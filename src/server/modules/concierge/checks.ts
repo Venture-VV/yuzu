@@ -29,6 +29,20 @@ export async function conciergeCheck(db: Db): Promise<FrontdeskCheck> {
       SELECT '同步版本号' AS ref WHERE (SELECT count(*) FROM concierge_sync) <> 1
     ) x
     LIMIT 5`;
+  // Migration 137 adds a separate praise ledger; pre-upgrade schema fixtures stay readable.
+  const [schema] = await db<{ present: boolean }[]>`SELECT to_regclass('concierge_praise') IS NOT NULL AS present`;
+  let praiseCount = 0;
+  if (schema?.present) {
+    const praiseBad = await db<{ ref: string }[]>`
+      SELECT '管家好评 ' || p.id AS ref FROM concierge_praise p
+      WHERE (SELECT count(*) FROM concierge_revisions r WHERE r.object_type='praise' AND r.object_id=p.id AND r.version BETWEEN 1 AND p.version) <> p.version
+        OR EXISTS (SELECT 1 FROM concierge_revisions r WHERE r.object_type='praise' AND r.object_id=p.id AND r.version>p.version)
+        OR NOT EXISTS (SELECT 1 FROM concierge_praise_evidence e WHERE e.praise_id=p.id)
+      LIMIT 5`;
+    bad.push(...praiseBad);
+    const [count] = await db<{ total: number }[]>`SELECT count(*)::int AS total FROM concierge_praise`;
+    praiseCount = count?.total ?? 0;
+  }
   const [t] = await db<{ members: number; records: number; revisions: number }[]>`
     SELECT (SELECT count(*)::int FROM concierge_members) AS members,
            (SELECT count(*)::int FROM concierge_records) AS records,
@@ -39,6 +53,6 @@ export async function conciergeCheck(db: Db): Promise<FrontdeskCheck> {
     ok: bad.length === 0,
     detail: bad.length
       ? `管家部有记录与修订历史对不上（如 ${bad.map((b) => b.ref).join('、')}）`
-      : `管家会员 ${t!.members} 位、业务记录 ${t!.records} 条，每一版都有修订快照（共 ${t!.revisions} 份）；余额依据都指得到`,
+      : `管家会员 ${t!.members} 位、业务记录 ${t!.records} 条、好评记录 ${praiseCount} 条，每一版都有修订快照（共 ${t!.revisions} 份）；历史依据与好评照片都指得到`,
   };
 }

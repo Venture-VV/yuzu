@@ -1,0 +1,143 @@
+.praise-center {
+  --praise-gold: #a87508;
+  --praise-gold-soft: #fcf0c8;
+  display: grid;
+  gap: 28px;
+  color: var(--color-ink);
+  font-size: 14px;
+  min-width: 0;
+}
+.praise-center *, .praise-form * { box-sizing: border-box; }
+.praise-center button, .praise-form button { cursor: pointer; font: inherit; }
+.praise-center button:disabled, .praise-form button:disabled { cursor: not-allowed; opacity: .5; }
+.praise-center button:focus-visible, .praise-form button:focus-visible, .praise-center summary:focus-visible {
+  outline: 3px solid var(--color-moss); outline-offset: 3px;
+}
+.praise-center button.praise-action {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 42px; padding: 10px 15px; border: 1px solid transparent;
+  border-radius: 8px; font-weight: 600; font-size: 14px; line-height: 1.3;
+  transition: background .15s, border-color .15s;
+}
+.praise-center button.praise-primary { background: var(--color-pine); color: #fffdf8; }
+.praise-center button.praise-primary:hover { background: var(--color-pine-hover); }
+.praise-center button.praise-outline { background: var(--color-card); border-color: var(--color-line-strong); color: var(--color-pine); }
+.praise-center button.praise-outline:hover { border-color: var(--color-pine); }
+.praise-center button.praise-link { color: var(--color-pine); padding-inline: 8px; background: transparent; }
+.praise-center button.praise-link:hover { background: var(--color-pine-tint); }
+.praise-hero {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 285px;
+  align-items: center; gap: 28px; padding: 34px 40px; overflow: hidden;
+  border: 1px solid var(--color-line); border-radius: 14px;
+  background: linear-gradient(120deg, var(--color-card) 30%, var(--color-yuzu-tint) 100%);
+}
+.praise-eyebrow { display: inline-flex; align-items: center; gap: 7px; color: var(--color-moss); font-size: 12px; font-weight: 600; letter-spacing: .06em; }
+.praise-center .praise-hero h2 { margin: 13px 0; font-size: clamp(25px, 2.8vw, 36px); line-height: 1.45; font-weight: 650; letter-spacing: .025em; color: var(--color-pine); }
+.praise-hero p { margin: 0; color: var(--color-ink-3); line-height: 1.8; }
+.praise-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.praise-month-award { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 22px 12px; text-align: center; }
+.praise-center button.praise-month-award { border-radius: 12px; background: transparent; color: inherit; transition: background .15s, box-shadow .15s; }
+.praise-center button.praise-month-award:hover:not(:disabled) { background: rgb(242 194 48 / 8%); box-shadow: inset 0 0 0 1px #dfc887; }
+.praise-center button.praise-month-award:focus-visible { outline: 3px solid var(--color-moss); outline-offset: 3px; }
+.praise-award-icon { display: grid; place-items: center; width: 58px; height: 58px; border: 1px solid #dfc887; border-radius: 50%; color: var(--praise-gold); background: var(--color-yuzu-soft); box-shadow: 0 0 0 7px rgb(242 194 48 / 7%); margin-bottom: 8px; }
+.praise-month-award > span { font-size: 13px; color: var(--color-ink-2); }
+.praise-month-award > strong { font-size: 62px; font-weight: 650; line-height: 1.2; letter-spacing: -.04em; color: var(--color-pine); font-variant-numeric: tabular-nums; }
+.praise-month-award > strong small { font-size: 15px; font-weight: 500; letter-spacing: 0; margin-left: 9px; color: var(--color-ink-3); }
+.praise-month-award > span.praise-award-note { display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: var(--color-moss); font-size: 12px; }
+.praise-month-dialog { gap: 20px; }
+.praise-month-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 18px; padding: 16px 18px; border: 1px solid var(--color-line); border-radius: 9px; background: var(--color-yuzu-tint); }
+.praise-month-summary > strong { font-size: 16px; font-weight: 600; color: var(--color-pine); }
+.praise-month-summary > span { color: var(--color-ink-2); font-size: 13px; }
+.praise-month-summary b { color: var(--color-pine); font-size: 21px; font-variant-numeric: tabular-nums; }
+.praise-section-title { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 20px; }
+.praise-center .praise-section-title h3 { display: flex; align-items: center; gap: 8px; margin: 7px 0 0; font-size: 19px; font-weight: 650; color: var(--color-pine); }
+.praise-period { color: var(--color-ink-3); font-size: 12px; line-height: 1.7; text-align: right; }
+.praise-ranking { padding: 25px 26px 18px; background: var(--color-card); border: 1px solid var(--color-line); border-radius: 14px; }
+.praise-podium { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: stretch; gap: 14px; }
+.praise-center button.praise-honoree {
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  gap: 9px; padding: 20px 12px 16px; border: 1px solid var(--color-line); border-radius: 10px;
+  background: var(--color-paper); color: var(--color-ink); text-align: center;
+}
+.praise-center button.praise-honoree:hover { border-color: var(--color-moss); }
+.praise-center button.praise-rank-1 { background: linear-gradient(180deg, #fcf2d1, #fffaf0); border-color: #e6cf93; }
+.praise-center button.praise-rank-2 { background: linear-gradient(180deg, #edf1ed, #fafbf8); }
+.praise-center button.praise-rank-3 { background: linear-gradient(180deg, #f2e9dd, #fdfaf5); }
+.praise-medal { display: inline-flex; align-items: center; gap: 6px; color: var(--color-ink-3); font-size: 12px; font-weight: 650; }
+.praise-medal-1 { color: var(--praise-gold); }.praise-medal-2 { color: #66796e; }.praise-medal-3 { color: #9d734c; }
+.praise-avatar { display: grid; place-items: center; height: 56px; width: 56px; margin-top: 3px; border: 3px solid var(--color-card); border-radius: 50%; background: var(--color-pine-soft); color: var(--color-pine); font-size: 23px; box-shadow: 0 0 0 1px var(--color-line); }
+.praise-honoree > strong { max-width: 100%; overflow-wrap: anywhere; font-size: 17px; }
+.praise-honoree > small { color: var(--color-ink-3); font-size: 12px; }
+.praise-honoree-count { display: block; color: var(--color-ink-2); font-size: 12px; }
+.praise-honoree-count b { margin-right: 3px; font-size: 28px; font-weight: 650; color: var(--color-pine); font-variant-numeric: tabular-nums; }
+.praise-honoree-link { display: flex; gap: 5px; align-items: center; margin-top: auto; padding-top: 6px; color: var(--color-moss); font-size: 12px; }
+.praise-all-ranking { margin-top: 16px; border-top: 1px solid var(--color-line); padding-top: 12px; }
+.praise-all-ranking summary { cursor: pointer; color: var(--color-pine); font-size: 13px; padding: 8px 0; }
+.praise-center button.praise-ranking-row { display: flex; align-items: center; width: 100%; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--color-line); color: var(--color-ink-2); text-align: left; }
+.praise-ranking-row > strong { flex: 1; font-weight: 500; }.praise-ranking-row > span:last-child { display: flex; align-items: center; gap: 5px; }
+.praise-caption, .praise-center .praise-caption { margin: 12px 0 0; color: var(--color-ink-3); font-size: 12px; line-height: 1.75; }
+.praise-staff-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.praise-center button.praise-staff-card { display: flex; align-items: center; gap: 11px; min-width: 0; min-height: 93px; padding: 16px; background: var(--color-card); border: 1px solid var(--color-line); border-radius: 10px; color: var(--color-ink); text-align: left; }
+.praise-center button.praise-staff-card:hover { border-color: var(--color-moss); background: var(--color-pine-tint); }
+.praise-staff-avatar { flex-shrink: 0; width: 42px; height: 42px; display: grid; place-items: center; background: var(--color-pine-soft); color: var(--color-pine); border-radius: 50%; font-size: 18px; }
+.praise-staff-name { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }.praise-staff-name strong { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }.praise-staff-name small { color: var(--color-ink-3); font-size: 11px; }
+.praise-staff-count { display: flex; flex-direction: column; gap: 2px; align-items: center; color: var(--color-ink-3); white-space: nowrap; }.praise-staff-count b { color: var(--color-pine); font-size: 23px; font-weight: 600; font-variant-numeric: tabular-nums; }.praise-staff-count small { font-size: 10px; }
+.praise-staff-card > svg { flex-shrink: 0; color: var(--color-ink-3); }
+.praise-filters { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; padding-bottom: 18px; }
+.praise-filters label { display: flex; flex-direction: column; gap: 6px; color: var(--color-ink-3); font-size: 12px; }
+.praise-filters input, .praise-filters select { height: 41px; min-width: 145px; max-width: 100%; border: 1px solid var(--color-line-strong); border-radius: 7px; background: var(--color-card); color: var(--color-ink-2); padding: 8px 10px; font-size: 14px; }
+.praise-filters input:focus, .praise-filters select:focus { outline: 2px solid var(--color-moss); outline-offset: 1px; }
+.praise-photo-wall { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 17px; }
+.praise-center button.praise-proof-card { display: flex; flex-direction: column; overflow: hidden; min-width: 0; padding: 0; border: 1px solid var(--color-line); border-radius: 10px; background: var(--color-card); color: var(--color-ink); text-align: left; transition: border-color .15s, box-shadow .15s; }
+.praise-center button.praise-proof-card:hover { border-color: var(--color-moss); box-shadow: 0 4px 15px rgb(36 73 58 / 6%); }
+.praise-proof-image { position: relative; display: block; width: 100%; aspect-ratio: 4/3; overflow: hidden; background: var(--color-paper-2); }
+.praise-proof-image > img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 25%; }
+.praise-photo-fallback { display: flex; align-items: center; justify-content: center; gap: 8px; flex-direction: column; height: 100%; padding: 20px; color: var(--color-ink-3); font-size: 12px; }
+.praise-image-count { position: absolute; display: inline-flex; align-items: center; gap: 5px; bottom: 10px; right: 10px; border-radius: 5px; background: rgb(28 35 31 / 65%); color: white; font-size: 11px; padding: 4px 7px; }
+.praise-proof-body { display: flex; flex-direction: column; flex: 1; gap: 9px; padding: 15px; min-width: 0; }
+.praise-proof-source { color: var(--color-ink-3); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.praise-proof-body > strong { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.praise-proof-content { color: var(--color-ink-2); font-size: 13px; line-height: 1.8; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.praise-proof-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--color-line); color: var(--color-moss); font-size: 11px; }.praise-proof-footer > span { display: inline-flex; align-items: center; gap: 5px; }
+.praise-voided-tag { position: absolute; top: 10px; left: 10px; padding: 4px 8px; border-radius: 5px; background: var(--color-paper); color: var(--color-ink-2); font-size: 11px; }
+.praise-proof-card.is-voided .praise-proof-image > img { filter: saturate(.5); }
+.praise-pagination { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 23px; }.praise-pagination > span { font-size: 12px; color: var(--color-ink-3); }
+.praise-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 165px; padding: 25px 20px; color: var(--color-ink-3); background: var(--color-card); border: 1px dashed var(--color-line-strong); border-radius: 10px; text-align: center; }.praise-empty > svg { color: var(--color-moss); opacity: .8; }.praise-empty strong { font-size: 15px; color: var(--color-ink-2); }.praise-empty p { font-size: 13px; margin: 0; line-height: 1.8; }.praise-ranking-empty { background: var(--color-yuzu-tint); }
+.praise-loading { padding: 20px; color: var(--color-ink-3); font-size: 13px; text-align: center; }
+.praise-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin: 0; border: 1px solid #dec9b5; border-radius: 8px; background: #fbf1e7; color: #8b5034; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.praise-form { display: grid; gap: 20px; min-width: 0; }.praise-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }.praise-form-grid > div { min-width: 0; }.praise-form input, .praise-form select, .praise-form textarea { min-width: 0; }
+.praise-member-lookup { position: relative; }.praise-member-results { margin-top: 5px; border: 1px solid var(--color-line); border-radius: 8px; max-height: 230px; overflow: auto; background: var(--color-card); }.praise-member-results button { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px; padding: 11px 13px; border: 0; border-bottom: 1px solid var(--color-line); text-align: left; background: var(--color-card); }.praise-member-results button:hover { background: var(--color-pine-tint); }.praise-member-results strong { color: var(--color-ink); font-size: 13px; font-weight: 600; }.praise-member-results span, .praise-member-results p { font-size: 12px; color: var(--color-ink-3); }.praise-member-results p { margin: 0; padding: 12px; line-height: 1.8; }
+.praise-selected-member { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; min-height: 44px; border: 1px solid var(--color-line-strong); border-radius: 8px; background: var(--color-pine-tint); color: var(--color-pine); }.praise-selected-member button { display: grid; place-items: center; min-height: 32px; min-width: 32px; border: 0; border-radius: 5px; color: var(--color-pine); background: transparent; }
+.praise-upload-block { display: grid; gap: 12px; }.praise-upload-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; color: var(--color-ink-2); font-size: 13px; }.praise-upload-heading strong { font-weight: 600; }.praise-upload-heading small { color: var(--color-ink-3); margin-left: 8px; font-weight: 400; }.praise-upload-heading > span { color: var(--color-ink-3); font-size: 12px; }
+.praise-upload-button { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 70px; padding: 15px; border: 1px dashed var(--color-moss); border-radius: 9px; background: var(--color-pine-tint); color: var(--color-pine); font-size: 14px; }.praise-upload-button:hover { background: var(--color-pine-soft); }
+.praise-upload-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }.praise-upload-grid > div { position: relative; min-width: 0; }.praise-upload-grid img { display: block; width: 100%; height: 100px; object-fit: cover; border: 1px solid var(--color-line); border-radius: 7px; }.praise-upload-grid button { position: absolute; top: 4px; right: 4px; display: grid; place-items: center; width: 27px; height: 27px; border: 0; border-radius: 50%; color: white; background: rgb(28 35 31 / 75%); }.praise-upload-grid a { display: block; margin-top: 5px; color: var(--color-pine); font-size: 11px; text-align: center; text-decoration: underline; text-underline-offset: 3px; }
+.praise-history { gap: 0; }.praise-history .praise-photo-wall { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.praise-detail { gap: 20px; }.praise-detail-heading { display: flex; align-items: flex-start; gap: 13px; }.praise-detail-heading > div { flex: 1; min-width: 0; }.praise-detail-heading h3 { margin: 7px 0 0; font-size: 19px; color: var(--color-pine); font-weight: 650; line-height: 1.7; overflow-wrap: anywhere; }.praise-detail-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 50%; color: var(--color-moss); background: var(--color-moss-soft); }
+.praise-status { flex-shrink: 0; display: inline-flex; align-items: center; padding: 5px 8px; border-radius: 5px; font-size: 11px; color: var(--color-pine); background: var(--color-pine-soft); }.praise-status.is-voided { background: var(--color-paper-2); color: var(--color-ink-3); }
+.praise-detail-content { margin: 0; padding: 18px 20px; background: var(--color-paper); border-left: 3px solid var(--color-moss); border-radius: 0 9px 9px 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.95; font-size: 14px; color: var(--color-ink-2); }
+.praise-detail-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px 25px; margin: 0; }.praise-detail-meta > div { min-width: 0; }.praise-detail-meta dt { font-size: 12px; color: var(--color-ink-3); margin-bottom: 5px; }.praise-detail-meta dd { font-size: 13px; color: var(--color-ink-2); margin: 0; overflow-wrap: anywhere; line-height: 1.6; }
+.praise-void-notice { display: flex; flex-direction: column; gap: 7px; padding: 14px 16px; border: 1px solid var(--color-line-strong); border-radius: 8px; background: var(--color-paper); color: var(--color-ink-2); font-size: 13px; overflow-wrap: anywhere; }.praise-void-notice span, .praise-void-notice p { font-size: 12px; color: var(--color-ink-3); margin: 0; line-height: 1.8; }
+.praise-detail .praise-evidence.concierge-workspace { min-height: 0; background: transparent; padding: 0; }.praise-evidence .receipt-image-pane { min-width: 0; width: 100%; }.praise-evidence .receipt-original { max-height: 560px; }.praise-evidence .receipt-image-tools { flex-wrap: wrap; }
+@media (max-width: 1050px) {
+  .praise-staff-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .praise-photo-wall { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .praise-center { gap: 24px; }
+  .praise-hero { grid-template-columns: minmax(0, 1fr); padding: 25px 22px; gap: 16px; }
+  .praise-center .praise-hero h2 { font-size: 28px; line-height: 1.4; }.praise-hero p { font-size: 13px; }
+  .praise-month-award { position: relative; flex-direction: row; justify-content: flex-start; flex-wrap: wrap; align-items: center; padding: 18px 0 0 63px; border-top: 1px solid #e8ddbb; gap: 7px 12px; min-height: 93px; text-align: left; }
+  .praise-award-icon { position: absolute; left: 3px; top: 28px; width: 43px; height: 43px; margin: 0; }.praise-award-icon svg { width: 23px; height: 23px; }.praise-month-award > span { font-size: 12px; flex-basis: 100%; }.praise-month-award > strong { font-size: 41px; line-height: 1.1; }.praise-month-award > strong small { font-size: 12px; }.praise-month-award > span.praise-award-note { flex-basis: auto; font-size: 11px; }
+  .praise-section-title { align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 9px; }.praise-center .praise-section-title h3 { font-size: 18px; }.praise-period { text-align: left; }.praise-eyebrow { font-size: 11px; }
+  .praise-ranking { padding: 21px 16px 16px; }.praise-podium { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .praise-center button.praise-honoree { padding: 14px 5px; gap: 8px; }.praise-honoree > strong { font-size: 13px; }.praise-avatar { width: 42px; height: 42px; font-size: 18px; }.praise-medal { font-size: 11px; gap: 3px; }.praise-medal svg { width: 16px; height: 16px; }.praise-honoree-count { font-size: 10px; }.praise-honoree-count b { display: block; font-size: 24px; margin: 0 0 2px; }.praise-honoree-link { font-size: 10px; gap: 2px; }.praise-honoree-link svg { width: 10px; height: 10px; }
+  .praise-staff-grid { grid-template-columns: minmax(0, 1fr); gap: 9px; }.praise-center button.praise-staff-card { min-height: 82px; padding: 13px 15px; }.praise-staff-name small { font-size: 12px; }.praise-staff-count small { font-size: 11px; }
+  .praise-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 9px; }.praise-filters label { min-width: 0; }.praise-filters input, .praise-filters select { min-width: 0; width: 100%; font-size: 16px; height: 44px; }.praise-filters button.praise-action { font-size: 12px; padding: 7px 3px; }
+  .praise-photo-wall, .praise-history .praise-photo-wall { grid-template-columns: minmax(0, 1fr); gap: 15px; }.praise-proof-image { aspect-ratio: 5/3; }.praise-proof-source, .praise-proof-footer, .praise-image-count { font-size: 12px; }.praise-proof-body { padding: 16px; }.praise-proof-content { font-size: 14px; }.praise-proof-body > strong { font-size: 16px; }
+  .praise-pagination { gap: 9px; }.praise-pagination button.praise-action { min-height: 44px; padding: 9px 12px; font-size: 13px; }.praise-pagination > span { font-size: 11px; }
+  .praise-form-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }.praise-form input, .praise-form select, .praise-form textarea { font-size: 16px; }.praise-upload-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }.praise-upload-grid img { height: 95px; }.praise-upload-grid button { width: 30px; height: 30px; }.praise-upload-grid a { font-size: 12px; padding-block: 4px; }.praise-member-results button { flex-direction: column; align-items: flex-start; gap: 5px; }.praise-member-results span { font-size: 13px; }
+  .praise-detail-heading { flex-wrap: wrap; gap: 10px; }.praise-detail-heading h3 { font-size: 17px; }.praise-detail-heading > div { flex-basis: calc(100% - 57px); }.praise-detail-icon { width: 39px; height: 39px; }.praise-detail-heading .praise-status { margin-left: 49px; }.praise-detail-meta { grid-template-columns: minmax(0, 1fr); gap: 16px; }.praise-detail-content { padding: 15px; }.praise-error { font-size: 13px; align-items: flex-start; }.praise-caption { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .praise-center button { transition: none; }
+}

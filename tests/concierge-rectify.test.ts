@@ -16,7 +16,8 @@ const mutate = (cookie: string, action: string, payload: Record<string, unknown>
 const revision = async () => (await api(ctx.app, butler, 'GET', '/api/concierge/revision')).body.revision as string;
 const profile = (name: string, cardNo: string) => ({ name, phone: '', cardNo, ownerId: String(butlerId), cardTier: '', preferences: '', source: '整改回归', joinedAt: '2026-11-12' });
 async function newMember(name: string, cardNo: string, extra: Record<string, unknown> = {}) {
-  const r = await mutate(butler, 'createMember', { ...profile(name, cardNo), ...extra });
+  const nativeMemberId = extra.nativeMemberId ?? (await createMember(ctx, name)).id;
+  const r = await mutate(butler, 'createMember', { ...profile(name, cardNo), nativeMemberId, ...extra });
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return r.body.id as string;
 }
@@ -42,17 +43,17 @@ describe('8.0.12 管家部 · 主线整改', () => {
     await login(ctx.app, 'linlan').catch(() => undefined);
     expect(await revision()).toBe(before);
     const key = randomUUID();
-    const body = profile('版本号会员', 'GJ-REV-1');
+    const body = { ...profile('版本号会员', 'GJ-REV-1'), nativeMemberId: (await createMember(ctx, '版本号会员')).id };
     const first = await mutate(butler, 'createMember', body, key);
     expect(first.status).toBe(200);
-    expect(BigInt(await revision())).toBe(BigInt(before) + 1n);
+    expect(BigInt((await revision()).split(':')[0]!)).toBe(BigInt(before.split(':')[0]!) + 1n);
     const replay = await mutate(butler, 'createMember', body, key);
     expect(replay.status).toBe(200);
     expect(replay.body.id).toBe(first.body.id);
-    expect(BigInt(await revision())).toBe(BigInt(before) + 1n);
+    expect(BigInt((await revision()).split(':')[0]!)).toBe(BigInt(before.split(':')[0]!) + 1n);
     // 被拒绝的请求不加
-    expect((await mutate(butler, 'createMember', { ...body, name: '' })).status).toBe(400);
-    expect(BigInt(await revision())).toBe(BigInt(before) + 1n);
+    expect((await mutate(butler, 'createMember', { ...body, joinedAt: 'invalid' })).status).toBe(400);
+    expect(BigInt((await revision()).split(':')[0]!)).toBe(BigInt(before.split(':')[0]!) + 1n);
   });
 
   it('关联的企业会员后来被停用：管家档案照样能改；换成另一位停用的会员不行', async () => {
@@ -67,7 +68,7 @@ describe('8.0.12 管家部 · 主线整改', () => {
     const edit = await mutate(ctx.owner, 'updateMember', { ...profile('关联会员（改过）', 'GJ-LINK-1'), id, version: 2, nativeMemberId: native.id, reason: '改称呼' });
     expect(edit.status, JSON.stringify(edit.body)).toBe(200);
     const [row] = await ctx.sql<{ name: string; nativeMemberId: number }[]>`SELECT data->>'name' AS name, native_member_id FROM concierge_members WHERE id = ${id}`;
-    expect(row).toEqual({ name: '关联会员（改过）', nativeMemberId: native.id });
+    expect(row).toEqual({ name: '整改企业会员', nativeMemberId: native.id });
     const relink = await mutate(ctx.owner, 'updateMember', { ...profile('关联会员（改过）', 'GJ-LINK-1'), id, version: 3, nativeMemberId: other.id, reason: '换关联' });
     expect(relink.status).toBe(400);
     expect(relink.body.error.message).toContain('不可用');

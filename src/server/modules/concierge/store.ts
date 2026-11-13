@@ -9,6 +9,7 @@ import type {
   Receipt,
 } from "@shared/concierge/types";
 import { WorkspaceError, uuid } from "./validation";
+import { nativeMemberSummary, nativeResourceOptions } from "./native-links";
 export async function requireMember(db: Db, id: string) {
   const [r] = await db`SELECT id FROM concierge_members WHERE id=${uuid(id)}::uuid`;
   if (!r) throw new WorkspaceError("管家会员不存在，请刷新", 404);
@@ -97,6 +98,7 @@ export function briefReceipt(r: any): Receipt {
 export async function readWorkspace(
   db: Db,
   actor: Actor,
+  timezone = "Asia/Shanghai",
 ): Promise<WorkspaceData> {
   const team = await listTeam(db);
   const members =
@@ -119,23 +121,28 @@ export async function readWorkspace(
     await db`SELECT u.id,u.member_id,i.mime,i.size_bytes AS size,i.sha256,s.display_name AS created_by_name,u.created_at FROM concierge_uploads u JOIN erp_images i ON i.id=u.image_id AND i.scope='concierge' JOIN staff s ON s.id=u.created_by ORDER BY u.created_at DESC`;
   const audits =
     await db`SELECT id,staff_id,action,target_type,target_id,(detail - 'before' - 'after') || jsonb_build_object('after',jsonb_build_object('status',detail->'after'->'status')) AS detail,created_at FROM audit_logs WHERE action IN ('concierge_record','concierge_upload') AND (${can(actor, "concierge.manage")} OR staff_id=${actor.id}) ORDER BY id DESC LIMIT 2000`;
+  const resources = await nativeResourceOptions(db);
+  const profiles = await Promise.all(members.map(async (m) => {
+    const native = m.nativeMemberId == null ? null : await nativeMemberSummary(db, Number(m.nativeMemberId), timezone);
+    return {
+      ...m.data,
+      // The member system owns identity; these are live projections, not another editable identity.
+      name: native?.name ?? m.data.name,
+      phone: native?.phone ?? m.data.phone,
+      nativeMember: native,
+      id: String(m.id), code: String(m.code).padStart(6,"0"),
+      nativeMemberId: m.nativeMemberId == null ? null : Number(m.nativeMemberId),
+      version:m.version,createdAt:m.createdAt,updatedAt:m.updatedAt,
+      createdByName:m.creatorName,updatedByName:m.updaterName,
+    };
+  }));
   return {
     user: mapActor(actor),
     team,
-    members: members.map((m) => ({
-      ...m.data,
-      id: String(m.id),
-      code: String(m.code).padStart(6, "0"),
-      nativeMemberId:
-        m.nativeMemberId == null ? null : Number(m.nativeMemberId),
-      version: m.version,
-      createdAt: m.createdAt,
-      updatedAt: m.updatedAt,
-      createdByName: m.creatorName,
-      updatedByName: m.updaterName,
-    })),
+    members: profiles,
     balances: recordsOf("balance"),
-    appointments: recordsOf("appointment"),
+    appointments: recordsOf("appointment").map(a => ({...a,nativeResource:resources.find(r=>r.key===a.resourceKey) ?? null})),
+    resourceOptions: resources,
     notes: recordsOf("note"),
     visits: recordsOf("visit"),
     tasks: recordsOf("task"),
