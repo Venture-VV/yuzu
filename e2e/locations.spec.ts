@@ -140,7 +140,7 @@ test.describe('v0.7.17 第一级实时位置', () => {
 
       // ① 后台「空间台账 → 实时位置」：打开开关、接待区选样例SPA区；登记刷卡点（装在 V312）；项目所在区域
       await page.goto('/admin/spaces');
-      await page.getByRole('radiogroup', { name: '空间台账' }).getByRole('radio', { name: '实时位置' }).click();
+      await page.getByTestId('subnav-locations').click();
       const rules = page.getByTestId('locations-rules');
       await rules.getByTestId('locations-enabled').check();
       await rules.getByTestId('locations-checkin-zone').selectOption({ label: '样例SPA区' });
@@ -161,7 +161,7 @@ test.describe('v0.7.17 第一级实时位置', () => {
         const r = (await getJson<LocationAdmin>(page, '/api/admin/locations')).readers.find((x) => x.code === READER.code)!;
         if (!r.active) await send(page, 'put', `/api/admin/locations/readers/${r.id}`, { code: r.code, name: r.name, zoneId: r.zoneId, spaceId: r.spaceId, note: r.note, active: true, expectedVersion: r.version });
         await page.reload();
-        await page.getByRole('radiogroup', { name: '空间台账' }).getByRole('radio', { name: '实时位置' }).click();
+        await page.getByTestId('subnav-locations').click();
       }
       await expect(readers.getByTestId(`reader-${READER.code}`)).toContainText('V312');
       // 项目所在区域：演示价目里第一个不要技师的项目 → 样例客房区
@@ -204,7 +204,7 @@ test.describe('v0.7.17 第一级实时位置', () => {
       // ③ 后台模拟刷卡（店主）：客人到 V312
       await relogin(page, 'linlan');
       await page.goto('/admin/spaces');
-      await page.getByRole('radiogroup', { name: '空间台账' }).getByRole('radio', { name: '实时位置' }).click();
+      await page.getByTestId('subnav-locations').click();
       await page.getByTestId(`reader-${READER.code}`).getByTestId('reader-swipe').click();
       const swipe = page.getByRole('dialog').filter({ hasText: `模拟刷卡 · ${READER.code}` });
       await swipe.getByTestId('swipe-value').fill(tag);
@@ -243,7 +243,7 @@ test.describe('v0.7.17 第一级实时位置', () => {
       await expect(pending).toHaveCount(0);
       expect(await events()).toBe(before + 2);
       // 再一次没到服务器的：确认作废，之后原请求晚到也不记
-      await page.getByRole('radiogroup', { name: '空间台账' }).getByRole('radio', { name: '实时位置' }).click();
+      await page.getByTestId('subnav-locations').click();
       await page.getByTestId(`reader-${READER.code}`).getByTestId('reader-swipe').click();
       await page.route(REPORT, (route) => route.abort('failed'));
       await swipe.getByTestId('swipe-value').fill(tag);

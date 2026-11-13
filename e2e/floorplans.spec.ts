@@ -30,7 +30,7 @@ test.describe('底图转换（v0.7.15）', () => {
     await login(page, 'linlan');
     await page.goto('/admin/spaces');
     await expect(page.getByRole('heading', { name: '空间台账' })).toBeVisible();
-    await page.getByRole('radio', { name: '底图' }).click();
+    await page.getByTestId('subnav-plans').click();
     await expect(page.getByTestId('floorplan-upload')).toBeVisible();
 
     // 第一版：选文件 → 上传 → 转换中 → 待启用
@@ -163,7 +163,7 @@ test.describe('底图转换（v0.7.15）', () => {
     const choosePdf = (name: string, buffer: Buffer) => page.getByTestId('floorplan-file').setInputFiles({ name, mimeType: 'application/pdf', buffer });
     await login(page, 'linlan');
     await page.goto('/admin/spaces');
-    await page.getByRole('radio', { name: '底图' }).click();
+    await page.getByTestId('subnav-plans').click();
     const detail = page.getByTestId('floorplan-detail');
 
     // 页面上写了 1:100：不填比例也能转换，入库登记里不记填的比例

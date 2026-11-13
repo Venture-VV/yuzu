@@ -45,6 +45,7 @@ import { SpaceImportCard } from './SpaceImportCard';
 import { FloorplanCard } from './FloorplanCard';
 import { GuideAdminCard } from './GuideAdminCard';
 import { LocationsCard, useInvalidateLocations } from './LocationsCard';
+import { useActiveSubTab, useGoSubTab } from '../../components/SubNav';
 
 type Tab = 'spaces' | 'zones' | 'import' | 'plans' | 'guide' | 'locations';
 type VerifyFilter = '' | SpaceVerifyStatus | 'unverified';
@@ -61,18 +62,39 @@ const NO_FILTER: Filters = { floorId: 0, zoneId: 0, type: '', verify: '', q: '',
 
 const VERIFY_TONE = { confirmed: 'pine', inferred: 'yuzu', site_check: 'ember' } as const;
 
+const SPACE_BASE = '/admin/spaces';
+/** 二级页签（8.0.17）：写进地址（/admin/spaces/plans）；清单在前，导入与工具在最后 */
+const SPACE_TABS = [
+  { key: 'spaces', label: '空间' },
+  { key: 'zones', label: '楼层与区域' },
+  { key: 'plans', label: '底图' },
+  { key: 'guide', label: '对客导览' },
+  { key: 'locations', label: '实时位置' },
+  { key: 'import', label: '导入' },
+];
+
 export function SpacesSection() {
-  const [tab, setTab] = useState<Tab>('spaces');
+  return (
+    <AdminPage
+      section="spaces"
+      wide
+      tabs={SPACE_TABS}
+      description="楼层、区域与空间（编码图的编码，建好后不能改）、别名与核对状态；空间清单、区域清单的导入与导出；编码图转换成每层底图与房间轮廓；实时位置的开关、刷卡点与项目所在区域。客房房间在「客房」里挂接空间。"
+    >
+      <SpacesBody />
+    </AdminPage>
+  );
+}
+
+function SpacesBody() {
+  const tab = (useActiveSubTab() ?? 'spaces') as Tab;
+  const go = useGoSubTab(SPACE_TABS, SPACE_BASE);
+  const setTab = (t: Tab) => go(t);
   const [filters, setFilters] = useState<Filters>(NO_FILTER);
   const ledger = useSpaceLedger();
   const invalidate = useInvalidateSpaces();
   const invalidateLocations = useInvalidateLocations();
   return (
-    <AdminPage
-      section="spaces"
-      wide
-      description="楼层、区域与空间（编码图的编码，建好后不能改）、别名与核对状态；空间清单、区域清单的导入与导出；编码图转换成每层底图与房间轮廓；实时位置的开关、刷卡点与项目所在区域。客房房间在「客房」里挂接空间。"
-    >
       <div className="space-y-4">
         {/* 导入与模拟刷卡的「结果待确认」：关掉对话框、刷新后在这里查回、按原内容重新提交或作废 */}
         <ErpPendingPanel
@@ -95,21 +117,6 @@ export function SpacesSection() {
             }}
           />
         )}
-        <Segmented<Tab>
-          value={tab}
-          onChange={setTab}
-          ariaLabel="空间台账"
-          // 六个分页（v0.7.19 加「对客导览」）：手机上一行放不下就换行，不横向滚动
-          className="max-w-full flex-wrap"
-          options={[
-            { value: 'spaces', label: '空间' },
-            { value: 'zones', label: '楼层与区域' },
-            { value: 'import', label: '导入' },
-            { value: 'plans', label: '底图' },
-            { value: 'guide', label: '对客导览' },
-            { value: 'locations', label: '实时位置' },
-          ]}
-        />
         {tab === 'locations' ? (
           <LocationsCard />
         ) : tab === 'guide' ? (
@@ -126,7 +133,6 @@ export function SpacesSection() {
           <FloorsZonesCard ledger={ledger.data} />
         )}
       </div>
-    </AdminPage>
   );
 }
 

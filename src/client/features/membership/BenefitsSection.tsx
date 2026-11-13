@@ -74,7 +74,7 @@ export function BenefitsSection() {
       wide
       description="本店权益清单（会员文档附录三 A 与补充项）：逐项设好配置起点、数量与券，发布后券类每月自动发、事件礼按事件自动发，服务类列在会员详情「本月可享」。改了只影响以后，已经发出的券、登记的使用不变。"
       actions={
-        <Link to="/admin/coupons?tab=usage" className="text-[13px] font-semibold text-pine hover:underline" data-testid="benefits-usage-link">
+        <Link to="/admin/coupons/usage" className="text-[13px] font-semibold text-pine hover:underline" data-testid="benefits-usage-link">
           看使用率
         </Link>
       }

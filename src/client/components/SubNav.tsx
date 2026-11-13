@@ -7,7 +7,7 @@
 //   · 用 8.0.16 的滑块：当前页签下面的那条线滑过去。
 
 import { createContext, useContext, type ReactNode } from 'react';
-import { Link, Navigate, useParams } from 'react-router';
+import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useSlidingIndicator } from '../lib/motion';
 import { cn } from '../lib/utils';
 
@@ -34,6 +34,12 @@ export function useSubTabs(tabs: readonly SubTab[], base: string): { active: str
   if (!tab) return { active: first, redirect: null };
   if (tabs.some((t) => t.key === tab)) return { active: tab, redirect: null };
   return { active: first, redirect: base };
+}
+
+/** 程序里换页签用（「去设置」这类按钮）：返回一个函数，给页签的名字就跳过去 */
+export function useGoSubTab(tabs: readonly SubTab[], base: string): (key: string) => void {
+  const navigate = useNavigate();
+  return (key) => navigate(tabs[0]?.key === key ? base : `${base}/${key}`);
 }
 
 /** 一排页签。base 是这个分区的地址（不带页签的那一段）；第一个页签的地址就是 base */

@@ -109,14 +109,14 @@ test.describe('视口冒烟', () => {
     await expect(page.getByTestId('spaces-summary')).toBeVisible();
     await expect(page.getByTestId('spaces-list')).toBeVisible();
     await expectFits(page);
-    await page.getByRole('radio', { name: '楼层与区域' }).click();
+    await page.getByTestId('subnav-zones').click();
     await expect(page.getByTestId('floor-L3')).toBeVisible();
     await expectFits(page);
-    await page.getByRole('radio', { name: '导入' }).click();
+    await page.getByTestId('subnav-import').click();
     await expect(page.getByTestId('space-import')).toBeVisible();
     await expectFits(page);
     // 底图（v0.7.15）：有批次时连预览一起看
-    await page.getByRole('radio', { name: '底图' }).click();
+    await page.getByTestId('subnav-plans').click();
     await expect(page.getByTestId('floorplan-upload')).toBeVisible();
     const hasBatch = (await (await page.request.get('/api/admin/floorplans')).json()).batches.length > 0;
     if (hasBatch) await expect(page.getByTestId('floorplan-detail')).toBeVisible();

@@ -7,7 +7,7 @@
 // 默认店主、店总（「维护券模板、发券规则与无记名券」）；按批次作废还要「作废券」。会员的券在会员详情里看、发、作废。
 
 import { useMemo, useState, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router';
+import { Navigate, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ban, CopyPlus, Download, Plus, Search } from 'lucide-react';
 import { ISO_DATE } from '@shared/business-date';
@@ -61,11 +61,13 @@ import {
 import { AdminPage } from './AdminShell';
 import { CampaignsCard } from './CampaignsCard';
 import { CouponUsageCard } from './CouponUsageCard';
+import { useActiveSubTab } from '../../components/SubNav';
 
 type Tab = 'templates' | 'rules' | 'campaigns' | 'batches' | 'stats' | 'usage';
+// 二级页签（8.0.17）：写进地址（/admin/coupons/rules）；顺序与别的分区一样——规则在前，再是清单、日常操作、统计
 const TABS: { value: Tab; label: string }[] = [
-  { value: 'templates', label: '券模板' },
   { value: 'rules', label: '发券规则' },
+  { value: 'templates', label: '券模板' },
   // 批量发券（8.0.4 需求表 06）
   { value: 'campaigns', label: '批量发券' },
   { value: 'batches', label: '无记名券' },
@@ -84,42 +86,45 @@ const pendingToast = (label: string) => ({
   body: '可能已经办好，也可能没有。这笔记在页面上方「结果待确认」里（刷新、重新登录也在）：先查回；查不到就按原内容重新提交（同一操作编号，不会多出一条）或确认作废后再重新填写。',
 });
 
+const COUPON_BASE = '/admin/coupons';
+const COUPON_TABS = TABS.map((t) => ({ key: t.value, label: <span data-testid={`coupon-tab-${t.value}`}>{t.label}</span> }));
+
 export function CouponsSection() {
-  // 别的页面可以带 ?tab= 直接打开某一页（「会员权益」的「看使用率」）
+  // 旧地址 /admin/coupons?tab=usage（8.0.16 及以前别的页面这样链过来）：跳到页签自己的地址
   const [params] = useSearchParams();
-  const [tab, setTab] = useState<Tab>(() => TABS.find((t) => t.value === params.get('tab'))?.value ?? 'templates');
+  const legacy = TABS.find((t) => t.value === params.get('tab'))?.value;
   const invalidateCoupons = useInvalidateCoupons();
+  if (legacy) return <Navigate to={legacy === TABS[0]!.value ? COUPON_BASE : `${COUPON_BASE}/${legacy}`} replace />;
   return (
     <AdminPage
       section="coupons"
+      tabs={COUPON_TABS}
       description="券模板（代金券、折扣券、兑换券、买一赠一券）、自动发券的规则（开卡礼、升级礼、生日礼、充值赠券）、批量发券、无记名纸质券、统计与使用率。会员的券在会员详情里看、发、作废；结账时在收款里用券。"
     >
       <div className="space-y-4" data-testid="coupon-admin">
         {/* 新建模板、加规则、生成无记名券、发券时断网：关掉对话框、刷新、重新登录后在这里查回、按原内容重新提交或作废（Codex 复审 6c3765c） */}
         <ErpPendingPanel types={COUPON_PENDING_TYPES} className="space-y-2" onFound={() => void invalidateCoupons()} />
-        <Segmented<Tab>
-          value={tab}
-          onChange={setTab}
-          ariaLabel="券与会员权益"
-          // 手机上一行放不下就换行，不横向滚动
-          className="max-w-full flex-wrap"
-          options={TABS.map((t) => ({ value: t.value, label: <span data-testid={`coupon-tab-${t.value}`}>{t.label}</span> }))}
-        />
-        {tab === 'templates' ? (
-          <TemplatesCard />
-        ) : tab === 'rules' ? (
-          <RulesCard />
-        ) : tab === 'campaigns' ? (
-          <CampaignsCard />
-        ) : tab === 'batches' ? (
-          <BatchesCard />
-        ) : tab === 'stats' ? (
-          <StatsCard />
-        ) : (
-          <CouponUsageCard />
-        )}
+        <CouponTabBody />
       </div>
     </AdminPage>
+  );
+}
+
+/** 现在这个页签的那一块 */
+function CouponTabBody() {
+  const tab = (useActiveSubTab() ?? TABS[0]!.value) as Tab;
+  return tab === 'templates' ? (
+    <TemplatesCard />
+  ) : tab === 'rules' ? (
+    <RulesCard />
+  ) : tab === 'campaigns' ? (
+    <CampaignsCard />
+  ) : tab === 'batches' ? (
+    <BatchesCard />
+  ) : tab === 'stats' ? (
+    <StatsCard />
+  ) : (
+    <CouponUsageCard />
   );
 }
 

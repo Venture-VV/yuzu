@@ -74,7 +74,7 @@ test.describe('8.0.16 动效套件', () => {
     test.skip(info.project.name !== '门店电脑', '后台页面的流程，只跑一次');
     await login(page, 'linlan');
     await page.goto('/admin/emenu');
-    await page.getByRole('radio', { name: '设置', exact: true }).click();
+    await page.getByTestId('subnav-settings').click();
     const group = page.getByTestId('emenu-admin-settings').getByRole('radiogroup', { name: '动效' });
     const thumb = group.locator('.mo-indicator');
     /** 滑块与选中的那一格重合（差不到 1 像素） */

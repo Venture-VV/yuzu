@@ -61,17 +61,24 @@ import { LangProvider } from './i18n';
 import { PageCanvas } from './pages';
 import { BigProvider } from './stage';
 import './emenu.css';
+import { useActiveSubTab, useGoSubTab } from '../../components/SubNav';
 
 const adminKey = ['admin', 'emenu'] as const;
 const useEmenuAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<EmenuAdmin>('/api/admin/emenu') });
 
 type Tab = 'pages' | 'dishes' | 'settings';
 type Apply = (next: EmenuAdmin) => void;
+const EMENU_BASE = '/admin/emenu';
 
 export function EmenuAdminSection() {
   const admin = useEmenuAdmin();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>('pages');
+  // 二级页签（8.0.17）：写进地址（/admin/emenu/dishes）；顺序与别的分区一样——设置在前，再是清单
+  const tabs = [
+    { key: 'settings', label: '设置' },
+    { key: 'pages', label: admin.data ? `分类与版面（${admin.data.categories.length}）` : '分类与版面' },
+    { key: 'dishes', label: admin.data ? `菜品图文（${admin.data.dishes.length}）` : '菜品图文' },
+  ];
   const apply: Apply = (next) => {
     qc.setQueryData(adminKey, next);
     void qc.invalidateQueries({ queryKey: ['emenu'] });
@@ -80,6 +87,7 @@ export function EmenuAdminSection() {
     <AdminPage
       section="emenu"
       wide
+      tabs={tabs}
       description="餐桌平板上的电子菜单：分类与供应时段、每一页的版面与菜品、菜品的图片与介绍、忌口与起菜方式。价格读价目表，估清、上下架跟着厨房与价目表走。"
       actions={
         <a
@@ -101,24 +109,23 @@ export function EmenuAdminSection() {
           {errorMessage(admin.error)}
         </Notice>
       ) : (
-        <div className="space-y-5" data-testid="emenu-admin">
-          <Checklist data={admin.data} onSettings={() => setTab('settings')} onDishes={() => setTab('dishes')} />
-          <Segmented
-            ariaLabel="电子菜单的分区"
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: 'pages', label: `分类与版面（${admin.data.categories.length}）` },
-              { value: 'dishes', label: `菜品图文（${admin.data.dishes.length}）` },
-              { value: 'settings', label: '设置' },
-            ]}
-          />
-          {tab === 'pages' && <PagesTab data={admin.data} apply={apply} />}
-          {tab === 'dishes' && <DishesTab data={admin.data} apply={apply} />}
-          {tab === 'settings' && <SettingsTab data={admin.data} apply={apply} />}
-        </div>
+        <EmenuAdminBody data={admin.data} apply={apply} tabs={tabs} />
       )}
     </AdminPage>
+  );
+}
+
+/** 页签下面的内容：还差什么的清单，加上现在这个页签的那一块 */
+function EmenuAdminBody({ data, apply, tabs }: { data: EmenuAdmin; apply: Apply; tabs: { key: string }[] }) {
+  const tab = (useActiveSubTab() ?? 'settings') as Tab;
+  const go = useGoSubTab(tabs as { key: string; label: string }[], EMENU_BASE);
+  return (
+    <div className="space-y-5" data-testid="emenu-admin">
+      <Checklist data={data} onSettings={() => go('settings')} onDishes={() => go('dishes')} />
+      {tab === 'pages' && <PagesTab data={data} apply={apply} />}
+      {tab === 'dishes' && <DishesTab data={data} apply={apply} />}
+      {tab === 'settings' && <SettingsTab data={data} apply={apply} />}
+    </div>
   );
 }
 

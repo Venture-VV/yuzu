@@ -184,7 +184,8 @@ test.describe('设备', () => {
   test('后台「设备」：按采购清单导入；登记、修改、停用', async ({ page }, info) => {
     test.skip(info.project.name !== '门店电脑', '写数据的只在门店电脑尺寸执行一次');
     await login(page);
-    await page.goto('/admin/devices');
+    // 8.0.17：后台「设备」分成三个页签——设备登记表、打印任务与设备事件、按采购清单导入
+    await page.goto('/admin/devices/import');
     const importCard = page.getByTestId('device-import');
     await expect(importCard).toBeVisible();
     if (await importCard.getByTestId('device-import-run').isVisible()) {
@@ -192,6 +193,8 @@ test.describe('设备', () => {
       await expect(page.getByText(/已按采购清单登记 \d+ 台/)).toBeVisible();
     }
     await expect(importCard).toContainText('清单里的设备都登记了');
+    await page.getByTestId('subnav-list').click();
+    await expect(page).toHaveURL(/\/admin\/devices$/);
     await expect(page.getByTestId('device-row-RDR-JD-01')).toBeVisible();
 
     const code = `PRN-UI-${run}`;

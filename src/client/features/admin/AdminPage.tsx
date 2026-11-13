@@ -43,15 +43,15 @@ export const adminRoutes: RouteObject[] = [
   { path: 'benefits', element: <BenefitsSection /> },
   // VIP 柜 8.0.4 起归「会员权益」：旧入口（会员规则、手牌与前台）的「去设置」都跳到这里
   { path: 'vip-lockers', element: <Navigate to="/admin/benefits?view=vip" replace /> },
-  { path: 'coupons', element: <CouponsSection /> },
+  { path: 'coupons/:tab?', element: <CouponsSection /> },
   { path: 'catalog/:tab?', element: <CatalogTab /> },
   { path: 'tags/:tab?', element: <TagsTab /> },
   { path: 'technicians/:tab?', element: <TechniciansSection /> },
   { path: 'dining/:tab?', element: <DiningSection /> },
-  { path: 'emenu', element: <EmenuAdminSection /> },
+  { path: 'emenu/:tab?', element: <EmenuAdminSection /> },
   { path: 'rooms/:tab?', element: <RoomsSection /> },
   { path: 'bookings', element: <BookingsSection /> },
-  { path: 'spaces', element: <SpacesSection /> },
+  { path: 'spaces/:tab?', element: <SpacesSection /> },
   { path: 'devices/:tab?', element: <DevicesSection /> },
   { path: 'mp', element: <MpAdminSection /> },
   {
