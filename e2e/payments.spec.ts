@@ -24,6 +24,12 @@ async function login(page: Page, username: string, password = PASSWORD) {
 
 const addDays = (iso: string, days: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
+/** 付款规则改回默认（别的用例照默认算）：用例开头与结尾都做一次，前一条没收尾也不带到后一条 */
+async function resetPaymentRules(page: Page) {
+  const r = await page.request.put('/api/erp/payments/rules', { data: DEFAULT_PAYMENT_RULES });
+  expect(r.status(), await r.text()).toBe(200);
+}
+
 test.describe('付款流（v0.7.32）', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会登记单据的流程只在门店电脑尺寸执行一次');
 
@@ -207,8 +213,12 @@ test.describe('付款流（v0.7.32）', () => {
 
   test('付款规则（8.0.6）：店主改本周应付的周数与三单差额比例，页面跟着变；不合格的不提交；最后改回默认', async ({ page }) => {
     await login(page, 'linlan');
+    // 先改回默认再开始：上一条用例要是中途超时，它最后那一步「改回默认」可能没发出去（测试会话 2026-11-13 在 #104 上报的）
+    await resetPaymentRules(page);
     try {
+      // 8.0.18：付款规则在「ERP 设置 → 付款规则」；旧地址跳过去
       await page.goto('/erp/payments?tab=rules');
+      await expect(page).toHaveURL(/\/erp\/settings\/payments$/);
       const card = page.getByTestId('payment-rules');
       await expect(card).toBeVisible();
       await expect(page.getByTestId('pay-rules-weeks')).toHaveValue('4');
@@ -226,8 +236,8 @@ test.describe('付款流（v0.7.32）', () => {
       await page.getByTestId('payment-rules-save').click();
       await expect(page.getByText('付款规则已保存').first()).toBeVisible();
       await expect(card).toContainText('现在：0.5% 且 ¥50');
-      // 本周应付按 2 周、三单的说明按新门槛
-      await page.getByTestId('payments-tab-weekly').click();
+      // 本周应付按 2 周、三单的说明按新门槛（规则不在付款页里了，回付款页看）
+      await page.goto('/erp/payments?tab=weekly');
       await expect(page.getByTestId('weekly-payables')).toContainText('起 2 周合计');
       await expect(page.getByTestId('weekly-payables')).not.toContainText('第 3 周');
       await page.getByTestId('payments-tab-three-way').click();
@@ -244,6 +254,7 @@ test.describe('付款流（v0.7.32）', () => {
 
   test('付款规则：两个页面同时开着各改一项，后保存的不把先保存的改回去（Codex 审查 #82 b240f89 的 P1，8.0.7 修）', async ({ page }) => {
     await login(page, 'linlan');
+    await resetPaymentRules(page);
     const other = await page.context().newPage();
     try {
       await page.goto('/erp/payments?tab=rules');
