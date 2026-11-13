@@ -112,7 +112,7 @@ function ReadStatus({ data, error, refresh }: ReturnType<typeof useInsights>) {
 }
 
 function GrowthChart({ growth, selected, onMonth }: { growth: MemberInsights["growth"]; selected: string; onMonth: (month: string) => void }) {
-  const max = Math.max(1, ...growth.months.map((m) => m.count));
+  const max = Math.max(2, Math.ceil(Math.max(0, ...growth.months.map((m) => m.count)) / 2) * 2);
   const y = (count: number) => 150 - count / max * 120;
   const points = growth.months.map((m, i) => ({ ...m, x: 35 + i * 60, y: y(m.count) }));
   const available = points.filter((m) => m.available);
