@@ -1,5 +1,5 @@
 // 动效套件（8.0.16，docs/UI_V8016.md）：全站公共部件共用的几样——退场的影子、依次出现、跟着当前项滑动的一块、
-// 折叠 / 展开、换页面时内容淡入、提示条停留多久。时间与曲线在 styles.css 开头的变量里。
+// 换页面时内容淡入、提示条停留多久。时间与曲线在 styles.css 开头的变量里。
 //
 // 规矩（设计文档第 2 节）：只动透明度、位移、缩放、颜色；进出成对；不用匀速；只在出现时播一次；
 // 系统开了「减少动态效果」时这里什么都不做（styles.css 末尾另有一条规则把所有动画、过渡的时间压到接近 0）。
@@ -190,13 +190,28 @@ export interface IndicatorBox {
   h: number;
 }
 
-/** 当前项在容器里的位置（算上容器自己滚动了多少）；量不到（没有当前项、容器没显示）返回 null */
+/**
+ * 当前项在容器里的位置；量不到（没有当前项、容器没显示）返回 null。
+ * 按排版的位置量（offsetLeft / offsetTop，一路加到容器），不按屏幕上的位置量：弹窗进场时整个面板还缩着（0.98 倍），
+ * 按屏幕量会把滑块也量小、量偏，而且之后不会再量一次。容器不是定位元素时退回到按屏幕量。
+ */
 export function measureIndicator(container: HTMLElement, selector: string): IndicatorBox | null {
   const active = container.querySelector<HTMLElement>(selector);
   if (!active) return null;
+  const w = active.offsetWidth;
+  const h = active.offsetHeight;
+  if (w === 0 || h === 0) return null;
+  let x = 0;
+  let y = 0;
+  let el: HTMLElement | null = active;
+  while (el && el !== container) {
+    x += el.offsetLeft;
+    y += el.offsetTop;
+    el = el.offsetParent as HTMLElement | null;
+  }
+  if (el === container) return { x, y, w, h };
   const c = container.getBoundingClientRect();
   const a = active.getBoundingClientRect();
-  if (a.width === 0 || a.height === 0) return null;
   return { x: a.left - c.left + container.scrollLeft - container.clientLeft, y: a.top - c.top + container.scrollTop - container.clientTop, w: a.width, h: a.height };
 }
 
@@ -243,19 +258,6 @@ export function useSlidingIndicator<T extends HTMLElement>(
   }, [box, settled]);
   const style: CSSProperties | null = box ? { transform: `translate3d(${box.x}px, ${box.y}px, 0)`, width: box.w, height: box.h } : null;
   return { ref, box, style, settled, jump };
-}
-
-// ───────────────────────── 折叠 / 展开 ─────────────────────────
-
-/** 折叠 / 展开：高度平滑变化。收起时里面的内容不能点、键盘到不了、读屏不念 */
-export function Collapse({ open, children, className }: { open: boolean; children: ReactNode; className?: string }) {
-  return (
-    <div className={cn('mo-collapse', className)} data-open={open}>
-      <div inert={!open} aria-hidden={!open || undefined}>
-        {children}
-      </div>
-    </div>
-  );
 }
 
 // ───────────────────────── 换页面时内容淡入 ─────────────────────────

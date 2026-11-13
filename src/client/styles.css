@@ -349,18 +349,22 @@
   animation: fade var(--dur-fast) ease-out both;
 }
 
-/* 折叠 / 展开：高度平滑变化（grid 的 0fr ↔ 1fr），里面那层裁掉超出的部分 */
-.mo-collapse {
-  display: grid;
-  grid-template-rows: 1fr;
-  transition: grid-template-rows var(--dur-slow) var(--ease-out-expo);
-}
-.mo-collapse[data-open='false'] {
-  grid-template-rows: 0fr;
-}
-.mo-collapse > * {
-  min-height: 0;
-  overflow: hidden;
+/* 页面上原生的折叠块（<details>）：展开、收起时高度平滑变化。只在浏览器支持「高度到 auto 的过渡」时生效
+   （Chrome / Edge 129 起）；不支持的浏览器照旧直接展开收起，功能一样 */
+@supports (interpolate-size: allow-keywords) {
+  details {
+    interpolate-size: allow-keywords;
+  }
+  details::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition:
+      block-size var(--dur-slow) var(--ease-out-expo),
+      content-visibility var(--dur-slow) allow-discrete;
+  }
+  details[open]::details-content {
+    block-size: auto;
+  }
 }
 
 /* 加载占位：一道微光从左扫到右（原来是整块明暗闪） */

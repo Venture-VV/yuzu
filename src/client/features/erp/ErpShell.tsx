@@ -185,7 +185,9 @@ export function ErpShell() {
         <span className="min-w-0 flex-1">{it.label}</span>
         {!!it.badge && (
           <span
-            className={cn('num flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold', it.alert ? 'bg-clay text-paper' : 'bg-yuzu text-ink')}
+            // 待办的数字变了：小幅回弹一下（8.0.16）
+            key={it.badge}
+            className={cn('num flex h-5 min-w-5 animate-tick items-center justify-center rounded-full px-1.5 text-[11px] font-bold', it.alert ? 'bg-clay text-paper' : 'bg-yuzu text-ink')}
             aria-hidden
             data-testid={`erp-badge-${it.key}`}
           >
