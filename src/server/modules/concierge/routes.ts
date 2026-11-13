@@ -480,7 +480,8 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
           const images =
             await tx`SELECT DISTINCT i.id,i.mime,i.sha256,i.size_bytes,encode(i.data,'base64') AS data FROM erp_images i JOIN concierge_uploads u ON u.image_id=i.id WHERE i.scope='concierge'`;
           return {
-            format: "yuzu-concierge-8.0.12",
+            // 8.0.18：内容比 8.0.12 多了好评两张表与预约的三列系统资源，标记跟上
+            format: "yuzu-concierge-8.0.18",
             exportedAt: new Date().toISOString(),
             tables,
             images,

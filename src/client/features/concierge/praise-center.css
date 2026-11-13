@@ -1,6 +1,8 @@
 .praise-center {
-  --praise-gold: #a87508;
-  --praise-gold-soft: #fcf0c8;
+  /* 颜色只用全店的变量（8.0.18 整合）：金 = 柚子色的深 / 浅 / 线；不用 color-mix（旧平板的浏览器不认） */
+  --praise-gold: var(--color-yuzu-deep);
+  --praise-gold-soft: var(--color-yuzu-soft);
+  --praise-gold-line: var(--color-yuzu);
   display: grid;
   gap: 28px;
   color: var(--color-ink);
@@ -19,7 +21,7 @@
   border-radius: 8px; font-weight: 600; font-size: 14px; line-height: 1.3;
   transition: background .15s, border-color .15s;
 }
-.praise-center button.praise-primary { background: var(--color-pine); color: #fffdf8; }
+.praise-center button.praise-primary { background: var(--color-pine); color: var(--color-card); }
 .praise-center button.praise-primary:hover { background: var(--color-pine-hover); }
 .praise-center button.praise-outline { background: var(--color-card); border-color: var(--color-line-strong); color: var(--color-pine); }
 .praise-center button.praise-outline:hover { border-color: var(--color-pine); }
@@ -37,9 +39,9 @@
 .praise-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .praise-month-award { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 22px 12px; text-align: center; }
 .praise-center button.praise-month-award { border-radius: 12px; background: transparent; color: inherit; transition: background .15s, box-shadow .15s; }
-.praise-center button.praise-month-award:hover:not(:disabled) { background: rgb(242 194 48 / 8%); box-shadow: inset 0 0 0 1px #dfc887; }
+.praise-center button.praise-month-award:hover:not(:disabled) { background: var(--color-yuzu-tint); box-shadow: inset 0 0 0 1px var(--praise-gold-line); }
 .praise-center button.praise-month-award:focus-visible { outline: 3px solid var(--color-moss); outline-offset: 3px; }
-.praise-award-icon { display: grid; place-items: center; width: 58px; height: 58px; border: 1px solid #dfc887; border-radius: 50%; color: var(--praise-gold); background: var(--color-yuzu-soft); box-shadow: 0 0 0 7px rgb(242 194 48 / 7%); margin-bottom: 8px; }
+.praise-award-icon { display: grid; place-items: center; width: 58px; height: 58px; border: 1px solid var(--praise-gold-line); border-radius: 50%; color: var(--praise-gold); background: var(--color-yuzu-soft); box-shadow: 0 0 0 7px var(--color-yuzu-tint); margin-bottom: 8px; }
 .praise-month-award > span { font-size: 13px; color: var(--color-ink-2); }
 .praise-month-award > strong { font-size: 62px; font-weight: 650; line-height: 1.2; letter-spacing: -.04em; color: var(--color-pine); font-variant-numeric: tabular-nums; }
 .praise-month-award > strong small { font-size: 15px; font-weight: 500; letter-spacing: 0; margin-left: 9px; color: var(--color-ink-3); }
@@ -60,11 +62,11 @@
   background: var(--color-paper); color: var(--color-ink); text-align: center;
 }
 .praise-center button.praise-honoree:hover { border-color: var(--color-moss); }
-.praise-center button.praise-rank-1 { background: linear-gradient(180deg, #fcf2d1, #fffaf0); border-color: #e6cf93; }
-.praise-center button.praise-rank-2 { background: linear-gradient(180deg, #edf1ed, #fafbf8); }
-.praise-center button.praise-rank-3 { background: linear-gradient(180deg, #f2e9dd, #fdfaf5); }
+.praise-center button.praise-rank-1 { background: linear-gradient(180deg, var(--color-yuzu-soft), var(--color-yuzu-tint)); border-color: var(--praise-gold-line); }
+.praise-center button.praise-rank-2 { background: linear-gradient(180deg, var(--color-pine-tint), var(--color-card)); }
+.praise-center button.praise-rank-3 { background: linear-gradient(180deg, var(--color-paper-2), var(--color-card)); }
 .praise-medal { display: inline-flex; align-items: center; gap: 6px; color: var(--color-ink-3); font-size: 12px; font-weight: 650; }
-.praise-medal-1 { color: var(--praise-gold); }.praise-medal-2 { color: #66796e; }.praise-medal-3 { color: #9d734c; }
+.praise-medal-1 { color: var(--praise-gold); }.praise-medal-2 { color: var(--color-moss); }.praise-medal-3 { color: var(--color-clay); }
 .praise-avatar { display: grid; place-items: center; height: 56px; width: 56px; margin-top: 3px; border: 3px solid var(--color-card); border-radius: 50%; background: var(--color-pine-soft); color: var(--color-pine); font-size: 23px; box-shadow: 0 0 0 1px var(--color-line); }
 .praise-honoree > strong { max-width: 100%; overflow-wrap: anywhere; font-size: 17px; }
 .praise-honoree > small { color: var(--color-ink-3); font-size: 12px; }
@@ -93,7 +95,7 @@
 .praise-proof-image { position: relative; display: block; width: 100%; aspect-ratio: 4/3; overflow: hidden; background: var(--color-paper-2); }
 .praise-proof-image > img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 25%; }
 .praise-photo-fallback { display: flex; align-items: center; justify-content: center; gap: 8px; flex-direction: column; height: 100%; padding: 20px; color: var(--color-ink-3); font-size: 12px; }
-.praise-image-count { position: absolute; display: inline-flex; align-items: center; gap: 5px; bottom: 10px; right: 10px; border-radius: 5px; background: rgb(28 35 31 / 65%); color: white; font-size: 11px; padding: 4px 7px; }
+.praise-image-count { position: absolute; display: inline-flex; align-items: center; gap: 5px; bottom: 10px; right: 10px; border-radius: 5px; background: rgb(28 35 31 / 65%); color: var(--color-card); font-size: 11px; padding: 4px 7px; }
 .praise-proof-body { display: flex; flex-direction: column; flex: 1; gap: 9px; padding: 15px; min-width: 0; }
 .praise-proof-source { color: var(--color-ink-3); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .praise-proof-body > strong { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
@@ -104,7 +106,7 @@
 .praise-pagination { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 23px; }.praise-pagination > span { font-size: 12px; color: var(--color-ink-3); }
 .praise-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 165px; padding: 25px 20px; color: var(--color-ink-3); background: var(--color-card); border: 1px dashed var(--color-line-strong); border-radius: 10px; text-align: center; }.praise-empty > svg { color: var(--color-moss); opacity: .8; }.praise-empty strong { font-size: 15px; color: var(--color-ink-2); }.praise-empty p { font-size: 13px; margin: 0; line-height: 1.8; }.praise-ranking-empty { background: var(--color-yuzu-tint); }
 .praise-loading { padding: 20px; color: var(--color-ink-3); font-size: 13px; text-align: center; }
-.praise-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin: 0; border: 1px solid #dec9b5; border-radius: 8px; background: #fbf1e7; color: #8b5034; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.praise-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin: 0; border: 1px solid var(--color-line-strong); border-radius: 8px; background: var(--color-clay-soft); color: var(--color-clay-hover); font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
 .praise-form { display: grid; gap: 20px; min-width: 0; }.praise-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }.praise-form-grid > div { min-width: 0; }.praise-form input, .praise-form select, .praise-form textarea { min-width: 0; }
 .praise-member-lookup { position: relative; }.praise-member-results { margin-top: 5px; border: 1px solid var(--color-line); border-radius: 8px; max-height: 230px; overflow: auto; background: var(--color-card); }.praise-member-results button { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px; padding: 11px 13px; border: 0; border-bottom: 1px solid var(--color-line); text-align: left; background: var(--color-card); }.praise-member-results button:hover { background: var(--color-pine-tint); }.praise-member-results strong { color: var(--color-ink); font-size: 13px; font-weight: 600; }.praise-member-results span, .praise-member-results p { font-size: 12px; color: var(--color-ink-3); }.praise-member-results p { margin: 0; padding: 12px; line-height: 1.8; }
 .praise-selected-member { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; min-height: 44px; border: 1px solid var(--color-line-strong); border-radius: 8px; background: var(--color-pine-tint); color: var(--color-pine); }.praise-selected-member button { display: grid; place-items: center; min-height: 32px; min-width: 32px; border: 0; border-radius: 5px; color: var(--color-pine); background: transparent; }
@@ -126,7 +128,7 @@
   .praise-center { gap: 24px; }
   .praise-hero { grid-template-columns: minmax(0, 1fr); padding: 25px 22px; gap: 16px; }
   .praise-center .praise-hero h2 { font-size: 28px; line-height: 1.4; }.praise-hero p { font-size: 13px; }
-  .praise-month-award { position: relative; flex-direction: row; justify-content: flex-start; flex-wrap: wrap; align-items: center; padding: 18px 0 0 63px; border-top: 1px solid #e8ddbb; gap: 7px 12px; min-height: 93px; text-align: left; }
+  .praise-month-award { position: relative; flex-direction: row; justify-content: flex-start; flex-wrap: wrap; align-items: center; padding: 18px 0 0 63px; border-top: 1px solid var(--praise-gold-line); gap: 7px 12px; min-height: 93px; text-align: left; }
   .praise-award-icon { position: absolute; left: 3px; top: 28px; width: 43px; height: 43px; margin: 0; }.praise-award-icon svg { width: 23px; height: 23px; }.praise-month-award > span { font-size: 12px; flex-basis: 100%; }.praise-month-award > strong { font-size: 41px; line-height: 1.1; }.praise-month-award > strong small { font-size: 12px; }.praise-month-award > span.praise-award-note { flex-basis: auto; font-size: 11px; }
   .praise-section-title { align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 9px; }.praise-center .praise-section-title h3 { font-size: 18px; }.praise-period { text-align: left; }.praise-eyebrow { font-size: 11px; }
   .praise-ranking { padding: 21px 16px 16px; }.praise-podium { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }

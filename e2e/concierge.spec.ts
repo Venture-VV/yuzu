@@ -457,3 +457,31 @@ test("本月好评数字打开当月有效名单，记录可进入原图并返�
     expect(stopped.status(), await stopped.text()).toBe(200);
   }
 });
+
+// 8.0.18 整合：哪一页写进地址（与后台的二级页签同一个规矩）
+test("管家部的页写进地址：刷新留在原页、浏览器后退回上一页、直接打开某一页的地址", async ({ page }) => {
+  await login(page);
+  await page.goto("/concierge");
+  await expect(page.getByRole("heading", { name: /今日工作台/ })).toBeVisible();
+  await moduleNav(page).getByRole("button", { name: "会员中心", exact: true }).click();
+  await expect(page).toHaveURL(/\/concierge\/tiers$/);
+  await expect(page.getByRole("heading", { name: "会员中心", exact: true })).toBeVisible();
+  await moduleNav(page).getByRole("button", { name: "管家好评中心", exact: true }).click();
+  await expect(page).toHaveURL(/\/concierge\/praise$/);
+  // 刷新不回工作台
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "管家好评中心", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page).toHaveURL(/\/concierge\/praise$/);
+  // 后退回到会员中心
+  await page.goBack();
+  await expect(page).toHaveURL(/\/concierge\/tiers$/);
+  await expect(page.getByRole("heading", { name: "会员中心", exact: true })).toBeVisible();
+  // 直接打开地址；认不得的页回工作台
+  await page.goto("/concierge/situation");
+  await expect(page.getByRole("heading", { name: "会员情况", exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.goto("/concierge/no-such-page");
+  await expect(page.getByRole("heading", { name: /今日工作台/ })).toBeVisible({ timeout: 20_000 });
+  // 门店主导航里「管家部」在各页都亮着
+  await page.goto("/concierge/members");
+  await expect(page.getByRole("heading", { name: "会员档案", exact: true })).toBeVisible({ timeout: 20_000 });
+});

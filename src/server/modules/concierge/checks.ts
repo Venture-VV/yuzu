@@ -40,6 +40,16 @@ export async function conciergeCheck(db: Db): Promise<FrontdeskCheck> {
         OR NOT EXISTS (SELECT 1 FROM concierge_praise_evidence e WHERE e.praise_id=p.id)
       LIMIT 5`;
     bad.push(...praiseBad);
+    // 协调预约记的系统资源（data.resourceKey）与三列 native_*_id 要对得上（8.0.18 整合）：
+    // 三列是保存时从 resourceKey 推出来的，冲突判断与外键用的是三列，两边不一致就会漏判
+    const resourceBad = await db<{ ref: string }[]>`
+      SELECT '协调预约 ' || r.id || '（系统资源与关联列不一致）' AS ref FROM concierge_records r
+      WHERE r.kind='appointment' AND coalesce(r.data->>'resourceKey','') <> coalesce(
+        CASE WHEN r.native_space_id IS NOT NULL THEN 'space:' || r.native_space_id
+             WHEN r.native_table_id IS NOT NULL THEN 'dining_table:' || r.native_table_id
+             WHEN r.native_room_id IS NOT NULL THEN 'room:' || r.native_room_id END, '')
+      LIMIT 5`;
+    bad.push(...resourceBad);
     const [count] = await db<{ total: number }[]>`SELECT count(*)::int AS total FROM concierge_praise`;
     praiseCount = count?.total ?? 0;
   }

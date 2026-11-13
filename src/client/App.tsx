@@ -322,7 +322,8 @@ const router = createBrowserRouter([
       { path: 'rooms', element: <RoomsPage /> },
       { path: 'bookings', element: <BookingsPage /> },
       // 管家部（8.0.12）：门店的工作页面；/admin/concierge 是 Codex 最初放的地址，留着跳过来
-      { path: 'concierge', element: <ConciergePage /> },
+      // 8.0.18：哪一页写进地址（/concierge/members、/concierge/praise……），见 Workspace.tsx 的 VIEW_SLUG
+      { path: 'concierge/:view?', element: <ConciergePage /> },
       { path: 'platform', element: <PlatformPage /> },
       { path: 'guide', element: <GuidePage /> },
       { path: 'devices', element: <DevicesPage /> },

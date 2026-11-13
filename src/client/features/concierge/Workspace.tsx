@@ -8,6 +8,7 @@ import "./profile-layout.css";
 import { MemberIdentityFields, ResourceFields, currentBalance, balanceGroupOf, memberGrade, uniqueMembers, resourceLabel } from "./NativeIntegration";
 import { loadReceipt, loadWorkspace, pendingRequests } from "./api";
 import { announceRevision } from "./live";
+import { useNavigate, useParams } from "react-router";
 import { api } from "../../lib/api";
 import { uuid } from "../../lib/utils";
 import { useCan } from "../../lib/session";
@@ -87,6 +88,24 @@ type View =
   | "receiptArchive"
   | "tasks"
   | "manager";
+// 哪一页写进地址（8.0.18 整合，与后台的二级页签同一个规矩）：/concierge 是今日工作台，其余是 /concierge/<页>。
+// 刷新不回工作台，也可以把某一页的链接发给同事。地址里用的是看得懂的名字，不跟内部的旧名走
+// （receipts 现在是好评中心、balances 是会员情况、segments 是会员中心）。
+const VIEW_SLUG: Record<View, string> = {
+  dashboard: "",
+  members: "members",
+  appointments: "appointments",
+  receipts: "praise",
+  receiptArchive: "receipts",
+  followup: "followup",
+  balances: "situation",
+  segments: "tiers",
+  tasks: "tasks",
+  manager: "manager",
+};
+const SLUG_VIEW = new Map(
+  (Object.entries(VIEW_SLUG) as [View, string][]).map(([view, slug]) => [slug, view]),
+);
 type Modal = {
   kind:
     | "member"
@@ -362,7 +381,14 @@ export default function Workspace({
 }) {
   const canNative = useCan();
   const [data, setData] = useState(initialData);
-  const [view, setView] = useState<View>("dashboard");
+  const viewSlug = useParams().view ?? "";
+  const go = useNavigate();
+  const wantedView = SLUG_VIEW.get(viewSlug) ?? "dashboard";
+  // 经理监管只有经理看得到；别人打开那个地址回到工作台
+  const view: View =
+    wantedView === "manager" && data.user.role !== "manager" ? "dashboard" : wantedView;
+  const setView = (v: View) =>
+    go(v === "dashboard" ? "/concierge" : `/concierge/${VIEW_SLUG[v]}`);
   const [insightBucket, setInsightBucket] = useState<"" | "dormant">("");
   const [search, setSearch] = useState("");
   const [group, setGroup] = useState("all");
