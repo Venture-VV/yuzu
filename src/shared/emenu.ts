@@ -549,8 +549,14 @@ export interface EmenuEnglishRow {
   unitEn?: string;
 }
 
+/** 一道菜现在的英文各项（读对照表时用来判断哪些格子改过、开头的单引号是谁加的） */
+export type EmenuEnglishCurrent = Required<Omit<EmenuEnglishRow, 'id'>>;
+
 export interface EmenuEnglishParsed {
+  /** 要导入的行；给了「现在的值」时只含改过的格子（没改过的格子、整行都没改的行不在里面） */
   rows: EmenuEnglishRow[];
+  /** 给了「现在的值」时：填了英文、但与现在一样的行数（不用导入） */
+  unchanged: number;
   /** 读不了的地方（整份不能导：没有表头、引号不配对；或某一行不对：编号不是数字、太长），带行号 */
   problems: string[];
 }
@@ -560,35 +566,76 @@ export interface EmenuEnglishParsed {
  * 免得表格软件把它当公式执行；读回来时要把这个单引号去掉，不然「+ Seasonal special」导出再导入就成了「'+ Seasonal special」。
  * 为了不误伤本来就以单引号开头的内容（「'+1 Combo」），这类格子导出时再多加一个单引号、读回来去掉一个：
  *   原文 +x → 文件里 '+x → 读回 +x；原文 '+x → 文件里 ''+x → 读回 '+x；原文 'hello、-5 度 不加也不去。
+ *
+ * 文件里一个以「单引号 + 公式开头」开头的格子，可能是导出时加的防公式单引号，也可能是有人在空格子里自己填的、单引号就是内容。
+ * 光看文件分不出来，所以读的时候对照这一格**现在的值**（readSheetCell）：
+ *   · 与现在的值导出来的样子一模一样：没改过，不导入；
+ *   · 改过，而且现在的值导出时带着防公式的单引号（那一格里本来就有一个系统加的）：开头的单引号当作那一个，去掉；
+ *   · 改过，现在的值导出时不带（空格子、普通的字）：系统没加过，开头的单引号是填的人自己写的，照字面保存。
+ * 不知道现在的值时（没给，或编号对不上）当作导出的文件处理：去掉一个。
  */
 const FORMULA_GUARDED = /^'+(?:[=+@]|-(?!\d))/;
+/** lib/csv 的 escapeCell 给哪些格子加单引号（两边要一致，tests/emenu-english.test.ts 里对过） */
+const FORMULA_START = (value: string) => /^[=+@]/.test(value) || (/^-/.test(value) && !/^-\d/.test(value));
 /** 导出：本来就是「单引号 + 公式开头」的格子多加一个单引号（单纯公式开头的由 lib/csv 加） */
 export const emenuSheetCellOut = (value: string): string => (FORMULA_GUARDED.test(value) ? `'${value}` : value);
 /** 读回：去掉导出时加的那一个单引号 */
 export const emenuSheetCellIn = (value: string): string => (FORMULA_GUARDED.test(value) ? value.slice(1) : value);
+/** 一个值导出到对照表里是什么样子（emenuSheetCellOut 加上 lib/csv 的防公式单引号） */
+export function emenuSheetGuard(value: string): string {
+  const out = emenuSheetCellOut(value);
+  return FORMULA_START(out) ? `'${out}` : out;
+}
+
+/**
+ * 读对照表里的一格。now 是这一格现在的值（不知道为 undefined）。
+ * 返回 null：这一格没改过（与现在的值导出来的样子一样），不用导入。
+ */
+export function readSheetCell(cell: string, now: string | undefined): string | null {
+  const text = cell.trim();
+  if (now === undefined) return emenuSheetCellIn(text).trim();
+  const exported = emenuSheetGuard(now);
+  if (text === exported) return null;
+  return (exported !== now ? emenuSheetCellIn(text) : text).trim();
+}
 
 const ENGLISH_LIMITS = { nameEn: 80, taglineEn: 80, descriptionEn: 400, unitEn: 12 } as const;
 const ENGLISH_HEADERS: Record<keyof typeof ENGLISH_LIMITS | 'attrsEn', string> = { nameEn: '英文名', taglineEn: '小字的英文', descriptionEn: '英文介绍', attrsEn: '属性行的英文', unitEn: '单位的英文' };
 export const EMENU_ATTR_EN_MAX = 48;
 
-/** 读英文对照表（CSV）：按表头找「编号」与各英文列；空行、英文各列都空着的行跳过 */
-export function parseEmenuEnglishCsv(text: string): EmenuEnglishParsed {
+/**
+ * 读英文对照表（CSV）：按表头找「编号」与各英文列；空行、英文各列都空着的行跳过。
+ * current：各道菜现在的英文（按编号）。给了的话，没改过的格子不导入，开头的单引号是不是内容也按现在的值判断（见 readSheetCell）；
+ * 不给时每个填了的格子都当作要导入的、按导出的文件去掉防公式的单引号。
+ */
+export function parseEmenuEnglishCsv(text: string, current?: ReadonlyMap<number, EmenuEnglishCurrent>): EmenuEnglishParsed {
+  const fail = (problem: string): EmenuEnglishParsed => ({ rows: [], unchanged: 0, problems: [problem] });
   const { records, unclosedQuoteLine } = parseCsvRecords(text.replace(/^\uFEFF/, ''));
-  if (unclosedQuoteLine !== null) return { rows: [], problems: [unclosedQuoteMessage(unclosedQuoteLine)] };
+  if (unclosedQuoteLine !== null) return fail(unclosedQuoteMessage(unclosedQuoteLine));
   const filled = records.filter((r) => r.cells.some((c) => c.trim()));
   const header = filled[0];
-  if (!header) return { rows: [], problems: ['文件是空的'] };
+  if (!header) return fail('文件是空的');
   const col = (name: string) => header.cells.findIndex((c) => c.trim() === name);
   const idCol = col('编号');
-  if (idCol < 0) return { rows: [], problems: ['第一行要是表头，并且有「编号」这一列（请用「导出英文对照表」导出的文件来填）'] };
+  if (idCol < 0) return fail('第一行要是表头，并且有「编号」这一列（请用「导出英文对照表」导出的文件来填）');
   const cols = Object.fromEntries(Object.entries(ENGLISH_HEADERS).map(([k, name]) => [k, col(name)])) as Record<keyof typeof ENGLISH_HEADERS, number>;
-  if (Object.values(cols).every((i) => i < 0)) return { rows: [], problems: [`没有找到英文的列（${Object.values(ENGLISH_HEADERS).join('、')}）`] };
+  if (Object.values(cols).every((i) => i < 0)) return fail(`没有找到英文的列（${Object.values(ENGLISH_HEADERS).join('、')}）`);
   const rows: EmenuEnglishRow[] = [];
   const problems: string[] = [];
   const seen = new Set<number>();
+  let unchanged = 0;
   for (const r of filled.slice(1)) {
     const idText = (r.cells[idCol] ?? '').trim();
-    const cell = (k: keyof typeof ENGLISH_HEADERS) => (cols[k] < 0 ? '' : emenuSheetCellIn((r.cells[cols[k]] ?? '').trim()).trim());
+    const now = current?.get(Number(idText));
+    let same = 0;
+    // 一格的内容：空着的、没改过的都返回空字（不导入）；没改过的另记一笔
+    const cell = (k: keyof typeof ENGLISH_HEADERS) => {
+      const raw = cols[k] < 0 ? '' : (r.cells[cols[k]] ?? '').trim();
+      if (!raw) return '';
+      const value = readSheetCell(raw, now === undefined ? undefined : k === 'attrsEn' ? now.attrsEn.join(EMENU_ATTR_SEPARATOR) : now[k]);
+      if (value === null) same += 1;
+      return value ?? '';
+    };
     const row: EmenuEnglishRow = { id: Number(idText) };
     let bad = false;
     for (const k of Object.keys(ENGLISH_LIMITS) as (keyof typeof ENGLISH_LIMITS)[]) {
@@ -611,7 +658,10 @@ export function parseEmenuEnglishCsv(text: string): EmenuEnglishParsed {
       }
       row.attrsEn = attrs;
     }
-    if (Object.keys(row).length === 1) continue;
+    if (Object.keys(row).length === 1) {
+      if (same > 0) unchanged += 1;
+      continue;
+    }
     if (!/^[0-9]{1,12}$/.test(idText) || row.id <= 0) {
       problems.push(`第 ${r.line} 行：编号「${idText}」不是数字（编号请不要改）`);
       continue;
@@ -623,8 +673,8 @@ export function parseEmenuEnglishCsv(text: string): EmenuEnglishParsed {
     seen.add(row.id);
     if (!bad) rows.push(row);
   }
-  if (rows.length > EMENU_ENGLISH_MAX_ROWS) return { rows: [], problems: [`一次最多导入 ${EMENU_ENGLISH_MAX_ROWS} 行`] };
-  return { rows, problems };
+  if (rows.length > EMENU_ENGLISH_MAX_ROWS) return fail(`一次最多导入 ${EMENU_ENGLISH_MAX_ROWS} 行`);
+  return { rows, unchanged, problems };
 }
 
 /** 导入的结果 */
