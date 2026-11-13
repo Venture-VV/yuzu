@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { todayIn } from '../src/server/modules/inventory/common';
 import { createStaff } from '../src/server/modules/staff';
-import { api, login, PASSWORD, setup, type TestContext } from './helpers';
+import { api, login, PASSWORD, setup, type TestContext, useLegacyQuoteThreshold } from './helpers';
 
 let ctx: TestContext;
 /** 物资经办（后勤人员，只有库存职责） */
@@ -83,6 +83,7 @@ async function opening(materialId: number, qtyMilli: number) {
 
 beforeAll(async () => {
   ctx = await setup();
+  await useLegacyQuoteThreshold(ctx);
   today = todayIn(ctx.config.timezone);
   await createStaff(ctx.sql, { username: 'keeper', displayName: '物资小林', role: 'backoffice', duties: ['stock'], password: PASSWORD, mustChangePassword: false });
   await createStaff(ctx.sql, { username: 'boss2', displayName: '负责人老周', role: 'backoffice', duties: ['approve'], password: PASSWORD, mustChangePassword: false });

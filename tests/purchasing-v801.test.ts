@@ -10,7 +10,7 @@ import { createStaff } from '../src/server/modules/staff';
 import { readXlsx } from '../src/server/lib/xlsx-read';
 import { REQUEST_IMPORT_COLUMNS } from '../src/shared/requests';
 import { seedInventoryDemo } from '../src/server/seed-inventory';
-import { api, login, PASSWORD, setup, type TestContext } from './helpers';
+import { api, login, PASSWORD, setup, type TestContext, useLegacyQuoteThreshold } from './helpers';
 
 /** 8.0.1 旧模板（集采需求表）的表头 */
 const REQUEST_IMPORT_LEGACY_HEADER = ['序号', '申请部门', '申请人', '物品名称', '单位', '数量', '采购优先级', '期望到货日期', '采购途径', '供应商名称', '备注'];
@@ -49,6 +49,7 @@ const openIds = async () => ((await api(ctx.app, buyer, 'GET', '/api/erp/request
 
 beforeAll(async () => {
   ctx = await setup();
+  await useLegacyQuoteThreshold(ctx);
   today = todayIn(ctx.config.timezone);
   expect((await seedInventoryDemo(ctx.sql, ctx.config)).skipped).toBe(false);
   boss = await login(ctx.app, 'linlan', 'yuzu2026');

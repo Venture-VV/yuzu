@@ -465,18 +465,20 @@ describe('④ 补货建议（E4）', () => {
 });
 
 describe('⑤ 询价比价与定标（E5–E8）', () => {
-  it('询价门槛：合计 ≥ ¥5,000 的采购单直接提交被拒，可以存草稿；门槛设 0 不要求', async () => {
+  it('询价门槛：默认 ¥1,000（8.0.17，店主 2026-11-13）——合计达到门槛的采购单直接提交被拒，可以存草稿；刚好等于门槛也算；门槛设 0 不要求', async () => {
+    expect(DEFAULT_PURCHASE_RULES.quoteThresholdCents).toBe(100_000);
     const s1 = await supplier('S001');
     const mat = await material('M016');
     const big = { supplierId: s1.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(20), priceCents: 45_000 }] };
     const rejected = await newPo(big);
     expect(rejected.status).toBe(422);
     expect(rejected.body.error.code).toBe('QUOTES_REQUIRED');
-    expect(rejected.body.error.message).toContain('¥5,000.00');
+    expect(rejected.body.error.message).toContain('¥1,000.00');
     const draft = (await newPo({ ...big, action: 'save' })).body.po;
     expect(draft.status).toBe('draft');
     expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${draft.id}/submit`, {})).body.error.code).toBe('QUOTES_REQUIRED');
-    // ¥5,000 以下照常
+    // 刚好 ¥1,000 也要询价；¥1,000 以下照常
+    expect((await newPo({ supplierId: s1.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(4), priceCents: 25_000 }] })).body.error.code).toBe('QUOTES_REQUIRED');
     expect((await newPo({ supplierId: s1.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] })).status).toBe(201);
     // 门槛设 0：不要求
     expect((await saveRules(boss, { ...DEFAULT_PURCHASE_RULES, quoteThresholdCents: 0 })).status).toBe(200);

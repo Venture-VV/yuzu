@@ -3,12 +3,12 @@
 //   · 没挂合同的应付：选供应商，再选这家没结清的收货单、期初未付与各自金额（挂合同的收货单要从合同申请）。
 // 新建先把操作编号和原请求存在本机（结果待确认时在付款页上方查回、重提或作废）；改了再提交带打开时的版本号。
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
 import { ArrowLeft, Send } from 'lucide-react';
 import { PAYMENT_STAGES, PAYMENT_STAGE_LABELS, type PaymentStage } from '@shared/contracts';
 import { formatAmount, parseYuan } from '@shared/money';
-import { type PaymentRequestDetail } from '@shared/payments';
+import { nextPayDay, payDaysLabel, type PaymentRequestDetail } from '@shared/payments';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
@@ -19,7 +19,7 @@ import { useToast } from '../../components/Toast';
 import { Button, Card, Field, Input, MoneyInput, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { useErpAccess } from '../erp/access';
 import { ErpPage } from '../erp/ErpHome';
-import { useInvalidatePayments, usePaymentMeta, usePaymentPlan, usePaymentRequest, useRequestableItems } from './queries';
+import { useInvalidatePayments, usePaymentMeta, usePaymentPlan, usePaymentRequest, usePaymentRules, useRequestableItems } from './queries';
 
 export function PaymentRequestFormPage() {
   const can = useCan();
@@ -81,6 +81,13 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
     existing ? Object.fromEntries(existing.targets.map((t) => [`${t.kind}:${t.targetId}`, (t.amountCents / 100).toFixed(2)])) : {},
   );
   const [expectedDate, setExpectedDate] = useState(existing && existing.expectedDate >= session.calendarToday ? existing.expectedDate : session.calendarToday);
+  // 固定付款日（8.0.17，LC7）：新建的申请默认取下一个付款日（今天就是付款日取今天）；自己改过日期、修改已有申请的不动
+  const rules = usePaymentRules();
+  const [dateTouched, setDateTouched] = useState(false);
+  const payDay = rules.data ? nextPayDay(session.calendarToday, rules.data.payDays) : null;
+  useEffect(() => {
+    if (!existing && !dateTouched && payDay) setExpectedDate(payDay);
+  }, [existing, dateTouched, payDay]);
   const [purpose, setPurpose] = useState(existing?.purpose ?? '');
   const [earlyReason, setEarlyReason] = useState(existing?.earlyReason ?? '');
   const [busy, setBusy] = useState(false);
@@ -346,7 +353,23 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
 
       <Card className="grid gap-3 p-5 sm:grid-cols-[180px_minmax(0,1fr)]">
         <Field label="期望付款日" htmlFor="rq-date">
-          <Input id="rq-date" type="date" value={expectedDate} min={session.calendarToday} onChange={(e) => setExpectedDate(e.target.value)} className="h-10" data-testid="request-expected" />
+          <Input
+            id="rq-date"
+            type="date"
+            value={expectedDate}
+            min={session.calendarToday}
+            onChange={(e) => {
+              setDateTouched(true);
+              setExpectedDate(e.target.value);
+            }}
+            className="h-10"
+            data-testid="request-expected"
+          />
+          {rules.data && rules.data.payDays.length > 0 && (
+            <p className="mt-1 text-[12px] text-ink-3" data-testid="request-payday-hint">
+              {payDaysLabel(rules.data.payDays)}付款{payDay ? `，下个付款日 ${payDay}` : ''}
+            </p>
+          )}
         </Field>
         <Field label="用途" htmlFor="rq-purpose">
           <Input id="rq-purpose" value={purpose} maxLength={200} onChange={(e) => setPurpose(e.target.value)} placeholder="例如：洗浴用品年度采购预付款" className="h-10" data-testid="request-purpose" />

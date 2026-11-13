@@ -512,7 +512,8 @@ export interface PurchaseRules {
 /** 默认规则（待确认，E1、E4–E6、CG01、CG03–CG05）：在「采购 → 采购规则」里改 */
 export const DEFAULT_PURCHASE_RULES: PurchaseRules = {
   channels: PURCHASE_CHANNELS,
-  quoteThresholdCents: 500_000,
+  // 8.0.17 起默认 ¥1,000（店主 2026-11-13，LC2；原来 ¥5,000，迁移 124 把存着旧默认的一起改）
+  quoteThresholdCents: 100_000,
   minQuotes: 2,
   reorderDays: 7,
   targetDays: 14,

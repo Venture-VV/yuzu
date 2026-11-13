@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { todayIn } from '../src/server/modules/inventory/common';
 import { inventoryChecks } from '../src/server/modules/inventory/reports';
 import { createStaff } from '../src/server/modules/staff';
-import { api, login, PASSWORD, setup, type TestContext } from './helpers';
+import { api, login, PASSWORD, setup, type TestContext, useLegacyQuoteThreshold } from './helpers';
 
 let ctx: TestContext;
 let today: string;
@@ -109,6 +109,7 @@ async function checksOk() {
 
 beforeAll(async () => {
   ctx = await setup();
+  await useLegacyQuoteThreshold(ctx);
   today = todayIn(ctx.config.timezone);
   const mk = (username: string, displayName: string, duties: string[]) =>
     createStaff(ctx.sql, { username, displayName, role: 'backoffice', duties: duties as never, password: PASSWORD, mustChangePassword: false });

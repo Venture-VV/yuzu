@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildPurchaseFlow, dayDiff, flowYuan, type FlowFacts, type FlowPoFact, type FlowRequestFact, type FlowSourcingFact, type PurchaseFlow } from '../src/shared/purchase-flow';
+import { DEFAULT_PAYMENT_RULES, nextPayDay, payDaysLabel } from '../src/shared/payments';
 import { DEFAULT_PURCHASE_RULES } from '../src/shared/purchasing';
 import { todayIn } from '../src/server/modules/inventory/common';
 import { createStaff } from '../src/server/modules/staff';
@@ -16,7 +17,8 @@ import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 const NOW = '2026-11-13T04:00:00.000Z';
 const TODAY = '2026-11-13';
 const hoursAgo = (h: number) => new Date(Date.parse(NOW) - h * 3_600_000).toISOString();
-const RULES = { quoteThresholdCents: 100_000, minQuotes: 2, arrivalOverdueDays: 7, stallDays: 2 };
+// 没有固定付款日（另有一条专门测付款日）
+const RULES = { quoteThresholdCents: 100_000, minQuotes: 2, arrivalOverdueDays: 7, stallDays: 2, payDays: [] as number[] };
 
 const req = (over: Partial<FlowRequestFact> = {}): FlowRequestFact => ({
   id: 1,
@@ -258,6 +260,38 @@ describe('采购流程图 · 推算函数', () => {
     expect(closed).toMatchObject({ end: 'closed', endText: '采购单已关闭：供应商断货' });
   });
 
+  it('固定付款日（LC7）：没到货的写每月几号付款；到齐没付清的写下个付款日；过了入库以后的第一个付款日还没付清标红；月底的日子按月底算', () => {
+    expect(nextPayDay('2026-11-13', [15, 30])).toBe('2026-11-15');
+    expect(nextPayDay('2026-11-15', [15, 30])).toBe('2026-11-15');
+    expect(nextPayDay('2026-11-15', [15, 30], true)).toBe('2026-11-30');
+    expect(nextPayDay('2026-11-30', [30, 15], true)).toBe('2026-12-15');
+    // 二月没有 30 号：按月底；跨年
+    expect(nextPayDay('2027-02-16', [15, 30])).toBe('2027-02-28');
+    expect(nextPayDay('2026-12-31', [15, 30], true)).toBe('2027-01-15');
+    expect(nextPayDay('2026-11-13', [])).toBeNull();
+    expect(payDaysLabel([15, 30])).toBe('每月 15 / 30 号');
+    const rules = { ...RULES, payDays: [15, 30] };
+    const base = { anchor: { kind: 'po' as const, id: 10, docNo: 'CG-0010' }, requests: [], rules };
+    const waiting = buildPurchaseFlow(facts({ ...base, pos: [po()] }));
+    expect(node(waiting, 'pay')).toMatchObject({ state: 'pending', role: '财务 · 每月 15 / 30 号', text: '到货后付款' });
+    // 11/10 入库、今天 11/13：下个付款日 11/15，还没过
+    const full = { receiving: 'full' as const, receivedLines: 2, receivedCents: 80_000, paidCents: 0, unpaidCents: 80_000, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed' as const, docDate: '2026-11-10' }] };
+    const due = buildPurchaseFlow(facts({ ...base, pos: [po(full)] }));
+    expect(node(due, 'pay')).toMatchObject({ state: 'current', text: '已付 ¥0.00 · 未付 ¥800.00 · 下个付款日 11/15', alert: null });
+    expect(due.alert).toBe(false);
+    // 10/20 入库：第一个付款日是 10/30，今天 11/13 已经过了 14 天
+    const late = buildPurchaseFlow(facts({ ...base, pos: [po({ ...full, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-10-20' }] })] }));
+    expect(node(late, 'pay')).toMatchObject({ state: 'current', text: '已付 ¥0.00 · 未付 ¥800.00', alert: '已过付款日 10/30 · 超 14 天' });
+    expect(late).toMatchObject({ stage: 'pay', alert: true });
+    // 入库当天就是付款日：算下一个（当天来不及对账）
+    const sameDay = buildPurchaseFlow(facts({ ...base, today: '2026-11-16', pos: [po({ ...full, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-11-15' }] })] }));
+    expect(node(sameDay, 'pay')).toMatchObject({ alert: null, text: '已付 ¥0.00 · 未付 ¥800.00 · 下个付款日 11/30' });
+    // 现付的看报销，不按付款日
+    expect(node(buildPurchaseFlow(facts({ ...base, pos: [po({ ...full, settlement: 'cash', unclaimedLines: 1, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-10-20' }] })] })), 'pay').alert).toBeNull();
+    // 看的人不能看金额：只写还没付清与付款日
+    expect(node(buildPurchaseFlow(facts({ ...base, purchasing: false, pos: [po(full)] })), 'pay').text).toBe('还没付清 · 下个付款日 11/15');
+  });
+
   it('几张单合在一起：一张需求拆成两张采购单（一张到齐、一张没到）；还有行没下单；几张需求并成一张采购单', () => {
     const a = po({ id: 10, docNo: 'CG-0010', receiving: 'full', receivedLines: 2, receivedCents: 80_000, paidCents: 80_000, unpaidCents: 0, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-11-10' }] });
     const b = po({ id: 11, docNo: 'CG-0011', supplierName: '山田洗护', totalCents: 10_000 });
@@ -342,7 +376,8 @@ describe('采购流程图 · 接口', () => {
     expect((await api(ctx.app, boss, 'GET', '/api/inventory/purchase-rules')).body.flowStallDays).toBe(2);
     expect((await api(ctx.app, boss, 'PUT', '/api/inventory/purchase-rules', { flowStallDays: 31 })).status).toBe(400);
     expect((await api(ctx.app, boss, 'PUT', '/api/inventory/purchase-rules', { flowStallDays: 3 })).body.flowStallDays).toBe(3);
-    expect((await list(buyer)).rules).toEqual({ quoteThresholdCents: DEFAULT_PURCHASE_RULES.quoteThresholdCents, minQuotes: DEFAULT_PURCHASE_RULES.minQuotes, arrivalOverdueDays: DEFAULT_PURCHASE_RULES.arrivalOverdueDays, stallDays: 3 });
+    expect((await list(buyer)).rules).toEqual({ quoteThresholdCents: DEFAULT_PURCHASE_RULES.quoteThresholdCents, minQuotes: DEFAULT_PURCHASE_RULES.minQuotes, arrivalOverdueDays: DEFAULT_PURCHASE_RULES.arrivalOverdueDays, stallDays: 3, payDays: [15, 30] });
+    expect(DEFAULT_PAYMENT_RULES.payDays).toEqual([15, 30]);
     await api(ctx.app, boss, 'PUT', '/api/inventory/purchase-rules', { flowStallDays: 2 });
   });
 
@@ -355,7 +390,7 @@ describe('采购流程图 · 接口', () => {
     expect((mine.body as PurchaseFlow).nodes.map((n) => `${n.key}:${n.state}`)).toEqual(['request:done', 'review:current', 'order:pending', 'receive:pending', 'stockin:pending', 'pay:pending']);
     expect((mine.body as PurchaseFlow).nodes[0]).toMatchObject({ role: '浴区 · 浴区申购', text: '已提交' });
     // 采购看得到金额（按参考价估：2 箱 × ¥450）
-    expect((await one(buyer, 'request', created.id)).body).toMatchObject({ amountCents: 90_000, amountEstimated: true, variantText: '< ¥5,000 · 免比价' });
+    expect((await one(buyer, 'request', created.id)).body).toMatchObject({ amountCents: 90_000, amountEstimated: true, variantText: '< ¥1,000 · 免比价' });
     // 别的部门的同事看不到这张；店员没有权限；部门同事不能直接看采购单、询价单的流程，也没有列表
     expect((await one(reqB, 'request', created.id)).status).toBe(404);
     expect((await one(ctx.clerk, 'request', created.id)).status).toBe(403);
@@ -418,10 +453,12 @@ describe('采购流程图 · 接口', () => {
     const pay = received.nodes.find((n) => n.key === 'pay')!;
     if (poNow.reimbursement.settlement === 'credit') {
       expect(pay).toMatchObject({ state: 'current' });
-      expect(pay.text).toBe(`已付 ¥${(poNow.paidCents / 100).toFixed(2)} · 未付 ¥${(poNow.unpaidCents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
+      // 今天入库：下个付款日（默认每月 15、30 号）还没过
+      expect(pay.text).toMatch(new RegExp(`^已付 ¥${(poNow.paidCents / 100).toFixed(2)} · 未付 ¥${(poNow.unpaidCents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })} · 下个付款日 \\d+/\\d+$`));
+      expect(pay.alert).toBeNull();
       // 部门同事看不到钱
       const hidden = (await one(reqA, 'request', created.id)).body as PurchaseFlow;
-      expect(hidden.nodes.find((n) => n.key === 'pay')!.text).toBe('还没付清');
+      expect(hidden.nodes.find((n) => n.key === 'pay')!.text).toMatch(/^还没付清 · 下个付款日 \d+\/\d+$/);
       // 这张单的钱一个数都不带（分流规则里的门槛金额是规则，不是这张单的钱）
       expect(JSON.stringify({ ...hidden, variantText: '' })).not.toContain('¥');
     } else {
@@ -437,8 +474,8 @@ describe('采购流程图 · 接口', () => {
     expect((await one(buyer, 'po', gone.id)).status).toBe(404);
   });
 
-  it('流程 B：把询价门槛改成 ¥1,000（店主图上的数）以后，估价达到门槛的需求通过后停在「待发起询价」', async () => {
-    expect((await api(ctx.app, boss, 'PUT', '/api/inventory/purchase-rules', { quoteThresholdCents: 100_000 })).status).toBe(200);
+  it('流程 B：询价门槛默认就是 ¥1,000（店主图上的数，LC2），估价达到门槛的需求通过后停在「待发起询价」', async () => {
+    expect((await api(ctx.app, boss, 'GET', '/api/inventory/purchase-rules')).body.quoteThresholdCents).toBe(100_000);
     const r = (await api(ctx.app, reqA, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(4), unit: '箱', refPriceCents: 45_000 }] })).body.request;
     await api(ctx.app, buyer, 'POST', `/api/erp/requests/${r.id}/approve`, {});
     const f = (await one(buyer, 'request', r.id)).body as PurchaseFlow;

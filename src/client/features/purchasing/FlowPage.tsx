@@ -4,6 +4,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { ArrowLeft, Settings2 } from 'lucide-react';
+import { payDaysLabel } from '@shared/payments';
 import { FLOW_STAGE_LABELS, flowYuan, type FlowNodeKey, type PurchaseFlowList } from '@shared/purchase-flow';
 import { api, errorMessage } from '../../lib/api';
 import { Stagger } from '../../lib/motion';
@@ -64,6 +65,7 @@ export function FlowPage() {
             )}
             <span className="text-ink-3">
               　·　一个环节等了 {rules.stallDays > 0 ? `${rules.stallDays} 天` : '多久都不'}标红，到货按预计到货日（没填按下单后 {rules.arrivalOverdueDays} 天）
+              {rules.payDays.length > 0 && `；${payDaysLabel(rules.payDays)}付款`}
             </span>
           </p>
         )}

@@ -10,6 +10,7 @@ import type { ApprovalStatus } from './approvals';
 import type { InvDocStatus } from './inventory';
 import { shiftDate } from './labels';
 import { formatYuan } from './money';
+import { nextPayDay, payDaysLabel } from './payments';
 import type { PoStatus, ReceivingState, SourcingStatus } from './purchasing';
 import type { RequestStatus } from './requests';
 
@@ -71,7 +72,7 @@ export interface PurchaseFlow {
 export interface PurchaseFlowList {
   flows: PurchaseFlow[];
   /** 现在的分流规则（页面顶上那一句） */
-  rules: { quoteThresholdCents: number; minQuotes: number; stallDays: number; arrivalOverdueDays: number };
+  rules: { quoteThresholdCents: number; minQuotes: number; stallDays: number; arrivalOverdueDays: number; payDays: number[] };
   /** 超过上限没列全 */
   truncated: boolean;
 }
@@ -157,6 +158,8 @@ export interface FlowRules {
   arrivalOverdueDays: number;
   /** 一个环节等了几天标红；0 = 不标 */
   stallDays: number;
+  /** 固定付款日（付款规则，LC7）：每月几号；空 = 没有 */
+  payDays: number[];
 }
 
 export interface FlowFacts {
@@ -191,6 +194,8 @@ export const FLOW_STAGE_LABELS: Record<FlowNodeKey, string> = {
 export const flowYuan = (cents: number): string => (cents % 100 === 0 ? `${cents < 0 ? '-' : ''}¥${Math.abs(cents / 100).toLocaleString('en-US')}` : formatYuan(cents));
 
 const DAY = 86_400_000;
+/** 2026-11-15 → 11/15 */
+const monthDay = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 const isDateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
 /** 两个日期（YYYY-MM-DD）差几天：a − b */
 export function dayDiff(a: string, b: string): number {
@@ -493,7 +498,7 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
     if (p.status === 'closed') return { ...base, state: 'done', text: p.receiving === 'none' ? '没有到货' : '到的已入库', at: lastConfirmed(p), link: poLink(p) };
     return { ...base, state: 'pending', text: p.receiving === 'partial' ? `已入库 ${p.receivedLines} / ${p.lineCount} 行` : '待验收后入库', link: poLink(p) };
   });
-  tail('pay', '财务付款', '财务', '已付清', '到货后付款', (p) => {
+  tail('pay', '财务付款', payDaysLabel(f.rules.payDays) ? `财务 · ${payDaysLabel(f.rules.payDays)}` : '财务', '已付清', '到货后付款', (p) => {
     const base = { key: 'pay' as const, title: '财务付款', role: '财务', noStall: true, link: poLink(p) };
     const allIn = arrived(p) && !pendingReceipt(p);
     if (p.settlement === 'cash') {
@@ -501,10 +506,24 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
       if (p.unclaimedLines === 0 && p.claimsPending === 0) return allIn ? { ...base, state: 'done', text: '已报销', at: lastConfirmed(p) } : { ...base, state: 'pending', text: '到的已报销' };
       return { ...base, state: allIn ? 'current' : 'pending', text: p.unclaimedLines > 0 ? `现付 · 还有 ${p.unclaimedLines} 行没报销` : '报销单待确认', since: allIn ? lastConfirmed(p) : null };
     }
-    if (p.receivedCents <= 0) return allIn ? { ...base, state: 'done', text: '没有到货，不用付款' } : { ...base, state: 'pending', text: '到货后付款' };
+    // 固定付款日（LC7、LC14）：还没到货的写每月几号付款；到齐入库、没付清的写下个付款日，过了入库以后的第一个付款日还没付清的标红
+    const days = payDaysLabel(f.rules.payDays);
+    if (p.receivedCents <= 0) return allIn ? { ...base, state: 'done', text: '没有到货，不用付款' } : { ...base, role: days ? `财务 · ${days}` : '财务', state: 'pending', text: '到货后付款' };
     if (p.unpaidCents <= 0) return allIn ? { ...base, state: 'done', text: '已付清', at: lastConfirmed(p) } : { ...base, state: 'pending', text: '到的已付清' };
     const money = f.purchasing ? `已付 ${formatYuan(p.paidCents)} · 未付 ${formatYuan(p.unpaidCents)}` : '还没付清';
-    return { ...base, state: allIn ? 'current' : 'pending', text: money, since: allIn ? lastConfirmed(p) : null };
+    if (!allIn) return { ...base, state: 'pending', text: money };
+    const inAt = lastConfirmed(p);
+    const due = inAt ? nextPayDay(inAt, f.rules.payDays, true) : null;
+    const late = due ? dayDiff(f.today, due) : 0;
+    const next = nextPayDay(f.today, f.rules.payDays);
+    return {
+      ...base,
+      role: days ? `财务 · ${days}` : '财务',
+      state: 'current',
+      text: late <= 0 && next ? `${money} · 下个付款日 ${monthDay(next)}` : money,
+      since: inAt,
+      alert: late > 0 && due ? `已过付款日 ${monthDay(due)} · 超 ${late} 天` : null,
+    };
   });
 
   // ── 收尾：结束的流程后面的环节都灰着；按天数标红；看的人打不开的不给链接 ──

@@ -16,7 +16,7 @@ import { seedInventoryDemo } from '../src/server/seed-inventory';
 import { LEGAL_ITEM_KEYS, type ContractDetail } from '../src/shared/contracts';
 import { shiftDate } from '../src/shared/labels';
 import { quarterOf, quarterRange, recentQuarters, scoreOf } from '../src/shared/supply';
-import { api, login, PASSWORD, setup, type TestContext } from './helpers';
+import { api, login, PASSWORD, setup, type TestContext, useLegacyQuoteThreshold } from './helpers';
 
 let ctx: TestContext;
 let today: string;
@@ -74,6 +74,7 @@ async function receive(supplierId: number, boxes: number, priceCents: number, op
 
 beforeAll(async () => {
   ctx = await setup();
+  await useLegacyQuoteThreshold(ctx);
   today = todayIn(ctx.config.timezone);
   expect((await seedInventoryDemo(ctx.sql, ctx.config)).skipped).toBe(false);
   buyer = await login(ctx.app, 'zhouyi', 'yuzu2026');

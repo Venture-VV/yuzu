@@ -40,6 +40,11 @@ export interface PaymentRules {
   warrantyRemindDays: number;
   /** P11：本周应付从本周一起看几周 */
   weeklyWeeks: number;
+  /**
+   * 固定付款日（8.0.17，店主 2026-11-13，LC7、LC14）：每月几号付款，从小到大，最多 PAY_DAYS_MAX 个；空 = 没有固定付款日。
+   * 只是日子：新建付款申请默认期望付款日取下一个付款日；采购流程图的付款环节写下个付款日、过了没付清标红。不改审批与付款登记。
+   */
+  payDays: number[];
 }
 
 export const DEFAULT_PAYMENT_RULES: PaymentRules = {
@@ -49,7 +54,35 @@ export const DEFAULT_PAYMENT_RULES: PaymentRules = {
   threeWayCapCents: 5_000,
   warrantyRemindDays: 30,
   weeklyWeeks: 4,
+  payDays: [15, 30],
 };
+
+export const PAY_DAYS_MAX = 4;
+
+/** 整理付款日：1–31 的整数、去重、从小到大 */
+export const normalizePayDays = (days: readonly number[]): number[] => [...new Set(days.filter((d) => Number.isInteger(d) && d >= 1 && d <= 31))].sort((a, b) => a - b);
+
+/** 15、30 号 → 「每月 15 / 30 号」；没有固定付款日为空字 */
+export const payDaysLabel = (days: readonly number[]): string => (days.length ? `每月 ${days.join(' / ')} 号` : '');
+
+/**
+ * from（YYYY-MM-DD）当天或之后的第一个付款日；strictlyAfter = 只算 from 之后的。没有固定付款日返回 null。
+ * 这个月没有的日子（30、31 号遇上二月、小月）按月底算。
+ */
+export function nextPayDay(from: string, days: readonly number[], strictlyAfter = false): string | null {
+  const list = normalizePayDays(days);
+  if (list.length === 0) return null;
+  const [y, m] = from.split('-').map(Number) as [number, number, number];
+  for (let k = 0; k < 3; k++) {
+    const first = new Date(Date.UTC(y, m - 1 + k, 1));
+    const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+    for (const d of [...new Set(list.map((x) => Math.min(x, last)))]) {
+      const date = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), d)).toISOString().slice(0, 10);
+      if (strictlyAfter ? date > from : date >= from) return date;
+    }
+  }
+  return null;
+}
 
 /** 各项的取值范围（页面与服务端同一份） */
 export const PAYMENT_RULE_LIMITS = {

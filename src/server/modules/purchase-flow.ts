@@ -24,6 +24,7 @@ import { approvalBrief } from './approvals/engine';
 import { poSettlement } from './inventory/common';
 import { loadPurchaseRules } from './inventory/purchase-rules';
 import { poMoney } from './inventory/purchasing';
+import { loadPaymentRules } from './payments/rules';
 
 /** 进行中的列表最多列几条、往回看多少天（再早的已确认采购单、已通过的需求单不列） */
 export const FLOW_LIST_MAX = 60;
@@ -52,7 +53,7 @@ async function context(db: Db, actor: Actor, timezone: string): Promise<Ctx> {
   const r = await loadPurchaseRules(db);
   return {
     db,
-    rules: { quoteThresholdCents: r.quoteThresholdCents, minQuotes: r.minQuotes, arrivalOverdueDays: r.arrivalOverdueDays, stallDays: r.flowStallDays },
+    rules: { quoteThresholdCents: r.quoteThresholdCents, minQuotes: r.minQuotes, arrivalOverdueDays: r.arrivalOverdueDays, stallDays: r.flowStallDays, payDays: (await loadPaymentRules(db)).payDays },
     cutoffEnabled: r.cutoffEnabled,
     now: new Date().toISOString(),
     today: todayIn(timezone),
