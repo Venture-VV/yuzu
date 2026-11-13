@@ -44,8 +44,9 @@ function makeGhost(node: HTMLElement): HTMLElement {
   // 复制出来的输入框只带着最初的值、滚动的位置回到顶上：照原样补上
   const inputs = node.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
   clone.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea').forEach((el, i) => {
-    el.value = inputs[i]?.value ?? '';
     el.readOnly = true;
+    // 选文件的框不带值（浏览器不让程序写）
+    if (!(el instanceof HTMLInputElement && el.type === 'file')) el.value = inputs[i]?.value ?? '';
   });
   return clone;
 }

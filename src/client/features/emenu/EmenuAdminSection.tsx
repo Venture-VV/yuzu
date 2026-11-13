@@ -40,6 +40,7 @@ import {
   type EmenuCategoryView,
   type EmenuDishAdmin,
   type EmenuDishView,
+  type EmenuEnglishParsed,
   type EmenuEnglishResult,
   type EmenuEnglishRow,
   type EmenuLang,
@@ -906,7 +907,7 @@ function DishesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
 function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; data: EmenuAdmin; onClose: () => void; apply: Apply }) {
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
-  const [picked, setPicked] = useState<{ name: string; rows: EmenuEnglishRow[]; unchanged: number; problems: string[] } | null>(null);
+  const [picked, setPicked] = useState<({ name: string } & EmenuEnglishParsed) | null>(null);
   const [result, setResult] = useState<EmenuEnglishResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1015,6 +1016,20 @@ function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; dat
               </ul>
             )}
             {picked.problems.length > 0 && picked.rows.length > 0 && <p className="mt-1">有问题的行不导入，其余的照常导入。</p>}
+            {picked.guarded.length > 0 && (
+              // 原来带着防公式单引号的格子改过以后，开头的单引号分不出是系统的还是想留着的：按系统的去掉，导入前说清楚会存成什么
+              <div className="mt-2" data-testid="emenu-admin-english-guarded">
+                <p>这 {picked.guarded.length} 格开头的单引号按「防公式加的」去掉了，会保存成下面的样子；单引号本身要留着的，请不要导这一格，打开那道菜直接改：</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                  {picked.guarded.slice(0, 8).map((g) => (
+                    <li key={`${g.line}-${g.column}`}>
+                      第 {g.line} 行「{g.column}」→ <span className="num font-semibold text-ink">{g.value}</span>
+                    </li>
+                  ))}
+                  {picked.guarded.length > 8 && <li>……还有 {picked.guarded.length - 8} 格</li>}
+                </ul>
+              </div>
+            )}
           </Notice>
         )}
         {result && (

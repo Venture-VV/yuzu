@@ -419,6 +419,14 @@ describe('英文对照表', () => {
       { id: dish.wine, taglineEn: '+2 for one', descriptionEn: "'+1 Combo" },
     ]);
     expect(parsed.unchanged).toBe(before.dishes.length - 2);
+    // 去掉了开头单引号的格子列出来（8.0.17，Codex 2026-11-13 P2）：只有原来带防公式单引号、又改过的那一格；空格子里手填的不在里面
+    expect(parsed.guarded.map((g) => [g.id, g.column, g.value])).toEqual([[dish.eel, '英文名', '+ Seasonal specials']]);
+    expect(untouched.guarded).toEqual([]);
+    // 分不出来的那种：原来是 + Seasonal special，整格改成 '+1 Combo（想把单引号留作内容）——文件里与「系统的单引号 + 新内容」一样，
+    // 按系统的去掉，但列出来会保存成 +1 Combo，不悄悄改
+    const ambiguous = parseEmenuEnglishCsv(editSheet(exported, [[dish.eel!, '英文名', "'+1 Combo"]]), currentOf(before));
+    expect(ambiguous.rows).toEqual([{ id: dish.eel, nameEn: '+1 Combo' }]);
+    expect(ambiguous.guarded).toEqual([{ line: expect.any(Number), id: dish.eel, column: '英文名', value: '+1 Combo' }]);
     const r = await importRows(parsed.rows);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.english).toEqual({ updated: 2, unchanged: 0, missing: [] });
