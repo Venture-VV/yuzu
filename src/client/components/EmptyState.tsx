@@ -16,7 +16,7 @@ export function EmptyState({
   art?: 'pool' | 'leaf' | 'search' | 'calm';
 }) {
   return (
-    <div className={cn('flex flex-col items-center justify-center px-6 py-10 text-center', className)}>
+    <div className={cn('flex animate-notice-in flex-col items-center justify-center px-6 py-10 text-center', className)}>
       <EmptyArt kind={art} />
       <p className="mt-4 text-[15px] font-bold text-ink">{title}</p>
       {description && <p className="mt-1.5 max-w-xs text-[13px] leading-relaxed text-ink-3">{description}</p>}

@@ -62,7 +62,58 @@
   --shadow-lift: 0 2px 4px rgb(28 35 31 / 0.04), 0 10px 24px -14px rgb(28 35 31 / 0.22);
   --shadow-pop: 0 2px 6px rgb(28 35 31 / 0.06), 0 24px 48px -20px rgb(28 35 31 / 0.32);
 
+  /*
+   * 动效（8.0.16，docs/UI_V8016.md）：时间分四档、曲线四条。进入用缓出，退出用 --ease-in-quick 而且更快；不用匀速。
+   * 只动透明度、位移、缩放、颜色。系统开了「减少动态效果」时文件末尾的规则把它们全部关掉。
+   */
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-quick: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-micro: 120ms;
+  --dur-fast: 180ms;
+  --dur-base: 260ms;
+  --dur-slow: 380ms;
+
+  /* 弹窗：遮罩淡入，面板从下面略升并从 0.98 放到 1 */
+  --animate-dialog-in: dialog-in var(--dur-base) var(--ease-out-soft) both;
+  /* 抽屉：从右边滑入 */
+  --animate-sheet-in: sheet-in var(--dur-slow) var(--ease-out-expo) both;
+  /* 提示条：从右边滑入 */
+  --animate-toast-in: toast-in var(--dur-base) var(--ease-out-soft) both;
+  /* 弹出菜单：从按钮的位置放大出来（transform-origin 由菜单自己给） */
+  --animate-menu-in: menu-in var(--dur-fast) var(--ease-out-soft) both;
+  /* 换页面：内容区淡入（不带位移——位移会让页面里固定定位的东西跟着跳，也会让滚动条闪一下） */
+  --animate-page-in: fade var(--dur-base) ease-out both;
+  /* 状态横幅第一次出现 */
+  --animate-notice-in: notice-in var(--dur-base) var(--ease-out-soft) both;
+  /* 勾选、数字角标这类小东西：小幅回弹 */
+  --animate-tick: tick var(--dur-base) var(--ease-spring) both;
+
+  @keyframes dialog-in {
+    from { opacity: 0; transform: translateY(10px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes sheet-in {
+    from { opacity: 0.6; transform: translateX(36px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateX(18px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes menu-in {
+    from { opacity: 0; transform: scale(0.94); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes notice-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes tick {
+    from { opacity: 0; transform: scale(0.5); }
+    to { opacity: 1; transform: none; }
+  }
 
   --animate-rise: rise 0.32s var(--ease-out-soft) both;
   --animate-fade: fade 0.2s ease-out both;
@@ -192,7 +243,157 @@
   animation: draw 0.5s 0.15s var(--ease-out-soft) forwards;
 }
 
+/*
+ * ───────────────────────── 动效套件（8.0.16，docs/UI_V8016.md） ─────────────────────────
+ * 与 src/client/lib/motion.tsx 配套。
+ */
+
+/* 退场的影子：弹窗、抽屉、菜单、提示条关掉时，页面逻辑照旧马上把它卸掉；卸掉之前复制一份放在最上层播退场，播完自己删掉。
+   影子不能点、读屏不念、没有测试标记（motion.tsx 的 useExitGhost）。怎么退由带 data-mo-out 的元素定。 */
+.mo-ghost,
+.mo-ghost * {
+  pointer-events: none !important;
+  animation: none;
+}
+.mo-ghost[data-mo-out='fade'],
+.mo-ghost [data-mo-out='fade'] {
+  animation: mo-fade-out var(--dur-fast) var(--ease-in-quick) both;
+}
+.mo-ghost[data-mo-out='dialog'],
+.mo-ghost [data-mo-out='dialog'] {
+  animation: mo-dialog-out var(--dur-fast) var(--ease-in-quick) both;
+}
+.mo-ghost[data-mo-out='sheet'],
+.mo-ghost [data-mo-out='sheet'] {
+  animation: mo-sheet-out 220ms var(--ease-in-quick) both;
+}
+.mo-ghost[data-mo-out='toast'],
+.mo-ghost [data-mo-out='toast'] {
+  animation: mo-toast-out var(--dur-fast) var(--ease-in-quick) both;
+}
+.mo-ghost[data-mo-out='menu'],
+.mo-ghost [data-mo-out='menu'] {
+  animation: mo-menu-out var(--dur-micro) var(--ease-in-quick) both;
+}
+@keyframes mo-fade-out {
+  to { opacity: 0; }
+}
+@keyframes mo-dialog-out {
+  to { opacity: 0; transform: translateY(6px) scale(0.98); }
+}
+@keyframes mo-sheet-out {
+  to { opacity: 0.4; transform: translateX(100%); }
+}
+@keyframes mo-toast-out {
+  to { opacity: 0; transform: translateX(18px); }
+}
+@keyframes mo-menu-out {
+  to { opacity: 0; transform: scale(0.96); }
+}
+
+/* 依次出现：一组卡片、一列行第一次出现时一个接一个升起（最多前 12 个，后面的直接显示）。
+   这个类只在刚出现的那一小会儿挂着（motion.tsx 的 Stagger），之后筛选、刷新进来的不再播 */
+.mo-stagger > * {
+  animation: rise var(--dur-base) var(--ease-out-soft) both;
+}
+.mo-stagger > :nth-child(2) { animation-delay: 28ms; }
+.mo-stagger > :nth-child(3) { animation-delay: 56ms; }
+.mo-stagger > :nth-child(4) { animation-delay: 84ms; }
+.mo-stagger > :nth-child(5) { animation-delay: 112ms; }
+.mo-stagger > :nth-child(6) { animation-delay: 140ms; }
+.mo-stagger > :nth-child(7) { animation-delay: 168ms; }
+.mo-stagger > :nth-child(8) { animation-delay: 196ms; }
+.mo-stagger > :nth-child(9) { animation-delay: 224ms; }
+.mo-stagger > :nth-child(10) { animation-delay: 252ms; }
+.mo-stagger > :nth-child(11) { animation-delay: 280ms; }
+.mo-stagger > :nth-child(12) { animation-delay: 308ms; }
+.mo-stagger > :nth-child(n + 13) {
+  animation: none;
+}
+
+/* 能点的卡片：悬停时浮起一点、阴影加深；按下去落回来。只在有鼠标的设备上浮（触屏上悬停会粘住） */
+.mo-lift {
+  transition:
+    transform var(--dur-micro) var(--ease-out-soft),
+    box-shadow var(--dur-fast) var(--ease-out-soft),
+    border-color var(--dur-micro) ease,
+    background-color var(--dur-micro) ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .mo-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lift);
+  }
+}
+.mo-lift:active {
+  transform: translateY(0) scale(0.99);
+}
+
+/* 跟着当前项滑动的那一块（分段开关的白色滑块、导航里当前项的底块）：位置由 motion.tsx 量好写在 style 里 */
+.mo-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dur-fast) var(--ease-out-soft),
+    width var(--dur-fast) var(--ease-out-soft),
+    height var(--dur-fast) var(--ease-out-soft);
+}
+/* 第一次量到位置时直接放过去，不从左上角滑过来 */
+.mo-indicator[data-settled='false'] {
+  transition: none;
+}
+/* 离得远的不滑过去：直接出现在新的位置并淡入（滑块换了 key 重新挂上来，带这个类） */
+.mo-indicator-jump {
+  animation: fade var(--dur-fast) ease-out both;
+}
+
+/* 页面上原生的折叠块（<details>）：展开、收起时高度平滑变化。只在浏览器支持「高度到 auto 的过渡」时生效
+   （Chrome / Edge 129 起）；不支持的浏览器照旧直接展开收起，功能一样 */
+@supports (interpolate-size: allow-keywords) {
+  details {
+    interpolate-size: allow-keywords;
+  }
+  details::details-content {
+    block-size: 0;
+    overflow: clip;
+    transition:
+      block-size var(--dur-slow) var(--ease-out-expo),
+      content-visibility var(--dur-slow) allow-discrete;
+  }
+  details[open]::details-content {
+    block-size: auto;
+  }
+}
+
+/* 加载占位：一道微光从左扫到右（原来是整块明暗闪） */
+.mo-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.mo-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgb(255 253 248 / 0.75) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: mo-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes mo-shimmer {
+  to { transform: translateX(100%); }
+}
+
+/* 表格行、列表行：悬停、选中的底色缓缓变（各页自己写了 hover 的颜色，这里只补过渡） */
+tbody tr,
+[role='row'] {
+  transition: background-color var(--dur-micro) ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .mo-shimmer::after {
+    animation: none;
+  }
   *,
   *::before,
   *::after {

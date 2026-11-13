@@ -11,6 +11,7 @@ import { Money } from '../../components/Money';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { DepartmentItemsCard } from './DepartmentItems';
 import { Columns, HBars, Kpi, PeriodPicker, presetRange, yuan, yuanShort, type Period } from './charts';
+import { Stagger } from '../../lib/motion';
 
 const people = (n: number) => `${n} 位`;
 const count = (n: number) => `${n}`;
@@ -42,7 +43,8 @@ export function OverviewTab() {
       ) : (
         d && (
           <>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {/* 指标卡依次出现（8.0.16） */}
+            <Stagger className="grid grid-cols-2 gap-3 md:grid-cols-4">
               <Kpi icon={<TrendingUp className="size-4" />} label="净营业额（应收 − 优惠 − 券抵扣 − 退款）" tone="pine" delta={{ now: d.kpis.net, prev: d.prev.net, format: yuan }} testId="overview-net">
                 <Money cents={d.kpis.net} />
               </Kpi>
@@ -101,7 +103,7 @@ export function OverviewTab() {
                   )}
                 </span>
               </Kpi>
-            </div>
+            </Stagger>
 
             <Card className="p-5">
               <SectionTitle aside={<span className="text-[12px] text-ink-3">悬停看当天客人与充值</span>}>每日净营业额</SectionTitle>

@@ -12,6 +12,7 @@ import { useSession } from '../../lib/session';
 import { formatDateTime } from '../../lib/utils';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { AdminPage, useAdminSections } from './AdminShell';
+import { Stagger } from '../../lib/motion';
 
 const SECTION_HINTS: Partial<Record<AdminSection, string>> = {
   dashboard: '今日、经营总览、会员、会员体系、技师、客房、营销成本（原门店的「看板」）',
@@ -48,7 +49,8 @@ export function AdminHome() {
       ) : (
         d && (
           <div className="space-y-5" data-testid="admin-home">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {/* 几张概况卡片依次出现（8.0.16） */}
+            <Stagger className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Stat label="门店" value={d.store.name} sub={`${INSTANCE_LABELS[d.store.instance] ?? d.store.instance} · ${versionText(d.store.version, d.store.commit)}`} />
               <Stat
                 label="营业"
@@ -92,7 +94,7 @@ export function AdminHome() {
                   )}
                 </p>
               </Card>
-            </div>
+            </Stagger>
 
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
               <Card className="p-5">
@@ -104,7 +106,7 @@ export function AdminHome() {
                       <li key={k}>
                         <Link
                           to={ADMIN_SECTIONS[k].path}
-                          className="group flex h-full items-start gap-2 rounded-lg border border-line bg-card p-3 transition-colors hover:border-pine/50 hover:bg-pine-tint/40"
+                          className="group mo-lift flex h-full items-start gap-2 rounded-lg border border-line bg-card p-3 hover:border-pine/50 hover:bg-pine-tint/40"
                         >
                           <span className="min-w-0 flex-1">
                             <span className="block text-[14px] font-bold text-ink">{ADMIN_SECTIONS[k].label}</span>

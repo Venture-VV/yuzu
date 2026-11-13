@@ -7,6 +7,7 @@ import { ERP_MODULE_KEYS, ERP_MODULES } from '@shared/erp';
 import { useSession } from '../../lib/session';
 import { Badge, Card } from '../../components/ui';
 import { useErpAccess } from './access';
+import { Stagger } from '../../lib/motion';
 
 /** ERP 里的设置页、首页：标题与说明（模块页沿用各自的页头） */
 export function ErpPage({ title, description, actions, children }: { title: string; description?: ReactNode; actions?: ReactNode; children: ReactNode }) {
@@ -35,10 +36,10 @@ export function ErpHome() {
           现在没有能用的 ERP 模块。{access.canSettings ? '在「模块设置」里开启需要的模块。' : '请店主在 ERP「模块设置」里开启，或在「岗位权限」里给你相应的权限。'}
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="erp-modules">
+        <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="erp-modules">
           {access.modules.map((k) => (
             <Link key={k} to={ERP_MODULES[k].path} className="group" data-testid={`erp-card-${k}`}>
-              <Card className="flex h-full flex-col gap-1.5 p-4 transition-colors group-hover:border-pine">
+              <Card className="mo-lift flex h-full flex-col gap-1.5 p-4 group-hover:border-pine">
                 <span className="flex items-center gap-2">
                   <span className="text-[16px] font-bold">{ERP_MODULES[k].label}</span>
                   <Badge tone="neutral">{ERP_MODULES[k].group}</Badge>
@@ -48,7 +49,7 @@ export function ErpHome() {
               </Card>
             </Link>
           ))}
-        </div>
+        </Stagger>
       )}
       {off.length > 0 && (
         <p className="mt-4 flex flex-wrap items-center gap-2 text-[12.5px] text-ink-3" data-testid="erp-off">

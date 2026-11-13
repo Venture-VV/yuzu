@@ -5,6 +5,7 @@ import { Building2, KeyRound, LogOut } from 'lucide-react';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import { api } from '../lib/api';
+import { useExitGhost, usePageEnter, useSlidingIndicator } from '../lib/motion';
 import { useCan, useSession } from '../lib/session';
 import { cn } from '../lib/utils';
 import { LogoMark } from './Brand';
@@ -22,6 +23,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   // ERP（库存、采购、货款、待办）在单独的工作区，主导航里没有（v0.7.3）；待办的数字在 ERP 导航上
   const nav = useStoreNav();
   const { pathname } = useLocation();
+  // 动效（8.0.16）：换页面时内容区淡入；主导航里当前项的底块滑过去
+  const content = usePageEnter<HTMLDivElement>(pathname);
+  const pill = useSlidingIndicator<HTMLDivElement>('.nav-on', `${pathname}|${nav.flat().length}`, 220);
   // 没有权限的门店页面（流水、日结、交班、前台……）回到首页：只用 ERP 的人回到 ERP，客户经理回到会员工作台。
   // 功能没开启（钟房、餐饮）不算没有权限，页面自己提示
   const page = storePageOf(pathname);
@@ -37,7 +41,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         <NavLink to="/" aria-label="浴族 yuzu 首页" className="mb-5 rounded-[14px] ring-1 ring-white/10 short:mb-2">
           <LogoMark className="size-10 short:size-8" />
         </NavLink>
-        <div className="scroll-thin flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto short:gap-0.5">
+        <div ref={pill.ref} className="scroll-thin relative flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto short:gap-0.5">
+          {pill.style && (
+            <span key={pill.jump} aria-hidden className={cn('mo-indicator rounded-[14px] bg-white/12 short:rounded-[12px]', pill.jump > 0 && 'mo-indicator-jump')} data-settled={pill.settled} style={pill.style}>
+              <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />
+            </span>
+          )}
           {nav.map((group, gi) => (
             <div key={group[0]!.to} className="flex flex-col items-center gap-1 short:gap-0.5">
               {gi > 0 && <span className="my-1.5 h-px w-8 bg-white/12 short:my-1" aria-hidden />}
@@ -50,13 +59,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                   className={({ isActive }) =>
                     cn(
                       'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors short:gap-0 short:rounded-[12px] short:py-[3px] short:text-[11px] short:leading-[15px] tiny:py-[2px] tiny:leading-[14px]',
-                      isActive ? 'bg-white/12 text-paper' : 'text-paper/60 hover:bg-white/6 hover:text-paper',
+                      // 当前项的底块与左边的黄条：量得到位置时由上面那一块滑过来画，量不到时自己画
+                      isActive ? cn('nav-on text-paper', !pill.style && 'bg-white/12') : 'text-paper/60 hover:bg-white/6 hover:text-paper',
                     )
                   }
                 >
                   {({ isActive }) => (
                     <>
-                      {isActive && <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />}
+                      {isActive && !pill.style && <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />}
                       <Icon className="size-[21px] short:size-[18px] tiny:size-4" strokeWidth={isActive ? 2.2 : 1.8} />
                       <span>{label}</span>
                     </>
@@ -69,7 +79,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <InstanceTag instance={session.instance} version={session.version} commit={session.commit} />
         <UserMenu />
       </nav>
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div ref={content} className="flex min-w-0 flex-1 flex-col">
         <PendingOpsBanner />
         {can('frontdesk.operate') && <FrontdeskPendingBanner />}
         {children}
@@ -120,7 +130,7 @@ function UserMenu() {
         {session.staff.displayName.slice(0, 1)}
       </button>
       {open && (
-        <div role="menu" className="absolute bottom-0 left-[calc(100%+12px)] z-30 w-56 animate-rise rounded-lg border border-line bg-card p-1.5 text-ink shadow-pop">
+        <MenuPanel>
           <div className="px-3 pt-2 pb-2.5">
             <p className="text-[14px] font-bold">{session.staff.displayName}</p>
             <p className="text-[12px] text-ink-3">
@@ -140,8 +150,18 @@ function UserMenu() {
           <MenuItem icon={<LogOut className="size-4" />} onClick={logout}>
             退出登录
           </MenuItem>
-        </div>
+        </MenuPanel>
       )}
+    </div>
+  );
+}
+
+/** 用户菜单的面板：从头像的位置放大出来；关掉时留一个影子缩回去（8.0.16） */
+function MenuPanel({ children }: { children: ReactNode }) {
+  const ref = useExitGhost<HTMLDivElement>();
+  return (
+    <div ref={ref} role="menu" data-mo-out="menu" className="absolute bottom-0 left-[calc(100%+12px)] z-30 w-56 origin-bottom-left animate-menu-in rounded-lg border border-line bg-card p-1.5 text-ink shadow-pop">
+      {children}
     </div>
   );
 }
