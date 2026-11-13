@@ -1,17 +1,16 @@
 import { businessDateOf } from "@shared/business-date";
-import { gradeLabel } from "@shared/membership";
 import type {
   NativeMemberSummary,
   NativeResourceOption,
 } from "@shared/concierge/types";
+import type { InsightMember } from "@shared/concierge/insights-types";
+import { maskPhone } from "@shared/labels";
+import { can } from "@shared/permissions";
 import type { Db } from "../../db";
+import type { Actor } from "../../lib/context";
 import { searchMembers } from "../members";
-import {
-  loadMembershipRules,
-  memberFamily,
-  projectedGrade,
-} from "../membership";
 import { loadSettings } from "../settings";
+import { loadInsightMembersByIds } from "./insights";
 import { WorkspaceError } from "./validation";
 
 /** Retain the saved link in history; only this read projection follows merges. */
@@ -31,70 +30,87 @@ export async function canonicalMemberId(
   throw new WorkspaceError("系统会员合并关系异常，请联系经理核对", 409);
 }
 
+/**
+ * 没有「查找与查看会员」权限的人看会员名单时，还没建管家服务档案的会员手机号打码（8.0.18 整合）：
+ * 看全体会员的档阶、余额、到访是店主定的（GJ13、GJ18、GJ26），手机号不在那几项里；
+ * 已经建了服务档案的是服务要用的，照旧显示。
+ */
+export function maskUnservedPhone<T extends { phone: string; profiles: unknown[] }>(
+  member: T,
+  actor: Actor,
+): T {
+  if (can(actor, "member.read") || member.profiles.length || !member.phone) return member;
+  return { ...member, phone: maskPhone(member.phone) };
+}
+
+/** 一批编号各自落到哪位主账号（沿「合并到」走到头）；不存在的不在结果里。 */
+export async function canonicalMemberIds(
+  db: Db,
+  ids: number[],
+): Promise<Map<number, number>> {
+  const result = new Map<number, number>();
+  const wanted = [...new Set(ids.filter((id) => Number.isSafeInteger(id) && id > 0))];
+  if (!wanted.length) return result;
+  const rows = await db<{ origin: number; id: number; depth: number }[]>`WITH RECURSIVE chain AS (
+      SELECT m.id AS origin,m.id,m.merged_into_id,0 AS depth FROM members m WHERE m.id = ANY(${wanted}::bigint[])
+      UNION ALL
+      SELECT c.origin,m.id,m.merged_into_id,c.depth+1 FROM chain c JOIN members m ON m.id=c.merged_into_id
+      WHERE c.depth < 30
+    ) SELECT origin,id,depth FROM chain WHERE merged_into_id IS NULL`;
+  for (const row of rows) result.set(Number(row.origin), Number(row.id));
+  return result;
+}
+
+const summaryOf = (m: InsightMember): NativeMemberSummary => ({
+  id: m.id,
+  memberNo: m.memberNo,
+  name: m.name,
+  phone: m.phone,
+  status: m.status,
+  gradeLabel: m.gradeLabel,
+  grade: m.grade,
+  tier: m.tier,
+  cycleEnd: m.cycleEnd,
+  graceUntil: m.graceUntil,
+  principalCents: m.principalCents,
+  bonusCents: m.bonusCents,
+  totalCents: m.totalCents,
+  profiles: m.profiles,
+});
+
+/**
+ * 几位会员的摘要一批取（8.0.18 整合时改：原来一位 8 条以上查询，工作区有多少服务档案就乘多少）。
+ * 键是给进来的编号（可以是被合并的旧编号）。
+ */
+export async function nativeMemberSummaries(
+  db: Db,
+  ids: number[],
+  timezone: string,
+): Promise<Map<number, NativeMemberSummary>> {
+  const members = await loadInsightMembersByIds(db, timezone, ids);
+  return new Map([...members].map(([id, m]) => [id, summaryOf(m)]));
+}
+
 export async function nativeMemberSummary(
   db: Db,
   originalId: number,
   timezone: string,
 ): Promise<NativeMemberSummary | null> {
-  const id = await canonicalMemberId(db, originalId);
-  if (id == null) return null;
-  const [row] =
-    await db`SELECT id,member_no,name,phone,status,principal_balance,bonus_balance,
-    (SELECT coalesce(sum(remaining),0) FROM bonus_lots WHERE member_id=m.id AND remaining>0 AND expires_at<=now()) AS expired_bonus
-    FROM members m WHERE id=${id}`;
-  if (!row) return null;
-  const settings = await loadSettings(db);
-  const day = businessDateOf(
-    new Date(),
-    timezone,
-    settings.businessDayStartHour,
-  );
-  const state = await projectedGrade(db, id, day);
-  if (!state) return null;
-  const family = await memberFamily(db, id);
-  const profiles =
-    await db`SELECT id,code,data->>'name' AS name FROM concierge_members WHERE native_member_id IN ${db(family)} ORDER BY code`;
-  const bonus = Math.max(
-    0,
-    Number(row.bonusBalance) - Number(row.expiredBonus),
-  );
-  return {
-    id: Number(row.id),
-    memberNo: row.memberNo,
-    name: row.name,
-    phone: row.phone,
-    status: row.status,
-    gradeLabel: gradeLabel(
-      await loadMembershipRules(db),
-      state.grade,
-      state.tier,
-    ),
-    grade: state.grade,
-    tier: state.tier,
-    cycleEnd: state.cycleEnd,
-    graceUntil: state.graceUntil,
-    principalCents: Number(row.principalBalance),
-    bonusCents: bonus,
-    totalCents: Number(row.principalBalance) + bonus,
-    profiles: profiles.map((p) => ({
-      id: String(p.id),
-      code: String(p.code).padStart(6, "0"),
-      name: String(p.name),
-    })),
-  };
+  return (await nativeMemberSummaries(db, [originalId], timezone)).get(originalId) ?? null;
 }
 
 /** Same lookup semantics as the member workbench; never return its full DTO. */
 export async function searchNativeMembers(db: Db, q: string, timezone: string) {
   const rows = await searchMembers(db, q, 30);
+  const ids = rows.map((row) => Number(row.id));
+  const summaries = await nativeMemberSummaries(db, ids, timezone);
   const seen = new Set<number>();
   const result: NativeMemberSummary[] = [];
-  for (const row of rows) {
-    const id = await canonicalMemberId(db, Number(row.id));
-    if (id == null || seen.has(id)) continue;
-    seen.add(id);
-    const summary = await nativeMemberSummary(db, id, timezone);
-    if (summary) result.push(summary);
+  for (const id of ids) {
+    const summary = summaries.get(id);
+    if (!summary || seen.has(summary.id)) continue;
+    seen.add(summary.id);
+    result.push(summary);
   }
   return result;
 }
@@ -216,11 +232,16 @@ export function resourceColumns(key: string | undefined) {
 }
 
 /** Bounded read-only fingerprints: linked identities, rule/day and small resource catalogs.
- * No triggers/locks are added to wallet writes. Unrelated staff audit entries do not invalidate it. */
+ * No triggers/locks are added to wallet writes. Unrelated staff audit entries do not invalidate it.
+ * 8.0.18 整合时改：从已关联的会员出发、逐位走主键（原来每 3 秒把 members 整表扫两遍）；
+ * OFFSET 0 是有意的——不让规划器把它摊平成对 members 的整表连接。 */
 export async function nativeRevision(db: Db, timezone: string) {
   const [row] = await db`WITH RECURSIVE linked AS (
-    SELECT m.* FROM members m JOIN concierge_members c ON c.native_member_id=m.id
-    UNION SELECT m.* FROM members m JOIN linked l ON l.merged_into_id=m.id
+    SELECT m.* FROM (SELECT DISTINCT native_member_id FROM concierge_members WHERE native_member_id IS NOT NULL) c
+      CROSS JOIN LATERAL (SELECT * FROM members WHERE id=c.native_member_id OFFSET 0) m
+    UNION
+    SELECT m.* FROM linked l
+      CROSS JOIN LATERAL (SELECT * FROM members WHERE id=l.merged_into_id OFFSET 0) m
   ) SELECT
     (SELECT md5(coalesce(string_agg(to_jsonb(l)::text || ':' ||
       (SELECT coalesce(sum(remaining),0)::text FROM bonus_lots WHERE member_id=l.id AND remaining>0 AND expires_at<=now()),'' ORDER BY l.id),'')) FROM linked l) AS members,

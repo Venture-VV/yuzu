@@ -184,8 +184,10 @@ async function nativeMember(db: Db, value: unknown) {
   if (value == null || value === "") return null;
   const id = await canonicalMemberId(db, integer(value, "企业会员编号"));
   if (!id) throw new WorkspaceError("系统会员不存在");
+  // 只读地核对、不给会员一行加锁（8.0.18 整合：管家模块锁之后只锁管家自己的行，AGENTS.md）；
+  // 存在与否由外键兜底，之后被合并、停用的在读的时候沿「合并到」投影
   const [r] =
-    await db`SELECT id,merged_into_id,status FROM members WHERE id=${id} FOR SHARE`;
+    await db`SELECT id,merged_into_id,status FROM members WHERE id=${id}`;
   if (!r || r.mergedIntoId || r.status !== "active")
     throw new WorkspaceError("企业会员不存在、已合并或不可用");
   return id;
@@ -533,7 +535,10 @@ async function execute(
         const ids=resourceColumns(resourceKey);
         const table=ids.spaceId ? "spaces" : ids.tableId ? "dining_tables" : "rooms";
         const resourceId=ids.spaceId || ids.tableId || ids.roomId;
-        await tx`SELECT id FROM ${tx(table)} WHERE id=${resourceId!} FOR SHARE`;
+        // 不给空间 / 桌台 / 客房一行加锁（8.0.18 整合）：前台预约到店、改期是「预约 → 空间」，
+        // 这里先锁空间再由外键去碰预约行会反过来；资源在不在、停没停用只读地核对，存在由外键兜底
+        const [exists] = await tx`SELECT id FROM ${tx(table)} WHERE id=${resourceId!}`;
+        if (!exists) throw new WorkspaceError("系统资源不存在，请刷新后重新选择");
         const option=(await nativeResourceOptions(tx)).find(r=>r.key===resourceKey);
         if (!option) throw new WorkspaceError("系统资源不存在，请刷新后重新选择");
         const closing=["已取消","已完成","未到店"].includes(status);
@@ -626,9 +631,7 @@ async function execute(
           throw new WorkspaceError("关联协调预约不匹配或已取消");
         if (appt.data.resourceKey && status === "接待中" &&
             (!before || before.data.status !== "接待中" || !["已到店", "已完成"].includes(appt.data.status))) {
-          const ids = resourceColumns(appt.data.resourceKey);
-          const table = ids.spaceId ? "spaces" : ids.tableId ? "dining_tables" : "rooms";
-          await tx.unsafe(`SELECT id FROM ${table} WHERE id=$1 FOR SHARE`, [ids.spaceId ?? ids.tableId ?? ids.roomId!]);
+          resourceColumns(appt.data.resourceKey);
           const resource = (await nativeResourceOptions(tx)).find(r => r.key === appt.data.resourceKey);
           if (!resource?.active) throw new WorkspaceError("预约资源已停用或不可安排，请先调整预约再开始接待");
         }

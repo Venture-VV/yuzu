@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { money } from "./format";
 import { api } from "../../lib/api";
 import { loadReceipt } from "./api";
 import type { Receipt } from "./types";
@@ -64,7 +65,7 @@ export function ReceiptArchive({
               {r.number || "待补单号"} · {r.status} · ¥
               {r.amountCents == null
                 ? "待核"
-                : (r.amountCents / 100).toFixed(2)}
+                : money(r.amountCents)}
             </button>
           ))}
           <button

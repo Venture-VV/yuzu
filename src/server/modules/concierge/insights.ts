@@ -24,7 +24,7 @@ import { idParam, parse } from "../../lib/validate";
 import { searchMembers } from "../members";
 import { loadMembershipRules, projectedGrade } from "../membership";
 import { loadSettings } from "../settings";
-import { canonicalMemberId } from "./native-links";
+import { canonicalMemberIds, maskUnservedPhone } from "./native-links";
 import { WorkspaceError } from "./validation";
 
 const PAGE_SIZE = 50;
@@ -115,40 +115,59 @@ interface NativeRow {
   daysSinceLastVisit: number | null;
 }
 
-/** Only frontdesk visits establish a visit; cancelled/future rows never do. */
+/**
+ * Only frontdesk visits establish a visit; cancelled/future rows never do.
+ * 整合时改过（8.0.18）：到期没处理的赠金一次取、不逐位会员查；到访先按会员取最后一次、再并到主账号；
+ * onlyIds 给了就只取这几位主账号（管家工作区的会员摘要一批取，不再一位一位查）。
+ */
 async function nativeRows(
   db: Db,
   timezone: string,
   at: Date,
-  onlyId: number | null = null,
+  onlyIds: number[] | null = null,
 ): Promise<NativeRow[]> {
+  if (onlyIds && !onlyIds.length) return [];
+  const asOf = at.toISOString();
+  const lastVisits = onlyIds
+    ? db`SELECT f.canonical_id,max(v.checked_in_at) AS last_visit_at
+        FROM family f JOIN visits v ON v.member_id=f.member_id
+        WHERE v.status<>'cancelled' AND v.checked_in_at<=${asOf}::timestamptz
+        GROUP BY f.canonical_id`
+    : db`SELECT f.canonical_id,max(v.last_visit_at) AS last_visit_at
+        FROM family f JOIN (
+          SELECT member_id,max(checked_in_at) AS last_visit_at FROM visits
+          WHERE member_id IS NOT NULL AND status<>'cancelled' AND checked_in_at<=${asOf}::timestamptz
+          GROUP BY member_id
+        ) v ON v.member_id=f.member_id
+        GROUP BY f.canonical_id`;
   return db<NativeRow[]>`WITH RECURSIVE family AS (
     SELECT m.id AS canonical_id,m.id AS member_id FROM members m
-    WHERE m.merged_into_id IS NULL AND (${onlyId}::bigint IS NULL OR m.id=${onlyId})
+    WHERE m.merged_into_id IS NULL ${onlyIds ? db`AND m.id = ANY(${onlyIds}::bigint[])` : db``}
     UNION
     SELECT f.canonical_id,m.id FROM members m JOIN family f ON m.merged_into_id=f.member_id
   ), visits_by_account AS (
-    SELECT f.canonical_id,max(v.checked_in_at) AS last_visit_at
-    FROM family f JOIN visits v ON v.member_id=f.member_id
-    WHERE v.status<>'cancelled' AND v.checked_in_at<=${at.toISOString()}::timestamptz
-    GROUP BY f.canonical_id
+    ${lastVisits}
   ), service_profiles AS (
     SELECT f.canonical_id,jsonb_agg(jsonb_build_object('id',c.id::text,
       'code',lpad(c.code::text,6,'0'),'name',coalesce(c.data->>'name','')) ORDER BY c.code) AS profiles
     FROM family f JOIN concierge_members c ON c.native_member_id=f.member_id GROUP BY f.canonical_id
   ), families AS (
     SELECT canonical_id,array_agg(member_id ORDER BY member_id) AS family_ids FROM family GROUP BY canonical_id
+  ), expired AS (
+    SELECT member_id,sum(remaining) AS expired_bonus FROM bonus_lots
+    WHERE remaining>0 AND expires_at IS NOT NULL AND expires_at<=${asOf}::timestamptz
+    GROUP BY member_id
   ) SELECT m.id,m.member_no,m.name,m.phone,m.status,m.created_at,
       to_char(m.created_at AT TIME ZONE ${timezone},'YYYY-MM') AS created_month,m.principal_balance,m.bonus_balance,
       m.grade,m.tier,m.cycle_start,m.cycle_end,m.grace_until,f.family_ids,
       coalesce(p.profiles,'[]'::jsonb) AS profiles,v.last_visit_at,
       CASE WHEN v.last_visit_at IS NULL THEN NULL ELSE
-        (${at.toISOString()}::timestamptz AT TIME ZONE ${timezone})::date-
+        (${asOf}::timestamptz AT TIME ZONE ${timezone})::date-
         (v.last_visit_at AT TIME ZONE ${timezone})::date END AS days_since_last_visit,
-      (SELECT coalesce(sum(remaining),0) FROM bonus_lots l WHERE l.member_id=m.id
-        AND l.remaining>0 AND l.expires_at<=${at.toISOString()}::timestamptz) AS expired_bonus
+      coalesce(e.expired_bonus,0) AS expired_bonus
     FROM members m JOIN families f ON f.canonical_id=m.id
     LEFT JOIN visits_by_account v ON v.canonical_id=m.id LEFT JOIN service_profiles p ON p.canonical_id=m.id
+    LEFT JOIN expired e ON e.member_id=m.id
     ORDER BY m.created_at DESC,m.id DESC`;
 }
 
@@ -352,17 +371,18 @@ export async function loadMemberInsights(
   };
 }
 
-export async function loadInsightMember(
+/** 几位会员一批取（给的可以是被合并的旧编号，都落到主账号上）；键是给进来的编号。 */
+export async function loadInsightMembersByIds(
   db: Db,
   timezone: string,
-  id: number,
+  ids: number[],
   at = new Date(),
-): Promise<InsightMember> {
-  const canonical = await canonicalMemberId(db, id);
-  if (canonical === null) throw notFound("系统会员不存在");
-  const rows = await nativeRows(db, timezone, at, canonical);
-  const row = rows[0];
-  if (!row) throw notFound("系统会员不存在");
+): Promise<Map<number, InsightMember>> {
+  const result = new Map<number, InsightMember>();
+  const canonical = await canonicalMemberIds(db, ids);
+  const wanted = [...new Set([...canonical.values()])];
+  if (!wanted.length) return result;
+  const rows = await nativeRows(db, timezone, at, wanted);
   const calendar = await readInsightCalendar(db, timezone, at);
   const rules = await loadMembershipRules(db);
   const settings = await loadSettings(db);
@@ -371,7 +391,28 @@ export async function loadInsightMember(
     rows,
     businessDateOf(at, timezone, settings.businessDayStartHour),
   );
-  return memberOf(row, states.get(canonical)!, rules, calendar);
+  const byCanonical = new Map(
+    rows.map((row) => [
+      Number(row.id),
+      memberOf(row, states.get(Number(row.id))!, rules, calendar),
+    ]),
+  );
+  for (const [id, target] of canonical) {
+    const member = byCanonical.get(target);
+    if (member) result.set(id, member);
+  }
+  return result;
+}
+
+export async function loadInsightMember(
+  db: Db,
+  timezone: string,
+  id: number,
+  at = new Date(),
+): Promise<InsightMember> {
+  const member = (await loadInsightMembersByIds(db, timezone, [id], at)).get(id);
+  if (!member) throw notFound("系统会员不存在");
+  return member;
 }
 
 async function handle<T>(body: () => Promise<T>): Promise<T> {
@@ -395,9 +436,10 @@ export function registerConciergeInsightsRoutes(
       handle(async () => {
         reply.header("Cache-Control", "private, no-store");
         const at = new Date();
-        return readSnapshot(sql, (db) =>
+        const data = await readSnapshot(sql, (db) =>
           loadMemberInsights(db, config.timezone, req.query ?? {}, at),
         );
+        return { ...data, members: data.members.map((m) => maskUnservedPhone(m, req.actor)) };
       }),
   );
   app.get(
@@ -409,8 +451,11 @@ export function registerConciergeInsightsRoutes(
         const { id } = parse(idParam, req.params);
         const at = new Date();
         return {
-          member: await readSnapshot(sql, (db) =>
-            loadInsightMember(db, config.timezone, id, at),
+          member: maskUnservedPhone(
+            await readSnapshot(sql, (db) =>
+              loadInsightMember(db, config.timezone, id, at),
+            ),
+            req.actor,
           ),
         };
       }),

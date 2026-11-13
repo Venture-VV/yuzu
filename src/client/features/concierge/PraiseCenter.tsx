@@ -1,4 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { stamp } from "./format";
+import { liveRefresh } from "./live";
 import type { FormEvent } from "react";
 import {
   ArrowRight,
@@ -99,14 +101,14 @@ function usePraiseRead<T>(url: string | null, refresh: number) {
       }
     };
     void run();
-    const timer = window.setInterval(() => void run(), 3000);
     const wake = () => void run();
+    const stopLive = liveRefresh(wake, 30_000);
     window.addEventListener("online", wake);
     window.addEventListener("focus", wake);
     document.addEventListener("visibilitychange", wake);
     return () => {
       live = false;
-      clearInterval(timer);
+      stopLive();
       window.removeEventListener("online", wake);
       window.removeEventListener("focus", wake);
       document.removeEventListener("visibilitychange", wake);
@@ -484,7 +486,7 @@ function PraiseDetail({ id, timezone, canManage, busy, saveError, onMutate, onCl
   const operationKey = useRef(uuid());
   const formId = useId();
   const info = record.data;
-  const timestamp = (value: string) => value ? new Date(value).toLocaleString("zh-CN", { timeZone: timezone, hour12: false }) : "—";
+  const timestamp = (value: string) => stamp(value);
   const submitVoid = async (event: FormEvent) => {
     event.preventDefault();
     if (!info || busy || !reason.trim()) return;

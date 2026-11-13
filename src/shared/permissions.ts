@@ -388,7 +388,7 @@ export function overridesFrom(target: Partial<Record<EditableRole, readonly Perm
 }
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
-  'concierge.read': '管家部：查看共享会员、协调预约与凭证',
+  'concierge.read': '管家部：查看服务档案、协调预约与凭证；会员中心能看到全店会员的档阶、余额与到访（没有「查找与查看会员」的，未建服务档案的会员手机号打码）',
   'concierge.operate': '管家部：建档、拍单、人工余额核对、服务与交班',
   'concierge.manage': '管家部：经理监管、名称核准、已确认凭证更正',
   'concierge.export': '管家部：业务与原图导出',

@@ -9,7 +9,7 @@ import type {
   Receipt,
 } from "@shared/concierge/types";
 import { WorkspaceError, uuid } from "./validation";
-import { nativeMemberSummary, nativeResourceOptions } from "./native-links";
+import { nativeMemberSummaries, nativeResourceOptions } from "./native-links";
 export async function requireMember(db: Db, id: string) {
   const [r] = await db`SELECT id FROM concierge_members WHERE id=${uuid(id)}::uuid`;
   if (!r) throw new WorkspaceError("管家会员不存在，请刷新", 404);
@@ -122,8 +122,14 @@ export async function readWorkspace(
   const audits =
     await db`SELECT id,staff_id,action,target_type,target_id,(detail - 'before' - 'after') || jsonb_build_object('after',jsonb_build_object('status',detail->'after'->'status')) AS detail,created_at FROM audit_logs WHERE action IN ('concierge_record','concierge_upload') AND (${can(actor, "concierge.manage")} OR staff_id=${actor.id}) ORDER BY id DESC LIMIT 2000`;
   const resources = await nativeResourceOptions(db);
-  const profiles = await Promise.all(members.map(async (m) => {
-    const native = m.nativeMemberId == null ? null : await nativeMemberSummary(db, Number(m.nativeMemberId), timezone);
+  // 会员摘要一批取（8.0.18 整合）：原来每个服务档案各查一遍
+  const natives = await nativeMemberSummaries(
+    db,
+    members.flatMap((m) => (m.nativeMemberId == null ? [] : [Number(m.nativeMemberId)])),
+    timezone,
+  );
+  const profiles = members.map((m) => {
+    const native = m.nativeMemberId == null ? null : natives.get(Number(m.nativeMemberId)) ?? null;
     return {
       ...m.data,
       // The member system owns identity; these are live projections, not another editable identity.
@@ -135,7 +141,7 @@ export async function readWorkspace(
       version:m.version,createdAt:m.createdAt,updatedAt:m.updatedAt,
       createdByName:m.creatorName,updatedByName:m.updaterName,
     };
-  }));
+  });
   return {
     user: mapActor(actor),
     team,

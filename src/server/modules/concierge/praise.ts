@@ -138,7 +138,7 @@ export async function executePraise(tx: Tx, actor: Actor, action: string, p: Rec
     const source = text(p.source, 80, true), content = text(p.content, 4000, true), guestName = text(p.guestName, 80, true), rawMemberId = text(p.memberId, 80), memberId = rawMemberId ? uuid(rawMemberId) : '';
     const uploadIds = [...new Set(idList(p.uploadIds, 12).map(uuid))];
     if (!uploadIds.length) throw new WorkspaceError('请至少上传一张好评原图凭证');
-    const [staff] = await tx`SELECT id,display_name,active,system,duties FROM staff WHERE id=${selectedStaff}::bigint FOR SHARE`;
+    const [staff] = await tx`SELECT id,display_name,active,system,duties FROM staff WHERE id=${selectedStaff}::bigint`; // 只读核对，不锁员工一行（8.0.18 整合）
     if (!staff || !isPraiseStaff(staff as any)) throw new WorkspaceError('所选员工不是在岗管家，请重新选择');
     if (memberId) await requireMember(tx, memberId);
     const photos = await tx`SELECT u.id,u.member_id,i.scope,i.size_bytes FROM concierge_uploads u JOIN erp_images i ON i.id=u.image_id WHERE u.id IN ${tx(uploadIds)}`;

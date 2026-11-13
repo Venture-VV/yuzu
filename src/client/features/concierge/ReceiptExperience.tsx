@@ -1,4 +1,5 @@
 import { useCan } from "../../lib/session";
+import { money, stamp } from "./format";
 import { uuid } from "../../lib/utils";
 import { conciergeFetch as fetch } from "./api";
 
@@ -141,12 +142,6 @@ const METHOD_OPTIONS = [
 ];
 // 操作编号：内网用 http://IP 打开时没有 crypto.randomUUID（只在 HTTPS / localhost 下有），统一用带降级的 uuid()（8.0.15）
 const uid = () => uuid();
-function money(n: number) {
-  return new Intl.NumberFormat("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n / 100);
-}
 function value(n: number | null | undefined) {
   return n == null ? "" : (n / 100).toFixed(2);
 }
@@ -185,17 +180,7 @@ function localTime(s?: string) {
 }
 function date(s?: string) {
   if (!s) return "未记录";
-  const d = new Date(s);
-  return Number.isNaN(d.getTime())
-    ? s
-    : new Intl.DateTimeFormat("zh-CN", {
-        timeZone: "Asia/Shanghai",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(d);
+  return stamp(s, s);
 }
 function detailTime(value: string) {
   return /T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&

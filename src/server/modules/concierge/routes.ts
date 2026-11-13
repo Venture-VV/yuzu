@@ -15,7 +15,7 @@ import {
 import { can } from "@shared/permissions";
 import { mutate, moduleLock, bumpRevision } from "./mutations";
 import { WorkspaceError, text, uuid } from "./validation";
-import { nativeMemberSummary, nativeRevision, searchNativeMembers } from "./native-links";
+import { maskUnservedPhone, nativeMemberSummary, nativeRevision, searchNativeMembers } from "./native-links";
 import { nativeSpending } from "./spending";
 import { registerConciergeInsightsRoutes } from "./insights";
 import { registerConciergePraiseRoutes } from "./praise";
@@ -73,10 +73,16 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
     { preHandler: guard("concierge.read") },
     async (_req, reply) => {
       reply.header("Cache-Control", "private, no-store");
-      // 管家部自己的同步版本号（整改，见 mutations.ts bumpRevision）
-      const [r] =
-        await sql`SELECT revision::text AS revision FROM concierge_sync`;
-      return { revision: `${r?.revision ?? "0"}:${await nativeRevision(sql,deps.config.timezone)}` };
+      // 管家部自己的同步版本号（整改，见 mutations.ts bumpRevision）＋原生会员与资源的只读指纹。
+      // 每个开着的管家页每 3 秒来一次，必须便宜（8.0.18 整合）：两段在同一个只读快照里取；
+      // 关掉这一个事务的 JIT——指纹只碰几十行，但递归查询的估算成本很高，默认配置下会触发 JIT，
+      // 编译比查询本身慢两个数量级（2 万会员的库上实测 0.6 秒 → 5 毫秒）
+      return readSnapshot(sql, async (tx) => {
+        await tx`SET LOCAL jit = off`;
+        const [r] =
+          await tx`SELECT revision::text AS revision FROM concierge_sync`;
+        return { revision: `${r?.revision ?? "0"}:${await nativeRevision(tx,deps.config.timezone)}` };
+      });
     },
   );
   app.get(
@@ -174,7 +180,7 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
       run(async () => {
         reply.header("Cache-Control", "private, no-store");
         const q = text(object(req.query).q, 60);
-        return readSnapshot(sql,async tx=>({ members: await searchNativeMembers(tx,q,deps.config.timezone) }));
+        return readSnapshot(sql,async tx=>({ members: (await searchNativeMembers(tx,q,deps.config.timezone)).map(m=>maskUnservedPhone(m,req.actor)) }));
       }),
   );
   app.get("/api/concierge/native-members/:id", {preHandler:guard("concierge.read")}, async(req,reply)=>run(async()=>{
@@ -183,7 +189,7 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
     if (!Number.isSafeInteger(id) || id<1) throw new WorkspaceError("系统会员编号不正确");
     const member=await readSnapshot(sql,tx=>nativeMemberSummary(tx,id,deps.config.timezone));
     if (!member) throw new WorkspaceError("系统会员不存在",404);
-    return {member};
+    return {member:maskUnservedPhone(member,req.actor)};
   }));
   app.get(
     "/api/concierge/audits/export",

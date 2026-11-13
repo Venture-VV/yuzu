@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { money, stamp } from "./format";
+import { liveRefresh } from "./live";
 import { ArrowRight, CalendarDays, ChevronLeft, ChevronRight, RefreshCw, Search, Users, X } from "lucide-react";
 import { Dialog } from "../../components/Overlay";
 import { api } from "../../lib/api";
@@ -7,10 +9,7 @@ import type { NativeMemberSummary } from "./types";
 import type { InsightMember, MemberInsights, InsightDormancyBucket } from "@shared/concierge/insights-types";
 import "./member-insights.css";
 
-const money = (v: number) => (v / 100).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const visitTime = (value: string | null, timezone = "Asia/Shanghai") => value
-  ? new Intl.DateTimeFormat("zh-CN", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value))
-  : "暂无到访记录";
+const visitTime = (value: string | null) => stamp(value, "暂无到访记录");
 const BUCKETS: Array<{ id: Exclude<InsightDormancyBucket, "recent" | "never">; title: string; detail: string }> = [
   { id: "oneToThree", title: "1—3个月未到访", detail: "满1个月 · 不足3个月" },
   { id: "threeToSix", title: "3—6个月未到访", detail: "满3个月 · 不足6个月" },
@@ -41,13 +40,14 @@ function useInsights(params: string) {
       } finally { inFlight = false; }
     };
     const debounce = window.setTimeout(() => void run(), 220);
-    const timer = window.setInterval(() => void run(), 3000);
+    // 名单要读全部会员：不再 3 秒轮询，同步发现有变再取，另外每 30 秒刷新一次（8.0.18）
     const wake = () => void run();
+    const stopLive = liveRefresh(wake, 30_000);
     for (const name of ["focus", "online", "offline", "concierge-data-changed"]) window.addEventListener(name, wake);
     document.addEventListener("visibilitychange", wake);
     return () => {
       live = false;
-      clearTimeout(debounce); clearInterval(timer);
+      clearTimeout(debounce); stopLive();
       for (const name of ["focus", "online", "offline", "concierge-data-changed"]) window.removeEventListener(name, wake);
       document.removeEventListener("visibilitychange", wake);
     };
@@ -81,10 +81,10 @@ function MemberRows({ data, onOpen, created = false }: { data: MemberInsights; o
     <td><span className={"tier-tag grade-" + m.grade}>{m.gradeLabel}</span>{m.status !== "active" && <small className="cell-sub">已停用</small>}</td>
     <td><strong className={m.totalCents < 3000000 ? "orange-text" : ""}>¥{money(m.totalCents)}</strong>
       <small className="cell-sub">本金 ¥{money(m.principalCents)} ＋ 赠金 ¥{money(m.bonusCents)}</small></td>
-    {created ? <td>{visitTime(m.createdAt, data.timezone)}</td> : <>
+    {created ? <td>{visitTime(m.createdAt)}</td> : <>
       <td>{m.daysSinceLastVisit == null ? "暂无到访记录" : m.daysSinceLastVisit === 0 ? "今日到访" : m.daysSinceLastVisit + "天未到访"}
         {["threeToSix", "sixToTwelve", "twelvePlus"].includes(m.dormancyBucket) && <small className="cell-sub orange-text">沉睡会员</small>}</td>
-      <td>{visitTime(m.lastVisitAt, data.timezone)}</td>
+      <td>{visitTime(m.lastVisitAt)}</td>
     </>}
     <td><button type="button" className="text-btn" onClick={() => onOpen(m)}>查看档案<ArrowRight size={14} /></button></td>
   </tr>)}</tbody></table></div>;
@@ -262,13 +262,13 @@ export function NativeMemberPreview({ id, onClose, onCreate, onOpenService }: {
       finally { inFlight = false; }
     };
     void load();
-    const timer = window.setInterval(() => void load(), 3000);
     const wake = () => void load();
+    const stopLive = liveRefresh(wake, 10_000);
     for (const name of ["focus", "online", "offline"]) window.addEventListener(name, wake);
     document.addEventListener("visibilitychange", wake);
     const before = document.body.style.overflow; document.body.style.overflow = "hidden";
     return () => {
-      live = false; clearInterval(timer);
+      live = false; stopLive();
       for (const name of ["focus", "online", "offline"]) window.removeEventListener(name, wake);
       document.removeEventListener("visibilitychange", wake);
       document.body.style.overflow = before;

@@ -1,4 +1,5 @@
 import { ReceiptArchive } from "./Components";
+import { clock, dayStamp, money, shortStamp } from "./format";
 import { NativeSpendingList } from "./NativeSpending";
 import { MemberInsightsView, NativeMemberPreview } from "./MemberInsights";
 import type { InsightMember } from "@shared/concierge/insights-types";
@@ -6,6 +7,7 @@ import { PraiseCenter } from "./PraiseCenter";
 import "./profile-layout.css";
 import { MemberIdentityFields, ResourceFields, currentBalance, balanceGroupOf, memberGrade, uniqueMembers, resourceLabel } from "./NativeIntegration";
 import { loadReceipt, loadWorkspace, pendingRequests } from "./api";
+import { announceRevision } from "./live";
 import { api } from "../../lib/api";
 import { uuid } from "../../lib/utils";
 import { useCan } from "../../lib/session";
@@ -173,37 +175,13 @@ function iso(value: string) {
     `${value}${value.length === 16 ? ":00" : ""}+08:00`,
   ).toISOString();
 }
+// 显示用的金额、时间都走 ./format（全店同一套，8.0.18）
 function date(value?: string, time = true) {
   if (!value) return "尚未记录";
-  const d = new Date(value);
-  return Number.isNaN(d.getTime())
-    ? "时间待核"
-    : new Intl.DateTimeFormat("zh-CN", {
-        timeZone: "Asia/Shanghai",
-        year: time ? undefined : "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: time ? "2-digit" : undefined,
-        minute: time ? "2-digit" : undefined,
-      }).format(d);
+  return time ? shortStamp(value, "时间待核") : dayStamp(value, "时间待核");
 }
 function time(value?: string) {
-  if (!value) return "";
-  const d = new Date(value);
-  return Number.isNaN(d.getTime())
-    ? ""
-    : new Intl.DateTimeFormat("zh-CN", {
-        timeZone: "Asia/Shanghai",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(d);
-}
-function money(n: number) {
-  return new Intl.NumberFormat("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n / 100);
+  return clock(value);
 }
 function amount(n: number | null | undefined) {
   return n == null ? "" : (n / 100).toFixed(2);
@@ -520,6 +498,8 @@ export default function Workspace({
       pollFailures.current = 0;
       pollSkip.current = 0;
       if (mounted.current && id === request.current) {
+        // 版本号或原生指纹变了：告诉页面里各自取数的部件（会员名单、扣费明细、好评……）跟着取一次
+        if (changed) announceRevision();
         if (changed || currentData.current !== loaded) {
           // 换一个新的对象引用，页面才会重新渲染
           const next = { ...loaded };

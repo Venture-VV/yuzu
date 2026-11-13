@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { money } from "./format";
+import { liveRefresh } from "./live";
 import { api } from "../../lib/api";
 import { useCan } from "../../lib/session";
 import type {
@@ -9,11 +11,6 @@ import type {
   Balance,
 } from "./types";
 
-const money = (cents: number) =>
-  (cents / 100).toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 export const memberGrade = (m: Member) =>
   m.nativeMember?.gradeLabel ||
   (m.nativeMemberId ? "系统档阶暂不可用" : "待关联系统会员");
@@ -68,15 +65,15 @@ function useMembers(q: string) {
     };
     setData([]);
     const debounce = window.setTimeout(() => void run(), 250);
-    const timer = window.setInterval(() => void run(), 5000);
     const wake = () => void run();
+    const stopLive = liveRefresh(wake, 30_000);
     window.addEventListener("focus", wake);
     window.addEventListener("online", wake);
     document.addEventListener("visibilitychange", wake);
     return () => {
       live = false;
       clearTimeout(debounce);
-      clearInterval(timer);
+      stopLive();
       window.removeEventListener("focus", wake);
       window.removeEventListener("online", wake);
       document.removeEventListener("visibilitychange", wake);
@@ -223,13 +220,13 @@ export function MemberIdentityFields({
       }
     };
     void run();
-    const timer = window.setInterval(() => void run(), 3000);
     const wake = () => void run();
+    const stopLive = liveRefresh(wake, 10_000);
     window.addEventListener("focus", wake);
     window.addEventListener("online", wake);
     return () => {
       live = false;
-      clearInterval(timer);
+      stopLive();
       window.removeEventListener("focus", wake);
       window.removeEventListener("online", wake);
     };

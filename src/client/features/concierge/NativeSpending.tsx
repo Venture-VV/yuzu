@@ -1,16 +1,9 @@
 import { useEffect, useState } from "react";
+import { money, stamp } from "./format";
+import { liveRefresh } from "./live";
 import { api } from "../../lib/api";
 import type { NativeSpendingPage, Member } from "./types";
-const money = (n: number) =>
-  (n / 100).toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-const time = (s: string) =>
-  new Date(s).toLocaleString("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    hour12: false,
-  });
+const time = (s: string) => stamp(s);
 export function NativeSpendingList({ member }: { member: Member }) {
   const [page, setPage] = useState(0),
     [data, setData] = useState<NativeSpendingPage | null>(null),
@@ -48,14 +41,14 @@ export function NativeSpendingList({ member }: { member: Member }) {
       }
     };
     void run();
-    const timer = window.setInterval(() => void run(), 3000);
     const wake = () => void run();
+    const stopLive = liveRefresh(wake, 15_000);
     window.addEventListener("online", wake);
     window.addEventListener("focus", wake);
     document.addEventListener("visibilitychange", wake);
     return () => {
       live = false;
-      clearInterval(timer);
+      stopLive();
       window.removeEventListener("online", wake);
       window.removeEventListener("focus", wake);
       document.removeEventListener("visibilitychange", wake);
