@@ -39,45 +39,37 @@ test("管家部嵌入企业后台并可从手机布局打开", async ({ page }) 
     ),
   ).toBe(true);
 });
-test("管家仅卡号建档与人工余额留痕，不要求建立企业钱包", async ({
-  page,
-}, testInfo) => {
-  test.skip(
-    testInfo.project.name !== "门店电脑",
-    "变更流程只在门店电脑组执行；其余视口仅执行布局冒烟",
-  );
+test("前台会员建立服务档案，实时资料与人工核对历史分开", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "门店电脑", "变更流程只在门店电脑组执行");
   await login(page);
+  const stamp = String(Date.now()).slice(-8), name = "E2E服务-" + stamp;
+  const made = await page.request.post("/api/members", { data: { name, phone: "199" + stamp } });
+  expect(made.status(), await made.text()).toBe(201);
+  const native = await made.json();
   await page.goto("/concierge");
-  await page
-    .getByRole("button", { name: "新增会员", exact: true })
-    .first()
-    .click();
-  let dialog = page.getByRole("dialog", { name: "新建会员档案" });
-  const name = "E2E管家会员-" + randomUUID().slice(0, 8);
-  await dialog
-    .getByRole("textbox", { name: "客户称呼 *", exact: true })
-    .fill(name);
-  await dialog
-    .getByRole("textbox", { name: "收银会员卡号", exact: true })
-    .fill("CI-CONCIERGE-" + randomUUID());
+  await page.getByRole("button", { name: "建立服务档案", exact: true }).first().click();
+  let dialog = page.getByRole("dialog", { name: "建立管家服务档案" });
+  await dialog.getByRole("textbox", { name: "选择系统会员 *", exact: true }).fill(name);
+  await dialog.locator(".native-member-option").filter({ hasText: name }).click();
+  await expect(dialog.locator('input[name="name"]')).toHaveValue(name);
+  await expect(dialog.locator('input[name="phone"]')).toHaveValue("199" + stamp);
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).not.toBeVisible();
-  await page
-    .getByRole("button", { name: new RegExp(name) })
-    .first()
-    .click();
-  const member = page.getByRole("complementary", { name: name + "的会员档案" });
+  await page.getByRole("button", { name: new RegExp(name) }).first().click();
+  const member = page.locator(".member-drawer");
   await expect(member).toContainText(/会员档案 · \d{6}/);
-  await member.getByRole("button", { name: "核对余额", exact: true }).click();
+  await member.getByRole("button", { name: "新增人工核对记录", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "核对会员余额" });
-  await dialog
-    .getByRole("textbox", { name: /收银核实后总余额/ })
-    .fill("29999.99");
-  await dialog
-    .getByRole("textbox", { name: /核对依据/ })
-    .fill("CI合成数据人工核对，不写收银钱包");
+  await dialog.getByRole("textbox", { name: /收银核实后总余额/ }).fill("29999.99");
+  await dialog.getByRole("textbox", { name: /核对依据/ }).fill("CI历史人工核对，不覆盖系统钱包");
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).not.toBeVisible();
+  await expect(member).toContainText("系统实时余额");
+  // An already-open drawer changes without page.reload() or pressing Sync.
+  const edit = await page.request.put(`/api/members/${native.id}`, { data: { name: name + "新名", phone: "199" + stamp } });
+  expect(edit.status(), await edit.text()).toBe(200);
+  await expect(member.getByRole("heading", { name: name + "新名", exact: true })).toBeVisible({ timeout: 15000 });
+  await member.getByRole("button", { name: "余额历史", exact: true }).click();
   await expect(member).toContainText("29,999.99");
 });
 
@@ -148,7 +140,10 @@ test("只有管家职责的后勤账号：登录直接进管家部；手机上�
     await expect(p).toHaveURL(/\/concierge$/);
     // 建一位管家会员（接口），再拍单
     const number = `E2E${stamp}`;
-    const member = await p.request.post("/api/concierge/workspace", { data: { action: "createMember", requestId: randomUUID(), payload: { name: `E2E拍单-${stamp}`, phone: "", cardNo: `E2E-OCR-${stamp}`, ownerId: "", cardTier: "", preferences: "", source: "", joinedAt: "" } } });
+    const native = await page.request.post("/api/members", { data: { name: `E2E拍单-${stamp}`, phone: "198" + stamp } });
+    expect(native.status(), await native.text()).toBe(201);
+    const nativeId = (await native.json()).id;
+    const member = await p.request.post("/api/concierge/workspace", { data: { action: "createMember", requestId: randomUUID(), payload: { nativeMemberId: nativeId, name: `E2E拍单-${stamp}`, phone: "", cardNo: `E2E-OCR-${stamp}`, ownerId: "", cardTier: "", preferences: "", source: "", joinedAt: "" } } });
     expect(member.status(), await member.text()).toBe(200);
     await p.reload();
     await p.getByRole("button", { name: /拍消费单/ }).first().click();

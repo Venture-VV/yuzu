@@ -127,7 +127,7 @@ describe("8.0.12 管家部原生集成", () => {
           "/api/concierge/native-members?q=合成",
         )
       ).status,
-    ).toBe(403);
+    ).toBe(200);
     expect(
       permissionsOf({ role: "backoffice", duties: ["concierge"] }),
     ).not.toContain("consume.create");
@@ -138,10 +138,11 @@ describe("8.0.12 管家部原生集成", () => {
   it("升级空名单，不自动纳入原生会员；从000001编码且收银卡号独立", async () => {
     await createMember(ctx, "原生旧会员", "19900001001");
     expect((await workspace()).members).toHaveLength(0);
+    const native = await createMember(ctx, "合成会员A", "19900001002");
     const r = await mutate(
       butler,
       "createMember",
-      member("合成会员A", "CASH-001"),
+      { ...member("合成会员A", "CASH-001"), nativeMemberId: native.id },
     );
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     memberId = r.body.id;
@@ -149,15 +150,16 @@ describe("8.0.12 管家部原生集成", () => {
     expect(b.members[0]).toMatchObject({
       code: "000001",
       cardNo: "CASH-001",
-      nativeMemberId: null,
+      nativeMemberId: native.id,
     });
     expect(b.team.find((t: any) => t.id === String(butlerId)).name).toBe(
       "合成管家",
     );
   });
   it("同编号重试只写一次；同编号换内容拒绝", async () => {
+    const native = await createMember(ctx, "合成会员B", "19900001003");
     const id = randomUUID(),
-      payload = member("合成会员B", "CASH-002");
+      payload = { ...member("合成会员B", "CASH-002"), nativeMemberId: native.id };
     const [a, b] = await Promise.all([
       mutate(butler, "createMember", payload, id),
       mutate(butler, "createMember", payload, id),
@@ -185,8 +187,9 @@ describe("8.0.12 管家部原生集成", () => {
     };
     expect((await mutate(butler, "updateMember", payload)).status).toBe(200);
     expect((await mutate(butler, "updateMember", payload)).status).toBe(409);
+    const duplicate = await createMember(ctx, "重复卡", "19900001004");
     expect(
-      (await mutate(butler, "createMember", member("重复卡", "CASH-001")))
+      (await mutate(butler, "createMember", { ...member("重复卡", "CASH-001"), nativeMemberId: duplicate.id }))
         .status,
     ).toBe(409);
     const d = await workspace();

@@ -12,6 +12,26 @@
   --orange: var(--color-yuzu-deep);
   --radius: var(--radius-md);
 }
+.concierge-workspace .native-member-search { margin: 16px 0; padding: 16px; }
+.concierge-workspace .native-member-search .panel-heading { display:flex; gap:12px; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; }
+.concierge-workspace .native-member-search h2 { margin:0; font-size:16px; }
+.concierge-workspace .native-member-search p { color:var(--muted); }
+.concierge-workspace .native-member-row { display:flex; gap:16px; justify-content:space-between; align-items:center; padding:14px 0; border-top:1px solid var(--line); }
+.concierge-workspace .native-member-summary { display:grid; gap:4px; min-width:0; overflow-wrap:anywhere; }
+.concierge-workspace .native-member-summary > span { font-size:13px; color:var(--muted); }
+.concierge-workspace .native-member-actions { display:flex; gap:8px; flex-wrap:wrap; flex-shrink:0; }
+.concierge-workspace .native-selected { display:grid; gap:8px; padding:14px; background:var(--color-card); border:1px solid var(--line); border-radius:var(--radius); }
+.concierge-workspace .native-member-options { max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:var(--radius); }
+.concierge-workspace .native-member-option { display:grid; gap:3px; width:100%; padding:12px; text-align:left; border:0; border-bottom:1px solid var(--line); background:var(--color-card); color:var(--text); }
+.concierge-workspace .native-member-option.is-selected { background:var(--color-pine-soft); }
+.concierge-workspace .native-member-option small { color:var(--muted); }
+.concierge-workspace .native-service-heading { padding:0 16px; font-size:16px; }
+.concierge-workspace input[readonly] { color:var(--muted); background:var(--paper); }
+@media(max-width:600px) {
+  .concierge-workspace .native-member-row { align-items:stretch; flex-direction:column; gap:10px; }
+  .concierge-workspace .native-member-actions button { flex:1; }
+  .concierge-workspace .native-member-summary > span { font-size:14px; }
+}
 .concierge-workspace * {
   box-sizing: border-box;
 }
