@@ -167,3 +167,21 @@ test("只有管家职责的后勤账号：登录直接进管家部；手机上�
     await page.request.put(`/api/staff/${staff.id}`, { data: { displayName: "E2E 管家", role: "backoffice", duties: ["concierge"], active: false } });
   }
 });
+
+
+test("两位低余额会员均无人工核对记录时重点跟进不崩溃", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "门店电脑", "写入仅在电脑组");
+  await login(page);
+  const stamp=String(Date.now()).slice(-7);
+  for (const [suffix,index] of [["甲",1],["乙",2]] as const) {
+    const native=await page.request.post("/api/members",{data:{name:`低余额验收${suffix}${stamp}`,phone:`197${index}${stamp}`}});
+    expect(native.status(),await native.text()).toBe(201);
+    const saved=await page.request.post("/api/concierge/workspace",{data:{action:"createMember",requestId:randomUUID(),payload:{nativeMemberId:(await native.json()).id}}});
+    expect(saved.status(),await saved.text()).toBe(200);
+  }
+  await page.goto("/concierge");
+  await page.getByRole("button",{name:/低余额关注 \d+位/}).click();
+  await expect(page.getByRole("heading",{name:"低余额关注名单",exact:true})).toBeVisible();
+  await expect(page.getByText(`低余额验收甲${stamp}`,{exact:true})).toBeVisible();
+  await expect(page.getByText(`低余额验收乙${stamp}`,{exact:true})).toBeVisible();
+});

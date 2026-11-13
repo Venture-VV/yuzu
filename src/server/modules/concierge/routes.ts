@@ -16,6 +16,7 @@ import { can } from "@shared/permissions";
 import { mutate, moduleLock, bumpRevision } from "./mutations";
 import { WorkspaceError, text, uuid } from "./validation";
 import { nativeMemberSummary, nativeRevision, searchNativeMembers } from "./native-links";
+import { nativeSpending } from "./spending";
 const object = (v: unknown): Record<string, any> => {
   if (!v || typeof v !== "object" || Array.isArray(v))
     throw new WorkspaceError("请求格式不正确");
@@ -57,6 +58,12 @@ function sniff(buf: Buffer) {
 }
 export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
+  app.get('/api/concierge/members/:id/spending', {preHandler:guard('concierge.read')}, async(req,reply)=>run(async()=>{
+    reply.header('Cache-Control','private, no-store');
+    const offset=Number(object(req.query).offset||0);
+    if (!Number.isSafeInteger(offset)||offset<0||offset>1000000)throw new WorkspaceError('页码不正确');
+    return readSnapshot(sql,tx=>nativeSpending(tx,text((req.params as any).id,80,true),offset));
+  }));
   app.get(
     "/api/concierge/revision",
     { preHandler: guard("concierge.read") },

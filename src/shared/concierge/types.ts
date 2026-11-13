@@ -37,6 +37,22 @@ export type NativeResourceOption = {
   active: boolean;
   warning: string;
 };
+export type NativeSpending = {
+  id: number;
+  docNo: string;
+  occurredAt: string;
+  businessDate: string;
+  status: "completed" | "reversed";
+  operatorName: string;
+  totalCents: number;
+  principalCents: number;
+  bonusCents: number;
+  payer: { id: number; memberNo: string; name: string };
+  checkout: { id: number; number: string; status: string; totalCents: number } | null;
+  reversal: { number: string; reason: string; occurredAt: string } | null;
+  items: Array<{ name: string; category: string; quantity: number; unitPriceCents: number | null; amountCents: number; discountCents: number }>;
+};
+export type NativeSpendingPage = { records: NativeSpending[]; hasMore: boolean; offset: number; serverTime: string };
 export type Member = {
   id: string;
   code: string;

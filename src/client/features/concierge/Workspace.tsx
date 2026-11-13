@@ -1,4 +1,5 @@
 import { ReceiptArchive } from "./Components";
+import { NativeSpendingList } from "./NativeSpending";
 import { MemberIdentityFields, SystemMemberResults, ResourceFields, currentBalance, balanceGroupOf, memberGrade, uniqueMembers, resourceLabel } from "./NativeIntegration";
 import { loadReceipt, loadWorkspace, pendingRequests } from "./api";
 import { api } from "../../lib/api";
@@ -2081,7 +2082,7 @@ export default function Workspace({
                 <div className="info-strip warm">
                   <Bell size={16} />
                   <span>
-                    最新已核对余额严格低于30,000元的会员列入重点；未知单列，低余额不取消管家服务。
+                    系统当前余额严格低于30,000元的会员列入重点；旧未关联档案按历史核对值，未知单列。低余额不取消管家服务。
                   </span>
                 </div>
                 <section className="panel">
@@ -2095,12 +2096,12 @@ export default function Workspace({
                   </div>
                   {FilterBar({ segments: false })}
                   {MemberTable({
-                    items: filteredMembers
+                    items: uniqueMembers(filteredMembers)
                       .filter((m) => balanceGroup(m) === "low")
                       .sort(
                         (a, b) =>
-                          balances.get(a.id)!.amountCents -
-                          balances.get(b.id)!.amountCents,
+                          (currentBalance(a,balances.get(a.id)) ?? Number.MAX_SAFE_INTEGER) -
+                          (currentBalance(b,balances.get(b.id)) ?? Number.MAX_SAFE_INTEGER),
                       ),
                     kind: "followup",
                   })}
@@ -2879,6 +2880,10 @@ export default function Workspace({
                   新增人工核对记录
                 </button>
               </div>
+              {member.nativeMember && <div className="detail-notice balance-source-explanation">
+                <Wallet size={15}/><span>上方是会员系统当前余额。新增人工核对只保存依据，不充值、不扣款，也不覆盖上方数字。
+                {balances.get(member.id) && <> 最近人工核对 ¥{money(balances.get(member.id)!.amountCents)}（{date(balances.get(member.id)!.checkedAt)}），相对当前系统余额差额 ¥{money(balances.get(member.id)!.amountCents-member.nativeMember.totalCents)}。历史时点与后续充值、消费可能不同；如核对不一致，请交前台核实原单。</>}</span>
+              </div>}
               <div className="member-quick-actions">
                 <button
                   onClick={() => openModal({ kind: "appointment", member })}
@@ -3178,6 +3183,8 @@ export default function Workspace({
                 )}
                 {drawerTab === "receipts" && (
                   <>
+                    <NativeSpendingList key={member.id} member={member}/>
+                    <h3 className="native-service-heading">小票与消费凭证</h3>
                     <div className="detail-notice">
                       <FileText size={15} />
                       只显示明确关联的消费凭证，点开可查看每项明细和原始照片；待核与已确认分开。
@@ -3381,6 +3388,7 @@ export default function Workspace({
                 )}
                 {modal.kind === "balance" && (
                   <>
+                    {modal.member?.nativeMember && <p className="detail-notice">系统当前余额 ¥{money(modal.member.nativeMember.totalCents)}，由前台同步。下面填写的金额只保存为人工核对依据，不会覆盖系统余额；如有差异，请核对充值、消费与原始凭证。</p>}
                     <div className="form-member-summary">
                       <span className="avatar">
                         {initial(modal.member!.name)}
