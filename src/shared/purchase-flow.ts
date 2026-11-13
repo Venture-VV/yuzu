@@ -571,7 +571,12 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
     [end, endText] = closed ? ['closed', `采购单已关闭${pos[0]!.closeReason ? `：${pos[0]!.closeReason}` : ''}`] : ['done', '全部完成'];
   }
   const current = end ? null : (nodes.find((n) => n.state === 'current') ?? null);
-  const summary = uniq([...pos.map((p) => p.summary), sourcing?.title ?? '', ...reqs.map((r) => r.summary)])[0] ?? f.anchor.docNo;
+  // 标题（买的是什么）：从哪张单看就用哪张单自己的摘要——从需求单看用需求单的，不用合并采购单、询价单的摘要
+  // （那里面可能有别的部门的物料；Codex 2026-11-13 P2：部门同事从自己的需求单看到了别的部门的物料名称）。
+  // 看的人没有「查看库存」时只用需求单的摘要，哪怕从采购单、询价单看也一样。
+  const own = f.anchor.kind === 'request' || !f.purchasing ? reqs.map((r) => r.summary) : f.anchor.kind === 'po' ? pos.map((p) => p.summary) : [sourcing?.title ?? ''];
+  const rest = f.purchasing ? [...pos.map((p) => p.summary), sourcing?.title ?? '', ...reqs.map((r) => r.summary)] : [];
+  const summary = uniq([...own, ...rest])[0] ?? f.anchor.docNo;
 
   return {
     anchor: f.anchor,

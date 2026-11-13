@@ -361,6 +361,14 @@ describe('采购流程图 · 推算函数', () => {
     expect(node(f, 'request').link).toMatchObject({ kind: 'request' });
     expect(f.nodes.filter((n) => n.key !== 'request' && n.key !== 'review').every((n) => n.link === null)).toBe(true);
     expect(JSON.stringify(f)).not.toContain('¥800');
+    // 标题只用自己这张需求单的：合并采购单、询价单的摘要里有别的部门的物料，不能带出来（Codex 2026-11-13 P2）
+    const merged = po({ ...full, summary: '沐浴露补充装、水吧专用糖浆' });
+    const mine = buildPurchaseFlow(facts({ purchasing: false, requests: [req({ summary: '沐浴露补充装' })], sourcing: src({ status: 'awarded', title: '浴区与水吧合并询价：糖浆、沐浴露' }), pos: [merged] }));
+    expect(mine.title).toBe('沐浴露补充装');
+    expect(JSON.stringify(mine)).not.toMatch(/糖浆|水吧/);
+    // 采购从需求单看，标题也是这张需求单自己的；从采购单看才是整张采购单的
+    expect(buildPurchaseFlow(facts({ requests: [req({ summary: '沐浴露补充装' })], pos: [merged] })).title).toBe('沐浴露补充装');
+    expect(buildPurchaseFlow(facts({ anchor: { kind: 'po', id: 10, docNo: 'CG-0010' }, requests: [req({ summary: '沐浴露补充装' })], pos: [merged] })).title).toBe('沐浴露补充装、水吧专用糖浆');
   });
 });
 
@@ -509,6 +517,41 @@ describe('采购流程图 · 接口', () => {
     expect((await one(buyer, 'po', gone.id)).body).toMatchObject({ stage: 'order' });
     expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${gone.id}/cancel`, { reason: '不买了' })).status).toBe(200);
     expect((await one(buyer, 'po', gone.id)).status).toBe(404);
+  });
+
+  it('两个部门的需求并进一张采购单：部门同事从自己的需求单看流程，看不到另一个部门的物料名称、部门、单号（Codex 2026-11-13 P2）', async () => {
+    const other = ((await api(ctx.app, boss, 'GET', '/api/inventory/materials?all=1')).body as { id: number; code: string; name: string }[]).find((m) => m.code === 'M001')!;
+    const mk = async (cookie: string, m: { id: number; name: string }) => {
+      const r = (await api(ctx.app, cookie, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines: [{ materialId: m.id, name: m.name, purpose: '客用消耗', qtyMilli: q(1), unit: '箱', refPriceCents: 100 }] })).body.request;
+      await api(ctx.app, buyer, 'POST', `/api/erp/requests/${r.id}/approve`, {});
+      return (await api(ctx.app, buyer, 'GET', `/api/erp/requests/${r.id}`)).body;
+    };
+    const a = await mk(reqA, mat);
+    const b = await mk(reqB, other);
+    expect(mat.name).not.toBe(other.name);
+    const merged = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(),
+      supplierId,
+      orderDate: today,
+      action: 'save',
+      lines: [
+        { materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 100, requestLineIds: [a.lines[0].id] },
+        { materialId: other.id, purchaseQtyMilli: q(1), priceCents: 100, requestLineIds: [b.lines[0].id] },
+      ],
+    });
+    expect(merged.status, JSON.stringify(merged.body)).toBe(201);
+    // 对照：另一个部门的需求单、采购单的流程都打不开
+    expect((await one(reqA, 'request', b.id)).status).toBe(404);
+    expect((await one(reqA, 'po', merged.body.po.id)).status).toBe(403);
+    const mine = (await one(reqA, 'request', a.id)).body as PurchaseFlow;
+    expect(mine.title).toBe(mat.name);
+    const text = JSON.stringify(mine);
+    expect(text).not.toContain(other.name);
+    expect(text).not.toContain('水吧');
+    expect(text).not.toContain(b.docNo);
+    expect(mine.amountCents).toBeNull();
+    // 采购从采购单看：两样都在
+    expect(((await one(buyer, 'po', merged.body.po.id)).body as PurchaseFlow).title).toContain(other.name);
   });
 
   it('流程 B：询价门槛默认就是 ¥1,000（店主图上的数，LC2），估价达到门槛的需求通过后停在「待发起询价」', async () => {
