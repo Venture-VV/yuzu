@@ -5,6 +5,7 @@
 
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
+import { useSlidingIndicator } from '../../lib/motion';
 import {
   ArchiveRestore,
   ArrowLeft,
@@ -82,6 +83,9 @@ export function AdminShell() {
   const session = useSession();
   const sections = useAdminSections();
   const location = useLocation();
+  // 动效（8.0.16）：导航里当前分区的底块滑过去（宽屏的侧栏与窄屏的横排各一块）
+  const sidePill = useSlidingIndicator<HTMLElement>('.nav-on', `${location.pathname}|${sections.length}`, 140);
+  const tabPill = useSlidingIndicator<HTMLElement>('.nav-on', `${location.pathname}|${sections.length}`, 140);
   useEffect(() => {
     document.title = `管理后台 · ${session.storeName}`;
     return () => {
@@ -95,6 +99,7 @@ export function AdminShell() {
   const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((k) => sections.includes(k)) })).filter((g) => g.items.length > 0);
   const link = (k: AdminSection, compact: boolean) => {
     const Icon = ICONS[k];
+    const pill = compact ? tabPill : sidePill;
     return (
       <NavLink
         key={k}
@@ -103,9 +108,10 @@ export function AdminShell() {
         data-testid={compact ? `admin-tab-${k}` : `admin-nav-${k}`}
         className={({ isActive }) =>
           cn(
-            'flex items-center gap-2.5 font-semibold whitespace-nowrap transition-colors',
+            'relative flex shrink-0 items-center gap-2.5 font-semibold whitespace-nowrap transition-colors duration-100',
             compact ? 'h-10 rounded-full px-3.5 text-[13.5px]' : 'h-10 rounded-lg px-3 text-[14px]',
-            isActive ? 'bg-pine text-paper' : 'text-ink-2 hover:bg-paper-2 hover:text-ink',
+            // 当前项的底块：量得到位置时由导航里那一块滑过来画（8.0.16），量不到时自己画
+            isActive ? cn('nav-on text-paper', !pill.style && 'bg-pine') : 'text-ink-2 hover:bg-paper-2 hover:text-ink',
           )
         }
       >
@@ -142,11 +148,13 @@ export function AdminShell() {
         </NavLink>
       </header>
       {/* 窄屏：分区横排在顶部，可横向滑动 */}
-      <nav aria-label="后台分区" className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-line bg-card px-3 py-2 lg:hidden">
+      <nav ref={tabPill.ref} aria-label="后台分区" className="relative flex shrink-0 gap-1.5 overflow-x-auto border-b border-line bg-card px-3 py-2 lg:hidden">
+        {tabPill.style && <span key={tabPill.jump} aria-hidden className={cn('mo-indicator rounded-full bg-pine', tabPill.jump > 0 && 'mo-indicator-jump')} data-settled={tabPill.settled} style={tabPill.style} />}
         {groups.flatMap((g) => g.items).map((k) => link(k, true))}
       </nav>
       <div className="flex min-h-0 flex-1">
-        <nav aria-label="后台导航" className="scroll-thin hidden w-[212px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-line bg-card px-3 py-4 lg:flex">
+        <nav ref={sidePill.ref} aria-label="后台导航" className="scroll-thin relative hidden w-[212px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-line bg-card px-3 py-4 lg:flex">
+          {sidePill.style && <span key={sidePill.jump} aria-hidden className={cn('mo-indicator rounded-lg bg-pine', sidePill.jump > 0 && 'mo-indicator-jump')} data-settled={sidePill.settled} style={sidePill.style} />}
           {groups.map((g) => (
             <div key={g.title} className="flex flex-col gap-0.5">
               <p className="px-3 pb-1 text-[11.5px] font-bold tracking-wide text-ink-4">{g.title}</p>
@@ -154,7 +162,8 @@ export function AdminShell() {
             </div>
           ))}
         </nav>
-        <main className="scroll-thin min-h-0 min-w-0 flex-1 overflow-y-auto" key={location.pathname}>
+        {/* 按地址重新挂载；换分区时内容区淡入（8.0.16） */}
+        <main className="scroll-thin min-h-0 min-w-0 flex-1 animate-page-in overflow-y-auto" key={location.pathname}>
           <Outlet />
         </main>
       </div>

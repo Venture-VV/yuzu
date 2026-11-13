@@ -8,6 +8,7 @@ import {
   type TextareaHTMLAttributes,
 } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
+import { useSlidingIndicator } from '../lib/motion';
 import { useOptionalSession } from '../lib/session';
 import { cn } from '../lib/utils';
 
@@ -48,7 +49,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type}
       disabled={disabled || loading}
       className={cn(
-        'relative inline-flex shrink-0 select-none items-center justify-center font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:translate-y-px',
+        'relative inline-flex shrink-0 select-none items-center justify-center font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow,transform] duration-150 ease-out active:scale-[0.975] disabled:active:scale-100',
         VARIANTS[variant],
         SIZES[size],
         className,
@@ -83,7 +84,7 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cn(
-        'inline-flex size-9 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-paper-2 hover:text-ink disabled:text-ink-4',
+        'inline-flex size-9 items-center justify-center rounded-md text-ink-2 transition-[background-color,color,transform] duration-150 hover:bg-paper-2 hover:text-ink active:scale-[0.92] disabled:text-ink-4 disabled:active:scale-100',
         className,
       )}
       {...rest}
@@ -212,8 +213,11 @@ export function Segmented<T extends string>({
   size?: 'sm' | 'md';
   ariaLabel?: string;
 }) {
+  // 白色的滑块滑到选中的那一格（8.0.16）。量不到位置时（容器还没显示）退回到选中的那格自己带白底
+  const thumb = useSlidingIndicator<HTMLDivElement>('[aria-checked="true"]', `${value}|${options.length}`);
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className={cn('inline-flex rounded-md bg-paper-2 p-1', className)}>
+    <div ref={thumb.ref} role="radiogroup" aria-label={ariaLabel} className={cn('relative inline-flex rounded-md bg-paper-2 p-1', className)}>
+      {thumb.style && <span aria-hidden className="mo-indicator rounded-[9px] bg-card shadow-[0_1px_2px_rgb(28_35_31/0.1)]" data-settled={thumb.settled} style={thumb.style} />}
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -225,9 +229,9 @@ export function Segmented<T extends string>({
             disabled={o.disabled}
             onClick={() => onChange(o.value)}
             className={cn(
-              'flex-1 rounded-[9px] font-semibold whitespace-nowrap transition-all duration-150 disabled:opacity-40',
+              'relative flex-1 rounded-[9px] font-semibold whitespace-nowrap transition-colors duration-150 disabled:opacity-40',
               size === 'sm' ? 'h-7 px-2.5 text-[12.5px]' : 'h-9 px-3.5 text-[13.5px]',
-              active ? 'bg-card text-ink shadow-[0_1px_2px_rgb(28_35_31/0.1)]' : 'text-ink-3 hover:text-ink',
+              active ? cn('text-ink', !thumb.style && 'bg-card shadow-[0_1px_2px_rgb(28_35_31/0.1)]') : 'text-ink-3 hover:text-ink',
             )}
           >
             {o.label}
@@ -271,7 +275,7 @@ export function ConfirmCheck({
           checked ? (tone === 'pine' ? 'border-pine bg-pine text-paper' : 'border-clay bg-clay text-paper') : 'border-ink-4 bg-card',
         )}
       >
-        {checked && <Check className="size-3.5" strokeWidth={3.5} />}
+        {checked && <Check className="size-3.5 animate-tick" strokeWidth={3.5} />}
       </span>
       <span className="text-[14px] leading-6 font-medium text-ink">{children}</span>
     </label>
@@ -344,7 +348,7 @@ export function Spinner({ className }: { className?: string }) {
 }
 
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn('animate-pulse rounded-md bg-paper-3/70', className)} />;
+  return <div className={cn('mo-shimmer rounded-md bg-paper-3/70', className)} />;
 }
 
 export function Card({ className, children, ...rest }: { className?: string; children: ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
@@ -390,7 +394,7 @@ export function Notice({
     error: 'border-clay/25 bg-clay-soft/60 text-clay',
   }[tone];
   return (
-    <div role={tone === 'error' ? 'alert' : 'status'} className={cn('flex gap-3 rounded-lg border px-4 py-3', styles, className)} data-testid={testId}>
+    <div role={tone === 'error' ? 'alert' : 'status'} className={cn('flex animate-notice-in gap-3 rounded-lg border px-4 py-3', styles, className)} data-testid={testId}>
       {icon && <span className="mt-0.5 shrink-0">{icon}</span>}
       <div className="min-w-0 flex-1">
         {title && <p className="text-[14px] font-bold">{title}</p>}

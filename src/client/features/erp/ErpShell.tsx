@@ -3,6 +3,7 @@
 
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
+import { usePageEnter, useSlidingIndicator } from '../../lib/motion';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileSignature, FileText, HandCoins, Landmark, LayoutGrid, LineChart, Monitor, Package, ReceiptText, ShieldCheck, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
@@ -56,6 +57,10 @@ export function ErpShell() {
   const can = useCan();
   const access = useErpAccess();
   const { pathname } = useLocation();
+  // 动效（8.0.16）：换页面时内容区淡入；导航里当前模块的底块滑过去（宽屏的侧栏与窄屏的横排各一块）
+  const content = usePageEnter<HTMLElement>(pathname);
+  const sidePill = useSlidingIndicator<HTMLElement>('.nav-on', pathname, 140);
+  const tabPill = useSlidingIndicator<HTMLElement>('.nav-on', pathname, 140);
   useEffect(() => {
     document.title = `ERP · ${session.storeName}`;
     return () => {
@@ -157,6 +162,7 @@ export function ErpShell() {
 
   const link = (it: Item, compact: boolean) => {
     const Icon = it.icon;
+    const pill = compact ? tabPill : sidePill;
     return (
       <NavLink
         key={it.key}
@@ -167,10 +173,11 @@ export function ErpShell() {
         data-testid={compact ? `erp-tab-${it.key}` : `erp-nav-${it.key}`}
         className={({ isActive }) =>
           cn(
-            'flex items-center gap-2.5 font-semibold whitespace-nowrap transition-colors',
+            'relative flex shrink-0 items-center gap-2.5 font-semibold whitespace-nowrap transition-colors duration-100',
             compact ? 'h-10 rounded-full px-3.5 text-[13.5px]' : 'h-10 rounded-lg px-3 text-[14px]',
-            // 模块下的其他页面（如费用模块的备用金、采购台账、账目自检）也高亮所属模块
-            isActive || erpModuleOfPage(pathname) === it.key ? 'bg-pine text-paper' : 'text-ink-2 hover:bg-paper-2 hover:text-ink',
+            // 模块下的其他页面（如费用模块的备用金、采购台账、账目自检）也高亮所属模块。
+            // 当前项的底块：量得到位置时由导航里那一块滑过来画（8.0.16），量不到时自己画
+            isActive || erpModuleOfPage(pathname) === it.key ? cn('nav-on text-paper', !pill.style && 'bg-pine') : 'text-ink-2 hover:bg-paper-2 hover:text-ink',
           )
         }
       >
@@ -218,11 +225,13 @@ export function ErpShell() {
         )}
       </header>
       {/* 窄屏：模块横排在顶部，可横向滑动 */}
-      <nav aria-label="ERP 分区" className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-line bg-card px-3 py-2 lg:hidden">
+      <nav ref={tabPill.ref} aria-label="ERP 分区" className="relative flex shrink-0 gap-1.5 overflow-x-auto border-b border-line bg-card px-3 py-2 lg:hidden">
+        {tabPill.style && <span key={tabPill.jump} aria-hidden className={cn('mo-indicator rounded-full bg-pine', tabPill.jump > 0 && 'mo-indicator-jump')} data-settled={tabPill.settled} style={tabPill.style} />}
         {groups.flatMap((g) => g.items).map((it) => link(it, true))}
       </nav>
       <div className="flex min-h-0 flex-1">
-        <nav aria-label="ERP 导航" className="scroll-thin hidden w-[212px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-line bg-card px-3 py-4 lg:flex">
+        <nav ref={sidePill.ref} aria-label="ERP 导航" className="scroll-thin relative hidden w-[212px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-line bg-card px-3 py-4 lg:flex">
+          {sidePill.style && <span key={sidePill.jump} aria-hidden className={cn('mo-indicator rounded-lg bg-pine', sidePill.jump > 0 && 'mo-indicator-jump')} data-settled={sidePill.settled} style={sidePill.style} />}
           {groups.map((g) => (
             <div key={g.title} className="flex flex-col gap-0.5">
               <p className="px-3 pb-1 text-[11.5px] font-bold tracking-wide text-ink-4">{g.title}</p>
@@ -231,7 +240,7 @@ export function ErpShell() {
           ))}
         </nav>
         {/* 不按地址重新挂载：库存的各个页签之间切换时，页面里的状态与原来在门店里一样保留 */}
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+        <main ref={content} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
           <ErpModuleGate module={erpModuleOfPage(pathname)}>
             <Outlet />
           </ErpModuleGate>
