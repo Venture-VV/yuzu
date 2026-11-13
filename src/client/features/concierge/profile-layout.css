@@ -1,0 +1,97 @@
+/* The whole profile can scroll; only its close bar and current tabs stay visible. */
+.concierge-workspace .member-drawer.service-member-drawer,
+.concierge-workspace .member-drawer.native-insight-preview {
+  display: block;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  width: 640px;
+  max-width: 100%;
+}
+.concierge-workspace .service-member-drawer .drawer-heading,
+.concierge-workspace .native-insight-preview .drawer-heading {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  height: 52px;
+  min-height: 52px;
+  padding: 8px 20px;
+  background: var(--color-card);
+}
+.concierge-workspace .service-member-drawer .drawer-profile {
+  padding: 18px 20px;
+  gap: 12px;
+}
+.concierge-workspace .service-member-drawer .drawer-profile .big-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  font-size: 25px;
+  flex-shrink: 0;
+}
+.concierge-workspace .service-member-drawer .drawer-profile h2 {
+  font-size: 24px;
+  line-height: 1.35;
+  margin-bottom: 7px;
+  overflow-wrap: anywhere;
+}
+.concierge-workspace .service-member-drawer .drawer-profile p {
+  font-size: 13px;
+  margin-bottom: 7px;
+}
+.concierge-workspace .service-member-drawer .drawer-balance {
+  margin: 0 20px 16px;
+  padding: 16px;
+}
+.concierge-workspace .service-member-drawer .drawer-balance .balance-amount { font-size: 28px; }
+.concierge-workspace .service-member-drawer .drawer-balance strong { margin-top: 5px; }
+.concierge-workspace .service-member-drawer .drawer-balance p { font-size: 12px; line-height: 1.6; }
+.concierge-workspace .service-member-drawer .member-quick-actions {
+  margin: 0 20px 14px;
+  gap: 8px;
+}
+.concierge-workspace .service-member-drawer .member-quick-actions button {
+  min-height: 62px;
+  height: auto;
+  padding: 10px 4px;
+  font-size: 12px;
+  gap: 6px;
+}
+.concierge-workspace .service-member-drawer .drawer-tabs {
+  position: sticky;
+  top: 52px;
+  z-index: 6;
+  padding: 0 20px;
+  gap: 22px;
+  overflow-x: auto;
+  background: var(--color-card);
+  scrollbar-width: thin;
+}
+.concierge-workspace .service-member-drawer .drawer-tabs button {
+  flex: 0 0 auto;
+  font-size: 14px;
+  padding: 13px 0;
+}
+.concierge-workspace .service-member-drawer .drawer-body {
+  overflow: visible;
+  flex: none;
+  min-height: 240px;
+  padding: 20px;
+}
+.concierge-workspace .legacy-service-panel > details > summary {
+  cursor: pointer;
+  padding: 20px;
+  font-size: 15px;
+}
+.concierge-workspace .legacy-service-panel .insights-rule { padding: 0 20px 16px; }
+@media (max-width: 600px) {
+  .concierge-workspace .service-member-drawer .drawer-profile { padding: 16px; gap: 10px; }
+  .concierge-workspace .service-member-drawer .drawer-profile h2 { font-size: 21px; }
+  .concierge-workspace .service-member-drawer .drawer-profile .big-avatar { width: 48px; height: 48px; }
+  .concierge-workspace .service-member-drawer .drawer-balance { margin: 0 16px 13px; padding: 14px; }
+  .concierge-workspace .service-member-drawer .drawer-balance .balance-amount { font-size: 27px; }
+  .concierge-workspace .service-member-drawer .member-quick-actions { margin: 0 16px 12px; gap: 7px; }
+  .concierge-workspace .service-member-drawer .drawer-tabs { padding: 0 16px; gap: 19px; }
+  .concierge-workspace .service-member-drawer .drawer-tabs button { font-size: 13px; }
+  .concierge-workspace .service-member-drawer .drawer-body { padding: 18px 16px 28px; min-height: 300px; }
+}

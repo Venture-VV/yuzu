@@ -5,7 +5,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { namePair, useLang, useM } from './i18n';
 import { BackspaceIcon, CheckMark } from './icons';
 import { useExitGhost } from './motion';
-import { box, Hairline } from './stage';
+import { BIG, box, Hairline, useBig } from './stage';
 
 /** 弹窗的位置与大小（设计稿） */
 const M = { x: 297.5, y: 133.7, w: 429.1, h: 500.6 };
@@ -48,15 +48,26 @@ function Titles({ title, subtitle, w, y, size }: { title: string; subtitle: stri
   );
 }
 
-function Frame({ title, subtitle, children, testId }: { title: string; subtitle: string; children: ReactNode; testId?: string }) {
+/**
+ * 放大的一档（8.0.15）：弹窗绕屏幕正中放大 BIG.ui 倍（429 × 501 → 558 × 651），里面照设计稿的像素写。
+ * 这一层自己不挡点按（点弹窗外面仍落在后面的半透明层上）。
+ */
+function Centered({ children }: { children: ReactNode }) {
+  const large = useBig();
+  if (!large) return <>{children}</>;
+  return <div style={{ ...box(0, 0, 1024, 768), transform: `scale(${BIG.ui})`, transformOrigin: '512px 384px', pointerEvents: 'none' }}>{children}</div>;
+}
+
+export function Frame({ title, subtitle, children, testId }: { title: string; subtitle: string; children: ReactNode; testId?: string }) {
   return (
+   <Centered>
     <div
       className="em-pop"
       data-em-out="pop"
       role="dialog"
       aria-label={title}
       onClick={(e) => e.stopPropagation()}
-      style={{ ...box(M.x, M.y, M.w, M.h), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden' }}
+      style={{ ...box(M.x, M.y, M.w, M.h), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden', pointerEvents: 'auto' }}
       data-testid={testId}
     >
       <div style={{ ...box(0, 0, M.w, 84.5), background: 'var(--em-band)' }} />
@@ -64,6 +75,7 @@ function Frame({ title, subtitle, children, testId }: { title: string; subtitle:
       <Titles title={title} subtitle={subtitle} w={M.w} y={[25.4, 50.6]} size={[24, 12]} />
       {children}
     </div>
+   </Centered>
   );
 }
 
@@ -367,13 +379,14 @@ export function SmallDialog({
 }) {
   return (
     <Backdrop onClick={onClose}>
+     <Centered>
       <div
         className="em-pop"
         data-em-out="pop"
         role="dialog"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
-        style={{ ...box(332, 259, 360, 250), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden' }}
+        style={{ ...box(332, 259, 360, 250), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden', pointerEvents: 'auto' }}
         data-testid={testId}
       >
         <div style={{ ...box(0, 0, 360, 72), background: 'var(--em-band)' }} />
@@ -382,16 +395,18 @@ export function SmallDialog({
         <div style={{ ...box(28, 96, 304, 88), fontSize: 13, lineHeight: '21px', color: 'var(--em-ink)', textAlign: 'center' }}>{children}</div>
         {actions}
       </div>
+     </Centered>
     </Backdrop>
   );
 }
 
 /** 页面底部的一条提示（加进未下单了、一单最多 30 行……），一会儿自己消失 */
 export function Toast({ text }: { text: string | null }) {
+  const large = useBig();
   if (!text) return null;
   return (
-    <div style={{ ...box(0, 700, 1024), display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-      <span key={text} className="em-toast" role="status" style={{ background: 'rgb(75 57 42 / 0.9)', color: 'var(--em-light)', fontSize: 12, lineHeight: '12px', padding: '9px 16px', borderRadius: 2, letterSpacing: '0.5px' }} data-testid="emenu-toast">
+    <div style={{ ...box(0, large ? 690 : 700, 1024), display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+      <span key={text} className="em-toast" role="status" style={{ background: 'rgb(75 57 42 / 0.9)', color: 'var(--em-light)', fontSize: large ? 16 : 12, lineHeight: large ? '16px' : '12px', padding: large ? '12px 22px' : '9px 16px', borderRadius: 2, letterSpacing: '0.5px' }} data-testid="emenu-toast">
         {text}
       </span>
     </div>

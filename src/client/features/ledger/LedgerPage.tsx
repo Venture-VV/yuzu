@@ -15,10 +15,18 @@ import { Badge, Button, Notice, Segmented, Select, Skeleton } from '../../compon
 import { ReversalDialog, type ReversalTarget } from '../flows/ReversalDialog';
 import { ActivityRow, ENTRY_META } from '../workbench/ActivityList';
 import { DocDrawer } from './DocDrawer';
+import { LedgerTabs } from './LedgerTabs';
+import { OrdersPanel } from './OrdersPanel';
 
 type TypeFilter = 'all' | 'recharge' | 'consume' | 'reversal' | 'expire' | 'opening';
 
+/** 流水页：余额流水（原来的页面）与订单查询（8.0.15）两个页签 */
 export function LedgerPage() {
+  const [params] = useSearchParams();
+  return params.get('tab') === 'orders' ? <OrdersPanel /> : <BalanceLedger />;
+}
+
+function BalanceLedger() {
   const session = useSession();
   const can = useCan();
   const [params, setParams] = useSearchParams();
@@ -93,6 +101,7 @@ export function LedgerPage() {
           )
         }
       />
+      <LedgerTabs value="ledger" />
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-5 py-3 md:px-7">
         <DateNav value={historyAllowed ? date : session.today} today={session.today} locked={!historyAllowed} onChange={(d) => update({ date: d === session.today ? null : d })} />
         <Segmented<TypeFilter>

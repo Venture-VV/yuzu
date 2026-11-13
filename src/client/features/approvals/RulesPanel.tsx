@@ -23,7 +23,7 @@ import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { cn } from '../../lib/utils';
+import { cn, uuid } from '../../lib/utils';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
@@ -138,7 +138,7 @@ function RuleDialog({ rule, open, onClose }: { rule: ApprovalRuleView | null; op
   const refresh = useRefreshAfterApproval();
   const toast = useToast();
   const session = useSession();
-  const [clientKey, setClientKey] = useState(() => crypto.randomUUID());
+  const [clientKey, setClientKey] = useState(() => uuid());
   const [docType, setDocType] = useState<ApprovalDocType>('purchase_order');
   const [min, setMin] = useState('');
   const [max, setMax] = useState('');
@@ -149,7 +149,7 @@ function RuleDialog({ rule, open, onClose }: { rule: ApprovalRuleView | null; op
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useResetOnOpen(open, () => {
-    setClientKey(crypto.randomUUID());
+    setClientKey(uuid());
     setDocType(rule?.docType ?? 'purchase_order');
     setMin(rule ? yuanInput(rule.minCents) : '');
     setMax(rule ? yuanInput(rule.maxCents) : '');

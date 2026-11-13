@@ -257,7 +257,11 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const em = await loadEmenuRules(db);
   const emd = DEFAULT_EMENU_RULES;
   const idleText = (m: number) => (m === 0 ? '不自动回' : `${m} 分钟没人动回到起始页、清掉没下单的菜`);
-  add({ key: 'emenu_rules.enabled', group: 'emenu', label: '平板点餐', value: onOff(em.enabled, '开启（餐桌平板翻菜单，服务员输点单密码确认）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'emenu', current: em.enabled, dflt: emd.enabled, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.enabled', group: 'emenu', label: '平板点餐', value: onOff(em.enabled, '开启（餐桌平板翻菜单、下单）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'emenu', current: em.enabled, dflt: emd.enabled, metaKey: 'emenu_rules' });
+  const pinText = (on: boolean) => (on ? '要（下单、重新提交、作废都要服务员输 6 位点单密码）' : '不要（核对手牌与桌号后直接下单，经办人记平板的账号）');
+  const sizeText = (v: string) => (v === 'design' ? '设计稿原样' : '放大');
+  add({ key: 'emenu_rules.requirePin', group: 'emenu', label: '点单密码', value: pinText(em.requirePin), defaultValue: pinText(emd.requirePin), pending: true, section: 'emenu', current: em.requirePin, dflt: emd.requirePin, metaKey: 'emenu_rules' });
+  add({ key: 'emenu_rules.textSize', group: 'emenu', label: '平板上字与按钮的大小', value: sizeText(em.textSize), defaultValue: sizeText(emd.textSize), pending: true, section: 'emenu', current: em.textSize, dflt: emd.textSize, metaKey: 'emenu_rules' });
   add({ key: 'emenu_rules.avoidOptions', group: 'emenu', label: '忌口选项', value: em.avoidOptions.join('、') || '没有', defaultValue: emd.avoidOptions.join('、'), pending: true, section: 'emenu', hint: '多选，写在这一单每道菜的口味备注上', current: em.avoidOptions, dflt: emd.avoidOptions, metaKey: 'emenu_rules' });
   add({ key: 'emenu_rules.serveOptions', group: 'emenu', label: '起菜方式', value: em.serveOptions.join('、') || '没有', defaultValue: emd.serveOptions.join('、'), pending: true, section: 'emenu', hint: '单选，可以不选', current: em.serveOptions, dflt: emd.serveOptions, metaKey: 'emenu_rules' });
   add({ key: 'emenu_rules.idleMinutes', group: 'emenu', label: '没人动多久回到起始页', value: idleText(em.idleMinutes), defaultValue: idleText(emd.idleMinutes), pending: true, section: 'emenu', current: em.idleMinutes, dflt: emd.idleMinutes, metaKey: 'emenu_rules' });

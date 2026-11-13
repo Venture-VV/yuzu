@@ -1,0 +1,63 @@
+.concierge-workspace .member-insights { display: grid; gap: 20px; min-width: 0; }
+.concierge-workspace .member-overview { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; }
+.concierge-workspace .member-overview-card { background: var(--color-card); border: 1px solid var(--color-moss-soft); border-radius: 14px; padding: 22px; min-width: 0; }
+.concierge-workspace .member-overview-card > span { color: var(--color-ink-3); font-size: 14px; }
+.concierge-workspace .member-overview-card > strong { display: block; margin: 14px 0 10px; font-size: 34px; font-weight: 500; color: var(--color-moss); }
+.concierge-workspace .member-overview-card small,.concierge-workspace .dormancy-card small,.concierge-workspace .grade-count small { margin-left: 7px; font-size: 13px; font-weight: 400; color: var(--color-ink-3); }
+.concierge-workspace .member-overview-card p { color: var(--color-ink-3); font-size: 12px; line-height: 1.7; margin: 0; }
+.concierge-workspace .dormancy-cards { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; }
+.concierge-workspace .dormancy-card { border: 1px solid var(--color-moss-soft); border-radius: 13px; padding: 20px; text-align: left; background: var(--color-card); color: var(--color-moss); min-width: 0; }
+.concierge-workspace .dormancy-card > span { display: block; margin: 14px 0; color: var(--color-ink); font-size: 14px; }
+.concierge-workspace .dormancy-card > strong { font-size: 29px; font-weight: 500; }
+.concierge-workspace .dormancy-card p { font-size: 12px; color: var(--color-ink-3); line-height: 1.6; }
+.concierge-workspace .dormancy-card.selected,.concierge-workspace .member-grade-card.selected { border-color: var(--color-moss); box-shadow: 0 0 0 1px var(--color-moss); background: var(--color-moss-soft); }
+.concierge-workspace .insights-rule { color: var(--color-ink-3); font-size: 13px; line-height: 1.8; margin: 0; }
+.concierge-workspace .member-grade-cards { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 11px; }
+.concierge-workspace .member-grade-card { background: var(--color-card); border: 1px solid var(--color-moss-soft); border-radius: 15px; display: grid; gap: 14px; padding: 22px 16px; text-align: left; min-width: 0; color: var(--color-moss); }
+.concierge-workspace .grade-number { font-size: 24px; font-weight: 600; }
+.concierge-workspace .member-grade-card > strong { font-size: 17px; font-weight: 500; color: var(--color-ink); }
+.concierge-workspace .grade-count { font-size: 25px; }
+.concierge-workspace .grade-card-link { display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: 12px; }
+.concierge-workspace .insights-list { min-width: 0; }
+.concierge-workspace .insights-filters { display: flex; flex-wrap: wrap; gap: 12px; padding: 16px 22px; }
+.concierge-workspace .insights-search { display: flex; gap: 8px; align-items: center; flex: 1 1 240px; border: 1px solid var(--color-moss-soft); border-radius: 8px; padding: 9px 12px; color: var(--color-ink-3); }
+.concierge-workspace .insights-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--color-ink); font-size: 15px; }
+.concierge-workspace .insights-filters select { border: 1px solid var(--color-moss-soft); border-radius: 8px; padding: 9px 12px; background: var(--color-card); color: var(--color-ink); font-size: 14px; min-width: 150px; }
+.concierge-workspace .insights-error { color: var(--color-ink); background: var(--color-moss-soft); padding: 14px 20px; font-size: 14px; line-height: 1.8; }
+.concierge-workspace .insights-empty { padding: 32px 20px; text-align: center; color: var(--color-ink-3); }
+.concierge-workspace .insights-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; padding: 16px 22px; border-top: 1px solid var(--color-moss-soft); }
+.concierge-workspace .insights-pagination > span { margin-right: auto; font-size: 12px; color: var(--color-ink-3); }
+.concierge-workspace .native-preview-content { padding: 20px; display: grid; gap: 24px; }
+.concierge-workspace .native-preview-identity { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.concierge-workspace .native-preview-identity h2 { margin: 0 0 9px; font-size: 24px; overflow-wrap: anywhere; }
+.concierge-workspace .native-preview-identity p { color: var(--color-ink-3); margin-bottom: 10px; }
+.concierge-workspace .native-preview-balance { padding: 22px; border-radius: 12px; background: var(--color-moss-soft); }
+.concierge-workspace .native-preview-balance > span { color: var(--color-ink-3); font-size: 13px; }
+.concierge-workspace .native-preview-balance strong { display: block; margin: 12px 0; font-size: 30px; font-weight: 500; color: var(--color-moss); }
+.concierge-workspace .native-preview-balance p { color: var(--color-ink-3); font-size: 13px; line-height: 1.7; }
+.concierge-workspace .native-preview-facts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
+.concierge-workspace .native-preview-facts dt { color: var(--color-ink-3); font-size: 12px; margin-bottom: 7px; }
+.concierge-workspace .native-preview-facts dd { margin: 0; font-size: 14px; }
+.concierge-workspace .native-profile-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 17px 0; color: var(--color-moss); border-bottom: 1px solid var(--color-moss-soft); }
+@media (max-width: 1100px) {
+ .concierge-workspace .member-overview { grid-template-columns: repeat(2,minmax(0,1fr)); }
+ .concierge-workspace .dormancy-cards { grid-template-columns: repeat(3,minmax(0,1fr)); }
+ .concierge-workspace .member-grade-cards { grid-template-columns: repeat(4,minmax(0,1fr)); }
+}
+@media (max-width: 600px) {
+ .concierge-workspace .member-insights { gap: 15px; }
+ .concierge-workspace .member-overview,.concierge-workspace .dormancy-cards,.concierge-workspace .member-grade-cards { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+ .concierge-workspace .member-overview-card { padding: 16px 12px; }
+ .concierge-workspace .member-overview-card > span { font-size: 12px; }
+ .concierge-workspace .member-overview-card > strong { font-size: 27px; margin: 12px 0; }
+ .concierge-workspace .member-overview-card p { font-size: 11px; }
+ .concierge-workspace .dormancy-card { padding: 16px 12px; }
+ .concierge-workspace .dormancy-card > span { font-size: 13px; line-height: 1.6; }
+ .concierge-workspace .member-grade-card { padding: 18px 14px; }
+ .concierge-workspace .insights-filters { padding: 12px; gap: 9px; }
+ .concierge-workspace .insights-filters select,.concierge-workspace .insights-search input { font-size: 16px; }
+ .concierge-workspace .insights-filters select { flex: 1; min-width: 0; }
+ .concierge-workspace .insights-pagination { padding: 12px; }
+ .concierge-workspace .native-preview-facts { grid-template-columns: 1fr; gap: 17px; }
+ .concierge-workspace .native-preview-identity h2 { font-size: 22px; }
+}

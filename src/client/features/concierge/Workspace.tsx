@@ -1,8 +1,13 @@
 import { ReceiptArchive } from "./Components";
 import { NativeSpendingList } from "./NativeSpending";
-import { MemberIdentityFields, SystemMemberResults, ResourceFields, currentBalance, balanceGroupOf, memberGrade, uniqueMembers, resourceLabel } from "./NativeIntegration";
+import { MemberInsightsView, NativeMemberPreview } from "./MemberInsights";
+import type { InsightMember } from "@shared/concierge/insights-types";
+import { PraiseCenter } from "./PraiseCenter";
+import "./profile-layout.css";
+import { MemberIdentityFields, ResourceFields, currentBalance, balanceGroupOf, memberGrade, uniqueMembers, resourceLabel } from "./NativeIntegration";
 import { loadReceipt, loadWorkspace, pendingRequests } from "./api";
 import { api } from "../../lib/api";
+import { uuid } from "../../lib/utils";
 import { useCan } from "../../lib/session";
 import { conciergeFetch as fetch } from "./api";
 
@@ -64,7 +69,6 @@ import {
   ReceiptEditor,
   ReceiptDetail,
   BalanceDetail,
-  BalanceEvidencePicker,
   applyDraftCatalog,
 } from "./ReceiptExperience";
 import { CatalogManager } from "./CatalogManager";
@@ -78,12 +82,12 @@ type View =
   | "balances"
   | "segments"
   | "receipts"
+  | "receiptArchive"
   | "tasks"
   | "manager";
 type Modal = {
   kind:
     | "member"
-    | "balance"
     | "appointment"
     | "visit"
     | "task"
@@ -93,7 +97,6 @@ type Modal = {
   member?: Member;
   initialNative?: NativeMemberSummary;
   appointment?: Appointment;
-  balance?: Balance;
   visit?: Visit;
   task?: Task;
   staff?: TeamUser;
@@ -103,23 +106,24 @@ const NAV = [
   { id: "dashboard", label: "今日工作台", icon: LayoutDashboard },
   { id: "members", label: "会员档案", icon: Users },
   { id: "appointments", label: "预约与接待", icon: CalendarDays },
-  { id: "receipts", label: "消费凭证", icon: Camera },
+  { id: "receipts", label: "管家好评中心", icon: Sparkles },
   { id: "followup", label: "重点跟进", icon: HeartHandshake },
-  { id: "balances", label: "余额核对", icon: Wallet },
+  { id: "balances", label: "会员情况", icon: Users },
   { id: "tasks", label: "待办与交班", icon: ClipboardList },
   { id: "segments", label: "客户分层", icon: Layers3 },
 ] as const;
 const TITLES: Record<View, [string, string]> = {
   dashboard: ["今日工作台", "把接待、拍单与后续安排，接续在同一份会员档案中。"],
-  members: ["会员档案", "从零建档，全员共享。会员编码与收银卡号分别保存。"],
+  members: ["会员档案", "查看全体系统会员，接续同一份管家服务档案。"],
   appointments: [
     "预约与接待",
     "管家协调预约；正式房间、技师占用请以前台预约为准。",
   ],
-  receipts: ["消费凭证", "拍照识别、核对关键字段，再保存消费记录。"],
+  receipts: ["管家好评中心", "记录被客人认可的服务，让每一份好评都有依据。"],
+  receiptArchive: ["消费凭证历史", "查看历史小票、识别草稿与原始图片。"],
   followup: ["重点跟进", "关注低余额与后续需求，记录实际结果。"],
-  balances: ["余额核对", "人工核对收银余额，保留每次核对依据与历史。"],
-  segments: ["客户分层", "余额分组用于服务跟进，会员卡级别独立管理。"],
+  balances: ["会员情况", "从真实到访记录识别沉睡会员，安排有针对性的服务跟进。"],
+  segments: ["客户分层", "按会员系统的档阶查看分布与会员名单。"],
   tasks: ["待办与交班", "让待回复、待处理和待接收的事项都有下一负责人。"],
   manager: ["经理监管", "从工作汇总追到明细、操作账号与原始凭证。"],
 };
@@ -132,7 +136,8 @@ const APPT_STATUS = [
   "未到店",
 ];
 const TASK_STATUS = ["待处理", "处理中", "待接收", "已接收", "已完成"];
-const uid = (): string => crypto.randomUUID();
+// 操作编号：内网用 http://IP 打开时没有 crypto.randomUUID（只在 HTTPS / localhost 下有），统一用带降级的 uuid()（8.0.15）
+const uid = (): string => uuid();
 function dayKey(value: string | Date = new Date()) {
   const d = typeof value === "string" ? new Date(value) : value;
   return Number.isNaN(d.getTime())
@@ -387,6 +392,7 @@ export default function Workspace({
   const [mobile, setMobile] = useState(false);
   const [modal, setModal] = useState<Modal | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [nativePreviewId, setNativePreviewId] = useState<number | null>(null);
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [drawerTab, setDrawerTab] = useState("timeline");
   const [busy, setBusy] = useState(false);
@@ -400,7 +406,6 @@ export default function Workspace({
     null,
   );
   const [balanceDetailId, setBalanceDetailId] = useState<string | null>(null);
-  const [balanceUploading, setBalanceUploading] = useState(false);
   const [receiptEditor, setReceiptEditor] = useState<{
     receipt?: Receipt;
     draft?: ReceiptDraft;
@@ -472,9 +477,6 @@ export default function Workspace({
     [data.members],
   );
   const member = drawerId ? memberMap.get(drawerId) : undefined;
-  const modalNativeMember = modal?.member
-    ? memberMap.get(modal.member.id)?.nativeMember
-    : undefined;
   const balances = useMemo(() => {
     const m = new Map<string, Balance>();
     for (const b of data.balances) if (!m.has(b.memberId)) m.set(b.memberId, b);
@@ -669,12 +671,11 @@ export default function Workspace({
     const key = uid();
     modalRequest.current = key;
     setModal({ ...value, key });
-    setBalanceUploading(false);
     setDirty(false);
     setError("");
   }
   function closeModal() {
-    if (busy || balanceUploading) return;
+    if (busy) return;
     if (dirty && !confirm("还有未保存的内容，确定关闭吗？")) return;
     setModal(null);
     setDirty(false);
@@ -687,6 +688,11 @@ export default function Workspace({
     setTimelineType("all");
     setTimelineMonth("");
     setTimelineLimit(20);
+  }
+  function openSystemMember(native: InsightMember) {
+    const profile = native.profiles.find((p) => memberMap.has(p.id));
+    if (profile) openMember(profile.id);
+    else setNativePreviewId(native.id);
   }
   function viewReceipt(r: Receipt) {
     setReceiptDetailId(r.id);
@@ -717,7 +723,7 @@ export default function Workspace({
           .toLowerCase()
           .includes(q)) &&
       (!owner || m.ownerId === owner) &&
-      (group === "all" || balanceGroup(m) === group)
+      (group === "all" || (m.nativeMember && String(m.nativeMember.grade) === group))
     );
   };
   const filteredMembers = data.members.filter(matches);
@@ -868,7 +874,7 @@ export default function Workspace({
 
   async function submitModal(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!modal || busy || balanceUploading) return;
+    if (!modal || busy) return;
     const fd = new FormData(e.currentTarget);
     const s = (k: string) => String(fd.get(k) || "").trim();
     let action = "",
@@ -906,27 +912,8 @@ export default function Workspace({
           };
         } else {
           action = "createMember";
-          if (s("openingBalance") !== "")
-            p = {
-              ...p,
-              openingBalance: s("openingBalance"),
-              checkedAt: iso(s("checkedAt")),
-              balanceNote: s("balanceNote"),
-            };
+
         }
-      }
-      if (modal.kind === "balance") {
-        action = "saveBalance";
-        p = {
-          memberId: modal.member!.id,
-          amount: s("amount"),
-          checkedAt: iso(s("checkedAt")),
-          source: s("source"),
-          note: s("note"),
-          expectedBalanceId: modal.balance?.id || null,
-          uploadIds: fd.getAll("uploadIds").map(String),
-          receiptIds: fd.getAll("receiptIds").map(String),
-        };
       }
       if (modal.kind === "appointment") {
         action = modal.appointment ? "updateAppointment" : "createAppointment";
@@ -1050,7 +1037,7 @@ export default function Workspace({
         ¥ {money(amount)}
       </span>
     ) : (
-      <span className="muted">待核对</span>
+      <span className="muted">{m.nativeMemberId ? "系统余额暂不可用" : "待关联系统会员"}</span>
     );
   };
   const memberSelect = (selected = "", name = "memberId", required = true) => (
@@ -1082,7 +1069,7 @@ export default function Workspace({
     kind = "member",
   }: {
     items: Member[];
-    kind?: "member" | "balance" | "followup";
+    kind?: "member" | "followup";
   }) {
     return items.length ? (
       <div className="table-scroll">
@@ -1093,7 +1080,6 @@ export default function Workspace({
               <th>系统档阶 / 会员号</th>
               <th>当前余额</th>
               <th>{kind === "followup" ? "最近跟进" : "负责管家"}</th>
-              <th>人工核对历史</th>
               <th className="text-right">操作</th>
             </tr>
           </thead>
@@ -1133,14 +1119,14 @@ export default function Workspace({
                       className="balance-open-button"
                       onClick={() =>
                         m.nativeMember
-                          ? (openMember(m.id),setDrawerTab("balances"))
+                          ? (openMember(m.id),setDrawerTab("receipts"))
                           : b
                           ? setBalanceDetailId(b.id)
-                          : openModal({ kind: "balance", member: m })
+                          : openMember(m.id)
                       }
                     >
                       <BalanceValue m={m} />
-                      <small>{m.nativeMember ? "系统实时" : "历史核对"}</small>
+                      <small>{m.nativeMember ? "系统实时" : "待关联"}</small>
                       {b && <Eye size={13} />}
                     </button>
                     {balanceGroup(m)==="low" && (
@@ -1164,30 +1150,12 @@ export default function Workspace({
                     )}
                   </td>
                   <td>
-                    {b ? (
-                      <>
-                        {date(b.checkedAt)}
-                        <small className="cell-sub">{b.actorName}</small>
-                      </>
-                    ) : (
-                      "待核对"
-                    )}
-                  </td>
-                  <td>
                     <div className="table-actions">
                       <button
                         className="text-btn"
-                        onClick={() =>
-                          kind === "balance"
-                            ? openModal({
-                                kind: "balance",
-                                member: m,
-                                balance: b,
-                              })
-                            : openMember(m.id)
-                        }
+                        onClick={() => openMember(m.id)}
                       >
-                        {kind === "balance" ? "核对余额" : "查看档案"}
+                        查看档案
                         <ArrowRight size={14} />
                       </button>
                     </div>
@@ -1210,7 +1178,7 @@ export default function Workspace({
         }
         text={
           kind === "followup"
-            ? "余额核对后，需要关注的会员会显示在这里。"
+            ? "系统余额低于3万元的会员会显示在这里。"
             : "选择前台已办理会员，为其建立管家服务记录。"
         }
         action={!data.members.length ? "建立服务档案" : undefined}
@@ -1238,14 +1206,12 @@ export default function Workspace({
         <div className="filter-selects">
           {segments && (
             <select
-              aria-label="余额分组"
+              aria-label="会员档阶"
               value={group}
               onChange={(e) => setGroup(e.target.value)}
             >
-              <option value="all">全部余额分组</option>
-              <option value="low">低于30,000元</option>
-              <option value="normal">30,000元及以上</option>
-              <option value="unknown">余额待核对</option>
+              <option value="all">全部会员档阶</option>
+              {Array.from({ length: 7 }, (_, grade) => <option key={grade} value={grade}>{"L" + grade}</option>)}
             </select>
           )}
           <select
@@ -1600,7 +1566,7 @@ export default function Workspace({
             </button>
           </header>
           <div className="integration-note">
-            会员资料、档阶和余额由前台会员系统实时同步；管家负责服务。人工核对保留作历史依据，不在这里充值、扣款或改档。
+            会员资料、档阶与余额实时同步前台会员系统。
           </div>
           <main className="page-content">
             {success && (
@@ -1647,13 +1613,7 @@ export default function Workspace({
                 <p>{TITLES[view][1]}</p>
               </div>
               <div className="heading-actions">
-                {manager && view === "members" && (
-                  <button className="btn btn-secondary" onClick={exportMembers}>
-                    <ArrowDownToLine size={16} />
-                    导出筛选
-                  </button>
-                )}
-                {view === "receipts" ? (
+                {view === "receiptArchive" ? (
                   <button
                     className="btn btn-primary"
                     onClick={() => setCapture({ memberId: "" })}
@@ -1661,7 +1621,7 @@ export default function Workspace({
                     <Camera size={17} />
                     拍摄消费单
                   </button>
-                ) : view === "tasks" ? (
+                ) : view === "receipts" ? null : view === "tasks" ? (
                   <button
                     className="btn btn-primary"
                     onClick={() => openModal({ kind: "task" })}
@@ -1777,7 +1737,7 @@ export default function Workspace({
                       caption: "识别完成后仍需人工核对",
                       tone: "purple",
                       fn: () => {
-                        navigate("receipts");
+                        navigate("receiptArchive");
                         setReceiptFilter("unconfirmed");
                       },
                     },
@@ -1893,27 +1853,15 @@ export default function Workspace({
                 </section>
               </>
             )}
-            {view === "members" && (
-              <section className="panel">
-                <div className="panel-header">
-                  <div>
-                    <h2>系统会员与管家服务</h2>
-                    <span className="count-tag">{data.members.length}份服务档案</span>
-                  </div>
-                  <span className="muted small">
-                    会员由前台办理，管家只建立服务档案
-                  </span>
-                </div>
-                {FilterBar({})}
-                <SystemMemberResults query={search} onOpen={openMember} onCreate={native=>openModal({kind:"member",initialNative:native})}/>
-                <h3 className="native-service-heading">已建服务档案</h3>
-                {MemberTable({ items: filteredMembers })}
-                <div className="table-footer">
-                  当前筛选 {filteredMembers.length} 份服务档案
-                  <span>全部管家可查看全部会员</span>
-                </div>
-              </section>
-            )}
+            {view === "members" && (<>
+              <MemberInsightsView mode="directory" onOpen={openSystemMember} />
+              {data.members.some((m) => !m.nativeMemberId) && <section className="panel legacy-service-panel">
+                <details><summary>未关联系统会员的历史服务档案（{data.members.filter((m) => !m.nativeMemberId).length}份）</summary>
+                  <p className="insights-rule">历史记录保留；关联前不将人工余额当作当前系统余额。</p>
+                  {MemberTable({ items: data.members.filter((m) => !m.nativeMemberId) })}
+                </details>
+              </section>}
+            </>)}
             {view === "appointments" && (
               <>
                 <div className="info-strip">
@@ -2012,7 +1960,8 @@ export default function Workspace({
                 </section>
               </>
             )}
-            {view === "receipts" && (
+            {view === "receipts" && <PraiseCenter data={data} busy={busy} saveError={error} onMutate={mutate} />}
+            {view === "receiptArchive" && (
               <>
                 <div className="info-strip">
                   <ShieldCheck size={16} />
@@ -2085,7 +2034,7 @@ export default function Workspace({
                 <div className="info-strip warm">
                   <Bell size={16} />
                   <span>
-                    系统当前余额严格低于30,000元的会员列入重点；旧未关联档案按历史核对值，未知单列。低余额不取消管家服务。
+                    系统当前余额严格低于30,000元的会员列入重点；未关联档案不按人工金额计入。低余额不取消管家服务。
                   </span>
                 </div>
                 <section className="panel">
@@ -2115,111 +2064,8 @@ export default function Workspace({
                 </section>
               </>
             )}
-            {view === "balances" && (
-              <>
-                <div className="info-strip">
-                  <ShieldCheck size={16} />
-                  <span>
-                    已关联会员显示系统实时本金与可用赠金；人工核对记录保留作历史依据，不改系统钱包。
-                  </span>
-                </div>
-                <section className="stats-grid balance-stats">
-                  {[
-                    {
-                      label: "系统余额合计（同一会员去重）",
-                      value: `¥ ${money(checkedTotal)}`,
-                    },
-                    { label: "已有余额记录", value: `${balances.size} 位` },
-                    {
-                      label: "余额待核对",
-                      value: `${servedMembers.filter(m=>currentBalance(m,balances.get(m.id))==null).length} 位`,
-                    },
-                    { label: "低余额关注", value: `${lowMembers.length} 位` },
-                  ].map((s) => (
-                    <div className="stat-card" key={s.label}>
-                      <div className="stat-top">{s.label}</div>
-                      <div className="stat-value">{s.value}</div>
-                    </div>
-                  ))}
-                </section>
-                <section className="panel">
-                  <div className="panel-header">
-                    <div>
-                      <h2>会员余额核对</h2>
-                      <span className="count-tag">人工核对</span>
-                    </div>
-                  </div>
-                  {FilterBar({})}
-                  {MemberTable({ items: filteredMembers, kind: "balance" })}
-                </section>
-              </>
-            )}
-            {view === "segments" && (
-              <>
-                <div className="segments-grid">
-                  {[
-                    {
-                      id: "low",
-                      name: "低余额关注",
-                      detail: "当前余额 < 30,000元",
-                      count: lowMembers.length,
-                      tone: "orange",
-                      icon: Bell,
-                    },
-                    {
-                      id: "normal",
-                      name: "3万元及以上",
-                      detail: "当前余额 ≥ 30,000元",
-                      count: servedMembers.filter(
-                        (m) => balanceGroup(m) === "normal",
-                      ).length,
-                      tone: "green",
-                      icon: ShieldCheck,
-                    },
-                    {
-                      id: "unknown",
-                      name: "余额暂不可用",
-                      detail: "待关联或核实余额来源",
-                      count: servedMembers.filter(
-                        (m) => balanceGroup(m) === "unknown",
-                      ).length,
-                      tone: "gray",
-                      icon: Clock3,
-                    },
-                  ].map((s) => (
-                    <button
-                      key={s.id}
-                      className={`segment-card ${s.tone} ${group === s.id ? "selected" : ""}`}
-                      onClick={() => setGroup(group === s.id ? "all" : s.id)}
-                    >
-                      <span className="segment-icon">
-                        <s.icon size={21} />
-                      </span>
-                      <span className="segment-count">
-                        {s.count}
-                        <small>位</small>
-                      </span>
-                      <strong>{s.name}</strong>
-                      <p>{s.detail}</p>
-                      <span className="segment-link">
-                        查看会员
-                        <ArrowRight size={14} />
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                <div className="info-strip">
-                  <Layers3 size={16} />
-                  <span>
-                    会员卡级别与余额分组分别保存，不用余额自动定义服务资格或客户价值。
-                  </span>
-                </div>
-                <section className="panel">
-                  {FilterBar({})}
-                  {MemberTable({ items: filteredMembers })}
-                </section>
-              </>
-            )}
+            {view === "balances" && <MemberInsightsView mode="situation" onOpen={openSystemMember} />}
+            {view === "segments" && <MemberInsightsView mode="tiers" onOpen={openSystemMember} />}
             {view === "tasks" && (
               <section className="panel">
                 <div className="panel-header">
@@ -2309,7 +2155,7 @@ export default function Workspace({
                           count: receipts.filter((r) => r.status === "待复核")
                             .length,
                           fn: () => {
-                            navigate("receipts");
+                            navigate("receiptArchive");
                             setReceiptFilter("待复核");
                           },
                         },
@@ -2751,11 +2597,9 @@ export default function Workspace({
                       <div className="backup-secondary">
                         <button
                           className="btn btn-secondary"
-                          onClick={() => {
-                            navigate("members");
-                          }}
+                          onClick={exportMembers}
                         >
-                          会员筛选与CSV导出
+                          导出管家服务档案
                           <ArrowRight size={14} />
                         </button>
                         <button
@@ -2771,7 +2615,7 @@ export default function Workspace({
                 )}
               </>
             )}
-            {view === "receipts" && (
+            {view === "receiptArchive" && (
               <ReceiptArchive
                 onSelect={(r) => {
                   setData((d) => ({
@@ -2799,18 +2643,13 @@ export default function Workspace({
           {[
             { id: "dashboard", label: "今日", icon: LayoutDashboard },
             { id: "members", label: "会员", icon: Users },
-            { id: "receipts", label: "拍单", icon: Camera },
+            { id: "receipts", label: "好评", icon: Sparkles },
             { id: "tasks", label: "待办", icon: ClipboardList },
           ].map((n) => (
             <button
               key={n.id}
               className={view === n.id ? "active" : ""}
-              onClick={() => {
-                if (n.id === "receipts") {
-                  navigate("receipts");
-                  setCapture({ memberId: "" });
-                } else navigate(n.id as View);
-              }}
+              onClick={() => navigate(n.id as View)}
             >
               <n.icon size={20} />
               <span>{n.label}</span>
@@ -2818,11 +2657,16 @@ export default function Workspace({
             </button>
           ))}
         </nav>
+        {nativePreviewId != null && <NativeMemberPreview id={nativePreviewId}
+          onClose={() => setNativePreviewId(null)}
+          onCreate={(native) => { setNativePreviewId(null); openModal({ kind: "member", initialNative: native }); }}
+          onOpenService={(id) => { setNativePreviewId(null); openMember(id); }} />}
         {member && (
           <div className="drawer-layer">
             <div className="drawer-scrim" onClick={() => setDrawerId(null)} />
             <aside
-              className="member-drawer"
+              key={member.id}
+              className="member-drawer service-member-drawer"
               aria-label={`${member.name}的会员档案`}
             >
               <div className="drawer-heading">
@@ -2858,35 +2702,17 @@ export default function Workspace({
               </div>
               <div className="drawer-balance">
                 <div>
-                  <small>{member.nativeMember ? "系统实时余额" : "历史人工核对余额"}</small>
+                  <small>{member.nativeMember ? "系统实时余额" : "系统余额待关联"}</small>
                   <strong>
                     <BalanceValue m={member} />
                   </strong>
                   <p>
                     {member.nativeMember
                       ? `本金 ¥${money(member.nativeMember.principalCents)} ＋ 赠金 ¥${money(member.nativeMember.bonusCents)} · 与前台同步`
-                      : balances.get(member.id)
-                      ? `${date(balances.get(member.id)!.checkedAt)} · ${balances.get(member.id)!.actorName}`
-                      : "尚未核对，不按零余额处理"}
+: "请关联前台会员，历史人工记录可在历史核对页查看"}
                   </p>
                 </div>
-                <button
-                  className="btn btn-primary small-btn"
-                  onClick={() =>
-                    openModal({
-                      kind: "balance",
-                      member,
-                      balance: balances.get(member.id),
-                    })
-                  }
-                >
-                  新增人工核对记录
-                </button>
               </div>
-              {member.nativeMember && <div className="detail-notice balance-source-explanation">
-                <Wallet size={15}/><span>上方是会员系统当前余额。新增人工核对只保存依据，不充值、不扣款，也不覆盖上方数字。
-                {balances.get(member.id) && <> 最近人工核对 ¥{money(balances.get(member.id)!.amountCents)}（{date(balances.get(member.id)!.checkedAt)}），相对当前系统余额差额 ¥{money(balances.get(member.id)!.amountCents-member.nativeMember.totalCents)}。历史时点与后续充值、消费可能不同；如核对不一致，请交前台核实原单。</>}</span>
-              </div>}
               <div className="member-quick-actions">
                 <button
                   onClick={() => openModal({ kind: "appointment", member })}
@@ -2911,7 +2737,7 @@ export default function Workspace({
                 {[
                   ["timeline", "全程记录"],
                   ["overview", "基本档案"],
-                  ["balances", "余额历史"],
+                  ["balances", "历史核对"],
                   ["receipts", "消费记录"],
                   ["notes", "服务记录"],
                 ].map(([id, label]) => (
@@ -2970,7 +2796,7 @@ export default function Workspace({
                     </div>
                     <div className="detail-notice">
                       <ShieldCheck size={15} />
-                      会员身份、档阶和余额实时同步；服务档案编号只用于管家记录。余额分组不改变服务资格。
+                      会员身份、档阶和余额实时同步；服务档案编号只用于管家记录。
                     </div>
                     <h3 className="detail-section-title">当前未结事项</h3>
                     {TaskList({
@@ -3178,8 +3004,8 @@ export default function Workspace({
                     ) : (
                       <Empty
                         icon={Wallet}
-                        title="尚未核对余额"
-                        text="余额未知与已核对零余额分别处理。"
+                        title="没有历史人工核对记录"
+                        text="当前余额以会员系统为准。"
                       />
                     )}
                   </>
@@ -3271,9 +3097,7 @@ export default function Workspace({
                 ? modal.member
                   ? "编辑服务档案"
                   : "建立管家服务档案"
-                : modal.kind === "balance"
-                  ? "核对会员余额"
-                  : modal.kind === "appointment"
+                : modal.kind === "appointment"
                     ? modal.appointment
                       ? "查看 / 调整预约"
                       : "登记新预约"
@@ -3337,7 +3161,7 @@ export default function Workspace({
                           placeholder="现场接待、同事介绍等"
                         />
                       </Field>
-                      <Field label="客户主动表达的偏好" wide>
+                      <Field label="备注（客户主动表达的偏好）" wide>
                         <textarea
                           name="preferences"
                           rows={3}
@@ -3357,108 +3181,7 @@ export default function Workspace({
                         </Field>
                       )}
                     </div>
-                    {!modal.member && (
-                      <details className="optional-fields">
-                        <summary>建立时的人工核对留档（选填）</summary>
-                        <div className="form-grid">
-                          <Field label="收银核实余额（元）">
-                            <input
-                              name="openingBalance"
-                              inputMode="decimal"
-                              pattern="[0-9]+(\.[0-9]{1,2})?"
-                              maxLength={15}
-                              placeholder="未核对请留空"
-                            />
-                          </Field>
-                          <Field label="核对时间（中国时间）">
-                            <input
-                              name="checkedAt"
-                              type="datetime-local"
-                              defaultValue={localTime()}
-                            />
-                          </Field>
-                          <Field label="核对依据" wide>
-                            <input
-                              name="balanceNote"
-                              maxLength={500}
-                              placeholder="如：已与收银查询结果核实"
-                            />
-                          </Field>
-                        </div>
-                      </details>
-                    )}
-                  </>
-                )}
-                {modal.kind === "balance" && (
-                  <>
-                    {modalNativeMember && <p className="detail-notice">系统当前余额 ¥{money(modalNativeMember.totalCents)}，由前台同步。下面填写的金额只保存为人工核对依据，不会覆盖系统余额；如有差异，请核对充值、消费与原始凭证。</p>}
-                    <div className="form-member-summary">
-                      <span className="avatar">
-                        {initial(modal.member!.name)}
-                      </span>
-                      <div>
-                        <strong>
-                          {modal.member!.code} · {modal.member!.name}
-                        </strong>
-                        <small>
-                          上次记录：
-                          {modal.balance
-                            ? `¥ ${money(modal.balance.amountCents)} · ${date(modal.balance.checkedAt)}`
-                            : "尚未核对"}
-                        </small>
-                      </div>
-                    </div>
-                    <div className="form-grid">
-                      <Field label="收银核实后总余额（元） *" wide>
-                        <div className="amount-input">
-                          <span>¥</span>
-                          <input
-                            name="amount"
-                            required
-                            inputMode="decimal"
-                            pattern="[0-9]+(\.[0-9]{1,2})?"
-                            maxLength={15}
-                            defaultValue={amount(modal.balance?.amountCents)}
-                            placeholder="0.00"
-                          />
-                        </div>
-                      </Field>
-                      <Field label="核对发生时间（中国时间） *">
-                        <input
-                          name="checkedAt"
-                          type="datetime-local"
-                          required
-                          defaultValue={localTime()}
-                        />
-                      </Field>
-                      <Field label="核对来源 *">
-                        <input
-                          name="source"
-                          required
-                          maxLength={100}
-                          defaultValue="收银系统查询"
-                        />
-                      </Field>
-                      <Field label="核对依据 / 更正说明 *" wide>
-                        <textarea
-                          name="note"
-                          required
-                          rows={3}
-                          maxLength={1000}
-                          placeholder="填写核对依据；更正上次金额时说明原因"
-                        />
-                      </Field>
-                    </div>
-                    <div className="detail-notice">
-                      <ShieldCheck size={15} />
-                      保存后新增记录，原核对值保留。差异不自动记成充值或消费。
-                    </div>
-                    <BalanceEvidencePicker
-                      memberId={modal.member!.id}
-                      receipts={receipts}
-                      onUploading={setBalanceUploading}
-                      onDirty={() => setDirty(true)}
-                    />
+
                   </>
                 )}
                 {modal.kind === "appointment" && (
@@ -3889,7 +3612,6 @@ export default function Workspace({
                   className="btn btn-primary"
                   disabled={
                     busy ||
-                    balanceUploading ||
                     (["appointment", "visit", "task"].includes(modal.kind) &&
                       !data.members.length)
                   }
@@ -3899,11 +3621,7 @@ export default function Workspace({
                   ) : (
                     <Check size={15} />
                   )}{" "}
-                  {balanceUploading
-                    ? "等待图片上传"
-                    : busy
-                      ? "正在保存…"
-                      : "保存"}
+                  {busy ? "正在保存…" : "保存"}
                 </button>
               </div>
             </form>
@@ -3966,6 +3684,7 @@ export default function Workspace({
                 data.balances.find((b) => b.id === balanceDetailId)!.memberId,
               )}
               receipts={receipts}
+              readOnly
               busy={busy}
               error={error}
               onClose={() => {

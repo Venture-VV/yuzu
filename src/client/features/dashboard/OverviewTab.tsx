@@ -9,6 +9,7 @@ import { api } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { Money } from '../../components/Money';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
+import { DepartmentItemsCard } from './DepartmentItems';
 import { Columns, HBars, Kpi, PeriodPicker, presetRange, yuan, yuanShort, type Period } from './charts';
 
 const people = (n: number) => `${n} 位`;
@@ -131,6 +132,8 @@ export function OverviewTab() {
                 <HBars format={yuan} empty="这段时间没有结账" rows={d.byMethod.map((m) => ({ key: m.method, label: CHECKOUT_METHOD_LABELS[m.method], value: m.amount }))} />
               </Card>
             </div>
+
+            <DepartmentItemsCard report={d} />
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
               <Card className="p-5">

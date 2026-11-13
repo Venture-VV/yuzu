@@ -63,6 +63,11 @@ export interface ExecutiveReport {
   /** 部门（项目分类）构成：结账时记下的快照（v0.7.6），反结账的冲回 */
   departments: DepartmentRevenue[];
   topItems: { name: string; category: string; quantity: number; amount: number }[];
+  /**
+   * 部门 × 项目明细（8.0.15，docs/ORDERS_V8015.md 第 3 节）：与 departments 同一份快照、同一个口径，
+   * 每个部门各项相加 = departments 里这个部门的数；按部门的销售金额从大到小、部门内按销售金额从大到小排好
+   */
+  items: DepartmentItem[];
   /** 到店时段：各小时接待的人数（撤销误开的不计） */
   arrivals: { hour: number; count: number }[];
 }
@@ -112,6 +117,73 @@ export interface DepartmentRevenue {
   /** 退款单退的金额（v0.7.20，按退款的营业日）；净额 = 应收 − 优惠 − 退款 */
   refund: number;
 }
+
+/** 部门里的一个项目（8.0.15）：字段的含义与 DepartmentRevenue 相同，净额 = 销售金额 − 优惠 − 退款 */
+export interface DepartmentItem extends DepartmentRevenue {
+  /** 项目名称（结账时记下的名称） */
+  name: string;
+}
+
+export interface DepartmentItemRow extends DepartmentItem {
+  net: number;
+  /** 占该部门销售金额的比例（0–1）；这个部门的销售金额不是正数（时段里只有反结账冲回）时为 null */
+  share: number | null;
+}
+
+export interface DepartmentItemGroup {
+  category: string;
+  quantity: number;
+  amount: number;
+  discount: number;
+  refund: number;
+  net: number;
+  /** 这个部门占全部销售金额的比例（0–1）；合计不是正数时为 null */
+  share: number | null;
+  items: DepartmentItemRow[];
+}
+
+export interface DepartmentItemTable {
+  groups: DepartmentItemGroup[];
+  total: { quantity: number; amount: number; discount: number; refund: number; net: number };
+}
+
+/**
+ * 把部门 × 项目明细分好组、算好小计、占比与合计（页面与导出的 CSV 用同一份，数字不会两样）。
+ * 部门按销售金额从大到小（同额按名称），部门内按销售金额从大到小（同额按数量、名称）。
+ */
+export function departmentItemTable(items: readonly DepartmentItem[]): DepartmentItemTable {
+  const byCat = new Map<string, DepartmentItem[]>();
+  for (const i of items) byCat.set(i.category, [...(byCat.get(i.category) ?? []), i]);
+  const sum = (list: readonly DepartmentItem[]) => {
+    const t = { quantity: 0, amount: 0, discount: 0, refund: 0, net: 0 };
+    for (const i of list) {
+      t.quantity += i.quantity;
+      t.amount += i.amount;
+      t.discount += i.discount;
+      t.refund += i.refund;
+    }
+    t.net = t.amount - t.discount - t.refund;
+    return t;
+  };
+  const total = sum(items);
+  const groups = [...byCat.entries()]
+    .map(([category, list]): DepartmentItemGroup => {
+      const t = sum(list);
+      return {
+        category,
+        ...t,
+        share: total.amount > 0 && t.amount >= 0 ? t.amount / total.amount : null,
+        items: [...list]
+          .sort((a, b) => b.amount - a.amount || b.quantity - a.quantity || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+          .map((i) => ({ ...i, net: i.amount - i.discount - i.refund, share: t.amount > 0 && i.amount >= 0 ? i.amount / t.amount : null })),
+      };
+    })
+    .sort((a, b) => b.amount - a.amount || (a.category < b.category ? -1 : a.category > b.category ? 1 : 0));
+  return { groups, total };
+}
+
+/** 占比的写法：一位小数的百分数（35.2%）；没有（null）写「—」 */
+export const sharePercent = (share: number | null): string => (share === null ? '—' : `${(Math.round(share * 1000) / 10).toFixed(1)}%`);
 
 /** 今日看板追加的值班数据 */
 export interface DutyExtras {

@@ -13,6 +13,7 @@ import { setTxTimeouts } from "../../lib/tx";
 import { mapActor, listTeam, requireMember } from "./store";
 import { buildReceipt } from "./receipt";
 import { canonicalMemberId, nativeResourceOptions, resourceColumns } from "./native-links";
+import { executePraise } from "./praise";
 import { memberFamily } from "../membership";
 import {
   WorkspaceError,
@@ -800,7 +801,9 @@ export async function mutate(
           );
         return old.response;
       }
-      const response = await execute(tx, actor, action, p, ip);
+      const response = action === "savePraise" || action === "voidPraise"
+        ? await executePraise(tx, actor, action, p, deps.config.timezone, ip)
+        : await execute(tx, actor, action, p, ip);
       await bumpRevision(tx);
       await tx`INSERT INTO concierge_operations(actor_id,request_id,request_hash,response) VALUES(${actor.id},${key},${hash},${tx.json(response)})`;
       return response;

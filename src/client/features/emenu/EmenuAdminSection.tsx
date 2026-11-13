@@ -59,6 +59,7 @@ import { AdminPage } from '../admin/AdminShell';
 import { Header } from './header';
 import { LangProvider } from './i18n';
 import { PageCanvas } from './pages';
+import { BigProvider } from './stage';
 import './emenu.css';
 
 const adminKey = ['admin', 'emenu'] as const;
@@ -170,7 +171,7 @@ function Checklist({ data, onSettings, onDishes }: { data: EmenuAdmin; onSetting
         」的桌台里改成带编号的名称
       </>,
     );
-  if (data.pinHolders === 0)
+  if (data.rules.requirePin && data.pinHolders === 0)
     todo.push(
       <>
         还没有员工有点单密码（服务员在平板上确认下单用）：到「
@@ -193,7 +194,7 @@ function Checklist({ data, onSettings, onDishes }: { data: EmenuAdmin; onSetting
   if (todo.length === 0) {
     return (
       <Notice tone="success" title="平板点餐已开启" data-testid="emenu-admin-status">
-        {data.tabletAccounts} 个点餐平板账号、{data.pinHolders} 位员工有点单密码。这里保存的改动，平板上 15 秒内跟上。
+        {data.tabletAccounts} 个点餐平板账号{data.rules.requirePin ? `、${data.pinHolders} 位员工有点单密码` : '，下单不要点单密码'}。这里保存的改动，平板上 15 秒内跟上。
       </Notice>
     );
   }
@@ -253,10 +254,13 @@ function PagePreview({ page, category, data, scale }: { page: EmenuPageAdmin; ca
       data-testid="emenu-admin-preview"
     >
       <div style={{ position: 'absolute', left: 0, top: 0, width: 1024, height: 768, transform: `scale(${scale})`, transformOrigin: '0 0', pointerEvents: 'none' }}>
-        <LangProvider value={lang}>
-          <PageCanvas page={{ layout: page.layout, title: page.title, titleEn: page.titleEn, dishes }} ctx={{ categoryName: category.name, categoryNameEn: category.nameEn, open: true, preview: true }} />
-          <Header categories={tabs} activeId={category.id} onCategory={noop} tagCode="A8060" count={0} bump={0} pending={false} onSearch={noop} onOrder={noop} onTag={noop} onLang={data.rules.langSwitch ? noop : undefined} />
-        </LangProvider>
+        {/* 预览跟着设置里「字与按钮的大小」：平板上放大，这里也放大 */}
+        <BigProvider value={data.rules.textSize !== 'design'}>
+          <LangProvider value={lang}>
+            <PageCanvas page={{ layout: page.layout, title: page.title, titleEn: page.titleEn, dishes }} ctx={{ categoryName: category.name, categoryNameEn: category.nameEn, open: true, preview: true }} />
+            <Header categories={tabs} activeId={category.id} onCategory={noop} tagCode="A8060" count={0} bump={0} pending={false} onSearch={noop} onOrder={noop} onTag={noop} onLang={data.rules.langSwitch ? noop : undefined} />
+          </LangProvider>
+        </BigProvider>
       </div>
     </div>
   );
@@ -1342,7 +1346,7 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
       <div className="min-w-[220px] flex-1">
         <p className="flex items-center gap-2 text-[14px] font-bold">
           {label}
-          {pending && <PendingBadge title="先按常见做法定的默认，待店主确认（PENDING_DECISIONS.md「8.0.10」「8.0.13」）" />}
+          {pending && <PendingBadge title="先按常见做法定的默认，待店主确认（PENDING_DECISIONS.md「8.0.10」「8.0.13」「8.0.15」）" />}
         </p>
         <p className="text-[12.5px] leading-relaxed text-ink-3">{hint}</p>
       </div>
@@ -1357,7 +1361,7 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
         {row(
           '平板点餐',
           <>
-            开启后「点餐平板」账号登录直接进点餐页，客人翻菜单、加菜，服务员输点单密码确认，菜挂到手牌、进厨房屏。关闭时点餐页提示没有开启，其余与升级前一样。
+            开启后「点餐平板」账号登录直接进点餐页，客人翻菜单、加菜，核对手牌与桌号后下单（下面「点单密码」开着时还要服务员输密码确认），菜挂到手牌、进厨房屏。关闭时点餐页提示没有开启，其余与升级前一样。
             {!data.diningEnabled && <b className="text-clay"> 餐饮功能还没开（后台「餐饮」），开了这里也用不了。</b>}
           </>,
           <Segmented
@@ -1369,6 +1373,24 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
               { value: 'on', label: '开启' },
             ]}
           />,
+        )}
+        {row(
+          '点单密码',
+          <>
+            <b>不要</b>（默认）：平板上核对手牌、桌号、人数后直接下单，这一单的经办人记这台平板登录的账号。
+            <b className="ml-1">要</b>：下单、重新提交、作废都要服务员输自己的 6 位点单密码，经办人记这位服务员（密码在「员工账号」里生成）。
+            <span className="text-clay"> 不要密码时，拿到平板的人知道一张在店手牌的号码就能往它上面点菜，平板请交给服务员或放在看得到的地方。</span>
+          </>,
+          <Segmented
+            ariaLabel="点单密码"
+            value={draft.requirePin ? 'on' : 'off'}
+            onChange={(v) => set({ requirePin: v === 'on' })}
+            options={[
+              { value: 'off', label: '不要' },
+              { value: 'on', label: '要' },
+            ]}
+          />,
+          true,
         )}
         {row(
           '起始页的氛围大图',
@@ -1438,6 +1460,20 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
             options={[
               { value: 'rich', label: '丰富' },
               { value: 'simple', label: '简洁' },
+            ]}
+          />,
+          true,
+        )}
+        {row(
+          '字与按钮的大小',
+          '「放大」（默认）：菜名、介绍、价格、加号、顶栏、订单抽屉与弹窗都大一档，位置重新排过，看得清、好点。「设计稿原样」：照设计师量的像素，字比较小。',
+          <Segmented
+            ariaLabel="字与按钮的大小"
+            value={draft.textSize}
+            onChange={(v) => set({ textSize: v })}
+            options={[
+              { value: 'large', label: '放大' },
+              { value: 'design', label: '设计稿原样' },
             ]}
           />,
           true,

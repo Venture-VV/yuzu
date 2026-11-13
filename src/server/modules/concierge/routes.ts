@@ -17,6 +17,8 @@ import { mutate, moduleLock, bumpRevision } from "./mutations";
 import { WorkspaceError, text, uuid } from "./validation";
 import { nativeMemberSummary, nativeRevision, searchNativeMembers } from "./native-links";
 import { nativeSpending } from "./spending";
+import { registerConciergeInsightsRoutes } from "./insights";
+import { registerConciergePraiseRoutes } from "./praise";
 const object = (v: unknown): Record<string, any> => {
   if (!v || typeof v !== "object" || Array.isArray(v))
     throw new WorkspaceError("请求格式不正确");
@@ -58,6 +60,8 @@ function sniff(buf: Buffer) {
 }
 export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
+  registerConciergeInsightsRoutes(app, deps);
+  registerConciergePraiseRoutes(app, deps);
   app.get('/api/concierge/members/:id/spending', {preHandler:guard('concierge.read')}, async(req,reply)=>run(async()=>{
     reply.header('Cache-Control','private, no-store');
     const offset=Number(object(req.query).offset||0);
@@ -461,6 +465,8 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
             "concierge_revisions",
             "concierge_operations",
             "concierge_balance_evidence",
+            "concierge_praise",
+            "concierge_praise_evidence",
           ];
           const tables: Record<string, unknown> = {};
           for (const name of names)

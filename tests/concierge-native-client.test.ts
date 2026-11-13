@@ -34,7 +34,8 @@ describe("concierge native presentation semantics", () => {
     expect(currentBalance(m, manual)).toBe(0);
     expect(memberGrade(m)).toBe("L4 望岳 · 享");
     expect(currentBalance({ ...m, nativeMember: null }, manual)).toBeNull();
-    expect(currentBalance(member("old"), manual)).toBe(9999999);
+    expect(currentBalance(member("old"), manual)).toBeNull();
+    expect(balanceGroupOf(member("old"), manual)).toBe("unknown");
     expect(currentBalance(member("unknown"))).toBeNull();
   });
   it("merged members count once, while unrelated legacy extensions remain distinct", () => {

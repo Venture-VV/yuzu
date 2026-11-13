@@ -19,12 +19,8 @@ export const memberGrade = (m: Member) =>
   (m.nativeMemberId ? "系统档阶暂不可用" : "待关联系统会员");
 export const resourceLabel = (a: Appointment) =>
   a.nativeResource?.label || a.resource || a.resourceGroup || "";
-export function currentBalance(m: Member, manual?: Balance): number | null {
-  return m.nativeMember
-    ? m.nativeMember.totalCents
-    : m.nativeMemberId
-      ? null
-      : (manual?.amountCents ?? null);
+export function currentBalance(m: Member, _manual?: Balance): number | null {
+  return m.nativeMember ? m.nativeMember.totalCents : null;
 }
 export function balanceGroupOf(m: Member, manual?: Balance) {
   const value = currentBalance(m, manual);

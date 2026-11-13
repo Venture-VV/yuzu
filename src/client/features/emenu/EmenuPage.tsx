@@ -31,11 +31,11 @@ import { uuid } from '../../lib/utils';
 import { Header, LangToggle } from './header';
 import { blockLabel, dishNames, dishTagline, guestErrorEn, LangProvider, messages, namePair, optionLabel, specLabel, useLang, useM, type Lang, type Messages } from './i18n';
 import { LogoStacked } from './logo';
-import { Backdrop, InfoModal, ModalButton, ModalNote, SmallDialog, SuccessModal, Toast, type InfoField } from './modals';
+import { Backdrop, Frame, InfoModal, ModalButton, ModalNote, SmallDialog, SuccessModal, Toast, type InfoField } from './modals';
 import { DishDetail, OrderDrawer, RemarkDrawer, SearchOverlay, type CartRow, type SearchHit } from './overlays';
 import { flyToOrder, overlayNav } from './motion';
 import { PageCanvas, yuan, type PageCtx } from './pages';
-import { box, Stage } from './stage';
+import { BIG, box, Stage, useBig, ZoomAt } from './stage';
 import { MenuStrip, type StripHandle } from './strip';
 import {
   EMPTY_REMARK,
@@ -245,6 +245,8 @@ export function EmenuPage() {
   const cartProblem = rows.length === 0 ? m.cartEmpty : (rows.find((r) => r.problem) ? m.cartHasBlocked : null);
   // 页面上显示的备注（切到英文时选项显示英文）；送进厨房的仍是中文选项，由门店系统按交上去的选项拼
   const optionsEn = menu?.rules.optionsEn ?? {};
+  // 下单要不要服务员输点单密码（后台设置，8.0.15 起默认不要）；菜单还没取到时按不要
+  const requirePin = menu?.rules.requirePin ?? false;
   const remarkText = [...remark.avoid.map((o) => optionLabel(o, shown, optionsEn)), ...(remark.serve ? [optionLabel(remark.serve, shown, optionsEn)] : []), ...(remark.custom.trim() ? [remark.custom.trim()] : [])].join(shown === 'en' ? ', ' : '，');
 
   const addSpec = useCallback(
@@ -346,6 +348,8 @@ export function EmenuPage() {
             return rejected(error.message);
           }
           if (pinProblem) {
+            // 后台刚把「点单密码」打开或关掉：取一次最新的设置，弹窗跟着变
+            void qc.invalidateQueries({ queryKey: MENU_KEY });
             setOpNote({ error: `${error.message}（原来那一单仍待确认）` });
             return { outcome: 'uncertain' };
           }
@@ -379,7 +383,7 @@ export function EmenuPage() {
         opEnd();
       }
     },
-    [finish, setOverlay],
+    [finish, setOverlay, qc],
   );
 
   const settle = useCallback(
@@ -404,13 +408,13 @@ export function EmenuPage() {
     if (!pending) return;
     opBegin();
     try {
-      settle(pending.key, await api.get<EmenuOpLookup>(`/api/emenu/orders/by-key/${pending.key}`), '暂时没有查到已经下单，原来的请求可能还在路上。可以输点单密码重新提交（不会重复），或者作废后重填。');
+      settle(pending.key, await api.get<EmenuOpLookup>(`/api/emenu/orders/by-key/${pending.key}`), `暂时没有查到已经下单，原来的请求可能还在路上。可以${requirePin ? '输点单密码' : ''}重新提交（不会重复），或者作废后重填。`);
     } catch (error) {
       setOpNote({ error: `还是确认不了：${errorMessage(error)}` });
     } finally {
       opEnd();
     }
-  }, [pending, settle]);
+  }, [pending, settle, requirePin]);
 
   const abandonPending = useCallback(
     async (pin: string) => {
@@ -531,7 +535,7 @@ export function EmenuPage() {
   // 抽屉里换内容（未下单 ⇄ 备注）：新的那一块不重新滑进来
   const swap = cameFrom.current === 'drawer' || cameFrom.current === 'remark';
   return (
-    <Stage testId="emenu" motion={menu.rules.motion} lang={shown}>
+    <Stage testId="emenu" motion={menu.rules.motion} lang={shown} big={menu.rules.textSize !== 'design'}>
       <LangProvider value={shown}>
       {inMenu ? (
         <>
@@ -626,6 +630,7 @@ export function EmenuPage() {
           remarkText={remarkText}
           locked={!!pending}
           problem={cartProblem}
+          callStaff={requirePin}
           onQuantity={setQuantity}
           onRemark={() => setOverlay({ kind: 'remark' })}
           onSubmit={() => {
@@ -651,6 +656,7 @@ export function EmenuPage() {
       {inMenu && overlay?.kind === 'confirm' && (
         <ConfirmOrder
           session={session}
+          requirePin={requirePin}
           busy={opBusy}
           note={opNote}
           onCancel={() => {
@@ -686,6 +692,7 @@ export function EmenuPage() {
       {overlay?.kind === 'pending' && pending && (
         <PendingOrderModal
           pending={pending}
+          requirePin={requirePin}
           busy={opBusy}
           note={opNote}
           onClose={() => {
@@ -823,6 +830,7 @@ function StartPage({
   const cover = menu.rules.coverUrl;
   // 压在氛围图上的字：有图时用浅色（图一般偏深），没图时照设计稿的深棕
   const tone = cover ? '#f4f3f2' : 'var(--em-ink)';
+  const large = useBig();
   return (
     <>
       <div
@@ -840,7 +848,7 @@ function StartPage({
           <LogoStacked />
         </div>
         {!asking && pending && (
-          <div style={{ ...box(0, 600, 1024), textAlign: 'center', fontSize: 12, color: tone }} data-testid="emenu-start-pending">
+          <div style={{ ...box(0, 600, 1024), textAlign: 'center', fontSize: large ? 16 : 12, color: tone }} data-testid="emenu-start-pending">
             有一单结果待确认，请服务员输入手牌后在订单里处理
           </div>
         )}
@@ -852,7 +860,7 @@ function StartPage({
           }}
           onPointerUp={() => hold.current && window.clearTimeout(hold.current)}
           onPointerLeave={() => hold.current && window.clearTimeout(hold.current)}
-          style={{ ...box(0, 715.2, 1024), textAlign: 'center', fontSize: 12, lineHeight: '12px', letterSpacing: '0.09em', color: tone }}
+          style={{ ...box(0, 715.2, 1024), textAlign: 'center', fontSize: 12, lineHeight: '12px', letterSpacing: '0.09em', color: tone, transform: large ? 'scale(1.2)' : undefined, transformOrigin: '50% 100%' }}
           data-testid="emenu-footer"
         >
           {/* 设计稿：英文 12 号、夹在中间的中文（汤崎）13 号，同一条基线 */}
@@ -869,7 +877,15 @@ function StartPage({
       </div>
       {asking && <AskInfo onCancel={onCancel} onReady={onReady} />}
       {/* 「中 | EN」：输入信息的弹窗开着时也能点（画在弹窗的后面一层之上） */}
-      {onLang && <LangToggle lang={lang} onToggle={onLang} x={936} y={44.3} light={!!cover && !asking} />}
+      {onLang &&
+        (large ? (
+          // 放大的一档：开关绕自己的中心放大，右边仍贴在 984
+          <ZoomAt x={984 - 24 * BIG.ui} y={55.45} k={BIG.ui}>
+            <LangToggle lang={lang} onToggle={onLang} x={-24} y={-11.15} light={!!cover && !asking} />
+          </ZoomAt>
+        ) : (
+          <LangToggle lang={lang} onToggle={onLang} x={936} y={44.3} light={!!cover && !asking} />
+        ))}
     </>
   );
 }
@@ -992,9 +1008,13 @@ function AskInfo({ onCancel, onReady }: { onCancel: () => void; onReady: (sessio
 
 // ───────────────────────── 确认下单、结果待确认 ─────────────────────────
 
-/** 设计稿「确认下单」：带出起始页填的手牌、桌号、人数（都还能改），服务员输点单密码 */
+/**
+ * 设计稿「确认下单」：带出起始页填的手牌、桌号、人数（都还能改），服务员输点单密码。
+ * 后台没开「点单密码」（8.0.15 起默认不开）时没有密码那一项：核对一下手牌、桌号、人数，点「下单」。
+ */
 function ConfirmOrder({
   session,
+  requirePin,
   busy,
   note,
   onCancel,
@@ -1002,6 +1022,7 @@ function ConfirmOrder({
   onSubmit,
 }: {
   session: TableSession;
+  requirePin: boolean;
   busy: boolean;
   note: { error?: string; hint?: string } | null;
   onCancel: () => void;
@@ -1011,7 +1032,8 @@ function ConfirmOrder({
 }) {
   const m = useM();
   const [values, setValues] = useState({ tag: session.tagCode, table: session.tableName, guests: String(session.guests), pin: '' });
-  const [active, setActive] = useState('pin');
+  // 不要密码时一开始哪一项都不接收键盘：手牌、桌号、人数是带出来的，免得碰到键盘改掉
+  const [active, setActive] = useState(requirePin ? 'pin' : '');
   const [checking, setChecking] = useState(false);
   const [local, setLocal] = useState<{ error?: string; hint?: string; pick?: 'tag' | 'table'; candidates?: string[] } | null>(null);
   const off = busy || checking;
@@ -1019,12 +1041,12 @@ function ConfirmOrder({
     { key: 'tag', label: '手牌', labelEn: 'Tag', value: values.tag, kind: 'tag', maxLength: 7 },
     { key: 'table', label: '桌号', labelEn: 'Table', value: values.table, kind: 'table', maxLength: 12 },
     { key: 'guests', label: '人数', labelEn: 'Guests', value: values.guests, kind: 'digits', maxLength: 2 },
-    { key: 'pin', label: '密码', labelEn: 'PIN', value: values.pin, kind: 'digits', maxLength: EMENU_PIN_LENGTH, mask: true },
+    ...(requirePin ? [{ key: 'pin', label: '密码', labelEn: 'PIN', value: values.pin, kind: 'digits' as const, maxLength: EMENU_PIN_LENGTH, mask: true }] : []),
   ];
   const go = async (v = values) => {
     if (off) return;
     const guests = parseGuests(v.guests);
-    const missing = !v.tag ? ['tag', m.needTag] : !v.table ? ['table', m.needTable] : guests === null ? ['guests', m.needGuests] : v.pin.length !== EMENU_PIN_LENGTH ? ['pin', m.needPin] : null;
+    const missing = !v.tag ? ['tag', m.needTag] : !v.table ? ['table', m.needTable] : guests === null ? ['guests', m.needGuests] : requirePin && v.pin.length !== EMENU_PIN_LENGTH ? ['pin', m.needPin] : null;
     if (missing) {
       setActive(missing[0]!);
       setLocal({ error: missing[1] });
@@ -1053,10 +1075,10 @@ function ConfirmOrder({
       }
     }
     onResolved(next);
-    await onSubmit(next, v.pin);
+    await onSubmit(next, requirePin ? v.pin : '');
     // 没下成（密码不对等）：密码清掉重输
     setValues((cur) => ({ ...cur, pin: '' }));
-    setActive('pin');
+    setActive(requirePin ? 'pin' : '');
   };
   const shown = local ?? note;
   return (
@@ -1099,9 +1121,13 @@ function ConfirmOrder({
   );
 }
 
-/** 设计稿之外补的「下单结果待确认」：查回、原样重新提交（要密码）、作废重填（要密码） */
+/**
+ * 设计稿之外补的「下单结果待确认」：查回、原样重新提交、作废重填。
+ * 开着「点单密码」时后两样要服务员输密码（左边一项密码、右边数字键盘）；没开时就是三个按钮，不要键盘。
+ */
 function PendingOrderModal({
   pending,
+  requirePin,
   busy,
   note,
   onClose,
@@ -1110,6 +1136,7 @@ function PendingOrderModal({
   onAbandon,
 }: {
   pending: PendingOrder;
+  requirePin: boolean;
   busy: boolean;
   note: { error?: string; hint?: string } | null;
   onClose: () => void;
@@ -1120,54 +1147,80 @@ function PendingOrderModal({
   const [pin, setPin] = useState('');
   const [local, setLocal] = useState<string | null>(null);
   const needPin = (then: (pin: string) => void) => () => {
+    if (!requirePin) return then('');
     if (pin.length !== EMENU_PIN_LENGTH) return setLocal(`这一步要服务员输入 ${EMENU_PIN_LENGTH} 位点单密码`);
     setLocal(null);
     then(pin);
     setPin('');
   };
-  const info = (label: string, value: ReactNode, i: number) => (
-    <div style={{ ...box(21.4, 151.6 + i * 34, 120), fontSize: 13, lineHeight: '16px', whiteSpace: 'nowrap' }}>
-      <span style={{ color: 'var(--em-mute)' }}>{label}</span> <span className="em-en">{value}</span>
-    </div>
+  const info = (label: string, value: ReactNode, i: number) =>
+    requirePin ? (
+      <div style={{ ...box(21.4, 151.6 + i * 34, 120), fontSize: 13, lineHeight: '16px', whiteSpace: 'nowrap' }}>
+        <span style={{ color: 'var(--em-mute)' }}>{label}</span> <span className="em-en">{value}</span>
+      </div>
+    ) : (
+      <div style={{ ...box(0, 122 + i * 32, 429.1), textAlign: 'center', fontSize: 16, lineHeight: '18px', whiteSpace: 'nowrap' }}>
+        <span style={{ color: 'var(--em-mute)' }}>{label}</span> <span className="em-en">{value}</span>
+      </div>
+    );
+  const body = (
+    <>
+      {info('手牌', pending.body.tagCode, 0)}
+      {info('桌号', pending.body.tableName, 1)}
+      {info('这一单', `${pending.quantity} 份 ¥${yuan(pending.body.expectedTotal)}`, 2)}
+      <ModalButton x={21.4} y={423.8} w={119} onClick={onCheck} disabled={busy} testId="emenu-pending-check">
+        查回结果
+      </ModalButton>
+      <ModalButton x={150.7} y={423.8} w={124} primary onClick={needPin(onRetry)} disabled={busy} testId="emenu-pending-retry">
+        重新提交
+      </ModalButton>
+      <ModalButton x={283.6} y={423.8} w={124} onClick={needPin(onAbandon)} disabled={busy} testId="emenu-pending-abandon">
+        作废重填
+      </ModalButton>
+      {requirePin ? (
+        <ModalNote
+          error={local ?? note?.error}
+          hint={local || note?.error ? null : (note?.hint ?? '刚才那一单没有收到门店系统的答复。请服务员处理：先查回；查不到就输密码重新提交（不会重复下单），或作废后重填。')}
+        />
+      ) : (
+        <div style={{ ...box(40, 232, 349.1, 178), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, textAlign: 'center', fontSize: 14, lineHeight: '22px' }}>
+          {note?.error && (
+            <span role="alert" style={{ color: 'var(--em-error)' }} data-testid="emenu-error">
+              {note.error}
+            </span>
+          )}
+          <span style={{ color: 'var(--em-mute)' }} data-testid="emenu-hint">
+            {note?.hint ?? '请先点「查回结果」；查不到就点「重新提交」（不会重复下单），或「作废重填」后改了再下。'}
+          </span>
+        </div>
+      )}
+      <button type="button" onClick={onClose} disabled={busy} style={{ ...box(388, 8, 30, 30), padding: 0, border: 0, background: 'none', fontSize: 18, color: 'var(--em-mute)' }} aria-label="先不处理" data-testid="emenu-pending-close">
+        ×
+      </button>
+    </>
   );
   return (
     <Backdrop>
-      <InfoModal
-        title="结果待确认"
-        subtitle="ORDER NOT CONFIRMED YET"
-        fields={[{ key: 'pin', label: '密码', value: pin, kind: 'digits', maxLength: EMENU_PIN_LENGTH, mask: true, row: 3 }]}
-        active="pin"
-        onActive={() => {}}
-        onChange={(_, value) => {
-          setPin(value);
-          setLocal(null);
-        }}
-        disabled={busy}
-        testId="emenu-pending"
-        footer={
-          <>
-            {info('手牌', pending.body.tagCode, 0)}
-            {info('桌号', pending.body.tableName, 1)}
-            {info('这一单', `${pending.quantity} 份 ¥${yuan(pending.body.expectedTotal)}`, 2)}
-            <ModalButton x={21.4} y={423.8} w={119} onClick={onCheck} disabled={busy} testId="emenu-pending-check">
-              查回结果
-            </ModalButton>
-            <ModalButton x={150.7} y={423.8} w={124} primary onClick={needPin(onRetry)} disabled={busy} testId="emenu-pending-retry">
-              重新提交
-            </ModalButton>
-            <ModalButton x={283.6} y={423.8} w={124} onClick={needPin(onAbandon)} disabled={busy} testId="emenu-pending-abandon">
-              作废重填
-            </ModalButton>
-            <ModalNote
-              error={local ?? note?.error}
-              hint={local || note?.error ? null : (note?.hint ?? '刚才那一单没有收到门店系统的答复。请服务员处理：先查回；查不到就输密码重新提交（不会重复下单），或作废后重填。')}
-            />
-            <button type="button" onClick={onClose} disabled={busy} style={{ ...box(388, 8, 30, 30), padding: 0, border: 0, background: 'none', fontSize: 18, color: 'var(--em-mute)' }} aria-label="先不处理" data-testid="emenu-pending-close">
-              ×
-            </button>
-          </>
-        }
-      />
+      {requirePin ? (
+        <InfoModal
+          title="结果待确认"
+          subtitle="ORDER NOT CONFIRMED YET"
+          fields={[{ key: 'pin', label: '密码', value: pin, kind: 'digits', maxLength: EMENU_PIN_LENGTH, mask: true, row: 3 }]}
+          active="pin"
+          onActive={() => {}}
+          onChange={(_, value) => {
+            setPin(value);
+            setLocal(null);
+          }}
+          disabled={busy}
+          testId="emenu-pending"
+          footer={body}
+        />
+      ) : (
+        <Frame title="结果待确认" subtitle="ORDER NOT CONFIRMED YET" testId="emenu-pending">
+          {body}
+        </Frame>
+      )}
     </Backdrop>
   );
 }
@@ -1181,9 +1234,10 @@ function PageDots({ flat, index, onGo }: { flat: FlatPage[]; index: number; onGo
   const first = index - at.pageNo;
   const n = at.category.pages.length;
   const hasMore = flat.length > 1;
+  const large = useBig();
   if (!hasMore) return null;
   return (
-    <div style={{ ...box(0, 742, 1024, 14), display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 7 }} data-testid="emenu-dots" data-page={index} data-pages={flat.length}>
+    <div style={{ ...box(0, 742, 1024, 14), display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 7, transform: large ? 'scale(1.5)' : undefined }} data-testid="emenu-dots" data-page={index} data-pages={flat.length}>
       {first > 0 && <Dot onClick={() => onGo(first - 1)} label="上一个分类" small testId="emenu-dot-prev" />}
       {Array.from({ length: n }, (_, i) => (
         <Dot key={i} on={first + i === index} onClick={() => onGo(first + i)} label={`第 ${i + 1} 页`} testId={`emenu-dot-${i}`} />
@@ -1206,8 +1260,10 @@ function Dot({ on, onClick, label, small, testId }: { on?: boolean; onClick: () 
 function NoMenu({ menu }: { menu: EmenuMenu }) {
   const lang = useLang();
   const title = menu.later.length ? namePair('现在不在供餐时段', 'KITCHEN IS RESTING NOW', lang) : namePair('菜单还在准备', 'MENU IS ON THE WAY', lang);
+  const large = useBig();
   return (
     <div className="em-page-in" style={{ ...box(0, 0, 1024, 768) }} data-testid="emenu-empty">
+     <div style={{ ...box(0, 0, 1024, 768), transform: large ? `scale(${BIG.ui})` : undefined, transformOrigin: '512px 384px' }}>
       {title.mainEn ? (
         <>
           <div className="em-en" style={{ ...box(0, 304, 1024), textAlign: 'center', fontSize: 22, lineHeight: '22px', letterSpacing: '0.06em' }}>{title.main}</div>
@@ -1232,6 +1288,7 @@ function NoMenu({ menu }: { menu: EmenuMenu }) {
         ))}
         {menu.later.length === 0 && <span style={{ fontSize: 12, color: 'var(--em-mute)' }}>请店主在「后台 → 电子菜单」里排好分类与版面</span>}
       </div>
+     </div>
     </div>
   );
 }
