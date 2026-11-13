@@ -10,12 +10,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import { APPROVAL_MAX_STAFF } from '@shared/approvals';
 import { centsToInput, parseYuan } from '@shared/money';
-import { PURCHASE_CHANNELS, URGENT_TIERS_MAX, type PurchaseRules } from '@shared/purchasing';
+import { DEPT_CONFIRM_RULE_LABELS, DEPT_CONFIRM_RULES, PURCHASE_CHANNELS, URGENT_TIERS_MAX, type DeptConfirmRule, type PurchaseRules } from '@shared/purchasing';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, Select, Skeleton } from '../../components/ui';
 import { useApprovers } from '../approvals/queries';
 import { pk, usePurchaseRules } from './queries';
 
@@ -26,6 +26,7 @@ interface Draft {
   targetDays: string;
   arrivalOverdueDays: string;
   flowStallDays: string;
+  deptConfirm: DeptConfirmRule;
   cutoffEnabled: boolean;
   cutoffTime: string;
   requestPoDirect: boolean;
@@ -39,6 +40,7 @@ const toDraft = (r: PurchaseRules): Draft => ({
   targetDays: String(r.targetDays),
   arrivalOverdueDays: String(r.arrivalOverdueDays),
   flowStallDays: String(r.flowStallDays),
+  deptConfirm: r.deptConfirm,
   cutoffEnabled: r.cutoffEnabled,
   cutoffTime: r.cutoffTime,
   requestPoDirect: r.requestPoDirect,
@@ -88,6 +90,7 @@ export function PurchaseRulesCard() {
         cutoffEnabled: draft.cutoffEnabled,
         cutoffTime: draft.cutoffTime,
         requestPoDirect: draft.requestPoDirect,
+        deptConfirm: draft.deptConfirm,
         urgentTiers,
       });
       qc.setQueryData(pk.purchaseRules, next);
@@ -206,7 +209,7 @@ export function PurchaseRulesCard() {
       </section>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="采购单合计到多少要先询价比价" htmlFor="pr-quote" hint="默认 5000 元；填 0 不要求。补单与已确认后的改版不拦">
+        <Field label="采购单合计到多少要先询价比价" htmlFor="pr-quote" hint="默认 1000 元（8.0.17 起，原来 5000）；填 0 不要求。补单与已确认后的改版不拦">
           <MoneyInput id="pr-quote" value={draft.quoteThreshold} disabled={!editable} onChange={(e) => setDraft({ ...draft, quoteThreshold: e.target.value })} className="h-10" data-testid="pr-quote" />
         </Field>
         <Field label="定标至少要几家报价" htmlFor="pr-min" hint="默认 2 家；不够的标单一来源、由负责人定标">
@@ -220,6 +223,15 @@ export function PurchaseRulesCard() {
         </Field>
         <Field label="下单后几天没到货算超期" htmlFor="pr-arrival" hint="采购单没填预计到货日时用（账目自检第 9 条），默认 7 天；8.0.1 从费用报销规则挪过来">
           <Input id="pr-arrival" inputMode="numeric" value={draft.arrivalOverdueDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, arrivalOverdueDays: e.target.value })} className="h-10" data-testid="pr-arrival" />
+        </Field>
+        <Field label="哪些需求单要部门主管先确认" htmlFor="pr-dept-confirm" hint="8.0.17：主管确认以后采购才能审核通过。估价 = 各行参考价 × 数量（没填参考价的行不算）；主管在「库存 → 档案 → 部门」里设，没设主管的部门不拦">
+          <Select id="pr-dept-confirm" value={draft.deptConfirm} disabled={!editable} onChange={(e) => setDraft({ ...draft, deptConfirm: e.target.value as DeptConfirmRule })} className="h-10" data-testid="pr-dept-confirm">
+            {DEPT_CONFIRM_RULES.map((v) => (
+              <option key={v} value={v}>
+                {DEPT_CONFIRM_RULE_LABELS[v]}
+              </option>
+            ))}
+          </Select>
         </Field>
         <Field label="流程图里一个环节等了几天标红" htmlFor="pr-stall" hint="采购 → 流程进度（8.0.17）：待审核、询价、定标、待审批、待下单、待入库等了这么多天就标红；默认 2 天，0 = 不标。到货按预计到货日，另算">
           <Input id="pr-stall" inputMode="numeric" value={draft.flowStallDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, flowStallDays: e.target.value })} className="h-10" data-testid="pr-stall" />

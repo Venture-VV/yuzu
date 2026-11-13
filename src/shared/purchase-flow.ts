@@ -2,6 +2,7 @@
 // 这里是不碰数据库的那一半：服务端把需求单、询价单、采购单取成「事实」，buildPurchaseFlow 算出一排环节；
 // 前端只管画。图是只读的——没有另存的状态，单据往前走一步，图自己跟着变。
 //
+// 要部门主管确认的需求单（8.0.17，LC1）在「部门提需求」后面多一环「部门确认」。
 //   流程 A（免比价）：部门提需求 → 需求审核 →（采购单审批）→ 采购下单 → 到货验收 → 入库 → 财务付款
 //   流程 B（比价 + 审批）：部门提需求 → 需求审核 → 询价比价 → 比价定标 → 采购单审批 → 下单中标方 → 到货验收 → 入库 → 财务付款
 // 走哪条读采购规则里的询价门槛（LC2）；超期与卡住的口径见 LC4。
@@ -14,7 +15,7 @@ import { nextPayDay, payDaysLabel } from './payments';
 import type { PoStatus, ReceivingState, SourcingStatus } from './purchasing';
 import type { RequestStatus } from './requests';
 
-export type FlowNodeKey = 'request' | 'review' | 'sourcing' | 'award' | 'approval' | 'order' | 'receive' | 'stockin' | 'pay';
+export type FlowNodeKey = 'request' | 'confirm' | 'review' | 'sourcing' | 'award' | 'approval' | 'order' | 'receive' | 'stockin' | 'pay';
 /** done 做完（绿勾）；current 正在等（橙点）；pending 还没到（灰） */
 export type FlowNodeState = 'done' | 'current' | 'pending';
 export type FlowLinkKind = 'request' | 'sourcing' | 'po' | 'approval' | 'receipt';
@@ -91,6 +92,8 @@ export interface FlowRequestFact {
   reason: string | null;
   /** 截单后提交、今天还不能通过 */
   lockedToday: boolean;
+  /** 部门主管确认（8.0.17，LC1）：none 不用；pending 等主管；confirmed 已确认 */
+  deptConfirm: { state: 'none' | 'pending' | 'confirmed'; headName: string | null; confirmedByName: string | null; confirmedAt: string | null };
   lineCount: number;
   summary: string;
   /** 还没有有效采购单的行数 */
@@ -177,9 +180,10 @@ export interface FlowFacts {
 
 // ───────────────────────── 小工具 ─────────────────────────
 
-export const FLOW_GLYPHS: Record<FlowNodeKey, string> = { request: '部', review: '审', sourcing: '价', award: '定', approval: '批', order: '订', receive: '收', stockin: '入', pay: '付' };
+export const FLOW_GLYPHS: Record<FlowNodeKey, string> = { request: '部', confirm: '确', review: '审', sourcing: '价', award: '定', approval: '批', order: '订', receive: '收', stockin: '入', pay: '付' };
 export const FLOW_STAGE_LABELS: Record<FlowNodeKey, string> = {
   request: '提需求',
+  confirm: '待主管确认',
   review: '待审核',
   sourcing: '询价中',
   award: '待定标',
@@ -297,7 +301,26 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
         : { key: 'request', title: '部门提需求', role: names(reqs.map((r) => r.departmentName)), state: 'done', text: `${reqs.length} 张需求单`, at: latest(reqs.map((r) => r.submittedAt)), link: reqLink(reqs[0]!) },
     );
     const waiting = reqs.find((r) => r.status !== 'approved');
-    if (!waiting) {
+    // ①′ 部门确认（要主管确认的才有这一环）：等主管确认时球在主管那里，「需求审核」先灰着
+    const confirming = reqs.filter((r) => r.deptConfirm.state !== 'none');
+    const atHead = !!waiting && waiting.deptConfirm.state === 'pending' && (waiting.status === 'submitted' || waiting.status === 'returned');
+    if (confirming.length) {
+      const c = waiting && waiting.deptConfirm.state !== 'none' ? waiting : confirming[0]!;
+      const head = `部门主管${c.deptConfirm.headName ? ` · ${c.deptConfirm.headName}` : ''}`;
+      if (atHead && waiting!.status === 'submitted') {
+        drafts.push({ key: 'confirm', title: '部门确认', role: head, state: 'current', text: '待主管确认', since: waiting!.submittedAt, link: reqLink(waiting!) });
+      } else if (atHead) {
+        drafts.push({ key: 'confirm', title: '部门确认', role: head, state: 'current', text: '等部门修改后再提交', since: waiting!.submittedAt, alert: `已退回${waiting!.reason ? `：${waiting!.reason}` : ''}`, link: reqLink(waiting!) });
+      } else if (confirming.every((r) => r.deptConfirm.state === 'confirmed')) {
+        drafts.push({ key: 'confirm', title: '部门确认', role: names(confirming.map((r) => r.deptConfirm.confirmedByName ?? '')) || head, state: 'done', text: '已确认', at: latest(confirming.map((r) => r.deptConfirm.confirmedAt)), link: reqLink(c) });
+      } else {
+        // 等主管确认的时候被采购定了不采购、被提单人撤回
+        drafts.push({ key: 'confirm', title: '部门确认', role: head, state: 'pending', text: '没有确认', link: reqLink(c) });
+      }
+    }
+    if (atHead) {
+      drafts.push({ key: 'review', title: '需求审核', role: '采购审核', state: 'pending', text: '待主管确认后', link: reqLink(waiting!) });
+    } else if (!waiting) {
       drafts.push({ key: 'review', title: '需求审核', role: names(reqs.map((r) => r.reviewedByName ?? '')) || '采购', state: 'done', text: '已通过', at: reviewedAt, link: reqLink(reqs[0]!) });
     } else if (waiting.status === 'submitted') {
       drafts.push({ key: 'review', title: '需求审核', role: '采购审核', state: 'current', text: waiting.lockedToday ? '截单后提交，明天起可审核' : '待审核', since: waiting.submittedAt, link: reqLink(waiting) });

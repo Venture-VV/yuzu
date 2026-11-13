@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ClipboardList, Download, ExternalLink, Inbox, PackageCheck, Pencil, Plus, ShoppingCart, X } from 'lucide-react';
 import { formatQty } from '@shared/quantity';
-import { REQUEST_STATUS_LABELS, type PurchaseRequest, type RequestLine, type RequestLineProgress, type RequestStatus } from '@shared/requests';
+import { REQUEST_STATUS_LABELS, requestStatusLabel, type PurchaseRequest, type RequestLine, type RequestLineProgress, type RequestStatus } from '@shared/requests';
 import { channelLabel } from '@shared/purchasing';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -71,6 +71,10 @@ export function RequestsPage() {
   const setView = (v: 'list' | 'open') => setParams(v === 'open' ? { view: 'open' } : {}, { replace: true });
   const open = (id: number | null) => setParams(id ? { request: String(id) } : {}, { replace: true });
   const me = list.data?.me ?? meta.data?.me;
+  // 我当主管的部门里、等主管确认的（店主不在这里列：店主能替任何部门确认，待审核的列表里看得到）
+  const waitingForMe = (list.data?.requests ?? []).filter(
+    (r) => r.status === 'submitted' && r.deptConfirm.state === 'pending' && (r.deptConfirm.head?.id === session.staff.id || (me?.headOf ?? []).includes(r.department.id)),
+  );
   // 草稿箱（供应链二次整改 03）：自己没提交的草稿
   const drafts = useDrafts(null, can('request.create'));
   const [boxOpen, setBoxOpen] = useState(false);
@@ -107,6 +111,20 @@ export function RequestsPage() {
       <DraftBox open={boxOpen} onClose={() => setBoxOpen(false)} />
       <div className="space-y-4" data-testid="requests-page">
         <ErpPendingPanel types={['purchase_request']} onFound={(_, ref) => open(ref.refId)} />
+        {/* 部门主管（8.0.17，LC1）：等我确认的 */}
+        {waitingForMe.length > 0 && (
+          <Notice tone="warning" title={`有 ${waitingForMe.length} 张需求单等你（部门主管）确认`} data-testid="requests-head-notice">
+            <span className="flex flex-wrap gap-x-3 gap-y-1">
+              {waitingForMe.slice(0, 8).map((r) => (
+                <button key={r.id} type="button" className="num font-semibold text-lake hover:underline" onClick={() => open(r.id)} data-testid={`requests-head-open-${r.id}`}>
+                  {r.docNo}
+                </button>
+              ))}
+              {waitingForMe.length > 8 && <span className="text-ink-3">……</span>}
+              <span className="text-ink-3">确认以后采购才能审核通过。</span>
+            </span>
+          </Notice>
+        )}
         {me && !me.canReview && me.canCreate && !me.departmentId && (
           <Notice tone="warning" title="你的员工档案里还没有填所属部门">请店主在「后台 → 员工」里给你选所属部门，之后才能提需求单。</Notice>
         )}
@@ -197,8 +215,8 @@ export function RequestsPage() {
                         <span className="hidden text-[12.5px] text-ink-2 md:block">
                           {r.status === 'approved' ? `已下单 ${r.orderedLines}/${r.lineCount} 行 · 到货 ${r.receivedLines} 行` : `${r.lineCount} 行`}
                         </span>
-                        <Badge tone={REQUEST_STATUS_TONE[r.status]} className="justify-self-start md:justify-self-auto">
-                          {REQUEST_STATUS_LABELS[r.status]}
+                        <Badge tone={REQUEST_STATUS_TONE[r.status]} className="justify-self-start md:justify-self-auto" data-testid={`request-status-${r.id}`}>
+                          {requestStatusLabel(r)}
                         </Badge>
                       </button>
                     </li>
@@ -370,7 +388,7 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
   const toast = useToast();
   const invalidate = useInvalidateRequests();
   const request = useRequest(id);
-  const [reasonFor, setReasonFor] = useState<'return' | 'reject' | 'cancel' | null>(null);
+  const [reasonFor, setReasonFor] = useState<'return' | 'reject' | 'cancel' | 'dept-return' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const r = request.data;
@@ -378,7 +396,7 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
   const mine = !!r && (r.requester.id === session.staff.id || session.staff.role === 'owner');
   const open = r?.status === 'submitted' || r?.status === 'returned';
 
-  const act = async (action: 'approve' | 'return' | 'reject' | 'cancel', reason?: string) => {
+  const act = async (action: 'approve' | 'return' | 'reject' | 'cancel' | 'dept-confirm' | 'dept-return', reason?: string) => {
     if (!r) return;
     setBusy(true);
     setError(null);
@@ -386,7 +404,7 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
       await api.post<PurchaseRequest>(`/api/erp/requests/${r.id}/${action}`, reason ? { reason } : {});
       await invalidate();
       setReasonFor(null);
-      toast({ tone: 'success', title: { approve: '已通过', return: '已退回', reject: '已定为不采购', cancel: '已撤回' }[action] });
+      toast({ tone: 'success', title: { approve: '已通过', return: '已退回', reject: '已定为不采购', cancel: '已撤回', 'dept-confirm': '主管已确认', 'dept-return': '主管已退回' }[action] });
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -418,7 +436,9 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={REQUEST_STATUS_TONE[r.status]}>{REQUEST_STATUS_LABELS[r.status]}</Badge>
+              <Badge tone={REQUEST_STATUS_TONE[r.status]} data-testid="request-sheet-status">
+                {requestStatusLabel(r)}
+              </Badge>
               <PriorityTag priority={r.priority} />
               {r.needBy && <span className="text-[12.5px] text-ink-3">期望 {r.needBy} 到货</span>}
               {r.source === 'import' && <Badge tone="neutral">集采导入</Badge>}
@@ -431,7 +451,19 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
               )}
             </div>
             {/* 这张需求走到哪了（8.0.17）：审核、询价、下单、到货、付款 */}
-            <PurchaseFlowPanel kind="request" id={r.id} version={`${r.status}|${r.submittedAt}|${r.orderedLines}|${r.receivedLines}|${r.lines.map((l) => `${l.progress.state}${l.progress.po?.status ?? ''}`).join(',')}`} />
+            <PurchaseFlowPanel kind="request" id={r.id} version={`${r.status}|${r.deptConfirm.state}|${r.submittedAt}|${r.orderedLines}|${r.receivedLines}|${r.lines.map((l) => `${l.progress.state}${l.progress.po?.status ?? ''}`).join(',')}`} />
+            {/* 部门主管确认（8.0.17，LC1） */}
+            {r.deptConfirm.state === 'pending' && r.status === 'submitted' && (
+              <Notice tone="warning" title={`等部门主管${r.deptConfirm.head ? `（${r.deptConfirm.head.name}）` : ''}确认`} data-testid="request-dept-pending">
+                {r.canDeptConfirm ? '你是这张单的部门主管：确认以后采购才能审核通过；不同意请退回并写原因。' : '主管确认以后采购才能审核通过；采购现在可以退回或定为不采购。'}
+              </Notice>
+            )}
+            {r.deptConfirm.state === 'confirmed' && (
+              <p className="text-[12.5px] text-ink-2" data-testid="request-dept-confirmed">
+                部门主管已确认：{r.deptConfirm.confirmedByName}
+                {r.deptConfirm.confirmedAt && <span className="num text-ink-3"> · {formatDateTime(r.deptConfirm.confirmedAt)}</span>}
+              </p>
+            )}
             {r.reason && (r.status === 'returned' || r.status === 'rejected' || r.status === 'cancelled') && (
               <Notice tone={r.status === 'returned' ? 'warning' : 'info'} title={`${REQUEST_STATUS_LABELS[r.status]}：${r.reason}`} />
             )}
@@ -472,6 +504,16 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
               </Link>
             </>
           )}
+          {r.canDeptConfirm && (
+            <>
+              <Button variant="secondary" disabled={busy} onClick={() => setReasonFor('dept-return')} data-testid="request-dept-return">
+                主管退回
+              </Button>
+              <Button variant="primary" loading={busy} onClick={() => void act('dept-confirm')} data-testid="request-dept-confirm">
+                主管确认
+              </Button>
+            </>
+          )}
           {open && review && (
             <Button variant="secondary" disabled={busy} onClick={() => setReasonFor('reject')} data-testid="request-reject">
               不采购
@@ -482,7 +524,12 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
               <Button variant="secondary" disabled={busy} onClick={() => setReasonFor('return')} data-testid="request-return">
                 退回
               </Button>
-              <Button variant="primary" loading={busy} disabled={r.lockedToday} title={r.lockedToday ? `${r.approvableOn} 起可以通过` : undefined} onClick={() => void act('approve')} data-testid="request-approve">
+              <Button
+                variant={r.canDeptConfirm ? 'secondary' : 'primary'}
+                loading={busy}
+                disabled={r.lockedToday || r.deptConfirm.state === 'pending'}
+                title={r.deptConfirm.state === 'pending' ? '要部门主管先确认' : r.lockedToday ? `${r.approvableOn} 起可以通过` : undefined}
+                onClick={() => void act('approve')} data-testid="request-approve">
                 通过
               </Button>
             </>
@@ -491,9 +538,9 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
       )}
       <ReasonDialog
         open={reasonFor !== null}
-        title={reasonFor === 'return' ? '退回需求单' : reasonFor === 'reject' ? '定为不采购' : '撤回需求单'}
-        description={reasonFor === 'return' ? '提单人改了再提交。' : reasonFor === 'reject' ? '这张需求单结束，不再转采购单。' : undefined}
-        confirmLabel={reasonFor === 'return' ? '退回' : reasonFor === 'reject' ? '不采购' : '撤回'}
+        title={reasonFor === 'return' ? '退回需求单' : reasonFor === 'dept-return' ? '主管退回需求单' : reasonFor === 'reject' ? '定为不采购' : '撤回需求单'}
+        description={reasonFor === 'return' || reasonFor === 'dept-return' ? '提单人改了再提交。' : reasonFor === 'reject' ? '这张需求单结束，不再转采购单。' : undefined}
+        confirmLabel={reasonFor === 'return' || reasonFor === 'dept-return' ? '退回' : reasonFor === 'reject' ? '不采购' : '撤回'}
         busy={busy}
         onClose={() => setReasonFor(null)}
         onConfirm={(reason) => reasonFor && void act(reasonFor, reason)}

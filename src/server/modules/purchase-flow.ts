@@ -44,7 +44,7 @@ interface Ctx {
   today: string;
   purchasing: boolean;
   /** 一次请求里同一张单只取一次 */
-  requests: Map<number, Promise<(FlowRequestFact & { departmentId: number; requesterId: number; poIds: number[]; sourcingIds: number[] }) | null>>;
+  requests: Map<number, Promise<(FlowRequestFact & { departmentId: number; requesterId: number; deptHeadId: number | null; poIds: number[]; sourcingIds: number[] }) | null>>;
   pos: Map<number, Promise<(FlowPoFact & { requestIds: number[]; sourcingId: number | null }) | null>>;
   sourcings: Map<number, Promise<(FlowSourcingFact & { requestIds: number[]; poIds: number[] }) | null>>;
 }
@@ -79,6 +79,7 @@ function requestFact(c: Ctx, id: number) {
       const [r] = await db<Record<string, unknown>[]>`
         SELECT r.id, r.doc_no, r.status, r.department_id, d.name AS department_name, r.requester_id, s.display_name AS requester_name,
                r.submitted_at, r.reviewed_at, rb.display_name AS reviewed_by_name, r.reason, r.approvable_on,
+               r.dept_confirm, r.dept_head_id, hd.display_name AS dept_head_name, cf.display_name AS dept_confirmed_by_name, r.dept_confirmed_at,
                (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id) AS line_count,
                coalesce((SELECT string_agg(l.name, '、' ORDER BY l.line_no) FROM purchase_request_lines l WHERE l.request_id = r.id AND l.line_no <= 3), '') AS summary,
                (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id AND NOT ${ORDERED(db)}) AS unordered_lines,
@@ -92,7 +93,7 @@ function requestFact(c: Ctx, id: number) {
                          JOIN sourcing_line_requests sr ON sr.request_line_id = l.id JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
                          JOIN sourcing_events e ON e.id = sl.event_id WHERE l.request_id = r.id AND e.status <> 'cancelled'), '{}') AS sourcing_ids
         FROM purchase_requests r JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
-        LEFT JOIN staff rb ON rb.id = r.reviewed_by
+        LEFT JOIN staff rb ON rb.id = r.reviewed_by LEFT JOIN staff hd ON hd.id = r.dept_head_id LEFT JOIN staff cf ON cf.id = r.dept_confirmed_by
         WHERE r.id = ${id}`;
       if (!r) return null;
       const status = r.status as RequestStatus;
@@ -111,6 +112,13 @@ function requestFact(c: Ctx, id: number) {
         reviewedByName: (r.reviewedByName as string | null) ?? null,
         reason: (r.reason as string | null) ?? null,
         lockedToday: c.cutoffEnabled && status === 'submitted' && approvableOn !== null && approvableOn > c.today,
+        deptConfirm: {
+          state: r.deptConfirm as 'none' | 'pending' | 'confirmed',
+          headName: (r.deptHeadName as string | null) ?? null,
+          confirmedByName: (r.deptConfirmedByName as string | null) ?? null,
+          confirmedAt: iso(r.deptConfirmedAt),
+        },
+        deptHeadId: r.deptHeadId == null ? null : Number(r.deptHeadId),
         lineCount,
         summary: lineCount > 3 ? `${String(r.summary)} 等 ${lineCount} 项` : String(r.summary),
         unorderedLines: Number(r.unorderedLines),
@@ -279,8 +287,11 @@ async function factsFor(c: Ctx, kind: FlowAnchorKind, id: number): Promise<FlowF
 }
 
 /** 看的人看不看得到这张需求单（与需求单详情同一条规矩：审核的人看全部；别人看本部门的与自己提的） */
-async function requestVisible(db: Db, actor: Actor, r: { departmentId: number; requesterId: number }): Promise<boolean> {
-  if (can(actor, 'request.review') || r.requesterId === actor.id) return true;
+async function requestVisible(db: Db, actor: Actor, r: { departmentId: number; requesterId: number; deptHeadId: number | null }): Promise<boolean> {
+  if (can(actor, 'request.review') || r.requesterId === actor.id || r.deptHeadId === actor.id) return true;
+  // 部门主管（8.0.17）：我当主管的部门的需求单
+  const [head] = await db<{ id: number }[]>`SELECT id FROM departments WHERE id = ${r.departmentId} AND head_id = ${actor.id}`;
+  if (head) return true;
   if (!can(actor, 'request.create')) return false;
   const [me] = await db<{ departmentId: number | null }[]>`SELECT department_id FROM staff WHERE id = ${actor.id}`;
   return me?.departmentId != null && Number(me.departmentId) === r.departmentId;

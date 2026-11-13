@@ -85,10 +85,27 @@ export interface RequestLine {
   supplier: { id: number; name: string } | null;
 }
 
+/**
+ * 部门主管确认（8.0.17，LC1）：none 不用确认；pending 等主管确认（确认后采购才能通过）；confirmed 已确认。
+ * head 是提交时这个部门的主管（要他确认；不用确认的为空）。
+ */
+export interface RequestDeptConfirm {
+  state: 'none' | 'pending' | 'confirmed';
+  head: { id: number; name: string } | null;
+  confirmedByName: string | null;
+  confirmedAt: string | null;
+}
+
+/** 列表、详情上显示的状态：待审核的需求单还在等主管确认时写「待主管确认」 */
+export const requestStatusLabel = (r: { status: RequestStatus; deptConfirm: Pick<RequestDeptConfirm, 'state'> }): string =>
+  r.status === 'submitted' && r.deptConfirm.state === 'pending' ? '待主管确认' : REQUEST_STATUS_LABELS[r.status];
+
 export interface PurchaseRequestSummary {
   id: number;
   docNo: string;
   status: RequestStatus;
+  /** 部门主管确认（8.0.17） */
+  deptConfirm: RequestDeptConfirm;
   department: { id: number; name: string };
   requester: { id: number; name: string };
   needBy: string | null;
@@ -113,6 +130,8 @@ export interface PurchaseRequestSummary {
 }
 
 export interface PurchaseRequest extends PurchaseRequestSummary {
+  /** 看的人现在能不能做主管确认 / 主管退回（这张单在等主管确认，而且我是它的主管、这个部门现在的主管或店主） */
+  canDeptConfirm: boolean;
   note: string;
   reviewedByName: string | null;
   reviewedAt: string | null;
@@ -124,8 +143,8 @@ export interface PurchaseRequest extends PurchaseRequestSummary {
 
 export interface RequestsList {
   requests: PurchaseRequestSummary[];
-  /** 当前账号：所属部门、能不能审核 */
-  me: { departmentId: number | null; departmentName: string | null; canReview: boolean; canCreate: boolean };
+  /** 当前账号：所属部门、能不能审核；headOf 是我当主管的部门（8.0.17） */
+  me: { departmentId: number | null; departmentName: string | null; canReview: boolean; canCreate: boolean; headOf: number[] };
 }
 
 /** 已通过、还没下单的需求行（转采购单用） */

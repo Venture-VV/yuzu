@@ -215,6 +215,8 @@ export interface Department {
   name: string;
   active: boolean;
   sortOrder: number;
+  /** 部门主管（8.0.17，LC1）：需求单要主管确认时由他确认；没设为空 */
+  head: { id: number; name: string; active: boolean } | null;
 }
 
 export interface Supplier {

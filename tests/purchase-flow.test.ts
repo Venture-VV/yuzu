@@ -31,6 +31,7 @@ const req = (over: Partial<FlowRequestFact> = {}): FlowRequestFact => ({
   reviewedByName: '采购主管',
   reason: null,
   lockedToday: false,
+  deptConfirm: { state: 'none', headName: null, confirmedByName: null, confirmedAt: null },
   lineCount: 1,
   summary: '沐浴露补充装',
   unorderedLines: 0,
@@ -191,6 +192,42 @@ describe('采购流程图 · 推算函数', () => {
     const approved = buildPurchaseFlow(facts({ requests: [req({ unorderedLines: 1 })] }));
     expect(states(approved)).toBe('ddcppp');
     expect(node(approved, 'order')).toMatchObject({ text: '已通过，待转采购单', waited: '29 小时', link: { kind: 'request', id: 1 } });
+  });
+
+  it('部门主管确认（LC1）：要确认的多一环「部门确认」——等主管时球在主管那里、需求审核灰着；确认后轮到采购；主管退回标红；不用确认的没有这一环', () => {
+    const pending = { state: 'pending' as const, headName: '王主管', confirmedByName: null, confirmedAt: null };
+    const confirmed = { state: 'confirmed' as const, headName: '王主管', confirmedByName: '王主管', confirmedAt: hoursAgo(5) };
+    const atHead = buildPurchaseFlow(facts({ requests: [req({ status: 'submitted', reviewedAt: null, reviewedByName: null, submittedAt: hoursAgo(6), unorderedLines: 1, deptConfirm: pending })] }));
+    expect(keys(atHead)).toEqual(['request', 'confirm', 'review', 'order', 'receive', 'stockin', 'pay']);
+    expect(states(atHead)).toBe('dcppppp');
+    expect(node(atHead, 'confirm')).toMatchObject({ glyph: '确', title: '部门确认', role: '部门主管 · 王主管', text: '待主管确认', waited: '6 小时', alert: null });
+    expect(node(atHead, 'review')).toMatchObject({ state: 'pending', text: '待主管确认后' });
+    expect(atHead.stage).toBe('confirm');
+    // 等了超过天数：标红
+    expect(node(buildPurchaseFlow(facts({ requests: [req({ status: 'submitted', reviewedAt: null, submittedAt: hoursAgo(60), deptConfirm: pending })] })), 'confirm').alert).toBe('已等待 2 天');
+    // 主管确认了：轮到采购审核
+    const atBuyer = buildPurchaseFlow(facts({ requests: [req({ status: 'submitted', reviewedAt: null, reviewedByName: null, submittedAt: hoursAgo(6), unorderedLines: 1, deptConfirm: confirmed })] }));
+    expect(states(atBuyer)).toBe('ddcpppp');
+    expect(node(atBuyer, 'confirm')).toMatchObject({ state: 'done', text: '已确认', role: '王主管' });
+    expect(node(atBuyer, 'review')).toMatchObject({ state: 'current', text: '待审核' });
+    // 主管退回：红条在「部门确认」上
+    const back = buildPurchaseFlow(facts({ requests: [req({ status: 'returned', reviewedAt: null, reason: '主管退回：数量太多', deptConfirm: pending })] }));
+    expect(node(back, 'confirm')).toMatchObject({ state: 'current', alert: '已退回：主管退回：数量太多' });
+    expect(node(back, 'review').state).toBe('pending');
+    // 采购退回的（主管已经确认过）：红条在「需求审核」上
+    const buyerBack = buildPurchaseFlow(facts({ requests: [req({ status: 'returned', reason: '请补规格', deptConfirm: confirmed })] }));
+    expect(node(buyerBack, 'confirm').state).toBe('done');
+    expect(node(buyerBack, 'review')).toMatchObject({ state: 'current', alert: '已退回：请补规格' });
+    // 等主管确认时被定为不采购：流程结束
+    const rejected = buildPurchaseFlow(facts({ requests: [req({ status: 'rejected', reason: '库里还有', deptConfirm: pending })] }));
+    expect(rejected.end).toBe('rejected');
+    expect(node(rejected, 'confirm')).toMatchObject({ state: 'pending', text: '没有确认' });
+    // 走完的：部门确认是做完的一环
+    const done = buildPurchaseFlow(facts({ requests: [req({ deptConfirm: confirmed })], pos: [po()] }));
+    expect(keys(done)).toEqual(['request', 'confirm', 'review', 'order', 'receive', 'stockin', 'pay']);
+    expect(states(done)).toBe('ddddcpp');
+    // 不用确认的没有这一环
+    expect(keys(buildPurchaseFlow(facts({ pos: [po()] })))).not.toContain('confirm');
   });
 
   it('分流：按参考价估；没填参考价的先按 A 画并注明；达到门槛、还没询价的走 B「待发起询价」；门槛 0 都走 A；采购单提交过了就不再改判', () => {

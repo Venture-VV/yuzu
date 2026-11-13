@@ -717,7 +717,9 @@ function Departments({ editable }: { editable: boolean }) {
   const invalidate = useInvalidateInventory();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
-  const save = async (d: Department | null, body: { name: string; active: boolean; sortOrder: number }) => {
+  // 部门主管（8.0.17，LC1）：需求单要主管确认时由他确认。名单只有能维护档案的人取得到
+  const heads = useQuery({ queryKey: ['inv', 'department-head-options'], queryFn: () => api.get<{ id: number; name: string }[]>('/api/inventory/department-head-options'), enabled: editable });
+  const save = async (d: Department | null, body: { name: string; active: boolean; sortOrder: number; headId?: number | null }) => {
     setBusy(true);
     try {
       if (d) await api.put(`/api/inventory/departments/${d.id}`, body);
@@ -732,11 +734,36 @@ function Departments({ editable }: { editable: boolean }) {
   };
   return (
     <div className="max-w-xl">
+      <p className="mb-2 text-[12.5px] text-ink-3" data-testid="department-head-hint">
+        部门主管：需求单要主管先确认时（「采购 → 采购规则」里定哪些要确认）由他确认，确认以后采购才能审核通过。没设主管的部门不拦。
+      </p>
       <p className="mb-3 text-[12.5px] text-ink-3">每个部门有一个小仓（新建部门时自动建）：仓库登记领料进部门小仓，部门在「本部门小仓」签收、耗用、盘点。停用部门前要先把它的小仓清空（退回总仓或盘点到 0）。</p>
       <ul className="divide-y divide-line/70 rounded-lg border border-line bg-card shadow-card">
         {departments.data?.map((d) => (
           <li key={d.id} className={cn('flex items-center gap-3 px-4 py-2.5', !d.active && 'opacity-55')}>
             <span className="flex-1 text-[14px] font-semibold">{d.name}</span>
+            {editable ? (
+              <Select
+                value={d.head ? String(d.head.id) : ''}
+                disabled={busy}
+                onChange={(e) => void save(d, { name: d.name, active: d.active, sortOrder: d.sortOrder, headId: e.target.value ? Number(e.target.value) : null })}
+                className="h-9 w-40 text-[13px]"
+                aria-label={`${d.name}的主管`}
+                data-testid={`department-head-${d.name}`}
+              >
+                <option value="">没设主管</option>
+                {/* 现在的主管停用了、不在名单里：照样列出来，免得一打开就像是没设 */}
+                {d.head && !heads.data?.some((h) => h.id === d.head!.id) && <option value={d.head.id}>{d.head.name}{d.head.active ? '' : '（已停用）'}</option>}
+                {heads.data?.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <span className="text-[12.5px] text-ink-3">{d.head ? `主管 ${d.head.name}` : '没设主管'}</span>
+            )}
+            {d.head && !d.head.active && <Badge tone="clay">主管已停用</Badge>}
             {!d.active && <Badge>已停用</Badge>}
             {editable && (
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => save(d, { name: d.name, active: !d.active, sortOrder: d.sortOrder })}>

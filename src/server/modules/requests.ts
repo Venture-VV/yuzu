@@ -53,17 +53,27 @@ const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因
 async function myContext(db: Db, actor: Actor) {
   const [me] = await db<{ departmentId: number | null; departmentName: string | null }[]>`
     SELECT s.department_id, d.name AS department_name FROM staff s LEFT JOIN departments d ON d.id = s.department_id WHERE s.id = ${actor.id}`;
+  // 我当主管的部门（8.0.17，LC1）：这些部门的需求单我都看得到、要确认的由我确认
+  const heads = await db<{ id: number }[]>`SELECT id FROM departments WHERE head_id = ${actor.id} ORDER BY id`;
   return {
     departmentId: me?.departmentId ?? null,
     departmentName: me?.departmentName ?? null,
     canReview: can(actor, 'request.review'),
     canCreate: can(actor, 'request.create'),
+    headOf: heads.map((h) => Number(h.id)),
   };
 }
 
 /** 看得到这张需求单：审核的人看全部；部门申购看本部门的与自己提的 */
-function visible(me: Awaited<ReturnType<typeof myContext>>, actor: Actor, r: { departmentId: number; requesterId: number }) {
-  return me.canReview || r.requesterId === actor.id || (me.departmentId !== null && r.departmentId === me.departmentId);
+function visible(me: Awaited<ReturnType<typeof myContext>>, actor: Actor, r: { departmentId: number; requesterId: number; deptHeadId?: number | null }) {
+  return (
+    me.canReview ||
+    r.requesterId === actor.id ||
+    (me.departmentId !== null && r.departmentId === me.departmentId) ||
+    // 部门主管（8.0.17）：我当主管的部门的、提交时记着要我确认的
+    me.headOf.includes(r.departmentId) ||
+    (r.deptHeadId != null && Number(r.deptHeadId) === actor.id)
+  );
 }
 
 // ───────────────────────── 读取 ─────────────────────────
@@ -135,9 +145,22 @@ async function summaries(
 ) {
   // 截单（03）：今天还不能通过的（最早可通过日期在今天以后）；截单关了以后都能通过（按现在的规则）
   const today = f.timezone && (await loadPurchaseRules(db)).cutoffEnabled ? todayIn(f.timezone) : null;
-  return db<(Omit<PurchaseRequestSummary, 'department' | 'requester'> & { departmentId: number; departmentName: string; requesterId: number; requesterName: string })[]>`
+  return db<
+    (Omit<PurchaseRequestSummary, 'department' | 'requester' | 'deptConfirm'> & {
+      departmentId: number;
+      departmentName: string;
+      requesterId: number;
+      requesterName: string;
+      deptConfirm: 'none' | 'pending' | 'confirmed';
+      deptHeadId: number | null;
+      deptHeadName: string | null;
+      deptConfirmedByName: string | null;
+      deptConfirmedAt: string | null;
+    })[]
+  >`
     SELECT r.id, r.doc_no, r.status, r.need_by, r.created_at, r.department_id, d.name AS department_name, r.requester_id, s.display_name AS requester_name,
            r.priority, r.submitted_at, r.approvable_on, r.source,
+           r.dept_confirm, r.dept_head_id, hd.display_name AS dept_head_name, cf.display_name AS dept_confirmed_by_name, r.dept_confirmed_at,
            (r.status = 'submitted' AND r.approvable_on IS NOT NULL AND ${today}::date IS NOT NULL AND r.approvable_on > ${today}::date) AS locked_today,
            (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id) AS line_count,
            coalesce((SELECT string_agg(l.name, '、' ORDER BY l.line_no) FROM purchase_request_lines l WHERE l.request_id = r.id AND l.line_no <= 3), '') AS summary,
@@ -150,13 +173,18 @@ async function summaries(
                 AND (SELECT coalesce(sum(il.qty_milli), 0) FROM inv_doc_lines il JOIN inv_docs dd ON dd.id = il.doc_id
                      WHERE il.po_line_id = pl.id AND dd.doc_type = 'receipt' AND dd.status = 'confirmed') >= pl.base_qty_milli)) AS received_lines
     FROM purchase_requests r JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
+    LEFT JOIN staff hd ON hd.id = r.dept_head_id LEFT JOIN staff cf ON cf.id = r.dept_confirmed_by
     WHERE TRUE
       ${f.ids ? db`AND r.id IN ${db(f.ids)}` : db``}
       ${f.status ? db`AND r.status = ${f.status}` : db``}
       ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
       ${f.from && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date >= ${f.from}` : db``}
       ${f.to && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date <= ${f.to}` : db``}
-      ${f.requesterOrDept ? db`AND (r.requester_id = ${f.requesterOrDept.staffId} OR r.department_id = ${f.requesterOrDept.departmentId ?? 0})` : db``}
+      ${f.requesterOrDept
+        ? db`AND (r.requester_id = ${f.requesterOrDept.staffId} OR r.department_id = ${f.requesterOrDept.departmentId ?? 0}
+                  OR r.dept_head_id = ${f.requesterOrDept.staffId}
+                  OR r.department_id IN (SELECT hd2.id FROM departments hd2 WHERE hd2.head_id = ${f.requesterOrDept.staffId}))`
+        : db``}
     ${f.status === 'submitted'
       ? // 待审核（CG02）：紧急在前 → 期望到货日期早的在前（没填的排后）→ 提交早的在前（与 @shared/requests 的 reviewOrder 一样）
         db`ORDER BY (r.priority = 'urgent') DESC, r.need_by ASC NULLS LAST, r.submitted_at, r.id`
@@ -165,9 +193,23 @@ async function summaries(
 }
 
 const toSummary = (r: Awaited<ReturnType<typeof summaries>>[number]): PurchaseRequestSummary => {
-  const { departmentId, departmentName, requesterId, requesterName, ...rest } = r;
-  return { ...rest, department: { id: departmentId, name: departmentName }, requester: { id: requesterId, name: requesterName } };
+  const { departmentId, departmentName, requesterId, requesterName, deptConfirm, deptHeadId, deptHeadName, deptConfirmedByName, deptConfirmedAt, ...rest } = r;
+  return {
+    ...rest,
+    department: { id: departmentId, name: departmentName },
+    requester: { id: requesterId, name: requesterName },
+    deptConfirm: {
+      state: deptConfirm,
+      head: deptHeadId != null && deptConfirm !== 'none' ? { id: Number(deptHeadId), name: deptHeadName ?? '' } : null,
+      confirmedByName: deptConfirmedByName,
+      confirmedAt: deptConfirmedAt,
+    },
+  };
 };
+
+/** 能不能替这张单做主管确认 / 主管退回：店主、提交时记着的主管、这个部门现在的主管 */
+const isHeadOf = (me: Awaited<ReturnType<typeof myContext>>, actor: Actor, r: { departmentId: number; deptHeadId: number | null }) =>
+  actor.role === 'owner' || (r.deptHeadId != null && Number(r.deptHeadId) === actor.id) || me.headOf.includes(r.departmentId);
 
 export async function listRequests(db: Db, actor: Actor, f: { status?: RequestStatus; departmentId?: number; from?: string; to?: string; timezone?: string }): Promise<RequestsList> {
   const me = await myContext(db, actor);
@@ -178,7 +220,8 @@ export async function listRequests(db: Db, actor: Actor, f: { status?: RequestSt
 export async function getRequest(db: Db, actor: Actor, requestId: number, timezone?: string): Promise<PurchaseRequest> {
   const me = await myContext(db, actor);
   const [row] = await summaries(db, { ids: [requestId], timezone });
-  if (!row || !visible(me, actor, { departmentId: row.departmentId, requesterId: row.requesterId })) throw notFound('需求单不存在');
+  if (!row || !visible(me, actor, { departmentId: row.departmentId, requesterId: row.requesterId, deptHeadId: row.deptHeadId })) throw notFound('需求单不存在');
+  const canDeptConfirm = row.status === 'submitted' && row.deptConfirm === 'pending' && isHeadOf(me, actor, row);
   const [extra] = await db<{ note: string; reviewedByName: string | null; reviewedAt: string | null; reason: string | null; isSynthetic: boolean }[]>`
     SELECT r.note, rb.display_name AS reviewed_by_name, r.reviewed_at, r.reason, r.is_synthetic
     FROM purchase_requests r LEFT JOIN staff rb ON rb.id = r.reviewed_by WHERE r.id = ${requestId}`;
@@ -194,7 +237,7 @@ export async function getRequest(db: Db, actor: Actor, requestId: number, timezo
   const approvals = await db<PurchaseRequest['approvals']>`
     SELECT a.id, a.action, s.display_name AS actor_name, a.reason, a.created_at
     FROM approval_logs a JOIN staff s ON s.id = a.actor_id WHERE a.doc_kind = 'purchase_request' AND a.doc_id = ${requestId} ORDER BY a.id`;
-  return { ...toSummary(row), ...extra!, lines: lines.map(({ sourcing, ...l }) => ({ ...l, progress: progressOf(l.progress, sourcing) })), approvals };
+  return { ...toSummary(row), ...extra!, canDeptConfirm, lines: lines.map(({ sourcing, ...l }) => ({ ...l, progress: progressOf(l.progress, sourcing) })), approvals };
 }
 
 /** 已通过、还没下单、也没被询价单占着的需求行（转采购单、发起询价用；ids 给了就只取这些） */
@@ -312,6 +355,31 @@ async function resolveDepartment(db: Db, actor: Actor, wanted: number | null) {
 }
 
 /**
+ * 部门主管确认（8.0.17，LC1、LC11、LC12）：这次提交要不要主管先确认、由谁确认。提交时算好记在单上（之后改规则、换主管不影响已经提交的单）。
+ *   · 规则「不要」、部门没设主管或主管停用了：不用确认；
+ *   · 「估价达到询价门槛的」：各行「参考价 × 数量」之和（没填参考价的行不算）达到采购规则里的询价门槛才要；门槛是 0 就都不要；
+ *   · 提单人就是主管、或店主提的：算已确认。
+ */
+export async function deptConfirmFor(
+  db: Db,
+  deptId: number,
+  actor: Actor,
+  lines: { qtyMilli: number; refPriceCents: number | null }[],
+): Promise<{ state: 'none' | 'pending' | 'confirmed'; headId: number | null }> {
+  const rules = await loadPurchaseRules(db);
+  if (rules.deptConfirm === 'off') return { state: 'none', headId: null };
+  const [d] = await db<{ headId: number | null; headActive: boolean | null }[]>`
+    SELECT d.head_id, h.active AS head_active FROM departments d LEFT JOIN staff h ON h.id = d.head_id WHERE d.id = ${deptId}`;
+  if (!d?.headId || !d.headActive) return { state: 'none', headId: null };
+  if (rules.deptConfirm === 'threshold') {
+    const estimate = lines.reduce((sum, l) => sum + (l.refPriceCents === null ? 0 : Math.round((l.qtyMilli * l.refPriceCents) / 1000)), 0);
+    if (rules.quoteThresholdCents <= 0 || estimate < rules.quoteThresholdCents) return { state: 'none', headId: null };
+  }
+  const headId = Number(d.headId);
+  return { state: actor.id === headId || actor.role === 'owner' ? 'confirmed' : 'pending', headId };
+}
+
+/**
  * 每日截单（03，CG03）：截单时间以后（含，门店时区）提交的需求单，最早第二天才能通过；截单前提交或没开截单的为空（随时能审）。
  * 提交时算好记在单上，之后改截单时间不影响已经提交的单。
  */
@@ -346,9 +414,12 @@ export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?:
       await validateLines(tx, input.lines);
       const docNo = await nextDocNo(tx, 'purchase_request', 'XQ', todayIn(deps.config.timezone));
       const approvableOn = await approvableOnFor(tx, deps.config.timezone);
+      const confirm = await deptConfirmFor(tx, deptId, actor, input.lines);
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO purchase_requests (doc_no, department_id, requester_id, need_by, note, status, client_key, priority, approvable_on)
-        VALUES (${docNo}, ${deptId}, ${actor.id}, ${input.needBy}, ${input.note}, 'submitted', ${input.clientKey}, ${input.priority}, ${approvableOn})
+        INSERT INTO purchase_requests (doc_no, department_id, requester_id, need_by, note, status, client_key, priority, approvable_on,
+                                       dept_confirm, dept_head_id, dept_confirmed_by, dept_confirmed_at)
+        VALUES (${docNo}, ${deptId}, ${actor.id}, ${input.needBy}, ${input.note}, 'submitted', ${input.clientKey}, ${input.priority}, ${approvableOn},
+                ${confirm.state}, ${confirm.headId}, ${confirm.state === 'confirmed' ? actor.id : null}, ${confirm.state === 'confirmed' ? tx`now()` : null})
         RETURNING id`;
       await writeLines(tx, row!.id, input.lines);
       await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'purchase_request', ${requestHash}, ${row!.id}, ${actor.id})`;
@@ -372,8 +443,10 @@ export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?:
 }
 
 async function lockRequest(tx: Db, requestId: number) {
-  const [r] = await tx<{ id: number; status: RequestStatus; requesterId: number; departmentId: number; docNo: string; approvableOn: string | null; priority: RequestPriority }[]>`
-    SELECT id, status, requester_id, department_id, doc_no, approvable_on, priority FROM purchase_requests WHERE id = ${requestId} FOR UPDATE`;
+  const [r] = await tx<
+    { id: number; status: RequestStatus; requesterId: number; departmentId: number; docNo: string; approvableOn: string | null; priority: RequestPriority; deptConfirm: 'none' | 'pending' | 'confirmed'; deptHeadId: number | null }[]
+  >`
+    SELECT id, status, requester_id, department_id, doc_no, approvable_on, priority, dept_confirm, dept_head_id FROM purchase_requests WHERE id = ${requestId} FOR UPDATE`;
   if (!r) throw notFound('需求单不存在');
   return r;
 }
@@ -394,9 +467,13 @@ export async function updateRequest(deps: Deps, requestId: number, raw: unknown,
     await writeLines(tx, requestId, input.lines);
     // 修改、退回后再提交都算重新提交：提交时间与截单后的最早可通过日期按这一次算（03）
     const approvableOn = await approvableOnFor(tx, deps.config.timezone);
+    // 主管确认（8.0.17）：重新提交按这一次的内容与现在的规则、主管重新算；原来确认过的要重新确认
+    const confirm = await deptConfirmFor(tx, r.departmentId, actor, input.lines);
     await tx`
       UPDATE purchase_requests SET need_by = ${input.needBy}, note = ${input.note}, priority = ${input.priority}, status = 'submitted', reason = NULL,
-             submitted_at = now(), approvable_on = ${approvableOn}, updated_at = now()
+             submitted_at = now(), approvable_on = ${approvableOn}, updated_at = now(),
+             dept_confirm = ${confirm.state}, dept_head_id = ${confirm.headId},
+             dept_confirmed_by = ${confirm.state === 'confirmed' ? actor.id : null}, dept_confirmed_at = ${confirm.state === 'confirmed' ? tx`now()` : null}
       WHERE id = ${requestId}`;
     await logApproval(tx, 'purchase_request', requestId, r.status === 'returned' ? 'submit' : 'revise', actor.id);
     // 改好提交了：这张需求单的修改草稿（自己的）关掉
@@ -406,16 +483,44 @@ export async function updateRequest(deps: Deps, requestId: number, raw: unknown,
   return getRequest(deps.sql, actor, requestId, deps.config.timezone);
 }
 
-export async function actOnRequest(deps: Deps, requestId: number, action: 'approve' | 'return' | 'reject' | 'cancel', raw: unknown, actor: Actor, ip?: string) {
-  const reason = action === 'approve' ? '' : parse(ReasonInput, raw).reason;
+export async function actOnRequest(
+  deps: Deps,
+  requestId: number,
+  action: 'approve' | 'return' | 'reject' | 'cancel' | 'dept-confirm' | 'dept-return',
+  raw: unknown,
+  actor: Actor,
+  ip?: string,
+) {
+  const reason = action === 'approve' || action === 'dept-confirm' ? '' : parse(ReasonInput, raw).reason;
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const r = await lockRequest(tx, requestId);
     switch (action) {
+      // 部门主管确认 / 退回（8.0.17，LC1、LC13）：与审核一样只锁需求单一行。能做的人：店主、提交时记着的主管、这个部门现在的主管
+      case 'dept-confirm':
+      case 'dept-return': {
+        const me = await myContext(tx, actor);
+        if (!isHeadOf(me, actor, r)) throw forbidden('只有这个部门的主管（或店主）能做主管确认');
+        if (action === 'dept-confirm') {
+          if (r.deptConfirm === 'confirmed') return;
+          if (r.status !== 'submitted' || r.deptConfirm !== 'pending') throw conflict('INVALID_STATE', '这张需求单现在不用主管确认');
+          await tx`UPDATE purchase_requests SET dept_confirm = 'confirmed', dept_confirmed_by = ${actor.id}, dept_confirmed_at = now(), updated_at = now() WHERE id = ${requestId}`;
+          return logApproval(tx, 'purchase_request', requestId, 'approve', actor.id, '部门主管确认');
+        }
+        if (r.status === 'returned') return;
+        if (r.status !== 'submitted' || r.deptConfirm !== 'pending') throw conflict('INVALID_STATE', '只有等主管确认的需求单可以由主管退回');
+        await tx`UPDATE purchase_requests SET status = 'returned', reason = ${`主管退回：${reason}`}, updated_at = now() WHERE id = ${requestId}`;
+        return logApproval(tx, 'purchase_request', requestId, 'return', actor.id, `主管退回：${reason}`);
+      }
       case 'approve':
         if (!can(actor, 'request.review')) throw forbidden('当前账号不能审核需求单');
         if (r.status === 'approved') return;
         if (r.status !== 'submitted') throw conflict('INVALID_STATE', '只有待审核的需求单可以通过');
+        // 主管确认（8.0.17，LC1）：要主管先确认的，确认以前不能通过（可以退回或定为不采购）
+        if (r.deptConfirm === 'pending') {
+          const [h] = r.deptHeadId ? await tx<{ name: string }[]>`SELECT display_name AS name FROM staff WHERE id = ${r.deptHeadId}` : [];
+          throw conflict('DEPT_CONFIRM_REQUIRED', `这张需求单要部门主管${h ? `（${h.name}）` : ''}先确认，确认以后才能审核通过（可以先退回或定为不采购）`, { headId: r.deptHeadId });
+        }
         // 每日截单（03，CG03）：截单后提交的当天不能通过（退回、不采购不受限）；截单关了以后不再拦（按现在的规则）
         if (r.approvableOn && r.approvableOn > todayIn(deps.config.timezone) && (await loadPurchaseRules(tx)).cutoffEnabled) {
           throw conflict('CUTOFF_LOCKED', `这张需求单是截单以后提交的，今天不能审核通过，${r.approvableOn} 起可以通过（可以先退回或定为不采购）`, { approvableOn: r.approvableOn });
@@ -652,6 +757,10 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
     app.post(`/api/erp/requests/:id/${action}`, { preHandler: guardAny('request.review') }, async (req) => actOnRequest(deps, docId(req), action, req.body, req.actor, req.ip));
   }
   app.post('/api/erp/requests/:id/cancel', { preHandler: guardAny('request.create') }, async (req) => actOnRequest(deps, docId(req), 'cancel', req.body, req.actor, req.ip));
+  // 部门主管确认 / 退回（8.0.17）：是不是这张单的主管在函数里核对
+  for (const action of ['dept-confirm', 'dept-return'] as const) {
+    app.post(`/api/erp/requests/:id/${action}`, { preHandler: anyRequest }, async (req) => actOnRequest(deps, docId(req), action, req.body, req.actor, req.ip));
+  }
 
   // 图片：上传（压缩后的 Base64，单张不超过 1 MB）与查看（要登录、要有需求单或库存采购的查看权限）
   app.post('/api/erp/images', { preHandler: guardAny('request.create', 'request.review', 'purchase.manage'), bodyLimit: 1_600_000 }, async (req, reply) => {

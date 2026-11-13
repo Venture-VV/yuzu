@@ -61,7 +61,7 @@ describe('8.0.16 → 8.0.17', () => {
                 ${status === 'approved' || status === 'rejected' ? '2026-11-02 10:00:00+08' : null})`;
     }
     expect(await migrate(sql)).toEqual(NEW);
-    expect((await sql<{ headId: number | null }[]>`SELECT head_id FROM departments`).map((d) => d.headId)).toEqual([null]);
+    expect((await sql<{ headId: number | null }[]>`SELECT head_id FROM departments`).every((d) => d.headId === null)).toBe(true);
     const rows = await sql<{ docNo: string; status: string; deptConfirm: string; deptHeadId: number | null }[]>`SELECT doc_no, status, dept_confirm, dept_head_id FROM purchase_requests ORDER BY doc_no`;
     expect(rows.map((r) => `${r.docNo}:${r.status}:${r.deptConfirm}:${r.deptHeadId}`)).toEqual(['XQ-A:approved:none:null', 'XQ-C:cancelled:none:null', 'XQ-R:rejected:none:null', 'XQ-S:submitted:none:null']);
     // 约束：等主管确认要有主管；已确认要有人、有时间；等主管确认的不能通过

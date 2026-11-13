@@ -17,7 +17,7 @@ import { Notice, Skeleton } from '../../components/ui';
 import { PurchaseFlowCard } from './PurchaseFlow';
 
 /** 按停在哪个环节筛：这几个是会停人的环节（提需求不会停） */
-const STAGES: FlowNodeKey[] = ['review', 'sourcing', 'award', 'approval', 'order', 'receive', 'stockin', 'pay'];
+const STAGES: FlowNodeKey[] = ['confirm', 'review', 'sourcing', 'award', 'approval', 'order', 'receive', 'stockin', 'pay'];
 
 export function FlowPage() {
   const can = useCan();
