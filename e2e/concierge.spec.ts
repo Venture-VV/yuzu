@@ -182,6 +182,6 @@ test("两位低余额会员均无人工核对记录时重点跟进不崩溃", as
   await page.goto("/concierge");
   await page.getByRole("button",{name:/低余额关注 \d+位/}).click();
   await expect(page.getByRole("heading",{name:"低余额关注名单",exact:true})).toBeVisible();
-  await expect(page.getByText(`低余额验收甲${stamp}`,{exact:true})).toBeVisible();
-  await expect(page.getByText(`低余额验收乙${stamp}`,{exact:true})).toBeVisible();
+  await expect(page.getByRole("button",{name:new RegExp(`低余额验收甲${stamp}`)})).toBeVisible();
+  await expect(page.getByRole("button",{name:new RegExp(`低余额验收乙${stamp}`)})).toBeVisible();
 });
