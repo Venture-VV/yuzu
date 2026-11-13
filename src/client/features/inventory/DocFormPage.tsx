@@ -75,7 +75,7 @@ interface FormState {
   coAcceptorId: number | null;
   handler: string;
   note: string;
-  /** 耗用的用途与经办人（8.0.7 2.3）：用途从「经营规则 → 可调的数值」的列表选，经办人默认自己 */
+  /** 耗用的用途与经办人（8.0.7 2.3）：用途从「门店基本规则 → 可调的数值」的列表选，经办人默认自己 */
   usePurpose: string;
   useHandlerId: number | null;
   lines: LineDraft[];

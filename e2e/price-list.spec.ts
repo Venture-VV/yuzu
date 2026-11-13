@@ -23,7 +23,8 @@ test.describe('汤崎价目表与多档价格', () => {
   test('导入价目表 → 前台挂「专业」档 → 仅女宾项目对男宾不可选 → 会员按档消费', async ({ page }) => {
     // ① 店主预览并导入
     await login(page, 'linlan');
-    await page.goto('/admin/catalog');
+    // 8.0.17：「导入价目表」是价目与套餐的一个页签
+    await page.goto('/admin/catalog/import');
     const card = page.getByTestId('price-list-import');
     await card.getByTestId('price-list-builtin').click();
     const preview = card.getByTestId('price-list-preview');
@@ -31,6 +32,7 @@ test.describe('汤崎价目表与多档价格', () => {
     await expect(preview).toContainText('全身按摩 · 基础系列');
     await card.getByTestId('price-list-confirm').click();
     await expect(page.getByText('已导入 29 个项目')).toBeVisible();
+    await page.getByTestId('subnav-items').click();
     const items = page.getByTestId('catalog-items');
     await expect(items.getByRole('button', { name: /日式指压/ })).toContainText('专业');
     await page.request.post('/api/auth/logout');

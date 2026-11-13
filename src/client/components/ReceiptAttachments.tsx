@@ -62,7 +62,7 @@ const toBase64 = (file: Blob) =>
   });
 
 /**
- * 收货单详情里的附件：列表 + 补传（照片压缩到 1 MB 以内；PDF 与份数上限按「经营规则 → 可调的数值」，默认 10 MB、9 份）；不能删。
+ * 收货单详情里的附件：列表 + 补传（照片压缩到 1 MB 以内；PDF 与份数上限按「门店基本规则 → 可调的数值」，默认 10 MB、9 份）；不能删。
  * 8.0.3 起进项发票的照片也用它（uploadUrl、标题、份数上限另给）。
  */
 export function ReceiptAttachmentsPanel({

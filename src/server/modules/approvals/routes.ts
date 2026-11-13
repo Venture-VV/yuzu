@@ -267,7 +267,7 @@ async function createDelegation(deps: Deps, raw: unknown, actor: Actor, ip?: str
   if (d.staffId !== actor.id && !can(actor, 'approval.rules')) throw forbidden('只能给自己设代理人（给别人设要店主）');
   if (d.staffId === d.delegateId) throw badRequest('代理人不能是本人');
   if (d.endsOn < d.startsOn) throw badRequest('结束日期不能早于开始日期');
-  // 代理最多几天（A7，8.0.7 起在「经营规则 → 可调的数值」里改）
+  // 代理最多几天（A7，8.0.7 起在「门店基本规则 → 可调的数值」里改）
   const { delegationMaxDays } = await loadSettings(deps.sql);
   if (daysBetween(d.startsOn, d.endsOn) + 1 > delegationMaxDays) throw badRequest(`代理最多 ${delegationMaxDays} 天（含首尾）`);
   if (d.endsOn < todayIn(deps.config.timezone)) throw badRequest('结束日期已经过了');

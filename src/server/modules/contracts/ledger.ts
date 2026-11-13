@@ -107,7 +107,7 @@ export async function listContracts(
 ): Promise<ContractSummary[]> {
   const filter = f.filter ?? 'all';
   const q = f.q ? `%${f.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
-  // 到期提醒的天数（C11，8.0.7 起在「经营规则 → 可调的数值」里改）
+  // 到期提醒的天数（C11，8.0.7 起在「门店基本规则 → 可调的数值」里改）
   const { contractRemindDays } = await loadSettings(db);
   const rows = await db<HeaderRow[]>`
     ${headerSelect(db, today)}

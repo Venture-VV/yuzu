@@ -77,7 +77,7 @@ test.describe('8.0.4 会员体系整改', () => {
     const warehouse = meta.warehouses.find((w) => w.active)!;
 
     // ① 买一赠一券
-    await page.goto('/admin/coupons');
+    await page.goto('/admin/coupons/templates');
     await page.getByTestId('coupon-template-new').click();
     const dialog = page.getByTestId('coupon-template-dialog');
     await dialog.getByTestId('coupon-template-name').fill(`E2E买一赠一${run}`);

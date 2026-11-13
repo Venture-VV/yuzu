@@ -328,7 +328,7 @@ export const FINANCE_EXCLUDED: Partial<Record<Permission, readonly Duty[]>> = { 
 
 /**
  * 这位账号的职责把这项权限挡掉了（与财务隔离）。financeExclusion 是经营规则「有财务职责的账号看不到营销成本」
- * （HY14，默认开；8.0.7 起在「经营规则 → 可调的数值」里改，关掉以后按岗位权限给）
+ * （HY14，默认开；8.0.7 起在「门店基本规则 → 可调的数值」里改，关掉以后按岗位权限给）
  */
 export function excludedByDuty(subject: Pick<PermissionSubject, 'role' | 'duties'>, permission: Permission, financeExclusion = true): boolean {
   if (subject.role === 'owner' || !financeExclusion) return false;

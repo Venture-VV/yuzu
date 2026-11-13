@@ -30,7 +30,7 @@ const PdfInput = z.object({
 export async function storePdf(db: Db, scope: FileScope, base64: string, actor: Actor): Promise<{ id: number; sizeBytes: number }> {
   const buf = Buffer.from(base64, 'base64');
   if (buf.length === 0 || buf.subarray(0, 5).toString('latin1') !== '%PDF-') throw unprocessable('FILE_NOT_PDF', '这不是 PDF 文件，请导出成 PDF 再上传');
-  // 每份最大（CG08，默认 10 MB，8.0.7 起在「经营规则 → 可调的数值」里往小调）
+  // 每份最大（CG08，默认 10 MB，8.0.7 起在「门店基本规则 → 可调的数值」里往小调）
   const { pdfMaxMb } = await loadSettings(db);
   if (buf.length > Math.min(MAX_PDF_BYTES, pdfMaxBytes({ pdfMaxMb }))) throw unprocessable('FILE_TOO_LARGE', `文件不能超过 ${pdfMaxMb} MB`);
   const sha256 = createHash('sha256').update(buf).digest('hex');

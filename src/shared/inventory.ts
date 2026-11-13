@@ -136,7 +136,7 @@ export interface DeptStockMeta {
     weighed: boolean;
   }[];
   suppliers: { id: number; code: string; name: string }[];
-  /** 耗用的用途（8.0.7 2.3，「经营规则 → 可调的数值」里改） */
+  /** 耗用的用途（8.0.7 2.3，「门店基本规则 → 可调的数值」里改） */
   purposes: string[];
   /** 经办人能选的员工（在职的） */
   staff: { id: number; name: string }[];

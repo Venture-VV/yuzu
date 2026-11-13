@@ -687,7 +687,7 @@ export async function receivedByPoLine(db: Db, poId: number, excludeDocId: numbe
 }
 
 /**
- * 耗用的用途与经办人（8.0.7 2.3）：用途要在「经营规则 → 可调的数值」的列表里；经办人要是在职员工，没选的默认是自己。
+ * 耗用的用途与经办人（8.0.7 2.3）：用途要在「门店基本规则 → 可调的数值」的列表里；经办人要是在职员工，没选的默认是自己。
  * 没带用途的（旧的调用、自动生成的）两样都不记。
  */
 async function prepareUse(db: Db, purpose: string | null, handlerId: number | null, actor: Actor): Promise<{ usePurpose: string | null; useHandlerId: number | null }> {
@@ -697,7 +697,7 @@ async function prepareUse(db: Db, purpose: string | null, handlerId: number | nu
   }
   const { consumptionPurposes } = await loadSettings(db);
   if (!consumptionPurposes.includes(purpose)) {
-    throw unprocessable('PURPOSE_INVALID', `用途只能选：${consumptionPurposes.join('、')}（在「经营规则 → 可调的数值」里改）`);
+    throw unprocessable('PURPOSE_INVALID', `用途只能选：${consumptionPurposes.join('、')}（在「门店基本规则 → 可调的数值」里改）`);
   }
   const who = handlerId ?? actor.id;
   const [st] = await db<{ active: boolean }[]>`SELECT active FROM staff WHERE id = ${who}`;

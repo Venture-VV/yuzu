@@ -41,7 +41,7 @@ export interface StoreRules extends Tunables {
    * 「当天第一笔充值前的余额 + 当天充值实收 × 这个百分比」；null 为不限（默认 70）
    */
   rechargeSpendPct: number | null;
-  /** 次卡售卖（8.0.4 需求表 03，HY05）：默认停售，已售的照常用、退、打印；8.0.7 起在「经营规则 → 可调的数值」里开关 */
+  /** 次卡售卖（8.0.4 需求表 03，HY05）：默认停售，已售的照常用、退、打印；8.0.7 起在「门店基本规则 → 可调的数值」里开关 */
   countCardSales: boolean;
   /** 撤销与反结账时限（#10，2026-10-29 签认默认 48 小时）：消费 / 结账后多少小时内可以撤销、反结账，超过后只有店主可以；null 为不限 */
   reversalWindowHours: number | null;
@@ -57,7 +57,7 @@ export interface StoreRules extends Tunables {
   businessHours: BusinessHours | null;
   /** 自定义赠金（不按套餐）的有效期天数（#2）；null 为长期有效。套餐的有效期在套餐上设置 */
   customBonusValidDays: number | null;
-  /** 会员渠道来源的可选项（v0.6.0，后台「会员与渠道」维护） */
+  /** 会员渠道来源的可选项（v0.6.0，后台「渠道与标签」维护） */
   memberChannels: MemberChannel[];
 }
 

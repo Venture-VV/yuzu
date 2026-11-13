@@ -683,7 +683,7 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         {couponLike && (
           <Field label="发哪张券" htmlFor="benefit-template" hint={draft.category === 'coupon' ? '券的有效期到本期最后一天（不看模板的有效天数）' : '按券模板的有效期'} className="sm:col-span-2">
             <Select id="benefit-template" value={draft.templateId} onChange={(e) => set({ templateId: e.target.value })} data-testid="benefit-template">
-              <option value="">选券模板（在「券与会员权益」里建）</option>
+              <option value="">选券模板（在「券」里建）</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}

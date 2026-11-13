@@ -1,5 +1,5 @@
 // 页面上可改的数值（8.0.7 A1，店主 2026-11-10：有争议的规则不要写死）：原来写死在代码里、标「待确认」的数值，
-// 存在经营规则设置（settings 表，见 src/server/modules/settings.ts），在后台「经营规则 → 可调的数值」里改（店主）。
+// 存在经营规则设置（settings 表，见 src/server/modules/settings.ts），在后台「门店基本规则 → 可调的数值」里改（店主）。
 // 会话里随 rules 带到各页面（只读），服务端在用到的地方读一次。默认值与原来写死的一样，升级后行为不变。
 
 import { APPROVAL_BATCH_MAX, APPROVAL_BATCH_MAX_CENTS, APPROVAL_OVERDUE_HOURS, DELEGATION_MAX_DAYS, URGENT_BACKFILL_ESCALATE_DAYS } from './approvals';

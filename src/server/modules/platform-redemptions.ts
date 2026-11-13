@@ -76,7 +76,7 @@ export async function registerRedemption(deps: Deps, raw: RedemptionInputData, c
   const now = ctx.at ?? new Date();
   const redeemedAt = new Date(input.redeemedAt);
   if (redeemedAt.getTime() > now.getTime() + 5 * 60_000) throw unprocessable('PLATFORM_TIME', '核销时间不能晚于现在');
-  // 最早能补到几天前（N6，8.0.7 起在「经营规则 → 可调的数值」里改）
+  // 最早能补到几天前（N6，8.0.7 起在「门店基本规则 → 可调的数值」里改）
   const { platformBackfillDays } = await loadSettings(deps.sql);
   if (redeemedAt.getTime() < now.getTime() - platformBackfillDays * 86_400_000) throw unprocessable('PLATFORM_TIME', `只能补登记 ${platformBackfillDays} 天以内的核销`);
   const { clientKey: key, ...payload } = input;

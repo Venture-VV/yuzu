@@ -32,7 +32,7 @@ import { sendBatchApprove, sentLabel, useUncertainApprovals } from './uncertain'
 type Tab = ApprovalTab | 'rules' | 'delegations';
 
 export function ApprovalsPage() {
-  // 超时的小时数等（A5、A6、A10）8.0.7 起在「经营规则 → 可调的数值」里改，随会话带过来
+  // 超时的小时数等（A5、A6、A10）8.0.7 起在「门店基本规则 → 可调的数值」里改，随会话带过来
   const rules = useSession().rules;
   const can = useCan();
   const [params, setParams] = useSearchParams();

@@ -41,7 +41,8 @@ test('按钱箱交班：后台切换 → 选钱箱开班 → 别人加入、收�
     await offShift(page.request);
 
     // ① 后台「经营规则」：交班方式切到按钱箱交班（用已有的 1 号钱箱，不新增：钱箱不能删）
-    await page.goto('/admin/rules');
+    // 8.0.17：「交班方式」是门店基本规则的一个页签
+    await page.goto('/admin/rules/shift');
     const card = page.getByTestId('shift-mode-card');
     await card.getByRole('radio', { name: '按钱箱交班' }).click();
     if ((await card.getByRole('radio', { name: '启用' }).first().getAttribute('aria-checked')) !== 'true') {

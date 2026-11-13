@@ -801,7 +801,7 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
     try {
       for (const f of list) {
         setProgress({ done, total: list.length });
-        // PDF（8.0.7 起）：每份按「经营规则 → 可调的数值」的大小，最多 10 MB
+        // PDF（8.0.7 起）：每份按「门店基本规则 → 可调的数值」的大小，最多 10 MB
         if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
           if (f.size > pdfMaxBytes(rules)) throw new Error(`「${f.name}」超过 ${rules.pdfMaxMb} MB`);
           await api.post(`/api/erp/contracts/${c.id}/files`, { name: f.name.replace(/\.[^.]+$/, '').slice(0, 80), mime: 'application/pdf', data: await fileBase64(f) }, { timeoutMs: 60_000 });

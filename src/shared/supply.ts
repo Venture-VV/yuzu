@@ -1,5 +1,5 @@
 // 8.0.7 供应链收尾（docs/ERP_V807.md 第 2 节）：供应商准入与证照、季度评分与观察名单、部门耗用的用途与经办人、
-// 呆滞与周转、批次与效期。数值与开关在「经营规则 → 可调的数值」里改（@shared/tunables）。
+// 呆滞与周转、批次与效期。数值与开关在「门店基本规则 → 可调的数值」里改（@shared/tunables）。
 
 export const SUPPLIER_ADMISSIONS = ['pending', 'approved', 'suspended'] as const;
 export type SupplierAdmission = (typeof SUPPLIER_ADMISSIONS)[number];
@@ -140,7 +140,7 @@ export function scoreOf(onTimeBp: number, qualityBp: number, priceIndexBp: numbe
 
 // ───────────────────────── 部门耗用（2.3） ─────────────────────────
 
-/** 耗用用途的默认列表（V6，在「经营规则 → 可调的数值」里改） */
+/** 耗用用途的默认列表（V6，在「门店基本规则 → 可调的数值」里改） */
 export const DEFAULT_CONSUMPTION_PURPOSES = ['客用消耗', '员工使用', '清洁卫生', '维修保养', '活动与赠送', '其他'] as const;
 export const MAX_CONSUMPTION_PURPOSES = 20;
 

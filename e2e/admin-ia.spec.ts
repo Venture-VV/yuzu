@@ -21,8 +21,7 @@ test.describe('8.0.17 后台的信息架构', () => {
     await login(page, 'linlan');
     await page.goto('/admin');
     const nav = page.getByRole('navigation', { name: '后台导航' });
-    const titles = await nav.locator('p').allInnerTexts();
-    expect(titles).toEqual(['概览', '规则中心', '会员与营销', '营业项目', '场地、设备与线上', '人员与权限', '数据与审计']);
+    await expect(nav.locator('p')).toHaveText(['概览', '规则中心', '会员与营销', '营业项目', '场地、设备与线上', '人员与权限', '数据与审计']);
     // 规则中心：规则总表、门店基本规则（原「经营规则」）
     await expect(page.getByTestId('admin-nav-settings')).toHaveText('规则总表');
     await expect(page.getByTestId('admin-nav-rules')).toHaveText('门店基本规则');
@@ -74,22 +73,20 @@ test.describe('8.0.17 后台的信息架构', () => {
     await expect(page.getByTestId('subnav-rules')).toHaveAttribute('aria-current', 'page');
 
     // 各分区页签的顺序：规则在最前，导入与工具在最后
-    const tabsOf = async (path: string) => {
+    const tabs = async (path: string, expected: (string | RegExp)[]) => {
       await page.goto(path);
-      return page.getByTestId('subnav').getByRole('link').allInnerTexts();
+      await expect(page.getByTestId('subnav').getByRole('link')).toHaveText(expected);
     };
-    expect(await tabsOf('/admin/rules')).toEqual(['基本与收款', '交班方式', '可调的数值', '库存与采购']);
-    expect(await tabsOf('/admin/tags')).toEqual(['前台规则', '手牌池', '建牌与导入']);
-    expect(await tabsOf('/admin/dining')).toEqual(['餐饮规则', '档口与出品', '桌台']);
-    expect(await tabsOf('/admin/rooms')).toEqual(['客房规则', '房型与房价', '房间']);
-    expect(await tabsOf('/admin/catalog')).toEqual(['消费项目', '门票', '充值套餐', '导入价目表']);
-    expect(await tabsOf('/admin/devices')).toEqual(['设备登记表', '打印任务与设备事件', '按采购清单导入']);
-    expect(await tabsOf('/admin/opening')).toEqual(['会员余额期初', '旧系统逐笔流水']);
-    expect(await tabsOf('/admin/coupons')).toEqual(['发券规则', '券模板', '批量发券', '无记名券', '统计', '使用率']);
-    expect(await tabsOf('/admin/spaces')).toEqual(['空间', '楼层与区域', '底图', '对客导览', '实时位置', '导入']);
-    const emenu = await tabsOf('/admin/emenu');
-    expect(emenu[0]).toBe('设置');
-    expect(emenu.slice(1).map((t) => t.replace(/（\d+）$/, ''))).toEqual(['分类与版面', '菜品图文']);
+    await tabs('/admin/rules', ['基本与收款', '交班方式', '可调的数值', '库存与采购']);
+    await tabs('/admin/tags', ['前台规则', '手牌池', '建牌与导入']);
+    await tabs('/admin/dining', ['餐饮规则', '档口与出品', '桌台']);
+    await tabs('/admin/rooms', ['客房规则', '房型与房价', '房间']);
+    await tabs('/admin/catalog', ['消费项目', '门票', '充值套餐', '导入价目表']);
+    await tabs('/admin/devices', ['设备登记表', '打印任务与设备事件', '按采购清单导入']);
+    await tabs('/admin/opening', ['会员余额期初', '旧系统逐笔流水']);
+    await tabs('/admin/coupons', ['发券规则', '券模板', '批量发券', '无记名券', '统计', '使用率']);
+    await tabs('/admin/spaces', ['空间', '楼层与区域', '底图', '对客导览', '实时位置', '导入']);
+    await tabs('/admin/emenu', ['设置', /^分类与版面（\d+）$/, /^菜品图文（\d+）$/]);
   });
 
   test('换页签不丢填到一半的东西；旧地址照旧能用', async ({ page }, info) => {

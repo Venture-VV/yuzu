@@ -85,6 +85,8 @@ test.describe('S5 餐饮', () => {
       await page.goto('/admin');
       await page.getByTestId('admin-nav-dining').click();
       await expect(page.getByTestId('dining-rules-card')).toContainText('餐饮功能');
+      await page.getByTestId('subnav-stations').click();
+      // 8.0.17：后台「餐饮」分成三个页签——餐饮规则、档口与出品、桌台
       let admin = await getJson<DiningAdmin>(page, '/api/admin/dining');
       for (const name of new Set(DISHES.map((d) => d.station))) {
         const old = admin.stations.find((s) => s.name === name);
@@ -119,6 +121,7 @@ test.describe('S5 餐饮', () => {
         await page.getByTestId('dining-items-save').click();
         await expect(page.getByText('菜品的出品档口已保存')).toBeVisible();
       }
+      await page.getByTestId('subnav-rules').click();
       const rules = page.getByTestId('dining-rules-card');
       await rules.getByRole('radiogroup', { name: '餐饮功能' }).getByRole('radio', { name: '开启' }).click();
       const save = page.getByTestId('dining-rules-save');

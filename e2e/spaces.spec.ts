@@ -153,7 +153,7 @@ test.describe('空间台账（v0.7.14）', () => {
       const type = admin.types.find((t) => t.active)!;
       const target = admin.spaces.find((x) => x.code === room)!;
       expect(admin.spaceRequired).toBe(true);
-      await page.goto('/admin/rooms');
+      await page.goto('/admin/rooms/rooms');
       await page.getByTestId('rooms-room-new').click();
       const roomDialog = page.getByRole('dialog', { name: '新建房间' });
       await roomDialog.getByTestId('rooms-room-space').selectOption(String(target.id));

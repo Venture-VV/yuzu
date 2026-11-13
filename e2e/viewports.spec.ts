@@ -134,9 +134,11 @@ test.describe('视口冒烟', () => {
     }
     await page.goto('/admin/technicians');
     await expect(page.getByTestId('technician-rules-card')).toBeVisible();
+    await page.getByTestId('subnav-items').click();
     await expect(page.getByTestId('technician-items')).toBeVisible();
     await expectFits(page);
     // 新建技师的对话框（只打开、不保存）
+    await page.getByTestId('subnav-roster').click();
     await page.getByTestId('technician-new').click();
     await expect(page.getByRole('dialog', { name: '新建技师' })).toBeVisible();
     await expectFits(page);
@@ -223,7 +225,9 @@ test.describe('视口冒烟', () => {
       await expectFits(page);
       await page.goto('/admin/dining');
       await expect(page.getByTestId('dining-rules-card')).toBeVisible();
+      await page.getByTestId('subnav-stations').click();
       await expect(page.getByTestId('dining-items')).toBeVisible();
+      await page.getByTestId('subnav-tables').click();
       await expect(page.getByTestId('dining-tables')).toBeVisible();
       await expectFits(page);
     } finally {
@@ -260,7 +264,9 @@ test.describe('视口冒烟', () => {
       }
       await page.goto('/admin/rooms');
       await expect(page.getByTestId('rooms-rules-card')).toBeVisible();
+      await page.getByTestId('subnav-types').click();
       await expect(page.getByTestId('rooms-types')).toBeVisible();
+      await page.getByTestId('subnav-rooms').click();
       await expect(page.getByTestId('rooms-rooms')).toBeVisible();
       await expectFits(page);
       await page.goto('/dashboard/rooms');

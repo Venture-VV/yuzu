@@ -86,7 +86,7 @@ interface RequestRow {
 }
 
 async function loadRequests(db: Db, where: { pending?: boolean; ids?: number[]; submittedBy?: number; limit?: number }): Promise<RequestRow[]> {
-  // 超时的小时数（A6，8.0.7 起在「经营规则 → 可调的数值」里改）
+  // 超时的小时数（A6，8.0.7 起在「门店基本规则 → 可调的数值」里改）
   const { approvalOverdueHours } = await loadSettings(db);
   const rows = await db<RequestRow[]>`
     SELECT r.id, r.doc_kind, r.doc_id, r.doc_type, r.doc_no, r.amount_cents, d.name AS department_name, r.rule_id, ar.note AS rule_note,

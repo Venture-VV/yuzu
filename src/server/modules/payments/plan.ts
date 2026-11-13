@@ -135,7 +135,7 @@ export async function contractPlan(db: Db, contractId: number, today: string): P
   const acceptances = await acceptancesOf(db, contractId);
   const latest = acceptances.find((a) => a.voidedAt === null) ?? null;
   const passed = latest?.result === 'pass';
-  // 验收不合格挂起付款（8.0.7 2.5，V9，「经营规则 → 可调的数值」里的开关）：最近一次验收不合格时不能申请、不能登记付款
+  // 验收不合格挂起付款（8.0.7 2.5，V9，「门店基本规则 → 可调的数值」里的开关）：最近一次验收不合格时不能申请、不能登记付款
   const acceptanceHold = signed && latest?.result === 'fail' && (await loadSettings(db)).acceptanceHoldsPayment;
   const holdWhy = acceptanceHold
     ? `最近一次验收（${latest!.acceptedOn}）不合格${latest!.note ? `：${latest!.note}` : ''}，付款挂起；重新验收合格以后再申请、再付`

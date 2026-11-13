@@ -721,7 +721,7 @@ export async function cancelJob(deps: Deps, id: number, ctx: OpContext, canManag
  */
 async function assertNetworkPrint(db: Db) {
   if ((await loadSettings(db)).printMode === 'local') {
-    throw unprocessable('PRINT_MODE_LOCAL', '现在是「本机打印」：请用浏览器打印到这台电脑连的打印机（店主可以在后台「经营规则 → 可调的数值」里改打印方式）');
+    throw unprocessable('PRINT_MODE_LOCAL', '现在是「本机打印」：请用浏览器打印到这台电脑连的打印机（店主可以在后台「门店基本规则 → 可调的数值」里改打印方式）');
   }
 }
 

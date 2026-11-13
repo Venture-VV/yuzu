@@ -27,7 +27,7 @@ export interface WecomStatus {
   configured: boolean;
   /** 配了但格式不对（要 https 的机器人地址） */
   invalid: boolean;
-  /** 「经营规则 → 可调的数值」里的开关（V20） */
+  /** 「门店基本规则 → 可调的数值」里的开关（V20） */
   enabled: boolean;
   /** 最近几次（新的在前） */
   recent: WecomPushView[];

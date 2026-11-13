@@ -312,7 +312,7 @@ export function Badge({ tone = 'neutral', className, children, icon }: { tone?: 
 }
 
 /** 「待确认」标记：模拟规则统一使用 */
-/** 经营规则还没签认时的「待确认」标记；店主在「经营规则」里选择隐藏后不再显示 */
+/** 经营规则还没签认时的「待确认」标记；店主在「门店基本规则」里选择隐藏后不再显示 */
 export function PendingBadge({ className, title }: { className?: string; title?: string }) {
   const session = useOptionalSession();
   if (session?.rules.hidePendingMarks) return null;

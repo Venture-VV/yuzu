@@ -498,7 +498,7 @@ export const SHIFT_MODES = ['person', 'drawer'] as const;
 export type ShiftMode = (typeof SHIFT_MODES)[number];
 export const SHIFT_MODE_LABELS: Record<ShiftMode, string> = { person: '按人交班', drawer: '按钱箱交班' };
 
-/** 钱箱（后台「经营规则」维护）：编号保存后不变，不能删、只能停用 */
+/** 钱箱（后台「门店基本规则」维护）：编号保存后不变，不能删、只能停用 */
 export interface CashDrawer {
   key: string;
   label: string;

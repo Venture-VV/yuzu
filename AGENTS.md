@@ -63,6 +63,7 @@ node dist/server/cli.js device-bridge-mock [--terminal <终端编号>] [--port 1
                                           # 模拟终端设备服务（桥）：输入 card / scan / nfc <号码>、unplug / plug <设备键>、fail；用法见 docs/HARDWARE.md 第 10 节
 E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟（CI 拆三组并行，见 docs/TESTING.md）
 E2E_DEMO_SHOWCASE=1 E2E_BASE_URL=… npx playwright test e2e/demo-showcase.spec.ts --project=门店电脑   # demo-prepare 准备好的库上核对演示场景
+E2E_BASE_URL=… npx playwright test e2e/admin-ia.spec.ts   # 后台的信息架构（8.0.17，docs/IA_V8017.md）：一级分组、设备进侧栏、二级页签写进地址、换页签不丢填的内容、旧地址跳转（门店电脑三条，平板竖屏一条）
 E2E_BASE_URL=… npx playwright test e2e/motion.spec.ts --project=门店电脑   # 动效套件（8.0.16，docs/UI_V8016.md）：弹窗关掉马上卸掉、影子认不到、减少动态效果时不留影子、滑块跟着当前项
 E2E_BASE_URL=… npx playwright test e2e/emenu.spec.ts   # 点餐系统 · 平板电子菜单（8.0.10，docs/EMENU.md）：整套流程只在门店电脑这一组跑（平板那一段另开 1024×768 的窗口）；地址 /emenu，用「点餐平板」岗位的账号登录；8.0.13 起含中英切换、键盘适配与动效的只读用例；8.0.15 起含「放大、不要点单密码」的只读用例（整套流程与设计稿位置核对走的是「要密码、设计稿原样」）
 npm run dev:canteen                        # 柚子饭堂（员工手机端，docs/CANTEEN.md）热更新：接口转到 CANTEEN_PORT（默认 8090）
@@ -84,7 +85,8 @@ E2E_MP_PORT=… E2E_MP_GATEWAY_KEY=… E2E_BASE_URL=… npx playwright test e2e/
 - 迁移只增不改：已发布到任何环境的迁移文件不修改，新变化写新的迁移。新迁移号先在 `docs/ROADMAP.md` 第 7 节登记再使用，避免两个开发会话撞号。
 - 会员钱包（`members` / `recharges` / `consumptions` / `reversals` / `ledger_entries`）是唯一的储值账本，其他模块需要扣储值时在同一事务内调用钱包记账，不另建余额。
 - 经营规则未定时内置模拟默认值并标「待确认」，记录在 `docs/PENDING_DECISIONS.md`。
-- 公共小工具（v0.7.22 整理）：服务端的原请求摘要 `hashRequest`（`lib/idempotency`）、经办人与 IP `ctxOf`（`lib/context`）、下载响应 `csvReply` / `attachment`（`lib/csv`）、事务时限与单号 `setTxTimeouts` / `nextDocNo`（`lib/tx`）、营业日与查询区间 `todayIn` / `dateIn` / `checkDateRange`（`lib/dates`）、规则类设置的保存 `saveRuleSetting`（`lib/rule-settings`：先取规则锁、在锁里读当前值再合并写回，只改部分字段的保存不会互相覆盖）；前端的页面按需加载 `lazyPage`、ERP 类单据的「结果待确认」`sendErpOp` + `ErpPendingPanel`、导入文件的 CSV 读法 `@shared/csv-read`、动效套件（8.0.16，`docs/UI_V8016.md`：`lib/motion` 的 `useExitGhost` / `Stagger` / `useSlidingIndicator` / `usePageEnter`，样式表里的 `--dur-*` / `--ease-*` 变量与 `animate-dialog-in`、`mo-lift` 等类；只动透明度、位移、缩放、颜色，不引入动画库，关掉就卸掉的浮层用影子播退场、不把它多留在页面上）。新代码直接用，不在模块里另写一份。
+- 公共小工具（v0.7.22 整理）：服务端的原请求摘要 `hashRequest`（`lib/idempotency`）、经办人与 IP `ctxOf`（`lib/context`）、下载响应 `csvReply` / `attachment`（`lib/csv`）、事务时限与单号 `setTxTimeouts` / `nextDocNo`（`lib/tx`）、营业日与查询区间 `todayIn` / `dateIn` / `checkDateRange`（`lib/dates`）、规则类设置的保存 `saveRuleSetting`（`lib/rule-settings`：先取规则锁、在锁里读当前值再合并写回，只改部分字段的保存不会互相覆盖）；前端的页面按需加载 `lazyPage`、ERP 类单据的「结果待确认」`sendErpOp` + `ErpPendingPanel`、导入文件的 CSV 读法 `@shared/csv-read`、动效套件（8.0.16，`docs/UI_V8016.md`：`lib/motion` 的 `useExitGhost` / `Stagger` / `useSlidingIndicator` / `usePageEnter`，样式表里的 `--dur-*` / `--ease-*` 变量与 `animate-dialog-in`、`mo-lift` 等类；只动透明度、位移、缩放、颜色，不引入动画库，关掉就卸掉的浮层用影子播退场、不把它多留在页面上）、二级页签（8.0.17，`docs/IA_V8017.md`：`components/SubNav` 的 `SubTabPage` / `SubPane` / `useActiveSubTab` / `useGoSubTab`，后台分区直接给 `AdminPage` 传 `tabs`；页签写进地址 `<分区>/:tab?`、顺序「规则 → 清单 → 导入与工具」，页面里不再用分段开关当页签）。新代码直接用，不在模块里另写一份。
+- 管理后台的分区在 `src/shared/admin.ts` 登记：`ADMIN_SECTIONS`（路径、名称、权限）与 `ADMIN_GROUPS`（一级分组，8.0.17）；每个分区必须在且只在一个分组里（`tests/admin-ia.test.ts` 核对），侧栏、窄屏横排、后台首页都按它排。新分区两处都要加。
 - ERP（库存、采购、应付货款、审批待办、营业数据……）是单独的工作区（v0.7.3）：模块在 `src/shared/erp.ts` 的注册表里登记（页面、接口前缀、权限、默认开关、依赖），导航、页面拦截与接口拦截都按它来；新模块按注册表加，不在门店主导航里加入口，见 `docs/ERP.md`。
 
 ## 提交、PR 与评论

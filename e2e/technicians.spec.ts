@@ -56,6 +56,8 @@ test.describe('v0.7.0 技师', () => {
 
       await page.goto('/admin/technicians');
       await expect(page.getByTestId('technician-rules-card')).toBeVisible();
+      await page.getByTestId('subnav-roster').click();
+      // 8.0.17：后台「技师」分成三个页签——规则、技师名册、需要技师的项目
       const roster = page.getByTestId('technician-roster');
       if (!(await roster.getByTestId(`technician-${TECH_NO}`).isVisible())) {
         await roster.getByTestId('technician-new').click();
@@ -70,6 +72,7 @@ test.describe('v0.7.0 技师', () => {
       const techName = (await getJson<{ technicians: Tech[] }>(page, '/api/admin/technicians')).technicians.find((t) => t.techNo === TECH_NO)!.name;
 
       // ② 勾选专用项目需要技师，开启技师功能
+      await page.getByTestId('subnav-items').click();
       const items = page.getByTestId('technician-items');
       const box = items.getByLabel(`${ITEM} 需要技师`);
       if (!(await box.isChecked())) {
@@ -77,6 +80,7 @@ test.describe('v0.7.0 技师', () => {
         await items.getByTestId('technician-items-save').click();
         await expect(page.getByText('需要技师的项目已保存')).toBeVisible();
       }
+      await page.getByTestId('subnav-rules').click();
       const rules = page.getByTestId('technician-rules-card');
       await rules.getByRole('radiogroup', { name: '技师功能' }).getByRole('radio', { name: '开启' }).click();
       if (await rules.getByTestId('technician-rules-save').isEnabled()) {

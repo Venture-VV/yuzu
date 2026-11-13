@@ -72,8 +72,9 @@ test.describe('8.0.7 供应链收尾与 ERP P2', () => {
     await login(page, 'linlan');
     const other = await page.context().newPage();
     try {
-      await page.goto('/admin/rules');
-      await other.goto('/admin/rules');
+      // 8.0.17：「可调的数值」是门店基本规则的一个页签
+      await page.goto('/admin/rules/tunables');
+      await other.goto('/admin/rules/tunables');
       await expect(page.getByTestId('tun-slowMovingDays')).toHaveValue('90');
       await expect(other.getByTestId('tun-expiryRemindDays')).toHaveValue('30');
       await page.getByTestId('tun-slowMovingDays').fill('60');
@@ -94,7 +95,7 @@ test.describe('8.0.7 供应链收尾与 ERP P2', () => {
 
   test('经营规则「可调的数值」：企业微信推送显示机器人地址配没配', async ({ page }) => {
     await login(page, 'linlan');
-    await page.goto('/admin/rules');
+    await page.goto('/admin/rules/tunables');
     const row = page.getByTestId('wecom-row');
     await expect(row).toBeVisible({ timeout: 20_000 });
     await expect(row).toContainText('机器人地址');
