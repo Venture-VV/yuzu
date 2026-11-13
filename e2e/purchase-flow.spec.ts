@@ -2,7 +2,8 @@
 //   · 用接口造出店主那张图上的两种情形：流程 A——需求通过、采购单已下、过了到货期还没到（到货验收标超期）；
 //     流程 B——需求通过、发起了询价、只收到 1 家报价（停在询价比价）；
 //   · 采购 → 流程进度：两张卡各停在对的环节、红条写超期几天；按「卡住或超期」「询价中」筛；点环节去那张单；
-//   · 需求单、采购单详情里嵌着同一条流程（紧凑的一排，点环节看那一环、能去那张单）。
+//   · 需求单、采购单详情里嵌着同一条流程（紧凑的一排，点环节看那一环、能去那张单）；
+//   · 部门主管确认：部门设主管 → 部门同事提的需求单等主管确认 → 主管确认后采购才能通过，流程图多一环「部门确认」。
 // 流程图是只读的；这条用例登记的需求单、采购单、询价单留在库里（不影响别的用例）。
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan，密码 yuzu2026。只在门店电脑尺寸执行。
 import { randomUUID } from 'node:crypto';
@@ -158,10 +159,92 @@ test.describe('8.0.17 ERP 采购流程图', () => {
     await expect(page.getByTestId('sourcing-detail').getByTestId('purchase-flow')).toHaveAttribute('data-stage', stageB);
   });
 
-  test('采购规则里有「流程图里一个环节等了几天标红」这一项（只读）', async ({ page }) => {
+  test('部门主管确认：部门设了主管 → 部门同事提的需求单等主管确认 → 主管在需求单页看到「等你确认」→ 确认后采购才能通过；流程图多一环「部门确认」', async ({ page, playwright, baseURL }) => {
+    test.setTimeout(120_000);
+    await login(page, 'linlan');
+    const api = page.request;
+    const tag = String(Date.now()).slice(-7);
+    const rules = await getJson<{ deptConfirm: string }>(api, '/api/inventory/purchase-rules');
+    type Dept = { id: number; name: string; active: boolean; sortOrder: number; head: { id: number } | null };
+    // 专门建一个部门，不动别的用例用的部门
+    const deptName = `流程${tag}`;
+    await post(api, '/api/inventory/departments', { name: deptName });
+    const dept = (await getJson<Dept[]>(api, '/api/inventory/departments')).find((d) => d.name === deptName)!;
+    const mat = (await getJson<{ id: number; code: string; name: string }[]>(api, '/api/inventory/materials?all=1')).find((m) => m.code === 'M016')!;
+    // 主管：采购经办 zhouyi（演示账号）；提单人：新建一个只有「部门申购」职责的账号（第一次登录先改密码）
+    const heads = await getJson<{ id: number; name: string }[]>(api, '/api/inventory/department-head-options');
+    const staffList = await getJson<{ id: number; username: string; displayName: string }[]>(api, '/api/staff');
+    const zhouyi = staffList.find((x) => x.username === 'zhouyi')!;
+    expect(heads.some((h) => h.id === zhouyi.id)).toBe(true);
+    const requester = `rq${tag}`;
+    const password = `Rq-${tag}-flow`;
+    await post(api, '/api/staff', { username: requester, displayName: `申购${tag}`, role: 'backoffice', duties: ['request'], departmentId: dept.id, password });
+    const asRequester = await playwright.request.newContext({ baseURL });
+    try {
+      // 规则临时改成「全部需求单」都要主管确认（别的用例把询价门槛改成多少都不影响这一条），结束时改回去
+      await api.put('/api/inventory/purchase-rules', { data: { deptConfirm: 'all' } });
+
+      // ① 库存 → 档案 → 部门：给这个部门选主管
+      await page.goto('/inventory/master');
+      await page.getByRole('radio', { name: '部门' }).click();
+      await expect(page.getByTestId('department-head-hint')).toBeVisible();
+      await page.getByTestId(`department-head-${deptName}`).selectOption(String(zhouyi.id));
+      await expect.poll(async () => (await getJson<Dept[]>(api, '/api/inventory/departments')).find((d) => d.id === dept.id)!.head?.id).toBe(zhouyi.id);
+
+      // ② 部门同事提一张需求单：等主管确认
+      expect((await asRequester.post('/api/auth/login', { data: { username: requester, password } })).ok()).toBe(true);
+      expect((await asRequester.post('/api/auth/change-password', { data: { currentPassword: password, newPassword: `${password}9` } })).ok()).toBe(true);
+      const made = await asRequester.post('/api/erp/requests', { data: { clientKey: randomUUID(), lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: 1000, unit: '箱', refPriceCents: 900 }] } });
+      expect(made.status(), await made.text()).toBe(201);
+      const r = ((await made.json()) as { request: { id: number; docNo: string; deptConfirm: { state: string } } }).request;
+      expect(r.deptConfirm.state).toBe('pending');
+
+      // ③ 主管（zhouyi，同时是采购）登录：需求单页顶上「等你确认」，点进去是「待主管确认」，流程停在「部门确认」，「通过」点不了
+      await api.post('/api/auth/logout');
+      await login(page, 'zhouyi');
+      await page.goto('/erp/requests');
+      await expect(page.getByTestId('requests-head-notice')).toContainText('等你（部门主管）确认');
+      await expect(page.getByTestId(`request-status-${r.id}`)).toHaveText('待主管确认');
+      await page.getByTestId(`requests-head-open-${r.id}`).click();
+      const sheet = page.getByTestId('request-sheet');
+      await expect(page.getByTestId('request-sheet-status')).toHaveText('待主管确认');
+      await expect(sheet.getByTestId('request-dept-pending')).toContainText(zhouyi.displayName);
+      const panel = sheet.getByTestId('purchase-flow');
+      await expect(panel).toHaveAttribute('data-stage', 'confirm');
+      await expect(panel.getByTestId('flow-node-confirm')).toHaveAttribute('data-state', 'current');
+      await expect(panel.getByTestId('flow-node-review')).toHaveAttribute('data-state', 'pending');
+      await expect(panel.getByTestId('flow-selected')).toContainText('待主管确认');
+      await expect(page.getByTestId('request-approve')).toBeDisabled();
+
+      // ④ 主管确认：变成「待审核」，流程走到「需求审核」；采购通过
+      await page.getByTestId('request-dept-confirm').click();
+      await expect(page.getByTestId('request-sheet-status')).toHaveText('待审核');
+      await expect(sheet.getByTestId('request-dept-confirmed')).toContainText(zhouyi.displayName);
+      await expect(panel).toHaveAttribute('data-stage', 'review');
+      await expect(panel.getByTestId('flow-node-confirm')).toHaveAttribute('data-state', 'done');
+      await expect(page.getByTestId('request-dept-confirm')).toHaveCount(0);
+      await page.getByTestId('request-approve').click();
+      await expect(page.getByTestId('request-sheet-status')).toHaveText('已通过');
+      await expect(panel).toHaveAttribute('data-stage', 'order');
+    } finally {
+      await asRequester.dispose();
+      await api.post('/api/auth/logout');
+      const owner = await playwright.request.newContext({ baseURL });
+      await owner.post('/api/auth/login', { data: { username: 'linlan', password: PASSWORD } });
+      await owner.put('/api/inventory/purchase-rules', { data: { deptConfirm: rules.deptConfirm } });
+      await owner.put(`/api/inventory/departments/${dept.id}`, { data: { name: dept.name, active: false, sortOrder: dept.sortOrder, headId: null } });
+      await owner.dispose();
+    }
+  });
+
+  test('采购规则里有「流程图里一个环节等了几天标红」「哪些需求单要部门主管先确认」两项；付款规则里有「固定付款日」（只读）', async ({ page }) => {
     await login(page, 'linlan');
     await page.goto('/purchasing/rules');
     await expect(page.getByTestId('pr-stall')).toBeVisible();
     await expect(page.getByTestId('pr-stall')).toHaveValue(/^\d+$/);
+    await expect(page.getByTestId('pr-dept-confirm')).toHaveValue(/^(off|threshold|all)$/);
+    await page.goto('/erp/payments?tab=rules');
+    await expect(page.getByTestId('pay-rules-days')).toBeVisible();
+    await expect(page.getByTestId('pay-rules-days')).toHaveValue(/^(\d+(、\d+)*)?$/);
   });
 });
