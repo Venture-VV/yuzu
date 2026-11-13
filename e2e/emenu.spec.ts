@@ -220,6 +220,9 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       // ① 后台「电子菜单」：还没开时列出还差什么；建分类（上一轮留着的沿用）、排两页、保存
       await page.goto('/admin/emenu');
       await expect(page.getByTestId('emenu-admin-status')).toContainText('平板点餐还没开启');
+      // 8.0.17：页签写进地址，第一个是「设置」；分类与版面是第二个
+      await page.getByTestId('subnav-pages').click();
+      await expect(page).toHaveURL(/\/admin\/emenu\/pages$/);
       if (!prep.hadCategory) {
         await page.getByTestId('emenu-admin-category-new').click();
         const dialog = page.getByRole('dialog').filter({ hasText: '新建分类' });

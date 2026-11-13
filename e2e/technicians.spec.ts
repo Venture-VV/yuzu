@@ -56,9 +56,13 @@ test.describe('v0.7.0 技师', () => {
 
       await page.goto('/admin/technicians');
       await expect(page.getByTestId('technician-rules-card')).toBeVisible();
-      await page.getByTestId('subnav-roster').click();
       // 8.0.17：后台「技师」分成三个页签——规则、技师名册、需要技师的项目
+      await page.getByTestId('subnav-roster').click();
+      await expect(page).toHaveURL(/\/admin\/technicians\/roster$/);
       const roster = page.getByTestId('technician-roster');
+      // 名册取到了再看这位技师在不在（下面的 isVisible 不等待）
+      await expect(roster).toBeVisible();
+      await expect(roster.getByText(/在职 \d+ 人|还没有技师/).first()).toBeVisible();
       if (!(await roster.getByTestId(`technician-${TECH_NO}`).isVisible())) {
         await roster.getByTestId('technician-new').click();
         const dialog = page.getByRole('dialog', { name: '新建技师' });
