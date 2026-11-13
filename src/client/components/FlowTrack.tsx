@@ -104,7 +104,7 @@ export function FlowTrack({ nodes, density = 'full', label, className }: { nodes
         {nodes.map((n, i) => {
           const prev = nodes[i - 1];
           return (
-            <li key={n.key} className={cn('relative flex flex-1 justify-center', compact ? 'min-w-[58px]' : 'min-w-[104px]')}>
+            <li key={n.key} className={cn('relative flex flex-1 justify-center', compact ? 'min-w-[52px]' : 'min-w-[104px]')}>
               {/* 与上一个环节之间的线：上一个做完了是绿的 */}
               {prev && <span aria-hidden className={cn('absolute right-1/2 left-[-50%] h-0.5', compact ? 'top-[19px]' : 'top-[23px]', prev.state === 'done' ? 'bg-pine/35' : 'bg-line')} />}
               <NodeShell
