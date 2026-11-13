@@ -48,7 +48,7 @@ import {
   type EmenuRules,
 } from '@shared/emenu';
 import { formatYuan } from '@shared/money';
-import { api, errorMessage } from '../../lib/api';
+import { api, ApiError, errorMessage } from '../../lib/api';
 import { qk } from '../../lib/queries';
 import { cn, downloadUrl, formatDateTime } from '../../lib/utils';
 import { imagePayload } from '../../components/Images';
@@ -895,7 +895,7 @@ function DishesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
 function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; data: EmenuAdmin; onClose: () => void; apply: Apply }) {
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
-  const [picked, setPicked] = useState<{ name: string; rows: EmenuEnglishRow[]; problems: string[] } | null>(null);
+  const [picked, setPicked] = useState<{ name: string; rows: EmenuEnglishRow[]; unchanged: number; problems: string[] } | null>(null);
   const [result, setResult] = useState<EmenuEnglishResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -915,10 +915,14 @@ function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; dat
     setResult(null);
     if (file.size > 3_000_000) return setError('文件太大了（超过 3 MB），请确认选的是导出的英文对照表');
     try {
-      const parsed = parseEmenuEnglishCsv(await file.text());
+      const text = await file.text();
+      // 对照各道菜现在的英文来读（取一次最新的）：没改过的格子不导入；格子开头的单引号是防公式加的还是填的人自己写的，也按现在的值判断
+      const fresh = await api.get<EmenuAdmin>('/api/admin/emenu');
+      apply(fresh);
+      const parsed = parseEmenuEnglishCsv(text, new Map(fresh.dishes.map((d) => [d.id, { nameEn: d.nameEn, taglineEn: d.taglineEn, descriptionEn: d.descriptionEn, attrsEn: d.attrsEn, unitEn: d.unitEn }])));
       setPicked({ name: file.name, ...parsed });
-    } catch {
-      setError('读不了这个文件，请确认是 CSV（表格软件里「另存为 CSV UTF-8」）');
+    } catch (e) {
+      setError(e instanceof ApiError ? errorMessage(e) : '读不了这个文件，请确认是 CSV（表格软件里「另存为 CSV UTF-8」）');
     } finally {
       if (input.current) input.current.value = '';
     }
@@ -979,9 +983,12 @@ function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; dat
             <input ref={input} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => void read(e.target.files?.[0])} data-testid="emenu-admin-english-file" />
           </li>
         </ol>
-        <p className="text-[12.5px] leading-relaxed text-ink-3">导入只更新英文、只认填了字的格子——空着的格子不会把原来的英文清掉（要清掉某一项请打开那道菜改）。同一份文件再导一次不会有变化。</p>
+        <p className="text-[12.5px] leading-relaxed text-ink-3">
+          导入只更新英文、只认填了字的格子——空着的格子不会把原来的英文清掉（要清掉某一项请打开那道菜改）。同一份文件再导一次不会有变化。以 <span className="num">= + @ -</span> 开头的英文，导出时前面带一个单引号（免得表格软件当成公式），导入时自动去掉，不用管它；自己新填的内容照填的保存。
+        </p>
         {picked && (
           <Notice tone={picked.rows.length ? 'info' : 'warning'} title={`${picked.name}：读到 ${picked.rows.length} 行要导入的英文`} data-testid="emenu-admin-english-preview">
+            {picked.unchanged > 0 && <p>另有 {picked.unchanged} 行与现在的一样，不用导入。</p>}
             {unknown.length > 0 && (
               <p>
                 其中 {unknown.length} 行的编号对不上现在的菜品，会跳过：{unknown.slice(0, 10).join('、')}

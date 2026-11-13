@@ -4,7 +4,9 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_EMENU_RULES, EMENU_ENGLISH_COLUMNS, emenuSheetCellIn, emenuSheetCellOut, parseEmenuEnglishCsv, type EmenuAdmin, type EmenuEnglishResult, type EmenuMenu } from '../src/shared/emenu';
+import { parseCsvRecords } from '../src/shared/csv-read';
+import { DEFAULT_EMENU_RULES, EMENU_ENGLISH_COLUMNS, emenuSheetCellIn, emenuSheetCellOut, emenuSheetGuard, parseEmenuEnglishCsv, readSheetCell, type EmenuAdmin, type EmenuEnglishResult, type EmenuMenu } from '../src/shared/emenu';
+import { toCsv } from '../src/server/lib/csv';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -353,5 +355,89 @@ describe('英文对照表', () => {
     // 版本号、内容都没有动
     const view = (a: EmenuAdmin) => a.dishes.map((d) => [d.id, d.version, d.nameEn, d.taglineEn, d.descriptionEn, d.unitEn, d.attrsEn]);
     expect(view(again.body)).toEqual(view(saved));
+  });
+
+  it('格子开头的单引号是谁加的，按这一格现在的值判断：空格子里手填的照字面保存，原来带防公式单引号的改完去掉一个（Codex 2026-11-13 P2 延伸）', async () => {
+    // 一个值导出到文件里的样子，与 lib/csv 实际写出来的一致
+    for (const v of ['+ Seasonal special', '=SUM(A1)', '@home', '- off', '-5 degrees', "'+1 Combo", "''=x", "'Nduja", 'Plain', '']) {
+      expect(toCsv([[emenuSheetCellOut(v)]]), v).toBe(`﻿${emenuSheetGuard(v)}\r\n`);
+    }
+    // 读一格
+    for (const [now, cell, expected] of [
+      // 空格子里新填的：系统没加过单引号，开头的单引号是内容
+      ['', "'+1 Combo", "'+1 Combo"],
+      ['', '+1 Combo', '+1 Combo'],
+      ['Combo', "'=x", "'=x"],
+      // 没改过
+      ['+ Seasonal special', "'+ Seasonal special", null],
+      ["'+1 Combo", "''+1 Combo", null],
+      ['Plain', 'Plain', null],
+      // 原来带防公式单引号的，改了后面的字：开头那个仍是防公式的，去掉
+      ['+ Seasonal special', "'+ Seasonal specials", '+ Seasonal specials'],
+      ["'+1 Combo", "''+2 Combo", "'+2 Combo"],
+      // 原来带的，改成普通的字
+      ['+ Seasonal special', 'Seasonal special', 'Seasonal special'],
+      // 不知道现在的值：当作导出的文件
+      [undefined, "'+x", '+x'],
+      [undefined, "'Nduja", "'Nduja"],
+    ] as const) {
+      expect(readSheetCell(cell, now), `${String(now)} ← ${cell}`).toBe(expected);
+    }
+
+    // 整条路：导出 → 在文件里改三格 → 对照现在的值读 → 导入
+    const currentOf = (a: EmenuAdmin) => new Map(a.dishes.map((d) => [d.id, { nameEn: d.nameEn, taglineEn: d.taglineEn, descriptionEn: d.descriptionEn, attrsEn: d.attrsEn, unitEn: d.unitEn }]));
+    /** 直接改导出文件里的格子（像用文本编辑器改的那样，写什么就是什么） */
+    const editSheet = (csv: string, edits: [id: number, column: string, value: string][]) => {
+      const { records } = parseCsvRecords(csv.replace(/^﻿/, ''));
+      const header = records[0]!.cells;
+      for (const [id, column, value] of edits) records.find((r) => r.cells[0] === String(id))!.cells[header.indexOf(column)] = value;
+      const quote = (c: string) => (/[",\n\r]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c);
+      return records
+        .filter((r) => r.cells.some(Boolean))
+        .map((r) => r.cells.map(quote).join(','))
+        .join('\r\n');
+    };
+    const before = await admin();
+    const wine0 = before.dishes.find((d) => d.id === dish.wine)!;
+    expect([before.dishes.find((d) => d.id === dish.eel)!.nameEn, wine0.taglineEn, wine0.descriptionEn]).toEqual(['+ Seasonal special', '', '']);
+    const exported = await sheet();
+    // 没改的文件：一行都不用导入
+    const untouched = parseEmenuEnglishCsv(exported, currentOf(before));
+    expect([untouched.rows, untouched.unchanged, untouched.problems]).toEqual([[], before.dishes.length, []]);
+    const edited = editSheet(exported, [
+      // 酒的英文介绍原来是空的：手填 '+1 Combo，单引号就是内容
+      [dish.wine!, '英文介绍', "'+1 Combo"],
+      // 酒的小字原来是空的：填 +2 for one（表格软件里打 '+2 for one，存出来没有单引号）
+      [dish.wine!, '小字的英文', '+2 for one'],
+      // 溪鳗的英文名原来是 + Seasonal special（文件里带着防公式的单引号）：只在后面加个 s
+      [dish.eel!, '英文名', "'+ Seasonal specials"],
+    ]);
+    const parsed = parseEmenuEnglishCsv(edited, currentOf(before));
+    expect(parsed.problems).toEqual([]);
+    expect(parsed.rows).toEqual([
+      { id: dish.eel, nameEn: '+ Seasonal specials' },
+      { id: dish.wine, taglineEn: '+2 for one', descriptionEn: "'+1 Combo" },
+    ]);
+    expect(parsed.unchanged).toBe(before.dishes.length - 2);
+    const r = await importRows(parsed.rows);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.english).toEqual({ updated: 2, unchanged: 0, missing: [] });
+    const wine = r.body.dishes.find((d) => d.id === dish.wine)!;
+    // 存下来的就是格子里填的：单引号还在
+    expect([wine.descriptionEn, wine.taglineEn, wine.attrsEn]).toEqual(["'+1 Combo", '+2 for one', wine0.attrsEn]);
+    expect(r.body.dishes.find((d) => d.id === dish.eel)!.nameEn).toBe('+ Seasonal specials');
+    expect((await dishOnMenu(dish.wine!)).descriptionEn).toBe("'+1 Combo");
+
+    // 再导出：手填的那一格多带一个单引号、表格软件不会当公式；原样读回、导入，什么都不改
+    const again = await sheet();
+    expect(again).toContain(",''+1 Combo,");
+    expect(again).toContain(",'+2 for one,");
+    const fresh = await admin();
+    const second = parseEmenuEnglishCsv(again, currentOf(fresh));
+    expect([second.rows, second.unchanged]).toEqual([[], fresh.dishes.length]);
+    // 不对照现在的值读（当作导出的文件）：读出来的也就是现在的值
+    const plain = parseEmenuEnglishCsv(again);
+    expect(plain.rows.find((x) => x.id === dish.wine)).toMatchObject({ taglineEn: '+2 for one', descriptionEn: "'+1 Combo" });
+    expect((await importRows(plain.rows)).body.english.updated).toBe(0);
   });
 });
