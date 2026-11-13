@@ -16,65 +16,26 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Skeleton } from '../../components/ui';
+import { SubPane } from '../../components/SubNav';
+import { AdminPage } from './AdminShell';
 
 type Editing = { kind: 'plan'; data: RechargePlan | null } | { kind: 'item'; data: ServiceItem | null } | null;
+
+/** 二级页签（8.0.17）：清单 → 导入与工具（价目没有规则类的设置） */
+const CATALOG_TABS = [
+  { key: 'items', label: '消费项目' },
+  { key: 'tickets', label: '门票' },
+  { key: 'plans', label: '充值套餐' },
+  { key: 'import', label: '导入价目表' },
+];
 
 export function CatalogTab() {
   const catalog = useCatalog(true);
   const [editing, setEditing] = useState<Editing>(null);
 
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
-      <Card className="p-5">
-        <SectionTitle
-          aside={
-            <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setEditing({ kind: 'plan', data: null })}>
-              新增套餐
-            </Button>
-          }
-        >
-          <span className="flex items-center gap-2">
-            充值套餐 <PendingBadge title="实际充值与赠送方案待店主确认" />
-          </span>
-        </SectionTitle>
-        <p className="mt-1 text-[12.5px] text-ink-3">实收金额计入本金，赠送部分计入赠金。停用后不再出现在充值页，历史单据不受影响。</p>
-        <div className="mt-3 space-y-2">
-          {catalog.isPending ? (
-            <Skeleton className="h-32" />
-          ) : catalog.data?.plans.length === 0 ? (
-            <EmptyState art="leaf" title="还没有充值套餐" className="py-6" />
-          ) : (
-            catalog.data?.plans.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setEditing({ kind: 'plan', data: p })}
-                className={cn('flex w-full items-center gap-3 rounded-lg border border-line px-4 py-3 text-left transition-colors hover:border-line-strong hover:bg-paper/60', !p.active && 'opacity-50')}
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-bold">{p.name}</p>
-                  {p.note && <p className="text-[12px] text-ink-3">{p.note}</p>}
-                </div>
-                {!p.active && <Badge>已停用</Badge>}
-                <div className="text-right">
-                  <Money cents={p.payAmount} className="text-[15px] font-bold" />
-                  <p className="text-[12px] font-semibold text-yuzu-deep">
-                    {p.bonusAmount ? (
-                      <>
-                        送 <Money cents={p.bonusAmount} />
-                        <span className="ml-1 font-normal text-ink-3">{p.bonusValidDays ? `${p.bonusValidDays} 天有效` : '长期有效'}</span>
-                      </>
-                    ) : (
-                      <span className="text-ink-4">无赠送</span>
-                    )}
-                  </p>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </Card>
-
+    <AdminPage section="catalog" description="消费项目（多档价格）、门票票种与票价、充值套餐、价目表导入。" tabs={CATALOG_TABS}>
+      <SubPane tab="items">
       <Card className="p-5">
         <SectionTitle
           aside={
@@ -131,14 +92,69 @@ export function CatalogTab() {
           )}
         </div>
       </Card>
-
-      <TicketTypesCard />
-      <PriceListCard />
+      </SubPane>
+      <SubPane tab="tickets">
+        <TicketTypesCard />
+      </SubPane>
+      <SubPane tab="plans">
+      <Card className="p-5">
+        <SectionTitle
+          aside={
+            <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setEditing({ kind: 'plan', data: null })}>
+              新增套餐
+            </Button>
+          }
+        >
+          <span className="flex items-center gap-2">
+            充值套餐 <PendingBadge title="实际充值与赠送方案待店主确认" />
+          </span>
+        </SectionTitle>
+        <p className="mt-1 text-[12.5px] text-ink-3">实收金额计入本金，赠送部分计入赠金。停用后不再出现在充值页，历史单据不受影响。</p>
+        <div className="mt-3 space-y-2">
+          {catalog.isPending ? (
+            <Skeleton className="h-32" />
+          ) : catalog.data?.plans.length === 0 ? (
+            <EmptyState art="leaf" title="还没有充值套餐" className="py-6" />
+          ) : (
+            catalog.data?.plans.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setEditing({ kind: 'plan', data: p })}
+                className={cn('flex w-full items-center gap-3 rounded-lg border border-line px-4 py-3 text-left transition-colors hover:border-line-strong hover:bg-paper/60', !p.active && 'opacity-50')}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-bold">{p.name}</p>
+                  {p.note && <p className="text-[12px] text-ink-3">{p.note}</p>}
+                </div>
+                {!p.active && <Badge>已停用</Badge>}
+                <div className="text-right">
+                  <Money cents={p.payAmount} className="text-[15px] font-bold" />
+                  <p className="text-[12px] font-semibold text-yuzu-deep">
+                    {p.bonusAmount ? (
+                      <>
+                        送 <Money cents={p.bonusAmount} />
+                        <span className="ml-1 font-normal text-ink-3">{p.bonusValidDays ? `${p.bonusValidDays} 天有效` : '长期有效'}</span>
+                      </>
+                    ) : (
+                      <span className="text-ink-4">无赠送</span>
+                    )}
+                  </p>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </Card>
+      </SubPane>
+      <SubPane tab="import">
+        <PriceListCard />
+      </SubPane>
 
       <PlanDialog editing={editing?.kind === 'plan' ? editing : null} onClose={() => setEditing(null)} />
       <ItemDialog editing={editing?.kind === 'item' ? editing : null} onClose={() => setEditing(null)} />
       {/* 次卡的卡种 8.0.4 起取消（需求表 03：价目与套餐不再有次卡；已售的次卡照常结账核销、退卡、打印，见 docs/MEMBERSHIP_V804.md 第 3 节） */}
-    </div>
+    </AdminPage>
   );
 }
 

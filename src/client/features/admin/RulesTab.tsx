@@ -16,6 +16,8 @@ import { Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTi
 import { useInvSettings } from '../inventory/queries';
 import { ShiftModeCard } from './ShiftModeCard';
 import { TunablesCard } from './TunablesCard';
+import { SubPane } from '../../components/SubNav';
+import { AdminPage } from './AdminShell';
 
 const EXAMPLE = { balance: { principal: 50000, bonus: 5000 }, amount: 11000 };
 /** 撤销时限的常用选项（小时）；null 为不限 */
@@ -106,8 +108,16 @@ export function RulesTab() {
     }
   };
 
+  // 二级页签（8.0.17）：原来一长页 5 张大卡。库存与采购的规则属于 ERP，下一步挪到「ERP 设置」，先单独一个页签
+  const tabs = [
+    { key: 'basic', label: '基本与收款' },
+    { key: 'shift', label: '交班方式' },
+    { key: 'tunables', label: '可调的数值' },
+    { key: 'inventory', label: '库存与采购' },
+  ];
   return (
-    <div className="space-y-5">
+    <AdminPage section="rules" description="门店与营业时间、扣款顺序、单笔上限、撤销时限、收款前开班；交班方式；可调的数值；库存与采购。修改只影响之后的业务。" tabs={tabs}>
+     <SubPane tab="basic" className="space-y-5">
       {settings.data?.hidePendingMarks ? (
         <Notice tone="info" title="店主已签认经营规则，「待确认」标记已隐藏">
           修改只影响之后的业务；已入账单据按当时的规则记录，撤销按原单构成恢复。
@@ -291,26 +301,32 @@ export function RulesTab() {
           保存规则
         </Button>
       </div>
+      <Notice tone="info" title="渠道来源与会员标签在「渠道与标签」设置，档级与会籍在「会员规则」设置；各岗位的权限在「岗位权限」设置" />
+     </SubPane>
 
       {/* 交班方式与钱箱（v0.7.28 ⑨）单独保存 */}
-      <ShiftModeCard />
+      <SubPane tab="shift">
+        <ShiftModeCard />
+      </SubPane>
 
       {/* 可调的数值（8.0.7 A1：原来写死、标「待确认」的数值，含打印方式）单独保存 */}
-      <TunablesCard />
+      <SubPane tab="tunables">
+        <TunablesCard />
+      </SubPane>
 
       {/* 库存与采购的规则属于 ERP 的库存模块：模块关着时不显示（接口也会拒绝） */}
-      {session.erpModules.includes('inventory') ? (
-        <InventoryRules />
-      ) : (
-        <div data-testid="inventory-rules-off">
-          <Notice tone="info" title="ERP 的「库存」模块已关闭">
-            库存与采购的规则在库存模块开启后才能修改；店主在 ERP「模块设置」里开启。
-          </Notice>
-        </div>
-      )}
-
-      <Notice tone="info" title="会员资料字段、渠道来源在「会员与渠道」设置，档级与会籍在「会员规则」设置；各岗位的权限在「岗位权限」设置" />
-    </div>
+      <SubPane tab="inventory">
+        {session.erpModules.includes('inventory') ? (
+          <InventoryRules />
+        ) : (
+          <div data-testid="inventory-rules-off">
+            <Notice tone="info" title="ERP 的「库存」模块已关闭">
+              库存与采购的规则在库存模块开启后才能修改；店主在 ERP「模块设置」里开启。
+            </Notice>
+          </div>
+        )}
+      </SubPane>
+    </AdminPage>
   );
 }
 

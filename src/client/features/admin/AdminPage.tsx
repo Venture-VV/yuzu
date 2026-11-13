@@ -36,43 +36,23 @@ export const adminRoutes: RouteObject[] = [
   { index: true, element: <AdminHome /> },
   { path: 'dashboard/:tab?', element: <DashboardPage /> },
   { path: 'settings', element: <RuleCatalog /> },
-  {
-    path: 'rules',
-    element: (
-      <AdminPage section="rules" description="营业日与营业时间、扣款顺序、单笔上限、撤销时限、收款前开班、库存与采购。修改只影响之后的业务。">
-        <RulesTab />
-      </AdminPage>
-    ),
-  },
+  // 8.0.17：有二级页签的分区路由写成 `<分区>/:tab?`（/admin/rules/shift）；页签的定义在各分区自己的组件里
+  { path: 'rules/:tab?', element: <RulesTab /> },
   { path: 'members', element: <MembersSection /> },
   { path: 'membership', element: <MembershipRulesSection /> },
   { path: 'benefits', element: <BenefitsSection /> },
   // VIP 柜 8.0.4 起归「会员权益」：旧入口（会员规则、手牌与前台）的「去设置」都跳到这里
   { path: 'vip-lockers', element: <Navigate to="/admin/benefits?view=vip" replace /> },
   { path: 'coupons', element: <CouponsSection /> },
-  {
-    path: 'catalog',
-    element: (
-      <AdminPage section="catalog" description="充值套餐、消费项目（多档价格）与价目表导入、门票票种与票价。">
-        <CatalogTab />
-      </AdminPage>
-    ),
-  },
-  {
-    path: 'tags',
-    element: (
-      <AdminPage section="tags" description="手牌池（分区、VIP 柜、锁定与停用）、柜号清单导入、前台规则。">
-        <TagsTab />
-      </AdminPage>
-    ),
-  },
-  { path: 'technicians', element: <TechniciansSection /> },
-  { path: 'dining', element: <DiningSection /> },
+  { path: 'catalog/:tab?', element: <CatalogTab /> },
+  { path: 'tags/:tab?', element: <TagsTab /> },
+  { path: 'technicians/:tab?', element: <TechniciansSection /> },
+  { path: 'dining/:tab?', element: <DiningSection /> },
   { path: 'emenu', element: <EmenuAdminSection /> },
-  { path: 'rooms', element: <RoomsSection /> },
+  { path: 'rooms/:tab?', element: <RoomsSection /> },
   { path: 'bookings', element: <BookingsSection /> },
   { path: 'spaces', element: <SpacesSection /> },
-  { path: 'devices', element: <DevicesSection /> },
+  { path: 'devices/:tab?', element: <DevicesSection /> },
   { path: 'mp', element: <MpAdminSection /> },
   {
     path: 'staff',
@@ -83,14 +63,7 @@ export const adminRoutes: RouteObject[] = [
     ),
   },
   { path: 'permissions', element: <PermissionsSection /> },
-  {
-    path: 'opening',
-    element: (
-      <AdminPage section="opening" description="旧系统（EBC）会员余额导入为期初，与控制总数比对；导入错误时整批作废。旧系统逐笔流水只读导入，会员详情里看。">
-        <OpeningTab />
-      </AdminPage>
-    ),
-  },
+  { path: 'opening/:tab?', element: <OpeningTab /> },
   {
     path: 'audit',
     element: (

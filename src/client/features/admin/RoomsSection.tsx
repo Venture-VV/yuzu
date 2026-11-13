@@ -37,17 +37,29 @@ import { minuteText, roomsAdminKey as adminKey, useRoomsAdmin } from '../rooms/q
 import { rateText } from '../rooms/parts';
 import { AdminPage } from './AdminShell';
 import { UsageRulesCard } from './UsageRulesCard';
+import { SubPane } from '../../components/SubNav';
 
+
+/** 二级页签（8.0.17）：规则 → 清单 */
+const ROOM_TABS = [
+  { key: 'rules', label: '客房规则' },
+  { key: 'types', label: '房型与房价' },
+  { key: 'rooms', label: '房间' },
+];
 
 export function RoomsSection() {
   return (
-    <AdminPage section="rooms" description="客房功能开关与退房、押金规则，房型与房价（全天房、钟点房），房间（房号、楼层、挂接空间台账）。">
-      <div className="space-y-5">
+    <AdminPage section="rooms" description="客房功能开关与退房、押金规则，房型与房价（全天房、钟点房），房间（房号、楼层、挂接空间台账）。" tabs={ROOM_TABS}>
+      <SubPane tab="rules" className="space-y-5">
         <RulesCard />
-        <TypesCard />
-        <RoomsCard />
         <UsageRulesCard />
-      </div>
+      </SubPane>
+      <SubPane tab="types">
+        <TypesCard />
+      </SubPane>
+      <SubPane tab="rooms">
+        <RoomsCard />
+      </SubPane>
     </AdminPage>
   );
 }

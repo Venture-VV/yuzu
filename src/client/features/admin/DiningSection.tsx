@@ -29,21 +29,33 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
 import { AdminPage } from './AdminShell';
+import { SubPane } from '../../components/SubNav';
 
 const adminKey = ['admin', 'dining'] as const;
 const useDiningAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<DiningAdmin>('/api/admin/dining') });
 const tablesAdminKey = ['admin', 'dining', 'tables'] as const;
 const useTablesAdmin = () => useQuery({ queryKey: tablesAdminKey, queryFn: () => api.get<TablesAdmin>('/api/admin/dining/tables') });
 
+/** 二级页签（8.0.17）：规则 → 清单 */
+const DINING_TABS = [
+  { key: 'rules', label: '餐饮规则' },
+  { key: 'stations', label: '档口与出品' },
+  { key: 'tables', label: '桌台' },
+];
+
 export function DiningSection() {
   return (
-    <AdminPage section="dining" description="餐饮功能开关与出品规则、出品档口（热菜、凉菜、水吧……）、每道菜送到哪个档口的厨房屏、桌台。">
-      <div className="space-y-5">
+    <AdminPage section="dining" description="餐饮功能开关与出品规则、出品档口（热菜、凉菜、水吧……）、每道菜送到哪个档口的厨房屏、桌台。" tabs={DINING_TABS}>
+      <SubPane tab="rules">
         <RulesCard />
+      </SubPane>
+      <SubPane tab="stations" className="space-y-5">
         <StationsCard />
         <ItemsCard />
+      </SubPane>
+      <SubPane tab="tables">
         <TablesCard />
-      </div>
+      </SubPane>
     </AdminPage>
   );
 }

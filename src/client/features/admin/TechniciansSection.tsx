@@ -25,21 +25,33 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Skeleton } from '../../components/ui';
 import { AdminPage } from './AdminShell';
+import { SubPane } from '../../components/SubNav';
 
 const adminKey = ['admin', 'technicians'] as const;
 const useTechnicianAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<TechnicianAdmin>('/api/admin/technicians') });
 
+/** 二级页签（8.0.17）：规则 → 清单 */
+const TECHNICIAN_TABS = [
+  { key: 'rules', label: '规则' },
+  { key: 'roster', label: '技师名册' },
+  { key: 'items', label: '需要技师的项目' },
+];
+
 export function TechniciansSection() {
   const can = useCan();
   return (
-    <AdminPage section="technicians" description="技师名册、挂技师项目时的规则、钟房与轮钟规则、提成规则、哪些项目需要技师。">
-      <div className="space-y-5">
+    <AdminPage section="technicians" description="技师的规则（挂技师项目、钟房与轮钟、提成）、技师名册、哪些项目需要技师。" tabs={TECHNICIAN_TABS}>
+      <SubPane tab="rules" className="space-y-5">
         <RulesCard />
-        <RosterCard />
         <ClockroomRulesCard />
         {(can('settings.manage') || can('report.commission')) && <CommissionCard />}
+      </SubPane>
+      <SubPane tab="roster">
+        <RosterCard />
+      </SubPane>
+      <SubPane tab="items">
         <ItemsCard />
-      </div>
+      </SubPane>
     </AdminPage>
   );
 }
