@@ -33,6 +33,8 @@ interface SavedState {
   session: TableSession;
   cart: CartLine[];
   remark: Remark;
+  /** 这一次点餐的语言（8.0.13；旧版本存下来的没有这一项，当中文） */
+  lang?: 'zh' | 'en';
   touchedAt: number;
 }
 
@@ -65,7 +67,7 @@ export function loadState(maxIdleMs: number): SavedState | null {
   const s = read<SavedState>(STATE_KEY);
   if (!s || typeof s.session?.visitId !== 'number' || typeof s.session.tagCode !== 'string' || !Array.isArray(s.cart)) return null;
   if (maxIdleMs > 0 && Date.now() - (s.touchedAt ?? 0) > maxIdleMs) return null;
-  return { session: s.session, cart: s.cart.filter((l) => l && l.quantity > 0), remark: { ...EMPTY_REMARK, ...(s.remark ?? {}) }, touchedAt: s.touchedAt };
+  return { session: s.session, cart: s.cart.filter((l) => l && l.quantity > 0), remark: { ...EMPTY_REMARK, ...(s.remark ?? {}) }, lang: s.lang === 'en' ? 'en' : 'zh', touchedAt: s.touchedAt };
 }
 
 export function saveState(state: Omit<SavedState, 'touchedAt'> | null) {
