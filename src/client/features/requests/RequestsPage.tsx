@@ -215,9 +215,10 @@ export function RequestsPage() {
                         <span className="hidden text-[12.5px] text-ink-2 md:block">
                           {r.status === 'approved' ? `已下单 ${r.orderedLines}/${r.lineCount} 行 · 到货 ${r.receivedLines} 行` : `${r.lineCount} 行`}
                         </span>
-                        <Badge tone={REQUEST_STATUS_TONE[r.status]} className="justify-self-start md:justify-self-auto" data-testid={`request-status-${r.id}`}>
-                          {requestStatusLabel(r)}
-                        </Badge>
+                        {/* Badge 不带测试标识，外面包一层 */}
+                        <span className="justify-self-start md:justify-self-auto" data-testid={`request-status-${r.id}`}>
+                          <Badge tone={r.deptConfirm.state === 'pending' && r.status === 'submitted' ? 'ember' : REQUEST_STATUS_TONE[r.status]}>{requestStatusLabel(r)}</Badge>
+                        </span>
                       </button>
                     </li>
                   ))}
@@ -436,9 +437,9 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={REQUEST_STATUS_TONE[r.status]} data-testid="request-sheet-status">
-                {requestStatusLabel(r)}
-              </Badge>
+              <span data-testid="request-sheet-status">
+                <Badge tone={r.deptConfirm.state === 'pending' && r.status === 'submitted' ? 'ember' : REQUEST_STATUS_TONE[r.status]}>{requestStatusLabel(r)}</Badge>
+              </span>
               <PriorityTag priority={r.priority} />
               {r.needBy && <span className="text-[12.5px] text-ink-3">期望 {r.needBy} 到货</span>}
               {r.source === 'import' && <Badge tone="neutral">集采导入</Badge>}

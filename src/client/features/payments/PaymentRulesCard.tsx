@@ -84,7 +84,9 @@ export function PaymentRulesCard() {
   const save = async () => {
     const next = fromDraft(draft);
     if (typeof next === 'string') return setError(next);
-    const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => v !== base[k as keyof PaymentRules])) as Partial<PaymentRules>;
+    // 付款日是一组数（8.0.17）：按内容比，不按是不是同一个数组
+    const same = (a: unknown, b: unknown) => (Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((x, i) => x === b[i]) : a === b);
+    const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => !same(v, base[k as keyof PaymentRules]))) as Partial<PaymentRules>;
     if (Object.keys(changed).length === 0) {
       setError(null);
       toast({ tone: 'info', title: '没有改动' });

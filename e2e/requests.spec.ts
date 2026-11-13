@@ -88,7 +88,8 @@ test.describe('部门采购需求单', () => {
     await expect(page.getByTestId('po-line-requests')).toHaveCount(2);
 
     await page.locator('#po-sup').selectOption({ index: 1 });
-    await page.getByLabel('单价（元/个）').fill('15');
+    // 合计 10 个 × ¥5 + 2 箱 × ¥450 = ¥950：不到询价门槛（8.0.17 起默认 ¥1,000，原来写的是 ¥15，合计 ¥1,050 就要先询价了）
+    await page.getByLabel('单价（元/个）').fill('5');
     const priceBox = page.getByLabel('单价（元/箱）');
     if ((await priceBox.inputValue()) === '') await priceBox.fill('450');
     await page.getByRole('button', { name: /^提交(确认)?$/ }).click();
