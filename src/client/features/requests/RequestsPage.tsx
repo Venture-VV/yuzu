@@ -19,6 +19,7 @@ import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, Segmented, Select, Skeleton } from '../../components/ui';
+import { PurchaseFlowPanel } from '../purchasing/PurchaseFlow';
 import { ErpPage } from '../erp/ErpHome';
 import { DraftBox } from './DraftBox';
 import { useDrafts } from './drafts';
@@ -429,6 +430,8 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
                 </span>
               )}
             </div>
+            {/* 这张需求走到哪了（8.0.17）：审核、询价、下单、到货、付款 */}
+            <PurchaseFlowPanel kind="request" id={r.id} version={`${r.status}|${r.submittedAt}|${r.orderedLines}|${r.receivedLines}|${r.lines.map((l) => `${l.progress.state}${l.progress.po?.status ?? ''}`).join(',')}`} />
             {r.reason && (r.status === 'returned' || r.status === 'rejected' || r.status === 'cancelled') && (
               <Notice tone={r.status === 'returned' ? 'warning' : 'info'} title={`${REQUEST_STATUS_LABELS[r.status]}：${r.reason}`} />
             )}

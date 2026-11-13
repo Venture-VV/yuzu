@@ -25,6 +25,7 @@ interface Draft {
   reorderDays: string;
   targetDays: string;
   arrivalOverdueDays: string;
+  flowStallDays: string;
   cutoffEnabled: boolean;
   cutoffTime: string;
   requestPoDirect: boolean;
@@ -37,6 +38,7 @@ const toDraft = (r: PurchaseRules): Draft => ({
   reorderDays: String(r.reorderDays),
   targetDays: String(r.targetDays),
   arrivalOverdueDays: String(r.arrivalOverdueDays),
+  flowStallDays: String(r.flowStallDays),
   cutoffEnabled: r.cutoffEnabled,
   cutoffTime: r.cutoffTime,
   requestPoDirect: r.requestPoDirect,
@@ -70,6 +72,7 @@ export function PurchaseRulesCard() {
       reorderDays: Number(draft.reorderDays),
       targetDays: Number(draft.targetDays),
       arrivalOverdueDays: Number(draft.arrivalOverdueDays),
+      flowStallDays: Number(draft.flowStallDays),
     };
     if (quoteThresholdCents === null) return setError('询价门槛的金额格式不正确');
     if (Object.values(ints).some((n) => !Number.isInteger(n))) return setError('报价家数与天数要填整数');
@@ -217,6 +220,9 @@ export function PurchaseRulesCard() {
         </Field>
         <Field label="下单后几天没到货算超期" htmlFor="pr-arrival" hint="采购单没填预计到货日时用（账目自检第 9 条），默认 7 天；8.0.1 从费用报销规则挪过来">
           <Input id="pr-arrival" inputMode="numeric" value={draft.arrivalOverdueDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, arrivalOverdueDays: e.target.value })} className="h-10" data-testid="pr-arrival" />
+        </Field>
+        <Field label="流程图里一个环节等了几天标红" htmlFor="pr-stall" hint="采购 → 流程进度（8.0.17）：待审核、询价、定标、待审批、待下单、待入库等了这么多天就标红；默认 2 天，0 = 不标。到货按预计到货日，另算">
+          <Input id="pr-stall" inputMode="numeric" value={draft.flowStallDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, flowStallDays: e.target.value })} className="h-10" data-testid="pr-stall" />
         </Field>
       </div>
       {error && <Notice tone="error" title={error} />}

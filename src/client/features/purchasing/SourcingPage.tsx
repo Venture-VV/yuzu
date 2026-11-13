@@ -24,6 +24,7 @@ import { Badge, Button, Card, Field, Input, MoneyInput, Notice, Select, Skeleton
 import { MaterialPicker } from '../inventory/inputs';
 import { useMaterials, useSuppliers } from '../inventory/queries';
 import { PriceHistoryButton } from './PriceHistory';
+import { PurchaseFlowPanel } from './PurchaseFlow';
 import { useInvalidateAll, usePurchaseRules, useSourcing, useSourcingList } from './queries';
 
 const STATUS_TONE: Record<SourcingStatus, 'yuzu' | 'pine' | 'neutral'> = { open: 'yuzu', awarded: 'pine', cancelled: 'neutral' };
@@ -344,7 +345,23 @@ export function SourcingDetailPage() {
       />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1180px] space-y-4 px-5 py-5 md:px-7" data-testid="sourcing-detail">
-          {ev.isPending ? <Skeleton className="h-64" /> : ev.error ? <Notice tone="error" title={errorMessage(ev.error)} /> : <Detail ev={ev.data!} />}
+          {ev.isPending ? (
+            <Skeleton className="h-64" />
+          ) : ev.error ? (
+            <Notice tone="error" title={errorMessage(ev.error)} />
+          ) : (
+            <>
+              {/* 这张询价单在整条流程里走到哪了（8.0.17）：撤销的不画 */}
+              {ev.data!.status !== 'cancelled' && (
+                <PurchaseFlowPanel
+                  kind="sourcing"
+                  id={ev.data!.id}
+                  version={`${ev.data!.status}|${ev.data!.quotes.filter((q) => q.status === 'active').length}|${ev.data!.purchaseOrder?.status ?? ''}`}
+                />
+              )}
+              <Detail ev={ev.data!} />
+            </>
+          )}
         </div>
       </div>
     </>

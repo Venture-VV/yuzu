@@ -17,6 +17,8 @@ import { Badge, Button, IconButton, Input, Notice, Select, Skeleton } from '../.
 import { checklistBody, checklistProblem, LegalChecklistEditor, type ChecklistDraft } from '../contracts/LegalChecklist';
 import { ReviewsView } from '../contracts/parts';
 import { ApprovalResend, waited } from './ApprovalProgress';
+import { ApprovalTimeline } from './ApprovalTimeline';
+import { PurchaseFlowPanel } from '../purchasing/PurchaseFlow';
 import { useApprovalDetail, useRefreshAfterApproval } from './queries';
 import { sendApproval, useSettleWhenFinished, useUncertainApprovals } from './uncertain';
 
@@ -197,48 +199,17 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
               </section>
             )}
 
+            {/* 采购单：这张单在整条采购流程里走到哪了（8.0.17；没有查看库存权限的取不到，不画） */}
+            {d.docKind === 'purchase_order' && <PurchaseFlowPanel kind="po" id={d.docId} version={`${d.status}|${d.currentLevel}`} />}
+
             <section>
               <h3 className="mb-1.5 text-[13px] font-bold text-ink-2">审批链</h3>
-              <ol className="space-y-2" data-testid="approval-chain">
-                {d.levelsDetail.map((lv) => (
-                  <li
-                    key={lv.level}
-                    className={cn('rounded-lg border px-3.5 py-2.5 text-[13px]', lv.state === 'current' ? 'border-yuzu-deep/40 bg-yuzu-tint' : 'border-line bg-card')}
-                    data-testid={`approval-chain-${lv.level}`}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="num text-[12px] text-ink-3">第 {lv.level} 级</span>
-                      <span className="font-bold">{lv.label}</span>
-                      <span className="text-[12px] text-ink-3">{APPROVAL_MODE_LABELS[lv.mode]}</span>
-                      <span className="ml-auto text-[12px] font-semibold">
-                        {lv.state === 'done' ? (
-                          <span className="text-pine">已同意</span>
-                        ) : lv.state === 'returned' ? (
-                          <span className="text-clay">已退回</span>
-                        ) : lv.state === 'current' ? (
-                          <span className="text-yuzu-deep">审批中 · 等了 {waited(d.levelStartedAt)}</span>
-                        ) : (
-                          <span className="text-ink-4">未到</span>
-                        )}
-                      </span>
-                    </div>
-                    {lv.waitingFor.length > 0 && <p className="mt-1 text-[12.5px] text-ink-2">还要 {lv.waitingFor.join('、')} 同意</p>}
-                    {lv.actions.map((a) => (
-                      <p key={a.id} className="mt-1 text-[12.5px] text-ink-2">
-                        <span className={a.action === 'return' ? 'font-semibold text-clay' : 'font-semibold text-pine'}>{a.action === 'return' ? '退回' : '同意'}</span>
-                        <span>
-                          {' '}
-                          · {a.actorName}
-                          {a.onBehalfOfName ? `（代 ${a.onBehalfOfName}）` : ''}
-                        </span>
-                        {a.batch && <span className="text-ink-3"> · 批量</span>}
-                        <span className="num text-ink-3"> · {formatDateTime(a.createdAt)}</span>
-                        {a.comment && <span className="block text-ink">{a.comment}</span>}
-                      </p>
-                    ))}
-                  </li>
-                ))}
-              </ol>
+              <ApprovalTimeline
+                testIdPrefix="approval-chain"
+                waitedText={waited(d.levelStartedAt)}
+                overdue={d.overdue}
+                levels={d.levelsDetail.map((lv) => ({ level: lv.level, label: lv.label, mode: APPROVAL_MODE_LABELS[lv.mode], state: lv.state === 'waiting' ? 'pending' : lv.state, waitingFor: lv.waitingFor, actions: lv.actions }))}
+              />
               {d.stuck && (
                 <Notice tone="warning" className="mt-2" icon={<TriangleAlert className="size-4" />} title="这一级目前没人能审">
                   提交人不能审自己的单、指定的人停用或没有审批权限时会这样。请店主改审批规则后让提交人撤回重提，或由店主审。

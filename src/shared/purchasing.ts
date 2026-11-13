@@ -505,6 +505,8 @@ export interface PurchaseRules {
   requestPoDirect: boolean;
   /** 急采分级审批（05，CG05）：按金额从小到大；最高一档就是急采上限 */
   urgentTiers: UrgentTier[];
+  /** 采购流程图（8.0.17，LC4）：一个环节等了几天标红；0 = 不标。到货另按预计到货日 / arrivalOverdueDays，审批另认审批中心的超时 */
+  flowStallDays: number;
 }
 
 /** 默认规则（待确认，E1、E4–E6、CG01、CG03–CG05）：在「采购 → 采购规则」里改 */
@@ -523,6 +525,7 @@ export const DEFAULT_PURCHASE_RULES: PurchaseRules = {
     { maxCents: 500_000, approverIds: [] },
     { maxCents: 3_000_000, approverIds: [] },
   ],
+  flowStallDays: 2,
 };
 
 /** 急采上限：分级的最高一档 */
