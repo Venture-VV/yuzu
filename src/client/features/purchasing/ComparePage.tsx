@@ -2,6 +2,7 @@
 // 按品类或物料、时间段（默认近 90 天），每个物料 × 供应商一行：价格（次数、数量、最近 / 平均 / 最低 / 最高单价、比上一个时段涨跌）、
 // 品质（退货率、合同验收登记的质量问题数）、耗用（这段时间的领用与直接耗用）。只读。
 
+import { PurchasingTabs } from './PurchasingTabs';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, Navigate } from 'react-router';
@@ -52,6 +53,7 @@ export function ComparePage() {
         }
         subtitle="同一物料不同供应商的价格波动、品质（退货、质量问题）与耗用；单价按物料现在的采购单位折算"
       />
+      <PurchasingTabs active="compare" />
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-5 py-3 md:px-7">
         <label className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
           收货日期

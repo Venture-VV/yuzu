@@ -1,6 +1,7 @@
 // 采购台账（按日逐笔，v0.7.9，飞书需求 RQ-005 第三步）：打款、报销的每一行、退回与补付按日期列出，每天小计；
 // 平账按打款算的在「备用金与每日平账」里看。导出 CSV（逐笔 + 合计）。
 
+import { ExpenseTabs } from '../expenses/ExpenseTabs';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { BookOpenCheck, Download, ShieldCheck, Wallet } from 'lucide-react';
@@ -63,6 +64,7 @@ export function PurchaseLedgerPage() {
 
   return (
     <ErpPage
+      tabs={<ExpenseTabs active="ledger" />}
       title="采购台账"
       description="按日期逐笔：打款、报销的每一行（已确认的）、退回与补付，每天小计。按打款平账在「备用金与每日平账」里看，账目问题在「账目自检」里看。"
       actions={

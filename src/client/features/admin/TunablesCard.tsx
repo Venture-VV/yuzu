@@ -2,6 +2,7 @@
 // 按模块分组，一次保存（只提交这些项，别的规则不动）。范围与服务端同一份（@shared/tunables）；改了立即生效、记修改记录，
 // 已经办完的单据不回头改。各页面上的提示文字随会话刷新。
 
+import { Link } from 'react-router';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { centsToInput, parseYuan } from '@shared/money';
@@ -23,9 +24,13 @@ interface FieldDef {
   unit?: string;
 }
 
-const GROUPS: { title: string; code: string; fields: FieldDef[] }[] = [
+/** 属于谁（8.0.18）：store 留在后台「门店基本规则 → 可调的数值」；erp 的显示在「ERP 设置 → 其他数值」 */
+type Scope = 'store' | 'erp';
+
+const GROUPS: { title: string; code: string; scope: Scope; fields: FieldDef[] }[] = [
   {
     title: '审批中心',
+    scope: 'erp',
     code: 'A5–A10',
     fields: [
       { key: 'approvalBatchMaxCents', label: '批量同意：每张不超过（元）', hint: '超过的要打开单独审（A5）' },
@@ -37,6 +42,7 @@ const GROUPS: { title: string; code: string; fields: FieldDef[] }[] = [
   },
   {
     title: '合同与采购附件',
+    scope: 'erp',
     code: 'C11、CG08、CG11',
     fields: [
       { key: 'contractRemindDays', label: '合同结束日前几天提醒', hint: '进 ERP 待办（C11）', unit: '天' },
@@ -46,6 +52,7 @@ const GROUPS: { title: string; code: string; fields: FieldDef[] }[] = [
   },
   {
     title: '扫码点餐与平台核销',
+    scope: 'store',
     code: 'N1、N6',
     fields: [
       { key: 'mpFoodMaxQuantity', label: '小程序扫码点餐：一单最多几份', hint: '一道菜一单最多 99 份、一单最多 20 道菜，多的分几次点或请服务员点（N1）', unit: '份' },
@@ -55,6 +62,7 @@ const GROUPS: { title: string; code: string; fields: FieldDef[] }[] = [
   },
   {
     title: '供应链与应收（8.0.7）',
+    scope: 'erp',
     code: 'V3、V5、V7、V10、V14、V18',
     fields: [
       { key: 'licenseRemindDays', label: '供应商证照到期前几天提醒', hint: '进 ERP 待办（V3）', unit: '天' },
@@ -67,6 +75,7 @@ const GROUPS: { title: string; code: string; fields: FieldDef[] }[] = [
   },
   {
     title: '营销与短信',
+    scope: 'store',
     code: 'HY07、HY08、HY16',
     fields: [
       { key: 'campaignMaxMembers', label: '批量发券一次最多发给几位', hint: '超过的要缩小范围、分几次发（HY07）', unit: '位' },
@@ -116,7 +125,10 @@ function bodyOf(s: Tunables & { countCardSales: boolean }): Record<string, unkno
   return typeof body === 'string' ? {} : body;
 }
 
-export function TunablesCard() {
+/**
+ * scope 给了就只显示那一边的项（保存照旧只交改过的项，两边互不覆盖）；不给显示全部。
+ */
+export function TunablesCard({ scope }: { scope?: Scope } = {}) {
   const settings = useSettings();
   const qc = useQueryClient();
   const toast = useToast();
@@ -166,14 +178,14 @@ export function TunablesCard() {
   return (
     <Card className="space-y-5 p-5" data-testid="tunables-card">
       <div className="flex flex-wrap items-center gap-2">
-        <SectionTitle aside={<PendingBadge title="默认与原来写死的一样，店主 2026-11-10：有争议的规则不要写死" />}>可调的数值</SectionTitle>
+        <SectionTitle aside={<PendingBadge title="默认与原来写死的一样，店主 2026-11-10：有争议的规则不要写死" />}>{scope === 'erp' ? 'ERP 的其他数值' : '可调的数值'}</SectionTitle>
         <Button variant="primary" size="sm" className="ml-auto" loading={saving} onClick={() => void save()} data-testid="tunables-save">
           保存
         </Button>
       </div>
       <p className="-mt-3 text-[12.5px] text-ink-3">原来写死在代码里、标「待确认」的数值，默认与原来一样。改了立即生效，已经办完的单据不回头改；付款流的几项在 ERP「付款 → 付款规则」里改。</p>
 
-      {GROUPS.map((g) => (
+      {GROUPS.filter((g) => !scope || g.scope === scope).map((g) => (
         <section key={g.title} className="space-y-3 rounded-lg border border-line p-4">
           <p className="text-[13.5px] font-bold">
             {g.title} <span className="font-normal text-ink-3">（{g.code}）</span>
@@ -192,6 +204,7 @@ export function TunablesCard() {
         </section>
       ))}
 
+      {scope !== 'erp' && (
       <section className="space-y-3 rounded-lg border border-line p-4">
         <p className="text-[13.5px] font-bold">
           打印 <span className="font-normal text-ink-3">（店主 2026-11-10：设置打印功能，连接打印机由各自的电脑负责；N7）</span>
@@ -213,7 +226,9 @@ export function TunablesCard() {
           </Field>
         )}
       </section>
+      )}
 
+      {scope !== 'erp' && (
       <section className="space-y-3 rounded-lg border border-line p-4">
         <p className="text-[13.5px] font-bold">
           次卡与营销成本 <span className="font-normal text-ink-3">（HY05、HY14）</span>
@@ -221,7 +236,9 @@ export function TunablesCard() {
         {toggle('次卡照常售卖（关着时停售：价目与套餐不显示次卡，已售的照常用、退、打印）', draft.countCardSales, (v) => set({ countCardSales: v }), 'tun-countCardSales')}
         {toggle('有财务职责（对账付款、成本核算）的账号看不到营销成本测算（关掉以后按岗位权限给）', draft.financeHidesMarketingCost, (v) => set({ financeHidesMarketingCost: v }), 'tun-financeHidesMarketingCost')}
       </section>
+      )}
 
+      {scope !== 'store' && (
       <section className="space-y-3 rounded-lg border border-line p-4">
         <p className="text-[13.5px] font-bold">
           供应链与付款的开关 <span className="font-normal text-ink-3">（8.0.7：V2、V6、V9、V20）</span>
@@ -234,6 +251,17 @@ export function TunablesCard() {
           <Textarea id="tun-consumptionPurposes" rows={6} value={draft.consumptionPurposes} onChange={(e) => set({ consumptionPurposes: e.target.value })} data-testid="tun-consumptionPurposes" />
         </Field>
       </section>
+      )}
+
+      {scope === 'store' && (
+        <Notice tone="info" title="审批、合同、供应链、应收的数值在 ERP 设置里" data-testid="tunables-erp-link">
+          审批超时、合同提醒、附件大小、供应商证照与评分、呆滞与效期、应收提醒、企业微信推送这些属于 ERP 的，8.0.18 起在{' '}
+          <Link to="/erp/settings/tunables" className="font-bold text-lake hover:underline">
+            ERP 设置 → 其他数值
+          </Link>
+          。
+        </Notice>
+      )}
 
       {error && <Notice tone="error" title={error} />}
     </Card>

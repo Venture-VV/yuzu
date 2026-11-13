@@ -1,6 +1,7 @@
 // 8–10 月旧账只读对照（v0.7.10，飞书需求 RQ-005 收尾，见 docs/LEGACY_LEDGER.md）。
 // 四份原始 Excel 按原样导入只读表：页面常显「不进正式账」；核验按「账目问题清单」的结构与口径重算，点开看是原表哪几行。
 
+import { ExpenseTabs } from '../expenses/ExpenseTabs';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { Archive, ChevronDown, ChevronRight, CircleAlert, CircleCheck, ExternalLink } from 'lucide-react';
@@ -586,6 +587,7 @@ export function LegacyPage() {
 
   return (
     <ErpPage
+      tabs={<ExpenseTabs active="legacy" />}
       title="旧账对照（8–10 月）"
       description="店主的四份原始 Excel 按原样导入的只读对照：采购台账、采购物资明细表、已下单物料、品牌新增寻款采购清单。核验按「账目问题清单」重算。"
     >

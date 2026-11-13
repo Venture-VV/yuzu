@@ -9,7 +9,7 @@ import { api } from '../../lib/api';
 import { relativeTime } from '../../lib/utils';
 import { Badge, Card, Notice, SectionTitle, Segmented, Skeleton } from '../../components/ui';
 import { Mascot } from '../../../canteen-app/Mascot';
-import { ErpPage } from '../erp/ErpHome';
+import { AdminModuleGate, AdminPage } from '../admin/AdminShell';
 import { FeedbackTab } from './FeedbackTab';
 import { MenusTab } from './MenusTab';
 import { RecordsTab } from './RecordsTab';
@@ -22,14 +22,21 @@ type Tab = 'today' | 'roster' | 'menus' | 'records' | 'mailbox' | 'reminders' | 
 export const useOverview = () => useQuery({ queryKey: ['canteen', 'overview'], queryFn: () => api.get<CanteenOverview>('/api/erp/canteen/overview'), refetchInterval: 60_000 });
 
 export function CanteenPage() {
+  return (
+    <AdminPage section="canteen" description="员工手机上的「柚子饭堂」：扫码自己登记、看菜单、点赞、亮饭卡码、跟柚子说；食堂负责人扫码打卡、厨师发布菜单。这里管注册二维码与名单、看用餐记录、回员工的话。">
+      {/* 模块关着时不画里面的内容（里面一进来就取数，接口会被拒绝） */}
+      <AdminModuleGate section="canteen">
+        <CanteenBody />
+      </AdminModuleGate>
+    </AdminPage>
+  );
+}
+
+function CanteenBody() {
   const [tab, setTab] = useState<Tab>('today');
   const overview = useOverview();
   const unread = overview.data?.feedbackUnread ?? 0;
   return (
-    <ErpPage
-      title="员工食堂"
-      description="员工手机上的「柚子饭堂」：扫码自己登记、看菜单、点赞、亮饭卡码、跟柚子说；食堂负责人扫码打卡、厨师发布菜单。这里管注册二维码与名单、看用餐记录、回员工的话。"
-    >
       <div className="space-y-5" data-testid="canteen-page">
         <Segmented<Tab>
           value={tab}
@@ -53,7 +60,6 @@ export function CanteenPage() {
         {tab === 'reminders' && <RemindersTab />}
         {tab === 'settings' && <SettingsTab />}
       </div>
-    </ErpPage>
   );
 }
 

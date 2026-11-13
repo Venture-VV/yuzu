@@ -1,5 +1,6 @@
 // 费用报销（v0.7.7，飞书需求 RQ-005）：按日期、部门、经办人、状态查报销单；明细里负责人确认、退回、冲销，登记人重新提交或撤回。
 
+import { ExpenseTabs } from './ExpenseTabs';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { Archive, BookOpenCheck, Download, FileText, Gauge, Plus, ReceiptText, ShieldCheck, Wallet, X } from 'lucide-react';
@@ -58,20 +59,11 @@ export function ExpensesPage() {
 
   return (
     <ErpPage
+      tabs={<ExpenseTabs active="claims" />}
       title="费用报销"
       description="一次支出一张报销单：按次或按现付供应商的采购单；单笔超过门槛要负责人确认。用备用金付的，平账在「备用金」里看。"
       actions={
         <div className="flex flex-wrap gap-2">
-          <Link to="/erp/petty">
-            <Button variant="secondary" icon={<Wallet className="size-4" />}>
-              备用金与每日平账
-            </Button>
-          </Link>
-          <Link to="/erp/expenses/budgets">
-            <Button variant="secondary" icon={<Gauge className="size-4" />} data-testid="budgets-link">
-              费用预算
-            </Button>
-          </Link>
           {session.erpModules.includes('invoices') && (
             <Link to="/erp/invoices">
               <Button variant="secondary" icon={<FileText className="size-4" />} data-testid="invoices-link">
@@ -79,21 +71,6 @@ export function ExpensesPage() {
               </Button>
             </Link>
           )}
-          <Link to="/erp/ledger">
-            <Button variant="secondary" icon={<BookOpenCheck className="size-4" />}>
-              采购台账
-            </Button>
-          </Link>
-          <Link to="/erp/audit">
-            <Button variant="secondary" icon={<ShieldCheck className="size-4" />} data-testid="audit-link">
-              账目自检
-            </Button>
-          </Link>
-          <Link to="/erp/legacy">
-            <Button variant="secondary" icon={<Archive className="size-4" />} data-testid="legacy-link">
-              旧账对照
-            </Button>
-          </Link>
           {can('expense.export') && (
             <a href={`/api/erp/expenses/export?${search(filters)}`} download>
               <Button variant="secondary" icon={<Download className="size-4" />}>

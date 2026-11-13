@@ -1,5 +1,6 @@
 // 规则总表：散在各分区的设置列在一张表里——当前值、默认值、是否改过、谁在什么时候改的、去哪里改。只读。
 
+import { useErpAccess } from '../erp/access';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
@@ -14,6 +15,7 @@ import { AdminPage, useAdminSections } from './AdminShell';
 type Filter = 'all' | 'changed' | 'pending';
 
 export function RuleCatalog() {
+  const erp = useErpAccess();
   const session = useSession();
   const sections = useAdminSections();
   const q = useQuery({ queryKey: ['admin', 'rules'], queryFn: () => api.get<RuleEntry[]>('/api/admin/rules') });
@@ -80,10 +82,19 @@ export function RuleCatalog() {
                           {r.updatedBy} · {formatDateTime(r.updatedAt!)}
                         </span>
                       )}
-                      {sections.includes(r.section) && (
-                        <Link to={ADMIN_SECTIONS[r.section].path} className="text-[12.5px] font-semibold text-pine hover:underline">
-                          去设置 →
-                        </Link>
+                      {r.href ? (
+                        // ERP 的规则在「ERP 设置」里改（8.0.18）；能不能改由那一页按权限定
+                        erp.canEnter && (
+                          <Link to={r.href} className="text-[12.5px] font-semibold text-pine hover:underline" data-testid={`rule-go-${r.key}`}>
+                            去 ERP 设置 →
+                          </Link>
+                        )
+                      ) : (
+                        sections.includes(r.section) && (
+                          <Link to={ADMIN_SECTIONS[r.section].path} className="text-[12.5px] font-semibold text-pine hover:underline">
+                            去设置 →
+                          </Link>
+                        )
                       )}
                     </div>
                   </li>

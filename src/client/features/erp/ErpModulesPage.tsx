@@ -2,7 +2,6 @@
 // 依赖的模块关着时，这个模块也用不了（开关保留，依赖的模块开了就恢复）。改动记审计。
 
 import { useState } from 'react';
-import { Link, Navigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ERP_MODULES, type ErpModuleKey, type ErpModulesInfo } from '@shared/erp';
 import { api, errorMessage } from '../../lib/api';
@@ -11,12 +10,11 @@ import { useCan } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Notice, PendingBadge, Segmented, Skeleton } from '../../components/ui';
-import { ExpenseRulesCard } from '../expenses/ExpenseRulesCard';
-import { ErpPage } from './ErpHome';
 
 const erpModulesKey = ['erp', 'modules'] as const;
 
-export function ErpModulesPage() {
+/** 模块开关（8.0.18 起是「ERP 设置」的第一个页签；原来是单独的「模块设置」页） */
+export function ErpModulesPanel() {
   const can = useCan();
   const qc = useQueryClient();
   const toast = useToast();
@@ -24,7 +22,7 @@ export function ErpModulesPage() {
   const [draft, setDraft] = useState<Partial<Record<ErpModuleKey, boolean>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (!can('settings.manage')) return <Navigate to="/erp" replace />;
+  if (!can('settings.manage')) return null;
   const d = info.data;
   const on = (k: ErpModuleKey) => draft[k] ?? d?.modules.find((m) => m.key === k)?.switchedOn ?? false;
   const dirty = !!d && d.modules.some((m) => draft[m.key] !== undefined && draft[m.key] !== m.switchedOn);
@@ -47,21 +45,19 @@ export function ErpModulesPage() {
   };
 
   return (
-    <ErpPage
-      title="模块设置"
-      description="开关 ERP 的模块：关掉的模块导航里不显示、页面打不开、接口也拒绝；数据都保留，重新开启就恢复。"
-      actions={
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="min-w-0 flex-1 text-[13px] text-ink-3">关掉的模块导航里不显示、页面打不开、接口也拒绝；数据都保留，重新开启就恢复。</p>
         <Button variant="primary" disabled={!dirty} loading={busy} onClick={() => void save()} data-testid="erp-modules-save">
           保存
         </Button>
-      }
-    >
+      </div>
       {!d ? (
         info.error ? <Notice tone="error" title={errorMessage(info.error)} /> : <Skeleton className="h-64" />
       ) : (
         <div className="space-y-3">
           <Notice tone="info" title={d.updatedBy ? `${d.updatedBy} 于 ${formatDateTime(d.updatedAt!)} 改过` : '现在全部按默认开启'}>
-            库存、采购原来就在用，默认都开启。以后同事提的新模块（数据字典、自定义字段、审批规则、成本……）也在这里开关。
+            库存、采购原来就在用，默认都开启。员工食堂、安保巡场、营业数据的页面 8.0.18 起在管理后台，开关仍在这里。
             <PendingBadge className="ml-2" title="ERP 第一步的默认做法待店主确认" />
           </Notice>
           <Card className="divide-y divide-line/70" data-testid="erp-module-switches">
@@ -95,18 +91,8 @@ export function ErpModulesPage() {
             })}
           </Card>
           {error && <Notice tone="error" title={error} />}
-          {/* 采购规则 8.0.1 挪到「采购 → 采购规则」（采购组整改 01，CG01） */}
-          {d.modules.find((m) => m.key === 'purchasing')?.enabled && (
-            <Notice tone="info" title="采购规则在「采购 → 采购规则」里改">
-              截单时间、需求单转的采购单提交即确认、急采分级审批、询价门槛与到货超期天数都在那里。{' '}
-              <Link to="/purchasing/rules" className="font-bold text-lake hover:underline" data-testid="purchase-rules-link">
-                去采购规则
-              </Link>
-            </Notice>
-          )}
-          {d.modules.find((m) => m.key === 'expenses')?.enabled && <ExpenseRulesCard />}
         </div>
       )}
-    </ErpPage>
+    </div>
   );
 }

@@ -38,10 +38,14 @@ test.describe('8.0.1 采购组整改的新页面', () => {
     await card.getByTestId('pr-tier-max-0').fill('5000');
     await card.getByTestId('purchase-rules-save').click();
     await expect.poll(async () => (await getJson<{ cutoffEnabled: boolean }>(page, '/api/inventory/purchase-rules')).cutoffEnabled).toBe(false);
-    // 「模块设置」里换成了链接
+    // 8.0.18：模块开关与采购规则都是「ERP 设置」的页签；旧地址 /erp/modules 跳到模块开关那一个
     await page.goto('/erp/modules');
-    await expect(page.getByTestId('purchase-rules-link')).toBeVisible();
+    await expect(page).toHaveURL(/\/erp\/settings\/modules$/);
+    await expect(page.getByTestId('erp-module-switches')).toBeVisible();
     await expect(page.getByTestId('purchase-rules')).toHaveCount(0);
+    await page.getByTestId('subnav-purchase').click();
+    await expect(page).toHaveURL(/\/erp\/settings\/purchase$/);
+    await expect(page.getByTestId('purchase-rules')).toBeVisible();
   });
 
   test('集采导入：下载模板、选文件、预览、导入，合成已通过的需求单，进待转采购单', async ({ page }) => {

@@ -1,3 +1,4 @@
+import { PurchasingTabs } from './PurchasingTabs';
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { Award, ChartColumn, FileUp, Lightbulb, PackageSearch, Plus, Scale, Search, Settings2, Shuffle, Zap } from 'lucide-react';
@@ -62,79 +63,12 @@ export function PurchasingPage() {
         actions={
           <span className="flex flex-wrap items-center gap-2">
             <Link
-              to="/purchasing/flow"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-pine/40 bg-pine-tint px-3.5 text-[13.5px] font-bold text-pine hover:border-pine"
-              data-testid="flow-link"
-            >
-              <Shuffle className="size-4" />
-              流程进度
-            </Link>
-            <Link
-              to="/purchasing/rules"
+              to="/erp/settings/purchase"
               className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
               data-testid="purchase-rules-page-link"
             >
               <Settings2 className="size-4" />
               采购规则
-            </Link>
-            {can('request.review') && (
-              <Link
-                to="/purchasing/import"
-                className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
-                data-testid="request-import-link"
-              >
-                <FileUp className="size-4" />
-                集采导入
-              </Link>
-            )}
-            <Link
-              to="/purchasing/urgent"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
-              data-testid="urgent-link"
-            >
-              <Zap className="size-4" />
-              急采
-            </Link>
-            <Link
-              to="/purchasing/compare"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
-              data-testid="compare-link"
-            >
-              <ChartColumn className="size-4" />
-              供应商比价
-            </Link>
-            <Link
-              to="/purchasing/scores"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
-              data-testid="scores-link"
-            >
-              <Award className="size-4" />
-              供应商评分
-            </Link>
-            <Link
-              to="/purchasing/sourcing"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
-              data-testid="sourcing-link"
-            >
-              <Scale className="size-4" />
-              询价比价
-            </Link>
-            <Link
-              to="/purchasing/suggestions"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
-              data-testid="suggestions-link"
-            >
-              <Lightbulb className="size-4" />
-              补货建议
-              {!!suggestions.data?.count && <span className="num rounded-full bg-yuzu px-1.5 text-[11.5px] font-bold text-ink">{suggestions.data.count}</span>}
-            </Link>
-            <Link
-              to="/purchasing/ordered"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
-              data-testid="ordered-link"
-            >
-              <PackageSearch className="size-4" />
-              下单物料
             </Link>
             {can('purchase.manage') && (
               <Link to="/purchasing/new" className="flex h-9 items-center gap-1.5 rounded-md bg-pine px-3.5 text-[13.5px] font-bold text-paper hover:bg-pine-hover">
@@ -145,6 +79,7 @@ export function PurchasingPage() {
           </span>
         }
       />
+      <PurchasingTabs active="orders" />
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-5 py-3 md:px-7">
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="状态">
           {FILTERS.map((f) => (

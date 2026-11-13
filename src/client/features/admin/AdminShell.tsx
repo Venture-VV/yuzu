@@ -4,7 +4,7 @@
 // 也能进后台，但只看得到「数据看板」（没有后台首页，进来直接到看板）。
 
 import { useEffect, type ReactNode } from 'react';
-import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
+import { Link, Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { SubTabPage, type SubTab } from '../../components/SubNav';
 import { useSlidingIndicator } from '../../lib/motion';
 import {
@@ -15,6 +15,7 @@ import {
   CalendarClock,
   ClipboardList,
   Crown,
+  Footprints,
   Gift,
   HandHeart,
   IdCard,
@@ -26,6 +27,7 @@ import {
   Scale,
   ShieldCheck,
   Smartphone,
+  Soup,
   Sparkles,
   Tags,
   Ticket,
@@ -33,13 +35,15 @@ import {
   UtensilsCrossed,
   type LucideIcon,
 } from 'lucide-react';
-import { ADMIN_GROUPS, ADMIN_SECTIONS, type AdminSection } from '@shared/admin';
+import { ADMIN_GROUPS, ADMIN_SECTION_MODULES, ADMIN_SECTIONS, ADMIN_STANDALONE_SECTIONS, type AdminSection } from '@shared/admin';
+import { ERP_MODULES, ERP_SETTINGS_PATH } from '@shared/erp';
 import { versionText } from '@shared/instance';
 import { ROLE_LABELS } from '@shared/labels';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { LogoMark } from '../../components/Brand';
 import { InstanceBadge } from '../../components/InstanceTag';
+import { Notice } from '../../components/ui';
 
 const ICONS: Record<AdminSection, LucideIcon> = {
   home: LayoutGrid,
@@ -62,6 +66,8 @@ const ICONS: Record<AdminSection, LucideIcon> = {
   mp: Smartphone,
   staff: UsersRound,
   permissions: ShieldCheck,
+  canteen: Soup,
+  patrol: Footprints,
   opening: ArchiveRestore,
   audit: ClipboardList,
 };
@@ -69,8 +75,15 @@ const ICONS: Record<AdminSection, LucideIcon> = {
 /** 当前账号能进的后台分区；进不了后台首页、只有看板权限的岗位只看得到数据看板（店主 2026-11-10） */
 export function useAdminSections() {
   const can = useCan();
-  const all = (Object.keys(ADMIN_SECTIONS) as AdminSection[]).filter((k) => ADMIN_SECTIONS[k].perms.some((p) => can(p)));
-  return all.includes('home') ? all : all.filter((k) => k === 'dashboard');
+  const session = useSession();
+  const all = (Object.keys(ADMIN_SECTIONS) as AdminSection[])
+    .filter((k) => ADMIN_SECTIONS[k].perms.some((p) => can(p)))
+    // 跟着 ERP 模块开关走的分区（员工食堂、安保巡场，8.0.18）：关着时只有能去开的人还看得到
+    .filter((k) => {
+      const module = ADMIN_SECTION_MODULES[k];
+      return !module || session.erpModules.includes(module) || can('settings.manage');
+    });
+  return all.includes('home') ? all : all.filter((k) => ADMIN_STANDALONE_SECTIONS.includes(k));
 }
 
 export function AdminShell() {
@@ -86,9 +99,9 @@ export function AdminShell() {
       document.title = session.storeName;
     };
   }, [session.storeName]);
-  if (!sections.includes('home') && !sections.includes('dashboard')) return <Navigate to="/" replace />;
-  // 只有看板权限的：没有后台首页，进来直接到数据看板
-  if (!sections.includes('home') && location.pathname.replace(/\/+$/, '') === ADMIN_SECTIONS.home.path) return <Navigate to={ADMIN_SECTIONS.dashboard.path} replace />;
+  if (sections.length === 0) return <Navigate to="/" replace />;
+  // 没有后台首页的（只有看板、员工食堂或安保巡场的权限）：进来直接到自己的第一个分区
+  if (!sections.includes('home') && location.pathname.replace(/\/+$/, '') === ADMIN_SECTIONS.home.path) return <Navigate to={ADMIN_SECTIONS[sections[0]!].path} replace />;
 
   const groups = ADMIN_GROUPS.map((g) => ({ ...g, items: g.items.filter((k) => sections.includes(k)) })).filter((g) => g.items.length > 0);
   const link = (k: AdminSection, compact: boolean) => {
@@ -208,6 +221,29 @@ export function AdminPage({
           {children}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * 跟着 ERP 模块开关走的分区（员工食堂、安保巡场，8.0.18）：模块关着时不画页面，提示去哪开。
+ * 关着时接口也拒绝（ERP_MODULE_DISABLED），所以这里先拦住，不让页面一片报错。
+ */
+export function AdminModuleGate({ section, children }: { section: AdminSection; children: ReactNode }) {
+  const session = useSession();
+  const module = ADMIN_SECTION_MODULES[section];
+  if (!module || session.erpModules.includes(module)) return <>{children}</>;
+  const def = ERP_MODULES[module];
+  return (
+    <div data-testid="admin-module-off">
+      <Notice tone="info" title={`「${def.label}」还没有开启`}>
+        {def.requires.length ? `它依赖「${def.requires.map((r) => ERP_MODULES[r].label).join('」「')}」。` : ''}
+        店主在{' '}
+        <Link to={`${ERP_SETTINGS_PATH}`} className="font-bold text-lake hover:underline">
+          ERP 设置 → 模块开关
+        </Link>{' '}
+        里开启后才能使用；数据都保留。
+      </Notice>
     </div>
   );
 }

@@ -75,7 +75,7 @@ export function registerPatrolPortalRoutes(
   let cache: { at: number; open: boolean } | null = null;
   const assertOpen = async () => {
     if (!cache || Date.now() - cache.at >= cacheMs) cache = { at: Date.now(), open: (await enabledErpModules(sql)).has('patrol') };
-    if (!cache.open) throw new AppError(503, 'PATROL_CLOSED', '巡场还没开：请管理员在 yuzu 的 ERP「模块设置」里打开「安保巡场」');
+    if (!cache.open) throw new AppError(503, 'PATROL_CLOSED', '巡场还没开：请管理员在 yuzu 的「ERP 设置 → 模块开关」里打开「安保巡场」');
   };
 
   /** 今天（或某一天，后台指定的人才能看以前的） */

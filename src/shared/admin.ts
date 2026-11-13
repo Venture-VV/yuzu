@@ -2,6 +2,7 @@
 // 数据看板（店主 2026-11-10）：门店主导航原来的「看板」整合到后台，统一在后台查看、管理；原来能看看板的岗位照旧能看——
 // 只有看板权限的岗位（值班经理、客户经理、收银）也能进后台，但只看得到「数据看板」这一个分区。
 
+import type { ErpModuleKey } from './erp';
 import type { InstanceKind } from './instance';
 import type { EditableRole, Permission, Role, RoleOverrides } from './permissions';
 
@@ -16,7 +17,8 @@ export const ADMIN_SECTIONS = {
   dashboard: {
     path: '/admin/dashboard',
     label: '数据看板',
-    perms: ['ledger.readToday', 'report.executive', 'report.members', 'member.retention', 'report.technicians', 'marketing.cost'],
+    // 8.0.18：ERP 的「营业数据」并进来（页签「营业数据」），带着原来的权限 erp.revenue
+    perms: ['ledger.readToday', 'report.executive', 'report.members', 'member.retention', 'report.technicians', 'marketing.cost', 'erp.revenue'],
   },
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
   // 8.0.17（IA5）：原来叫「经营规则」，与「规则总表」分不清，改叫「门店基本规则」（路径不变）
@@ -46,6 +48,10 @@ export const ADMIN_SECTIONS = {
   mp: { path: '/admin/mp', label: '微信小程序', perms: ['mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite', 'mp.food', 'mp.booking'] },
   staff: { path: '/admin/staff', label: '员工账号', perms: ['staff.manage'] },
   permissions: { path: '/admin/permissions', label: '岗位权限', perms: ['settings.manage', 'audit.read'] },
+  // 8.0.18（IA1，店主 2026-11-13）：员工食堂、安保巡场从 ERP 挪到后台「人员与行政」。页面、权限、接口都没变；
+  // 开没开仍然按 ERP 的模块开关（ADMIN_SECTION_MODULES），员工手机端的入口不变
+  canteen: { path: '/admin/canteen', label: '员工食堂', perms: ['canteen.manage'] },
+  patrol: { path: '/admin/patrol', label: '安保巡场', perms: ['patrol.read', 'patrol.manage'] },
   opening: { path: '/admin/opening', label: '期初与旧账', perms: ['wallet.opening'] },
   audit: { path: '/admin/audit', label: '操作审计', perms: ['audit.read'] },
 } as const satisfies Record<string, { path: string; label: string; perms: readonly Permission[] }>;
@@ -63,13 +69,22 @@ export const ADMIN_GROUPS: readonly { key: string; title: string; items: readonl
   { key: 'members', title: '会员与营销', items: ['membership', 'benefits', 'members', 'coupons'] },
   { key: 'business', title: '营业项目', items: ['catalog', 'tags', 'technicians', 'dining', 'emenu', 'rooms', 'bookings'] },
   { key: 'venue', title: '场地、设备与线上', items: ['spaces', 'devices', 'mp'] },
-  { key: 'staff', title: '人员与权限', items: ['staff', 'permissions'] },
+  { key: 'staff', title: '人员与行政', items: ['staff', 'permissions', 'canteen', 'patrol'] },
   { key: 'data', title: '数据与审计', items: ['audit', 'opening'] },
 ];
 /** 能进后台首页、看后台各个设置分区的权限（有其一即可） */
 export const ADMIN_PERMISSIONS: readonly Permission[] = ADMIN_SECTIONS.home.perms;
-/** 能进后台的权限（有其一即可）：后台首页的权限，加上数据看板的权限（只有看板权限的只看得到数据看板） */
-export const ADMIN_ENTRY_PERMISSIONS: readonly Permission[] = [...new Set<Permission>([...ADMIN_SECTIONS.home.perms, ...ADMIN_SECTIONS.dashboard.perms])];
+/**
+ * 不进后台首页也看得到的分区：数据看板（店主 2026-11-10），员工食堂、安保巡场（8.0.18，食堂负责人、安保主管原来只进 ERP）。
+ * 只有这些分区的权限的岗位能进后台，但只看得到自己的这几个分区
+ */
+export const ADMIN_STANDALONE_SECTIONS: readonly AdminSection[] = ['dashboard', 'canteen', 'patrol'];
+/** 跟着 ERP 模块开关走的分区：模块关着时只有能改模块开关的人还看得到（页面上提示去开启） */
+export const ADMIN_SECTION_MODULES: Partial<Record<AdminSection, ErpModuleKey>> = { canteen: 'canteen', patrol: 'patrol' };
+/** 能进后台的权限（有其一即可）：后台首页的权限，加上不进首页也看得到的那几个分区的权限 */
+export const ADMIN_ENTRY_PERMISSIONS: readonly Permission[] = [
+  ...new Set<Permission>([...ADMIN_SECTIONS.home.perms, ...ADMIN_STANDALONE_SECTIONS.flatMap((k) => ADMIN_SECTIONS[k].perms)]),
+];
 
 export const RULE_GROUPS = {
   store: '门店与营业',
@@ -84,7 +99,8 @@ export const RULE_GROUPS = {
   floormap: '平面图与导览',
   locations: '实时位置',
   inventory: '库存与采购',
-  erp: 'ERP（审批中心、合同）',
+  erp: 'ERP（审批、合同、付款、报销）',
+  workplace: '人员与行政（员工食堂、安保巡场）',
   staff: '岗位与权限',
 } as const;
 export type RuleGroup = keyof typeof RULE_GROUPS;
@@ -103,6 +119,11 @@ export interface RuleEntry {
   updatedAt: string | null;
   updatedBy: string | null;
   section: AdminSection;
+  /**
+   * 不在后台分区里改的规则去哪改（8.0.18）：ERP 的规则在「ERP 设置」的页签里（/erp/settings/purchase……）。
+   * 给了就按它跳，没给的照旧去 section 那个分区
+   */
+  href?: string;
   hint?: string;
 }
 

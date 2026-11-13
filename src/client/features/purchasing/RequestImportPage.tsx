@@ -5,6 +5,7 @@
 // 导入出来的需求单按「部门 + 优先级 + 期望到货日期」合成、直接已通过，进「待转采购单」；同一份文件只能导入一次。
 // 导入带操作编号：结果不明时记在本机，页面上方查回、按原内容重新提交或作废（AGENTS.md）。
 
+import { PurchasingTabs } from './PurchasingTabs';
 import { useRef, useState } from 'react';
 import { Link, Navigate } from 'react-router';
 import { ArrowLeft, CircleCheck, Download, FileSearch, FileUp } from 'lucide-react';
@@ -152,6 +153,7 @@ export function RequestImportPage() {
         }
         subtitle={`用采购组的「${REQUEST_IMPORT_TITLE}」整理好需求，一次导成「已通过」的需求单，进待转采购单；同一份文件只能导入一次`}
       />
+      <PurchasingTabs active="import" />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1180px] space-y-4 px-5 py-5 md:px-7" data-testid="request-import">
           <ErpPendingPanel types={['request_import']} className="space-y-2" onFound={() => void invalidate()} />

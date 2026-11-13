@@ -47,8 +47,14 @@ test.describe('ERP 工作区', () => {
       expect(erp.kpis.net).toBe(exec.kpis.net);
       expect(erp.trend).toEqual(exec.trend);
 
-      // 模块设置：关掉采购
-      await erpNav(page).getByRole('link', { name: '模块设置', exact: true }).click();
+      // 8.0.18：营业数据并进了后台的数据看板（ERP 导航里那一条是跳转），这时已经在后台里
+      await expect(page).toHaveURL(/\/admin\/dashboard\/revenue$/);
+      await expect(page.getByTestId('admin-shell')).toBeVisible();
+
+      // 模块开关（8.0.18 起是「ERP 设置」的第一个页签）：关掉采购
+      await page.goto('/erp');
+      await erpNav(page).getByRole('link', { name: 'ERP 设置', exact: true }).click();
+      await expect(page).toHaveURL(/\/erp\/settings$/);
       await page.getByTestId('erp-switch-purchasing').getByRole('radio', { name: '关闭' }).click();
       await page.getByTestId('erp-modules-save').click();
       await expect(page.getByText('ERP 模块设置已保存')).toBeVisible();
@@ -85,7 +91,12 @@ test.describe('ERP 工作区', () => {
     await expect(page).toHaveURL(/\/inventory/);
     await expect(page.getByTestId('erp-shell')).toBeVisible();
     await expect(page.getByRole('navigation', { name: '主导航' })).toHaveCount(0);
-    for (const name of ['营业数据', '模块设置', '应付货款']) await expect(erpNav(page).getByRole('link', { name, exact: true })).toHaveCount(0);
+    for (const name of ['营业数据', '应付货款']) await expect(erpNav(page).getByRole('link', { name, exact: true })).toHaveCount(0);
+    // 8.0.18：「ERP 设置」里物资经办只看得到采购规则（只读），没有模块开关
+    await page.goto('/erp/settings/modules');
+    await expect(page.getByTestId('erp-settings')).toBeVisible();
+    await expect(page.getByTestId('erp-module-switches')).toHaveCount(0);
+    await expect(page.getByTestId('purchase-rules')).toBeVisible();
     expect((await page.request.get('/api/erp/revenue?from=2026-01-01&to=2026-01-01')).status()).toBe(403);
     await page.goto('/erp/modules');
     await expect(page).toHaveURL(/\/erp$/);

@@ -16,7 +16,8 @@ describe('后台的一级分组', () => {
   });
 
   it('7 个分组，名称与顺序固定；规则中心里是规则总表与门店基本规则', () => {
-    expect(ADMIN_GROUPS.map((g) => g.title)).toEqual(['概览', '规则中心', '会员与营销', '营业项目', '场地、设备与线上', '人员与权限', '数据与审计']);
+    expect(ADMIN_GROUPS.map((g) => g.title)).toEqual(['概览', '规则中心', '会员与营销', '营业项目', '场地、设备与线上', '人员与行政', '数据与审计']);
+    // 8.0.18：「人员与权限」改叫「人员与行政」，员工食堂、安保巡场从 ERP 挪进来（tests/erp-ia.test.ts）
     expect(ADMIN_GROUPS.find((g) => g.key === 'rules')!.items).toEqual(['settings', 'rules']);
     expect(new Set(ADMIN_GROUPS.map((g) => g.key)).size).toBe(ADMIN_GROUPS.length);
   });

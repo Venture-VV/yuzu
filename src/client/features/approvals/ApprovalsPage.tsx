@@ -25,7 +25,6 @@ import { Badge, Button, Input, Notice, Segmented, Skeleton } from '../../compone
 import { useApprovalResend, waited } from './ApprovalProgress';
 import { ApprovalSheet } from './ApprovalSheet';
 import { DelegationsPanel } from './DelegationsPanel';
-import { RulesPanel } from './RulesPanel';
 import { useApprovals, useRefreshAfterApproval, useUrgentAccepts, useUrgentBackfills, type ApprovalTab } from './queries';
 import { sendBatchApprove, sentLabel, useUncertainApprovals } from './uncertain';
 
@@ -56,13 +55,14 @@ export function ApprovalsPage() {
   const accepts = useUrgentAccepts(can('inventory.approve'));
   const [retryOpen, setRetryOpen] = useState(false);
   if (!canAct) return <Navigate to="/erp" replace />;
+  // 8.0.18：审批规则收进「ERP 设置 → 审批规则与代理人」；旧地址 /approvals?tab=rules 跳过去（代理人是日常要用的，这里照旧留着）
+  if (tab === 'rules') return <Navigate to="/erp/settings/approvals" replace />;
 
   const overdue = (mine.data ?? []).filter((c) => c.overdue).length;
   const tabs: { value: Tab; label: string }[] = [
     { value: 'mine', label: `待我审批${mine.data ? ` ${mine.data.length}` : ''}` },
     ...(canViewAll ? [{ value: 'all' as Tab, label: '全部在审' }] : []),
     { value: 'submitted', label: '我提交的' },
-    { value: 'rules', label: '审批规则' },
     { value: 'delegations', label: '代理人' },
   ];
 
@@ -85,17 +85,19 @@ export function ApprovalsPage() {
           <UncertainPanel onOpen={(id) => setParam({ open: String(id) })} onBatch={() => setRetryOpen(true)} />
           {(accepts.data?.length ?? 0) > 0 && <AcceptStrip items={accepts.data!} />}
           {(backfills.data?.length ?? 0) > 0 && <BackfillStrip items={backfills.data!} />}
-          <div className="-mx-1 overflow-x-auto px-1">
+          <div className="-mx-1 flex items-center gap-3 overflow-x-auto px-1">
             <Segmented value={tab} onChange={(v) => setParam({ tab: v === 'mine' ? null : v })} options={tabs} ariaLabel="审批中心分页" className="min-w-max" />
+            {/* 8.0.18：审批规则在「ERP 设置」里 */}
+            <Link to="/erp/settings/approvals" className="shrink-0 text-[13px] font-semibold text-lake hover:underline" data-testid="approval-rules-link">
+              审批规则
+            </Link>
           </div>
           {tab === 'mine' && overdue > 0 && (
             <Notice tone="warning" icon={<TriangleAlert className="size-4" />} title={`${overdue} 张超时`} data-testid="approval-overdue">
               当前这一级等了超过 {rules.approvalOverdueHours} 小时，已排在最前。
             </Notice>
           )}
-          {tab === 'rules' ? (
-            <RulesPanel />
-          ) : tab === 'delegations' ? (
+          {tab === 'delegations' ? (
             <DelegationsPanel />
           ) : cards.error ? (
             <Notice tone="error" title={errorMessage(cards.error)} />
