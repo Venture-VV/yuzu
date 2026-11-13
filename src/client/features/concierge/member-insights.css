@@ -1,11 +1,14 @@
 .concierge-workspace .member-insights { display: grid; gap: 20px; min-width: 0; }
 .concierge-workspace .member-overview { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px; }
-.concierge-workspace .member-overview-card { background: var(--color-card); border: 1px solid var(--color-moss-soft); border-radius: 14px; padding: 22px; min-width: 0; }
+.concierge-workspace .member-overview-card { background: var(--color-card); border: 1px solid var(--color-moss-soft); border-radius: 14px; padding: 22px; min-width: 0; text-align: left; transition: border-color .15s,box-shadow .15s; }
+.concierge-workspace .member-overview-card:hover:not(:disabled),.concierge-workspace .member-overview-card:focus-visible { border-color: var(--color-moss); box-shadow: 0 3px 14px color-mix(in srgb,var(--color-moss) 10%,transparent); }
+.concierge-workspace .member-overview-card:focus-visible { outline: 2px solid var(--color-moss); outline-offset: 3px; }
+.concierge-workspace .member-overview-card .overview-link { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 16px; font-size: 12px; color: var(--color-moss); }
 .concierge-workspace .member-overview-card > span { color: var(--color-ink-3); font-size: 14px; }
 .concierge-workspace .member-overview-card > strong { display: block; margin: 14px 0 10px; font-size: 34px; font-weight: 500; color: var(--color-moss); }
 .concierge-workspace .member-overview-card small,.concierge-workspace .dormancy-card small,.concierge-workspace .grade-count small { margin-left: 7px; font-size: 13px; font-weight: 400; color: var(--color-ink-3); }
 .concierge-workspace .member-overview-card p { color: var(--color-ink-3); font-size: 12px; line-height: 1.7; margin: 0; }
-.concierge-workspace .dormancy-cards { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; }
+.concierge-workspace .dormancy-cards { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
 .concierge-workspace .dormancy-card { border: 1px solid var(--color-moss-soft); border-radius: 13px; padding: 20px; text-align: left; background: var(--color-card); color: var(--color-moss); min-width: 0; }
 .concierge-workspace .dormancy-card > span { display: block; margin: 14px 0; color: var(--color-ink); font-size: 14px; }
 .concierge-workspace .dormancy-card > strong { font-size: 29px; font-weight: 500; }
@@ -39,6 +42,32 @@
 .concierge-workspace .native-preview-facts dt { color: var(--color-ink-3); font-size: 12px; margin-bottom: 7px; }
 .concierge-workspace .native-preview-facts dd { margin: 0; font-size: 14px; }
 .concierge-workspace .native-profile-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 17px 0; color: var(--color-moss); border-bottom: 1px solid var(--color-moss-soft); }
+.concierge-workspace.member-insights-dialog { min-height: 0; display: grid; gap: 20px; background: transparent; min-width: 0; }
+.concierge-workspace .growth-section { min-width: 0; padding: 20px; border: 1px solid var(--color-moss-soft); border-radius: 14px; background: var(--color-card); }
+.concierge-workspace .growth-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.concierge-workspace .growth-toolbar h3 { font-size: 18px; color: var(--color-ink); margin: 7px 0 0; }
+.concierge-workspace .growth-toolbar > div > span { color: var(--color-ink-3); font-size: 12px; }
+.concierge-workspace .growth-year-controls { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.concierge-workspace .growth-year-controls input { border: 1px solid var(--color-moss-soft); border-radius: 8px; padding: 8px 10px; background: var(--color-card); color: var(--color-ink); font-size: 15px; min-width: 0; max-width: 160px; }
+.concierge-workspace .growth-year-controls .small-btn { padding: 9px; }
+.concierge-workspace .growth-chart-scroll { overflow-x: auto; overscroll-behavior-x: contain; margin: 0 0 14px; }
+.concierge-workspace .growth-chart { width: 100%; min-width: 680px; }
+.concierge-workspace .growth-chart svg { display: block; width: 100%; height: 150px; overflow: visible; }
+.concierge-workspace .growth-grid { stroke: var(--color-moss-soft); stroke-width: 1; stroke-dasharray: 4 4; }
+.concierge-workspace .growth-line { fill: none; stroke: var(--color-moss); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.concierge-workspace .growth-dot { fill: var(--color-card); stroke: var(--color-moss); stroke-width: 2; }
+.concierge-workspace .growth-dot.selected { fill: var(--color-moss); }
+.concierge-workspace .growth-chart svg text { font-size: 11px; fill: var(--color-ink-3); }
+.concierge-workspace .growth-chart svg .growth-count { font-size: 13px; fill: var(--color-moss); }
+.concierge-workspace .growth-months { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); padding: 0 10px 6px; }
+.concierge-workspace .growth-months button { display: grid; gap: 5px; padding: 9px 2px; min-height: 54px; border-radius: 8px; border: 1px solid transparent; color: var(--color-ink); font-size: 13px; }
+.concierge-workspace .growth-months button small { font-size: 11px; color: var(--color-ink-3); }
+.concierge-workspace .growth-months button:hover:not(:disabled),.concierge-workspace .growth-months button:focus-visible { border-color: var(--color-moss); }
+.concierge-workspace .growth-months button.selected { background: var(--color-moss-soft); border-color: var(--color-moss); color: var(--color-moss); }
+.concierge-workspace .growth-months button:disabled { opacity: .4; }
+.concierge-workspace.member-insights-dialog .panel { margin: 0; min-width: 0; }
+.concierge-workspace.member-insights-dialog .panel-header { flex-wrap: wrap; gap: 12px; }
+.concierge-workspace.member-insights-dialog .data-table { min-width: 620px; }
 @media (max-width: 1100px) {
  .concierge-workspace .member-overview { grid-template-columns: repeat(2,minmax(0,1fr)); }
  .concierge-workspace .dormancy-cards { grid-template-columns: repeat(3,minmax(0,1fr)); }
@@ -60,4 +89,7 @@
  .concierge-workspace .insights-pagination { padding: 12px; }
  .concierge-workspace .native-preview-facts { grid-template-columns: 1fr; gap: 17px; }
  .concierge-workspace .native-preview-identity h2 { font-size: 22px; }
+ .concierge-workspace .growth-section { padding: 14px; }
+ .concierge-workspace .growth-year-controls input { font-size: 16px; }
+ .concierge-workspace.member-insights-dialog .insights-pagination { justify-content: flex-start; }
 }

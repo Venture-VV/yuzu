@@ -110,7 +110,7 @@ const NAV = [
   { id: "followup", label: "重点跟进", icon: HeartHandshake },
   { id: "balances", label: "会员情况", icon: Users },
   { id: "tasks", label: "待办与交班", icon: ClipboardList },
-  { id: "segments", label: "客户分层", icon: Layers3 },
+  { id: "segments", label: "会员中心", icon: Layers3 },
 ] as const;
 const TITLES: Record<View, [string, string]> = {
   dashboard: ["今日工作台", "把接待、拍单与后续安排，接续在同一份会员档案中。"],
@@ -123,7 +123,7 @@ const TITLES: Record<View, [string, string]> = {
   receiptArchive: ["消费凭证历史", "查看历史小票、识别草稿与原始图片。"],
   followup: ["重点跟进", "关注低余额与后续需求，记录实际结果。"],
   balances: ["会员情况", "从真实到访记录识别沉睡会员，安排有针对性的服务跟进。"],
-  segments: ["客户分层", "按会员系统的档阶查看分布与会员名单。"],
+  segments: ["会员中心", "按会员系统的档阶查看分布与会员名单。"],
   tasks: ["待办与交班", "让待回复、待处理和待接收的事项都有下一负责人。"],
   manager: ["经理监管", "从工作汇总追到明细、操作账号与原始凭证。"],
 };
@@ -385,6 +385,7 @@ export default function Workspace({
   const canNative = useCan();
   const [data, setData] = useState(initialData);
   const [view, setView] = useState<View>("dashboard");
+  const [insightBucket, setInsightBucket] = useState<"" | "dormant">("");
   const [search, setSearch] = useState("");
   const [group, setGroup] = useState("all");
   const [owner, setOwner] = useState("");
@@ -662,6 +663,7 @@ export default function Workspace({
   }
   function navigate(v: View) {
     setView(v);
+    setInsightBucket("");
     setSearch("");
     setOwner("");
     setGroup("all");
@@ -1854,7 +1856,10 @@ export default function Workspace({
               </>
             )}
             {view === "members" && (<>
-              <MemberInsightsView mode="directory" onOpen={openSystemMember} />
+              <MemberInsightsView mode="directory" onOpen={openSystemMember} onNavigate={(target) => {
+                navigate(target === "tiers" ? "segments" : "balances");
+                if (target === "dormant") setInsightBucket("dormant");
+              }} />
               {data.members.some((m) => !m.nativeMemberId) && <section className="panel legacy-service-panel">
                 <details><summary>未关联系统会员的历史服务档案（{data.members.filter((m) => !m.nativeMemberId).length}份）</summary>
                   <p className="insights-rule">历史记录保留；关联前不将人工余额当作当前系统余额。</p>
@@ -2064,7 +2069,7 @@ export default function Workspace({
                 </section>
               </>
             )}
-            {view === "balances" && <MemberInsightsView mode="situation" onOpen={openSystemMember} />}
+            {view === "balances" && <MemberInsightsView key={"situation-" + insightBucket} mode="situation" initialBucket={insightBucket} onOpen={openSystemMember} />}
             {view === "segments" && <MemberInsightsView mode="tiers" onOpen={openSystemMember} />}
             {view === "tasks" && (
               <section className="panel">

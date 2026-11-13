@@ -294,6 +294,7 @@ export function PraiseCenter({ data, busy, saveError, onMutate }: Props) {
   const [staffFilter, setStaffFilter] = useState("");
   const [status, setStatus] = useState("active");
   const [entryOpen, setEntryOpen] = useState(false);
+  const [monthDetails, setMonthDetails] = useState<{ month: string; count: number } | null>(null);
   const [historyStaff, setHistoryStaff] = useState<PraiseStaff | null>(null);
   const [recordId, setRecordId] = useState("");
   const changed = () => setRefresh((n) => n + 1);
@@ -320,12 +321,22 @@ export function PraiseCenter({ data, busy, saveError, onMutate }: Props) {
             <button type="button" className="praise-action praise-link" onClick={changed}><RefreshCw size={15} />刷新</button>
           </div>
         </div>
-        <div className="praise-month-award">
+        <button
+          type="button"
+          className="praise-month-award"
+          aria-label="查看本月好评明细"
+          aria-haspopup="dialog"
+          aria-expanded={Boolean(monthDetails)}
+          disabled={!center.data}
+          onClick={() => {
+            if (center.data) setMonthDetails({ month: center.data.month, count: center.data.monthCount });
+          }}
+        >
           <span className="praise-award-icon"><Trophy size={29} /></span>
           <span>{center.data ? monthLabel(center.data.month) : "本月"} · 有效好评</span>
           <strong>{center.data ? center.data.monthCount : "—"}<small>条</small></strong>
-          <span className="praise-award-note">每一条，都有客人的原始凭证</span>
-        </div>
+          <span className="praise-award-note">查看本月好评明细 <ArrowRight size={13} /></span>
+        </button>
       </header>
       <ReadState loading={center.loading} error={center.error} hasData={Boolean(center.data)} onRetry={changed} />
       {center.data && (
@@ -354,6 +365,15 @@ export function PraiseCenter({ data, busy, saveError, onMutate }: Props) {
         </>
       )}
       <PraiseEntry open={entryOpen} onClose={() => setEntryOpen(false)} center={center.data} members={data.members} busy={busy} saveError={saveError} onMutate={onMutate} onSaved={() => { setEntryOpen(false); changed(); }} />
+      <Dialog open={Boolean(monthDetails)} onClose={() => setMonthDetails(null)} title="本月好评明细" description="本月新增的有效好评记录，按好评发生日期归月；已撤销记录不计入。点击记录可查看原文和图片。" width="max-w-5xl">
+        {monthDetails && <div className="praise-center praise-month-dialog">
+          <div className="praise-month-summary" aria-label="本月有效好评统计">
+            <strong>{monthLabel(monthDetails.month)}</strong>
+            <span>共 <b>{center.data?.month === monthDetails.month ? center.data.monthCount : monthDetails.count}</b> 条有效好评</span>
+          </div>
+          <PraiseFeed key={monthDetails.month} month={monthDetails.month} status="active" refresh={refresh} onRecord={setRecordId} />
+        </div>}
+      </Dialog>
       <Dialog open={Boolean(historyStaff)} onClose={() => setHistoryStaff(null)} title={`${historyStaff?.name || "管家"}的服务荣誉`} description="全部历史好评；点击记录可查看内容与原始图片。" width="max-w-4xl">
         {historyStaff && <div className="praise-center praise-history"><PraiseFeed key={historyStaff.id} staffId={historyStaff.id} refresh={refresh} onRecord={setRecordId} /></div>}
       </Dialog>

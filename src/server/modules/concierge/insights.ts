@@ -10,7 +10,7 @@ import {
   type Tier,
 } from "@shared/membership";
 import {
-  INSIGHT_BUCKETS,
+  INSIGHT_FILTER_BUCKETS,
   type InsightDormancyBucket,
   type InsightMember,
   type MemberInsights,
@@ -19,7 +19,7 @@ import type { NativeMemberSummary } from "@shared/concierge/types";
 import { guard } from "../../auth/guard";
 import { readSnapshot, type Db } from "../../db";
 import type { Deps } from "../../lib/context";
-import { AppError, notFound } from "../../lib/errors";
+import { AppError, badRequest, notFound } from "../../lib/errors";
 import { idParam, parse } from "../../lib/validate";
 import { searchMembers } from "../members";
 import { loadMembershipRules, projectedGrade } from "../membership";
@@ -41,7 +41,24 @@ const Query = z.object({
     optionalFilter,
     z.coerce.number().int().min(0).max(MAX_GRADE).optional(),
   ),
-  bucket: z.preprocess(optionalFilter, z.enum(INSIGHT_BUCKETS).optional()),
+  bucket: z.preprocess(
+    optionalFilter,
+    z.enum(INSIGHT_FILTER_BUCKETS).optional(),
+  ),
+  createdMonth: z
+    .string()
+    .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "创建月份应为YYYY-MM")
+    .refine(
+      (month) => Number(month.slice(0, 4)) >= 1900,
+      "创建年份不能早于1900年",
+    )
+    .optional(),
+  trendYear: z
+    .string()
+    .regex(/^\d{4}$/, "趋势年份应为四位年份YYYY")
+    .transform(Number)
+    .refine((year) => year >= 1900, "趋势年份不能早于1900年")
+    .optional(),
   offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
 });
 
@@ -83,6 +100,7 @@ interface NativeRow {
   phone: string;
   status: string;
   createdAt: string;
+  createdMonth: string;
   principalBalance: number;
   bonusBalance: number;
   expiredBonus: number;
@@ -120,7 +138,8 @@ async function nativeRows(
     FROM family f JOIN concierge_members c ON c.native_member_id=f.member_id GROUP BY f.canonical_id
   ), families AS (
     SELECT canonical_id,array_agg(member_id ORDER BY member_id) AS family_ids FROM family GROUP BY canonical_id
-  ) SELECT m.id,m.member_no,m.name,m.phone,m.status,m.created_at,m.principal_balance,m.bonus_balance,
+  ) SELECT m.id,m.member_no,m.name,m.phone,m.status,m.created_at,
+      to_char(m.created_at AT TIME ZONE ${timezone},'YYYY-MM') AS created_month,m.principal_balance,m.bonus_balance,
       m.grade,m.tier,m.cycle_start,m.cycle_end,m.grace_until,f.family_ids,
       coalesce(p.profiles,'[]'::jsonb) AS profiles,v.last_visit_at,
       CASE WHEN v.last_visit_at IS NULL THEN NULL ELSE
@@ -211,6 +230,13 @@ export async function loadMemberInsights(
 ): Promise<MemberInsights> {
   const query = parse(Query, rawQuery);
   const calendar = await readInsightCalendar(db, timezone, at);
+  const currentMonth = calendar.day.slice(0, 7);
+  const currentYear = Number(currentMonth.slice(0, 4));
+  if (query.createdMonth !== undefined && query.createdMonth > currentMonth)
+    throw badRequest("创建月份不能晚于门店当前月份", { field: "createdMonth" });
+  const trendYear = query.trendYear ?? currentYear;
+  if (trendYear > currentYear)
+    throw badRequest("趋势年份不能晚于门店当前年份", { field: "trendYear" });
   const settings = await loadSettings(db);
   const rules = await loadMembershipRules(db);
   const rows = await nativeRows(db, timezone, at);
@@ -245,6 +271,18 @@ export async function loadMemberInsights(
     calendar.previousMonthStart,
     calendar.monthStart,
   );
+  const creationMonths = new Map(
+    rows.map((row) => [Number(row.id), row.createdMonth]),
+  );
+  const monthCounts = new Map<string, number>();
+  for (const row of rows) {
+    // Do not count a future-dated creation even within the currently available month.
+    if (Date.parse(row.createdAt) > at.getTime()) continue;
+    monthCounts.set(
+      row.createdMonth,
+      (monthCounts.get(row.createdMonth) ?? 0) + 1,
+    );
+  }
   let matchingIds: Set<number> | null = null;
   if (query.q && rows.length) {
     // Reuse the native matcher (formatted phones, member numbers, and active physical cards).
@@ -265,7 +303,15 @@ export async function loadMemberInsights(
     (m) =>
       (!matchingIds || matchingIds.has(m.id)) &&
       (query.grade === undefined || m.grade === query.grade) &&
-      (query.bucket === undefined || m.dormancyBucket === query.bucket),
+      (query.bucket === undefined ||
+        (query.bucket === "dormant"
+          ? ["threeToSix", "sixToTwelve", "twelvePlus"].includes(
+              m.dormancyBucket,
+            )
+          : m.dormancyBucket === query.bucket)) &&
+      (query.createdMonth === undefined ||
+        (creationMonths.get(m.id) === query.createdMonth &&
+          Date.parse(m.createdAt) <= at.getTime())),
   );
   return {
     members: filtered.slice(query.offset, query.offset + PAGE_SIZE),
@@ -285,6 +331,19 @@ export async function loadMemberInsights(
       label: gradeLabel(rules, grade, null),
       count: all.filter((m) => m.grade === grade).length,
     })),
+    growth: {
+      year: trendYear,
+      months: Array.from({ length: 12 }, (_, index) => {
+        const month = `${trendYear}-${String(index + 1).padStart(2, "0")}`;
+        const available = month <= currentMonth;
+        return {
+          month,
+          count: available ? (monthCounts.get(month) ?? 0) : 0,
+          available,
+        };
+      }),
+    },
+    filteredTotal: filtered.length,
     serverTime: at.toISOString(),
     timezone,
     offset: query.offset,

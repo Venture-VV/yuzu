@@ -1,7 +1,7 @@
 // Synthetic fixtures in the dedicated TEST_DATABASE_URL only. No operational database is used.
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readSnapshot } from "../src/server/db";
+import { readSnapshot, type Tx } from "../src/server/db";
 import {
   loadInsightMember,
   loadMemberInsights,
@@ -69,6 +69,19 @@ const insights = (query: unknown = {}) =>
   readSnapshot(ctx.sql, (db) => loadMemberInsights(db, timezone, query, at));
 const detail = (id: number) =>
   readSnapshot(ctx.sql, (db) => loadInsightMember(db, timezone, id, at));
+
+/** Extra date-boundary fixtures never leak into another test's population. */
+async function withRolledBackFixtures(body: (db: Tx) => Promise<void>) {
+  const rollback = new Error("rollback synthetic insight fixtures");
+  try {
+    await ctx.sql.begin(async (db) => {
+      await body(db);
+      throw rollback;
+    });
+  } catch (error) {
+    if (error !== rollback) throw error;
+  }
+}
 
 describe("concierge all-native member insights", () => {
   beforeAll(async () => {
@@ -258,8 +271,10 @@ describe("concierge all-native member insights", () => {
     const first = await insights({ q: "分页会员" }),
       second = await insights({ q: "分页会员", offset: 50 });
     expect(first.members).toHaveLength(50);
+    expect(first.filteredTotal).toBe(51);
     expect(first.hasMore).toBe(true);
     expect(second.members).toHaveLength(1);
+    expect(second.filteredTotal).toBe(51);
     expect(second.hasMore).toBe(false);
     expect(
       new Set([...first.members, ...second.members].map((m) => m.id)).size,
@@ -285,6 +300,242 @@ describe("concierge all-native member insights", () => {
     await expect(insights({ q: "\u0000" })).rejects.toMatchObject({
       status: 400,
     });
+  });
+
+  it("returns twelve native-creation months with canonical deduplication, empty months and future availability", async () => {
+    const result = await insights();
+    expect(result.growth.year).toBe(2024);
+    expect(result.growth.months).toHaveLength(12);
+    expect(result.growth.months.slice(0, 4)).toEqual([
+      { month: "2024-01", count: 1, available: true },
+      { month: "2024-02", count: 2, available: true },
+      { month: "2024-03", count: 5, available: true },
+      { month: "2024-04", count: 0, available: false },
+    ]);
+    expect(
+      result.growth.months.slice(3).every((m) => !m.available && m.count === 0),
+    ).toBe(true);
+    for (const month of result.growth.months.filter((m) => m.available)) {
+      const list = await insights({ createdMonth: month.month });
+      expect(list.filteredTotal).toBe(month.count);
+      expect(list.members).toHaveLength(month.count);
+      expect(list.stats).toEqual(result.stats);
+      expect(list.growth).toEqual(result.growth);
+    }
+    expect(result.growth.months[2]!.count).toBe(result.stats.newThisMonth);
+    expect(result.growth.months[1]!.count).toBe(result.stats.newLastMonth);
+    const old = await insights({ trendYear: "2020", createdMonth: "2020-01" });
+    expect(old.filteredTotal).toBe(51);
+    expect(old.growth.months[0]).toEqual({
+      month: "2020-01",
+      count: 51,
+      available: true,
+    });
+    expect(old.growth.months.every((m) => m.available)).toBe(true);
+    expect(old.growth.months.slice(1).every((m) => m.count === 0)).toBe(true);
+    // The merged source was created in 2022, but only its final account's 2024 creation counts.
+    expect(
+      (await insights({ trendYear: "2022", createdMonth: "2022-01" }))
+        .filteredTotal,
+    ).toBe(0);
+    const empty = await insights({
+      trendYear: "1900",
+      createdMonth: "1900-01",
+    });
+    expect(empty.filteredTotal).toBe(0);
+    expect(empty.growth.months.every((m) => m.available && m.count === 0)).toBe(
+      true,
+    );
+  });
+
+  it("uses Shanghai month/year boundaries for creation lists, annual trends and current defaults", async () => {
+    await withRolledBackFixtures(async (db) => {
+      await db`UPDATE members SET created_at='2024-02-29T15:59:59.999Z' WHERE id=${recent}`;
+      await db`UPDATE members SET created_at='2024-02-29T16:00:00Z' WHERE id=${never}`;
+      const february = await loadMemberInsights(
+        db,
+        timezone,
+        { createdMonth: "2024-02" },
+        at,
+      );
+      const march = await loadMemberInsights(
+        db,
+        timezone,
+        { createdMonth: "2024-03" },
+        at,
+      );
+      expect(february.members.map((m) => m.id)).toContain(recent);
+      expect(february.members.map((m) => m.id)).not.toContain(never);
+      expect(february.filteredTotal).toBe(3);
+      expect(march.filteredTotal).toBe(4);
+      expect(march.members.map((m) => m.id)).toContain(never);
+      expect(march.growth.months[1]!.count).toBe(3);
+      expect(march.growth.months[2]!.count).toBe(4);
+
+      await db`UPDATE members SET created_at='2023-12-31T15:59:59.999Z' WHERE id=${recent}`;
+      await db`UPDATE members SET created_at='2023-12-31T16:00:00Z' WHERE id=${never}`;
+      const newYear = new Date("2023-12-31T16:30:00Z");
+      const january = await loadMemberInsights(
+        db,
+        timezone,
+        { createdMonth: "2024-01" },
+        newYear,
+      );
+      const december = await loadMemberInsights(
+        db,
+        timezone,
+        { trendYear: "2023", createdMonth: "2023-12" },
+        newYear,
+      );
+      expect(january.growth.year).toBe(2024);
+      expect(january.members.map((m) => m.id)).toEqual([never]);
+      expect(january.filteredTotal).toBe(1);
+      expect(january.stats.newThisMonth).toBe(1);
+      expect(january.stats.newLastMonth).toBe(1);
+      expect(january.growth.months[0]).toEqual({
+        month: "2024-01",
+        count: 1,
+        available: true,
+      });
+      expect(
+        january.growth.months
+          .slice(1)
+          .every((m) => !m.available && m.count === 0),
+      ).toBe(true);
+      expect(december.members.map((m) => m.id)).toEqual([recent]);
+      expect(december.growth.months[11]).toEqual({
+        month: "2023-12",
+        count: 1,
+        available: true,
+      });
+    });
+  });
+
+  it("combines creation month, search, grade, dormancy and pagination without changing global aggregates", async () => {
+    const baseline = await insights();
+    const first = await insights({
+      q: "分页会员",
+      grade: "0",
+      bucket: "never",
+      createdMonth: "2020-01",
+      offset: 0,
+    });
+    const last = await insights({
+      q: "分页会员",
+      grade: "0",
+      bucket: "never",
+      createdMonth: "2020-01",
+      offset: 50,
+    });
+    const beyond = await insights({
+      q: "分页会员",
+      grade: "0",
+      bucket: "never",
+      createdMonth: "2020-01",
+      offset: 100,
+    });
+    expect(first.filteredTotal).toBe(51);
+    expect(last.filteredTotal).toBe(51);
+    expect(beyond.filteredTotal).toBe(51);
+    expect(first.members).toHaveLength(50);
+    expect(last.members).toHaveLength(1);
+    expect(beyond.members).toEqual([]);
+    expect([first.hasMore, last.hasMore, beyond.hasMore]).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    expect(
+      new Set([...first.members, ...last.members].map((m) => m.id)).size,
+    ).toBe(51);
+    const dormant = await insights({ bucket: "dormant" });
+    expect(dormant.filteredTotal).toBe(baseline.stats.dormantThreeMonths);
+    expect(dormant.members.map((m) => m.id).sort((a, b) => a - b)).toEqual(
+      [three, six, twelve].sort((a, b) => a - b),
+    );
+    expect(
+      dormant.members.every((m) =>
+        ["threeToSix", "sixToTwelve", "twelvePlus"].includes(m.dormancyBucket),
+      ),
+    ).toBe(true);
+    const combined = await insights({
+      q: "满",
+      grade: "0",
+      bucket: "dormant",
+      createdMonth: "2024-01",
+    });
+    expect(combined.members.map((m) => m.id)).toEqual([six]);
+    expect(combined.filteredTotal).toBe(1);
+    for (const result of [first, last, beyond, dormant, combined]) {
+      expect(result.stats).toEqual(baseline.stats);
+      expect(result.dormancyGroups).toEqual(baseline.dormancyGroups);
+      expect(result.tiers).toEqual(baseline.tiers);
+      expect(result.growth).toEqual(baseline.growth);
+    }
+  });
+
+  it("rejects noncanonical or future creation months and trend years rather than silently widening the list", async () => {
+    for (const createdMonth of [
+      "",
+      "all",
+      "2024-1",
+      "2024-00",
+      "2024-13",
+      "2024-02-01",
+      "1899-12",
+      "10000-01",
+      "2024-04",
+      "2025-01",
+      " 2024-03",
+      ["2024-01"],
+    ])
+      await expect(insights({ createdMonth })).rejects.toMatchObject({
+        status: 400,
+      });
+    for (const trendYear of [
+      "",
+      "all",
+      "24",
+      "2024.0",
+      "2e3",
+      "1899",
+      "10000",
+      "2025",
+      " 2024",
+      ["2024"],
+    ])
+      await expect(insights({ trendYear })).rejects.toMatchObject({
+        status: 400,
+      });
+    for (const query of [
+      "createdMonth=2024-13",
+      "createdMonth=9999-12",
+      "trendYear=9999",
+      "trendYear=2024.0",
+    ])
+      expect(
+        (
+          await api(
+            ctx.app,
+            butler,
+            "GET",
+            `/api/concierge/member-insights?${query}`,
+          )
+        ).status,
+      ).toBe(400);
+    const response = await api<MemberInsights>(
+      ctx.app,
+      butler,
+      "GET",
+      "/api/concierge/member-insights?createdMonth=2024-02&trendYear=2024",
+    );
+    expect(response.status).toBe(200);
+    expect(response.body.filteredTotal).toBe(2);
+    expect(
+      response.body.members.map((m) => m.id).sort((a, b) => a - b),
+    ).toEqual([one, three].sort((a, b) => a - b));
+    expect(response.body.growth.year).toBe(2024);
+    expect(response.body.growth.months).toHaveLength(12);
   });
 
   it("projects overdue grades and available gifts without financial writes or automatic service enrollment", async () => {
