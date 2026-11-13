@@ -7,12 +7,12 @@ import { shiftDate } from '@shared/labels';
 import { channelLabel } from '@shared/members';
 import { gradeLabel } from '@shared/membership';
 import { can } from '@shared/permissions';
-import { MAX_REPORT_DAYS, type DepartmentRevenue, type DutyExtras, type ExecutiveReport, type MemberBrief, type MembersReport, type PeriodKpis } from '@shared/reports';
+import { departmentItemTable, MAX_REPORT_DAYS, sharePercent, type DepartmentItem, type DepartmentRevenue, type DutyExtras, type ExecutiveReport, type MemberBrief, type MembersReport, type PeriodKpis } from '@shared/reports';
 import type { RoomBoardStatus, RoomsReport } from '@shared/rooms';
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
-import { toCsv, CSV_TYPE, attachment } from '../lib/csv';
+import { toCsv, CSV_TYPE, attachment, csvReply } from '../lib/csv';
 import type { Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
 import { dateSchema, parse } from '../lib/validate';
@@ -174,6 +174,8 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
         OR coalesce(sum(cb.ticket_amount) FILTER (WHERE ${inRange('c.business_date')}), 0) <> coalesce(sum(cb.ticket_amount) FILTER (WHERE ${inRange('c.void_business_date')}), 0)
     ORDER BY count DESC`;
   const lines = await itemLines(db, from, to);
+  // 部门 × 项目明细（8.0.15）：就是这一份 lines，排好序给页面（分组、小计、占比由 departmentItemTable 算，页面与 CSV 共用）
+  const items: DepartmentItem[] = departmentItemTable(lines).groups.flatMap((g) => g.items.map(({ net: _net, share: _share, ...i }) => i));
   const arrivals = await db<ExecutiveReport['arrivals']>`
     SELECT extract(hour FROM checked_in_at AT TIME ZONE ${c.tz})::int AS hour, count(*)::int AS count
     FROM visits WHERE business_date BETWEEN ${from} AND ${to} AND status <> 'cancelled'
@@ -191,8 +193,43 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
     tickets,
     departments: byCategory(lines),
     topItems: lines.filter((l) => l.category !== '门票' && l.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, 10),
+    items,
     arrivals,
   };
+}
+
+const csvYuan = (c: number) => `${c < 0 ? '-' : ''}${Math.trunc(Math.abs(c) / 100)}.${String(Math.abs(c) % 100).padStart(2, '0')}`;
+
+/**
+ * 部门项目明细的 CSV（8.0.15，docs/ORDERS_V8015.md 第 3 节）：一行一个项目，每个部门后面一行小计，最后一行合计；
+ * 再下面两行是对照用的应收与净营业额（与经营总览上面的数同一次查询），合计行与它们应当一分不差。
+ */
+export async function departmentItemsCsv(db: Db, from: string, to: string, c: Clock): Promise<{ csv: string; rows: number }> {
+  const table = departmentItemTable(await itemLines(db, from, to));
+  const kpis = await periodKpis(db, from, to, c);
+  const line = (category: string, name: string, x: { quantity: number; amount: number; discount: number; refund: number; net: number }, share: string) => [
+    category,
+    name,
+    x.quantity,
+    csvYuan(x.amount),
+    share,
+    csvYuan(x.discount),
+    csvYuan(x.refund),
+    csvYuan(x.net),
+  ];
+  const rows: (string | number)[][] = [['部门', '项目', '销售数量', '销售金额（应收，元）', '占该部门金额比', '优惠（元）', '退款（元）', '净额（元）']];
+  let count = 0;
+  for (const g of table.groups) {
+    for (const i of g.items) {
+      rows.push(line(g.category, i.name, i, sharePercent(i.share)));
+      count += 1;
+    }
+    rows.push(line(g.category, '小计', g, sharePercent(g.amount > 0 ? 1 : null)));
+  }
+  rows.push(line('合计', '', table.total, ''));
+  rows.push([`对照：应收（${from} 至 ${to}）`, '', '', csvYuan(kpis.receivable), '', '', '', '']);
+  rows.push([`对照：净营业额（${from} 至 ${to}）`, '', '', '', '', '', '', csvYuan(kpis.net)]);
+  return { csv: toCsv(rows), rows: count };
 }
 
 const MEMBER_BRIEF = (db: Db) => db`
@@ -402,6 +439,15 @@ export function registerDashboardReportRoutes(app: FastifyInstance, deps: Deps) 
     return readSnapshot(deps.sql, (tx) => executiveReport(tx, from, to, c));
   });
 
+  // 部门项目明细的导出（8.0.15）：时段与权限同经营总览，记审计
+  app.get('/api/reports/executive/items.csv', { preHandler: guard('report.executive') }, async (req, reply) => {
+    const { c, today } = await clockAndToday();
+    const { from, to } = period(req.query, today);
+    const { csv, rows } = await readSnapshot(deps.sql, (tx) => departmentItemsCsv(tx, from, to, c));
+    await writeAudit(deps.sql, { staffId: req.actor.id, action: 'export', targetType: 'executive_items', targetId: `${from}~${to}`, detail: { from, to, rows }, ip: req.ip });
+    return csvReply(reply, `部门项目明细_${from}_${to}.csv`, csv);
+  });
+
   app.get('/api/reports/members', { preHandler: guard('report.members') }, async (req) => {
     const { c, today } = await clockAndToday();
     const { from, to } = period(req.query, today);
@@ -430,7 +476,7 @@ export function registerDashboardReportRoutes(app: FastifyInstance, deps: Deps) 
       lines: await withCommission(tx, await settledTechnicianLines(tx, from, to)),
       techs: await loadTechnicians(tx),
     }));
-    const yuan = (c: number) => `${c < 0 ? '-' : ''}${Math.trunc(Math.abs(c) / 100)}.${String(Math.abs(c) % 100).padStart(2, '0')}`;
+    const yuan = csvYuan;
     await writeAudit(deps.sql, { staffId: req.actor.id, action: 'export', targetType: 'technician_commission', targetId: `${from}~${to}`, ip: req.ip });
     attachment(reply, `技师提成明细_${from}_${to}.csv`, CSV_TYPE);
     return toCsv([

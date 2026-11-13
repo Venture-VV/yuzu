@@ -6,7 +6,7 @@ import { dishBlock, type EmenuBlock, type EmenuDishView, type EmenuPageView, typ
 import { blockLabel, dishAttrs, dishDescription, dishNames, dishTagline, dishUnit, namePair, useLang, useM } from './i18n';
 import { PlusDot } from './icons';
 import { designPoint, FadeImg } from './motion';
-import { box } from './stage';
+import { BIG, box, useBig, ZoomAt } from './stage';
 
 export interface PageCtx {
   /** 这一页所在的分类：封面用它的名字；不在供应时段时整页的菜都标「当前时段不可售」 */
@@ -52,6 +52,9 @@ export function PlusButton({ dish, ctx, block, style }: { dish: EmenuDishView; c
   const lang = useLang();
   const m = useM();
   const disabled = !!block || ctx.preview;
+  // 放大的一档：圆点本身再大一点（连同整块的放大，屏幕上约 21），中心不动
+  const large = useBig();
+  const size = large ? 15 : 12.6;
   return (
     <button
       type="button"
@@ -62,11 +65,11 @@ export function PlusButton({ dish, ctx, block, style }: { dish: EmenuDishView; c
       }}
       aria-label={m.addAria(dishNames(dish, lang).main)}
       className="em-tap"
-      style={{ position: 'relative', width: 12.6, height: 12.6, padding: 0, border: 0, background: 'none', flex: 'none', ...style }}
+      style={{ position: 'relative', width: size, height: size, margin: large ? -1.2 : undefined, padding: 0, border: 0, background: 'none', flex: 'none', ...style }}
       data-testid={`emenu-add-${dish.id}`}
     >
       <span style={{ position: 'absolute', inset: -15.7 }} />
-      <PlusDot muted={!!block} />
+      <PlusDot size={size} muted={!!block} />
     </button>
   );
 }
@@ -96,6 +99,8 @@ export function Photo({
   tint?: boolean;
 }) {
   const lang = useLang();
+  // 放大的一档：压在图上的「已售罄」等字大一档
+  const f = useBig() ? BIG.dish : 1;
   const block = dish ? dishBlock(dish, ctx.open) : null;
   const clickable = !!dish && !ctx.preview && !!ctx.onOpen;
   const why = block ? blockLabel(block, lang) : null;
@@ -121,15 +126,15 @@ export function Photo({
         >
           {why.mainEn ? (
             <>
-              <span className="em-en" style={{ fontSize: 15, lineHeight: '15px' }}>
+              <span className="em-en" style={{ fontSize: 15 * f, lineHeight: `${15 * f}px` }}>
                 {why.main}
               </span>
-              <span style={{ fontSize: 9, lineHeight: '9px', marginTop: 3 }}>{why.sub}</span>
+              <span style={{ fontSize: 9 * f, lineHeight: `${9 * f}px`, marginTop: 3 * f }}>{why.sub}</span>
             </>
           ) : (
             <>
-              <span style={{ fontSize: 16, lineHeight: '16px' }}>{why.main}</span>
-              <span className="em-en" style={{ fontSize: 8, lineHeight: '8px', marginTop: 0.7 }}>
+              <span style={{ fontSize: 16 * f, lineHeight: `${16 * f}px` }}>{why.main}</span>
+              <span className="em-en" style={{ fontSize: 8 * f, lineHeight: `${8 * f}px`, marginTop: 0.7 * f }}>
                 {why.sub}
               </span>
             </>
@@ -167,7 +172,20 @@ function Tagline({ dish }: { dish: EmenuDishView }) {
  * 每行 13；价格（14 号的数字）在介绍最后一行下面 23.6，没有介绍时在 37.4；加号比菜名高 0.9、跟在菜名后面隔 44.2。
  * desc：normal / tight 见上；none 不要介绍。plusAt：加号放在离左边多远（列表里按列对齐）。
  * 切到英文（8.0.13）：英文名为主（14 号、放不下折成两行），中文名在下面一行小字；介绍用英文介绍。
+ *
+ * 放大的一档（8.0.15）：里面的字号不变，整块放大 BIG.dish 倍（菜名 22、介绍 13、价格 20），行与行之间原来留得很宽的空收紧一些；
+ * 位置、宽度用 big 里给的（没给的沿用设计稿的），big.bottom 是文字块的下沿贴在哪条线上（往上长，用在文字下面紧挨着图的版面）。
  */
+export interface BigSpot {
+  x?: number;
+  y?: number;
+  w?: number;
+  bottom?: number;
+  /** 介绍最多几行（默认 4） */
+  lines?: number;
+  plusAt?: number;
+}
+
 export function DishText({
   dish,
   x,
@@ -175,8 +193,9 @@ export function DishText({
   w,
   ctx,
   desc = 'none',
-  plusAt,
+  plusAt: plusAtDesign,
   noteByPrice,
+  big,
 }: {
   dish: EmenuDishView;
   x: number;
@@ -185,6 +204,7 @@ export function DishText({
   ctx: PageCtx;
   desc?: 'normal' | 'tight' | 'none';
   plusAt?: number;
+  big?: BigSpot;
   /** 这道菜在这一页没有图可以压暗：不能点的原因写在价格旁 */
   noteByPrice?: boolean;
 }) {
@@ -195,14 +215,21 @@ export function DishText({
   const intro = dishDescription(dish, lang);
   const showDesc = desc !== 'none' && !!intro.text;
   const clickable = !ctx.preview && !!ctx.onOpen;
-  const nameWidth = plusAt === undefined ? w - 58 : plusAt - 8;
+  const large = useBig();
+  const k = large ? BIG.dish : 1;
+  const at = large ? { x: big?.x ?? x, y: big?.y ?? y, w: big?.w ?? w, bottom: big?.bottom } : { x, y, w, bottom: undefined };
+  const plusAt = large ? (big?.plusAt ?? plusAtDesign) : plusAtDesign;
+  // 里面能用的宽（放大以前的像素）
+  const inner = at.w / k;
+  const nameWidth = plusAt !== undefined ? plusAt - 8 : large ? inner - 30 : w - 58;
+  const gapUnderName = name.sub ? 0 : 8.7;
   return (
     <div
-      className={ctx.flashId === dish.id ? 'em-flash' : undefined}
-      style={{ ...box(x, y, w), opacity: block && noteByPrice ? 0.5 : 1 }}
+      style={{ position: 'absolute', left: at.x, ...(at.bottom === undefined ? { top: at.y } : { bottom: 768 - at.bottom }), width: at.w, opacity: block && noteByPrice ? 0.5 : 1 }}
       data-testid={`emenu-dish-${dish.id}`}
       data-block={block ?? undefined}
     >
+     <div className={ctx.flashId === dish.id ? 'em-flash' : undefined} style={large ? { width: inner, transform: `scale(${k})`, transformOrigin: at.bottom === undefined ? '0 0' : '0 100%' } : undefined}>
       <div style={{ display: 'flex', alignItems: 'flex-start', minHeight: 16, position: 'relative' }}>
         <span
           role={clickable ? 'button' : undefined}
@@ -218,7 +245,7 @@ export function DishText({
           {name.main}
           <Tagline dish={dish} />
         </span>
-        <PlusButton dish={dish} ctx={ctx} block={block} style={plusAt === undefined ? { marginLeft: 44.2, marginTop: -0.9 } : { position: 'absolute', left: plusAt, top: -0.9 }} />
+        <PlusButton dish={dish} ctx={ctx} block={block} style={plusAt === undefined ? { marginLeft: large ? 15 : 44.2, marginTop: -0.9 } : { position: 'absolute', left: plusAt, top: -0.9 }} />
       </div>
       {name.sub &&
         (name.mainEn ? (
@@ -233,17 +260,22 @@ export function DishText({
       {showDesc && (
         <div
           className={intro.en ? 'em-en' : undefined}
-          style={{ fontSize: 9, lineHeight: '13px', letterSpacing: intro.en ? '0.2px' : '0.62px', color: MUTE, marginTop: (desc === 'tight' ? 9 : 24.7) + (name.sub ? 0 : 8.7), maxWidth: 262, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }}
+          style={
+            large
+              ? { fontSize: 9.5, lineHeight: '13.5px', letterSpacing: intro.en ? '0.2px' : '0.5px', color: MUTE, marginTop: (desc === 'tight' ? 9 : 12) + gapUnderName, maxWidth: Math.min(inner, 310), overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: big?.lines ?? 4, WebkitBoxOrient: 'vertical' }
+              : { fontSize: 9, lineHeight: '13px', letterSpacing: intro.en ? '0.2px' : '0.62px', color: MUTE, marginTop: (desc === 'tight' ? 9 : 24.7) + gapUnderName, maxWidth: 262, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical' }
+          }
         >
           {intro.text}
         </div>
       )}
       {spec && (
-        <div style={{ marginTop: showDesc ? 23.6 : 12.7 + (name.sub ? 0 : 8.7), display: 'flex', alignItems: 'baseline' }}>
+        <div style={{ marginTop: large ? (showDesc ? 14 : 10 + gapUnderName) : showDesc ? 23.6 : 12.7 + gapUnderName, display: 'flex', alignItems: 'baseline' }}>
           <Price cents={spec.price} dish={dish} />
           {block && noteByPrice && <BlockNote block={block} />}
         </div>
       )}
+     </div>
     </div>
   );
 }
@@ -262,19 +294,21 @@ export function wrapParen(text: string): string {
 function VerticalTitle({ x, y, title, titleEn }: { x: number; y: number; title: string; titleEn: string }) {
   // 切到英文：英文那一竖用深色、中文用浅色（位置不动）
   const en = useLang() === 'en' && !!titleEn;
+  // 放大的一档：整块绕中文第一个字的左上角放大（x、y 由各版面另给）
+  const k = useBig() ? BIG.row : 1;
   return (
-    <>
+    <ZoomAt x={x} y={y} k={k}>
       {titleEn && (
-        <div className="em-en" style={{ ...box(x - 19.4, y + 3.4), writingMode: 'vertical-rl', fontSize: 14, lineHeight: '14px', letterSpacing: '0.062em', color: en ? 'var(--em-ink)' : MUTE, whiteSpace: 'nowrap' }}>
+        <div className="em-en" style={{ ...box(-19.4, 3.4), writingMode: 'vertical-rl', fontSize: 14, lineHeight: '14px', letterSpacing: '0.062em', color: en ? 'var(--em-ink)' : MUTE, whiteSpace: 'nowrap' }}>
           {titleEn}
         </div>
       )}
       {title && (
-        <div style={{ ...box(x, y + 4.7), width: 16, fontSize: 16, lineHeight: '16px', wordBreak: 'break-all', textAlign: 'center', color: en ? MUTE : undefined }} data-testid="emenu-vtitle">
+        <div style={{ ...box(0, 4.7), width: 16, fontSize: 16, lineHeight: '16px', wordBreak: 'break-all', textAlign: 'center', color: en ? MUTE : undefined }} data-testid="emenu-vtitle">
           {title}
         </div>
       )}
-    </>
+    </ZoomAt>
   );
 }
 
@@ -302,7 +336,8 @@ function Cover({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
           {title.main}
         </div>
       )}
-      {d && <DishText dish={d} x={40} y={344} w={420} ctx={ctx} desc="normal" noteByPrice={noteIfNoImage(d, d.imageUrl)} />}
+      {/* 放大的一档：文字的下沿贴在特写图上面 24（往上长） */}
+      {d && <DishText dish={d} x={40} y={344} w={420} ctx={ctx} desc="normal" noteByPrice={noteIfNoImage(d, d.imageUrl)} big={{ bottom: 485, w: 429 }} />}
       <Photo url={d?.detailUrl ?? null} x={40} y={509.1} w={429.1} h={218.9} dish={d ?? null} ctx={ctx} label="特写图" />
       <Photo url={d?.imageUrl ?? null} x={555.5} y={133.8} w={428.5} h={594.2} dish={d ?? null} ctx={ctx} label="餐品展示" />
     </>
@@ -311,19 +346,23 @@ function Cover({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
 
 function ListImage({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
   const first: Slot = page.dishes.find((d) => d);
+  const large = useBig();
   const cols = [
     { x: 636.9, plus: 120 },
     { x: 823.8, plus: 142 },
   ];
   const rows = [257.7, 350.9, 443];
+  // 放大的一档：小标题与两列往左挪（图右边到页边的空都用上），三行拉开
+  const bigCols = [566, 778];
+  const bigRows = [256, 392, 528];
   return (
     <>
       <Photo url={first?.imageUrl ?? null} x={40} y={133.8} w={428.5} h={594.2} dish={first ?? null} ctx={ctx} label="餐品展示" />
-      <VerticalTitle x={577.4} y={254} title={page.title} titleEn={page.titleEn} />
+      <VerticalTitle x={large ? 524 : 577.4} y={large ? 252 : 254} title={page.title} titleEn={page.titleEn} />
       {page.dishes.slice(0, 6).map((d, i) => {
         if (!d) return null;
         const col = cols[i % 2]!;
-        return <DishText key={d.id} dish={d} x={col.x} y={rows[Math.floor(i / 2)]!} w={170} ctx={ctx} plusAt={col.plus} noteByPrice />;
+        return <DishText key={d.id} dish={d} x={col.x} y={rows[Math.floor(i / 2)]!} w={170} ctx={ctx} plusAt={col.plus} noteByPrice big={{ x: bigCols[i % 2]!, y: bigRows[Math.floor(i / 2)]!, w: 206, plusAt: 132 }} />;
       })}
     </>
   );
@@ -332,11 +371,22 @@ function ListImage({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
 function SingleWide({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
   const d: Slot = page.dishes[0];
   const intro = d ? dishDescription(d, useLang()) : null;
+  const large = useBig();
   return (
     <>
       <Photo url={d?.imageUrl ?? null} x={40} y={133.8} w={944} h={359.6} dish={d ?? null} ctx={ctx} label="餐品展示" />
-      {d && <DishText dish={d} x={39.7} y={525.8} w={420} ctx={ctx} noteByPrice={noteIfNoImage(d, d.imageUrl)} />}
-      {intro?.text && (
+      {d && <DishText dish={d} x={39.7} y={525.8} w={420} ctx={ctx} noteByPrice={noteIfNoImage(d, d.imageUrl)} big={{ y: 522, w: 440 }} />}
+      {intro?.text && large && (
+        <ZoomAt x={512} y={520} k={BIG.dish}>
+          <div
+            className={intro.en ? 'em-en' : undefined}
+            style={{ width: 337, fontSize: 9.5, lineHeight: '13.5px', letterSpacing: intro.en ? '0.2px' : '0.5px', color: MUTE, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical' }}
+          >
+            {intro.text}
+          </div>
+        </ZoomAt>
+      )}
+      {intro?.text && !large && (
         <div
           className={intro.en ? 'em-en' : undefined}
           style={{ ...box(512, 523.4, 392), fontSize: 9, lineHeight: '13px', letterSpacing: intro.en ? '0.2px' : '0.62px', color: MUTE, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical' }}
@@ -354,7 +404,7 @@ function SingleLeft({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
     <>
       <Photo url={d?.imageUrl ?? null} x={40} y={133.8} w={428.5} h={594.2} dish={d ?? null} ctx={ctx} label="餐品展示" />
       <Photo url={d?.detailUrl ?? null} x={812.4} y={133.8} w={171.6} h={203.1} dish={d ?? null} ctx={ctx} label="特写图" />
-      {d && <DishText dish={d} x={554.9} y={464.5} w={420} ctx={ctx} desc="normal" noteByPrice={noteIfNoImage(d, d.imageUrl)} />}
+      {d && <DishText dish={d} x={554.9} y={464.5} w={420} ctx={ctx} desc="normal" noteByPrice={noteIfNoImage(d, d.imageUrl)} big={{ y: 440, w: 429 }} />}
     </>
   );
 }
@@ -363,7 +413,7 @@ function SingleRight({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
   const d: Slot = page.dishes[0];
   return (
     <>
-      {d && <DishText dish={d} x={210.9} y={275.2} w={330} ctx={ctx} desc="normal" noteByPrice={noteIfNoImage(d, d.imageUrl)} />}
+      {d && <DishText dish={d} x={210.9} y={275.2} w={330} ctx={ctx} desc="normal" noteByPrice={noteIfNoImage(d, d.imageUrl)} big={{ x: 130, y: 250, w: 400 }} />}
       <Photo url={d?.detailUrl ?? null} x={40} y={524.9} w={171.6} h={203.1} dish={d ?? null} ctx={ctx} label="特写图" />
       <Photo url={d?.imageUrl ?? null} x={555.5} y={133.8} w={428.5} h={594.2} dish={d ?? null} ctx={ctx} label="餐品展示" />
     </>
@@ -375,8 +425,9 @@ function DuoStagger({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
   return (
     <>
       <Photo url={a?.imageUrl ?? null} x={40} y={133.8} w={429.1} h={296.7} dish={a ?? null} ctx={ctx} label="餐品展示" />
-      {a && <DishText dish={a} x={40} y={464.6} w={420} ctx={ctx} desc="normal" noteByPrice={noteIfNoImage(a, a.imageUrl)} />}
-      {b && <DishText dish={b} x={640.7} y={182.9} w={343} ctx={ctx} desc="normal" noteByPrice={noteIfNoImage(b, b.imageUrl)} />}
+      {a && <DishText dish={a} x={40} y={464.6} w={420} ctx={ctx} desc="normal" noteByPrice={noteIfNoImage(a, a.imageUrl)} big={{ y: 458, w: 429 }} />}
+      {/* 放大的一档：第二道的文字下沿贴在它的图上面 24（往上长），介绍最多 3 行 */}
+      {b && <DishText dish={b} x={640.7} y={182.9} w={343} ctx={ctx} desc="normal" noteByPrice={noteIfNoImage(b, b.imageUrl)} big={{ bottom: 313, lines: 3 }} />}
       <Photo url={b?.imageUrl ?? null} x={640.8} y={337} w={343.2} h={391} dish={b ?? null} ctx={ctx} label="餐品展示" />
     </>
   );
@@ -388,8 +439,8 @@ function DuoRow({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
     <>
       <Photo url={a?.imageUrl ?? null} x={40} y={165.1} w={386.2} h={359.6} dish={a ?? null} ctx={ctx} label="餐品展示" />
       <Photo url={b?.imageUrl ?? null} x={426.2} y={165.1} w={557.8} h={359.6} dish={b ?? null} ctx={ctx} label="餐品展示" tint />
-      {a && <DishText dish={a} x={39.7} y={557.1} w={370} ctx={ctx} noteByPrice={noteIfNoImage(a, a.imageUrl)} />}
-      {b && <DishText dish={b} x={426.2} y={557.1} w={420} ctx={ctx} noteByPrice={noteIfNoImage(b, b.imageUrl)} />}
+      {a && <DishText dish={a} x={39.7} y={557.1} w={370} ctx={ctx} noteByPrice={noteIfNoImage(a, a.imageUrl)} big={{ y: 552 }} />}
+      {b && <DishText dish={b} x={426.2} y={557.1} w={420} ctx={ctx} noteByPrice={noteIfNoImage(b, b.imageUrl)} big={{ y: 552, w: 540 }} />}
     </>
   );
 }
@@ -398,10 +449,11 @@ function DuoMixed({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
   const [a, b]: Slot[] = page.dishes;
   return (
     <>
-      {a && <DishText dish={a} x={40} y={256.1} w={420} ctx={ctx} desc="tight" noteByPrice={noteIfNoImage(a, a.imageUrl)} />}
+      {/* 放大的一档：第一道的文字下沿贴在它的图上面 24（往上长） */}
+      {a && <DishText dish={a} x={40} y={256.1} w={420} ctx={ctx} desc="tight" noteByPrice={noteIfNoImage(a, a.imageUrl)} big={{ bottom: 344, w: 540 }} />}
       <Photo url={a?.imageUrl ?? null} x={40} y={368.4} w={557.8} h={359.6} dish={a ?? null} ctx={ctx} label="餐品展示" />
       <Photo url={b?.imageUrl ?? null} x={769.5} y={133.8} w={214.5} h={265.6} dish={b ?? null} ctx={ctx} label="餐品展示" />
-      {b && <DishText dish={b} x={769.5} y={431.6} w={214.5} ctx={ctx} desc="tight" noteByPrice={noteIfNoImage(b, b.imageUrl)} />}
+      {b && <DishText dish={b} x={769.5} y={431.6} w={214.5} ctx={ctx} desc="tight" noteByPrice={noteIfNoImage(b, b.imageUrl)} big={{ y: 426 }} />}
     </>
   );
 }
@@ -414,7 +466,7 @@ function TrioRow({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
         return (
           <div key={x}>
             <Photo url={d?.imageUrl ?? null} x={x} y={165.1} w={257.6} h={343.9} dish={d ?? null} ctx={ctx} label="餐品展示" />
-            {d && <DishText dish={d} x={x} y={542.1} w={257.6} ctx={ctx} noteByPrice={noteIfNoImage(d, d.imageUrl)} />}
+            {d && <DishText dish={d} x={x} y={542.1} w={257.6} ctx={ctx} noteByPrice={noteIfNoImage(d, d.imageUrl)} big={{ y: 536 }} />}
           </div>
         );
       })}
@@ -435,7 +487,7 @@ function TrioMixed({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
         return (
           <div key={s.x}>
             <Photo url={d?.imageUrl ?? null} x={s.x} y={133.8} w={s.w} h={s.h} dish={d ?? null} ctx={ctx} label="餐品展示" />
-            {d && <DishText dish={d} x={s.x} y={s.textY} w={s.w} ctx={ctx} noteByPrice={noteIfNoImage(d, d.imageUrl)} />}
+            {d && <DishText dish={d} x={s.x} y={s.textY} w={s.w} ctx={ctx} noteByPrice={noteIfNoImage(d, d.imageUrl)} big={{ y: s.textY - 6 }} />}
           </div>
         );
       })}
@@ -456,8 +508,11 @@ function TextRow({ dish, x, y, ctx }: { dish: EmenuDishView; x: number; y: numbe
   const why = block ? blockLabel(block, lang) : null;
   const clickable = !ctx.preview && !!ctx.onOpen;
   const open = clickable ? (e: { currentTarget: Element }) => ctx.onOpen!(dish, designPoint(e.currentTarget)) : undefined;
+  // 放大的一档：这一行整块放大（x、y 由 ListText 另给）
+  const k = useBig() ? BIG.row : 1;
   return (
-    <div className={ctx.flashId === dish.id ? 'em-flash' : undefined} style={{ ...box(x, y, 232, 74), opacity: block ? 0.5 : 1 }} data-testid={`emenu-dish-${dish.id}`} data-block={block ?? undefined}>
+    <div style={{ ...box(x, y, 232 * k, 74 * k), opacity: block ? 0.5 : 1 }} data-testid={`emenu-dish-${dish.id}`} data-block={block ?? undefined}>
+     <div className={ctx.flashId === dish.id ? 'em-flash' : undefined} style={{ ...box(0, 0, 232, 74), transform: k === 1 ? undefined : `scale(${k})`, transformOrigin: '0 0' }}>
       {name.mainEn ? (
         <div style={{ width: 186 }}>
           <div
@@ -506,6 +561,7 @@ function TextRow({ dish, x, y, ctx }: { dish: EmenuDishView; x: number; y: numbe
       )}
       {spec && <Price cents={spec.price} dish={dish} style={{ ...box(196.2, 0.6) }} />}
       <PlusButton dish={dish} ctx={ctx} block={block} style={{ position: 'absolute', left: 206.3, top: 37.2 }} />
+     </div>
     </div>
   );
 }
@@ -514,10 +570,13 @@ function TextRow({ dish, x, y, ctx }: { dish: EmenuDishView; x: number; y: numbe
 const TEXT_ROWS = [174.6, 264.2, 354.1, 444, 534];
 
 function ListText({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
+  const large = useBig();
+  // 放大的一档：小标题与两列往左挪（左边原来空着的一大块用上），5 行的间隔从 90 拉到 112
+  const at = (i: number) => (large ? { x: i % 2 === 0 ? 296 : 660, y: 150 + Math.floor(i / 2) * 112 } : { x: i % 2 === 0 ? 403.7 : 755.1, y: TEXT_ROWS[Math.floor(i / 2)]! });
   return (
     <>
-      <VerticalTitle x={307.8} y={169.9} title={page.title} titleEn={page.titleEn} />
-      {page.dishes.slice(0, 10).map((d, i) => (d ? <TextRow key={d.id} dish={d} x={i % 2 === 0 ? 403.7 : 755.1} y={TEXT_ROWS[Math.floor(i / 2)]!} ctx={ctx} /> : null))}
+      <VerticalTitle x={large ? 236 : 307.8} y={large ? 156 : 169.9} title={page.title} titleEn={page.titleEn} />
+      {page.dishes.slice(0, 10).map((d, i) => (d ? <TextRow key={d.id} dish={d} x={at(i).x} y={at(i).y} ctx={ctx} /> : null))}
     </>
   );
 }

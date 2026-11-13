@@ -110,6 +110,9 @@ async function prepareByApi(page: Page) {
     serveOptions: ['即起', '慢起'],
     idleMinutes: 10,
     offHours: 'hide',
+    // 这一条走的是「要点单密码」「设计稿原样」的一套（8.0.15 起默认是不要密码、放大）；默认的那一套另有用例
+    requirePin: true,
+    textSize: 'design',
   });
   const dishId = (name: string) => admin.dishes.find((x) => x.name === name)!.id;
   return { itemId, dishId, hadCategory: !!cat, tables: admin.tables };
@@ -133,8 +136,8 @@ async function prepareTablet(page: Page): Promise<{ id: number; temporaryPasswor
 const tabletContext = (browser: Browser, baseURL: string | undefined) =>
   browser.newContext({ baseURL, viewport: { width: 1024, height: 768 }, hasTouch: true, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
 
-/** 合成的菜单（只读用例用，代替接口）：两个分类，一页「两菜 · 并排」、一页「分类封面」 */
-function syntheticMenu(): EmenuMenu {
+/** 合成的菜单（只读用例用，代替接口）：两个分类，一页「两菜 · 并排」、一页「分类封面」。默认是「要点单密码」「设计稿原样」，rules 可以改 */
+function syntheticMenu(rules: Partial<EmenuMenu['rules']> = {}): EmenuMenu {
   const dish = (id: number, name: string, nameEn: string, price: number) => ({
     id,
     name,
@@ -155,7 +158,7 @@ function syntheticMenu(): EmenuMenu {
     serverTime: new Date().toISOString(),
     businessDate: '2026-11-11',
     enabled: true,
-    rules: { footerText: 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED', avoidOptions: ['不加香菜'], serveOptions: ['即起'], idleMinutes: 0, offHours: 'hide', langSwitch: true, optionsEn: {}, motion: true, coverUrl: null },
+    rules: { footerText: 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED', avoidOptions: ['不加香菜'], serveOptions: ['即起'], idleMinutes: 0, offHours: 'hide', langSwitch: true, optionsEn: {}, motion: true, requirePin: true, textSize: 'design', coverUrl: null, ...rules },
     categories: [
       { id: 1, name: '西式午餐', nameEn: 'WESTERN LUNCH', window: null, open: true, pages: [{ layout: 'duo_row', title: '', titleEn: '', dishes: [dish(1, '温泉蛋黑松露奶油意粉', 'Hot Spring Egg And Black Truffle Cream Spaghetti', 4200), dish(2, '和牛牛肉汉堡', 'Wagyu Beef Burger', 4200)] }] },
       { id: 2, name: '中式午餐', nameEn: 'CHINESE LUNCH', window: null, open: true, pages: [{ layout: 'cover', title: '', titleEn: '', dishes: [dish(3, '广式猪脚姜浸花胶', 'Cantonese Pork Trotter Ginger Vinegar Fish Maw', 4200)] }] },
@@ -934,5 +937,178 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await noScroll(page);
     expect(writes).toEqual([]);
     await clearEmenuStorage(page);
+  });
+
+  test('8.0.15 默认的一档：字与按钮放大、整页仍不出滚动条；不要点单密码——核对手牌桌号后直接下单，没有答复时重新提交、作废也不要密码（合成菜单，只读）', async ({ page }, info) => {
+    test.skip(info.project.name !== '门店电脑', '这一条自己把窗口定成 1024×768，与项目的屏幕尺寸无关，只跑一次');
+    await page.setViewportSize({ width: 1024, height: 768 });
+    // 后台什么都没改过时平板取到的就是这一套：不要密码、放大
+    const menu = syntheticMenu({ requirePin: false, textSize: 'large' });
+    const guest = { visitId: 1, tagCode: 'A8060', ordered: [], orderedTotal: 0 };
+    const seen = { posts: [] as Record<string, unknown>[], abandons: [] as unknown[] };
+    let mode: 'ok' | 'drop' = 'ok';
+    await page.route('**/api/emenu/**', async (route) => {
+      const req = route.request();
+      const url = new URL(req.url());
+      if (url.pathname === '/api/emenu/menu') return route.fulfill({ json: menu });
+      if (url.pathname === '/api/emenu/guest') return route.fulfill({ json: guest });
+      if (url.pathname === '/api/emenu/table') return route.fulfill({ json: { tableName: 'A01' } });
+      if (url.pathname === '/api/emenu/orders' && req.method() === 'POST') {
+        const body = req.postDataJSON() as { expectedTotal: number };
+        seen.posts.push(body);
+        if (mode === 'drop') return route.abort('connectionreset');
+        return route.fulfill({ json: { orderNo: 'D0001', tableName: 'A01', guests: 2, total: body.expectedTotal, quantity: 1, waiterName: '一号桌平板', replayed: false, guest } });
+      }
+      if (url.pathname.startsWith('/api/emenu/orders/by-key/')) {
+        if (req.method() === 'GET') return route.fulfill({ json: { found: false, abandoned: false } });
+        seen.abandons.push(req.postDataJSON());
+        return route.fulfill({ json: { found: false, abandoned: true } });
+      }
+      return route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: '没有' } } });
+    });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await loginStaff(page, 'linlan');
+    await clearEmenuStorage(page);
+    await page.goto('/emenu');
+    await expect(page.getByTestId('emenu')).toHaveAttribute('data-size', 'large');
+    const box = async (testId: string) => (await page.getByTestId(testId).boundingBox())!;
+
+    // 输入信息的弹窗：绕屏幕正中放大 1.3 倍（429 × 501 → 558 × 651），整个在屏幕里
+    await page.getByTestId('emenu-start').click();
+    const ask = await box('emenu-ask');
+    expect(ask.width).toBeCloseTo(429.1 * 1.3, 0);
+    expect(ask.height).toBeCloseTo(500.6 * 1.3, 0);
+    expect(ask.x + ask.width / 2).toBeCloseTo(512, 0);
+    expect(ask.y).toBeGreaterThan(40);
+    expect(ask.y + ask.height).toBeLessThan(728);
+    expect((await box('emenu-key-1')).width).toBeCloseTo(59.5 * 1.3, 0);
+    for (const d of '8060') await page.getByTestId(`emenu-key-${d}`).click();
+    await page.getByTestId('emenu-field-table').click();
+    await page.getByTestId('emenu-key-clear').click();
+    for (const d of '01') await page.getByTestId(`emenu-key-${d}`).click();
+    await page.getByTestId('emenu-field-guests').click();
+    await page.getByTestId('emenu-key-2').click();
+    await page.getByTestId('emenu-ask-go').click();
+    await expect(page.getByTestId('emenu-header')).toBeVisible();
+
+    // 菜单页：菜名 16 → 22 号、加号 12.6 → 21、手牌色块 22 → 29 高，右边仍贴在 984；整页不出滚动条
+    const fontPx = (testId: string) => page.getByTestId(testId).evaluate((el) => (el.getBoundingClientRect().height / (el as HTMLElement).offsetHeight) * parseFloat(getComputedStyle(el).fontSize));
+    expect(await fontPx('emenu-name-1')).toBeCloseTo(16 * 1.4, 0);
+    const plus = await box('emenu-add-1');
+    expect(plus.width).toBeCloseTo(15 * 1.4, 0);
+    const tagPill = await box('emenu-tag');
+    expect(tagPill.height).toBeCloseTo(22.3 * 1.3, 0);
+    expect(tagPill.x + tagPill.width).toBeCloseTo(984, 0);
+    const search = await box('emenu-search-open');
+    const order = await box('emenu-order-open');
+    expect(search.width).toBeCloseTo(20.5 * 1.3, 0);
+    // 顶栏右边几样不叠在一起
+    const lang = await box('emenu-lang');
+    expect(lang.x + lang.width).toBeLessThan(search.x - 8);
+    expect(search.x + search.width).toBeLessThan(order.x - 8);
+    expect(order.x + order.width).toBeLessThan(tagPill.x - 8);
+    // 两道菜的文字都在页面里、互不压着，也不压图
+    const d1 = await box('emenu-name-1');
+    const d2 = await box('emenu-name-2');
+    const photo1 = await box('emenu-photo-1');
+    expect(d1.y).toBeGreaterThan(photo1.y + photo1.height);
+    expect(d1.x + d1.width).toBeLessThan(d2.x);
+    expect(d2.x + d2.width).toBeLessThan(984);
+    await noScroll(page);
+    // 分类封面：文字的下沿在特写图上面（往上长），上沿在大标题下面
+    await page.getByTestId('emenu-cat-2').click();
+    const title = await box('emenu-cover-title');
+    const name3 = await box('emenu-name-3');
+    const add3 = await box('emenu-add-3');
+    expect(name3.y).toBeGreaterThan(title.y + title.height);
+    expect(add3.y + add3.height).toBeLessThan(485);
+
+    // 菜品详情：卡片 200 高（原来 153）、贴着底边留 40，加号按钮 71 × 27 → 92 × 35
+    await page.getByTestId('emenu-photo-3').last().click();
+    const card = await box('emenu-detail-card');
+    expect(card.height).toBeCloseTo(200, 0);
+    expect(card.y + card.height).toBeCloseTo(728, 0);
+    const add = await box('emenu-detail-add');
+    expect(add.width).toBeCloseTo(70.9 * 1.3, 0);
+    expect(add.x + add.width).toBeLessThan(card.x + card.width);
+    expect(add.y + add.height).toBeLessThan(card.y + card.height);
+    expect((await box('emenu-detail-close')).width).toBeCloseTo(42, 0);
+    await page.getByTestId('emenu-detail-add').click();
+    await page.getByTestId('emenu-detail-close').click();
+
+    // 搜索：框宽 689 → 896，居中
+    await page.getByTestId('emenu-search-open').click();
+    const bar = await box('emenu-search');
+    expect(bar.width).toBeCloseTo(689 * 1.3, 0);
+    // 设计稿里搜索框的中心在 510.9（不是正中的 512），放大以后照旧
+    expect(Math.abs(bar.x + bar.width / 2 - 512)).toBeLessThan(2);
+    await page.getByTestId('emenu-search-input').fill('汉堡');
+    const hit = await box('emenu-search-hit-2');
+    expect(hit.height).toBeCloseTo(34.2 * 1.3, 0);
+    await page.keyboard.press('Escape');
+
+    // 订单抽屉：宽 426 → 532、右边贴着屏幕边，按钮与下面那行字都在屏幕里；按钮上不写「请呼叫服务员」
+    await page.getByTestId('emenu-order-open').click();
+    const drawer = await box('emenu-drawer');
+    expect(drawer.width).toBeCloseTo(425.7 * 1.25, 0);
+    expect(drawer.x + drawer.width).toBeCloseTo(1024, 0);
+    const submit = page.getByTestId('emenu-submit');
+    await expect(submit).toHaveText('下单');
+    const submitBox = (await submit.boundingBox())!;
+    expect(submitBox.height).toBeCloseTo(28.3 * 1.25, 0);
+    const note = await box('emenu-cart-note');
+    expect(note.y + note.height).toBeLessThan(768);
+    expect((await box('emenu-plus-9003')).width).toBeCloseTo(18 * 1.25, 0);
+
+    // 确认信息：没有密码那一项；点「下单」直接发出去，请求里的密码是空的
+    await submit.click();
+    const confirm = page.getByTestId('emenu-confirm');
+    await expect(confirm.getByTestId('emenu-field-tag')).toHaveAttribute('data-value', 'A8060');
+    await expect(confirm.getByTestId('emenu-field-guests')).toHaveAttribute('data-value', '2');
+    await expect(confirm.getByTestId('emenu-field-pin')).toHaveCount(0);
+    // 哪一项都没选中：碰到键盘不会把带出来的手牌改掉
+    await confirm.getByTestId('emenu-key-7').click();
+    await expect(confirm.getByTestId('emenu-field-tag')).toHaveAttribute('data-value', 'A8060');
+    await expect(confirm.getByTestId('emenu-field-guests')).toHaveAttribute('data-value', '2');
+    await page.getByTestId('emenu-confirm-go').click();
+    await expect(page.getByTestId('emenu-success')).toBeVisible();
+    expect(seen.posts).toHaveLength(1);
+    expect(seen.posts[0]).toMatchObject({ tagCode: 'A8060', tableName: 'A01', guests: 2, pin: '' });
+    await expect(page.getByTestId('emenu-success')).toBeHidden({ timeout: 10_000 });
+
+    // 没有答复：「结果待确认」里没有密码、没有数字键盘，三个按钮直接能点；作废的请求里也没有密码
+    mode = 'drop';
+    await page.getByTestId('emenu-add-3').click();
+    await page.getByTestId('emenu-order-open').click();
+    await submit.click();
+    await page.getByTestId('emenu-confirm-go').click();
+    const pendingModal = page.getByTestId('emenu-pending');
+    await expect(pendingModal).toBeVisible();
+    await expect(pendingModal.getByTestId('emenu-field-pin')).toHaveCount(0);
+    await expect(pendingModal.getByTestId('emenu-key-1')).toHaveCount(0);
+    await expect(pendingModal.getByTestId('emenu-hint')).toContainText('查回结果');
+    await pendingModal.getByTestId('emenu-pending-abandon').click();
+    await expect(pendingModal).toBeHidden();
+    expect(seen.abandons).toEqual([{ pin: '' }]);
+    expect(await page.evaluate(() => localStorage.getItem('yuzu.emenu.pending.v1'))).toBeNull();
+    await expect(page.getByTestId('emenu-cart-9003')).toBeVisible();
+    await noScroll(page);
+    await clearEmenuStorage(page);
+  });
+
+  test('8.0.15 后台设置：有「点单密码」（不要 / 要）与「字与按钮的大小」（放大 / 设计稿原样）两行（只读）', async ({ page }, info) => {
+    test.skip(info.project.name !== '门店电脑', '后台页面，只跑一次');
+    await loginStaff(page, 'linlan');
+    await page.goto('/admin/emenu');
+    await page.getByRole('radio', { name: '设置', exact: true }).click();
+    const settings = page.getByTestId('emenu-admin-settings');
+    const pin = settings.getByRole('radiogroup', { name: '点单密码' });
+    await expect(pin.getByRole('radio', { name: '不要', exact: true })).toBeVisible();
+    await expect(pin.getByRole('radio', { name: '要', exact: true })).toBeVisible();
+    const size = settings.getByRole('radiogroup', { name: '字与按钮的大小' });
+    await expect(size.getByRole('radio', { name: '放大' })).toBeVisible();
+    await expect(size.getByRole('radio', { name: '设计稿原样' })).toBeVisible();
+    // 不要密码时的提醒写在这一行
+    await expect(settings).toContainText('平板请交给服务员或放在看得到的地方');
   });
 });

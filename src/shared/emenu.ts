@@ -30,7 +30,19 @@ export interface EmenuRules {
   optionsEn: Record<string, string>;
   /** 动效（EN12）：true 丰富（默认），false 简洁（老平板卡的时候用）；系统「减少动态效果」时总是简洁 */
   motion: boolean;
+  /**
+   * 点单密码（8.0.15，EM1）：true 下单、重新提交、作废都要服务员输 6 位点单密码，经办人记这位服务员；
+   * false（默认）不要密码，核对手牌与桌号后直接下单，经办人记这台平板登录的账号。
+   */
+  requirePin: boolean;
+  /**
+   * 平板上的字与按钮（8.0.15，EM3）：large 放大（默认，字、加号、顶栏、抽屉、弹窗都大一档，位置重新排过）；
+   * design 设计稿原样（设计师量的像素，字小）。
+   */
+  textSize: EmenuTextSize;
 }
+
+export type EmenuTextSize = 'large' | 'design';
 
 export const DEFAULT_EMENU_RULES: EmenuRules = {
   enabled: false,
@@ -43,6 +55,8 @@ export const DEFAULT_EMENU_RULES: EmenuRules = {
   langSwitch: true,
   optionsEn: {},
   motion: true,
+  requirePin: false,
+  textSize: 'large',
 };
 
 /** 点单密码：6 位数字（设计稿「密码 ******」） */
@@ -335,7 +349,7 @@ export interface EmenuMenu {
   businessDate: string;
   /** 平板点餐与餐饮功能都开着 */
   enabled: boolean;
-  rules: Pick<EmenuRules, 'footerText' | 'avoidOptions' | 'serveOptions' | 'idleMinutes' | 'offHours' | 'langSwitch' | 'optionsEn' | 'motion'> & { coverUrl: string | null };
+  rules: Pick<EmenuRules, 'footerText' | 'avoidOptions' | 'serveOptions' | 'idleMinutes' | 'offHours' | 'langSwitch' | 'optionsEn' | 'motion' | 'requirePin' | 'textSize'> & { coverUrl: string | null };
   /** 现在显示的分类（按排序；不在时段的只有设置成「显示」时才在） */
   categories: EmenuCategoryView[];
   /** 不在时段、没显示出来的分类（没有分类可点时告诉客人什么时候供应） */

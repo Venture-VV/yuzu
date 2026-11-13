@@ -22,6 +22,35 @@ interface StageInfo {
   animated: boolean;
 }
 
+/**
+ * 字与按钮放大的一档（8.0.15，docs/EMENU.md 第 12 节）：后台「电子菜单 → 设置 → 字与按钮的大小」是「放大」时为 true。
+ * 各处里面仍照设计稿的像素写，外面套一层按倍数放大、位置重新排；「设计稿原样」时为 false，与 8.0.14 一模一样。
+ * 后台的版面预览不在舞台里，自己用 BigProvider 给。
+ */
+const BigContext = createContext(false);
+export const BigProvider = BigContext.Provider;
+export const useBig = () => useContext(BigContext);
+
+/** 放大那一档各处用的倍数 */
+export const BIG = {
+  /** 菜单页上一道菜的文字（菜名、英文名、介绍、价格、加号） */
+  dish: 1.4,
+  /** 文字陈列的一行、竖排小标题 */
+  row: 1.35,
+  /** 顶栏右边的几样（中 | EN、搜索、订单、手牌）、菜品详情的卡片、搜索框、弹窗、提示条 */
+  ui: 1.3,
+  /** 右侧抽屉（订单、备注） */
+  drawer: 1.25,
+} as const;
+
+/**
+ * 放大的一块：里面照设计稿的像素写，整块绕 (x, y) 这个点放大 k 倍。里面的元素相对这个点定位（可以是负数）。
+ * 自己不占位置、不挡点按；k = 1 时等于没套。
+ */
+export function ZoomAt({ x, y, k, children, style }: { x: number; y: number; k: number; children: ReactNode; style?: CSSProperties }) {
+  return <div style={{ position: 'absolute', left: x, top: y, width: 0, height: 0, transform: k === 1 ? undefined : `scale(${k})`, transformOrigin: '0 0', ...style }}>{children}</div>;
+}
+
 const StageContext = createContext<StageInfo>({ scale: 1, visible: STAGE_H, keyboard: false, animated: false });
 export const useStage = () => useContext(StageContext);
 /** 现在缩放到多少倍（把屏幕上的距离换算回设计稿的像素用） */
@@ -41,7 +70,21 @@ function readViewport(lastEditAt: number): ViewportNow {
 
 const INITIAL: StageLayout = { scale: 1, left: 0, top: 0, shift: 0, visible: STAGE_H, keyboard: false };
 
-export function Stage({ children, testId, motion = true, lang = 'zh' }: { children: ReactNode; testId?: string; motion?: boolean; /** 现在的语言：切到英文时整页的字默认用英文字体（emenu.css） */ lang?: 'zh' | 'en' }) {
+export function Stage({
+  children,
+  testId,
+  motion = true,
+  lang = 'zh',
+  big = false,
+}: {
+  children: ReactNode;
+  testId?: string;
+  motion?: boolean;
+  /** 现在的语言：切到英文时整页的字默认用英文字体（emenu.css） */
+  lang?: 'zh' | 'en';
+  /** 字与按钮放大的一档（后台设置；菜单还没取到时不放大） */
+  big?: boolean;
+}) {
   const stable = useRef<StableSize | null>(null);
   const lastEditAt = useRef(0);
   const stageEl = useRef<HTMLDivElement>(null);
@@ -97,12 +140,14 @@ export function Stage({ children, testId, motion = true, lang = 'zh' }: { childr
   const animated = motion && !reduce;
   return (
     <StageContext.Provider value={{ scale: layout.scale, visible: layout.visible, keyboard: layout.keyboard, animated }}>
+      <BigContext.Provider value={big}>
       <div
         className="emenu"
         // 高度写成稳定的那个数（不用 inset: 0）：键盘把窗口压矮时这一层不跟着变矮，舞台不会被挤
         style={{ position: 'fixed', left: 0, top: 0, width: '100%', height: height ?? '100%', overflow: 'hidden', background: 'var(--em-bg)' }}
         data-motion={animated ? undefined : 'off'}
         data-lang={lang}
+        data-size={big ? 'large' : 'design'}
         data-keyboard={layout.keyboard || undefined}
         data-testid={testId}
       >
@@ -127,6 +172,7 @@ export function Stage({ children, testId, motion = true, lang = 'zh' }: { childr
           <div data-emenu-ghosts aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }} />
         </div>
       </div>
+      </BigContext.Provider>
     </StageContext.Provider>
   );
 }

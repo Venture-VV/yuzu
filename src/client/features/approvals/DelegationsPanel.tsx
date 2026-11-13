@@ -10,7 +10,7 @@ import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { formatDateTime } from '../../lib/utils';
+import { formatDateTime, uuid } from '../../lib/utils';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
@@ -107,7 +107,7 @@ function DelegationDialog({ open, onClose }: { open: boolean; onClose: () => voi
   const refresh = useRefreshAfterApproval();
   const toast = useToast();
   const today = session.calendarToday;
-  const [clientKey, setClientKey] = useState(() => crypto.randomUUID());
+  const [clientKey, setClientKey] = useState(() => uuid());
   const [staffId, setStaffId] = useState(session.staff.id);
   const [delegateId, setDelegateId] = useState('');
   const [startsOn, setStartsOn] = useState(today);
@@ -116,7 +116,7 @@ function DelegationDialog({ open, onClose }: { open: boolean; onClose: () => voi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useResetOnOpen(open, () => {
-    setClientKey(crypto.randomUUID());
+    setClientKey(uuid());
     setStaffId(session.staff.id);
     setDelegateId('');
     setStartsOn(today);

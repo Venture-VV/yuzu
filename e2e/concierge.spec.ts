@@ -81,6 +81,72 @@ test("管家仅卡号建档与人工余额留痕，不要求建立企业钱包",
   await expect(member).toContainText("29,999.99");
 });
 
+// ── 8.0.15（docs/ORDERS_V8015.md 第 1 节）──
+// 门店内网用 http://IP 打开时没有 crypto.randomUUID（只在 HTTPS / localhost 下有）；8.0.12 的管家部直接用了它，点「新增会员」没反应。
+// 这里把这个接口拿掉来模拟内网 HTTP：点按钮 1 秒内出录入窗，提交后名单与「在册会员」数马上更新，代录预约、拍消费单同样打得开。
+test("内网 HTTP（没有 crypto.randomUUID）：新增会员 1 秒内弹窗、提交后名单与在册数更新；代录预约、拍消费单打得开；没有相关报错", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "门店电脑", "变更流程只在门店电脑组执行");
+  const problems: string[] = [];
+  page.on("pageerror", (e) => problems.push(String(e)));
+  page.on("console", (m) => {
+    if (m.type() === "error" && /randomUUID|is not a function/i.test(m.text())) problems.push(m.text());
+  });
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, "randomUUID", { value: undefined, configurable: true, writable: true });
+  });
+  await login(page);
+  await page.goto("/concierge");
+  await expect(page.getByRole("heading", { level: 1, name: /^今日工作台/ })).toBeVisible();
+  expect(await page.evaluate(() => typeof (crypto as { randomUUID?: unknown }).randomUUID)).toBe("undefined");
+  const enrolledCard = page.locator(".stat-card", { hasText: "在册会员" });
+  const enrolled = async () => Number(/(\d+)/.exec(await enrolledCard.locator(".stat-value").innerText())?.[1] ?? NaN);
+  const before = await enrolled();
+  expect(Number.isInteger(before)).toBe(true);
+
+  // 新增会员：1 秒内出录入窗，有称呼、联系方式、备注
+  await page.getByRole("button", { name: "新增会员", exact: true }).first().click();
+  let dialog = page.getByRole("dialog", { name: "新建会员档案" });
+  await expect(dialog).toBeVisible({ timeout: 1000 });
+  await expect(dialog.getByRole("textbox", { name: "客户称呼 *", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("textbox", { name: /手机号码/ })).toBeVisible();
+  await expect(dialog.getByRole("textbox", { name: /备注/ })).toBeVisible();
+  const name = "E2E内网会员-" + randomUUID().slice(0, 8);
+  await dialog.getByRole("textbox", { name: "客户称呼 *", exact: true }).fill(name);
+  await dialog.getByRole("textbox", { name: /手机号码/ }).fill("139" + String(Date.now()).slice(-8));
+  await dialog.getByRole("textbox", { name: /备注/ }).fill("喜欢靠窗的位置");
+  await dialog.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  // 「在册会员」数加一；名单里马上有，点开档案里带着备注
+  await expect.poll(enrolled).toBe(before + 1);
+  await enrolledCard.click();
+  await page.getByRole("button", { name: new RegExp(name) }).first().click();
+  const member = page.getByRole("complementary", { name: name + "的会员档案" });
+  await expect(member).toContainText(/会员档案 · \d{6}/);
+  await member.getByText("基本档案", { exact: true }).click();
+  await expect(member).toContainText("喜欢靠窗的位置");
+  // 从档案里代录预约、拍消费单：都能直接关联到这位会员
+  await member.getByRole("button", { name: "录预约", exact: true }).click();
+  dialog = page.getByRole("dialog", { name: "登记新预约" });
+  await expect(dialog).toBeVisible({ timeout: 1000 });
+  await dialog.getByRole("button", { name: "关闭" }).click();
+  await expect(dialog).not.toBeVisible();
+
+  await page.locator(".drawer-scrim").click({ position: { x: 10, y: 10 } });
+  await expect(member).not.toBeVisible();
+
+  // 工作台上的三个入口：新增会员、代录预约、拍消费单
+  await page.getByRole("navigation", { name: "管家业务模块" }).getByRole("button", { name: /工作台/ }).first().click();
+  await page.locator(".quick-actions").getByRole("button", { name: /代录预约/ }).click();
+  dialog = page.getByRole("dialog", { name: "登记新预约" });
+  await expect(dialog).toBeVisible({ timeout: 1000 });
+  await dialog.getByRole("button", { name: "关闭" }).click();
+  await page.locator(".quick-actions").getByRole("button", { name: /拍消费单/ }).click();
+  const capture = page.getByRole("dialog").last();
+  await expect(capture).toBeVisible({ timeout: 1000 });
+  await expect(capture).toContainText(/拍|凭证|小票/);
+  expect(problems).toEqual([]);
+});
+
 // ── 主线整改（docs/HANDOFF_V8012.md）──
 // 合成小票：用页面画一张（不是真实小票），当作拍到的照片
 async function syntheticReceipt(page: Page, number: string): Promise<Buffer> {

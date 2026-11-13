@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { uuid } from "../../lib/utils";
 import type { CatalogItem } from "./types";
 import {
   Check,
@@ -67,7 +68,7 @@ export function CatalogApprovalPanel({
     }
     setWorking(true);
     setError("");
-    operation.current ||= crypto.randomUUID();
+    operation.current ||= uuid();
     try {
       const fresh = await onSave(
         {
@@ -237,7 +238,7 @@ export function CatalogManager({
           .includes(search.toLowerCase())),
   );
   function edit(item?: CatalogItem) {
-    setEditing({ item, key: crypto.randomUUID() });
+    setEditing({ item, key: uuid() });
     setName(item?.name || "");
     setSpec(item?.spec || "");
     setCode(item?.code || "");
@@ -298,7 +299,7 @@ export function CatalogManager({
           packageIncluded: item.packageIncluded,
           active: !item.active,
         },
-        crypto.randomUUID(),
+        uuid(),
       );
     } finally {
       setWorking(false);

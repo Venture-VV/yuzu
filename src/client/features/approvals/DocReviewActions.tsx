@@ -23,6 +23,10 @@ export function ReviewActions({ approval, kind, docNo, urlBase, onDone }: { appr
   // 对话框开着时后台刷新拿到了新的一次提交（撤回、改了再提交又到这一级）或别的级别，就提示关掉重开，
   // 不把这次填的审查清单、意见算到新的提交上（Codex 自动审查 e426148）
   const [opened, setOpened] = useState<{ approval: ApprovalBrief; fence: { requestId?: number; level?: number } } | null>(null);
+  // 刚在这里审过（同意、退回成功）的那一级：页面还没刷新到新的状态之前，「审批」按钮先不能点。
+  // 不然紧接着再点开，对话框记下的还是刚审过的这一级，等刷新到了就变成「审批已经变了」、只能关掉重开
+  // （8.0.14 在 main 上的 CI 里付款申请连着审两级的用例就卡在这里，Codex 2026-11-13 的跟踪）
+  const [acted, setActed] = useState<{ requestId?: number; level?: number } | null>(null);
   const approver = can('approval.act') || can('inventory.approve') || can('expense.approve');
   // 这一级已经轮不到自己（别人审过、退回、撤回……）时收起对话框，免得以后又到这一级时自己弹出来
   const actionable = !!approval && approval.status === 'pending' && approver && !gate.uncertain && gate.canActHere;
@@ -33,9 +37,10 @@ export function ReviewActions({ approval, kind, docNo, urlBase, onDone }: { appr
   if (gate.uncertain) return <ApprovalResend sent={gate.uncertain} onDone={onDone} />;
   if (!gate.canActHere) return gate.waiting ? <span className="text-[12.5px] text-ink-3">{gate.waiting}</span> : null;
   const moved = !!opened && (opened.fence.requestId !== gate.fence.requestId || opened.fence.level !== gate.fence.level);
+  const refreshing = !!acted && acted.requestId === gate.fence.requestId && acted.level === gate.fence.level;
   return (
     <>
-      <Button size="sm" variant="primary" icon={<Gavel className="size-4" />} onClick={() => setOpened({ approval, fence: gate.fence })} data-testid={`review-open-${docNo}`}>
+      <Button size="sm" variant="primary" loading={refreshing} icon={<Gavel className="size-4" />} onClick={() => setOpened({ approval, fence: gate.fence })} data-testid={`review-open-${docNo}`}>
         审批{approval.levels > 1 ? `（第 ${approval.currentLevel}/${approval.levels} 级）` : ''}
       </Button>
       <ApproveDialog
@@ -47,6 +52,7 @@ export function ReviewActions({ approval, kind, docNo, urlBase, onDone }: { appr
         urlBase={urlBase}
         fence={opened?.fence ?? gate.fence}
         moved={moved}
+        onActed={setActed}
         onDone={onDone}
       />
     </>
@@ -62,6 +68,7 @@ function ApproveDialog({
   urlBase,
   fence,
   moved,
+  onActed,
   onDone,
 }: {
   open: boolean;
@@ -73,6 +80,8 @@ function ApproveDialog({
   fence: { requestId?: number; level?: number };
   /** 打开以后审批变了（新的一次提交或到了别的级别）：不能按这次填的提交 */
   moved: boolean;
+  /** 同意、退回成功了：这一级已经审过（页面刷新到新状态之前不要再开这一级） */
+  onActed: (fence: { requestId?: number; level?: number }) => void;
   onDone: () => unknown;
 }) {
   const session = useSession();
@@ -105,6 +114,7 @@ function ApproveDialog({
         title: action === 'return' ? '已退回' : approval.currentLevel < approval.levels ? `已同意第 ${approval.currentLevel} 级` : '已同意，审批通过',
         body: docNo,
       });
+      onActed(fence);
       onClose();
     } catch (e) {
       toast({

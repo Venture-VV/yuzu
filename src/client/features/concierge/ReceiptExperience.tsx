@@ -1,4 +1,5 @@
 import { useCan } from "../../lib/session";
+import { uuid } from "../../lib/utils";
 import { conciergeFetch as fetch } from "./api";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -138,7 +139,8 @@ const METHOD_OPTIONS = [
   "银行卡",
   "其他待核",
 ];
-const uid = () => crypto.randomUUID();
+// 操作编号：内网用 http://IP 打开时没有 crypto.randomUUID（只在 HTTPS / localhost 下有），统一用带降级的 uuid()（8.0.15）
+const uid = () => uuid();
 function money(n: number) {
   return new Intl.NumberFormat("zh-CN", {
     minimumFractionDigits: 2,
