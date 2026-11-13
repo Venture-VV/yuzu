@@ -35,20 +35,32 @@ const threshold = async () => (await sql<{ value: { quoteThresholdCents?: number
 
 describe('8.0.16 → 8.0.17', () => {
   it('124：存着旧默认 ¥5,000 的询价门槛改成 ¥1,000，别的规则不动；自己改过的数、设成 0 的不动；没保存过的用新默认', async () => {
-    for (const [stored, after] of [[500_000, 100_000], [300_000, 300_000], [0, 0], [100_000, 100_000]] as const) {
-      await schemaAt8016();
-      await sql`INSERT INTO settings (key, value) VALUES ('purchase_rules', ${sql.json({ quoteThresholdCents: stored, minQuotes: 3, cutoffEnabled: true })})`;
-      expect(await migrate(sql)).toEqual(NEW);
-      expect(await threshold()).toBe(after);
-      expect(await loadPurchaseRules(sql)).toMatchObject({ quoteThresholdCents: after, minQuotes: 3, cutoffEnabled: true, flowStallDays: 2, deptConfirm: 'threshold' });
-    }
+    // 8.0.16 的库只建一次（建一次要几秒，CI 上更慢）：先按真的升级跑一遍，其余几种情形直接执行迁移 124 的 SQL
     await schemaAt8016();
-    await migrate(sql);
-    expect(await threshold()).toBeUndefined();
-    expect((await loadPurchaseRules(sql)).quoteThresholdCents).toBe(100_000);
+    await sql`INSERT INTO settings (key, value) VALUES ('purchase_rules', ${sql.json({ quoteThresholdCents: 500_000, minQuotes: 3, cutoffEnabled: true })})`;
+    expect(await migrate(sql)).toEqual(NEW);
+    expect(await threshold()).toBe(100_000);
+    // 别的规则不动；8.0.17 新加的几项没存过，按默认
+    expect(await loadPurchaseRules(sql)).toMatchObject({ quoteThresholdCents: 100_000, minQuotes: 3, cutoffEnabled: true, flowStallDays: 2, deptConfirm: 'threshold' });
     // 再跑一次什么都不做
     expect(await migrate(sql)).toEqual([]);
-  });
+
+    const m124 = await readFile(new URL('124_quote_threshold_default.sql', MIGRATIONS), 'utf8');
+    for (const [stored, after] of [[500_000, 100_000], [300_000, 300_000], [0, 0], [100_000, 100_000], [499_999, 499_999]] as const) {
+      await sql`UPDATE settings SET value = ${sql.json({ quoteThresholdCents: stored, minQuotes: 3 })} WHERE key = 'purchase_rules'`;
+      await sql.unsafe(m124);
+      expect(await threshold()).toBe(after);
+      expect((await loadPurchaseRules(sql)).minQuotes).toBe(3);
+    }
+    // 存的不是数字（坏数据）不碰；从没保存过采购规则的没有这一行，直接用新默认 ¥1,000
+    await sql`UPDATE settings SET value = ${sql.json({ quoteThresholdCents: '500000' })} WHERE key = 'purchase_rules'`;
+    await sql.unsafe(m124);
+    expect(await threshold()).toBe('500000');
+    await sql`DELETE FROM settings WHERE key = 'purchase_rules'`;
+    await sql.unsafe(m124);
+    expect(await threshold()).toBeUndefined();
+    expect((await loadPurchaseRules(sql)).quoteThresholdCents).toBe(100_000);
+  }, 120_000);
 
   it('125：部门没有主管；原来的需求单都是「不用主管确认」、状态不动；等主管确认的不能是已通过', async () => {
     await schemaAt8016();
@@ -71,5 +83,5 @@ describe('8.0.16 → 8.0.17', () => {
     await expect(sql`UPDATE purchase_requests SET status = 'approved', reviewed_by = ${staff!.id}, reviewed_at = now() WHERE doc_no = 'XQ-S'`).rejects.toThrow(/purchase_requests_dept_before_approve/);
     await sql`UPDATE purchase_requests SET dept_confirm = 'confirmed', dept_confirmed_by = ${staff!.id}, dept_confirmed_at = now() WHERE doc_no = 'XQ-S'`;
     await sql`UPDATE purchase_requests SET status = 'approved', reviewed_by = ${staff!.id}, reviewed_at = now() WHERE doc_no = 'XQ-S'`;
-  });
+  }, 120_000);
 });
