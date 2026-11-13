@@ -123,14 +123,14 @@ export function FlowTrack({ nodes, density = 'full', label, className }: { nodes
                 </span>
                 {!compact && (
                   <>
-                    {n.role && <span className="mt-0.5 text-[11.5px] leading-snug text-ink-3">{n.role}</span>}
+                    {n.role && <span className="mt-0.5 text-[12px] leading-snug text-ink-3">{n.role}</span>}
                     {n.text && (
-                      <span className={cn('mt-0.5 text-[11.5px] leading-snug', n.state === 'current' ? 'font-semibold text-ember' : n.state === 'done' ? 'text-ink-2' : 'text-ink-4')}>
+                      <span className={cn('mt-0.5 text-[12px] leading-snug', n.state === 'current' ? 'font-semibold text-ember' : n.state === 'done' ? 'text-ink-2' : 'text-ink-4')}>
                         {n.text}
                         {n.at && <span className="num"> {flowTime(n.at)}</span>}
                       </span>
                     )}
-                    {n.alert ? <FlowAlert className="mt-1.5">{n.alert}</FlowAlert> : n.state === 'current' && n.waited ? <span className="mt-0.5 text-[11.5px] text-ink-3">已等待 {n.waited}</span> : null}
+                    {n.alert ? <FlowAlert className="mt-1.5">{n.alert}</FlowAlert> : n.state === 'current' && n.waited ? <span className="mt-0.5 text-[12px] text-ink-3">已等待 {n.waited}</span> : null}
                   </>
                 )}
               </NodeShell>

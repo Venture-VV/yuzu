@@ -116,10 +116,11 @@ describe('采购流程图 · 推算函数', () => {
     expect(node(f, 'review')).toMatchObject({ text: '已通过', role: '采购主管' });
     expect(node(f, 'order')).toMatchObject({ title: '采购下单', role: '采购 → 清野饮品', text: 'CG-0010 已下单', link: { kind: 'po', id: 10 } });
     // 11/6 下单，没填预计到货日：按 7 天算到 11/13，今天还不算超期
-    expect(node(f, 'receive')).toMatchObject({ text: '供应商送货中', alert: null, waited: '27 小时' });
+    expect(node(f, 'receive')).toMatchObject({ text: '供应商送货中', alert: null, waited: '7 天' });
     expect(f).toMatchObject({ stage: 'receive', alert: false, end: null, amountCents: 80_000, amountEstimated: false, title: '沐浴露补充装' });
     // 预计 11/11 到：超期 2 天，红条写等了多久与超期几天（到货不按「环节等了几天」标红）
-    const late = buildPurchaseFlow(facts({ pos: [po({ expectedDate: '2026-11-11', approvedAt: hoursAgo(7 * 24 + 1) })] }));
+    // 等了几天从下单日算（不看确认得早晚）
+    const late = buildPurchaseFlow(facts({ pos: [po({ expectedDate: '2026-11-11', approvedAt: hoursAgo(1) })] }));
     expect(node(late, 'receive').alert).toBe('已等待 7 天 · 超期 2 天');
     expect(late.alert).toBe(true);
     const due = buildPurchaseFlow(facts({ pos: [po({ orderDate: '2026-11-04' })] }));

@@ -110,6 +110,27 @@ test.describe('8.0.17 后台的信息架构', () => {
     await page.getByTestId('admin-nav-rules').click();
     await expect(page.locator('#r-store')).toHaveValue(before);
 
+    // 电子菜单的设置也一样（Codex 2026-11-13 P2：8.0.16 起就会丢，换页签把设置那一块卸掉了）：
+    // 改了「点单密码」不保存，切到「分类与版面」再回来，改的还在、保存按钮还能点；不保存，换分区再回来就是服务器上的
+    await page.goto('/admin/emenu');
+    const pin = page.getByTestId('emenu-admin-settings').getByRole('radiogroup', { name: '点单密码' });
+    const save = page.getByTestId('emenu-admin-settings-save');
+    const was = (await pin.getByRole('radio', { name: '不要' }).getAttribute('aria-checked')) === 'true' ? '不要' : '要';
+    const now = was === '不要' ? '要' : '不要';
+    await expect(save).toBeDisabled();
+    await pin.getByRole('radio', { name: now, exact: true }).click();
+    await expect(save).toBeEnabled();
+    await page.getByTestId('subnav-pages').click();
+    await expect(page).toHaveURL(/\/admin\/emenu\/pages$/);
+    await expect(save).toBeHidden();
+    await page.getByTestId('subnav-settings').click();
+    await expect(pin.getByRole('radio', { name: now, exact: true })).toHaveAttribute('aria-checked', 'true');
+    await expect(save).toBeEnabled();
+    await page.getByTestId('admin-nav-settings').click();
+    await page.getByTestId('admin-nav-emenu').click();
+    await expect(pin.getByRole('radio', { name: was, exact: true })).toHaveAttribute('aria-checked', 'true');
+    await expect(save).toBeDisabled();
+
     // 券的旧地址 ?tab=usage：跳到页签自己的地址
     await page.goto('/admin/coupons?tab=usage');
     await expect(page).toHaveURL(/\/admin\/coupons\/usage$/);

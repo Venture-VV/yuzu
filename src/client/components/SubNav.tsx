@@ -6,7 +6,7 @@
 //   · 顺序固定：规则 → 清单 → 导入与工具（各分区自己按这个顺序排）。
 //   · 用 8.0.16 的滑块：当前页签下面的那条线滑过去。
 
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useSlidingIndicator } from '../lib/motion';
 import { cn } from '../lib/utils';
@@ -99,9 +99,12 @@ export function SubTabPage({ tabs, base, label, header, children }: { tabs: read
  * 一个页签里的内容。不是当前页签时藏起来（不卸掉）：里面填到一半的东西、已经取到的数据都留着。
  * 页面没有二级页签（没包在 SubTabPage 里）时照常显示。
  */
-export function SubPane({ tab, children, className }: { tab: string; children: ReactNode; className?: string }) {
+export function SubPane({ tab, children, className, lazy }: { tab: string; children: ReactNode; className?: string; /** 第一次点到这个页签才挂上（里面的东西重的时候用）；挂上以后照样只藏不卸 */ lazy?: boolean }) {
   const active = useActiveSubTab();
   const shown = active === null || active === tab;
+  const [visited, setVisited] = useState(shown);
+  if (shown && !visited) setVisited(true);
+  if (lazy && !shown && !visited) return null;
   return (
     <div role="tabpanel" hidden={!shown} className={cn(shown && 'animate-page-in', className)} data-subpane={tab}>
       {children}

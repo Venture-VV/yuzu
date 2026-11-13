@@ -470,7 +470,8 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
     const pr = pendingReceipt(p);
     // 收货单登记了、还没确认：验收这一步算做了，球在「入库」那一环
     if (pr) return { ...base, state: 'done', text: `已登记收货 ${pr.docNo}`, at: pr.docDate, link: receiptLink(pr) };
-    const since = p.approvedAt ?? p.createdAt;
+    // 从下单日算等了几天（补录的采购单确认得晚，按确认时间算会写成「等了 0 分钟、超期 3 天」）
+    const since = p.orderDate;
     const due = p.expectedDate ?? shiftDate(p.orderDate, f.rules.arrivalOverdueDays);
     const late = dayDiff(f.today, due);
     const w = waitedOf(since, f);

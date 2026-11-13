@@ -62,7 +62,7 @@ import { LangProvider } from './i18n';
 import { PageCanvas } from './pages';
 import { BigProvider } from './stage';
 import './emenu.css';
-import { useActiveSubTab, useGoSubTab } from '../../components/SubNav';
+import { SubPane, useGoSubTab } from '../../components/SubNav';
 
 const adminKey = ['admin', 'emenu'] as const;
 const useEmenuAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<EmenuAdmin>('/api/admin/emenu') });
@@ -118,14 +118,21 @@ export function EmenuAdminSection() {
 
 /** 页签下面的内容：还差什么的清单，加上现在这个页签的那一块 */
 function EmenuAdminBody({ data, apply, tabs }: { data: EmenuAdmin; apply: Apply; tabs: { key: string }[] }) {
-  const tab = (useActiveSubTab() ?? 'settings') as Tab;
   const go = useGoSubTab(tabs as { key: string; label: string }[], EMENU_BASE);
+  // 换页签只藏不卸（8.0.17，Codex 2026-11-13 P2）：设置里改了没保存的、排到一半的版面，切到别的页签再切回来还在。
+  // 第一次点到才挂上（版面预览比较重），挂上以后留着
   return (
     <div className="space-y-5" data-testid="emenu-admin">
       <Checklist data={data} onSettings={() => go('settings')} onDishes={() => go('dishes')} />
-      {tab === 'pages' && <PagesTab data={data} apply={apply} />}
-      {tab === 'dishes' && <DishesTab data={data} apply={apply} />}
-      {tab === 'settings' && <SettingsTab data={data} apply={apply} />}
+      <SubPane tab="settings" lazy>
+        <SettingsTab data={data} apply={apply} />
+      </SubPane>
+      <SubPane tab="pages" lazy>
+        <PagesTab data={data} apply={apply} />
+      </SubPane>
+      <SubPane tab="dishes" lazy>
+        <DishesTab data={data} apply={apply} />
+      </SubPane>
     </div>
   );
 }
@@ -1017,16 +1024,16 @@ function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; dat
             )}
             {picked.problems.length > 0 && picked.rows.length > 0 && <p className="mt-1">有问题的行不导入，其余的照常导入。</p>}
             {picked.guarded.length > 0 && (
-              // 原来带着防公式单引号的格子改过以后，开头的单引号分不出是系统的还是想留着的：按系统的去掉，导入前说清楚会存成什么
+              // 原来带着防公式单引号的格子改过以后，开头的单引号分不出是系统的还是想留着的：按系统的去掉，导入前说清楚会存成什么。
+              // 每一格都列出来（多了在框里滚），不只列前几格——没列出来的那几格操作的人没法知道会存成什么（Codex 2026-11-13 复验）
               <div className="mt-2" data-testid="emenu-admin-english-guarded">
                 <p>这 {picked.guarded.length} 格开头的单引号按「防公式加的」去掉了，会保存成下面的样子；单引号本身要留着的，请不要导这一格，打开那道菜直接改：</p>
-                <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                  {picked.guarded.slice(0, 8).map((g) => (
+                <ul className="scroll-thin mt-1 max-h-44 list-disc space-y-0.5 overflow-y-auto pl-5" data-testid="emenu-admin-english-guarded-list">
+                  {picked.guarded.map((g) => (
                     <li key={`${g.line}-${g.column}`}>
                       第 {g.line} 行「{g.column}」→ <span className="num font-semibold text-ink">{g.value}</span>
                     </li>
                   ))}
-                  {picked.guarded.length > 8 && <li>……还有 {picked.guarded.length - 8} 格</li>}
                 </ul>
               </div>
             )}
