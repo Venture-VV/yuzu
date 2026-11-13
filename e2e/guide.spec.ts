@@ -76,7 +76,7 @@ test.describe('v0.7.19 对客导览', () => {
     try {
       // ① 后台：按在用底图识别图标；样例派对区设成动区
       await page.goto('/admin/spaces');
-      await page.getByRole('radio', { name: '对客导览' }).click();
+      await page.getByTestId('subnav-guide').click();
       const card = page.getByTestId('guide-admin');
       await expect(card).toBeVisible();
       await card.getByTestId('guide-detect').click();

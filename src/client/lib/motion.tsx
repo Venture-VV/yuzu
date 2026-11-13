@@ -42,9 +42,16 @@ export function makeGhost(node: HTMLElement): HTMLElement {
   clone.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select').forEach((el, i) => {
     const src = from[i];
     if (!src) return;
-    if (el instanceof HTMLInputElement && src instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) el.checked = src.checked;
-    else el.value = src.value;
     el.disabled = true;
+    if (el instanceof HTMLInputElement && src instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) el.checked = src.checked;
+    // 选文件的框不带值：浏览器不让程序给它写文件名（选了文件以后写会报错，8.0.17 修；8.0.16 关掉这样的弹窗整页报错）
+    else if (!(src instanceof HTMLInputElement && src.type === 'file')) {
+      try {
+        el.value = src.value;
+      } catch {
+        // 写不进去的就让它空着：影子只是个样子
+      }
+    }
   });
   return clone;
 }
@@ -119,44 +126,58 @@ export function useExitGhost<T extends HTMLElement>(): RefObject<T | null> {
   useLayoutEffect(() => {
     const node = ref.current;
     return () => {
-      if (!node || !node.isConnected || prefersReducedMotion()) return;
-      const style = window.getComputedStyle(node);
-      const rect = node.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return;
-      const scrolls = [...node.querySelectorAll<HTMLElement>('.scroll-thin, [data-mo-scroll]')].map((el) => el.scrollTop);
-      const clone = makeGhost(node);
-      if (style.position !== 'fixed') {
-        // 不是固定定位的（菜单、提示条）：钉在它此刻的位置上
-        Object.assign(clone.style, { position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, right: 'auto', bottom: 'auto', width: `${rect.width}px`, height: `${rect.height}px`, margin: '0' });
+      // 退场只是锦上添花：这里出什么错都不能带倒页面（卸载时抛出的错会被路由的错误页接住，整页就没了）
+      try {
+        leaveGhost(node);
+      } catch {
+        // 留不了影子就不播退场
       }
-      // 影子比原来低一层：紧接着打开的下一个弹窗画在它上面
-      const z = Number.parseInt(style.zIndex, 10);
-      clone.style.zIndex = String(Number.isFinite(z) ? z - 1 : 39);
-      // 开发模式下 React 会把副作用先卸一次再装回来（StrictMode）：那一次这一层还在页面上，不留影子
-      queueMicrotask(() => {
-        if (node.isConnected) return;
-        const root = ensureGhostRoot();
-        if (!root) return;
-        syncGhostStyles(root);
-        root.appendChild(clone);
-        clone.querySelectorAll<HTMLElement>('.scroll-thin, [data-mo-scroll]').forEach((el, i) => {
-          el.scrollTop = scrolls[i] ?? 0;
-        });
-        // 容器是关着的，从外面数不到里面有几个影子：把个数、一共留过几个写在容器上（排查与浏览器用例用）
-        const host = root.host as HTMLElement;
-        const count = () => {
-          host.dataset.count = String(root.childElementCount);
-        };
-        host.dataset.total = String(Number(host.dataset.total ?? 0) + 1);
-        count();
-        window.setTimeout(() => {
-          clone.remove();
-          count();
-        }, GHOST_MS);
-      });
     };
   }, []);
   return ref;
+}
+
+/** 给正要卸掉的这一层留一个影子（useExitGhost 卸载时调） */
+function leaveGhost(node: HTMLElement | null) {
+  if (!node || !node.isConnected || prefersReducedMotion()) return;
+  const style = window.getComputedStyle(node);
+  const rect = node.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  const scrolls = [...node.querySelectorAll<HTMLElement>('.scroll-thin, [data-mo-scroll]')].map((el) => el.scrollTop);
+  const clone = makeGhost(node);
+  if (style.position !== 'fixed') {
+    // 不是固定定位的（菜单、提示条）：钉在它此刻的位置上
+    Object.assign(clone.style, { position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, right: 'auto', bottom: 'auto', width: `${rect.width}px`, height: `${rect.height}px`, margin: '0' });
+  }
+  // 影子比原来低一层：紧接着打开的下一个弹窗画在它上面
+  const z = Number.parseInt(style.zIndex, 10);
+  clone.style.zIndex = String(Number.isFinite(z) ? z - 1 : 39);
+  // 开发模式下 React 会把副作用先卸一次再装回来（StrictMode）：那一次这一层还在页面上，不留影子
+  queueMicrotask(() => {
+    if (node.isConnected) return;
+    const root = ensureGhostRoot();
+    if (!root) return;
+    try {
+      syncGhostStyles(root);
+    } catch {
+      return;
+    }
+    root.appendChild(clone);
+    clone.querySelectorAll<HTMLElement>('.scroll-thin, [data-mo-scroll]').forEach((el, i) => {
+      el.scrollTop = scrolls[i] ?? 0;
+    });
+    // 容器是关着的，从外面数不到里面有几个影子：把个数、一共留过几个写在容器上（排查与浏览器用例用）
+    const host = root.host as HTMLElement;
+    const count = () => {
+      host.dataset.count = String(root.childElementCount);
+    };
+    host.dataset.total = String(Number(host.dataset.total ?? 0) + 1);
+    count();
+    window.setTimeout(() => {
+      clone.remove();
+      count();
+    }, GHOST_MS);
+  });
 }
 
 // ───────────────────────── 依次出现 ─────────────────────────

@@ -19,14 +19,15 @@ export const ADMIN_SECTIONS = {
     perms: ['ledger.readToday', 'report.executive', 'report.members', 'member.retention', 'report.technicians', 'marketing.cost'],
   },
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
-  rules: { path: '/admin/rules', label: '经营规则', perms: ['settings.manage'] },
-  members: { path: '/admin/members', label: '会员与渠道', perms: ['settings.manage'] },
+  // 8.0.17（IA5）：原来叫「经营规则」，与「规则总表」分不清，改叫「门店基本规则」（路径不变）
+  rules: { path: '/admin/rules', label: '门店基本规则', perms: ['settings.manage'] },
+  members: { path: '/admin/members', label: '渠道与标签', perms: ['settings.manage'] },
   // 会员体系 v2（v0.7.23，docs/MEMBERSHIP.md）：会员规则（店主、店总）；看板与到期提醒名单在「数据看板 → 会员体系」（客户经理不进后台）
   membership: { path: '/admin/membership', label: '会员规则', perms: ['member.rules'] },
   // 会员体系 v2 第二期（v0.7.24，docs/BENEFITS.md）：本店权益清单的导入、修改、发布与暂缓，本月发放与使用
   benefits: { path: '/admin/benefits', label: '会员权益', perms: ['benefit.publish'] },
   // 券与会员权益（v0.7.20，飞书 RQ-006 后半，见 docs/COUPONS.md）：券模板、发券规则、无记名券、统计；默认店主、店总
-  coupons: { path: '/admin/coupons', label: '券与会员权益', perms: ['coupon.manage'] },
+  coupons: { path: '/admin/coupons', label: '券', perms: ['coupon.manage'] },
   catalog: { path: '/admin/catalog', label: '价目与套餐', perms: ['catalog.manage'] },
   tags: { path: '/admin/tags', label: '手牌与前台', perms: ['frontdesk.tags', 'settings.manage'] },
   technicians: { path: '/admin/technicians', label: '技师', perms: ['technician.manage', 'settings.manage', 'catalog.manage', 'audit.read'] },
@@ -45,11 +46,26 @@ export const ADMIN_SECTIONS = {
   mp: { path: '/admin/mp', label: '微信小程序', perms: ['mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite', 'mp.food', 'mp.booking'] },
   staff: { path: '/admin/staff', label: '员工账号', perms: ['staff.manage'] },
   permissions: { path: '/admin/permissions', label: '岗位权限', perms: ['settings.manage', 'audit.read'] },
-  opening: { path: '/admin/opening', label: '期初导入', perms: ['wallet.opening'] },
+  opening: { path: '/admin/opening', label: '期初与旧账', perms: ['wallet.opening'] },
   audit: { path: '/admin/audit', label: '操作审计', perms: ['audit.read'] },
 } as const satisfies Record<string, { path: string; label: string; perms: readonly Permission[] }>;
 
 export type AdminSection = keyof typeof ADMIN_SECTIONS;
+
+/**
+ * 后台的一级分组（8.0.17，docs/IA_V8017.md 第 3.2 节）：侧栏、窄屏的横排、后台首页的分区卡片都按它排。
+ * 每个分区必须在且只在一个分组里（tests/admin-ia.test.ts 核对）——8.0.16 以前分组写在侧栏的组件里，
+ * 「设备」漏了，侧栏里一直没有它。
+ */
+export const ADMIN_GROUPS: readonly { key: string; title: string; items: readonly AdminSection[] }[] = [
+  { key: 'overview', title: '概览', items: ['home', 'dashboard'] },
+  { key: 'rules', title: '规则中心', items: ['settings', 'rules'] },
+  { key: 'members', title: '会员与营销', items: ['membership', 'benefits', 'members', 'coupons'] },
+  { key: 'business', title: '营业项目', items: ['catalog', 'tags', 'technicians', 'dining', 'emenu', 'rooms', 'bookings'] },
+  { key: 'venue', title: '场地、设备与线上', items: ['spaces', 'devices', 'mp'] },
+  { key: 'staff', title: '人员与权限', items: ['staff', 'permissions'] },
+  { key: 'data', title: '数据与审计', items: ['audit', 'opening'] },
+];
 /** 能进后台首页、看后台各个设置分区的权限（有其一即可） */
 export const ADMIN_PERMISSIONS: readonly Permission[] = ADMIN_SECTIONS.home.perms;
 /** 能进后台的权限（有其一即可）：后台首页的权限，加上数据看板的权限（只有看板权限的只看得到数据看板） */

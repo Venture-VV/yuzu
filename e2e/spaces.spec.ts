@@ -73,7 +73,7 @@ test.describe('空间台账（v0.7.14）', () => {
     try {
       await page.goto('/admin/spaces');
       await expect(page.getByRole('heading', { name: '空间台账' })).toBeVisible();
-      await page.getByRole('radio', { name: '导入' }).click();
+      await page.getByTestId('subnav-import').click();
 
       // 区域清单
       await chooseCsv(page, `区域清单-${s}.csv`, ['楼层,区域名(中文),区域名(英文),备注', `L3,${zoneSpa},E2E SPA,合成样例`, `L3,${zoneRoom},E2E Rooms,`].join('\r\n'));
@@ -122,7 +122,7 @@ test.describe('空间台账（v0.7.14）', () => {
       ]);
 
       // 只看没核对的 → 核对踩背那间
-      await page.getByRole('radio', { name: '空间', exact: true }).click();
+      await page.getByTestId('subnav-spaces').click();
       await page.getByTestId('spaces-show-unverified').click();
       await expect(page.getByTestId(`space-${back}`)).toBeVisible();
       await expect(page.getByTestId(`space-${foot}`)).toContainText('推断');
@@ -153,7 +153,7 @@ test.describe('空间台账（v0.7.14）', () => {
       const type = admin.types.find((t) => t.active)!;
       const target = admin.spaces.find((x) => x.code === room)!;
       expect(admin.spaceRequired).toBe(true);
-      await page.goto('/admin/rooms');
+      await page.goto('/admin/rooms/rooms');
       await page.getByTestId('rooms-room-new').click();
       const roomDialog = page.getByRole('dialog', { name: '新建房间' });
       await roomDialog.getByTestId('rooms-room-space').selectOption(String(target.id));

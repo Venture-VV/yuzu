@@ -47,6 +47,7 @@ import { registerGiftRoutes } from './modules/inventory/gifts';
 import { registerPettyAccountRoutes } from './modules/petty-accounts';
 import { registerReplenishRoutes } from './modules/inventory/replenish';
 import { registerSourcingRoutes } from './modules/inventory/sourcing';
+import { registerPurchaseFlowRoutes } from './modules/purchase-flow';
 import { registerApprovalRoutes } from './modules/approvals/routes';
 import { registerContractRoutes } from './modules/contracts/routes';
 import { registerTemplateRoutes } from './modules/contracts/templates';
@@ -256,6 +257,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerPettyAccountRoutes(app, deps);
   registerReplenishRoutes(app, deps);
   registerSourcingRoutes(app, deps);
+  // 采购流程图（8.0.17，只读）
+  registerPurchaseFlowRoutes(app, deps);
   // 审批中心（v0.7.30）
   registerApprovalRoutes(app, deps);
   // 合同与法务审查（v0.7.31）

@@ -136,6 +136,17 @@ export async function setRule(ctx: TestContext, deductionRule: string) {
  * 在营业日切换（06:00，上海时间）之后 5 个半小时内灌数据时，班次会落在结账单的前一个营业日，按营业日核对的用例对不上；
  * 这段时间把灌数据的时刻挪到 05:30，演示数据整体落在前一个营业日、彼此一致。
  */
+/**
+ * 把询价门槛设回 ¥5,000（8.0.17 以前的默认；8.0.17 起默认 ¥1,000，店主 2026-11-13，LC2）。
+ * 这些用例造的采购单多在 ¥1,000–¥5,000 之间，测的是审批、收货、付款等别的事，不是询价门槛：
+ * 开头把门槛放回写用例时的数，采购单才能照原来的写法直接提交。门槛本身的用例在 erp-purchasing、purchase-flow 里按新默认测。
+ */
+export async function useLegacyQuoteThreshold(ctx: TestContext) {
+  await ctx.sql`
+    INSERT INTO settings (key, value) VALUES ('purchase_rules', ${ctx.sql.json({ quoteThresholdCents: 500_000 })})
+    ON CONFLICT (key) DO UPDATE SET value = settings.value || excluded.value`;
+}
+
 export function demoSeedTime(now = new Date()): Date {
   // 与命令行 --previous-day 同一规则（src/server/ops/demo-time.ts）
   return demoSeedWindow(now, 'Asia/Shanghai', 6)?.anchor ?? now;
@@ -256,6 +267,8 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '121_emenu.sql',
   '122_patrol_rounds.sql',
   '123_emenu_english.sql',
+  '124_quote_threshold_default.sql',
+  '125_dept_head_confirm.sql',
   '130_request_drafts_imports.sql',
   '135_concierge.sql',
 ];

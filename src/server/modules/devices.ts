@@ -473,6 +473,9 @@ export async function reportBridge(deps: Deps, raw: unknown, ctx: OpContext): Pr
   const input = parse(ReportInput, raw);
   const now = new Date();
   return deps.sql.begin(async (tx) => {
+    // 等锁最多 3 秒（8.0.17）：页面每 2 秒报一次、上一次没回来不发下一次，在这里一直等就等于这台终端不上报了；
+    // 等不到就让这一次失败，没报成的事件页面下次再报（按事件编号只记一次）
+    await tx.unsafe("SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '5s'");
     // 锁顺序：终端一行 → 它下面的设备（id 升序）
     const [terminal] = await tx<{ id: number; code: string; name: string; enabled: boolean; status: DeviceStatus; statusCode: string | null }[]>`
       SELECT id, code, name, enabled, status, status_code FROM devices WHERE code = ${input.terminal} AND kind = 'terminal' FOR UPDATE`;
@@ -721,7 +724,7 @@ export async function cancelJob(deps: Deps, id: number, ctx: OpContext, canManag
  */
 async function assertNetworkPrint(db: Db) {
   if ((await loadSettings(db)).printMode === 'local') {
-    throw unprocessable('PRINT_MODE_LOCAL', '现在是「本机打印」：请用浏览器打印到这台电脑连的打印机（店主可以在后台「经营规则 → 可调的数值」里改打印方式）');
+    throw unprocessable('PRINT_MODE_LOCAL', '现在是「本机打印」：请用浏览器打印到这台电脑连的打印机（店主可以在后台「门店基本规则 → 可调的数值」里改打印方式）');
   }
 }
 

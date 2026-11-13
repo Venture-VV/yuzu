@@ -69,7 +69,7 @@ export async function addReceiptAttachment(deps: Deps, docId: number, raw: unkno
       WHERE doc_id = ${docId} AND (image_id = ${stored.imageId} OR file_id = ${stored.fileId})`;
     if (dup) return; // 同一份已经挂着
     const [n] = await tx<{ n: number }[]>`SELECT count(*)::int AS n FROM inv_doc_attachments WHERE doc_id = ${docId}`;
-    // 每张最多几份（CG11，8.0.7 起在「经营规则 → 可调的数值」里改）
+    // 每张最多几份（CG11，8.0.7 起在「门店基本规则 → 可调的数值」里改）
     const { receiptAttachmentsMax } = await loadSettings(tx);
     if (n!.n >= receiptAttachmentsMax) throw conflict('ATTACHMENT_LIMIT', `每张收货单最多 ${receiptAttachmentsMax} 份附件`);
     const name = input.name || (stored.fileId ? 'PDF' : '照片');

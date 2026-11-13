@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { todayIn } from '../src/server/modules/inventory/common';
 import { seedInventoryDemo } from '../src/server/seed-inventory';
-import { api, login, setup, type TestContext } from './helpers';
+import { api, login, setup, type TestContext, useLegacyQuoteThreshold } from './helpers';
 
 let ctx: TestContext;
 let today: string;
@@ -26,6 +26,7 @@ const create = (body: Record<string, unknown>, key = randomUUID()) =>
 
 beforeAll(async () => {
   ctx = await setup();
+  await useLegacyQuoteThreshold(ctx);
   today = todayIn(ctx.config.timezone);
   expect((await seedInventoryDemo(ctx.sql, ctx.config)).skipped).toBe(false);
   keeper = await login(ctx.app, 'lixiao', 'yuzu2026');

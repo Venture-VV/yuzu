@@ -220,6 +220,9 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       // ① 后台「电子菜单」：还没开时列出还差什么；建分类（上一轮留着的沿用）、排两页、保存
       await page.goto('/admin/emenu');
       await expect(page.getByTestId('emenu-admin-status')).toContainText('平板点餐还没开启');
+      // 8.0.17：页签写进地址，第一个是「设置」；分类与版面是第二个
+      await page.getByTestId('subnav-pages').click();
+      await expect(page).toHaveURL(/\/admin\/emenu\/pages$/);
       if (!prep.hadCategory) {
         await page.getByTestId('emenu-admin-category-new').click();
         const dialog = page.getByRole('dialog').filter({ hasText: '新建分类' });
@@ -247,7 +250,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       await page.getByTestId('emenu-admin-pages-save').click();
       await expect(page.getByText(`「${CATEGORY}」的版面已保存`)).toBeVisible();
       // 菜品图文：改一道菜的小字
-      await page.getByRole('radio', { name: /菜品图文/ }).click();
+      await page.getByTestId('subnav-dishes').click();
       await page.getByTestId(`emenu-admin-dish-${PORK.name}`).click();
       const dishDialog = page.getByRole('dialog').filter({ hasText: '修改菜品' });
       await dishDialog.getByLabel('名称后的小字').fill('例份');
@@ -255,7 +258,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       await expect(page.getByText('菜品已保存')).toBeVisible();
       await expect(page.getByTestId(`emenu-admin-dish-${PORK.name}`)).toContainText('例份');
       // 设置：打开平板点餐
-      await page.getByRole('radio', { name: '设置', exact: true }).click();
+      await page.getByTestId('subnav-settings').click();
       await page.getByTestId('emenu-admin-settings').getByRole('radiogroup', { name: '平板点餐' }).getByRole('radio', { name: '开启' }).click();
       await page.getByTestId('emenu-admin-settings-save').click();
       await expect(page.getByText('电子菜单的设置已保存')).toBeVisible();
@@ -265,7 +268,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
 
       // ①′ 8.0.13 英文：在「菜品图文」里给砂锅鱼填英文介绍与规格的英文；用「英文对照表」给小炒肉换一个英文名
       await page.goto('/admin/emenu');
-      await page.getByRole('radio', { name: /菜品图文/ }).click();
+      await page.getByTestId('subnav-dishes').click();
       await page.getByTestId(`emenu-admin-dish-${FISH.name}`).click();
       const enDialog = page.getByRole('dialog').filter({ hasText: '修改菜品' });
       await enDialog.getByLabel('英文介绍').fill('E2E: fish slow-baked in a clay pot.');
@@ -1100,7 +1103,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     test.skip(info.project.name !== '门店电脑', '后台页面，只跑一次');
     await loginStaff(page, 'linlan');
     await page.goto('/admin/emenu');
-    await page.getByRole('radio', { name: '设置', exact: true }).click();
+    await page.getByTestId('subnav-settings').click();
     const settings = page.getByTestId('emenu-admin-settings');
     const pin = settings.getByRole('radiogroup', { name: '点单密码' });
     await expect(pin.getByRole('radio', { name: '不要', exact: true })).toBeVisible();

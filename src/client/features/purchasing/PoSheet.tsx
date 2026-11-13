@@ -19,6 +19,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, Spinner, InfoItem as Info } from '../../components/ui';
 import { Qty, SimRule } from '../inventory/parts';
 import { CompareChip, PoStatusChip, ReceivingChip } from './parts';
+import { PurchaseFlowPanel } from './PurchaseFlow';
 import { useInvalidateAll, usePo } from './queries';
 import { ThreeWayBadge } from '../payments/parts';
 import { usePoThreeWay } from '../payments/queries';
@@ -107,6 +108,10 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
       </header>
 
       <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+        {/* 这张采购单在整条流程里走到哪了（8.0.17）：撤回的不画 */}
+        {po.status !== 'cancelled' && (
+          <PurchaseFlowPanel kind="po" id={po.id} version={`${po.status}|${po.revision}|${po.receiving}|${po.receipts.map((r) => r.status).join(',')}|${po.paidCents}|${po.approval?.status ?? ''}|${po.approval?.currentLevel ?? ''}`} />
+        )}
         {po.status === 'returned' && po.returnedReason && <Notice tone="warning" title="负责人退回修改">{po.returnedReason}</Notice>}
         {po.status === 'submitted' && (
           <Notice tone="warning" title={po.revision > 1 ? '改版待确认：确认前不能继续收货' : '待负责人确认：确认前不能收货'}>

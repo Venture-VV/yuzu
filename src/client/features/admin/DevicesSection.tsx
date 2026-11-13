@@ -32,8 +32,16 @@ import { useToast } from '../../components/Toast';
 import { Button, Card, Field, Input, Notice, Select, Skeleton } from '../../components/ui';
 import { StatusBadge, useDeviceOverview } from '../devices/DevicesPage';
 import { AdminPage } from './AdminShell';
+import { SubPane } from '../../components/SubNav';
 
 const keys = { list: ['devices', 'admin'] as const, jobs: ['devices', 'jobs'] as const, events: ['devices', 'events'] as const, preview: ['devices', 'import'] as const };
+
+/** 二级页签（8.0.17）：清单 → 记录 → 导入与工具 */
+const DEVICE_TABS = [
+  { key: 'list', label: '设备登记表' },
+  { key: 'jobs', label: '打印任务与设备事件' },
+  { key: 'import', label: '按采购清单导入' },
+];
 
 export function DevicesSection() {
   const qc = useQueryClient();
@@ -52,10 +60,14 @@ export function DevicesSection() {
           登记设备
         </Button>
       }
+      tabs={DEVICE_TABS}
     >
-      <div className="space-y-4">
-        <ErpPendingPanel types={['device_create']} className="space-y-2" onFound={() => void invalidate()} />
+      {/* 结果待确认的登记：在哪个页签都要看得到 */}
+      <ErpPendingPanel types={['device_create']} className="mb-4 space-y-2" onFound={() => void invalidate()} />
+      <SubPane tab="import">
         <ImportCard onDone={() => void invalidate()} />
+      </SubPane>
+      <SubPane tab="list">
         <Card className="p-0">
           {!list.data ? (
             <Skeleton className="m-4 h-40" />
@@ -109,8 +121,10 @@ export function DevicesSection() {
             </table>
           )}
         </Card>
+      </SubPane>
+      <SubPane tab="jobs">
         <JobsAndEvents />
-      </div>
+      </SubPane>
       <DeviceDialog target={target} devices={list.data ?? overview.data?.devices ?? []} onClose={() => setTarget(null)} onSaved={() => void invalidate()} />
     </AdminPage>
   );

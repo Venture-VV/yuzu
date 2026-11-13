@@ -739,7 +739,7 @@ const ScanInput = z.object({
 });
 
 /**
- * 上传一份扫描件：一页照片（压缩后不超过 1 MB）或一份 PDF（8.0.7 起，每份按「经营规则 → 可调的数值」的 PDF 大小，最多 10 MB）。
+ * 上传一份扫描件：一页照片（压缩后不超过 1 MB）或一份 PDF（8.0.7 起，每份按「门店基本规则 → 可调的数值」的 PDF 大小，最多 10 MB）。
  * 作废的合同不能再传；归档以后只能追加。
  */
 export async function addFile(deps: Deps, contractId: number, raw: unknown, actor: Actor, ip?: string) {

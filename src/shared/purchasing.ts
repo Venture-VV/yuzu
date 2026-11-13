@@ -478,6 +478,10 @@ export const DEFAULT_CHANNEL_KEY: PurchaseChannelKey = 'supplier';
 export const channelLabel = (key: string | null | undefined): string => PURCHASE_CHANNELS.find((c) => c.key === key)?.label ?? '—';
 
 /** 急采分级审批的一档（05，CG05）：合计不超过 maxCents 的由这一档的审批人审（1–5 人或签；没指定的由负责人审） */
+export const DEPT_CONFIRM_RULES = ['off', 'threshold', 'all'] as const;
+export type DeptConfirmRule = (typeof DEPT_CONFIRM_RULES)[number];
+export const DEPT_CONFIRM_RULE_LABELS: Record<DeptConfirmRule, string> = { off: '不要', threshold: '估价达到询价门槛的', all: '全部需求单' };
+
 export interface UrgentTier {
   maxCents: number;
   approverIds: number[];
@@ -505,12 +509,20 @@ export interface PurchaseRules {
   requestPoDirect: boolean;
   /** 急采分级审批（05，CG05）：按金额从小到大；最高一档就是急采上限 */
   urgentTiers: UrgentTier[];
+  /**
+   * 部门主管确认（8.0.17，店主 2026-11-13，LC1、LC11）：哪些需求单要部门主管先确认、采购才能审核通过。
+   * off 不要；threshold 估价（各行参考价 × 数量，没填参考价的行不算）达到询价门槛的；all 全部。部门没设主管的不拦。
+   */
+  deptConfirm: DeptConfirmRule;
+  /** 采购流程图（8.0.17，LC4）：一个环节等了几天标红；0 = 不标。到货另按预计到货日 / arrivalOverdueDays，审批另认审批中心的超时 */
+  flowStallDays: number;
 }
 
 /** 默认规则（待确认，E1、E4–E6、CG01、CG03–CG05）：在「采购 → 采购规则」里改 */
 export const DEFAULT_PURCHASE_RULES: PurchaseRules = {
   channels: PURCHASE_CHANNELS,
-  quoteThresholdCents: 500_000,
+  // 8.0.17 起默认 ¥1,000（店主 2026-11-13，LC2；原来 ¥5,000，迁移 124 把存着旧默认的一起改）
+  quoteThresholdCents: 100_000,
   minQuotes: 2,
   reorderDays: 7,
   targetDays: 14,
@@ -523,6 +535,8 @@ export const DEFAULT_PURCHASE_RULES: PurchaseRules = {
     { maxCents: 500_000, approverIds: [] },
     { maxCents: 3_000_000, approverIds: [] },
   ],
+  flowStallDays: 2,
+  deptConfirm: 'threshold',
 };
 
 /** 急采上限：分级的最高一档 */

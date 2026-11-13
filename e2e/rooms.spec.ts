@@ -101,6 +101,7 @@ async function prepare(page: Page) {
   if (!admin.types.some((t) => t.name === DAILY.name)) {
     await page.goto('/admin/rooms');
     await expect(page.getByTestId('rooms-rules-card')).toContainText('客房功能');
+    await page.getByTestId('subnav-types').click();
     await page.getByTestId('rooms-type-new').click();
     await page.getByTestId('rooms-type-name').fill(DAILY.name);
     await page.getByTestId('rooms-type-price').fill(String(DAILY.price / 100));

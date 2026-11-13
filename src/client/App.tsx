@@ -90,6 +90,7 @@ const PurchaseRulesPage = lazyPage(() => import('./features/purchasing/PurchaseR
 const RequestImportPage = lazyPage(() => import('./features/purchasing/RequestImportPage').then((m) => m.RequestImportPage));
 const ComparePage = lazyPage(() => import('./features/purchasing/ComparePage').then((m) => m.ComparePage));
 const ScoresPage = lazyPage(() => import('./features/purchasing/ScoresPage').then((m) => m.ScoresPage));
+const FlowPage = lazyPage(() => import('./features/purchasing/FlowPage').then((m) => m.FlowPage));
 const UrgentDocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.UrgentDocFormPage));
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
@@ -289,6 +290,7 @@ const router = createBrowserRouter([
       { path: 'purchasing', element: <PurchasingPage /> },
       { path: 'purchasing/new', element: <PoFormPage mode="new" /> },
       { path: 'purchasing/ordered', element: <OrderedPage /> },
+      { path: 'purchasing/flow', element: <FlowPage /> },
       { path: 'purchasing/suggestions', element: <SuggestionsPage /> },
       { path: 'purchasing/sourcing', element: <SourcingPage /> },
       { path: 'purchasing/sourcing/:id', element: <SourcingDetailPage /> },

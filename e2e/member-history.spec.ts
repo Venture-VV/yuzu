@@ -27,7 +27,8 @@ test('旧系统流水：后台导入 → 会员详情看得到，不进正式账
     `${phone},E2E,2026-08-02 19:30,消费,-128,872,C-${run},洗浴`,
     `19500000000,不在系统里,2026-08-03,消费,-10,,X-${run},`,
   ].join('\n');
-  await page.goto('/admin/opening');
+  // 8.0.17：「旧系统逐笔流水」是期初与旧账的一个页签
+  await page.goto('/admin/opening/history');
   const card = page.getByTestId('member-history-import');
   await card.getByTestId('member-history-file').setInputFiles({ name: `ebc-${run}.csv`, mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
   const preview = card.getByTestId('member-history-preview');

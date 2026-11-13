@@ -573,6 +573,21 @@ export interface EmenuEnglishParsed {
   unchanged: number;
   /** 读不了的地方（整份不能导：没有表头、引号不配对；或某一行不对：编号不是数字、太长），带行号 */
   problems: string[];
+  /**
+   * 改过、而且开头的单引号被当作防公式的去掉了的格子（8.0.17）：这一格原来带着系统加的防公式单引号，改完以后文件里
+   * 分不出开头那个单引号是系统的还是填的人想留着的——按系统的去掉，但在导入前列出来「会保存成什么」，不悄悄改。
+   */
+  guarded: EmenuEnglishGuarded[];
+}
+
+export interface EmenuEnglishGuarded {
+  /** 文件里的行号 */
+  line: number;
+  id: number;
+  /** 哪一列（表头的名字） */
+  column: string;
+  /** 会保存成的值（已经去掉开头那个单引号） */
+  value: string;
 }
 
 /**
@@ -584,7 +599,8 @@ export interface EmenuEnglishParsed {
  * 文件里一个以「单引号 + 公式开头」开头的格子，可能是导出时加的防公式单引号，也可能是有人在空格子里自己填的、单引号就是内容。
  * 光看文件分不出来，所以读的时候对照这一格**现在的值**（readSheetCell）：
  *   · 与现在的值导出来的样子一模一样：没改过，不导入；
- *   · 改过，而且现在的值导出时带着防公式的单引号（那一格里本来就有一个系统加的）：开头的单引号当作那一个，去掉；
+ *   · 改过，而且现在的值导出时带着防公式的单引号（那一格里本来就有一个系统加的）：开头的单引号当作那一个，去掉
+ *     （填的人想把单引号留作内容时文件里分不出来：parseEmenuEnglishCsv 把这样的格子记进 guarded，导入前列给人看）；
  *   · 改过，现在的值导出时不带（空格子、普通的字）：系统没加过，开头的单引号是填的人自己写的，照字面保存。
  * 不知道现在的值时（没给，或编号对不上）当作导出的文件处理：去掉一个。
  */
@@ -623,7 +639,7 @@ export const EMENU_ATTR_EN_MAX = 48;
  * 不给时每个填了的格子都当作要导入的、按导出的文件去掉防公式的单引号。
  */
 export function parseEmenuEnglishCsv(text: string, current?: ReadonlyMap<number, EmenuEnglishCurrent>): EmenuEnglishParsed {
-  const fail = (problem: string): EmenuEnglishParsed => ({ rows: [], unchanged: 0, problems: [problem] });
+  const fail = (problem: string): EmenuEnglishParsed => ({ rows: [], unchanged: 0, problems: [problem], guarded: [] });
   const { records, unclosedQuoteLine } = parseCsvRecords(text.replace(/^\uFEFF/, ''));
   if (unclosedQuoteLine !== null) return fail(unclosedQuoteMessage(unclosedQuoteLine));
   const filled = records.filter((r) => r.cells.some((c) => c.trim()));
@@ -637,17 +653,21 @@ export function parseEmenuEnglishCsv(text: string, current?: ReadonlyMap<number,
   const rows: EmenuEnglishRow[] = [];
   const problems: string[] = [];
   const seen = new Set<number>();
+  const guarded: EmenuEnglishGuarded[] = [];
   let unchanged = 0;
   for (const r of filled.slice(1)) {
     const idText = (r.cells[idCol] ?? '').trim();
     const now = current?.get(Number(idText));
     let same = 0;
+    const stripped: EmenuEnglishGuarded[] = [];
     // 一格的内容：空着的、没改过的都返回空字（不导入）；没改过的另记一笔
     const cell = (k: keyof typeof ENGLISH_HEADERS) => {
       const raw = cols[k] < 0 ? '' : (r.cells[cols[k]] ?? '').trim();
       if (!raw) return '';
       const value = readSheetCell(raw, now === undefined ? undefined : k === 'attrsEn' ? now.attrsEn.join(EMENU_ATTR_SEPARATOR) : now[k]);
       if (value === null) same += 1;
+      // 对照着现在的值读、改过、开头少了一个单引号：按防公式的去掉的，记下来
+      else if (now !== undefined && value !== raw) stripped.push({ line: r.line, id: Number(idText), column: ENGLISH_HEADERS[k], value });
       return value ?? '';
     };
     const row: EmenuEnglishRow = { id: Number(idText) };
@@ -685,10 +705,13 @@ export function parseEmenuEnglishCsv(text: string, current?: ReadonlyMap<number,
       continue;
     }
     seen.add(row.id);
-    if (!bad) rows.push(row);
+    if (!bad) {
+      rows.push(row);
+      guarded.push(...stripped);
+    }
   }
   if (rows.length > EMENU_ENGLISH_MAX_ROWS) return fail(`一次最多导入 ${EMENU_ENGLISH_MAX_ROWS} 行`);
-  return { rows, unchanged, problems };
+  return { rows, unchanged, problems, guarded };
 }
 
 /** 导入的结果 */

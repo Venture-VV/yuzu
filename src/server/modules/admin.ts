@@ -385,7 +385,7 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     hint: '只看总仓；在途（没到的采购单）算进去；按采购单位向上取整',
     current: [pr.reorderDays, pr.targetDays], dflt: [prd.reorderDays, prd.targetDays], metaKey: 'purchase_rules',
   });
-  // ── 可调的数值（8.0.7 A1，店主 2026-11-10：有争议的规则不要写死；后台「经营规则 → 可调的数值」）──
+  // ── 可调的数值（8.0.7 A1，店主 2026-11-10：有争议的规则不要写死；后台「门店基本规则 → 可调的数值」）──
   const tun = (key: keyof typeof k, group: RuleGroup, label: string, show: (v: never) => string, hint?: string) => {
     const prop = k[key] as keyof typeof s;
     add({

@@ -6,9 +6,9 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { bpToInput, parsePercentBp } from '@shared/contracts';
 import { centsToInput, parseYuan } from '@shared/money';
-import { DEFAULT_PAYMENT_RULES, PAYMENT_RULE_LIMITS, threeWayToleranceText, type PaymentRules } from '@shared/payments';
+import { DEFAULT_PAYMENT_RULES, nextPayDay, normalizePayDays, PAY_DAYS_MAX, PAYMENT_RULE_LIMITS, threeWayToleranceText, type PaymentRules } from '@shared/payments';
 import { api, errorMessage } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { useToast } from '../../components/Toast';
 import { Button, Card, Field, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
 import { pk, usePaymentRules } from './queries';
@@ -21,6 +21,8 @@ interface Draft {
   cap: string;
   remindDays: string;
   weeks: string;
+  /** 固定付款日：写成「15、30」 */
+  payDays: string;
 }
 
 const toDraft = (r: PaymentRules): Draft => ({
@@ -31,6 +33,7 @@ const toDraft = (r: PaymentRules): Draft => ({
   cap: centsToInput(r.threeWayCapCents),
   remindDays: String(r.warrantyRemindDays),
   weeks: String(r.weeklyWeeks),
+  payDays: r.payDays.join('、'),
 });
 
 const inRange = (n: number, l: { min: number; max: number }) => Number.isInteger(n) && n >= l.min && n <= l.max;
@@ -48,13 +51,20 @@ function fromDraft(d: Draft): PaymentRules | string {
   if (!inRange(warrantyRemindDays, L.warrantyRemindDays)) return `质保金提前提醒天数要是 ${L.warrantyRemindDays.min}–${L.warrantyRemindDays.max} 的整数`;
   const weeklyWeeks = Number(d.weeks);
   if (!inRange(weeklyWeeks, L.weeklyWeeks)) return `本周应付的周数要是 ${L.weeklyWeeks.min}–${L.weeklyWeeks.max} 的整数`;
-  return { ownerLevelCents, requireRequestForContractGoods: d.requireRequest, threeWayPctBp, threeWayCapCents, warrantyRemindDays, weeklyWeeks };
+  // 固定付款日：用顿号、逗号或空格隔开的几号；空着 = 没有固定付款日
+  const dayTexts = d.payDays.split(/[、,，\s/]+/).map((x) => x.replace(/号$/, '').trim()).filter(Boolean);
+  const dayNumbers = dayTexts.map(Number);
+  if (dayNumbers.some((n) => !Number.isInteger(n) || n < 1 || n > 31)) return '固定付款日写成「15、30」这样（每月几号，1–31）；空着就是没有固定付款日';
+  const payDays = normalizePayDays(dayNumbers);
+  if (payDays.length > PAY_DAYS_MAX) return `固定付款日最多 ${PAY_DAYS_MAX} 个`;
+  return { ownerLevelCents, requireRequestForContractGoods: d.requireRequest, threeWayPctBp, threeWayCapCents, warrantyRemindDays, weeklyWeeks, payDays };
 }
 
 export function PaymentRulesCard() {
   const qc = useQueryClient();
   const toast = useToast();
   const can = useCan();
+  const session = useSession();
   const editable = can('settings.manage');
   const rules = usePaymentRules();
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -74,7 +84,9 @@ export function PaymentRulesCard() {
   const save = async () => {
     const next = fromDraft(draft);
     if (typeof next === 'string') return setError(next);
-    const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => v !== base[k as keyof PaymentRules])) as Partial<PaymentRules>;
+    // 付款日是一组数（8.0.17）：按内容比，不按是不是同一个数组
+    const same = (a: unknown, b: unknown) => (Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((x, i) => x === b[i]) : a === b);
+    const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => !same(v, base[k as keyof PaymentRules]))) as Partial<PaymentRules>;
     if (Object.keys(changed).length === 0) {
       setError(null);
       toast({ tone: 'info', title: '没有改动' });
@@ -167,6 +179,24 @@ export function PaymentRulesCard() {
           <Field label="本周应付看几周" htmlFor="pay-rules-weeks" hint="默认 4 周，从本周一算起" className="min-w-[200px]">
             <Input id="pay-rules-weeks" inputMode="numeric" value={draft.weeks} disabled={!editable} onChange={(e) => set({ weeks: e.target.value })} fullWidth={false} className="h-10 w-28" data-testid="pay-rules-weeks" />
           </Field>
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-lg border border-line p-4" data-testid="pay-rules-days-section">
+        <p className="text-[13.5px] font-bold">固定付款日（8.0.17）</p>
+        <p className="text-[12.5px] text-ink-3">
+          每月固定几号付款（店主 2026-11-13：15、30 号）。只是日子，不改审批与付款登记：新建付款申请的期望付款日默认取下一个付款日；采购流程图的「财务付款」写下个付款日，
+          过了入库以后的第一个付款日还没付清的标红。这个月没有的日子（30、31 号遇上二月、小月）按月底算；空着 = 没有固定付款日。
+        </p>
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+          <Field label="每月几号付款" htmlFor="pay-rules-days" hint={`默认 15、30；最多 ${PAY_DAYS_MAX} 个，用顿号或逗号隔开`} className="min-w-[220px]">
+            <Input id="pay-rules-days" value={draft.payDays} disabled={!editable} onChange={(e) => set({ payDays: e.target.value })} fullWidth={false} placeholder="15、30" className="h-10 w-44" data-testid="pay-rules-days" />
+          </Field>
+          {saved && saved.payDays.length > 0 && (
+            <p className="pb-2 text-[12.5px] text-ink-2" data-testid="pay-rules-next-day">
+              下个付款日 <b className="num font-bold text-ink">{nextPayDay(session.calendarToday, saved.payDays)}</b>
+            </p>
+          )}
         </div>
       </section>
 

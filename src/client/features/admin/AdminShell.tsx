@@ -5,6 +5,7 @@
 
 import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
+import { SubTabPage, type SubTab } from '../../components/SubNav';
 import { useSlidingIndicator } from '../../lib/motion';
 import {
   ArchiveRestore,
@@ -32,7 +33,7 @@ import {
   UtensilsCrossed,
   type LucideIcon,
 } from 'lucide-react';
-import { ADMIN_SECTIONS, type AdminSection } from '@shared/admin';
+import { ADMIN_GROUPS, ADMIN_SECTIONS, type AdminSection } from '@shared/admin';
 import { versionText } from '@shared/instance';
 import { ROLE_LABELS } from '@shared/labels';
 import { useCan, useSession } from '../../lib/session';
@@ -65,13 +66,6 @@ const ICONS: Record<AdminSection, LucideIcon> = {
   audit: ClipboardList,
 };
 
-const GROUPS: { title: string; items: AdminSection[] }[] = [
-  { title: '概览', items: ['home', 'dashboard', 'settings'] },
-  { title: '经营设置', items: ['rules', 'members', 'membership', 'benefits', 'coupons', 'catalog', 'tags', 'technicians', 'dining', 'emenu', 'rooms', 'bookings', 'spaces', 'mp'] },
-  { title: '人员与权限', items: ['staff', 'permissions'] },
-  { title: '数据', items: ['opening', 'audit'] },
-];
-
 /** 当前账号能进的后台分区；进不了后台首页、只有看板权限的岗位只看得到数据看板（店主 2026-11-10） */
 export function useAdminSections() {
   const can = useCan();
@@ -96,7 +90,7 @@ export function AdminShell() {
   // 只有看板权限的：没有后台首页，进来直接到数据看板
   if (!sections.includes('home') && location.pathname.replace(/\/+$/, '') === ADMIN_SECTIONS.home.path) return <Navigate to={ADMIN_SECTIONS.dashboard.path} replace />;
 
-  const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((k) => sections.includes(k)) })).filter((g) => g.items.length > 0);
+  const groups = ADMIN_GROUPS.map((g) => ({ ...g, items: g.items.filter((k) => sections.includes(k)) })).filter((g) => g.items.length > 0);
   const link = (k: AdminSection, compact: boolean) => {
     const Icon = ICONS[k];
     const pill = compact ? tabPill : sidePill;
@@ -162,8 +156,9 @@ export function AdminShell() {
             </div>
           ))}
         </nav>
-        {/* 按地址重新挂载；换分区时内容区淡入（8.0.16） */}
-        <main className="scroll-thin min-h-0 min-w-0 flex-1 animate-page-in overflow-y-auto" key={location.pathname}>
+        {/* 换分区重新挂载、内容区淡入（8.0.16）。按分区那一段地址算（/admin/technicians），分区里换二级页签不重新挂载：
+            别的页签里填到一半的东西还在（8.0.17） */}
+        <main className="scroll-thin min-h-0 min-w-0 flex-1 animate-page-in overflow-y-auto" key={location.pathname.split('/').slice(0, 3).join('/')}>
           <Outlet />
         </main>
       </div>
@@ -171,20 +166,48 @@ export function AdminShell() {
   );
 }
 
-/** 分区页：标题、说明与权限；没有权限时回到后台首页 */
-export function AdminPage({ section, description, actions, children, wide }: { section: AdminSection; description?: ReactNode; actions?: ReactNode; children: ReactNode; wide?: boolean }) {
+/**
+ * 分区页：标题、说明与权限；没有权限时回到后台首页。
+ * tabs（8.0.17）：这个分区的二级页签——画在标题下面，写进地址（/admin/<分区>/<页签>）；里面的内容用 SubPane 分到各页签。
+ */
+export function AdminPage({
+  section,
+  description,
+  actions,
+  children,
+  wide,
+  tabs,
+}: {
+  section: AdminSection;
+  description?: ReactNode;
+  actions?: ReactNode;
+  children: ReactNode;
+  wide?: boolean;
+  tabs?: readonly SubTab[];
+}) {
   const sections = useAdminSections();
   if (!sections.includes(section)) return <Navigate to="/admin" replace />;
+  const header = (
+    <div className={cn('flex flex-wrap items-end gap-x-4 gap-y-2', tabs ? 'mb-3' : 'mb-5')}>
+      <div className="min-w-0 flex-1">
+        <h1 className="text-[21px] font-bold tracking-tight text-ink">{ADMIN_SECTIONS[section].label}</h1>
+        {description && <p className="mt-0.5 text-[13px] text-ink-3">{description}</p>}
+      </div>
+      {actions}
+    </div>
+  );
   return (
     <div className={cn('mx-auto px-4 py-5 md:px-7 md:py-6', wide ? 'max-w-[1280px]' : 'max-w-[1080px]')}>
-      <div className="mb-5 flex flex-wrap items-end gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-[21px] font-bold tracking-tight text-ink">{ADMIN_SECTIONS[section].label}</h1>
-          {description && <p className="mt-0.5 text-[13px] text-ink-3">{description}</p>}
-        </div>
-        {actions}
-      </div>
-      {children}
+      {tabs ? (
+        <SubTabPage tabs={tabs} base={ADMIN_SECTIONS[section].path} label={`${ADMIN_SECTIONS[section].label}的页签`} header={header}>
+          {children}
+        </SubTabPage>
+      ) : (
+        <>
+          {header}
+          {children}
+        </>
+      )}
     </div>
   );
 }

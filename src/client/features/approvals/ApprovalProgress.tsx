@@ -1,4 +1,4 @@
-// 单据详情里的「审批进度」（v0.7.30）：审批链每一级、谁同意或退回、意见；原来的「确认」「退回」按钮带上看到的审批单与级别。
+// 单据详情里的「审批进度」（v0.7.30；8.0.17 起画成一条时间线，ApprovalTimeline）：审批链每一级、谁同意或退回、意见；原来的「确认」「退回」按钮带上看到的审批单与级别。
 
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -9,6 +9,7 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 import { Badge, Button } from '../../components/ui';
+import { ApprovalTimeline } from './ApprovalTimeline';
 import { sendApproval, sentLabel, useSettleWhenFinished, useUncertainApprovals, type SentApproval } from './uncertain';
 
 /** 等了多久：12 分钟、3 小时、2 天 */
@@ -101,35 +102,18 @@ export function ApprovalProgress({ approval, className }: { approval: ApprovalBr
           </Link>
         )}
       </div>
-      <ol className="space-y-1.5">
-        {approval.stepLabels.map((label, i) => {
+      <ApprovalTimeline
+        testIdPrefix="approval-level"
+        waitedText={waited(approval.levelStartedAt)}
+        overdue={approval.overdue}
+        levels={approval.stepLabels.map((label, i) => {
           const level = i + 1;
-          const acts = approval.actions.filter((a) => a.level === level);
+          const actions = approval.actions.filter((x) => x.level === level);
           const current = approval.status === 'pending' && level === approval.currentLevel;
           const done = approval.status === 'approved' || level < approval.currentLevel;
-          const returned = acts.some((a) => a.action === 'return');
-          return (
-            <li key={level} className={cn('rounded-md border px-3 py-2 text-[12.5px]', current ? 'border-yuzu-deep/40 bg-yuzu-tint' : 'border-line bg-card')} data-testid={`approval-level-${level}`}>
-              <div className="flex items-center gap-2">
-                <span className="num text-ink-3">第 {level} 级</span>
-                <span className="font-bold text-ink">{label}</span>
-                <span className="ml-auto text-[12px] font-semibold">
-                  {returned ? <span className="text-clay">已退回</span> : done ? <span className="text-pine">已同意</span> : current ? <span className="text-yuzu-deep">审批中 · 等了 {waited(approval.levelStartedAt)}</span> : <span className="text-ink-4">未到</span>}
-                </span>
-              </div>
-              {acts.map((a) => (
-                <p key={a.id} className="mt-1 text-ink-2">
-                  <span className={a.action === 'return' ? 'font-semibold text-clay' : 'font-semibold text-pine'}>{a.action === 'return' ? '退回' : '同意'}</span>
-                  <span> · {a.actorName}{a.onBehalfOfName ? `（代 ${a.onBehalfOfName}）` : ''}</span>
-                  {a.batch && <span className="text-ink-3"> · 批量</span>}
-                  <span className="num text-ink-3"> · {formatDateTime(a.createdAt)}</span>
-                  {a.comment && <span className="block text-ink">{a.comment}</span>}
-                </p>
-              ))}
-            </li>
-          );
+          return { level, label, actions, state: actions.some((x) => x.action === 'return') ? 'returned' : done ? 'done' : current ? 'current' : 'pending' };
         })}
-      </ol>
+      />
     </section>
   );
 }

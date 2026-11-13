@@ -24,6 +24,8 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, ConfirmCheck, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
 import { groupTags, tagKindText, VipChip, ZoneChip, ZONE_STYLE } from '../frontdesk/parts';
+import { SubPane } from '../../components/SubNav';
+import { AdminPage } from './AdminShell';
 
 type AdminTag = HandTag & { inUse: boolean; lockedByName: string | null; lockedAt: string | null };
 
@@ -41,12 +43,13 @@ export function TagsTab() {
     void qc.invalidateQueries({ queryKey: ['frontdesk'] });
   };
 
+  // 二级页签（8.0.17）：规则 → 清单 → 导入与工具。前台规则只有能改经营规则的岗位（店主）能改；
+  // 值班经理在这里只维护手牌池，看不到「前台规则」这个页签
+  const tabs = [...(can('settings.manage') ? [{ key: 'rules', label: '前台规则' }] : []), { key: 'pool', label: '手牌池' }, { key: 'create', label: '建牌与导入' }];
   return (
-    <div className="space-y-5">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <ImportCard onImported={refresh} />
-        {/* 前台规则只有能改经营规则的岗位（店主）能改；值班经理在这里只维护手牌池 */}
-        {can('settings.manage') && (
+    <AdminPage section="tags" description="前台规则、手牌池（分区、VIP 柜、锁定与停用）、按号段建牌与柜号清单导入。" tabs={tabs}>
+      {can('settings.manage') && (
+        <SubPane tab="rules">
           <RulesCard
             rules={rules.data}
             onSaved={() => {
@@ -54,10 +57,14 @@ export function TagsTab() {
               toast({ tone: 'success', title: '前台规则已保存' });
             }}
           />
-        )}
-      </div>
-      <BatchCard onCreated={refresh} />
+        </SubPane>
+      )}
+      <SubPane tab="create" className="space-y-5">
+        <ImportCard onImported={refresh} />
+        <BatchCard onCreated={refresh} />
+      </SubPane>
 
+      <SubPane tab="pool">
       <Card className="p-5">
         <SectionTitle>手牌池</SectionTitle>
         <p className="mt-1 text-[12.5px] text-ink-3">
@@ -115,6 +122,7 @@ export function TagsTab() {
           })
         )}
       </Card>
+      </SubPane>
 
       {editing && (
         <TagDialog
@@ -127,7 +135,7 @@ export function TagsTab() {
           }}
         />
       )}
-    </div>
+    </AdminPage>
   );
 }
 

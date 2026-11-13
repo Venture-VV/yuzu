@@ -144,6 +144,12 @@ test.describe('设备', () => {
         const panel2 = second.getByTestId('terminal-panel');
         await expect(panel2.getByTestId('terminal-bridge-state')).toContainText('设备服务已连上');
         await expect.poll(() => bridge.clients()).toBe(2);
+        // 两个页面选的都是这台终端、都在上报（第二个页面打开时从本机读到）：不是的话下面的读卡只显示、不上报。
+        // 这几行是为了下次再失败时看得出断在哪一环（Codex 2026-11-13 在 8.0.15 上遇到一次：两个页面都显示了读卡、服务端没记到，原因没查明）
+        await expect(panel.getByTestId('terminal-select')).toHaveValue(terminal);
+        await expect(panel2.getByTestId('terminal-select')).toHaveValue(terminal);
+        await expect(panel.getByTestId('terminal-report')).toContainText('已上报');
+        await expect(panel2.getByTestId('terminal-report')).toContainText('已上报');
         bridge.sendCard(cardB);
         await expect(panel.getByTestId('terminal-events')).toContainText(cardB);
         await expect(panel2.getByTestId('terminal-events')).toContainText(cardB);
@@ -184,7 +190,8 @@ test.describe('设备', () => {
   test('后台「设备」：按采购清单导入；登记、修改、停用', async ({ page }, info) => {
     test.skip(info.project.name !== '门店电脑', '写数据的只在门店电脑尺寸执行一次');
     await login(page);
-    await page.goto('/admin/devices');
+    // 8.0.17：后台「设备」分成三个页签——设备登记表、打印任务与设备事件、按采购清单导入
+    await page.goto('/admin/devices/import');
     const importCard = page.getByTestId('device-import');
     await expect(importCard).toBeVisible();
     if (await importCard.getByTestId('device-import-run').isVisible()) {
@@ -192,6 +199,8 @@ test.describe('设备', () => {
       await expect(page.getByText(/已按采购清单登记 \d+ 台/)).toBeVisible();
     }
     await expect(importCard).toContainText('清单里的设备都登记了');
+    await page.getByTestId('subnav-list').click();
+    await expect(page).toHaveURL(/\/admin\/devices$/);
     await expect(page.getByTestId('device-row-RDR-JD-01')).toBeVisible();
 
     const code = `PRN-UI-${run}`;

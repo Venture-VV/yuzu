@@ -52,7 +52,8 @@ test.describe('券与会员权益（v0.7.20）', () => {
     const addedRules: number[] = [];
     try {
       // ① 新建代金券模板：面额 5 元、满 50 元，发券后 30 天
-      await page.goto('/admin/coupons');
+      // 8.0.17：券的页签写进地址，第一个是「发券规则」；券模板在 /admin/coupons/templates
+      await page.goto('/admin/coupons/templates');
       await expect(page.getByTestId('coupon-admin')).toBeVisible();
       await page.getByTestId('coupon-template-new').click();
       const dialog = page.getByTestId('coupon-template-dialog');
@@ -208,7 +209,7 @@ test.describe('券与会员权益（v0.7.20）', () => {
 
   test('新建券模板：回复丢了，页面马上查回——已经建好的只有一个，不用重新填写', async ({ page }) => {
     await login(page, 'linlan');
-    await page.goto('/admin/coupons');
+    await page.goto('/admin/coupons/templates');
     const name = `E2E重提-${Date.now() % 100000}`;
     let dropped = false;
     await page.route('**/api/coupons/templates', async (route) => {

@@ -2,7 +2,8 @@
 // 存成一条设置 purchase_rules，在「采购 → 采购规则」里改（8.0.1 起从 ERP「模块设置」挪过来，CG01）；没存的按默认（待确认）。
 //   · 采购途径固定三类（08，CG08）：网购、自采（现采 / 零采）、供应商，改不了、加不了；
 //   · 询价门槛与最少报价家数（E5、E6）、补货触发与目标天数（E4）、下单后几天没到货算超期（从费用报销规则挪过来）；
-//   · 每日截单（03，CG03）、需求单转的采购单免二次审批（04，CG04）、急采分级审批（05，CG05）。
+//   · 每日截单（03，CG03）、需求单转的采购单免二次审批（04，CG04）、急采分级审批（05，CG05）；
+//   · 采购流程图里一个环节等了几天标红（8.0.17，LC4）；哪些需求单要部门主管先确认（8.0.17，LC1、LC11）。
 // 改采购规则要「维护采购规则」（默认只有店主，可在岗位权限里下放）；有查看库存的都能看。
 //
 // 采购途径：单据存键与当时的名称、途径说明。明确选了要写说明的途径（网购、自采）必须写说明；
@@ -14,6 +15,7 @@ import {
   channelCategory,
   DEFAULT_CHANNEL_KEY,
   DEFAULT_PURCHASE_RULES,
+  DEPT_CONFIRM_RULES,
   PURCHASE_CHANNELS,
   URGENT_TIERS_MAX,
   type PurchaseChannelDef,
@@ -57,6 +59,8 @@ const RulesInput = z
     cutoffEnabled: z.boolean(),
     cutoffTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, '截单时间要写成 17:00 这样（24 小时制）'),
     requestPoDirect: z.boolean(),
+    flowStallDays: z.number().int().min(0, '环节超期天数不能为负').max(30, '环节超期天数最多 30 天'),
+    deptConfirm: z.enum(DEPT_CONFIRM_RULES, '部门主管确认只能选：不要、估价达到询价门槛的、全部'),
     urgentTiers: z
       .array(
         z.object({

@@ -74,7 +74,7 @@ export function BenefitsSection() {
       wide
       description="本店权益清单（会员文档附录三 A 与补充项）：逐项设好配置起点、数量与券，发布后券类每月自动发、事件礼按事件自动发，服务类列在会员详情「本月可享」。改了只影响以后，已经发出的券、登记的使用不变。"
       actions={
-        <Link to="/admin/coupons?tab=usage" className="text-[13px] font-semibold text-pine hover:underline" data-testid="benefits-usage-link">
+        <Link to="/admin/coupons/usage" className="text-[13px] font-semibold text-pine hover:underline" data-testid="benefits-usage-link">
           看使用率
         </Link>
       }
@@ -683,7 +683,7 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         {couponLike && (
           <Field label="发哪张券" htmlFor="benefit-template" hint={draft.category === 'coupon' ? '券的有效期到本期最后一天（不看模板的有效天数）' : '按券模板的有效期'} className="sm:col-span-2">
             <Select id="benefit-template" value={draft.templateId} onChange={(e) => set({ templateId: e.target.value })} data-testid="benefit-template">
-              <option value="">选券模板（在「券与会员权益」里建）</option>
+              <option value="">选券模板（在「券」里建）</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}

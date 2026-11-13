@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { ArrowRight, History, ListChecks } from 'lucide-react';
-import { ADMIN_SECTIONS, type AdminOverview, type AdminSection } from '@shared/admin';
+import { ADMIN_GROUPS, ADMIN_SECTIONS, type AdminOverview, type AdminSection } from '@shared/admin';
 import { INSTANCE_LABELS, versionText } from '@shared/instance';
 import { ROLE_LABELS } from '@shared/labels';
 import { ROLES } from '@shared/permissions';
@@ -17,8 +17,11 @@ import { Stagger } from '../../lib/motion';
 const SECTION_HINTS: Partial<Record<AdminSection, string>> = {
   dashboard: '今日、经营总览、会员、会员体系、技师、客房、营销成本（原门店的「看板」）',
   settings: '所有规则一张表：当前值、默认值、谁改的',
-  rules: '营业日、扣款顺序、上限与时限、开班、库存规则',
-  members: '自定义字段、渠道来源',
+  rules: '门店与营业时间、扣款顺序、上限与时限、开班与交班方式、可调的数值',
+  members: '渠道来源、会员标签',
+  benefits: '本店权益清单的导入、修改、发布，VIP 柜，停车登记',
+  emenu: '餐桌平板的菜单：分类与版面、菜品图文、平板点餐的设置',
+  bookings: '能约的时段、小程序预约的限制、爽约规则',
   membership: '档级门槛与赠送比例、享 / 尊阶、会籍周期与补充期、最低充值、到期提醒',
   coupons: '券模板、开卡 / 升级 / 生日 / 充值赠券规则、无记名券、统计',
   catalog: '充值套餐、消费项目与价目表、票种票价',
@@ -31,7 +34,7 @@ const SECTION_HINTS: Partial<Record<AdminSection, string>> = {
   mp: '对顾客开放的开关、门店信息、首页轮播、项目介绍、会员的微信绑定与解绑',
   staff: '账号、岗位、库存职责、重置密码',
   permissions: '各岗位能做什么，店主可以勾选调整',
-  opening: '旧系统会员余额导入与作废',
+  opening: '旧系统会员余额导入与作废、旧系统逐笔流水',
   audit: '谁在什么时候做了什么',
 };
 
@@ -99,24 +102,32 @@ export function AdminHome() {
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
               <Card className="p-5">
                 <SectionTitle>后台分区</SectionTitle>
-                <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-                  {sections
-                    .filter((k) => k !== 'home')
-                    .map((k) => (
-                      <li key={k}>
-                        <Link
-                          to={ADMIN_SECTIONS[k].path}
-                          className="group mo-lift flex h-full items-start gap-2 rounded-lg border border-line bg-card p-3 hover:border-pine/50 hover:bg-pine-tint/40"
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-[14px] font-bold text-ink">{ADMIN_SECTIONS[k].label}</span>
-                            <span className="block text-[12px] text-ink-3">{SECTION_HINTS[k]}</span>
-                          </span>
-                          <ArrowRight className="mt-0.5 size-4 text-ink-4 group-hover:text-pine" />
-                        </Link>
-                      </li>
+                {/* 与侧栏同一套分组（8.0.17）：规则中心、会员与营销、营业项目…… */}
+                <div className="mt-3 space-y-4" data-testid="admin-home-groups">
+                  {ADMIN_GROUPS.map((g) => ({ ...g, items: g.items.filter((k) => k !== 'home' && sections.includes(k)) }))
+                    .filter((g) => g.items.length > 0)
+                    .map((g) => (
+                      <div key={g.key}>
+                        <p className="mb-1.5 text-[11.5px] font-bold tracking-wide text-ink-4">{g.title}</p>
+                        <ul className="grid gap-2 sm:grid-cols-2">
+                          {g.items.map((k) => (
+                            <li key={k}>
+                              <Link
+                                to={ADMIN_SECTIONS[k].path}
+                                className="group mo-lift flex h-full items-start gap-2 rounded-lg border border-line bg-card p-3 hover:border-pine/50 hover:bg-pine-tint/40"
+                              >
+                                <span className="min-w-0 flex-1">
+                                  <span className="block text-[14px] font-bold text-ink">{ADMIN_SECTIONS[k].label}</span>
+                                  <span className="block text-[12px] text-ink-3">{SECTION_HINTS[k]}</span>
+                                </span>
+                                <ArrowRight className="mt-0.5 size-4 text-ink-4 group-hover:text-pine" />
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     ))}
-                </ul>
+                </div>
               </Card>
               <Card className="p-5">
                 <SectionTitle>

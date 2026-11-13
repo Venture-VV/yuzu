@@ -164,7 +164,7 @@ export async function createCampaign(deps: Deps, raw: unknown, ctx: OpContext): 
         if (!validRange(template, date)) throw unprocessable('TEMPLATE_EXPIRED', `券模板「${template.name}」的有效期到 ${template.validTo} 已经过了，不能再发；请另建模板`);
         const members = await audienceMembers(tx, audience);
         if (members.length === 0) throw unprocessable('NO_MEMBERS', '按这个条件圈到的会员是 0 位，请换个条件');
-        // 一次最多发给几位（HY07，8.0.7 起在「经营规则 → 可调的数值」里改）
+        // 一次最多发给几位（HY07，8.0.7 起在「门店基本规则 → 可调的数值」里改）
         const { campaignMaxMembers } = await loadSettings(tx);
         if (members.length > campaignMaxMembers) {
           throw unprocessable('TOO_MANY_MEMBERS', `圈到 ${members.length} 位，一次最多发 ${campaignMaxMembers} 位；请缩小范围、分几次发`, { count: members.length });

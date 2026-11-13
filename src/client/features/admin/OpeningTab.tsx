@@ -22,20 +22,32 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, ConfirmCheck, Field, Input, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { MemberHistoryImportCard } from './MemberHistoryImportCard';
+import { SubPane } from '../../components/SubNav';
+import { AdminPage } from './AdminShell';
 
 const listKey = ['opening-imports'] as const;
 
 /** 旧系统（EBC）会员余额期初导入（店主 #6）：先预览核对，再整批导入；导入记录可逐位或整批作废 */
+/** 二级页签（8.0.17） */
+const OPENING_TABS = [
+  { key: 'balances', label: '会员余额期初' },
+  { key: 'history', label: '旧系统逐笔流水' },
+];
+
 export function OpeningTab() {
   const [openId, setOpenId] = useState<number | null>(null);
   return (
-    <div className="space-y-5">
-      <ImportCard />
-      <HistoryCard onOpen={setOpenId} />
+    <AdminPage section="opening" description="旧系统（EBC）会员余额导入为期初，与控制总数比对；导入错误时整批作废。旧系统逐笔流水只读导入，会员详情里看。" tabs={OPENING_TABS}>
+      <SubPane tab="balances" className="space-y-5">
+        <ImportCard />
+        <HistoryCard onOpen={setOpenId} />
+      </SubPane>
       {/* 旧系统逐笔流水（v0.7.28 ⑩）：只读导入，会员详情里看 */}
-      <MemberHistoryImportCard />
+      <SubPane tab="history">
+        <MemberHistoryImportCard />
+      </SubPane>
       {openId !== null && <ImportDetailDialog id={openId} onClose={() => setOpenId(null)} />}
-    </div>
+    </AdminPage>
   );
 }
 

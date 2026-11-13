@@ -75,7 +75,7 @@ async function prepare(page: Page) {
   // 桌台：第一张在后台页面上建（还没有时），其余用接口；停用的重新启用
   let tables = await getJson<TablesAdmin>(page, '/api/admin/dining/tables');
   if (!tables.tables.some((t) => t.name === A1)) {
-    await page.goto('/admin/dining');
+    await page.goto('/admin/dining/tables');
     await page.getByTestId('dining-table-new').click();
     await page.getByTestId('dining-table-name').fill(A1);
     await page.getByTestId('dining-table-area').fill(AREA);

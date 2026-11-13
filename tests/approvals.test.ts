@@ -14,7 +14,7 @@ import { todayIn } from '../src/server/modules/inventory/common';
 import { createStaff } from '../src/server/modules/staff';
 import { seedInventoryDemo } from '../src/server/seed-inventory';
 import { shiftDate } from '../src/shared/labels';
-import { api, login, PASSWORD, setup, type TestContext } from './helpers';
+import { api, login, PASSWORD, setup, type TestContext, useLegacyQuoteThreshold } from './helpers';
 
 let ctx: TestContext;
 let today: string;
@@ -98,6 +98,7 @@ const approve = (cookie: string, requestId: number, level: number, comment = '')
 
 beforeAll(async () => {
   ctx = await setup();
+  await useLegacyQuoteThreshold(ctx);
   today = todayIn(ctx.config.timezone);
   expect((await seedInventoryDemo(ctx.sql, ctx.config)).skipped).toBe(false);
   // 演示数据把免确认门槛设成 0（都要确认）；这里按默认的 ¥2,000

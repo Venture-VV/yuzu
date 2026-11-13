@@ -20,7 +20,7 @@ import { seedInventoryDemo } from '../src/server/seed-inventory';
 import { LEGAL_ITEM_KEYS, type ContractDetail, type PaymentTerm } from '../src/shared/contracts';
 import { addMonths, DEFAULT_PAYMENT_RULES, stageAmounts, threeWayToleranceText, withinTolerance, type ContractPaymentPlan, type PaymentRequestDetail, type WarrantyRow } from '../src/shared/payments';
 import { shiftDate } from '../src/shared/labels';
-import { api, login, PASSWORD, setup, type TestContext } from './helpers';
+import { api, login, PASSWORD, setup, type TestContext, useLegacyQuoteThreshold } from './helpers';
 
 let ctx: TestContext;
 let today: string;
@@ -151,6 +151,7 @@ const invoice = (lines: { poId: number; amountCents: number }[], extra: Record<s
 
 beforeAll(async () => {
   ctx = await setup();
+  await useLegacyQuoteThreshold(ctx);
   today = todayIn(ctx.config.timezone);
   expect((await seedInventoryDemo(ctx.sql, ctx.config)).skipped).toBe(false);
   boss = await login(ctx.app, 'linlan', 'yuzu2026');

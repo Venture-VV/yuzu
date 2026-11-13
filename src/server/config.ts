@@ -33,7 +33,7 @@ export interface AppConfig {
 }
 
 /**
- * 企业微信群机器人（ERP_WECOM_WEBHOOK）：每周一把本周应付、待审批、快到期的、逾期应收推到群里（开关在「经营规则 → 可调的数值」）。
+ * 企业微信群机器人（ERP_WECOM_WEBHOOK）：每周一把本周应付、待审批、快到期的、逾期应收推到群里（开关在「门店基本规则 → 可调的数值」）。
  * 地址里带着机器人的 key，相当于密码：只放 .env，不进 Git、不进库、不写日志。https 的地址才认；开发、测试另认 http（本机模拟）。
  * 和看门狗的告警群（WECOM_WEBHOOK_URL）分开配：告警群里的人不一定该看到应付的金额。
  */
@@ -194,7 +194,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     trustProxy: (process.env.TRUST_PROXY ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     logLevel: process.env.LOG_LEVEL ?? (env === 'test' ? 'silent' : 'info'),
     // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉
-    version: (process.env.APP_VERSION || '8.0.16').replace(/^v/, ''),
+    version: (process.env.APP_VERSION || '8.0.17').replace(/^v/, ''),
     commit: /^[0-9a-f]{7,40}$/.test(process.env.APP_COMMIT ?? '') ? process.env.APP_COMMIT! : '',
     instance: resolveInstance(env, process.env.YUZU_INSTANCE),
     initOwner:

@@ -3,6 +3,7 @@
 //   · 弹窗关掉：页面逻辑马上卸掉（没有 role=dialog 了、后面的页面马上能点），另留一个影子播退场，一会儿自己删掉；
 //   · 影子在关着的容器里：按文字、按角色都找不到它（弹窗标题与页面按钮同名时不会变成两个）；
 //   · 系统「减少动态效果」：不留影子；
+//   · 弹窗里选了文件再关掉：页面照常（8.0.17）；
 //   · 分段开关的滑块、后台导航里当前分区的底块跟着当前项。
 import { expect, test, type Page } from '@playwright/test';
 
@@ -70,11 +71,43 @@ test.describe('8.0.16 动效套件', () => {
     expect((await ghosts(page)).total).toBe(0);
   });
 
+  // 8.0.17 修（Codex 在 8.0.16 上报的 P1）：弹窗里选了文件再关掉——影子复制输入框时去写「选文件的框」的值，
+  // 浏览器不让写，卸载时报错，整页变成错误页。选了文件的框不带值；留影子出什么错都不带倒页面。
+  test('弹窗里选了文件再取消：页面照常（影子不去写选文件的框），影子照样留一个', async ({ page }, info) => {
+    test.skip(info.project.name !== '门店电脑', '后台页面的流程，只跑一次');
+    await login(page, 'linlan');
+    await page.goto('/inventory/master');
+    await page.getByRole('radio', { name: '供应商' }).click();
+    const cards = page.getByRole('button', { name: /^S\d+/ });
+    await expect(cards.first()).toBeVisible();
+    await cards.first().click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    const admission = dialog.getByTestId('supplier-admission');
+    await expect(admission).toBeVisible();
+    // 选一个本地合成的 PDF：文件名显示在按钮上；不登记、不保存
+    await admission.locator('input[type="file"]').setInputFiles({ name: 'motion-probe.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n% e2e motion\n%%EOF\n') });
+    await expect(admission.getByRole('button', { name: /motion-probe\.pdf/ })).toBeVisible();
+    const before = await ghosts(page);
+    await dialog.getByRole('button', { name: /^(取消|关闭)$/ }).last().click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // 页面没有变成错误页：供应商列表还在、还能再打开
+    await expect(page.getByText('Unexpected Application Error')).toHaveCount(0);
+    await expect(cards.first()).toBeVisible();
+    await expect.poll(async () => (await ghosts(page)).total).toBe(before.total + 1);
+    await cards.first().click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    // 重新打开的是新的：没有带着刚才选的文件
+    await expect(page.getByRole('dialog').getByRole('button', { name: /motion-probe\.pdf/ })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
   test('滑块跟着当前项：分段开关的白色滑块、后台导航里当前分区的底块', async ({ page }, info) => {
     test.skip(info.project.name !== '门店电脑', '后台页面的流程，只跑一次');
     await login(page, 'linlan');
     await page.goto('/admin/emenu');
-    await page.getByRole('radio', { name: '设置', exact: true }).click();
+    await page.getByTestId('subnav-settings').click();
     const group = page.getByTestId('emenu-admin-settings').getByRole('radiogroup', { name: '动效' });
     const thumb = group.locator('.mo-indicator');
     /** 滑块与选中的那一格重合（差不到 1 像素） */

@@ -380,7 +380,7 @@ function IssueCouponDialog({ open, member, onClose }: { open: boolean; member: M
         ) : !templates.data ? (
           <Skeleton className="h-11" />
         ) : (
-          <Field label="券" htmlFor="coupon-issue-template" hint={choices.length === 0 ? '还没有启用的券模板，请店主或店总在后台「券与会员权益」里建' : undefined}>
+          <Field label="券" htmlFor="coupon-issue-template" hint={choices.length === 0 ? '还没有启用的券模板，请店主或店总在后台「券」里建' : undefined}>
             <Select id="coupon-issue-template" value={templateId ?? ''} onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : null)} disabled={busy} className="h-11" data-testid="coupon-issue-template">
               <option value="">选择券</option>
               {choices.map((t) => {

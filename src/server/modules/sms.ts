@@ -11,7 +11,7 @@ import type { SmsConfig } from '../config';
 import type { Sql } from '../db';
 import { loadSettings } from './settings';
 
-/** 短信发不出去最多试几次（HY08）：默认 3，8.0.7 起在「经营规则 → 可调的数值」里改（smsMaxAttempts） */
+/** 短信发不出去最多试几次（HY08）：默认 3，8.0.7 起在「门店基本规则 → 可调的数值」里改（smsMaxAttempts） */
 export const SMS_MAX_ATTEMPTS = 3;
 /** 一条最多等多久（阿里云接口的超时） */
 const SEND_TIMEOUT_MS = 10_000;

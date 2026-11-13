@@ -188,6 +188,9 @@ function disconnect() {
   set({ connected: false, devices: [] });
 }
 
+/** 一次上报最多等多久（毫秒） */
+const BRIDGE_REPORT_TIMEOUT_MS = 6_000;
+
 let reporting = false;
 async function report() {
   const terminal = state.terminal;
@@ -202,7 +205,9 @@ async function report() {
       devices: state.devices.map((d) => ({ key: d.key, status: d.status, code: d.code ?? null })),
       events: events.map(({ id, key, type, value, at }) => ({ id, key, type, value, at })),
     };
-    const result = await api.post<BridgeReportResult>('/api/devices/bridge-report', body);
+    // 每 2 秒报一次，一次最多等 6 秒（8.0.17；原来用默认的 15 秒）：上一次没回来之前不会发下一次，
+    // 卡住一次就等于这台终端 15 秒不上报。没报成的事件留在队列里下次再报，服务端按编号只记一次
+    const result = await api.post<BridgeReportResult>('/api/devices/bridge-report', body, { timeoutMs: BRIDGE_REPORT_TIMEOUT_MS });
     const sent = new Set(events.map((e) => e.id));
     unsent = unsent.filter((e) => !sent.has(e.id));
     set({ lastReport: { at: new Date().toISOString(), ok: true, result } });

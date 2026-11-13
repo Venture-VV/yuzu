@@ -40,6 +40,7 @@ import {
   type EmenuCategoryView,
   type EmenuDishAdmin,
   type EmenuDishView,
+  type EmenuEnglishParsed,
   type EmenuEnglishResult,
   type EmenuEnglishRow,
   type EmenuLang,
@@ -61,17 +62,24 @@ import { LangProvider } from './i18n';
 import { PageCanvas } from './pages';
 import { BigProvider } from './stage';
 import './emenu.css';
+import { SubPane, useGoSubTab } from '../../components/SubNav';
 
 const adminKey = ['admin', 'emenu'] as const;
 const useEmenuAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<EmenuAdmin>('/api/admin/emenu') });
 
 type Tab = 'pages' | 'dishes' | 'settings';
 type Apply = (next: EmenuAdmin) => void;
+const EMENU_BASE = '/admin/emenu';
 
 export function EmenuAdminSection() {
   const admin = useEmenuAdmin();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>('pages');
+  // 二级页签（8.0.17）：写进地址（/admin/emenu/dishes）；顺序与别的分区一样——设置在前，再是清单
+  const tabs = [
+    { key: 'settings', label: '设置' },
+    { key: 'pages', label: admin.data ? `分类与版面（${admin.data.categories.length}）` : '分类与版面' },
+    { key: 'dishes', label: admin.data ? `菜品图文（${admin.data.dishes.length}）` : '菜品图文' },
+  ];
   const apply: Apply = (next) => {
     qc.setQueryData(adminKey, next);
     void qc.invalidateQueries({ queryKey: ['emenu'] });
@@ -80,6 +88,7 @@ export function EmenuAdminSection() {
     <AdminPage
       section="emenu"
       wide
+      tabs={tabs}
       description="餐桌平板上的电子菜单：分类与供应时段、每一页的版面与菜品、菜品的图片与介绍、忌口与起菜方式。价格读价目表，估清、上下架跟着厨房与价目表走。"
       actions={
         <a
@@ -101,24 +110,30 @@ export function EmenuAdminSection() {
           {errorMessage(admin.error)}
         </Notice>
       ) : (
-        <div className="space-y-5" data-testid="emenu-admin">
-          <Checklist data={admin.data} onSettings={() => setTab('settings')} onDishes={() => setTab('dishes')} />
-          <Segmented
-            ariaLabel="电子菜单的分区"
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: 'pages', label: `分类与版面（${admin.data.categories.length}）` },
-              { value: 'dishes', label: `菜品图文（${admin.data.dishes.length}）` },
-              { value: 'settings', label: '设置' },
-            ]}
-          />
-          {tab === 'pages' && <PagesTab data={admin.data} apply={apply} />}
-          {tab === 'dishes' && <DishesTab data={admin.data} apply={apply} />}
-          {tab === 'settings' && <SettingsTab data={admin.data} apply={apply} />}
-        </div>
+        <EmenuAdminBody data={admin.data} apply={apply} tabs={tabs} />
       )}
     </AdminPage>
+  );
+}
+
+/** 页签下面的内容：还差什么的清单，加上现在这个页签的那一块 */
+function EmenuAdminBody({ data, apply, tabs }: { data: EmenuAdmin; apply: Apply; tabs: { key: string }[] }) {
+  const go = useGoSubTab(tabs as { key: string; label: string }[], EMENU_BASE);
+  // 换页签只藏不卸（8.0.17，Codex 2026-11-13 P2）：设置里改了没保存的、排到一半的版面，切到别的页签再切回来还在。
+  // 第一次点到才挂上（版面预览比较重），挂上以后留着
+  return (
+    <div className="space-y-5" data-testid="emenu-admin">
+      <Checklist data={data} onSettings={() => go('settings')} onDishes={() => go('dishes')} />
+      <SubPane tab="settings" lazy>
+        <SettingsTab data={data} apply={apply} />
+      </SubPane>
+      <SubPane tab="pages" lazy>
+        <PagesTab data={data} apply={apply} />
+      </SubPane>
+      <SubPane tab="dishes" lazy>
+        <DishesTab data={data} apply={apply} />
+      </SubPane>
+    </div>
   );
 }
 
@@ -899,7 +914,7 @@ function DishesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
 function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; data: EmenuAdmin; onClose: () => void; apply: Apply }) {
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
-  const [picked, setPicked] = useState<{ name: string; rows: EmenuEnglishRow[]; unchanged: number; problems: string[] } | null>(null);
+  const [picked, setPicked] = useState<({ name: string } & EmenuEnglishParsed) | null>(null);
   const [result, setResult] = useState<EmenuEnglishResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1008,6 +1023,20 @@ function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; dat
               </ul>
             )}
             {picked.problems.length > 0 && picked.rows.length > 0 && <p className="mt-1">有问题的行不导入，其余的照常导入。</p>}
+            {picked.guarded.length > 0 && (
+              // 原来带着防公式单引号的格子改过以后，开头的单引号分不出是系统的还是想留着的：按系统的去掉，导入前说清楚会存成什么。
+              // 每一格都列出来（多了在框里滚），不只列前几格——没列出来的那几格操作的人没法知道会存成什么（Codex 2026-11-13 复验）
+              <div className="mt-2" data-testid="emenu-admin-english-guarded">
+                <p>这 {picked.guarded.length} 格开头的单引号按「防公式加的」去掉了，会保存成下面的样子；单引号本身要留着的，请不要导这一格，打开那道菜直接改：</p>
+                <ul className="scroll-thin mt-1 max-h-44 list-disc space-y-0.5 overflow-y-auto pl-5" data-testid="emenu-admin-english-guarded-list">
+                  {picked.guarded.map((g) => (
+                    <li key={`${g.line}-${g.column}`}>
+                      第 {g.line} 行「{g.column}」→ <span className="num font-semibold text-ink">{g.value}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </Notice>
         )}
         {result && (

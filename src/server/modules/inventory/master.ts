@@ -69,8 +69,10 @@ export const listSuppliers = (db: Db, includeInactive = false) =>
 
 export const listDepartments = (db: Db, includeInactive = false) =>
   db<Department[]>`
-    SELECT id, name, active, sort_order FROM departments
-    ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, sort_order, id`;
+    SELECT d.id, d.name, d.active, d.sort_order,
+           CASE WHEN h.id IS NULL THEN NULL ELSE json_build_object('id', h.id, 'name', h.display_name, 'active', h.active) END AS head
+    FROM departments d LEFT JOIN staff h ON h.id = d.head_id
+    ${includeInactive ? db`` : db`WHERE d.active`} ORDER BY d.active DESC, d.sort_order, d.id`;
 
 const text = (max: number, label: string) => z.string().trim().max(max, `${label}最多 ${max} 个字`);
 const required = (max: number, label: string) => text(max, label).min(1, `请填写${label}`);
@@ -137,7 +139,16 @@ const DepartmentInput = z.object({
   name: required(16, '部门名称'),
   active: z.boolean().default(true),
   sortOrder: z.number().int().default(0),
+  // 部门主管（8.0.17，LC1）：没带这一项的保持原样（旧页面、别处的调用）；null = 不设
+  headId: z.number().int().positive().nullable().optional(),
 });
+
+/** 主管要是在职的员工 */
+async function assertHead(db: Db, headId: number | null | undefined) {
+  if (headId == null) return;
+  const [s] = await db<{ active: boolean }[]>`SELECT active FROM staff WHERE id = ${headId}`;
+  if (!s?.active) throw unprocessable('HEAD_INVALID', '选的部门主管不存在或已停用，请重新选择');
+}
 
 /** 停用部门前：它的小仓没有存货、没有待确认的单据 */
 async function assertDeptWarehouseEmpty(tx: Tx, departmentId: number) {
@@ -362,6 +373,11 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
       SELECT id, display_name FROM staff WHERE active AND (role = 'owner' OR 'purchase' = ANY (duties)) ORDER BY role = 'owner', display_name`,
   );
 
+  // 选部门主管用的名单（8.0.17，LC1）：在职的员工
+  app.get('/api/inventory/department-head-options', { preHandler: guard('inventory.master') }, async () =>
+    sql<{ id: number; name: string }[]>`SELECT id, display_name AS name FROM staff WHERE active ORDER BY role = 'owner' DESC, display_name, id`,
+  );
+
   // 部门：库存之外，费用报销（只有费用职责的员工也要选部门）与需求单也要用
   app.get('/api/inventory/departments', { preHandler: guardAny('inventory.read', 'expense.read', 'request.create', 'request.review') }, async (req) =>
     listDepartments(sql, all(req.query)),
@@ -369,8 +385,9 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
   app.post('/api/inventory/departments', { preHandler: guard('inventory.master') }, async (req) => {
     const d = parse(DepartmentInput, req.body);
     try {
+      await assertHead(sql, d.headId);
       const [row] = await sql<{ id: number }[]>`
-        INSERT INTO departments (name, active, sort_order) VALUES (${d.name}, ${d.active}, ${d.sortOrder}) RETURNING id`;
+        INSERT INTO departments (name, active, sort_order, head_id) VALUES (${d.name}, ${d.active}, ${d.sortOrder}, ${d.headId ?? null}) RETURNING id`;
       await writeAudit(sql, { staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'department', targetId: row!.id, detail: d, ip: req.ip });
     } catch (error) {
       if (isUniqueViolation(error)) throw conflict('NAME_EXISTS', '部门名称已存在');
@@ -387,7 +404,9 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
         const [cur] = await tx<{ active: boolean }[]>`SELECT active FROM departments WHERE id = ${id} FOR UPDATE`;
         if (!cur) throw notFound('部门不存在');
         if (cur.active && !d.active) await assertDeptWarehouseEmpty(tx, id);
-        await tx`UPDATE departments SET name = ${d.name}, active = ${d.active}, sort_order = ${d.sortOrder} WHERE id = ${id}`;
+        await assertHead(tx, d.headId);
+        // 主管：没带这一项的保持原样；改主管只锁部门这一行，已经提交的需求单记着当时的主管（新主管也能确认，见 requests.ts）
+        await tx`UPDATE departments SET name = ${d.name}, active = ${d.active}, sort_order = ${d.sortOrder}${d.headId === undefined ? tx`` : tx`, head_id = ${d.headId}`} WHERE id = ${id}`;
       });
     } catch (error) {
       if (isUniqueViolation(error)) throw conflict('NAME_EXISTS', '部门名称已存在');

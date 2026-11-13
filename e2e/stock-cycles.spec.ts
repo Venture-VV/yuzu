@@ -182,7 +182,8 @@ test.describe('台面日耗品、称重与对账（v0.7.13）', () => {
   test('规则总表：称重容差与盘点、对账提醒的规则可以改', async ({ page }) => {
     await login(page, 'linlan', '会员工作台');
     const before = await getJson<Record<string, unknown>>(page, '/api/inventory/settings');
-    await page.goto('/admin/rules');
+    // 8.0.17：「库存与采购」是门店基本规则的一个页签
+    await page.goto('/admin/rules/inventory');
     await expect(page.getByLabel('每月盘点日')).toHaveValue('1');
     await expect(page.getByLabel('称重收货容差（%）')).toHaveValue('10');
     await page.getByLabel('按批次对账宽限天数').fill('5');

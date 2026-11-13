@@ -37,7 +37,7 @@ import { erpOpAbandoned } from './erp-ops';
 import { loadExpenseRules } from './expenses';
 import { logApproval } from './inventory/common';
 import { isoDate, PRIORITY_NAMES, qtyMilliOf } from './request-import';
-import { approvableOnFor } from './requests';
+import { approvableOnFor, deptConfirmFor } from './requests';
 
 const FileFields = z.object({
   fileName: z.string().trim().min(1, '缺少文件名').max(120, '文件名太长'),
@@ -282,9 +282,13 @@ export async function applyDeptSheet(deps: Deps, raw: unknown, actor: Actor, ip?
     for (const rows of groups) {
       const head = rows[0]!;
       const docNo = await nextDocNo(tx, 'purchase_request', 'XQ', today);
+      // 主管确认（8.0.17，LC1）：与手填的一样，按这一张的估价与部门的主管算
+      const confirm = await deptConfirmFor(tx, head.department!.id, actor, rows.map((l) => ({ qtyMilli: l.qtyMilli ?? 0, refPriceCents: l.refPriceCents ?? null })));
       const [req] = await tx<{ id: number }[]>`
-        INSERT INTO purchase_requests (doc_no, department_id, requester_id, need_by, note, status, priority, approvable_on, source, import_id)
-        VALUES (${docNo}, ${head.department!.id}, ${actor.id}, ${head.needBy}, ${`表格导入：${f.fileName}`.slice(0, 200)}, 'submitted', ${head.priority}, ${approvableOn}, 'sheet', ${importId})
+        INSERT INTO purchase_requests (doc_no, department_id, requester_id, need_by, note, status, priority, approvable_on, source, import_id,
+                                       dept_confirm, dept_head_id, dept_confirmed_by, dept_confirmed_at)
+        VALUES (${docNo}, ${head.department!.id}, ${actor.id}, ${head.needBy}, ${`表格导入：${f.fileName}`.slice(0, 200)}, 'submitted', ${head.priority}, ${approvableOn}, 'sheet', ${importId},
+                ${confirm.state}, ${confirm.headId}, ${confirm.state === 'confirmed' ? actor.id : null}, ${confirm.state === 'confirmed' ? tx`now()` : null})
         RETURNING id`;
       const requestId = Number(req!.id);
       if (!firstRequestId) firstRequestId = requestId;
