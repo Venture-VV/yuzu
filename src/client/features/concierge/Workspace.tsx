@@ -4,6 +4,7 @@ import {
 } from "./Components";
 import { loadReceipt, loadWorkspace, pendingRequests } from "./api";
 import { api } from "../../lib/api";
+import { uuid } from "../../lib/utils";
 import { useCan } from "../../lib/session";
 import { conciergeFetch as fetch } from "./api";
 
@@ -131,7 +132,8 @@ const APPT_STATUS = [
   "未到店",
 ];
 const TASK_STATUS = ["待处理", "处理中", "待接收", "已接收", "已完成"];
-const uid = (): string => crypto.randomUUID();
+// 操作编号：内网用 http://IP 打开时没有 crypto.randomUUID（只在 HTTPS / localhost 下有），统一用带降级的 uuid()（8.0.15）
+const uid = (): string => uuid();
 function dayKey(value: string | Date = new Date()) {
   const d = typeof value === "string" ? new Date(value) : value;
   return Number.isNaN(d.getTime())
@@ -3346,7 +3348,7 @@ export default function Workspace({
                           placeholder="现场接待、同事介绍等"
                         />
                       </Field>
-                      <Field label="客户主动表达的偏好" wide>
+                      <Field label="备注（客户主动表达的偏好）" wide>
                         <textarea
                           name="preferences"
                           rows={3}
