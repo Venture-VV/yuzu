@@ -257,8 +257,6 @@ async function execute(
     const
       cardNo = text(p.cardNo, 60),
       ownerId = text(p.ownerId, 80);
-    if (phone && !/^[+\d\s()-]{5,30}$/.test(phone))
-      throw new WorkspaceError("联系电话格式不正确");
     await assignee(tx, ownerId);
     const joinedAt = text(p.joinedAt, 10);
     if (
@@ -290,6 +288,11 @@ async function execute(
       name=before && sameLink ? before.data.name : identity!.name;
       phone=before && sameLink ? before.data.phone : identity!.phone;
     }
+    // 手机号的格式只核对手工填的（没关联系统会员的旧档案）。关联了系统会员的，上面已经换成会员系统里的手机号，
+    // 页面交上来的那一个只是显示用的、不采用——没有会员查看权限的管家看到的是打码的（199 **** 8001），
+    // 原来先核对格式再替换，这些人就建不了服务档案（8.0.18，Codex 审查 51358d0 的 P1）
+    if (!nativeId && phone && !/^[+\d\s()-]{5,30}$/.test(phone))
+      throw new WorkspaceError("联系电话格式不正确");
     if (!name) throw new WorkspaceError("请填写接待称呼");
     if (!phone && !cardNo) throw new WorkspaceError("手机号和收银卡号至少填一项");
     if (before && nativeId !== (before.nativeMemberId ?? null)) {

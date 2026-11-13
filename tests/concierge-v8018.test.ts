@@ -58,6 +58,28 @@ describe('未建服务档案的会员手机号', () => {
   });
 });
 
+describe('没有会员查看权限的管家建服务档案', () => {
+  it('页面交上来的是打码的手机号也建得了：存的是会员系统里的完整手机号；之后修改这份档案照常（Codex 审查 51358d0 的 P1）', async () => {
+    const m = await createMember(ctx, '打码建档', '19900018051');
+    const found = await api(ctx.app, butler, 'GET', `/api/concierge/native-members/${m.id}`);
+    expect(found.body.member.phone).toBe('199 **** 8051');
+    // 页面把选中的会员的姓名、手机号原样放进表单再交上来
+    const created = await mutate('createMember', { nativeMemberId: m.id, name: found.body.member.name, phone: found.body.member.phone, joinedAt: '2026-11-14' });
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    const ws = (await api<WorkspaceData>(ctx.app, butler, 'GET', path)).body;
+    const profile = ws.members.find((x) => x.id === created.body.id)!;
+    expect(profile.phone).toBe('19900018051');
+    expect(profile.nativeMember).toMatchObject({ id: m.id, phone: '19900018051' });
+    const [row] = await ctx.sql<{ phone: string }[]>`SELECT data->>'phone' AS phone FROM concierge_members WHERE id=${created.body.id}::uuid`;
+    expect(row!.phone).toBe('19900018051');
+    // 建了服务档案以后看到的是完整的；再交一个乱写的手机号上来也不采用、不报错
+    const updated = await mutate('updateMember', { id: created.body.id, version: profile.version, nativeMemberId: m.id, name: profile.name, phone: '199 **** 8051', changeReason: '补接待称呼', serviceAlias: '打码先生' });
+    expect(updated.status, JSON.stringify(updated.body)).toBe(200);
+    const [after] = await ctx.sql<{ phone: string }[]>`SELECT data->>'phone' AS phone FROM concierge_members WHERE id=${created.body.id}::uuid`;
+    expect(after!.phone).toBe('19900018051');
+  });
+});
+
 describe('会员摘要一批取', () => {
   it('给的是被合并的旧编号也落到主账号；不存在的编号不在结果里；工作区一次带出全部服务档案的摘要', async () => {
     const from = await createMember(ctx, '合并来源', '19900018011');

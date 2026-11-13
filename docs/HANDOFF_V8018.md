@@ -23,7 +23,7 @@ PR #99 带进来的功能（口径 GJ12–GJ34 照它的不动）：会员身份
 | 工作区的会员摘要 | 每个服务档案各查一遍（一位 8 条以上查询） | `nativeMemberSummaries` 一批取（含被合并的旧编号落到主账号） |
 | 会员名单（会员情况、会员中心、下钻弹窗） | 每次请求读全部会员与到访，页面每 3 秒轮询 | 页面不再 3 秒轮询：同步发现有变时再取，另加慢速刷新（名单 30 秒、会员详情 10 秒、扣费明细 15 秒）；查询去掉逐位会员的子查询 |
 | 管家保存时对原生表的行锁 | 对 `members`、`spaces` / `dining_tables` / `rooms`、`staff` 加 `FOR SHARE`，与「只锁管家自己的行」不一致，并与前台预约到店（预约 → 空间）反向 | 改回只读核对、不加行锁（存在由外键兜底） |
-| 没有会员查看权限的管家看全店会员 | 完整手机号 | 没建服务档案的会员手机号打码（`199 **** 8001`，仍可按手机号查找）；建了服务档案的照旧；权限说明写明能看到什么 |
+| 没有会员查看权限的管家看全店会员 | 完整手机号 | 没建服务档案的会员手机号打码（`199 **** 8001`，仍可按手机号查找）；建了服务档案的照旧；权限说明写明能看到什么。给这样的会员建服务档案时，页面交上来的是打码的那一个，服务端不采用、存会员系统里的完整手机号（Codex 审查 `51358d0` 的 P1：原来先核对格式，这些人建不了档） |
 | 金额、时间的格式 | 各部件自己写一套，时区写死 | `features/concierge/format.ts`，用全店的格式函数（跟门店时区） |
 | 好评中心的颜色 | 十几个写死的颜色值 | 全店的颜色变量 |
 | 管家页顶上的导航 | 页面里的状态，刷新回工作台 | 写进地址：`/concierge/members`、`/appointments`、`/praise`、`/followup`、`/situation`、`/tasks`、`/tiers`、`/manager`、`/receipts` |
@@ -78,7 +78,7 @@ PR #99 带进来的功能（口径 GJ12–GJ34 照它的不动）：会员身份
 ## 4. 已执行的验证
 
 - `npm run typecheck`、`npm run build` 通过。
-- 集成用例：管家部 10 个文件（原 9 个 73 条 + `tests/concierge-v8018.test.ts` 5 条）通过；`tests/erp-ia.test.ts`（新，9 条）、`tests/admin-ia.test.ts`、`tests/erp.test.ts` 通过。全量见 PR 的 CI。
+- 集成用例：管家部 10 个文件（原 9 个 73 条 + `tests/concierge-v8018.test.ts` 6 条）通过；`tests/erp-ia.test.ts`（新，9 条）、`tests/admin-ia.test.ts`、`tests/erp.test.ts` 通过。全量见 PR 的 CI。
 - `tests/concierge-v8018.test.ts` 的「不给原生表的行加锁」一条做过反证：把 `FOR SHARE` 加回去，这条用例等到锁超时失败；去掉就通过。
 - 浏览器用例（门店电脑，`demo-prepare` 准备的独立演示库）：`e2e/concierge.spec.ts` 10 条、`e2e/erp-ia.spec.ts`（新）6 条、`e2e/admin-ia.spec.ts`、`e2e/erp.spec.ts`、`e2e/erp-807.spec.ts`、`e2e/purchasing-v801.spec.ts`、`e2e/purchase-flow.spec.ts` 通过；全量见 PR 的 CI。
 - 压力核对（本地独立库灌 20,000 位会员、200,000 条到访）：同步指纹 0.62–0.71 秒 → 5–8 毫秒；工作区 0.02 秒；会员名单单次约 0.35 秒（仍读全部会员，见下面「已知的限度」）。
