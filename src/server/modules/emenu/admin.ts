@@ -20,6 +20,7 @@ import {
   EMENU_ATTR_SEPARATOR,
   EMENU_ENGLISH_COLUMNS,
   EMENU_ENGLISH_MAX_ROWS,
+  emenuSheetCellOut,
   EMENU_MAX_AVOID_OPTIONS,
   EMENU_MAX_FOOTER,
   EMENU_MAX_IDLE_MINUTES,
@@ -430,18 +431,10 @@ export async function emenuEnglishCsv(db: Db): Promise<string> {
     SELECT id, name, name_en, tagline, tagline_en, description, description_en, attrs, attrs_en, unit, unit_en FROM emenu_dishes ORDER BY active DESC, id`;
   return toCsv([
     [...EMENU_ENGLISH_COLUMNS],
+    // 文字各列过一遍 emenuSheetCellOut：防表格公式的单引号读回来时能原样去掉（见 @shared/emenu）
     ...dishes.map((d) => [
       Number(d.id),
-      d.name,
-      d.nameEn,
-      d.tagline,
-      d.taglineEn,
-      d.description,
-      d.descriptionEn,
-      d.attrs.join(EMENU_ATTR_SEPARATOR),
-      d.attrsEn.join(EMENU_ATTR_SEPARATOR),
-      d.unit,
-      d.unitEn,
+      ...[d.name, d.nameEn, d.tagline, d.taglineEn, d.description, d.descriptionEn, d.attrs.join(EMENU_ATTR_SEPARATOR), d.attrsEn.join(EMENU_ATTR_SEPARATOR), d.unit, d.unitEn].map(emenuSheetCellOut),
     ]),
   ]);
 }

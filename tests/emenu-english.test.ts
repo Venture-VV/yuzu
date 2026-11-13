@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_EMENU_RULES, EMENU_ENGLISH_COLUMNS, parseEmenuEnglishCsv, type EmenuAdmin, type EmenuEnglishResult, type EmenuMenu } from '../src/shared/emenu';
+import { DEFAULT_EMENU_RULES, EMENU_ENGLISH_COLUMNS, emenuSheetCellIn, emenuSheetCellOut, parseEmenuEnglishCsv, type EmenuAdmin, type EmenuEnglishResult, type EmenuMenu } from '../src/shared/emenu';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -285,5 +285,73 @@ describe('英文对照表', () => {
     expect(parseEmenuEnglishCsv('编号,菜名\n1,溪鳗').problems[0]).toContain('没有找到英文的列');
     expect(parseEmenuEnglishCsv('编号,英文名\n1,"没配对').problems[0]).toContain('引号没有配对');
     expect(parseEmenuEnglishCsv(`编号,英文名\n7,A\n7,B`).problems[0]).toContain('出现了两次');
+  });
+
+  it('以 = + @ - 或单引号开头的英文：导出加的防公式单引号读回来原样去掉，原样导出再导入什么都不改（Codex 2026-11-13 P2）', async () => {
+    // 单个格子：加与去是一对
+    for (const [text, inFile] of [
+      ['+ Seasonal special', "'+ Seasonal special"],
+      ['=SUM(A1)', "'=SUM(A1)"],
+      ['@home', "'@home"],
+      ['- off menu', "'- off menu"],
+      // 本来就以单引号开头、后面是公式开头：多加一个，读回来去掉一个
+      ["'+1 Combo", "''+1 Combo"],
+      ["''=x", "'''=x"],
+      // 不是公式开头的不加也不去：负数、普通的单引号
+      ['-5 degrees', '-5 degrees'],
+      ["'Nduja toast", "'Nduja toast"],
+      ['Plain', 'Plain'],
+    ] as const) {
+      // 文件里的样子 = 这里多加的那一个 + lib/csv 给公式开头加的那一个
+      const out = emenuSheetCellOut(text);
+      const guarded = /^[=+@]/.test(out) || (/^-/.test(out) && !/^-\d/.test(out)) ? `'${out}` : out;
+      expect(guarded, text).toBe(inFile);
+      expect(emenuSheetCellIn(inFile), text).toBe(text);
+    }
+
+    // 整条路：把几道菜的英文各项改成以这些字符开头 → 导出 → 原样读回 → 导入，一道都不改
+    const before = await admin();
+    const eel = before.dishes.find((d) => d.id === dish.eel)!;
+    const egg = before.dishes.find((d) => d.id === dish.egg)!;
+    const wine = before.dishes.find((d) => d.id === dish.wine)!;
+    const put = (d: typeof eel, patch: Record<string, unknown>) =>
+      api<EmenuAdmin>(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/dishes/${d.id}`, {
+        name: d.name,
+        nameEn: d.nameEn,
+        tagline: d.tagline,
+        description: d.description,
+        attrs: d.attrs,
+        unit: d.unit,
+        taglineEn: d.taglineEn,
+        descriptionEn: d.descriptionEn,
+        attrsEn: d.attrsEn,
+        unitEn: d.unitEn,
+        specs: d.specs.map((sp) => ({ itemId: sp.itemId, label: sp.label, labelEn: sp.labelEn })),
+        version: d.version,
+        ...patch,
+      });
+    expect((await put(eel, { nameEn: '+ Seasonal special', taglineEn: "'+1 Combo", descriptionEn: '=not a formula, just text', unitEn: '@pot' })).status).toBe(200);
+    expect((await put(egg, { nameEn: "'Nduja Eggs", taglineEn: '- off menu soon', descriptionEn: '-5 degrees chilled plate' })).status).toBe(200);
+    expect((await put(wine, { attrsEn: ['+12% ABV', "'=Reserve"] })).status).toBe(200);
+    const saved = await admin();
+    const csv = await sheet();
+    // 文件里公式开头的都带着单引号（表格软件不会当公式执行）
+    expect(csv).toContain(`${dish.eel},${eel.name},'+ Seasonal special,${eel.tagline},''+1 Combo,`);
+    expect(csv).toContain("'=not a formula");
+    expect(csv).toContain("'@pot");
+    expect(csv).toContain("'+12% ABV | '=Reserve");
+    expect(csv).toContain("'- off menu soon");
+    expect(csv).toContain(',-5 degrees chilled plate,');
+    const parsed = parseEmenuEnglishCsv(csv);
+    expect(parsed.problems).toEqual([]);
+    expect(parsed.rows.find((r) => r.id === dish.eel)).toEqual({ id: dish.eel, nameEn: '+ Seasonal special', taglineEn: "'+1 Combo", descriptionEn: '=not a formula, just text', unitEn: '@pot' });
+    expect(parsed.rows.find((r) => r.id === dish.egg)).toMatchObject({ nameEn: "'Nduja Eggs", taglineEn: '- off menu soon', descriptionEn: '-5 degrees chilled plate' });
+    expect(parsed.rows.find((r) => r.id === dish.wine)!.attrsEn).toEqual(['+12% ABV', "'=Reserve"]);
+    const again = await importRows(parsed.rows);
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body.english).toEqual({ updated: 0, unchanged: parsed.rows.length, missing: [] });
+    // 版本号、内容都没有动
+    const view = (a: EmenuAdmin) => a.dishes.map((d) => [d.id, d.version, d.nameEn, d.taglineEn, d.descriptionEn, d.unitEn, d.attrsEn]);
+    expect(view(again.body)).toEqual(view(saved));
   });
 });

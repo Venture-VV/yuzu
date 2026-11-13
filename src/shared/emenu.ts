@@ -555,6 +555,18 @@ export interface EmenuEnglishParsed {
   problems: string[];
 }
 
+/**
+ * 防表格公式的单引号要能原样还原。导出时 lib/csv 给以 = + @ 或「-」（后面不是数字）开头的格子前面加一个单引号，
+ * 免得表格软件把它当公式执行；读回来时要把这个单引号去掉，不然「+ Seasonal special」导出再导入就成了「'+ Seasonal special」。
+ * 为了不误伤本来就以单引号开头的内容（「'+1 Combo」），这类格子导出时再多加一个单引号、读回来去掉一个：
+ *   原文 +x → 文件里 '+x → 读回 +x；原文 '+x → 文件里 ''+x → 读回 '+x；原文 'hello、-5 度 不加也不去。
+ */
+const FORMULA_GUARDED = /^'+(?:[=+@]|-(?!\d))/;
+/** 导出：本来就是「单引号 + 公式开头」的格子多加一个单引号（单纯公式开头的由 lib/csv 加） */
+export const emenuSheetCellOut = (value: string): string => (FORMULA_GUARDED.test(value) ? `'${value}` : value);
+/** 读回：去掉导出时加的那一个单引号 */
+export const emenuSheetCellIn = (value: string): string => (FORMULA_GUARDED.test(value) ? value.slice(1) : value);
+
 const ENGLISH_LIMITS = { nameEn: 80, taglineEn: 80, descriptionEn: 400, unitEn: 12 } as const;
 const ENGLISH_HEADERS: Record<keyof typeof ENGLISH_LIMITS | 'attrsEn', string> = { nameEn: '英文名', taglineEn: '小字的英文', descriptionEn: '英文介绍', attrsEn: '属性行的英文', unitEn: '单位的英文' };
 export const EMENU_ATTR_EN_MAX = 48;
@@ -576,7 +588,7 @@ export function parseEmenuEnglishCsv(text: string): EmenuEnglishParsed {
   const seen = new Set<number>();
   for (const r of filled.slice(1)) {
     const idText = (r.cells[idCol] ?? '').trim();
-    const cell = (k: keyof typeof ENGLISH_HEADERS) => (cols[k] < 0 ? '' : (r.cells[cols[k]] ?? '').trim());
+    const cell = (k: keyof typeof ENGLISH_HEADERS) => (cols[k] < 0 ? '' : emenuSheetCellIn((r.cells[cols[k]] ?? '').trim()).trim());
     const row: EmenuEnglishRow = { id: Number(idText) };
     let bad = false;
     for (const k of Object.keys(ENGLISH_LIMITS) as (keyof typeof ENGLISH_LIMITS)[]) {
