@@ -202,7 +202,7 @@ describe('后台「电子菜单」', () => {
       const d = r.body.dishes.find((x) => x.name === name)!;
       dish[key] = d.id;
       // 只有一个规格：规格名不存
-      expect(d.specs).toEqual([{ itemId: item[itemName], label: '', itemName, price: expect.any(Number), orderable: true }]);
+      expect(d.specs).toEqual([{ itemId: item[itemName], label: '', labelEn: '', itemName, price: expect.any(Number), orderable: true }]);
     }
     // 不存在的项目
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/emenu/dishes', { name: '没有的菜', specs: [{ itemId: 999999 }] })).body.error.code).toBe('DISH_REF_NOT_FOUND');
@@ -326,8 +326,8 @@ describe('平板上的菜单', () => {
     expect(eel.imageUrl).toMatch(/^\/api\/emenu\/images\/\d+$/);
     expect(eel.detailUrl).not.toBe(eel.imageUrl);
     expect(eel.specs).toEqual([
-      { itemId: item['砂锅焗溪鳗（大份）'], label: '大份', price: 8800, state: 'ok', remaining: null },
-      { itemId: item['砂锅焗溪鳗（小份）'], label: '小份', price: 4800, state: 'ok', remaining: null },
+      { itemId: item['砂锅焗溪鳗（大份）'], label: '大份', labelEn: '', price: 8800, state: 'ok', remaining: null },
+      { itemId: item['砂锅焗溪鳗（小份）'], label: '小份', labelEn: '', price: 4800, state: 'ok', remaining: null },
     ]);
     // 中间的空位是 null
     expect(lunch.pages[1]!.dishes.map((d) => d?.name ?? null)).toEqual(['小梦若奇白葡萄酒', null, '砂锅黄椒酱焗溪鳗']);

@@ -6,7 +6,8 @@
 //   · 分类自己的信息与它的各页共用一个版本号：修改、保存各页都只锁那个分类一行，版本号对不上拒绝；各页整批换（先删后建）；
 //   · 菜品图文的修改只锁那道菜一行（带版本号），规格整批换；「一个价目项目只在一道菜里」靠唯一索引兜底；
 //   · 新建分类、新建菜品不带操作编号：分类名、规格的唯一索引兜底，重复提交会被拒绝而不是建出两份；
-//   · 生成初稿先取电子菜单的咨询锁、全部串行；图片按内容去重、不加锁。
+//   · 生成初稿先取电子菜单的咨询锁、全部串行；图片按内容去重、不加锁；
+//   · 导入英文对照表（8.0.13）：一个事务里按菜品编号升序锁菜品一行，只改有变化的、版本号加一；同样的内容再导一次什么都不改。
 
 import { z } from 'zod';
 import { defaultTier, type TierPrice } from '@shared/catalog';
@@ -15,16 +16,23 @@ import {
   emenuNoteWorstCase,
   EMENU_LAYOUT_INFO,
   EMENU_LAYOUTS,
+  EMENU_ATTR_EN_MAX,
+  EMENU_ATTR_SEPARATOR,
+  EMENU_ENGLISH_COLUMNS,
+  EMENU_ENGLISH_MAX_ROWS,
+  emenuSheetCellOut,
   EMENU_MAX_AVOID_OPTIONS,
   EMENU_MAX_FOOTER,
   EMENU_MAX_IDLE_MINUTES,
   EMENU_MAX_NOTE,
+  EMENU_MAX_OPTION_EN,
   EMENU_MAX_OPTION_LENGTH,
   EMENU_MAX_PAGES,
   EMENU_MAX_SERVE_OPTIONS,
   type EmenuAdmin,
   type EmenuCategoryAdmin,
   type EmenuDishAdmin,
+  type EmenuEnglishResult,
   type EmenuItemOption,
   type EmenuLayout,
   type EmenuPageAdmin,
@@ -34,6 +42,7 @@ import { isForeignKeyViolation, isUniqueViolation, type Db, type Tx } from '../.
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
 import { conflict, notFound, unprocessable } from '../../lib/errors';
+import { toCsv } from '../../lib/csv';
 import { hashRequest } from '../../lib/idempotency';
 import { saveRuleSetting } from '../../lib/rule-settings';
 import { setTxTimeouts } from '../../lib/tx';
@@ -81,9 +90,10 @@ async function loadCategories(db: Db): Promise<EmenuCategoryAdmin[]> {
 
 async function loadDishes(db: Db, categories: EmenuCategoryAdmin[]): Promise<EmenuDishAdmin[]> {
   const dishes = await db<Omit<EmenuDishAdmin, 'specs' | 'usedIn'>[]>`
-    SELECT id, name, name_en, tagline, description, attrs, unit, image_id, detail_image_id, active, version FROM emenu_dishes ORDER BY active DESC, id`;
-  const specs = await db<{ dishId: number; itemId: number; label: string; itemName: string; prices: TierPrice[]; orderable: boolean }[]>`
-    SELECT sp.dish_id, sp.item_id, sp.label, i.name AS item_name, ${pricesColumn(db)} AS prices,
+    SELECT id, name, name_en, tagline, description, attrs, unit, tagline_en, description_en, attrs_en, unit_en, image_id, detail_image_id, active, version
+    FROM emenu_dishes ORDER BY active DESC, id`;
+  const specs = await db<{ dishId: number; itemId: number; label: string; labelEn: string; itemName: string; prices: TierPrice[]; orderable: boolean }[]>`
+    SELECT sp.dish_id, sp.item_id, sp.label, sp.label_en, i.name AS item_name, ${pricesColumn(db)} AS prices,
            (i.active AND NOT i.technician_required AND st.id IS NOT NULL) AS orderable
     FROM emenu_dish_specs sp JOIN service_items i ON i.id = sp.item_id LEFT JOIN kitchen_stations st ON st.id = i.station_id AND st.active
     ORDER BY sp.dish_id, sp.sort_no, sp.item_id`;
@@ -96,7 +106,7 @@ async function loadDishes(db: Db, categories: EmenuCategoryAdmin[]): Promise<Eme
     detailImageId: d.detailImageId === null ? null : Number(d.detailImageId),
     specs: specs
       .filter((s) => Number(s.dishId) === Number(d.id))
-      .map((s) => ({ itemId: Number(s.itemId), label: s.label, itemName: s.itemName, price: defaultPrice(s.prices), orderable: s.orderable })),
+      .map((s) => ({ itemId: Number(s.itemId), label: s.label, labelEn: s.labelEn, itemName: s.itemName, price: defaultPrice(s.prices), orderable: s.orderable })),
     usedIn: [...(usedIn.get(Number(d.id)) ?? [])],
   }));
 }
@@ -157,6 +167,9 @@ const RulesInput = z.object({
   serveOptions: optionList('起菜方式', EMENU_MAX_SERVE_OPTIONS),
   idleMinutes: z.number('分钟数必须是整数').int('分钟数必须是整数').min(0, '不能小于 0').max(EMENU_MAX_IDLE_MINUTES, `最多 ${EMENU_MAX_IDLE_MINUTES} 分钟`),
   offHours: z.enum(['hide', 'show'], '请选择不在供应时段的分类怎么显示'),
+  langSwitch: z.boolean(),
+  optionsEn: z.record(z.string().max(EMENU_MAX_OPTION_LENGTH), z.string().trim().max(EMENU_MAX_OPTION_EN, `选项的英文最多 ${EMENU_MAX_OPTION_EN} 个字符`)),
+  motion: z.boolean(),
 });
 
 /** 保存设置：只交改过的项；带页面打开时的版本，别人先保存过拒绝 */
@@ -169,7 +182,10 @@ export async function saveEmenuRules(deps: Deps, raw: unknown, ctx: OpContext): 
     loadEmenuRules,
     async (before, tx) => {
       if (rulesRev(before) !== rev) throw changed('设置');
-      const next = parse(RulesInput, { ...DEFAULT_EMENU_RULES, ...before, ...patch });
+      const merged = parse(RulesInput, { ...DEFAULT_EMENU_RULES, ...before, ...patch });
+      // 选项的英文只留现在还有的选项、填了字的（删掉的选项的英文跟着去掉）
+      const options = new Set([...merged.avoidOptions, ...merged.serveOptions]);
+      const next = { ...merged, optionsEn: Object.fromEntries(Object.entries(merged.optionsEn).filter(([k, v]) => options.has(k) && v)) };
       if (emenuNoteWorstCase(next.avoidOptions, next.serveOptions) > EMENU_MAX_NOTE) {
         throw unprocessable('REMARK_OPTIONS_TOO_LONG', `忌口与起菜方式的选项加起来太长了：全选上再写满自定义备注要放进 ${EMENU_MAX_NOTE} 个字里，请减少或缩短选项`);
       }
@@ -314,6 +330,10 @@ const DishFields = z.object({
   description: z.string().trim().max(200, '介绍最多 200 个字').default(''),
   attrs: z.array(z.string().trim().min(1, '属性行不能为空').max(24, '属性行最多 24 个字')).max(3, '属性行最多 3 行').default([]),
   unit: z.string().trim().min(1, '请填写单位').max(4, '单位最多 4 个字').default('份'),
+  taglineEn: z.string().trim().max(80, '小字的英文最多 80 个字符').default(''),
+  descriptionEn: z.string().trim().max(400, '英文介绍最多 400 个字符').default(''),
+  attrsEn: z.array(z.string().trim().min(1, '属性行的英文不能有空行').max(EMENU_ATTR_EN_MAX, `属性行的英文每行最多 ${EMENU_ATTR_EN_MAX} 个字符`)).max(3, '属性行的英文最多 3 行').default([]),
+  unitEn: z.string().trim().max(12, '单位的英文最多 12 个字符').default(''),
   imageId,
   detailImageId: imageId,
   active: z.boolean().default(true),
@@ -322,6 +342,7 @@ const DishFields = z.object({
       z.object({
         itemId: z.number('请选择价目项目').int().positive('请选择价目项目'),
         label: z.string().trim().max(8, '规格名最多 8 个字').default(''),
+        labelEn: z.string().trim().max(16, '规格的英文最多 16 个字符').default(''),
       }),
       '请至少选一个价目项目',
     )
@@ -343,7 +364,7 @@ function checkSpecs(d: DishData) {
 async function writeSpecs(tx: Tx, dishId: number, d: DishData) {
   await tx`DELETE FROM emenu_dish_specs WHERE dish_id = ${dishId}`;
   for (const [i, s] of d.specs.entries()) {
-    await tx`INSERT INTO emenu_dish_specs (dish_id, item_id, label, sort_no) VALUES (${dishId}, ${s.itemId}, ${d.specs.length > 1 ? s.label : ''}, ${i})`;
+    await tx`INSERT INTO emenu_dish_specs (dish_id, item_id, label, label_en, sort_no) VALUES (${dishId}, ${s.itemId}, ${d.specs.length > 1 ? s.label : ''}, ${d.specs.length > 1 ? s.labelEn : ''}, ${i})`;
   }
 }
 
@@ -366,8 +387,9 @@ export async function createEmenuDish(deps: Deps, raw: unknown, ctx: OpContext):
   try {
     await deps.sql.begin(async (tx) => {
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO emenu_dishes (name, name_en, tagline, description, attrs, unit, image_id, detail_image_id, active, created_by, updated_by)
-        VALUES (${d.name}, ${d.nameEn}, ${d.tagline}, ${d.description}, ${d.attrs}, ${d.unit}, ${d.imageId}, ${d.detailImageId}, ${d.active}, ${ctx.actor.id}, ${ctx.actor.id})
+        INSERT INTO emenu_dishes (name, name_en, tagline, description, attrs, unit, tagline_en, description_en, attrs_en, unit_en, image_id, detail_image_id, active, created_by, updated_by)
+        VALUES (${d.name}, ${d.nameEn}, ${d.tagline}, ${d.description}, ${d.attrs}, ${d.unit}, ${d.taglineEn}, ${d.descriptionEn}, ${d.attrsEn}, ${d.unitEn},
+                ${d.imageId}, ${d.detailImageId}, ${d.active}, ${ctx.actor.id}, ${ctx.actor.id})
         RETURNING id`;
       await writeSpecs(tx, Number(row!.id), d);
       await writeAudit(tx, { staffId: ctx.actor.id, action: 'emenu_saved', targetType: 'emenu_dish', targetId: row!.id, detail: { summary: `新建电子菜单菜品「${d.name}」` }, ip: ctx.ip });
@@ -389,6 +411,7 @@ export async function updateEmenuDish(deps: Deps, id: number, raw: unknown, ctx:
       if (cur.version !== d.version) throw changed(`菜品「${cur.name}」`);
       await tx`
         UPDATE emenu_dishes SET name = ${d.name}, name_en = ${d.nameEn}, tagline = ${d.tagline}, description = ${d.description}, attrs = ${d.attrs}, unit = ${d.unit},
+               tagline_en = ${d.taglineEn}, description_en = ${d.descriptionEn}, attrs_en = ${d.attrsEn}, unit_en = ${d.unitEn},
                image_id = ${d.imageId}, detail_image_id = ${d.detailImageId}, active = ${d.active}, version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now()
         WHERE id = ${id}`;
       await writeSpecs(tx, id, d);
@@ -398,6 +421,86 @@ export async function updateEmenuDish(deps: Deps, id: number, raw: unknown, ctx:
     throw await dishError(deps.sql, error, d, id);
   }
   return emenuAdmin(deps.sql);
+}
+
+// ───────────────────────── 英文对照表（8.0.13） ─────────────────────────
+
+/** 导出：每道菜一行，中文各列给翻译的人看、英文各列填好再导入（列名见 EMENU_ENGLISH_COLUMNS） */
+export async function emenuEnglishCsv(db: Db): Promise<string> {
+  const dishes = await db<{ id: number; name: string; nameEn: string; tagline: string; taglineEn: string; description: string; descriptionEn: string; attrs: string[]; attrsEn: string[]; unit: string; unitEn: string }[]>`
+    SELECT id, name, name_en, tagline, tagline_en, description, description_en, attrs, attrs_en, unit, unit_en FROM emenu_dishes ORDER BY active DESC, id`;
+  return toCsv([
+    [...EMENU_ENGLISH_COLUMNS],
+    // 文字各列过一遍 emenuSheetCellOut：防表格公式的单引号读回来时能原样去掉（见 @shared/emenu）
+    ...dishes.map((d) => [
+      Number(d.id),
+      ...[d.name, d.nameEn, d.tagline, d.taglineEn, d.description, d.descriptionEn, d.attrs.join(EMENU_ATTR_SEPARATOR), d.attrsEn.join(EMENU_ATTR_SEPARATOR), d.unit, d.unitEn].map(emenuSheetCellOut),
+    ]),
+  ]);
+}
+
+const englishText = (max: number, label: string) => z.string().trim().max(max, `${label}最多 ${max} 个字符`).optional();
+const EnglishInput = z.object({
+  rows: z
+    .array(
+      z.object({
+        id: z.number('编号不对').int('编号不对').positive('编号不对'),
+        nameEn: englishText(80, '英文名'),
+        taglineEn: englishText(80, '小字的英文'),
+        descriptionEn: englishText(400, '英文介绍'),
+        attrsEn: z.array(z.string().trim().min(1).max(EMENU_ATTR_EN_MAX, `属性行的英文每条最多 ${EMENU_ATTR_EN_MAX} 个字符`)).max(3, '属性行的英文最多 3 条').optional(),
+        unitEn: englishText(12, '单位的英文'),
+      }),
+      '没有要导入的内容',
+    )
+    .min(1, '没有要导入的内容')
+    .max(EMENU_ENGLISH_MAX_ROWS, `一次最多导入 ${EMENU_ENGLISH_MAX_ROWS} 行`),
+});
+
+/**
+ * 导入英文对照表：只更新英文各列、只认给了字的项（空着的不动原来的英文）；编号对不上的跳过、在结果里列出。
+ * 一个事务里按编号升序锁菜品一行；有变化的版本号加一（开着的修改菜品窗口再保存会被拒绝、要重新载入）。
+ */
+export async function importEmenuEnglish(deps: Deps, raw: unknown, ctx: OpContext): Promise<EmenuAdmin & { english: EmenuEnglishResult }> {
+  const { rows } = parse(EnglishInput, raw);
+  const ids = rows.map((r) => r.id);
+  if (new Set(ids).size !== ids.length) throw unprocessable('ENGLISH_DUPLICATE_ID', '同一个编号出现了两次，请检查文件');
+  const english = await deps.sql.begin(async (tx): Promise<EmenuEnglishResult> => {
+    await setTxTimeouts(tx);
+    const current = await tx<{ id: number; nameEn: string; taglineEn: string; descriptionEn: string; attrsEn: string[]; unitEn: string }[]>`
+      SELECT id, name_en, tagline_en, description_en, attrs_en, unit_en FROM emenu_dishes WHERE id IN ${tx(ids)} ORDER BY id FOR UPDATE`;
+    const byId = new Map(current.map((c) => [Number(c.id), c]));
+    let updated = 0;
+    for (const r of [...rows].sort((a, b) => a.id - b.id)) {
+      const cur = byId.get(r.id);
+      if (!cur) continue;
+      const next = {
+        nameEn: r.nameEn || cur.nameEn,
+        taglineEn: r.taglineEn || cur.taglineEn,
+        descriptionEn: r.descriptionEn || cur.descriptionEn,
+        attrsEn: r.attrsEn?.length ? r.attrsEn : cur.attrsEn,
+        unitEn: r.unitEn || cur.unitEn,
+      };
+      if (next.nameEn === cur.nameEn && next.taglineEn === cur.taglineEn && next.descriptionEn === cur.descriptionEn && next.unitEn === cur.unitEn && JSON.stringify(next.attrsEn) === JSON.stringify(cur.attrsEn)) continue;
+      await tx`
+        UPDATE emenu_dishes SET name_en = ${next.nameEn}, tagline_en = ${next.taglineEn}, description_en = ${next.descriptionEn}, attrs_en = ${next.attrsEn}, unit_en = ${next.unitEn},
+               version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now()
+        WHERE id = ${r.id}`;
+      updated += 1;
+    }
+    const missing = ids.filter((id) => !byId.has(id)).sort((a, b) => a - b);
+    if (updated > 0) {
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'emenu_saved',
+        targetType: 'emenu',
+        detail: { summary: `导入电子菜单的英文对照表：更新 ${updated} 道菜${missing.length ? `，${missing.length} 个编号对不上` : ''}`, updated, missing: missing.slice(0, 50) },
+        ip: ctx.ip,
+      });
+    }
+    return { updated, unchanged: current.length - updated, missing };
+  });
+  return { ...(await emenuAdmin(deps.sql)), english };
 }
 
 // ───────────────────────── 从价目表生成初稿 ─────────────────────────

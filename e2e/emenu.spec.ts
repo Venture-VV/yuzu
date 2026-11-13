@@ -6,6 +6,9 @@
 //    前台账单与厨房屏有这一单（经办人是服务员、带桌号与整单备注）；估清后平板标「已售罄」；点手牌结束点餐。
 // ② 各尺寸（门店电脑、平板横屏、平板竖屏）：合成菜单代替接口、只读——整页按 1024×768 等比缩放、不出滚动条，
 //    1024×768 时几处文字正好在设计稿量的位置上。
+// ③ 8.0.13（docs/EMENU.md 第 11 节，合成菜单、只读）：「中 | EN」切换（录了英文的显示英文、没录的显示中文、切回来位置不变、
+//    结束点餐回到中文、后台关掉就没有开关）；键盘弹起（正在输入时窗口变矮）页面不缩放、结果列表在键盘上面；
+//    拖动翻页与两头的回弹、关掉菜品详情时留一个退场的影子、「减少动态效果」时都没有。
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan、前台 xiaozhou，密码 yuzu2026。
 // 专用的菜品、档口、分类（E2E 开头）与平板账号 e2epad 留着下次沿用；结束时关掉平板点餐与餐饮、停用平板账号，可重复执行。
 import { randomUUID } from 'node:crypto';
@@ -140,15 +143,19 @@ function syntheticMenu(): EmenuMenu {
     description: '',
     attrs: [],
     unit: '份',
+    taglineEn: '',
+    descriptionEn: '',
+    attrsEn: [],
+    unitEn: '',
     imageUrl: null,
     detailUrl: null,
-    specs: [{ itemId: 9000 + id, label: '', price, state: 'ok' as const, remaining: null }],
+    specs: [{ itemId: 9000 + id, label: '', labelEn: '', price, state: 'ok' as const, remaining: null }],
   });
   return {
     serverTime: new Date().toISOString(),
     businessDate: '2026-11-11',
     enabled: true,
-    rules: { footerText: 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED', avoidOptions: ['不加香菜'], serveOptions: ['即起'], idleMinutes: 0, offHours: 'hide', coverUrl: null },
+    rules: { footerText: 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED', avoidOptions: ['不加香菜'], serveOptions: ['即起'], idleMinutes: 0, offHours: 'hide', langSwitch: true, optionsEn: {}, motion: true, coverUrl: null },
     categories: [
       { id: 1, name: '西式午餐', nameEn: 'WESTERN LUNCH', window: null, open: true, pages: [{ layout: 'duo_row', title: '', titleEn: '', dishes: [dish(1, '温泉蛋黑松露奶油意粉', 'Hot Spring Egg And Black Truffle Cream Spaghetti', 4200), dish(2, '和牛牛肉汉堡', 'Wagyu Beef Burger', 4200)] }] },
       { id: 2, name: '中式午餐', nameEn: 'CHINESE LUNCH', window: null, open: true, pages: [{ layout: 'cover', title: '', titleEn: '', dishes: [dish(3, '广式猪脚姜浸花胶', 'Cantonese Pork Trotter Ginger Vinegar Fish Maw', 4200)] }] },
@@ -156,6 +163,36 @@ function syntheticMenu(): EmenuMenu {
     later: [],
     tables: [],
   };
+}
+
+/** 合成的接口（只读用例用）：菜单、按手牌找客人、核对桌号；写请求一律掐掉并记下来 */
+async function mockEmenu(page: Page, menu: () => EmenuMenu): Promise<string[]> {
+  const writes: string[] = [];
+  await page.route('**/api/emenu/**', (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() !== 'GET') {
+      writes.push(url.pathname);
+      return route.abort();
+    }
+    if (url.pathname === '/api/emenu/menu') return route.fulfill({ json: menu() });
+    if (url.pathname === '/api/emenu/guest') return route.fulfill({ json: { visitId: 1, tagCode: 'A8060', ordered: [], orderedTotal: 0 } });
+    if (url.pathname === '/api/emenu/table') return route.fulfill({ json: { tableName: 'A01' } });
+    return route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: '没有' } } });
+  });
+  return writes;
+}
+
+/** 起始页 → 输手牌 8060、桌号 01、2 人 → 进菜单 */
+async function enterMenu(page: Page) {
+  await page.getByTestId('emenu-start').click();
+  for (const d of '8060') await page.getByTestId(`emenu-key-${d}`).click();
+  await page.getByTestId('emenu-field-table').click();
+  await page.getByTestId('emenu-key-clear').click();
+  for (const d of '01') await page.getByTestId(`emenu-key-${d}`).click();
+  await page.getByTestId('emenu-field-guests').click();
+  await page.getByTestId('emenu-key-2').click();
+  await page.getByTestId('emenu-ask-go').click();
+  await expect(page.getByTestId('emenu-header')).toBeVisible();
 }
 
 /** 清掉这台浏览器里平板点餐页存的东西（这一次点餐、待确认的记录） */
@@ -222,6 +259,28 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       // 规则总表里有这一项
       await page.goto('/admin/settings');
       await expect(page.getByText('平板点餐', { exact: true }).first()).toBeVisible();
+
+      // ①′ 8.0.13 英文：在「菜品图文」里给砂锅鱼填英文介绍与规格的英文；用「英文对照表」给小炒肉换一个英文名
+      await page.goto('/admin/emenu');
+      await page.getByRole('radio', { name: /菜品图文/ }).click();
+      await page.getByTestId(`emenu-admin-dish-${FISH.name}`).click();
+      const enDialog = page.getByRole('dialog').filter({ hasText: '修改菜品' });
+      await enDialog.getByLabel('英文介绍').fill('E2E: fish slow-baked in a clay pot.');
+      await enDialog.getByTestId('emenu-admin-spec-en-1').fill('Half');
+      await enDialog.getByTestId('emenu-admin-dish-save').click();
+      await expect(page.getByText('菜品已保存')).toBeVisible();
+      await page.getByTestId('emenu-admin-english').click();
+      const sheet = page.getByTestId('emenu-admin-english-dialog');
+      await expect(sheet.getByTestId('emenu-admin-english-export')).toBeVisible();
+      const exported = await page.request.get('/api/admin/emenu/english.csv');
+      expect(exported.ok()).toBe(true);
+      expect(await exported.text()).toContain(`${fishId},${FISH.name},${FISH.nameEn},`);
+      await sheet.getByTestId('emenu-admin-english-file').setInputFiles({ name: '英文对照表.csv', mimeType: 'text/csv', buffer: Buffer.from(`\uFEFF编号,菜名,英文名\r\n${porkId},${PORK.name},E2E Wok Fried Pork\r\n999999999,没有这道菜,Ghost\r\n`, 'utf8') });
+      await expect(sheet.getByTestId('emenu-admin-english-preview')).toContainText('读到 2 行');
+      await expect(sheet.getByTestId('emenu-admin-english-preview')).toContainText('1 行的编号对不上');
+      await page.getByTestId('emenu-admin-english-apply').click();
+      await expect(sheet.getByTestId('emenu-admin-english-result')).toContainText('更新了 1 道菜');
+      await page.getByRole('button', { name: '关闭' }).last().click();
 
       // ② 员工账号：给前台小周生成点单密码（只显示一次）；岗位里有「点餐平板」
       const tablet = await prepareTablet(page);
@@ -297,6 +356,12 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       await expect(page1.getByTestId(`emenu-dish-${porkId}`)).toContainText(PORK.name);
       await expect(page1.getByTestId(`emenu-dish-${porkId}`)).toContainText('(例份)');
       await expect(page1.getByTestId(`emenu-dish-${porkId}`)).toContainText('48');
+      // 8.0.13 点「EN」：后台刚录的英文显示出来（对照表导入的英文名、内置的单位）；再点换回中文接着点
+      await pad.getByTestId('emenu-lang').click();
+      await expect(page1.getByTestId(`emenu-name-${porkId}`)).toContainText('E2E Wok Fried Pork');
+      await expect(page1.getByTestId(`emenu-dish-${porkId}`)).toContainText('/portion');
+      await pad.getByTestId('emenu-lang').click();
+      await expect(page1.getByTestId(`emenu-name-${porkId}`)).toContainText(PORK.name);
       await page1.getByTestId(`emenu-add-${porkId}`).click();
       await page1.getByTestId(`emenu-add-${porkId}`).click();
       await expect(pad.getByTestId('emenu-order-count')).toHaveText('2');
@@ -312,6 +377,13 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       const detail = pad.getByTestId('emenu-detail');
       await expect(detail.getByTestId('emenu-detail-name')).toContainText(FISH.name);
       await expect(detail.getByTestId('emenu-detail-price')).toContainText('88');
+      // 详情里切到英文：英文介绍、规格的英文（大份用内置的 Large，小份是后台填的 Half）
+      await pad.getByTestId('emenu-lang').click();
+      await expect(detail.getByTestId('emenu-detail-desc')).toHaveText('E2E: fish slow-baked in a clay pot.');
+      await expect(detail.getByTestId(`emenu-spec-${fishBig}`)).toHaveText('Large');
+      await expect(detail.getByTestId(`emenu-spec-${fishSmall}`)).toHaveText('Half');
+      await pad.getByTestId('emenu-lang').click();
+      await expect(detail.getByTestId(`emenu-spec-${fishSmall}`)).toHaveText('小份');
       await detail.getByTestId(`emenu-spec-${fishSmall}`).click();
       await expect(detail.getByTestId('emenu-detail-price')).toContainText('42');
       await detail.getByTestId('emenu-detail-add').click();
@@ -619,6 +691,248 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await notice.getByTestId('emenu-notice-ok').click();
     await expect(page.getByTestId('emenu-cart-9003')).toContainText('广式猪脚姜浸花胶');
     await expect(page.getByTestId('emenu-submit')).toBeEnabled();
+    await clearEmenuStorage(page);
+  });
+
+  test('8.0.13 中 | EN：录了英文的显示英文、没录的显示中文；切回来位置不变；结束点餐回到中文；后台关掉就没有开关（合成菜单，只读）', async ({ page }) => {
+    const menu = syntheticMenu();
+    // 第 1 道菜录了英文介绍与小字；第 2 道只有英文名；封面那道连英文名都没有
+    const [first, second] = menu.categories[0]!.pages[0]!.dishes as [EmenuMenu['categories'][0]['pages'][0]['dishes'][0] & object, EmenuMenu['categories'][0]['pages'][0]['dishes'][0] & object];
+    Object.assign(first, { tagline: '例份', taglineEn: 'Regular', description: '温泉蛋与黑松露。', descriptionEn: 'Onsen egg and black truffle.' });
+    Object.assign(menu.categories[1]!.pages[0]!.dishes[0]!, { nameEn: '', description: '猪脚姜。' });
+    const writes = await mockEmenu(page, () => menu);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await loginStaff(page, 'linlan');
+    await clearEmenuStorage(page);
+    await page.goto('/emenu');
+    await expect(page.getByTestId('emenu-start')).toBeVisible();
+    const viewport = page.viewportSize()!;
+    const scale = Math.min(viewport.width / 1024, viewport.height / 768);
+    const stage = (await page.locator('[data-emenu-stage]').boundingBox())!;
+    const at = async (testId: string) => {
+      const b = (await page.getByTestId(testId).first().boundingBox())!;
+      return { x: (b.x - stage.x) / scale, y: (b.y - stage.y) / scale };
+    };
+    const near = (actual: number, expected: number) => expect(Math.abs(actual - expected), `${actual} ≈ ${expected}`).toBeLessThanOrEqual(1);
+
+    // 起始页右上角的开关：默认中文；点一下换成英文，输入信息的弹窗跟着是英文
+    const lang = page.getByTestId('emenu-lang');
+    await expect(lang).toHaveAttribute('data-lang', 'zh');
+    await expect(page.getByTestId('emenu')).toHaveAttribute('data-lang', 'zh');
+    near((await at('emenu-lang')).x, 936);
+    await lang.click();
+    await expect(lang).toHaveAttribute('data-lang', 'en');
+    await page.getByTestId('emenu-start').click();
+    const ask = page.getByTestId('emenu-ask');
+    await expect(ask).toContainText('INPUT INFORMATION');
+    await expect(ask.getByTestId('emenu-field-tag')).toContainText('Tag');
+    await expect(ask.getByTestId('emenu-ask-go')).toHaveText('Start ordering');
+    // 弹窗开着时也能换回中文
+    await lang.click();
+    await expect(ask.getByTestId('emenu-ask-go')).toHaveText('开始点单');
+    await expect(ask.getByTestId('emenu-field-tag')).toContainText('手牌');
+    await ask.getByTestId('emenu-ask-cancel').click();
+    await enterMenu(page);
+
+    // 中文：与 8.0.12 一样（位置是设计稿量的）；顶栏的开关在搜索左边
+    const dish1 = page.getByTestId('emenu-dish-1');
+    await expect(page.getByTestId('emenu-name-1')).toContainText('温泉蛋黑松露奶油意粉');
+    await expect(dish1).toContainText('/份');
+    near((await at('emenu-dish-1')).x, 39.7);
+    near((await at('emenu-dish-1')).y, 557.1);
+    near((await at('emenu-lang')).x, 726);
+    near((await at('emenu-search-open')).x, 795.4);
+
+    // 切到英文：英文名为主、中文名还在（小字）；介绍、小字、单位、手牌、分类页签都是英文
+    await page.getByTestId('emenu-lang').click();
+    await expect(page.getByTestId('emenu')).toHaveAttribute('data-lang', 'en');
+    await expect(page.getByTestId('emenu-name-1')).toContainText('Hot Spring Egg And Black Truffle Cream Spaghetti');
+    await expect(page.getByTestId('emenu-name-1')).toContainText('(Regular)');
+    await expect(dish1).toContainText('温泉蛋黑松露奶油意粉');
+    await expect(dish1).toContainText('/portion');
+    await expect(page.getByTestId('emenu-tag')).toHaveText('Tag: A8060');
+    await expect(page.getByTestId('emenu-cat-1')).toContainText('WESTERN LUNCH');
+    // 第 2 道只录了英文名：名字是英文
+    await expect(page.getByTestId('emenu-name-2')).toContainText('Wagyu Beef Burger');
+    // 菜品详情：英文介绍
+    await page.getByTestId('emenu-photo-1').click();
+    await expect(page.getByTestId('emenu-detail-name')).toContainText('Hot Spring Egg');
+    await expect(page.getByTestId('emenu-detail-desc')).toHaveText('Onsen egg and black truffle.');
+    await page.getByTestId('emenu-detail-close').click();
+    // 没录英文名的菜（封面那道）照旧显示中文，不留空白；封面的大标题是分类的英文名
+    await page.getByTestId('emenu-cat-2').click();
+    await expect(page.getByTestId('emenu-cover-title')).toHaveText('CHINESE LUNCH');
+    await expect(page.getByTestId('emenu-name-3')).toHaveText('广式猪脚姜浸花胶');
+    await expect(page.getByTestId('emenu-dish-3')).toContainText('猪脚姜。');
+
+    // 加菜、订单抽屉、备注：界面是英文；忌口的选项显示内置的英文，交给门店系统的仍是中文选项（这里不提交）
+    await page.getByTestId('emenu-add-3').click();
+    await expect(page.getByTestId('emenu-toast')).toContainText('added');
+    await page.getByTestId('emenu-order-open').click();
+    const drawer = page.getByTestId('emenu-drawer');
+    await expect(drawer).toContainText('DISH INFORMATION');
+    await expect(drawer.getByTestId('emenu-tab-cart')).toHaveText('Cart');
+    await expect(drawer.getByTestId('emenu-submit')).toHaveText('Place order (please call our staff)');
+    await drawer.getByTestId('emenu-remark-open').click();
+    await expect(page.getByTestId('emenu-remark-不加香菜')).toHaveText('No cilantro');
+    await page.getByTestId('emenu-remark-不加香菜').click();
+    await page.getByTestId('emenu-remark-done').click();
+    await expect(page.getByTestId('emenu-remark-open')).toHaveText('Notes: No cilantro');
+    // 换回中文：同一份备注显示中文
+    await page.mouse.click(100 * scale + stage.x, 400 * scale + stage.y);
+    await expect(page.getByTestId('emenu-drawer')).toBeHidden();
+    await page.getByTestId('emenu-lang').click();
+    await page.getByTestId('emenu-order-open').click();
+    await expect(page.getByTestId('emenu-remark-open')).toHaveText('备注：不加香菜');
+    await page.mouse.click(100 * scale + stage.x, 400 * scale + stage.y);
+
+    // 页面被系统刷新：这一次点餐的语言还在；结束点餐回到中文（下一位客人从中文开始）
+    await page.getByTestId('emenu-lang').click();
+    await page.reload();
+    await expect(page.getByTestId('emenu-tag')).toHaveText('Tag: A8060');
+    await page.getByTestId('emenu-tag').click();
+    await expect(page.getByTestId('emenu-end')).toContainText('FINISH ORDERING');
+    await page.getByTestId('emenu-end-ok').click();
+    await expect(page.getByTestId('emenu-start')).toBeVisible();
+    await expect(page.getByTestId('emenu-lang')).toHaveAttribute('data-lang', 'zh');
+
+    // 后台关掉中英切换：没有开关，顶栏与 8.0.12 一样
+    menu.rules.langSwitch = false;
+    await page.reload();
+    await expect(page.getByTestId('emenu-start')).toBeVisible();
+    await expect(page.getByTestId('emenu-lang')).toHaveCount(0);
+    await enterMenu(page);
+    await expect(page.getByTestId('emenu-lang')).toHaveCount(0);
+    await expect(page.getByTestId('emenu-tag')).toContainText('手牌');
+    await noScroll(page);
+    expect(writes).toEqual([]);
+    await clearEmenuStorage(page);
+  });
+
+  test('8.0.13 键盘与动效：正在输入时窗口变矮页面不缩放、结果列表在键盘上面；拖动翻页与回弹；关掉详情留一个退场的影子（合成菜单，只读）', async ({ page }, info) => {
+    test.skip(info.project.name !== '门店电脑', '要改窗口大小、拖动鼠标，只在门店电脑这一组跑一次');
+    const menu = syntheticMenu();
+    const writes = await mockEmenu(page, () => menu);
+    await loginStaff(page, 'linlan');
+    await clearEmenuStorage(page);
+    await page.goto('/emenu');
+    await expect(page.getByTestId('emenu-start')).toBeVisible();
+    // 动效开着（没有要求减少动态效果、后台也没设成简洁）
+    await expect(page.getByTestId('emenu')).not.toHaveAttribute('data-motion', 'off');
+    await enterMenu(page);
+    const full = page.viewportSize()!;
+    const stageBox = async () => (await page.locator('[data-emenu-stage]').boundingBox())!;
+    const before = await stageBox();
+    // 进菜单时那一页有轻微放大的入场动画：等它播完再量菜品图的大小
+    const photoWidth = async () => (await page.getByTestId('emenu-photo-1').boundingBox())!.width;
+    await expect.poll(photoWidth).toBeCloseTo(386.2 * (before.width / 1024), 0);
+    const photoBefore = (await page.getByTestId('emenu-photo-1').boundingBox())!;
+
+    // ① 搜索时键盘弹起：部分安卓平板会把网页可用的高度压小——用「正在输入时把窗口压矮」来模拟
+    await page.getByTestId('emenu-search-open').click();
+    await page.getByTestId('emenu-search-input').fill('a');
+    await expect(page.getByTestId('emenu-search-list')).toBeVisible();
+    const short = Math.round(full.height * 0.45);
+    await page.setViewportSize({ width: full.width, height: short });
+    await expect(page.getByTestId('emenu')).toHaveAttribute('data-keyboard', 'true');
+    const during = await stageBox();
+    // 页面没有缩小、没有挪动（搜索框在最上面）；菜品图一样大
+    expect(during.width).toBeCloseTo(before.width, 0);
+    expect(during.height).toBeCloseTo(before.height, 0);
+    expect(during.x).toBeCloseTo(before.x, 0);
+    expect(during.y).toBeCloseTo(before.y, 0);
+    const photoDuring = (await page.getByTestId('emenu-photo-1').boundingBox())!;
+    expect(photoDuring.width).toBeCloseTo(photoBefore.width, 0);
+    expect(photoDuring.height).toBeCloseTo(photoBefore.height, 0);
+    // 结果列表整个在键盘上面
+    const list = (await page.getByTestId('emenu-search-results').boundingBox())!;
+    expect(list.y + list.height).toBeLessThanOrEqual(short);
+    // 键盘收起：还是原来的大小
+    await page.setViewportSize(full);
+    await expect(page.getByTestId('emenu')).not.toHaveAttribute('data-keyboard', 'true');
+    expect((await stageBox()).width).toBeCloseTo(before.width, 0);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('emenu-search')).toBeHidden();
+    // 没在输入时窗口真的变小了（不是键盘）：照常重新缩放
+    await expect.poll(async () => page.evaluate(() => document.activeElement?.tagName)).not.toBe('INPUT');
+    await page.waitForTimeout(1100);
+    await page.setViewportSize({ width: full.width, height: short });
+    await expect.poll(async () => (await stageBox()).height).toBeLessThan(before.height - 50);
+    await page.setViewportSize(full);
+    await expect.poll(async () => (await stageBox()).height).toBeGreaterThan(before.height - 2);
+
+    // ② 备注抽屉的自定义备注在屏幕下半部分：键盘盖住时整页往上挪到它露出来，收起后回到原位
+    await page.getByTestId('emenu-add-1').click();
+    await page.getByTestId('emenu-order-open').click();
+    await page.getByTestId('emenu-remark-open').click();
+    await page.getByTestId('emenu-remark-custom-open').click();
+    const custom = page.getByTestId('emenu-remark-custom');
+    await expect(custom).toBeFocused();
+    await page.setViewportSize({ width: full.width, height: short });
+    await expect.poll(async () => {
+      const b = (await custom.boundingBox())!;
+      return b.y + b.height;
+    }).toBeLessThanOrEqual(short);
+    expect((await stageBox()).width).toBeCloseTo(before.width, 0);
+    await page.setViewportSize(full);
+    await page.getByTestId('emenu-remark-done').click();
+    await expect.poll(async () => (await stageBox()).y).toBeCloseTo(before.y, 0);
+    await page.mouse.click(before.x + 100 * (before.width / 1024), before.y + 400 * (before.height / 768));
+    await expect(page.getByTestId('emenu-drawer')).toBeHidden();
+
+    // ③ 拖动翻页：往左拖过五分之一屏翻到下一页；最后一页再往左拖、第一页往右拖都回弹、不翻页
+    const dots = page.getByTestId('emenu-dots');
+    const drag = async (fromX: number, toX: number) => {
+      const y = before.y + before.height * 0.62;
+      await page.mouse.move(before.x + before.width * fromX, y);
+      await page.mouse.down();
+      const steps = 12;
+      for (let i = 1; i <= steps; i++) await page.mouse.move(before.x + before.width * (fromX + ((toX - fromX) * i) / steps), y);
+      await page.mouse.up();
+    };
+    await expect(dots).toHaveAttribute('data-page', '0');
+    await drag(0.8, 0.3);
+    await expect(dots).toHaveAttribute('data-page', '1');
+    await expect(page.getByTestId('emenu-cover-title')).toBeInViewport();
+    await drag(0.8, 0.3);
+    await expect(dots).toHaveAttribute('data-page', '1');
+    await drag(0.3, 0.8);
+    await expect(dots).toHaveAttribute('data-page', '0');
+    await drag(0.3, 0.8);
+    await expect(dots).toHaveAttribute('data-page', '0');
+    await expect(page.getByTestId('emenu-dish-1')).toBeInViewport();
+    // 拖完松手不会点开手指底下的菜；只拖了一点点不翻页
+    await expect(page.getByTestId('emenu-detail')).toHaveCount(0);
+    await drag(0.5, 0.45);
+    await expect(dots).toHaveAttribute('data-page', '0');
+
+    // ④ 关掉菜品详情：详情马上卸掉（不会有两份能点的），舞台上留一个影子播退场动画，播完自己没有
+    const ghosts = page.locator('[data-emenu-ghosts] > .em-ghost');
+    await page.getByTestId('emenu-photo-1').click();
+    await expect(page.getByTestId('emenu-detail')).toBeVisible();
+    await page.getByTestId('emenu-detail-close').click();
+    await expect(page.getByTestId('emenu-detail')).toHaveCount(0);
+    expect(await ghosts.count()).toBe(1);
+    // 影子不带测试标记、读屏不念、不能点
+    expect(await ghosts.first().evaluate((el) => [el.querySelectorAll('[data-testid]').length, el.getAttribute('aria-hidden'), getComputedStyle(el).pointerEvents])).toEqual([0, 'true', 'none']);
+    await expect(ghosts).toHaveCount(0);
+
+    // ⑤ 系统要求减少动态效果：舞台标 data-motion="off"，关掉详情不留影子
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await expect(page.getByTestId('emenu')).toHaveAttribute('data-motion', 'off');
+    await page.getByTestId('emenu-photo-1').click();
+    await page.getByTestId('emenu-detail-close').click();
+    await expect(page.getByTestId('emenu-detail')).toHaveCount(0);
+    expect(await ghosts.count()).toBe(0);
+    // 后台把动效设成「简洁」也一样
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect(page.getByTestId('emenu')).not.toHaveAttribute('data-motion', 'off');
+    menu.rules.motion = false;
+    await page.reload();
+    await expect(page.getByTestId('emenu-header')).toBeVisible();
+    await expect(page.getByTestId('emenu')).toHaveAttribute('data-motion', 'off');
+    await noScroll(page);
+    expect(writes).toEqual([]);
     await clearEmenuStorage(page);
   });
 });

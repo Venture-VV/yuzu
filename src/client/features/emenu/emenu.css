@@ -50,6 +50,16 @@
   --em-error: #a2412b;
   --em-zh: 'Em Box Zh', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif;
   --em-en: 'Em Box En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', 'STFangsong', sans-serif;
+  /*
+   * 动效（8.0.13，docs/EMENU.md 第 11.3 节）：整体舒缓。要调快慢改这几个数：
+   *   --em-in 进入（弹窗、抽屉、菜品详情）；--em-out 退出；--em-page 翻页与分类切换；--em-micro 按下、选中这类小反馈。
+   * 曲线是缓出：开始快一点、慢慢停下来。
+   */
+  --em-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --em-in: 0.52s;
+  --em-out: 0.32s;
+  --em-page: 0.62s;
+  --em-micro: 0.26s;
 
   font-family: var(--em-zh);
   color: var(--em-ink);
@@ -63,6 +73,12 @@
 
 /* 英文、数字、价格。顶替字体 Average Sans 比设计稿的原字体窄 5–7%：每个字补 0.027em，宽度就与设计稿对上了（全大写的小标题另补到 0.05em 左右） */
 .emenu .em-en {
+  font-family: var(--em-en);
+  letter-spacing: 0.027em;
+}
+
+/* 切到英文（8.0.13）：整页的字默认用英文字体；中文（菜名的小字、没录英文的地方）照旧落到朱雀仿宋 */
+.emenu[data-lang='en'] {
   font-family: var(--em-en);
   letter-spacing: 0.027em;
 }
@@ -103,32 +119,24 @@
   }
 }
 
-/* 菜单页横向一页一页翻：原生滚动 + 吸附，不显示滚动条 */
+/* 菜单页一页一页左右翻（8.0.13 起跟手拖动，strip.tsx）：横向的拖动交给页面自己，浏览器不接手 */
 .emenu-strip {
-  overflow-x: auto;
-  overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
-.emenu-strip::-webkit-scrollbar {
-  display: none;
-}
-.emenu-strip > * {
-  scroll-snap-align: start;
-  scroll-snap-stop: always;
+  overflow: hidden;
+  touch-action: pan-y;
 }
 
+/* 能上下滑的一块（订单抽屉里的菜、搜索结果）：滚动是浏览器自己的，到头的阻尼与回弹在 motion.tsx 的 ScrollArea 里 */
 .emenu-scroll {
   overflow-y: auto;
   scrollbar-width: none;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
 }
 .emenu-scroll::-webkit-scrollbar {
   display: none;
 }
 
+/* ───────────── 进入 ───────────── */
 @keyframes em-fade {
   from {
     opacity: 0;
@@ -145,10 +153,11 @@
     transform: none;
   }
 }
+/* 弹窗：轻微放大、缓入 */
 @keyframes em-pop {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.985);
+    transform: scale(0.94);
   }
   to {
     opacity: 1;
@@ -158,11 +167,53 @@
 @keyframes em-rise {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
     transform: none;
+  }
+}
+/* 菜品详情：从被点的那道菜的位置放大出来（transform-origin 由页面按点的位置给） */
+@keyframes em-zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* 点分类页签、开始点单：那一页轻微放大缓入 */
+@keyframes em-page-in {
+  from {
+    opacity: 0;
+    transform: scale(0.965);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* 起始页（结束点餐回来时）：从略大的地方落定 */
+@keyframes em-settle {
+  from {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* 起始页的氛围大图极慢地放大缩小 */
+@keyframes em-kenburns {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.06);
   }
 }
 /* 下单成功的对勾：先画圆、再画勾（设计稿「勾勾动态展示」） */
@@ -192,18 +243,80 @@
     transform: scale(1);
   }
 }
+/* 提示条：淡入、停留、淡出（一共 2.2 秒，与页面收起它的时间一样） */
+@keyframes em-toast {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  14%,
+  82% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+/* 图片上扫过的一道淡淡的光 */
+@keyframes em-sheen {
+  from {
+    transform: translateX(-130%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(230%) skewX(-18deg);
+  }
+}
+
+/* ───────────── 退出（只用在影子上，见 motion.tsx） ───────────── */
+@keyframes em-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes em-pop-out {
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+@keyframes em-drawer-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes em-zoom-out {
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
 
 .em-fade {
-  animation: em-fade 0.22s ease-out both;
+  animation: em-fade var(--em-in) ease-out both;
 }
 .em-drawer {
-  animation: em-drawer 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: em-drawer var(--em-in) var(--em-ease) both;
 }
 .em-pop {
-  animation: em-pop 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: em-pop var(--em-in) var(--em-ease) both;
 }
 .em-rise {
-  animation: em-rise 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: em-rise var(--em-in) var(--em-ease) both;
+}
+.em-zoom-in {
+  animation: em-zoom-in var(--em-in) var(--em-ease) both;
+}
+.em-page-in {
+  animation: em-page-in var(--em-page) var(--em-ease) both;
+  transform-origin: 50% 56%;
+}
+.em-settle {
+  animation: em-settle var(--em-page) var(--em-ease) both;
+}
+.em-kenburns {
+  animation: em-kenburns 24s ease-in-out infinite alternate;
 }
 .em-flash {
   animation: em-flash 0.7s ease-in-out 3 both;
@@ -211,6 +324,9 @@
 }
 .em-bump {
   animation: em-bump 0.36s ease-out both;
+}
+.em-toast {
+  animation: em-toast 2.2s ease both;
 }
 .em-check-circle {
   stroke-dasharray: 600;
@@ -223,21 +339,173 @@
   animation: em-draw 0.4s ease-out 0.6s forwards;
 }
 
+/* 退场的影子：不能点；自己淡出，里面带 data-em-out 的元素另有各自的退法 */
+.emenu .em-ghost {
+  pointer-events: none;
+  animation: em-fade-out var(--em-out) ease-in both !important;
+}
+.emenu .em-ghost * {
+  animation: none !important;
+  transition: none !important;
+}
+.emenu .em-ghost [data-em-out='pop'] {
+  animation: em-pop-out var(--em-out) ease-in both !important;
+}
+.emenu .em-ghost [data-em-out='drawer'] {
+  animation: em-drawer-out var(--em-out) cubic-bezier(0.4, 0, 0.8, 0.4) both !important;
+}
+.emenu .em-ghost[data-em-out='zoom'] {
+  animation: em-zoom-out var(--em-out) ease-in both !important;
+}
+/* 抽屉的影子：背景淡得慢一点，抽屉先滑出去 */
+.emenu .em-ghost[data-em-kind='drawer'] {
+  animation-duration: calc(var(--em-out) + 0.06s) !important;
+}
+.emenu .em-ghost .em-check-circle,
+.emenu .em-ghost .em-check-mark {
+  stroke-dashoffset: 0;
+}
+.emenu .em-ghost .em-img {
+  opacity: 1;
+}
+
+/* ───────────── 轻互动 ───────────── */
+/* 图片加载完淡入 */
+.emenu .em-img {
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.emenu .em-img[data-loaded] {
+  opacity: 1;
+}
+
+/* 菜品图：按下（鼠标是悬停）时微微浮起、带一层柔和的阴影，图片略微放大，上面扫过一道淡淡的光 */
+.emenu .em-lift {
+  transition:
+    transform var(--em-micro) var(--em-ease),
+    box-shadow var(--em-micro) var(--em-ease);
+}
+.emenu .em-lift > img {
+  transition:
+    transform 0.9s var(--em-ease),
+    opacity 0.6s ease;
+}
+.emenu .em-lift::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.2), transparent);
+  transform: translateX(-130%) skewX(-18deg);
+  pointer-events: none;
+}
+.emenu .em-lift:active {
+  transform: translateY(-2.5px);
+  box-shadow: 0 14px 26px -14px rgb(75 57 42 / 0.5);
+}
+.emenu .em-lift:active > img {
+  transform: scale(1.025);
+}
+.emenu .em-lift:active::after {
+  animation: em-sheen 0.9s ease-out both;
+}
+/* 菜名：按下时略微浮起 */
+.emenu .em-press {
+  transition:
+    transform var(--em-micro) var(--em-ease),
+    opacity var(--em-micro) ease;
+}
+.emenu .em-press:active {
+  transform: translateY(-1px);
+  opacity: 0.72;
+}
+/* 加号、圆点按钮、弹窗按钮：按下缩一点、松手弹回 */
+.emenu .em-tap {
+  transition: transform var(--em-micro) cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.emenu .em-tap:active:not(:disabled) {
+  transform: scale(0.88);
+  transition-duration: 0.08s;
+}
+.emenu .em-tap-soft {
+  transition:
+    transform var(--em-micro) var(--em-ease),
+    filter var(--em-micro) ease;
+}
+.emenu .em-tap-soft:active:not(:disabled) {
+  transform: scale(0.975);
+  filter: brightness(0.96);
+}
+@media (hover: hover) and (pointer: fine) {
+  .emenu .em-lift:hover {
+    transform: translateY(-2.5px);
+    box-shadow: 0 14px 26px -14px rgb(75 57 42 / 0.5);
+  }
+  .emenu .em-lift:hover > img {
+    transform: scale(1.025);
+  }
+  .emenu .em-lift:hover::after {
+    animation: em-sheen 0.9s ease-out both;
+  }
+  .emenu .em-press:hover {
+    transform: translateY(-1px);
+  }
+}
+
+/* 分类页签：选中的那个下面一块柔和的渐变光晕与一条渐隐的细线，换分类时滑过去；字的颜色跟着缓缓变 */
+.emenu .em-cat {
+  transition: color 0.45s ease;
+}
+.emenu .em-cat-glow {
+  position: absolute;
+  pointer-events: none;
+  background: radial-gradient(ellipse 60% 85% at 50% 100%, rgb(166 148 122 / 0.2), rgb(166 148 122 / 0.06) 55%, transparent 75%);
+  transition:
+    left var(--em-page) var(--em-ease),
+    width var(--em-page) var(--em-ease);
+}
+.emenu .em-cat-glow::after {
+  content: '';
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--em-tan), transparent);
+  opacity: 0.75;
+}
+/* 「中 | EN」开关里卡其色的那一块滑过去 */
+.emenu .em-lang-knob {
+  transition: transform var(--em-in) var(--em-ease);
+}
+/* 菜品详情换上一道 / 下一道：图片与文字交叉淡入 */
+.emenu .em-swap {
+  animation: em-fade 0.45s ease-out both;
+}
+
+/* 动效关掉：系统「减少动态效果」或后台设成「简洁」时舞台带 data-motion="off"（stage.tsx） */
+.emenu[data-motion='off'] *,
+.emenu[data-motion='off'] *::before,
+.emenu[data-motion='off'] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+.emenu[data-motion='off'] .em-check-circle,
+.emenu[data-motion='off'] .em-check-mark {
+  stroke-dashoffset: 0;
+}
+/* 后台的版面预览没有舞台：照系统的设置来 */
 @media (prefers-reduced-motion: reduce) {
-  .em-fade,
-  .em-drawer,
-  .em-pop,
-  .em-rise,
-  .em-flash,
-  .em-bump {
-    animation: none;
+  .emenu *,
+  .emenu *::before,
+  .emenu *::after {
+    animation: none !important;
+    transition: none !important;
   }
-  .em-check-circle,
-  .em-check-mark {
-    animation: none;
+  .emenu .em-check-circle,
+  .emenu .em-check-mark {
     stroke-dashoffset: 0;
-  }
-  .emenu-strip {
-    scroll-behavior: auto;
   }
 }
