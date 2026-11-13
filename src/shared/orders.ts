@@ -59,7 +59,7 @@ export interface OrderLine {
   /** 技师与点钟 / 轮钟；没有为 null */
   technician: string | null;
   quantity: number;
-  /** 单价（分）；按项目快照显示、而且同一个项目有几种单价时为 null */
+  /** 单价（分）；按项目快照显示、这个项目不止 1 份时为 null（快照里没有单价） */
   unitPrice: number | null;
   amount: number;
   /** 摊到这一行的优惠（优惠 / 免单、券抵扣、会员折扣） */
@@ -105,8 +105,8 @@ const itemKey = (category: string, name: string) => `${category}\u0000${name}`;
  * 与结账时把整单优惠摊到项目用的是同一种算法），所以各行相加正好等于这个项目的优惠。
  * 按行算出来的各项（数量、金额）与快照对不上时返回 null：调用方改用快照显示。
  */
-export function allocateLineDiscounts(lines: readonly RawOrderLine[], items: readonly OrderItemSnapshot[]): OrderLine[] | null {
-  const groups = new Map<string, RawOrderLine[]>();
+export function allocateLineDiscounts<T extends RawOrderLine>(lines: readonly T[], items: readonly OrderItemSnapshot[]): (Omit<T, 'lineId' | 'itemName'> & { discount: number })[] | null {
+  const groups = new Map<string, T[]>();
   for (const l of lines) groups.set(itemKey(l.category, l.itemName), [...(groups.get(itemKey(l.category, l.itemName)) ?? []), l]);
   if (groups.size !== items.length) return null;
   const discountOf = new Map<number, number>();
@@ -116,6 +116,8 @@ export function allocateLineDiscounts(lines: readonly RawOrderLine[], items: rea
     const amount = group.reduce((s, l) => s + l.amount, 0);
     const quantity = group.reduce((s, l) => s + l.quantity, 0);
     if (amount !== item.amount || quantity !== item.quantity) return null;
+    // 金额为 0 的项目（赠送、免票）没有优惠可摊
+    if (amount <= 0 || item.discount <= 0) continue;
     const shares = group.map((l) => ({ id: l.lineId, base: Math.floor((l.amount * item.discount) / amount), frac: (l.amount * item.discount) % amount, amount: l.amount }));
     let left = item.discount - shares.reduce((s, x) => s + x.base, 0);
     for (const x of [...shares].sort((a, b) => b.frac - a.frac || b.amount - a.amount || a.id - b.id)) {
@@ -126,7 +128,7 @@ export function allocateLineDiscounts(lines: readonly RawOrderLine[], items: rea
   return lines.map(({ lineId, itemName: _itemName, ...l }) => ({ ...l, discount: discountOf.get(lineId) ?? 0 }));
 }
 
-/** 按项目快照显示（没有手牌、技师）：单价 = 金额 / 数量，除不尽（同一个项目有几种单价）时不显示 */
+/** 按项目快照显示（没有手牌、技师）：快照里一个项目只有数量与金额，几份可能不是一个价，只有 1 份的才显示单价 */
 export function linesFromItems(items: readonly OrderItemSnapshot[]): OrderLine[] {
   return items.map((i) => ({
     holder: '',
@@ -134,7 +136,7 @@ export function linesFromItems(items: readonly OrderItemSnapshot[]): OrderLine[]
     category: i.category,
     technician: null,
     quantity: i.quantity,
-    unitPrice: i.quantity > 0 && i.amount % i.quantity === 0 ? i.amount / i.quantity : null,
+    unitPrice: i.quantity === 1 ? i.amount : null,
     amount: i.amount,
     discount: i.discount,
   }));

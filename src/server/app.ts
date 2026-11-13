@@ -53,6 +53,7 @@ import { registerTemplateRoutes } from './modules/contracts/templates';
 import { registerPaymentRoutes } from './modules/payments/routes';
 import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
+import { registerOrderRoutes } from './modules/orders';
 import { registerMemberRoutes } from './modules/members';
 import { registerMemberTagRoutes } from './modules/member-tags';
 import { registerMemberRecordRoutes } from './modules/member-records';
@@ -227,6 +228,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDashboardRoutes(app, deps);
   registerDashboardReportRoutes(app, deps);
   registerLedgerRoutes(app, deps);
+  registerOrderRoutes(app, deps);
   registerSettlementRoutes(app, deps);
   registerStaffRoutes(app, deps);
   registerCatalogRoutes(app, deps);

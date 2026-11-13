@@ -21,6 +21,8 @@ import { DEMO_PASSWORD } from '../src/server/seed';
 import type { BackupManifest } from '../src/server/ops/backup';
 import { computeFingerprint } from '../src/server/ops/fingerprint';
 import { APP_PRESENCE_LOCK, holdAppPresence, type AppPresence } from '../src/server/presence';
+import { readSnapshot } from '../src/server/db';
+import { checkoutOrderDetail } from '../src/server/modules/orders';
 import { setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -133,6 +135,22 @@ describe('演示数据准备', () => {
     expect(r.blocks.every((b) => !b.written)).toBe(true);
     expect(r.check.ok).toBe(true);
     expect(await fingerprint()).toBe(before);
+  });
+
+  it('订单查询的逐行明细（8.0.15）：演示库每一张结账单按行算出来的「部门 × 项目」与结账时记下的快照一致', async () => {
+    // 客房、派对房、桌台、门票、手动金额各种归法都在演示库里；对不上的会退回按快照显示（source = items）
+    const all = await ctx.sql<{ id: number; checkoutNo: string; totalAmount: number }[]>`SELECT id, checkout_no, total_amount FROM checkouts ORDER BY id`;
+    expect(all.length).toBeGreaterThan(5);
+    const categories = new Set<string>();
+    for (const c of all) {
+      const d = await readSnapshot(ctx.sql, (tx) => checkoutOrderDetail(tx, c.id));
+      expect(d.source, c.checkoutNo).toBe('lines');
+      expect(d.amount, c.checkoutNo).toBe(Number(c.totalAmount));
+      const [snap] = await ctx.sql<{ discount: number }[]>`SELECT coalesce(sum(discount), 0)::bigint AS discount FROM checkout_items WHERE checkout_id = ${c.id}`;
+      expect(d.discount, c.checkoutNo).toBe(Number(snap!.discount));
+      for (const l of d.lines) categories.add(l.category);
+    }
+    expect(categories.has('门票')).toBe(true);
   });
 
   it('准备完以后应用第一次跑每分钟的自动任务不改数据（demo-prepare 最后已经照样跑过一次，main 定时测试 v0.7.29）', async () => {
