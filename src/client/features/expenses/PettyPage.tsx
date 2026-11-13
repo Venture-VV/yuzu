@@ -64,16 +64,6 @@ export function PettyPage() {
       description={`按部门记账、经办人留名。每笔打款单独平账，只算已确认的报销；从打款日起超过 ${rules.data?.overdueDays ?? 7} 天没平的标红。`}
       actions={
         <div className="flex flex-wrap gap-2">
-          <Link to="/erp/expenses">
-            <Button variant="secondary" icon={<ReceiptText className="size-4" />}>
-              费用报销
-            </Button>
-          </Link>
-          <Link to="/erp/ledger">
-            <Button variant="secondary" icon={<BookOpenCheck className="size-4" />}>
-              采购台账
-            </Button>
-          </Link>
           <Link to="/erp/petty/accounts">
             <Button variant="secondary" icon={<HandCoins className="size-4" />} data-testid="petty-accounts-link">
               部门备用金台账
