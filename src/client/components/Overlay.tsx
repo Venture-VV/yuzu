@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { useExitGhost } from '../lib/motion';
 import { cn } from '../lib/utils';
 import { IconButton } from './ui';
 
@@ -63,16 +64,17 @@ export function Dialog({
   useFocusReturn(open, panel);
   if (!open) return null;
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6">
-      <div className="absolute inset-0 animate-fade bg-ink/30 backdrop-blur-[2px]" onClick={dismissible ? onClose : undefined} />
+    <ExitLayer className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6">
+      <div className="absolute inset-0 animate-fade bg-ink/30 backdrop-blur-[2px]" data-mo-out="fade" onClick={dismissible ? onClose : undefined} />
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
+        data-mo-out="dialog"
         className={cn(
-          'relative flex max-h-[92vh] w-full animate-rise flex-col overflow-hidden rounded-t-xl border border-line bg-card shadow-pop outline-none sm:rounded-xl',
+          'relative flex max-h-[92vh] w-full animate-dialog-in flex-col overflow-hidden rounded-t-xl border border-line bg-card shadow-pop outline-none sm:rounded-xl',
           width,
         )}
       >
@@ -92,8 +94,21 @@ export function Dialog({
         <div className="scroll-thin flex-1 overflow-y-auto px-6 py-5">{children}</div>
         {footer && <footer className="flex flex-wrap justify-end gap-2.5 border-t border-line bg-paper/60 px-6 py-4">{footer}</footer>}
       </div>
-    </div>,
+    </ExitLayer>,
     document.body,
+  );
+}
+
+/**
+ * 弹窗、抽屉的整层：关掉（这一层卸掉）时留一个影子播退场（8.0.16，lib/motion 的 useExitGhost）——
+ * 遮罩淡出、面板缩回去或滑出去。影子不能点、没有 role，所以关掉以后马上能点后面的页面，Esc、焦点、浏览器用例都与原来一样。
+ */
+function ExitLayer({ className, children }: { className: string; children: ReactNode }) {
+  const ref = useExitGhost<HTMLDivElement>();
+  return (
+    <div ref={ref} className={className}>
+      {children}
+    </div>
   );
 }
 
@@ -116,19 +131,20 @@ export function Sheet({
   useFocusReturn(open, panel);
   if (!open) return null;
   return createPortal(
-    <div className="fixed inset-0 z-40 flex justify-end">
-      <div className="absolute inset-0 animate-fade bg-ink/25" onClick={onClose} />
+    <ExitLayer className="fixed inset-0 z-40 flex justify-end overflow-hidden">
+      <div className="absolute inset-0 animate-fade bg-ink/25" data-mo-out="fade" onClick={onClose} />
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-label={label}
         tabIndex={-1}
-        className={cn('relative flex h-full animate-slide-in flex-col bg-paper shadow-pop outline-none', width)}
+        data-mo-out="sheet"
+        className={cn('relative flex h-full animate-sheet-in flex-col bg-paper shadow-pop outline-none', width)}
       >
         {children}
       </div>
-    </div>,
+    </ExitLayer>,
     document.body,
   );
 }
