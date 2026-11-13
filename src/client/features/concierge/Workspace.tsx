@@ -472,6 +472,9 @@ export default function Workspace({
     [data.members],
   );
   const member = drawerId ? memberMap.get(drawerId) : undefined;
+  const modalNativeMember = modal?.member
+    ? memberMap.get(modal.member.id)?.nativeMember
+    : undefined;
   const balances = useMemo(() => {
     const m = new Map<string, Balance>();
     for (const b of data.balances) if (!m.has(b.memberId)) m.set(b.memberId, b);
@@ -3388,7 +3391,7 @@ export default function Workspace({
                 )}
                 {modal.kind === "balance" && (
                   <>
-                    {modal.member?.nativeMember && <p className="detail-notice">系统当前余额 ¥{money(modal.member.nativeMember.totalCents)}，由前台同步。下面填写的金额只保存为人工核对依据，不会覆盖系统余额；如有差异，请核对充值、消费与原始凭证。</p>}
+                    {modalNativeMember && <p className="detail-notice">系统当前余额 ¥{money(modalNativeMember.totalCents)}，由前台同步。下面填写的金额只保存为人工核对依据，不会覆盖系统余额；如有差异，请核对充值、消费与原始凭证。</p>}
                     <div className="form-member-summary">
                       <span className="avatar">
                         {initial(modal.member!.name)}

@@ -131,7 +131,7 @@ export function NativeSpendingList({ member }: { member: Member }) {
               </p>
             )}
             {r.items.length ? (
-              <div className="table-wrap">
+              <div className="table-scroll">
                 <table className="data-table">
                   <thead>
                     <tr>
