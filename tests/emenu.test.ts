@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { minuteOfDay, type EmenuAdmin, type EmenuMenu } from '../src/shared/emenu';
+import { DEFAULT_EMENU_RULES, minuteOfDay, type EmenuAdmin, type EmenuMenu } from '../src/shared/emenu';
 import { resetLoginThrottle } from '../src/server/auth/lockout';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
@@ -135,7 +135,8 @@ describe('岗位「点餐平板」与开关', () => {
       expect(r.status).toBe(422);
       expect(r.body.error.code).toBe('EMENU_DISABLED');
     }
-    expect((await rules({ enabled: true })).status).toBe(200);
+    // 这份用例大部分走的是「要点单密码」的那一套（8.0.15 起默认不要，见最后「不要点单密码」一段）
+    expect((await rules({ enabled: true, requirePin: true })).status).toBe(200);
     expect((await menu()).enabled).toBe(false);
     expect((await admin()).diningEnabled).toBe(false);
     expect((await api(ctx.app, pad, 'GET', '/api/emenu/guest?tag=8001')).body.error.code).toBe('EMENU_DISABLED');
@@ -278,7 +279,7 @@ describe('后台「电子菜单」', () => {
     // 规则总表有「点餐系统」一组（不混进「餐饮」那一组）；改过的那一项标出来，改回默认以后不标
     type Entry = { key: string; group: string; isDefault: boolean; value: string; section: string; updatedBy: string | null };
     let catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as Entry[];
-    expect(catalog.filter((r) => r.group === 'emenu').map((r) => r.key)).toEqual(['emenu_rules.enabled', 'emenu_rules.avoidOptions', 'emenu_rules.serveOptions', 'emenu_rules.idleMinutes', 'emenu_rules.offHours']);
+    expect(catalog.filter((r) => r.group === 'emenu').map((r) => r.key)).toEqual(['emenu_rules.enabled', 'emenu_rules.requirePin', 'emenu_rules.textSize', 'emenu_rules.avoidOptions', 'emenu_rules.serveOptions', 'emenu_rules.idleMinutes', 'emenu_rules.offHours']);
     expect(catalog.find((r) => r.key === 'emenu_rules.idleMinutes')).toMatchObject({ isDefault: false, value: '5 分钟没人动回到起始页、清掉没下单的菜', section: 'emenu' });
     expect(catalog.find((r) => r.key === 'emenu_rules.idleMinutes')!.updatedBy).not.toBeNull();
     expect(catalog.find((r) => r.key === 'emenu_rules.offHours')).toMatchObject({ isDefault: true, value: '平板上不显示' });
@@ -666,6 +667,75 @@ describe('结果待确认', () => {
     expect(foreign.status).toBe(409);
     expect(foreign.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     expect((await api(ctx.app, pad, 'GET', `/api/emenu/orders/by-key/${key3}`)).body).toEqual({ found: false, abandoned: false });
+  });
+});
+
+describe('不要点单密码（8.0.15，默认）', () => {
+  it('默认不要密码、字是放大的一档；设置能开能关，规则中心看得到', async () => {
+    expect(DEFAULT_EMENU_RULES).toMatchObject({ requirePin: false, textSize: 'large' });
+    // 前面的用例为了测密码把它打开了
+    expect((await admin()).rules).toMatchObject({ requirePin: true, textSize: 'large' });
+    expect((await api(ctx.app, pad, 'GET', '/api/emenu/menu')).body.rules).toMatchObject({ requirePin: true, textSize: 'large' });
+    expect((await rules({ textSize: 'huge' })).status).toBe(400);
+    expect((await rules({ requirePin: 'no' })).status).toBe(400);
+    const off = await rules({ requirePin: false, textSize: 'design' });
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+    expect((await api(ctx.app, pad, 'GET', '/api/emenu/menu')).body.rules).toMatchObject({ requirePin: false, textSize: 'design' });
+    type Entry = { key: string; isDefault: boolean; value: string };
+    const catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as Entry[];
+    expect(catalog.find((r) => r.key === 'emenu_rules.requirePin')).toMatchObject({ isDefault: true, value: '不要（核对手牌与桌号后直接下单，经办人记平板的账号）' });
+    expect(catalog.find((r) => r.key === 'emenu_rules.textSize')).toMatchObject({ isDefault: false, value: '设计稿原样' });
+    expect((await rules({ textSize: 'large' })).status).toBe(200);
+  });
+
+  it('下单不带密码：挂到手牌、进厨房，经办人记这台平板的账号；带了密码也不看；作废也不要密码', async () => {
+    await enter('A8009');
+    const lines = [{ itemId: item['华夫牛角']!, quantity: 1 }];
+    const key = randomUUID();
+    const body = { clientKey: key, visitId: visit.A8009, tagCode: 'A8009', tableName: 'A01', guests: 2, lines, avoid: [], serve: null, customNote: '', expectedTotal: 3800 };
+    const r = await api(ctx.app, pad, 'POST', '/api/emenu/orders', body);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ tableName: 'A01', total: 3800, quantity: 1, waiterName: '一号桌平板', replayed: false });
+    expect(await dishLinesOf(visit.A8009!)).toEqual([{ name: '华夫牛角', quantity: 1, amount: 3800, postedBy: padId, status: 'active', deliverTo: 'A01', note: '' }]);
+    const [o] = await ctx.sql<{ waiterId: number; deviceStaffId: number }[]>`SELECT waiter_id, device_staff_id FROM emenu_orders WHERE client_key = ${key}`;
+    expect({ waiterId: Number(o!.waiterId), deviceStaffId: Number(o!.deviceStaffId) }).toEqual({ waiterId: padId, deviceStaffId: padId });
+    const [log] = await ctx.sql<{ staffId: number; detail: { deviceUsername: string; noPin?: boolean } }[]>`SELECT staff_id, detail FROM audit_logs WHERE action = 'emenu_order' ORDER BY id DESC LIMIT 1`;
+    expect(Number(log!.staffId)).toBe(padId);
+    expect(log!.detail).toMatchObject({ deviceUsername: 'pad1', noPin: true });
+    // 原样重提：返回第一次的结果
+    expect((await api(ctx.app, pad, 'POST', '/api/emenu/orders', body)).body).toMatchObject({ total: 3800, replayed: true });
+    // 带了一个不对的密码：不看，也不记输错
+    const failuresBefore = (await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'order_pin_failed'`)[0]!.n;
+    const withBad = await order(lines, 3800, { tag: 'A8009', pin: wrongPin(clerkPin) });
+    expect(withBad.status, JSON.stringify(withBad.body)).toBe(200);
+    expect((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'order_pin_failed'`)[0]!.n).toBe(failuresBefore);
+    // 别的规矩照旧：手牌对不上、价格变了照样拒绝
+    expect((await api(ctx.app, pad, 'POST', '/api/emenu/orders', { ...body, clientKey: randomUUID(), tagCode: 'A8001' })).body.error.code).toBe('TAG_CHANGED');
+    expect((await api(ctx.app, pad, 'POST', '/api/emenu/orders', { ...body, clientKey: randomUUID(), expectedTotal: 100 })).status).toBe(409);
+    // 没登录的、不是平板也没有点单权限的账号照样进不来
+    expect((await ctx.app.inject({ method: 'POST', url: '/api/emenu/orders', payload: { ...body, clientKey: randomUUID() } })).statusCode).toBe(401);
+
+    // 作废：不要密码，经办人记平板的账号
+    const key2 = randomUUID();
+    const gone = await api(ctx.app, pad, 'POST', `/api/emenu/orders/by-key/${key2}/abandon`, {});
+    expect(gone.status, JSON.stringify(gone.body)).toBe(200);
+    expect(gone.body).toEqual({ found: false, abandoned: true });
+    const [fence] = await ctx.sql<{ staffId: number }[]>`SELECT staff_id FROM audit_logs WHERE action = 'frontdesk_abandon' AND target_id = ${key2}`;
+    expect(Number(fence!.staffId)).toBe(padId);
+    expect((await api(ctx.app, pad, 'POST', '/api/emenu/orders', { ...body, clientKey: key2 })).body.error.code).toBe('OP_ABANDONED');
+    expect(await dishLinesOf(visit.A8009!)).toHaveLength(2);
+  });
+
+  it('再打开「点单密码」：不带密码的下单、作废马上被拒', async () => {
+    expect((await rules({ requirePin: true })).status).toBe(200);
+    const lines = [{ itemId: item['华夫牛角']!, quantity: 1 }];
+    const body = { clientKey: randomUUID(), visitId: visit.A8009, tagCode: 'A8009', tableName: 'A01', guests: 2, lines, avoid: [], serve: null, customNote: '', expectedTotal: 3800 };
+    const r = await api(ctx.app, pad, 'POST', '/api/emenu/orders', body);
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toContain('点单密码');
+    expect((await api(ctx.app, pad, 'POST', `/api/emenu/orders/by-key/${randomUUID()}/abandon`, {})).status).toBe(400);
+    expect((await order(lines, 3800, { tag: 'A8009' })).status).toBe(200);
+    expect(await dishLinesOf(visit.A8009!)).toHaveLength(3);
   });
 });
 

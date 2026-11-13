@@ -170,6 +170,8 @@ const RulesInput = z.object({
   langSwitch: z.boolean(),
   optionsEn: z.record(z.string().max(EMENU_MAX_OPTION_LENGTH), z.string().trim().max(EMENU_MAX_OPTION_EN, `选项的英文最多 ${EMENU_MAX_OPTION_EN} 个字符`)),
   motion: z.boolean(),
+  requirePin: z.boolean(),
+  textSize: z.enum(['large', 'design'], '请选择平板上的字用哪一档'),
 });
 
 /** 保存设置：只交改过的项；带页面打开时的版本，别人先保存过拒绝 */

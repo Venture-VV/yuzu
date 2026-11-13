@@ -98,7 +98,8 @@ test("内网 HTTP（没有 crypto.randomUUID）：新增会员 1 秒内弹窗、
   await page.goto("/concierge");
   await expect(page.getByRole("heading", { level: 1, name: /^今日工作台/ })).toBeVisible();
   expect(await page.evaluate(() => typeof (crypto as { randomUUID?: unknown }).randomUUID)).toBe("undefined");
-  const enrolled = async () => Number(/(\d+)/.exec(await page.locator(".stats-grid").getByText("在册会员").locator("xpath=..").innerText())?.[1] ?? NaN);
+  const enrolledCard = page.locator(".stat-card", { hasText: "在册会员" });
+  const enrolled = async () => Number(/(\d+)/.exec(await enrolledCard.locator(".stat-value").innerText())?.[1] ?? NaN);
   const before = await enrolled();
   expect(Number.isInteger(before)).toBe(true);
 
@@ -117,16 +118,21 @@ test("内网 HTTP（没有 crypto.randomUUID）：新增会员 1 秒内弹窗、
   await expect(dialog).not.toBeVisible();
   // 「在册会员」数加一；名单里马上有，点开档案里带着备注
   await expect.poll(enrolled).toBe(before + 1);
+  await enrolledCard.click();
   await page.getByRole("button", { name: new RegExp(name) }).first().click();
   const member = page.getByRole("complementary", { name: name + "的会员档案" });
   await expect(member).toContainText(/会员档案 · \d{6}/);
+  await member.getByText("基本档案", { exact: true }).click();
   await expect(member).toContainText("喜欢靠窗的位置");
   // 从档案里代录预约、拍消费单：都能直接关联到这位会员
-  await member.getByRole("button", { name: /预约/ }).first().click();
+  await member.getByRole("button", { name: "录预约", exact: true }).click();
   dialog = page.getByRole("dialog", { name: "登记新预约" });
   await expect(dialog).toBeVisible({ timeout: 1000 });
   await dialog.getByRole("button", { name: "关闭" }).click();
   await expect(dialog).not.toBeVisible();
+
+  await page.locator(".drawer-scrim").click({ position: { x: 10, y: 10 } });
+  await expect(member).not.toBeVisible();
 
   // 工作台上的三个入口：新增会员、代录预约、拍消费单
   await page.getByRole("navigation", { name: "管家业务模块" }).getByRole("button", { name: /工作台/ }).first().click();

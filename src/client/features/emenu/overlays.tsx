@@ -8,7 +8,7 @@ import { ArrowDot, CloseDot, MinusDot, PlusDot, SearchIcon } from './icons';
 import { Backdrop } from './modals';
 import { FadeImg, ScrollArea, useExitGhost } from './motion';
 import { displaySpec, wrapParen, yuan } from './pages';
-import { box, Hairline, HEADER_H, useStage } from './stage';
+import { BIG, box, Hairline, HEADER_H, useBig, useStage, ZoomAt } from './stage';
 import type { CartLine, Remark } from './store';
 
 const MUTE = 'var(--em-mute)';
@@ -52,12 +52,20 @@ export function DishDetail({
   const intro = dishDescription(dish, lang);
   const attrs = dishAttrs(dish, lang);
   const unit = dishUnit(dish, lang);
+  // 放大的一档（8.0.15）：三个圆按钮绕各自的中心放大 1.4 倍；下面的卡片高 200（原来 153），里面照设计稿的像素写、整块放大 BIG.ui 倍
+  const large = useBig();
+  const k = large ? BIG.ui : 1;
+  const cardH = large ? 200 : 153;
+  /** 卡片里面能用的宽（放大以前的像素）：设计稿 944 */
+  const cardW = 944 / k;
   const round = (onClick: (() => void) | null, x: number, y: number, size: number, icon: ReactNode, label: string, testId: string) =>
     onClick && (
-      <button type="button" onClick={onClick} aria-label={label} className="em-tap" style={{ ...box(x, y - HEADER_H, size, size), padding: 0, border: 0, background: 'none', borderRadius: '50%' }} data-testid={testId}>
-        <span style={{ position: 'absolute', inset: -10 }} />
-        {icon}
-      </button>
+      <ZoomAt x={x + size / 2} y={y - HEADER_H + size / 2} k={large ? 1.4 : 1}>
+        <button type="button" onClick={onClick} aria-label={label} className="em-tap" style={{ ...box(-size / 2, -size / 2, size, size), padding: 0, border: 0, background: 'none', borderRadius: '50%' }} data-testid={testId}>
+          <span style={{ position: 'absolute', inset: -10 }} />
+          {icon}
+        </button>
+      </ZoomAt>
     );
   return (
     <div
@@ -70,11 +78,11 @@ export function DishDetail({
       {/* 上一道 / 下一道：新的图淡入 */}
       {image && <FadeImg key={image} src={image} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
       {why && (
-        <div style={{ position: 'absolute', inset: 0, background: 'rgb(0 0 0 / 0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingBottom: 150, color: '#f4f3f2' }}>
-          <span className={why.mainEn ? 'em-en' : undefined} style={{ fontSize: why.mainEn ? 20 : 22, lineHeight: '22px' }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'rgb(0 0 0 / 0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingBottom: large ? 200 : 150, color: '#f4f3f2' }}>
+          <span className={why.mainEn ? 'em-en' : undefined} style={{ fontSize: (why.mainEn ? 20 : 22) * k, lineHeight: `${22 * k}px` }}>
             {why.main}
           </span>
-          <span className={why.mainEn ? undefined : 'em-en'} style={{ fontSize: 11, marginTop: 4 }}>
+          <span className={why.mainEn ? undefined : 'em-en'} style={{ fontSize: 11 * k, marginTop: 4 * k }}>
             {why.sub}
           </span>
         </div>
@@ -83,11 +91,12 @@ export function DishDetail({
       {round(onPrev, 40, 369, 30, <ArrowDot dir="left" />, m.prevDish, 'emenu-detail-prev')}
       {round(onNext, 954, 369, 30, <ArrowDot dir="right" />, m.nextDish, 'emenu-detail-next')}
 
-      <div className="em-rise" style={{ ...box(40, 575 - HEADER_H, 944, 153), background: 'var(--em-bg)', borderRadius: 3 }}>
+      <div className="em-rise" style={{ ...box(40, 728 - HEADER_H - cardH, 944, cardH), background: 'var(--em-bg)', borderRadius: 3 }} data-testid="emenu-detail-card">
+       <div style={{ ...box(0, 0, cardW, cardH / k), transform: k === 1 ? undefined : `scale(${k})`, transformOrigin: '0 0' }}>
         <div key={dish.id} className="em-swap" style={{ position: 'absolute', inset: 0 }}>
           {name.mainEn ? (
             <>
-              <div className="em-en em-clip" style={{ ...box(23.3, 21.6, 760), fontSize: 17, lineHeight: '17px' }} data-testid="emenu-detail-name">
+              <div className="em-en em-clip" style={{ ...box(23.3, 21.6, cardW - 184), fontSize: 17, lineHeight: '17px' }} data-testid="emenu-detail-name">
                 {name.main}
                 {tag.text && (
                   <span className={tag.en ? undefined : undefined} style={{ fontSize: 10, lineHeight: 0, color: MUTE, marginLeft: 4, fontFamily: tag.en ? undefined : 'var(--em-zh)' }}>
@@ -95,18 +104,18 @@ export function DishDetail({
                   </span>
                 )}
               </div>
-              <div className="em-clip" style={{ ...box(23.3, 41.6, 760), fontSize: 10.5, lineHeight: '10.5px', color: MUTE }}>
+              <div className="em-clip" style={{ ...box(23.3, 41.6, cardW - 184), fontSize: 10.5, lineHeight: '10.5px', color: MUTE }}>
                 {name.sub}
               </div>
             </>
           ) : (
             <>
-              <div className="em-clip" style={{ ...box(23.3, 20.7, 760), fontSize: 18, lineHeight: '18px' }} data-testid="emenu-detail-name">
+              <div className="em-clip" style={{ ...box(23.3, 20.7, cardW - 184), fontSize: 18, lineHeight: '18px' }} data-testid="emenu-detail-name">
                 {name.main}
                 {tag.text && <span style={{ fontSize: 10, lineHeight: 0, color: MUTE, marginLeft: 2.6 }}>{wrapParen(tag.text)}</span>}
               </div>
               {name.sub && (
-                <div className="em-en em-clip" style={{ ...box(23.3, 38.1, 760), fontSize: 9, lineHeight: '9px', color: MUTE }}>
+                <div className="em-en em-clip" style={{ ...box(23.3, 38.1, cardW - 184), fontSize: 9, lineHeight: '9px', color: MUTE }}>
                   {name.sub}
                 </div>
               )}
@@ -115,7 +124,7 @@ export function DishDetail({
           {/* 设计稿：12 号、行距 14，一行 39 个字正好到 567.6（字距 0.955） */}
           <div
             className={intro.en ? 'em-en' : undefined}
-            style={{ ...box(23.3, 65.1, intro.en ? 560 : 510), fontSize: intro.en ? 11.5 : 12, lineHeight: '14px', letterSpacing: intro.en ? '0.2px' : '0.955px', color: MUTE, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}
+            style={{ ...box(23.3, 65.1, Math.min(intro.en ? 560 : 510, cardW - 190)), fontSize: intro.en ? 11.5 : 12, lineHeight: '14px', letterSpacing: intro.en ? '0.2px' : '0.955px', color: MUTE, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}
             data-testid="emenu-detail-desc"
           >
             {intro.text}
@@ -182,13 +191,14 @@ export function DishDetail({
           onClick={(e) => spec && onAdd(spec, e.currentTarget)}
           aria-label={m.addAria(name.main)}
           className="em-tap-soft"
-          style={{ ...box(850.5, 107.1, 70.9, 27.3), padding: 0, border: 0, borderRadius: 1.5, background: 'var(--em-tan)', opacity: specBlocked ? 0.35 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          style={{ ...box(cardW - 93.5, 107.1, 70.9, 27.3), padding: 0, border: 0, borderRadius: 1.5, background: 'var(--em-tan)', opacity: specBlocked ? 0.35 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           data-testid="emenu-detail-add"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
             <path d="M0 7h14M7 0v14" stroke="#fff" strokeWidth="1" />
           </svg>
         </button>
+       </div>
       </div>
     </div>
   );
@@ -214,10 +224,17 @@ export function SearchOverlay({ hits, onPick, onClose }: { hits: (q: string) => 
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => input.current?.focus(), []);
   const found = useMemo(() => (q.trim() ? hits(q.trim()).slice(0, 12) : []), [q, hits]);
-  const room = Math.max(HIT_H * 2, Math.min(HIT_H * 8, visible - 84.6 - 10));
+  // 放大的一档（8.0.15）：搜索框与结果整块绕上沿的正中放大 BIG.ui 倍（框宽 896、高 44），里面照设计稿的像素写
+  const large = useBig();
+  const k = large ? BIG.ui : 1;
+  const top = large ? 32 : 44.3;
+  // 结果列表最多多高（放大以前的像素）：到键盘上面留 10
+  const room = Math.max(HIT_H * 2, Math.min(HIT_H * (large ? 7 : 8), (visible - top - 40.3 * k - 10) / k));
+  const X = 166.4 - 512;
   return (
     <Backdrop onClick={onClose} kind="search">
-      <div onClick={(e) => e.stopPropagation()} className="em-rise" style={{ ...box(166.4, 44.3, 689, 34.2), background: 'var(--em-bg)', borderRadius: 2 }} data-testid="emenu-search">
+     <ZoomAt x={512} y={top} k={k}>
+      <div onClick={(e) => e.stopPropagation()} className="em-rise" style={{ ...box(X, 0, 689, 34.2), background: 'var(--em-bg)', borderRadius: 2 }} data-testid="emenu-search">
         <input
           ref={input}
           value={q}
@@ -243,7 +260,7 @@ export function SearchOverlay({ hits, onPick, onClose }: { hits: (q: string) => 
         </span>
       </div>
       {q.trim() && (
-        <div onClick={(e) => e.stopPropagation()} className="em-rise" style={{ ...box(166.4, 84.6, 689), background: 'var(--em-bg)', borderRadius: 2, overflow: 'hidden' }} data-testid="emenu-search-results">
+        <div onClick={(e) => e.stopPropagation()} className="em-rise" style={{ ...box(X, 40.3, 689), background: 'var(--em-bg)', borderRadius: 2, overflow: 'hidden' }} data-testid="emenu-search-results">
           {found.length === 0 ? (
             <div style={{ height: HIT_H, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: MUTE }}>{m.searchEmpty}</div>
           ) : (
@@ -281,6 +298,7 @@ export function SearchOverlay({ hits, onPick, onClose }: { hits: (q: string) => 
           )}
         </div>
       )}
+     </ZoomAt>
     </Backdrop>
   );
 }
@@ -289,6 +307,12 @@ export function SearchOverlay({ hits, onPick, onClose }: { hits: (q: string) => 
 
 /** 右侧抽屉的壳（设计稿：从 598.3 起到右边，里面的内容从 640.7 到 984，左边的页面压暗）。DX 是内容左边离抽屉左边多远 */
 const DX = 42.4;
+/**
+ * 放大的一档（8.0.15）：抽屉整块放大 BIG.drawer 倍——宽从 425.7 变成 532（左边到 491.9），里面仍照设计稿的像素写，
+ * 只是能用的高从 768 变成 614.4：贴着底的几样（按钮、备注、合计）与能滑的那一块都往上收这么多。
+ */
+const DRAWER_DROP = 768 - 768 / BIG.drawer;
+const useDrawerDrop = () => (useBig() ? DRAWER_DROP : 0);
 function Drawer({
   kind,
   swap,
@@ -311,9 +335,11 @@ function Drawer({
 }) {
   const m = useM();
   const t = namePair(title, subtitle, useLang());
+  const k = useBig() ? BIG.drawer : 1;
   return (
     <Backdrop onClick={onClose} kind={kind} still={swap}>
-      <div className={swap ? undefined : 'em-drawer'} data-em-out="drawer" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ ...box(598.3, 0, 425.7, 768), background: 'var(--em-bg)' }} data-testid={testId}>
+      <div className={swap ? undefined : 'em-drawer'} data-em-out="drawer" role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ ...box(1024 - 425.7 * k, 0, 425.7 * k, 768), background: 'var(--em-bg)' }} data-testid={testId}>
+       <div style={{ ...box(0, 0, 425.7, 768 / k), transform: k === 1 ? undefined : `scale(${k})`, transformOrigin: '0 0' }}>
         <div className={swap ? 'em-swap' : undefined} style={{ position: 'absolute', inset: 0 }}>
           {t.mainEn ? (
             <>
@@ -338,19 +364,21 @@ function Drawer({
           )}
           {children}
         </div>
+       </div>
       </div>
     </Backdrop>
   );
 }
 
 function DrawerButton({ onClick, disabled, children, testId, shift = 0 }: { onClick: () => void; disabled?: boolean; children: ReactNode; testId: string; shift?: number }) {
+  const drop = useDrawerDrop();
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
       className="em-tap-soft"
-      style={{ ...box(DX, 700.2, 343.3, 28.3), padding: 0, border: 0, borderRadius: 1.5, background: 'var(--em-tan)', color: 'var(--em-bg)', fontSize: 16, lineHeight: '16px', opacity: disabled ? 0.45 : 1 }}
+      style={{ ...box(DX, 700.2 - drop, 343.3, 28.3), padding: 0, border: 0, borderRadius: 1.5, background: 'var(--em-tan)', color: 'var(--em-bg)', fontSize: 16, lineHeight: '16px', opacity: disabled ? 0.45 : 1 }}
       data-testid={testId}
     >
       {/* 字的文字框在按钮上沿往下 8.1（设计稿；浏览器自己居中的话是 6.15） */}
@@ -416,6 +444,7 @@ export function OrderDrawer({
   remarkText,
   locked,
   problem,
+  callStaff,
   onQuantity,
   onRemark,
   onSubmit,
@@ -433,6 +462,8 @@ export function OrderDrawer({
   locked: boolean;
   /** 现在不能下单的原因（没点菜、有菜估清了……） */
   problem: string | null;
+  /** 下单要服务员输点单密码（后台开着「点单密码」）：按钮上写「请呼叫服务员」 */
+  callStaff: boolean;
   onQuantity: (itemId: number, quantity: number) => void;
   onRemark: () => void;
   onSubmit: () => void;
@@ -441,8 +472,12 @@ export function OrderDrawer({
   const lang = useLang();
   const en = lang === 'en';
   const m = useM();
+  const drop = useDrawerDrop();
+  // 放大的一档：加减的圆点再大一点（连同抽屉的放大，屏幕上约 22），两个圆点离得开一点
+  const large = drop > 0;
+  const dot = large ? 18 : 12.6;
   const step = (onClick: () => void, icon: ReactNode, x: number, label: string, testId: string, disabled?: boolean) => (
-    <button type="button" onClick={onClick} disabled={disabled} aria-label={label} className="em-tap" style={{ ...box(x, 14.6, 12.6, 12.6), padding: 0, border: 0, background: 'none' }} data-testid={testId}>
+    <button type="button" onClick={onClick} disabled={disabled} aria-label={label} className="em-tap" style={{ ...box(x, 20.9 - dot / 2, dot, dot), padding: 0, border: 0, background: 'none' }} data-testid={testId}>
       <span style={{ position: 'absolute', inset: -12 }} />
       {icon}
     </button>
@@ -459,7 +494,7 @@ export function OrderDrawer({
 
       {tab === 'cart' ? (
         <>
-          <ScrollArea style={{ ...box(DX, 160, 343.3, 506) }} testId="emenu-cart">
+          <ScrollArea style={{ ...box(DX, 160, 343.3, 506 - drop) }} testId="emenu-cart">
             {rows.length === 0 ? (
               <div className={en ? 'em-en' : undefined} style={{ paddingTop: 90, textAlign: 'center', fontSize: 13, lineHeight: '22px', color: MUTE }}>
                 {m.cartEmpty}
@@ -469,7 +504,7 @@ export function OrderDrawer({
             ) : (
               rows.map((r) => (
                 <div key={r.itemId} className="em-rise" style={{ position: 'relative', height: 45.4, opacity: r.problem ? 0.55 : 1 }} data-testid={`emenu-cart-${r.itemId}`}>
-                  <div className={`em-clip${r.names.mainEn ? ' em-en' : ''}`} style={{ ...box(0.5, r.names.mainEn ? 16.9 : 15.9, 270), fontSize: r.names.mainEn ? 13 : 14, lineHeight: '14px' }}>
+                  <div className={`em-clip${r.names.mainEn ? ' em-en' : ''}`} style={{ ...box(0.5, r.names.mainEn ? 16.9 : 15.9, large ? 252 : 270), fontSize: r.names.mainEn ? 13 : 14, lineHeight: '14px' }}>
                     {r.names.main}
                     {r.label && <span style={{ fontSize: 10, lineHeight: 0, color: MUTE }}>{r.names.mainEn ? ` (${r.label})` : `（${r.label}）`}</span>}
                     {r.tagline.text && <span style={{ fontSize: 10, lineHeight: 0, color: MUTE, fontFamily: r.tagline.en ? undefined : 'var(--em-zh)' }}>{wrapParen(r.tagline.text)}</span>}
@@ -488,26 +523,26 @@ export function OrderDrawer({
                     </div>
                   )}
                   {/* 减号 283.6、加号 330.7（离内容左边），份数在两个圆点中间；圆点比菜名高 1.3 */}
-                  {step(() => onQuantity(r.itemId, r.quantity - 1), <MinusDot />, 283.6, m.less(r.names.main), `emenu-minus-${r.itemId}`, locked)}
-                  <span key={r.quantity} className="em-en em-bump" style={{ ...box(296.2, 16.2, 34.5), textAlign: 'center', fontSize: 12, lineHeight: '12px', letterSpacing: 0 }} data-testid={`emenu-qty-${r.itemId}`}>
+                  {step(() => onQuantity(r.itemId, r.quantity - 1), <MinusDot size={dot} />, large ? 264 : 283.6, m.less(r.names.main), `emenu-minus-${r.itemId}`, locked)}
+                  <span key={r.quantity} className="em-en em-bump" style={large ? { ...box(282, 14.4, 43.3), textAlign: 'center', fontSize: 14, lineHeight: '14px', letterSpacing: 0 } : { ...box(296.2, 16.2, 34.5), textAlign: 'center', fontSize: 12, lineHeight: '12px', letterSpacing: 0 }} data-testid={`emenu-qty-${r.itemId}`}>
                     {r.quantity}
                   </span>
-                  {step(() => onQuantity(r.itemId, r.quantity + 1), <PlusDot />, 330.7, m.more(r.names.main), `emenu-plus-${r.itemId}`, locked || !!r.problem || r.quantity >= 99)}
+                  {step(() => onQuantity(r.itemId, r.quantity + 1), <PlusDot size={dot} />, large ? 325.3 : 330.7, m.more(r.names.main), `emenu-plus-${r.itemId}`, locked || !!r.problem || r.quantity >= 99)}
                 </div>
               ))
             )}
           </ScrollArea>
-          <button type="button" onClick={onRemark} disabled={locked} className="em-press" style={{ ...box(DX, 674, 343.3, 26), padding: 0, border: 0, background: 'none', fontSize: 12, lineHeight: '12px', color: MUTE }} data-testid="emenu-remark-open">
+          <button type="button" onClick={onRemark} disabled={locked} className="em-press" style={{ ...box(DX, 674 - drop, 343.3, 26), padding: 0, border: 0, background: 'none', fontSize: 12, lineHeight: '12px', color: MUTE }} data-testid="emenu-remark-open">
             <span className={`em-clip${en ? ' em-en' : ''}`} style={{ ...box(0, 8.8, 343.3), textAlign: 'center' }}>
               {remarkText ? m.remarkWith(remarkText) : m.remark}
             </span>
           </button>
           {/* 设计稿里这一行字比按钮正中偏右 4.45 */}
-          <DrawerButton onClick={onSubmit} disabled={!!problem || locked} testId="emenu-submit" shift={en ? 0 : 4.45}>
-            {en ? <span className="em-en" style={{ fontSize: 14 }}>{m.submit}</span> : m.submit}
+          <DrawerButton onClick={onSubmit} disabled={!!problem || locked} testId="emenu-submit" shift={en || !callStaff ? 0 : 4.45}>
+            {en ? <span className="em-en" style={{ fontSize: 14 }}>{callStaff ? m.submit : m.placeOrder}</span> : callStaff ? m.submit : m.placeOrder}
           </DrawerButton>
           {rows.length > 0 && (
-            <div className={en ? 'em-en' : undefined} style={{ ...box(DX, 734, 343.3), textAlign: 'center', fontSize: en ? 10 : 11, lineHeight: '14px', color: problem ? 'var(--em-error)' : MUTE }} data-testid="emenu-cart-note">
+            <div className={en ? 'em-en' : undefined} style={{ ...box(DX, 734 - drop, 343.3), textAlign: 'center', fontSize: en ? 10 : 11, lineHeight: '14px', color: problem ? 'var(--em-error)' : MUTE }} data-testid="emenu-cart-note">
               {problem ?? (
                 <>
                   {m.cartNoteBefore}
@@ -520,7 +555,7 @@ export function OrderDrawer({
         </>
       ) : (
         <>
-          <ScrollArea style={{ ...box(DX, 160, 343.3, 470) }} testId="emenu-ordered">
+          <ScrollArea style={{ ...box(DX, 160, 343.3, 470 - drop) }} testId="emenu-ordered">
             {!guest ? (
               <div className={en ? 'em-en' : undefined} style={{ paddingTop: 90, textAlign: 'center', fontSize: 13, color: MUTE }}>
                 {guestLoading ? m.orderedLoading : m.orderedFailed}
@@ -557,7 +592,7 @@ export function OrderDrawer({
             )}
           </ScrollArea>
           {guest && (
-            <div style={{ position: 'absolute', right: 42.1, top: 650.6, display: 'flex', alignItems: 'baseline', whiteSpace: 'nowrap' }} data-testid="emenu-ordered-total">
+            <div style={{ position: 'absolute', right: 42.1, top: 650.6 - drop, display: 'flex', alignItems: 'baseline', whiteSpace: 'nowrap' }} data-testid="emenu-ordered-total">
               {en ? (
                 <span className="em-en" style={{ fontSize: 13, marginRight: 8 }}>
                   {m.orderedTotal}
@@ -606,6 +641,7 @@ export function RemarkDrawer({
   const [tab, setTab] = useState<'avoid' | 'serve'>('avoid');
   const [custom, setCustom] = useState(!!remark.custom);
   const input = useRef<HTMLInputElement>(null);
+  const drop = useDrawerDrop();
   const tabButton = (key: 'avoid' | 'serve', label: string, x: number, w: number) => (
     <button
       type="button"
@@ -642,7 +678,7 @@ export function RemarkDrawer({
       })}
       {options.length === 0 && <div style={{ ...box(DX, 176, 343.3), textAlign: 'center', fontSize: 13, color: MUTE }}>{m.noOptions}</div>}
       {custom && (
-        <div style={{ ...box(DX, 628, 343.3, 30) }}>
+        <div style={{ ...box(DX, 628 - drop, 343.3, 30) }}>
           <input
             ref={input}
             value={remark.custom}
@@ -665,7 +701,7 @@ export function RemarkDrawer({
           setTimeout(() => input.current?.focus(), 0);
         }}
         className="em-press"
-        style={{ ...box(DX, 674, 343.3, 26), padding: 0, border: 0, background: 'none', fontSize: 12, lineHeight: '12px', color: MUTE }}
+        style={{ ...box(DX, 674 - drop, 343.3, 26), padding: 0, border: 0, background: 'none', fontSize: 12, lineHeight: '12px', color: MUTE }}
         data-testid="emenu-remark-custom-open"
       >
         <span className={en ? 'em-en' : undefined} style={{ ...box(0, 8.8, 343.3), textAlign: 'center' }}>

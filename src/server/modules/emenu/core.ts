@@ -240,6 +240,8 @@ export async function emenuMenu(db: Db, deps: Deps): Promise<EmenuMenu> {
       langSwitch: rules.langSwitch,
       optionsEn: rules.optionsEn,
       motion: rules.motion,
+      requirePin: rules.requirePin,
+      textSize: rules.textSize,
       coverUrl: emenuImageUrl(rules.coverImageId),
     },
     categories,
@@ -382,8 +384,9 @@ export async function placeEmenuOrder(deps: Deps, raw: unknown, device: Actor, s
   const note = composeEmenuNote(avoid, input.serve, input.customNote);
   if (note.length > EMENU_MAX_NOTE) throw unprocessable('REMARK_TOO_LONG', `备注太长了（最多 ${EMENU_MAX_NOTE} 个字），请少选几项或写短一点`);
 
-  // 点单密码在事务外核对：密码不对、锁了、没有权限都在这里拒绝，不碰账单
-  const waiter = await resolveWaiter(deps, (raw as { pin?: unknown } | null)?.pin, device, source);
+  // 点单密码在事务外核对：密码不对、锁了、没有权限都在这里拒绝，不碰账单。
+  // 后台没开「点单密码」（8.0.15 起默认不开）：不核对，经办人记这台平板登录的账号
+  const waiter = await orderOperator(deps, rules, raw, device, source);
 
   const { clientKey: key, ...payload } = input;
   const tagCode = normalizeTagCode(input.tagCode);
@@ -432,6 +435,7 @@ export async function placeEmenuOrder(deps: Deps, raw: unknown, device: Actor, s
         orderNo: posted.orderNo,
         deviceStaffId: device.id,
         deviceUsername: device.username,
+        ...(rules.requirePin ? {} : { noPin: true }),
       },
       ip: source,
       businessDate: date,
@@ -442,6 +446,15 @@ export async function placeEmenuOrder(deps: Deps, raw: unknown, device: Actor, s
   // 编号是点单页（不是平板）用过的：内容摘要对不上时 runIdempotent 已经拒绝；走到这里一定有点餐单
   if (!order) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一笔不同的业务，请重新下单');
   return { ...order, replayed };
+}
+
+/**
+ * 这一单记谁经办：开着「点单密码」时是输密码的那位服务员（密码不对、锁了、没有点单权限在这里拒绝）；
+ * 没开时是这台平板登录的账号（请求里带了密码也不看）。
+ */
+async function orderOperator(deps: Deps, rules: Pick<EmenuRules, 'requirePin'>, raw: unknown, device: Actor, source: string): Promise<Actor> {
+  if (!rules.requirePin) return device;
+  return resolveWaiter(deps, (raw as { pin?: unknown } | null)?.pin, device, source);
 }
 
 const KeyParam = z.object({ key: z.uuid('操作编号格式不正确') });
@@ -460,7 +473,7 @@ export async function emenuOpLookup(db: Db, rawParams: unknown): Promise<EmenuOp
  */
 export async function abandonEmenuOrder(deps: Deps, rawParams: unknown, raw: unknown, device: Actor, source: string): Promise<EmenuOpLookup> {
   const { key } = parse(KeyParam, rawParams);
-  const waiter = await resolveWaiter(deps, (raw as { pin?: unknown } | null)?.pin, device, source);
+  const waiter = await orderOperator(deps, await loadEmenuRules(deps.sql), raw, device, source);
   const result = await abandonFrontdeskOp(deps, key, 'bill_post', { actor: waiter, ip: source });
   if (!result.found) return { found: false, abandoned: result.abandoned };
   const order = await orderByKey(deps.sql, key);
