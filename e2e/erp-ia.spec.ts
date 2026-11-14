@@ -31,7 +31,7 @@ test.describe('8.0.18 ERP 的信息架构', () => {
     const group = (title: string) => nav.locator('div', { has: page.locator('p', { hasText: new RegExp(`^${title}$`) }) }).getByRole('link');
     // 链接里可能带着待办的数字
     await expect(group('审批')).toHaveText([/^审批中心/]);
-    await expect(group('供应链')).toHaveText([/^库存/, /^采购(\d|$)/, /^采购需求单/, /^本部门小仓/, /^资产与易耗/]);
+    await expect(group('供应链')).toHaveText([/^库存/, /^采购(\d|$)/, /^采购需求单/, /^本部门小仓/, /^资产与易耗/, /^布草洗涤/]); // 8.0.20 加了布草洗涤
     await expect(group('财务')).toHaveText([/^付款/, /应付货款/, /费用与备用金/, /发票台账/, /应收与挂账/]);
     await expect(group('合同')).toHaveText([/合同/]);
     await expect(page.getByTestId('erp-nav-settings')).toHaveText('ERP 设置');

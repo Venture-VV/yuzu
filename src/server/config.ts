@@ -194,7 +194,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     trustProxy: (process.env.TRUST_PROXY ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     logLevel: process.env.LOG_LEVEL ?? (env === 'test' ? 'silent' : 'info'),
     // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉
-    version: (process.env.APP_VERSION || '8.0.19').replace(/^v/, ''),
+    version: (process.env.APP_VERSION || '8.0.20').replace(/^v/, ''),
     commit: /^[0-9a-f]{7,40}$/.test(process.env.APP_COMMIT ?? '') ? process.env.APP_COMMIT! : '',
     instance: resolveInstance(env, process.env.YUZU_INSTANCE),
     initOwner:

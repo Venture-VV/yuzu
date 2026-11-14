@@ -745,7 +745,13 @@ export async function checkinRoom(deps: Deps, raw: unknown, ctx: OpContext): Pro
     // 这位客人的房价（8.0.20 会员联动房价）：手牌绑了会员、房型设了会员价的按会员价；读会员的档阶不加锁（与浴票延迟一样）
     const quote = await roomQuote(tx, room.roomTypeId, type!.price, visit.memberId, date);
     if (quote.rate !== input.expectedRate) {
-      throw conflict('PRICE_CHANGED', `房型「${type!.name}」这位客人的房价是 ${formatYuan(quote.rate)}${quote.memberGrade ? '（会员价）' : ''}，请核对后重新确认`, { rate: quote.rate });
+      throw conflict(
+        'PRICE_CHANGED',
+        quote.memberGrade
+          ? `房型「${type!.name}」这位会员的房价是 ${formatYuan(quote.rate)}（会员价），请核对后重新确认`
+          : `房型「${type!.name}」的房价刚刚改为 ${formatYuan(quote.rate)}，请核对后重新确认`,
+        { rate: quote.rate },
+      );
     }
     const bookingId = await bookingForCheckin(tx, input.bookingId, visitId, room.roomTypeId);
     const stayNo = await nextDocNo(tx, 'room_stay', 'RZ', date);
