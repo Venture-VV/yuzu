@@ -487,6 +487,10 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
     defaultChannel: null as string | null,
     // 签约 / 未签约（8.0.1 采购组整改 08，CG08）：签约的可以上传合同 PDF
     contracted: false,
+    // 收款账户（8.0.21 批量付款）：账号页面上只看得到后四位，要改就整个重填（空着 = 不改）
+    bankPayee: '',
+    bankName: '',
+    bankAccount: '',
     active: true,
   };
   const [form, setForm] = useState(blank);
@@ -507,6 +511,9 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
             reconcileCycle: editing.reconcileCycle,
             defaultChannel: editing.defaultChannel ?? null,
             contracted: editing.contracted,
+            bankPayee: editing.bankPayee,
+            bankName: editing.bankName,
+            bankAccount: '',
             active: editing.active,
           }
         : blank,
@@ -519,8 +526,11 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
     setSaving(true);
     setError(null);
     try {
-      if (s) await api.put(`/api/inventory/suppliers/${s.id}`, form);
-      else await api.post('/api/inventory/suppliers', form);
+      // 收款账号空着不传（保持原样）
+      const { bankAccount, ...rest } = form;
+      const body = bankAccount.trim() ? { ...rest, bankAccount: bankAccount.trim() } : rest;
+      if (s) await api.put(`/api/inventory/suppliers/${s.id}`, body);
+      else await api.post('/api/inventory/suppliers', body);
       await invalidate();
       toast({ tone: 'success', title: '供应商已保存' });
       onClose();
@@ -631,6 +641,15 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
               </option>
             ))}
           </Select>
+        </Field>
+        <Field label="收款户名" htmlFor="s-bank-payee" className="sm:col-span-3" hint="批量付款文件用（8.0.21）">
+          <Input id="s-bank-payee" value={form.bankPayee} maxLength={60} onChange={(e) => setForm({ ...form, bankPayee: e.target.value })} className="h-10" data-testid="s-bank-payee" />
+        </Field>
+        <Field label="收款开户行" htmlFor="s-bank-name" className="sm:col-span-3">
+          <Input id="s-bank-name" value={form.bankName} maxLength={60} onChange={(e) => setForm({ ...form, bankName: e.target.value })} className="h-10" data-testid="s-bank-name" />
+        </Field>
+        <Field label="收款账号" htmlFor="s-bank-account" className="sm:col-span-3" hint={s?.bankAccountTail ? `现在是尾号 ${s.bankAccountTail}；空着不改，要改就整个重填` : '8–32 位数字'}>
+          <Input id="s-bank-account" value={form.bankAccount} maxLength={40} inputMode="numeric" onChange={(e) => setForm({ ...form, bankAccount: e.target.value })} placeholder={s?.bankAccountTail ? `**** ${s.bankAccountTail}` : ''} className="num h-10" data-testid="s-bank-account" />
         </Field>
         <Field label="状态" className="sm:col-span-3">
           <Segmented

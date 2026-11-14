@@ -405,6 +405,8 @@ export const ERP_OP_TYPES = [
   'invoice_request',
   // 8.0.21 网银流水导入
   'bank_import',
+  // 8.0.21 批量付款：生成一批
+  'payment_batch',
   'customer_note',
   'customer_binding_request',
   'customer_binding_review',
@@ -472,6 +474,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   linen_doc: '布草单据',
   invoice_request: '开票申请',
   bank_import: '网银流水导入',
+  payment_batch: '批量付款',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

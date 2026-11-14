@@ -247,7 +247,9 @@ export type AuditAction =
   // 8.0.21 银行账户与网银流水（docs/FINANCE_V8021.md 第 4 节）：账户、导入、勾对
   | 'bank_account'
   | 'bank_import'
-  | 'bank_match';
+  | 'bank_match'
+  // 8.0.21 批量付款（同上第 5 节）：生成、导出、下载、作废、记已付 / 失败
+  | 'payment_batch';
 
 export interface AuditEntry {
   staffId: number | null;

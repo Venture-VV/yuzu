@@ -64,6 +64,8 @@ export const listSuppliers = (db: Db, includeInactive = false) =>
            -- 准入与证照（8.0.7 A2，迁移 097）：在用的证照里最早到期的
            admission, admission_note,
            (SELECT min(l.valid_until)::text FROM supplier_licenses l WHERE l.supplier_id = suppliers.id AND l.removed_at IS NULL) AS license_due,
+           -- 收款账户（8.0.21 批量付款）：完整账号不发到页面，只给后四位
+           bank_payee, bank_name, right(bank_account, 4) AS bank_account_tail,
            active, is_synthetic FROM suppliers
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, code`;
 
@@ -142,6 +144,15 @@ export const SupplierInput = z.object({
   defaultChannel: ChannelKey.nullable().optional(),
   /** 签约 / 未签约（8.0.1，CG08）：新建不填为未签约，修改不填保持原样 */
   contracted: z.boolean().optional(),
+  /** 收款账户（8.0.21 批量付款，CW18）：户名、开户行；不填保持原样 */
+  bankPayee: text(60, '收款户名').optional(),
+  bankName: text(60, '收款开户行').optional(),
+  /** 收款账号：页面上只看得到后四位，要改就整个重填；不填保持原样，传空字符串清掉 */
+  bankAccount: z
+    .string()
+    .transform((v) => v.replace(/[\s-]/g, ''))
+    .refine((v) => v === '' || /^[0-9]{8,32}$/.test(v), '收款账号是 8–32 位数字')
+    .optional(),
   active: z.boolean().default(true),
 });
 export type SupplierInputData = z.input<typeof SupplierInput>;
@@ -253,10 +264,11 @@ export async function saveSupplier(
   try {
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
-        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, default_channel, contracted, active, is_synthetic, admission)
+        INSERT INTO suppliers (code, name, contact, phone, note, settlement, reconcile_cycle, reconcile_since, default_channel, contracted, active, is_synthetic, admission,
+                               bank_payee, bank_name, bank_account)
         VALUES (${s.code}, ${s.name}, ${s.contact}, ${s.phone}, ${s.note}, ${s.settlement ?? 'credit'}, ${cycle ?? 'monthly'},
                 ${cycle === 'batch' ? db`coalesce(${today}::date, CURRENT_DATE)` : null}, ${s.defaultChannel ?? null}, ${s.contracted ?? false}, ${s.active}, ${extra.isSynthetic ?? false},
-                ${extra.admission ?? 'approved'})
+                ${extra.admission ?? 'approved'}, ${s.bankPayee ?? ''}, ${s.bankName ?? ''}, ${s.bankAccount ?? ''})
         RETURNING id`;
       return row!.id;
     }
@@ -265,6 +277,9 @@ export async function saveSupplier(
              settlement = coalesce(${s.settlement ?? null}, settlement),
              default_channel = ${s.defaultChannel === undefined ? db`default_channel` : s.defaultChannel},
              contracted = coalesce(${s.contracted ?? null}, contracted),
+             bank_payee = coalesce(${s.bankPayee ?? null}, bank_payee),
+             bank_name = coalesce(${s.bankName ?? null}, bank_name),
+             bank_account = coalesce(${s.bankAccount ?? null}, bank_account),
              reconcile_since = CASE WHEN ${cycle}::text = 'batch' AND reconcile_cycle <> 'batch' THEN coalesce(${today}::date, CURRENT_DATE)
                                     ELSE reconcile_since END,
              reconcile_cycle = coalesce(${cycle}::text, reconcile_cycle),

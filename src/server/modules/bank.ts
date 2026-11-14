@@ -40,6 +40,7 @@ import { readSheet } from '../lib/sheet-read';
 import { setTxTimeouts } from '../lib/tx';
 import { idParam, parse } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
+import { recordItemPaid } from './payment-batches';
 
 const READ = guard('payable.read');
 const MANAGE = guard('payable.manage');
@@ -187,11 +188,13 @@ async function importStatement(deps: Deps, raw: unknown, actor: Actor, ip?: stri
     await writeAudit(tx, { staffId: actor.id, action: 'bank_import', targetType: 'bank_import', targetId: importId, detail: { account: account.name, fileName: f.fileName, lines: r.lines.length, fresh: fresh.length, autoMatched: auto }, ip });
     return { importId, replayed: false };
   });
+  // 自动对上的批量付款行：照「按申请登记付款」记账（事务外，各自的操作编号；记不了的留给人手工处理）
+  const followUps = result.replayed ? [] : await recordBatchMatches(deps, deps.sql`l.import_id = ${result.importId} AND m.auto`, actor, ip);
   const [summary] = await deps.sql<{ lineCount: number; newCount: number; dupCount: number; autoMatched: number }[]>`
     SELECT i.line_count, i.new_count, i.dup_count,
            (SELECT count(DISTINCT m.line_id)::int FROM bank_matches m JOIN bank_statement_lines l ON l.id = m.line_id WHERE l.import_id = i.id AND m.auto AND m.status = 'active') AS auto_matched
     FROM bank_imports i WHERE i.id = ${result.importId}`;
-  return { import: { id: result.importId, ...summary!, problems: r.problems.slice(0, 50) }, replayed: result.replayed };
+  return { import: { id: result.importId, ...summary!, problems: r.problems.slice(0, 50), followUps }, replayed: result.replayed };
 }
 
 // ───────────────────────── 对象（系统里的付款、回款……） ─────────────────────────
@@ -202,6 +205,10 @@ async function candidates(db: Db, types: MatchTargetType[], filter: { amountMax?
   const amt = (col: Fragment) => (filter.amountEq !== undefined ? db`${col} = ${filter.amountEq}` : filter.amountMax !== undefined ? db`${col} <= ${filter.amountMax}` : db`TRUE`);
   const idsOf = (t: MatchTargetType) => filter.ids?.filter((x) => x.type === t).map((x) => x.id);
   const notMatched = (t: MatchTargetType, col: Fragment) => db`NOT EXISTS (SELECT 1 FROM bank_matches m WHERE m.target_type = ${t} AND m.target_id = ${col} AND m.status = 'active')`;
+  // 批量付款记账出来的付款：那一行已经对上流水了，付款本身不再算没对上
+  const notViaBatch = (kind: 'payment' | 'payout', col: Fragment) => db`NOT EXISTS (
+    SELECT 1 FROM payment_batch_items bi JOIN bank_matches bm ON bm.target_type = 'batch_item' AND bm.target_id = bi.id AND bm.status = 'active'
+    WHERE bi.payment_kind = ${kind} AND bi.payment_id = ${col})`;
   for (const t of types) {
     const only = idsOf(t);
     if (filter.ids && !only?.length) continue;
@@ -211,13 +218,13 @@ async function candidates(db: Db, types: MatchTargetType[], filter: { amountMax?
       rows = await db`
         SELECT p.id, p.doc_no, p.pay_date::text AS date, p.amount_cents::text AS amount_cents, s.name AS party, p.status = 'voided' AS voided
         FROM payments p JOIN suppliers s ON s.id = p.supplier_id
-        WHERE ${only ? db`TRUE` : db`p.status = 'confirmed' AND p.method <> 'cash' AND p.pay_date BETWEEN ${filter.from} AND ${filter.to} AND ${notMatched(t, db`p.id`)}`}
+        WHERE ${only ? db`TRUE` : db`p.status = 'confirmed' AND p.method <> 'cash' AND p.pay_date BETWEEN ${filter.from} AND ${filter.to} AND ${notMatched(t, db`p.id`)} AND ${notViaBatch('payment', db`p.id`)}`}
           AND ${amt(db`p.amount_cents`)} AND ${pick(db`p.id`)}`;
     } else if (t === 'contract_payout') {
       rows = await db`
         SELECT o.id, o.doc_no, o.pay_date::text AS date, o.amount_cents::text AS amount_cents, coalesce(c.counterparty, r.payee) AS party, o.status = 'voided' AS voided
         FROM contract_payouts o JOIN payment_requests r ON r.id = o.payment_request_id LEFT JOIN contracts c ON c.id = r.contract_id
-        WHERE ${only ? db`TRUE` : db`o.status = 'confirmed' AND o.method <> 'cash' AND o.pay_date BETWEEN ${filter.from} AND ${filter.to} AND ${notMatched(t, db`o.id`)}`}
+        WHERE ${only ? db`TRUE` : db`o.status = 'confirmed' AND o.method <> 'cash' AND o.pay_date BETWEEN ${filter.from} AND ${filter.to} AND ${notMatched(t, db`o.id`)} AND ${notViaBatch('payout', db`o.id`)}`}
           AND ${amt(db`o.amount_cents`)} AND ${pick(db`o.id`)}`;
     } else if (t === 'petty_advance') {
       rows = await db`
@@ -247,11 +254,9 @@ async function candidates(db: Db, types: MatchTargetType[], filter: { amountMax?
         WHERE ${only ? db`TRUE` : db`p.status = 'active' AND p.received_on BETWEEN ${filter.from} AND ${filter.to} AND ${notMatched(t, db`p.id`)}`}
           AND ${amt(db`p.amount`)} AND ${pick(db`p.id`)}`;
     } else if (t === 'batch_item') {
-      // 批量付款的一行（迁移 145 起才有）
-      const [exists] = await db<{ ok: boolean }[]>`SELECT to_regclass('payment_batch_items') IS NOT NULL AS ok`;
-      if (!exists!.ok) continue;
+      // 批量付款的一行（第 5 节）：导出以后、还没有结论的
       rows = await db`
-        SELECT i.id, b.batch_no || '-' || i.line_no AS doc_no, b.created_at::date::text AS date, i.amount_cents::text AS amount_cents, i.payee_name AS party,
+        SELECT i.id, b.batch_no || '-' || i.line_no AS doc_no, coalesce(b.exported_at, b.created_at)::date::text AS date, i.amount_cents::text AS amount_cents, i.payee_name AS party,
                i.status IN ('removed', 'failed') OR b.status = 'voided' AS voided
         FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id
         WHERE ${only ? db`TRUE` : db`b.status = 'exported' AND i.status = 'pending' AND ${notMatched(t, db`i.id`)}`}
@@ -452,7 +457,25 @@ async function matchLine(deps: Deps, id: number, raw: unknown, actor: Actor, ip?
     if (isUniqueViolation(error, 'bank_matches_target_uq')) throw conflict('MATCH_TARGET_TAKEN', '选的记录已经对到别的流水上了，请刷新后重选');
     throw error;
   }
-  return getLine(deps.sql, id);
+  const followUps = await recordBatchMatches(deps, deps.sql`m.line_id = ${id}`, actor, ip);
+  return { ...(await getLine(deps.sql, id)), followUps };
+}
+
+/** 对上流水的批量付款行：照「按申请登记付款」记账；返回记不了的（给页面提示） */
+async function recordBatchMatches(deps: Deps, where: Fragment, actor: Actor, ip?: string): Promise<string[]> {
+  const rows = await deps.sql<{ itemId: number; txnDate: string; bankRef: string }[]>`
+    SELECT m.target_id AS item_id, l.txn_date::text AS txn_date, l.bank_ref
+    FROM bank_matches m JOIN bank_statement_lines l ON l.id = m.line_id JOIN payment_batch_items i ON i.id = m.target_id
+    WHERE m.target_type = 'batch_item' AND m.status = 'active' AND i.status = 'pending' AND ${where}`;
+  const problems: string[] = [];
+  for (const r of rows) {
+    try {
+      await recordItemPaid(deps, Number(r.itemId), { payDate: r.txnDate, bankRef: r.bankRef }, actor, ip);
+    } catch (error) {
+      problems.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return problems;
 }
 
 async function voidMatch(deps: Deps, matchId: number, raw: unknown, actor: Actor, ip?: string): Promise<BankLine> {

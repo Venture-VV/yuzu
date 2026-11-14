@@ -260,6 +260,10 @@ export interface Supplier {
   admissionNote: string;
   /** 在用的证照里最早到期的（没有或都长期的为空）；过期的也算 */
   licenseDue: string | null;
+  /** 收款账户（8.0.21 批量付款）：户名、开户行、账号后四位（完整账号不发到页面；没填为空） */
+  bankPayee: string;
+  bankName: string;
+  bankAccountTail: string;
   active: boolean;
   isSynthetic: boolean;
 }

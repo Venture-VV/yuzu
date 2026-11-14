@@ -233,6 +233,8 @@ export interface BankLine {
   matches: BankMatch[];
   /** 勾对的对象后来作废了 */
   targetVoided: boolean;
+  /** 勾对以后没能自动记账的批量付款行（勾对接口返回时才有） */
+  followUps?: string[];
 }
 
 export interface BankOverview {
