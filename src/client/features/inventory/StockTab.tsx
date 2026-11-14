@@ -556,6 +556,8 @@ function MaterialDetail({ id, warehouseId: initialWarehouse, onClose, closable }
 
 /** 提醒线说明（#22，v0.7.12）：设了提醒天数且有用量的按可用天数，否则按固定数量 */
 function coverText(m: Material): string {
+  // 按需采购（迁移 161）：不提补货、不做低库存提醒
+  if (m.replenishMode === 'on_demand') return '按需采购 · 不提醒';
   if (m.coverDays !== null && m.daysOfCover !== null) return `可用 ${m.daysOfCover} 天 · 提醒 ${m.coverDays} 天`;
   if (m.coverDays !== null) return `提醒 ${m.coverDays} 天 · 近期没有用量`;
   return m.lowStockMilli !== null ? `提醒线 ${formatQty(m.lowStockMilli)} ${m.inventoryUnit}` : '未设提醒线';

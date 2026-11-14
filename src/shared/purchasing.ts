@@ -2,7 +2,7 @@
 
 import type { ApprovalBrief } from './approvals';
 import type { ContractCheckResult } from './contracts';
-import type { ApprovalLog, DocRef, Ref } from './inventory';
+import type { ApprovalLog, DocRef, Ref, ReplenishMode } from './inventory';
 
 export const PO_STATUSES = ['draft', 'submitted', 'returned', 'approved', 'cancelled', 'closed'] as const;
 export type PoStatus = (typeof PO_STATUSES)[number];
@@ -499,6 +499,11 @@ export interface PurchaseRules {
   reorderDays: number;
   /** 补货目标天数（E4）：建议补到能用这么多天 */
   targetDays: number;
+  /**
+   * 常用天数（E11，店主 2026-11-14）：补货方式是「自动识别」、又没设提醒的物料，近 REPLENISH_LOOKBACK_DAYS 天里有领用的天数
+   * 少于它的看作一次性采购、不提补货。1 = 不按领用次数识别（领过一次就算，同原来）
+   */
+  regularUseDays: number;
   /** 下单后几天没到货算超期（采购单没填预计到货日时用；账目自检第 9 条）。8.0.1 从费用报销规则挪过来（CG01） */
   arrivalOverdueDays: number;
   /** 每日截单（03，CG03）：开着时截单时间以后（含）提交的需求单当天不能审核通过 */
@@ -526,6 +531,7 @@ export const DEFAULT_PURCHASE_RULES: PurchaseRules = {
   minQuotes: 2,
   reorderDays: 7,
   targetDays: 14,
+  regularUseDays: 2,
   arrivalOverdueDays: 7,
   // 截单默认关着（打开后默认 17:00）：升级后审核照旧，采购或店主在「采购 → 采购规则」里打开（CG03）
   cutoffEnabled: false,
@@ -572,12 +578,17 @@ export interface ReplenishLine {
   stockMilli: number;
   /** 在途：没撤回、没关闭的采购单还没收到的（补单除外） */
   inTransitMilli: number;
+  /** 欠着没扣的（8.0.20：销售 / 出品扣料库存不够时留着的净数，总仓）：算可用数量时已经减掉 */
+  owedMilli: number;
   /** 在途来自哪几张采购单 */
   openPos: string[];
   /** 日均用量（库存单位，近 N 天）；没有用量为 null */
   dailyUsageMilli: number | null;
-  /** (结存 + 在途) ÷ 日均用量，一位小数 */
+  /** (结存 + 在途 − 欠着没扣的) ÷ 日均用量，一位小数 */
   daysOfCover: number | null;
+  /** 档案里的补货方式（迁移 161；建议里的只会是自动识别或常备）与它的版本号：改补货方式时带上版本号，对不上拒绝 */
+  mode: ReplenishMode;
+  modeRev: number;
   /** cover：可用天数不足；low_stock：没有用量、低于提醒数量 */
   reason: 'cover' | 'low_stock';
   /** 触发天数（物料的提醒天数，或规则的补货触发天数）与补到的天数 */
@@ -593,6 +604,53 @@ export interface ReplenishLine {
   amountCents: number | null;
 }
 
+/** 自动识别看近多少天的领用（E11）：固定 90 天，每月领一次的耗材也认得出来；日均用量照旧按「可用天数的用量统计」 */
+export const REPLENISH_LOOKBACK_DAYS = 90;
+
+/** 没提补货的原因：on_demand 档案里定了按需采购；asset 建过资产卡片；sporadic 近期只领过一两次、看作一次性采购 */
+export type ReplenishSkipWhy = 'on_demand' | 'asset' | 'sporadic';
+
+/**
+ * 这个物料要不要提补货（E9、E10）：返回 null = 照常按用量 / 提醒数量算；否则是不提的原因。
+ * 常备的一直提；按需采购的不提；自动识别依次看——设了提醒天数或提醒数量的算常备（人已经说了要备货），
+ * 档案里已经标明是消耗品的算常备（consumable：台面日耗品、管效期、称重；8.0.20 起挂了在用用料的也算），
+ * 建过资产卡片的不提，近期有领用的天数不到「常用天数」的不提。
+ */
+export function replenishSkipWhy(
+  m: { replenishMode: ReplenishMode; coverDays: number | null; lowStockMilli: number | null; consumable: boolean; hasAsset: boolean; useDays: number },
+  regularUseDays: number,
+): ReplenishSkipWhy | null {
+  if (m.replenishMode === 'on_demand') return 'on_demand';
+  if (m.replenishMode === 'stock') return null;
+  if (m.coverDays !== null || (m.lowStockMilli !== null && m.lowStockMilli > 0)) return null;
+  if (m.consumable) return null;
+  if (m.hasAsset) return 'asset';
+  return m.useDays < regularUseDays ? 'sporadic' : null;
+}
+
+/** 本来会提、识别为不用补的物料（E12）：页面列在「没提补货的」里，可以一键改补货方式 */
+export interface ReplenishSkipped {
+  materialId: number;
+  code: string;
+  name: string;
+  specification: string;
+  inventoryUnit: string;
+  stockMilli: number;
+  inTransitMilli: number;
+  /** 欠着没扣的（同建议行） */
+  owedMilli: number;
+  /** 档案里的补货方式与它的版本号（改补货方式时带上版本号，对不上拒绝） */
+  mode: ReplenishMode;
+  modeRev: number;
+  why: ReplenishSkipWhy;
+  /** 近 lookbackDays 天里有领用的天数与最近一次的日期 */
+  useDays: number;
+  lastUsedOn: string | null;
+  /** 建过的资产卡片：编号最小的一张与张数 */
+  assetNo: string | null;
+  assetCount: number;
+}
+
 export interface ReplenishGroup {
   /** 物料的默认供应商，没设的取最近一次收货的供应商；都没有为空（要先选供应商） */
   supplier: Ref | null;
@@ -604,8 +662,14 @@ export interface ReplenishSuggestions {
   windowDays: number;
   reorderDays: number;
   targetDays: number;
+  /** 常用天数与识别窗口（E11） */
+  regularUseDays: number;
+  lookbackDays: number;
+  /** 真正建议的种数（不含 skipped） */
   count: number;
   groups: ReplenishGroup[];
+  /** 本来会提、识别为不用补的（E12） */
+  skipped: ReplenishSkipped[];
 }
 
 // ───────────────────────── 询价比价与定标（v0.7.29 ERP 采购五项⑤，docs/ERP_PURCHASING.md 第 6 节） ─────────────────────────

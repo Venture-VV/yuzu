@@ -187,6 +187,14 @@ describe('零售：结账时记、每分钟的任务开耗用单', () => {
     expect(await stock(mat['瓶装水']!)).toBe(q(7));
     const blocked = (await api(ctx.app, keeper, 'GET', '/api/inventory/usage')).body.pending;
     expect(blocked).toEqual([expect.objectContaining({ materialName: '瓶装水', netMilli: q(9), stockMilli: q(7), blocked: true })]);
+    // 与补货方式（迁移 161）的配合：挂了在用用料的物料算常备——只有一天有用量也照常提，不认成一次性采购；
+    // 欠着没扣的当成已经用掉，算进该补多少（结存 7 − 欠 9 = −2）
+    const sug = (await api(ctx.app, ctx.owner, 'GET', '/api/purchase-suggestions')).body;
+    const water = sug.groups.flatMap((g: { lines: { materialId: number }[] }) => g.lines).find((l: { materialId: number }) => l.materialId === mat['瓶装水']);
+    expect(water, JSON.stringify(sug.skipped)).toMatchObject({ stockMilli: q(7), owedMilli: q(9), reason: 'cover' });
+    expect(water.daysOfCover).toBeLessThan(0);
+    expect(water.suggestedBaseMilli).toBeGreaterThanOrEqual(q(2));
+    expect(sug.skipped.some((x: { materialId: number }) => x.materialId === mat['瓶装水'])).toBe(false);
     // 到一箱货（24 瓶）
     const sup = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/suppliers', { code: 'US01', name: '扣料测试供应商' });
     const supplierId = sup.body.find((x: { code: string }) => x.code === 'US01').id;

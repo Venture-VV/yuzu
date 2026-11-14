@@ -5,7 +5,7 @@
 //   · 先按 id 升序锁定涉及的物料行（SELECT … FOR UPDATE），同一物料的收发严格串行；
 //   · 结存字段有 CHECK (>= 0) 兜底，任何情况下都不会出现负库存。
 
-import { CENTRAL_WAREHOUSE_ID, DEFAULT_COUNT_BIG_CENTS, DEFAULT_COUNT_BIG_PCT, type ApprovalRules, type InventorySettings, type MoveType } from '@shared/inventory';
+import { CENTRAL_WAREHOUSE_ID, DEFAULT_COUNT_BIG_CENTS, DEFAULT_COUNT_BIG_PCT, type ApprovalRules, type InventorySettings, type MoveType, type ReplenishMode } from '@shared/inventory';
 import { shiftDate } from '@shared/labels';
 import { urgentCapOf } from '@shared/purchasing';
 import { formatQty } from '@shared/quantity';
@@ -126,20 +126,36 @@ export async function usageByMaterial(db: Db, warehouseId: number, since: string
 }
 
 /**
+ * 总仓从 since（含）起每个物料有用量的天数与最近一次的日期（补货方式的自动识别用，迁移 161，docs/ERP_PURCHASING.md 第 5.1 节）。
+ * 口径同 usageByMaterial 的总仓：领料、直接耗用、报损、盘点记成耗用的；已冲销的单据整张不算。
+ */
+export async function usageDaysByMaterial(db: Db, since: string): Promise<Map<number, { days: number; lastOn: string }>> {
+  const rows = await db<{ materialId: number; days: number; lastOn: string }[]>`
+    SELECT sm.material_id, count(DISTINCT sm.doc_date)::int AS days, max(sm.doc_date)::text AS last_on
+    FROM stock_moves sm JOIN inv_docs d ON d.id = sm.doc_id LEFT JOIN inv_doc_lines l ON l.id = sm.doc_line_id
+    WHERE sm.warehouse_id = ${CENTRAL_WAREHOUSE_ID} AND sm.doc_date >= ${since} AND d.status = 'confirmed' AND sm.qty_delta_milli < 0
+      AND (sm.move_type IN ('issue', 'direct_use', 'damage') OR (sm.move_type = 'count_adjust' AND l.diff_reason = 'consumed'))
+    GROUP BY sm.material_id`;
+  return new Map(rows.map((r) => [Number(r.materialId), { days: r.days, lastOn: r.lastOn }]));
+}
+
+/**
  * 日均用量（milli/天）与可用天数（结存 ÷ 日均用量，一位小数；没有用量为空）；
  * 提醒：设了提醒天数且有用量时按可用天数，否则按固定的低库存提醒数量（只有总仓有）。
+ * 补货方式是「按需采购」的不提醒（迁移 161）。
  */
 export function coverFor(
   stockMilli: number,
   usedMilli: number,
   windowDays: number,
-  m: { coverDays: number | null; lowStockMilli?: number | null; tracked?: boolean },
+  m: { coverDays: number | null; lowStockMilli?: number | null; tracked?: boolean; replenishMode?: ReplenishMode },
 ): { dailyUsageMilli: number; daysOfCover: number | null; isLow: boolean } {
   const days = Math.max(1, windowDays);
   const dailyUsageMilli = usedMilli > 0 ? Math.round(usedMilli / days) : 0;
   const daysOfCover = usedMilli > 0 ? Math.floor((stockMilli * days * 10) / usedMilli) / 10 : null;
   const isLow =
     m.tracked !== false &&
+    m.replenishMode !== 'on_demand' &&
     (m.coverDays !== null && daysOfCover !== null
       ? daysOfCover < m.coverDays
       : m.lowStockMilli !== undefined && m.lowStockMilli !== null && stockMilli < m.lowStockMilli);

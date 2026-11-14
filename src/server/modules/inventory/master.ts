@@ -2,7 +2,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Department, Material, Supplier } from '@shared/inventory';
+import { REPLENISH_MODE_LABELS, REPLENISH_MODES, type Department, type Material, type Supplier } from '@shared/inventory';
 import { fitsDecimals, formatQty } from '@shared/quantity';
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
@@ -11,16 +11,16 @@ import type { Deps } from '../../lib/context';
 import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { CENTRAL_WAREHOUSE_ID } from '@shared/inventory';
-import { coverFor, loadInventorySettings, todayIn, usageByMaterial, usageSince } from './common';
+import { coverFor, loadInventorySettings, setTxTimeouts, todayIn, usageByMaterial, usageSince } from './common';
 import { assertChannelKey, ChannelKey } from './purchase-rules';
 import { lockSettings } from '../../lib/rule-settings';
 
 const MATERIAL_COLUMNS = (db: Db) => db`
   m.id, m.code, m.name, m.category, m.specification, m.inventory_unit, m.decimals, m.purchase_unit,
   m.purchase_factor_milli, m.ref_price_cents, m.default_supplier_id, s.name AS default_supplier_name,
-  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.expiry_tracked, m.shelf_life_days, m.tracked, m.active, m.stock_milli,
+  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.expiry_tracked, m.shelf_life_days, m.replenish_mode, m.replenish_rev, m.tracked, m.active, m.stock_milli,
   (SELECT coalesce(sum(ws.stock_milli), 0) FROM warehouse_stock ws WHERE ws.material_id = m.id) AS dept_stock_milli,
-  (m.low_stock_milli IS NOT NULL AND m.tracked AND m.stock_milli < m.low_stock_milli) AS is_low,
+  (m.low_stock_milli IS NOT NULL AND m.tracked AND m.replenish_mode <> 'on_demand' AND m.stock_milli < m.low_stock_milli) AS is_low,
   (m.last_move_id IS NOT NULL) AS has_moves,
   (m.last_move_id IS NOT NULL OR EXISTS (SELECT 1 FROM stock_moves sm WHERE sm.material_id = m.id)) AS any_moves,
   (SELECT created_at FROM stock_moves WHERE id = m.last_move_id) AS last_move_at,
@@ -99,6 +99,8 @@ export const MaterialInput = z
     /** 效期管理（8.0.7 3.3）：收货要填到期日；保质期天数（填了的按生产日期自动算到期日） */
     expiryTracked: z.boolean().default(false),
     shelfLifeDays: z.number('保质期要填天数').int('保质期要填整天数').min(1, '保质期至少 1 天').max(3650, '保质期最多 3650 天').nullable().default(null),
+    /** 补货方式（迁移 161）：新建不填按自动识别，修改不填保持原样（旧页面、导入、别处的调用） */
+    replenishMode: z.enum(REPLENISH_MODES, '补货方式只能选：自动识别、常备、按需采购').optional(),
     tracked: z.boolean().default(true),
     active: z.boolean().default(true),
     note: text(200, '备注').default(''),
@@ -116,6 +118,15 @@ export const MaterialInput = z
     path: ['decimals'],
   });
 export type MaterialInputData = z.input<typeof MaterialInput>;
+
+const ReplenishModeInput = z.object({
+  mode: z.enum(REPLENISH_MODES, '补货方式只能选：自动识别、常备、按需采购'),
+  /**
+   * 页面看到的补货方式版本号（materials.replenish_rev，每改一次加一）：对不上就拒绝，不盖掉后来的修改——
+   * 哪怕这之后补货方式改走又改回了原来的值（只比值认不出来；测试会话在 44ddeb5 上复验报的边界）
+   */
+  expectedRev: z.number('请带上页面上看到的补货方式版本号').int().min(0),
+});
 
 export const SupplierInput = z.object({
   code: required(16, '供应商编码'),
@@ -175,19 +186,19 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
       const [row] = await db<{ id: number }[]>`
         INSERT INTO materials (code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli,
                                ref_price_cents, default_supplier_id, low_stock_milli, cover_days, counter_use, weighed, expiry_tracked, shelf_life_days,
-                               tracked, active, note, is_synthetic)
+                               replenish_mode, tracked, active, note, is_synthetic)
         VALUES (${m.code}, ${m.name}, ${m.category}, ${m.specification}, ${m.inventoryUnit}, ${m.decimals}, ${m.purchaseUnit},
                 ${m.purchaseFactorMilli}, ${m.refPriceCents}, ${m.defaultSupplierId}, ${m.lowStockMilli}, ${m.coverDays}, ${m.counterUse}, ${m.weighed},
-                ${m.expiryTracked}, ${m.shelfLifeDays}, ${m.tracked}, ${m.active}, ${m.note}, ${extra.isSynthetic ?? false})
+                ${m.expiryTracked}, ${m.shelfLifeDays}, ${m.replenishMode ?? 'auto'}, ${m.tracked}, ${m.active}, ${m.note}, ${extra.isSynthetic ?? false})
         RETURNING id`;
       return row!.id;
     }
     return await db.begin(async (tx) => {
       // 锁物料行：与库存收发串行（改成台面日耗品时核对的部门小仓结存不会在核对后又变）
       // 任何一个仓有流水都算（部门小仓的期初、急采也会先于总仓有流水，v0.7.11）
-      const [before] = await tx<{ inventoryUnit: string; decimals: number; hasMoves: boolean; tracked: boolean; counterUse: boolean }[]>`
+      const [before] = await tx<{ inventoryUnit: string; decimals: number; hasMoves: boolean; tracked: boolean; counterUse: boolean; replenishMode: string }[]>`
         SELECT inventory_unit, decimals, (last_move_id IS NOT NULL OR EXISTS (SELECT 1 FROM stock_moves WHERE material_id = ${id})) AS has_moves,
-               tracked, counter_use
+               tracked, counter_use, replenish_mode
         FROM materials WHERE id = ${id} FOR UPDATE`;
       if (!before) throw notFound('物料不存在');
       // 已有流水的物料不能改库存单位、不能减少小数位，否则会改写历史数量的含义；增加小数位不影响历史（例如改成称重，v0.7.13）
@@ -215,6 +226,9 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
                purchase_factor_milli = ${m.purchaseFactorMilli}, ref_price_cents = ${m.refPriceCents},
                default_supplier_id = ${m.defaultSupplierId}, low_stock_milli = ${m.lowStockMilli}, cover_days = ${m.coverDays},
                counter_use = ${m.counterUse}, weighed = ${m.weighed}, expiry_tracked = ${m.expiryTracked}, shelf_life_days = ${m.shelfLifeDays}, tracked = ${m.tracked},
+               replenish_mode = coalesce(${m.replenishMode ?? null}, replenish_mode),
+               -- 补货方式变了就把它的版本号加一（迁移 161）：补货建议页上没等到回音的旧请求晚到时会被拒绝
+               replenish_rev = replenish_rev + ${m.replenishMode !== undefined && before && m.replenishMode !== before.replenishMode ? 1 : 0},
                active = ${m.active}, note = ${m.note}, updated_at = now()
         WHERE id = ${id}`;
       return id;
@@ -349,6 +363,37 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
     const { id } = parse(idParam, req.params);
     await saveMaterial(sql, id, req.body as MaterialInputData);
     await writeAudit(sql, { staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'material', targetId: id, detail: req.body as Record<string, unknown>, ip: req.ip });
+    return getMaterial(sql, id, config.timezone);
+  });
+  // 只改补货方式（迁移 161，docs/ERP_PURCHASING.md 第 5.1 节）：补货建议页上一键「定为按需采购 / 设为常备 / 改回自动识别」。
+  // 与改房态同一个思路（合并前 Codex 审查 e3cfbd0、测试会话在 44ddeb5 上的复验）：
+  //   · 等锁、执行有时限（setTxTimeouts）——等不到锁回 BUSY、明确没生效；
+  //   · 带上页面看到的补货方式版本号，对不上拒绝（REPLENISH_MODE_CHANGED）——晚到的旧请求不会盖掉后来的修改，
+  //     改走又改回原来的值也认得出来（版本号每改一次加一，物料档案的整份保存改了补货方式也加）；
+  //   · 已经是要改成的值照常返回（原样重提不报错、不重复记审计、不加版本号）。
+  // 只锁这一个物料行、只改这两列，不带操作编号。
+  app.put('/api/inventory/materials/:id/replenish-mode', { preHandler: guard('inventory.master') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const { mode, expectedRev } = parse(ReplenishModeInput, req.body);
+    await sql.begin(async (tx) => {
+      await setTxTimeouts(tx);
+      const [before] = await tx<{ name: string; replenishMode: (typeof REPLENISH_MODES)[number]; replenishRev: number }[]>`
+        SELECT name, replenish_mode, replenish_rev FROM materials WHERE id = ${id} FOR NO KEY UPDATE`;
+      if (!before) throw notFound('物料不存在');
+      if (before.replenishMode === mode) return;
+      if (before.replenishRev !== expectedRev) {
+        throw conflict(
+          'REPLENISH_MODE_CHANGED',
+          `「${before.name}」的补货方式在这之后又被改过（现在是「${REPLENISH_MODE_LABELS[before.replenishMode].title}」），这次没有再改；页面已经刷新，要改请再点一次`,
+          { current: before.replenishMode, rev: before.replenishRev },
+        );
+      }
+      await tx`UPDATE materials SET replenish_mode = ${mode}, replenish_rev = replenish_rev + 1, updated_at = now() WHERE id = ${id}`;
+      await writeAudit(tx, {
+        staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'material', targetId: id,
+        detail: { replenishMode: mode, before: before.replenishMode }, ip: req.ip,
+      });
+    });
     return getMaterial(sql, id, config.timezone);
   });
 

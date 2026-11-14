@@ -188,6 +188,8 @@ function deptMaterial(m: DeptStockMeta['materials'][number], row: WarehouseStock
     // 部门小仓不分批（V17）
     expiryTracked: false,
     shelfLifeDays: null,
+    replenishMode: row?.replenishMode ?? 'auto',
+    replenishRev: 0,
   };
 }
 
