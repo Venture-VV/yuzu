@@ -57,7 +57,7 @@ export interface LocationRules {
   restZoneId: number | null;
 }
 
-export const DEFAULT_LOCATION_RULES: LocationRules = { enabled: false, checkinZoneId: null, restZoneId: null };
+export const DEFAULT_LOCATION_RULES: LocationRules = { enabled: true, checkinZoneId: null, restZoneId: null };
 
 /** 刷卡上报的时间窗：不能早于 24 小时，不能晚于服务器 2 分钟 */
 export const REPORT_MAX_AGE_MS = 24 * 60 * 60 * 1000;

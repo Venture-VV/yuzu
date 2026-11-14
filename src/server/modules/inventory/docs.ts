@@ -1201,7 +1201,8 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
         }
       }
       // 按采购单收货进总仓；急采进部门小仓
-      for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, ref(l, 'receipt'));
+      // 成本（8.0.20）：按这一行的金额入库，重算平均成本
+      for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, l.qtyMilli, { ...ref(l, 'receipt'), valueCents: l.amountCents });
       // 急采的台面日耗品：进部门小仓即算耗用（#14，v0.7.13）
       if (isDept) await consumeCounterUse(lines);
       // 按采购单收货：跟着这张采购单的结算方式（第一张收货或已有的报销定下的，供应商改了设置也不变）
@@ -1263,7 +1264,7 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
       } else {
         // 退供应商：从原收货单的仓出（急采的从部门小仓出）
         await assertEnough(whId, lines);
-        for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, -l.qtyMilli, ref(l, 'supplier_return'));
+        for (const l of lines) await applyMove(tx, mats.get(l.materialId)!, -l.qtyMilli, { ...ref(l, 'supplier_return'), valueCents: l.amountCents });
         // 退货跟着原收货单的结算方式：现付的收货没记应付，退货也不记应付扣款（供应商退款在 RQ-002 做）
         const [src] = await tx<{ settlement: SupplierSettlement | null }[]>`SELECT settlement FROM inv_docs WHERE id = ${doc.sourceDocId}`;
         settlement = src?.settlement ?? 'credit';
@@ -1607,8 +1608,8 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
     if (doc.purchaseOrderId) await tx`SELECT id FROM purchase_orders WHERE id = ${doc.purchaseOrderId} FOR UPDATE`;
     const check = await voidability(tx, await getDoc(tx, docId), deps.config.timezone);
     if (!check.ok) throw conflict('NOT_VOIDABLE', check.reason ?? '这张单据不能冲销');
-    const moves = await tx<{ materialId: number; docLineId: number; qtyDeltaMilli: number; warehouseId: number }[]>`
-      SELECT material_id, doc_line_id, qty_delta_milli, warehouse_id FROM stock_moves WHERE doc_id = ${docId} AND move_type <> 'void' ORDER BY id DESC`;
+    const moves = await tx<{ materialId: number; docLineId: number; qtyDeltaMilli: number; warehouseId: number; moveType: string; costCents: number | null }[]>`
+      SELECT material_id, doc_line_id, qty_delta_milli, warehouse_id, move_type, cost_cents FROM stock_moves WHERE doc_id = ${docId} AND move_type <> 'void' ORDER BY id DESC`;
     const mats = await lockMaterials(tx, moves.map((m) => m.materialId));
     const wh = await warehouseRef(tx, doc.warehouseId);
     // 部门停用后它的小仓已清空，不能再冲回去
@@ -1625,6 +1626,8 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
         operatorId: actor.id,
         warehouseId: mv.warehouseId,
         warehouseName: mv.warehouseId === CENTRAL_WAREHOUSE_ID ? '总仓' : wh?.name,
+        // 成本（8.0.20）：带金额进出的（收货、退供应商）按原流水的金额冲回、重算平均成本；其余按现在的平均成本记
+        valueCents: (mv.moveType === 'receipt' || mv.moveType === 'supplier_return') && mv.costCents !== null ? Math.abs(Number(mv.costCents)) : null,
       });
     }
     // 台面日耗品（v0.7.13）：冲销不能让部门小仓留下结存——物料可能是这张单之后才改成台面日耗品的

@@ -24,8 +24,25 @@ export interface TestContext {
   close: () => Promise<void>;
 }
 
+/**
+ * 把 8.0.20 起默认开的功能开关都关上（技师、餐饮与桌台、客房、平板点餐、实时位置、员工食堂与安保巡场、企业微信周推）：
+ * 之前的用例从「都关着」开始、用到哪样自己打开。新加的功能开关（8.0.20 的扣库存等）不在这里，新用例按默认开写——
+ * 只有自动补货例外（到点自己建单，结果随钟点变）。
+ */
+export async function legacySwitchesOff(sql: Sql): Promise<void> {
+  const off = { enabled: false };
+  await sql`INSERT INTO settings (key, value) VALUES
+    ('technician_rules', ${sql.json(off)}), ('room_rules', ${sql.json(off)}), ('emenu_rules', ${sql.json(off)}), ('location_rules', ${sql.json(off)}),
+    ('dining_rules', ${sql.json({ enabled: false, tablesEnabled: false })}),
+    ('erp_modules', ${sql.json({ canteen: false, patrol: false })}),
+    ('wecom_weekly_push', 'false'::jsonb),
+    -- 自动补货（8.0.20 新加的）到点会自己建采购单草稿，结果随钟点变；别的用例里关着，它自己的用例里打开
+    ('auto_replenish', ${sql.json({ enabled: false })})
+    ON CONFLICT (key) DO NOTHING`;
+}
+
 /** 清空测试库、执行迁移、建好店主与店员，返回已登录的 cookie。 */
-export async function setup(): Promise<TestContext> {
+export async function setup(options: { keepDefaultSwitches?: boolean } = {}): Promise<TestContext> {
   process.env.APP_ENV = 'test';
   const config = loadConfig({ databaseUrl: TEST_DB, env: 'test', logLevel: 'silent' });
   // 并行时从迁移好的模板库整库复制一份新的；不并行时照旧清空、迁移（见 tests/test-db.ts）
@@ -42,6 +59,9 @@ export async function setup(): Promise<TestContext> {
   // 8.0.4 的充值当日储值消费比例默认 70%（HY01）：之前的用例常在同一天先充值再消费，这里设成不限，
   // 比例的行为由 tests/membership-v804.test.ts 单独验证（那里按需改回 70）
   await sql`INSERT INTO settings (key, value) VALUES ('recharge_spend_pct', 'null'::jsonb)`;
+  // 8.0.20 起功能开关都默认开（店主 2026-11-14，迁移 126）；之前的用例按「默认关、用到时自己打开」的口径编写，这里都关上，
+  // 默认开与迁移 126 的行为由 tests/switches-default.test.ts 单独验证（那里不经这一段）
+  if (!options.keepDefaultSwitches) await legacySwitchesOff(sql);
   const ownerId = await createStaff(sql, { username: 'owner', displayName: '测试店主', role: 'owner', password: PASSWORD, mustChangePassword: false });
   const clerkId = await createStaff(sql, { username: 'clerk', displayName: '测试店员', role: 'clerk', password: PASSWORD, mustChangePassword: false });
   const app = await buildApp(sql, config);
@@ -269,10 +289,17 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '123_emenu_english.sql',
   '124_quote_threshold_default.sql',
   '125_dept_head_confirm.sql',
+  '126_switches_on.sql',
+  '127_stock_cost.sql',
+  '128_stock_usage.sql',
+  '129_replenish_runs.sql',
   '130_request_drafts_imports.sql',
   '135_concierge.sql',
   '136_concierge_native_resources.sql',
   '137_concierge_praise.sql',
+  '138_linen.sql',
+  '139_room_member_prices.sql',
+  '140_linen_ops.sql',
   '161_replenish_mode.sql',
   '162_customer_workbench.sql',
   '163_customer_credit_canonical.sql',

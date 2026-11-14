@@ -106,7 +106,7 @@ export const DEFAULT_TUNABLES: Tunables = {
   reconLinkDays: 14,
   arOverdueDays: 60,
   expiryRemindDays: 30,
-  wecomWeeklyPush: false,
+  wecomWeeklyPush: true,
 };
 
 /** 整数项的取值范围（页面与服务端同一份） */

@@ -388,7 +388,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             关闭
           </Button>
         )}
-        {po.withdrawable && (canApprove || (canManage && po.createdBy === session.staff.id)) && (
+        {po.withdrawable && (canApprove || (canManage && (po.createdBy === session.staff.id || (po.createdBySystem && po.status === 'draft')))) && (
           <Button variant="ghost" size="sm" icon={<Ban className="size-4" />} onClick={() => setDialog('cancel')}>
             撤回
           </Button>

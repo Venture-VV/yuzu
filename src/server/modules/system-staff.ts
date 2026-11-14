@@ -73,3 +73,36 @@ export async function systemGiftActor(db: Db): Promise<Actor> {
     mustChangePassword: false,
   };
 }
+
+// ───────────────────────── 系统账号「自动扣料」（8.0.20） ───────────────────────
+
+export const SYSTEM_STOCK_USERNAME = 'system.stock';
+const SYSTEM_STOCK_NAME = '自动扣料';
+
+/** 系统账号「自动扣料」的编号（销售出库、配方耗用、自动补货草稿的经办人；没有就建，不能登录、员工名单里不显示） */
+export async function systemStockStaffId(db: Db): Promise<number> {
+  const [row] = await db<{ id: number; system: boolean }[]>`SELECT id, system FROM staff WHERE username = ${SYSTEM_STOCK_USERNAME}`;
+  if (row?.system) return row.id;
+  if (!row) {
+    const [made] = await db<{ id: number }[]>`
+      INSERT INTO staff (username, display_name, role, password_hash, active, must_change_password, system)
+      VALUES (${SYSTEM_STOCK_USERNAME}, ${SYSTEM_STOCK_NAME}, 'clerk', 'system:no-login', false, false, true)
+      ON CONFLICT (username) DO NOTHING RETURNING id`;
+    if (made) return made.id;
+    const [again] = await db<{ id: number; system: boolean }[]>`SELECT id, system FROM staff WHERE username = ${SYSTEM_STOCK_USERNAME}`;
+    if (again?.system) return again.id;
+  }
+  throw new AppError(500, 'SYSTEM_ACCOUNT_TAKEN', `员工账号 ${SYSTEM_STOCK_USERNAME} 被占用了，自动扣料要用这个系统账号；请店主改掉那位员工的账号名`);
+}
+
+/** 系统账号「自动扣料」当经办人：带库存职责（总仓的耗用）、成本核算（部门小仓的耗用）与采购（自动补货的采购单草稿），不带其他岗位权限 */
+export async function systemStockActor(db: Db): Promise<Actor> {
+  return {
+    id: await systemStockStaffId(db),
+    username: SYSTEM_STOCK_USERNAME,
+    displayName: SYSTEM_STOCK_NAME,
+    role: 'clerk',
+    duties: ['stock', 'cost', 'purchase'],
+    mustChangePassword: false,
+  };
+}

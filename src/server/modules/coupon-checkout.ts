@@ -21,6 +21,7 @@ import type { Db, Tx } from '../db';
 import type { Deps } from '../lib/context';
 import { conflict, unprocessable } from '../lib/errors';
 import { parse } from '../lib/validate';
+import { usageCoversItem } from './stock-usage';
 
 /** 账单上的有效明细，部门与部门营业额快照同一口径（门票、客房、其他、价目分类、未分类） */
 export async function couponLines(db: Db, billIds: number[]): Promise<CouponLine[]> {
@@ -168,8 +169,17 @@ export async function redeemCoupon(
     INSERT INTO coupon_events (coupon_id, kind, checkout_id, amount, staff_id, at, business_date)
     VALUES (${r.id}, 'use', ${o.checkoutId}, ${j.amount}, ${o.staffId}, ${o.at}, ${o.date})`;
   // 买一赠一的赠品出库（8.0.4，HY12）：模板上选了物料的，记一条「待出库」，每分钟的自动任务在选的仓开直接耗用单；
-  // 这里只写这一行、不碰库存（库存不够也不挡结账）
-  if (r.kind === 'bogo' && r.giftMaterialId !== null && r.giftQtyMilli !== null && r.giftWarehouseId !== null) {
+  // 这里只写这一行、不碰库存（库存不够也不挡结账）。
+  // 8.0.20：这个项目设了用料、按用料扣库存开着时不记——赠的那一件也在账单上，用料（结账时或出品完成时）已经把它一起扣了，
+  // 再记一条赠品出库就扣了两次（合并前 Codex 审查 342941e）。没设用料的项目照旧。
+  const giftItemId = r.exchangeItemId ?? r.buyItemId;
+  if (
+    r.kind === 'bogo' &&
+    r.giftMaterialId !== null &&
+    r.giftQtyMilli !== null &&
+    r.giftWarehouseId !== null &&
+    !(giftItemId !== null && (await usageCoversItem(tx, giftItemId)))
+  ) {
     await tx`
       INSERT INTO coupon_gift_outs (coupon_id, checkout_id, template_id, item_id, material_id, qty_milli, warehouse_id, business_date)
       SELECT ${r.id}, ${o.checkoutId}, c.template_id, ${r.exchangeItemId ?? r.buyItemId}, ${r.giftMaterialId}, ${r.giftQtyMilli}, ${r.giftWarehouseId}, ${o.date}

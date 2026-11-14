@@ -161,13 +161,26 @@ test.describe('8.0.19 门店的日常入口', () => {
     await page.reload();
     await expect(page.getByTestId('member-wechat-pending')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('member-wechat-unbind')).toBeDisabled();
+    // 其实服务端已经解绑了（只是回复丢了）：刷新后读到「已解绑」。小程序关着、又没有绑定了，这一行本来不显示——
+    // 但本机还记着这笔没收到结果的解绑，提示不能跟着消失（Codex 2026-11-14 P2，8.0.20 修）
+    await page.unroute(`**/api/admin/mp/members/${member.id}/bindings`);
+    await page.route(`**/api/admin/mp/members/${member.id}/bindings`, (route) =>
+      route.fulfill({ json: [{ ...BINDING, unboundAt: '2026-11-14T03:00:00.000Z', unboundByName: '林岚', unbindReason: '换微信' }] }),
+    );
+    await page.reload();
+    await expect(page.getByTestId('member-wechat-pending')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('member-wechat-none')).toContainText('以前绑过 1 次');
+    await expect(page.getByTestId('member-wechat-unbind')).toHaveCount(0);
     // 收尾：这是模拟的一笔，把本机的记录清掉（真的要到后台「微信小程序 → 绑定」处理）
     await page.evaluate(() => {
       for (const k of Object.keys(localStorage)) if (k.includes('mp') && (localStorage.getItem(k) ?? '').includes('"unbind"')) localStorage.removeItem(k);
     });
+    // 清掉以后：小程序关着、没有绑定、也没有待确认的 → 这一行不显示（W10）
+    const read = page.waitForResponse((r) => r.url().includes(`/api/admin/mp/members/${member.id}/bindings`));
     await page.reload();
-    await expect(page.getByTestId('member-wechat')).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId('member-wechat-pending')).toHaveCount(0);
+    await read;
+    await expect(page.getByTestId('member-cards')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('member-wechat')).toHaveCount(0);
   });
 
   test('用户菜单「本机终端」：写着这台电脑设成了哪台，点了到「设备」页并定位到那一块', async ({ page }) => {
