@@ -86,3 +86,34 @@ describe('客户部同步指纹', () => {
     expect(await revision()).toBe(last);
   });
 });
+
+// 「在店与到店」列表整合时改成先用索引圈出候选（在店的、当天有有效结账的、离店时刻在当天前后的），再按原规则判断：
+// 结账离店那一路由 customer-trial-reads 的用例盖住，这里补上没有结账的那一路（撤销来访按离店时刻所在的营业日算）。
+describe('客户部在店与到店列表', () => {
+  it('撤销的来访算在撤销当天离店，不出现在别的营业日；单看一位不受筛选影响', async () => {
+    const visits = async (query: string) => {
+      const r = await api(ctx.app, ctx.owner, 'GET', `/api/customer/visits?${query}`);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      return r.body as { businessDate: string; filteredTotal: number; rows: { id: number; status: string }[] };
+    };
+    const checkin = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: 'R002', zone: 'male' }, { tagCode: 'R003', zone: 'male' }] });
+    expect(checkin.status, JSON.stringify(checkin.body)).toBe(201);
+    const [gone, staying] = checkin.body.visits.map((v: { id: number }) => v.id) as [number, number];
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${gone}/cancel`, { reason: '列表用例撤销' })).status).toBe(200);
+    const today = (await visits('status=all')).businessDate;
+    const all = await visits(`day=${today}&status=all`);
+    expect(all.rows.find((r) => r.id === gone)?.status).toBe('cancelled');
+    expect(all.rows.find((r) => r.id === staying)?.status).toBe('open');
+    expect((await visits(`day=${today}&status=cancelled`)).rows.map((r) => r.id)).toContain(gone);
+    expect((await visits(`day=${today}&status=left`)).rows.map((r) => r.id)).toContain(gone);
+    expect((await visits(`day=${today}&status=open`)).rows.map((r) => r.id)).not.toContain(gone);
+    // 别的营业日：撤销的不在，还在店的照样在（在店不分日子）
+    const other = await visits('day=1900-01-01&status=all');
+    expect(other.rows.map((r) => r.id)).not.toContain(gone);
+    expect(other.rows.map((r) => r.id)).toContain(staying);
+    // 单看一位：不看日子与筛选
+    const detail = await api(ctx.app, ctx.owner, 'GET', `/api/customer/visits/${gone}`);
+    expect(detail.status, JSON.stringify(detail.body)).toBe(200);
+    expect(detail.body.visit.status).toBe('cancelled');
+  });
+});

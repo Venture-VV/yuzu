@@ -696,14 +696,32 @@ async function visitRows(
   if (!["all", "open", "left", "settled", "cancelled"].includes(q.status))
     throw badRequest("到店状态不正确");
   const settings = await loadSettings(db);
+  // 「今天离店」按最后一次有效结账的营业日算；没有有效结账的（撤销来访）按离店时刻所在的营业日算。
+  const leftOn = db`coalesce(
+        (SELECT c.business_date FROM checkout_bills cbill JOIN checkouts c ON c.id=cbill.checkout_id
+          WHERE cbill.bill_id=v.bill_id AND cbill.visit_id=v.id AND c.status='completed' ORDER BY c.id DESC LIMIT 1),
+        ((v.closed_at AT TIME ZONE ${timezone})-make_interval(hours=>${settings.businessDayStartHour}::int))::date)`;
+  // 来访表会一直长，不能对每一条历史来访都去查它的结账（20 万条来访时这条查询两分钟都回不来）。
+  // 先用索引圈出可能符合的：还在店的、这个营业日有有效结账的、离店时刻在这个营业日前后一天之内的；
+  // 圈得比实际宽，后面仍按 leftOn 原样判断，结果与逐条判断一样。结账明细按账单找（checkout_bills_bill_idx；来访与账单一一对应）。
+  const dayStart = db`(${day}::date + make_interval(hours=>${settings.businessDayStartHour}::int))`;
+  const candidates = db`SELECT o.id FROM visits o WHERE o.status='open'
+      UNION ALL SELECT cbill.visit_id FROM checkouts c JOIN checkout_bills cbill ON cbill.checkout_id=c.id
+        WHERE c.business_date=${day}::date AND c.status='completed' AND cbill.visit_id IS NOT NULL
+      UNION ALL SELECT x.id FROM visits x
+        WHERE x.closed_at >= (${dayStart} - interval '1 day') AT TIME ZONE ${timezone}
+          AND x.closed_at < (${dayStart} + interval '2 days') AT TIME ZONE ${timezone}`;
   // Overview arrivals follow the original check-in business day, including
   // guests who checked out later. The workbench keeps current/departing guests.
   const population = arrivalRange
     ? db`v.business_date BETWEEN ${arrivalRange.from} AND ${arrivalRange.to} AND v.status<>'cancelled'`
-    : db`(v.status='open' OR (v.status<>'open' AND coalesce(
-        (SELECT c.business_date FROM checkout_bills cbill JOIN checkouts c ON c.id=cbill.checkout_id
-          WHERE cbill.visit_id=v.id AND c.status='completed' ORDER BY c.id DESC LIMIT 1),
-        ((v.closed_at AT TIME ZONE ${timezone})-make_interval(hours=>${settings.businessDayStartHour}::int))::date)=${day}::date))`;
+    : db`v.id IN (${candidates}) AND (v.status='open' OR ${leftOn}=${day}::date)`;
+  const where = id !== null
+    ? db`v.id=${id}`
+    : db`${population}
+      AND (${q.status}='all' OR (${q.status}='left' AND v.status<>'open') OR v.status=${q.status}) AND (${q.managerId ?? null}::bigint IS NULL OR cb.maintainer_staff_id=${q.managerId ?? null})
+      AND (${q.hour ?? null}::int IS NULL OR extract(hour FROM v.checked_in_at AT TIME ZONE ${timezone})=${q.hour ?? null})
+      AND (${!q.q} OR t.code ILIKE ${like(q.q)} OR m.name ILIKE ${like(q.q)} OR m.phone LIKE ${like(q.q)} OR m.member_no ILIKE ${like(q.q)} OR v.guest_label ILIKE ${like(q.q)})`;
   // Keep the native bill total: it is updated atomically with native bill facts.
   // Never reconstruct a customer amount from catalog prices or summing display lines.
   const rows = (await db`${family(db)} SELECT v.id,v.visit_no,t.code AS tag_code,v.status,v.checked_in_at,v.closed_at,v.business_date::text AS business_date,v.guest_label,
@@ -711,11 +729,7 @@ async function visitRows(
     (SELECT max(occurred_at) FROM customer_service_notes WHERE visit_id=v.id) AS last_service_at
     FROM visits v JOIN bills b ON b.id=v.bill_id JOIN hand_tags t ON t.id=v.tag_id LEFT JOIN family f ON f.id=v.member_id
     LEFT JOIN members m ON m.id=f.root LEFT JOIN customer_bindings cb ON cb.member_id=f.root
-    WHERE (${id}::bigint IS NOT NULL AND v.id=${id}) OR (${id}::bigint IS NULL
-      AND ${population}
-      AND (${q.status}='all' OR (${q.status}='left' AND v.status<>'open') OR v.status=${q.status}) AND (${q.managerId ?? null}::bigint IS NULL OR cb.maintainer_staff_id=${q.managerId ?? null})
-      AND (${q.hour ?? null}::int IS NULL OR extract(hour FROM v.checked_in_at AT TIME ZONE ${timezone})=${q.hour ?? null})
-      AND (${!q.q} OR t.code ILIKE ${like(q.q)} OR m.name ILIKE ${like(q.q)} OR m.phone LIKE ${like(q.q)} OR m.member_no ILIKE ${like(q.q)} OR v.guest_label ILIKE ${like(q.q)}))
+    WHERE ${where}
     ORDER BY (v.status='open') DESC,v.checked_in_at DESC,v.id DESC`) as C.CustomerVisitRow[];
   const bands: Record<C.CustomerAmountBand, [number, number | null]> = {
     all: [0, null], lt1k: [0, 100000], "1k-3k": [100000, 300000], "3k-5k": [300000, 500000], "5k-10k": [500000, 1000000], gte10k: [1000000, null],

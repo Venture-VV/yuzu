@@ -3,7 +3,7 @@ import { z } from "zod";
 import { can } from "@shared/permissions";
 import { maskPhone } from "@shared/labels";
 import { guard } from "../../auth/guard";
-import { readSnapshot, type Db } from "../../db";
+import { readSnapshot, type Db, type Sql, type Tx } from "../../db";
 import type { Actor, Deps } from "../../lib/context";
 import { idParam, parse } from "../../lib/validate";
 import {
@@ -29,6 +29,16 @@ import { registerCustomerWriteRoutes } from "./writes";
  * 和管家部同一条规则（concierge/native-links 的 maskUnservedPhone）；仍然可以按手机号查找。
  * 客户部的读取结果里手机号只出现在会员对象的 phone 上，这里统一处理，免得哪个新加的读取漏掉。
  */
+/**
+ * 客户部的读取都在只读快照里做，并关掉这一个事务的 JIT：这些统计查询的估算成本高、实际只动几百到几千行，
+ * 默认配置下会触发 JIT，编译比查询本身慢好几倍（大库实测：结算列表 660 → 110 毫秒，低余额 450 → 77 毫秒）。做法同管家部的同步指纹。
+ */
+function readNoJit<T>(sql: Sql, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return readSnapshot(sql, async (tx) => {
+    await tx`SET LOCAL jit = off`;
+    return fn(tx);
+  });
+}
 export function maskCustomerPhones<T>(value: T, actor: Actor): T {
   if (can(actor, "member.read")) return value;
   const walk = (v: unknown): unknown => {
@@ -65,7 +75,7 @@ export function registerCustomerRoutes(
         reply.header("Cache-Control", "private, no-store");
         const at = new Date();
         return maskCustomerPhones(
-          await readSnapshot(sql, (db) =>
+          await readNoJit(sql, (db) =>
             read(db, req.actor, config.timezone, req.query ?? {}, at),
           ),
           req.actor,
@@ -74,16 +84,13 @@ export function registerCustomerRoutes(
     );
   };
   // 每个开着的客户部页面每 3 秒来一次，必须便宜：只取几个主键上的最大编号与开着的账单的合计（见 customerRevision）；
-  // 关掉这一个事务的 JIT（同管家部：这类小查询在默认配置下可能触发 JIT，编译比查询本身慢得多）
+  // 与其他读取一样关掉这一个事务的 JIT（readNoJit）
   app.get(
     "/api/customer/revision",
     { preHandler: guard("customer.read") },
     async (_req, reply) => {
       reply.header("Cache-Control", "private, no-store");
-      return readSnapshot(sql, async (tx) => {
-        await tx`SET LOCAL jit = off`;
-        return { revision: await customerRevision(tx, config.timezone) };
-      });
+      return readNoJit(sql, async (tx) => ({ revision: await customerRevision(tx, config.timezone) }));
     },
   );
   list("overview", customerOverview);
@@ -103,7 +110,7 @@ export function registerCustomerRoutes(
       const { id } = parse(idParam, req.params),
         at = new Date();
       return maskCustomerPhones(
-        await readSnapshot(sql, (db) =>
+        await readNoJit(sql, (db) =>
           customerRecharge(db, req.actor, config.timezone, id, at),
         ),
         req.actor,
@@ -124,7 +131,7 @@ export function registerCustomerRoutes(
         req.query ?? {},
       );
       return maskCustomerPhones(
-        await readSnapshot(sql, (db) =>
+        await readNoJit(sql, (db) =>
           customerSettlement(db, req.actor, config.timezone, id, at, source),
         ),
         req.actor,
@@ -139,7 +146,7 @@ export function registerCustomerRoutes(
       const { id } = parse(idParam, req.params),
         at = new Date();
       return maskCustomerPhones(
-        await readSnapshot(sql, (db) =>
+        await readNoJit(sql, (db) =>
           customerVisit(db, req.actor, config.timezone, id, at),
         ),
         req.actor,
@@ -154,7 +161,7 @@ export function registerCustomerRoutes(
       const { id } = parse(idParam, req.params),
         at = new Date();
       return maskCustomerPhones(
-        await readSnapshot(sql, (db) =>
+        await readNoJit(sql, (db) =>
           customerMember(db, req.actor, config.timezone, id, req.query ?? {}, at),
         ),
         req.actor,
