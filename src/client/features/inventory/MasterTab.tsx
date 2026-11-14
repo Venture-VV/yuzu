@@ -2,7 +2,7 @@ import { SUPPLIER_SETTLEMENT_LABELS, type SupplierSettlement } from '@shared/exp
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Plus, Search, Upload } from 'lucide-react';
-import { RECONCILE_CYCLE_LABELS, RECONCILE_CYCLES, type Department, type Material, type ReconcileCycle, type Supplier, type SupplierContractFile } from '@shared/inventory';
+import { RECONCILE_CYCLE_LABELS, RECONCILE_CYCLES, REPLENISH_MODE_LABELS, REPLENISH_MODES, type Department, type Material, type ReconcileCycle, type ReplenishMode, type Supplier, type SupplierContractFile } from '@shared/inventory';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { conversionText, formatQty, parseQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
@@ -102,11 +102,21 @@ function Materials({ editable }: { editable: boolean }) {
                   <td className="num px-2 py-2.5 text-ink-2">{conversionText(m.purchaseUnit, m.purchaseFactorMilli, m.inventoryUnit)}</td>
                   <td className="num px-2 py-2.5 text-right">{m.refPriceCents !== null ? `¥${formatAmount(m.refPriceCents)}/${m.purchaseUnit}` : <span className="text-ink-4">—</span>}</td>
                   <td className="num px-2 py-2.5 text-right">
-                    {m.coverDays !== null ? `可用不足 ${m.coverDays} 天` : m.lowStockMilli !== null ? `${formatQty(m.lowStockMilli)} ${m.inventoryUnit}` : <span className="text-ink-4">—</span>}
+                    {m.replenishMode === 'on_demand' ? (
+                      <span className="text-ink-3">不提醒</span>
+                    ) : m.coverDays !== null ? (
+                      `可用不足 ${m.coverDays} 天`
+                    ) : m.lowStockMilli !== null ? (
+                      `${formatQty(m.lowStockMilli)} ${m.inventoryUnit}`
+                    ) : (
+                      <span className="text-ink-4">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5">
                     <span className="flex flex-wrap gap-1">
                       {!m.tracked ? <Badge tone="lake">候选</Badge> : m.active ? <Badge tone="pine">受管</Badge> : <Badge>已停用</Badge>}
+                      {m.replenishMode === 'on_demand' && <Badge tone="lake">按需采购</Badge>}
+                      {m.replenishMode === 'stock' && <Badge tone="lake">常备</Badge>}
                       {m.counterUse && <Badge tone="lake">台面日耗品</Badge>}
                       {m.weighed && <Badge tone="lake">称重</Badge>}
                       {m.isSynthetic && <Badge tone="ember">合成</Badge>}
@@ -185,6 +195,7 @@ export function MaterialDialog({
       weighed: form.weighed,
       expiryTracked: form.expiryTracked,
       shelfLifeDays: form.shelfLifeDays.trim() ? Number(form.shelfLifeDays) : null,
+      replenishMode: form.replenishMode,
       tracked: form.tracked,
       active: form.active,
       note: form.note.trim(),
@@ -205,6 +216,8 @@ export function MaterialDialog({
   };
 
   const same = form.purchaseUnit.trim() !== '' && form.purchaseUnit.trim() === form.inventoryUnit.trim();
+  // 按需采购（迁移 161）：不提补货、不做低库存提醒，两个提醒填了也不用（留着，改回来还在）
+  const onDemand = form.replenishMode === 'on_demand';
   return (
     <Dialog
       open={!!editing}
@@ -264,10 +277,10 @@ export function MaterialDialog({
           )}
         </div>
 
-        <Field label={`参考价（元/${form.purchaseUnit || '采购单位'}）`} htmlFor="m-price" className="sm:col-span-2">
+        <Field label={`参考价（元/${form.purchaseUnit || '采购单位'}）`} htmlFor="m-price" className="sm:col-span-3">
           <MoneyInput id="m-price" value={form.price} onChange={(e) => set({ price: e.target.value })} />
         </Field>
-        <Field label="常用供应商" htmlFor="m-sup" className="sm:col-span-2">
+        <Field label="常用供应商" htmlFor="m-sup" className="sm:col-span-3">
           <Select id="m-sup" value={form.supplierId} onChange={(e) => set({ supplierId: e.target.value })}>
             <option value="">不指定</option>
             {suppliers.data?.map((s) => (
@@ -277,11 +290,31 @@ export function MaterialDialog({
             ))}
           </Select>
         </Field>
-        <Field label="提醒天数" htmlFor="m-cover" hint="可用天数少于它时提醒：一般用品约 7 天，新鲜食材 1–2 天；按近期用量算，没有用量时用右边的固定数量">
-          <Input id="m-cover" value={form.coverDays} inputMode="numeric" placeholder="不按天数" onChange={(e) => set({ coverDays: e.target.value.replace(/\D/g, '') })} className="num text-right" />
+        {/* 补货方式（迁移 161）在前：它管下面两个提醒用不用 */}
+        <Field label="补货方式" className="sm:col-span-6" hint={REPLENISH_MODE_LABELS[form.replenishMode].hint}>
+          <Segmented
+            value={form.replenishMode}
+            onChange={(v) => set({ replenishMode: v })}
+            ariaLabel="补货方式"
+            className="w-full"
+            options={REPLENISH_MODES.map((v) => ({ value: v, label: REPLENISH_MODE_LABELS[v].title }))}
+          />
         </Field>
-        <Field label={<span className="flex items-center gap-1.5">低库存提醒线 <SimRule>人工设定</SimRule></span>} htmlFor="m-low" hint={`低于此数提醒（${form.inventoryUnit || '库存单位'}，只看总仓），留空不提醒`}>
-          <Input id="m-low" value={form.low} inputMode="decimal" onChange={(e) => set({ low: e.target.value })} className="num text-right" />
+        <Field
+          label="提醒天数"
+          htmlFor="m-cover"
+          className="sm:col-span-3"
+          hint={onDemand ? '按需采购的不提醒' : '可用天数少于它时提醒：一般用品约 7 天，新鲜食材 1–2 天；按近期用量算，没有用量时用右边的固定数量'}
+        >
+          <Input id="m-cover" value={form.coverDays} inputMode="numeric" placeholder="不按天数" disabled={onDemand} onChange={(e) => set({ coverDays: e.target.value.replace(/\D/g, '') })} className="num text-right" />
+        </Field>
+        <Field
+          label={<span className="flex items-center gap-1.5">低库存提醒线 <SimRule>人工设定</SimRule></span>}
+          htmlFor="m-low"
+          className="sm:col-span-3"
+          hint={onDemand ? '按需采购的不提醒' : `低于此数提醒（${form.inventoryUnit || '库存单位'}，只看总仓），留空不提醒`}
+        >
+          <Input id="m-low" value={form.low} inputMode="decimal" disabled={onDemand} onChange={(e) => set({ low: e.target.value })} className="num text-right" />
         </Field>
 
         <div className="space-y-2.5 rounded-lg border border-line bg-paper-2/50 p-4 sm:col-span-6">
@@ -371,6 +404,7 @@ function toForm(m: Material | null) {
     weighed: m?.weighed ?? false,
     expiryTracked: m?.expiryTracked ?? false,
     shelfLifeDays: m?.shelfLifeDays != null ? String(m.shelfLifeDays) : '',
+    replenishMode: (m?.replenishMode ?? 'auto') as ReplenishMode,
     tracked: m?.tracked ?? true,
     active: m?.active ?? true,
     note: m?.note ?? '',

@@ -53,16 +53,17 @@ export async function listWarehouses(db: Db): Promise<Warehouse[]> {
 export async function warehouseStock(db: Db, warehouseId: number, timeZone?: string): Promise<WarehouseStockRow[]> {
   const rows = await db<Omit<WarehouseStockRow, 'dailyUsageMilli' | 'daysOfCover' | 'isLow'>[]>`
     SELECT m.id AS material_id, m.code, m.name, m.specification, m.category, m.inventory_unit, m.decimals, ws.stock_milli, m.cover_days,
-           m.counter_use, (SELECT created_at FROM stock_moves WHERE id = ws.last_move_id) AS last_move_at
+           m.counter_use, m.replenish_mode, (SELECT created_at FROM stock_moves WHERE id = ws.last_move_id) AS last_move_at
     FROM warehouse_stock ws JOIN materials m ON m.id = ws.material_id
     WHERE ws.warehouse_id = ${warehouseId}
     ORDER BY ws.stock_milli = 0, m.counter_use, m.code`;
   if (!timeZone) return rows.map((r) => ({ ...r, dailyUsageMilli: 0, daysOfCover: null, isLow: false }));
   const { usageWindowDays } = await loadInventorySettings(db);
   const used = await usageByMaterial(db, warehouseId, usageSince(timeZone, usageWindowDays));
-  // 部门小仓只按可用天数提醒（固定的低库存数量是总仓的）；台面日耗品领到即耗用、没有结存，不提醒（v0.7.13）
+  // 部门小仓只按可用天数提醒（固定的低库存数量是总仓的）；台面日耗品领到即耗用、没有结存，不提醒（v0.7.13）；
+  // 补货方式是按需采购的也不提醒（迁移 161）
   return rows.map((r) => {
-    const cover = coverFor(r.stockMilli, used.get(r.materialId) ?? 0, usageWindowDays, { coverDays: r.coverDays, lowStockMilli: null });
+    const cover = coverFor(r.stockMilli, used.get(r.materialId) ?? 0, usageWindowDays, { coverDays: r.coverDays, lowStockMilli: null, replenishMode: r.replenishMode });
     return r.counterUse ? { ...r, ...cover, daysOfCover: null, isLow: false } : { ...r, ...cover };
   });
 }

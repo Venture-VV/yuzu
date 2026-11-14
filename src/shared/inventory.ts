@@ -58,6 +58,20 @@ export const COUNT_REASON_LABELS: Record<CountReason | 'pending', string> = {
   consumed: '耗用',
 };
 
+// ───────────────────────── 补货方式（店主 2026-11-14，迁移 161，docs/ERP_PURCHASING.md 第 5.1 节） ─────────────────────────
+
+/**
+ * 物料的补货方式：auto 自动识别（默认）；stock 常备（一直按用量 / 提醒数量提补货）；
+ * on_demand 按需采购（不提补货、也不做低库存提醒——手机、设备这类部门提了需求才买的）。
+ */
+export const REPLENISH_MODES = ['auto', 'stock', 'on_demand'] as const;
+export type ReplenishMode = (typeof REPLENISH_MODES)[number];
+export const REPLENISH_MODE_LABELS: Record<ReplenishMode, { title: string; hint: string }> = {
+  auto: { title: '自动识别', hint: '设了提醒的、台面日耗品这类消耗品、经常领用的才提补货；只领过一次的、建过资产卡片的不提' },
+  stock: { title: '常备', hint: '一直备着的耗材：按用量或提醒数量提补货' },
+  on_demand: { title: '按需采购', hint: '手机、设备这类不是消耗品的：部门提需求才买，不提补货、不做低库存提醒' },
+};
+
 // ───────────────────────── 两级库存（v0.7.11，docs/WAREHOUSES.md） ─────────────────────────
 
 /** 总仓固定是 1 号仓；每个部门一个小仓 */
@@ -92,6 +106,8 @@ export interface WarehouseStockRow {
   isLow: boolean;
   /** 台面日耗品（v0.7.13）：领到即耗用，部门小仓结存始终为 0、不提醒 */
   counterUse: boolean;
+  /** 补货方式（迁移 161）：按需采购的不提醒 */
+  replenishMode: ReplenishMode;
 }
 
 /** 领料单的部门签收（#17 第二次验收） */
@@ -305,13 +321,17 @@ export interface Material {
   /** 效期管理（8.0.7 3.3）：收货要填到期日；保质期天数（可空） */
   expiryTracked: boolean;
   shelfLifeDays: number | null;
+  /** 补货方式（迁移 161）：按需采购的不提补货、不做低库存提醒 */
+  replenishMode: ReplenishMode;
+  /** 补货方式的版本号（每改一次加一）：只改补货方式时带上，对不上拒绝 */
+  replenishRev: number;
   tracked: boolean;
   active: boolean;
   /** 总仓结存 */
   stockMilli: number;
   /** 各部门小仓合计（v0.7.11） */
   deptStockMilli: number;
-  /** 总仓低于提醒线：设了提醒天数且有用量的按可用天数，否则按人工设定的数量 */
+  /** 总仓低于提醒线：设了提醒天数且有用量的按可用天数，否则按人工设定的数量；补货方式是按需采购的不提醒 */
   isLow: boolean;
   /** 总仓近期日均用量（milli/天，按「用量统计天数」算；没有用量为 0） */
   dailyUsageMilli: number;

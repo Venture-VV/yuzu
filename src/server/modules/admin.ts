@@ -18,7 +18,7 @@ import { DEFAULT_DINING_RULES } from '@shared/dining';
 import { DEFAULT_EMENU_RULES } from '@shared/emenu';
 import { DEFAULT_ROOM_RULES } from '@shared/rooms';
 import { formatYuan } from '@shared/money';
-import { DEFAULT_PURCHASE_RULES, DEPT_CONFIRM_RULE_LABELS } from '@shared/purchasing';
+import { DEFAULT_PURCHASE_RULES, DEPT_CONFIRM_RULE_LABELS, REPLENISH_LOOKBACK_DAYS } from '@shared/purchasing';
 import { DEFAULT_PAYMENT_RULES, payDaysLabel } from '@shared/payments';
 import { DEFAULT_EXPENSE_RULES } from '@shared/expenses';
 import { DEFAULT_CANTEEN_SETTINGS, mealWindowText } from '@shared/canteen';
@@ -387,11 +387,13 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     hint: '合计到门槛的采购单第一次提交时要来自已定标的询价单；只有一家报价的标单一来源、由负责人定标；补单与改版不拦',
     current: [pr.quoteThresholdCents, pr.minQuotes], dflt: [prd.quoteThresholdCents, prd.minQuotes], metaKey: 'purchase_rules',
   });
-  const replText = (r: typeof pr) => `可用天数少于 ${r.reorderDays} 天（物料设了提醒天数按物料的）就建议补，补到 ${r.targetDays} 天`;
+  const replText = (r: typeof pr) =>
+    `可用天数少于 ${r.reorderDays} 天（物料设了提醒天数按物料的）就建议补，补到 ${r.targetDays} 天；` +
+    (r.regularUseDays > 1 ? `近 ${REPLENISH_LOOKBACK_DAYS} 天有领用的天数不到 ${r.regularUseDays} 天的看作一次性采购、不提` : '领过一次就算常用');
   add({
     key: 'purchase_rules.replenish', group: 'inventory', label: '补货建议', value: replText(pr), defaultValue: replText(prd), pending: true, section: 'rules', href: '/erp/settings/purchase',
-    hint: '只看总仓；在途（没到的采购单）算进去；按采购单位向上取整',
-    current: [pr.reorderDays, pr.targetDays], dflt: [prd.reorderDays, prd.targetDays], metaKey: 'purchase_rules',
+    hint: '只看总仓；在途（没到的采购单）算进去；按采购单位向上取整。物料档案里的补货方式是「按需采购」的不提，「常备」的一直提，「自动识别」的按领用次数与资产卡片认',
+    current: [pr.reorderDays, pr.targetDays, pr.regularUseDays], dflt: [prd.reorderDays, prd.targetDays, prd.regularUseDays], metaKey: 'purchase_rules',
   });
   // 8.0.18 规则总表补全（docs/IA_V8017.md 第 3.3 节）：8.0.17 加的两项采购规则，付款、报销、员工食堂、安保巡场的规则原来不在总表里
   add({

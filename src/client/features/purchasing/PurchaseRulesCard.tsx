@@ -1,7 +1,7 @@
 // 采购规则（v0.7.29 ERP 采购五项，docs/ERP_PURCHASING.md；8.0.1 采购组整改，docs/PURCHASING_V801.md）：
 // 8.0.1 起在「采购 → 采购规则」里改（从 ERP「模块设置」挪过来，CG01），要「维护采购规则」（默认只有店主）；有查看库存的只看。
 //   · 采购途径固定三类（网购、自采、供应商，CG08），这里只显示；
-//   · 询价门槛与最少报价家数（E5、E6）、补货触发与目标天数（E4）、下单后几天没到货算超期（从费用报销规则挪过来）；
+//   · 询价门槛与最少报价家数（E5、E6）、补货触发与目标天数（E4）、常用天数（E11，自动识别一次性采购）、下单后几天没到货算超期（从费用报销规则挪过来）；
 //   · 每日截单（03，CG03）、需求单转的采购单提交即确认（04，CG04）、急采按金额分级审批与每一档的审批人（05，CG05）。
 // 改动记审计，之后的单据按新规则，已有的不变。
 
@@ -10,7 +10,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import { APPROVAL_MAX_STAFF } from '@shared/approvals';
 import { centsToInput, parseYuan } from '@shared/money';
-import { DEPT_CONFIRM_RULE_LABELS, DEPT_CONFIRM_RULES, PURCHASE_CHANNELS, URGENT_TIERS_MAX, type DeptConfirmRule, type PurchaseRules } from '@shared/purchasing';
+import { DEPT_CONFIRM_RULE_LABELS, DEPT_CONFIRM_RULES, PURCHASE_CHANNELS, REPLENISH_LOOKBACK_DAYS, URGENT_TIERS_MAX, type DeptConfirmRule, type PurchaseRules } from '@shared/purchasing';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn } from '../../lib/utils';
@@ -24,6 +24,7 @@ interface Draft {
   minQuotes: string;
   reorderDays: string;
   targetDays: string;
+  regularUseDays: string;
   arrivalOverdueDays: string;
   flowStallDays: string;
   deptConfirm: DeptConfirmRule;
@@ -38,6 +39,7 @@ const toDraft = (r: PurchaseRules): Draft => ({
   minQuotes: String(r.minQuotes),
   reorderDays: String(r.reorderDays),
   targetDays: String(r.targetDays),
+  regularUseDays: String(r.regularUseDays),
   arrivalOverdueDays: String(r.arrivalOverdueDays),
   flowStallDays: String(r.flowStallDays),
   deptConfirm: r.deptConfirm,
@@ -73,6 +75,7 @@ export function PurchaseRulesCard() {
       minQuotes: Number(draft.minQuotes),
       reorderDays: Number(draft.reorderDays),
       targetDays: Number(draft.targetDays),
+      regularUseDays: Number(draft.regularUseDays),
       arrivalOverdueDays: Number(draft.arrivalOverdueDays),
       flowStallDays: Number(draft.flowStallDays),
     };
@@ -220,6 +223,13 @@ export function PurchaseRulesCard() {
         </Field>
         <Field label="建议补到能用几天" htmlFor="pr-target" hint="默认 14 天，要比触发天数长">
           <Input id="pr-target" inputMode="numeric" value={draft.targetDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, targetDays: e.target.value })} className="h-10" />
+        </Field>
+        <Field
+          label="领用几天以上才算常用（自动识别）"
+          htmlFor="pr-regular"
+          hint={`补货方式是「自动识别」、没设提醒、也不是台面日耗品这类消耗品的物料：近 ${REPLENISH_LOOKBACK_DAYS} 天里有领用的天数不到这个数的，看作一次性采购、不提补货（手机这类领一次就完的）。默认 2 天，填 1 = 领过一次就算。单个物料在物料档案里可以直接定成「常备」或「按需采购」`}
+        >
+          <Input id="pr-regular" inputMode="numeric" value={draft.regularUseDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, regularUseDays: e.target.value })} className="h-10" data-testid="pr-regular" />
         </Field>
         <Field label="下单后几天没到货算超期" htmlFor="pr-arrival" hint="采购单没填预计到货日时用（账目自检第 9 条），默认 7 天；8.0.1 从费用报销规则挪过来">
           <Input id="pr-arrival" inputMode="numeric" value={draft.arrivalOverdueDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, arrivalOverdueDays: e.target.value })} className="h-10" data-testid="pr-arrival" />
