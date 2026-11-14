@@ -308,6 +308,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '139_room_member_prices.sql',
   '140_linen_ops.sql',
   '141_custom_fields.sql',
+  '142_invoice_entry_method.sql',
   '161_replenish_mode.sql',
   '162_customer_workbench.sql',
   '163_customer_credit_canonical.sql',

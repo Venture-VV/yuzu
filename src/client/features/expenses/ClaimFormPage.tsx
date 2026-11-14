@@ -35,6 +35,8 @@ import { usePurchaseRules } from '../purchasing/queries';
 import { useAdvances, useClaimPrefill, useExpenseRules, useHandlers, useInvalidateExpenses, usePoCandidates, usePoForClaim } from './queries';
 import { useInvoiceLookup } from '../invoices/queries';
 import { BudgetHint, invoiceBlocking, InvoiceLedgerFields, useClaimOverBudget, type CategoryAmounts, type InvoiceExtras } from './ClaimExtras';
+import { InvoiceScanButton, kindFromHint, RecognitionCheck, RecognizedMark, useInvoiceRecognition } from '../invoices/InvoiceScan';
+import { totalFromExTax } from '@shared/invoice-recognize';
 
 interface AdhocLine {
   key: string;
@@ -72,6 +74,9 @@ export function ClaimFormPage() {
   const [invoiceNo, setInvoiceNo] = useState('');
   // 进项发票台账（8.0.3）：选的台账发票、开票方、开票日、税额（自动登记进台账时用）
   const [invExtras, setInvExtras] = useState<InvoiceExtras>({ invoiceId: null, issuer: '', date: '', tax: '' });
+  // 8.0.21 发票识别：识别带出的格子标「识别」，要勾核对；票面的价税合计只用来对照报销合计
+  const rec = useInvoiceRecognition();
+  const [scannedTotal, setScannedTotal] = useState<number | null>(null);
   const [note, setNote] = useState('');
   // 采购途径（v0.7.29，E1）：按次报销必选；按采购单报销照采购单（v0.7.29 以前的采购单没记的可以补选）
   const purchaseRules = usePurchaseRules();
@@ -221,6 +226,8 @@ export function ClaimFormPage() {
                 ? `${inv.label}要填发票号码`
                 : invoiceProblem
                   ? invoiceProblem
+                : rec.needsCheck
+                  ? '请对照票面核对识别出来的内容并勾选'
                 : mode === 'po'
                   ? !poId
                     ? '请选择采购单'
@@ -303,6 +310,7 @@ export function ClaimFormPage() {
             invoiceIssuer: mode === 'adhoc' ? invExtras.issuer.trim() : '',
             invoiceDate: invExtras.date || null,
             invoiceTaxCents: invExtras.tax.trim() ? parseYuan(invExtras.tax) : null,
+            invoiceEntryMethod: rec.entryMethod,
           }
         : {}),
       purchaseOrderId: mode === 'po' ? poId : null,
@@ -433,7 +441,35 @@ export function ClaimFormPage() {
                 </Select>
               </Field>
             )}
-            <Field label="发票类型" htmlFor="ex-inv">
+            {!locked && (
+              <div className="sm:col-span-full">
+                <InvoiceScanButton
+                  onResult={(r) => {
+                    const filled: string[] = [];
+                    const types = rules.data?.invoiceTypes ?? [];
+                    const k = kindFromHint(types, r.kindHint);
+                    const t = types.find((x) => x.key === (k ?? invoiceType));
+                    touch('invoice');
+                    if (k) (setInvoiceType(k), filled.push('kind'));
+                    let bp: number | null = t && t.taxRatesBp.length === 1 ? t.taxRatesBp[0]! : k ? null : taxRateBp;
+                    if (t && r.amountExTaxCents !== undefined && r.taxCents !== undefined) {
+                      bp = t.taxRatesBp.find((b) => totalFromExTax(r.amountExTaxCents!, b).taxCents === r.taxCents) ?? bp;
+                    }
+                    if (bp !== null && t) (setTaxRateBp(bp), filled.push('rate'));
+                    if (r.invoiceNo) (setInvoiceNo(r.invoiceNo), filled.push('no'));
+                    setInvExtras((x) => ({
+                      invoiceId: null,
+                      issuer: r.issuerName ?? x.issuer,
+                      date: r.invoiceDate ?? x.date,
+                      tax: r.taxCents !== undefined ? centsToInput(r.taxCents) : x.tax,
+                    }));
+                    setScannedTotal(r.totalCents ?? (r.amountExTaxCents !== undefined && bp !== null ? totalFromExTax(r.amountExTaxCents, bp).totalCents : null));
+                    rec.apply(r, filled);
+                  }}
+                />
+              </div>
+            )}
+            <Field label={<>发票类型<RecognizedMark on={rec.isRecognized('kind')} /></>} htmlFor="ex-inv">
               <Select
                 id="ex-inv"
                 value={invoiceType}
@@ -454,7 +490,7 @@ export function ClaimFormPage() {
                 ))}
               </Select>
             </Field>
-            <Field label="税点" htmlFor="ex-tax">
+            <Field label={<>税点<RecognizedMark on={rec.isRecognized('rate')} /></>} htmlFor="ex-tax">
               <Select id="ex-tax" value={taxRateBp ?? ''} disabled={locked || !inv} onChange={(e) => {
                   touch('invoice');
                   setTaxRateBp(e.target.value === '' ? null : Number(e.target.value));
@@ -467,7 +503,7 @@ export function ClaimFormPage() {
                 ))}
               </Select>
             </Field>
-            <Field label="发票号码" htmlFor="ex-invno" hint={inv?.needsNumber ? '有发票必须填' : '没有发票可以不填'}>
+            <Field label={<>发票号码<RecognizedMark on={rec.isRecognized('no')} /></>} htmlFor="ex-invno" hint={inv?.needsNumber ? '有发票必须填' : '没有发票可以不填'}>
               <Input
                 id="ex-invno"
                 value={invoiceNo}
@@ -494,6 +530,18 @@ export function ClaimFormPage() {
                 onChange={setInvExtras}
                 disabled={locked}
               />
+            )}
+            {rec.method && (
+              <div className="sm:col-span-full">
+                <RecognitionCheck
+                  rec={rec}
+                  hint={
+                    scannedTotal !== null && scannedTotal !== total
+                      ? `票面价税合计 ¥${formatAmount(scannedTotal)}，与报销合计 ¥${formatAmount(total)} 不一样，核对一下明细`
+                      : '开票方、开票日、税额也是识别带出来的'
+                  }
+                />
+              </div>
             )}
             <Field label="备注" htmlFor="ex-note">
               <Input id="ex-note" value={note} maxLength={200} disabled={locked} onChange={(e) => setNote(e.target.value)} placeholder="可选" className="h-10" />

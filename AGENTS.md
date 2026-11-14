@@ -64,6 +64,7 @@ node dist/server/cli.js device-bridge-mock [--terminal <终端编号>] [--port 1
 E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟（CI 拆三组并行，见 docs/TESTING.md）
 E2E_DEMO_SHOWCASE=1 E2E_BASE_URL=… npx playwright test e2e/demo-showcase.spec.ts --project=门店电脑   # demo-prepare 准备好的库上核对演示场景
 E2E_BASE_URL=… npx playwright test e2e/dictionaries.spec.ts --project=门店电脑   # 8.0.21 数据字典与自定义字段（docs/FINANCE_V8021.md 第 1 节）：后台加快捷原因 → 前台锁牌弹窗里有；建会员字段 → 详情填、列表看得到、按字段查；用完恢复原因、停用字段
+E2E_BASE_URL=… npx playwright test e2e/invoice-scan.spec.ts --project=门店电脑   # 8.0.21 发票识别：合成一张左上角带二维码的发票图，登记发票时识别带出、核对后保存，台账标「二维码识别」
 E2E_BASE_URL=… npx playwright test e2e/v8020.spec.ts --project=门店电脑   # 8.0.20（docs/ERP_V8020.md）：用料与扣料、成本、自动补货、布草洗涤、房型会员价；物料、项目、品类都是现造的，可重复执行
 E2E_BASE_URL=… npx playwright test e2e/store-entries.spec.ts --project=门店电脑   # 门店的日常入口（8.0.19，docs/IA_V8017.md 第 3.4 节）：会员工作台的「发券」「停车登记」、会员详情的「微信小程序」一行（解绑的接口在用例里是拦下来模拟的）、头像菜单的「本机终端」
 E2E_BASE_URL=… npx playwright test e2e/erp-ia.spec.ts --project=门店电脑   # ERP 的信息架构（8.0.18，docs/IA_V8017.md 第 3.3 节）：导航分组、「ERP 设置」的页签与规则的旧地址、采购 / 报销的页签、员工食堂与安保巡场在后台、营业数据在数据看板、规则总表直达

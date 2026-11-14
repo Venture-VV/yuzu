@@ -35,6 +35,8 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
 import { search, useInputInvoice, useInvalidateInvoices, useInvoiceLedger, useInvoiceMeta } from './queries';
+import { InvoiceScanButton, kindFromHint, RecognitionCheck, RecognizedMark, useInvoiceRecognition } from './InvoiceScan';
+import { INVOICE_ENTRY_LABELS, totalFromExTax, type RecognizedInvoice } from '@shared/invoice-recognize';
 
 const VIEWS: InvoiceView[] = ['all', 'pending', 'due', 'certified', 'not_required', 'anomaly', 'voided'];
 const CERT_TONE: Record<CertStatus, 'yuzu' | 'pine' | 'neutral'> = { pending: 'yuzu', certified: 'pine', not_required: 'neutral' };
@@ -118,6 +120,11 @@ export function InvoicesPage() {
             );
           })}
         </div>
+        {!!counts?.valid && (
+          <p className="text-[12.5px] text-ink-3" data-testid="invoice-recognized-count">
+            有效的 {counts.valid} 张里，{counts.recognized} 张是拍照 / 文件识别登记的（二维码或文字识别，人核对后保存）
+          </p>
+        )}
         <Card className="flex flex-wrap items-end gap-3 p-4">
           <label className="flex flex-col gap-1 text-[12.5px] font-semibold text-ink-3">
             来源
@@ -231,6 +238,7 @@ function InvoiceRow({ r, pickable, picked, onPick, onOpen }: { r: InputInvoice; 
               {INVOICE_ANOMALY_LABELS[a]}
             </Badge>
           ))}
+          {r.entryMethod !== 'manual' && <Badge tone="lake">{INVOICE_ENTRY_LABELS[r.entryMethod]}</Badge>}
           {r.attachmentCount > 0 && <span className="text-ink-3">照片 {r.attachmentCount}</span>}
         </span>
       </button>
@@ -471,7 +479,12 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 8.0.21 发票识别：二维码只有不含税金额，选了税率再算价税合计
+  const rec = useInvoiceRecognition();
+  const [exTax, setExTax] = useState<number | null>(null);
   useResetOnOpen(open, () => {
+    rec.reset();
+    setExTax(null);
     setKind('');
     setInvoiceNo('');
     setSupplierId(null);
@@ -486,6 +499,42 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
   const def = kinds.find((k) => k.key === kind);
   const totalCents = total.trim() ? parseYuan(total) : null;
   const taxCents = tax.trim() ? parseYuan(tax) : totalCents !== null && rateBp !== null ? expectedTaxCents(totalCents, rateBp) : null;
+  const fillFromExTax = (bp: number | null) => {
+    if (exTax === null || bp === null || total.trim()) return;
+    const t = totalFromExTax(exTax, bp);
+    setTotal(centsToInput(t.totalCents));
+    setTax(centsToInput(t.taxCents));
+  };
+  const applyScan = (r: RecognizedInvoice) => {
+    const filled: string[] = [];
+    if (r.invoiceNo) (setInvoiceNo(r.invoiceNo), filled.push('no'));
+    if (r.invoiceDate) (setInvoiceDate(r.invoiceDate), filled.push('date'));
+    const k = kindFromHint(kinds, r.kindHint);
+    const kindDef = kinds.find((x) => x.key === (k ?? kind));
+    if (k) (setKind(k), filled.push('kind'));
+    if (r.issuerName) {
+      const s = meta.data?.suppliers.find((x) => x.name === r.issuerName);
+      if (s) (setSupplierId(s.id), filled.push('supplier'));
+      else (setSupplierId(null), setIssuer(r.issuerName), filled.push('issuer'));
+    }
+    if (r.totalCents !== undefined) (setTotal(centsToInput(r.totalCents)), filled.push('total'));
+    if (r.taxCents !== undefined) (setTax(centsToInput(r.taxCents)), filled.push('tax'));
+    // 有不含税金额与税额：反推税率；只有一档税率的直接用
+    let bp: number | null = kindDef && kindDef.taxRatesBp.length === 1 ? kindDef.taxRatesBp[0]! : null;
+    if (r.amountExTaxCents !== undefined && r.taxCents !== undefined && kindDef) {
+      bp = kindDef.taxRatesBp.find((b) => totalFromExTax(r.amountExTaxCents!, b).taxCents === r.taxCents) ?? bp;
+    }
+    if (bp !== null) (setRateBp(bp), filled.push('rate'));
+    setExTax(r.amountExTaxCents ?? null);
+    if (r.totalCents === undefined && r.amountExTaxCents !== undefined && bp !== null) {
+      const t = totalFromExTax(r.amountExTaxCents, bp);
+      setTotal(centsToInput(t.totalCents));
+      setTax(centsToInput(t.taxCents));
+      filled.push('total', 'tax');
+    }
+    if (r.invoiceCode && !note.trim()) setNote(`发票代码 ${r.invoiceCode}`);
+    rec.apply(r, filled);
+  };
   const problem = !def
     ? '请选择发票类型'
     : !invoiceNo.trim()
@@ -500,7 +549,9 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
               ? '请选择税率'
               : taxCents === null || taxCents > totalCents
                 ? '税额格式不对或超过价税合计'
-                : null;
+                : rec.needsCheck
+                  ? '请对照票面核对识别出来的内容并勾选'
+                  : null;
   const submit = async () => {
     if (problem) return;
     setBusy(true);
@@ -516,6 +567,7 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
       taxCents,
       taxRateBp: rateBp,
       note: note.trim(),
+      entryMethod: rec.entryMethod,
     };
     try {
       const r = await sendErpOp<{ invoice: { id: number } }>({
@@ -558,7 +610,10 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
       }
     >
       <div className="grid gap-3 sm:grid-cols-2" data-testid="invoice-create">
-        <Field label="发票类型" htmlFor="inv-kind" hint={def ? (def.certify ? '要认证：登记后记「待认证」' : '不用认证') : meta.error ? errorMessage(meta.error) : undefined}>
+        <div className="sm:col-span-2">
+          <InvoiceScanButton onResult={applyScan} disabled={busy} />
+        </div>
+        <Field label={<>发票类型<RecognizedMark on={rec.isRecognized('kind')} /></>} htmlFor="inv-kind" hint={def ? (def.certify ? '要认证：登记后记「待认证」' : '不用认证') : meta.error ? errorMessage(meta.error) : undefined}>
           <Select
             id="inv-kind"
             value={kind}
@@ -577,10 +632,10 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
             ))}
           </Select>
         </Field>
-        <Field label="发票号码" htmlFor="inv-no">
+        <Field label={<>发票号码<RecognizedMark on={rec.isRecognized('no')} /></>} htmlFor="inv-no">
           <Input id="inv-no" value={invoiceNo} maxLength={40} onChange={(e) => setInvoiceNo(e.target.value)} className="h-10" data-testid="inv-no" />
         </Field>
-        <Field label="供应商" htmlFor="inv-supplier" hint="不是档案里的供应商就填开票方">
+        <Field label={<>供应商<RecognizedMark on={rec.isRecognized('supplier')} /></>} htmlFor="inv-supplier" hint="不是档案里的供应商就填开票方">
           <Select id="inv-supplier" value={supplierId ?? ''} onChange={(e) => setSupplierId(Number(e.target.value) || null)} data-testid="inv-supplier">
             <option value="">不是档案里的供应商</option>
             {meta.data?.suppliers.map((s) => (
@@ -590,17 +645,27 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
             ))}
           </Select>
         </Field>
-        <Field label="开票方" htmlFor="inv-issuer">
+        <Field label={<>开票方<RecognizedMark on={rec.isRecognized('issuer')} /></>} htmlFor="inv-issuer">
           <Input id="inv-issuer" value={supplierId ? '' : issuer} disabled={!!supplierId} maxLength={60} onChange={(e) => setIssuer(e.target.value)} placeholder={supplierId ? '按供应商' : '发票上的销售方名称'} className="h-10" data-testid="inv-issuer" />
         </Field>
-        <Field label="开票日" htmlFor="inv-date">
+        <Field label={<>开票日<RecognizedMark on={rec.isRecognized('date')} /></>} htmlFor="inv-date">
           <Input id="inv-date" type="date" value={invoiceDate} max={session.calendarToday} onChange={(e) => setInvoiceDate(e.target.value)} className="h-10" data-testid="inv-date" />
         </Field>
-        <Field label="价税合计" htmlFor="inv-total">
+        <Field label={<>价税合计<RecognizedMark on={rec.isRecognized('total')} /></>} htmlFor="inv-total" hint={exTax !== null && !total.trim() ? `二维码里的不含税金额 ¥${formatAmount(exTax)}，选了税率自动算` : undefined}>
           <MoneyInput id="inv-total" value={total} onChange={(e) => setTotal(e.target.value)} className="h-10" data-testid="inv-total" />
         </Field>
-        <Field label="税率" htmlFor="inv-rate">
-          <Select id="inv-rate" value={rateBp ?? ''} disabled={!def} onChange={(e) => setRateBp(e.target.value === '' ? null : Number(e.target.value))} data-testid="inv-rate">
+        <Field label={<>税率<RecognizedMark on={rec.isRecognized('rate')} /></>} htmlFor="inv-rate">
+          <Select
+            id="inv-rate"
+            value={rateBp ?? ''}
+            disabled={!def}
+            onChange={(e) => {
+              const bp = e.target.value === '' ? null : Number(e.target.value);
+              setRateBp(bp);
+              fillFromExTax(bp);
+            }}
+            data-testid="inv-rate"
+          >
             <option value="">{def ? '选择税率' : '先选发票类型'}</option>
             {def?.taxRatesBp.map((bp) => (
               <option key={bp} value={bp}>
@@ -609,12 +674,15 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
             ))}
           </Select>
         </Field>
-        <Field label="税额" htmlFor="inv-tax" hint={totalCents && rateBp !== null ? `不填按税率算：¥${formatAmount(expectedTaxCents(totalCents, rateBp))}` : '不填按税率算'}>
+        <Field label={<>税额<RecognizedMark on={rec.isRecognized('tax')} /></>} htmlFor="inv-tax" hint={totalCents && rateBp !== null ? `不填按税率算：¥${formatAmount(expectedTaxCents(totalCents, rateBp))}` : '不填按税率算'}>
           <MoneyInput id="inv-tax" value={tax} onChange={(e) => setTax(e.target.value)} placeholder={totalCents && rateBp !== null ? centsToInput(expectedTaxCents(totalCents, rateBp)) : ''} className="h-10" data-testid="inv-tax" />
         </Field>
         <Field label="备注" htmlFor="inv-note" className="sm:col-span-2">
           <Input id="inv-note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="可选" className="h-10" />
         </Field>
+        <div className="sm:col-span-2">
+          <RecognitionCheck rec={rec} hint="保存后记作「识别登记」，台账上看得到" />
+        </div>
         {error && <Notice tone="error" title={error} className="sm:col-span-2" />}
       </div>
     </Dialog>

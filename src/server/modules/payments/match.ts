@@ -22,6 +22,7 @@ import { erpOpAbandoned } from '../erp-ops';
 import { loadExpenseRules } from '../expenses';
 import { findByNo, ledgerKind, lockInvoiceNo, voidInputInvoice } from '../invoices';
 import { invoiceTypeCertifies } from '@shared/expenses';
+import { INVOICE_ENTRY_METHODS } from '@shared/invoice-recognize';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => `¥${formatAmount(cents)}`;
@@ -206,6 +207,8 @@ const InvoiceInput = z.object({
   taxRateBp: z.number('请填写税率').int().min(0, '税率不能为负').max(10000, '税率不能超过 100%'),
   note: z.string().trim().max(200, '备注最多 200 个字').default(''),
   lines: z.array(z.object({ poId: id, amountCents: positiveCents('分到采购单的金额') })).min(1, '请选择这张发票对应的采购单').max(50),
+  // 8.0.21 发票识别：手填 / 读二维码 / 读文字（只为统计）
+  entryMethod: z.enum(INVOICE_ENTRY_METHODS, '登记方式不对').default('manual'),
 });
 
 /** 登记发票：分到采购单的金额合计 = 价税合计；采购单要是这家供应商、已下单的 */
@@ -218,7 +221,8 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
   const kind = ledgerKind(await loadExpenseRules(deps.sql), input.kind);
   if (!kind) throw unprocessable('INVOICE_TYPE_INVALID', '发票类型不在费用报销规则里（要填号码的类型），请刷新页面后重选');
   if (new Set(input.lines.map((l) => l.poId)).size !== input.lines.length) throw badRequest('同一张采购单在一张发票里只能出现一次');
-  const requestHash = hashRequest({ ...input, clientKey: undefined });
+  // 手填的不放进摘要：升级前就在「结果待确认」里的原请求照样对得上
+  const requestHash = hashRequest({ ...input, clientKey: undefined, entryMethod: input.entryMethod === 'manual' ? undefined : input.entryMethod });
   const find = async (db: Db) => {
     const [row] = await db<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM supplier_invoices WHERE client_key = ${input.clientKey}`;
     if (!row) return null;
@@ -259,9 +263,10 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
       if (dup) throw conflict('INVOICE_DUPLICATE', `${sup.name}的发票 ${input.invoiceNo} 已经在发票台账里了（登错了先作废原来那张）`, { invoiceId: dup.id });
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO supplier_invoices (invoice_no, supplier_id, invoice_date, total_cents, tax_cents, tax_rate_bp, note, client_key, request_hash, created_by,
-                                       kind, kind_label, source, cert_status)
+                                       kind, kind_label, source, cert_status, entry_method)
         VALUES (${input.invoiceNo}, ${input.supplierId}, ${input.invoiceDate}, ${input.totalCents}, ${input.taxCents}, ${input.taxRateBp}, ${input.note},
-                ${input.clientKey}, ${requestHash}, ${actor.id}, ${kind.key}, ${kind.label}, 'three_way', ${invoiceTypeCertifies(kind) ? 'pending' : 'not_required'})
+                ${input.clientKey}, ${requestHash}, ${actor.id}, ${kind.key}, ${kind.label}, 'three_way', ${invoiceTypeCertifies(kind) ? 'pending' : 'not_required'},
+                ${input.entryMethod})
         RETURNING id`;
       const invoiceId = Number(row!.id);
       for (const l of input.lines) {

@@ -511,3 +511,29 @@ describe('进项发票台账（BI07–BI12）', () => {
     expect(csv.body).toContain('OLD-OVERDUE');
   }, 60_000);
 });
+
+// 8.0.21 发票识别（docs/FINANCE_V8021.md 第 2 节，CW-A；迁移 142）：台账记下每张是怎么登记的，只为统计
+describe('发票的登记方式', () => {
+  it('台账直接登记、报销自动登记、三单登记都记下手填 / 二维码 / 文字识别；手填的原请求摘要与升级前一样；台账数得出识别了几张', async () => {
+    const before = (await ledger()).counts;
+    const body = { clientKey: randomUUID(), kind: 'vat_special', invoiceNo: 'QR-0001', issuerName: '扫码印刷', invoiceDate: today, totalCents: 11_300, taxCents: 1_300, taxRateBp: 1300 };
+    const qr = (await ok(api(ctx.app, coster, 'POST', '/api/erp/invoices', { ...body, entryMethod: 'qr' }))).invoice;
+    expect(qr.entryMethod).toBe('qr');
+    // 同一个操作编号、登记方式不一样：当成另一件事
+    expect((await api(ctx.app, coster, 'POST', '/api/erp/invoices', body)).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect((await api(ctx.app, coster, 'POST', '/api/erp/invoices', { ...body, clientKey: randomUUID(), invoiceNo: 'QR-X', entryMethod: 'camera' })).status).toBe(400);
+    // 手填的：不传与传 manual 是同一个请求（升级前的「结果待确认」照样对得上）
+    const manualBody = { ...body, clientKey: randomUUID(), invoiceNo: 'QR-0002' };
+    const manual = (await ok(api(ctx.app, coster, 'POST', '/api/erp/invoices', manualBody))).invoice;
+    expect(manual.entryMethod).toBe('manual');
+    expect((await ok(api(ctx.app, coster, 'POST', '/api/erp/invoices', { ...manualBody, entryMethod: 'manual' }), 200)).replayed).toBe(true);
+    // 报销时自动登记进台账
+    const claimed = (await ok(claim({ ...special('OCR-0003'), invoiceIssuer: '识别文具', invoiceEntryMethod: 'ocr', lines: [line({ amountCents: 2_260 })] }))).claim;
+    expect((await api(ctx.app, payer, 'GET', `/api/erp/invoices/${claimed.invoice.id}`)).body.entryMethod).toBe('ocr');
+    const after = (await ledger()).counts;
+    expect(after.recognized - before.recognized).toBe(2);
+    expect(after.valid - before.valid).toBe(3);
+    // 内容（含登记方式）建了不能改
+    await expect(ctx.sql`UPDATE supplier_invoices SET entry_method = 'manual' WHERE id = ${qr.id}`).rejects.toThrow();
+  });
+});

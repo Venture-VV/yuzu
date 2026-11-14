@@ -16,6 +16,9 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Select } from '../../components/ui';
 import { ThreeWayBadge } from './parts';
+import { InvoiceScanButton, kindFromHint, RecognitionCheck, RecognizedMark, useInvoiceRecognition } from '../invoices/InvoiceScan';
+import { totalFromExTax, type RecognizedInvoice } from '@shared/invoice-recognize';
+import { centsToInput } from '@shared/money';
 import { usePaymentMeta, usePaymentRules, useSupplierPos } from './queries';
 
 export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplier }: { open: boolean; onClose: () => void; onDone: () => unknown; supplierId?: number | null }) {
@@ -36,7 +39,10 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useErpPending(['supplier_invoice']);
+  // 8.0.21 发票识别
+  const rec = useInvoiceRecognition();
   useResetOnOpen(open, () => {
+    rec.reset();
     setSupplierId(presetSupplier ?? null);
     setInvoiceNo('');
     setInvoiceDate(session.calendarToday);
@@ -58,6 +64,33 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
     .map(([poId, text]) => ({ poId: Number(poId), cents: text.trim() ? parseYuan(text) : null, text }))
     .filter((l) => l.text.trim());
   const splitSum = lines.reduce((s, l) => s + (l.cents ?? 0), 0);
+  const applyScan = (r: RecognizedInvoice) => {
+    const filled: string[] = [];
+    if (r.invoiceNo) (setInvoiceNo(r.invoiceNo), filled.push('no'));
+    if (r.invoiceDate) (setInvoiceDate(r.invoiceDate), filled.push('date'));
+    const k = kindFromHint(kinds, r.kindHint);
+    if (k) (setKind(k), filled.push('kind'));
+    if (r.issuerName && !supplierId) {
+      const s = meta.data?.suppliers.find((x) => x.name === r.issuerName);
+      if (s) (setSupplierId(s.id), setSplit({}), filled.push('supplier'));
+    }
+    let bpNow = rateBp;
+    if (r.amountExTaxCents !== undefined && r.taxCents !== undefined && r.amountExTaxCents > 0) {
+      // 反推税率（取整到 0.01%）
+      const guess = [100, 300, 500, 600, 900, 1000, 1300].find((b) => totalFromExTax(r.amountExTaxCents!, b).taxCents === r.taxCents);
+      if (guess !== undefined) (setRate(String(guess / 100)), (bpNow = guess), filled.push('rate'));
+    }
+    if (r.totalCents !== undefined) (setTotal(centsToInput(r.totalCents)), filled.push('total'));
+    if (r.taxCents !== undefined) (setTax(centsToInput(r.taxCents)), filled.push('tax'));
+    if (r.totalCents === undefined && r.amountExTaxCents !== undefined && bpNow !== null) {
+      const t = totalFromExTax(r.amountExTaxCents, bpNow);
+      setTotal(centsToInput(t.totalCents));
+      setTax(centsToInput(t.taxCents));
+      filled.push('total', 'tax');
+    }
+    if (r.invoiceCode && !note.trim()) setNote(`发票代码 ${r.invoiceCode}`);
+    rec.apply(r, filled);
+  };
   const problem =
     pending.length > 0
       ? '上一张发票结果待确认，请先在上方查回、按原内容重新提交或作废'
@@ -81,7 +114,9 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
                         ? '有分到采购单的金额格式不对'
                         : splitSum !== totalCents
                           ? `分到采购单的合计 ¥${formatAmount(splitSum)} 与价税合计 ¥${formatAmount(totalCents)} 不一样`
-                          : null;
+                          : rec.needsCheck
+                            ? '请对照票面核对识别出来的内容并勾选'
+                            : null;
 
   const submit = async () => {
     if (problem) return;
@@ -99,6 +134,7 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
       taxRateBp: rateBp,
       note: note.trim(),
       lines: lines.map((l) => ({ poId: l.poId, amountCents: l.cents })),
+      entryMethod: rec.entryMethod,
     };
     try {
       await sendErpOp({
@@ -141,7 +177,10 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
       }
     >
       <div className="grid gap-3 sm:grid-cols-3">
-        <Field label="供应商" htmlFor="iv-supplier" className="sm:col-span-3">
+        <div className="sm:col-span-3">
+          <InvoiceScanButton onResult={applyScan} disabled={busy} />
+        </div>
+        <Field label={<>供应商<RecognizedMark on={rec.isRecognized('supplier')} /></>} htmlFor="iv-supplier" className="sm:col-span-3">
           <Select id="iv-supplier" value={supplierId ?? ''} onChange={(e) => (setSupplierId(Number(e.target.value) || null), setSplit({}))} data-testid="invoice-supplier">
             <option value="">选择供应商</option>
             {(meta.data?.suppliers ?? []).map((s) => (
@@ -151,7 +190,7 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
             ))}
           </Select>
         </Field>
-        <Field label="发票类型" htmlFor="iv-kind">
+        <Field label={<>发票类型<RecognizedMark on={rec.isRecognized('kind')} /></>} htmlFor="iv-kind">
           <Select id="iv-kind" value={kinds.length === 0 || kindDef ? kind : ''} onChange={(e) => setKind(e.target.value)} data-testid="invoice-kind">
             {kinds.length === 0 && <option value="vat_special">增值税专用发票</option>}
             {kinds.length > 0 && !kindDef && <option value="">选择发票类型</option>}
@@ -162,24 +201,27 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
             ))}
           </Select>
         </Field>
-        <Field label="发票号码" htmlFor="iv-no">
+        <Field label={<>发票号码<RecognizedMark on={rec.isRecognized('no')} /></>} htmlFor="iv-no">
           <Input id="iv-no" value={invoiceNo} maxLength={40} onChange={(e) => setInvoiceNo(e.target.value)} className="h-10" data-testid="invoice-no" />
         </Field>
-        <Field label="开票日" htmlFor="iv-date">
+        <Field label={<>开票日<RecognizedMark on={rec.isRecognized('date')} /></>} htmlFor="iv-date">
           <Input id="iv-date" type="date" value={invoiceDate} max={session.calendarToday} onChange={(e) => setInvoiceDate(e.target.value)} className="h-10" />
         </Field>
-        <Field label="税率（%）" htmlFor="iv-rate">
+        <Field label={<>税率（%）<RecognizedMark on={rec.isRecognized('rate')} /></>} htmlFor="iv-rate">
           <Input id="iv-rate" value={rate} onChange={(e) => setRate(e.target.value)} className="h-10 text-right" />
         </Field>
-        <Field label="价税合计" htmlFor="iv-total">
+        <Field label={<>价税合计<RecognizedMark on={rec.isRecognized('total')} /></>} htmlFor="iv-total">
           <MoneyInput id="iv-total" value={total} onChange={(e) => setTotal(e.target.value)} data-testid="invoice-total" />
         </Field>
-        <Field label="其中税额" htmlFor="iv-tax">
+        <Field label={<>其中税额<RecognizedMark on={rec.isRecognized('tax')} /></>} htmlFor="iv-tax">
           <MoneyInput id="iv-tax" value={tax} onChange={(e) => setTax(e.target.value)} />
         </Field>
         <Field label="备注（选填）" htmlFor="iv-note">
           <Input id="iv-note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} className="h-10" />
         </Field>
+        <div className="sm:col-span-3">
+          <RecognitionCheck rec={rec} hint="供应商与分到哪几张采购单要自己选" />
+        </div>
       </div>
       {supplierId && (
         <div className="mt-4">
