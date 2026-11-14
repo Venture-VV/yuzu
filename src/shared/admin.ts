@@ -23,6 +23,8 @@ export const ADMIN_SECTIONS = {
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
   // 8.0.17（IA5）：原来叫「经营规则」，与「规则总表」分不清，改叫「门店基本规则」（路径不变）
   rules: { path: '/admin/rules', label: '门店基本规则', perms: ['settings.manage'] },
+  // 数据字典与字段（8.0.21，docs/FINANCE_V8021.md 第 1 节）：快捷原因、会员 / 供应商 / 物料 / 合同的自定义字段、按字段查
+  dictionaries: { path: '/admin/dictionaries', label: '数据字典与字段', perms: ['settings.manage'] },
   // 会员体系（8.0.19，IA5）：原来的三个分区——会员规则（member.rules）、会员权益（benefit.publish）、渠道与标签（settings.manage）——
   // 合成一个，三个页签各自还是原来的权限（features/membership/MembershipSection）；有其中一项的就看得到这个分区。
   // 旧地址 /admin/benefits、/admin/members 跳过来
@@ -66,7 +68,7 @@ export type AdminSection = keyof typeof ADMIN_SECTIONS;
  */
 export const ADMIN_GROUPS: readonly { key: string; title: string; items: readonly AdminSection[] }[] = [
   { key: 'overview', title: '概览', items: ['home', 'dashboard'] },
-  { key: 'rules', title: '规则中心', items: ['settings', 'rules'] },
+  { key: 'rules', title: '规则中心', items: ['settings', 'rules', 'dictionaries'] },
   { key: 'members', title: '会员与营销', items: ['membership', 'coupons'] },
   { key: 'business', title: '营业项目', items: ['catalog', 'tags', 'technicians', 'dining', 'emenu', 'rooms', 'bookings'] },
   { key: 'venue', title: '场地、设备与线上', items: ['spaces', 'guide', 'devices', 'mp'] },

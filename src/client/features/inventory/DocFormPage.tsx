@@ -19,7 +19,8 @@ import {
 import { centsToInput, parseYuan } from '@shared/money';
 import { formatQty, lineAmountCents } from '@shared/quantity';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
-import { useCan, useSession } from '../../lib/session';
+import { useCan, useReasons, useSession } from '../../lib/session';
+import { ReasonChips } from '../../components/ReasonChips';
 import { cn, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
@@ -486,6 +487,7 @@ function DocForm({
   }, [form, type, editing, phase.kind]);
 
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
+  const damageReasons = useReasons('damageReasons');
   const patchLine = (key: string, p: Partial<LineDraft>) =>
     setForm((f) => ({ ...f, lines: f.lines.map((l) => (l.key === key ? { ...l, ...p } : l)) }));
   const removeLine = (key: string) => setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.key !== key) }));
@@ -1090,6 +1092,7 @@ function DocForm({
               htmlFor="note"
               className={NOTE_SPAN[type]}
             >
+              {type === 'damage' && !locked && <ReasonChips reasons={damageReasons} value={form.note} onPick={(r) => patch({ note: r })} testId="damage-reason-chips" />}
               <Input
                 id="note"
                 value={form.note}

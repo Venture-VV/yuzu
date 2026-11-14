@@ -6,6 +6,7 @@ import { DEDUCTION_RULES } from '@shared/deduction';
 import { DEFAULT_MEMBER_CHANNELS, MAX_MEMBER_CHANNELS, MEMBER_CHANNEL_KEY, type MemberChannel } from '@shared/members';
 import { DEFAULT_TUNABLES, PRINT_MODES, TUNABLE_LIMITS } from '@shared/tunables';
 import { MAX_CONSUMPTION_PURPOSES } from '@shared/supply';
+import { DEFAULT_DICTIONARIES, DICTIONARY_KEYS, MAX_DICTIONARY_ITEM_LENGTH, MAX_DICTIONARY_ITEMS, mergeDictionaries } from '@shared/custom-fields';
 import type { StoreRules } from '@shared/types';
 import type { Db } from '../db';
 import { writeAudit } from '../lib/audit';
@@ -64,6 +65,8 @@ const KEY_MAP = {
   ar_overdue_days: 'arOverdueDays',
   expiry_remind_days: 'expiryRemindDays',
   wecom_weekly_push: 'wecomWeeklyPush',
+  // 8.0.21 数据字典（快捷原因，docs/FINANCE_V8021.md 第 1 节）
+  dictionaries: 'dictionaries',
 } as const satisfies Record<string, keyof StoreSettings>;
 
 /** 设置项在库里的键（规则总表按它找最近修改的时间与人） */
@@ -83,6 +86,7 @@ const DEFAULTS: StoreSettings = {
   requireOpenShift: true,
   hidePendingMarks: false,
   memberChannels: DEFAULT_MEMBER_CHANNELS,
+  dictionaries: DEFAULT_DICTIONARIES,
   // 交班方式（v0.7.28 ⑨，N11 待确认）：默认按人交班（现在的做法）；按钱箱交班时开班选钱箱
   shiftMode: 'person',
   cashDrawers: DEFAULT_CASH_DRAWERS,
@@ -100,7 +104,7 @@ export async function loadSettings(db: Db): Promise<StoreSettings> {
   const settings: Record<string, unknown> = { ...DEFAULTS };
   for (const row of rows) {
     const prop = KEY_MAP[row.key as keyof typeof KEY_MAP];
-    if (prop) settings[prop] = row.value;
+    if (prop) settings[prop] = prop === 'dictionaries' ? mergeDictionaries(row.value) : row.value;
   }
   return settings as unknown as StoreSettings;
 }
@@ -157,6 +161,18 @@ const SettingsInput = z
       .max(MAX_CONSUMPTION_PURPOSES, `耗用用途最多 ${MAX_CONSUMPTION_PURPOSES} 个`)
       .refine((l) => new Set(l).size === l.length, '耗用用途重复了'),
     ...tunableInputs(),
+    // 数据字典（8.0.21）：只改提交上来的那几份，没提交的保持原样
+    dictionaries: z
+      .partialRecord(
+        z.enum(DICTIONARY_KEYS),
+        z
+          .array(
+            z.string().trim().min(1, '原因不能为空').max(MAX_DICTIONARY_ITEM_LENGTH, `每条原因最多 ${MAX_DICTIONARY_ITEM_LENGTH} 个字`),
+            '原因要是一组文字',
+          )
+          .max(MAX_DICTIONARY_ITEMS, `每份最多 ${MAX_DICTIONARY_ITEMS} 条`)
+          .refine((l) => new Set(l).size === l.length, '原因重复了'),
+      ),
     cashDrawers: z
       .array(
         z.object({
@@ -232,6 +248,7 @@ export function registerSettingsRoutes(app: FastifyInstance, { sql }: Deps) {
         ...parsed,
         ...(parsed.memberChannels ? { memberChannels: normalizeChannels(before.memberChannels, parsed.memberChannels) } : {}),
         ...(parsed.cashDrawers ? { cashDrawers: normalizeDrawers(before.cashDrawers, parsed.cashDrawers) } : {}),
+        ...(parsed.dictionaries ? { dictionaries: { ...before.dictionaries, ...parsed.dictionaries } } : {}),
       } as Partial<StoreSettings>;
       // 按钱箱交班至少要有一个启用的钱箱（切换后新开的班按新做法，开着的班照旧到交班为止，所以切换不用等大家交班）
       const mode = input.shiftMode ?? before.shiftMode;

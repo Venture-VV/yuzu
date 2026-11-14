@@ -20,6 +20,7 @@ import { MemberCardsCard } from '../membership/MemberCardsCard';
 import { MemberHistoryCard } from '../membership/MemberHistoryCard';
 import { MemberTagChips } from '../membership/TagPicker';
 import { AccountCard } from '../membership/AccountCard';
+import { CustomFieldsCard } from '../custom-fields/CustomFieldsCard';
 
 export function MemberDetail({
   member,
@@ -226,6 +227,9 @@ export function MemberDetail({
 
       {/* 会员实体卡（v0.7.28）：发卡、挂失、补卡；换会员时整块重来 */}
       <MemberCardsCard key={`member-cards-${member.id}`} member={member} />
+
+      {/* 其他信息（8.0.21 自定义字段）：后台建了字段才显示；单独保存，不动会员档案 */}
+      <CustomFieldsCard key={`custom-${member.id}`} entity="member" entityId={member.id} />
 
       {/* 微信小程序的绑定（8.0.19）：看绑没绑，有权限的在这里解绑；换会员时整块重来 */}
       <MemberWechatCard key={`wechat-${member.id}`} member={member} />

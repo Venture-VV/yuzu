@@ -21,7 +21,8 @@ import {
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
 import type { MemberSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
-import { useSession } from '../../lib/session';
+import { useReasons, useSession } from '../../lib/session';
+import { ReasonChips } from '../../components/ReasonChips';
 import { cn, formatTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { DateNav } from '../../components/DateNav';
@@ -418,6 +419,7 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
   // 8.0.8（A04）：这位会员此刻在店的，手牌自动带出（可改）
   const [tag, setTag] = useState(action === 'arrive' ? (b.memberOpenTag ?? '') : '');
   const [reason, setReason] = useState('');
+  const cancelReasons = useReasons('bookingCancelReasons');
   const [date, setDate] = useState(b.businessDate);
   const [startsAt, setStartsAt] = useState<string | null>(null);
   const [technicianId, setTechnicianId] = useState<number | null>(b.technicianId);
@@ -491,6 +493,7 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
         )}
         {action === 'cancel' && (
           <Field label="取消原因" htmlFor="booking-cancel-reason">
+            <ReasonChips reasons={cancelReasons} value={reason} onPick={setReason} />
             <Input id="booking-cancel-reason" value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} placeholder="例如 客人改天" data-testid="booking-cancel-reason" />
           </Field>
         )}

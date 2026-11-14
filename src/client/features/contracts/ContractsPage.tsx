@@ -16,6 +16,7 @@ import { ErpPage } from '../erp/ErpHome';
 import { ContractStatusBadge, daysLeftText } from './parts';
 import { useContractExpiring, useContracts, type ContractFilter } from './queries';
 import { TemplatesDialog } from './TemplatesDialog';
+import { CustomFieldInline, useCustomListValues } from '../custom-fields/CustomFieldsCard';
 
 const FILTERS: { value: ContractFilter; label: string }[] = [
   { value: 'all', label: '全部' },
@@ -36,6 +37,7 @@ export function ContractsPage() {
   const [category, setCategory] = useState<ContractCategory | ''>('');
   const [q, setQ] = useState('');
   const list = useContracts(filter, category, q);
+  const custom = useCustomListValues('contract', (list.data ?? []).map((c) => c.id));
   const expiring = useContractExpiring();
   const manage = can('contract.manage');
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -183,6 +185,7 @@ export function ContractsPage() {
                         {c.departmentName && ` · ${c.departmentName}`} · 经办 {c.handlerName}
                         {c.startDate && ` · ${c.startDate} 至 ${c.endDate ?? '不定期'}`}
                       </span>
+                      <CustomFieldInline data={custom.data} id={c.id} />
                     </span>
                     <span className="text-right md:self-center">
                       <Money cents={c.totalCents} className="text-[14px] font-bold" />

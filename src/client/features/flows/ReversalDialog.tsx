@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Undo2 } from 'lucide-react';
-import { DEDUCTION_RULE_LABELS, describeHours, REVERSAL_REASONS } from '@shared/labels';
+import { DEDUCTION_RULE_LABELS, describeHours } from '@shared/labels';
 import type { ConsumptionDoc } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
 import { findPending } from '../../lib/pendingOps';
-import { useSession } from '../../lib/session';
+import { useReasons, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Dialog } from '../../components/Overlay';
@@ -23,6 +23,7 @@ export interface ReversalTarget {
 /** 整单撤销：按原单的本金/赠金构成恢复余额，原单保留并标记为已撤销 */
 export function ReversalDialog({ target, onClose }: { target: ReversalTarget | null; onClose: () => void }) {
   const session = useSession();
+  const reversalReasons = useReasons('reversalReasons');
   const consumptionId = target?.consumptionId ?? null;
   const open = target !== null;
   const doc = useQuery({
@@ -191,7 +192,7 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
               <div>
                 <p className="mb-2 text-[13px] font-semibold text-ink-2">撤销原因</p>
                 <div className="flex flex-wrap gap-2">
-                  {REVERSAL_REASONS.map((r) => (
+                  {reversalReasons.map((r) => (
                     <button
                       key={r}
                       type="button"

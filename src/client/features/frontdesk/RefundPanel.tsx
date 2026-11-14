@@ -12,7 +12,8 @@ import { defaultRefundAmount, refundNeedsRef, type RefundDetail, type RefundMeth
 import { PAYMENT_METHOD_LABELS } from '@shared/labels';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
-import { useCan, useSession } from '../../lib/session';
+import { useCan, useReasons, useSession } from '../../lib/session';
+import { ReasonChips } from '../../components/ReasonChips';
 import { cn, formatTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
@@ -51,6 +52,7 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
   const [pays, setPays] = useState<Partial<Record<RefundMethod, { amount: string; ref: string }>>>({});
   const [paysTouched, setPaysTouched] = useState(false);
   const [reason, setReason] = useState('');
+  const refundReasons = useReasons('refundReasons');
   const [drawer, setDrawer] = useState<number | null>(null);
   const o = options.data;
 
@@ -272,6 +274,7 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
           ) : (
             total > 0 && <ShiftGate action="退款" />
           )}
+          <ReasonChips reasons={refundReasons} value={reason} onPick={setReason} disabled={op.locked} testId="refund-reason-chips" />
           <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="退款原因（至少 2 个字），例如：按摩没做完、客人投诉" maxLength={200} disabled={op.locked} aria-label="退款原因" />
           {problems.length > 0 && total > 0 && (
             <ul className="space-y-0.5 text-[12.5px] font-semibold text-clay">

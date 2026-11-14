@@ -238,7 +238,10 @@ export type AuditAction =
   // 8.0.20 布草洗涤：品类的新建与修改、开单、作废
   | 'linen_item'
   | 'linen_doc'
-  | 'linen_doc_void';
+  | 'linen_doc_void'
+  // 8.0.21 自定义字段（docs/FINANCE_V8021.md 第 1 节）
+  | 'custom_field_def'
+  | 'custom_field_value';
 
 export interface AuditEntry {
   staffId: number | null;

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useResetOnOpen } from '../lib/useResetOnOpen';
 import { Dialog } from './Overlay';
+import { ReasonChips } from './ReasonChips';
 import { Button, Field, Textarea } from './ui';
 
 /** 需要填写原因的操作：退回修改、撤回、冲销、关闭等。原因会写进单据的经办记录。 */
@@ -13,6 +14,7 @@ export function ReasonDialog({
   danger,
   busy,
   extra,
+  reasons,
   testId,
   onClose,
   onConfirm,
@@ -25,6 +27,8 @@ export function ReasonDialog({
   danger?: boolean;
   busy?: boolean;
   extra?: ReactNode;
+  /** 快捷原因（数据字典），点一下填进原因框 */
+  reasons?: readonly string[];
   /** 浏览器用例用：原因输入框为 `${testId}-reason`，确认按钮为 `${testId}-confirm` */
   testId?: string;
   onClose: () => void;
@@ -51,6 +55,7 @@ export function ReasonDialog({
       }
     >
       <Field label={label} htmlFor="reason-text" hint="至少 2 个字，会记在经办记录里">
+        {reasons && <ReasonChips reasons={reasons} value={reason} onPick={setReason} />}
         <Textarea id="reason-text" data-autofocus value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} data-testid={testId ? `${testId}-reason` : undefined} />
       </Field>
       {extra}

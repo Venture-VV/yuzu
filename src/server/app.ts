@@ -57,6 +57,7 @@ import { registerLedgerRoutes } from './modules/ledger';
 import { registerOrderRoutes } from './modules/orders';
 import { registerMemberRoutes } from './modules/members';
 import { registerMemberTagRoutes } from './modules/member-tags';
+import { registerCustomFieldRoutes } from './modules/custom-fields';
 import { registerMemberRecordRoutes } from './modules/member-records';
 import { registerCouponRoutes } from './modules/coupons';
 import { registerCampaignRoutes } from './modules/coupon-campaigns';
@@ -212,6 +213,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerGrantRoutes(app, deps);
   registerMemberRoutes(app, deps);
   registerMemberTagRoutes(app, deps);
+  // 自定义字段（8.0.21，docs/FINANCE_V8021.md 第 1 节）
+  registerCustomFieldRoutes(app, deps);
   registerMemberRecordRoutes(app, deps);
   registerCouponRoutes(app, deps);
   registerCampaignRoutes(app, deps);

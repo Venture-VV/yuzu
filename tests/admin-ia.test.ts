@@ -15,10 +15,11 @@ describe('后台的一级分组', () => {
     expect(placed).toContain('devices');
   });
 
-  it('7 个分组，名称与顺序固定；规则中心里是规则总表与门店基本规则', () => {
+  it('7 个分组，名称与顺序固定；规则中心里是规则总表、门店基本规则、数据字典与字段', () => {
     expect(ADMIN_GROUPS.map((g) => g.title)).toEqual(['概览', '规则中心', '会员与营销', '营业项目', '场地、设备与线上', '人员与行政', '数据与审计']);
     // 8.0.18：「人员与权限」改叫「人员与行政」，员工食堂、安保巡场从 ERP 挪进来（tests/erp-ia.test.ts）
-    expect(ADMIN_GROUPS.find((g) => g.key === 'rules')!.items).toEqual(['settings', 'rules']);
+    // 8.0.21：数据字典与字段（docs/FINANCE_V8021.md 第 1 节）
+    expect(ADMIN_GROUPS.find((g) => g.key === 'rules')!.items).toEqual(['settings', 'rules', 'dictionaries']);
     expect(new Set(ADMIN_GROUPS.map((g) => g.key)).size).toBe(ADMIN_GROUPS.length);
   });
 
@@ -55,8 +56,8 @@ describe('二级页签', () => {
     .map((f) => ({ f, text: readFileSync(join(ADMIN_DIR, f), 'utf8') }))
     .filter((x) => /<SubPane tab="/.test(x.text));
 
-  it('拆了页签的 8 个分区', () => {
-    expect(withPanes.map((x) => x.f).sort()).toEqual(['CatalogTab.tsx', 'DevicesSection.tsx', 'DiningSection.tsx', 'OpeningTab.tsx', 'RoomsSection.tsx', 'RulesTab.tsx', 'TagsTab.tsx', 'TechniciansSection.tsx']);
+  it('拆了页签的 9 个分区', () => {
+    expect(withPanes.map((x) => x.f).sort()).toEqual(['CatalogTab.tsx', 'DevicesSection.tsx', 'DictionariesSection.tsx', 'DiningSection.tsx', 'OpeningTab.tsx', 'RoomsSection.tsx', 'RulesTab.tsx', 'TagsTab.tsx', 'TechniciansSection.tsx']);
   });
 
   it('每个页面里：写了的页签都有内容，有内容的页签都写了；页签的名字只用小写字母、数字、短横线', () => {

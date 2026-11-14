@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { MAX_MOVE_LINES, normalizeTagCode, ZONE_LABELS, type BillLine, type BoardTag, type FrontdeskBoardRules, type VisitDetail } from '@shared/frontdesk';
 import { formatYuan } from '@shared/money';
-import { useCan, useSession } from '../../lib/session';
+import { useCan, useReasons, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
@@ -15,7 +15,6 @@ import { Button, Field, Input, Notice } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp } from './pending';
 import { useServerNow } from './queries';
 
-const MOVE_REASONS = ['挂错手牌', '同行客人分开结账', '客人要求转给同行'];
 
 /** 这条明细能不能转：不能转的写明原因（与服务端一致） */
 export function moveBlock(line: BillLine): string | null {
@@ -43,6 +42,7 @@ export function MoveLinesDialog({
 }) {
   const session = useSession();
   const can = useCan();
+  const moveReasons = useReasons('moveReasons');
   const [picked, setPicked] = useState<number[]>([]);
   const [code, setCode] = useState('');
   const [reason, setReason] = useState('');
@@ -180,7 +180,7 @@ export function MoveLinesDialog({
         </div>
         <Field label="原因" htmlFor="move-reason">
           <div className="mb-2 flex flex-wrap gap-1.5">
-            {MOVE_REASONS.map((r) => (
+            {moveReasons.map((r) => (
               <button
                 key={r}
                 type="button"

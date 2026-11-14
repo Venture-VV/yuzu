@@ -13,6 +13,7 @@ import { Money } from '../../components/Money';
 import { Button, Kbd, Notice, Select, Skeleton } from '../../components/ui';
 import { groupTags, tagLabel } from '@shared/member-tags';
 import { useMemberTags } from '../membership/TagPicker';
+import { CustomFieldInline, useCustomListValues } from '../custom-fields/CustomFieldsCard';
 
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -40,6 +41,7 @@ export const MemberList = forwardRef<
   const members = useMembers(query, memberCodeOf(query) ? null : tagId);
   const [cursor, setCursor] = useState(0);
   const list = members.data ?? [];
+  const custom = useCustomListValues('member', list.map((m) => m.id));
   // 扫到会员码（v0.7.25）：校验通过就直接打开这位会员，清空查找框（码 60 秒就换）
   const code = memberCodeOf(query);
   useEffect(() => {
@@ -199,6 +201,7 @@ export const MemberList = forwardRef<
                   <span className="num block truncate text-[12.5px] text-ink-3">
                     {maskPhone(m.phone)} · {relativeTime(m.lastActivityAt)}
                   </span>
+                  <CustomFieldInline data={custom.data} id={m.id} />
                 </span>
                 <span className="text-right">
                   <Money

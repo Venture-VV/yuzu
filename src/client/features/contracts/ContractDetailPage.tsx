@@ -57,6 +57,7 @@ import { ErpPage } from '../erp/ErpHome';
 import { ContractPaymentCard } from '../payments/ContractPaymentCard';
 import { ContractStatusBadge, daysLeftText, Fact, Facts, LinesView, ReviewsView, TermsView } from './parts';
 import { useContract, useContractMeta, useInvalidateContracts } from './queries';
+import { CustomFieldsCard } from '../custom-fields/CustomFieldsCard';
 
 export function ContractDetailPage() {
   const can = useCan();
@@ -269,6 +270,9 @@ function Detail({ c }: { c: ContractDetail }) {
         </div>
         {c.content.note && <p className="text-[13px] text-ink-2">备注：{c.content.note}</p>}
       </Card>
+
+      {/* 其他信息（8.0.21 自定义字段）：单独保存，不改合同的版本，作废、终止的也能补记 */}
+      <CustomFieldsCard key={`custom-${c.id}`} entity="contract" entityId={c.id} />
 
       {/* 付款计划、验收与质量问题（v0.7.32）：审批通过以后才有生效的一版 */}
       {c.currentVersion > 0 && c.status !== 'voided' && <ContractPaymentCard c={c} />}
