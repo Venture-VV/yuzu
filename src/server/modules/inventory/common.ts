@@ -237,6 +237,12 @@ export interface LockedMaterial {
   counterUse: boolean;
   /** 称重（#14，v0.7.13） */
   weighed: boolean;
+  /** 平均成本（8.0.20，万分之一分 / 库存单位）；0 = 还没有成本 */
+  avgCostE4: number;
+  costEstimated: boolean;
+  /** 参考价（分 / 采购单位）与采购单位换算：还没有成本时按它起算 */
+  refPriceCents: number | null;
+  purchaseFactorMilli: number;
 }
 
 /** 按 id 升序锁定物料，返回可变的结存快照 */
@@ -244,7 +250,8 @@ export async function lockMaterials(tx: Tx, ids: number[]): Promise<Map<number, 
   const unique = [...new Set(ids)].sort((a, b) => a - b);
   if (unique.length === 0) return new Map();
   const rows = await tx<LockedMaterial[]>`
-    SELECT id, code, name, inventory_unit, decimals, stock_milli, last_move_id, tracked, active, counter_use, weighed
+    SELECT id, code, name, inventory_unit, decimals, stock_milli, last_move_id, tracked, active, counter_use, weighed,
+           avg_cost_e4, cost_estimated, ref_price_cents, purchase_factor_milli
     FROM materials WHERE id IN ${tx(unique)} ORDER BY id FOR UPDATE`;
   if (rows.length !== unique.length) throw unprocessable('MATERIAL_NOT_FOUND', '有物料不存在，请刷新后重试');
   return new Map(rows.map((r) => [r.id, r]));
@@ -298,47 +305,96 @@ export async function assertEnoughDeptStock(db: Db, warehouseId: number, warehou
   }
 }
 
+/** 一笔流水的成本（8.0.20，docs/ERP_V8020.md 第 1 节）：数量（千分之一库存单位）× 单位成本（万分之一分）→ 分，四舍五入，符号跟数量 */
+export function moveCostCents(deltaMilli: number, unitCostE4: number): number {
+  const raw = BigInt(Math.abs(deltaMilli)) * BigInt(unitCostE4);
+  const cents = Number((raw + 5_000_000n) / 10_000_000n);
+  return deltaMilli < 0 ? -cents : cents;
+}
+
+/** 参考价折成每库存单位的成本（万分之一分）；没有参考价是 0 */
+export function refCostE4(m: Pick<LockedMaterial, 'refPriceCents' | 'purchaseFactorMilli'>): number {
+  if (!m.refPriceCents || m.purchaseFactorMilli <= 0) return 0;
+  return Number((BigInt(m.refPriceCents) * 10_000_000n + BigInt(m.purchaseFactorMilli) / 2n) / BigInt(m.purchaseFactorMilli));
+}
+
+/**
+ * 移动加权平均（纯函数，tests/stock-cost.test.ts）：带金额的进出（收货、作废收货、向供应商退货及其作废）重算平均成本；
+ * 结存减到 0 或以下时保持原来的平均成本。onHandMilli 是这一笔之前全公司的结存（总仓 + 各部门小仓）。
+ */
+export function movingAverageE4(onHandMilli: number, avgE4: number, deltaMilli: number, valueCents: number): number {
+  const after = onHandMilli + deltaMilli;
+  if (after <= 0) return avgE4;
+  const total = BigInt(Math.max(onHandMilli, 0)) * BigInt(avgE4) + BigInt(deltaMilli < 0 ? -1 : 1) * BigInt(valueCents) * 10_000_000n;
+  if (total <= 0n) return 0;
+  return Number((total + BigInt(after) / 2n) / BigInt(after));
+}
+
 /**
  * 写一条库存流水并更新所在仓的结存（v0.7.11 两级库存）：总仓的结存在物料上（stock_milli、last_move_id），
  * 部门小仓的在 warehouse_stock；流水的「变动后结存」按所在仓算。调用方已按 id 升序锁定物料行（所有仓的收发都串行）。
+ *
+ * 成本（8.0.20）：每笔流水记当时的单位成本与金额。ref.valueCents 给了（收货的行金额、退供应商的金额、作废它们时原流水的金额）
+ * 就按这笔金额记、并重算物料的平均成本；没给的按当时的平均成本记，不改平均成本。物料还没有成本时按参考价起算。
+ * 都在已经锁住的物料行上做，不另加锁。
  */
 export async function applyMove(
   tx: Tx,
   m: LockedMaterial,
   deltaMilli: number,
-  ref: { moveType: MoveType; docId: number; lineId: number; docDate: string; operatorId: number; warehouseId: number; warehouseName?: string },
+  ref: { moveType: MoveType; docId: number; lineId: number; docDate: string; operatorId: number; warehouseId: number; warehouseName?: string; valueCents?: number | null },
 ) {
   if (deltaMilli === 0) return;
-  if (ref.warehouseId === CENTRAL_WAREHOUSE_ID) {
-    const after = m.stockMilli + deltaMilli;
-    if (after < 0) throw insufficient(m, -deltaMilli);
-    const [move] = await tx<{ id: number }[]>`
-      INSERT INTO stock_moves (material_id, move_type, doc_id, doc_line_id, qty_delta_milli, qty_after_milli, doc_date, operator_id, warehouse_id)
-      VALUES (${m.id}, ${ref.moveType}, ${ref.docId}, ${ref.lineId}, ${deltaMilli}, ${after}, ${ref.docDate}, ${ref.operatorId}, ${CENTRAL_WAREHOUSE_ID})
-      RETURNING id`;
-    await tx`UPDATE materials SET stock_milli = ${after}, last_move_id = ${move!.id}, updated_at = now() WHERE id = ${m.id}`;
-    m.stockMilli = after;
-    m.lastMoveId = move!.id;
-    return;
+  const isCentral = ref.warehouseId === CENTRAL_WAREHOUSE_ID;
+  let before: number;
+  if (isCentral) before = m.stockMilli;
+  else {
+    const [cur] = await tx<{ stockMilli: number }[]>`
+      SELECT stock_milli FROM warehouse_stock WHERE warehouse_id = ${ref.warehouseId} AND material_id = ${m.id} FOR UPDATE`;
+    before = cur?.stockMilli ?? 0;
   }
-  const [cur] = await tx<{ stockMilli: number }[]>`
-    SELECT stock_milli FROM warehouse_stock WHERE warehouse_id = ${ref.warehouseId} AND material_id = ${m.id} FOR UPDATE`;
-  const before = cur?.stockMilli ?? 0;
   const after = before + deltaMilli;
   if (after < 0) {
+    if (isCentral) throw insufficient(m, -deltaMilli);
     throw unprocessable(
       'INSUFFICIENT_STOCK',
       `「${m.name}」${ref.warehouseName ?? '部门小仓'}库存不足：当前 ${formatQty(before)} ${m.inventoryUnit}，需要 ${formatQty(-deltaMilli)} ${m.inventoryUnit}`,
       { materialId: m.id, stockMilli: before, needMilli: -deltaMilli, warehouseId: ref.warehouseId },
     );
   }
+  // 成本
+  const hasValue = ref.valueCents !== undefined && ref.valueCents !== null && ref.valueCents >= 0;
+  let avg = m.avgCostE4 > 0 ? m.avgCostE4 : refCostE4(m);
+  let unitCost = avg;
+  let costCents = moveCostCents(deltaMilli, avg);
+  let estimated = m.costEstimated;
+  if (hasValue) {
+    const value = ref.valueCents!;
+    const [others] = await tx<{ milli: number }[]>`SELECT COALESCE(sum(stock_milli), 0)::bigint AS milli FROM warehouse_stock WHERE material_id = ${m.id}`;
+    const onHand = m.stockMilli + Number(others!.milli);
+    unitCost = Number((BigInt(value) * 10_000_000n + BigInt(Math.abs(deltaMilli)) / 2n) / BigInt(Math.abs(deltaMilli)));
+    costCents = deltaMilli < 0 ? -value : value;
+    avg = movingAverageE4(onHand, avg, deltaMilli, value);
+    // 真的按进价入库过一次：不再是估的
+    if (deltaMilli > 0 && ref.moveType === 'receipt') estimated = false;
+  }
   const [move] = await tx<{ id: number }[]>`
-    INSERT INTO stock_moves (material_id, move_type, doc_id, doc_line_id, qty_delta_milli, qty_after_milli, doc_date, operator_id, warehouse_id)
-    VALUES (${m.id}, ${ref.moveType}, ${ref.docId}, ${ref.lineId}, ${deltaMilli}, ${after}, ${ref.docDate}, ${ref.operatorId}, ${ref.warehouseId})
+    INSERT INTO stock_moves (material_id, move_type, doc_id, doc_line_id, qty_delta_milli, qty_after_milli, doc_date, operator_id, warehouse_id, unit_cost_e4, cost_cents)
+    VALUES (${m.id}, ${ref.moveType}, ${ref.docId}, ${ref.lineId}, ${deltaMilli}, ${after}, ${ref.docDate}, ${ref.operatorId}, ${ref.warehouseId}, ${unitCost}, ${costCents})
     RETURNING id`;
-  await tx`
-    INSERT INTO warehouse_stock (warehouse_id, material_id, stock_milli, last_move_id) VALUES (${ref.warehouseId}, ${m.id}, ${after}, ${move!.id})
-    ON CONFLICT (warehouse_id, material_id) DO UPDATE SET stock_milli = ${after}, last_move_id = ${move!.id}, updated_at = now()`;
+  const costChanged = avg !== m.avgCostE4 || estimated !== m.costEstimated;
+  if (isCentral) {
+    await tx`UPDATE materials SET stock_milli = ${after}, last_move_id = ${move!.id}, avg_cost_e4 = ${avg}, cost_estimated = ${estimated}, updated_at = now() WHERE id = ${m.id}`;
+    m.stockMilli = after;
+    m.lastMoveId = move!.id;
+  } else {
+    await tx`
+      INSERT INTO warehouse_stock (warehouse_id, material_id, stock_milli, last_move_id) VALUES (${ref.warehouseId}, ${m.id}, ${after}, ${move!.id})
+      ON CONFLICT (warehouse_id, material_id) DO UPDATE SET stock_milli = ${after}, last_move_id = ${move!.id}, updated_at = now()`;
+    if (costChanged) await tx`UPDATE materials SET avg_cost_e4 = ${avg}, cost_estimated = ${estimated}, updated_at = now() WHERE id = ${m.id}`;
+  }
+  m.avgCostE4 = avg;
+  m.costEstimated = estimated;
 }
 
 export type DocKind =
