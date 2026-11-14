@@ -147,6 +147,8 @@ export const PERMISSIONS = {
   /** 查看库存数量、物料档案与库存单据 */
   'inventory.read': { roles: ['owner'], duties: ['stock', 'purchase', 'payable', 'approve', 'cost'] },
   /** 期初录入、收货、领用、退回、直接耗用、报损申请、盘点录入 */
+  // 8.0.20 成本核算（docs/ERP_V8020.md 第 1 节）：库存金额、耗用成本、项目毛利、用料的理论成本
+  'inventory.cost': { roles: ['owner', 'store_manager'], duties: ['cost', 'payable', 'approve'] },
   'inventory.operate': { roles: ['owner'], duties: ['stock'] },
   /** 物料、供应商、部门档案 */
   'inventory.master': { roles: ['owner'], duties: ['purchase'] },
@@ -433,6 +435,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'coupon.issue': '发券给会员',
   'coupon.void': '作废会员没用过的券',
   'inventory.read': '查看库存与物资单据',
+  'inventory.cost': '看成本：库存金额、耗用成本、项目毛利',
   'inventory.operate': '期初、收货、领料、退回、耗用、报损、盘点录入（总仓）',
   'inventory.master': '维护物料、供应商、部门档案',
   'purchase.manage': '编制与提交采购单',
@@ -529,7 +532,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   {
     title: 'ERP（库存、采购、货款、费用、营业数据）',
     items: [
-      'inventory.read', 'inventory.operate', 'inventory.master', 'purchase.manage', 'purchase.rules', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
+      'inventory.read', 'inventory.cost', 'inventory.operate', 'inventory.master', 'purchase.manage', 'purchase.rules', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
       'deptStock.operate', 'deptStock.audit',
       'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
       'approval.act', 'approval.rules', 'contract.read', 'contract.manage', 'payment.request', 'budget.manage', 'invoice.manage',

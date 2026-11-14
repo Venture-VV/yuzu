@@ -288,6 +288,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '125_dept_head_confirm.sql',
   '126_switches_on.sql',
   '127_stock_cost.sql',
+  '128_stock_usage.sql',
   '130_request_drafts_imports.sql',
   '135_concierge.sql',
   '136_concierge_native_resources.sql',

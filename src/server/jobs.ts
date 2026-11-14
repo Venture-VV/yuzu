@@ -10,6 +10,7 @@ import { sweepBookings } from './modules/bookings';
 import { expireCountCards } from './modules/count-cards';
 import { resumeCampaigns } from './modules/coupon-campaigns';
 import { processGiftOuts } from './modules/gift-outs';
+import { processStockUsage } from './modules/stock-usage';
 import { sweepDrafts } from './modules/request-drafts';
 import { sendPendingSms } from './modules/sms';
 import { issueBirthdayCoupons } from './modules/coupons';
@@ -116,6 +117,15 @@ export async function runMinuteJobs(
     if (r.done || r.failed || r.voided) log.info(`赠品出库：出库 ${r.done} 条、冲销 ${r.voided} 条${r.failed ? `、${r.failed} 条失败（营销成本页重试）` : ''}`);
   } catch (error) {
     log.error('赠品出库失败，下一分钟重试', error);
+  }
+  // 销售出库、配方耗用（8.0.20）：结账、出品时记下的「该扣多少」轧差后开耗用单；库存不够的留着，补上以后自动扣
+  try {
+    const r = await processStockUsage({ sql, config });
+    if (r.docs || r.released || r.reconciled) {
+      log.info(`自动扣料：开了 ${r.docs} 张耗用单（${r.lines} 样物料）${r.blocked ? `、${r.blocked} 样库存不够先留着` : ''}${r.released ? `、${r.released} 批没开成（下一分钟再试）` : ''}${r.reconciled ? `、${r.reconciled} 批对上了账` : ''}`);
+    }
+  } catch (error) {
+    log.error('自动扣料失败，下一分钟重试', error);
   }
   // 次卡（v0.7.28）：过了有效期没用完的次数作废
   try {

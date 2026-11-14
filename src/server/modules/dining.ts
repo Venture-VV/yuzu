@@ -21,6 +21,7 @@ import { businessDate, loadFrontdeskRules, nextDocNo, setTxTimeouts } from './fr
 import { pricesColumn } from './pricing';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { recordRecipeUsage, reverseRecipeUsage } from './stock-usage';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
   const [row] = await db<{ value: Partial<DiningRules> }[]>`SELECT value FROM settings WHERE key = 'dining_rules'`;
@@ -93,14 +94,19 @@ export async function createKitchenItems(
   if (args.lines.length === 0) return null;
   const orderNo = await nextDocNo(tx, 'kitchen_order', 'CD', args.date);
   const done = args.backfill ? args.at : null;
+  const made: number[] = [];
   for (const l of args.lines) {
-    await tx`
+    const [row] = await tx<{ id: number }[]>`
       INSERT INTO kitchen_items (order_no, bill_line_id, visit_id, table_session_id, item_id, station_id, quantity, note, status, business_date,
                                  limit_taken, created_by, created_at, done_by, done_at, served_by, served_at, deliver_to)
       VALUES (${orderNo}, ${l.billLineId}, ${args.visitId}, ${args.tableSessionId ?? null}, ${l.itemId}, ${l.stationId}, ${l.quantity}, ${l.note},
               ${args.backfill ? 'served' : 'queued'}, ${args.date}, ${l.limitTaken}, ${args.actor.id}, ${args.at},
-              ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done}, ${args.deliverTo ?? ''})`;
+              ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done}, ${args.deliverTo ?? ''})
+      RETURNING id`;
+    made.push(Number(row!.id));
   }
+  // 扣库存（8.0.20）：补录的一建就是已上桌，这时按用料记「该扣多少」；正常下单的等出品完成时记
+  if (args.backfill) await recordRecipeUsage(tx, made);
   return orderNo;
 }
 
@@ -247,6 +253,8 @@ export async function kitchenAction(deps: Deps, id: number, action: KitchenActio
       await tx`UPDATE kitchen_items SET status = 'done', done_at = ${at}, done_by = ${ctx.actor.id} WHERE id = ${id}`;
       // 规则「出餐即算上菜」：不用服务员再点上菜
       if (!rules.trackServed) await tx`UPDATE kitchen_items SET status = 'served', served_at = ${at}, served_by = ${ctx.actor.id} WHERE id = ${id}`;
+      // 扣库存（8.0.20）：出品完成时按用料记「该扣多少」（只插入；每分钟的任务再开耗用单）
+      await recordRecipeUsage(tx, [id]);
     } else if (action === 'serve') {
       if (k.status !== 'done') throw stale();
       await tx`UPDATE kitchen_items SET status = 'served', served_at = ${at}, served_by = ${ctx.actor.id} WHERE id = ${id}`;
@@ -257,6 +265,8 @@ export async function kitchenAction(deps: Deps, id: number, action: KitchenActio
       } else if (k.status === 'done') {
         await tx`
           UPDATE kitchen_items SET status = ${k.startedAt ? 'cooking' : 'queued'}, done_at = NULL, done_by = NULL WHERE id = ${id}`;
+        // 扣库存（8.0.20）：撤回出品完成，记一条冲回
+        await reverseRecipeUsage(tx, id);
       } else if (k.status === 'cooking') {
         await tx`UPDATE kitchen_items SET status = 'queued', started_at = NULL, started_by = NULL WHERE id = ${id}`;
       } else {

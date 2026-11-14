@@ -40,6 +40,7 @@ import { assertCanFix, businessDate, hashRequest, loadFrontdeskRules, nextDocNo,
 import { loadPricedItems, priceLine } from './pricing';
 import { lockPaymentShift, openShiftOf } from './shifts';
 import { ctxOf } from '../lib/context';
+import { recordSaleUsage } from './stock-usage';
 
 // ───────────────────────── 后台：桌台 ─────────────────────────
 
@@ -588,6 +589,8 @@ export async function checkoutTables(deps: Deps, raw: unknown, ctx: OpContext): 
     const memberIds = [...guests].filter((m): m is number => m !== null);
     await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes: [], tables, billIds, memberIds, date, at, ctx });
     await snapshotCheckoutItems(tx, checkoutId);
+    // 扣库存（8.0.20）：不进厨房的明细按用料记「该扣多少」（与手牌结账同一个做法）
+    await recordSaleUsage(tx, checkoutId, billIds, date);
     // 结清：账单与开台结束，桌台空出来
     await tx`UPDATE bills SET status = 'settled', closed_at = ${at} WHERE id IN ${tx(billIds)}`;
     await tx`UPDATE table_sessions SET status = 'settled', closed_at = ${at}, closed_by = ${ctx.actor.id} WHERE id IN ${tx(ids)}`;

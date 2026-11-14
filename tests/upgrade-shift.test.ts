@@ -107,6 +107,8 @@ beforeAll(async () => {
   await sql`CREATE TABLE benefits (id bigint, code text, name text, category text, start_grade smallint, start_tier smallint, period text, quantity smallint, tier_quantities jsonb, template_id bigint, events text[], festival_dates date[], discount_target text, companion_count smallint, companion_counts jsonb, weekdays smallint[], month_days smallint[], visit_target smallint, is_parking boolean, parking_hours smallint, parking_hours_by_tier jsonb, content text, conditions text, status text, version integer, sort_order integer)`;
   // 现版本结账时记浴票延迟（045 才有）：写入期间临时加结账单的两列，迁移前删掉
   await sql`ALTER TABLE checkout_bills ADD COLUMN ticket_extension_minutes smallint NOT NULL DEFAULT 0, ADD COLUMN ticket_extension_benefit_id bigint`;
+  // 现版本结账时按用料记扣料事件（128 才有那张表）：写入期间把这个开关关上，迁移前删掉
+  await sql`INSERT INTO settings (key, value) VALUES ('stock_usage_rules', '{"enabled": false}'::jsonb)`;
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
   const cash = (amount: number) => ({ idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: amount, bonusAmount: 0, paymentMethod: 'cash' as const, paymentConfirmed: true as const });
@@ -146,6 +148,7 @@ beforeAll(async () => {
   await sql`ALTER TABLE ledger_entries DROP COLUMN member_refund_id, DROP COLUMN member_merge_id`;
   await sql`ALTER TABLE recharges DROP COLUMN channel`;
   await sql`ALTER TABLE checkout_bills DROP COLUMN ticket_extension_minutes, DROP COLUMN ticket_extension_benefit_id`;
+  await sql`DELETE FROM settings WHERE key = 'stock_usage_rules'`;
 
   expect(await migrate(sql)).toEqual(migrationsFrom('016_shift_boundary.sql'));
   // 升级后的收款这里按小额核对班次；会员体系 v2 的首充 / 续充最低（默认 5,000 元）设成不限

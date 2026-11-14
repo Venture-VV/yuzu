@@ -231,7 +231,9 @@ export type AuditAction =
   | 'wecom_push'
   // 8.0.9 安保巡场（docs/PATROL_V809.md）：场所的新建、修改、换码、停用 / 启用；作废打卡记录
   | 'patrol_point'
-  | 'patrol_checkin_void';
+  | 'patrol_checkin_void'
+  // 8.0.20 用料与扣料（docs/ERP_V8020.md）：改项目的用料
+  | 'item_recipe';
 
 export interface AuditEntry {
   staffId: number | null;
