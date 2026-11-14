@@ -55,7 +55,6 @@ import { cn, downloadUrl, formatDateTime, formatTime } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
-import { AdminPage } from '../admin/AdminShell';
 import { benefitKeys } from './queries';
 import { BenefitTiersView } from './BenefitTiersView';
 import { VipLockersCard } from './VipLockersCard';
@@ -64,21 +63,19 @@ import { VipLockersCard } from './VipLockersCard';
 type BenefitView = 'tiers' | 'list' | 'vip';
 const VIEWS: BenefitView[] = ['tiers', 'list', 'vip'];
 
-export function BenefitsSection() {
+/** 「会员体系 → 会员权益」页签的内容（8.0.19 起三个分区合成一个，外框在 MembershipSection） */
+export function BenefitsBody() {
   const [params, setParams] = useSearchParams();
   const raw = params.get('view');
   const view: BenefitView = VIEWS.includes(raw as BenefitView) ? (raw as BenefitView) : 'tiers';
   return (
-    <AdminPage
-      section="benefits"
-      wide
-      description="本店权益清单（会员文档附录三 A 与补充项）：逐项设好配置起点、数量与券，发布后券类每月自动发、事件礼按事件自动发，服务类列在会员详情「本月可享」。改了只影响以后，已经发出的券、登记的使用不变。"
-      actions={
+    <div>
+      <div className="mb-4 flex flex-wrap items-start gap-x-4 gap-y-2">
+        <p className="min-w-0 flex-1 basis-80 text-[13px] text-ink-3">本店权益清单（会员文档附录三 A 与补充项）：逐项设好配置起点、数量与券，发布后券类每月自动发、事件礼按事件自动发，服务类列在会员详情「本月可享」。改了只影响以后，已经发出的券、登记的使用不变。</p>
         <Link to="/admin/coupons/usage" className="text-[13px] font-semibold text-pine hover:underline" data-testid="benefits-usage-link">
           看使用率
         </Link>
-      }
-    >
+      </div>
       <Segmented
         ariaLabel="看法"
         className="mb-4"
@@ -105,7 +102,7 @@ export function BenefitsSection() {
           </Notice>
         </>
       )}
-    </AdminPage>
+    </div>
   );
 }
 

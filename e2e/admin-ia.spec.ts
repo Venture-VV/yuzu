@@ -25,7 +25,11 @@ test.describe('8.0.17 后台的信息架构', () => {
     // 规则中心：规则总表、门店基本规则（原「经营规则」）
     await expect(page.getByTestId('admin-nav-settings')).toHaveText('规则总表');
     await expect(page.getByTestId('admin-nav-rules')).toHaveText('门店基本规则');
-    await expect(page.getByTestId('admin-nav-members')).toHaveText('渠道与标签');
+    // 8.0.19：会员规则、会员权益、渠道与标签合成「会员体系」一个分区；对客导览单列
+    await expect(page.getByTestId('admin-nav-membership')).toHaveText('会员体系');
+    await expect(page.getByTestId('admin-nav-members')).toHaveCount(0);
+    await expect(page.getByTestId('admin-nav-benefits')).toHaveCount(0);
+    await expect(page.getByTestId('admin-nav-guide')).toHaveText('对客导览');
     await expect(page.getByTestId('admin-nav-coupons')).toHaveText('券');
     await expect(page.getByTestId('admin-nav-opening')).toHaveText('期初与旧账');
     // 设备：8.0.16 以前不在侧栏里
