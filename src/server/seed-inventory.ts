@@ -19,6 +19,7 @@ import { approvePo, createPo, submitPo } from './modules/inventory/purchasing';
 import { createStaff } from './modules/staff';
 import { DEMO_PASSWORD } from './seed';
 import demo from './demo/inventory-demo.json' with { type: 'json' };
+import { dateIn } from './lib/dates';
 
 type Demo = typeof demo;
 const q = (text: string) => Math.round(Number(text) * 1000);
@@ -260,6 +261,10 @@ export async function seedInventoryDemo(sql: Sql, config: AppConfig) {
 
   events.sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order);
   for (const e of events) await e.run();
+
+  // 自动补货（8.0.20）默认开着、到点会按补货建议自己建采购单草稿。演示数据写进来的这一天记成「今天已经跑过」：
+  // 准备完的库不随钟点多出几张草稿（固定预期与浏览器用例才对得上）；第二天起照常自动跑，当天要看效果在「补货建议」里点「现在跑一次」
+  await sql`INSERT INTO replenish_runs (run_date, status, finished_at) VALUES (${dateIn(new Date(), config.timezone)}, 'done', now()) ON CONFLICT (run_date) DO NOTHING`;
 
   return { skipped: false as const, materials: materials.size, suppliers: suppliers.size, docs: docIds.size, purchaseOrders: poIds.size };
 }

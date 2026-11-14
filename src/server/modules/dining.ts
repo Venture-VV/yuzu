@@ -21,6 +21,7 @@ import { businessDate, loadFrontdeskRules, nextDocNo, setTxTimeouts } from './fr
 import { pricesColumn } from './pricing';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { recordRecipeUsage, reverseRecipeUsage } from './stock-usage';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
   const [row] = await db<{ value: Partial<DiningRules> }[]>`SELECT value FROM settings WHERE key = 'dining_rules'`;
@@ -93,14 +94,19 @@ export async function createKitchenItems(
   if (args.lines.length === 0) return null;
   const orderNo = await nextDocNo(tx, 'kitchen_order', 'CD', args.date);
   const done = args.backfill ? args.at : null;
+  const made: number[] = [];
   for (const l of args.lines) {
-    await tx`
+    const [row] = await tx<{ id: number }[]>`
       INSERT INTO kitchen_items (order_no, bill_line_id, visit_id, table_session_id, item_id, station_id, quantity, note, status, business_date,
                                  limit_taken, created_by, created_at, done_by, done_at, served_by, served_at, deliver_to)
       VALUES (${orderNo}, ${l.billLineId}, ${args.visitId}, ${args.tableSessionId ?? null}, ${l.itemId}, ${l.stationId}, ${l.quantity}, ${l.note},
               ${args.backfill ? 'served' : 'queued'}, ${args.date}, ${l.limitTaken}, ${args.actor.id}, ${args.at},
-              ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done}, ${args.deliverTo ?? ''})`;
+              ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done}, ${args.deliverTo ?? ''})
+      RETURNING id`;
+    made.push(Number(row!.id));
   }
+  // 扣库存（8.0.20）：补录的一建就是已上桌，这时按用料记「该扣多少」；正常下单的等出品完成时记
+  if (args.backfill) await recordRecipeUsage(tx, made);
   return orderNo;
 }
 
@@ -196,8 +202,20 @@ export async function diningGuest(db: Db, tagCode: string): Promise<DiningGuest>
   const [v] = await db<{ visitId: number }[]>`
     SELECT v.id AS visit_id FROM visits v JOIN hand_tags h ON h.id = v.tag_id
     WHERE v.status = 'open' AND upper(h.code) = upper(${tagCode})`;
-  if (!v) throw notFound(`手牌 ${tagCode} 现在没有在店客人，请核对牌号`);
-  return diningGuestOf(db, v.visitId);
+  if (v) return { ...(await diningGuestOf(db, v.visitId)), via: 'tag' };
+  // 客房点餐（8.0.20）：不是手牌号的话当房号找在住的客人（住客本来就有手牌与账单，点的菜挂在那张账单上、退房时一起结）
+  const [stay] = await db<{ visitId: number }[]>`
+    SELECT s.visit_id FROM room_stays s JOIN rooms r ON r.id = s.room_id JOIN visits vv ON vv.id = s.visit_id
+    WHERE s.status = 'open' AND vv.status = 'open' AND upper(r.room_no) = upper(${tagCode})`;
+  if (stay) return { ...(await diningGuestOf(db, stay.visitId)), via: 'room' };
+  throw notFound(`手牌 ${tagCode} 现在没有在店客人（也没有这个房号的在住客人），请核对`);
+}
+
+/** 这位客人在住的客房（没住店是 null） */
+export async function openRoomOf(db: Db, visitId: number): Promise<string | null> {
+  const [r] = await db<{ roomNo: string }[]>`
+    SELECT r.room_no FROM room_stays s JOIN rooms r ON r.id = s.room_id WHERE s.visit_id = ${visitId} AND s.status = 'open' ORDER BY s.id LIMIT 1`;
+  return r?.roomNo ?? null;
 }
 
 /**
@@ -214,7 +232,7 @@ export async function diningGuestOf(db: Db, visitId: number): Promise<DiningGues
     SELECT k.id, k.bill_line_id, k.item_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at
     FROM kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN bill_lines l ON l.id = k.bill_line_id
     WHERE k.visit_id = ${v.visitId} AND k.status IN ('queued', 'cooking', 'done') ORDER BY k.id`;
-  return { visitId: v.visitId, tagCode: v.tagCode, zone: v.zone, guest: guestName(v.memberName, v.guestLabel), pending };
+  return { visitId: v.visitId, tagCode: v.tagCode, zone: v.zone, guest: guestName(v.memberName, v.guestLabel), pending, roomNo: await openRoomOf(db, v.visitId) };
 }
 
 const KITCHEN_ACTIONS = ['start', 'done', 'serve', 'undo'] as const;
@@ -247,6 +265,8 @@ export async function kitchenAction(deps: Deps, id: number, action: KitchenActio
       await tx`UPDATE kitchen_items SET status = 'done', done_at = ${at}, done_by = ${ctx.actor.id} WHERE id = ${id}`;
       // 规则「出餐即算上菜」：不用服务员再点上菜
       if (!rules.trackServed) await tx`UPDATE kitchen_items SET status = 'served', served_at = ${at}, served_by = ${ctx.actor.id} WHERE id = ${id}`;
+      // 扣库存（8.0.20）：出品完成时按用料记「该扣多少」（只插入；每分钟的任务再开耗用单）
+      await recordRecipeUsage(tx, [id]);
     } else if (action === 'serve') {
       if (k.status !== 'done') throw stale();
       await tx`UPDATE kitchen_items SET status = 'served', served_at = ${at}, served_by = ${ctx.actor.id} WHERE id = ${id}`;
@@ -257,6 +277,8 @@ export async function kitchenAction(deps: Deps, id: number, action: KitchenActio
       } else if (k.status === 'done') {
         await tx`
           UPDATE kitchen_items SET status = ${k.startedAt ? 'cooking' : 'queued'}, done_at = NULL, done_by = NULL WHERE id = ${id}`;
+        // 扣库存（8.0.20）：撤回出品完成，记一条冲回
+        await reverseRecipeUsage(tx, id);
       } else if (k.status === 'cooking') {
         await tx`UPDATE kitchen_items SET status = 'queued', started_at = NULL, started_by = NULL WHERE id = ${id}`;
       } else {
@@ -429,16 +451,26 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
   );
 
   app.get('/api/dining/guest', { preHandler: guard('dining.order') }, async (req) => {
-    const { tag } = parse(z.object({ tag: z.string().trim().min(1, '请输入手牌号').max(16) }), req.query ?? {});
+    const { tag } = parse(z.object({ tag: z.string().trim().min(1, '请输入手牌号或房号').max(16) }), req.query ?? {});
     return diningGuest(sql, tag);
   });
 
   // 下单就是挂账：与钟房派钟一样还要「前台挂账」权限（断网后的「结果待确认」按前台的操作编号查回、作废）
   app.post('/api/dining/orders', { preHandler: guard('dining.order', 'frontdesk.operate') }, async (req) => {
-    const body = parse(z.object({ visitId: z.number('请先选客人').int().positive('请先选客人') }).passthrough(), req.body);
+    const body = parse(z.object({ visitId: z.number('请先选客人').int().positive('请先选客人'), toRoom: z.boolean().optional() }).passthrough(), req.body);
     const { postCharges } = await import('./frontdesk/bills');
+    // 客房点餐（8.0.20）：送到客房的，出品单上写房号。住哪间在挂账的事务里、核对完操作编号之后才查（见 PostOptions.toRoom）
+    const visitId = body.visitId;
+    const toRoom = body.toRoom
+      ? async (tx: Tx) => {
+          const roomNo = await openRoomOf(tx, visitId);
+          if (!roomNo) throw unprocessable('ROOM_NOT_STAYING', '这位客人现在没有在住的客房，不能送到客房');
+          return `客房 ${roomNo}`;
+        }
+      : undefined;
+    const { toRoom: _toRoom, ...rest } = req.body as Record<string, unknown>;
     // 点单页只能点进厨房的菜（其他项目、手动金额请到前台登记）
-    await postCharges(deps, body.visitId, { ...(req.body as object), customLines: [] } as never, ctxOf(req), { dining: { onlyKitchen: true } });
+    await postCharges(deps, visitId, { ...rest, customLines: [] } as never, ctxOf(req), { dining: { onlyKitchen: true }, ...(toRoom ? { toRoom } : {}) });
     return diningGuestOf(sql, body.visitId);
   });
 

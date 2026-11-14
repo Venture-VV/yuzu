@@ -28,7 +28,9 @@ afterAll(async () => ctx.close());
 describe('可调的数值（8.0.7 A1）', () => {
   it('默认与原来写死的一样，会话里带着；只改提交的项，不合格的拒绝，改动进规则总表', async () => {
     const s = (await api(ctx.app, ctx.owner, 'GET', '/api/settings')).body;
-    expect(s).toMatchObject(DEFAULT_TUNABLES);
+    // 企业微信周推 8.0.20 起默认开；用例的基线把它关着（tests/helpers.ts 的 legacySwitchesOff），默认值在 switches-default 里核对
+    expect(s).toMatchObject({ ...DEFAULT_TUNABLES, wecomWeeklyPush: false });
+    expect(DEFAULT_TUNABLES.wecomWeeklyPush).toBe(true);
     expect(s).toMatchObject({ approvalBatchMaxCents: 500_000, approvalBatchMax: 50, approvalOverdueHours: 24, delegationMaxDays: 31, urgentEscalateDays: 3, contractRemindDays: 60, pdfMaxMb: 10, receiptAttachmentsMax: 9, mpFoodMaxQuantity: 20, mpFoodMaxTotalCents: 50_000, platformBackfillDays: 31, printMode: 'local', printWaitMinutes: 30, campaignMaxMembers: 2000, campaignNoticeDays: 30, smsMaxAttempts: 3, financeHidesMarketingCost: true });
     // 会话（各页面读它）
     expect((await api(ctx.app, duty, 'GET', '/api/auth/me')).body.rules).toMatchObject({ approvalOverdueHours: 24, printMode: 'local' });

@@ -73,6 +73,27 @@ async function topUp(baseURL: string, materialCode: string, supplierCode: string
   }
 }
 
+/**
+ * 「只用 ERP 的人没有返回门店」要门店那边没有他能用的页面：餐饮、客房开着时后勤能看出品屏、改房态，就有门店入口。
+ * 8.0.20 起这两个开关默认开，这条用例自己把它们关上、核对完再还原，不靠别的用例先跑过（店主的接口会话，不影响页面上登录的账号）。
+ */
+async function storePagesOff(baseURL: string): Promise<() => Promise<void>> {
+  const api = await request.newContext({ baseURL });
+  expect((await api.post('/api/auth/login', { data: { username: 'linlan', password: PASSWORD } })).ok()).toBe(true);
+  const dining = ((await (await api.get('/api/admin/dining')).json()) as { rules: { enabled: boolean } }).rules;
+  const rooms = ((await (await api.get('/api/admin/rooms')).json()) as { rules: Record<string, unknown> & { enabled: boolean } }).rules;
+  if (dining.enabled) expect((await api.put('/api/admin/dining/rules', { data: { enabled: false } })).ok()).toBe(true);
+  if (rooms.enabled) expect((await api.put('/api/admin/rooms/rules', { data: { ...rooms, enabled: false } })).ok()).toBe(true);
+  return async () => {
+    try {
+      if (dining.enabled) await api.put('/api/admin/dining/rules', { data: { enabled: true } });
+      if (rooms.enabled) await api.put('/api/admin/rooms/rules', { data: { ...rooms, enabled: true } });
+    } finally {
+      await api.dispose();
+    }
+  };
+}
+
 async function logout(page: Page) {
   await page.request.post('/api/auth/logout');
 }
@@ -81,13 +102,18 @@ test.describe('库存与采购流程', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '流程只在门店电脑尺寸执行一次');
 
   test('物资经办：登录直接进入 ERP 的库存，没有门店入口与货款；按箱领料、领料退回', async ({ page, baseURL }) => {
-    await login(page, 'lixiao', '库存');
-    await expect(page.getByTestId('erp-shell')).toBeVisible();
-    await expect(nav(page, '库存')).toBeVisible();
-    // 门店主导航（会员、日结……）不出现，也没有「返回门店」；没有货款权限就没有「应付货款」
-    await expect(page.getByRole('navigation', { name: '主导航' })).toHaveCount(0);
-    await expect(page.getByTestId('erp-exit')).toHaveCount(0);
-    await expect(nav(page, '应付货款')).toHaveCount(0);
+    const restore = await storePagesOff(baseURL!);
+    try {
+      await login(page, 'lixiao', '库存');
+      await expect(page.getByTestId('erp-shell')).toBeVisible();
+      await expect(nav(page, '库存')).toBeVisible();
+      // 门店主导航（会员、日结……）不出现，也没有「返回门店」；没有货款权限就没有「应付货款」
+      await expect(page.getByRole('navigation', { name: '主导航' })).toHaveCount(0);
+      await expect(page.getByTestId('erp-exit')).toHaveCount(0);
+      await expect(nav(page, '应付货款')).toHaveCount(0);
+    } finally {
+      await restore();
+    }
 
     // 反复执行会消耗演示库存：不够一箱时先按正式流程（采购单 → 按单收货）补两箱
     if ((await stockOf(page, 'M018')) < 24) await topUp(baseURL!, 'M018', 'S005', 2);

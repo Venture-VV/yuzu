@@ -55,6 +55,8 @@ export function OrderTab() {
   const [tagText, setTagText] = useState('');
   const [tag, setTag] = useState<string | null>(null);
   const [tableSession, setTableSession] = useState<number | null>(null);
+  /** 客房点餐（8.0.20）：住店的客人可以选「送到客房」；没动过这个勾时，按房号找到的默认送、按手牌找到的默认不送 */
+  const [toRoomChoice, setToRoomChoice] = useState<boolean | null>(null);
   const guest = useQuery({
     queryKey: guestKey(tag),
     queryFn: () => api.get<DiningGuest>(`/api/dining/guest?tag=${encodeURIComponent(tag!)}`),
@@ -65,6 +67,7 @@ export function OrderTab() {
   const board = useTablesBoard(mode === 'table');
   const table = useTableSession(mode === 'table' ? tableSession : null);
   const g = mode === 'tag' && tag ? (guest.data ?? null) : null;
+  const toRoom = !!g?.roomNo && (toRoomChoice ?? g.via === 'room');
   const t: TableSessionDetail | null = mode === 'table' && tableSession !== null ? (table.data ?? null) : null;
   const target: { label: string; who: string; pending: PendingDish[]; open: boolean } | null = g
     ? { label: g.tagCode, who: g.guest, pending: g.pending, open: true }
@@ -155,10 +158,11 @@ export function OrderTab() {
     const code = tagText.trim();
     if (!code) return;
     const go = () => {
+      setToRoomChoice(null);
       setTag(code);
       op.clearError();
     };
-    // 已经找到一位客人、又输了另一个手牌号：也是换人
+    // 已经找到一位客人、又输了另一个手牌号（或房号）：也是换人。按房号找到的客人，再按同一个房号找不算
     if (g && code.toUpperCase() !== g.tagCode.toUpperCase() && code !== tag) askSwitch(go);
     else go();
   };
@@ -217,8 +221,8 @@ export function OrderTab() {
           }
         : {
             url: '/api/dining/orders',
-            body: { clientKey: key, visitId: g!.visitId, lines: orderLines, expectedTotal: total },
-            tagCodes: [g!.tagCode],
+            body: { clientKey: key, visitId: g!.visitId, lines: orderLines, expectedTotal: total, ...(toRoom ? { toRoom: true } : {}) },
+            tagCodes: [toRoom ? `${g!.tagCode} · 客房 ${g!.roomNo}` : g!.tagCode],
             summary,
             amount: total,
           },
@@ -290,7 +294,7 @@ export function OrderTab() {
                 find();
               }}
             >
-              <Field label="手牌号" htmlFor="dining-tag">
+              <Field label="手牌号或房号" htmlFor="dining-tag">
                 <Input
                   id="dining-tag"
                   value={tagText}
@@ -307,7 +311,7 @@ export function OrderTab() {
               </Button>
               <div className="min-w-0 flex-1 self-center">
                 {!tag ? (
-                  <p className="text-[13px] text-ink-3">输入客人手牌上的号码</p>
+                  <p className="text-[13px] text-ink-3">输入客人手牌上的号码；住店的客人也可以输房号</p>
                 ) : guest.isPending ? (
                   <Spinner />
                 ) : guest.error ? (
@@ -320,6 +324,12 @@ export function OrderTab() {
                       <Badge tone={g.zone === 'female' ? 'clay' : 'lake'}>{ZONE_LABELS[g.zone].title}</Badge>
                       <span className="num text-[18px] font-bold">{g.tagCode}</span>
                       <span className="text-[15px] font-semibold">{g.guest}</span>
+                      {g.roomNo && (
+                        <label className="ml-1 inline-flex items-center gap-1.5 rounded-md bg-paper-2 px-2 py-1 text-[13px] font-semibold" data-testid="dining-to-room">
+                          <input type="checkbox" checked={toRoom} onChange={(e) => setToRoomChoice(e.target.checked)} />
+                          送到客房 {g.roomNo}
+                        </label>
+                      )}
                       <button
                         type="button"
                         className="ml-1 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[12.5px] font-semibold text-ink-3 hover:bg-paper-2 hover:text-ink"
@@ -327,6 +337,7 @@ export function OrderTab() {
                           askSwitch(() => {
                             setTag(null);
                             setTagText('');
+                            setToRoomChoice(null);
                           })
                         }
                         data-testid="dining-switch-guest"
@@ -462,6 +473,12 @@ export function OrderTab() {
                 <span className="text-[14.5px] font-bold">{target.who}</span>
                 <span className="num ml-auto text-[13.5px] font-bold text-ink-2">{cart.reduce((s, l) => s + l.quantity, 0)} 份</span>
               </p>
+              {/* 客房点餐（8.0.20）：勾了「送到客房」时在这里也写明送到哪一间 */}
+              {toRoom && g?.roomNo && (
+                <p className="text-[12.5px] font-semibold text-ink-2" data-testid="dining-target-room">
+                  送到客房 <span className="num">{g.roomNo}</span>
+                </p>
+              )}
             </div>
           )}
           {carriedFrom && cart.length > 0 && (

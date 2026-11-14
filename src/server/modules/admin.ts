@@ -63,6 +63,9 @@ import { DEFAULT_SETTINGS, loadSettings, SETTINGS_KEYS } from './settings';
 import { loadTechnicianRules } from './technicians';
 import { loadClockroomRules } from './clockroom';
 import { loadPurchaseRules } from './inventory/purchase-rules';
+import { DEFAULT_AUTO_REPLENISH, loadAutoReplenish } from './inventory/auto-replenish';
+import { loadStockUsageRules } from './stock-usage';
+import { DEFAULT_STOCK_USAGE_RULES } from '@shared/stock-usage';
 import { commissionSettings } from './commission';
 import { loadDiningRules } from './dining';
 import { loadEmenuRules } from './emenu/core';
@@ -106,6 +109,8 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const fdd: FrontdeskRules = DEFAULT_FRONTDESK_RULES;
   const inv = await loadInventorySettings(db);
   const pr = await loadPurchaseRules(db);
+  const ar = await loadAutoReplenish(db);
+  const sur = await loadStockUsageRules(db);
   const tech = await loadTechnicianRules(db);
   const techd = DEFAULT_TECHNICIAN_RULES;
   const overrides = await loadRoleOverrides(db);
@@ -394,6 +399,19 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     key: 'purchase_rules.replenish', group: 'inventory', label: '补货建议', value: replText(pr), defaultValue: replText(prd), pending: true, section: 'rules', href: '/erp/settings/purchase',
     hint: '只看总仓；在途（没到的采购单）算进去；按采购单位向上取整。物料档案里的补货方式是「按需采购」的不提，「常备」的一直提，「自动识别」的按领用次数与资产卡片认',
     current: [pr.reorderDays, pr.targetDays, pr.regularUseDays], dflt: [prd.reorderDays, prd.targetDays, prd.regularUseDays], metaKey: 'purchase_rules',
+  });
+  // 8.0.20（docs/ERP_V8020.md 第 2、3 节）：两个新开关在「ERP 设置」里改
+  const autoText = (r: typeof ar) => (r.enabled ? `开着：每天 ${r.time} 以后按补货建议给每家供应商建一张采购单草稿（不提交）` : '关着');
+  add({
+    key: 'auto_replenish', group: 'inventory', label: '自动补货', value: autoText(ar), defaultValue: autoText(DEFAULT_AUTO_REPLENISH), pending: true, section: 'rules', href: '/erp/settings/purchase',
+    hint: '只给补货建议里真正建议、有供应商的行建草稿；草稿算在途、不重复建，删掉的第二天会再建——不想再提的物料在建议行点「不用备货」',
+    current: [ar.enabled, ar.time], dflt: [DEFAULT_AUTO_REPLENISH.enabled, DEFAULT_AUTO_REPLENISH.time], metaKey: 'auto_replenish',
+  });
+  const stockUsageText = (r: typeof sur) => (r.enabled ? '开着：进厨房 / 水吧的出品完成时扣，不进的结账时扣；没设用料的项目不扣' : '关着');
+  add({
+    key: 'stock_usage_rules', group: 'inventory', label: '结账、出品时按用料扣库存', value: stockUsageText(sur), defaultValue: stockUsageText(DEFAULT_STOCK_USAGE_RULES), pending: true, section: 'rules', href: '/erp/settings/inventory',
+    hint: '库存不够不拦结账与出品，欠着的列在「库存 → 用料与扣料」的待扣料里，补货后自动扣；从哪个仓扣也在那里设',
+    current: [sur.enabled], dflt: [DEFAULT_STOCK_USAGE_RULES.enabled], metaKey: 'stock_usage_rules',
   });
   // 8.0.18 规则总表补全（docs/IA_V8017.md 第 3.3 节）：8.0.17 加的两项采购规则，付款、报销、员工食堂、安保巡场的规则原来不在总表里
   add({

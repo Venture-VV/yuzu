@@ -109,7 +109,7 @@ describe('技师名册', () => {
     // v0.7.1 起同一组还有钟房与轮钟规则、技师提成
     expect(techRules.some((x) => x.key === 'clockroom_rules.afterRotation')).toBe(true);
     expect(techRules.some((x) => x.key === 'commission_rules')).toBe(true);
-    expect(techRules.find((x) => x.key === 'technician_rules.enabled')).toMatchObject({ isDefault: false, section: 'technicians' });
+    expect(techRules.find((x) => x.key === 'technician_rules.enabled')).toMatchObject({ isDefault: true, section: 'technicians' }); // 开着 = 8.0.20 起的默认值
     const home = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/overview')).body;
     expect(home.counts.technicians).toEqual({ active: 2, enabled: true });
     expect(home.recentChanges.some((c: { summary: string }) => c.summary === '修改了技师规则')).toBe(true);

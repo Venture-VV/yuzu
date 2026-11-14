@@ -131,7 +131,7 @@ export async function poMoney(db: Db, poId: number): Promise<{ receivedCents: nu
 export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
   const [po] = await db<(Omit<PurchaseOrder, 'channel' | 'sourcing' | 'contract' | 'contractNote' | 'contractCheck'> & { supplierId: number; supplierName: string; backfillReceiptId: number | null; channelKey: string | null; channelLabel: string | null; channelNote: string; sourcingId: number | null; sourcingNo: string | null; sourcingStatus: string | null })[]>`
     SELECT po.id, po.doc_no, po.status, po.order_date, po.expected_date, po.note, po.price_basis, po.revision, po.backfill,
-           po.backfill_receipt_id, po.created_by, cb.display_name AS created_by_name, po.created_at,
+           po.backfill_receipt_id, po.created_by, cb.display_name AS created_by_name, cb.system AS created_by_system, po.created_at,
            po.channel AS channel_key, po.channel_label, po.channel_note,
            se.id AS sourcing_id, se.doc_no AS sourcing_no, se.status AS sourcing_status,
            ab.display_name AS approved_by_name, po.approved_at, po.returned_reason,
@@ -850,7 +850,10 @@ export async function cancelPo(deps: Deps, poId: number, raw: unknown, actor: Ac
     if (po.status === 'cancelled') return;
     const block = await withdrawBlock(tx, poId);
     if (block) throw conflict(block.code, block.message);
-    if (!can(actor, 'inventory.approve') && po.createdBy !== actor.id) throw forbidden('只能撤回自己创建的采购单');
+    // 系统建的草稿（自动补货，8.0.20）：等人确认的东西，能编制采购单的人都可以撤掉——别人编的照旧只能本人或负责人撤（合并前 Codex 审查 35d8b16）
+    const [creator] = await tx<{ system: boolean }[]>`SELECT system FROM staff WHERE id = ${po.createdBy}`;
+    const systemDraft = po.status === 'draft' && creator?.system === true;
+    if (!can(actor, 'inventory.approve') && po.createdBy !== actor.id && !systemDraft) throw forbidden('只能撤回自己创建的采购单');
     await tx`UPDATE purchase_orders SET status = 'cancelled', returned_reason = ${reason}, updated_at = now() WHERE id = ${poId}`;
     await closeApproval(tx, 'purchase_order', poId, actor);
     await logApproval(tx, 'purchase_order', poId, 'cancel', actor.id, reason, po.revision);

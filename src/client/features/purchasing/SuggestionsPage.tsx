@@ -4,6 +4,7 @@
 // 补货方式（店主 2026-11-14，迁移 161，第 5.1 节）：手机这类不是消耗品的不该提补货——每行有「不用备货」（定为按需采购）；
 // 页面下方「没提补货的」列出本来会提、识别为不用补的物料与原因（按需采购 / 建过资产卡片 / 只领过一次），一键改成常备、按需采购或改回自动识别。
 
+import { AutoReplenishCard } from './AutoReplenishCard';
 import { PurchasingTabs } from './PurchasingTabs';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -56,6 +57,7 @@ export function SuggestionsPage() {
       <PurchasingTabs active="suggestions" />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1180px] space-y-4 px-5 py-5 md:px-7" data-testid="suggestions-page">
+          <AutoReplenishCard />
           {data.isPending ? (
             <Skeleton className="h-64" />
           ) : data.error ? (
@@ -416,9 +418,12 @@ function GroupCard({ group, canCreate, canMode, mode }: { group: ReplenishGroup;
               <span className="block text-ink-2">
                 结存 {formatQty(l.stockMilli)} {l.inventoryUnit}
                 {l.inTransitMilli > 0 && ` · 在途 ${formatQty(l.inTransitMilli)}（${l.openPos.join('、')}）`}
+                {l.owedMilli > 0 && ` · 欠着没扣 ${formatQty(l.owedMilli)}`}
                 {l.reason === 'cover'
                   ? ` · 日均 ${formatQty(l.dailyUsageMilli ?? 0)} · 够用 ${l.daysOfCover} 天（少于 ${l.triggerDays} 天）→ 补到 ${l.targetDays} 天`
-                  : ` · 近期没有用量，低于提醒数量 ${formatQty(l.lowStockMilli ?? 0)}`}
+                  : l.lowStockMilli === null
+                    ? ' · 卖出、出品的用料还没扣上，把欠的补上'
+                    : ` · 近期没有用量，低于提醒数量 ${formatQty(l.lowStockMilli)}`}
               </span>
               {err && <span className="block font-semibold text-clay">{err}</span>}
               {canMode && (
@@ -508,7 +513,8 @@ function SkippedCard({ data, canMode, mode }: { data: ReplenishSuggestions; canM
                   </span>
                   <span className="block text-ink-2">
                     结存 {formatQty(r.stockMilli)} {r.inventoryUnit}
-                    {r.inTransitMilli > 0 && ` · 在途 ${formatQty(r.inTransitMilli)}`} · {skipReason(r, data)}
+                    {r.inTransitMilli > 0 && ` · 在途 ${formatQty(r.inTransitMilli)}`}
+                    {r.owedMilli > 0 && ` · 欠着没扣 ${formatQty(r.owedMilli)}`} · {skipReason(r, data)}
                   </span>
                 </span>
                 {canMode && (
