@@ -104,6 +104,7 @@ import { registerErpModuleGate, registerErpRoutes } from './modules/erp';
 import { registerMpStaffRoutes } from './modules/mp/staff';
 import { registerCanteenAdminRoutes } from './modules/canteen/admin-routes';
 import { registerConciergeRoutes } from './modules/concierge/routes';
+import { registerCustomerRoutes } from './modules/customer/routes';
 import { registerPatrolAdminRoutes } from './modules/patrol/routes';
 
 function originHost(origin: string): string | null {
@@ -202,6 +203,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   // ERP 关闭的模块：按接口前缀统一拦截（先于各接口注册，所有接口都经过它）
   registerErpModuleGate(app, deps);
   registerConciergeRoutes(app, deps);
+  registerCustomerRoutes(app, deps);
   registerAuthRoutes(app, deps);
   registerGrantRoutes(app, deps);
   registerMemberRoutes(app, deps);

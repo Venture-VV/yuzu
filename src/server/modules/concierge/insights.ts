@@ -3,11 +3,13 @@ import { z } from "zod";
 import { businessDateOf } from "@shared/business-date";
 import {
   expiryWindowEnd,
+  expiryStep,
   gradeLabel,
   MAX_GRADE,
   type Grade,
   type GradeState,
   type Tier,
+  type MembershipRules,
 } from "@shared/membership";
 import {
   INSIGHT_FILTER_BUCKETS,
@@ -188,8 +190,29 @@ async function statesOf(
   db: Db,
   rows: NativeRow[],
   day: string,
+  rules: MembershipRules,
 ): Promise<Map<number, GradeState>> {
   const states = new Map<number, GradeState>();
+  const overdue = rows.filter((row) => {
+    const end = expiryWindowEnd(row);
+    return row.grade > 0 && row.cycleStart && end && end < day;
+  });
+  // Preserve the native due projection's completed family consumption and
+  // closed business-date intervals, but fetch all selected accounts together.
+  type MemberSpend = { root: number; day: string; amount: number };
+  const spendRows: MemberSpend[] = overdue.length ? await db<MemberSpend[]>`WITH RECURSIVE family AS (
+    SELECT id AS root,id FROM members WHERE id=ANY(${overdue.map((r) => Number(r.id))}::bigint[])
+    UNION SELECT f.root,m.id FROM members m JOIN family f ON m.merged_into_id=f.id
+  ) SELECT f.root,c.business_date::text AS day,sum(c.total_amount)::bigint AS amount
+    FROM family f JOIN consumptions c ON c.member_id=f.id
+    WHERE c.status='completed' AND c.business_date>=${overdue.map((r) => r.cycleStart!).sort()[0]!}
+    GROUP BY f.root,c.business_date` : [];
+  const spendByMember = new Map<number, MemberSpend[]>();
+  for (const row of spendRows) {
+    const id = Number(row.root), spends = spendByMember.get(id) ?? [];
+    spends.push(row);
+    spendByMember.set(id, spends);
+  }
   for (const row of rows) {
     let state: GradeState = {
       grade: row.grade,
@@ -198,10 +221,17 @@ async function statesOf(
       cycleEnd: row.cycleEnd,
       graceUntil: row.graceUntil,
     };
-    const end = expiryWindowEnd(state);
-    // Current persisted states need no per-member projection queries. Overdue states use the native rule engine.
-    if (state.grade > 0 && state.cycleStart && end && end < day)
-      state = (await projectedGrade(db, Number(row.id), day)) ?? state;
+    const spends = spendByMember.get(Number(row.id)) ?? [];
+    // Same read-only expiry steps and bound as membership.projectDue.
+    for (let i = 0; i < 40; i++) {
+      const end = expiryWindowEnd(state);
+      if (state.grade === 0 || !state.cycleStart || !end || end >= day) break;
+      const from = state.cycleStart;
+      const spend = spends.reduce((sum, r) => sum + (r.day >= from && r.day <= end ? Number(r.amount) : 0), 0);
+      const step = expiryStep(rules, state, spend, day);
+      if (!step) break;
+      state = step.next;
+    }
     states.set(Number(row.id), state);
   }
   return states;
@@ -368,7 +398,7 @@ export async function loadMemberInsights(
 
   // 只取这一页的详情（余额、可用赠金、服务档案、上次到访……）；nativeRows 的顺序与翻页的顺序相同
   const rows = await nativeRows(db, timezone, at, t.pageIds.map(Number));
-  const states = await statesOf(db, rows, day);
+  const states = await statesOf(db, rows, day, rules);
   const members = rows.map((row) =>
     memberOf(row, states.get(Number(row.id))!, rules, calendar),
   );
@@ -431,6 +461,7 @@ export async function loadInsightMembersByIds(
     db,
     rows,
     businessDateOf(at, timezone, settings.businessDayStartHour),
+    rules,
   );
   const byCanonical = new Map(
     rows.map((row) => [
