@@ -58,6 +58,9 @@ export function QtyInput({
       onChange={(e) => {
         const raw = e.target.value.trim();
         if (/[^0-9]/.test(raw)) {
+          // 之前清空过留下的空草稿一并作废：不然离开输入框时不算数的那一串清掉了，框里却还是空的
+          //（先清空、再输字母、再移开，测试会话 2026-11-14 在 524a371 上报的）
+          setDraft(null);
           setBad(raw.slice(0, 8));
           if (value !== start.current) onChange(start.current);
           onHint?.(`数量只能填 ${range} 的整数，「${raw.slice(0, 8)}」没有采用，仍按 ${start.current} 算`);
@@ -80,7 +83,11 @@ export function QtyInput({
       }}
       onBlur={() => {
         // 不算数的那一串：离开就恢复成数量（提示留着，说明刚才那一串没有采用）
-        if (bad !== null) return setBad(null);
+        if (bad !== null) {
+          setBad(null);
+          setDraft(null);
+          return;
+        }
         if (draft === null) return;
         setDraft(null);
         onHint?.(`数量请填 ${range} 的整数，已保留原来的 ${value}`);

@@ -84,6 +84,16 @@ test.describe('店主 2026-11-14 的需求：登记消费与预约', () => {
       await expect(qty).toHaveValue('4');
       await expect(qty).toHaveAttribute('aria-invalid', 'false');
     }
+    // 先清空、再敲字母、再移开：框里回到原来的 4，不是空的（测试会话在 524a371 上报的）
+    await qty.click();
+    await page.keyboard.press('Backspace');
+    await expect(qty).toHaveValue('');
+    await page.keyboard.type('a');
+    await expect(qty).toHaveValue('a');
+    await expect(page.getByTestId('consume-qty-hint')).toContainText('「a」没有采用，仍按 4 算');
+    await qty.blur();
+    await expect(qty).toHaveValue('4');
+    await expect(footer).toContainText('88.00');
     // 一个键一个键敲「1.5」：敲到小数点起整串不采用，数量回到 4（不会停在 1，更不会变成 15）；删回整数就采用
     await qty.click();
     await qty.pressSequentially('1.5');
