@@ -106,6 +106,28 @@ describe('客户部本地工作台写入：不写钱包、独立责任、版本�
   expect((await post(ctx.owner,`/bindings/requests/${request.body.id}/review`,{expectedVersion:1,decision:'reject',reason:'冻结员工不承接'})).status).toBe(200);
   const [row]=await ctx.sql`SELECT version,maintainer_staff_id FROM customer_bindings WHERE member_id=${secondId}`;expect(row).toMatchObject({version:0,maintainerStaffId:null});
  });
+ it('店总给自己申请的绑定由店主审核通过；审核人不能借别人的申请把另一位管理者绑上去',async()=>{
+  // Codex 2026-11-14（a41dfa7）：原来审核时拿审核人去套「管理者只能选自己」，店总给自己的申请只有店总自己审才通得过
+  const sm=await createStaff(ctx.sql,{username:'customer-sm',displayName:'合成店总',role:'store_manager',password:PASSWORD,mustChangePassword:false});
+  const csm=await login(ctx.app,'customer-sm');
+  const third=(await createMember(ctx,'合成客户部会员戊','19900003151')).id;
+  const own=await post(csm,'/bindings/requests',{memberId:third,toStaffId:sm,expectedVersion:0,reason:'店总自己维护这位'});
+  expect(own.status,JSON.stringify(own.body)).toBe(200);
+  const approved=await post(ctx.owner,`/bindings/requests/${own.body.id}/review`,{expectedVersion:1,decision:'approve',reason:'店主核实通过'});
+  expect(approved.status,JSON.stringify(approved.body)).toBe(200);
+  const [bound]=await ctx.sql`SELECT version,maintainer_staff_id FROM customer_bindings WHERE member_id=${third}`;
+  expect(bound).toMatchObject({version:1,maintainerStaffId:sm});
+  // 申请时的限制没有放松：店主不能把会员申请给店总（管理者只能选自己）
+  const other=await post(ctx.owner,'/bindings/requests',{memberId:secondId,toStaffId:sm,expectedVersion:0,reason:'替店总申请'});
+  expect(other.status,JSON.stringify(other.body)).toBe(400);
+  // 承接人离岗以后审核仍然通不过
+  const fourth=(await createMember(ctx,'合成客户部会员己','19900003152')).id;
+  const pending=await post(csm,'/bindings/requests',{memberId:fourth,toStaffId:sm,expectedVersion:0,reason:'再申请一位'});
+  expect(pending.status,JSON.stringify(pending.body)).toBe(200);
+  await ctx.sql`UPDATE staff SET active=false WHERE id=${sm}`;
+  expect((await post(ctx.owner,`/bindings/requests/${pending.body.id}/review`,{expectedVersion:1,decision:'approve',reason:'承接人已离岗'})).status).toBe(400);
+  expect((await post(ctx.owner,`/bindings/requests/${pending.body.id}/review`,{expectedVersion:1,decision:'reject',reason:'承接人已离岗'})).status).toBe(200);
+ });
  it('月目标仅manage版本化配置，部门与个人独立，无默认640万，不覆盖历史月份',async()=>{
   const p={month:'2026-11',staffId:null,amountCents:1234567,expectedVersion:0,reason:'本地试算目标'};
   expect((await post(ca,'/targets',p)).status).toBe(403);

@@ -29,9 +29,18 @@ const targetInput = base.extend({month:z.string().regex(/^(19\d\d|[2-9]\d{3})-(0
 const param = z.object({id:z.coerce.number().int().positive().safe()});
 
 async function member(db: Db, memberId: number) { const [m]=await db`SELECT id FROM members WHERE id=${memberId}`;if(!m)throw notFound('会员不存在'); }
-async function eligible(tx: Tx, selected: number, actor: Actor) {
+/**
+ * 所选的人此刻能不能承接：在岗、不是系统账号，是客户经理；店主、店总只有本人自己选了自己才算（selectorId 是选他的人）。
+ * 审核绑定申请时 selectorId 是当初的申请人，不是审核的人——不然店总给自己申请的绑定，店主审核时会被当成「选了别的管理者」而通不过，
+ * 只能由申请人自己审自己的（Codex 2026-11-14 在 a41dfa7 上的审查）。
+ */
+async function eligibleTarget(tx: Tx, selected: number, selectorId: number) {
   const [s]=await tx`SELECT id,active,system,role FROM staff WHERE id=${selected} FOR SHARE`;
-  if(!s||!s.active||s.system||!(s.role==='account_manager'||(selected===actor.id&&['owner','store_manager'].includes(s.role))))throw badRequest('请选择在岗客户经理；管理者仅可明确选择自己');
+  if(!s||!s.active||s.system||!(s.role==='account_manager'||(selected===selectorId&&['owner','store_manager'].includes(s.role))))throw badRequest('请选择在岗客户经理；管理者仅可明确选择自己');
+}
+/** 经办人这一次能不能选这个人：所选的人能承接，并且没有管理权限的只能选自己。 */
+async function eligible(tx: Tx, selected: number, actor: Actor) {
+  await eligibleTarget(tx,selected,actor.id);
   if(!can(actor,'customer.manage')&&selected!==actor.id)throw forbidden('只能记录本人的服务或成交，不能代替另一位经理');
 }
 export async function customerMaintainerAt(db: Db, memberId: number | null, occurredAt: string): Promise<number|null> {
@@ -112,7 +121,8 @@ export function registerCustomerWriteRoutes(app:FastifyInstance,deps:Deps){
       if(p.decision==='approve'){
         await requireUnmerged(tx,Number(row!.memberId));
         if(current.version!==row!.expectedVersion||current.maintainerStaffId!==row!.fromStaffId)throw conflict('CUSTOMER_VERSION','原维护关系已变化，不能套用旧申请');
-        await eligible(tx,Number(row!.toStaffId),actor);
+        // 审核时再核对一次承接人还在岗、岗位还对；「管理者只能选自己」按申请人算（申请时已经核对过申请人的权限）
+        await eligibleTarget(tx,Number(row!.toStaffId),Number(row!.requestedBy));
         // Native recharges use the application clock; a different PG clock can reorder historical ownership.
         const [event]=await tx`INSERT INTO customer_binding_events(member_id,from_staff_id,to_staff_id,request_id,version,approved_by,effective_at) VALUES(${row!.memberId},${row!.fromStaffId},${row!.toStaffId},${ref},${current.version+1},${actor.id},${new Date().toISOString()}::timestamptz) RETURNING effective_at`;
         await tx`UPDATE customer_bindings SET maintainer_staff_id=${row!.toStaffId},version=version+1,updated_at=${event!.effectiveAt}::timestamptz WHERE member_id=${row!.memberId}`;
