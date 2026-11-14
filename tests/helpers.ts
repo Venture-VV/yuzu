@@ -86,10 +86,21 @@ export async function api<T = any>(
   return { status: res.statusCode, body: body as T };
 }
 
+/**
+ * 没给手机号时自动取一个：166 号段、按顺序往下排，不会与用例里写死的号码（都是 199、13x 等）相撞，同一个文件里几次调用之间也不会撞。
+ * 原来是「1990000 + 随机四位」（19900001000–19900009999），正好盖住用例里写死的 1990000xxxx。
+ * 2026-11-14 main（68391d6）第一次 CI 里 concierge-rectify 的一条用例第一行建会员报 PHONE_EXISTS、整轮集成测试失败：
+ * 那次日志里接口报错写的占用者是「整改企业会员二」（同一文件上一条用例用 19900003002 建的），同一时刻数据库的唯一约束报错
+ * 写的是 Key (phone)=(19900003002)——自动取的号撞上了写死的号。同一提交重跑通过，但第一次失败的记录仍在。
+ * 这里改的是测试夹具（自动取的号不再落在写死的号段里），不涉及业务代码。
+ */
+let autoPhoneSeq = 0;
+const nextAutoPhone = () => `1660${String(1_000_000 + autoPhoneSeq++)}`;
+
 export async function createMember(ctx: TestContext, name = '测试会员', phone?: string) {
   const res = await api(ctx.app, ctx.clerk, 'POST', '/api/members', {
     name,
-    phone: phone ?? `1990000${String(Math.floor(Math.random() * 9000) + 1000)}`,
+    phone: phone ?? nextAutoPhone(),
   });
   if (res.status !== 201) throw new Error(JSON.stringify(res.body));
   return res.body as { id: number; principalBalance: number; bonusBalance: number };

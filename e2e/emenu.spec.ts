@@ -433,6 +433,20 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       await confirm.getByTestId('emenu-confirm-go').click();
       await expect(pad.getByTestId('emenu-success')).toBeVisible();
       await expect(pad.getByTestId('emenu-success')).toBeHidden({ timeout: 10_000 });
+      // 店主 2026-11-14 的需求 7：下单成功提示完自动回起始页，手牌、桌号、没下单的菜都清掉——下一位不用服务员先退出
+      await expect(pad.getByTestId('emenu-start')).toBeVisible();
+      await expect(pad.getByTestId('emenu-header')).toHaveCount(0);
+      expect(await pad.evaluate(() => localStorage.getItem('yuzu.emenu.state.v1'))).toBeNull();
+      // 同一位客人要接着点、看已下单：重新开始点单（手牌要重输，桌号记着上一次的）
+      await pad.getByTestId('emenu-start').click();
+      await expect(pad.getByTestId('emenu-field-tag')).toHaveAttribute('data-value', '');
+      await pad.keyboard.type(tag);
+      await pad.getByTestId('emenu-field-guests').click();
+      await pad.getByTestId('emenu-key-3').click();
+      await pad.getByTestId('emenu-ask-go').click();
+      await expect(pad.getByTestId('emenu-header').or(pickTable)).toBeVisible();
+      if (await pickTable.isVisible()) await pickTable.click();
+      await expect(pad.getByTestId('emenu-tag')).toContainText(tag);
       // 已下单：这张手牌点过的菜与合计；未下单清空了
       await pad.getByTestId('emenu-order-open').click();
       await pad.getByTestId('emenu-tab-ordered').click();
@@ -637,14 +651,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await loginStaff(page, 'linlan');
     await clearEmenuStorage(page);
     await page.goto('/emenu');
-    await page.getByTestId('emenu-start').click();
-    for (const d of '8060') await page.getByTestId(`emenu-key-${d}`).click();
-    await page.getByTestId('emenu-field-table').click();
-    await page.getByTestId('emenu-key-clear').click();
-    for (const d of '01') await page.getByTestId(`emenu-key-${d}`).click();
-    await page.getByTestId('emenu-field-guests').click();
-    await page.getByTestId('emenu-key-2').click();
-    await page.getByTestId('emenu-ask-go').click();
+    await enterMenu(page);
     await page.getByTestId('emenu-cat-2').click();
     const toConfirm = async () => {
       await page.getByTestId('emenu-add-3').click();
@@ -667,8 +674,15 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     expect(seen.posts).toHaveLength(1);
     expect(seen.lookups).toBe(0);
     expect(await page.evaluate(() => localStorage.getItem('yuzu.emenu.pending.v1'))).toBeNull();
+    // 需求 7：这一单下成了，回到起始页；手牌、桌号、菜都清掉，这一次点餐不再留在平板上
+    await expect(page.getByTestId('emenu-start')).toBeVisible();
+    await expect(page.getByTestId('emenu-header')).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('yuzu.emenu.state.v1'))).toBeNull();
 
     // ② 没有答复：弹出「结果待确认」，记录留在平板上；刷新以后还在、进菜单自动查回一次（只读）
+    //    下单没成不回起始页：留在原页，手牌与菜都在
+    await enterMenu(page);
+    await page.getByTestId('emenu-cat-2').click();
     mode = 'drop';
     await toConfirm();
     await go.click();
@@ -1078,8 +1092,13 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     expect(seen.posts).toHaveLength(1);
     expect(seen.posts[0]).toMatchObject({ tagCode: 'A8060', tableName: 'A01', guests: 2, pin: '' });
     await expect(page.getByTestId('emenu-success')).toBeHidden({ timeout: 10_000 });
+    // 需求 7：下单成功后回起始页（不要密码时也一样）
+    await expect(page.getByTestId('emenu-start')).toBeVisible();
+    await expect(page.getByTestId('emenu-header')).toHaveCount(0);
 
     // 没有答复：「结果待确认」里没有密码、没有数字键盘，三个按钮直接能点；作废的请求里也没有密码
+    await enterMenu(page);
+    await page.getByTestId('emenu-cat-2').click();
     mode = 'drop';
     await page.getByTestId('emenu-add-3').click();
     await page.getByTestId('emenu-order-open').click();
@@ -1094,7 +1113,11 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await expect(pendingModal).toBeHidden();
     expect(seen.abandons).toEqual([{ pin: '' }]);
     expect(await page.evaluate(() => localStorage.getItem('yuzu.emenu.pending.v1'))).toBeNull();
-    await expect(page.getByTestId('emenu-cart-9003')).toBeVisible();
+    // 需求 7：作废也算这一笔结束——回起始页、手牌与没下单的菜清掉，并说明那一单没有下成
+    await expect(page.getByTestId('emenu-start')).toBeVisible();
+    await expect(page.getByTestId('emenu-toast')).toContainText('已作废');
+    await expect(page.getByTestId('emenu-header')).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('yuzu.emenu.state.v1'))).toBeNull();
     await noScroll(page);
     await clearEmenuStorage(page);
   });
@@ -1113,5 +1136,41 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await expect(size.getByRole('radio', { name: '设计稿原样' })).toBeVisible();
     // 不要密码时的提醒写在这一行
     await expect(settings).toContainText('平板请交给服务员或放在看得到的地方');
+  });
+
+  test('待机后唤醒直接是起始页：平板睡着时定时器是停的，屏幕一亮就核对，不先闪上一位客人的菜单；加菜、改数量不会回起始页（合成菜单，只读）', async ({ page }, info) => {
+    // 店主 2026-11-14 的需求 7 第 5、6 点
+    test.skip(info.project.name !== '门店电脑', '与屏幕尺寸无关，只跑一次');
+    const writes = await mockEmenu(page, () => syntheticMenu({ idleMinutes: 10, requirePin: false }));
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await loginStaff(page, 'linlan');
+    await clearEmenuStorage(page);
+    // 装上可控的时钟：之后页面里的时间只在这里拨（定时器不会自己走）——就是平板待机时的样子
+    await page.clock.install();
+    await page.goto('/emenu');
+    await enterMenu(page);
+    await page.getByTestId('emenu-cat-2').click();
+    // 加菜、改数量、看订单：还在菜单里，手牌还在
+    await page.getByTestId('emenu-add-3').click();
+    await page.getByTestId('emenu-order-open').click();
+    await page.getByTestId('emenu-plus-9003').click();
+    await expect(page.getByTestId('emenu-cart-9003')).toBeVisible();
+    await expect(page.getByTestId('emenu-header')).toBeVisible();
+    await expect(page.getByTestId('emenu-start')).toHaveCount(0);
+    // 过了 9 分钟亮屏：还没到设置的 10 分钟，这一次点餐还在
+    const t0 = await page.evaluate(() => Date.now());
+    await page.clock.setSystemTime(t0 + 9 * 60_000);
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(page.getByTestId('emenu-header')).toBeVisible();
+    // 过了 11 分钟亮屏：马上是起始页，手牌、没下单的菜都清掉了
+    await page.clock.setSystemTime(t0 + 11 * 60_000);
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(page.getByTestId('emenu-start')).toBeVisible({ timeout: 2_000 });
+    await expect(page.getByTestId('emenu-header')).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('yuzu.emenu.state.v1'))).toBeNull();
+    await page.getByTestId('emenu-start').click();
+    await expect(page.getByTestId('emenu-field-tag')).toHaveAttribute('data-value', '');
+    expect(writes).toEqual([]);
+    await clearEmenuStorage(page);
   });
 });

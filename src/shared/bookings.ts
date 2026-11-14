@@ -128,7 +128,8 @@ export interface BookingBoard {
   /** 能约的技师（在职），预约技师时挑 */
   technicians: { id: number; techNo: string; name: string; gender: 'male' | 'female' }[];
   /** 需要技师的项目 */
-  items: { id: number; name: string; minutes: number }[];
+  /** category：新建预约里按分类分组、搜索（店主 2026-11-14 的需求 6） */
+  items: { id: number; name: string; minutes: number; category: string }[];
   /** 开单即占用的房间 */
   spaces: { id: number; code: string; name: string; businessType: string; capacity: number | null }[];
   roomTypes: { id: number; name: string; rooms: number }[];
