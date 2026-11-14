@@ -36,6 +36,56 @@ test("客户部总览数字与小时键盘下钻沿用真实查询条件", async
   await expect(page.getByRole("link", { name: "充值原单与归属", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("button", { name: new RegExp(`${String(hour).padStart(2, "0")}:00时段`) })).toBeVisible();
 });
+test("入场小时下钻按入场营业日查询并可刷新和恢复普通跨日跟进", async ({ page }) => {
+  await login(page);
+  await openCustomer(page);
+  const response = await page.request.get("/api/customer/overview");
+  expect(response.status(), await response.text()).toBe(200);
+  const overview: CustomerOverview = await response.json();
+  const index = Math.max(0, overview.hourly.findIndex((item) => item.visitCount > 0));
+  const bucket = overview.hourly[index]!;
+  await page.getByRole("radio", { name: "入场人数", exact: true }).click();
+  const isArrivalResponse = (res: import("@playwright/test").Response) => {
+    const url = new URL(res.url());
+    return url.pathname === "/api/customer/visits" && url.searchParams.get("visitScope") === "arrivals" && url.searchParams.get("day") === overview.day && url.searchParams.get("hour") === String(bucket.hour);
+  };
+  const requested = page.waitForResponse(isArrivalResponse);
+  await page.getByRole("group", { name: "每小时时段明细", exact: true }).getByRole("button").nth(index).press("Enter");
+  const arrivalResponse = await requested;
+  expect(arrivalResponse.status(), await arrivalResponse.text()).toBe(200);
+  const arrivals: CustomerVisitPage = await arrivalResponse.json();
+  expect(arrivals.filteredTotal).toBe(bucket.visitCount);
+  expect(arrivals.rows.every((row) => row.businessDate === overview.day && row.status !== "cancelled")).toBe(true);
+  const bookmark = page.url();
+  await expect(page.getByRole("button", { name: `入场营业日：${overview.day} · 恢复普通跟进 ×`, exact: true })).toBeVisible();
+  await expect(page.getByText("全店实时总量，含跨日在店；与下方入场明细范围不同", { exact: true })).toBeVisible();
+  const reloaded = page.waitForResponse(isArrivalResponse);
+  await page.reload();
+  expect((await reloaded).status()).toBe(200);
+  await expect(page).toHaveURL(bookmark);
+  await expect(page.getByRole("button", { name: new RegExp(`${String(bucket.hour).padStart(2, "0")}:00时段`) })).toBeVisible();
+  const isWorkbenchRequest = (request: import("@playwright/test").Request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/customer/visits" && !url.searchParams.has("visitScope") && !url.searchParams.has("hour");
+  };
+  const normal = page.waitForRequest(isWorkbenchRequest);
+  await page.getByRole("button", { name: `入场营业日：${overview.day} · 恢复普通跟进 ×`, exact: true }).click();
+  await normal;
+  expect(new URL(page.url()).searchParams.has("visitScope")).toBe(false);
+  await expect(page.getByText("与前台一致，包含跨日未离店手牌", { exact: true })).toBeVisible();
+  await page.goto(bookmark);
+  await expect(page.getByRole("button", { name: /入场营业日：.*恢复普通跟进/ })).toBeVisible();
+  const mainEntry = page.waitForRequest(isWorkbenchRequest);
+  await page.getByTestId("customer-tab-visits").click();
+  await mainEntry;
+  await expect(page.getByRole("button", { name: /入场营业日：.*恢复普通跟进/ })).toHaveCount(0);
+  await page.goto(bookmark);
+  await page.getByTestId("customer-tab-overview").click();
+  const currentGuests = page.waitForRequest(isWorkbenchRequest);
+  await page.getByRole("button", { name: "查看当前在店手牌详情", exact: true }).click();
+  await currentGuests;
+  await expect(page.getByRole("button", { name: /入场营业日：.*恢复普通跟进/ })).toHaveCount(0);
+});
 test("经理可发现维护绑定审核队列并打开原始会员", async ({ page }) => {
   await login(page);
   await openCustomer(page);

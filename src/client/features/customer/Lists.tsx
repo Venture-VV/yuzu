@@ -37,10 +37,12 @@ export function RechargeList(props: ListProps) {
 }
 export function VisitList(props: ListProps) {
   const f = props.filters;
-  const read = useCustomerRead<CustomerVisitPage>(customerUrl("visits", { day: props.day, q: f.query, status: f.status || "all", amountBand: f.amountBand || "all", hour: f.hour, offset: f.offset }), props.revision);
+  const arrivals = f.visitScope === "arrivals";
+  const read = useCustomerRead<CustomerVisitPage>(customerUrl("visits", { day: props.day, visitScope: arrivals ? "arrivals" : undefined, q: f.query, status: f.status || "all", amountBand: f.amountBand || "all", hour: f.hour, offset: f.offset }), props.revision);
   useCorrectPage(read.data, props);
   const d = read.data;
   return <div className="customer-stack">
+    {arrivals && <button type="button" className="customer-filter-chip" onClick={() => props.onFilters({ ...f, visitScope: "workbench", hour: "", offset: 0 })}>入场营业日：{props.day} · 恢复普通跟进 ×</button>}
     <div className="customer-section-head customer-visit-filters">
       <ListFilters {...props} searchLabel="搜索手牌 / 在店会员" statusOptions={[["", "全部状态"], ["open", "在店"], ["left", "已离店 / 已撤销"]]} />
       <label className="customer-filter-field">手牌消费区间<Select aria-label="手牌消费区间" value={f.amountBand} onChange={(event) => props.onFilters({ ...f, amountBand: event.target.value, offset: 0 })}>
@@ -49,8 +51,8 @@ export function VisitList(props: ListProps) {
     </div>
     <ReadStatus {...read} hasData={Boolean(d)} onRetry={props.onRefresh} />
     {d && <>
-      <div className="customer-metrics customer-metrics-single"><div className="customer-metric"><span>当前在店手牌</span><strong>{d.totals.inStoreCount}<small> 个</small></strong><small>与前台一致，包含跨日未离店手牌</small></div></div>
-      <Card className="customer-section"><SectionTitle>手牌消费与服务跟进</SectionTitle><p className="customer-caption">当前在店包含全部跨日未离店手牌；离店记录按所选营业日。消费项目及入离场状态来自前台，客户部只能查看原单并记录服务跟进。</p>
+      <div className="customer-metrics customer-metrics-single"><div className="customer-metric"><span>{arrivals ? "全店当前在店手牌" : "当前在店手牌"}</span><strong>{d.totals.inStoreCount}<small> 个</small></strong><small>{arrivals ? "全店实时总量，含跨日在店；与下方入场明细范围不同" : "与前台一致，包含跨日未离店手牌"}</small></div></div>
+      <Card className="customer-section"><SectionTitle>手牌消费与服务跟进</SectionTitle><p className="customer-caption">{arrivals ? `当前明细按所选入场营业日${f.hour !== "" ? "及入场小时" : ""}筛选，不含已撤销入场；与总览入场人数口径一致。` : "当前在店包含全部跨日未离店手牌；离店记录按所选营业日。"}消费项目及入离场状态来自前台，客户部只能查看原单并记录服务跟进。</p>
         {!d.rows.length ? <Empty /> : <div className="customer-table-scroll"><table className="customer-table customer-visit-table"><thead><tr><th>手牌 / 客人</th><th>入场时间</th><th>实时消费</th><th>长期维护人</th><th>在场 / 跟进</th><th>操作</th></tr></thead><tbody>{d.rows.map((row) => <tr key={row.id}>
           <td data-label="手牌 / 客人"><button type="button" className="customer-text-button" onClick={() => props.onRecord("visit", row.id)}>{row.tagCode} · {row.guestLabel}</button><small>{row.visitNo}</small>{row.member && <small><button type="button" className="customer-text-button" onClick={() => props.onRecord("member", row.member!.id)}>{row.member.name} · {row.member.memberNo}</button><span className="customer-member-tier">{row.member.gradeLabel}</span></small>}</td>
           <td data-label="入场时间">{localTime(row.checkedInAt, d.timezone)}</td><td data-label="实时消费"><Amount value={row.amountCents} /><small>{row.lineCount}项前台明细</small></td><td data-label="长期维护人">{staffName(row.maintainer)}</td>

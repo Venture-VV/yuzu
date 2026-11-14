@@ -50,6 +50,7 @@ const Query = z.object({
   groupName: z.enum(["A组", "B组"]).optional(),
   method: z.string().max(30).optional(),
   hour: z.coerce.number().int().min(0).max(23).optional(),
+  visitScope: z.enum(["workbench", "arrivals"]).default("workbench"),
   offset: z.coerce.number().int().min(0).max(1000000).default(0),
   timelineOffset: z.coerce.number().int().min(0).max(1000000).default(0),
   unbound: z.enum(["0", "1"]).optional(),
@@ -619,10 +620,19 @@ async function visitRows(
   q: Q,
   day: string,
   id: number | null = null,
+  arrivalRange: { from: string; to: string } | null = null,
 ): Promise<C.CustomerVisitRow[]> {
   if (!["all", "open", "left", "settled", "cancelled"].includes(q.status))
     throw badRequest("到店状态不正确");
   const settings = await loadSettings(db);
+  // Overview arrivals follow the original check-in business day, including
+  // guests who checked out later. The workbench keeps current/departing guests.
+  const population = arrivalRange
+    ? db`v.business_date BETWEEN ${arrivalRange.from} AND ${arrivalRange.to} AND v.status<>'cancelled'`
+    : db`(v.status='open' OR (v.status<>'open' AND coalesce(
+        (SELECT c.business_date FROM checkout_bills cbill JOIN checkouts c ON c.id=cbill.checkout_id
+          WHERE cbill.visit_id=v.id AND c.status='completed' ORDER BY c.id DESC LIMIT 1),
+        ((v.closed_at AT TIME ZONE ${timezone})-make_interval(hours=>${settings.businessDayStartHour}::int))::date)=${day}::date))`;
   // Keep the native bill total: it is updated atomically with native bill facts.
   // Never reconstruct a customer amount from catalog prices or summing display lines.
   const rows = (await db`${family(db)} SELECT v.id,v.visit_no,t.code AS tag_code,v.status,v.checked_in_at,v.closed_at,v.business_date::text AS business_date,v.guest_label,
@@ -631,10 +641,7 @@ async function visitRows(
     FROM visits v JOIN bills b ON b.id=v.bill_id JOIN hand_tags t ON t.id=v.tag_id LEFT JOIN family f ON f.id=v.member_id
     LEFT JOIN members m ON m.id=f.root LEFT JOIN customer_bindings cb ON cb.member_id=f.root
     WHERE (${id}::bigint IS NOT NULL AND v.id=${id}) OR (${id}::bigint IS NULL
-      AND (v.status='open' OR (v.status<>'open' AND coalesce(
-        (SELECT c.business_date FROM checkout_bills cbill JOIN checkouts c ON c.id=cbill.checkout_id
-          WHERE cbill.visit_id=v.id AND c.status='completed' ORDER BY c.id DESC LIMIT 1),
-        ((v.closed_at AT TIME ZONE ${timezone})-make_interval(hours=>${settings.businessDayStartHour}::int))::date)=${day}::date))
+      AND ${population}
       AND (${q.status}='all' OR (${q.status}='left' AND v.status<>'open') OR v.status=${q.status}) AND (${q.managerId ?? null}::bigint IS NULL OR cb.maintainer_staff_id=${q.managerId ?? null})
       AND (${q.hour ?? null}::int IS NULL OR extract(hour FROM v.checked_in_at AT TIME ZONE ${timezone})=${q.hour ?? null})
       AND (${!q.q} OR t.code ILIKE ${like(q.q)} OR m.name ILIKE ${like(q.q)} OR m.phone LIKE ${like(q.q)} OR m.member_no ILIKE ${like(q.q)} OR v.guest_label ILIKE ${like(q.q)}))
@@ -667,11 +674,14 @@ export async function customerVisits(
 ): Promise<C.CustomerVisitPage> {
   const q = parse(Query, raw),
     meta = await customerMeta(db, actor, timezone, at),
+    arrivalRange = q.visitScope === "arrivals" ? dates(q, meta) : null,
     rows = await visitRows(
       db,
       timezone,
       q,
       q.day ?? meta.businessDate,
+      null,
+      arrivalRange,
     ),
     board = await getBoard(db);
   return {

@@ -22,7 +22,7 @@ import { Targets } from "./Targets";
 import { LowBalances } from "./LowBalances";
 import { ReadStatus } from "./ui";
 import { emptyFilters } from "./types";
-import type { CustomerForm, CustomerTab, Filters, RecordKind } from "./types";
+import type { CustomerForm, CustomerTab, Filters, RecordKind, VisitScope } from "./types";
 import "./customer.css";
 const TABS = [
   { id: "overview", title: "经营总览", icon: LayoutDashboard },
@@ -45,6 +45,8 @@ function CustomerWorkspace() {
   // Keep the original ?tab links. SubNav supports explicit addresses, including these query links.
   const dailyMode = params.get("daily") === "settlement" ? "settlement" : "recharge";
   const memberMode = params.get("member") === "bindings" ? "bindings" : "members";
+  const visitScope: VisitScope = params.get("visitScope") === "arrivals" ? "arrivals" : "workbench";
+  const visitHour = /^(?:[0-9]|1[0-9]|2[0-3])$/.test(params.get("hour") || "") ? params.get("hour")! : "";
   const [revision, setRevision] = useState(0);
   // A recharge status/page must never be carried into the settlement read model (or vice versa).
   const [filters, setFilters] = useState<Record<FilterTab, Filters>>({ overview: { ...emptyFilters }, visits: { ...emptyFilters }, daily: { ...emptyFilters }, settlements: { ...emptyFilters }, targets: { ...emptyFilters }, members: { ...emptyFilters }, lowBalances: { ...emptyFilters } });
@@ -55,6 +57,8 @@ function CustomerWorkspace() {
   const tabAddress = (next: CustomerTab, extra: Record<string, string> = {}) => {
     const nextParams = new URLSearchParams(params);
     nextParams.set("tab", next);
+    // The main hand-tag entry always opens normal cross-day service follow-up.
+    if (next === "visits") { nextParams.delete("visitScope"); nextParams.delete("hour"); }
     for (const [key, value] of Object.entries(extra)) nextParams.set(key, value);
     return `/customer?${nextParams}`;
   };
@@ -79,18 +83,38 @@ function CustomerWorkspace() {
     if (managerAction ? !data.capabilities.manage : !data.capabilities.operate) return;
     setForm({ key: uuid(), value, meta: data, managers: data.managers.map((row) => row.manager) });
   };
-  const onDrilldown = (next: CustomerTab, hour?: number, kind?: RecordKind) => {
+  const onDrilldown = (next: CustomerTab, hour?: number, kind?: RecordKind, scope: VisitScope = "workbench") => {
     const mode = kind === "settlement" || kind === "consumption" ? "settlement" : "recharge";
     const filterTab = next === "daily" && mode === "settlement" ? "settlements" : next;
     setFilters((old) => ({ ...old, [filterTab]: { ...emptyFilters, hour: hour == null ? "" : String(hour) } }));
     const nextParams = new URLSearchParams(params);
     nextParams.set("tab", next);
     if (next === "daily") nextParams.set("daily", mode);
+    if (next === "visits") {
+      nextParams.delete("visitScope"); nextParams.delete("hour");
+      if (scope === "arrivals") {
+        nextParams.set("visitScope", "arrivals"); nextParams.set("day", day);
+        if (hour != null) nextParams.set("hour", String(hour));
+      }
+    }
     setParams(nextParams);
   };
   const data = overview.data;
   const filterTab = tab === "daily" && dailyMode === "settlement" ? "settlements" : tab;
-  const listProps = data ? { day, filters: filters[filterTab], onFilters: (value: Filters) => setFilters((old) => ({ ...old, [filterTab]: value })), managers: data.managers.map((row) => row.manager), meta: data, revision, onRecord: openRecord, onForm: openForm, onRefresh: refresh } : null;
+  const activeFilters = tab === "visits" ? { ...filters.visits, visitScope, hour: visitScope === "arrivals" ? visitHour : "" } : filters[filterTab];
+  const onFilters = (value: Filters) => {
+    setFilters((old) => ({ ...old, [filterTab]: value }));
+    if (tab === "visits" && (value.visitScope !== visitScope || value.hour !== activeFilters.hour)) {
+      const next = new URLSearchParams(params);
+      next.delete("visitScope"); next.delete("hour");
+      if (value.visitScope === "arrivals") {
+        next.set("visitScope", "arrivals");
+        if (value.hour !== "") next.set("hour", value.hour);
+      }
+      setParams(next);
+    }
+  };
+  const listProps = data ? { day, filters: activeFilters, onFilters, managers: data.managers.map((row) => row.manager), meta: data, revision, onRecord: openRecord, onForm: openForm, onRefresh: refresh } : null;
   return <div className="customer-page" data-testid="customer-workbench">
     <PageHeader title="客户部经营工作台" subtitle="前台业务实时同步，服务与成交责任分别记录。" actions={<Button variant="secondary" size="sm" onClick={refresh}><RefreshCw size={14} />刷新</Button>} />
     <div className="customer-tabs"><SubNav tabs={tabs} base="/customer" active={tab} label="客户部模块" /></div>
