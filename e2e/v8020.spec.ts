@@ -201,6 +201,26 @@ test.describe('8.0.20 进销存做深与客房', () => {
     await expect(row.locator('td').nth(1)).toHaveText('56');
   });
 
+  test('值班经理（有「看成本」、没有「查看库存」）：进库存只有「成本」一个页签（合并前 Codex 审查 35d8b16）', async ({ page }) => {
+    // 演示库里没有店长账号：现建一个（第一次登录先改密码），用它的会话看页面
+    await login(page);
+    const username = `mgr${stamp}`;
+    const first = `Mgr-${stamp}x`;
+    const made = await page.request.post('/api/staff', { data: { username, displayName: `店长${stamp}`, role: 'store_manager', duties: [], password: first } });
+    expect(made.status(), await made.text()).toBe(201);
+    expect((await page.request.post('/api/auth/login', { data: { username, password: first } })).ok()).toBe(true);
+    expect((await page.request.post('/api/auth/change-password', { data: { currentPassword: first, newPassword: `${first}9` } })).ok()).toBe(true);
+    await page.goto('/inventory');
+    await expect(page).toHaveURL(/\/inventory\/cost$/);
+    await expect(page.getByTestId('cost-tab')).toBeVisible();
+    await expect(page.getByTestId('cost-total-stock')).toBeVisible();
+    await expect(page.getByRole('link', { name: '档案' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: '单据' })).toHaveCount(0);
+    // 别的页签的地址也进不去：跳回成本
+    await page.goto('/inventory/master');
+    await expect(page).toHaveURL(/\/inventory\/cost$/);
+  });
+
   test('会员房价与客房点餐的入口：房型里填会员价、保存后还在；点餐页写着「手牌号或房号」', async ({ page }) => {
     await login(page);
     const typeName = `验收房型${stamp}`.slice(0, 12);

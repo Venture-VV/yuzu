@@ -38,7 +38,8 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     path: '/inventory',
     pages: ['/inventory'],
     apis: ['/api/inventory'],
-    perms: ['inventory.read'],
+    // 有「看成本」没有「查看库存」的（值班经理默认如此）只看得到「成本」一个页签
+    perms: ['inventory.read', 'inventory.cost'],
     defaultEnabled: true,
     requires: [],
   },

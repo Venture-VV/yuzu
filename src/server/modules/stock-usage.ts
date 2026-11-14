@@ -20,6 +20,7 @@ import { fitsDecimals } from '@shared/quantity';
 import {
   DEFAULT_STOCK_USAGE_RULES,
   STOCK_USAGE_KIND_LABELS,
+  usageMilli,
   type ItemRecipe,
   type PendingUsage,
   type RecipeLine,
@@ -75,14 +76,15 @@ export async function listRecipes(db: Db, actor: Actor): Promise<ItemRecipe[]> {
     LEFT JOIN staff st ON st.id = r.created_by
     ORDER BY (r.id IS NULL), i.category, i.sort_order, i.id`;
   const recipeIds = items.map((i) => i.recipeId).filter((x): x is number => x !== null);
-  type LineRow = { recipeId: number; materialId: number; code: string; name: string; inventoryUnit: string; decimals: number; qtyMilli: number; lossBp: number; avgCostE4: number };
+  type LineRow = { recipeId: number; materialId: number; code: string; name: string; inventoryUnit: string; decimals: number; qtyMilli: number; lossBp: number; avgCostE4: number; costKnown: boolean };
   const lines: LineRow[] = recipeIds.length
     ? await db<LineRow[]>`
         SELECT l.recipe_id, l.material_id, m.code, m.name, m.inventory_unit, m.decimals, l.qty_milli, l.loss_bp,
                -- 还没有成本的物料（平均成本是 0 而且还是估的）按参考价起算，与入库时的起算一样；成本真的是 0 的就是 0
                (CASE WHEN m.avg_cost_e4 > 0 OR NOT m.cost_estimated THEN m.avg_cost_e4
                      WHEN m.ref_price_cents IS NOT NULL AND m.purchase_factor_milli > 0 THEN round(m.ref_price_cents::numeric * 10000000 / m.purchase_factor_milli)
-                     ELSE 0 END)::bigint AS avg_cost_e4
+                     ELSE 0 END)::bigint AS avg_cost_e4,
+               (m.avg_cost_e4 > 0 OR NOT m.cost_estimated OR (m.ref_price_cents IS NOT NULL AND m.purchase_factor_milli > 0)) AS cost_known
         FROM item_recipe_lines l JOIN materials m ON m.id = l.material_id WHERE l.recipe_id IN ${db(recipeIds)} ORDER BY l.id`
     : [];
   const byRecipe = new Map<number, LineRow[]>();
@@ -99,9 +101,9 @@ export async function listRecipes(db: Db, actor: Actor): Promise<ItemRecipe[]> {
       lossBp: l.lossBp,
       avgCostE4: cost ? Number(l.avgCostE4) : null,
     }));
-    // 一份的理论成本：各样用料（含损耗）× 现在的平均成本；有物料还没有成本的不给数
-    const complete = own.length > 0 && own.every((l) => Number(l.avgCostE4) > 0);
-    const unitCostCents = cost && complete ? own.reduce((sum, l) => sum + moveCostCents(Math.ceil((Number(l.qtyMilli) * (10000 + l.lossBp)) / 10000), Number(l.avgCostE4)), 0) : null;
+    // 一份的理论成本：各样用料（含损耗，按物料的小数位向上取整——与卖一份实际扣的一样）× 现在的平均成本；有物料还没有成本的不给数
+    const complete = own.length > 0 && own.every((l) => l.costKnown);
+    const unitCostCents = cost && complete ? own.reduce((sum, l) => sum + moveCostCents(usageMilli(Number(l.qtyMilli), 1, l.lossBp, l.decimals), Number(l.avgCostE4)), 0) : null;
     return {
       itemId: Number(i.id),
       itemName: i.name,
@@ -343,13 +345,13 @@ async function postGroup(deps: Pick<Deps, 'sql' | 'config'>, kind: StockUsageKin
   //    不用给事件加锁：改处理状态的只有这个任务（咨询锁保证同一时刻一个），业务事务只插入新行
   const claimed = await sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    const nets = await tx<{ materialId: number; net: number; ids: number[]; name: string; stock: number }[]>`
-      SELECT e.material_id, sum(e.sign * e.qty_milli)::bigint AS net, array_agg(e.id ORDER BY e.id) AS ids, m.name,
+    const nets = await tx<{ materialId: number; net: number; ids: number[]; name: string; stock: number; usable: boolean }[]>`
+      SELECT e.material_id, sum(e.sign * e.qty_milli)::bigint AS net, array_agg(e.id ORDER BY e.id) AS ids, m.name, (m.active AND m.tracked) AS usable,
              (CASE WHEN ${warehouseId} = ${CENTRAL_WAREHOUSE_ID} THEN m.stock_milli
                    ELSE COALESCE((SELECT ws.stock_milli FROM warehouse_stock ws WHERE ws.warehouse_id = ${warehouseId} AND ws.material_id = e.material_id), 0) END)::bigint AS stock
       FROM stock_usage_events e JOIN materials m ON m.id = e.material_id
       WHERE e.state = 'pending' AND e.kind = ${kind} AND e.warehouse_id = ${warehouseId}
-      GROUP BY e.material_id, m.name, m.stock_milli ORDER BY e.material_id`;
+      GROUP BY e.material_id, m.name, m.stock_milli, m.active, m.tracked ORDER BY e.material_id`;
     const lines: { materialId: number; qtyMilli: number; ids: number[] }[] = [];
     for (const n of nets) {
       const net = Number(n.net);
@@ -358,8 +360,10 @@ async function postGroup(deps: Pick<Deps, 'sql' | 'config'>, kind: StockUsageKin
         // 正的与冲回的正好抵掉：不用出库
         await tx`UPDATE stock_usage_events SET state = 'netted', blocked_at = NULL WHERE id IN ${tx(ids)}`;
       } else if (net > 0) {
-        if (Number(n.stock) < net) {
-          // 库存不够：这样物料先不扣，留着（待扣料里看得到），库存补上后自动扣
+        if (!n.usable || Number(n.stock) < net) {
+          // 库存不够：这样物料先不扣，留着（待扣料里看得到），库存补上后自动扣。
+          // 记下事件以后物料被停用了（或退回成候选）的也留着、不进这一批：耗用单不收停用的物料，带上它整张单开不出来，
+          // 同一个仓别的物料会跟着一直扣不了（合并前 Codex 审查 35d8b16）；重新启用以后自动扣
           await tx`UPDATE stock_usage_events SET blocked_at = COALESCE(blocked_at, now()) WHERE id IN ${tx(ids)}`;
           run.blocked += 1;
         } else if (lines.length < BATCH_MAX_LINES) lines.push({ materialId: Number(n.materialId), qtyMilli: net, ids });
@@ -415,12 +419,13 @@ export async function stockUsageOverview(db: Db, actor: Actor): Promise<StockUsa
   const pending = await db<Record<string, unknown>[]>`
     SELECT e.kind, e.warehouse_id, COALESCE(d.name, '总仓') AS warehouse_name, e.material_id, m.code, m.name, m.inventory_unit,
            sum(e.sign * e.qty_milli)::bigint AS net, count(*)::int AS events, min(e.created_at) AS since, bool_or(e.blocked_at IS NOT NULL) AS blocked,
+           NOT (m.active AND m.tracked) AS inactive,
            (CASE WHEN e.warehouse_id = ${CENTRAL_WAREHOUSE_ID} THEN m.stock_milli
                  ELSE COALESCE((SELECT ws.stock_milli FROM warehouse_stock ws WHERE ws.warehouse_id = e.warehouse_id AND ws.material_id = e.material_id), 0) END)::bigint AS stock
     FROM stock_usage_events e JOIN materials m ON m.id = e.material_id
     LEFT JOIN warehouses w ON w.id = e.warehouse_id LEFT JOIN departments d ON d.id = w.department_id
     WHERE e.state = 'pending'
-    GROUP BY e.kind, e.warehouse_id, d.name, e.material_id, m.code, m.name, m.inventory_unit, m.stock_milli
+    GROUP BY e.kind, e.warehouse_id, d.name, e.material_id, m.code, m.name, m.inventory_unit, m.stock_milli, m.active, m.tracked
     ORDER BY bool_or(e.blocked_at IS NOT NULL) DESC, min(e.created_at)`;
   const batches = await db<Record<string, unknown>[]>`
     SELECT b.id, b.kind, COALESCE(dp.name, '总仓') AS warehouse_name, b.status, b.inv_doc_id, d.doc_no, b.doc_date::text AS doc_date, b.line_count, b.error, b.created_at
@@ -442,6 +447,7 @@ export async function stockUsageOverview(db: Db, actor: Actor): Promise<StockUsa
         stockMilli: Number(r.stock),
         since: new Date(r.since as string).toISOString(),
         blocked: Boolean(r.blocked),
+        inactive: Boolean(r.inactive),
         events: Number(r.events),
       }),
     ),

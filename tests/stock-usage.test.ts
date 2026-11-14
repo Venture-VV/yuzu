@@ -285,6 +285,53 @@ describe('配方：出品完成时记', () => {
   });
 });
 
+describe('合并前 Codex 审查 35d8b16', () => {
+  it('记下事件以后物料被停用：这一样留着（待扣料里写着已停用），同一个仓别的物料照扣；重新启用以后自动扣', async () => {
+    const made: Record<string, number> = {};
+    for (const [code, name] of [
+      ['U-OKA', '照扣的物料'],
+      ['U-OFF', '被停用的物料'],
+    ] as const) {
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code, name, inventoryUnit: '个', decimals: 0, purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 1000 });
+      if (r.status !== 201) throw new Error(JSON.stringify(r.body));
+      made[name] = r.body.id;
+      await opening(r.body.id, q(10));
+    }
+    const it = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '两样物料的套装', category: '零售', price: 900 });
+    const itemId = it.body.items.find((i: { name: string }) => i.name === '两样物料的套装').id;
+    expect((await recipe(itemId, { expectedVersion: 0, lines: [{ materialId: made['照扣的物料'], qtyMilli: q(1) }, { materialId: made['被停用的物料'], qtyMilli: q(1) }] })).status).toBe(200);
+    await run();
+    const v = await enter();
+    expect((await charge(v.id, itemId, 2, 900)).status).toBe(200);
+    await pay(v.id);
+    await ctx.sql`UPDATE materials SET active = false WHERE id = ${made['被停用的物料']!}`;
+    const r = await run();
+    expect(r).toMatchObject({ docs: 1, lines: 1, released: 0 });
+    expect(await stock(made['照扣的物料']!)).toBe(q(8));
+    expect(await stock(made['被停用的物料']!)).toBe(q(10));
+    const pending = (await api(ctx.app, keeper, 'GET', '/api/inventory/usage')).body.pending as { materialName: string; inactive: boolean; netMilli: number }[];
+    expect(pending.find((p) => p.materialName === '被停用的物料')).toMatchObject({ inactive: true, netMilli: q(2) });
+    // 再跑不会反复开失败的批次
+    expect(await run()).toMatchObject({ docs: 0, released: 0 });
+    await ctx.sql`UPDATE materials SET active = true WHERE id = ${made['被停用的物料']!}`;
+    expect(await run()).toMatchObject({ docs: 1, lines: 1 });
+    expect(await stock(made['被停用的物料']!)).toBe(q(8));
+  });
+
+  it('一份的理论成本按物料的小数位向上取整（与卖一份实际扣的一样）：整瓶的物料带 10% 损耗，一份算 2 瓶', async () => {
+    const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'U-WHOLE', name: '整瓶的饮料', inventoryUnit: '瓶', decimals: 0, purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 1000 });
+    if (m.status !== 201) throw new Error(JSON.stringify(m.body));
+    const it = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '带损耗的整瓶饮料', category: '零售', price: 500 });
+    const itemId = it.body.items.find((i: { name: string }) => i.name === '带损耗的整瓶饮料').id;
+    const saved = await recipe(itemId, { expectedVersion: 0, lines: [{ materialId: m.body.id, qtyMilli: q(1), lossBp: 1000 }] });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    // 参考价 ¥10 / 箱 10 瓶 = ¥1 / 瓶；一份实际扣 2 瓶 → ¥2（不是 ¥1.10）
+    expect(usageMilli(q(1), 1, 1000, 0)).toBe(q(2));
+    const listed = (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/recipes')).body as { itemId: number; unitCostCents: number | null }[];
+    expect(listed.find((x) => x.itemId === itemId)!.unitCostCents).toBe(200);
+  });
+});
+
 describe('成本报表（docs/ERP_V8020.md 第 1 节）', () => {
   it('库存金额、耗用成本（自动扣料的分成销售出库、配方耗用）、项目毛利（理论成本）；只有「看成本」的人能看；能导出', async () => {
     expect((await api(ctx.app, keeper, 'GET', '/api/inventory/cost')).status).toBe(403);

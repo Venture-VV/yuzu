@@ -34,7 +34,7 @@
 ## 3. 已执行的验证
 
 - `npm run typecheck`、`npm run build` 通过。
-- 集成用例（本机，全量；`main` 合进来、Codex 审查的六条修完以后）：182 个文件、1740 条通过。新加的：`switches-default`（3）、`stock-cost`（4）、`stock-usage`（7）、`auto-replenish`（2）、`linen`（4）、`rooms-v8020`（4）。几条反向验证见第 5 节。
+- 集成用例（本机，全量；`main` 合进来、Codex 两轮审查的十一条修完以后）：182 个文件、1744 条通过。新加的：`switches-default`（3）、`stock-cost`（4）、`stock-usage`（7）、`auto-replenish`（2）、`linen`（4）、`rooms-v8020`（4）。几条反向验证见第 5 节。
 - 浏览器用例：新加 `e2e/v8020.spec.ts` 4 条（门店电脑；新建独立库，与 CI 一样用五条 seed 命令准备），本机通过；全量见 PR 的 CI。「开关默认开」那一次提交的 CI 三组浏览器用例全绿（原有用例都是用到哪样自己打开，不依赖默认关）。
 - 没有做的：真机（平板、小票机）；真实门店数据上的成本起算是否合理（要看真实的进价记录）；长期运行后扣料批次的数量（每个仓每种每分钟最多一张单）。
 

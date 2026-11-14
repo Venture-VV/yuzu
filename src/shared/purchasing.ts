@@ -97,6 +97,8 @@ export interface PurchaseOrder {
   backfillReceipt: DocRef | null;
   createdBy: number;
   createdByName: string;
+  /** 系统建的（自动补货的草稿）：还是草稿时，能编制采购单的人都可以撤掉 */
+  createdBySystem: boolean;
   createdAt: string;
   approvedByName: string | null;
   approvedAt: string | null;

@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runAutoReplenish } from '../src/server/modules/inventory/auto-replenish';
 import { todayIn } from '../src/server/modules/inventory/common';
-import { api, setup, type TestContext } from './helpers';
+import { createStaff } from '../src/server/modules/staff';
+import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let today: string;
@@ -98,5 +99,23 @@ describe('自动补货', () => {
     const third = await api(ctx.app, ctx.owner, 'POST', '/api/purchase-suggestions/auto/run');
     expect(third.body).toMatchObject({ status: 'done', lineCount: 3 });
     expect(await drafts()).toHaveLength(3);
+  });
+
+  it('自动建的草稿：能编制采购单的采购可以撤掉；别人编的照旧只能本人或负责人撤（合并前 Codex 审查 35d8b16）', async () => {
+    await createStaff(ctx.sql, { username: 'ar-buyer', displayName: '采购小孙', role: 'backoffice', duties: ['purchase'] as never, password: PASSWORD, mustChangePassword: false });
+    const buyer = await login(ctx.app, 'ar-buyer');
+    const auto = (await drafts()).find((d) => d.operator === 'system.stock' && d.status === 'draft')!;
+    const seen = await api(ctx.app, buyer, 'GET', `/api/purchase-orders/${auto.id}`);
+    expect(seen.body).toMatchObject({ status: 'draft', createdBySystem: true, withdrawable: true });
+    const gone = await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${auto.id}/cancel`, { reason: '这次不买' });
+    expect(gone.status, JSON.stringify(gone.body)).toBe(200);
+    expect(gone.body.status).toBe('cancelled');
+    // 店主自己编的草稿：采购撤不了
+    const own = await api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(), supplierId: supplier['AR-S1'], orderDate: today, action: 'save', lines: [{ materialId: mat['AR-M4'], purchaseQtyMilli: q(1), priceCents: 3000 }],
+    });
+    expect(own.status, JSON.stringify(own.body)).toBe(201);
+    expect(own.body.po).toMatchObject({ status: 'draft', createdBySystem: false });
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${own.body.po.id}/cancel`, { reason: '想撤别人的' })).status).toBe(403);
   });
 });

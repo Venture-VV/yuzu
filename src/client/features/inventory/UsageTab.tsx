@@ -146,7 +146,7 @@ export function UsageTab() {
                 <span className="num text-ink-3">
                   现有 {formatQty(p.stockMilli)} {p.inventoryUnit}
                 </span>
-                {p.blocked && <Badge tone="clay">库存不够</Badge>}
+                {p.inactive ? <Badge tone="clay">物料已停用，启用后自动扣</Badge> : p.blocked && <Badge tone="clay">库存不够</Badge>}
                 <span className="basis-full text-[12px] text-ink-3 md:basis-auto">{formatDateTime(p.since)} 起</span>
               </li>
             ))}

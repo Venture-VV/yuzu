@@ -65,6 +65,8 @@ export interface PendingUsage {
   since: string;
   /** 库存不够没扣成 */
   blocked: boolean;
+  /** 物料已停用（或退回成候选）：留着不扣，重新启用以后自动扣 */
+  inactive: boolean;
   events: number;
 }
 

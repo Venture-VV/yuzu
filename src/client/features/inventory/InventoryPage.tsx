@@ -32,10 +32,11 @@ export function InventoryPage() {
   const can = useCan();
   const settings = useInvSettings();
   const { tab = 'stock' } = useParams<{ tab?: TabKey }>();
-  if (!can('inventory.read')) return <Navigate to="/" replace />;
-  // 成本只给有「看成本」权限的人
-  const tabs = TABS.filter((t) => t.key !== 'cost' || can('inventory.cost'));
-  if (!tabs.some((t) => t.key === tab)) return <Navigate to="/inventory" replace />;
+  // 成本只给有「看成本」权限的人；别的页签要「查看库存」。有「看成本」没有「查看库存」的（值班经理默认如此）只有「成本」一个页签
+  const read = can('inventory.read');
+  const tabs = TABS.filter((t) => (t.key === 'cost' ? can('inventory.cost') : read));
+  if (tabs.length === 0) return <Navigate to="/" replace />;
+  if (!tabs.some((t) => t.key === tab)) return <Navigate to={tabs[0]!.key === 'stock' ? '/inventory' : `/inventory/${tabs[0]!.key}`} replace />;
   return (
     <>
       <PageHeader

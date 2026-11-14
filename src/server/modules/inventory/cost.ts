@@ -7,7 +7,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { CostReport, MarginRow, StockValueRow, UsageCostRow } from '@shared/stock-usage';
+import { usageMilli, type CostReport, type MarginRow, type StockValueRow, type UsageCostRow } from '@shared/stock-usage';
 import { guard } from '../../auth/guard';
 import { readSnapshot, type Db } from '../../db';
 import type { Deps } from '../../lib/context';
@@ -55,19 +55,24 @@ export async function costReport(db: Db, timezone: string, raw: unknown): Promis
 
   const usageRows = await db<{ warehouseName: string; label: string; cost: number; moves: number; uncosted: number }[]>`
     SELECT COALESCE(dp.name, '总仓') AS warehouse_name,
-           (CASE WHEN b.kind = 'sale' THEN '销售出库' WHEN b.kind = 'recipe' THEN '配方耗用' WHEN d.doc_type = 'damage' THEN '报损' ELSE '耗用' END) AS label,
+           (CASE WHEN b.kind = 'sale' THEN '销售出库' WHEN b.kind = 'recipe' THEN '配方耗用' WHEN d.doc_type = 'damage' THEN '报损'
+                 WHEN d.doc_type = 'count' THEN '盘点记成耗用' ELSE '耗用' END) AS label,
            COALESCE(sum(-sm.cost_cents), 0)::bigint AS cost, count(*)::int AS moves, count(*) FILTER (WHERE sm.cost_cents IS NULL)::int AS uncosted
     FROM stock_moves sm JOIN inv_docs d ON d.id = sm.doc_id
     LEFT JOIN stock_usage_batches b ON b.inv_doc_id = d.id
+    LEFT JOIN inv_doc_lines dl ON dl.id = sm.doc_line_id
     LEFT JOIN warehouses w ON w.id = sm.warehouse_id LEFT JOIN departments dp ON dp.id = w.department_id
     -- 按流水认，不按单据类型认（合并前 Codex 审查 b850838）：台面日耗品领到部门、急采进部门小仓时，在领料单 / 收货单下面接着记一笔「耗用」流水，
     -- 只看耗用单、报损单会把它们漏掉。作废冲回的那一笔流水类型是 void：同一张单、同一行、同一个仓里冲的是耗用 / 报损的才算（数量为正的那一笔；
     -- 同一行里冲调入、冲收货的是负的，不算）。
+    -- 盘点里差异原因记成「耗用」的盘亏也是耗用（与日均用量 usageByMaterial 同一个口径；别的盘点差异不算）。
     WHERE (sm.move_type IN ('direct_use', 'damage')
+           OR (sm.move_type = 'count_adjust' AND sm.qty_delta_milli < 0 AND dl.diff_reason = 'consumed')
            OR (sm.move_type = 'void' AND sm.qty_delta_milli > 0 AND EXISTS (
                  SELECT 1 FROM stock_moves o
                  WHERE o.doc_id = sm.doc_id AND o.doc_line_id = sm.doc_line_id AND o.warehouse_id = sm.warehouse_id AND o.material_id = sm.material_id
-                   AND o.move_type IN ('direct_use', 'damage'))))
+                   AND (o.move_type IN ('direct_use', 'damage')
+                        OR (o.move_type = 'count_adjust' AND o.qty_delta_milli < 0 AND dl.diff_reason = 'consumed')))))
       AND sm.doc_date BETWEEN ${from} AND ${to}
     GROUP BY 1, 2 ORDER BY 1, 2`;
   const usage: UsageCostRow[] = usageRows.map((r) => ({ warehouseName: r.warehouseName, label: r.label, costCents: Number(r.cost), moves: r.moves, uncosted: r.uncosted }));
@@ -81,10 +86,11 @@ export async function costReport(db: Db, timezone: string, raw: unknown): Promis
     WHERE c.status = 'completed' AND c.business_date BETWEEN ${from} AND ${to}
     GROUP BY i.id, i.name, i.category, r.id ORDER BY sum(l.amount) DESC, i.id`;
   const recipeIds = sold.map((s) => s.recipeId).filter((x): x is number => x !== null);
-  type RL = { recipeId: number; qtyMilli: number; lossBp: number; cost: number };
+  type RL = { recipeId: number; qtyMilli: number; lossBp: number; decimals: number; cost: number; costKnown: boolean };
   const recipeLines: RL[] = recipeIds.length
     ? await db<RL[]>`
-        SELECT l.recipe_id, l.qty_milli, l.loss_bp, ${effectiveCost(db)} AS cost
+        SELECT l.recipe_id, l.qty_milli, l.loss_bp, m.decimals, ${effectiveCost(db)} AS cost,
+               (m.avg_cost_e4 > 0 OR NOT m.cost_estimated OR (m.ref_price_cents IS NOT NULL AND m.purchase_factor_milli > 0)) AS cost_known
         FROM item_recipe_lines l JOIN materials m ON m.id = l.material_id WHERE l.recipe_id IN ${db(recipeIds)}`
     : [];
   const unitCost = new Map<number, number | null>();
@@ -92,7 +98,8 @@ export async function costReport(db: Db, timezone: string, raw: unknown): Promis
     const own = recipeLines.filter((l) => Number(l.recipeId) === Number(id));
     unitCost.set(
       Number(id),
-      own.length > 0 && own.every((l) => Number(l.cost) > 0) ? own.reduce((sum, l) => sum + moveCostCents(Math.ceil((Number(l.qtyMilli) * (10000 + l.lossBp)) / 10000), Number(l.cost)), 0) : null,
+      // 一份用多少与实际扣料同一个算法（含损耗、按物料的小数位向上取整）；成本真的是 0 的物料也算「有成本」
+      own.length > 0 && own.every((l) => l.costKnown) ? own.reduce((sum, l) => sum + moveCostCents(usageMilli(Number(l.qtyMilli), 1, l.lossBp, l.decimals), Number(l.cost)), 0) : null,
     );
   }
   const margin: MarginRow[] = sold.map((s) => {
