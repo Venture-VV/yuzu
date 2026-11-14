@@ -18,7 +18,7 @@ import { lockSettings } from '../../lib/rule-settings';
 const MATERIAL_COLUMNS = (db: Db) => db`
   m.id, m.code, m.name, m.category, m.specification, m.inventory_unit, m.decimals, m.purchase_unit,
   m.purchase_factor_milli, m.ref_price_cents, m.default_supplier_id, s.name AS default_supplier_name,
-  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.expiry_tracked, m.shelf_life_days, m.replenish_mode, m.tracked, m.active, m.stock_milli,
+  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.expiry_tracked, m.shelf_life_days, m.replenish_mode, m.replenish_rev, m.tracked, m.active, m.stock_milli,
   (SELECT coalesce(sum(ws.stock_milli), 0) FROM warehouse_stock ws WHERE ws.material_id = m.id) AS dept_stock_milli,
   (m.low_stock_milli IS NOT NULL AND m.tracked AND m.replenish_mode <> 'on_demand' AND m.stock_milli < m.low_stock_milli) AS is_low,
   (m.last_move_id IS NOT NULL) AS has_moves,
@@ -121,8 +121,11 @@ export type MaterialInputData = z.input<typeof MaterialInput>;
 
 const ReplenishModeInput = z.object({
   mode: z.enum(REPLENISH_MODES, '补货方式只能选：自动识别、常备、按需采购'),
-  /** 页面看到的补货方式：对不上（刚被别人改过，或者自己上一次没等到回音的请求后来生效了）就拒绝，不盖掉后来的修改 */
-  expected: z.enum(REPLENISH_MODES, '请带上页面上看到的补货方式'),
+  /**
+   * 页面看到的补货方式版本号（materials.replenish_rev，每改一次加一）：对不上就拒绝，不盖掉后来的修改——
+   * 哪怕这之后补货方式改走又改回了原来的值（只比值认不出来；测试会话在 44ddeb5 上复验报的边界）
+   */
+  expectedRev: z.number('请带上页面上看到的补货方式版本号').int().min(0),
 });
 
 export const SupplierInput = z.object({
@@ -193,9 +196,9 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
     return await db.begin(async (tx) => {
       // 锁物料行：与库存收发串行（改成台面日耗品时核对的部门小仓结存不会在核对后又变）
       // 任何一个仓有流水都算（部门小仓的期初、急采也会先于总仓有流水，v0.7.11）
-      const [before] = await tx<{ inventoryUnit: string; decimals: number; hasMoves: boolean; tracked: boolean; counterUse: boolean }[]>`
+      const [before] = await tx<{ inventoryUnit: string; decimals: number; hasMoves: boolean; tracked: boolean; counterUse: boolean; replenishMode: string }[]>`
         SELECT inventory_unit, decimals, (last_move_id IS NOT NULL OR EXISTS (SELECT 1 FROM stock_moves WHERE material_id = ${id})) AS has_moves,
-               tracked, counter_use
+               tracked, counter_use, replenish_mode
         FROM materials WHERE id = ${id} FOR UPDATE`;
       if (!before) throw notFound('物料不存在');
       // 已有流水的物料不能改库存单位、不能减少小数位，否则会改写历史数量的含义；增加小数位不影响历史（例如改成称重，v0.7.13）
@@ -224,6 +227,8 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
                default_supplier_id = ${m.defaultSupplierId}, low_stock_milli = ${m.lowStockMilli}, cover_days = ${m.coverDays},
                counter_use = ${m.counterUse}, weighed = ${m.weighed}, expiry_tracked = ${m.expiryTracked}, shelf_life_days = ${m.shelfLifeDays}, tracked = ${m.tracked},
                replenish_mode = coalesce(${m.replenishMode ?? null}, replenish_mode),
+               -- 补货方式变了就把它的版本号加一（迁移 161）：补货建议页上没等到回音的旧请求晚到时会被拒绝
+               replenish_rev = replenish_rev + ${m.replenishMode !== undefined && before && m.replenishMode !== before.replenishMode ? 1 : 0},
                active = ${m.active}, note = ${m.note}, updated_at = now()
         WHERE id = ${id}`;
       return id;
@@ -361,28 +366,29 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
     return getMaterial(sql, id, config.timezone);
   });
   // 只改补货方式（迁移 161，docs/ERP_PURCHASING.md 第 5.1 节）：补货建议页上一键「定为按需采购 / 设为常备 / 改回自动识别」。
-  // 与改房态同一个做法（合并前 Codex 审查 e3cfbd0）：
-  //   · 等锁、执行有时限（setTxTimeouts）——页面 15 秒超时之前这次请求要么已提交、要么已回滚，读回来的才可信；
-  //   · 带上页面看到的补货方式，对不上拒绝（REPLENISH_MODE_CHANGED）——晚到的旧请求不会盖掉后来的修改；
-  //   · 已经是要改成的值照常返回（原样重提不报错、不重复记审计）。
-  // 只锁这一个物料行、只改这一列，不带操作编号。
+  // 与改房态同一个思路（合并前 Codex 审查 e3cfbd0、测试会话在 44ddeb5 上的复验）：
+  //   · 等锁、执行有时限（setTxTimeouts）——等不到锁回 BUSY、明确没生效；
+  //   · 带上页面看到的补货方式版本号，对不上拒绝（REPLENISH_MODE_CHANGED）——晚到的旧请求不会盖掉后来的修改，
+  //     改走又改回原来的值也认得出来（版本号每改一次加一，物料档案的整份保存改了补货方式也加）；
+  //   · 已经是要改成的值照常返回（原样重提不报错、不重复记审计、不加版本号）。
+  // 只锁这一个物料行、只改这两列，不带操作编号。
   app.put('/api/inventory/materials/:id/replenish-mode', { preHandler: guard('inventory.master') }, async (req) => {
     const { id } = parse(idParam, req.params);
-    const { mode, expected } = parse(ReplenishModeInput, req.body);
+    const { mode, expectedRev } = parse(ReplenishModeInput, req.body);
     await sql.begin(async (tx) => {
       await setTxTimeouts(tx);
-      const [before] = await tx<{ name: string; replenishMode: (typeof REPLENISH_MODES)[number] }[]>`
-        SELECT name, replenish_mode FROM materials WHERE id = ${id} FOR NO KEY UPDATE`;
+      const [before] = await tx<{ name: string; replenishMode: (typeof REPLENISH_MODES)[number]; replenishRev: number }[]>`
+        SELECT name, replenish_mode, replenish_rev FROM materials WHERE id = ${id} FOR NO KEY UPDATE`;
       if (!before) throw notFound('物料不存在');
       if (before.replenishMode === mode) return;
-      if (before.replenishMode !== expected) {
+      if (before.replenishRev !== expectedRev) {
         throw conflict(
           'REPLENISH_MODE_CHANGED',
-          `「${before.name}」的补货方式已经是「${REPLENISH_MODE_LABELS[before.replenishMode].title}」了（刚被改过），这次没有再改；页面已经刷新，要改请再点一次`,
-          { current: before.replenishMode },
+          `「${before.name}」的补货方式在这之后又被改过（现在是「${REPLENISH_MODE_LABELS[before.replenishMode].title}」），这次没有再改；页面已经刷新，要改请再点一次`,
+          { current: before.replenishMode, rev: before.replenishRev },
         );
       }
-      await tx`UPDATE materials SET replenish_mode = ${mode}, updated_at = now() WHERE id = ${id}`;
+      await tx`UPDATE materials SET replenish_mode = ${mode}, replenish_rev = replenish_rev + 1, updated_at = now() WHERE id = ${id}`;
       await writeAudit(tx, {
         staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'material', targetId: id,
         detail: { replenishMode: mode, before: before.replenishMode }, ip: req.ip,

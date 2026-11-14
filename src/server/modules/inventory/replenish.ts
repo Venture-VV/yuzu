@@ -60,6 +60,7 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
     coverDays: number | null;
     lowStockMilli: number | null;
     replenishMode: ReplenishMode;
+    replenishRev: number;
     consumable: boolean;
     assetNo: string | null;
     assetCount: number;
@@ -68,7 +69,7 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
     supplierName: string | null;
   }[]>`
     SELECT m.id, m.code, m.name, m.specification, m.inventory_unit, m.purchase_unit, m.purchase_factor_milli, m.decimals, m.stock_milli,
-           m.cover_days, m.low_stock_milli, m.replenish_mode, m.ref_price_cents,
+           m.cover_days, m.low_stock_milli, m.replenish_mode, m.replenish_rev, m.ref_price_cents,
            -- 档案里已经标明是消耗品的（自动识别时算常备，头一次领用就提）：台面日耗品、管效期的、称重的。
            -- 别的「明摆着是消耗品」的信号接在这里——8.0.20 的用料与配方合进来以后，挂了在用用料的物料也算
            --（零售品、菜品原料：第一天就卖断货的话，后面的扣料都欠着、不会再有第二天的用量）。
@@ -160,6 +161,7 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
         stockMilli: stock,
         inTransitMilli: inTransit,
         mode: m.replenishMode,
+        modeRev: m.replenishRev,
         why,
         useDays: use?.days ?? 0,
         lastUsedOn: use?.lastOn ?? null,
@@ -189,6 +191,7 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
       dailyUsageMilli: daily > 0 ? Math.round(daily) : null,
       daysOfCover,
       mode: m.replenishMode,
+      modeRev: m.replenishRev,
       reason,
       triggerDays,
       targetDays,

@@ -189,6 +189,7 @@ function deptMaterial(m: DeptStockMeta['materials'][number], row: WarehouseStock
     expiryTracked: false,
     shelfLifeDays: null,
     replenishMode: row?.replenishMode ?? 'auto',
+    replenishRev: 0,
   };
 }
 

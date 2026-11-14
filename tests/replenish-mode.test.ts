@@ -58,13 +58,12 @@ const mkMaterial = (body: Record<string, unknown>) =>
   ok<{ id: number; replenishMode: string; isLow: boolean }>(
     api(ctx.app, buyer, 'POST', '/api/inventory/materials', { category: '测试', inventoryUnit: '台', purchaseUnit: '台', purchaseFactorMilli: q(1), refPriceCents: 300_00, ...body }),
   );
-const getMaterial = (id: number) => ok<{ id: number; replenishMode: string; isLow: boolean; coverDays: number | null }>(api(ctx.app, keeper, 'GET', `/api/inventory/materials/${id}`), 200);
+const getMaterial = (id: number) =>
+  ok<{ id: number; replenishMode: string; replenishRev: number; isLow: boolean; coverDays: number | null }>(api(ctx.app, keeper, 'GET', `/api/inventory/materials/${id}`), 200);
 const putMode = (cookie: string, id: number, body: Record<string, unknown>) => api(ctx.app, cookie, 'PUT', `/api/inventory/materials/${id}/replenish-mode`, body);
-/** 改补货方式：像页面一样带上现在看到的值 */
-const setMode = async (cookie: string, id: number, mode: unknown) => {
-  const [cur] = await ctx.sql<{ replenishMode: string }[]>`SELECT replenish_mode FROM materials WHERE id = ${id}`;
-  return putMode(cookie, id, { mode, expected: cur?.replenishMode ?? 'auto' });
-};
+const revOf = async (id: number) => Number((await ctx.sql<{ rev: number }[]>`SELECT replenish_rev AS rev FROM materials WHERE id = ${id}`)[0]?.rev ?? 0);
+/** 改补货方式：像页面一样带上现在看到的版本号 */
+const setMode = async (cookie: string, id: number, mode: unknown) => putMode(cookie, id, { mode, expectedRev: await revOf(id) });
 
 /** 采购入库 n 个（店主建单即确认，仓库收货），返回收货单 */
 async function stockIn(materialId: number, n: number, date = today) {
@@ -310,9 +309,10 @@ describe('物料档案的补货方式', () => {
     expect((await setMode(keeper, m.id, 'on_demand')).status).toBe(403);
     expect((await setMode(buyer, m.id, 'never')).status).toBe(400);
     expect((await setMode(buyer, m.id, undefined)).status).toBe(400);
-    // 要带上页面看到的值
+    // 要带上页面看到的版本号
     expect((await putMode(buyer, m.id, { mode: 'on_demand' })).status).toBe(400);
-    expect((await putMode(buyer, 99_999_999, { mode: 'on_demand', expected: 'auto' })).status).toBe(404);
+    expect((await putMode(buyer, m.id, { mode: 'on_demand', expectedRev: -1 })).status).toBe(400);
+    expect((await putMode(buyer, 99_999_999, { mode: 'on_demand', expectedRev: 0 })).status).toBe(404);
     const audits = async () =>
       (await ctx.sql<{ detail: Record<string, unknown> }[]>`
         SELECT detail FROM audit_logs WHERE action = 'inventory_master_saved' AND target_type = 'material' AND target_id = ${String(m.id)} AND detail ? 'before' ORDER BY id`).map((r) => r.detail);
@@ -323,26 +323,41 @@ describe('物料档案的补货方式', () => {
     expect(await audits()).toEqual([{ replenishMode: 'on_demand', before: 'auto' }, { replenishMode: 'auto', before: 'on_demand' }]);
   });
 
-  it('带上页面看到的值，对不上拒绝：晚到的旧请求不会盖掉后来的修改；已经是要改成的值照常返回（原样重提）；等锁有时限', async () => {
+  it('带上页面看到的版本号，对不上拒绝：晚到的旧请求不会盖掉后来的修改，改走又改回原来的值也一样；已经是要改成的值照常返回（原样重提）；等锁有时限', async () => {
     const m = await mkMaterial({ code: 'BH-M3', name: '投影仪' });
-    // 页面甲看到「自动识别」，要定为按需采购——这次请求没等到回音（当它还在路上）
-    const late = { mode: 'on_demand', expected: 'auto' };
+    expect(await getMaterial(m.id)).toMatchObject({ replenishMode: 'auto', replenishRev: 0 });
+    // 页面甲看到「自动识别」（版本 0），要定为按需采购——这次请求没等到回音（当它还在路上）
+    const late = { mode: 'on_demand', expectedRev: 0 };
     // 这期间页面刷新过，又改成了常备
-    await ok(putMode(buyer, m.id, { mode: 'stock', expected: 'auto' }), 200);
-    // 旧请求这时才到：看到的是自动识别、现在是常备，对不上 → 拒绝，常备没被盖掉
-    const res = await putMode(buyer, m.id, late);
+    expect(await ok(putMode(buyer, m.id, { mode: 'stock', expectedRev: 0 }), 200)).toMatchObject({ replenishMode: 'stock', replenishRev: 1 });
+    // 旧请求这时才到：版本对不上 → 拒绝，常备没被盖掉
+    let res = await putMode(buyer, m.id, late);
     expect(res.status).toBe(409);
-    expect(res.body.error).toMatchObject({ code: 'REPLENISH_MODE_CHANGED', details: { current: 'stock' } });
+    expect(res.body.error).toMatchObject({ code: 'REPLENISH_MODE_CHANGED', details: { current: 'stock', rev: 1 } });
     expect((await getMaterial(m.id)).replenishMode).toBe('stock');
-    // 原样重提：已经是要改成的值，照常返回、不报错（哪怕带的是旧的「看到的值」）
-    expect((await ok<{ replenishMode: string }>(putMode(buyer, m.id, { mode: 'stock', expected: 'auto' }), 200)).replenishMode).toBe('stock');
+    // 原样重提：已经是要改成的值，照常返回、不报错、不加版本号（哪怕带的是旧的版本号）
+    expect(await ok(putMode(buyer, m.id, { mode: 'stock', expectedRev: 0 }), 200)).toMatchObject({ replenishMode: 'stock', replenishRev: 1 });
+
+    // 改走又改回（测试会话在 44ddeb5 上复验的边界）：在物料档案里整份保存，把补货方式改回「自动识别」——
+    // 值和旧请求当时看到的一样了，版本号不一样
+    const body = { code: 'BH-M3', name: '投影仪', category: '测试', inventoryUnit: '台', purchaseUnit: '台', purchaseFactorMilli: q(1), refPriceCents: 300_00 };
+    expect(await ok(api(ctx.app, buyer, 'PUT', `/api/inventory/materials/${m.id}`, { ...body, replenishMode: 'auto' }), 200)).toMatchObject({ replenishMode: 'auto', replenishRev: 2 });
+    res = await putMode(buyer, m.id, late);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatchObject({ code: 'REPLENISH_MODE_CHANGED', details: { current: 'auto', rev: 2 } });
+    expect(await getMaterial(m.id)).toMatchObject({ replenishMode: 'auto', replenishRev: 2 });
+    // 整份保存没改补货方式（不带这一项，或者带的是同一个值）：版本号不动
+    expect((await ok<{ replenishRev: number }>(api(ctx.app, buyer, 'PUT', `/api/inventory/materials/${m.id}`, { ...body, note: '会议室' }), 200)).replenishRev).toBe(2);
+    expect((await ok<{ replenishRev: number }>(api(ctx.app, buyer, 'PUT', `/api/inventory/materials/${m.id}`, { ...body, replenishMode: 'auto' }), 200)).replenishRev).toBe(2);
+    // 带着现在的版本号就能改
+    expect(await ok(putMode(buyer, m.id, { mode: 'stock', expectedRev: 2 }), 200)).toMatchObject({ replenishMode: 'stock', replenishRev: 3 });
     // 物料行被别的事务锁着（收发货在记账）：等不到锁就失败、明确没有生效，不会拖到页面超时以后才生效
     const holder = await ctx.sql.reserve();
     try {
       await holder`BEGIN`;
       await holder`SELECT id FROM materials WHERE id = ${m.id} FOR UPDATE`;
       const started = Date.now();
-      const busy = await putMode(buyer, m.id, { mode: 'auto', expected: 'stock' });
+      const busy = await putMode(buyer, m.id, { mode: 'auto', expectedRev: 3 });
       expect(busy.status).toBe(409);
       expect(busy.body.error.code).toBe('BUSY');
       expect(Date.now() - started).toBeLessThan(9_000);

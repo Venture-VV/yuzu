@@ -6,6 +6,7 @@
 
 import { PurchasingTabs } from './PurchasingTabs';
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { ArrowLeft, ChevronDown, CloudOff, FilePlus2, FileSearch, Lightbulb } from 'lucide-react';
 import { REPLENISH_MODE_LABELS, type Material, type ReplenishMode } from '@shared/inventory';
@@ -28,7 +29,7 @@ import { SourcingCreateDialog, type SourcingDraft } from './SourcingPage';
 export function SuggestionsPage() {
   const can = useCan();
   const data = useSuggestions();
-  const modeOps = useReplenishModeOps(data.data);
+  const modeOps = useReplenishModeOps();
   if (!can('inventory.read')) return <Navigate to="/" replace />;
   const d = data.data;
   return (
@@ -68,7 +69,7 @@ export function SuggestionsPage() {
                   title={`「${modeOps.pending.name}」的补货方式结果待确认：要改成「${REPLENISH_MODE_LABELS[modeOps.pending.mode].title}」，网络断了或超时，不知道改没改成`}
                   data-testid="mode-pending"
                 >
-                  <p className="mb-2">点「再试一次」按原样重提（已经改成了的不会重复改）；确认之前，别的补货方式先不能改。</p>
+                  <p className="mb-2">点「再试一次」按原样重提（已经改成了的不会重复改；这之后被别人改过的会明确告诉你没改）。确认之前，补货建议页上的补货方式先不能改；刷新、离开再回来这一条都还在。</p>
                   <Button variant="secondary" size="sm" loading={modeOps.busyId !== null} onClick={() => void modeOps.retry()} data-testid="mode-pending-retry">
                     再试一次
                   </Button>
@@ -105,21 +106,50 @@ interface ModeOp {
   name: string;
   /** 要改成的 */
   mode: ReplenishMode;
-  /** 页面上看到的：服务端对不上就拒绝（晚到的旧请求不会盖掉后来的修改） */
-  expected: ReplenishMode;
+  /** 页面上看到的补货方式版本号：服务端对不上就拒绝（晚到的旧请求不会盖掉后来的修改，改走又改回也认得出来） */
+  expectedRev: number;
+}
+
+// 改补货方式的「结果待确认」存在本机浏览器里（一次只有一个）：提交前先存下并读回核对，存不了就不发请求；
+// 有了结论（成功、被明确拒绝、读回来版本号已经变了）才删。刷新、离开页面再回来都还在。
+const MODE_PENDING_KEY = 'yuzu.replenishModePending.v1';
+function loadModePending(): ModeOp | null {
+  try {
+    const p = JSON.parse(localStorage.getItem(MODE_PENDING_KEY) ?? 'null') as Partial<ModeOp> | null;
+    return p && typeof p.materialId === 'number' && typeof p.expectedRev === 'number' && typeof p.mode === 'string' && typeof p.name === 'string' ? (p as ModeOp) : null;
+  } catch {
+    return null;
+  }
+}
+/** 写入并读回核对：写不进去返回 false */
+function storeModePending(op: ModeOp | null): boolean {
+  const raw = op ? JSON.stringify(op) : null;
+  try {
+    if (raw === null) localStorage.removeItem(MODE_PENDING_KEY);
+    else localStorage.setItem(MODE_PENDING_KEY, raw);
+    return localStorage.getItem(MODE_PENDING_KEY) === raw;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * 改一个物料的补货方式（只改这一项）：改完补货建议、物料档案一起刷新。整页共用一份，同一时刻只发一个。
- * 断网、超时或服务器出错时不知道改没改成（合并前 Codex 审查 e3cfbd0）：留一条「结果待确认」，只能按原样再试一次
- * （已经是要改成的值服务端照常返回），确认之前别的补货方式不能改；读回来已经是要改成的就算确认了。
- * 服务端等锁、执行有时限，页面超时的时候那次请求已经提交或回滚；真有晚到的，带着当时看到的值、对不上会被拒绝。
+ *
+ * 断网、超时或服务器出错时不知道改没改成（合并前 Codex 审查 e3cfbd0、测试会话在 44ddeb5 上的复验）：
+ *   · 提交前把这次请求存在本机，没有结论之前页面上一直留着「结果待确认」，补货方式都不能再改；
+ *   · 只能按原样「再试一次」：已经是要改成的值服务端照常返回；这之后被改过的（版本号对不上）明确拒绝；
+ *   · 也会自己读回这个物料：版本号变了就有结论——是要改成的值算改成了，不是就说明之后又被改过、那次请求不会再生效。
  */
-function useReplenishModeOps(data: ReplenishSuggestions | undefined) {
+function useReplenishModeOps() {
   const toast = useToast();
   const invalidate = useInvalidateAll();
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [pending, setPending] = useState<ModeOp | null>(null);
+  const [pending, setPendingState] = useState<ModeOp | null>(loadModePending);
+  const settle = () => {
+    storeModePending(null);
+    setPendingState(null);
+  };
   const done = (op: ModeOp) =>
     toast({
       tone: 'success',
@@ -127,18 +157,23 @@ function useReplenishModeOps(data: ReplenishSuggestions | undefined) {
       body: op.mode === 'on_demand' ? '以后不提补货、不做低库存提醒；在下面「没提补货的」或物料档案里可以改回来' : REPLENISH_MODE_LABELS[op.mode].hint,
     });
   const send = async (op: ModeOp) => {
+    // 先存下再发：存不了就不发（不然断网以后没有地方记着这次请求）
+    if (!storeModePending(op)) {
+      toast({ tone: 'error', title: '没有提交', body: '这台电脑的浏览器存不了「结果待确认」记录（存储已满或被禁用），请清理浏览器数据或换一台电脑再试' });
+      return;
+    }
     setBusyId(op.materialId);
     try {
-      await api.put<Material>(`/api/inventory/materials/${op.materialId}/replenish-mode`, { mode: op.mode, expected: op.expected });
-      setPending(null);
+      await api.put<Material>(`/api/inventory/materials/${op.materialId}/replenish-mode`, { mode: op.mode, expectedRev: op.expectedRev });
+      settle();
       done(op);
     } catch (e) {
       if (e instanceof UncertainError) {
-        setPending(op);
+        setPendingState(op);
         toast({ tone: 'error', title: '网络断了或超时，不知道补货方式改没改成', body: '页面上留了一条「结果待确认」，点「再试一次」按原样重提' });
       } else {
-        // 明确被拒绝（没权限、刚被别人改过……）：没有生效，刷新后按页面上的为准
-        setPending(null);
+        // 明确被拒绝（没权限、这之后又被改过……）：没有生效，刷新后按页面上的为准
+        settle();
         toast({ tone: 'error', title: '补货方式没改成', body: errorMessage(e) });
       }
     } finally {
@@ -146,20 +181,28 @@ function useReplenishModeOps(data: ReplenishSuggestions | undefined) {
       setBusyId(null);
     }
   };
-  // 待确认的那一个：读回来已经是要改成的，就是生效了
+  // 待确认的那一个：读回这个物料。版本号变了就有结论（要等这一次读回来的是最新的）
+  const check = useQuery({
+    queryKey: ['inv', 'material-replenish', pending?.materialId ?? 0],
+    queryFn: () => api.get<Material>(`/api/inventory/materials/${pending!.materialId}`),
+    enabled: pending !== null && busyId === null,
+    staleTime: 0,
+  });
   useEffect(() => {
-    if (!pending || !data) return;
-    const now = data.groups.flatMap((g) => g.lines).find((l) => l.materialId === pending.materialId)?.mode ?? data.skipped.find((r) => r.materialId === pending.materialId)?.mode;
-    if (now !== pending.mode) return;
-    setPending(null);
-    done(pending);
-  }, [data, pending]);
+    const m = check.data;
+    if (!pending || busyId !== null || !m || check.isFetching || m.id !== pending.materialId) return;
+    if (m.replenishRev === pending.expectedRev && m.replenishMode !== pending.mode) return; // 还没生效，也还可能晚到
+    settle();
+    if (m.replenishMode === pending.mode) done(pending);
+    else toast({ tone: 'info', title: `「${pending.name}」的补货方式之后又被改过`, body: `现在是「${REPLENISH_MODE_LABELS[m.replenishMode].title}」，刚才那次修改不会再生效` });
+    void invalidate();
+  }, [check.data, check.isFetching, pending, busyId]);
   return {
     busyId,
     pending,
     /** 正在发，或者有一个还没确认：别的先不能改 */
     locked: busyId !== null || pending !== null,
-    setMode: (m: { materialId: number; name: string; mode: ReplenishMode }, to: ReplenishMode) => send({ materialId: m.materialId, name: m.name, mode: to, expected: m.mode }),
+    setMode: (m: { materialId: number; name: string; modeRev: number }, to: ReplenishMode) => send({ materialId: m.materialId, name: m.name, mode: to, expectedRev: m.modeRev }),
     retry: () => (pending ? send(pending) : Promise.resolve()),
   };
 }

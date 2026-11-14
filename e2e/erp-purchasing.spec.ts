@@ -343,11 +343,14 @@ test.describe('补货方式（迁移 161）', () => {
     await expect(pending).toContainText('按需采购');
     await expect(group.getByTestId(`suggest-off-${a.id}`)).toBeDisabled();
     expect(await materialOf(page, c.id)).toMatchObject({ replenishMode: 'auto' });
+    // 这一条存在本机：没有结论之前一直在（这里不刷新页面，下一条用例核对刷新以后还在）
+    expect(await page.evaluate(() => localStorage.getItem('yuzu.replenishModePending.v1'))).toContain(`"materialId":${c.id}`);
     // 再试一次：按原样重提，改成了
     await page.getByTestId('mode-pending-retry').click();
     await expect(pending).toHaveCount(0);
     await expect(page.getByTestId(`suggest-line-${c.id}`)).toHaveCount(0);
     expect(await materialOf(page, c.id)).toMatchObject({ replenishMode: 'on_demand' });
+    expect(await page.evaluate(() => localStorage.getItem('yuzu.replenishModePending.v1'))).toBeNull();
 
     // 建议刷新以后：A 还是 5 箱，B 还是没勾
     await expect(group.getByTestId(`suggest-qty-${a.id}`)).toHaveValue('5');
@@ -359,5 +362,48 @@ test.describe('补货方式（迁移 161）', () => {
     const poId = Number(/\/purchasing\/(\d+)\/edit/.exec(page.url())![1]);
     const po = (await (await page.request.get(`/api/purchase-orders/${poId}`)).json()) as { lines: { materialId: number; purchaseQtyMilli: number }[] };
     expect(po.lines).toEqual([expect.objectContaining({ materialId: a.id, purchaseQtyMilli: 5000 })]);
+  });
+
+  test('结果待确认刷新以后还在；这之后补货方式改走又改回，旧请求晚到也不会生效（测试会话在 44ddeb5 上复验的边界）', async ({ page }) => {
+    const { tag } = await setup(page);
+    const sup = await newSupplier(page, tag);
+    const mat = await newMaterial(page, tag, { defaultSupplierId: sup.id, lowStockMilli: 25_000 });
+    const full = { code: mat.code, name: mat.name, category: 'E2E', inventoryUnit: '包', purchaseUnit: '箱', purchaseFactorMilli: 10_000, refPriceCents: 3_000, defaultSupplierId: sup.id, lowStockMilli: 25_000 };
+
+    await page.goto('/purchasing/suggestions');
+    const group = page.getByTestId(`suggest-group-${sup.id}`);
+    await expect(group.getByTestId(`suggest-line-${mat.id}`)).toBeVisible();
+    // 点「不用备货」时网关回 504：请求体记下来，当它还在路上
+    let captured: string | null = null;
+    await page.route('**/api/inventory/materials/*/replenish-mode', async (route) => {
+      captured = route.request().postData();
+      await route.fulfill({ status: 504, contentType: 'text/plain', body: 'gateway timeout' });
+    });
+    await group.getByTestId(`suggest-off-${mat.id}`).click();
+    const pending = page.getByTestId('mode-pending');
+    await expect(pending).toContainText(mat.name);
+    expect(JSON.parse(captured!)).toEqual({ mode: 'on_demand', expectedRev: 0 });
+    await page.unroute('**/api/inventory/materials/*/replenish-mode');
+
+    // 刷新页面：这一条还在，补货方式还是不能改
+    await page.reload();
+    await expect(pending).toContainText(mat.name);
+    await expect(page.getByTestId(`suggest-off-${mat.id}`)).toBeDisabled();
+
+    // 这期间在物料档案里把补货方式改成常备、又改回自动识别（值和当时看到的一样，版本号变了）
+    for (const replenishMode of ['stock', 'auto']) {
+      const r = await page.request.put(`/api/inventory/materials/${mat.id}`, { data: { ...full, replenishMode } });
+      expect(r.status(), await r.text()).toBe(200);
+    }
+    // 回到补货建议：读回来版本号变了 → 有结论了（那次修改不会再生效），待确认消失，可以再改
+    await page.reload();
+    await expect(pending).toHaveCount(0);
+    await expect(page.getByTestId(`suggest-off-${mat.id}`)).toBeEnabled();
+    expect(await page.evaluate(() => localStorage.getItem('yuzu.replenishModePending.v1'))).toBeNull();
+    // 旧请求这时才到：被拒绝，还是自动识别
+    const late = await page.request.put(`/api/inventory/materials/${mat.id}/replenish-mode`, { data: JSON.parse(captured!) });
+    expect(late.status()).toBe(409);
+    expect((await late.json()).error.code).toBe('REPLENISH_MODE_CHANGED');
+    expect(await materialOf(page, mat.id)).toMatchObject({ replenishMode: 'auto' });
   });
 });

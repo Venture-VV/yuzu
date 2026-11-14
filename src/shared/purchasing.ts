@@ -584,8 +584,9 @@ export interface ReplenishLine {
   dailyUsageMilli: number | null;
   /** (结存 + 在途) ÷ 日均用量，一位小数 */
   daysOfCover: number | null;
-  /** 档案里的补货方式（迁移 161；建议里的只会是自动识别或常备）：改补货方式时带上，对不上拒绝 */
+  /** 档案里的补货方式（迁移 161；建议里的只会是自动识别或常备）与它的版本号：改补货方式时带上版本号，对不上拒绝 */
   mode: ReplenishMode;
+  modeRev: number;
   /** cover：可用天数不足；low_stock：没有用量、低于提醒数量 */
   reason: 'cover' | 'low_stock';
   /** 触发天数（物料的提醒天数，或规则的补货触发天数）与补到的天数 */
@@ -634,8 +635,9 @@ export interface ReplenishSkipped {
   inventoryUnit: string;
   stockMilli: number;
   inTransitMilli: number;
-  /** 档案里的补货方式 */
+  /** 档案里的补货方式与它的版本号（改补货方式时带上版本号，对不上拒绝） */
   mode: ReplenishMode;
+  modeRev: number;
   why: ReplenishSkipWhy;
   /** 近 lookbackDays 天里有领用的天数与最近一次的日期 */
   useDays: number;

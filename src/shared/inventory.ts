@@ -323,6 +323,8 @@ export interface Material {
   shelfLifeDays: number | null;
   /** 补货方式（迁移 161）：按需采购的不提补货、不做低库存提醒 */
   replenishMode: ReplenishMode;
+  /** 补货方式的版本号（每改一次加一）：只改补货方式时带上，对不上拒绝 */
+  replenishRev: number;
   tracked: boolean;
   active: boolean;
   /** 总仓结存 */
