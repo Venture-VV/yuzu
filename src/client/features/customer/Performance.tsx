@@ -21,7 +21,7 @@ export function PerformanceDialog({ selection, meta, revision, onRefresh, onClos
   }, [d?.filteredTotal, d?.limit, offset]);
   const periodName = period === "today" ? "今日" : period === "month" ? "本月" : "上月同期";
   const title = selection.scope === "department" ? `${periodName}部门已核业绩` : `${selection.subject}${periodName}已核业绩`;
-  return <Dialog open title={title} description="已核充值原单与退储值冲减逐笔展示，金额来自原生账本。" width="max-w-5xl" onClose={onClose} footer={<Button variant="secondary" onClick={onClose}>关闭业绩详情</Button>}>
+  return <Dialog open title={title} description="已核充值原单与退储值冲减逐笔展示，金额取自会员账本。" width="max-w-5xl" onClose={onClose} footer={<Button variant="secondary" onClick={onClose}>关闭业绩详情</Button>}>
     <div className="customer-dialog customer-stack">
       <Segmented ariaLabel="业绩原单统计期间" size="sm" value={period} onChange={(value) => { setPeriod(value); setOffset(0); }} options={[{ value: "today", label: "所选当日" }, { value: "month", label: "本月累计" }, { value: "lastMonthSame", label: "上月同期" }]} />
       {!allowed && <Notice tone="info" title="原单明细按账号权限查看">当前账号可查看部门与分组汇总，金融原单仅可查看本人。{!selfOnly && <div className="customer-actions"><Button size="sm" variant="secondary" onClick={() => setSelfOnly(true)}>查看本人同期已核原单</Button></div>}</Notice>}

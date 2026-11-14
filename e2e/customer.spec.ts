@@ -224,7 +224,7 @@ test("原生资金及历史项权限收回时保留客户服务并明确说明�
   await page.getByTestId("customer-tab-members").click();
   await page.getByRole("button", { name: "查看档案", exact: true }).first().click();
   const member = page.getByRole("dialog", { name: "会员档案与维护时间轴", exact: true });
-  await expect(member.getByText("会员资金记录按原生权限查看", { exact: true })).toBeVisible();
+  await expect(member.getByText("这个账号看不了会员的资金记录", { exact: true })).toBeVisible();
   await expect(member.getByText("系统实时可用余额", { exact: true })).toBeVisible();
   await expect(member.getByText("会员维护事实", { exact: true })).toBeVisible();
   await expect(member.getByRole("combobox", { name: "会员资金类别", exact: true })).toHaveCount(0);
@@ -235,7 +235,7 @@ test("原生资金及历史项权限收回时保留客户服务并明确说明�
   const visit = page.getByRole("dialog", { name: "手牌消费与服务跟进", exact: true });
   await expect(visit.getByText("历史消费项目按账号权限查看", { exact: true })).toBeVisible();
   await expect(visit.getByText("接待与服务跟进", { exact: true })).toBeVisible();
-  await expect(visit.getByText("原生消费项目（只读）", { exact: true })).toHaveCount(0);
+  await expect(visit.getByText("消费项目（来自前台，只读）", { exact: true })).toHaveCount(0);
   expect(financialRequests).toBe(0);
 });
 test("会员资金时间轴原单入口同时遵守金融权限与服务端可读编号", async ({ page }) => {

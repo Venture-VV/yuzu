@@ -23,7 +23,7 @@ export function Overview({ data, onNavigate }: { data: CustomerOverview; onNavig
           <span className="customer-hour-number">{chart === "visits" ? value(h) : (value(h) / 100).toLocaleString("zh-CN", { maximumFractionDigits: 0 })}</span><span className="customer-hour-track"><span style={{ height: `${Math.max(value(h) ? 3 : 1, value(h) / max * 100)}%` }} /></span><small>{h.label}</small>
         </button>)}
       </div></div>
-      <p className="customer-caption">按门店营业日及本地小时查看；入场人数按入场营业日追溯，不含已撤销入场；消费按原生结账单与独立扣卡单汇总，充值与消费不相加。消费汇总为全店口径，下钻原单按账号权限与经办范围展示。</p>
+      <p className="customer-caption">按门店营业日及本地小时查看；入场人数按入场营业日追溯，不含已撤销入场；消费按前台结账单与单独扣卡汇总，充值与消费不相加。消费是全店合计，下钻原单按账号权限与经办范围展示。</p>
     </Card>
     <div className="customer-two-columns">
       <Card className="customer-section"><SectionTitle>实收与核定分开看</SectionTitle><div className="customer-mini-facts"><span>本日充值实收 <b><Amount value={m.rechargePaidCents} /></b></span><span>充值赠额 <b><Amount value={m.rechargeBonusCents} /></b></span><span>客户部已核业绩 <b><Amount value={m.verifiedCreditCents} /></b></span><button type="button" onClick={() => onNavigate("daily", undefined, "consumption")}><span>其中会员工作台独立扣卡</span><b><Amount value={m.standaloneWalletNetCents} /></b></button>{data.capabilities.manage && <span>归属待核实收 <b><Amount value={m.pendingPaidCents} /></b></span>}</div><p className="customer-caption">待核表示责任归属尚未确认，已到账充值仍计实收。独立扣卡列入已结消费，结账关联扣卡不重复累计；赠金不计实收业绩，不自动计算提成。</p></Card>

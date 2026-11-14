@@ -20,7 +20,7 @@ import { Overview } from "./Overview";
 import { SettlementList } from "./Settlements";
 import { Targets } from "./Targets";
 import { LowBalances } from "./LowBalances";
-import { ReadStatus } from "./ui";
+import { ReadStatus, SyncedAt } from "./ui";
 import { emptyFilters } from "./types";
 import type { CustomerForm, CustomerTab, Filters, RecordKind, VisitScope } from "./types";
 import "./customer.css";
@@ -116,19 +116,20 @@ function CustomerWorkspace() {
   };
   const listProps = data ? { day, filters: activeFilters, onFilters, managers: data.managers.map((row) => row.manager), meta: data, revision, onRecord: openRecord, onForm: openForm, onRefresh: refresh } : null;
   return <div className="customer-page" data-testid="customer-workbench">
-    <PageHeader title="客户部经营工作台" subtitle="前台业务实时同步，服务与成交责任分别记录。" actions={<Button variant="secondary" size="sm" onClick={refresh}><RefreshCw size={14} />刷新</Button>} />
+    <PageHeader title="客户部经营工作台" subtitle="前台的手牌、消费与充值实时带过来；服务跟进、成交归属在这里记" actions={<><SyncedAt receivedAt={overview.receivedAt} /><Button variant="secondary" size="sm" onClick={refresh}><RefreshCw size={14} />刷新</Button></>} />
     <div className="customer-tabs"><SubNav tabs={tabs} base="/customer" active={tab} label="客户部模块" /></div>
     <main className="customer-content">
-      <div className="customer-section-head"><DateNav value={day} today={today} onChange={(value) => selectDay(value)} /><p className="customer-caption">{data?.capabilities.scope === "self" ? "共享经营总量 · 个人充值与目标仅本人" : "部门经营与原生业务记录"}</p></div>
+      {/* 低余额、会员名单看的是此刻的会员余额与维护关系，不随营业日变：这两页不放日期 */}
+      {(tab !== "lowBalances" && tab !== "members" || data?.capabilities.scope === "self") && <div className="customer-section-head">{tab !== "lowBalances" && tab !== "members" ? <DateNav value={day} today={today} onChange={(value) => selectDay(value)} /> : <span />}{data?.capabilities.scope === "self" && <p className="customer-caption">经营总量大家都看得到；充值明细与目标只看本人的</p>}</div>}
       <ErpPendingPanel types={CUSTOMER_OP_TYPES} onFound={refresh} />
       <ReadStatus {...overview} hasData={Boolean(data)} onRetry={refresh} />
       {data && tab === "overview" && <Overview data={data} onNavigate={onDrilldown} />}
       {listProps && tab === "visits" && <VisitList {...listProps} />}
-      {listProps && tab === "daily" && <div className="customer-stack"><Notice tone="info" title="数据来自前台原单">到账实收、客户部已核业绩及待归属分别展示。尚待核定或退款冲减会形成差额，不表示同步失败。客户部不能在此修改原金额、办理收款或退款。</Notice><SubNav tabs={dailyTabs} base="/customer" active={dailyMode} label="当日经营明细类别" />{dailyMode === "recharge" ? <RechargeList {...listProps} /> : <SettlementList {...listProps} />}</div>}
+      {listProps && tab === "daily" && <div className="customer-stack"><Notice tone="info" title="金额都来自前台的原单">到账实收、客户部已核业绩、还没核定归属的分开列；三个数对不上是因为有的还没核定、或者有退款冲减，不是没同步。这里不能改金额，也不办收款、退款。</Notice><SubNav tabs={dailyTabs} base="/customer" active={dailyMode} label="当日经营明细类别" />{dailyMode === "recharge" ? <RechargeList {...listProps} /> : <SettlementList {...listProps} />}</div>}
       {data && tab === "targets" && <Targets day={day} revision={revision} onRefresh={refresh} onForm={openForm} onRecord={openRecord} />}
       {listProps && tab === "lowBalances" && <LowBalances {...listProps} />}
       {listProps && tab === "members" && <div className="customer-stack">{data?.capabilities.manage && <SubNav tabs={memberTabs} base="/customer" active={memberMode} label="会员绑定工作区" />}{data?.capabilities.manage && memberMode === "bindings" ? <BindingQueue revision={revision} onRefresh={refresh} onRecord={openRecord} onForm={openForm} /> : <MemberList {...listProps} />}</div>}
-      <p className="customer-caption">会员钱包与消费读取原生系统，服务与成交归属各自留痕；赠金不计实收业绩，不自动计算提成。</p>
+      <p className="customer-caption">会员余额与消费直接取自会员系统与前台，这里不改；服务记录与成交归属分开记。赠金不算业绩，这里也不算提成。</p>
     </main>
     {records.map((entry, index) => <CustomerDetailDialog key={entry.key} entry={entry} open={index === records.length - 1} hasBack={index > 0} revision={revision} onClose={() => setRecords((old) => old.slice(0, -1))} onRecord={openRecord} onForm={openForm} onRefresh={refresh} />)}
     {form && <CustomerFormDialog key={form.key} form={form.value} meta={form.meta} managers={form.managers} onClose={() => setForm(null)} onSaved={() => { setForm(null); refresh(); }} />}

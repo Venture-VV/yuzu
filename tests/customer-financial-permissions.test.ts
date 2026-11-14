@@ -239,3 +239,26 @@ it("keeps current hand-tag service items available while requiring native frontd
   await role("store_manager", { remove: ["frontdesk.read"] });
   expect((await get(`visits/${closedVisit}`, manager)).body).toMatchObject({ linesReadable: false, lines: [] });
 });
+
+// 整合进主线时加的（与管家部同一条规则）：没有「查找与查看会员」权限的账号，客户部返回的会员手机号打码；仍可按手机号查找。
+it("masks member phones for accounts without member.read while keeping phone search, and leaves them intact for authorized accounts", async () => {
+  const full = "19900008601", masked = "199 **** 8601";
+  const phones = (body: unknown) => [...JSON.stringify(body).matchAll(/"phone":"([^"]*)"/g)].map((m) => m[1]);
+  // 默认的客户经理有 member.read：列表与详情都是完整的号码
+  const list = await get("members?q=" + full);
+  expect(list.status).toBe(200);
+  expect(phones(list.body)).toContain(full);
+  expect(phones((await get(`members/${memberId}`)).body)).toContain(full);
+  // 收回 member.read：同样的请求，号码都打码（按完整号码仍然查得到这位会员）
+  await role("account_manager", { remove: ["member.read"] });
+  for (const path of ["members?q=" + full, `members/${memberId}`, "low-balances?q=" + full, `visits/${openVisit}`]) {
+    const res = await get(path);
+    expect(res.status, path).toBe(200);
+    const seen = phones(res.body);
+    expect(seen, path).not.toContain(full);
+    if (path.startsWith("members")) expect(seen, path).toContain(masked);
+  }
+  expect((await get("members?q=" + full)).body.rows.map((r: { id: number }) => r.id)).toContain(memberId);
+  // 店主不受影响
+  expect(phones((await get(`members/${memberId}`, ctx.owner)).body)).toContain(full);
+});
