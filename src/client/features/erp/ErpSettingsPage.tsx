@@ -14,6 +14,8 @@ import { RulesPanel } from '../approvals/RulesPanel';
 import { ExpenseRulesCard } from '../expenses/ExpenseRulesCard';
 import { PaymentRulesCard } from '../payments/PaymentRulesCard';
 import { PurchaseRulesCard } from '../purchasing/PurchaseRulesCard';
+import { AutoReplenishCard } from '../purchasing/AutoReplenishCard';
+import { UsageRulesCard } from '../inventory/UsageTab';
 import { ErpModulesPanel } from './ErpModulesPage';
 import { erpSettingsTabs } from './settingsTabs';
 import { ERP_SETTINGS_PATH } from '@shared/erp';
@@ -39,13 +41,17 @@ export function ErpSettingsPage() {
           </SubPane>
         )}
         {has('purchase') && (
-          <SubPane tab="purchase" lazy>
+          <SubPane tab="purchase" lazy className="space-y-5">
             <PurchaseRulesCard />
+            {/* 8.0.20：自动补货的开关与时间（「采购 → 补货建议」顶上是同一张卡片，两处都能改） */}
+            <AutoReplenishCard />
           </SubPane>
         )}
         {has('inventory') && (
-          <SubPane tab="inventory" lazy>
+          <SubPane tab="inventory" lazy className="space-y-5">
             <InventoryRules />
+            {/* 8.0.20：按用料扣库存的开关（「库存 → 用料与扣料」顶上是同一张卡片） */}
+            <UsageRulesCard />
           </SubPane>
         )}
         {has('approvals') && (

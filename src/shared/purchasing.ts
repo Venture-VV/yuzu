@@ -97,6 +97,8 @@ export interface PurchaseOrder {
   backfillReceipt: DocRef | null;
   createdBy: number;
   createdByName: string;
+  /** 系统建的（自动补货的草稿）：还是草稿时，能编制采购单的人都可以撤掉 */
+  createdBySystem: boolean;
   createdAt: string;
   approvedByName: string | null;
   approvedAt: string | null;
@@ -578,11 +580,13 @@ export interface ReplenishLine {
   stockMilli: number;
   /** 在途：没撤回、没关闭的采购单还没收到的（补单除外） */
   inTransitMilli: number;
+  /** 欠着没扣的（8.0.20：销售 / 出品扣料库存不够时留着的净数，总仓）：算可用数量时已经减掉 */
+  owedMilli: number;
   /** 在途来自哪几张采购单 */
   openPos: string[];
   /** 日均用量（库存单位，近 N 天）；没有用量为 null */
   dailyUsageMilli: number | null;
-  /** (结存 + 在途) ÷ 日均用量，一位小数 */
+  /** (结存 + 在途 − 欠着没扣的) ÷ 日均用量，一位小数 */
   daysOfCover: number | null;
   /** 档案里的补货方式（迁移 161；建议里的只会是自动识别或常备）与它的版本号：改补货方式时带上版本号，对不上拒绝 */
   mode: ReplenishMode;
@@ -635,6 +639,8 @@ export interface ReplenishSkipped {
   inventoryUnit: string;
   stockMilli: number;
   inTransitMilli: number;
+  /** 欠着没扣的（同建议行） */
+  owedMilli: number;
   /** 档案里的补货方式与它的版本号（改补货方式时带上版本号，对不上拒绝） */
   mode: ReplenishMode;
   modeRev: number;

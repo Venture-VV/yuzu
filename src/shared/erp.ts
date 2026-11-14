@@ -4,7 +4,7 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'assets', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'receivables', 'revenue', 'canteen', 'patrol'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'assets', 'linen', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'receivables', 'revenue', 'canteen', 'patrol'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -38,7 +38,8 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     path: '/inventory',
     pages: ['/inventory'],
     apis: ['/api/inventory'],
-    perms: ['inventory.read'],
+    // 有「看成本」没有「查看库存」的（店总默认如此）只看得到「成本」一个页签
+    perms: ['inventory.read', 'inventory.cost'],
     defaultEnabled: true,
     requires: [],
   },
@@ -101,6 +102,18 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     apis: ['/api/erp/assets'],
     perms: ['asset.read'],
     defaultEnabled: true,
+    requires: ['inventory'],
+  },
+  linen: {
+    label: '布草洗涤',
+    group: '供应链',
+    description: '布草（浴巾、浴衣、床品）的在店 / 在洗台账：送洗、收回（破损、丢失）、新增、报废；按洗涤厂、按月的洗涤费对账表（8.0.20）',
+    path: '/erp/linen',
+    pages: ['/erp/linen'],
+    apis: ['/api/erp/linen'],
+    perms: ['linen.read'],
+    defaultEnabled: true,
+    // 洗涤厂用供应商档案
     requires: ['inventory'],
   },
   approvals: {
@@ -206,7 +219,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     pages: ['/erp/canteen'],
     apis: ['/api/erp/canteen'],
     perms: ['canteen.manage'],
-    defaultEnabled: false,
+    defaultEnabled: true,
     requires: [],
   },
   patrol: {
@@ -220,7 +233,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     pages: ['/erp/patrol'],
     apis: ['/api/erp/patrol'],
     perms: ['patrol.read', 'patrol.manage'],
-    defaultEnabled: false,
+    defaultEnabled: true,
     requires: ['canteen'],
   },
 };
@@ -231,7 +244,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
  */
 export const ERP_NAV_GROUPS: readonly { key: string; title: string; modules: readonly ErpModuleKey[] }[] = [
   { key: 'approvals', title: '审批', modules: ['approvals'] },
-  { key: 'supply', title: '供应链', modules: ['inventory', 'purchasing', 'requests', 'deptStock', 'assets'] },
+  { key: 'supply', title: '供应链', modules: ['inventory', 'purchasing', 'requests', 'deptStock', 'assets', 'linen'] },
   { key: 'finance', title: '财务', modules: ['payments', 'payables', 'expenses', 'invoices', 'receivables'] },
   { key: 'contracts', title: '合同', modules: ['contracts'] },
   // 已经挪到后台的：页面不在 ERP 里。8.0.18 在 ERP 导航里各留了一条跳转，8.0.19 去掉；这一组留着是为了「每个模块都有归属」，
@@ -362,6 +375,8 @@ export const ERP_OP_TYPES = [
   'asset_stocktake',
   // 8.0.9 安保巡场：新建场所
   'patrol_point',
+  // 8.0.20 布草洗涤：送洗、收回、新增、报废单
+  'linen_doc',
   'customer_note',
   'customer_binding_request',
   'customer_binding_review',
@@ -426,6 +441,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   asset_card: '资产建卡',
   asset_stocktake: '开始扫码盘点',
   patrol_point: '新建巡场场所',
+  linen_doc: '布草单据',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

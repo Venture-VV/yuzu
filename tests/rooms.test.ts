@@ -102,11 +102,11 @@ describe('后台：客房规则、房型、房间', () => {
     expect(rules.status, JSON.stringify(rules.body)).toBe(200);
     expect((await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.rooms).toBe(true);
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/rooms/rules', { enabled: true, checkoutMinute: 720, lateFullMinute: 600, hourlyGraceMinutes: 15, defaultDeposit: 0 })).status).toBe(400);
-    // 规则总表列出客房规则：开关不是默认值，其余按默认（待确认）；最近修改记在店主名下
+    // 规则总表列出客房规则：开关开着（8.0.20 起开就是默认值），其余按默认（待确认）；最近修改记在店主名下
     const catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as { key: string; group: string; isDefault: boolean; pending: boolean; section: string; updatedBy: string | null }[];
     const roomRules = catalog.filter((r) => r.group === 'rooms');
     expect(roomRules.map((r) => [r.key, r.isDefault, r.pending, r.section])).toEqual([
-      ['room_rules.enabled', false, false, 'rooms'],
+      ['room_rules.enabled', true, false, 'rooms'],
       ['room_rules.checkout', true, true, 'rooms'],
       ['room_rules.hourlyGraceMinutes', true, true, 'rooms'],
       ['room_rules.defaultDeposit', true, true, 'rooms'],

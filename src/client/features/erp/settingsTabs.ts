@@ -15,8 +15,8 @@ export interface ErpSettingsTab {
 
 const ALL: readonly (ErpSettingsTab & { perms: readonly Permission[]; module?: ErpModuleKey })[] = [
   { key: 'modules', label: '模块开关', hint: '开关 ERP 的模块（含已经挪到后台的员工食堂、安保巡场、营业数据）', perms: ['settings.manage'] },
-  { key: 'purchase', label: '采购规则', hint: '截单、需求单转采购单、部门主管确认、急采分级审批、询价门槛、补货与到货超期', perms: ['inventory.read'], module: 'purchasing' },
-  { key: 'inventory', label: '库存与审批开关', hint: '盘点日、称重容差、按批次对账宽限、哪些单据要负责人确认', perms: ['settings.manage'], module: 'inventory' },
+  { key: 'purchase', label: '采购规则', hint: '截单、需求单转采购单、部门主管确认、急采分级审批、询价门槛、补货与到货超期、自动补货', perms: ['inventory.read'], module: 'purchasing' },
+  { key: 'inventory', label: '库存与审批开关', hint: '盘点日、称重容差、按批次对账宽限、哪些单据要负责人确认、按用料扣库存', perms: ['settings.manage'], module: 'inventory' },
   { key: 'approvals', label: '审批规则与代理人', hint: '单据类型 × 金额 × 部门 → 一到三级审批链；谁替谁审', perms: ['approval.act', 'inventory.approve', 'expense.approve', 'approval.rules'], module: 'approvals' },
   { key: 'payments', label: '付款规则', hint: '三单比对的容差、本周应付、固定付款日、质保金提醒、挂合同的货款先提申请', perms: ['payable.read', 'payment.request'], module: 'payments' },
   { key: 'expenses', label: '报销与备用金', hint: '报销门槛、发票类型与税率、预算预警；部门备用金定额与预算额度的入口', perms: ['settings.manage'], module: 'expenses' },

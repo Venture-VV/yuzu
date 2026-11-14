@@ -73,6 +73,7 @@ import { countCardOptions, redeemCountCards, returnCheckoutCountCards } from '..
 import { lockPlatformCode, redemptionOfCode } from '../platform-redemptions';
 import { chargeOnAccount, voidChargesOfCheckout } from '../receivables';
 import { MAX_COUNT_CARD_USES, MAX_COUNT_CARDS_PER_CHECKOUT } from '@shared/count-cards';
+import { recordSaleUsage, reverseSaleUsage } from '../stock-usage';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -644,6 +645,8 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     });
     await recordCheckoutPayments(tx, deps, { checkoutId, checkoutNo, payments: input.payments, discount, tagCodes, billIds, memberIds, date, at, ctx, memberDiscount });
     await snapshotCheckoutItems(tx, checkoutId);
+    // 扣库存（8.0.20）：不进厨房的明细按用料记「该扣多少」，只插入、不碰库存的锁；每分钟的任务再开耗用单
+    await recordSaleUsage(tx, checkoutId, billIds, date);
 
     // 结清：账单与来访结束，手牌释放；同行组没有在店客人时关闭
     await tx`UPDATE bills SET status = 'settled', closed_at = ${at} WHERE id IN ${tx(billIds)}`;
@@ -822,6 +825,8 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     await returnCheckoutCoupons(tx, { checkoutId: c.id, reason: voidText, date, at, staffId: ctx.actor.id });
     // 用掉的次卡次数退回（v0.7.28；在券之后按卡的 id 升序锁卡）
     await returnCheckoutCountCards(tx, { checkoutId: c.id, reason: voidText, date, at, staffId: ctx.actor.id });
+    // 扣库存（8.0.20）：这张结账单记过的扣料各记一条冲回（重新结账时再记）
+    await reverseSaleUsage(tx, c.id);
     // 退款记到反结账人的班次，或所选钱箱当班的班次（事务开头已加锁核对）
     await tx`
       UPDATE checkouts SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${reason}, void_business_date = ${date},

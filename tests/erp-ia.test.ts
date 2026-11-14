@@ -18,7 +18,7 @@ describe('ERP 导航分组', () => {
     expect(groupOf('approvals').modules).toEqual(['approvals']);
     expect(groupOf('payables').title).toBe('财务');
     expect(groupOf('contracts').title).toBe('合同');
-    expect(groupOf('inventory').modules).toEqual(['inventory', 'purchasing', 'requests', 'deptStock', 'assets']);
+    expect(groupOf('inventory').modules).toEqual(['inventory', 'purchasing', 'requests', 'deptStock', 'assets', 'linen']);
     for (const g of ERP_NAV_GROUPS) {
       for (const k of g.modules) {
         if (g.key === 'moved') expect(ERP_MODULES[k].group).toBe('后台');

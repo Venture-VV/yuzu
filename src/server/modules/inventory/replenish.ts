@@ -62,6 +62,7 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
     replenishMode: ReplenishMode;
     replenishRev: number;
     consumable: boolean;
+    owedMilli: number;
     assetNo: string | null;
     assetCount: number;
     refPriceCents: number | null;
@@ -71,9 +72,14 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
     SELECT m.id, m.code, m.name, m.specification, m.inventory_unit, m.purchase_unit, m.purchase_factor_milli, m.decimals, m.stock_milli,
            m.cover_days, m.low_stock_milli, m.replenish_mode, m.replenish_rev, m.ref_price_cents,
            -- 档案里已经标明是消耗品的（自动识别时算常备，头一次领用就提）：台面日耗品、管效期的、称重的。
-           -- 别的「明摆着是消耗品」的信号接在这里——8.0.20 的用料与配方合进来以后，挂了在用用料的物料也算
-           --（零售品、菜品原料：第一天就卖断货的话，后面的扣料都欠着、不会再有第二天的用量）。
-           (m.counter_use OR m.expiry_tracked OR m.weighed) AS consumable,
+           -- 挂在某个在用的用料里的也算（8.0.20，docs/ERP_V8020.md 第 3 节）：零售品、菜品原料第一天就卖断货的话，
+           -- 后面的扣料都欠着、不会再有第二天的用量，按领用天数会被认成一次性采购。
+           (m.counter_use OR m.expiry_tracked OR m.weighed
+            OR EXISTS (SELECT 1 FROM item_recipe_lines rl JOIN item_recipes r ON r.id = rl.recipe_id
+                       WHERE rl.material_id = m.id AND r.status = 'active')) AS consumable,
+           -- 总仓欠着没扣的（8.0.20：销售 / 出品扣料库存不够时留着的净数）：当成已经用掉的，从可用数量里减
+           greatest(0, coalesce((SELECT sum(e.sign * e.qty_milli) FROM stock_usage_events e
+                                 WHERE e.material_id = m.id AND e.state = 'pending' AND e.warehouse_id = ${CENTRAL_WAREHOUSE_ID}), 0))::bigint AS owed_milli,
            ac.asset_no, coalesce(ac.n, 0) AS asset_count,
            coalesce(ds.id, ls.id) AS supplier_id, coalesce(ds.name, ls.name) AS supplier_name
     FROM materials m
@@ -116,7 +122,8 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
     const stock = Number(m.stockMilli);
     const tr = transitBy.get(Number(m.id));
     const inTransit = tr?.qty ?? 0;
-    const available = stock + inTransit;
+    const owed = Number(m.owedMilli);
+    const available = stock + inTransit - owed;
     const usedMilli = used.get(Number(m.id)) ?? 0;
     let reason: ReplenishLine['reason'];
     let needMilli: number;
@@ -134,6 +141,10 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
     } else if (m.lowStockMilli !== null && available < Number(m.lowStockMilli)) {
       reason = 'low_stock';
       needMilli = Number(m.lowStockMilli) - available;
+    } else if (owed > 0 && available < 0) {
+      // 没有用量、也没设提醒数量，但已经欠着没扣（一直没货的零售品、原料）：把欠的补上
+      reason = 'low_stock';
+      needMilli = -available;
     } else continue;
     if (needMilli <= 0) continue;
     const packs = packsFor(needMilli, Number(m.purchaseFactorMilli), m.decimals);
@@ -160,6 +171,7 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
         inventoryUnit: m.inventoryUnit,
         stockMilli: stock,
         inTransitMilli: inTransit,
+        owedMilli: owed,
         mode: m.replenishMode,
         modeRev: m.replenishRev,
         why,
@@ -187,6 +199,7 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
       decimals: m.decimals,
       stockMilli: stock,
       inTransitMilli: inTransit,
+      owedMilli: owed,
       openPos: tr?.docNos ?? [],
       dailyUsageMilli: daily > 0 ? Math.round(daily) : null,
       daysOfCover,

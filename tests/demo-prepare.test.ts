@@ -28,7 +28,7 @@ import { setup, type TestContext } from './helpers';
 let ctx: TestContext;
 let dev: AppConfig;
 beforeAll(async () => {
-  ctx = await setup();
+  ctx = await setup({ keepDefaultSwitches: true });
   dev = loadConfig({ databaseUrl: ctx.config.databaseUrl, env: 'development', logLevel: 'silent' });
 });
 afterAll(async () => ctx.close());

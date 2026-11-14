@@ -46,7 +46,8 @@ export interface TechnicianRules {
 }
 
 export const DEFAULT_TECHNICIAN_RULES: TechnicianRules = {
-  enabled: false,
+  // 8.0.20：功能开关都默认开（店主 2026-11-14，docs/PENDING_DECISIONS.md KG1–KG4）；要关在设置页关
+  enabled: true,
   requireTechnician: true,
   tierByGrade: true,
   defaultCallType: 'rotation',
