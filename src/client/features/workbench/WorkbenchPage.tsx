@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
+import { Ticket } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MemberSummary } from '@shared/types';
 import { errorMessage } from '../../lib/api';
@@ -123,7 +124,23 @@ export function WorkbenchPage() {
 
   return (
     <>
-      <PageHeader title="会员工作台" subtitle={session.storeName} />
+      <PageHeader
+        title="会员工作台"
+        subtitle={session.storeName}
+        actions={
+          // 发券（8.0.19，IA4）：批量发券、无记名券从后台「券」挪到这里；权限照旧是维护券的人
+          can('coupon.manage') && (
+            <Link
+              to="/coupon-issue"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+              data-testid="workbench-coupon-issue"
+            >
+              <Ticket className="size-4" />
+              发券
+            </Link>
+          )
+        }
+      />
       <div
         className={cn(
           'grid min-h-0 flex-1',

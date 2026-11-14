@@ -24,6 +24,7 @@ const ClockroomPage = lazyPage(() => import('./features/clockroom/ClockroomPage'
 const DiningPage = lazyPage(() => import('./features/dining/DiningPage').then((m) => m.DiningPage));
 const RoomsPage = lazyPage(() => import('./features/rooms/RoomsPage').then((m) => m.RoomsPage));
 const BookingsPage = lazyPage(() => import('./features/bookings/BookingsPage').then((m) => m.BookingsPage));
+const CouponIssuePage = lazyPage(() => import('./features/coupons/CouponIssuePage').then((m) => m.CouponIssuePage));
 const ConciergePage = lazyPage(() => import('./features/concierge/ConciergePage').then((m) => m.ConciergePage));
 const PlatformPage = lazyPage(() => import('./features/platform/PlatformPage').then((m) => m.PlatformPage));
 const GuidePage = lazyPage(() => import('./features/guide/GuidePage').then((m) => m.GuidePage));
@@ -320,6 +321,8 @@ const router = createBrowserRouter([
       { path: 'dining/:tab?', element: <DiningPage /> },
       { path: 'rooms', element: <RoomsPage /> },
       { path: 'bookings', element: <BookingsPage /> },
+      // 发券（8.0.19，IA4）：批量发券、无记名券从后台「券」挪到门店，会员工作台右上角进
+      { path: 'coupon-issue/:tab?', element: <CouponIssuePage /> },
       // 管家部（8.0.12）：门店的工作页面；/admin/concierge 是 Codex 最初放的地址，留着跳过来
       // 8.0.18：哪一页写进地址（/concierge/members、/concierge/praise……），见 Workspace.tsx 的 VIEW_SLUG
       { path: 'concierge/:view?', element: <ConciergePage /> },
