@@ -101,3 +101,49 @@ export function usageMilli(qtyMilli: number, quantity: number, lossBp: number, d
   const milli = (raw + 9999n) / 10000n;
   return Number(((milli + step - 1n) / step) * step);
 }
+
+// ───────────────────────── 成本报表（docs/ERP_V8020.md 第 1 节） ─────────────────────────
+
+export interface StockValueRow {
+  materialId: number;
+  code: string;
+  name: string;
+  inventoryUnit: string;
+  /** 全公司结存（总仓 + 各部门小仓） */
+  stockMilli: number;
+  centralMilli: number;
+  avgCostE4: number;
+  /** 成本是估的（升级时按最近进价或参考价起算，还没有真的按进价入库过） */
+  estimated: boolean;
+  valueCents: number;
+}
+
+export interface UsageCostRow {
+  warehouseName: string;
+  /** 耗用 / 报损 / 销售出库 / 配方耗用 */
+  label: string;
+  costCents: number;
+  moves: number;
+  /** 没记成本的流水条数（8.0.20 之前的） */
+  uncosted: number;
+}
+
+export interface MarginRow {
+  itemId: number;
+  itemName: string;
+  category: string;
+  quantity: number;
+  revenueCents: number;
+  /** 一份的理论成本（配方 × 现在的平均成本，含损耗）；没设用料或有物料没成本是 null */
+  unitCostCents: number | null;
+  costCents: number | null;
+  marginCents: number | null;
+}
+
+export interface CostReport {
+  from: string;
+  to: string;
+  stock: { rows: StockValueRow[]; totalCents: number; estimatedCount: number };
+  usage: { rows: UsageCostRow[]; totalCents: number };
+  margin: { rows: MarginRow[]; revenueCents: number; costCents: number };
+}

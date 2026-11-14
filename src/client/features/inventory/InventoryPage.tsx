@@ -1,15 +1,17 @@
 import { NavLink, Navigate, useParams } from 'react-router';
-import { Archive, BarChart3, Boxes, FileStack, Gift, Hourglass } from 'lucide-react';
+import { Archive, BarChart3, Boxes, Calculator, FileStack, Gift, Hourglass, PackageMinus } from 'lucide-react';
 import { useCan } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { AgingTab } from './AgingTab';
+import { CostTab } from './CostTab';
 import { DocsTab } from './DocsTab';
 import { GiftsTab } from './GiftsTab';
 import { MasterTab } from './MasterTab';
 import { useInvSettings } from './queries';
 import { StockTab } from './StockTab';
 import { SummaryTab } from './SummaryTab';
+import { UsageTab } from './UsageTab';
 
 const TABS = [
   { key: 'stock', label: '库存', icon: Boxes },
@@ -19,6 +21,9 @@ const TABS = [
   { key: 'aging', label: '呆滞与临期', icon: Hourglass },
   // 赠品台账（8.0.1 采购组整改 09）：只记台账，不进库存
   { key: 'gifts', label: '赠品台账', icon: Gift },
+  // 用料与扣料、成本（8.0.20，docs/ERP_V8020.md）
+  { key: 'usage', label: '用料与扣料', icon: PackageMinus },
+  { key: 'cost', label: '成本', icon: Calculator },
   { key: 'master', label: '档案', icon: Archive },
 ] as const;
 type TabKey = (typeof TABS)[number]['key'];
@@ -28,7 +33,9 @@ export function InventoryPage() {
   const settings = useInvSettings();
   const { tab = 'stock' } = useParams<{ tab?: TabKey }>();
   if (!can('inventory.read')) return <Navigate to="/" replace />;
-  if (!TABS.some((t) => t.key === tab)) return <Navigate to="/inventory" replace />;
+  // 成本只给有「看成本」权限的人
+  const tabs = TABS.filter((t) => t.key !== 'cost' || can('inventory.cost'));
+  if (!tabs.some((t) => t.key === tab)) return <Navigate to="/inventory" replace />;
   return (
     <>
       <PageHeader
@@ -37,7 +44,7 @@ export function InventoryPage() {
         subtitle={`${settings.data?.scopeName ?? '后勤总库'} · 数量按各自库存单位记录，每一笔变化都可追溯`}
       />
       <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-5 md:px-7">
-        {TABS.map(({ key, label, icon: Icon }) => (
+        {tabs.map(({ key, label, icon: Icon }) => (
           <NavLink
             key={key}
             to={key === 'stock' ? '/inventory' : `/inventory/${key}`}
@@ -57,6 +64,8 @@ export function InventoryPage() {
       {tab === 'summary' && <SummaryTab />}
       {tab === 'aging' && <AgingTab />}
       {tab === 'gifts' && <GiftsTab />}
+      {tab === 'usage' && <UsageTab />}
+      {tab === 'cost' && <CostTab />}
       {tab === 'master' && <MasterTab />}
     </>
   );

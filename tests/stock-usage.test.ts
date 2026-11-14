@@ -276,3 +276,46 @@ describe('配方：出品完成时记', () => {
     await expect(ctx.sql`DELETE FROM stock_usage_events WHERE id = ${ea!.id}`).rejects.toThrow();
   });
 });
+
+describe('成本报表（docs/ERP_V8020.md 第 1 节）', () => {
+  it('库存金额、耗用成本（自动扣料的分成销售出库、配方耗用）、项目毛利（理论成本）；只有「看成本」的人能看；能导出', async () => {
+    expect((await api(ctx.app, keeper, 'GET', '/api/inventory/cost')).status).toBe(403);
+    const r = await api(ctx.app, ctx.owner, 'GET', '/api/inventory/cost');
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const body = r.body as import('../src/shared/stock-usage').CostReport;
+    // 库存金额：结存 × 平均成本，合计对得上
+    const water = body.stock.rows.find((x) => x.name === '瓶装水')!;
+    expect(water.stockMilli).toBe(await stock(mat['瓶装水']!));
+    expect(water.valueCents).toBe(Math.round((water.stockMilli * water.avgCostE4) / 10_000_000));
+    expect(body.stock.totalCents).toBe(body.stock.rows.reduce((a, x) => a + x.valueCents, 0));
+    // 收过一次货的不再是估的；只做过期初的还是估的
+    expect(water.estimated).toBe(false);
+    expect(body.stock.rows.find((x) => x.name === '鸡腿肉')!.estimated).toBe(true);
+    // 耗用成本：总仓的销售出库、配方耗用都有，金额为正，都记了成本
+    const labels = body.usage.rows.filter((x) => x.warehouseName === '总仓').map((x) => x.label);
+    expect(labels).toEqual(expect.arrayContaining(['销售出库', '配方耗用']));
+    for (const row of body.usage.rows) {
+      expect(row.costCents).toBeGreaterThan(0);
+      expect(row.uncosted).toBe(0);
+    }
+    // 与流水记的金额一致（耗用、报损的流水取反求和）
+    const [sum] = await ctx.sql<{ cents: number }[]>`
+      SELECT COALESCE(sum(-sm.cost_cents), 0)::bigint AS cents FROM stock_moves sm JOIN inv_docs d ON d.id = sm.doc_id WHERE d.doc_type IN ('direct_use', 'damage')`;
+    expect(body.usage.totalCents).toBe(Number(sum!.cents));
+    // 项目毛利：矿泉水卖 5.00、一瓶成本 1.00；没设用料的只有销售额
+    const sold = body.margin.rows.find((x) => x.itemName === '矿泉水')!;
+    expect(sold.unitCostCents).toBe(100);
+    expect(sold.costCents).toBe(sold.quantity * 100);
+    expect(sold.marginCents).toBe(sold.revenueCents - sold.quantity * 100);
+    expect(sold.revenueCents).toBe(sold.quantity * 500);
+    expect(body.margin.rows.find((x) => x.itemName === '没设用料的')).toMatchObject({ unitCostCents: null, costCents: null, marginCents: null });
+    // 日期范围不对拒绝；导出是 CSV
+    expect((await api(ctx.app, ctx.owner, 'GET', '/api/inventory/cost?from=2026-12-01&to=2026-01-01')).status).toBe(400);
+    const csv = await ctx.app.inject({ method: 'GET', url: '/api/inventory/cost/export', headers: { cookie: ctx.owner } });
+    expect(csv.statusCode).toBe(200);
+    expect(csv.headers['content-type']).toContain('text/csv');
+    expect(csv.body).toContain('库存金额');
+    expect(csv.body).toContain('瓶装水');
+  });
+});
+
