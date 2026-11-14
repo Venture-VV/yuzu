@@ -49,13 +49,27 @@ export async function loadStockUsageRules(db: Db): Promise<StockUsageRules> {
 }
 
 /**
- * 这个价目项目卖出 / 出品时会不会按用料扣库存（开关开着、而且有在用的用料）。
- * 买一赠一用（合并前 Codex 审查 342941e）：赠的那一件也在账单上，用料会把它一起扣掉，券模板上的赠品出库就不要再记一次。
+ * 这张结账单里这个价目项目的明细，用料是不是都会（或已经）把它扣掉。
+ * 买一赠一用（合并前 Codex 审查 342941e、7dbc313）：赠的那一件也在账单上，用料把它一起扣了的话，券模板上的赠品出库就不要再记一次。
+ *   · 不进厨房的明细：结账时扣（同一个事务里的 recordSaleUsage）——看此刻开关开没开、有没有在用的用料，与它用的是同样的条件；
+ *   · 进厨房、已经出品完成的：出品时扣——看这张出品单**记没记过**扣料事件，不看现在的开关与用料
+ *     （出品时开关关着、或那时还没设用料，后来才打开 / 设上的，当时没记，赠品出库要照记，不然一次都没扣）；
+ *   · 进厨房、还没出品完成的：到出品完成时才扣，只能按此刻的开关与用料估。
+ * 有一条明细不会被用料扣到，就照旧记赠品出库。只读、不加锁（账单调用方已锁）。
  */
-export async function usageCoversItem(db: Db, itemId: number): Promise<boolean> {
-  if (!(await loadStockUsageRules(db)).enabled) return false;
-  const [r] = await db<{ id: number }[]>`SELECT id FROM item_recipes WHERE item_id = ${itemId} AND status = 'active'`;
-  return !!r;
+export async function usageCoversItem(db: Db, itemId: number, billIds: number[]): Promise<boolean> {
+  const rules = await loadStockUsageRules(db);
+  const [recipe] = await db<{ id: number }[]>`SELECT id FROM item_recipes WHERE item_id = ${itemId} AND status = 'active'`;
+  const now = rules.enabled && !!recipe;
+  if (billIds.length === 0) return now;
+  const lines = await db<{ kitchenId: number | null; status: string | null; recorded: boolean }[]>`
+    SELECT k.id AS kitchen_id, k.status,
+           (k.id IS NOT NULL AND EXISTS (SELECT 1 FROM stock_usage_events e
+                                         WHERE e.kitchen_item_id = k.id AND e.kind = 'recipe' AND e.sign = 1 AND e.reversed_at IS NULL)) AS recorded
+    FROM bill_lines l LEFT JOIN kitchen_items k ON k.bill_line_id = l.id
+    WHERE l.bill_id IN ${db(billIds)} AND l.status = 'active' AND l.item_id = ${itemId}`;
+  if (lines.length === 0) return now;
+  return lines.every((l) => (l.kitchenId === null ? now : l.status === 'done' || l.status === 'served' ? l.recorded : now));
 }
 
 const RulesInput = z.object({

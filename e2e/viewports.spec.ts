@@ -1,7 +1,7 @@
 // 视口冒烟（R1.6，只读）：除门店电脑 1440×900、平板 1024×768 / 820×1180 外，再看 1280×720 的小屏电脑与手机（393×727）。
 // 看板、日结、管理后台在手机上也要能看（店主用手机查）；前台、交班、会员工作台只在电脑与平板上用。依赖四套演示数据，账号店主 linlan。
 // 核对：页面不横向滚动；除了有意横向滚动的区域（表格、标签栏，带 overflow-x-auto），没有横向滚动区，也没有内容超出屏幕右边。
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const PASSWORD = 'yuzu2026';
 
@@ -67,6 +67,14 @@ async function expectFits(page: Page) {
     return out.slice(0, 8);
   });
   expect(problems).toEqual([]);
+}
+
+/** 主导航最后一个入口「后台」与实例标识之间的余量：标识是一行时要放得下多一行（演示库、测试服是两行），已经是两行时只要不挨着 */
+async function expectNavRoomForTwoLineTag(nav: Locator, tag: { y: number }) {
+  const twoLines = await nav.getByTestId('instance-tag').locator('span').first().evaluate((el) => el.querySelector('br') !== null);
+  const last = (await nav.getByRole('link', { name: '后台', exact: true }).boundingBox())!;
+  const gap = tag.y - (last.y + last.height);
+  expect(gap, twoLines ? '「后台」与两行的实例标识不挨着' : '「后台」与实例标识之间放得下多一行标识').toBeGreaterThanOrEqual(twoLines ? 4 : 16);
 }
 
 test.describe('视口冒烟', () => {
@@ -209,9 +217,9 @@ test.describe('视口冒烟', () => {
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
         }
-        // 演示库、测试服的实例标识是两行（例如「演示」「不作数」），比这里的开发环境多一行：最后一个入口与标识之间要留出这一行（Codex 复测 PR #18 P2）
-        const last = (await nav.getByRole('link', { name: '后台', exact: true }).boundingBox())!;
-        expect(last.y + last.height, '「后台」与实例标识之间放得下多一行标识').toBeLessThanOrEqual(tag.y - 16);
+        // 演示库、测试服的实例标识是两行（例如「演示」「不作数」），开发环境是一行：一行时最后一个入口与标识之间要留出多一行（16 像素，Codex 复测 PR #18 P2）；
+        // 已经是两行时那一行已经算在标识里，只要求不挨着（4 像素）——原来一律按 16 算，在演示库上量到 12.5 像素就报错，其实没有遮挡（测试会话 YUZU-MAIN-68391-FULL-20261114）
+        await expectNavRoomForTwoLineTag(nav, tag);
       }
       await page.getByTestId('dining-tab-kitchen').click();
       await expect(page.getByTestId('kitchen')).toBeVisible();
@@ -258,9 +266,9 @@ test.describe('视口冒烟', () => {
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
         }
-        // 演示库、测试服的实例标识是两行，比这里的开发环境多一行：最后一个入口与标识之间要留出这一行
-        const last = (await nav.getByRole('link', { name: '后台', exact: true }).boundingBox())!;
-        expect(last.y + last.height, '「后台」与实例标识之间放得下多一行标识').toBeLessThanOrEqual(tag.y - 16);
+        // 演示库、测试服的实例标识是两行（例如「演示」「不作数」），开发环境是一行：一行时最后一个入口与标识之间要留出多一行（16 像素，Codex 复测 PR #18 P2）；
+        // 已经是两行时那一行已经算在标识里，只要求不挨着（4 像素）——原来一律按 16 算，在演示库上量到 12.5 像素就报错，其实没有遮挡（测试会话 YUZU-MAIN-68391-FULL-20261114）
+        await expectNavRoomForTwoLineTag(nav, tag);
       }
       await page.goto('/admin/rooms');
       await expect(page.getByTestId('rooms-rules-card')).toBeVisible();

@@ -374,6 +374,53 @@ describe('合并前 Codex 审查 342941e', () => {
   });
 });
 
+describe('合并前 Codex 审查 7dbc313（8.0.21）', () => {
+  it('进厨房的买一赠一：出品时开关关着、结账前才打开——出品时没记扣料，赠品出库照记；出品时记过的不再另记', async () => {
+    const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'U-KBOGO', name: '买一赠一的果盘料', inventoryUnit: '份', decimals: 0, purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 1000 });
+    if (m.status !== 201) throw new Error(JSON.stringify(m.body));
+    await opening(m.body.id, q(20));
+    const made = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '买一赠一的果盘', category: '热菜', price: 3000 });
+    const itemId = made.body.items.find((i: { name: string }) => i.name === '买一赠一的果盘').id as number;
+    const stations = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/dining')).body.stations as { id: number; name: string }[];
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/items', { items: [{ id: itemId, stationId: stations.find((x) => x.name === '热菜')!.id }] })).status).toBe(200);
+    expect((await recipe(itemId, { expectedVersion: 0, lines: [{ materialId: m.body.id, qtyMilli: q(1) }] })).status).toBe(200);
+    const warehouseId = ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/meta')).body as { warehouses: { id: number }[] }).warehouses[0]!.id;
+    const t = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', {
+      clientKey: randomUUID(), validity: 'days', validDays: 30, name: '果盘买一赠一', kind: 'bogo', buyItemId: itemId, giftMaterialId: m.body.id, giftQtyMilli: q(1), giftWarehouseId: warehouseId,
+    });
+    expect(t.status, JSON.stringify(t.body)).toBe(200);
+    const usageSwitch = (enabled: boolean) => api(ctx.app, ctx.owner, 'PUT', '/api/inventory/usage/rules', { enabled });
+    /** 一位会员点两份、出品完成、用券结账；返回这张结账单记了几条赠品出库 */
+    const round = async (phone: string, beforeDone: () => Promise<unknown>, beforePay: () => Promise<unknown>) => {
+      const member = await createMember(ctx, `果盘会员${phone.slice(-2)}`, phone);
+      expect((await api(ctx.app, ctx.owner, 'POST', `/api/members/${member.id}/coupons`, { clientKey: randomUUID(), templateId: t.body.id, quantity: 1, reason: '审查用例' })).status).toBe(201);
+      const code = ((await api(ctx.app, ctx.owner, 'GET', `/api/members/${member.id}/coupons`)).body.coupons as { code: string; templateId: number }[]).find((c) => c.templateId === t.body.id)!.code;
+      tagNo += 1;
+      const v = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: `U${String(tagNo).padStart(3, '0')}`, zone: 'male', memberId: member.id }] });
+      expect(v.status, JSON.stringify(v.body)).toBe(201);
+      const visitId = v.body.visits[0].id as number;
+      expect((await order(visitId, itemId, 2, 3000)).status).toBe(200);
+      await beforeDone();
+      for (const k of await kitchenIds(visitId)) expect((await act(k, 'done')).status).toBe(200);
+      await beforePay();
+      const pre = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body;
+      const paid = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', {
+        clientKey: randomUUID(), visitIds: [visitId], expectedTotal: pre.totalAmount, payments: [{ method: 'store_coupon', code, amount: 3000 }, { method: 'cash', amount: pre.totalAmount - 3000 }],
+      });
+      expect(paid.status, JSON.stringify(paid.body)).toBe(200);
+      return (await ctx.sql`SELECT 1 FROM coupon_gift_outs WHERE checkout_id = ${paid.body.id}`).length;
+    };
+    try {
+      // ① 出品时开关关着（没记扣料），结账前打开：赠品出库照记一条
+      expect(await round('13900183001', () => usageSwitch(false), () => usageSwitch(true))).toBe(1);
+      // ② 出品时开着（记了两份的扣料）：不再另记赠品出库
+      expect(await round('13900183002', async () => undefined, async () => undefined)).toBe(0);
+    } finally {
+      await usageSwitch(true);
+    }
+  });
+});
+
 describe('成本报表（docs/ERP_V8020.md 第 1 节）', () => {
   it('库存金额、耗用成本（自动扣料的分成销售出库、配方耗用）、项目毛利（理论成本）；只有「看成本」的人能看；能导出', async () => {
     expect((await api(ctx.app, keeper, 'GET', '/api/inventory/cost')).status).toBe(403);

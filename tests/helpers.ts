@@ -106,10 +106,17 @@ export async function api<T = any>(
   return { status: res.statusCode, body: body as T };
 }
 
+/**
+ * 不传手机号时按序号取号（每个用例文件各自从头数；一个文件一个库，文件之内不重复）。
+ * 原来在 19900001000–19900009999 里随机取，会撞上用例里写死的号（这一段有一百多个）或另一个随机号，偶发 PHONE_EXISTS
+ *（`main` 68391d6 的 CI 因此红过一次）；196 号段没有用例用固定号。
+ */
+let memberPhoneSeq = 0;
 export async function createMember(ctx: TestContext, name = '测试会员', phone?: string) {
+  memberPhoneSeq += 1;
   const res = await api(ctx.app, ctx.clerk, 'POST', '/api/members', {
     name,
-    phone: phone ?? `1990000${String(Math.floor(Math.random() * 9000) + 1000)}`,
+    phone: phone ?? `196${String(memberPhoneSeq).padStart(8, '0')}`,
   });
   if (res.status !== 201) throw new Error(JSON.stringify(res.body));
   return res.body as { id: number; principalBalance: number; bonusBalance: number };
