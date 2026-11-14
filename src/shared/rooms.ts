@@ -140,6 +140,20 @@ export interface RoomType {
   active: boolean;
   /** 这个房型的启用房间数 */
   roomCount: number;
+  /** 会员价（8.0.20）：某一档起的价，按档升序；没设是空数组 */
+  memberPrices: { grade: number; price: number }[];
+}
+
+/** 办入住前的报价（8.0.20 会员联动房价） */
+export interface RoomQuote {
+  /** 门市价 */
+  listRate: number;
+  /** 这位客人实际的房价 */
+  rate: number;
+  /** 用了哪一档的会员价；没用是 null */
+  memberGrade: number | null;
+  /** 有会员价却没用上的原因（结账时的折扣更低）；别的情况是 null */
+  reason: string | null;
 }
 
 export interface Room {
@@ -189,6 +203,9 @@ export interface StaySummary {
   kind: RoomKind;
   /** 入住时的房价（每晚 / 每段） */
   rate: number;
+  /** 入住时的门市价（8.0.20 起的入住单才有）与用了哪一档的会员价（没用是 null） */
+  listRate: number | null;
+  memberGrade: number | null;
   guestLabel: string;
   guests: number;
   /** 住客的手牌与来访（房费挂在手牌账单上） */

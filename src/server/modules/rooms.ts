@@ -54,6 +54,12 @@ import { leaveRoomStay, locateRoomStay } from './locations';
 import { insertHousekeepingEvent, markRoomDirty, revertHousekeeping, roomTimeline } from './rooms-808';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { discountOff } from '@shared/benefits';
+import { MAX_GRADE } from '@shared/membership';
+import type { RoomQuote } from '@shared/rooms';
+import { bestRoomDiscountRate } from './member-discounts';
+import { benefitState } from './member-trials';
+import { projectedGrade } from './membership';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -92,7 +98,9 @@ export async function roomsAdmin(db: Db): Promise<RoomsAdmin> {
     SELECT s.updated_at, st.display_name AS updated_by FROM settings s LEFT JOIN staff st ON st.id = s.updated_by WHERE s.key = 'room_rules'`;
   const types = await db<RoomsAdmin['types']>`
     SELECT t.id, t.name, t.kind, t.price, t.block_minutes, t.sort_order, t.active,
-           (SELECT count(*) FROM rooms r WHERE r.room_type_id = t.id AND r.active)::int AS room_count
+           (SELECT count(*) FROM rooms r WHERE r.room_type_id = t.id AND r.active)::int AS room_count,
+           COALESCE((SELECT jsonb_agg(jsonb_build_object('grade', mp.grade, 'price', mp.price) ORDER BY mp.grade)
+                     FROM room_type_member_prices mp WHERE mp.room_type_id = t.id), '[]'::jsonb) AS member_prices
     FROM room_types t ORDER BY t.sort_order, t.id`;
   const rooms = await db<RoomsAdmin['rooms']>`
     SELECT r.id, r.room_no, r.floor, r.room_type_id, r.housekeeping, r.maintenance_note, r.sort_order, r.active,
@@ -129,8 +137,24 @@ const RoomTypeInput = z
     blockMinutes: z.number('每段时长不正确').int('每段时长不正确').min(30, '每段至少 30 分钟').max(720, '每段最多 12 小时').nullish(),
     sortOrder: z.number().int().min(0).max(9999).default(0),
     active: z.boolean().default(true),
+    /** 会员价（8.0.20）：某一档起的价；不传 = 不动原来的，传空数组 = 都不设 */
+    memberPrices: z
+      .array(z.object({ grade: z.number().int().min(1).max(MAX_GRADE), price: positiveCents('会员价').max(10_000_000, '会员价过大') }))
+      .max(MAX_GRADE)
+      .optional(),
   })
-  .refine((t) => (t.kind === 'hourly') === (t.blockMinutes != null), { message: '钟点房要填每段时长，全天房不用填', path: ['blockMinutes'] });
+  .refine((t) => (t.kind === 'hourly') === (t.blockMinutes != null), { message: '钟点房要填每段时长，全天房不用填', path: ['blockMinutes'] })
+  .refine((t) => !t.memberPrices || new Set(t.memberPrices.map((m) => m.grade)).size === t.memberPrices.length, { message: '同一档只能设一个会员价', path: ['memberPrices'] })
+  .refine((t) => !t.memberPrices || t.memberPrices.every((m) => m.price < t.price), { message: '会员价要低于门市价', path: ['memberPrices'] });
+
+/** 保存房型的会员价（调用方的事务里，房型一行已锁或刚建）：整份换掉 */
+async function saveMemberPrices(tx: Tx, typeId: number, prices: { grade: number; price: number }[] | undefined, actorId: number) {
+  if (prices === undefined) return;
+  await tx`DELETE FROM room_type_member_prices WHERE room_type_id = ${typeId}`;
+  for (const m of prices) {
+    await tx`INSERT INTO room_type_member_prices (room_type_id, grade, price, updated_by) VALUES (${typeId}, ${m.grade}, ${m.price}, ${actorId})`;
+  }
+}
 
 async function saveRoomType(deps: Deps, id: number | null, raw: unknown, ctx: OpContext) {
   const t = parse(RoomTypeInput, raw);
@@ -142,6 +166,7 @@ async function saveRoomType(deps: Deps, id: number | null, raw: unknown, ctx: Op
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO room_types (name, kind, price, block_minutes, sort_order, active, created_by)
         VALUES (${t.name}, ${t.kind}, ${t.price}, ${block}, ${t.sortOrder}, ${t.active}, ${ctx.actor.id}) RETURNING id`;
+      await saveMemberPrices(tx, row!.id, t.memberPrices, ctx.actor.id);
       await writeAudit(tx, {
         staffId: ctx.actor.id,
         action: 'room_type_saved',
@@ -162,6 +187,12 @@ async function saveRoomType(deps: Deps, id: number | null, raw: unknown, ctx: Op
       UPDATE room_types SET name = ${t.name}, kind = ${t.kind}, price = ${t.price}, block_minutes = ${block}, sort_order = ${t.sortOrder},
              active = ${t.active}, updated_at = now()
       WHERE id = ${id}`;
+    if (t.memberPrices === undefined) {
+      // 没传会员价的：门市价降到会员价以下时，那些会员价就不成立了
+      const [bad] = await tx<{ n: number }[]>`SELECT count(*)::int AS n FROM room_type_member_prices WHERE room_type_id = ${id} AND price >= ${t.price}`;
+      if (bad!.n > 0) throw unprocessable('MEMBER_PRICE_NOT_LOWER', '门市价改到了会员价以下，请同时改会员价');
+    }
+    await saveMemberPrices(tx, id, t.memberPrices, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'room_type_saved',
@@ -298,7 +329,7 @@ async function saveRoom(deps: Deps, id: number | null, raw: unknown, ctx: OpCont
 type StayRow = Omit<StayDetail, 'charges' | 'deposits' | 'depositByMethod' | 'moves'> & { roomTypeId: number };
 
 const staySelect = (db: Db) => db`
-  SELECT s.id, s.stay_no, s.kind, s.rate, s.block_minutes, s.status, s.room_id, r.room_no, t.name AS type_name, s.room_type_id,
+  SELECT s.id, s.stay_no, s.kind, s.rate, s.list_rate, s.member_grade, s.block_minutes, s.status, s.room_id, r.room_no, t.name AS type_name, s.room_type_id,
          s.bill_id, b.bill_no, b.amount_cents AS bill_amount, s.visit_id, ht.code AS tag_code, s.guest_label, s.guests, v.member_id,
          m.name AS member_name, s.checked_in_at, s.business_date, s.expected_checkout_date, s.closed_at AS checked_out_at,
          cb.display_name AS checked_out_by_name, s.close_reason,
@@ -315,6 +346,8 @@ const toSummary = (r: StayRow): StaySummary => ({
   stayNo: r.stayNo,
   kind: r.kind,
   rate: r.rate,
+  listRate: r.listRate ?? null,
+  memberGrade: r.memberGrade ?? null,
   guestLabel: r.guestLabel,
   guests: r.guests,
   tagCode: r.tagCode,
@@ -656,6 +689,30 @@ async function bookingForCheckin(tx: Tx, bookingId: number | undefined, visitId:
   return bookingId;
 }
 
+/**
+ * 这位客人住这个房型的房价（8.0.20 会员联动房价，docs/ERP_V8020.md 第 6 节）。只读、不加锁。
+ * 手牌绑了在用的会员、房型给他这一档（含体验中的临时身份）或更低的档设了会员价，就按会员价；
+ * 「不叠加、取低的」（JX8）：这位会员今天对客房能享的折扣，折后价不比会员价贵时不用会员价——按门市价入住，结账时照常打折。
+ */
+export async function roomQuote(db: Db, roomTypeId: number, listRate: number, memberId: number | null, date: string): Promise<RoomQuote> {
+  const plain: RoomQuote = { listRate, rate: listRate, memberGrade: null, reason: null };
+  if (memberId === null) return plain;
+  const [m] = await db<{ status: string }[]>`SELECT status FROM members WHERE id = ${memberId}`;
+  if (m?.status !== 'active') return plain;
+  const own = await projectedGrade(db, memberId, date);
+  if (!own) return plain;
+  const state = await benefitState(db, memberId, own, date);
+  if (state.grade < 1) return plain;
+  const [mp] = await db<{ grade: number; price: number }[]>`
+    SELECT grade, price FROM room_type_member_prices WHERE room_type_id = ${roomTypeId} AND grade <= ${state.grade} ORDER BY grade DESC LIMIT 1`;
+  if (!mp || mp.price >= listRate) return plain;
+  const best = await bestRoomDiscountRate(db, state.grade, state.tier, date);
+  if (best !== null && listRate - discountOff(listRate, best) <= mp.price) {
+    return { ...plain, reason: `这位会员结账时房费能打 ${best / 10} 折，比会员价更低，按门市价入住` };
+  }
+  return { listRate, rate: mp.price, memberGrade: mp.grade, reason: null };
+}
+
 export async function checkinRoom(deps: Deps, raw: unknown, ctx: OpContext): Promise<StayDetail> {
   const input = parse(CheckinInput, raw);
   const { clientKey: key, ...payload } = input;
@@ -676,9 +733,6 @@ export async function checkinRoom(deps: Deps, raw: unknown, ctx: OpContext): Pro
     const [type] = await tx<{ kind: RoomKind; price: number; blockMinutes: number | null; active: boolean; name: string }[]>`
       SELECT kind, price, block_minutes, active, name FROM room_types WHERE id = ${room.roomTypeId}`;
     if (!type!.active) throw conflict('ROOM_TYPE_INACTIVE', `房型「${type!.name}」已停用，不能入住`);
-    if (type!.price !== input.expectedRate) {
-      throw conflict('PRICE_CHANGED', `房型「${type!.name}」的房价刚刚改为 ${formatYuan(type!.price)}，请核对后重新确认`, { rate: type!.price });
-    }
     const date = await businessDate(tx, deps, at);
     // 房费挂在在店客人的手牌账单上
     const [peek] = await tx<{ id: number }[]>`
@@ -688,17 +742,23 @@ export async function checkinRoom(deps: Deps, raw: unknown, ctx: OpContext): Pro
     assertOpen(visit);
     const billId = visit.billId;
     const visitId = visit.id;
+    // 这位客人的房价（8.0.20 会员联动房价）：手牌绑了会员、房型设了会员价的按会员价；读会员的档阶不加锁（与浴票延迟一样）
+    const quote = await roomQuote(tx, room.roomTypeId, type!.price, visit.memberId, date);
+    if (quote.rate !== input.expectedRate) {
+      throw conflict('PRICE_CHANGED', `房型「${type!.name}」这位客人的房价是 ${formatYuan(quote.rate)}${quote.memberGrade ? '（会员价）' : ''}，请核对后重新确认`, { rate: quote.rate });
+    }
     const bookingId = await bookingForCheckin(tx, input.bookingId, visitId, room.roomTypeId);
     const stayNo = await nextDocNo(tx, 'room_stay', 'RZ', date);
     const [stay] = await tx<{ id: number }[]>`
       INSERT INTO room_stays (stay_no, room_id, room_type_id, kind, rate, block_minutes, bill_id, visit_id, guest_label, guests,
-                              expected_checkout_date, business_date, checked_in_at, checked_in_by, open_key, booking_id)
-      VALUES (${stayNo}, ${room.id}, ${room.roomTypeId}, ${type!.kind}, ${type!.price}, ${type!.blockMinutes}, ${billId}, ${visitId},
-              ${input.guestLabel}, ${input.guests}, ${input.expectedCheckoutDate}, ${date}, ${at}, ${ctx.actor.id}, ${key}, ${bookingId})
+                              expected_checkout_date, business_date, checked_in_at, checked_in_by, open_key, booking_id, list_rate, member_grade)
+      VALUES (${stayNo}, ${room.id}, ${room.roomTypeId}, ${type!.kind}, ${quote.rate}, ${type!.blockMinutes}, ${billId}, ${visitId},
+              ${input.guestLabel}, ${input.guests}, ${input.expectedCheckoutDate}, ${date}, ${at}, ${ctx.actor.id}, ${key}, ${bookingId},
+              ${type!.price}, ${quote.memberGrade})
       RETURNING id`;
     const stayId = stay!.id;
     // 第一晚 / 第一段随入住挂上
-    const first: RoomDue = type!.kind === 'daily' ? { kind: 'night', nightDate: date, blockNo: null, amount: type!.price } : { kind: 'block', nightDate: null, blockNo: 1, amount: type!.price };
+    const first: RoomDue = type!.kind === 'daily' ? { kind: 'night', nightDate: date, blockNo: null, amount: quote.rate } : { kind: 'block', nightDate: null, blockNo: 1, amount: quote.rate };
     await postRoomCharges(tx, { id: stayId, billId, roomNo: room.roomNo }, [first], { source: 'checkin', postKey: key, actorId: ctx.actor.id, at, date });
     if (input.deposit) {
       await tx`
@@ -1195,6 +1255,18 @@ export function registerRoomRoutes(app: FastifyInstance, deps: Deps) {
 
   // 入住、续住、改登记、换房、押金、退房、撤销入住、夜审
   const opGuard = guard('room.operate');
+  // 办入住前的报价（8.0.20 会员联动房价）：这间房、这位客人（按手牌）的房价；只读
+  app.get('/api/rooms/quote', { preHandler: opGuard }, async (req) => {
+    const q = parse(z.object({ roomId: z.coerce.number().int().positive(), tag: z.string().trim().max(16).default('') }), req.query ?? {});
+    const [room] = await deps.sql<{ roomTypeId: number; price: number }[]>`
+      SELECT r.room_type_id, t.price FROM rooms r JOIN room_types t ON t.id = r.room_type_id WHERE r.id = ${q.roomId}`;
+    if (!room) throw notFound('房间不存在');
+    const tag = q.tag ? normalizeTagCode(q.tag) : '';
+    const [visit] = tag
+      ? await deps.sql<{ memberId: number | null }[]>`SELECT v.member_id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${tag} AND v.status = 'open'`
+      : [];
+    return roomQuote(deps.sql, room.roomTypeId, room.price, visit?.memberId ?? null, await businessDate(deps.sql, deps, new Date()));
+  });
   app.post('/api/rooms/checkin', { preHandler: opGuard }, async (req) => checkinRoom(deps, req.body, ctxOf(req)));
   app.post('/api/rooms/stays/:id/extend', { preHandler: opGuard }, async (req) => extendStay(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.put('/api/rooms/stays/:id', { preHandler: opGuard }, async (req) => updateStay(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));

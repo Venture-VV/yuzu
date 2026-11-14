@@ -142,6 +142,38 @@ export function discountOptions(
 const publicOption = ({ lineIds: _l, sortOrder: _s, ...o }: MemberDiscountOption & { lineIds: number[]; sortOrder: number }): MemberDiscountOption => o;
 
 /**
+ * 会员折扣能打的明细（8.0.20，会员联动房价 JX8「不叠加」）：账单上的有效明细里去掉**用了会员房价的入住单的房费**——
+ * 入住时已经按会员价算过，结账不再打一次会员折扣（券不受影响，券用的是 couponLines）。只读，不加锁。
+ */
+async function discountableLines(db: Db, billIds: number[]): Promise<CouponLine[]> {
+  const lines = await couponLines(db, billIds);
+  const rooms = lines.filter((l) => l.category === '客房').map((l) => Number(l.id));
+  if (rooms.length === 0) return lines;
+  const priced = await db<{ lineId: number }[]>`
+    SELECT c.line_id FROM room_stay_charges c JOIN room_stays s ON s.id = c.stay_id WHERE s.member_grade IS NOT NULL AND c.line_id IN ${db(rooms)}`;
+  if (priced.length === 0) return lines;
+  const skip = new Set(priced.map((p) => Number(p.lineId)));
+  return lines.filter((l) => !skip.has(Number(l.id)));
+}
+
+/**
+ * 这一档的会员今天对客房房费能享的最低折扣（百分比，75 = 七五折）；没有是 null。读已发布的折扣类权益，不加锁。
+ * 会员联动房价（8.0.20）入住时用它「取低的」：折后价不比会员价贵时，不用会员价、留给结账时打折。
+ */
+export async function bestRoomDiscountRate(db: Db, grade: number, tier: number | null, date: string): Promise<number | null> {
+  let best: number | null = null;
+  for (const d of await publishedDiscounts(db)) {
+    if (!d.discountTarget || isCompanionTarget(d.discountTarget)) continue;
+    if (discountLines(d.discountTarget, [{ category: '客房' }]).length === 0) continue;
+    if (!benefitEligible(d, grade, tier) || !discountDayMatches(d, date)) continue;
+    const rate = benefitQuantity(d, grade, tier);
+    if (rate === null || rate < MIN_DISCOUNT_RATE || rate > MAX_DISCOUNT_RATE) continue;
+    if (best === null || rate < best) best = rate;
+  }
+  return best;
+}
+
+/**
  * 结账前核对（只读）：visits 是这张结账单里有会员的客人，companions 是不是会员的客人（同行优惠打他们的明细）；
  * ticket 是这位客人按此刻算出的门票（还没挂到账单，用负数编号）
  */
@@ -162,11 +194,11 @@ export async function memberDiscountPreview(
     const own = await projectedGrade(db, v.memberId, date);
     if (!own) continue;
     const s = await benefitState(db, v.memberId, own, date);
-    guests.push({ memberId: v.memberId, memberName: v.memberName, tagCode: v.tagCode, grade: s.grade, tier: s.tier, lines: [...(await couponLines(db, [v.billId])), ...(v.ticket ? [v.ticket] : [])] });
+    guests.push({ memberId: v.memberId, memberName: v.memberName, tagCode: v.tagCode, grade: s.grade, tier: s.tier, lines: [...(await discountableLines(db, [v.billId])), ...(v.ticket ? [v.ticket] : [])] });
   }
   const companions: CompanionGuest[] = [];
   if (defs.some((d) => d.discountTarget && isCompanionTarget(d.discountTarget))) {
-    for (const c of companionVisits) companions.push({ tagCode: c.tagCode, lines: [...(await couponLines(db, [c.billId])), ...(c.ticket ? [c.ticket] : [])] });
+    for (const c of companionVisits) companions.push({ tagCode: c.tagCode, lines: [...(await discountableLines(db, [c.billId])), ...(c.ticket ? [c.ticket] : [])] });
   }
   return discountOptions(defs, guests, date, (g, t) => gradeLabel(rules, g, t as Tier | null), companions).map(publicOption);
 }
@@ -226,11 +258,11 @@ export async function settleMemberDiscount(
     const own = await settleMemberDue(tx, g.memberId, o.date);
     if (!own) continue;
     const s = await benefitState(tx, g.memberId, own, o.date);
-    guests.push({ memberId: g.memberId, memberName: g.memberName, tagCode: g.tagCode, grade: s.grade, tier: s.tier, lines: await couponLines(tx, [g.billId]) });
+    guests.push({ memberId: g.memberId, memberName: g.memberName, tagCode: g.tagCode, grade: s.grade, tier: s.tier, lines: await discountableLines(tx, [g.billId]) });
   }
   const companions: CompanionGuest[] = [];
   if (defs.some((d) => d.discountTarget && isCompanionTarget(d.discountTarget))) {
-    for (const c of o.companions ?? []) companions.push({ tagCode: c.tagCode, lines: await couponLines(tx, [c.billId]) });
+    for (const c of o.companions ?? []) companions.push({ tagCode: c.tagCode, lines: await discountableLines(tx, [c.billId]) });
   }
   const options = defs.length ? discountOptions(defs, guests, o.date, (gr, t) => gradeLabel(rules, gr, t as Tier | null), companions) : [];
   const best = options[0] ?? null;

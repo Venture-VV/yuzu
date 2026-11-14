@@ -202,8 +202,20 @@ export async function diningGuest(db: Db, tagCode: string): Promise<DiningGuest>
   const [v] = await db<{ visitId: number }[]>`
     SELECT v.id AS visit_id FROM visits v JOIN hand_tags h ON h.id = v.tag_id
     WHERE v.status = 'open' AND upper(h.code) = upper(${tagCode})`;
-  if (!v) throw notFound(`手牌 ${tagCode} 现在没有在店客人，请核对牌号`);
-  return diningGuestOf(db, v.visitId);
+  if (v) return { ...(await diningGuestOf(db, v.visitId)), via: 'tag' };
+  // 客房点餐（8.0.20）：不是手牌号的话当房号找在住的客人（住客本来就有手牌与账单，点的菜挂在那张账单上、退房时一起结）
+  const [stay] = await db<{ visitId: number }[]>`
+    SELECT s.visit_id FROM room_stays s JOIN rooms r ON r.id = s.room_id JOIN visits vv ON vv.id = s.visit_id
+    WHERE s.status = 'open' AND vv.status = 'open' AND upper(r.room_no) = upper(${tagCode})`;
+  if (stay) return { ...(await diningGuestOf(db, stay.visitId)), via: 'room' };
+  throw notFound(`手牌 ${tagCode} 现在没有在店客人（也没有这个房号的在住客人），请核对`);
+}
+
+/** 这位客人在住的客房（没住店是 null） */
+export async function openRoomOf(db: Db, visitId: number): Promise<string | null> {
+  const [r] = await db<{ roomNo: string }[]>`
+    SELECT r.room_no FROM room_stays s JOIN rooms r ON r.id = s.room_id WHERE s.visit_id = ${visitId} AND s.status = 'open' ORDER BY s.id LIMIT 1`;
+  return r?.roomNo ?? null;
 }
 
 /**
@@ -220,7 +232,7 @@ export async function diningGuestOf(db: Db, visitId: number): Promise<DiningGues
     SELECT k.id, k.bill_line_id, k.item_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at
     FROM kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN bill_lines l ON l.id = k.bill_line_id
     WHERE k.visit_id = ${v.visitId} AND k.status IN ('queued', 'cooking', 'done') ORDER BY k.id`;
-  return { visitId: v.visitId, tagCode: v.tagCode, zone: v.zone, guest: guestName(v.memberName, v.guestLabel), pending };
+  return { visitId: v.visitId, tagCode: v.tagCode, zone: v.zone, guest: guestName(v.memberName, v.guestLabel), pending, roomNo: await openRoomOf(db, v.visitId) };
 }
 
 const KITCHEN_ACTIONS = ['start', 'done', 'serve', 'undo'] as const;
@@ -439,16 +451,24 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
   );
 
   app.get('/api/dining/guest', { preHandler: guard('dining.order') }, async (req) => {
-    const { tag } = parse(z.object({ tag: z.string().trim().min(1, '请输入手牌号').max(16) }), req.query ?? {});
+    const { tag } = parse(z.object({ tag: z.string().trim().min(1, '请输入手牌号或房号').max(16) }), req.query ?? {});
     return diningGuest(sql, tag);
   });
 
   // 下单就是挂账：与钟房派钟一样还要「前台挂账」权限（断网后的「结果待确认」按前台的操作编号查回、作废）
   app.post('/api/dining/orders', { preHandler: guard('dining.order', 'frontdesk.operate') }, async (req) => {
-    const body = parse(z.object({ visitId: z.number('请先选客人').int().positive('请先选客人') }).passthrough(), req.body);
+    const body = parse(z.object({ visitId: z.number('请先选客人').int().positive('请先选客人'), toRoom: z.boolean().optional() }).passthrough(), req.body);
     const { postCharges } = await import('./frontdesk/bills');
+    // 客房点餐（8.0.20）：送到客房的，出品单上写房号（客人得正住着；读入住单不加锁，挂账照旧锁来访与账单）
+    let deliverTo: string | undefined;
+    if (body.toRoom) {
+      const roomNo = await openRoomOf(sql, body.visitId);
+      if (!roomNo) throw unprocessable('ROOM_NOT_STAYING', '这位客人现在没有在住的客房，不能送到客房');
+      deliverTo = `客房 ${roomNo}`;
+    }
+    const { toRoom: _toRoom, ...rest } = req.body as Record<string, unknown>;
     // 点单页只能点进厨房的菜（其他项目、手动金额请到前台登记）
-    await postCharges(deps, body.visitId, { ...(req.body as object), customLines: [] } as never, ctxOf(req), { dining: { onlyKitchen: true } });
+    await postCharges(deps, body.visitId, { ...rest, customLines: [] } as never, ctxOf(req), { dining: { onlyKitchen: true }, ...(deliverTo ? { deliverTo } : {}) });
     return diningGuestOf(sql, body.visitId);
   });
 

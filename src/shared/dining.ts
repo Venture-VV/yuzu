@@ -139,6 +139,10 @@ export interface DiningGuest {
   guest: string;
   /** 这位客人点过、还没上的菜（可以催单、上菜、退菜） */
   pending: PendingDish[];
+  /** 在住的客房（8.0.20 客房点餐）：有的话可以选「送到客房」，出品单上写房号；没住店是 null */
+  roomNo: string | null;
+  /** 是按手牌还是按房号找到的（按房号找到的默认送到客房） */
+  via?: 'tag' | 'room';
 }
 
 /** 点过、还没上的菜（出品单）：点单页、桌台详情上可以催单、上菜、退菜 */

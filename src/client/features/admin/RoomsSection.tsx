@@ -273,6 +273,8 @@ function TypeDialog({ target, onClose }: { target: RoomType | 'new' | null; onCl
   const [block, setBlock] = useState(String(DEFAULT_BLOCK_MINUTES));
   const [sortOrder, setSortOrder] = useState('0');
   const [active, setActive] = useState(true);
+  /** 会员价（8.0.20）：L1–L6 各一格，空着 = 这一档不单独设（用比它低的最近一档；都没设就是门市价） */
+  const [memberPrices, setMemberPrices] = useState<string[]>(() => Array.from({ length: 6 }, () => ''));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [opened, setOpened] = useState<typeof target>(null);
@@ -285,12 +287,21 @@ function TypeDialog({ target, onClose }: { target: RoomType | 'new' | null; onCl
     setBlock(String(t?.blockMinutes ?? DEFAULT_BLOCK_MINUTES));
     setSortOrder(String(t?.sortOrder ?? 0));
     setActive(t?.active ?? true);
+    setMemberPrices(
+      Array.from({ length: 6 }, (_, i) => {
+        const mp = t?.memberPrices.find((m) => m.grade === i + 1);
+        return mp ? centsToInput(mp.price) : '';
+      }),
+    );
     setError(null);
   }
   const cents = parseYuan(price);
   const blockNum = Number(block);
   const order = Number(sortOrder);
+  const memberCents = memberPrices.map((v) => (v.trim() === '' ? null : parseYuan(v)));
+  const memberOk = memberPrices.every((v, i) => v.trim() === '' || (memberCents[i] !== null && memberCents[i]! > 0 && cents !== null && memberCents[i]! < cents));
   const ok =
+    memberOk &&
     name.trim().length >= 1 &&
     name.trim().length <= MAX_ROOM_TYPE_NAME &&
     cents !== null &&
@@ -304,7 +315,15 @@ function TypeDialog({ target, onClose }: { target: RoomType | 'new' | null; onCl
     setBusy(true);
     setError(null);
     try {
-      const body = { name: name.trim(), kind, price: cents!, blockMinutes: kind === 'hourly' ? blockNum : null, sortOrder: order, active };
+      const body = {
+        name: name.trim(),
+        kind,
+        price: cents!,
+        blockMinutes: kind === 'hourly' ? blockNum : null,
+        sortOrder: order,
+        active,
+        memberPrices: memberCents.flatMap((c, i) => (c === null ? [] : [{ grade: i + 1, price: c }])),
+      };
       const next = target === 'new' ? await api.post<RoomsAdmin>('/api/admin/rooms/types', body) : await api.put<RoomsAdmin>(`/api/admin/rooms/types/${target!.id}`, body);
       qc.setQueryData(adminKey, next);
       void qc.invalidateQueries({ queryKey: ['rooms'] });
@@ -365,6 +384,25 @@ function TypeDialog({ target, onClose }: { target: RoomType | 'new' | null; onCl
             <Input fullWidth={false} id="room-type-order" type="number" inputMode="numeric" min={0} max={9999} value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="num w-28" />
           </Field>
         </div>
+        <Field
+          label="会员价（选填）"
+          hint="某一档起的价：高档没单独填的，用比它低的最近一档；都不填就是门市价。要低于门市价。按会员价入住的房费，结账时不再打会员折扣。"
+          error={memberOk ? null : '会员价要是大于 0、低于门市价的金额'}
+        >
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" data-testid="rooms-type-member-prices">
+            {memberPrices.map((v, i) => (
+              <label key={i} className="text-[12px] font-semibold text-ink-3">
+                L{i + 1} 起
+                <MoneyInput
+                  aria-label={`L${i + 1} 起的会员价`}
+                  value={v}
+                  onChange={(e) => setMemberPrices((list) => list.map((x, j) => (j === i ? e.target.value : x)))}
+                  data-testid={`rooms-type-member-${i + 1}`}
+                />
+              </label>
+            ))}
+          </div>
+        </Field>
         {target !== 'new' && target && target.price !== cents && cents !== null && (
           <p className="text-[12.5px] text-ink-3">
             原房价 <Money cents={target.price} />：改价只影响之后的入住，在住的客人按入住时的房价。

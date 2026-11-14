@@ -66,6 +66,8 @@ export interface PostOptions {
   session?: Omit<SessionPostOptions, 'backfill'>;
   /** 点单页下单：只能点进厨房的菜（其他项目、手动金额请到前台登记） */
   dining?: { onlyKitchen: boolean };
+  /** 出品单写送到哪（8.0.20 客房点餐：「客房 W301」）；空为送到客人手里 */
+  deliverTo?: string;
 }
 
 export type PostInputParsed = z.output<typeof PostInput>;
@@ -111,16 +113,19 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
   // 派钟选的房间（v0.7.16）、按哪张预约派（8.0.8）也算进摘要：同一个操作编号换了房间、预约重发会被拒绝；都没有时摘要与升级前完全相同
   const spaceId = options.session?.dispatch?.spaceId;
   const bookingId = options.session?.dispatch?.bookingId;
+  // 送到哪（8.0.20 客房点餐：送到客房）也算进摘要；没有时摘要与升级前完全相同
+  const deliverTo = options.deliverTo;
   const requestHash = hashRequest({
     visitId,
     ...payload,
     ...(spaceId === undefined ? {} : { spaceId }),
     ...(bookingId === undefined ? {} : { bookingId }),
+    ...(deliverTo ? { deliverTo } : {}),
   });
   // 补录纸质单：明细按纸质单上的实际时间登记（营业日按实际时间归属）
   const backfill = resolveBackfill(input.backfill, ctx.actor);
   await runIdempotent(deps, { key, opType: 'bill_post', requestHash }, async (tx) =>
-    (await postChargesTx(tx, deps, visitId, input, { key, requestHash, backfill }, ctx, options)).visitId,
+    (await postChargesTx(tx, deps, visitId, input, { key, requestHash, backfill, ...(deliverTo ? { deliverTo } : {}) }, ctx, options)).visitId,
   );
   return getVisit(deps.sql, visitId, deps.config.timezone);
 }

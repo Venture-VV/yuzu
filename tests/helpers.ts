@@ -298,6 +298,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '136_concierge_native_resources.sql',
   '137_concierge_praise.sql',
   '138_linen.sql',
+  '139_room_member_prices.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

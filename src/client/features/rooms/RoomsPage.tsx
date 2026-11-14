@@ -21,6 +21,7 @@ import {
   type RoomBoard,
   type RoomBoardRoom,
   type RoomBoardStatus,
+  type RoomQuote,
   type StayDetail,
 } from '@shared/rooms';
 import { spaceLabel } from '@shared/spaces';
@@ -420,6 +421,13 @@ function CheckinDialog({
 
   const tagCode = normalizeTagCode(tag);
   const tagOk = TAG_CODE_PATTERN.test(tagCode);
+  // 这位客人的房价（8.0.20 会员联动房价）：手牌绑了会员、房型设了会员价的按会员价；填好手牌号才问得到
+  const quote = useQuery({
+    queryKey: [...roomsKey, 'quote', room.id, tagOk ? tagCode : ''],
+    queryFn: () => api.get<RoomQuote>(`/api/rooms/quote?roomId=${room.id}&tag=${encodeURIComponent(tagOk ? tagCode : '')}`),
+    staleTime: 0,
+  });
+  const rate = quote.data?.rate ?? room.price;
   const depProblem = withDeposit ? depositProblem(deposit, { required: true }) : null;
   const ok =
     tagOk &&
@@ -448,7 +456,7 @@ function CheckinDialog({
         guestLabel: label.trim(),
         guests,
         expectedCheckoutDate: room.kind === 'daily' && leave ? leave : null,
-        expectedRate: room.price,
+        expectedRate: rate,
         deposit: dep,
         bookingId: booking?.id,
       },
@@ -487,6 +495,19 @@ function CheckinDialog({
     >
       <PendingPanel op={op} onResolved={finish} />
       <div className="space-y-4" data-testid="room-checkin">
+        {quote.data && (quote.data.memberGrade !== null || quote.data.reason) && (
+          <Notice
+            tone={quote.data.memberGrade !== null ? 'success' : 'info'}
+            title={
+              quote.data.memberGrade !== null
+                ? `会员价 ${formatYuan(quote.data.rate)}（L${quote.data.memberGrade} 起的价，门市价 ${formatYuan(quote.data.listRate)}）`
+                : quote.data.reason
+            }
+            data-testid="room-checkin-quote"
+          >
+            {quote.data.memberGrade !== null ? '按会员价入住的房费，结账时不再打会员折扣（券照常能用）。' : null}
+          </Notice>
+        )}
         <Field
           label="住客的手牌号"
           htmlFor="room-tag"
