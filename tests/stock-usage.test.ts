@@ -3,9 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { usageMilli } from '../src/shared/stock-usage';
 import { todayIn } from '../src/server/modules/inventory/common';
+import { processGiftOuts } from '../src/server/modules/gift-outs';
 import { processStockUsage } from '../src/server/modules/stock-usage';
 import { createStaff } from '../src/server/modules/staff';
-import { api, login, PASSWORD, setup, type TestContext } from './helpers';
+import { api, createMember, login, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let today: string;
@@ -329,6 +330,47 @@ describe('合并前 Codex 审查 35d8b16', () => {
     expect(usageMilli(q(1), 1, 1000, 0)).toBe(q(2));
     const listed = (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/recipes')).body as { itemId: number; unitCostCents: number | null }[];
     expect(listed.find((x) => x.itemId === itemId)!.unitCostCents).toBe(200);
+  });
+});
+
+describe('合并前 Codex 审查 342941e', () => {
+  it('买一赠一：项目设了用料时赠的那一件随用料扣，不另记赠品出库（不扣两次）；项目毛利的销售额减去分摊的优惠', async () => {
+    const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'U-BOGO', name: '买一赠一的水', inventoryUnit: '瓶', decimals: 0, purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 1000 });
+    if (m.status !== 201) throw new Error(JSON.stringify(m.body));
+    await opening(m.body.id, q(10));
+    const made = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '买一赠一的瓶装水', category: '零售', price: 500 });
+    const itemId = made.body.items.find((i: { name: string }) => i.name === '买一赠一的瓶装水').id as number;
+    expect((await recipe(itemId, { expectedVersion: 0, lines: [{ materialId: m.body.id, qtyMilli: q(1) }] })).status).toBe(200);
+    const warehouseId = ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/meta')).body as { warehouses: { id: number }[] }).warehouses[0]!.id;
+    const t = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', {
+      clientKey: randomUUID(), validity: 'days', validDays: 30, name: '瓶装水买一赠一', kind: 'bogo', buyItemId: itemId, giftMaterialId: m.body.id, giftQtyMilli: q(1), giftWarehouseId: warehouseId,
+    });
+    expect(t.status, JSON.stringify(t.body)).toBe(200);
+    const member = await createMember(ctx, '买一赠一会员', '13900182001');
+    const issued = await api(ctx.app, ctx.owner, 'POST', `/api/members/${member.id}/coupons`, { clientKey: randomUUID(), templateId: t.body.id, quantity: 1, reason: '审查用例' });
+    expect(issued.status, JSON.stringify(issued.body)).toBe(201);
+    const code = ((await api(ctx.app, ctx.owner, 'GET', `/api/members/${member.id}/coupons`)).body.coupons as { code: string; templateId: number }[]).find((c) => c.templateId === t.body.id)!.code;
+    await run();
+    // 会员进店、拿两瓶（买一赠一），用券抵一瓶
+    tagNo += 1;
+    const tag = `U${String(tagNo).padStart(3, '0')}`;
+    const v = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', memberId: member.id }] });
+    expect(v.status, JSON.stringify(v.body)).toBe(201);
+    const visitId = v.body.visits[0].id as number;
+    expect((await charge(visitId, itemId, 2, 500)).status).toBe(200);
+    const pre = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body;
+    const paid = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', {
+      clientKey: randomUUID(), visitIds: [visitId], expectedTotal: pre.totalAmount, payments: [{ method: 'store_coupon', code, amount: 500 }, { method: 'cash', amount: pre.totalAmount - 500 }],
+    });
+    expect(paid.status, JSON.stringify(paid.body)).toBe(200);
+    // 没有另记赠品出库；用料扣两瓶（买的一瓶 + 赠的一瓶），不是三瓶
+    expect(await ctx.sql`SELECT 1 FROM coupon_gift_outs WHERE checkout_id = ${paid.body.id}`).toHaveLength(0);
+    expect(await run()).toMatchObject({ docs: 1, lines: 1 });
+    expect(await processGiftOuts({ sql: ctx.sql, config: ctx.config })).toMatchObject({ done: 0 });
+    expect(await stock(m.body.id)).toBe(q(8));
+    // 项目毛利：两瓶标价 ¥10，券抵了 ¥5 → 销售额 ¥5；成本 2 × ¥1 → 毛利 ¥3（不是按 ¥10 算成 ¥8）
+    const row = ((await api(ctx.app, ctx.owner, 'GET', '/api/inventory/cost')).body.margin.rows as { itemId: number }[]).find((x) => x.itemId === itemId);
+    expect(row).toMatchObject({ quantity: 2, revenueCents: 500, discountCents: 500, unitCostCents: 100, costCents: 200, marginCents: 300 });
   });
 });
 

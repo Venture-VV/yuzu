@@ -48,6 +48,16 @@ export async function loadStockUsageRules(db: Db): Promise<StockUsageRules> {
   return { ...DEFAULT_STOCK_USAGE_RULES, ...(row?.value ?? {}) };
 }
 
+/**
+ * 这个价目项目卖出 / 出品时会不会按用料扣库存（开关开着、而且有在用的用料）。
+ * 买一赠一用（合并前 Codex 审查 342941e）：赠的那一件也在账单上，用料会把它一起扣掉，券模板上的赠品出库就不要再记一次。
+ */
+export async function usageCoversItem(db: Db, itemId: number): Promise<boolean> {
+  if (!(await loadStockUsageRules(db)).enabled) return false;
+  const [r] = await db<{ id: number }[]>`SELECT id FROM item_recipes WHERE item_id = ${itemId} AND status = 'active'`;
+  return !!r;
+}
+
 const RulesInput = z.object({
   enabled: z.boolean('请选择开还是关'),
   saleWarehouseId: z.number().int().positive(),

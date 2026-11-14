@@ -61,7 +61,7 @@ export function CostTab() {
               <div className="num mt-1 text-[24px] font-bold">
                 {formatYuan(r.margin.rows.filter((x) => x.marginCents !== null).reduce((a, x) => a + (x.marginCents ?? 0), 0))}
               </div>
-              <div className="text-[12.5px] text-ink-3">销售额 − 配方 × 现在的平均成本，不是当时真实耗用</div>
+              <div className="text-[12.5px] text-ink-3">销售额（减去优惠后）− 配方 × 现在的平均成本，不是当时真实耗用</div>
             </Card>
           </div>
 
@@ -98,7 +98,7 @@ export function CostTab() {
           <Card className="p-4">
             <div className="mb-2 flex items-center gap-2">
               <span className="text-[14.5px] font-bold">项目毛利</span>
-              <span className="text-[12.5px] text-ink-3">这段时间已结账的；没设用料的只有销售额</span>
+              <span className="text-[12.5px] text-ink-3">这段时间已结账的；销售额已减去分摊到这一项的券、会员折扣、优惠；没设用料的只有销售额</span>
             </div>
             {r.margin.rows.length === 0 ? (
               <p className="text-[13px] text-ink-3">这段时间没有结账的项目。</p>

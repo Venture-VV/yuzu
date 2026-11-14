@@ -77,11 +77,15 @@ export async function costReport(db: Db, timezone: string, raw: unknown): Promis
     GROUP BY 1, 2 ORDER BY 1, 2`;
   const usage: UsageCostRow[] = usageRows.map((r) => ({ warehouseName: r.warehouseName, label: r.label, costCents: Number(r.cost), moves: r.moves, uncosted: r.uncosted }));
 
-  const sold = await db<{ id: number; name: string; category: string; quantity: number; revenue: number; recipeId: number | null }[]>`
-    SELECT i.id, i.name, i.category, sum(l.quantity)::int AS quantity, sum(l.amount)::bigint AS revenue, r.id AS recipe_id
+  // 销售额减去分摊到这一项的优惠（券、会员折扣、优惠 / 免单；合并前 Codex 审查 342941e）：结账时已经按金额比例分摊进 checkout_items.discount
+  //（日结、部门项目明细用的是同一份），这里按「同一张结账单、同一个部门、同一个名称」取这条明细占的那一份；对不上的（项目后来改了分类）按没有优惠算。
+  const sold = await db<{ id: number; name: string; category: string; quantity: number; revenue: number; discount: number; recipeId: number | null }[]>`
+    SELECT i.id, i.name, i.category, sum(l.quantity)::int AS quantity, sum(l.amount)::bigint AS revenue,
+           round(sum(CASE WHEN ci.amount > 0 THEN ci.discount::numeric * l.amount / ci.amount ELSE 0 END))::bigint AS discount, r.id AS recipe_id
     FROM checkouts c JOIN checkout_bills cb ON cb.checkout_id = c.id
     JOIN bill_lines l ON l.bill_id = cb.bill_id AND l.status = 'active' AND l.item_id IS NOT NULL
     JOIN service_items i ON i.id = l.item_id
+    LEFT JOIN checkout_items ci ON ci.checkout_id = c.id AND ci.name = l.name AND ci.category = coalesce(nullif(i.category, ''), '未分类')
     LEFT JOIN item_recipes r ON r.item_id = i.id AND r.status = 'active'
     WHERE c.status = 'completed' AND c.business_date BETWEEN ${from} AND ${to}
     GROUP BY i.id, i.name, i.category, r.id ORDER BY sum(l.amount) DESC, i.id`;
@@ -105,7 +109,9 @@ export async function costReport(db: Db, timezone: string, raw: unknown): Promis
   const margin: MarginRow[] = sold.map((s) => {
     const unit = s.recipeId === null ? null : (unitCost.get(Number(s.recipeId)) ?? null);
     const cost = unit === null ? null : unit * s.quantity;
-    return { itemId: Number(s.id), itemName: s.name, category: s.category, quantity: s.quantity, revenueCents: Number(s.revenue), unitCostCents: unit, costCents: cost, marginCents: cost === null ? null : Number(s.revenue) - cost };
+    const discount = Math.min(Number(s.discount), Number(s.revenue));
+    const net = Number(s.revenue) - discount;
+    return { itemId: Number(s.id), itemName: s.name, category: s.category, quantity: s.quantity, revenueCents: net, discountCents: discount, unitCostCents: unit, costCents: cost, marginCents: cost === null ? null : net - cost };
   });
 
   return {

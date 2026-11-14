@@ -135,7 +135,10 @@ export interface MarginRow {
   itemName: string;
   category: string;
   quantity: number;
+  /** 销售额：已经减去分摊到这一项的优惠（券、会员折扣、优惠 / 免单） */
   revenueCents: number;
+  /** 分摊到这一项的优惠 */
+  discountCents: number;
   /** 一份的理论成本（配方 × 现在的平均成本，含损耗）；没设用料或有物料没成本是 null */
   unitCostCents: number | null;
   costCents: number | null;
