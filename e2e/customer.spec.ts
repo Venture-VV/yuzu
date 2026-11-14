@@ -378,3 +378,32 @@ test("部门目标卡和员工金额打开原单明细，三秒同步保留目�
     await form.getByRole("button", { name: "关闭", exact: true }).last().click();
   }
 });
+
+test("店主申请维护绑定时下拉里选得到本人，其余是在岗的客户经理", async ({ page }) => {
+  // Codex 2026-11-14（d0040b7）：名单只列客户经理和已经有目标、有成交的人，店主、店总第一次把会员记在自己名下时选不到自己。
+  // 只打开表单核对选项，不提交。
+  await login(page);
+  await openCustomer(page);
+  const session: SessionInfo = await (await page.request.get("/api/auth/me")).json();
+  const members = page.waitForResponse((res) => new URL(res.url()).pathname === "/api/customer/members");
+  await page.getByTestId("customer-tab-members").click();
+  await members;
+  const rows = page.getByRole("button", { name: "查看档案", exact: true });
+  test.skip((await rows.count()) === 0, "演示库里没有会员");
+  await rows.first().click();
+  const profile = page.getByRole("dialog", { name: "会员档案与维护时间轴", exact: true });
+  const apply = profile.getByRole("button", { name: "申请绑定 / 换绑", exact: true });
+  await expect(profile.getByText("会员维护事实", { exact: true })).toBeVisible();
+  test.skip((await apply.count()) === 0, "第一位会员已停用，不能申请绑定");
+  await apply.click();
+  const form = page.getByRole("dialog", { name: "申请维护绑定 / 换绑", exact: true });
+  const select = form.getByLabel("拟绑定维护人 *");
+  await expect(select).toBeEnabled();
+  const options = await select.locator("option").evaluateAll((nodes) => nodes.map((node) => ({ value: (node as HTMLOptionElement).value, text: node.textContent ?? "" })));
+  const self = options.filter((option) => option.value === String(session.staff.id));
+  expect(self, JSON.stringify(options)).toHaveLength(1);
+  expect(self[0]!.text).toContain(session.staff.displayName);
+  await select.selectOption(String(session.staff.id));
+  await expect(select).toHaveValue(String(session.staff.id));
+  await form.getByRole("button", { name: "关闭", exact: true }).first().click();
+});

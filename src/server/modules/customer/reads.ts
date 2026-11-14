@@ -18,7 +18,6 @@ import { memberFamily } from "../membership";
 import {
   canonicalMemberId,
   nativeMemberSummaries,
-  nativeMemberSummary,
 } from "../concierge/native-links";
 import { checkoutOrderDetail } from "../orders";
 import { getConsumption } from "../wallet";
@@ -737,16 +736,19 @@ async function visitRows(
   const [minimum, maximum] = bands[q.amountBand];
   return rows.filter((r) => n(r.amountCents) >= minimum && (maximum === null || n(r.amountCents) < maximum));
 }
+// 这一页客人的会员摘要一批取（Codex 2026-11-14 在 d0040b7 上的审查）：原来一位会员取一次、各跑一遍完整的档阶推算，
+// 50 位就是几百条查询，前台一有变化还会重来。做法同会员名单与低余额。
 async function liveVisitMembers(db: Db, rows: C.CustomerVisitRow[], timezone: string) {
-  const members = new Map<number, C.CustomerVisitMember>();
+  const ids = [...new Set(rows.flatMap((r) => (r.member ? [r.member.id] : [])))];
+  if (!ids.length) return rows;
+  const summaries = await nativeMemberSummaries(db, ids, timezone);
   for (const r of rows) {
     if (!r.member) continue;
-    if (!members.has(r.member.id)) {
-      const m = await nativeMemberSummary(db, r.member.id, timezone);
-      if (m) members.set(m.id, { id: m.id, memberNo: m.memberNo, name: m.name, phone: m.phone, status: m.status,
-        grade: m.grade as C.CustomerVisitMember["grade"], tier: m.tier as C.CustomerVisitMember["tier"], gradeLabel: m.gradeLabel });
-    }
-    r.member = members.get(r.member.id) ?? null;
+    const m = summaries.get(r.member.id);
+    r.member = m
+      ? { id: m.id, memberNo: m.memberNo, name: m.name, phone: m.phone, status: m.status,
+          grade: m.grade as C.CustomerVisitMember["grade"], tier: m.tier as C.CustomerVisitMember["tier"], gradeLabel: m.gradeLabel }
+      : null;
   }
   return rows;
 }

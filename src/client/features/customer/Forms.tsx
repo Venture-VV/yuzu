@@ -74,7 +74,11 @@ export function CustomerFormDialog({ form, meta, managers, onClose, onSaved }: {
   const isReview = form.kind === "bindingReview" || form.kind === "creditReview";
   const canManage = meta.capabilities.manage;
   const canSubmit = form.kind === "target" || isReview ? canManage : meta.capabilities.operate;
-  const eligibleManagers = managers.filter((manager) => manager.active && (canManage || manager.id === meta.capabilities.actorId));
+  const listedManagers = managers.filter((manager) => manager.active && (canManage || manager.id === meta.capabilities.actorId));
+  // 店主、店总可以把会员或一笔充值记在自己名下（服务端认），但名单只列客户经理和已经有目标、有成交的人——
+  // 还没有过的店主、店总第一次选不到自己（Codex 2026-11-14 在 d0040b7 上的审查），这里单独补上本人。
+  const selfSelectable = canManage && ["owner", "store_manager"].includes(session.staff.role) && !listedManagers.some((manager) => manager.id === session.staff.id);
+  const eligibleManagers = selfSelectable ? [...listedManagers, { id: session.staff.id, name: `${session.staff.displayName}（本人）`, active: true }] : listedManagers;
   const snapshot = form.kind === "credit" || form.kind === "creditReview" ? form.recharge : null;
   const canVerify = snapshot && snapshot.credit.rechargeKind !== "unknown" && snapshot.credit.ownerDepartment !== "unknown" && (snapshot.credit.ownerDepartment !== "customer" || snapshot.credit.claimedSeller != null);
   const submit = async (event: FormEvent) => {
