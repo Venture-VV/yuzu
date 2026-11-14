@@ -75,8 +75,9 @@ test.describe('v0.7.19 对客导览', () => {
     const before = await getJson<GuideAdmin>(page, '/api/admin/guide');
     try {
       // ① 后台：按在用底图识别图标；样例派对区设成动区
-      await page.goto('/admin/spaces');
-      await page.getByTestId('subnav-guide').click();
+      // 8.0.19：对客导览从空间台账的页签里单列成后台分区；旧地址跳过来
+      await page.goto('/admin/spaces/guide');
+      await expect(page).toHaveURL(/\/admin\/guide$/);
       const card = page.getByTestId('guide-admin');
       await expect(card).toBeVisible();
       await card.getByTestId('guide-detect').click();

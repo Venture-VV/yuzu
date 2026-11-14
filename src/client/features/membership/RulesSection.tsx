@@ -12,17 +12,15 @@ import { api, ApiError, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { useToast } from '../../components/Toast';
 import { Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Select, Skeleton } from '../../components/ui';
-import { AdminPage } from '../admin/AdminShell';
 import { membershipKeys, useMembershipRules } from './queries';
 
-export function MembershipRulesSection() {
+/** 「会员体系 → 会员规则」页签的内容（8.0.19 起三个分区合成一个，外框在 MembershipSection） */
+export function MembershipRulesBody() {
   return (
-    <AdminPage
-      section="membership"
-      description="档级门槛与赠送比例、享阶 / 尊阶、会籍周期与补充期、最低充值、到期提醒、生日礼到账、邀请体验。改了只影响以后的充值、消费与到期判断，已经记下的档阶不重算。"
-    >
+    <div className="max-w-[1024px]">
+      <p className="mb-4 text-[13px] text-ink-3">档级门槛与赠送比例、享阶 / 尊阶、会籍周期与补充期、最低充值、到期提醒、生日礼到账、邀请体验。改了只影响以后的充值、消费与到期判断，已经记下的档阶不重算。</p>
       <RulesEditor />
-    </AdminPage>
+    </div>
   );
 }
 

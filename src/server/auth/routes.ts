@@ -14,6 +14,7 @@ import { loadDiningRules } from '../modules/dining';
 import { loadRoomRules } from '../modules/rooms';
 import { emenuEnabled } from '../modules/emenu/core';
 import { enabledErpModules } from '../modules/erp';
+import { loadMpRules } from '../modules/mp/rules';
 import { sessionOnly } from './guard';
 import { checkLock, clearFailures, recordFailure } from './lockout';
 import { checkPasswordStrength, hashPassword, verifyPassword } from './password';
@@ -51,6 +52,7 @@ export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Pro
     rooms: (await loadRoomRules(sql)).enabled,
     emenu: await emenuEnabled(sql),
     erpModules: [...(await enabledErpModules(sql))],
+    miniProgram: (await loadMpRules(sql)).enabled,
   };
 }
 

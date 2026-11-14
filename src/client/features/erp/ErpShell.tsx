@@ -153,11 +153,11 @@ export function ErpShell() {
       (k === 'receivables' && !!arTodo.data && (arTodo.data.overdueCharges > 0 || arTodo.data.platformOverdueCents > 0)),
   });
   // 导航的分组与顺序（8.0.18，docs/IA_V8017.md 第 3.3 节）：审批单列、应付归财务、「法务」改叫「合同」；
-  // 员工食堂、安保巡场、营业数据已经挪到后台，这里各留一条跳转（下一个版本去掉）
+  // 员工食堂、安保巡场、营业数据已经挪到后台：8.0.18 在这里各留了一条跳转，8.0.19 去掉（旧地址的跳转一直留着）
   const settingsTabs = erpSettingsTabs(can, session.erpModules);
   const groups: { title: string; items: Item[] }[] = [
     { title: '概览', items: [{ key: 'home', to: '/erp', label: 'ERP 首页', icon: LayoutGrid, end: true }] },
-    ...ERP_NAV_GROUPS.map((g) => ({ title: g.title, items: g.modules.filter((k) => access.modules.includes(k)).map(moduleItem) })),
+    ...ERP_NAV_GROUPS.filter((g) => g.key !== 'moved').map((g) => ({ title: g.title, items: g.modules.filter((k) => access.modules.includes(k)).map(moduleItem) })),
     { title: '设置', items: settingsTabs.length ? [{ key: 'settings', to: ERP_SETTINGS_PATH, label: 'ERP 设置', icon: SlidersHorizontal }] : [] },
   ].filter((g) => g.items.length > 0);
 

@@ -254,6 +254,71 @@ test("只有管家职责的后勤账号：登录直接进管家部；手机上�
 });
 
 
+// ── 8.0.19（W11）──
+// 8.0.18 合并前 Codex 的 P1：没有「查找与查看会员」权限的管家，名单里还没建档的会员手机号是打码的；
+// 页面把打码的号原样交回来，建档被手机号格式拦住。那次只补了接口的用例，这里在页面上走一遍。
+test("没有会员查看权限的管家：还没建档的会员手机号打码，照样能在页面上建立服务档案，建好以后看得到完整的号", async ({ page, browser }, testInfo) => {
+  test.skip(testInfo.project.name !== "门店电脑", "会写数据的流程只在门店电脑组执行");
+  test.setTimeout(120_000);
+  await login(page);
+  const stamp = String(Date.now()).slice(-8), name = "E2E打码-" + stamp, phone = "197" + stamp;
+  const native = await page.request.post("/api/members", { data: { name, phone } });
+  expect(native.status(), await native.text()).toBe(201);
+  const nativeId = (await native.json()).id as number;
+  const made = await page.request.post("/api/staff", { data: { username: `e2emask${stamp}`, displayName: "E2E 打码管家", role: "backoffice", duties: ["concierge"], password: "E2e-mask-2026" } });
+  expect(made.status(), await made.text()).toBe(201);
+  const staff = (await made.json()) as { id: number; temporaryPassword: string };
+  const ctx = await browser.newContext({ locale: "zh-CN", timezoneId: "Asia/Shanghai", baseURL: testInfo.project.use.baseURL });
+  try {
+    const p = await ctx.newPage();
+    await p.goto("/login");
+    await p.fill("#username", `e2emask${stamp}`);
+    await p.fill("#password", staff.temporaryPassword);
+    await p.getByRole("button", { name: "登录", exact: true }).click();
+    await expect(p.getByText("设置你的密码")).toBeVisible();
+    const pw = p.locator("input[type=password]");
+    await pw.nth(0).fill(staff.temporaryPassword);
+    await pw.nth(1).fill("E2e-mask-2027");
+    await pw.nth(2).fill("E2e-mask-2027");
+    await p.getByRole("button", { name: "保存新密码" }).click();
+    await expect(p).toHaveURL(/\/concierge$/, { timeout: 20_000 });
+    // 这位管家确实没有会员查看权限：会员工作台的查找接口不让用
+    expect((await p.request.get("/api/members?q=" + phone)).status()).toBe(403);
+    // 管家部的查找照样能按完整手机号找到人，但给回来的号是打码的
+    const lookup = await p.request.get("/api/concierge/native-members?q=" + phone);
+    expect(lookup.status(), await lookup.text()).toBe(200);
+    const masked = ((await lookup.json()) as { members: { id: number; phone: string }[] }).members.find((m) => m.id === nativeId)!.phone;
+    expect(masked).not.toBe(phone);
+    expect(masked).toContain("*");
+    // 页面上建档
+    await p.getByRole("button", { name: "建立服务档案", exact: true }).first().click();
+    const dialog = p.getByRole("dialog", { name: "建立管家服务档案" });
+    await dialog.getByRole("textbox", { name: "选择系统会员 *", exact: true }).fill(phone);
+    const option = dialog.locator(".native-member-option").filter({ hasText: name });
+    await expect(option).not.toContainText(phone);
+    await option.click();
+    await expect(dialog.locator('input[name="name"]')).toHaveValue(name);
+    await expect(dialog.locator('input[name="phone"]')).toHaveValue(masked);
+    await dialog.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(dialog).not.toBeVisible({ timeout: 15_000 });
+    // 建好了：名单里有这位，打开看得到完整的号（建了服务档案的照旧显示完整的）
+    await p.getByRole("button", { name: new RegExp(name) }).first().click();
+    const drawer = p.locator(".member-drawer");
+    await expect(drawer).toContainText(/会员档案 · \d{6}/);
+    const after = await p.request.get("/api/concierge/native-members?q=" + phone);
+    const row = ((await after.json()) as { members: { id: number; phone: string; profiles: { id: number }[] }[] }).members.find((m) => m.id === nativeId)!;
+    expect(row.profiles).toHaveLength(1);
+    expect(row.phone).toBe(phone);
+    // 前台的会员没被改：手机号还是原来那个
+    const kept = (await (await page.request.get(`/api/members/${nativeId}`)).json()) as { phone: string; name: string };
+    expect(kept.phone).toBe(phone);
+    expect(kept.name).toBe(name);
+  } finally {
+    await ctx.close();
+    await page.request.put(`/api/staff/${staff.id}`, { data: { displayName: "E2E 打码管家", role: "backoffice", duties: ["concierge"], active: false } });
+  }
+});
+
 test("两位低余额会员均无人工核对记录时重点跟进不崩溃", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "门店电脑", "写入仅在电脑组");
   await login(page);

@@ -9,17 +9,16 @@ import { qk, useSettings } from '../../lib/queries';
 import { cn } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, IconButton, Input, Notice, PendingBadge, SectionTitle, Segmented, Skeleton } from '../../components/ui';
-import { AdminPage } from './AdminShell';
 import { MemberTagsCard } from './MemberTagsCard';
 
-export function MembersSection() {
+/** 「会员体系 → 渠道与标签」页签的内容（8.0.19 起三个分区合成一个，外框在 MembershipSection） */
+export function MembersBody() {
   return (
-    <AdminPage section="members" description="会员标签（客群分层）与渠道来源。改动只影响之后的建档与显示；档级、赠送比例与会籍在「会员规则」。">
-      <div className="space-y-5">
-        <ChannelsCard />
-        <MemberTagsCard />
-      </div>
-    </AdminPage>
+    <div className="max-w-[1024px] space-y-5">
+      <p className="text-[13px] text-ink-3">会员标签（客群分层）与渠道来源。改动只影响之后的建档与显示；档级、赠送比例与会籍在「会员规则」页签。</p>
+      <ChannelsCard />
+      <MemberTagsCard />
+    </div>
   );
 }
 

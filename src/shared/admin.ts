@@ -23,11 +23,10 @@ export const ADMIN_SECTIONS = {
   settings: { path: '/admin/settings', label: '规则总表', perms: ['settings.manage', 'audit.read'] },
   // 8.0.17（IA5）：原来叫「经营规则」，与「规则总表」分不清，改叫「门店基本规则」（路径不变）
   rules: { path: '/admin/rules', label: '门店基本规则', perms: ['settings.manage'] },
-  members: { path: '/admin/members', label: '渠道与标签', perms: ['settings.manage'] },
-  // 会员体系 v2（v0.7.23，docs/MEMBERSHIP.md）：会员规则（店主、店总）；看板与到期提醒名单在「数据看板 → 会员体系」（客户经理不进后台）
-  membership: { path: '/admin/membership', label: '会员规则', perms: ['member.rules'] },
-  // 会员体系 v2 第二期（v0.7.24，docs/BENEFITS.md）：本店权益清单的导入、修改、发布与暂缓，本月发放与使用
-  benefits: { path: '/admin/benefits', label: '会员权益', perms: ['benefit.publish'] },
+  // 会员体系（8.0.19，IA5）：原来的三个分区——会员规则（member.rules）、会员权益（benefit.publish）、渠道与标签（settings.manage）——
+  // 合成一个，三个页签各自还是原来的权限（features/membership/MembershipSection）；有其中一项的就看得到这个分区。
+  // 旧地址 /admin/benefits、/admin/members 跳过来
+  membership: { path: '/admin/membership', label: '会员体系', perms: ['member.rules', 'benefit.publish', 'settings.manage'] },
   // 券与会员权益（v0.7.20，飞书 RQ-006 后半，见 docs/COUPONS.md）：券模板、发券规则、无记名券、统计；默认店主、店总
   coupons: { path: '/admin/coupons', label: '券', perms: ['coupon.manage'] },
   catalog: { path: '/admin/catalog', label: '价目与套餐', perms: ['catalog.manage'] },
@@ -41,6 +40,8 @@ export const ADMIN_SECTIONS = {
   bookings: { path: '/admin/bookings', label: '预约', perms: ['settings.manage'] },
   // 空间台账（RQ-004 第一段，v0.7.14）：店主、店总，与「客房」同一组权限
   spaces: { path: '/admin/spaces', label: '空间台账', perms: ['settings.manage', 'catalog.manage'] },
+  // 对客导览（8.0.19）：原来是空间台账里的一个页签，是对客的内容（区域色块、设施图标、大屏轮播），单列出来；权限与空间台账相同
+  guide: { path: '/admin/guide', label: '对客导览', perms: ['settings.manage', 'catalog.manage'] },
   // 设备（RQ-001，v0.7.21，见 docs/HARDWARE.md）：设备登记、按采购清单导入、打印任务与设备事件；默认店主、店总
   devices: { path: '/admin/devices', label: '设备', perms: ['device.manage'] },
   // 微信小程序（小程序线，docs/MINIPROGRAM.md 第 5 节）：开关、门店信息、首页轮播、项目介绍、会员的微信绑定与解绑。
@@ -66,9 +67,9 @@ export type AdminSection = keyof typeof ADMIN_SECTIONS;
 export const ADMIN_GROUPS: readonly { key: string; title: string; items: readonly AdminSection[] }[] = [
   { key: 'overview', title: '概览', items: ['home', 'dashboard'] },
   { key: 'rules', title: '规则中心', items: ['settings', 'rules'] },
-  { key: 'members', title: '会员与营销', items: ['membership', 'benefits', 'members', 'coupons'] },
+  { key: 'members', title: '会员与营销', items: ['membership', 'coupons'] },
   { key: 'business', title: '营业项目', items: ['catalog', 'tags', 'technicians', 'dining', 'emenu', 'rooms', 'bookings'] },
-  { key: 'venue', title: '场地、设备与线上', items: ['spaces', 'devices', 'mp'] },
+  { key: 'venue', title: '场地、设备与线上', items: ['spaces', 'guide', 'devices', 'mp'] },
   { key: 'staff', title: '人员与行政', items: ['staff', 'permissions', 'canteen', 'patrol'] },
   { key: 'data', title: '数据与审计', items: ['audit', 'opening'] },
 ];
@@ -119,6 +120,8 @@ export interface RuleEntry {
   updatedAt: string | null;
   updatedBy: string | null;
   section: AdminSection;
+  /** 在这个分区的哪个页签里改（8.0.19：会员体系的三个页签）；给了「去设置」就直达页签 */
+  tab?: string;
   /**
    * 不在后台分区里改的规则去哪改（8.0.18）：ERP 的规则在「ERP 设置」的页签里（/erp/settings/purchase……）。
    * 给了就按它跳，没给的照旧去 section 那个分区

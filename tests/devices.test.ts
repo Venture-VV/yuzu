@@ -458,6 +458,48 @@ describe('终端替桥上报', () => {
     expect((await report({ terminal: 'TRM-SY-01', bridge: { connected: true }, events: [{ id: 'x', key: 'rc300', type: 'card', value: '1', at: 'now' }] })).status).toBe(400);
   });
 
+  it('修改员工的事务还没提交时，店主账号的终端上报（带读卡事件）不被它挡住（8.0.19 W12）', async () => {
+    // Codex 在 8.0.15 上遇到一次：两个页面都显示了读卡、不带事件的上报照常 200，带事件的那一次 10 秒没记到。
+    // 一条能造成这个现象的路径：修改员工的事务把所有店主行 FOR UPDATE 锁住（保证至少留一位在职店主），
+    // 这期间凡是要引用店主的写入（设备事件记经办人）都要等它提交。改成 FOR NO KEY UPDATE：改员工仍然互相串行，不再挡别的写入。
+    const [target] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'am'`;
+    const eventId = randomUUID();
+    let put: Promise<{ status: number; body: unknown }> | null = null;
+    let reported: { status: number; body: unknown } | null = null;
+    let took = 0;
+    await ctx.sql.begin(async (tx) => {
+      // 先占住要改的那位员工一行：改员工的事务锁了店主行以后停在这里
+      await tx`SELECT id FROM staff WHERE id = ${target!.id} FOR UPDATE`;
+      put = api(ctx.app, ctx.owner, 'PUT', `/api/staff/${target!.id}`, { displayName: '客户经理', role: 'account_manager', duties: [], active: true });
+      await expect
+        .poll(async () => Number((await ctx.sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%UPDATE staff SET display_name%' AND query NOT ILIKE '%pg_stat_activity%'`)[0]!.n), { timeout: 5_000 })
+        .toBe(1);
+      const started = Date.now();
+      reported = await api(ctx.app, ctx.owner, 'POST', '/api/devices/bridge-report', {
+        terminal: 'TRM-SY-01',
+        bridge: { connected: true },
+        devices: [{ key: 'rc300', status: 'online' }],
+        events: [{ id: eventId, key: 'rc300', type: 'card', value: '0081901912', at: new Date().toISOString() }],
+      });
+      took = Date.now() - started;
+    });
+    expect(reported!.status, JSON.stringify(reported!.body)).toBe(200);
+    expect(reported!.body).toMatchObject({ recorded: 1 });
+    expect(took).toBeLessThan(2_000);
+    expect((await put!).status).toBe(200);
+    // 两个改员工的事务仍然互相串行：第二个等第一个提交（店主行的锁没有放松到可以同时改）
+    const [owner] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'owner'`;
+    let second: Promise<{ status: number; body: unknown }> | null = null;
+    await ctx.sql.begin(async (tx) => {
+      await tx`SELECT id FROM staff WHERE id = ${owner!.id} FOR NO KEY UPDATE`;
+      second = api(ctx.app, ctx.owner, 'PUT', `/api/staff/${target!.id}`, { displayName: '客户经理', role: 'account_manager', duties: [], active: true });
+      await expect
+        .poll(async () => Number((await ctx.sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%FROM staff WHERE role = ''owner''%' AND query NOT ILIKE '%pg_stat_activity%'`)[0]!.n), { timeout: 5_000 })
+        .toBe(1);
+    });
+    expect((await second!).status).toBe(200);
+  });
+
   it('桥报的错误码只认协议里的（__proto__ 之类不写进去）；拼上错误码的长说明截到上限，整份上报照常收下（Codex 自动审查 9ca8a95）', async () => {
     const report = (body: Record<string, unknown>) => api(ctx.app, ctx.clerk, 'POST', '/api/devices/bridge-report', body);
     // 对象继承来的属性名当错误码：状态照记，错误码不写（原来会把 __proto__ 写进去，设备页渲染出错）

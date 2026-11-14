@@ -31,20 +31,22 @@ export function ErpHome() {
   const session = useSession();
   const access = useErpAccess();
   const off = access.canSettings ? ERP_MODULE_KEYS.filter((k) => !session.erpModules.includes(k)) : [];
+  // 页面在 ERP 里的模块（8.0.19）：员工食堂、安保巡场、营业数据的页面在管理后台，这里不再列
+  const here = access.modules.filter((k) => ERP_MODULES[k].group !== '后台');
   return (
     <ErpPage title="ERP 首页" description="财务、采购用的功能都在这里（含供应链：供应商、采购、库存、应付货款）；门店前台看不到。模块开关与各模块的规则在「ERP 设置」里。">
-      {access.modules.length === 0 ? (
+      {here.length === 0 ? (
         <Card className="p-6 text-center text-[13.5px] text-ink-3" data-testid="erp-empty">
           现在没有能用的 ERP 模块。{access.canSettings ? '在「ERP 设置 → 模块开关」里开启需要的模块。' : '请店主在「ERP 设置 → 模块开关」里开启，或在「岗位权限」里给你相应的权限。'}
         </Card>
       ) : (
         <Stagger className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="erp-modules">
-          {access.modules.map((k) => (
+          {here.map((k) => (
             <Link key={k} to={ERP_MODULES[k].path} className="group" data-testid={`erp-card-${k}`}>
               <Card className="mo-lift flex h-full flex-col gap-1.5 p-4 group-hover:border-pine">
                 <span className="flex items-center gap-2">
                   <span className="text-[16px] font-bold">{ERP_MODULES[k].label}</span>
-                  <Badge tone="neutral">{ERP_MODULES[k].group === '后台' ? '在管理后台' : ERP_MODULES[k].group}</Badge>
+                  <Badge tone="neutral">{ERP_MODULES[k].group}</Badge>
                   <ArrowRight className="ml-auto size-4 text-ink-4 group-hover:text-pine" />
                 </span>
                 <span className="text-[12.5px] leading-relaxed text-ink-3">{ERP_MODULES[k].description}</span>

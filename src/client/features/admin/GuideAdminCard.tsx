@@ -1,6 +1,7 @@
 // 后台「空间台账 → 对客导览」（v0.7.19，见 docs/FLOORPLAN_FINISH.md 第 2 节）：区域的导览分类（动区 / 静区 / 公共 / 后场）与颜色、
 // 设施图标（按在用底图的文字自动识别；可挪位置、隐藏、补加，存图纸坐标）、大屏轮播秒数（店主）、预览。
 
+import { AdminPage } from './AdminShell';
 import { useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -28,6 +29,15 @@ import { GUIDE_ICONS, GuideMap, useGuide } from '../guide/GuidePage';
 
 const adminKey = ['admin', 'guide'] as const;
 const useGuideAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<GuideAdmin>('/api/admin/guide') });
+
+/** 后台「对客导览」分区（8.0.19：从空间台账的页签里单列出来；内容还是这一张卡） */
+export function GuideSection() {
+  return (
+    <AdminPage section="guide" description="对客导览图：区域按动区、静区等分类上色，设施图标（洗手间、电梯、饮水……）按在用底图识别或手动补；门店大屏按楼层轮播。底图与空间在「空间台账」里维护。">
+      <GuideAdminCard />
+    </AdminPage>
+  );
+}
 
 export function GuideAdminCard() {
   const admin = useGuideAdmin();

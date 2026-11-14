@@ -85,8 +85,10 @@ test.describe('券与会员权益（v0.7.20）', () => {
       expect(rule).toMatchObject({ kind: 'recharge', planId: plan.id });
       await expect(page.getByTestId(`coupon-rule-${rule.id}`)).toContainText(name);
 
-      // ③ 无记名券：生成 3 张，导出券码清单
-      await page.getByTestId('coupon-tab-batches').click();
+      // ③ 无记名券：生成 3 张，导出券码清单。8.0.19：批量发券、无记名券挪到门店「会员工作台 → 发券」，后台的旧地址跳过去
+      await page.goto('/admin/coupons/batches');
+      await expect(page).toHaveURL(/\/coupon-issue\/batches$/);
+      await expect(page.getByTestId('coupon-tab-batches')).toHaveAttribute('aria-current', 'page');
       await page.getByTestId('coupon-batch-new').click();
       await page.getByTestId('coupon-batch-template').selectOption(String(template.id));
       await page.getByTestId('coupon-batch-quantity').fill('3');

@@ -1,7 +1,7 @@
 // 管理后台的路由（v0.6.0）：/admin 下各分区；旧的「管理」页的 /admin/<分区> 地址不变。
 
 import type { RouteObject } from 'react-router';
-import { Navigate } from 'react-router';
+import { Navigate, useLocation } from 'react-router';
 import { lazyPage } from '../../lib/lazyPage';
 
 // 各分区第一次打开时再下载（v0.7.22）；门店前台用不到这些代码
@@ -16,11 +16,10 @@ const DevicesSection = lazyPage(() => import('./DevicesSection').then((m) => m.D
 const DiningSection = lazyPage(() => import('./DiningSection').then((m) => m.DiningSection));
 // 电子菜单（8.0.10，docs/EMENU.md）：餐桌平板上的菜单在这里排
 const EmenuAdminSection = lazyPage(() => import('../emenu/EmenuAdminSection').then((m) => m.EmenuAdminSection));
-const MembersSection = lazyPage(() => import('./MembersSection').then((m) => m.MembersSection));
 // 微信小程序（小程序线）
 const MpAdminSection = lazyPage(() => import('../mp/MpAdminSection').then((m) => m.MpAdminSection));
-const MembershipRulesSection = lazyPage(() => import('../membership/RulesSection').then((m) => m.MembershipRulesSection));
-const BenefitsSection = lazyPage(() => import('../membership/BenefitsSection').then((m) => m.BenefitsSection));
+const MembershipSection = lazyPage(() => import('../membership/MembershipSection').then((m) => m.MembershipSection));
+const GuideSection = lazyPage(() => import('./GuideAdminCard').then((m) => m.GuideSection));
 const OpeningTab = lazyPage(() => import('./OpeningTab').then((m) => m.OpeningTab));
 const PermissionsSection = lazyPage(() => import('./PermissionsSection').then((m) => m.PermissionsSection));
 const RoomsSection = lazyPage(() => import('./RoomsSection').then((m) => m.RoomsSection));
@@ -34,6 +33,12 @@ const CanteenPage = lazyPage(() => import('../canteen/CanteenPage').then((m) => 
 const PatrolPage = lazyPage(() => import('../patrol/PatrolPage').then((m) => m.PatrolPage));
 const TechniciansSection = lazyPage(() => import('./TechniciansSection').then((m) => m.TechniciansSection));
 
+/** 旧地址跳到新地址，查询参数（?view=list 这类）带过去 */
+function MovedWithSearch({ to }: { to: string }) {
+  const { search } = useLocation();
+  return <Navigate to={`${to}${search}`} replace />;
+}
+
 export const adminRoutes: RouteObject[] = [
   { index: true, element: <AdminHome /> },
   { path: 'dashboard/:tab?', element: <DashboardPage /> },
@@ -42,11 +47,15 @@ export const adminRoutes: RouteObject[] = [
   // 8.0.18：库存与采购的规则归 ERP（「ERP 设置 → 库存与审批开关」）；旧地址跳过去
   { path: 'rules/inventory', element: <Navigate to="/erp/settings/inventory" replace /> },
   { path: 'rules/:tab?', element: <RulesTab /> },
-  { path: 'members', element: <MembersSection /> },
-  { path: 'membership', element: <MembershipRulesSection /> },
-  { path: 'benefits', element: <BenefitsSection /> },
+  // 会员体系（8.0.19，IA5）：会员规则、会员权益、渠道与标签合成一个分区的三个页签；旧地址带着查询参数跳过来
+  { path: 'membership/:tab?', element: <MembershipSection /> },
+  { path: 'benefits', element: <MovedWithSearch to="/admin/membership/benefits" /> },
+  { path: 'members', element: <Navigate to="/admin/membership/channels" replace /> },
+  // 对客导览（8.0.19）：从空间台账的页签里单列出来
+  { path: 'guide', element: <GuideSection /> },
+  { path: 'spaces/guide', element: <Navigate to="/admin/guide" replace /> },
   // VIP 柜 8.0.4 起归「会员权益」：旧入口（会员规则、手牌与前台）的「去设置」都跳到这里
-  { path: 'vip-lockers', element: <Navigate to="/admin/benefits?view=vip" replace /> },
+  { path: 'vip-lockers', element: <Navigate to="/admin/membership/benefits?view=vip" replace /> },
   { path: 'coupons/:tab?', element: <CouponsSection /> },
   { path: 'catalog/:tab?', element: <CatalogTab /> },
   { path: 'tags/:tab?', element: <TagsTab /> },
