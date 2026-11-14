@@ -3,7 +3,8 @@
 //   · 要客户部的查看权限；只读（不写任何东西）。
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { api, createMember, rechargeBody, setup, type TestContext } from './helpers';
+import { createStaff } from '../src/server/modules/staff';
+import { api, createMember, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let memberId: number;
@@ -32,7 +33,7 @@ describe('客户部同步指纹', () => {
     expect(await revision()).toBe(a);
   });
 
-  it('充值、来访、前台挂账与撤销挂账、客户部记录服务之后都会变', async () => {
+  it('充值、来访、前台挂账与撤销挂账、客户部记录服务、绑定申请与审核之后都会变', async () => {
     const seen = new Set<string>([await revision()]);
     const changed = async (what: string) => {
       const next = await revision();
@@ -64,6 +65,22 @@ describe('客户部同步指纹', () => {
     });
     expect(note.status, JSON.stringify(note.body)).toBe(200);
     await changed('客户部记录服务');
+    // 维护绑定：提交申请（多一条）、驳回（待审核的少一条）、再申请并通过（多一条生效记录）
+    const managerId = await createStaff(ctx.sql, { username: 'rev-manager', displayName: '指纹合成经理', role: 'account_manager', password: PASSWORD, mustChangePassword: false });
+    const request = (version: number) =>
+      api(ctx.app, ctx.owner, 'POST', '/api/customer/bindings/requests', { requestKey: randomUUID(), memberId, toStaffId: managerId, expectedVersion: version, reason: '指纹用例申请' });
+    const review = (id: number, decision: 'approve' | 'reject') =>
+      api(ctx.app, ctx.owner, 'POST', `/api/customer/bindings/requests/${id}/review`, { requestKey: randomUUID(), expectedVersion: 1, decision, reason: '指纹用例审核' });
+    const first = await request(0);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    await changed('提交绑定申请');
+    expect((await review(first.body.id, 'reject')).status).toBe(200);
+    await changed('驳回绑定申请');
+    const second = await request(0);
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+    await changed('再次申请');
+    expect((await review(second.body.id, 'approve')).status).toBe(200);
+    await changed('通过绑定申请');
     // 之后没有变化：稳定
     const last = await revision();
     expect(await revision()).toBe(last);

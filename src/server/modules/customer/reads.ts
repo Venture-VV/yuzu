@@ -108,7 +108,8 @@ export async function customerMeta(
  *   · 会员账本的最大编号：充值、扣卡、撤销、退储值、赠金到期、合并……钱包的每一笔都会多一行；
  *   · 前台：挂账明细的最大编号、开着的账单的金额与行数合计（退菜、转单改的是它）、在店手牌数、来访与结账单的最大编号、
  *     今天反结账与作废退款单的张数、退款单的最大编号；
- *   · 客户部自己的：服务记录、绑定申请（含状态变化的版本合计）与生效记录、归属与目标的历史——这几张都是只追加或带版本的；
+ *   · 客户部自己的：服务记录、绑定申请的最大编号与还在等审核的条数（通过、驳回都会让它变；走「待审核」的部分索引，
+ *     不随历史申请变多而变慢）、绑定的生效记录、归属与目标的历史——后几张都是只追加的；
  *   · 营业日（过了营业日切换时间，页面上的「今天」要跟着变）。
  * 会员改名、改手机号、换岗这类不在里面，靠页面的慢速刷新带出来。
  */
@@ -127,7 +128,8 @@ export async function customerRevision(db: Db, timezone: string, at = new Date()
     (SELECT count(*) FROM refunds WHERE business_date=${today} AND status<>'completed') AS refund_voids,
     (SELECT coalesce(max(id),0) FROM member_refunds) AS member_refunds,
     (SELECT coalesce(max(id),0) FROM customer_service_notes) AS notes,
-    (SELECT coalesce(max(id),0)::text||'/'||coalesce(sum(version),0)::text FROM customer_binding_requests) AS binding_requests,
+    (SELECT coalesce(max(id),0) FROM customer_binding_requests) AS binding_requests,
+    (SELECT count(*) FROM customer_binding_requests WHERE status='pending') AS binding_pending,
     (SELECT coalesce(max(id),0) FROM customer_binding_events) AS binding_events,
     (SELECT coalesce(max(id),0) FROM customer_credit_events) AS credit_events,
     (SELECT coalesce(max(id),0) FROM customer_target_versions) AS target_versions`;
