@@ -52,7 +52,7 @@ test.describe('8.0.4 会员体系整改', () => {
     await expect(page.getByTestId('vip-lockers')).toBeVisible();
     for (const grade of [0, 1, 2, 3, 4, 5, 6]) await expect(page.getByTestId(`vip-level-${grade}`)).toBeVisible();
     await page.goto('/admin/vip-lockers');
-    await expect(page).toHaveURL(/\/admin\/benefits\?view=vip/);
+    await expect(page).toHaveURL(/\/admin\/membership\/benefits\?view=vip/);
     await expect(page.getByTestId('vip-lockers')).toBeVisible();
 
     // 看使用率

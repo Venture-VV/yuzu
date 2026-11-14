@@ -85,7 +85,7 @@
  .concierge-workspace .member-grade-card { padding: 18px 14px; }
  .concierge-workspace .insights-filters { padding: 12px; gap: 9px; }
  .concierge-workspace .insights-filters select,.concierge-workspace .insights-search input { font-size: 16px; }
- .concierge-workspace .insights-filters select { flex: 1; min-width: 0; }
+ .concierge-workspace .insights-filters select { flex: 1 1 150px; min-width: 0; }
  .concierge-workspace .insights-pagination { padding: 12px; }
  .concierge-workspace .native-preview-facts { grid-template-columns: 1fr; gap: 17px; }
  .concierge-workspace .native-preview-identity h2 { font-size: 22px; }

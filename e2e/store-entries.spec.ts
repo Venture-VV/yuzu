@@ -24,6 +24,15 @@ async function firstMember(page: Page): Promise<{ id: number; name: string }> {
 
 const BINDING = { id: 770019, openidTail: 'a1b2c3', phone: '13800001111', mock: true, boundAt: '2026-11-02T03:00:00.000Z', unboundAt: null, unboundByName: null, unbindReason: null, purgedAt: null };
 
+/** 会话里「小程序开没开」（8.0.19 W10）：别的用例会改真的开关，这里把会话接口的这一项拦下来定住 */
+async function mockMiniProgram(page: Page, on: boolean) {
+  await page.unroute('**/api/auth/me');
+  await page.route('**/api/auth/me', async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...((await response.json()) as object), miniProgram: on } });
+  });
+}
+
 test.describe('8.0.19 门店的日常入口', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '只在门店电脑尺寸跑一次');
 
@@ -79,7 +88,15 @@ test.describe('8.0.19 门店的日常入口', () => {
   test('会员详情「微信小程序」：没绑的写没有绑定；绑了的店主可以解绑（写原因、带操作编号），店员看不到解绑', async ({ page, browser }) => {
     await login(page, 'linlan');
     const member = await firstMember(page);
-    // 真的接口：演示会员没有绑过
+    // 没开小程序的门店（W10）：演示会员没有绑过，这一行不显示（等读绑定的接口回来再看）
+    await mockMiniProgram(page, false);
+    const read = page.waitForResponse((r) => r.url().includes(`/api/admin/mp/members/${member.id}/bindings`));
+    await page.goto(`/?m=${member.id}`);
+    await read;
+    await expect(page.getByTestId('member-cards')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('member-wechat')).toHaveCount(0);
+    // 开了小程序：真的接口，没绑的写「没有绑定」
+    await mockMiniProgram(page, true);
     await page.goto(`/?m=${member.id}`);
     await expect(page.getByTestId('member-wechat')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId('member-wechat-none')).toContainText('没有绑定');
@@ -126,6 +143,8 @@ test.describe('8.0.19 门店的日常入口', () => {
   });
 
   test('解绑没收到结果：记在本机、这一行提示去后台处理，期间不能另起一笔', async ({ page }) => {
+    // 小程序关着、但这位还绑着：这一行照旧显示，好让人解绑（W10）
+    await mockMiniProgram(page, false);
     await login(page, 'linlan');
     const member = await firstMember(page);
     await page.route(`**/api/admin/mp/members/${member.id}/bindings`, (route) => route.fulfill({ json: [BINDING] }));

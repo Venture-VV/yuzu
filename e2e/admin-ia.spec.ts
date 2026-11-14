@@ -143,7 +143,7 @@ test.describe('8.0.17 后台的信息架构', () => {
     await expect(page.getByTestId('subnav-usage')).toHaveAttribute('aria-current', 'page');
     // 「会员权益」里的「看使用率」也到这里
     await page.goto('/admin/vip-lockers');
-    await expect(page).toHaveURL(/\/admin\/benefits\?view=vip$/);
+    await expect(page).toHaveURL(/\/admin\/membership\/benefits\?view=vip$/);
     // 深链接：直接打开某个页签
     await page.goto('/admin/spaces/plans');
     await expect(page.getByTestId('subnav-plans')).toHaveAttribute('aria-current', 'page');

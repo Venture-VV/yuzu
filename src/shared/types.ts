@@ -88,6 +88,8 @@ export interface SessionInfo {
   emenu: boolean;
   /** ERP 里能用的模块（v0.7.3：店主的模块开关与依赖算好的结果） */
   erpModules: import('./erp').ErpModuleKey[];
+  /** 微信小程序已开启（8.0.19：没开的门店，会员详情不显示「微信小程序」一行——还绑着的例外） */
+  miniProgram: boolean;
 }
 
 export interface MemberSummary extends MemberGradeFields {

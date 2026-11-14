@@ -22,6 +22,7 @@ import { MpPendingReadError, MpPendingStoreError, sendUnbind, useMpPending } fro
 
 export function MemberWechatCard({ member }: { member: MemberDetail }) {
   const can = useCan();
+  const session = useSession();
   // 与后台「微信小程序 → 绑定」同一个查询键：哪边解绑了，另一边跟着变
   const bindings = useQuery({
     queryKey: ['mp', 'bindings', member.id],
@@ -34,6 +35,8 @@ export function MemberWechatCard({ member }: { member: MemberDetail }) {
   if (!bindings.data) return null;
   const active = bindings.data.filter((b) => !b.unboundAt);
   const past = bindings.data.length - active.length;
+  // 没开小程序的门店不显示这一行（8.0.19，W10）；关掉以前绑的还绑着时照旧显示，好让人解绑
+  if (!session.miniProgram && active.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-line bg-card px-4 py-3 text-[13.5px]" data-testid="member-wechat">
       <MessageCircle className="size-4 shrink-0 text-ink-3" />
