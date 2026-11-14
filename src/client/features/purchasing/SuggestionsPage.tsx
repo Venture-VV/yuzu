@@ -2,6 +2,7 @@
 // 总仓物料按日均用量、结存与在途算出该补多少，按供应商分组；采购改数量、去掉不要的行，一键生成采购单草稿，
 // 打开草稿核对后提交；合计到询价门槛的（或想先比价的）可以「发起询价」（v0.7.30）。建好的草稿、询价单都算在途，刷新后不会重复建议。
 
+import { AutoReplenishCard } from './AutoReplenishCard';
 import { PurchasingTabs } from './PurchasingTabs';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
@@ -50,6 +51,7 @@ export function SuggestionsPage() {
       <PurchasingTabs active="suggestions" />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1180px] space-y-4 px-5 py-5 md:px-7" data-testid="suggestions-page">
+          <AutoReplenishCard />
           {data.isPending ? (
             <Skeleton className="h-64" />
           ) : data.error ? (

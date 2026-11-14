@@ -26,7 +26,8 @@ export interface TestContext {
 
 /**
  * 把 8.0.20 起默认开的功能开关都关上（技师、餐饮与桌台、客房、平板点餐、实时位置、员工食堂与安保巡场、企业微信周推）：
- * 之前的用例从「都关着」开始、用到哪样自己打开。新加的功能开关（8.0.20 的扣库存等）不在这里，新用例按默认开写。
+ * 之前的用例从「都关着」开始、用到哪样自己打开。新加的功能开关（8.0.20 的扣库存等）不在这里，新用例按默认开写——
+ * 只有自动补货例外（到点自己建单，结果随钟点变）。
  */
 export async function legacySwitchesOff(sql: Sql): Promise<void> {
   const off = { enabled: false };
@@ -34,7 +35,9 @@ export async function legacySwitchesOff(sql: Sql): Promise<void> {
     ('technician_rules', ${sql.json(off)}), ('room_rules', ${sql.json(off)}), ('emenu_rules', ${sql.json(off)}), ('location_rules', ${sql.json(off)}),
     ('dining_rules', ${sql.json({ enabled: false, tablesEnabled: false })}),
     ('erp_modules', ${sql.json({ canteen: false, patrol: false })}),
-    ('wecom_weekly_push', 'false'::jsonb)
+    ('wecom_weekly_push', 'false'::jsonb),
+    -- 自动补货（8.0.20 新加的）到点会自己建采购单草稿，结果随钟点变；别的用例里关着，它自己的用例里打开
+    ('auto_replenish', ${sql.json({ enabled: false })})
     ON CONFLICT (key) DO NOTHING`;
 }
 
@@ -289,6 +292,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '126_switches_on.sql',
   '127_stock_cost.sql',
   '128_stock_usage.sql',
+  '129_replenish_runs.sql',
   '130_request_drafts_imports.sql',
   '135_concierge.sql',
   '136_concierge_native_resources.sql',
