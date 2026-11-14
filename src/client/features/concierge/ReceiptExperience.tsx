@@ -1,4 +1,5 @@
 import { useCan } from "../../lib/session";
+import { money, stamp } from "./format";
 import { uuid } from "../../lib/utils";
 import { conciergeFetch as fetch } from "./api";
 
@@ -141,12 +142,6 @@ const METHOD_OPTIONS = [
 ];
 // 操作编号：内网用 http://IP 打开时没有 crypto.randomUUID（只在 HTTPS / localhost 下有），统一用带降级的 uuid()（8.0.15）
 const uid = () => uuid();
-function money(n: number) {
-  return new Intl.NumberFormat("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n / 100);
-}
 function value(n: number | null | undefined) {
   return n == null ? "" : (n / 100).toFixed(2);
 }
@@ -185,17 +180,7 @@ function localTime(s?: string) {
 }
 function date(s?: string) {
   if (!s) return "未记录";
-  const d = new Date(s);
-  return Number.isNaN(d.getTime())
-    ? s
-    : new Intl.DateTimeFormat("zh-CN", {
-        timeZone: "Asia/Shanghai",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(d);
+  return stamp(s, s);
 }
 function detailTime(value: string) {
   return /T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
@@ -2130,7 +2115,7 @@ export function ReceiptDetail({
   );
 }
 
-async function prepareEvidence(files: File[]): Promise<File[]> {
+export async function prepareEvidence(files: File[]): Promise<File[]> {
   const result: File[] = [];
   for (const f of files) {
     if (!["image/jpeg", "image/png", "image/webp"].includes(f.type))
@@ -2389,8 +2374,10 @@ export function BalanceDetail({
   onClose,
   onReceipt,
   onAttach,
+  readOnly = false,
 }: {
   balance: Balance;
+  readOnly?: boolean;
   member?: Member;
   receipts: Receipt[];
   busy: boolean;
@@ -2427,7 +2414,7 @@ export function BalanceDetail({
   }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (uploading || busy) return;
+    if (readOnly || uploading || busy) return;
     const fd = new FormData(e.currentTarget);
     const uploaded = fd.getAll("uploadIds").map(String);
     const selected = fd.getAll("receiptIds").map(String);
@@ -2534,10 +2521,11 @@ export function BalanceDetail({
                 <FileText size={25} />
                 <strong>这条历史余额尚未关联消费凭证</strong>
                 <p>
-                  已有金额和说明保留，可手工追加依据；不会自动把最近的消费单附到这里。
+                  已有金额、说明和依据按历史保留；当前余额统一读取会员系统。
                 </p>
               </div>
             )}
+            {!readOnly && (
             <button
               className="btn btn-secondary full-width"
               onClick={() => {
@@ -2557,9 +2545,10 @@ export function BalanceDetail({
               <Plus size={15} />
               {adding ? "收起追加依据" : "追加照片 / 手工关联消费单"}
             </button>
+            )}
           </section>
         </div>
-        {adding && (
+        {!readOnly && adding && (
           <form className="append-evidence-form" onSubmit={submit}>
             {(error || localError) && (
               <div className="alert alert-error" role="alert">

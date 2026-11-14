@@ -71,8 +71,9 @@ describe('模块与权限', () => {
   it('安保巡场依赖员工食堂；店员（没有巡场权限）看不到后台接口', async () => {
     const mods = (await admin('GET', '/api/erp/modules')).body.modules as { key: string; group: string; requires: string[]; enabled: boolean }[];
     const patrol = mods.find((m) => m.key === 'patrol')!;
-    expect(patrol).toMatchObject({ group: '员工工作台', requires: ['canteen'], enabled: true });
-    expect(mods.find((m) => m.key === 'canteen')!.group).toBe('员工工作台');
+    // 8.0.18：员工食堂、安保巡场的页面挪到了管理后台「人员与行政」，注册表里记成「后台」（开关与接口拦截照旧）
+    expect(patrol).toMatchObject({ group: '后台', requires: ['canteen'], enabled: true });
+    expect(mods.find((m) => m.key === 'canteen')!.group).toBe('后台');
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/erp/patrol/day')).status).toBe(403);
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/erp/patrol/points')).status).toBe(403);
   });

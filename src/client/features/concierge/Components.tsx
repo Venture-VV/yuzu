@@ -1,63 +1,8 @@
 import { useState } from "react";
+import { money } from "./format";
 import { api } from "../../lib/api";
-import { useCan } from "../../lib/session";
 import { loadReceipt } from "./api";
 import type { Receipt } from "./types";
-export function NativeMemberField({ selected }: { selected?: number | null }) {
-  const can = useCan();
-  const [q, setQ] = useState(""),
-    [items, setItems] = useState<
-      Array<{ id: number; name: string; phone: string; memberNo: string }>
-    >([]),
-    [id, setId] = useState(selected ? String(selected) : ""),
-    [error, setError] = useState("");
-  async function search() {
-    try {
-      const r = await api.get<{ members: typeof items }>(
-        `/api/concierge/native-members?q=${encodeURIComponent(q)}`,
-      );
-      setItems(r.members);
-      setError("");
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-  if (!can("member.read")) return null;
-  return (
-    <div className="field field-wide">
-      <span>关联企业会员（可选，不会自动纳入或开卡）</span>
-      <div className="inline-form">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="输入至少2个字或手机号搜索"
-        />
-        <button type="button" onClick={() => void search()}>
-          查找
-        </button>
-      </div>
-      <select
-        name="nativeMemberId"
-        value={id}
-        onChange={(e) => setId(e.target.value)}
-      >
-        <option value="">暂不关联</option>
-        {selected && !items.some((m) => m.id === selected) && (
-          <option value={selected}>已关联企业会员 #{selected}</option>
-        )}
-        {items.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.memberNo} · {m.name} · {m.phone}
-          </option>
-        ))}
-      </select>
-      {error && <small role="alert">{error}</small>}
-      <small>
-        这是管家服务档案的关联；不会更改企业手机号、等级、储值或赠金。
-      </small>
-    </div>
-  );
-}
 export function ReceiptArchive({
   onSelect,
 }: {
@@ -120,7 +65,7 @@ export function ReceiptArchive({
               {r.number || "待补单号"} · {r.status} · ¥
               {r.amountCents == null
                 ? "待核"
-                : (r.amountCents / 100).toFixed(2)}
+                : money(r.amountCents)}
             </button>
           ))}
           <button

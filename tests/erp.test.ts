@@ -39,10 +39,12 @@ describe('模块注册表', () => {
     expect(erpModuleOfPage('/purchasing/3/revise')).toBe('purchasing');
     expect(erpModuleOfPage('/payables/pay')).toBe('payables');
     expect(erpModuleOfPage('/todo')).toBe('approvals');
-    for (const path of ['/erp', '/erp/modules', '/frontdesk']) expect(erpModuleOfPage(path), path).toBeNull();
+    for (const path of ['/erp', '/erp/modules', '/erp/settings', '/erp/settings/purchase', '/frontdesk']) expect(erpModuleOfPage(path), path).toBeNull();
     // 入口页面归到模块自己；按注册顺序算依赖（effectiveErpModules）要求依赖排在前面
     for (const [i, key] of ERP_MODULE_KEYS.entries()) {
-      expect(erpModuleOfPage(ERP_MODULES[key].path)).toBe(key);
+      // 8.0.18：员工食堂、安保巡场、营业数据的页面挪到了后台（入口是后台的地址），旧的 ERP 地址仍归它们
+      if (ERP_MODULES[key].group === '后台') expect(ERP_MODULES[key].pages.every((p) => erpModuleOfPage(p) === key)).toBe(true);
+      else expect(erpModuleOfPage(ERP_MODULES[key].path)).toBe(key);
       for (const r of ERP_MODULES[key].requires) expect(ERP_MODULE_KEYS.indexOf(r), `${key} 依赖 ${r}`).toBeLessThan(i);
     }
   });

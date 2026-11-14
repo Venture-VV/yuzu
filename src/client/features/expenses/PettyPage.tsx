@@ -2,6 +2,7 @@
 // 每笔打款单独平账，只算已确认的报销：应退回 = 打款 − 支出；实际退回 = 退回 − 补付；未退回 = 应退回 − 实际退回。
 // 每日平账按付款日（打款日期）与部门汇总，当天有一笔没平就整天标出来。
 
+import { ExpenseTabs } from './ExpenseTabs';
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { BookOpenCheck, CircleAlert, Download, HandCoins, Plus, ReceiptText, Undo2, X } from 'lucide-react';
@@ -58,20 +59,11 @@ export function PettyPage() {
 
   return (
     <ErpPage
+      tabs={<ExpenseTabs active="petty" />}
       title="备用金与每日平账"
       description={`按部门记账、经办人留名。每笔打款单独平账，只算已确认的报销；从打款日起超过 ${rules.data?.overdueDays ?? 7} 天没平的标红。`}
       actions={
         <div className="flex flex-wrap gap-2">
-          <Link to="/erp/expenses">
-            <Button variant="secondary" icon={<ReceiptText className="size-4" />}>
-              费用报销
-            </Button>
-          </Link>
-          <Link to="/erp/ledger">
-            <Button variant="secondary" icon={<BookOpenCheck className="size-4" />}>
-              采购台账
-            </Button>
-          </Link>
           <Link to="/erp/petty/accounts">
             <Button variant="secondary" icon={<HandCoins className="size-4" />} data-testid="petty-accounts-link">
               部门备用金台账

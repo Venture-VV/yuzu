@@ -18,7 +18,11 @@ import { DEFAULT_DINING_RULES } from '@shared/dining';
 import { DEFAULT_EMENU_RULES } from '@shared/emenu';
 import { DEFAULT_ROOM_RULES } from '@shared/rooms';
 import { formatYuan } from '@shared/money';
-import { DEFAULT_PURCHASE_RULES } from '@shared/purchasing';
+import { DEFAULT_PURCHASE_RULES, DEPT_CONFIRM_RULE_LABELS } from '@shared/purchasing';
+import { DEFAULT_PAYMENT_RULES, payDaysLabel } from '@shared/payments';
+import { DEFAULT_EXPENSE_RULES } from '@shared/expenses';
+import { DEFAULT_CANTEEN_SETTINGS, mealWindowText } from '@shared/canteen';
+import { PATROL_ROUND_DEFAULT_MINUTES } from '@shared/patrol';
 import {
   ALL_PERMISSIONS,
   can,
@@ -34,6 +38,10 @@ import {
   type RoleOverrides,
 } from '@shared/permissions';
 import type { Db } from '../db';
+import { loadPaymentRules, PAYMENT_RULES_KEY } from './payments/rules';
+import { loadExpenseRules } from './expenses';
+import { loadCanteenSettings } from './canteen/settings';
+import { loadPatrolSettings } from './patrol/core';
 import { guard, guardAny } from '../auth/guard';
 import { loadRoleOverrides } from '../auth/role-permissions';
 import { writeAudit } from '../lib/audit';
@@ -315,30 +323,30 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   add({ key: 'location_rules.enabled', group: 'locations', label: '实时位置', value: onOff(lr.enabled, '开启（刷卡与业务动作推导客人、技师在哪）', '关闭'), defaultValue: '关闭', pending: true, section: 'spaces', hint: '关着时不推导、刷卡上报拒绝；离店照样清掉已有的位置', current: lr.enabled, dflt: DEFAULT_LOCATION_RULES.enabled, metaKey: 'location_rules' });
   add({ key: 'location_rules.zones', group: 'locations', label: '接待区与技师休息区', value: zoneText(lr), defaultValue: zoneText(DEFAULT_LOCATION_RULES), pending: true, section: 'spaces', hint: '发手牌后客人在接待区；技师上牌、下钟后在休息区', current: [lr.checkinZoneId, lr.restZoneId], dflt: [null, null], metaKey: 'location_rules' });
   // ── 库存与采购 ──
-  add({ key: 'inventory_scope_name', group: 'inventory', label: '库存范围', value: inv.scopeName, defaultValue: '后勤总库', pending: true, section: 'rules', current: inv.scopeName, dflt: '后勤总库', metaKey: 'inventory_scope_name' });
+  add({ key: 'inventory_scope_name', group: 'inventory', label: '库存范围', value: inv.scopeName, defaultValue: '后勤总库', pending: true, section: 'rules', href: '/erp/settings/inventory', current: inv.scopeName, dflt: '后勤总库', metaKey: 'inventory_scope_name' });
   // 迁移 002 写入的初始口径
   const basis = '含税到货价（模拟口径，待确认）';
-  add({ key: 'inventory_price_basis', group: 'inventory', label: '价格口径', value: inv.priceBasis, defaultValue: basis, pending: true, section: 'rules', current: inv.priceBasis, dflt: basis, metaKey: 'inventory_price_basis' });
+  add({ key: 'inventory_price_basis', group: 'inventory', label: '价格口径', value: inv.priceBasis, defaultValue: basis, pending: true, section: 'rules', href: '/erp/settings/inventory', current: inv.priceBasis, dflt: basis, metaKey: 'inventory_price_basis' });
   add({
     key: 'inventory_urgent_cap_cents', group: 'inventory', label: '急采上限', value: `每张急采单不超过 ${formatYuan(inv.urgentCapCents)}`,
-    defaultValue: `每张急采单不超过 ${formatYuan(DEFAULT_URGENT_CAP_CENTS)}`, pending: true, section: 'rules',
+    defaultValue: `每张急采单不超过 ${formatYuan(DEFAULT_URGENT_CAP_CENTS)}`, pending: true, section: 'rules', href: '/erp/settings/inventory',
     hint: '8.0.1 起由采购在「采购 → 急采」登记，按金额分级审批后仓库验收、采购补单；上限就是「采购规则」里急采分级的最高一档，在那里改',
     current: inv.urgentCapCents, dflt: DEFAULT_URGENT_CAP_CENTS, metaKey: 'purchase_rules',
   });
   add({
     key: 'inventory_approval_rules', group: 'inventory', label: '需要负责人确认的单据', value: approvals(inv.approvalRules), defaultValue: approvals(DEFAULT_APPROVAL_RULES),
-    pending: true, section: 'rules', current: inv.approvalRules, dflt: DEFAULT_APPROVAL_RULES, metaKey: 'inventory_approval_rules',
+    pending: true, section: 'rules', href: '/erp/settings/inventory', current: inv.approvalRules, dflt: DEFAULT_APPROVAL_RULES, metaKey: 'inventory_approval_rules',
   });
   const threshold = (c: number) => (c > 0 ? `${formatYuan(c)} 以内不用负责人确认` : '全部要负责人确认');
   add({
     key: 'inventory_approval_threshold_cents', group: 'inventory', label: '免确认门槛', value: threshold(inv.approvalThresholdCents),
-    defaultValue: threshold(DEFAULT_APPROVAL_THRESHOLD_CENTS), pending: true, section: 'rules',
+    defaultValue: threshold(DEFAULT_APPROVAL_THRESHOLD_CENTS), pending: true, section: 'rules', href: '/erp/settings/inventory',
     hint: '采购单、报损、退供应商、付款、期初在设为需要确认时，金额不超过门槛的提交即生效；总仓盘点调整照旧要确认',
     current: inv.approvalThresholdCents, dflt: DEFAULT_APPROVAL_THRESHOLD_CENTS, metaKey: 'inventory_approval_threshold_cents',
   });
   add({
     key: 'inventory_usage_window_days', group: 'inventory', label: '可用天数的用量统计', value: `按近 ${inv.usageWindowDays} 天的用量`,
-    defaultValue: `按近 ${DEFAULT_USAGE_WINDOW_DAYS} 天的用量`, pending: true, section: 'rules',
+    defaultValue: `按近 ${DEFAULT_USAGE_WINDOW_DAYS} 天的用量`, pending: true, section: 'rules', href: '/erp/settings/inventory',
     hint: '物料设了提醒天数时，可用天数 = 结存 ÷ 这段时间的日均用量，少于提醒天数就提醒',
     current: inv.usageWindowDays, dflt: DEFAULT_USAGE_WINDOW_DAYS, metaKey: 'inventory_usage_window_days',
   });
@@ -346,21 +354,21 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const cyc = DEFAULT_CYCLE_RULES;
   add({
     key: 'inventory_cycle_rules.weighTolerancePct', group: 'inventory', label: '称重收货容差', value: `可以比采购单多 ${inv.weighTolerancePct}%`,
-    defaultValue: `可以比采购单多 ${cyc.weighTolerancePct}%`, pending: true, section: 'rules',
+    defaultValue: `可以比采购单多 ${cyc.weighTolerancePct}%`, pending: true, section: 'rules', href: '/erp/settings/inventory',
     hint: '物料设为称重的，按实际称重收货，可以比采购单这一行的订购数量多出这么多；货款按实收重量算',
     current: inv.weighTolerancePct, dflt: cyc.weighTolerancePct, metaKey: 'inventory_cycle_rules',
   });
   const stText = (d: number, g: number) => `每月 ${d} 号起提醒，过 ${g} 天没盘完标红`;
   add({
     key: 'inventory_cycle_rules.stocktake', group: 'inventory', label: '每月盘点提醒', value: stText(inv.stocktakeDay, inv.stocktakeGraceDays),
-    defaultValue: stText(cyc.stocktakeDay, cyc.stocktakeGraceDays), pending: true, section: 'rules',
+    defaultValue: stText(cyc.stocktakeDay, cyc.stocktakeGraceDays), pending: true, section: 'rules', href: '/erp/settings/inventory',
     hint: '每个仓按「月初有结存的物料本月都在盘点单里盘到」算盘完；部门小仓的台面日耗品不用清点',
     current: [inv.stocktakeDay, inv.stocktakeGraceDays], dflt: [cyc.stocktakeDay, cyc.stocktakeGraceDays], metaKey: 'inventory_cycle_rules',
   });
   const rcText = (d: number, g: number, b: number) => `月结：每月 ${d} 号起提醒对上个月的账，过 ${g} 天标红；按批次：收货后 ${b} 天标红`;
   add({
     key: 'inventory_cycle_rules.recon', group: 'inventory', label: '供应商对账提醒', value: rcText(inv.monthlyReconDay, inv.monthlyReconGraceDays, inv.batchReconGraceDays),
-    defaultValue: rcText(cyc.monthlyReconDay, cyc.monthlyReconGraceDays, cyc.batchReconGraceDays), pending: true, section: 'rules',
+    defaultValue: rcText(cyc.monthlyReconDay, cyc.monthlyReconGraceDays, cyc.batchReconGraceDays), pending: true, section: 'rules', href: '/erp/settings/inventory',
     hint: '挂账供应商在档案里选「月结」或「按批次」；对完账在「货款 → 对账」登记',
     current: [inv.monthlyReconDay, inv.monthlyReconGraceDays, inv.batchReconGraceDays],
     dflt: [cyc.monthlyReconDay, cyc.monthlyReconGraceDays, cyc.batchReconGraceDays], metaKey: 'inventory_cycle_rules',
@@ -369,27 +377,85 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const prd = DEFAULT_PURCHASE_RULES;
   const channelText = (r: typeof pr) => r.channels.map((c) => (c.needsNote ? `${c.label}（写说明）` : c.label)).join('、');
   add({
-    key: 'purchase_rules.channels', group: 'inventory', label: '采购途径', value: channelText(pr), defaultValue: channelText(prd), pending: true, section: 'rules',
-    hint: '采购单、报销单记在哪买的；供应商档案可设默认途径。在 ERP「模块设置 → 采购规则」里改',
+    key: 'purchase_rules.channels', group: 'inventory', label: '采购途径', value: channelText(pr), defaultValue: channelText(prd), pending: true, section: 'rules', href: '/erp/settings/purchase',
+    hint: '采购单、报销单记在哪买的；供应商档案可设默认途径。在「ERP 设置 → 采购规则」里改',
     current: pr.channels, dflt: prd.channels, metaKey: 'purchase_rules',
   });
   const quoteText = (r: typeof pr) => (r.quoteThresholdCents > 0 ? `${formatYuan(r.quoteThresholdCents)} 及以上要询价比价，至少 ${r.minQuotes} 家报价` : '不要求询价比价');
   add({
-    key: 'purchase_rules.quotes', group: 'inventory', label: '询价比价门槛', value: quoteText(pr), defaultValue: quoteText(prd), pending: true, section: 'rules',
+    key: 'purchase_rules.quotes', group: 'inventory', label: '询价比价门槛', value: quoteText(pr), defaultValue: quoteText(prd), pending: true, section: 'rules', href: '/erp/settings/purchase',
     hint: '合计到门槛的采购单第一次提交时要来自已定标的询价单；只有一家报价的标单一来源、由负责人定标；补单与改版不拦',
     current: [pr.quoteThresholdCents, pr.minQuotes], dflt: [prd.quoteThresholdCents, prd.minQuotes], metaKey: 'purchase_rules',
   });
   const replText = (r: typeof pr) => `可用天数少于 ${r.reorderDays} 天（物料设了提醒天数按物料的）就建议补，补到 ${r.targetDays} 天`;
   add({
-    key: 'purchase_rules.replenish', group: 'inventory', label: '补货建议', value: replText(pr), defaultValue: replText(prd), pending: true, section: 'rules',
+    key: 'purchase_rules.replenish', group: 'inventory', label: '补货建议', value: replText(pr), defaultValue: replText(prd), pending: true, section: 'rules', href: '/erp/settings/purchase',
     hint: '只看总仓；在途（没到的采购单）算进去；按采购单位向上取整',
     current: [pr.reorderDays, pr.targetDays], dflt: [prd.reorderDays, prd.targetDays], metaKey: 'purchase_rules',
+  });
+  // 8.0.18 规则总表补全（docs/IA_V8017.md 第 3.3 节）：8.0.17 加的两项采购规则，付款、报销、员工食堂、安保巡场的规则原来不在总表里
+  add({
+    key: 'purchase_rules.deptConfirm', group: 'inventory', label: '部门主管确认', value: DEPT_CONFIRM_RULE_LABELS[pr.deptConfirm], defaultValue: DEPT_CONFIRM_RULE_LABELS[prd.deptConfirm],
+    pending: true, section: 'rules', href: '/erp/settings/purchase', hint: '哪些需求单要部门主管先确认，采购才能审核通过；部门没设主管、提单人就是主管、店主提的不拦',
+    current: pr.deptConfirm, dflt: prd.deptConfirm, metaKey: 'purchase_rules',
+  });
+  add({
+    key: 'purchase_rules.flowStall', group: 'inventory', label: '流程图里一个环节等了几天标红', value: `${pr.flowStallDays} 天`, defaultValue: `${prd.flowStallDays} 天`,
+    pending: true, section: 'rules', href: '/erp/settings/purchase', hint: '采购流程图；到货按预计到货日另算',
+    current: pr.flowStallDays, dflt: prd.flowStallDays, metaKey: 'purchase_rules',
+  });
+  const pay = await loadPaymentRules(db);
+  const payd = DEFAULT_PAYMENT_RULES;
+  const payDaysText = (r: typeof pay) => payDaysLabel(r.payDays) || '没有固定付款日';
+  add({
+    key: 'payment_rules.payDays', group: 'erp', label: '固定付款日', value: payDaysText(pay), defaultValue: payDaysText(payd), pending: true, section: 'rules', href: '/erp/settings/payments',
+    hint: '只是日子：新建付款申请默认取下一个付款日，流程图的付款环节按它提示',
+    current: pay.payDays, dflt: payd.payDays, metaKey: PAYMENT_RULES_KEY,
+  });
+  const threeWayText = (r: typeof pay) => `差额不超过收货金额的 ${r.threeWayPctBp / 100}% 且不超过 ${formatYuan(r.threeWayCapCents)}`;
+  add({
+    key: 'payment_rules.threeWay', group: 'erp', label: '三单比对的容差', value: threeWayText(pay), defaultValue: threeWayText(payd), pending: true, section: 'rules', href: '/erp/settings/payments',
+    hint: '采购单、收货、发票三个金额；超过的挂起、财务放行',
+    current: [pay.threeWayPctBp, pay.threeWayCapCents], dflt: [payd.threeWayPctBp, payd.threeWayCapCents], metaKey: PAYMENT_RULES_KEY,
+  });
+  const contractGoodsText = (r: typeof pay) => (r.requireRequestForContractGoods ? '要先提付款申请' : '可以直接登记付款');
+  add({
+    key: 'payment_rules.contractGoods', group: 'erp', label: '挂合同的货款', value: contractGoodsText(pay), defaultValue: contractGoodsText(payd), pending: true, section: 'rules', href: '/erp/settings/payments',
+    current: pay.requireRequestForContractGoods, dflt: payd.requireRequestForContractGoods, metaKey: PAYMENT_RULES_KEY,
+  });
+  const exp = await loadExpenseRules(db);
+  const expd = DEFAULT_EXPENSE_RULES;
+  add({
+    key: 'expense_rules.threshold', group: 'erp', label: '报销要负责人确认的门槛', value: `单笔超过 ${formatYuan(exp.approvalThresholdCents)}`, defaultValue: `单笔超过 ${formatYuan(expd.approvalThresholdCents)}`,
+    pending: true, section: 'rules', href: '/erp/settings/expenses',
+    current: exp.approvalThresholdCents, dflt: expd.approvalThresholdCents, metaKey: 'expense_rules',
+  });
+  add({
+    key: 'expense_rules.overdue', group: 'erp', label: '备用金多久没平账标红', value: `打款后超过 ${exp.overdueDays} 天`, defaultValue: `打款后超过 ${expd.overdueDays} 天`,
+    pending: true, section: 'rules', href: '/erp/settings/expenses',
+    current: exp.overdueDays, dflt: expd.overdueDays, metaKey: 'expense_rules',
+  });
+  // 人员与行政：员工食堂的开饭时间、安保巡场的间隔（页面在后台「人员与行政」，8.0.18）
+  const canteen = await loadCanteenSettings(db);
+  const mealsText = (list: typeof canteen.meals) => list.map(mealWindowText).join('、');
+  add({
+    key: 'canteen.meals', group: 'workplace', label: '开饭时间', value: mealsText(canteen.meals), defaultValue: mealsText(DEFAULT_CANTEEN_SETTINGS.meals), pending: false, section: 'canteen',
+    hint: '员工食堂 → 设置；打卡按它算哪一餐',
+    current: canteen.meals, dflt: DEFAULT_CANTEEN_SETTINGS.meals, metaKey: 'canteen',
+  });
+  const patrol = await loadPatrolSettings(db);
+  add({
+    key: 'patrol.round', group: 'workplace', label: '巡场间隔', value: `每 ${patrol.roundMinutes} 分钟一轮`, defaultValue: `每 ${PATROL_ROUND_DEFAULT_MINUTES} 分钟一轮`, pending: false, section: 'patrol',
+    hint: '安保巡场 → 设置；同一个场所每轮只记一次',
+    current: patrol.roundMinutes, dflt: PATROL_ROUND_DEFAULT_MINUTES, metaKey: 'patrol',
   });
   // ── 可调的数值（8.0.7 A1，店主 2026-11-10：有争议的规则不要写死；后台「门店基本规则 → 可调的数值」）──
   const tun = (key: keyof typeof k, group: RuleGroup, label: string, show: (v: never) => string, hint?: string) => {
     const prop = k[key] as keyof typeof s;
     add({
       key, group, label, value: show(s[prop] as never), defaultValue: show(d[prop] as never), pending: true, section: 'rules',
+      // 属于 ERP 的数值（8.0.18）在「ERP 设置 → 其他数值」里改
+      ...(group === 'erp' || group === 'inventory' ? { href: '/erp/settings/tunables' } : {}),
       ...(hint ? { hint } : {}), current: s[prop], dflt: d[prop], metaKey: key,
     });
   };

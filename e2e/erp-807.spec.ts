@@ -72,9 +72,9 @@ test.describe('8.0.7 供应链收尾与 ERP P2', () => {
     await login(page, 'linlan');
     const other = await page.context().newPage();
     try {
-      // 8.0.17：「可调的数值」是门店基本规则的一个页签
-      await page.goto('/admin/rules/tunables');
-      await other.goto('/admin/rules/tunables');
+      // 8.0.18：供应链、应收这些属于 ERP 的数值在「ERP 设置 → 其他数值」（门店的仍在后台「门店基本规则 → 可调的数值」）
+      await page.goto('/erp/settings/tunables');
+      await other.goto('/erp/settings/tunables');
       await expect(page.getByTestId('tun-slowMovingDays')).toHaveValue('90');
       await expect(other.getByTestId('tun-expiryRemindDays')).toHaveValue('30');
       await page.getByTestId('tun-slowMovingDays').fill('60');
@@ -95,7 +95,7 @@ test.describe('8.0.7 供应链收尾与 ERP P2', () => {
 
   test('经营规则「可调的数值」：企业微信推送显示机器人地址配没配', async ({ page }) => {
     await login(page, 'linlan');
-    await page.goto('/admin/rules/tunables');
+    await page.goto('/erp/settings/tunables');
     const row = page.getByTestId('wecom-row');
     await expect(row).toBeVisible({ timeout: 20_000 });
     await expect(row).toContainText('机器人地址');

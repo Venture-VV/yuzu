@@ -9,9 +9,12 @@ export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
   label: string;
-  /** ERP 导航的分组 */
-  /** 员工工作台（8.0.9 起，原来叫「员工服务」）：员工端（柚子饭堂）应用的中台，一个应用一个模块 */
-  group: '供应链' | '财务' | '法务' | '员工工作台';
+  /**
+   * ERP 导航的分组（8.0.18 重排，docs/IA_V8017.md 第 3.3 节）：审批单列、应付归财务、「法务」改叫「合同」。
+   * 「后台」= 已经挪到管理后台的（员工食堂、安保巡场在「人员与行政」，营业数据在数据看板）：
+   * 模块开关与接口拦截照旧按这张表，ERP 导航里只留一条跳转
+   */
+  group: '审批' | '供应链' | '财务' | '合同' | '后台';
   description: string;
   /** 模块的入口页面 */
   path: string;
@@ -80,7 +83,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
   },
   payables: {
     label: '应付货款',
-    group: '供应链',
+    group: '财务',
     description: '供应商应付、期初未付、付款登记与对账单',
     path: '/payables',
     pages: ['/payables'],
@@ -102,7 +105,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
   },
   approvals: {
     label: '审批中心',
-    group: '供应链',
+    group: '审批',
     description:
       '审批规则（单据类型 × 金额 × 部门 → 一到三级审批链）、待我审批、批量同意、超时提醒、代理人，手机上也能审；采购、报损、盘点差异、退货、付款、期初、报销都走这里（v0.7.30）。' +
       '旧的「审批待办」页照常在。关掉只是不显示这两页，各单据里的确认照常走审批规则',
@@ -115,7 +118,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
   },
   contracts: {
     label: '合同',
-    group: '法务',
+    group: '合同',
     description:
       '合同台账与四要素（单价表、付款节点、质保、验收标准），审查走审批中心（财务 → 法务 → 负责人，法务按审查清单逐条给意见），' +
       '签署、用印、归档，变更单，到期前 60 天提醒；采购单可以挂合同、按单价表核对（v0.7.31）',
@@ -183,9 +186,10 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
   },
   revenue: {
     label: '营业数据',
-    group: '财务',
-    description: '只读：每天的营业收入、收款构成、部门构成与日结情况（门店的流水、日结、交班仍在门店办理）',
-    path: '/erp/revenue',
+    group: '后台',
+    description: '只读：每天的营业收入、收款构成、部门构成与日结情况（门店的流水、日结、交班仍在门店办理）。8.0.18 起在后台「数据看板 → 营业数据」',
+    // 8.0.18：并进后台的数据看板；旧地址 /erp/revenue 跳过去
+    path: '/admin/dashboard/revenue',
     pages: ['/erp/revenue'],
     apis: ['/api/erp/revenue'],
     perms: ['erp.revenue'],
@@ -195,9 +199,10 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
   // 员工食堂 · 柚子饭堂（店主 2026-11-06，docs/CANTEEN.md）：默认关；关着时员工端口也回「饭堂还没开张」
   canteen: {
     label: '员工食堂',
-    group: '员工工作台',
+    group: '后台',
     description: '员工手机上的「柚子饭堂」：看菜单、点赞、亮饭卡码；食堂负责人扫码打卡、厨师发布菜单。这里管员工名单、打印开通卡片、看用餐记录、设开饭时间',
-    path: '/erp/canteen',
+    // 8.0.18：页面在后台「人员与行政 → 员工食堂」；旧地址 /erp/canteen 跳过去
+    path: '/admin/canteen',
     pages: ['/erp/canteen'],
     apis: ['/api/erp/canteen'],
     perms: ['canteen.manage'],
@@ -206,11 +211,12 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
   },
   patrol: {
     label: '安保巡场',
-    group: '员工工作台',
+    group: '后台',
     description:
       '安保部门在柚子饭堂「工作台 → 巡场」扫场所二维码打卡；这里生成、打印场所二维码，看每天的巡场清单（还没人巡的场所标出来）与记录、导出，' +
       '设巡场部门与手机上能看记录的人（8.0.9，docs/PATROL_V809.md）。员工端口、员工账号都在员工食堂里，要先开员工食堂',
-    path: '/erp/patrol',
+    // 8.0.18：页面在后台「人员与行政 → 安保巡场」；旧地址 /erp/patrol 跳过去
+    path: '/admin/patrol',
     pages: ['/erp/patrol'],
     apis: ['/api/erp/patrol'],
     perms: ['patrol.read', 'patrol.manage'],
@@ -218,6 +224,22 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     requires: ['canteen'],
   },
 };
+
+/**
+ * ERP 导航的分组与顺序（8.0.18，docs/IA_V8017.md 第 3.3 节）。模块在注册表里的先后是按依赖排的（被依赖的在前），
+ * 不等于导航里想要的顺序，所以单独列。每个模块必须在且只在一个分组里（tests/erp-ia.test.ts 核对）。
+ */
+export const ERP_NAV_GROUPS: readonly { key: string; title: string; modules: readonly ErpModuleKey[] }[] = [
+  { key: 'approvals', title: '审批', modules: ['approvals'] },
+  { key: 'supply', title: '供应链', modules: ['inventory', 'purchasing', 'requests', 'deptStock', 'assets'] },
+  { key: 'finance', title: '财务', modules: ['payments', 'payables', 'expenses', 'invoices', 'receivables'] },
+  { key: 'contracts', title: '合同', modules: ['contracts'] },
+  // 已经挪到后台的：留一条跳转，下一个版本去掉
+  { key: 'moved', title: '已挪到后台', modules: ['revenue', 'canteen', 'patrol'] },
+];
+
+/** 「ERP 设置」的地址（8.0.18）：模块开关与各模块的规则收在这一页的页签里 */
+export const ERP_SETTINGS_PATH = '/erp/settings';
 
 /** 店主保存的模块开关（只存改过的；没存的按默认） */
 export type ErpModuleSwitches = Partial<Record<ErpModuleKey, boolean>>;

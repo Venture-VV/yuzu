@@ -48,8 +48,8 @@ const ShiftPrintPage = lazyPage(() => import('./features/print/ShiftPrintPage').
 const ReconPublicPage = lazyPage(() => import('./features/payables/ReconPublicPage').then((m) => m.ReconPublicPage));
 const ErpShell = lazyPage(() => import('./features/erp/ErpShell').then((m) => m.ErpShell));
 const ErpHome = lazyPage(() => import('./features/erp/ErpHome').then((m) => m.ErpHome));
-const ErpModulesPage = lazyPage(() => import('./features/erp/ErpModulesPage').then((m) => m.ErpModulesPage));
-const RevenuePage = lazyPage(() => import('./features/erp/RevenuePage').then((m) => m.RevenuePage));
+const ErpSettingsPage = lazyPage(() => import('./features/erp/ErpSettingsPage').then((m) => m.ErpSettingsPage));
+const ErpModulesMoved = lazyPage(() => import('./features/erp/ErpSettingsPage').then((m) => m.ErpModulesMoved));
 const ExpensesPage = lazyPage(() => import('./features/expenses/ExpensesPage').then((m) => m.ExpensesPage));
 const ClaimFormPage = lazyPage(() => import('./features/expenses/ClaimFormPage').then((m) => m.ClaimFormPage));
 const PettyPage = lazyPage(() => import('./features/expenses/PettyPage').then((m) => m.PettyPage));
@@ -71,8 +71,6 @@ const ContractsPage = lazyPage(() => import('./features/contracts/ContractsPage'
 const ContractDetailPage = lazyPage(() => import('./features/contracts/ContractDetailPage').then((m) => m.ContractDetailPage));
 const ContractFormPage = lazyPage(() => import('./features/contracts/ContractFormPage').then((m) => m.ContractFormPage));
 const PaymentsPage = lazyPage(() => import('./features/payments/PaymentsPage').then((m) => m.PaymentsPage));
-const CanteenPage = lazyPage(() => import('./features/canteen/CanteenPage').then((m) => m.CanteenPage));
-const PatrolPage = lazyPage(() => import('./features/patrol/PatrolPage').then((m) => m.PatrolPage));
 const PaymentRequestPage = lazyPage(() => import('./features/payments/PaymentRequestPage').then((m) => m.PaymentRequestPage));
 const PaymentRequestFormPage = lazyPage(() => import('./features/payments/PaymentRequestFormPage').then((m) => m.PaymentRequestFormPage));
 const DocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.DocFormPage));
@@ -86,7 +84,6 @@ const SuggestionsPage = lazyPage(() => import('./features/purchasing/Suggestions
 const SourcingPage = lazyPage(() => import('./features/purchasing/SourcingPage').then((m) => m.SourcingPage));
 const SourcingDetailPage = lazyPage(() => import('./features/purchasing/SourcingPage').then((m) => m.SourcingDetailPage));
 const UrgentPage = lazyPage(() => import('./features/purchasing/UrgentPage').then((m) => m.UrgentPage));
-const PurchaseRulesPage = lazyPage(() => import('./features/purchasing/PurchaseRulesPage').then((m) => m.PurchaseRulesPage));
 const RequestImportPage = lazyPage(() => import('./features/purchasing/RequestImportPage').then((m) => m.RequestImportPage));
 const ComparePage = lazyPage(() => import('./features/purchasing/ComparePage').then((m) => m.ComparePage));
 const ScoresPage = lazyPage(() => import('./features/purchasing/ScoresPage').then((m) => m.ScoresPage));
@@ -241,8 +238,10 @@ const router = createBrowserRouter([
     element: <AuthGate shell="erp" />,
     children: [
       { index: true, element: <ErpHome /> },
-      { path: 'modules', element: <ErpModulesPage /> },
-      { path: 'revenue', element: <RevenuePage /> },
+      // 8.0.18：ERP 的规则收成「ERP 设置」；模块设置、营业数据、员工食堂、安保巡场的旧地址跳到新位置（docs/IA_V8017.md 第 3.3 节）
+      { path: 'settings/:tab?', element: <ErpSettingsPage /> },
+      { path: 'modules', element: <ErpModulesMoved /> },
+      { path: 'revenue', element: <Navigate to="/admin/dashboard/revenue" replace /> },
       { path: 'expenses', element: <ExpensesPage /> },
       { path: 'expenses/new', element: <ClaimFormPage /> },
       // 费用预算与进项发票台账（8.0.3）
@@ -274,8 +273,8 @@ const router = createBrowserRouter([
       { path: 'payments/requests/new', element: <PaymentRequestFormPage /> },
       { path: 'payments/requests/:id', element: <PaymentRequestPage /> },
       // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）
-      { path: 'canteen', element: <CanteenPage /> },
-      { path: 'patrol', element: <PatrolPage /> },
+      { path: 'canteen', element: <Navigate to="/admin/canteen" replace /> },
+      { path: 'patrol', element: <Navigate to="/admin/patrol" replace /> },
       { path: '*', element: <Navigate to="/erp" replace /> },
     ],
   },
@@ -299,7 +298,7 @@ const router = createBrowserRouter([
       { path: 'purchasing/urgent/new', element: <UrgentDocFormPage /> },
       { path: 'purchasing/urgent/:id/edit', element: <UrgentDocFormPage /> },
       // 采购规则（8.0.1 采购组整改 01：从 ERP「模块设置」挪过来）
-      { path: 'purchasing/rules', element: <PurchaseRulesPage /> },
+      { path: 'purchasing/rules', element: <Navigate to="/erp/settings/purchase" replace /> },
       // 集采导入（8.0.1 采购组整改 06）
       { path: 'purchasing/import', element: <RequestImportPage /> },
       // 供应商比价看板（8.0.1 采购组整改 07）
@@ -322,7 +321,8 @@ const router = createBrowserRouter([
       { path: 'rooms', element: <RoomsPage /> },
       { path: 'bookings', element: <BookingsPage /> },
       // 管家部（8.0.12）：门店的工作页面；/admin/concierge 是 Codex 最初放的地址，留着跳过来
-      { path: 'concierge', element: <ConciergePage /> },
+      // 8.0.18：哪一页写进地址（/concierge/members、/concierge/praise……），见 Workspace.tsx 的 VIEW_SLUG
+      { path: 'concierge/:view?', element: <ConciergePage /> },
       { path: 'platform', element: <PlatformPage /> },
       { path: 'guide', element: <GuidePage /> },
       { path: 'devices', element: <DevicesPage /> },

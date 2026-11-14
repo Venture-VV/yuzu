@@ -8,10 +8,57 @@ export type TeamUser = {
   login?: string;
   hasPassword?: boolean;
 };
+export type NativeMemberSummary = {
+  id: number;
+  memberNo: string;
+  name: string;
+  phone: string;
+  status: string;
+  gradeLabel: string;
+  grade: number;
+  tier: number | null;
+  cycleEnd: string | null;
+  graceUntil: string | null;
+  principalCents: number;
+  bonusCents: number;
+  totalCents: number;
+  profiles: Array<{ id: string; code: string; name: string }>;
+};
+export type NativeResourceOption = {
+  key: string;
+  kind: "space" | "dining_table" | "room";
+  id: number;
+  category: string;
+  categoryLabel: string;
+  group: string;
+  name: string;
+  label: string;
+  capacity: number | null;
+  active: boolean;
+  warning: string;
+};
+export type NativeSpending = {
+  id: number;
+  docNo: string;
+  occurredAt: string;
+  businessDate: string;
+  status: "completed" | "reversed";
+  operatorName: string;
+  totalCents: number;
+  principalCents: number;
+  bonusCents: number;
+  payer: { id: number; memberNo: string; name: string };
+  checkout: { id: number; number: string; status: string; totalCents: number } | null;
+  reversal: { number: string; reason: string; occurredAt: string } | null;
+  items: Array<{ name: string; category: string; quantity: number; unitPriceCents: number | null; amountCents: number; discountCents: number }>;
+};
+export type NativeSpendingPage = { records: NativeSpending[]; hasMore: boolean; offset: number; serverTime: string };
 export type Member = {
   id: string;
   code: string;
   nativeMemberId?: number | null;
+  nativeMember?: NativeMemberSummary | null;
+  serviceAlias?: string;
   name: string;
   phone: string;
   cardNo: string;
@@ -47,6 +94,10 @@ export type Appointment = {
   partySize: number;
   service: string;
   resource: string;
+  resourceKey?: string;
+  resourceCategory?: string;
+  resourceGroup?: string;
+  nativeResource?: NativeResourceOption | null;
   status: string;
   hostId: string;
   note: string;
@@ -218,6 +269,7 @@ export type WorkspaceData = {
   uploads: Upload[];
   audits: Audit[];
   sync: { serverTime: string; pollSeconds: number };
+  resourceOptions?: NativeResourceOption[];
   capabilities: {
     ocr: "browser";
     staffLogin: boolean;

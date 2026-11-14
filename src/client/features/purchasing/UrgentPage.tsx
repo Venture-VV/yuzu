@@ -2,6 +2,7 @@
 // 按采购规则里的金额分级审批（审批中心），批了以后仓库到部门验收、进部门小仓，之后采购补采购单（提交即确认）。
 // 列表按进度分：审批中、待验收、待补单、全部；点开看单据——审批、验收、补单都在单据里办。
 
+import { PurchasingTabs } from './PurchasingTabs';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { Plus } from 'lucide-react';
 import type { InvDocSummary } from '@shared/inventory';
@@ -72,6 +73,7 @@ export function UrgentPage() {
           ) : undefined
         }
       />
+      <PurchasingTabs active="urgent" />
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-5 py-3 md:px-7">
         <Segmented<Filter>
           ariaLabel="急采进度"

@@ -4,6 +4,7 @@
 // 改额度时按点「改额度」那一刻的额度做底（snap）：改的过程中页面刷新不影响，保存时只送改了的格子、带上那一刻的额度核对
 // （Codex 自动审查 c2c4a12：原来按刷新后的额度比对、送刷新后的额度，会把别人刚改的格子悄悄改回去）。
 
+import { ExpenseTabs } from './ExpenseTabs';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { ArrowLeft, PencilLine, Save, X } from 'lucide-react';
@@ -91,15 +92,11 @@ export function BudgetsPage() {
 
   return (
     <ErpPage
+      tabs={<ExpenseTabs active="budgets" />}
       title="费用预算"
       description="部门 × 费用科目的月度额度：从某月起生效、之后每月沿用。已占用 = 待确认、已退回、已确认的报销（撤回、冲销的不算）。超了不拦报销，要多一级店主审批。"
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <Link to="/erp/expenses">
-            <Button variant="secondary" icon={<ArrowLeft className="size-4" />}>
-              费用报销
-            </Button>
-          </Link>
           <Input type="month" fullWidth={false} value={month} disabled={editing} onChange={(e) => e.target.value && setMonth(e.target.value)} className="h-10 w-40" aria-label="月份" data-testid="budget-month" />
           {canManage && grid.data && !grid.isPlaceholderData && !editing && (
             <Button variant="primary" icon={<PencilLine className="size-4" />} onClick={() => startEdit(grid.data!)} data-testid="budget-edit">

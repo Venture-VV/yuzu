@@ -1,6 +1,7 @@
 // 供应商季度评分与观察名单（8.0.7 供应链收尾 2.2）：「采购 → 供应商评分」。按季度现算：准时率、合格率、价格指数，
 // 分数 = 准时 × 40 + 合格 × 40 + 价格 × 20（V4，待确认），低于观察线（V5，「门店基本规则 → 可调的数值」里改）的进观察名单。只读，能导出。
 
+import { PurchasingTabs } from './PurchasingTabs';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, Navigate } from 'react-router';
@@ -39,6 +40,7 @@ export function ScoresPage() {
         }
         subtitle={`按季度：准时率 × ${SCORE_WEIGHTS.onTime} + 合格率 × ${SCORE_WEIGHTS.quality} + 价格分 × ${SCORE_WEIGHTS.price}（待确认）；低于观察线的进观察名单，下采购单时提示`}
       />
+      <PurchasingTabs active="scores" />
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-5 py-3 md:px-7">
         <Select fullWidth={false} value={quarter} onChange={(e) => setQuarter(e.target.value)} className="h-9 min-w-[120px] text-[13px]" aria-label="季度" data-testid="scores-quarter">
           {quarters.map((q) => (

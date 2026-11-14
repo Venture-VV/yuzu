@@ -17,6 +17,13 @@ export interface SubTab {
   label: ReactNode;
   /** 页签上的数字（待办等）；0 或不给不显示 */
   badge?: number;
+  /**
+   * 这个页签自己的地址（8.0.18）：ERP 的采购、报销原来是一组各有地址的子页（/purchasing/flow、/erp/petty……），
+   * 改成页签以后地址不变，就在这里给；不给的照旧是 `<base>/<key>`
+   */
+  to?: string;
+  /** 自动化用的标识；不给的是 `subnav-<key>` */
+  testId?: string;
 }
 
 const SubTabContext = createContext<string | null>(null);
@@ -56,7 +63,7 @@ export function SubNav({ tabs, base, active, label, className }: { tabs: readonl
           // 它会一直把第一个标成当前页
           <Link
             key={t.key}
-            to={i === 0 ? base : `${base}/${t.key}`}
+            to={t.to ?? (i === 0 ? base : `${base}/${t.key}`)}
             aria-current={on ? 'page' : undefined}
             className={cn(
               'relative flex h-10 shrink-0 items-center gap-1.5 px-3.5 text-[14px] font-semibold whitespace-nowrap transition-colors duration-150',
@@ -64,7 +71,7 @@ export function SubNav({ tabs, base, active, label, className }: { tabs: readonl
               // 量不到位置时（容器还没显示）当前页签自己画底下那条线
               on && !line.style && 'shadow-[inset_0_-2px_0_var(--color-pine)]',
             )}
-            data-testid={`subnav-${t.key}`}
+            data-testid={t.testId ?? `subnav-${t.key}`}
           >
             {t.label}
             {!!t.badge && (

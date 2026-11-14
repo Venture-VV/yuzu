@@ -12,7 +12,7 @@ import type { PaymentTodo } from '@shared/payments';
 import type { InvoiceTodo } from '@shared/invoices';
 import type { SupplyTodo } from '@shared/supply';
 import type { ArTodo } from '@shared/ar';
-import { ERP_MODULES, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
+import { ERP_MODULES, ERP_NAV_GROUPS, ERP_SETTINGS_PATH, erpModuleOfPage, type ErpModuleKey } from '@shared/erp';
 import { versionText } from '@shared/instance';
 import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import { api } from '../../lib/api';
@@ -22,6 +22,7 @@ import { LogoMark } from '../../components/Brand';
 import { InstanceBadge } from '../../components/InstanceTag';
 import { Notice } from '../../components/ui';
 import { useErpAccess } from './access';
+import { erpSettingsTabs } from './settingsTabs';
 
 const ICONS: Record<ErpModuleKey, LucideIcon> = {
   inventory: Boxes,
@@ -151,15 +152,17 @@ export function ErpShell() {
       (k === 'purchasing' && !!supplyTodo.data?.licensesExpired) ||
       (k === 'receivables' && !!arTodo.data && (arTodo.data.overdueCharges > 0 || arTodo.data.platformOverdueCents > 0)),
   });
+  // 导航的分组与顺序（8.0.18，docs/IA_V8017.md 第 3.3 节）：审批单列、应付归财务、「法务」改叫「合同」；
+  // 员工食堂、安保巡场、营业数据已经挪到后台，这里各留一条跳转（下一个版本去掉）
+  const settingsTabs = erpSettingsTabs(can, session.erpModules);
   const groups: { title: string; items: Item[] }[] = [
     { title: '概览', items: [{ key: 'home', to: '/erp', label: 'ERP 首页', icon: LayoutGrid, end: true }] },
-    { title: '供应链', items: access.modules.filter((k) => ERP_MODULES[k].group === '供应链').map(moduleItem) },
-    { title: '财务', items: access.modules.filter((k) => ERP_MODULES[k].group === '财务').map(moduleItem) },
-    { title: '法务', items: access.modules.filter((k) => ERP_MODULES[k].group === '法务').map(moduleItem) },
-    { title: '员工工作台', items: access.modules.filter((k) => ERP_MODULES[k].group === '员工工作台').map(moduleItem) },
-    { title: '设置', items: access.canSettings ? [{ key: 'modules', to: '/erp/modules', label: '模块设置', icon: SlidersHorizontal }] : [] },
+    ...ERP_NAV_GROUPS.map((g) => ({ title: g.title, items: g.modules.filter((k) => access.modules.includes(k)).map(moduleItem) })),
+    { title: '设置', items: settingsTabs.length ? [{ key: 'settings', to: ERP_SETTINGS_PATH, label: 'ERP 设置', icon: SlidersHorizontal }] : [] },
   ].filter((g) => g.items.length > 0);
 
+  // 现在在哪个模块：模块下的其他页面也算；规则类的旧地址（采购规则）现在都在「ERP 设置」里
+  const activeKey = pathname === ERP_SETTINGS_PATH || pathname.startsWith(`${ERP_SETTINGS_PATH}/`) ? 'settings' : erpModuleOfPage(pathname);
   const link = (it: Item, compact: boolean) => {
     const Icon = it.icon;
     const pill = compact ? tabPill : sidePill;
@@ -177,7 +180,7 @@ export function ErpShell() {
             compact ? 'h-10 rounded-full px-3.5 text-[13.5px]' : 'h-10 rounded-lg px-3 text-[14px]',
             // 模块下的其他页面（如费用模块的备用金、采购台账、账目自检）也高亮所属模块。
             // 当前项的底块：量得到位置时由导航里那一块滑过来画（8.0.16），量不到时自己画
-            isActive || erpModuleOfPage(pathname) === it.key ? cn('nav-on text-paper', !pill.style && 'bg-pine') : 'text-ink-2 hover:bg-paper-2 hover:text-ink',
+            isActive || activeKey === it.key ? cn('nav-on text-paper', !pill.style && 'bg-pine') : 'text-ink-2 hover:bg-paper-2 hover:text-ink',
           )
         }
       >
@@ -264,7 +267,7 @@ function ErpModuleGate({ module, children }: { module: ErpModuleKey | null; chil
       <div className="mx-auto w-full max-w-[720px] px-5 py-8" data-testid="erp-module-off">
         <Notice tone="info" title={`ERP 的「${def.label}」模块没有开启`}>
           {def.requires.length ? `它依赖「${def.requires.map((r) => ERP_MODULES[r].label).join('」「')}」模块。` : ''}
-          店主在 ERP「模块设置」里开启后才能使用。
+          店主在「ERP 设置 → 模块开关」里开启后才能使用。
         </Notice>
       </div>
     );

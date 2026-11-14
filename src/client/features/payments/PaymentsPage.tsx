@@ -2,7 +2,7 @@
 // 付款申请走审批中心（财务 → 负责人，提前付款多一级店主），批了以后对账付款的人在申请里登记付款。
 
 import { useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { Navigate, Link, useNavigate, useSearchParams } from 'react-router';
 import { Download, FilePlus2, Plus, ReceiptText, ShieldCheck } from 'lucide-react';
 import { PAYMENT_STAGE_LABELS, WARRANTY_BASIS_LABELS } from '@shared/contracts';
 import { formatAmount, parseYuan } from '@shared/money';
@@ -18,7 +18,6 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
 import { InvoiceDialog } from './InvoiceDialog';
-import { PaymentRulesCard } from './PaymentRulesCard';
 import { RequestStatusBadge, stageText, ThreeWayBadge, WarrantyBadge } from './parts';
 import {
   useInvalidatePayments,
@@ -69,6 +68,8 @@ export function PaymentsPage() {
   const [params, setParams] = useSearchParams();
   const tab: Tab = TABS.find((t) => t.value === params.get('tab'))?.value ?? 'requests';
   const todo = usePaymentTodo(can('payable.read'));
+  // 8.0.18：付款规则收进「ERP 设置 → 付款规则」；页签还在，点了（或打开旧地址 ?tab=rules）跳过去
+  if (tab === 'rules') return <Navigate to="/erp/settings/payments" replace />;
   return (
     <ErpPage
       title="付款"
@@ -109,7 +110,6 @@ export function PaymentsPage() {
         {tab === 'three-way' && <ThreeWayTab />}
         {tab === 'warranty' && <WarrantyTab />}
         {tab === 'weekly' && <WeeklyTab />}
-        {tab === 'rules' && <PaymentRulesCard />}
       </div>
     </ErpPage>
   );

@@ -108,15 +108,15 @@ export function RulesTab() {
     }
   };
 
-  // 二级页签（8.0.17）：原来一长页 5 张大卡。库存与采购的规则属于 ERP，下一步挪到「ERP 设置」，先单独一个页签
+  // 二级页签（8.0.17）：原来一长页 5 张大卡。8.0.18：库存与采购的规则、可调的数值里属于 ERP 的，挪到「ERP 设置」
+  // （旧地址 /admin/rules/inventory 跳过去；这一页的「可调的数值」底下留一条链接）
   const tabs = [
     { key: 'basic', label: '基本与收款' },
     { key: 'shift', label: '交班方式' },
     { key: 'tunables', label: '可调的数值' },
-    { key: 'inventory', label: '库存与采购' },
   ];
   return (
-    <AdminPage section="rules" description="门店与营业时间、扣款顺序、单笔上限、撤销时限、收款前开班；交班方式；可调的数值；库存与采购。修改只影响之后的业务。" tabs={tabs}>
+    <AdminPage section="rules" description="门店与营业时间、扣款顺序、单笔上限、撤销时限、收款前开班；交班方式；可调的数值。库存、采购、审批、付款这些 ERP 的规则在「ERP 设置」里。修改只影响之后的业务。" tabs={tabs}>
      <SubPane tab="basic" className="space-y-5">
       {settings.data?.hidePendingMarks ? (
         <Notice tone="info" title="店主已签认经营规则，「待确认」标记已隐藏">
@@ -311,20 +311,7 @@ export function RulesTab() {
 
       {/* 可调的数值（8.0.7 A1：原来写死、标「待确认」的数值，含打印方式）单独保存 */}
       <SubPane tab="tunables">
-        <TunablesCard />
-      </SubPane>
-
-      {/* 库存与采购的规则属于 ERP 的库存模块：模块关着时不显示（接口也会拒绝） */}
-      <SubPane tab="inventory">
-        {session.erpModules.includes('inventory') ? (
-          <InventoryRules />
-        ) : (
-          <div data-testid="inventory-rules-off">
-            <Notice tone="info" title="ERP 的「库存」模块已关闭">
-              库存与采购的规则在库存模块开启后才能修改；店主在 ERP「模块设置」里开启。
-            </Notice>
-          </div>
-        )}
+        <TunablesCard scope="store" />
       </SubPane>
     </AdminPage>
   );
@@ -342,7 +329,8 @@ const CYCLE_FIELDS: { key: CycleKey; label: string; hint: string; min: number; m
 ];
 
 /** 库存与采购的经营规则（模拟规则，可由店主调整） */
-function InventoryRules() {
+/** 库存与采购的规则（8.0.18 起显示在「ERP 设置 → 库存与审批开关」） */
+export function InventoryRules() {
   const settings = useInvSettings();
   const qc = useQueryClient();
   const toast = useToast();

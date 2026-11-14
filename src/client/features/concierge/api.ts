@@ -126,12 +126,12 @@ export function rememberReceipt(receipt: Receipt) {
  * 取工作区：先比同步版本号，没变就不重新取。changed = 这次的内容与上次给出去的不一样
  * （页面据此决定要不要重新渲染：原来每 3 秒不管变没变都整个换一遍，开着的编辑器跟着重算）。
  */
-export async function loadWorkspace(): Promise<{
+export async function loadWorkspace(force = false): Promise<{
   data: WorkspaceData;
   changed: boolean;
 }> {
   const rev = await api.get<{ revision: string }>("/api/concierge/revision");
-  const fetched = !cached || revision !== rev.revision;
+  const fetched = force || !cached || revision !== rev.revision;
   if (fetched) {
     cached = await api.get<WorkspaceData>("/api/concierge/workspace");
     revision = rev.revision;

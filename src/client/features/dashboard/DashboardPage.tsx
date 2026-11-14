@@ -16,6 +16,7 @@ import { MarketingCostTab } from './MarketingCostTab';
 import { MembersTab } from './MembersTab';
 import { MembershipTab } from '../membership/MembershipTab';
 import { OverviewTab } from './OverviewTab';
+import { RevenuePage } from '../erp/RevenuePage';
 import { RoomsTab } from './RoomsTab';
 import { TechniciansTab } from './TechniciansTab';
 
@@ -36,6 +37,8 @@ const TABS = [
   { key: 'rooms', label: '客房', perm: 'report.executive' },
   // 营销成本测算（8.0.4 需求表 10、11）：店主、店总；有财务职责的账号没有这项权限（与财务隔离）
   { key: 'marketing', label: '营销成本', perm: 'marketing.cost' },
+  // 8.0.18：ERP 的「营业数据」并进来（任选时段、每天的明细与日结情况）；权限照旧是 erp.revenue，ERP 里把这个模块关了就不显示
+  { key: 'revenue', label: '营业数据', perm: 'erp.revenue' },
 ] as const satisfies readonly { key: string; label: string; perm: Permission }[];
 type TabKey = (typeof TABS)[number]['key'];
 
@@ -61,7 +64,7 @@ export function DashboardPage() {
   const can = useCan();
   const { tab } = useParams();
   const [pref, setPref] = useState(readPref);
-  const tabs = TABS.filter((t) => can(t.perm) && (t.key !== 'technicians' || session.technicians) && (t.key !== 'rooms' || session.rooms));
+  const tabs = TABS.filter((t) => can(t.perm) && (t.key !== 'technicians' || session.technicians) && (t.key !== 'rooms' || session.rooms) && (t.key !== 'revenue' || session.erpModules.includes('revenue')));
   const current = tabs.find((t) => t.key === tab) ?? (tab ? undefined : (tabs.find((t) => t.key === pref) ?? tabs[0]));
   if (!current) return <Navigate to={tabs.length ? DASHBOARD_PATH : '/'} replace />;
   const defaultButton = tabs.length > 1 && (
@@ -79,7 +82,17 @@ export function DashboardPage() {
     </button>
   );
   return (
-    <AdminPage section="dashboard" description={current.key === 'today' ? `营业日 ${session.today} · 每分钟刷新` : '口径与日结一致：按营业日，反结账冲回'} actions={defaultButton}>
+    <AdminPage
+      section="dashboard"
+      description={
+        current.key === 'today'
+          ? `营业日 ${session.today} · 每分钟刷新`
+          : current.key === 'revenue'
+            ? '只读：任选时段的营业收入、每天的明细与日结情况、收款与部门构成；与经营总览同一口径'
+            : '口径与日结一致：按营业日，反结账冲回'
+      }
+      actions={defaultButton}
+    >
       {tabs.length > 1 && (
         <div className="-mt-1 mb-5 flex items-center gap-1 overflow-x-auto border-b border-line" role="tablist" aria-label="看板">
           {tabs.map((t) => (
@@ -110,6 +123,8 @@ export function DashboardPage() {
           <RoomsTab />
         ) : current.key === 'marketing' ? (
           <MarketingCostTab />
+        ) : current.key === 'revenue' ? (
+          <RevenuePage />
         ) : (
           <TodayTab />
         )}

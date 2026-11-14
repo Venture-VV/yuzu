@@ -1,6 +1,7 @@
 // 下单物料（库管视图，v0.7.9，飞书需求 RQ-005）：已确认的采购单每一行的图片、规格、已到与未到、应到日期，
 // 没到齐且过了应到日期的标红。导出带图片的 Excel（每行嵌入第一张图片）与 CSV。
 
+import { PurchasingTabs } from './PurchasingTabs';
 import { useState } from 'react';
 import { Link, Navigate } from 'react-router';
 import { ArrowLeft, Download, FileSpreadsheet, PackageSearch } from 'lucide-react';
@@ -64,6 +65,7 @@ export function OrderedPage() {
           </div>
         }
       />
+      <PurchasingTabs active="ordered" />
       <div className="flex shrink-0 flex-wrap items-end gap-3 border-b border-line px-5 py-3 md:px-7">
         <Segmented
           size="sm"

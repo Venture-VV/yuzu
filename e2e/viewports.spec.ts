@@ -311,7 +311,7 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
     const navName = isMobile || (page.viewportSize()?.width ?? 0) < 1024 ? 'ERP 分区' : 'ERP 导航';
     const erpNav = page.getByRole('navigation', { name: navName });
-    for (const name of ['ERP 首页', '库存', '采购', '应付货款', '审批中心', '营业数据', '模块设置']) await expect(erpNav.getByRole('link', { name, exact: true })).toHaveCount(1);
+    for (const name of ['ERP 首页', '库存', '采购', '应付货款', '审批中心', '营业数据', 'ERP 设置']) await expect(erpNav.getByRole('link', { name, exact: true })).toHaveCount(1);
     for (const [url, testId] of [
       ['/inventory', null],
       ['/purchasing', null],
@@ -321,8 +321,15 @@ test.describe('视口冒烟', () => {
       ['/approvals', 'approvals-page'],
       ['/approvals?tab=rules', 'approval-rules'],
       ['/approvals?tab=delegations', 'approval-delegations'],
-      ['/erp/revenue', 'erp-revenue'],
+      // 8.0.18：模块开关、各模块的规则在「ERP 设置」的页签里（旧地址 /erp/modules 跳过去）
       ['/erp/modules', 'erp-module-switches'],
+      ['/erp/settings/purchase', 'purchase-rules'],
+      ['/erp/settings/approvals', 'approval-rules'],
+      ['/erp/settings/payments', 'payment-rules'],
+      ['/erp/settings/tunables', 'tunables-card'],
+      // 采购、费用的子页顶上的页签
+      ['/purchasing/flow', 'purchasing-tabs'],
+      ['/erp/petty', 'subnav'],
       // v0.7.9：采购台账、账目自检、下单物料
       ['/erp/ledger', 'ledger-page'],
       ['/erp/audit', 'audit-page'],
@@ -343,6 +350,13 @@ test.describe('视口冒烟', () => {
       await page.waitForLoadState('networkidle');
       await expectFits(page);
     }
+    // 8.0.18：营业数据并进了后台的数据看板（旧地址 /erp/revenue 跳过去，这时在后台的外壳里，不是 ERP 的）
+    await page.goto('/erp/revenue');
+    await expect(page).toHaveURL(/\/admin\/dashboard\/revenue$/);
+    await expect(page.getByTestId('admin-shell')).toBeVisible();
+    await expect(page.getByTestId('erp-revenue')).toBeVisible();
+    await page.waitForLoadState('networkidle');
+    await expectFits(page);
   });
 
   test('日结：营业口径、余额核对与异常', async ({ page }) => {

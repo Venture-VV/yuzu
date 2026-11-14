@@ -15,6 +15,8 @@ import { AdminPage, useAdminSections } from './AdminShell';
 import { Stagger } from '../../lib/motion';
 
 const SECTION_HINTS: Partial<Record<AdminSection, string>> = {
+  canteen: '柚子饭堂：员工名单、菜单、用餐记录、柚子信箱、开饭时间',
+  patrol: '场所与二维码、每天的巡场清单与记录、巡场间隔',
   dashboard: '今日、经营总览、会员、会员体系、技师、客房、营销成本（原门店的「看板」）',
   settings: '所有规则一张表：当前值、默认值、谁改的',
   rules: '门店与营业时间、扣款顺序、上限与时限、开班与交班方式、可调的数值',

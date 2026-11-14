@@ -1,6 +1,7 @@
 // 采购 → 流程进度（8.0.17，docs/FLOW_V8017.md）：进行中的每一条画一张卡——流程 A / B、金额、从提需求到付款的一排环节。
 // 顶上写现在的分流规则（读采购规则），可以按「卡住或超期」与停在哪个环节筛。只读；全部做完的不列。
 
+import { PurchasingTabs } from './PurchasingTabs';
 import { useQuery } from '@tanstack/react-query';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { ArrowLeft, Settings2 } from 'lucide-react';
@@ -52,6 +53,7 @@ export function FlowPage() {
           </Link>
         }
       />
+      <PurchasingTabs active="flow" />
       <div className="shrink-0 border-b border-line px-5 py-3 md:px-7">
         {rules && (
           <p className="mb-2.5 text-[13px] text-ink-2" data-testid="flow-rules">

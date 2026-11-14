@@ -35,7 +35,7 @@ import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
-import { ErpPage } from '../erp/ErpHome';
+import { AdminModuleGate, AdminPage } from '../admin/AdminShell';
 import { PrintButton } from '../print/PrintButton';
 
 type Tab = 'day' | 'records' | 'points' | 'settings';
@@ -46,10 +46,8 @@ export function PatrolPage() {
   const manage = can('patrol.manage');
   const [tab, setTab] = useState<Tab>('day');
   return (
-    <ErpPage
-      title="安保巡场"
-      description="安保部门在柚子饭堂「工作台 → 巡场」扫场所二维码打卡。每天按巡场间隔（默认 3 小时）分轮，同一个场所每轮只记一次。这里按轮看每个场所巡了没有、巡场记录与导出；管场所与二维码、巡场部门、巡场间隔、手机上能看记录的人。"
-    >
+    <AdminPage section="patrol" description="安保部门在柚子饭堂「工作台 → 巡场」扫场所二维码打卡。每天按巡场间隔（默认 3 小时）分轮，同一个场所每轮只记一次。这里按轮看每个场所巡了没有、巡场记录与导出；管场所与二维码、巡场部门、巡场间隔、手机上能看记录的人。">
+     <AdminModuleGate section="patrol">
       <div className="space-y-5" data-testid="patrol-admin">
         {manage && <ErpPendingPanel types={['patrol_point']} />}
         <Segmented<Tab>
@@ -72,7 +70,8 @@ export function PatrolPage() {
         {tab === 'points' && manage && <PointsTab />}
         {tab === 'settings' && manage && <SettingsTab />}
       </div>
-    </ErpPage>
+     </AdminModuleGate>
+    </AdminPage>
   );
 }
 

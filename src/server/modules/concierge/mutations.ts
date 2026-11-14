@@ -12,6 +12,9 @@ import { hashRequest } from "../../lib/idempotency";
 import { setTxTimeouts } from "../../lib/tx";
 import { mapActor, listTeam, requireMember } from "./store";
 import { buildReceipt } from "./receipt";
+import { canonicalMemberId, nativeResourceOptions, resourceColumns } from "./native-links";
+import { executePraise } from "./praise";
+import { memberFamily } from "../membership";
 import {
   WorkspaceError,
   text,
@@ -117,10 +120,11 @@ async function saveRecord(
   const v = before ? before.version + 1 : 1;
   data.createdByName = before?.data.createdByName || actor.displayName;
   data.updatedByName = actor.displayName;
+  const refs = resourceColumns(kind === "appointment" ? data.resourceKey : undefined);
   if (before)
-    await tx`UPDATE concierge_records SET member_id=${memberId || null},data=${tx.json(data)},version=${v},updated_by=${actor.id},updated_at=now(),native_booking_id=${nativeBookingId},native_checkout_id=${nativeCheckoutId} WHERE id=${id}`;
+    await tx`UPDATE concierge_records SET member_id=${memberId || null},data=${tx.json(data)},version=${v},updated_by=${actor.id},updated_at=now(),native_booking_id=${nativeBookingId},native_checkout_id=${nativeCheckoutId},native_space_id=${refs.spaceId},native_table_id=${refs.tableId},native_room_id=${refs.roomId} WHERE id=${id}`;
   else
-    await tx`INSERT INTO concierge_records(id,kind,member_id,data,created_by,updated_by,native_booking_id,native_checkout_id) VALUES(${id},${kind},${memberId || null},${tx.json(data)},${actor.id},${actor.id},${nativeBookingId},${nativeCheckoutId})`;
+    await tx`INSERT INTO concierge_records(id,kind,member_id,data,created_by,updated_by,native_booking_id,native_checkout_id,native_space_id,native_table_id,native_room_id) VALUES(${id},${kind},${memberId || null},${tx.json(data)},${actor.id},${actor.id},${nativeBookingId},${nativeCheckoutId},${refs.spaceId},${refs.tableId},${refs.roomId})`;
   await revision(tx, kind, id, v, data, actor, reason);
   await audit(
     tx,
@@ -178,23 +182,36 @@ async function assignee(db: Db, id: string) {
 }
 async function nativeMember(db: Db, value: unknown) {
   if (value == null || value === "") return null;
-  const id = integer(value, "企业会员编号");
+  const id = await canonicalMemberId(db, integer(value, "企业会员编号"));
+  if (!id) throw new WorkspaceError("系统会员不存在");
+  // 只读地核对、不给会员一行加锁（8.0.18 整合：管家模块锁之后只锁管家自己的行，AGENTS.md）；
+  // 存在与否由外键兜底，之后被合并、停用的在读的时候沿「合并到」投影
   const [r] =
     await db`SELECT id,merged_into_id,status FROM members WHERE id=${id}`;
   if (!r || r.mergedIntoId || r.status !== "active")
     throw new WorkspaceError("企业会员不存在、已合并或不可用");
   return id;
 }
+async function coordinationConflict(db:Db,key:string,label:string,start:string,end:string,except:string) {
+  const ids=resourceColumns(key);
+  const [room]=ids.roomId ? await db`SELECT space_id FROM rooms WHERE id=${ids.roomId}` : [];
+  const space=ids.spaceId || room?.spaceId || null;
+  const [hit]=await db`SELECT id FROM concierge_records WHERE kind='appointment' AND id<>${uuid(except)}::uuid
+    AND ((coalesce(data->>'resourceKey','')<>'' AND data->>'resourceKey'=${key} AND ${key}<>'')
+      OR (native_space_id=${space} AND ${space}::bigint IS NOT NULL)
+      OR (native_room_id IN (SELECT id FROM rooms WHERE space_id=${space}) AND ${space}::bigint IS NOT NULL)
+      OR (coalesce(data->>'resourceKey','')='' AND lower(data->>'resource')=lower(${label})))
+    AND data->>'status' IN ('已确认','已到店') AND data->>'startAt'<${end} AND data->>'endAt'>${start}`;
+  if (hit) throw new WorkspaceError("管家服务安排已有同一资源的时段冲突，请调整时间或资源",409);
+}
 async function checkNativeBooking(db: Db, memberId: string, id: number) {
   if (!memberId) throw new WorkspaceError("前台预约与当前关联企业会员不匹配");
   const [b] = await db`SELECT member_id FROM bookings WHERE id=${id}`;
   const [m] =
     await db`SELECT native_member_id FROM concierge_members WHERE id=${uuid(memberId)}::uuid`;
-  if (
-    !b ||
-    !m?.nativeMemberId ||
-    Number(b.memberId) !== Number(m.nativeMemberId)
-  )
+  const canonical=m?.nativeMemberId ? await canonicalMemberId(db,Number(m.nativeMemberId)) : null;
+  const family=canonical ? await memberFamily(db,canonical) : [];
+  if (!b || !family.includes(Number(b.memberId)))
     throw new WorkspaceError("前台预约与当前关联企业会员不匹配");
 }
 async function checkNativeCheckout(db: Db, memberId: string, id: number) {
@@ -204,8 +221,11 @@ async function checkNativeCheckout(db: Db, memberId: string, id: number) {
     await db`SELECT native_member_id FROM concierge_members WHERE id=${uuid(memberId)}::uuid`;
   if (!m?.nativeMemberId)
     throw new WorkspaceError("请先关联企业会员，再关联同一位会员的结账");
+  const canonical=await canonicalMemberId(db,Number(m.nativeMemberId));
+  if (!canonical) throw new WorkspaceError("系统会员关联不存在");
+  const family=await memberFamily(db,canonical);
   const [hit] =
-    await db`SELECT c.id FROM checkouts c WHERE c.id=${id} AND c.status<>'voided' AND (EXISTS(SELECT 1 FROM checkout_bills cb JOIN visits v ON v.id=cb.visit_id WHERE cb.checkout_id=c.id AND v.member_id=${m.nativeMemberId}) OR EXISTS(SELECT 1 FROM checkout_payments cp WHERE cp.checkout_id=c.id AND cp.method='wallet' AND cp.consumption_id IS NOT NULL AND cp.member_id=${m.nativeMemberId}))`;
+    await db`SELECT c.id FROM checkouts c WHERE c.id=${id} AND c.status<>'voided' AND (EXISTS(SELECT 1 FROM checkout_bills cb JOIN visits v ON v.id=cb.visit_id WHERE cb.checkout_id=c.id AND v.member_id IN ${db(family)}) OR EXISTS(SELECT 1 FROM checkout_payments cp WHERE cp.checkout_id=c.id AND cp.method='wallet' AND cp.consumption_id IS NOT NULL AND cp.member_id IN ${db(family)}))`;
   if (!hit) throw new WorkspaceError("企业结账不属于当前关联会员");
 }
 async function execute(
@@ -232,14 +252,11 @@ async function execute(
       action === "updateMember"
         ? text(p.changeReason ?? p.reason, 1000, true)
         : "管家首次纳入";
-    const name = text(p.name, 60, true),
-      phone = text(p.phone, 30),
+    let name = text(p.name, 60),
+      phone = text(p.phone, 30);
+    const
       cardNo = text(p.cardNo, 60),
       ownerId = text(p.ownerId, 80);
-    if (!phone && !cardNo)
-      throw new WorkspaceError("手机号和收银卡号至少填一项");
-    if (phone && !/^[+\d\s()-]{5,30}$/.test(phone))
-      throw new WorkspaceError("联系电话格式不正确");
     await assignee(tx, ownerId);
     const joinedAt = text(p.joinedAt, 10);
     if (
@@ -249,21 +266,35 @@ async function execute(
         new Date(joinedAt).toISOString().slice(0, 10) !== joinedAt)
     )
       throw new WorkspaceError("建档日期不存在");
-    if (
-      p.nativeMemberId !== undefined &&
-      String(p.nativeMemberId || "") !== String(before?.nativeMemberId || "") &&
-      !can(actor, "member.read")
-    )
-      throw new WorkspaceError("关联企业会员需要原生会员查看权限", 403);
     // 只在关联变了的时候核对企业会员还在用：页面每次保存都带着原来的关联，
     // 关联的企业会员后来被停用、被合并以后，这份管家档案照样要能改（整改：原来每次都核对，档案就再也存不了）
     const sameLink =
       p.nativeMemberId === undefined ||
       (!!before &&
         String(p.nativeMemberId ?? "") === String(before.nativeMemberId ?? ""));
+    if (before?.nativeMemberId && !sameLink && !p.nativeMemberId) throw new WorkspaceError("已关联的服务档案不能退回独立会员，请保留系统关联");
+    if (before?.nativeMemberId && !sameLink && !can(actor,"concierge.manage")) throw new WorkspaceError("纠正已有系统会员关联请由经理核对并说明原因",403);
     const nativeId = sameLink
       ? (before?.nativeMemberId ?? null)
       : await nativeMember(tx, p.nativeMemberId);
+    if (!before && !nativeId) throw new WorkspaceError("请先选择前台已办理的系统会员，再建立服务档案");
+    if (nativeId) {
+      const canonical = await canonicalMemberId(tx, nativeId);
+      if (!canonical) throw new WorkspaceError("关联的系统会员不存在");
+      const family=await memberFamily(tx,canonical);
+      const [existing]=await tx`SELECT id,code FROM concierge_members WHERE native_member_id IN ${tx(family)} AND id<>${uuid(id)}::uuid LIMIT 1`;
+      if (existing && (!before || !sameLink)) throw new WorkspaceError(`这位系统会员已有管家服务档案 ${String(existing.code).padStart(6,"0")}，请打开原档案`,409);
+      const [identity]=await tx`SELECT name,phone FROM members WHERE id=${canonical}`;
+      name=before && sameLink ? before.data.name : identity!.name;
+      phone=before && sameLink ? before.data.phone : identity!.phone;
+    }
+    // 手机号的格式只核对手工填的（没关联系统会员的旧档案）。关联了系统会员的，上面已经换成会员系统里的手机号，
+    // 页面交上来的那一个只是显示用的、不采用——没有会员查看权限的管家看到的是打码的（199 **** 8001），
+    // 原来先核对格式再替换，这些人就建不了服务档案（8.0.18，Codex 审查 51358d0 的 P1）
+    if (!nativeId && phone && !/^[+\d\s()-]{5,30}$/.test(phone))
+      throw new WorkspaceError("联系电话格式不正确");
+    if (!name) throw new WorkspaceError("请填写接待称呼");
+    if (!phone && !cardNo) throw new WorkspaceError("手机号和收银卡号至少填一项");
     if (before && nativeId !== (before.nativeMemberId ?? null)) {
       const [linked] =
         await tx`SELECT id FROM concierge_records WHERE member_id=${uuid(id)}::uuid AND (native_booking_id IS NOT NULL OR native_checkout_id IS NOT NULL) LIMIT 1`;
@@ -277,7 +308,8 @@ async function execute(
       phone,
       cardNo,
       ownerId,
-      cardTier: text(p.cardTier, 60),
+      cardTier: nativeId ? before?.data.cardTier || "" : text(p.cardTier, 60),
+      serviceAlias: text(p.serviceAlias,60),
       preferences: text(p.preferences, 2000),
       source: text(p.source, 100),
       joinedAt,
@@ -496,9 +528,37 @@ async function execute(
       const startAt = dateTime(p.startAt, true),
         endAt = dateTime(p.endAt),
         status = text(p.status, 20, true),
-        resource = text(p.resource, 100),
         hostId = text(p.hostId, 80),
         partySize = integer(p.partySize, "人数");
+      const resourceKey=p.resourceKey===undefined ? before?.data.resourceKey || "" : text(p.resourceKey,80);
+      resourceColumns(resourceKey);
+      let resource=text(p.resource,240), service=text(p.service,100,true);
+      let resourceCategory=text(p.resourceCategory ?? before?.data.resourceCategory,80), resourceGroup=text(p.resourceGroup ?? before?.data.resourceGroup,120);
+      if (resourceKey) {
+        const ids=resourceColumns(resourceKey);
+        const table=ids.spaceId ? "spaces" : ids.tableId ? "dining_tables" : "rooms";
+        const resourceId=ids.spaceId || ids.tableId || ids.roomId;
+        // 不给空间 / 桌台 / 客房一行加锁（8.0.18 整合）：前台预约到店、改期是「预约 → 空间」，
+        // 这里先锁空间再由外键去碰预约行会反过来；资源在不在、停没停用只读地核对，存在由外键兜底
+        const [exists] = await tx`SELECT id FROM ${tx(table)} WHERE id=${resourceId!}`;
+        if (!exists) throw new WorkspaceError("系统资源不存在，请刷新后重新选择");
+        const option=(await nativeResourceOptions(tx)).find(r=>r.key===resourceKey);
+        if (!option) throw new WorkspaceError("系统资源不存在，请刷新后重新选择");
+        const closing=["已取消","已完成","未到店"].includes(status);
+        const changesArrangement=!before || before.data.resourceKey!==resourceKey || (!closing && (before.data.startAt!==startAt || before.data.endAt!==endAt || before.data.status!==status));
+        if (changesArrangement && !option.active) throw new WorkspaceError("所选系统资源已停用或不可安排，请重新选择");
+        resource=before && before.data.resourceKey===resourceKey ? before.data.resource : option.label;
+        service=before && before.data.resourceKey===resourceKey ? before.data.service : option.categoryLabel;
+        resourceCategory=option.category;
+        resourceGroup=option.group;
+      } else if (resourceCategory) {
+        const options=await nativeResourceOptions(tx);
+        const option=options.find(r=>r.active && r.category===resourceCategory && (!resourceGroup || r.group===resourceGroup));
+        const unchanged=before?.data.resourceCategory===resourceCategory && before?.data.resourceGroup===resourceGroup;
+        if (!option && !unchanged) throw new WorkspaceError("区域或规格已变更，请刷新后重新选择");
+        if (option) service=option.categoryLabel;
+        resource=""; // An area/specification request never reserves an entire group.
+      }
       await assignee(tx, hostId);
       if (
         partySize > 9999 ||
@@ -516,9 +576,7 @@ async function execute(
       if (resource && ["已确认", "已到店"].includes(status) && !endAt)
         throw new WorkspaceError("指定协调资源请填写结束时间");
       if (resource && endAt && ["已确认", "已到店"].includes(status)) {
-        const [hit] =
-          await tx`SELECT id FROM concierge_records WHERE kind='appointment' AND id<>${uuid(id)}::uuid AND lower(data->>'resource')=lower(${resource}) AND data->>'status' IN ('已确认','已到店') AND data->>'startAt'<${endAt} AND data->>'endAt'>${startAt}`;
-        if (hit) throw new WorkspaceError("管家协调安排已有时段冲突", 409);
+        await coordinationConflict(tx,resourceKey,resource,startAt,endAt,id);
       }
       if (p.nativeBookingId !== undefined) {
         nativeBookingId =
@@ -539,9 +597,12 @@ async function execute(
         endAt,
         status,
         resource,
+        resourceKey,
+        resourceCategory,
+        resourceGroup,
         hostId,
         partySize,
-        service: text(p.service, 100, true),
+        service,
         note: text(p.note, 2000),
         changeReason: reason,
         nativeBookingId,
@@ -571,14 +632,14 @@ async function execute(
           ["已取消", "未到店"].includes(appt.data.status)
         )
           throw new WorkspaceError("关联协调预约不匹配或已取消");
+        if (appt.data.resourceKey && status === "接待中" &&
+            (!before || before.data.status !== "接待中" || !["已到店", "已完成"].includes(appt.data.status))) {
+          resourceColumns(appt.data.resourceKey);
+          const resource = (await nativeResourceOptions(tx)).find(r => r.key === appt.data.resourceKey);
+          if (!resource?.active) throw new WorkspaceError("预约资源已停用或不可安排，请先调整预约再开始接待");
+        }
         if (appt.data.resource && appt.data.endAt && status === "接待中") {
-          const [hit] =
-            await tx`SELECT id FROM concierge_records WHERE kind='appointment' AND id<>${appt.id} AND lower(data->>'resource')=lower(${appt.data.resource}) AND data->>'status' IN ('已确认','已到店') AND data->>'startAt'<${appt.data.endAt} AND data->>'endAt'>${appt.data.startAt}`;
-          if (hit)
-            throw new WorkspaceError(
-              "协调资源已有冲突，请先调整预约再开始接待",
-              409,
-            );
+          await coordinationConflict(tx,appt.data.resourceKey || "",appt.data.resource,appt.data.startAt,appt.data.endAt,String(appt.id));
         }
         // 预约状态只往前走、变了才写（整改：原来每次保存接待都重写一版，
         // 预约已经「已完成」以后再改一下还在「接待中」的接待，会把它退回「已到店」）
@@ -746,7 +807,9 @@ export async function mutate(
           );
         return old.response;
       }
-      const response = await execute(tx, actor, action, p, ip);
+      const response = action === "savePraise" || action === "voidPraise"
+        ? await executePraise(tx, actor, action, p, deps.config.timezone, ip)
+        : await execute(tx, actor, action, p, ip);
       await bumpRevision(tx);
       await tx`INSERT INTO concierge_operations(actor_id,request_id,request_hash,response) VALUES(${actor.id},${key},${hash},${tx.json(response)})`;
       return response;

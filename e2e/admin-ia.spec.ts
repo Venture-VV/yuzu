@@ -21,7 +21,7 @@ test.describe('8.0.17 后台的信息架构', () => {
     await login(page, 'linlan');
     await page.goto('/admin');
     const nav = page.getByRole('navigation', { name: '后台导航' });
-    await expect(nav.locator('p')).toHaveText(['概览', '规则中心', '会员与营销', '营业项目', '场地、设备与线上', '人员与权限', '数据与审计']);
+    await expect(nav.locator('p')).toHaveText(['概览', '规则中心', '会员与营销', '营业项目', '场地、设备与线上', '人员与行政', '数据与审计']);
     // 规则中心：规则总表、门店基本规则（原「经营规则」）
     await expect(page.getByTestId('admin-nav-settings')).toHaveText('规则总表');
     await expect(page.getByTestId('admin-nav-rules')).toHaveText('门店基本规则');
@@ -35,7 +35,7 @@ test.describe('8.0.17 后台的信息架构', () => {
     // 后台首页：同一套分组（没有「后台首页」自己）
     await page.goto('/admin');
     const groups = page.getByTestId('admin-home-groups');
-    await expect(groups.locator('> div > p')).toHaveText(['概览', '规则中心', '会员与营销', '营业项目', '场地、设备与线上', '人员与权限', '数据与审计']);
+    await expect(groups.locator('> div > p')).toHaveText(['概览', '规则中心', '会员与营销', '营业项目', '场地、设备与线上', '人员与行政', '数据与审计']);
     await groups.getByRole('link', { name: /门店基本规则/ }).click();
     await expect(page).toHaveURL(/\/admin\/rules$/);
   });
@@ -77,7 +77,8 @@ test.describe('8.0.17 后台的信息架构', () => {
       await page.goto(path);
       await expect(page.getByTestId('subnav').getByRole('link')).toHaveText(expected);
     };
-    await tabs('/admin/rules', ['基本与收款', '交班方式', '可调的数值', '库存与采购']);
+    // 8.0.18：「库存与采购」归了 ERP（ERP 设置 → 库存与审批开关），e2e/erp-ia.spec.ts 核对旧地址的跳转
+    await tabs('/admin/rules', ['基本与收款', '交班方式', '可调的数值']);
     await tabs('/admin/tags', ['前台规则', '手牌池', '建牌与导入']);
     await tabs('/admin/dining', ['餐饮规则', '档口与出品', '桌台']);
     await tabs('/admin/rooms', ['客房规则', '房型与房价', '房间']);

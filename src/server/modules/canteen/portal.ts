@@ -122,7 +122,7 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
       if (origin && originHost(origin) !== req.headers.host) throw new AppError(403, 'BAD_ORIGIN', '请求来源不正确');
     }
     if (routePath(req) === '/api/canteen/ping') return;
-    if (!(await canteenOpen())) throw new AppError(503, 'CANTEEN_CLOSED', '饭堂还没开张：请管理员在 yuzu 的 ERP「模块设置」里打开「员工食堂」');
+    if (!(await canteenOpen())) throw new AppError(503, 'CANTEEN_CLOSED', '饭堂还没开张：请管理员在 yuzu 的「ERP 设置 → 模块开关」里打开「员工食堂」');
     const token = req.cookies[CANTEEN_COOKIE];
     if (token) {
       const found = await resolveCanteenSession(sql, token);

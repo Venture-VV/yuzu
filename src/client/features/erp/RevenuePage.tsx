@@ -12,8 +12,8 @@ import { formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Badge, Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { HBars, Kpi, PeriodPicker, presetRange, yuan, type Period } from '../dashboard/charts';
-import { ErpPage } from './ErpHome';
 
+/** 数据看板「营业数据」页签的内容（8.0.18 起；原来是 ERP 的一页） */
 export function RevenuePage() {
   const session = useSession();
   const [period, setPeriod] = useState<Period>(() => ({ preset: 'last7', ...presetRange('last7', session.today) }));
@@ -25,10 +25,7 @@ export function RevenuePage() {
   const d = q.data;
   const closed = new Map((d?.settlements ?? []).map((s) => [s.date, s]));
   return (
-    <ErpPage
-      title="营业数据"
-      description="只读：每天的营业收入、收款与部门构成、日结情况（与经营总览同一口径，结账计入、反结账冲回）。门店的流水、日结、交班仍在门店办理。"
-    >
+    <>
       <div className="space-y-5" data-testid="erp-revenue">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <PeriodPicker value={period} onChange={setPeriod} today={session.today} />
@@ -140,6 +137,6 @@ export function RevenuePage() {
           )
         )}
       </div>
-    </ErpPage>
+    </>
   );
 }

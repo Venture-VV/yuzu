@@ -88,7 +88,7 @@ export function registerErpModuleGate(app: FastifyInstance, deps: Deps) {
 /** 模块关着时的拒绝（接口拦截与审批中心按单据所属模块拦截共用） */
 export function erpModuleDisabled(key: ErpModuleKey): AppError {
   const def = ERP_MODULES[key];
-  return new AppError(403, 'ERP_MODULE_DISABLED', `ERP 的「${def.label}」模块没有开启（或它依赖的模块没有开启），请店主在 ERP「模块设置」里开启`, { module: key });
+  return new AppError(403, 'ERP_MODULE_DISABLED', `ERP 的「${def.label}」模块没有开启（或它依赖的模块没有开启），请店主在「ERP 设置 → 模块开关」里开启`, { module: key });
 }
 
 export function registerErpRoutes(app: FastifyInstance, deps: Deps) {

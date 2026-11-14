@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { shortStamp } from "./format";
 import { Navigate } from "react-router";
 import { api } from "../../lib/api";
 import { useCan, useSession } from "../../lib/session";
@@ -35,10 +36,7 @@ function describePending(op: Pending): string {
   const p = op.payload as Record<string, unknown>;
   const pick = (k: string) => (typeof p[k] === "string" ? (p[k] as string).trim() : "");
   const what = pick("name") || pick("number") || pick("content").slice(0, 20) || pick("service") || (pick("amount") ? `¥${pick("amount")}` : "");
-  const at = new Date(op.createdAt);
-  const time = Number.isFinite(at.getTime())
-    ? at.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })
-    : "";
+  const time = shortStamp(op.createdAt);
   return [ACTION_LABELS[op.action] ?? op.action, what, time && `${time} 提交`].filter(Boolean).join(" · ");
 }
 export function ConciergePage() {

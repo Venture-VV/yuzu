@@ -3,6 +3,7 @@
 // 详情：比价表（每家的单价、货款、运费、综合到价、付款条件、交货、有效期；每行最低价与最低综合到价标出），登记 / 撤下报价，
 // 定标（理由必填；报价不够家数的标单一来源、负责人定标），转采购单（生成草稿），撤销定标、撤销询价单。
 
+import { PurchasingTabs } from './PurchasingTabs';
 import { useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Award, CloudOff, FileSearch, FileText, Plus, Scale, Trash2 } from 'lucide-react';
@@ -74,6 +75,7 @@ export function SourcingPage() {
           )
         }
       />
+      <PurchasingTabs active="sourcing" />
       <div className="flex shrink-0 flex-wrap gap-1.5 border-b border-line px-5 py-3 md:px-7" role="radiogroup" aria-label="状态">
         {[{ value: '', label: '全部' }, ...(['open', 'awarded', 'cancelled'] as const).map((s) => ({ value: s, label: SOURCING_STATUS_LABELS[s] }))].map((f) => (
           <button

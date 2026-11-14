@@ -15,6 +15,10 @@ import {
 import { can } from "@shared/permissions";
 import { mutate, moduleLock, bumpRevision } from "./mutations";
 import { WorkspaceError, text, uuid } from "./validation";
+import { maskUnservedPhone, nativeMemberSummary, nativeRevision, searchNativeMembers } from "./native-links";
+import { nativeSpending } from "./spending";
+import { registerConciergeInsightsRoutes } from "./insights";
+import { registerConciergePraiseRoutes } from "./praise";
 const object = (v: unknown): Record<string, any> => {
   if (!v || typeof v !== "object" || Array.isArray(v))
     throw new WorkspaceError("请求格式不正确");
@@ -56,15 +60,29 @@ function sniff(buf: Buffer) {
 }
 export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
+  registerConciergeInsightsRoutes(app, deps);
+  registerConciergePraiseRoutes(app, deps);
+  app.get('/api/concierge/members/:id/spending', {preHandler:guard('concierge.read')}, async(req,reply)=>run(async()=>{
+    reply.header('Cache-Control','private, no-store');
+    const offset=Number(object(req.query).offset||0);
+    if (!Number.isSafeInteger(offset)||offset<0||offset>1000000)throw new WorkspaceError('页码不正确');
+    return readSnapshot(sql,tx=>nativeSpending(tx,text((req.params as any).id,80,true),offset));
+  }));
   app.get(
     "/api/concierge/revision",
     { preHandler: guard("concierge.read") },
     async (_req, reply) => {
       reply.header("Cache-Control", "private, no-store");
-      // 管家部自己的同步版本号（整改，见 mutations.ts bumpRevision）
-      const [r] =
-        await sql`SELECT revision::text AS revision FROM concierge_sync`;
-      return { revision: r?.revision ?? "0" };
+      // 管家部自己的同步版本号（整改，见 mutations.ts bumpRevision）＋原生会员与资源的只读指纹。
+      // 每个开着的管家页每 3 秒来一次，必须便宜（8.0.18 整合）：两段在同一个只读快照里取；
+      // 关掉这一个事务的 JIT——指纹只碰几十行，但递归查询的估算成本很高，默认配置下会触发 JIT，
+      // 编译比查询本身慢两个数量级（2 万会员的库上实测 0.6 秒 → 5 毫秒）
+      return readSnapshot(sql, async (tx) => {
+        await tx`SET LOCAL jit = off`;
+        const [r] =
+          await tx`SELECT revision::text AS revision FROM concierge_sync`;
+        return { revision: `${r?.revision ?? "0"}:${await nativeRevision(tx,deps.config.timezone)}` };
+      });
     },
   );
   app.get(
@@ -74,7 +92,7 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
       run(async () => {
         reply.header("Cache-Control", "private, no-store");
         return readSnapshot(sql, async (tx) => {
-          const data = await readWorkspace(tx, req.actor);
+          const data = await readWorkspace(tx, req.actor, deps.config.timezone);
           const ev =
             await tx`SELECT balance_id,upload_id,receipt_id FROM concierge_balance_evidence ORDER BY id`;
           for (const b of data.balances) {
@@ -138,7 +156,16 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
         if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1000000)
           throw new WorkspaceError("页码不正确");
         const rows =
-          await sql`SELECT r.id,r.data - 'rawText' - 'itemsText' - 'items' - 'review' - 'warnings' AS data,r.version,r.created_at,r.updated_at FROM concierge_records r LEFT JOIN concierge_members m ON m.id=r.member_id WHERE r.kind='receipt' AND (${search}='' OR concat(r.data->>'number',' ',r.data->>'store',' ',m.data->>'name',' ',m.data->>'phone') ILIKE ${"%" + search + "%"}) ORDER BY r.created_at DESC,r.id DESC LIMIT 51 OFFSET ${offset}`;
+          await sql`SELECT r.id,r.data - 'rawText' - 'itemsText' - 'items' - 'review' - 'warnings' AS data,r.version,r.created_at,r.updated_at
+            FROM concierge_records r LEFT JOIN concierge_members m ON m.id=r.member_id
+            LEFT JOIN LATERAL (
+              WITH RECURSIVE chain AS (
+                SELECT n.id,n.name,n.phone,n.member_no,n.merged_into_id,0 AS depth FROM members n WHERE n.id=m.native_member_id
+                UNION ALL SELECT n.id,n.name,n.phone,n.member_no,n.merged_into_id,c.depth+1 FROM members n JOIN chain c ON c.merged_into_id=n.id WHERE c.depth<30
+              ) SELECT name,phone,member_no FROM chain WHERE merged_into_id IS NULL LIMIT 1
+            ) n ON true
+            WHERE r.kind='receipt' AND (${search}='' OR concat(r.data->>'number',' ',r.data->>'store',' ',m.data->>'name',' ',m.data->>'phone',' ',m.data->>'serviceAlias',' ',m.data->>'cardNo',' ',n.name,' ',n.phone,' ',n.member_no) ILIKE ${"%" + search + "%"})
+            ORDER BY r.created_at DESC,r.id DESC LIMIT 51 OFFSET ${offset}`;
         return {
           receipts: rows.slice(0, 50).map(briefReceipt),
           hasMore: rows.length > 50,
@@ -148,16 +175,22 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
   );
   app.get(
     "/api/concierge/native-members",
-    { preHandler: guard("concierge.read", "member.read") },
-    async (req) =>
+    { preHandler: guard("concierge.read") },
+    async (req, reply) =>
       run(async () => {
+        reply.header("Cache-Control", "private, no-store");
         const q = text(object(req.query).q, 60);
-        if (q.length < 2) return { members: [] };
-        const rows =
-          await sql`SELECT id,member_no,name,phone FROM members WHERE merged_into_id IS NULL AND status='active' AND (name ILIKE ${"%" + q + "%"} OR phone LIKE ${"%" + q + "%"} OR member_no ILIKE ${"%" + q + "%"}) ORDER BY id DESC LIMIT 20`;
-        return { members: rows };
+        return readSnapshot(sql,async tx=>({ members: (await searchNativeMembers(tx,q,deps.config.timezone)).map(m=>maskUnservedPhone(m,req.actor)) }));
       }),
   );
+  app.get("/api/concierge/native-members/:id", {preHandler:guard("concierge.read")}, async(req,reply)=>run(async()=>{
+    reply.header("Cache-Control","private, no-store");
+    const id=Number((req.params as any).id);
+    if (!Number.isSafeInteger(id) || id<1) throw new WorkspaceError("系统会员编号不正确");
+    const member=await readSnapshot(sql,tx=>nativeMemberSummary(tx,id,deps.config.timezone));
+    if (!member) throw new WorkspaceError("系统会员不存在",404);
+    return {member:maskUnservedPhone(member,req.actor)};
+  }));
   app.get(
     "/api/concierge/audits/export",
     { preHandler: guard("concierge.read", "concierge.export") },
@@ -438,6 +471,8 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
             "concierge_revisions",
             "concierge_operations",
             "concierge_balance_evidence",
+            "concierge_praise",
+            "concierge_praise_evidence",
           ];
           const tables: Record<string, unknown> = {};
           for (const name of names)
@@ -445,7 +480,8 @@ export function registerConciergeRoutes(app: FastifyInstance, deps: Deps) {
           const images =
             await tx`SELECT DISTINCT i.id,i.mime,i.sha256,i.size_bytes,encode(i.data,'base64') AS data FROM erp_images i JOIN concierge_uploads u ON u.image_id=i.id WHERE i.scope='concierge'`;
           return {
-            format: "yuzu-concierge-8.0.12",
+            // 8.0.18：内容比 8.0.12 多了好评两张表与预约的三列系统资源，标记跟上
+            format: "yuzu-concierge-8.0.18",
             exportedAt: new Date().toISOString(),
             tables,
             images,

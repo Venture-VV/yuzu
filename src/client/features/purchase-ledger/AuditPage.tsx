@@ -1,6 +1,7 @@
 // 12 条账目自检（v0.7.9，飞书需求 RQ-005 第五段）：逐条列出规则、怎么查、现在有几条问题，点开看是哪几张单。
 // 「录入时拦截」的规则在登记时已经挡住，这里再查一遍库里的数据；「每日预警」是要有人处理的经营问题。
 
+import { ExpenseTabs } from '../expenses/ExpenseTabs';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { ChevronDown, ChevronRight, CircleAlert, CircleCheck, RotateCw } from 'lucide-react';
@@ -82,6 +83,7 @@ export function AuditPage() {
   const warnBad = rules.filter((r) => r.kind === 'warn' && !r.ok).length;
   return (
     <ErpPage
+      tabs={<ExpenseTabs active="audit" />}
       title="账目自检"
       description="飞书需求 RQ-005 的 12 条规则：录入时拦截的再查一遍库里的数据；每日预警列出要有人处理的问题。这是经营预警，不影响系统自检（check）。"
       actions={
