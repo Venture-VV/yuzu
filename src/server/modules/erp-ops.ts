@@ -24,6 +24,12 @@ export const erpOpAbandoned = () => conflict('OP_ABANDONED', '这笔已确认作
 
 /** 登记（也就是作废）要的权限：与原来的提交接口一致 */
 const WRITE: Record<ErpOpType, Permission[]> = {
+  customer_note: ['customer.operate'],
+  customer_binding_request: ['customer.operate'],
+  customer_binding_review: ['customer.manage'],
+  customer_credit_claim: ['customer.operate'],
+  customer_credit_review: ['customer.manage'],
+  customer_target: ['customer.manage'],
   expense_claim: ['expense.manage'],
   petty_advance: ['petty.manage'],
   petty_settlement: ['petty.manage'],
@@ -96,6 +102,12 @@ const WRITE: Record<ErpOpType, Permission[]> = {
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
+  customer_note: ['customer.read'],
+  customer_binding_request: ['customer.read'],
+  customer_binding_review: ['customer.manage'],
+  customer_credit_claim: ['customer.read'],
+  customer_credit_review: ['customer.manage'],
+  customer_target: ['customer.manage'],
   expense_claim: ['expense.read'],
   petty_advance: ['expense.read'],
   petty_settlement: ['expense.read'],
@@ -236,6 +248,12 @@ const KeyParam = z.object({ key: z.uuid('操作编号格式不正确') });
 const TypeQuery = z.object({ type: z.enum(ERP_OP_TYPES, '缺少原操作的业务类型') });
 const AbandonInput = TypeQuery.extend({ summary: z.string().trim().max(200).default('') });
 
+async function customerOpScope(db: Db, key: string, type: ErpOpType, actor: Parameters<typeof can>[0] & {id:number}) {
+  if (!type.startsWith('customer_') || can(actor,'customer.manage')) return;
+  const owners=await db`SELECT staff_id FROM idempotency_keys WHERE key=${key}::uuid UNION SELECT staff_id FROM op_fences WHERE key=${key}::uuid AND op_type=${type}`;
+  if (owners.some(row=>Number(row.staffId)!==actor.id)) throw forbidden('不能查回或作废其他员工的客户部操作');
+}
+
 export function registerErpOpsRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   const allowed = (actor: Parameters<typeof can>[0], perms: Permission[]) => perms.some((p) => can(actor, p));
@@ -244,7 +262,11 @@ export function registerErpOpsRoutes(app: FastifyInstance, deps: Deps) {
     const { key } = parse(KeyParam, req.params);
     const { type } = parse(TypeQuery, req.query ?? {});
     if (!allowed(req.actor, READ[type])) throw forbidden();
-    return lookupErpOp(sql, key, type);
+    await customerOpScope(sql,key,type,req.actor);
+    const result = await lookupErpOp(sql, key, type);
+    // A foreign submission may have committed between the first check and lookup.
+    await customerOpScope(sql,key,type,req.actor);
+    return result;
   });
 
   app.post('/api/erp/ops/:key/abandon', { preHandler: guard() }, async (req) => {
@@ -254,6 +276,7 @@ export function registerErpOpsRoutes(app: FastifyInstance, deps: Deps) {
     const outcome = await sql.begin(async (tx) => {
       await setTxTimeouts(tx);
       const result = await fenceKey(tx, key, input.type, req.actor.id);
+      await customerOpScope(tx,key,input.type,req.actor);
       if ('inserted' in result && result.inserted) {
         await writeAudit(tx, {
           staffId: req.actor.id,

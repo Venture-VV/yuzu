@@ -32,7 +32,7 @@ export function InventoryPage() {
   const can = useCan();
   const settings = useInvSettings();
   const { tab = 'stock' } = useParams<{ tab?: TabKey }>();
-  // 成本只给有「看成本」权限的人；别的页签要「查看库存」。有「看成本」没有「查看库存」的（值班经理默认如此）只有「成本」一个页签
+  // 成本只给有「看成本」权限的人；别的页签要「查看库存」。有「看成本」没有「查看库存」的（店总默认如此）只有「成本」一个页签
   const read = can('inventory.read');
   const tabs = TABS.filter((t) => (t.key === 'cost' ? can('inventory.cost') : read));
   if (tabs.length === 0) return <Navigate to="/" replace />;

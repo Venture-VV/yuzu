@@ -67,6 +67,9 @@ interface Rule {
 }
 
 export const PERMISSIONS = {
+  'customer.read': { roles: ['owner', 'store_manager', 'account_manager'] },
+  'customer.operate': { roles: ['owner', 'store_manager', 'account_manager'] },
+  'customer.manage': { roles: ['owner', 'store_manager'] },
   'concierge.read': { roles: ['owner', 'store_manager'], duties: ['concierge', 'concierge_manager'] },
   'concierge.operate': { roles: ['owner', 'store_manager'], duties: ['concierge', 'concierge_manager'] },
   'concierge.manage': { roles: ['owner', 'store_manager'], duties: ['concierge_manager'] },
@@ -393,6 +396,9 @@ export function overridesFrom(target: Partial<Record<EditableRole, readonly Perm
 }
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
+  'customer.read': '客户部：查看同源经营、会员及本人业绩',
+  'customer.operate': '客户部：记录服务、申请绑定与成交归属',
+  'customer.manage': '客户部：核验归属、审批绑定与维护目标',
   'concierge.read': '管家部：查看服务档案、协调预约与凭证；会员中心能看到全店会员的档阶、余额与到访（没有「查找与查看会员」的，未建服务档案的会员手机号打码）',
   'concierge.operate': '管家部：建档、拍单、人工余额核对、服务与交班',
   'concierge.manage': '管家部：经理监管、名称核准、已确认凭证更正',
@@ -518,6 +524,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
+  { title: '客户部', items: ['customer.read', 'customer.operate', 'customer.manage'] },
   { title: '管家部', items: ['concierge.read', 'concierge.operate', 'concierge.manage', 'concierge.export'] },
   {
     title: '会员与储值',

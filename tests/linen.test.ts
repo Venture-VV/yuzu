@@ -1,7 +1,9 @@
 // 8.0.20 布草洗涤（docs/ERP_V8020.md 第 4 节，JX-E；迁移 138）：品类、送洗 / 收回 / 新增 / 报废、作废、洗涤费对账表。
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { todayIn } from '../src/server/modules/inventory/common';
+import { FENCED_OPS } from '../src/server/lib/fences';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -125,6 +127,29 @@ describe('布草洗涤', () => {
   });
 });
 
+describe('迁移 140 与别的分支的迁移谁先跑都成立（测试会话在 PR #109 上报的 P1）', () => {
+  it('在当时的约束上追加：先跑了客户部的 162 再跑 140，客户部的作废类型还在；库里已经有客户部的作废登记也升得上去', async () => {
+    const file = await readFile(new URL('../src/server/migrations/140_linen_ops.sql', import.meta.url), 'utf8');
+    const def = async (db: typeof ctx.sql) =>
+      (await db<{ def: string }[]>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'op_fences'::regclass AND conname = 'op_fences_op_type_check'`)[0]!.def;
+    // 现在的库是 140、162 都跑过的：再跑一遍 140 = 「162 之后才跑 140」
+    await ctx.sql
+      .begin(async (tx) => {
+        const [owner] = await tx<{ id: number }[]>`SELECT id FROM staff WHERE role = 'owner' ORDER BY id LIMIT 1`;
+        await tx`INSERT INTO op_fences (key, op_type, staff_id) VALUES (${randomUUID()}, 'customer_note', ${owner!.id})`;
+        await tx.unsafe(file);
+        const after = await def(tx as never);
+        for (const t of FENCED_OPS) expect(after, t).toContain(`'${t}'`);
+        // 只在这个事务里试，不留下
+        throw new Error('rollback');
+      })
+      .catch((e: Error) => {
+        if (e.message !== 'rollback') throw e;
+      });
+    for (const t of ['linen_doc', 'customer_note', 'customer_target']) expect(await def(ctx.sql)).toContain(`'${t}'`);
+  });
+});
+
 describe('合并前 Codex 审查 b850838', () => {
   let other: number;
   let sheet: number;
@@ -156,8 +181,8 @@ describe('合并前 Codex 审查 b850838', () => {
     expect(await counts('床单')).toEqual([40, 10, 30]);
   });
 
-  it('值班经理（默认有布草权限、没有「查看库存」）：取得到洗涤厂名单，开得了送洗单', async () => {
-    await createStaff(ctx.sql, { username: 'ln-manager', displayName: '值班经理小周', role: 'store_manager', password: PASSWORD, mustChangePassword: false });
+  it('店总（默认有布草权限、没有「查看库存」）：取得到洗涤厂名单，开得了送洗单', async () => {
+    await createStaff(ctx.sql, { username: 'ln-manager', displayName: '店总小周', role: 'store_manager', password: PASSWORD, mustChangePassword: false });
     const manager = await login(ctx.app, 'ln-manager');
     expect((await api(ctx.app, manager, 'GET', '/api/inventory/suppliers')).status).toBe(403);
     const o = await overview(manager);

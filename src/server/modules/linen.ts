@@ -103,7 +103,7 @@ export async function linenOverview(db: Db, actor: Actor): Promise<LinenOverview
     GROUP BY d.supplier_id, s.name, l.item_id, i.name
     HAVING sum(CASE WHEN d.kind = 'send' THEN l.qty ELSE -(l.qty + l.damaged_qty + l.lost_qty) END) <> 0
     ORDER BY s.name, l.item_id`;
-  // 洗涤厂的可选名单（在用的供应商）：有布草权限就能取，不要求另有「查看库存」（值班经理默认没有，合并前 Codex 审查 b850838）
+  // 洗涤厂的可选名单（在用的供应商）：有布草权限就能取，不要求另有「查看库存」（店总默认没有，合并前 Codex 审查 b850838）
   const suppliers = await db<{ id: number; name: string }[]>`SELECT id, name FROM suppliers WHERE active ORDER BY name, id`;
   return {
     items: await listItems(db),

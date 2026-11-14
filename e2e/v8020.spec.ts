@@ -201,12 +201,12 @@ test.describe('8.0.20 进销存做深与客房', () => {
     await expect(row.locator('td').nth(1)).toHaveText('56');
   });
 
-  test('值班经理（有「看成本」、没有「查看库存」）：进库存只有「成本」一个页签（合并前 Codex 审查 35d8b16）', async ({ page }) => {
-    // 演示库里没有店长账号：现建一个（第一次登录先改密码），用它的会话看页面
+  test('店总（有「看成本」、没有「查看库存」）：进库存只有「成本」一个页签（合并前 Codex 审查 35d8b16）', async ({ page }) => {
+    // 演示库里没有店总账号：现建一个（第一次登录先改密码），用它的会话看页面
     await login(page);
     const username = `mgr${stamp}`;
     const first = `Mgr-${stamp}x`;
-    const made = await page.request.post('/api/staff', { data: { username, displayName: `店长${stamp}`, role: 'store_manager', duties: [], password: first } });
+    const made = await page.request.post('/api/staff', { data: { username, displayName: `店总${stamp}`, role: 'store_manager', duties: [], password: first } });
     expect(made.status(), await made.text()).toBe(201);
     expect((await page.request.post('/api/auth/login', { data: { username, password: first } })).ok()).toBe(true);
     expect((await page.request.post('/api/auth/change-password', { data: { currentPassword: first, newPassword: `${first}9` } })).ok()).toBe(true);

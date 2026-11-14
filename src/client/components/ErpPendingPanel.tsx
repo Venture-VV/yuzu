@@ -22,6 +22,13 @@ export interface ErpOpRef {
 function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
   const d = data as Record<string, { id: number } | number | undefined>;
   switch (type) {
+    case 'customer_note':
+    case 'customer_binding_request':
+    case 'customer_binding_review':
+    case 'customer_credit_claim':
+    case 'customer_credit_review':
+    case 'customer_target':
+      return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'expense_claim':
       return d.claim && typeof d.claim === 'object' ? { refId: d.claim.id } : null;
     case 'petty_advance':

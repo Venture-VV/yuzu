@@ -159,7 +159,7 @@ describe('随单据走', () => {
     expect((await usageOf()) - before).toBe(0);
   });
 
-  it('盘点里记成「耗用」的盘亏算进耗用成本，别的盘点差异不算；值班经理（有「看成本」、没有「查看库存」）看得到报表（合并前 Codex 审查 35d8b16）', async () => {
+  it('盘点里记成「耗用」的盘亏算进耗用成本，别的盘点差异不算；店总（有「看成本」、没有「查看库存」）看得到报表（合并前 Codex 审查 35d8b16）', async () => {
     const m = await material('C006', { refPriceCents: 5000 });
     const other = await material('C007', { refPriceCents: 5000 });
     for (const x of [m, other]) await ok(doc(ctx.owner, { docType: 'opening', approveNow: true, lines: [{ materialId: x.id, qtyMilli: q(10) }] }));
@@ -181,8 +181,8 @@ describe('随单据走', () => {
     expect(counted.status).toBe('confirmed');
     // 只算记成耗用的那 2 个 × ¥5
     expect((await row()) - before).toBe(1000);
-    // 值班经理：没有「查看库存」，有「看成本」——接口给看，ERP「库存」模块对他可见（页面只有「成本」一个页签）
-    await createStaff(ctx.sql, { username: 'cost-manager', displayName: '值班经理小郑', role: 'store_manager', password: PASSWORD, mustChangePassword: false });
+    // 店总：没有「查看库存」，有「看成本」——接口给看，ERP「库存」模块对他可见（页面只有「成本」一个页签）
+    await createStaff(ctx.sql, { username: 'cost-manager', displayName: '店总小郑', role: 'store_manager', password: PASSWORD, mustChangePassword: false });
     const manager = await login(ctx.app, 'cost-manager');
     expect((await api(ctx.app, manager, 'GET', '/api/inventory/materials')).status).toBe(403);
     expect((await api(ctx.app, manager, 'GET', '/api/inventory/cost')).status).toBe(200);

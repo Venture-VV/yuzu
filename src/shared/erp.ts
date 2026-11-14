@@ -38,7 +38,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     path: '/inventory',
     pages: ['/inventory'],
     apis: ['/api/inventory'],
-    // 有「看成本」没有「查看库存」的（值班经理默认如此）只看得到「成本」一个页签
+    // 有「看成本」没有「查看库存」的（店总默认如此）只看得到「成本」一个页签
     perms: ['inventory.read', 'inventory.cost'],
     defaultEnabled: true,
     requires: [],
@@ -377,9 +377,21 @@ export const ERP_OP_TYPES = [
   'patrol_point',
   // 8.0.20 布草洗涤：送洗、收回、新增、报废单
   'linen_doc',
+  'customer_note',
+  'customer_binding_request',
+  'customer_binding_review',
+  'customer_credit_claim',
+  'customer_credit_review',
+  'customer_target',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
+  customer_note: '客户部服务记录',
+  customer_binding_request: '客户维护绑定申请',
+  customer_binding_review: '客户维护绑定审核',
+  customer_credit_claim: '充值归属认领',
+  customer_credit_review: '充值归属核验',
+  customer_target: '客户部月目标',
   expense_claim: '费用报销',
   petty_advance: '备用金打款',
   petty_settlement: '备用金退回 / 补付',

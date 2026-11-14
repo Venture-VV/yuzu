@@ -114,6 +114,12 @@ export const FENCED_OPS = [
   'patrol_point',
   // 8.0.20 布草洗涤（迁移 140）：布草单据；编号记在单据上（linen_docs.client_key）
   'linen_doc',
+  'customer_note',
+  'customer_binding_request',
+  'customer_binding_review',
+  'customer_credit_claim',
+  'customer_credit_review',
+  'customer_target',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

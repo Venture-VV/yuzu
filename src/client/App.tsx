@@ -27,6 +27,7 @@ const BookingsPage = lazyPage(() => import('./features/bookings/BookingsPage').t
 const ParkingLogPage = lazyPage(() => import('./features/membership/ParkingLogCard').then((m) => m.ParkingLogPage));
 const CouponIssuePage = lazyPage(() => import('./features/coupons/CouponIssuePage').then((m) => m.CouponIssuePage));
 const ConciergePage = lazyPage(() => import('./features/concierge/ConciergePage').then((m) => m.ConciergePage));
+const CustomerPage = lazyPage(() => import('./features/customer/CustomerPage').then((m) => m.CustomerPage));
 const PlatformPage = lazyPage(() => import('./features/platform/PlatformPage').then((m) => m.PlatformPage));
 const GuidePage = lazyPage(() => import('./features/guide/GuidePage').then((m) => m.GuidePage));
 const GuideScreenPage = lazyPage(() => import('./features/guide/GuidePage').then((m) => m.GuideScreenPage));
@@ -332,6 +333,7 @@ const router = createBrowserRouter([
       // 管家部（8.0.12）：门店的工作页面；/admin/concierge 是 Codex 最初放的地址，留着跳过来
       // 8.0.18：哪一页写进地址（/concierge/members、/concierge/praise……），见 Workspace.tsx 的 VIEW_SLUG
       { path: 'concierge/:view?', element: <ConciergePage /> },
+      { path: 'customer', element: <CustomerPage /> },
       { path: 'platform', element: <PlatformPage /> },
       { path: 'guide', element: <GuidePage /> },
       { path: 'devices', element: <DevicesPage /> },
