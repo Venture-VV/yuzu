@@ -25,7 +25,7 @@ import { consumeOverLimitGrant } from '../auth/grants';
 import { writeAudit } from '../lib/audit';
 import { assertNotFenced, fenceKey, isFenced } from '../lib/fences';
 import type { Deps, OpContext } from '../lib/context';
-import { AppError, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
+import { AppError, badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents, cents } from '../lib/validate';
 import { addRechargeLot, expireDueLots, expireMemberBonus, restoreToLots, takeFromLots } from './bonus';
 import { issueRechargeCoupons } from './coupons';
@@ -40,6 +40,7 @@ import { applyBalance, assertNotMerged, lockMember, nextDocNo, type LockedMember
 import { hashRequest } from '../lib/idempotency';
 import { ctxOf } from '../lib/context';
 import { setTxTimeouts } from '../lib/tx';
+import { lockPayTxForUse, markPayTxUsed } from './pay-terminal';
 
 type OpType = 'recharge' | 'consume' | 'reversal';
 const OP_TYPES = ['recharge', 'consume', 'reversal'] as const satisfies readonly OpType[];
@@ -62,6 +63,8 @@ export const RechargeInput = z.object({
   paymentRef: z.string().trim().max(64, '收款备注最多 64 字').default(''),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
   paymentConfirmed: z.literal(true, '请先核实收款到账，再确认入账'),
+  /** 扫码收款（8.0.21 支付直连）：到账的那笔交易；入账时核对方式与金额，参考号记支付方单号。不带时不进入请求摘要 */
+  payTxId: z.number().int().positive().optional(),
   overLimitGrantId,
   /** 页面确认时看到的赠金有效期（天，null 为长期有效）；与当前规则不一致时拒绝。不带时不核对 */
   bonusValidDays: z.number().int().positive().nullable().optional(),
@@ -574,15 +577,21 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
         ? await approveOverLimit(tx, input.overLimitGrantId, ctx, { kind: 'recharge', memberId: member.id, amount: input.paidAmount, limit: settings.maxRechargeCents, key })
         : null;
 
+      // 扫码收款（8.0.21）：在会员之后锁交易一行，核对到账、没被用过、方式与金额一致；参考号记支付方单号
+      if (input.payTxId && input.paymentMethod !== 'wechat' && input.paymentMethod !== 'alipay') throw badRequest('只有微信、支付宝能用扫码收款');
+      const paymentRef = input.payTxId ? await lockPayTxForUse(tx, input.payTxId, { provider: input.paymentMethod, amountCents: input.paidAmount }) : input.paymentRef;
       const docNo = await nextDocNo(tx, 'recharge', businessDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO recharges (doc_no, member_id, plan_id, plan_name, paid_amount, bonus_amount, payment_method,
-                               payment_ref, note, business_date, operator_id, created_at, over_limit_approved_by, bonus_expires_at, shift_id)
+                               payment_ref, note, business_date, operator_id, created_at, over_limit_approved_by, bonus_expires_at, shift_id
+                               ${input.payTxId ? tx`, pay_tx_id` : tx``})
         VALUES (${docNo}, ${member.id}, ${input.planId}, ${planName}, ${input.paidAmount}, ${input.bonusAmount},
-                ${input.paymentMethod}, ${input.paymentRef}, ${input.note}, ${businessDate}, ${ctx.actor.id}, ${at},
-                ${overLimit?.approverId ?? null}, ${bonusExpiresAt}, ${shiftId})
+                ${input.paymentMethod}, ${paymentRef}, ${input.note}, ${businessDate}, ${ctx.actor.id}, ${at},
+                ${overLimit?.approverId ?? null}, ${bonusExpiresAt}, ${shiftId}
+                ${input.payTxId ? tx`, ${input.payTxId}` : tx``})
         RETURNING id`;
       const id = row!.id;
+      if (input.payTxId) await markPayTxUsed(tx, input.payTxId, 'recharge', Number(id), ctx.actor.id);
       await applyBalance(tx, member, { principal: input.paidAmount, bonus: input.bonusAmount }, {
         entryType: 'recharge', docNo, rechargeId: id, businessDate, operatorId: ctx.actor.id, at,
       });

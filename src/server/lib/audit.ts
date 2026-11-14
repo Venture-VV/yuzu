@@ -254,7 +254,9 @@ export type AuditAction =
   | 'contract_template'
   // 8.0.21 供应商门户（同上第 7 节）：发链接、作废，供应商在链接里报价、确认、发货预告
   | 'supplier_link'
-  | 'supplier_reply';
+  | 'supplier_reply'
+  // 8.0.21 扫码收款（docs/INTEGRATIONS_V8021.md 第 2 节）：开始收款、原路退回、重试、线下已退
+  | 'pay_terminal';
 
 export interface AuditEntry {
   staffId: number | null;

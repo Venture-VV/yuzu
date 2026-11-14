@@ -198,6 +198,8 @@ export interface RefundOptions {
   checkoutStatus: 'completed' | 'voided';
   createdAt: string;
   totalAmount: number;
+  /** 扫码收款（8.0.21）：这张结账单每种方式扫码收的、还能原路退的 */
+  terminal: { method: RefundMethod; refundable: number }[];
   items: {
     category: string;
     name: string;

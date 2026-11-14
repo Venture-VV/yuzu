@@ -20,6 +20,7 @@ import { runWecomWeekly } from './modules/wecom';
 import { runCanteenReminders } from './modules/canteen/push';
 import { MEAL_LABELS } from '@shared/canteen';
 import { WECOM_MAX_ATTEMPTS } from '@shared/wecom';
+import { sweepPaying } from './modules/pay-terminal';
 
 export interface JobLog {
   info: (msg: string) => void;
@@ -149,5 +150,12 @@ export async function runMinuteJobs(
     else if (r) log.error(`企业微信每周一推没发出去（隔 5 分钟再试，最多 ${WECOM_MAX_ATTEMPTS} 次）：${r.error}`);
   } catch (error) {
     log.error('企业微信每周一推失败，下一分钟重试', error);
+  }
+  // 扫码收款（8.0.21）：还在支付中的去支付方查，超过 5 分钟没结果的撤单（没配置扫码收款时什么都不做）
+  try {
+    const n = await sweepPaying({ sql, config }, now);
+    if (n > 0) log.info(`扫码收款：${n} 笔支付中的出了结果`);
+  } catch (error) {
+    log.error('扫码收款的查询失败，下一分钟重试', error);
   }
 }

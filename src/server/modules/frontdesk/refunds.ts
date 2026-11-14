@@ -33,6 +33,7 @@ import { parse, positiveCents } from '../../lib/validate';
 import { loadSettings } from '../settings';
 import { lockPaymentShift, lockRefundShift, openShiftOf, shiftDrawerLabel } from '../shifts';
 import { businessDate, hashRequest, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './common';
+import { processRefunds, queueCheckoutRefund } from '../pay-terminal';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -47,6 +48,8 @@ const RefundPaymentInput = z.object({
   amount: positiveCents('退款金额'),
   /** 扫码、银行卡：商户后台的退款单号；其他：写明怎么退的 */
   ref: z.string().trim().max(64, '退款单号最多 64 字').default(''),
+  /** 原路退回（8.0.21 支付直连）：微信、支付宝里扫码收的那部分，由系统去支付方退，不用登记退款单号。不带时不进入请求摘要 */
+  viaTerminal: z.boolean().optional(),
 });
 export const RefundInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
@@ -128,6 +131,10 @@ export async function refundOptions(db: Db, checkoutId: number, actor: Actor, at
   if (!c) throw notFound('结账单不存在');
   const items = (await itemBalances(db, c.id)).map((i) => ({ ...i, ...remainingOf(i) }));
   const { methods, nonRefundable } = await methodBalances(db, c.id);
+  // 扫码收的（8.0.21）：每种方式还能原路退多少
+  const terminal = await db<{ method: RefundMethod; amount: number }[]>`
+    SELECT provider AS method, sum(amount_cents - refund_cents)::bigint AS amount FROM pay_transactions
+    WHERE consumed_kind = 'checkout' AND consumed_id = ${c.id} GROUP BY provider`;
   const refundable = Math.min(
     items.reduce((s, i) => s + Math.max(0, i.remainingAmount), 0),
     methods.reduce((s, m) => s + Math.max(0, m.remaining), 0),
@@ -147,6 +154,7 @@ export async function refundOptions(db: Db, checkoutId: number, actor: Actor, at
     checkoutStatus: c.status,
     createdAt: new Date(c.createdAt).toISOString(),
     totalAmount: c.totalAmount,
+    terminal: terminal.map((t) => ({ method: t.method, refundable: Number(t.amount) })).filter((t) => t.refundable > 0),
     items,
     methods,
     nonRefundable,
@@ -170,7 +178,8 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
       payments: paysTotal,
     });
   }
-  const missingRef = input.payments.find((p) => refundNeedsRef(p.method) && p.ref.length < 2);
+  if (input.payments.some((p) => p.viaTerminal && p.method !== 'wechat' && p.method !== 'alipay')) throw badRequest('只有微信、支付宝能原路退回');
+  const missingRef = input.payments.find((p) => refundNeedsRef(p.method) && !p.viaTerminal && p.ref.length < 2);
   if (missingRef) {
     throw badRequest(
       missingRef.method === 'other'
@@ -259,7 +268,10 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
         VALUES (${r!.id}, ${c.id}, ${i.category}, ${i.name}, ${i.quantity}, ${i.amount})`;
     }
     for (const p of input.payments) {
-      await tx`INSERT INTO refund_payments (refund_id, method, amount, ref) VALUES (${r!.id}, ${p.method}, ${p.amount}, ${p.ref})`;
+      if (p.viaTerminal) await tx`INSERT INTO refund_payments (refund_id, method, amount, ref, via_terminal) VALUES (${r!.id}, ${p.method}, ${p.amount}, '原路退回', true)`;
+      else await tx`INSERT INTO refund_payments (refund_id, method, amount, ref) VALUES (${r!.id}, ${p.method}, ${p.amount}, ${p.ref})`;
+      // 原路退回（8.0.21）：在结账单之后按交易 id 升序锁这张结账单用这种方式扫码收的交易，写待退；提交以后去支付方退
+      if (p.viaTerminal) await queueCheckoutRefund(tx, { checkoutId: c.id, provider: p.method, amountCents: p.amount, reason: `退款单 ${refundNo}：${input.reason}`.slice(0, 200), refundId: r!.id, staffId: ctx.actor.id });
     }
     // 从别人的钱箱退现金：审计写明记到了谁的哪个班次
     const drawer = shiftId ? await shiftDrawerLabel(tx, shiftId, ctx.actor.id) : null;
@@ -283,6 +295,9 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
     });
     return r!.id;
   });
+  // 原路退回的去支付方退（事务外）；重提、上一次提交后没来得及退的也在这里补上
+  const pending = await deps.sql<{ id: number }[]>`SELECT id FROM pay_refunds WHERE refund_id = ${run.refId} AND status = 'pending' ORDER BY id`;
+  if (pending.length) await processRefunds(deps, pending.map((x) => Number(x.id)));
   return getRefund(deps.sql, run.refId);
 }
 
@@ -312,6 +327,9 @@ export async function voidRefund(deps: Deps, refundId: number, raw: unknown, ctx
       SELECT r.id, r.refund_no, r.status, to_char(r.business_date, 'YYYY-MM-DD') AS business_date, r.amount, c.checkout_no
       FROM refunds r JOIN checkouts c ON c.id = r.checkout_id WHERE r.id = ${refundId} FOR UPDATE OF r`;
     if (r!.status !== 'completed') throw conflict('ALREADY_VOIDED', `退款单 ${r!.refundNo} 已作废`);
+    // 原路退回过的（8.0.21）：钱已经（或正在）退给客人，作废不了
+    const [via] = await tx<{ n: number }[]>`SELECT count(*)::int AS n FROM pay_refunds WHERE refund_id = ${r!.id}`;
+    if (via!.n > 0) throw conflict('REFUND_VIA_TERMINAL', `退款单 ${r!.refundNo} 有原路退回给客人的部分，不能作废；请店主处理`);
     const today = await businessDate(tx, deps, at);
     if (r!.businessDate !== today) {
       throw conflict('REFUND_VOID_DAY_PASSED', `退款单 ${r!.refundNo} 是 ${r!.businessDate} 的，过了营业日不能作废；请店主处理`, {

@@ -120,6 +120,8 @@ export const FENCED_OPS = [
   'bank_import',
   // 8.0.21 批量付款（迁移 145）：编号记在批次上（payment_batches.client_key）
   'payment_batch',
+  // 8.0.21 扫码收款（迁移 148）：编号记在交易上（pay_transactions.client_key）
+  'pay_terminal',
   'customer_note',
   'customer_binding_request',
   'customer_binding_review',
@@ -179,6 +181,7 @@ export async function fenceKey(
   if (isContractOp(opType) && (await contractOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isPaymentFlowOp(opType) && (await paymentFlowOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isErpP2Op(opType) && (await erpP2OpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (opType === 'pay_terminal' && (await tx`SELECT 1 FROM pay_transactions WHERE client_key = ${key}`).length) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;

@@ -51,6 +51,8 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
   const [picked, setPicked] = useState<Record<string, { quantity: string; amount: string }>>({});
   const [pays, setPays] = useState<Partial<Record<RefundMethod, { amount: string; ref: string }>>>({});
   const [paysTouched, setPaysTouched] = useState(false);
+  /** 原路退回（8.0.21 扫码收款）：这张结账单这种方式有扫码收的，默认勾上；勾上的不用登记退款单号，由系统去支付方退 */
+  const [noVia, setNoVia] = useState<Partial<Record<RefundMethod, boolean>>>({});
   const [reason, setReason] = useState('');
   const refundReasons = useReasons('refundReasons');
   const [drawer, setDrawer] = useState<number | null>(null);
@@ -78,6 +80,8 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
   }, [o?.drawers]);
 
   const payCents = (m: RefundMethod) => parseYuan(pays[m]?.amount ?? '') ?? 0;
+  const terminalOf = (m: RefundMethod) => o?.terminal?.find((t) => t.method === m) ?? null;
+  const viaOf = (m: RefundMethod) => !!terminalOf(m) && !noVia[m];
   const paysTotal = methods.reduce((s, m) => s + payCents(m.method), 0);
   const cash = payCents('cash');
   const problems: string[] = [];
@@ -97,7 +101,9 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
   for (const m of methods) {
     const c = payCents(m.method);
     if (c > m.remaining) problems.push(`${PAYMENT_METHOD_LABELS[m.method]}最多还能退 ${formatYuan(m.remaining)}`);
-    if (c > 0 && refundNeedsRef(m.method) && (pays[m.method]?.ref.trim().length ?? 0) < 2) {
+    const t = terminalOf(m.method);
+    if (viaOf(m.method) && t && c > t.refundable) problems.push(`${PAYMENT_METHOD_LABELS[m.method]}扫码收的最多原路退 ${formatYuan(t.refundable)}；多出的请不勾「原路退回」，登记退款单号`);
+    if (c > 0 && refundNeedsRef(m.method) && !viaOf(m.method) && (pays[m.method]?.ref.trim().length ?? 0) < 2) {
       problems.push(m.method === 'other' ? '「其他」退款请写明是怎么退的' : `${PAYMENT_METHOD_LABELS[m.method]}退款请登记商户后台的退款单号`);
     }
   }
@@ -119,7 +125,9 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
     if (!ready || !o) return;
     const body = {
       items: items.filter((i) => picked[keyOf(i)]).map((i) => ({ category: i.category, name: i.name, quantity: Number(picked[keyOf(i)]!.quantity), amount: parseYuan(picked[keyOf(i)]!.amount)! })),
-      payments: methods.filter((m) => payCents(m.method) > 0).map((m) => ({ method: m.method, amount: payCents(m.method), ref: pays[m.method]?.ref.trim() ?? '' })),
+      payments: methods
+        .filter((m) => payCents(m.method) > 0)
+        .map((m) => (viaOf(m.method) ? { method: m.method, amount: payCents(m.method), viaTerminal: true } : { method: m.method, amount: payCents(m.method), ref: pays[m.method]?.ref.trim() ?? '' })),
       reason: reason.trim(),
       ...(cash > 0 && drawer !== null ? { refundShiftId: drawer } : {}),
     };
@@ -254,7 +262,19 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
                   />
                 </div>
                 <span className="text-[12px] text-ink-3">还能退 {formatYuan(m.remaining)}</span>
-                {refundNeedsRef(m.method) && (
+                {terminalOf(m.method) && (
+                  <label className="flex items-center gap-1 text-[12.5px]" data-testid={`refund-via-${m.method}`}>
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-[var(--color-pine)]"
+                      checked={viaOf(m.method)}
+                      disabled={op.locked}
+                      onChange={(e) => setNoVia((cur) => ({ ...cur, [m.method]: !e.target.checked }))}
+                    />
+                    原路退回（扫码收的，系统去支付方退）
+                  </label>
+                )}
+                {refundNeedsRef(m.method) && !viaOf(m.method) && (
                   <Input
                     fullWidth={false}
                     value={pays[m.method]?.ref ?? ''}

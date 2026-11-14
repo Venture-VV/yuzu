@@ -26,6 +26,8 @@ import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { Money } from '../../components/Money';
 import { Badge, Button, Input, MoneyInput, Select } from '../../components/ui';
+import type { PayTxView } from '@shared/integrations';
+import { ScanPayButton } from '../pay/ScanPay';
 
 // 结账收款（手牌结账与餐饮桌台结账共用）：可组合多种方式，收款合计等于应收才能结清。
 // R1.2（店主 2026-10-29 签认）：「优惠 / 免单」由值班经理及以上当场授权（这几张手牌或这几桌、这个金额），
@@ -71,6 +73,8 @@ export interface PayRow {
   /** 挂账（8.0.7 A3）：协议单位与签单人 */
   accountId: number | null;
   signer: string;
+  /** 扫码收款（8.0.21）：到账的那笔交易；有了以后金额、参考号锁定 */
+  payTx: PayTxView | null;
 }
 
 let paySeq = 1;
@@ -90,6 +94,7 @@ export const newRow = (method: CheckoutMethod, amount: number): PayRow => ({
   couponInput: '',
   accountId: null,
   signer: '',
+  payTx: null,
 });
 
 export const QUICK_METHODS: CheckoutMethod[] = ['wechat', 'alipay', 'cash', 'bank_card', 'other', 'wallet', 'coupon', 'store_coupon', 'discount', 'on_account'];
@@ -110,7 +115,7 @@ export type PaymentBody =
   | { method: 'member_discount'; memberId: number; benefitId: number; amount: number }
   | { method: 'count_card'; cardId: number; uses: number; amount: number }
   | { method: 'on_account'; accountId: number; signer: string; amount: number }
-  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card' | 'on_account'>; amount: number; ref: string };
+  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card' | 'on_account'>; amount: number; ref: string; payTxId?: number };
 
 /**
  * 收款登记的状态与核对：每笔的金额、储值扣款构成（余额不足、会员不在本次结账里）、团购券码、「其他」备注、
@@ -246,7 +251,9 @@ export function usePayRows(opts: {
       if (r.method === 'discount') return { method: 'discount' as const, amount, grantId: r.grant!.grantId };
       if (r.method === 'store_coupon') return { method: 'store_coupon' as const, code: r.coupon!.code, amount };
       if (r.method === 'on_account') return { method: 'on_account' as const, accountId: r.accountId!, signer: r.signer.trim(), amount };
-      return { method: r.method as Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card' | 'on_account'>, amount, ref: r.ref.trim() };
+      const method = r.method as Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card' | 'on_account'>;
+      if (r.payTx) return { method, amount, ref: r.payTx.providerTradeNo ?? '', payTxId: r.payTx.id };
+      return { method, amount, ref: r.ref.trim() };
     }),
   ];
 
@@ -468,15 +475,35 @@ export function PayRowEditor({
           <MoneyInput
             value={row.amount}
             onChange={(e) => onChange({ amount: e.target.value })}
-            // 券抵扣的金额由服务端按此刻的明细算好，不能改
-            disabled={locked || row.method === 'store_coupon'}
+            // 券抵扣的金额由服务端按此刻的明细算好，不能改；扫码到账的金额也不能改
+            disabled={locked || row.method === 'store_coupon' || !!row.payTx}
             aria-label={`${CHECKOUT_METHOD_LABELS[row.method]}金额`}
             className="h-10"
           />
         </div>
+        {(row.method === 'wechat' || row.method === 'alipay') &&
+          (row.payTx ? (
+            <span className="flex items-center gap-1" data-testid="scan-pay-attached">
+              <Badge tone="pine">已扫码到账</Badge>
+              {!locked && (
+                <Button size="sm" variant="ghost" onClick={() => onChange({ payTx: null, ref: '' })}>
+                  不用这一笔
+                </Button>
+              )}
+            </span>
+          ) : (
+            <ScanPayButton
+              provider={row.method}
+              amountCents={cents}
+              purpose="checkout"
+              disabled={locked}
+              onPaid={(tx) => onChange({ payTx: tx, amount: centsToInput(tx.amountCents), ref: tx.providerTradeNo ?? '' })}
+            />
+          ))}
         {(PAYMENT_METHODS as readonly string[]).includes(row.method) && (
           <Input
             fullWidth={false}
+            readOnly={!!row.payTx}
             value={row.ref}
             onChange={(e) => onChange({ ref: e.target.value })}
             placeholder={row.method === 'cash' ? '备注（选填）' : row.method === 'other' ? '写明收的是什么（必填）' : '单号后几位（选填）'}
