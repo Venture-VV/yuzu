@@ -1,3 +1,4 @@
+import { MemberWechatCard } from './MemberWechatCard';
 import { ArrowLeft, Bath, CirclePlus, PencilLine, StickyNote } from 'lucide-react';
 import { formatPhone } from '@shared/labels';
 import { lastUsableDate } from '@shared/business-date';
@@ -225,6 +226,9 @@ export function MemberDetail({
 
       {/* 会员实体卡（v0.7.28）：发卡、挂失、补卡；换会员时整块重来 */}
       <MemberCardsCard key={`member-cards-${member.id}`} member={member} />
+
+      {/* 微信小程序的绑定（8.0.19）：看绑没绑，有权限的在这里解绑；换会员时整块重来 */}
+      <MemberWechatCard key={`wechat-${member.id}`} member={member} />
 
       {/* 账户内券（v0.7.20）：换会员时整块重来（筛选、发券的操作编号都不带到下一位会员） */}
       {can('member.read') && <MemberCouponsCard key={member.id} member={member} />}
