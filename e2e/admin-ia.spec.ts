@@ -85,7 +85,8 @@ test.describe('8.0.17 后台的信息架构', () => {
     await tabs('/admin/catalog', ['消费项目', '门票', '充值套餐', '导入价目表']);
     await tabs('/admin/devices', ['设备登记表', '打印任务与设备事件', '按采购清单导入']);
     await tabs('/admin/opening', ['会员余额期初', '旧系统逐笔流水']);
-    await tabs('/admin/coupons', ['发券规则', '券模板', '批量发券', '无记名券', '统计', '使用率']);
+    // 8.0.19：批量发券、无记名券挪到门店「会员工作台 → 发券」（e2e/store-entries.spec.ts）
+    await tabs('/admin/coupons', ['发券规则', '券模板', '统计', '使用率']);
     await tabs('/admin/spaces', ['空间', '楼层与区域', '底图', '对客导览', '实时位置', '导入']);
     await tabs('/admin/emenu', ['设置', /^分类与版面（\d+）$/, /^菜品图文（\d+）$/]);
   });
