@@ -10,6 +10,7 @@ import { ENTRY_TYPE_LABELS, type EntryType } from '@shared/labels';
 import { RECORD_SECTION_LABELS, SECTION_TYPES, spendRatio, type MemberRecords, type RecordSection } from '@shared/member-records';
 import type { MemberDetail } from '@shared/types';
 import { api } from '../../lib/api';
+import { useCan } from '../../lib/session';
 import { cn, downloadUrl } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
@@ -130,6 +131,8 @@ function Section({
   onReverse?: (consumptionId: number) => void;
 }) {
   const t = data?.totals;
+  // 8.0.21：充值行上的「开票」（有「确认充值入账」的岗位）
+  const canInvoice = useCan()('recharge.create');
   const [showAll, setShowAll] = useState(false);
   const [querying, setQuerying] = useState(false);
   const rows = data ? (showAll ? data.rows : data.rows.slice(0, PREVIEW_ROWS)) : [];
@@ -185,7 +188,7 @@ function Section({
           ) : (
             <div className="mt-1 divide-y divide-line/70">
               {rows.map((row) => (
-                <ActivityRow key={row.id} row={row} onReverse={onReverse} />
+                <ActivityRow key={row.id} row={row} onReverse={onReverse} invoice={canInvoice} />
               ))}
               {rows.length < data.rows.length && (
                 <div className="px-3 py-2">

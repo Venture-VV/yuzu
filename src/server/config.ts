@@ -1,6 +1,7 @@
 // 运行配置全部来自环境变量；本地开发可放在 .env（不进入 Git）。
 
 import { SETTABLE_INSTANCES, type InstanceKind } from '@shared/instance';
+import { loadIntegrationsConfig, type IntegrationsConfig } from './integrations/config';
 
 export type AppEnv = 'development' | 'trial' | 'production' | 'test';
 
@@ -30,6 +31,8 @@ export interface AppConfig {
   sms: SmsConfig;
   /** 企业微信群机器人（8.0.7 ERP 每周一推，docs/ERP_V807.md 第 4 节）：没配时不推 */
   wecom: WecomConfig;
+  /** 对外接口的模式（8.0.21，docs/INTEGRATIONS_V8021.md）：模拟只在开发、测试；正式的看密钥在不在 */
+  integrations: IntegrationsConfig;
 }
 
 /**
@@ -183,6 +186,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const ownerPass = process.env.INIT_OWNER_PASSWORD;
   const mainPort = Number(process.env.PORT ?? 8080);
   const mp = overrides.mp ?? loadMpConfig(process.env, mainPort);
+  const instance = overrides.instance ?? resolveInstance(env, process.env.YUZU_INSTANCE);
   return {
     env,
     host: process.env.HOST ?? '0.0.0.0',
@@ -196,7 +200,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉
     version: (process.env.APP_VERSION || '8.0.20').replace(/^v/, ''),
     commit: /^[0-9a-f]{7,40}$/.test(process.env.APP_COMMIT ?? '') ? process.env.APP_COMMIT! : '',
-    instance: resolveInstance(env, process.env.YUZU_INSTANCE),
+    instance,
     initOwner:
       ownerUser && ownerPass
         ? { username: ownerUser, password: ownerPass, displayName: process.env.INIT_OWNER_NAME?.trim() || '店主' }
@@ -205,6 +209,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     canteen: overrides.canteen ?? loadCanteenConfig(process.env, mainPort, mp.port),
     sms: overrides.sms ?? loadSmsConfig(process.env, env),
     wecom: overrides.wecom ?? loadWecomConfig(process.env, env),
+    integrations: overrides.integrations ?? loadIntegrationsConfig(process.env, env, instance),
     ...overrides,
   };
 }

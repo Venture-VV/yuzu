@@ -63,6 +63,7 @@ const LinenPage = lazyPage(() => import('./features/linen/LinenPage').then((m) =
 const AssetLabelsPrintPage = lazyPage(() => import('./features/assets/AssetLabelsPrintPage').then((m) => m.AssetLabelsPrintPage));
 const ReceivablesPage = lazyPage(() => import('./features/receivables/ReceivablesPage').then((m) => m.ReceivablesPage));
 const InvoicesPage = lazyPage(() => import('./features/invoices/InvoicesPage').then((m) => m.InvoicesPage));
+const SalesInvoicesPage = lazyPage(() => import('./features/sales-invoices/SalesInvoicesPage').then((m) => m.SalesInvoicesPage));
 const RequestsPage = lazyPage(() => import('./features/requests/RequestsPage').then((m) => m.RequestsPage));
 const RequestFormPage = lazyPage(() => import('./features/requests/RequestFormPage').then((m) => m.RequestFormPage));
 const RequestSheetImportPage = lazyPage(() => import('./features/requests/RequestSheetImportPage').then((m) => m.RequestSheetImportPage));
@@ -251,6 +252,7 @@ const router = createBrowserRouter([
       // 费用预算与进项发票台账（8.0.3）
       { path: 'expenses/budgets', element: <BudgetsPage /> },
       { path: 'invoices', element: <InvoicesPage /> },
+      { path: 'sales-invoices', element: <SalesInvoicesPage /> },
       { path: 'receivables', element: <ReceivablesPage /> },
       { path: 'assets', element: <AssetsPage /> },
       // 布草洗涤（8.0.20）

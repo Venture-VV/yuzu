@@ -43,6 +43,7 @@ import { allocateCountCards, type CheckoutCountCardOption, type CountCardAllocat
 import { pendingFor, PendingPanel, useFrontdeskOp, useFrontdeskPending } from './pending';
 import { RefundPanel, RefundsList } from './RefundPanel';
 import { stayText, useCheckout, useCheckoutDaySummary, useCheckoutPreview, useCheckouts, useRefreshFrontdesk, useTicketTypes } from './queries';
+import { InvoiceRequestButton } from '../sales-invoices/InvoiceRequest';
 
 // 结账（S3）：勾选要一起结的手牌 → 核对门票与明细 → 登记收款（可组合）→ 确认结清。
 // 应收合计、储值扣款构成以服务端为准：门票刚好跳档、余额或扣款规则变化时服务端拒绝，页面刷新后重新核对。
@@ -896,6 +897,8 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
               打印结账单
             </PrintButton>
             <NetPrintButton doc={{ type: 'checkout', id: d.id }} testId="checkout-renetprint" />
+            {/* 8.0.21 开票申请：按实收开（储值、券、优惠、挂账不在这里开） */}
+            <InvoiceRequestButton sourceType="checkout" sourceId={d.id} size="md" />
           </div>
           <RefundsList refunds={d.refunds ?? []} onChanged={() => void detail.refetch()} />
           {d.status === 'completed' && can('frontdesk.refund') && !voiding && !showRefund && (

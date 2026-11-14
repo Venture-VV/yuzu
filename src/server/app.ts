@@ -58,6 +58,7 @@ import { registerOrderRoutes } from './modules/orders';
 import { registerMemberRoutes } from './modules/members';
 import { registerMemberTagRoutes } from './modules/member-tags';
 import { registerCustomFieldRoutes } from './modules/custom-fields';
+import { registerSalesInvoiceRoutes } from './modules/sales-invoices';
 import { registerMemberRecordRoutes } from './modules/member-records';
 import { registerCouponRoutes } from './modules/coupons';
 import { registerCampaignRoutes } from './modules/coupon-campaigns';
@@ -285,6 +286,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   // 费用预算与进项发票台账（8.0.3）
   registerBudgetRoutes(app, deps);
   registerInvoiceRoutes(app, deps);
+  // 开票申请（8.0.21）
+  registerSalesInvoiceRoutes(app, deps);
   registerRequestRoutes(app, deps);
   registerRequestImportRoutes(app, deps);
   registerRequestDraftRoutes(app, deps);

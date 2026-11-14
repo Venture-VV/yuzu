@@ -5,7 +5,7 @@ import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { usePageEnter, useSlidingIndicator } from '../../lib/motion';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileSignature, FileText, HandCoins, Landmark, LayoutGrid, LineChart, Monitor, Package, ReceiptText, ShieldCheck, Shirt, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileOutput, FileSignature, FileText, HandCoins, Landmark, LayoutGrid, LineChart, Monitor, Package, ReceiptText, ShieldCheck, Shirt, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
 import type { ContractExpiryItem } from '@shared/contracts';
 import type { PaymentTodo } from '@shared/payments';
@@ -37,6 +37,7 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   payments: Banknote,
   expenses: ReceiptText,
   invoices: FileText,
+  salesInvoices: FileOutput,
   receivables: Landmark,
   revenue: LineChart,
   canteen: Soup,

@@ -63,6 +63,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 布草单据（8.0.20）：返回那张单
     case 'linen_doc':
       return d.doc && typeof d.doc === 'object' ? { refId: d.doc.id } : null;
+    // 开票申请（8.0.21）：返回那张申请
+    case 'invoice_request':
+      return d.request && typeof d.request === 'object' ? { refId: d.request.id } : null;
     case 'supplier_recon':
     case 'supplier_recon_void':
       return d.reconciliation && typeof d.reconciliation === 'object' ? { refId: d.reconciliation.id } : null;

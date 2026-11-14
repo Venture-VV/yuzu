@@ -114,6 +114,8 @@ export const FENCED_OPS = [
   'patrol_point',
   // 8.0.20 布草洗涤（迁移 140）：布草单据；编号记在单据上（linen_docs.client_key）
   'linen_doc',
+  // 8.0.21 开票申请（迁移 143）：编号记在申请上（invoice_requests.client_key）
+  'invoice_request',
   'customer_note',
   'customer_binding_request',
   'customer_binding_review',
@@ -327,7 +329,7 @@ export async function memberCardOpRef(db: Db, key: string): Promise<number | nul
   return row ? Number(row.id) : null;
 }
 
-const ERP_P2_OPS = ['ar_collection', 'asset_card', 'asset_stocktake', 'patrol_point', 'linen_doc'] as const;
+const ERP_P2_OPS = ['ar_collection', 'asset_card', 'asset_stocktake', 'patrol_point', 'linen_doc', 'invoice_request'] as const;
 type ErpP2Op = (typeof ERP_P2_OPS)[number];
 export const isErpP2Op = (op: string): op is ErpP2Op => (ERP_P2_OPS as readonly string[]).includes(op);
 
@@ -342,6 +344,8 @@ export async function erpP2OpRef(db: Db, key: string, op: ErpP2Op): Promise<numb
           ? await db<{ id: number }[]>`SELECT id FROM patrol_points WHERE client_key = ${key}`
         : op === 'linen_doc'
           ? await db<{ id: number }[]>`SELECT id FROM linen_docs WHERE client_key = ${key}`
+        : op === 'invoice_request'
+          ? await db<{ id: number }[]>`SELECT id FROM invoice_requests WHERE client_key = ${key}`
         : await db<{ id: number }[]>`SELECT id FROM asset_cards WHERE client_key = ${key} ORDER BY id LIMIT 1`;
   return row ? Number(row.id) : null;
 }

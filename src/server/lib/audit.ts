@@ -241,7 +241,9 @@ export type AuditAction =
   | 'linen_doc_void'
   // 8.0.21 自定义字段（docs/FINANCE_V8021.md 第 1 节）
   | 'custom_field_def'
-  | 'custom_field_value';
+  | 'custom_field_value'
+  // 8.0.21 开票申请（docs/FINANCE_V8021.md 第 3 节）：申请、登记已开、交给服务商开、驳回、作废
+  | 'invoice_request';
 
 export interface AuditEntry {
   staffId: number | null;
