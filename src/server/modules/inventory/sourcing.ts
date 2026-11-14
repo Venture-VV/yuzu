@@ -70,7 +70,7 @@ export async function getSourcing(db: Db, eventId: number): Promise<SourcingEven
   }
   const quotesRaw = await db<(Omit<SourcingQuote, 'supplier' | 'prices' | 'rank' | 'landedCents'> & { supplierId: number; supplierName: string })[]>`
     SELECT q.id, q.supplier_id, s.name AS supplier_name, q.status, q.goods_cents, q.freight_cents, q.pay_terms, q.credit_days, q.delivery_days,
-           q.valid_until, q.note, cb.display_name AS created_by_name, q.created_at, q.withdraw_reason, wb.display_name AS withdrawn_by_name
+           q.valid_until, q.note, q.via_link_id IS NOT NULL AS via_link, cb.display_name AS created_by_name, q.created_at, q.withdraw_reason, wb.display_name AS withdrawn_by_name
     FROM sourcing_quotes q JOIN suppliers s ON s.id = q.supplier_id JOIN staff cb ON cb.id = q.created_by LEFT JOIN staff wb ON wb.id = q.withdrawn_by
     WHERE q.event_id = ${eventId} ORDER BY q.id`;
   const prices = quotesRaw.length
@@ -286,11 +286,41 @@ const QuoteInput = z.object({
   prices: z.array(z.object({ lineId: id, priceCents: z.number('请填写单价').int().min(0, '单价不能为负').max(100_000_000) })).min(1).max(30),
 });
 
-async function lockEvent(tx: Tx, eventId: number) {
+export async function lockEvent(tx: Tx, eventId: number) {
   const [e] = await tx<{ id: number; docNo: string; status: SourcingStatus; awardedQuoteId: number | null }[]>`
     SELECT id, doc_no, status, awarded_quote_id FROM sourcing_events WHERE id = ${eventId} FOR UPDATE`;
   if (!e) throw notFound('询价单不存在');
   return e;
+}
+
+export type QuoteFields = Omit<z.infer<typeof QuoteInput>, 'clientKey'> & { clientKey: string };
+
+/**
+ * 登记一份报价（调用方已经锁住询价单一行、核对过询价中）：供应商没停用、这家没有有效报价、每行都报了价。
+ * 员工登记（addQuote）与供应商在链接里报价（supplier-portal.ts，viaLinkId）共用。
+ */
+export async function insertQuoteLocked(tx: Tx, eventId: number, input: QuoteFields, requestHash: string, actorId: number, viaLinkId: number | null) {
+  const [s] = await tx<{ active: boolean; name: string }[]>`SELECT active, name FROM suppliers WHERE id = ${input.supplierId}`;
+  if (!s?.active) throw unprocessable('SUPPLIER_INACTIVE', '供应商不存在或已停用');
+  const [dup] = await tx<{ id: number }[]>`SELECT id FROM sourcing_quotes WHERE event_id = ${eventId} AND supplier_id = ${input.supplierId} AND status = 'active'`;
+  if (dup) throw conflict('QUOTE_EXISTS', `「${s.name}」已经有一份有效报价；要改请先撤下原来的`);
+  const lines = await tx<{ id: number; baseQtyMilli: number; factorMilli: number }[]>`
+    SELECT id, base_qty_milli, factor_milli FROM sourcing_lines WHERE event_id = ${eventId} ORDER BY line_no`;
+  const given = new Map(input.prices.map((p) => [p.lineId, p.priceCents]));
+  if (given.size !== input.prices.length) throw badRequest('同一行只能报一个价');
+  if (lines.length !== given.size || lines.some((l) => !given.has(Number(l.id)))) throw unprocessable('QUOTE_LINES', '每份报价要报全部物料的单价');
+  const amounts = lines.map((l) => ({ lineId: Number(l.id), priceCents: given.get(Number(l.id))!, amountCents: lineAmountCents(Number(l.baseQtyMilli), given.get(Number(l.id))!, Number(l.factorMilli)) }));
+  const goods = amounts.reduce((t, a) => t + a.amountCents, 0);
+  const [q] = await tx<{ id: number }[]>`
+    INSERT INTO sourcing_quotes (event_id, supplier_id, goods_cents, freight_cents, pay_terms, credit_days, delivery_days, valid_until, note,
+                                 client_key, request_hash, created_by, via_link_id)
+    VALUES (${eventId}, ${input.supplierId}, ${goods}, ${input.freightCents}, ${input.payTerms}, ${input.creditDays}, ${input.deliveryDays},
+            ${input.validUntil}, ${input.note}, ${input.clientKey}, ${requestHash}, ${actorId}, ${viaLinkId})
+    RETURNING id`;
+  for (const a of amounts) {
+    await tx`INSERT INTO sourcing_quote_lines (quote_id, sourcing_line_id, price_cents, amount_cents) VALUES (${q!.id}, ${a.lineId}, ${a.priceCents}, ${a.amountCents})`;
+  }
+  return { id: Number(q!.id), goodsCents: goods };
 }
 
 export async function addQuote(deps: Deps, eventId: number, raw: unknown, actor: Actor, ip?: string) {
@@ -305,28 +335,9 @@ export async function addQuote(deps: Deps, eventId: number, raw: unknown, actor:
       if (await findByKey(tx, 'sourcing_quotes', input.clientKey, requestHash)) return;
       const e = await lockEvent(tx, eventId);
       if (e.status !== 'open') throw conflict('INVALID_STATE', e.status === 'awarded' ? '询价单已定标，要改报价请先撤销定标' : '询价单已撤销');
-      const [s] = await tx<{ active: boolean; name: string }[]>`SELECT active, name FROM suppliers WHERE id = ${input.supplierId}`;
-      if (!s?.active) throw unprocessable('SUPPLIER_INACTIVE', '供应商不存在或已停用');
-      const [dup] = await tx<{ id: number }[]>`SELECT id FROM sourcing_quotes WHERE event_id = ${eventId} AND supplier_id = ${input.supplierId} AND status = 'active'`;
-      if (dup) throw conflict('QUOTE_EXISTS', `「${s.name}」已经有一份有效报价；要改请先撤下原来的`);
-      const lines = await tx<{ id: number; baseQtyMilli: number; factorMilli: number }[]>`
-        SELECT id, base_qty_milli, factor_milli FROM sourcing_lines WHERE event_id = ${eventId} ORDER BY line_no`;
-      const given = new Map(input.prices.map((p) => [p.lineId, p.priceCents]));
-      if (given.size !== input.prices.length) throw badRequest('同一行只能报一个价');
-      if (lines.length !== given.size || lines.some((l) => !given.has(Number(l.id)))) throw unprocessable('QUOTE_LINES', '每份报价要报全部物料的单价');
-      const amounts = lines.map((l) => ({ lineId: Number(l.id), priceCents: given.get(Number(l.id))!, amountCents: lineAmountCents(Number(l.baseQtyMilli), given.get(Number(l.id))!, Number(l.factorMilli)) }));
-      const goods = amounts.reduce((t, a) => t + a.amountCents, 0);
-      const [q] = await tx<{ id: number }[]>`
-        INSERT INTO sourcing_quotes (event_id, supplier_id, goods_cents, freight_cents, pay_terms, credit_days, delivery_days, valid_until, note,
-                                     client_key, request_hash, created_by)
-        VALUES (${eventId}, ${input.supplierId}, ${goods}, ${input.freightCents}, ${input.payTerms}, ${input.creditDays}, ${input.deliveryDays},
-                ${input.validUntil}, ${input.note}, ${input.clientKey}, ${requestHash}, ${actor.id})
-        RETURNING id`;
-      for (const a of amounts) {
-        await tx`INSERT INTO sourcing_quote_lines (quote_id, sourcing_line_id, price_cents, amount_cents) VALUES (${q!.id}, ${a.lineId}, ${a.priceCents}, ${a.amountCents})`;
-      }
+      const q = await insertQuoteLocked(tx, eventId, input, requestHash, actor.id, null);
       await tx`UPDATE sourcing_events SET updated_at = now() WHERE id = ${eventId}`;
-      await writeAudit(tx, { staffId: actor.id, action: 'sourcing_doc', targetType: 'sourcing_quote', targetId: q!.id, detail: { docNo: e.docNo, supplierId: input.supplierId, goodsCents: goods, freightCents: input.freightCents }, ip });
+      await writeAudit(tx, { staffId: actor.id, action: 'sourcing_doc', targetType: 'sourcing_quote', targetId: q.id, detail: { docNo: e.docNo, supplierId: input.supplierId, goodsCents: q.goodsCents, freightCents: input.freightCents }, ip });
     });
   } catch (error) {
     if (isUniqueViolation(error, 'sourcing_quotes_client_key_key')) {

@@ -50,6 +50,7 @@ const ShiftPrintPage = lazyPage(() => import('./features/print/ShiftPrintPage').
 // ERP 工作区
 // 供应商在线对账确认（8.0.7 2.6）：供应商打开链接，不用登录
 const ReconPublicPage = lazyPage(() => import('./features/payables/ReconPublicPage').then((m) => m.ReconPublicPage));
+const SupplierPublicPage = lazyPage(() => import('./features/purchasing/SupplierPublicPage').then((m) => m.SupplierPublicPage));
 const ErpShell = lazyPage(() => import('./features/erp/ErpShell').then((m) => m.ErpShell));
 const ErpHome = lazyPage(() => import('./features/erp/ErpHome').then((m) => m.ErpHome));
 const ErpSettingsPage = lazyPage(() => import('./features/erp/ErpSettingsPage').then((m) => m.ErpSettingsPage));
@@ -216,6 +217,8 @@ function DashboardMoved() {
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/r/:token', element: <ReconPublicPage /> },
+  // 8.0.21 供应商门户：报价、订单确认、发货预告（不用登录）
+  { path: '/s/:token', element: <SupplierPublicPage /> },
   {
     path: '/print',
     element: <AuthGate shell="bare" />,

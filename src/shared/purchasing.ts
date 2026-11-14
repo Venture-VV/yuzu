@@ -717,6 +717,8 @@ export interface SourcingQuote {
   prices: { lineId: number; priceCents: number; amountCents: number; changePercent: number | null }[];
   /** 有效报价里按综合到价的名次（1 = 最低）；撤下的为空 */
   rank: number | null;
+  /** 供应商在报价链接里自己报的（8.0.21 供应商门户）；员工登记的为 false */
+  viaLink: boolean;
   createdByName: string;
   createdAt: string;
   withdrawReason: string | null;

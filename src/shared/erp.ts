@@ -53,7 +53,8 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     // 补货建议、询价比价、价格曲线（v0.7.29 ERP 采购五项）也跟采购模块走
     // 供应商比价看板（8.0.1 采购组整改 07）也跟采购模块走
     // 采购流程图（8.0.17）也跟采购模块走；只有需求单权限的部门同事从需求单里看（需求单依赖采购）
-    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images', '/api/purchase-suggestions', '/api/purchase-sourcing', '/api/purchase-price-history', '/api/purchase-compare', '/api/purchase-flow'],
+    // 供应商门户的链接（8.0.21）也跟采购模块走；供应商打开的公开接口在 /api/public/supplier，采购关着时 404
+    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images', '/api/purchase-suggestions', '/api/purchase-sourcing', '/api/purchase-price-history', '/api/purchase-compare', '/api/purchase-flow', '/api/purchase-supplier-links'],
     // 物资经办要看采购单、按单收货（采购单的读接口按「查看库存与物资单据」开放）
     perms: ['inventory.read', 'purchase.manage', 'inventory.approve', 'payable.read'],
     defaultEnabled: true,

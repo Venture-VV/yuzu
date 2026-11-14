@@ -139,7 +139,9 @@ function poFact(c: Ctx, id: number) {
     p = (async () => {
       const { db } = c;
       const [po] = await db<Record<string, unknown>[]>`
-        SELECT po.id, po.doc_no, po.status, s.name AS supplier_name, po.total_cents, po.order_date, po.expected_date, po.created_at,
+        SELECT po.id, po.doc_no, po.status, s.name AS supplier_name, po.total_cents, po.order_date,
+               -- 供应商在订单确认链接里承诺的到货日（8.0.21 供应商门户）优先
+               coalesce((SELECT c.promised_date FROM po_supplier_confirmations c WHERE c.purchase_order_id = po.id), po.expected_date) AS expected_date, po.created_at,
                cb.display_name AS created_by_name, po.approved_at, ab.display_name AS approved_by_name, po.returned_reason, po.close_reason, po.sourcing_event_id,
                (SELECT count(*)::int FROM purchase_order_lines pl WHERE pl.po_id = po.id) AS line_count,
                coalesce((SELECT string_agg(m.name, '、' ORDER BY pl.line_no) FROM purchase_order_lines pl JOIN materials m ON m.id = pl.material_id

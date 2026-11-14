@@ -34,6 +34,7 @@ import type { PoLine } from '@shared/purchasing';
 import { usePo, usePos } from '../purchasing/queries';
 import { useDeptDoc, useDeptMeta, useDeptStock, useInvalidateDept } from '../dept-stock/queries';
 import { useCoAcceptors, useDepartments, useInvDoc, useInvDocs, useInvSettings, useInvalidateInventory, useMaterials, useSuppliers, useUsual } from './queries';
+import { DeliveryNoticesHint } from '../purchasing/SupplierLinks';
 
 // ───────────────────────── 表单状态 ─────────────────────────
 
@@ -1116,6 +1117,8 @@ function DocForm({
               {po.data.lines.some((l) => l.weighed) && <> 称重的物料按实际称重填，可以比订购数量多出 {data.weighTolerancePct}%，货款按实收重量算。</>}
             </Notice>
           )}
+          {/* 8.0.21 供应商门户：供应商的承诺到货日与发货预告 */}
+          {type === 'receipt' && po.data && form.purchaseOrderId === po.data.id && <DeliveryNoticesHint po={po.data} />}
 
           {/* ── 明细 ── */}
           <section className="@container rounded-lg border border-line bg-card shadow-card">

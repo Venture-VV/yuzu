@@ -26,6 +26,7 @@ import { MaterialPicker } from '../inventory/inputs';
 import { useMaterials, useSuppliers } from '../inventory/queries';
 import { PriceHistoryButton } from './PriceHistory';
 import { PurchaseFlowPanel } from './PurchaseFlow';
+import { SourcingSupplierLinks } from './SupplierLinks';
 import { useInvalidateAll, usePurchaseRules, useSourcing, useSourcingList } from './queries';
 
 const STATUS_TONE: Record<SourcingStatus, 'yuzu' | 'pine' | 'neutral'> = { open: 'yuzu', awarded: 'pine', cancelled: 'neutral' };
@@ -539,6 +540,9 @@ function Detail({ ev }: { ev: SourcingEvent }) {
         </div>
       )}
 
+      {/* 8.0.21 供应商门户：发报价链接给供应商，报的价直接进上面的报价 */}
+      <SourcingSupplierLinks eventId={ev.id} open={ev.status === 'open'} />
+
       <QuoteDialog ev={ev} open={quoting} onClose={() => setQuoting(false)} />
       <AwardDialog ev={ev} quotes={active} open={awarding} onClose={() => setAwarding(false)} />
       <ReasonDialog
@@ -587,6 +591,7 @@ function Compare({ ev, quotes }: { ev: SourcingEvent; quotes: SourcingQuote[] })
             {quotes.map((q) => (
               <th key={q.id} className={cn('px-3 py-2 text-right font-semibold', q.id === ev.awardedQuoteId && 'bg-pine-tint')}>
                 <span className="block text-[13px] font-bold text-ink">{q.supplier.name}</span>
+                {q.viaLink && <span className="block text-[11.5px] font-semibold text-lake">供应商链接</span>}
                 <span className="font-normal">第 {q.rank} 名</span>
               </th>
             ))}

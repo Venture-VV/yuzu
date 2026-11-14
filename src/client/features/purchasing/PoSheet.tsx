@@ -20,6 +20,7 @@ import { Badge, Button, IconButton, Notice, Spinner, InfoItem as Info } from '..
 import { Qty, SimRule } from '../inventory/parts';
 import { CompareChip, PoStatusChip, ReceivingChip } from './parts';
 import { PurchaseFlowPanel } from './PurchaseFlow';
+import { PoSupplierCard } from './SupplierLinks';
 import { useInvalidateAll, usePo } from './queries';
 import { ThreeWayBadge } from '../payments/parts';
 import { usePoThreeWay } from '../payments/queries';
@@ -132,6 +133,9 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             已入库并计入货款；本单确认后只建立关联，不再入库或形成应付。
           </Notice>
         )}
+
+        {/* 8.0.21 供应商门户：订单确认（承诺到货日）与发货预告 */}
+        {(po.status === 'approved' || po.status === 'closed') && <PoSupplierCard po={po} />}
 
         {/* 下单、收货、付款分别展示 */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
