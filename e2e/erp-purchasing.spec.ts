@@ -266,3 +266,53 @@ test.describe('询价接上需求单与补货建议（v0.7.30）', () => {
     await expect(page.getByTestId(`suggest-line-${mat.id}`)).toHaveCount(0);
   });
 });
+
+// 补货方式（店主 2026-11-14，迁移 161，docs/ERP_PURCHASING.md 第 5.1 节）：手机这类不是消耗品的不提补货
+test.describe('补货方式（迁移 161）', () => {
+  test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会改物料档案的流程只在门店电脑尺寸执行一次');
+
+  const materialOf = async (page: Page, id: number) =>
+    (await (await page.request.get(`/api/inventory/materials/${id}`)).json()) as { replenishMode: string; isLow: boolean };
+
+  test('建议行点「不用备货」→ 进「没提补货的」并写着原因；改回自动识别又回来；物料档案里能直接定', async ({ page }) => {
+    const { tag } = await setup(page);
+    const sup = await newSupplier(page, tag);
+    // 结存 0、提醒数量 25 包：设了提醒数量的算常备，会提
+    const mat = await newMaterial(page, tag, { defaultSupplierId: sup.id, lowStockMilli: 25_000 });
+    expect(await materialOf(page, mat.id)).toMatchObject({ replenishMode: 'auto', isLow: true });
+
+    await page.goto('/purchasing/suggestions');
+    const group = page.getByTestId(`suggest-group-${sup.id}`);
+    await expect(group.getByTestId(`suggest-line-${mat.id}`)).toBeVisible();
+    await group.getByTestId(`suggest-off-${mat.id}`).click();
+    // 不再建议，列到「没提补货的」里，原因写清楚；低库存提醒也不标了
+    await expect(page.getByTestId(`suggest-line-${mat.id}`)).toHaveCount(0);
+    const skipped = page.getByTestId('suggest-skipped');
+    await skipped.getByTestId('suggest-skipped-toggle').click();
+    await expect(skipped.getByTestId(`suggest-skip-${mat.id}`)).toContainText('定了按需采购');
+    expect(await materialOf(page, mat.id)).toMatchObject({ replenishMode: 'on_demand', isLow: false });
+
+    // 改回自动识别：又提了
+    await skipped.getByTestId(`suggest-skip-auto-${mat.id}`).click();
+    await expect(page.getByTestId(`suggest-line-${mat.id}`)).toBeVisible();
+    expect(await materialOf(page, mat.id)).toMatchObject({ replenishMode: 'auto', isLow: true });
+
+    // 物料档案里直接定：选「按需采购」，两个提醒不能填
+    await page.goto('/inventory/master');
+    await page.getByLabel('搜索物料档案').fill(mat.code);
+    await page.getByRole('cell', { name: mat.code, exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: new RegExp(`编辑物料 · ${mat.name}`) });
+    const modes = dialog.getByRole('radiogroup', { name: '补货方式' });
+    await expect(modes.getByRole('radio', { name: '自动识别' })).toBeChecked();
+    await modes.getByRole('radio', { name: '按需采购' }).click();
+    await expect(dialog.locator('#m-low')).toBeDisabled();
+    await expect(dialog.locator('#m-cover')).toBeDisabled();
+    await dialog.getByRole('button', { name: '保存' }).click();
+    await expect(dialog).toBeHidden();
+    expect(await materialOf(page, mat.id)).toMatchObject({ replenishMode: 'on_demand', isLow: false });
+    await expect(page.getByRole('row', { name: new RegExp(mat.code) })).toContainText('按需采购');
+    await page.goto('/purchasing/suggestions');
+    await expect(page.getByTestId('suggestions-page')).toBeVisible();
+    await expect(page.getByTestId(`suggest-line-${mat.id}`)).toHaveCount(0);
+  });
+});

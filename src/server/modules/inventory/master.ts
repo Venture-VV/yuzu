@@ -2,7 +2,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Department, Material, Supplier } from '@shared/inventory';
+import { REPLENISH_MODES, type Department, type Material, type Supplier } from '@shared/inventory';
 import { fitsDecimals, formatQty } from '@shared/quantity';
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
@@ -18,9 +18,9 @@ import { lockSettings } from '../../lib/rule-settings';
 const MATERIAL_COLUMNS = (db: Db) => db`
   m.id, m.code, m.name, m.category, m.specification, m.inventory_unit, m.decimals, m.purchase_unit,
   m.purchase_factor_milli, m.ref_price_cents, m.default_supplier_id, s.name AS default_supplier_name,
-  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.expiry_tracked, m.shelf_life_days, m.tracked, m.active, m.stock_milli,
+  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.expiry_tracked, m.shelf_life_days, m.replenish_mode, m.tracked, m.active, m.stock_milli,
   (SELECT coalesce(sum(ws.stock_milli), 0) FROM warehouse_stock ws WHERE ws.material_id = m.id) AS dept_stock_milli,
-  (m.low_stock_milli IS NOT NULL AND m.tracked AND m.stock_milli < m.low_stock_milli) AS is_low,
+  (m.low_stock_milli IS NOT NULL AND m.tracked AND m.replenish_mode <> 'on_demand' AND m.stock_milli < m.low_stock_milli) AS is_low,
   (m.last_move_id IS NOT NULL) AS has_moves,
   (m.last_move_id IS NOT NULL OR EXISTS (SELECT 1 FROM stock_moves sm WHERE sm.material_id = m.id)) AS any_moves,
   (SELECT created_at FROM stock_moves WHERE id = m.last_move_id) AS last_move_at,
@@ -99,6 +99,8 @@ export const MaterialInput = z
     /** 效期管理（8.0.7 3.3）：收货要填到期日；保质期天数（填了的按生产日期自动算到期日） */
     expiryTracked: z.boolean().default(false),
     shelfLifeDays: z.number('保质期要填天数').int('保质期要填整天数').min(1, '保质期至少 1 天').max(3650, '保质期最多 3650 天').nullable().default(null),
+    /** 补货方式（迁移 161）：新建不填按自动识别，修改不填保持原样（旧页面、导入、别处的调用） */
+    replenishMode: z.enum(REPLENISH_MODES, '补货方式只能选：自动识别、常备、按需采购').optional(),
     tracked: z.boolean().default(true),
     active: z.boolean().default(true),
     note: text(200, '备注').default(''),
@@ -116,6 +118,8 @@ export const MaterialInput = z
     path: ['decimals'],
   });
 export type MaterialInputData = z.input<typeof MaterialInput>;
+
+const ReplenishModeInput = z.object({ mode: z.enum(REPLENISH_MODES, '补货方式只能选：自动识别、常备、按需采购') });
 
 export const SupplierInput = z.object({
   code: required(16, '供应商编码'),
@@ -175,10 +179,10 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
       const [row] = await db<{ id: number }[]>`
         INSERT INTO materials (code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli,
                                ref_price_cents, default_supplier_id, low_stock_milli, cover_days, counter_use, weighed, expiry_tracked, shelf_life_days,
-                               tracked, active, note, is_synthetic)
+                               replenish_mode, tracked, active, note, is_synthetic)
         VALUES (${m.code}, ${m.name}, ${m.category}, ${m.specification}, ${m.inventoryUnit}, ${m.decimals}, ${m.purchaseUnit},
                 ${m.purchaseFactorMilli}, ${m.refPriceCents}, ${m.defaultSupplierId}, ${m.lowStockMilli}, ${m.coverDays}, ${m.counterUse}, ${m.weighed},
-                ${m.expiryTracked}, ${m.shelfLifeDays}, ${m.tracked}, ${m.active}, ${m.note}, ${extra.isSynthetic ?? false})
+                ${m.expiryTracked}, ${m.shelfLifeDays}, ${m.replenishMode ?? 'auto'}, ${m.tracked}, ${m.active}, ${m.note}, ${extra.isSynthetic ?? false})
         RETURNING id`;
       return row!.id;
     }
@@ -215,6 +219,7 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
                purchase_factor_milli = ${m.purchaseFactorMilli}, ref_price_cents = ${m.refPriceCents},
                default_supplier_id = ${m.defaultSupplierId}, low_stock_milli = ${m.lowStockMilli}, cover_days = ${m.coverDays},
                counter_use = ${m.counterUse}, weighed = ${m.weighed}, expiry_tracked = ${m.expiryTracked}, shelf_life_days = ${m.shelfLifeDays}, tracked = ${m.tracked},
+               replenish_mode = coalesce(${m.replenishMode ?? null}, replenish_mode),
                active = ${m.active}, note = ${m.note}, updated_at = now()
         WHERE id = ${id}`;
       return id;
@@ -349,6 +354,23 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
     const { id } = parse(idParam, req.params);
     await saveMaterial(sql, id, req.body as MaterialInputData);
     await writeAudit(sql, { staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'material', targetId: id, detail: req.body as Record<string, unknown>, ip: req.ip });
+    return getMaterial(sql, id, config.timezone);
+  });
+  // 只改补货方式（迁移 161，docs/ERP_PURCHASING.md 第 5.1 节）：补货建议页上一键「定为按需采购 / 设为常备 / 改回自动识别」。
+  // 只锁这一个物料行、只改这一列；设成同一个值再设一次结果一样，不用操作编号。
+  app.put('/api/inventory/materials/:id/replenish-mode', { preHandler: guard('inventory.master') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    const { mode } = parse(ReplenishModeInput, req.body);
+    await sql.begin(async (tx) => {
+      const [before] = await tx<{ replenishMode: string }[]>`SELECT replenish_mode FROM materials WHERE id = ${id} FOR NO KEY UPDATE`;
+      if (!before) throw notFound('物料不存在');
+      if (before.replenishMode === mode) return;
+      await tx`UPDATE materials SET replenish_mode = ${mode}, updated_at = now() WHERE id = ${id}`;
+      await writeAudit(tx, {
+        staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'material', targetId: id,
+        detail: { replenishMode: mode, before: before.replenishMode }, ip: req.ip,
+      });
+    });
     return getMaterial(sql, id, config.timezone);
   });
 

@@ -1,12 +1,16 @@
 // 补货建议（v0.7.29 ERP 采购五项④，E4，docs/ERP_PURCHASING.md 第 5 节）。
 // 总仓物料按日均用量、结存与在途算出该补多少，按供应商分组；采购改数量、去掉不要的行，一键生成采购单草稿，
 // 打开草稿核对后提交；合计到询价门槛的（或想先比价的）可以「发起询价」（v0.7.30）。建好的草稿、询价单都算在途，刷新后不会重复建议。
+// 补货方式（店主 2026-11-14，迁移 161，第 5.1 节）：手机这类不是消耗品的不该提补货——每行有「不用备货」（定为按需采购）；
+// 页面下方「没提补货的」列出本来会提、识别为不用补的物料与原因（按需采购 / 建过资产卡片 / 只领过一次），一键改成常备、按需采购或改回自动识别。
 
 import { PurchasingTabs } from './PurchasingTabs';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
-import { ArrowLeft, CloudOff, FilePlus2, FileSearch, Lightbulb } from 'lucide-react';
-import type { PurchaseOrder, ReplenishGroup } from '@shared/purchasing';
+import { ArrowLeft, ChevronDown, CloudOff, FilePlus2, FileSearch, Lightbulb } from 'lucide-react';
+import { REPLENISH_MODE_LABELS, type Material, type ReplenishMode } from '@shared/inventory';
+import { describeDate } from '@shared/labels';
+import type { PurchaseOrder, ReplenishGroup, ReplenishSkipped, ReplenishSuggestions } from '@shared/purchasing';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { fitsDecimals, formatQty, lineAmountCents, parseQty, toBaseQty } from '@shared/quantity';
 import { api, errorMessage, UncertainError } from '../../lib/api';
@@ -43,7 +47,7 @@ export function SuggestionsPage() {
         }
         subtitle={
           d
-            ? `总仓物料：按近 ${d.windowDays} 天的日均用量，结存加在途能用的天数少于 ${d.reorderDays} 天（物料设了提醒天数的按物料的）就建议，补到 ${d.targetDays} 天；没有用量的按低库存提醒数量补`
+            ? `总仓物料：按近 ${d.windowDays} 天的日均用量，结存加在途能用的天数少于 ${d.reorderDays} 天（物料设了提醒天数的按物料的）就建议，补到 ${d.targetDays} 天；没有用量的按低库存提醒数量补。按需采购的、只领过一次的不提`
             : '按日均用量、结存与在途算出该补多少'
         }
       />
@@ -54,10 +58,19 @@ export function SuggestionsPage() {
             <Skeleton className="h-64" />
           ) : data.error ? (
             <Notice tone="error" title={errorMessage(data.error)} />
-          ) : d!.count === 0 ? (
-            <EmptyState art="calm" title="现在没有要补的物料" description="结存加在途都够用；物料设了提醒天数或低库存提醒数量才会算进来。" />
           ) : (
-            d!.groups.map((g) => <GroupCard key={g.supplier?.id ?? 'none'} group={g} canCreate={can('purchase.manage')} />)
+            <>
+              {d!.count === 0 ? (
+                <EmptyState
+                  art="calm"
+                  title="现在没有要补的物料"
+                  description="常备的、经常领用的物料结存加在途都够用。手机、设备这类按需采购的东西不在这里提，部门提需求单再买。"
+                />
+              ) : (
+                d!.groups.map((g) => <GroupCard key={g.supplier?.id ?? 'none'} group={g} canCreate={can('purchase.manage')} canMode={can('inventory.master')} />)
+              )}
+              {d!.skipped.length > 0 && <SkippedCard data={d!} canMode={can('inventory.master')} />}
+            </>
           )}
         </div>
       </div>
@@ -71,7 +84,33 @@ interface Pick {
   price: string;
 }
 
-function GroupCard({ group, canCreate }: { group: ReplenishGroup; canCreate: boolean }) {
+/** 改一个物料的补货方式（只改这一项）：改完补货建议、物料档案一起刷新 */
+function useSetReplenishMode() {
+  const toast = useToast();
+  const invalidate = useInvalidateAll();
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const setMode = async (m: { materialId: number; name: string }, mode: ReplenishMode) => {
+    setBusyId(m.materialId);
+    try {
+      await api.put<Material>(`/api/inventory/materials/${m.materialId}/replenish-mode`, { mode });
+      toast({
+        tone: 'success',
+        title: `「${m.name}」已${mode === 'on_demand' ? '定为按需采购' : mode === 'stock' ? '设为常备' : '改回自动识别'}`,
+        body: mode === 'on_demand' ? '以后不提补货、不做低库存提醒；在下面「没提补货的」或物料档案里可以改回来' : REPLENISH_MODE_LABELS[mode].hint,
+      });
+    } catch (e) {
+      // 断网、超时：不知道改没改成。这一项设成同一个值再设一次结果一样，下面刷新后看到的就是实际的，没改成再点一次
+      if (e instanceof UncertainError) toast({ tone: 'error', title: '网络断了或超时，不知道补货方式改没改成', body: '页面已经刷新，按现在显示的为准；没改成的再点一次' });
+      else toast({ tone: 'error', title: '补货方式没改成', body: errorMessage(e) });
+    } finally {
+      await invalidate();
+      setBusyId(null);
+    }
+  };
+  return { busyId, setMode };
+}
+
+function GroupCard({ group, canCreate, canMode }: { group: ReplenishGroup; canCreate: boolean; canMode: boolean }) {
   const session = useSession();
   const toast = useToast();
   const navigate = useNavigate();
@@ -86,6 +125,7 @@ function GroupCard({ group, canCreate }: { group: ReplenishGroup; canCreate: boo
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mode = useSetReplenishMode();
   useEffect(() => {
     setPicks(
       Object.fromEntries(
@@ -276,6 +316,18 @@ function GroupCard({ group, canCreate }: { group: ReplenishGroup; canCreate: boo
                   : ` · 近期没有用量，低于提醒数量 ${formatQty(l.lowStockMilli ?? 0)}`}
               </span>
               {err && <span className="block font-semibold text-clay">{err}</span>}
+              {canMode && (
+                <button
+                  type="button"
+                  className="mt-0.5 text-[12px] font-semibold text-ink-3 underline decoration-line-strong underline-offset-2 hover:text-ink disabled:opacity-50"
+                  title="不是消耗品（手机、设备这类部门提需求才买的）：定为按需采购，以后不提补货"
+                  disabled={mode.busyId !== null || busy}
+                  onClick={() => void mode.setMode(l, 'on_demand')}
+                  data-testid={`suggest-off-${l.materialId}`}
+                >
+                  不用备货
+                </button>
+              )}
             </span>
             <label className="col-start-2 flex items-center gap-1.5 text-[12.5px] text-ink-3 md:col-start-auto">
               <Input
@@ -297,6 +349,85 @@ function GroupCard({ group, canCreate }: { group: ReplenishGroup; canCreate: boo
         ))}
       </ul>
       <SourcingCreateDialog open={!!sourcingDraft} onClose={() => setSourcingDraft(null)} initial={sourcingDraft ?? undefined} />
+    </Card>
+  );
+}
+
+/** 没提补货的原因，一句话 */
+function skipReason(r: ReplenishSkipped, d: ReplenishSuggestions): string {
+  if (r.why === 'on_demand') return '物料档案里定了按需采购';
+  if (r.why === 'asset') return `建过资产卡片（${r.assetNo}${r.assetCount > 1 ? ` 等 ${r.assetCount} 张` : ''}），按资产管`;
+  const last = r.lastUsedOn ? `，最近一次 ${describeDate(r.lastUsedOn).md}` : '';
+  return `近 ${d.lookbackDays} 天只有 ${r.useDays} 天有领用${last}，看作一次性采购`;
+}
+
+/** 本来会提、识别为不用补的（E12）：默认收起，展开看原因、改补货方式 */
+function SkippedCard({ data, canMode }: { data: ReplenishSuggestions; canMode: boolean }) {
+  const [open, setOpen] = useState(false);
+  const mode = useSetReplenishMode();
+  const counts = { on_demand: 0, asset: 0, sporadic: 0 };
+  for (const r of data.skipped) counts[r.why] += 1;
+  const summary = [
+    counts.sporadic ? `${data.regularUseDays === 2 ? '只领过一次的' : `领用不到 ${data.regularUseDays} 天的`} ${counts.sporadic} 种` : '',
+    counts.asset ? `建过资产卡片的 ${counts.asset} 种` : '',
+    counts.on_demand ? `按需采购的 ${counts.on_demand} 种` : '',
+  ]
+    .filter(Boolean)
+    .join('、');
+  return (
+    <Card className="overflow-hidden" data-testid="suggest-skipped">
+      <button
+        type="button"
+        className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/60"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        data-testid="suggest-skipped-toggle"
+      >
+        <h2 className="text-[14.5px] font-bold">没提补货的</h2>
+        <Badge>{data.skipped.length} 种</Badge>
+        <span className="min-w-0 flex-1 text-[12.5px] text-ink-3">{summary}。结存不多了，但不像是要一直备着的东西，点开看原因</span>
+        <ChevronDown className={cn('size-4 shrink-0 text-ink-3 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <>
+          <p className="border-t border-line px-4 py-2.5 text-[12.5px] text-ink-3">
+            自动识别：设了提醒天数或提醒数量的、近 {data.lookbackDays} 天有 {data.regularUseDays} 天以上领用的才提补货；认错了在这里改，或者到「库存 → 档案」里改物料的补货方式。
+          </p>
+          <ul className="divide-y divide-line/70 border-t border-line">
+            {data.skipped.map((r) => (
+              <li key={r.materialId} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid={`suggest-skip-${r.materialId}`}>
+                <span className="min-w-0 flex-1 basis-64 text-[12.5px]">
+                  <span className="block truncate text-[13.5px] font-semibold">
+                    <span className="num mr-1.5 text-ink-3">{r.code}</span>
+                    {r.name}
+                    {r.specification && <span className="ml-1.5 font-normal text-ink-3">{r.specification}</span>}
+                  </span>
+                  <span className="block text-ink-2">
+                    结存 {formatQty(r.stockMilli)} {r.inventoryUnit}
+                    {r.inTransitMilli > 0 && ` · 在途 ${formatQty(r.inTransitMilli)}`} · {skipReason(r, data)}
+                  </span>
+                </span>
+                {canMode && (
+                  <span className="flex flex-wrap gap-2">
+                    {r.mode === 'on_demand' ? (
+                      <Button variant="secondary" size="sm" disabled={mode.busyId !== null} loading={mode.busyId === r.materialId} onClick={() => void mode.setMode(r, 'auto')} data-testid={`suggest-skip-auto-${r.materialId}`}>
+                        改回自动识别
+                      </Button>
+                    ) : (
+                      <Button variant="secondary" size="sm" disabled={mode.busyId !== null} loading={mode.busyId === r.materialId} onClick={() => void mode.setMode(r, 'on_demand')} data-testid={`suggest-skip-off-${r.materialId}`}>
+                        定为按需采购
+                      </Button>
+                    )}
+                    <Button variant="secondary" size="sm" disabled={mode.busyId !== null} onClick={() => void mode.setMode(r, 'stock')} data-testid={`suggest-skip-stock-${r.materialId}`}>
+                      要备货，设为常备
+                    </Button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </Card>
   );
 }
