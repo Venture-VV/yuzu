@@ -14,7 +14,8 @@
 // 补货方式（店主 2026-11-14，迁移 161，第 5.1 节，E9–E12）：原来所有受管物料都当成要备货的，手机这类部门提了需求才买的东西，
 // 领走以后近 28 天都有「用量」、总仓会一直出建议。现在按物料的补货方式过滤（replenishSkipWhy）：
 //   · 按需采购的不提；常备的一直提；
-//   · 自动识别的：设了提醒天数或提醒数量的照常；建过资产卡片的不提；近 90 天有领用的天数不到「常用天数」的看作一次性采购、不提。
+//   · 自动识别的：设了提醒天数或提醒数量的照常；档案里标明是消耗品的（台面日耗品、管效期、称重）照常；
+//     建过资产卡片的不提；近 90 天有领用的天数不到「常用天数」的看作一次性采购、不提。
 // 本来会提、识别为不用补的放在 skipped 里（带原因），不进 groups、不算进 count——按 groups 建草稿的（页面、8.0.20 的自动补货）都不会带上它们。
 
 import type { FastifyInstance } from 'fastify';
@@ -59,6 +60,7 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
     coverDays: number | null;
     lowStockMilli: number | null;
     replenishMode: ReplenishMode;
+    consumable: boolean;
     assetNo: string | null;
     assetCount: number;
     refPriceCents: number | null;
@@ -67,6 +69,10 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
   }[]>`
     SELECT m.id, m.code, m.name, m.specification, m.inventory_unit, m.purchase_unit, m.purchase_factor_milli, m.decimals, m.stock_milli,
            m.cover_days, m.low_stock_milli, m.replenish_mode, m.ref_price_cents,
+           -- 档案里已经标明是消耗品的（自动识别时算常备，头一次领用就提）：台面日耗品、管效期的、称重的。
+           -- 别的「明摆着是消耗品」的信号接在这里——8.0.20 的用料与配方合进来以后，挂了在用用料的物料也算
+           --（零售品、菜品原料：第一天就卖断货的话，后面的扣料都欠着、不会再有第二天的用量）。
+           (m.counter_use OR m.expiry_tracked OR m.weighed) AS consumable,
            ac.asset_no, coalesce(ac.n, 0) AS asset_count,
            coalesce(ds.id, ls.id) AS supplier_id, coalesce(ds.name, ls.name) AS supplier_name
     FROM materials m
@@ -134,7 +140,14 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
     // 补货方式（第 5.1 节）：本来会提、识别为不用补的只列出来，不建议
     const use = useDays.get(Number(m.id));
     const why = replenishSkipWhy(
-      { replenishMode: m.replenishMode, coverDays: m.coverDays, lowStockMilli: m.lowStockMilli === null ? null : Number(m.lowStockMilli), hasAsset: m.assetCount > 0, useDays: use?.days ?? 0 },
+      {
+        replenishMode: m.replenishMode,
+        coverDays: m.coverDays,
+        lowStockMilli: m.lowStockMilli === null ? null : Number(m.lowStockMilli),
+        consumable: m.consumable,
+        hasAsset: m.assetCount > 0,
+        useDays: use?.days ?? 0,
+      },
       rules.regularUseDays,
     );
     if (why) {

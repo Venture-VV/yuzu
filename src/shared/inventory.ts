@@ -67,7 +67,7 @@ export const COUNT_REASON_LABELS: Record<CountReason | 'pending', string> = {
 export const REPLENISH_MODES = ['auto', 'stock', 'on_demand'] as const;
 export type ReplenishMode = (typeof REPLENISH_MODES)[number];
 export const REPLENISH_MODE_LABELS: Record<ReplenishMode, { title: string; hint: string }> = {
-  auto: { title: '自动识别', hint: '设了提醒的、经常领用的才提补货；只领过一次的、建过资产卡片的不提' },
+  auto: { title: '自动识别', hint: '设了提醒的、台面日耗品这类消耗品、经常领用的才提补货；只领过一次的、建过资产卡片的不提' },
   stock: { title: '常备', hint: '一直备着的耗材：按用量或提醒数量提补货' },
   on_demand: { title: '按需采购', hint: '手机、设备这类不是消耗品的：部门提需求才买，不提补货、不做低库存提醒' },
 };

@@ -608,15 +608,17 @@ export type ReplenishSkipWhy = 'on_demand' | 'asset' | 'sporadic';
 /**
  * 这个物料要不要提补货（E9、E10）：返回 null = 照常按用量 / 提醒数量算；否则是不提的原因。
  * 常备的一直提；按需采购的不提；自动识别依次看——设了提醒天数或提醒数量的算常备（人已经说了要备货），
+ * 档案里已经标明是消耗品的算常备（consumable：台面日耗品、管效期、称重；8.0.20 起挂了在用用料的也算），
  * 建过资产卡片的不提，近期有领用的天数不到「常用天数」的不提。
  */
 export function replenishSkipWhy(
-  m: { replenishMode: ReplenishMode; coverDays: number | null; lowStockMilli: number | null; hasAsset: boolean; useDays: number },
+  m: { replenishMode: ReplenishMode; coverDays: number | null; lowStockMilli: number | null; consumable: boolean; hasAsset: boolean; useDays: number },
   regularUseDays: number,
 ): ReplenishSkipWhy | null {
   if (m.replenishMode === 'on_demand') return 'on_demand';
   if (m.replenishMode === 'stock') return null;
   if (m.coverDays !== null || (m.lowStockMilli !== null && m.lowStockMilli > 0)) return null;
+  if (m.consumable) return null;
   if (m.hasAsset) return 'asset';
   return m.useDays < regularUseDays ? 'sporadic' : null;
 }

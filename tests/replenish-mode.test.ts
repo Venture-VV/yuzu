@@ -111,7 +111,7 @@ beforeAll(async () => {
 afterAll(async () => ctx.close());
 
 describe('补货方式：识别规则（纯函数）', () => {
-  const base = { replenishMode: 'auto' as const, coverDays: null, lowStockMilli: null, hasAsset: false, useDays: 1 };
+  const base = { replenishMode: 'auto' as const, coverDays: null, lowStockMilli: null, consumable: false, hasAsset: false, useDays: 1 };
   it('按需采购不提、常备一直提；自动识别依次看提醒、资产卡片、领用天数', () => {
     expect(DEFAULT_PURCHASE_RULES.regularUseDays).toBe(2);
     expect(REPLENISH_LOOKBACK_DAYS).toBe(90);
@@ -128,6 +128,10 @@ describe('补货方式：识别规则（纯函数）', () => {
     expect(replenishSkipWhy({ ...base, coverDays: 7 }, 2)).toBeNull();
     expect(replenishSkipWhy({ ...base, lowStockMilli: 5000, hasAsset: true }, 2)).toBeNull();
     expect(replenishSkipWhy({ ...base, lowStockMilli: 0 }, 2)).toBe('sporadic');
+    // 档案里标明是消耗品的（台面日耗品、管效期、称重；8.0.20 起挂了用料的）算常备：头一次领用就提，建过资产卡片也照常
+    expect(replenishSkipWhy({ ...base, consumable: true }, 2)).toBeNull();
+    expect(replenishSkipWhy({ ...base, consumable: true, hasAsset: true }, 2)).toBeNull();
+    expect(replenishSkipWhy({ ...base, consumable: true, replenishMode: 'on_demand' }, 2)).toBe('on_demand');
     // 建过资产卡片的不提，领得再勤也一样
     expect(replenishSkipWhy({ ...base, hasAsset: true, useDays: 30 }, 2)).toBe('asset');
   });
@@ -225,6 +229,35 @@ describe('补货建议按补货方式过滤', () => {
     // 物料列表（不带时区的口径）也一样
     const listed = (await api(ctx.app, keeper, 'GET', '/api/inventory/materials')).body.find((m: { id: number }) => m.id === cup.id);
     expect(listed).toMatchObject({ replenishMode: 'on_demand', isLow: false });
+  });
+
+  it('档案里标明是消耗品的算常备：台面日耗品、管效期的、称重的头一次领用就提；什么都没标的同样情形不提', async () => {
+    const mk = (code: string, name: string, extra: Record<string, unknown>) => mkMaterial({ code, name, inventoryUnit: '个', purchaseUnit: '个', refPriceCents: 100, ...extra });
+    const plain = await mk('BH-X0', '挂钩（补货方式）', {});
+    const counter = await mk('BH-X1', '一次性牙刷（补货方式）', { counterUse: true });
+    const expiry = await mk('BH-X2', '消毒液（补货方式）', { expiryTracked: true, shelfLifeDays: 365 });
+    const weighed = await mk('BH-X3', '柠檬（补货方式）', { weighed: true, decimals: 2, inventoryUnit: '斤', purchaseUnit: '斤' });
+    for (const m of [plain, counter, weighed]) await stockIn(m.id, 10);
+    // 管效期的收货要填到期日
+    const po = await ok(api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, approveNow: true, lines: [{ materialId: expiry.id, purchaseQtyMilli: q(10), priceCents: 100 }] }));
+    await ok(
+      api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+        clientKey: randomUUID(), docDate: today, docType: 'receipt', supplierId, purchaseOrderId: po.po.id,
+        lines: [{ materialId: expiry.id, poLineId: po.po.lines[0].id, deliveredMilli: q(10), acceptedMilli: q(10), expiresOn: shiftDate(today, 300) }],
+      }),
+    );
+    for (const m of [plain, counter, expiry, weighed]) await issue(m.id, 10);
+    const d = await suggest();
+    // 都只领过这一次、结存 0：标了消耗品的三样照常提，什么都没标的看作一次性采购
+    for (const m of [counter, expiry, weighed]) {
+      expect(lineOf(d, m.id), String(m.id)).toMatchObject({ reason: 'cover' });
+      expect(skipOf(d, m.id)).toBeNull();
+    }
+    expect(lineOf(d, plain.id)).toBeNull();
+    expect(skipOf(d, plain.id)).toMatchObject({ why: 'sporadic', useDays: 1 });
+    // 标了消耗品的也可以定为按需采购：档案里定的优先
+    await ok(setMode(buyer, counter.id, 'on_demand'), 200);
+    expect(skipOf(await suggest(), counter.id)).toMatchObject({ why: 'on_demand' });
   });
 
   it('建过资产卡片的不提补货（领得再勤也一样）；设为常备以后照常提', async () => {

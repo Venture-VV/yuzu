@@ -227,7 +227,7 @@ export function PurchaseRulesCard() {
         <Field
           label="领用几天以上才算常用（自动识别）"
           htmlFor="pr-regular"
-          hint={`补货方式是「自动识别」、又没设提醒的物料：近 ${REPLENISH_LOOKBACK_DAYS} 天里有领用的天数不到这个数的，看作一次性采购、不提补货（手机这类领一次就完的）。默认 2 天，填 1 = 领过一次就算。单个物料在物料档案里可以直接定成「常备」或「按需采购」`}
+          hint={`补货方式是「自动识别」、没设提醒、也不是台面日耗品这类消耗品的物料：近 ${REPLENISH_LOOKBACK_DAYS} 天里有领用的天数不到这个数的，看作一次性采购、不提补货（手机这类领一次就完的）。默认 2 天，填 1 = 领过一次就算。单个物料在物料档案里可以直接定成「常备」或「按需采购」`}
         >
           <Input id="pr-regular" inputMode="numeric" value={draft.regularUseDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, regularUseDays: e.target.value })} className="h-10" data-testid="pr-regular" />
         </Field>

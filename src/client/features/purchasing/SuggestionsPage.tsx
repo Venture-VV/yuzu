@@ -391,7 +391,7 @@ function SkippedCard({ data, canMode }: { data: ReplenishSuggestions; canMode: b
       {open && (
         <>
           <p className="border-t border-line px-4 py-2.5 text-[12.5px] text-ink-3">
-            自动识别：设了提醒天数或提醒数量的、近 {data.lookbackDays} 天有 {data.regularUseDays} 天以上领用的才提补货；认错了在这里改，或者到「库存 → 档案」里改物料的补货方式。
+            自动识别：设了提醒天数或提醒数量的、台面日耗品这类消耗品（还有管效期、称重的）、近 {data.lookbackDays} 天有 {data.regularUseDays} 天以上领用的才提补货；认错了在这里改，或者到「库存 → 档案」里改物料的补货方式。
           </p>
           <ul className="divide-y divide-line/70 border-t border-line">
             {data.skipped.map((r) => (
