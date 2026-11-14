@@ -51,9 +51,15 @@ test('停车优惠：会员页登记车牌与免费几小时，后台停车登�
   await expect(row).toContainText('今天已登记');
   await expect(row.getByTestId('benefit-use-QY-016')).toBeDisabled();
 
-  // 后台「会员权益」：停车登记
-  await page.goto('/admin/benefits');
+  // 停车登记：8.0.19 起在门店「会员工作台 → 停车登记」（默认看今天）；后台「会员权益」原处留一条指路
+  await page.goto('/');
+  await page.getByTestId('workbench-parking-log').click();
+  await expect(page).toHaveURL(/\/parking-log$/);
   const log = page.getByTestId('benefit-parking-log');
   await expect(log.getByTestId(`parking-row-${plate}`)).toContainText('2 小时');
   await expect(log.getByTestId(`parking-row-${plate}`)).toContainText(`E2E 停车 ${run}`);
+  await page.goto('/admin/benefits');
+  await expect(page.getByTestId('benefit-parking-log')).toHaveCount(0);
+  await page.getByTestId('benefit-parking-moved').getByRole('link').click();
+  await expect(page).toHaveURL(/\/parking-log$/);
 });

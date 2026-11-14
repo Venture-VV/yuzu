@@ -25,8 +25,9 @@ test.describe('8.0.18 ERP 的信息架构', () => {
     await page.goto('/erp');
     const nav = page.getByRole('navigation', { name: 'ERP 导航' });
     await expect(page.getByTestId('erp-nav-settings')).toBeVisible();
-    // 关着的模块（员工食堂、安保巡场默认关）不显示，所以「已挪到后台」这一组可能只有营业数据
-    await expect.poll(async () => (await nav.locator('p').allTextContents()).filter((t) => t !== '已挪到后台')).toEqual(['概览', '审批', '供应链', '财务', '合同', '设置']);
+    // 8.0.19：已经挪到后台的三个模块（营业数据、员工食堂、安保巡场）不在 ERP 导航里了
+    await expect.poll(async () => nav.locator('p').allTextContents()).toEqual(['概览', '审批', '供应链', '财务', '合同', '设置']);
+    for (const name of ['营业数据', '员工食堂', '安保巡场']) await expect(nav.getByRole('link', { name, exact: true })).toHaveCount(0);
     const group = (title: string) => nav.locator('div', { has: page.locator('p', { hasText: new RegExp(`^${title}$`) }) }).getByRole('link');
     // 链接里可能带着待办的数字
     await expect(group('审批')).toHaveText([/^审批中心/]);

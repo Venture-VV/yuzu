@@ -32,10 +32,13 @@ test.describe('ERP 工作区', () => {
       await page.getByTestId('user-menu').click();
       await page.getByTestId('user-menu-erp').click();
       await expect(page).toHaveURL(/\/erp$/);
-      for (const k of ['inventory', 'purchasing', 'payables', 'approvals', 'revenue']) await expect(page.getByTestId(`erp-card-${k}`)).toBeVisible();
+      for (const k of ['inventory', 'purchasing', 'payables', 'approvals']) await expect(page.getByTestId(`erp-card-${k}`)).toBeVisible();
+      // 8.0.19：营业数据的页面在后台数据看板，ERP 首页与导航不再列它（8.0.18 留过一条跳转）
+      await expect(page.getByTestId('erp-card-revenue')).toHaveCount(0);
+      await expect(erpNav(page).getByRole('link', { name: '营业数据', exact: true })).toHaveCount(0);
 
-      // 营业数据（只读）：与经营总览同一口径
-      await erpNav(page).getByRole('link', { name: '营业数据', exact: true }).click();
+      // 营业数据（只读）：与经营总览同一口径；旧地址跳到后台的看板
+      await page.goto('/erp/revenue');
       await expect(page.getByTestId('erp-revenue-net')).toBeVisible();
       await expect(page.getByTestId('erp-revenue-days')).toBeVisible();
       const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string };
