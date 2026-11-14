@@ -1,6 +1,7 @@
 // 布草洗涤（8.0.20，docs/ERP_V8020.md 第 4 节）：ERP「供应链 → 布草洗涤」。
 // 布草品类的总数 / 在洗 / 在店；开送洗、收回（破损、丢失）、新增、报废单；洗涤厂手里还有几件；按月的洗涤费对账表。
-// 开单带操作编号（这个弹窗开着的时候一直用同一个）：没收到结果再点一次保存，只记一次。
+// 开单带操作编号，提交前先把编号与原请求存在本机（存不了就不发）：没收到结果时关掉弹窗、刷新、换页以后，
+// 页面顶上的「结果待确认」里还能查回、按原内容重新提交（只记一次）或确认作废（合并前 Codex 审查 b850838）。
 
 import { useState } from 'react';
 import { Navigate } from 'react-router';
@@ -9,15 +10,16 @@ import { Download, PackagePlus, Plus, Shirt, Trash2, Truck, Undo2 } from 'lucide
 import { LINEN_DOC_LABELS, type LinenDoc, type LinenDocKind, type LinenItem, type LinenOverview, type LinenStatement } from '@shared/linen';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Dialog } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, Select, Skeleton } from '../../components/ui';
-import { useSuppliers } from '../inventory/queries';
 
 const key = ['erp', 'linen'] as const;
 const KIND_ICON: Record<LinenDocKind, typeof Truck> = { add: PackagePlus, send: Truck, return: Undo2, scrap: Trash2 };
@@ -77,6 +79,8 @@ export function LinenPage() {
       />
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1180px] space-y-4 px-5 py-5 md:px-7" data-testid="linen-page">
+          {/* 没收到结果的布草单：查回、按原内容重新提交（同一编号只记一次）或确认作废 */}
+          {manage && <ErpPendingPanel types={['linen_doc']} onFound={() => void refresh()} />}
           {data.error ? (
             <Notice tone="error" title={errorMessage(data.error)} />
           ) : !d ? (
@@ -233,7 +237,7 @@ export function LinenPage() {
           )}
         </div>
       </div>
-      {opening && d && <DocDialog kind={opening} items={d.items.filter((i) => i.active)} onClose={() => setOpening(null)} onDone={refresh} />}
+      {opening && d && <DocDialog kind={opening} items={d.items.filter((i) => i.active)} suppliers={d.suppliers} onClose={() => setOpening(null)} onDone={refresh} />}
       {editing && <ItemDialog item={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onDone={refresh} />}
       <ReasonDialog open={!!voiding} title={`作废 ${voiding?.docNo ?? ''}`} description="作废以后单据还在，数量冲回去。后面已经有送洗、收回挡着的作废不了，要先处理后面的单。" confirmLabel="作废" busy={busy} onClose={() => setVoiding(null)} onConfirm={(reason) => void doVoid(reason)} />
     </>
@@ -308,12 +312,11 @@ interface Line {
   lost: string;
 }
 
-function DocDialog({ kind, items, onClose, onDone }: { kind: LinenDocKind; items: LinenItem[]; onClose: () => void; onDone: () => Promise<unknown> }) {
+function DocDialog({ kind, items, suppliers, onClose, onDone }: { kind: LinenDocKind; items: LinenItem[]; suppliers: LinenOverview['suppliers']; onClose: () => void; onDone: () => Promise<unknown> }) {
   const toast = useToast();
   const session = useSession();
-  const suppliers = useSuppliers();
   const needsSupplier = kind === 'send' || kind === 'return';
-  // 这个弹窗开着的时候一直用同一个操作编号：没收到结果再点一次保存，服务端只记一次
+  // 这个弹窗开着的时候一直用同一个操作编号；编号与原请求提交前存在本机（sendErpOp），关掉弹窗以后在页面顶上的「结果待确认」里接着处理
   const [clientKey] = useState(uuid);
   const [supplierId, setSupplierId] = useState<number | ''>('');
   const [docDate, setDocDate] = useState(session.calendarToday);
@@ -341,14 +344,23 @@ function DocDialog({ kind, items, onClose, onDone }: { kind: LinenDocKind; items
     if (body.length === 0) return setError('请至少填一行');
     setSaving(true);
     try {
-      await api.post('/api/erp/linen/docs', { clientKey, kind, supplierId: needsSupplier ? supplierId : null, docDate, note: note.trim(), lines: body });
+      const pieces = body.reduce((a, l) => a + l.qty + l.damagedQty + l.lostQty, 0);
+      const supplierName = needsSupplier ? (suppliers.find((s) => s.id === supplierId)?.name ?? '') : '';
+      await sendErpOp({
+        key: clientKey,
+        type: 'linen_doc',
+        url: '/api/erp/linen/docs',
+        body: { clientKey, kind, supplierId: needsSupplier ? supplierId : null, docDate, note: note.trim(), lines: body },
+        summary: `${LINEN_DOC_LABELS[kind]}单${supplierName ? ` · ${supplierName}` : ''} · ${body.length} 个品类共 ${pieces} 件`,
+        staffName: session.staff.displayName,
+      });
       toast({ tone: 'success', title: `${LINEN_DOC_LABELS[kind]}单已保存` });
       await onDone();
       onClose();
     } catch (e) {
       if (e instanceof UncertainError) {
         setUncertain(true);
-        setError('没收到结果，不知道存没存上。不要改内容，再点一次「保存」——存过了不会再记一次。');
+        setError('没收到结果，不知道存没存上。不要改内容，再点一次「保存」——存过了不会再记一次。也可以先关掉：这一笔记在页面顶上的「结果待确认」里，能查回、按原内容重新提交或确认作废。');
       } else setError(errorMessage(e));
     } finally {
       setSaving(false);
@@ -359,7 +371,6 @@ function DocDialog({ kind, items, onClose, onDone }: { kind: LinenDocKind; items
     <Dialog
       open
       onClose={onClose}
-      dismissible={!uncertain}
       title={`${LINEN_DOC_LABELS[kind]}单`}
       description={
         kind === 'send'
@@ -374,7 +385,7 @@ function DocDialog({ kind, items, onClose, onDone }: { kind: LinenDocKind; items
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={saving}>
-            {uncertain ? '先不管（稍后在单据里核对）' : '取消'}
+            {uncertain ? '先关掉（在「结果待确认」里处理）' : '取消'}
           </Button>
           <Button variant="primary" onClick={() => void submit()} disabled={saving} data-testid="linen-doc-save">
             保存
@@ -388,7 +399,7 @@ function DocDialog({ kind, items, onClose, onDone }: { kind: LinenDocKind; items
             <Field label="洗涤厂" htmlFor="linen-supplier" hint="在「库存 → 档案 → 供应商」里维护">
               <Select id="linen-supplier" value={supplierId} disabled={uncertain} onChange={(e) => setSupplierId(e.target.value === '' ? '' : Number(e.target.value))} data-testid="linen-doc-supplier">
                 <option value="">请选择</option>
-                {(suppliers.data ?? []).map((s) => (
+                {suppliers.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>

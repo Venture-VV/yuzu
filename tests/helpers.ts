@@ -299,6 +299,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '137_concierge_praise.sql',
   '138_linen.sql',
   '139_room_member_prices.sql',
+  '140_linen_ops.sql',
   '161_replenish_mode.sql',
 ];
 

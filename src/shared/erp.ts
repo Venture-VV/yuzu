@@ -374,6 +374,8 @@ export const ERP_OP_TYPES = [
   'asset_stocktake',
   // 8.0.9 安保巡场：新建场所
   'patrol_point',
+  // 8.0.20 布草洗涤：送洗、收回、新增、报废单
+  'linen_doc',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -426,6 +428,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   asset_card: '资产建卡',
   asset_stocktake: '开始扫码盘点',
   patrol_point: '新建巡场场所',
+  linen_doc: '布草单据',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

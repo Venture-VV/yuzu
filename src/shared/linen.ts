@@ -52,6 +52,8 @@ export interface LinenOutstanding {
 
 export interface LinenOverview {
   items: LinenItem[];
+  /** 洗涤厂的可选名单（在用的供应商；有布草权限就能取） */
+  suppliers: { id: number; name: string }[];
   outstanding: LinenOutstanding[];
   docs: LinenDoc[];
   canManage: boolean;

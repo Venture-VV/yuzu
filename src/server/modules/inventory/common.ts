@@ -380,7 +380,8 @@ export async function applyMove(
   }
   // 成本
   const hasValue = ref.valueCents !== undefined && ref.valueCents !== null && ref.valueCents >= 0;
-  let avg = m.avgCostE4 > 0 ? m.avgCostE4 : refCostE4(m);
+  // 还没有成本（平均成本是 0 而且还是估的）才按参考价起算；按进价收过货、成本真的是 0 的（赠送、零元进货）就按 0 算
+  let avg = m.avgCostE4 > 0 || !m.costEstimated ? m.avgCostE4 : refCostE4(m);
   let unitCost = avg;
   let costCents = moveCostCents(deltaMilli, avg);
   let estimated = m.costEstimated;

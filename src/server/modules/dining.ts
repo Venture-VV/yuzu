@@ -459,16 +459,18 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/dining/orders', { preHandler: guard('dining.order', 'frontdesk.operate') }, async (req) => {
     const body = parse(z.object({ visitId: z.number('请先选客人').int().positive('请先选客人'), toRoom: z.boolean().optional() }).passthrough(), req.body);
     const { postCharges } = await import('./frontdesk/bills');
-    // 客房点餐（8.0.20）：送到客房的，出品单上写房号（客人得正住着；读入住单不加锁，挂账照旧锁来访与账单）
-    let deliverTo: string | undefined;
-    if (body.toRoom) {
-      const roomNo = await openRoomOf(sql, body.visitId);
-      if (!roomNo) throw unprocessable('ROOM_NOT_STAYING', '这位客人现在没有在住的客房，不能送到客房');
-      deliverTo = `客房 ${roomNo}`;
-    }
+    // 客房点餐（8.0.20）：送到客房的，出品单上写房号。住哪间在挂账的事务里、核对完操作编号之后才查（见 PostOptions.toRoom）
+    const visitId = body.visitId;
+    const toRoom = body.toRoom
+      ? async (tx: Tx) => {
+          const roomNo = await openRoomOf(tx, visitId);
+          if (!roomNo) throw unprocessable('ROOM_NOT_STAYING', '这位客人现在没有在住的客房，不能送到客房');
+          return `客房 ${roomNo}`;
+        }
+      : undefined;
     const { toRoom: _toRoom, ...rest } = req.body as Record<string, unknown>;
     // 点单页只能点进厨房的菜（其他项目、手动金额请到前台登记）
-    await postCharges(deps, body.visitId, { ...rest, customLines: [] } as never, ctxOf(req), { dining: { onlyKitchen: true }, ...(deliverTo ? { deliverTo } : {}) });
+    await postCharges(deps, visitId, { ...rest, customLines: [] } as never, ctxOf(req), { dining: { onlyKitchen: true }, ...(toRoom ? { toRoom } : {}) });
     return diningGuestOf(sql, body.visitId);
   });
 

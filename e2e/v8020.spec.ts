@@ -163,6 +163,42 @@ test.describe('8.0.20 进销存做深与客房', () => {
     const statement = page.getByTestId('linen-statement').locator('tr', { hasText: laundry.name });
     await expect(statement).toContainText('¥43.50');
     await expect(page.getByTestId('linen-docs')).toContainText('破损 2');
+
+    // 合并前 Codex 审查 b850838：布草单的操作编号与原请求提交前存在本机，没收到结果时关掉弹窗、刷新以后还能接着处理
+    const addOnce = async (qty: string) => {
+      await page.getByTestId('linen-new-add').click();
+      const dialog = page.getByTestId('linen-doc-dialog');
+      await dialog.getByTestId('linen-doc-item-0').selectOption({ label: name });
+      await page.getByTestId('linen-doc-qty-0').fill(qty);
+      await page.getByTestId('linen-doc-save').click();
+      await expect(dialog).toContainText('没收到结果');
+      return dialog;
+    };
+    // ① 单子存上了、回复丢了：页面自己按编号查回，已登记，数量只加一次（47 + 5）
+    await page.route('**/api/erp/linen/docs', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await route.fetch();
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: '模拟：回复丢了' } }) });
+    });
+    let dialog = await addOnce('5');
+    await expect(page.getByText('已查回：布草单据已登记').first()).toBeVisible();
+    await page.unroute('**/api/erp/linen/docs');
+    await page.getByRole('button', { name: /先关掉/ }).click();
+    await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+    await expect(row.locator('td').nth(1)).toHaveText('52');
+    // ② 请求没发出去（断网）：关掉弹窗、刷新以后「结果待确认」里还有这一笔；按原内容重新提交只记一次（52 + 4）
+    await page.route('**/api/erp/linen/docs', (route) => (route.request().method() === 'POST' ? route.abort('internetdisconnected') : route.continue()));
+    dialog = await addOnce('4');
+    await page.getByRole('button', { name: /先关掉/ }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByTestId('erp-pending')).toContainText('布草单据');
+    await page.unroute('**/api/erp/linen/docs');
+    await page.reload();
+    await expect(page.getByTestId('erp-pending')).toContainText('布草单据');
+    await expect(row.locator('td').nth(1)).toHaveText('52');
+    await page.getByTestId('erp-pending-resend').click();
+    await expect(page.getByTestId('erp-pending')).toHaveCount(0);
+    await expect(row.locator('td').nth(1)).toHaveText('56');
   });
 
   test('会员房价与客房点餐的入口：房型里填会员价、保存后还在；点餐页写着「手牌号或房号」', async ({ page }) => {

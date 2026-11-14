@@ -190,5 +190,22 @@ describe('客房点餐', () => {
     expect(first.status).toBe(200);
     const changed = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', { clientKey: key, visitId: g.visitId, lines: [{ itemId: dishId, quantity: 1 }], expectedTotal: 4800 });
     expect(changed.status).toBe(409);
+    // 点单已经生效、回复丢了，之后客人换了房：按原样重提认得出是同一笔（摘要只算「送到客房」，不算房号），
+    // 不多挂一道，出品单上还是下单时的房号（合并前 Codex 审查 b850838）
+    const rm = await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/rooms', { roomNo: 'H506', floor: '5', roomTypeId: typeId });
+    const h506 = rm.body.rooms.find((x: { roomNo: string }) => x.roomNo === 'H506').id;
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/rooms/${h506}/housekeeping`, { status: 'clean' })).status).toBe(200);
+    const moved = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.body.id}/move`, { toRoomId: h506, reason: '客人嫌吵' });
+    expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+    const count = async () => Number((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM kitchen_items WHERE visit_id = ${g.visitId}`)[0]!.n);
+    const before = await count();
+    const again = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', { clientKey: key, visitId: g.visitId, lines: [{ itemId: dishId, quantity: 1 }], expectedTotal: 4800, toRoom: true });
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(await count()).toBe(before);
+    // 换房以后新下的单写新房号
+    const fresh = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', { clientKey: randomUUID(), visitId: g.visitId, lines: [{ itemId: dishId, quantity: 1 }], expectedTotal: 4800, toRoom: true });
+    expect(fresh.status).toBe(200);
+    const last = await ctx.sql<{ deliverTo: string }[]>`SELECT deliver_to FROM kitchen_items WHERE visit_id = ${g.visitId} ORDER BY id DESC LIMIT 2`;
+    expect(last.map((t) => t.deliverTo)).toEqual(['客房 H506', '客房 H501']);
   });
 });

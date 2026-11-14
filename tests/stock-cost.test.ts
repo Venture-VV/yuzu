@@ -123,4 +123,38 @@ describe('随单据走', () => {
       [q(4), 1200],
     ]);
   });
+
+  it('零元进货（赠送）以后成本真的是 0：不拿参考价顶；再进货从 0 起算（合并前 Codex 审查 b850838）', async () => {
+    // 参考价 ¥10 / 箱 = ¥1 / 个
+    const m = await material('C004', { refPriceCents: 1000 });
+    await receive(m.id, 1, 0);
+    expect(await cost(m.id)).toMatchObject({ avg: 0, estimated: false, stock: q(10) });
+    // 耗用 2 个：按 0 记，不按参考价记成 ¥2
+    await ok(doc(keeper, { docType: 'direct_use', note: '零成本用例耗用', lines: [{ materialId: m.id, qtyMilli: q(2) }] }));
+    expect((await moves(m.id)).filter((x) => x.type === 'direct_use').map((x) => [Number(x.unit), Number(x.cents)])).toEqual([[0, 0]]);
+    // 再进 10 个共 ¥10：8 个 @0 + 10 个 ¥10 → 1000 / 18（不是把那 8 个按参考价算成 ¥8）
+    await receive(m.id, 1, 1000);
+    expect((await cost(m.id)).avg).toBe(555_556);
+    const report = await api(ctx.app, ctx.owner, 'GET', '/api/inventory/cost');
+    expect(report.body.stock.rows.find((r: { materialId: number }) => r.materialId === m.id)).toMatchObject({ avgCostE4: 555_556, estimated: false });
+  });
+
+  it('台面日耗品领到部门：领料单下面那笔「耗用」流水算进耗用成本；作废领料冲回（合并前 Codex 审查 b850838）', async () => {
+    const m = await material('C005', { refPriceCents: 2000, counterUse: true });
+    await ok(doc(ctx.owner, { docType: 'opening', approveNow: true, lines: [{ materialId: m.id, qtyMilli: q(10) }] }));
+    const [dept] = await ctx.sql<{ id: number; name: string }[]>`SELECT id, name FROM departments ORDER BY id DESC LIMIT 1`;
+    const usageOf = async () => {
+      const r = await api(ctx.app, ctx.owner, 'GET', '/api/inventory/cost');
+      return (r.body.usage.rows as { warehouseName: string; label: string; costCents: number }[]).find((u) => u.warehouseName === dept!.name && u.label === '耗用')?.costCents ?? 0;
+    };
+    const before = await usageOf();
+    const issued = await ok(doc(ctx.owner, { docType: 'issue', departmentId: dept!.id, handler: '部门同事', approveNow: true, lines: [{ materialId: m.id, qtyMilli: q(3) }] }));
+    expect(issued.status).toBe('confirmed');
+    expect((await moves(m.id)).map((x) => x.type)).toEqual(['opening', 'issue', 'issue', 'direct_use']);
+    // 3 个 × ¥2
+    expect((await usageOf()) - before).toBe(600);
+    const voided = await api(ctx.app, ctx.owner, 'POST', `/api/inventory/docs/${issued.id}/void`, { reason: '领错了' });
+    expect(voided.status, JSON.stringify(voided.body)).toBe(200);
+    expect((await usageOf()) - before).toBe(0);
+  });
 });

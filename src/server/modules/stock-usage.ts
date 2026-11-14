@@ -79,8 +79,8 @@ export async function listRecipes(db: Db, actor: Actor): Promise<ItemRecipe[]> {
   const lines: LineRow[] = recipeIds.length
     ? await db<LineRow[]>`
         SELECT l.recipe_id, l.material_id, m.code, m.name, m.inventory_unit, m.decimals, l.qty_milli, l.loss_bp,
-               -- 还没有进出过的物料没有平均成本：按参考价起算（与入库时的起算一样）
-               (CASE WHEN m.avg_cost_e4 > 0 THEN m.avg_cost_e4
+               -- 还没有成本的物料（平均成本是 0 而且还是估的）按参考价起算，与入库时的起算一样；成本真的是 0 的就是 0
+               (CASE WHEN m.avg_cost_e4 > 0 OR NOT m.cost_estimated THEN m.avg_cost_e4
                      WHEN m.ref_price_cents IS NOT NULL AND m.purchase_factor_milli > 0 THEN round(m.ref_price_cents::numeric * 10000000 / m.purchase_factor_milli)
                      ELSE 0 END)::bigint AS avg_cost_e4
         FROM item_recipe_lines l JOIN materials m ON m.id = l.material_id WHERE l.recipe_id IN ${db(recipeIds)} ORDER BY l.id`

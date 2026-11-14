@@ -124,3 +124,66 @@ describe('布草洗涤', () => {
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/erp/modules', { modules: { linen: true } })).status).toBe(200);
   });
 });
+
+describe('合并前 Codex 审查 b850838', () => {
+  let other: number;
+  let sheet: number;
+
+  it('几家洗涤厂洗同一个品类：收回按这一家手里的数量核对；这一家已经收回过的送洗单不能直接作废', async () => {
+    const s = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/suppliers', { code: 'LN02', name: '白云洗涤厂' });
+    other = s.body.find((x: { code: string }) => x.code === 'LN02').id;
+    sheet = (await api(ctx.app, keeper, 'POST', '/api/erp/linen/items', { name: '床单', washPriceCents: 200 })).body.id;
+    expect((await doc({ kind: 'add', lines: [{ itemId: sheet, qty: 40 }] })).status).toBe(201);
+    const toA = await doc({ kind: 'send', supplierId: laundry, lines: [{ itemId: sheet, qty: 10 }] });
+    const toB = await doc({ kind: 'send', supplierId: other, lines: [{ itemId: sheet, qty: 10 }] });
+    expect([toA.status, toB.status]).toEqual([201, 201]);
+    // 加起来在洗 20，但 B 手里只有 10：从 B 收回 15 不行
+    const tooMany = await doc({ kind: 'return', supplierId: other, lines: [{ itemId: sheet, qty: 12, damagedQty: 2, lostQty: 1 }] });
+    expect(tooMany.status).toBe(422);
+    expect(tooMany.body.error).toMatchObject({ code: 'LINEN_NOT_AT_LAUNDRY' });
+    expect(tooMany.body.error.message).toContain('白云洗涤厂');
+    expect(await counts('床单')).toEqual([40, 20, 20]);
+    // 从 B 收回 6：B 手里还有 4、A 手里还有 10，没有负数
+    const back = await doc({ kind: 'return', supplierId: other, lines: [{ itemId: sheet, qty: 6 }] });
+    expect(back.status, JSON.stringify(back.body)).toBe(201);
+    const held = (await overview()).outstanding.filter((o: { itemId: number }) => o.itemId === sheet).map((o: { supplierName: string; qty: number }) => [o.supplierName, o.qty]);
+    expect(held.sort()).toEqual([['洁净洗涤厂', 10], ['白云洗涤厂', 4]].sort());
+    // 作废送给 B 的那张：加起来在洗 14 ≥ 10，但 B 已经收回 6、手里只有 4 → 不让作废；作废了收回单以后可以
+    const blocked = await api(ctx.app, keeper, 'POST', `/api/erp/linen/docs/${toB.body.doc.id}/void`, { reason: '送错了' });
+    expect(blocked.body.error.code).toBe('LINEN_VOID_BLOCKED');
+    expect((await api(ctx.app, keeper, 'POST', `/api/erp/linen/docs/${back.body.doc.id}/void`, { reason: '先撤收回' })).status).toBe(200);
+    expect((await api(ctx.app, keeper, 'POST', `/api/erp/linen/docs/${toB.body.doc.id}/void`, { reason: '送错了' })).status).toBe(200);
+    expect(await counts('床单')).toEqual([40, 10, 30]);
+  });
+
+  it('值班经理（默认有布草权限、没有「查看库存」）：取得到洗涤厂名单，开得了送洗单', async () => {
+    await createStaff(ctx.sql, { username: 'ln-manager', displayName: '值班经理小周', role: 'store_manager', password: PASSWORD, mustChangePassword: false });
+    const manager = await login(ctx.app, 'ln-manager');
+    expect((await api(ctx.app, manager, 'GET', '/api/inventory/suppliers')).status).toBe(403);
+    const o = await overview(manager);
+    expect(o.canManage).toBe(true);
+    expect(o.suppliers).toEqual(expect.arrayContaining([{ id: laundry, name: '洁净洗涤厂' }, { id: other, name: '白云洗涤厂' }]));
+    expect((await doc({ kind: 'send', supplierId: other, lines: [{ itemId: sheet, qty: 5 }] }, manager)).status).toBe(201);
+  });
+
+  it('结果待确认：按编号查得回；确认作废以后原请求再到也不开单；已经开了的作废不了', async () => {
+    // 查回：开过的查得到，返回那张单
+    const key = randomUUID();
+    const made = await doc({ kind: 'add', lines: [{ itemId: sheet, qty: 3 }] }, keeper, key);
+    expect(made.status).toBe(201);
+    expect((await api(ctx.app, keeper, 'GET', `/api/erp/ops/${key}?type=linen_doc`)).body).toMatchObject({ found: true, refId: made.body.doc.id });
+    // 已经开了的：「确认作废」不生效，告诉它已经登记
+    expect((await api(ctx.app, keeper, 'POST', `/api/erp/ops/${key}/abandon`, { type: 'linen_doc' })).body).toMatchObject({ found: true, abandoned: false });
+    // 没到的：查不到 → 确认作废 → 原请求晚到也不开单，数量不变
+    const lost = randomUUID();
+    expect((await api(ctx.app, keeper, 'GET', `/api/erp/ops/${lost}?type=linen_doc`)).body).toMatchObject({ found: false, abandoned: false });
+    // 只能看的人不能作废
+    expect((await api(ctx.app, coster, 'POST', `/api/erp/ops/${lost}/abandon`, { type: 'linen_doc' })).status).toBe(403);
+    expect((await api(ctx.app, keeper, 'POST', `/api/erp/ops/${lost}/abandon`, { type: 'linen_doc' })).body).toMatchObject({ found: false, abandoned: true });
+    const before = await counts('床单');
+    const late = await doc({ kind: 'add', lines: [{ itemId: sheet, qty: 9 }] }, keeper, lost);
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect(await counts('床单')).toEqual(before);
+  });
+});

@@ -18,9 +18,12 @@ import { moveCostCents, todayIn } from './common';
 
 const Range = z.object({ from: z.string().optional(), to: z.string().optional() });
 
-/** 还没有进出过的物料没有平均成本：按参考价起算（与入库时的起算一样） */
-const effectiveCost = (db: Db) => db`
-  (CASE WHEN m.avg_cost_e4 > 0 THEN m.avg_cost_e4
+/**
+ * 还没有进出过的物料没有平均成本：按参考价起算（与入库时的起算一样）。
+ * 「还没有成本」= 平均成本是 0 而且还是估的；按进价收过货、平均成本真的是 0（赠送、零元进货）的就是 0，不拿参考价顶（合并前 Codex 审查 b850838）。
+ */
+export const effectiveCost = (db: Db) => db`
+  (CASE WHEN m.avg_cost_e4 > 0 OR NOT m.cost_estimated THEN m.avg_cost_e4
         WHEN m.ref_price_cents IS NOT NULL AND m.purchase_factor_milli > 0 THEN round(m.ref_price_cents::numeric * 10000000 / m.purchase_factor_milli)
         ELSE 0 END)::bigint`;
 
@@ -57,7 +60,15 @@ export async function costReport(db: Db, timezone: string, raw: unknown): Promis
     FROM stock_moves sm JOIN inv_docs d ON d.id = sm.doc_id
     LEFT JOIN stock_usage_batches b ON b.inv_doc_id = d.id
     LEFT JOIN warehouses w ON w.id = sm.warehouse_id LEFT JOIN departments dp ON dp.id = w.department_id
-    WHERE d.doc_type IN ('direct_use', 'damage') AND sm.doc_date BETWEEN ${from} AND ${to}
+    -- 按流水认，不按单据类型认（合并前 Codex 审查 b850838）：台面日耗品领到部门、急采进部门小仓时，在领料单 / 收货单下面接着记一笔「耗用」流水，
+    -- 只看耗用单、报损单会把它们漏掉。作废冲回的那一笔流水类型是 void：同一张单、同一行、同一个仓里冲的是耗用 / 报损的才算（数量为正的那一笔；
+    -- 同一行里冲调入、冲收货的是负的，不算）。
+    WHERE (sm.move_type IN ('direct_use', 'damage')
+           OR (sm.move_type = 'void' AND sm.qty_delta_milli > 0 AND EXISTS (
+                 SELECT 1 FROM stock_moves o
+                 WHERE o.doc_id = sm.doc_id AND o.doc_line_id = sm.doc_line_id AND o.warehouse_id = sm.warehouse_id AND o.material_id = sm.material_id
+                   AND o.move_type IN ('direct_use', 'damage'))))
+      AND sm.doc_date BETWEEN ${from} AND ${to}
     GROUP BY 1, 2 ORDER BY 1, 2`;
   const usage: UsageCostRow[] = usageRows.map((r) => ({ warehouseName: r.warehouseName, label: r.label, costCents: Number(r.cost), moves: r.moves, uncosted: r.uncosted }));
 

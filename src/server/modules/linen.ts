@@ -3,8 +3,10 @@
 // 单据只增不改，作废留原因并把数量冲回。洗涤费这一版只出对账表，不记应付货款（JX11）。
 //
 // 锁与幂等：
-// · 开单先取操作编号的咨询锁（同一个编号串行）→ 查这个编号开过没有（开过原样返回，内容不同拒绝）→ 布草品类按 id 升序 FOR UPDATE
+// · 开单先取操作编号的咨询锁（同一个编号串行，与「确认作废」串行）→ 查这个编号开过没有（开过原样返回，内容不同拒绝）→ 核对没被确认作废
+//   → 布草品类按 id 升序 FOR UPDATE（同一个品类的送洗、收回、作废都串行：某家洗涤厂手里还有几件在这把锁里算）
 //   → 写单据与明细、改品类的数量；作废：单据一行 FOR UPDATE → 品类按 id 升序 FOR UPDATE → 冲回数量。
+// · 操作编号记在单据上（client_key），查回、确认作废走全店那一套（业务类型 linen_doc，迁移 140；合并前 Codex 审查 b850838）。
 // · 品类的修改只锁品类一行、带版本号；在用的品类不重名靠部分唯一索引。数量不能为负、在洗不超过总数由约束兜底。
 // · 读洗涤厂（供应商档案）不加锁。
 
@@ -18,9 +20,11 @@ import { writeAudit } from '../lib/audit';
 import { ctxOf, type Actor, type Deps, type OpContext } from '../lib/context';
 import { csvReply, toCsv } from '../lib/csv';
 import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
+import { assertNotFenced, lockOpKey } from '../lib/fences';
 import { hashRequest } from '../lib/idempotency';
 import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { idParam, parse } from '../lib/validate';
+import { erpOpAbandoned } from './erp-ops';
 import { assertNotFuture, docDateSchema, todayIn } from './inventory/common';
 
 const id = z.number().int().positive();
@@ -99,8 +103,11 @@ export async function linenOverview(db: Db, actor: Actor): Promise<LinenOverview
     GROUP BY d.supplier_id, s.name, l.item_id, i.name
     HAVING sum(CASE WHEN d.kind = 'send' THEN l.qty ELSE -(l.qty + l.damaged_qty + l.lost_qty) END) <> 0
     ORDER BY s.name, l.item_id`;
+  // 洗涤厂的可选名单（在用的供应商）：有布草权限就能取，不要求另有「查看库存」（值班经理默认没有，合并前 Codex 审查 b850838）
+  const suppliers = await db<{ id: number; name: string }[]>`SELECT id, name FROM suppliers WHERE active ORDER BY name, id`;
   return {
     items: await listItems(db),
+    suppliers: suppliers.map((s) => ({ id: Number(s.id), name: s.name })),
     outstanding: outstanding.map((o): LinenOutstanding => ({ supplierId: Number(o.supplierId), supplierName: o.supplierName, itemId: Number(o.itemId), itemName: o.itemName, qty: o.qty })),
     docs: await loadDocs(db, db`true`, 60),
     canManage: can(actor, 'linen.manage'),
@@ -168,6 +175,16 @@ async function lockItems(tx: Tx, ids: number[]) {
   return new Map(rows.map((r) => [Number(r.id), r]));
 }
 
+/** 这家洗涤厂手里还有几件（按品类；有效的送洗 − 收回）。调用方已经锁住这几个品类：同一个品类的送洗、收回、作废都串行 */
+async function supplierOutstanding(tx: Tx, supplierId: number, itemIds: number[]): Promise<Map<number, number>> {
+  const rows = await tx<{ itemId: number; qty: number }[]>`
+    SELECT l.item_id, sum(CASE WHEN d.kind = 'send' THEN l.qty ELSE -(l.qty + l.damaged_qty + l.lost_qty) END)::int AS qty
+    FROM linen_docs d JOIN linen_doc_lines l ON l.doc_id = d.id
+    WHERE d.status = 'confirmed' AND d.kind IN ('send', 'return') AND d.supplier_id = ${supplierId} AND l.item_id IN ${tx(itemIds)}
+    GROUP BY l.item_id`;
+  return new Map(rows.map((r) => [Number(r.itemId), r.qty]));
+}
+
 export async function createLinenDoc(deps: Deps, raw: unknown, ctx: OpContext): Promise<{ doc: LinenDoc; replayed: boolean }> {
   const input = parse(DocInput, raw);
   assertNotFuture(input.docDate, deps.config.timezone);
@@ -184,18 +201,23 @@ export async function createLinenDoc(deps: Deps, raw: unknown, ctx: OpContext): 
   const requestHash = hashRequest(body);
   return deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${clientKey}, 0))`;
+    await lockOpKey(tx, clientKey);
     const [done] = await tx<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM linen_docs WHERE client_key = ${clientKey}`;
     if (done) {
       if (done.requestHash !== requestHash) throw conflict('IDEMPOTENCY_CONFLICT', '这个操作编号已经用在另一张布草单上了，请刷新页面后重新填写');
       return { doc: (await loadDocs(tx, tx`d.id = ${done.id}`, 1))[0]!, replayed: true };
     }
+    await assertNotFenced(tx, clientKey, 'linen_doc', erpOpAbandoned);
+    let supplierName = '';
     if (input.supplierId !== null) {
       const [s] = await tx<{ active: boolean; name: string }[]>`SELECT active, name FROM suppliers WHERE id = ${input.supplierId}`;
       if (!s) throw unprocessable('SUPPLIER_NOT_FOUND', '洗涤厂不存在，请刷新后重试');
       if (!s.active) throw unprocessable('SUPPLIER_INACTIVE', `「${s.name}」已停用`);
+      supplierName = s.name;
     }
     const items = await lockItems(tx, ids);
+    // 收回：按这家洗涤厂手里的数量核对，不只看所有洗涤厂加起来的在洗数（几家都洗同一个品类时，从 B 收回的不能多过送给 B 的）
+    const held = input.kind === 'return' ? await supplierOutstanding(tx, input.supplierId!, ids) : null;
     let amount = 0;
     const lines = input.lines.map((l) => {
       const item = items.get(l.itemId)!;
@@ -210,6 +232,9 @@ export async function createLinenDoc(deps: Deps, raw: unknown, ctx: OpContext): 
         throw unprocessable('LINEN_NOT_ENOUGH', `「${item.name}」在店只有 ${item.totalQty - item.atLaundryQty} 件，报废不了 ${l.qty} 件`);
       }
       if (atLaundry < 0) throw unprocessable('LINEN_NOT_AT_LAUNDRY', `「${item.name}」在洗只有 ${item.atLaundryQty} 件，收不回 ${l.qty + l.damagedQty + l.lostQty} 件`);
+      if (held && l.qty + l.damagedQty + l.lostQty > (held.get(l.itemId) ?? 0)) {
+        throw unprocessable('LINEN_NOT_AT_LAUNDRY', `「${item.name}」在「${supplierName}」只有 ${held.get(l.itemId) ?? 0} 件在洗，收不回 ${l.qty + l.damagedQty + l.lostQty} 件；是别家洗的请选那一家`);
+      }
       // 洗涤费：完好的与破损的都洗过，丢失的不算
       const price = input.kind === 'return' ? item.washPriceCents : 0;
       const lineAmount = input.kind === 'return' ? (l.qty + l.damagedQty) * price : 0;
@@ -237,13 +262,19 @@ export async function voidLinenDoc(deps: Deps, docId: number, raw: unknown, ctx:
   const { reason } = parse(VoidInput, raw);
   return deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    const [doc] = await tx<{ id: number; kind: LinenDocKind; status: string; docNo: string }[]>`SELECT id, kind, status, doc_no FROM linen_docs WHERE id = ${docId} FOR UPDATE`;
+    const [doc] = await tx<{ id: number; kind: LinenDocKind; status: string; docNo: string; supplierId: number | null }[]>`
+      SELECT id, kind, status, doc_no, supplier_id FROM linen_docs WHERE id = ${docId} FOR UPDATE`;
     if (!doc) throw notFound('布草单据不存在');
     if (doc.status === 'voided') throw conflict('LINEN_DOC_VOIDED', '这张单已经作废了');
     const lines = await tx<{ itemId: number; qty: number; damagedQty: number; lostQty: number }[]>`SELECT item_id, qty, damaged_qty, lost_qty FROM linen_doc_lines WHERE doc_id = ${docId}`;
     const items = await lockItems(tx, lines.map((l) => Number(l.itemId)));
+    // 作废送洗单：这家洗涤厂已经收回过的就不能直接作废（不然它手里的数量成了负的）——按这一家核对，不只看加起来的在洗数
+    const held = doc.kind === 'send' ? await supplierOutstanding(tx, Number(doc.supplierId), lines.map((l) => Number(l.itemId))) : null;
     for (const l of lines) {
       const item = items.get(Number(l.itemId))!;
+      if (held && (held.get(Number(l.itemId)) ?? 0) < l.qty) {
+        throw unprocessable('LINEN_VOID_BLOCKED', `作废「${doc.docNo}」以后「${item.name}」在这家洗涤厂的数量对不上（这张单送去的已经收回了一部分），请先作废后面的收回单`);
+      }
       const e = effect(doc.kind, l);
       const total = item.totalQty - e.total;
       const atLaundry = item.atLaundryQty - e.atLaundry;

@@ -66,8 +66,12 @@ export interface PostOptions {
   session?: Omit<SessionPostOptions, 'backfill'>;
   /** 点单页下单：只能点进厨房的菜（其他项目、手动金额请到前台登记） */
   dining?: { onlyKitchen: boolean };
-  /** 出品单写送到哪（8.0.20 客房点餐：「客房 W301」）；空为送到客人手里 */
-  deliverTo?: string;
+  /**
+   * 送到客房（8.0.20 客房点餐）：出品单写「客房 W301」。给的是「怎么查这位客人现在住哪间」，在挂账的事务里、核对完操作编号之后才查——
+   * 摘要里只算「送到客房」这件事（提交上来的、不会变的），不算查出来的房号：点单已经生效但回复丢了以后客人换了房、退了房，
+   * 按原样重提照样认得出是同一笔、返回第一次的结果，不会被说成另一笔或「没有在住的客房」（合并前 Codex 审查 b850838）。
+   */
+  toRoom?: (tx: Tx) => Promise<string>;
 }
 
 export type PostInputParsed = z.output<typeof PostInput>;
@@ -113,19 +117,18 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
   // 派钟选的房间（v0.7.16）、按哪张预约派（8.0.8）也算进摘要：同一个操作编号换了房间、预约重发会被拒绝；都没有时摘要与升级前完全相同
   const spaceId = options.session?.dispatch?.spaceId;
   const bookingId = options.session?.dispatch?.bookingId;
-  // 送到哪（8.0.20 客房点餐：送到客房）也算进摘要；没有时摘要与升级前完全相同
-  const deliverTo = options.deliverTo;
+  // 送到客房（8.0.20 客房点餐）也算进摘要——只算提交上来的「送到客房」，不算查出来的房号；没有时摘要与升级前完全相同
   const requestHash = hashRequest({
     visitId,
     ...payload,
     ...(spaceId === undefined ? {} : { spaceId }),
     ...(bookingId === undefined ? {} : { bookingId }),
-    ...(deliverTo ? { deliverTo } : {}),
+    ...(options.toRoom ? { toRoom: true } : {}),
   });
   // 补录纸质单：明细按纸质单上的实际时间登记（营业日按实际时间归属）
   const backfill = resolveBackfill(input.backfill, ctx.actor);
   await runIdempotent(deps, { key, opType: 'bill_post', requestHash }, async (tx) =>
-    (await postChargesTx(tx, deps, visitId, input, { key, requestHash, backfill, ...(deliverTo ? { deliverTo } : {}) }, ctx, options)).visitId,
+    (await postChargesTx(tx, deps, visitId, input, { key, requestHash, backfill }, ctx, options)).visitId,
   );
   return getVisit(deps.sql, visitId, deps.config.timezone);
 }
@@ -144,7 +147,7 @@ export async function postChargesTx(
   ctx: OpContext,
   options: PostOptions = {},
 ): Promise<PostResult> {
-  const { key, requestHash, backfill, channel, deliverTo } = meta;
+  const { key, requestHash, backfill, channel } = meta;
   const at = backfill?.at ?? ctx.at ?? new Date();
   // ③ 来访 → 账单
   const visit = (await lockVisits(tx, [visitId])).get(visitId)!;
@@ -156,6 +159,8 @@ export async function postChargesTx(
   const [bill] = await tx<{ id: number; status: string; amountCents: number; lineCount: number }[]>`
     SELECT id, status, amount_cents, line_count FROM bills WHERE id = ${visit.billId} FOR UPDATE`;
   if (bill!.status !== 'open') throw conflict('BILL_CLOSED', '账单已结束，不能再挂账');
+  // 送到客房：来访锁住以后才查住哪间（读入住单不加锁）；没在住的在这里拒绝
+  const deliverTo = meta.deliverTo ?? (options.toRoom ? await options.toRoom(tx) : undefined);
   // 项目价格以服务端为准，按所选价格档计价；只限某一性别的项目（如私汤木桶浴仅女宾）按客人分区核对
   const items = await loadPricedItems(tx, input.lines.map((l) => l.itemId));
   // 技师（v0.7.0）：功能开启时，需要技师的项目记下技师与点钟 / 轮钟；价格跟等级时按技师等级取价
