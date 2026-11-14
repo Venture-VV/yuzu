@@ -62,6 +62,7 @@ import { registerCouponRoutes } from './modules/coupons';
 import { registerCampaignRoutes } from './modules/coupon-campaigns';
 import { registerGiftOutRoutes } from './modules/gift-outs';
 import { registerStockUsageRoutes } from './modules/stock-usage';
+import { registerLinenRoutes } from './modules/linen';
 import { registerCostRoutes } from './modules/inventory/cost';
 import { registerAutoReplenishRoutes } from './modules/inventory/auto-replenish';
 import { registerCouponUsageRoutes } from './modules/coupon-usage';
@@ -216,6 +217,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerStockUsageRoutes(app, deps);
   registerCostRoutes(app, deps);
   registerAutoReplenishRoutes(app, deps);
+  registerLinenRoutes(app, deps);
   registerCouponUsageRoutes(app, deps);
   registerMarketingCostRoutes(app, deps);
   registerMembershipRoutes(app, deps);

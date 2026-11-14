@@ -233,7 +233,11 @@ export type AuditAction =
   | 'patrol_point'
   | 'patrol_checkin_void'
   // 8.0.20 用料与扣料（docs/ERP_V8020.md）：改项目的用料
-  | 'item_recipe';
+  | 'item_recipe'
+  // 8.0.20 布草洗涤：品类的新建与修改、开单、作废
+  | 'linen_item'
+  | 'linen_doc'
+  | 'linen_doc_void';
 
 export interface AuditEntry {
   staffId: number | null;

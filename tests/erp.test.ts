@@ -93,6 +93,8 @@ describe('ERP 模块开关', () => {
         ['payables', true, false],
         // 资产与易耗（8.0.7）依赖库存
         ['assets', true, false],
+        // 布草洗涤（8.0.20）依赖库存（洗涤厂用供应商档案）
+        ['linen', true, false],
         ['approvals', true, false],
         ['contracts', true, false],
         ['payments', true, false],
