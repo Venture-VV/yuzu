@@ -2,6 +2,7 @@
 // 按区域分组，在线 / 离线 / 故障 / 未知一眼看到，2 秒刷新；打印机可测试打印（结果待确认同 ERP 一套）；
 // 右侧「本机终端」：选这台终端是哪台、桥连没连上、最近的读卡与扫码（也收模拟键盘输入）。
 
+import { useLocation } from 'react-router';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CircleAlert, CircleCheck, CircleDashed, CircleOff, Printer, RefreshCw, ScanLine } from 'lucide-react';
@@ -280,8 +281,18 @@ function TerminalPanel({ terminals }: { terminals: Device[] }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
   const mine = terminals.find((x) => x.code === t.terminal) ?? null;
+  // 从用户菜单的「本机终端」过来（/devices#terminal，8.0.19）：滚到这一块、描一下边，过两秒收掉
+  const { hash, key } = useLocation();
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (hash !== '#terminal') return;
+    document.getElementById('terminal')?.scrollIntoView({ block: 'center' });
+    setFocused(true);
+    const timer = setTimeout(() => setFocused(false), 2000);
+    return () => clearTimeout(timer);
+  }, [hash, key]);
   return (
-    <Card className="h-fit space-y-3 p-4" data-testid="terminal-panel">
+    <Card id="terminal" className={cn('h-fit scroll-mt-4 space-y-3 p-4 transition-shadow duration-500', focused && 'ring-2 ring-pine/45')} data-testid="terminal-panel" data-focused={focused || undefined}>
       <h2 className="text-[15px] font-bold">本机终端</h2>
       <Field label="这台终端是" hint="记在这台设备的浏览器里；选了之后开着门店页面就会每 2 秒上报读卡器、扫码的状态">
         <Select

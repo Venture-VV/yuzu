@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Navigate, NavLink, useLocation, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Building2, KeyRound, LogOut } from 'lucide-react';
+import { Building2, KeyRound, LogOut, MonitorSmartphone } from 'lucide-react';
+import { useTerminalState } from '../features/devices/terminal';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import { api } from '../lib/api';
@@ -90,7 +91,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function UserMenu() {
   const session = useSession();
+  const can = useCan();
   const erp = useErpAccess();
+  // 这台电脑现在设成了哪台终端（记在本机浏览器里；没设 = 不上报）
+  const terminalCode = useTerminalState().terminal;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -142,6 +146,12 @@ function UserMenu() {
             // ERP 不在主导航里显示（店主 2026-10-30 定）：有 ERP 权限的人从这里进
             <MenuItem icon={<Building2 className="size-4" />} onClick={() => { setOpen(false); navigate('/erp'); }} testId="user-menu-erp">
               进入 ERP
+            </MenuItem>
+          )}
+          {can('device.view') && (
+            // 本机终端（8.0.19，IA 第 3.4 节）：这台电脑是哪台终端在门店「设备」页右边设；从哪一页都点得到
+            <MenuItem icon={<MonitorSmartphone className="size-4" />} onClick={() => { setOpen(false); navigate('/devices#terminal'); }} testId="user-menu-terminal">
+              本机终端<span className="ml-auto max-w-[96px] truncate text-[12px] text-ink-3" data-testid="user-menu-terminal-current">{terminalCode ?? '未设置'}</span>
             </MenuItem>
           )}
           <MenuItem icon={<KeyRound className="size-4" />} onClick={() => { setOpen(false); navigate('/password'); }}>

@@ -24,9 +24,21 @@ describe('后台的一级分组', () => {
 
   it('改过名的分区：路径不变（旧链接照旧能用）', () => {
     expect(ADMIN_SECTIONS.rules).toMatchObject({ path: '/admin/rules', label: '门店基本规则' });
-    expect(ADMIN_SECTIONS.members).toMatchObject({ path: '/admin/members', label: '渠道与标签' });
     expect(ADMIN_SECTIONS.coupons).toMatchObject({ path: '/admin/coupons', label: '券' });
     expect(ADMIN_SECTIONS.opening).toMatchObject({ path: '/admin/opening', label: '期初与旧账' });
+  });
+
+  it('8.0.19：会员规则、会员权益、渠道与标签合成「会员体系」一个分区；对客导览单列；旧地址有跳转', () => {
+    expect(ADMIN_SECTIONS.membership).toMatchObject({ path: '/admin/membership', label: '会员体系', perms: ['member.rules', 'benefit.publish', 'settings.manage'] });
+    expect(Object.keys(ADMIN_SECTIONS)).not.toContain('members');
+    expect(Object.keys(ADMIN_SECTIONS)).not.toContain('benefits');
+    expect(ADMIN_GROUPS.find((g) => g.key === 'members')!.items).toEqual(['membership', 'coupons']);
+    expect(ADMIN_SECTIONS.guide).toMatchObject({ path: '/admin/guide', label: '对客导览', perms: ADMIN_SECTIONS.spaces.perms });
+    expect(ADMIN_GROUPS.find((g) => g.key === 'venue')!.items).toEqual(['spaces', 'guide', 'devices', 'mp']);
+    for (const path of ["path: 'membership/:tab?'", "path: 'benefits'", "path: 'members'", "path: 'guide'", "path: 'spaces/guide'", "path: 'vip-lockers'"]) expect(routes, path).toContain(path);
+    // 三个页签各自还是原来的权限，顺序：规则 → 清单 → 渠道与标签
+    const section = readFileSync(join(ADMIN_DIR, '..', 'membership', 'MembershipSection.tsx'), 'utf8');
+    expect([...section.matchAll(/\{ key: '([a-z]+)', label: '[^']*', perm: '([a-z.]+)' \}/g)].map((m) => `${m[1]}:${m[2]}`)).toEqual(['rules:member.rules', 'benefits:benefit.publish', 'channels:settings.manage']);
   });
 
   it('侧栏不再自己写一份分组', () => {

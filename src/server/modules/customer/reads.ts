@@ -17,6 +17,7 @@ import { loadSettings } from "../settings";
 import { memberFamily } from "../membership";
 import {
   canonicalMemberId,
+  nativeMemberSummaries,
   nativeMemberSummary,
 } from "../concierge/native-links";
 import { checkoutOrderDetail } from "../orders";
@@ -271,11 +272,29 @@ export async function customerRecharges(
     meta = await customerMeta(db, actor, timezone, at),
     range = dates(q, meta),
     rows = await rechargeRows(db, actor, timezone, q, range.from, range.to);
+  // A row's net is its lifetime net; period performance follows the signed
+  // native events instead, including refunds of recharges outside this page.
+  const managerId = scope(actor, q);
+  const [credit] = await db`${family(db)}, events AS (
+    SELECT r.id AS recharge_id,r.business_date,r.created_at AS occurred_at,r.paid_amount AS amount
+    FROM recharges r
+    UNION ALL
+    SELECT l.recharge_id,mr.business_date,mr.created_at,-l.amount
+    FROM member_refund_lines l JOIN member_refunds mr ON mr.id=l.refund_id WHERE l.source='recharge'
+  ) SELECT coalesce(sum(e.amount),0)::bigint AS amount FROM events e
+    JOIN recharges r ON r.id=e.recharge_id JOIN family f ON f.id=r.member_id JOIN members m ON m.id=f.root
+    JOIN customer_recharge_credits cr ON cr.recharge_id=r.id
+    WHERE cr.status='verified' AND cr.owner_department='customer'
+      AND (${q.status}='all' OR ${q.status}='verified')
+      AND e.business_date BETWEEN ${range.from} AND ${range.to}
+      AND (${managerId}::bigint IS NULL OR cr.seller_staff_id=${managerId})
+      AND (${q.hour ?? null}::int IS NULL OR extract(hour FROM e.occurred_at AT TIME ZONE ${timezone})=${q.hour ?? null})
+      AND (${!q.q} OR r.doc_no ILIKE ${like(q.q)} OR m.name ILIKE ${like(q.q)} OR m.phone LIKE ${like(q.q)} OR m.member_no ILIKE ${like(q.q)})`;
   return {
     ...page(rows, q, meta),
     filters: {
       ...range,
-      managerId: scope(actor, q),
+      managerId,
       status: q.status,
       q: q.q,
       hour: q.hour ?? null,
@@ -286,12 +305,7 @@ export async function customerRecharges(
         bonusCents: s.bonusCents + r.bonusCents,
         refundedCents: s.refundedCents + r.refundedCents,
         netPaidCents: s.netPaidCents + r.netPaidCents,
-        verifiedCreditCents:
-          s.verifiedCreditCents +
-          (r.credit.status === "verified" &&
-          r.credit.ownerDepartment === "customer"
-            ? r.netPaidCents
-            : 0),
+        verifiedCreditCents: n(credit!.amount),
         pendingPaidCents:
           s.pendingPaidCents +
           (r.credit.status !== "verified" ? r.paidCents : 0),
@@ -301,7 +315,7 @@ export async function customerRecharges(
         bonusCents: 0,
         refundedCents: 0,
         netPaidCents: 0,
-        verifiedCreditCents: 0,
+        verifiedCreditCents: n(credit!.amount),
         pendingPaidCents: 0,
       },
     ),
@@ -703,18 +717,28 @@ export async function customerVisit(
     notes: await noteRows(db, db`sn.visit_id=${id}`),
   };
 }
-async function memberProjection(
+async function memberProjections(
   db: Db,
-  id: number,
+  ids: number[],
   timezone: string,
-): Promise<C.CustomerMember> {
-  const s = await nativeMemberSummary(db, id, timezone);
-  if (!s) throw notFound("会员不存在");
-  const [r] =
-    await db`SELECT m.created_at,b.version,b.updated_at,${staff(db, "b.maintainer_staff_id")} AS maintainer,
-    (SELECT max(v.checked_in_at) FROM visits v WHERE v.member_id IN ${db(await memberFamily(db, s.id))} AND v.status<>'cancelled' AND v.checked_in_at<=now()) AS last_visit_at
-    FROM members m LEFT JOIN customer_bindings b ON b.member_id=m.id WHERE m.id=${s.id}`;
-  return {
+): Promise<C.CustomerMember[]> {
+  if (!ids.length) return [];
+  const summaries = await nativeMemberSummaries(db, ids, timezone),
+    canonicalIds = [...new Set([...summaries.values()].map((s) => s.id))];
+  const details = await db`WITH RECURSIVE family AS (
+    SELECT id AS root,id FROM members WHERE id=ANY(${canonicalIds}::bigint[])
+    UNION SELECT f.root,m.id FROM members m JOIN family f ON m.merged_into_id=f.id
+  ), last_visits AS (
+    SELECT f.root,max(v.checked_in_at) AS last_visit_at FROM family f JOIN visits v ON v.member_id=f.id
+    WHERE v.status<>'cancelled' AND v.checked_in_at<=now() GROUP BY f.root
+  ) SELECT m.id,m.created_at,b.version,b.updated_at,${staff(db, "b.maintainer_staff_id")} AS maintainer,v.last_visit_at
+    FROM members m LEFT JOIN customer_bindings b ON b.member_id=m.id LEFT JOIN last_visits v ON v.root=m.id
+    WHERE m.id=ANY(${canonicalIds}::bigint[])`;
+  const byId = new Map(details.map((r) => [n(r.id), r]));
+  return ids.map((id) => {
+    const s = summaries.get(id), r = s && byId.get(s.id);
+    if (!s || !r) throw notFound("会员不存在");
+    return {
     id: s.id,
     memberNo: s.memberNo,
     name: s.name,
@@ -726,15 +750,19 @@ async function memberProjection(
     principalCents: s.principalCents,
     bonusCents: s.bonusCents,
     totalCents: s.totalCents,
-    createdAt: r!.createdAt,
-    lastVisitAt: r!.lastVisitAt,
+    createdAt: r.createdAt,
+    lastVisitAt: r.lastVisitAt,
     binding: {
       memberId: s.id,
-      maintainer: r!.maintainer,
-      version: n(r!.version),
-      updatedAt: r!.updatedAt ?? null,
+      maintainer: r.maintainer,
+      version: n(r.version),
+      updatedAt: r.updatedAt ?? null,
     },
-  };
+    };
+  });
+}
+async function memberProjection(db: Db, id: number, timezone: string): Promise<C.CustomerMember> {
+  return (await memberProjections(db, [id], timezone))[0]!;
 }
 export async function customerMembers(
   db: Db,
@@ -752,9 +780,7 @@ export async function customerMembers(
       SELECT 1 FROM family f JOIN members sm ON sm.id=f.id WHERE f.root=m.id AND (sm.name ILIKE ${like(q.q)} OR sm.phone LIKE ${like(q.q)} OR sm.member_no ILIKE ${like(q.q)}
         OR EXISTS(SELECT 1 FROM member_cards mc WHERE mc.member_id=sm.id AND mc.status='active' AND mc.card_no ILIKE ${like(q.q)})))) ORDER BY m.id DESC`;
   const result = page(ids, q, meta),
-    rows = [];
-  for (const r of result.rows)
-    rows.push(await memberProjection(db, n(r.id), timezone));
+    rows = await memberProjections(db, result.rows.map((r) => n(r.id)), timezone);
   return { ...result, rows };
 }
 
@@ -775,8 +801,8 @@ export async function customerLowBalances(
       OR EXISTS(SELECT 1 FROM member_cards mc WHERE mc.member_id=sm.id AND mc.status='active' AND mc.card_no ILIKE ${like(q.q)}))))
     ORDER BY m.principal_balance+greatest(0,m.bonus_balance-(SELECT coalesce(sum(remaining),0) FROM bonus_lots
       WHERE member_id=m.id AND remaining>0 AND expires_at<=now())),m.id`;
-  const result = page(ids, q, meta), rows: C.CustomerMember[] = [];
-  for (const r of result.rows) rows.push(await memberProjection(db, n(r.id), timezone));
+  const result = page(ids, q, meta),
+    rows = await memberProjections(db, result.rows.map((r) => n(r.id)), timezone);
   return {
     ...result, rows, thresholdCents: 3000000,
     totals: ids.reduce<C.CustomerLowBalancePage["totals"]>((s, r) => ({ memberCount: s.memberCount + 1, principalCents: s.principalCents + n(r.principalCents),

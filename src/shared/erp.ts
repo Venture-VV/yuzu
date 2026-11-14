@@ -234,7 +234,8 @@ export const ERP_NAV_GROUPS: readonly { key: string; title: string; modules: rea
   { key: 'supply', title: '供应链', modules: ['inventory', 'purchasing', 'requests', 'deptStock', 'assets'] },
   { key: 'finance', title: '财务', modules: ['payments', 'payables', 'expenses', 'invoices', 'receivables'] },
   { key: 'contracts', title: '合同', modules: ['contracts'] },
-  // 已经挪到后台的：留一条跳转，下一个版本去掉
+  // 已经挪到后台的：页面不在 ERP 里。8.0.18 在 ERP 导航里各留了一条跳转，8.0.19 去掉；这一组留着是为了「每个模块都有归属」，
+  // 模块开关页（ERP 设置 → 模块开关）仍按它列出这三个
   { key: 'moved', title: '已挪到后台', modules: ['revenue', 'canteen', 'patrol'] },
 ];
 

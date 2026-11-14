@@ -7,7 +7,7 @@
 // 默认店主、店总（「维护券模板、发券规则与无记名券」）；按批次作废还要「作废券」。会员的券在会员详情里看、发、作废。
 
 import { useMemo, useState, type ReactNode } from 'react';
-import { Navigate, useSearchParams } from 'react-router';
+import { Link, Navigate, useParams, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ban, CopyPlus, Download, Plus, Search } from 'lucide-react';
 import { ISO_DATE } from '@shared/business-date';
@@ -59,18 +59,16 @@ import {
   useInvalidateCoupons,
 } from '../coupons/queries';
 import { AdminPage } from './AdminShell';
-import { CampaignsCard } from './CampaignsCard';
 import { CouponUsageCard } from './CouponUsageCard';
 import { useActiveSubTab } from '../../components/SubNav';
 
-type Tab = 'templates' | 'rules' | 'campaigns' | 'batches' | 'stats' | 'usage';
-// 二级页签（8.0.17）：写进地址（/admin/coupons/rules）；顺序与别的分区一样——规则在前，再是清单、日常操作、统计
+type Tab = 'templates' | 'rules' | 'stats' | 'usage';
+// 二级页签（8.0.17）：写进地址（/admin/coupons/rules）；顺序与别的分区一样——规则在前，再是清单、统计。
+// 8.0.19（IA4）：批量发券、无记名券是当班会做的事，挪到门店会员工作台的「发券」（features/coupons/CouponIssuePage）；
+// 这里只留规则、模板、统计，旧地址 /admin/coupons/campaigns、/admin/coupons/batches 跳过去
 const TABS: { value: Tab; label: string }[] = [
   { value: 'rules', label: '发券规则' },
   { value: 'templates', label: '券模板' },
-  // 批量发券（8.0.4 需求表 06）
-  { value: 'campaigns', label: '批量发券' },
-  { value: 'batches', label: '无记名券' },
   { value: 'stats', label: '统计' },
   // 权益使用率看板（8.0.4 需求表 08）：按发放的一批券看领取率、核销率
   { value: 'usage', label: '使用率' },
@@ -87,6 +85,9 @@ const pendingToast = (label: string) => ({
 });
 
 const COUPON_BASE = '/admin/coupons';
+/** 8.0.19 挪到门店「发券」的两个页签 */
+const MOVED_TABS = ['campaigns', 'batches'] as const;
+const COUPON_ISSUE_PATH = '/coupon-issue';
 const COUPON_TABS = TABS.map((t) => ({ key: t.value, label: <span data-testid={`coupon-tab-${t.value}`}>{t.label}</span> }));
 
 export function CouponsSection() {
@@ -94,12 +95,20 @@ export function CouponsSection() {
   const [params] = useSearchParams();
   const legacy = TABS.find((t) => t.value === params.get('tab'))?.value;
   const invalidateCoupons = useInvalidateCoupons();
+  const { tab: tabInUrl } = useParams();
+  const moved = MOVED_TABS.find((t) => t === tabInUrl || t === params.get('tab'));
+  if (moved) return <Navigate to={moved === 'campaigns' ? COUPON_ISSUE_PATH : `${COUPON_ISSUE_PATH}/${moved}`} replace />;
   if (legacy) return <Navigate to={legacy === TABS[0]!.value ? COUPON_BASE : `${COUPON_BASE}/${legacy}`} replace />;
   return (
     <AdminPage
       section="coupons"
       tabs={COUPON_TABS}
-      description="券模板（代金券、折扣券、兑换券、买一赠一券）、自动发券的规则（开卡礼、升级礼、生日礼、充值赠券）、批量发券、无记名纸质券、统计与使用率。会员的券在会员详情里看、发、作废；结账时在收款里用券。"
+      actions={
+        <Link to={COUPON_ISSUE_PATH} className="flex h-9 items-center rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3" data-testid="coupon-issue-link">
+          去发券（批量发券、无记名券）
+        </Link>
+      }
+      description="券模板（代金券、折扣券、兑换券、买一赠一券）、自动发券的规则（开卡礼、升级礼、生日礼、充值赠券）、统计与使用率。批量发券、无记名纸质券 8.0.19 起在门店会员工作台的「发券」。会员的券在会员详情里看、发、作废；结账时在收款里用券。"
     >
       <div className="space-y-4" data-testid="coupon-admin">
         {/* 新建模板、加规则、生成无记名券、发券时断网：关掉对话框、刷新、重新登录后在这里查回、按原内容重新提交或作废（Codex 复审 6c3765c） */}
@@ -117,10 +126,6 @@ function CouponTabBody() {
     <TemplatesCard />
   ) : tab === 'rules' ? (
     <RulesCard />
-  ) : tab === 'campaigns' ? (
-    <CampaignsCard />
-  ) : tab === 'batches' ? (
-    <BatchesCard />
   ) : tab === 'stats' ? (
     <StatsCard />
   ) : (
@@ -1337,7 +1342,8 @@ const LINK_BUTTON =
 /** 还没用的（含未生效、已过期）：按批次作废的就是这些 */
 const unusedOf = (b: CouponBatch) => b.counts.available + b.counts.pending + b.counts.expired;
 
-function BatchesCard() {
+/** 无记名券（8.0.19 起显示在门店「发券 → 无记名券」） */
+export function BatchesCard() {
   const can = useCan();
   const batches = useCouponBatches();
   const templates = useCouponTemplates();

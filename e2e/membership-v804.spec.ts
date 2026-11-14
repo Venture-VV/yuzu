@@ -52,7 +52,7 @@ test.describe('8.0.4 会员体系整改', () => {
     await expect(page.getByTestId('vip-lockers')).toBeVisible();
     for (const grade of [0, 1, 2, 3, 4, 5, 6]) await expect(page.getByTestId(`vip-level-${grade}`)).toBeVisible();
     await page.goto('/admin/vip-lockers');
-    await expect(page).toHaveURL(/\/admin\/benefits\?view=vip/);
+    await expect(page).toHaveURL(/\/admin\/membership\/benefits\?view=vip/);
     await expect(page.getByTestId('vip-lockers')).toBeVisible();
 
     // 看使用率
@@ -100,8 +100,11 @@ test.describe('8.0.4 会员体系整改', () => {
     const members: number[] = [];
     for (const n of [1, 2]) members.push((await postJson<{ id: number }>(page, '/api/members', { name: `E2E圈选${run}-${n}`, phone: phone(n), tagIds: [tag.id] })).id);
     const cash = await postJson<{ id: number }>(page, '/api/coupons/templates', { clientKey: randomUUID(), name: `E2E批量${run}`, kind: 'cash', faceValue: 1000, validity: 'days', validDays: 30 });
-    await page.reload();
-    await page.getByTestId('coupon-tab-campaigns').click();
+    // 8.0.19：批量发券在门店「会员工作台 → 发券」（从工作台右上角进）
+    await page.goto('/');
+    await page.getByTestId('workbench-coupon-issue').click();
+    await expect(page).toHaveURL(/\/coupon-issue$/);
+    await expect(page.getByTestId('coupon-tab-campaigns')).toHaveAttribute('aria-current', 'page');
     await page.getByTestId('campaign-new').click();
     await page.getByTestId('campaign-template').selectOption(String(cash.id));
     await page.getByTestId(`campaign-tag-${tag.id}`).click();

@@ -55,7 +55,6 @@ import { cn, downloadUrl, formatDateTime, formatTime } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
-import { AdminPage } from '../admin/AdminShell';
 import { benefitKeys } from './queries';
 import { BenefitTiersView } from './BenefitTiersView';
 import { VipLockersCard } from './VipLockersCard';
@@ -64,21 +63,19 @@ import { VipLockersCard } from './VipLockersCard';
 type BenefitView = 'tiers' | 'list' | 'vip';
 const VIEWS: BenefitView[] = ['tiers', 'list', 'vip'];
 
-export function BenefitsSection() {
+/** 「会员体系 → 会员权益」页签的内容（8.0.19 起三个分区合成一个，外框在 MembershipSection） */
+export function BenefitsBody() {
   const [params, setParams] = useSearchParams();
   const raw = params.get('view');
   const view: BenefitView = VIEWS.includes(raw as BenefitView) ? (raw as BenefitView) : 'tiers';
   return (
-    <AdminPage
-      section="benefits"
-      wide
-      description="本店权益清单（会员文档附录三 A 与补充项）：逐项设好配置起点、数量与券，发布后券类每月自动发、事件礼按事件自动发，服务类列在会员详情「本月可享」。改了只影响以后，已经发出的券、登记的使用不变。"
-      actions={
+    <div>
+      <div className="mb-4 flex flex-wrap items-start gap-x-4 gap-y-2">
+        <p className="min-w-0 flex-1 basis-80 text-[13px] text-ink-3">本店权益清单（会员文档附录三 A 与补充项）：逐项设好配置起点、数量与券，发布后券类每月自动发、事件礼按事件自动发，服务类列在会员详情「本月可享」。改了只影响以后，已经发出的券、登记的使用不变。</p>
         <Link to="/admin/coupons/usage" className="text-[13px] font-semibold text-pine hover:underline" data-testid="benefits-usage-link">
           看使用率
         </Link>
-      }
-    >
+      </div>
       <Segmented
         ariaLabel="看法"
         className="mb-4"
@@ -95,10 +92,17 @@ export function BenefitsSection() {
       ) : (
         <>
           <BenefitsEditor view={view} />
-          <ParkingLogCard />
+          {/* 停车登记（8.0.19，IA4）：是前台每天要对的账，挪到门店会员工作台右上角的「停车登记」；这里留一条指路 */}
+          <Notice tone="info" title="停车登记在门店里看" className="mt-4" data-testid="benefit-parking-moved">
+            前台登记的停车优惠（车牌、免费几小时）与导出给停车场的清单，8.0.19 起在门店{' '}
+            <Link to="/parking-log" className="font-bold text-lake hover:underline">
+              会员工作台 → 停车登记
+            </Link>
+            。停车优惠这项权益本身（每次免几小时）仍在上面的清单里改。
+          </Notice>
         </>
       )}
-    </AdminPage>
+    </div>
   );
 }
 
@@ -828,82 +832,5 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         {error && <Notice tone="error" title={error} className="sm:col-span-2" />}
       </div>
     </Dialog>
-  );
-}
-
-/**
- * 停车登记（v0.7.28，QY-016，N10）：一段营业日里前台登记的停车优惠（车牌、免费几小时、会员、经办），导出给停车场对账。
- * 系统不收停车费，只登记
- */
-function ParkingLogCard() {
-  const today = useSession().today;
-  const [from, setFrom] = useState(`${today.slice(0, 7)}-01`);
-  const [to, setTo] = useState(today);
-  const valid = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to;
-  const q = useQuery({
-    queryKey: ['benefits', 'parking', from, to],
-    queryFn: () => api.get<ParkingUseRow[]>(`/api/benefits/parking?from=${from}&to=${to}`),
-    enabled: valid,
-  });
-  const rows = q.data ?? [];
-  const active = rows.filter((r) => r.status === 'active');
-  return (
-    <Card className="mt-4 p-5" data-testid="benefit-parking-log">
-      <SectionTitle
-        aside={
-          <Button size="sm" variant="secondary" icon={<Download className="size-3.5" />} disabled={!valid} onClick={() => downloadUrl(`/api/benefits/parking/export?from=${from}&to=${to}`)}>
-            导出给停车场
-          </Button>
-        }
-      >
-        停车登记
-      </SectionTitle>
-      <p className="mt-1 text-[12.5px] text-ink-3">前台登记的停车优惠（车牌、免费几小时）；系统不收停车费，只登记、给停车场对账。作废的列出来但不算。</p>
-      <div className="mt-3 flex flex-wrap items-end gap-2">
-        <Field label="从" htmlFor="parking-from">
-          <Input id="parking-from" type="date" fullWidth={false} value={from} onChange={(e) => setFrom(e.target.value)} />
-        </Field>
-        <Field label="到" htmlFor="parking-to">
-          <Input id="parking-to" type="date" fullWidth={false} value={to} onChange={(e) => setTo(e.target.value)} />
-        </Field>
-        <span className="pb-2 text-[13px] text-ink-2" data-testid="benefit-parking-total">
-          {active.length} 次 · 共免 {active.reduce((sum, r) => sum + r.hours, 0)} 小时
-        </span>
-      </div>
-      {q.error ? (
-        <Notice tone="error" title={errorMessage(q.error)} className="mt-3" />
-      ) : rows.length === 0 ? (
-        <p className="mt-3 text-[13px] text-ink-3">这段时间没有停车登记。</p>
-      ) : (
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[640px] text-[13px]">
-            <thead className="text-left text-[12px] text-ink-3">
-              <tr>
-                <th className="py-1.5 pr-3">时间</th>
-                <th className="py-1.5 pr-3">车牌</th>
-                <th className="py-1.5 pr-3">免费</th>
-                <th className="py-1.5 pr-3">会员</th>
-                <th className="py-1.5 pr-3">经办</th>
-                <th className="py-1.5">状态</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/70">
-              {rows.map((r) => (
-                <tr key={r.id} data-testid={`parking-row-${r.plate}`}>
-                  <td className="num py-1.5 pr-3 whitespace-nowrap">{formatDateTime(r.createdAt)}</td>
-                  <td className="py-1.5 pr-3 font-semibold">{r.plate}</td>
-                  <td className="num py-1.5 pr-3">{r.hours} 小时</td>
-                  <td className="py-1.5 pr-3">
-                    {r.memberName} <span className="text-ink-4">{r.memberNo}</span>
-                  </td>
-                  <td className="py-1.5 pr-3">{r.staffName}</td>
-                  <td className="py-1.5">{r.status === 'voided' ? <Badge tone="clay">已作废：{r.voidReason}</Badge> : '有效'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Card>
   );
 }

@@ -559,6 +559,52 @@ describe("concierge all-native member insights", () => {
     expect(await snapshot()).toBe(before);
   });
 
+  it("filters and counts tiers in SQL by the projected grade, not the stored one (8.0.19 W9)", async () => {
+    // 「满十二月」存着的是 1 档，会籍 2023-12-31 到期还没处理：筛选、分档人数与名单里显示的都按投影出来的 0 档
+    const [stored] = await ctx.sql`SELECT grade FROM members WHERE id=${twelve}`;
+    expect(Number(stored!.grade)).toBe(1);
+    const all = await insights();
+    const zero = await insights({ grade: 0 });
+    expect(zero.members.map((m) => m.id)).toContain(twelve);
+    expect(zero.members.every((m) => m.grade === 0)).toBe(true);
+    const first = await insights({ grade: 1 });
+    expect(first.members.map((m) => m.id)).not.toContain(twelve);
+    for (const tier of all.tiers) {
+      const page = await insights({ grade: tier.grade });
+      expect(page.filteredTotal).toBe(tier.count);
+      expect(page.stats).toEqual(all.stats);
+    }
+    expect(all.tiers.reduce((sum, tier) => sum + tier.count, 0)).toBe(all.stats.totalMembers);
+  });
+
+  it("pages in SQL: every account appears exactly once across pages, newest first (8.0.19 W9)", async () => {
+    await withRolledBackFixtures(async (db) => {
+      const stamps = Array.from({ length: 120 }, (_, i) => new Date(Date.UTC(2024, 0, 1 + (i % 40), 3, 0, 0)).toISOString());
+      for (const [i, createdAt] of stamps.entries())
+        await db`INSERT INTO members(member_no,name,phone,created_at)
+          VALUES (${`W9${String(i).padStart(4, "0")}`},${`翻页${i}`},${`1377${String(i).padStart(7, "0")}`},${createdAt})`;
+      const load = (query: unknown) => loadMemberInsights(db, timezone, query, at);
+      const head = await load({});
+      const seen: number[] = [];
+      const order: string[] = [];
+      for (let offset = 0; offset < head.filteredTotal; offset += head.limit) {
+        const page = await load({ offset });
+        expect(page.filteredTotal).toBe(head.filteredTotal);
+        expect(page.hasMore).toBe(offset + head.limit < head.filteredTotal);
+        expect(page.members.length).toBe(Math.min(head.limit, head.filteredTotal - offset));
+        for (const m of page.members) {
+          seen.push(m.id);
+          order.push(`${m.createdAt}#${String(m.id).padStart(12, "0")}`);
+        }
+      }
+      expect(seen.length).toBe(head.filteredTotal);
+      expect(new Set(seen).size).toBe(seen.length);
+      expect(head.filteredTotal).toBe(head.stats.totalMembers);
+      expect(order).toEqual([...order].sort().reverse());
+      expect((await load({ offset: head.filteredTotal })).members).toEqual([]);
+    });
+  });
+
   it("serves only limited read-only summaries with concierge permission, including unenrolled member details", async () => {
     const denied = await api(
       ctx.app,

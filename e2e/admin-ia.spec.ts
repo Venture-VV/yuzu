@@ -25,7 +25,11 @@ test.describe('8.0.17 后台的信息架构', () => {
     // 规则中心：规则总表、门店基本规则（原「经营规则」）
     await expect(page.getByTestId('admin-nav-settings')).toHaveText('规则总表');
     await expect(page.getByTestId('admin-nav-rules')).toHaveText('门店基本规则');
-    await expect(page.getByTestId('admin-nav-members')).toHaveText('渠道与标签');
+    // 8.0.19：会员规则、会员权益、渠道与标签合成「会员体系」一个分区；对客导览单列
+    await expect(page.getByTestId('admin-nav-membership')).toHaveText('会员体系');
+    await expect(page.getByTestId('admin-nav-members')).toHaveCount(0);
+    await expect(page.getByTestId('admin-nav-benefits')).toHaveCount(0);
+    await expect(page.getByTestId('admin-nav-guide')).toHaveText('对客导览');
     await expect(page.getByTestId('admin-nav-coupons')).toHaveText('券');
     await expect(page.getByTestId('admin-nav-opening')).toHaveText('期初与旧账');
     // 设备：8.0.16 以前不在侧栏里
@@ -85,8 +89,9 @@ test.describe('8.0.17 后台的信息架构', () => {
     await tabs('/admin/catalog', ['消费项目', '门票', '充值套餐', '导入价目表']);
     await tabs('/admin/devices', ['设备登记表', '打印任务与设备事件', '按采购清单导入']);
     await tabs('/admin/opening', ['会员余额期初', '旧系统逐笔流水']);
-    await tabs('/admin/coupons', ['发券规则', '券模板', '批量发券', '无记名券', '统计', '使用率']);
-    await tabs('/admin/spaces', ['空间', '楼层与区域', '底图', '对客导览', '实时位置', '导入']);
+    // 8.0.19：批量发券、无记名券挪到门店「会员工作台 → 发券」（e2e/store-entries.spec.ts）
+    await tabs('/admin/coupons', ['发券规则', '券模板', '统计', '使用率']);
+    await tabs('/admin/spaces', ['空间', '楼层与区域', '底图', '实时位置', '导入']);
     await tabs('/admin/emenu', ['设置', /^分类与版面（\d+）$/, /^菜品图文（\d+）$/]);
   });
 
@@ -138,7 +143,7 @@ test.describe('8.0.17 后台的信息架构', () => {
     await expect(page.getByTestId('subnav-usage')).toHaveAttribute('aria-current', 'page');
     // 「会员权益」里的「看使用率」也到这里
     await page.goto('/admin/vip-lockers');
-    await expect(page).toHaveURL(/\/admin\/benefits\?view=vip$/);
+    await expect(page).toHaveURL(/\/admin\/membership\/benefits\?view=vip$/);
     // 深链接：直接打开某个页签
     await page.goto('/admin/spaces/plans');
     await expect(page.getByTestId('subnav-plans')).toHaveAttribute('aria-current', 'page');

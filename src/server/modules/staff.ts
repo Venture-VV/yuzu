@@ -111,8 +111,10 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
     // 停用的员工不用先改职责（停用后没有任何权限）
     if (input.active) assertDutiesCompatible(input.role, input.duties);
     await sql.begin(async (tx) => {
-      // 锁住全部店主行，保证并发修改时仍至少保留一位在职店主
-      await tx`SELECT id FROM staff WHERE role = 'owner' FOR UPDATE`;
+      // 锁住全部店主行，保证并发修改时仍至少保留一位在职店主。
+      // FOR NO KEY UPDATE（8.0.19，原来是 FOR UPDATE）：改员工的事务之间照旧互相串行，但不再挡住引用店主的写入——
+      // 审计、设备事件等记经办人的外键检查要对店主行加 KEY SHARE，FOR UPDATE 会让全店所有店主经手的写入等这个事务提交
+      await tx`SELECT id FROM staff WHERE role = 'owner' FOR NO KEY UPDATE`;
       const [before] = await tx<{ role: string; duties: string[]; active: boolean; displayName: string; system: boolean }[]>`
         SELECT role, duties, active, display_name, system FROM staff WHERE id = ${id}`;
       if (!before || before.system) throw notFound('员工不存在');

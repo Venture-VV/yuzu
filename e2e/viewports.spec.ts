@@ -311,7 +311,7 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
     const navName = isMobile || (page.viewportSize()?.width ?? 0) < 1024 ? 'ERP 分区' : 'ERP 导航';
     const erpNav = page.getByRole('navigation', { name: navName });
-    for (const name of ['ERP 首页', '库存', '采购', '应付货款', '审批中心', '营业数据', 'ERP 设置']) await expect(erpNav.getByRole('link', { name, exact: true })).toHaveCount(1);
+    for (const name of ['ERP 首页', '库存', '采购', '应付货款', '审批中心', 'ERP 设置']) await expect(erpNav.getByRole('link', { name, exact: true })).toHaveCount(1);
     for (const [url, testId] of [
       ['/inventory', null],
       ['/purchasing', null],

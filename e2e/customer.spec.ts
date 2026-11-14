@@ -21,7 +21,7 @@ test("客户部总览数字与小时键盘下钻沿用真实查询条件", async
   expect(response.status(), await response.text()).toBe(200);
   const overview: CustomerOverview = await response.json();
   await page.getByRole("button", { name: "查看今日已结消费详情", exact: true }).click();
-  await expect(page.getByRole("radio", { name: "整单消费与独立扣卡", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("link", { name: "整单消费与独立扣卡", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("消费原单 · 结账与独立扣卡", { exact: true })).toBeVisible();
   await page.getByTestId("customer-tab-overview").click();
   const firstHour = page.getByRole("group", { name: "每小时时段明细", exact: true }).getByRole("button").first();
@@ -33,7 +33,7 @@ test("客户部总览数字与小时键盘下钻沿用真实查询条件", async
   await firstHour.focus();
   await firstHour.press("Enter");
   expect((await requested).status()).toBe(200);
-  await expect(page.getByRole("radio", { name: "充值原单与归属", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("link", { name: "充值原单与归属", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("button", { name: new RegExp(`${String(hour).padStart(2, "0")}:00时段`) })).toBeVisible();
 });
 test("经理可发现维护绑定审核队列并打开原始会员", async ({ page }) => {
@@ -41,7 +41,7 @@ test("经理可发现维护绑定审核队列并打开原始会员", async ({ pa
   await openCustomer(page);
   await page.getByTestId("customer-tab-members").click();
   const response = page.waitForResponse((res) => new URL(res.url()).pathname === "/api/customer/bindings");
-  await page.getByRole("radio", { name: "绑定审核", exact: true }).click();
+  await page.getByRole("link", { name: "绑定审核", exact: true }).click();
   const queueResponse = await response;
   expect(queueResponse.status(), await queueResponse.text()).toBe(200);
   const queue: CustomerBindingQueue = await queueResponse.json();
@@ -52,6 +52,83 @@ test("经理可发现维护绑定审核队列并打开原始会员", async ({ pa
     await expect(page.getByRole("dialog", { name: "会员档案与维护时间轴", exact: true })).toBeVisible();
     await expect(page.getByRole("dialog")).toContainText(row.member.memberNo);
   } else await expect(page.getByText("当前状态下暂无绑定申请。", { exact: true })).toBeVisible();
+});
+test("当日经营子页地址在刷新、收藏直达和后退时保留消费流程", async ({ page }) => {
+  await login(page);
+  await page.goto("/customer?tab=daily");
+  const dailyTabs = page.getByRole("navigation", { name: "当日经营明细类别", exact: true });
+  await expect(dailyTabs.getByRole("link", { name: "充值原单与归属", exact: true })).toHaveAttribute("aria-current", "page");
+  await dailyTabs.getByRole("link", { name: "整单消费与独立扣卡", exact: true }).click();
+  await expect(page).toHaveURL(/tab=daily.*daily=settlement/);
+  const bookmark = page.url();
+  await expect(page.getByText("消费原单 · 结账与独立扣卡", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(dailyTabs.getByRole("link", { name: "整单消费与独立扣卡", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("消费原单 · 结账与独立扣卡", { exact: true })).toBeVisible();
+  await dailyTabs.getByRole("link", { name: "充值原单与归属", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "搜索充值原单", exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(bookmark);
+  await expect(page.getByText("消费原单 · 结账与独立扣卡", { exact: true })).toBeVisible();
+  await page.getByTestId("customer-tab-overview").click();
+  await page.goto(bookmark);
+  await expect(dailyTabs.getByRole("link", { name: "整单消费与独立扣卡", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("消费原单 · 结账与独立扣卡", { exact: true })).toBeVisible();
+});
+test("会员绑定子页地址在刷新、收藏直达和后退时保留审核队列", async ({ page }) => {
+  await login(page);
+  await page.goto("/customer?tab=members");
+  const memberTabs = page.getByRole("navigation", { name: "会员绑定工作区", exact: true });
+  await expect(memberTabs.getByRole("link", { name: "会员名单", exact: true })).toHaveAttribute("aria-current", "page");
+  await memberTabs.getByRole("link", { name: "绑定审核", exact: true }).click();
+  await expect(page).toHaveURL(/tab=members.*member=bindings/);
+  const bookmark = page.url();
+  await expect(page.getByText("会员维护绑定审核", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(memberTabs.getByRole("link", { name: "绑定审核", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("会员维护绑定审核", { exact: true })).toBeVisible();
+  await memberTabs.getByRole("link", { name: "会员名单", exact: true }).click();
+  await expect(page.getByText("会员档案与维护关系", { exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(bookmark);
+  await expect(page.getByText("会员维护绑定审核", { exact: true })).toBeVisible();
+  await page.getByTestId("customer-tab-overview").click();
+  await page.goto(bookmark);
+  await expect(memberTabs.getByRole("link", { name: "绑定审核", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("会员维护绑定审核", { exact: true })).toBeVisible();
+});
+test("个人权限深链不挂载绑定审核且地址参数不能放宽充值范围", async ({ page }) => {
+  await login(page);
+  // Exercise the UI with the same capabilities returned to an account manager. API authorization
+  // and seller filtering are covered against real account-manager sessions in customer-reads.test.ts.
+  await page.route("**/api/auth/me", async (route) => {
+    const response = await route.fetch();
+    const session: SessionInfo = await response.json();
+    session.permissions = session.permissions.filter((permission) => permission !== "customer.manage");
+    await route.fulfill({ response, json: session });
+  });
+  await page.route("**/api/customer/overview*", async (route) => {
+    const response = await route.fetch();
+    const overview: CustomerOverview = await response.json();
+    overview.capabilities = { ...overview.capabilities, manage: false, scope: "self" };
+    await route.fulfill({ response, json: overview });
+  });
+  let bindingRequests = 0;
+  page.on("request", (request) => { if (new URL(request.url()).pathname === "/api/customer/bindings") bindingRequests += 1; });
+  await page.goto("/customer?tab=members&member=bindings");
+  await expect(page.getByText("会员档案与维护关系", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "绑定审核", exact: true })).toHaveCount(0);
+  await expect(page.getByText("会员维护绑定审核", { exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText("会员档案与维护关系", { exact: true })).toBeVisible();
+  expect(bindingRequests).toBe(0);
+  const requested = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/customer/recharges");
+  await page.goto("/customer?tab=daily&daily=recharge&managerId=999999&scope=all");
+  const query = new URL((await requested).url()).searchParams;
+  expect(query.has("managerId")).toBe(false);
+  expect(query.has("scope")).toBe(false);
+  await expect(page.getByRole("textbox", { name: "搜索充值原单", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "客户经理筛选", exact: true })).toHaveCount(0);
 });
 test("无客户部权限时客户端隐藏入口且不读取客户部数据", async ({ page }) => {
   await login(page);
@@ -78,7 +155,7 @@ test("390px客户部六模块与横向表格局部滚动不会撑宽页面", asy
     await page.getByTestId(`customer-tab-${tab}`).click();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
   }
-  await page.getByRole("radio", { name: "绑定审核", exact: true }).click();
+  await page.getByRole("link", { name: "绑定审核", exact: true }).click();
   await expect(page.getByText("会员维护绑定审核", { exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
 });
@@ -157,6 +234,11 @@ test("部门目标卡和员工金额打开原单明细，三秒同步保留目�
     await form.getByLabel("月目标（元）*", { exact: true }).fill("350000");
     await form.getByLabel("本月组别", { exact: true }).selectOption("A组");
     await form.getByLabel("原因 / 依据 *", { exact: true }).fill("只读验收草稿，不提交");
+    await page.goBack();
+    await expect(page.getByTestId("customer-tab-overview")).toHaveAttribute("aria-current", "page");
+    await expect(form.getByLabel("原因 / 依据 *", { exact: true })).toHaveValue("只读验收草稿，不提交");
+    await page.goForward();
+    await expect(page.getByTestId("customer-tab-targets")).toHaveAttribute("aria-current", "page");
     await page.waitForTimeout(3400);
     await expect(form.getByLabel("月目标（元）*", { exact: true })).toHaveValue("350000");
     await expect(form.getByLabel("本月组别", { exact: true })).toHaveValue("A组");

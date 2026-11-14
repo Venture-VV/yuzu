@@ -91,7 +91,7 @@ export function RuleCatalog() {
                         )
                       ) : (
                         sections.includes(r.section) && (
-                          <Link to={ADMIN_SECTIONS[r.section].path} className="text-[12.5px] font-semibold text-pine hover:underline">
+                          <Link to={r.tab ? `${ADMIN_SECTIONS[r.section].path}/${r.tab}` : ADMIN_SECTIONS[r.section].path} className="text-[12.5px] font-semibold text-pine hover:underline">
                             去设置 →
                           </Link>
                         )

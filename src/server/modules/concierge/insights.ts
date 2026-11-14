@@ -3,11 +3,13 @@ import { z } from "zod";
 import { businessDateOf } from "@shared/business-date";
 import {
   expiryWindowEnd,
+  expiryStep,
   gradeLabel,
   MAX_GRADE,
   type Grade,
   type GradeState,
   type Tier,
+  type MembershipRules,
 } from "@shared/membership";
 import {
   INSIGHT_FILTER_BUCKETS,
@@ -188,8 +190,29 @@ async function statesOf(
   db: Db,
   rows: NativeRow[],
   day: string,
+  rules: MembershipRules,
 ): Promise<Map<number, GradeState>> {
   const states = new Map<number, GradeState>();
+  const overdue = rows.filter((row) => {
+    const end = expiryWindowEnd(row);
+    return row.grade > 0 && row.cycleStart && end && end < day;
+  });
+  // Preserve the native due projection's completed family consumption and
+  // closed business-date intervals, but fetch all selected accounts together.
+  type MemberSpend = { root: number; day: string; amount: number };
+  const spendRows: MemberSpend[] = overdue.length ? await db<MemberSpend[]>`WITH RECURSIVE family AS (
+    SELECT id AS root,id FROM members WHERE id=ANY(${overdue.map((r) => Number(r.id))}::bigint[])
+    UNION SELECT f.root,m.id FROM members m JOIN family f ON m.merged_into_id=f.id
+  ) SELECT f.root,c.business_date::text AS day,sum(c.total_amount)::bigint AS amount
+    FROM family f JOIN consumptions c ON c.member_id=f.id
+    WHERE c.status='completed' AND c.business_date>=${overdue.map((r) => r.cycleStart!).sort()[0]!}
+    GROUP BY f.root,c.business_date` : [];
+  const spendByMember = new Map<number, MemberSpend[]>();
+  for (const row of spendRows) {
+    const id = Number(row.root), spends = spendByMember.get(id) ?? [];
+    spends.push(row);
+    spendByMember.set(id, spends);
+  }
   for (const row of rows) {
     let state: GradeState = {
       grade: row.grade,
@@ -198,10 +221,17 @@ async function statesOf(
       cycleEnd: row.cycleEnd,
       graceUntil: row.graceUntil,
     };
-    const end = expiryWindowEnd(state);
-    // Current persisted states need no per-member projection queries. Overdue states use the native rule engine.
-    if (state.grade > 0 && state.cycleStart && end && end < day)
-      state = (await projectedGrade(db, Number(row.id), day)) ?? state;
+    const spends = spendByMember.get(Number(row.id)) ?? [];
+    // Same read-only expiry steps and bound as membership.projectDue.
+    for (let i = 0; i < 40; i++) {
+      const end = expiryWindowEnd(state);
+      if (state.grade === 0 || !state.cycleStart || !end || end >= day) break;
+      const from = state.cycleStart;
+      const spend = spends.reduce((sum, r) => sum + (r.day >= from && r.day <= end ? Number(r.amount) : 0), 0);
+      const step = expiryStep(rules, state, spend, day);
+      if (!step) break;
+      state = step.next;
+    }
     states.set(Number(row.id), state);
   }
   return states;
@@ -240,7 +270,26 @@ function memberOf(
   };
 }
 
-/** The caller supplies one read-only repeatable-read snapshot for stats, filtering, and details. */
+interface InsightTotals {
+  total: number;
+  buckets: Partial<Record<InsightDormancyBucket, number>> | null;
+  grades: Record<string, number> | null;
+  newThis: number;
+  newLast: number;
+  months: Record<string, number> | null;
+  filteredTotal: number;
+  pageIds: (number | string)[];
+}
+
+/**
+ * The caller supplies one read-only repeatable-read snapshot for stats, filtering, and details.
+ *
+ * 8.0.19（W9）：统计、筛选、翻页都在数据库里做，只把这一页的 50 位取出来。原来每次请求把全部会员读进来、
+ * 在这里逐位算（2 万会员约 0.35 秒，还要把 2 万行搬过来）。口径没有变：
+ *   · 到访 = 前台有效入场（不含作废、不含 at 之后的），合并的会员并到主账号；四段按门店时区的日历月周年时刻分；
+ *   · 档级：会籍到期还没处理的（通常没有，每天的到期处理会清掉）先按会员规则投影，再当作覆盖传进查询；
+ *   · 查找沿用会员工作台的查法（手机号各种写法、会员号、实体卡），查到的落到主账号。
+ */
 export async function loadMemberInsights(
   db: Db,
   timezone: string,
@@ -258,88 +307,110 @@ export async function loadMemberInsights(
     throw badRequest("趋势年份不能晚于门店当前年份", { field: "trendYear" });
   const settings = await loadSettings(db);
   const rules = await loadMembershipRules(db);
-  const rows = await nativeRows(db, timezone, at);
-  const states = await statesOf(
-    db,
-    rows,
-    businessDateOf(at, timezone, settings.businessDayStartHour),
-  );
-  const all = rows.map((row) =>
-    memberOf(row, states.get(Number(row.id))!, rules, calendar),
-  );
-  const groups = {
-    oneToThree: 0,
-    threeToSix: 0,
-    sixToTwelve: 0,
-    twelvePlus: 0,
-    never: 0,
-  };
-  for (const member of all)
-    if (member.dormancyBucket !== "recent") groups[member.dormancyBucket]++;
-  const createdBetween = (from: string, to: string) =>
-    all.filter(
-      (m) =>
-        Date.parse(m.createdAt) >= Date.parse(from) &&
-        Date.parse(m.createdAt) < Date.parse(to),
-    ).length;
-  const newThisMonth = createdBetween(
-    calendar.monthStart,
-    new Date(at.getTime() + 1).toISOString(),
-  );
-  const newLastMonth = createdBetween(
-    calendar.previousMonthStart,
-    calendar.monthStart,
-  );
-  const creationMonths = new Map(
-    rows.map((row) => [Number(row.id), row.createdMonth]),
-  );
-  const monthCounts = new Map<string, number>();
-  for (const row of rows) {
-    // Do not count a future-dated creation even within the currently available month.
-    if (Date.parse(row.createdAt) > at.getTime()) continue;
-    monthCounts.set(
-      row.createdMonth,
-      (monthCounts.get(row.createdMonth) ?? 0) + 1,
-    );
+  const day = businessDateOf(at, timezone, settings.businessDayStartHour);
+  const asOf = at.toISOString();
+  // 「不算将来的」统一用这个上界（与原来按毫秒比较一致：at 这一毫秒以内建的算）
+  const notAfter = new Date(at.getTime() + 1).toISOString();
+
+  // 会籍到期还没处理的主账号：按规则投影出现在的档级，覆盖存着的那个
+  const overdue = await db<{ id: number }[]>`SELECT id FROM members
+    WHERE merged_into_id IS NULL AND grade > 0 AND cycle_start IS NOT NULL
+      AND coalesce(grace_until, cycle_end) < ${day}::date ORDER BY id`;
+  const overrideIds: number[] = [];
+  const overrideGrades: number[] = [];
+  for (const row of overdue) {
+    const state = await projectedGrade(db, Number(row.id), day);
+    if (!state) continue;
+    overrideIds.push(Number(row.id));
+    overrideGrades.push(state.grade);
   }
-  let matchingIds: Set<number> | null = null;
-  if (query.q && rows.length) {
+
+  let matchIds: number[] | null = null;
+  if (query.q) {
     // Reuse the native matcher (formatted phones, member numbers, and active physical cards).
     // Include its complete bounded population before canonical deduplication/pagination.
-    const found = await searchMembers(
-      db,
-      query.q,
-      rows.reduce((sum, row) => sum + row.familyIds.length, 0),
-    );
-    const foundIds = new Set(found.map((m) => Number(m.id)));
-    matchingIds = new Set(
-      rows
-        .filter((row) => row.familyIds.some((id) => foundIds.has(Number(id))))
-        .map((row) => Number(row.id)),
-    );
+    const [population] = await db<{ total: number }[]>`SELECT count(*)::int AS total FROM members`;
+    const found = population!.total ? await searchMembers(db, query.q, population!.total) : [];
+    matchIds = [...new Set((await canonicalMemberIds(db, found.map((m) => Number(m.id)))).values())];
   }
-  const filtered = all.filter(
-    (m) =>
-      (!matchingIds || matchingIds.has(m.id)) &&
-      (query.grade === undefined || m.grade === query.grade) &&
-      (query.bucket === undefined ||
-        (query.bucket === "dormant"
-          ? ["threeToSix", "sixToTwelve", "twelvePlus"].includes(
-              m.dormancyBucket,
-            )
-          : m.dormancyBucket === query.bucket)) &&
-      (query.createdMonth === undefined ||
-        (creationMonths.get(m.id) === query.createdMonth &&
-          Date.parse(m.createdAt) <= at.getTime())),
+
+  const where = [
+    matchIds ? db`AND id = ANY(${matchIds}::bigint[])` : db``,
+    query.grade !== undefined ? db`AND grade = ${query.grade}` : db``,
+    query.bucket === "dormant"
+      ? db`AND bucket IN ('threeToSix','sixToTwelve','twelvePlus')`
+      : query.bucket !== undefined
+        ? db`AND bucket = ${query.bucket}`
+        : db``,
+    query.createdMonth !== undefined
+      ? db`AND created_month = ${query.createdMonth} AND created_at < ${notAfter}::timestamptz`
+      : db``,
+  ];
+  const [totals] = await db<InsightTotals[]>`WITH RECURSIVE family AS (
+      SELECT m.id AS canonical_id,m.id AS member_id FROM members m WHERE m.merged_into_id IS NULL
+      UNION
+      SELECT f.canonical_id,m.id FROM members m JOIN family f ON m.merged_into_id=f.member_id
+    ), last_visit AS (
+      SELECT f.canonical_id,max(v.last_visit_at) AS last_visit_at
+      FROM family f JOIN (
+        SELECT member_id,max(checked_in_at) AS last_visit_at FROM visits
+        WHERE member_id IS NOT NULL AND status<>'cancelled' AND checked_in_at<=${asOf}::timestamptz
+        GROUP BY member_id
+      ) v ON v.member_id=f.member_id
+      GROUP BY f.canonical_id
+    ), acct AS (
+      SELECT m.id,m.created_at,coalesce(o.grade,m.grade)::int AS grade,
+        to_char(m.created_at AT TIME ZONE ${timezone},'YYYY-MM') AS created_month,
+        CASE WHEN l.last_visit_at IS NULL THEN 'never'
+             WHEN l.last_visit_at > ${calendar.one}::timestamptz THEN 'recent'
+             WHEN l.last_visit_at > ${calendar.three}::timestamptz THEN 'oneToThree'
+             WHEN l.last_visit_at > ${calendar.six}::timestamptz THEN 'threeToSix'
+             WHEN l.last_visit_at > ${calendar.twelve}::timestamptz THEN 'sixToTwelve'
+             ELSE 'twelvePlus' END AS bucket
+      FROM members m LEFT JOIN last_visit l ON l.canonical_id=m.id
+      LEFT JOIN unnest(${overrideIds}::bigint[],${overrideGrades}::int[]) AS o(id,grade) ON o.id=m.id
+      WHERE m.merged_into_id IS NULL
+    ), picked AS (
+      SELECT id,created_at FROM acct WHERE true ${where[0]!} ${where[1]!} ${where[2]!} ${where[3]!}
+    ) SELECT
+      (SELECT count(*)::int FROM acct) AS total,
+      (SELECT jsonb_object_agg(bucket,n) FROM (SELECT bucket,count(*)::int AS n FROM acct GROUP BY bucket) b) AS buckets,
+      (SELECT jsonb_object_agg(grade::text,n) FROM (SELECT grade,count(*)::int AS n FROM acct GROUP BY grade) g) AS grades,
+      (SELECT count(*)::int FROM acct WHERE created_at >= ${calendar.monthStart}::timestamptz AND created_at < ${notAfter}::timestamptz) AS new_this,
+      (SELECT count(*)::int FROM acct WHERE created_at >= ${calendar.previousMonthStart}::timestamptz AND created_at < ${calendar.monthStart}::timestamptz) AS new_last,
+      (SELECT jsonb_object_agg(created_month,n) FROM (
+        SELECT created_month,count(*)::int AS n FROM acct
+        WHERE created_at < ${notAfter}::timestamptz AND created_month LIKE ${`${trendYear}-%`} GROUP BY created_month) c) AS months,
+      (SELECT count(*)::int FROM picked) AS filtered_total,
+      (SELECT coalesce(array_agg(id ORDER BY created_at DESC,id DESC),'{}') FROM (
+        SELECT id,created_at FROM picked ORDER BY created_at DESC,id DESC LIMIT ${PAGE_SIZE} OFFSET ${query.offset}) p) AS page_ids`;
+  const t = totals!;
+  const buckets = t.buckets ?? {};
+  const groups = {
+    oneToThree: buckets.oneToThree ?? 0,
+    threeToSix: buckets.threeToSix ?? 0,
+    sixToTwelve: buckets.sixToTwelve ?? 0,
+    twelvePlus: buckets.twelvePlus ?? 0,
+    never: buckets.never ?? 0,
+  };
+  const gradeCounts = t.grades ?? {};
+  const monthCounts = t.months ?? {};
+
+  // 只取这一页的详情（余额、可用赠金、服务档案、上次到访……）；nativeRows 的顺序与翻页的顺序相同
+  const rows = await nativeRows(db, timezone, at, t.pageIds.map(Number));
+  const states = await statesOf(db, rows, day, rules);
+  const members = rows.map((row) =>
+    memberOf(row, states.get(Number(row.id))!, rules, calendar),
   );
+  const filteredTotal = Number(t.filteredTotal);
   return {
-    members: filtered.slice(query.offset, query.offset + PAGE_SIZE),
+    members,
     stats: {
-      totalMembers: all.length,
-      visitedLastMonth: all.filter((m) => m.dormancyBucket === "recent").length,
-      newThisMonth,
-      newLastMonth,
-      newDelta: newThisMonth - newLastMonth,
+      totalMembers: Number(t.total),
+      visitedLastMonth: buckets.recent ?? 0,
+      newThisMonth: Number(t.newThis),
+      newLastMonth: Number(t.newLast),
+      newDelta: Number(t.newThis) - Number(t.newLast),
       dormantThreeMonths:
         groups.threeToSix + groups.sixToTwelve + groups.twelvePlus,
       neverVisited: groups.never,
@@ -348,7 +419,7 @@ export async function loadMemberInsights(
     tiers: Array.from({ length: MAX_GRADE + 1 }, (_, grade) => ({
       grade,
       label: gradeLabel(rules, grade, null),
-      count: all.filter((m) => m.grade === grade).length,
+      count: gradeCounts[String(grade)] ?? 0,
     })),
     growth: {
       year: trendYear,
@@ -357,17 +428,17 @@ export async function loadMemberInsights(
         const available = month <= currentMonth;
         return {
           month,
-          count: available ? (monthCounts.get(month) ?? 0) : 0,
+          count: available ? (monthCounts[month] ?? 0) : 0,
           available,
         };
       }),
     },
-    filteredTotal: filtered.length,
+    filteredTotal,
     serverTime: at.toISOString(),
     timezone,
     offset: query.offset,
     limit: PAGE_SIZE,
-    hasMore: filtered.length > query.offset + PAGE_SIZE,
+    hasMore: filteredTotal > query.offset + PAGE_SIZE,
   };
 }
 
@@ -390,6 +461,7 @@ export async function loadInsightMembersByIds(
     db,
     rows,
     businessDateOf(at, timezone, settings.businessDayStartHour),
+    rules,
   );
   const byCanonical = new Map(
     rows.map((row) => [

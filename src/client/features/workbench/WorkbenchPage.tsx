@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
+import { SquareParking, Ticket } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MemberSummary } from '@shared/types';
 import { errorMessage } from '../../lib/api';
@@ -123,7 +124,35 @@ export function WorkbenchPage() {
 
   return (
     <>
-      <PageHeader title="会员工作台" subtitle={session.storeName} />
+      <PageHeader
+        title="会员工作台"
+        subtitle={session.storeName}
+        actions={
+          // 8.0.19（IA4）：当班会用的两个入口从后台挪到这里——停车登记（能登记权益使用的）、发券（维护券的人）；权限照旧
+          <span className="flex flex-wrap items-center gap-2">
+            {(can('benefit.use') || can('benefit.publish')) && (
+              <Link
+                to="/parking-log"
+                className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+                data-testid="workbench-parking-log"
+              >
+                <SquareParking className="size-4" />
+                停车登记
+              </Link>
+            )}
+            {can('coupon.manage') && (
+              <Link
+                to="/coupon-issue"
+                className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+                data-testid="workbench-coupon-issue"
+              >
+                <Ticket className="size-4" />
+                发券
+              </Link>
+            )}
+          </span>
+        }
+      />
       <div
         className={cn(
           'grid min-h-0 flex-1',

@@ -184,7 +184,7 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     pending: true, section: 'rules', hint: '套餐的赠金有效期在「价目与套餐」里设置', current: s.customBonusValidDays, dflt: d.customBonusValidDays, metaKey: sk('customBonusValidDays'),
   });
   // ── 会员与渠道 ──
-  add({ key: 'member_channels', group: 'members', label: '渠道来源', value: channels(s.memberChannels), defaultValue: channels(d.memberChannels), pending: true, section: 'members', current: s.memberChannels, dflt: d.memberChannels, metaKey: sk('memberChannels') });
+  add({ key: 'member_channels', group: 'members', label: '渠道来源', value: channels(s.memberChannels), defaultValue: channels(d.memberChannels), pending: true, section: 'membership', tab: 'channels', current: s.memberChannels, dflt: d.memberChannels, metaKey: sk('memberChannels') });
   // 会员自定义字段 8.0.4 起改成会员标签（数据，不是规则；在「会员与渠道 → 会员标签」维护），不在规则总表里
   // ── 会员体系 v2（v0.7.23，后台「会员体系 → 会员规则」）──
   const mr = await loadMembershipRules(db);
@@ -192,13 +192,13 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const ladder = (r: MembershipRules) => r.grades.slice(1).map((g, i) => `L${i + 1} ${g.name} ${formatYuan(g.thresholdCents)} / ${g.bonusBp / 100}%`).join('，');
   const cycle = (r: MembershipRules) => `周期 ${r.cycleDays} 天；享阶 ${r.enjoyPct}%、尊阶（保级）${r.honorPct}%；补充期 ${r.graceDays} 天`;
   const mins = (r: MembershipRules) => `首充 ${r.firstRechargeMinCents ? formatYuan(r.firstRechargeMinCents) : '不限'}，续充 ${r.topUpMinCents ? formatYuan(r.topUpMinCents) : '不限'}`;
-  add({ key: 'membership_rules.grades', group: 'members', label: '档级：门槛 / 赠送比例', value: ladder(mr), defaultValue: ladder(mrd), pending: true, section: 'membership', hint: '按滚动 365 天累计充值升档', current: mr.grades, dflt: mrd.grades, metaKey: 'membership_rules' });
-  add({ key: 'membership_rules.cycle', group: 'members', label: '阶位与会籍周期', value: cycle(mr), defaultValue: cycle(mrd), pending: true, section: 'membership', current: [mr.cycleDays, mr.enjoyPct, mr.honorPct, mr.graceDays], dflt: [mrd.cycleDays, mrd.enjoyPct, mrd.honorPct, mrd.graceDays], metaKey: 'membership_rules' });
-  add({ key: 'membership_rules.minimum', group: 'members', label: '单笔最低充值', value: mins(mr), defaultValue: mins(mrd), pending: true, section: 'membership', hint: '建议续充改成 1,000 或不限（M4）', current: [mr.firstRechargeMinCents, mr.topUpMinCents], dflt: [mrd.firstRechargeMinCents, mrd.topUpMinCents], metaKey: 'membership_rules' });
-  add({ key: 'membership_rules.reminderDays', group: 'members', label: '到期提醒', value: mr.reminderDays.map((d) => `${d} 天`).join('、'), defaultValue: mrd.reminderDays.map((d) => `${d} 天`).join('、'), pending: true, section: 'membership', current: mr.reminderDays, dflt: mrd.reminderDays, metaKey: 'membership_rules' });
+  add({ key: 'membership_rules.grades', group: 'members', label: '档级：门槛 / 赠送比例', value: ladder(mr), defaultValue: ladder(mrd), pending: true, section: 'membership', tab: 'rules', hint: '按滚动 365 天累计充值升档', current: mr.grades, dflt: mrd.grades, metaKey: 'membership_rules' });
+  add({ key: 'membership_rules.cycle', group: 'members', label: '阶位与会籍周期', value: cycle(mr), defaultValue: cycle(mrd), pending: true, section: 'membership', tab: 'rules', current: [mr.cycleDays, mr.enjoyPct, mr.honorPct, mr.graceDays], dflt: [mrd.cycleDays, mrd.enjoyPct, mrd.honorPct, mrd.graceDays], metaKey: 'membership_rules' });
+  add({ key: 'membership_rules.minimum', group: 'members', label: '单笔最低充值', value: mins(mr), defaultValue: mins(mrd), pending: true, section: 'membership', tab: 'rules', hint: '建议续充改成 1,000 或不限（M4）', current: [mr.firstRechargeMinCents, mr.topUpMinCents], dflt: [mrd.firstRechargeMinCents, mrd.topUpMinCents], metaKey: 'membership_rules' });
+  add({ key: 'membership_rules.reminderDays', group: 'members', label: '到期提醒', value: mr.reminderDays.map((d) => `${d} 天`).join('、'), defaultValue: mrd.reminderDays.map((d) => `${d} 天`).join('、'), pending: true, section: 'membership', tab: 'rules', current: mr.reminderDays, dflt: mrd.reminderDays, metaKey: 'membership_rules' });
   // 生日礼提前几天到账（8.0.4，HY13）；VIP 柜 8.0.4 起归「会员权益」，不在规则总表里
   const lead = (d: number) => (d === 0 ? '生日当天' : `生日前 ${d} 天`);
-  add({ key: 'membership_rules.birthdayLeadDays', group: 'members', label: '生日礼到账', value: lead(mr.birthdayLeadDays), defaultValue: lead(mrd.birthdayLeadDays), pending: true, section: 'membership', hint: '发券规则的生日礼、权益清单的生日礼遇都按它', current: mr.birthdayLeadDays, dflt: mrd.birthdayLeadDays, metaKey: 'membership_rules' });
+  add({ key: 'membership_rules.birthdayLeadDays', group: 'members', label: '生日礼到账', value: lead(mr.birthdayLeadDays), defaultValue: lead(mrd.birthdayLeadDays), pending: true, section: 'membership', tab: 'rules', hint: '发券规则的生日礼、权益清单的生日礼遇都按它', current: mr.birthdayLeadDays, dflt: mrd.birthdayLeadDays, metaKey: 'membership_rules' });
   // ── 前台与结账 ──
   add({
     key: 'frontdesk_rules.selfVoidMinutes', group: 'frontdesk', label: '店员自行更正时限', value: `${fd.selfVoidMinutes} 分钟`, defaultValue: `${fdd.selfVoidMinutes} 分钟`,
