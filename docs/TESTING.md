@@ -56,6 +56,7 @@ npm run typecheck && npm test && npm run build                  # 交 PR 前
 | 餐饮与桌台 | `dining*` | `dining*` |
 | 客房 | `rooms*` | `rooms` |
 | 客户部（经营总览、手牌跟进、成交归属、月目标、低余额、同步指纹；只读前台与会员数据） | `customer-*` | `customer` |
+| 加了带操作编号的业务类型、动了「确认作废」的类型约束（任何迁移） | `op-fences-constraint`（代码里登记的类型约束都认）、`wallet-abandon` | — |
 | 空间台账、底图、房态图、实时位置 | `spaces`、`floorplan*`、`floormap`、`locations`、`upgrade-floormap` | `spaces`、`floorplans`、`floormap`、`locations` |
 | ERP（库存、采购、应付、报销、需求单、两级库存、台账、旧账；采购途径、转报销、部门备用金台账、补货建议、询价比价） | `inventory*`、`purchasing`、`supplier-settlement`、`stock-cycles`、`warehouses`、`expenses`、`requests`、`purchase-ledger`、`erp`、`erp-purchasing`、`replenish-mode`（补货方式，迁移 161）、`legacy` | `inventory`、`warehouses`、`supplier-settlement`、`stock-cycles`、`expenses`、`requests`、`purchase-ledger`、`erp`、`erp-purchasing`、`legacy` |
 | 后台、岗位权限、看板 | `admin-v060`、`roles`、`instance` | `admin-v060`、`review-v060`、`viewports`、`pending-marks` |
