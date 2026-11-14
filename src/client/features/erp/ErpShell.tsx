@@ -5,7 +5,7 @@ import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { usePageEnter, useSlidingIndicator } from '../../lib/motion';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Banknote, Boxes, ClipboardCheck, ClipboardList, FileOutput, FileSignature, FileText, HandCoins, Landmark, LayoutGrid, LineChart, Monitor, Package, ReceiptText, ShieldCheck, Shirt, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, Banknote, Building2, Boxes, ClipboardCheck, ClipboardList, FileOutput, FileSignature, FileText, HandCoins, Landmark, LayoutGrid, LineChart, Monitor, Package, ReceiptText, ShieldCheck, Shirt, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
 import type { ContractExpiryItem } from '@shared/contracts';
 import type { PaymentTodo } from '@shared/payments';
@@ -39,6 +39,7 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   invoices: FileText,
   salesInvoices: FileOutput,
   receivables: Landmark,
+  bank: Building2,
   revenue: LineChart,
   canteen: Soup,
   patrol: ShieldCheck,
@@ -105,6 +106,13 @@ export function ErpShell() {
     enabled: access.modules.includes('invoices') && (can('payable.read') || can('expense.read') || can('invoice.manage')),
     refetchInterval: 300_000,
   });
+  // 银行流水（8.0.21，CW17）：超过 7 天没对上的流水、超过 7 天没对上流水的付款与回款
+  const bankTodo = useQuery({
+    queryKey: ['erp', 'bank', 'todo'],
+    queryFn: () => api.get<{ stale: number; unmatched: number }>('/api/erp/bank/todo'),
+    enabled: access.modules.includes('bank') && can('payable.read'),
+    refetchInterval: 300_000,
+  });
   // 供应链（8.0.7）：库存——呆滞、临期与过期的批次；采购——待准入的供应商、快到期与过期的证照
   const supplyTodo = useQuery({
     queryKey: ['inv', 'supply-todo'],
@@ -145,7 +153,9 @@ export function ErpShell() {
                     ? supplyTodo.data.pendingAdmission + supplyTodo.data.licensesDue || undefined
                     : k === 'receivables' && arTodo.data
                       ? arTodo.data.overdueCharges + (arTodo.data.platformOverdueCents > 0 ? 1 : 0) || undefined
-                      : undefined,
+                      : k === 'bank' && bankTodo.data
+                        ? bankTodo.data.stale + bankTodo.data.unmatched || undefined
+                        : undefined,
     alert:
       (k === 'approvals' && !!todo.data?.overdue) ||
       (k === 'contracts' && contractsDue.some((x) => x.daysLeft < 0)) ||

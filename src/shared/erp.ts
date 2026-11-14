@@ -4,7 +4,7 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'assets', 'linen', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'salesInvoices', 'receivables', 'revenue', 'canteen', 'patrol'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'assets', 'linen', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'salesInvoices', 'receivables', 'bank', 'revenue', 'canteen', 'patrol'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -198,6 +198,18 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     defaultEnabled: true,
     requires: [],
   },
+  // 8.0.21 银行账户与网银流水（docs/FINANCE_V8021.md 第 4 节，CW-C）
+  bank: {
+    label: '银行流水',
+    group: '财务',
+    description: '本公司的银行账户（只记后四位），导入网银导出的对账单，与付款、回款、备用金、平台打款勾对；超过 7 天没对上的进待办（8.0.21）',
+    path: '/erp/bank',
+    pages: ['/erp/bank'],
+    apis: ['/api/erp/bank'],
+    perms: ['payable.read'],
+    defaultEnabled: true,
+    requires: ['payables'],
+  },
   receivables: {
     label: '应收与挂账',
     group: '财务',
@@ -257,7 +269,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
 export const ERP_NAV_GROUPS: readonly { key: string; title: string; modules: readonly ErpModuleKey[] }[] = [
   { key: 'approvals', title: '审批', modules: ['approvals'] },
   { key: 'supply', title: '供应链', modules: ['inventory', 'purchasing', 'requests', 'deptStock', 'assets', 'linen'] },
-  { key: 'finance', title: '财务', modules: ['payments', 'payables', 'expenses', 'invoices', 'salesInvoices', 'receivables'] },
+  { key: 'finance', title: '财务', modules: ['payments', 'payables', 'expenses', 'invoices', 'salesInvoices', 'receivables', 'bank'] },
   { key: 'contracts', title: '合同', modules: ['contracts'] },
   // 已经挪到后台的：页面不在 ERP 里。8.0.18 在 ERP 导航里各留了一条跳转，8.0.19 去掉；这一组留着是为了「每个模块都有归属」，
   // 模块开关页（ERP 设置 → 模块开关）仍按它列出这三个
@@ -391,6 +403,8 @@ export const ERP_OP_TYPES = [
   'linen_doc',
   // 8.0.21 开票申请（前台、财务申请；动的是给客人开的发票）
   'invoice_request',
+  // 8.0.21 网银流水导入
+  'bank_import',
   'customer_note',
   'customer_binding_request',
   'customer_binding_review',
@@ -457,6 +471,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   patrol_point: '新建巡场场所',
   linen_doc: '布草单据',
   invoice_request: '开票申请',
+  bank_import: '网银流水导入',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

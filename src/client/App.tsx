@@ -64,6 +64,7 @@ const AssetLabelsPrintPage = lazyPage(() => import('./features/assets/AssetLabel
 const ReceivablesPage = lazyPage(() => import('./features/receivables/ReceivablesPage').then((m) => m.ReceivablesPage));
 const InvoicesPage = lazyPage(() => import('./features/invoices/InvoicesPage').then((m) => m.InvoicesPage));
 const SalesInvoicesPage = lazyPage(() => import('./features/sales-invoices/SalesInvoicesPage').then((m) => m.SalesInvoicesPage));
+const BankPage = lazyPage(() => import('./features/bank/BankPage').then((m) => m.BankPage));
 const RequestsPage = lazyPage(() => import('./features/requests/RequestsPage').then((m) => m.RequestsPage));
 const RequestFormPage = lazyPage(() => import('./features/requests/RequestFormPage').then((m) => m.RequestFormPage));
 const RequestSheetImportPage = lazyPage(() => import('./features/requests/RequestSheetImportPage').then((m) => m.RequestSheetImportPage));
@@ -253,6 +254,7 @@ const router = createBrowserRouter([
       { path: 'expenses/budgets', element: <BudgetsPage /> },
       { path: 'invoices', element: <InvoicesPage /> },
       { path: 'sales-invoices', element: <SalesInvoicesPage /> },
+      { path: 'bank', element: <BankPage /> },
       { path: 'receivables', element: <ReceivablesPage /> },
       { path: 'assets', element: <AssetsPage /> },
       // 布草洗涤（8.0.20）

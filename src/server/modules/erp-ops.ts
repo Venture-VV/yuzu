@@ -100,6 +100,7 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   patrol_point: ['patrol.manage'],
   linen_doc: ['linen.manage'],
   invoice_request: ['frontdesk.checkout', 'recharge.create', 'ar.manage', 'invoice.issue'],
+  bank_import: ['payable.manage'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -160,6 +161,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   patrol_point: ['patrol.read', 'patrol.manage'],
   linen_doc: ['linen.read'],
   invoice_request: ['frontdesk.checkout', 'recharge.create', 'ar.read', 'invoice.issue'],
+  bank_import: ['payable.read'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {

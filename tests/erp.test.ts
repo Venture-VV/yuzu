@@ -105,6 +105,8 @@ describe('ERP 模块开关', () => {
         ['salesInvoices', true, true],
         // 应收与挂账（8.0.7）不依赖库存
         ['receivables', true, true],
+        // 银行流水（8.0.21）依赖应付货款，应付依赖库存
+        ['bank', true, false],
         ['revenue', true, true],
         // 员工食堂、安保巡场不依赖库存（8.0.20 起默认开）
         ['canteen', true, true],
