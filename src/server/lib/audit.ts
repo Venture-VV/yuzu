@@ -249,7 +249,9 @@ export type AuditAction =
   | 'bank_import'
   | 'bank_match'
   // 8.0.21 批量付款（同上第 5 节）：生成、导出、下载、作废、记已付 / 失败
-  | 'payment_batch';
+  | 'payment_batch'
+  // 8.0.21 合同模板（同上第 6 节）：新建、改版、停用、导出 Word
+  | 'contract_template';
 
 export interface AuditEntry {
   staffId: number | null;

@@ -40,6 +40,7 @@ const ShiftPage = lazyPage(() => import('./features/shift/ShiftPage').then((m) =
 const LookupPage = lazyPage(() => import('./features/membership/LookupPage').then((m) => m.LookupPage));
 const AdminShell = lazyPage(() => import('./features/admin/AdminShell').then((m) => m.AdminShell));
 const CheckoutPrintPage = lazyPage(() => import('./features/print/CheckoutPrintPage').then((m) => m.CheckoutPrintPage));
+const ContractPrintPage = lazyPage(() => import('./features/print/ContractPrintPage').then((m) => m.ContractPrintPage));
 const RefundPrintPage = lazyPage(() => import('./features/print/RefundPrintPage').then((m) => m.RefundPrintPage));
 const SettlementPrintPage = lazyPage(() => import('./features/print/SettlementPrintPage').then((m) => m.SettlementPrintPage));
 const CanteenCardsPrintPage = lazyPage(() => import('./features/canteen/CardsPrintPage').then((m) => m.CanteenCardsPrintPage));
@@ -229,6 +230,8 @@ const router = createBrowserRouter([
       { path: 'patrol-codes/:ids', element: <PatrolCodesPrintPage /> },
       // 资产标签（8.0.7）
       { path: 'asset-labels/:ids', element: <AssetLabelsPrintPage /> },
+      // 合同（8.0.21）：A4，打印或存为 PDF
+      { path: 'contract/:id', element: <ContractPrintPage /> },
     ],
   },
   // 对客导览的大屏模式（v0.7.19）：没有导航与操作，适合门店大屏常开

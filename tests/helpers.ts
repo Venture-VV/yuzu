@@ -313,6 +313,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '143_invoice_requests.sql',
   '144_bank_statements.sql',
   '145_payment_batches.sql',
+  '146_contract_templates.sql',
   '161_replenish_mode.sql',
   '162_customer_workbench.sql',
   '163_customer_credit_canonical.sql',

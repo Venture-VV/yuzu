@@ -51,6 +51,7 @@ import { registerPurchaseFlowRoutes } from './modules/purchase-flow';
 import { registerApprovalRoutes } from './modules/approvals/routes';
 import { registerContractRoutes } from './modules/contracts/routes';
 import { registerTemplateRoutes } from './modules/contracts/templates';
+import { registerContractDocRoutes } from './modules/contracts/doc-templates';
 import { registerPaymentRoutes } from './modules/payments/routes';
 import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
@@ -279,6 +280,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerApprovalRoutes(app, deps);
   // 合同与法务审查（v0.7.31）
   registerTemplateRoutes(app, deps);
+  // 合同模板与导出（8.0.21）：要在 /api/erp/contracts/:id 之前注册
+  registerContractDocRoutes(app, deps);
   registerContractRoutes(app, deps);
   registerPaymentRoutes(app, deps);
   registerPayableRoutes(app, deps);

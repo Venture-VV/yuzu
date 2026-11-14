@@ -4,21 +4,7 @@
 
 import { useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
-import {
-  Archive,
-  ArrowLeft,
-  FilePen,
-  FileStack,
-  FileText,
-  ImagePlus,
-  PenLine,
-  RefreshCw,
-  Send,
-  Stamp,
-  Trash2,
-  Undo2,
-  XCircle,
-} from 'lucide-react';
+import { Archive, ArrowLeft, FileDown, FilePen, FileStack, FileText, ImagePlus, PenLine, Printer, RefreshCw, Send, Stamp, Trash2, Undo2, XCircle } from 'lucide-react';
 import { APPROVAL_STATUS_LABELS } from '@shared/approvals';
 import {
   CHANGE_KIND_LABELS,
@@ -42,7 +28,7 @@ import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { cn, formatDateTime, uuid } from '../../lib/utils';
+import { cn, downloadUrl, formatDateTime, uuid } from '../../lib/utils';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { imagePayload } from '../../components/Images';
 import { Money } from '../../components/Money';
@@ -195,6 +181,13 @@ function Detail({ c }: { c: ContractDetail }) {
 
         {/* 操作 */}
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3" data-testid="contract-actions">
+          {/* 导出（8.0.21）：Word 与打印页（存成 PDF）；起草中的是草稿，生效以后是生效的那一版 */}
+          <Button size="sm" variant="ghost" icon={<FileDown className="size-4" />} onClick={() => downloadUrl(`/api/erp/contracts/${c.id}/document.docx`)} data-testid="contract-export-docx">
+            导出 Word
+          </Button>
+          <Button size="sm" variant="ghost" icon={<Printer className="size-4" />} onClick={() => window.open(`/print/contract/${c.id}`, '_blank', 'noopener')} data-testid="contract-print">
+            打印 / PDF
+          </Button>
           {manage && editable && (
             <>
               <Button size="sm" variant="secondary" icon={<FilePen className="size-4" />} onClick={() => navigate(`/erp/contracts/${c.id}/edit`)} data-testid="contract-edit">

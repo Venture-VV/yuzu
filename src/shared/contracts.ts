@@ -114,6 +114,18 @@ export interface ContractContent {
   acceptance: Acceptance;
   note: string;
   lines: ContractLineInput[];
+  /** 用合同模板起草的（8.0.21，docs/FINANCE_V8021.md 第 6 节）：用的哪一版、填了什么、勾了哪几条；没用模板的没有这一项 */
+  template?: ContractTemplateRef | null;
+}
+
+/** 合同内容里记的模板：哪一行（即哪一版）、填的值、勾的可选条款 */
+export interface ContractTemplateRef {
+  id: number;
+  code: string;
+  version: number;
+  name: string;
+  values: Record<string, string>;
+  clauses: string[];
 }
 
 export const CONTRACT_MAX_LINES = 50;
