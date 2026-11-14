@@ -112,6 +112,12 @@ export const FENCED_OPS = [
   'technician_state',
   // 8.0.9 安保巡场（迁移 111）：新建场所；编号记在场所上（patrol_points.client_key）
   'patrol_point',
+  'customer_note',
+  'customer_binding_request',
+  'customer_binding_review',
+  'customer_credit_claim',
+  'customer_credit_review',
+  'customer_target',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
