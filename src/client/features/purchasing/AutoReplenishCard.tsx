@@ -75,7 +75,7 @@ export function AutoReplenishCard() {
         {today ? (
           today.poIds.length > 0 ? (
             <>
-              今天建了 {today.poIds.length} 张采购单草稿（{today.lineCount} 样物料），确认数量后提交、不要的撤掉：
+              今天建了 {today.poIds.length} 张采购单草稿（{today.lineCount} 样物料），确认数量后提交、不要的撤掉（撤掉的第二天还会再建；不想再提的物料在建议行点「不用备货」）：
               {today.poIds.map((id, i) => (
                 <Link key={id} to={`/purchasing/${id}/edit`} className="num ml-1.5 font-semibold text-pine underline-offset-2 hover:underline">
                   {today.poNos[i] ?? `#${id}`}

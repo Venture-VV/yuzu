@@ -23,6 +23,64 @@ import { useMaterials, useWarehouses } from './queries';
 const recipesKey = ['inv', 'recipes'] as const;
 const usageKey = ['inv', 'usage'] as const;
 
+/**
+ * 「结账、出品时按用料扣库存」的开关与默认从哪个仓扣。两处都能改：这一页顶上，和「ERP 设置 → 库存与审批开关」（规则都收在那里）。
+ * 不给 rules 时自己取。
+ */
+export function UsageRulesCard({ rules, onSaved }: { rules?: StockUsageOverview['rules']; onSaved?: () => void | Promise<void> }) {
+  const can = useCan();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const warehouses = useWarehouses();
+  const own = useQuery({ queryKey: usageKey, queryFn: () => api.get<StockUsageOverview>('/api/inventory/usage'), enabled: !rules });
+  const r = rules ?? own.data?.rules;
+  if (!r) return null;
+  const saveRules = async (patch: Record<string, unknown>) => {
+    try {
+      await api.put('/api/inventory/usage/rules', patch);
+      await qc.invalidateQueries({ queryKey: usageKey });
+      await onSaved?.();
+    } catch (e) {
+      toast({ tone: 'error', title: errorMessage(e) });
+    }
+  };
+  const active = (warehouses.data ?? []).filter((w) => w.active);
+  return (
+    <Card className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4 text-[13.5px]" data-testid="usage-rules">
+      <span className="font-bold">结账、出品时按用料扣库存</span>
+      <Badge tone={r.enabled ? 'moss' : 'neutral'}>{r.enabled ? '开着' : '关着'}</Badge>
+      <span className="text-ink-3">进厨房 / 水吧的出品完成时扣，不进的结账时扣；没设用料的项目不扣。库存不够不拦结账与出品，欠着的列在「待扣料」里。</span>
+      {can('purchase.rules') && (
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
+            零售从
+            <Select fullWidth={false} className="h-9" value={r.saleWarehouseId} onChange={(e) => void saveRules({ saleWarehouseId: Number(e.target.value) })} data-testid="usage-sale-warehouse">
+              {active.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <label className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
+            配方从
+            <Select fullWidth={false} className="h-9" value={r.recipeWarehouseId} onChange={(e) => void saveRules({ recipeWarehouseId: Number(e.target.value) })} data-testid="usage-recipe-warehouse">
+              {active.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <Button size="sm" variant="secondary" onClick={() => void saveRules({ enabled: !r.enabled })} data-testid="usage-toggle">
+            {r.enabled ? '关掉' : '打开'}
+          </Button>
+        </span>
+      )}
+    </Card>
+  );
+}
+
 export function UsageTab() {
   const can = useCan();
   const toast = useToast();
@@ -57,52 +115,10 @@ export function UsageTab() {
       setBusy(false);
     }
   };
-  const saveRules = async (patch: Record<string, unknown>) => {
-    try {
-      await api.put('/api/inventory/usage/rules', patch);
-      await refresh();
-    } catch (e) {
-      toast({ tone: 'error', title: errorMessage(e) });
-    }
-  };
-
   const u = usage.data;
   return (
     <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 md:px-7" data-testid="usage-tab">
-      {u && (
-        <Card className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4 text-[13.5px]" data-testid="usage-rules">
-          <span className="font-bold">结账、出品时按用料扣库存</span>
-          <Badge tone={u.rules.enabled ? 'moss' : 'neutral'}>{u.rules.enabled ? '开着' : '关着'}</Badge>
-          <span className="text-ink-3">进厨房 / 水吧的出品完成时扣，不进的结账时扣；没设用料的项目不扣。库存不够不拦结账与出品，欠着的列在「待扣料」里。</span>
-          {can('purchase.rules') && (
-            <span className="ml-auto flex flex-wrap items-center gap-2">
-              <label className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
-                零售从
-                <Select fullWidth={false} className="h-9" value={u.rules.saleWarehouseId} onChange={(e) => void saveRules({ saleWarehouseId: Number(e.target.value) })} data-testid="usage-sale-warehouse">
-                  {(warehouses.data ?? []).filter((w) => w.active).map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.name}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <label className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
-                配方从
-                <Select fullWidth={false} className="h-9" value={u.rules.recipeWarehouseId} onChange={(e) => void saveRules({ recipeWarehouseId: Number(e.target.value) })} data-testid="usage-recipe-warehouse">
-                  {(warehouses.data ?? []).filter((w) => w.active).map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.name}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <Button size="sm" variant="secondary" onClick={() => void saveRules({ enabled: !u.rules.enabled })} data-testid="usage-toggle">
-                {u.rules.enabled ? '关掉' : '打开'}
-              </Button>
-            </span>
-          )}
-        </Card>
-      )}
+      {u && <UsageRulesCard rules={u.rules} onSaved={refresh} />}
 
       {u && u.pending.length > 0 && (
         <Card className="p-4" data-testid="usage-pending">

@@ -112,6 +112,11 @@ test.describe('8.0.20 进销存做深与客房', () => {
     await page.getByTestId('auto-replenish-run').click();
     await expect(page.getByText(/今天一共建了 \d+ 张草稿|没跑完/)).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('auto-replenish-today')).toContainText(/今天建了 \d+ 张采购单草稿|今天没有自动建草稿/);
+    // 规则都收在「ERP 设置」：自动补货在「采购规则」、按用料扣库存在「库存与审批开关」，与各自页面顶上是同一张卡片
+    await page.goto('/erp/settings/purchase');
+    await expect(page.getByTestId('auto-replenish')).toContainText('自动补货');
+    await page.goto('/erp/settings/inventory');
+    await expect(page.getByTestId('usage-rules')).toContainText('按用料扣库存');
   });
 
   test('布草洗涤：加品类 → 新增 → 送洗 → 收回（破损）→ 对账表有洗涤费', async ({ page }) => {
