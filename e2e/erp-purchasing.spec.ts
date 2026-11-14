@@ -32,9 +32,14 @@ async function setup(page: Page) {
   return { me, today: me.calendarToday, tag };
 }
 
+// 同一个用例里连建几样时不能撞号：原来取两位随机数，三样里有两样同号的机会约 3%（PR #111 CI 撞过一次 CODE_EXISTS）。
+// 改成这个文件里递增的序号（tag 每个用例不同，重跑换新的进程时 tag 也换了）。
+let seq = 10;
+const nextSeq = () => String(++seq);
+
 async function newSupplier(page: Page, tag: string, body: Record<string, unknown> = {}) {
   // Z 开头：排在演示数据的 S001… 后面，别的用例按顺序取第一家供应商时不会取到这里新建的
-  const code = `Z${tag}${Math.floor(Math.random() * 90 + 10)}`;
+  const code = `Z${tag}${nextSeq()}`;
   const res = await page.request.post('/api/inventory/suppliers', { data: { code, name: `E2E 供应商${code}`, ...body } });
   expect(res.status(), await res.text()).toBe(201);
   const list = (await (await page.request.get('/api/inventory/suppliers')).json()) as { id: number; code: string; name: string }[];
@@ -42,7 +47,7 @@ async function newSupplier(page: Page, tag: string, body: Record<string, unknown
 }
 
 async function newMaterial(page: Page, tag: string, body: Record<string, unknown> = {}) {
-  const code = `ZM${tag}${Math.floor(Math.random() * 90 + 10)}`;
+  const code = `ZM${tag}${nextSeq()}`;
   const res = await page.request.post('/api/inventory/materials', {
     data: { code, name: `E2E 物料${code}`, category: 'E2E', inventoryUnit: '包', purchaseUnit: '箱', purchaseFactorMilli: 10_000, refPriceCents: 3_000, ...body },
   });
