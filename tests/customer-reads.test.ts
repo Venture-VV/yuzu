@@ -395,7 +395,11 @@ it("shares only member and visit projections, paginates the true ledger before f
   const visit = await get(`visits/${visitId}`, aCookie);
   expect(visit.status).toBe(200);
   expect(visit.body.visit.member.id).toBe(memberA);
-  expect(visit.body.lines.length).toBeGreaterThan(0);
+  expect(visit.body.linesReadable).toBe(false);
+  expect(visit.body.lines).toEqual([]);
+  const authorizedVisit = await get(`visits/${visitId}`);
+  expect(authorizedVisit.body.linesReadable).toBe(true);
+  expect(authorizedVisit.body.lines.length).toBeGreaterThan(0);
   expect((await get("visits?day=1900-01-01", aCookie)).body.filteredTotal).toBe(
     0,
   );

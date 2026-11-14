@@ -36,6 +36,10 @@ export interface CustomerMeta {
     operate: boolean;
     scope: "all" | "self";
     actorId: number;
+    financialReadToday: boolean;
+    financialReadHistory: boolean;
+    financialScope: "all" | "self";
+    memberFinancialTimeline: boolean;
   };
 }
 export interface CustomerPage<T> extends CustomerMeta {
@@ -194,6 +198,7 @@ export interface CustomerVisitPage extends CustomerPage<CustomerVisitRow> {
 }
 export interface CustomerVisitDetail extends CustomerMeta {
   visit: CustomerVisitRow;
+  linesReadable: boolean;
   lines: Array<{
     id: number;
     name: string;

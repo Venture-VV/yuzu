@@ -1,6 +1,6 @@
 // Customer department UI uses native read models. These cases perform no financial writes.
 import { expect, test, type Page } from "@playwright/test";
-import type { CustomerOverview, CustomerBindingQueue, CustomerLowBalancePage, CustomerTargets, CustomerVisitPage } from "../src/shared/customer";
+import type { CustomerOverview, CustomerBindingQueue, CustomerLowBalancePage, CustomerMemberDetail, CustomerTargets, CustomerVisitDetail, CustomerVisitPage } from "../src/shared/customer";
 import type { SessionInfo } from "../src/shared/types";
 async function login(page: Page) {
   await page.goto("/login");
@@ -179,6 +179,87 @@ test("个人权限深链不挂载绑定审核且地址参数不能放宽充值�
   expect(query.has("scope")).toBe(false);
   await expect(page.getByRole("textbox", { name: "搜索充值原单", exact: true })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "客户经理筛选", exact: true })).toHaveCount(0);
+});
+test("原生资金及历史项权限收回时保留客户服务并明确说明受限范围", async ({ page }) => {
+  await login(page);
+  // These capability stubs exercise UI gates only; real revoked-role access and SQL
+  // non-disclosure are verified in customer-financial-permissions.test.ts.
+  await page.route("**/api/auth/me", async (route) => {
+    const response = await route.fetch();
+    const session: SessionInfo = await response.json();
+    session.permissions = session.permissions.filter((permission) => !["customer.manage", "member.read", "ledger.readToday", "ledger.readHistory", "frontdesk.read"].includes(permission));
+    await route.fulfill({ response, json: session });
+  });
+  await page.route("**/api/customer/overview*", async (route) => {
+    const response = await route.fetch();
+    const overview: CustomerOverview = await response.json();
+    overview.capabilities = { ...overview.capabilities, manage: false, scope: "self", financialReadToday: false, financialReadHistory: false, financialScope: "self", memberFinancialTimeline: false };
+    await route.fulfill({ response, json: overview });
+  });
+  let financialRequests = 0;
+  await page.route("**/api/customer/settlements**", async (route) => {
+    financialRequests += 1;
+    await route.fulfill({ status: 403, json: { error: { code: "FORBIDDEN", message: "UI门控未生效" } } });
+  });
+  await page.route("**/api/customer/members/*", async (route) => {
+    const response = await route.fetch();
+    const member: CustomerMemberDetail = await response.json();
+    member.capabilities = { ...member.capabilities, financialReadToday: false, financialReadHistory: false, financialScope: "self", memberFinancialTimeline: false };
+    member.timeline = []; member.timelineHasMore = false;
+    await route.fulfill({ response, json: member });
+  });
+  await page.route("**/api/customer/visits/*", async (route) => {
+    const response = await route.fetch();
+    const visit: CustomerVisitDetail = await response.json();
+    visit.visit.status = "settled"; visit.linesReadable = false; visit.lines = [];
+    await route.fulfill({ response, json: visit });
+  });
+  await page.goto("/customer?tab=daily&daily=settlement");
+  await expect(page.getByText("消费原单按账号权限查看", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "搜索结账单 / 扣卡单 / 会员", exact: true })).toHaveCount(0);
+  await page.getByTestId("customer-tab-overview").click();
+  await page.getByRole("button", { name: "查看今日已结消费详情", exact: true }).click();
+  await expect(page.getByText("消费原单按账号权限查看", { exact: true })).toBeVisible();
+  expect(financialRequests).toBe(0);
+  await page.getByTestId("customer-tab-members").click();
+  await page.getByRole("button", { name: "查看档案", exact: true }).first().click();
+  const member = page.getByRole("dialog", { name: "会员档案与维护时间轴", exact: true });
+  await expect(member.getByText("会员资金记录按原生权限查看", { exact: true })).toBeVisible();
+  await expect(member.getByText("系统实时可用余额", { exact: true })).toBeVisible();
+  await expect(member.getByText("会员维护事实", { exact: true })).toBeVisible();
+  await expect(member.getByRole("combobox", { name: "会员资金类别", exact: true })).toHaveCount(0);
+  await expect(member.getByText("当前条件下暂无资金记录。", { exact: true })).toHaveCount(0);
+  await member.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await page.getByTestId("customer-tab-visits").click();
+  await page.getByRole("button", { name: "明细 / 跟进", exact: true }).first().click();
+  const visit = page.getByRole("dialog", { name: "手牌消费与服务跟进", exact: true });
+  await expect(visit.getByText("历史消费项目按账号权限查看", { exact: true })).toBeVisible();
+  await expect(visit.getByText("接待与服务跟进", { exact: true })).toBeVisible();
+  await expect(visit.getByText("原生消费项目（只读）", { exact: true })).toHaveCount(0);
+  expect(financialRequests).toBe(0);
+});
+test("会员资金时间轴原单入口同时遵守金融权限与服务端可读编号", async ({ page }) => {
+  await login(page);
+  let financialAllowed = false;
+  await page.route("**/api/customer/members/*", async (route) => {
+    const response = await route.fetch();
+    const member: CustomerMemberDetail = await response.json();
+    member.capabilities = { ...member.capabilities, memberFinancialTimeline: true, financialReadToday: financialAllowed, financialReadHistory: false, financialScope: "self" };
+    // Deliberately retain an ID while the capability is false to verify the UI's
+    // own gate; once allowed, also cover a checkout link without a consumption ID.
+    member.timeline = [{ id: -1, type: "consume", docNo: "UI-PERMISSION-CHECK", occurredAt: member.serverTime, businessDate: member.businessDate, principalDeltaCents: -100, bonusDeltaCents: 0, operatorName: "UI合成经办", rechargeId: null, consumptionId: null, checkoutId: 1 }];
+    member.timelineHasMore = false;
+    await route.fulfill({ response, json: member });
+  });
+  await page.goto("/customer?tab=members");
+  await page.getByRole("button", { name: "查看档案", exact: true }).first().click();
+  const member = page.getByRole("dialog", { name: "会员档案与维护时间轴", exact: true });
+  await expect(member.getByText(/UI-PERMISSION-CHECK/)).toBeVisible();
+  await expect(member.getByRole("button", { name: "查看实际消费原单", exact: true })).toHaveCount(0);
+  await member.getByRole("button", { name: "关闭详情", exact: true }).click();
+  financialAllowed = true;
+  await page.getByRole("button", { name: "查看档案", exact: true }).first().click();
+  await expect(member.getByRole("button", { name: "查看实际消费原单", exact: true })).toBeVisible();
 });
 test("无客户部权限时客户端隐藏入口且不读取客户部数据", async ({ page }) => {
   await login(page);

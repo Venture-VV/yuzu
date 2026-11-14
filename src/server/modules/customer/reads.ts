@@ -94,6 +94,10 @@ export async function customerMeta(
       operate: can(actor, "customer.operate"),
       scope: can(actor, "customer.manage") ? "all" : "self",
       actorId: actor.id,
+      financialReadToday: can(actor, "ledger.readToday"),
+      financialReadHistory: can(actor, "ledger.readHistory"),
+      financialScope: can(actor, "customer.manage") ? "all" : "self",
+      memberFinancialTimeline: can(actor, "member.read"),
     },
   };
 }
@@ -131,6 +135,29 @@ function visibleCredit(db: Db, actor: Actor, alias = "cr") {
     ? db`true`
     : db`${db(alias + ".seller_staff_id")}=${actor.id}
     AND (${db(alias + ".status")}='verified' OR ${db(alias + ".claimed_by")}=${actor.id})`;
+}
+type FinancialAccess = { today: string; history: boolean; operatorId: number | null };
+function financialAccess(actor: Actor, today: string, day = today): FinancialAccess {
+  if (!can(actor, "ledger.readToday")) throw forbidden("当前账号没有查看消费原单的流水权限");
+  const history = can(actor, "ledger.readHistory");
+  if (day !== today && !history) throw forbidden("当前账号只能查看本营业日的消费原单");
+  return { today, history, operatorId: can(actor, "customer.manage") ? null : actor.id };
+}
+function visibleFinancialSource(db: Db, actor: Actor, today: string, alias: string) {
+  return db`${can(actor, "ledger.readToday")}
+    AND (${can(actor, "ledger.readHistory")} OR ${db(alias + ".business_date")}=${today}::date)
+    AND (${can(actor, "customer.manage")} OR ${db(alias + ".operator_id")}=${actor.id})`;
+}
+async function financialDocumentAccess(db: Db, actor: Actor, today: string, id: number, source: "checkout" | "consumption") {
+  financialAccess(actor, today);
+  const [document] = source === "checkout"
+    ? await db`SELECT business_date::text AS day,operator_id FROM checkouts WHERE id=${id}`
+    : await db`SELECT business_date::text AS day,operator_id FROM consumptions WHERE id=${id} AND checkout_id IS NULL`;
+  if (!document) throw notFound("消费原单不存在");
+  const access = financialAccess(actor, today, String(document.day));
+  if (access.operatorId !== null && n(document.operatorId) !== access.operatorId)
+    throw notFound("消费原单不存在或不在本人的经办范围");
+  return access;
 }
 
 /** Signed performance events use their actual business date; they never rewrite native amounts. */
@@ -367,7 +394,8 @@ async function settlementRows(
   timezone: string,
   q: Q,
   day: string,
-  onlyId: number | null = null,
+  onlyId: number | null,
+  access: FinancialAccess,
 ): Promise<C.CustomerSettlementRow[]> {
   if (q.method && !Object.hasOwn(CHECKOUT_METHOD_LABELS, q.method))
     throw badRequest("付款方式不正确");
@@ -386,8 +414,10 @@ async function settlementRows(
     (c.void_business_date=${day}::date AND (${q.hour ?? null}::int IS NULL OR extract(hour FROM c.voided_at AT TIME ZONE ${timezone})=${q.hour ?? null})) AS voided_today,
     (SELECT coalesce(sum(amount),0) FROM refunds WHERE checkout_id=c.id AND status='completed' AND business_date=${day}
       AND (${q.hour ?? null}::int IS NULL OR extract(hour FROM created_at AT TIME ZONE ${timezone})=${q.hour ?? null})) AS refunded_today
-    FROM checkouts c WHERE (${onlyId}::bigint IS NOT NULL AND c.id=${onlyId}) OR (${onlyId}::bigint IS NULL
-      AND (c.business_date=${day} OR c.void_business_date=${day} OR EXISTS(SELECT 1 FROM refunds rf WHERE rf.checkout_id=c.id AND rf.business_date=${day} AND rf.status='completed')))
+    FROM checkouts c WHERE ((${onlyId}::bigint IS NOT NULL AND c.id=${onlyId}) OR (${onlyId}::bigint IS NULL
+      AND (c.business_date=${day} OR c.void_business_date=${day} OR EXISTS(SELECT 1 FROM refunds rf WHERE rf.checkout_id=c.id AND rf.business_date=${day} AND rf.status='completed'))))
+      AND (${access.operatorId}::bigint IS NULL OR c.operator_id=${access.operatorId})
+      AND (${access.history} OR c.business_date=${access.today}::date)
     ORDER BY c.created_at DESC,c.id DESC`;
   return rows
     .filter(
@@ -441,7 +471,8 @@ async function standaloneRows(
   timezone: string,
   q: Q,
   day: string,
-  id: number | null = null,
+  id: number | null,
+  access: FinancialAccess,
 ): Promise<C.CustomerSettlementRow[]> {
   const rows = await db<
     Row[]
@@ -449,7 +480,9 @@ async function standaloneRows(
     ${staff(db, "c.operator_id")} AS operator,m.name,
     (c.business_date=${day}::date AND (${q.hour ?? null}::int IS NULL OR extract(hour FROM c.created_at AT TIME ZONE ${timezone})=${q.hour ?? null})) AS created_today,
     (r.business_date=${day}::date AND (${q.hour ?? null}::int IS NULL OR extract(hour FROM r.created_at AT TIME ZONE ${timezone})=${q.hour ?? null})) AS reversed_today FROM consumptions c JOIN members m ON m.id=c.member_id LEFT JOIN reversals r ON r.consumption_id=c.id
-    WHERE c.checkout_id IS NULL AND ((${id}::bigint IS NOT NULL AND c.id=${id}) OR (${id}::bigint IS NULL AND (c.business_date=${day} OR r.business_date=${day}))) ORDER BY c.created_at DESC,c.id DESC`;
+    WHERE c.checkout_id IS NULL AND ((${id}::bigint IS NOT NULL AND c.id=${id}) OR (${id}::bigint IS NULL AND (c.business_date=${day} OR r.business_date=${day})))
+    AND (${access.operatorId}::bigint IS NULL OR c.operator_id=${access.operatorId})
+    AND (${access.history} OR c.business_date=${access.today}::date) ORDER BY c.created_at DESC,c.id DESC`;
   return rows
     .filter(
       (r) =>
@@ -502,10 +535,11 @@ export async function customerSettlements(
 ): Promise<C.CustomerSettlementPage> {
   const q = parse(Query, raw),
     meta = await customerMeta(db, actor, timezone, at),
-    day = q.day ?? meta.businessDate;
+    day = q.day ?? meta.businessDate,
+    access = financialAccess(actor, meta.businessDate, day);
   const rows = [
-    ...(await settlementRows(db, timezone, q, day)),
-    ...(await standaloneRows(db, timezone, q, day)),
+    ...(await settlementRows(db, timezone, q, day, null, access)),
+    ...(await standaloneRows(db, timezone, q, day, null, access)),
   ].sort(
     (a, b) =>
       b.occurredAt.localeCompare(a.occurredAt) ||
@@ -542,15 +576,17 @@ export async function customerSettlement(
 ): Promise<C.CustomerSettlementDetail> {
   if (!["checkout", "consumption"].includes(source))
     throw badRequest("消费来源不正确");
+  const meta = await customerMeta(db, actor, timezone, at),
+    access = await financialDocumentAccess(db, actor, meta.businessDate, id, source as "checkout" | "consumption");
   if (source === "consumption") {
-    const meta = await customerMeta(db, actor, timezone, at),
-      settlement = (
+    const settlement = (
         await standaloneRows(
           db,
           timezone,
           parse(Query, {}),
           meta.businessDate,
           id,
+          access,
         )
       )[0];
     if (!settlement) throw notFound("独立会员扣卡单不存在");
@@ -576,14 +612,14 @@ export async function customerSettlement(
       ],
     };
   }
-  const meta = await customerMeta(db, actor, timezone, at),
-    settlement = (
+  const settlement = (
       await settlementRows(
         db,
         timezone,
         parse(Query, {}),
         meta.businessDate,
         id,
+        access,
       )
     )[0];
   if (!settlement) throw notFound("结账单不存在");
@@ -709,12 +745,14 @@ export async function customerVisit(
       await visitRows(db, timezone, parse(Query, {}), meta.businessDate, id)
     )[0];
   if (!visit) throw notFound("到店记录不存在");
-  const lines =
-    await db`SELECT l.id,l.name,l.quantity,l.unit_price AS unit_price_cents,l.amount AS amount_cents,l.status,l.posted_at AS occurred_at
-    FROM bill_lines l JOIN visits v ON v.bill_id=l.bill_id WHERE v.id=${id} ORDER BY l.id`;
+  const linesReadable = visit.status === "open" || can(actor, "frontdesk.read");
+  const lines = linesReadable
+    ? await db`SELECT l.id,l.name,l.quantity,l.unit_price AS unit_price_cents,l.amount AS amount_cents,l.status,l.posted_at AS occurred_at
+    FROM bill_lines l JOIN visits v ON v.bill_id=l.bill_id WHERE v.id=${id} ORDER BY l.id` : [];
   return {
     ...meta,
     visit: (await liveVisitMembers(db, [visit], timezone))[0]!,
+    linesReadable,
     lines: lines.map((l) => ({
       id: n(l.id),
       name: l.name,
@@ -833,15 +871,18 @@ export async function customerMember(
     canonical = await canonicalMemberId(db, id);
   if (canonical === null) throw notFound("会员不存在");
   const ids = await memberFamily(db, canonical),
-    timeline =
-      await db`SELECT le.id,le.entry_type AS type,le.doc_no,le.created_at AS occurred_at,le.business_date::text AS business_date,
+    timeline = can(actor, "member.read")
+      ? await db`SELECT le.id,le.entry_type AS type,le.doc_no,le.created_at AS occurred_at,le.business_date::text AS business_date,
     le.principal_delta AS principal_delta_cents,le.bonus_delta AS bonus_delta_cents,coalesce(s.display_name,'系统') AS operator_name,
-    CASE WHEN ${visibleCredit(db, actor)} THEN le.recharge_id ELSE NULL END AS recharge_id,le.consumption_id,c.checkout_id
+    CASE WHEN ${visibleCredit(db, actor)} THEN le.recharge_id ELSE NULL END AS recharge_id,
+    CASE WHEN c.checkout_id IS NULL AND ${visibleFinancialSource(db, actor, meta.businessDate, "c")} THEN le.consumption_id ELSE NULL END AS consumption_id,
+    CASE WHEN ${visibleFinancialSource(db, actor, meta.businessDate, "checkout")} THEN c.checkout_id ELSE NULL END AS checkout_id
     FROM ledger_entries le LEFT JOIN staff s ON s.id=le.operator_id LEFT JOIN consumptions c ON c.id=le.consumption_id
+    LEFT JOIN checkouts checkout ON checkout.id=c.checkout_id
     LEFT JOIN customer_recharge_credits cr ON cr.recharge_id=le.recharge_id WHERE le.member_id IN ${db(ids)}
     AND (${q.timelineMonth ?? null}::text IS NULL OR to_char(le.business_date,'YYYY-MM')=${q.timelineMonth ?? null})
     ${q.timelineSection === "all" ? db`` : db`AND le.entry_type IN ${db([...SECTION_TYPES[q.timelineSection]])}`}
-    ORDER BY le.id DESC LIMIT 51 OFFSET ${q.timelineOffset}`;
+    ORDER BY le.id DESC LIMIT 51 OFFSET ${q.timelineOffset}` : [];
   const requests =
     await db`SELECT br.id,br.member_id,br.version,br.status,br.reason,br.requested_at AS created_at,br.reviewed_at AS resolved_at,br.review_reason,
     ${staff(db, "br.to_staff_id")} AS manager,${staff(db, "br.from_staff_id")} AS from,${staff(db, "br.requested_by")} AS requester,${staff(db, "br.reviewed_by")} AS reviewer
