@@ -333,7 +333,8 @@ function CreateBookingDialog({
   const inRange = (d: string) => d >= today && d <= lastDay;
   const has = <T extends { id: number }>(list: T[], id: number | null | undefined) => (id != null && list.some((x) => x.id === id) ? id : null);
   // 预约日期写在弹窗最上面、可以改（需求 2）：原来弹窗里看不出约的是哪一天，也没有别的地方选
-  const [day, setDayRaw] = useState(draft && inRange(draft.day) ? draft.day : inRange(date) ? date : today);
+  const defaultDay = inRange(date) ? date : today;
+  const [day, setDayRaw] = useState(draft && inRange(draft.day) ? draft.day : defaultDay);
   const [kind, setKind] = useState<BookingKind>(draft?.kind ?? 'technician');
   const [source, setSource] = useState<'front' | 'phone'>(draft?.source ?? 'phone');
   const [term, setTerm] = useState(draft?.term ?? '');
@@ -376,11 +377,28 @@ function CreateBookingDialog({
   };
   /** 没约成就关掉：填了的留着，下次打开接着填 */
   const leave = () => {
-    const touched = !!member || !!term.trim() || !!guestName.trim() || !!guestPhone.trim() || !!note.trim() || guests !== '1' || technicianId !== null || kind !== 'technician' || itemId !== (board.items[0]?.id ?? null);
+    // 动过哪一样都算填过：只改了预约日期（或来源、房间、时长、房型）也要留着——
+    // 原来没把这几样算进去，只点了「明天」就关掉，再打开日期回到今天（测试会话 2026-11-14 在 5545835 上报的）
+    const touched =
+      day !== defaultDay ||
+      kind !== 'technician' ||
+      source !== 'phone' ||
+      !!member ||
+      !!term.trim() ||
+      !!guestName.trim() ||
+      !!guestPhone.trim() ||
+      !!note.trim() ||
+      guests !== '1' ||
+      technicianId !== null ||
+      itemId !== (board.items[0]?.id ?? null) ||
+      spaceId !== (board.spaces[0]?.id ?? null) ||
+      duration !== (board.rules.spaceDurations[0] ?? 120) ||
+      roomTypeId !== (board.roomTypes[0]?.id ?? null);
     onClose(touched ? { day, kind, source, term, member, guestName, guestPhone, guests, itemId, technicianId, spaceId, duration, roomTypeId, note } : null);
   };
   const startOver = () => {
     setRestored(false);
+    setDayRaw(defaultDay);
     setKind('technician');
     setSource('phone');
     setTerm('');

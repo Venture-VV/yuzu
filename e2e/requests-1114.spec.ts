@@ -71,9 +71,31 @@ test.describe('店主 2026-11-14 的需求：登记消费与预约', () => {
     await expect(qty).toHaveValue('5');
     await page.getByRole('button', { name: /^减少 柚子气泡水/ }).click();
     await expect(qty).toHaveValue('4');
-    // 不是数字的进不去；超过 99 按 99 算并提示；输空了、输 0 离开时回到原来的数并提示
-    await qty.fill('1a2');
-    await expect(qty).toHaveValue('12');
+    // 小数点、负号、字母、全角数字都不采用：数量回到点进来之前的数并提示，框里照样显示输的那一串——
+    // 不能删掉这些字符再算（「1.5」不能变成 15、「-3」不能变成 3，测试会话在 5545835 上报的）
+    for (const bad of ['1.5', '-3', '1a2', '４']) {
+      await qty.fill(bad);
+      await expect(qty).toHaveValue(bad);
+      await expect(qty).toHaveAttribute('aria-invalid', 'true');
+      await expect(page.getByTestId('consume-qty-hint')).toContainText(`「${bad}」没有采用，仍按 4 算`);
+      await expect(footer).toContainText('88.00');
+      await expect(footer).not.toContainText('330.00');
+      await qty.blur();
+      await expect(qty).toHaveValue('4');
+      await expect(qty).toHaveAttribute('aria-invalid', 'false');
+    }
+    // 一个键一个键敲「1.5」：敲到小数点起整串不采用，数量回到 4（不会停在 1，更不会变成 15）；删回整数就采用
+    await qty.click();
+    await qty.pressSequentially('1.5');
+    await expect(qty).toHaveValue('1.5');
+    await expect(footer).toContainText('88.00');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await expect(qty).toHaveValue('1');
+    await expect(footer).toContainText('22.00');
+    await expect(page.getByTestId('consume-qty-hint')).toHaveCount(0);
+    await qty.fill('4');
+    // 超过 99 按 99 算并提示；输空了、输 0 离开时回到原来的数并提示
     await qty.fill('150');
     await expect(qty).toHaveValue('99');
     await expect(page.getByTestId('consume-qty-hint')).toContainText('最多 99');
@@ -149,6 +171,22 @@ test.describe('店主 2026-11-14 的需求：登记消费与预约', () => {
     await expect(day).toHaveValue(me.today);
     await expect(day).toHaveAttribute('min', me.today);
     await expect(day).toHaveAttribute('max', lastDay);
+    await dialog.getByTestId('booking-day-1').click();
+    await expect(day).toHaveValue(tomorrow);
+    // 只改了预约日期就关掉：再打开日期还是明天、有「带回来了」的提示（测试会话在 5545835 上报的：原来回到今天）；
+    // 「清空重填」回到默认的今天；什么都没动就关掉，再打开没有提示
+    await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
+    await expect(dialog).toHaveCount(0);
+    await page.getByTestId('booking-new').click();
+    await expect(dialog.getByTestId('booking-draft-restored')).toBeVisible();
+    await expect(day).toHaveValue(tomorrow);
+    await dialog.getByTestId('booking-draft-clear').click();
+    await expect(day).toHaveValue(me.today);
+    await expect(dialog.getByTestId('booking-draft-restored')).toHaveCount(0);
+    await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
+    await page.getByTestId('booking-new').click();
+    await expect(dialog.getByTestId('booking-draft-restored')).toHaveCount(0);
+    await expect(day).toHaveValue(me.today);
     await dialog.getByTestId('booking-day-1').click();
     await expect(day).toHaveValue(tomorrow);
     await expect(page.getByRole('dialog')).toContainText('明天');
