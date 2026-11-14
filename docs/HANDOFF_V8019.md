@@ -53,7 +53,14 @@
 ## 4. 已执行的验证
 
 - `npm run typecheck`、`npm run build` 通过。
-- 浏览器用例（门店电脑；新建独立库，与 CI 一样用五条 seed 命令准备）：`e2e/store-entries.spec.ts`（新）5 条；受影响的旧用例 `coupons-admin`、`membership-v804`、`parking`、`erp`、`erp-ia` 共 18 条，都通过。全量见 PR 的 CI。
+- 浏览器用例（门店电脑；新建独立库，与 CI 一样用五条 seed 命令准备）：`e2e/store-entries.spec.ts`（新）5 条；受影响的旧用例 `coupons-admin`、`membership-v804`、`parking`、`erp`、`erp-ia` 共 18 条，都通过。
+- 收尾部分（第 1.2 节）：
+  - 集成用例：`tests/concierge*.test.ts` 10 个文件 81 条（其中 `concierge-insights` 12 条：原有 10 条没改，新加「按投影的档级筛选与分档」「翻页不重不漏」2 条）；`tests/devices.test.ts` 17 条（新加「修改员工的事务还没提交时……」1 条，改之前失败、改之后通过）；`tests/admin-ia.test.ts`、`tests/erp-ia.test.ts` 18 条。
+  - 浏览器用例（门店电脑）：`store-entries`、`concierge`（新加打码建档 1 条）、`admin-ia`、`guide`、`membership`、`benefits`、`membership-v804`、`member-finish`、`admin-v060`、`parking` 共 41 条通过、1 条按设计跳过（其中两条是把用例里写的旧地址改成新地址后通过的）。
+  - 管家部名单的速度：新建库灌 2 万会员、20 万次到访，接口 `/api/concierge/member-insights` 各种筛选连取三次，0.14–0.19 秒（按手机号片段搜到 1 万人的那种 0.35 秒，慢在会员查找本身）；改之前同一个库上是 0.35 秒左右。
+  - 管家部版面：十个页面（工作台、会员档案、预约与接待、好评中心、消费凭证、重点跟进、会员情况、会员中心、待办、主管）在 390×844、820×1180 下用脚本量过：页面宽度不超过窗口、没有伸到窗口外又不在滚动容器里的元素、没有被裁字的按钮与标题；另看了截图。
+  - 设备用例满负载连跑 12 遍：见第 6 节。
+- 全量（集成用例与三组浏览器用例）见 PR 的 CI。
 - 解绑那一段在浏览器用例里是把读绑定、解绑两个接口拦下来模拟的（真的绑定要走小程序，演示库里没有）：核对了提交的内容（原因、操作编号）、没写原因不能提交、店员看不到解绑、回复丢了以后记在本机并拦住再次解绑、刷新以后还在。真的解绑接口没有改，它的用例在小程序线（`tests/mp-*.test.ts`）。
 
 ## 5. 验收要点
@@ -84,7 +91,7 @@ Codex 2026-11-13 在 main v8.0.15 上的全量回归里，`e2e/devices.spec.ts` 
 - 改法：那把锁改成 `FOR NO KEY UPDATE`（`modules/staff.ts`）。改员工的事务之间照旧互相串行（「至少一位在职店主」的保证不变），不再挡引用店主的写入。这不只影响设备：原来它会让全店所有店主经手、要记经办人的写入都等。
 - 回归：`tests/devices.test.ts`「修改员工的事务还没提交时……」——占住要改的那位员工一行，让改员工的事务锁了店主行以后停住，这时店主账号带读卡事件的上报要在 2 秒内记下；另核对两个改员工的事务仍然互相等。**反向验证**：改之前这条失败（上报等到 3 秒上限、返回 409 BUSY）。
 - **没查到的**：那次首轮失败时是不是真有一个改员工的事务停了 10 秒以上，没有证据（要当时的 trace 或数据库日志）。全量回归里并行的别的用例确实会改员工（建、停用测试账号），但正常只占几毫秒；什么让它停那么久没有复现。所以这条写的是「一条属实的、现象吻合的路径，已经堵上」，不是「确认了那一次的原因」。
-- 复现尝试：本机把 CPU 占满（4 核各一个空转进程）连跑这份用例 12 遍，W12RESULT。8.0.17 加的四行核对（两个页面都选着这台终端、都报过一次）留着，再出现时看得出断在哪一环。
+- 复现尝试：本机把 CPU 占满（4 核各一个空转进程）连跑这份用例 12 遍，12 遍都通过，没有复现。8.0.17 加的四行核对（两个页面都选着这台终端、都报过一次）留着，再出现时看得出断在哪一环。
 
 ## 7. 可复制给测试 AI 的指令
 
@@ -95,8 +102,9 @@ Codex 2026-11-13 在 main v8.0.15 上的全量回归里，`e2e/devices.spec.ts` 
   node dist/server/cli.js migrate && node dist/server/cli.js seed-demo && node dist/server/cli.js seed-inventory-demo \
     && node dist/server/cli.js seed-frontdesk-demo && node dist/server/cli.js seed-billing-demo && node dist/server/cli.js seed-legacy-demo
   TEST_DATABASE_URL=<独立测试库> npm test
-  E2E_BASE_URL=http://127.0.0.1:<端口> npx playwright test e2e/store-entries.spec.ts e2e/erp-ia.spec.ts e2e/parking.spec.ts --project=门店电脑 --trace off
+  E2E_BASE_URL=http://127.0.0.1:<端口> npx playwright test e2e/store-entries.spec.ts e2e/erp-ia.spec.ts e2e/parking.spec.ts e2e/admin-ia.spec.ts e2e/concierge.spec.ts e2e/guide.spec.ts --project=门店电脑 --trace off
   E2E_BASE_URL=… npm run e2e                  # 全量
 重点看 docs/HANDOFF_V8019.md 第 5 节；微信解绑请另用真的绑定（小程序线的环境）走一遍。
+第 6 节的设备模拟桥：如果还留着 8.0.15 那次首轮失败的 trace 或数据库日志，请看当时有没有一个改员工（PUT /api/staff/:id）的事务没提交。
 问题发在 PR #105 上，标 P1 / P2，附复现步骤；账错、串单、越权、数据丢失是阻断项。
 ```
