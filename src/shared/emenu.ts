@@ -45,7 +45,8 @@ export interface EmenuRules {
 export type EmenuTextSize = 'large' | 'design';
 
 export const DEFAULT_EMENU_RULES: EmenuRules = {
-  enabled: false,
+  // 8.0.20：功能开关都默认开（店主 2026-11-14，docs/PENDING_DECISIONS.md KG1–KG4）；要关在设置页关
+  enabled: true,
   coverImageId: null,
   footerText: 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED',
   avoidOptions: ['不加香菜', '不加辣椒', '少辣', '不加洋葱', '不加香葱', '重辣'],

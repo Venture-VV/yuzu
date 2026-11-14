@@ -25,7 +25,8 @@ export interface RoomRules {
 }
 
 export const DEFAULT_ROOM_RULES: RoomRules = {
-  enabled: false,
+  // 8.0.20：功能开关都默认开（店主 2026-11-14，docs/PENDING_DECISIONS.md KG1–KG4）；要关在设置页关
+  enabled: true,
   checkoutMinute: 12 * 60,
   lateFullMinute: 18 * 60,
   hourlyGraceMinutes: 15,

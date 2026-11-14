@@ -206,7 +206,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     pages: ['/erp/canteen'],
     apis: ['/api/erp/canteen'],
     perms: ['canteen.manage'],
-    defaultEnabled: false,
+    defaultEnabled: true,
     requires: [],
   },
   patrol: {
@@ -220,7 +220,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     pages: ['/erp/patrol'],
     apis: ['/api/erp/patrol'],
     perms: ['patrol.read', 'patrol.manage'],
-    defaultEnabled: false,
+    defaultEnabled: true,
     requires: ['canteen'],
   },
 };

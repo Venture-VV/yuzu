@@ -18,7 +18,7 @@ const modules = async (cookie: string) => (await api(ctx.app, cookie, 'GET', '/a
 const switchModules = (cookie: string, body: unknown) => api(ctx.app, cookie, 'PUT', '/api/erp/modules', body);
 
 beforeAll(async () => {
-  ctx = await setup();
+  ctx = await setup({ keepDefaultSwitches: true });
   await createStaff(ctx.sql, { username: 'boss', displayName: '店总', role: 'store_manager', password: PASSWORD, mustChangePassword: false });
   await createStaff(ctx.sql, { username: 'fin', displayName: '对账付款', role: 'backoffice', duties: ['payable'], password: PASSWORD, mustChangePassword: false });
   await createStaff(ctx.sql, { username: 'stock', displayName: '物资经办', role: 'backoffice', duties: ['stock'], password: PASSWORD, mustChangePassword: false });
@@ -51,11 +51,12 @@ describe('模块注册表', () => {
 });
 
 /** 新装的门店默认关着的模块：员工食堂、安保巡场（8.0.9） */
-const OFF_BY_DEFAULT: string[] = ['canteen', 'patrol'];
+// 8.0.20 起所有模块默认开（店主 2026-11-14，KG1）；原来员工食堂、安保巡场默认关
+const OFF_BY_DEFAULT: string[] = [];
 
 describe('ERP 模块开关', () => {
-  it('升级后默认开启（员工食堂、安保巡场默认关）；会话带实际能用的模块；能进 ERP 的人都能看模块列表，前台岗位不能', async () => {
-    // 员工食堂（docs/CANTEEN.md，K1）、安保巡场（8.0.9，docs/PATROL_V809.md，依赖员工食堂）默认关，其余默认开
+  it('升级后默认开启（8.0.20 起员工食堂、安保巡场也默认开）；会话带实际能用的模块；能进 ERP 的人都能看模块列表，前台岗位不能', async () => {
+    // 员工食堂（docs/CANTEEN.md，K1）、安保巡场（8.0.9，docs/PATROL_V809.md，依赖员工食堂）原来默认关，8.0.20 起与其余一样默认开
     expect(ERP_MODULE_KEYS.filter((k) => !ERP_MODULES[k].defaultEnabled)).toEqual(OFF_BY_DEFAULT);
     expect(await modules(ctx.owner)).toEqual(ERP_MODULE_KEYS.filter((k) => !OFF_BY_DEFAULT.includes(k)));
     const list = await api(ctx.app, stock, 'GET', '/api/erp/modules');
@@ -101,10 +102,11 @@ describe('ERP 模块开关', () => {
         // 应收与挂账（8.0.7）不依赖库存
         ['receivables', true, true],
         ['revenue', true, true],
-        ['canteen', false, false],
-        ['patrol', false, false],
+        // 员工食堂、安保巡场不依赖库存（8.0.20 起默认开）
+        ['canteen', true, true],
+        ['patrol', true, true],
       ]);
-      expect(await modules(ctx.owner)).toEqual(['receivables', 'revenue']);
+      expect(await modules(ctx.owner)).toEqual(['receivables', 'revenue', 'canteen', 'patrol']);
       for (const url of ['/api/inventory/materials', '/api/inventory/todo-count', '/api/purchase-orders', '/api/purchase-baseline?materialId=1', '/api/payables/overview', '/api/erp/expenses', '/api/erp/petty/daily', '/api/erp/requests', '/api/erp/images/1', '/api/erp/dept-stock/meta', '/api/erp/contracts', '/api/erp/payments/requests', '/api/erp/invoices']) {
         const r = await api(ctx.app, ctx.owner, 'GET', url);
         expect(r.status, url).toBe(403);

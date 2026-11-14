@@ -72,7 +72,7 @@ describe('迁移 034、035 · 迁移前已有的钟单与项目', () => {
       expect((await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM ${sql(table)}`)[0]!.n, table).toBe(0);
     }
     expect((await sql<{ zoneId: number | null }[]>`SELECT zone_id FROM service_items`).map((r) => r.zoneId)).toEqual([null]);
-    expect(await loadLocationRules(sql)).toEqual({ enabled: false, checkinZoneId: null, restZoneId: null });
+    expect(await loadLocationRules(sql)).toEqual({ enabled: true, checkinZoneId: null, restZoneId: null }); // 8.0.20 起默认开，没设区域时什么都不推导
     for (const c of [...(await spaceChecks(sql)), ...(await locationChecks(sql))]) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
   });
 });

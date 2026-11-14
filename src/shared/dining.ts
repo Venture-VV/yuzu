@@ -30,10 +30,11 @@ export interface DiningRules {
 }
 
 export const DEFAULT_DINING_RULES: DiningRules = {
-  enabled: false,
+  // 8.0.20：功能开关都默认开（店主 2026-11-14，docs/PENDING_DECISIONS.md KG1–KG4）；要关在设置页关
+  enabled: true,
   trackServed: true,
   warnMinutes: 15,
-  tablesEnabled: false,
+  tablesEnabled: true,
   voidFreeCents: 5000,
 };
 
