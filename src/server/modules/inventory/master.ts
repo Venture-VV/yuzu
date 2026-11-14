@@ -2,7 +2,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { REPLENISH_MODES, type Department, type Material, type Supplier } from '@shared/inventory';
+import { REPLENISH_MODE_LABELS, REPLENISH_MODES, type Department, type Material, type Supplier } from '@shared/inventory';
 import { fitsDecimals, formatQty } from '@shared/quantity';
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
@@ -11,7 +11,7 @@ import type { Deps } from '../../lib/context';
 import { conflict, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { CENTRAL_WAREHOUSE_ID } from '@shared/inventory';
-import { coverFor, loadInventorySettings, todayIn, usageByMaterial, usageSince } from './common';
+import { coverFor, loadInventorySettings, setTxTimeouts, todayIn, usageByMaterial, usageSince } from './common';
 import { assertChannelKey, ChannelKey } from './purchase-rules';
 import { lockSettings } from '../../lib/rule-settings';
 
@@ -119,7 +119,11 @@ export const MaterialInput = z
   });
 export type MaterialInputData = z.input<typeof MaterialInput>;
 
-const ReplenishModeInput = z.object({ mode: z.enum(REPLENISH_MODES, '补货方式只能选：自动识别、常备、按需采购') });
+const ReplenishModeInput = z.object({
+  mode: z.enum(REPLENISH_MODES, '补货方式只能选：自动识别、常备、按需采购'),
+  /** 页面看到的补货方式：对不上（刚被别人改过，或者自己上一次没等到回音的请求后来生效了）就拒绝，不盖掉后来的修改 */
+  expected: z.enum(REPLENISH_MODES, '请带上页面上看到的补货方式'),
+});
 
 export const SupplierInput = z.object({
   code: required(16, '供应商编码'),
@@ -357,14 +361,27 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
     return getMaterial(sql, id, config.timezone);
   });
   // 只改补货方式（迁移 161，docs/ERP_PURCHASING.md 第 5.1 节）：补货建议页上一键「定为按需采购 / 设为常备 / 改回自动识别」。
-  // 只锁这一个物料行、只改这一列；设成同一个值再设一次结果一样，不用操作编号。
+  // 与改房态同一个做法（合并前 Codex 审查 e3cfbd0）：
+  //   · 等锁、执行有时限（setTxTimeouts）——页面 15 秒超时之前这次请求要么已提交、要么已回滚，读回来的才可信；
+  //   · 带上页面看到的补货方式，对不上拒绝（REPLENISH_MODE_CHANGED）——晚到的旧请求不会盖掉后来的修改；
+  //   · 已经是要改成的值照常返回（原样重提不报错、不重复记审计）。
+  // 只锁这一个物料行、只改这一列，不带操作编号。
   app.put('/api/inventory/materials/:id/replenish-mode', { preHandler: guard('inventory.master') }, async (req) => {
     const { id } = parse(idParam, req.params);
-    const { mode } = parse(ReplenishModeInput, req.body);
+    const { mode, expected } = parse(ReplenishModeInput, req.body);
     await sql.begin(async (tx) => {
-      const [before] = await tx<{ replenishMode: string }[]>`SELECT replenish_mode FROM materials WHERE id = ${id} FOR NO KEY UPDATE`;
+      await setTxTimeouts(tx);
+      const [before] = await tx<{ name: string; replenishMode: (typeof REPLENISH_MODES)[number] }[]>`
+        SELECT name, replenish_mode FROM materials WHERE id = ${id} FOR NO KEY UPDATE`;
       if (!before) throw notFound('物料不存在');
       if (before.replenishMode === mode) return;
+      if (before.replenishMode !== expected) {
+        throw conflict(
+          'REPLENISH_MODE_CHANGED',
+          `「${before.name}」的补货方式已经是「${REPLENISH_MODE_LABELS[before.replenishMode].title}」了（刚被改过），这次没有再改；页面已经刷新，要改请再点一次`,
+          { current: before.replenishMode },
+        );
+      }
       await tx`UPDATE materials SET replenish_mode = ${mode}, updated_at = now() WHERE id = ${id}`;
       await writeAudit(tx, {
         staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'material', targetId: id,

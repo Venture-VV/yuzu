@@ -59,7 +59,12 @@ const mkMaterial = (body: Record<string, unknown>) =>
     api(ctx.app, buyer, 'POST', '/api/inventory/materials', { category: '测试', inventoryUnit: '台', purchaseUnit: '台', purchaseFactorMilli: q(1), refPriceCents: 300_00, ...body }),
   );
 const getMaterial = (id: number) => ok<{ id: number; replenishMode: string; isLow: boolean; coverDays: number | null }>(api(ctx.app, keeper, 'GET', `/api/inventory/materials/${id}`), 200);
-const setMode = (cookie: string, id: number, mode: unknown) => api(ctx.app, cookie, 'PUT', `/api/inventory/materials/${id}/replenish-mode`, { mode } as Record<string, unknown>);
+const putMode = (cookie: string, id: number, body: Record<string, unknown>) => api(ctx.app, cookie, 'PUT', `/api/inventory/materials/${id}/replenish-mode`, body);
+/** 改补货方式：像页面一样带上现在看到的值 */
+const setMode = async (cookie: string, id: number, mode: unknown) => {
+  const [cur] = await ctx.sql<{ replenishMode: string }[]>`SELECT replenish_mode FROM materials WHERE id = ${id}`;
+  return putMode(cookie, id, { mode, expected: cur?.replenishMode ?? 'auto' });
+};
 
 /** 采购入库 n 个（店主建单即确认，仓库收货），返回收货单 */
 async function stockIn(materialId: number, n: number, date = today) {
@@ -305,7 +310,9 @@ describe('物料档案的补货方式', () => {
     expect((await setMode(keeper, m.id, 'on_demand')).status).toBe(403);
     expect((await setMode(buyer, m.id, 'never')).status).toBe(400);
     expect((await setMode(buyer, m.id, undefined)).status).toBe(400);
-    expect((await setMode(buyer, 99_999_999, 'on_demand')).status).toBe(404);
+    // 要带上页面看到的值
+    expect((await putMode(buyer, m.id, { mode: 'on_demand' })).status).toBe(400);
+    expect((await putMode(buyer, 99_999_999, { mode: 'on_demand', expected: 'auto' })).status).toBe(404);
     const audits = async () =>
       (await ctx.sql<{ detail: Record<string, unknown> }[]>`
         SELECT detail FROM audit_logs WHERE action = 'inventory_master_saved' AND target_type = 'material' AND target_id = ${String(m.id)} AND detail ? 'before' ORDER BY id`).map((r) => r.detail);
@@ -315,4 +322,34 @@ describe('物料档案的补货方式', () => {
     await ok(setMode(buyer, m.id, 'auto'), 200);
     expect(await audits()).toEqual([{ replenishMode: 'on_demand', before: 'auto' }, { replenishMode: 'auto', before: 'on_demand' }]);
   });
+
+  it('带上页面看到的值，对不上拒绝：晚到的旧请求不会盖掉后来的修改；已经是要改成的值照常返回（原样重提）；等锁有时限', async () => {
+    const m = await mkMaterial({ code: 'BH-M3', name: '投影仪' });
+    // 页面甲看到「自动识别」，要定为按需采购——这次请求没等到回音（当它还在路上）
+    const late = { mode: 'on_demand', expected: 'auto' };
+    // 这期间页面刷新过，又改成了常备
+    await ok(putMode(buyer, m.id, { mode: 'stock', expected: 'auto' }), 200);
+    // 旧请求这时才到：看到的是自动识别、现在是常备，对不上 → 拒绝，常备没被盖掉
+    const res = await putMode(buyer, m.id, late);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatchObject({ code: 'REPLENISH_MODE_CHANGED', details: { current: 'stock' } });
+    expect((await getMaterial(m.id)).replenishMode).toBe('stock');
+    // 原样重提：已经是要改成的值，照常返回、不报错（哪怕带的是旧的「看到的值」）
+    expect((await ok<{ replenishMode: string }>(putMode(buyer, m.id, { mode: 'stock', expected: 'auto' }), 200)).replenishMode).toBe('stock');
+    // 物料行被别的事务锁着（收发货在记账）：等不到锁就失败、明确没有生效，不会拖到页面超时以后才生效
+    const holder = await ctx.sql.reserve();
+    try {
+      await holder`BEGIN`;
+      await holder`SELECT id FROM materials WHERE id = ${m.id} FOR UPDATE`;
+      const started = Date.now();
+      const busy = await putMode(buyer, m.id, { mode: 'auto', expected: 'stock' });
+      expect(busy.status).toBe(409);
+      expect(busy.body.error.code).toBe('BUSY');
+      expect(Date.now() - started).toBeLessThan(9_000);
+    } finally {
+      await holder`ROLLBACK`;
+      holder.release();
+    }
+    expect((await getMaterial(m.id)).replenishMode).toBe('stock');
+  }, 30_000);
 });

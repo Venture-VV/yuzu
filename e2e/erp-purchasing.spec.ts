@@ -315,4 +315,49 @@ test.describe('补货方式（迁移 161）', () => {
     await expect(page.getByTestId('suggestions-page')).toBeVisible();
     await expect(page.getByTestId(`suggest-line-${mat.id}`)).toHaveCount(0);
   });
+
+  test('点一行的「不用备货」不冲掉同组别的行改好的数量和去掉的勾；断网时留「结果待确认」、只能原样再试（合并前 Codex 审查 e3cfbd0）', async ({ page }) => {
+    const { tag } = await setup(page);
+    const sup = await newSupplier(page, tag);
+    // 同一家供应商下三样：都低于提醒数量（建议各 3 箱）
+    const a = await newMaterial(page, tag, { defaultSupplierId: sup.id, lowStockMilli: 25_000 });
+    const b = await newMaterial(page, tag, { defaultSupplierId: sup.id, lowStockMilli: 25_000 });
+    const c = await newMaterial(page, tag, { defaultSupplierId: sup.id, lowStockMilli: 25_000 });
+
+    await page.goto('/purchasing/suggestions');
+    const group = page.getByTestId(`suggest-group-${sup.id}`);
+    await expect(group.getByTestId(`suggest-qty-${a.id}`)).toHaveValue('3');
+    // 采购把 A 改成 5 箱、把 B 的勾去掉
+    await group.getByTestId(`suggest-qty-${a.id}`).fill('5');
+    await group.getByRole('checkbox', { name: `补 ${b.name}` }).uncheck();
+
+    // 第一次点 C 的「不用备货」时断网：不知道改没改成，留一条「结果待确认」，别的先不能改
+    let dropped = 0;
+    await page.route('**/api/inventory/materials/*/replenish-mode', async (route) => {
+      if (dropped++ === 0) await route.abort('connectionfailed');
+      else await route.continue();
+    });
+    await group.getByTestId(`suggest-off-${c.id}`).click();
+    const pending = page.getByTestId('mode-pending');
+    await expect(pending).toContainText(c.name);
+    await expect(pending).toContainText('按需采购');
+    await expect(group.getByTestId(`suggest-off-${a.id}`)).toBeDisabled();
+    expect(await materialOf(page, c.id)).toMatchObject({ replenishMode: 'auto' });
+    // 再试一次：按原样重提，改成了
+    await page.getByTestId('mode-pending-retry').click();
+    await expect(pending).toHaveCount(0);
+    await expect(page.getByTestId(`suggest-line-${c.id}`)).toHaveCount(0);
+    expect(await materialOf(page, c.id)).toMatchObject({ replenishMode: 'on_demand' });
+
+    // 建议刷新以后：A 还是 5 箱，B 还是没勾
+    await expect(group.getByTestId(`suggest-qty-${a.id}`)).toHaveValue('5');
+    await expect(group.getByRole('checkbox', { name: `补 ${b.name}` })).not.toBeChecked();
+    await expect(group.getByTestId(`suggest-off-${a.id}`)).toBeEnabled();
+    // 生成的草稿只有 A 的 5 箱
+    await group.getByTestId('suggest-create').click();
+    await expect(page).toHaveURL(/\/purchasing\/\d+\/edit/);
+    const poId = Number(/\/purchasing\/(\d+)\/edit/.exec(page.url())![1]);
+    const po = (await (await page.request.get(`/api/purchase-orders/${poId}`)).json()) as { lines: { materialId: number; purchaseQtyMilli: number }[] };
+    expect(po.lines).toEqual([expect.objectContaining({ materialId: a.id, purchaseQtyMilli: 5000 })]);
+  });
 });

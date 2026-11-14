@@ -28,6 +28,7 @@ import { SourcingCreateDialog, type SourcingDraft } from './SourcingPage';
 export function SuggestionsPage() {
   const can = useCan();
   const data = useSuggestions();
+  const modeOps = useReplenishModeOps(data.data);
   if (!can('inventory.read')) return <Navigate to="/" replace />;
   const d = data.data;
   return (
@@ -60,6 +61,19 @@ export function SuggestionsPage() {
             <Notice tone="error" title={errorMessage(data.error)} />
           ) : (
             <>
+              {modeOps.pending && (
+                <Notice
+                  tone="warning"
+                  icon={<CloudOff className="size-5" />}
+                  title={`「${modeOps.pending.name}」的补货方式结果待确认：要改成「${REPLENISH_MODE_LABELS[modeOps.pending.mode].title}」，网络断了或超时，不知道改没改成`}
+                  data-testid="mode-pending"
+                >
+                  <p className="mb-2">点「再试一次」按原样重提（已经改成了的不会重复改）；确认之前，别的补货方式先不能改。</p>
+                  <Button variant="secondary" size="sm" loading={modeOps.busyId !== null} onClick={() => void modeOps.retry()} data-testid="mode-pending-retry">
+                    再试一次
+                  </Button>
+                </Notice>
+              )}
               {d!.count === 0 ? (
                 <EmptyState
                   art="calm"
@@ -67,9 +81,9 @@ export function SuggestionsPage() {
                   description="常备的、经常领用的物料结存加在途都够用。手机、设备这类按需采购的东西不在这里提，部门提需求单再买。"
                 />
               ) : (
-                d!.groups.map((g) => <GroupCard key={g.supplier?.id ?? 'none'} group={g} canCreate={can('purchase.manage')} canMode={can('inventory.master')} />)
+                d!.groups.map((g) => <GroupCard key={g.supplier?.id ?? 'none'} group={g} canCreate={can('purchase.manage')} canMode={can('inventory.master')} mode={modeOps} />)
               )}
-              {d!.skipped.length > 0 && <SkippedCard data={d!} canMode={can('inventory.master')} />}
+              {d!.skipped.length > 0 && <SkippedCard data={d!} canMode={can('inventory.master')} mode={modeOps} />}
             </>
           )}
         </div>
@@ -82,35 +96,76 @@ interface Pick {
   on: boolean;
   qty: string;
   price: string;
+  /** 人动过（改了数量、单价，或者勾掉 / 勾回）：建议刷新时保持原样 */
+  touched?: boolean;
 }
 
-/** 改一个物料的补货方式（只改这一项）：改完补货建议、物料档案一起刷新 */
-function useSetReplenishMode() {
+interface ModeOp {
+  materialId: number;
+  name: string;
+  /** 要改成的 */
+  mode: ReplenishMode;
+  /** 页面上看到的：服务端对不上就拒绝（晚到的旧请求不会盖掉后来的修改） */
+  expected: ReplenishMode;
+}
+
+/**
+ * 改一个物料的补货方式（只改这一项）：改完补货建议、物料档案一起刷新。整页共用一份，同一时刻只发一个。
+ * 断网、超时或服务器出错时不知道改没改成（合并前 Codex 审查 e3cfbd0）：留一条「结果待确认」，只能按原样再试一次
+ * （已经是要改成的值服务端照常返回），确认之前别的补货方式不能改；读回来已经是要改成的就算确认了。
+ * 服务端等锁、执行有时限，页面超时的时候那次请求已经提交或回滚；真有晚到的，带着当时看到的值、对不上会被拒绝。
+ */
+function useReplenishModeOps(data: ReplenishSuggestions | undefined) {
   const toast = useToast();
   const invalidate = useInvalidateAll();
   const [busyId, setBusyId] = useState<number | null>(null);
-  const setMode = async (m: { materialId: number; name: string }, mode: ReplenishMode) => {
-    setBusyId(m.materialId);
+  const [pending, setPending] = useState<ModeOp | null>(null);
+  const done = (op: ModeOp) =>
+    toast({
+      tone: 'success',
+      title: `「${op.name}」已${op.mode === 'on_demand' ? '定为按需采购' : op.mode === 'stock' ? '设为常备' : '改回自动识别'}`,
+      body: op.mode === 'on_demand' ? '以后不提补货、不做低库存提醒；在下面「没提补货的」或物料档案里可以改回来' : REPLENISH_MODE_LABELS[op.mode].hint,
+    });
+  const send = async (op: ModeOp) => {
+    setBusyId(op.materialId);
     try {
-      await api.put<Material>(`/api/inventory/materials/${m.materialId}/replenish-mode`, { mode });
-      toast({
-        tone: 'success',
-        title: `「${m.name}」已${mode === 'on_demand' ? '定为按需采购' : mode === 'stock' ? '设为常备' : '改回自动识别'}`,
-        body: mode === 'on_demand' ? '以后不提补货、不做低库存提醒；在下面「没提补货的」或物料档案里可以改回来' : REPLENISH_MODE_LABELS[mode].hint,
-      });
+      await api.put<Material>(`/api/inventory/materials/${op.materialId}/replenish-mode`, { mode: op.mode, expected: op.expected });
+      setPending(null);
+      done(op);
     } catch (e) {
-      // 断网、超时：不知道改没改成。这一项设成同一个值再设一次结果一样，下面刷新后看到的就是实际的，没改成再点一次
-      if (e instanceof UncertainError) toast({ tone: 'error', title: '网络断了或超时，不知道补货方式改没改成', body: '页面已经刷新，按现在显示的为准；没改成的再点一次' });
-      else toast({ tone: 'error', title: '补货方式没改成', body: errorMessage(e) });
+      if (e instanceof UncertainError) {
+        setPending(op);
+        toast({ tone: 'error', title: '网络断了或超时，不知道补货方式改没改成', body: '页面上留了一条「结果待确认」，点「再试一次」按原样重提' });
+      } else {
+        // 明确被拒绝（没权限、刚被别人改过……）：没有生效，刷新后按页面上的为准
+        setPending(null);
+        toast({ tone: 'error', title: '补货方式没改成', body: errorMessage(e) });
+      }
     } finally {
       await invalidate();
       setBusyId(null);
     }
   };
-  return { busyId, setMode };
+  // 待确认的那一个：读回来已经是要改成的，就是生效了
+  useEffect(() => {
+    if (!pending || !data) return;
+    const now = data.groups.flatMap((g) => g.lines).find((l) => l.materialId === pending.materialId)?.mode ?? data.skipped.find((r) => r.materialId === pending.materialId)?.mode;
+    if (now !== pending.mode) return;
+    setPending(null);
+    done(pending);
+  }, [data, pending]);
+  return {
+    busyId,
+    pending,
+    /** 正在发，或者有一个还没确认：别的先不能改 */
+    locked: busyId !== null || pending !== null,
+    setMode: (m: { materialId: number; name: string; mode: ReplenishMode }, to: ReplenishMode) => send({ materialId: m.materialId, name: m.name, mode: to, expected: m.mode }),
+    retry: () => (pending ? send(pending) : Promise.resolve()),
+  };
 }
+type ModeOps = ReturnType<typeof useReplenishModeOps>;
 
-function GroupCard({ group, canCreate, canMode }: { group: ReplenishGroup; canCreate: boolean; canMode: boolean }) {
+function GroupCard({ group, canCreate, canMode, mode }: { group: ReplenishGroup; canCreate: boolean; canMode: boolean; mode: ModeOps }) {
   const session = useSession();
   const toast = useToast();
   const navigate = useNavigate();
@@ -125,11 +180,18 @@ function GroupCard({ group, canCreate, canMode }: { group: ReplenishGroup; canCr
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const mode = useSetReplenishMode();
+  // 建议刷新了（这一组里有一行改了补货方式、别处建了草稿……）：人动过的行（改过数量、单价，或者去掉了勾）保持原样，
+  // 没动过的跟着新的建议量走，新出现的行按建议量——不然点一行的「不用备货」会把别的行改好的数量、去掉的勾都冲掉
+  //（合并前 Codex 审查 e3cfbd0）
   useEffect(() => {
-    setPicks(
+    setPicks((prev) =>
       Object.fromEntries(
-        group.lines.map((l) => [l.materialId, { on: true, qty: formatQty(l.suggestedPurchaseMilli).replace(/,/g, ''), price: l.priceCents === null ? '' : centsToInput(l.priceCents) }]),
+        group.lines.map((l) => [
+          l.materialId,
+          prev[l.materialId]?.touched
+            ? prev[l.materialId]!
+            : { on: true, qty: formatQty(l.suggestedPurchaseMilli).replace(/,/g, ''), price: l.priceCents === null ? '' : centsToInput(l.priceCents) },
+        ]),
       ),
     );
   }, [group]);
@@ -178,7 +240,7 @@ function GroupCard({ group, canCreate, canMode }: { group: ReplenishGroup; canCr
       lines,
     });
   };
-  const setPick = (id: number, patch: Partial<Pick>) => setPicks((ps) => ({ ...ps, [id]: { ...ps[id]!, ...patch } }));
+  const setPick = (id: number, patch: Partial<Pick>) => setPicks((ps) => ({ ...ps, [id]: { ...ps[id]!, ...patch, touched: true } }));
 
   const done = (po: PurchaseOrder) => {
     void invalidate();
@@ -321,7 +383,7 @@ function GroupCard({ group, canCreate, canMode }: { group: ReplenishGroup; canCr
                   type="button"
                   className="mt-0.5 text-[12px] font-semibold text-ink-3 underline decoration-line-strong underline-offset-2 hover:text-ink disabled:opacity-50"
                   title="不是消耗品（手机、设备这类部门提需求才买的）：定为按需采购，以后不提补货"
-                  disabled={mode.busyId !== null || busy}
+                  disabled={mode.locked || busy}
                   onClick={() => void mode.setMode(l, 'on_demand')}
                   data-testid={`suggest-off-${l.materialId}`}
                 >
@@ -362,9 +424,8 @@ function skipReason(r: ReplenishSkipped, d: ReplenishSuggestions): string {
 }
 
 /** 本来会提、识别为不用补的（E12）：默认收起，展开看原因、改补货方式 */
-function SkippedCard({ data, canMode }: { data: ReplenishSuggestions; canMode: boolean }) {
+function SkippedCard({ data, canMode, mode }: { data: ReplenishSuggestions; canMode: boolean; mode: ModeOps }) {
   const [open, setOpen] = useState(false);
-  const mode = useSetReplenishMode();
   const counts = { on_demand: 0, asset: 0, sporadic: 0 };
   for (const r of data.skipped) counts[r.why] += 1;
   const summary = [
@@ -410,15 +471,15 @@ function SkippedCard({ data, canMode }: { data: ReplenishSuggestions; canMode: b
                 {canMode && (
                   <span className="flex flex-wrap gap-2">
                     {r.mode === 'on_demand' ? (
-                      <Button variant="secondary" size="sm" disabled={mode.busyId !== null} loading={mode.busyId === r.materialId} onClick={() => void mode.setMode(r, 'auto')} data-testid={`suggest-skip-auto-${r.materialId}`}>
+                      <Button variant="secondary" size="sm" disabled={mode.locked} loading={mode.busyId === r.materialId} onClick={() => void mode.setMode(r, 'auto')} data-testid={`suggest-skip-auto-${r.materialId}`}>
                         改回自动识别
                       </Button>
                     ) : (
-                      <Button variant="secondary" size="sm" disabled={mode.busyId !== null} loading={mode.busyId === r.materialId} onClick={() => void mode.setMode(r, 'on_demand')} data-testid={`suggest-skip-off-${r.materialId}`}>
+                      <Button variant="secondary" size="sm" disabled={mode.locked} loading={mode.busyId === r.materialId} onClick={() => void mode.setMode(r, 'on_demand')} data-testid={`suggest-skip-off-${r.materialId}`}>
                         定为按需采购
                       </Button>
                     )}
-                    <Button variant="secondary" size="sm" disabled={mode.busyId !== null} onClick={() => void mode.setMode(r, 'stock')} data-testid={`suggest-skip-stock-${r.materialId}`}>
+                    <Button variant="secondary" size="sm" disabled={mode.locked} onClick={() => void mode.setMode(r, 'stock')} data-testid={`suggest-skip-stock-${r.materialId}`}>
                       要备货，设为常备
                     </Button>
                   </span>

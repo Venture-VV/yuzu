@@ -188,6 +188,7 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
       openPos: tr?.docNos ?? [],
       dailyUsageMilli: daily > 0 ? Math.round(daily) : null,
       daysOfCover,
+      mode: m.replenishMode,
       reason,
       triggerDays,
       targetDays,
