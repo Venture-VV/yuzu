@@ -17,7 +17,7 @@ export function LowBalances(props: ListProps) {
     <ListFilters {...props} managerVisible searchLabel="搜索低余额会员" />
     <ReadStatus {...read} hasData={Boolean(d)} onRetry={props.onRefresh} />
     {d && <>
-      <div className="customer-metrics customer-metrics-single"><Metric label="低余额关注会员" note={<>本金＋可用赠金严格低于 <Amount value={d.thresholdCents} /></>}>{d.totals.memberCount}<small> 位</small></Metric></div>
+      <div className="customer-metrics customer-metrics-single"><Metric label="低余额关注会员" note={<>本金加可用赠金不到 <Amount value={d.thresholdCents} /></>}>{d.totals.memberCount}<small> 位</small></Metric></div>
       <Card className="customer-section">
         <SectionTitle>低余额关注名单</SectionTitle>
         <p className="customer-caption">与管家部看的是同一份会员余额（本金加还能用的赠金），实时更新，不随上面选的营业日变；余额满 30,000 元的不列入。点击会员可查看个人档案、原单与维护记录。</p>

@@ -101,6 +101,39 @@ export async function customerMeta(
     },
   };
 }
+/**
+ * 客户部页面每 3 秒问一次「有没有变化」的指纹（整合进主线时加的，做法同管家部的 /api/concierge/revision）。
+ * 原来每个开着的页面每 3 秒把总览、目标、列表这些较重的统计各重读一遍；现在只读这一条，变了才重读，另有慢速刷新兜底。
+ * 只取各表主键上的最大编号与「开着的账单 / 在店手牌」的合计——都走索引、不随历史数据变慢：
+ *   · 会员账本的最大编号：充值、扣卡、撤销、退储值、赠金到期、合并……钱包的每一笔都会多一行；
+ *   · 前台：挂账明细的最大编号、开着的账单的金额与行数合计（退菜、转单改的是它）、在店手牌数、来访与结账单的最大编号、
+ *     今天反结账与作废退款单的张数、退款单的最大编号；
+ *   · 客户部自己的：服务记录、绑定申请（含状态变化的版本合计）与生效记录、归属与目标的历史——这几张都是只追加或带版本的；
+ *   · 营业日（过了营业日切换时间，页面上的「今天」要跟着变）。
+ * 会员改名、改手机号、换岗这类不在里面，靠页面的慢速刷新带出来。
+ */
+export async function customerRevision(db: Db, timezone: string, at = new Date()): Promise<string> {
+  const settings = await loadSettings(db);
+  const today = businessDateOf(at, timezone, settings.businessDayStartHour);
+  const [row] = await db`SELECT
+    (SELECT coalesce(max(id),0) FROM ledger_entries) AS ledger,
+    (SELECT coalesce(max(id),0) FROM bill_lines) AS lines,
+    (SELECT count(*)::text||'/'||coalesce(sum(amount_cents),0)::text||'/'||coalesce(sum(line_count),0)::text FROM bills WHERE status='open') AS open_bills,
+    (SELECT count(*) FROM visits WHERE status='open') AS in_store,
+    (SELECT coalesce(max(id),0) FROM visits) AS visits,
+    (SELECT coalesce(max(id),0) FROM checkouts) AS checkouts,
+    (SELECT count(*) FROM checkouts WHERE void_business_date=${today}) AS voids,
+    (SELECT coalesce(max(id),0) FROM refunds) AS refunds,
+    (SELECT count(*) FROM refunds WHERE business_date=${today} AND status<>'completed') AS refund_voids,
+    (SELECT coalesce(max(id),0) FROM member_refunds) AS member_refunds,
+    (SELECT coalesce(max(id),0) FROM customer_service_notes) AS notes,
+    (SELECT coalesce(max(id),0)::text||'/'||coalesce(sum(version),0)::text FROM customer_binding_requests) AS binding_requests,
+    (SELECT coalesce(max(id),0) FROM customer_binding_events) AS binding_events,
+    (SELECT coalesce(max(id),0) FROM customer_credit_events) AS credit_events,
+    (SELECT coalesce(max(id),0) FROM customer_target_versions) AS target_versions`;
+  return [today, ...Object.values(row ?? {})].join(":");
+}
+
 function scope(actor: Actor, q: Q): number | null {
   if (can(actor, "customer.manage")) return q.managerId ?? null;
   if (q.managerId !== undefined && q.managerId !== actor.id)

@@ -20,6 +20,7 @@ import {
   customerBindings,
   customerLowBalances,
   customerPerformance,
+  customerRevision,
 } from "./reads";
 import { registerCustomerWriteRoutes } from "./writes";
 
@@ -72,6 +73,19 @@ export function registerCustomerRoutes(
       },
     );
   };
+  // 每个开着的客户部页面每 3 秒来一次，必须便宜：只取几个主键上的最大编号与开着的账单的合计（见 customerRevision）；
+  // 关掉这一个事务的 JIT（同管家部：这类小查询在默认配置下可能触发 JIT，编译比查询本身慢得多）
+  app.get(
+    "/api/customer/revision",
+    { preHandler: guard("customer.read") },
+    async (_req, reply) => {
+      reply.header("Cache-Control", "private, no-store");
+      return readSnapshot(sql, async (tx) => {
+        await tx`SET LOCAL jit = off`;
+        return { revision: await customerRevision(tx, config.timezone) };
+      });
+    },
+  );
   list("overview", customerOverview);
   list("recharges", customerRecharges);
   list("settlements", customerSettlements);

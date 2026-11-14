@@ -10,7 +10,7 @@ import { Button, Notice } from "../../components/ui";
 import { useBusinessToday } from "../../lib/revenue";
 import { useCan } from "../../lib/session";
 import { uuid } from "../../lib/utils";
-import { customerUrl, useCustomerRead } from "./api";
+import { customerUrl, useCustomerRead, useCustomerRevision } from "./api";
 import { CustomerDetailDialog } from "./Details";
 import type { DetailEntry } from "./Details";
 import { CustomerFormDialog, CUSTOMER_OP_TYPES } from "./Forms";
@@ -54,6 +54,8 @@ function CustomerWorkspace() {
   const [records, setRecords] = useState<DetailEntry[]>([]);
   const [form, setForm] = useState<{ key: string; value: CustomerForm; meta: CustomerMeta; managers: CustomerStaff[] } | null>(null);
   const refresh = () => setRevision((value) => value + 1);
+  // 前台、会员系统或客户部自己有变化时，各块跟着重读（每 3 秒只问一次有没有变化）
+  useCustomerRevision(refresh);
   const tabAddress = (next: CustomerTab, extra: Record<string, string> = {}) => {
     const nextParams = new URLSearchParams(params);
     nextParams.set("tab", next);
