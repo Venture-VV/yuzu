@@ -8,13 +8,20 @@ export function DateNav({
   today,
   onChange,
   locked,
+  max,
 }: {
   value: string;
   today: string;
   onChange: (date: string) => void;
   /** 无权查看历史营业日 */
   locked?: boolean;
+  /**
+   * 最晚能选到哪一天。不给就是今天——流水、日结、结账记录这些看历史的页面都不给，只能选今天和以前；
+   * 只有预约页给「今天 + 规则里最远能约的天数」（店主 2026-11-14 的需求 2：原来预约页也选不了明天）。
+   */
+  max?: string;
 }) {
+  const last = max && max > today ? max : today;
   const d = describeDate(value);
   const isToday = value === today;
   if (locked) {
@@ -44,7 +51,7 @@ export function DateNav({
             type="date"
             aria-label="选择营业日"
             value={value}
-            max={today}
+            max={last}
             onChange={(e) => e.target.value && onChange(e.target.value)}
             className="absolute inset-0 cursor-pointer opacity-0"
           />
@@ -52,7 +59,7 @@ export function DateNav({
         <button
           type="button"
           aria-label="后一天"
-          disabled={value >= today}
+          disabled={value >= last}
           onClick={() => onChange(shiftDate(value, 1))}
           className="flex h-full w-9 items-center justify-center rounded-r-md text-ink-2 hover:bg-paper-2 disabled:text-ink-4 disabled:hover:bg-transparent"
         >

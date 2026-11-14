@@ -11,7 +11,10 @@ import { ZONE_LABELS } from '@shared/frontdesk';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime, uuid } from '../../lib/utils';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Money } from '../../components/Money';
+import { Dialog } from '../../components/Overlay';
+import { QtyInput } from '../../components/QtyInput';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Skeleton, Spinner } from '../../components/ui';
@@ -63,12 +66,17 @@ export function OrderTab() {
   const table = useTableSession(mode === 'table' ? tableSession : null);
   const g = mode === 'tag' && tag ? (guest.data ?? null) : null;
   const t: TableSessionDetail | null = mode === 'table' && tableSession !== null ? (table.data ?? null) : null;
-  const target: { label: string; pending: PendingDish[]; open: boolean } | null = g
-    ? { label: g.tagCode, pending: g.pending, open: true }
+  const target: { label: string; who: string; pending: PendingDish[]; open: boolean } | null = g
+    ? { label: g.tagCode, who: g.guest, pending: g.pending, open: true }
     : t
-      ? { label: `桌 ${t.tableName}`, pending: t.pending, open: t.status === 'open' }
+      ? { label: `桌 ${t.tableName}`, who: `${t.guests} 人 · ${t.member?.name ?? (t.guestLabel || '散客')}`, pending: t.pending, open: t.status === 'open' }
       : null;
   const [cart, setCart] = useState<CartLine[]>([]);
+  // 换一位客人、换一张桌时菜篮里还有没下单的菜（店主 2026-11-14 的需求 5）：原来菜篮悄悄跟到下一位，容易记到别人账上。
+  // 先问清空还是带过去；带过去的在下单处一直标着是从谁那里带来的，直到下单或清空
+  const [switching, setSwitching] = useState<{ from: string; apply: () => void } | null>(null);
+  const [carriedFrom, setCarriedFrom] = useState<string | null>(null);
+  const [qtyHint, setQtyHint] = useState<string | null>(null);
   const [category, setCategory] = useState('all');
   const [voiding, setVoiding] = useState<{ dish: PendingDish; mode: 'void' | 'modify' } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -137,11 +145,22 @@ export function OrderTab() {
     void qc.invalidateQueries({ queryKey: ['frontdesk'] });
   };
 
+  /** 要换点单对象了：菜篮空着、或者现在还没找到人（没有可以记错的对象）直接换；否则先问 */
+  const askSwitch = (apply: () => void) => {
+    if (op.locked) return;
+    if (cart.length === 0 || !target) return apply();
+    setSwitching({ from: target.label, apply });
+  };
   const find = () => {
     const code = tagText.trim();
     if (!code) return;
-    setTag(code);
-    op.clearError();
+    const go = () => {
+      setTag(code);
+      op.clearError();
+    };
+    // 已经找到一位客人、又输了另一个手牌号：也是换人
+    if (g && code.toUpperCase() !== g.tagCode.toUpperCase() && code !== tag) askSwitch(go);
+    else go();
   };
 
   const add = (d: MenuDish) => {
@@ -154,7 +173,18 @@ export function OrderTab() {
     });
     op.clearError();
   };
-  const update = (key: string, patch: Partial<CartLine>) => setCart((c) => c.map((l) => (l.key === key ? { ...l, ...patch } : l)).filter((l) => l.quantity > 0));
+  const update = (key: string, patch: Partial<CartLine>) => {
+    if (patch.quantity !== undefined) setQtyHint(null);
+    setCart((c) => c.map((l) => (l.key === key ? { ...l, ...patch } : l)).filter((l) => l.quantity > 0));
+  };
+  const emptyCart = () => {
+    setCart([]);
+    setCarriedFrom(null);
+    setQtyHint(null);
+  };
+  useEffect(() => {
+    if (cart.length === 0) setCarriedFrom(null);
+  }, [cart.length]);
   const addNote = (l: CartLine, word: string) => {
     const parts = l.note.split(/[，,、\s]+/).filter(Boolean);
     if (parts.includes(word)) return;
@@ -194,7 +224,7 @@ export function OrderTab() {
           },
     );
     if (ok) {
-      setCart([]);
+      emptyCart();
       toast({
         tone: 'success',
         title: `${target.label} 已下单`,
@@ -208,9 +238,11 @@ export function OrderTab() {
   };
 
   const switchMode = (m: 'tag' | 'table') => {
-    if (op.locked) return;
-    setMode(m);
-    op.clearError();
+    if (op.locked || m === mode) return;
+    askSwitch(() => {
+      setMode(m);
+      op.clearError();
+    });
   };
   const openTables = (board.data?.tables ?? []).filter((x) => x.session);
 
@@ -291,10 +323,13 @@ export function OrderTab() {
                       <button
                         type="button"
                         className="ml-1 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[12.5px] font-semibold text-ink-3 hover:bg-paper-2 hover:text-ink"
-                        onClick={() => {
-                          setTag(null);
-                          setTagText('');
-                        }}
+                        onClick={() =>
+                          askSwitch(() => {
+                            setTag(null);
+                            setTagText('');
+                          })
+                        }
+                        data-testid="dining-switch-guest"
                       >
                         <X className="size-3.5" /> 换一位
                       </button>
@@ -312,8 +347,13 @@ export function OrderTab() {
               error={table.error}
               locked={op.locked}
               onPick={(id) => {
-                setTableSession(id);
-                op.clearError();
+                const go = () => {
+                  setTableSession(id);
+                  op.clearError();
+                };
+                // 已经选着一张桌、又点了另一张：也是换对象
+                if (t && id !== tableSession) askSwitch(go);
+                else go();
               }}
             />
           )}
@@ -323,6 +363,11 @@ export function OrderTab() {
           <SectionTitle aside={menu.data && <span className="text-[12px] text-ink-3">营业日 {menu.data.businessDate}</span>}>菜单</SectionTitle>
           {menu.isPending ? (
             <Skeleton className="mt-3 h-48" />
+          ) : menu.isError && !menu.data ? (
+            // 菜单没取回来：不是「还没有菜」，给重试；已经点的菜、找到的客人都不动（需求 4 的同类问题）
+            <LoadFailed title="菜单加载失败，请检查网络" onRetry={() => void menu.refetch()} retrying={menu.isFetching} className="mt-3" testId="dining-menu-error">
+              菜单没有取回来，不是没有菜。点「重试」再取一次。
+            </LoadFailed>
           ) : dishes.length === 0 ? (
             <p className="mt-3 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">
               还没有进厨房的菜。请店主在「后台 → 餐饮」建出品档口，并把菜挂到档口上。
@@ -389,7 +434,7 @@ export function OrderTab() {
             aside={
               cart.length > 0 &&
               !op.locked && (
-                <button type="button" className="text-[12.5px] font-semibold text-ink-3 hover:text-ink" onClick={() => setCart([])}>
+                <button type="button" className="text-[12.5px] font-semibold text-ink-3 hover:text-ink" onClick={emptyCart} data-testid="dining-cart-clear">
                   清空
                 </button>
               )
@@ -403,11 +448,27 @@ export function OrderTab() {
             <PendingPanel
               op={op}
               onResolved={() => {
-                setCart([]);
+                emptyCart();
                 refresh();
               }}
             />
           </div>
+          {/* 这一单记到谁账上：手牌号（桌号）、客人、份数放在最上面，下单前一眼看得到（需求 5） */}
+          {target && cart.length > 0 && (
+            <div className="mb-3 rounded-lg border border-pine/25 bg-pine-tint px-3 py-2" data-testid="dining-target">
+              <p className="text-[11.5px] font-semibold text-ink-3">这一单记到</p>
+              <p className="flex flex-wrap items-baseline gap-x-2">
+                <span className="num text-[22px] leading-tight font-bold text-pine">{target.label}</span>
+                <span className="text-[14.5px] font-bold">{target.who}</span>
+                <span className="num ml-auto text-[13.5px] font-bold text-ink-2">{cart.reduce((s, l) => s + l.quantity, 0)} 份</span>
+              </p>
+            </div>
+          )}
+          {carriedFrom && cart.length > 0 && (
+            <Notice tone="warning" className="mb-3" title={`这些菜是从 ${carriedFrom} 带过来的`} data-testid="dining-carried">
+              {target ? `现在会记到 ${target.label} 的账上，下单前请核对；不对就点「清空」。` : '找到下一位客人后会记到他的账上，下单前请核对；不对就点「清空」。'}
+            </Notice>
+          )}
           {cart.length === 0 ? (
             <p className="rounded-lg border border-dashed border-line-strong px-3 py-6 text-center text-[13px] text-ink-3">点菜单里的菜加进来</p>
           ) : (
@@ -427,7 +488,7 @@ export function OrderTab() {
                       >
                         {l.quantity === 1 ? <Trash2 className="size-3.5" /> : <Minus className="size-3.5" />}
                       </button>
-                      <span className="num w-6 text-center text-[15px] font-bold">{l.quantity}</span>
+                      <QtyInput value={l.quantity} onChange={(n) => update(l.key, { quantity: n })} onHint={setQtyHint} label={`${l.dish?.name ?? '已下架的菜'} 的份数`} disabled={op.locked} className="h-8 w-9 text-[15px]" testId={`dining-qty-${i}`} />
                       <button
                         type="button"
                         className="flex size-8 items-center justify-center rounded-full bg-paper-2 hover:bg-paper-3"
@@ -469,6 +530,11 @@ export function OrderTab() {
                 </li>
               ))}
             </ul>
+          )}
+          {qtyHint && cart.length > 0 && (
+            <p className="mt-2 text-[12.5px] font-semibold text-clay" role="status" data-testid="dining-qty-hint">
+              {qtyHint}
+            </p>
           )}
           {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} className="mt-3" />}
           <div className="mt-3 flex items-center gap-3 border-t border-line pt-3">
@@ -559,6 +625,45 @@ export function OrderTab() {
           </Card>
         )}
       </div>
+
+      {switching &&
+        (() => {
+          const named = lines.map((l) => `${l.dish?.name ?? '已下架的菜'} ×${l.quantity}`);
+          const count = cart.reduce((n, l) => n + l.quantity, 0);
+          const done = (keep: boolean) => {
+            const { from, apply } = switching;
+            setSwitching(null);
+            if (keep) setCarriedFrom((prev) => prev ?? from);
+            else emptyCart();
+            apply();
+          };
+          return (
+            <Dialog
+              open
+              onClose={() => setSwitching(null)}
+              title="菜篮里还有没下单的菜"
+              description={`现在是 ${switching.from} 的菜篮`}
+              footer={
+                <>
+                  <Button variant="secondary" onClick={() => done(true)} data-testid="dining-switch-keep">
+                    保留并换人
+                  </Button>
+                  <Button variant="primary" onClick={() => done(false)} data-autofocus data-testid="dining-switch-clear">
+                    清空菜篮
+                  </Button>
+                </>
+              }
+            >
+              <div className="space-y-2 text-[14px]" data-testid="dining-switch">
+                <p>
+                  当前有 <b className="num">{count}</b> 份未下单的菜品（{named.slice(0, 3).join('、')}
+                  {named.length > 3 ? ' 等' : ''}），要带走给下一位客人还是清空？
+                </p>
+                <p className="text-[12.5px] text-ink-3">清空：这些菜不要了，下一位从空的菜篮开始。保留并换人：菜跟到下一位，下单时记在下一位的账上。点右上角关闭则不换人。</p>
+              </div>
+            </Dialog>
+          );
+        })()}
 
       <DishVoidDialog
         dish={voiding ? { billLineId: voiding.dish.billLineId, name: voiding.dish.name, quantity: voiding.dish.quantity, amount: voiding.dish.amount, postedBy: voiding.dish.postedBy, postedAt: voiding.dish.postedAt, served: voiding.dish.status === 'done' } : null}

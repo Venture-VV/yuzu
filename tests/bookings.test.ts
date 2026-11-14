@@ -96,6 +96,14 @@ afterAll(async () => ctx?.close());
 describe('可约时段与前台新建', () => {
   let first: BookingDetail;
 
+  it('看板里需要技师的项目带分类（新建预约里按分类分组、搜索用，店主 2026-11-14 的需求 6）；没写分类的归「其他」', async () => {
+    const b = await board();
+    expect(b.items.find((i) => i.name === '合成足疗')).toMatchObject({ category: '足疗', minutes: 60 });
+    expect(b.items.every((i) => typeof i.category === 'string' && i.category.length > 0)).toBe(true);
+    // 最远能约几天后：页面的日期条按它放开（需求 2）
+    expect(b.rules.maxDaysAhead).toBe(7);
+  });
+
   it('技师：半小时一格；指定了技师的占掉那一位；「不指定」按空着的技师数；冲突拒绝', async () => {
     const s = await slots({ kind: 'technician', date: tomorrow, itemId });
     expect(s.length).toBeGreaterThan(10);
