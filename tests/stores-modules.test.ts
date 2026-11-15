@@ -124,9 +124,9 @@ describe('多门店的各块', () => {
   it('审计按店记、按店看', async () => {
     const [row] = await ctx.sql<{ storeId: number }[]>`SELECT store_id FROM audit_logs WHERE action = 'device_created' ORDER BY id DESC LIMIT 1`;
     expect(Number(row!.storeId)).toBe(ft);
-    const ftAudit = await inStore(ft, async () => (await api(ctx.app, ctx.owner, 'GET', '/api/audit?limit=200')).body as { action: string }[]);
+    const ftAudit = await inStore(ft, async () => (await api(ctx.app, ctx.owner, 'GET', '/api/audit?limit=200')).body as { action: string; id: number }[]);
     const hqAudit = (await api(ctx.app, ctx.owner, 'GET', '/api/audit?limit=200')).body as { action: string; id: number }[];
     const ids = new Set(hqAudit.map((a) => a.id));
-    expect((ftAudit as { id: number }[]).some((a) => ids.has(a.id))).toBe(false);
+    expect(ftAudit.some((a) => ids.has(a.id))).toBe(false);
   });
 });
