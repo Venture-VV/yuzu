@@ -1,6 +1,7 @@
 // AI 辅助（8.0.22，docs/AI_V8022.md，MD-D）：每天的经营小结、问数、合同条款提示——只读、只出文字。
 //   · 模型服务按对外接口的模式（src/server/integrations/config.ts）：没配 YUZU_AI_API_KEY 是 off，一条数据都不发；
-//     INTEGRATIONS_MOCK=true（只许开发、测试实例）是模拟，不出网；配了是正式（Claude，官方 SDK，integrations/ai.ts）。
+//     INTEGRATIONS_MOCK=true（只许开发、测试实例）是模拟，不出网；配了是正式——8.1.1 起默认 DeepSeek（MD8，
+//     integrations/ai-deepseek.ts），YUZU_AI_PROVIDER=claude 时用 Claude（官方 SDK，integrations/ai.ts）。
 //   · 发出去的只有汇总数与打码后的文字（mask.ts）；每次调用记一行对外调用（种类 ai，只存摘要、不存原文）。
 //   · 加锁（第 7 节）：小结先认领一行（「门店 + 营业日 + 种类」唯一索引兜底）、写 10 分钟租约，事务外调模型，再只改这一行
 //     （之后的写入都带上这一次的租约：被当成中断、别人重新认领以后，晚到的结果不算数、也不推送）；
@@ -33,6 +34,7 @@ import { guard, guardAny } from '../../auth/guard';
 import { recordCall } from '../../integrations/calls';
 import { modeOf } from '../../integrations/config';
 import { AiRefused, claudeProvider, mockAiProvider, type AiProvider } from '../../integrations/ai';
+import { deepseekProvider } from '../../integrations/ai-deepseek';
 import type { Actor, Deps } from '../../lib/context';
 import { ctxOf } from '../../lib/context';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
@@ -77,13 +79,17 @@ export function aiProvider(config: AppConfig, rules: AiRules): AiProvider | null
   const mode = aiMode(config);
   if (mode === 'mock') return mockAiProvider();
   if (mode !== 'live') return null;
-  // 只认专门给浴族配的密钥（显式传给 SDK），不读 ANTHROPIC_API_KEY 或别处的登录
+  // 只认专门给浴族配的密钥（显式传给适配器），不读 ANTHROPIC_API_KEY、DEEPSEEK_API_KEY 或别处的登录
   const apiKey = (process.env.YUZU_AI_API_KEY ?? '').trim();
   if (!apiKey) return null;
-  return claudeProvider({ apiKey, baseURL: process.env.YUZU_AI_BASE_URL?.trim() || undefined, model: process.env.YUZU_AI_MODEL, fallbacks: rules.fallbacks });
+  const baseURL = process.env.YUZU_AI_BASE_URL?.trim() || undefined;
+  const model = process.env.YUZU_AI_MODEL?.trim() || undefined;
+  // 8.1.1 起默认 DeepSeek（MD8）；服务端回退（MD9）只有 Claude 有
+  if ((config.integrations.aiService ?? 'deepseek') === 'claude') return claudeProvider({ apiKey, baseURL, model, fallbacks: rules.fallbacks });
+  return deepseekProvider({ apiKey, baseURL, model });
 }
 
-const providerName = (p: AiProvider) => (p.mode === 'mock' ? 'mock' : 'claude');
+const providerName = (p: AiProvider) => p.name;
 
 export async function loadAiRules(db: Db): Promise<AiRules> {
   const row = await settingRow<Partial<AiRules>>(db, AI_RULES_KEY);
@@ -266,7 +272,7 @@ async function produceSummary(
     // 这一次已经被当成中断、别人重新认领了：结果不算数，也不推送
     if (!done.length) return summaryById(sql, id);
   } catch (e) {
-    const why = e instanceof AiRefused ? '模型拒答了这一份（换个时间重新生成试试）' : message(e);
+    const why = e instanceof AiRefused ? `这一份没写出来（${e.message}），换个时间重新生成试试` : message(e);
     await recordCall(sql, { ...base, request: { storeId: target.storeId, date: target.date, factsHash: hash }, ok: false, error: why, durationMs: Date.now() - started }).catch(() => undefined);
     await sql`UPDATE ai_summaries SET status = 'failed', error = ${why.slice(0, 500)}, lease_until = NULL, updated_at = now() WHERE ${mine}`;
     return summaryById(sql, id);
@@ -385,7 +391,7 @@ async function answerQuestion(deps: Deps, id: number, a: { actor: Actor; storeId
         WHERE id = ${id} AND status = 'running'`;
     } catch (e) {
       const refused = e instanceof AiRefused;
-      const why = refused ? '这个问题答不了（模型拒答）' : message(e);
+      const why = refused ? `这个问题答不了（${e.message}）` : message(e);
       await recordCall(sql, { ...base, ok: false, error: why, durationMs: Date.now() - started }).catch(() => undefined);
       await sql`
         UPDATE ai_questions SET status = ${refused ? 'refused' : 'failed'}, error = ${why.slice(0, 500)}, finished_at = now()
@@ -446,7 +452,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/ai/status', { preHandler: guardAny('report.executive', 'contract.read', 'contract.manage', 'settings.manage') }, async (req): Promise<AiStatus> => {
     const rules = await loadAiRules(sql);
     const provider = aiProvider(config, rules);
-    return { mode: provider ? provider.mode : 'off', model: provider?.model ?? null, rules, usedToday: await usedToday(sql, req.actor.id, config.timezone) };
+    return { mode: provider ? provider.mode : 'off', provider: provider?.name ?? null, model: provider?.model ?? null, rules, usedToday: await usedToday(sql, req.actor.id, config.timezone) };
   });
 
   app.get('/api/admin/ai-rules', { preHandler: guard('settings.manage') }, async () => loadAiRules(sql));
@@ -501,7 +507,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: Deps) {
     const rules = await loadAiRules(sql);
     if (!rules.enabled || !rules.questions) throw conflict('AI_DISABLED', '问数已关闭（后台「对外接口」→ AI 辅助里打开）');
     const provider = aiProvider(config, rules);
-    if (!provider) throw conflict('AI_NOT_CONFIGURED', '还没配置模型服务（服务器 .env 的 YUZU_AI_API_KEY），问数用不了');
+    if (!provider) throw conflict('AI_NOT_CONFIGURED', '还没配置模型服务（服务器 .env 的 YUZU_AI_API_KEY，填 DeepSeek 的密钥），问数用不了');
     // 问数只看汇总的数、查不了某一位会员：问题里写了会员的姓名、会员号、手机号（按会员档案认，空格、符号的变形也认）
     // 或者手机号、证件号的，拦下、什么都不发（测试会话在 80284a9、e25d122 报的 P1）
     const hits = (await memberTextGuard(sql)).find(body.question);
@@ -557,7 +563,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: Deps) {
     const rules = await loadAiRules(sql);
     if (!rules.enabled || !rules.contractHints) throw conflict('AI_DISABLED', '合同条款提示已关闭（后台「对外接口」→ AI 辅助里打开）');
     const provider = aiProvider(config, rules);
-    if (!provider) throw conflict('AI_NOT_CONFIGURED', '还没配置模型服务（服务器 .env 的 YUZU_AI_API_KEY），条款提示用不了');
+    if (!provider) throw conflict('AI_NOT_CONFIGURED', '还没配置模型服务（服务器 .env 的 YUZU_AI_API_KEY，填 DeepSeek 的密钥），条款提示用不了');
     // 发出去之前整个打码：正文、备注里可能有会员的姓名、会员号、手机号（按会员档案认，空格、符号的变形也认）、
     // 别人的电话、身份证号（正则）；合同里写人名是正常的，所以这里打码、不拦；取不出会员档案就不发
     const guard = await memberTextGuard(sql);
@@ -570,7 +576,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: Deps) {
       await recordCall(sql, { ...base, request: { category: input.category, chars: json.length + (input.body?.length ?? 0) }, ok: true, result: { ...r.usage, hints: hints.length }, durationMs: Date.now() - started });
       return { hints };
     } catch (e) {
-      const why = e instanceof AiRefused ? '这份合同 AI 看不了（模型拒答）' : message(e);
+      const why = e instanceof AiRefused ? `这份合同 AI 看不了（${e.message}）` : message(e);
       await recordCall(sql, { ...base, ok: false, error: why, durationMs: Date.now() - started }).catch(() => undefined);
       throw conflict(e instanceof AiRefused ? 'AI_REFUSED' : 'AI_UNAVAILABLE', why);
     }

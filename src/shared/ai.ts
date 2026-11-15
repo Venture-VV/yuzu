@@ -8,7 +8,7 @@ export interface AiRules {
   contractHints: boolean;
   /** 小结推企业微信（配了群机器人才推，MD11） */
   pushWecom: boolean;
-  /** 拒答时由服务端换一个模型接着答（MD9） */
+  /** 拒答时由服务端换一个模型接着答（MD9）：只有 Claude 有；8.1.1 起默认用 DeepSeek（MD8），这一项随之不起作用 */
   fallbacks: boolean;
   /** 每人每天最多问几次（MD10） */
   dailyQuestionLimit: number;
@@ -25,6 +25,9 @@ export const DEFAULT_AI_RULES: AiRules = {
 };
 
 export type AiMode = 'off' | 'mock' | 'live';
+/** 用的哪家模型服务：8.1.1 起默认 DeepSeek（MD8），YUZU_AI_PROVIDER=claude 时 Claude；模拟是 mock */
+export type AiProviderKind = 'deepseek' | 'claude' | 'mock';
+export const AI_PROVIDER_LABELS: Record<AiProviderKind, string> = { deepseek: 'DeepSeek', claude: 'Claude', mock: '模拟' };
 export type AiSummaryStatus = 'running' | 'done' | 'failed' | 'unconfigured';
 export type AiQuestionStatus = 'running' | 'done' | 'failed' | 'refused';
 /** 问数一次最多来回几次（模型挑工具、服务端执行） */
@@ -79,6 +82,8 @@ export interface AiSummaryResponse {
 /** 页面上要知道的 AI 辅助状态（不含密钥） */
 export interface AiStatus {
   mode: AiMode;
+  /** 用的哪家（没配是空） */
+  provider: AiProviderKind | null;
   /** 正式时用的模型（模拟是 mock，没配是空） */
   model: string | null;
   rules: AiRules;

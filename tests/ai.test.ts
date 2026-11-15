@@ -1,14 +1,17 @@
 // AI 辅助（8.0.22，docs/AI_V8022.md 第 8 节）：打码、事实包与工具里没有会员个人信息、工具的参数校验与按权限给、
 // 模拟模式的小结每天一份、问数原样重提只答一次、限额与开关、没配模型服务时、合同条款提示、适配器的请求形状。
 // 正式的模型调用不在用例里跑（要密钥、要外网）。
+// 8.1.1：DeepSeek 适配器（MD8）用假的 fetch 核对请求的样子、工具来回、JSON 模式、错误怎么翻译、不把 Anthropic 的密钥发出去。
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { AiQuestionView, AiRules, AiSummaryResponse } from '../src/shared/ai';
 import { DEFAULT_AI_RULES } from '../src/shared/ai';
 import { shiftDate } from '../src/shared/labels';
 import { readSnapshot } from '../src/server/db';
-import { AiRefused, claudeProvider, mockAiProvider, type AiProvider, type AiTool } from '../src/server/integrations/ai';
-import { runAiSummaries, setAiProviderForTests } from '../src/server/modules/ai';
+import { AiRefused, AiUnavailable, claudeProvider, mockAiProvider, type AiProvider, type AiTool } from '../src/server/integrations/ai';
+import { DEEPSEEK_DEFAULT_MODEL, deepseekProvider, jsonSchemaOf } from '../src/server/integrations/ai-deepseek';
+import { aiServiceOf } from '../src/server/integrations/config';
+import { aiProvider, runAiSummaries, setAiProviderForTests } from '../src/server/modules/ai';
 import { buildDailyFacts } from '../src/server/modules/ai/facts';
 import { aiMaskName, aiMaskText, maskForAi, memberTextGuard } from '../src/server/modules/ai/mask';
 import { aiTools } from '../src/server/modules/ai/tools';
@@ -369,5 +372,226 @@ describe('适配器（假的 SDK 客户端）', () => {
     await off.write({ system: 's', prompt: 'p' });
     expect(calls[0]!.params).not.toHaveProperty('betas');
     expect(calls[0]!.params).not.toHaveProperty('fallbacks');
+  });
+});
+
+describe('DeepSeek 适配器（假的 fetch，8.1.1，MD8）', () => {
+  type Req = { url: string; headers: Record<string, string>; body: Record<string, unknown> };
+  type Reply = { status?: number; body?: unknown; headers?: Record<string, string> } | Error;
+  /** 按顺序回答的假 fetch；记下每一次请求 */
+  const fakeFetch = (replies: ((req: Req) => Reply)[]) => {
+    const reqs: Req[] = [];
+    const fetch = async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      const req = { url, headers: init.headers, body: JSON.parse(init.body) as Record<string, unknown> };
+      reqs.push(req);
+      const r = replies[Math.min(reqs.length - 1, replies.length - 1)]!(req);
+      if (r instanceof Error) throw r;
+      const status = r.status ?? 200;
+      return { ok: status < 300, status, headers: { get: (n: string) => r.headers?.[n.toLowerCase()] ?? null }, json: async () => r.body };
+    };
+    return { fetch, reqs };
+  };
+  const answer =
+    (message: Record<string, unknown>, finish = 'stop') =>
+    (): Reply => ({ body: { choices: [{ index: 0, finish_reason: finish, message: { role: 'assistant', content: null, ...message } }], usage: { prompt_tokens: 5, completion_tokens: 3 } } });
+  const provider = (f: ReturnType<typeof fakeFetch>, more: { apiKey?: string; baseURL?: string; model?: string } = {}) =>
+    deepseekProvider({ apiKey: more.apiKey ?? 'sk-test-key', baseURL: more.baseURL, model: more.model, fetch: f.fetch as never, retryDelayMs: 0 });
+
+  it('写小结：地址、密钥、默认模型、思考模式关掉；不带 Claude 才有的字段', async () => {
+    const f = fakeFetch([answer({ content: ' 昨天还行 ' })]);
+    const p = provider(f);
+    expect([p.name, p.mode, p.model]).toEqual(['deepseek', 'live', DEEPSEEK_DEFAULT_MODEL]);
+    expect(DEEPSEEK_DEFAULT_MODEL).toBe('deepseek-v4-pro');
+    const r = await p.write({ system: '系统', prompt: '材料' });
+    expect(r).toEqual({ text: '昨天还行', usage: { inputTokens: 5, outputTokens: 3 } });
+    const req = f.reqs[0]!;
+    expect(req.url).toBe('https://api.deepseek.com/chat/completions');
+    expect(req.headers.authorization).toBe('Bearer sk-test-key');
+    expect(req.body).toMatchObject({ model: 'deepseek-v4-pro', thinking: { type: 'disabled' }, stream: false, messages: [{ role: 'system', content: '系统' }, { role: 'user', content: '材料' }] });
+    for (const k of ['tools', 'response_format', 'betas', 'fallbacks', 'output_config', 'user_id', 'reasoning_effort']) expect(req.body).not.toHaveProperty(k);
+    // 地址（末尾的 / 去掉）与模型可以换
+    const g = fakeFetch([answer({ content: '好' })]);
+    await provider(g, { baseURL: 'https://proxy.example.invalid/v1/', model: 'deepseek-flash' }).write({ system: 's', prompt: 'p' });
+    expect(g.reqs[0]!.url).toBe('https://proxy.example.invalid/v1/chat/completions');
+    expect(g.reqs[0]!.body.model).toBe('deepseek-flash');
+  });
+
+  it('问数：工具照 OpenAI 的格式给，模型挑了工具就在服务端校验参数、取数，结果带着 tool_call_id 回给它，再写答案', async () => {
+    let ran = 0;
+    const { z } = await import('zod');
+    const tool: AiTool = {
+      name: 'revenue',
+      description: '营业额：某段日期的净营业额',
+      schema: z.object({ from: z.iso.date(), to: z.iso.date() }).strict().refine((v) => v.from <= v.to, { message: '开始不能晚于结束' }) as never,
+      example: { from: '2026-11-01', to: '2026-11-02' },
+      run: async (input) => (ran++, { net: '¥1,234.00', input }),
+    };
+    const f = fakeFetch([
+      answer({ content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'revenue', arguments: '{"from":"2026-11-01","to":"2026-11-07"}' } }] }, 'tool_calls'),
+      answer({ content: '上周净营业额 ¥1,234.00' }),
+    ]);
+    const r = await provider(f).ask({ system: 's', question: '上周营业额？', tools: [tool], maxIterations: 6 });
+    expect(r.text).toBe('上周净营业额 ¥1,234.00');
+    expect(r.usage).toEqual({ inputTokens: 10, outputTokens: 6 });
+    expect(r.calls).toMatchObject([{ name: 'revenue', input: { from: '2026-11-01', to: '2026-11-07' }, ok: true }]);
+    expect(ran).toBe(1);
+    const first = f.reqs[0]!.body as { tools: { type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }[]; tool_choice: string };
+    expect(first.tool_choice).toBe('auto');
+    expect(first.tools).toHaveLength(1);
+    expect(first.tools[0]).toMatchObject({ type: 'function', function: { name: 'revenue', description: '营业额：某段日期的净营业额' } });
+    expect(first.tools[0]!.function.parameters).toMatchObject({ type: 'object', required: ['from', 'to'], additionalProperties: false });
+    expect(first.tools[0]!.function.parameters).not.toHaveProperty('$schema');
+    expect(first.tools[0]!.function).not.toHaveProperty('strict');
+    const second = f.reqs[1]!.body.messages as { role: string; tool_call_id?: string; content: string; tool_calls?: unknown[] }[];
+    expect(second.map((m) => m.role)).toEqual(['system', 'user', 'assistant', 'tool']);
+    expect(second[2]!.tool_calls).toHaveLength(1);
+    expect(second[3]!.tool_call_id).toBe('call_1');
+    expect(JSON.parse(second[3]!.content)).toMatchObject({ net: '¥1,234.00' });
+  });
+
+  it('问数：参数不合格、没有的工具不执行，把原因告诉模型；到最后一轮不再给它挑工具（tool_choice: none）', async () => {
+    let ran = 0;
+    const { z } = await import('zod');
+    const tool: AiTool = {
+      name: 'revenue',
+      description: '营业额',
+      schema: z.object({ from: z.iso.date(), to: z.iso.date() }).strict().refine((v) => v.from <= v.to, { message: '开始不能晚于结束' }) as never,
+      example: {},
+      run: async () => (ran++, {}),
+    };
+    const f = fakeFetch([
+      answer(
+        {
+          tool_calls: [
+            { id: 'a', type: 'function', function: { name: 'revenue', arguments: '{"from":"2026-11-09","to":"2026-11-01"}' } },
+            { id: 'b', type: 'function', function: { name: 'drop_table', arguments: '{}' } },
+            { id: 'c', type: 'function', function: { name: 'revenue', arguments: '不是 JSON' } },
+          ],
+        },
+        'tool_calls',
+      ),
+      // 第二轮（也是最后一轮）它还想挑工具：照它写的文字作答，不再执行
+      answer({ content: '取不到数', tool_calls: [{ id: 'd', type: 'function', function: { name: 'revenue', arguments: '{"from":"2026-11-01","to":"2026-11-02"}' } }] }, 'tool_calls'),
+    ]);
+    const r = await provider(f).ask({ system: 's', question: 'q', tools: [tool], maxIterations: 2 });
+    expect(ran).toBe(0);
+    expect(r.text).toBe('取不到数');
+    expect(r.calls.map((c) => [c.name, c.ok])).toEqual([
+      ['revenue', false],
+      ['drop_table', false],
+      ['revenue', false],
+    ]);
+    const msgs = f.reqs[1]!.body.messages as { role: string; tool_call_id?: string; content: string }[];
+    const toolMsgs = msgs.filter((m) => m.role === 'tool');
+    expect(toolMsgs.map((m) => m.tool_call_id)).toEqual(['a', 'b', 'c']);
+    expect(JSON.parse(toolMsgs[0]!.content).error).toContain('开始不能晚于结束');
+    expect(JSON.parse(toolMsgs[1]!.content).error).toContain('没有「drop_table」这个报表');
+    expect(JSON.parse(toolMsgs[2]!.content).error).toContain('不是合格的 JSON');
+    expect(f.reqs[0]!.body.tool_choice).toBe('auto');
+    expect(f.reqs[1]!.body.tool_choice).toBe('none');
+  });
+
+  it('问数的真实工具都转得成 JSON Schema（交给模型的参数格式）', () => {
+    const tools = aiTools({ sql: ctx.sql, today, timeZone: ctx.config.timezone, can: () => true, erp: new Set(['inventory', 'payments'] as never), stores: [{ id: 1, code: 'HQ', name: '本店' }, { id: 2, code: 'B2', name: '二店' }], currentStoreId: 1 });
+    expect(tools.length).toBeGreaterThan(3);
+    for (const t of tools) {
+      const js = jsonSchemaOf(t.schema);
+      expect(js.type, t.name).toBe('object');
+      expect(js).not.toHaveProperty('$schema');
+      // 日期只留 format，不带 zod 的那一长串正则
+      expect(JSON.stringify(js)).not.toContain('pattern');
+    }
+  });
+
+  it('合同条款提示：JSON 模式、提示里写明 json 与格式；不合格重试一次，再不行写「这次没整理出来」', async () => {
+    const { z } = await import('zod');
+    const schema = z.object({ hints: z.array(z.object({ kind: z.enum(['missing', 'risk']), title: z.string(), detail: z.string() })) });
+    const f = fakeFetch([answer({ content: '   ' }), answer({ content: '{"hints":[{"kind":"risk","title":"违约金","detail":"偏高"}]}' })]);
+    const r = await provider(f).structured({ system: '看合同', prompt: '合同草稿', schema });
+    expect(r.value).toEqual({ hints: [{ kind: 'risk', title: '违约金', detail: '偏高' }] });
+    expect(r.usage).toEqual({ inputTokens: 10, outputTokens: 6 });
+    expect(f.reqs).toHaveLength(2);
+    const body = f.reqs[0]!.body as { response_format: unknown; messages: { role: string; content: string }[] };
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    expect(body.messages[0]!.content).toContain('看合同');
+    expect(body.messages[0]!.content).toContain('json');
+    expect(body.messages[0]!.content).toContain('"hints"');
+    // 两次都不合格式（格式对不上也算）
+    const bad = fakeFetch([answer({ content: '{"hints":[{"kind":"other"}]}' })]);
+    await expect(provider(bad).structured({ system: 's', prompt: 'p', schema })).rejects.toThrow(/这次没整理出来/);
+    expect(bad.reqs).toHaveLength(2);
+  });
+
+  it('错误翻成看得懂的话：密钥不对、余额用完、太忙会再试、对方出错、连不上；审核拦下算拒答；错误里像密钥的打掉', async () => {
+    const fail = (status: number, body: unknown = {}) => (): Reply => ({ status, body });
+    const err = async (replies: ((req: Req) => Reply)[]) => {
+      const f = fakeFetch(replies);
+      const e = await provider(f)
+        .write({ system: 's', prompt: 'p' })
+        .then(() => null)
+        .catch((x: unknown) => x);
+      return { e: e as Error, n: f.reqs.length };
+    };
+    let r = await err([fail(401)]);
+    expect(r.e).toBeInstanceOf(AiUnavailable);
+    expect(r.e.message).toContain('YUZU_AI_API_KEY');
+    expect(r.n).toBe(1);
+    r = await err([fail(402)]);
+    expect(r.e.message).toContain('余额用完了');
+    r = await err([fail(422, { error: { message: 'Model Not Exist: deepseek-x (key sk-abcdef123456)' } })]);
+    expect(r.e.message).toContain('Model Not Exist');
+    expect(r.e.message).not.toContain('sk-abcdef123456');
+    // 429、5xx、连不上：再试 2 次
+    r = await err([fail(429), answer({ content: '好了' })]);
+    expect(r.e).toBeNull();
+    expect(r.n).toBe(2);
+    r = await err([fail(500)]);
+    expect(r.e.message).toContain('模型服务出错（500）');
+    expect(r.n).toBe(3);
+    r = await err([fail(503)]);
+    expect(r.e.message).toContain('服务器过载');
+    r = await err([() => new TypeError('fetch failed')]);
+    expect(r.e.message).toContain('连不上模型服务');
+    expect(r.n).toBe(3);
+    r = await err([answer({ content: '' }, 'content_filter')]);
+    expect(r.e).toBeInstanceOf(AiRefused);
+    expect(r.e.message).toBe('内容被模型服务的审核拦下');
+    r = await err([answer({ content: '' }, 'insufficient_system_resource')]);
+    expect(r.e).toBeInstanceOf(AiUnavailable);
+    // 模型自己说答不了的：照它的原话（不当拒答）
+    const f = fakeFetch([answer({ content: '这个我答不了：没有相关数据' })]);
+    expect((await provider(f).write({ system: 's', prompt: 'p' })).text).toBe('这个我答不了：没有相关数据');
+  });
+
+  it('看着是 Anthropic 的密钥（sk-ant-）不发给 DeepSeek：一次请求都不发、写明怎么改', async () => {
+    const f = fakeFetch([answer({ content: '不该到这里' })]);
+    const p = provider(f, { apiKey: 'sk-ant-api03-xxxxxxxx' });
+    await expect(p.write({ system: 's', prompt: 'p' })).rejects.toThrow(/Anthropic.*YUZU_AI_PROVIDER=claude/);
+    expect(f.reqs).toHaveLength(0);
+  });
+
+  it('用哪家：YUZU_AI_PROVIDER 不写是 DeepSeek、claude 是 Claude、写错的启动时报出来；页面的状态里有哪家', async () => {
+    expect(aiServiceOf({})).toBe('deepseek');
+    expect(aiServiceOf({ YUZU_AI_PROVIDER: ' DeepSeek ' })).toBe('deepseek');
+    expect(aiServiceOf({ YUZU_AI_PROVIDER: 'Claude' })).toBe('claude');
+    expect(() => aiServiceOf({ YUZU_AI_PROVIDER: 'openai' })).toThrow(/只能是 deepseek 或 claude/);
+    const saved = { key: process.env.YUZU_AI_API_KEY, model: process.env.YUZU_AI_MODEL };
+    try {
+      process.env.YUZU_AI_API_KEY = 'sk-test-key';
+      delete process.env.YUZU_AI_MODEL;
+      const live = (aiService?: 'deepseek' | 'claude') => ({ ...ctx.config, integrations: { mock: false, aiService, liveConfigured: ['ai_model'] } });
+      expect(aiProvider(live(), DEFAULT_AI_RULES)).toMatchObject({ name: 'deepseek', mode: 'live', model: 'deepseek-v4-pro' });
+      expect(aiProvider(live('deepseek'), DEFAULT_AI_RULES)?.name).toBe('deepseek');
+      expect(aiProvider(live('claude'), DEFAULT_AI_RULES)).toMatchObject({ name: 'claude', model: 'claude-opus-5-5' });
+      delete process.env.YUZU_AI_API_KEY;
+      expect(aiProvider(live(), DEFAULT_AI_RULES)).toBeNull();
+    } finally {
+      if (saved.key === undefined) delete process.env.YUZU_AI_API_KEY;
+      else process.env.YUZU_AI_API_KEY = saved.key;
+      if (saved.model !== undefined) process.env.YUZU_AI_MODEL = saved.model;
+    }
+    // 用例的实例是模拟模式
+    const status = await api(ctx.app, ctx.owner, 'GET', '/api/ai/status');
+    expect(status.body).toMatchObject({ mode: 'mock', provider: 'mock', model: 'mock' });
   });
 });

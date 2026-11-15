@@ -19,12 +19,27 @@ export const LIVE_ENV: Record<string, { kind: IntegrationKind; label: string; va
   alipay_f2f: { kind: 'pay_terminal', label: '支付宝当面付', vars: ['ALIPAY_APP_ID', 'ALIPAY_PRIVATE_KEY_PATH', 'ALIPAY_PUBLIC_KEY_PATH'] },
   meituan: { kind: 'platform_voucher', label: '美团团购', vars: ['MEITUAN_APP_KEY', 'MEITUAN_APP_SECRET', 'MEITUAN_SESSION'] },
   douyin: { kind: 'platform_voucher', label: '抖音来客', vars: ['DOUYIN_CLIENT_KEY', 'DOUYIN_CLIENT_SECRET', 'DOUYIN_ACCOUNT_ID'] },
-  // AI 辅助（8.0.22，docs/AI_V8022.md 第 4 节）：只认专门给浴族配的密钥（YUZU_AI_BASE_URL、YUZU_AI_MODEL 选填）
-  claude: { kind: 'ai', label: 'AI 辅助（Claude）', vars: ['YUZU_AI_API_KEY'] },
+  // AI 辅助（8.0.22，docs/AI_V8022.md 第 4 节）：只认专门给浴族配的密钥（YUZU_AI_PROVIDER、YUZU_AI_BASE_URL、YUZU_AI_MODEL 选填）；
+  // 8.1.1 起默认 DeepSeek（MD8），YUZU_AI_PROVIDER=claude 时用 Claude
+  ai_model: { kind: 'ai', label: 'AI 辅助的模型服务（默认 DeepSeek）', vars: ['YUZU_AI_API_KEY'] },
 };
+
+/** AI 辅助用哪家（8.1.1 起默认 DeepSeek，店主 2026-11-15 定 MD8；Claude 留作可选） */
+export const AI_SERVICES = ['deepseek', 'claude'] as const;
+export type AiService = (typeof AI_SERVICES)[number];
+
+/** 读 YUZU_AI_PROVIDER：不写是 deepseek；写错的启动时就报出来，免得以为配好了、其实一条都发不出去 */
+export function aiServiceOf(env: NodeJS.ProcessEnv): AiService {
+  const v = (env.YUZU_AI_PROVIDER ?? '').trim().toLowerCase();
+  if (!v) return 'deepseek';
+  if ((AI_SERVICES as readonly string[]).includes(v)) return v as AiService;
+  throw new Error(`YUZU_AI_PROVIDER 只能是 deepseek 或 claude（现在是「${v.slice(0, 20)}」）`);
+}
 
 export interface IntegrationsConfig {
   mock: boolean;
+  /** AI 辅助用哪家（YUZU_AI_PROVIDER）；不写（用例里手搭的配置）当 deepseek */
+  aiService?: AiService;
   /** 配好了正式环境变量的那几样（LIVE_ENV 的键） */
   liveConfigured: string[];
 }
@@ -34,13 +49,14 @@ export function loadIntegrationsConfig(env: NodeJS.ProcessEnv, appEnv: AppEnv, i
     .filter(([, v]) => v.vars.every((name) => (env[name] ?? '').trim() !== ''))
     .map(([k]) => k);
   const mock = env.INTEGRATIONS_MOCK === 'true';
+  const aiService = aiServiceOf(env);
   if (mock) {
     if (appEnv !== 'development' && appEnv !== 'test') throw new Error('INTEGRATIONS_MOCK=true 只能用在 APP_ENV=development 或 test');
     if (instance === 'prod' || instance === 'shadow' || instance === 'test') throw new Error(`INTEGRATIONS_MOCK=true 不能用在 ${instance} 实例（正式服、影子运行、测试服）`);
     const anyLive = Object.values(LIVE_ENV).some((v) => v.vars.some((name) => (env[name] ?? '').trim() !== ''));
     if (anyLive) throw new Error('INTEGRATIONS_MOCK=true 不能和正式接口的密钥同时配置：要测模拟就把正式的变量去掉');
   }
-  return { mock, liveConfigured };
+  return { mock, aiService, liveConfigured };
 }
 
 /** 某一类现在是什么模式：模拟优先；正式的要那一类下面至少一样配好了 */
