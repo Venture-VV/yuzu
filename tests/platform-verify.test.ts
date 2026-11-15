@@ -219,4 +219,27 @@ describe('平台验券', () => {
     expect(n2).toBe(0);
     expect([0, 2]).toContain(n1);
   });
+
+  it('今天验券、明天才结账的：按验券那天对账，两天都不报差异（营收照旧按结账日）', async () => {
+    const today = (await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.today as string;
+    const [next] = await ctx.sql<{ d: string }[]>`SELECT to_char(${today}::date + 1, 'YYYY-MM-DD') AS d`;
+    const c = code('6601');
+    const v = (await verify('meituan', c)).body;
+    const vid = await enter();
+    const t = await total([vid]);
+    expect((await checkout([vid], t, [{ method: 'coupon', platform: 'meituan', code: c, amount: 9_900, verificationId: v.id }, { method: 'cash', amount: t - 9_900 }])).status).toBe(200);
+    // 模拟这一笔是第二天结的账（结账单、团购券记在第二天）
+    await ctx.sql`ALTER TABLE group_buy_coupons DISABLE TRIGGER group_buy_coupons_guard`;
+    try {
+      await ctx.sql`UPDATE group_buy_coupons SET business_date = ${next!.d} WHERE verification_id = ${v.id}`;
+    } finally {
+      await ctx.sql`ALTER TABLE group_buy_coupons ENABLE TRIGGER group_buy_coupons_guard`;
+    }
+    for (const d of [today, next!.d]) {
+      const run = await api(ctx.app, ctx.owner, 'POST', '/api/platform/recon/run', { platform: 'meituan', date: d });
+      expect(run.body, JSON.stringify(run.body)).toMatchObject({ ok: true });
+      const issues = (await api(ctx.app, ctx.owner, 'GET', `/api/platform/recon?from=${d}&to=${d}`)).body.issues as { code: string }[];
+      expect(issues.filter((i) => i.code === c)).toEqual([]);
+    }
+  });
 });

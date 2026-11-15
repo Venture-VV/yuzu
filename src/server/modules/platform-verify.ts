@@ -374,12 +374,16 @@ export async function reconcileDay(deps: Deps, platform: VoucherPlatform, date: 
   } catch (e) {
     error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
   }
+  // 系统一侧：经过「验券」的那张按验券那天算（平台的核销明细就记在那天），没验过的按结账 / 补录那天；
+  // 营收照旧按结账日（Codex 审查 92fc629 后补：原来今天验、明天结账的券，两天各对出一处假差异，怎么重跑都消不掉）
   const system = await deps.sql<{ code: string; cents: number; ref: string; dealName: string }[]>`
-    SELECT g.code, g.amount AS cents, c.checkout_no AS ref, g.deal_name FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
-    WHERE g.platform = ${platform} AND g.business_date = ${date} AND g.status = 'active'
+    SELECT g.code, g.amount AS cents, c.checkout_no AS ref, g.deal_name
+    FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id LEFT JOIN platform_verifications v ON v.id = g.verification_id
+    WHERE g.platform = ${platform} AND coalesce(v.business_date, g.business_date) = ${date} AND g.status = 'active'
     UNION ALL
-    SELECT code, face_value AS cents, redemption_no AS ref, deal_name FROM platform_redemptions
-    WHERE platform = ${platform} AND business_date = ${date} AND status = 'active'`;
+    SELECT r.code, r.face_value AS cents, r.redemption_no AS ref, r.deal_name
+    FROM platform_redemptions r LEFT JOIN platform_verifications v ON v.redemption_id = r.id
+    WHERE r.platform = ${platform} AND coalesce(v.business_date, r.business_date) = ${date} AND r.status = 'active'`;
   const issues: { kind: 'platform_only' | 'system_only' | 'amount_diff'; code: string; dealName: string; platformCents: number | null; systemCents: number | null; systemRef: string }[] = [];
   if (!error) {
     const sys = new Map(system.map((s) => [s.code, s]));

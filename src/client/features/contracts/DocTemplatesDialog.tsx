@@ -12,6 +12,7 @@ import { cn, formatDateTime } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, IconButton, Input, Notice, Select, Skeleton, Textarea } from '../../components/ui';
+import { LoadFailed } from '../../components/LoadFailed';
 import { docTemplatesKey, useDocTemplates } from './TemplateSection';
 
 export function DocTemplatesDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -43,8 +44,13 @@ export function DocTemplatesDialog({ open, onClose }: { open: boolean; onClose: 
           </>
         }
       >
+        {/* 取不回来（也没有上一次的）写明加载失败、可以重试，不一直转圈（Codex 审查 92fc629 后补） */}
         {!list.data ? (
-          <Skeleton className="h-40" />
+          list.isError ? (
+            <LoadFailed title="合同模板取不回来，请检查网络" onRetry={() => void list.refetch()} retrying={list.isFetching} testId="doc-templates-error" />
+          ) : (
+            <Skeleton className="h-40" />
+          )
         ) : rows.length === 0 ? (
           <p className="text-[13px] text-ink-3">还没有合同模板。</p>
         ) : (

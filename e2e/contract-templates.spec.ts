@@ -109,4 +109,19 @@ test.describe('8.0.21 合同模板', () => {
     const head = await page.request.get(`/api/erp/contracts/${c.id}/document.docx`);
     expect(decodeURIComponent(head.headers()['content-disposition'] ?? '')).toContain(`合同-${c.contractNo}-草稿.docx`);
   });
+
+  test('「合同模板」管理弹窗取不回来：写明加载失败、可以重试', async ({ page }) => {
+    test.setTimeout(60_000);
+    await login(page);
+    const url = '**/api/erp/contracts/doc-templates*';
+    await page.route(url, (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.goto('/erp/contracts');
+    await page.getByTestId('doc-templates-open').click();
+    const failed = page.getByTestId('doc-templates-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await page.unroute(url);
+    await failed.getByTestId('doc-templates-error-retry').click();
+    await expect(page.getByTestId('doc-templates-error')).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId('doc-template-new')).toBeVisible();
+  });
 });
