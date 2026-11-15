@@ -39,6 +39,19 @@ const previewCode = (): string | null => {
 export function useCanteenLayout(online: boolean): { doc: StudioDoc; preview: boolean } {
   const preview = useMemo(previewCode, []);
   const [doc, setDoc] = useState<StudioDoc>(() => (preview ? null : parseLayout(readJson<unknown>(KEY))) ?? defaultStudioDoc('canteen'));
+  // 开着不关的手机：从后台切回来（隔一分钟以上）再问一次，定时发布到点以后也换得上（8.1.2，GZ27）
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (preview) return;
+    let last = Date.now();
+    const onShow = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - last < 60_000) return;
+      last = Date.now();
+      setTick((t) => t + 1);
+    };
+    document.addEventListener('visibilitychange', onShow);
+    return () => document.removeEventListener('visibilitychange', onShow);
+  }, [preview]);
   useEffect(() => {
     if (!online) return;
     let alive = true;
@@ -54,7 +67,7 @@ export function useCanteenLayout(online: boolean): { doc: StudioDoc; preview: bo
     return () => {
       alive = false;
     };
-  }, [online, preview]);
+  }, [online, preview, tick]);
   // 主题色、字体：改过的写到页面最外层
   useEffect(() => {
     const root = document.documentElement;
