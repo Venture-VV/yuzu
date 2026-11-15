@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle2, Eye, History, Maximize2, Minus, Plus, Redo2, Send, TriangleAlert, Undo2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Clock, Ellipsis, Eye, History, Languages, Maximize2, MessageSquare, Minus, Package, Plus, Redo2, Send, TriangleAlert, Undo2 } from 'lucide-react';
 import type { EmenuLayout, EmenuMenu } from '@shared/emenu';
 import { qrShape } from '@shared/qr-svg';
 import {
@@ -72,6 +72,8 @@ import {
 import { phoneEditorBlocks } from './phoneBlocks';
 import { AssetsPanel, ChecksPanel, InsertPanel, LayersPanel, PropsPanel, ThemePanel, type ComponentOps } from './panels';
 import { TemplateCanvas } from './TemplateCanvas';
+import { CommentPins, CommentsPanel, CopyDialog, PackDialog, PresenceChip, useComments, usePresence } from './collab';
+import { SHOWN_ON } from './shownOn';
 import { DishStatePanel, SlotPanel, TemplatesPanel } from './templatePanels';
 import { pagesWithLayout, templatePage } from './templateModel';
 
@@ -101,11 +103,62 @@ function ToolButton({ title, onClick, disabled, children, active, testId }: { ti
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={cn('flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-ink-2 hover:bg-paper-2 disabled:opacity-35', active && 'bg-pine-tint text-pine')}
+      className={cn('flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 text-[12.5px] text-ink-2 hover:bg-paper-2 disabled:opacity-35', active && 'bg-pine-tint text-pine')}
       data-testid={testId}
     >
       {children}
     </button>
+  );
+}
+
+/** 顶栏上按钮的字：宽屏（1400 以上）才显示，窄一点只留图标（按钮有说明） */
+const Wide = ({ children }: { children: ReactNode }) => <span className="hidden min-[1400px]:inline">{children}</span>;
+
+/** 顶栏的「更多」：不常用的几样收在这里（点外面或按 Esc 收起） */
+function MoreMenu({ items }: { items: { key: string; label: string; hint: string; icon: ReactNode; onClick: () => void }[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <ToolButton title="更多：中英文案、设计包" onClick={() => setOpen((o) => !o)} active={open} testId="studio-more">
+        <Ellipsis className="size-4" /> <Wide>更多</Wide>
+      </ToolButton>
+      {open && (
+        <div className="absolute right-0 top-9 z-40 w-64 rounded-lg border border-line bg-card p-1 shadow-lg" data-testid="studio-more-menu">
+          {items.map((it) => (
+            <button
+              key={it.key}
+              type="button"
+              className="flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left hover:bg-paper-2"
+              onClick={() => {
+                setOpen(false);
+                it.onClick();
+              }}
+              data-testid={`studio-open-${it.key}`}
+            >
+              <span className="mt-0.5 text-ink-3">{it.icon}</span>
+              <span>
+                <span className="block text-[13px] text-ink">{it.label}</span>
+                <span className="block text-[11.5px] leading-snug text-ink-3">{it.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -130,18 +183,27 @@ export function StudioPage() {
 
   const history = useDocHistory(defaultStudioDoc(surface));
   const { doc } = history;
+  const others = usePresence(surface);
+  const commentsQ = useComments(surface);
+  const openComments = (commentsQ.data ?? []).filter((c) => c.parentId === null && !c.resolvedAt).length;
   const [loaded, setLoaded] = useState(false);
   const rev = useRef(0);
   const [status, setStatus] = useState<SaveStatus>('saved');
   const [selection, setSelection] = useState<string[]>([]);
   const [screen, setScreen] = useState(def.screens[0]!.key);
   const [left, setLeft] = useState<'layers' | 'insert' | 'assets' | 'theme' | 'templates'>('layers');
-  const [right, setRight] = useState<'props' | 'checks'>('props');
+  const [right, setRight] = useState<'props' | 'checks' | 'comments'>('props');
+  // 批注（8.1.2）：在加批注（点画布上的地方）、刚点下的位置、看着的那一条
+  const [commentAdding, setCommentAdding] = useState(false);
+  const [commentDraftAt, setCommentDraft] = useState<{ screen: string; x: number; y: number; nodeId: string | null } | null>(null);
+  // 点下的位置记着是哪一屏：换了屏就不算（回到那一屏还在）
+  const commentDraft = commentDraftAt && commentDraftAt.screen === screen ? commentDraftAt : null;
+  const [activeComment, setActiveComment] = useState<number | null>(null);
   const [zoom, setZoom] = useState<'fit' | (typeof ZOOMS)[number]>('fit');
   const [lang, setLang] = useState<'zh' | 'en'>('zh');
   const [big, setBig] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
-  const [dialog, setDialog] = useState<null | 'publish' | 'versions' | 'preview'>(null);
+  const [dialog, setDialog] = useState<null | 'publish' | 'versions' | 'preview' | 'copy' | 'pack'>(null);
   // 卡片模板（8.1.2，平板菜单）：左栏「版式」打开时画布改成那种版式的一页，选中的是版式里的一块
   const [tplLayout, setTplLayout] = useState<EmenuLayout>('cover');
   const [tplSlot, setTplSlot] = useState<string | null>(null);
@@ -479,15 +541,20 @@ export function StudioPage() {
         <Link to="/admin/studio" className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-ink-2 hover:bg-paper-2" title="回后台的「工作台」">
           <ArrowLeft className="size-4" />
         </Link>
-        <div className="mr-2 text-[13.5px] font-bold">
-          工作台 <span className="font-normal text-ink-3">· {def.label}</span>
+        {/* 顶栏在窄一点的屏幕上（不到 1400 宽）只留图标与要紧的字，鼠标停上去有说明 */}
+        <div className="mr-2 shrink-0 whitespace-nowrap text-[13.5px] font-bold">
+          <span className="hidden min-[1400px]:inline">工作台 </span>
+          <span className="font-normal text-ink-3">
+            <span className="hidden min-[1400px]:inline">· </span>
+            {def.label}
+          </span>
         </div>
-        <div className="flex rounded-md border border-line p-0.5" data-testid="studio-screens">
+        <div className="flex shrink-0 rounded-md border border-line p-0.5" data-testid="studio-screens">
           {def.screens.map((s) => (
             <button
               key={s.key}
               type="button"
-              className={cn('h-7 rounded px-2.5 text-[12.5px]', screen === s.key ? 'bg-pine text-white' : 'text-ink-2 hover:bg-paper-2')}
+              className={cn('h-7 whitespace-nowrap rounded px-2.5 text-[12.5px]', screen === s.key ? 'bg-pine text-white' : 'text-ink-2 hover:bg-paper-2')}
               onClick={() => {
                 setScreen(s.key);
                 setSelection([]);
@@ -567,7 +634,11 @@ export function StudioPage() {
           <Maximize2 className="size-4" />
         </ToolButton>
         <div className="flex-1" />
-        <span className={cn('mr-2 text-[12px]', status === 'error' || status === 'conflict' ? 'text-clay' : 'text-ink-3')} data-testid="studio-save-status" data-status={status}>
+        <span
+          className={cn('mr-2 shrink-0 whitespace-nowrap text-[12px]', status === 'error' || status === 'conflict' ? 'text-clay' : 'text-ink-3')}
+          data-testid="studio-save-status"
+          data-status={status}
+        >
           {statusText[status]}
         </span>
         {status === 'error' && (
@@ -575,16 +646,43 @@ export function StudioPage() {
             再存一次
           </Button>
         )}
+        <PresenceChip others={others} />
+        {(stateQ.data?.scheduled ?? []).slice(0, 1).map((v) => {
+          const at = new Date(v.effectiveAt!).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+          return (
+            <button
+              key={v.id}
+              type="button"
+              className="mr-2 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-pine-tint px-2 py-0.5 text-[11.5px] text-pine"
+              title={`第 ${v.version} 版定在 ${at} 生效（点开「版本」可以撤销）`}
+              onClick={() => setDialog('versions')}
+              data-testid="studio-scheduled"
+            >
+              <Clock className="size-3" /> {at} 换版
+            </button>
+          );
+        })}
+        <ToolButton title="批注：在画布上留言，设计师和店主来回说" onClick={() => setRight('comments')} active={right === 'comments'} testId="studio-open-comments">
+          <MessageSquare className="size-4" /> <Wide>批注</Wide>
+          {openComments > 0 && <span className="rounded-full bg-clay px-1.5 text-[10.5px] font-bold leading-4 text-white">{openComments}</span>}
+        </ToolButton>
         <ToolButton title="检查" onClick={() => setRight('checks')} active={right === 'checks'} testId="studio-open-checks">
           {red ? <TriangleAlert className="size-4 text-clay" /> : <CheckCircle2 className="size-4 text-pine" />}
-          检查{issues.length ? `（${issues.length}）` : ''}
+          <Wide>检查</Wide>
+          {issues.length ? <span className="tabular-nums">（{issues.length}）</span> : null}
         </ToolButton>
         <ToolButton title={phone ? '在手机大小的页面上点一点' : '像客人一样点一点；也可以在真平板上扫码看'} onClick={() => setDialog('preview')} testId="studio-open-preview">
-          <Eye className="size-4" /> 预览
+          <Eye className="size-4" /> <Wide>预览</Wide>
         </ToolButton>
         <ToolButton title="已发布的各版，可以回到任何一版" onClick={() => setDialog('versions')} testId="studio-open-versions">
-          <History className="size-4" /> 版本
+          <History className="size-4" /> <Wide>版本</Wide>
         </ToolButton>
+        <MoreMenu
+          items={[
+            { key: 'copy', label: '中英文案', hint: '所有的字列成一张表，中英对着改；可以导出给人翻译', icon: <Languages className="size-4" />, onClick: () => setDialog('copy') },
+            { key: 'pack', label: '设计包', hint: '版面连同用到的图存成一个文件，换个地方导进来', icon: <Package className="size-4" />, onClick: () => setDialog('pack') },
+          ]}
+        />
         <Button
           size="sm"
           variant="primary"
@@ -728,18 +826,44 @@ export function StudioPage() {
                 window.setTimeout(() => textRef.current?.focus(), 30);
               }}
               onMeasure={(m) => (measuredRef.current = m)}
+              overlay={
+                <CommentPins
+                  comments={commentsQ.data ?? []}
+                  screen={screen}
+                  scale={scale}
+                  adding={commentAdding && right === 'comments'}
+                  draft={commentDraft}
+                  active={activeComment}
+                  onPlace={(p) => {
+                    setCommentDraft({ ...p, screen });
+                    setCommentAdding(false);
+                  }}
+                  onPick={(id) => {
+                    setActiveComment(id);
+                    setRight('comments');
+                  }}
+                />
+              }
             />
           )}
         </main>
 
         {/* 右栏 */}
         <aside className="flex w-72 shrink-0 flex-col border-l border-line bg-card">
-          <div className="grid grid-cols-2 border-b border-line text-[12.5px]">
+          <div className="grid grid-cols-3 border-b border-line text-[12.5px]">
             <button type="button" className={cn('h-9 border-b-2', right === 'props' ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3')} onClick={() => setRight('props')}>
               属性
             </button>
             <button type="button" className={cn('h-9 border-b-2', right === 'checks' ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3')} onClick={() => setRight('checks')}>
               检查{red ? <span className="ml-1 rounded-full bg-clay px-1.5 text-[10px] text-white">{red}</span> : null}
+            </button>
+            <button
+              type="button"
+              className={cn('h-9 border-b-2', right === 'comments' ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3')}
+              onClick={() => setRight('comments')}
+              data-testid="studio-tab-comments"
+            >
+              批注{openComments ? <span className="ml-1 rounded-full bg-clay px-1.5 text-[10px] text-white">{openComments}</span> : null}
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -764,6 +888,31 @@ export function StudioPage() {
                   components={componentOps}
                 />
               )
+            ) : right === 'comments' ? (
+              <CommentsPanel
+                surface={surface}
+                screen={screen}
+                screenLabel={(k) => screenLabel(surface, k)}
+                adding={commentAdding}
+                onAdding={(on) => {
+                  // 批注留在屏上：「版式」看的是卡片模板，先回到普通的画布
+                  if (on && tplMode) setLeft('layers');
+                  setCommentAdding(on);
+                  if (on) setCommentDraft(null);
+                }}
+                draft={commentDraft}
+                onDraftDone={() => setCommentDraft(null)}
+                active={activeComment}
+                onActive={(id) => {
+                  if (id !== null && tplMode) setLeft('layers');
+                  setActiveComment(id);
+                }}
+                onGoScreen={(sc) => {
+                  if (tplMode) setLeft('layers');
+                  setScreen(sc);
+                  setSelection([]);
+                }}
+              />
             ) : (
               <ChecksPanel
                 issues={issues}
@@ -791,10 +940,13 @@ export function StudioPage() {
           onDone={(v) => {
             setDialog(null);
             void qc.invalidateQueries({ queryKey: ['studio'] });
+            const later = v.effectiveAt && new Date(v.effectiveAt).getTime() > Date.now();
             toast({
               tone: 'success',
-              title: `已发布第 ${v.version} 版`,
-              body: isEmenu ? '各台平板回到起始页（或空闲）时换成新样子；改坏了在「版本」里回到上一版。' : '客人下次打开时是新样子；改坏了在「版本」里回到上一版。',
+              title: later
+                ? `第 ${v.version} 版定在 ${new Date(v.effectiveAt!).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 生效`
+                : `已发布第 ${v.version} 版`,
+              body: later ? '到点以前在「版本」里可以撤销定时；到点以后照常' + SHOWN_ON[surface].when + '。' : `${SHOWN_ON[surface].when}；改坏了在「版本」里回到上一版。`,
             });
           }}
           onShowChecks={() => {
@@ -813,11 +965,24 @@ export function StudioPage() {
             history.set(d);
             setSelection([]);
             setDialog(null);
-            toast({ tone: 'success', title: '已把这一版放进草稿', body: '可以接着改；发布以后平板才换。' });
+            toast({ tone: 'success', title: '已把这一版放进草稿', body: `可以接着改；发布以后${SHOWN_ON[surface].where}才换。` });
           }}
         />
       )}
       {dialog === 'preview' && <PreviewDialog surface={surface} doc={doc} onClose={() => setDialog(null)} />}
+      {dialog === 'copy' && <CopyDialog doc={doc} onChange={change} onClose={() => setDialog(null)} />}
+      {dialog === 'pack' && (
+        <PackDialog
+          surface={surface}
+          flush={save}
+          onImported={(d) => {
+            history.set(d);
+            setSelection([]);
+            setDialog(null);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
     </div>
   );
 }
@@ -848,11 +1013,19 @@ function PublishDialog({
   const toast = useToast();
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  // 定时发布（8.1.2，GZ27）：现在生效，或定在以后某个时候（这台电脑的时间）
+  const [when, setWhen] = useState<'now' | 'later'>('now');
+  const [at, setAt] = useState('');
   const red = issues.filter((i) => i.level === 'error');
   const yellow = issues.filter((i) => i.level === 'warn');
   const go = async () => {
     if (!note.trim()) {
       toast({ tone: 'error', title: '写一句改了什么（版本列表里看得到）' });
+      return;
+    }
+    const effectiveAt = when === 'later' && at ? new Date(at).toISOString() : null;
+    if (when === 'later' && !effectiveAt) {
+      toast({ tone: 'error', title: '选一个生效的时间' });
       return;
     }
     setBusy(true);
@@ -867,8 +1040,8 @@ function PublishDialog({
         key,
         type: 'studio_publish',
         url: `/api/studio/${surface}/publish`,
-        body: { clientKey: key, rev: revOf(), note: note.trim() },
-        summary: `发布：${note.trim()}`.slice(0, 200),
+        body: { clientKey: key, rev: revOf(), note: note.trim(), ...(effectiveAt ? { effectiveAt } : {}) },
+        summary: `${effectiveAt ? '定时发布' : '发布'}：${note.trim()}`.slice(0, 200),
         staffName,
       });
       onDone(v);
@@ -884,7 +1057,9 @@ function PublishDialog({
       open
       title="发布"
       description={
-        published ? `平板现在用的是第 ${published.version} 版（${published.publishedBy} ${new Date(published.publishedAt).toLocaleString('zh-CN')}）` : '平板现在用的是内置的默认版面（还没发布过）'
+        published
+          ? `${SHOWN_ON[surface].where}现在用的是第 ${published.version} 版（${published.publishedBy} ${new Date(published.publishedAt).toLocaleString('zh-CN')}）`
+          : `${SHOWN_ON[surface].where}现在用的是内置的默认版面（还没发布过）`
       }
       onClose={onClose}
     >
@@ -913,13 +1088,34 @@ function PublishDialog({
             data-testid="studio-publish-note"
           />
         </label>
-        <p className="text-[12px] leading-relaxed text-ink-3">发布以后各台平板在停在起始页、或空闲回到起始页时换成新样子（客人点菜中途不换）；改坏了在「版本」里一键回到上一版。发布记在操作审计里。</p>
+        <div className="space-y-1.5 text-[12.5px] text-ink-2">
+          <div>什么时候生效</div>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-1.5">
+              <input type="radio" checked={when === 'now'} onChange={() => setWhen('now')} data-testid="studio-publish-now" /> 现在
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="radio" checked={when === 'later'} onChange={() => setWhen('later')} data-testid="studio-publish-later" /> 定时
+            </label>
+            {when === 'later' && (
+              <input
+                type="datetime-local"
+                className="h-8 rounded-md border border-line bg-card px-2 text-[12.5px]"
+                value={at}
+                onChange={(e) => setAt(e.target.value)}
+                data-testid="studio-publish-at"
+              />
+            )}
+          </div>
+          {when === 'later' && <p className="text-[11.5px] text-ink-3">到点才换（最早 2 分钟以后、最晚 60 天以内）；没到点之前在「版本」里能撤。到点前又发了一版也照样到点换成这一版。</p>}
+        </div>
+        <p className="text-[12px] leading-relaxed text-ink-3">发布以后{SHOWN_ON[surface].when}；改坏了在「版本」里一键回到上一版。发布记在操作审计里。</p>
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             再看看
           </Button>
           <Button variant="primary" loading={busy} disabled={red.length > 0} onClick={() => void go()} data-testid="studio-publish-go">
-            发布
+            {when === 'later' ? '定时发布' : '发布'}
           </Button>
         </div>
       </div>
@@ -946,8 +1142,13 @@ function VersionsDialog({
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['studio', 'versions', surface], queryFn: () => api.get<StudioVersionView[]>(`/api/studio/${surface}/versions`) });
   const [busy, setBusy] = useState<number | null>(null);
+  // 还没生效（定时的）或撤销了的一版从没用过：按钮叫「现在就用这一版」
+  const neverLive = (v: StudioVersionView) => !!v.cancelledAt || (!!v.effectiveAt && new Date(v.effectiveAt).getTime() > Date.now());
   const rollback = async (v: StudioVersionView) => {
-    if (!window.confirm(`回到第 ${v.version} 版？会照第 ${v.version} 版再发一版（历史都留着），平板回到起始页时换。`)) return;
+    const ask = neverLive(v)
+      ? `现在就用第 ${v.version} 版？会照它马上再发一版（历史都留着）${v.cancelledAt ? '' : '；原来定的时间到了也照样换成它，不想要就再撤销定时'}。`
+      : `回到第 ${v.version} 版？会照第 ${v.version} 版再发一版（历史都留着）：${SHOWN_ON[surface].when}。`;
+    if (!window.confirm(ask)) return;
     setBusy(v.version);
     try {
       const key = uuid();
@@ -959,12 +1160,22 @@ function VersionsDialog({
         summary: `回到第 ${v.version} 版`,
         staffName,
       });
-      toast({ tone: 'success', title: `已回到第 ${v.version} 版（发成第 ${r.version} 版）` });
+      toast({ tone: 'success', title: neverLive(v) ? `照第 ${v.version} 版发成了第 ${r.version} 版，现在就用` : `已回到第 ${v.version} 版（发成第 ${r.version} 版）` });
       void qc.invalidateQueries({ queryKey: ['studio'] });
     } catch (e) {
       toast({ tone: 'error', title: errorMessage(e) });
     } finally {
       setBusy(null);
+    }
+  };
+  const cancel = async (v: StudioVersionView) => {
+    if (!window.confirm(`撤销第 ${v.version} 版的定时发布？撤了以后这一版不会生效（记录留着）。`)) return;
+    try {
+      await api.post(`/api/studio/${surface}/versions/${v.version}/cancel`, {});
+      toast({ tone: 'success', title: `第 ${v.version} 版的定时发布撤销了` });
+      void qc.invalidateQueries({ queryKey: ['studio'] });
+    } catch (e) {
+      toast({ tone: 'error', title: errorMessage(e) });
     }
   };
   const useAsDraft = async (v: StudioVersionView) => {
@@ -983,13 +1194,23 @@ function VersionsDialog({
         ) : q.isError && !q.data ? (
           <LoadFailed title="版本列表取不回来" onRetry={() => void q.refetch()} retrying={q.isFetching} />
         ) : q.data!.length === 0 ? (
-          <p className="text-[13px] text-ink-3">还没发布过：平板用的是内置的默认版面。</p>
+          <p className="text-[13px] text-ink-3">还没发布过：{SHOWN_ON[surface].where}用的是内置的默认版面。</p>
         ) : (
-          q.data!.map((v, i) => (
-            <div key={v.id} className="rounded-md border border-line px-3 py-2" data-testid={`studio-version-${v.version}`}>
+          q.data!.map((v) => (
+            <div key={v.id} className={cn('rounded-md border border-line px-3 py-2', v.cancelledAt && 'opacity-60')} data-testid={`studio-version-${v.version}`}>
               <div className="flex items-center gap-2 text-[13px]">
                 <span className="font-bold">第 {v.version} 版</span>
-                {i === 0 && <span className="rounded bg-pine-tint px-1.5 text-[11px] text-pine">平板现在用的</span>}
+                {v.current && <span className="rounded bg-pine-tint px-1.5 text-[11px] text-pine">现在用的</span>}
+                {v.effectiveAt && !v.cancelledAt && new Date(v.effectiveAt).getTime() > Date.now() && (
+                  <span className="rounded bg-yuzu-soft px-1.5 text-[11px] text-yuzu-deep" data-testid={`studio-version-pending-${v.version}`}>
+                    定在 {new Date(v.effectiveAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 生效
+                  </span>
+                )}
+                {v.cancelledAt && (
+                  <span className="rounded bg-paper-2 px-1.5 text-[11px] text-ink-3">
+                    {v.cancelledBy} 撤销了（{new Date(v.cancelledAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}）
+                  </span>
+                )}
                 {v.kind === 'rollback' && <span className="rounded bg-paper-2 px-1.5 text-[11px] text-ink-3">回到第 {v.rollbackOf} 版</span>}
                 <span className="ml-auto text-[11.5px] text-ink-3">
                   {v.publishedBy} · {new Date(v.publishedAt).toLocaleString('zh-CN')}
@@ -998,9 +1219,14 @@ function VersionsDialog({
               <div className="mt-0.5 text-[12.5px] text-ink-2">{v.note}</div>
               <div className="mt-0.5 text-[11.5px] text-ink-3">改了：{v.screensChanged.map((s) => screenLabel(surface, s)).join('、') || '—'}</div>
               <div className="mt-1.5 flex gap-2">
-                {i > 0 && canPublish && (
+                {!v.current && canPublish && (
                   <Button size="sm" variant="secondary" loading={busy === v.version} onClick={() => void rollback(v)} data-testid={`studio-rollback-${v.version}`}>
-                    回到这一版
+                    {neverLive(v) ? '现在就用这一版' : '回到这一版'}
+                  </Button>
+                )}
+                {v.effectiveAt && !v.cancelledAt && new Date(v.effectiveAt).getTime() > Date.now() && canPublish && (
+                  <Button size="sm" variant="ghost" onClick={() => void cancel(v)} data-testid={`studio-cancel-${v.version}`}>
+                    撤销定时
                   </Button>
                 )}
                 <Button size="sm" variant="ghost" onClick={() => void useAsDraft(v)}>

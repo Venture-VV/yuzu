@@ -237,7 +237,7 @@
 ```ts
 import { readPublishedStudio, readStudioAssetFor } from '../studio/published';
 
-// 这家店现在用哪一版小程序版面：这家店的最新一版，没有就用本店（编号 1）的；都没有返回 null
+// 这家店现在用哪一版小程序版面：这家店现在用的那一版（定时发布的到点才算，撤销的不算），没有就用本店（编号 1）的；都没有返回 null
 const p = await readPublishedStudio(db, 'mp', storeId);
 // p = { id, version, inherited, publishedAt, doc } | null
 //   id：全局编号，内容不会变（只追加），可以按 id 长期缓存
@@ -249,6 +249,7 @@ const img = await readStudioAssetFor(db, 'mp', assetId);   // { mime, data: Buff
 
 建议这样转出去（具体路径、网关照小程序线的习惯）：
 - **取版面**：返回 `{ id, version, doc }`，或者 `null`。小程序进页面、回到前台时取一次，`id` 没变就用本地缓存的那一份。
+  - 8.1.2 起设计师可以「定时发布」（换季、节日到点才换）：到点前读到的是原来那一版，到点以后同一个入口读到新的；所以每次进页面、回到前台都要问一次，不能只按发布时间缓存。
 - **取图**：返回图片本身，带长期缓存头。小程序里的 `<image>` 用这个地址；也可以先 `wx.downloadFile` 存本地。
 
 两个函数都只读、不加锁、不写任何表，可以在读快照里用。

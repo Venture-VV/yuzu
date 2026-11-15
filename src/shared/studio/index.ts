@@ -5,3 +5,4 @@ export * from './check';
 export * from './api';
 export * from './emenu-templates';
 export * from './components';
+export * from './copy';

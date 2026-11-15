@@ -44,6 +44,7 @@ export function StudioCanvas({
   onCommit,
   onEditText,
   onMeasure,
+  overlay,
 }: {
   doc: StudioDoc;
   screen: string;
@@ -60,6 +61,8 @@ export function StudioCanvas({
   onEditText: (id: string) => void;
   /** 量到的各块在画布上的位置大小（存成组件时用：自动排列里撑满、跟内容的块版面里的宽高不准） */
   onMeasure?: (boxes: ReadonlyMap<string, Box>) => void;
+  /** 盖在最上面的（批注的圆点、加批注时点的那一层，8.1.2） */
+  overlay?: ReactNode;
 }) {
   const layer = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -348,6 +351,7 @@ export function StudioCanvas({
           />
         ))}
       </div>
+      {overlay}
     </div>
   );
 }

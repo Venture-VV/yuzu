@@ -7,14 +7,22 @@ import { DocSchema, expandInstances, validateStudioDoc, type StudioDoc, type Stu
 import type { Db } from '../../db';
 import { currentStoreId, DEFAULT_STORE_ID } from '../../lib/store-context';
 
+/**
+ * 一家店现在用哪一版：没撤销、已经生效的里面生效时间（定时发布的按定的时间，别的按发布时间）最晚的，同时的取版本号大的
+ * （8.1.2 定时发布，GZ27：定在以后的到点才换；到点前又发了一版，到点照样换成定时的那一版）
+ */
+const currentOf = (db: Db, surface: StudioSurface, storeId: number) => db<{ id: number; version: number }[]>`
+  SELECT v.id, v.version FROM studio_versions v
+  WHERE v.surface = ${surface} AND v.store_id = ${storeId} AND coalesce(v.effective_at, v.published_at) <= now()
+    AND NOT EXISTS (SELECT 1 FROM studio_version_cancels c WHERE c.version_id = v.id)
+  ORDER BY coalesce(v.effective_at, v.published_at) DESC, v.version DESC LIMIT 1`;
+
 /** 平板现在用哪一版：这家店的，没有就本店的（GZ11）；都没有为空（用内置的默认版面） */
 export async function studioPublishedRef(db: Db, surface: StudioSurface, storeId = currentStoreId()): Promise<(StudioPublishedRef & { inherited: boolean }) | null> {
-  const [own] = await db<{ id: number; version: number }[]>`
-    SELECT id, version FROM studio_versions WHERE surface = ${surface} AND store_id = ${storeId} ORDER BY version DESC LIMIT 1`;
+  const [own] = await currentOf(db, surface, storeId);
   if (own) return { id: Number(own.id), version: Number(own.version), inherited: false };
   if (storeId === DEFAULT_STORE_ID) return null;
-  const [base] = await db<{ id: number; version: number }[]>`
-    SELECT id, version FROM studio_versions WHERE surface = ${surface} AND store_id = ${DEFAULT_STORE_ID} ORDER BY version DESC LIMIT 1`;
+  const [base] = await currentOf(db, surface, DEFAULT_STORE_ID);
   return base ? { id: Number(base.id), version: Number(base.version), inherited: true } : null;
 }
 
@@ -30,7 +38,8 @@ export interface PublishedStudio {
 }
 
 /**
- * 某个界面现在用哪一份已发布的版面（小程序线、员工食堂读）：这家店的最新一版，没有用本店的；都没有返回空（用自己原来的页面）。
+ * 某个界面现在用哪一份已发布的版面（小程序线、员工食堂读）：这家店现在用的那一版（定时发布的到点才算，撤销的不算），没有用本店的；
+ * 都没有返回空（用自己原来的页面）。
  * 存进去时核对过；读出来再按现在的格式与界面登记核对一遍，对不上（界面登记以后改过）也返回空，不给半份。
  */
 export async function readPublishedStudio(db: Db, surface: StudioSurface, storeId = currentStoreId()): Promise<PublishedStudio | null> {
@@ -46,7 +55,8 @@ export async function readPublishedStudio(db: Db, surface: StudioSurface, storeI
 }
 
 /**
- * 取版面里的一张图（小程序线转给小程序用）：只给这个界面已经发布过的版面里用到的图（任何一家店、任何一版），
+ * 取版面里的一张图（小程序线转给小程序用）：只给这个界面已经发布过的版面里用到的图（任何一家店、任何一版，含定时还没到点的——
+ * 到点时手机上不用再等图），
  * 不让小程序的接口变成随便取素材库的口子。没有返回空。图的内容按编号（SHA-256）不会变，可以长期缓存。
  */
 export async function readStudioAssetFor(db: Db, surface: StudioSurface, assetId: string): Promise<{ mime: string; data: Buffer } | null> {

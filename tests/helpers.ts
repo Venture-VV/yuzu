@@ -335,6 +335,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '163_customer_credit_canonical.sql',
   '164_studio.sql',
   '165_studio_surfaces.sql',
+  '166_studio_schedule_comments.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

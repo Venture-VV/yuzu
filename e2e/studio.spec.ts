@@ -2,12 +2,13 @@
 //   店主建（或重置）设计师账号 e2esheji → 设计师第一次登录先改密码，之后直接到后台的「工作台」→ 打开编辑器（起始页画的就是平板的样子）→
 //   拖动字标、撤销重做 → 插入文字、写中英文 → 主题换强调色 → 自动保存 → 检查没有红的 → 发布 → 版本列表里有这一版 →
 //   8.1.2：「版式」里挪一块、加圆角、放大一档单独挪一块（卡片模板）→
-//   平板的菜单接口带上这一版、预览码打开看得到那行字 → 用完照内置的默认版面再发一版（演示库的平板照旧是原来的样子）、停用 e2esheji。
+//   平板的菜单接口带上这一版、预览码打开看得到那行字 →
+//   8.1.2 第 4 步：店主也开着编辑器（「谁在改」）、批注来回（留言、回复、标解决）、中英文案改英文并导出、设计包导进来、定时发布再撤销 → 用完照内置的默认版面再发一版（演示库的平板照旧是原来的样子）、停用 e2esheji。
 // 只要 seed-demo 的店主 linlan（密码 yuzu2026），不依赖 demo-prepare；演示库的设计师 sheji 留给人手工试，用例不碰它。
 // 只在独立演示库。可重复执行（e2esheji 下次启用、重置密码接着用）。
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
-import { defaultStudioDoc, type StudioState, type StudioVersionView } from '../src/shared/studio';
+import { changedScreens, defaultStudioDoc, type StudioDoc, type StudioState, type StudioVersionView } from '../src/shared/studio';
 
 const PASSWORD = 'yuzu2026';
 const DESIGNER = { username: 'e2esheji', displayName: 'E2E 设计师', password: 'E2e-sheji-2026' };
@@ -87,6 +88,14 @@ test.describe('8.1.1 UI 工作台', () => {
       expect((await page.request.get('/api/emenu/guest?tag=1')).status()).toBe(403);
 
       await resetDraft(page);
+      // 上一次停在中途（没走到「用完」）留下的那一版：先照默认版面发一版，下面「这一版改了哪几块」才对得上
+      const before = await getJson<StudioState>(page, '/api/studio/emenu');
+      if (before.published) {
+        const pub = await getJson<{ doc: StudioDoc }>(page, `/api/studio/emenu/versions/${before.published.version}`);
+        if (changedScreens(pub.doc, defaultStudioDoc('emenu')).length) {
+          await send(page, 'post', '/api/studio/emenu/publish', { clientKey: randomUUID(), rev: before.draft.rev, note: `E2E 开始前回到默认版面 ${stamp}` });
+        }
+      }
       await page.getByTestId('studio-open-emenu').click();
       await expect(page.getByTestId('studio-canvas')).toBeVisible();
       await expect(page.getByTestId('studio-save-status')).toHaveAttribute('data-status', 'saved');
@@ -164,7 +173,7 @@ test.describe('8.1.1 UI 工作台', () => {
       expect(versions[0]).toMatchObject({ kind: 'publish', note: `E2E 起始页加字、换强调色 ${stamp}`, publishedBy: DESIGNER.displayName });
       expect(versions[0]!.screensChanged).toEqual(expect.arrayContaining(['theme', 'start', 'templates']));
       await page.getByTestId('studio-open-versions').click();
-      await expect(page.getByTestId(`studio-version-${versions[0]!.version}`)).toContainText('平板现在用的');
+      await expect(page.getByTestId(`studio-version-${versions[0]!.version}`)).toContainText('现在用的');
       await page.keyboard.press('Escape');
 
       // 平板（店主有「打开平板点餐」）：菜单接口带上这一版，取得到版面
@@ -180,6 +189,100 @@ test.describe('8.1.1 UI 工作台', () => {
       await pad.goto(`/emenu?studio=${code.code}`);
       await expect(pad.getByTestId('emenu-studio-preview')).toContainText('不能下单');
       await expect(pad.getByTestId('emenu-start')).toContainText(words);
+
+      // 8.1.2 第 4 步 ── 谁在改：店主也打开这个界面的编辑器，设计师这边顶上写着有人也在改
+      await pad.goto('/studio/emenu');
+      await expect(pad.getByTestId('studio-canvas')).toBeVisible();
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect(page.getByTestId('studio-presence')).toContainText('也在改', { timeout: 15_000 });
+
+      // 批注：设计师在画布上点一下留言 → 店主回复 → 设计师标解决（画布上的圆点不见了）
+      const note = `E2E 批注 ${stamp}：字标再往上一点`;
+      await page.getByTestId('studio-open-comments').click();
+      // 上面停在「版式」：点「加一条批注」自己回到普通的画布（停在菜单页）；回起始页再加
+      await page.getByTestId('studio-comment-add').click();
+      await expect(page.getByTestId('studio-comment-layer')).toBeVisible();
+      await page.getByTestId('studio-screen-start').click();
+      await expect(page.getByTestId('studio-comment-layer')).toBeVisible();
+      const area = (await page.getByTestId('studio-canvas-layer').boundingBox())!;
+      await page.mouse.click(area.x + area.width * 0.3, area.y + area.height * 0.3);
+      await page.getByTestId('studio-comment-text').fill(note);
+      await page.getByTestId('studio-comment-send').click();
+      const comments = await getJson<{ id: number; body: string; parentId: number | null }[]>(page, '/api/studio/emenu/comments');
+      const mine = comments.find((c) => c.body === note)!;
+      expect(mine).toBeTruthy();
+      await expect(page.getByTestId(`studio-comment-pin-${mine.id}`)).toBeVisible();
+      await pad.reload();
+      await pad.getByTestId('studio-open-comments').click();
+      await pad.getByTestId(`studio-comment-reply-${mine.id}`).fill('好的，下午改');
+      await pad.getByTestId(`studio-comment-reply-send-${mine.id}`).click();
+      await expect(pad.getByTestId(`studio-comment-${mine.id}`)).toContainText('好的，下午改');
+      await page.reload();
+      await page.getByTestId('studio-open-comments').click();
+      await expect(page.getByTestId(`studio-comment-${mine.id}`)).toContainText('好的，下午改');
+      await page.getByTestId(`studio-comment-resolve-${mine.id}`).click();
+      await expect(page.getByTestId(`studio-comment-pin-${mine.id}`)).toHaveCount(0);
+      await pad.goto('/admin/studio');
+
+      // 中英文案：插进来的那段字列在表里，改英文 → 草稿里跟着改；导出的 CSV 里有这段字
+      await page.getByTestId('studio-more').click();
+      await page.getByTestId('studio-open-copy').click();
+      const enCells = page.locator('[data-testid^="studio-copy-en-"]');
+      await expect(page.getByTestId('studio-copy')).toContainText(words);
+      const row = page.locator('[data-testid^="studio-copy-row-"]', { hasText: words });
+      await row.locator('[data-testid^="studio-copy-en-"]').fill(`E2E Winter edited ${stamp}`);
+      expect(await enCells.count()).toBeGreaterThan(0);
+      const csvDownload = page.waitForEvent('download');
+      await page.getByTestId('studio-copy-export').click();
+      const csvText = await (await csvDownload).createReadStream().then(async (st) => {
+        const parts: Buffer[] = [];
+        for await (const c of st) parts.push(c as Buffer);
+        return Buffer.concat(parts).toString('utf8');
+      });
+      expect(csvText).toContain('编号,屏,名字,中文,英文');
+      expect(csvText).toContain(`E2E Winter edited ${stamp}`);
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('studio-save-status')).toHaveAttribute('data-status', 'saved', { timeout: 15_000 });
+      expect(JSON.stringify((await getJson<StudioState>(page, '/api/studio/emenu')).draft.doc)).toContain(`E2E Winter edited ${stamp}`);
+
+      // 设计包：导出（接口）→ 改一句再导进来 → 编辑器里换成设计包里的、自动存上
+      const pack = await getJson<{ kind: string; doc: unknown; assets: unknown[] }>(page, '/api/studio/emenu/pack');
+      expect(pack.kind).toBe('yuzu-studio-pack');
+      const packed = JSON.stringify(pack).replace(`E2E Winter edited ${stamp}`, `E2E Winter packed ${stamp}`);
+      await page.getByTestId('studio-more').click();
+      await page.getByTestId('studio-open-pack').click();
+      await page.getByTestId('studio-pack-file').setInputFiles({ name: 'pack.json', mimeType: 'application/json', buffer: Buffer.from(packed) });
+      await expect(page.getByText('设计包导进来了')).toBeVisible({ timeout: 15_000 });
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('studio-save-status')).toHaveAttribute('data-status', 'saved', { timeout: 15_000 });
+      expect(JSON.stringify((await getJson<StudioState>(page, '/api/studio/emenu')).draft.doc)).toContain(`E2E Winter packed ${stamp}`);
+
+      // 定时发布：定在 10 分钟以后 → 版本列表里写着「定在…生效」、平板还用原来那版 → 撤销定时
+      const live = (await getJson<StudioState>(page, '/api/studio/emenu')).published!;
+      await page.getByTestId('studio-open-publish').click();
+      await page.getByTestId('studio-publish-note').fill(`E2E 定时发布 ${stamp}`);
+      await page.getByTestId('studio-publish-later').check();
+      const later = await page.evaluate(() => {
+        const d = new Date(Date.now() + 10 * 60_000);
+        const p = (n: number) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+      });
+      await page.getByTestId('studio-publish-at').fill(later);
+      await page.getByTestId('studio-publish-go').click();
+      await expect(page.getByTestId('studio-scheduled')).toBeVisible({ timeout: 15_000 });
+      const sched = (await getJson<StudioState>(page, '/api/studio/emenu')).scheduled;
+      expect(sched).toHaveLength(1);
+      expect(sched[0]).toMatchObject({ note: `E2E 定时发布 ${stamp}` });
+      expect((await getJson<StudioState>(page, '/api/studio/emenu')).published!.version).toBe(live.version);
+      const menuNow = await getJson<{ studio: { version: number } | null }>(pad, '/api/emenu/menu');
+      expect(menuNow.studio?.version).toBe(live.version);
+      await page.getByTestId('studio-open-versions').click();
+      await expect(page.getByTestId(`studio-version-pending-${sched[0]!.version}`)).toBeVisible();
+      page.once('dialog', (d) => void d.accept());
+      await page.getByTestId(`studio-cancel-${sched[0]!.version}`).click();
+      await expect(page.getByTestId(`studio-version-${sched[0]!.version}`)).toContainText('撤销了');
+      await page.keyboard.press('Escape');
+      expect((await getJson<StudioState>(page, '/api/studio/emenu')).scheduled).toHaveLength(0);
 
       // 用完：照内置的默认版面再发一版（演示库的平板照旧是原来的样子）
       await resetDraft(page);

@@ -13,8 +13,12 @@ export interface CsvRecord {
 /** 引号没有配对时的提示（行号是这条记录开始的行） */
 export const unclosedQuoteMessage = (line: number) => `第 ${line} 行开始的引号没有配对，请检查文件（单元格里的引号要写成两个）`;
 
-/** 切出所有记录（含空行）；引号没有配对时 unclosedQuoteLine 是那条记录开始的行号 */
-export function parseCsvRecords(text: string): { records: CsvRecord[]; unclosedQuoteLine: number | null } {
+/**
+ * 切出所有记录（含空行）；引号没有配对时 unclosedQuoteLine 是那条记录开始的行号。
+ * 单元格默认去掉前后的空白；trim: false 原样保留（8.1.2 工作台的中英文案：「Welcome to 」后面的空格是字的一部分）。
+ */
+export function parseCsvRecords(text: string, opts: { trim?: boolean } = {}): { records: CsvRecord[]; unclosedQuoteLine: number | null } {
+  const trim = opts.trim ?? true;
   const records: CsvRecord[] = [];
   let cells: string[] = [];
   let cur = '';
@@ -52,15 +56,24 @@ export function parseCsvRecords(text: string): { records: CsvRecord[]; unclosedQ
     cells.push(cur);
     records.push({ line: startLine, cells });
   }
-  return { records: records.map((r) => ({ line: r.line, cells: r.cells.map((c) => c.replace(/\r\n?/g, '\n').trim()) })), unclosedQuoteLine: null };
+  return {
+    records: records.map((r) => ({
+      line: r.line,
+      cells: r.cells.map((c) => {
+        const v = c.replace(/\r\n?/g, '\n');
+        return trim ? v.trim() : v;
+      }),
+    })),
+    unclosedQuoteLine: null,
+  };
 }
 
 /**
  * 读成「表头 + 数据行」：去掉开头的 BOM，跳过整行都空的记录，第一条不空的记录是表头。
  * 导入文件（会员期初、手牌柜号、价目表）都按这个读。
  */
-export function readCsvTable(text: string): { header: CsvRecord | null; rows: CsvRecord[]; unclosedQuoteLine: number | null } {
-  const { records, unclosedQuoteLine } = parseCsvRecords(text.replace(/^﻿/, ''));
-  const filled = records.filter((r) => r.cells.some((c) => c !== ''));
+export function readCsvTable(text: string, opts: { trim?: boolean } = {}): { header: CsvRecord | null; rows: CsvRecord[]; unclosedQuoteLine: number | null } {
+  const { records, unclosedQuoteLine } = parseCsvRecords(text.replace(/^﻿/, ''), opts);
+  const filled = records.filter((r) => r.cells.some((c) => c.trim() !== ''));
   return { header: filled[0] ?? null, rows: filled.slice(1), unclosedQuoteLine };
 }
