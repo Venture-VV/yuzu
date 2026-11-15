@@ -106,8 +106,11 @@ export function UsageTab() {
   const runNow = async () => {
     setBusy(true);
     try {
-      const r = await api.post<{ docs: number; lines: number; blocked: number }>('/api/inventory/usage/run');
-      toast({ tone: r.docs ? 'success' : 'info', title: r.docs ? `开了 ${r.docs} 张耗用单（${r.lines} 样物料）` : '这一次没有要扣的', body: r.blocked ? `${r.blocked} 样库存不够，先留着` : undefined });
+      // pendingAfter：跑完还剩几笔没扣（含库存不够留着的）。每分钟的任务刚好在跑时服务端等它跑完，
+      // 那边已经扣掉的这一次就是 0 张——写「没有待扣的了」，不写成「没有要扣的」让人以为没扣
+      const r = await api.post<{ docs: number; lines: number; blocked: number; pendingAfter?: number }>('/api/inventory/usage/run');
+      const title = r.docs ? `开了 ${r.docs} 张耗用单（${r.lines} 样物料）` : r.pendingAfter === 0 ? '没有待扣的了' : '这一次没有能扣的';
+      toast({ tone: r.docs ? 'success' : 'info', title, body: r.blocked ? `${r.blocked} 样库存不够，先留着` : undefined });
       await refresh();
     } catch (e) {
       toast({ tone: 'error', title: errorMessage(e) });

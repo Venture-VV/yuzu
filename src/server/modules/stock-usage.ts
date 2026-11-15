@@ -293,6 +293,8 @@ async function reverse(tx: Tx, where: ReturnType<Tx>): Promise<number> {
 // ───────────────────────── 每分钟：轧差、开耗用单 ─────────────────────────
 
 const JOB_LOCK = 'stock_usage_job';
+/** 「现在扣一次」最多等每分钟的任务多久 */
+const MANUAL_RUN_WAIT_MS = 15_000;
 /** 一张耗用单最多几样物料（库存单据一张最多 100 行，留余量） */
 const BATCH_MAX_LINES = 60;
 
@@ -310,16 +312,24 @@ export interface StockUsageRun {
 }
 
 /**
- * 把还没入账的扣料事件轧差后开成耗用单。同一时刻只有一个在跑（会话级咨询锁，拿不到直接返回）。
+ * 把还没入账的扣料事件轧差后开成耗用单。同一时刻只有一个在跑（会话级咨询锁）。
  * 每一个「种类 + 仓」一轮最多一张单；库存不够的物料留着，库存补上以后自动扣。
+ *
+ * 每分钟的任务拿不到锁直接返回（下一分钟再来）。「现在扣一次」传 waitMs：每分钟的任务正在跑时等它跑完再看
+ * （8.1.0：原来也是拿不到就返回，页面说「这一次没有要扣的」，其实那边正在扣——CI 上撞上过一次）；
+ * 等不到抛 USAGE_BUSY。
  */
-export async function processStockUsage(deps: Pick<Deps, 'sql' | 'config'>): Promise<StockUsageRun> {
+export async function processStockUsage(deps: Pick<Deps, 'sql' | 'config'>, opts: { waitMs?: number } = {}): Promise<StockUsageRun> {
   const { sql, config } = deps;
   const run: StockUsageRun = { docs: 0, lines: 0, blocked: 0, reconciled: 0, released: 0 };
   const lockConn = await sql.reserve();
   try {
-    const [got] = await lockConn<{ ok: boolean }[]>`SELECT pg_try_advisory_lock(hashtextextended(${JOB_LOCK}, 0)) AS ok`;
-    if (!got?.ok) return run;
+    if (opts.waitMs) {
+      if (!(await waitJobLock(lockConn, opts.waitMs))) throw conflict('USAGE_BUSY', '自动扣料正在跑，等一会儿再点「现在扣一次」');
+    } else {
+      const [got] = await lockConn<{ ok: boolean }[]>`SELECT pg_try_advisory_lock(hashtextextended(${JOB_LOCK}, 0)) AS ok`;
+      if (!got?.ok) return run;
+    }
     try {
       await reconcileBatches(sql, run);
       const groups = await sql<{ kind: StockUsageKind; warehouseId: number }[]>`
@@ -334,6 +344,26 @@ export async function processStockUsage(deps: Pick<Deps, 'sql' | 'config'>): Pro
     lockConn.release();
   }
   return run;
+}
+
+/** 等扣料任务的会话级锁，最多 waitMs（等锁超时 55P03 当作没等到；连接放回连接池之前恢复默认的等锁时限） */
+async function waitJobLock(lockConn: Awaited<ReturnType<Deps['sql']['reserve']>>, waitMs: number): Promise<boolean> {
+  await lockConn.unsafe(`SET lock_timeout = ${Math.max(1, Math.round(waitMs))}`);
+  try {
+    await lockConn`SELECT pg_advisory_lock(hashtextextended(${JOB_LOCK}, 0))`;
+    return true;
+  } catch (error) {
+    if ((error as { code?: string }).code === '55P03') return false;
+    throw error;
+  } finally {
+    await lockConn`RESET lock_timeout`;
+  }
+}
+
+/** 还在等扣的事件数（含库存不够留着的） */
+export async function pendingUsageCount(sql: Deps['sql']): Promise<number> {
+  const [r] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM stock_usage_events WHERE state = 'pending'`;
+  return Number(r?.n ?? 0);
 }
 
 /** 上一轮开了单没记下结果的批次：按操作编号对账——单已经生效的认下，没有的把事件放回去 */
@@ -521,6 +551,9 @@ export function registerStockUsageRoutes(app: FastifyInstance, deps: Deps) {
       ctxOf(req),
     ),
   );
-  /** 现在扣一次（不等下一分钟）：物资经办补了库存以后用 */
-  app.post('/api/inventory/usage/run', { preHandler: guard('inventory.operate') }, async () => processStockUsage(deps));
+  /** 现在扣一次（不等下一分钟）：物资经办补了库存以后用。每分钟的任务正在跑时等它（最多 15 秒），跑完再看还剩多少没扣 */
+  app.post('/api/inventory/usage/run', { preHandler: guard('inventory.operate') }, async () => {
+    const run = await processStockUsage(deps, { waitMs: MANUAL_RUN_WAIT_MS });
+    return { ...run, pendingAfter: await pendingUsageCount(deps.sql) };
+  });
 }

@@ -463,3 +463,32 @@ describe('成本报表（docs/ERP_V8020.md 第 1 节）', () => {
   });
 });
 
+
+describe('「现在扣一次」与每分钟的任务撞上（8.1.0：CI 上撞上过一次）', () => {
+  it('任务正在跑时，现在扣一次等它跑完再扣、回还剩几笔没扣；一直等不到回 USAGE_BUSY，不说成「没有要扣的」', async () => {
+    await run(); // 先把前面留下、能扣的扣掉（库存不够的照旧留着）
+    const v = await enter();
+    expect((await charge(v.id, item['矿泉水']!, 1, 500)).status).toBe(200);
+    await pay(v.id);
+    const lockConn = await ctx.sql.reserve();
+    try {
+      // 模拟每分钟的任务正在跑：占着同一把会话级咨询锁
+      await lockConn`SELECT pg_advisory_lock(hashtextextended('stock_usage_job', 0))`;
+      expect(await run()).toMatchObject({ docs: 0, lines: 0 }); // 每分钟的任务拿不到锁：这一分钟什么都不做
+      await expect(processStockUsage({ sql: ctx.sql, config: ctx.config }, { waitMs: 200 })).rejects.toMatchObject({ code: 'USAGE_BUSY' });
+      // 「现在扣一次」在等锁；锁放开以后接着扣
+      const manual = api(ctx.app, keeper, 'POST', '/api/inventory/usage/run');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await lockConn`SELECT pg_advisory_unlock(hashtextextended('stock_usage_job', 0))`;
+      const res = await manual;
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toMatchObject({ docs: 1, lines: 1 });
+      expect(res.body.pendingAfter).toBe(Number((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM stock_usage_events WHERE state = 'pending'`)[0]!.n));
+    } finally {
+      lockConn.release();
+    }
+    // 等锁的连接放回连接池时等锁时限已经恢复默认（不影响别的请求）
+    const [t] = await ctx.sql<{ v: string }[]>`SELECT current_setting('lock_timeout') AS v`;
+    expect(t!.v).not.toBe('15s');
+  });
+});

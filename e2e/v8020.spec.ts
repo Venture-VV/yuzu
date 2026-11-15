@@ -84,7 +84,8 @@ test.describe('8.0.20 进销存做深与客房', () => {
     await expect(pending).toContainText('该扣 0.42 千克');
     await expect(pending).toContainText('配方耗用');
     await page.getByTestId('usage-run').click();
-    await expect(page.getByText(/开了 \d+ 张耗用单/)).toBeVisible();
+    // 每分钟的扣料任务可能刚好抢先扣掉（8.1.0 CI 上撞上过一次）：那时这一次是 0 张、写「没有待扣的了」；两种都对，下面核对结果
+    await expect(page.getByText(/开了 \d+ 张耗用单|没有待扣的了/)).toBeVisible();
     await expect(page.getByTestId(`usage-pending-${code}`)).toHaveCount(0);
     await expect(page.getByTestId('usage-batches')).toContainText('配方耗用');
     const mat = await get<{ stockMilli: number }>(page.request, `/api/inventory/materials/${material.id}`);
