@@ -39,11 +39,12 @@ node dist/server/cli.js check              # 会员（含营业口径）、库�
 node dist/server/cli.js fingerprint        # 数据指纹（只读）；--expect <摘要> 比对，不一致退出码为 1
 ./scripts/backup.sh                        # 立即备份：临时库试恢复、自检并记下指纹（写 BACKUP_DIR，含 .json 说明）
 ./scripts/verify-backup.sh <备份文件.dump>  # 核验一份备份，不碰当前数据库
-./scripts/rollback.sh                      # 回到上一次 update.sh 之前的版本（加了迁移时同时恢复升级前的备份）
+./scripts/rollback.sh                      # 回到上一次 update.sh 之前的版本（加了迁移时同时恢复升级前的备份；8.1.0 起先停应用再备份，恢复前列出升级以后写进系统的、当面确认）
 ./scripts/offsite-copy.sh [--check]        # 新备份用 age 公钥加密后经 Tailscale 传到云服务器 A（宿主机定时执行；--check 只测连通）
 ./scripts/daily-recon.sh [营业日]           # 每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班、技师业绩，写到 recon/<营业日>/
 node dist/server/cli.js daily-recon --store <门店代码> [--date YYYY-MM-DD]   # 别的门店的对账包（8.0.22，目录名带门店代码；不给 --store 是本店，与上一行一样）
 node dist/server/cli.js balance-changes --since "YYYY-MM-DD HH:MM"   # 某时刻之后有余额变动的会员（只读，回写 EBC 用）
+node dist/server/cli.js changes-since --since "YYYY-MM-DD HH:MM"     # 某时刻之后写进系统的业务（只读，8.1.0）：接待、结账、充值、消费、库存单据的笔数、余额有变动的会员、审计里的业务动作；rollback.sh 恢复前用
 node dist/server/cli.js import-hand-tags --store-list   # 预览导入店主 747 个真实柜号；--apply 才写入（真实业务数据，门店环境须店主同意）
 node dist/server/cli.js import-price-list --tangqi      # 预览导入汤崎价目表（29 个项目、多档价格）；--apply 才写入（同上）
 node dist/server/cli.js import-legacy <原始.xlsx> --operator <店主账号>   # 预览导入 8–10 月旧账（四份原始 Excel 之一）的只读对照；--apply 才写入（真实业务数据，门店环境须店主同意；不进正式账）

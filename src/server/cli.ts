@@ -48,6 +48,9 @@
 //                                         每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班、技师业绩、客房与押金，写到 <目录>/<营业日>/
 //   balance-changes --since "YYYY-MM-DD HH:MM" [--include-opening] [--out 文件.csv]
 //                                         某时刻之后有余额变动的会员（只读），退回旧系统时用于回写 EBC；不给 --out 时 CSV 打到标准输出
+//   changes-since --since "YYYY-MM-DD HH:MM"（门店时间）或带时区的时刻
+//                                         某时刻之后写进系统的业务（只读，8.1.0）：接待、结账、充值、消费、库存单据的笔数，余额有变动的会员，
+//                                         审计里的业务动作；最后一行 CHANGES=<合计>。rollback.sh 恢复升级前的备份之前用它列出会丢的数据
 //   floorplan-convert <图纸.dwg|.dxf|.pdf> [--out 目录] [--scale 比例]
 //                                         底图转换（RQ-004 第二段，不连数据库、不需要 DATABASE_URL）：每层 SVG 底图、spaces.geojson、
 //                                         转换报告（每个图层的用途与图元数）写到目录（默认 floorplan-<文件名>）；
@@ -106,6 +109,7 @@ import { loadSettings } from './modules/settings';
 import { createStaff } from './modules/staff';
 import { assertBackupTarget, backupDirFromEnv, backupLoop, backupPolicyFromEnv, createBackup, verifyBackup } from './ops/backup';
 import { balanceChanges, balanceChangesCsv, parseLocalTime } from './ops/balance-changes';
+import { changesSince, changesSinceLines } from './ops/changes-since';
 import { consistencyChecks } from './ops/consistency';
 import { demoSeedTime, rememberDemoAnchor } from './ops/demo-time';
 import { computeFingerprint } from './ops/fingerprint';
@@ -748,6 +752,13 @@ async function main() {
         }
         await writeFile(out, csv);
         console.log(`${sinceText} 之后有余额变动的会员 ${rows.length} 位，已写到 ${out}`);
+        break;
+      }
+      case 'changes-since': {
+        const sinceText = flag(args, 'since');
+        const since = sinceText ? parseLocalTime(sinceText, config.timezone) : null;
+        if (!since) throw new Error('用法：changes-since --since "YYYY-MM-DD HH:MM"（门店时间）或带时区的时刻（如 2026-11-15T03:00:00Z）');
+        for (const line of changesSinceLines(await changesSince(sql, since), sinceText!)) console.log(line);
         break;
       }
       case 'verify-backup': {

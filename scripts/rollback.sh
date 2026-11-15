@@ -3,7 +3,10 @@
 # 上一版的镜像由 update.sh 按完整 SHA 打了标签留着，不用重新构建。
 # 新版本加了数据库迁移时，必须同时恢复升级前的备份（迁移只进不退）：升级之后录入的数据要按纸质单补录。
 # 没加迁移时只切回上一版的程序，数据保留；加 --restore-data 也恢复升级前的备份。
-# 步骤：核对升级记录与镜像 → 当面确认 → 回退前备份 → [停应用、恢复升级前的备份、比对指纹] → 切回上一版代码与镜像 → 启动 → 自检。
+# 步骤：核对升级记录与镜像 → 当面确认 → 停应用（入口关掉、写入停下）→ 回退前备份（这时的数据就是最后的数据）
+#       → [列出升级以后写进系统的、当面确认要按纸质单补录 → 恢复升级前的备份、比对指纹] → 切回上一版代码与镜像 → 启动 → 自检。
+# 8.1.0 起先停应用再备份（测试会话在 PR #113 be1de5a 报的 P1：原来应用开着做回退前的备份、恢复时才停，
+# 中间新写进来的既不在回退前的备份里、也不在恢复后的库里）。确认之前取消、或备份没做成，应用照旧在新版本上启动。
 # 正式环境（.env 里 APP_ENV=production）必须当面输入确认，不接受 YUZU_ROLLBACK_CONFIRM 跳过。
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -60,7 +63,47 @@ fi
 
 begin_maintenance "回退到 ${prev:0:12}"
 image=$(app_image)
-./scripts/backup.sh before-rollback
+# 没动数据之前不回退了：应用照旧在新版本上启动
+resume_current() {
+  echo "$1" >&2
+  docker compose up -d app backup
+  exit 1
+}
+# 先关入口、停下所有写入，再做回退前的备份：之后再没有新的写入，这份备份就是最后的数据
+echo "· 停应用（前台、平板、小程序、员工端的写入都停下）……"
+docker compose stop app backup
+if ! out=$(./scripts/backup.sh before-rollback); then
+  printf '%s\n' "$out"
+  resume_current "✗ 回退前的备份没有做成：没有回退，应用照旧在新版本上启动"
+fi
+printf '%s\n' "$out"
+rollback_dump=$(printf '%s\n' "$out" | grep -o 'yuzu-[0-9]\{8\}-[0-9]\{6\}-before-rollback\.dump' | tail -n 1 || true)
+if $restore; then
+  # 恢复升级前的备份会把那份备份之后写进系统的都拿掉：先列出来，当面确认要按纸质单补录
+  since=$(json_str createdAt "$before.json")
+  [[ -n "$since" ]] || since=$(state_of UPDATED_AT | cut -c1-16)
+  mkdir -p .deploy
+  report=".deploy/after-upgrade-$(date +%Y%m%d-%H%M%S).txt"
+  if ! docker compose run --rm -T --no-deps backup node dist/server/cli.js changes-since --since "$since" > "$report"; then
+    cat "$report"
+    resume_current "✗ 列不出升级以后写进系统的数据：没有回退，应用照旧在新版本上启动"
+  fi
+  cat "$report"
+  changes=$(grep -o '^CHANGES=[0-9]*' "$report" | tail -n 1 | cut -d= -f2 || true)
+  if [[ "${changes:-1}" != "0" ]]; then
+    echo "以上是升级以后写进系统的。恢复升级前的备份后，它们会从系统里消失，要按纸质单补录。"
+    echo "回退前的备份里都留着：${rollback_dump:-见备份目录}；这份清单存在 $report。"
+    if [[ "$app_env" == "production" ]]; then
+      read -r -p "核对过、确认按纸质单补录，请输入 DISCARD-AFTER-UPGRADE（输入别的就不回退）：" answer
+      [[ "$answer" == "DISCARD-AFTER-UPGRADE" ]] || resume_current "已取消回退：应用照旧在新版本上启动"
+    elif [[ "${YUZU_ROLLBACK_CONFIRM:-}" != "yes" ]]; then
+      read -r -p "确认按纸质单补录，请输入 DISCARD（输入别的就不回退）：" answer
+      [[ "$answer" == "DISCARD" ]] || resume_current "已取消回退：应用照旧在新版本上启动"
+    fi
+  else
+    echo "· 升级以后没有业务写入。"
+  fi
+fi
 mark_dirty
 if $restore; then
   restore_database "$before"

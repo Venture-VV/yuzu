@@ -5,6 +5,7 @@
 店主 2026-11-15 定：8.0.20–8.0.22 那一批做完后切到 8.1.0（Z1：一大批新功能时加中间一位）。**功能与 8.0.22 一样，没有迁移**；升级清单 `docs/RELEASE_V810.md`。
 
 - **版本号** 8.1.0（`package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml`、`src/server/config.ts`）。
+- **回退脚本先停写再备份**（测试会话在 `be1de5a` 报的 P1）：`scripts/rollback.sh` 原来应用开着做回退前的备份、恢复升级前的备份时才停应用，中间新写进来的既不在回退前的备份里、也不在恢复后的库里。现在先停应用（入口关掉、写入停下）再备份，这份备份就是最后的数据；要恢复升级前的备份时，先用新命令 `changes-since` 列出那份备份之后写进系统的（接待、结账、充值、消费、库存单据的笔数，余额有变动的会员，审计里的业务动作，清单存在 `.deploy/after-upgrade-*.txt`），有的话当面确认（正式环境输入 `DISCARD-AFTER-UPGRADE`）才恢复；取消、备份没做成、列不出来都不回退，应用照旧在新版本上启动。用例 `tests/changes-since.test.ts`；运维脚本照旧过 shellcheck。
 - **修一处**（这个 PR 的 CI 撞出来的）：库存「用料与扣料」的「现在扣一次」碰上每分钟的自动扣料正在跑时，原来拿不到锁马上返回、页面说「这一次没有要扣的」（其实那边正在扣）；现在等它跑完（最多 15 秒）再扣剩下的，回「还剩几笔没扣」，扣完了写「没有待扣的了」，等不到写明「自动扣料正在跑」。用例 `tests/stock-usage.test.ts` 加一条（占着锁时等、放开以后接着扣、等不到回 `USAGE_BUSY`），浏览器用例两种结果都认。
 - **小程序线交给 Gemini**：`GEMINI.md`（Gemini 专用的补充：范围、分支 `gemini/*`、自测、红线、评论署名）与 `.gemini/settings.json`（Gemini CLI 同时读 `AGENTS.md` 与 `GEMINI.md`）；交接说明 `docs/HANDOFF_MP_GEMINI.md`（现状、店主要做的配置、发给 Gemini 的提示词、每个小程序 PR 的验收流程、发给 Codex 的通知）；`AGENTS.md`「四个 AI 按线协作」、ROADMAP 第 7 节、`docs/MINIPROGRAM.md` 第 8 节跟着改。
 - **线范围检查**（`.github/workflows/line-scope.yml` + `scripts/check-line-scope.mjs`）：小程序线的 PR（分支 `gemini/…`、标题【小程序线】或标签）只能改小程序线自己的目录、用例与文档；登记处（挂路由、权限表……）与新迁移（`NNN_mp_<用途>.sql`）列出来请主线复核；改核心、改已有迁移的不通过。用 `pull_request_target` 跑 main 上的检查，只比对文件名、不执行 PR 的代码。用例 `tests/line-scope.test.ts`（含在临时 git 仓库里走一遍命令行）；拿以往小程序线合并的 PR 回放都通过。

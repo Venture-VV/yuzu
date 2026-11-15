@@ -7,6 +7,9 @@ env_of() { grep -E "^$1=" .env 2>/dev/null | tail -n 1 | cut -d= -f2- || true; }
 # 备份旁 .json 说明里的 64 位十六进制值（sha256、fingerprintDigest）
 json_hex() { grep -o "\"$1\": \"[0-9a-f]\{64\}\"" "$2" 2>/dev/null | head -n 1 | grep -o '[0-9a-f]\{64\}' || true; }
 
+# 备份旁 .json 说明里的一个字符串值（如 createdAt）；没有时为空
+json_str() { grep -o "\"$1\": \"[^\"]*\"" "$2" 2>/dev/null | head -n 1 | sed 's/^.*: "\(.*\)"$/\1/' || true; }
+
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
