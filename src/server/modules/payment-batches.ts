@@ -42,15 +42,17 @@ export interface BatchCandidate {
   bankPayee: string;
   bankName: string;
   bankAccountTail: string;
-  /** 收款账户不全（户名、开户行、账号）的不能进批次 */
+  /** 收款账户不全（户名、开户行、账号）或还没复核（CW28）的不能进批次 */
   bankOk: boolean;
+  /** 收款账户齐全，但改过以后还没有另一人复核 */
+  bankUnverified: boolean;
 }
 
 /** 能进批次的：已审批、没付清、不在别的没结束的批次里 */
 async function candidates(db: Db): Promise<BatchCandidate[]> {
-  const rows = await db<{ requestId: number; requestNo: string; payee: string; supplierName: string | null; amount: string; paid: string; expectedDate: string; payMode: 'ap' | 'direct'; bankPayee: string | null; bankName: string | null; bankAccount: string | null }[]>`
+  const rows = await db<{ requestId: number; requestNo: string; payee: string; supplierName: string | null; amount: string; paid: string; expectedDate: string; payMode: 'ap' | 'direct'; bankPayee: string | null; bankName: string | null; bankAccount: string | null; bankVerified: boolean | null }[]>`
     SELECT r.id AS request_id, r.request_no, r.payee, s.name AS supplier_name, r.amount_cents::text AS amount, r.expected_date::text AS expected_date, r.pay_mode,
-           s.bank_payee, s.bank_name, s.bank_account,
+           s.bank_payee, s.bank_name, s.bank_account, s.bank_verified_at IS NOT NULL AS bank_verified,
            (coalesce((SELECT sum(p.amount_cents) FROM payments p WHERE p.payment_request_id = r.id AND p.status = 'confirmed'), 0)
             + coalesce((SELECT sum(o.amount_cents) FROM contract_payouts o WHERE o.payment_request_id = r.id AND o.status = 'confirmed'), 0))::text AS paid
     FROM payment_requests r LEFT JOIN suppliers s ON s.id = r.supplier_id
@@ -61,6 +63,7 @@ async function candidates(db: Db): Promise<BatchCandidate[]> {
     .map((r) => {
       const left = Number(r.amount) - Number(r.paid);
       const payee = (r.bankPayee || '').trim();
+      const complete = !!payee && !!(r.bankName ?? '').trim() && /^[0-9]{8,32}$/.test(r.bankAccount ?? '');
       return {
         requestId: Number(r.requestId),
         requestNo: r.requestNo,
@@ -72,7 +75,8 @@ async function candidates(db: Db): Promise<BatchCandidate[]> {
         bankPayee: payee,
         bankName: r.bankName ?? '',
         bankAccountTail: (r.bankAccount ?? '').slice(-4),
-        bankOk: !!payee && !!(r.bankName ?? '').trim() && /^[0-9]{8,32}$/.test(r.bankAccount ?? ''),
+        bankOk: complete && !!r.bankVerified,
+        bankUnverified: complete && !r.bankVerified,
       };
     })
     .filter((r) => r.leftCents > 0);
@@ -186,7 +190,8 @@ async function createBatch(deps: Deps, raw: unknown, actor: Actor, ip?: string):
       const picked = ids.map((id) => {
         const c = pool.get(id);
         if (!c) throw conflict('BATCH_REQUEST_INVALID', `付款申请 #${id} 不是待付款、已经付清，或已经在别的批次里，请刷新后重选`);
-        if (!c.bankOk) throw unprocessable('BATCH_BANK_MISSING', `${c.supplierName ?? c.payee} 的收款账户没登记全（户名、开户行、账号），先在供应商档案里补上`);
+        if (c.bankUnverified) throw unprocessable('BATCH_BANK_UNVERIFIED', `${c.supplierName ?? c.payee} 的收款账户改过以后还没有另一人复核，先在供应商的「收款账户」里复核`);
+        if (!c.bankOk) throw unprocessable('BATCH_BANK_MISSING', `${c.supplierName ?? c.payee} 的收款账户没登记全（户名、开户行、账号），请应付岗在供应商的「收款账户」里补上`);
         return c;
       });
       const today = todayIn(deps.config.timezone);
@@ -200,11 +205,13 @@ async function createBatch(deps: Deps, raw: unknown, actor: Actor, ip?: string):
       let n = 0;
       for (const c of picked) {
         n += 1;
-        // 收款账户在这里抄下来（之后改档案不影响这一批）
-        await tx`
+        // 收款账户在这里抄下来（之后改档案不影响这一批）；只抄已复核的——上面核对以后到这里之间刚被改掉（复核随之清空）的，这一句抄不到，整批拒绝
+        const copied = await tx`
           INSERT INTO payment_batch_items (batch_id, line_no, payment_request_id, amount_cents, payee_name, payee_bank, payee_account, purpose, pay_client_key)
           SELECT ${batchId}, ${n}, r.id, ${c.leftCents}, s.bank_payee, s.bank_name, s.bank_account, left(${`付款申请 ${c.requestNo}`}, 60), gen_random_uuid()
-          FROM payment_requests r JOIN suppliers s ON s.id = r.supplier_id WHERE r.id = ${c.requestId}`;
+          FROM payment_requests r JOIN suppliers s ON s.id = r.supplier_id
+          WHERE r.id = ${c.requestId} AND s.bank_verified_at IS NOT NULL`;
+        if (copied.count !== 1) throw conflict('BATCH_BANK_UNVERIFIED', `${c.supplierName ?? c.payee} 的收款账户刚被改过、还没复核，请刷新后重选`);
       }
       await writeAudit(tx, { staffId: actor.id, action: 'payment_batch', targetType: 'payment_batch', targetId: batchId, detail: { op: 'create', batchNo, count: picked.length, totalCents: total }, ip });
       return { id: batchId, replayed: false };

@@ -17,6 +17,7 @@ import { Badge, Button, Field, Input, MoneyInput, Notice, Segmented, Select, Ske
 import { SimRule } from './parts';
 import { useDepartments, useInvalidateInventory, useMaterials, useSuppliers } from './queries';
 import { AdmissionBadges, AdmissionSection } from './SupplierAdmission';
+import { SupplierBankSection } from './SupplierBank';
 import { usePurchaseRules } from '../purchasing/queries';
 
 type Section = 'materials' | 'suppliers' | 'departments';
@@ -423,7 +424,7 @@ function Suppliers({ editable }: { editable: boolean }) {
   const can = useCan();
   const session = useSession();
   // 负责人（「审核」权限）没有维护档案的权限也能打开，看证照、准入或暂停（8.0.7 2.1）
-  const openable = editable || can('inventory.approve');
+  const openable = editable || can('inventory.approve') || can('payable.manage');
   const [editing, setEditing] = useState<Supplier | 'new' | null>(null);
   const supplierCustom = useCustomListValues('supplier', (suppliers.data ?? []).map((s) => s.id));
   return (
@@ -487,10 +488,6 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
     defaultChannel: null as string | null,
     // 签约 / 未签约（8.0.1 采购组整改 08，CG08）：签约的可以上传合同 PDF
     contracted: false,
-    // 收款账户（8.0.21 批量付款）：账号页面上只看得到后四位，要改就整个重填（空着 = 不改）
-    bankPayee: '',
-    bankName: '',
-    bankAccount: '',
     active: true,
   };
   const [form, setForm] = useState(blank);
@@ -511,9 +508,6 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
             reconcileCycle: editing.reconcileCycle,
             defaultChannel: editing.defaultChannel ?? null,
             contracted: editing.contracted,
-            bankPayee: editing.bankPayee,
-            bankName: editing.bankName,
-            bankAccount: '',
             active: editing.active,
           }
         : blank,
@@ -526,11 +520,8 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
     setSaving(true);
     setError(null);
     try {
-      // 收款账号空着不传（保持原样）
-      const { bankAccount, ...rest } = form;
-      const body = bankAccount.trim() ? { ...rest, bankAccount: bankAccount.trim() } : rest;
-      if (s) await api.put(`/api/inventory/suppliers/${s.id}`, body);
-      else await api.post('/api/inventory/suppliers', body);
+      if (s) await api.put(`/api/inventory/suppliers/${s.id}`, form);
+      else await api.post('/api/inventory/suppliers', form);
       await invalidate();
       toast({ tone: 'success', title: '供应商已保存' });
       onClose();
@@ -569,6 +560,7 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
             {s.note ? ` · ${s.note}` : ''}
           </p>
           <AdmissionSection supplier={s} />
+          <SupplierBankSection supplier={s} />
         </div>
       ) : (
       <div className="grid gap-4 sm:grid-cols-3">
@@ -642,15 +634,6 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
             ))}
           </Select>
         </Field>
-        <Field label="收款户名" htmlFor="s-bank-payee" className="sm:col-span-3" hint="批量付款文件用（8.0.21）">
-          <Input id="s-bank-payee" value={form.bankPayee} maxLength={60} onChange={(e) => setForm({ ...form, bankPayee: e.target.value })} className="h-10" data-testid="s-bank-payee" />
-        </Field>
-        <Field label="收款开户行" htmlFor="s-bank-name" className="sm:col-span-3">
-          <Input id="s-bank-name" value={form.bankName} maxLength={60} onChange={(e) => setForm({ ...form, bankName: e.target.value })} className="h-10" data-testid="s-bank-name" />
-        </Field>
-        <Field label="收款账号" htmlFor="s-bank-account" className="sm:col-span-3" hint={s?.bankAccountTail ? `现在是尾号 ${s.bankAccountTail}；空着不改，要改就整个重填` : '8–32 位数字'}>
-          <Input id="s-bank-account" value={form.bankAccount} maxLength={40} inputMode="numeric" onChange={(e) => setForm({ ...form, bankAccount: e.target.value })} placeholder={s?.bankAccountTail ? `**** ${s.bankAccountTail}` : ''} className="num h-10" data-testid="s-bank-account" />
-        </Field>
         <Field label="状态" className="sm:col-span-3">
           <Segmented
             value={form.active ? 'on' : 'off'}
@@ -666,6 +649,8 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
         {s && <AdmissionSection supplier={s} />}
         {!s && <p className="text-[12.5px] text-ink-3 sm:col-span-3">新建的供应商是「待准入」：保存以后登记营业执照，由负责人准入（经营规则里打开「采购单只能给已准入的供应商」以后，没准入的不能下采购单）。</p>}
         {s && <ContractFiles supplier={s} pendingContracted={form.contracted} />}
+        {/* 收款账户（8.0.21 安全审查后补）：应付岗单独改、另一人复核，不随上面的「保存」 */}
+        {s && <SupplierBankSection supplier={s} />}
         {/* 自定义字段（8.0.21）：单独保存，不动供应商本身 */}
         {s && <CustomFieldsCard entity="supplier" entityId={s.id} bare readOnly={readOnly} className="border-t border-line pt-3 sm:col-span-3" />}
       </div>

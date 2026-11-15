@@ -763,12 +763,34 @@ describe('批量付款（8.0.21）', () => {
     expect((await list()).candidates.find((c) => c.requestId === a.id)).toMatchObject({ bankOk: false, leftCents: 20_000 });
     const make = (requestIds: number[], key = randomUUID()) => api(ctx.app, payer, 'POST', '/api/erp/payments/batches', { clientKey: key, accountId: acc.id, requestIds });
     expect((await make([a.id])).body.error.code).toBe('BATCH_BANK_MISSING');
-    // 供应商档案补上收款账户（页面上只看得到后四位）
-    const sup = (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/suppliers?all=1')).body.find((s: { id: number }) => s.id === supplierId);
-    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/inventory/suppliers/${supplierId}`, { code: sup.code, name: sup.name, bankPayee: '付款流测试供应商', bankName: '建设银行城西支行', bankAccount: '6227 0000 1234 5678' })).status).toBe(200);
-    const after = (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/suppliers?all=1')).body.find((s: { id: number }) => s.id === supplierId);
-    expect(after).toMatchObject({ bankPayee: '付款流测试供应商', bankName: '建设银行城西支行', bankAccountTail: '5678' });
+    // 收款账户（CW28，Codex 安全审查后补）：采购改供应商档案改不了它，也调不了收款账户的接口
+    const supOf = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/suppliers?all=1')).body.find((s: { id: number }) => s.id === supplierId);
+    const sup = await supOf();
+    const bankBody = { bankPayee: '付款流测试供应商', bankName: '建设银行城西支行', bankAccount: '6227 0000 1234 5678' };
+    const viaMaster = await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${supplierId}`, { code: sup.code, name: sup.name, ...bankBody });
+    expect(viaMaster.body.error?.code).toBe('SUPPLIER_BANK_SEPARATE');
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/inventory/suppliers', { code: 'PY-BANK', name: '新建带账户', ...bankBody })).body.error?.code).toBe('SUPPLIER_BANK_SEPARATE');
+    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, bankBody)).status).toBe(403);
+    // 应付改（页面上只看得到后四位）→ 待复核：进不了批次，改的本人不能复核
+    expect((await api(ctx.app, payer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, bankBody)).status).toBe(200);
+    const after = await supOf();
+    expect(after).toMatchObject({ bankPayee: '付款流测试供应商', bankName: '建设银行城西支行', bankAccountTail: '5678', bankStatus: 'pending', bankChangedByName: '钱芬（对账付款）' });
     expect(JSON.stringify(after)).not.toContain('6227000012345678');
+    // 采购保存档案的其他内容（带着原样的户名、开户行）不受影响，也不清掉复核状态
+    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${supplierId}`, { code: sup.code, name: sup.name, contact: '王经理', bankPayee: after.bankPayee, bankName: after.bankName })).status).toBe(200);
+    expect((await list()).candidates.find((c) => c.requestId === a.id)).toMatchObject({ bankOk: false, bankUnverified: true, bankAccountTail: '5678' });
+    expect((await make([a.id])).body.error.code).toBe('BATCH_BANK_UNVERIFIED');
+    expect((await api(ctx.app, payer, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678' })).status).toBe(403);
+    // 另一人（店主）复核：后四位对不上（刚被改过）拒绝，对上了复核
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '0000' })).body.error.code).toBe('SUPPLIER_BANK_CHANGED');
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678' })).status).toBe(200);
+    expect(await supOf()).toMatchObject({ bankStatus: 'verified', bankVerifiedByName: expect.any(String) });
+    // 数据库兜底：不管从哪儿改了账号，复核随之清空
+    await ctx.sql`UPDATE suppliers SET bank_account = '6227000012349999' WHERE id = ${supplierId}`;
+    expect(await supOf()).toMatchObject({ bankStatus: 'pending', bankAccountTail: '9999' });
+    // 店主改的直接算复核过
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, bankBody)).status).toBe(200);
+    expect(await supOf()).toMatchObject({ bankStatus: 'verified', bankAccountTail: '5678' });
     const created = await ok(make([a.id]));
     const batch = created.batch;
     expect(batch).toMatchObject({ status: 'draft', totalCents: 20_000, itemCount: 1 });

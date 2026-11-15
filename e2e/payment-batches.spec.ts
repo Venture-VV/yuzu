@@ -1,6 +1,7 @@
 // 8.0.21 浏览器验收：批量付款（docs/FINANCE_V8021.md 第 5 节，CW-D）。可重复执行。
 // 依赖演示数据（仅独立演示库），账号：店主 linlan，密码 yuzu2026。
-//   · 供应商档案填收款户名、开户行、账号 → 保存以后只看得到后四位，账号输入框空着（不发完整账号到页面）；
+//   · 供应商档案的「收款账户」（应付岗单独改，CW28）：填户名、开户行、账号 → 只看得到后四位，账号输入框空着（不发完整账号到页面）；
+//     店主改的直接「已复核」；对账付款（qianfen）改的「待复核」、本人看不到复核按钮，店主复核；
 //   · 付款 →「批量付款」页签：待付款的申请列表与生成按钮（演示库里没有批了待付的申请时显示空的提示）。
 // 生成、导出、导入流水自动记账的整条链在 tests/payments.test.ts「批量付款（8.0.21）」里。
 import { expect, test, type Page } from '@playwright/test';
@@ -13,7 +14,8 @@ async function login(page: Page, username = 'linlan') {
   await page.fill('#username', username);
   await page.fill('#password', PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
-  await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 });
+  // 店主落在门店（主导航），后勤岗位（对账付款）落在 ERP（ERP 导航）
+  await expect(page.getByRole('navigation', { name: /^(主导航|ERP 导航)$/ })).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe('8.0.21 批量付款', () => {
@@ -29,18 +31,48 @@ test.describe('8.0.21 批量付款', () => {
     await page.goto('/inventory/master');
     await page.getByRole('radiogroup', { name: '档案' }).getByRole('radio', { name: '供应商' }).click();
     await page.getByRole('button').filter({ hasText: `批量付款验收${stamp}` }).click();
+    const bank = page.getByTestId('supplier-bank');
+    await expect(bank.getByTestId('supplier-bank-status')).toHaveText('没有收款账户');
+    await bank.getByTestId('supplier-bank-edit').click();
     await page.getByTestId('s-bank-payee').fill(`批量付款验收${stamp}`);
     await page.getByTestId('s-bank-name').fill('建设银行验收支行');
     await page.getByTestId('s-bank-account').fill('6227000011112222');
-    await page.getByRole('button', { name: '保存' }).click();
-    await expect(page.getByText('供应商已保存')).toBeVisible();
-    const list = (await (await page.request.get('/api/inventory/suppliers?all=1')).json()) as { code: string; bankAccountTail: string }[];
-    expect(list.find((s) => s.code === code)!.bankAccountTail).toBe('2222');
+    await page.getByTestId('supplier-bank-save').click();
+    await expect(page.getByText('收款账户已保存').first()).toBeVisible();
+    // 店主改的直接算复核过
+    await expect(bank.getByTestId('supplier-bank-status')).toHaveText('已复核');
+    await expect(bank.getByText('尾号 2222')).toBeVisible();
+    const list = (await (await page.request.get('/api/inventory/suppliers?all=1')).json()) as { code: string; bankAccountTail: string; bankStatus: string }[];
+    expect(list.find((s) => s.code === code)).toMatchObject({ bankAccountTail: '2222', bankStatus: 'verified' });
     expect(JSON.stringify(list)).not.toContain('6227000011112222');
-    // 再打开：账号框空着，提示尾号
-    await page.getByRole('button').filter({ hasText: `批量付款验收${stamp}` }).click();
+    // 再打开修改：账号框空着，提示尾号
+    await bank.getByTestId('supplier-bank-edit').click();
     await expect(page.getByTestId('s-bank-account')).toHaveValue('');
     await expect(page.getByText('现在是尾号 2222')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+
+    // 对账付款（不是店主）改的：待复核，改的本人看不到「复核」；店主复核
+    const sid = (list as unknown as { id: number; code: string }[]).find((s) => s.code === code)!.id;
+    const payer = await page.context().browser()!.newContext({ baseURL: test.info().project.use.baseURL });
+    const payerPage = await payer.newPage();
+    await login(payerPage, 'qianfen');
+    const changed = await payerPage.request.put(`/api/inventory/suppliers/${sid}/bank`, { data: { bankPayee: `批量付款验收${stamp}`, bankName: '建设银行验收支行', bankAccount: '6227000033334444' } });
+    expect(changed.ok(), await changed.text()).toBe(true);
+    await payerPage.goto('/inventory/master');
+    await payerPage.getByRole('radiogroup', { name: '档案' }).getByRole('radio', { name: '供应商' }).click();
+    await payerPage.getByRole('button').filter({ hasText: `批量付款验收${stamp}` }).click();
+    await expect(payerPage.getByTestId('supplier-bank-status')).toHaveText('待复核');
+    await expect(payerPage.getByTestId('supplier-bank-verify')).toHaveCount(0);
+    await expect(payerPage.getByText('改的人自己不能复核')).toBeVisible();
+    await payer.close();
+    await page.reload();
+    await page.getByRole('radiogroup', { name: '档案' }).getByRole('radio', { name: '供应商' }).click();
+    await page.getByRole('button').filter({ hasText: `批量付款验收${stamp}` }).click();
+    await expect(bank.getByTestId('supplier-bank-status')).toHaveText('待复核');
+    await bank.getByTestId('supplier-bank-verify').click();
+    await expect(page.getByText('收款账户已复核').first()).toBeVisible();
+    await expect(bank.getByTestId('supplier-bank-status')).toHaveText('已复核');
     await page.keyboard.press('Escape');
 
     await page.goto('/erp/payments?tab=batches');

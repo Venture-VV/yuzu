@@ -29,6 +29,7 @@ interface Candidate {
   bankName: string;
   bankAccountTail: string;
   bankOk: boolean;
+  bankUnverified: boolean;
 }
 interface Item {
   id: number;
@@ -169,7 +170,7 @@ export function BatchesTab() {
                     <span className="num w-[9em] shrink-0 font-semibold">{c.requestNo}</span>
                     <span className="min-w-0 flex-1 truncate">
                       {c.supplierName ?? c.payee}
-                      <span className="ml-2 text-[12px] text-ink-3">{c.bankOk ? `${c.bankPayee} · ${c.bankName} · 尾号 ${c.bankAccountTail}` : '收款账户没登记全（到供应商档案里补户名、开户行、账号）'}</span>
+                      <span className="ml-2 text-[12px] text-ink-3">{c.bankOk ? `${c.bankPayee} · ${c.bankName} · 尾号 ${c.bankAccountTail}` : c.bankUnverified ? `收款账户（尾号 ${c.bankAccountTail}）改过以后还没复核：到供应商档案的「收款账户」里由另一位应付或店主复核` : '收款账户没登记全：到供应商档案的「收款账户」里补户名、开户行、账号'}</span>
                     </span>
                     <span className="num text-ink-3">{c.expectedDate}</span>
                     <span className="num w-[7em] text-right font-bold">{yuan(c.leftCents)}</span>

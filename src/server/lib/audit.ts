@@ -262,7 +262,9 @@ export type AuditAction =
   // 8.0.21 OTA 渠道订单（同上第 4 节）：渠道的新建与修改、导入、订单建 / 改 / 取消预约
   | 'ota_channel'
   | 'ota_import'
-  | 'ota_order';
+  | 'ota_order'
+  // 8.0.21 供应商收款账户（Codex 安全审查后补，迁移 151）：应付岗改账户、另一人复核
+  | 'supplier_bank';
 
 export interface AuditEntry {
   staffId: number | null;

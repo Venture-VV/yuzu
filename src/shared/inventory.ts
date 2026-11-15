@@ -264,6 +264,13 @@ export interface Supplier {
   bankPayee: string;
   bankName: string;
   bankAccountTail: string;
+  /** 收款账户的复核（8.0.21 安全审查后补，CW28）：没有账户 / 待复核 / 已复核；只有已复核的能进批量付款 */
+  bankStatus: 'none' | 'pending' | 'verified';
+  bankChangedBy: number | null;
+  bankChangedByName: string | null;
+  bankChangedAt: string | null;
+  bankVerifiedByName: string | null;
+  bankVerifiedAt: string | null;
   active: boolean;
   isSynthetic: boolean;
 }
