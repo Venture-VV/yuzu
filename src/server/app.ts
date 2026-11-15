@@ -41,6 +41,7 @@ import { registerSlowRoutes } from './modules/inventory/slow';
 import { registerReconLinkRoutes } from './modules/inventory/recon-links';
 import { registerSupplierPortalRoutes } from './modules/inventory/supplier-portal';
 import { registerPayTerminalRoutes } from './modules/pay-terminal';
+import { registerPlatformVerifyRoutes } from './modules/platform-verify';
 import { registerReceivableRoutes } from './modules/receivables';
 import { registerAssetRoutes } from './modules/assets';
 import { registerExpiryRoutes } from './modules/inventory/expiry';
@@ -270,6 +271,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerReconLinkRoutes(app, deps);
   registerSupplierPortalRoutes(app, deps);
   registerPayTerminalRoutes(app, deps);
+  registerPlatformVerifyRoutes(app, deps);
   registerReceivableRoutes(app, deps);
   registerAssetRoutes(app, deps);
   registerExpiryRoutes(app, deps);

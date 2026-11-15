@@ -62,3 +62,66 @@ export interface PayTerminalStatus {
 
 /** 付款码：微信 18 位（10–15 开头）、支付宝 16–24 位（25–30 开头）；这里只核对是数字、长度合理 */
 export const AUTH_CODE_PATTERN = /^\d{16,24}$/;
+
+// ── 平台验券（CW-H） ──
+export type VoucherPlatform = 'meituan' | 'douyin';
+export const VOUCHER_PLATFORMS: readonly VoucherPlatform[] = ['meituan', 'douyin'];
+export type VerificationStatus = 'verifying' | 'verified' | 'failed' | 'cancelled' | 'recorded';
+export const VERIFICATION_STATUS_LABELS: Record<VerificationStatus, string> = { verifying: '核销中', verified: '已核销', failed: '没核销成', cancelled: '已撤销核销', recorded: '已转补录' };
+
+export interface VoucherPreview {
+  platform: VoucherPlatform;
+  code: string;
+  dealName: string;
+  faceCents: number;
+  settleCents: number;
+  quantity: number;
+}
+
+export interface VerificationView {
+  id: number;
+  platform: VoucherPlatform;
+  code: string;
+  dealName: string;
+  faceCents: number;
+  settleCents: number;
+  quantity: number;
+  status: VerificationStatus;
+  verifyNo: string | null;
+  failReason: string | null;
+  /** 用在哪张结账单；没用为空 */
+  checkout: { id: number; checkoutNo: string } | null;
+  redemptionNo: string | null;
+  staffName: string;
+  createdAt: string;
+  verifiedAt: string | null;
+}
+
+export type ReconIssueKind = 'platform_only' | 'system_only' | 'amount_diff';
+export const RECON_ISSUE_LABELS: Record<ReconIssueKind, string> = { platform_only: '平台有、系统没有', system_only: '系统有、平台没有', amount_diff: '金额不同' };
+export interface PlatformReconIssue {
+  id: number;
+  platform: VoucherPlatform;
+  businessDate: string;
+  kind: ReconIssueKind;
+  code: string;
+  dealName: string;
+  platformCents: number | null;
+  systemCents: number | null;
+  systemRef: string;
+  resolvedByName: string | null;
+  resolvedAt: string | null;
+  resolveNote: string | null;
+}
+export interface PlatformReconRun {
+  id: number;
+  platform: VoucherPlatform;
+  businessDate: string;
+  ok: boolean;
+  error: string | null;
+  platformLines: number;
+  systemLines: number;
+  issues: number;
+  staffName: string | null;
+  createdAt: string;
+}

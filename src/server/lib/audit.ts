@@ -256,7 +256,9 @@ export type AuditAction =
   | 'supplier_link'
   | 'supplier_reply'
   // 8.0.21 扫码收款（docs/INTEGRATIONS_V8021.md 第 2 节）：开始收款、原路退回、重试、线下已退
-  | 'pay_terminal';
+  | 'pay_terminal'
+  // 8.0.21 平台验券（同上第 3 节）：验券、撤销核销、转补录
+  | 'platform_verify';
 
 export interface AuditEntry {
   staffId: number | null;

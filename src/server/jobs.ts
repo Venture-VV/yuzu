@@ -21,6 +21,7 @@ import { runCanteenReminders } from './modules/canteen/push';
 import { MEAL_LABELS } from '@shared/canteen';
 import { WECOM_MAX_ATTEMPTS } from '@shared/wecom';
 import { sweepPaying } from './modules/pay-terminal';
+import { runVoucherReconcile } from './modules/platform-verify';
 
 export interface JobLog {
   info: (msg: string) => void;
@@ -157,5 +158,12 @@ export async function runMinuteJobs(
     if (n > 0) log.info(`扫码收款：${n} 笔支付中的出了结果`);
   } catch (error) {
     log.error('扫码收款的查询失败，下一分钟重试', error);
+  }
+  // 平台验券（8.0.21）：每天过了设定的时间（默认 06:10），按平台拉前一个营业日的核销明细对账（没配置时什么都不做）
+  try {
+    const n = await runVoucherReconcile({ sql, config }, now);
+    if (n > 0) log.info(`平台验券对账：对了 ${n} 个平台`);
+  } catch (error) {
+    log.error('平台验券对账失败，下一分钟重试', error);
   }
 }

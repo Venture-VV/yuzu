@@ -75,6 +75,7 @@ import { chargeOnAccount, voidChargesOfCheckout } from '../receivables';
 import { MAX_COUNT_CARD_USES, MAX_COUNT_CARDS_PER_CHECKOUT } from '@shared/count-cards';
 import { recordSaleUsage, reverseSaleUsage } from '../stock-usage';
 import { lockPayTxForUse, markPayTxUsed, releasePayTxs } from '../pay-terminal';
+import { assertNotVerified, lockVerificationForUse, markVerificationUsed, releaseVerifications } from '../platform-verify';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -102,6 +103,8 @@ const CouponPayment = z.object({
     .pipe(z.string().regex(COUPON_CODE_PATTERN, '请填写完整券码（6–64 位数字或字母）')),
   dealName: z.string().trim().max(48, '团购项目最多 48 字').default(''),
   amount: positiveCents('抵扣金额'),
+  /** 平台验券（8.0.21）：验过的那一次；入账时核对平台、券码、金额 = 面值。不带时不进入请求摘要 */
+  verificationId: z.number().int().positive().optional(),
 });
 /** 优惠 / 免单：值班经理及以上当场授权（授权编号）；原因随授权填写 */
 const DiscountPayment = z.object({
@@ -453,13 +456,19 @@ export async function recordCheckoutPayments(
       SELECT c.checkout_no, g.registered_at FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
       WHERE g.platform = ${cp.platform} AND g.code = ${cp.code} AND g.status = 'active'`;
     if (used) throw couponUsed(cp.platform, cp.code, used.checkoutNo);
+    // 平台验券（8.0.21）：带了验券编号的在「平台 + 券码」之后锁验券一行核对；手输的不能是已经验过的券
+    const dealName = cp.verificationId ? (await lockVerificationForUse(tx, cp.verificationId, { platform: cp.platform, code: cp.code, amount: cp.amount })).dealName : cp.dealName;
+    if (!cp.verificationId) await assertNotVerified(tx, cp.platform, cp.code);
     const [g] = await tx<{ id: number }[]>`
-      INSERT INTO group_buy_coupons (platform, code, deal_name, amount, checkout_id, business_date, registered_by, registered_at)
-      VALUES (${cp.platform}, ${cp.code}, ${cp.dealName}, ${cp.amount}, ${a.checkoutId}, ${a.date}, ${a.ctx.actor.id}, ${a.at})
+      INSERT INTO group_buy_coupons (platform, code, deal_name, amount, checkout_id, business_date, registered_by, registered_at
+                                     ${cp.verificationId ? tx`, verification_id` : tx``})
+      VALUES (${cp.platform}, ${cp.code}, ${dealName}, ${cp.amount}, ${a.checkoutId}, ${a.date}, ${a.ctx.actor.id}, ${a.at}
+              ${cp.verificationId ? tx`, ${cp.verificationId}` : tx``})
       RETURNING id`;
+    if (cp.verificationId) await markVerificationUsed(tx, cp.verificationId, g!.id);
     await tx`
       INSERT INTO checkout_payments (checkout_id, method, amount, ref, coupon_id)
-      VALUES (${a.checkoutId}, 'coupon', ${cp.amount}, ${cp.dealName}, ${g!.id})`;
+      VALUES (${a.checkoutId}, 'coupon', ${cp.amount}, ${dealName}, ${g!.id})`;
   }
   // 券抵扣（v0.7.20）：在会员储值、赠金批次之后锁券一行，按此刻的明细核对抵扣；记下适用的明细（部门快照按它们分摊）
   for (const sc of a.payments.filter((p) => p.method === 'store_coupon')) {
@@ -839,6 +848,8 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     await tx`
       UPDATE group_buy_coupons SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${voidText}
       WHERE checkout_id = ${c.id} AND status = 'active'`;
+    // 平台验券（8.0.21）：团购券作废以后，验过的券回到「没用」（挂到重新结账，或撤销核销）
+    await releaseVerifications(tx, c.id);
     // 用掉的券退回（v0.7.20；在会员之后锁券）
     await returnCheckoutCoupons(tx, { checkoutId: c.id, reason: voidText, date, at, staffId: ctx.actor.id });
     // 用掉的次卡次数退回（v0.7.28；在券之后按卡的 id 升序锁卡）
