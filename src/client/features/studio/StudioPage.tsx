@@ -1,6 +1,6 @@
-// UI 工作台编辑器（8.1.1，docs/WORKBENCH_V811.md）：设计师在系统里直接改平板电子菜单的版面——所见即所得、改完自己发布（GZ3）。
+// UI 工作台编辑器（8.1.1 起，docs/WORKBENCH_V811.md）：设计师在系统里直接改版面（平板电子菜单、微信小程序……）——所见即所得、改完自己发布（GZ3）。
 //
-// 顶栏：回后台、屏（起始页 / 菜单页）、预览的语言与字号档、撤销重做、缩放、保存状态、检查、预览、版本、发布。
+// 顶栏：回后台、屏（起始页 / 菜单页……）、预览的语言与字号档（平板菜单）、撤销重做、缩放、保存状态、检查、预览、版本、发布。
 // 左栏：图层、插入、素材、主题；中间：画布（与平板同一个渲染器）；右栏：属性 / 检查。
 // 草稿每改一步自动存（带版本号，别处改过时拒绝、提示刷新）；撤销、重做在本机，最多 200 步。
 // 发布、回滚带操作编号，接进「结果待确认」（断网时查回、重提或作废）；发布前跑检查，红的拦下。
@@ -14,6 +14,7 @@ import { qrShape } from '@shared/qr-svg';
 import {
   checkStudioDoc,
   defaultStudioDoc,
+  isFlow,
   screenLabel,
   STUDIO_SURFACE_DEFS,
   STUDIO_SURFACES,
@@ -39,7 +40,25 @@ import { Button, Skeleton, Textarea } from '../../components/ui';
 import { StudioCanvas } from './Canvas';
 import { emenuEditorBlocks, flatPages } from './emenuBlocks';
 import { useDocHistory } from './history';
-import { duplicateNodes, findNode, geometryRules, insertNode, makeEllipse, makeFrame, makeImage, makeRect, makeText, moveLayer, newId, removeNodes, round1, screenOf, updateNodes } from './model';
+import {
+  duplicateNodes,
+  findNode,
+  geometryRules,
+  insertNode,
+  makeEllipse,
+  makeFrame,
+  makeImage,
+  makeRect,
+  makeText,
+  moveLayer,
+  newId,
+  removeNodes,
+  round1,
+  screenOf,
+  sizeForFlow,
+  updateNodes,
+} from './model';
+import { phoneEditorBlocks } from './phoneBlocks';
 import { AssetsPanel, ChecksPanel, InsertPanel, LayersPanel, PropsPanel, ThemePanel } from './panels';
 
 type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
@@ -89,7 +108,10 @@ export function StudioPage() {
   const canPublish = can('studio.publish');
 
   const stateQ = useQuery({ queryKey: ['studio', 'state', surface], queryFn: () => api.get<StudioState>(`/api/studio/${surface}`), refetchOnWindowFocus: false, staleTime: Infinity });
-  const menuQ = useQuery({ queryKey: ['studio', 'menu'], queryFn: () => api.get<EmenuMenu>('/api/studio/emenu/menu'), staleTime: 60_000 });
+  const isEmenu = surface === 'emenu';
+  const phone = def.kind === 'phone';
+  // 平板菜单的画布用真实的菜单画菜单页、顶栏；手机界面的功能块画示意，不用菜单
+  const menuQ = useQuery({ queryKey: ['studio', 'menu'], queryFn: () => api.get<EmenuMenu>('/api/studio/emenu/menu'), staleTime: 60_000, enabled: isEmenu });
   const assetsQ = useQuery({ queryKey: ['studio', 'assets'], queryFn: () => api.get<StudioAssetView[]>('/api/studio/assets') });
 
   const history = useDocHistory(defaultStudioDoc(surface));
@@ -178,7 +200,7 @@ export function StudioPage() {
   );
   const red = issues.filter((i) => i.level === 'error').length;
   const vars = useMemo(() => themeVars(doc), [doc]);
-  const blocks = useMemo(() => emenuEditorBlocks(menuQ.data ?? null, { lang, pageIndex }), [menuQ.data, lang, pageIndex]);
+  const blocks = useMemo(() => (isEmenu ? emenuEditorBlocks(menuQ.data ?? null, { lang, pageIndex }) : phoneEditorBlocks(def)), [isEmenu, def, menuQ.data, lang, pageIndex]);
   const flat = useMemo(() => flatPages(menuQ.data ?? null), [menuQ.data]);
 
   // ── 缩放：适应画布区域 ──
@@ -191,18 +213,30 @@ export function StudioPage() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [loaded]);
-  const fit = Math.max(0.2, Math.min((areaSize.w - 48) / def.size.w, (areaSize.h - 48) / def.size.h));
+  // 平板：整屏放得下；手机：按宽放（屏往下长，画布区域上下滚）
+  const fit = phone ? Math.max(0.5, Math.min(1.5, (areaSize.w - 48) / def.size.w)) : Math.max(0.2, Math.min((areaSize.w - 48) / def.size.w, (areaSize.h - 48) / def.size.h));
   const scale = zoom === 'fit' ? fit : zoom;
 
   // ── 操作 ──
+  /**
+   * 插入：选中了一个框时插到框里（功能块除外，它们只能放在屏上）；放进自动排列的（屏或框）时大小跟着排
+   * （文字、框宽撑满、高跟内容……），自由摆放的框里放在框的中间。
+   */
   const insert = useCallback(
     (node: StudioNode) => {
-      change((d) => insertNode(d, screen, node));
-      setSelection([node.id]);
+      const d0 = latest.current;
+      const sel = selection.length === 1 ? findNode(d0, screen, selection[0]!) : null;
+      const into = sel && sel.node.type === 'frame' && node.type !== 'block' ? sel.node : null;
+      const sc = screenOf(d0, screen);
+      const flow = into ? (into.layout && isFlow(into.layout) ? into.layout : null) : sc.layout && isFlow(sc.layout) ? sc.layout : null;
+      let n = sizeForFlow(node, flow, def);
+      if (into && !flow) n = { ...n, x: round1(Math.max(0, (into.w - n.w) / 2)), y: round1(Math.max(0, (into.h - n.h) / 2)) } as StudioNode;
+      change((d) => insertNode(d, screen, n, undefined, into?.id));
+      setSelection([n.id]);
       setLeft('layers');
       setRight('props');
     },
-    [change, screen],
+    [change, screen, selection, def],
   );
   const deleteSelection = useCallback(() => {
     const removable = selection.filter((id) => {
@@ -216,10 +250,19 @@ export function StudioPage() {
   }, [selection, screen, change, def.blocks, toast]);
   const nudge = useCallback(
     (dx: number, dy: number) => {
+      // 自动排列里的一块：方向键换先后（← ↑ 往前排，→ ↓ 往后排）
+      if (selection.length === 1) {
+        const f = findNode(latest.current, screen, selection[0]!);
+        if (f?.flow) {
+          if (dx < 0 || dy < 0) change((d) => moveLayer(d, screen, f.node.id, 'down'));
+          else if (dx > 0 || dy > 0) change((d) => moveLayer(d, screen, f.node.id, 'up'));
+          return;
+        }
+      }
       const patches: Record<string, Partial<StudioNode>> = {};
       for (const id of selection) {
         const f = findNode(latest.current, screen, id);
-        if (f && geometryRules(f.node, def).move) patches[id] = { x: round1(f.node.x + dx), y: round1(f.node.y + dy) };
+        if (f && geometryRules(f.node, def, f.flow).move) patches[id] = { x: round1(f.node.x + dx), y: round1(f.node.y + dy) };
       }
       if (Object.keys(patches).length) change((d) => updateNodes(d, screen, patches), `nudge.${selection.join(',')}`);
     },
@@ -278,15 +321,16 @@ export function StudioPage() {
       } else if (!mod && !e.altKey) {
         const cx = def.size.w / 2;
         const cy = def.size.h / 2;
-        if (k === 't') insert(makeText(cx - 160, cy - 20));
-        else if (k === 'r') insert(makeRect(cx - 100, cy - 60));
-        else if (k === 'o') insert(makeEllipse(cx - 60, cy - 60));
-        else if (k === 'f') insert(makeFrame(cx - 160, cy - 100));
+        const t = def.tokens;
+        if (k === 't') insert(makeText(cx - 160, cy - 20, undefined, t, phone ? 16 : 24));
+        else if (k === 'r') insert(makeRect(cx - 100, cy - 60, t));
+        else if (k === 'o') insert(makeEllipse(cx - 60, cy - 60, t));
+        else if (k === 'f') insert(makeFrame(cx - 160, cy - 100, t, phone ? 'column' : undefined));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dialog, history, save, selection, screen, def, deleteSelection, nudge, insert]);
+  }, [dialog, history, save, selection, screen, def, phone, deleteSelection, nudge, insert]);
 
   // 选中的不在这一屏了（撤销、删掉、换屏）：去掉
   useEffect(() => {
@@ -352,9 +396,11 @@ export function StudioPage() {
         <ToolButton title="看中文 / 英文的样子" onClick={() => setLang((l) => (l === 'zh' ? 'en' : 'zh'))} testId="studio-lang">
           {lang === 'zh' ? '中' : 'EN'}
         </ToolButton>
-        <ToolButton title="字与按钮：设计稿原样 / 放大（平板上按后台「电子菜单 → 设置」）" onClick={() => setBig((b) => !b)} active={big}>
-          {big ? '放大' : '原样'}
-        </ToolButton>
+        {isEmenu && (
+          <ToolButton title="字与按钮：设计稿原样 / 放大（平板上按后台「电子菜单 → 设置」）" onClick={() => setBig((b) => !b)} active={big}>
+            {big ? '放大' : '原样'}
+          </ToolButton>
+        )}
         <div className="mx-1 h-5 w-px bg-line" />
         <ToolButton title="撤销（⌘/Ctrl+Z）" onClick={history.undo} disabled={!history.canUndo} testId="studio-undo">
           <Undo2 className="size-4" />
@@ -386,7 +432,7 @@ export function StudioPage() {
           {red ? <TriangleAlert className="size-4 text-clay" /> : <CheckCircle2 className="size-4 text-pine" />}
           检查{issues.length ? `（${issues.length}）` : ''}
         </ToolButton>
-        <ToolButton title="像客人一样点一点；也可以在真平板上扫码看" onClick={() => setDialog('preview')} testId="studio-open-preview">
+        <ToolButton title={phone ? '在手机大小的页面上点一点' : '像客人一样点一点；也可以在真平板上扫码看'} onClick={() => setDialog('preview')} testId="studio-open-preview">
           <Eye className="size-4" /> 预览
         </ToolButton>
         <ToolButton title="已发布的各版，可以回到任何一版" onClick={() => setDialog('versions')} testId="studio-open-versions">
@@ -441,7 +487,7 @@ export function StudioPage() {
         </aside>
 
         {/* 画布 */}
-        <main ref={area} className="flex min-w-0 flex-1 items-center justify-center overflow-auto p-6" onPointerDown={(e) => e.target === e.currentTarget && setSelection([])}>
+        <main ref={area} className={cn('flex min-w-0 flex-1 justify-center overflow-auto p-6', phone ? 'items-start' : 'items-center')} onPointerDown={(e) => e.target === e.currentTarget && setSelection([])}>
           <StudioCanvas
             doc={doc}
             screen={screen}
@@ -506,7 +552,11 @@ export function StudioPage() {
           onDone={(v) => {
             setDialog(null);
             void qc.invalidateQueries({ queryKey: ['studio'] });
-            toast({ tone: 'success', title: `已发布第 ${v.version} 版`, body: '各台平板回到起始页（或空闲）时换成新样子；改坏了在「版本」里回到上一版。' });
+            toast({
+              tone: 'success',
+              title: `已发布第 ${v.version} 版`,
+              body: isEmenu ? '各台平板回到起始页（或空闲）时换成新样子；改坏了在「版本」里回到上一版。' : '客人下次打开时是新样子；改坏了在「版本」里回到上一版。',
+            });
           }}
           onShowChecks={() => {
             setDialog(null);
@@ -706,9 +756,11 @@ function PreviewDialog({ surface, doc, onClose }: { surface: StudioSurface; doc:
     // 打开时生成一次（之后改了再点「重新生成」）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const url = code ? `${window.location.origin}/emenu?studio=${code.code}` : '';
+  const phone = STUDIO_SURFACE_DEFS[surface].kind === 'phone';
+  // 平板菜单：点餐平板打开 /emenu?studio=<码>；手机界面：在手机大小的预览页上看（登录着工作台的账号）
+  const url = code ? (phone ? `${window.location.origin}/studio-preview/${surface}/${code.code}` : `${window.location.origin}/emenu?studio=${code.code}`) : '';
   return (
-    <Dialog open title="预览（现在的草稿）" description="像客人一样点一点：翻分类、加菜、开订单；预览里不能下单" onClose={onClose}>
+    <Dialog open title="预览（现在的草稿）" description={phone ? '在手机大小的页面上点一点：按钮、入口点了会写出「会打开哪一页」，不真的跳' : '像客人一样点一点：翻分类、加菜、开订单；预览里不能下单'} onClose={onClose}>
       <div className="space-y-3" data-testid="studio-preview">
         {!code ? (
           <Skeleton className="h-40" />
@@ -719,7 +771,13 @@ function PreviewDialog({ surface, doc, onClose }: { surface: StudioSurface; doc:
               <p>
                 预览码 <span className="font-mono text-[15px] font-bold tracking-wider text-ink" data-testid="studio-preview-code">{code.code}</span>，{new Date(code.expiresAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 前有效（30 分钟）。
               </p>
-              <p>在真平板上看：平板登录着「点餐平板」账号，扫左边的码，或打开 <span className="break-all font-mono text-[11.5px]">{url}</span></p>
+              {phone ? (
+                <p>
+                  在手机上看：手机浏览器登录着工作台的账号，扫左边的码，或打开 <span className="break-all font-mono text-[11.5px]">{url}</span>。小程序里的样子以小程序线照这份版面画的为准。
+                </p>
+              ) : (
+                <p>在真平板上看：平板登录着「点餐平板」账号，扫左边的码，或打开 <span className="break-all font-mono text-[11.5px]">{url}</span></p>
+              )}
               <div className="flex gap-2">
                 <Button size="sm" variant="primary" onClick={() => window.open(url, '_blank', 'noopener')} data-testid="studio-preview-open">
                   在这台电脑上打开

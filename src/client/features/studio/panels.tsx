@@ -1,15 +1,18 @@
-// UI 工作台编辑器的左右两栏（8.1.1，docs/WORKBENCH_V811.md 第 1、2 节）：图层、插入、素材、主题（左），属性、检查（右）。
+// UI 工作台编辑器的左右两栏（8.1.1 起，docs/WORKBENCH_V811.md 第 1、2 节）：图层、插入、素材、主题（左），属性、检查（右）。
 // 傻瓜：每一项都写中文、给默认值；颜色可以点主题色，也可以填 #RRGGBB；功能块的属性按界面登记自动出表单。
+// 8.1.2：自动排列（横排、竖排、换行、间距、内边距、对齐）、尺寸规则（固定 / 撑满 / 跟内容）、按钮、数据字段、点了做什么。
 
 import { useRef, useState, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, Circle, Eye, EyeOff, Frame, ImagePlus, Lock, Square, Trash2, Type, Unlock } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, Circle, Columns3, Database, Eye, EyeOff, Frame, ImagePlus, Lock, LogOut, MousePointerClick, Rows3, Square, Trash2, Type, Unlock } from 'lucide-react';
 import {
   defaultStudioDoc,
   SHADOWS,
+  type StudioAction,
   type StudioAssetView,
   type StudioBlockDef,
   type StudioDoc,
   type StudioIssue,
+  type StudioLayout,
   type StudioNode,
   type StudioPropDef,
   type StudioSurfaceDef,
@@ -17,7 +20,7 @@ import {
 import { api, errorMessage } from '../../lib/api';
 import { useToast } from '../../components/Toast';
 import { cn } from '../../lib/utils';
-import { canAddNode, findNode, geometryRules, makeBlock, makeEllipse, makeFrame, makeImage, makeRect, makeText, nodeLabel, round1, screenOf } from './model';
+import { canAddNode, findNode, geometryRules, makeBlock, makeButton, makeEllipse, makeField, makeFrame, makeImage, makeRect, makeText, moveOutOfFrame, nodeLabel, round1, screenOf } from './model';
 
 const SHADOW_LABELS: Record<(typeof SHADOWS)[number], string> = { none: '无', sm: '轻', md: '中', lg: '重' };
 
@@ -172,7 +175,7 @@ export function LayersPanel({
           onClick={(e) => onSelect(e.shiftKey ? (on ? selection.filter((x) => x !== n.id) : [...selection, n.id]) : [n.id])}
           data-testid={`studio-layer-${n.id}`}
         >
-          <span className="w-4 shrink-0 text-center text-[10px] text-ink-3">{n.type === 'text' ? 'T' : n.type === 'image' ? '图' : n.type === 'block' ? '块' : n.type === 'frame' ? '框' : n.type === 'ellipse' ? '○' : '□'}</span>
+          <span className="w-4 shrink-0 text-center text-[10px] text-ink-3">{{ text: 'T', image: '图', block: '块', frame: n.type === 'frame' && n.layout && n.layout.mode !== 'free' ? (n.layout.mode === 'row' ? '⇥' : '⇩') : '框', ellipse: '○', rect: '□', button: '钮', field: '数' }[n.type]}</span>
           <span className={cn('min-w-0 flex-1 truncate', n.hidden && 'text-ink-4 line-through')}>{nodeLabel(n, surface)}</span>
           {required && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[10px] text-yuzu-deep">必需</span>}
           <button
@@ -226,11 +229,16 @@ export function InsertPanel({ doc, screen, surface, onInsert }: { doc: StudioDoc
   const cy = surface.size.h / 2;
   const nodes = screenOf(doc, screen).nodes;
   const full = !canAddNode(doc, screen);
+  const t = surface.tokens;
+  const phone = surface.kind === 'phone';
   const basics: { label: string; icon: ReactNode; make: () => StudioNode; key: string }[] = [
-    { key: 'text', label: '文字', icon: <Type className="size-4" />, make: () => makeText(cx - 160, cy - 20) },
-    { key: 'rect', label: '矩形', icon: <Square className="size-4" />, make: () => makeRect(cx - 100, cy - 60) },
-    { key: 'ellipse', label: '椭圆', icon: <Circle className="size-4" />, make: () => makeEllipse(cx - 60, cy - 60) },
-    { key: 'frame', label: '框（卡片）', icon: <Frame className="size-4" />, make: () => makeFrame(cx - 160, cy - 100) },
+    { key: 'text', label: '文字', icon: <Type className="size-4" />, make: () => makeText(cx - 160, cy - 20, undefined, t, phone ? 16 : 24) },
+    { key: 'rect', label: '矩形', icon: <Square className="size-4" />, make: () => makeRect(cx - 100, cy - 60, t) },
+    { key: 'ellipse', label: '椭圆', icon: <Circle className="size-4" />, make: () => makeEllipse(cx - 60, cy - 60, t) },
+    { key: 'frame', label: '框（卡片）', icon: <Frame className="size-4" />, make: () => makeFrame(cx - 160, cy - 100, t) },
+    { key: 'column', label: '竖排框', icon: <Rows3 className="size-4" />, make: () => makeFrame(cx - 160, cy - 100, t, 'column') },
+    { key: 'row', label: '横排框', icon: <Columns3 className="size-4" />, make: () => makeFrame(cx - 160, cy - 100, t, 'row') },
+    { key: 'button', label: '按钮', icon: <MousePointerClick className="size-4" />, make: () => makeButton(cx - 80, cy - 22, t) },
   ];
   const defaults = defaultStudioDoc(surface.key);
   const blocks = Object.values(surface.blocks).filter((b) => b.screens.includes(screen));
@@ -263,7 +271,29 @@ export function InsertPanel({ doc, screen, surface, onInsert }: { doc: StudioDoc
           ))}
         </div>
         {full && <p className="mt-1 text-[11.5px] text-clay">这一屏的图层到上限了，删掉一些再加</p>}
+        <p className="mt-1.5 text-[11.5px] leading-snug text-ink-3">先选中一个框再点，就插在这个框里；框可以「竖排 / 横排」自动排好里面的东西。</p>
       </div>
+      {surface.fields.length > 0 && (
+        <div>
+          <PanelTitle>数据（显示真实的门店、会员信息）</PanelTitle>
+          <div className="space-y-1">
+            {surface.fields.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                disabled={full}
+                className="flex w-full items-center gap-2 rounded-md border border-line bg-card px-2.5 py-1.5 text-left text-[12.5px] hover:border-pine disabled:opacity-45"
+                onClick={() => onInsert(makeField(cx - 120, cy - 12, f, t))}
+                data-testid={`studio-insert-field-${f.key}`}
+              >
+                <Database className="size-3.5 shrink-0 text-ink-3" />
+                <span className="min-w-0 flex-1 truncate">{f.label}</span>
+                <span className="max-w-24 truncate text-[11px] text-ink-3">{f.sample.zh}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div>
         <PanelTitle>功能块（带逻辑，只改位置与样子）</PanelTitle>
         <div className="space-y-1.5">
@@ -430,6 +460,208 @@ function BlockPropField({ def, value, onChange, surface, doc }: { def: StudioPro
   }
 }
 
+// ── 8.1.2 的几块：自动排列、尺寸规则、点了做什么、字的样子 ──
+
+const seg = (on: boolean) => cn('h-7 flex-1 rounded border text-[12px]', on ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2');
+
+const DEFAULT_LAYOUT: StudioLayout = { mode: 'column', wrap: false, gap: 8, padding: [12, 12, 12, 12], align: 'stretch', justify: 'start' };
+
+/** 自动排列（框、手机的屏）：自由摆放 / 竖排 / 横排，换行，间距，内边距，对齐 */
+function LayoutEditor({ value, onChange, allowFree = true, testId }: { value: StudioLayout | undefined; onChange: (v: StudioLayout | undefined) => void; allowFree?: boolean; testId?: string }) {
+  const v = value ?? { ...DEFAULT_LAYOUT, mode: 'free' as const };
+  const set = (patch: Partial<StudioLayout>) => onChange({ ...v, ...patch });
+  const flow = v.mode !== 'free';
+  return (
+    <div className="space-y-1.5" data-testid={testId}>
+      <Row label="排列">
+        {allowFree && (
+          <button type="button" className={seg(!flow)} onClick={() => onChange(undefined)}>
+            自由摆放
+          </button>
+        )}
+        <button type="button" className={seg(v.mode === 'column')} onClick={() => set({ ...(flow ? {} : DEFAULT_LAYOUT), mode: 'column' })} data-testid={testId && `${testId}-column`}>
+          竖排
+        </button>
+        <button type="button" className={seg(v.mode === 'row')} onClick={() => set({ ...(flow ? {} : DEFAULT_LAYOUT), mode: 'row', align: v.align === 'stretch' && !flow ? 'center' : v.align })} data-testid={testId && `${testId}-row`}>
+          横排
+        </button>
+      </Row>
+      {flow && (
+        <>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Row label="间距" narrow>
+              <NumberInput value={v.gap} min={0} max={400} onChange={(x) => set({ gap: x })} testId={testId && `${testId}-gap`} />
+            </Row>
+            {v.mode === 'row' && (
+              <label className="flex items-center gap-1 text-[12px]">
+                <input type="checkbox" checked={v.wrap} onChange={(e) => set({ wrap: e.target.checked })} /> 放不下换行
+              </label>
+            )}
+          </div>
+          <div className="grid grid-cols-4 gap-1">
+            {(['上', '右', '下', '左'] as const).map((label, i) => (
+              <label key={label} className="flex flex-col gap-0.5 text-[11px] text-ink-3">
+                内边距 {label}
+                <NumberInput
+                  value={v.padding[i]!}
+                  min={0}
+                  max={400}
+                  onChange={(x) => {
+                    const p = [...v.padding] as StudioLayout['padding'];
+                    p[i] = x;
+                    set({ padding: p });
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+          <Row label={v.mode === 'row' ? '上下对齐' : '左右对齐'}>
+            {(['start', 'center', 'end', 'stretch'] as const).map((a) => (
+              <button key={a} type="button" className={seg(v.align === a)} onClick={() => set({ align: a })}>
+                {{ start: v.mode === 'row' ? '上' : '左', center: '中', end: v.mode === 'row' ? '下' : '右', stretch: '撑满' }[a]}
+              </button>
+            ))}
+          </Row>
+          <Row label={v.mode === 'row' ? '左右分布' : '上下分布'}>
+            {(['start', 'center', 'end', 'between'] as const).map((a) => (
+              <button key={a} type="button" className={seg(v.justify === a)} onClick={() => set({ justify: a })}>
+                {{ start: v.mode === 'row' ? '靠左' : '靠上', center: '居中', end: v.mode === 'row' ? '靠右' : '靠下', between: '两头' }[a]}
+              </button>
+            ))}
+          </Row>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 自动排列里一块的宽、高：固定 / 撑满 / 跟内容 */
+function SizingRows({ node, onChange }: { node: StudioNode; onChange: (patch: Partial<StudioNode>) => void }) {
+  const sz = node.sizing ?? { w: 'fixed' as const, h: 'fixed' as const };
+  const pick = (axis: 'w' | 'h', mode: 'fixed' | 'fill' | 'hug') => onChange({ sizing: { ...sz, [axis]: mode } });
+  return (
+    <>
+      {(['w', 'h'] as const).map((axis) => (
+        <div key={axis} className="space-y-1">
+          <Row label={axis === 'w' ? '宽' : '高'} narrow>
+            {(['fixed', 'fill', 'hug'] as const).map((m) => (
+              <button key={m} type="button" className={seg(sz[axis] === m)} onClick={() => pick(axis, m)} data-testid={`studio-sizing-${axis}-${m}`}>
+                {{ fixed: '固定', fill: '撑满', hug: '跟内容' }[m]}
+              </button>
+            ))}
+          </Row>
+          {sz[axis] === 'fixed' && (
+            <Row label="" narrow>
+              <NumberInput value={axis === 'w' ? node.w : node.h} min={4} onChange={(v) => onChange(axis === 'w' ? { w: v } : { h: v })} testId={`studio-prop-${axis}`} />
+            </Row>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** 点了做什么：界面登记的动作（打开哪一页、拨打门店电话……） */
+function ActionEditor({ value, surface, onChange }: { value: StudioAction | undefined; surface: StudioSurfaceDef; onChange: (v: StudioAction | undefined) => void }) {
+  if (!surface.actions.length) return null;
+  const def = value ? surface.actions.find((a) => a.key === value.action) : undefined;
+  return (
+    <div className="space-y-1.5" data-testid="studio-action">
+      <PanelTitle>点了做什么</PanelTitle>
+      <Row label="动作">
+        <select
+          className={inputCls}
+          value={value?.action ?? ''}
+          onChange={(e) => {
+            const a = surface.actions.find((x) => x.key === e.target.value);
+            onChange(a ? { action: a.key, arg: a.args?.[0]?.value ?? '' } : undefined);
+          }}
+          data-testid="studio-action-kind"
+        >
+          <option value="">什么都不做（只是样子）</option>
+          {surface.actions.map((a) => (
+            <option key={a.key} value={a.key}>
+              {a.label}
+            </option>
+          ))}
+        </select>
+      </Row>
+      {value && def?.args && (
+        <Row label="打开">
+          <select className={inputCls} value={value.arg} onChange={(e) => onChange({ ...value, arg: e.target.value })} data-testid="studio-action-arg">
+            {def.args.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </Row>
+      )}
+    </div>
+  );
+}
+
+type TextLike = Extract<StudioNode, { type: 'text' | 'button' | 'field' }>;
+
+/** 字的样子：字体、字号、粗细、行高、字距、对齐、斜体下划线、颜色（文字、按钮、数据字段共用） */
+function TextStyleRows({ n, set, surface, doc }: { n: TextLike; set: (patch: Partial<StudioNode>, key: string) => void; surface: StudioSurfaceDef; doc: StudioDoc }) {
+  return (
+    <>
+      <Row label="字体">
+        <select className={inputCls} value={n.font} onChange={(e) => set({ font: e.target.value as 'zh' | 'en' }, 'font')}>
+          <option value="zh">中文字体（主题）</option>
+          <option value="en">英文字体（主题）</option>
+        </select>
+      </Row>
+      <div className="grid grid-cols-2 gap-1.5">
+        <Row label="字号" narrow>
+          <NumberInput value={n.size} min={4} max={400} onChange={(v) => set({ size: v }, 'size')} testId="studio-prop-size" />
+        </Row>
+        <Row label="粗细" narrow>
+          <select className={inputCls} value={n.weight} onChange={(e) => set({ weight: Number(e.target.value) as 400 }, 'weight')}>
+            {[300, 400, 500, 600, 700, 900].map((w) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row label="行高" narrow>
+          <NumberInput value={n.lineHeight} min={0.5} max={4} step={0.1} onChange={(v) => set({ lineHeight: v }, 'lh')} />
+        </Row>
+        <Row label="字距" narrow>
+          <NumberInput value={n.letterSpacing} min={-0.5} max={2} step={0.01} onChange={(v) => set({ letterSpacing: v }, 'ls')} />
+        </Row>
+      </div>
+      <Row label="对齐">
+        {(['left', 'center', 'right'] as const).map((a) => (
+          <button key={a} type="button" className={seg(n.align === a)} onClick={() => set({ align: a }, 'align')}>
+            {{ left: '左', center: '中', right: '右' }[a]}
+          </button>
+        ))}
+      </Row>
+      <Row label="竖直">
+        {(['top', 'middle', 'bottom'] as const).map((a) => (
+          <button key={a} type="button" className={seg(n.valign === a)} onClick={() => set({ valign: a }, 'valign')}>
+            {{ top: '上', middle: '中', bottom: '下' }[a]}
+          </button>
+        ))}
+      </Row>
+      <Row label="样式">
+        <label className="flex items-center gap-1 text-[12px]">
+          <input type="checkbox" checked={n.italic} onChange={(e) => set({ italic: e.target.checked }, 'italic')} /> 斜体
+        </label>
+        <label className="flex items-center gap-1 text-[12px]">
+          <input type="checkbox" checked={n.underline} onChange={(e) => set({ underline: e.target.checked }, 'underline')} /> 下划线
+        </label>
+      </Row>
+      <Row label="颜色">
+        <ColorField value={n.color} onChange={(v) => set({ color: v ?? surface.tokens.text }, 'color')} surface={surface} doc={doc} testId="studio-prop-color" />
+      </Row>
+    </>
+  );
+}
+
 export function PropsPanel({
   doc,
   screen,
@@ -459,7 +691,29 @@ export function PropsPanel({
         <Row label="底色">
           <ColorField value={s.background} onChange={(v) => onChange((d) => ({ ...d, screens: { ...d.screens, [screen]: { ...screenOf(d, screen), background: v } } }), 'screen.bg')} surface={surface} doc={doc} allowNone />
         </Row>
-        <p className="text-[11.5px] leading-snug text-ink-3">点画布上的一块选中它；按住 Shift 点可以多选。方向键挪 1 像素（Shift 10 像素），Delete 删除，⌘/Ctrl+Z 撤销，⌘/Ctrl+D 复制一份。</p>
+        {surface.kind === 'phone' && (
+          <>
+            <Row label="屏高">
+              <NumberInput value={s.height ?? surface.size.h} min={100} max={20000} onChange={(v) => onChange((d) => ({ ...d, screens: { ...d.screens, [screen]: { ...screenOf(d, screen), height: v } } }), 'screen.h')} testId="studio-screen-height" />
+            </Row>
+            <p className="text-[11.5px] leading-snug text-ink-3">手机往下滚：自动排列时内容多了会往下长，屏高是最少这么高。</p>
+            <PanelTitle>整屏的排列</PanelTitle>
+            <LayoutEditor
+              value={s.layout}
+              onChange={(v) =>
+                onChange((d) => {
+                  const cur = screenOf(d, screen);
+                  const next = { ...cur };
+                  if (v) next.layout = v;
+                  else delete next.layout;
+                  return { ...d, screens: { ...d.screens, [screen]: next } };
+                }, 'screen.layout')
+              }
+              testId="studio-screen-layout"
+            />
+          </>
+        )}
+        <p className="text-[11.5px] leading-snug text-ink-3">点画布上的一块选中它；按住 Shift 点可以多选。方向键挪 1 像素（Shift 10 像素；在自动排列里是往前、往后排），Delete 删除，⌘/Ctrl+Z 撤销，⌘/Ctrl+D 复制一份。</p>
       </div>
     );
   }
@@ -477,7 +731,7 @@ export function PropsPanel({
   const f = findNode(doc, screen, selection[0]!);
   if (!f) return null;
   const n = f.node;
-  const rules = geometryRules(n, surface);
+  const rules = geometryRules(n, surface, f.flow);
   const block = n.type === 'block' ? surface.blocks[n.block] : undefined;
   const set = (patch: Partial<StudioNode>, key: string) =>
     onChange((d) => {
@@ -490,12 +744,23 @@ export function PropsPanel({
   return (
     <div className="space-y-4" data-testid="studio-props">
       <div>
-        <PanelTitle aside={<span className="text-[11px] text-ink-3">{block ? '功能块' : { text: '文字', rect: '矩形', ellipse: '椭圆', frame: '框', image: '图片' }[n.type as 'text']}</span>}>{nodeLabel(n, surface)}</PanelTitle>
+        <PanelTitle aside={<span className="text-[11px] text-ink-3">{block ? '功能块' : { text: '文字', rect: '矩形', ellipse: '椭圆', frame: '框', image: '图片', button: '按钮', field: '数据字段' }[n.type as 'text']}</span>}>{nodeLabel(n, surface)}</PanelTitle>
         {block && <p className="mb-2 text-[11.5px] leading-snug text-ink-3">{block.hint}</p>}
         <Row label="名字">
           <input className={inputCls} value={n.name} maxLength={40} placeholder="给这一块起个名字" onChange={(e) => set({ name: e.target.value }, 'name')} />
         </Row>
       </div>
+      {f.flow ? (
+        <div className="space-y-1.5">
+          <PanelTitle>大小（在自动排列里）</PanelTitle>
+          <p className="text-[11px] leading-snug text-ink-3">位置按先后排：方向键或右边「前后」换位置。</p>
+          <SizingRows node={n} onChange={(patch) => set(patch, 'sizing')} />
+          <Row label="不透明">
+            <input type="range" className="min-w-0 flex-1 accent-[var(--color-pine)]" min={0} max={1} step={0.05} value={n.opacity} onChange={(e) => set({ opacity: Number(e.target.value) }, 'opacity')} />
+            <span className="w-9 shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">{Math.round(n.opacity * 100)}%</span>
+          </Row>
+        </div>
+      ) : (
       <div className="space-y-1.5">
         <PanelTitle>位置与大小</PanelTitle>
         <div className="grid grid-cols-2 gap-1.5">
@@ -523,70 +788,57 @@ export function PropsPanel({
           <span className="w-9 shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">{Math.round(n.opacity * 100)}%</span>
         </Row>
       </div>
+      )}
 
       {n.type === 'text' && (
         <div className="space-y-1.5">
           <PanelTitle>文字</PanelTitle>
           <textarea ref={textRef} className={cn(inputCls, 'h-20 py-1.5')} value={n.text.zh} maxLength={2000} placeholder="中文" onChange={(e) => set({ text: { ...n.text, zh: e.target.value } }, 'zh')} data-testid="studio-text-zh" />
           <textarea className={cn(inputCls, 'h-16 py-1.5')} value={n.text.en} maxLength={2000} placeholder="English（切到 EN 时显示；不填就显示中文）" onChange={(e) => set({ text: { ...n.text, en: e.target.value } }, 'en')} data-testid="studio-text-en" />
-          <Row label="字体">
-            <select className={inputCls} value={n.font} onChange={(e) => set({ font: e.target.value as 'zh' | 'en' }, 'font')}>
-              <option value="zh">中文字体（主题）</option>
-              <option value="en">英文字体（主题）</option>
-            </select>
-          </Row>
-          <div className="grid grid-cols-2 gap-1.5">
-            <Row label="字号" narrow>
-              <NumberInput value={n.size} min={4} max={400} onChange={(v) => set({ size: v }, 'size')} testId="studio-prop-size" />
-            </Row>
-            <Row label="粗细" narrow>
-              <select className={inputCls} value={n.weight} onChange={(e) => set({ weight: Number(e.target.value) as 400 }, 'weight')}>
-                {[300, 400, 500, 600, 700, 900].map((w) => (
-                  <option key={w} value={w}>
-                    {w}
-                  </option>
-                ))}
-              </select>
-            </Row>
-            <Row label="行高" narrow>
-              <NumberInput value={n.lineHeight} min={0.5} max={4} step={0.1} onChange={(v) => set({ lineHeight: v }, 'lh')} />
-            </Row>
-            <Row label="字距" narrow>
-              <NumberInput value={n.letterSpacing} min={-0.5} max={2} step={0.01} onChange={(v) => set({ letterSpacing: v }, 'ls')} />
-            </Row>
-          </div>
-          <Row label="对齐">
-            {(['left', 'center', 'right'] as const).map((a) => (
-              <button key={a} type="button" className={cn('h-7 flex-1 rounded border text-[12px]', n.align === a ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2')} onClick={() => set({ align: a }, 'align')}>
-                {{ left: '左', center: '中', right: '右' }[a]}
-              </button>
-            ))}
-          </Row>
-          <Row label="竖直">
-            {(['top', 'middle', 'bottom'] as const).map((a) => (
-              <button key={a} type="button" className={cn('h-7 flex-1 rounded border text-[12px]', n.valign === a ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2')} onClick={() => set({ valign: a }, 'valign')}>
-                {{ top: '上', middle: '中', bottom: '下' }[a]}
-              </button>
-            ))}
-          </Row>
-          <Row label="样式">
-            <label className="flex items-center gap-1 text-[12px]">
-              <input type="checkbox" checked={n.italic} onChange={(e) => set({ italic: e.target.checked }, 'italic')} /> 斜体
-            </label>
-            <label className="flex items-center gap-1 text-[12px]">
-              <input type="checkbox" checked={n.underline} onChange={(e) => set({ underline: e.target.checked }, 'underline')} /> 下划线
-            </label>
-          </Row>
-          <Row label="颜色">
-            <ColorField value={n.color} onChange={(v) => set({ color: v ?? '$ink' }, 'color')} surface={surface} doc={doc} testId="studio-prop-color" />
-          </Row>
+          <TextStyleRows n={n} set={set} surface={surface} doc={doc} />
           <Row label="底色">
             <ColorField value={n.fill} onChange={(v) => set({ fill: v }, 'fill')} surface={surface} doc={doc} allowNone />
           </Row>
         </div>
       )}
 
-      {(n.type === 'rect' || n.type === 'ellipse' || n.type === 'frame') && (
+      {n.type === 'button' && (
+        <div className="space-y-1.5">
+          <PanelTitle>按钮上的字</PanelTitle>
+          <input ref={textRef as unknown as React.RefObject<HTMLInputElement>} className={inputCls} value={n.text.zh} maxLength={80} placeholder="中文" onChange={(e) => set({ text: { ...n.text, zh: e.target.value } }, 'zh')} data-testid="studio-button-zh" />
+          <input className={inputCls} value={n.text.en} maxLength={80} placeholder="English（不填就显示中文）" onChange={(e) => set({ text: { ...n.text, en: e.target.value } }, 'en')} data-testid="studio-button-en" />
+          <TextStyleRows n={n} set={set} surface={surface} doc={doc} />
+        </div>
+      )}
+
+      {n.type === 'field' && (
+        <div className="space-y-1.5">
+          <PanelTitle>显示哪一项数据</PanelTitle>
+          <Row label="数据">
+            <select className={inputCls} value={n.field} onChange={(e) => set({ field: e.target.value }, 'field')} data-testid="studio-field-key">
+              {surface.fields.map((x) => (
+                <option key={x.key} value={x.key}>
+                  {x.label}（例：{x.sample.zh}）
+                </option>
+              ))}
+            </select>
+          </Row>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Row label="前面" narrow>
+              <input className={inputCls} value={n.prefix.zh} maxLength={40} placeholder="如「营业」" onChange={(e) => set({ prefix: { ...n.prefix, zh: e.target.value } }, 'prefix')} />
+            </Row>
+            <Row label="后面" narrow>
+              <input className={inputCls} value={n.suffix.zh} maxLength={40} placeholder="如「张」" onChange={(e) => set({ suffix: { ...n.suffix, zh: e.target.value } }, 'suffix')} />
+            </Row>
+          </div>
+          <TextStyleRows n={n} set={set} surface={surface} doc={doc} />
+          <Row label="底色">
+            <ColorField value={n.fill} onChange={(v) => set({ fill: v }, 'fill')} surface={surface} doc={doc} allowNone />
+          </Row>
+        </div>
+      )}
+
+      {(n.type === 'rect' || n.type === 'ellipse' || n.type === 'frame' || n.type === 'button') && (
         <div className="space-y-1.5">
           <PanelTitle>样式</PanelTitle>
           <Row label="填充">
@@ -622,6 +874,49 @@ export function PropsPanel({
         </div>
       )}
 
+      {n.type === 'frame' && (
+        <div className="space-y-1.5">
+          <PanelTitle>框里的东西怎么排</PanelTitle>
+          <LayoutEditor
+            value={n.layout}
+            onChange={(v) =>
+              onChange((d) => {
+                const next = structuredClone(d);
+                const x = findNode(next, screen, n.id);
+                if (x && x.node.type === 'frame') {
+                  const frame = { ...x.node };
+                  if (v) frame.layout = v;
+                  else delete frame.layout;
+                  x.list[x.index] = frame;
+                }
+                return next;
+              }, `${n.id}.layout`)
+            }
+            testId="studio-frame-layout"
+          />
+        </div>
+      )}
+
+      {(n.type === 'frame' || n.type === 'image' || n.type === 'button') && (
+        <ActionEditor
+          value={n.action}
+          surface={surface}
+          onChange={(v) =>
+            onChange((d) => {
+              const next = structuredClone(d);
+              const x = findNode(next, screen, n.id);
+              if (x && (x.node.type === 'frame' || x.node.type === 'image' || x.node.type === 'button')) {
+                const node = { ...x.node };
+                if (v) node.action = v;
+                else delete node.action;
+                x.list[x.index] = node;
+              }
+              return next;
+            }, `${n.id}.action`)
+          }
+        />
+      )}
+
       {n.type === 'image' && (
         <div className="space-y-1.5">
           <PanelTitle>图片</PanelTitle>
@@ -653,14 +948,14 @@ export function PropsPanel({
       )}
 
       <div className="space-y-1.5">
-        <PanelTitle>前后</PanelTitle>
+        <PanelTitle>{f.flow ? '先后（自动排列里的顺序）' : '前后'}</PanelTitle>
         <div className="flex gap-1">
           {(
             [
-              ['top', <ChevronsUp key="t" className="size-3.5" />, '到最上'],
-              ['up', <ArrowUp key="u" className="size-3.5" />, '往上一层'],
-              ['down', <ArrowDown key="d" className="size-3.5" />, '往下一层'],
-              ['bottom', <ChevronsDown key="b" className="size-3.5" />, '到最下'],
+              ['top', <ChevronsUp key="t" className="size-3.5" />, f.flow ? '排到最后' : '到最上'],
+              ['up', <ArrowUp key="u" className="size-3.5" />, f.flow ? '往后排一个' : '往上一层'],
+              ['down', <ArrowDown key="d" className="size-3.5" />, f.flow ? '往前排一个' : '往下一层'],
+              ['bottom', <ChevronsDown key="b" className="size-3.5" />, f.flow ? '排到最前' : '到最下'],
             ] as const
           ).map(([dir, icon, label]) => (
             <button key={dir} type="button" title={label} className="flex h-8 flex-1 items-center justify-center rounded-md border border-line text-ink-2 hover:border-pine hover:text-pine" onClick={() => onLayer(dir)}>
@@ -668,6 +963,16 @@ export function PropsPanel({
             </button>
           ))}
         </div>
+        {f.parent && (
+          <button
+            type="button"
+            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-line text-[12.5px] text-ink-2 hover:border-pine hover:text-pine"
+            onClick={() => onChange((d) => moveOutOfFrame(d, screen, n.id))}
+            data-testid="studio-move-out"
+          >
+            <LogOut className="size-3.5" /> 移出框（放到「{nodeLabel(f.parent, surface)}」后面）
+          </button>
+        )}
         <button
           type="button"
           disabled={!!block?.required}

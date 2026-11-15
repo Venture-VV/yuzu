@@ -3,8 +3,8 @@
 //   · checkStudioDoc：发布前的检查（GZ7）。红的（error）不改不能发布：必需的功能块不在或看不见、图片不在素材库里；
 //     黄的（warn）提醒一下：英文没填、字和底色对比不够、能点的块缩得太小、图片太大、整块在画布外面。
 
-import { STUDIO_LIMITS, walkNodes, type StudioBlockNode, type StudioColor, type StudioDoc, type StudioNode } from './format';
-import { STUDIO_SURFACE_DEFS, type StudioBlockDef, type StudioPropDef } from './surfaces';
+import { isFlow, STUDIO_LIMITS, walkNodes, type StudioAction, type StudioBlockNode, type StudioColor, type StudioDoc, type StudioNode } from './format';
+import { STUDIO_SURFACE_DEFS, type StudioBlockDef, type StudioPropDef, type StudioSurfaceDef } from './surfaces';
 
 export interface StudioIssue {
   level: 'error' | 'warn';
@@ -31,6 +31,14 @@ function propIssue(def: StudioPropDef, value: unknown): string | null {
   }
 }
 
+/** 动作只能是界面登记的；有选项的 arg 只能从选项里选，没有选项的不要 arg */
+function actionIssue(def: StudioSurfaceDef, a: StudioAction): string | null {
+  const d = def.actions.find((x) => x.key === a.action);
+  if (!d) return def.actions.length ? `没有「${a.action}」这个动作` : `${def.label}上的按钮、框不能设「点了做什么」`;
+  if (d.args) return d.args.some((o) => o.value === a.arg) ? null : `「${d.label}」要从选项里选`;
+  return a.arg ? `「${d.label}」不要填参数` : null;
+}
+
 /** 格式之外按界面登记核对：不过的存不进去 */
 export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
   const def = STUDIO_SURFACE_DEFS[doc.surface];
@@ -46,6 +54,8 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
       err(`没有「${screen}」这一屏`, screen);
       continue;
     }
+    // 平板（整页等比缩放）的屏是一张画布：不能自动排列、不能改高；手机的屏能
+    if (def.kind === 'tablet' && (s.layout || s.height !== undefined)) err(`${def.label}的屏不能自动排列、不能改高`, screen);
     let count = 0;
     const singles = new Map<string, number>();
     walkNodes(s.nodes, (n, depth, parent) => {
@@ -53,6 +63,11 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
       if (ids.has(n.id)) err(`节点编号「${n.id}」重复了`, screen, n.id);
       ids.add(n.id);
       if (depth > STUDIO_LIMITS.depth) err(`框最多套 ${STUDIO_LIMITS.depth} 层`, screen, n.id);
+      if ((n.type === 'button' || n.type === 'frame' || n.type === 'image') && n.action) {
+        const why = actionIssue(def, n.action);
+        if (why) err(why, screen, n.id);
+      }
+      if (n.type === 'field' && !def.fields.some((f) => f.key === n.field)) err(`没有「${n.field}」这个数据字段`, screen, n.id);
       if (n.type !== 'block') return;
       const b = def.blocks[n.block];
       if (!b) return err(`没有「${n.block}」这个功能块`, screen, n.id);
@@ -119,6 +134,14 @@ export interface StudioCheckContext {
 
 const MB = 1024 * 1024;
 
+/**
+ * 字和底色要多大的对比（WCAG）：正文 4.5:1；大字 3:1——24 号以上，或 18.66 号以上的粗体（700 以上）。
+ * 8.1.1 的平板菜单原来只查 24 号以下的正文，大字不查；8.1.2 起大字也查 3:1。
+ */
+function contrastNeeded(size: number, weight: number): 4.5 | 3 {
+  return size >= 24 || (size >= 18.66 && weight >= 700) ? 3 : 4.5;
+}
+
 /** 发布前的检查：红的不改不能发布，黄的提醒 */
 export function checkStudioDoc(doc: StudioDoc, ctx: StudioCheckContext = {}): StudioIssue[] {
   const def = STUDIO_SURFACE_DEFS[doc.surface];
@@ -136,10 +159,11 @@ export function checkStudioDoc(doc: StudioDoc, ctx: StudioCheckContext = {}): St
       else if (n.hidden || n.opacity < 0.05) add('error', `${screenDef.label}的「${b.label}」被隐藏了：客人看不到、点不到`, screenDef.key, n.id);
     }
     const screenBg = resolveColor(doc, s?.background ?? screenDef.background) ?? resolveColor(doc, '$bg');
+    const height = s?.height ?? def.size.h;
     walkNodes(nodes, (n, _depth, parent) => {
       if (n.hidden) return;
-      // 整块在画布外面
-      if (!parent && (n.x >= def.size.w || n.y >= def.size.h || n.x + n.w <= 0 || n.y + n.h <= 0)) add('warn', `「${n.name || n.id}」整块在画布外面，平板上看不到`, screenDef.key, n.id);
+      // 整块在画布外面（整屏自动排列时不看 x / y）
+      if (!parent && !isFlow(s?.layout) && (n.x >= def.size.w || n.y >= height || n.x + n.w <= 0 || n.y + n.h <= 0)) add('warn', `「${n.name || n.id}」整块在画布外面，${def.kind === 'tablet' ? '平板' : '手机'}上看不到`, screenDef.key, n.id);
       if (n.type === 'image' && ctx.assets) {
         const size = ctx.assets.get(n.asset);
         if (size === undefined) add('error', `「${n.name || n.id}」用的图片不在素材库里`, screenDef.key, n.id);
@@ -150,12 +174,27 @@ export function checkStudioDoc(doc: StudioDoc, ctx: StudioCheckContext = {}): St
         const fg = resolveColor(doc, n.color);
         const bg = resolveColor(doc, n.fill) ?? (parent ? resolveColor(doc, parent.fill) : null) ?? screenBg;
         const ratio = fg && bg ? contrastRatio(fg, bg) : null;
-        if (ratio !== null && ratio < 4.5 && n.size < 24) add('warn', `「${n.name || n.text.zh.slice(0, 10)}」字和底色对比不够（${ratio.toFixed(1)}:1，正文要 4.5:1），可能看不清`, screenDef.key, n.id);
+        const need = contrastNeeded(n.size, n.weight);
+        if (ratio !== null && ratio < need) add('warn', `「${n.name || n.text.zh.slice(0, 10)}」字和底色对比不够（${ratio.toFixed(1)}:1，${need === 3 ? '大字' : '正文'}要 ${need}:1），可能看不清`, screenDef.key, n.id);
       }
       if (n.type === 'block') {
         const b: StudioBlockDef | undefined = def.blocks[n.block];
         // 等比缩放的能点的块（中 | EN）缩得比默认小：点按区域跟着变小
         if (b?.tap && b.resize === 'scale' && n.w < b.size.w - 0.5) add('warn', `「${b.label}」比默认的小，客人可能点不准`, screenDef.key, n.id);
+      }
+      if (n.type === 'button') {
+        const label = n.name || n.text.zh.slice(0, 10) || '按钮';
+        // 自动排列里跟内容走的边量不出来，只看固定的
+        const fixedW = !n.sizing || n.sizing.w === 'fixed';
+        const fixedH = !n.sizing || n.sizing.h === 'fixed';
+        if ((fixedW && n.w < 44) || (fixedH && n.h < 44)) add('warn', `「${label}」比 44×44 小，手指可能点不准`, screenDef.key, n.id);
+        if (ctx.langSwitch && n.text.zh.trim() && !n.text.en.trim()) add('warn', `「${label}」没填英文：切到 EN 时显示中文`, screenDef.key, n.id);
+        const fg = resolveColor(doc, n.color);
+        const bg = resolveColor(doc, n.fill) ?? (parent ? resolveColor(doc, parent.fill) : null) ?? screenBg;
+        const ratio = fg && bg ? contrastRatio(fg, bg) : null;
+        const need = contrastNeeded(n.size, n.weight);
+        if (ratio !== null && ratio < need) add('warn', `「${label}」字和底色对比不够（${ratio.toFixed(1)}:1，要 ${need}:1），可能看不清`, screenDef.key, n.id);
+        if (!n.action && def.actions.length) add('warn', `「${label}」还没设「点了做什么」，点了没反应`, screenDef.key, n.id);
       }
     });
   }

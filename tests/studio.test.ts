@@ -3,8 +3,9 @@
 // 预览码 30 分钟有效；发布、回滚记审计。
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { defaultStudioDoc, type StudioDoc } from '../src/shared/studio';
+import { defaultStudioDoc, type StudioDoc, type StudioNode } from '../src/shared/studio';
 import { createStaff } from '../src/server/modules/staff';
+import { readPublishedStudio, readStudioAssetFor } from '../src/server/modules/studio/published';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -189,5 +190,71 @@ describe('素材与预览码', () => {
     expect(got.body.doc.theme.colors.ink).toBe('#222222');
     await ctx.sql`UPDATE studio_preview_codes SET expires_at = now() - interval '1 minute' WHERE code = ${r.body.code}`;
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/studio/preview/${r.body.code}`)).status).toBe(404);
+  });
+});
+
+describe('8.1.2：微信小程序的版面（给小程序线读）', () => {
+  const PNG_2x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEUlEQVR42mNk+M9Qz8DAwMAAAA4AAf8Y9gqmAAAAAElFTkSuQmCC';
+  const image = (id: string, asset: string): StudioNode => ({ type: 'image', id, name: '海报', x: 0, y: 0, w: 375, h: 200, rotate: 0, opacity: 1, hidden: false, locked: false, sizing: { w: 'fill', h: 'fixed' }, asset, fit: 'cover', radius: 0, fill: null });
+
+  it('设计师能改小程序的版面；发布以前读不到（小程序用自己原来的页面），发布以后读得到这一版；图只给发布过的版面里用到的', async () => {
+    const overview = (await api(ctx.app, designer, 'GET', '/api/studio')).body;
+    expect(overview.surfaces.map((x: { surface: string }) => x.surface)).toEqual(['emenu', 'mp']);
+    const s = (await api(ctx.app, designer, 'GET', '/api/studio/mp')).body;
+    expect(s.draft.rev).toBe(0);
+    expect(s.draft.doc).toEqual(defaultStudioDoc('mp'));
+    expect(s.langSwitch).toBe(false);
+    expect(await readPublishedStudio(ctx.sql, 'mp')).toBeNull();
+
+    // 两张图：一张放进小程序的活动页，一张只在素材库
+    const used = (await api(ctx.app, designer, 'POST', '/api/studio/assets', { name: '海报.png', data: PNG_1x1 })).body.id as string;
+    const unused = (await api(ctx.app, designer, 'POST', '/api/studio/assets', { name: '没用的.png', data: PNG_2x1 })).body.id as string;
+    expect(used).not.toBe(unused);
+    const doc = clone(s.draft.doc);
+    doc.screens.activity!.nodes.unshift(image('poster', used));
+    doc.theme.colors.wood = '#8A6A4A';
+    const saved = await api(ctx.app, designer, 'PUT', '/api/studio/mp/draft', { rev: 0, doc });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    // 没发布：图也取不到
+    expect(await readStudioAssetFor(ctx.sql, 'mp', used)).toBeNull();
+
+    const pub = await api(ctx.app, designer, 'POST', '/api/studio/mp/publish', { clientKey: randomUUID(), rev: saved.body.rev, note: '活动页加海报、换木色' });
+    expect(pub.status, JSON.stringify(pub.body)).toBe(200);
+    expect(pub.body).toMatchObject({ version: 1, kind: 'publish', screensChanged: ['theme', 'activity'] });
+
+    const read = await readPublishedStudio(ctx.sql, 'mp');
+    expect(read).toMatchObject({ id: pub.body.id, version: 1, inherited: false });
+    expect(read!.doc.theme.colors.wood).toBe('#8A6A4A');
+    expect(read!.doc.screens.activity!.nodes[0]).toMatchObject({ type: 'image', asset: used });
+    // 平板菜单的那一份不受影响
+    expect((await readPublishedStudio(ctx.sql, 'emenu'))?.doc.surface ?? 'emenu').toBe('emenu');
+
+    const img = await readStudioAssetFor(ctx.sql, 'mp', used);
+    expect(img?.mime).toBe('image/png');
+    expect(img?.data.length).toBeGreaterThan(0);
+    // 素材库里有、但没在发布过的小程序版面里的：不给；乱写的编号也不给
+    expect(await readStudioAssetFor(ctx.sql, 'mp', unused)).toBeNull();
+    expect(await readStudioAssetFor(ctx.sql, 'mp', 'not-a-hash')).toBeNull();
+    // 只在平板菜单里用的图，小程序取不到
+    expect(await readStudioAssetFor(ctx.sql, 'emenu', used)).toBeNull();
+  });
+
+  it('小程序的版面里不认识的动作、字段存不进去；预览码在手机预览页取得到', async () => {
+    const s = (await api(ctx.app, designer, 'GET', '/api/studio/mp')).body;
+    const bad = clone(s.draft.doc);
+    bad.screens.activity!.nodes.push({
+      type: 'button', id: 'evil', name: '', x: 0, y: 0, w: 160, h: 44, rotate: 0, opacity: 1, hidden: false, locked: false,
+      fill: '$wood', stroke: null, strokeWidth: 0, radius: 8, shadow: 'none', text: { zh: '去', en: '' }, font: 'zh', size: 15, weight: 600, color: '#FFFFFF',
+      align: 'center', valign: 'middle', lineHeight: 1.4, letterSpacing: 0, italic: false, underline: false, action: { action: 'open.page', arg: 'pay-anything' },
+    });
+    const r = await api(ctx.app, designer, 'PUT', '/api/studio/mp/draft', { rev: s.draft.rev, doc: bad });
+    expect(r.status).toBe(422);
+    expect(r.body.error.code).toBe('STUDIO_INVALID');
+
+    const code = await api(ctx.app, designer, 'POST', '/api/studio/mp/preview-code', { doc: s.draft.doc });
+    expect(code.status, JSON.stringify(code.body)).toBe(200);
+    const got = await api(ctx.app, designer, 'GET', `/api/studio/preview/${code.body.code}`);
+    expect(got.status).toBe(200);
+    expect(got.body.surface).toBe('mp');
   });
 });

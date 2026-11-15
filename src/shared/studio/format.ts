@@ -1,8 +1,15 @@
-// UI 工作台的版面格式（8.1.1，docs/WORKBENCH_V811.md 第 3 节）。前后端共用：编辑器、平板、服务端读的都是这一份。
+// UI 工作台的版面格式（8.1.1 起，docs/WORKBENCH_V811.md 第 3 节；小程序线照这一份写渲染组件，说明见 docs/STUDIO_MP.md）。
+// 前后端共用：编辑器、平板、员工食堂、小程序、服务端读的都是这一份。
 //
-// 一份版面 = 一个界面（如平板电子菜单）的主题 + 每一屏的一列节点。节点按设计稿的像素摆（平板菜单是 1024×768），
-// 后面的盖在前面的上面。节点只有几种：框、矩形、椭圆、文字、图片，以及「功能块」——各界面在代码里登记的、带逻辑的那几块
-// （菜单页、顶栏、语言切换……），设计师改它们放在哪、多大、长什么样，不改它们做什么。
+// 一份版面 = 一个界面（如平板电子菜单）的主题 + 每一屏的一列节点。节点按设计稿的像素摆（平板菜单是 1024×768，手机是 375 宽），
+// 后面的盖在前面的上面。节点只有几种：框、矩形、椭圆、文字、图片、按钮、数据字段，以及「功能块」——各界面在代码里登记的、
+// 带逻辑的那几块（菜单页、顶栏、语言切换……），设计师改它们放在哪、多大、长什么样，不改它们做什么。
+//
+// 8.1.2 加的（都是可选项，没写的照 8.1.1 的样子，旧版面一字不改照样能读）：
+//   · 自动排列（layout）：框、屏可以「横排 / 竖排」（可换行），里面的节点按顺序排、不看 x / y；间距、内边距、对齐；
+//   · 尺寸规则（sizing）：在自动排列里，宽、高可以「固定 / 撑满 / 跟内容」；
+//   · 按钮（button）与点了做什么（action，只能从界面登记的动作里选）；数据字段（field，只能从界面登记的字段里选）；
+//   · 屏的高度（height）：手机界面会往下滚，一屏多高由设计师定。
 //
 // 安全：版面里没有 HTML、CSS、脚本字符串；颜色只能是 #rrggbb(aa) 或主题色（$ink）；图片只能引用素材库里的图（按内容的摘要）；
 // 功能块只能从界面登记的清单里选，属性按登记的格式核对。所以版面改得再乱也只是难看，不会注入脚本、不会把数据发到别处、
@@ -43,6 +50,8 @@ const Base = {
   opacity: num(0, 1).default(1),
   hidden: z.boolean().default(false),
   locked: z.boolean().default(false),
+  /** 在自动排列的框（或屏）里：宽、高「固定 / 撑满 / 跟内容」（没写是两个都固定；自由摆放时不看这一项） */
+  sizing: z.object({ w: z.enum(['fixed', 'fill', 'hug']).default('fixed'), h: z.enum(['fixed', 'fill', 'hug']).default('fixed') }).optional(),
 };
 
 const Box = {
@@ -55,10 +64,10 @@ const Box = {
 
 /** 文字的字体：zh / en 是主题里的中文、英文字体 */
 export const TEXT_FONTS = ['zh', 'en'] as const;
-export const TextSchema = z.object({
-  type: z.literal('text'),
-  ...Base,
-  text: z.object({ zh: z.string().max(STUDIO_LIMITS.text), en: z.string().max(STUDIO_LIMITS.text).default('') }),
+/** 中英两份的文字（英文没填时显示中文） */
+const Bilingual = (max: number) => z.object({ zh: z.string().max(max), en: z.string().max(max).default('') });
+/** 字的样子：文字、按钮、数据字段共用 */
+const TextStyle = {
   font: z.enum(TEXT_FONTS).default('zh'),
   size: num(4, 400).default(16),
   weight: z.union([z.literal(300), z.literal(400), z.literal(500), z.literal(600), z.literal(700), z.literal(900)]).default(400),
@@ -71,6 +80,46 @@ export const TextSchema = z.object({
   letterSpacing: num(-0.5, 2).default(0),
   italic: z.boolean().default(false),
   underline: z.boolean().default(false),
+};
+export const TextSchema = z.object({
+  type: z.literal('text'),
+  ...Base,
+  text: Bilingual(STUDIO_LIMITS.text),
+  ...TextStyle,
+  fill: ColorSchema.nullable().default(null),
+});
+
+/** 点了做什么：只能是界面登记的动作（打开哪一页、拨打门店电话……），arg 按登记核对 */
+export const ActionSchema = z.object({
+  action: z.string().regex(/^[a-z][a-zA-Z0-9.]{0,47}$/, '动作的名字不对'),
+  arg: z.string().max(80).default(''),
+});
+export type StudioAction = z.infer<typeof ActionSchema>;
+
+/** 按钮：一个框里一行字，点了做登记的动作（没设动作的只是样子） */
+export const ButtonSchema = z.object({
+  type: z.literal('button'),
+  ...Base,
+  fill: ColorSchema.nullable().default('$ink'),
+  stroke: ColorSchema.nullable().default(null),
+  strokeWidth: num(0, 40).default(0),
+  radius: num(0, 4096).default(8),
+  shadow: z.enum(SHADOWS).default('none'),
+  text: Bilingual(80),
+  ...TextStyle,
+  align: z.enum(['left', 'center', 'right']).default('center'),
+  valign: z.enum(['top', 'middle', 'bottom']).default('middle'),
+  action: ActionSchema.optional(),
+});
+
+/** 数据字段：显示界面登记的一项数据（门店名、营业时间、会员等级……），前后可以加字 */
+export const FieldSchema = z.object({
+  type: z.literal('field'),
+  ...Base,
+  field: z.string().regex(/^[a-z][a-zA-Z0-9.]{0,47}$/, '字段的名字不对'),
+  prefix: Bilingual(40).default({ zh: '', en: '' }),
+  suffix: Bilingual(40).default({ zh: '', en: '' }),
+  ...TextStyle,
   fill: ColorSchema.nullable().default(null),
 });
 
@@ -85,6 +134,7 @@ export const ImageSchema = z.object({
   fit: z.enum(['cover', 'contain', 'fill']).default('cover'),
   radius: num(0, 4096).default(0),
   fill: ColorSchema.nullable().default(null),
+  action: ActionSchema.optional(),
 });
 
 /** 功能块的属性：只能是简单的值，按界面登记的格式再核对 */
@@ -101,19 +151,49 @@ export type StudioRectNode = z.infer<typeof RectSchema>;
 export type StudioEllipseNode = z.infer<typeof EllipseSchema>;
 export type StudioImageNode = z.infer<typeof ImageSchema>;
 export type StudioBlockNode = z.infer<typeof BlockSchema>;
+export type StudioButtonNode = z.infer<typeof ButtonSchema>;
+export type StudioFieldNode = z.infer<typeof FieldSchema>;
 export type StudioFrameNode = z.infer<typeof BaseFrameSchema> & { children: StudioNode[] };
-export type StudioNode = StudioTextNode | StudioRectNode | StudioEllipseNode | StudioImageNode | StudioBlockNode | StudioFrameNode;
+export type StudioNode = StudioTextNode | StudioRectNode | StudioEllipseNode | StudioImageNode | StudioBlockNode | StudioButtonNode | StudioFieldNode | StudioFrameNode;
 export type StudioNodeType = StudioNode['type'];
 
-/** 框：里面的节点按框的左上角摆；clip 时超出的部分不显示 */
-const BaseFrameSchema = z.object({ type: z.literal('frame'), ...Base, ...Box, clip: z.boolean().default(false) });
+/**
+ * 自动排列（框、屏都可以有）：free 自由摆放（按 x / y，8.1.1 的样子）；row 横排、column 竖排——里面的节点按先后排，不看 x / y。
+ * wrap：横排放不下时换行（网格用「换行 + 每个一样宽」表达，不用 CSS 网格，小程序也照着排得出来）。
+ * padding 是上、右、下、左；align 是另一个方向上怎么对齐（stretch：撑满）；justify 是排的方向上怎么分（between：两头对齐、中间平分）。
+ */
+export const LayoutSchema = z.object({
+  mode: z.enum(['free', 'row', 'column']).default('free'),
+  wrap: z.boolean().default(false),
+  gap: num(0, 400).default(0),
+  padding: z.tuple([num(0, 400), num(0, 400), num(0, 400), num(0, 400)]).default([0, 0, 0, 0]),
+  align: z.enum(['start', 'center', 'end', 'stretch']).default('start'),
+  justify: z.enum(['start', 'center', 'end', 'between']).default('start'),
+});
+export type StudioLayout = z.infer<typeof LayoutSchema>;
+
+/** 框：里面的节点按框的左上角摆（或按 layout 自动排）；clip 时超出的部分不显示；有 action 的框整块能点（卡片、入口） */
+const BaseFrameSchema = z.object({ type: z.literal('frame'), ...Base, ...Box, clip: z.boolean().default(false), layout: LayoutSchema.optional(), action: ActionSchema.optional() });
 export const NodeSchema: z.ZodType<StudioNode> = z.lazy(() =>
-  z.discriminatedUnion('type', [TextSchema, RectSchema, EllipseSchema, ImageSchema, BlockSchema, BaseFrameSchema.extend({ children: z.array(NodeSchema).max(STUDIO_LIMITS.nodesPerScreen) })]),
+  z.discriminatedUnion('type', [
+    TextSchema,
+    RectSchema,
+    EllipseSchema,
+    ImageSchema,
+    BlockSchema,
+    ButtonSchema,
+    FieldSchema,
+    BaseFrameSchema.extend({ children: z.array(NodeSchema).max(STUDIO_LIMITS.nodesPerScreen) }),
+  ]),
 ) as z.ZodType<StudioNode>;
 
 export const ScreenSchema = z.object({
   /** 这一屏的底色（null：用界面自己的底） */
   background: ColorSchema.nullable().default(null),
+  /** 这一屏多高（手机界面往下滚；没写用界面登记的高） */
+  height: num(100, 20000).optional(),
+  /** 整屏自动排列（手机界面常用竖排：一段一段往下排） */
+  layout: LayoutSchema.optional(),
   nodes: z.array(NodeSchema).max(STUDIO_LIMITS.nodesPerScreen),
 });
 export type StudioScreen = z.infer<typeof ScreenSchema>;
@@ -126,9 +206,9 @@ export const ThemeSchema = z.object({
 });
 export type StudioTheme = z.infer<typeof ThemeSchema>;
 
-export const STUDIO_SURFACES = ['emenu'] as const;
+export const STUDIO_SURFACES = ['emenu', 'mp'] as const;
 export type StudioSurface = (typeof STUDIO_SURFACES)[number];
-export const STUDIO_SURFACE_LABELS: Record<StudioSurface, string> = { emenu: '平板电子菜单' };
+export const STUDIO_SURFACE_LABELS: Record<StudioSurface, string> = { emenu: '平板电子菜单', mp: '微信小程序' };
 
 export const DocSchema = z.object({
   schema: z.literal(STUDIO_SCHEMA),
@@ -159,6 +239,9 @@ export function docAssets(doc: StudioDoc): string[] {
   for (const s of Object.values(doc.screens)) walkNodes(s.nodes, (n) => n.type === 'image' && out.add(n.asset));
   return [...out];
 }
+
+/** 这一层是不是自动排列（横排、竖排）：里面的节点不看 x / y */
+export const isFlow = (layout: StudioLayout | undefined): boolean => !!layout && layout.mode !== 'free';
 
 /** 颜色写成页面上用的值：主题色换成 CSS 变量（平板菜单的 $ink → var(--em-ink)），hex 原样 */
 export function colorValue(c: StudioColor | null | undefined, tokenVar: (key: string) => string): string | undefined {
