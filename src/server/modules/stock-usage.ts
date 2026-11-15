@@ -40,11 +40,12 @@ import { idParam, parse } from '../lib/validate';
 import { moveCostCents, todayIn } from './inventory/common';
 import { createDoc } from './inventory/docs';
 import { systemStockActor } from './system-staff';
+import { settingRow } from '../lib/store-settings';
 
 const KEY = 'stock_usage_rules';
 
 export async function loadStockUsageRules(db: Db): Promise<StockUsageRules> {
-  const [row] = await db<{ value: Partial<StockUsageRules> }[]>`SELECT value FROM settings WHERE key = ${KEY}`;
+  const row = await settingRow<Partial<StockUsageRules>>(db, KEY);
   return { ...DEFAULT_STOCK_USAGE_RULES, ...(row?.value ?? {}) };
 }
 
@@ -85,7 +86,7 @@ const canSeeCost = (actor: Actor) => can(actor, 'inventory.cost');
 /** 全部价目项目与它在用的用料（没设的 version = 0） */
 export async function listRecipes(db: Db, actor: Actor): Promise<ItemRecipe[]> {
   // 餐饮开没开（不从 dining 模块引，它要反过来引这里记扣料）
-  const [dr] = await db<{ value: { enabled?: boolean } }[]>`SELECT value FROM settings WHERE key = 'dining_rules'`;
+  const dr = await settingRow<{ enabled?: boolean }>(db, 'dining_rules');
   const dining = { enabled: dr?.value?.enabled ?? DEFAULT_DINING_RULES.enabled };
   const cost = canSeeCost(actor);
   const items = await db<

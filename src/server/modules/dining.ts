@@ -22,9 +22,10 @@ import { pricesColumn } from './pricing';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { recordRecipeUsage, reverseRecipeUsage } from './stock-usage';
+import { settingRow } from '../lib/store-settings';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
-  const [row] = await db<{ value: Partial<DiningRules> }[]>`SELECT value FROM settings WHERE key = 'dining_rules'`;
+  const row = await settingRow<Partial<DiningRules>>(db, 'dining_rules');
   return { ...DEFAULT_DINING_RULES, ...(row?.value ?? {}) };
 }
 

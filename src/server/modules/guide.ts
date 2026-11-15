@@ -42,11 +42,12 @@ import { loadSettings } from './settings';
 import { lockLedger } from './spaces';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { settingRow } from '../lib/store-settings';
 
 // ───────────────────────── 规则 ─────────────────────────
 
 export async function loadGuideRules(db: Db): Promise<GuideRules> {
-  const [row] = await db<{ value: Partial<GuideRules> }[]>`SELECT value FROM settings WHERE key = 'guide_rules'`;
+  const row = await settingRow<Partial<GuideRules>>(db, 'guide_rules');
   return { ...DEFAULT_GUIDE_RULES, ...(row?.value ?? {}) };
 }
 

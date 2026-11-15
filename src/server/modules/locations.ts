@@ -44,11 +44,12 @@ import { loadSettings } from './settings';
 import { ctxOf } from '../lib/context';
 import { hashRequest } from '../lib/idempotency';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { settingRow } from '../lib/store-settings';
 
 // ───────────────────────── 规则 ─────────────────────────
 
 export async function loadLocationRules(db: Db): Promise<LocationRules> {
-  const [row] = await db<{ value: Partial<LocationRules> }[]>`SELECT value FROM settings WHERE key = 'location_rules'`;
+  const row = await settingRow<Partial<LocationRules>>(db, 'location_rules');
   return { ...DEFAULT_LOCATION_RULES, ...(row?.value ?? {}) };
 }
 

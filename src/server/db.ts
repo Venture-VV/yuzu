@@ -1,4 +1,5 @@
 import postgres from 'postgres';
+import { currentStoreId, DEFAULT_STORE_ID } from './lib/store-context';
 
 export type Sql = postgres.Sql<{}>;
 export type Tx = postgres.TransactionSql<{}>;
@@ -8,7 +9,7 @@ export type Db = Sql | Tx;
 export type Fragment = postgres.PendingQuery<postgres.Row[]>;
 
 export function createSql(databaseUrl: string, options: { max?: number } = {}): Sql {
-  return postgres(databaseUrl, {
+  return withStoreContext(postgres(databaseUrl, {
     max: options.max ?? 10,
     idle_timeout: 30,
     connect_timeout: 10,
@@ -26,7 +27,27 @@ export function createSql(databaseUrl: string, options: { max?: number } = {}): 
         parse: (x: string) => new Date(x).toISOString(),
       },
     },
-  }) as unknown as Sql;
+  }) as unknown as Sql);
+}
+
+/**
+ * 每个事务（含只读快照）开头记上当前门店（8.0.22，docs/MULTISTORE_V8022.md 第 3 节）：当前门店不是本店时
+ * set_config('yuzu.store', 门店编号, true)，业务表 store_id 的默认值取它；本店什么都不做（与以往完全一样）。
+ */
+function withStoreContext(sql: Sql): Sql {
+  const begin = sql.begin.bind(sql) as unknown as (...args: unknown[]) => Promise<unknown>;
+  (sql as unknown as { begin: unknown }).begin = (...args: unknown[]) => {
+    const storeId = currentStoreId();
+    if (storeId === DEFAULT_STORE_ID) return begin(...args);
+    const fn = args[args.length - 1] as (tx: Tx) => unknown;
+    const scoped = async (tx: Tx) => {
+      await tx`SELECT set_config('yuzu.store', ${String(storeId)}, true)`;
+      const result = await fn(tx);
+      return Array.isArray(result) ? Promise.all(result) : result;
+    };
+    return begin(...args.slice(0, -1), scoped);
+  };
+  return sql;
 }
 
 /**

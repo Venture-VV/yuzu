@@ -46,11 +46,12 @@ import { loadPricedItems } from './pricing';
 import { leaveUsages, locateUsage } from './locations';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { settingRow } from '../lib/store-settings';
 
 // ───────────────────────── 规则 ─────────────────────────
 
 export async function loadUsageRules(db: Db): Promise<UsageRules> {
-  const [row] = await db<{ value: Partial<UsageRules> }[]>`SELECT value FROM settings WHERE key = 'usage_rules'`;
+  const row = await settingRow<Partial<UsageRules>>(db, 'usage_rules');
   const v = { ...DEFAULT_USAGE_RULES, ...(row?.value ?? {}) };
   return { businessTypes: v.businessTypes, pricing: v.pricing ?? {} };
 }

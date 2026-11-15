@@ -60,11 +60,12 @@ import type { RoomQuote } from '@shared/rooms';
 import { bestRoomDiscountRate } from './member-discounts';
 import { benefitState } from './member-trials';
 import { projectedGrade } from './membership';
+import { settingRow } from '../lib/store-settings';
 
 // ───────────────────────── 规则 ─────────────────────────
 
 export async function loadRoomRules(db: Db): Promise<RoomRules> {
-  const [row] = await db<{ value: Partial<RoomRules> }[]>`SELECT value FROM settings WHERE key = 'room_rules'`;
+  const row = await settingRow<Partial<RoomRules>>(db, 'room_rules');
   return { ...DEFAULT_ROOM_RULES, ...(row?.value ?? {}) };
 }
 

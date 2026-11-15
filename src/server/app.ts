@@ -11,6 +11,7 @@ import { SESSION_COOKIE, resolveSession } from './auth/session';
 import { AppError } from './lib/errors';
 import { isApiRequest, routePath } from './lib/paths';
 import type { Deps } from './lib/context';
+import { DEFAULT_STORE_ID, runInStore } from './lib/store-context';
 import { registerAdminRoutes } from './modules/admin';
 import { registerAuditRoutes } from './modules/audit';
 import { registerCatalogRoutes } from './modules/catalog';
@@ -90,6 +91,7 @@ import { registerShiftRoutes } from './modules/shifts';
 import { registerDashboardRoutes } from './modules/dashboard';
 import { registerDashboardReportRoutes } from './modules/reports';
 import { registerSettingsRoutes } from './modules/settings';
+import { registerStoreRoutes } from './modules/stores';
 import { registerWecomRoutes } from './modules/wecom';
 import { registerSettlementRoutes } from './modules/settlement';
 import { registerStaffRoutes } from './modules/staff';
@@ -160,6 +162,12 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
         req.hasSession = true;
       }
     }
+  });
+
+  // 当前门店（8.0.22，docs/MULTISTORE_V8022.md 第 3 节）：处理请求时在这家店的上下文里——事务开头记上门店、
+  // 业务表 store_id 的默认值取它；放在请求体解析以后（preHandler），处理函数整个在里面
+  app.addHook('preHandler', (req, _reply, done) => {
+    runInStore(req.actor?.storeId ?? DEFAULT_STORE_ID, done);
   });
 
   // 浏览器按声明的类型解析响应，不猜测内容类型（测试服 E2E 报告）；不让别的网站把页面嵌进去（防点击劫持），
@@ -256,6 +264,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerStaffRoutes(app, deps);
   registerCatalogRoutes(app, deps);
   registerSettingsRoutes(app, deps);
+  registerStoreRoutes(app, deps);
   registerWecomRoutes(app, deps);
   registerAuditRoutes(app, deps);
   registerAdminRoutes(app, deps);

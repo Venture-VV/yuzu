@@ -51,11 +51,12 @@ import { assertOpen, businessDate, lockVisits, runIdempotent } from '../frontdes
 import { abandonFrontdeskOp } from '../frontdesk/visits';
 import { pricesColumn } from '../pricing';
 import { resolveWaiter } from './pins';
+import { settingRow } from '../../lib/store-settings';
 
 // ───────────────────────── 设置 ─────────────────────────
 
 export async function loadEmenuRules(db: Db): Promise<EmenuRules> {
-  const [row] = await db<{ value: Partial<EmenuRules> }[]>`SELECT value FROM settings WHERE key = 'emenu_rules'`;
+  const row = await settingRow<Partial<EmenuRules>>(db, 'emenu_rules');
   return { ...DEFAULT_EMENU_RULES, ...(row?.value ?? {}) };
 }
 

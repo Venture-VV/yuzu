@@ -40,9 +40,10 @@ import { loadTechnicianRules, loadTechnicians } from './technicians';
 import { assertTechnicianNotBooked } from './booking-guard';
 import { locateSession, locateSessionEnd, locateSignIn, locateSignOut } from './locations';
 import { ctxOf } from '../lib/context';
+import { settingRow } from '../lib/store-settings';
 
 export async function loadClockroomRules(db: Db): Promise<ClockroomRules> {
-  const [row] = await db<{ value: Partial<ClockroomRules> }[]>`SELECT value FROM settings WHERE key = 'clockroom_rules'`;
+  const row = await settingRow<Partial<ClockroomRules>>(db, 'clockroom_rules');
   return { ...DEFAULT_CLOCKROOM_RULES, ...(row?.value ?? {}) };
 }
 

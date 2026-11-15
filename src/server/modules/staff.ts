@@ -7,6 +7,7 @@ import { guard } from '../auth/guard';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from '../auth/password';
 import { destroyStaffSessions } from '../auth/session';
 import { writeAudit } from '../lib/audit';
+import { currentStoreId } from '../lib/store-context';
 import type { Deps } from '../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
@@ -93,6 +94,8 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
     const weak = checkPasswordStrength(password);
     if (weak) throw badRequest(weak, { field: 'password' });
     const id = await createStaff(sql, { ...input, password, mustChangePassword: true });
+    // 新员工挂在建他的那家门店（8.0.22，docs/MULTISTORE_V8022.md 第 1 节；员工档案里可以再改成几家）
+    await sql`INSERT INTO staff_stores (staff_id, store_id) VALUES (${id}, ${currentStoreId()}) ON CONFLICT DO NOTHING`;
     await writeAudit(sql, {
       staffId: req.actor.id,
       action: 'staff_created',

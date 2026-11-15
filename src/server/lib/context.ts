@@ -18,6 +18,8 @@ export interface Actor {
   mustChangePassword: boolean;
   /** 按后台岗位权限算好的权限（登录会话都带）；系统操作、合成数据没有时按默认规则 */
   permissions?: Permission[];
+  /** 当前门店（8.0.22，登录会话都带；系统操作、合成数据没有时是本店） */
+  storeId?: number;
 }
 
 /** 一次业务操作的上下文。at 仅供合成数据与测试指定业务发生时间。 */

@@ -51,11 +51,12 @@ import { loadUsageRules, openUsageTx } from './usages';
 import { ClaimKey, lockClaim, mpContext, saveClaim } from './mp-entries';
 import { randomUUID } from 'node:crypto';
 import { lockTechnicianBookings } from './booking-guard';
+import { settingRow } from '../lib/store-settings';
 
 // ───────────────────────── 规则 ─────────────────────────
 
 export async function loadBookingRules(db: Db): Promise<BookingRules> {
-  const [row] = await db<{ value: Partial<BookingRules> }[]>`SELECT value FROM settings WHERE key = 'booking_rules'`;
+  const row = await settingRow<Partial<BookingRules>>(db, 'booking_rules');
   return { ...DEFAULT_BOOKING_RULES, ...(row?.value ?? {}) };
 }
 

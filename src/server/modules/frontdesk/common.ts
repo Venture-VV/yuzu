@@ -14,11 +14,12 @@ import { AppError, conflict, forbidden, unprocessable } from '../../lib/errors';
 import { assertNotFenced, isFenced } from '../../lib/fences';
 import { nextDocNo, setTxTimeouts } from '../../lib/tx';
 import { loadSettings } from '../settings';
+import { settingRow } from '../../lib/store-settings';
 
 export { nextDocNo, setTxTimeouts };
 
 export async function loadFrontdeskRules(db: Db): Promise<FrontdeskRules> {
-  const [row] = await db<{ value: Partial<FrontdeskRules> }[]>`SELECT value FROM settings WHERE key = 'frontdesk_rules'`;
+  const row = await settingRow<Partial<FrontdeskRules>>(db, 'frontdesk_rules');
   return { ...DEFAULT_FRONTDESK_RULES, ...(row?.value ?? {}) };
 }
 

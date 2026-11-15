@@ -30,9 +30,10 @@ import { businessDate } from './frontdesk/common';
 import { settledTechnicianLines, withCommission } from './commission';
 import { loadClockroomRules } from './clockroom';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { settingRow } from '../lib/store-settings';
 
 export async function loadTechnicianRules(db: Db): Promise<TechnicianRules> {
-  const [row] = await db<{ value: Partial<TechnicianRules> }[]>`SELECT value FROM settings WHERE key = 'technician_rules'`;
+  const row = await settingRow<Partial<TechnicianRules>>(db, 'technician_rules');
   return { ...DEFAULT_TECHNICIAN_RULES, ...(row?.value ?? {}) };
 }
 
