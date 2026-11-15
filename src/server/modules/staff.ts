@@ -59,6 +59,8 @@ function assertDutiesCompatible(role: Role, duties: readonly Duty[]) {
   if (role === 'other_store' && duties.length) throw unprocessable('DUTY_CONFLICT', '「他店查询」只查会员档阶，不能带库存与采购职责', { field: 'duties' });
   // 点餐平板（8.0.10）是放在餐桌上的设备账号，只能打开点餐页，不带职责（带了就会多出 ERP 的权限）
   if (role === 'tablet' && duties.length) throw unprocessable('DUTY_CONFLICT', '「点餐平板」只用来打开点餐页，不能带库存与采购职责', { field: 'duties' });
+  // 设计师（8.1.1）只进工作台，不带职责（带了就会多出 ERP 的权限）
+  if (role === 'designer' && duties.length) throw unprocessable('DUTY_CONFLICT', '「设计师」只进工作台改版面，不能带库存与采购职责', { field: 'duties' });
   const groups = dutyConflict(role, duties);
   if (groups) {
     throw unprocessable('DUTY_CONFLICT', `仓库、采购、部门、财务（含成本）、负责人不兼任：这名员工的职责跨了「${groups}」，请只保留其中一组`, { field: 'duties' });

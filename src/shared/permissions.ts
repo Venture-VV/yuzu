@@ -25,8 +25,10 @@
 // 与财务隔离——有财务职责（对账付款、成本核算）的账号一律没有，后台岗位权限加了也不生效（店主除外，FINANCE_EXCLUDED）。
 // 8.0.10 点餐系统 · 平板电子菜单（docs/EMENU.md，DC1、DC16 待确认）：新岗位「点餐平板」（放在餐桌上的平板登录用，只能打开点餐页），
 // 新增「打开平板点餐」「维护电子菜单」。平板上确认下单的服务员照旧要「餐饮点单」+「前台挂账」（凭点单密码认人）。
+// 8.1.1 UI 工作台（docs/WORKBENCH_V811.md 第 6 节）：新岗位「设计师」（只进工作台），新增「工作台：编辑」「工作台：发布」；
+// 店主 2026-11-15 定设计师可以发布（GZ3）：两项默认给店主与设计师，别的岗位要的在后台「岗位权限」里加。
 
-export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store', 'tablet'] as const;
+export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store', 'tablet', 'designer'] as const;
 export type Role = (typeof ROLES)[number];
 
 export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request', 'legal', 'concierge', 'concierge_manager'] as const;
@@ -266,6 +268,10 @@ export const PERMISSIONS = {
   'emenu.view': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'tablet'] },
   /** 维护电子菜单（8.0.10，DC16 待确认：店主、店总，与管理价目同一批人）：分类与供应时段、版面、菜品图文与图片、设置 */
   'emenu.manage': { roles: ['owner', 'store_manager'] },
+  /** UI 工作台：改草稿、传素材、预览（8.1.1，GZ3：店主、设计师）。看得到菜单内容（菜名、图片、价格），看不到会员、账、经营数据 */
+  'studio.edit': { roles: ['owner', 'designer'] },
+  /** UI 工作台：发布、回滚（8.1.1，店主 2026-11-15 定设计师可以发布，GZ3）；都记审计 */
+  'studio.publish': { roles: ['owner', 'designer'] },
   /** 客房：入住、续住、换房、退房、收退押金、撤销入住、夜审（S7，v0.7.4，待确认：前台岗位都能做） */
   'room.operate': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 预约（v0.7.28，待确认：前台岗位都能做）：预约技师、派对房、客房电话预订；确认、改时间、到店、取消、记爽约 */
@@ -524,6 +530,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'report.technicians': '看技师业绩（钟数、点钟 / 轮钟、金额）',
   'report.commission': '看技师提成与导出提成明细',
   'marketing.cost': '营销成本测算（券、赠金、会员折扣的实核成本；有财务职责的账号不生效）',
+  'studio.edit': 'UI 工作台：改版面草稿、传素材、预览',
+  'studio.publish': 'UI 工作台：发布、回滚版面（平板马上换成新样子）',
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
@@ -558,4 +566,5 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },
   { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission', 'marketing.cost'] },
   { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'emenu.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
+  { title: 'UI 工作台', items: ['studio.edit', 'studio.publish'] },
 ];

@@ -134,6 +134,8 @@ export const FENCED_OPS = [
   'customer_target',
   // 8.0.22 门店间调拨（迁移 155）：编号记在 idempotency_keys（ref_id 是那张调拨单）
   'stock_transfer',
+  // 8.1.1 UI 工作台：发布、回滚（迁移 164；编号记在 studio_versions.client_key）
+  'studio_publish',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -190,6 +192,7 @@ export async function fenceKey(
   if (opType === 'pay_terminal' && (await tx`SELECT 1 FROM pay_transactions WHERE client_key = ${key}`).length) return { existingOpType: opType };
   if (opType === 'platform_verify' && (await tx`SELECT 1 FROM platform_verifications WHERE client_key = ${key}`).length) return { existingOpType: opType };
   if (opType === 'ota_import' && (await tx`SELECT 1 FROM ota_imports WHERE client_key = ${key}`).length) return { existingOpType: opType };
+  if (opType === 'studio_publish' && (await tx`SELECT 1 FROM studio_versions WHERE client_key = ${key}`).length) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;

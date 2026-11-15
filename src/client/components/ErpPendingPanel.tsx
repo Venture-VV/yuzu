@@ -30,6 +30,8 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     case 'customer_target':
     // 门店间调拨（8.0.22）：返回那张调拨单
     case 'stock_transfer':
+    // 工作台发布、回滚（8.1.1）：返回那一版
+    case 'studio_publish':
       return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'expense_claim':
       return d.claim && typeof d.claim === 'object' ? { refId: d.claim.id } : null;

@@ -418,6 +418,8 @@ export const ERP_OP_TYPES = [
   'customer_target',
   // 8.0.22 门店间调拨（迁移 155）
   'stock_transfer',
+  // 8.1.1 UI 工作台：发布、回滚（迁移 164；编号记在 studio_versions.client_key）
+  'studio_publish',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -482,6 +484,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   payment_batch: '批量付款',
   ota_import: '渠道订单导入',
   stock_transfer: '门店间调拨',
+  studio_publish: '工作台发布 / 回滚',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

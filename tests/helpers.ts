@@ -333,6 +333,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '161_replenish_mode.sql',
   '162_customer_workbench.sql',
   '163_customer_credit_canonical.sql',
+  '164_studio.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

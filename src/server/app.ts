@@ -103,6 +103,7 @@ import { registerDiningRoutes } from './modules/dining';
 import { registerTableRoutes } from './modules/tables';
 import { registerDining808Routes } from './modules/dining-808';
 import { registerEmenuRoutes } from './modules/emenu/routes';
+import { registerStudioRoutes } from './modules/studio';
 import { registerRoomRoutes } from './modules/rooms';
 import { registerSpaceRoutes } from './modules/spaces';
 import { registerFloorplanRoutes } from './modules/floorplans';
@@ -335,6 +336,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDining808Routes(app, deps);
   // 点餐系统 · 平板电子菜单（8.0.10）
   registerEmenuRoutes(app, deps);
+  registerStudioRoutes(app, deps);
   registerRoomRoutes(app, deps);
   registerSpaceRoutes(app, deps);
   registerFloorplanRoutes(app, deps);

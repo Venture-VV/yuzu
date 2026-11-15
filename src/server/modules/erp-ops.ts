@@ -104,6 +104,7 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   payment_batch: ['payable.manage'],
   ota_import: ['booking.manage'],
   stock_transfer: ['inventory.operate'],
+  studio_publish: ['studio.publish'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -168,6 +169,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   payment_batch: ['payable.read'],
   ota_import: ['booking.manage'],
   stock_transfer: ['inventory.read'],
+  studio_publish: ['studio.edit'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -180,6 +182,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
       return { found: true, abandoned: false, refId, advanceId: s ? Number(s.advanceId) : undefined };
     }
     return { found: true, abandoned: false, refId };
+  }
+  // UI 工作台（8.1.1）的发布、回滚：编号记在版本上，refId 是那一版
+  if (type === 'studio_publish') {
+    const [v] = await db<{ id: number }[]>`SELECT id FROM studio_versions WHERE client_key = ${key}`;
+    if (v) return { found: true, abandoned: false, refId: Number(v.id) };
   }
   // 模拟刷卡（v0.7.17）的编号记在位置事件上：refId 是那条位置事件
   if (type === 'location_report') {

@@ -53,6 +53,7 @@ import { pricesColumn } from '../pricing';
 import { resolveWaiter } from './pins';
 import { settingRow } from '../../lib/store-settings';
 import { currentStoreId } from '../../lib/store-context';
+import { studioPublishedRef } from '../studio/published';
 
 // ───────────────────────── 设置 ─────────────────────────
 
@@ -248,6 +249,7 @@ export async function emenuMenu(db: Db, deps: Deps): Promise<EmenuMenu> {
     },
     categories,
     later,
+    studio: await studioPublishedRef(db, 'emenu'),
     tables: await emenuTables(db),
   };
 }

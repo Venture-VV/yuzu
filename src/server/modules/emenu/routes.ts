@@ -27,7 +27,8 @@ export function registerEmenuRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/emenu/orders/by-key/:key', { preHandler: tablet }, async (req) => emenuOpLookup(sql, req.params));
   app.post('/api/emenu/orders/by-key/:key/abandon', { preHandler: tablet }, async (req) => abandonEmenuOrder(deps, req.params, req.body, req.actor, req.ip));
   // 图片的内容不会变（按内容去重、只追加）：浏览器长期缓存
-  app.get('/api/emenu/images/:id', { preHandler: guardAny('emenu.view', 'emenu.manage') }, async (req, reply) => {
+  // 设计师在工作台里画菜单页也要看菜品图（8.1.1）
+  app.get('/api/emenu/images/:id', { preHandler: guardAny('emenu.view', 'emenu.manage', 'studio.edit') }, async (req, reply) => {
     const img = await emenuImage(sql, parse(idParam, req.params).id);
     reply.header('content-type', img.mime).header('cache-control', 'private, max-age=31536000, immutable');
     return reply.send(img.data);
