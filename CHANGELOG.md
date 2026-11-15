@@ -1,5 +1,15 @@
 # 变更记录
 
+## v8.1.0 · 切到 8.1：小程序线交给 Gemini、线范围检查、8.1.1–8.1.2 的排期（UI 工作台、DeepSeek）
+
+店主 2026-11-15 定：8.0.20–8.0.22 那一批做完后切到 8.1.0（Z1：一大批新功能时加中间一位）。**功能与 8.0.22 一样，没有迁移、不改业务代码**；升级清单 `docs/RELEASE_V810.md`。
+
+- **版本号** 8.1.0（`package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml`、`src/server/config.ts`）。
+- **小程序线交给 Gemini**：`GEMINI.md`（Gemini 专用的补充：范围、分支 `gemini/*`、自测、红线、评论署名）与 `.gemini/settings.json`（Gemini CLI 同时读 `AGENTS.md` 与 `GEMINI.md`）；交接说明 `docs/HANDOFF_MP_GEMINI.md`（现状、店主要做的配置、发给 Gemini 的提示词、每个小程序 PR 的验收流程、发给 Codex 的通知）；`AGENTS.md`「四个 AI 按线协作」、ROADMAP 第 7 节、`docs/MINIPROGRAM.md` 第 8 节跟着改。
+- **线范围检查**（`.github/workflows/line-scope.yml` + `scripts/check-line-scope.mjs`）：小程序线的 PR（分支 `gemini/…`、标题【小程序线】或标签）只能改小程序线自己的目录、用例与文档；登记处（挂路由、权限表……）与新迁移（`NNN_mp_<用途>.sql`）列出来请主线复核；改核心、改已有迁移的不通过。用 `pull_request_target` 跑 main 上的检查，只比对文件名、不执行 PR 的代码。用例 `tests/line-scope.test.ts`（含在临时 git 仓库里走一遍命令行）；拿以往小程序线合并的 PR 回放都通过。
+- **店主的决定**：MD8 用 DeepSeek（8.1.1 做适配器），MD9 随之不再适用，MD10、MD19–MD21 确认；新的待确认 GX2–GX6（Gemini 接手的细节）、DS1–DS3（DeepSeek）、UI1–UI12（UI 工作台），都按默认写好。
+- **8.1.1–8.1.2 的排期**（`docs/SCHEDULE_V811.md`）与 **UI 工作台的设计**（`docs/WORKBENCH_V811.md`）：设计师在系统里直接改版面（编辑器与平板用同一个渲染器，所见即所得），预览、检查、店主发布即生效、一键回滚；8.1.1 先接平板电子菜单（内置的默认版面与现在逐屏一致），8.1.2 接员工食堂并给小程序线版面格式；点菜、下单、点单密码等逻辑不开放。迁移号：主线 `164`–`169`，小程序线预留 `170`–`179`。
+
 ## v8.0.22 · 多门店、多店多仓与调拨、多公司主体、价目按店、AI 辅助（这一批的收尾版）
 
 排期 `docs/SCHEDULE_V8020.md` 第 4 节，设计 `docs/MULTISTORE_V8022.md`、`docs/AI_V8022.md`，交接 `docs/HANDOFF_V8022.md`；迁移 `153`–`158`。**只有一家店、没配模型服务时与 8.0.21 一样。**

@@ -1,0 +1,40 @@
+# 线范围检查（8.1.0，docs/RELEASE_V810.md 第 3 节）：小程序线（店主 2026-11-15 起交给 Gemini）的 PR 只改小程序线自己的文件。
+#
+# 用 pull_request_target：跑的是 main 上的这份工作流与 scripts/check-line-scope.mjs，PR 自己改不了这个检查。
+# 安全：只把 PR 的提交取下来做 git diff（只看改了哪些文件），不检出、不执行 PR 里的任何代码，不用任何密钥，
+# 令牌只有读权限；标题、分支名、标签经环境变量传给脚本，不拼进命令行。
+# 主线等别的 PR 照样跑一遍，显示「不是小程序线的 PR」并通过（改到小程序线目录的只提醒）。
+name: 线范围
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: line-scope-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    name: 小程序线只改自己的文件
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # 检出的是目标分支（main）上的代码，不是 PR 的
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: 取下 PR 的提交（只取不检出）
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+      - name: 核对 PR 改了哪些文件
+        env:
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/check-line-scope.mjs --base "$BASE_SHA" --head refs/remotes/pr/head
