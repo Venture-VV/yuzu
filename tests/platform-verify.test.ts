@@ -2,8 +2,9 @@
 // 券码尾号 0000 不存在、2222 两份 ¥398、9999 撤销不了、5555 第一次撤销平台没回应、7777 平台对账单上没有；其余美团 ¥99（应结 ¥92）、抖音 ¥88。
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mockPlatformBillAdd } from '../src/server/integrations/platform-voucher';
-import { runVoucherReconcile } from '../src/server/modules/platform-verify';
+import { mockPlatformBillAdd, mockPlatformVoucher } from '../src/server/integrations/platform-voucher';
+import { hashRequest } from '../src/server/lib/idempotency';
+import { runVoucherReconcile, sweepVerifying } from '../src/server/modules/platform-verify';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -132,6 +133,43 @@ describe('平台验券', () => {
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     // 用在结账单上的不让撤（不去问平台）
     expect((await api(ctx.app, duty, 'POST', `/api/platform/verifications/${nine.id}/cancel`, { reason: '客人走了' })).body.error.code).toBe('COUPON_USED');
+  });
+
+  it('停在「核销中」（写了以后进程停了）：过 2 分钟去平台查——平台核销了的补成已核销，平台上没有的记没成功；原样重提也会去查；刚写的不碰', async () => {
+    const [me] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff ORDER BY id LIMIT 1`;
+    const stuck = async (c: string, minutesAgo: number, clientKey = randomUUID(), hash = 'x') =>
+      Number(
+        (
+          await ctx.sql<{ id: number }[]>`
+            INSERT INTO platform_verifications (platform, code, deal_name, face_cents, settle_cents, quantity, adapter, business_date, client_key, request_hash, staff_id, created_at, updated_at)
+            VALUES ('meituan', ${c}, '单人浴资（模拟）', 9900, 9200, 1, 'mock', CURRENT_DATE, ${clientKey}, ${hash}, ${me!.id},
+                    now() - make_interval(mins => ${minutesAgo}), now() - make_interval(mins => ${minutesAgo}))
+            RETURNING id`
+        )[0]!.id,
+      );
+    const statusOf = async (id: number) => (await ctx.sql<{ status: string; verifyNo: string | null }[]>`SELECT status, verify_no FROM platform_verifications WHERE id = ${id}`)[0]!;
+    // 平台其实核销了这一次（模拟：直接在模拟平台上按这一次的编号核销）
+    const c1 = code('4401');
+    const id1 = await stuck(c1, 5);
+    await mockPlatformVoucher.verify({ platform: 'meituan', code: c1, quantity: 1, outNo: String(id1).padStart(8, '0'), businessDate: '2026-11-15' });
+    // 平台上没有这一次
+    const id2 = await stuck(code('4402'), 5);
+    // 刚写的：不碰
+    const id3 = await stuck(code('4403'), 0);
+    const deps = { sql: ctx.sql, config: ctx.config };
+    expect(await sweepVerifying(deps, new Date())).toBe(2);
+    expect(await statusOf(id1)).toMatchObject({ status: 'verified', verifyNo: `MOCKV${String(id1).padStart(8, '0')}` });
+    expect(await statusOf(id2)).toMatchObject({ status: 'failed' });
+    expect(await statusOf(id3)).toMatchObject({ status: 'verifying' });
+    // 没成功的那张可以重新验
+    expect((await verify('meituan', code('4402'))).status).toBe(201);
+    // 原样重提（同一个操作编号）：也会去查、补上结果
+    const key = randomUUID();
+    const c4 = code('4404');
+    const id4 = await stuck(c4, 5, key, hashRequest({ platform: 'meituan', code: c4, expectedFaceCents: 9900 }));
+    const replay = await api(ctx.app, ctx.clerk, 'POST', '/api/platform/verify', { clientKey: key, platform: 'meituan', code: c4, expectedFaceCents: 9900 });
+    expect(replay.status, JSON.stringify(replay.body)).toBe(200);
+    expect(replay.body).toMatchObject({ id: id4, status: 'failed' });
   });
 
   it('确认作废：请求没到时作废，原请求晚到也不核销', async () => {

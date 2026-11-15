@@ -123,10 +123,16 @@ const looksLikeHeader = (cells: string[]) => {
 };
 
 function readStatement(f: z.infer<typeof FileInput>, saved: ColumnMap) {
-  const sheet = readSheet({ csv: f.csv, xlsxBase64: f.xlsxBase64 }, { dateColumns: DATE_HEADERS, findHeader: looksLikeHeader, headerScan: 30 });
-  // 列怎么对：页面上传来的 → 这个账户记住的（表头都还在）→ 按同义词认
-  const savedFits = Object.keys(saved).length > 0 && Object.values(saved).every((h) => !h || sheet.header.includes(h));
-  const map: ColumnMap = f.columnMap ?? (savedFits ? saved : detectColumns(sheet.header));
+  // 列怎么对：页面上传来的 → 这个账户记住的（表头都还在）→ 按同义词认；Excel 存成序号的日期按对上的那一列换
+  const mapFor = (header: string[]): ColumnMap => {
+    const savedFits = Object.keys(saved).length > 0 && Object.values(saved).every((h) => !h || header.includes(h));
+    return f.columnMap ?? (savedFits ? saved : detectColumns(header));
+  };
+  const sheet = readSheet(
+    { csv: f.csv, xlsxBase64: f.xlsxBase64 },
+    { dateColumns: DATE_HEADERS, dateColumnsFor: (header) => [mapFor(header).date], findHeader: looksLikeHeader, headerScan: 30 },
+  );
+  const map = mapFor(sheet.header);
   const problem = columnMapProblem(map);
   const parsed = problem ? { lines: [], problems: [] } : parseStatementRows(sheet.header, sheet.rows.map((r) => ({ row: r.row, cells: r.cells })), map);
   return { sheet, map, problem, ...parsed };
@@ -258,7 +264,10 @@ async function candidates(db: Db, types: MatchTargetType[], filter: { amountMax?
       // （导一份早的对账单时，不会拿几个月前同户名同金额的一笔去对后来才导出的批次）
       rows = await db`
         SELECT i.id, b.batch_no || '-' || i.line_no AS doc_no, coalesce(b.exported_at, b.created_at)::date::text AS date, i.amount_cents::text AS amount_cents, i.payee_name AS party,
-               i.status IN ('removed', 'failed') OR b.status = 'voided' AS voided
+               -- 这一行记的付款后来冲销了，也算对象失效（与直接对上付款的一样标出来，Codex 审查 55ccc5e 后补）
+               i.status IN ('removed', 'failed') OR b.status = 'voided'
+                 OR (i.payment_kind = 'payment' AND EXISTS (SELECT 1 FROM payments p WHERE p.id = i.payment_id AND p.status = 'voided'))
+                 OR (i.payment_kind = 'payout' AND EXISTS (SELECT 1 FROM contract_payouts o WHERE o.id = i.payment_id AND o.status = 'voided')) AS voided
         FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id
         WHERE ${only ? db`TRUE` : db`b.status = 'exported' AND i.status = 'pending' AND coalesce(b.exported_at, b.created_at)::date BETWEEN ${filter.from}::date AND ${filter.to}::date AND ${notMatched(t, db`i.id`)}`}
           AND ${amt(db`i.amount_cents`)} AND ${pick(db`i.id`)}`;

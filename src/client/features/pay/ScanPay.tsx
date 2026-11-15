@@ -350,15 +350,16 @@ function UnsettledPayDialog({ open, onClose, rows, canRefund }: { open: boolean;
                       退 {formatYuan(r.amountCents)}
                       {r.refundNo ? `（退款单 ${r.refundNo}）` : ''}：{r.failReason ?? r.reason}
                     </span>
+                    {/* 退款中的（记下以后没去成支付方，系统每分钟也会自己再退一次）也能手动再退：同一个退款编号，支付方只退一次 */}
+                    {canRefund && (r.status === 'failed' || r.status === 'pending') && (
+                      <Button size="sm" variant="ghost" onClick={() => void act(() => api.post(`/api/pay/refunds/${r.id}/resolve`, { action: 'retry' }), '已重新去支付方退')} data-testid={`pay-refund-retry-${r.id}`}>
+                        {r.status === 'pending' ? '再去退一次' : '重试'}
+                      </Button>
+                    )}
                     {canRefund && r.status === 'failed' && (
-                      <>
-                        <Button size="sm" variant="ghost" onClick={() => void act(() => api.post(`/api/pay/refunds/${r.id}/resolve`, { action: 'retry' }), '已重新去支付方退')}>
-                          重试
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setOffline(r.id)}>
-                          线下已退
-                        </Button>
-                      </>
+                      <Button size="sm" variant="ghost" onClick={() => setOffline(r.id)}>
+                        线下已退
+                      </Button>
                     )}
                   </div>
                 ))}

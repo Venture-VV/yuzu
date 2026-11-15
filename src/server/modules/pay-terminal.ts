@@ -360,6 +360,21 @@ export async function refundUnconsumed(deps: Deps, txId: number, raw: unknown, a
 }
 
 /** 原路退款失败的：重试，或改成线下已退（写明怎么退的） */
+/** 原路退款请求发出去以后等这么久还停在「退款中」，才再去支付方退一次（同一个退款编号，支付方只退一次） */
+export const REFUND_RESUME_AFTER_MS = 60_000;
+
+/**
+ * 每分钟：停在「退款中」超过 1 分钟的（记下退款以后进程停了、没去支付方退）再去退一次（Codex 审查 55ccc5e 后补）。
+ * 用原来的退款编号，支付方按它去重；没配置扫码收款时记「退款失败」，页面上可以改「线下已退」。
+ */
+export async function sweepRefunds(deps: Deps, now = new Date()): Promise<number> {
+  const rows = await deps.sql<{ id: number }[]>`
+    SELECT id FROM pay_refunds WHERE status = 'pending' AND updated_at < ${new Date(now.getTime() - REFUND_RESUME_AFTER_MS)} ORDER BY id LIMIT 50`;
+  if (!rows.length) return 0;
+  await processRefunds(deps, rows.map((r) => Number(r.id)));
+  return rows.length;
+}
+
 export async function resolveRefund(deps: Deps, refundId: number, raw: unknown, actor: Actor, ip?: string): Promise<PayTxView> {
   const input = parse(z.discriminatedUnion('action', [z.object({ action: z.literal('retry') }), z.object({ action: z.literal('offline'), note: Reason })]), raw);
   const txId = await deps.sql.begin(async (tx) => {

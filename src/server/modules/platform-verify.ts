@@ -125,6 +125,8 @@ export async function verifyVoucher(deps: Deps, raw: unknown, actor: Actor, ip?:
   const [prev0] = await deps.sql<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM platform_verifications WHERE client_key = ${input.clientKey}`;
   if (prev0) {
     if (prev0.requestHash !== requestHash) throw conflict('IDEMPOTENCY_CONFLICT', '这个操作编号已经用在另一次验券上，请刷新后重新验券');
+    // 还停在「核销中」、又过了等结果的时间：去平台查一次补上结果（只查，不再核销）
+    await resumeVerification(deps, Number(prev0.id));
     return { verification: await verificationView(deps.sql, Number(prev0.id)), replayed: true };
   }
   // 先看本店有没有登记过（不加锁，只为给个明白的提示；锁里还会再核对一次）
@@ -170,6 +172,50 @@ export async function verifyVoucher(deps: Deps, raw: unknown, actor: Actor, ip?:
     }
   }
   return { verification: await verificationView(deps.sql, r.id), replayed: r.replayed };
+}
+
+// ───────────────────────── 停在「核销中」的补结果 ─────────────────────────
+
+/** 核销请求发出去以后等这么久还没写回结果，才去平台查（比对外调用的超时长，免得和还在路上的那一次抢着写） */
+export const VERIFY_RESUME_AFTER_MS = 2 * 60_000;
+
+/**
+ * 写了「核销中」、还没写回结果（进程停了、重启了）：按我们的核销编号去平台查（只查，不再核销）——
+ * 平台核销了的记「已核销」，平台没有这一次的记「没成功」（券还能再验），查不到结果的留着下次再查。
+ * 只处理「核销中」超过 VERIFY_RESUME_AFTER_MS 的；结果回写只锁验券一行。返回是否有了结果。
+ */
+export async function resumeVerification(deps: Deps, id: number, now = new Date()): Promise<boolean> {
+  const a = platformVoucherAdapter(deps.config.integrations);
+  if (!a) return false;
+  const [v] = await deps.sql<{ status: string; platform: VoucherPlatform; code: string; createdAt: Date }[]>`
+    SELECT status, platform, code, created_at FROM platform_verifications WHERE id = ${id}`;
+  if (!v || v.status !== 'verifying' || now.getTime() - new Date(v.createdAt).getTime() < VERIFY_RESUME_AFTER_MS) return false;
+  const outNo = String(id).padStart(8, '0');
+  const r = await withCallLog(
+    deps.sql,
+    { kind: 'platform_voucher', provider: v.platform, action: 'query', mode: a.mode, refType: 'platform_verification', refId: id, request: { code: v.code, outNo } },
+    () => a.query({ platform: v.platform, code: v.code, outNo }),
+    (x) => ({ status: x.status, ...(x.status === 'verified' ? { verifyNo: x.verifyNo } : x.status === 'unknown' ? { error: x.error } : {}) }),
+  ).catch((e: unknown) => ({ status: 'unknown' as const, error: e instanceof Error ? e.message : String(e) }));
+  if (r.status === 'unknown') return false;
+  return deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    const [cur] = await tx<{ status: string }[]>`SELECT status FROM platform_verifications WHERE id = ${id} FOR UPDATE`;
+    if (cur?.status !== 'verifying') return false;
+    if (r.status === 'verified') await tx`UPDATE platform_verifications SET status = 'verified', verify_no = ${r.verifyNo}, verified_at = now(), updated_at = now() WHERE id = ${id}`;
+    else await tx`UPDATE platform_verifications SET status = 'failed', fail_reason = '平台上没有这一次核销（中途断了，没有核销），可以重新验券', updated_at = now() WHERE id = ${id}`;
+    return true;
+  });
+}
+
+/** 每分钟：停在「核销中」超过 2 分钟的去平台查结果（没配置平台验券时什么都不做） */
+export async function sweepVerifying(deps: Deps, now = new Date()): Promise<number> {
+  if (!platformVoucherAdapter(deps.config.integrations)) return 0;
+  const rows = await deps.sql<{ id: number }[]>`
+    SELECT id FROM platform_verifications WHERE status = 'verifying' AND created_at < ${new Date(now.getTime() - VERIFY_RESUME_AFTER_MS)} ORDER BY id LIMIT 50`;
+  let n = 0;
+  for (const r of rows) if (await resumeVerification(deps, Number(r.id), now)) n += 1;
+  return n;
 }
 
 // ───────────────────────── 结账用掉、反结账解开 ─────────────────────────

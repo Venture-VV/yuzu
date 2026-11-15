@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { detectColumns, parseStatementRows } from '../src/shared/bank';
 import { FENCED_OPS } from '../src/server/lib/fences';
 import { createStaff } from '../src/server/modules/staff';
+import { buildWorkbook } from '../src/server/lib/xlsx';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -126,6 +127,32 @@ describe('银行流水', () => {
     // 账户记住了列怎么对
     expect(all.accounts[0].columnMap).toMatchObject({ date: '交易日期', out: '借方发生额', in: '贷方发生额' });
     expect(FENCED_OPS).toContain('bank_import');
+  });
+
+  it('Excel 对账单：日期存成序号的，按对上的那一列换（手动对的英文表头、带说明的中文表头都认）', async () => {
+    // 2026-11-15 的 Excel 序号是 46341
+    const serial = (iso: string) => Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.UTC(1899, 11, 30)) / 86_400_000);
+    expect(serial('2026-11-15')).toBe(46_341);
+    const book = (header: string[], rows: (string | number)[][]) =>
+      buildWorkbook([{ name: '流水', widths: header.map(() => 14), rows: [{ cells: header }, ...rows.map((cells) => ({ cells }))] }]).toString('base64');
+    // 手动对的英文表头
+    const en = await api(ctx.app, payer, 'POST', '/api/erp/bank/import/preview', {
+      accountId,
+      fileName: 'en.xlsx',
+      xlsxBase64: book(['Txn Date', 'Debit', 'Credit', 'Counterparty', 'Ref'], [[serial(today), 123.45, '', '某供应商', 'EN-0001']]),
+      columnMap: { date: 'Txn Date', out: 'Debit', in: 'Credit', counterparty: 'Counterparty', ref: 'Ref' },
+    });
+    expect(en.status, JSON.stringify(en.body)).toBe(200);
+    expect(en.body.problems ?? []).toEqual([]);
+    expect(en.body.lines[0]).toMatchObject({ txnDate: today, direction: 'out', amountCents: 12_345 });
+    // 带说明的中文表头（按同义词认得出来，但不在固定的日期列名单里）
+    const zh = await api(ctx.app, payer, 'POST', '/api/erp/bank/import/preview', {
+      accountId,
+      fileName: 'zh.xlsx',
+      xlsxBase64: book(['交易日期（年/月/日）', '借方发生额', '贷方发生额', '对方户名'], [[serial(today), '', 88, '某客户']]),
+    });
+    expect(zh.status, JSON.stringify(zh.body)).toBe(200);
+    expect(zh.body.lines[0]).toMatchObject({ txnDate: today, direction: 'in', amountCents: 8_800 });
   });
 
   it('人工勾对：候选里有同金额的；合计超过流水拒绝；同一笔不能对两条；撤销写原因；不用对的（利息）要写原因', async () => {

@@ -226,9 +226,21 @@ const FileInput = z
   .refine((v) => (v.csv === undefined) !== (v.xlsxBase64 === undefined), '请选一份 CSV 或 Excel 文件');
 
 function readOrders(f: z.infer<typeof FileInput>, saved: OtaColumnMap) {
-  const sheet = readSheet({ csv: f.csv, xlsxBase64: f.xlsxBase64 }, { dateColumns: ['入住日期', '入住日', '离店日期', '离店日', '到店日期'], findHeader: (cells) => !!detectOtaColumns(cells).orderNo, headerScan: 20 });
-  const savedFits = Object.keys(saved).length > 0 && Object.values(saved).every((h) => !h || sheet.header.includes(h));
-  const map: OtaColumnMap = f.columnMap ?? (savedFits ? saved : detectOtaColumns(sheet.header));
+  // 列怎么对：页面上传来的 → 这个渠道记住的（表头都还在）→ 按同义词认；Excel 存成序号的日期按对上的入住、离店两列换
+  const mapFor = (header: string[]): OtaColumnMap => {
+    const savedFits = Object.keys(saved).length > 0 && Object.values(saved).every((h) => !h || header.includes(h));
+    return f.columnMap ?? (savedFits ? saved : detectOtaColumns(header));
+  };
+  const sheet = readSheet(
+    { csv: f.csv, xlsxBase64: f.xlsxBase64 },
+    {
+      dateColumns: ['入住日期', '入住日', '离店日期', '离店日', '到店日期'],
+      dateColumnsFor: (header) => [mapFor(header).checkin, mapFor(header).checkout],
+      findHeader: (cells) => !!detectOtaColumns(cells).orderNo,
+      headerScan: 20,
+    },
+  );
+  const map = mapFor(sheet.header);
   const problem = otaColumnProblem(map);
   const parsed = problem ? { orders: [], problems: [] } : parseOtaRows(sheet.header, sheet.rows.map((r) => ({ row: r.row, cells: r.cells })), map);
   const hash = createHash('sha256')

@@ -880,5 +880,12 @@ describe('批量付款（8.0.21）', () => {
     // 作废以后申请又能单独处理
     await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b5.id}/void`, { version: b5.version, reason: '货款已经单独付了一部分', confirmNotPaid: true }), 200);
     expect((await payReq(r4.id, { amountCents: 6_000, allocations: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 6_000 }] })).status).toBe(201);
+
+    // 批量付款对上流水、记了账以后，那笔付款被冲销：流水那一行要标「对象已失效」（不再显示对平了）
+    const lineOf = async () =>
+      ((await ok(api(ctx.app, payer, 'GET', '/api/erp/bank?status=all'), 200)).lines as { bankRef: string; targetVoided: boolean; status: string }[]).find((l) => l.bankRef === 'PL-T-0001')!;
+    expect(await lineOf()).toMatchObject({ status: 'matched', targetVoided: false });
+    await ok(api(ctx.app, payer, 'POST', `/api/payables/payments/${done.items[0].paymentId}/void`, { reason: '流水对错了' }), 200);
+    expect(await lineOf()).toMatchObject({ status: 'matched', targetVoided: true });
   });
 });

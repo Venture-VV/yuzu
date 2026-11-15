@@ -2,7 +2,7 @@
 // 付款码尾号 0000 失败、1111 第二次查询成功、2222 一直在等、3333 退款失败，其余直接成功。
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { sweepPaying } from '../src/server/modules/pay-terminal';
+import { sweepPaying, sweepRefunds } from '../src/server/modules/pay-terminal';
 import { createStaff } from '../src/server/modules/staff';
 import { api, createMember, login, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
 
@@ -112,6 +112,31 @@ describe('扫码收款', () => {
     await api(ctx.app, ctx.clerk, 'POST', '/api/shifts', { openingCash: 0 });
     // 那位客人用现金结掉
     expect((await checkout([v], await total([v]), [{ method: 'cash', amount: await total([v]) }])).status).toBe(200);
+  });
+
+  it('原路退款停在「退款中」（记下以后进程停了）：每分钟再去退一次（同一个退款编号）；刚记的不碰；页面上也能手动再退', async () => {
+    const paid = await scan({ amountCents: 500 });
+    expect(paid.body.status, JSON.stringify(paid.body)).toBe('paid');
+    const [me] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff ORDER BY id LIMIT 1`;
+    const stuck = async (no: string, minutesAgo: number) =>
+      Number(
+        (
+          await ctx.sql<{ id: number }[]>`
+            INSERT INTO pay_refunds (tx_id, out_refund_no, amount_cents, reason, staff_id, created_at, updated_at)
+            VALUES (${paid.body.id}, ${no}, 100, '中途断了', ${me!.id}, now() - make_interval(mins => ${minutesAgo}), now() - make_interval(mins => ${minutesAgo}))
+            RETURNING id`
+        )[0]!.id,
+      );
+    const old = await stuck(`YZRSTUCK${String(Date.now()).slice(-6)}A`, 5);
+    const recent = await stuck(`YZRSTUCK${String(Date.now()).slice(-6)}B`, 0);
+    expect(await sweepRefunds({ sql: ctx.sql, config: ctx.config }, new Date())).toBe(1);
+    const statusOf = async (id: number) => (await ctx.sql<{ status: string }[]>`SELECT status FROM pay_refunds WHERE id = ${id}`)[0]!.status;
+    expect(await statusOf(old)).toBe('done');
+    expect(await statusOf(recent)).toBe('pending');
+    // 页面上「再去退一次」：退款中的也能重试
+    const retried = await api(ctx.app, duty, 'POST', `/api/pay/refunds/${recent}/resolve`, { action: 'retry' });
+    expect(retried.status, JSON.stringify(retried.body)).toBe(200);
+    expect(await statusOf(recent)).toBe('done');
   });
 
   it('反结账解开用过的扫码收款（不自动退钱），挂到重新结账；退款单原路退回、退款失败的改线下已退；有原路退回的退款单不能作废', async () => {

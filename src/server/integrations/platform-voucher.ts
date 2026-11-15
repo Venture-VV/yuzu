@@ -28,6 +28,11 @@ export interface PlatformVoucher {
   prepare(a: { platform: VoucherPlatform; code: string }): Promise<{ ok: true; info: VoucherInfo } | { ok: false; error: string }>;
   verify(a: { platform: VoucherPlatform; code: string; quantity: number; outNo: string; businessDate: string }): Promise<{ status: 'verified'; verifyNo: string } | { status: 'failed' | 'unknown'; error: string }>;
   cancel(a: { platform: VoucherPlatform; code: string; verifyNo: string }): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * 按我们的核销编号（outNo）查这一次核销在平台上的结果，不改平台上的任何东西（8.0.21 Codex 审查 55ccc5e 后补）：
+   * 进程在「写了核销中、还没写回结果」时停了，用它补上结果——不能再调一次 verify（客人可能已经走了，会把券核销掉）
+   */
+  query(a: { platform: VoucherPlatform; code: string; outNo: string }): Promise<{ status: 'verified'; verifyNo: string } | { status: 'not_found' } | { status: 'unknown'; error: string }>;
   bill(a: { platform: VoucherPlatform; businessDate: string }): Promise<VoucherBillLine[]>;
 }
 
@@ -66,6 +71,10 @@ export const mockPlatformVoucher: PlatformVoucher = {
     const v = mockVerified.get(`${platform}:${code}`);
     if (v) v.cancelled = true;
     return { ok: true };
+  },
+  async query({ platform, code, outNo }) {
+    const v = mockVerified.get(`${platform}:${code}`);
+    return v && !v.cancelled && v.verifyNo === `MOCKV${outNo}` ? { status: 'verified', verifyNo: v.verifyNo } : { status: 'not_found' };
   },
   async bill({ platform, businessDate }) {
     return [...mockVerified.values()]

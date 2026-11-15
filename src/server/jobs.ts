@@ -20,8 +20,8 @@ import { runWecomWeekly } from './modules/wecom';
 import { runCanteenReminders } from './modules/canteen/push';
 import { MEAL_LABELS } from '@shared/canteen';
 import { WECOM_MAX_ATTEMPTS } from '@shared/wecom';
-import { sweepPaying } from './modules/pay-terminal';
-import { runVoucherReconcile } from './modules/platform-verify';
+import { sweepPaying, sweepRefunds } from './modules/pay-terminal';
+import { runVoucherReconcile, sweepVerifying } from './modules/platform-verify';
 
 export interface JobLog {
   info: (msg: string) => void;
@@ -158,6 +158,20 @@ export async function runMinuteJobs(
     if (n > 0) log.info(`扫码收款：${n} 笔支付中的出了结果`);
   } catch (error) {
     log.error('扫码收款的查询失败，下一分钟重试', error);
+  }
+  // 扫码收款的原路退款：停在「退款中」超过 1 分钟的再去支付方退一次（同一个退款编号）
+  try {
+    const n = await sweepRefunds({ sql, config }, now);
+    if (n > 0) log.info(`扫码收款：${n} 笔退款中的又去支付方退了一次`);
+  } catch (error) {
+    log.error('扫码收款的原路退款重试失败，下一分钟再试', error);
+  }
+  // 平台验券：停在「核销中」超过 2 分钟的去平台查结果（只查，不再核销）
+  try {
+    const n = await sweepVerifying({ sql, config }, now);
+    if (n > 0) log.info(`平台验券：${n} 张核销中的补上了结果`);
+  } catch (error) {
+    log.error('平台验券的核销结果查询失败，下一分钟重试', error);
   }
   // 平台验券（8.0.21）：每天过了设定的时间（默认 06:10），按平台拉前一个营业日的核销明细对账（没配置时什么都不做）
   try {
