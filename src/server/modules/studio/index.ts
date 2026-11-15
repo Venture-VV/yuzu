@@ -168,6 +168,12 @@ const PublishInput = z.object({
 /** 定时发布最早 2 分钟以后、最晚 60 天以内 */
 const SCHEDULE_MIN_MS = 2 * 60_000;
 const SCHEDULE_MAX_MS = 60 * 86_400_000;
+/**
+ * 离生效不到这么久的定时发布不能再撤（8.1.2，PR #116 测试会话在 045560f 报的 P2）：撤销要等「界面 + 门店」的版本锁、写完再提交，
+ * 这期间到了点，平板、员工手机可能已经读到这一版在用；提交以后再撤，现在用的那一版又退回去。锁最多等 5 秒、每条语句最多 10 秒，
+ * 留一分钟足够。
+ */
+const CANCEL_CUTOFF_SEC = 60;
 const CancelInput = z.object({ reason: z.string().trim().max(200, '最多 200 字').default('') });
 const RollbackInput = z.object({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'), version: z.number().int().min(1), note: z.string().trim().max(200, '最多 200 字').default('') });
 
@@ -243,8 +249,8 @@ async function publish(deps: Deps, surface: StudioSurface, body: unknown, ctx: O
       SELECT doc, rev FROM studio_designs WHERE surface = ${surface} AND store_id = ${storeId} FOR UPDATE`;
     if (!design || Number(design.rev) !== input.rev) throw conflict('STUDIO_REV', '草稿在你看过以后又改过：刷新、看一眼再发布', { rev: design ? Number(design.rev) : 0 });
     if (effectiveAt) {
-      // 按数据库的时钟核对：至少 2 分钟以后、60 天以内
-      const [clock] = await tx<{ now: string }[]>`SELECT now() AS now`;
+      // 按数据库的时钟核对：至少 2 分钟以后、60 天以内（等过锁，用此刻的时钟 clock_timestamp()，不用事务开始的 now()）
+      const [clock] = await tx<{ now: string }[]>`SELECT clock_timestamp() AS now`;
       const ahead = Date.parse(effectiveAt) - new Date(clock!.now).getTime();
       if (ahead < SCHEDULE_MIN_MS) throw unprocessable('STUDIO_SCHEDULE', '定时发布的时间至少要在 2 分钟以后；马上要换就选「现在生效」');
       if (ahead > SCHEDULE_MAX_MS) throw unprocessable('STUDIO_SCHEDULE', '定时发布最多定在 60 天以内');
@@ -275,21 +281,26 @@ async function rollback(deps: Deps, surface: StudioSurface, body: unknown, ctx: 
   });
 }
 
-/** 撤销定时发布（8.1.2）：只撤还没生效的那一版（撤了永远不生效）；撤过的原样返回 */
+/**
+ * 撤销定时发布（8.1.2）：只撤还没生效、离生效还有一分钟以上的那一版（撤了永远不生效）；撤过的原样返回。
+ * 生效没有按锁之后此刻的时钟（clock_timestamp()）判断——事务开始的 now() 在等锁时不走，等过了点还会当成没生效。
+ */
 async function cancelScheduled(deps: Deps, surface: StudioSurface, version: number, body: unknown, ctx: OpContext): Promise<StudioVersionView> {
   const input = parse(CancelInput, body ?? {});
   const storeId = currentStoreId();
   return deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     await lockVersions(tx, surface, storeId);
-    const [v] = await tx<{ id: number; effectiveAt: string | null; live: boolean; cancelled: boolean }[]>`
-      SELECT v.id, v.effective_at, coalesce(v.effective_at, v.published_at) <= now() AS live,
+    const [v] = await tx<{ id: number; effectiveAt: string | null; live: boolean; imminent: boolean; cancelled: boolean }[]>`
+      SELECT v.id, v.effective_at, coalesce(v.effective_at, v.published_at) <= clock_timestamp() AS live,
+             coalesce(v.effective_at, v.published_at) <= clock_timestamp() + make_interval(secs => ${CANCEL_CUTOFF_SEC}) AS imminent,
              EXISTS (SELECT 1 FROM studio_version_cancels c WHERE c.version_id = v.id) AS cancelled
       FROM studio_versions v WHERE v.surface = ${surface} AND v.store_id = ${storeId} AND v.version = ${version}`;
     if (!v) throw notFound(`没有第 ${version} 版`);
     if (v.cancelled) return (await versionById(tx, Number(v.id)))!;
     if (!v.effectiveAt) throw unprocessable('STUDIO_NOT_SCHEDULED', `第 ${version} 版不是定时发布的：要换回去就「回到」上一版`);
     if (v.live) throw unprocessable('STUDIO_ALREADY_LIVE', `第 ${version} 版已经生效了，撤不了：要换回去就「回到」上一版`);
+    if (v.imminent) throw unprocessable('STUDIO_ALREADY_LIVE', `第 ${version} 版不到一分钟就要生效了，来不及撤：生效以后要换回去就「回到」上一版`);
     await tx`INSERT INTO studio_version_cancels (version_id, cancelled_by, reason) VALUES (${v.id}, ${ctx.actor.id}, ${input.reason})`;
     await writeAudit(tx, {
       staffId: ctx.actor.id,

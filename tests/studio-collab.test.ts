@@ -104,6 +104,61 @@ describe('定时发布（GZ27）', () => {
   });
 });
 
+describe('定时发布的撤销与生效时间（PR #116 测试会话在 045560f 报的 P2）', () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  async function waitFor(check: () => Promise<boolean>, what: string) {
+    for (let i = 0; i < 100; i += 1) {
+      if (await check()) return;
+      await sleep(50);
+    }
+    throw new Error(`等不到：${what}`);
+  }
+  /** 员工食堂这个界面直接写一版（不影响上面平板菜单的几版）；生效时间是「此刻 + 几秒」，空 = 发布时就生效 */
+  async function insertVersion(version: number, inSeconds: number | null) {
+    const [me] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'sheji1'`;
+    const [row] = await ctx.sql<{ id: number; effectiveAt: string | null }[]>`
+      INSERT INTO studio_versions (surface, store_id, version, kind, doc, doc_hash, note, screens_changed, client_key, request_hash, published_by, effective_at)
+      VALUES ('canteen', 1, ${version}, 'publish', ${ctx.sql.json(defaultStudioDoc('canteen') as never)}, ${'c'.repeat(64)}, ${`第 ${version} 版`}, '{home}', ${randomUUID()}, 'x', ${me!.id},
+              ${inSeconds === null ? null : ctx.sql`clock_timestamp() + make_interval(secs => ${inSeconds})`})
+      RETURNING id, effective_at`;
+    return row!;
+  }
+
+  it('撤销排在版本锁后面、等到过了生效时间：按锁之后此刻的时钟判断，已经生效的撤不了，现在用的还是定时的那一版', async () => {
+    await insertVersion(1, null);
+    const v2 = await insertVersion(2, 2);
+    expect((await studioPublishedRef(ctx.sql, 'canteen'))?.version).toBe(1);
+    // 另一个连接占着「员工食堂 + 本店」的版本锁（像另一次发布正在进行）
+    const holder = await ctx.sql.reserve();
+    try {
+      await holder`SELECT pg_advisory_lock(hashtextextended(${'studio_versions:canteen:1'}, 0))`;
+      const pending = d('POST', '/api/studio/canteen/versions/2/cancel', { reason: '排在锁后面' });
+      await waitFor(async () => (await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`)[0]!.n > 0, '撤销在等版本锁');
+      // 等到数据库的时钟过了生效时间，第 2 版已经是现在用的那一版
+      await waitFor(async () => (await ctx.sql<{ ok: boolean }[]>`SELECT ${v2.effectiveAt}::timestamptz <= clock_timestamp() AS ok`)[0]!.ok, '第 2 版到点');
+      expect((await studioPublishedRef(ctx.sql, 'canteen'))?.version).toBe(2);
+      await holder`SELECT pg_advisory_unlock(hashtextextended(${'studio_versions:canteen:1'}, 0))`;
+      const res = await pending;
+      expect([res.status, res.body.error?.code]).toEqual([422, 'STUDIO_ALREADY_LIVE']);
+    } finally {
+      holder.release();
+    }
+    expect((await ctx.sql`SELECT 1 FROM studio_version_cancels c JOIN studio_versions v ON v.id = c.version_id WHERE v.surface = 'canteen'`).length).toBe(0);
+    expect((await studioPublishedRef(ctx.sql, 'canteen'))?.version).toBe(2);
+  });
+
+  it('离生效不到一分钟的撤不了（来不及：撤销提交以前可能已经到点）；一分钟以上的照常能撤', async () => {
+    await insertVersion(3, 30);
+    const soon = await d('POST', '/api/studio/canteen/versions/3/cancel', {});
+    expect([soon.status, soon.body.error?.code]).toEqual([422, 'STUDIO_ALREADY_LIVE']);
+    expect(soon.body.error.message).toContain('不到一分钟');
+    await insertVersion(4, 5 * 60);
+    const later = await d('POST', '/api/studio/canteen/versions/4/cancel', {});
+    expect(later.status, JSON.stringify(later.body)).toBe(200);
+    expect(later.body.cancelledAt).not.toBeNull();
+  });
+});
+
 describe('批注（GZ28）', () => {
   it('在画布上留言、回复、标解决与重新打开；同一个操作编号原样重提返回那一条；回复不能再回复', async () => {
     const key = randomUUID();

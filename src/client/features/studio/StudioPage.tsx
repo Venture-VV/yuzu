@@ -1224,7 +1224,7 @@ function VersionsDialog({
                     {neverLive(v) ? '现在就用这一版' : '回到这一版'}
                   </Button>
                 )}
-                {v.effectiveAt && !v.cancelledAt && new Date(v.effectiveAt).getTime() > Date.now() && canPublish && (
+                {v.effectiveAt && !v.cancelledAt && new Date(v.effectiveAt).getTime() > Date.now() + 60_000 && canPublish && (
                   <Button size="sm" variant="ghost" onClick={() => void cancel(v)} data-testid={`studio-cancel-${v.version}`}>
                     撤销定时
                   </Button>
