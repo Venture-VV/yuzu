@@ -45,7 +45,7 @@ import { loadSettings } from '../settings';
 import { allowedStores } from '../stores';
 import { postWecom, truncateBytes, weeklyDigestLines } from '../wecom';
 import { buildDailyFacts, factsHash, SUMMARY_SYSTEM, summaryPrompt } from './facts';
-import { aiMaskText, maskForAi } from './mask';
+import { aiMaskText, mapStrings, maskForAi, memberTextMasker } from './mask';
 import { AI_MAX_DAYS, aiTools, questionSystem } from './tools';
 
 export const AI_RULES_KEY = 'ai_rules';
@@ -373,7 +373,10 @@ async function answerQuestion(deps: Deps, id: number, a: { actor: Actor; storeId
       const today = await todayHere(sql, config);
       const tools = aiTools({ sql, today, timeZone: config.timezone, can: (p) => can(a.actor, p), erp, stores, currentStoreId: a.storeId });
       const storeName = stores.find((x) => x.id === a.storeId)?.name ?? '本店';
-      const r = await a.provider.ask({ system: questionSystem(today, storeName, stores.length > 1), question: aiMaskText(a.question), tools, maxIterations: AI_MAX_TOOL_ROUNDS });
+      // 问题是员工写的自由文字：库里有的会员姓名、会员号先打码，再打码手机号、证件号（取不出会员档案就不发）
+      const maskMembers = await memberTextMasker(sql);
+      const question = aiMaskText(maskMembers(a.question));
+      const r = await a.provider.ask({ system: questionSystem(today, storeName, stores.length > 1), question, tools, maxIterations: AI_MAX_TOOL_ROUNDS });
       const answer = r.text.trim().slice(0, 4000) || '（模型没有写出答案）';
       await recordCall(sql, { ...base, request: { tools: r.calls.map((c) => c.name) }, ok: true, result: { ...r.usage, rounds: r.calls.length, chars: answer.length }, durationMs: Date.now() - started });
       await sql`
@@ -545,8 +548,9 @@ export function registerAiRoutes(app: FastifyInstance, deps: Deps) {
     if (!rules.enabled || !rules.contractHints) throw conflict('AI_DISABLED', '合同条款提示已关闭（后台「对外接口」→ AI 辅助里打开）');
     const provider = aiProvider(config, rules);
     if (!provider) throw conflict('AI_NOT_CONFIGURED', '还没配置模型服务（服务器 .env 的 YUZU_AI_API_KEY），条款提示用不了');
-    // 发出去之前整个打码（正文里可能有电话、身份证号）
-    const material = maskForAi({ category: input.category, counterparty: input.counterparty, content: input.content ?? null, body: input.body ?? '' });
+    // 发出去之前整个打码：正文、备注里可能有会员的姓名、会员号（按会员档案找）、电话、身份证号
+    const maskMembers = await memberTextMasker(sql);
+    const material = maskForAi(mapStrings({ category: input.category, counterparty: input.counterparty, content: input.content ?? null, body: input.body ?? '' }, maskMembers));
     const started = Date.now();
     const base = { kind: 'ai' as const, provider: providerName(provider), action: 'contract_hints', mode: provider.mode, refType: null, refId: null, staffId: req.actor.id };
     try {

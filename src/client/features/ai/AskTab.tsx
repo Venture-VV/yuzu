@@ -121,7 +121,7 @@ export function AskTab() {
             {session.store.name} · 今天问了 {status.data?.usedToday ?? 0} / {rules?.dailyQuestionLimit ?? '—'} 次
           </span>
         </div>
-        <p className="mb-3 text-[13px] text-ink-3">用一句话问经营数据：AI 只能用看板上的只读报表取数（你看得到的那几张），答案里会写用了哪张、哪个日期范围。数字以看板为准。</p>
+        <p className="mb-3 text-[13px] text-ink-3">用一句话问经营数据：AI 只能用看板上的只读报表取数（你看得到的那几张），答案里会写用了哪张、哪个日期范围；数字以看板为准。问数只看汇总的数、查不了某一位会员——问题里的会员姓名、会员号、手机号会先打码再发出去。</p>
         {off ? (
           <Notice tone="info" title="问数已关闭">店主可以在后台「对外接口」→ AI 辅助里打开。</Notice>
         ) : status.data?.mode === 'off' ? (

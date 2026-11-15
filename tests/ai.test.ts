@@ -10,7 +10,7 @@ import { readSnapshot } from '../src/server/db';
 import { AiRefused, claudeProvider, mockAiProvider, type AiProvider, type AiTool } from '../src/server/integrations/ai';
 import { runAiSummaries, setAiProviderForTests } from '../src/server/modules/ai';
 import { buildDailyFacts } from '../src/server/modules/ai/facts';
-import { aiMaskName, aiMaskText, maskForAi } from '../src/server/modules/ai/mask';
+import { aiMaskName, aiMaskText, maskForAi, memberTextMasker } from '../src/server/modules/ai/mask';
 import { aiTools } from '../src/server/modules/ai/tools';
 import { loadSettings } from '../src/server/modules/settings';
 import { businessDateOf } from '../src/shared/business-date';
@@ -18,6 +18,7 @@ import { api, createMember, rechargeBody, setup, type TestContext } from './help
 
 let ctx: TestContext;
 let today: string;
+let memberNo: string;
 const MEMBER_NAME = '欧阳测试';
 const MEMBER_PHONE = '13912345678';
 
@@ -46,6 +47,7 @@ beforeAll(async () => {
   today = businessDateOf(new Date(), ctx.config.timezone, s.businessDayStartHour);
   // 一位会员、一笔充值：名字和手机号都不能出现在发给模型的内容里
   const m = await createMember(ctx, MEMBER_NAME, MEMBER_PHONE);
+  memberNo = (await ctx.sql<{ no: string }[]>`SELECT member_no AS no FROM members WHERE id = ${m.id}`)[0]!.no;
   const r = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 50_000));
   expect(r.status, JSON.stringify(r.body)).toBeLessThan(300);
 }, 90_000);
@@ -58,6 +60,16 @@ describe('打码', () => {
     expect(aiMaskText('客人 13912345678 说')).toBe('客人 139****5678 说');
     expect(aiMaskText('证件 11010119900307123X')).toBe('证件 [证件号已隐去]');
     expect(maskForAi({ memberName: '张三', phone: '13912345678', note: '回电 13912345678', n: 3 })).toEqual({ memberName: '张*', phone: '139****5678', note: '回电 139****5678', n: 3 });
+  });
+});
+
+describe('自由文字里的会员姓名、会员号（测试会话 80284a9 的 P1）', () => {
+  it('按会员档案找出来打码：姓名只留第一个字，会员号整个换掉；一个字、不在档案里的不动', async () => {
+    const mask = await memberTextMasker(ctx.sql);
+    expect(mask(`会员${MEMBER_NAME}昨天消费多少？会员号 ${memberNo}`)).toBe(`会员欧*昨天消费多少？会员号 [会员号]`);
+    expect(mask('上周哪些项目卖得最好？欧先生来过吗')).toBe('上周哪些项目卖得最好？欧先生来过吗');
+    // 与手机号、证件号的打码叠在一起
+    expect(aiMaskText(mask(`${MEMBER_NAME} ${MEMBER_PHONE}`))).toBe('欧* 139****5678');
   });
 });
 
@@ -230,11 +242,12 @@ describe('问数', () => {
       },
     };
     setAiProviderForTests(capture);
-    const r = await api(ctx.app, ctx.owner, 'POST', '/api/ai/questions', { clientKey: randomUUID(), question: `会员 ${MEMBER_PHONE} 昨天来过吗` });
+    const r = await api(ctx.app, ctx.owner, 'POST', '/api/ai/questions', { clientKey: randomUUID(), question: `会员${MEMBER_NAME}（${memberNo}，${MEMBER_PHONE}）昨天来过吗` });
     expect(r.status).toBe(202);
     expect((await waitQuestion(r.body.id)).status).toBe('done');
-    expect(seen).toContain('139****5678');
-    expect(seen).not.toContain(MEMBER_PHONE);
+    expect(seen).toBe('会员欧*（[会员号]，139****5678）昨天来过吗');
+    noPersonal(seen);
+    expect(seen).not.toContain(memberNo);
   });
 
   it('拒答、每人每天的限额、关掉问数、没配模型服务', async () => {
@@ -262,7 +275,12 @@ describe('问数', () => {
 
 describe('合同条款提示', () => {
   it('模拟模式按格式交回提示；发出去的正文先打码', async () => {
-    const body = { category: 'service', counterparty: '某保洁公司', content: { title: '保洁外包', totalCents: 360000 }, body: `联系人电话 ${MEMBER_PHONE}，身份证 11010119900307123X` };
+    const body = {
+      category: 'service',
+      counterparty: '某保洁公司',
+      content: { title: '保洁外包', totalCents: 360000, note: `${MEMBER_NAME}介绍的` },
+      body: `联系人${MEMBER_NAME}，电话 ${MEMBER_PHONE}，身份证 11010119900307123X`,
+    };
     const r = await api(ctx.app, ctx.owner, 'POST', '/api/ai/contract-hints', body);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.hints).toEqual([{ kind: 'missing', title: '【模拟】保密条款', detail: expect.any(String) }]);
@@ -270,7 +288,9 @@ describe('合同条款提示', () => {
     setAiProviderForTests({ ...mockAiProvider(), structured: async (input) => ((prompt = input.prompt), mockAiProvider().structured(input)) });
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/ai/contract-hints', body)).status).toBe(200);
     expect(prompt).toContain('139****5678');
+    expect(prompt).toContain('联系人欧*');
     expect(prompt).not.toContain(MEMBER_PHONE);
+    expect(prompt).not.toContain(MEMBER_NAME);
     expect(prompt).not.toContain('11010119900307123X');
   });
 });

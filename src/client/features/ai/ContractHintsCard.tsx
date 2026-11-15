@@ -45,7 +45,7 @@ export function ContractHintsCard({ input }: { input: () => AiContractHintsInput
         </Button>
       </div>
       <p className="mt-1 text-[12.5px] text-ink-3">
-        只是提示：不改合同、不算法务审查的结论。发出去的是表单上现在的内容，手机号、身份证号先打码。{status.data.mode === 'mock' ? '（模拟模式：固定的示例）' : ''}
+        只是提示：不改合同、不算法务审查的结论。发出去的是表单上现在的内容，会员的姓名、会员号、手机号、身份证号先打码。{status.data.mode === 'mock' ? '（模拟模式：固定的示例）' : ''}
       </p>
       {error && <p className="mt-2 text-[13px] text-clay">{error}</p>}
       {hints && (
