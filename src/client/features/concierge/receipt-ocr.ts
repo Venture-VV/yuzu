@@ -1572,3 +1572,6 @@ export async function runReceiptOcr(
     recognitionRunning = false;
   }
 }
+
+/** 发票识别（8.0.21，features/invoices/invoice-scan）共用同一套本机识别引擎 */
+export { loadScript as loadLocalTesseract };

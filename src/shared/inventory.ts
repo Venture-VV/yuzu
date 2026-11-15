@@ -260,6 +260,19 @@ export interface Supplier {
   admissionNote: string;
   /** 在用的证照里最早到期的（没有或都长期的为空）；过期的也算 */
   licenseDue: string | null;
+  /** 收款账户（8.0.21 批量付款）：户名、开户行、账号后四位（完整账号不发到页面；没填为空） */
+  bankPayee: string;
+  bankName: string;
+  bankAccountTail: string;
+  /** 收款账户的复核（8.0.21 安全审查后补，CW28）：没有账户 / 待复核 / 已复核；只有已复核的能进批量付款 */
+  bankStatus: 'none' | 'pending' | 'verified';
+  bankChangedBy: number | null;
+  bankChangedByName: string | null;
+  bankChangedAt: string | null;
+  bankVerifiedByName: string | null;
+  bankVerifiedAt: string | null;
+  /** 这一行的版本（改了任何一项都会变）：复核收款账户时带回去 */
+  rowVersion: string;
   active: boolean;
   isSynthetic: boolean;
 }

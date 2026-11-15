@@ -541,6 +541,18 @@ interface LockedRequest {
   createdBy: number;
 }
 
+/**
+ * 这张申请正在一批没结束的批量付款里（8.0.21，Codex 审查 beabd59 后补）：只有那一行自己（用它的操作编号 ownKey）能登记付款；
+ * 单独登记付款、作废、结束都拒绝——不然导出的文件里还是生成时的金额，网银再付一次。调用方已锁住申请一行（与生成批次串行）。
+ */
+async function assertNotInBatch(tx: Tx, requestId: number, ownKey: string | null) {
+  const [b] = await tx<{ batchNo: string }[]>`
+    SELECT b.batch_no FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id
+    WHERE i.payment_request_id = ${requestId} AND i.active ${ownKey ? tx`AND i.pay_client_key <> ${ownKey}` : tx``}
+    LIMIT 1`;
+  if (b) throw conflict('REQUEST_IN_BATCH', `这张申请在批量付款 ${b.batchNo} 里：等那一批有结论（记已付、标失败，或作废那一批）以后再单独处理`);
+}
+
 async function lockRequest(tx: Tx, requestId: number): Promise<LockedRequest> {
   const [r] = await tx<LockedRequest[]>`
     SELECT r.id, r.request_no, r.status, r.supplier_id, r.contract_id, r.stage, r.pay_mode, r.amount_cents, ${requestPaidSql(tx)} AS paid_cents, r.early, r.version, r.created_by
@@ -639,6 +651,7 @@ export async function voidPaymentRequest(deps: Deps, requestId: number, raw: unk
     assertVersion(r, input.version);
     if (!['submitted', 'returned', 'approved'].includes(r.status)) throw conflict('INVALID_STATE', '已付清、已结束的付款申请不能作废');
     if (!mayHandle(actor, r) && !can(actor, 'payable.manage')) throw forbidden('只能作废自己发起的付款申请');
+    await assertNotInBatch(tx, r.id, null);
     const [any] = await tx<{ n: number }[]>`
       SELECT (SELECT count(*) FROM payments WHERE payment_request_id = ${r.id} AND status = 'confirmed')
            + (SELECT count(*) FROM contract_payouts WHERE payment_request_id = ${r.id} AND status = 'confirmed') AS n`;
@@ -659,6 +672,7 @@ export async function endPaymentRequest(deps: Deps, requestId: number, raw: unkn
     assertVersion(r, input.version);
     if (r.status !== 'approved') throw conflict('INVALID_STATE', '只有待付款的付款申请可以结束');
     if (r.paidCents <= 0) throw conflict('REQUEST_NOT_PAID', '这张申请还没付过钱，不用的话请作废');
+    await assertNotInBatch(tx, r.id, null);
     await tx`UPDATE payment_requests SET status = 'ended', closed_reason = ${input.reason}, closed_by = ${actor.id}, closed_at = now(), version = version + 1, updated_at = now() WHERE id = ${r.id}`;
     await writeAudit(tx, { staffId: actor.id, action: 'payment_doc', targetType: 'payment_request', targetId: r.id, detail: { op: 'end', requestNo: r.requestNo, paidCents: r.paidCents, reason: input.reason }, ip });
   });
@@ -748,6 +762,7 @@ export async function payFromRequest(deps: Deps, requestId: number, raw: unknown
       await lockSupplier(tx, supplierId);
       const r = await lockRequest(tx, requestId);
       if (r.payMode !== 'ap') throw conflict('PAY_MODE_MISMATCH', '服务、租赁、其他合同的申请请登记合同付款（不进供应商往来）');
+      await assertNotInBatch(tx, r.id, input.clientKey);
       if (r.status !== 'approved') throw conflict('INVALID_STATE', r.status === 'paid' ? '这张申请已经付清了' : '只有批过（待付款）的申请可以登记付款');
       const left = r.amountCents - r.paidCents;
       if (input.amountCents > left) throw conflict('OVER_REQUEST', `申请 ${yuan(r.amountCents)}，已付 ${yuan(r.paidCents)}，这次最多付 ${yuan(left)}`, { leftCents: left });
@@ -825,6 +840,7 @@ export async function payoutFromRequest(deps: Deps, requestId: number, raw: unkn
       if (existing) return { payoutId: existing, replayed: true };
       const r = await lockRequest(tx, requestId);
       if (r.payMode !== 'direct') throw conflict('PAY_MODE_MISMATCH', '采购合同与没挂合同的申请请按供应商往来登记付款');
+      await assertNotInBatch(tx, r.id, input.clientKey);
       if (r.status !== 'approved') throw conflict('INVALID_STATE', r.status === 'paid' ? '这张申请已经付清了' : '只有批过（待付款）的申请可以登记付款');
       if (r.contractId !== null) await assertNoAcceptanceHold(tx, r.contractId);
       const left = r.amountCents - r.paidCents;

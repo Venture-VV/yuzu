@@ -101,14 +101,18 @@ describe('ERP 模块开关', () => {
         ['expenses', true, false],
         // 发票台账（8.0.3）也依赖库存
         ['invoices', true, false],
+        // 开票（8.0.21）不依赖库存
+        ['salesInvoices', true, true],
         // 应收与挂账（8.0.7）不依赖库存
         ['receivables', true, true],
+        // 银行流水（8.0.21）依赖应付货款，应付依赖库存
+        ['bank', true, false],
         ['revenue', true, true],
         // 员工食堂、安保巡场不依赖库存（8.0.20 起默认开）
         ['canteen', true, true],
         ['patrol', true, true],
       ]);
-      expect(await modules(ctx.owner)).toEqual(['receivables', 'revenue', 'canteen', 'patrol']);
+      expect(await modules(ctx.owner)).toEqual(['salesInvoices', 'receivables', 'revenue', 'canteen', 'patrol']);
       for (const url of ['/api/inventory/materials', '/api/inventory/todo-count', '/api/purchase-orders', '/api/purchase-baseline?materialId=1', '/api/payables/overview', '/api/erp/expenses', '/api/erp/petty/daily', '/api/erp/requests', '/api/erp/images/1', '/api/erp/dept-stock/meta', '/api/erp/contracts', '/api/erp/payments/requests', '/api/erp/invoices']) {
         const r = await api(ctx.app, ctx.owner, 'GET', url);
         expect(r.status, url).toBe(403);

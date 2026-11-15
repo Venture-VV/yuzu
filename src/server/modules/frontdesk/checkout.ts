@@ -74,6 +74,9 @@ import { lockPlatformCode, redemptionOfCode } from '../platform-redemptions';
 import { chargeOnAccount, voidChargesOfCheckout } from '../receivables';
 import { MAX_COUNT_CARD_USES, MAX_COUNT_CARDS_PER_CHECKOUT } from '@shared/count-cards';
 import { recordSaleUsage, reverseSaleUsage } from '../stock-usage';
+import { lockPayTxForUse, markPayTxUsed, releasePayTxs } from '../pay-terminal';
+import { assertNotVerified, lockVerificationForUse, markVerificationUsed, releaseVerifications } from '../platform-verify';
+import { otaPrepaidHints } from '../ota';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -82,6 +85,8 @@ const CashPayment = z.object({
   amount: positiveCents('收款金额'),
   /** 收款备注，例如微信支付单号后几位 */
   ref: z.string().trim().max(64, '收款备注最多 64 字').default(''),
+  /** 扫码收款（8.0.21 支付直连）：到账的那笔交易；入账时核对方式与金额，参考号记支付方单号。不带时不进入请求摘要 */
+  payTxId: z.number().int().positive().optional(),
 });
 const WalletPayment = z.object({
   method: z.literal('wallet'),
@@ -99,6 +104,8 @@ const CouponPayment = z.object({
     .pipe(z.string().regex(COUPON_CODE_PATTERN, '请填写完整券码（6–64 位数字或字母）')),
   dealName: z.string().trim().max(48, '团购项目最多 48 字').default(''),
   amount: positiveCents('抵扣金额'),
+  /** 平台验券（8.0.21）：验过的那一次；入账时核对平台、券码、金额 = 面值。不带时不进入请求摘要 */
+  verificationId: z.number().int().positive().optional(),
 });
 /** 优惠 / 免单：值班经理及以上当场授权（授权编号）；原因随授权填写 */
 const DiscountPayment = z.object({
@@ -316,6 +323,7 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       dishes: await unservedDishesOf(tx, ids),
       rooms: await openRoomsOf(tx, ids),
       usages: await openUsagesOf(tx, ids, at),
+      otaPrepaid: await otaPrepaidHints(tx, ids),
     };
   });
 }
@@ -359,6 +367,10 @@ export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext
   if (new Set(countCards.map((c) => c.cardId)).size !== countCards.length) throw badRequest('同一张次卡请合并为一笔（抵几次写在一起）');
   if (countCards.length && (storeCoupons.length || discounts.length || memberDiscounts.length)) throw badRequest('次卡不能和券、会员折扣、优惠 / 免单同时用，请二选一');
   if (payments.some((p) => p.method === 'other' && !p.ref)) throw badRequest('「其他」收款请在备注里写明收的是什么');
+  // 扫码收款（8.0.21）：只有微信、支付宝能带，同一笔不能登记两次
+  const payTxIds = payments.flatMap((p) => ('payTxId' in p && p.payTxId ? [{ method: p.method, id: p.payTxId }] : []));
+  if (payTxIds.some((x) => x.method !== 'wechat' && x.method !== 'alipay')) throw badRequest('只有微信、支付宝能用扫码收款');
+  if (new Set(payTxIds.map((x) => x.id)).size !== payTxIds.length) throw badRequest('同一笔扫码收款不能登记两次');
   if (wallets.length && !can(actor, 'consume.create')) throw forbidden('当前岗位不能用会员储值收款');
   if (new Set(wallets.map((w) => w.memberId)).size !== wallets.length) throw badRequest('同一位会员的储值支付请合并为一笔');
   if (new Set(coupons.map((c) => `${c.platform}:${c.code}`)).size !== coupons.length) throw badRequest('同一张团购券不能登记两次');
@@ -446,13 +458,19 @@ export async function recordCheckoutPayments(
       SELECT c.checkout_no, g.registered_at FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
       WHERE g.platform = ${cp.platform} AND g.code = ${cp.code} AND g.status = 'active'`;
     if (used) throw couponUsed(cp.platform, cp.code, used.checkoutNo);
+    // 平台验券（8.0.21）：带了验券编号的在「平台 + 券码」之后锁验券一行核对；手输的不能是已经验过的券
+    const dealName = cp.verificationId ? (await lockVerificationForUse(tx, cp.verificationId, { platform: cp.platform, code: cp.code, amount: cp.amount })).dealName : cp.dealName;
+    if (!cp.verificationId) await assertNotVerified(tx, cp.platform, cp.code);
     const [g] = await tx<{ id: number }[]>`
-      INSERT INTO group_buy_coupons (platform, code, deal_name, amount, checkout_id, business_date, registered_by, registered_at)
-      VALUES (${cp.platform}, ${cp.code}, ${cp.dealName}, ${cp.amount}, ${a.checkoutId}, ${a.date}, ${a.ctx.actor.id}, ${a.at})
+      INSERT INTO group_buy_coupons (platform, code, deal_name, amount, checkout_id, business_date, registered_by, registered_at
+                                     ${cp.verificationId ? tx`, verification_id` : tx``})
+      VALUES (${cp.platform}, ${cp.code}, ${dealName}, ${cp.amount}, ${a.checkoutId}, ${a.date}, ${a.ctx.actor.id}, ${a.at}
+              ${cp.verificationId ? tx`, ${cp.verificationId}` : tx``})
       RETURNING id`;
+    if (cp.verificationId) await markVerificationUsed(tx, cp.verificationId, g!.id);
     await tx`
       INSERT INTO checkout_payments (checkout_id, method, amount, ref, coupon_id)
-      VALUES (${a.checkoutId}, 'coupon', ${cp.amount}, ${cp.dealName}, ${g!.id})`;
+      VALUES (${a.checkoutId}, 'coupon', ${cp.amount}, ${dealName}, ${g!.id})`;
   }
   // 券抵扣（v0.7.20）：在会员储值、赠金批次之后锁券一行，按此刻的明细核对抵扣；记下适用的明细（部门快照按它们分摊）
   for (const sc of a.payments.filter((p) => p.method === 'store_coupon')) {
@@ -500,8 +518,19 @@ export async function recordCheckoutPayments(
     if (p.method !== 'on_account') continue;
     await chargeOnAccount(tx, { checkoutId: a.checkoutId, accountId: p.accountId, signer: p.signer, amount: p.amount, date: a.date, staffId: a.ctx.actor.id });
   }
-  for (const p of a.payments) {
-    if (p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount' || p.method === 'store_coupon' || p.method === 'member_discount' || p.method === 'count_card' || p.method === 'on_account') continue;
+  // 现金类；扫码收款的（8.0.21）在已有的锁之后按交易 id 升序锁交易行，核对到账、没被用过、方式与金额一致，参考号记支付方单号
+  const cashPays = a.payments.flatMap((p) =>
+    p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount' || p.method === 'store_coupon' || p.method === 'member_discount' || p.method === 'count_card' || p.method === 'on_account' ? [] : [p],
+  );
+  for (const p of [...cashPays].sort((x, y) => (x.payTxId ?? 0) - (y.payTxId ?? 0))) {
+    if (p.payTxId) {
+      const providerTradeNo = await lockPayTxForUse(tx, p.payTxId, { provider: p.method, amountCents: p.amount });
+      await tx`
+        INSERT INTO checkout_payments (checkout_id, method, amount, ref, pay_tx_id)
+        VALUES (${a.checkoutId}, ${p.method}, ${p.amount}, ${providerTradeNo}, ${p.payTxId})`;
+      await markPayTxUsed(tx, p.payTxId, 'checkout', a.checkoutId, a.ctx.actor.id);
+      continue;
+    }
     await tx`
       INSERT INTO checkout_payments (checkout_id, method, amount, ref)
       VALUES (${a.checkoutId}, ${p.method}, ${p.amount}, ${p.ref})`;
@@ -821,12 +850,16 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     await tx`
       UPDATE group_buy_coupons SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${voidText}
       WHERE checkout_id = ${c.id} AND status = 'active'`;
+    // 平台验券（8.0.21）：团购券作废以后，验过的券回到「没用」（挂到重新结账，或撤销核销）
+    await releaseVerifications(tx, c.id);
     // 用掉的券退回（v0.7.20；在会员之后锁券）
     await returnCheckoutCoupons(tx, { checkoutId: c.id, reason: voidText, date, at, staffId: ctx.actor.id });
     // 用掉的次卡次数退回（v0.7.28；在券之后按卡的 id 升序锁卡）
     await returnCheckoutCountCards(tx, { checkoutId: c.id, reason: voidText, date, at, staffId: ctx.actor.id });
     // 扣库存（8.0.20）：这张结账单记过的扣料各记一条冲回（重新结账时再记）
     await reverseSaleUsage(tx, c.id);
+    // 扫码收款（8.0.21）：解开这张结账单用过的交易（id 升序），回到「没入账」，由收银员挂到重新结账或原路退回——反结账不自动退钱
+    await releasePayTxs(tx, 'checkout', c.id, ctx.actor.id, `反结账：${voidText}`);
     // 退款记到反结账人的班次，或所选钱箱当班的班次（事务开头已加锁核对）
     await tx`
       UPDATE checkouts SET status = 'voided', voided_at = ${at}, voided_by = ${ctx.actor.id}, void_reason = ${reason}, void_business_date = ${date},

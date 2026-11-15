@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildCanteenApp } from '../src/server/modules/canteen/portal';
 import { patrolLink, parsePatrolToken, patrolRoundMinutesOn, patrolRoundsOf } from '../src/shared/patrol';
+import { minuteOfDay } from '../src/shared/business-date';
 import { api, setup, type TestContext } from './helpers';
 
 const SECRET = 'patrol-test-secret-0123456789abcdef-0123456789';
@@ -51,6 +52,17 @@ const today = async () => (await admin('GET', '/api/erp/patrol/day')).body.today
 
 beforeAll(async () => {
   ctx = await setup();
+  // 用例里有补报 10 分钟前、往后拨几分钟的打卡：刚过营业日切换（默认 06:00）时跑，补报的那一笔会落到前一个营业日
+  // （CI 在 06:05 红过一次）。打卡的记录时刻用的是数据库的真实时间，员工端的「此刻」也只能是真实时间，
+  // 所以把这个用例库的营业日切换点挪到离现在最远的整点（0–12 点里挑），跑完整个文件也碰不到切换。
+  const minuteNow = minuteOfDay(new Date(), ctx.config.timezone);
+  const distance = (h: number) => {
+    const d = (((minuteNow - h * 60) % 1440) + 1440) % 1440;
+    return Math.min(d, 1440 - d);
+  };
+  const startHour = Array.from({ length: 13 }, (_, h) => h).sort((a, b) => distance(b) - distance(a))[0]!;
+  expect((await admin('PUT', '/api/settings', { businessDayStartHour: startHour })).status).toBe(200);
+  nowMs = Date.now();
   const config = { ...ctx.config, canteen: { port: null, host: '127.0.0.1', codeSecret: SECRET, cookieSecure: false, trustProxy: [] } };
   canteen = await buildCanteenApp(ctx.sql, config, { openCacheMs: 0, clock: () => nowMs });
   expect((await admin('PUT', '/api/erp/modules', { modules: { canteen: true, patrol: true } })).status).toBe(200);

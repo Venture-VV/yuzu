@@ -114,6 +114,18 @@ export const FENCED_OPS = [
   'patrol_point',
   // 8.0.20 布草洗涤（迁移 140）：布草单据；编号记在单据上（linen_docs.client_key）
   'linen_doc',
+  // 8.0.21 开票申请（迁移 143）：编号记在申请上（invoice_requests.client_key）
+  'invoice_request',
+  // 8.0.21 网银流水导入（迁移 144）：编号记在导入上（bank_imports.client_key）
+  'bank_import',
+  // 8.0.21 批量付款（迁移 145）：编号记在批次上（payment_batches.client_key）
+  'payment_batch',
+  // 8.0.21 扫码收款（迁移 148）：编号记在交易上（pay_transactions.client_key）
+  'pay_terminal',
+  // 8.0.21 平台验券（迁移 149）：编号记在验券记录上（platform_verifications.client_key）
+  'platform_verify',
+  // 8.0.21 渠道订单导入（迁移 150）：编号记在导入记录上（ota_imports.client_key）
+  'ota_import',
   'customer_note',
   'customer_binding_request',
   'customer_binding_review',
@@ -173,6 +185,9 @@ export async function fenceKey(
   if (isContractOp(opType) && (await contractOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isPaymentFlowOp(opType) && (await paymentFlowOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (isErpP2Op(opType) && (await erpP2OpRef(tx, key, opType)) !== null) return { existingOpType: opType };
+  if (opType === 'pay_terminal' && (await tx`SELECT 1 FROM pay_transactions WHERE client_key = ${key}`).length) return { existingOpType: opType };
+  if (opType === 'platform_verify' && (await tx`SELECT 1 FROM platform_verifications WHERE client_key = ${key}`).length) return { existingOpType: opType };
+  if (opType === 'ota_import' && (await tx`SELECT 1 FROM ota_imports WHERE client_key = ${key}`).length) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -327,7 +342,7 @@ export async function memberCardOpRef(db: Db, key: string): Promise<number | nul
   return row ? Number(row.id) : null;
 }
 
-const ERP_P2_OPS = ['ar_collection', 'asset_card', 'asset_stocktake', 'patrol_point', 'linen_doc'] as const;
+const ERP_P2_OPS = ['ar_collection', 'asset_card', 'asset_stocktake', 'patrol_point', 'linen_doc', 'invoice_request', 'bank_import', 'payment_batch', 'ota_import'] as const;
 type ErpP2Op = (typeof ERP_P2_OPS)[number];
 export const isErpP2Op = (op: string): op is ErpP2Op => (ERP_P2_OPS as readonly string[]).includes(op);
 
@@ -342,6 +357,14 @@ export async function erpP2OpRef(db: Db, key: string, op: ErpP2Op): Promise<numb
           ? await db<{ id: number }[]>`SELECT id FROM patrol_points WHERE client_key = ${key}`
         : op === 'linen_doc'
           ? await db<{ id: number }[]>`SELECT id FROM linen_docs WHERE client_key = ${key}`
+        : op === 'invoice_request'
+          ? await db<{ id: number }[]>`SELECT id FROM invoice_requests WHERE client_key = ${key}`
+        : op === 'bank_import'
+          ? await db<{ id: number }[]>`SELECT id FROM bank_imports WHERE client_key = ${key}`
+        : op === 'payment_batch'
+          ? await db<{ id: number }[]>`SELECT id FROM payment_batches WHERE client_key = ${key}`
+        : op === 'ota_import'
+          ? await db<{ id: number }[]>`SELECT id FROM ota_imports WHERE client_key = ${key}`
         : await db<{ id: number }[]>`SELECT id FROM asset_cards WHERE client_key = ${key} ORDER BY id LIMIT 1`;
   return row ? Number(row.id) : null;
 }

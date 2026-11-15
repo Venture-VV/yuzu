@@ -4,7 +4,6 @@ import {
   BILL_SOURCE_LABELS,
   matchTags,
   normalizeTagCode,
-  SWAP_REASONS,
   uniqueTagMatch,
   ZONE_LABELS,
   type BoardTag,
@@ -14,7 +13,7 @@ import {
 import { grantCovers, type VipGrant } from '@shared/grants';
 import { formatYuan } from '@shared/money';
 import { api } from '../../lib/api';
-import { useSession } from '../../lib/session';
+import { useReasons, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
@@ -54,6 +53,7 @@ export function SwapDialog({
   const [authOpen, setAuthOpen] = useState(false);
   const fee = rules?.lostTagFeeCents ?? 0;
   const session = useSession();
+  const swapReasons = useReasons('swapReasons');
   // 这位客人上一笔换牌结果待确认时，先处理那一笔
   const op = useFrontdeskOp<VisitDetail>({
     type: 'tag_swap',
@@ -194,7 +194,7 @@ export function SwapDialog({
         </div>
         <Field label="换牌原因">
           <div className="flex flex-wrap gap-1.5">
-            {SWAP_REASONS.map((r) => (
+            {swapReasons.map((r) => (
               <button
                 key={r}
                 type="button"

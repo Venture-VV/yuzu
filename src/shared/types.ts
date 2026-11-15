@@ -1,5 +1,6 @@
 // 前后端共用的接口数据结构。金额字段均为整数「分」。
 
+import type { Dictionaries } from './custom-fields';
 import type { BusinessHours } from './business-date';
 import type { SpendQuota } from './spend-quota';
 import type { PriceTier, Strength, TierPrice } from './catalog';
@@ -59,6 +60,8 @@ export interface StoreRules extends Tunables {
   customBonusValidDays: number | null;
   /** 会员渠道来源的可选项（v0.6.0，后台「渠道与标签」维护） */
   memberChannels: MemberChannel[];
+  /** 数据字典（8.0.21，CW11）：作废、撤销、退款、报损……的快捷原因，后台「数据字典与字段」维护；原因照旧存文字，也可以手填 */
+  dictionaries: Dictionaries;
 }
 
 export interface SessionInfo {

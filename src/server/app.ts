@@ -39,6 +39,11 @@ import { registerAdmissionRoutes } from './modules/inventory/admission';
 import { registerScoreRoutes } from './modules/inventory/scores';
 import { registerSlowRoutes } from './modules/inventory/slow';
 import { registerReconLinkRoutes } from './modules/inventory/recon-links';
+import { registerSupplierPortalRoutes } from './modules/inventory/supplier-portal';
+import { registerPayTerminalRoutes } from './modules/pay-terminal';
+import { registerPlatformVerifyRoutes } from './modules/platform-verify';
+import { registerOtaRoutes } from './modules/ota';
+import { registerIntegrationsAdminRoutes } from './modules/integrations-admin';
 import { registerReceivableRoutes } from './modules/receivables';
 import { registerAssetRoutes } from './modules/assets';
 import { registerExpiryRoutes } from './modules/inventory/expiry';
@@ -51,12 +56,17 @@ import { registerPurchaseFlowRoutes } from './modules/purchase-flow';
 import { registerApprovalRoutes } from './modules/approvals/routes';
 import { registerContractRoutes } from './modules/contracts/routes';
 import { registerTemplateRoutes } from './modules/contracts/templates';
+import { registerContractDocRoutes } from './modules/contracts/doc-templates';
 import { registerPaymentRoutes } from './modules/payments/routes';
 import { registerReportRoutes } from './modules/inventory/reports';
 import { registerLedgerRoutes } from './modules/ledger';
 import { registerOrderRoutes } from './modules/orders';
 import { registerMemberRoutes } from './modules/members';
 import { registerMemberTagRoutes } from './modules/member-tags';
+import { registerCustomFieldRoutes } from './modules/custom-fields';
+import { registerSalesInvoiceRoutes } from './modules/sales-invoices';
+import { registerBankRoutes } from './modules/bank';
+import { registerPaymentBatchRoutes } from './modules/payment-batches';
 import { registerMemberRecordRoutes } from './modules/member-records';
 import { registerCouponRoutes } from './modules/coupons';
 import { registerCampaignRoutes } from './modules/coupon-campaigns';
@@ -212,6 +222,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerGrantRoutes(app, deps);
   registerMemberRoutes(app, deps);
   registerMemberTagRoutes(app, deps);
+  // 自定义字段（8.0.21，docs/FINANCE_V8021.md 第 1 节）
+  registerCustomFieldRoutes(app, deps);
   registerMemberRecordRoutes(app, deps);
   registerCouponRoutes(app, deps);
   registerCampaignRoutes(app, deps);
@@ -259,6 +271,11 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerScoreRoutes(app, deps);
   registerSlowRoutes(app, deps);
   registerReconLinkRoutes(app, deps);
+  registerSupplierPortalRoutes(app, deps);
+  registerPayTerminalRoutes(app, deps);
+  registerPlatformVerifyRoutes(app, deps);
+  registerOtaRoutes(app, deps);
+  registerIntegrationsAdminRoutes(app, deps);
   registerReceivableRoutes(app, deps);
   registerAssetRoutes(app, deps);
   registerExpiryRoutes(app, deps);
@@ -273,6 +290,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerApprovalRoutes(app, deps);
   // 合同与法务审查（v0.7.31）
   registerTemplateRoutes(app, deps);
+  // 合同模板与导出（8.0.21）：要在 /api/erp/contracts/:id 之前注册
+  registerContractDocRoutes(app, deps);
   registerContractRoutes(app, deps);
   registerPaymentRoutes(app, deps);
   registerPayableRoutes(app, deps);
@@ -282,6 +301,12 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   // 费用预算与进项发票台账（8.0.3）
   registerBudgetRoutes(app, deps);
   registerInvoiceRoutes(app, deps);
+  // 开票申请（8.0.21）
+  registerSalesInvoiceRoutes(app, deps);
+  // 银行账户与网银流水（8.0.21）
+  registerBankRoutes(app, deps);
+  // 批量付款（8.0.21）
+  registerPaymentBatchRoutes(app, deps);
   registerRequestRoutes(app, deps);
   registerRequestImportRoutes(app, deps);
   registerRequestDraftRoutes(app, deps);

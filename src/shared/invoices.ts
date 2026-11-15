@@ -58,6 +58,8 @@ export interface InputInvoice {
   taxCents: number;
   taxRateBp: number;
   source: InvoiceSource;
+  /** 怎么登记的（8.0.21 发票识别）：手填、读二维码、读文字 */
+  entryMethod: import('./invoice-recognize').InvoiceEntryMethod;
   status: 'valid' | 'voided';
   note: string;
   certStatus: CertStatus;
@@ -106,7 +108,7 @@ export interface InvoiceLedger {
   /** 这个视图里还有更多（只列出最新的）：缩短日期范围或导出 */
   truncated: boolean;
   /** 页面上方的数字（有效的发票） */
-  counts: { pending: number; due: number; anomaly: number };
+  counts: { pending: number; due: number; anomaly: number; /** 有效发票里识别登记的（二维码、文字） */ recognized: number; valid: number };
   rules: { certifyDays: number; remindDays: number; taxToleranceCents: number };
 }
 

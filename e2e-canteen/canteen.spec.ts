@@ -678,14 +678,21 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
         );
         await cdp.send('ServiceWorker.enable');
         const [reg] = await registered;
-        await cdp.send('ServiceWorker.deliverPushMessage', { origin: CANTEEN, registrationId: reg!.registrationId, data: JSON.stringify(msg) });
-        await expect
-          .poll(() =>
-            fp.evaluate(async () =>
-              (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({ title: n.title, body: n.body, tag: n.tag, url: (n.data as { url?: string } | null)?.url })),
-            ),
-          )
-          .toEqual([{ title: msg.title, body: msg.body, tag: 'test-lunch', url: '/#/code' }]);
+        const shown = () =>
+          fp.evaluate(async () =>
+            (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({ title: n.title, body: n.body, tag: n.tag, url: (n.data as { url?: string } | null)?.url })),
+          );
+        // 开发者工具送的推送在 CI 上偶尔丢（主线 CI 两次 15 秒都没弹，同一提交别的次都过）：几秒没弹就再送一次。
+        // 同一个 tag 的通知会替换掉前一条，送两次也只看到一条，不会掩盖「弹了两条」这种问题
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          await cdp.send('ServiceWorker.deliverPushMessage', { origin: CANTEEN, registrationId: reg!.registrationId, data: JSON.stringify(msg) });
+          const ok = await expect
+            .poll(shown, { timeout: 5_000 })
+            .not.toEqual([])
+            .then(() => true, () => false);
+          if (ok) break;
+        }
+        await expect.poll(shown).toEqual([{ title: msg.title, body: msg.body, tag: 'test-lunch', url: '/#/code' }]);
       } finally {
         await full.close();
       }

@@ -7,8 +7,8 @@ import { fitsDecimals, formatQty } from '@shared/quantity';
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
-import type { Deps } from '../../lib/context';
-import { conflict, notFound, unprocessable } from '../../lib/errors';
+import type { Actor, Deps } from '../../lib/context';
+import { conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 import { CENTRAL_WAREHOUSE_ID } from '@shared/inventory';
 import { coverFor, loadInventorySettings, setTxTimeouts, todayIn, usageByMaterial, usageSince } from './common';
@@ -64,6 +64,14 @@ export const listSuppliers = (db: Db, includeInactive = false) =>
            -- 准入与证照（8.0.7 A2，迁移 097）：在用的证照里最早到期的
            admission, admission_note,
            (SELECT min(l.valid_until)::text FROM supplier_licenses l WHERE l.supplier_id = suppliers.id AND l.removed_at IS NULL) AS license_due,
+           -- 收款账户（8.0.21 批量付款）：完整账号不发到页面，只给后四位
+           bank_payee, bank_name, right(bank_account, 4) AS bank_account_tail,
+           -- 收款账户的复核（8.0.21 安全审查后补，迁移 151）：谁改的、谁复核的
+           CASE WHEN bank_account = '' THEN 'none' WHEN bank_verified_at IS NULL THEN 'pending' ELSE 'verified' END AS bank_status,
+           bank_changed_by, (SELECT display_name FROM staff WHERE id = suppliers.bank_changed_by) AS bank_changed_by_name, bank_changed_at,
+           (SELECT display_name FROM staff WHERE id = suppliers.bank_verified_by) AS bank_verified_by_name, bank_verified_at,
+           -- 这一行的版本（行的 xmin，改了任何一项都会变）：复核时带回来，对不上就是看完以后又被改过（Codex 审查 ee51abe 后补）
+           suppliers.xmin::text AS row_version,
            active, is_synthetic FROM suppliers
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, code`;
 
@@ -142,7 +150,29 @@ export const SupplierInput = z.object({
   defaultChannel: ChannelKey.nullable().optional(),
   /** 签约 / 未签约（8.0.1，CG08）：新建不填为未签约，修改不填保持原样 */
   contracted: z.boolean().optional(),
+  /**
+   * 收款账户（8.0.21 批量付款，CW18）：8.0.21 安全审查后不在这里改（采购也能存供应商档案），
+   * 由应付岗在 PUT /api/inventory/suppliers/:id/bank 里改、另一人复核（CW28）；这里传了和现在一样的照旧接受，不一样的拒绝
+   */
+  bankPayee: text(60, '收款户名').optional(),
+  bankName: text(60, '收款开户行').optional(),
+  bankAccount: z.string().optional(),
   active: z.boolean().default(true),
+});
+
+const BANK_SEPARATE = () =>
+  unprocessable('SUPPLIER_BANK_SEPARATE', '收款账户不在供应商档案里改：请应付岗在供应商的「收款账户」里改（改了要另一人复核才能批量付款）');
+
+/** 收款账户：户名、开户行、账号（账号去掉空格与短横） */
+const BankInput = z.object({
+  bankPayee: text(60, '收款户名').min(1, '请填写收款户名'),
+  bankName: text(60, '收款开户行').min(1, '请填写收款开户行'),
+  /** 页面上只看得到后四位：要改就整个重填，空着不改 */
+  bankAccount: z
+    .string()
+    .transform((v) => v.replace(/[\s-]/g, ''))
+    .refine((v) => v === '' || /^[0-9]{8,32}$/.test(v), '收款账号是 8–32 位数字')
+    .default(''),
 });
 export type SupplierInputData = z.input<typeof SupplierInput>;
 
@@ -250,6 +280,13 @@ export async function saveSupplier(
   const today = extra.today ?? null;
   const cycle = s.reconcileCycle ?? null;
   await assertChannelKey(db, s.defaultChannel);
+  if (id === null && [s.bankPayee, s.bankName, s.bankAccount].some((v) => (v ?? '').trim() !== '')) throw BANK_SEPARATE();
+  if (id !== null && (s.bankPayee !== undefined || s.bankName !== undefined || s.bankAccount !== undefined)) {
+    const [cur] = await db<{ bankPayee: string; bankName: string; bankAccount: string }[]>`SELECT bank_payee, bank_name, bank_account FROM suppliers WHERE id = ${id}`;
+    const account = s.bankAccount?.replace(/[\s-]/g, '');
+    if (cur && ((s.bankPayee !== undefined && s.bankPayee !== cur.bankPayee) || (s.bankName !== undefined && s.bankName !== cur.bankName) || (account !== undefined && account !== '' && account !== cur.bankAccount)))
+      throw BANK_SEPARATE();
+  }
   try {
     if (id === null) {
       const [row] = await db<{ id: number }[]>`
@@ -305,6 +342,56 @@ const SettingsInput = z.object({
     opening: z.boolean(),
   }),
 });
+
+/**
+ * 改供应商收款账户（应付岗，payable.manage）：锁供应商一行（FOR NO KEY UPDATE）再写；记下谁改的。
+ * 店主改的直接算复核过；别人改的要另一位应付或店主复核（verifySupplierBank）以后，批量付款才用它。
+ */
+export async function saveSupplierBank(db: Sql, id: number, raw: unknown, actor: Actor, ip?: string) {
+  const b = parse(BankInput, raw);
+  await db.begin(async (tx) => {
+    const [cur] = await tx<{ bankPayee: string; bankName: string; bankAccount: string }[]>`
+      SELECT bank_payee, bank_name, bank_account FROM suppliers WHERE id = ${id} FOR NO KEY UPDATE`;
+    if (!cur) throw notFound('供应商不存在');
+    const account = b.bankAccount || cur.bankAccount;
+    if (!account) throw unprocessable('SUPPLIER_BANK_ACCOUNT', '请填写收款账号（8–32 位数字）');
+    if (b.bankPayee === cur.bankPayee && b.bankName === cur.bankName && account === cur.bankAccount) return;
+    const self = actor.role === 'owner';
+    await tx`
+      UPDATE suppliers SET bank_payee = ${b.bankPayee}, bank_name = ${b.bankName}, bank_account = ${account},
+             bank_changed_by = ${actor.id}, bank_changed_at = now(),
+             bank_verified_by = ${self ? actor.id : null}, bank_verified_at = ${self ? tx`now()` : null}, updated_at = now()
+      WHERE id = ${id}`;
+    await writeAudit(tx, {
+      staffId: actor.id, action: 'supplier_bank', targetType: 'supplier', targetId: id,
+      detail: { op: 'change', bankPayee: b.bankPayee, bankName: b.bankName, tail: account.slice(-4), beforeTail: cur.bankAccount.slice(-4), verified: self },
+      ip,
+    });
+  });
+}
+
+/**
+ * 复核收款账户：带上页面看到的后四位与这一行的版本（rowVersion）——户名、开户行、账号哪一项在看完以后被改过（哪怕换成同样后四位的账号），
+ * 版本都对不上、拒绝，免得复核了没看过的内容（Codex 审查 ee51abe 后补）；改账户的本人不能复核（店主除外）
+ */
+export async function verifySupplierBank(db: Sql, id: number, raw: unknown, actor: Actor, ip?: string) {
+  const { tail, rowVersion } = parse(
+    z.object({ tail: z.string().regex(/^[0-9]{4}$/, '请带上页面看到的账号后四位'), rowVersion: z.string('请刷新后重新核对').regex(/^[0-9]{1,20}$/, '请刷新后重新核对') }),
+    raw,
+  );
+  await db.begin(async (tx) => {
+    const [cur] = await tx<{ bankAccount: string; changedBy: number | null; verifiedAt: Date | null; rowVersion: string }[]>`
+      SELECT bank_account, bank_changed_by AS changed_by, bank_verified_at AS verified_at, xmin::text AS row_version FROM suppliers WHERE id = ${id} FOR NO KEY UPDATE`;
+    if (!cur) throw notFound('供应商不存在');
+    if (!cur.bankAccount) throw unprocessable('SUPPLIER_BANK_ACCOUNT', '这家供应商还没有收款账户');
+    if (cur.bankAccount.slice(-4) !== tail || cur.rowVersion !== rowVersion) throw conflict('SUPPLIER_BANK_CHANGED', '供应商档案（收款账户）刚被改过，请刷新后重新核对');
+    if (cur.verifiedAt) return;
+    if (cur.changedBy !== null && Number(cur.changedBy) === actor.id && actor.role !== 'owner')
+      throw forbidden('改收款账户的人不能自己复核：请另一位应付或店主跟供应商核对后复核');
+    await tx`UPDATE suppliers SET bank_verified_by = ${actor.id}, bank_verified_at = now(), updated_at = now() WHERE id = ${id}`;
+    await writeAudit(tx, { staffId: actor.id, action: 'supplier_bank', targetType: 'supplier', targetId: id, detail: { op: 'verify', tail }, ip });
+  });
+}
 
 export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps) {
   const all = (q: unknown) => (q as { all?: string }).all === '1';
@@ -409,6 +496,18 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
     const { id } = parse(idParam, req.params);
     await saveSupplier(sql, id, req.body as SupplierInputData, { today: todayIn(config.timezone) });
     await writeAudit(sql, { staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'supplier', targetId: id, detail: req.body as Record<string, unknown>, ip: req.ip });
+    return listSuppliers(sql, true);
+  });
+
+  // 收款账户（8.0.21 安全审查后补，CW28）：应付岗改、另一人复核
+  app.put('/api/inventory/suppliers/:id/bank', { preHandler: guard('payable.manage') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    await saveSupplierBank(sql, id, req.body, req.actor, req.ip);
+    return listSuppliers(sql, true);
+  });
+  app.post('/api/inventory/suppliers/:id/bank/verify', { preHandler: guard('payable.manage') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    await verifySupplierBank(sql, id, req.body, req.actor, req.ip);
     return listSuppliers(sql, true);
   });
 

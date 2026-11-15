@@ -11,13 +11,15 @@ import { qk, useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
-import { Button, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, Skeleton } from '../../components/ui';
+import { Badge, Button, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, Skeleton } from '../../components/ui';
 import { BalanceChange, FlowFrame, OperationStatus, OverLimitCard, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
 import { isBusy, isLocked, useOperation } from './useOperation';
 import { SHIFT_ERRORS, shiftKeys, ShiftGate, useShiftReady } from '../shift/ShiftGate';
 import { planGiftText, usePlanGifts } from '../coupons/queries';
 import { gradeLabel, rechargeMinimum, rechargeOutcome } from '@shared/membership';
 import { membershipKeys, useMemberGrade, useMembershipRules } from '../membership/queries';
+import type { PayTxView } from '@shared/integrations';
+import { ScanPayButton } from '../pay/ScanPay';
 
 const METHOD_ICONS: Record<PaymentMethod, typeof Smartphone> = {
   wechat: Smartphone,
@@ -51,6 +53,8 @@ export function RechargeFlow({
   const [customBonus, setCustomBonus] = useState(false);
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const [paymentRef, setPaymentRef] = useState('');
+  /** 扫码收款（8.0.21）：到账的那笔交易；方式、金额变了就不再用它 */
+  const [payTx, setPayTx] = useState<PayTxView | null>(null);
   const [note, setNote] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -88,6 +92,10 @@ export function RechargeFlow({
   const grantScope = { kind: 'recharge' as const, memberId: member.id, amount: paid ?? 0 };
   const grantOk = !overLimit || overLimitGrantFits(grant, grantScope);
 
+  useEffect(() => {
+    if (payTx && (payTx.provider !== method || payTx.amountCents !== paid)) setPayTx(null);
+  }, [payTx, method, paid]);
+
   const op = useOperation({
     type: 'recharge',
     url: '/api/recharges',
@@ -99,7 +107,8 @@ export function RechargeFlow({
         paidAmount: paid,
         bonusAmount: bonus,
         paymentMethod: method,
-        paymentRef,
+        paymentRef: payTx ? (payTx.providerTradeNo ?? '') : paymentRef,
+        ...(payTx ? { payTxId: payTx.id } : {}),
         note,
         paymentConfirmed: confirmed,
         overLimitGrantId: overLimit ? grant?.grantId : undefined,
@@ -453,9 +462,32 @@ export function RechargeFlow({
         })}
       </div>
 
+      {(method === 'wechat' || method === 'alipay') && (
+        <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="recharge-scan">
+          {payTx ? (
+            <>
+              <Badge tone="pine">已扫码到账 · {payTx.providerTradeNo}</Badge>
+              <Button size="sm" variant="ghost" onClick={() => setPayTx(null)}>
+                不用这一笔
+              </Button>
+            </>
+          ) : (
+            <ScanPayButton
+              provider={method}
+              amountCents={paid ?? null}
+              purpose="recharge"
+              onPaid={(tx) => {
+                setPayTx(tx);
+                setConfirmed(true);
+              }}
+            />
+          )}
+        </div>
+      )}
+
       <div className="mt-5 grid gap-4">
         <Field label="收款备注" htmlFor="ref" hint="选填，如支付单号后 4 位，便于对账">
-          <Input id="ref" value={paymentRef} maxLength={64} onChange={(e) => setPaymentRef(e.target.value)} placeholder="选填" />
+          <Input id="ref" value={payTx ? (payTx.providerTradeNo ?? '') : paymentRef} readOnly={!!payTx} maxLength={64} onChange={(e) => setPaymentRef(e.target.value)} placeholder="选填" />
         </Field>
         <Field label="备注" htmlFor="note">
           <Input id="note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="选填" />

@@ -10,12 +10,14 @@ import { useCan, useSession } from '../../lib/session';
 import { pdfMaxBytes } from '@shared/tunables';
 import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
+import { CustomFieldInline, CustomFieldsCard, useCustomListValues } from '../custom-fields/CustomFieldsCard';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { SimRule } from './parts';
 import { useDepartments, useInvalidateInventory, useMaterials, useSuppliers } from './queries';
 import { AdmissionBadges, AdmissionSection } from './SupplierAdmission';
+import { SupplierBankSection } from './SupplierBank';
 import { usePurchaseRules } from '../purchasing/queries';
 
 type Section = 'materials' | 'suppliers' | 'departments';
@@ -56,6 +58,7 @@ function Materials({ editable }: { editable: boolean }) {
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<Material | 'new' | null>(null);
   const list = (materials.data ?? []).filter((m) => !q.trim() || `${m.code} ${m.name} ${m.specification} ${m.category}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const custom = useCustomListValues('material', list.map((m) => m.id));
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -97,6 +100,7 @@ function Materials({ editable }: { editable: boolean }) {
                   <td className="px-2 py-2.5">
                     <p className="font-bold">{m.name}</p>
                     <p className="text-[12px] text-ink-3">{m.specification || '—'}</p>
+                    <CustomFieldInline data={custom.data} id={m.id} />
                   </td>
                   <td className="px-2 py-2.5 text-ink-2">{m.category || '—'}</td>
                   <td className="num px-2 py-2.5 text-ink-2">{conversionText(m.purchaseUnit, m.purchaseFactorMilli, m.inventoryUnit)}</td>
@@ -381,6 +385,8 @@ export function MaterialDialog({
           <Input id="m-note" value={form.note} maxLength={200} onChange={(e) => set({ note: e.target.value })} />
         </Field>
         {error && <Notice tone="error" title={error} className="sm:col-span-6" />}
+        {/* 自定义字段（8.0.21）：单独保存，不动物料本身 */}
+        {m && <CustomFieldsCard entity="material" entityId={m.id} bare className="border-t border-line pt-3 sm:col-span-6" />}
       </div>
     </Dialog>
   );
@@ -418,8 +424,9 @@ function Suppliers({ editable }: { editable: boolean }) {
   const can = useCan();
   const session = useSession();
   // 负责人（「审核」权限）没有维护档案的权限也能打开，看证照、准入或暂停（8.0.7 2.1）
-  const openable = editable || can('inventory.approve');
+  const openable = editable || can('inventory.approve') || can('payable.manage');
   const [editing, setEditing] = useState<Supplier | 'new' | null>(null);
+  const supplierCustom = useCustomListValues('supplier', (suppliers.data ?? []).map((s) => s.id));
   return (
     <>
       <div className="mb-3 flex justify-end">
@@ -455,6 +462,7 @@ function Suppliers({ editable }: { editable: boolean }) {
                 </p>
                 <p className="mt-0.5 truncate text-[12.5px] text-ink-3">{[s.contact, s.phone].filter(Boolean).join(' · ') || '未填写联系人'}</p>
                 {s.note && <p className="truncate text-[12px] text-ink-3">{s.note}</p>}
+                <CustomFieldInline data={supplierCustom.data} id={s.id} />
               </button>
             </li>
           ))}
@@ -552,6 +560,7 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
             {s.note ? ` · ${s.note}` : ''}
           </p>
           <AdmissionSection supplier={s} />
+          <SupplierBankSection supplier={s} />
         </div>
       ) : (
       <div className="grid gap-4 sm:grid-cols-3">
@@ -640,6 +649,10 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
         {s && <AdmissionSection supplier={s} />}
         {!s && <p className="text-[12.5px] text-ink-3 sm:col-span-3">新建的供应商是「待准入」：保存以后登记营业执照，由负责人准入（经营规则里打开「采购单只能给已准入的供应商」以后，没准入的不能下采购单）。</p>}
         {s && <ContractFiles supplier={s} pendingContracted={form.contracted} />}
+        {/* 收款账户（8.0.21 安全审查后补）：应付岗单独改、另一人复核，不随上面的「保存」 */}
+        {s && <SupplierBankSection supplier={s} />}
+        {/* 自定义字段（8.0.21）：单独保存，不动供应商本身 */}
+        {s && <CustomFieldsCard entity="supplier" entityId={s.id} bare readOnly={readOnly} className="border-t border-line pt-3 sm:col-span-3" />}
       </div>
       )}
     </Dialog>

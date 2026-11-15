@@ -30,7 +30,7 @@ import {
   type ContractMeta,
   type PaymentStage,
   type WarrantyBasis,
-} from '@shared/contracts';
+  type ContractTemplateRef } from '@shared/contracts';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { formatQty, parseQty } from '@shared/quantity';
 import { api, errorMessage, UncertainError } from '../../lib/api';
@@ -42,6 +42,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
 import { useAcceptanceTemplates, useContract, useContractMeta, useInvalidateContracts } from './queries';
+import { TemplateSection } from './TemplateSection';
 
 export type ContractFormMode = 'new' | 'edit' | 'change' | 'change-edit';
 
@@ -71,6 +72,8 @@ interface ContentForm {
   acceptance: { method: string; signer: string; penalty: string; templateName: string; items: string };
   note: string;
   lines: LineForm[];
+  /** 合同模板（8.0.21）：用的哪一版、填的字段、勾的条款 */
+  template: ContractTemplateRef | null;
 }
 
 interface HeaderForm {
@@ -107,6 +110,7 @@ function toForm(c: ContractContent): ContentForm {
       taxRate: bpToInput(l.taxRateBp),
       qty: qtyInput(l.qtyMilli),
     })),
+    template: c.template ?? null,
   };
 }
 
@@ -163,6 +167,8 @@ function build(f: ContentForm): { content: ContractContent; termsBp: number } | 
       },
       note: f.note.trim(),
       lines,
+      // 接口只认 id、values、clauses（别的几项是页面上显示用的）
+      template: f.template ? { ...f.template, values: Object.fromEntries(Object.entries(f.template.values).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v)) } : null,
     },
     termsBp: paymentTerms.reduce((t, x) => t + x.percentBp, 0),
   };
@@ -693,6 +699,9 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
           />
         </div>
       </Card>
+
+      {/* 合同正文（模板，8.0.21） */}
+      <TemplateSection category={header.category} value={form.template} onChange={(template) => setForm((f) => ({ ...f, template }))} />
 
       {/* 单价表 */}
       <Card className="p-5">

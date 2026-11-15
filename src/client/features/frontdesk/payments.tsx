@@ -26,6 +26,9 @@ import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { Money } from '../../components/Money';
 import { Badge, Button, Input, MoneyInput, Select } from '../../components/ui';
+import type { PayTxView, VerificationView } from '@shared/integrations';
+import { ScanPayButton } from '../pay/ScanPay';
+import { VerifyButton } from '../pay/VoucherVerify';
 
 // 结账收款（手牌结账与餐饮桌台结账共用）：可组合多种方式，收款合计等于应收才能结清。
 // R1.2（店主 2026-10-29 签认）：「优惠 / 免单」由值班经理及以上当场授权（这几张手牌或这几桌、这个金额），
@@ -71,6 +74,10 @@ export interface PayRow {
   /** 挂账（8.0.7 A3）：协议单位与签单人 */
   accountId: number | null;
   signer: string;
+  /** 扫码收款（8.0.21）：到账的那笔交易；有了以后金额、参考号锁定 */
+  payTx: PayTxView | null;
+  /** 平台验券（8.0.21）：验过的那一次；有了以后平台、券码、项目、金额锁定 */
+  verification: VerificationView | null;
 }
 
 let paySeq = 1;
@@ -90,6 +97,8 @@ export const newRow = (method: CheckoutMethod, amount: number): PayRow => ({
   couponInput: '',
   accountId: null,
   signer: '',
+  payTx: null,
+  verification: null,
 });
 
 export const QUICK_METHODS: CheckoutMethod[] = ['wechat', 'alipay', 'cash', 'bank_card', 'other', 'wallet', 'coupon', 'store_coupon', 'discount', 'on_account'];
@@ -104,13 +113,13 @@ export interface CouponSource {
 /** 提交给服务端的一笔收款 */
 export type PaymentBody =
   | { method: 'wallet'; memberId: number; amount: number; expectedSplit: { principal: number; bonus: number } }
-  | { method: 'coupon'; platform: CouponPlatform; code: string; dealName: string; amount: number }
+  | { method: 'coupon'; platform: CouponPlatform; code: string; dealName: string; amount: number; verificationId?: number }
   | { method: 'discount'; amount: number; grantId: string }
   | { method: 'store_coupon'; code: string; amount: number }
   | { method: 'member_discount'; memberId: number; benefitId: number; amount: number }
   | { method: 'count_card'; cardId: number; uses: number; amount: number }
   | { method: 'on_account'; accountId: number; signer: string; amount: number }
-  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card' | 'on_account'>; amount: number; ref: string };
+  | { method: Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card' | 'on_account'>; amount: number; ref: string; payTxId?: number };
 
 /**
  * 收款登记的状态与核对：每笔的金额、储值扣款构成（余额不足、会员不在本次结账里）、团购券码、「其他」备注、
@@ -225,6 +234,8 @@ export function usePayRows(opts: {
       }
       setRows((list) => [...list, row]);
     });
+  /** 带好内容的一笔（8.0.21：预付的渠道订单默认带一行团购券） */
+  const addPreset = (method: CheckoutMethod, amount: number, patch: Partial<PayRow>) => setRows((list) => [...list, { ...newRow(method, amount), ...patch }]);
   const update = (id: number, patch: Partial<PayRow>) => edit(() => setRows((list) => list.map((r) => (r.id === id ? { ...r, ...patch } : r))));
   const remove = (id: number) => edit(() => setRows((list) => list.filter((x) => x.id !== id)));
   /** 授权弹窗签发后记到那一笔上（不经过 edit：授权时表单没有锁） */
@@ -242,11 +253,16 @@ export function usePayRows(opts: {
         const s = splitOf(r, amount);
         return { method: 'wallet' as const, memberId: r.member!.id, amount, expectedSplit: s && s.ok ? { principal: s.principal, bonus: s.bonus } : { principal: amount, bonus: 0 } };
       }
-      if (r.method === 'coupon') return { method: 'coupon' as const, platform: r.platform, code: normalizeCouponCode(r.code), dealName: r.dealName.trim(), amount };
+      if (r.method === 'coupon') {
+        if (r.verification) return { method: 'coupon' as const, platform: r.verification.platform, code: r.verification.code, dealName: r.verification.dealName, amount, verificationId: r.verification.id };
+        return { method: 'coupon' as const, platform: r.platform, code: normalizeCouponCode(r.code), dealName: r.dealName.trim(), amount };
+      }
       if (r.method === 'discount') return { method: 'discount' as const, amount, grantId: r.grant!.grantId };
       if (r.method === 'store_coupon') return { method: 'store_coupon' as const, code: r.coupon!.code, amount };
       if (r.method === 'on_account') return { method: 'on_account' as const, accountId: r.accountId!, signer: r.signer.trim(), amount };
-      return { method: r.method as Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card' | 'on_account'>, amount, ref: r.ref.trim() };
+      const method = r.method as Exclude<CheckoutMethod, 'wallet' | 'coupon' | 'discount' | 'store_coupon' | 'member_discount' | 'count_card' | 'on_account'>;
+      if (r.payTx) return { method, amount, ref: r.payTx.providerTradeNo ?? '', payTxId: r.payTx.id };
+      return { method, amount, ref: r.ref.trim() };
     }),
   ];
 
@@ -277,6 +293,7 @@ export function usePayRows(opts: {
     grantFits: opts.grantFits,
     locked: opts.locked,
     addRow,
+    addPreset,
     update,
     remove,
     setGrant,
@@ -468,15 +485,35 @@ export function PayRowEditor({
           <MoneyInput
             value={row.amount}
             onChange={(e) => onChange({ amount: e.target.value })}
-            // 券抵扣的金额由服务端按此刻的明细算好，不能改
-            disabled={locked || row.method === 'store_coupon'}
+            // 券抵扣的金额由服务端按此刻的明细算好，不能改；扫码到账、验过券的金额也不能改
+            disabled={locked || row.method === 'store_coupon' || !!row.payTx || !!row.verification}
             aria-label={`${CHECKOUT_METHOD_LABELS[row.method]}金额`}
             className="h-10"
           />
         </div>
+        {(row.method === 'wechat' || row.method === 'alipay') &&
+          (row.payTx ? (
+            <span className="flex items-center gap-1" data-testid="scan-pay-attached">
+              <Badge tone="pine">已扫码到账</Badge>
+              {!locked && (
+                <Button size="sm" variant="ghost" onClick={() => onChange({ payTx: null, ref: '' })}>
+                  不用这一笔
+                </Button>
+              )}
+            </span>
+          ) : (
+            <ScanPayButton
+              provider={row.method}
+              amountCents={cents}
+              purpose="checkout"
+              disabled={locked}
+              onPaid={(tx) => onChange({ payTx: tx, amount: centsToInput(tx.amountCents), ref: tx.providerTradeNo ?? '' })}
+            />
+          ))}
         {(PAYMENT_METHODS as readonly string[]).includes(row.method) && (
           <Input
             fullWidth={false}
+            readOnly={!!row.payTx}
             value={row.ref}
             onChange={(e) => onChange({ ref: e.target.value })}
             placeholder={row.method === 'cash' ? '备注（选填）' : row.method === 'other' ? '写明收的是什么（必填）' : '单号后几位（选填）'}
@@ -488,7 +525,7 @@ export function PayRowEditor({
         )}
         {row.method === 'coupon' && (
           <>
-            <Select fullWidth={false} value={row.platform} onChange={(e) => onChange({ platform: e.target.value as CouponPlatform })} disabled={locked} className="h-10 w-[120px]" aria-label="团购平台">
+            <Select fullWidth={false} value={row.platform} onChange={(e) => onChange({ platform: e.target.value as CouponPlatform })} disabled={locked || !!row.verification} className="h-10 w-[120px]" aria-label="团购平台">
               {COUPON_PLATFORMS.map((pl) => (
                 <option key={pl} value={pl}>
                   {COUPON_PLATFORM_LABELS[pl]}
@@ -501,11 +538,29 @@ export function PayRowEditor({
               onChange={(e) => onChange({ code: e.target.value.toUpperCase() })}
               onBlur={() => onChange({ code: normalizeCouponCode(row.code) })}
               placeholder="完整券码"
-              disabled={locked}
+              disabled={locked || !!row.verification}
               className="num h-10 min-w-0 flex-1 basis-40 font-semibold tracking-wide"
               aria-label="完整券码"
               data-testid="coupon-code"
             />
+            {/* 平台验券（8.0.21）：美团、抖音验券即核销；没配置时不显示，照旧手输 */}
+            {row.verification ? (
+              <span className="flex items-center gap-1" data-testid="voucher-attached">
+                <Badge tone="pine">已验券</Badge>
+                {!locked && (
+                  <Button size="sm" variant="ghost" onClick={() => onChange({ verification: null })}>
+                    不用这一张
+                  </Button>
+                )}
+              </span>
+            ) : (
+              <VerifyButton
+                platform={row.platform}
+                code={normalizeCouponCode(row.code)}
+                disabled={locked}
+                onVerified={(v) => onChange({ verification: v, platform: v.platform, code: v.code, dealName: v.dealName, amount: centsToInput(v.faceCents) })}
+              />
+            )}
           </>
         )}
         <span className="flex-1" />
@@ -515,7 +570,7 @@ export function PayRowEditor({
       </div>
 
       {row.method === 'coupon' && (
-        <Input value={row.dealName} onChange={(e) => onChange({ dealName: e.target.value })} placeholder="团购项目（选填，例如「不含餐 12 小时」）" maxLength={48} disabled={locked} className="mt-2 h-9 text-[13px]" aria-label="团购项目" />
+        <Input value={row.dealName} onChange={(e) => onChange({ dealName: e.target.value })} placeholder="团购项目（选填，例如「不含餐 12 小时」）" maxLength={48} disabled={locked || !!row.verification} className="mt-2 h-9 text-[13px]" aria-label="团购项目" />
       )}
 
       {row.method === 'on_account' && (

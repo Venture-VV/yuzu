@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from 'react';
+import { DEFAULT_DICTIONARIES, type DictionaryKey } from '@shared/custom-fields';
 import type { Permission } from '@shared/permissions';
 import type { SessionInfo } from '@shared/types';
 
@@ -23,4 +24,10 @@ export function useSession(): SessionInfo {
 export function useCan() {
   const s = useSession();
   return (p: Permission) => s.permissions.includes(p);
+}
+
+/** 快捷原因（8.0.21 数据字典，后台「数据字典与字段」维护）；原因照旧存文字，页面上仍然可以手填 */
+export function useReasons(key: DictionaryKey): readonly string[] {
+  const s = useContext(SessionContext);
+  return s?.rules.dictionaries?.[key] ?? DEFAULT_DICTIONARIES[key];
 }

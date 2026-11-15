@@ -17,6 +17,7 @@ import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
+import { BatchesTab } from './BatchesTab';
 import { InvoiceDialog } from './InvoiceDialog';
 import { RequestStatusBadge, stageText, ThreeWayBadge, WarrantyBadge } from './parts';
 import {
@@ -38,6 +39,8 @@ const TABS = [
   { value: 'three-way', label: '三单' },
   { value: 'warranty', label: '质保金' },
   { value: 'weekly', label: '本周应付' },
+  // 8.0.21 批量付款（docs/FINANCE_V8021.md 第 5 节）
+  { value: 'batches', label: '批量付款' },
   { value: 'rules', label: '付款规则' },
 ] as const;
 type Tab = (typeof TABS)[number]['value'];
@@ -110,6 +113,7 @@ export function PaymentsPage() {
         {tab === 'three-way' && <ThreeWayTab />}
         {tab === 'warranty' && <WarrantyTab />}
         {tab === 'weekly' && <WeeklyTab />}
+        {tab === 'batches' && <BatchesTab />}
       </div>
     </ErpPage>
   );

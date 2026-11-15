@@ -10,9 +10,9 @@ export const BOOKING_KINDS = ['technician', 'space', 'room'] as const;
 export type BookingKind = (typeof BOOKING_KINDS)[number];
 export const BOOKING_KIND_LABELS: Record<BookingKind, string> = { technician: '技师', space: '派对房等', room: '客房' };
 
-export const BOOKING_SOURCES = ['front', 'phone', 'mp'] as const;
+export const BOOKING_SOURCES = ['front', 'phone', 'mp', 'ota'] as const;
 export type BookingSource = (typeof BOOKING_SOURCES)[number];
-export const BOOKING_SOURCE_LABELS: Record<BookingSource, string> = { front: '前台', phone: '电话', mp: '小程序' };
+export const BOOKING_SOURCE_LABELS: Record<BookingSource, string> = { front: '前台', phone: '电话', mp: '小程序', ota: '渠道' };
 
 export const BOOKING_STATUSES = ['pending', 'confirmed', 'arrived', 'cancelled', 'no_show'] as const;
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];

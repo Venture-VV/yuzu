@@ -21,13 +21,15 @@ import { Dialog } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
+import { shiftDate } from '@shared/labels';
+import { VoucherReconTab } from '../pay/VoucherVerify';
 
 const keys = { list: (d: string) => ['platform', 'redemptions', d] as const, reconcile: (f: string, t: string) => ['platform', 'reconcile', f, t] as const };
 
 export function PlatformPage() {
   const can = useCan();
   const session = useSession();
-  const [tab, setTab] = useState<'redeem' | 'settle'>('redeem');
+  const [tab, setTab] = useState<'redeem' | 'settle' | 'recon'>('redeem');
   return (
     <>
       <PageHeader
@@ -43,13 +45,14 @@ export function PlatformPage() {
               options={[
                 { value: 'redeem', label: '补登记' },
                 { value: 'settle', label: '打款与对账' },
+                { value: 'recon', label: '验券对账' },
               ]}
             />
           ) : null
         }
       />
       <div className="space-y-4 p-5 md:p-7" data-testid="platform-page">
-        {tab === 'redeem' ? <RedeemTab today={session.today} /> : <SettleTab today={session.today} />}
+        {tab === 'redeem' ? <RedeemTab today={session.today} /> : tab === 'settle' ? <SettleTab today={session.today} /> : <VoucherReconTab from={shiftDate(session.today, -14)} to={session.today} />}
       </div>
     </>
   );

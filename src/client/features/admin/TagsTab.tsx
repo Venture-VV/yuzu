@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileUp, Lock, Plus, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router';
 import {
-  LOCK_REASONS,
   MAX_VIP_LEVEL,
   TAG_KIND_LABELS,
   TAG_ZONES,
@@ -18,7 +17,7 @@ import { parseHandTagCsv, type HandTagCsvResult, type HandTagImportReport } from
 import { formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { readImportFile } from '../../lib/import-file';
-import { useCan } from '../../lib/session';
+import { useCan, useReasons } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
@@ -475,6 +474,7 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
 
 function TagDialog({ tag, onClose, onDone }: { tag: AdminTag; onClose: () => void; onDone: (message: string) => void }) {
   const legacy = tag.zone === 'child';
+  const lockReasons = useReasons('lockReasons');
   const [zone, setZone] = useState<Zone>(tag.zone === 'child' ? 'male' : tag.zone);
   const [kind, setKind] = useState<TagKind>(tag.kind);
   const [vipLevel, setVipLevel] = useState(tag.vipLevel ?? 1);
@@ -569,7 +569,7 @@ function TagDialog({ tag, onClose, onDone }: { tag: AdminTag; onClose: () => voi
             <>
               <p className="text-[13px] font-semibold text-ink-2">锁定后前台不能发出这张牌</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {LOCK_REASONS.map((r) => (
+                {lockReasons.map((r) => (
                   <button
                     key={r}
                     type="button"

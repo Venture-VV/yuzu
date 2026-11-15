@@ -43,6 +43,7 @@ import { resolveReadableDate } from './ledger';
 import { loadSettings } from './settings';
 import { nextDocNo } from '../lib/tx';
 import { ctxOf } from '../lib/context';
+import { unsettledPayOfShift } from './pay-terminal';
 
 /**
  * 收款开始处理时经办人所在的班次（不加锁，没有开班时为 null）；入账事务里交给 lockPaymentShift 核对。
@@ -633,6 +634,17 @@ export async function closeShift(deps: Deps, id: number, raw: unknown, ctx: OpCo
       }
     }
     if (input.handedTo === s.staffId) throw conflict('HANDOVER_SELF', '接班人不能是交班人自己');
+    // 扫码收款（8.0.21）：这个班次收了钱没入账、还在支付中的先处理（挂到结账 / 充值，或原路退回）
+    const pay = await unsettledPayOfShift(tx, s.id);
+    if (pay.unconsumed || pay.paying) {
+      throw conflict(
+        'PAY_UNSETTLED',
+        pay.paying
+          ? `这个班次还有 ${pay.paying} 笔扫码收款在支付中，等出了结果再交班`
+          : `这个班次还有 ${pay.unconsumed} 笔扫码收款收了钱没入账：先挂到结账、充值，或原路退回，再交班`,
+        pay,
+      );
+    }
     const summary = await shiftSummary(tx, s, at);
     if (summary.cash.expected !== input.expectedCash) {
       throw conflict('SHIFT_CHANGED', '交班期间又有收款，应有现金已变化，请刷新后重新核对', { expectedCash: summary.cash.expected });

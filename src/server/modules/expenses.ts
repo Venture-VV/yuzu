@@ -60,6 +60,7 @@ import { approvalBrief, approveCurrent, closeApproval, overBudgetPlan, returnCur
 import { receiptAttachments } from './inventory/attachments';
 import { checkClaimBudget } from './budgets';
 import { resolveClaimInvoice } from './invoices';
+import { INVOICE_ENTRY_METHODS } from '@shared/invoice-recognize';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(Math.abs(cents)).replace(/,/g, '');
@@ -657,6 +658,8 @@ const ClaimInput = z.object({
   invoiceIssuer: z.string().trim().max(60, '开票方最多 60 个字').default(''),
   invoiceDate: docDateSchema.nullable().default(null),
   invoiceTaxCents: z.number().int('税额要精确到分').min(0, '税额不能为负').max(1_000_000_000).nullable().default(null),
+  // 8.0.21 发票识别：发票一栏是手填、读二维码还是读文字（只为统计；自动登记进台账时记下）
+  invoiceEntryMethod: z.enum(INVOICE_ENTRY_METHODS, '登记方式不对').default('manual'),
   purchaseOrderId: id.nullable().default(null),
   /** 采购途径与途径说明（v0.7.29，E1）：按采购单报销的照采购单记（采购单没记的才用这里的）；按次报销的页面上必选，接口不传记「未填」 */
   channel: ChannelKey.nullable().default(null),
@@ -702,7 +705,8 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
   const total = input.lines.reduce((t, l) => t + l.amountCents, 0);
   if (input.invoiceTaxCents !== null && input.invoiceTaxCents > total) throw badRequest('税额不能超过报销金额');
   const needsApproval = total > rules.approvalThresholdCents;
-  const requestHash = hashRequest({ ...input, clientKey: undefined });
+  // 手填的不放进摘要：升级前就在「结果待确认」里的原请求照样对得上
+  const requestHash = hashRequest({ ...input, clientKey: undefined, invoiceEntryMethod: input.invoiceEntryMethod === 'manual' ? undefined : input.invoiceEntryMethod });
 
   const findExisting = async (db: Db) => {
     const [row] = await db<{ opType: string; requestHash: string; refId: number }[]>`SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${input.clientKey}`;
@@ -780,6 +784,7 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
             totalCents: total,
             taxCents: input.invoiceTaxCents,
             taxRateBp: input.taxRateBp,
+            entryMethod: input.invoiceEntryMethod,
           },
           actor,
         );

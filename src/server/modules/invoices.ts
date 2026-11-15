@@ -56,6 +56,7 @@ import { erpOpAbandoned } from './erp-ops';
 import { loadExpenseRules } from './expenses';
 import { readFile, storePdf } from './inventory/files';
 import { saveImage } from './requests';
+import { INVOICE_ENTRY_METHODS, type InvoiceEntryMethod } from '@shared/invoice-recognize';
 
 const id = z.number().int().positive();
 const ACTIVE_CLAIM = ['submitted', 'returned', 'confirmed'] as const;
@@ -86,6 +87,7 @@ interface RawRow {
   taxCents: string;
   taxRateBp: number;
   source: InvoiceSource;
+  entryMethod: InvoiceEntryMethod;
   status: 'valid' | 'voided';
   note: string;
   certStatus: CertStatus;
@@ -143,7 +145,7 @@ function anomalySql(db: Db, rules: ExpenseRules, today: string): Fragment {
 async function rowsWhere(db: Db, where: Fragment, limit = 1000): Promise<RawRow[]> {
   return db<RawRow[]>`
     SELECT i.id, i.invoice_no, i.kind, i.kind_label, i.supplier_id, s.name AS supplier_name, i.issuer_name, i.invoice_date,
-           i.total_cents::text AS total_cents, i.tax_cents::text AS tax_cents, i.tax_rate_bp, i.source, i.status, i.note,
+           i.total_cents::text AS total_cents, i.tax_cents::text AS tax_cents, i.tax_rate_bp, i.source, i.entry_method, i.status, i.note,
            i.cert_status, i.cert_period, i.cert_note, cb.display_name AS cert_by_name, i.cert_at, i.cert_version,
            cr.display_name AS created_by_name, i.created_at, vb.display_name AS voided_by_name, i.voided_at, i.void_reason,
            ${sameNoSql(db)}::int AS same_no,
@@ -210,6 +212,7 @@ function toInvoice(r: RawRow, pos: InputInvoice['pos'], rules: ExpenseRules, tod
     taxCents: Number(r.taxCents),
     taxRateBp: r.taxRateBp,
     source: r.source,
+    entryMethod: r.entryMethod,
     status: r.status,
     note: r.note,
     certStatus: r.certStatus,
@@ -266,8 +269,10 @@ export async function loadLedger(db: Db, raw: unknown, today: string, limit = LE
   const pos = await poSplits(db, shown.map((r) => Number(r.id)));
   const invoices = shown.map((r) => toInvoice(r, pos.get(Number(r.id)) ?? [], rules, today));
   // 上方的数字：全部有效的发票，在 SQL 里数（不受列表张数限制）
-  const [counts] = await db<{ pending: number; due: number; anomaly: number }[]>`
+  const [counts] = await db<{ pending: number; due: number; anomaly: number; recognized: number; valid: number }[]>`
     SELECT count(*) FILTER (WHERE i.cert_status = 'pending')::int AS pending,
+           count(*) FILTER (WHERE i.entry_method <> 'manual')::int AS recognized,
+           count(*)::int AS valid,
            count(*) FILTER (WHERE ${dueSql(db, rules, today)})::int AS due,
            count(*) FILTER (WHERE ${anomalySql(db, rules, today)})::int AS anomaly
     FROM supplier_invoices i
@@ -368,6 +373,8 @@ export interface ClaimInvoiceInput {
   totalCents: number;
   taxCents: number | null;
   taxRateBp: number;
+  /** 8.0.21 发票识别：报销页的发票一栏是怎么填的 */
+  entryMethod?: InvoiceEntryMethod;
 }
 
 /**
@@ -411,10 +418,11 @@ export async function resolveClaimInvoice(tx: Tx, input: ClaimInvoiceInput, acto
   const certifies = invoiceTypeCertifies(input.kind);
   const [row] = await tx<{ id: number }[]>`
     INSERT INTO supplier_invoices (invoice_no, supplier_id, issuer_name, invoice_date, total_cents, tax_cents, tax_rate_bp, note,
-                                   kind, kind_label, source, cert_status, client_key, request_hash, created_by)
+                                   kind, kind_label, source, cert_status, client_key, request_hash, created_by, entry_method)
     VALUES (${input.invoiceNo.trim()}, ${input.supplier?.id ?? null}, ${input.supplier ? '' : input.issuerName.trim()}, ${input.invoiceDate},
             ${input.totalCents}, ${input.taxCents ?? expectedTaxCents(input.totalCents, input.taxRateBp)}, ${input.taxRateBp}, '',
-            ${input.kind.key}, ${input.kind.label}, 'expense', ${certifies ? 'pending' : 'not_required'}, gen_random_uuid(), 'expense', ${actor.id})
+            ${input.kind.key}, ${input.kind.label}, 'expense', ${certifies ? 'pending' : 'not_required'}, gen_random_uuid(), 'expense', ${actor.id},
+            ${input.entryMethod ?? 'manual'})
     RETURNING id`;
   return Number(row!.id);
 }
@@ -432,6 +440,8 @@ const ManualInput = z.object({
   taxCents: z.number('请填写税额').int('税额要精确到分').min(0, '税额不能为负').max(1_000_000_000),
   taxRateBp: z.number('请填写税率').int().min(0, '税率不能为负').max(10000, '税率不能超过 100%'),
   note: z.string().trim().max(200, '备注最多 200 个字').default(''),
+  // 8.0.21 发票识别：手填 / 读二维码 / 读文字（只为统计；识别的结果人核对过才提交）
+  entryMethod: z.enum(INVOICE_ENTRY_METHODS, '登记方式不对').default('manual'),
 });
 
 export async function createManualInvoice(deps: Deps, raw: unknown, actor: Actor, ip?: string): Promise<{ id: number; replayed: boolean }> {
@@ -442,7 +452,8 @@ export async function createManualInvoice(deps: Deps, raw: unknown, actor: Actor
   const rules = await loadExpenseRules(deps.sql);
   const kind = ledgerKind(rules, input.kind);
   if (!kind) throw unprocessable('INVOICE_TYPE_INVALID', '台账只登记要填号码的发票（专票、普票等），请刷新页面后重选发票类型');
-  const requestHash = hashRequest({ ...input, clientKey: undefined, manual: true });
+  // 手填的不放进摘要：升级前就在「结果待确认」里的原请求照样对得上
+  const requestHash = hashRequest({ ...input, clientKey: undefined, manual: true, entryMethod: input.entryMethod === 'manual' ? undefined : input.entryMethod });
   const find = async (db: Db) => {
     const [row] = await db<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM supplier_invoices WHERE client_key = ${input.clientKey}`;
     if (!row) return null;
@@ -470,10 +481,10 @@ export async function createManualInvoice(deps: Deps, raw: unknown, actor: Actor
       if (dup) throw conflict('INVOICE_DUPLICATE', `${dup.issuerName || '这个开票方'}的发票 ${input.invoiceNo} 已经在台账里了（登错了先作废原来那张）`, { invoiceId: dup.id });
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO supplier_invoices (invoice_no, supplier_id, issuer_name, invoice_date, total_cents, tax_cents, tax_rate_bp, note,
-                                       kind, kind_label, source, cert_status, client_key, request_hash, created_by)
+                                       kind, kind_label, source, cert_status, client_key, request_hash, created_by, entry_method)
         VALUES (${input.invoiceNo}, ${input.supplierId}, ${input.supplierId ? '' : input.issuerName}, ${input.invoiceDate}, ${input.totalCents},
                 ${input.taxCents}, ${input.taxRateBp}, ${input.note}, ${kind.key}, ${kind.label}, 'manual',
-                ${invoiceTypeCertifies(kind) ? 'pending' : 'not_required'}, ${input.clientKey}, ${requestHash}, ${actor.id})
+                ${invoiceTypeCertifies(kind) ? 'pending' : 'not_required'}, ${input.clientKey}, ${requestHash}, ${actor.id}, ${input.entryMethod})
         RETURNING id`;
       const invoiceId = Number(row!.id);
       await writeAudit(tx, {

@@ -44,7 +44,8 @@ export async function legacySwitchesOff(sql: Sql): Promise<void> {
 /** 清空测试库、执行迁移、建好店主与店员，返回已登录的 cookie。 */
 export async function setup(options: { keepDefaultSwitches?: boolean } = {}): Promise<TestContext> {
   process.env.APP_ENV = 'test';
-  const config = loadConfig({ databaseUrl: TEST_DB, env: 'test', logLevel: 'silent' });
+  // 对外接口用模拟的（8.0.21，docs/INTEGRATIONS_V8021.md）：开票服务商、支付、平台验券都不连真的
+  const config = loadConfig({ databaseUrl: TEST_DB, env: 'test', logLevel: 'silent', integrations: { mock: true, liveConfigured: [] } });
   // 并行时从迁移好的模板库整库复制一份新的；不并行时照旧清空、迁移（见 tests/test-db.ts）
   const fresh = await recreateFromTemplate();
   const sql = createSql(TEST_DB, { max: 20 });
@@ -311,6 +312,18 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '138_linen.sql',
   '139_room_member_prices.sql',
   '140_linen_ops.sql',
+  '141_custom_fields.sql',
+  '142_invoice_entry_method.sql',
+  '143_invoice_requests.sql',
+  '144_bank_statements.sql',
+  '145_payment_batches.sql',
+  '146_contract_templates.sql',
+  '147_supplier_links.sql',
+  '148_pay_terminal.sql',
+  '149_platform_verify.sql',
+  '150_ota.sql',
+  '151_supplier_bank_verify.sql',
+  '152_po_confirm_revision.sql',
   '161_replenish_mode.sql',
   '162_customer_workbench.sql',
   '163_customer_credit_canonical.sql',

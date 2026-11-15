@@ -40,6 +40,7 @@ const ShiftPage = lazyPage(() => import('./features/shift/ShiftPage').then((m) =
 const LookupPage = lazyPage(() => import('./features/membership/LookupPage').then((m) => m.LookupPage));
 const AdminShell = lazyPage(() => import('./features/admin/AdminShell').then((m) => m.AdminShell));
 const CheckoutPrintPage = lazyPage(() => import('./features/print/CheckoutPrintPage').then((m) => m.CheckoutPrintPage));
+const ContractPrintPage = lazyPage(() => import('./features/print/ContractPrintPage').then((m) => m.ContractPrintPage));
 const RefundPrintPage = lazyPage(() => import('./features/print/RefundPrintPage').then((m) => m.RefundPrintPage));
 const SettlementPrintPage = lazyPage(() => import('./features/print/SettlementPrintPage').then((m) => m.SettlementPrintPage));
 const CanteenCardsPrintPage = lazyPage(() => import('./features/canteen/CardsPrintPage').then((m) => m.CanteenCardsPrintPage));
@@ -49,6 +50,7 @@ const ShiftPrintPage = lazyPage(() => import('./features/print/ShiftPrintPage').
 // ERP 工作区
 // 供应商在线对账确认（8.0.7 2.6）：供应商打开链接，不用登录
 const ReconPublicPage = lazyPage(() => import('./features/payables/ReconPublicPage').then((m) => m.ReconPublicPage));
+const SupplierPublicPage = lazyPage(() => import('./features/purchasing/SupplierPublicPage').then((m) => m.SupplierPublicPage));
 const ErpShell = lazyPage(() => import('./features/erp/ErpShell').then((m) => m.ErpShell));
 const ErpHome = lazyPage(() => import('./features/erp/ErpHome').then((m) => m.ErpHome));
 const ErpSettingsPage = lazyPage(() => import('./features/erp/ErpSettingsPage').then((m) => m.ErpSettingsPage));
@@ -63,6 +65,8 @@ const LinenPage = lazyPage(() => import('./features/linen/LinenPage').then((m) =
 const AssetLabelsPrintPage = lazyPage(() => import('./features/assets/AssetLabelsPrintPage').then((m) => m.AssetLabelsPrintPage));
 const ReceivablesPage = lazyPage(() => import('./features/receivables/ReceivablesPage').then((m) => m.ReceivablesPage));
 const InvoicesPage = lazyPage(() => import('./features/invoices/InvoicesPage').then((m) => m.InvoicesPage));
+const SalesInvoicesPage = lazyPage(() => import('./features/sales-invoices/SalesInvoicesPage').then((m) => m.SalesInvoicesPage));
+const BankPage = lazyPage(() => import('./features/bank/BankPage').then((m) => m.BankPage));
 const RequestsPage = lazyPage(() => import('./features/requests/RequestsPage').then((m) => m.RequestsPage));
 const RequestFormPage = lazyPage(() => import('./features/requests/RequestFormPage').then((m) => m.RequestFormPage));
 const RequestSheetImportPage = lazyPage(() => import('./features/requests/RequestSheetImportPage').then((m) => m.RequestSheetImportPage));
@@ -213,6 +217,8 @@ function DashboardMoved() {
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/r/:token', element: <ReconPublicPage /> },
+  // 8.0.21 供应商门户：报价、订单确认、发货预告（不用登录）
+  { path: '/s/:token', element: <SupplierPublicPage /> },
   {
     path: '/print',
     element: <AuthGate shell="bare" />,
@@ -227,6 +233,8 @@ const router = createBrowserRouter([
       { path: 'patrol-codes/:ids', element: <PatrolCodesPrintPage /> },
       // 资产标签（8.0.7）
       { path: 'asset-labels/:ids', element: <AssetLabelsPrintPage /> },
+      // 合同（8.0.21）：A4，打印或存为 PDF
+      { path: 'contract/:id', element: <ContractPrintPage /> },
     ],
   },
   // 对客导览的大屏模式（v0.7.19）：没有导航与操作，适合门店大屏常开
@@ -251,6 +259,8 @@ const router = createBrowserRouter([
       // 费用预算与进项发票台账（8.0.3）
       { path: 'expenses/budgets', element: <BudgetsPage /> },
       { path: 'invoices', element: <InvoicesPage /> },
+      { path: 'sales-invoices', element: <SalesInvoicesPage /> },
+      { path: 'bank', element: <BankPage /> },
       { path: 'receivables', element: <ReceivablesPage /> },
       { path: 'assets', element: <AssetsPage /> },
       // 布草洗涤（8.0.20）

@@ -4,7 +4,7 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'assets', 'linen', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'receivables', 'revenue', 'canteen', 'patrol'] as const;
+export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'assets', 'linen', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'salesInvoices', 'receivables', 'bank', 'revenue', 'canteen', 'patrol'] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -53,7 +53,8 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     // 补货建议、询价比价、价格曲线（v0.7.29 ERP 采购五项）也跟采购模块走
     // 供应商比价看板（8.0.1 采购组整改 07）也跟采购模块走
     // 采购流程图（8.0.17）也跟采购模块走；只有需求单权限的部门同事从需求单里看（需求单依赖采购）
-    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images', '/api/purchase-suggestions', '/api/purchase-sourcing', '/api/purchase-price-history', '/api/purchase-compare', '/api/purchase-flow'],
+    // 供应商门户的链接（8.0.21）也跟采购模块走；供应商打开的公开接口在 /api/public/supplier，采购关着时 404
+    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images', '/api/purchase-suggestions', '/api/purchase-sourcing', '/api/purchase-price-history', '/api/purchase-compare', '/api/purchase-flow', '/api/purchase-supplier-links'],
     // 物资经办要看采购单、按单收货（采购单的读接口按「查看库存与物资单据」开放）
     perms: ['inventory.read', 'purchase.manage', 'inventory.approve', 'payable.read'],
     defaultEnabled: true,
@@ -186,6 +187,30 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     // 开票方可以是供应商档案里的供应商
     requires: ['inventory'],
   },
+  // 8.0.21 开票（docs/FINANCE_V8021.md 第 3 节，CW-B）：客人的开票申请（销项）
+  salesInvoices: {
+    label: '开票',
+    group: '财务',
+    description: '给客人开票：前台在结账记录、充值记录上申请，协议单位按回款申请；财务登记已开、交给开票服务商开（先带模拟的）、驳回、作废红冲（8.0.21）',
+    path: '/erp/sales-invoices',
+    pages: ['/erp/sales-invoices'],
+    apis: ['/api/erp/sales-invoices'],
+    perms: ['invoice.issue'],
+    defaultEnabled: true,
+    requires: [],
+  },
+  // 8.0.21 银行账户与网银流水（docs/FINANCE_V8021.md 第 4 节，CW-C）
+  bank: {
+    label: '银行流水',
+    group: '财务',
+    description: '本公司的银行账户（只记后四位），导入网银导出的对账单，与付款、回款、备用金、平台打款勾对；超过 7 天没对上的进待办（8.0.21）',
+    path: '/erp/bank',
+    pages: ['/erp/bank'],
+    apis: ['/api/erp/bank'],
+    perms: ['payable.read'],
+    defaultEnabled: true,
+    requires: ['payables'],
+  },
   receivables: {
     label: '应收与挂账',
     group: '财务',
@@ -245,7 +270,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
 export const ERP_NAV_GROUPS: readonly { key: string; title: string; modules: readonly ErpModuleKey[] }[] = [
   { key: 'approvals', title: '审批', modules: ['approvals'] },
   { key: 'supply', title: '供应链', modules: ['inventory', 'purchasing', 'requests', 'deptStock', 'assets', 'linen'] },
-  { key: 'finance', title: '财务', modules: ['payments', 'payables', 'expenses', 'invoices', 'receivables'] },
+  { key: 'finance', title: '财务', modules: ['payments', 'payables', 'expenses', 'invoices', 'salesInvoices', 'receivables', 'bank'] },
   { key: 'contracts', title: '合同', modules: ['contracts'] },
   // 已经挪到后台的：页面不在 ERP 里。8.0.18 在 ERP 导航里各留了一条跳转，8.0.19 去掉；这一组留着是为了「每个模块都有归属」，
   // 模块开关页（ERP 设置 → 模块开关）仍按它列出这三个
@@ -377,6 +402,14 @@ export const ERP_OP_TYPES = [
   'patrol_point',
   // 8.0.20 布草洗涤：送洗、收回、新增、报废单
   'linen_doc',
+  // 8.0.21 开票申请（前台、财务申请；动的是给客人开的发票）
+  'invoice_request',
+  // 8.0.21 网银流水导入
+  'bank_import',
+  // 8.0.21 批量付款：生成一批
+  'payment_batch',
+  // 8.0.21 渠道订单导入（前台「预约 → 渠道订单」；Codex 审查 e64932b 后补，接进同一套「结果待确认」）
+  'ota_import',
   'customer_note',
   'customer_binding_request',
   'customer_binding_review',
@@ -442,6 +475,10 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   asset_stocktake: '开始扫码盘点',
   patrol_point: '新建巡场场所',
   linen_doc: '布草单据',
+  invoice_request: '开票申请',
+  bank_import: '网银流水导入',
+  payment_batch: '批量付款',
+  ota_import: '渠道订单导入',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

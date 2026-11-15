@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import { Lock, LockOpen } from 'lucide-react';
-import { LOCK_REASONS, normalizeTagCode, uniqueTagMatch, ZONE_LABELS, type BoardTag } from '@shared/frontdesk';
+import { normalizeTagCode, uniqueTagMatch, ZONE_LABELS, type BoardTag } from '@shared/frontdesk';
 import { api, errorMessage } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { useCan, useReasons } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
@@ -92,6 +92,7 @@ export function TagLockDialog({
   onDone: (message: string) => void;
 }) {
   const can = useCan();
+  const lockReasons = useReasons('lockReasons');
   const [code, setCode] = useState('');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -190,7 +191,7 @@ export function TagLockDialog({
         {tag && !tag.locked && !tag.visit && (
           <Field label="锁定原因">
             <div className="flex flex-wrap gap-1.5">
-              {LOCK_REASONS.map((r) => (
+              {lockReasons.map((r) => (
                 <button
                   key={r}
                   type="button"

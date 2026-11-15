@@ -23,6 +23,7 @@ import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
+import { InvoiceRequestButton } from '../sales-invoices/InvoiceRequest';
 
 const KEY = ['erp', 'receivables'] as const;
 type Tab = 'accounts' | 'aging';
@@ -368,6 +369,7 @@ function AccountSheet({ id, manage, onClose }: { id: number | null; manage: bool
                       <span>{AR_METHOD_LABELS[k.method]}</span>
                       <Money cents={k.amountCents} className="font-bold" />
                       {k.voided && <Badge>已冲销</Badge>}
+                      {!k.voided && <InvoiceRequestButton sourceType="ar_collection" sourceId={k.id} />}
                       {manage && !k.voided && (
                         <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setVoiding({ id: k.id, docNo: k.docNo })}>
                           冲销

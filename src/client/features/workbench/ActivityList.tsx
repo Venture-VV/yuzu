@@ -4,6 +4,7 @@ import type { LedgerRow } from '@shared/types';
 import { cn, formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Badge, Button } from '../../components/ui';
+import { InvoiceRequestButton } from '../sales-invoices/InvoiceRequest';
 
 export const ENTRY_META = {
   recharge: { label: '充值', icon: CirclePlus, tone: 'bg-lake-soft text-lake' },
@@ -23,11 +24,14 @@ export function ActivityRow({
   onReverse,
   onOpen,
   showMember = false,
+  invoice = false,
 }: {
   row: LedgerRow;
   onReverse?: (consumptionId: number) => void;
   onOpen?: (row: LedgerRow) => void;
   showMember?: boolean;
+  /** 充值行上显示「开票」（8.0.21，有「确认充值入账」的岗位） */
+  invoice?: boolean;
 }) {
   const meta = ENTRY_META[row.entryType];
   const Icon = meta.icon;
@@ -77,6 +81,7 @@ export function ActivityRow({
           </span>
         )}
         <DeltaLine label="本金" cents={row.principalDelta} struck={reversed} emphasize={row.entryType !== 'recharge'} />
+        {invoice && row.entryType === 'recharge' && row.rechargeId && (row.paidAmount ?? 0) > 0 && <InvoiceRequestButton sourceType="recharge" sourceId={row.rechargeId} />}
         {row.bonusDelta !== 0 && <DeltaLine label="赠金" cents={row.bonusDelta} struck={reversed} bonus />}
         {onReverse && row.entryType === 'consume' && !reversed && row.consumptionId && !row.checkoutNo && (
           <Button

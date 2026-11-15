@@ -12,6 +12,7 @@ import {
   type ContractCategory,
   type ContractContent,
   type ContractLineInput,
+  type ContractTemplateRef,
 } from '@shared/contracts';
 import { ISO_DATE } from '@shared/business-date';
 import type { Db } from '../../db';
@@ -59,6 +60,17 @@ export const ContentInput = z.object({
   }),
   note: text('备注', 200),
   lines: z.array(LineInput).max(CONTRACT_MAX_LINES, `单价表最多 ${CONTRACT_MAX_LINES} 行`).default([]),
+  // 8.0.21 合同模板：用的哪一版（模板一行的 id）、可填字段的值、勾的可选条款
+  template: z
+    .object({
+      id: z.number().int().positive('模板编号不对'),
+      values: z.record(z.string(), z.string().trim().max(500, '模板字段的值最多 500 个字')).default({}),
+      clauses: z.array(z.string().max(24)).max(30).default([]),
+    })
+    // 没选模板（不传或传 null）时这个键不出现在解析结果里：createContract / createChange 拿解析结果算原请求摘要，
+    // 升级前提交的请求（没有这个键）原样重提时摘要不变
+    .nullish()
+    .transform((v) => v ?? undefined),
 });
 export type ContentInputT = z.infer<typeof ContentInput>;
 
@@ -112,7 +124,24 @@ export async function normalizeContent(db: Db, input: ContentInputT): Promise<Co
     },
     note: input.note,
     lines,
+    ...(input.template ? { template: await templateRef(db, input.template) } : {}),
   };
+}
+
+/** 核对用的模板：可填字段只认模板里有的，可选条款只认模板里有的；值去掉首尾空白，空的不存 */
+async function templateRef(db: Db, t: { id: number; values: Record<string, string>; clauses: string[] }): Promise<ContractTemplateRef> {
+  const [row] = await db<{ id: number; code: string; version: number; name: string; fields: { key: string }[]; clauses: { key: string }[] }[]>`
+    SELECT id, code, version, name, fields, clauses FROM contract_templates WHERE id = ${t.id}`;
+  if (!row) throw unprocessable('TEMPLATE_NOT_FOUND', '选的合同模板不存在，请刷新后重选');
+  const keys = new Set(row.fields.map((f) => f.key));
+  const values: Record<string, string> = {};
+  for (const [k, v] of Object.entries(t.values)) {
+    if (!keys.has(k)) throw badRequest(`模板里没有「${k}」这一项`);
+    if (v.trim()) values[k] = v.trim();
+  }
+  const clauseKeys = new Set(row.clauses.map((c) => c.key));
+  if (t.clauses.some((c) => !clauseKeys.has(c))) throw badRequest('勾的可选条款不在模板里，请刷新后重选');
+  return { id: Number(row.id), code: row.code, version: row.version, name: row.name, values, clauses: [...new Set(t.clauses)] };
 }
 
 /** 提交审查前要齐的（C5、C9）：开始日期、付款节点加起来 100%、采购合同至少一行单价表且都选了物料、单价表的物料都还在用 */
@@ -126,6 +155,12 @@ export async function assertSubmittable(db: Db, category: ContractCategory, c: C
   if (category === 'purchase') {
     if (c.lines.length === 0) throw unprocessable('CONTRACT_INCOMPLETE', '采购合同提交审查前请填写单价表');
     if (c.lines.some((l) => l.materialId === null)) throw unprocessable('CONTRACT_INCOMPLETE', '采购合同的单价表每一行都要选物料（采购单按它核对）');
+  }
+  // 用了模板的：必填的字段要填
+  if (c.template) {
+    const [t] = await db<{ fields: { key: string; label: string; required: boolean }[] }[]>`SELECT fields FROM contract_templates WHERE id = ${c.template.id}`;
+    const missing = (t?.fields ?? []).filter((f) => f.required && !(c.template!.values[f.key] ?? '').trim());
+    if (missing.length) throw unprocessable('CONTRACT_INCOMPLETE', `合同模板里还有没填的：${missing.map((f) => f.label).join('、')}`);
   }
   const ids = [...new Set(c.lines.map((l) => l.materialId).filter((x): x is number => x !== null))];
   if (ids.length) {
@@ -170,5 +205,6 @@ export function readContent(raw: unknown): ContractContent {
       taxRateBp: Number(l.taxRateBp ?? 0),
       qtyMilli: l.qtyMilli === null || l.qtyMilli === undefined ? null : Number(l.qtyMilli),
     })),
+    ...(c.template ? { template: { ...c.template, id: Number(c.template.id), values: c.template.values ?? {}, clauses: c.template.clauses ?? [] } } : {}),
   };
 }

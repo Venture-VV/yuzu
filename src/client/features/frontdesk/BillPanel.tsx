@@ -24,9 +24,7 @@ import {
 import {
   BILL_SOURCE_LABELS,
   BILL_SOURCES,
-  CANCEL_REASONS,
   VISIT_STATUS_LABELS,
-  VOID_REASONS,
   ZONE_LABELS,
   type BillLine,
   type FrontdeskBoardRules,
@@ -38,7 +36,7 @@ import { KITCHEN_STATUS_LABELS } from '@shared/dining';
 import { technicianText } from '@shared/technicians';
 import { maskPhone } from '@shared/labels';
 import { api, errorMessage } from '../../lib/api';
-import { useCan, useSession } from '../../lib/session';
+import { useCan, useReasons, useSession } from '../../lib/session';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
@@ -83,6 +81,8 @@ export function BillPanel({
   const session = useSession();
   const toast = useToast();
   const pendingOps = useFrontdeskPending();
+  const voidReasons = useReasons('voidReasons');
+  const cancelReasons = useReasons('cancelReasons');
 
   if (loading && !visit) {
     return (
@@ -444,7 +444,7 @@ export function BillPanel({
         open={!!voiding}
         title={voiding ? `作废「${voiding.name} × ${voiding.quantity}」` : ''}
         description="作废后不计入未结金额，明细保留并标注作废原因与经办人"
-        reasons={VOID_REASONS}
+        reasons={voidReasons}
         confirmLabel="确认作废"
         onClose={() => setVoiding(null)}
         onConfirm={async (reason) => {
@@ -495,7 +495,7 @@ export function BillPanel({
             ? `账单上还有 ${active.length} 项未结消费，不能直接释放手牌。请先结账，或作废登记错的明细。`
             : '只用于开错牌、客人未入场等情况：撤销后手牌立即空闲，来访记录保留。'
         }
-        reasons={CANCEL_REASONS}
+        reasons={cancelReasons}
         confirmLabel="撤销并释放手牌"
         disabled={active.length > 0}
         onClose={() => setCancelling(false)}

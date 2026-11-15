@@ -21,6 +21,11 @@ export interface Sheet {
 export interface SheetOptions {
   /** 这几列是日期：Excel 存成序号的换成 YYYY-MM-DD */
   dateColumns?: string[];
+  /**
+   * 读出表头以后再定哪几列是日期（与 dateColumns 合在一起）：列是按同义词认的、页面上手动对的、或这个账户记住的，
+   * 表头写法不一定在固定的名单里（如「交易日期（年/月/日）」「Txn Date」）——8.0.21 Codex 审查后补
+   */
+  dateColumnsFor?: (header: string[]) => (string | null | undefined)[];
   /** 表头是哪一行：在前 headerScan 行（默认 10）里找第一行满足的；不给就是第一行有内容的 */
   findHeader?: (cells: string[]) => boolean;
   headerScan?: number;
@@ -76,7 +81,8 @@ export function readSheet(f: { csv?: string; xlsxBase64?: string }, options: str
   const headerRow = filled.find((r, i) => isHeader(lineOf(r), i)) ?? filled[0]!;
   const header = lineOf(headerRow);
   const width = header.length;
-  const dateCols = new Set(dateColumns.map((name) => header.indexOf(name)).filter((i) => i >= 0));
+  const dateNames = [...dateColumns, ...(opts.dateColumnsFor?.(header) ?? [])].filter((x): x is string => !!x);
+  const dateCols = new Set(dateNames.map((name) => header.indexOf(name)).filter((i) => i >= 0));
   const rows: Sheet['rows'] = [];
   for (const r of rowNos) {
     if (r <= headerRow) continue;

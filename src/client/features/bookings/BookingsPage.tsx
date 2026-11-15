@@ -24,7 +24,8 @@ import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
 import { describeDate, shiftDate } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
-import { useSession } from '../../lib/session';
+import { useReasons, useSession } from '../../lib/session';
+import { ReasonChips } from '../../components/ReasonChips';
 import { cn, formatTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { DateNav } from '../../components/DateNav';
@@ -34,6 +35,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
+import { OtaOrdersPanel } from '../ota/OtaPanels';
 
 const boardKey = (date: string) => ['bookings', date] as const;
 const STATUS_TONE: Record<BookingStatus, 'lake' | 'pine' | 'ember' | 'clay' | 'ink'> = {
@@ -72,12 +74,43 @@ export function BookingsPage() {
     p.delete('b');
     return p;
   });
+  // 8.0.21 OTA：渠道订单（导入渠道后台导出的订单表，建客房预约）
+  const view = params.get('view') === 'ota' ? 'ota' : 'board';
+  const setView = (v: 'board' | 'ota') =>
+    setParams((p) => {
+      if (v === 'ota') p.set('view', 'ota');
+      else p.delete('view');
+      return p;
+    });
+  const viewSwitch = (
+    <Segmented
+      value={view}
+      onChange={setView}
+      ariaLabel="页面"
+      size="sm"
+      options={[
+        { value: 'board', label: '预约' },
+        { value: 'ota', label: '渠道订单' },
+      ]}
+    />
+  );
+  if (view === 'ota') {
+    return (
+      <>
+        <PageHeader title="预约 · 渠道订单" actions={viewSwitch} />
+        <div className="space-y-5 p-5 md:p-7">
+          <OtaOrdersPanel />
+        </div>
+      </>
+    );
+  }
   return (
     <>
       <PageHeader
         title="预约"
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {viewSwitch}
             <DateNav value={date} today={session.today} max={lastDay} onChange={setDate} />
             <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)} data-testid="booking-new">
               新建预约
@@ -654,6 +687,7 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
   // 8.0.8（A04）：这位会员此刻在店的，手牌自动带出（可改）
   const [tag, setTag] = useState(action === 'arrive' ? (b.memberOpenTag ?? '') : '');
   const [reason, setReason] = useState('');
+  const cancelReasons = useReasons('bookingCancelReasons');
   const [date, setDate] = useState(b.businessDate);
   const [startsAt, setStartsAt] = useState<string | null>(null);
   const [technicianId, setTechnicianId] = useState<number | null>(b.technicianId);
@@ -727,6 +761,7 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
         )}
         {action === 'cancel' && (
           <Field label="取消原因" htmlFor="booking-cancel-reason">
+            <ReasonChips reasons={cancelReasons} value={reason} onPick={setReason} />
             <Input id="booking-cancel-reason" value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} placeholder="例如 客人改天" data-testid="booking-cancel-reason" />
           </Field>
         )}

@@ -97,6 +97,9 @@ export async function registerRedemption(deps: Deps, raw: RedemptionInputData, c
       const label = `${COUPON_PLATFORM_LABELS[input.platform]}券码 ${input.code}`;
       const dup = await redemptionOfCode(tx, input.platform, input.code);
       if (dup) throw conflict('PLATFORM_CODE_USED', `${label} 已经补登记过（${dup}）`);
+      // 平台验券（8.0.21）：验过、还没用的券不用补登记（撤销核销，或在验券记录上「转补录」）
+      const [verified] = await tx<{ id: number }[]>`SELECT id FROM platform_verifications WHERE platform = ${input.platform} AND code = ${input.code} AND status IN ('verifying', 'verified')`;
+      if (verified) throw conflict('PLATFORM_CODE_USED', `${label} 是在前台验券核销的：没结账的请在「已验券没结账」里撤销核销或转补录`);
       const [used] = await tx<{ checkoutNo: string }[]>`
         SELECT c.checkout_no FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
         WHERE g.platform = ${input.platform} AND g.code = ${input.code} AND g.status = 'active'`;

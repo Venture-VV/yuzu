@@ -170,15 +170,15 @@ export async function redeemCoupon(
     VALUES (${r.id}, 'use', ${o.checkoutId}, ${j.amount}, ${o.staffId}, ${o.at}, ${o.date})`;
   // 买一赠一的赠品出库（8.0.4，HY12）：模板上选了物料的，记一条「待出库」，每分钟的自动任务在选的仓开直接耗用单；
   // 这里只写这一行、不碰库存（库存不够也不挡结账）。
-  // 8.0.20：这个项目设了用料、按用料扣库存开着时不记——赠的那一件也在账单上，用料（结账时或出品完成时）已经把它一起扣了，
-  // 再记一条赠品出库就扣了两次（合并前 Codex 审查 342941e）。没设用料的项目照旧。
+  // 8.0.20：这张结账单里这个项目的明细都会（或已经）被用料扣掉时不记——赠的那一件也在账单上，再记一条赠品出库就扣了两次
+  //（合并前 Codex 审查 342941e）；进厨房、已经出品的看出品时记没记过扣料，不看现在的开关（8.0.21，Codex 审查 7dbc313）。没设用料的项目照旧。
   const giftItemId = r.exchangeItemId ?? r.buyItemId;
   if (
     r.kind === 'bogo' &&
     r.giftMaterialId !== null &&
     r.giftQtyMilli !== null &&
     r.giftWarehouseId !== null &&
-    !(giftItemId !== null && (await usageCoversItem(tx, giftItemId)))
+    !(giftItemId !== null && (await usageCoversItem(tx, giftItemId, o.billIds)))
   ) {
     await tx`
       INSERT INTO coupon_gift_outs (coupon_id, checkout_id, template_id, item_id, material_id, qty_milli, warehouse_id, business_date)

@@ -238,7 +238,33 @@ export type AuditAction =
   // 8.0.20 布草洗涤：品类的新建与修改、开单、作废
   | 'linen_item'
   | 'linen_doc'
-  | 'linen_doc_void';
+  | 'linen_doc_void'
+  // 8.0.21 自定义字段（docs/FINANCE_V8021.md 第 1 节）
+  | 'custom_field_def'
+  | 'custom_field_value'
+  // 8.0.21 开票申请（docs/FINANCE_V8021.md 第 3 节）：申请、登记已开、交给服务商开、驳回、作废
+  | 'invoice_request'
+  // 8.0.21 银行账户与网银流水（docs/FINANCE_V8021.md 第 4 节）：账户、导入、勾对
+  | 'bank_account'
+  | 'bank_import'
+  | 'bank_match'
+  // 8.0.21 批量付款（同上第 5 节）：生成、导出、下载、作废、记已付 / 失败
+  | 'payment_batch'
+  // 8.0.21 合同模板（同上第 6 节）：新建、改版、停用、导出 Word
+  | 'contract_template'
+  // 8.0.21 供应商门户（同上第 7 节）：发链接、作废，供应商在链接里报价、确认、发货预告
+  | 'supplier_link'
+  | 'supplier_reply'
+  // 8.0.21 扫码收款（docs/INTEGRATIONS_V8021.md 第 2 节）：开始收款、原路退回、重试、线下已退
+  | 'pay_terminal'
+  // 8.0.21 平台验券（同上第 3 节）：验券、撤销核销、转补录
+  | 'platform_verify'
+  // 8.0.21 OTA 渠道订单（同上第 4 节）：渠道的新建与修改、导入、订单建 / 改 / 取消预约
+  | 'ota_channel'
+  | 'ota_import'
+  | 'ota_order'
+  // 8.0.21 供应商收款账户（Codex 安全审查后补，迁移 151）：应付岗改账户、另一人复核
+  | 'supplier_bank';
 
 export interface AuditEntry {
   staffId: number | null;

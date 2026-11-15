@@ -1,0 +1,48 @@
+// 对外接口的模式（8.0.21，docs/INTEGRATIONS_V8021.md 第 1、6 节）：只由运行环境决定，页面上改不了。
+//   · mock（模拟）：INTEGRATIONS_MOCK=true，只许在 APP_ENV 是 development / test、实例不是 prod / shadow / test；
+//     和任何正式密钥同时出现时拒绝启动（免得以为在测模拟、其实连着真的商户）。
+//   · live（正式）：那一样的环境变量都在才算配置好。8.0.21 只有接口与模拟实现（CW22），正式实现等联调——
+//     配好了也只显示「已配置，等联调」，不会去调。
+//   · off：都没有。
+// 密钥只放运行环境（.env / 云端环境变量），不进库、不进仓库、不进聊天与飞书；这里只看「有没有」，不读出来存。
+
+import type { InstanceKind } from '@shared/instance';
+import type { AppEnv } from '../config';
+
+export const INTEGRATION_KINDS = ['pay_terminal', 'platform_voucher', 'einvoice', 'bank_direct', 'ota'] as const;
+export type IntegrationKind = (typeof INTEGRATION_KINDS)[number];
+export type IntegrationMode = 'off' | 'mock' | 'live';
+
+/** 每一样正式接口要的环境变量（都有才算配置好）；数电票服务商、银企直连、OTA 联调时按对方定 */
+export const LIVE_ENV: Record<string, { kind: IntegrationKind; label: string; vars: string[] }> = {
+  wechat_micro: { kind: 'pay_terminal', label: '微信付款码支付', vars: ['WXPAY_MICRO_MCH_ID', 'WXPAY_MICRO_APP_ID', 'WXPAY_MICRO_API_KEY'] },
+  alipay_f2f: { kind: 'pay_terminal', label: '支付宝当面付', vars: ['ALIPAY_APP_ID', 'ALIPAY_PRIVATE_KEY_PATH', 'ALIPAY_PUBLIC_KEY_PATH'] },
+  meituan: { kind: 'platform_voucher', label: '美团团购', vars: ['MEITUAN_APP_KEY', 'MEITUAN_APP_SECRET', 'MEITUAN_SESSION'] },
+  douyin: { kind: 'platform_voucher', label: '抖音来客', vars: ['DOUYIN_CLIENT_KEY', 'DOUYIN_CLIENT_SECRET', 'DOUYIN_ACCOUNT_ID'] },
+};
+
+export interface IntegrationsConfig {
+  mock: boolean;
+  /** 配好了正式环境变量的那几样（LIVE_ENV 的键） */
+  liveConfigured: string[];
+}
+
+export function loadIntegrationsConfig(env: NodeJS.ProcessEnv, appEnv: AppEnv, instance: InstanceKind): IntegrationsConfig {
+  const liveConfigured = Object.entries(LIVE_ENV)
+    .filter(([, v]) => v.vars.every((name) => (env[name] ?? '').trim() !== ''))
+    .map(([k]) => k);
+  const mock = env.INTEGRATIONS_MOCK === 'true';
+  if (mock) {
+    if (appEnv !== 'development' && appEnv !== 'test') throw new Error('INTEGRATIONS_MOCK=true 只能用在 APP_ENV=development 或 test');
+    if (instance === 'prod' || instance === 'shadow' || instance === 'test') throw new Error(`INTEGRATIONS_MOCK=true 不能用在 ${instance} 实例（正式服、影子运行、测试服）`);
+    const anyLive = Object.values(LIVE_ENV).some((v) => v.vars.some((name) => (env[name] ?? '').trim() !== ''));
+    if (anyLive) throw new Error('INTEGRATIONS_MOCK=true 不能和正式接口的密钥同时配置：要测模拟就把正式的变量去掉');
+  }
+  return { mock, liveConfigured };
+}
+
+/** 某一类现在是什么模式：模拟优先；正式的要那一类下面至少一样配好了 */
+export function modeOf(cfg: IntegrationsConfig, kind: IntegrationKind): IntegrationMode {
+  if (cfg.mock) return 'mock';
+  return cfg.liveConfigured.some((k) => LIVE_ENV[k]?.kind === kind) ? 'live' : 'off';
+}

@@ -10,7 +10,7 @@ import { ASSET_CATEGORIES, ASSET_CATEGORY_LABELS, ASSET_STATUS_LABELS, ASSET_STA
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
-import { useCan, useSession } from '../../lib/session';
+import { useCan, useReasons, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
@@ -326,6 +326,7 @@ function AssetSheet({ id, manage, onClose }: { id: number | null; manage: boolea
   const detail = useQuery({ queryKey: [...KEY, 'one', id], queryFn: () => api.get<AssetDetail>(`/api/erp/assets/${id}`), enabled: id !== null });
   const [transfer, setTransfer] = useState<{ departmentId: string; location: string; keeper: string } | null>(null);
   const [scrapping, setScrapping] = useState(false);
+  const scrapReasons = useReasons('assetScrapReasons');
   const a = detail.data;
   const change = async (body: Record<string, unknown>) => {
     if (!a) return;
@@ -409,6 +410,7 @@ function AssetSheet({ id, manage, onClose }: { id: number | null; manage: boolea
         description="报废以后卡片不能再改，记录保留。"
         confirmLabel="报废"
         danger
+        reasons={scrapReasons}
         onClose={() => setScrapping(false)}
         onConfirm={async (reason) => {
           await change({ kind: 'scrap', reason });

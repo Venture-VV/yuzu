@@ -22,6 +22,8 @@ import { useBoard, useFrontdeskChecks, useRefreshFrontdesk, useServerNow, useVis
 import { FindGuestDialog, TagLockDialog } from './ToolDialogs';
 import { JoinGroupDialog, PreviewDialog, SwapDialog } from './VisitDialogs';
 import { MoveLinesDialog } from './MoveLinesDialog';
+import { UnsettledPayBanner } from '../pay/ScanPay';
+import { UnusedVerificationsBanner } from '../pay/VoucherVerify';
 
 type StatusFilter = 'all' | 'in' | 'free' | 'locked';
 
@@ -268,6 +270,10 @@ function FrontdeskBoard() {
           {/* 牌号快检 */}
           <div className="shrink-0 space-y-3 border-b border-line px-5 pt-4 pb-3 md:px-6">
             <CrossDayShiftNotice />
+            {/* 8.0.21 扫码收款：收了钱没入账、还在支付中、原路退款没完成的 */}
+            <UnsettledPayBanner />
+            {/* 8.0.21 平台验券：验过券没结账的 */}
+            <UnusedVerificationsBanner />
             <div className="flex flex-wrap items-stretch gap-3">
               <div className="relative min-w-[240px] flex-1">
                 <Hash className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-ink-3" />

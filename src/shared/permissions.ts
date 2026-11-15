@@ -224,6 +224,8 @@ export const PERMISSIONS = {
   'budget.manage': { roles: ['owner'] },
   /** 进项发票台账：直接登记发票、标认证与所属期、上传照片、作废（三单里分到采购单的发票照旧在付款页登记） */
   'invoice.manage': { roles: ['owner'], duties: ['payable', 'cost'] },
+  /** 开票（8.0.21，CW14）：处理客人的开票申请——登记已开、交给服务商开、驳回、作废（店主；对账付款） */
+  'invoice.issue': { roles: ['owner'], duties: ['payable'] },
   // ── 8.0.7 ERP P2（docs/ERP_V807.md，默认值待确认）──
   /** 应收与挂账：看协议单位、挂账、回款、平台回款与账龄（店主、店总；对账付款、成本核算） */
   'ar.read': { roles: ['owner', 'store_manager'], duties: ['payable', 'cost'] },
@@ -477,6 +479,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'payment.request': '付款：发起付款申请、修改与撤回',
   'budget.manage': '设定费用预算（部门 × 费用科目的月度额度）',
   'invoice.manage': '管理进项发票（台账里登记、标认证、上传照片、作废）',
+  'invoice.issue': '开票：处理客人的开票申请（登记已开、交给服务商开、驳回、作废）',
   'ar.read': '应收与挂账：看协议单位、挂账、回款、平台回款与账龄',
   'ar.manage': '应收与挂账：维护协议单位、登记与冲销回款',
   'asset.read': '资产与易耗：看资产卡片与盘点',
@@ -547,7 +550,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
       'inventory.read', 'inventory.cost', 'inventory.operate', 'inventory.master', 'purchase.manage', 'purchase.rules', 'supplierReturn.create', 'supplierReturn.answer', 'payable.read', 'payable.manage', 'inventory.approve', 'inventory.void', 'inventory.export',
       'deptStock.operate', 'deptStock.audit',
       'expense.read', 'expense.manage', 'petty.manage', 'expense.approve', 'finance.void', 'expense.export', 'request.create', 'request.review', 'erp.revenue',
-      'approval.act', 'approval.rules', 'contract.read', 'contract.manage', 'payment.request', 'budget.manage', 'invoice.manage',
+      'approval.act', 'approval.rules', 'contract.read', 'contract.manage', 'payment.request', 'budget.manage', 'invoice.manage', 'invoice.issue',
       'ar.read', 'ar.manage', 'asset.read', 'asset.manage', 'linen.read', 'linen.manage',
     ],
   },

@@ -750,3 +750,236 @@ describe('付款规则（8.0.6）', () => {
     expect(await paymentChecks(ctx.sql)).toEqual([expect.objectContaining({ key: 'payments', ok: true }), expect.objectContaining({ key: 'input_invoices', ok: true })]);
   });
 });
+
+// 8.0.21 批量付款文件（docs/FINANCE_V8021.md 第 5 节，CW-D / CW18；迁移 145）
+describe('批量付款（8.0.21）', () => {
+  it('收款账户不全不能进批次；生成时抄下收款账户；同一张申请不能同时在两批；导出后导入流水自动对上，照「按申请登记付款」记账；作废要确认没付', async () => {
+    const free = await receiveUnderContract(null, 4); // 200 元
+    await ok(invoice([{ poId: free.poId, amountCents: 20_000 }]));
+    const r = (await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free.receipt.id, amountCents: 20_000 }] } }))).request as PaymentRequestDetail;
+    const a = await approveAll(r);
+    const acc = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/accounts', { name: '批量付款户', bankName: '工商银行城东支行', accountTail: '7788', template: 'generic' }));
+    const list = async () => ok<{ batches: any[]; candidates: any[] }>(api(ctx.app, payer, 'GET', '/api/erp/payments/batches'), 200);
+    expect((await list()).candidates.find((c) => c.requestId === a.id)).toMatchObject({ bankOk: false, leftCents: 20_000 });
+    const make = (requestIds: number[], key = randomUUID()) => api(ctx.app, payer, 'POST', '/api/erp/payments/batches', { clientKey: key, accountId: acc.id, requestIds });
+    expect((await make([a.id])).body.error.code).toBe('BATCH_BANK_MISSING');
+    // 收款账户（CW28，Codex 安全审查后补）：采购改供应商档案改不了它，也调不了收款账户的接口
+    const supOf = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/suppliers?all=1')).body.find((s: { id: number }) => s.id === supplierId);
+    const sup = await supOf();
+    const bankBody = { bankPayee: '付款流测试供应商', bankName: '建设银行城西支行', bankAccount: '6227 0000 1234 5678' };
+    const viaMaster = await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${supplierId}`, { code: sup.code, name: sup.name, ...bankBody });
+    expect(viaMaster.body.error?.code).toBe('SUPPLIER_BANK_SEPARATE');
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/inventory/suppliers', { code: 'PY-BANK', name: '新建带账户', ...bankBody })).body.error?.code).toBe('SUPPLIER_BANK_SEPARATE');
+    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, bankBody)).status).toBe(403);
+    // 应付改（页面上只看得到后四位）→ 待复核：进不了批次，改的本人不能复核
+    expect((await api(ctx.app, payer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, bankBody)).status).toBe(200);
+    const after = await supOf();
+    expect(after).toMatchObject({ bankPayee: '付款流测试供应商', bankName: '建设银行城西支行', bankAccountTail: '5678', bankStatus: 'pending', bankChangedByName: '钱芬（对账付款）' });
+    expect(JSON.stringify(after)).not.toContain('6227000012345678');
+    // 采购保存档案的其他内容（带着原样的户名、开户行）不受影响，也不清掉复核状态
+    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${supplierId}`, { code: sup.code, name: sup.name, contact: '王经理', bankPayee: after.bankPayee, bankName: after.bankName })).status).toBe(200);
+    expect((await list()).candidates.find((c) => c.requestId === a.id)).toMatchObject({ bankOk: false, bankUnverified: true, bankAccountTail: '5678' });
+    expect((await make([a.id])).body.error.code).toBe('BATCH_BANK_UNVERIFIED');
+    const seen = await supOf();
+    expect((await api(ctx.app, payer, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678', rowVersion: seen.rowVersion })).status).toBe(403);
+    // 另一人（店主）复核：后四位对不上拒绝；看完以后又被改过（换成同样后四位的账号、改了户名）也拒绝；按刷新后的复核
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '0000', rowVersion: seen.rowVersion })).body.error.code).toBe('SUPPLIER_BANK_CHANGED');
+    expect((await api(ctx.app, payer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, { ...bankBody, bankPayee: '付款流测试供应商（新户）', bankAccount: '6227 9999 0000 5678' })).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678', rowVersion: seen.rowVersion })).body.error.code).toBe('SUPPLIER_BANK_CHANGED');
+    expect((await api(ctx.app, payer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, bankBody)).status).toBe(200);
+    const reread = await supOf();
+    expect(reread).toMatchObject({ bankStatus: 'pending', bankPayee: '付款流测试供应商' });
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678', rowVersion: reread.rowVersion })).status).toBe(200);
+    expect(await supOf()).toMatchObject({ bankStatus: 'verified', bankVerifiedByName: expect.any(String) });
+    // 数据库兜底：不管从哪儿改了账号，复核随之清空
+    await ctx.sql`UPDATE suppliers SET bank_account = '6227000012349999' WHERE id = ${supplierId}`;
+    expect(await supOf()).toMatchObject({ bankStatus: 'pending', bankAccountTail: '9999' });
+    // 店主改的直接算复核过
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, bankBody)).status).toBe(200);
+    expect(await supOf()).toMatchObject({ bankStatus: 'verified', bankAccountTail: '5678' });
+    const created = await ok(make([a.id]));
+    const batch = created.batch;
+    expect(batch).toMatchObject({ status: 'draft', totalCents: 20_000, itemCount: 1 });
+    expect(batch.items[0]).toMatchObject({ payeeName: '付款流测试供应商', payeeBank: '建设银行城西支行', payeeAccountMasked: '********5678', status: 'pending' });
+    expect((await make([a.id])).body.error.code).toBe('BATCH_REQUEST_INVALID');
+    // 改档案不影响已经生成的这一批（数据库兜底：抄下的收款信息不能改）
+    await expect(ctx.sql`UPDATE payment_batch_items SET payee_account = '6222000000000000' WHERE id = ${batch.items[0].id}`).rejects.toThrow(/不能改/);
+    // 没导出不能下载、不能记已付；导出以后能下载（通用 CSV 里有完整账号）
+    expect((await api(ctx.app, payer, 'POST', `/api/erp/payments/batch-items/${batch.items[0].id}/paid`, { payDate: today })).body.error.code).toBe('BATCH_NOT_EXPORTED');
+    const exported = await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${batch.id}/export`, { version: batch.version }), 200);
+    expect(exported.status).toBe('exported');
+    const file = await ctx.app.inject({ method: 'GET', url: `/api/erp/payments/batches/${batch.id}/file`, headers: { cookie: payer } });
+    expect(file.statusCode).toBe(200);
+    expect(file.body).toContain('6227000012345678');
+    expect(file.body).toContain('200.00');
+    // 导一份早的对账单：同户名、同金额的一笔在导出这一批的 5 天前，不拿它对这一批（与别的对象一样只在日期前后 3 天里找）
+    const oldCsv = ['交易日期,摘要,借方发生额,贷方发生额,余额,对方户名,对方账号,交易流水号', `${shiftDate(today, -5)},代付,200.00,,1.00,付款流测试供应商,6227000012345678,PL-OLD-0001`].join('\n');
+    const oldImp = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/import', { clientKey: randomUUID(), accountId: acc.id, fileName: 'pl-old.csv', csv: oldCsv }));
+    expect(oldImp.import).toMatchObject({ autoMatched: 0 });
+    expect((await ok(api(ctx.app, payer, 'GET', `/api/erp/payments/batches/${batch.id}`), 200)).items[0]).toMatchObject({ status: 'pending', matched: false });
+    // 另一个账户的流水：同户名、同金额、同一天，也不对这一批（批次是从「批量付款户」导出的；Codex 审查 26fe580 后补）
+    const accB = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/accounts', { name: '另一个基本户', bankName: '建设银行城西支行', accountTail: '9911', template: 'generic' }));
+    const otherCsv = ['交易日期,摘要,借方发生额,贷方发生额,余额,对方户名,对方账号,交易流水号', `${today},代付,200.00,,1.00,付款流测试供应商,6227000012345678,PL-B-0001`].join('\n');
+    const otherImp = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/import', { clientKey: randomUUID(), accountId: accB.id, fileName: 'pl-b.csv', csv: otherCsv }));
+    expect(otherImp.import).toMatchObject({ autoMatched: 0 });
+    const [otherLine] = await ctx.sql<{ id: number; version: number }[]>`SELECT id, version FROM bank_statement_lines WHERE bank_ref = 'PL-B-0001'`;
+    const otherCands = await ok(api(ctx.app, payer, 'GET', `/api/erp/bank/lines/${otherLine!.id}/candidates`), 200);
+    expect([...otherCands.suggested, ...otherCands.others].some((c: { type: string }) => c.type === 'batch_item')).toBe(false);
+    const cross = await api(ctx.app, payer, 'POST', `/api/erp/bank/lines/${otherLine!.id}/match`, { version: otherLine!.version, targets: [{ type: 'batch_item', id: batch.items[0].id }] });
+    expect(cross.body.error.code).toBe('MATCH_ACCOUNT_MISMATCH');
+    expect((await ok(api(ctx.app, payer, 'GET', `/api/erp/payments/batches/${batch.id}`), 200)).items[0]).toMatchObject({ status: 'pending', matched: false });
+    // 网银付完，回来导入流水：金额与收款户名对上，自动记账
+    const csv = ['交易日期,摘要,借方发生额,贷方发生额,余额,对方户名,对方账号,交易流水号', `${today},批量代付,200.00,,1.00,付款流测试供应商,6227000012345678,PL-T-0001`].join('\n');
+    const imp = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/import', { clientKey: randomUUID(), accountId: acc.id, fileName: 'pl.csv', csv }));
+    expect(imp.import).toMatchObject({ autoMatched: 1, followUps: [] });
+    const done = await ok(api(ctx.app, payer, 'GET', `/api/erp/payments/batches/${batch.id}`), 200);
+    expect(done.status).toBe('done');
+    expect(done.items[0]).toMatchObject({ status: 'paid', paymentKind: 'payment', matched: true, paidOn: today, bankRef: 'PL-T-0001' });
+    expect((await detail(a.id)).status).toBe('paid');
+    const [pay] = await ctx.sql<{ status: string; method: string; evidence: string }[]>`SELECT status, method, evidence FROM payments WHERE id = ${done.items[0].paymentId}`;
+    expect(pay).toMatchObject({ status: 'confirmed', method: 'bank_transfer' });
+    expect(pay!.evidence).toContain(batch.batchNo);
+    // 这笔付款已经通过批量付款的那一行对上流水，银行页不再算它没对上
+    const todo = await ok(api(ctx.app, payer, 'GET', '/api/erp/bank/todo'), 200);
+    expect(todo.unmatched).toBe(0);
+
+    // 作废：要确认没在网银里付；作废以后这张申请又能进新的一批
+    const free2 = await receiveUnderContract(null, 2);
+    await ok(invoice([{ poId: free2.poId, amountCents: 10_000 }]));
+    const r2 = await approveAll((await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free2.receipt.id, amountCents: 10_000 }] } }))).request);
+    const b2 = (await ok(make([r2.id]))).batch;
+    expect((await api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b2.id}/void`, { version: b2.version, reason: '金额填错' })).status).toBe(400);
+    const v = await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b2.id}/void`, { version: b2.version, reason: '金额填错', confirmNotPaid: true }), 200);
+    expect(v.status).toBe('voided');
+    const b3 = (await ok(make([r2.id]))).batch;
+    // 手工标记：一行失败，批次结束
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b3.id}/export`, { version: b3.version }), 200);
+    const failed = await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batch-items/${b3.items[0].id}/failed`, { reason: '收款账号户名不符，被退回' }), 200);
+    expect(failed).toMatchObject({ status: 'done' });
+    expect(failed.items[0]).toMatchObject({ status: 'failed' });
+    expect((await list()).candidates.some((c) => c.requestId === r2.id)).toBe(true);
+
+    // 记已付做到一半（付款已经按这一行的操作编号记上、这一行还没标已付）：再点一次找回那笔付款，不按现在的余额重算核销
+    const free3 = await receiveUnderContract(null, 3);
+    await ok(invoice([{ poId: free3.poId, amountCents: 15_000 }]));
+    const r3 = await approveAll((await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free3.receipt.id, amountCents: 15_000 }] } }))).request);
+    const b4 = (await ok(make([r3.id]))).batch;
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b4.id}/export`, { version: b4.version }), 200);
+    const [item] = await ctx.sql<{ id: number; payClientKey: string }[]>`SELECT id, pay_client_key FROM payment_batch_items WHERE batch_id = ${b4.id}`;
+    const first = await ok(payReq(r3.id, { clientKey: item!.payClientKey, amountCents: 15_000, allocations: [{ kind: 'receipt', targetId: free3.receipt.id, amountCents: 15_000 }] }));
+    await ctx.sql`UPDATE payment_batch_items SET paid_on = ${today} WHERE id = ${item!.id}`;
+    expect((await detail(r3.id)).status).toBe('paid');
+    const resumed = await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batch-items/${item!.id}/paid`, { payDate: today }), 200);
+    expect(resumed.status).toBe('done');
+    expect(resumed.items[0]).toMatchObject({ status: 'paid', paymentKind: 'payment', paymentId: first.payment.id });
+    expect(await detail(r3.id)).toMatchObject({ status: 'paid', paidCents: 15_000 });
+
+    // 批次占着申请时：单独登记付款、作废都拦（只有那一行自己能记）；生成以后货款被直接付掉一部分，导出时拦下（作废重开）
+    const free4 = await receiveUnderContract(null, 2); // 100 元
+    await ok(invoice([{ poId: free4.poId, amountCents: 10_000 }]));
+    const r4 = await approveAll((await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 10_000 }] } }))).request);
+    const b5 = (await ok(make([r4.id]))).batch;
+    expect((await payReq(r4.id, { amountCents: 10_000, allocations: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 10_000 }] })).body.error.code).toBe('REQUEST_IN_BATCH');
+    expect((await api(ctx.app, payer, 'POST', `/api/erp/payments/requests/${r4.id}/void`, { version: r4.version, reason: '不付了' })).body.error.code).toBe('REQUEST_IN_BATCH');
+    // 不走申请的付款登记也拦（批次还没导出时也一样，测试会话在 ee51abe 上报的 P1）
+    const directPay = await api(ctx.app, payer, 'POST', '/api/payables/payments', {
+      clientKey: randomUUID(),
+      supplierId,
+      payDate: today,
+      amountCents: 4_000,
+      method: 'bank_transfer',
+      evidence: '流水尾号 0404',
+      allocations: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 4_000 }],
+    });
+    expect(directPay.body.error?.code, JSON.stringify(directPay.body)).toBe('TARGET_IN_BATCH');
+    // 兜底：库里直接记一笔核销掉 ¥40 的已确认付款（绕开了上面的拦截）→ 导出拦下
+    const [p4] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO payments (doc_no, supplier_id, pay_date, amount_cents, method, status, created_by, confirmed_by, confirmed_at)
+      VALUES (${`FK-T-${randomUUID().slice(0, 8)}`}, ${supplierId}, ${today}, 4000, 'bank_transfer', 'confirmed', ${ctx.ownerId}, ${ctx.ownerId}, now())
+      RETURNING id`;
+    await ctx.sql`INSERT INTO payment_allocations (payment_id, receipt_doc_id, amount_cents) VALUES (${p4!.id}, ${free4.receipt.id}, 4000)`;
+    const stale = await api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b5.id}/export`, { version: b5.version });
+    expect(stale.body.error?.code).toBe('BATCH_STALE');
+    expect(stale.body.error.message).toContain('¥60.00');
+    // 作废以后申请又能单独处理
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b5.id}/void`, { version: b5.version, reason: '货款已经单独付了一部分', confirmNotPaid: true }), 200);
+    expect((await payReq(r4.id, { amountCents: 6_000, allocations: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 6_000 }] })).status).toBe(201);
+
+    // 导出以后：不走申请的付款登记不能再付这笔货款（测试会话在 ee51abe 上报的 P1）；下载文件前也再核对一次
+    const free6 = await receiveUnderContract(null, 4); // 200 元
+    await ok(invoice([{ poId: free6.poId, amountCents: 20_000 }]));
+    const r6 = await approveAll((await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free6.receipt.id, amountCents: 20_000 }] } }))).request);
+    const b6 = (await ok(make([r6.id]))).batch;
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b6.id}/export`, { version: b6.version }), 200);
+    const direct6 = await api(ctx.app, payer, 'POST', '/api/payables/payments', {
+      clientKey: randomUUID(),
+      supplierId,
+      payDate: today,
+      amountCents: 4_000,
+      method: 'bank_transfer',
+      evidence: '流水尾号 0606',
+      allocations: [{ kind: 'receipt', targetId: free6.receipt.id, amountCents: 4_000 }],
+    });
+    expect(direct6.body.error?.code, JSON.stringify(direct6.body)).toBe('TARGET_IN_BATCH');
+    const file6 = () => ctx.app.inject({ method: 'GET', url: `/api/erp/payments/batches/${b6.id}/file`, headers: { cookie: payer } });
+    expect((await file6()).statusCode).toBe(200);
+    // 兜底：库里直接记一笔核销到这张收货单的已确认付款（绕开了上面的拦截）→ 文件不给下载
+    const [p6] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO payments (doc_no, supplier_id, pay_date, amount_cents, method, status, created_by, confirmed_by, confirmed_at)
+      VALUES (${`FK-T-${randomUUID().slice(0, 8)}`}, ${supplierId}, ${today}, 4000, 'bank_transfer', 'confirmed', ${ctx.ownerId}, ${ctx.ownerId}, now())
+      RETURNING id`;
+    await ctx.sql`INSERT INTO payment_allocations (payment_id, receipt_doc_id, amount_cents) VALUES (${p6!.id}, ${free6.receipt.id}, 4000)`;
+    const stale6 = await file6();
+    expect(stale6.statusCode).toBe(409);
+    expect(stale6.json().error).toMatchObject({ code: 'BATCH_STALE' });
+    expect(stale6.json().error.message).toContain('¥160.00');
+    // 没在网银里付：这一行标失败，这张收货单又能单独登记
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batch-items/${b6.items[0].id}/failed`, { reason: '文件作废了，没付' }), 200);
+    const direct6b = await api(ctx.app, payer, 'POST', '/api/payables/payments', {
+      clientKey: randomUUID(),
+      supplierId,
+      payDate: today,
+      amountCents: 1_000,
+      method: 'bank_transfer',
+      evidence: '流水尾号 0607',
+      allocations: [{ kind: 'receipt', targetId: free6.receipt.id, amountCents: 1_000 }],
+    });
+    expect(direct6b.status, JSON.stringify(direct6b.body)).toBe(201);
+
+    // 导入流水提交了、批量付款那一行的记账没做完（这里先把那一行的付款编号「确认作废」拦住来模拟中途停了）：原样重提接着记（Codex 审查 e64932b 后补）
+    const free7 = await receiveUnderContract(null, 7); // 350 元
+    await ok(invoice([{ poId: free7.poId, amountCents: 35_000 }]));
+    const r7 = await approveAll((await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free7.receipt.id, amountCents: 35_000 }] } }))).request);
+    const b7 = (await ok(make([r7.id]))).batch;
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b7.id}/export`, { version: b7.version }), 200);
+    const [item7] = await ctx.sql<{ id: number; payClientKey: string }[]>`SELECT id, pay_client_key FROM payment_batch_items WHERE batch_id = ${b7.id}`;
+    expect((await api(ctx.app, payer, 'POST', `/api/erp/ops/${item7!.payClientKey}/abandon`, { type: 'payment' })).status).toBe(200);
+    const key7 = randomUUID();
+    const body7 = {
+      clientKey: key7,
+      accountId: acc.id,
+      fileName: 'pl7.csv',
+      csv: ['交易日期,摘要,借方发生额,贷方发生额,余额,对方户名,对方账号,交易流水号', `${today},批量代付,350.00,,1.00,付款流测试供应商,6227000012345678,PL-T-0007`].join('\n'),
+    };
+    const imp7 = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/import', body7));
+    expect(imp7.import.autoMatched).toBe(1);
+    expect(imp7.import.followUps).toHaveLength(1);
+    expect((await ok(api(ctx.app, payer, 'GET', `/api/erp/payments/batches/${b7.id}`), 200)).items[0].status).toBe('pending');
+    // 去掉那条作废登记（当作「当时停了，没记成」），原样重提：接着记账
+    await ctx.sql`ALTER TABLE op_fences DISABLE TRIGGER op_fences_append_only`;
+    await ctx.sql`DELETE FROM op_fences WHERE key = ${item7!.payClientKey}`;
+    await ctx.sql`ALTER TABLE op_fences ENABLE TRIGGER op_fences_append_only`;
+    const replay7 = await api(ctx.app, payer, 'POST', '/api/erp/bank/import', body7);
+    expect(replay7.status, JSON.stringify(replay7.body)).toBe(200);
+    expect(replay7.body).toMatchObject({ replayed: true, import: { followUps: [] } });
+    expect((await ok(api(ctx.app, payer, 'GET', `/api/erp/payments/batches/${b7.id}`), 200)).items[0]).toMatchObject({ status: 'paid', bankRef: 'PL-T-0007' });
+    expect((await detail(r7.id)).status).toBe('paid');
+
+    // 批量付款对上流水、记了账以后，那笔付款被冲销：流水那一行要标「对象已失效」（不再显示对平了）
+    const lineOf = async () =>
+      ((await ok(api(ctx.app, payer, 'GET', '/api/erp/bank?status=all'), 200)).lines as { bankRef: string; targetVoided: boolean; status: string }[]).find((l) => l.bankRef === 'PL-T-0001')!;
+    expect(await lineOf()).toMatchObject({ status: 'matched', targetVoided: false });
+    await ok(api(ctx.app, payer, 'POST', `/api/payables/payments/${done.items[0].paymentId}/void`, { reason: '流水对错了' }), 200);
+    expect(await lineOf()).toMatchObject({ status: 'matched', targetVoided: true });
+  });
+});
