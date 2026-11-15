@@ -75,6 +75,8 @@ async function main() {
     }
   };
   await sweep();
+  // CI 的升级自检等这一行再停应用（停在半路，会员到期处理等记录会停在「没跑完」）
+  app.log.info('启动时的每分钟任务已跑完一轮');
   const sweeper = setInterval(() => void sweep(), 60_000);
 
   // 硬件连接（v0.7.21）：每 2 秒查一次设备（网口心跳、终端上报超时）；打印任务的恢复在开端口之前做过了。

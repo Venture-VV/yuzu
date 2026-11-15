@@ -388,6 +388,8 @@ jobs:
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8080/api/health && ok=1 && break; sleep 1; done
           echo
           if [ -z "$ok" ]; then cat app.log; exit 1; fi
+          # 等启动时的那一轮每分钟任务跑完再停（会员到期处理等在半路被停，记录会停在「没跑完」，自检就报错）
+          for i in $(seq 1 90); do grep -q '启动时的每分钟任务已跑完一轮' app.log && break; sleep 1; done
           # 停掉应用再核对：应用每分钟扫描一次到期赠金，会改数据
           kill "$pid"; wait "$pid" || true
           node dist/server/cli.js migrate
