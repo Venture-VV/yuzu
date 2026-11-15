@@ -6,6 +6,8 @@
 //   · 每分钟的自动任务按单据自己的门店处理时用 runInStore 包一层。
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+// 只引用类型（编译后不留 import），不会与 db.ts 循环引用
+import type { Db, Tx } from '../db';
 
 export const DEFAULT_STORE_ID = 1;
 
@@ -19,4 +21,23 @@ export function currentStoreId(): number {
 /** 在某家店的上下文里执行（请求的门店、自动任务逐家处理时） */
 export function runInStore<T>(storeId: number, fn: () => T): T {
   return als.run({ storeId }, fn);
+}
+
+/**
+ * 在单据所在的门店里接着处理（小程序入口、每分钟的自动任务）：事务里记上那家店（之后新写的单据落在那家店），
+ * currentStoreId() 也换成它。本店照旧什么都不设。
+ */
+export async function inRowStore<T>(tx: Tx, storeId: number, fn: () => Promise<T>): Promise<T> {
+  if (storeId !== DEFAULT_STORE_ID || currentStoreId() !== DEFAULT_STORE_ID) {
+    await tx`SELECT set_config('yuzu.store', ${storeId === DEFAULT_STORE_ID ? '' : String(storeId)}, true)`;
+  }
+  return runInStore(storeId, fn);
+}
+
+/** 每家启用的门店各跑一次（自动任务）：只有本店时就是直接跑一次，与以往一样 */
+export async function forEachStore(sql: Db, fn: (storeId: number) => Promise<void>): Promise<void> {
+  const stores = await sql<{ id: number }[]>`SELECT id FROM stores WHERE active ORDER BY id`;
+  for (const s of stores.length ? stores : [{ id: DEFAULT_STORE_ID }]) {
+    await runInStore(Number(s.id), () => fn(Number(s.id)));
+  }
 }

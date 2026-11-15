@@ -79,6 +79,7 @@ import { DEFAULT_USAGE_RULES } from '@shared/usages';
 import { loadGuideRules } from './guide';
 import { DEFAULT_GUIDE_RULES } from '@shared/guide';
 import { lockSettings } from '../lib/rule-settings';
+import { currentStoreId } from '../lib/store-context';
 
 // 存进 jsonb 的对象键会重新排序（例如会员规则的各档），比较前按键名排好
 const same = sameJson;
@@ -642,10 +643,10 @@ export async function adminOverview(db: Db, deps: Deps, actor: Actor): Promise<A
            (SELECT count(*) FROM service_items WHERE active)::int AS items,
            (SELECT count(*) FROM recharge_plans WHERE active)::int AS plans,
            (SELECT count(*) FROM ticket_types WHERE active)::int AS tickets,
-           (SELECT count(*) FROM hand_tags WHERE active)::int AS tags_active,
-           (SELECT count(*) FROM hand_tags WHERE active AND locked)::int AS tags_locked,
-           (SELECT count(*) FROM hand_tags WHERE NOT active)::int AS tags_inactive,
-           (SELECT count(*) FROM technicians WHERE active)::int AS technicians_active`;
+           (SELECT count(*) FROM hand_tags WHERE active AND store_id = ${currentStoreId()})::int AS tags_active,
+           (SELECT count(*) FROM hand_tags WHERE active AND locked AND store_id = ${currentStoreId()})::int AS tags_locked,
+           (SELECT count(*) FROM hand_tags WHERE NOT active AND store_id = ${currentStoreId()})::int AS tags_inactive,
+           (SELECT count(*) FROM technicians WHERE active AND store_id = ${currentStoreId()})::int AS technicians_active`;
   const byRole = await db<{ role: Role; n: number }[]>`SELECT role, count(*)::int AS n FROM staff WHERE active GROUP BY role`;
   const rules = await ruleCatalog(db);
   let recentChanges: AdminOverview['recentChanges'] = null;

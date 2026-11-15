@@ -351,7 +351,7 @@ export async function importDevices(db: Sql, actor: { id: number } | null, ip?: 
         INSERT INTO devices (code, name, kind, brand, model, area, connection, bridge_key, options, catalog_key, note, created_by)
         VALUES (${p.code}, ${p.name}, ${p.line.kind}, ${p.line.brand}, ${p.line.model}, ${p.area}, ${p.line.connection},
                 ${p.line.connection === 'bridge' ? (p.line.bridgeKey ?? 'reader') : null}, ${tx.json(options as never)}, ${p.line.key}, ${p.line.note ?? ''}, ${actor?.id ?? null})
-        ON CONFLICT (code) DO NOTHING RETURNING id`;
+        ON CONFLICT (store_id, code) DO NOTHING RETURNING id`;
       created += rows.length;
     }
     await writeAudit(tx, { staffId: actor?.id ?? null, action: 'devices_imported', targetType: 'device', detail: { created, skipped: planned.length - created, source: '采购清单 2025-12-17' }, ip });

@@ -44,6 +44,7 @@ import { loadSettings } from './settings';
 import { nextDocNo } from '../lib/tx';
 import { ctxOf } from '../lib/context';
 import { unsettledPayOfShift } from './pay-terminal';
+import { currentStoreId } from '../lib/store-context';
 
 /**
  * 收款开始处理时经办人所在的班次（不加锁，没有开班时为 null）；入账事务里交给 lockPaymentShift 核对。
@@ -52,7 +53,7 @@ import { unsettledPayOfShift } from './pay-terminal';
 export async function openShiftOf(db: Db, staffId: number): Promise<number | null> {
   const [row] = await db<{ id: number }[]>`
     SELECT s.id FROM shift_members m JOIN shifts s ON s.id = m.shift_id
-    WHERE m.staff_id = ${staffId} AND m.left_at IS NULL AND s.status = 'open'`;
+    WHERE m.staff_id = ${staffId} AND m.left_at IS NULL AND s.status = 'open' AND s.store_id = ${currentStoreId()}`;
   return row?.id ?? null;
 }
 
@@ -69,7 +70,7 @@ export async function lockPaymentShift(tx: Tx, staffId: number, seen: number | n
   // 只锁班次一行（共享锁）：交班的排他锁在班次上；按钱箱交班时同时离开钱箱的，这笔开始时还在钱箱上，照样记进这个钱箱的班次
   const [row] = await tx<{ id: number }[]>`
     SELECT s.id FROM shift_members m JOIN shifts s ON s.id = m.shift_id
-    WHERE m.staff_id = ${staffId} AND m.left_at IS NULL AND s.status = 'open' FOR SHARE OF s`;
+    WHERE m.staff_id = ${staffId} AND m.left_at IS NULL AND s.status = 'open' AND s.store_id = ${currentStoreId()} FOR SHARE OF s`;
   const id = row?.id ?? null;
   if (seen !== null && id !== seen) {
     const [s] = await tx<{ shiftNo: string; status: string; drawerName: string | null }[]>`SELECT shift_no, status, drawer_name FROM shifts WHERE id = ${seen}`;
@@ -112,7 +113,7 @@ export async function lockRefundShift(tx: Tx, shiftId: number): Promise<number> 
  * （钱是收进那个钱箱的）；否则是反结账人自己的班次；只有一个当班的班次时选它；都没有时不预选。
  */
 export async function refundShiftOptions(db: Db, checkoutId: number, actorId: number): Promise<RefundShiftOptions> {
-  const [c] = await db<{ shiftId: number | null }[]>`SELECT shift_id FROM checkouts WHERE id = ${checkoutId}`;
+  const [c] = await db<{ shiftId: number | null }[]>`SELECT shift_id FROM checkouts WHERE id = ${checkoutId} AND store_id = ${currentStoreId()}`;
   if (!c) throw notFound('结账单不存在');
   const shifts = (await openDrawerShifts(db, actorId)).map((r) => ({ ...r, original: r.id === c.shiftId }));
   const suggested = (shifts.find((x) => x.original) ?? shifts.find((x) => x.mine) ?? (shifts.length === 1 ? shifts[0] : undefined))?.id ?? null;
@@ -127,7 +128,7 @@ export async function openDrawerShifts(db: Db, actorId: number): Promise<Omit<Re
   const rows = await db<{ id: number; shiftNo: string; staffName: string; drawerName: string | null; startedAt: string; mine: boolean }[]>`
     SELECT s.id, s.shift_no, st.display_name AS staff_name, s.drawer_name, s.started_at,
            EXISTS (SELECT 1 FROM shift_members m WHERE m.shift_id = s.id AND m.staff_id = ${actorId} AND m.left_at IS NULL) AS mine
-    FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.status = 'open' AND NOT s.legacy_refund ORDER BY s.started_at, s.id`;
+    FROM shifts s JOIN staff st ON st.id = s.staff_id WHERE s.status = 'open' AND NOT s.legacy_refund AND s.store_id = ${currentStoreId()} ORDER BY s.started_at, s.id`;
   return rows.map((r) => ({ id: r.id, shiftNo: r.shiftNo, staffName: r.staffName, drawerName: r.drawerName, startedAt: new Date(r.startedAt).toISOString(), mine: r.mine }));
 }
 
@@ -441,7 +442,7 @@ export async function currentShift(db: Db, staffId: number): Promise<ShiftRecord
 
 export async function listShifts(db: Db, date: string): Promise<ShiftRecord[]> {
   const rows = await db<{ id: number }[]>`
-    SELECT id FROM shifts WHERE business_date = ${date} OR (status = 'open' AND business_date < ${date}) ORDER BY started_at DESC`;
+    SELECT id FROM shifts WHERE (business_date = ${date} OR (status = 'open' AND business_date < ${date})) AND store_id = ${currentStoreId()} ORDER BY started_at DESC`;
   return Promise.all(rows.map((r) => getShift(db, r.id)));
 }
 
@@ -453,7 +454,7 @@ const canSeeShift = (actor: OpContext['actor'], s: ShiftRecord) =>
 export async function drawerBoard(db: Db, actorId: number): Promise<DrawerBoard> {
   const settings = await loadSettings(db);
   const open = await db<{ id: number; shiftNo: string; drawer: string; drawerName: string; startedAt: Date; openingCash: number }[]>`
-    SELECT id, shift_no, drawer, drawer_name, started_at, opening_cash FROM shifts WHERE status = 'open' AND drawer IS NOT NULL ORDER BY started_at, id`;
+    SELECT id, shift_no, drawer, drawer_name, started_at, opening_cash FROM shifts WHERE status = 'open' AND drawer IS NOT NULL AND store_id = ${currentStoreId()} ORDER BY started_at, id`;
   const members = open.length
     ? await db<{ shiftId: number; staffId: number; staffName: string; joinedAt: Date }[]>`
         SELECT m.shift_id, m.staff_id, st.display_name AS staff_name, m.joined_at FROM shift_members m JOIN staff st ON st.id = m.staff_id
@@ -499,13 +500,16 @@ const CloseInput = z.object({
 
 /** 本人此刻所在的班次：已经在一个班次上的不能再开班或加入别的钱箱 */
 async function assertNotOnShift(tx: Tx, staffId: number) {
-  const [mine] = await tx<{ shiftNo: string; drawerName: string | null }[]>`
-    SELECT s.shift_no, s.drawer_name FROM shift_members m JOIN shifts s ON s.id = m.shift_id
+  // 一位员工同时只在一个班次上（全公司）：在别家店的班次上时提示是哪家店（8.0.22）
+  const [mine] = await tx<{ shiftNo: string; drawerName: string | null; storeName: string | null }[]>`
+    SELECT s.shift_no, s.drawer_name, CASE WHEN s.store_id <> ${currentStoreId()} THEN st.name END AS store_name
+    FROM shift_members m JOIN shifts s ON s.id = m.shift_id JOIN stores st ON st.id = s.store_id
     WHERE m.staff_id = ${staffId} AND m.left_at IS NULL`;
   if (mine) {
+    const where = mine.storeName ? `${mine.storeName}` : '';
     throw conflict(
       'SHIFT_OPEN',
-      mine.drawerName ? `你还在${mine.drawerName}的班次 ${mine.shiftNo} 上，请先离开钱箱或交班` : `你还有未交班的班次 ${mine.shiftNo}，请先交班`,
+      mine.drawerName ? `你还在${where}${mine.drawerName}的班次 ${mine.shiftNo} 上，请先离开钱箱或交班` : `你还有${where ? `${where}的` : ''}未交班的班次 ${mine.shiftNo}，请先交班`,
       { shiftNo: mine.shiftNo },
     );
   }
@@ -531,7 +535,7 @@ export async function startShift(deps: Deps, raw: unknown, ctx: OpContext): Prom
         if (!input.drawer) throw badRequest('现在是按钱箱交班：请选择在哪个钱箱开班');
         const d = settings.cashDrawers.find((x) => x.key === input.drawer);
         if (!d || !d.active) throw badRequest('这个钱箱不存在或已停用，请刷新后重新选择');
-        const [open] = await tx<{ id: number; shiftNo: string }[]>`SELECT id, shift_no FROM shifts WHERE drawer = ${d.key} AND status = 'open'`;
+        const [open] = await tx<{ id: number; shiftNo: string }[]>`SELECT id, shift_no FROM shifts WHERE drawer = ${d.key} AND status = 'open' AND store_id = ${currentStoreId()}`;
         if (open) throw conflict('DRAWER_OPEN', `${d.label}已经开班（班次 ${open.shiftNo}），请点「加入」`, { shiftId: open.id, shiftNo: open.shiftNo });
         drawer = { key: d.key, label: d.label };
       } else if (input.drawer) {
@@ -567,7 +571,7 @@ export async function joinShift(deps: Deps, id: number, ctx: OpContext): Promise
   await deps.sql
     .begin(async (tx) => {
       const [s] = await tx<{ id: number; shiftNo: string; status: string; drawerName: string | null; businessDate: string }[]>`
-        SELECT id, shift_no, status, drawer_name, to_char(business_date, 'YYYY-MM-DD') AS business_date FROM shifts WHERE id = ${id} FOR SHARE`;
+        SELECT id, shift_no, status, drawer_name, to_char(business_date, 'YYYY-MM-DD') AS business_date FROM shifts WHERE id = ${id} AND store_id = ${currentStoreId()} FOR SHARE`;
       if (!s) throw notFound('班次不存在');
       if (s.status !== 'open') throw conflict('SHIFT_CLOSED', `班次 ${s.shiftNo} 已交班，不能再加入；请在这个钱箱开新班`);
       if (s.drawerName === null) throw conflict('NOT_DRAWER_SHIFT', `班次 ${s.shiftNo} 是按人交班开的，不能加入；请自己开班`);
@@ -622,7 +626,7 @@ export async function closeShift(deps: Deps, id: number, raw: unknown, ctx: OpCo
     const [s] = await tx<(ShiftScope & { shiftNo: string; status: string; onShift: boolean })[]>`
       SELECT id, shift_no, staff_id, status, started_at, opening_cash, legacy_window, legacy_refund, drawer_name,
              EXISTS (SELECT 1 FROM shift_members m WHERE m.shift_id = shifts.id AND m.staff_id = ${ctx.actor.id} AND m.left_at IS NULL) AS on_shift
-      FROM shifts WHERE id = ${id} FOR UPDATE`;
+      FROM shifts WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
     // 交班时刻取在拿到锁之后：快照里的单据都不晚于交班时刻
     const at = ctx.at ?? new Date();
     if (!s) throw notFound('班次不存在');
@@ -696,6 +700,9 @@ export function registerShiftRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/shifts/:id', { preHandler: guard('ledger.readToday') }, async (req) => {
     const { id } = parse(idParam, req.params);
+    // 别家店的班次（8.0.22）：与不存在一样
+    const [own] = await sql`SELECT 1 FROM shifts WHERE id = ${id} AND store_id = ${currentStoreId()}`;
+    if (!own) throw notFound('班次不存在');
     const shift = await getShift(sql, id);
     if (!canSeeShift(req.actor, shift)) throw forbidden('只能查看自己的班次');
     return shift;

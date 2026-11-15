@@ -22,6 +22,7 @@ import { authorizeLineVoid } from '../dining-808';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill, type Backfill } from './backfill';
 import { getVisit } from './visits';
 import { locateCharges, locateSession } from '../locations';
+import { currentStoreId } from '../../lib/store-context';
 
 export const PostInput = z
   .object({
@@ -381,7 +382,7 @@ export async function moveLines(deps: Deps, raw: unknown, ctx: OpContext) {
   await runIdempotent(deps, { key, opType: 'line_move', requestHash }, async (tx) => {
     const at = ctx.at ?? new Date();
     const [target] = await tx<{ id: number; tagId: number }[]>`
-      SELECT v.id, v.tag_id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.toTagCode} AND v.status = 'open'`;
+      SELECT v.id, v.tag_id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.toTagCode} AND v.status = 'open' AND t.store_id = ${currentStoreId()}`;
     if (!target) throw conflict('TAG_NOT_IN_STORE', `手牌 ${input.toTagCode} 没有在店客人，请核对牌号`);
     if (target.id === fromVisitId) throw badRequest(`这些明细就在手牌 ${input.toTagCode} 上，不用转`);
     // 来访（id 升序）→ 账单（id 升序）→ 明细（id 升序）

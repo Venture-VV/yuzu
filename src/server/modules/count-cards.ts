@@ -44,6 +44,7 @@ import { erpOpAbandoned } from './erp-ops';
 import { loadSettings } from './settings';
 import { lockPaymentShift, openShiftOf } from './shifts';
 import { systemStaffId } from './system-staff';
+import { currentStoreId } from '../lib/store-context';
 
 const nums = (v: unknown[] | null | undefined) => (v ?? []).map(Number);
 
@@ -635,16 +636,17 @@ export async function importOpeningCountCards(deps: Deps, rows: OpeningCountCard
 export async function countCardDayTotals(db: Db, date: string): Promise<CountCardDayTotals> {
   const sales = await db<{ method: PaymentMethod; count: number; amount: number }[]>`
     SELECT payment_method AS method, count(*)::int AS count, coalesce(sum(price), 0)::bigint AS amount FROM count_cards
-    WHERE source = 'sale' AND business_date = ${date} GROUP BY payment_method ORDER BY payment_method`;
+    WHERE source = 'sale' AND business_date = ${date} AND store_id = ${currentStoreId()} GROUP BY payment_method ORDER BY payment_method`;
   const refunds = await db<{ method: PaymentMethod; count: number; amount: number }[]>`
     SELECT method, count(*)::int AS count, coalesce(sum(amount), 0)::bigint AS amount FROM count_card_refunds
-    WHERE business_date = ${date} GROUP BY method ORDER BY method`;
+    WHERE business_date = ${date} AND card_id IN (SELECT id FROM count_cards WHERE store_id = ${currentStoreId()}) GROUP BY method ORDER BY method`;
   const [mv] = await db<{ useCount: number; useAmount: number; expiredCards: number; expiredUses: number; openingCards: number; openingUses: number }[]>`
     SELECT coalesce(-sum(delta) FILTER (WHERE kind = 'use'), 0)::int - coalesce(sum(delta) FILTER (WHERE kind = 'return'), 0)::int AS use_count,
            coalesce(sum(amount) FILTER (WHERE kind = 'use'), 0)::bigint - coalesce(sum(amount) FILTER (WHERE kind = 'return'), 0)::bigint AS use_amount,
            count(*) FILTER (WHERE kind = 'expire')::int AS expired_cards, coalesce(-sum(delta) FILTER (WHERE kind = 'expire'), 0)::int AS expired_uses,
            count(*) FILTER (WHERE kind = 'opening')::int AS opening_cards, coalesce(sum(delta) FILTER (WHERE kind = 'opening'), 0)::int AS opening_uses
-    FROM count_card_moves WHERE business_date = ${date}`;
+    FROM count_card_moves m WHERE business_date = ${date}
+      AND coalesce((SELECT c.store_id FROM checkouts c WHERE c.id = m.checkout_id), (SELECT k.store_id FROM count_cards k WHERE k.id = m.card_id)) = ${currentStoreId()}`;
   const [left] = await db<{ cards: number; uses: number }[]>`
     SELECT count(*) FILTER (WHERE s > 0)::int AS cards, coalesce(sum(s) FILTER (WHERE s > 0), 0)::int AS uses
     FROM (SELECT card_id, sum(delta) AS s FROM count_card_moves WHERE business_date <= ${date} GROUP BY card_id) x`;

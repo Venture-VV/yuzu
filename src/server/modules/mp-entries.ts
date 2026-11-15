@@ -25,6 +25,7 @@ import { postChargesTx } from './frontdesk/bills';
 import { createTrialTx, getTrial, PhoneField, trialToday, trialUniqueError } from './member-trials';
 import { loadSettings } from './settings';
 import { systemActor } from './system-staff';
+import { currentStoreId, inRowStore } from '../lib/store-context';
 
 // ───────────────────────── claimKey 的去重 ─────────────────────────
 
@@ -214,48 +215,51 @@ export async function orderFoodFromMp(tx: Tx, deps: Deps, raw: MpFoodInput): Pro
   const requestHash = hashRequest({ memberId: input.memberId, items, tableCode: input.tableCode ?? null, expectedTotal: input.expectedTotal ?? null });
   const prior = await lockClaim(tx, 'mp_food', input.claimKey, requestHash);
   if (prior) return { ...(await foodOrderOf(tx, prior.refId, prior.refKey!)), replayed: true };
-  if (!(await loadDiningRules(tx)).enabled) throw unprocessable('DINING_DISABLED', '餐饮功能没有开启，请服务员点单');
-  const limits = await loadSettings(tx);
-  // 会员同时只有一张在店手牌（visits_member_open_uq）
-  const [open] = await tx<{ id: number }[]>`SELECT id FROM visits WHERE member_id = ${input.memberId} AND status = 'open'`;
-  if (!open) throw unprocessable('NO_OPEN_VISIT', '这位会员现在没有在店手牌：请先到前台开手牌，或请服务员点单');
-  let deliverTo = '';
-  if (input.tableCode) {
-    const [t] = await tx<{ name: string }[]>`
-      SELECT name FROM dining_tables WHERE active AND lower(btrim(name)) = lower(${input.tableCode})`;
-    if (!t) throw unprocessable('TABLE_NOT_FOUND', `没有叫「${input.tableCode}」的桌台，请扫桌上的码重试，或请服务员点单`);
-    deliverTo = t.name;
-  }
-  const ctx = await mpContext(tx, input.at);
-  const postKey = randomUUID();
-  await postChargesTx(
-    tx,
-    deps,
-    Number(open.id),
-    {
-      clientKey: postKey,
-      lines: items.map((i) => ({ itemId: i.itemId, quantity: i.quantity, note: i.note || undefined, tier: undefined, technicianId: undefined, callType: undefined })),
-      customLines: [],
-      expectedTotal: 0,
-      backfill: undefined,
-    },
-    {
-      key: postKey,
-      requestHash,
-      backfill: null,
-      channel: {
-        expectedTotal: input.expectedTotal ?? null,
-        maxQuantity: limits.mpFoodMaxQuantity,
-        maxTotal: limits.mpFoodMaxTotalCents,
-        deliverTo,
-        memberId: input.memberId,
+  // 会员同时只有一张在店手牌（visits_member_open_uq）；多门店（8.0.22）：在客人所在的门店里点——
+  // 餐饮规则、桌台、出品单都是那家店的
+  const [open] = await tx<{ id: number; storeId: number }[]>`SELECT id, store_id FROM visits WHERE member_id = ${input.memberId} AND status = 'open'`;
+  return inRowStore(tx, open ? Number(open.storeId) : currentStoreId(), async () => {
+    if (!(await loadDiningRules(tx)).enabled) throw unprocessable('DINING_DISABLED', '餐饮功能没有开启，请服务员点单');
+    const limits = await loadSettings(tx);
+    if (!open) throw unprocessable('NO_OPEN_VISIT', '这位会员现在没有在店手牌：请先到前台开手牌，或请服务员点单');
+    let deliverTo = '';
+    if (input.tableCode) {
+      const [t] = await tx<{ name: string }[]>`
+        SELECT name FROM dining_tables WHERE active AND lower(btrim(name)) = lower(${input.tableCode}) AND store_id = ${currentStoreId()}`;
+      if (!t) throw unprocessable('TABLE_NOT_FOUND', `没有叫「${input.tableCode}」的桌台，请扫桌上的码重试，或请服务员点单`);
+      deliverTo = t.name;
+    }
+    const ctx = await mpContext(tx, input.at);
+    const postKey = randomUUID();
+    await postChargesTx(
+      tx,
+      deps,
+      Number(open.id),
+      {
+        clientKey: postKey,
+        lines: items.map((i) => ({ itemId: i.itemId, quantity: i.quantity, note: i.note || undefined, tier: undefined, technicianId: undefined, callType: undefined })),
+        customLines: [],
+        expectedTotal: 0,
+        backfill: undefined,
       },
-    },
-    ctx,
-    { dining: { onlyKitchen: true } },
-  );
-  await saveClaim(tx, 'mp_food', input.claimKey, requestHash, Number(open.id), postKey);
-  return { ...(await foodOrderOf(tx, Number(open.id), postKey)), replayed: false };
+      {
+        key: postKey,
+        requestHash,
+        backfill: null,
+        channel: {
+          expectedTotal: input.expectedTotal ?? null,
+          maxQuantity: limits.mpFoodMaxQuantity,
+          maxTotal: limits.mpFoodMaxTotalCents,
+          deliverTo,
+          memberId: input.memberId,
+        },
+      },
+      ctx,
+      { dining: { onlyKitchen: true } },
+    );
+    await saveClaim(tx, 'mp_food', input.claimKey, requestHash, Number(open.id), postKey);
+    return { ...(await foodOrderOf(tx, Number(open.id), postKey)), replayed: false };
+  });
 }
 
 // ───────────────────────── 只读 ─────────────────────────

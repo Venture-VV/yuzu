@@ -34,6 +34,7 @@ import { loadSettings } from '../settings';
 import { lockPaymentShift, lockRefundShift, openShiftOf, shiftDrawerLabel } from '../shifts';
 import { businessDate, hashRequest, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './common';
 import { processRefunds, queueCheckoutRefund } from '../pay-terminal';
+import { currentStoreId } from '../../lib/store-context';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -127,7 +128,7 @@ async function windowBlock(db: Db, actor: Actor, checkoutNo: string, createdAt: 
 /** 开退款单前的核对（只读）：每项、每种方式还能退多少，不能开的原因 */
 export async function refundOptions(db: Db, checkoutId: number, actor: Actor, at = new Date()): Promise<RefundOptions> {
   const [c] = await db<{ id: number; checkoutNo: string; status: 'completed' | 'voided'; createdAt: string; totalAmount: number }[]>`
-    SELECT id, checkout_no, status, created_at, total_amount FROM checkouts WHERE id = ${checkoutId}`;
+    SELECT id, checkout_no, status, created_at, total_amount FROM checkouts WHERE id = ${checkoutId} AND store_id = ${currentStoreId()}`;
   if (!c) throw notFound('结账单不存在');
   const items = (await itemBalances(db, c.id)).map((i) => ({ ...i, ...remainingOf(i) }));
   const { methods, nonRefundable } = await methodBalances(db, c.id);
@@ -200,7 +201,7 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
     const shiftId = input.refundShiftId === undefined ? await lockPaymentShift(tx, ctx.actor.id, seenShift) : await lockRefundShift(tx, input.refundShiftId);
     const at = ctx.at ?? new Date();
     const [c] = await tx<{ id: number; checkoutNo: string; status: string; createdAt: string }[]>`
-      SELECT id, checkout_no, status, created_at FROM checkouts WHERE id = ${checkoutId} FOR UPDATE`;
+      SELECT id, checkout_no, status, created_at FROM checkouts WHERE id = ${checkoutId} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!c) throw notFound('结账单不存在');
     if (c.status !== 'completed') throw conflict('CHECKOUT_VOIDED', `结账单 ${c.checkoutNo} 已反结账，不能开退款单`);
     const w = await windowBlock(tx, ctx.actor, c.checkoutNo, c.createdAt, at);
@@ -311,7 +312,7 @@ export async function voidRefund(deps: Deps, refundId: number, raw: unknown, ctx
   const { reason } = parse(VoidRefundInput, raw);
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    const [peek] = await tx<{ checkoutId: number; shiftId: number | null }[]>`SELECT checkout_id, shift_id FROM refunds WHERE id = ${refundId}`;
+    const [peek] = await tx<{ checkoutId: number; shiftId: number | null }[]>`SELECT checkout_id, shift_id FROM refunds WHERE id = ${refundId} AND store_id = ${currentStoreId()}`;
     if (!peek) throw notFound('退款单不存在');
     if (peek.shiftId !== null) {
       const [s] = await tx<{ status: string; shiftNo: string; staffName: string }[]>`
@@ -383,12 +384,12 @@ export async function listRefundsOf(db: Db, checkoutId: number): Promise<RefundS
 
 /** 某个营业日开的退款单（含已作废的，作废只能在当天） */
 export async function listRefunds(db: Db, date: string): Promise<RefundSummary[]> {
-  const rows = await db<RefundSummary[]>`${summarySql(db)} WHERE r.business_date = ${date} ORDER BY r.id DESC`;
+  const rows = await db<RefundSummary[]>`${summarySql(db)} WHERE r.business_date = ${date} AND r.store_id = ${currentStoreId()} ORDER BY r.id DESC`;
   return rows.map(toSummary);
 }
 
 export async function getRefund(db: Db, id: number): Promise<RefundDetail> {
-  const [r] = await db<RefundSummary[]>`${summarySql(db)} WHERE r.id = ${id}`;
+  const [r] = await db<RefundSummary[]>`${summarySql(db)} WHERE r.id = ${id} AND r.store_id = ${currentStoreId()}`;
   if (!r) throw notFound('退款单不存在');
   const items = await db<RefundDetail['items']>`
     SELECT category, name, quantity, amount FROM refund_items WHERE refund_id = ${id} ORDER BY amount DESC, category COLLATE "C", name COLLATE "C"`;

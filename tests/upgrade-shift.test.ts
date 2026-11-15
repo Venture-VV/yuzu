@@ -109,6 +109,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE checkout_bills ADD COLUMN ticket_extension_minutes smallint NOT NULL DEFAULT 0, ADD COLUMN ticket_extension_benefit_id bigint`;
   // 现版本结账时按用料记扣料事件（128 才有那张表）：写入期间把这个开关关上，迁移前删掉
   await sql`INSERT INTO settings (key, value) VALUES ('stock_usage_rules', '{"enabled": false}'::jsonb)`;
+  // 现版本按门店找手牌、来访、班次与结账单（154 才有）：写入期间临时加列（都是本店），迁移前删掉
+  for (const t of ['hand_tags', 'visits', 'shifts', 'checkouts']) await sql.unsafe(`ALTER TABLE ${t} ADD COLUMN store_id bigint NOT NULL DEFAULT 1`);
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
   const cash = (amount: number) => ({ idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: amount, bonusAmount: 0, paymentMethod: 'cash' as const, paymentConfirmed: true as const });
@@ -149,6 +151,7 @@ beforeAll(async () => {
   await sql`ALTER TABLE recharges DROP COLUMN channel`;
   await sql`ALTER TABLE checkout_bills DROP COLUMN ticket_extension_minutes, DROP COLUMN ticket_extension_benefit_id`;
   await sql`DELETE FROM settings WHERE key = 'stock_usage_rules'`;
+  for (const t of ['hand_tags', 'visits', 'shifts', 'checkouts']) await sql.unsafe(`ALTER TABLE ${t} DROP COLUMN store_id`);
 
   expect(await migrate(sql)).toEqual(migrationsFrom('016_shift_boundary.sql'));
   // 升级后的收款这里按小额核对班次；会员体系 v2 的首充 / 续充最低（默认 5,000 元）设成不限
