@@ -10,7 +10,7 @@ import { readSnapshot } from '../src/server/db';
 import { AiRefused, claudeProvider, mockAiProvider, type AiProvider, type AiTool } from '../src/server/integrations/ai';
 import { runAiSummaries, setAiProviderForTests } from '../src/server/modules/ai';
 import { buildDailyFacts } from '../src/server/modules/ai/facts';
-import { aiMaskName, aiMaskText, maskForAi, memberTextMasker } from '../src/server/modules/ai/mask';
+import { aiMaskName, aiMaskText, maskForAi, memberTextGuard } from '../src/server/modules/ai/mask';
 import { aiTools } from '../src/server/modules/ai/tools';
 import { loadSettings } from '../src/server/modules/settings';
 import { businessDateOf } from '../src/shared/business-date';
@@ -21,6 +21,8 @@ let today: string;
 let memberNo: string;
 const MEMBER_NAME = '欧阳测试';
 const MEMBER_PHONE = '13912345678';
+/** 系统允许的最长姓名（32 字）：测试会话 e25d122 复验时 21 字以上的没认出来 */
+const LONG_NAME = `长${'名字测'.repeat(10)}尾`;
 
 const rules = async (patch: Partial<AiRules>) => {
   const r = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/ai-rules', patch);
@@ -48,6 +50,9 @@ beforeAll(async () => {
   // 一位会员、一笔充值：名字和手机号都不能出现在发给模型的内容里
   const m = await createMember(ctx, MEMBER_NAME, MEMBER_PHONE);
   memberNo = (await ctx.sql<{ no: string }[]>`SELECT member_no AS no FROM members WHERE id = ${m.id}`)[0]!.no;
+  await createMember(ctx, LONG_NAME);
+  // 档案里常见的占位名：不当成某一位会员的姓名认（不然「新会员多少」也会被拦）
+  await createMember(ctx, '会员');
   const r = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 50_000));
   expect(r.status, JSON.stringify(r.body)).toBeLessThan(300);
 }, 90_000);
@@ -63,13 +68,23 @@ describe('打码', () => {
   });
 });
 
-describe('自由文字里的会员姓名、会员号（测试会话 80284a9 的 P1）', () => {
-  it('按会员档案找出来打码：姓名只留第一个字，会员号整个换掉；一个字、不在档案里的不动', async () => {
-    const mask = await memberTextMasker(ctx.sql);
-    expect(mask(`会员${MEMBER_NAME}昨天消费多少？会员号 ${memberNo}`)).toBe(`会员欧*昨天消费多少？会员号 [会员号]`);
-    expect(mask('上周哪些项目卖得最好？欧先生来过吗')).toBe('上周哪些项目卖得最好？欧先生来过吗');
-    // 与手机号、证件号的打码叠在一起
-    expect(aiMaskText(mask(`${MEMBER_NAME} ${MEMBER_PHONE}`))).toBe('欧* 139****5678');
+describe('自由文字里的会员身份（测试会话 80284a9、e25d122 的 P1）', () => {
+  it('按会员档案认：系统允许的姓名长度、空格与符号的变形、会员号、手机号；一个字、占位名、不在档案里的不动', async () => {
+    expect([...LONG_NAME].length).toBe(32);
+    const guard = await memberTextGuard(ctx.sql);
+    expect(guard.mask(`会员${MEMBER_NAME}昨天消费多少？会员号 ${memberNo}`)).toBe('会员欧*昨天消费多少？会员号 [会员号]');
+    expect(guard.mask(`问一下${LONG_NAME}的情况`)).toBe('问一下长*的情况');
+    // 中间夹空格、间隔号、顿号、全角空格；会员号小写、夹横线；手机号夹空格、横线
+    expect(guard.mask('欧阳 测试来过吗')).toBe('欧*来过吗');
+    expect(guard.mask('欧阳·测试、欧阳　测试')).toBe('欧*、欧*');
+    expect(guard.mask(`会员号 ${memberNo.slice(0, 2).toLowerCase()}-${memberNo.slice(2)}`)).toBe('会员号 [会员号]');
+    expect(guard.mask('电话 139 1234 5678')).toBe('电话 139****5678');
+    expect(guard.find('欧阳 测试 139-1234-5678').map((h) => h.kind)).toEqual(['name', 'phone']);
+    expect(guard.find(`${LONG_NAME.slice(0, 10)} ${LONG_NAME.slice(10)}`).map((h) => h.masked)).toEqual(['长*']);
+    // 不认的：占位名「会员」、不在档案里的人
+    expect(guard.find('这个月新会员多少？欧先生来过吗')).toEqual([]);
+    // 不在档案里的手机号、证件号靠正则：中间夹空格、横线的也打码
+    expect(aiMaskText('客人 138-0000-1111，证件 110101 19900307 123X')).toBe('客人 138****1111，证件 [证件号已隐去]');
   });
 });
 
@@ -229,11 +244,13 @@ describe('问数', () => {
     expect((list.body as AiQuestionView[]).some((q) => q.id === r.body.id)).toBe(true);
   });
 
-  it('发给模型的问题与工具结果都打过码', async () => {
+  it('问题里写了会员的姓名、会员号、手机号的拦下、什么都不发；没写的照常问，工具结果都打过码', async () => {
+    let called = 0;
     let seen = '';
     const capture: AiProvider = {
       ...mockAiProvider(),
       async ask({ question, tools }: { question: string; tools: AiTool[] }) {
+        called += 1;
         seen = question;
         const outs = [];
         for (const t of tools) outs.push(await t.run(t.example));
@@ -242,12 +259,28 @@ describe('问数', () => {
       },
     };
     setAiProviderForTests(capture);
-    const r = await api(ctx.app, ctx.owner, 'POST', '/api/ai/questions', { clientKey: randomUUID(), question: `会员${MEMBER_NAME}（${memberNo}，${MEMBER_PHONE}）昨天来过吗` });
-    expect(r.status).toBe(202);
-    expect((await waitQuestion(r.body.id)).status).toBe('done');
-    expect(seen).toBe('会员欧*（[会员号]，139****5678）昨天来过吗');
-    noPersonal(seen);
-    expect(seen).not.toContain(memberNo);
+    for (const question of [
+      `会员${MEMBER_NAME}昨天来过吗`,
+      '欧阳 测试上个月消费了多少',
+      `会员号 ${memberNo} 的余额`,
+      '电话 139 1234 5678 的客人来过吗',
+      `${LONG_NAME}的充值记录`,
+      '证件号 110101199003071234 是谁',
+    ]) {
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/ai/questions', { clientKey: randomUUID(), question });
+      expect(r.status, question).toBe(422);
+      expect(r.body.error.code).toBe('AI_MEMBER_INFO');
+      noPersonal(r.body);
+      expect(JSON.stringify(r.body)).not.toContain(LONG_NAME);
+    }
+    expect(called).toBe(0);
+    expect((await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM ai_questions WHERE question LIKE '%测试%' OR question LIKE '%长名字%'`)[0]!.n).toBe(0);
+    // 没写会员身份的照常问（「新会员」里的「会员」是占位名，不拦）
+    const ok = await api(ctx.app, ctx.owner, 'POST', '/api/ai/questions', { clientKey: randomUUID(), question: '这个月新会员多少？' });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(202);
+    expect((await waitQuestion(ok.body.id)).status).toBe('done');
+    expect(called).toBe(1);
+    expect(seen).toBe('这个月新会员多少？');
   });
 
   it('拒答、每人每天的限额、关掉问数、没配模型服务', async () => {
@@ -278,8 +311,8 @@ describe('合同条款提示', () => {
     const body = {
       category: 'service',
       counterparty: '某保洁公司',
-      content: { title: '保洁外包', totalCents: 360000, note: `${MEMBER_NAME}介绍的` },
-      body: `联系人${MEMBER_NAME}，电话 ${MEMBER_PHONE}，身份证 11010119900307123X`,
+      content: { title: '保洁外包', totalCents: 360000, note: `${MEMBER_NAME}介绍的`, acceptance: { signer: `${LONG_NAME.slice(0, 16)} ${LONG_NAME.slice(16)}` } },
+      body: `联系人${MEMBER_NAME}，电话 ${MEMBER_PHONE}，身份证 11010119900307123X；备用联系人 欧阳 测试（139-1234-5678），推荐人 ${LONG_NAME}`,
     };
     const r = await api(ctx.app, ctx.owner, 'POST', '/api/ai/contract-hints', body);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
@@ -291,6 +324,10 @@ describe('合同条款提示', () => {
     expect(prompt).toContain('联系人欧*');
     expect(prompt).not.toContain(MEMBER_PHONE);
     expect(prompt).not.toContain(MEMBER_NAME);
+    expect(prompt).not.toContain('欧阳 测试');
+    expect(prompt).not.toContain('139-1234-5678');
+    expect(prompt).not.toContain(LONG_NAME.slice(0, 16));
+    expect(prompt).not.toContain(LONG_NAME.slice(16));
     expect(prompt).not.toContain('11010119900307123X');
   });
 });

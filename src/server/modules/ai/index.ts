@@ -35,7 +35,7 @@ import { modeOf } from '../../integrations/config';
 import { AiRefused, claudeProvider, mockAiProvider, type AiProvider } from '../../integrations/ai';
 import type { Actor, Deps } from '../../lib/context';
 import { ctxOf } from '../../lib/context';
-import { badRequest, conflict, forbidden, notFound } from '../../lib/errors';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../lib/errors';
 import { saveRuleSetting } from '../../lib/rule-settings';
 import { currentStoreId, DEFAULT_STORE_ID, runInStore } from '../../lib/store-context';
 import { settingRow } from '../../lib/store-settings';
@@ -45,7 +45,7 @@ import { loadSettings } from '../settings';
 import { allowedStores } from '../stores';
 import { postWecom, truncateBytes, weeklyDigestLines } from '../wecom';
 import { buildDailyFacts, factsHash, SUMMARY_SYSTEM, summaryPrompt } from './facts';
-import { aiMaskText, mapStrings, maskForAi, memberTextMasker } from './mask';
+import { aiMaskText, mapStrings, maskForAi, memberTextGuard } from './mask';
 import { AI_MAX_DAYS, aiTools, questionSystem } from './tools';
 
 export const AI_RULES_KEY = 'ai_rules';
@@ -373,9 +373,9 @@ async function answerQuestion(deps: Deps, id: number, a: { actor: Actor; storeId
       const today = await todayHere(sql, config);
       const tools = aiTools({ sql, today, timeZone: config.timezone, can: (p) => can(a.actor, p), erp, stores, currentStoreId: a.storeId });
       const storeName = stores.find((x) => x.id === a.storeId)?.name ?? '本店';
-      // 问题是员工写的自由文字：库里有的会员姓名、会员号先打码，再打码手机号、证件号（取不出会员档案就不发）
-      const maskMembers = await memberTextMasker(sql);
-      const question = aiMaskText(maskMembers(a.question));
+      // 问题在接收时已经核对过不含会员身份；这里再按会员档案打码一遍（档案在这之间可能多了人），取不出档案就不发
+      const guard = await memberTextGuard(sql);
+      const question = aiMaskText(guard.mask(a.question));
       const r = await a.provider.ask({ system: questionSystem(today, storeName, stores.length > 1), question, tools, maxIterations: AI_MAX_TOOL_ROUNDS });
       const answer = r.text.trim().slice(0, 4000) || '（模型没有写出答案）';
       await recordCall(sql, { ...base, request: { tools: r.calls.map((c) => c.name) }, ok: true, result: { ...r.usage, rounds: r.calls.length, chars: answer.length }, durationMs: Date.now() - started });
@@ -502,6 +502,16 @@ export function registerAiRoutes(app: FastifyInstance, deps: Deps) {
     if (!rules.enabled || !rules.questions) throw conflict('AI_DISABLED', '问数已关闭（后台「对外接口」→ AI 辅助里打开）');
     const provider = aiProvider(config, rules);
     if (!provider) throw conflict('AI_NOT_CONFIGURED', '还没配置模型服务（服务器 .env 的 YUZU_AI_API_KEY），问数用不了');
+    // 问数只看汇总的数、查不了某一位会员：问题里写了会员的姓名、会员号、手机号（按会员档案认，空格、符号的变形也认）
+    // 或者手机号、证件号的，拦下、什么都不发（测试会话在 80284a9、e25d122 报的 P1）
+    const hits = (await memberTextGuard(sql)).find(body.question);
+    if (hits.length || aiMaskText(body.question) !== body.question) {
+      const seen = [...new Set(hits.map((h) => h.masked))].slice(0, 5);
+      throw unprocessable(
+        'AI_MEMBER_INFO',
+        `问数只看汇总的经营数据、查不了某一位会员：请把问题里的会员姓名、会员号、手机号、证件号去掉再问${seen.length ? `（认出来的：${seen.join('、')}）` : ''}`,
+      );
+    }
     const storeId = currentStoreId();
     let id: number | null = null;
     await sql.begin(async (tx) => {
@@ -548,9 +558,10 @@ export function registerAiRoutes(app: FastifyInstance, deps: Deps) {
     if (!rules.enabled || !rules.contractHints) throw conflict('AI_DISABLED', '合同条款提示已关闭（后台「对外接口」→ AI 辅助里打开）');
     const provider = aiProvider(config, rules);
     if (!provider) throw conflict('AI_NOT_CONFIGURED', '还没配置模型服务（服务器 .env 的 YUZU_AI_API_KEY），条款提示用不了');
-    // 发出去之前整个打码：正文、备注里可能有会员的姓名、会员号（按会员档案找）、电话、身份证号
-    const maskMembers = await memberTextMasker(sql);
-    const material = maskForAi(mapStrings({ category: input.category, counterparty: input.counterparty, content: input.content ?? null, body: input.body ?? '' }, maskMembers));
+    // 发出去之前整个打码：正文、备注里可能有会员的姓名、会员号、手机号（按会员档案认，空格、符号的变形也认）、
+    // 别人的电话、身份证号（正则）；合同里写人名是正常的，所以这里打码、不拦；取不出会员档案就不发
+    const guard = await memberTextGuard(sql);
+    const material = maskForAi(mapStrings({ category: input.category, counterparty: input.counterparty, content: input.content ?? null, body: input.body ?? '' }, (t) => guard.mask(t)));
     const started = Date.now();
     const base = { kind: 'ai' as const, provider: providerName(provider), action: 'contract_hints', mode: provider.mode, refType: null, refId: null, staffId: req.actor.id };
     try {

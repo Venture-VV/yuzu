@@ -7,8 +7,9 @@
 import { maskPhone } from '@shared/membership';
 import type { Db } from '../../db';
 
-const PHONE = /(?<!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)/g;
-const ID_CARD = /(?<![\dXx])\d{17}[\dXx](?![\dXx])/g;
+// 中间夹着空格、横线的也认（「139 1234 5678」「139-1234-5678」，测试会话 e25d122 复验）
+const PHONE = /(?<!\d)(1[3-9]\d)[\s-]?\d{4}[\s-]?(\d{4})(?!\d)/g;
+const ID_CARD = /(?<![\dXx])\d{6}[\s-]?\d{8}[\s-]?\d{3}[\dXx](?![\dXx])/g;
 const NAME_KEYS = /^(member|guest|customer|contact|holder)_?name$/i;
 const PHONE_KEYS = /(phone|mobile|tel)$/i;
 
@@ -53,62 +54,111 @@ export function mapStrings<T>(value: T, fn: (s: string) => string): T {
   return walk(value) as T;
 }
 
-/** 名字最长按多少个字找（再长的档案名不会是员工随手写进问题里的） */
-const NAME_MAX = 20;
+/**
+ * 认的时候不算数的字：空白、零宽字符与常见的分隔符号——「欧阳 测试」「欧阳·测试」「欧阳-测试」都认作「欧阳测试」；
+ * 全角、半角与大小写也先统一（NFKC + 小写）。
+ */
+const SKIP = /[\s\u200b-\u200d\u2060\ufeff·•・\-_.,，、。'"‘’“”()（）[\]【】:：;；/\\|]/u;
+/**
+ * 档案里常见的占位「名字」（导入的旧数据、前台随手填的），不当成某一位会员的姓名找——
+ * 不然「这个月新会员多少」「客人数」都会被认成写了会员姓名。
+ */
+const GENERIC_NAMES = new Set(['会员', '客人', '散客', '顾客', '客户', '先生', '女士', '小姐', '老板', '老师', '师傅', '贵宾', 'vip', '测试', '未知', '无名', '匿名', '本人', '朋友', '同事', '员工', '临时', '其他', '其它']);
+
+function normChar(ch: string): string {
+  return [...ch.normalize('NFKC').toLowerCase()].filter((c) => !SKIP.test(c)).join('');
+}
+
+/** 统一后的文字，与每一位落在原文的哪个位置（打码时按原文换） */
+function normalize(text: string): { norm: string; origin: number[] } {
+  let norm = '';
+  const origin: number[] = [];
+  let i = 0;
+  for (const ch of text) {
+    const n = normChar(ch);
+    for (let k = 0; k < n.length; k++) origin.push(i);
+    norm += n;
+    i += ch.length;
+  }
+  return { norm, origin };
+}
+
+const normKey = (s: string) => [...s].map(normChar).join('');
+
+export type MemberHitKind = 'name' | 'no' | 'phone';
+export interface MemberHit {
+  kind: MemberHitKind;
+  /** 打码后的样子（给页面提示用，不含原文） */
+  masked: string;
+}
+export interface MemberTextGuard {
+  /** 文字里出现的会员身份（按会员档案认：姓名、会员号、手机号） */
+  find(text: string): MemberHit[];
+  /** 把认出来的换掉：姓名只留第一个字，会员号换成「[会员号]」，手机号只留前三后四 */
+  mask(text: string): string;
+}
 
 /**
- * 自由文字（员工写的问题、合同正文与备注）里的会员姓名、会员号：正则认不出名字，所以拿库里的会员档案逐个对——
- * 出现了的姓名只留第一个字（与结构化字段同一条规则），会员号整个换成「[会员号]」。两个字以下的名字不找（一个字的会误伤）。
- * 8.0.22 测试会话在 `80284a9` 报的 P1：原来自由文字只打码手机号、证件号，会员姓名会原样发给模型。
+ * 自由文字（员工写的问题、合同正文与备注）里的会员身份：正则认不出名字，所以拿会员档案逐个对（8.0.22，测试会话在
+ * `80284a9`、`e25d122` 报的 P1）。系统允许的姓名长度（1–32 字）都认，空格、分隔符号、全半角、大小写的变形也认；
+ * 一个字的名字不找（打码规则本来就留第一个字），全是数字的「名字」与常见的占位名不找。
  * 取不出会员档案时整个抛错（问答、条款提示就不发出去），宁可不发也不漏。
  */
-export async function memberTextMasker(db: Db): Promise<(text: string) => string> {
-  const rows = await db<{ name: string | null; no: string | null }[]>`SELECT name, member_no AS no FROM members`;
-  const names = new Set<string>();
-  const nos = new Set<string>();
-  let maxLen = 0;
+export async function memberTextGuard(db: Db): Promise<MemberTextGuard> {
+  const rows = await db<{ name: string | null; no: string | null; phone: string | null }[]>`SELECT name, member_no AS no, phone FROM members`;
+  const keys = new Map<string, MemberHitKind>();
+  const add = (key: string, kind: MemberHitKind) => {
+    if (!keys.has(key)) keys.set(key, kind);
+  };
   for (const r of rows) {
-    const name = (r.name ?? '').trim();
-    const n = [...name].length;
-    if (n >= 2 && n <= NAME_MAX) {
-      names.add(name);
-      maxLen = Math.max(maxLen, name.length);
-    }
-    const no = (r.no ?? '').trim();
-    if (no.length >= 4 && no.length <= NAME_MAX) {
-      nos.add(no);
-      maxLen = Math.max(maxLen, no.length);
-    }
+    const name = normKey((r.name ?? '').trim());
+    if ([...name].length >= 2 && !/^\d+$/.test(name) && !GENERIC_NAMES.has(name)) add(name, 'name');
+    const no = normKey((r.no ?? '').trim());
+    if (no.length >= 4 && !(/^\d+$/.test(no) && no.length < 6)) add(no, 'no');
+    const phone = (r.phone ?? '').replace(/\D/g, '');
+    if (phone.length >= 7) add(phone, 'phone');
   }
-  return (text: string) => {
-    if (!maxLen || !text) return text;
-    let out = '';
-    let i = 0;
-    while (i < text.length) {
-      let hit = 0;
-      let kind: 'name' | 'no' | null = null;
-      // 同一个位置先认最长的（「王先生」先于「王先」）
-      for (let len = Math.min(maxLen, text.length - i); len >= 2; len--) {
-        const piece = text.slice(i, i + len);
-        if (names.has(piece)) {
-          hit = len;
-          kind = 'name';
-          break;
-        }
-        if (nos.has(piece)) {
-          hit = len;
-          kind = 'no';
+  // 先认长的（「王先生」先于「王先」）
+  const lengths = [...new Set([...keys.keys()].map((k) => k.length))].sort((a, b) => b - a);
+
+  const scan = (text: string): { start: number; end: number; kind: MemberHitKind; key: string }[] => {
+    if (!text || !keys.size) return [];
+    const { norm, origin } = normalize(text);
+    const hits: { start: number; end: number; kind: MemberHitKind; key: string }[] = [];
+    let s = 0;
+    while (s < norm.length) {
+      let matched = 0;
+      for (const len of lengths) {
+        if (s + len > norm.length) continue;
+        const piece = norm.slice(s, s + len);
+        const kind = keys.get(piece);
+        if (kind) {
+          const last = origin[s + len - 1]!;
+          const lastLen = (text.codePointAt(last) ?? 0) > 0xffff ? 2 : 1;
+          hits.push({ start: origin[s]!, end: last + lastLen, kind, key: piece });
+          matched = len;
           break;
         }
       }
-      if (kind === 'name') out += aiMaskName(text.slice(i, i + hit));
-      else if (kind === 'no') out += '[会员号]';
-      else {
-        out += text[i];
-        hit = 1;
-      }
-      i += hit;
+      s += matched || 1;
     }
-    return out;
+    return hits;
+  };
+  const show = (h: { kind: MemberHitKind; key: string }, original: string) =>
+    h.kind === 'name' ? aiMaskName(original) : h.kind === 'no' ? '[会员号]' : maskPhone(h.key);
+
+  return {
+    find(text) {
+      return scan(text).map((h) => ({ kind: h.kind, masked: show(h, text.slice(h.start, h.end)) }));
+    },
+    mask(text) {
+      let out = '';
+      let at = 0;
+      for (const h of scan(text)) {
+        out += text.slice(at, h.start) + show(h, text.slice(h.start, h.end));
+        at = h.end;
+      }
+      return out + text.slice(at);
+    },
   };
 }
