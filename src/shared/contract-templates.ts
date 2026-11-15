@@ -58,6 +58,8 @@ export const BUILTIN_TEMPLATE_FIELDS: { key: string; hint: string }[] = [
   { key: '单价表', hint: '单独一段写它，换成单价表' },
 ];
 const TABLE_KEYS = new Set(['付款节点', '单价表']);
+/** 内置字段的名字：模板自己的可填字段不能用这些名字（不然导出的正文会和合同里结构化的金额、相对方对不上） */
+export const BUILTIN_TEMPLATE_KEYS: ReadonlySet<string> = new Set(BUILTIN_TEMPLATE_FIELDS.map((f) => f.key));
 export const TEMPLATE_FIELD_KEY = /^[一-龥A-Za-z][一-龥A-Za-z0-9_]{0,11}$/;
 
 const DIGITS = '零壹贰叁肆伍陆柒捌玖';
@@ -182,7 +184,8 @@ export function renderContractDoc(
     if (content.note) blocks.push({ kind: 'para', text: `备注：${content.note}` });
     return blocks;
   }
-  const values: Record<string, string> = { ...builtinValues(content, head), ...content.template.values };
+  // 内置字段以合同本身为准：模板自己的字段与内置的重名时（旧模板，8.0.21 起新建、改版都拦）不让它盖掉合同的金额、相对方等
+  const values: Record<string, string> = { ...content.template.values, ...builtinValues(content, head) };
   const fill = (s: string) => s.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, k: string) => (values[k] !== undefined && values[k] !== '' ? values[k]! : `【${k}】`));
   for (const para of template.body.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
     const t = para.trim();

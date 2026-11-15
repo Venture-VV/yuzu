@@ -230,8 +230,3 @@ export interface OtaPrepaidHint {
   roomTypeName: string;
   amountCents: number;
 }
-/** 订单号做团购券码：只留数字与字母、转大写，不够 6 位的前面补 OTA */
-export function otaCouponCode(orderNo: string): string {
-  const s = orderNo.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 64);
-  return s.length >= 6 ? s : `OTA${s}`.padEnd(6, '0');
-}

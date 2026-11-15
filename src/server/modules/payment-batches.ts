@@ -275,6 +275,45 @@ async function closeIfDone(db: Db, batchId: number) {
   if (left!.n === 0) await db`UPDATE payment_batches SET status = 'done', version = version + 1 WHERE id = ${batchId} AND status = 'exported'`;
 }
 
+/** 这一行的操作编号已经记过的付款（按申请登记的付款，或合同付款） */
+async function priorPayment(db: Db, key: string): Promise<{ kind: 'payment' | 'payout'; paymentId: number } | null> {
+  const [p] = await db<{ refId: number }[]>`SELECT ref_id FROM idempotency_keys WHERE key = ${key} AND op_type = 'payment'`;
+  if (p) return { kind: 'payment', paymentId: Number(p.refId) };
+  const [o] = await db<{ id: number }[]>`SELECT id FROM contract_payouts WHERE client_key = ${key}`;
+  return o ? { kind: 'payout', paymentId: Number(o.id) } : null;
+}
+
+/** 照「按申请登记付款」记这一行（用这一行自己的操作编号） */
+async function payItem(
+  deps: Deps,
+  claim: { requestId: number; amountCents: number; payDate: string; key: string },
+  evidence: string,
+  actor: Actor,
+  ip?: string,
+): Promise<{ kind: 'payment' | 'payout'; paymentId: number }> {
+  const req = await getPaymentRequest(deps.sql, claim.requestId, todayIn(deps.config.timezone));
+  if (req.payMode === 'direct') {
+    const r = await payoutFromRequest(deps, claim.requestId, { clientKey: claim.key, payDate: claim.payDate, amountCents: claim.amountCents, method: 'bank_transfer', evidence, note: '' }, actor, ip);
+    return { kind: 'payout', paymentId: r.payoutId };
+  }
+  // 没挂合同的：核销到申请里选的那几笔（按顺序）；挂了合同的：记预付款，之后按收货核销
+  const allocations: { kind: 'receipt' | 'opening'; targetId: number; amountCents: number }[] = [];
+  let prepay = false;
+  if (req.contractId === null) {
+    let left = claim.amountCents;
+    for (const t of req.targets) {
+      const room = Math.min(t.amountCents - t.paidCents, t.openCents);
+      if (room <= 0 || left <= 0) continue;
+      const a = Math.min(room, left);
+      allocations.push({ kind: t.kind, targetId: t.targetId, amountCents: a });
+      left -= a;
+    }
+    if (left > 0) throw unprocessable('BATCH_ALLOC', `付款申请 ${req.requestNo} 里选的货款不够核销 ¥${yuanText(claim.amountCents)}，请到付款申请里手工登记`);
+  } else prepay = true;
+  const r = await payFromRequest(deps, claim.requestId, { clientKey: claim.key, payDate: claim.payDate, amountCents: claim.amountCents, method: 'bank_transfer', evidence, note: '', allocations, prepay }, actor, ip);
+  return { kind: 'payment', paymentId: r.paymentId };
+}
+
 /** 记这一行已付：照「按申请登记付款」记账（重来也只记一次） */
 export async function recordItemPaid(deps: Deps, itemId: number, input: { payDate: string; bankRef: string }, actor: Actor, ip?: string): Promise<void> {
   const claim = await deps.sql.begin(async (tx) => {
@@ -292,34 +331,11 @@ export async function recordItemPaid(deps: Deps, itemId: number, input: { payDat
     return { batchId: Number(head.batchId), batchNo: b!.batchNo, requestId: Number(i!.requestId), amountCents: Number(i!.amountCents), payDate: i!.paidOn ?? input.payDate, bankRef: i!.paidOn === null ? input.bankRef.slice(0, 64) : i!.bankRef, key: i!.payClientKey };
   });
   if (!claim) return;
-  const today = todayIn(deps.config.timezone);
-  const req = await getPaymentRequest(deps.sql, claim.requestId, today);
   const evidence = `批量付款 ${claim.batchNo}${claim.bankRef ? ` 流水 ${claim.bankRef}` : ''}`.slice(0, 200);
-  let kind: 'payment' | 'payout';
-  let paymentId: number;
-  if (req.payMode === 'direct') {
-    const r = await payoutFromRequest(deps, claim.requestId, { clientKey: claim.key, payDate: claim.payDate, amountCents: claim.amountCents, method: 'bank_transfer', evidence, note: '' }, actor, ip);
-    kind = 'payout';
-    paymentId = r.payoutId;
-  } else {
-    // 没挂合同的：核销到申请里选的那几笔（按顺序）；挂了合同的：记预付款，之后按收货核销
-    const allocations: { kind: 'receipt' | 'opening'; targetId: number; amountCents: number }[] = [];
-    let prepay = false;
-    if (req.contractId === null) {
-      let left = claim.amountCents;
-      for (const t of req.targets) {
-        const room = Math.min(t.amountCents - t.paidCents, t.openCents);
-        if (room <= 0 || left <= 0) continue;
-        const a = Math.min(room, left);
-        allocations.push({ kind: t.kind, targetId: t.targetId, amountCents: a });
-        left -= a;
-      }
-      if (left > 0) throw unprocessable('BATCH_ALLOC', `付款申请 ${req.requestNo} 里选的货款不够核销 ¥${yuanText(claim.amountCents)}，请到付款申请里手工登记`);
-    } else prepay = true;
-    const r = await payFromRequest(deps, claim.requestId, { clientKey: claim.key, payDate: claim.payDate, amountCents: claim.amountCents, method: 'bank_transfer', evidence, note: '', allocations, prepay }, actor, ip);
-    kind = 'payment';
-    paymentId = r.paymentId;
-  }
+  // 上一次已经记上了付款、没来得及把这一行标已付（进程停了、超时）：按这一行自己的操作编号找回那笔，
+  // 不再按现在的余额重算核销（记过以后申请里的货款已经核销掉了，重算会以为不够核销而卡住）
+  const prior = await priorPayment(deps.sql, claim.key);
+  const { kind, paymentId } = prior ?? (await payItem(deps, claim, evidence, actor, ip));
   await deps.sql.begin(async (tx) => {
     await tx`SELECT id FROM payment_batches WHERE id = ${claim.batchId} FOR UPDATE`;
     const [i] = await tx<{ status: string }[]>`SELECT status FROM payment_batch_items WHERE id = ${itemId} FOR UPDATE`;

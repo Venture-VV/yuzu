@@ -66,7 +66,7 @@ function VerifyDialog({ open, onClose, platform, code, onVerified }: { open: boo
   const [key, setKey] = useState(uuid);
   const [uncertain, setUncertain] = useState(false);
   const openList = useOpenVerifications(open);
-  const reusable = (openList.data ?? []).filter((v) => v.status === 'verified' && !v.checkout && v.platform === platform);
+  const reusable = (openList.data ?? []).filter((v) => v.status === 'verified' && !v.checkout && !v.cancelling && v.platform === platform);
 
   useEffect(() => {
     if (!open) return;
@@ -243,7 +243,7 @@ export function UnusedVerificationsBanner() {
         <ul className="divide-y divide-line/70 rounded-lg border border-line text-[13px]" data-testid="unused-vouchers-list">
           {rows.map((v) => (
             <li key={v.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
-              <Badge tone={v.status === 'verified' ? 'pine' : 'yuzu'}>{VERIFICATION_STATUS_LABELS[v.status]}</Badge>
+              {v.cancelling ? <Badge tone="clay">撤销中</Badge> : <Badge tone={v.status === 'verified' ? 'pine' : 'yuzu'}>{VERIFICATION_STATUS_LABELS[v.status]}</Badge>}
               <span className="font-semibold">
                 {COUPON_PLATFORM_LABELS[v.platform]} {v.code}
               </span>
@@ -257,11 +257,13 @@ export function UnusedVerificationsBanner() {
               {can('platform.void') && v.status === 'verified' && (
                 <>
                   <Button size="sm" variant="ghost" onClick={() => setCancelling(v)} data-testid={`voucher-cancel-${v.id}`}>
-                    撤销核销
+                    {v.cancelling ? '再问一次平台' : '撤销核销'}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => void record(v)}>
-                    转补录
-                  </Button>
+                  {!v.cancelling && (
+                    <Button size="sm" variant="ghost" onClick={() => void record(v)}>
+                      转补录
+                    </Button>
+                  )}
                 </>
               )}
             </li>

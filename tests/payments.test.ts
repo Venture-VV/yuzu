@@ -784,6 +784,11 @@ describe('批量付款（8.0.21）', () => {
     expect(file.statusCode).toBe(200);
     expect(file.body).toContain('6227000012345678');
     expect(file.body).toContain('200.00');
+    // 导一份早的对账单：同户名、同金额的一笔在导出这一批的 5 天前，不拿它对这一批（与别的对象一样只在日期前后 3 天里找）
+    const oldCsv = ['交易日期,摘要,借方发生额,贷方发生额,余额,对方户名,对方账号,交易流水号', `${shiftDate(today, -5)},代付,200.00,,1.00,付款流测试供应商,6227000012345678,PL-OLD-0001`].join('\n');
+    const oldImp = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/import', { clientKey: randomUUID(), accountId: acc.id, fileName: 'pl-old.csv', csv: oldCsv }));
+    expect(oldImp.import).toMatchObject({ autoMatched: 0 });
+    expect((await ok(api(ctx.app, payer, 'GET', `/api/erp/payments/batches/${batch.id}`), 200)).items[0]).toMatchObject({ status: 'pending', matched: false });
     // 网银付完，回来导入流水：金额与收款户名对上，自动记账
     const csv = ['交易日期,摘要,借方发生额,贷方发生额,余额,对方户名,对方账号,交易流水号', `${today},批量代付,200.00,,1.00,付款流测试供应商,6227000012345678,PL-T-0001`].join('\n');
     const imp = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/import', { clientKey: randomUUID(), accountId: acc.id, fileName: 'pl.csv', csv }));
@@ -814,5 +819,20 @@ describe('批量付款（8.0.21）', () => {
     expect(failed).toMatchObject({ status: 'done' });
     expect(failed.items[0]).toMatchObject({ status: 'failed' });
     expect((await list()).candidates.some((c) => c.requestId === r2.id)).toBe(true);
+
+    // 记已付做到一半（付款已经按这一行的操作编号记上、这一行还没标已付）：再点一次找回那笔付款，不按现在的余额重算核销
+    const free3 = await receiveUnderContract(null, 3);
+    await ok(invoice([{ poId: free3.poId, amountCents: 15_000 }]));
+    const r3 = await approveAll((await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free3.receipt.id, amountCents: 15_000 }] } }))).request);
+    const b4 = (await ok(make([r3.id]))).batch;
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b4.id}/export`, { version: b4.version }), 200);
+    const [item] = await ctx.sql<{ id: number; payClientKey: string }[]>`SELECT id, pay_client_key FROM payment_batch_items WHERE batch_id = ${b4.id}`;
+    const first = await ok(payReq(r3.id, { clientKey: item!.payClientKey, amountCents: 15_000, allocations: [{ kind: 'receipt', targetId: free3.receipt.id, amountCents: 15_000 }] }));
+    await ctx.sql`UPDATE payment_batch_items SET paid_on = ${today} WHERE id = ${item!.id}`;
+    expect((await detail(r3.id)).status).toBe('paid');
+    const resumed = await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batch-items/${item!.id}/paid`, { payDate: today }), 200);
+    expect(resumed.status).toBe('done');
+    expect(resumed.items[0]).toMatchObject({ status: 'paid', paymentKind: 'payment', paymentId: first.payment.id });
+    expect(await detail(r3.id)).toMatchObject({ status: 'paid', paidCents: 15_000 });
   });
 });

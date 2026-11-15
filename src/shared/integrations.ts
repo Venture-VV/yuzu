@@ -95,6 +95,8 @@ export interface VerificationView {
   staffName: string;
   createdAt: string;
   verifiedAt: string | null;
+  /** 撤销核销已经占住、还没有结果（正在问平台，或上一次平台没回应）：不能用、不能转补录，可以再点撤销 */
+  cancelling: boolean;
 }
 
 export type ReconIssueKind = 'platform_only' | 'system_only' | 'amount_diff';

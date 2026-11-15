@@ -1,7 +1,10 @@
 // 8.0.21 OTA 渠道订单（docs/INTEGRATIONS_V8021.md 第 4 节，CW-I / CW9；迁移 150）：渠道订单表导入成客房预约。
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { detectOtaColumns, parseOtaRows, otaCouponCode } from '../src/shared/ota';
+import { detectOtaColumns, parseOtaRows } from '../src/shared/ota';
+import { COUPON_CODE_PATTERN } from '../src/shared/checkout';
+import { hashRequest } from '../src/server/lib/idempotency';
+import { otaCouponCode } from '../src/server/modules/ota';
 import { shiftDate } from '../src/shared/labels';
 import { api, setup, type TestContext } from './helpers';
 
@@ -41,8 +44,12 @@ describe('解析', () => {
       { orderNo: 'A2', checkin: '2026-12-03', checkout: '2026-12-04', rooms: 2, amountCents: 50_000, payMode: 'prepaid', channelStatus: 'cancelled' },
     ]);
     expect(r.problems).toEqual([{ row: 4, message: '订单 A3：入住日读不出来' }]);
-    expect(otaCouponCode('ct-123')).toBe('OTACT123');
-    expect(otaCouponCode('1234567890')).toBe('1234567890');
+    // 券码按「渠道 + 原订单号」认：两个渠道同一个订单号、AB-123 与 AB123 都不撞；同一张每次一样；合团购券码的格式
+    const codes = [otaCouponCode(1, 'AB-123'), otaCouponCode(1, 'AB123'), otaCouponCode(2, 'AB123'), otaCouponCode(1, 'ab123'), otaCouponCode(12, '3'), otaCouponCode(1, '23')];
+    expect(new Set(codes).size).toBe(codes.length);
+    expect(otaCouponCode(1, 'AB-123')).toBe(otaCouponCode(1, 'AB-123'));
+    expect(otaCouponCode(1, 'AB-123')).toMatch(/^OTA1AB123[0-9A-F]{8}$/);
+    for (const c of [...codes, otaCouponCode(999_999, 'x'.repeat(64))]) expect(c).toMatch(COUPON_CODE_PATTERN);
   });
 });
 
@@ -103,6 +110,36 @@ describe('渠道订单', () => {
     // 没变的再导一次：不动
     const same = await importFile([`C1001,王五,13800001111,豪华大床房,${d2},${shiftDate(d2, 2)},1,600.00,预付,已确认`, '']);
     expect(same.body).toMatchObject({ unchanged: 1, created: 0, updated: 0 });
+  });
+
+  it('导入记下了、逐张处理到一半断了：原样重提接着做完；更晚的一次导入已经改过的那张不拿旧文件盖回去', async () => {
+    const d = shiftDate(today, 6);
+    const rowsA = [`C2001,周八,,豪华大床房,${d},${shiftDate(d, 1)},1,300,现付,已确认`, `C2002,吴九,,豪华大床房,${d},${shiftDate(d, 1)},1,300,现付,已确认`];
+    // 模拟断在导入记录写完、逐张处理之前：只写导入记录（与 importOtaOrders 同样的摘要）
+    const keyA = randomUUID();
+    const text = csv(rowsA);
+    const fileHash = createHash('sha256').update(text).digest('hex');
+    const ownerId = Number((await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'owner' LIMIT 1`)[0]?.id ?? (await ctx.sql<{ id: number }[]>`SELECT id FROM staff ORDER BY id LIMIT 1`)[0]!.id);
+    await ctx.sql`
+      INSERT INTO ota_imports (channel_id, file_name, file_hash, rows, client_key, request_hash, staff_id)
+      VALUES (${channelId}, 'orders.csv', ${fileHash}, 2, ${keyA}, ${hashRequest({ channelId, fileHash })}, ${ownerId})`;
+    expect(await order('C2001')).toBeUndefined();
+    const resumed = await api(ctx.app, ctx.clerk, 'POST', '/api/ota/import', { clientKey: keyA, channelId, fileName: 'orders.csv', csv: text });
+    expect(resumed.status, JSON.stringify(resumed.body)).toBe(200);
+    expect(resumed.body).toMatchObject({ created: 2 });
+    expect((await order('C2001')).bookings).toHaveLength(1);
+    expect((await order('C2002')).bookings).toHaveLength(1);
+    // 再重提一次：都处理过了，什么都不动
+    const again = await api(ctx.app, ctx.clerk, 'POST', '/api/ota/import', { clientKey: keyA, channelId, fileName: 'orders.csv', csv: text });
+    expect(again.body).toMatchObject({ created: 0, updated: 0, unchanged: 2 });
+    // 更晚的一次导入把 C2001 改成 2 间；之后再重提最早那次：C2001 不回到 1 间
+    const later = await importFile([`C2001,周八,,豪华大床房,${d},${shiftDate(d, 1)},2,600,现付,已确认`]);
+    expect(later.body).toMatchObject({ updated: 1 });
+    const stale = await api(ctx.app, ctx.clerk, 'POST', '/api/ota/import', { clientKey: keyA, channelId, fileName: 'orders.csv', csv: text });
+    expect(stale.body).toMatchObject({ created: 0, updated: 0, cancelled: 0, unchanged: 2 });
+    const o = await order('C2001');
+    expect(o).toMatchObject({ rooms: 2, amountCents: 60_000 });
+    expect(o.bookings.filter((b: { status: string }) => b.status === 'confirmed')).toHaveLength(2);
   });
 
   it('对账：按入住月份，订单数、间夜、金额、佣金（15%）、净额；导出 CSV', async () => {

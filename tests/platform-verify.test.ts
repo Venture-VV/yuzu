@@ -1,5 +1,5 @@
 // 8.0.21 平台验券（docs/INTEGRATIONS_V8021.md 第 3 节，CW-H / CW8；迁移 149）。用的是模拟实现：
-// 券码尾号 0000 不存在、2222 两份 ¥398、9999 撤销不了、7777 平台对账单上没有；其余美团 ¥99（应结 ¥92）、抖音 ¥88。
+// 券码尾号 0000 不存在、2222 两份 ¥398、9999 撤销不了、5555 第一次撤销平台没回应、7777 平台对账单上没有；其余美团 ¥99（应结 ¥92）、抖音 ¥88。
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mockPlatformBillAdd } from '../src/server/integrations/platform-voucher';
@@ -95,6 +95,43 @@ describe('平台验券', () => {
     const [r] = await ctx.sql<{ faceValue: number; settleAmount: number }[]>`SELECT face_value, settle_amount FROM platform_redemptions WHERE redemption_no = ${rec.body.redemptionNo}`;
     expect(r).toMatchObject({ faceValue: 9_900, settleAmount: 9_200 });
     await expect(ctx.sql`UPDATE platform_verifications SET status = 'verified' WHERE id = ${b.id}`).rejects.toThrow(/不能这样改/);
+  });
+
+  it('撤销核销先在锁里占住（「撤销中」）再问平台：占住时结账用不了、转补录不了；平台没回应留着「撤销中」，再撤一次问清；同一张同时只有一个撤销', async () => {
+    const c = code('5555');
+    const v = (await verify('meituan', c)).body;
+    // 别人正在撤（撤销锁被占着）：直接告诉他
+    const other = await ctx.sql.reserve();
+    try {
+      await other`SELECT pg_advisory_lock(hashtextextended(${`platform_verify_cancel:${v.id}`}, 0))`;
+      expect((await api(ctx.app, duty, 'POST', `/api/platform/verifications/${v.id}/cancel`, { reason: '客人不用了' })).body.error.code).toBe('CANCEL_IN_PROGRESS');
+      await other`SELECT pg_advisory_unlock(hashtextextended(${`platform_verify_cancel:${v.id}`}, 0))`;
+    } finally {
+      other.release();
+    }
+    // 第一次撤销平台没回应：留着「撤销中」
+    const unknown = await api(ctx.app, duty, 'POST', `/api/platform/verifications/${v.id}/cancel`, { reason: '客人不用了' });
+    expect(unknown.body.error.code).toBe('CANCEL_UNKNOWN');
+    const open = (await api(ctx.app, ctx.clerk, 'GET', '/api/platform/verifications/open')).body.find((x: { id: number }) => x.id === v.id);
+    expect(open).toMatchObject({ status: 'verified', cancelling: true });
+    // 占住时：结账用不了、转补录不了
+    const vid = await enter();
+    const t = await total([vid]);
+    const used = await checkout([vid], t, [{ method: 'coupon', platform: 'meituan', code: c, amount: 9_900, verificationId: v.id }, { method: 'cash', amount: t - 9_900 }]);
+    expect(used.body.error.code).toBe('VERIFICATION_CANCELLING');
+    expect((await api(ctx.app, duty, 'POST', `/api/platform/verifications/${v.id}/record`, {})).body.error.code).toBe('VERIFICATION_CANCELLING');
+    // 再撤一次：平台撤了，记「已撤销」
+    const done = await api(ctx.app, duty, 'POST', `/api/platform/verifications/${v.id}/cancel`, { reason: '客人不用了' });
+    expect(done.status, JSON.stringify(done.body)).toBe(200);
+    expect(done.body).toMatchObject({ status: 'cancelled', cancelling: false });
+    // 平台明确不让撤的（9999）放开占位：照旧能用
+    const nine = (await verify('meituan', code('19999'))).body;
+    expect((await api(ctx.app, duty, 'POST', `/api/platform/verifications/${nine.id}/cancel`, { reason: '客人走了' })).body.error.code).toBe('CANCEL_FAILED');
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/platform/verifications/open')).body.find((x: { id: number }) => x.id === nine.id)).toMatchObject({ cancelling: false });
+    const ok = await checkout([vid], t, [{ method: 'coupon', platform: 'meituan', code: code('19999'), amount: 9_900, verificationId: nine.id }, { method: 'cash', amount: t - 9_900 }]);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    // 用在结账单上的不让撤（不去问平台）
+    expect((await api(ctx.app, duty, 'POST', `/api/platform/verifications/${nine.id}/cancel`, { reason: '客人走了' })).body.error.code).toBe('COUPON_USED');
   });
 
   it('确认作废：请求没到时作废，原请求晚到也不核销', async () => {

@@ -254,12 +254,13 @@ async function candidates(db: Db, types: MatchTargetType[], filter: { amountMax?
         WHERE ${only ? db`TRUE` : db`p.status = 'active' AND p.received_on BETWEEN ${filter.from} AND ${filter.to} AND ${notMatched(t, db`p.id`)}`}
           AND ${amt(db`p.amount`)} AND ${pick(db`p.id`)}`;
     } else if (t === 'batch_item') {
-      // 批量付款的一行（第 5 节）：导出以后、还没有结论的
+      // 批量付款的一行（第 5 节）：导出以后、还没有结论的；日期按导出的那天，与别的对象一样只在给的日期范围里找
+      // （导一份早的对账单时，不会拿几个月前同户名同金额的一笔去对后来才导出的批次）
       rows = await db`
         SELECT i.id, b.batch_no || '-' || i.line_no AS doc_no, coalesce(b.exported_at, b.created_at)::date::text AS date, i.amount_cents::text AS amount_cents, i.payee_name AS party,
                i.status IN ('removed', 'failed') OR b.status = 'voided' AS voided
         FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id
-        WHERE ${only ? db`TRUE` : db`b.status = 'exported' AND i.status = 'pending' AND ${notMatched(t, db`i.id`)}`}
+        WHERE ${only ? db`TRUE` : db`b.status = 'exported' AND i.status = 'pending' AND coalesce(b.exported_at, b.created_at)::date BETWEEN ${filter.from}::date AND ${filter.to}::date AND ${notMatched(t, db`i.id`)}`}
           AND ${amt(db`i.amount_cents`)} AND ${pick(db`i.id`)}`;
     }
     for (const r of rows) out.push({ type: t, id: Number(r.id), docNo: r.docNo, date: r.date, amountCents: Number(r.amountCents), party: r.party, voided: r.voided });

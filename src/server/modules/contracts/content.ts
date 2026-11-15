@@ -67,8 +67,10 @@ export const ContentInput = z.object({
       values: z.record(z.string(), z.string().trim().max(500, '模板字段的值最多 500 个字')).default({}),
       clauses: z.array(z.string().max(24)).max(30).default([]),
     })
-    .nullable()
-    .default(null),
+    // 没选模板（不传或传 null）时这个键不出现在解析结果里：createContract / createChange 拿解析结果算原请求摘要，
+    // 升级前提交的请求（没有这个键）原样重提时摘要不变
+    .nullish()
+    .transform((v) => v ?? undefined),
 });
 export type ContentInputT = z.infer<typeof ContentInput>;
 

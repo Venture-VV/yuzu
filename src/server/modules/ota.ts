@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf, businessDayStart } from '@shared/business-date';
-import { detectOtaColumns, OTA_FIELDS, otaColumnProblem, otaCouponCode, parseOtaRows, type OtaChannel, type OtaColumnMap, type OtaImportResult, type OtaOrderView, type OtaPrepaidHint, type OtaReconRow, type ParsedOtaOrder } from '@shared/ota';
+import { detectOtaColumns, OTA_FIELDS, otaColumnProblem, parseOtaRows, type OtaChannel, type OtaColumnMap, type OtaImportResult, type OtaOrderView, type OtaPrepaidHint, type OtaReconRow, type ParsedOtaOrder } from '@shared/ota';
 import { isUniqueViolation, type Db, type Fragment } from '../db';
 import { guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -135,10 +135,12 @@ async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, 
               ${o.channelStatus}, ${tx.json(o as never)}, ${importId})
       ON CONFLICT (channel_id, order_no) DO NOTHING RETURNING id`;
     const isNew = inserted.length > 0;
-    const [ord] = await tx<{ id: number; status: string; checkinDate: string; rooms: number; roomTypeId: number | null; channelStatus: string; overbooked: boolean; amountCents: number }[]>`
-      SELECT id, status, to_char(checkin_date, 'YYYY-MM-DD') AS checkin_date, rooms, room_type_id, channel_status, overbooked, amount_cents
+    const [ord] = await tx<{ id: number; status: string; checkinDate: string; rooms: number; roomTypeId: number | null; channelStatus: string; overbooked: boolean; amountCents: number; lastImportId: number | null }[]>`
+      SELECT id, status, to_char(checkin_date, 'YYYY-MM-DD') AS checkin_date, rooms, room_type_id, channel_status, overbooked, amount_cents, last_import_id
       FROM ota_orders WHERE channel_id = ${channel.id} AND order_no = ${o.orderNo} FOR UPDATE`;
     const id = Number(ord!.id);
+    // 这次导入（原样重提续做时）或更晚的一次导入已经处理过这张：不再处理（不拿旧文件盖掉新的）
+    if (!isNew && importId !== null && ord!.lastImportId !== null && Number(ord!.lastImportId) >= importId) return 'unchanged';
     const before = { status: ord!.status, checkin: ord!.checkinDate, rooms: Number(ord!.rooms), roomTypeId: ord!.roomTypeId === null ? null : Number(ord!.roomTypeId), channelStatus: ord!.channelStatus, amount: Number(ord!.amountCents) };
     await tx`
       UPDATE ota_orders SET guest_name = ${o.guestName}, guest_phone = ${o.guestPhone}, channel_room = ${o.roomType}, room_type_id = ${roomTypeId},
@@ -280,19 +282,19 @@ export async function importOtaOrders(deps: Deps, raw: unknown, actor: Actor, ip
     return { id: Number(row!.id), replayed: false };
   });
   const result: OtaImportResult = { importId: head.id, rows: r.orders.length, created: 0, updated: 0, cancelled: 0, failed: 0, skipped: 0, unchanged: 0, problems: r.problems, orders: [] };
-  if (!head.replayed) {
-    for (const o of r.orders) {
-      try {
-        result[await processOrder(deps, channel, o, head.id, actor, ip)] += 1;
-      } catch (e) {
-        // 一张出错不影响别的：记「没建成」、写原因
-        result.failed += 1;
-        const message = e instanceof Error ? e.message : String(e);
-        await deps.sql`
-          UPDATE ota_orders SET status = 'failed', fail_reason = ${message.slice(0, 200)}, updated_at = now()
-          WHERE channel_id = ${channel.id} AND order_no = ${o.orderNo}`.catch(() => undefined);
-        result.problems.push({ row: o.row, message: `订单 ${o.orderNo}：${message}` });
-      }
+  // 原样重提（上一次导入记下了、逐张处理到一半断了）也逐张走一遍：已经按这次（或更晚的一次）处理过的那几张在
+  // processOrder 里认出来、记「没变化」，没处理完的接着做——导入记录与逐张处理分在几个事务里，进度按订单上的 last_import_id 认
+  for (const o of r.orders) {
+    try {
+      result[await processOrder(deps, channel, o, head.id, actor, ip)] += 1;
+    } catch (e) {
+      // 一张出错不影响别的：记「没建成」、写原因
+      result.failed += 1;
+      const message = e instanceof Error ? e.message : String(e);
+      await deps.sql`
+        UPDATE ota_orders SET status = 'failed', fail_reason = ${message.slice(0, 200)}, updated_at = now()
+        WHERE channel_id = ${channel.id} AND order_no = ${o.orderNo}`.catch(() => undefined);
+      result.problems.push({ row: o.row, message: `订单 ${o.orderNo}：${message}` });
     }
   }
   result.orders = await orderViews(deps.sql, deps.sql`o.last_import_id = ${head.id}`);
@@ -325,15 +327,24 @@ export async function otaRecon(db: Db, month: string): Promise<OtaReconRow[]> {
   });
 }
 
+/**
+ * 预付订单那一行团购券的券码：按「渠道 + 原订单号」认一张——两个渠道同一个订单号、AB-123 与 AB123 都不会撞成同一张券
+ * （结账按「平台 + 券码」拦重复）。OTA + 渠道编号 + 订单号里的数字字母（大写，最多 40 位，方便收银员对单）+ 渠道与原订单号的摘要前 8 位。
+ */
+export function otaCouponCode(channelId: number, orderNo: string): string {
+  const digest = createHash('sha256').update(`${channelId}\u0000${orderNo}`).digest('hex').slice(0, 8).toUpperCase();
+  return `OTA${channelId}${orderNo.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 40)}${digest}`;
+}
+
 /** 结账时：这几位客人是按预付的渠道订单到店的 → 收款区默认带一行团购券 */
 export async function otaPrepaidHints(db: Db, visitIds: number[]): Promise<OtaPrepaidHint[]> {
   if (!visitIds.length) return [];
-  const rows = await db<{ orderNo: string; channelName: string; roomTypeName: string | null; amountCents: number }[]>`
-    SELECT DISTINCT o.order_no, c.name AS channel_name, rt.name AS room_type_name, o.amount_cents
+  const rows = await db<{ channelId: number; orderNo: string; channelName: string; roomTypeName: string | null; amountCents: number }[]>`
+    SELECT DISTINCT o.channel_id, o.order_no, c.name AS channel_name, rt.name AS room_type_name, o.amount_cents
     FROM bookings b JOIN ota_order_bookings ob ON ob.booking_id = b.id JOIN ota_orders o ON o.id = ob.order_id JOIN ota_channels c ON c.id = o.channel_id
     LEFT JOIN room_types rt ON rt.id = o.room_type_id
     WHERE b.arrival_visit_id IN ${db(visitIds)} AND b.status = 'arrived' AND o.pay_mode = 'prepaid' AND o.status = 'booked'`;
-  return rows.map((r) => ({ orderNo: r.orderNo, couponCode: otaCouponCode(r.orderNo), channelName: r.channelName, roomTypeName: r.roomTypeName ?? '', amountCents: Number(r.amountCents) }));
+  return rows.map((r) => ({ orderNo: r.orderNo, couponCode: otaCouponCode(Number(r.channelId), r.orderNo), channelName: r.channelName, roomTypeName: r.roomTypeName ?? '', amountCents: Number(r.amountCents) }));
 }
 
 // ───────────────────────── 路由 ─────────────────────────

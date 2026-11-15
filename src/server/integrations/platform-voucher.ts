@@ -32,6 +32,7 @@ export interface PlatformVoucher {
 }
 
 const mockVerified = new Map<string, VoucherBillLine & { platform: VoucherPlatform; businessDate: string; cancelled: boolean }>();
+const mockCancelTimedOut = new Set<string>();
 
 function mockInfo(platform: VoucherPlatform, code: string): VoucherInfo | null {
   if (code.endsWith('0000')) return null;
@@ -57,6 +58,11 @@ export const mockPlatformVoucher: PlatformVoucher = {
   },
   async cancel({ platform, code }) {
     if (code.endsWith('9999')) return { ok: false, error: '已过了平台允许撤销的时间（模拟）' };
+    // 尾号 5555：第一次撤销平台没有回应（模拟超时，其实没撤），再撤一次才撤掉
+    if (code.endsWith('5555') && !mockCancelTimedOut.has(`${platform}:${code}`)) {
+      mockCancelTimedOut.add(`${platform}:${code}`);
+      throw new Error('请求超时（模拟）');
+    }
     const v = mockVerified.get(`${platform}:${code}`);
     if (v) v.cancelled = true;
     return { ok: true };

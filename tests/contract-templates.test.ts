@@ -4,6 +4,7 @@ import { inflateRawSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { amountInChinese, renderContractDoc } from '../src/shared/contract-templates';
 import type { ContractContent } from '../src/shared/contracts';
+import { ContentInput } from '../src/server/modules/contracts/content';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -86,6 +87,16 @@ describe('渲染', () => {
       { kind: 'para', text: '1. 违约：按 扣当月服务费 5%' },
     ]);
   });
+  it('内置字段以合同本身为准：模板值里有同名的（旧数据）也盖不掉总价、相对方', () => {
+    const c = { ...(content() as unknown as ContractContent), template: { id: 1, code: 'HT-001', version: 1, name: '保洁', values: { 总价: '¥999.00', 相对方: '别人' }, clauses: [] } };
+    const blocks = renderContractDoc(c, { contractNo: 'HT2026-001', counterparty: '城南保洁', storeName: '汤崎', versionLabel: '草稿' }, { body: '乙方 {{相对方}}，总价 {{总价}}。', clauses: [] });
+    expect(blocks[1]).toEqual({ kind: 'para', text: '乙方 城南保洁，总价 ¥12,345.00。' });
+  });
+  it('没选模板时解析结果里没有 template 这个键（原请求摘要与升级前一样），传 null 也一样', () => {
+    expect('template' in ContentInput.parse(content())).toBe(false);
+    expect(JSON.stringify(ContentInput.parse({ ...content(), template: null }))).toBe(JSON.stringify(ContentInput.parse(content())));
+    expect(ContentInput.parse({ ...content(), template: { id: 3 } }).template).toEqual({ id: 3, values: {}, clauses: [] });
+  });
 });
 
 describe('合同模板', () => {
@@ -102,6 +113,19 @@ describe('合同模板', () => {
     expect(t1.status, JSON.stringify(t1.body)).toBe(201);
     expect(t1.body).toMatchObject({ code: 'HT-001', version: 1, status: 'active' });
     expect((await api(ctx.app, legal, 'POST', '/api/erp/contracts/doc-templates', { ...body, fields: [body.fields[0], body.fields[0]] })).status).toBe(400);
+    // 可填字段不能和内置字段重名
+    const clash = await api(ctx.app, legal, 'POST', '/api/erp/contracts/doc-templates', { ...body, fields: [{ key: '总价', label: '总价', type: 'text', required: false }] });
+    expect(clash.status).toBe(400);
+    expect(clash.body.error.message).toContain('内置字段');
+    expect((await api(ctx.app, legal, 'POST', `/api/erp/contracts/doc-templates/${t1.body.id}/revise`, { ...body, fields: [{ key: '相对方', label: '乙方', type: 'text', required: false }] })).status).toBe(400);
+
+    // 没选模板的合同：原样重提（不带 template、带 template: null）都认作同一次
+    const plainKey = randomUUID();
+    const plain = { clientKey: plainKey, category: 'service', supplierId: null, counterparty: '城北保洁公司', content: content({ title: '不用模板的合同' }) };
+    const p1 = await api(ctx.app, legal, 'POST', '/api/erp/contracts', plain);
+    expect(p1.status, JSON.stringify(p1.body)).toBe(201);
+    const p2 = await api(ctx.app, legal, 'POST', '/api/erp/contracts', { ...plain, content: { ...plain.content, template: null } });
+    expect(p2.body.contract.id).toBe(p1.body.contract.id);
 
     // 用第 1 版起草一份服务合同
     const created = await api(ctx.app, legal, 'POST', '/api/erp/contracts', {

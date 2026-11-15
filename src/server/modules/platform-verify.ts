@@ -57,7 +57,8 @@ async function adapterOrThrow(deps: Deps): Promise<PlatformVoucher> {
 async function views(db: Db, where: Fragment): Promise<VerificationView[]> {
   const rows = await db<(Omit<VerificationView, 'checkout'> & { checkoutId: number | null; checkoutNo: string | null })[]>`
     SELECT v.id, v.platform, v.code, v.deal_name, v.face_cents, v.settle_cents, v.quantity, v.status, v.verify_no, v.fail_reason,
-           c.id AS checkout_id, c.checkout_no, r.redemption_no, s.display_name AS staff_name, v.created_at, v.verified_at
+           c.id AS checkout_id, c.checkout_no, r.redemption_no, s.display_name AS staff_name, v.created_at, v.verified_at,
+           (v.status = 'verified' AND v.cancelled_by IS NOT NULL) AS cancelling
     FROM platform_verifications v JOIN staff s ON s.id = v.staff_id
     LEFT JOIN group_buy_coupons g ON g.id = v.group_buy_coupon_id LEFT JOIN checkouts c ON c.id = g.checkout_id
     LEFT JOIN platform_redemptions r ON r.id = v.redemption_id
@@ -175,12 +176,15 @@ export async function verifyVoucher(deps: Deps, raw: unknown, actor: Actor, ip?:
 
 /** 结账登记团购券时（调用方已取「平台 + 券码」咨询锁）：锁验券一行，核对已核销、券码一致、没被用过、金额 = 面值；返回项目名 */
 export async function lockVerificationForUse(tx: Tx, id: number, expect: { platform: string; code: string; amount: number }): Promise<{ dealName: string }> {
-  const [v] = await tx<{ platform: string; code: string; status: string; faceCents: number; dealName: string; couponId: number | null }[]>`
-    SELECT platform, code, status, face_cents, deal_name, group_buy_coupon_id AS coupon_id FROM platform_verifications WHERE id = ${id} FOR UPDATE`;
+  const [v] = await tx<{ platform: string; code: string; status: string; faceCents: number; dealName: string; couponId: number | null; cancelling: boolean }[]>`
+    SELECT platform, code, status, face_cents, deal_name, group_buy_coupon_id AS coupon_id, cancelled_by IS NOT NULL AS cancelling
+    FROM platform_verifications WHERE id = ${id} FOR UPDATE`;
   if (!v) throw notFound('验券记录不存在，请刷新后重试');
   if (v.platform !== expect.platform || v.code !== expect.code) throw unprocessable('VERIFICATION_MISMATCH', '验券记录的平台、券码和登记的团购券不一样');
   if (v.status !== 'verified') throw conflict('VERIFICATION_NOT_READY', v.status === 'verifying' ? '这张券还在核销中，等出了结果再结账' : '这张券的核销已经撤销或没成功，不能用');
   if (v.couponId) throw conflict('COUPON_USED', '这次验券已经用在别的结账单上了');
+  // 撤销核销已经占住（正在问平台，或上一次平台没回应）：不能用，免得结了账平台那边却撤掉了
+  if (v.cancelling) throw conflict('VERIFICATION_CANCELLING', '这张券正在撤销核销，不能用；撤销没成的，再点一次「撤销核销」问清平台以后再用');
   if (Number(v.faceCents) !== expect.amount) throw unprocessable('VERIFICATION_MISMATCH', `验过的券面值是 ${formatYuan(Number(v.faceCents))}，团购券这一行要填一样的金额`);
   return { dealName: v.dealName };
 }
@@ -210,26 +214,68 @@ const Reason = z.string('请写原因').trim().min(2, '请写原因（至少 2 �
 export async function cancelVerification(deps: Deps, id: number, raw: unknown, actor: Actor, ip?: string): Promise<VerificationView> {
   const { reason } = parse(z.object({ reason: Reason }), raw);
   const a = await adapterOrThrow(deps);
-  const [v] = await deps.sql<{ status: string; couponId: number | null; platform: VoucherPlatform; code: string; verifyNo: string }[]>`
-    SELECT status, group_buy_coupon_id AS coupon_id, platform, code, verify_no FROM platform_verifications WHERE id = ${id}`;
-  if (!v) throw notFound('验券记录不存在');
-  if (v.status === 'cancelled') return verificationView(deps.sql, id);
-  if (v.status !== 'verified') throw conflict('INVALID_STATE', '只有已核销的能撤销');
-  if (v.couponId) throw conflict('COUPON_USED', '这张券已经用在结账单上：要撤先反结账');
-  const r = await withCallLog(
-    deps.sql,
-    { kind: 'platform_voucher', provider: v.platform, action: 'cancel', mode: a.mode, refType: 'platform_verification', refId: id, request: { code: v.code, verifyNo: v.verifyNo }, staffId: actor.id },
-    () => a.cancel({ platform: v.platform, code: v.code, verifyNo: v.verifyNo }),
-    (x) => ({ ok: x.ok, error: x.error ?? null }),
-  ).catch((e: unknown) => ({ ok: false, error: `平台没有回应：${e instanceof Error ? e.message : String(e)}` }));
-  if (!r.ok) throw conflict('CANCEL_FAILED', `平台没让撤销：${r.error ?? ''}。过了平台允许的时间的，点「转补录」记一条平台核销补录`);
+  // 同一次验券同时只有一个撤销在跑：会话级咨询锁（进程停了连接一断就放开），拿不到的直接告诉他别人正在撤
+  const conn = await deps.sql.reserve();
+  try {
+    const lockKey = `platform_verify_cancel:${id}`;
+    const [got] = await conn<{ ok: boolean }[]>`SELECT pg_try_advisory_lock(hashtextextended(${lockKey}, 0)) AS ok`;
+    if (!got?.ok) throw conflict('CANCEL_IN_PROGRESS', '别人正在撤销这张券的核销，请稍后刷新再看');
+    try {
+      return await cancelHeld(deps, a, id, reason, actor, ip);
+    } finally {
+      await conn`SELECT pg_advisory_unlock(hashtextextended(${lockKey}, 0))`;
+    }
+  } finally {
+    conn.release();
+  }
+}
+
+/**
+ * 撤销核销（已取这一次验券的撤销锁）：
+ *   1) 锁住验券一行先「占住」——记下撤销人与原因、还不记撤销时刻（「撤销中」），之后结账用券、转补录看到它都拒绝；已经用在结账单上的不让撤；
+ *   2) 事务外问平台；
+ *   3) 平台撤了 → 记「已撤销」；平台明确不让撤 → 放开占位（照旧能用、能转补录）；平台没回应 → 留着「撤销中」，再点一次撤销会再问平台。
+ */
+async function cancelHeld(deps: Deps, a: PlatformVoucher, id: number, reason: string, actor: Actor, ip?: string): Promise<VerificationView> {
+  const v = await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    const [cur] = await tx<{ status: string; couponId: number | null; platform: VoucherPlatform; code: string; verifyNo: string }[]>`
+      SELECT status, group_buy_coupon_id AS coupon_id, platform, code, verify_no FROM platform_verifications WHERE id = ${id} FOR UPDATE`;
+    if (!cur) throw notFound('验券记录不存在');
+    if (cur.status === 'cancelled') return null;
+    if (cur.status !== 'verified') throw conflict('INVALID_STATE', '只有已核销的能撤销');
+    if (cur.couponId) throw conflict('COUPON_USED', '这张券已经用在结账单上：要撤先反结账');
+    await tx`UPDATE platform_verifications SET cancel_reason = ${reason}, cancelled_by = ${actor.id}, updated_at = now() WHERE id = ${id}`;
+    return cur;
+  });
+  if (!v) return verificationView(deps.sql, id);
+  let outcome: { ok: true } | { ok: false; definite: boolean; error: string };
+  try {
+    const r = await withCallLog(
+      deps.sql,
+      { kind: 'platform_voucher', provider: v.platform, action: 'cancel', mode: a.mode, refType: 'platform_verification', refId: id, request: { code: v.code, verifyNo: v.verifyNo }, staffId: actor.id },
+      () => a.cancel({ platform: v.platform, code: v.code, verifyNo: v.verifyNo }),
+      (x) => ({ ok: x.ok, error: x.error ?? null }),
+    );
+    outcome = r.ok ? { ok: true } : { ok: false, definite: true, error: r.error ?? '' };
+  } catch (e) {
+    outcome = { ok: false, definite: false, error: `平台没有回应：${e instanceof Error ? e.message : String(e)}` };
+  }
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    const [cur] = await tx<{ status: string; couponId: number | null }[]>`SELECT status, group_buy_coupon_id AS coupon_id FROM platform_verifications WHERE id = ${id} FOR UPDATE`;
-    if (cur!.status !== 'verified' || cur!.couponId) return;
-    await tx`UPDATE platform_verifications SET status = 'cancelled', cancel_reason = ${reason}, cancelled_by = ${actor.id}, cancelled_at = now(), updated_at = now() WHERE id = ${id}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'platform_verify', targetType: 'platform_verification', targetId: id, detail: { op: 'cancel', code: v.code, reason }, ip });
+    const [cur] = await tx<{ status: string }[]>`SELECT status FROM platform_verifications WHERE id = ${id} FOR UPDATE`;
+    if (cur!.status !== 'verified') return;
+    if (outcome.ok) {
+      await tx`UPDATE platform_verifications SET status = 'cancelled', cancel_reason = ${reason}, cancelled_by = ${actor.id}, cancelled_at = now(), updated_at = now() WHERE id = ${id}`;
+      await writeAudit(tx, { staffId: actor.id, action: 'platform_verify', targetType: 'platform_verification', targetId: id, detail: { op: 'cancel', code: v.code, reason }, ip });
+    } else if (outcome.definite) {
+      await tx`UPDATE platform_verifications SET cancel_reason = NULL, cancelled_by = NULL, updated_at = now() WHERE id = ${id}`;
+    }
   });
+  if (!outcome.ok) {
+    if (outcome.definite) throw conflict('CANCEL_FAILED', `平台没让撤销：${outcome.error}。过了平台允许的时间的，点「转补录」记一条平台核销补录`);
+    throw conflict('CANCEL_UNKNOWN', `${outcome.error}。不知道平台撤没撤成：这张券先不能用，请稍后再点一次「撤销核销」（会再问平台）`);
+  }
   return verificationView(deps.sql, id);
 }
 
@@ -240,11 +286,13 @@ export async function recordVerification(deps: Deps, id: number, actor: Actor, i
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     await lockPlatformCode(tx, peek.platform, peek.code);
-    const [v] = await tx<{ status: string; couponId: number | null; dealName: string; faceCents: number; settleCents: number; quantity: number; verifiedAt: Date; businessDate: string }[]>`
-      SELECT status, group_buy_coupon_id AS coupon_id, deal_name, face_cents, settle_cents, quantity, verified_at, to_char(business_date, 'YYYY-MM-DD') AS business_date
+    const [v] = await tx<{ status: string; couponId: number | null; cancelling: boolean; dealName: string; faceCents: number; settleCents: number; quantity: number; verifiedAt: Date; businessDate: string }[]>`
+      SELECT status, group_buy_coupon_id AS coupon_id, cancelled_by IS NOT NULL AS cancelling, deal_name, face_cents, settle_cents, quantity, verified_at,
+             to_char(business_date, 'YYYY-MM-DD') AS business_date
       FROM platform_verifications WHERE id = ${id} FOR UPDATE`;
     if (v!.status === 'recorded') return;
     if (v!.status !== 'verified') throw conflict('INVALID_STATE', '只有已核销、没用的能转补录');
+    if (v!.cancelling) throw conflict('VERIFICATION_CANCELLING', '这张券正在撤销核销（或上一次撤销平台没有回应）：请先再点一次「撤销核销」问清平台，平台不让撤再转补录');
     if (v!.couponId) throw conflict('COUPON_USED', '这张券已经用在结账单上了，不用补录');
     const dup = await redemptionOfCode(tx, peek.platform, peek.code);
     if (dup) throw conflict('COUPON_USED', `这张券已经补登记过（${dup}）`);
