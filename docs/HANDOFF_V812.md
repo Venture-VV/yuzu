@@ -25,7 +25,7 @@
 
 ## 3. 已执行的验证
 
-- 类型检查、构建；集成用例全量（`npm test`，见 PR 里的最后一条说明）。工作台的用例：`tests/studio-templates.test.ts`（12）、`tests/studio-components.test.ts`（8）、`tests/studio-collab.test.ts`（5）、`tests/studio-copy.test.ts`（3）、`tests/canteen-studio.test.ts`（4）、`tests/studio-mp-samples.test.ts`（3）、`tests/studio-format.test.ts`（11，8.1.2 加 6）、`tests/studio.test.ts`（11，8.1.2 加 3）。
+- 类型检查、构建；集成用例全量（`npm test`，本机 4 个进程）：219 个文件、1,994 项全过。工作台的用例：`tests/studio-templates.test.ts`（12）、`tests/studio-components.test.ts`（8）、`tests/studio-collab.test.ts`（5）、`tests/studio-copy.test.ts`（3）、`tests/canteen-studio.test.ts`（4）、`tests/studio-mp-samples.test.ts`（3）、`tests/studio-format.test.ts`（11，8.1.2 加 6）、`tests/studio.test.ts`（11，8.1.2 加 3）。
 - **逐屏核对**（每一步之后都做）：平板菜单 44 + 20 屏像素差 0；员工食堂员工、负责人的首页与饭卡码页（固定数据、固定时间）一致，只有小柚子动画每次 0.001–0.003% 的抖动（改造前连截两次也有）。
 - **浏览器**：`e2e/studio.spec.ts`（门店电脑，含第 4 步：店主也开着编辑器、批注来回、中英文案改英文并导出、设计包改一句导进来、定时发布再撤销）本机过，开始前会把上一次没走完留下的那一版发回默认（可以重复执行）；员工食堂手机端整套（`playwright.canteen.config.ts`，13 条，含 `e2e-canteen/studio.spec.ts`）在新库上过。
 - **手工**：店主、设计师两个账号同时开编辑器，走了谁在改、批注、中英文案导出、设计包导出再导入、定时发布再撤销；顶栏在 1024、1280、1366、1440、1600 宽都排成一行。
