@@ -1,7 +1,7 @@
 // 8.0.21 浏览器验收：合同模板与导出（docs/FINANCE_V8021.md 第 6 节，CW-E）。可重复执行（模板名带这一次的时间）。
 // 依赖演示数据（仅独立演示库），账号：店主 linlan，密码 yuzu2026。
 //   · ERP → 合同 →「合同模板」新建一份（正文带 {{相对方}}、{{服务区域}}、{{付款节点}}，一个必填字段、一条可选条款）；
-//   · 用它起草一份服务合同（接口）→ 编辑页里看得到模板一节、字段值；
+//   · 用它起草一份服务合同（接口）→ 编辑页里看得到模板一节、字段值；模板取不回来时写明加载失败、重试以后回来；
 //   · 合同详情「打印 / PDF」：正文按模板排好、付款节点是表格；「导出 Word」下载得到 .docx。
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -79,6 +79,17 @@ test.describe('8.0.21 合同模板', () => {
     // 编辑页：模板一节选着这份、字段值在
     await page.goto(`/erp/contracts/${c.id}/edit`);
     const section = page.getByTestId('contract-template-section');
+    await expect(section.getByTestId('ct-template')).toHaveValue(String(t.id));
+    await expect(section.getByTestId('ct-field-服务区域')).toHaveValue('更衣室与大堂');
+    // 模板取不回来：写明加载失败、可以重试（不显示成只有「不用模板」的空下拉，Codex 审查 a645468 后补）
+    const templatesUrl = '**/api/erp/contracts/doc-templates*';
+    await page.route(templatesUrl, (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.reload();
+    const failed = page.getByTestId('ct-template-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('ct-template')).toHaveCount(0);
+    await page.unroute(templatesUrl);
+    await failed.getByTestId('ct-template-error-retry').click();
     await expect(section.getByTestId('ct-template')).toHaveValue(String(t.id));
     await expect(section.getByTestId('ct-field-服务区域')).toHaveValue('更衣室与大堂');
 

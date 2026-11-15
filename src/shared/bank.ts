@@ -110,8 +110,10 @@ function parseMoney(raw: string): number | null {
   return c === null ? null : neg ? -c : c;
 }
 
-const OUT_FLAGS = /^(借|支|支出|付|d|debit|-)$/i;
-const IN_FLAGS = /^(贷|收|收入|存|c|credit|\+)$/i;
+// 借贷标志：各家网银的写法（借 / 借方 / 借记、支出 / 付出 / 转出、D / Dr / Debit……）。认不出的非空标志记成问题、不按金额正负去猜（Codex 审查 a645468 后补：
+// 原来「借方」认不出，按正数当成收入记进来）；标志空着的才按金额正负认
+const OUT_FLAGS = /^(借|借方|借记|支|支出|支取|付|付出|付款|出|转出|d|dr|debit|-)$/i;
+const IN_FLAGS = /^(贷|贷方|贷记|收|收入|收款|存|存入|入|转入|c|cr|credit|\+)$/i;
 
 /** 按列对出来的映射解析每一行；解析不了的行记在 problems 里（不进库） */
 export function parseStatementRows(
@@ -149,10 +151,14 @@ export function parseStatementRows(
     }
     if (direction === null && map.amount) {
       const a = parseMoney(cell(r, 'amount'));
-      const flag = cell(r, 'dc');
+      const flag = cell(r, 'dc').replace(/\s/g, '');
       if (a !== null && a !== 0) {
+        if (flag && !OUT_FLAGS.test(flag) && !IN_FLAGS.test(flag)) {
+          problems.push({ row: r.row, message: `借贷标志「${flag.slice(0, 10)}」认不出（认得借 / 贷、借方 / 贷方、支出 / 收入、D / C）` });
+          continue;
+        }
         cents = Math.abs(a);
-        direction = flag && OUT_FLAGS.test(flag) ? 'out' : flag && IN_FLAGS.test(flag) ? 'in' : a < 0 ? 'out' : 'in';
+        direction = flag ? (OUT_FLAGS.test(flag) ? 'out' : 'in') : a < 0 ? 'out' : 'in';
       }
     }
     if (direction === null || cents === null || cents <= 0) {

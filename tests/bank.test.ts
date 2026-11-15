@@ -92,6 +92,31 @@ describe('对账单解析', () => {
     expect(ls.map((l) => [l.txnDate, l.direction, l.amountCents, l.summary])).toEqual([['2026-11-14', 'out', 12_345, '合计支付11月货款']]);
     expect(problems).toEqual([]);
   });
+  it('借贷标志：借方 / 贷方、Dr / Cr、转出 / 转入都认；认不出的非空标志记成问题、不按金额正负猜成收入', () => {
+    const header = ['交易日期', '交易金额', '借贷标志', '对方户名'];
+    const map = detectColumns(header);
+    const { lines: ls, problems } = parseStatementRows(
+      header,
+      [
+        { row: 2, cells: ['2026-11-14', '100.00', '借方', '城东蔬菜'] },
+        { row: 3, cells: ['2026-11-14', '200.00', '贷方', '协议单位甲'] },
+        { row: 4, cells: ['2026-11-14', '300.00', 'Dr', '城西肉类'] },
+        { row: 5, cells: ['2026-11-14', '400.00', ' 转入 ', '协议单位乙'] },
+        { row: 6, cells: ['2026-11-14', '500.00', '冲正', '某某'] },
+        { row: 7, cells: ['2026-11-14', '-60.00', '', '手续费'] },
+      ],
+      map,
+    );
+    expect(ls.map((l) => [l.amountCents, l.direction])).toEqual([
+      [10_000, 'out'],
+      [20_000, 'in'],
+      [30_000, 'out'],
+      [40_000, 'in'],
+      [6_000, 'out'],
+    ]);
+    expect(problems).toEqual([{ row: 6, message: '借贷标志「冲正」认不出（认得借 / 贷、借方 / 贷方、支出 / 收入、D / C）' }]);
+  });
+
   it('没有流水号、没有余额：打给不同账号的是两笔；内容完全一样的几笔按先后编号，各记各的', () => {
     const header = ['交易日期', '交易金额', '对方户名', '对方账号', '摘要'];
     const map = detectColumns(header);

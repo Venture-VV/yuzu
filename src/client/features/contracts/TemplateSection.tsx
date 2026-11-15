@@ -7,7 +7,8 @@ import type { ContractCategory, ContractTemplateRef } from '@shared/contracts';
 import { CONTRACT_CATEGORY_LABELS } from '@shared/contracts';
 import type { ContractTemplate } from '@shared/contract-templates';
 import { api } from '../../lib/api';
-import { Card, Field, Input, Notice, Select } from '../../components/ui';
+import { LoadFailed } from '../../components/LoadFailed';
+import { Card, Field, Input, Notice, Select, Skeleton } from '../../components/ui';
 
 export const docTemplatesKey = ['contracts', 'doc-templates'] as const;
 export const useDocTemplates = (all = false) =>
@@ -15,7 +16,22 @@ export const useDocTemplates = (all = false) =>
 
 export function TemplateSection({ category, value, onChange }: { category: ContractCategory; value: ContractTemplateRef | null; onChange: (v: ContractTemplateRef | null) => void }) {
   const list = useDocTemplates(true);
-  const all = list.data ?? [];
+  // 模板取不回来（也没有上一次的）：写明加载失败、可以重试，不显示成只有「不用模板」的空下拉——用了模板的合同那样会连字段、条款一起不见（Codex 审查 a645468 后补）
+  if (!list.data) {
+    return (
+      <Card className="p-5" data-testid="contract-template-section">
+        <h2 className="mb-3 text-[14px] font-bold">合同正文（模板）</h2>
+        {list.isError ? (
+          <LoadFailed title="合同模板取不回来，请检查网络" onRetry={() => void list.refetch()} retrying={list.isFetching} testId="ct-template-error">
+            {value ? `这份合同用的是「${value.name}」第 ${value.version} 版，取回来以后再填模板里的字段。` : '取回来以后再选模板。'}
+          </LoadFailed>
+        ) : (
+          <Skeleton className="h-10" />
+        )}
+      </Card>
+    );
+  }
+  const all = list.data;
   const current = value ? all.find((t) => t.id === value.id) ?? null : null;
   const choices = all.filter((t) => t.status === 'active' || t.id === value?.id);
   const pick = (id: number | null) => {
