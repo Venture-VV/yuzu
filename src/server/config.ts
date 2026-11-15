@@ -2,6 +2,7 @@
 
 import { SETTABLE_INSTANCES, type InstanceKind } from '@shared/instance';
 import { loadIntegrationsConfig, type IntegrationsConfig } from './integrations/config';
+import { loadProtectionConfig, type ProtectionConfig } from './lib/protect';
 
 export type AppEnv = 'development' | 'trial' | 'production' | 'test';
 
@@ -33,6 +34,8 @@ export interface AppConfig {
   wecom: WecomConfig;
   /** 对外接口的模式（8.0.21，docs/INTEGRATIONS_V8021.md）：模拟只在开发、测试；正式的看密钥在不在 */
   integrations: IntegrationsConfig;
+  /** 过载保护、频率限制、访问网段（8.1.3，docs/RESILIENCE_V813.md 第 3.5 节） */
+  protection: ProtectionConfig;
 }
 
 /**
@@ -210,6 +213,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     sms: overrides.sms ?? loadSmsConfig(process.env, env),
     wecom: overrides.wecom ?? loadWecomConfig(process.env, env),
     integrations: overrides.integrations ?? loadIntegrationsConfig(process.env, env, instance),
+    protection: overrides.protection ?? loadProtectionConfig(process.env, env),
     ...overrides,
   };
 }

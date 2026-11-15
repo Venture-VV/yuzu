@@ -13,7 +13,8 @@ import { buildMpApp } from './modules/mp/app';
 import { buildCanteenApp } from './modules/canteen/portal';
 
 const config = loadConfig();
-const sql = createSql(config.databaseUrl);
+// 事务开着不动超过 2 分钟由数据库断开、放掉行锁（8.1.3 WL11）
+const sql = createSql(config.databaseUrl, { idleInTransactionMs: 120_000 });
 
 async function waitForDatabase(retries = 30) {
   for (let i = 1; ; i++) {
@@ -93,19 +94,41 @@ async function main() {
       });
   }, HEARTBEAT_INTERVAL_MS);
 
-  const shutdown = async (signal: string) => {
-    app.log.info(`收到 ${signal}，正在关闭…`);
-    clearInterval(sweeper);
-    clearInterval(deviceTimer);
-    await app.close();
-    await mpApp?.close();
-    await canteenApp?.close();
-    await presence.release();
-    await sql.end({ timeout: 5 });
-    process.exit(0);
+  // 停机（8.1.3 WL11，照 close-with-grace 的做法）：收到停止信号或出现没接住的异常时，关端口、等正在处理的请求做完、断数据库，
+  // 最多等 10 秒，到时间还没收完就直接退出（Docker 自动拉起）。没接住的异常写进日志、按出错退出
+  let closing = false;
+  const shutdown = async (reason: string, code: number) => {
+    if (closing) return;
+    closing = true;
+    app.log.info(`收到 ${reason}，正在关闭…`);
+    const force = setTimeout(() => {
+      app.log.error(`${reason}：10 秒内没有收完，直接退出`);
+      process.exit(code || 1);
+    }, 10_000);
+    force.unref();
+    try {
+      clearInterval(sweeper);
+      clearInterval(deviceTimer);
+      await app.close();
+      await mpApp?.close();
+      await canteenApp?.close();
+      await presence.release();
+      await sql.end({ timeout: 5 });
+    } catch (error) {
+      app.log.error({ err: error }, '关闭时出错');
+    }
+    process.exit(code);
   };
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM', 0));
+  process.on('SIGINT', () => void shutdown('SIGINT', 0));
+  process.on('uncaughtException', (error) => {
+    app.log.fatal({ err: error }, '没接住的异常，收尾后退出');
+    void shutdown('uncaughtException', 1);
+  });
+  process.on('unhandledRejection', (error) => {
+    app.log.fatal({ err: error }, '没接住的 Promise 拒绝，收尾后退出');
+    void shutdown('unhandledRejection', 1);
+  });
 }
 
 main().catch(async (error) => {

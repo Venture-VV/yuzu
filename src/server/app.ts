@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
@@ -9,11 +9,14 @@ import { registerGrantRoutes } from './auth/grants';
 import { registerAuthRoutes } from './auth/routes';
 import { SESSION_COOKIE, resolveSession } from './auth/session';
 import { AppError } from './lib/errors';
-import { isApiRequest, routePath } from './lib/paths';
+import { createProtection } from './lib/protect';
+import { decodedPath, isApiRequest, routePath } from './lib/paths';
 import type { Deps } from './lib/context';
 import { DEFAULT_STORE_ID, runInStore } from './lib/store-context';
 import { registerAdminRoutes } from './modules/admin';
+import type { PingReply } from '@shared/resilience';
 import { registerAuditRoutes } from './modules/audit';
+import { registerClientErrorRoutes } from './modules/client-errors';
 import { registerCatalogRoutes } from './modules/catalog';
 import { registerFrontdeskRoutes } from './modules/frontdesk/routes';
 import { registerDeptStockRoutes } from './modules/inventory/dept-stock';
@@ -147,9 +150,19 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   app.decorateRequest('actor', null as never);
   app.decorateRequest('hasSession', false);
 
+  // 防护（8.1.3，docs/RESILIENCE_V813.md 第 3.5 节）：访问网段与过载保护在读会话之前（忙的时候不再多查一次库），
+  // 频率限制在读完会话之后（登录了的按会话算）。拒绝都发生在处理之前，页面据此原样自动重发
+  const protection = createProtection(config.protection);
+  app.addHook('onRequest', protection.gate);
+  app.addHook('onResponse', protection.done);
+  app.addHook('onRequestAbort', protection.done);
+  app.addHook('onClose', async () => protection.close());
+
   app.addHook('onRequest', async (req) => {
     // 按解码后的路径认接口：/%61pi/… 与 /api/… 进的是同一个接口，来源检查、读会话都要一样
     if (!isApiRequest(req)) return;
+    // 页面问「连不连得上」：不读会话、不查库
+    if (decodedPath(req.url) === '/api/ping') return;
     // 修改类请求必须来自本站页面（防止跨站请求伪造）
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       const origin = req.headers.origin;
@@ -166,6 +179,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
       }
     }
   });
+
+  app.addHook('onRequest', protection.limit);
 
   // 当前门店（8.0.22，docs/MULTISTORE_V8022.md 第 3 节）：处理请求时在这家店的上下文里——事务开头记上门店、
   // 业务表 store_id 的默认值取它；放在请求体解析以后（preHandler），处理函数整个在里面
@@ -193,9 +208,9 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
       reply.status(422).send({ error: { code: 'CONSTRAINT', message: '数据校验未通过，操作未生效，请核对后重试' } });
       return;
     }
-    if (e.code === '55P03' || e.code === '57014') {
-      // 等锁或执行超时：事务已回滚，操作没有生效
-      req.log.warn({ err: error }, '记账等待超时');
+    if (e.code === '55P03' || e.code === '57014' || e.code === '40P01' || e.code === '40001') {
+      // 等锁或执行超时、死锁、串行化冲突（8.1.3）：事务已回滚，操作没有生效；页面带原操作编号自动重发
+      req.log.warn({ err: error }, e.code === '40P01' ? '死锁，事务已回滚' : e.code === '40001' ? '串行化冲突，事务已回滚' : '记账等待超时');
       const path = routePath(req);
       const what = path.startsWith('/api/inventory') || path.startsWith('/api/purchase') || path.startsWith('/api/payables')
         ? '相关物料或单据'
@@ -224,6 +239,15 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
     await sql`SELECT 1`;
     return { ok: true, version: config.version, commit: config.commit, instance: config.instance, time: new Date().toISOString() };
   });
+
+  // 页面问「连不连得上」（8.1.3 WL3）：不查数据库、不读会话、不受过载保护与频率限制；顺带告诉页面服务器上这一版页面的入口文件，
+  // 和页面自己的不一样就是系统更新过了（提示条请员工方便时刷新）
+  const clientEntry = readClientEntry(resolve(process.env.STATIC_DIR ?? 'dist/client'));
+  app.get('/api/ping', async (_req, reply): Promise<PingReply> => {
+    reply.header('cache-control', 'no-store');
+    return { ok: true, version: config.version, commit: config.commit, instance: config.instance, client: clientEntry, time: new Date().toISOString() };
+  });
+  registerClientErrorRoutes(app);
 
   // ERP 关闭的模块：按接口前缀统一拦截（先于各接口注册，所有接口都经过它）
   registerErpModuleGate(app, deps);
@@ -389,4 +413,14 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   });
 
   return app;
+}
+
+/** 构建好的 index.html 里页面入口的脚本（/assets/index-xxxx.js）；没有构建产物（开发、测试）时为空 */
+export function readClientEntry(staticDir: string): string | null {
+  try {
+    const html = readFileSync(resolve(staticDir, 'index.html'), 'utf8');
+    return /<script\b[^>]*\bsrc="(\/assets\/[^"]+\.js)"/.exec(html)?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
