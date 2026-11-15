@@ -42,11 +42,13 @@ import { loadSettings } from './settings';
 import { lockLedger } from './spaces';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { settingRow } from '../lib/store-settings';
+import { currentStoreId } from '../lib/store-context';
 
 // ───────────────────────── 规则 ─────────────────────────
 
 export async function loadGuideRules(db: Db): Promise<GuideRules> {
-  const [row] = await db<{ value: Partial<GuideRules> }[]>`SELECT value FROM settings WHERE key = 'guide_rules'`;
+  const row = await settingRow<Partial<GuideRules>>(db, 'guide_rules');
   return { ...DEFAULT_GUIDE_RULES, ...(row?.value ?? {}) };
 }
 
@@ -80,7 +82,7 @@ interface ActivePlan {
 }
 
 async function activePlan(db: Db): Promise<ActivePlan | null> {
-  const [b] = await db<{ id: number; report: { params?: { unitMm?: number } } | null }[]>`SELECT id, report FROM floorplan_batches WHERE status = 'active'`;
+  const [b] = await db<{ id: number; report: { params?: { unitMm?: number } } | null }[]>`SELECT id, report FROM floorplan_batches WHERE status = 'active' AND store_id = ${currentStoreId()}`;
   if (!b) return null;
   const batchId = Number(b.id);
   const floors = (await batchFloors(db, batchId)).map((f) => ({ code: f.floor.code, title: f.floor.title, width: f.floor.width, height: f.floor.height, frame: f.frame as number[] }));
@@ -146,6 +148,7 @@ async function zoneRows(db: Db): Promise<ZoneRow[]> {
   return db<ZoneRow[]>`
     SELECT z.id, z.version, f.code AS floor_code, f.name AS floor_name, z.name, z.name_en, z.guide_kind AS kind, z.guide_color AS color, z.sort_order, (z.active AND f.active) AS active
     FROM zones z JOIN floors f ON f.id = z.floor_id
+    WHERE f.store_id = ${currentStoreId()}
     ORDER BY f.sort_order, f.code, z.sort_order, z.id`;
 }
 
@@ -166,7 +169,7 @@ async function zoneShapes(db: Db, plan: ActivePlan | null) {
   if (plan) {
     const rooms = await batchRooms(db, plan.batchId);
     const spaces = await db<{ code: string; zoneId: number; floorCode: string }[]>`
-      SELECT sp.code, sp.zone_id, f.code AS floor_code FROM spaces sp JOIN floors f ON f.id = sp.floor_id WHERE sp.active AND sp.zone_id IS NOT NULL`;
+      SELECT sp.code, sp.zone_id, f.code AS floor_code FROM spaces sp JOIN floors f ON f.id = sp.floor_id WHERE sp.active AND sp.zone_id IS NOT NULL AND sp.store_id = ${currentStoreId()}`;
     const zoneOf = new Map(spaces.map((s) => [s.code, { zoneId: Number(s.zoneId), floorCode: s.floorCode }]));
     for (const r of rooms) {
       const s = zoneOf.get(r.code);
@@ -209,7 +212,7 @@ interface MarkerRow {
 }
 
 const markerRows = (db: Db) =>
-  db<MarkerRow[]>`SELECT id, floor_code, kind, x_mm, y_mm, label, label_en, source, hidden, version FROM guide_markers ORDER BY floor_code, kind, id`;
+  db<MarkerRow[]>`SELECT id, floor_code, kind, x_mm, y_mm, label, label_en, source, hidden, version FROM guide_markers WHERE store_id = ${currentStoreId()} ORDER BY floor_code, kind, id`;
 
 function placeMarker(plan: ActivePlan | null, m: MarkerRow): { x: number; y: number; onPlan: boolean } {
   const f = plan?.floors.find((x) => x.code === m.floorCode);
@@ -254,7 +257,7 @@ export async function guideAdmin(db: Db): Promise<GuideAdmin> {
   const plan = await activePlan(db);
   const { zones, shapes, colors } = await zoneShapes(db, plan);
   const counts = new Map(
-    (await db<{ zoneId: number; n: number }[]>`SELECT zone_id, count(*)::int AS n FROM spaces WHERE active AND zone_id IS NOT NULL GROUP BY zone_id`).map((r) => [Number(r.zoneId), r.n]),
+    (await db<{ zoneId: number; n: number }[]>`SELECT zone_id, count(*)::int AS n FROM spaces WHERE active AND zone_id IS NOT NULL AND store_id = ${currentStoreId()} GROUP BY zone_id`).map((r) => [Number(r.zoneId), r.n]),
   );
   const outZones: GuideAdminZone[] = zones
     .filter((z) => z.active)
@@ -297,7 +300,7 @@ async function saveZoneGuide(deps: Deps, id: number, raw: unknown, ctx: OpContex
   await deps.sql.begin(async (tx) => {
     await lockLedger(tx);
     const [z] = await tx<{ version: number; name: string; kind: GuideKind; color: string | null }[]>`
-      SELECT version, name, guide_kind AS kind, guide_color AS color FROM zones WHERE id = ${id} FOR UPDATE`;
+      SELECT version, name, guide_kind AS kind, guide_color AS color FROM zones WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!z) throw notFound('没有这个区域');
     if (z.version !== input.version) throw conflict('ZONE_STALE', `区域「${z.name}」刚被修改过，这次没有保存；请刷新后再改`);
     await tx`UPDATE zones SET guide_kind = ${input.kind}, guide_color = ${input.color}, version = version + 1, updated_at = now() WHERE id = ${id}`;
@@ -379,7 +382,7 @@ async function editMarker(deps: Deps, id: number, raw: unknown, ctx: OpContext):
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const [m] = await tx<{ floorCode: string; version: number; xMm: number; yMm: number }[]>`
-      SELECT floor_code, version, x_mm, y_mm FROM guide_markers WHERE id = ${id} FOR UPDATE`;
+      SELECT floor_code, version, x_mm, y_mm FROM guide_markers WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!m) throw notFound('没有这个图标');
     if (m.version !== input.version) throw conflict('MARKER_STALE', '这个图标刚被修改过，这次没有保存；请刷新后再改');
     let [xMm, yMm] = [Number(m.xMm), Number(m.yMm)];
@@ -438,7 +441,7 @@ export async function detectMarkers(deps: Deps, ctx: OpContext): Promise<{ detec
         found.push({ floor: f.code, kind, xMm, yMm });
       }
     }
-    const removed = await tx`DELETE FROM guide_markers WHERE source = 'auto' RETURNING id`;
+    const removed = await tx`DELETE FROM guide_markers WHERE source = 'auto' AND store_id = ${currentStoreId()} RETURNING id`;
     for (const m of found) {
       await tx`
         INSERT INTO guide_markers (floor_code, kind, x_mm, y_mm, source, created_by)
@@ -474,7 +477,7 @@ export function registerGuideRoutes(app: FastifyInstance, deps: Deps) {
     const { b } = parse(SvgQuery, req.query);
     const [row] = await sql<{ svg: string }[]>`
       SELECT f.svg FROM floorplan_floors f JOIN floorplan_batches bt ON bt.id = f.batch_id
-      WHERE f.batch_id = ${b} AND bt.status = 'active' AND f.floor_code = ${floor}`;
+      WHERE f.batch_id = ${b} AND bt.status = 'active' AND f.floor_code = ${floor} AND bt.store_id = ${currentStoreId()}`;
     if (!row) {
       reply.header('cache-control', 'no-store');
       throw notFound('这一层的底图已经换了或没有，请刷新页面');

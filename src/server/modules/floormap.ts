@@ -12,30 +12,32 @@ import { guardAny } from '../auth/guard';
 import type { Deps } from '../lib/context';
 import { loadUsageRules, usagePricingViews } from './usages';
 import { outlineRev } from './floorplans';
+import { currentStoreId } from '../lib/store-context';
 
 export async function floorMapData(db: Db): Promise<FloorMapData> {
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
-  const [batch] = await db<{ id: number }[]>`SELECT id FROM floorplan_batches WHERE status = 'active'`;
+  const [batch] = await db<{ id: number }[]>`SELECT id FROM floorplan_batches WHERE status = 'active' AND store_id = ${currentStoreId()}`;
   const spaces = await db<FloorMapSpace[]>`
     SELECT sp.id, sp.code, f.code AS floor_code, f.name AS floor_name, sp.zone_id, z.name AS zone_name, sp.business_type, sp.capacity, sp.area_centi_m2,
            sp.display_name, sp.sellable, sp.active,
            coalesce((SELECT array_agg(a.alias ORDER BY a.id) FROM space_aliases a WHERE a.space_id = sp.id AND a.active), '{}') AS aliases,
            (SELECT r.id FROM rooms r WHERE r.space_id = sp.id) AS room_id
     FROM spaces sp JOIN floors f ON f.id = sp.floor_id LEFT JOIN zones z ON z.id = sp.zone_id
+    WHERE sp.store_id = ${currentStoreId()}
     ORDER BY f.sort_order, f.code, sp.code`;
   const sessions = await db<(Omit<FloorMapSession, 'plannedEnd'> & { startedAt: string | null; createdAt: string })[]>`
     SELECT s.id, s.session_no, s.space_id, t.tech_no, t.name AS tech_name, h.code AS tag_code, i.name AS item_name, s.clocks, s.minutes, s.status,
            s.created_at, s.started_at
     FROM technician_sessions s JOIN visits v ON v.id = s.visit_id JOIN technicians t ON t.id = s.technician_id
     JOIN hand_tags h ON h.id = v.tag_id JOIN service_items i ON i.id = s.item_id
-    WHERE s.space_id IS NOT NULL AND s.status IN ('waiting', 'serving') AND v.status = 'open'
+    WHERE s.space_id IS NOT NULL AND s.status IN ('waiting', 'serving') AND v.status = 'open' AND v.store_id = ${currentStoreId()}
     ORDER BY s.space_id, (s.status = 'serving') DESC, coalesce(s.started_at, s.created_at), s.id`;
   const usages = await db<(Omit<FloorMapUsage, 'openedAt' | 'pricing'> & { openedAt: string; businessType: string })[]>`
     SELECT u.id, u.usage_no, u.space_id, u.visit_id, h.code AS tag_code, u.guests, u.note, u.opened_at, st.display_name AS opened_by_name,
            sp.business_type
     FROM space_usages u JOIN visits v ON v.id = u.visit_id JOIN hand_tags h ON h.id = v.tag_id JOIN staff st ON st.id = u.opened_by
     JOIN spaces sp ON sp.id = u.space_id
-    WHERE u.status = 'open'
+    WHERE u.status = 'open' AND u.store_id = ${currentStoreId()}
     ORDER BY u.space_id`;
   const usageRules = await loadUsageRules(db);
   const pricingViews = await usagePricingViews(db, usageRules);

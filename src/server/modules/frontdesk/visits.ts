@@ -69,6 +69,7 @@ import { resolveTicketType, ticketAuthRequired, visitTicket } from './tickets';
 import { lineTechnicianSql } from '../technicians';
 import { loadVipLockerRules } from '../vip-lockers';
 import { assertVipAllowed, consumeVipShortfalls, memberLockerGrades, vipShortfalls } from './vip';
+import { currentStoreId } from '../../lib/store-context';
 
 const clientKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
 const tagCode = z
@@ -566,7 +567,7 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
     LEFT JOIN members m ON m.id = v.member_id
     LEFT JOIN visit_groups g ON g.id = v.group_id
     LEFT JOIN bills b ON b.id = v.bill_id
-    WHERE t.active OR v.id IS NOT NULL
+    WHERE t.store_id = ${currentStoreId()} AND (t.active OR v.id IS NOT NULL)
     ORDER BY CASE t.zone WHEN 'male' THEN 0 WHEN 'female' THEN 1 ELSE 2 END, t.kind = 'vip', t.vip_level,
              regexp_replace(t.code, '[0-9]', '', 'g'), length(t.code), t.code`;
   const tags = rows.map((r) => ({
@@ -636,7 +637,7 @@ export async function getVisit(db: Db, id: number, timezone: string): Promise<Vi
            os.display_name AS vip_override_by_name
     FROM visits v JOIN bills b ON b.id = v.bill_id JOIN hand_tags t ON t.id = v.tag_id
     JOIN staff s ON s.id = v.checked_in_by LEFT JOIN staff cs ON cs.id = v.closed_by LEFT JOIN staff os ON os.id = v.vip_override_by
-    WHERE v.id = ${id}`;
+    WHERE v.id = ${id} AND v.store_id = ${currentStoreId()}`;
   if (!v) throw notFound('来访记录不存在');
 
   const [member] = v.memberId
@@ -785,7 +786,7 @@ export async function previewBills(db: Db, visitIds: number[]): Promise<PreviewB
     SELECT v.id AS visit_id, v.visit_no, t.code AS tag_code, v.zone, m.name AS member_name, v.guest_label, v.checked_in_at,
            b.amount_cents, v.status, v.bill_id
     FROM visits v JOIN hand_tags t ON t.id = v.tag_id JOIN bills b ON b.id = v.bill_id LEFT JOIN members m ON m.id = v.member_id
-    WHERE v.id IN ${db(ids)} ORDER BY t.code`;
+    WHERE v.id IN ${db(ids)} AND v.store_id = ${currentStoreId()} ORDER BY t.code`;
   if (visits.length !== ids.length) throw notFound('有手牌的来访记录不存在，请刷新后重试');
   const closed = visits.find((v) => v.status !== 'open');
   if (closed) throw conflict('VISIT_CLOSED', `手牌 ${closed.tagCode} 已不在店，请刷新后重新选择`);

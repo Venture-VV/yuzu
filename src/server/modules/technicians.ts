@@ -30,9 +30,11 @@ import { businessDate } from './frontdesk/common';
 import { settledTechnicianLines, withCommission } from './commission';
 import { loadClockroomRules } from './clockroom';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { settingRow } from '../lib/store-settings';
+import { currentStoreId, storeIn } from '../lib/store-context';
 
 export async function loadTechnicianRules(db: Db): Promise<TechnicianRules> {
-  const [row] = await db<{ value: Partial<TechnicianRules> }[]>`SELECT value FROM settings WHERE key = 'technician_rules'`;
+  const row = await settingRow<Partial<TechnicianRules>>(db, 'technician_rules');
   return { ...DEFAULT_TECHNICIAN_RULES, ...(row?.value ?? {}) };
 }
 
@@ -46,7 +48,7 @@ export async function loadTechnicians(db: Db, ids?: number[]): Promise<Map<numbe
   const unique = [...new Set(ids ?? [])];
   if (ids && unique.length === 0) return new Map();
   const rows = await db<Technician[]>`
-    SELECT ${TECH_COLUMNS(db)} FROM technicians t ${ids ? db`WHERE t.id IN ${db(unique)}` : db``} ORDER BY ${ORDER(db)}`;
+    SELECT ${TECH_COLUMNS(db)} FROM technicians t WHERE ${storeIn(db, 't.store_id')} ${ids ? db`AND t.id IN ${db(unique)}` : db``} ORDER BY ${ORDER(db)}`;
   return new Map(rows.map((r) => [r.id, r]));
 }
 
@@ -58,7 +60,7 @@ export async function frontdeskTechnicians(db: Db, deps: Deps): Promise<Frontdes
     SELECT ${TECH_COLUMNS(db)},
            coalesce((SELECT sum(l.quantity) FROM bill_lines l
                      WHERE l.technician_id = t.id AND l.status = 'active' AND l.business_date = ${today}), 0)::int AS today_clocks
-    FROM technicians t WHERE t.active ORDER BY ${ORDER(db)}`;
+    FROM technicians t WHERE t.active AND t.store_id = ${currentStoreId()} ORDER BY ${ORDER(db)}`;
   return { rules, technicians };
 }
 
@@ -74,7 +76,7 @@ export async function technicianAdmin(db: Db): Promise<TechnicianAdmin> {
   const technicians = await db<TechnicianAdmin['technicians']>`
     SELECT ${TECH_COLUMNS(db)}, t.created_at, t.updated_at,
            (SELECT count(*) FROM bill_lines l WHERE l.technician_id = t.id)::int AS line_count
-    FROM technicians t ORDER BY ${ORDER(db)}`;
+    FROM technicians t WHERE t.store_id = ${currentStoreId()} ORDER BY ${ORDER(db)}`;
   // 分类按价目表里的顺序（与「价目与套餐」一致），不依赖数据库的排序规则
   const categories = await db<{ category: string }[]>`
     SELECT coalesce(nullif(category, ''), '其他') AS category FROM service_items GROUP BY 1 ORDER BY min(sort_order), min(id)`;
@@ -145,9 +147,9 @@ export async function technicianReport(db: Db, from: string, to: string): Promis
   // 需要技师、但挂账时没有指定技师的明细（规则不要求必须选技师时会有）
   const [un] = await db<{ clocks: number; amount: number }[]>`
     WITH k AS (
-      SELECT id, created_at, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to}
+      SELECT id, created_at, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}
       UNION ALL
-      SELECT id, created_at, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
+      SELECT id, created_at, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}
     )
     SELECT coalesce(sum(k.sign * l.quantity), 0)::int AS clocks, coalesce(sum(k.sign * l.amount), 0)::bigint AS amount
     FROM k JOIN checkout_bills cb ON cb.checkout_id = k.id
@@ -240,7 +242,7 @@ export function registerTechnicianRoutes(app: FastifyInstance, deps: Deps) {
     const { id } = parse(idParam, req.params);
     const t = parse(TechnicianInput, req.body);
     await sql.begin(async (tx) => {
-      const [before] = await tx<Technician[]>`SELECT ${TECH_COLUMNS(tx)} FROM technicians t WHERE t.id = ${id} FOR UPDATE`;
+      const [before] = await tx<Technician[]>`SELECT ${TECH_COLUMNS(tx)} FROM technicians t WHERE t.id = ${id} AND t.store_id = ${currentStoreId()} FOR UPDATE`;
       if (!before) throw notFound('技师不存在');
       await tx`
         UPDATE technicians SET name = ${t.name}, gender = ${t.gender}, grade = ${t.grade}, skills = ${t.skills}::text[], active = ${t.active},

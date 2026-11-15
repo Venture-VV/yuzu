@@ -497,10 +497,12 @@ export async function createPaymentRequest(deps: Deps, raw: unknown, actor: Acto
       const requestNo = await nextDocNo(tx, 'payment_request', 'FS', today);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO payment_requests (request_no, supplier_id, payee, contract_id, stage, pay_mode, amount_cents, early, early_reason, expected_date, purpose,
-                                      department_id, status, submitted_by, client_key, request_hash, created_by)
+                                      department_id, status, submitted_by, client_key, request_hash, created_by, entity_id)
         VALUES (${requestNo}, ${head.supplierId}, ${head.payee.slice(0, 60)}, ${head.contractId}, ${head.stage}, ${head.payMode}, ${head.amountCents},
                 ${input.early}, ${input.early ? input.earlyReason : ''}, ${input.expectedDate}, ${input.purpose}, ${head.departmentId}, 'submitted', ${actor.id},
-                ${input.clientKey}, ${requestHash}, ${actor.id})
+                ${input.clientKey}, ${requestHash}, ${actor.id},
+                -- 公司主体（8.0.22）：挂合同的跟合同，没挂的是当前门店的主体
+                coalesce((SELECT entity_id FROM contracts WHERE id = ${head.contractId}), yuzu_entity()))
         RETURNING id`;
       const requestId = Number(row!.id);
       if (input.source.kind === 'payables') await insertTargets(tx, requestId, input.source.targets);
@@ -792,8 +794,9 @@ export async function payFromRequest(deps: Deps, requestId: number, raw: unknown
       await checkAllocations(tx, supplierId, input.allocations, null);
       const docNo = await nextDocNo(tx, 'payment', 'FK', input.payDate);
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO payments (doc_no, supplier_id, pay_date, amount_cents, method, evidence, note, status, client_key, created_by, payment_request_id)
-        VALUES (${docNo}, ${supplierId}, ${input.payDate}, ${input.amountCents}, ${input.method}, ${input.evidence}, ${note}, 'submitted', ${input.clientKey}, ${actor.id}, ${r.id})
+        INSERT INTO payments (doc_no, supplier_id, pay_date, amount_cents, method, evidence, note, status, client_key, created_by, payment_request_id, entity_id)
+        VALUES (${docNo}, ${supplierId}, ${input.payDate}, ${input.amountCents}, ${input.method}, ${input.evidence}, ${note}, 'submitted', ${input.clientKey}, ${actor.id}, ${r.id},
+                (SELECT entity_id FROM payment_requests WHERE id = ${r.id}))
         RETURNING id`;
       const paymentId = Number(row!.id);
       for (const a of input.allocations) {
@@ -847,8 +850,9 @@ export async function payoutFromRequest(deps: Deps, requestId: number, raw: unkn
       if (input.amountCents > left) throw conflict('OVER_REQUEST', `申请 ${yuan(r.amountCents)}，已付 ${yuan(r.paidCents)}，这次最多付 ${yuan(left)}`, { leftCents: left });
       const docNo = await nextDocNo(tx, 'contract_payout', 'HF', input.payDate);
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO contract_payouts (doc_no, payment_request_id, pay_date, amount_cents, method, evidence, note, client_key, request_hash, created_by)
-        VALUES (${docNo}, ${r.id}, ${input.payDate}, ${input.amountCents}, ${input.method}, ${input.evidence}, ${input.note}, ${input.clientKey}, ${requestHash}, ${actor.id})
+        INSERT INTO contract_payouts (doc_no, payment_request_id, pay_date, amount_cents, method, evidence, note, client_key, request_hash, created_by, entity_id)
+        VALUES (${docNo}, ${r.id}, ${input.payDate}, ${input.amountCents}, ${input.method}, ${input.evidence}, ${input.note}, ${input.clientKey}, ${requestHash}, ${actor.id},
+                (SELECT entity_id FROM payment_requests WHERE id = ${r.id}))
         RETURNING id`;
       const payoutId = Number(row!.id);
       if (r.paidCents + input.amountCents === r.amountCents) await tx`UPDATE payment_requests SET status = 'paid', version = version + 1, updated_at = now() WHERE id = ${r.id}`;

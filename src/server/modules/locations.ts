@@ -44,11 +44,13 @@ import { loadSettings } from './settings';
 import { ctxOf } from '../lib/context';
 import { hashRequest } from '../lib/idempotency';
 import { saveRuleSetting } from '../lib/rule-settings';
+import { settingRow } from '../lib/store-settings';
+import { currentStoreId } from '../lib/store-context';
 
 // ───────────────────────── 规则 ─────────────────────────
 
 export async function loadLocationRules(db: Db): Promise<LocationRules> {
-  const [row] = await db<{ value: Partial<LocationRules> }[]>`SELECT value FROM settings WHERE key = 'location_rules'`;
+  const row = await settingRow<Partial<LocationRules>>(db, 'location_rules');
   return { ...DEFAULT_LOCATION_RULES, ...(row?.value ?? {}) };
 }
 
@@ -63,7 +65,7 @@ interface Place {
 /** 区域 → 地方：区域与楼层都在用才算 */
 async function zonePlace(db: Db, zoneId: number): Promise<Place | null> {
   const [z] = await db<{ id: number; floorId: number }[]>`
-    SELECT z.id, z.floor_id FROM zones z JOIN floors f ON f.id = z.floor_id WHERE z.id = ${zoneId} AND z.active AND f.active`;
+    SELECT z.id, z.floor_id FROM zones z JOIN floors f ON f.id = z.floor_id WHERE z.id = ${zoneId} AND z.active AND f.active AND f.store_id = ${currentStoreId()}`;
   return z ? { floorId: z.floorId, zoneId: z.id, spaceId: null } : null;
 }
 
@@ -72,13 +74,13 @@ async function spacePlace(db: Db, spaceId: number): Promise<Place | null> {
   const [s] = await db<{ id: number; floorId: number; zoneId: number | null }[]>`
     SELECT sp.id, sp.floor_id, CASE WHEN z.active THEN sp.zone_id END AS zone_id
     FROM spaces sp JOIN floors f ON f.id = sp.floor_id LEFT JOIN zones z ON z.id = sp.zone_id
-    WHERE sp.id = ${spaceId} AND sp.active AND f.active`;
+    WHERE sp.id = ${spaceId} AND sp.active AND f.active AND sp.store_id = ${currentStoreId()}`;
   return s ? { floorId: s.floorId, zoneId: s.zoneId, spaceId: s.id } : null;
 }
 
 /** 离开某个空间时用：停用了也照样认（只用来核对「现在就在这里」） */
 async function spacePlaceAny(db: Db, spaceId: number): Promise<Place | null> {
-  const [s] = await db<{ id: number; floorId: number; zoneId: number | null }[]>`SELECT id, floor_id, zone_id FROM spaces WHERE id = ${spaceId}`;
+  const [s] = await db<{ id: number; floorId: number; zoneId: number | null }[]>`SELECT id, floor_id, zone_id FROM spaces WHERE id = ${spaceId} AND store_id = ${currentStoreId()}`;
   return s ? { floorId: s.floorId, zoneId: s.zoneId, spaceId: s.id } : null;
 }
 
@@ -459,14 +461,14 @@ export async function reportLocation(deps: Deps, raw: unknown, ctx: OpContext): 
   let readerId: number | null = null;
   if (input.source === 'reader') {
     const [r] = await deps.sql<{ id: number; name: string; active: boolean; zoneId: number | null; spaceId: number | null }[]>`
-      SELECT id, name, active, zone_id, space_id FROM location_readers WHERE code = ${input.readerCode!}`;
+      SELECT id, name, active, zone_id, space_id FROM location_readers WHERE code = ${input.readerCode!} AND store_id = ${currentStoreId()}`;
     if (!r) throw notFound(`刷卡点 ${input.readerCode} 没有登记`);
     if (!r.active) throw unprocessable('READER_INACTIVE', `刷卡点 ${input.readerCode}（${r.name}）已停用`);
     readerId = r.id;
     place = r.spaceId ? await spacePlace(deps.sql, r.spaceId) : await zonePlace(deps.sql, r.zoneId!);
     if (!place) throw unprocessable('PLACE_INACTIVE', `刷卡点 ${input.readerCode}（${r.name}）装的${r.spaceId ? '空间' : '区域'}已停用，请到后台改刷卡点`);
   } else if (input.spaceCode !== undefined) {
-    const [s] = await deps.sql<{ id: number }[]>`SELECT id FROM spaces WHERE code = ${input.spaceCode}`;
+    const [s] = await deps.sql<{ id: number }[]>`SELECT id FROM spaces WHERE code = ${input.spaceCode} AND store_id = ${currentStoreId()}`;
     if (!s) throw notFound(`空间 ${input.spaceCode} 不在台账里`);
     place = await spacePlace(deps.sql, s.id);
     if (!place) throw unprocessable('PLACE_INACTIVE', `空间 ${input.spaceCode} 已停用`);
@@ -479,11 +481,11 @@ export async function reportLocation(deps: Deps, raw: unknown, ctx: OpContext): 
   let subject: Subject;
   if (input.tagCode !== undefined) {
     const [v] = await deps.sql<{ id: number }[]>`
-      SELECT v.id FROM visits v JOIN hand_tags h ON h.id = v.tag_id WHERE h.code = ${input.tagCode} AND v.status = 'open'`;
+      SELECT v.id FROM visits v JOIN hand_tags h ON h.id = v.tag_id WHERE h.code = ${input.tagCode} AND v.status = 'open' AND h.store_id = ${currentStoreId()}`;
     if (!v) throw unprocessable('TAG_NOT_IN_STORE', `手牌 ${input.tagCode} 没有在店客人`);
     subject = { visitId: v.id };
   } else {
-    const [t] = await deps.sql<{ id: number; active: boolean }[]>`SELECT id, active FROM technicians WHERE lower(tech_no) = lower(${input.technicianNo!})`;
+    const [t] = await deps.sql<{ id: number; active: boolean }[]>`SELECT id, active FROM technicians WHERE lower(tech_no) = lower(${input.technicianNo!}) AND store_id = ${currentStoreId()}`;
     if (!t) throw notFound(`技师工号 ${input.technicianNo} 不存在`);
     if (!t.active) throw unprocessable('TECHNICIAN_INACTIVE', `技师 ${input.technicianNo} 已停用`);
     subject = { technicianId: t.id };
@@ -580,7 +582,7 @@ async function peopleWhere(db: Db, deps: Deps, only?: Subject): Promise<Location
     JOIN hand_tags h ON h.id = v.tag_id
     JOIN floors f ON f.id = c.floor_id LEFT JOIN zones z ON z.id = c.zone_id LEFT JOIN spaces sp ON sp.id = c.space_id
     JOIN location_events e ON e.id = c.last_event_id
-    WHERE c.state = 'at' ${visitFilter}
+    WHERE c.state = 'at' AND v.store_id = ${currentStoreId()} ${visitFilter}
     UNION ALL
     SELECT 'technician', c.technician_id, NULL, t.tech_no, t.name,
            ${db.unsafe(PLACE_COLUMNS('c'))}, c.since, c.last_at, e.source
@@ -589,7 +591,7 @@ async function peopleWhere(db: Db, deps: Deps, only?: Subject): Promise<Location
     JOIN technician_status ts ON ts.technician_id = t.id AND ts.business_date = ${date} AND ts.state <> 'off'
     JOIN floors f ON f.id = c.floor_id LEFT JOIN zones z ON z.id = c.zone_id LEFT JOIN spaces sp ON sp.id = c.space_id
     JOIN location_events e ON e.id = c.last_event_id
-    WHERE c.state = 'at' ${techFilter}
+    WHERE c.state = 'at' AND t.store_id = ${currentStoreId()} ${techFilter}
     ORDER BY floor_code, zone_name NULLS LAST, space_code NULLS FIRST, kind, since`;
   return rows.map((r) => ({ ...r, since: new Date(r.since).toISOString(), lastAt: new Date(r.lastAt).toISOString() }));
 }
@@ -599,9 +601,9 @@ export async function currentLocations(db: Db, deps: Deps): Promise<LocationsCur
   const rules = await loadLocationRules(db);
   const date = await businessDate(db, deps, new Date(now!.now));
   const [counts] = await db<{ guests: number; technicians: number }[]>`
-    SELECT (SELECT count(*) FROM visits WHERE status = 'open')::int AS guests,
+    SELECT (SELECT count(*) FROM visits WHERE status = 'open' AND store_id = ${currentStoreId()})::int AS guests,
            (SELECT count(*) FROM technician_status ts JOIN technicians t ON t.id = ts.technician_id
-            WHERE ts.business_date = ${date} AND ts.state <> 'off' AND t.active)::int AS technicians`;
+            WHERE ts.business_date = ${date} AND ts.state <> 'off' AND t.active AND t.store_id = ${currentStoreId()})::int AS technicians`;
   return {
     serverTime: new Date(now!.now).toISOString(),
     enabled: rules.enabled,
@@ -633,11 +635,11 @@ export async function locationTrack(db: Db, deps: Deps, raw: unknown): Promise<L
   let range: { from: Date; to: Date } | null = null;
   if (q.visitId !== undefined) {
     const [v] = await db<{ id: number; visitNo: string; tagCode: string; status: string; checkedInAt: string }[]>`
-      SELECT v.id, v.visit_no, h.code AS tag_code, v.status, v.checked_in_at FROM visits v JOIN hand_tags h ON h.id = v.tag_id WHERE v.id = ${q.visitId}`;
+      SELECT v.id, v.visit_no, h.code AS tag_code, v.status, v.checked_in_at FROM visits v JOIN hand_tags h ON h.id = v.tag_id WHERE v.id = ${q.visitId} AND v.store_id = ${currentStoreId()}`;
     if (!v) throw notFound('来访不存在');
     subject = { kind: 'guest', visitId: v.id, visitNo: v.visitNo, tagCode: v.tagCode, inStore: v.status === 'open', checkedInAt: new Date(v.checkedInAt).toISOString() };
   } else {
-    const [t] = await db<{ id: number; techNo: string; name: string }[]>`SELECT id, tech_no, name FROM technicians WHERE id = ${q.technicianId!}`;
+    const [t] = await db<{ id: number; techNo: string; name: string }[]>`SELECT id, tech_no, name FROM technicians WHERE id = ${q.technicianId!} AND store_id = ${currentStoreId()}`;
     if (!t) throw notFound('技师不存在');
     const date = q.date ?? (await today(db, deps));
     const settings = await loadSettings(db);
@@ -754,10 +756,11 @@ export async function locationAdmin(db: Db): Promise<LocationAdmin> {
     LEFT JOIN spaces sp ON sp.id = r.space_id
     LEFT JOIN zones z ON z.id = coalesce(r.zone_id, sp.zone_id)
     JOIN floors f ON f.id = coalesce(sp.floor_id, z.floor_id)
+    WHERE r.store_id = ${currentStoreId()}
     ORDER BY r.active DESC, r.code`;
   const zones = await db<LocationZone[]>`
     SELECT z.id, f.code AS floor_code, f.name AS floor_name, z.name, z.active AND f.active AS active
-    FROM zones z JOIN floors f ON f.id = z.floor_id ORDER BY f.sort_order, f.code, z.sort_order, z.name`;
+    FROM zones z JOIN floors f ON f.id = z.floor_id WHERE f.store_id = ${currentStoreId()} ORDER BY f.sort_order, f.code, z.sort_order, z.name`;
   const items = await db<LocationItem[]>`
     SELECT id, name, category, active, zone_id FROM service_items ORDER BY active DESC, category, sort_order, name`;
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
@@ -863,7 +866,7 @@ async function updateReader(deps: Deps, id: number, raw: unknown, ctx: OpContext
   try {
     await deps.sql.begin(async (tx) => {
       const [before] = await tx<{ code: string; name: string; zoneId: number | null; spaceId: number | null; note: string; active: boolean; version: number }[]>`
-        SELECT code, name, zone_id, space_id, note, active, version FROM location_readers WHERE id = ${id} FOR UPDATE`;
+        SELECT code, name, zone_id, space_id, note, active, version FROM location_readers WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
       if (!before) throw notFound('刷卡点不存在');
       if (before.version !== expectedVersion) throw conflict('READER_STALE', `刷卡点 ${readerText(before)} 刚刚被别人改过，请刷新后再改`);
       // 停用不核对装的地方；在用的、换了地方的要核对地方在用

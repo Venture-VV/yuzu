@@ -16,6 +16,7 @@ import type { Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
 import { cents, parse } from '../lib/validate';
 import { lockSettings } from '../lib/rule-settings';
+import { storeIn } from '../lib/store-context';
 
 interface VersionRow {
   id: number;
@@ -76,9 +77,9 @@ export interface CommissionLine {
 export async function settledTechnicianLines(db: Db, from: string, to: string): Promise<CommissionLine[]> {
   return db<CommissionLine[]>`
     WITH k AS (
-      SELECT id, checkout_no, created_at, business_date, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to}
+      SELECT id, checkout_no, created_at, business_date, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}
       UNION ALL
-      SELECT id, checkout_no, created_at, void_business_date, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
+      SELECT id, checkout_no, created_at, void_business_date, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}
     )
     SELECT k.sign, k.id AS checkout_id, k.checkout_no, k.created_at AS checkout_at, k.business_date::text AS business_date,
            h.code AS tag_code, l.technician_id, l.item_id, l.name, l.tier, l.quantity, l.amount, l.call_type

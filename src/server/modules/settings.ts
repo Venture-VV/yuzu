@@ -10,6 +10,8 @@ import { DEFAULT_DICTIONARIES, DICTIONARY_KEYS, MAX_DICTIONARY_ITEM_LENGTH, MAX_
 import type { StoreRules } from '@shared/types';
 import type { Db } from '../db';
 import { writeAudit } from '../lib/audit';
+import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
+import { storeOverrides, upsertSetting } from '../lib/store-settings';
 import { badRequest } from '../lib/errors';
 import type { Deps } from '../lib/context';
 import { parse } from '../lib/validate';
@@ -105,6 +107,15 @@ export async function loadSettings(db: Db): Promise<StoreSettings> {
   for (const row of rows) {
     const prop = KEY_MAP[row.key as keyof typeof KEY_MAP];
     if (prop) settings[prop] = prop === 'dictionaries' ? mergeDictionaries(row.value) : row.value;
+  }
+  // 第二家店（8.0.22，docs/MULTISTORE_V8022.md 第 4 节）：按店的那几项用它单独设的，门店名取门店档案
+  if (currentStoreId() !== DEFAULT_STORE_ID) {
+    for (const [key, value] of await storeOverrides(db)) {
+      const prop = KEY_MAP[key as keyof typeof KEY_MAP];
+      if (prop) settings[prop] = value;
+    }
+    const [store] = await db<{ name: string }[]>`SELECT name FROM stores WHERE id = ${currentStoreId()}`;
+    if (store) settings.storeName = store.name;
   }
   return settings as unknown as StoreSettings;
 }
@@ -254,14 +265,20 @@ export function registerSettingsRoutes(app: FastifyInstance, { sql }: Deps) {
       const mode = input.shiftMode ?? before.shiftMode;
       const drawers = input.cashDrawers ?? before.cashDrawers;
       if (mode === 'drawer' && !drawers.some((d) => d.active)) throw badRequest('按钱箱交班至少要有一个启用的钱箱');
+      const storeId = currentStoreId();
       for (const [key, prop] of Object.entries(KEY_MAP)) {
         if (!(prop in input)) continue;
         const value = input[prop as keyof typeof input];
-        // 「不限」「全天营业」存为 JSON null（不是 SQL NULL）
-        await tx`
-          INSERT INTO settings (key, value, updated_at, updated_by)
-          VALUES (${key}, ${value === null ? tx`'null'::jsonb` : tx.json(value as never)}, now(), ${req.actor.id})
-          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
+        // 门店名（8.0.22）：第二家店改的是它的门店档案；本店改设置的同时把门店档案的名称跟上
+        if (key === 'store_name') {
+          if (storeId !== DEFAULT_STORE_ID) {
+            await tx`UPDATE stores SET name = ${String(value)}, version = version + 1, updated_at = now() WHERE id = ${storeId}`;
+            continue;
+          }
+          await tx`UPDATE stores SET name = ${String(value).slice(0, 40)}, updated_at = now() WHERE id = ${DEFAULT_STORE_ID} AND name <> ${String(value).slice(0, 40)}`;
+        }
+        // 「不限」「全天营业」存为 JSON null（不是 SQL NULL）；按店的那几项在第二家店里存进 store_settings
+        await upsertSetting(tx, key, value, req.actor.id);
       }
       await writeAudit(tx, {
         staffId: req.actor.id,

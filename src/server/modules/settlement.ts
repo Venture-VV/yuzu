@@ -11,6 +11,7 @@ import type { BusinessTotals, CheckoutDaySummary, SettlementAnomaly, SettlementC
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
+import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
 import type { Deps } from '../lib/context';
 import { unprocessable } from '../lib/errors';
 import { toCsv, CSV_TYPE, attachment } from '../lib/csv';
@@ -25,28 +26,32 @@ import { EMPTY_PLATFORM_DAY_TOTALS } from '@shared/platform';
 
 type Pair = { principal: number; bonus: number };
 
+/** 日结按当前门店算（8.0.22，docs/MULTISTORE_V8022.md 第 5 节）；没有门店的（赠金过期、期初导入、平台补录）算在本店 */
+const sid = () => currentStoreId();
+const isDefaultStore = () => currentStoreId() === DEFAULT_STORE_ID;
+
 async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
   const [rc] = await db<{ count: number; paid: number; bonus: number }[]>`
     SELECT count(*) AS count, coalesce(sum(paid_amount), 0) AS paid, coalesce(sum(bonus_amount), 0) AS bonus
-    FROM recharges WHERE business_date = ${date}`;
+    FROM recharges WHERE business_date = ${date} AND store_id = ${sid()}`;
   const byMethod = await db<{ method: PaymentMethod; count: number; amount: number }[]>`
     SELECT payment_method AS method, count(*) AS count, sum(paid_amount) AS amount
-    FROM recharges WHERE business_date = ${date} GROUP BY payment_method ORDER BY payment_method`;
+    FROM recharges WHERE business_date = ${date} AND store_id = ${sid()} GROUP BY payment_method ORDER BY payment_method`;
   // 线上（小程序，v0.7.26）：已含在上面，单列；不进交班
   const [online] = await db<{ count: number; paid: number; bonus: number }[]>`
     SELECT count(*)::int AS count, coalesce(sum(paid_amount), 0)::bigint AS paid, coalesce(sum(bonus_amount), 0)::bigint AS bonus
-    FROM recharges WHERE business_date = ${date} AND channel = 'mp'`;
+    FROM recharges WHERE business_date = ${date} AND store_id = ${sid()} AND channel = 'mp'`;
   const [cs] = await db<SettlementTotals['consume'][]>`
     SELECT count(*) AS count, coalesce(sum(total_amount), 0) AS total,
            coalesce(sum(principal_amount), 0) AS principal, coalesce(sum(bonus_amount), 0) AS bonus,
            count(*) FILTER (WHERE status = 'reversed') AS reversed_count
-    FROM consumptions WHERE business_date = ${date}`;
+    FROM consumptions WHERE business_date = ${date} AND store_id = ${sid()}`;
   const [rv] = await db<SettlementTotals['reversal'][]>`
     SELECT count(*) AS count, coalesce(sum(r.principal_amount), 0) AS principal, coalesce(sum(r.bonus_amount), 0) AS bonus,
            count(*) FILTER (WHERE c.business_date <> r.business_date) AS cross_day_count
-    FROM reversals r JOIN consumptions c ON c.id = r.consumption_id WHERE r.business_date = ${date}`;
+    FROM reversals r JOIN consumptions c ON c.id = r.consumption_id WHERE r.business_date = ${date} AND r.store_id = ${sid()}`;
   const [ex] = await db<SettlementTotals['expiry'][]>`
-    SELECT count(*) AS count, coalesce(sum(amount), 0) AS bonus FROM bonus_expiries WHERE business_date = ${date}`;
+    SELECT count(*) AS count, coalesce(sum(amount), 0) AS bonus FROM bonus_expiries WHERE business_date = ${date} AND ${isDefaultStore()}`;
   // 期初导入（只算有余额的行）与当天作废的期初
   const [op] = await db<SettlementTotals['opening'][]>`
     SELECT
@@ -57,24 +62,24 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
       coalesce(sum(b.bonus) FILTER (WHERE i.business_date = ${date}), 0)
         - coalesce(sum(b.bonus) FILTER (WHERE b.void_business_date = ${date}), 0) AS bonus
     FROM opening_balances b JOIN opening_imports i ON i.id = b.import_id
-    WHERE b.principal + b.bonus > 0 AND (i.business_date = ${date} OR b.void_business_date = ${date})`;
+    WHERE b.principal + b.bonus > 0 AND (i.business_date = ${date} OR b.void_business_date = ${date}) AND ${isDefaultStore()}`;
   // 储值退回（v0.7.26）：当天的退储值单，退的本金按退款方式、扣回的赠金（不能作废，没有作废的）
   const [mr] = await db<{ count: number; principal: number; bonus: number }[]>`
     SELECT count(*)::int AS count, coalesce(sum(principal), 0)::bigint AS principal, coalesce(sum(bonus), 0)::bigint AS bonus
-    FROM member_refunds WHERE business_date = ${date}`;
+    FROM member_refunds WHERE business_date = ${date} AND store_id = ${sid()}`;
   const mrByMethod = await db<{ method: PaymentMethod; count: number; amount: number }[]>`
     SELECT l.method, count(DISTINCT r.id)::int AS count, sum(l.amount)::bigint AS amount
     FROM member_refund_lines l JOIN member_refunds r ON r.id = l.refund_id
-    WHERE r.business_date = ${date} GROUP BY l.method ORDER BY l.method`;
+    WHERE r.business_date = ${date} AND r.store_id = ${sid()} GROUP BY l.method ORDER BY l.method`;
   // 其中退线上充值（小程序）的（v0.7.27）：钱从小程序的商户号退；auto = 交给门店系统原路退回的
   const [mrOnline] = await db<{ count: number; amount: number; auto: number }[]>`
     SELECT count(DISTINCT r.id)::int AS count, coalesce(sum(l.amount), 0)::bigint AS amount,
            coalesce(sum(l.amount) FILTER (WHERE l.route = 'mp_auto'), 0)::bigint AS auto
     FROM member_refund_lines l JOIN member_refunds r ON r.id = l.refund_id JOIN recharges rc ON rc.id = l.recharge_id
-    WHERE r.business_date = ${date} AND rc.channel = 'mp'`;
+    WHERE r.business_date = ${date} AND r.store_id = ${sid()} AND rc.channel = 'mp'`;
   const [net] = await db<Pair[]>`
     SELECT coalesce(sum(principal_delta), 0) AS principal, coalesce(sum(bonus_delta), 0) AS bonus
-    FROM ledger_entries WHERE business_date = ${date}`;
+    FROM ledger_entries WHERE business_date = ${date} AND store_id = ${sid()}`;
   return {
     recharge: { count: rc!.count, paid: rc!.paid, bonus: rc!.bonus, byMethod, online: online! },
     consume: cs!,
@@ -90,7 +95,7 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     },
     net: net!,
     business: await businessTotals(db, date),
-    backfill: (await db<{ count: number }[]>`SELECT count(*)::int AS count FROM backfill_entries WHERE business_date = ${date}`)[0]!,
+    backfill: (await db<{ count: number }[]>`SELECT count(*)::int AS count FROM backfill_entries WHERE business_date = ${date} AND store_id = ${sid()}`)[0]!,
     deposits: await depositTotals(db, date),
     countCards: await countCardDayTotals(db, date),
     platformRedemptions: await platformDayTotals(db, date),
@@ -101,10 +106,10 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
 async function depositTotals(db: Db, date: string): Promise<SettlementDeposits> {
   const rows = await db<{ kind: string; method: PaymentMethod; count: number; amount: number }[]>`
     SELECT kind, method, count(*) AS count, sum(amount) AS amount FROM room_deposits
-    WHERE business_date = ${date} GROUP BY kind, method ORDER BY kind, method`;
+    WHERE business_date = ${date} AND stay_id IN (SELECT id FROM room_stays WHERE store_id = ${sid()}) GROUP BY kind, method ORDER BY kind, method`;
   const [held] = await db<{ amount: number }[]>`
     SELECT coalesce(sum(CASE WHEN kind = 'receive' THEN amount ELSE -amount END), 0) AS amount
-    FROM room_deposits WHERE business_date <= ${date}`;
+    FROM room_deposits WHERE business_date <= ${date} AND stay_id IN (SELECT id FROM room_stays WHERE store_id = ${sid()})`;
   const pick = (kind: string) => rows.filter((r) => r.kind === kind).map(({ method, count, amount }) => ({ method, count, amount }));
   return { received: pick('receive'), refunded: pick('refund'), held: held!.amount };
 }
@@ -123,7 +128,7 @@ async function businessTotals(db: Db, date: string): Promise<BusinessTotals> {
                FILTER (WHERE business_date = ${date}), 0)
         - coalesce(sum((SELECT sum(cb.ticket_amount) FROM checkout_bills cb WHERE cb.checkout_id = c.id))
                    FILTER (WHERE void_business_date = ${date}), 0) AS ticket
-    FROM checkouts c WHERE business_date = ${date} OR void_business_date = ${date}`;
+    FROM checkouts c WHERE (business_date = ${date} OR void_business_date = ${date}) AND c.store_id = ${sid()}`;
   const byMethod = await db<BusinessTotals['byMethod']>`
     SELECT p.method,
            coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${date}), 0)
@@ -131,7 +136,7 @@ async function businessTotals(db: Db, date: string): Promise<BusinessTotals> {
            count(*) FILTER (WHERE c.business_date = ${date}) AS count,
            count(*) FILTER (WHERE c.void_business_date = ${date}) AS void_count
     FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-    WHERE c.business_date = ${date} OR c.void_business_date = ${date}
+    WHERE (c.business_date = ${date} OR c.void_business_date = ${date}) AND c.store_id = ${sid()}
     GROUP BY p.method ORDER BY p.method`;
   const coupons = await db<BusinessTotals['coupons']>`
     SELECT g.platform,
@@ -140,16 +145,16 @@ async function businessTotals(db: Db, date: string): Promise<BusinessTotals> {
            count(*) FILTER (WHERE c.business_date = ${date}) AS count,
            count(*) FILTER (WHERE c.void_business_date = ${date}) AS void_count
     FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id
-    WHERE c.business_date = ${date} OR c.void_business_date = ${date}
+    WHERE (c.business_date = ${date} OR c.void_business_date = ${date}) AND c.store_id = ${sid()}
     GROUP BY g.platform ORDER BY g.platform`;
   const net = co!.total - co!.voidTotal;
   // 退款单（v0.7.20）：当天开的、生效的（作废只能在当天，作废了就不算）
   const [rf] = await db<{ count: number; total: number }[]>`
-    SELECT count(*)::int AS count, coalesce(sum(amount), 0)::bigint AS total FROM refunds WHERE business_date = ${date} AND status = 'completed'`;
+    SELECT count(*)::int AS count, coalesce(sum(amount), 0)::bigint AS total FROM refunds WHERE business_date = ${date} AND status = 'completed' AND store_id = ${sid()}`;
   const refundByMethod = await db<BusinessTotals['refunds']['byMethod']>`
     SELECT p.method, count(*)::int AS count, sum(p.amount)::bigint AS amount
     FROM refund_payments p JOIN refunds r ON r.id = p.refund_id
-    WHERE r.business_date = ${date} AND r.status = 'completed' GROUP BY p.method ORDER BY p.method`;
+    WHERE r.business_date = ${date} AND r.status = 'completed' AND r.store_id = ${sid()} GROUP BY p.method ORDER BY p.method`;
   return {
     checkouts: { count: co!.count, total: co!.total },
     voids: { count: co!.voidCount, total: co!.voidTotal },
@@ -166,7 +171,7 @@ async function businessTotals(db: Db, date: string): Promise<BusinessTotals> {
 export async function checkoutDaySummary(db: Db, date: string): Promise<CheckoutDaySummary> {
   const b = await businessTotals(db, date);
   const [u] = await db<{ count: number; total: number }[]>`
-    SELECT count(*)::int AS count, coalesce(sum(total_amount), 0)::bigint AS total FROM checkouts WHERE business_date = ${date} AND shift_id IS NULL`;
+    SELECT count(*)::int AS count, coalesce(sum(total_amount), 0)::bigint AS total FROM checkouts WHERE business_date = ${date} AND shift_id IS NULL AND store_id = ${sid()}`;
   return {
     businessDate: date,
     checkouts: b.checkouts,
@@ -266,6 +271,8 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
        FROM members) AS members_now
     FROM ledger_entries`;
   const balances = bal!;
+  const [companyNet] = await db<Pair[]>`
+    SELECT coalesce(sum(principal_delta), 0) AS principal, coalesce(sum(bonus_delta), 0) AS bonus FROM ledger_entries WHERE business_date = ${date}`;
 
   // 每条流水的「变动后余额」必须等于上一条的余额加本次变动
   const chainBreaks = await db<{ docNo: string; memberName: string; createdAt: string }[]>`
@@ -302,18 +309,18 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
       (SELECT coalesce(sum(p.amount) FILTER (WHERE c.business_date = ${date}), 0)
               - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date = ${date}), 0)
        FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-       WHERE p.method = 'wallet' AND (c.business_date = ${date} OR c.void_business_date = ${date})) AS payments,
-      (SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE checkout_id IS NOT NULL AND business_date = ${date}) AS consumed,
+       WHERE p.method = 'wallet' AND (c.business_date = ${date} OR c.void_business_date = ${date}) AND c.store_id = ${sid()}) AS payments,
+      (SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE checkout_id IS NOT NULL AND business_date = ${date} AND store_id = ${sid()}) AS consumed,
       (SELECT coalesce(sum(r.principal_amount + r.bonus_amount), 0) FROM reversals r JOIN consumptions k ON k.id = r.consumption_id
-       WHERE k.checkout_id IS NOT NULL AND r.business_date = ${date}) AS reversed,
+       WHERE k.checkout_id IS NOT NULL AND r.business_date = ${date} AND r.store_id = ${sid()}) AS reversed,
       (SELECT coalesce(sum(cb.amount) FILTER (WHERE c.business_date = ${date}), 0)
               - coalesce(sum(cb.amount) FILTER (WHERE c.void_business_date = ${date}), 0)
        FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
-       WHERE c.business_date = ${date} OR c.void_business_date = ${date}) AS bills`;
+       WHERE (c.business_date = ${date} OR c.void_business_date = ${date}) AND c.store_id = ${sid()}) AS bills`;
   const receiptsNet = totals.business.byMethod.reduce((s, m) => s + m.amount, 0);
   const [refundCheck] = await db<{ bad: number }[]>`
     SELECT count(*)::int AS bad FROM refunds r
-    WHERE r.business_date = ${date}
+    WHERE r.business_date = ${date} AND r.store_id = ${sid()}
       AND (r.amount <> (SELECT coalesce(sum(amount), 0) FROM refund_items WHERE refund_id = r.id)
            OR r.amount <> (SELECT coalesce(sum(amount), 0) FROM refund_payments WHERE refund_id = r.id))`;
 
@@ -331,9 +338,10 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
     {
       key: 'opening_plus_net',
       label: '期初 + 本日变动 = 期末',
+      // 期初、期末是全公司的钱包（会员全公司通用，8.0.22）：按全公司当天的变动比
       ok:
-        balances.opening.principal + totals.net.principal === balances.closing.principal &&
-        balances.opening.bonus + totals.net.bonus === balances.closing.bonus,
+        balances.opening.principal + companyNet!.principal === balances.closing.principal &&
+        balances.opening.bonus + companyNet!.bonus === balances.closing.bonus,
       detail: `期初 ${pairText(balances.opening)}；期末 ${pairText(balances.closing)}`,
     },
     {
@@ -621,15 +629,15 @@ export async function computeSettlement(db: Db, date: string, today: string): Pr
            coalesce(c.cnt, 0) AS consume_count, coalesce(c.total, 0) AS consume_total,
            coalesce(v.cnt, 0) AS reversal_count
     FROM staff s
-    LEFT JOIN (SELECT operator_id, count(*) AS cnt, sum(paid_amount) AS paid FROM recharges WHERE business_date = ${date} GROUP BY 1) r ON r.operator_id = s.id
-    LEFT JOIN (SELECT operator_id, count(*) AS cnt, sum(total_amount) AS total FROM consumptions WHERE business_date = ${date} GROUP BY 1) c ON c.operator_id = s.id
-    LEFT JOIN (SELECT operator_id, count(*) AS cnt FROM reversals WHERE business_date = ${date} GROUP BY 1) v ON v.operator_id = s.id
+    LEFT JOIN (SELECT operator_id, count(*) AS cnt, sum(paid_amount) AS paid FROM recharges WHERE business_date = ${date} AND store_id = ${sid()} GROUP BY 1) r ON r.operator_id = s.id
+    LEFT JOIN (SELECT operator_id, count(*) AS cnt, sum(total_amount) AS total FROM consumptions WHERE business_date = ${date} AND store_id = ${sid()} GROUP BY 1) c ON c.operator_id = s.id
+    LEFT JOIN (SELECT operator_id, count(*) AS cnt FROM reversals WHERE business_date = ${date} AND store_id = ${sid()} GROUP BY 1) v ON v.operator_id = s.id
     WHERE r.cnt IS NOT NULL OR c.cnt IS NOT NULL OR v.cnt IS NOT NULL
     ORDER BY s.id`;
 
   const [closedRow] = await db<{ closedAt: string; closedByName: string; note: string; revision: number; snapshot: SettlementTotals }[]>`
     SELECT d.closed_at, s.display_name AS closed_by_name, d.note, d.revision, d.snapshot
-    FROM daily_settlements d JOIN staff s ON s.id = d.closed_by WHERE d.business_date = ${date}`;
+    FROM daily_settlements d JOIN staff s ON s.id = d.closed_by WHERE d.business_date = ${date} AND d.store_id = ${sid()}`;
 
   return {
     businessDate: date,
@@ -767,13 +775,14 @@ export function registerSettlementRoutes(app: FastifyInstance, deps: Deps) {
     // 快照取自同一时刻的数据；写入单独一个事务，并串行化同一营业日的日结确认
     const totals = await readSnapshot(sql, (tx) => computeTotals(tx, date));
     await sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(hashtext(${'settle:' + date}))`;
+      // 日结按门店各一份：锁也按门店分（本店照旧用原来的键）
+      await tx`SELECT pg_advisory_xact_lock(hashtext(${'settle:' + (isDefaultStore() ? '' : `${sid()}:`) + date}))`;
       const [prev] = await tx<{ snapshot: SettlementTotals; revision: number }[]>`
-        SELECT snapshot, revision FROM daily_settlements WHERE business_date = ${date}`;
+        SELECT snapshot, revision FROM daily_settlements WHERE business_date = ${date} AND store_id = ${sid()}`;
       await tx`
         INSERT INTO daily_settlements (business_date, closed_by, closed_at, note, snapshot, revision)
         VALUES (${date}, ${req.actor.id}, now(), ${note}, ${tx.json(totals as never)}, 1)
-        ON CONFLICT (business_date) DO UPDATE
+        ON CONFLICT (store_id, business_date) DO UPDATE
           SET closed_by = EXCLUDED.closed_by, closed_at = now(), note = EXCLUDED.note,
               snapshot = EXCLUDED.snapshot, revision = daily_settlements.revision + 1`;
       await writeAudit(tx, {

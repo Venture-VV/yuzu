@@ -97,7 +97,8 @@ export async function buildWeeklyMessage(db: Db, config: Pick<AppConfig, 'timezo
   return truncateBytes(`${title}\n${body}\n${foot}`, MAX_BYTES);
 }
 
-function truncateBytes(text: string, max: number): string {
+/** 超过 max 字节的截断（企业微信 markdown 消息最长 4096 字节；AI 小结推送也用） */
+export function truncateBytes(text: string, max: number): string {
   const buf = Buffer.from(text, 'utf8');
   if (buf.length <= max) return text;
   let s = buf.subarray(0, max - 6).toString('utf8');

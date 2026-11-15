@@ -51,11 +51,13 @@ import { assertOpen, businessDate, lockVisits, runIdempotent } from '../frontdes
 import { abandonFrontdeskOp } from '../frontdesk/visits';
 import { pricesColumn } from '../pricing';
 import { resolveWaiter } from './pins';
+import { settingRow } from '../../lib/store-settings';
+import { currentStoreId } from '../../lib/store-context';
 
 // ───────────────────────── 设置 ─────────────────────────
 
 export async function loadEmenuRules(db: Db): Promise<EmenuRules> {
-  const [row] = await db<{ value: Partial<EmenuRules> }[]>`SELECT value FROM settings WHERE key = 'emenu_rules'`;
+  const row = await settingRow<Partial<EmenuRules>>(db, 'emenu_rules');
   return { ...DEFAULT_EMENU_RULES, ...(row?.value ?? {}) };
 }
 
@@ -185,7 +187,7 @@ export async function dishViews(db: Db, dishIds: number[], today: string, dining
 }
 
 export async function emenuTables(db: Db): Promise<{ name: string; area: string }[]> {
-  return db<{ name: string; area: string }[]>`SELECT name, area FROM dining_tables WHERE active ORDER BY sort_order, id`;
+  return db<{ name: string; area: string }[]>`SELECT name, area FROM dining_tables WHERE active AND store_id = ${currentStoreId()} ORDER BY sort_order, id`;
 }
 
 /** 平板上的菜单：设置、现在显示的分类与各页、每道菜的状态、桌台。每 15 秒取一次，价格、估清、上下架、版面都跟得上 */

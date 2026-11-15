@@ -14,6 +14,7 @@ import { ctxOf, type Deps } from '../lib/context';
 import { conflict } from '../lib/errors';
 import { sameJson, saveRuleSetting } from '../lib/rule-settings';
 import { parse } from '../lib/validate';
+import { currentStoreId } from '../lib/store-context';
 
 export const VIP_LOCKER_RULES_KEY = 'vip_locker_rules';
 
@@ -42,7 +43,7 @@ export async function vipLockerSettings(db: Db): Promise<VipLockerSettings> {
   const [meta] = await db<{ updatedAt: string; updatedByName: string | null }[]>`
     SELECT s.updated_at, st.display_name AS updated_by_name FROM settings s LEFT JOIN staff st ON st.id = s.updated_by WHERE s.key = ${VIP_LOCKER_RULES_KEY}`;
   const counts = await db<{ level: number; n: number }[]>`
-    SELECT vip_level AS level, count(*)::int AS n FROM hand_tags WHERE kind = 'vip' AND active GROUP BY vip_level ORDER BY vip_level`;
+    SELECT vip_level AS level, count(*)::int AS n FROM hand_tags WHERE kind = 'vip' AND active AND store_id = ${currentStoreId()} GROUP BY vip_level ORDER BY vip_level`;
   const lockerCounts: Record<number, number> = {};
   for (let level = 1; level <= MAX_VIP_LEVEL; level++) lockerCounts[level] = 0;
   for (const c of counts) lockerCounts[Number(c.level)] = c.n;

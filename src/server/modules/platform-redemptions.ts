@@ -21,6 +21,7 @@ import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { cents, idParam, parse } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
 import { loadSettings } from './settings';
+import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
 
 /** 「平台 + 券码」的咨询锁：补登记与前台结账登记团购券都先取它，两边不会同时登记同一张券 */
 export const lockPlatformCode = (tx: Tx, platform: CouponPlatform, code: string) => lockOpKey(tx, `platform-coupon:${platform}:${code}`);
@@ -255,8 +256,8 @@ export async function reconcilePlatforms(db: Db, from: string, to: string): Prom
 export async function platformDayTotals(db: Db, date: string): Promise<PlatformDayTotals> {
   const rows = await db<{ platform: CouponPlatform; count: number; face: number; settle: number }[]>`
     SELECT platform, count(*)::int AS count, coalesce(sum(face_value), 0)::bigint AS face, coalesce(sum(settle_amount), 0)::bigint AS settle
-    FROM platform_redemptions WHERE status = 'active' AND business_date = ${date} GROUP BY platform ORDER BY platform`;
-  const [v] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM platform_redemptions WHERE status = 'voided' AND business_date = ${date}`;
+    FROM platform_redemptions WHERE status = 'active' AND business_date = ${date} AND ${currentStoreId() === DEFAULT_STORE_ID} GROUP BY platform ORDER BY platform`;
+  const [v] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM platform_redemptions WHERE status = 'voided' AND business_date = ${date} AND ${currentStoreId() === DEFAULT_STORE_ID}`;
   const byPlatform = rows.map((r) => ({ platform: r.platform, count: r.count, face: Number(r.face), settle: Number(r.settle) }));
   return {
     count: byPlatform.reduce((t, r) => t + r.count, 0),

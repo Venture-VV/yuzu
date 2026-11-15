@@ -57,7 +57,7 @@ function dayOfMonth(monthStart: string, day: number): string {
 interface WarehouseLite {
   id: number;
   name: string;
-  kind: 'central' | 'department';
+  kind: 'central' | 'department' | 'store_main';
   departmentId: number | null;
 }
 

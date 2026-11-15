@@ -36,6 +36,7 @@ import { getRefund } from './frontdesk/refunds';
 import { resolveReadableDate } from './ledger';
 import { checkoutForPrint } from './print';
 import { technicianTextSql } from './technicians';
+import { currentStoreId } from '../lib/store-context';
 
 // ───────────────────────── 查询 ─────────────────────────
 
@@ -106,11 +107,12 @@ export async function searchOrders(db: Db, input: OrderSearchInput): Promise<Ord
   const { q, historyAllowed } = input;
   const date = q ? (historyAllowed ? null : input.today) : input.date;
   const like = `%${escapeLike(q)}%`;
+  // 只查当前门店的（8.0.22）
   const checkoutWhere = db`
-    ${date ? db`(c.business_date = ${date} OR c.void_business_date = ${date})` : db`true`}
+    c.store_id = ${currentStoreId()} AND ${date ? db`(c.business_date = ${date} OR c.void_business_date = ${date})` : db`true`}
     ${q ? db`AND ${checkoutMatchSql(db, q)}` : db``}`;
   const refundWhere = db`
-    ${date ? db`r.business_date = ${date}` : db`true`}
+    r.store_id = ${currentStoreId()} AND ${date ? db`r.business_date = ${date}` : db`true`}
     ${q ? db`AND (r.refund_no ILIKE ${like} OR ${checkoutMatchSql(db, q)})` : db``}`;
   const rows = await db<RowRecord[]>`
     SELECT * FROM (
@@ -303,7 +305,7 @@ export function registerOrderRoutes(app: FastifyInstance, deps: Deps) {
     const { id } = parse(idParam, req.params);
     const [c] = await sql<{ businessDate: string; voidBusinessDate: string | null }[]>`
       SELECT to_char(business_date, 'YYYY-MM-DD') AS business_date, to_char(void_business_date, 'YYYY-MM-DD') AS void_business_date
-      FROM checkouts WHERE id = ${id}`;
+      FROM checkouts WHERE id = ${id} AND store_id = ${currentStoreId()}`;
     if (!c) throw notFound('结账单不存在');
     await needReadable(req, [c.businessDate, c.voidBusinessDate]);
     return readSnapshot(sql, (tx) => checkoutOrderDetail(tx, id));
@@ -311,7 +313,7 @@ export function registerOrderRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/ledger/orders/refunds/:id', { preHandler: guard('ledger.readToday') }, async (req): Promise<RefundOrderDetail> => {
     const { id } = parse(idParam, req.params);
-    const [r] = await sql<{ businessDate: string }[]>`SELECT to_char(business_date, 'YYYY-MM-DD') AS business_date FROM refunds WHERE id = ${id}`;
+    const [r] = await sql<{ businessDate: string }[]>`SELECT to_char(business_date, 'YYYY-MM-DD') AS business_date FROM refunds WHERE id = ${id} AND store_id = ${currentStoreId()}`;
     if (!r) throw notFound('退款单不存在');
     await needReadable(req, [r.businessDate]);
     return readSnapshot(sql, (tx) => getRefund(tx, id));

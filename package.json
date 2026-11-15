@@ -1,6 +1,6 @@
 {
   "name": "yuzu",
-  "version": "8.0.21",
+  "version": "8.0.22",
   "private": true,
   "description": "浴族 yuzu · 汤泉门店经营系统（会员充值、消费、撤销、流水与日结）",
   "type": "module",
@@ -26,6 +26,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@fastify/cookie": "^11.1.3",
     "@fastify/static": "^10.1.7",
     "@mlightcad/libredwg-web": "0.8.1",

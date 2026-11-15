@@ -3,7 +3,9 @@
 import type { ApprovalBrief } from './approvals';
 import type { PriceCompare } from './purchasing';
 
-export const INV_DOC_TYPES = ['opening', 'receipt', 'issue', 'issue_return', 'direct_use', 'damage', 'count', 'supplier_return'] as const;
+// 调出、调入（8.0.22，门店间调拨）：由调拨单生成、一建就生效，不能单独新建或冲销（在「调拨」里撤回）
+export const INV_DOC_TYPES = ['opening', 'receipt', 'issue', 'issue_return', 'direct_use', 'damage', 'count', 'supplier_return', 'transfer_out', 'transfer_in'] as const;
+export const TRANSFER_DOC_TYPES = ['transfer_out', 'transfer_in'] as const;
 export type InvDocType = (typeof INV_DOC_TYPES)[number];
 
 export const INV_DOC_META: Record<InvDocType, { title: string; prefix: string; verb: string; direction: 'in' | 'out' | 'both' }> = {
@@ -15,6 +17,8 @@ export const INV_DOC_META: Record<InvDocType, { title: string; prefix: string; v
   damage: { title: '报损', prefix: 'BS', verb: '报损', direction: 'out' },
   count: { title: '盘点', prefix: 'PD', verb: '盘点', direction: 'both' },
   supplier_return: { title: '退供应商', prefix: 'TG', verb: '退货', direction: 'out' },
+  transfer_out: { title: '调拨调出', prefix: 'DC', verb: '调出', direction: 'out' },
+  transfer_in: { title: '调拨调入', prefix: 'DR', verb: '调入', direction: 'in' },
 };
 
 // 待供应商确认：退供应商单确认后先等供应商同意，库存、货款都不动（#20，v0.7.12）
@@ -31,7 +35,7 @@ export const INV_STATUS_LABELS: Record<InvDocStatus, string> = {
   voided: '已冲销',
 };
 
-export const MOVE_TYPES = ['opening', 'receipt', 'issue', 'issue_return', 'direct_use', 'damage', 'count_adjust', 'supplier_return', 'void'] as const;
+export const MOVE_TYPES = ['opening', 'receipt', 'issue', 'issue_return', 'direct_use', 'damage', 'count_adjust', 'supplier_return', 'void', 'transfer_out', 'transfer_in'] as const;
 export type MoveType = (typeof MOVE_TYPES)[number];
 
 export const MOVE_TYPE_LABELS: Record<MoveType, string> = {
@@ -44,6 +48,8 @@ export const MOVE_TYPE_LABELS: Record<MoveType, string> = {
   count_adjust: '盘点调整',
   supplier_return: '退供应商',
   void: '冲销',
+  transfer_out: '调拨调出',
+  transfer_in: '调拨调入',
 };
 
 /** 盘点差异原因：确认前一律为「待核差异」，不自动认定为浪费或失窃；部门小仓默认「耗用」（v0.7.11） */
@@ -79,12 +85,51 @@ export const CENTRAL_WAREHOUSE_ID = 1;
 
 export interface Warehouse {
   id: number;
-  kind: 'central' | 'department';
+  /** store_main：第二家店的主仓（8.0.22） */
+  kind: 'central' | 'department' | 'store_main';
   departmentId: number | null;
-  /** 总仓用「库存范围名称」，部门小仓是「部门名 + 小仓」 */
+  /** 总仓用「库存范围名称」，部门小仓是「部门名 + 小仓」，门店主仓是「门店名 + 主仓」 */
   name: string;
   /** 部门停用后它的小仓也停用（停用前要清空） */
   active: boolean;
+  /** 所在门店（8.0.22；只有一家店时都是本店） */
+  storeId: number;
+  storeName: string;
+}
+
+/** 门店间调拨单（8.0.22，docs/MULTISTORE_V8022.md 第 8 节） */
+export type StockTransferStatus = 'in_transit' | 'received' | 'cancelled';
+export const STOCK_TRANSFER_STATUS_LABELS: Record<StockTransferStatus, string> = { in_transit: '在途', received: '已调入', cancelled: '已撤回' };
+export interface StockTransferLine {
+  materialId: number;
+  code: string;
+  name: string;
+  inventoryUnit: string;
+  decimals: number;
+  qtyMilli: number;
+  receivedMilli: number | null;
+  varianceReason: string | null;
+}
+export interface StockTransfer {
+  id: number;
+  transferNo: string;
+  fromWarehouseId: number;
+  fromName: string;
+  toWarehouseId: number;
+  toName: string;
+  status: StockTransferStatus;
+  note: string;
+  outDocId: number;
+  inDocId: number | null;
+  sentByName: string;
+  sentAt: string;
+  receivedByName: string | null;
+  receivedAt: string | null;
+  cancelledByName: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  version: number;
+  lines: StockTransferLine[];
 }
 
 /** 部门小仓里一个物料的结存 */

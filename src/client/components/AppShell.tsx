@@ -11,6 +11,7 @@ import { useCan, useSession } from '../lib/session';
 import { cn } from '../lib/utils';
 import { LogoMark } from './Brand';
 import { InstanceTag } from './InstanceTag';
+import { StoreSwitcher } from './StoreSwitcher';
 import { storePageOf, useStoreNav } from './storeNav';
 import { PendingOpsBanner } from './PendingOpsBanner';
 import { FrontdeskPendingBanner } from '../features/frontdesk/PendingBanner';
@@ -77,6 +78,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           ))}
         </div>
+        {/* 能进不止一家店的人：当前门店、点一下换店（8.0.22）；只有一家店时不显示 */}
+        <StoreSwitcher />
         <InstanceTag instance={session.instance} version={session.version} commit={session.commit} />
         <UserMenu />
       </nav>

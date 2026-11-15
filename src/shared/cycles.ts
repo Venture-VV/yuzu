@@ -4,7 +4,7 @@
 export interface StocktakeProgress {
   warehouseId: number;
   warehouseName: string;
-  kind: 'central' | 'department';
+  kind: 'central' | 'department' | 'store_main';
   departmentId: number | null;
   /** 月初（1 号 0 点）有结存、要盘的物料种数（部门小仓不含台面日耗品） */
   required: number;

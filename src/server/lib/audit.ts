@@ -1,4 +1,5 @@
 import type { Db } from '../db';
+import { currentStoreId, DEFAULT_STORE_ID } from './store-context';
 
 export type AuditAction =
   | 'customer_record'
@@ -23,6 +24,10 @@ export type AuditAction =
   | 'operation_abandoned'
   | 'settlement_closed'
   | 'settings_updated'
+  | 'store_saved'
+  | 'entity_saved'
+  | 'staff_stores_saved'
+  | 'store_switched'
   | 'plan_saved'
   | 'item_saved'
   | 'price_list_imported'
@@ -215,6 +220,7 @@ export type AuditAction =
   | 'receipt_attachment'
   | 'request_import'
   | 'gift_receipt'
+  | 'stock_transfer'
   // 8.0.3 费用预算与进项发票台账：改预算额度；台账里的发票（登记、认证状态、照片、作废）
   | 'expense_budget'
   | 'input_invoice'
@@ -276,10 +282,15 @@ export interface AuditEntry {
   businessDate?: string;
 }
 
-export async function writeAudit(db: Db, entry: AuditEntry): Promise<void> {
+/** 审计记在当前门店（8.0.22）：不在事务里写的也记对（门店显式传，不靠事务开头的设置） */
+export async function writeAudit(db: Db, entry: AuditEntry & { storeId?: number }): Promise<void> {
+  const storeId = entry.storeId ?? currentStoreId();
+  // 本店照旧不写这一列（默认值就是本店，只有一家店时与以往完全一样）
+  const storeCol = storeId === DEFAULT_STORE_ID ? db`` : db`, store_id`;
+  const storeVal = storeId === DEFAULT_STORE_ID ? db`` : db`, ${storeId}`;
   await db`
-    INSERT INTO audit_logs (staff_id, action, target_type, target_id, detail, ip, business_date)
+    INSERT INTO audit_logs (staff_id, action, target_type, target_id, detail, ip, business_date ${storeCol})
     VALUES (${entry.staffId}, ${entry.action}, ${entry.targetType ?? null},
             ${entry.targetId == null ? null : String(entry.targetId)},
-            ${db.json((entry.detail ?? {}) as never)}, ${entry.ip ?? null}, ${entry.businessDate ?? null})`;
+            ${db.json((entry.detail ?? {}) as never)}, ${entry.ip ?? null}, ${entry.businessDate ?? null} ${storeVal})`;
 }

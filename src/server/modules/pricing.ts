@@ -4,6 +4,7 @@
 import { defaultTier, lineName, PRICE_TIER_LABELS, sortTiers, tierPrice, type PriceTier, type TierPrice } from '@shared/catalog';
 import type { Db } from '../db';
 import { conflict } from '../lib/errors';
+import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
 
 export interface PricedItem {
   id: number;
@@ -19,9 +20,18 @@ export interface PricedItem {
  * 各档价格（JSON 数组）。没有分档价格记录的项目（例如直接写库建的项目）按 price 作为唯一的「标准」档，
  * 与分档之前的计价完全一致。
  */
-export const pricesColumn = (db: Db) => db`
+export const pricesColumn = (db: Db, opts: { base?: boolean } = {}) =>
+  // 第二家店（8.0.22）：这家店单独定了价的档用本店价；本店、后台维护全公司价目时（base）照旧
+  opts.base || currentStoreId() === DEFAULT_STORE_ID
+    ? db`
   coalesce((SELECT json_agg(json_build_object('tier', p.tier, 'price', p.price))
             FROM service_item_prices p WHERE p.item_id = i.id),
+           json_build_array(json_build_object('tier', 'standard', 'price', i.price)))`
+    : db`
+  coalesce((SELECT json_agg(json_build_object('tier', p.tier, 'price', coalesce(sp.price, p.price)))
+            FROM service_item_prices p
+            LEFT JOIN service_item_store_prices sp ON sp.item_id = p.item_id AND sp.tier = p.tier AND sp.store_id = ${currentStoreId()}
+            WHERE p.item_id = i.id),
            json_build_array(json_build_object('tier', 'standard', 'price', i.price)))`;
 
 export async function loadPricedItems(db: Db, ids: number[]): Promise<Map<number, PricedItem>> {

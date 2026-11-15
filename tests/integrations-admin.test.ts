@@ -32,6 +32,8 @@ describe('对外接口', () => {
       ['einvoice', 'mock'],
       ['bank_direct', 'off'],
       ['ota', 'off'],
+      // AI 辅助（8.0.22）：模拟模式下也是模拟
+      ['ai', 'mock'],
     ]);
     expect(info.switches).toEqual({ payTerminal: true, platformVoucher: true, voucherReconcileAt: '06:10' });
     expect(JSON.stringify(info)).not.toMatch(/WXPAY_MICRO_API_KEY.*=/);

@@ -77,6 +77,7 @@ import { recordSaleUsage, reverseSaleUsage } from '../stock-usage';
 import { lockPayTxForUse, markPayTxUsed, releasePayTxs } from '../pay-terminal';
 import { assertNotVerified, lockVerificationForUse, markVerificationUsed, releaseVerifications } from '../platform-verify';
 import { otaPrepaidHints } from '../ota';
+import { currentStoreId } from '../../lib/store-context';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -202,7 +203,7 @@ async function loadVisitRows(db: Db, ids: number[]): Promise<VisitRow[]> {
            v.ticket_type_id, tt.name AS ticket_name, v.ticket_price_12h AS price12h, v.ticket_price_24h AS price24h, v.ticket_end_at
     FROM visits v JOIN bills b ON b.id = v.bill_id JOIN hand_tags t ON t.id = v.tag_id
     LEFT JOIN members m ON m.id = v.member_id LEFT JOIN ticket_types tt ON tt.id = v.ticket_type_id
-    WHERE v.id IN ${db(ids)} ORDER BY t.code`;
+    WHERE v.id IN ${db(ids)} AND v.store_id = ${currentStoreId()} ORDER BY t.code`;
 }
 
 /** 结账前核对：所选手牌的已挂明细与按此刻计算的门票（只读） */
@@ -746,7 +747,7 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
     const voidShiftId = refundShiftId === undefined ? await lockPaymentShift(tx, ctx.actor.id, seenShift) : await lockRefundShift(tx, refundShiftId);
     const at = ctx.at ?? new Date();
     const [c] = await tx<{ id: number; checkoutNo: string; clientKey: string; status: string; createdAt: string }[]>`
-      SELECT id, checkout_no, client_key, status, created_at FROM checkouts WHERE id = ${checkoutId} FOR UPDATE`;
+      SELECT id, checkout_no, client_key, status, created_at FROM checkouts WHERE id = ${checkoutId} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!c) throw notFound('结账单不存在');
     if (c.status !== 'completed') throw conflict('ALREADY_VOIDED', `结账单 ${c.checkoutNo} 已反结账`);
     // 退款单（v0.7.20）：有生效的退款单的结账单不能反结账（结账单已锁，开退款单要等这里提交）
@@ -892,7 +893,7 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
   const [c] = await db<Omit<CheckoutDetail, 'bills' | 'payments' | 'remainingMates'>[]>`
     SELECT c.id, c.checkout_no, c.status, c.total_amount, c.note, c.business_date, s.display_name AS operator_name, c.created_at,
            c.voided_at, vs.display_name AS voided_by_name, c.void_reason, ${backfillMarkSql(db, 'c.client_key')} AS backfill
-    FROM checkouts c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff vs ON vs.id = c.voided_by WHERE c.id = ${id}`;
+    FROM checkouts c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff vs ON vs.id = c.voided_by WHERE c.id = ${id} AND c.store_id = ${currentStoreId()}`;
   if (!c) throw notFound('结账单不存在');
   // 手牌账单显示牌号；桌台账单（餐饮第二步）显示桌号与人数
   const bills = await db<CheckoutDetail['bills']>`
@@ -933,7 +934,7 @@ export async function listCheckouts(db: Db, date: string): Promise<CheckoutSumma
            (SELECT bf.slip_no FROM backfill_entries bf WHERE bf.op_key = c.client_key ORDER BY bf.id LIMIT 1) AS backfill_slip_no,
            (SELECT coalesce(sum(r.amount), 0) FROM refunds r WHERE r.checkout_id = c.id AND r.status = 'completed')::bigint AS refunded_amount
     FROM checkouts c JOIN staff s ON s.id = c.operator_id
-    WHERE c.business_date = ${date} OR c.void_business_date = ${date}
+    WHERE (c.business_date = ${date} OR c.void_business_date = ${date}) AND c.store_id = ${currentStoreId()}
     ORDER BY c.id DESC`;
 }
 

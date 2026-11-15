@@ -263,9 +263,17 @@ export async function requestInvoice(deps: Deps, raw: unknown, ctx: OpContext): 
       const requestNo = await nextDocNo(tx, 'invoice_request', 'KP', today);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO invoice_requests (request_no, source_type, source_id, source_no, amount_cents, title_type, title, tax_no, email, phone,
-                                      invoice_kind, note, client_key, request_hash, requested_by)
+                                      invoice_kind, note, client_key, request_hash, requested_by, entity_id)
         VALUES (${requestNo}, ${input.sourceType}, ${input.sourceId}, ${src.no}, ${input.amountCents}, ${input.titleType}, ${input.title}, ${input.taxNo},
-                ${input.email}, ${input.phone}, ${input.invoiceKind}, ${input.note}, ${input.clientKey}, ${requestHash}, ${ctx.actor.id})
+                ${input.email}, ${input.phone}, ${input.invoiceKind}, ${input.note}, ${input.clientKey}, ${requestHash}, ${ctx.actor.id},
+                -- 销售方（8.0.22）：结账、充值发生在哪家店就是那家店的主体；回款是当前门店的主体
+                coalesce((SELECT entity_id FROM stores WHERE id = ${
+                  input.sourceType === 'checkout'
+                    ? tx`(SELECT store_id FROM checkouts WHERE id = ${input.sourceId})`
+                    : input.sourceType === 'recharge'
+                      ? tx`(SELECT store_id FROM recharges WHERE id = ${input.sourceId})`
+                      : tx`NULL::bigint`
+                }), yuzu_entity()))
         RETURNING id`;
       await writeAudit(tx, {
         staffId: ctx.actor.id,

@@ -12,22 +12,27 @@ import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { DepartmentItemsCard } from './DepartmentItems';
 import { Columns, HBars, Kpi, PeriodPicker, presetRange, yuan, yuanShort, type Period } from './charts';
 import { Stagger } from '../../lib/motion';
+import { useReportScope } from '../../lib/reportScope';
+import { AiSummaryCard } from '../ai/AiSummaryCard';
 
 const people = (n: number) => `${n} 位`;
 const count = (n: number) => `${n}`;
 
 export function OverviewTab() {
+  const scope = useReportScope();
   const session = useSession();
   const [period, setPeriod] = useState<Period>(() => ({ preset: 'last7', ...presetRange('last7', session.today) }));
   const q = useQuery({
-    queryKey: ['reports', 'executive', period.from, period.to],
-    queryFn: () => api.get<ExecutiveReport>(`/api/reports/executive?from=${period.from}&to=${period.to}`),
+    queryKey: ['reports', 'executive', period.from, period.to, scope.merged],
+    queryFn: () => api.get<ExecutiveReport>(`/api/reports/executive?from=${period.from}&to=${period.to}${scope.q}`),
     enabled: period.from <= period.to,
   });
   const d = q.data;
   const startHour = session.rules.businessDayStartHour;
   return (
     <div className="space-y-5" data-testid="dashboard-overview">
+      {/* 昨日小结（8.0.22 AI 辅助）：关着时不显示 */}
+      <AiSummaryCard />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PeriodPicker value={period} onChange={setPeriod} today={session.today} />
         {d && (

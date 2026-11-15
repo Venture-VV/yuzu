@@ -15,6 +15,7 @@ import { conflict, notFound, unprocessable } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { LOCAL_UNIT_MM } from '../floorplan/convert';
 import { setTxTimeouts } from '../lib/tx';
+import { currentStoreId } from '../lib/store-context';
 
 type P = [number, number];
 
@@ -93,7 +94,7 @@ export const outlineAreaCentiM2 = (poly: P[]) => Math.round(Math.abs(signedArea(
 /** 取「底图」锁，核对批次与编码，锁这个编码现在的补画 */
 async function lockTarget(tx: Tx, batchId: number, code: string) {
   await tx`SELECT pg_advisory_xact_lock(hashtextextended('floorplans', 0))`;
-  const [b] = await tx<{ status: string }[]>`SELECT status FROM floorplan_batches WHERE id = ${batchId}`;
+  const [b] = await tx<{ status: string }[]>`SELECT status FROM floorplan_batches WHERE id = ${batchId} AND store_id = ${currentStoreId()}`;
   if (!b) throw notFound('没有这个底图批次');
   if (b.status !== 'ready' && b.status !== 'active') {
     throw conflict('FLOORPLAN_READONLY', b.status === 'retired' ? '已换下的底图只读；要补画请先换回这一批' : '这一批还不能补画（转换中或转换失败）');

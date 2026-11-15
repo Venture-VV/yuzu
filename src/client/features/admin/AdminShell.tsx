@@ -35,6 +35,7 @@ import {
   UsersRound,
   UtensilsCrossed,
   type LucideIcon,
+  Store,
 } from 'lucide-react';
 import { ADMIN_GROUPS, ADMIN_SECTION_MODULES, ADMIN_SECTIONS, ADMIN_STANDALONE_SECTIONS, type AdminSection } from '@shared/admin';
 import { ERP_MODULES, ERP_SETTINGS_PATH } from '@shared/erp';
@@ -66,6 +67,7 @@ const ICONS: Record<AdminSection, LucideIcon> = {
   devices: Printer,
   integrations: PlugZap,
   mp: Smartphone,
+  stores: Store,
   staff: UsersRound,
   permissions: ShieldCheck,
   canteen: Soup,

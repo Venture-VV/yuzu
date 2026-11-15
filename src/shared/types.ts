@@ -68,6 +68,10 @@ export interface SessionInfo {
   staff: StaffBrief;
   permissions: Permission[];
   storeName: string;
+  /** 当前门店（8.0.22，docs/MULTISTORE_V8022.md 第 2 节） */
+  store: import('./stores').StoreBrief;
+  /** 能进的门店（最近用过的在前）；不止一家时导航栏的门店名可以点开换店 */
+  stores: import('./stores').StoreBrief[];
   rules: StoreRules;
   /** 当前营业日 YYYY-MM-DD（会员业务，按营业日切换时间） */
   today: string;

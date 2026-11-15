@@ -37,6 +37,8 @@ export const contractFileUrl = (fileId: number) => `/api/erp/contracts/files/${f
 
 interface HeaderRow {
   id: number;
+  entityId: number;
+  entityName: string;
   contractNo: string;
   category: ContractCategory;
   title: string;
@@ -68,9 +70,10 @@ const headerSelect = (db: Db, today: string) => db`
          CASE WHEN c.status IN ('signed', 'archived') AND c.end_date IS NOT NULL THEN (c.end_date - ${today}::date) END AS days_left,
          rn.id AS renewal_id, rn.contract_no AS renewal_no, rn.status AS renewal_status,
          (SELECT x.change_no FROM contract_changes x WHERE x.contract_id = c.id AND x.status IN ('draft', 'reviewing', 'returned') LIMIT 1) AS open_change_no,
-         c.updated_at
+         c.updated_at, c.entity_id, en.name AS entity_name
   FROM contracts c
   JOIN staff h ON h.id = c.handler_id
+  JOIN legal_entities en ON en.id = c.entity_id
   LEFT JOIN suppliers s ON s.id = c.supplier_id
   LEFT JOIN departments d ON d.id = c.department_id
   LEFT JOIN LATERAL (SELECT r.id, r.contract_no, r.status FROM contracts r WHERE r.renewal_of = c.id AND r.status <> 'voided' ORDER BY r.id DESC LIMIT 1) rn ON true`;
@@ -94,6 +97,8 @@ function toSummary(r: HeaderRow): ContractSummary {
     renewal: r.renewalId === null ? null : { id: Number(r.renewalId), contractNo: r.renewalNo!, status: r.renewalStatus! },
     openChangeNo: r.openChangeNo,
     updatedAt: r.updatedAt,
+    entityId: Number(r.entityId),
+    entityName: r.entityName,
   };
 }
 
@@ -103,7 +108,7 @@ export type ContractListFilter = 'all' | 'drafting' | 'reviewing' | 'effective' 
 export async function listContracts(
   db: Db,
   today: string,
-  f: { filter?: ContractListFilter; category?: ContractCategory; q?: string } = {},
+  f: { filter?: ContractListFilter; category?: ContractCategory; q?: string; entityId?: number } = {},
 ): Promise<ContractSummary[]> {
   const filter = f.filter ?? 'all';
   const q = f.q ? `%${f.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
@@ -118,6 +123,7 @@ export async function listContracts(
       ${filter === 'expiring' ? db`AND c.status IN ('signed', 'archived') AND c.end_date IS NOT NULL AND c.end_date - ${today}::date <= ${contractRemindDays}` : db``}
       ${filter === 'closed' ? db`AND c.status IN ('terminated', 'voided')` : db``}
       ${f.category ? db`AND c.category = ${f.category}` : db``}
+      ${f.entityId ? db`AND c.entity_id = ${f.entityId}` : db``}
       ${q ? db`AND (c.contract_no ILIKE ${q} OR c.title ILIKE ${q} OR c.counterparty ILIKE ${q})` : db``}
     ORDER BY c.updated_at DESC, c.id DESC
     LIMIT 300`;

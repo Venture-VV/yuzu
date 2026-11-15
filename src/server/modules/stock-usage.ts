@@ -40,11 +40,13 @@ import { idParam, parse } from '../lib/validate';
 import { moveCostCents, todayIn } from './inventory/common';
 import { createDoc } from './inventory/docs';
 import { systemStockActor } from './system-staff';
+import { settingRow } from '../lib/store-settings';
+import { currentStoreId } from '../lib/store-context';
 
 const KEY = 'stock_usage_rules';
 
 export async function loadStockUsageRules(db: Db): Promise<StockUsageRules> {
-  const [row] = await db<{ value: Partial<StockUsageRules> }[]>`SELECT value FROM settings WHERE key = ${KEY}`;
+  const row = await settingRow<Partial<StockUsageRules>>(db, KEY);
   return { ...DEFAULT_STOCK_USAGE_RULES, ...(row?.value ?? {}) };
 }
 
@@ -85,7 +87,7 @@ const canSeeCost = (actor: Actor) => can(actor, 'inventory.cost');
 /** 全部价目项目与它在用的用料（没设的 version = 0） */
 export async function listRecipes(db: Db, actor: Actor): Promise<ItemRecipe[]> {
   // 餐饮开没开（不从 dining 模块引，它要反过来引这里记扣料）
-  const [dr] = await db<{ value: { enabled?: boolean } }[]>`SELECT value FROM settings WHERE key = 'dining_rules'`;
+  const dr = await settingRow<{ enabled?: boolean }>(db, 'dining_rules');
   const dining = { enabled: dr?.value?.enabled ?? DEFAULT_DINING_RULES.enabled };
   const cost = canSeeCost(actor);
   const items = await db<
@@ -233,7 +235,7 @@ export async function recordSaleUsage(tx: Tx, checkoutId: number, billIds: numbe
   if (!rules.enabled) return 0;
   const rows = await tx`
     INSERT INTO stock_usage_events (kind, sign, checkout_id, bill_line_id, item_id, item_name, quantity, recipe_id, material_id, warehouse_id, qty_milli, business_date)
-    SELECT 'sale', 1, ${checkoutId}, src.id, src.item_id, src.name, src.quantity, r.id, rl.material_id, COALESCE(r.warehouse_id, ${rules.saleWarehouseId}), ${usageSql(tx)}, ${date}
+    SELECT 'sale', 1, ${checkoutId}, src.id, src.item_id, src.name, src.quantity, r.id, rl.material_id, COALESCE((SELECT w.id FROM warehouses w WHERE w.id = r.warehouse_id AND w.store_id = ${currentStoreId()}), ${rules.saleWarehouseId}), ${usageSql(tx)}, ${date}
     FROM bill_lines src
     JOIN item_recipes r ON r.item_id = src.item_id AND r.status = 'active'
     JOIN item_recipe_lines rl ON rl.recipe_id = r.id
@@ -260,7 +262,7 @@ export async function recordRecipeUsage(tx: Tx, kitchenItemIds: number[]): Promi
   if (!rules.enabled) return 0;
   const rows = await tx`
     INSERT INTO stock_usage_events (kind, sign, kitchen_item_id, bill_line_id, item_id, item_name, quantity, recipe_id, material_id, warehouse_id, qty_milli, business_date)
-    SELECT 'recipe', 1, src.id, src.bill_line_id, src.item_id, i.name, src.quantity, r.id, rl.material_id, COALESCE(r.warehouse_id, ${rules.recipeWarehouseId}), ${usageSql(tx)}, src.business_date
+    SELECT 'recipe', 1, src.id, src.bill_line_id, src.item_id, i.name, src.quantity, r.id, rl.material_id, COALESCE((SELECT w.id FROM warehouses w WHERE w.id = r.warehouse_id AND w.store_id = ${currentStoreId()}), ${rules.recipeWarehouseId}), ${usageSql(tx)}, src.business_date
     FROM kitchen_items src
     JOIN service_items i ON i.id = src.item_id
     JOIN item_recipes r ON r.item_id = src.item_id AND r.status = 'active'

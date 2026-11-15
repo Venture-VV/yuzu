@@ -18,6 +18,11 @@ const KIND_LABELS: Record<IntegrationKind, string> = {
   einvoice: '开票服务商（数电票）',
   bank_direct: '银企直连（批量付款直接付）',
   ota: 'OTA 渠道直连',
+  ai: 'AI 辅助（经营小结、问数、合同条款提示）',
+};
+/** 正式实现已经写好、配了环境变量就直接用的（不用等联调）：页面上「已配置」不写「等联调」 */
+const LIVE_READY: Partial<Record<IntegrationKind, string>> = {
+  ai: '配了 YUZU_AI_API_KEY 就直接调 Claude（默认 claude-opus-5-5，YUZU_AI_MODEL 可换）；正式服在大陆连不上时经代理（YUZU_AI_BASE_URL，MD8）。开关在下面「AI 辅助」',
 };
 /** 这一版还只能用文件的（没有接口，也没有模拟） */
 const FILE_ONLY: Partial<Record<IntegrationKind, string>> = {
@@ -30,6 +35,8 @@ export interface IntegrationKindInfo {
   label: string;
   mode: IntegrationMode;
   note: string | null;
+  /** 正式实现已经写好（配了就直接用，不用等联调） */
+  liveReady: boolean;
   /** 正式接口要的环境变量配没配（只给名字与有没有，不给值） */
   live: { key: string; label: string; vars: string[]; configured: boolean }[];
 }
@@ -63,7 +70,8 @@ export function registerIntegrationsAdminRoutes(app: FastifyInstance, deps: Deps
       kind,
       label: KIND_LABELS[kind],
       mode: FILE_ONLY[kind] ? 'off' : modeOf(config.integrations, kind),
-      note: FILE_ONLY[kind] ?? null,
+      note: FILE_ONLY[kind] ?? LIVE_READY[kind] ?? null,
+      liveReady: !!LIVE_READY[kind],
       live: Object.entries(LIVE_ENV)
         .filter(([, v]) => v.kind === kind)
         .map(([key, v]) => ({ key, label: v.label, vars: v.vars, configured: config.integrations.liveConfigured.includes(key) })),

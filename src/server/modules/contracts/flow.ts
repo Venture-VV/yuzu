@@ -108,7 +108,8 @@ async function checkHeader(db: Db, h: z.infer<typeof HeaderInput>, actor: Actor,
   return { ...h, counterparty, handlerId };
 }
 
-const CreateInput = HeaderInput.extend({ clientKey: ClientKey, content: ContentInput });
+// 我方公司主体（8.0.22）：不给是当前门店的主体；建好以后不改
+const CreateInput = HeaderInput.extend({ clientKey: ClientKey, content: ContentInput, entityId: z.number().int().positive().optional() });
 
 export async function createContract(deps: Deps, raw: unknown, actor: Actor, ip?: string): Promise<{ id: number; replayed: boolean }> {
   const input = parse(CreateInput, raw);
@@ -128,13 +129,17 @@ export async function createContract(deps: Deps, raw: unknown, actor: Actor, ip?
       if (existing) return { id: existing, replayed: true };
       const h = await checkHeader(tx, input, actor, null);
       const content = await normalizeContent(tx, input.content);
+      if (input.entityId !== undefined) {
+        const [ent] = await tx<{ active: boolean }[]>`SELECT active FROM legal_entities WHERE id = ${input.entityId} FOR KEY SHARE`;
+        if (!ent?.active) throw unprocessable('ENTITY_INVALID', '公司主体不存在或已停用');
+      }
       const contractNo = await nextDocNo(tx, 'contract', 'HT', todayIn(deps.config.timezone));
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO contracts (contract_no, category, supplier_id, counterparty, department_id, handler_id, renewal_of, draft, title, start_date, end_date,
-                               total_cents, client_key, request_hash, created_by)
+                               total_cents, client_key, request_hash, created_by, entity_id)
         VALUES (${contractNo}, ${h.category}, ${h.supplierId}, ${h.counterparty}, ${h.departmentId}, ${h.handlerId}, ${h.renewalOf},
                 ${tx.json(content as never)}, ${content.title}, ${content.startDate}, ${content.endDate}, ${content.totalCents},
-                ${input.clientKey}, ${requestHash}, ${actor.id})
+                ${input.clientKey}, ${requestHash}, ${actor.id}, coalesce(${input.entityId ?? null}::bigint, yuzu_entity()))
         RETURNING id`;
       await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract', targetId: row!.id, detail: { op: 'create', contractNo }, ip });
       return { id: Number(row!.id), replayed: false };

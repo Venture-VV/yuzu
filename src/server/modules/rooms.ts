@@ -60,11 +60,13 @@ import type { RoomQuote } from '@shared/rooms';
 import { bestRoomDiscountRate } from './member-discounts';
 import { benefitState } from './member-trials';
 import { projectedGrade } from './membership';
+import { settingRow } from '../lib/store-settings';
+import { currentStoreId } from '../lib/store-context';
 
 // ───────────────────────── 规则 ─────────────────────────
 
 export async function loadRoomRules(db: Db): Promise<RoomRules> {
-  const [row] = await db<{ value: Partial<RoomRules> }[]>`SELECT value FROM settings WHERE key = 'room_rules'`;
+  const row = await settingRow<Partial<RoomRules>>(db, 'room_rules');
   return { ...DEFAULT_ROOM_RULES, ...(row?.value ?? {}) };
 }
 
@@ -101,16 +103,16 @@ export async function roomsAdmin(db: Db): Promise<RoomsAdmin> {
            (SELECT count(*) FROM rooms r WHERE r.room_type_id = t.id AND r.active)::int AS room_count,
            COALESCE((SELECT jsonb_agg(jsonb_build_object('grade', mp.grade, 'price', mp.price) ORDER BY mp.grade)
                      FROM room_type_member_prices mp WHERE mp.room_type_id = t.id), '[]'::jsonb) AS member_prices
-    FROM room_types t ORDER BY t.sort_order, t.id`;
+    FROM room_types t WHERE t.store_id = ${currentStoreId()} ORDER BY t.sort_order, t.id`;
   const rooms = await db<RoomsAdmin['rooms']>`
     SELECT r.id, r.room_no, r.floor, r.room_type_id, r.housekeeping, r.maintenance_note, r.sort_order, r.active,
            EXISTS (SELECT 1 FROM room_stays s WHERE s.room_id = r.id AND s.status = 'open') AS occupied,
            r.space_id, sp.code AS space_code, sp.display_name AS space_name
-    FROM rooms r LEFT JOIN spaces sp ON sp.id = r.space_id ORDER BY r.floor, r.sort_order, r.room_no`;
+    FROM rooms r LEFT JOIN spaces sp ON sp.id = r.space_id WHERE r.store_id = ${currentStoreId()} ORDER BY r.floor, r.sort_order, r.room_no`;
   const spaces = await db<RoomsAdmin['spaces']>`
     SELECT s.id, s.code, s.display_name, f.code AS floor_code, s.active, r.id AS room_id
     FROM spaces s JOIN floors f ON f.id = s.floor_id LEFT JOIN rooms r ON r.space_id = s.id
-    WHERE s.business_type = ${ROOM_BUSINESS_TYPE} AND (s.active OR r.id IS NOT NULL)
+    WHERE s.business_type = ${ROOM_BUSINESS_TYPE} AND (s.active OR r.id IS NOT NULL) AND s.store_id = ${currentStoreId()}
     ORDER BY f.sort_order, s.code`;
   return {
     rules,
@@ -160,7 +162,7 @@ async function saveRoomType(deps: Deps, id: number | null, raw: unknown, ctx: Op
   const t = parse(RoomTypeInput, raw);
   const block = t.kind === 'hourly' ? t.blockMinutes! : null;
   await deps.sql.begin(async (tx) => {
-    const [dup] = await tx<{ id: number }[]>`SELECT id FROM room_types WHERE lower(btrim(name)) = lower(${t.name}) AND id IS DISTINCT FROM ${id}`;
+    const [dup] = await tx<{ id: number }[]>`SELECT id FROM room_types WHERE lower(btrim(name)) = lower(${t.name}) AND id IS DISTINCT FROM ${id} AND store_id = ${currentStoreId()}`;
     if (dup) throw conflict('ROOM_TYPE_NAME_TAKEN', `已有房型「${t.name}」`);
     if (id === null) {
       const [row] = await tx<{ id: number }[]>`
@@ -177,7 +179,7 @@ async function saveRoomType(deps: Deps, id: number | null, raw: unknown, ctx: Op
       });
       return;
     }
-    const [cur] = await tx<{ name: string; price: number }[]>`SELECT name, price FROM room_types WHERE id = ${id} FOR UPDATE`;
+    const [cur] = await tx<{ name: string; price: number }[]>`SELECT name, price FROM room_types WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!cur) throw notFound('房型不存在');
     if (!t.active) {
       const [used] = await tx<{ n: number }[]>`SELECT count(*)::int AS n FROM rooms WHERE room_type_id = ${id} AND active`;
@@ -225,7 +227,7 @@ const RoomInput = z.object({
  */
 async function lockLinkableSpace(tx: Tx, spaceId: number, roomId: number | null) {
   const [space] = await tx<{ code: string; displayName: string; businessType: string; active: boolean }[]>`
-    SELECT code, display_name, business_type, active FROM spaces WHERE id = ${spaceId} FOR UPDATE`;
+    SELECT code, display_name, business_type, active FROM spaces WHERE id = ${spaceId} AND store_id = ${currentStoreId()} FOR UPDATE`;
   if (!space) throw notFound('空间不存在，请刷新后重试');
   if (!space.active) throw conflict('SPACE_INACTIVE', `空间 ${space.code} 已停用，不能挂客房`);
   if (space.businessType !== ROOM_BUSINESS_TYPE) throw conflict('SPACE_NOT_ROOM', `空间 ${space.code} 的业态是「${space.businessType}」，客房只能挂「${ROOM_BUSINESS_TYPE}」的空间`);
@@ -239,7 +241,7 @@ async function saveRoom(deps: Deps, id: number | null, raw: unknown, ctx: OpCont
   const reasonOk = r.linkReason.length >= 2;
   try {
     await deps.sql.begin(async (tx) => {
-      const [type] = await tx<{ active: boolean }[]>`SELECT active FROM room_types WHERE id = ${r.roomTypeId}`;
+      const [type] = await tx<{ active: boolean }[]>`SELECT active FROM room_types WHERE id = ${r.roomTypeId} AND store_id = ${currentStoreId()}`;
       if (!type) throw notFound('房型不存在，请刷新后重试');
       if (id === null) {
         if (!type.active) throw conflict('ROOM_TYPE_INACTIVE', '这个房型已停用，请换一个房型');
@@ -251,11 +253,11 @@ async function saveRoom(deps: Deps, id: number | null, raw: unknown, ctx: OpCont
           spaceId = r.spaceId;
         } else {
           // 空间台账里已有客房：新建的房间都要从台账里选（房号不再手工录入）
-          const [required] = await tx`SELECT 1 FROM spaces WHERE business_type = ${ROOM_BUSINESS_TYPE} AND active LIMIT 1`;
+          const [required] = await tx`SELECT 1 FROM spaces WHERE business_type = ${ROOM_BUSINESS_TYPE} AND active AND store_id = ${currentStoreId()} LIMIT 1`;
           if (required) throw unprocessable('ROOM_SPACE_REQUIRED', '空间台账里已有客房：新建房间请选一个空间，房号就是空间编码');
           if (!roomNo) throw unprocessable('ROOM_NO_REQUIRED', '请填写房号');
         }
-        const [dup] = await tx<{ id: number }[]>`SELECT id FROM rooms WHERE lower(btrim(room_no)) = lower(${roomNo})`;
+        const [dup] = await tx<{ id: number }[]>`SELECT id FROM rooms WHERE lower(btrim(room_no)) = lower(${roomNo}) AND store_id = ${currentStoreId()}`;
         if (dup) throw conflict('ROOM_NO_TAKEN', `已有房间「${roomNo}」${spaceId ? '（先把那间房挂到这个空间上，或改它的房号）' : ''}`);
         const [row] = await tx<{ id: number }[]>`
           INSERT INTO rooms (room_no, floor, room_type_id, sort_order, active, created_by, space_id)
@@ -271,7 +273,7 @@ async function saveRoom(deps: Deps, id: number | null, raw: unknown, ctx: OpCont
         return;
       }
       const [cur] = await tx<{ roomNo: string; roomTypeId: number; spaceId: number | null }[]>`
-        SELECT room_no, room_type_id, space_id FROM rooms WHERE id = ${id} FOR UPDATE`;
+        SELECT room_no, room_type_id, space_id FROM rooms WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
       if (!cur) throw notFound('房间不存在');
       const [busy] = await tx<{ stayNo: string }[]>`SELECT stay_no FROM room_stays WHERE room_id = ${id} AND status = 'open'`;
       if (busy && (!r.active || r.roomTypeId !== cur.roomTypeId)) {
@@ -298,7 +300,7 @@ async function saveRoom(deps: Deps, id: number | null, raw: unknown, ctx: OpCont
         if (!roomNo) throw unprocessable('ROOM_NO_REQUIRED', '请填写房号');
         if (relink) linkNote = `，取消挂接空间（${r.linkReason}）`;
       }
-      const [dup] = await tx<{ id: number }[]>`SELECT id FROM rooms WHERE lower(btrim(room_no)) = lower(${roomNo}) AND id <> ${id}`;
+      const [dup] = await tx<{ id: number }[]>`SELECT id FROM rooms WHERE lower(btrim(room_no)) = lower(${roomNo}) AND id <> ${id} AND store_id = ${currentStoreId()}`;
       if (dup) throw conflict('ROOM_NO_TAKEN', `已有房间「${roomNo}」`);
       await tx`
         UPDATE rooms SET room_no = ${roomNo}, floor = ${r.floor}, room_type_id = ${r.roomTypeId}, sort_order = ${r.sortOrder}, active = ${r.active},
@@ -379,7 +381,7 @@ const byMethodList = (m: Map<PaymentMethod, number> | undefined) =>
   PAYMENT_METHODS.filter((k) => (m?.get(k) ?? 0) !== 0).map((k) => ({ method: k, balance: m!.get(k)! }));
 
 export async function getStay(db: Db, id: number): Promise<StayDetail> {
-  const [s] = await db<StayRow[]>`${staySelect(db)} WHERE s.id = ${id}`;
+  const [s] = await db<StayRow[]>`${staySelect(db)} WHERE s.id = ${id} AND s.store_id = ${currentStoreId()}`;
   if (!s) throw notFound('入住单不存在');
   const charges = await db<StayDetail['charges']>`
     SELECT c.id, c.kind, c.night_date, c.block_no, c.amount, c.source, c.line_id, l.status AS line_status, c.created_at,
@@ -406,10 +408,10 @@ async function auditState(db: Db, deps: Deps, now: Date): Promise<RoomAuditState
   const date = businessDateOf(now, clock.timeZone, clock.startHour);
   const [last] = await db<{ runAt: string; runByName: string }[]>`
     SELECT a.run_at, st.display_name AS run_by_name FROM room_audits a JOIN staff st ON st.id = a.run_by
-    WHERE a.business_date = ${date} ORDER BY a.id DESC LIMIT 1`;
+    WHERE a.business_date = ${date} AND a.store_id = ${currentStoreId()} ORDER BY a.id DESC LIMIT 1`;
   const [pending] = await db<{ n: number }[]>`
     SELECT count(*)::int AS n FROM room_stays s
-    WHERE s.status = 'open' AND s.kind = 'daily' AND s.business_date < ${date}
+    WHERE s.status = 'open' AND s.kind = 'daily' AND s.business_date < ${date} AND s.store_id = ${currentStoreId()}
       AND NOT EXISTS (SELECT 1 FROM room_stay_charges c WHERE c.stay_id = s.id AND c.kind = 'night' AND c.night_date = ${date})`;
   return {
     date,
@@ -427,7 +429,7 @@ const boardStatus = (housekeeping: string, occupied: boolean): RoomBoardStatus =
 async function roomStatusCounts(db: Db): Promise<Record<RoomBoardStatus, number>> {
   const rows = await db<{ housekeeping: string; occupied: boolean }[]>`
     SELECT r.housekeeping, EXISTS (SELECT 1 FROM room_stays s WHERE s.room_id = r.id AND s.status = 'open') AS occupied
-    FROM rooms r WHERE r.active`;
+    FROM rooms r WHERE r.active AND r.store_id = ${currentStoreId()}`;
   const counts: Record<RoomBoardStatus, number> = { vacant: 0, occupied: 0, dirty: 0, maintenance: 0 };
   for (const r of rows) counts[boardStatus(r.housekeeping, r.occupied)] += 1;
   return counts;
@@ -473,7 +475,7 @@ export async function roomsBoard(deps: Deps): Promise<RoomBoard> {
       FROM room_housekeeping_events e JOIN staff st ON st.id = e.staff_id
       WHERE e.room_id = r.id ORDER BY e.id DESC LIMIT 1
     ) hk ON true
-    WHERE r.active OR s.id IS NOT NULL
+    WHERE (r.active OR s.id IS NOT NULL) AND r.store_id = ${currentStoreId()}
     ORDER BY r.floor, r.sort_order, r.room_no`;
   const ids = rooms.flatMap((r) => (r.stayId ? [r.stayId] : []));
   const stays = ids.length ? await db<StayRow[]>`${staySelect(db)} WHERE s.id IN ${db(ids)}` : [];
@@ -518,7 +520,8 @@ async function lockRooms(tx: Tx, ids: number[]): Promise<Map<number, LockedRoom>
   const unique = [...new Set(ids)].sort((a, b) => a - b);
   if (unique.length === 0) return new Map();
   const rows = await tx<LockedRoom[]>`
-    SELECT id, room_no, room_type_id, housekeeping, active FROM rooms WHERE id IN ${tx(unique)} ORDER BY id FOR UPDATE`;
+    SELECT id, room_no, room_type_id, housekeeping, active FROM rooms WHERE id IN ${tx(unique)} AND store_id = ${currentStoreId()} ORDER BY id FOR UPDATE`;
+  // 别家店的房间（8.0.22）：与不存在一样
   if (rows.length !== unique.length) throw notFound('房间不存在，请刷新后重试');
   return new Map(rows.map((r) => [r.id, r]));
 }
@@ -548,7 +551,7 @@ async function lockStays(tx: Tx, ids: number[], lockedRooms?: Map<number, number
   if (unique.length === 0) return new Map();
   let roomOf = lockedRooms;
   if (!roomOf) {
-    const peek = await tx<{ id: number; roomId: number }[]>`SELECT id, room_id FROM room_stays WHERE id IN ${tx(unique)}`;
+    const peek = await tx<{ id: number; roomId: number }[]>`SELECT id, room_id FROM room_stays WHERE id IN ${tx(unique)} AND store_id = ${currentStoreId()}`;
     if (peek.length !== unique.length) throw notFound('入住单不存在，请刷新后重试');
     await lockRooms(tx, peek.map((p) => p.roomId));
     roomOf = new Map(peek.map((p) => [p.id, p.roomId]));
@@ -736,7 +739,7 @@ export async function checkinRoom(deps: Deps, raw: unknown, ctx: OpContext): Pro
     const date = await businessDate(tx, deps, at);
     // 房费挂在在店客人的手牌账单上
     const [peek] = await tx<{ id: number }[]>`
-      SELECT v.id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.tagCode} AND v.status = 'open'`;
+      SELECT v.id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.tagCode} AND v.status = 'open' AND t.store_id = ${currentStoreId()}`;
     if (!peek) throw conflict('TAG_NOT_IN_STORE', `手牌 ${input.tagCode} 没有在店客人，请核对牌号；住客要先在前台接待、买门票，再入住客房`);
     const visit = (await lockVisits(tx, [peek.id])).get(peek.id)!;
     assertOpen(visit);
@@ -881,7 +884,7 @@ export async function moveStay(deps: Deps, id: number, raw: unknown, ctx: OpCont
     await setTxTimeouts(tx);
     const at = ctx.at ?? new Date();
     await assertRoomsEnabled(tx);
-    const [peek] = await tx<{ roomId: number }[]>`SELECT room_id FROM room_stays WHERE id = ${id}`;
+    const [peek] = await tx<{ roomId: number }[]>`SELECT room_id FROM room_stays WHERE id = ${id} AND store_id = ${currentStoreId()}`;
     if (!peek) throw notFound('入住单不存在');
     if (peek.roomId === input.toRoomId) throw badRequest('新房间与原房间相同');
     // 两间房一起按 id 升序加锁，再锁入住单；入住单在这之前被别的终端换走了就拒绝（不再去锁第三间房）
@@ -1041,7 +1044,7 @@ export async function previewStayCheckout(deps: Deps, id: number, at = new Date(
   return deps.sql.begin('isolation level repeatable read read only', async (tx) => {
     const [s] = await tx<LockedStay[]>`
       SELECT id, stay_no, room_id, kind, rate, block_minutes, bill_id, visit_id, guests, status, business_date, checked_in_at, checked_in_by
-      FROM room_stays WHERE id = ${id}`;
+      FROM room_stays WHERE id = ${id} AND store_id = ${currentStoreId()}`;
     if (!s) throw notFound('入住单不存在');
     assertStayOpen(s);
     const dues = await duesNow(tx, deps, s, at);
@@ -1184,7 +1187,7 @@ export async function runNightAudit(deps: Deps, ctx: OpContext): Promise<RoomAud
     if (at.getTime() < cutoff.getTime()) {
       throw unprocessable('AUDIT_TOO_EARLY', `今天的夜审要在 ${hhmm(rules.lateFullMinute)} 以后做（这时还在住的客人要付今晚的房费）`);
     }
-    const open = await tx<{ id: number }[]>`SELECT id FROM room_stays WHERE status = 'open' AND kind = 'daily' ORDER BY id`;
+    const open = await tx<{ id: number }[]>`SELECT id FROM room_stays WHERE status = 'open' AND kind = 'daily' AND store_id = ${currentStoreId()} ORDER BY id`;
     const stays = await lockStays(tx, open.map((s) => s.id));
     const postKey = randomUUID();
     const posted: RoomAuditReport['posted'] = [];
@@ -1210,7 +1213,7 @@ export async function runNightAudit(deps: Deps, ctx: OpContext): Promise<RoomAud
     return { date, posted, amount };
   });
   const db = deps.sql;
-  const open = await db<StayRow[]>`${staySelect(db)} WHERE s.status = 'open' ORDER BY r.floor, r.sort_order, r.room_no`;
+  const open = await db<StayRow[]>`${staySelect(db)} WHERE s.status = 'open' AND s.store_id = ${currentStoreId()} ORDER BY r.floor, r.sort_order, r.room_no`;
   return {
     date: result.date,
     runAt: at.toISOString(),
@@ -1265,11 +1268,11 @@ export function registerRoomRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/rooms/quote', { preHandler: opGuard }, async (req) => {
     const q = parse(z.object({ roomId: z.coerce.number().int().positive(), tag: z.string().trim().max(16).default('') }), req.query ?? {});
     const [room] = await deps.sql<{ roomTypeId: number; price: number }[]>`
-      SELECT r.room_type_id, t.price FROM rooms r JOIN room_types t ON t.id = r.room_type_id WHERE r.id = ${q.roomId}`;
+      SELECT r.room_type_id, t.price FROM rooms r JOIN room_types t ON t.id = r.room_type_id WHERE r.id = ${q.roomId} AND r.store_id = ${currentStoreId()}`;
     if (!room) throw notFound('房间不存在');
     const tag = q.tag ? normalizeTagCode(q.tag) : '';
     const [visit] = tag
-      ? await deps.sql<{ memberId: number | null }[]>`SELECT v.member_id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${tag} AND v.status = 'open'`
+      ? await deps.sql<{ memberId: number | null }[]>`SELECT v.member_id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${tag} AND v.status = 'open' AND t.store_id = ${currentStoreId()}`
       : [];
     return roomQuote(deps.sql, room.roomTypeId, room.price, visit?.memberId ?? null, await businessDate(deps.sql, deps, new Date()));
   });

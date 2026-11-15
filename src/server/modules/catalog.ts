@@ -6,7 +6,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { defaultTier, isCareItem, PRICE_TIERS, sortTiers, STRENGTHS, tierPrice, type TierPrice } from '@shared/catalog';
+import { defaultTier, isCareItem, PRICE_TIERS, sortTiers, STRENGTHS, tierPrice, type PriceTier, type TierPrice } from '@shared/catalog';
 import { PRICE_LIST_MAX_ROWS, type BuiltinPriceList, type PriceListImportReport } from '@shared/price-list-import';
 import type { Catalog, RechargePlan, ServiceItem } from '@shared/types';
 import type { Db, Sql, Tx } from '../db';
@@ -17,6 +17,7 @@ import type { Deps } from '../lib/context';
 import { badRequest, conflict, notFound } from '../lib/errors';
 import { cents, idParam, parse, positiveCents } from '../lib/validate';
 import { pricesColumn } from './pricing';
+import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
 
 const PlanInput = z.object({
   name: z.string().trim().min(1, '请填写套餐名称').max(32, '名称最多 32 个字'),
@@ -64,22 +65,23 @@ const ItemInput = z
   .refine((v) => v.tiers.length > 0, '请至少填写一档价格');
 type ItemData = z.output<typeof ItemInput>;
 
-const ITEM_COLUMNS = (db: Db) => db`
+const ITEM_COLUMNS = (db: Db, base = false) => db`
   i.id, i.name, i.category, i.price, i.duration_minutes, i.gender, i.strength, i.essential_oil, i.heat_therapy, i.popular,
-  i.technician_required, i.note, i.active, i.sort_order, ${pricesColumn(db)} AS prices`;
+  i.technician_required, i.note, i.active, i.sort_order, ${pricesColumn(db, { base })} AS prices`;
 
-export async function loadItems(db: Db, includeInactive = false): Promise<ServiceItem[]> {
+/** base：全公司的价目（后台维护价目表用）；不给时第二家店按本店价（前台挂账、点单用，8.0.22） */
+export async function loadItems(db: Db, includeInactive = false, base = false): Promise<ServiceItem[]> {
   const rows = await db<ServiceItem[]>`
-    SELECT ${ITEM_COLUMNS(db)} FROM service_items i
+    SELECT ${ITEM_COLUMNS(db, base)} FROM service_items i
     ${includeInactive ? db`` : db`WHERE i.active`} ORDER BY i.active DESC, i.sort_order, i.id`;
   return rows.map((r) => ({ ...r, prices: sortTiers(r.prices) }));
 }
 
-export async function loadCatalog(db: Db, includeInactive = false): Promise<Catalog> {
+export async function loadCatalog(db: Db, includeInactive = false, base = includeInactive): Promise<Catalog> {
   const plans = await db<RechargePlan[]>`
     SELECT id, name, pay_amount, bonus_amount, bonus_valid_days, note, active, sort_order FROM recharge_plans
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, sort_order, pay_amount, id`;
-  return { plans, items: await loadItems(db, includeInactive) };
+  return { plans, items: await loadItems(db, includeInactive, base) };
 }
 
 /** 写入项目与各档价格（调用方开事务）；默认档价格同步写入 service_items.price */
@@ -162,7 +164,7 @@ export async function importPriceList(
   return sql.begin(async (tx) => {
     // 先锁定全部项目（id 升序），与同时进行的项目编辑串行
     const existing = await tx<{ id: number }[]>`SELECT id FROM service_items ORDER BY id ${input.dryRun ? tx`` : tx`FOR UPDATE`}`;
-    const items = existing.length ? await loadItems(tx, true) : [];
+    const items = existing.length ? await loadItems(tx, true, true) : [];
     const byName = new Map<string, ServiceItem[]>();
     for (const it of items) byName.set(it.name, [...(byName.get(it.name) ?? []), it]);
 
@@ -322,6 +324,44 @@ export function registerCatalogRoutes(app: FastifyInstance, { sql }: Deps) {
       await writeAudit(tx, { staffId: req.actor.id, action: 'item_saved', targetType: 'item', targetId: id, detail: i, ip: req.ip });
     });
     return loadCatalog(sql, true);
+  });
+
+  // 本店价（8.0.22，价目按店覆盖）：第二家店里打开时，每个项目每一档的全公司价与本店价；本店不用
+  app.get('/api/admin/catalog/store-prices', { preHandler: guard('catalog.manage') }, async () => {
+    const storeId = currentStoreId();
+    if (storeId === DEFAULT_STORE_ID) throw badRequest('本店用全公司的价目表；本店价在第二家店里设');
+    return sql<{ itemId: number; name: string; category: string; active: boolean; tier: PriceTier; price: number; storePrice: number | null }[]>`
+      SELECT i.id AS item_id, i.name, i.category, i.active, p.tier, p.price, sp.price AS store_price
+      FROM service_items i JOIN service_item_prices p ON p.item_id = i.id
+      LEFT JOIN service_item_store_prices sp ON sp.item_id = i.id AND sp.tier = p.tier AND sp.store_id = ${storeId}
+      ORDER BY i.active DESC, i.sort_order, i.id, p.tier`.then((rows) =>
+      rows.map((r) => ({ ...r, itemId: Number(r.itemId), price: Number(r.price), storePrice: r.storePrice === null ? null : Number(r.storePrice) })),
+    );
+  });
+
+  app.put('/api/admin/catalog/store-prices', { preHandler: guard('catalog.manage') }, async (req) => {
+    const storeId = currentStoreId();
+    if (storeId === DEFAULT_STORE_ID) throw badRequest('本店用全公司的价目表；本店价在第二家店里设');
+    const input = parse(
+      z.object({
+        itemId: z.number().int().positive(),
+        tier: z.enum(['standard', 'professional', 'premium']),
+        // null：取消本店价，按全公司的
+        price: z.number().int().positive().max(100_000_000).nullable(),
+      }),
+      req.body,
+    );
+    await sql.begin(async (tx) => {
+      const [p] = await tx`SELECT 1 FROM service_item_prices WHERE item_id = ${input.itemId} AND tier = ${input.tier}`;
+      if (!p) throw notFound('这个项目没有这一档价格');
+      if (input.price === null) await tx`DELETE FROM service_item_store_prices WHERE store_id = ${storeId} AND item_id = ${input.itemId} AND tier = ${input.tier}`;
+      else
+        await tx`
+          INSERT INTO service_item_store_prices (store_id, item_id, tier, price, updated_by) VALUES (${storeId}, ${input.itemId}, ${input.tier}, ${input.price}, ${req.actor.id})
+          ON CONFLICT (store_id, item_id, tier) DO UPDATE SET price = EXCLUDED.price, updated_by = EXCLUDED.updated_by, updated_at = now()`;
+      await writeAudit(tx, { staffId: req.actor.id, action: 'item_saved', targetType: 'item', targetId: input.itemId, detail: { storePrice: input }, ip: req.ip });
+    });
+    return { ok: true };
   });
 
   // 价目表：内置清单（店主提供）与按清单导入（默认只预览）

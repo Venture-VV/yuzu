@@ -41,6 +41,7 @@ import { setTxTimeouts } from '../lib/tx';
 import { idParam, parse } from '../lib/validate';
 import { erpOpAbandoned } from './erp-ops';
 import { recordItemPaid } from './payment-batches';
+import { currentStoreId } from '../lib/store-context';
 
 const READ = guard('payable.read');
 const MANAGE = guard('payable.manage');
@@ -53,8 +54,10 @@ interface AccountRow extends Omit<BankAccount, 'id'> {
   id: number;
 }
 async function listAccounts(db: Db): Promise<BankAccount[]> {
-  const rows = await db<AccountRow[]>`SELECT id, name, bank_name, account_tail, template, column_map, active, version FROM bank_accounts ORDER BY NOT active, id`;
-  return rows.map((r) => ({ ...r, id: Number(r.id), columnMap: (r.columnMap ?? {}) as ColumnMap }));
+  const rows = await db<AccountRow[]>`
+    SELECT a.id, a.name, a.bank_name, a.account_tail, a.template, a.column_map, a.active, a.version, a.entity_id, e.name AS entity_name
+    FROM bank_accounts a JOIN legal_entities e ON e.id = a.entity_id ORDER BY NOT a.active, a.id`;
+  return rows.map((r) => ({ ...r, id: Number(r.id), entityId: Number(r.entityId), columnMap: (r.columnMap ?? {}) as ColumnMap }));
 }
 async function getAccount(db: Db, id: number): Promise<BankAccount> {
   const a = (await listAccounts(db)).find((x) => x.id === id);
@@ -67,14 +70,19 @@ const AccountInput = z.object({
   bankName: z.string('请填写开户行').trim().min(1, '请填写开户行').max(40, '开户行最多 40 个字'),
   accountTail: z.string('请填写账号后四位').trim().regex(/^[0-9]{4}$/, '只填账号的后四位数字（完整账号不进系统）'),
   template: z.enum(BANK_TEMPLATES, '网银格式不对').default('generic'),
+  // 所属公司主体（8.0.22）：不给是当前门店的主体；建好以后不改
+  entityId: z.number().int().positive().optional(),
 });
 
 async function createAccount(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
   const input = parse(AccountInput, raw);
   try {
+    const entityId = input.entityId ?? Number((await deps.sql<{ id: number }[]>`SELECT entity_id AS id FROM stores WHERE id = ${currentStoreId()}`)[0]!.id);
+    const [ent] = await deps.sql<{ active: boolean }[]>`SELECT active FROM legal_entities WHERE id = ${entityId}`;
+    if (!ent?.active) throw unprocessable('ENTITY_INVALID', '公司主体不存在或已停用');
     const [row] = await deps.sql<{ id: number }[]>`
-      INSERT INTO bank_accounts (name, bank_name, account_tail, template, created_by)
-      VALUES (${input.name}, ${input.bankName}, ${input.accountTail}, ${input.template}, ${actor.id}) RETURNING id`;
+      INSERT INTO bank_accounts (name, bank_name, account_tail, template, created_by, entity_id)
+      VALUES (${input.name}, ${input.bankName}, ${input.accountTail}, ${input.template}, ${actor.id}, ${entityId}) RETURNING id`;
     await writeAudit(deps.sql, { staffId: actor.id, action: 'bank_account', targetType: 'bank_account', targetId: row!.id, detail: { op: 'create', ...input }, ip });
     return getAccount(deps.sql, Number(row!.id));
   } catch (error) {

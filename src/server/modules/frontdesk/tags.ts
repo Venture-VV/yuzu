@@ -10,6 +10,7 @@ import { badRequest, conflict, notFound } from '../../lib/errors';
 import { parse } from '../../lib/validate';
 import type { Deps } from '../../lib/context';
 import { setTxTimeouts } from './common';
+import { currentStoreId } from '../../lib/store-context';
 
 export async function listTags(db: Db): Promise<(HandTag & { inUse: boolean; lockedByName: string | null; lockedAt: string | null })[]> {
   return db`
@@ -17,6 +18,7 @@ export async function listTags(db: Db): Promise<(HandTag & { inUse: boolean; loc
            s.display_name AS locked_by_name,
            EXISTS (SELECT 1 FROM visits v WHERE v.tag_id = t.id AND v.status = 'open') AS in_use
     FROM hand_tags t LEFT JOIN staff s ON s.id = t.locked_by
+    WHERE t.store_id = ${currentStoreId()}
     ORDER BY CASE t.zone WHEN 'male' THEN 0 WHEN 'female' THEN 1 ELSE 2 END, t.kind = 'vip', t.vip_level,
              regexp_replace(t.code, '[0-9]', '', 'g'), length(t.code), t.code`;
 }
@@ -49,7 +51,7 @@ export async function batchCreate(deps: Deps, raw: unknown, ctx: OpContext) {
   return deps.sql.begin(async (tx) => {
     const rows = await tx<{ code: string }[]>`
       INSERT INTO hand_tags (code, zone, kind, vip_level) SELECT unnest(${codes}::text[]), ${input.zone}, ${input.kind}, ${input.vipLevel}
-      ON CONFLICT (code) DO NOTHING RETURNING code`;
+      ON CONFLICT (store_id, code) DO NOTHING RETURNING code`;
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'hand_tags_created',
@@ -68,7 +70,7 @@ export async function batchCreate(deps: Deps, raw: unknown, ctx: OpContext) {
  */
 async function lockTag(tx: Db, id: number) {
   const [tag] = await tx<{ id: number; code: string; zone: string; kind: string; vipLevel: number | null; locked: boolean; active: boolean }[]>`
-    SELECT id, code, zone, kind, vip_level, locked, active FROM hand_tags WHERE id = ${id} FOR UPDATE`;
+    SELECT id, code, zone, kind, vip_level, locked, active FROM hand_tags WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
   if (!tag) throw notFound('手牌不存在');
   const [use] = await tx<{ inUse: boolean }[]>`
     SELECT EXISTS (SELECT 1 FROM visits WHERE tag_id = ${id} AND status = 'open') AS in_use`;
@@ -181,7 +183,7 @@ export async function importHandTags(
   return sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const existing = await tx<{ id: number; code: string; zone: string; kind: string; vipLevel: number | null; active: boolean }[]>`
-      SELECT id, code, zone, kind, vip_level, active FROM hand_tags ORDER BY id ${input.dryRun ? tx`` : tx`FOR UPDATE`}`;
+      SELECT id, code, zone, kind, vip_level, active FROM hand_tags WHERE store_id = ${currentStoreId()} ORDER BY id ${input.dryRun ? tx`` : tx`FOR UPDATE`}`;
     const inUse = new Set(
       (await tx<{ tagId: number }[]>`SELECT tag_id FROM visits WHERE status = 'open'`).map((r) => r.tagId),
     );
@@ -232,7 +234,7 @@ export async function importHandTags(
           SELECT u.code, u.zone, u.kind, u.vip_level, ${options.synthetic ?? false}
           FROM unnest(${create.map((r) => r.code)}::text[], ${create.map((r) => r.zone)}::text[], ${create.map((r) => r.kind)}::text[],
                       ${create.map((r) => r.vipLevel) as never}::smallint[]) AS u(code, zone, kind, vip_level)
-          ON CONFLICT (code) DO NOTHING RETURNING code`;
+          ON CONFLICT (store_id, code) DO NOTHING RETURNING code`;
         if (rows.length !== create.length) throw conflict('TAGS_CHANGED', '手牌池刚刚有其他人新建了手牌，请重新预览后再导入');
       }
       if (update.length) {

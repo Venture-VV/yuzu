@@ -22,9 +22,11 @@ import { pricesColumn } from './pricing';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { recordRecipeUsage, reverseRecipeUsage } from './stock-usage';
+import { settingRow } from '../lib/store-settings';
+import { currentStoreId } from '../lib/store-context';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
-  const [row] = await db<{ value: Partial<DiningRules> }[]>`SELECT value FROM settings WHERE key = 'dining_rules'`;
+  const row = await settingRow<Partial<DiningRules>>(db, 'dining_rules');
   return { ...DEFAULT_DINING_RULES, ...(row?.value ?? {}) };
 }
 
@@ -178,16 +180,16 @@ export async function kitchenBoard(db: Db, deps: Deps): Promise<KitchenBoard> {
   // 今天还在做的、出了餐还没上的，以及最近上过 / 退过的 30 道（核对用）
   const open = await db<KitchenItem[]>`
     SELECT ${ITEM_COLUMNS(db)} FROM ${ITEM_FROM(db)}
-    WHERE k.status IN ('queued', 'cooking', 'done') ORDER BY k.created_at, k.id`;
+    WHERE k.status IN ('queued', 'cooking', 'done') AND k.store_id = ${currentStoreId()} ORDER BY k.created_at, k.id`;
   const recent = await db<KitchenItem[]>`
     SELECT ${ITEM_COLUMNS(db)} FROM ${ITEM_FROM(db)}
-    WHERE k.business_date = ${today} AND k.status IN ('served', 'cancelled') ORDER BY coalesce(k.served_at, k.cancelled_at) DESC, k.id DESC LIMIT 30`;
+    WHERE k.business_date = ${today} AND k.status IN ('served', 'cancelled') AND k.store_id = ${currentStoreId()} ORDER BY coalesce(k.served_at, k.cancelled_at) DESC, k.id DESC LIMIT 30`;
   const [t] = await db<{ orders: number; dishes: number; served: number; cancelled: number; avgMinutes: number | null }[]>`
     SELECT count(DISTINCT order_no)::int AS orders, coalesce(sum(quantity) FILTER (WHERE status <> 'cancelled'), 0)::int AS dishes,
            coalesce(sum(quantity) FILTER (WHERE status = 'served'), 0)::int AS served,
            coalesce(sum(quantity) FILTER (WHERE status = 'cancelled'), 0)::int AS cancelled,
            round(avg(extract(epoch FROM done_at - created_at) / 60) FILTER (WHERE done_at IS NOT NULL AND status <> 'cancelled'))::int AS avg_minutes
-    FROM kitchen_items WHERE business_date = ${today}`;
+    FROM kitchen_items WHERE business_date = ${today} AND store_id = ${currentStoreId()}`;
   return { serverTime: now.toISOString(), businessDate: today, rules, stations, items: [...open, ...recent], dishes, today: t! };
 }
 
@@ -226,7 +228,7 @@ export async function diningGuestOf(db: Db, visitId: number): Promise<DiningGues
   const [v] = await db<{ visitId: number; tagCode: string; zone: 'male' | 'female'; memberName: string | null; guestLabel: string }[]>`
     SELECT v.id AS visit_id, h.code AS tag_code, v.zone, m.name AS member_name, v.guest_label
     FROM visits v JOIN hand_tags h ON h.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
-    WHERE v.id = ${visitId}`;
+    WHERE v.id = ${visitId} AND v.store_id = ${currentStoreId()}`;
   if (!v) throw notFound('来访不存在');
   const pending = await db<DiningGuest['pending']>`
     SELECT k.id, k.bill_line_id, k.item_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at
@@ -248,7 +250,7 @@ export async function kitchenAction(deps: Deps, id: number, action: KitchenActio
     await setTxTimeouts(tx);
     const at = ctx.at ?? new Date();
     const [k] = await tx<{ status: KitchenStatus; startedAt: string | null; orderNo: string }[]>`
-      SELECT status, started_at, order_no FROM kitchen_items WHERE id = ${id} FOR UPDATE`;
+      SELECT status, started_at, order_no FROM kitchen_items WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!k) throw notFound('出品单不存在');
     if (k.status === 'cancelled') throw conflict('DISH_CANCELLED', '这道菜已经退了，请刷新');
     const rules = await loadDiningRules(tx);

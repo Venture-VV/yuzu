@@ -14,11 +14,13 @@ import { AppError, conflict, forbidden, unprocessable } from '../../lib/errors';
 import { assertNotFenced, isFenced } from '../../lib/fences';
 import { nextDocNo, setTxTimeouts } from '../../lib/tx';
 import { loadSettings } from '../settings';
+import { settingRow } from '../../lib/store-settings';
+import { currentStoreId } from '../../lib/store-context';
 
 export { nextDocNo, setTxTimeouts };
 
 export async function loadFrontdeskRules(db: Db): Promise<FrontdeskRules> {
-  const [row] = await db<{ value: Partial<FrontdeskRules> }[]>`SELECT value FROM settings WHERE key = 'frontdesk_rules'`;
+  const row = await settingRow<Partial<FrontdeskRules>>(db, 'frontdesk_rules');
   return { ...DEFAULT_FRONTDESK_RULES, ...(row?.value ?? {}) };
 }
 
@@ -199,7 +201,7 @@ export async function lockTagsByCode(tx: Tx, codes: string[]): Promise<Map<strin
   if (unique.length === 0) return new Map();
   const rows = await tx<LockedTag[]>`
     SELECT id, code, zone, kind, vip_level, locked, lock_reason, active FROM hand_tags
-    WHERE code IN ${tx(unique)} ORDER BY id FOR UPDATE`;
+    WHERE code IN ${tx(unique)} AND store_id = ${currentStoreId()} ORDER BY id FOR UPDATE`;
   const byCode = new Map(rows.map((r) => [r.code, r]));
   const missing = unique.filter((c) => !byCode.has(c));
   if (missing.length) throw unprocessable('TAG_NOT_FOUND', `手牌池里没有牌号 ${missing.join('、')}，请核对牌号`, { codes: missing });
@@ -245,7 +247,8 @@ export async function lockVisits(tx: Tx, ids: number[]): Promise<Map<number, Loc
   if (unique.length === 0) return new Map();
   const rows = await tx<LockedVisit[]>`
     SELECT id, visit_no, bill_id, tag_id, zone, member_id, group_id, status, checked_in_at, checked_in_by
-    FROM visits WHERE id IN ${tx(unique)} ORDER BY id FOR UPDATE`;
+    FROM visits WHERE id IN ${tx(unique)} AND store_id = ${currentStoreId()} ORDER BY id FOR UPDATE`;
+  // 别家店的来访（8.0.22）：与不存在一样
   if (rows.length !== unique.length) throw unprocessable('VISIT_NOT_FOUND', '来访记录不存在，请刷新后重试');
   return new Map(rows.map((r) => [r.id, r]));
 }

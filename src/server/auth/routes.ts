@@ -18,7 +18,9 @@ import { loadMpRules } from '../modules/mp/rules';
 import { sessionOnly } from './guard';
 import { checkLock, clearFailures, recordFailure } from './lockout';
 import { checkPasswordStrength, hashPassword, verifyPassword } from './password';
-import { SESSION_COOKIE, createSession, destroySession, destroyStaffSessions } from './session';
+import { SESSION_COOKIE, createSession, destroySession, destroyStaffSessions, hashSessionToken } from './session';
+import { DEFAULT_STORE_ID, runInStore } from '../lib/store-context';
+import { allowedStores, switchStore } from '../modules/stores';
 
 const LoginInput = z.object({
   username: z.string().trim().toLowerCase().min(1, '请输入账号'),
@@ -30,14 +32,24 @@ const ChangePasswordInput = z.object({
   newPassword: z.string(),
 });
 
-export async function buildSessionInfo({ sql, config }: Deps, actor: Actor): Promise<SessionInfo> {
+export async function buildSessionInfo(deps: Deps, actor: Actor): Promise<SessionInfo> {
+  // 按这位员工的当前门店算（登录、换店时请求本身还在原来的门店上下文里，8.0.22）
+  return runInStore(actor.storeId ?? DEFAULT_STORE_ID, () => sessionInfoInStore(deps, actor));
+}
+
+async function sessionInfoInStore({ sql, config }: Deps, actor: Actor): Promise<SessionInfo> {
   const settings = await loadSettings(sql);
+  const stores = await allowedStores(sql, actor);
+  const storeId = actor.storeId ?? DEFAULT_STORE_ID;
+  const [current] = stores.some((s) => s.id === storeId) ? stores.filter((s) => s.id === storeId) : await sql<{ id: number; code: string; name: string }[]>`SELECT id, code, name FROM stores WHERE id = ${storeId}`;
   const [synthetic] = await sql<{ exists: boolean }[]>`SELECT (EXISTS (SELECT 1 FROM members WHERE is_synthetic) OR EXISTS (SELECT 1 FROM materials WHERE is_synthetic) OR EXISTS (SELECT 1 FROM hand_tags WHERE is_synthetic)) AS exists`;
   const { storeName, ...rules } = settings;
   return {
     staff: { id: actor.id, username: actor.username, displayName: actor.displayName, role: actor.role, duties: actor.duties, mustChangePassword: actor.mustChangePassword },
     permissions: actor.permissions ?? permissionsOf(actor, await loadRoleOverrides(sql), { financeExclusion: settings.financeHidesMarketingCost }),
     storeName,
+    store: current ?? { id: storeId, code: '', name: storeName },
+    stores,
     rules,
     today: businessDateOf(new Date(), config.timezone, settings.businessDayStartHour),
     calendarToday: businessDateOf(new Date(), config.timezone, 0),
@@ -117,6 +129,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
       duties: (staff.duties ?? []) as Duty[],
       mustChangePassword: staff.mustChangePassword,
     };
+    // 登录进最近用过的门店（会话里没记门店时取能进的第一家，与会话解析同一个顺序，8.0.22）
+    actor.storeId = (await allowedStores(sql, actor))[0]?.id ?? DEFAULT_STORE_ID;
     return buildSessionInfo(deps, actor);
   });
 
@@ -129,6 +143,15 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get('/api/auth/me', { preHandler: sessionOnly }, async (req) => buildSessionInfo(deps, req.actor));
+  // 换门店（8.0.22，docs/MULTISTORE_V8022.md 第 2 节）：只能换到自己能进的、启用的门店；页面换完整个重新取数
+  app.post('/api/auth/store', { preHandler: sessionOnly }, async (req) => {
+    const { storeId } = parse(z.object({ storeId: z.number().int().positive() }), req.body);
+    const token = req.cookies[SESSION_COOKIE];
+    if (!token) throw unauthorized();
+    await switchStore(sql, req.actor, hashSessionToken(token), storeId);
+    await writeAudit(sql, { staffId: req.actor.id, action: 'store_switched', targetType: 'store', targetId: storeId, ip: req.ip });
+    return buildSessionInfo(deps, { ...req.actor, storeId });
+  });
   // 当前营业日（8.0.8，A02）：页面上的「今天」跟着服务端走，过了营业日切换时间不用重新登录就换到新的一天
   app.get('/api/business-day', { preHandler: sessionOnly }, async () => {
     const settings = await loadSettings(deps.sql);

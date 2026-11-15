@@ -73,6 +73,7 @@ import { setTxTimeouts } from '../lib/tx';
 import { openUsageIn } from './usages';
 import { hashRequest } from '../lib/idempotency';
 import { ctxOf } from '../lib/context';
+import { currentStoreId } from '../lib/store-context';
 
 const text = (label: string, max: number) =>
   z
@@ -106,16 +107,17 @@ export async function spaceLedger(db: Db): Promise<SpaceLedger> {
     SELECT f.id, f.code, f.name, f.sort_order, f.active, f.version,
            (SELECT count(*) FROM zones z WHERE z.floor_id = f.id AND z.active)::int AS zone_count,
            (SELECT count(*) FROM spaces s WHERE s.floor_id = f.id AND s.active)::int AS space_count
-    FROM floors f ORDER BY f.sort_order, f.code`;
+    FROM floors f WHERE f.store_id = ${currentStoreId()} ORDER BY f.sort_order, f.code`;
   const zones = await db<Zone[]>`
     SELECT z.id, z.floor_id, z.name, z.name_en, z.note, z.sort_order, z.active, z.version,
            (SELECT count(*) FROM spaces s WHERE s.zone_id = z.id AND s.active)::int AS space_count
-    FROM zones z JOIN floors f ON f.id = z.floor_id ORDER BY f.sort_order, z.sort_order, z.id`;
+    FROM zones z JOIN floors f ON f.id = z.floor_id WHERE f.store_id = ${currentStoreId()} ORDER BY f.sort_order, z.sort_order, z.id`;
   const rows = await db<SpaceRow[]>`
     SELECT s.id, s.code, s.floor_id, s.zone_id, s.business_type, s.capacity, s.area_centi_m2, s.display_name, s.name_en, s.sellable,
            s.verify_status, s.verified_at, vb.display_name AS verified_by_name, s.verify_note, s.source_label, s.note, s.active, s.import_id,
            s.version, s.created_at, s.updated_at
     FROM spaces s JOIN floors f ON f.id = s.floor_id LEFT JOIN staff vb ON vb.id = s.verified_by
+    WHERE s.store_id = ${currentStoreId()}
     ORDER BY f.sort_order, s.code`;
   const aliases = await db<(SpaceAlias & { spaceId: number })[]>`
     SELECT a.id, a.space_id, a.alias, a.kind, a.active, a.created_at, cb.display_name AS created_by_name, a.retired_at, rb.display_name AS retired_by_name
@@ -202,7 +204,7 @@ async function createFloor(deps: Deps, raw: unknown, ctx: OpContext) {
   const f = parse(FloorCreateInput, raw);
   await deps.sql.begin(async (tx) => {
     await lockLedger(tx);
-    const [dup] = await tx`SELECT 1 FROM floors WHERE code = ${f.code}`;
+    const [dup] = await tx`SELECT 1 FROM floors WHERE code = ${f.code} AND store_id = ${currentStoreId()}`;
     if (dup) throw conflict('FLOOR_CODE_TAKEN', `已有楼层 ${f.code}`);
     const [row] = await tx<{ id: number }[]>`INSERT INTO floors (code, name, sort_order) VALUES (${f.code}, ${f.name}, ${f.sortOrder}) RETURNING id`;
     await writeAudit(tx, { staffId: ctx.actor.id, action: 'space_zone_saved', targetType: 'floor', targetId: row!.id, detail: { summary: `新建楼层 ${f.code}「${f.name}」` }, ip: ctx.ip });
@@ -214,7 +216,7 @@ async function updateFloor(deps: Deps, id: number, raw: unknown, ctx: OpContext)
   await deps.sql.begin(async (tx) => {
     await lockLedger(tx);
     const [cur] = await tx<{ code: string; name: string; active: boolean; version: number }[]>`
-      SELECT code, name, active, version FROM floors WHERE id = ${id} FOR UPDATE`;
+      SELECT code, name, active, version FROM floors WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!cur) throw notFound('楼层不存在');
     if (cur.version !== f.version) throw stale('FLOOR_STALE', `楼层 ${cur.code} `);
     if (!f.active && cur.active) {
@@ -252,7 +254,7 @@ async function createZone(deps: Deps, raw: unknown, ctx: OpContext) {
   const z0 = parse(ZoneCreateInput, raw);
   await deps.sql.begin(async (tx) => {
     await lockLedger(tx);
-    const [floor] = await tx<{ code: string; active: boolean }[]>`SELECT code, active FROM floors WHERE id = ${z0.floorId} FOR SHARE`;
+    const [floor] = await tx<{ code: string; active: boolean }[]>`SELECT code, active FROM floors WHERE id = ${z0.floorId} AND store_id = ${currentStoreId()} FOR SHARE`;
     if (!floor) throw notFound('楼层不存在，请刷新后重试');
     if (!floor.active) throw conflict('FLOOR_INACTIVE', `楼层 ${floor.code} 已停用`);
     const [dup] = await tx`SELECT 1 FROM zones WHERE floor_id = ${z0.floorId} AND lower(btrim(name)) = lower(${z0.name})`;
@@ -273,7 +275,7 @@ async function updateZone(deps: Deps, id: number, raw: unknown, ctx: OpContext) 
   await deps.sql.begin(async (tx) => {
     await lockLedger(tx);
     const [cur] = await tx<{ floorId: number; name: string; active: boolean; version: number }[]>`
-      SELECT floor_id, name, active, version FROM zones WHERE id = ${id} FOR UPDATE`;
+      SELECT floor_id, name, active, version FROM zones WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!cur) throw notFound('区域不存在');
     if (cur.version !== z0.version) throw stale('ZONE_STALE', `区域「${cur.name}」`);
     const [dup] = await tx`SELECT 1 FROM zones WHERE floor_id = ${cur.floorId} AND lower(btrim(name)) = lower(${z0.name}) AND id <> ${id}`;
@@ -329,11 +331,11 @@ const SpaceUpdateInput = z.object({ ...SpaceFields, active: z.boolean().default(
 
 /** 楼层在用；区域在用、在同一层（加共享锁，与停用楼层、区域串行） */
 async function checkPlace(tx: Tx, floorId: number, zoneId: number | null) {
-  const [floor] = await tx<{ code: string; active: boolean }[]>`SELECT code, active FROM floors WHERE id = ${floorId} FOR SHARE`;
+  const [floor] = await tx<{ code: string; active: boolean }[]>`SELECT code, active FROM floors WHERE id = ${floorId} AND store_id = ${currentStoreId()} FOR SHARE`;
   if (!floor) throw notFound('楼层不存在，请刷新后重试');
   if (!floor.active) throw conflict('FLOOR_INACTIVE', `楼层 ${floor.code} 已停用`);
   if (zoneId !== null) {
-    const [zone] = await tx<{ floorId: number; name: string; active: boolean }[]>`SELECT floor_id, name, active FROM zones WHERE id = ${zoneId} FOR SHARE`;
+    const [zone] = await tx<{ floorId: number; name: string; active: boolean }[]>`SELECT floor_id, name, active FROM zones WHERE id = ${zoneId} AND store_id = ${currentStoreId()} FOR SHARE`;
     if (!zone) throw notFound('区域不存在，请刷新后重试');
     if (!zone.active) throw conflict('ZONE_INACTIVE', `区域「${zone.name}」已停用`);
     if (zone.floorId !== floorId) throw unprocessable('ZONE_FLOOR_MISMATCH', `区域「${zone.name}」不在 ${floor.code}，请选这一层的区域`);
@@ -346,7 +348,7 @@ async function createSpace(deps: Deps, raw: unknown, ctx: OpContext) {
   await deps.sql.begin(async (tx) => {
     await lockLedger(tx);
     const floor = await checkPlace(tx, s.floorId, s.zoneId);
-    const [dup] = await tx<{ active: boolean }[]>`SELECT active FROM spaces WHERE code = ${s.code}`;
+    const [dup] = await tx<{ active: boolean }[]>`SELECT active FROM spaces WHERE code = ${s.code} AND store_id = ${currentStoreId()}`;
     if (dup) throw conflict('SPACE_CODE_TAKEN', `编码 ${s.code} 已在台账里${dup.active ? '' : '（已停用；编码不能重复使用，可以启用原来的）'}`);
     try {
       const [row] = await tx<{ id: number }[]>`
@@ -388,7 +390,7 @@ async function lockSpace(tx: Tx, id: number, version?: number) {
       verifyStatus: SpaceVerifyStatus;
       version: number;
     }[]
-  >`SELECT code, floor_id, zone_id, business_type, display_name, active, sellable, verify_status, version FROM spaces WHERE id = ${id} FOR UPDATE`;
+  >`SELECT code, floor_id, zone_id, business_type, display_name, active, sellable, verify_status, version FROM spaces WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
   if (!cur) throw notFound('空间不存在');
   if (version !== undefined && cur.version !== version) throw stale('SPACE_STALE', `空间 ${cur.code} `);
   return cur;
@@ -553,13 +555,13 @@ async function bulkSetZone(deps: Deps, raw: unknown, ctx: OpContext) {
   await deps.sql.begin(async (tx) => {
     await lockLedger(tx);
     const rows = await tx<{ id: number; code: string; floorId: number; version: number }[]>`
-      SELECT id, code, floor_id, version FROM spaces WHERE id IN ${tx(ids)} ORDER BY id FOR UPDATE`;
+      SELECT id, code, floor_id, version FROM spaces WHERE id IN ${tx(ids)} AND store_id = ${currentStoreId()} ORDER BY id FOR UPDATE`;
     if (rows.length !== ids.length) throw notFound('有空间不存在，请刷新后重试');
     const changed = rows.filter((r) => r.version !== expected.get(r.id));
     if (changed.length) throw stale('SPACE_STALE', `空间 ${changed.map((r) => r.code).slice(0, 5).join('、')} `);
     let zoneName = '（不分区域）';
     if (b.zoneId !== null) {
-      const [zone] = await tx<{ floorId: number; name: string; active: boolean }[]>`SELECT floor_id, name, active FROM zones WHERE id = ${b.zoneId} FOR SHARE`;
+      const [zone] = await tx<{ floorId: number; name: string; active: boolean }[]>`SELECT floor_id, name, active FROM zones WHERE id = ${b.zoneId} AND store_id = ${currentStoreId()} FOR SHARE`;
       if (!zone) throw notFound('区域不存在，请刷新后重试');
       if (!zone.active) throw conflict('ZONE_INACTIVE', `区域「${zone.name}」已停用`);
       const off = rows.filter((r) => r.floorId !== zone.floorId);
@@ -653,12 +655,12 @@ async function plan(db: Db, f: FileInputData): Promise<Plan> {
     const i = col.get(name) ?? -1;
     return i >= 0 ? (r.cells[i] ?? '').trim() : '';
   };
-  const floors = await db<{ id: number; code: string; active: boolean }[]>`SELECT id, code, active FROM floors`;
+  const floors = await db<{ id: number; code: string; active: boolean }[]>`SELECT id, code, active FROM floors WHERE store_id = ${currentStoreId()}`;
   const floorByCode = new Map(floors.map((x) => [x.code, x]));
   const floorCodeById = new Map(floors.map((x) => [x.id, x.code]));
   const floorList = floors.filter((x) => x.active).map((x) => x.code).join('、');
   const zones = await db<{ id: number; floorId: number; name: string; nameEn: string; note: string; active: boolean }[]>`
-    SELECT id, floor_id, name, name_en, note, active FROM zones`;
+    SELECT id, floor_id, name, name_en, note, active FROM zones WHERE store_id = ${currentStoreId()}`;
   const zoneKey = (floorId: number, name: string) => `${floorId}:${name.trim().toLowerCase()}`;
   const zoneByKey = new Map(zones.map((x) => [zoneKey(x.floorId, x.name), x]));
   const zoneNameById = new Map(zones.map((x) => [x.id, x.name]));
@@ -726,7 +728,7 @@ async function plan(db: Db, f: FileInputData): Promise<Plan> {
           note: string;
           active: boolean;
         }[]
-      >`SELECT code, floor_id, zone_id, business_type, capacity, area_centi_m2, display_name, name_en, sellable, verify_status, source_label, note, active FROM spaces`
+      >`SELECT code, floor_id, zone_id, business_type, capacity, area_centi_m2, display_name, name_en, sellable, verify_status, source_label, note, active FROM spaces WHERE store_id = ${currentStoreId()}`
     ).map((s) => [s.code, s]),
   );
   const seen = new Map<string, number>();
@@ -970,7 +972,7 @@ export async function spacesCsv(db: Db): Promise<string> {
 export async function spaceChecks(db: Db): Promise<{ label: string; ok: boolean; detail: string }[]> {
   // ① 编码唯一（大小写不敏感）、区域与空间在同一层、在用的空间不在停用的楼层
   const ledgerDiff = await db<{ ref: string }[]>`
-    SELECT 'code ' || lower(code) AS ref FROM spaces GROUP BY lower(code) HAVING count(*) > 1
+    SELECT 'code ' || lower(code) AS ref FROM spaces GROUP BY store_id, lower(code) HAVING count(*) > 1
     UNION ALL
     SELECT s.code FROM spaces s JOIN zones z ON z.id = s.zone_id WHERE z.floor_id <> s.floor_id
     UNION ALL

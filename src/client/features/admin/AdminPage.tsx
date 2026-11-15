@@ -30,6 +30,8 @@ const RuleCatalog = lazyPage(() => import('./RuleCatalog').then((m) => m.RuleCat
 const RulesTab = lazyPage(() => import('./RulesTab').then((m) => m.RulesTab));
 const SpacesSection = lazyPage(() => import('./SpacesSection').then((m) => m.SpacesSection));
 const StaffTab = lazyPage(() => import('./StaffTab').then((m) => m.StaffTab));
+// 门店与主体（8.0.22）
+const StoresSection = lazyPage(() => import('./StoresSection').then((m) => m.StoresSection));
 const TagsTab = lazyPage(() => import('./TagsTab').then((m) => m.TagsTab));
 const CanteenPage = lazyPage(() => import('../canteen/CanteenPage').then((m) => m.CanteenPage));
 const PatrolPage = lazyPage(() => import('../patrol/PatrolPage').then((m) => m.PatrolPage));
@@ -82,6 +84,7 @@ export const adminRoutes: RouteObject[] = [
     ),
   },
   { path: 'permissions', element: <PermissionsSection /> },
+  { path: 'stores', element: <StoresSection /> },
   // 8.0.18（IA1）：员工食堂、安保巡场从 ERP 挪到后台「人员与行政」
   { path: 'canteen', element: <CanteenPage /> },
   { path: 'patrol', element: <PatrolPage /> },

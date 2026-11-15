@@ -34,6 +34,7 @@ import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, Select, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
+import { useEntities } from '../../lib/entities';
 
 const KEY = ['bank'] as const;
 const VIEWS = [
@@ -571,6 +572,9 @@ function AccountDialog({ editing, onClose }: { editing: BankAccount | 'new' | nu
   const [tail, setTail] = useState('');
   const [template, setTemplate] = useState<BankTemplate>('generic');
   const [active, setActive] = useState(true);
+  // 所属公司主体（8.0.22）：只在新建、有几个主体时选
+  const entities = useEntities(!a);
+  const [entityId, setEntityId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useResetOnOpen(!!editing, () => {
@@ -579,6 +583,7 @@ function AccountDialog({ editing, onClose }: { editing: BankAccount | 'new' | nu
     setTail(a?.accountTail ?? '');
     setTemplate(a?.template ?? 'generic');
     setActive(a?.active ?? true);
+    setEntityId(null);
     setError(null);
   });
   const save = async () => {
@@ -587,7 +592,7 @@ function AccountDialog({ editing, onClose }: { editing: BankAccount | 'new' | nu
     try {
       const body = { name: name.trim(), bankName: bankName.trim(), accountTail: tail.trim(), template };
       if (a) await api.put(`/api/erp/bank/accounts/${a.id}`, { ...body, version: a.version, active });
-      else await api.post('/api/erp/bank/accounts', body);
+      else await api.post('/api/erp/bank/accounts', { ...body, ...(entityId ? { entityId } : {}) });
       toast({ tone: 'success', title: '账户已保存' });
       onClose();
     } catch (e) {
@@ -624,6 +629,18 @@ function AccountDialog({ editing, onClose }: { editing: BankAccount | 'new' | nu
         <Field label="账号后四位" htmlFor="ba-tail">
           <Input id="ba-tail" value={tail} maxLength={4} inputMode="numeric" onChange={(e) => setTail(e.target.value.replace(/\D/g, ''))} className="num h-10" data-testid="ba-tail" />
         </Field>
+        {!a && (entities.data?.length ?? 0) > 1 && (
+          <Field label="所属公司主体" htmlFor="ba-entity" hint="不选是当前门店的主体；批量付款一批只付一个主体的款">
+            <Select id="ba-entity" value={entityId ?? ''} onChange={(e) => setEntityId(Number(e.target.value) || null)} data-testid="bank-account-entity">
+              <option value="">当前门店的主体</option>
+              {entities.data!.map((en) => (
+                <option key={en.id} value={en.id}>
+                  {en.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
         <Field label="网银格式" htmlFor="ba-template" hint="批量付款文件按它导出">
           <Select id="ba-template" value={template} onChange={(e) => setTemplate(e.target.value as BankTemplate)}>
             {BANK_TEMPLATES.map((t) => (

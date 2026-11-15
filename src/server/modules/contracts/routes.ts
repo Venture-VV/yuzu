@@ -44,6 +44,8 @@ const ListQuery = z.object({
   filter: z.enum(['all', 'drafting', 'reviewing', 'effective', 'expiring', 'closed']).default('all'),
   category: z.enum(CONTRACT_CATEGORIES).optional(),
   q: z.string().trim().max(32).optional(),
+  // 按公司主体筛（8.0.22）
+  entityId: z.coerce.number().int().positive().optional(),
 });
 const CheckBody = z.object({
   contractId: z.number().int().positive(),
@@ -82,7 +84,7 @@ export function registerContractRoutes(app: FastifyInstance, deps: Deps) {
   // ── 读 ──
   app.get('/api/erp/contracts', { preHandler: READ }, async (req) => {
     const q = parse(ListQuery, req.query);
-    return readSnapshot(sql, (tx) => listContracts(tx, today(), { filter: q.filter as ContractListFilter, category: q.category, q: q.q }));
+    return readSnapshot(sql, (tx) => listContracts(tx, today(), { filter: q.filter as ContractListFilter, category: q.category, q: q.q, entityId: q.entityId }));
   });
   app.get('/api/erp/contracts/meta', { preHandler: READ }, async (): Promise<ContractMeta> =>
     readSnapshot(sql, async (tx) => ({

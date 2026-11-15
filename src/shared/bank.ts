@@ -196,6 +196,9 @@ export interface BankAccount {
   columnMap: ColumnMap;
   active: boolean;
   version: number;
+  /** 所属公司主体（8.0.22；只有一个主体时都是本公司） */
+  entityId: number;
+  entityName: string;
 }
 
 export const MATCH_TARGET_TYPES = ['payment', 'contract_payout', 'petty_advance', 'petty_topup', 'petty_return', 'ar_collection', 'platform_settlement', 'batch_item'] as const;

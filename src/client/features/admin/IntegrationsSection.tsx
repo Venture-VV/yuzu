@@ -12,12 +12,14 @@ import { useToast } from '../../components/Toast';
 import { LoadFailed } from '../../components/LoadFailed';
 import { Badge, Button, Card, Field, Input, Select, Skeleton } from '../../components/ui';
 import { AdminPage } from './AdminShell';
+import { AiRulesCard } from '../ai/AiRulesCard';
 
 interface KindInfo {
   kind: string;
   label: string;
   mode: IntegrationMode;
   note: string | null;
+  liveReady: boolean;
   live: { key: string; label: string; vars: string[]; configured: boolean }[];
 }
 interface Call {
@@ -70,7 +72,7 @@ export function IntegrationsSection() {
     }
   };
   return (
-    <AdminPage section="integrations" description="扫码收款、平台验券、开票服务商、银企直连、OTA 渠道：现在是哪种模式（只看运行环境的配置）、门店开关、最近的对外调用。密钥只放运行环境，这里只显示配没配。">
+    <AdminPage section="integrations" description="扫码收款、平台验券、开票服务商、银企直连、OTA 渠道、AI 辅助：现在是哪种模式（只看运行环境的配置）、门店开关、最近的对外调用。密钥只放运行环境，这里只显示配没配。">
       <div className="space-y-5" data-testid="integrations">
         <Card className="p-5">
           <h2 className="mb-3 text-[15px] font-bold">模式</h2>
@@ -86,7 +88,7 @@ export function IntegrationsSection() {
                 <li key={k.kind} className="space-y-1 py-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold">{k.label}</span>
-                    <Badge tone={MODE_TONE[k.mode]}>{INTEGRATION_MODE_LABELS[k.mode]}</Badge>
+                    <Badge tone={MODE_TONE[k.mode]}>{k.mode === 'live' && k.liveReady ? '已配置' : INTEGRATION_MODE_LABELS[k.mode]}</Badge>
                   </div>
                   {k.note && <p className="text-[12.5px] text-ink-3">{k.note}</p>}
                   {k.live.map((l) => (
@@ -130,6 +132,8 @@ export function IntegrationsSection() {
             </div>
           )}
         </Card>
+
+        <AiRulesCard />
 
         <Card className="p-5">
           <div className="mb-3 flex flex-wrap items-center gap-2">

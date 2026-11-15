@@ -7,6 +7,8 @@
 import type { Sql, Tx } from '../db';
 import { writeAudit } from './audit';
 import type { OpContext } from './context';
+import { currentStoreId, DEFAULT_STORE_ID } from './store-context';
+import { isStoreScopedKey, upsertSetting } from './store-settings';
 
 /** 两份规则（JSON）是否相同：不看对象里键的先后（jsonb 存进去会重排键） */
 export function sameJson(a: unknown, b: unknown): boolean {
@@ -34,10 +36,9 @@ export async function saveRuleSetting<T>(
     await lockSettings(tx);
     const before = await load(tx);
     const after = await next(before, tx);
-    await tx`
-      INSERT INTO settings (key, value, updated_at, updated_by) VALUES (${key}, ${tx.json(after as never)}, now(), ${ctx.actor.id})
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key, before, after }, ip: ctx.ip });
+    // 按店的规则在第二家店里存进 store_settings（8.0.22，docs/MULTISTORE_V8022.md 第 4 节）
+    await upsertSetting(tx, key, after, ctx.actor.id);
+    await writeAudit(tx, { staffId: ctx.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key, before, after, ...(isStoreScopedKey(key) && currentStoreId() !== DEFAULT_STORE_ID ? { storeId: currentStoreId() } : {}) }, ip: ctx.ip });
     saved = after;
   });
   return saved;
