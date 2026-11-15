@@ -128,10 +128,12 @@ export function parseStatementRows(
   const problems: { row: number; message: string }[] = [];
   for (const r of rows) {
     const dateRaw = cell(r, 'date');
-    // 合计行、空行：没有日期的跳过
-    if (!dateRaw || /合计|总计|小计/.test(r.cells.join(''))) continue;
+    // 空行：没有日期的跳过
+    if (!dateRaw) continue;
     const txnDate = parseDate(dateRaw);
     if (!txnDate) {
+      // 合计行：日期那一格不是日期、这一行写着合计 / 总计 / 小计的跳过；有日期的一笔照常认（摘要里写「合计支付」的不算合计行，Codex 审查 ee51abe 后补）
+      if (/合计|总计|小计/.test(r.cells.join(''))) continue;
       problems.push({ row: r.row, message: `日期「${dateRaw}」认不出` });
       continue;
     }

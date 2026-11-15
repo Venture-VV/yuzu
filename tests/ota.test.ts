@@ -148,6 +148,33 @@ describe('渠道订单', () => {
     expect(o.bookings.filter((b: { status: string }) => b.status === 'confirmed')).toHaveLength(2);
   });
 
+  it('已有的订单这一次没处理成（新房型停用了）：留下这一次的内容，上一次处理成的照旧；补好以后「重试」按这一次的内容来', async () => {
+    const t2 = await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/types', { name: '渠道湖景套房', kind: 'daily', price: 58800 });
+    const lakeId = t2.body.types.find((t: { name: string }) => t.name === '渠道湖景套房').id as number;
+    const ch = (await api(ctx.app, ctx.clerk, 'GET', '/api/ota/channels')).body.find((c: { id: number }) => c.id === channelId);
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/ota/channels/${channelId}`, { ...ch, roomMap: { ...ch.roomMap, 湖景套房: lakeId } })).status).toBe(200);
+    const d = shiftDate(today, 8);
+    expect((await importFile([`C5001,钱一,,豪华大床房,${d},${shiftDate(d, 1)},1,300,现付,已确认`])).body).toMatchObject({ created: 1 });
+    // 湖景套房停用以后，渠道把这张改成湖景套房：这一次没处理成
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/admin/rooms/types/${lakeId}`, { name: '渠道湖景套房', kind: 'daily', price: 58800, active: false })).status).toBe(200);
+    const failed = await importFile([`C5001,钱一,,湖景套房,${d},${shiftDate(d, 1)},1,588,现付,已确认`]);
+    expect(failed.body).toMatchObject({ failed: 1 });
+    const o1 = await order('C5001');
+    expect(o1).toMatchObject({ status: 'failed', channelRoom: '豪华大床房', roomTypeName: '渠道大床房', amountCents: 30_000 });
+    expect(o1.failReason).toContain('停用');
+    // 新订单这一次没处理成的也留一行，能重试
+    expect((await importFile([`C5002,孙二,,湖景套房,${d},${shiftDate(d, 1)},1,588,现付,已确认`])).body).toMatchObject({ failed: 1 });
+    expect(await order('C5002')).toMatchObject({ status: 'failed', channelRoom: '湖景套房' });
+    // 把湖景套房启用回来，重试：按这一次（湖景套房、588 元）的内容
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/admin/rooms/types/${lakeId}`, { name: '渠道湖景套房', kind: 'daily', price: 58800, active: true })).status).toBe(200);
+    const retried = await api(ctx.app, ctx.clerk, 'POST', `/api/ota/orders/${o1.id}/retry`, {});
+    expect(retried.status, JSON.stringify(retried.body)).toBe(200);
+    expect(retried.body).toMatchObject({ status: 'booked', channelRoom: '湖景套房', roomTypeName: '渠道湖景套房', amountCents: 58_800 });
+    expect(retried.body.bookings.filter((b: { status: string }) => b.status === 'confirmed')).toHaveLength(1);
+    const r2 = await api(ctx.app, ctx.clerk, 'POST', `/api/ota/orders/${(await order('C5002')).id}/retry`, {});
+    expect(r2.body).toMatchObject({ status: 'booked', roomTypeName: '渠道湖景套房' });
+  });
+
   it('预付的几间订单：到店的每一间各带一行团购券（各自的券码、按间数分的金额），分开结账各用各的；用过的不再带', async () => {
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'Q', from: 1, to: 5, width: 3, zone: 'male' })).status).toBe(200);
     await api(ctx.app, ctx.clerk, 'POST', '/api/shifts', { openingCash: 0 });

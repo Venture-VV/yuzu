@@ -300,12 +300,16 @@ export async function importOtaOrders(deps: Deps, raw: unknown, actor: Actor, ip
     try {
       result[await processOrder(deps, channel, o, head.id, actor, ip)] += 1;
     } catch (e) {
-      // 一张出错不影响别的：记「没建成」、写原因
+      // 一张出错不影响别的：记「没建成」、写原因，并把这一次没处理成的内容留在 raw 里（「重试」按它来，Codex 审查 ee51abe 后补）——
+      // 已有的订单只改状态、原因与 raw，上一次处理成的房型、日期、间数、金额照旧；新订单记一行「没建成」（last_import_id 空着，原样重提时会再处理）
       result.failed += 1;
       const message = e instanceof Error ? e.message : String(e);
       await deps.sql`
-        UPDATE ota_orders SET status = 'failed', fail_reason = ${message.slice(0, 200)}, updated_at = now()
-        WHERE channel_id = ${channel.id} AND order_no = ${o.orderNo}`.catch(() => undefined);
+        INSERT INTO ota_orders (channel_id, order_no, guest_name, guest_phone, channel_room, room_type_id, checkin_date, checkout_date, rooms, amount_cents, pay_mode,
+                                channel_status, raw, status, fail_reason, last_import_id)
+        VALUES (${channel.id}, ${o.orderNo}, ${o.guestName}, ${o.guestPhone}, ${o.roomType}, ${channel.roomMap[o.roomType] ?? null}, ${o.checkin}, ${o.checkout}, ${o.rooms},
+                ${o.amountCents}, ${o.payMode}, ${o.channelStatus}, ${deps.sql.json(o as never)}, 'failed', ${message.slice(0, 200)}, NULL)
+        ON CONFLICT (channel_id, order_no) DO UPDATE SET status = 'failed', fail_reason = EXCLUDED.fail_reason, raw = EXCLUDED.raw, updated_at = now()`.catch(() => undefined);
       result.problems.push({ row: o.row, message: `订单 ${o.orderNo}：${message}` });
     }
   }

@@ -77,6 +77,21 @@ describe('对账单解析', () => {
     ]);
     expect(problems).toEqual([{ row: 6, message: '日期「2026-13-01」认不出' }]);
   });
+  it('合计行只认日期那一格不是日期的：摘要里写「合计支付」的有日期的一笔照常认', () => {
+    const header = ['交易日期', '交易金额', '对方户名', '摘要'];
+    const map = detectColumns(header);
+    const { lines: ls, problems } = parseStatementRows(
+      header,
+      [
+        { row: 2, cells: ['2026-11-14', '-123.45', '城东蔬菜', '合计支付11月货款'] },
+        { row: 3, cells: ['本页合计', '-123.45', '', ''] },
+        { row: 4, cells: ['总计：', '-123.45', '', ''] },
+      ],
+      map,
+    );
+    expect(ls.map((l) => [l.txnDate, l.direction, l.amountCents, l.summary])).toEqual([['2026-11-14', 'out', 12_345, '合计支付11月货款']]);
+    expect(problems).toEqual([]);
+  });
 });
 
 describe('银行流水', () => {

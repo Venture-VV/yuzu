@@ -271,6 +271,8 @@ export interface Supplier {
   bankChangedAt: string | null;
   bankVerifiedByName: string | null;
   bankVerifiedAt: string | null;
+  /** 这一行的版本（改了任何一项都会变）：复核收款账户时带回去 */
+  rowVersion: string;
   active: boolean;
   isSynthetic: boolean;
 }

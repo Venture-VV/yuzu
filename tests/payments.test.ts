@@ -780,10 +780,16 @@ describe('批量付款（8.0.21）', () => {
     expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${supplierId}`, { code: sup.code, name: sup.name, contact: '王经理', bankPayee: after.bankPayee, bankName: after.bankName })).status).toBe(200);
     expect((await list()).candidates.find((c) => c.requestId === a.id)).toMatchObject({ bankOk: false, bankUnverified: true, bankAccountTail: '5678' });
     expect((await make([a.id])).body.error.code).toBe('BATCH_BANK_UNVERIFIED');
-    expect((await api(ctx.app, payer, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678' })).status).toBe(403);
-    // 另一人（店主）复核：后四位对不上（刚被改过）拒绝，对上了复核
-    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '0000' })).body.error.code).toBe('SUPPLIER_BANK_CHANGED');
-    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678' })).status).toBe(200);
+    const seen = await supOf();
+    expect((await api(ctx.app, payer, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678', rowVersion: seen.rowVersion })).status).toBe(403);
+    // 另一人（店主）复核：后四位对不上拒绝；看完以后又被改过（换成同样后四位的账号、改了户名）也拒绝；按刷新后的复核
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '0000', rowVersion: seen.rowVersion })).body.error.code).toBe('SUPPLIER_BANK_CHANGED');
+    expect((await api(ctx.app, payer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, { ...bankBody, bankPayee: '付款流测试供应商（新户）', bankAccount: '6227 9999 0000 5678' })).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678', rowVersion: seen.rowVersion })).body.error.code).toBe('SUPPLIER_BANK_CHANGED');
+    expect((await api(ctx.app, payer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, bankBody)).status).toBe(200);
+    const reread = await supOf();
+    expect(reread).toMatchObject({ bankStatus: 'pending', bankPayee: '付款流测试供应商' });
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678', rowVersion: reread.rowVersion })).status).toBe(200);
     expect(await supOf()).toMatchObject({ bankStatus: 'verified', bankVerifiedByName: expect.any(String) });
     // 数据库兜底：不管从哪儿改了账号，复核随之清空
     await ctx.sql`UPDATE suppliers SET bank_account = '6227000012349999' WHERE id = ${supplierId}`;

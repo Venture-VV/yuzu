@@ -70,6 +70,8 @@ export const listSuppliers = (db: Db, includeInactive = false) =>
            CASE WHEN bank_account = '' THEN 'none' WHEN bank_verified_at IS NULL THEN 'pending' ELSE 'verified' END AS bank_status,
            bank_changed_by, (SELECT display_name FROM staff WHERE id = suppliers.bank_changed_by) AS bank_changed_by_name, bank_changed_at,
            (SELECT display_name FROM staff WHERE id = suppliers.bank_verified_by) AS bank_verified_by_name, bank_verified_at,
+           -- 这一行的版本（行的 xmin，改了任何一项都会变）：复核时带回来，对不上就是看完以后又被改过（Codex 审查 ee51abe 后补）
+           suppliers.xmin::text AS row_version,
            active, is_synthetic FROM suppliers
     ${includeInactive ? db`` : db`WHERE active`} ORDER BY active DESC, code`;
 
@@ -368,15 +370,21 @@ export async function saveSupplierBank(db: Sql, id: number, raw: unknown, actor:
   });
 }
 
-/** 复核收款账户：带上页面看到的后四位（对不上说明刚被改过）；改账户的本人不能复核（店主除外） */
+/**
+ * 复核收款账户：带上页面看到的后四位与这一行的版本（rowVersion）——户名、开户行、账号哪一项在看完以后被改过（哪怕换成同样后四位的账号），
+ * 版本都对不上、拒绝，免得复核了没看过的内容（Codex 审查 ee51abe 后补）；改账户的本人不能复核（店主除外）
+ */
 export async function verifySupplierBank(db: Sql, id: number, raw: unknown, actor: Actor, ip?: string) {
-  const { tail } = parse(z.object({ tail: z.string().regex(/^[0-9]{4}$/, '请带上页面看到的账号后四位') }), raw);
+  const { tail, rowVersion } = parse(
+    z.object({ tail: z.string().regex(/^[0-9]{4}$/, '请带上页面看到的账号后四位'), rowVersion: z.string('请刷新后重新核对').regex(/^[0-9]{1,20}$/, '请刷新后重新核对') }),
+    raw,
+  );
   await db.begin(async (tx) => {
-    const [cur] = await tx<{ bankAccount: string; changedBy: number | null; verifiedAt: Date | null }[]>`
-      SELECT bank_account, bank_changed_by AS changed_by, bank_verified_at AS verified_at FROM suppliers WHERE id = ${id} FOR NO KEY UPDATE`;
+    const [cur] = await tx<{ bankAccount: string; changedBy: number | null; verifiedAt: Date | null; rowVersion: string }[]>`
+      SELECT bank_account, bank_changed_by AS changed_by, bank_verified_at AS verified_at, xmin::text AS row_version FROM suppliers WHERE id = ${id} FOR NO KEY UPDATE`;
     if (!cur) throw notFound('供应商不存在');
     if (!cur.bankAccount) throw unprocessable('SUPPLIER_BANK_ACCOUNT', '这家供应商还没有收款账户');
-    if (cur.bankAccount.slice(-4) !== tail) throw conflict('SUPPLIER_BANK_CHANGED', '收款账户刚被改过，请刷新后重新核对');
+    if (cur.bankAccount.slice(-4) !== tail || cur.rowVersion !== rowVersion) throw conflict('SUPPLIER_BANK_CHANGED', '供应商档案（收款账户）刚被改过，请刷新后重新核对');
     if (cur.verifiedAt) return;
     if (cur.changedBy !== null && Number(cur.changedBy) === actor.id && actor.role !== 'owner')
       throw forbidden('改收款账户的人不能自己复核：请另一位应付或店主跟供应商核对后复核');

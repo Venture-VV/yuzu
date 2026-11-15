@@ -59,7 +59,7 @@ export function SupplierBankSection({ supplier }: { supplier: Supplier }) {
   const verify = async () => {
     setBusy(true);
     try {
-      await api.post(`/api/inventory/suppliers/${s.id}/bank/verify`, { tail: s.bankAccountTail });
+      await api.post(`/api/inventory/suppliers/${s.id}/bank/verify`, { tail: s.bankAccountTail, rowVersion: s.rowVersion });
       await invalidate();
       toast({ tone: 'success', title: '收款账户已复核' });
     } catch (e) {
