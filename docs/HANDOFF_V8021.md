@@ -35,8 +35,8 @@
 ## 3. 已执行的验证
 
 - `npm run typecheck`、`npm run build` 通过。
-- 集成用例（本机全量）：见 PR 上的最后一条进度评论（数字随最后一次全量更新）。这一版新加的用例文件：`custom-fields`、`invoice-scan`（发票识别的解析）、`sales-invoices`、`bank`、`payments`（批量付款一节）、`contract-templates`、`supplier-portal`、`pay-terminal`、`platform-verify`、`ota`、`integrations-admin`。
-- 浏览器用例（门店电脑）新加：`dictionaries`、`invoice-scan`、`sales-invoices`、`bank`、`payment-batches`、`contract-templates`、`supplier-portal`、`pay-terminal`、`platform-verify`、`ota`。其中 `pay-terminal`、`platform-verify` 要应用带 `INTEGRATIONS_MOCK=true` 启动，CI 里没带时整条跳过（本机带着跑过）。
+- 集成用例（本机全量，`0363652` 的代码）：201 个文件、1846 条全部通过。这一版新加的用例文件：`custom-fields`、`invoice-scan`（发票识别的解析）、`sales-invoices`、`bank`、`payments`（批量付款一节）、`contract-templates`、`supplier-portal`、`pay-terminal`、`platform-verify`、`ota`、`integrations-admin`。
+- 浏览器用例（门店电脑）新加（本机 12 条全过，带 `INTEGRATIONS_MOCK=true` 的独立演示库）：`dictionaries`、`invoice-scan`、`sales-invoices`、`bank`、`payment-batches`、`contract-templates`、`supplier-portal`、`pay-terminal`、`platform-verify`、`ota`。其中 `pay-terminal`、`platform-verify` 要应用带 `INTEGRATIONS_MOCK=true` 启动，CI 里没带时整条跳过（本机带着跑过）。
 - CI 顺带修的三处（都与产品逻辑无关）：巡场用例避开营业日切换（`c4c3992`）、员工食堂推送用例丢了就再送一次（`c4c3992`）、补货方式用例连建三样物料不再随机取尾号（`6dc7334`）；升级自检等应用启动时那一轮每分钟任务跑完再停（`caf46b8`，`f821016` 上红过一次）。
 - 没有做的：任何正式的支付、平台、开票服务商、银行接口（没有账号）；真机扫码枪扫付款码（扫码枪按键盘输入，与手输同一条路径）；供应商门户在公网上的访问（正式服对公网开放前只在内网 / Tailscale）。
 
