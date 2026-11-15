@@ -41,6 +41,7 @@ import { assertTechnicianNotBooked } from './booking-guard';
 import { locateSession, locateSessionEnd, locateSignIn, locateSignOut } from './locations';
 import { ctxOf } from '../lib/context';
 import { settingRow } from '../lib/store-settings';
+import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
 
 export async function loadClockroomRules(db: Db): Promise<ClockroomRules> {
   const row = await settingRow<Partial<ClockroomRules>>(db, 'clockroom_rules');
@@ -48,7 +49,9 @@ export async function loadClockroomRules(db: Db): Promise<ClockroomRules> {
 }
 
 /** 改排位、派钟、上下钟都先拿这把锁：轮钟队列是全店共用的，按先后串行 */
-export const lockQueue = (tx: Tx) => tx`SELECT pg_advisory_xact_lock(hashtext('technician_queue'))`;
+// 轮牌按门店各一条队列（8.0.22）：本店照旧用原来的键
+export const lockQueue = (tx: Tx) =>
+  tx`SELECT pg_advisory_xact_lock(hashtext(${currentStoreId() === DEFAULT_STORE_ID ? 'technician_queue' : `technician_queue:${currentStoreId()}`}))`;
 
 interface Status {
   state: TechState;
@@ -92,7 +95,7 @@ async function activeSessions(db: Db) {
   return db<{ id: number; technicianId: number; status: 'waiting' | 'serving'; callType: CallType; visitId: number }[]>`
     SELECT s.id, s.technician_id, s.status, s.call_type, s.visit_id
     FROM technician_sessions s JOIN visits v ON v.id = s.visit_id
-    WHERE s.status IN ('waiting', 'serving') AND v.status = 'open'
+    WHERE s.status IN ('waiting', 'serving') AND v.status = 'open' AND v.store_id = ${currentStoreId()}
     ORDER BY s.id`;
 }
 
@@ -139,7 +142,7 @@ interface ServiceSpace {
  */
 export async function lockServiceSpace(tx: Tx, spaceId: number): Promise<ServiceSpace> {
   const [sp] = await tx<(ServiceSpace & { businessType: string; active: boolean; sellable: boolean })[]>`
-    SELECT id, code, display_name, business_type, active, sellable FROM spaces WHERE id = ${spaceId} FOR SHARE`;
+    SELECT id, code, display_name, business_type, active, sellable FROM spaces WHERE id = ${spaceId} AND store_id = ${currentStoreId()} FOR SHARE`;
   if (!sp) throw notFound('房间不存在，请刷新后重新选择');
   const name = spaceLabel(sp.code, sp.displayName);
   if (!sp.active) throw conflict('SPACE_INACTIVE', `房间 ${name} 已停用，请换一间`);
@@ -399,7 +402,7 @@ const lockSession = async (tx: Tx, id: number) =>
   (
     await tx<SessionRow[]>`
       SELECT id, session_no, technician_id, visit_id, item_id, call_type, clocks, minutes, status, queue_key_before, started_at, space_id, booking_id
-      FROM technician_sessions WHERE id = ${id} FOR UPDATE`
+      FROM technician_sessions WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`
   )[0];
 
 /**
@@ -615,7 +618,7 @@ export async function setSessionSpace(deps: Deps, id: number, raw: unknown, ctx:
     const at = ctx.at ?? new Date();
     const [s] = await tx<{ id: number; sessionNo: string; technicianId: number; status: string; spaceId: number | null; spaceVersion: number; visitStatus: string }[]>`
       SELECT s.id, s.session_no, s.technician_id, s.status, s.space_id, s.space_version, v.status AS visit_status
-      FROM technician_sessions s JOIN visits v ON v.id = s.visit_id WHERE s.id = ${id} FOR UPDATE OF s`;
+      FROM technician_sessions s JOIN visits v ON v.id = s.visit_id WHERE s.id = ${id} AND s.store_id = ${currentStoreId()} FOR UPDATE OF s`;
     if (!s) throw notFound('钟单不存在');
     if (s.status !== 'waiting' && s.status !== 'serving') throw conflict('SESSION_CLOSED', `钟单 ${s.sessionNo} 已结束，不能再换房间`);
     if (s.visitStatus !== 'open') throw conflict('VISIT_CLOSED', `钟单 ${s.sessionNo} 的客人已离店，不能再换房间`);
@@ -852,7 +855,7 @@ export async function clockSpaces(db: Db): Promise<ClockSpace[]> {
     FROM spaces sp JOIN floors f ON f.id = sp.floor_id LEFT JOIN zones z ON z.id = sp.zone_id
     LEFT JOIN technician_sessions s ON s.space_id = sp.id AND s.status IN ('waiting', 'serving')
       AND EXISTS (SELECT 1 FROM visits v WHERE v.id = s.visit_id AND v.status = 'open')
-    WHERE sp.active AND sp.sellable AND sp.business_type IN ${db([...TECHNICIAN_BUSINESS_TYPES])}
+    WHERE sp.active AND sp.sellable AND sp.business_type IN ${db([...TECHNICIAN_BUSINESS_TYPES])} AND sp.store_id = ${currentStoreId()}
     GROUP BY sp.id, f.code, f.sort_order, z.name
     ORDER BY f.sort_order, f.code, sp.code`;
 }
@@ -886,7 +889,7 @@ export async function changeState(deps: Deps, technicianId: number, raw: unknown
     const at = ctx.at ?? new Date();
     await lockQueue(tx);
     const [t] = await tx<{ id: number; techNo: string; name: string; active: boolean; suspendedAt: string | null; suspendedReason: string | null }[]>`
-      SELECT id, tech_no, name, active, suspended_at, suspended_reason FROM technicians WHERE id = ${technicianId}
+      SELECT id, tech_no, name, active, suspended_at, suspended_reason FROM technicians WHERE id = ${technicianId} AND store_id = ${currentStoreId()}
       ${action === 'suspend' || action === 'resume' ? tx`FOR UPDATE` : tx``}`;
     if (!t) throw notFound('技师不存在');
     if (!t.active) throw unprocessable('TECHNICIAN_INACTIVE', `${t.techNo} 号 ${t.name}已停用`);
@@ -1011,7 +1014,7 @@ export async function clockroomBoard(db: Db, deps: Deps): Promise<ClockroomBoard
     FROM technician_sessions s JOIN technicians t ON t.id = s.technician_id JOIN visits v ON v.id = s.visit_id
     JOIN hand_tags h ON h.id = v.tag_id JOIN service_items i ON i.id = s.item_id LEFT JOIN members m ON m.id = v.member_id
     LEFT JOIN spaces sp ON sp.id = s.space_id
-    WHERE s.status IN ('waiting', 'serving') AND v.status = 'open'
+    WHERE s.status IN ('waiting', 'serving') AND v.status = 'open' AND v.store_id = ${currentStoreId()}
     ORDER BY (s.status = 'serving') DESC, coalesce(s.started_at, s.created_at), s.id`;
   const clocks = await db<{ technicianId: number; callType: CallType; clocks: number }[]>`
     SELECT technician_id, call_type, sum(quantity)::int AS clocks FROM bill_lines
@@ -1024,6 +1027,7 @@ export async function clockroomBoard(db: Db, deps: Deps): Promise<ClockroomBoard
     FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id JOIN hand_tags h ON h.id = v.tag_id
     JOIN staff st ON st.id = l.posted_by LEFT JOIN members m ON m.id = v.member_id
     WHERE l.source = 'therapist' AND l.status = 'active' AND l.technician_id IS NULL AND l.item_id IS NOT NULL AND v.status = 'open'
+      AND v.store_id = ${currentStoreId()}
     ORDER BY l.posted_at, l.id`;
   const board: BoardTechnician[] = [...techs.values()]
     .filter((t) => t.active || sessions.some((s) => s.technicianId === t.id))
@@ -1098,7 +1102,7 @@ export async function clockEvents(db: Db, date: string): Promise<ClockEvent[]> {
     SELECT e.id, e.created_at, e.kind, t.tech_no, t.name AS tech_name, s.session_no, st.display_name AS staff_name, e.detail
     FROM technician_events e LEFT JOIN technicians t ON t.id = e.technician_id LEFT JOIN technician_sessions s ON s.id = e.session_id
     JOIN staff st ON st.id = e.staff_id
-    WHERE e.business_date = ${date} ORDER BY e.id DESC LIMIT 500`;
+    WHERE e.business_date = ${date} AND coalesce(t.store_id, 1) = ${currentStoreId()} ORDER BY e.id DESC LIMIT 500`;
   return rows.map((r) => ({
     id: r.id,
     at: new Date(r.createdAt).toISOString(),
@@ -1178,7 +1182,7 @@ export function registerClockroomRoutes(app: FastifyInstance, deps: Deps) {
     const [s] = await sql<{ visitId: number; itemId: number; technicianId: number; callType: CallType; status: string; tier: 'standard' | 'professional' | 'premium' | null }[]>`
       SELECT s.visit_id, s.item_id, s.technician_id, s.call_type, s.status,
              (SELECT l.tier FROM bill_lines l WHERE l.session_id = s.id ORDER BY l.id LIMIT 1) AS tier
-      FROM technician_sessions s WHERE s.id = ${id}`;
+      FROM technician_sessions s WHERE s.id = ${id} AND s.store_id = ${currentStoreId()}`;
     if (!s) throw notFound('钟单不存在');
     if (s.status !== 'serving') throw conflict('SESSION_NOT_SERVING', '只有上钟中的钟单可以加钟');
     const rules = await loadClockroomRules(sql);

@@ -18,7 +18,7 @@ import { buildCheckoutSlip, buildRefundSlip, buildSettlementSlip, buildShiftSlip
 import { ctxOf, type Deps } from '../lib/context';
 import { forbidden, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse } from '../lib/validate';
-import { cancelJob, createDocJob, getJob, listJobs } from './devices';
+import { cancelJob, createDocJob, getStoreJob, listJobs } from './devices';
 import { getCheckout } from './frontdesk/checkout';
 import { getRefund } from './frontdesk/refunds';
 import { resolveReadableDate } from './ledger';
@@ -26,6 +26,7 @@ import { loadSettings } from './settings';
 import { computeSettlement } from './settlement';
 import { getShift } from './shifts';
 import { technicianTextSql } from './technicians';
+import { currentStoreId } from '../lib/store-context';
 
 export async function checkoutForPrint(db: Db, id: number): Promise<CheckoutPrint> {
   const detail = await getCheckout(db, id);
@@ -74,6 +75,7 @@ export async function listPrinters(db: Db): Promise<PrintPrinter[]> {
            (SELECT count(*)::int FROM device_jobs j WHERE j.device_id = d.id AND j.status IN ('queued', 'sending', 'waiting')) AS waiting
     FROM devices d
     WHERE d.enabled AND d.kind = 'printer' AND d.connection IN ('network', 'print_server') AND d.host IS NOT NULL AND d.port IS NOT NULL
+      AND d.store_id = ${currentStoreId()}
     ORDER BY d.area, d.code`;
   return rows.map(({ options, ...r }) => ({ ...r, paperWidth: options.paperWidth === 58 ? 58 : 80 }));
 }
@@ -156,14 +158,14 @@ export function registerPrintRoutes(app: FastifyInstance, deps: Deps) {
   // 打一张单据：先核对、排好内容（只读，不加锁），再建打印任务（操作编号的咨询锁 → 打印机一行）
   app.post('/api/print/jobs', { preHandler: guard('print.network') }, async (req) => {
     const input = parse(PrintJobInput, req.body);
-    const [printer] = await deps.sql<{ options: { paperWidth?: 58 | 80 } }[]>`SELECT options FROM devices WHERE id = ${input.deviceId}`;
+    const [printer] = await deps.sql<{ options: { paperWidth?: 58 | 80 } }[]>`SELECT options FROM devices WHERE id = ${input.deviceId} AND store_id = ${currentStoreId()}`;
     if (!printer) throw notFound('打印机不存在');
     const r = await renderDoc(deps, req, input.doc, printer.options.paperWidth === 58 ? 58 : 80);
     if (r.payload.length > PRINT_PAYLOAD_MAX_BYTES) throw unprocessable('PRINT_TOO_LONG', '这张单据太长，打不到小票机上，请用浏览器打印');
     return createDocJob(deps, { clientKey: input.clientKey, deviceId: input.deviceId, kind: KIND_OF[input.doc.type], docRef: r.ref, docLabel: r.label, payload: r.payload }, ctxOf(req), log);
   });
 
-  app.get('/api/print/jobs/:id', { preHandler: guard('print.network') }, async (req): Promise<DeviceJob> => getJob(deps.sql, parse(idParam, req.params).id));
+  app.get('/api/print/jobs/:id', { preHandler: guard('print.network') }, async (req): Promise<DeviceJob> => getStoreJob(deps.sql, parse(idParam, req.params).id));
 
   // 还没打完的单据（排队、发送中、等打印机恢复）：设备页的「打印队列」
   app.get('/api/print/queue', { preHandler: guard('print.network') }, async () => {

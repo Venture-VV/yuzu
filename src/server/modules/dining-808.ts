@@ -21,6 +21,7 @@ import { consumeLineVoidGrant } from '../auth/grants';
 import { assertCanFix, loadFrontdeskRules } from './frontdesk/common';
 import { loadDiningRules } from './dining';
 import { loadSettings } from './settings';
+import { currentStoreId } from '../lib/store-context';
 
 export type VoidApproval = { approval: 'small' | 'self' | 'manager' | 'grant'; approverName?: string; approverId?: number };
 
@@ -93,6 +94,7 @@ export async function diningLedger(db: Db, q: DiningLedgerQuery): Promise<Dining
            l.name, coalesce(nullif(si.category, ''), '未分类') AS category, l.quantity, l.unit_price, l.amount, l.status, l.void_reason,
            ki.status AS kitchen_status, st.display_name AS posted_by_name
     FROM bill_lines l JOIN staff st ON st.id = l.posted_by
+    JOIN bills bb ON bb.id = l.bill_id AND bb.store_id = ${currentStoreId()}
     LEFT JOIN service_items si ON si.id = l.item_id
     LEFT JOIN visits v ON v.bill_id = l.bill_id LEFT JOIN hand_tags h ON h.id = v.tag_id
     LEFT JOIN table_sessions ts ON ts.bill_id = l.bill_id LEFT JOIN dining_tables dt ON dt.id = ts.table_id
@@ -103,7 +105,7 @@ export async function diningLedger(db: Db, q: DiningLedgerQuery): Promise<Dining
     ORDER BY l.posted_at, l.id`;
   const categories = await db<{ category: string }[]>`
     SELECT DISTINCT coalesce(nullif(si.category, ''), '未分类') AS category
-    FROM bill_lines l LEFT JOIN service_items si ON si.id = l.item_id
+    FROM bill_lines l LEFT JOIN service_items si ON si.id = l.item_id JOIN bills bb ON bb.id = l.bill_id AND bb.store_id = ${currentStoreId()}
     WHERE l.source = 'dining' AND l.business_date BETWEEN ${q.from} AND ${q.to} ORDER BY 1`;
   const list = rows.map((r) => ({ ...r, id: Number(r.id), postedAt: new Date(r.postedAt).toISOString() }));
   const active = list.filter((r) => r.status === 'active');
@@ -162,6 +164,7 @@ export async function dishVoids(db: Db, deps: Deps, q: { from: string; to: strin
            coalesce(h.code, '') AS tag_code, coalesce(dt.name, '') AS table_name,
            a.detail->>'approval' AS approval, a.detail->>'approverName' AS approver_name
     FROM bill_lines l JOIN staff vs ON vs.id = l.voided_by JOIN staff ps ON ps.id = l.posted_by
+    JOIN bills bb ON bb.id = l.bill_id AND bb.store_id = ${currentStoreId()}
     LEFT JOIN visits v ON v.bill_id = l.bill_id LEFT JOIN hand_tags h ON h.id = v.tag_id
     LEFT JOIN table_sessions ts ON ts.bill_id = l.bill_id LEFT JOIN dining_tables dt ON dt.id = ts.table_id
     LEFT JOIN LATERAL (

@@ -47,6 +47,7 @@ import { leaveUsages, locateUsage } from './locations';
 import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { settingRow } from '../lib/store-settings';
+import { currentStoreId } from '../lib/store-context';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -160,6 +161,7 @@ async function readUsages(db: Db, where: { id?: number; date?: string; spaceId?:
       AND ${where.date !== undefined ? db`u.business_date = ${where.date}` : db`true`}
       AND ${where.spaceId !== undefined ? db`u.space_id = ${where.spaceId}` : db`true`}
       AND ${where.openOnly ? db`u.status = 'open'` : db`true`}
+      AND u.store_id = ${currentStoreId()}
     ORDER BY u.opened_at, u.id`;
   const rules = await loadUsageRules(db);
   const views = await usagePricingViews(db, rules);
@@ -193,7 +195,7 @@ export async function usageBoard(db: Db): Promise<UsageBoard> {
   const spaces = await db<Omit<UsageBoardSpace, 'priced' | 'pricing' | 'usage'>[]>`
     SELECT sp.id, sp.code, sp.display_name, sp.business_type, sp.capacity, f.code AS floor_code
     FROM spaces sp JOIN floors f ON f.id = sp.floor_id
-    WHERE sp.active AND sp.sellable AND sp.business_type IN ${db(rules.businessTypes)}
+    WHERE sp.active AND sp.sellable AND sp.business_type IN ${db(rules.businessTypes)} AND sp.store_id = ${currentStoreId()}
     ORDER BY array_position(${rules.businessTypes}::text[], sp.business_type), f.sort_order, f.code, sp.code`;
   const open = new Map((await readUsages(db, { openOnly: true })).map((u) => [u.spaceId, u]));
   return {
@@ -249,14 +251,14 @@ export async function openUsageTx(
   const rules = await loadUsageRules(tx);
   // ① 来访（共享锁：开单不改来访，但要挡住同时结账、撤销）
   const [peek] = await tx<{ id: number }[]>`
-    SELECT v.id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.tagCode} AND v.status = 'open'`;
+    SELECT v.id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${input.tagCode} AND v.status = 'open' AND t.store_id = ${currentStoreId()}`;
   if (!peek) throw conflict('TAG_NOT_IN_STORE', `手牌 ${input.tagCode} 没有在店客人，请核对牌号；使用人要先在前台接待、买门票，再开单`);
   const [visit] = await tx<{ id: number; visitNo: string; billId: number; status: string }[]>`
     SELECT id, visit_no, bill_id, status FROM visits WHERE id = ${peek.id} FOR SHARE`;
   if (visit!.status !== 'open') throw conflict('VISIT_CLOSED', `来访 ${visit!.visitNo} 已${visit!.status === 'settled' ? '结账离店' : '撤销'}，不能开单`);
   // ② 空间一行（与空间台账的停用、改业态串行；不挡外键检查）
   const [space] = await tx<{ id: number; code: string; displayName: string; businessType: string; active: boolean; sellable: boolean }[]>`
-    SELECT id, code, display_name, business_type, active, sellable FROM spaces WHERE id = ${input.spaceId} FOR NO KEY UPDATE`;
+    SELECT id, code, display_name, business_type, active, sellable FROM spaces WHERE id = ${input.spaceId} AND store_id = ${currentStoreId()} FOR NO KEY UPDATE`;
   if (!space) throw notFound('空间不存在，请刷新后重试');
   if (!rules.businessTypes.includes(space.businessType)) {
     throw unprocessable(
@@ -307,7 +309,7 @@ interface LockedUsage {
 async function lockUsage(tx: Tx, id: number): Promise<LockedUsage> {
   const [u] = await tx<LockedUsage[]>`
     SELECT u.id, u.usage_no, u.space_id, u.visit_id, u.status, u.opened_by, u.opened_at, sp.code AS space_code, sp.business_type
-    FROM space_usages u JOIN spaces sp ON sp.id = u.space_id WHERE u.id = ${id} FOR UPDATE OF u`;
+    FROM space_usages u JOIN spaces sp ON sp.id = u.space_id WHERE u.id = ${id} AND u.store_id = ${currentStoreId()} FOR UPDATE OF u`;
   if (!u) throw notFound('使用单不存在');
   if (u.status !== 'open') {
     throw conflict('USAGE_CLOSED', `使用单 ${u.usageNo}（${u.spaceCode}）已${u.status === 'cancelled' ? '撤单' : '结束'}，请刷新`);
@@ -324,7 +326,7 @@ export async function endUsage(deps: Deps, id: number, raw: unknown, ctx: OpCont
     const at = ctx.at ?? new Date();
     // 计费的：先锁来访、账单（与结账同一个顺序：来访 → 账单 → 使用单），再锁使用单
     const [peek] = await tx<{ visitId: number; businessType: string }[]>`
-      SELECT u.visit_id, sp.business_type FROM space_usages u JOIN spaces sp ON sp.id = u.space_id WHERE u.id = ${id}`;
+      SELECT u.visit_id, sp.business_type FROM space_usages u JOIN spaces sp ON sp.id = u.space_id WHERE u.id = ${id} AND u.store_id = ${currentStoreId()}`;
     if (!peek) throw notFound('使用单不存在');
     const pricing = pricingOf(await loadUsageRules(tx), peek.businessType);
     let billId: number | null = null;

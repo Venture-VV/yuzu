@@ -28,6 +28,7 @@ import { badRequest, conflict, notFound } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { businessDate, setTxTimeouts } from './frontdesk/common';
 import { loadSettings } from './settings';
+import { currentStoreId } from '../lib/store-context';
 
 // ───────────────────────── 房态记录（B04） ─────────────────────────
 
@@ -58,7 +59,7 @@ export async function insertHousekeepingEvent(tx: Tx, e: HousekeepingEventInput)
  * 调用前已锁好入住单（与原来一样，房间一行在这里锁）
  */
 export async function markRoomDirty(tx: Tx, roomId: number, why: { ref: string; note: string; staffId: number; at: Date }) {
-  const [r] = await tx<{ housekeeping: Housekeeping }[]>`SELECT housekeeping FROM rooms WHERE id = ${roomId} FOR UPDATE`;
+  const [r] = await tx<{ housekeeping: Housekeeping }[]>`SELECT housekeeping FROM rooms WHERE id = ${roomId} AND store_id = ${currentStoreId()} FOR UPDATE`;
   await tx`UPDATE rooms SET housekeeping = 'dirty', maintenance_note = NULL, updated_at = now() WHERE id = ${roomId}`;
   if (r) await insertHousekeepingEvent(tx, { roomId, from: r.housekeeping, to: 'dirty', note: why.note, source: 'auto', ref: why.ref, staffId: why.staffId, at: why.at });
 }
@@ -77,7 +78,7 @@ export async function revertHousekeeping(deps: Deps, roomId: number, raw: unknow
     await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
       const [room] = await tx<{ roomNo: string; housekeeping: Housekeeping }[]>`
-        SELECT room_no, housekeeping FROM rooms WHERE id = ${roomId} FOR UPDATE`;
+        SELECT room_no, housekeeping FROM rooms WHERE id = ${roomId} AND store_id = ${currentStoreId()} FOR UPDATE`;
       if (!room) throw notFound('房间不存在，请刷新后重试');
       const [last] = await tx<{ id: number; fromState: Housekeeping; toState: Housekeeping; source: HousekeepingSource }[]>`
         SELECT id, from_state, to_state, source FROM room_housekeeping_events WHERE room_id = ${roomId} ORDER BY id DESC LIMIT 1`;
@@ -183,7 +184,7 @@ export async function roomTimeline(deps: Deps, roomId: number, raw: unknown): Pr
   };
 
   const [room] = await db<{ id: number; roomNo: string; floor: string; typeName: string; housekeeping: Housekeeping }[]>`
-    SELECT r.id, r.room_no, r.floor, t.name AS type_name, r.housekeeping FROM rooms r JOIN room_types t ON t.id = r.room_type_id WHERE r.id = ${roomId}`;
+    SELECT r.id, r.room_no, r.floor, t.name AS type_name, r.housekeeping FROM rooms r JOIN room_types t ON t.id = r.room_type_id WHERE r.id = ${roomId} AND r.store_id = ${currentStoreId()}`;
   if (!room) throw notFound('房间不存在');
 
   // 在这段时间里住过这间房的入住单（现在在这间，或换进、换出过这间）

@@ -52,6 +52,7 @@ import { ClaimKey, lockClaim, mpContext, saveClaim } from './mp-entries';
 import { randomUUID } from 'node:crypto';
 import { lockTechnicianBookings } from './booking-guard';
 import { settingRow } from '../lib/store-settings';
+import { currentStoreId, forEachStore } from '../lib/store-context';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -137,6 +138,8 @@ async function readBookingRows(db: Db, where: { id?: number; date?: string; memb
     WHERE ${where.id !== undefined ? db`b.id = ${where.id}` : db`true`}
       AND ${where.date !== undefined ? db`b.business_date = ${where.date}` : db`true`}
       AND ${where.memberId !== undefined ? db`b.member_id = ${where.memberId}` : db`true`}
+      -- 前台看板、单张预约只看当前门店（8.0.22）；小程序「我的预约」按会员看全部门店
+      AND ${where.memberId !== undefined ? db`true` : db`b.store_id = ${currentStoreId()}`}
     ORDER BY b.starts_at, b.id`;
   return rows.map(({ techNo, techName, sessionNo, stayNo, ...r }) => ({
     ...r,
@@ -179,17 +182,17 @@ export async function bookingBoard(db: Db, date: string): Promise<BookingBoard> 
   const usageTypes = (await loadUsageRules(db)).businessTypes;
   const [bookings, technicians, items, spaces, roomTypes] = await Promise.all([
     readBookings(db, { date }),
-    db<BookingBoard['technicians']>`SELECT id, tech_no, name, gender FROM technicians WHERE active ORDER BY sort_order, tech_no`,
+    db<BookingBoard['technicians']>`SELECT id, tech_no, name, gender FROM technicians WHERE active AND store_id = ${currentStoreId()} ORDER BY sort_order, tech_no`,
     db<{ id: number; name: string; category: string; durationMinutes: number | null }[]>`
       SELECT id, name, category, duration_minutes FROM service_items WHERE active AND technician_required ORDER BY sort_order, id`,
     usageTypes.length
       ? db<BookingBoard['spaces']>`
           SELECT id, code, display_name AS name, business_type, capacity FROM spaces
-          WHERE active AND sellable AND business_type IN ${db(usageTypes)} ORDER BY code`
+          WHERE active AND sellable AND business_type IN ${db(usageTypes)} AND store_id = ${currentStoreId()} ORDER BY code`
       : Promise.resolve([] as BookingBoard['spaces']),
     db<BookingBoard['roomTypes']>`
       SELECT rt.id, rt.name, (SELECT count(*)::int FROM rooms r WHERE r.room_type_id = rt.id AND r.active) AS rooms
-      FROM room_types rt WHERE rt.active ORDER BY rt.sort_order, rt.id`,
+      FROM room_types rt WHERE rt.active AND rt.store_id = ${currentStoreId()} ORDER BY rt.sort_order, rt.id`,
   ]);
   return {
     date,
@@ -243,7 +246,7 @@ async function unassignedBusy(db: Db, from: number, to: number, excludeBookingId
   const rows = await db<{ startsAt: string; endsAt: string }[]>`
     SELECT starts_at, ends_at FROM bookings
     WHERE kind = 'technician' AND technician_id IS NULL AND status IN ${db(ACTIVE_BOOKING_STATUSES)}
-      AND starts_at < ${new Date(to)} AND ends_at > ${new Date(from)} AND id <> ${excludeBookingId ?? 0}`;
+      AND starts_at < ${new Date(to)} AND ends_at > ${new Date(from)} AND id <> ${excludeBookingId ?? 0} AND store_id = ${currentStoreId()}`;
   return rows.map((r) => ({ start: Date.parse(r.startsAt), end: Date.parse(r.endsAt) }));
 }
 
@@ -586,7 +589,7 @@ async function lockBooking(tx: Tx, id: number): Promise<LockedBooking> {
   const [b] = await tx<LockedBooking[]>`
     SELECT id, booking_no, kind, source, status, member_id, item_id, technician_id, space_id, room_type_id, starts_at, ends_at, guests, version,
            business_date::text AS business_date
-    FROM bookings WHERE id = ${id} FOR UPDATE`;
+    FROM bookings WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
   if (!b) throw notFound('预约单不存在');
   return { ...b, id: Number(b.id) };
 }
@@ -703,7 +706,7 @@ async function changeBookingTx(tx: Tx, deps: Deps, id: number, p: ChangePayload,
   // 到店：客人要先接待开手牌；派对房直接开使用单
   stillOpen(b);
   const [v] = await tx<{ id: number }[]>`
-    SELECT v.id FROM visits v JOIN hand_tags h ON h.id = v.tag_id WHERE h.code = ${p.tagCode} AND v.status = 'open'`;
+    SELECT v.id FROM visits v JOIN hand_tags h ON h.id = v.tag_id WHERE h.code = ${p.tagCode} AND v.status = 'open' AND h.store_id = ${currentStoreId()}`;
   if (!v) throw conflict('TAG_NOT_IN_STORE', `手牌 ${p.tagCode} 没有在店客人：请先接待开手牌，再点到店`);
   let ref: string | null = null;
   if (b.kind === 'space') {
@@ -725,13 +728,26 @@ async function changeBookingTx(tx: Tx, deps: Deps, id: number, p: ChangePayload,
  * 一张一个事务，只锁那张预约单；返回处理了几张
  */
 export async function sweepBookings(sql: Sql, now = new Date()): Promise<{ cancelled: number; noShow: number }> {
+  // 按门店逐家跑（8.0.22）：各店的预约规则（确认提前量、爽约时限）可以不一样
+  let cancelled = 0;
+  let noShow = 0;
+  await forEachStore(sql, async () => {
+    const r = await sweepStoreBookings(sql, now);
+    cancelled += r.cancelled;
+    noShow += r.noShow;
+  });
+  return { cancelled, noShow };
+}
+
+async function sweepStoreBookings(sql: Sql, now: Date): Promise<{ cancelled: number; noShow: number }> {
   const rules = await loadBookingRules(sql);
   // 到了的：没确认的小程序预约到了自动取消的时刻；其余过了记爽约的时刻（客房：过了保留时间）
   const due = await sql<{ id: number }[]>`
     SELECT id FROM bookings
-    WHERE (status = 'pending' AND source = 'mp' AND starts_at - ${`${rules.confirmLeadMinutes} minutes`}::interval <= ${now})
+    WHERE ((status = 'pending' AND source = 'mp' AND starts_at - ${`${rules.confirmLeadMinutes} minutes`}::interval <= ${now})
        OR (status IN ('pending', 'confirmed') AND (
-             (kind <> 'room' AND starts_at + ${`${rules.noShowMinutes} minutes`}::interval <= ${now}) OR (kind = 'room' AND hold_until <= ${now})))
+             (kind <> 'room' AND starts_at + ${`${rules.noShowMinutes} minutes`}::interval <= ${now}) OR (kind = 'room' AND hold_until <= ${now}))))
+      AND store_id = ${currentStoreId()}
     ORDER BY id`;
   let cancelled = 0;
   let noShow = 0;

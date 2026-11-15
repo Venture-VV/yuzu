@@ -51,6 +51,7 @@ import { todayIn } from '../lib/dates';
 import { setTxTimeouts } from '../lib/tx';
 import { outlineRev, registerOutlineRoutes } from './floorplan-outlines';
 import { attachment } from '../lib/csv';
+import { currentStoreId } from '../lib/store-context';
 
 /** 转换超过这么久停掉（需求：30 分钟内出新底图与差异报告） */
 export const FLOORPLAN_TIMEOUT_MS = 15 * 60_000;
@@ -77,7 +78,7 @@ const batchSelect = (db: Db) => db`
 const toBatch = (r: BatchRow): FloorplanBatch => ({ ...r, id: Number(r.id), fileBytes: Number(r.fileBytes) });
 
 async function getBatch(db: Db, id: number): Promise<FloorplanBatch> {
-  const [row] = await db<BatchRow[]>`${batchSelect(db)} WHERE b.id = ${id}`;
+  const [row] = await db<BatchRow[]>`${batchSelect(db)} WHERE b.id = ${id} AND b.store_id = ${currentStoreId()}`;
   if (!row) throw notFound('没有这个底图批次');
   return toBatch(row);
 }
@@ -87,7 +88,7 @@ async function activations(db: Db, batchId: number | null, limit: number): Promi
   const rows = await db<(Omit<FloorplanActivation, 'at'> & { at: string })[]>`
     SELECT a.id, a.batch_id, b.file_name, a.kind, a.at, s.display_name AS staff_name, a.reason
     FROM floorplan_activations a JOIN floorplan_batches b ON b.id = a.batch_id LEFT JOIN staff s ON s.id = a.staff_id
-    WHERE ${batchId === null ? db`true` : db`a.batch_id = ${batchId}`}
+    WHERE ${batchId === null ? db`true` : db`a.batch_id = ${batchId}`} AND b.store_id = ${currentStoreId()}
     ORDER BY a.at DESC, a.id DESC LIMIT ${limit}`;
   return rows.map((r) => ({ ...r, id: Number(r.id), batchId: Number(r.batchId), at: new Date(r.at).toISOString() }));
 }
@@ -99,10 +100,10 @@ async function activationSeq(db: Db): Promise<number> {
 }
 
 export async function listFloorplans(db: Db): Promise<FloorplanList> {
-  const rows = await db<BatchRow[]>`${batchSelect(db)} ORDER BY b.id DESC LIMIT 50`;
+  const rows = await db<BatchRow[]>`${batchSelect(db)} WHERE b.store_id = ${currentStoreId()} ORDER BY b.id DESC LIMIT 50`;
   const batches = rows.map(toBatch);
   // 列表只取最近 50 批；在用的那批更早时也带上
-  const [active] = await db<{ id: number }[]>`SELECT id FROM floorplan_batches WHERE status = 'active'`;
+  const [active] = await db<{ id: number }[]>`SELECT id FROM floorplan_batches WHERE status = 'active' AND store_id = ${currentStoreId()}`;
   if (active && !batches.some((b) => b.id === Number(active.id))) batches.push(await getBatch(db, Number(active.id)));
   return {
     batches,
@@ -185,7 +186,7 @@ const normLabel = (s: string) => s.replace(/\s+/g, '');
 /** 与空间台账比对：编码是主键；只比图上这几层的在用空间 */
 export async function ledgerDiff(db: Db, floors: string[], rooms: FloorplanRoom[]): Promise<FloorplanLedgerDiff> {
   const ledger = await db<{ code: string; displayName: string; sourceLabel: string; active: boolean; floorCode: string }[]>`
-    SELECT s.code, s.display_name, s.source_label, s.active, f.code AS floor_code FROM spaces s JOIN floors f ON f.id = s.floor_id`;
+    SELECT s.code, s.display_name, s.source_label, s.active, f.code AS floor_code FROM spaces s JOIN floors f ON f.id = s.floor_id WHERE s.store_id = ${currentStoreId()}`;
   const byCode = new Map(ledger.map((s) => [s.code, s]));
   const drawn = new Set(rooms.map((r) => r.code));
   const diff: FloorplanLedgerDiff = { onlyDrawing: [], onlyLedger: [], floorMismatch: [], labelChanged: [], matched: 0 };
@@ -224,8 +225,8 @@ function insidePolygon([x, y]: Pt, poly: [number, number][]): boolean {
 async function batchDiff(db: Db, batchId: number, status: FloorplanBatchStatus, rooms: FloorplanRoom[], frames: Map<string, number[]>, unitMm: number): Promise<FloorplanBatchDiff | null> {
   const [against] =
     status === 'active'
-      ? await db<{ id: number }[]>`SELECT id FROM floorplan_batches WHERE status = 'retired' AND id <> ${batchId} ORDER BY retired_at DESC, id DESC LIMIT 1`
-      : await db<{ id: number }[]>`SELECT id FROM floorplan_batches WHERE status = 'active' AND id <> ${batchId}`;
+      ? await db<{ id: number }[]>`SELECT id FROM floorplan_batches WHERE status = 'retired' AND id <> ${batchId} AND store_id = ${currentStoreId()} ORDER BY retired_at DESC, id DESC LIMIT 1`
+      : await db<{ id: number }[]>`SELECT id FROM floorplan_batches WHERE status = 'active' AND id <> ${batchId} AND store_id = ${currentStoreId()}`;
   if (!against) return null;
   const otherId = Number(against.id);
   const oldRooms = await batchRooms(db, otherId);
@@ -308,13 +309,13 @@ export async function floorplanDetail(db: Db, id: number): Promise<FloorplanDeta
 export { outlineRev };
 
 export async function activeFloorplan(db: Db): Promise<ActiveFloorplan> {
-  const [b] = await db<{ id: number; activatedAt: string }[]>`SELECT id, activated_at FROM floorplan_batches WHERE status = 'active'`;
+  const [b] = await db<{ id: number; activatedAt: string }[]>`SELECT id, activated_at FROM floorplan_batches WHERE status = 'active' AND store_id = ${currentStoreId()}`;
   if (!b) return { batchId: null, activatedAt: null, outlineRev: 0, floors: [], rooms: [] };
   const id = Number(b.id);
   const floors = (await batchFloors(db, id)).map((f) => f.floor);
   const rooms = await batchRooms(db, id);
   const spaces = await db<{ id: number; code: string; displayName: string }[]>`
-    SELECT id, code, display_name FROM spaces WHERE active AND code IN ${db(rooms.length ? rooms.map((r) => r.code) : [''])}`;
+    SELECT id, code, display_name FROM spaces WHERE active AND store_id = ${currentStoreId()} AND code IN ${db(rooms.length ? rooms.map((r) => r.code) : [''])}`;
   const byCode = new Map(spaces.map((s) => [s.code, s]));
   return {
     batchId: id,
@@ -498,7 +499,7 @@ export async function uploadFloorplan(
     if (!isUniqueViolation(error)) throw error;
     const again = await sameFileBatch(db, sha, pdfScale);
     if (again) return { batch: again, replayed: true };
-    const [busy] = await db<{ fileName: string }[]>`SELECT file_name FROM floorplan_batches WHERE status = 'converting'`;
+    const [busy] = await db<{ fileName: string }[]>`SELECT file_name FROM floorplan_batches WHERE status = 'converting' AND store_id = ${currentStoreId()}`;
     throw conflict('FLOORPLAN_BUSY', `正在转换另一份图纸${busy ? `（${busy.fileName}）` : ''}，等它转换完再上传`);
   }
   await writeAudit(db, {
@@ -554,7 +555,7 @@ async function switchActive(deps: Deps, id: number, raw: unknown, actor: Actor, 
       await setTxTimeouts(tx);
       await tx`SELECT pg_advisory_xact_lock(hashtextextended('floorplans', 0))`;
       const rows = await tx<{ id: number; status: FloorplanBatchStatus }[]>`
-        SELECT id, status FROM floorplan_batches WHERE id = ${id} OR status = 'active' ORDER BY id FOR UPDATE`;
+        SELECT id, status FROM floorplan_batches WHERE store_id = ${currentStoreId()} AND (id = ${id} OR status = 'active') ORDER BY id FOR UPDATE`;
       const target = rows.find((r) => Number(r.id) === id);
       if (!target) throw notFound('没有这个底图批次');
       if (target.status === 'active') return { replayed: true };
@@ -732,7 +733,7 @@ export function registerFloorplanRoutes(app: FastifyInstance, deps: Deps, jobs =
   app.get('/api/floorplans/:id/floors/:floor/svg', { preHandler: read }, async (req, reply) => {
     const { id, floor } = parse(FloorParams, req.params);
     const [row] = await sql<{ svg: string; status: FloorplanBatchStatus }[]>`
-      SELECT f.svg, b.status FROM floorplan_floors f JOIN floorplan_batches b ON b.id = f.batch_id WHERE f.batch_id = ${id} AND f.floor_code = ${floor}`;
+      SELECT f.svg, b.status FROM floorplan_floors f JOIN floorplan_batches b ON b.id = f.batch_id WHERE f.batch_id = ${id} AND f.floor_code = ${floor} AND b.store_id = ${currentStoreId()}`;
     if (!row || (row.status !== 'active' && !isAdmin(req))) throw notFound('没有这一层的底图');
     reply
       .header('content-type', 'image/svg+xml; charset=utf-8')

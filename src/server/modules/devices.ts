@@ -51,6 +51,7 @@ import { probe, sendToPrinter } from '../devices/netprint';
 import { erpOpAbandoned } from './erp-ops';
 import { loadSettings } from './settings';
 import { ctxOf } from '../lib/context';
+import { currentStoreId } from '../lib/store-context';
 
 // ───────────────────────── 读 ─────────────────────────
 
@@ -72,7 +73,8 @@ const sortDevices = (list: Device[]) =>
   );
 
 export async function listDevices(db: Db): Promise<Device[]> {
-  const rows = await db<Device[]>`SELECT ${deviceColumns(db)} FROM devices d LEFT JOIN devices h ON h.id = d.host_device_id`;
+  // 当前门店的设备（8.0.22）；心跳、补打照旧看全部门店的
+  const rows = await db<Device[]>`SELECT ${deviceColumns(db)} FROM devices d LEFT JOIN devices h ON h.id = d.host_device_id WHERE d.store_id = ${currentStoreId()}`;
   return sortDevices(rows);
 }
 
@@ -118,10 +120,17 @@ export async function getJob(db: Db, id: number): Promise<DeviceJob> {
   return row;
 }
 
+/** 当前门店的打印任务（8.0.22，接口用）：别家店的与不存在一样 */
+export async function getStoreJob(db: Db, id: number): Promise<DeviceJob> {
+  const [own] = await db`SELECT 1 FROM device_jobs WHERE id = ${id} AND store_id = ${currentStoreId()}`;
+  if (!own) throw notFound('打印任务不存在');
+  return getJob(db, id);
+}
+
 export async function listJobs(db: Db, f: { deviceId?: number; limit?: number; open?: boolean; createdBy?: number }): Promise<DeviceJob[]> {
   return db<DeviceJob[]>`
     SELECT ${jobColumns(db)} FROM ${jobFrom(db)}
-    WHERE ${f.deviceId ? db`j.device_id = ${f.deviceId}` : db`true`}
+    WHERE d.store_id = ${currentStoreId()} AND ${f.deviceId ? db`j.device_id = ${f.deviceId}` : db`true`}
       AND ${f.open ? db`j.status IN ('queued', 'sending', 'waiting')` : db`true`}
       AND ${f.createdBy ? db`j.created_by = ${f.createdBy}` : db`true`}
     ORDER BY j.id DESC LIMIT ${f.limit ?? 50}`;
@@ -131,7 +140,7 @@ export async function listEvents(db: Db, f: { deviceId?: number; type?: string; 
   return db<DeviceEvent[]>`
     SELECT e.id, e.device_id, d.code AS device_code, e.type, e.data, s.display_name AS staff_name, e.created_at
     FROM device_events e LEFT JOIN devices d ON d.id = e.device_id LEFT JOIN staff s ON s.id = e.staff_id
-    WHERE ${f.deviceId ? db`e.device_id = ${f.deviceId}` : db`true`} AND ${f.type ? db`e.type = ${f.type}` : db`true`}
+    WHERE coalesce(d.store_id, 1) = ${currentStoreId()} AND ${f.deviceId ? db`e.device_id = ${f.deviceId}` : db`true`} AND ${f.type ? db`e.type = ${f.type}` : db`true`}
     ORDER BY e.id DESC LIMIT ${f.limit ?? 100}`;
 }
 
@@ -193,7 +202,7 @@ async function normalizeFields(db: Db, f: Fields, selfId: number | null) {
   let hostDeviceId: number | null = null;
   const wantsHost = f.connection === 'bridge' || f.connection === 'keyboard' || f.connection === 'print_server';
   if (wantsHost && f.hostDeviceCode) {
-    const [h] = await db<{ id: number; kind: DeviceKind }[]>`SELECT id, kind FROM devices WHERE code = ${f.hostDeviceCode.toUpperCase()}`;
+    const [h] = await db<{ id: number; kind: DeviceKind }[]>`SELECT id, kind FROM devices WHERE code = ${f.hostDeviceCode.toUpperCase()} AND store_id = ${currentStoreId()}`;
     if (!h) throw badRequest(`没有编号为「${f.hostDeviceCode}」的设备`, { field: 'hostDeviceCode' });
     const need: DeviceKind = f.connection === 'print_server' ? 'print_server' : 'terminal';
     if (h.kind !== need) throw badRequest(f.connection === 'print_server' ? '「经打印服务器」要挂在打印服务器下' : '读卡、扫码要挂在终端下', { field: 'hostDeviceCode' });
@@ -255,7 +264,7 @@ export async function createDevice(deps: Deps, raw: unknown, ctx: OpContext): Pr
 
 async function lockDevice(tx: Tx, id: number) {
   const [row] = await tx<{ id: number; code: string; kind: DeviceKind; version: number; enabled: boolean; connection: string; host: string | null; port: number | null }[]>`
-    SELECT id, code, kind, version, enabled, connection, host, port FROM devices WHERE id = ${id} FOR UPDATE`;
+    SELECT id, code, kind, version, enabled, connection, host, port FROM devices WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
   if (!row) throw notFound('设备不存在');
   return row;
 }
@@ -328,7 +337,7 @@ export async function setDeviceEnabled(deps: Deps, id: number, raw: unknown, ctx
 
 export async function importPreview(db: Db): Promise<DeviceImportPreview> {
   const planned = plannedQuoteDevices();
-  const existing = new Set((await db<{ code: string }[]>`SELECT code FROM devices`).map((r) => r.code));
+  const existing = new Set((await db<{ code: string }[]>`SELECT code FROM devices WHERE store_id = ${currentStoreId()}`).map((r) => r.code));
   return {
     create: planned.filter((p) => !existing.has(p.code)).map((p) => ({ code: p.code, name: p.name, kind: p.line.kind, model: p.line.model, area: p.area, catalogKey: p.line.key })),
     skipped: planned.filter((p) => existing.has(p.code)).map((p) => p.code),
@@ -478,7 +487,7 @@ export async function reportBridge(deps: Deps, raw: unknown, ctx: OpContext): Pr
     await tx.unsafe("SET LOCAL lock_timeout = '3s'; SET LOCAL statement_timeout = '5s'");
     // 锁顺序：终端一行 → 它下面的设备（id 升序）
     const [terminal] = await tx<{ id: number; code: string; name: string; enabled: boolean; status: DeviceStatus; statusCode: string | null }[]>`
-      SELECT id, code, name, enabled, status, status_code FROM devices WHERE code = ${input.terminal} AND kind = 'terminal' FOR UPDATE`;
+      SELECT id, code, name, enabled, status, status_code FROM devices WHERE code = ${input.terminal} AND kind = 'terminal' AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!terminal) throw notFound(`没有登记编号为「${input.terminal}」的终端`);
     if (!terminal.enabled) throw unprocessable('DEVICE_DISABLED', `终端「${terminal.name}」已停用`);
     const children = await tx<{ id: number; code: string; name: string; bridgeKey: string | null; enabled: boolean; status: DeviceStatus; statusCode: string | null }[]>`
@@ -702,7 +711,7 @@ export async function resumeWaitingJobs(deps: Deps, opts: { now?: Date; log?: (m
 export async function cancelJob(deps: Deps, id: number, ctx: OpContext, canManage: boolean): Promise<DeviceJob> {
   await deps.sql.begin(async (tx) => {
     const [j] = await tx<{ status: string; createdBy: number; deviceId: number; docLabel: string | null; kind: DeviceJobKind }[]>`
-      SELECT status, created_by, device_id, doc_label, kind FROM device_jobs WHERE id = ${id} FOR UPDATE`;
+      SELECT status, created_by, device_id, doc_label, kind FROM device_jobs WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!j) throw notFound('打印任务不存在');
     if (Number(j.createdBy) !== ctx.actor.id && !canManage) throw forbidden('只能取消自己提交的打印任务');
     if (j.status !== 'queued' && j.status !== 'waiting') {
@@ -857,7 +866,7 @@ export function registerDeviceRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/devices/import', { preHandler: guard('device.manage') }, async (req) => importDevices(sql, req.actor, req.ip));
   app.post('/api/devices/:id/jobs', { preHandler: guard('device.test') }, async (req) => createJob(deps, parse(idParam, req.params).id, req.body, ctxOf(req), log));
   app.get('/api/devices/jobs', { preHandler: guard('device.view') }, async (req) => listJobs(sql, parse(JobsQuery, req.query ?? {})));
-  app.get('/api/devices/jobs/:id', { preHandler: guard('device.view') }, async (req) => getJob(sql, parse(idParam, req.params).id));
+  app.get('/api/devices/jobs/:id', { preHandler: guard('device.view') }, async (req) => getStoreJob(sql, parse(idParam, req.params).id));
   app.get('/api/devices/events', { preHandler: guard('device.manage') }, async (req) => listEvents(sql, parse(EventsQuery, req.query ?? {})));
   app.post('/api/devices/bridge-report', { preHandler: guard('device.view') }, async (req) => reportBridge(deps, req.body, ctxOf(req)));
 }

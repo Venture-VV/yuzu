@@ -41,6 +41,7 @@ import { loadPricedItems, priceLine } from './pricing';
 import { lockPaymentShift, openShiftOf } from './shifts';
 import { ctxOf } from '../lib/context';
 import { recordSaleUsage } from './stock-usage';
+import { currentStoreId } from '../lib/store-context';
 
 // ───────────────────────── 后台：桌台 ─────────────────────────
 
@@ -56,7 +57,7 @@ export async function tablesAdmin(db: Db): Promise<TablesAdmin> {
   const tables = await db<TablesAdmin['tables']>`
     SELECT t.id, t.name, t.area, t.seats, t.sort_order, t.active,
            (SELECT count(*) FROM table_sessions s WHERE s.table_id = t.id)::int AS session_count
-    FROM dining_tables t ORDER BY t.sort_order, t.id`;
+    FROM dining_tables t WHERE t.store_id = ${currentStoreId()} ORDER BY t.sort_order, t.id`;
   return { tables };
 }
 
@@ -64,7 +65,7 @@ async function saveTable(deps: Deps, id: number | null, raw: unknown, ctx: OpCon
   const t = parse(TableInput, raw);
   await deps.sql.begin(async (tx) => {
     const [dup] = await tx<{ id: number }[]>`
-      SELECT id FROM dining_tables WHERE lower(btrim(name)) = lower(${t.name}) AND id IS DISTINCT FROM ${id}`;
+      SELECT id FROM dining_tables WHERE lower(btrim(name)) = lower(${t.name}) AND id IS DISTINCT FROM ${id} AND store_id = ${currentStoreId()}`;
     if (dup) throw conflict('TABLE_NAME_TAKEN', `已有桌台「${t.name}」`);
     if (id === null) {
       const [row] = await tx<{ id: number }[]>`
@@ -73,7 +74,7 @@ async function saveTable(deps: Deps, id: number | null, raw: unknown, ctx: OpCon
       await writeAudit(tx, { staffId: ctx.actor.id, action: 'dining_table_saved', targetType: 'dining_table', targetId: row!.id, detail: { summary: `新建桌台「${t.name}」` }, ip: ctx.ip });
       return;
     }
-    const [cur] = await tx<{ name: string }[]>`SELECT name FROM dining_tables WHERE id = ${id} FOR UPDATE`;
+    const [cur] = await tx<{ name: string }[]>`SELECT name FROM dining_tables WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!cur) throw notFound('桌台不存在');
     if (!t.active) {
       const [busy] = await tx<{ sessionNo: string }[]>`SELECT session_no FROM table_sessions WHERE table_id = ${id} AND status = 'open'`;
@@ -101,7 +102,7 @@ export async function tablesBoard(db: Db, deps: Deps): Promise<TablesBoard> {
   const rows = await db<(TablesBoard['tables'][number] & { sessionId: number | null })[]>`
     SELECT t.id, t.name, t.area, t.seats, t.sort_order, t.active, s.id AS session_id
     FROM dining_tables t LEFT JOIN table_sessions s ON s.table_id = t.id AND s.status = 'open'
-    WHERE t.active OR s.id IS NOT NULL
+    WHERE (t.active OR s.id IS NOT NULL) AND t.store_id = ${currentStoreId()}
     ORDER BY t.sort_order, t.id`;
   const ids = rows.flatMap((r) => (r.sessionId ? [r.sessionId] : []));
   const sessions = ids.length
@@ -127,7 +128,7 @@ export async function getTableSession(db: Db, id: number): Promise<TableSessionD
            b.amount_cents AS amount
     FROM table_sessions s JOIN dining_tables t ON t.id = s.table_id JOIN bills b ON b.id = s.bill_id JOIN staff st ON st.id = s.opened_by
     LEFT JOIN members m ON m.id = s.member_id
-    WHERE s.id = ${id}`;
+    WHERE s.id = ${id} AND s.store_id = ${currentStoreId()}`;
   if (!s) throw notFound('开台记录不存在');
   const lines = await db<BillLine[]>`
     SELECT l.id, l.source, l.item_id, l.tier, l.name, l.unit_price, l.quantity, l.amount, l.status, l.post_key, l.business_date,
@@ -168,7 +169,8 @@ async function lockSessions(tx: Tx, ids: number[]): Promise<Map<number, LockedSe
   if (unique.length === 0) return new Map();
   const rows = await tx<LockedSession[]>`
     SELECT id, session_no, bill_id, table_id, guests, member_id, status, opened_by, opened_at
-    FROM table_sessions WHERE id IN ${tx(unique)} ORDER BY id FOR UPDATE`;
+    FROM table_sessions WHERE id IN ${tx(unique)} AND store_id = ${currentStoreId()} ORDER BY id FOR UPDATE`;
+  // 别家店的开台（8.0.22）：与不存在一样
   if (rows.length !== unique.length) throw notFound('开台记录不存在，请刷新后重试');
   return new Map(rows.map((r) => [r.id, r]));
 }
@@ -215,7 +217,7 @@ export async function openTable(deps: Deps, raw: unknown, ctx: OpContext): Promi
     await assertDiningEnabled(tx);
     await assertTablesEnabled(tx);
     // ① 桌台：启用、空闲（部分唯一索引兜底）
-    const [t] = await tx<{ id: number; name: string; active: boolean }[]>`SELECT id, name, active FROM dining_tables WHERE id = ${input.tableId} FOR UPDATE`;
+    const [t] = await tx<{ id: number; name: string; active: boolean }[]>`SELECT id, name, active FROM dining_tables WHERE id = ${input.tableId} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!t) throw notFound('桌台不存在，请刷新后重试');
     if (!t.active) throw conflict('TABLE_INACTIVE', `桌台「${t.name}」已停用，请换一张桌`);
     const [busy] = await tx<{ sessionNo: string }[]>`SELECT session_no FROM table_sessions WHERE table_id = ${t.id} AND status = 'open'`;
@@ -280,12 +282,12 @@ export async function moveTable(deps: Deps, id: number, raw: unknown, ctx: OpCon
   const input = parse(MoveInput, raw);
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    const [peek] = await tx<{ tableId: number }[]>`SELECT table_id FROM table_sessions WHERE id = ${id}`;
+    const [peek] = await tx<{ tableId: number }[]>`SELECT table_id FROM table_sessions WHERE id = ${id} AND store_id = ${currentStoreId()}`;
     if (!peek) throw notFound('开台记录不存在');
     if (peek.tableId === input.toTableId) throw badRequest('已经在这张桌台上了');
     // ① 两张桌台按 id 升序加锁 → ② 开台；加锁后核对没有被其他终端转走
     const tables = await tx<{ id: number; name: string; active: boolean }[]>`
-      SELECT id, name, active FROM dining_tables WHERE id IN ${tx([peek.tableId, input.toTableId])} ORDER BY id FOR UPDATE`;
+      SELECT id, name, active FROM dining_tables WHERE id IN ${tx([peek.tableId, input.toTableId])} AND store_id = ${currentStoreId()} ORDER BY id FOR UPDATE`;
     const to = tables.find((t) => t.id === input.toTableId);
     if (!to) throw notFound('要转去的桌台不存在');
     const s = (await lockSessions(tx, [id])).get(id)!;
@@ -482,7 +484,7 @@ export async function previewTableCheckout(deps: Deps, sessionIds: number[], at 
       SELECT s.id, s.session_no, s.bill_id, s.status, t.name AS table_name, s.guests, s.guest_label, s.member_id, m.name AS member_name,
              s.opened_at, b.amount_cents AS amount
       FROM table_sessions s JOIN dining_tables t ON t.id = s.table_id JOIN bills b ON b.id = s.bill_id LEFT JOIN members m ON m.id = s.member_id
-      WHERE s.id IN ${tx(ids)} ORDER BY t.sort_order, t.id`;
+      WHERE s.id IN ${tx(ids)} AND s.store_id = ${currentStoreId()} ORDER BY t.sort_order, t.id`;
     if (rows.length !== ids.length) throw notFound('有开台记录不存在，请刷新后重试');
     const closed = rows.find((r) => r.status !== 'open');
     if (closed) throw conflict('TABLE_CLOSED', `桌台「${closed.tableName}」的这次开台已结束，请刷新后重新选择`);

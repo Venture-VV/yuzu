@@ -14,12 +14,12 @@ BEGIN
     'recharges', 'consumptions', 'reversals', 'ledger_entries', 'member_refunds', 'count_cards',
     -- 设备
     'devices', 'device_jobs',
-    -- 客房与预约
-    'room_types', 'rooms', 'room_stays', 'bookings',
+    -- 客房与预约（夜审一家店一份）
+    'room_types', 'rooms', 'room_stays', 'room_audits', 'bookings',
     -- 技师与钟房
     'technicians', 'technician_sessions',
-    -- 餐饮与桌台
-    'kitchen_stations', 'dining_tables', 'table_sessions', 'kitchen_items', 'emenu_orders',
+    -- 餐饮与桌台（出品档口与菜品挂钩，全公司一套；各店的厨房屏只看自己店的出品单）
+    'dining_tables', 'table_sessions', 'kitchen_items', 'emenu_orders',
     -- 空间、底图、实时位置、导览
     'floors', 'zones', 'spaces', 'space_usages', 'floorplan_batches', 'location_readers', 'current_locations', 'guide_markers',
     -- 审计
@@ -29,7 +29,7 @@ BEGIN
   END LOOP;
 END $$;
 
--- 按店唯一：手牌代码、设备编号、技师工号、房号、房型名、桌台名、档口名、楼层与空间代码、刷卡点编号
+-- 按店唯一：手牌代码、设备编号、技师工号、房号、房型名、桌台名、楼层与空间代码、刷卡点编号
 ALTER TABLE hand_tags DROP CONSTRAINT hand_tags_code_key;
 CREATE UNIQUE INDEX hand_tags_code_key ON hand_tags (store_id, code);
 ALTER TABLE devices DROP CONSTRAINT devices_code_key;
@@ -42,8 +42,6 @@ DROP INDEX room_types_name_uq;
 CREATE UNIQUE INDEX room_types_name_uq ON room_types (store_id, lower(btrim(name)));
 DROP INDEX dining_tables_name_uq;
 CREATE UNIQUE INDEX dining_tables_name_uq ON dining_tables (store_id, lower(btrim(name)));
-DROP INDEX kitchen_stations_name_uq;
-CREATE UNIQUE INDEX kitchen_stations_name_uq ON kitchen_stations (store_id, lower(btrim(name)));
 DROP INDEX floors_code_uq;
 CREATE UNIQUE INDEX floors_code_uq ON floors (store_id, code);
 DROP INDEX spaces_code_uq;
