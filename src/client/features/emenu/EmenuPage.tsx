@@ -108,10 +108,12 @@ export function EmenuPage() {
   const pending = usePendingOrder();
   const lastTouch = useRef(saved?.touchedAt ?? Date.now());
 
-  // 这一次点餐随手存在平板上：页面被系统刷新了还在
+  // 这一次点餐随手存在平板上：页面被系统刷新了还在。
+  // 下单成功、正在提示的那两秒里这一次点餐已经结束（马上回起始页），不再存——这时候页面被刷新也不会回到上一位客人的菜单里
+  const ended = overlay?.kind === 'success';
   useEffect(() => {
-    saveState(phase === 'menu' && session ? { session, cart, remark, lang } : null);
-  }, [phase, session, cart, remark, lang]);
+    saveState(phase === 'menu' && session && !ended ? { session, cart, remark, lang } : null);
+  }, [phase, session, cart, remark, lang, ended]);
 
   const say = useCallback((text: string) => {
     setToast(text);
@@ -165,7 +167,20 @@ export function EmenuPage() {
     };
     check();
     const t = window.setInterval(check, 5_000);
-    return () => window.clearInterval(t);
+    // 平板待机时定时器是停的：屏幕一亮（页面重新可见、回到前台）马上核对一次，不等下一个 5 秒——
+    // 唤醒看到的直接是起始页，不会先闪一下上一位客人的菜单（店主 2026-11-14 的需求 7 第 5 点）
+    const wake = () => {
+      if (document.visibilityState !== 'hidden') check();
+    };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('pageshow', wake);
+    window.addEventListener('focus', wake);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('pageshow', wake);
+      window.removeEventListener('focus', wake);
+    };
   }, [idleMinutes, phase, reset]);
 
   // ───────────── 菜单：把各分类的页排成一条 ─────────────
@@ -392,16 +407,17 @@ export function EmenuPage() {
         removePending(key);
         finish(found.order);
       } else if (found.abandoned) {
-        // 门店系统确认已经作废：原来那一单永远不会生效，可以改菜重下
+        // 门店系统确认已经作废：原来那一单永远不会生效。这一笔到此结束，回到起始页、清掉手牌与没下单的菜，
+        // 下一位直接开始（需求 7：下单成功、作废都算一笔结束；原来是留在这张手牌的菜单里）
         removePending(key);
         setOpNote(null);
-        setOverlay({ kind: 'drawer', tab: 'cart' });
-        say('原来那一单已作废，可以重新下单');
+        reset();
+        say('原来那一单已作废，没有下成；要点的话请重新开始点单');
       } else {
         setOpNote({ hint: miss });
       }
     },
-    [finish, say, setOverlay],
+    [finish, say, reset],
   );
 
   const checkPending = useCallback(async () => {
@@ -712,7 +728,9 @@ export function EmenuPage() {
           onAbandon={(pin) => void abandonPending(pin)}
         />
       )}
-      {overlay?.kind === 'success' && <SuccessModal onDone={() => setOverlay((o) => (o?.kind === 'success' ? null : o))} />}
+      {/* 下单成功提示 2 秒（点一下马上关）之后回到起始页：手牌、桌号、人数、备注都清掉，下一位客人不用服务员先退出（需求 7）。
+          下单没成（断网、超时、密码不对、被拒绝）不走这里：留在原页，菜还在 */}
+      {overlay?.kind === 'success' && <SuccessModal onDone={reset} />}
       {overlay?.kind === 'notice' && (
         <SmallDialog
           title="没有下成"

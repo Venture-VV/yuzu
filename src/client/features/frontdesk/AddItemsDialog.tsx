@@ -10,8 +10,10 @@ import { useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
+import { QtyInput } from '../../components/QtyInput';
 import { Button, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
 import { CartLineName, cartKey, cartLines, ItemCard } from '../catalog/ItemCard';
 import { ZoneChip } from './parts';
@@ -49,6 +51,8 @@ export function AddItemsDialog({
   /** 键见 lineKey（项目:价格档，选了技师时再加技师与上钟方式），值为数量 */
   const [cart, setCart] = useState<Map<string, number>>(new Map());
   const [category, setCategory] = useState('全部');
+  /** 数量输得不对时的一句提示（输空了、超过上限） */
+  const [qtyHint, setQtyHint] = useState<string | null>(null);
   const [custom, setCustom] = useState<{ name: string; amount: string }[]>([]);
   const techs = useFrontdeskTechnicians(open);
   // 进厨房的菜的余量（8.0.8，B03）：厨房估清设的今天还能卖几份（null 不限量，0 估清）；余量不够时服务端照旧整单拒绝。
@@ -97,6 +101,7 @@ export function AddItemsDialog({
   const add = (key: string, delta: number) => {
     if (locked) return;
     touch();
+    setQtyHint(null);
     setCart((m) => {
       const next = new Map(m);
       // 限量的菜：同一道菜（不分价格档）一共不超过余量
@@ -111,6 +116,21 @@ export function AddItemsDialog({
       else next.set(key, q);
       return next;
     });
+  };
+
+  /** 这一行最多能填几份：99，限量的菜再减去同一道菜别的行已经点的（与点加号同一条规矩） */
+  const maxOf = (key: string) => {
+    const itemId = key.split(':')[0];
+    const left = remainingOf.get(Number(itemId));
+    if (left == null) return 99;
+    const others = [...cart].filter(([k]) => k !== key && k.split(':')[0] === itemId).reduce((n, [, q]) => n + q, 0);
+    return Math.max(1, Math.min(99, left - others));
+  };
+  /** 直接输数量（需求 1）：与点加减是同一个数 */
+  const setQty = (key: string, qty: number) => {
+    if (locked) return;
+    touch();
+    setCart((m) => new Map(m).set(key, Math.max(1, Math.min(maxOf(key), qty))));
   };
 
   const techById = useMemo(() => new Map((techs.data?.technicians ?? []).map((t) => [t.id, t])), [techs.data]);
@@ -249,6 +269,11 @@ export function AddItemsDialog({
               </div>
               {catalog.isPending ? (
                 <Skeleton className="h-40" />
+              ) : catalog.isError && !catalog.data ? (
+                // 项目没取回来：不是「还没有项目」，给重试；已经点的、填的都不动（需求 4）
+                <LoadFailed title="项目列表加载失败，请检查网络" onRetry={() => void catalog.refetch()} retrying={catalog.isFetching} testId="add-items-catalog-error">
+                  项目没有取回来，不是没有项目。点「重试」再取一次。
+                </LoadFailed>
               ) : shown.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">还没有可挂账的项目，请店主在「管理 → 套餐与项目」中添加</p>
               ) : (
@@ -347,7 +372,7 @@ export function AddItemsDialog({
                     <button type="button" aria-label={`减少 ${l.name}`} onClick={() => add(l.key, -1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
                       <Minus className="size-3.5" />
                     </button>
-                    <span className="num w-6 text-center text-[13px] font-bold">{l.quantity}</span>
+                    <QtyInput value={l.quantity} max={maxOf(l.key)} onChange={(n) => setQty(l.key, n)} onHint={setQtyHint} label={`${l.name} 的数量`} disabled={locked} className="h-7 w-8 text-[13px]" testId={`add-items-qty-${l.item.id}`} />
                     <button type="button" aria-label={`增加 ${l.name}`} onClick={() => add(l.key, 1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
                       <Plus className="size-3.5" />
                     </button>
@@ -362,6 +387,11 @@ export function AddItemsDialog({
                 </li>
               ))}
             </ul>
+          )}
+          {qtyHint && lines.length > 0 && (
+            <p className="mt-2 text-[12.5px] font-semibold text-clay" role="status" data-testid="add-items-qty-hint">
+              {qtyHint}
+            </p>
           )}
         </aside>
       </div>

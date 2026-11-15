@@ -301,4 +301,105 @@ test.describe('S5 餐饮', () => {
       expect(res.ok(), await res.text()).toBe(true);
     }
   });
+
+  test('换一位时菜篮里还有没下单的菜：先问清空还是保留，保留的在下单处标明记到谁、从谁带来；份数可以直接输；菜单取不回来有重试', async ({ page }) => {
+    // 店主 2026-11-14 的需求 5（同类的 1、4 一起核对）：原来点「换一位」菜篮悄悄跟到下一位，下单按钮直接变成另一个手牌。只点菜不下单。
+    await login(page, 'linlan');
+    const visits: number[] = [];
+    try {
+      await prepareByApi(page);
+      await page.request.post('/api/auth/logout');
+      await login(page, 'xiaozhou');
+      const free = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse();
+      const [a, b] = [free[0]!, free[1]!];
+      await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: a, zone: 'male', guestLabel: 'E2E 甲' }] });
+      await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: b, zone: 'male', guestLabel: 'E2E 乙' }] });
+      const after = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags;
+      visits.push(after.find((t) => t.code === a)!.visit!.id, after.find((t) => t.code === b)!.visit!.id);
+
+      // 菜单第一次取不回来：写明加载失败、有重试，不说「还没有进厨房的菜」；放开后点重试正常
+      await page.route('**/api/dining/menu', (route) => route.abort('connectionreset'));
+      await page.goto('/dining/order');
+      const failed = page.getByTestId('dining-menu-error');
+      await expect(failed).toBeVisible({ timeout: 30_000 });
+      await expect(failed).toContainText('菜单加载失败');
+      await expect(page.getByTestId('dining-menu')).not.toContainText('还没有进厨房的菜');
+      await page.getByTestId('dining-tag').fill(a);
+      await page.unroute('**/api/dining/menu');
+      await page.getByTestId('dining-menu-error-retry').click();
+      await expect(page.getByTestId(`dining-dish-${HOT.name}`)).toBeVisible();
+      await expect(page.getByTestId('dining-tag')).toHaveValue(a);
+
+      // 甲：点一份宫保鸡丁；份数直接输成 4（不用点三下加号），输 150 按 99 算并提示，输空了离开回到原来的数
+      await page.getByTestId('dining-find').click();
+      await expect(page.getByTestId('dining-guest')).toContainText(a);
+      await page.getByTestId(`dining-dish-${HOT.name}`).click();
+      const qty = page.getByTestId('dining-qty-0');
+      await expect(qty).toHaveValue('1');
+      await qty.fill('4');
+      await expect(page.getByTestId('dining-cart')).toContainText('192.00');
+      await qty.fill('150');
+      await expect(qty).toHaveValue('99');
+      await expect(page.getByTestId('dining-qty-hint')).toContainText('最多 99');
+      await qty.fill('');
+      await qty.blur();
+      await expect(qty).toHaveValue('99');
+      await expect(page.getByTestId('dining-qty-hint')).toContainText('1–99');
+      await qty.fill('1');
+      await expect(page.getByTestId('dining-qty-hint')).toHaveCount(0);
+      // 下单处最上面：记到谁（手牌号、客人）、几份
+      const target = page.getByTestId('dining-target');
+      await expect(target).toContainText(a);
+      await expect(target).toContainText('E2E 甲');
+      await expect(target).toContainText('1 份');
+
+      // 换一位：弹确认，默认聚焦「清空菜篮」；点右上角关闭不换人、菜篮不动
+      await page.getByTestId('dining-switch-guest').click();
+      const ask = page.getByRole('dialog').filter({ has: page.getByTestId('dining-switch') });
+      await expect(ask.getByTestId('dining-switch')).toContainText(`当前有 1 份未下单的菜品（${HOT.name} ×1）`);
+      await expect(page.getByTestId('dining-switch-clear')).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(ask).toHaveCount(0);
+      await expect(page.getByTestId('dining-guest')).toContainText(a);
+      await expect(page.getByTestId('dining-line-0')).toContainText(HOT.name);
+
+      // 保留并换人 → 找乙：下单处写明记到乙、这些菜是从甲带过来的；下单按钮是乙
+      await page.getByTestId('dining-switch-guest').click();
+      await page.getByTestId('dining-switch-keep').click();
+      await expect(page.getByTestId('dining-guest')).toHaveCount(0);
+      await expect(page.getByTestId('dining-carried')).toContainText(a);
+      await page.getByTestId('dining-tag').fill(b);
+      await page.getByTestId('dining-find').click();
+      await expect(page.getByTestId('dining-guest')).toContainText(b);
+      await expect(target).toContainText(b);
+      await expect(target).toContainText('E2E 乙');
+      await expect(target).toContainText('1 份');
+      await expect(page.getByTestId('dining-carried')).toContainText(`这些菜是从 ${a} 带过来的`);
+      await expect(page.getByTestId('dining-carried')).toContainText(`现在会记到 ${b} 的账上`);
+      await expect(page.getByTestId('dining-submit')).toHaveText(`下单 · ${b}`);
+
+      // 已经找到乙、直接输甲的手牌再找：同样先问；这次清空
+      await page.getByTestId('dining-tag').fill(a);
+      await page.getByTestId('dining-find').click();
+      await expect(ask.getByTestId('dining-switch')).toContainText('1 份未下单');
+      await page.getByTestId('dining-switch-clear').click();
+      await expect(page.getByTestId('dining-guest')).toContainText(a);
+      await expect(page.getByTestId('dining-cart')).toContainText('点菜单里的菜加进来');
+      await expect(page.getByTestId('dining-carried')).toHaveCount(0);
+      await expect(page.getByTestId('dining-target')).toHaveCount(0);
+      // 菜篮空着换人不问
+      await page.getByTestId('dining-switch-guest').click();
+      await expect(ask).toHaveCount(0);
+      await expect(page.getByTestId('dining-guest')).toHaveCount(0);
+      // 什么都没有下单
+      for (const id of visits) expect((await getJson<{ lines: Line[] }>(page, `/api/frontdesk/visits/${id}`)).lines).toEqual([]);
+    } finally {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      for (const id of visits) await page.request.post(`/api/frontdesk/visits/${id}/cancel`, { data: { reason: 'E2E：换一位用例收尾' } });
+      await page.request.post('/api/auth/logout');
+      await login(page, 'linlan');
+      const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: false } });
+      expect(res.ok(), await res.text()).toBe(true);
+    }
+  });
 });
