@@ -1007,7 +1007,12 @@ export function PropsPanel({
         <div className="space-y-1.5">
           <PanelTitle>大小（在自动排列里）</PanelTitle>
           <p className="text-[11px] leading-snug text-ink-3">位置按先后排：方向键或右边「前后」换位置。</p>
-          <SizingRows node={n} onChange={(patch) => set(patch, 'sizing')} />
+          {/* 大小由里面的内容定的功能块（员工食堂的各段、饭卡码）：不能改宽高规则 */}
+          {block?.resize === 'none' ? (
+            <p className="text-[11.5px] leading-snug text-ink-3">这一块的大小跟着里面的内容走，不能改。</p>
+          ) : (
+            <SizingRows node={n} onChange={(patch) => set(patch, 'sizing')} />
+          )}
           <Row label="不透明">
             <input
               type="range"

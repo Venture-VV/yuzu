@@ -4,7 +4,8 @@
 //   · expandInstances：把实例都换成组件的样子（编号加上实例的前缀，不重复），给只认普通节点的地方用（小程序线）；
 //   · componentCycles：组件里又放了它自己（直接或间接）的，画不出来，核对拦下。
 
-import { STUDIO_LIMITS, walkNodes, type StudioDoc, type StudioInstanceNode, type StudioNode } from './format';
+import { STUDIO_LIMITS, walkNodes } from './core';
+import type { StudioDoc, StudioInstanceNode, StudioNode } from './format';
 
 /** 实例画出来是什么：组件的样子换上实例的位置、大小、转角、藏不藏、尺寸规则；编号用实例的 */
 export function instanceView(inst: StudioInstanceNode, master: StudioNode): StudioNode {

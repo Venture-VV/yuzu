@@ -270,7 +270,8 @@ export function StudioCanvas({
         // 手机：375 宽、往下长；主题变量、字体设在最外层
         <div style={{ position: 'absolute', left: 0, top: 0, width: W, transform: `scale(${scale})`, transformOrigin: '0 0', ...(vars as React.CSSProperties) }}>
           <div ref={stage}>
-            <StudioPhoneScreen screen={s} ctx={ctx} />
+            {/* 底色「无」：用这个界面自己的底（员工食堂是暖白） */}
+            <StudioPhoneScreen screen={s} ctx={ctx} background={s.background ?? surface.screens.find((x) => x.key === screen)?.background ?? null} />
           </div>
         </div>
       ) : (

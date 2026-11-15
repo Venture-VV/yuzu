@@ -23,6 +23,7 @@ import { PatrolLogPage } from './pages/PatrolLog';
 import { WorkPage } from './pages/Work';
 import { flushPatrol, forgetPatrolLink, loadPatrolQueue, peekPatrolLink, rememberPatrolLink } from './patrol';
 import { RegisterPage } from './pages/Register';
+import { useCanteenLayout } from './studio';
 import { ScanPage } from './pages/Scan';
 import { TalkPage } from './pages/Talk';
 import { clearBadge, disablePush, syncPush } from './push';
@@ -63,6 +64,8 @@ export function App() {
   const [justIntroduced, setJustIntroduced] = useState(false);
   // 这次打开以后从门店系统拿到过最新的「我是谁」（工作台的应用以它为准）
   const [fresh, setFresh] = useState(false);
+  // UI 工作台发布的版面（8.1.2）：登录着、联网时取一次，存在这台手机上（没网用上次的，从没取到过用默认 = 原来的样子）
+  const { doc: layout } = useCanteenLayout(online && state === 'ready');
 
   // 直接扫开的巡场码：先记下（没登录的登录好以后接着打卡），地址改成 #/patrol，刷新也不会再打一次
   useEffect(() => {
@@ -296,9 +299,9 @@ export function App() {
   // 不是负责人的点了桌面的「扫码」入口（K22）：扫码是负责人用的，给他打开饭卡码
   const route = allowed(hash.route) ? hash.route : hash.route === 'scan' ? 'code' : 'home';
   const page = {
-    home: <HomePage me={me} offsetMs={offsetMs} online={online} go={go} />,
+    home: <HomePage me={me} offsetMs={offsetMs} online={online} go={go} layout={layout} />,
     menu: <MenuPage me={me} offsetMs={offsetMs} />,
-    code: <CodePage me={me} offsetMs={offsetMs} online={online} />,
+    code: <CodePage me={me} offsetMs={offsetMs} online={online} go={go} layout={layout} />,
     talk: <TalkPage me={me} online={online} />,
     kitchen: <KitchenPage me={me} offsetMs={offsetMs} />,
     scan: <ScanPage me={me} offsetMs={offsetMs} online={online} />,
@@ -336,9 +339,7 @@ export function App() {
 type Tab = { key: Route; label: string; icon: (fill: string) => React.ReactNode };
 
 function TabBar({ route, role, hasWork, go }: { route: Route; role: CanteenMe['employee']['role']; hasWork: boolean; go: (r: string) => void }) {
-  const center: Tab = canScan(role)
-    ? { key: 'scan', label: '扫码', icon: (f) => <IconCamera size={30} fill={f} /> }
-    : { key: 'code', label: '饭卡码', icon: (f) => <IconTicket size={30} fill={f} /> };
+  const center: Tab = canScan(role) ? { key: 'scan', label: '扫码', icon: (f) => <IconCamera size={30} fill={f} /> } : { key: 'code', label: '饭卡码', icon: (f) => <IconTicket size={30} fill={f} /> };
   const items: Tab[] = [
     { key: 'home', label: '首页', icon: (f) => <IconHome size={26} fill={f} /> },
     { key: 'menu', label: '菜单', icon: (f) => <IconMenu size={26} fill={f} /> },
@@ -369,10 +370,7 @@ function TabBar({ route, role, hasWork, go }: { route: Route; role: CanteenMe['e
               >
                 {raised ? (
                   <span
-                    className={cn(
-                      '-mt-7 flex size-[60px] items-center justify-center rounded-full text-white ring-4 ring-cream transition-colors',
-                      active ? 'bg-wood-deep' : 'bg-wood',
-                    )}
+                    className={cn('-mt-7 flex size-[60px] items-center justify-center rounded-full text-white ring-4 ring-cream transition-colors', active ? 'bg-wood-deep' : 'bg-wood')}
                     style={{ boxShadow: '0 5px 0 var(--color-wood-ink)' }}
                   >
                     {it.icon('var(--color-yuzu)')}

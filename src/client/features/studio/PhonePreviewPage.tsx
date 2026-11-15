@@ -47,7 +47,7 @@ export function PhonePreviewPage() {
   }, []);
   const blocks = useMemo(() => (def ? phoneEditorBlocks(def) : {}), [def]);
   const doc = q.data?.doc ?? null;
-  const vars = useMemo(() => (doc ? themeVars(doc) : {}), [doc]);
+  const vars = useMemo(() => (doc ? themeVars(doc, true) : {}), [doc]);
 
   if (!surface || !def || def.kind !== 'phone') {
     return <div className="p-6 text-[13px] text-ink-2">这个界面没有手机预览</div>;
@@ -76,7 +76,7 @@ export function PhonePreviewPage() {
   if (bare) {
     return (
       <div style={frame} data-testid="studio-phone-preview">
-        <StudioPhoneScreen screen={s} ctx={ctx} testId="studio-phone-screen" />
+        <StudioPhoneScreen screen={s} ctx={ctx} background={s.background ?? def.screens.find((x) => x.key === current)?.background ?? null} testId="studio-phone-screen" />
       </div>
     );
   }
@@ -89,7 +89,13 @@ export function PhonePreviewPage() {
         <span className="text-[12.5px] font-bold">预览 · {def.label}</span>
         <div className="flex rounded-md border border-line p-0.5">
           {def.screens.map((x) => (
-            <button key={x.key} type="button" className={cn('h-7 rounded px-2 text-[12px]', current === x.key ? 'bg-pine text-white' : 'text-ink-2')} onClick={() => setScreen(x.key)} data-testid={`studio-phone-screen-${x.key}`}>
+            <button
+              key={x.key}
+              type="button"
+              className={cn('h-7 rounded px-2 text-[12px]', current === x.key ? 'bg-pine text-white' : 'text-ink-2')}
+              onClick={() => setScreen(x.key)}
+              data-testid={`studio-phone-screen-${x.key}`}
+            >
               {x.label}
             </button>
           ))}
@@ -107,7 +113,7 @@ export function PhonePreviewPage() {
       <div className={cn('mx-auto overflow-hidden bg-card shadow-[0_8px_30px_rgb(0_0_0/0.14)]', width >= 420 && 'my-4 rounded-[18px]')} style={frame}>
         {/* 窄屏按比例缩（zoom 连同占的高一起缩，不留空白） */}
         <div style={{ width: def.size.w, zoom: k === 1 ? undefined : k }}>
-          <StudioPhoneScreen screen={s} ctx={ctx} testId="studio-phone-screen" />
+          <StudioPhoneScreen screen={s} ctx={ctx} background={s.background ?? def.screens.find((x) => x.key === current)?.background ?? null} testId="studio-phone-screen" />
         </div>
       </div>
     </div>

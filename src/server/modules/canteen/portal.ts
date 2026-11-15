@@ -38,6 +38,8 @@ import { registerEmployee, registerInfo } from './registration';
 import { loadCanteenSettings } from './settings';
 import { patrolAppsFor } from '../patrol/core';
 import { registerPatrolPortalRoutes } from '../patrol/routes';
+import { assetHeaders } from '../studio/assets';
+import { readPublishedStudio, readStudioAssetFor } from '../studio/published';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -81,11 +83,7 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
   const secret = config.canteen.codeSecret;
   if (!secret || secret.length < 32) throw new Error('员工端口没有配饭卡码的密钥（CANTEEN_CODE_SECRET，至少 32 个字符），不开');
   const now = opts.clock ?? Date.now;
-  const app = Fastify({
-    logger: { level: config.logLevel },
-    bodyLimit: 32 * 1024,
-    trustProxy: config.canteen.trustProxy.length ? config.canteen.trustProxy : false,
-  });
+  const app = Fastify({ logger: { level: config.logLevel }, bodyLimit: 32 * 1024, trustProxy: config.canteen.trustProxy.length ? config.canteen.trustProxy : false });
   await app.register(fastifyCookie);
   const limiter = new AttemptLimiter();
   /** 同一来源 IP 一小时最多登记 60 个账号（只记成功的，K14） */
@@ -106,13 +104,7 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
    */
   const secureCookie = (req: FastifyRequest) => req.protocol === 'https' || (config.canteen.cookieSecure && !isLanHost(req.hostname));
   const setSession = (req: FastifyRequest, reply: FastifyReply, token: string) =>
-    reply.setCookie(CANTEEN_COOKIE, token, {
-      httpOnly: true,
-      sameSite: 'strict',
-      secure: secureCookie(req),
-      path: '/',
-      maxAge: CANTEEN_SESSION_DAYS * 86_400,
-    });
+    reply.setCookie(CANTEEN_COOKIE, token, { httpOnly: true, sameSite: 'strict', secure: secureCookie(req), path: '/', maxAge: CANTEEN_SESSION_DAYS * 86_400 });
 
   app.addHook('onRequest', async (req, reply) => {
     // 按解码后的路径认接口（/%61pi/… 与 /api/… 进的是同一个接口，见 lib/paths）
@@ -182,9 +174,7 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
   };
 
   const buildMe = async (employeeId: number): Promise<CanteenMe> => {
-    const [e] = await sql<
-      (Omit<CanteenMe['employee'], 'username' | 'source'> & { username: string | null; source: CanteenMe['employee']['source']; codeEpoch: number })[]
-    >`
+    const [e] = await sql<(Omit<CanteenMe['employee'], 'username' | 'source'> & { username: string | null; source: CanteenMe['employee']['source']; codeEpoch: number })[]>`
       SELECT e.id, e.emp_no, e.name, e.role, e.avatar, coalesce(d.name, '') AS department, e.code_epoch, e.username, e.source
       FROM canteen_employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ${employeeId} AND e.active`;
     if (!e) throw unauthorized('请先登录柚子饭堂');
@@ -292,6 +282,33 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
 
   app.put('/api/canteen/likes', async (req) => likeDish(sql, who(req), req.body));
 
+  /**
+   * 版面（8.1.2，UI 工作台，docs/WORKBENCH_V811.md 第 8 节）：这家店发布的员工食堂版面（没发布过为空：用内置的默认版面 = 原来的样子），
+   * 组件已经展开；图只给发布过的员工食堂版面里用到的。预览码（工作台里生成的、30 分钟）给登录着的员工看草稿的样子。
+   */
+  app.get('/api/canteen/studio', async (req) => {
+    who(req);
+    const p = await readPublishedStudio(sql, 'canteen');
+    return { layout: p ? { id: p.id, version: p.version, doc: p.doc } : null };
+  });
+  app.get('/api/canteen/studio/preview/:code', async (req) => {
+    who(req);
+    const code = String((req.params as { code?: string }).code ?? '')
+      .trim()
+      .toUpperCase();
+    if (!/^[A-Z2-9]{8}$/.test(code)) throw new AppError(404, 'NOT_FOUND', '预览码不对');
+    const [r] = await sql<{ doc: unknown }[]>`SELECT doc FROM studio_preview_codes WHERE code = ${code} AND surface = 'canteen' AND expires_at > now()`;
+    if (!r) throw new AppError(404, 'NOT_FOUND', '预览码不对或已经过期（30 分钟有效）：在工作台里重新生成');
+    return { layout: { id: 0, version: 0, doc: r.doc } };
+  });
+  app.get('/api/canteen/studio/assets/:id', async (req, reply) => {
+    who(req);
+    const a = await readStudioAssetFor(sql, 'canteen', String((req.params as { id?: string }).id ?? ''));
+    if (!a) throw new AppError(404, 'NOT_FOUND', '没有这张图');
+    reply.headers(assetHeaders(a.mime));
+    return reply.send(a.data);
+  });
+
   /** 跟柚子说（第二期，K16）：自己说过的、发一条 */
   app.get('/api/canteen/feedback', async (req) => myFeedback(sql, who(req).id));
   app.post('/api/canteen/feedback', async (req) => submitFeedback(sql, who(req), req.body, config.timezone, now()));
@@ -299,9 +316,7 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
   /** 饭点提醒（店主 2026-11-10，第 19 节，K23、K24）：这台手机打开、关掉提醒（退出登录时也关），选哪几顿，给自己发一条试试 */
   app.get('/api/canteen/push', async (req) => pushInfo(sql, who(req).id));
   app.put('/api/canteen/push/subscription', async (req) => savePushSubscription(sql, config, who(req).id, req.body, req.headers.origin));
-  app.post('/api/canteen/push/off', async (req) =>
-    removePushSubscription(sql, who(req).id, req.body, (req.body as { reason?: unknown } | null)?.reason === 'logout' ? 'logout' : 'off'),
-  );
+  app.post('/api/canteen/push/off', async (req) => removePushSubscription(sql, who(req).id, req.body, (req.body as { reason?: unknown } | null)?.reason === 'logout' ? 'logout' : 'off'));
   app.put('/api/canteen/push/muted', async (req) => saveMutedMeals(sql, who(req).id, req.body));
   app.post('/api/canteen/push/test', async (req) => sendTestPush(sql, config, who(req).id, null, new Date(now())));
 
@@ -379,4 +394,3 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
 
 /** 管理后台用：员工端口开着没有 */
 export const canteenPortOpen = (config: AppConfig) => config.canteen.port !== null;
-

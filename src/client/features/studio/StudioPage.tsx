@@ -220,7 +220,8 @@ export function StudioPage() {
     [doc, assetSizes, assetsQ.data, stateQ.data?.langSwitch],
   );
   const red = issues.filter((i) => i.level === 'error').length;
-  const vars = useMemo(() => themeVars(doc), [doc]);
+  // 手机界面在工作台里画：那个界面自己的样式表不在这里，主题色、字体全写上（员工食堂的默认值也要）
+  const vars = useMemo(() => themeVars(doc, phone), [doc, phone]);
   const blocks = useMemo(
     () => (isEmenu ? emenuEditorBlocks(menuQ.data ?? null, { lang, pageIndex, templates: doc.templates, dishStates: doc.dishStates }) : phoneEditorBlocks(def)),
     [isEmenu, def, menuQ.data, lang, pageIndex, doc.templates, doc.dishStates],
@@ -1059,7 +1060,17 @@ function PreviewDialog({ surface, doc, onClose }: { surface: StudioSurface; doc:
                 </span>
                 ，{new Date(code.expiresAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 前有效（30 分钟）。
               </p>
-              {phone ? (
+              {surface === 'canteen' ? (
+                <>
+                  <p>
+                    在这台电脑上看示意：扫左边的码或打开 <span className="break-all font-mono text-[11.5px]">{url}</span>（各段画的是示意）。
+                  </p>
+                  <p data-testid="studio-preview-canteen">
+                    在员工手机上看真实的样子：用员工账号登录柚子饭堂，在它的地址后面加 <span className="font-mono text-[12px] font-bold text-ink">?studio={code.code}</span>
+                    （比如 <span className="font-mono text-[11.5px]">http://柚子饭堂的地址/?studio={code.code}</span>），首页、饭卡码页就是这份草稿的样子；不存进手机，关掉再开回到发布的那一版。
+                  </p>
+                </>
+              ) : phone ? (
                 <p>
                   在手机上看：手机浏览器登录着工作台的账号，扫左边的码，或打开 <span className="break-all font-mono text-[11.5px]">{url}</span>。小程序里的样子以小程序线照这份版面画的为准。
                 </p>

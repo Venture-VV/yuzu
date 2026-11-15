@@ -16,12 +16,10 @@
 // 不会绕过下单逻辑。服务端存之前按这里的格式核对一遍，平板读到不认识的属性就忽略（新编辑器配旧平板也不白屏）。
 
 import { z } from 'zod';
+import { SHADOWS, STUDIO_LIMITS, STUDIO_SCHEMA, walkNodes } from './core';
 
-/** 格式版本：以后改格式加一，写升级函数（upgradeStudioDoc），旧版面自动升上来 */
-export const STUDIO_SCHEMA = 1;
-
-/** 一屏最多几个节点（连同框里的）、一份版面最多几个、框最多套几层、整份最大多少字节 */
-export const STUDIO_LIMITS = { nodesPerScreen: 300, nodesPerDoc: 1500, depth: 6, bytes: 512 * 1024, text: 2000, components: 100, expanded: 3000 } as const;
+// 不依赖 zod 的常数与小工具（格式版本、上限、投影、遍历、颜色）在 core.ts：员工食堂等只画版面的地方不用带上 zod；这里照旧都能取到
+export { colorValue, isFlow, SHADOW_CSS, SHADOWS, STUDIO_LIMITS, STUDIO_SCHEMA, walkNodes } from './core';
 
 /** 颜色：#rrggbb、#rrggbbaa，或者主题色（$ink） */
 export const ColorSchema = z.string().regex(/^(#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?|\$[a-z][a-zA-Z0-9]{0,23})$/, '颜色写成 #RRGGBB 或主题色');
@@ -29,15 +27,6 @@ export type StudioColor = z.infer<typeof ColorSchema>;
 
 const num = (min: number, max: number) => z.number().finite().min(min).max(max);
 const Id = z.string().regex(/^[A-Za-z0-9_-]{1,40}$/, '节点编号只能是字母、数字、- 与 _');
-
-/** 投影：几档，不让写任意的 CSS */
-export const SHADOWS = ['none', 'sm', 'md', 'lg'] as const;
-export const SHADOW_CSS: Record<(typeof SHADOWS)[number], string | undefined> = {
-  none: undefined,
-  sm: '0 1px 3px rgb(0 0 0 / 0.12)',
-  md: '0 4px 14px rgb(0 0 0 / 0.16)',
-  lg: '0 12px 32px rgb(0 0 0 / 0.22)',
-};
 
 const Base = {
   id: Id,
@@ -211,9 +200,9 @@ export const ThemeSchema = z.object({
 });
 export type StudioTheme = z.infer<typeof ThemeSchema>;
 
-export const STUDIO_SURFACES = ['emenu', 'mp'] as const;
+export const STUDIO_SURFACES = ['emenu', 'mp', 'canteen'] as const;
 export type StudioSurface = (typeof STUDIO_SURFACES)[number];
-export const STUDIO_SURFACE_LABELS: Record<StudioSurface, string> = { emenu: '平板电子菜单', mp: '微信小程序' };
+export const STUDIO_SURFACE_LABELS: Record<StudioSurface, string> = { emenu: '平板电子菜单', mp: '微信小程序', canteen: '员工食堂' };
 
 /**
  * 卡片模板里一块在一档里的改动：只写改了的（没写的照登记的位置）。bottom 只给放大一档里「下沿贴线、往上长」的文字块
@@ -261,27 +250,10 @@ export function upgradeStudioDoc(raw: unknown): unknown {
   throw new Error(`版面格式第 ${String(v)} 版认不出来`);
 }
 
-/** 遍历一屏里所有的节点（连同框里的），depth 从 1 算 */
-export function walkNodes(nodes: readonly StudioNode[], fn: (node: StudioNode, depth: number, parent: StudioFrameNode | null) => void, depth = 1, parent: StudioFrameNode | null = null): void {
-  for (const n of nodes) {
-    fn(n, depth, parent);
-    if (n.type === 'frame') walkNodes(n.children, fn, depth + 1, n);
-  }
-}
-
 /** 一份版面里用到的素材（按出现的先后，不重复；组件里的也算） */
 export function docAssets(doc: StudioDoc): string[] {
   const out = new Set<string>();
   for (const s of Object.values(doc.screens)) walkNodes(s.nodes, (n) => n.type === 'image' && out.add(n.asset));
   for (const c of Object.values(doc.components ?? {})) walkNodes([c.node], (n) => n.type === 'image' && out.add(n.asset));
   return [...out];
-}
-
-/** 这一层是不是自动排列（横排、竖排）：里面的节点不看 x / y */
-export const isFlow = (layout: StudioLayout | undefined): boolean => !!layout && layout.mode !== 'free';
-
-/** 颜色写成页面上用的值：主题色换成 CSS 变量（平板菜单的 $ink → var(--em-ink)），hex 原样 */
-export function colorValue(c: StudioColor | null | undefined, tokenVar: (key: string) => string): string | undefined {
-  if (!c) return undefined;
-  return c.startsWith('$') ? tokenVar(c.slice(1)) : c;
 }

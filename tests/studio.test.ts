@@ -199,7 +199,7 @@ describe('8.1.2：微信小程序的版面（给小程序线读）', () => {
 
   it('设计师能改小程序的版面；发布以前读不到（小程序用自己原来的页面），发布以后读得到这一版；图只给发布过的版面里用到的', async () => {
     const overview = (await api(ctx.app, designer, 'GET', '/api/studio')).body;
-    expect(overview.surfaces.map((x: { surface: string }) => x.surface)).toEqual(['emenu', 'mp']);
+    expect(overview.surfaces.map((x: { surface: string }) => x.surface)).toEqual(['emenu', 'mp', 'canteen']);
     const s = (await api(ctx.app, designer, 'GET', '/api/studio/mp')).body;
     expect(s.draft.rev).toBe(0);
     expect(s.draft.doc).toEqual(defaultStudioDoc('mp'));

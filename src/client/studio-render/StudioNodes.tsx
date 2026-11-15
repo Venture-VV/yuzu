@@ -9,20 +9,11 @@
 // 设了「点了做什么」的按钮、框、图片（8.1.2，手机界面）接点按，交给 ctx.onAction；编辑器里不给 onAction，点一下是选中。
 
 import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react';
-import {
-  colorValue,
-  instanceView,
-  isFlow,
-  SHADOW_CSS,
-  STUDIO_LIMITS,
-  type StudioAction,
-  type StudioBlockNode,
-  type StudioDoc,
-  type StudioLayout,
-  type StudioNode,
-  type StudioScreen,
-  type StudioSurfaceDef,
-} from '@shared/studio';
+// 只从不带 zod 的几个文件取（员工食堂只画版面，不带上 zod；核对在服务端、编辑器里做）
+import { colorValue, isFlow, SHADOW_CSS, STUDIO_LIMITS } from '@shared/studio/core';
+import { instanceView } from '@shared/studio/components';
+import type { StudioAction, StudioBlockNode, StudioDoc, StudioLayout, StudioNode, StudioScreen } from '@shared/studio/format';
+import type { StudioSurfaceDef } from '@shared/studio/surfaces';
 
 export interface StudioRenderCtx {
   surface: StudioSurfaceDef;
@@ -166,10 +157,15 @@ function NodeView({ node: n, ctx, flow }: { node: StudioNode; ctx: StudioRenderC
   switch (n.type) {
     case 'block': {
       const draw = ctx.blocks[n.block];
+      const content = draw ? draw(n) : null;
+      // 自动排列里这一块这会儿什么都没有：不占位置，也不多一个间隔（编辑器里照样画，好选中）
+      if (flow && content === null && !ctx.editor) return null;
+      // 员工食堂的一段（flowContents）：里面的几样各自直接排进去，与原来的页面一模一样
+      if (flow && !ctx.editor && ctx.surface.blocks[n.block]?.flowContents) return <>{content}</>;
       return (
         <div style={place} data-studio-block={n.block} {...tag}>
           {/* 块自己的按钮照旧能点：点按属性往下继承，外框本身不接 */}
-          <div style={{ display: 'contents', pointerEvents: 'auto' }}>{draw ? draw(n) : null}</div>
+          <div style={{ display: 'contents', pointerEvents: 'auto' }}>{content}</div>
         </div>
       );
     }
@@ -261,6 +257,22 @@ export function StudioPhoneScreen({ screen, ctx, background, testId }: { screen:
         fontFamily: fontOf(ctx, 'zh'),
         color: colorValue(ctx.surface.tokens.text, ctx.surface.cssVar),
       }}
+      data-testid={testId}
+    >
+      <StudioNodes nodes={screen.nodes} ctx={ctx} flow={flow} />
+    </div>
+  );
+}
+
+/**
+ * 撑满外面宽度的一屏（员工食堂：手机多宽就多宽，外壳管左右留白、底色、字体）：自动排列照版面；
+ * 自由摆放时高是这一屏的高。
+ */
+export function StudioFillScreen({ screen, ctx, testId }: { screen: StudioScreen; ctx: StudioRenderCtx; testId?: string }) {
+  const flow = screen.layout && isFlow(screen.layout) ? screen.layout : null;
+  return (
+    <div
+      style={{ position: 'relative', ...(flow ? flowContainerStyle(flow) : { height: screen.height ?? ctx.surface.size.h }), background: colorValue(screen.background, ctx.surface.cssVar) }}
       data-testid={testId}
     >
       <StudioNodes nodes={screen.nodes} ctx={ctx} flow={flow} />

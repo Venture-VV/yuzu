@@ -7,7 +7,8 @@
 
 import type { EmenuTemplateDef } from './emenu-templates';
 import { EMENU_TEMPLATES } from './emenu-templates';
-import { STUDIO_SCHEMA, type StudioBlockNode, type StudioButtonNode, type StudioDoc, type StudioFrameNode, type StudioLayout, type StudioNode, type StudioSurface, type StudioTextNode } from './format';
+import { STUDIO_SCHEMA } from './core';
+import type { StudioBlockNode, StudioButtonNode, StudioDoc, StudioFrameNode, StudioLayout, StudioNode, StudioSurface, StudioTextNode } from './format';
 
 export interface StudioPropDef {
   key: string;
@@ -44,6 +45,11 @@ export interface StudioBlockDef {
   tap?: boolean;
   /** 放进自动排列的屏时默认的尺寸规则（手机界面：宽撑满、高跟内容） */
   sizing?: { w: 'fixed' | 'fill' | 'hug'; h: 'fixed' | 'fill' | 'hug' };
+  /**
+   * 在自动排列里不另占一格：里面的几样（员工食堂一段里的几张卡片、按钮）各自直接排进去，没有的不占位置、不多间隔——
+   * 与原来的页面一模一样。编辑器里照常是一整块（好选中、挪先后）。
+   */
+  flowContents?: boolean;
   props: readonly StudioPropDef[];
 }
 
@@ -424,7 +430,123 @@ export const MP_SURFACE: StudioSurfaceDef = {
   inlineAllVars: true,
 };
 
-export const STUDIO_SURFACE_DEFS: Record<StudioSurface, StudioSurfaceDef> = { emenu: EMENU_SURFACE, mp: MP_SURFACE };
+/** 柚子饭堂的页（与 src/canteen-app/App.tsx 的路由对应） */
+const CANTEEN_PAGES = [
+  { value: 'home', label: '首页' },
+  { value: 'menu', label: '菜单（这周吃什么）' },
+  { value: 'code', label: '饭卡码' },
+  { value: 'talk', label: '跟柚子说' },
+  { value: 'me', label: '我的' },
+] as const;
+
+/** 柚子饭堂的主题色在页面上的变量：ink2 → --color-ink-2、woodDeep → --color-wood-deep（src/canteen-app/styles.css） */
+export const canteenColorVar = (token: string) =>
+  `--color-${token
+    .replace(/([A-Z])/g, '-$1')
+    .replace(/(\d+)/g, '-$1')
+    .toLowerCase()}`;
+
+/** 一块内容（功能块）：照现在的页面画，高跟着内容走、宽撑满；不能改大小（大小由里面的内容定） */
+const cnBlock = (key: string, label: string, hint: string, screen: 'home' | 'code', h: number, more: Partial<StudioBlockDef> = {}): StudioBlockDef => ({
+  key,
+  label,
+  hint,
+  screens: [screen],
+  size: { w: 343, h },
+  resize: 'none',
+  move: true,
+  single: true,
+  sizing: { w: 'fill', h: 'hug' },
+  flowContents: true,
+  props: [],
+  ...more,
+});
+
+/**
+ * 员工食堂 · 柚子饭堂（8.1.2，docs/CANTEEN.md、docs/WORKBENCH_V811.md 第 8 节）：员工手机上的首页与饭卡码页。
+ * 现在的每一段（问好、现在吃什么、亮出饭卡码、按岗位的入口……）都是功能块（逻辑照旧），设计师调先后、藏起来、在中间加图文、换主题色；
+ * **饭卡码那一块的大小、留白、颜色锁定**（码是固定的深色点阵白底，主题色改不到它），扫不出来就打不了卡。
+ */
+export const CANTEEN_SURFACE: StudioSurfaceDef = {
+  key: 'canteen',
+  label: '员工食堂',
+  kind: 'phone',
+  size: { w: 375, h: 812 },
+  screens: [
+    {
+      key: 'home',
+      label: '首页',
+      hint: '员工打开柚子饭堂的第一页：问好、现在吃什么、亮出饭卡码、按岗位的入口、跟柚子说、今天的菜单。没网时照样能看（用上次的样子）。底色「无」是柚子饭堂的暖白',
+      background: '$cream',
+    },
+    { key: 'code', label: '饭卡码', hint: '给食堂负责人扫的那一页：饭卡码那一块的大小、留白、颜色锁定（扫不出来就打不了卡），只能改它周围。底色「无」是柚子饭堂的暖白', background: '$cream' },
+  ],
+  colors: [
+    { key: 'cream', label: '页面底色（暖白）', default: '#f4ede2' },
+    { key: 'card', label: '卡片底色', default: '#fbf7f0' },
+    { key: 'line', label: '细线', default: '#e3d6c3' },
+    { key: 'ink', label: '主文字（深胡桃）', default: '#3a2c22' },
+    { key: 'ink2', label: '次要文字', default: '#5c4639' },
+    { key: 'ink3', label: '浅文字', default: '#8b7865' },
+    { key: 'wood', label: '木色', default: '#937051' },
+    { key: 'wood4', label: '木色（浅）', default: '#d2b993' },
+    { key: 'woodDeep', label: '木色（深，按钮）', default: '#8a684a' },
+    { key: 'yuzu', label: '柚黄（重点）', default: '#e9c75e' },
+    { key: 'yuzuDeep', label: '柚黄（深）', default: '#7f5d10' },
+    { key: 'yuzuSoft', label: '柚黄（浅底）', default: '#f6ebc5' },
+    { key: 'organic', label: '概念色：有机（绿，成功）', default: '#6d673d' },
+    { key: 'relax', label: '概念色：放松（蓝，提示）', default: '#4d718c' },
+    { key: 'energy', label: '概念色：活力（橙，点赞）', default: '#c04a1f' },
+    { key: 'danger', label: '出错', default: '#a6452f' },
+  ],
+  fonts: {
+    zh: [
+      {
+        key: 'harmony',
+        label: '鸿蒙 / 苹方（默认）',
+        stack:
+          "'HarmonyOS Sans SC', 'HarmonyOS Sans', 'PingFang SC', -apple-system, 'Helvetica Neue', Helvetica, Arial, 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif",
+      },
+      { key: 'serif', label: '宋体', stack: "'Songti SC', 'STSong', 'Noto Serif CJK SC', 'Source Han Serif SC', serif" },
+    ],
+    en: [
+      { key: 'helvetica', label: 'Helvetica（默认）', stack: "'Helvetica Neue', Helvetica, Arial, sans-serif" },
+      { key: 'serif', label: '衬线', stack: "Georgia, 'Times New Roman', serif" },
+    ],
+    default: { zh: 'harmony', en: 'helvetica' },
+  },
+  blocks: {
+    'cn.greeting': cnBlock('cn.greeting', '问好与头像', '「中午好，名字」与头像（点头像到「我的」）', 'home', 76),
+    'cn.notices': cnBlock('cn.notices', '提示条', '没网时、菜单是上次看到的、问要不要饭点提醒；没有要提示的时候不占地方', 'home', 44),
+    'cn.focusMeal': cnBlock('cn.focusMeal', '现在吃什么', '现在开饭的那一顿（或今天下一顿）的菜单卡片，可以点赞；都开完了是柚子说明天见', 'home', 300),
+    'cn.codeButton': cnBlock('cn.codeButton', '亮出饭卡码', '大按钮：打开饭卡码。员工吃饭靠它，不能去掉', 'home', 56, { required: true }),
+    'cn.entries': cnBlock('cn.entries', '按岗位的入口', '负责人的「扫码打卡」「柚子信箱」，巡场的人的「巡场打卡」；别的员工这里什么都没有。不能去掉', 'home', 200, { required: true }),
+    'cn.talk': cnBlock('cn.talk', '跟柚子说', '柚子与「跟柚子说」的入口', 'home', 96),
+    'cn.today': cnBlock('cn.today', '今天的菜单', '今天其他几顿的菜单，「看看这周的菜单」', 'home', 260),
+    'cn.footer': cnBlock('cn.footer', '这个月吃了几顿', '一行小字：这个月在饭堂吃了几顿', 'home', 28),
+    'cn.profile': cnBlock('cn.profile', '我的名片', '头像、名字、工号、部门、岗位', 'code', 82),
+    'cn.qr': cnBlock('cn.qr', '饭卡码', '每 30 秒换一个的饭卡码，外圈是倒计时。大小、留白、颜色锁定：扫不出来就打不了卡。不能去掉', 'code', 330, {
+      required: true,
+      size: { w: 330, h: 330 },
+      sizing: { w: 'hug', h: 'hug' },
+    }),
+    'cn.codeHint': cnBlock('cn.codeHint', '扫码说明', '「给食堂负责人扫一扫」、几秒后换码、连没连上门店', 'code', 90, { sizing: { w: 'hug', h: 'hug' } }),
+    'cn.mascot': cnBlock('cn.mascot', '柚子与一句话', '柚子端着碗：「吃饱饱，下午才有力气呀」', 'code', 64, { sizing: { w: 'hug', h: 'hug' } }),
+  },
+  actions: [{ key: 'open.page', label: '打开柚子饭堂的一页', args: CANTEEN_PAGES }],
+  fields: [
+    { key: 'me.name', label: '员工的名字', sample: { zh: '林小柚', en: 'Lin' } },
+    { key: 'me.department', label: '部门', sample: { zh: '前厅部', en: 'Front desk' } },
+    { key: 'me.mealsThisMonth', label: '这个月在饭堂吃了几顿', sample: { zh: '12', en: '12' } },
+    { key: 'today.date', label: '今天的日期', sample: { zh: '11 月 16 日 周一', en: 'Mon, Nov 16' } },
+  ],
+  tokens: { text: '$ink', fill: '$yuzu', panel: '$card', line: '$line', button: '$woodDeep' },
+  cssVar: (token) => `var(${canteenColorVar(token)})`,
+  fontVars: { zh: '--font-sans', en: '--font-en' },
+  inlineAllVars: false,
+};
+
+export const STUDIO_SURFACE_DEFS: Record<StudioSurface, StudioSurfaceDef> = { emenu: EMENU_SURFACE, mp: MP_SURFACE, canteen: CANTEEN_SURFACE };
 
 /** 默认版面里的一块（位置、大小照现在的页面） */
 const block = (id: string, key: string, name: string, x: number, y: number, w: number, h: number, props: StudioBlockNode['props'] = {}): StudioBlockNode => ({
@@ -445,7 +567,41 @@ const block = (id: string, key: string, name: string, x: number, y: number, w: n
 
 /** 代码里内置的默认版面（= 现在的样子）。每次调用返回新的一份 */
 export function defaultStudioDoc(surface: StudioSurface): StudioDoc {
-  return surface === 'mp' ? defaultMpDoc() : defaultEmenuDoc();
+  return surface === 'mp' ? defaultMpDoc() : surface === 'canteen' ? defaultCanteenDoc() : defaultEmenuDoc();
+}
+
+/** 柚子饭堂的默认版面（= 现在的样子）：首页一段一段往下排、间隔 16；饭卡码页居中、上面留 8；左右各留 16 */
+function defaultCanteenDoc(): StudioDoc {
+  const def = CANTEEN_SURFACE;
+  const at = (id: string, key: string): StudioBlockNode => {
+    const b = def.blocks[key]!;
+    return { ...block(id, key, b.label, 0, 0, b.size.w, b.size.h), sizing: { ...(b.sizing ?? { w: 'fill', h: 'hug' }) } };
+  };
+  // 左右各留 16（原来是外壳留的，现在在版面里，设计师可以改）
+  const column = (gap: number, align: StudioLayout['align'], top = 0): StudioLayout => ({ mode: 'column', wrap: false, gap, padding: [top, 16, 0, 16], align, justify: 'start' });
+  return {
+    schema: STUDIO_SCHEMA,
+    surface: 'canteen',
+    theme: themeOf(def),
+    screens: {
+      home: {
+        background: null,
+        layout: column(16, 'stretch'),
+        nodes: [
+          at('home-greeting', 'cn.greeting'),
+          at('home-notices', 'cn.notices'),
+          at('home-focus', 'cn.focusMeal'),
+          at('home-code', 'cn.codeButton'),
+          at('home-entries', 'cn.entries'),
+          at('home-talk', 'cn.talk'),
+          at('home-today', 'cn.today'),
+          at('home-footer', 'cn.footer'),
+        ],
+      },
+      // 饭卡码页：各段自己带着原来的上边距（码上面 24、说明上面 24……），间隔是 0
+      code: { background: null, layout: column(0, 'center', 8), nodes: [at('code-profile', 'cn.profile'), at('code-qr', 'cn.qr'), at('code-hint', 'cn.codeHint'), at('code-mascot', 'cn.mascot')] },
+    },
+  };
 }
 
 const themeOf = (def: StudioSurfaceDef) => ({ colors: Object.fromEntries(def.colors.map((c) => [c.key, c.default])), fonts: { ...def.fonts.default } });
@@ -464,15 +620,7 @@ function defaultEmenuDoc(): StudioDoc {
     block('menu-header', 'menu.header', '顶栏', 0, 0, 1024, 102),
     block('menu-dots', 'menu.dots', '翻页圆点', 0, 742, 1024, 14),
   ];
-  return {
-    schema: STUDIO_SCHEMA,
-    surface: 'emenu',
-    theme: themeOf(def),
-    screens: {
-      start: { background: '$photo', nodes: start },
-      menu: { background: null, nodes: menu },
-    },
-  };
+  return { schema: STUDIO_SCHEMA, surface: 'emenu', theme: themeOf(def), screens: { start: { background: '$photo', nodes: start }, menu: { background: null, nodes: menu } } };
 }
 
 // ───────────────────────── 小程序的默认版面 ─────────────────────────
@@ -480,14 +628,14 @@ function defaultEmenuDoc(): StudioDoc {
 // 自己原来的页面也可以（docs/STUDIO_MP.md 第 6 节）。
 
 const at = (x: number, y: number, w: number, h: number) => ({ x, y, w, h, rotate: 0, opacity: 1, hidden: false, locked: false });
-const flow = (mode: 'row' | 'column', gap: number, padding: [number, number, number, number], align: StudioLayout['align'] = 'start', justify: StudioLayout['justify'] = 'start', wrap = false): StudioLayout => ({
-  mode,
-  wrap,
-  gap,
-  padding,
-  align,
-  justify,
-});
+const flow = (
+  mode: 'row' | 'column',
+  gap: number,
+  padding: [number, number, number, number],
+  align: StudioLayout['align'] = 'start',
+  justify: StudioLayout['justify'] = 'start',
+  wrap = false,
+): StudioLayout => ({ mode, wrap, gap, padding, align, justify });
 const txt = (id: string, name: string, zh: string, en: string, size: number, style: Partial<StudioTextNode> = {}): StudioTextNode => ({
   type: 'text',
   id,
@@ -546,10 +694,7 @@ const pillar = (id: string, en: string, zh: string, color: string, page: string)
     zh,
     0,
     96,
-    [
-      txt(`${id}-en`, '英文', en, en, 10, { font: 'en', weight: 700, letterSpacing: 0.1, color: '$cardInk' }),
-      txt(`${id}-zh`, '中文', zh, zh, 15, { weight: 500, color: '$cardInk' }),
-    ],
+    [txt(`${id}-en`, '英文', en, en, 10, { font: 'en', weight: 700, letterSpacing: 0.1, color: '$cardInk' }), txt(`${id}-zh`, '中文', zh, zh, 15, { weight: 500, color: '$cardInk' })],
     { fill: color, stroke: null, strokeWidth: 0, layout: flow('column', 6, [18, 12, 18, 12], 'start', 'end'), sizing: { w: 'fill', h: 'fixed' }, action: { action: 'open.page', arg: page } },
   );
 const section = (id: string, name: string, eyebrow: string, title: string, body: StudioNode): StudioFrameNode => ({
@@ -586,59 +731,56 @@ function defaultMpDoc(): StudioDoc {
     shadow: 'none',
     clip: false,
     layout: flow('row', 8, [20, 18, 4, 18], 'start'),
-    children: [pillar('home-taste', 'TASTE', '美食餐饮', '$energy', 'food'), pillar('home-wellness', 'WELLNESS', '按摩疗愈', '$relax', 'booking'), pillar('home-exp', 'EXPERIENCE', '日常娱乐', '$organic', 'guide')],
+    children: [
+      pillar('home-taste', 'TASTE', '美食餐饮', '$energy', 'food'),
+      pillar('home-wellness', 'WELLNESS', '按摩疗愈', '$relax', 'booking'),
+      pillar('home-exp', 'EXPERIENCE', '日常娱乐', '$organic', 'guide'),
+    ],
   };
-  const services = section(
-    'home-services',
-    '服务',
-    'SERVICES',
-    '服务',
-    {
-      type: 'frame',
-      id: 'home-services-grid',
-      name: '入口',
-      ...at(0, 0, 339, 0),
-      sizing: { w: 'fill', h: 'hug' },
-      fill: null,
-      stroke: null,
-      strokeWidth: 0,
-      radius: 0,
-      shadow: 'none',
-      clip: false,
-      layout: flow('row', 11, [0, 0, 0, 0], 'start', 'start', true),
-      children: [entry('home-code', '码', '会员码', 'code'), entry('home-prices', '价', '价目表', 'prices'), entry('home-guide', '导', '楼层导览', 'guide'), entry('home-coupons', '券', '我的券', 'coupons')],
-    },
-  );
-  const memberEntries = section(
-    'member-entries',
-    '我的入口',
-    'MY TOUCHILL',
-    '我的',
-    {
-      type: 'frame',
-      id: 'member-entries-grid',
-      name: '入口',
-      ...at(0, 0, 339, 0),
-      sizing: { w: 'fill', h: 'hug' },
-      fill: null,
-      stroke: null,
-      strokeWidth: 0,
-      radius: 0,
-      shadow: 'none',
-      clip: false,
-      layout: flow('row', 11, [0, 0, 0, 0], 'start', 'start', true),
-      children: [
-        entry('member-coupons', '券', '我的券', 'coupons'),
-        entry('member-benefits', '益', '会员权益', 'benefits'),
-        entry('member-ledger', '账', '账单流水', 'ledger'),
-        entry('member-recharge', '充', '充值', 'recharge'),
-        entry('member-bookings', '约', '我的预约', 'bookings'),
-        entry('member-invite', '邀', '邀请好友', 'invite'),
-        entry('member-center', '领', '领券中心', 'coupon-center'),
-        entry('member-code', '码', '会员码', 'code'),
-      ],
-    },
-  );
+  const services = section('home-services', '服务', 'SERVICES', '服务', {
+    type: 'frame',
+    id: 'home-services-grid',
+    name: '入口',
+    ...at(0, 0, 339, 0),
+    sizing: { w: 'fill', h: 'hug' },
+    fill: null,
+    stroke: null,
+    strokeWidth: 0,
+    radius: 0,
+    shadow: 'none',
+    clip: false,
+    layout: flow('row', 11, [0, 0, 0, 0], 'start', 'start', true),
+    children: [
+      entry('home-code', '码', '会员码', 'code'),
+      entry('home-prices', '价', '价目表', 'prices'),
+      entry('home-guide', '导', '楼层导览', 'guide'),
+      entry('home-coupons', '券', '我的券', 'coupons'),
+    ],
+  });
+  const memberEntries = section('member-entries', '我的入口', 'MY TOUCHILL', '我的', {
+    type: 'frame',
+    id: 'member-entries-grid',
+    name: '入口',
+    ...at(0, 0, 339, 0),
+    sizing: { w: 'fill', h: 'hug' },
+    fill: null,
+    stroke: null,
+    strokeWidth: 0,
+    radius: 0,
+    shadow: 'none',
+    clip: false,
+    layout: flow('row', 11, [0, 0, 0, 0], 'start', 'start', true),
+    children: [
+      entry('member-coupons', '券', '我的券', 'coupons'),
+      entry('member-benefits', '益', '会员权益', 'benefits'),
+      entry('member-ledger', '账', '账单流水', 'ledger'),
+      entry('member-recharge', '充', '充值', 'recharge'),
+      entry('member-bookings', '约', '我的预约', 'bookings'),
+      entry('member-invite', '邀', '邀请好友', 'invite'),
+      entry('member-center', '领', '领券中心', 'coupon-center'),
+      entry('member-code', '码', '会员码', 'code'),
+    ],
+  });
   const activityTitle = txt('activity-title', '活动标题', '活动页还没有排', 'Coming soon', 22, { weight: 600, align: 'center' });
   const activityNote = txt('activity-note', '说明', '在工作台里放海报、文字、按钮，发布以后这里就是新的活动页。', 'Posters, text and buttons go here.', 13, { align: 'center', color: '$muted' });
   const backHome: StudioButtonNode = {
@@ -673,13 +815,14 @@ function defaultMpDoc(): StudioDoc {
       home: {
         background: '$bg',
         layout: flow('column', 0, [0, 0, 24, 0], 'stretch'),
-        nodes: [mpBlock('home-banner', 'mp.banner', '版头大图', 375, 300, { shade: 0.2, wordmark: true, autoplay: true }), mpBlock('home-store', 'mp.store', '门店信息', 375, 280, { card: '$surface', buttons: true }), pillars, services],
+        nodes: [
+          mpBlock('home-banner', 'mp.banner', '版头大图', 375, 300, { shade: 0.2, wordmark: true, autoplay: true }),
+          mpBlock('home-store', 'mp.store', '门店信息', 375, 280, { card: '$surface', buttons: true }),
+          pillars,
+          services,
+        ],
       },
-      activity: {
-        background: '$bg',
-        layout: flow('column', 16, [120, 24, 24, 24], 'center'),
-        nodes: [activityTitle, activityNote, backHome],
-      },
+      activity: { background: '$bg', layout: flow('column', 16, [120, 24, 24, 24], 'center'), nodes: [activityTitle, activityNote, backHome] },
       member: {
         background: '$bg',
         layout: flow('column', 0, [0, 0, 24, 0], 'stretch'),
@@ -693,16 +836,21 @@ function defaultMpDoc(): StudioDoc {
  * 主题色、字体在页面上的 CSS 变量。平板菜单只给和默认不一样的（默认值在 emenu.css 里，默认版面在页面上一个变量都不多设）；
  * 手机界面全给（React 这边没有它们的样式表）。
  */
-export function themeVars(doc: StudioDoc): Record<string, string> {
+/**
+ * 主题色、字体的 CSS 变量：界面登记 inlineAllVars 的全写，不然只写改过的（默认值在那个界面自己的样式表里）。
+ * all：不管登记都全写——在别的页面里画这个界面时（工作台的编辑器、预览里画员工食堂，那里没有员工食堂的样式表）。
+ */
+export function themeVars(doc: StudioDoc, all = false): Record<string, string> {
   const def = STUDIO_SURFACE_DEFS[doc.surface];
+  const every = all || def.inlineAllVars;
   const out: Record<string, string> = {};
   for (const c of def.colors) {
     const v = doc.theme.colors[c.key] ?? c.default;
-    if (def.inlineAllVars || v.toLowerCase() !== c.default.toLowerCase()) out[def.cssVar(c.key).slice(4, -1)] = v;
+    if (every || v.toLowerCase() !== c.default.toLowerCase()) out[def.cssVar(c.key).slice(4, -1)] = v;
   }
   const zh = def.fonts.zh.find((f) => f.key === doc.theme.fonts.zh) ?? def.fonts.zh.find((f) => f.key === def.fonts.default.zh);
   const en = def.fonts.en.find((f) => f.key === doc.theme.fonts.en) ?? def.fonts.en.find((f) => f.key === def.fonts.default.en);
-  if (zh && (def.inlineAllVars || zh.key !== def.fonts.default.zh)) out[def.fontVars.zh] = zh.stack;
-  if (en && (def.inlineAllVars || en.key !== def.fonts.default.en)) out[def.fontVars.en] = en.stack;
+  if (zh && (every || zh.key !== def.fonts.default.zh)) out[def.fontVars.zh] = zh.stack;
+  if (en && (every || en.key !== def.fonts.default.en)) out[def.fontVars.en] = en.stack;
   return out;
 }

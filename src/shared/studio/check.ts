@@ -90,6 +90,8 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
         if (why) err(why, screen, n.id);
       }
       if (b.resize === 'none' && (!near(n.w, b.size.w) || !near(n.h, b.size.h))) err(`「${b.label}」不能改大小`, screen, n.id);
+      // 自动排列里大小跟着内容走的功能块（员工食堂的各段、饭卡码）：宽高规则也不能改
+      if (b.resize === 'none' && b.sizing && (n.sizing?.w ?? 'fixed') + (n.sizing?.h ?? 'fixed') !== b.sizing.w + b.sizing.h) err(`「${b.label}」不能改大小`, screen, n.id);
       if (b.resize === 'scale' && b.size.w > 0 && n.w > 0 && Math.abs(n.h / n.w - b.size.h / b.size.w) > 0.01 * (b.size.h / b.size.w) + 0.02) err(`「${b.label}」只能等比缩放`, screen, n.id);
       const at = FIXED_AT[n.block];
       if (!b.move && at && (!near(n.x, at.x) || !near(n.y, at.y))) err(`「${b.label}」不能挪`, screen, n.id);

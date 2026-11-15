@@ -165,3 +165,29 @@ describe('8.1.2：小程序的版面（自动排列、按钮、数据字段、�
     expect(checkStudioDoc(doc).filter((i) => i.level === 'error').map((i) => i.message)).toEqual(['首页缺了「门店信息」：从左边「插入 → 功能块」加回来']);
   });
 });
+
+describe('8.1.2：员工食堂的版面', () => {
+  it('默认版面合格式、核对和检查都没有问题；主题变量一个都不多设（员工手机上与原来一样），在工作台里画时全写上', () => {
+    const doc = defaultStudioDoc('canteen');
+    expect(DocSchema.parse(doc)).toEqual(doc);
+    expect(validateStudioDoc(doc)).toEqual([]);
+    expect(checkStudioDoc(doc, { assets: new Map(), langSwitch: false })).toEqual([]);
+    expect(themeVars(doc)).toEqual({});
+    const all = themeVars(doc, true);
+    expect(all['--color-yuzu']).toBe('#e9c75e');
+    expect(all['--color-ink-2']).toBe('#5c4639');
+    expect(all['--color-wood-deep']).toBe('#8a684a');
+    expect(all['--font-sans']).toContain('HarmonyOS Sans SC');
+    // 首页一段一段往下排（间隔 16），饭卡码页居中；各段都是功能块
+    expect(doc.screens.home!.layout).toMatchObject({ mode: 'column', gap: 16, align: 'stretch' });
+    expect(doc.screens.code!.nodes.map((n) => (n.type === 'block' ? n.block : n.type))).toEqual(['cn.profile', 'cn.qr', 'cn.codeHint', 'cn.mascot']);
+  });
+
+  it('饭卡码、亮出饭卡码、按岗位的入口是必需的：藏起来是红的', () => {
+    const doc = defaultStudioDoc('canteen');
+    for (const n of [...doc.screens.home!.nodes, ...doc.screens.code!.nodes]) if (n.type === 'block' && ['cn.qr', 'cn.codeButton', 'cn.entries'].includes(n.block)) n.hidden = true;
+    const red = checkStudioDoc(doc, { assets: new Map(), langSwitch: false }).filter((i) => i.level === 'error');
+    expect(red.map((i) => i.message)).toEqual(expect.arrayContaining([expect.stringContaining('饭卡码'), expect.stringContaining('亮出饭卡码'), expect.stringContaining('按岗位的入口')]));
+  });
+});
+
