@@ -10,6 +10,7 @@
 //   · 导入英文对照表（8.0.13）：一个事务里按菜品编号升序锁菜品一行，只改有变化的、版本号加一；同样的内容再导一次什么都不改。
 
 import { z } from 'zod';
+import { readPublishedStudio } from '../studio/published';
 import { defaultTier, type TierPrice } from '@shared/catalog';
 import {
   DEFAULT_EMENU_RULES,
@@ -61,7 +62,14 @@ const defaultPrice = (prices: TierPrice[]) => {
 // ───────────────────────── 读 ─────────────────────────
 
 /** 设置的版本：内容的摘要（键的先后不影响） */
-const rulesRev = (rules: EmenuRules) => hashRequest(Object.fromEntries(Object.keys(rules).sort().map((k) => [k, rules[k as keyof EmenuRules]])));
+const rulesRev = (rules: EmenuRules) =>
+  hashRequest(
+    Object.fromEntries(
+      Object.keys(rules)
+        .sort()
+        .map((k) => [k, rules[k as keyof EmenuRules]]),
+    ),
+  );
 
 async function loadCategories(db: Db): Promise<EmenuCategoryAdmin[]> {
   const cats = await db<{ id: number; name: string; nameEn: string; startMinute: number | null; endMinute: number | null; sortOrder: number; active: boolean; version: number }[]>`
@@ -121,6 +129,12 @@ async function loadItemOptions(db: Db): Promise<EmenuItemOption[]> {
   return rows.map(({ prices, ...r }) => ({ ...r, id: Number(r.id), dishId: r.dishId === null ? null : Number(r.dishId), price: defaultPrice(prices) }));
 }
 
+/** 现在发布的版面里的卡片模板与菜的几种样子（8.1.2）：后台的版面预览照它画 */
+async function publishedCards(db: Db): Promise<Pick<EmenuAdmin, 'templates' | 'dishStates'>> {
+  const doc = (await readPublishedStudio(db, 'emenu'))?.doc;
+  return { templates: doc?.templates ?? null, dishStates: doc?.dishStates ?? null };
+}
+
 export async function emenuAdmin(db: Db): Promise<EmenuAdmin> {
   const rules = await loadEmenuRules(db);
   const [meta] = await db<{ updatedAt: string; updatedBy: string | null }[]>`
@@ -141,6 +155,7 @@ export async function emenuAdmin(db: Db): Promise<EmenuAdmin> {
     tables: await emenuTables(db),
     tabletAccounts: counts!.tablets,
     pinHolders: counts!.pins,
+    ...(await publishedCards(db)),
   };
 }
 
@@ -313,7 +328,14 @@ export async function saveEmenuPages(deps: Deps, id: number, raw: unknown, ctx: 
         }
       }
       await tx`UPDATE emenu_categories SET version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now() WHERE id = ${id}`;
-      await writeAudit(tx, { staffId: ctx.actor.id, action: 'emenu_saved', targetType: 'emenu_category', targetId: id, detail: { summary: `保存电子菜单「${cur.name}」的版面：${pages.length} 页` }, ip: ctx.ip });
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'emenu_saved',
+        targetType: 'emenu_category',
+        targetId: id,
+        detail: { summary: `保存电子菜单「${cur.name}」的版面：${pages.length} 页` },
+        ip: ctx.ip,
+      });
     });
   } catch (error) {
     if (isForeignKeyViolation(error)) throw unprocessable('DISH_NOT_FOUND', '有菜品不存在，请重新载入后再排');
@@ -334,7 +356,10 @@ const DishFields = z.object({
   unit: z.string().trim().min(1, '请填写单位').max(4, '单位最多 4 个字').default('份'),
   taglineEn: z.string().trim().max(80, '小字的英文最多 80 个字符').default(''),
   descriptionEn: z.string().trim().max(400, '英文介绍最多 400 个字符').default(''),
-  attrsEn: z.array(z.string().trim().min(1, '属性行的英文不能有空行').max(EMENU_ATTR_EN_MAX, `属性行的英文每行最多 ${EMENU_ATTR_EN_MAX} 个字符`)).max(3, '属性行的英文最多 3 行').default([]),
+  attrsEn: z
+    .array(z.string().trim().min(1, '属性行的英文不能有空行').max(EMENU_ATTR_EN_MAX, `属性行的英文每行最多 ${EMENU_ATTR_EN_MAX} 个字符`))
+    .max(3, '属性行的英文最多 3 行')
+    .default([]),
   unitEn: z.string().trim().max(12, '单位的英文最多 12 个字符').default(''),
   imageId,
   detailImageId: imageId,
@@ -417,7 +442,14 @@ export async function updateEmenuDish(deps: Deps, id: number, raw: unknown, ctx:
                image_id = ${d.imageId}, detail_image_id = ${d.detailImageId}, active = ${d.active}, version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now()
         WHERE id = ${id}`;
       await writeSpecs(tx, id, d);
-      await writeAudit(tx, { staffId: ctx.actor.id, action: 'emenu_saved', targetType: 'emenu_dish', targetId: id, detail: { summary: `修改电子菜单菜品「${cur.name}」${d.active ? '' : '（停用）'}` }, ip: ctx.ip });
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'emenu_saved',
+        targetType: 'emenu_dish',
+        targetId: id,
+        detail: { summary: `修改电子菜单菜品「${cur.name}」${d.active ? '' : '（停用）'}` },
+        ip: ctx.ip,
+      });
     });
   } catch (error) {
     throw await dishError(deps.sql, error, d, id);
@@ -429,7 +461,9 @@ export async function updateEmenuDish(deps: Deps, id: number, raw: unknown, ctx:
 
 /** 导出：每道菜一行，中文各列给翻译的人看、英文各列填好再导入（列名见 EMENU_ENGLISH_COLUMNS） */
 export async function emenuEnglishCsv(db: Db): Promise<string> {
-  const dishes = await db<{ id: number; name: string; nameEn: string; tagline: string; taglineEn: string; description: string; descriptionEn: string; attrs: string[]; attrsEn: string[]; unit: string; unitEn: string }[]>`
+  const dishes = await db<
+    { id: number; name: string; nameEn: string; tagline: string; taglineEn: string; description: string; descriptionEn: string; attrs: string[]; attrsEn: string[]; unit: string; unitEn: string }[]
+  >`
     SELECT id, name, name_en, tagline, tagline_en, description, description_en, attrs, attrs_en, unit, unit_en FROM emenu_dishes ORDER BY active DESC, id`;
   return toCsv([
     [...EMENU_ENGLISH_COLUMNS],
@@ -450,7 +484,10 @@ const EnglishInput = z.object({
         nameEn: englishText(80, '英文名'),
         taglineEn: englishText(80, '小字的英文'),
         descriptionEn: englishText(400, '英文介绍'),
-        attrsEn: z.array(z.string().trim().min(1).max(EMENU_ATTR_EN_MAX, `属性行的英文每条最多 ${EMENU_ATTR_EN_MAX} 个字符`)).max(3, '属性行的英文最多 3 条').optional(),
+        attrsEn: z
+          .array(z.string().trim().min(1).max(EMENU_ATTR_EN_MAX, `属性行的英文每条最多 ${EMENU_ATTR_EN_MAX} 个字符`))
+          .max(3, '属性行的英文最多 3 条')
+          .optional(),
         unitEn: englishText(12, '单位的英文'),
       }),
       '没有要导入的内容',
@@ -483,7 +520,14 @@ export async function importEmenuEnglish(deps: Deps, raw: unknown, ctx: OpContex
         attrsEn: r.attrsEn?.length ? r.attrsEn : cur.attrsEn,
         unitEn: r.unitEn || cur.unitEn,
       };
-      if (next.nameEn === cur.nameEn && next.taglineEn === cur.taglineEn && next.descriptionEn === cur.descriptionEn && next.unitEn === cur.unitEn && JSON.stringify(next.attrsEn) === JSON.stringify(cur.attrsEn)) continue;
+      if (
+        next.nameEn === cur.nameEn &&
+        next.taglineEn === cur.taglineEn &&
+        next.descriptionEn === cur.descriptionEn &&
+        next.unitEn === cur.unitEn &&
+        JSON.stringify(next.attrsEn) === JSON.stringify(cur.attrsEn)
+      )
+        continue;
       await tx`
         UPDATE emenu_dishes SET name_en = ${next.nameEn}, tagline_en = ${next.taglineEn}, description_en = ${next.descriptionEn}, attrs_en = ${next.attrsEn}, unit_en = ${next.unitEn},
                version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now()
@@ -512,57 +556,59 @@ export async function importEmenuEnglish(deps: Deps, raw: unknown, ctx: OpContex
  * 新建的菜按 10 道一页排成「文字陈列」接在这个分类后面。已经有的菜、已经排好的页都不动，可以重复点。
  */
 export async function generateEmenuDraft(deps: Deps, ctx: OpContext): Promise<EmenuAdmin & { draft: { dishes: number; categories: number; pages: number } }> {
-  const draft = await deps.sql.begin(async (tx) => {
-    await setTxTimeouts(tx);
-    await tx`SELECT pg_advisory_xact_lock(hashtext('emenu_draft'))`;
-    const items = (await loadItemOptions(tx)).filter((i) => i.dishId === null);
-    const byCategory = new Map<string, EmenuItemOption[]>();
-    for (const i of items) byCategory.set(i.category || '其他', [...(byCategory.get(i.category || '其他') ?? []), i]);
-    let categories = 0;
-    let pages = 0;
-    for (const [name, list] of byCategory) {
-      const dishIds: number[] = [];
-      for (const item of list) {
-        const [d] = await tx<{ id: number }[]>`
+  const draft = await deps.sql
+    .begin(async (tx) => {
+      await setTxTimeouts(tx);
+      await tx`SELECT pg_advisory_xact_lock(hashtext('emenu_draft'))`;
+      const items = (await loadItemOptions(tx)).filter((i) => i.dishId === null);
+      const byCategory = new Map<string, EmenuItemOption[]>();
+      for (const i of items) byCategory.set(i.category || '其他', [...(byCategory.get(i.category || '其他') ?? []), i]);
+      let categories = 0;
+      let pages = 0;
+      for (const [name, list] of byCategory) {
+        const dishIds: number[] = [];
+        for (const item of list) {
+          const [d] = await tx<{ id: number }[]>`
           INSERT INTO emenu_dishes (name, created_by, updated_by) VALUES (${item.name}, ${ctx.actor.id}, ${ctx.actor.id}) RETURNING id`;
-        await tx`INSERT INTO emenu_dish_specs (dish_id, item_id) VALUES (${d!.id}, ${item.id})`;
-        dishIds.push(Number(d!.id));
-      }
-      let [cat] = await tx<{ id: number }[]>`SELECT id FROM emenu_categories WHERE lower(btrim(name)) = lower(${name}) FOR UPDATE`;
-      if (!cat) {
-        const [last] = await tx<{ n: number }[]>`SELECT coalesce(max(sort_order), 0)::int AS n FROM emenu_categories`;
-        [cat] = await tx<{ id: number }[]>`
-          INSERT INTO emenu_categories (name, sort_order, created_by, updated_by) VALUES (${name}, ${last!.n + 10}, ${ctx.actor.id}, ${ctx.actor.id}) RETURNING id`;
-        categories += 1;
-      }
-      const [next] = await tx<{ n: number }[]>`SELECT coalesce(max(sort_no) + 1, 0)::int AS n FROM emenu_pages WHERE category_id = ${cat!.id}`;
-      const perPage = EMENU_LAYOUT_INFO.list_text.slots;
-      for (let i = 0; i < dishIds.length; i += perPage) {
-        const sortNo = next!.n + i / perPage;
-        if (sortNo >= EMENU_MAX_PAGES) throw unprocessable('PAGE_LIMIT', `分类「${name}」的页数超过 ${EMENU_MAX_PAGES} 页了，请先整理这个分类再生成`);
-        const [p] = await tx<{ id: number }[]>`
-          INSERT INTO emenu_pages (category_id, sort_no, layout, title) VALUES (${cat!.id}, ${sortNo}, 'list_text', ${name.length <= 8 ? name : ''}) RETURNING id`;
-        for (const [slot, dishId] of dishIds.slice(i, i + perPage).entries()) {
-          await tx`INSERT INTO emenu_page_dishes (page_id, slot_no, dish_id) VALUES (${p!.id}, ${slot}, ${dishId})`;
+          await tx`INSERT INTO emenu_dish_specs (dish_id, item_id) VALUES (${d!.id}, ${item.id})`;
+          dishIds.push(Number(d!.id));
         }
-        pages += 1;
+        let [cat] = await tx<{ id: number }[]>`SELECT id FROM emenu_categories WHERE lower(btrim(name)) = lower(${name}) FOR UPDATE`;
+        if (!cat) {
+          const [last] = await tx<{ n: number }[]>`SELECT coalesce(max(sort_order), 0)::int AS n FROM emenu_categories`;
+          [cat] = await tx<{ id: number }[]>`
+          INSERT INTO emenu_categories (name, sort_order, created_by, updated_by) VALUES (${name}, ${last!.n + 10}, ${ctx.actor.id}, ${ctx.actor.id}) RETURNING id`;
+          categories += 1;
+        }
+        const [next] = await tx<{ n: number }[]>`SELECT coalesce(max(sort_no) + 1, 0)::int AS n FROM emenu_pages WHERE category_id = ${cat!.id}`;
+        const perPage = EMENU_LAYOUT_INFO.list_text.slots;
+        for (let i = 0; i < dishIds.length; i += perPage) {
+          const sortNo = next!.n + i / perPage;
+          if (sortNo >= EMENU_MAX_PAGES) throw unprocessable('PAGE_LIMIT', `分类「${name}」的页数超过 ${EMENU_MAX_PAGES} 页了，请先整理这个分类再生成`);
+          const [p] = await tx<{ id: number }[]>`
+          INSERT INTO emenu_pages (category_id, sort_no, layout, title) VALUES (${cat!.id}, ${sortNo}, 'list_text', ${name.length <= 8 ? name : ''}) RETURNING id`;
+          for (const [slot, dishId] of dishIds.slice(i, i + perPage).entries()) {
+            await tx`INSERT INTO emenu_page_dishes (page_id, slot_no, dish_id) VALUES (${p!.id}, ${slot}, ${dishId})`;
+          }
+          pages += 1;
+        }
+        await tx`UPDATE emenu_categories SET version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now() WHERE id = ${cat!.id}`;
       }
-      await tx`UPDATE emenu_categories SET version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now() WHERE id = ${cat!.id}`;
-    }
-    if (items.length) {
-      await writeAudit(tx, {
-        staffId: ctx.actor.id,
-        action: 'emenu_draft',
-        targetType: 'emenu',
-        detail: { summary: `从价目表生成电子菜单初稿：${items.length} 道菜、新建 ${categories} 个分类、${pages} 页`, dishes: items.length, categories, pages },
-        ip: ctx.ip,
-      });
-    }
-    return { dishes: items.length, categories, pages };
-  }).catch((error: unknown) => {
-    // 生成的时候别人正好把同一个项目放进了菜品、或新建了同名的分类：整批不写，请他再点一次（只补还没有的）
-    if (isUniqueViolation(error)) throw changed('电子菜单');
-    throw error;
-  });
+      if (items.length) {
+        await writeAudit(tx, {
+          staffId: ctx.actor.id,
+          action: 'emenu_draft',
+          targetType: 'emenu',
+          detail: { summary: `从价目表生成电子菜单初稿：${items.length} 道菜、新建 ${categories} 个分类、${pages} 页`, dishes: items.length, categories, pages },
+          ip: ctx.ip,
+        });
+      }
+      return { dishes: items.length, categories, pages };
+    })
+    .catch((error: unknown) => {
+      // 生成的时候别人正好把同一个项目放进了菜品、或新建了同名的分类：整批不写，请他再点一次（只补还没有的）
+      if (isUniqueViolation(error)) throw changed('电子菜单');
+      throw error;
+    });
   return { ...(await emenuAdmin(deps.sql)), draft };
 }

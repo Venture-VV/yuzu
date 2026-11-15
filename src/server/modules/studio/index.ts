@@ -43,6 +43,7 @@ import { parse } from '../../lib/validate';
 import { erpOpAbandoned } from '../erp-ops';
 import { emenuMenu, loadEmenuRules } from '../emenu/core';
 import { assetHeaders, parseStudioAsset } from './assets';
+import { registerStudioCollab } from './collab';
 import { studioPublishedRef } from './published';
 
 export { studioPublishedRef };
@@ -71,7 +72,12 @@ function parseDoc(raw: unknown, surface: StudioSurface): StudioDoc {
 }
 
 const versionColumns = (db: Db) => db`
-  v.id, v.version, v.kind, v.rollback_of, v.note, v.screens_changed, v.published_at, coalesce(s.display_name, '') AS published_by`;
+  v.id, v.version, v.kind, v.rollback_of, v.note, v.screens_changed, v.published_at, coalesce(s.display_name, '') AS published_by,
+  v.effective_at, c.cancelled_at, cs.display_name AS cancelled_by`;
+/** 版本连着发布的人、撤销（定时发布还没生效就撤了的，8.1.2） */
+const versionFrom = (db: Db) => db`
+  studio_versions v LEFT JOIN staff s ON s.id = v.published_by
+  LEFT JOIN studio_version_cancels c ON c.version_id = v.id LEFT JOIN staff cs ON cs.id = c.cancelled_by`;
 
 function versionView(r: Record<string, unknown>): StudioVersionView {
   return {
@@ -83,13 +89,16 @@ function versionView(r: Record<string, unknown>): StudioVersionView {
     screensChanged: (r.screensChanged as string[] | null) ?? [],
     publishedAt: new Date(r.publishedAt as string).toISOString(),
     publishedBy: String(r.publishedBy ?? ''),
+    effectiveAt: r.effectiveAt ? new Date(r.effectiveAt as string).toISOString() : null,
+    cancelledAt: r.cancelledAt ? new Date(r.cancelledAt as string).toISOString() : null,
+    cancelledBy: r.cancelledAt ? String(r.cancelledBy ?? '') : null,
   };
 }
 
 /** 这家店最新的一版（没有返回空） */
 async function latestVersion(db: Db, surface: StudioSurface, storeId: number): Promise<(StudioVersionView & { doc: unknown }) | null> {
   const [r] = await db<Record<string, unknown>[]>`
-    SELECT ${versionColumns(db)}, v.doc FROM studio_versions v LEFT JOIN staff s ON s.id = v.published_by
+    SELECT ${versionColumns(db)}, v.doc FROM ${versionFrom(db)}
     WHERE v.surface = ${surface} AND v.store_id = ${storeId} ORDER BY v.version DESC LIMIT 1`;
   return r ? { ...versionView(r), doc: r.doc } : null;
 }
@@ -153,17 +162,36 @@ const PublishInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
   rev: z.number().int().min(1, '先存一次草稿再发布'),
   note: z.string().trim().min(1, '写一句改了什么').max(200, '最多 200 字'),
+  /** 定时发布（8.1.2，GZ27）：定在以后什么时候生效（不给 = 现在就生效） */
+  effectiveAt: z.iso.datetime({ offset: true, message: '生效时间写成 2026-11-20T10:00:00+08:00 这样' }).nullable().optional(),
 });
-const RollbackInput = z.object({
-  clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
-  version: z.number().int().min(1),
-  note: z.string().trim().max(200, '最多 200 字').default(''),
-});
+/** 定时发布最早 2 分钟以后、最晚 60 天以内 */
+const SCHEDULE_MIN_MS = 2 * 60_000;
+const SCHEDULE_MAX_MS = 60 * 86_400_000;
+/**
+ * 离生效不到这么久的定时发布不能再撤（8.1.2，PR #116 测试会话在 045560f 报的 P2）：撤销要等「界面 + 门店」的版本锁、写完再提交，
+ * 这期间到了点，平板、员工手机可能已经读到这一版在用；提交以后再撤，现在用的那一版又退回去。锁最多等 5 秒、每条语句最多 10 秒，
+ * 留一分钟足够。
+ */
+const CANCEL_CUTOFF_SEC = 60;
+const CancelInput = z.object({ reason: z.string().trim().max(200, '最多 200 字').default('') });
+const RollbackInput = z.object({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'), version: z.number().int().min(1), note: z.string().trim().max(200, '最多 200 字').default('') });
 
 /** 发布、回滚共用：写新的一版（在调用方的事务里，已经取了操作编号的锁、核对过没有作废） */
 async function insertVersion(
   tx: Tx,
-  a: { surface: StudioSurface; storeId: number; doc: StudioDoc; kind: 'publish' | 'rollback'; rollbackOf: number | null; note: string; clientKey: string; requestHash: string; ctx: OpContext },
+  a: {
+    surface: StudioSurface;
+    storeId: number;
+    doc: StudioDoc;
+    kind: 'publish' | 'rollback';
+    rollbackOf: number | null;
+    note: string;
+    clientKey: string;
+    requestHash: string;
+    ctx: OpContext;
+    effectiveAt?: string | null;
+  },
 ): Promise<StudioVersionView> {
   // 检查（GZ7）：红的不能发布
   const issues = checkStudioDoc(a.doc, { assets: await assetSizes(tx, docAssets(a.doc)), langSwitch: await langSwitchOn(tx, a.surface) });
@@ -174,23 +202,23 @@ async function insertVersion(
   const screens = changedScreens(before, a.doc);
   const version = (last?.version ?? 0) + 1;
   const [row] = await tx<{ id: number }[]>`
-    INSERT INTO studio_versions (surface, store_id, version, kind, rollback_of, doc, doc_hash, note, screens_changed, client_key, request_hash, published_by)
+    INSERT INTO studio_versions (surface, store_id, version, kind, rollback_of, doc, doc_hash, note, screens_changed, client_key, request_hash, published_by, effective_at)
     VALUES (${a.surface}, ${a.storeId}, ${version}, ${a.kind}, ${a.rollbackOf}, ${tx.json(a.doc as never)}, ${hashRequest(a.doc)}, ${a.note}, ${screens},
-            ${a.clientKey}, ${a.requestHash}, ${a.ctx.actor.id})
+            ${a.clientKey}, ${a.requestHash}, ${a.ctx.actor.id}, ${a.effectiveAt ?? null})
     RETURNING id`;
   await writeAudit(tx, {
     staffId: a.ctx.actor.id,
     action: a.kind === 'publish' ? 'studio_publish' : 'studio_rollback',
     targetType: 'studio_version',
     targetId: Number(row!.id),
-    detail: { surface: a.surface, version, rollbackOf: a.rollbackOf, note: a.note, screens, warnings: issues.length },
+    detail: { surface: a.surface, version, rollbackOf: a.rollbackOf, note: a.note, screens, warnings: issues.length, effectiveAt: a.effectiveAt ?? null },
     ip: a.ctx.ip,
   });
   return (await versionById(tx, Number(row!.id)))!;
 }
 
 async function versionById(db: Db, id: number): Promise<StudioVersionView | null> {
-  const [r] = await db<Record<string, unknown>[]>`SELECT ${versionColumns(db)} FROM studio_versions v LEFT JOIN staff s ON s.id = v.published_by WHERE v.id = ${id}`;
+  const [r] = await db<Record<string, unknown>[]>`SELECT ${versionColumns(db)} FROM ${versionFrom(db)} WHERE v.id = ${id}`;
   return r ? versionView(r) : null;
 }
 
@@ -208,7 +236,8 @@ const lockVersions = (tx: Tx, surface: StudioSurface, storeId: number) => tx`SEL
 async function publish(deps: Deps, surface: StudioSurface, body: unknown, ctx: OpContext): Promise<StudioVersionView> {
   const input = parse(PublishInput, body);
   const storeId = currentStoreId();
-  const requestHash = hashRequest({ kind: 'publish', surface, storeId, rev: input.rev, note: input.note });
+  const effectiveAt = input.effectiveAt ? new Date(input.effectiveAt).toISOString() : null;
+  const requestHash = hashRequest({ kind: 'publish', surface, storeId, rev: input.rev, note: input.note, ...(effectiveAt ? { effectiveAt } : {}) });
   return deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     await lockOpKey(tx, input.clientKey);
@@ -219,7 +248,14 @@ async function publish(deps: Deps, surface: StudioSurface, body: unknown, ctx: O
     const [design] = await tx<{ doc: unknown; rev: number }[]>`
       SELECT doc, rev FROM studio_designs WHERE surface = ${surface} AND store_id = ${storeId} FOR UPDATE`;
     if (!design || Number(design.rev) !== input.rev) throw conflict('STUDIO_REV', '草稿在你看过以后又改过：刷新、看一眼再发布', { rev: design ? Number(design.rev) : 0 });
-    return insertVersion(tx, { surface, storeId, doc: parseDoc(design.doc, surface), kind: 'publish', rollbackOf: null, note: input.note, clientKey: input.clientKey, requestHash, ctx });
+    if (effectiveAt) {
+      // 按数据库的时钟核对：至少 2 分钟以后、60 天以内（等过锁，用此刻的时钟 clock_timestamp()，不用事务开始的 now()）
+      const [clock] = await tx<{ now: string }[]>`SELECT clock_timestamp() AS now`;
+      const ahead = Date.parse(effectiveAt) - new Date(clock!.now).getTime();
+      if (ahead < SCHEDULE_MIN_MS) throw unprocessable('STUDIO_SCHEDULE', '定时发布的时间至少要在 2 分钟以后；马上要换就选「现在生效」');
+      if (ahead > SCHEDULE_MAX_MS) throw unprocessable('STUDIO_SCHEDULE', '定时发布最多定在 60 天以内');
+    }
+    return insertVersion(tx, { surface, storeId, doc: parseDoc(design.doc, surface), kind: 'publish', rollbackOf: null, note: input.note, clientKey: input.clientKey, requestHash, ctx, effectiveAt });
   });
 }
 
@@ -242,6 +278,39 @@ async function rollback(deps: Deps, surface: StudioSurface, body: unknown, ctx: 
     const invalid = validateStudioDoc(doc).filter((i) => i.level === 'error');
     if (invalid.length) throw unprocessable('STUDIO_INVALID', `第 ${input.version} 版现在用不了：${invalid[0]!.message}`, { issues: invalid });
     return insertVersion(tx, { surface, storeId, doc, kind: 'rollback', rollbackOf: input.version, note: input.note || `回到第 ${input.version} 版`, clientKey: input.clientKey, requestHash, ctx });
+  });
+}
+
+/**
+ * 撤销定时发布（8.1.2）：只撤还没生效、离生效还有一分钟以上的那一版（撤了永远不生效）；撤过的原样返回。
+ * 生效没有按锁之后此刻的时钟（clock_timestamp()）判断——事务开始的 now() 在等锁时不走，等过了点还会当成没生效。
+ */
+async function cancelScheduled(deps: Deps, surface: StudioSurface, version: number, body: unknown, ctx: OpContext): Promise<StudioVersionView> {
+  const input = parse(CancelInput, body ?? {});
+  const storeId = currentStoreId();
+  return deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    await lockVersions(tx, surface, storeId);
+    const [v] = await tx<{ id: number; effectiveAt: string | null; live: boolean; imminent: boolean; cancelled: boolean }[]>`
+      SELECT v.id, v.effective_at, coalesce(v.effective_at, v.published_at) <= clock_timestamp() AS live,
+             coalesce(v.effective_at, v.published_at) <= clock_timestamp() + make_interval(secs => ${CANCEL_CUTOFF_SEC}) AS imminent,
+             EXISTS (SELECT 1 FROM studio_version_cancels c WHERE c.version_id = v.id) AS cancelled
+      FROM studio_versions v WHERE v.surface = ${surface} AND v.store_id = ${storeId} AND v.version = ${version}`;
+    if (!v) throw notFound(`没有第 ${version} 版`);
+    if (v.cancelled) return (await versionById(tx, Number(v.id)))!;
+    if (!v.effectiveAt) throw unprocessable('STUDIO_NOT_SCHEDULED', `第 ${version} 版不是定时发布的：要换回去就「回到」上一版`);
+    if (v.live) throw unprocessable('STUDIO_ALREADY_LIVE', `第 ${version} 版已经生效了，撤不了：要换回去就「回到」上一版`);
+    if (v.imminent) throw unprocessable('STUDIO_ALREADY_LIVE', `第 ${version} 版不到一分钟就要生效了，来不及撤：生效以后要换回去就「回到」上一版`);
+    await tx`INSERT INTO studio_version_cancels (version_id, cancelled_by, reason) VALUES (${v.id}, ${ctx.actor.id}, ${input.reason})`;
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'studio_cancel',
+      targetType: 'studio_version',
+      targetId: Number(v.id),
+      detail: { surface, version, effectiveAt: v.effectiveAt, reason: input.reason },
+      ip: ctx.ip,
+    });
+    return (await versionById(tx, Number(v.id)))!;
   });
 }
 
@@ -273,50 +342,78 @@ export function registerStudioRoutes(app: FastifyInstance, deps: Deps) {
   const reader = guardAny('studio.edit', 'emenu.view', 'emenu.manage');
   const surfaceOf = (params: unknown) => parse(SurfaceParam, params).surface;
 
-  app.get('/api/studio', { preHandler: edit }, async (): Promise<StudioOverview> =>
-    readSnapshot(sql, async (tx) => ({
-      surfaces: await Promise.all(
-        STUDIO_SURFACES.map(async (surface) => {
-          const draft = await loadDraft(tx, surface);
-          const ref = await studioPublishedRef(tx, surface);
-          return {
-            surface,
-            label: STUDIO_SURFACE_LABELS[surface],
-            draftUpdatedAt: draft.updatedAt,
-            draftUpdatedBy: draft.updatedBy,
-            published: ref ? await versionById(tx, ref.id) : null,
-            inherited: ref?.inherited ?? false,
-          };
-        }),
-      ),
-    })),
+  app.get(
+    '/api/studio',
+    { preHandler: edit },
+    async (): Promise<StudioOverview> =>
+      readSnapshot(sql, async (tx) => ({
+        surfaces: await Promise.all(
+          STUDIO_SURFACES.map(async (surface) => {
+            const draft = await loadDraft(tx, surface);
+            const ref = await studioPublishedRef(tx, surface);
+            const [next] = await tx<Record<string, unknown>[]>`
+              SELECT ${versionColumns(tx)} FROM ${versionFrom(tx)}
+              WHERE v.surface = ${surface} AND v.store_id = ${currentStoreId()} AND v.effective_at > now() AND c.version_id IS NULL ORDER BY v.effective_at, v.version LIMIT 1`;
+            const [open] = await tx<{ n: number }[]>`
+              SELECT count(*)::int AS n FROM studio_comments WHERE surface = ${surface} AND store_id = ${currentStoreId()} AND parent_id IS NULL AND resolved_at IS NULL`;
+            return {
+              surface,
+              label: STUDIO_SURFACE_LABELS[surface],
+              draftUpdatedAt: draft.updatedAt,
+              draftUpdatedBy: draft.updatedBy,
+              published: ref ? await versionById(tx, ref.id) : null,
+              inherited: ref?.inherited ?? false,
+              scheduled: next ? versionView(next) : null,
+              openComments: Number(open?.n ?? 0),
+            };
+          }),
+        ),
+      })),
   );
 
   app.get('/api/studio/:surface', { preHandler: edit }, async (req): Promise<StudioState> => {
     const surface = surfaceOf(req.params);
     return readSnapshot(sql, async (tx) => {
       const ref = await studioPublishedRef(tx, surface);
-      return { surface, draft: await loadDraft(tx, surface), published: ref ? await versionById(tx, ref.id) : null, inherited: ref?.inherited ?? false, langSwitch: await langSwitchOn(tx, surface) };
+      const scheduled = await tx<Record<string, unknown>[]>`
+        SELECT ${versionColumns(tx)} FROM ${versionFrom(tx)}
+        WHERE v.surface = ${surface} AND v.store_id = ${currentStoreId()} AND v.effective_at > now() AND c.version_id IS NULL ORDER BY v.effective_at, v.version`;
+      return {
+        surface,
+        draft: await loadDraft(tx, surface),
+        published: ref ? await versionById(tx, ref.id) : null,
+        inherited: ref?.inherited ?? false,
+        langSwitch: await langSwitchOn(tx, surface),
+        scheduled: scheduled.map(versionView),
+      };
     });
   });
 
   app.put('/api/studio/:surface/draft', { preHandler: edit, bodyLimit: STUDIO_LIMITS.bytes * 2 }, async (req) => saveDraft(deps, surfaceOf(req.params), req.body, ctxOf(req)));
   app.post('/api/studio/:surface/publish', { preHandler: publishGuard }, async (req) => publish(deps, surfaceOf(req.params), req.body, ctxOf(req)));
   app.post('/api/studio/:surface/rollback', { preHandler: publishGuard }, async (req) => rollback(deps, surfaceOf(req.params), req.body, ctxOf(req)));
+  // 批注、谁在改、设计包（8.1.2）
+  registerStudioCollab(app, deps, { edit, surfaceOf, parseDoc, draftDoc: async (db, surface) => (await loadDraft(db, surface)).doc });
+  app.post('/api/studio/:surface/versions/:version/cancel', { preHandler: publishGuard }, async (req) => {
+    const { version } = parse(z.object({ version: z.coerce.number().int().min(1) }), req.params);
+    return cancelScheduled(deps, surfaceOf(req.params), version, req.body, ctxOf(req));
+  });
 
   app.get('/api/studio/:surface/versions', { preHandler: edit }, async (req): Promise<StudioVersionView[]> => {
     const surface = surfaceOf(req.params);
     const rows = await sql<Record<string, unknown>[]>`
-      SELECT ${versionColumns(sql)} FROM studio_versions v LEFT JOIN staff s ON s.id = v.published_by
+      SELECT ${versionColumns(sql)} FROM ${versionFrom(sql)}
       WHERE v.surface = ${surface} AND v.store_id = ${currentStoreId()} ORDER BY v.version DESC LIMIT 200`;
-    return rows.map(versionView);
+    // 现在用的是哪一版（定时发布的到点才算；这家店没发布过时一版都不是）
+    const ref = await studioPublishedRef(sql, surface);
+    return rows.map((r) => ({ ...versionView(r), current: !!ref && !ref.inherited && Number(r.id) === ref.id }));
   });
 
   app.get('/api/studio/:surface/versions/:version', { preHandler: edit }, async (req) => {
     const surface = surfaceOf(req.params);
     const { version } = parse(z.object({ version: z.coerce.number().int().min(1) }), req.params);
     const [r] = await sql<Record<string, unknown>[]>`
-      SELECT ${versionColumns(sql)}, v.doc FROM studio_versions v LEFT JOIN staff s ON s.id = v.published_by
+      SELECT ${versionColumns(sql)}, v.doc FROM ${versionFrom(sql)}
       WHERE v.surface = ${surface} AND v.store_id = ${currentStoreId()} AND v.version = ${version}`;
     if (!r) throw notFound(`没有第 ${version} 版`);
     return { ...versionView(r), doc: parseDoc(r.doc, surface) };
@@ -353,7 +450,16 @@ export function registerStudioRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get('/api/studio/preview/:code', { preHandler: reader }, async (req) => {
-    const { code } = parse(z.object({ code: z.string().trim().toUpperCase().regex(/^[A-Z2-9]{8}$/, '预览码不对') }), req.params);
+    const { code } = parse(
+      z.object({
+        code: z
+          .string()
+          .trim()
+          .toUpperCase()
+          .regex(/^[A-Z2-9]{8}$/, '预览码不对'),
+      }),
+      req.params,
+    );
     const [r] = await sql<{ surface: StudioSurface; doc: unknown; expiresAt: string }[]>`
       SELECT surface, doc, expires_at FROM studio_preview_codes WHERE code = ${code} AND expires_at > now()`;
     if (!r) throw notFound('预览码不对或已经过期（30 分钟有效）：在工作台里重新生成');
@@ -392,7 +498,15 @@ export function registerStudioRoutes(app: FastifyInstance, deps: Deps) {
 
   // 素材的大小：发布前检查用（编辑器里也显示）
   app.get('/api/studio/assets-sizes', { preHandler: edit }, async (req) => {
-    const { ids } = parse(z.object({ ids: z.string().max(65 * 400).default('') }), req.query ?? {});
+    const { ids } = parse(
+      z.object({
+        ids: z
+          .string()
+          .max(65 * 400)
+          .default(''),
+      }),
+      req.query ?? {},
+    );
     const list = ids.split(',').filter((x) => /^[0-9a-f]{64}$/.test(x));
     if (list.length > 400) throw badRequest('一次最多查 400 张');
     return Object.fromEntries(await assetSizes(sql, list));

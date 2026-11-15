@@ -3,8 +3,10 @@
 //   · checkStudioDoc：发布前的检查（GZ7）。红的（error）不改不能发布：必需的功能块不在或看不见、图片不在素材库里；
 //     黄的（warn）提醒一下：英文没填、字和底色对比不够、能点的块缩得太小、图片太大、整块在画布外面。
 
-import { STUDIO_LIMITS, walkNodes, type StudioBlockNode, type StudioColor, type StudioDoc, type StudioNode } from './format';
-import { STUDIO_SURFACE_DEFS, type StudioBlockDef, type StudioPropDef } from './surfaces';
+import { isFlow, STUDIO_LIMITS, walkNodes, type StudioAction, type StudioBlockNode, type StudioColor, type StudioDoc, type StudioNode } from './format';
+import { slotHideable, slotResizable } from './emenu-templates';
+import { componentCycles, expandedCount } from './components';
+import { STUDIO_SURFACE_DEFS, type StudioBlockDef, type StudioPropDef, type StudioSurfaceDef } from './surfaces';
 
 export interface StudioIssue {
   level: 'error' | 'warn';
@@ -23,7 +25,9 @@ function propIssue(def: StudioPropDef, value: unknown): string | null {
       if (def.auto && value === 'auto') return null;
       return typeof value === 'string' && /^(#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?|\$[a-z][a-zA-Z0-9]{0,23})$/.test(value) ? null : `「${def.label}」要是颜色`;
     case 'number':
-      return typeof value === 'number' && Number.isFinite(value) && (def.min === undefined || value >= def.min) && (def.max === undefined || value <= def.max) ? null : `「${def.label}」要在 ${def.min ?? '-∞'}–${def.max ?? '∞'} 之间`;
+      return typeof value === 'number' && Number.isFinite(value) && (def.min === undefined || value >= def.min) && (def.max === undefined || value <= def.max)
+        ? null
+        : `「${def.label}」要在 ${def.min ?? '-∞'}–${def.max ?? '∞'} 之间`;
     case 'boolean':
       return typeof value === 'boolean' ? null : `「${def.label}」要是开或关`;
     case 'select':
@@ -31,11 +35,29 @@ function propIssue(def: StudioPropDef, value: unknown): string | null {
   }
 }
 
+/** 动作只能是界面登记的；有选项的 arg 只能从选项里选，没有选项的不要 arg */
+function actionIssue(def: StudioSurfaceDef, a: StudioAction): string | null {
+  const d = def.actions.find((x) => x.key === a.action);
+  if (!d) return def.actions.length ? `没有「${a.action}」这个动作` : `${def.label}上的按钮、框不能设「点了做什么」`;
+  if (d.args) return d.args.some((o) => o.value === a.arg) ? null : `「${d.label}」要从选项里选`;
+  return a.arg ? `「${d.label}」不要填参数` : null;
+}
+
 /** 格式之外按界面登记核对：不过的存不进去 */
 export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
   const def = STUDIO_SURFACE_DEFS[doc.surface];
   const issues: StudioIssue[] = [];
   const err = (message: string, screen?: string, nodeId?: string) => issues.push({ level: 'error', message, screen, nodeId });
+  const comps = doc.components ?? {};
+  /** 屏上、组件里都一样的：动作、数据字段按登记，实例的组件要在 */
+  const nodeRules = (n: StudioNode, where: string) => {
+    if ((n.type === 'button' || n.type === 'frame' || n.type === 'image') && n.action) {
+      const why = actionIssue(def, n.action);
+      if (why) err(why, where, n.id);
+    }
+    if (n.type === 'field' && !def.fields.some((f) => f.key === n.field)) err(`没有「${n.field}」这个数据字段`, where, n.id);
+    if (n.type === 'instance' && !comps[n.component]) err(`「${n.name || n.id}」用的组件已经删掉了：拆开前先从版本里找回，或删掉这一块`, where, n.id);
+  };
   for (const key of Object.keys(doc.theme.colors)) if (!def.colors.some((c) => c.key === key)) err(`没有「${key}」这个主题色`);
   if (!def.fonts.zh.some((f) => f.key === doc.theme.fonts.zh)) err(`中文字体「${doc.theme.fonts.zh}」不在可选的里面`);
   if (!def.fonts.en.some((f) => f.key === doc.theme.fonts.en)) err(`英文字体「${doc.theme.fonts.en}」不在可选的里面`);
@@ -46,6 +68,8 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
       err(`没有「${screen}」这一屏`, screen);
       continue;
     }
+    // 平板（整页等比缩放）的屏是一张画布：不能自动排列、不能改高；手机的屏能
+    if (def.kind === 'tablet' && (s.layout || s.height !== undefined)) err(`${def.label}的屏不能自动排列、不能改高`, screen);
     let count = 0;
     const singles = new Map<string, number>();
     walkNodes(s.nodes, (n, depth, parent) => {
@@ -53,6 +77,7 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
       if (ids.has(n.id)) err(`节点编号「${n.id}」重复了`, screen, n.id);
       ids.add(n.id);
       if (depth > STUDIO_LIMITS.depth) err(`框最多套 ${STUDIO_LIMITS.depth} 层`, screen, n.id);
+      nodeRules(n, screen);
       if (n.type !== 'block') return;
       const b = def.blocks[n.block];
       if (!b) return err(`没有「${n.block}」这个功能块`, screen, n.id);
@@ -65,6 +90,8 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
         if (why) err(why, screen, n.id);
       }
       if (b.resize === 'none' && (!near(n.w, b.size.w) || !near(n.h, b.size.h))) err(`「${b.label}」不能改大小`, screen, n.id);
+      // 自动排列里大小跟着内容走的功能块（员工食堂的各段、饭卡码）：宽高规则也不能改
+      if (b.resize === 'none' && b.sizing && (n.sizing?.w ?? 'fixed') + (n.sizing?.h ?? 'fixed') !== b.sizing.w + b.sizing.h) err(`「${b.label}」不能改大小`, screen, n.id);
       if (b.resize === 'scale' && b.size.w > 0 && n.w > 0 && Math.abs(n.h / n.w - b.size.h / b.size.w) > 0.01 * (b.size.h / b.size.w) + 0.02) err(`「${b.label}」只能等比缩放`, screen, n.id);
       const at = FIXED_AT[n.block];
       if (!b.move && at && (!near(n.x, at.x) || !near(n.y, at.y))) err(`「${b.label}」不能挪`, screen, n.id);
@@ -73,7 +100,51 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
     if (count > STUDIO_LIMITS.nodesPerScreen) err(`一屏最多 ${STUDIO_LIMITS.nodesPerScreen} 个图层`, screen);
     total += count;
   }
+  // 组件（8.1.2）：里面的节点按同样的规矩，不能有功能块；编号在一个组件里不重；不能套自己
+  if (Object.keys(comps).length > STUDIO_LIMITS.components) err(`一份版面最多 ${STUDIO_LIMITS.components} 个组件`);
+  for (const [cid, c] of Object.entries(comps)) {
+    const where = `@${cid}`;
+    const cids = new Set<string>();
+    walkNodes([c.node], (n, depth) => {
+      total += 1;
+      if (cids.has(n.id)) err(`组件「${c.name}」里节点编号「${n.id}」重复了`, where, n.id);
+      cids.add(n.id);
+      if (depth > STUDIO_LIMITS.depth) err(`框最多套 ${STUDIO_LIMITS.depth} 层`, where, n.id);
+      if (n.type === 'block') err(`功能块不能存进组件（「${c.name}」）`, where, n.id);
+      nodeRules(n, where);
+    });
+  }
+  for (const cid of componentCycles(doc)) err(`组件「${comps[cid]!.name}」里又放了它自己（直接或间接），画不出来`, `@${cid}`);
   if (total > STUDIO_LIMITS.nodesPerDoc) err(`一份版面最多 ${STUDIO_LIMITS.nodesPerDoc} 个图层`);
+  else if (doc.components && !componentCycles(doc).length && expandedCount(doc) > STUDIO_LIMITS.expanded) err(`组件展开以后图层太多（最多 ${STUDIO_LIMITS.expanded} 个）：少放几处，或把组件拆小`);
+  // 菜的几种状态（8.1.2）：与卡片模板一样只有登记了模板的界面有
+  if (doc.dishStates && !def.templates) err(`${def.label}没有「菜的几种样子」`);
+  // 卡片模板的改动（8.1.2）：只有登记了模板的界面有；版式、块按登记；藏、改大小、圆角只给能改的块
+  for (const [layout, slots] of Object.entries(doc.templates ?? {})) {
+    const t = def.templates?.[layout];
+    if (!t) {
+      err(def.templates ? `没有「${layout}」这种版式` : `${def.label}没有卡片模板`);
+      continue;
+    }
+    for (const [key, o] of Object.entries(slots)) {
+      const slot = t.slots.find((x) => x.key === key);
+      if (!slot) {
+        err(`版式「${layout}」里没有「${key}」这一块`);
+        continue;
+      }
+      const can = slotResizable(slot);
+      if (o.hidden && !slotHideable(slot)) err(`「${slot.label}」不能藏起来（菜名、价格、加号在里面）`);
+      if (o.radius !== undefined && slot.kind !== 'photo') err(`「${slot.label}」没有圆角这一项`);
+      for (const mode of ['design', 'big'] as const) {
+        const p = o[mode];
+        if (!p) continue;
+        if ((p.w !== undefined && !can.w) || (p.h !== undefined && !can.h)) err(`「${slot.label}」不能改${p.w !== undefined && !can.w ? '宽' : '高'}`);
+        // 下沿只给放大一档里登记成「往上长」的文字块；同一档里上沿、下沿只能写一个
+        if (p.bottom !== undefined && (mode === 'design' || slot.big?.bottom === undefined)) err(`「${slot.label}」${mode === 'design' ? '原样一档' : ''}没有「下沿」这一项`);
+        if (p.bottom !== undefined && p.y !== undefined) err(`「${slot.label}」的上沿、下沿只能定一个`);
+      }
+    }
+  }
   return issues;
 }
 
@@ -119,6 +190,14 @@ export interface StudioCheckContext {
 
 const MB = 1024 * 1024;
 
+/**
+ * 字和底色要多大的对比（WCAG）：正文 4.5:1；大字 3:1——24 号以上，或 18.66 号以上的粗体（700 以上）。
+ * 8.1.1 的平板菜单原来只查 24 号以下的正文，大字不查；8.1.2 起大字也查 3:1。
+ */
+function contrastNeeded(size: number, weight: number): 4.5 | 3 {
+  return size >= 24 || (size >= 18.66 && weight >= 700) ? 3 : 4.5;
+}
+
 /** 发布前的检查：红的不改不能发布，黄的提醒 */
 export function checkStudioDoc(doc: StudioDoc, ctx: StudioCheckContext = {}): StudioIssue[] {
   const def = STUDIO_SURFACE_DEFS[doc.surface];
@@ -136,10 +215,12 @@ export function checkStudioDoc(doc: StudioDoc, ctx: StudioCheckContext = {}): St
       else if (n.hidden || n.opacity < 0.05) add('error', `${screenDef.label}的「${b.label}」被隐藏了：客人看不到、点不到`, screenDef.key, n.id);
     }
     const screenBg = resolveColor(doc, s?.background ?? screenDef.background) ?? resolveColor(doc, '$bg');
+    const height = s?.height ?? def.size.h;
     walkNodes(nodes, (n, _depth, parent) => {
       if (n.hidden) return;
-      // 整块在画布外面
-      if (!parent && (n.x >= def.size.w || n.y >= def.size.h || n.x + n.w <= 0 || n.y + n.h <= 0)) add('warn', `「${n.name || n.id}」整块在画布外面，平板上看不到`, screenDef.key, n.id);
+      // 整块在画布外面（整屏自动排列时不看 x / y）
+      if (!parent && !isFlow(s?.layout) && (n.x >= def.size.w || n.y >= height || n.x + n.w <= 0 || n.y + n.h <= 0))
+        add('warn', `「${n.name || n.id}」整块在画布外面，${def.kind === 'tablet' ? '平板' : '手机'}上看不到`, screenDef.key, n.id);
       if (n.type === 'image' && ctx.assets) {
         const size = ctx.assets.get(n.asset);
         if (size === undefined) add('error', `「${n.name || n.id}」用的图片不在素材库里`, screenDef.key, n.id);
@@ -150,12 +231,28 @@ export function checkStudioDoc(doc: StudioDoc, ctx: StudioCheckContext = {}): St
         const fg = resolveColor(doc, n.color);
         const bg = resolveColor(doc, n.fill) ?? (parent ? resolveColor(doc, parent.fill) : null) ?? screenBg;
         const ratio = fg && bg ? contrastRatio(fg, bg) : null;
-        if (ratio !== null && ratio < 4.5 && n.size < 24) add('warn', `「${n.name || n.text.zh.slice(0, 10)}」字和底色对比不够（${ratio.toFixed(1)}:1，正文要 4.5:1），可能看不清`, screenDef.key, n.id);
+        const need = contrastNeeded(n.size, n.weight);
+        if (ratio !== null && ratio < need)
+          add('warn', `「${n.name || n.text.zh.slice(0, 10)}」字和底色对比不够（${ratio.toFixed(1)}:1，${need === 3 ? '大字' : '正文'}要 ${need}:1），可能看不清`, screenDef.key, n.id);
       }
       if (n.type === 'block') {
         const b: StudioBlockDef | undefined = def.blocks[n.block];
         // 等比缩放的能点的块（中 | EN）缩得比默认小：点按区域跟着变小
         if (b?.tap && b.resize === 'scale' && n.w < b.size.w - 0.5) add('warn', `「${b.label}」比默认的小，客人可能点不准`, screenDef.key, n.id);
+      }
+      if (n.type === 'button') {
+        const label = n.name || n.text.zh.slice(0, 10) || '按钮';
+        // 自动排列里跟内容走的边量不出来，只看固定的
+        const fixedW = !n.sizing || n.sizing.w === 'fixed';
+        const fixedH = !n.sizing || n.sizing.h === 'fixed';
+        if ((fixedW && n.w < 44) || (fixedH && n.h < 44)) add('warn', `「${label}」比 44×44 小，手指可能点不准`, screenDef.key, n.id);
+        if (ctx.langSwitch && n.text.zh.trim() && !n.text.en.trim()) add('warn', `「${label}」没填英文：切到 EN 时显示中文`, screenDef.key, n.id);
+        const fg = resolveColor(doc, n.color);
+        const bg = resolveColor(doc, n.fill) ?? (parent ? resolveColor(doc, parent.fill) : null) ?? screenBg;
+        const ratio = fg && bg ? contrastRatio(fg, bg) : null;
+        const need = contrastNeeded(n.size, n.weight);
+        if (ratio !== null && ratio < need) add('warn', `「${label}」字和底色对比不够（${ratio.toFixed(1)}:1，要 ${need}:1），可能看不清`, screenDef.key, n.id);
+        if (!n.action && def.actions.length) add('warn', `「${label}」还没设「点了做什么」，点了没反应`, screenDef.key, n.id);
       }
     });
   }
@@ -182,11 +279,19 @@ export function changedScreens(before: StudioDoc | null, after: StudioDoc): stri
   const out: string[] = [];
   if (!before || canonicalJson(before.theme) !== canonicalJson(after.theme)) out.push('theme');
   for (const s of def.screens) if (!before || canonicalJson(before.screens[s.key] ?? null) !== canonicalJson(after.screens[s.key] ?? null)) out.push(s.key);
+  // 卡片模板与菜的几种样子（8.1.2）：改过、或恢复了默认
+  const cards = (d: StudioDoc | null) => canonicalJson({ templates: d?.templates ?? null, dishStates: d?.dishStates ?? null });
+  if (cards(before) !== cards(after)) out.push('templates');
+  // 组件（8.1.2）：改了组件，用到它的屏也跟着变；这里单记一项
+  if (canonicalJson(before?.components ?? null) !== canonicalJson(after.components ?? null)) out.push('components');
   return out;
 }
 
 /** 屏、主题的中文名（发布记录、版本列表里显示） */
 export function screenLabel(surface: StudioDoc['surface'], key: string): string {
   if (key === 'theme') return '主题';
+  if (key === 'templates') return '卡片模板';
+  if (key === 'components') return '组件';
+  if (key.startsWith('@')) return '组件';
   return STUDIO_SURFACE_DEFS[surface].screens.find((s) => s.key === key)?.label ?? key;
 }

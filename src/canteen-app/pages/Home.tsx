@@ -1,13 +1,16 @@
 // 首页：打招呼、现在（或下一顿）吃什么、亮出饭卡码；跟柚子说的一栏；今天的其他几顿。
+// 8.1.2：这几段是 UI 工作台版面里的功能块（studio.tsx），先后、藏不藏、中间加的图文照发布的版面；默认 = 原来的样子。
 // 能收提醒、还没决定过的手机，问一句要不要柚子到点喊你吃饭（docs/CANTEEN.md 第 19 节）。
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { canScan, canUseMailbox, type CanteenMe, type Meal, type MealWindow } from '@shared/canteen';
+import type { StudioDoc } from '@shared/studio';
 import { Mascot } from '../Mascot';
 import { IconArrow, IconCamera, IconLetter, IconShield, IconTicket } from '../doodles';
 import { addDays, call, storeNow } from '../lib';
 import { MealCard, useMenus } from '../menus';
 import { ReminderPrompt } from '../reminders';
+import { CanteenScreen } from '../studio';
 import { Button, Pill, Stamp } from '../ui';
 
 const toMin = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
@@ -34,7 +37,7 @@ function mealNow(windows: MealWindow[], minute: number): { meal: Meal; window: M
   return next ? { meal: next.meal, window: next, open: false, afterMidnight: false } : null;
 }
 
-export function HomePage({ me, offsetMs, online, go }: { me: CanteenMe; offsetMs: number; online: boolean; go: (route: string) => void }) {
+export function HomePage({ me, offsetMs, online, go, layout }: { me: CanteenMe; offsetMs: number; online: boolean; go: (route: string) => void; layout: StudioDoc }) {
   const clock = storeNow(offsetMs);
   const today = clock.date;
   const tomorrow = addDays(today, 1);
@@ -43,9 +46,13 @@ export function HomePage({ me, offsetMs, online, go }: { me: CanteenMe; offsetMs
   const menuOf = (date: string, meal: Meal) => menus?.find((m) => m.date === date && m.meal === meal);
   const enabled = me.meals.filter((w) => w.enabled);
   const firstTomorrow = enabled[0];
+  const scan = canScan(me.employee.role);
+  const mailbox = canUseMailbox(me.employee.role);
+  const work = (me.apps?.length ?? 0) > 0;
 
-  return (
-    <div className="space-y-4">
+  // 首页的各段（8.1.2 起是 UI 工作台版面里的功能块：先后、藏不藏照发布的版面，默认 = 原来的样子；每段的内容与逻辑照旧）
+  const blocks: Record<string, () => ReactNode> = {
+    'cn.greeting': () => (
       <header className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
           <p className="eyebrow">Yuzu Canteen · 汤崎</p>
@@ -63,11 +70,15 @@ export function HomePage({ me, offsetMs, online, go }: { me: CanteenMe; offsetMs
           {me.employee.avatar}
         </button>
       </header>
-
-      {!online && <p className="rounded-2xl bg-sky-soft px-4 py-2.5 text-[14px] font-bold text-relax">现在没网：饭卡码照样能亮，菜单是上次看到的</p>}
-      <ReminderPrompt online={online} />
-      {stale && online && <p className="rounded-2xl bg-sky-soft px-4 py-2.5 text-[14px] font-bold text-relax">菜单是上次看到的，联网后会更新</p>}
-
+    ),
+    'cn.notices': () => (
+      <>
+        {!online && <p className="rounded-2xl bg-sky-soft px-4 py-2.5 text-[14px] font-bold text-relax">现在没网：饭卡码照样能亮，菜单是上次看到的</p>}
+        <ReminderPrompt online={online} />
+        {stale && online && <p className="rounded-2xl bg-sky-soft px-4 py-2.5 text-[14px] font-bold text-relax">菜单是上次看到的，联网后会更新</p>}
+      </>
+    ),
+    'cn.focusMeal': () => (
       <div data-tour="focus-meal">
         {focus ? (
           <MealCard
@@ -89,34 +100,42 @@ export function HomePage({ me, offsetMs, online, go }: { me: CanteenMe; offsetMs
           </div>
         )}
       </div>
-
+    ),
+    'cn.codeButton': () => (
       <Button big tone="yuzu" className="w-full" onClick={() => go('code')} data-testid="show-code">
         <IconTicket size={26} /> 亮出饭卡码
       </Button>
-      {canScan(me.employee.role) && (
-        <Button big className="w-full" onClick={() => go('scan')}>
-          <IconCamera size={26} fill="var(--color-yuzu)" /> 扫码打卡
-        </Button>
-      )}
-      {canUseMailbox(me.employee.role) && <MailboxEntry online={online} go={go} />}
-      {/* 工作台（8.0.9）：有巡场的人直接去巡场，只看记录的去巡场记录 */}
-      {(me.apps?.length ?? 0) > 0 && (
-        <button
-          type="button"
-          onClick={() => go(me.apps!.includes('patrol') ? 'patrol' : 'patrolLog')}
-          data-testid="home-work"
-          className="sketch flex w-full items-center gap-3 rounded-[var(--radius-card)] bg-yuzu-soft px-4 py-3 text-left shadow-[var(--shadow-sticker)] active:scale-[0.99]"
-        >
-          <IconShield size={34} fill="var(--color-yuzu)" />
-          <span className="min-w-0 flex-1">
-            <span className="block text-[17px] font-black">{me.apps!.includes('patrol') ? '巡场打卡' : '巡场记录'}</span>
-            <span className="block text-[13px] text-ink-3">{me.apps!.includes('patrol') ? '巡到哪里，扫哪里的场所二维码' : '每天谁几点巡了哪里'}</span>
-          </span>
-          <IconArrow size={22} className="shrink-0 text-wood-deep" />
-        </button>
-      )}
-
-      {/* 跟柚子说（第二期，K16）：员工面板上的反馈栏 */}
+    ),
+    // 按岗位的入口：负责人扫码打卡、柚子信箱；巡场的人去巡场（8.0.9）。别的员工这一段什么都没有（不占位置）
+    'cn.entries': () =>
+      scan || mailbox || work ? (
+        <>
+          {scan && (
+            <Button big className="w-full" onClick={() => go('scan')}>
+              <IconCamera size={26} fill="var(--color-yuzu)" /> 扫码打卡
+            </Button>
+          )}
+          {mailbox && <MailboxEntry online={online} go={go} />}
+          {/* 工作台（8.0.9）：有巡场的人直接去巡场，只看记录的去巡场记录 */}
+          {work && (
+            <button
+              type="button"
+              onClick={() => go(me.apps!.includes('patrol') ? 'patrol' : 'patrolLog')}
+              data-testid="home-work"
+              className="sketch flex w-full items-center gap-3 rounded-[var(--radius-card)] bg-yuzu-soft px-4 py-3 text-left shadow-[var(--shadow-sticker)] active:scale-[0.99]"
+            >
+              <IconShield size={34} fill="var(--color-yuzu)" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[17px] font-black">{me.apps!.includes('patrol') ? '巡场打卡' : '巡场记录'}</span>
+                <span className="block text-[13px] text-ink-3">{me.apps!.includes('patrol') ? '巡到哪里，扫哪里的场所二维码' : '每天谁几点巡了哪里'}</span>
+              </span>
+              <IconArrow size={22} className="shrink-0 text-wood-deep" />
+            </button>
+          )}
+        </>
+      ) : null,
+    // 跟柚子说（第二期，K16）：员工面板上的反馈栏
+    'cn.talk': () => (
       <button
         type="button"
         onClick={() => go('talk')}
@@ -136,22 +155,26 @@ export function HomePage({ me, offsetMs, online, go }: { me: CanteenMe; offsetMs
           <IconArrow size={20} />
         </span>
       </button>
-
-      <section className="space-y-3">
-        <h2 className="px-1 text-[15px] font-extrabold text-ink-2">今天的菜单</h2>
-        {enabled
-          .filter((w) => w.meal !== focus?.meal)
-          .map((w) => (
-            <MealCard key={w.meal} meal={w.meal} window={w} menu={menuOf(today, w.meal)} onLike={like} />
-          ))}
-        <button type="button" onClick={() => go('menu')} className="w-full rounded-2xl py-3 text-[15px] font-bold text-ink-2 active:bg-cream-2">
-          明天吃什么？看看这周的菜单 →
-        </button>
-      </section>
-      {enabled.length === 0 && <p className="text-center text-[14px] text-ink-3">管理员还没设开饭时间</p>}
-      <p className="pt-2 text-center text-[13px] text-ink-3">这个月在饭堂吃了 {me.mealsThisMonth} 顿 · 喜欢的菜记得点个赞</p>
-    </div>
-  );
+    ),
+    'cn.today': () => (
+      <>
+        <section className="space-y-3">
+          <h2 className="px-1 text-[15px] font-extrabold text-ink-2">今天的菜单</h2>
+          {enabled
+            .filter((w) => w.meal !== focus?.meal)
+            .map((w) => (
+              <MealCard key={w.meal} meal={w.meal} window={w} menu={menuOf(today, w.meal)} onLike={like} />
+            ))}
+          <button type="button" onClick={() => go('menu')} className="w-full rounded-2xl py-3 text-[15px] font-bold text-ink-2 active:bg-cream-2">
+            明天吃什么？看看这周的菜单 →
+          </button>
+        </section>
+        {enabled.length === 0 && <p className="text-center text-[14px] text-ink-3">管理员还没设开饭时间</p>}
+      </>
+    ),
+    'cn.footer': () => <p className="pt-2 text-center text-[13px] text-ink-3">这个月在饭堂吃了 {me.mealsThisMonth} 顿 · 喜欢的菜记得点个赞</p>,
+  };
+  return <CanteenScreen doc={layout} screen="home" blocks={blocks} go={go} me={me} testId="home-screen" />;
 }
 
 /** 食堂负责人：柚子信箱的入口（店主 2026-11-10，docs/CANTEEN.md 第 18 节，K20），写着还有几条没看过 */

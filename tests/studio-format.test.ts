@@ -98,3 +98,96 @@ describe('版面格式', () => {
     expect(themeVars(b)['--em-key-2']).toBe('#000000');
   });
 });
+
+describe('8.1.2：小程序的版面（自动排列、按钮、数据字段、点了做什么）', () => {
+  const mpNode = (n: Record<string, unknown>): StudioNode =>
+    DocSchema.shape.screens.parse({ s: { nodes: [{ id: 'x', x: 0, y: 0, w: 100, h: 40, ...n }] } }).s!.nodes[0]!;
+
+  it('默认版面合格式、核对没有问题、检查没有红的；主题变量全写在页面上（小程序这边没有样式表）', () => {
+    const doc = defaultStudioDoc('mp');
+    expect(DocSchema.parse(doc)).toEqual(doc);
+    expect(validateStudioDoc(doc)).toEqual([]);
+    expect(checkStudioDoc(doc, { assets: new Map() }).filter((i) => i.level === 'error')).toEqual([]);
+    expect(Object.keys(doc.screens)).toEqual(['home', 'activity', 'member']);
+    // 首页：整屏竖排，版头、门店信息（必需）、三块业务、服务入口
+    expect(doc.screens.home!.layout?.mode).toBe('column');
+    expect(doc.screens.home!.nodes.map((n) => n.id)).toEqual(['home-banner', 'home-store', 'home-pillars', 'home-services']);
+    const vars = themeVars(doc);
+    expect(vars['--mp-wood']).toBe('#937051');
+    expect(vars['--mp-zh']).toContain('PingFang SC');
+    // 旧版面（8.1.1 的平板菜单）一个新字段都没有：存进去、读出来一字不改
+    expect(JSON.stringify(defaultStudioDoc('emenu'))).not.toMatch(/"(layout|sizing|action)"/);
+  });
+
+  it('自动排列、尺寸规则、按钮、数据字段合格式；乱写的排列、尺寸、动作名存不进去', () => {
+    expect(mpNode({ type: 'frame', layout: { mode: 'row', gap: 8 }, children: [] })).toMatchObject({ layout: { mode: 'row', wrap: false, gap: 8, padding: [0, 0, 0, 0], align: 'start', justify: 'start' } });
+    expect(mpNode({ type: 'text', text: { zh: '字' }, sizing: { w: 'fill' } })).toMatchObject({ sizing: { w: 'fill', h: 'fixed' } });
+    expect(mpNode({ type: 'button', text: { zh: '去看看' }, action: { action: 'open.page', arg: 'coupons' } })).toMatchObject({ fill: '$ink', align: 'center', valign: 'middle', action: { action: 'open.page', arg: 'coupons' } });
+    expect(mpNode({ type: 'field', field: 'store.hours' })).toMatchObject({ prefix: { zh: '', en: '' }, suffix: { zh: '', en: '' } });
+    const parse = (n: Record<string, unknown>) => DocSchema.shape.screens.safeParse({ s: { nodes: [{ id: 'x', x: 0, y: 0, w: 1, h: 1, ...n }] } }).success;
+    expect(parse({ type: 'frame', layout: { mode: 'grid' }, children: [] })).toBe(false);
+    expect(parse({ type: 'text', text: { zh: '字' }, sizing: { w: 'auto' } })).toBe(false);
+    expect(parse({ type: 'button', text: { zh: '去' }, action: { action: 'javascript:alert(1)' } })).toBe(false);
+    expect(parse({ type: 'field', field: 'store.name; drop' })).toBe(false);
+  });
+
+  it('核对：动作、参数、字段只能是登记的；平板菜单的屏不能自动排列、没有动作', () => {
+    const doc = defaultStudioDoc('mp');
+    const add = (d: StudioDoc, n: StudioNode) => {
+      d.screens.activity!.nodes.push(n);
+      return validateStudioDoc(d).map((i) => i.message);
+    };
+    expect(add(clone(doc), mpNode({ type: 'button', id: 'b1', text: { zh: '打开' }, action: { action: 'open.url', arg: 'https://x' } }))).toContain('没有「open.url」这个动作');
+    expect(add(clone(doc), mpNode({ type: 'button', id: 'b2', text: { zh: '打开' }, action: { action: 'open.page', arg: 'admin' } }))).toContain('「打开小程序的一页」要从选项里选');
+    expect(add(clone(doc), mpNode({ type: 'button', id: 'b3', text: { zh: '打电话' }, action: { action: 'call.store', arg: '13800000000' } }))).toContain('「拨打门店电话」不要填参数');
+    expect(add(clone(doc), mpNode({ type: 'field', id: 'f1', field: 'member.phone' }))).toContain('没有「member.phone」这个数据字段');
+    expect(add(clone(doc), mpNode({ type: 'button', id: 'b4', text: { zh: '我的券' }, action: { action: 'open.page', arg: 'coupons' } }))).toEqual([]);
+
+    const em = clone(defaultStudioDoc('emenu'));
+    em.screens.start!.layout = { mode: 'column', wrap: false, gap: 0, padding: [0, 0, 0, 0], align: 'start', justify: 'start' };
+    expect(validateStudioDoc(em).map((i) => i.message)).toContain('平板电子菜单的屏不能自动排列、不能改高');
+    const em2 = clone(defaultStudioDoc('emenu'));
+    em2.screens.start!.nodes.push(mpNode({ type: 'button', id: 'b5', text: { zh: '去' }, action: { action: 'open.page', arg: 'home' } }));
+    expect(validateStudioDoc(em2).map((i) => i.message)).toContain('平板电子菜单上的按钮、框不能设「点了做什么」');
+  });
+
+  it('发布前的检查：按钮太小、没设动作、字和底色对比不够是黄的；自动排列的屏不报「在画布外面」', () => {
+    const doc = clone(defaultStudioDoc('mp'));
+    doc.screens.activity!.nodes.push(mpNode({ type: 'button', id: 'tiny', w: 30, h: 30, text: { zh: '小' }, fill: '#FFFFFF', color: '#EEEEEE', sizing: { w: 'fixed', h: 'fixed' } }));
+    // 自动排列里的 x / y 不看：远在「画布外」也不报
+    doc.screens.activity!.nodes.push(mpNode({ type: 'text', id: 'far', x: 5000, y: 5000, text: { zh: '很远' }, sizing: { w: 'fill', h: 'hug' } }));
+    const msgs = checkStudioDoc(doc, { assets: new Map() }).map((i) => `${i.level}:${i.message}`);
+    expect(msgs).toEqual(expect.arrayContaining([expect.stringMatching(/^warn:「小」比 44×44 小/), expect.stringMatching(/^warn:「小」还没设「点了做什么」/), expect.stringMatching(/^warn:「小」字和底色对比不够/)]));
+    expect(msgs.some((m) => m.includes('画布外面'))).toBe(false);
+    expect(msgs.filter((m) => m.startsWith('error'))).toEqual([]);
+    // 门店信息是必需的：删了是红的
+    doc.screens.home!.nodes = doc.screens.home!.nodes.filter((n) => n.id !== 'home-store');
+    expect(checkStudioDoc(doc).filter((i) => i.level === 'error').map((i) => i.message)).toEqual(['首页缺了「门店信息」：从左边「插入 → 功能块」加回来']);
+  });
+});
+
+describe('8.1.2：员工食堂的版面', () => {
+  it('默认版面合格式、核对和检查都没有问题；主题变量一个都不多设（员工手机上与原来一样），在工作台里画时全写上', () => {
+    const doc = defaultStudioDoc('canteen');
+    expect(DocSchema.parse(doc)).toEqual(doc);
+    expect(validateStudioDoc(doc)).toEqual([]);
+    expect(checkStudioDoc(doc, { assets: new Map(), langSwitch: false })).toEqual([]);
+    expect(themeVars(doc)).toEqual({});
+    const all = themeVars(doc, true);
+    expect(all['--color-yuzu']).toBe('#e9c75e');
+    expect(all['--color-ink-2']).toBe('#5c4639');
+    expect(all['--color-wood-deep']).toBe('#8a684a');
+    expect(all['--font-sans']).toContain('HarmonyOS Sans SC');
+    // 首页一段一段往下排（间隔 16），饭卡码页居中；各段都是功能块
+    expect(doc.screens.home!.layout).toMatchObject({ mode: 'column', gap: 16, align: 'stretch' });
+    expect(doc.screens.code!.nodes.map((n) => (n.type === 'block' ? n.block : n.type))).toEqual(['cn.profile', 'cn.qr', 'cn.codeHint', 'cn.mascot']);
+  });
+
+  it('饭卡码、亮出饭卡码、按岗位的入口是必需的：藏起来是红的', () => {
+    const doc = defaultStudioDoc('canteen');
+    for (const n of [...doc.screens.home!.nodes, ...doc.screens.code!.nodes]) if (n.type === 'block' && ['cn.qr', 'cn.codeButton', 'cn.entries'].includes(n.block)) n.hidden = true;
+    const red = checkStudioDoc(doc, { assets: new Map(), langSwitch: false }).filter((i) => i.level === 'error');
+    expect(red.map((i) => i.message)).toEqual(expect.arrayContaining([expect.stringContaining('饭卡码'), expect.stringContaining('亮出饭卡码'), expect.stringContaining('按岗位的入口')]));
+  });
+});
+

@@ -36,6 +36,7 @@ const DevicesPage = lazyPage(() => import('./features/devices/DevicesPage').then
 const EmenuPage = lazyPage(() => import('./features/emenu/EmenuPage').then((m) => m.EmenuPage));
 // UI 工作台的编辑器（8.1.1）：整屏，只在打开时加载（平板不带编辑器）
 const StudioPage = lazyPage(() => import('./features/studio/StudioPage').then((m) => m.StudioPage));
+const PhonePreviewPage = lazyPage(() => import('./features/studio/PhonePreviewPage').then((m) => m.PhonePreviewPage));
 const LedgerPage = lazyPage(() => import('./features/ledger/LedgerPage').then((m) => m.LedgerPage));
 const SettlementPage = lazyPage(() => import('./features/settlement/SettlementPage').then((m) => m.SettlementPage));
 const ShiftPage = lazyPage(() => import('./features/shift/ShiftPage').then((m) => m.ShiftPage));
@@ -247,6 +248,8 @@ const router = createBrowserRouter([
   { path: '/emenu', element: <AuthGate shell="bare" />, children: [{ index: true, element: <EmenuPage /> }] },
   // UI 工作台的编辑器（8.1.1，docs/WORKBENCH_V811.md）：整屏的画布；后台「工作台」分区点进来
   { path: '/studio/:surface', element: <AuthGate shell="bare" />, children: [{ index: true, element: <StudioPage /> }] },
+  // 手机界面（小程序、员工食堂）的预览（8.1.2）：按预览码画出当时的草稿，375 宽
+  { path: '/studio-preview/:surface/:code', element: <AuthGate shell="bare" />, children: [{ index: true, element: <PhonePreviewPage /> }] },
   { path: '/admin/concierge', element: <Navigate to="/concierge" replace /> },
   { path: '/admin', element: <AuthGate shell="admin" />, children: adminRoutes },
   // ERP 工作区（v0.7.3）：首页、模块设置、营业数据，以及库存、采购、货款、待办（原来的地址不变，门店主导航里不再有）。

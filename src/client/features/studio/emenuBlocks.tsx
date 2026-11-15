@@ -3,10 +3,11 @@
 
 import type { ReactNode } from 'react';
 import type { EmenuCategoryView, EmenuMenu, EmenuPageView } from '@shared/emenu';
-import type { StudioBlockNode } from '@shared/studio';
+import type { StudioBlockNode, StudioDoc } from '@shared/studio';
 import { Header } from '../emenu/header';
 import type { Lang } from '../emenu/i18n';
 import { PageCanvas } from '../emenu/pages';
+import { EmenuTemplatesProvider } from '../emenu/templates';
 import { box } from '../emenu/stage';
 import { LangBlock, LogoBlock, LogoRowBlock, StartCoverBlock, StartFooterBlock, StartPendingBlock } from '../emenu/studio';
 
@@ -30,7 +31,10 @@ function Placeholder({ w, h, text }: { w: number; h: number; text: string }) {
 }
 
 /** 编辑器画布上平板菜单的功能块 */
-export function emenuEditorBlocks(menu: EmenuMenu | null, opts: { lang: Lang; pageIndex: number }): Record<string, (n: StudioBlockNode) => ReactNode> {
+export function emenuEditorBlocks(
+  menu: EmenuMenu | null,
+  opts: { lang: Lang; pageIndex: number; templates?: StudioDoc['templates']; dishStates?: StudioDoc['dishStates'] },
+): Record<string, (n: StudioBlockNode) => ReactNode> {
   const cover = menu?.rules.coverUrl ?? null;
   const tone = cover ? '#f4f3f2' : 'var(--em-ink)';
   const flat = flatPages(menu);
@@ -44,7 +48,13 @@ export function emenuEditorBlocks(menu: EmenuMenu | null, opts: { lang: Lang; pa
     'start.footer': (n) => <StartFooterBlock node={n} tone={tone} text={menu?.rules.footerText ?? 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED'} />,
     lang: (n) => <LangBlock node={n} lang={opts.lang} onToggle={noop} autoLight={!!cover} />,
     'menu.pages': (n) =>
-      at ? <PageCanvas page={at.page} ctx={{ categoryName: at.category.name, categoryNameEn: at.category.nameEn, open: true }} /> : <Placeholder w={n.w} h={n.h} text="菜单页（后台「电子菜单」里还没有排菜）" />,
+      at ? (
+        <EmenuTemplatesProvider templates={opts.templates} dishStates={opts.dishStates}>
+          <PageCanvas page={at.page} ctx={{ categoryName: at.category.name, categoryNameEn: at.category.nameEn, open: true }} />
+        </EmenuTemplatesProvider>
+      ) : (
+        <Placeholder w={n.w} h={n.h} text="菜单页（后台「电子菜单」里还没有排菜）" />
+      ),
     'menu.header': () => (
       <Header
         categories={menu?.categories ?? []}

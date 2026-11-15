@@ -35,6 +35,7 @@ import { Backdrop, Frame, InfoModal, ModalButton, ModalNote, SmallDialog, Succes
 import { DishDetail, OrderDrawer, RemarkDrawer, SearchOverlay, type CartRow, type SearchHit } from './overlays';
 import { flyToOrder, overlayNav } from './motion';
 import { PageCanvas, yuan, type PageCtx } from './pages';
+import { EmenuTemplatesProvider } from './templates';
 import { BIG, box, Stage, useBig } from './stage';
 import { MenuStrip, type StripHandle } from './strip';
 import { LangBlock, LogoBlock, LogoRowBlock, StartCoverBlock, StartFooterBlock, StartPendingBlock, StudioPreviewBand, StudioVersionMark, studioAssetUrl, useEmenuLayout } from './studio';
@@ -560,6 +561,8 @@ export function EmenuPage() {
   return (
     <Stage testId="emenu" motion={menu.rules.motion} lang={shown} big={menu.rules.textSize !== 'design'} vars={layout.vars}>
       <LangProvider value={shown}>
+      {/* 卡片模板（8.1.2）：菜单页 11 种版式里每一块的位置照版面里设计师改过的 */}
+      <EmenuTemplatesProvider templates={layout.doc.templates} dishStates={layout.doc.dishStates}>
       {inMenu ? (
         // 菜单页的几块（UI 工作台的版面，8.1.1）：菜单页、顶栏（菜品详情在顶栏下面打开）、翻页圆点，以及设计师加的装饰
         <StudioNodes
@@ -568,6 +571,7 @@ export function EmenuPage() {
             surface: EMENU_SURFACE,
             lang: shown,
             assetUrl: studioAssetUrl,
+            components: layout.doc.components,
             blocks: {
               'menu.pages': () =>
                 flat.length === 0 ? (
@@ -834,6 +838,7 @@ export function EmenuPage() {
       )}
       <StudioPreviewBand preview={layout.preview} error={layout.previewError} />
       <Toast text={toast} />
+      </EmenuTemplatesProvider>
       </LangProvider>
     </Stage>
   );
@@ -889,6 +894,7 @@ function StartPage({
     surface: EMENU_SURFACE,
     lang,
     assetUrl: studioAssetUrl,
+    components: doc.components,
     blocks: {
       'start.cover': (n) => <StartCoverBlock node={n} coverUrl={cover} />,
       'brand.logo': (n) => <LogoBlock node={n} tone={tone} />,

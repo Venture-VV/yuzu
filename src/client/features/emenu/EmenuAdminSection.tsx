@@ -60,6 +60,7 @@ import { AdminPage } from '../admin/AdminShell';
 import { Header } from './header';
 import { LangProvider } from './i18n';
 import { PageCanvas } from './pages';
+import { EmenuTemplatesProvider } from './templates';
 import { BigProvider } from './stage';
 import './emenu.css';
 import { SubPane, useGoSubTab } from '../../components/SubNav';
@@ -272,7 +273,10 @@ function PagePreview({ page, category, data, scale }: { page: EmenuPageAdmin; ca
         {/* 预览跟着设置里「字与按钮的大小」：平板上放大，这里也放大 */}
         <BigProvider value={data.rules.textSize !== 'design'}>
           <LangProvider value={lang}>
-            <PageCanvas page={{ layout: page.layout, title: page.title, titleEn: page.titleEn, dishes }} ctx={{ categoryName: category.name, categoryNameEn: category.nameEn, open: true, preview: true }} />
+            {/* 卡片模板（8.1.2）：照现在发布的版面里改过的位置画 */}
+            <EmenuTemplatesProvider templates={data.templates} dishStates={data.dishStates}>
+              <PageCanvas page={{ layout: page.layout, title: page.title, titleEn: page.titleEn, dishes }} ctx={{ categoryName: category.name, categoryNameEn: category.nameEn, open: true, preview: true }} />
+            </EmenuTemplatesProvider>
             <Header categories={tabs} activeId={category.id} onCategory={noop} tagCode="A8060" count={0} bump={0} pending={false} onSearch={noop} onOrder={noop} onTag={noop} onLang={data.rules.langSwitch ? noop : undefined} />
           </LangProvider>
         </BigProvider>

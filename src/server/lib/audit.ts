@@ -271,9 +271,11 @@ export type AuditAction =
   | 'ota_order'
   // 8.0.21 供应商收款账户（Codex 安全审查后补，迁移 151）：应付岗改账户、另一人复核
   | 'supplier_bank'
-  // 8.1.1 UI 工作台：发布、回滚（谁、什么时候、改了哪几屏，GZ3）
+  // 8.1.1 UI 工作台：发布、回滚（谁、什么时候、改了哪几屏，GZ3）；8.1.2 撤销定时发布、导入设计包
   | 'studio_publish'
-  | 'studio_rollback';
+  | 'studio_rollback'
+  | 'studio_cancel'
+  | 'studio_pack_import';
 
 export interface AuditEntry {
   staffId: number | null;
