@@ -4,7 +4,7 @@
 //   · OtaChannelsCard（后台「客房 → 渠道」）：渠道、佣金比例、渠道房型 → 本店房型的对照。
 // 导入带操作编号：没收到结果时按原内容再提交一次（同一份文件只导一次，重提返回上一次的结果）。
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Upload } from 'lucide-react';
 import { formatYuan } from '@shared/money';
@@ -47,6 +47,8 @@ interface Preview {
   problems: { row: number; message: string }[];
 }
 
+type PickedFile = { name: string; payload: { csv?: string; xlsxBase64?: string } };
+
 const STATUS_TONE: Record<OtaOrderStatus, 'pine' | 'neutral' | 'clay' | 'yuzu'> = { new: 'neutral', booked: 'pine', cancelled: 'neutral', failed: 'clay', skipped: 'neutral' };
 
 export function OtaOrdersPanel() {
@@ -57,9 +59,13 @@ export function OtaOrdersPanel() {
   const active = (channels.data ?? []).filter((c) => c.active);
   const [channelId, setChannelId] = useState<number | null>(null);
   const cid = channelId ?? active[0]?.id ?? null;
-  const [file, setFile] = useState<{ name: string; payload: { csv?: string; xlsxBase64?: string } } | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [file, setFile] = useState<PickedFile | null>(null);
+  // 预览记着是按哪个渠道看的：换了渠道就作废、按新渠道重新预览（各渠道的列对照、房型对照不一样，Codex 审查 26fe580 后补）
+  const [preview, setPreview] = useState<(Preview & { forChannel: number }) | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [importing, setImporting] = useState(false);
+  // 每发一次预览加一：回来晚了的（之前那个渠道、之前那份文件的）不再用
+  const previewSeq = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<OtaImportResult | null>(null);
   const [status, setStatus] = useState<OtaOrderStatus | ''>('');
@@ -67,31 +73,53 @@ export function OtaOrdersPanel() {
   const [month, setMonth] = useState(session.today.slice(0, 7));
   const recon = useQuery({ queryKey: otaKeys.recon(month), queryFn: () => api.get<OtaReconRow[]>(`/api/ota/recon?month=${month}`) });
 
-  const pick = async (f: File | null) => {
+  const runPreview = async (f: PickedFile, channel: number) => {
+    const seq = ++previewSeq.current;
     setPreview(null);
+    setPreviewing(true);
+    try {
+      const p = await api.post<Preview>('/api/ota/import/preview', { channelId: channel, fileName: f.name, ...f.payload });
+      if (seq === previewSeq.current) setPreview({ ...p, forChannel: channel });
+    } catch (e) {
+      if (seq === previewSeq.current) setError(errorMessage(e));
+    } finally {
+      if (seq === previewSeq.current) setPreviewing(false);
+    }
+  };
+  const pick = async (f: File | null) => {
+    previewSeq.current += 1;
+    setPreview(null);
+    setPreviewing(false);
     setResult(null);
     setError(null);
     if (!f || !cid) return setFile(null);
     try {
-      const payload = await fileToPayload(f);
-      setFile({ name: f.name, payload });
-      setBusy(true);
-      setPreview(await api.post<Preview>('/api/ota/import/preview', { channelId: cid, fileName: f.name, ...payload }));
+      const picked = { name: f.name, payload: await fileToPayload(f) };
+      setFile(picked);
+      await runPreview(picked, cid);
     } catch (e) {
       setError(errorMessage(e));
-    } finally {
-      setBusy(false);
     }
+  };
+  const changeChannel = (id: number | null) => {
+    setChannelId(id);
+    previewSeq.current += 1;
+    setPreview(null);
+    setPreviewing(false);
+    setResult(null);
+    setError(null);
+    if (file && id) void runPreview(file, id);
   };
   // 结果待确认（AGENTS.md；Codex 审查 e64932b 后补）：与网银流水导入同一套——发出去之前把编号与原请求存进本机（存不了不发），
   // 超时、断网、5xx 以后记在上面的「结果待确认」里，刷新页面、关掉再开也能按原编号查回、原样重提（接着处理没做完的订单）或确认作废
   const doImport = async () => {
-    if (!file || !cid) return;
-    setBusy(true);
+    // 只导看过预览的那个渠道（按钮在预览与当前渠道对不上时本来就点不了）
+    if (!file || !preview || preview.forChannel !== cid) return;
+    setImporting(true);
     setError(null);
     // 每次提交一个新编号（与网银流水导入一样）：没收到结果的那一次留在「结果待确认」里按它自己的编号处理，接着导别的文件不会盖掉它
     const key = uuid();
-    const body = { clientKey: key, channelId: cid, fileName: file.name, ...file.payload };
+    const body = { clientKey: key, channelId: preview.forChannel, fileName: file.name, ...file.payload };
     try {
       const r = await sendErpOp<OtaImportResult>({ key, type: 'ota_import', url: '/api/ota/import', body, summary: `导入渠道订单 ${file.name}`, staffName: session.staff.displayName });
       setResult(r);
@@ -103,7 +131,7 @@ export function OtaOrdersPanel() {
         setError('导入没收到结果：记在上面的「结果待确认」里，查回或原样重提（没处理完的订单会接着处理），不要换一个文件重新导');
       } else setError(errorMessage(e));
     } finally {
-      setBusy(false);
+      setImporting(false);
       await qc.invalidateQueries({ queryKey: ['ota'] });
       await qc.invalidateQueries({ queryKey: ['bookings'] });
     }
@@ -132,7 +160,7 @@ export function OtaOrdersPanel() {
       <Card className="space-y-3 p-4">
         <div className="flex flex-wrap items-end gap-3">
           <Field label="渠道" htmlFor="ota-channel">
-            <Select id="ota-channel" value={cid ?? ''} fullWidth={false} className="h-10 w-40" onChange={(e) => setChannelId(Number(e.target.value) || null)} data-testid="ota-channel">
+            <Select id="ota-channel" value={cid ?? ''} fullWidth={false} className="h-10 w-40" disabled={importing} onChange={(e) => changeChannel(Number(e.target.value) || null)} data-testid="ota-channel">
               {active.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -141,10 +169,17 @@ export function OtaOrdersPanel() {
             </Select>
           </Field>
           <Field label="渠道后台导出的订单表（CSV / Excel）" htmlFor="ota-file">
-            <input id="ota-file" type="file" accept=".csv,.xlsx,text/csv" onChange={(e) => void pick(e.target.files?.[0] ?? null)} className="block text-[13px]" data-testid="ota-file" />
+            <input id="ota-file" type="file" accept=".csv,.xlsx,text/csv" disabled={importing} onChange={(e) => void pick(e.target.files?.[0] ?? null)} className="block text-[13px]" data-testid="ota-file" />
           </Field>
           <span className="flex-1" />
-          <Button variant="primary" icon={<Upload className="size-4" />} loading={busy} disabled={!preview || !!preview.problem || preview.duplicate || preview.total === 0} onClick={() => void doImport()} data-testid="ota-import">
+          <Button
+            variant="primary"
+            icon={<Upload className="size-4" />}
+            loading={importing || previewing}
+            disabled={!preview || preview.forChannel !== cid || !!preview.problem || preview.duplicate || preview.total === 0}
+            onClick={() => void doImport()}
+            data-testid="ota-import"
+          >
             导入
           </Button>
         </div>

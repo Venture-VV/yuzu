@@ -207,7 +207,15 @@ async function importStatement(deps: Deps, raw: unknown, actor: Actor, ip?: stri
 // ───────────────────────── 对象（系统里的付款、回款……） ─────────────────────────
 
 /** 某几种对象的候选（没作废、没对过）；party 用来与对方户名比 */
-async function candidates(db: Db, types: MatchTargetType[], filter: { amountMax?: number; amountEq?: number; from: string; to: string; ids?: { type: MatchTargetType; id: number }[] }): Promise<MatchTarget[]> {
+/**
+ * 一条流水能对的记录。`accountId`：流水所在的本公司账户——批量付款的一行只认从这个账户导出的批次
+ * （别的账户的流水同户名、同金额也不对上，Codex 审查 26fe580 后补）；查已有的勾对时不给
+ */
+async function candidates(
+  db: Db,
+  types: MatchTargetType[],
+  filter: { amountMax?: number; amountEq?: number; from: string; to: string; ids?: { type: MatchTargetType; id: number }[]; accountId?: number },
+): Promise<MatchTarget[]> {
   const out: MatchTarget[] = [];
   const amt = (col: Fragment) => (filter.amountEq !== undefined ? db`${col} = ${filter.amountEq}` : filter.amountMax !== undefined ? db`${col} <= ${filter.amountMax}` : db`TRUE`);
   const idsOf = (t: MatchTargetType) => filter.ids?.filter((x) => x.type === t).map((x) => x.id);
@@ -271,6 +279,7 @@ async function candidates(db: Db, types: MatchTargetType[], filter: { amountMax?
                  OR (i.payment_kind = 'payout' AND EXISTS (SELECT 1 FROM contract_payouts o WHERE o.id = i.payment_id AND o.status = 'voided')) AS voided
         FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id
         WHERE ${only ? db`TRUE` : db`b.status = 'exported' AND i.status = 'pending' AND coalesce(b.exported_at, b.created_at)::date BETWEEN ${filter.from}::date AND ${filter.to}::date AND ${notMatched(t, db`i.id`)}`}
+          AND ${filter.accountId !== undefined ? db`b.account_id = ${filter.accountId}` : db`TRUE`}
           AND ${amt(db`i.amount_cents`)} AND ${pick(db`i.id`)}`;
     }
     for (const r of rows) out.push({ type: t, id: Number(r.id), docNo: r.docNo, date: r.date, amountCents: Number(r.amountCents), party: r.party, voided: r.voided });
@@ -299,10 +308,12 @@ async function autoMatch(tx: Tx, lineIds: number[], actor: Actor): Promise<numbe
   let n = 0;
   const claimed = new Set<string>();
   for (const id of lineIds) {
-    const [l] = await tx<{ txnDate: string; direction: 'in' | 'out'; amountCents: string; counterparty: string }[]>`
-      SELECT txn_date::text AS txn_date, direction, amount_cents::text AS amount_cents, counterparty FROM bank_statement_lines WHERE id = ${id} FOR UPDATE`;
+    const [l] = await tx<{ accountId: number; txnDate: string; direction: 'in' | 'out'; amountCents: string; counterparty: string }[]>`
+      SELECT account_id, txn_date::text AS txn_date, direction, amount_cents::text AS amount_cents, counterparty FROM bank_statement_lines WHERE id = ${id} FOR UPDATE`;
     if (!l || !l.counterparty) continue;
-    const list = (await candidates(tx, l.direction === 'out' ? OUT_TARGETS : IN_TARGETS, { amountEq: Number(l.amountCents), from: shift(l.txnDate, -AUTO_DAYS), to: shift(l.txnDate, AUTO_DAYS) }))
+    const list = (
+      await candidates(tx, l.direction === 'out' ? OUT_TARGETS : IN_TARGETS, { amountEq: Number(l.amountCents), from: shift(l.txnDate, -AUTO_DAYS), to: shift(l.txnDate, AUTO_DAYS), accountId: Number(l.accountId) })
+    )
       .filter((c) => partyMatches(l.counterparty, c.party) && !claimed.has(`${c.type}:${c.id}`));
     if (list.length !== 1) continue;
     const c = list[0]!;
@@ -418,7 +429,7 @@ async function lineCandidates(db: Db, id: number): Promise<{ suggested: MatchTar
   const l = await getLine(db, id);
   const remaining = l.amountCents - l.matchedCents;
   if (remaining <= 0 || l.status === 'ignored') return { suggested: [], others: [] };
-  const list = await candidates(db, l.direction === 'out' ? OUT_TARGETS : IN_TARGETS, { amountMax: remaining, from: shift(l.txnDate, -30), to: shift(l.txnDate, 30) });
+  const list = await candidates(db, l.direction === 'out' ? OUT_TARGETS : IN_TARGETS, { amountMax: remaining, from: shift(l.txnDate, -30), to: shift(l.txnDate, 30), accountId: l.accountId });
   const score = (c: MatchTarget) => (c.amountCents === remaining ? 2 : 0) + (partyMatches(l.counterparty, c.party) ? 1 : 0);
   const sorted = list.sort((a, b) => score(b) - score(a) || Math.abs(Date.parse(a.date) - Date.parse(l.txnDate)) - Math.abs(Date.parse(b.date) - Date.parse(l.txnDate)));
   return { suggested: sorted.filter((c) => score(c) >= 2).slice(0, 20), others: sorted.filter((c) => score(c) < 2).slice(0, 80) };
@@ -435,8 +446,8 @@ async function matchLine(deps: Deps, id: number, raw: unknown, actor: Actor, ip?
   try {
     await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
-      const [l] = await tx<{ status: string; version: number; direction: 'in' | 'out'; amountCents: string }[]>`
-        SELECT status, version, direction, amount_cents::text AS amount_cents FROM bank_statement_lines WHERE id = ${id} FOR UPDATE`;
+      const [l] = await tx<{ accountId: number; status: string; version: number; direction: 'in' | 'out'; amountCents: string }[]>`
+        SELECT account_id, status, version, direction, amount_cents::text AS amount_cents FROM bank_statement_lines WHERE id = ${id} FOR UPDATE`;
       if (!l) throw notFound('这条流水不存在');
       if (l.version !== input.version) throw conflict('BANK_LINE_CHANGED', '这条流水刚被别人勾对过，请刷新后再看');
       if (l.status === 'ignored') throw conflict('BANK_LINE_IGNORED', '这条流水标了「不用对」，先取消');
@@ -451,8 +462,13 @@ async function matchLine(deps: Deps, id: number, raw: unknown, actor: Actor, ip?
         if (!(await lockTarget(tx, t.type, t.id))) throw conflict('MATCH_TARGET_INVALID', `${MATCH_TARGET_LABELS[t.type]}（#${t.id}）已作废或状态不对，请刷新后重选`);
         const [taken] = await tx<{ n: number }[]>`SELECT count(*)::int AS n FROM bank_matches WHERE target_type = ${t.type} AND target_id = ${t.id} AND status = 'active'`;
         if (taken!.n > 0) throw conflict('MATCH_TARGET_TAKEN', `${MATCH_TARGET_LABELS[t.type]}（#${t.id}）已经对到别的流水上了，请刷新后重选`);
-        const [c] = await candidates(tx, [t.type], { from: '1900-01-01', to: '2999-12-31', ids: [t] });
-        if (!c) throw notFound(`${MATCH_TARGET_LABELS[t.type]}（#${t.id}）不存在`);
+        const [c] = await candidates(tx, [t.type], { from: '1900-01-01', to: '2999-12-31', ids: [t], accountId: Number(l.accountId) });
+        if (!c) {
+          // 批量付款的一行只对从同一个账户导出的批次（Codex 审查 26fe580 后补）
+          if (t.type === 'batch_item' && (await candidates(tx, [t.type], { from: '1900-01-01', to: '2999-12-31', ids: [t] })).length)
+            throw unprocessable('MATCH_ACCOUNT_MISMATCH', '这一批是从另一个付款账户导出的，不能对这个账户的流水');
+          throw notFound(`${MATCH_TARGET_LABELS[t.type]}（#${t.id}）不存在`);
+        }
         sum += c.amountCents;
         picked.push(c);
       }

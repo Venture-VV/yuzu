@@ -1,6 +1,6 @@
 // 详情页的「其他信息」（8.0.21 自定义字段，docs/FINANCE_V8021.md 第 1 节）：会员、供应商、物料、合同。
 // 字段在后台「数据字典与字段」里建；这里只填值，单独保存（带看到的值的摘要，别人刚改过会提示刷新），不动业务单据本身。
-// 没有启用的字段时整块不显示。
+// 没有启用的字段时整块不显示；取不回来时写明加载失败、可以重试（不当成「没有字段」，Codex 审查 26fe580 后补）。
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,6 +9,7 @@ import type { Permission } from '@shared/permissions';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn } from '../../lib/utils';
+import { LoadFailed } from '../../components/LoadFailed';
 import { useToast } from '../../components/Toast';
 import { Button, Card, Field, Input, Notice, SectionTitle, Select } from '../../components/ui';
 
@@ -53,6 +54,15 @@ export function CustomFieldsCard({
     setBaseHash(data.hash);
     setDraft(Object.fromEntries(data.defs.map((d) => [d.key, data.values[d.key] ?? ''])));
   }
+  // 取不回来（也没有上一次的）：写明失败、给重试，不把整块藏起来——藏起来就跟「没建字段」一样，员工分不出来
+  if (sheet.isError && !data) {
+    return (
+      <LoadFailed title="其他信息加载失败，请检查网络" onRetry={() => void sheet.refetch()} retrying={sheet.isFetching} className={className} testId="custom-fields-error">
+        这里是后台「数据字典与字段」里建的字段；重试以后再看或填写。
+      </LoadFailed>
+    );
+  }
+  // 还在取：不占位（这一块本来就可有可无，没建字段的门店每打开一次详情就闪一下骨架反而晃眼）；没有启用的字段：整块不显示
   if (!data || !draft || data.defs.length === 0) return null;
   const editable = !readOnly && can(WRITE_PERM[entity]);
   const changed = data.defs.filter((d) => (draft[d.key] ?? '').trim() !== (data.values[d.key] ?? ''));

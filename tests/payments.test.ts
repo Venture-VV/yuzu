@@ -817,6 +817,17 @@ describe('批量付款（8.0.21）', () => {
     const oldImp = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/import', { clientKey: randomUUID(), accountId: acc.id, fileName: 'pl-old.csv', csv: oldCsv }));
     expect(oldImp.import).toMatchObject({ autoMatched: 0 });
     expect((await ok(api(ctx.app, payer, 'GET', `/api/erp/payments/batches/${batch.id}`), 200)).items[0]).toMatchObject({ status: 'pending', matched: false });
+    // 另一个账户的流水：同户名、同金额、同一天，也不对这一批（批次是从「批量付款户」导出的；Codex 审查 26fe580 后补）
+    const accB = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/accounts', { name: '另一个基本户', bankName: '建设银行城西支行', accountTail: '9911', template: 'generic' }));
+    const otherCsv = ['交易日期,摘要,借方发生额,贷方发生额,余额,对方户名,对方账号,交易流水号', `${today},代付,200.00,,1.00,付款流测试供应商,6227000012345678,PL-B-0001`].join('\n');
+    const otherImp = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/import', { clientKey: randomUUID(), accountId: accB.id, fileName: 'pl-b.csv', csv: otherCsv }));
+    expect(otherImp.import).toMatchObject({ autoMatched: 0 });
+    const [otherLine] = await ctx.sql<{ id: number; version: number }[]>`SELECT id, version FROM bank_statement_lines WHERE bank_ref = 'PL-B-0001'`;
+    const otherCands = await ok(api(ctx.app, payer, 'GET', `/api/erp/bank/lines/${otherLine!.id}/candidates`), 200);
+    expect([...otherCands.suggested, ...otherCands.others].some((c: { type: string }) => c.type === 'batch_item')).toBe(false);
+    const cross = await api(ctx.app, payer, 'POST', `/api/erp/bank/lines/${otherLine!.id}/match`, { version: otherLine!.version, targets: [{ type: 'batch_item', id: batch.items[0].id }] });
+    expect(cross.body.error.code).toBe('MATCH_ACCOUNT_MISMATCH');
+    expect((await ok(api(ctx.app, payer, 'GET', `/api/erp/payments/batches/${batch.id}`), 200)).items[0]).toMatchObject({ status: 'pending', matched: false });
     // 网银付完，回来导入流水：金额与收款户名对上，自动记账
     const csv = ['交易日期,摘要,借方发生额,贷方发生额,余额,对方户名,对方账号,交易流水号', `${today},批量代付,200.00,,1.00,付款流测试供应商,6227000012345678,PL-T-0001`].join('\n');
     const imp = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/import', { clientKey: randomUUID(), accountId: acc.id, fileName: 'pl.csv', csv }));

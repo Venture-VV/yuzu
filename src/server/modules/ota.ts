@@ -305,17 +305,29 @@ export async function importOtaOrders(deps: Deps, raw: unknown, actor: Actor, ip
       // 已有的订单只改状态、原因与 raw，上一次处理成的房型、日期、间数、金额照旧；新订单记一行「没建成」（last_import_id 空着，原样重提时会再处理）
       result.failed += 1;
       const message = e instanceof Error ? e.message : String(e);
-      await deps.sql`
-        INSERT INTO ota_orders (channel_id, order_no, guest_name, guest_phone, channel_room, room_type_id, checkin_date, checkout_date, rooms, amount_cents, pay_mode,
-                                channel_status, raw, status, fail_reason, last_import_id)
-        VALUES (${channel.id}, ${o.orderNo}, ${o.guestName}, ${o.guestPhone}, ${o.roomType}, ${channel.roomMap[o.roomType] ?? null}, ${o.checkin}, ${o.checkout}, ${o.rooms},
-                ${o.amountCents}, ${o.payMode}, ${o.channelStatus}, ${deps.sql.json(o as never)}, 'failed', ${message.slice(0, 200)}, NULL)
-        ON CONFLICT (channel_id, order_no) DO UPDATE SET status = 'failed', fail_reason = EXCLUDED.fail_reason, raw = EXCLUDED.raw, updated_at = now()`.catch(() => undefined);
+      await markOrderFailed(deps.sql, channel, o, head.id, message).catch(() => undefined);
       result.problems.push({ row: o.row, message: `订单 ${o.orderNo}：${message}` });
     }
   }
   result.orders = await orderViews(deps.sql, deps.sql`o.last_import_id = ${head.id}`);
   return result;
+}
+
+/**
+ * 一张订单这一次没处理成：记「没建成」、原因与这一次的内容（raw，「重试」按它来）。processOrder 的事务已经回滚、锁也放了，
+ * 这时同一张订单可能刚被更晚的一次导入处理成——那样就不写（只在订单还没被这一次或更晚的一次导入处理成时写），
+ * 不拿旧的内容把更晚那次的结果盖成「没建成」（Codex 审查 26fe580 后补；与 processOrder 里按 last_import_id 认先后同一个口径）
+ */
+export async function markOrderFailed(db: Db, channel: OtaChannel, o: ParsedOtaOrder, importId: number, message: string): Promise<boolean> {
+  const rows = await db`
+    INSERT INTO ota_orders (channel_id, order_no, guest_name, guest_phone, channel_room, room_type_id, checkin_date, checkout_date, rooms, amount_cents, pay_mode,
+                            channel_status, raw, status, fail_reason, last_import_id)
+    VALUES (${channel.id}, ${o.orderNo}, ${o.guestName}, ${o.guestPhone}, ${o.roomType}, ${channel.roomMap[o.roomType] ?? null}, ${o.checkin}, ${o.checkout}, ${o.rooms},
+            ${o.amountCents}, ${o.payMode}, ${o.channelStatus}, ${db.json(o as never)}, 'failed', ${message.slice(0, 200)}, NULL)
+    ON CONFLICT (channel_id, order_no) DO UPDATE SET status = 'failed', fail_reason = EXCLUDED.fail_reason, raw = EXCLUDED.raw, updated_at = now()
+      WHERE ota_orders.last_import_id IS NULL OR ota_orders.last_import_id < ${importId}
+    RETURNING id`;
+  return rows.length > 0;
 }
 
 /** 补了房型对照以后重试一张（按上一次导入的内容） */

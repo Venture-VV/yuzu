@@ -88,6 +88,18 @@ test.describe('8.0.21 数据字典与自定义字段', () => {
       await page.getByTestId('cf-search-go').click();
       await expect(page.getByTestId('cf-search-result')).toContainText(member.name);
       await expect(page.getByTestId('cf-search-result')).toContainText(`粤B${stamp}`);
+
+      // 取不回来：写明加载失败、可以重试，不当成「没建字段」整块藏起来（Codex 审查 26fe580 后补）
+      const sheetUrl = `**/api/custom-fields/member/${member.id}`;
+      await page.route(sheetUrl, (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+      await page.goto(`/?m=${member.id}`);
+      const failed = page.getByTestId('custom-fields-error');
+      await expect(failed).toBeVisible({ timeout: 20_000 });
+      await expect(failed).toContainText('其他信息加载失败');
+      await page.unroute(sheetUrl);
+      await failed.getByTestId('custom-fields-error-retry').click();
+      await expect(page.getByTestId('custom-fields')).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId('custom-fields').getByLabel(label)).toHaveValue(`粤B${stamp}`);
     } finally {
       if (fieldId !== null) {
         const defs = (await (await page.request.get('/api/custom-fields/defs')).json()) as { id: number; version: number }[];

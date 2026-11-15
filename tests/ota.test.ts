@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { detectOtaColumns, parseOtaRows } from '../src/shared/ota';
 import { COUPON_CODE_PATTERN } from '../src/shared/checkout';
 import { hashRequest } from '../src/server/lib/idempotency';
-import { otaCouponCode, otaPrepaidHints, roomShare } from '../src/server/modules/ota';
+import { markOrderFailed, otaCouponCode, otaPrepaidHints, roomShare } from '../src/server/modules/ota';
 import { shiftDate } from '../src/shared/labels';
 import { api, setup, type TestContext } from './helpers';
 
@@ -199,6 +199,25 @@ describe('渠道订单', () => {
     const preview = await api(ctx.app, ctx.clerk, 'POST', '/api/ota/import/preview', { channelId, fileName: 'big.csv', csv: big });
     expect(preview.status, JSON.stringify(preview.body).slice(0, 200)).toBe(200);
     expect(preview.body.total).toBe(1500);
+  });
+
+  it('一次导入没处理成的那张：订单已经被更晚的一次导入处理成了，不把它盖成「没建成」、不换掉内容', async () => {
+    const d = shiftDate(today, 15);
+    const first = await importFile([`Y1001,褚三,,豪华大床房,${d},${shiftDate(d, 1)},1,300,现付,已确认`]);
+    const second = await importFile([`Y1001,褚三,,豪华大床房,${d},${shiftDate(d, 1)},1,330,现付,已确认`]);
+    expect(second.body).toMatchObject({ updated: 1 });
+    const [row] = await ctx.sql<{ raw: any; lastImportId: number }[]>`SELECT raw, last_import_id FROM ota_orders WHERE channel_id = ${channelId} AND order_no = 'Y1001'`;
+    expect(Number(row!.lastImportId)).toBe(second.body.importId);
+    const channel = { id: channelId, roomMap: { 豪华大床房: roomTypeId } } as never;
+    // 较早那次（first）在 processOrder 里出错、回滚以后，更晚那次（second）已经处理成了：这时才写失败——不写
+    const stale = { ...row!.raw, amountCents: 30000 };
+    expect(await markOrderFailed(ctx.sql, channel, stale, first.body.importId, '模拟较早那次没处理成')).toBe(false);
+    expect(await order('Y1001')).toMatchObject({ status: 'booked', amountCents: 33000, failReason: null });
+    const [kept] = await ctx.sql<{ raw: any }[]>`SELECT raw FROM ota_orders WHERE channel_id = ${channelId} AND order_no = 'Y1001'`;
+    expect(kept!.raw.amountCents).toBe(33000);
+    // 更晚的一次（编号更大）没处理成：照常记「没建成」、留下这一次的内容
+    expect(await markOrderFailed(ctx.sql, channel, { ...row!.raw, amountCents: 36000 }, second.body.importId + 1000, '模拟更晚那次没处理成')).toBe(true);
+    expect(await order('Y1001')).toMatchObject({ status: 'failed', failReason: '模拟更晚那次没处理成', amountCents: 33000 });
   });
 
   it('预付的几间订单：到店的每一间各带一行团购券（各自的券码、按间数分的金额），分开结账各用各的；用过的不再带', async () => {
