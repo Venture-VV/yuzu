@@ -22,7 +22,6 @@ import {
   type PayMode,
   type RequestPaymentView,
   type StagePlan,
-  type ThreeWayRow,
 } from '@shared/payments';
 import { can } from '@shared/permissions';
 import { PAYMENT_METHODS, type PayMethod } from '@shared/purchasing';
@@ -42,7 +41,6 @@ import { loadExpenseRules } from '../expenses';
 import { assertNotFuture, assertSameMonth, logApproval } from '../inventory/common';
 import { checkAllocations, confirmPayment, lockSupplier, openItems, reopenPaidRequest, supplierCredits } from '../inventory/payables';
 import { contractReceivedPoIds, poThreeWay, threeWayProblems } from './match';
-import { loadSettings } from '../settings';
 import { assertNoAcceptanceHold } from './hold';
 import { contractPlan, requestPaidSql } from './plan';
 

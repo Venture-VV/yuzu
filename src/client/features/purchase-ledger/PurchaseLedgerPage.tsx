@@ -4,7 +4,7 @@
 import { ExpenseTabs } from '../expenses/ExpenseTabs';
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { BookOpenCheck, Download, ShieldCheck, Wallet } from 'lucide-react';
+import { BookOpenCheck, Download } from 'lucide-react';
 import { EXPENSE_CATEGORY_LABELS, PAY_SOURCE_LABELS } from '@shared/expenses';
 import { LEDGER_KIND_LABELS, type LedgerEntry, type LedgerTotals } from '@shared/purchase-ledger';
 import { formatQty } from '@shared/quantity';

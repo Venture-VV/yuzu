@@ -3,10 +3,9 @@ import { money, stamp } from "./format";
 import { uuid } from "../../lib/utils";
 import { conciergeFetch as fetch } from "./api";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
-  ArrowRight,
   ArrowUpRight,
   Camera,
   Check,
@@ -105,12 +104,6 @@ export type ReceiptDraft = {
     checkedIssueKeys: string[];
     summaryConfirmed: boolean;
   };
-};
-const EMPTY_TOTALS: ReceiptTotalsInput = {
-  subtotal: "",
-  due: "",
-  rounding: "",
-  paid: "",
 };
 const EMPTY_DETAILS: ReceiptDetailsInput = {
   cashier: "",

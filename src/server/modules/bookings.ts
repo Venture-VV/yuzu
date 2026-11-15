@@ -42,7 +42,7 @@ import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
 import { hashRequest } from '../lib/idempotency';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { idParam, parse } from '../lib/validate';
-import { businessDate, nextDocNo, runIdempotent, saveKey } from './frontdesk/common';
+import { nextDocNo, runIdempotent, saveKey } from './frontdesk/common';
 import { loadSettings } from './settings';
 import { systemStaffId } from './system-staff';
 import { loadTechnicianRules, loadTechnicians } from './technicians';

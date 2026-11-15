@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf, ISO_DATE } from '@shared/business-date';
 import { COUPON_CODE_PATTERN, COUPON_PLATFORM_LABELS, COUPON_PLATFORMS, normalizeCouponCode, type CouponPlatform } from '@shared/checkout';
-import { type PlatformDayTotals, type PlatformReconcile, type PlatformRedemption, type PlatformSettlement } from '@shared/platform';
+import type { PlatformDayTotals, PlatformReconcile, PlatformRedemption, PlatformSettlement } from '@shared/platform';
 import { guard, guardAny } from '../auth/guard';
 import { isUniqueViolation, type Db, type Tx } from '../db';
 import { writeAudit } from '../lib/audit';

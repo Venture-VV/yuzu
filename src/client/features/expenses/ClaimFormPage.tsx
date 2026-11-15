@@ -4,7 +4,7 @@
 // 断网时「结果待确认」（v0.7.8 修正）：提交前把编号和原请求存在本机并读回核对，存不了就不提交；
 // 刷新、关闭页面后仍在页面顶部查回、按原内容重新提交（同一编号不会重复登记）或确认作废。
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
 import { ArrowLeft, CircleAlert, CircleCheck, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import {

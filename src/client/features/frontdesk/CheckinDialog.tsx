@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CircleAlert, CircleCheck, Crown, Link2, Plus, Search, ShieldCheck, Trash2, UserRound, Users } from 'lucide-react';
 import {
   matchTags,
@@ -141,7 +141,7 @@ export function CheckinDialog({
   // VIP 柜：会员本人（第 1 位）按档级能用的柜子等级（会员规则里的对应表），其他同行与散客为 0
   const level = useMemberGrade(guestType === 'member' && member ? member.id : null);
   const guestLevelOf = (i: number): number | null => (i === 0 && guestType === 'member' && member ? (level.data?.lockerLevel ?? null) : 0);
-  const vipRows = rows.map((r, i) => {
+  const vipRows = rows.map((_r, i) => {
     const s = statuses[i];
     if (!s?.ok || s.tag.kind !== 'vip') return null;
     return { code: s.tag.code, memberId: i === 0 && guestType === 'member' && member ? member.id : null, tagLevel: s.tag.vipLevel!, guestLevel: guestLevelOf(i) };

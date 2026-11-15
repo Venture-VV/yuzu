@@ -22,7 +22,7 @@ import {
 import type { CheckoutPreview } from '../src/shared/checkout';
 import type { VisitDetail } from '../src/shared/frontdesk';
 import { shiftDate } from '../src/shared/labels';
-import { rechargeOutcome, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
+import type { MemberGradeInfo, MembershipRules } from '../src/shared/membership';
 import type { Actor } from '../src/server/lib/context';
 import { benefitChecks } from '../src/server/modules/benefits';
 import { checkout } from '../src/server/modules/frontdesk/checkout';

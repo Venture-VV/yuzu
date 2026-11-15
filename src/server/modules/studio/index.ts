@@ -25,7 +25,6 @@ import {
   type StudioDoc,
   type StudioOverview,
   type StudioPreviewCode,
-  type StudioPublishedRef,
   type StudioState,
   type StudioSurface,
   type StudioVersionView,

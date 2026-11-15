@@ -9,12 +9,7 @@ import {
   PASSWORD,
 } from "./helpers";
 import { createStaff } from "../src/server/modules/staff";
-import { can, permissionsOf } from "../src/shared/permissions";
-import {
-  reviewReceipt,
-  applyCatalogMatches,
-} from "../src/shared/concierge/receipt-review";
-import { readWorkspace } from "../src/server/modules/concierge/store";
+import { permissionsOf } from "../src/shared/permissions";
 let ctx: TestContext,
   butler = "",
   manager = "",

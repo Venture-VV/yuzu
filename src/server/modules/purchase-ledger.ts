@@ -36,7 +36,7 @@ import { dateSchema, parse } from '../lib/validate';
 import { buildXlsx, type XlsxImage } from '../lib/xlsx';
 import { advanceRows, loadExpenseRules, toAdvanceSummary } from './expenses';
 import { loadPurchaseRules } from './inventory/purchase-rules';
-import { checkDateRange, daysBetween, todayIn } from '../lib/dates';
+import { checkDateRange, todayIn } from '../lib/dates';
 import { shiftDate } from '@shared/labels';
 
 /** 页面最多显示多少笔；合计与导出不受这个限制 */

@@ -1,7 +1,7 @@
 import { PurchasingTabs } from './PurchasingTabs';
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
-import { Award, ChartColumn, FileUp, Lightbulb, PackageSearch, Plus, Scale, Search, Settings2, Shuffle, Zap } from 'lucide-react';
+import { Plus, Search, Settings2 } from 'lucide-react';
 import type { PoStatus } from '@shared/purchasing';
 import { errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
@@ -13,7 +13,7 @@ import { Badge, Notice, Select, Skeleton } from '../../components/ui';
 import { useSuppliers } from '../inventory/queries';
 import { PoSheet } from './PoSheet';
 import { PoStatusChip, ReceivingChip } from './parts';
-import { usePos, useSuggestions } from './queries';
+import { usePos } from './queries';
 
 const FILTERS: { value: string; label: string }[] = [
   { value: '', label: '全部' },
@@ -34,7 +34,6 @@ export function PurchasingPage() {
   const pos = usePos({ status: status || undefined, supplierId: supplierId || undefined, q: params.get('q') ?? undefined });
   const openId = Number(params.get('po')) || null;
   // 补货建议（v0.7.29）：有要补的物料时入口上带数量
-  const suggestions = useSuggestions(can('inventory.read'));
 
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);

@@ -50,7 +50,6 @@ import {
   type SpaceAlias,
   type SpaceImportDiff,
   type SpaceImportIssue,
-  type SpaceImportKind,
   type SpaceImportPreview,
   type SpaceImportRecord,
   type SpaceLedger,

@@ -465,7 +465,7 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/receivables/aging', { preHandler: READ }, async () => arAging(sql, today()));
   app.get('/api/erp/receivables/platforms', { preHandler: READ }, async () => platformReceivables(sql));
   app.get('/api/erp/receivables/todo', { preHandler: READ }, async () => arTodo(sql, today()));
-  app.get('/api/erp/receivables/aging/export', { preHandler: READ }, async (req, reply) => {
+  app.get('/api/erp/receivables/aging/export', { preHandler: READ }, async (_req, reply) => {
     const r = await arAging(sql, today());
     const y = (c: number) => (c / 100).toFixed(2);
     const csv = toCsv([

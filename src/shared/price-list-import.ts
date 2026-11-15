@@ -8,7 +8,7 @@
 //     填「无」/「否」才会清除。店主可以在表格里补齐属性后重新导入。
 
 import { parseYuan } from './money';
-import { PRICE_TIERS, STRENGTHS, type Strength, type TierPrice } from './catalog';
+import { PRICE_TIERS, type Strength, type TierPrice } from './catalog';
 import { readCsvTable, unclosedQuoteMessage } from './csv-read';
 
 export interface PriceListRow {

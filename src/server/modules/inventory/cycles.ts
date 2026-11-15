@@ -19,7 +19,7 @@ import type {
 import { CENTRAL_WAREHOUSE_ID } from '@shared/inventory';
 import { shiftDate } from '@shared/labels';
 import { can } from '@shared/permissions';
-import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../../db';
+import { isUniqueViolation, readSnapshot, type Db } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';

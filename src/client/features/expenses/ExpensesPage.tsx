@@ -3,7 +3,7 @@
 import { ExpenseTabs } from './ExpenseTabs';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { Archive, BookOpenCheck, Download, FileText, Gauge, Plus, ReceiptText, ShieldCheck, Wallet, X } from 'lucide-react';
+import { Download, FileText, Plus, ReceiptText, X } from 'lucide-react';
 import {
   CLAIM_STATUS_LABELS,
   EXPENSE_CATEGORY_LABELS,

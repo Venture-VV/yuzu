@@ -35,7 +35,6 @@ import {
   type InvoiceMeta,
   type InvoiceSource,
   type InvoiceTodo,
-  type InvoiceView,
 } from '@shared/invoices';
 import { formatAmount } from '@shared/money';
 import { shiftDate } from '@shared/labels';

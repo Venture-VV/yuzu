@@ -9,7 +9,6 @@ import { CENTRAL_WAREHOUSE_ID, DEFAULT_COUNT_BIG_CENTS, DEFAULT_COUNT_BIG_PCT, t
 import { shiftDate } from '@shared/labels';
 import { urgentCapOf } from '@shared/purchasing';
 import { formatQty } from '@shared/quantity';
-import { z } from 'zod';
 import { can } from '@shared/permissions';
 import type { Db, Tx } from '../../db';
 import type { Actor } from '../../lib/context';

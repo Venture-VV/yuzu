@@ -23,7 +23,7 @@ import { idParam, parse } from '../../lib/validate';
 import type { InvoiceTypeDef } from '@shared/expenses';
 import { loadExpenseRules } from '../expenses';
 import { legacyAudit, type LegacyData } from './audit';
-import { parseLegacyWorkbook, type ParsedLegacy } from './parse';
+import type { ParsedLegacy } from './parse';
 
 export { parseLegacyWorkbook, LegacyParseError } from './parse';
 

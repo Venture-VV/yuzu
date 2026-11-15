@@ -8,7 +8,6 @@ import { DEDUCTION_RULE_LABELS, describeHours } from '@shared/labels';
 import { centsToInput, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useSettings } from '../../lib/queries';
-import { useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
@@ -43,7 +42,6 @@ interface Draft {
 }
 
 export function RulesTab() {
-  const session = useSession();
   const settings = useSettings();
   const qc = useQueryClient();
   const toast = useToast();

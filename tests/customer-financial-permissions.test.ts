@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
 import { api, createMember, login, PASSWORD, setup, type TestContext } from "./helpers";
 import { createStaff } from "../src/server/modules/staff";
 
-let ctx: TestContext, employeeId: number, managerId: number, employee: string, manager: string;
+let ctx: TestContext, employeeId: number, employee: string, manager: string;
 let memberId: number, today: string, defaults: Record<string, string[]>;
 let ownToday: number, otherToday: number, ownHistory: number, otherHistory: number, reversedHistory: number;
 let ownCheckout: number, otherCheckout: number, historicCheckout: number, refundedCheckout: number, voidedCheckout: number;
@@ -84,7 +84,7 @@ async function queries<T>(fn: () => Promise<T>) {
 beforeAll(async () => {
   ctx = await setup();
   employeeId = await createStaff(ctx.sql, { username: "financial_employee", displayName: "金融权限客户经理", role: "account_manager", password: PASSWORD, mustChangePassword: false });
-  managerId = await createStaff(ctx.sql, { username: "financial_manager", displayName: "金融权限客户主管", role: "store_manager", password: PASSWORD, mustChangePassword: false });
+  await createStaff(ctx.sql, { username: "financial_manager", displayName: "金融权限客户主管", role: "store_manager", password: PASSWORD, mustChangePassword: false });
   employee = await login(ctx.app, "financial_employee"); manager = await login(ctx.app, "financial_manager");
   defaults = (await native("admin/permissions", ctx.owner)).body.defaults;
   today = (await native("auth/me", ctx.owner)).body.today;

@@ -519,7 +519,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     }
   });
 
-  test('各尺寸：整页按 1024×768 等比缩放、不出滚动条；1024×768 时文字在设计稿量的位置上（合成菜单，只读）', async ({ page }, info) => {
+  test('各尺寸：整页按 1024×768 等比缩放、不出滚动条；1024×768 时文字在设计稿量的位置上（合成菜单，只读）', async ({ page }) => {
     const menu = syntheticMenu();
     const writes: string[] = [];
     await page.route('**/api/emenu/**', (route) => {
@@ -717,7 +717,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
   test('8.0.13 中 | EN：录了英文的显示英文、没录的显示中文；切回来位置不变；结束点餐回到中文；后台关掉就没有开关（合成菜单，只读）', async ({ page }) => {
     const menu = syntheticMenu();
     // 第 1 道菜录了英文介绍与小字；第 2 道只有英文名；封面那道连英文名都没有
-    const [first, second] = menu.categories[0]!.pages[0]!.dishes as [EmenuMenu['categories'][0]['pages'][0]['dishes'][0] & object, EmenuMenu['categories'][0]['pages'][0]['dishes'][0] & object];
+    const [first] = menu.categories[0]!.pages[0]!.dishes as [EmenuMenu['categories'][0]['pages'][0]['dishes'][0] & object, EmenuMenu['categories'][0]['pages'][0]['dishes'][0] & object];
     Object.assign(first, { tagline: '例份', taglineEn: 'Regular', description: '温泉蛋与黑松露。', descriptionEn: 'Onsen egg and black truffle.' });
     Object.assign(menu.categories[1]!.pages[0]!.dishes[0]!, { nameEn: '', description: '猪脚姜。' });
     const writes = await mockEmenu(page, () => menu);

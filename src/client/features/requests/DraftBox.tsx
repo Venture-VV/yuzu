@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ChevronDown, ChevronRight, FilePen, Inbox, Trash2, X } from 'lucide-react';
-import { type RequestDraft, type RequestDraftSummary } from '@shared/requests';
+import type { RequestDraft, RequestDraftSummary } from '@shared/requests';
 import { errorMessage } from '../../lib/api';
 import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';

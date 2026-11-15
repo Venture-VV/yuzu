@@ -10,7 +10,7 @@ import { bonusExpiryAt, businessDateOf, businessDayStart } from '../src/shared/b
 import { shiftDate } from '../src/shared/labels';
 import type { Actor } from '../src/server/lib/context';
 import { expireMemberBonus, restoreToLots, sweepExpiredBonus } from '../src/server/modules/bonus';
-import { consume, recharge, reverse, type ConsumeInputData, type RechargeInputData } from '../src/server/modules/wallet';
+import { consume, recharge, type ConsumeInputData, type RechargeInputData } from '../src/server/modules/wallet';
 import { api, balanceOf, createMember, setRule, setup, type TestContext } from './helpers';
 
 const DAY = 86_400_000;

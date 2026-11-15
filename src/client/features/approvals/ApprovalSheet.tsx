@@ -8,7 +8,7 @@ import { erpModuleOfPage } from '@shared/erp';
 import { COUNT_REASONS, COUNT_REASON_LABELS } from '@shared/inventory';
 import { errorMessage, UncertainError } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import { cn, formatDateTime } from '../../lib/utils';
+import { formatDateTime } from '../../lib/utils';
 import { Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';

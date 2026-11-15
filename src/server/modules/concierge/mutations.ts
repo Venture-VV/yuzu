@@ -25,7 +25,6 @@ import {
   idList,
   uuid,
 } from "./validation";
-const now = () => new Date().toISOString();
 const integer = (x: unknown, label: string) => {
   const n = Number(x);
   if (!Number.isSafeInteger(n) || n < 1)
@@ -236,7 +235,6 @@ async function execute(
   ip?: string,
 ) {
   const user: TeamUser = mapActor(actor);
-  const ts = now();
   if (action === "createMember" || action === "updateMember") {
     const id = action === "createMember" ? randomUUID() : text(p.id, 80, true);
     const [before] =

@@ -4,7 +4,6 @@ import type {
   ReceiptDetails,
   ReceiptReview,
 } from "@shared/concierge/types";
-import { normalizeReceiptPaymentMethod } from "@shared/concierge/receipt-review";
 export class WorkspaceError extends Error {
   constructor(
     message: string,
@@ -151,9 +150,6 @@ export function receiptDetails(
     if (input[key] !== undefined)
       output[key] = text(input[key], key === "coupons" ? 1000 : 200);
   return output;
-}
-function paymentMethod(raw: string): string {
-  return normalizeReceiptPaymentMethod(raw);
 }
 export function receiptReview(value: unknown): ReceiptReview {
   const input = objectField(value, "异常核对");

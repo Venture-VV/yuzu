@@ -177,7 +177,7 @@ async function spaceOf(sql: Sql, code: string): Promise<SpaceRow | null> {
   return s ? { ...s, id: Number(s.id), zoneId: s.zoneId === null ? null : Number(s.zoneId) } : null;
 }
 
-async function idOf(sql: Sql, query: Promise<{ id: number }[]>): Promise<number> {
+async function idOf(_sql: Sql, query: Promise<{ id: number }[]>): Promise<number> {
   const [row] = await query;
   if (!row) throw new Error('演示场景：刚建好的记录没找到，请再执行一次');
   return Number(row.id);

@@ -134,7 +134,6 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
   const backfill = resolveBackfill(input.backfill, ctx.actor);
   const run = await runIdempotent(deps, { key, opType: 'checkin', requestHash }, async (tx) => {
     const at = backfill?.at ?? ctx.at ?? new Date();
-    const rules = await loadFrontdeskRules(tx);
     // ① 手牌（id 升序）
     const tags = await lockTagsByCode(tx, codes);
     for (const g of input.guests) assertTagIssuable(tags.get(g.tagCode)!, g.zone);

@@ -26,13 +26,10 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleHelp,
-  Clock3,
   FileText,
   HeartHandshake,
   LayoutDashboard,
   Layers3,
-  Menu,
-  MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
@@ -48,9 +45,7 @@ import {
   ImagePlus,
   Eye,
   Pencil,
-  LogOut,
   KeyRound,
-  UploadCloud,
   ArrowUpRight,
 } from "lucide-react";
 import type {
@@ -394,7 +389,6 @@ export default function Workspace({
   const [group, setGroup] = useState("all");
   const [owner, setOwner] = useState("");
   const [day, setDay] = useState(dayKey());
-  const [mobile, setMobile] = useState(false);
   const [modal, setModal] = useState<Modal | null>(null);
   const [dirty, setDirty] = useState(false);
   const [nativePreviewId, setNativePreviewId] = useState<number | null>(null);
@@ -472,7 +466,6 @@ export default function Workspace({
   const noteRequest = useRef("");
   const manager = data.user.role === "manager";
   const today = dayKey();
-  const team = data.team.filter((t) => t.active);
   const visits = data.visits || [];
   const tasks = data.tasks || [];
   const receipts = data.receipts || [];
@@ -493,7 +486,6 @@ export default function Workspace({
   const balanceGroup = (m: Member) => balanceGroupOf(m,balances.get(m.id));
   const servedMembers=uniqueMembers(data.members);
   const lowMembers = servedMembers.filter((m) => balanceGroup(m) === "low");
-  const checkedTotal = servedMembers.reduce((n,m)=>n+(m.nativeMember?.totalCents || 0),0);
   const todayAppointments = data.appointments
     .filter((a) => dayKey(a.startAt) === today && a.status !== "已取消")
     .sort((a, b) => a.startAt.localeCompare(b.startAt));
@@ -673,7 +665,6 @@ export default function Workspace({
     setSearch("");
     setOwner("");
     setGroup("all");
-    setMobile(false);
   }
   function openModal(value: Omit<Modal, "key">) {
     const key = uid();

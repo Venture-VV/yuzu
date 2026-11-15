@@ -11,7 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ERP_OP_TYPES, type ErpOpLookup, type ErpOpType } from '@shared/erp';
 import { can, type Permission } from '@shared/permissions';
-import { type Db } from '../db';
+import type { Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';

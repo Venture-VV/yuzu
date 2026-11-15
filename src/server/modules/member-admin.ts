@@ -17,7 +17,7 @@ import type { MemberAccountHistory, MemberMergeDetail, MemberPhoneChange, Member
 import { gradeLabel, type Grade, type Tier } from '@shared/membership';
 import { formatYuan } from '@shared/money';
 import { guard } from '../auth/guard';
-import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../db';
+import { isUniqueViolation, readSnapshot, type Db } from '../db';
 import { writeAudit } from '../lib/audit';
 import { ctxOf, type Deps, type OpContext } from '../lib/context';
 import { conflict, notFound, unprocessable } from '../lib/errors';

@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
 import { shortStamp } from "./format";
 import { Navigate } from "react-router";
-import { api } from "../../lib/api";
 import { useCan, useSession } from "../../lib/session";
 import Workspace from "./Workspace";
-import type { WorkspaceData, Receipt, Member } from "./types";
+import type { WorkspaceData } from "./types";
 import {
   conciergeFetch,
   setConciergeActor,
@@ -14,7 +13,6 @@ import {
   retryPending,
   abandonPending,
   type Pending,
-  loadReceipt,
 } from "./api";
 import { Button } from "../../components/ui";
 import "./concierge.css";

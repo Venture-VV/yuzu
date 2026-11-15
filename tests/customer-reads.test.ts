@@ -12,21 +12,8 @@ import {
   type TestContext,
 } from "./helpers";
 import { createStaff } from "../src/server/modules/staff";
-import { readSnapshot } from "../src/server/db";
 import type { Actor } from "../src/server/lib/context";
 import { reverse } from "../src/server/modules/wallet";
-import {
-  customerOverview,
-  customerRecharges,
-  customerSettlements,
-  customerTargets,
-  customerMember,
-} from "../src/server/modules/customer/reads";
-import type {
-  CustomerOverview,
-  CustomerRechargePage,
-  CustomerSettlementPage,
-} from "../src/shared/customer";
 let ctx: TestContext,
   aCookie: string,
   bCookie: string,

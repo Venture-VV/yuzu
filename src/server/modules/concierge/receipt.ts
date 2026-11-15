@@ -4,7 +4,6 @@ import type {
   Receipt,
   Payment,
   TeamUser,
-  CatalogItem,
   ReceiptItem,
 } from "@shared/concierge/types";
 import {

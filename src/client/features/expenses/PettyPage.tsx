@@ -5,7 +5,7 @@
 import { ExpenseTabs } from './ExpenseTabs';
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { BookOpenCheck, CircleAlert, Download, HandCoins, Plus, ReceiptText, Undo2, X } from 'lucide-react';
+import { CircleAlert, Download, HandCoins, Plus, Undo2, X } from 'lucide-react';
 import {
   CLAIM_STATUS_LABELS,
   SETTLEMENT_KIND_LABELS,

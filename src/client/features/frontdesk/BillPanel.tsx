@@ -44,7 +44,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, PendingBadge, Skeleton, Textarea } from '../../components/ui';
 import { DishVoidDialog } from '../dining/DishVoid';
-import { GroupMark, LONG_STAY_MINUTES, VipChip, ZoneChip, ZONE_STYLE } from './parts';
+import { GroupMark, LONG_STAY_MINUTES, VipChip, ZONE_STYLE } from './parts';
 import { FRONTDESK_OP_LABELS, useFrontdeskPending } from './pending';
 import { stayMinutes, stayText, useServerNow } from './queries';
 

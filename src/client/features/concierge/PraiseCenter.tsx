@@ -475,7 +475,7 @@ function PraiseEntry({ open, onClose, center, members, busy, saveError, onMutate
   </Dialog>;
 }
 
-function PraiseDetail({ id, timezone, canManage, busy, saveError, onMutate, onClose, onStaff, onChanged }: {
+function PraiseDetail({ id, canManage, busy, saveError, onMutate, onClose, onStaff, onChanged }: {
   id: string; timezone: string; canManage: boolean; busy: boolean; saveError: string; onMutate: Mutate; onClose: () => void; onStaff: (staff: PraiseStaff) => void; onChanged: () => void;
 }) {
   const [refresh, setRefresh] = useState(0);

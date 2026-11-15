@@ -6,8 +6,7 @@
 
 import { ExpenseTabs } from './ExpenseTabs';
 import { useState } from 'react';
-import { Link } from 'react-router';
-import { ArrowLeft, PencilLine, Save, X } from 'lucide-react';
+import { PencilLine, Save, X } from 'lucide-react';
 import { BUDGET_LEVEL_LABELS, type BudgetCell, type BudgetGrid, type BudgetLevel, type BudgetSaveCell } from '@shared/budgets';
 import type { ExpenseCategory } from '@shared/expenses';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';

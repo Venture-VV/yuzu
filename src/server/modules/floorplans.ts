@@ -35,7 +35,7 @@ import {
   type FloorplanRoomStatus,
 } from '@shared/floorplans';
 import { can } from '@shared/permissions';
-import type { Db, Sql, Tx } from '../db';
+import type { Db, Sql } from '../db';
 import { isUniqueViolation } from '../db';
 import { guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';

@@ -48,7 +48,6 @@ export function TablesTab() {
   const board = useTablesBoard();
   // 8.0.8（A05）：桌台点单下架时不能开台、加菜；开着的桌照常结账、退菜（菜单还没取到时两样都先不显示）
   const menuRules = useDiningMenu().data?.rules;
-  const tablesOn = menuRules?.tablesEnabled ?? false;
   const tablesOff = menuRules ? !menuRules.tablesEnabled : false;
   const now = useServerNow(board.data?.serverTime, 30_000);
   const [opening, setOpening] = useState<Tile | null>(null);

@@ -42,7 +42,6 @@ import {
   type EmenuDishView,
   type EmenuEnglishParsed,
   type EmenuEnglishResult,
-  type EmenuEnglishRow,
   type EmenuLang,
   type EmenuLayout,
   type EmenuPageAdmin,
@@ -68,7 +67,6 @@ import { SubPane, useGoSubTab } from '../../components/SubNav';
 const adminKey = ['admin', 'emenu'] as const;
 const useEmenuAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<EmenuAdmin>('/api/admin/emenu') });
 
-type Tab = 'pages' | 'dishes' | 'settings';
 type Apply = (next: EmenuAdmin) => void;
 const EMENU_BASE = '/admin/emenu';
 
