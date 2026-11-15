@@ -108,16 +108,20 @@ export async function api<T = any>(
 }
 
 /**
- * 不传手机号时按序号取号（每个用例文件各自从头数；一个文件一个库，文件之内不重复）。
- * 原来在 19900001000–19900009999 里随机取，会撞上用例里写死的号（这一段有一百多个）或另一个随机号，偶发 PHONE_EXISTS
- *（`main` 68391d6 的 CI 因此红过一次）；196 号段没有用例用固定号。
+ * 没给手机号时自动取一个：166 号段、按顺序往下排，不会与用例里写死的号码（都是 199、13x 等）相撞，同一个文件里几次调用之间也不会撞。
+ * 原来是「1990000 + 随机四位」（19900001000–19900009999），正好盖住用例里写死的 1990000xxxx。
+ * 2026-11-14 main（68391d6）第一次 CI 里 concierge-rectify 的一条用例第一行建会员报 PHONE_EXISTS、整轮集成测试失败：
+ * 那次日志里接口报错写的占用者是「整改企业会员二」（同一文件上一条用例用 19900003002 建的），同一时刻数据库的唯一约束报错
+ * 写的是 Key (phone)=(19900003002)——自动取的号撞上了写死的号。同一提交重跑通过，但第一次失败的记录仍在。
+ * 这里改的是测试夹具（自动取的号不再落在写死的号段里），不涉及业务代码。
  */
-let memberPhoneSeq = 0;
+let autoPhoneSeq = 0;
+const nextAutoPhone = () => `1660${String(1_000_000 + autoPhoneSeq++)}`;
+
 export async function createMember(ctx: TestContext, name = '测试会员', phone?: string) {
-  memberPhoneSeq += 1;
   const res = await api(ctx.app, ctx.clerk, 'POST', '/api/members', {
     name,
-    phone: phone ?? `196${String(memberPhoneSeq).padStart(8, '0')}`,
+    phone: phone ?? nextAutoPhone(),
   });
   if (res.status !== 201) throw new Error(JSON.stringify(res.body));
   return res.body as { id: number; principalBalance: number; bonusBalance: number };

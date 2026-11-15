@@ -179,8 +179,8 @@ export async function bookingBoard(db: Db, date: string): Promise<BookingBoard> 
   const [bookings, technicians, items, spaces, roomTypes] = await Promise.all([
     readBookings(db, { date }),
     db<BookingBoard['technicians']>`SELECT id, tech_no, name, gender FROM technicians WHERE active ORDER BY sort_order, tech_no`,
-    db<{ id: number; name: string; durationMinutes: number | null }[]>`
-      SELECT id, name, duration_minutes FROM service_items WHERE active AND technician_required ORDER BY sort_order, id`,
+    db<{ id: number; name: string; category: string; durationMinutes: number | null }[]>`
+      SELECT id, name, category, duration_minutes FROM service_items WHERE active AND technician_required ORDER BY sort_order, id`,
     usageTypes.length
       ? db<BookingBoard['spaces']>`
           SELECT id, code, display_name AS name, business_type, capacity FROM spaces
@@ -195,7 +195,7 @@ export async function bookingBoard(db: Db, date: string): Promise<BookingBoard> 
     rules,
     bookings,
     technicians: technicians.map((t) => ({ ...t, id: Number(t.id) })),
-    items: items.map((i) => ({ id: Number(i.id), name: i.name, minutes: i.durationMinutes ?? rules.defaultServiceMinutes })),
+    items: items.map((i) => ({ id: Number(i.id), name: i.name, minutes: i.durationMinutes ?? rules.defaultServiceMinutes, category: i.category || '其他' })),
     spaces: spaces.map((s) => ({ ...s, id: Number(s.id) })),
     roomTypes: roomTypes.map((r) => ({ ...r, id: Number(r.id) })),
   };

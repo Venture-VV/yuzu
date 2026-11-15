@@ -13,6 +13,8 @@ import { qk, useCatalog } from '../../lib/queries';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
+import { LoadFailed } from '../../components/LoadFailed';
+import { QtyInput } from '../../components/QtyInput';
 import { Money } from '../../components/Money';
 import { Button, Field, Input, MoneyInput, Notice, PendingBadge, Skeleton } from '../../components/ui';
 import { BalanceChange, FlowFrame, OperationStatus, OverLimitCard, PendingRecovery, SuccessHeader, SummaryRow, type Step } from './parts';
@@ -44,6 +46,8 @@ export function ConsumeFlow({
   const [custom, setCustom] = useState<CustomLine | null>(null);
   const [note, setNote] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  /** 数量输得不对时的一句提示（输空了、超过 99） */
+  const [qtyHint, setQtyHint] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // 确认时看到的余额，提交给服务端校验（其他终端同时操作时要求重新确认）
   const [seenBalance, setSeenBalance] = useState<WalletBalance>({ principal: member.principalBalance, bonus: member.bonusBalance });
@@ -75,12 +79,22 @@ export function ConsumeFlow({
   const grantScope = { kind: 'consume' as const, memberId: member.id, amount: total };
   const grantOk = !overLimit || overLimitGrantFits(grant, grantScope);
 
-  const add = (key: string, delta: number) =>
+  const add = (key: string, delta: number) => {
+    setQtyHint(null);
     setCart((prev) => {
       const next = new Map(prev);
       const qty = Math.max(0, Math.min(99, (next.get(key) ?? 0) + delta));
       if (qty === 0) next.delete(key);
       else next.set(key, qty);
+      return next;
+    });
+  };
+
+  /** 直接输数量（1–99）：与点加减是同一个数，上限、扣款核对都不变 */
+  const setQty = (key: string, qty: number) =>
+    setCart((prev) => {
+      const next = new Map(prev);
+      next.set(key, Math.max(1, Math.min(99, qty)));
       return next;
     });
 
@@ -347,6 +361,11 @@ export function ConsumeFlow({
             <Skeleton key={i} className="h-[66px]" />
           ))}
         </div>
+      ) : catalog.isError && !catalog.data ? (
+        // 项目没取回来（断网、服务器出错）：不是「还没有项目」，给重试；已经填的备注、其他金额都不动
+        <LoadFailed title="项目列表加载失败，请检查网络" onRetry={() => void catalog.refetch()} retrying={catalog.isFetching} className="mb-4" testId="consume-catalog-error">
+          项目没有取回来，不是没有项目。点「重试」再取一次{can('consume.customAmount') ? '；着急的话也可以先用下面的「其他金额」' : ''}。
+        </LoadFailed>
       ) : items.length === 0 ? (
         <EmptyState art="leaf" title="还没有消费项目" description="店主可在「管理 → 套餐与项目」中添加；也可以直接输入其他金额。" />
       ) : (
@@ -394,7 +413,7 @@ export function ConsumeFlow({
                 <button type="button" aria-label={`减少 ${l.name}`} onClick={() => add(l.key, -1)} className="flex size-9 items-center justify-center text-ink-2 hover:bg-paper-2">
                   <Minus className="size-3.5" />
                 </button>
-                <span className="num w-7 text-center text-[14px] font-bold">{l.qty}</span>
+                <QtyInput value={l.qty} onChange={(n) => setQty(l.key, n)} onHint={setQtyHint} label={`${l.name} 的数量`} className="h-9 w-10 text-[14px]" testId={`consume-qty-${l.item.id}`} />
                 <button type="button" aria-label={`增加 ${l.name}`} onClick={() => add(l.key, 1)} className="flex size-9 items-center justify-center text-ink-2 hover:bg-paper-2">
                   <Plus className="size-3.5" />
                 </button>
@@ -402,6 +421,11 @@ export function ConsumeFlow({
               <Money cents={l.amount} className="w-24 text-right text-[14px] font-bold" />
             </div>
           ))}
+          {qtyHint && (
+            <p className="border-t border-line px-3.5 py-1.5 text-[12.5px] font-semibold text-clay" role="status" data-testid="consume-qty-hint">
+              {qtyHint}
+            </p>
+          )}
         </div>
       )}
 
