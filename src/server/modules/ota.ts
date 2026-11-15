@@ -142,11 +142,17 @@ async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, 
     // 这次导入（原样重提续做时）或更晚的一次导入已经处理过这张：不再处理（不拿旧文件盖掉新的）
     if (!isNew && importId !== null && ord!.lastImportId !== null && Number(ord!.lastImportId) >= importId) return 'unchanged';
     const before = { status: ord!.status, checkin: ord!.checkinDate, rooms: Number(ord!.rooms), roomTypeId: ord!.roomTypeId === null ? null : Number(ord!.roomTypeId), channelStatus: ord!.channelStatus, amount: Number(ord!.amountCents) };
-    await tx`
-      UPDATE ota_orders SET guest_name = ${o.guestName}, guest_phone = ${o.guestPhone}, channel_room = ${o.roomType}, room_type_id = ${roomTypeId},
-             checkin_date = ${o.checkin}, checkout_date = ${o.checkout}, rooms = ${o.rooms}, amount_cents = ${o.amountCents}, pay_mode = ${o.payMode},
-             channel_status = ${o.channelStatus}, raw = ${tx.json(o as never)}, last_import_id = coalesce(${importId}, last_import_id), updated_at = now()
-      WHERE id = ${id}`;
+    if (o.channelStatus === 'cancelled' || roomTypeId !== null) {
+      await tx`
+        UPDATE ota_orders SET guest_name = ${o.guestName}, guest_phone = ${o.guestPhone}, channel_room = ${o.roomType}, room_type_id = ${roomTypeId},
+               checkin_date = ${o.checkin}, checkout_date = ${o.checkout}, rooms = ${o.rooms}, amount_cents = ${o.amountCents}, pay_mode = ${o.payMode},
+               channel_status = ${o.channelStatus}, raw = ${tx.json(o as never)}, last_import_id = coalesce(${importId}, last_import_id), updated_at = now()
+        WHERE id = ${id}`;
+    } else {
+      // 房型没对照、这一次处理不成：只留下这一次的内容（raw，「重试」按它来），订单上的入住日、间数、房型、金额仍是上一次处理成的——
+      // 预约还在原来那天；要是把新日期先记上，补了对照再重试时「日期没变」就不改预约的时间了（Codex 审查 73ae462 后补，与出错那一路同一个口径）
+      await tx`UPDATE ota_orders SET raw = ${tx.json(o as never)}, last_import_id = coalesce(${importId}, last_import_id), updated_at = now() WHERE id = ${id}`;
+    }
     const linked = await tx<{ id: number; status: string; version: number; startsAt: Date; roomTypeId: number }[]>`
       SELECT b.id, b.status, b.version, b.starts_at, b.room_type_id FROM ota_order_bookings ob JOIN bookings b ON b.id = ob.booking_id
       WHERE ob.order_id = ${id} ORDER BY b.id`;

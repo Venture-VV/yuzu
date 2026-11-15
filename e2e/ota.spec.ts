@@ -3,7 +3,8 @@
 //   · 后台「客房 → 渠道」新建渠道、对照一个渠道房型；
 //   · 前台「预约 → 渠道订单」选渠道、选订单表（CSV）→ 认出 2 张、1 个房型没对照 → 导入 → 1 张建好预约、1 张没建成 → 对账表里有这个渠道；
 //   · 导入的请求没收到结果（拦下来模拟断网）→ 刷新页面「结果待确认」还在 →「按原内容重新提交」→ 订单建好（Codex 审查 e64932b 后补）；
-//   · 选好文件以后换渠道：按新渠道重新预览（重复与否、房型对照都按新渠道），导入进的是看过预览的那个渠道（Codex 审查 26fe580 后补）。
+//   · 选好文件以后换渠道：按新渠道重新预览（重复与否、房型对照都按新渠道），导入进的是看过预览的那个渠道（Codex 审查 26fe580 后补）；
+//   · 渠道订单、渠道对账取不回来：写明加载失败、可以重试（Codex 审查 73ae462 后补）。
 import { expect, test, type Page } from '@playwright/test';
 
 const PASSWORD = 'yuzu2026';
@@ -144,5 +145,22 @@ test.describe('8.0.21 OTA 渠道订单', () => {
     const ordersOf = async (channelId: number) => (await (await page.request.get(`/api/ota/orders?channelId=${channelId}`)).json()) as { orderNo: string; status: string }[];
     expect((await ordersOf(b.id)).map((o) => [o.orderNo, o.status])).toEqual([[`S${stamp}01`, 'failed']]);
     expect((await ordersOf(a.id)).map((o) => [o.orderNo, o.status])).toEqual([[`S${stamp}01`, 'booked']]);
+  });
+
+  test('渠道订单、渠道对账取不回来：写明加载失败、可以重试', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const fail = (route: import('@playwright/test').Route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) });
+    await page.route('**/api/ota/orders*', fail);
+    await page.route('**/api/ota/recon?*', fail);
+    await page.goto('/bookings?view=ota');
+    await expect(page.getByTestId('ota-orders-error')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('ota-recon-error')).toBeVisible({ timeout: 20_000 });
+    await page.unroute('**/api/ota/orders*');
+    await page.unroute('**/api/ota/recon?*');
+    await page.getByTestId('ota-orders-error-retry').click();
+    await expect(page.getByTestId('ota-order-list')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('ota-recon-error-retry').click();
+    await expect(page.getByTestId('ota-recon')).toBeVisible({ timeout: 20_000 });
   });
 });

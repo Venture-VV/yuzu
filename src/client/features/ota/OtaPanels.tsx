@@ -12,6 +12,7 @@ import { OTA_FIELD_LABELS, OTA_ORDER_STATUS_LABELS, type OtaChannel, type OtaCol
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp } from '../../lib/erpPending';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
+import { LoadFailed } from '../../components/LoadFailed';
 import { useCan, useSession } from '../../lib/session';
 import { downloadUrl, uuid } from '../../lib/utils';
 import { useRoomsAdmin } from '../rooms/queries';
@@ -223,8 +224,13 @@ export function OtaOrdersPanel() {
           ))}
         </Select>
       </div>
+      {/* 取不回来（也没有上一次的）写明加载失败、可以重试，不一直转圈（Codex 审查 73ae462 后补，AGENTS.md「列表取不回来用 LoadFailed」） */}
       {!orders.data ? (
-        <Skeleton className="h-32" />
+        orders.isError ? (
+          <LoadFailed title="渠道订单加载失败，请检查网络" onRetry={() => void orders.refetch()} retrying={orders.isFetching} testId="ota-orders-error" />
+        ) : (
+          <Skeleton className="h-32" />
+        )
       ) : orders.data.length === 0 ? (
         <p className="text-[13px] text-ink-3">还没有渠道订单。</p>
       ) : (
@@ -262,32 +268,40 @@ export function OtaOrdersPanel() {
         </Button>
         <span className="text-[12px] text-ink-3">按入住月份、已建预约的订单；渠道打款照旧在「平台核销补录 → 打款与对账」登记（平台选「其他」、备注写渠道）</span>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-line bg-card">
-        <table className="w-full text-[13px]" data-testid="ota-recon">
-          <thead className="bg-paper-2 text-left text-ink-3">
-            <tr>
-              <th className="px-3 py-2">渠道</th>
-              <th className="px-3 py-2 text-right">订单数</th>
-              <th className="px-3 py-2 text-right">间夜</th>
-              <th className="px-3 py-2 text-right">订单金额</th>
-              <th className="px-3 py-2 text-right">佣金</th>
-              <th className="px-3 py-2 text-right">应收净额</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line/70">
-            {(recon.data ?? []).map((r) => (
-              <tr key={r.channelId}>
-                <td className="px-3 py-2">{r.channelName}</td>
-                <td className="num px-3 py-2 text-right">{r.orders}</td>
-                <td className="num px-3 py-2 text-right">{r.roomNights}</td>
-                <td className="num px-3 py-2 text-right">{formatYuan(r.amountCents)}</td>
-                <td className="num px-3 py-2 text-right">{formatYuan(r.commissionCents)}</td>
-                <td className="num px-3 py-2 text-right font-semibold">{formatYuan(r.netCents)}</td>
+      {!recon.data ? (
+        recon.isError ? (
+          <LoadFailed title="渠道对账加载失败，请检查网络" onRetry={() => void recon.refetch()} retrying={recon.isFetching} testId="ota-recon-error" />
+        ) : (
+          <Skeleton className="h-24" />
+        )
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-line bg-card">
+          <table className="w-full text-[13px]" data-testid="ota-recon">
+            <thead className="bg-paper-2 text-left text-ink-3">
+              <tr>
+                <th className="px-3 py-2">渠道</th>
+                <th className="px-3 py-2 text-right">订单数</th>
+                <th className="px-3 py-2 text-right">间夜</th>
+                <th className="px-3 py-2 text-right">订单金额</th>
+                <th className="px-3 py-2 text-right">佣金</th>
+                <th className="px-3 py-2 text-right">应收净额</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-line/70">
+              {recon.data.map((r) => (
+                <tr key={r.channelId}>
+                  <td className="px-3 py-2">{r.channelName}</td>
+                  <td className="num px-3 py-2 text-right">{r.orders}</td>
+                  <td className="num px-3 py-2 text-right">{r.roomNights}</td>
+                  <td className="num px-3 py-2 text-right">{formatYuan(r.amountCents)}</td>
+                  <td className="num px-3 py-2 text-right">{formatYuan(r.commissionCents)}</td>
+                  <td className="num px-3 py-2 text-right font-semibold">{formatYuan(r.netCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 // 券码尾号 0000 不存在、2222 两份 ¥398、9999 撤销不了、5555 第一次撤销平台没回应、7777 平台对账单上没有；其余美团 ¥99（应结 ¥92）、抖音 ¥88。
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mockPlatformBillAdd, mockPlatformVoucher } from '../src/server/integrations/platform-voucher';
+import { mockPlatformBillAdd, mockPlatformBillFailNext, mockPlatformVoucher } from '../src/server/integrations/platform-voucher';
 import { hashRequest } from '../src/server/lib/idempotency';
 import { runVoucherReconcile, sweepVerifying } from '../src/server/modules/platform-verify';
 import { createStaff } from '../src/server/modules/staff';
@@ -202,6 +202,14 @@ describe('平台验券', () => {
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/platform/recon/issues/${issue.id}/resolve`, { note: '平台那边退款了' })).status).toBe(200);
     const after = (await api(ctx.app, ctx.owner, 'GET', `/api/platform/recon?from=${today}&to=${today}`)).body.issues.find((i: { id: number }) => i.id === issue.id);
     expect(after).toMatchObject({ resolveNote: '平台那边退款了' });
+    // 再对一次没成功（取不到平台的对账单）：记一次没成功，上一次对出来的差异照样在（没处理的仍是没处理）
+    mockPlatformBillFailNext();
+    const failedRun = await api(ctx.app, ctx.owner, 'POST', '/api/platform/recon/run', { platform: 'meituan', date: today });
+    expect(failedRun.body).toMatchObject({ ok: false });
+    const still = (await api(ctx.app, ctx.owner, 'GET', `/api/platform/recon?from=${today}&to=${today}`)).body;
+    expect((still.issues as { kind: string; code: string; resolvedAt: string | null }[]).find((i) => i.kind === 'system_only' && i.code === code('7777'))).toMatchObject({ resolvedAt: null });
+    expect((still.issues as { id: number }[]).some((i) => i.id === issue.id)).toBe(true);
+    expect((still.runs as { ok: boolean }[])[0]).toMatchObject({ ok: false });
 
     // 自动对账：过了 06:10 才跑，前一个营业日每个平台只跑一次
     const deps = { sql: ctx.sql, config: ctx.config };

@@ -77,11 +77,21 @@ export const mockPlatformVoucher: PlatformVoucher = {
     return v && !v.cancelled && v.verifyNo === `MOCKV${outNo}` ? { status: 'verified', verifyNo: v.verifyNo } : { status: 'not_found' };
   },
   async bill({ platform, businessDate }) {
+    if (mockBillFailNext) {
+      mockBillFailNext = false;
+      throw new Error('模拟：平台对账单取不到');
+    }
     return [...mockVerified.values()]
       .filter((v) => v.platform === platform && v.businessDate === businessDate && !v.cancelled && !v.code.endsWith('7777'))
       .map(({ code, verifyNo, dealName, faceCents, settleCents }) => ({ code, verifyNo, dealName, faceCents, settleCents }));
   },
 };
+
+let mockBillFailNext = false;
+/** 用例：下一次取对账单失败（模拟平台不通，对账记一次没成功） */
+export function mockPlatformBillFailNext() {
+  mockBillFailNext = true;
+}
 
 /** 用例：在模拟的对账单上加一张（模拟「平台有、系统没有」） */
 export function mockPlatformBillAdd(line: VoucherBillLine & { platform: VoucherPlatform; businessDate: string }) {

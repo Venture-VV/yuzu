@@ -20,7 +20,7 @@
     "migrate": "tsx src/server/cli.ts migrate",
     "seed": "tsx src/server/cli.ts seed-demo",
     "cli": "tsx src/server/cli.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "node --max-old-space-size=4096 node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test"

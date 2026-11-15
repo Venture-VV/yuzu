@@ -175,6 +175,25 @@ describe('渠道订单', () => {
     expect(r2.body).toMatchObject({ status: 'booked', roomTypeName: '渠道湖景套房' });
   });
 
+  it('已有的订单改了日期、新的渠道房型又没对照：这一次没处理成，订单上仍是原来的日期；补了对照再重试，预约改到新日期', async () => {
+    const d1 = shiftDate(today, 18);
+    const d2 = shiftDate(today, 19);
+    expect((await importFile([`Z1001,吕一,,豪华大床房,${d1},${shiftDate(d1, 1)},1,300,现付,已确认`])).body).toMatchObject({ created: 1 });
+    // 渠道把它改到 d2，房型名也换成了还没对照的「豪华大床新」
+    expect((await importFile([`Z1001,吕一,,豪华大床新,${d2},${shiftDate(d2, 1)},1,300,现付,已确认`])).body).toMatchObject({ failed: 1 });
+    const o1 = await order('Z1001');
+    expect(o1).toMatchObject({ status: 'failed', checkinDate: d1, channelRoom: '豪华大床房', roomTypeName: '渠道大床房' });
+    // 补对照（对到原来的本店房型）再重试：预约改到 d2（原来订单上先记了 d2，重试时「日期没变」，预约留在 d1）
+    const ch = (await api(ctx.app, ctx.clerk, 'GET', '/api/ota/channels')).body.find((c: { id: number }) => c.id === channelId);
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/ota/channels/${channelId}`, { ...ch, roomMap: { ...ch.roomMap, 豪华大床新: roomTypeId } })).status).toBe(200);
+    const retried = await api(ctx.app, ctx.clerk, 'POST', `/api/ota/orders/${o1.id}/retry`, {});
+    expect(retried.body).toMatchObject({ status: 'booked', checkinDate: d2, channelRoom: '豪华大床新' });
+    const live = await ctx.sql<{ businessDate: string }[]>`
+      SELECT b.business_date::text AS business_date FROM ota_order_bookings ob JOIN bookings b ON b.id = ob.booking_id
+      WHERE ob.order_id = ${o1.id} AND b.status IN ('pending', 'confirmed')`;
+    expect(live.map((b) => b.businessDate)).toEqual([d2]);
+  });
+
   it('渠道把订单改到一天房已经约满的日子：照样改时间、标超订；只改金额不清掉、放得下了才清；订单表大（超过 64 KB）也能导', async () => {
     const d1 = shiftDate(today, 12);
     const d2 = shiftDate(today, 13);

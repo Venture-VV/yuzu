@@ -434,14 +434,17 @@ async function runs(db: Db, where: Fragment): Promise<PlatformReconRun[]> {
   return rows.map((r) => ({ ...r, id: Number(r.id) }));
 }
 
-/** 一段时间里每个平台每天最近一次对账的差异 */
+/**
+ * 一段时间里每个平台每天最近一次**对成了的**对账的差异。重跑没成功（取不到平台的对账单）只记在对账记录里、不写差异，
+ * 不能因此把上一次对出来、还没处理的差异藏起来（Codex 审查 73ae462 后补）
+ */
 async function reconIssues(db: Db, from: string, to: string): Promise<PlatformReconIssue[]> {
   const rows = await db<PlatformReconIssue[]>`
     SELECT i.id, i.platform, to_char(i.business_date, 'YYYY-MM-DD') AS business_date, i.kind, i.code, i.deal_name, i.platform_cents, i.system_cents, i.system_ref,
            s.display_name AS resolved_by_name, i.resolved_at, i.resolve_note
     FROM platform_recon_issues i LEFT JOIN staff s ON s.id = i.resolved_by
     WHERE i.business_date BETWEEN ${from} AND ${to}
-      AND i.run_id = (SELECT max(r.id) FROM platform_recon_runs r WHERE r.platform = i.platform AND r.business_date = i.business_date)
+      AND i.run_id = (SELECT max(r.id) FROM platform_recon_runs r WHERE r.platform = i.platform AND r.business_date = i.business_date AND r.ok)
     ORDER BY i.business_date DESC, i.id`;
   return rows.map((r) => ({ ...r, id: Number(r.id), platformCents: r.platformCents === null ? null : Number(r.platformCents), systemCents: r.systemCents === null ? null : Number(r.systemCents) }));
 }

@@ -3,7 +3,8 @@
 //   · 询价单详情「请供应商在线报价」：选一家、生成报价链接 → 供应商（另一个没登录的浏览器）打开链接填单价、付款条件、姓名提交
 //     → 回到询价单，报价里有这一家、标「供应商链接」；
 //   · 已确认的采购单发订单确认链接 → 供应商确认、写承诺到货日 → 采购单详情显示「供应商已确认，承诺 X 到」
-//     → 再发发货预告链接、供应商报一批 → 采购单详情列出这一批。
+//     → 再发发货预告链接、供应商报一批 → 采购单详情列出这一批；
+//   · 发货预告提交上了、回复丢了：供应商页面记着「没收到结果」，刷新以后还在、不能另填一份，按原内容重新提交 → 只记一批（Codex 审查 73ae462 后补）。
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
@@ -118,5 +119,52 @@ test.describe('8.0.21 供应商门户', () => {
     await s2.close();
     await page.reload();
     await expect(page.getByTestId('po-delivery-notices')).toContainText(`${mat.name} 1箱`);
+  });
+
+  test('发货预告的回复丢了：刷新以后还记着「没收到结果」，按原内容重新提交只记一批', async ({ page, browser }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const { sup, mat, today } = await setup(page);
+    const created = await page.request.post('/api/purchase-orders', {
+      data: { clientKey: randomUUID(), orderDate: today, action: 'submit', supplierId: sup.id, lines: [{ materialId: mat.id, purchaseQtyMilli: 3_000, priceCents: 3_000 }] },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    let po = (await created.json()).po as { id: number; docNo: string; status: string };
+    if (po.status !== 'approved') po = (await (await page.request.post(`/api/purchase-orders/${po.id}/approve`, { data: {} })).json()) as typeof po;
+    // 订单确认（直接走公开接口）
+    await page.goto(`/purchasing?po=${po.id}`);
+    await page.getByTestId('po-supplier-card').getByTestId('po-supplier-link-create').click();
+    const confirmUrl = (await page.getByTestId('po-supplier-card').getByTestId('supplier-link-url').textContent())!.trim();
+    const confirmToken = confirmUrl.split('/s/')[1]!;
+    const confirmed = await page.request.post(`/api/public/supplier/${confirmToken}/reply`, { data: { clientKey: randomUUID(), name: '李', promisedDate: today, note: '' } });
+    expect(confirmed.status(), await confirmed.text()).toBe(200);
+    // 发货预告链接
+    await page.reload();
+    await page.getByTestId('po-supplier-link-create').click();
+    const url = (await page.getByTestId('po-supplier-card').getByTestId('supplier-link-url').textContent())!.trim();
+
+    const s = await supplierPage(browser, url);
+    // 请求照常送到服务器（登记上了），回复在路上断了
+    await s.p.route('**/api/public/supplier/*/reply', async (route) => {
+      const resp = await route.fetch();
+      expect(resp.status()).toBe(200);
+      await route.abort('connectionreset');
+    });
+    await s.p.locator('[data-testid^="sp-qty-"]').first().fill('2');
+    await s.p.getByTestId('sp-name').fill('李');
+    await s.p.getByTestId('sp-submit').click();
+    await expect(s.p.getByTestId('sp-pending')).toBeVisible();
+    await s.p.unroute('**/api/public/supplier/*/reply');
+    // 刷新：还记着，不能另填一份
+    await s.p.reload();
+    await expect(s.p.getByTestId('sp-pending')).toContainText('发货预告');
+    await expect(s.p.getByTestId('sp-submit')).toHaveCount(0);
+    // 按原内容重新提交：服务端认出原编号，返回登记过的那一份，不再记一批
+    await s.p.getByTestId('sp-pending-resend').click();
+    await expect(s.p.getByTestId('sp-pending')).toHaveCount(0);
+    await expect(s.p.getByTestId('sp-notices').locator('li')).toHaveCount(1);
+    await expect(s.p.getByTestId('sp-notices')).toContainText(`${mat.name} 2箱`);
+    await expect(s.p.getByTestId('sp-submit')).toBeVisible();
+    await s.close();
   });
 });

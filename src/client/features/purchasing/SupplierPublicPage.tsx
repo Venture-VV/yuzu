@@ -3,22 +3,86 @@
 //   · 订单确认：确认能供、写承诺到货日；只能确认一次。
 //   · 发货预告：发货日、预计到货、各行发了多少、物流单号；可以分批报多次。
 // 每次提交带页面生成的操作编号：没收到结果再点一次只记一次。
+// 结果待确认（AGENTS.md；Codex 审查 73ae462 后补）：发出去之前把编号与原内容存进本机并读回核对，存不了不发；
+// 断网、超时、服务器出错以后这一份留着，刷新、关掉再开链接都还在，只能「按原内容重新提交」（服务端先认原编号：
+// 已经登记过的直接返回那一份，不会再记一次），不能另填一份。重新提交被明确拒绝（链接作废、过期、已经关了、日期过了）
+// 时原来那次也不可能再登记（服务端在这些检查之前先认原编号，这些条件也不会倒回去），这时才清掉、可以重新填写。
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { formatQty, parseQty } from '@shared/quantity';
 import { SUPPLIER_LINK_LABELS, type SupplierPublicView } from '@shared/supplier-portal';
-import { uuid } from '../../lib/utils';
+import { formatDateTime, uuid } from '../../lib/utils';
 import { Button, Field, Input, Notice, Skeleton, Textarea } from '../../components/ui';
 
 const yuan = (cents: number) => `¥${formatAmount(cents)}`;
 
-async function call<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
+/** 没收到结果（断网、超时、服务器出错、太频繁）：可能已经登记了，也可能没有 */
+class UncertainReply extends Error {}
+
+async function call<T>(url: string, init?: RequestInit, timeoutMs = 20_000): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, signal: ctrl.signal, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
+  } catch {
+    throw new UncertainReply('网络断了或太慢，没收到结果');
+  } finally {
+    clearTimeout(timer);
+  }
   const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-  if (!res.ok) throw new Error(body?.error?.message ?? `出错了（${res.status}），请稍后再试`);
+  if (!res.ok) {
+    if (res.status >= 500 || res.status === 429) throw new UncertainReply(body?.error?.message ?? `服务器出错（${res.status}），没收到结果`);
+    throw new Error(body?.error?.message ?? `出错了（${res.status}），请稍后再试`);
+  }
   return body as T;
+}
+
+// ── 本机记下的「没收到结果」的那一份：按链接分开记（链接本身不存，存一个短摘要当键） ──
+interface PendingReply {
+  key: string;
+  body: Record<string, unknown>;
+  summary: string;
+  createdAt: string;
+}
+const PENDING_STORE = 'yuzu.supplierReply.pending.v1';
+/** 链接的短摘要（FNV-1a）：只用来分开不同链接的记录；内网 HTTP 下没有 crypto.subtle，不用它 */
+function linkKey(token: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < token.length; i += 1) {
+    h ^= token.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${h.toString(36)}-${token.length}`;
+}
+function readAllPending(): Record<string, PendingReply> {
+  const raw = localStorage.getItem(PENDING_STORE);
+  return raw ? (JSON.parse(raw) as Record<string, PendingReply>) : {};
+}
+function readPending(token: string): PendingReply | null {
+  try {
+    return readAllPending()[linkKey(token)] ?? null;
+  } catch {
+    return null;
+  }
+}
+/** 存进本机并读回核对；存不了抛错（调用方据此不发请求） */
+function savePending(token: string, p: PendingReply): void {
+  const all = readAllPending();
+  all[linkKey(token)] = p;
+  localStorage.setItem(PENDING_STORE, JSON.stringify(all));
+  if (readAllPending()[linkKey(token)]?.key !== p.key) throw new Error('本机存不进去');
+}
+function clearPending(token: string): void {
+  try {
+    const all = readAllPending();
+    delete all[linkKey(token)];
+    localStorage.setItem(PENDING_STORE, JSON.stringify(all));
+  } catch {
+    // 清不掉：下次打开会再提示一次，按原内容重新提交照样只记一次
+  }
 }
 
 export function SupplierPublicPage() {
@@ -75,24 +139,64 @@ export function SupplierPublicPage() {
 }
 
 function useSubmit(token: string, onDone: (v: SupplierPublicView) => void) {
-  const [key, setKey] = useState(uuid);
+  const [pending, setPending] = useState<PendingReply | null>(() => readPending(token));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
-  const submit = async (body: Record<string, unknown>) => {
+  const send = async (p: PendingReply) => {
     setBusy(true);
     setError(null);
     try {
-      onDone(await call<SupplierPublicView>(`/api/public/supplier/${encodeURIComponent(token)}/reply`, { method: 'POST', body: JSON.stringify({ ...body, clientKey: key }) }));
-      setKey(uuid());
+      const v = await call<SupplierPublicView>(`/api/public/supplier/${encodeURIComponent(token)}/reply`, { method: 'POST', body: JSON.stringify({ ...p.body, clientKey: p.key }) });
+      clearPending(token);
+      setPending(null);
       setSent(true);
+      onDone(v);
     } catch (e) {
-      setError((e as Error).message);
+      if (e instanceof UncertainReply) {
+        // 可能已经登记了：留着这一份，只能按原内容重新提交
+        setPending(p);
+        setError(`${e.message}。可能已经提交上了，也可能没有：请点「按原内容重新提交」（同一份只会登记一次），不要重新填一份。`);
+      } else {
+        // 明确拒绝：这一份（以及之前没收到结果的那次）都没有、也不会再登记，清掉，可以重新填写
+        clearPending(token);
+        setPending(null);
+        setError((e as Error).message);
+      }
     } finally {
       setBusy(false);
     }
   };
-  return { busy, error, sent, submit };
+  const submit = async (body: Record<string, unknown>, summary: string) => {
+    const p: PendingReply = { key: uuid(), body, summary, createdAt: new Date().toISOString() };
+    try {
+      savePending(token, p);
+    } catch {
+      setError('这台设备记不下这次提交（可能是无痕模式或存储满了）。为免断网时重复登记，这次没有提交：请换一个浏览器打开链接，或直接联系门店采购。');
+      return;
+    }
+    await send(p);
+  };
+  const resend = () => (pending ? send(pending) : Promise.resolve());
+  return { busy, error, sent, submit, pending, resend };
+}
+
+/** 上次提交没收到结果：只能按原内容重新提交 */
+function PendingReplyNotice({ pending, busy, onResend }: { pending: PendingReply; busy: boolean; onResend: () => void }) {
+  return (
+    <Notice
+      tone="warning"
+      title="上次提交没收到结果"
+      data-testid="sp-pending"
+      action={
+        <Button size="sm" variant="primary" loading={busy} onClick={onResend} data-testid="sp-pending-resend">
+          按原内容重新提交
+        </Button>
+      }
+    >
+      {pending.summary}（{formatDateTime(pending.createdAt)}）。可能已经提交上了，也可能没有；重新提交用同一个编号，只会登记一次。处理完之前不能另填一份。
+    </Notice>
+  );
 }
 
 function LinesTable({ view, cell, head }: { view: SupplierPublicView; head: string; cell: (lineId: number) => ReactNode }) {
@@ -145,7 +249,7 @@ function QuoteForm({ token, view, onDone }: { token: string; view: SupplierPubli
   const [validUntil, setValidUntil] = useState(q?.validUntil ?? '');
   const [note, setNote] = useState(q?.note ?? '');
   const [name, setName] = useState('');
-  const { busy, error, sent, submit } = useSubmit(token, onDone);
+  const { busy, error, sent, submit, pending, resend } = useSubmit(token, onDone);
   const parsed = view.snapshot.lines.map((l) => ({ lineId: l.lineId, priceCents: parseYuan(prices[l.lineId] ?? '') }));
   const freightCents = parseYuan(freight || '0');
   const problem = parsed.some((p) => p.priceCents === null)
@@ -173,7 +277,9 @@ function QuoteForm({ token, view, onDone }: { token: string; view: SupplierPubli
           <Input inputMode="decimal" value={prices[id] ?? ''} disabled={!view.open} onChange={(e) => setPrices({ ...prices, [id]: e.target.value })} className="h-9 w-32" aria-label="单价" data-testid={`sp-price-${id}`} />
         )}
       />
-      {view.open && (
+      {pending && <PendingReplyNotice pending={pending} busy={busy} onResend={() => void resend()} />}
+      {pending && error && <Notice tone="error" title={error} />}
+      {view.open && !pending && (
         <>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="运费（元）" htmlFor="sp-freight">
@@ -201,16 +307,19 @@ function QuoteForm({ token, view, onDone }: { token: string; view: SupplierPubli
             loading={busy}
             disabled={!!problem}
             onClick={() =>
-              void submit({
-                name: name.trim(),
-                prices: parsed,
-                freightCents,
-                payTerms: payTerms.trim(),
-                creditDays: Number(/(\d+)\s*天/.exec(payTerms)?.[1] ?? 0),
-                deliveryDays: deliveryDays ? Number(deliveryDays) : null,
-                validUntil: validUntil || null,
-                note: note.trim(),
-              })
+              void submit(
+                {
+                  name: name.trim(),
+                  prices: parsed,
+                  freightCents,
+                  payTerms: payTerms.trim(),
+                  creditDays: Number(/(\d+)\s*天/.exec(payTerms)?.[1] ?? 0),
+                  deliveryDays: deliveryDays ? Number(deliveryDays) : null,
+                  validUntil: validUntil || null,
+                  note: note.trim(),
+                },
+                `报价：${parsed.length} 行单价${freightCents ? `、运费 ${yuan(freightCents)}` : ''}，付款条件「${payTerms.trim()}」，${name.trim()}`,
+              )
             }
             data-testid="sp-submit"
           >
@@ -226,19 +335,22 @@ function ConfirmForm({ token, view, onDone }: { token: string; view: SupplierPub
   const [promisedDate, setPromisedDate] = useState(view.snapshot.needBy ?? '');
   const [note, setNote] = useState('');
   const [name, setName] = useState('');
-  const { busy, error, submit } = useSubmit(token, onDone);
+  const { busy, error, submit, pending, resend } = useSubmit(token, onDone);
   const c = view.confirmation;
   const problem = !promisedDate ? '请写承诺到货日' : !name.trim() ? '请留下您的姓名' : null;
   return (
     <div className="space-y-3">
       <LinesTable view={view} head="" cell={() => null} />
+      {pending && <PendingReplyNotice pending={pending} busy={busy} onResend={() => void resend()} />}
+      {pending && error && <Notice tone="error" title={error} />}
       {c ? (
         <Notice tone="success" title={`已确认：承诺 ${c.promisedDate} 到货`} data-testid="sp-confirmed">
           {c.replyName} · {c.createdAt.slice(0, 16).replace('T', ' ')}
           {c.note ? ` · ${c.note}` : ''}。到货日有变的，请直接联系门店采购。
         </Notice>
       ) : (
-        view.open && (
+        view.open &&
+        !pending && (
           <>
             <Field label="承诺到货日" htmlFor="sp-promised">
               <Input id="sp-promised" type="date" value={promisedDate} onChange={(e) => setPromisedDate(e.target.value)} className="h-10" data-testid="sp-promised" />
@@ -248,7 +360,7 @@ function ConfirmForm({ token, view, onDone }: { token: string; view: SupplierPub
             </Field>
             <NameField name={name} setName={setName} />
             {error && <Notice tone="error" title={error} />}
-            <Button variant="primary" className="w-full" loading={busy} disabled={!!problem} onClick={() => void submit({ name: name.trim(), promisedDate, note: note.trim() })} data-testid="sp-submit">
+            <Button variant="primary" className="w-full" loading={busy} disabled={!!problem} onClick={() => void submit({ name: name.trim(), promisedDate, note: note.trim() }, `确认：承诺 ${promisedDate} 到货，${name.trim()}`)} data-testid="sp-submit">
               {problem ?? '确认能供，按这个日期送到'}
             </Button>
           </>
@@ -266,7 +378,7 @@ function DeliveryForm({ token, view, onDone }: { token: string; view: SupplierPu
   const [trackingNo, setTrackingNo] = useState('');
   const [note, setNote] = useState('');
   const [name, setName] = useState('');
-  const { busy, error, sent, submit } = useSubmit(token, onDone);
+  const { busy, error, sent, submit, pending, resend } = useSubmit(token, onDone);
   const lines = view.snapshot.lines
     .map((l) => ({ lineId: l.lineId, qtyMilli: (qty[l.lineId] ?? '').trim() ? parseQty(qty[l.lineId]!) : 0 }))
     .filter((x) => x.qtyMilli !== 0);
@@ -301,7 +413,9 @@ function DeliveryForm({ token, view, onDone }: { token: string; view: SupplierPu
           </ul>
         </div>
       )}
-      {view.open && (
+      {pending && <PendingReplyNotice pending={pending} busy={busy} onResend={() => void resend()} />}
+      {pending && error && <Notice tone="error" title={error} />}
+      {view.open && !pending && (
         <>
           <LinesTable
             view={view}
@@ -330,7 +444,12 @@ function DeliveryForm({ token, view, onDone }: { token: string; view: SupplierPu
             className="w-full"
             loading={busy}
             disabled={!!problem}
-            onClick={() => void submit({ name: name.trim(), shipDate, eta: eta || null, trackingNo: trackingNo.trim(), lines, note: note.trim() })}
+            onClick={() =>
+              void submit(
+                { name: name.trim(), shipDate, eta: eta || null, trackingNo: trackingNo.trim(), lines, note: note.trim() },
+                `发货预告：${shipDate} 发货，${lines.length} 行${trackingNo.trim() ? `，物流单号 ${trackingNo.trim()}` : ''}，${name.trim()}`,
+              )
+            }
             data-testid="sp-submit"
           >
             {problem ?? '提交发货预告'}
