@@ -2,7 +2,8 @@
 // 依赖演示数据（仅独立演示库），账号：店主 linlan，密码 yuzu2026。
 //   · 供应商档案的「收款账户」（应付岗单独改，CW28）：填户名、开户行、账号 → 只看得到后四位，账号输入框空着（不发完整账号到页面）；
 //     店主改的直接「已复核」；对账付款（qianfen）改的「待复核」、本人看不到复核按钮，店主复核；
-//   · 付款 →「批量付款」页签：待付款的申请列表与生成按钮（演示库里没有批了待付的申请时显示空的提示）。
+//   · 付款 →「批量付款」页签：待付款的申请列表与生成按钮（演示库里没有批了待付的申请时显示空的提示）；
+//   · 付款账户取不回来：写明加载失败、可以重试，不说「先建一个银行账户」（Codex 审查 76d9c72 后补）。
 // 生成、导出、导入流水自动记账的整条链在 tests/payments.test.ts「批量付款（8.0.21）」里。
 import { expect, test, type Page } from '@playwright/test';
 
@@ -78,5 +79,19 @@ test.describe('8.0.21 批量付款', () => {
     await page.goto('/erp/payments?tab=batches');
     await expect(page.getByTestId('payments-tab-batches')).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByTestId('batches-tab')).toBeVisible();
+  });
+
+  test('批量付款的付款账户取不回来：写明加载失败、可以重试，不说「先建一个银行账户」', async ({ page }) => {
+    test.setTimeout(60_000);
+    await login(page);
+    await page.route('**/api/erp/bank?status=open', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.goto('/erp/payments?tab=batches');
+    await expect(page.getByTestId('batches-tab')).toBeVisible();
+    const failed = page.getByTestId('batch-accounts-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('batches-tab')).not.toContainText('先建一个银行账户');
+    await page.unroute('**/api/erp/bank?status=open');
+    await failed.getByTestId('batch-accounts-error-retry').click();
+    await expect(page.getByTestId('batch-accounts-error')).toHaveCount(0, { timeout: 20_000 });
   });
 });

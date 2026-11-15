@@ -194,6 +194,30 @@ describe('渠道订单', () => {
     expect(live.map((b) => b.businessDate)).toEqual([d2]);
   });
 
+  it('重试：读出内容以后、锁住订单之前被另一次导入处理成了，拒绝，不拿读出来的旧内容去盖；页面上的版本过时了也拒绝', async () => {
+    const d = shiftDate(today, 25);
+    expect((await importFile([`W1001,魏一,,未对照房型W,${d},${shiftDate(d, 1)},1,300,现付,已确认`])).body).toMatchObject({ failed: 1 });
+    const failed = await order('W1001');
+    expect(failed).toMatchObject({ status: 'failed' });
+    // 测试这一边先锁住订单一行；重试读出内容以后在锁订单那一步等着，这时「另一次导入」把它处理成了（这里直接改那一行模拟）、提交
+    const waiting = () => ctx.sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%FROM ota_orders WHERE channel_id%FOR UPDATE%'`;
+    let retried: Promise<Awaited<ReturnType<typeof api>>> | null = null;
+    await ctx.sql.begin(async (tx) => {
+      await tx`SELECT id FROM ota_orders WHERE id = ${failed.id} FOR UPDATE`;
+      retried = api(ctx.app, ctx.clerk, 'POST', `/api/ota/orders/${failed.id}/retry`, {});
+      for (let i = 0; i < 100 && (await waiting())[0]!.n === 0; i += 1) await new Promise((r) => setTimeout(r, 30));
+      expect((await waiting())[0]!.n).toBeGreaterThan(0);
+      await tx`UPDATE ota_orders SET status = 'booked', amount_cents = 33000, fail_reason = NULL, updated_at = now() WHERE id = ${failed.id}`;
+    });
+    const r = (await retried!) as { status: number; body: { error?: { code: string } } };
+    expect(r.body.error?.code, JSON.stringify(r.body)).toBe('OTA_ORDER_CHANGED');
+    expect(await order('W1001')).toMatchObject({ status: 'booked', amountCents: 33000 });
+    // 页面上还是「没建成」那一份（旧版本）：拒绝；现在不是「没建成」的也不用重试
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/ota/orders/${failed.id}/retry`, { rev: failed.rev })).body.error.code).toBe('OTA_ORDER_CHANGED');
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/ota/orders/${failed.id}/retry`, {})).body.error.code).toBe('OTA_ORDER_NOT_FAILED');
+  });
+
   it('渠道把订单改到一天房已经约满的日子：照样改时间、标超订；只改金额不清掉、放得下了才清；订单表大（超过 64 KB）也能导', async () => {
     const d1 = shiftDate(today, 12);
     const d2 = shiftDate(today, 13);

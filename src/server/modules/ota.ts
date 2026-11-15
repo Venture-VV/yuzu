@@ -101,7 +101,8 @@ async function orderViews(db: Db, where: Fragment): Promise<OtaOrderView[]> {
   const rows = await db<(Omit<OtaOrderView, 'bookings' | 'nights'> & { nights: number })[]>`
     SELECT o.id, o.channel_id, c.name AS channel_name, o.order_no, o.guest_name, o.guest_phone, o.channel_room, rt.name AS room_type_name,
            to_char(o.checkin_date, 'YYYY-MM-DD') AS checkin_date, to_char(o.checkout_date, 'YYYY-MM-DD') AS checkout_date,
-           (o.checkout_date - o.checkin_date) AS nights, o.rooms, o.amount_cents, o.pay_mode, o.channel_status, o.status, o.fail_reason, o.overbooked, o.notice, o.updated_at
+           (o.checkout_date - o.checkin_date) AS nights, o.rooms, o.amount_cents, o.pay_mode, o.channel_status, o.status, o.fail_reason, o.overbooked, o.notice, o.updated_at,
+           o.xmin::text AS rev
     FROM ota_orders o JOIN ota_channels c ON c.id = o.channel_id LEFT JOIN room_types rt ON rt.id = o.room_type_id
     WHERE ${where} ORDER BY o.checkin_date DESC, o.id DESC LIMIT 300`;
   const ids = rows.map((r) => Number(r.id));
@@ -122,7 +123,11 @@ async function orderViews(db: Db, where: Fragment): Promise<OtaOrderView[]> {
 type Outcome = 'created' | 'updated' | 'cancelled' | 'failed' | 'skipped' | 'unchanged';
 
 /** 一张订单一个事务：订单一行 → 预约（预约一行 → 房型一行） */
-async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, importId: number | null, actor: Actor, ip?: string): Promise<Outcome> {
+/**
+ * 处理一张订单（一个事务）。`expectRev`：重试时读出那一份内容时这一行的版本（行的 xmin）——锁住订单以后对不上，说明读出以后被另一次导入、
+ * 重试改过，拒绝（OTA_ORDER_CHANGED），不拿读出来的旧内容去盖（Codex 审查 76d9c72 后补；导入那一路靠 last_import_id 认先后）
+ */
+async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, importId: number | null, actor: Actor, ip?: string, expectRev?: string): Promise<Outcome> {
   const settings = await loadSettings(deps.sql);
   const tz = deps.config.timezone;
   return deps.sql.begin(async (tx) => {
@@ -135,10 +140,11 @@ async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, 
               ${o.channelStatus}, ${tx.json(o as never)}, ${importId})
       ON CONFLICT (channel_id, order_no) DO NOTHING RETURNING id`;
     const isNew = inserted.length > 0;
-    const [ord] = await tx<{ id: number; status: string; checkinDate: string; rooms: number; roomTypeId: number | null; channelStatus: string; overbooked: boolean; amountCents: number; lastImportId: number | null }[]>`
-      SELECT id, status, to_char(checkin_date, 'YYYY-MM-DD') AS checkin_date, rooms, room_type_id, channel_status, overbooked, amount_cents, last_import_id
+    const [ord] = await tx<{ id: number; status: string; checkinDate: string; rooms: number; roomTypeId: number | null; channelStatus: string; overbooked: boolean; amountCents: number; lastImportId: number | null; rev: string }[]>`
+      SELECT id, status, to_char(checkin_date, 'YYYY-MM-DD') AS checkin_date, rooms, room_type_id, channel_status, overbooked, amount_cents, last_import_id, xmin::text AS rev
       FROM ota_orders WHERE channel_id = ${channel.id} AND order_no = ${o.orderNo} FOR UPDATE`;
     const id = Number(ord!.id);
+    if (expectRev !== undefined && (isNew || ord!.rev !== expectRev)) throw conflict('OTA_ORDER_CHANGED', '这张订单刚被另一次导入或重试改过，请刷新后再看');
     // 这次导入（原样重提续做时）或更晚的一次导入已经处理过这张：不再处理（不拿旧文件盖掉新的）
     if (!isNew && importId !== null && ord!.lastImportId !== null && Number(ord!.lastImportId) >= importId) return 'unchanged';
     const before = { status: ord!.status, checkin: ord!.checkinDate, rooms: Number(ord!.rooms), roomTypeId: ord!.roomTypeId === null ? null : Number(ord!.roomTypeId), channelStatus: ord!.channelStatus, amount: Number(ord!.amountCents) };
@@ -336,12 +342,19 @@ export async function markOrderFailed(db: Db, channel: OtaChannel, o: ParsedOtaO
   return rows.length > 0;
 }
 
-/** 补了房型对照以后重试一张（按上一次导入的内容） */
-export async function retryOrder(deps: Deps, id: number, actor: Actor, ip?: string): Promise<OtaOrderView> {
-  const [o] = await deps.sql<{ channelId: number; raw: ParsedOtaOrder }[]>`SELECT channel_id, raw FROM ota_orders WHERE id = ${id}`;
+/**
+ * 补了房型对照以后重试一张（按这一次没处理成的内容 raw）。内容与这一行的版本一起读出，处理时锁住订单再核对版本：读出以后被另一次导入
+ * 处理成了、或者又被改过，都拒绝（OTA_ORDER_CHANGED）；页面带上看到的版本（rev）时也核对（Codex 审查 76d9c72 后补）
+ */
+export async function retryOrder(deps: Deps, id: number, raw: unknown, actor: Actor, ip?: string): Promise<OtaOrderView> {
+  const input = parse(z.object({ rev: z.string().trim().min(1).max(32).optional() }), raw ?? {});
+  const [o] = await deps.sql<{ channelId: number; raw: ParsedOtaOrder; status: string; rev: string }[]>`
+    SELECT channel_id, raw, status, xmin::text AS rev FROM ota_orders WHERE id = ${id}`;
   if (!o) throw notFound('渠道订单不存在');
+  if (input.rev !== undefined && input.rev !== o.rev) throw conflict('OTA_ORDER_CHANGED', '这张订单刚被另一次导入或重试改过，请刷新后再看');
+  if (o.status !== 'failed') throw conflict('OTA_ORDER_NOT_FAILED', '这张订单现在不是「没建成」，不用重试（请刷新）');
   const channel = await channelOf(deps.sql, Number(o.channelId));
-  await processOrder(deps, channel, o.raw, null, actor, ip);
+  await processOrder(deps, channel, o.raw, null, actor, ip, o.rev);
   return (await orderViews(deps.sql, deps.sql`o.id = ${id}`))[0]!;
 }
 
@@ -431,7 +444,7 @@ export function registerOtaRoutes(app: FastifyInstance, deps: Deps) {
     const q = parse(z.object({ status: z.enum(['new', 'booked', 'cancelled', 'failed', 'skipped']).optional(), channelId: z.coerce.number().int().positive().optional() }), req.query);
     return orderViews(sql, sql`${q.status ? sql`o.status = ${q.status}` : sql`true`} AND ${q.channelId ? sql`o.channel_id = ${q.channelId}` : sql`true`}`);
   });
-  app.post('/api/ota/orders/:id/retry', { preHandler: guardAny('booking.manage') }, async (req) => retryOrder(deps, parse(idParam, req.params).id, req.actor, req.ip));
+  app.post('/api/ota/orders/:id/retry', { preHandler: guardAny('booking.manage') }, async (req) => retryOrder(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
   const Month = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, '月份不对') });
   app.get('/api/ota/recon', { preHandler: desk }, async (req) => otaRecon(sql, parse(Month, req.query).month));
   app.get('/api/ota/recon.csv', { preHandler: desk }, async (req, reply) => {

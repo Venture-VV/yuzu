@@ -139,7 +139,7 @@ export function OtaOrdersPanel() {
   };
   const retry = async (o: OtaOrderView) => {
     try {
-      const r = await api.post<OtaOrderView>(`/api/ota/orders/${o.id}/retry`, {});
+      const r = await api.post<OtaOrderView>(`/api/ota/orders/${o.id}/retry`, { rev: o.rev });
       toast({ tone: r.status === 'booked' ? 'success' : 'error', title: r.status === 'booked' ? `订单 ${o.orderNo} 建好了预约` : (r.failReason ?? '还是没建成') });
     } catch (e) {
       toast({ tone: 'error', title: errorMessage(e) });

@@ -13,6 +13,7 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, downloadUrl, uuid } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Dialog } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
@@ -123,7 +124,15 @@ export function BatchesTab() {
       await refresh();
     }
   };
-  if (!d) return data.error ? <Notice tone="error" title={errorMessage(data.error)} /> : <Skeleton className="h-60" />;
+  // 取不回来（也没有上一次的）写明加载失败、可以重试（AGENTS.md「列表取不回来用 LoadFailed」）
+  if (!d)
+    return data.isError ? (
+      <LoadFailed title="批量付款加载失败，请检查网络" onRetry={() => void data.refetch()} retrying={data.isFetching} testId="batches-error">
+        {errorMessage(data.error)}
+      </LoadFailed>
+    ) : (
+      <Skeleton className="h-60" />
+    );
   return (
     <div className="space-y-5" data-testid="batches-tab">
       {manage && <ErpPendingPanel types={['payment_batch']} />}
@@ -131,7 +140,14 @@ export function BatchesTab() {
         <Card className="p-4">
           <div className="flex flex-wrap items-end gap-3">
             <h3 className="mr-auto text-[14px] font-bold">待付款的申请（{d.candidates.length}）</h3>
-            {activeAccounts.length === 0 ? (
+            {/* 付款账户取不回来不当成「没有账户」（Codex 审查 76d9c72 后补）：写明加载失败、可以重试；还在取时占个位 */}
+            {!accounts.data ? (
+              accounts.isError ? (
+                <LoadFailed title="付款账户取不回来，请检查网络" onRetry={() => void accounts.refetch()} retrying={accounts.isFetching} testId="batch-accounts-error" />
+              ) : (
+                <Skeleton className="h-10 w-60" />
+              )
+            ) : activeAccounts.length === 0 ? (
               <Notice tone="info" title="先建一个银行账户">
                 在 <Link to="/erp/bank" className="font-semibold text-pine hover:underline">银行流水</Link> 里新增付款用的账户（只记后四位），网银模板按它的格式导出。
               </Notice>

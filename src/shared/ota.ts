@@ -200,6 +200,8 @@ export interface OtaOrderView {
   notice: string | null;
   bookings: { id: number; bookingNo: string; status: string }[];
   updatedAt: string;
+  /** 这一行的版本（xmin）：「重试」带上，处理时核对没被另一次导入、重试改过 */
+  rev: string;
 }
 export interface OtaImportResult {
   importId: number;
