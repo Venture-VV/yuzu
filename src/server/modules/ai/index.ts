@@ -2,7 +2,8 @@
 //   · 模型服务按对外接口的模式（src/server/integrations/config.ts）：没配 YUZU_AI_API_KEY 是 off，一条数据都不发；
 //     INTEGRATIONS_MOCK=true（只许开发、测试实例）是模拟，不出网；配了是正式（Claude，官方 SDK，integrations/ai.ts）。
 //   · 发出去的只有汇总数与打码后的文字（mask.ts）；每次调用记一行对外调用（种类 ai，只存摘要、不存原文）。
-//   · 加锁（第 7 节）：小结先认领一行（「门店 + 营业日 + 种类」唯一索引兜底）、写 2 分钟租约，事务外调模型，再只改这一行；
+//   · 加锁（第 7 节）：小结先认领一行（「门店 + 营业日 + 种类」唯一索引兜底）、写 10 分钟租约，事务外调模型，再只改这一行
+//     （之后的写入都带上这一次的租约：被当成中断、别人重新认领以后，晚到的结果不算数、也不推送）；
 //     问数先写一行「回答中」（client_key 唯一，原样重提返回这一行；同一人的限额核对取这个人的咨询锁），事务外问答，再只改这一行；
 //     合同条款提示不写业务表。都不碰业务行的锁：事实包、工具都在只读快照里取。
 
@@ -48,8 +49,8 @@ import { aiMaskText, maskForAi } from './mask';
 import { AI_MAX_DAYS, aiTools, questionSystem } from './tools';
 
 export const AI_RULES_KEY = 'ai_rules';
-/** 认领后这一次最多生成多久（之后算中断） */
-const LEASE_SECONDS = 120;
+/** 认领后这一次最多生成多久（之后算中断）：一次模型调用最多等 2 分钟、SDK 自己再试 2 次，租约要比它长 */
+const LEASE_SECONDS = 600;
 /** 失败的隔几分钟再试、最多几次 */
 const RETRY_MINUTES = 5;
 export const AI_SUMMARY_MAX_ATTEMPTS = 3;
@@ -156,7 +157,13 @@ async function failStaleSummaries(db: Db) {
  * 自动认领：这一天还没有就新建；失败的隔 5 分钟、没试满 3 次的再认领；没配模型时生成的、现在配好了的再认领一次。
  * 已生成、正在生成的不认领（几个进程同时跑也只有一个认领到）。
  */
-async function claimAuto(db: Db, storeId: number | null, date: string, providerReady: boolean): Promise<number | null> {
+/** 认领到的一份：之后的写入都带上这一次的租约（被当成中断、别人重新认领以后，晚到的写入不生效） */
+interface SummaryClaim {
+  id: number;
+  lease: string;
+}
+
+async function claimAuto(db: Db, storeId: number | null, date: string, providerReady: boolean): Promise<SummaryClaim | null> {
   const [prev] = await db<{ status: AiSummaryStatus; attempts: number; retryable: boolean }[]>`
     SELECT status, attempts, updated_at < now() - ${RETRY_MINUTES} * interval '1 minute' AS retryable
     FROM ai_summaries WHERE coalesce(store_id, 0) = ${storeId ?? 0} AND business_date = ${date} AND kind = 'daily'`;
@@ -164,7 +171,7 @@ async function claimAuto(db: Db, storeId: number | null, date: string, providerR
     const again = (prev.status === 'failed' && prev.attempts < AI_SUMMARY_MAX_ATTEMPTS && prev.retryable) || (prev.status === 'unconfigured' && providerReady);
     if (!again) return null;
   }
-  const [row] = await db<{ id: number }[]>`
+  const [row] = await db<{ id: number; lease: string }[]>`
     INSERT INTO ai_summaries (store_id, business_date, kind, facts, facts_hash, status, attempts, lease_until)
     VALUES (${storeId}, ${date}, 'daily', '{}'::jsonb, '', 'running', 1, now() + ${LEASE_SECONDS} * interval '1 second')
     ON CONFLICT ((coalesce(store_id, 0)), business_date, kind) DO UPDATE
@@ -172,21 +179,21 @@ async function claimAuto(db: Db, storeId: number | null, date: string, providerR
       WHERE (ai_summaries.status = 'failed' AND ai_summaries.attempts < ${AI_SUMMARY_MAX_ATTEMPTS}
              AND ai_summaries.updated_at < now() - ${RETRY_MINUTES} * interval '1 minute')
          OR (ai_summaries.status = 'unconfigured' AND ${providerReady})
-    RETURNING id`;
-  return row ? Number(row.id) : null;
+    RETURNING id, lease_until::text AS lease`;
+  return row ? { id: Number(row.id), lease: row.lease } : null;
 }
 
 /** 「重新生成」：不在生成中就重新认领（次数从头算）；正在生成的拒绝 */
-async function claimForce(db: Db, storeId: number | null, date: string): Promise<number> {
-  const [row] = await db<{ id: number }[]>`
+async function claimForce(db: Db, storeId: number | null, date: string): Promise<SummaryClaim> {
+  const [row] = await db<{ id: number; lease: string }[]>`
     INSERT INTO ai_summaries (store_id, business_date, kind, facts, facts_hash, status, attempts, lease_until)
     VALUES (${storeId}, ${date}, 'daily', '{}'::jsonb, '', 'running', 1, now() + ${LEASE_SECONDS} * interval '1 second')
     ON CONFLICT ((coalesce(store_id, 0)), business_date, kind) DO UPDATE
       SET status = 'running', attempts = 1, lease_until = EXCLUDED.lease_until, error = NULL, updated_at = now()
       WHERE ai_summaries.status <> 'running' OR ai_summaries.lease_until < now()
-    RETURNING id`;
+    RETURNING id, lease_until::text AS lease`;
   if (!row) throw conflict('AI_BUSY', '这一份正在生成，稍等一下再看');
-  return Number(row.id);
+  return { id: Number(row.id), lease: row.lease };
 }
 
 /** ERP 待办（本周应付、待审批、快到期、逾期应收）：与企业微信每周一推同一份数字，去掉加粗 */
@@ -221,24 +228,28 @@ async function buildFacts(deps: { sql: Sql; config: AppConfig }, storeId: number
 /** 认领到以后：取事实包 → 事务外调模型 → 只改这一行；配了群机器人、开着推送的推一条 */
 async function produceSummary(
   deps: { sql: Sql; config: AppConfig },
-  id: number,
+  claim: SummaryClaim,
   target: { storeId: number | null; date: string },
   rules: AiRules,
   provider: AiProvider | null,
   opts: { send?: Send; staffId?: number | null } = {},
 ): Promise<AiSummaryView> {
   const { sql, config } = deps;
+  const id = claim.id;
+  // 只改还是这一次认领的那一行（租约对得上）；返回改没改到
+  const mine = sql`id = ${id} AND status = 'running' AND lease_until = ${claim.lease}::timestamptz`;
   let facts: AiDailyFacts | AiCompanyFacts;
   try {
     facts = await buildFacts(deps, target.storeId, target.date);
   } catch (e) {
-    await sql`UPDATE ai_summaries SET status = 'failed', error = ${`材料没取出来：${message(e)}`.slice(0, 500)}, lease_until = NULL, updated_at = now() WHERE id = ${id}`;
+    await sql`UPDATE ai_summaries SET status = 'failed', error = ${`材料没取出来：${message(e)}`.slice(0, 500)}, lease_until = NULL, updated_at = now() WHERE ${mine}`;
     return summaryById(sql, id);
   }
   const hash = factsHash(facts);
-  await sql`UPDATE ai_summaries SET facts = ${sql.json(facts as never)}, facts_hash = ${hash}, updated_at = now() WHERE id = ${id}`;
+  const kept = await sql`UPDATE ai_summaries SET facts = ${sql.json(facts as never)}, facts_hash = ${hash}, updated_at = now() WHERE ${mine} RETURNING id`;
+  if (!kept.length) return summaryById(sql, id);
   if (!provider) {
-    await sql`UPDATE ai_summaries SET status = 'unconfigured', text = NULL, model = NULL, lease_until = NULL, updated_at = now() WHERE id = ${id}`;
+    await sql`UPDATE ai_summaries SET status = 'unconfigured', text = NULL, model = NULL, lease_until = NULL, updated_at = now() WHERE ${mine}`;
     return summaryById(sql, id);
   }
   const started = Date.now();
@@ -248,14 +259,16 @@ async function produceSummary(
     const r = await provider.write({ system: SUMMARY_SYSTEM, prompt: summaryPrompt(facts) });
     text = r.text.trim().slice(0, 2000);
     await recordCall(sql, { ...base, request: { storeId: target.storeId, date: target.date, factsHash: hash }, ok: true, result: { ...r.usage, chars: text.length }, durationMs: Date.now() - started });
-    await sql`
+    const done = await sql`
       UPDATE ai_summaries SET status = 'done', text = ${text || '（模型没有写出内容）'}, model = ${provider.model}, input_tokens = ${r.usage.inputTokens},
         output_tokens = ${r.usage.outputTokens}, error = NULL, lease_until = NULL, updated_at = now()
-      WHERE id = ${id}`;
+      WHERE ${mine} RETURNING id`;
+    // 这一次已经被当成中断、别人重新认领了：结果不算数，也不推送
+    if (!done.length) return summaryById(sql, id);
   } catch (e) {
     const why = e instanceof AiRefused ? '模型拒答了这一份（换个时间重新生成试试）' : message(e);
     await recordCall(sql, { ...base, request: { storeId: target.storeId, date: target.date, factsHash: hash }, ok: false, error: why, durationMs: Date.now() - started }).catch(() => undefined);
-    await sql`UPDATE ai_summaries SET status = 'failed', error = ${why.slice(0, 500)}, lease_until = NULL, updated_at = now() WHERE id = ${id}`;
+    await sql`UPDATE ai_summaries SET status = 'failed', error = ${why.slice(0, 500)}, lease_until = NULL, updated_at = now() WHERE ${mine}`;
     return summaryById(sql, id);
   }
   // 推企业微信（MD11）：只推一次；没推出去的记原因，不重试
@@ -294,9 +307,9 @@ export async function runAiSummaries(
   const out: { storeId: number | null; date: string; status: AiSummaryStatus }[] = [];
   let common: string | null = null;
   const one = async (storeId: number | null, date: string) => {
-    const id = await claimAuto(sql, storeId, date, provider !== null);
-    if (id === null) return;
-    const v = await produceSummary(deps, id, { storeId, date }, rules, provider, opts);
+    const claim = await claimAuto(sql, storeId, date, provider !== null);
+    if (claim === null) return;
+    const v = await produceSummary(deps, claim, { storeId, date }, rules, provider, opts);
     out.push({ storeId, date, status: v.status });
   };
   for (const st of stores) {
@@ -465,12 +478,12 @@ export function registerAiRoutes(app: FastifyInstance, deps: Deps) {
     if (!rules.enabled || !rules.dailySummary) throw conflict('AI_DISABLED', '经营小结已关闭（后台「对外接口」→ AI 辅助里打开）');
     const t = await summaryTarget(req, body);
     await failStaleSummaries(sql);
-    const id = await claimForce(sql, t.storeId, t.date);
+    const claim = await claimForce(sql, t.storeId, t.date);
     const provider = aiProvider(config, rules);
     // 不等它生成完：页面每 2 秒看一次
-    void produceSummary(deps, id, { storeId: t.storeId, date: t.date }, rules, provider, { staffId: req.actor.id }).catch((e) => req.log.error(e, 'AI 小结生成失败'));
+    void produceSummary(deps, claim, { storeId: t.storeId, date: t.date }, rules, provider, { staffId: req.actor.id }).catch((e) => req.log.error(e, 'AI 小结生成失败'));
     reply.code(202);
-    return { date: t.date, scope: t.scope as 'store' | 'all', summary: await summaryById(sql, id) };
+    return { date: t.date, scope: t.scope as 'store' | 'all', summary: await summaryById(sql, claim.id) };
   });
 
   app.post('/api/ai/questions', { preHandler: guard('report.executive') }, async (req, reply): Promise<AiQuestionView> => {

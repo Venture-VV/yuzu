@@ -59,7 +59,8 @@ export function aiTools(s: AiToolScope): AiTool[] {
     .refine((v) => v.from <= v.to, { message: '开始不能晚于结束' })
     .refine((v) => v.to <= s.today, { message: '结束不能晚于今天的营业日' })
     .refine((v) => days(v.from, v.to) <= AI_MAX_DAYS, { message: `一次最多 ${AI_MAX_DAYS} 天` });
-  const asOf = z.object({ ...storeField }).strict();
+  // 库存、应付是全公司的（物料、供应商、总仓、付款），不分门店：没有「门店」参数
+  const asOf = z.object({}).strict();
   type Range = { from: string; to: string; store?: string };
   const check = <T>(schema: z.ZodType<T>, raw: unknown): T => {
     const r = schema.safeParse(raw);
@@ -212,7 +213,7 @@ export function aiTools(s: AiToolScope): AiTool[] {
       name: 'inventory_alerts',
       description: '库存提醒（此刻）：低于提醒线的物料（前 30 样）、临期与过期的批次、呆滞的物料、待审批的物资单据',
       schema: asOf,
-      example: multi ? { store: 'current' } : {},
+      example: {},
       run: async (raw) => {
         check(asOf, raw);
         // 物料、供应商是全公司的；总仓的结存在物料上（各店主仓的结存另在调拨、领料里看）
@@ -237,7 +238,7 @@ export function aiTools(s: AiToolScope): AiTool[] {
       name: 'payables_week',
       description: '本周应付（此刻）：本周要付的合计与笔数（前 20 笔的对方与金额）、以后几周的、没挂合同的应付余额',
       schema: asOf,
-      example: multi ? { store: 'current' } : {},
+      example: {},
       run: async (raw) => {
         check(asOf, raw);
         return inScope(undefined, async (tx) => {

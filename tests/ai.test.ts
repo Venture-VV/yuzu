@@ -153,6 +153,41 @@ describe('每天的经营小结', () => {
     expect((await api(ctx.app, ctx.owner, 'GET', '/api/ai/summaries?scope=all')).status).toBe(403);
   });
 
+  it('生成得太久被当成中断、别人重新生成以后，晚到的结果不算数', async () => {
+    const date = shiftDate(today, -4);
+    await ctx.sql`DELETE FROM ai_summaries WHERE business_date = ${date}`;
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const slow: AiProvider = { ...mockAiProvider(), write: async () => (await gate, { text: '晚到的旧结果', usage: { inputTokens: 0, outputTokens: 0 } }) };
+    setAiProviderForTests(slow);
+    const at = new Date(Date.parse(`${shiftDate(date, 1)}T12:00:00+08:00`));
+    const first = runAiSummaries({ sql: ctx.sql, config: ctx.config }, at);
+    // 等第一次认领好、事实包写进去
+    for (let i = 0; i < 100; i++) {
+      const [r] = await ctx.sql<{ hash: string }[]>`SELECT facts_hash AS hash FROM ai_summaries WHERE business_date = ${date}`;
+      if (r?.hash) break;
+      await new Promise((res) => setTimeout(res, 50));
+    }
+    // 租约过了（当成中断）→ 换成正常的模型服务、「重新生成」
+    await ctx.sql`UPDATE ai_summaries SET lease_until = now() - interval '1 second' WHERE business_date = ${date}`;
+    setAiProviderForTests(undefined);
+    const re = await api(ctx.app, ctx.owner, 'POST', '/api/ai/summaries/regenerate', { date });
+    expect(re.status, JSON.stringify(re.body)).toBe(202);
+    let s = (re.body as AiSummaryResponse).summary!;
+    for (let i = 0; i < 50 && s.status === 'running'; i++) {
+      await new Promise((res) => setTimeout(res, 100));
+      s = ((await api(ctx.app, ctx.owner, 'GET', `/api/ai/summaries?date=${date}`)).body as AiSummaryResponse).summary!;
+    }
+    expect(s.status).toBe('done');
+    // 第一次的结果这时才回来：不盖掉
+    release();
+    await first;
+    const [row] = await ctx.sql<{ text: string; status: string }[]>`SELECT text, status FROM ai_summaries WHERE business_date = ${date}`;
+    expect(row).toMatchObject({ status: 'done' });
+    expect(row!.text).toContain('【模拟小结】');
+    expect(row!.text).not.toContain('晚到的旧结果');
+  });
+
   it('关掉小结时什么都不做', async () => {
     await rules({ dailySummary: false });
     expect(await runAiSummaries({ sql: ctx.sql, config: ctx.config }, new Date(Date.now() + 5 * 86_400_000))).toEqual([]);
