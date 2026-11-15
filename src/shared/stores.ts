@@ -58,3 +58,26 @@ export interface EntityView {
   version: number;
   storeCount: number;
 }
+
+/**
+ * 门店之间的储值结算（docs/MULTISTORE_V8022.md 第 7 节，MD19 待确认）：会员在开卡店（第一笔充值所在的门店，
+ * 没有充值的算本店）以外的门店用储值消费，开卡店收着这笔钱、别家店做了服务。时段内的储值消费计正、撤销计负。
+ */
+export interface StoreSettlementPair {
+  /** 开卡店：收着钱的一方 */
+  homeStoreId: number;
+  /** 消费店：做了服务的一方 */
+  spendStoreId: number;
+  count: number;
+  principal: number;
+  bonus: number;
+}
+
+export interface StoreSettlementReport {
+  from: string;
+  to: string;
+  stores: StoreBrief[];
+  pairs: StoreSettlementPair[];
+  /** 两两轧差以后：from 店应付给 to 店的本金（只列大于 0 的） */
+  net: { fromStoreId: number; toStoreId: number; principal: number }[];
+}

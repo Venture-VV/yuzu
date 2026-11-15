@@ -51,6 +51,8 @@ export const ADMIN_SECTIONS = {
   // 微信小程序（小程序线，docs/MINIPROGRAM.md 第 5 节）：开关、门店信息、首页轮播、项目介绍、会员的微信绑定与解绑。
   // 进后台的权限不变（客户经理照旧不进后台，v0.6.0）：能进后台、又有这两项之一的才看得到
   mp: { path: '/admin/mp', label: '微信小程序', perms: ['mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite', 'mp.food', 'mp.booking'] },
+  // 门店与主体（8.0.22，docs/MULTISTORE_V8022.md）：门店档案、公司主体、门店之间的储值结算
+  stores: { path: '/admin/stores', label: '门店与主体', perms: ['settings.manage'] },
   staff: { path: '/admin/staff', label: '员工账号', perms: ['staff.manage'] },
   permissions: { path: '/admin/permissions', label: '岗位权限', perms: ['settings.manage', 'audit.read'] },
   // 8.0.18（IA1，店主 2026-11-13）：员工食堂、安保巡场从 ERP 挪到后台「人员与行政」。页面、权限、接口都没变；
@@ -74,7 +76,7 @@ export const ADMIN_GROUPS: readonly { key: string; title: string; items: readonl
   { key: 'members', title: '会员与营销', items: ['membership', 'coupons'] },
   { key: 'business', title: '营业项目', items: ['catalog', 'tags', 'technicians', 'dining', 'emenu', 'rooms', 'bookings'] },
   { key: 'venue', title: '场地、设备与线上', items: ['spaces', 'guide', 'devices', 'integrations', 'mp'] },
-  { key: 'staff', title: '人员与行政', items: ['staff', 'permissions', 'canteen', 'patrol'] },
+  { key: 'staff', title: '人员与行政', items: ['stores', 'staff', 'permissions', 'canteen', 'patrol'] },
   { key: 'data', title: '数据与审计', items: ['audit', 'opening'] },
 ];
 /** 能进后台首页、看后台各个设置分区的权限（有其一即可） */

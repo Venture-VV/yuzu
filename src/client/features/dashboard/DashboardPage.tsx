@@ -10,7 +10,7 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { AdminPage } from '../admin/AdminShell';
-import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
+import { Card, Notice, SectionTitle, Segmented, Skeleton } from '../../components/ui';
 import { Columns, FitText, HBars, yuan } from './charts';
 import { MarketingCostTab } from './MarketingCostTab';
 import { MembersTab } from './MembersTab';
@@ -19,6 +19,7 @@ import { OverviewTab } from './OverviewTab';
 import { RevenuePage } from '../erp/RevenuePage';
 import { RoomsTab } from './RoomsTab';
 import { TechniciansTab } from './TechniciansTab';
+import { useReportScope } from '../../lib/reportScope';
 
 // 看板按岗位分页（v0.6.0）：今日（值班经理、收银）、经营总览（总经理）、会员总览（客户经理）；各页按权限显示
 // v0.7.0 加「技师业绩」（店主、店总、值班经理）；技师功能关闭时不显示（店主 2026-10-30 定，数据保留，重新开启后照常显示）
@@ -66,7 +67,23 @@ export function DashboardPage() {
   const [pref, setPref] = useState(readPref);
   const tabs = TABS.filter((t) => can(t.perm) && (t.key !== 'technicians' || session.technicians) && (t.key !== 'rooms' || session.rooms) && (t.key !== 'revenue' || session.erpModules.includes('revenue')));
   const current = tabs.find((t) => t.key === tab) ?? (tab ? undefined : (tabs.find((t) => t.key === pref) ?? tabs[0]));
+  const scope = useReportScope();
   if (!current) return <Navigate to={tabs.length ? DASHBOARD_PATH : '/'} replace />;
+  // 合并看（8.0.22）：能进几家店的人看这几家店的合计；只有一家店时没有这个开关
+  const scopeToggle = scope.multi && current.key !== 'revenue' && (
+    <span data-testid="report-scope">
+      <Segmented
+        size="sm"
+        ariaLabel="看哪几家店"
+        value={scope.merged ? 'all' : 'store'}
+        onChange={(v) => scope.set(v === 'all')}
+        options={[
+          { value: 'store', label: `本店（${session.store.name}）` },
+          { value: 'all', label: `合并 ${scope.count} 家` },
+        ]}
+      />
+    </span>
+  );
   const defaultButton = tabs.length > 1 && (
     <button
       type="button"
@@ -91,7 +108,12 @@ export function DashboardPage() {
             ? '只读：任选时段的营业收入、每天的明细与日结情况、收款与部门构成；与经营总览同一口径'
             : '口径与日结一致：按营业日，反结账冲回'
       }
-      actions={defaultButton}
+      actions={
+        <>
+          {scopeToggle}
+          {defaultButton}
+        </>
+      }
     >
       {tabs.length > 1 && (
         <div className="-mt-1 mb-5 flex items-center gap-1 overflow-x-auto border-b border-line" role="tablist" aria-label="看板">
@@ -136,8 +158,9 @@ export function DashboardPage() {
 /** 今日：在店、营业额与收款、近 7 个营业日、分时、部门、在店最久、当班中（口径与日结一致） */
 function TodayTab() {
   const session = useSession();
-  const q = useQuery({ queryKey: ['dashboard'], queryFn: () => api.get<DashboardData>('/api/dashboard'), refetchInterval: 60_000 });
-  const duty = useQuery({ queryKey: ['dashboard', 'duty'], queryFn: () => api.get<DutyExtras>('/api/reports/duty'), refetchInterval: 60_000 });
+  const scope = useReportScope();
+  const q = useQuery({ queryKey: ['dashboard', scope.merged], queryFn: () => api.get<DashboardData>(`/api/dashboard${scope.qs}`), refetchInterval: 60_000 });
+  const duty = useQuery({ queryKey: ['dashboard', 'duty', scope.merged], queryFn: () => api.get<DutyExtras>(`/api/reports/duty${scope.qs}`), refetchInterval: 60_000 });
   const d = q.data;
   return (
     <>

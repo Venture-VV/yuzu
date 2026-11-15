@@ -7,11 +7,11 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 // 只引用类型（编译后不留 import），不会与 db.ts 循环引用
-import type { Db, Tx } from '../db';
+import type { Db, Fragment, Tx } from '../db';
 
 export const DEFAULT_STORE_ID = 1;
 
-const als = new AsyncLocalStorage<{ storeId: number }>();
+const als = new AsyncLocalStorage<{ storeId: number; storeSet?: number[] }>();
 
 /** 这次请求（或 runInStore 里）的当前门店；没有上下文时是本店 */
 export function currentStoreId(): number {
@@ -21,6 +21,22 @@ export function currentStoreId(): number {
 /** 在某家店的上下文里执行（请求的门店、自动任务逐家处理时） */
 export function runInStore<T>(storeId: number, fn: () => T): T {
   return als.run({ storeId }, fn);
+}
+
+/** 报表、看板看哪几家店：默认当前门店；「合并看」时是 runWithStoreSet 给的那几家 */
+export function reportStoreIds(): number[] {
+  const s = als.getStore();
+  return s?.storeSet ?? [s?.storeId ?? DEFAULT_STORE_ID];
+}
+
+/** 「合并看」（MD18）：在这几家店的范围里出报表（当前门店不变，写入照旧记当前门店） */
+export function runWithStoreSet<T>(ids: number[], fn: () => T): T {
+  return als.run({ storeId: currentStoreId(), storeSet: ids }, fn);
+}
+
+/** 报表的门店条件：列名 IN（这几家店）。col 形如 'c.store_id' */
+export function storeIn(db: Db, col: string): Fragment {
+  return db`${db(col)} IN ${db(reportStoreIds())}`;
 }
 
 /**

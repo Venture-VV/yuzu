@@ -4,14 +4,15 @@
 //   · 员工挂哪几家店（staff_stores）；店主不用挂（所有启用的门店都能进）；没挂任何门店的按本店算。
 //   · 这些都是档案：修改带版本号（对不上拒绝）、只锁那一行；新建靠代码、名称的唯一索引兜底（同样的再交一次报「已有」）。
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { DEFAULT_ENTITY_ID, DEFAULT_STORE_ID, STORE_CODE_PATTERN, type EntityView, type StoreBrief, type StoreView } from '@shared/stores';
+import { DEFAULT_ENTITY_ID, DEFAULT_STORE_ID, STORE_CODE_PATTERN, type EntityView, type StoreBrief, type StoreSettlementPair, type StoreSettlementReport, type StoreView } from '@shared/stores';
 import { isUniqueViolation, type Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { badRequest, conflict, notFound } from '../lib/errors';
+import { runWithStoreSet } from '../lib/store-context';
 import { idParam, parse } from '../lib/validate';
 
 /** 员工能进的门店：最近用过的在前，再按排序（店主是全部启用的门店；没挂任何门店的是本店） */
@@ -27,6 +28,54 @@ export async function allowedStores(db: Db, actor: Pick<Actor, 'id' | 'role'>): 
   return db<StoreBrief[]>`
     SELECT x.id, x.code, x.name FROM staff_stores ss JOIN stores x ON x.id = ss.store_id AND x.active
     WHERE ss.staff_id = ${actor.id} ORDER BY ss.last_used_at DESC NULLS LAST, x.sort_order, x.id`;
+}
+
+/**
+ * 报表、看板的「合并看」（?scope=all，MD18）：店主看全部门店，挂着几家店的人只合并自己挂着的店；
+ * 只能进一家店的照旧只看当前门店
+ */
+export async function withReportScope<T>(db: Db, req: FastifyRequest, fn: () => Promise<T>): Promise<T> {
+  const scope = (req.query as { scope?: unknown } | undefined)?.scope;
+  if (scope !== 'all' || !req.actor) return fn();
+  const stores = await allowedStores(db, req.actor);
+  if (stores.length <= 1) return fn();
+  return runWithStoreSet(stores.map((x) => Number(x.id)).sort((a, b) => a - b), fn);
+}
+
+/** 门店之间的储值结算（只读）：消费店 ≠ 开卡店的储值消费（撤销冲回），按「开卡店 → 消费店」汇总，再两两轧差 */
+export async function storeSettlement(db: Db, from: string, to: string, stores: StoreBrief[]): Promise<StoreSettlementReport> {
+  const ids = stores.map((x) => Number(x.id));
+  const rows = ids.length
+    ? await db<StoreSettlementPair[]>`
+        WITH home AS (SELECT DISTINCT ON (member_id) member_id, store_id FROM recharges ORDER BY member_id, id),
+        x AS (
+          SELECT coalesce(h.store_id, ${DEFAULT_STORE_ID}) AS home_store_id, c.store_id AS spend_store_id, 1 AS n, c.principal_amount AS principal, c.bonus_amount AS bonus
+          FROM consumptions c LEFT JOIN home h ON h.member_id = c.member_id
+          WHERE c.business_date BETWEEN ${from} AND ${to}
+          UNION ALL
+          SELECT coalesce(h.store_id, ${DEFAULT_STORE_ID}), c.store_id, -1, -r.principal_amount, -r.bonus_amount
+          FROM reversals r JOIN consumptions c ON c.id = r.consumption_id LEFT JOIN home h ON h.member_id = r.member_id
+          WHERE r.business_date BETWEEN ${from} AND ${to}
+        )
+        SELECT home_store_id, spend_store_id, sum(n)::int AS count, sum(principal)::bigint AS principal, sum(bonus)::bigint AS bonus
+        FROM x
+        WHERE home_store_id <> spend_store_id AND home_store_id IN ${db(ids)} AND spend_store_id IN ${db(ids)}
+        GROUP BY 1, 2 HAVING sum(principal) <> 0 OR sum(bonus) <> 0
+        ORDER BY 1, 2`
+    : [];
+  const pairs = rows.map((r) => ({ ...r, homeStoreId: Number(r.homeStoreId), spendStoreId: Number(r.spendStoreId), principal: Number(r.principal), bonus: Number(r.bonus) }));
+  const owed = new Map<string, number>();
+  for (const p of pairs) owed.set(`${p.homeStoreId}>${p.spendStoreId}`, (owed.get(`${p.homeStoreId}>${p.spendStoreId}`) ?? 0) + p.principal);
+  const net: StoreSettlementReport['net'] = [];
+  for (const a of ids) {
+    for (const b of ids) {
+      if (a >= b) continue;
+      const d = (owed.get(`${a}>${b}`) ?? 0) - (owed.get(`${b}>${a}`) ?? 0);
+      if (d > 0) net.push({ fromStoreId: a, toStoreId: b, principal: d });
+      if (d < 0) net.push({ fromStoreId: b, toStoreId: a, principal: -d });
+    }
+  }
+  return { from, to, stores, pairs, net };
 }
 
 /** 换门店：只能换到自己能进的；记下这家店最近用过（下次登录默认它） */
@@ -180,10 +229,24 @@ export function registerStoreRoutes(app: FastifyInstance, { sql }: Deps) {
   });
 
   // 员工挂哪几家店（员工档案里的「门店」）
+  // 门店之间的储值结算表（第 7 节）：只是报表，不记账；只列自己能进的门店之间的
+  app.get('/api/reports/store-settlement', { preHandler: guard('report.executive') }, async (req) => {
+    const q = parse(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD'), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD') }), req.query ?? {});
+    if (q.from > q.to) throw badRequest('开始日期不能晚于结束日期');
+    const stores = await allowedStores(sql, req.actor);
+    return storeSettlement(sql, q.from, q.to, stores);
+  });
+
   app.get('/api/staff/:id/stores', { preHandler: guard('staff.manage') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const rows = await sql<{ storeId: number }[]>`SELECT store_id FROM staff_stores WHERE staff_id = ${id} ORDER BY store_id`;
-    return { storeIds: rows.map((r) => Number(r.storeId)) };
+    // 能勾的门店：自己能进的（店主是全部启用的）；挂着的照样列出来
+    const mine = await allowedStores(sql, req.actor);
+    const linked = rows.map((r) => Number(r.storeId));
+    const extra = linked.filter((x) => !mine.some((m) => Number(m.id) === x));
+    const others = extra.length ? await sql<StoreBrief[]>`SELECT id, code, name FROM stores WHERE id IN ${sql(extra)}` : [];
+    const stores = [...mine, ...others].map((x) => ({ ...x, id: Number(x.id) })).sort((a, b) => a.id - b.id);
+    return { storeIds: linked, stores };
   });
 
   app.put('/api/staff/:id/stores', { preHandler: guard('staff.manage') }, async (req) => {
@@ -191,6 +254,10 @@ export function registerStoreRoutes(app: FastifyInstance, { sql }: Deps) {
     const { storeIds } = parse(StaffStoresInput, req.body);
     const wanted = [...new Set(storeIds)].sort((a, b) => a - b);
     if (wanted.length === 0) throw badRequest('至少挂一家门店');
+    // 只能挂自己能进的门店（店主能进全部）；原来就挂着的可以留着
+    const mine = new Set((await allowedStores(sql, req.actor)).map((x) => Number(x.id)));
+    const before = new Set((await sql<{ storeId: number }[]>`SELECT store_id FROM staff_stores WHERE staff_id = ${id}`).map((r) => Number(r.storeId)));
+    if (wanted.some((x) => !mine.has(x) && !before.has(x))) throw badRequest('只能挂你自己能进的门店');
     await sql.begin(async (tx) => {
       const [staff] = await tx<{ role: string }[]>`SELECT role FROM staff WHERE id = ${id} FOR NO KEY UPDATE`;
       if (!staff) throw notFound('员工不存在');

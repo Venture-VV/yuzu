@@ -31,7 +31,7 @@ import { settledTechnicianLines, withCommission } from './commission';
 import { loadClockroomRules } from './clockroom';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { settingRow } from '../lib/store-settings';
-import { currentStoreId } from '../lib/store-context';
+import { currentStoreId, storeIn } from '../lib/store-context';
 
 export async function loadTechnicianRules(db: Db): Promise<TechnicianRules> {
   const row = await settingRow<Partial<TechnicianRules>>(db, 'technician_rules');
@@ -48,7 +48,7 @@ export async function loadTechnicians(db: Db, ids?: number[]): Promise<Map<numbe
   const unique = [...new Set(ids ?? [])];
   if (ids && unique.length === 0) return new Map();
   const rows = await db<Technician[]>`
-    SELECT ${TECH_COLUMNS(db)} FROM technicians t WHERE t.store_id = ${currentStoreId()} ${ids ? db`AND t.id IN ${db(unique)}` : db``} ORDER BY ${ORDER(db)}`;
+    SELECT ${TECH_COLUMNS(db)} FROM technicians t WHERE ${storeIn(db, 't.store_id')} ${ids ? db`AND t.id IN ${db(unique)}` : db``} ORDER BY ${ORDER(db)}`;
   return new Map(rows.map((r) => [r.id, r]));
 }
 
@@ -147,9 +147,9 @@ export async function technicianReport(db: Db, from: string, to: string): Promis
   // 需要技师、但挂账时没有指定技师的明细（规则不要求必须选技师时会有）
   const [un] = await db<{ clocks: number; amount: number }[]>`
     WITH k AS (
-      SELECT id, created_at, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to}
+      SELECT id, created_at, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}
       UNION ALL
-      SELECT id, created_at, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
+      SELECT id, created_at, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}
     )
     SELECT coalesce(sum(k.sign * l.quantity), 0)::int AS clocks, coalesce(sum(k.sign * l.amount), 0)::bigint AS amount
     FROM k JOIN checkout_bills cb ON cb.checkout_id = k.id

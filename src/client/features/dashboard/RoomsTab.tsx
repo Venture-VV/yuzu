@@ -9,11 +9,13 @@ import { Money } from '../../components/Money';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { useRoomsReport } from '../rooms/queries';
 import { Columns, HBars, Kpi, PeriodPicker, presetRange, yuan, yuanShort, type Period } from './charts';
+import { useReportScope } from '../../lib/reportScope';
 
 export function RoomsTab() {
   const session = useSession();
   const [period, setPeriod] = useState<Period>(() => ({ preset: 'today', ...presetRange('today', session.today) }));
-  const q = useRoomsReport(period.from, period.to, period.from <= period.to);
+  const scope = useReportScope();
+  const q = useRoomsReport(period.from, period.to, period.from <= period.to, scope.q);
   const d = q.data;
   const occupied = d ? d.now.counts.occupied : 0;
   const rate = d && d.now.rooms > 0 ? Math.round((occupied / d.now.rooms) * 100) : 0;

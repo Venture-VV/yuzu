@@ -20,6 +20,8 @@ import { loadMembershipRules } from './membership';
 import { loadSettings } from './settings';
 import { loadTechnicians, technicianReport, withoutCommission } from './technicians';
 import { settledTechnicianLines, withCommission } from './commission';
+import { storeIn } from '../lib/store-context';
+import { withReportScope } from './stores';
 
 export interface Clock {
   tz: string;
@@ -36,37 +38,37 @@ async function periodKpis(db: Db, from: string, to: string, c: Clock): Promise<P
     SELECT
       (SELECT coalesce(sum(total_amount) FILTER (WHERE business_date BETWEEN ${from} AND ${to}), 0)
               - coalesce(sum(total_amount) FILTER (WHERE void_business_date BETWEEN ${from} AND ${to}), 0)
-       FROM checkouts WHERE business_date BETWEEN ${from} AND ${to} OR void_business_date BETWEEN ${from} AND ${to}) AS receivable,
+       FROM checkouts WHERE (business_date BETWEEN ${from} AND ${to} OR void_business_date BETWEEN ${from} AND ${to}) AND ${storeIn(db, 'store_id')}) AS receivable,
       (SELECT coalesce(sum(p.amount) FILTER (WHERE c.business_date BETWEEN ${from} AND ${to}), 0)
               - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date BETWEEN ${from} AND ${to}), 0)
        FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-       WHERE p.method = 'discount' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to})) AS discount,
+       WHERE p.method = 'discount' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to}) AND ${storeIn(db, 'c.store_id')}) AS discount,
       -- 券抵扣与退款单（v0.7.20）：券抵扣随结账单（反结账冲回），退款单按退款的营业日（作废的不算）
       (SELECT coalesce(sum(p.amount) FILTER (WHERE c.business_date BETWEEN ${from} AND ${to}), 0)
               - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date BETWEEN ${from} AND ${to}), 0)
        FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-       WHERE p.method = 'store_coupon' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to})) AS coupon,
+       WHERE p.method = 'store_coupon' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to}) AND ${storeIn(db, 'c.store_id')}) AS coupon,
       -- 会员折扣（v0.7.25）：口径同券抵扣
       (SELECT coalesce(sum(p.amount) FILTER (WHERE c.business_date BETWEEN ${from} AND ${to}), 0)
               - coalesce(sum(p.amount) FILTER (WHERE c.void_business_date BETWEEN ${from} AND ${to}), 0)
        FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-       WHERE p.method = 'member_discount' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to})) AS member_discount,
-      (SELECT coalesce(sum(amount), 0) FROM refunds WHERE status = 'completed' AND business_date BETWEEN ${from} AND ${to}) AS refund,
+       WHERE p.method = 'member_discount' AND (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to}) AND ${storeIn(db, 'c.store_id')}) AS member_discount,
+      (SELECT coalesce(sum(amount), 0) FROM refunds WHERE status = 'completed' AND business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}) AS refund,
       -- 结账客人、结账单、储值消费与日结同一营业口径（v0.7.1）：时段内结的计正数、时段内反结账 / 撤销的计负数
       -- 结账客人按人数：手牌每位 1 人，桌台按开台人数（餐饮第二步）
       (SELECT coalesce(sum(cb.guests) FILTER (WHERE c.business_date BETWEEN ${from} AND ${to}), 0)
               - coalesce(sum(cb.guests) FILTER (WHERE c.void_business_date BETWEEN ${from} AND ${to}), 0)
        FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
-       WHERE c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to})::int AS guests,
+       WHERE (c.business_date BETWEEN ${from} AND ${to} OR c.void_business_date BETWEEN ${from} AND ${to}) AND ${storeIn(db, 'c.store_id')})::int AS guests,
       (SELECT count(*) FILTER (WHERE business_date BETWEEN ${from} AND ${to}) - count(*) FILTER (WHERE void_business_date BETWEEN ${from} AND ${to})
-       FROM checkouts WHERE business_date BETWEEN ${from} AND ${to} OR void_business_date BETWEEN ${from} AND ${to})::int AS checkouts,
-      (SELECT coalesce(sum(paid_amount), 0) FROM recharges WHERE business_date BETWEEN ${from} AND ${to}) AS recharge_paid,
-      (SELECT count(*) FROM recharges WHERE business_date BETWEEN ${from} AND ${to})::int AS recharge_count,
+       FROM checkouts WHERE (business_date BETWEEN ${from} AND ${to} OR void_business_date BETWEEN ${from} AND ${to}) AND ${storeIn(db, 'store_id')})::int AS checkouts,
+      (SELECT coalesce(sum(paid_amount), 0) FROM recharges WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}) AS recharge_paid,
+      (SELECT count(*) FROM recharges WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')})::int AS recharge_count,
       -- 储值退回（v0.7.26）：退的本金，与充值并列（不是营业额）
-      (SELECT coalesce(sum(principal), 0) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to})::bigint AS member_refund,
-      (SELECT count(*) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to})::int AS member_refund_count,
-      ((SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to})
-        - (SELECT coalesce(sum(principal_amount + bonus_amount), 0) FROM reversals WHERE business_date BETWEEN ${from} AND ${to})) AS wallet_consumed,
+      (SELECT coalesce(sum(principal), 0) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')})::bigint AS member_refund,
+      (SELECT count(*) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')})::int AS member_refund_count,
+      ((SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')})
+        - (SELECT coalesce(sum(principal_amount + bonus_amount), 0) FROM reversals WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')})) AS wallet_consumed,
       (SELECT count(*) FROM members WHERE ${bizDate(db, 'created_at', c)} BETWEEN ${from} AND ${to})::int AS new_members`;
   const net = r!.receivable - r!.discount - r!.coupon - r!.memberDiscount - r!.refund;
   return { ...r!, net, perGuest: r!.guests ? Math.round(net / r!.guests) : 0 };
@@ -80,9 +82,9 @@ async function periodKpis(db: Db, from: string, to: string, c: Clock): Promise<P
 async function itemLines(db: Db, from: string, to: string) {
   return db<{ category: string; name: string; quantity: number; amount: number; discount: number; refund: number }[]>`
     WITH k AS (
-      SELECT id, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to}
+      SELECT id, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}
       UNION ALL
-      SELECT id, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
+      SELECT id, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}
     ),
     x AS (
       SELECT ci.category, ci.name, k.sign * ci.quantity AS quantity, k.sign * ci.amount AS amount, k.sign * ci.discount AS discount, 0::bigint AS refund
@@ -90,7 +92,7 @@ async function itemLines(db: Db, from: string, to: string) {
       UNION ALL
       SELECT ri.category, ri.name, -ri.quantity, 0, 0, ri.amount
       FROM refund_items ri JOIN refunds r ON r.id = ri.refund_id
-      WHERE r.status = 'completed' AND r.business_date BETWEEN ${from} AND ${to}
+      WHERE r.status = 'completed' AND r.business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'r.store_id')}
     )
     SELECT category, name, sum(quantity)::int AS quantity, sum(amount)::bigint AS amount, sum(discount)::bigint AS discount, sum(refund)::bigint AS refund
     FROM x
@@ -120,28 +122,28 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
   const trend = await db<ExecutiveReport['trend']>`
     WITH d AS (SELECT generate_series(${from}::date, ${to}::date, interval '1 day')::date AS date),
     rec AS (
-      SELECT business_date AS date, sum(total_amount) AS amount FROM checkouts WHERE business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      SELECT business_date AS date, sum(total_amount) AS amount FROM checkouts WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')} GROUP BY 1
       UNION ALL
-      SELECT void_business_date, -sum(total_amount) FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      SELECT void_business_date, -sum(total_amount) FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')} GROUP BY 1
     ),
     dis AS (
       -- 优惠 / 免单、券抵扣（v0.7.20）、会员折扣（v0.7.25），以及退款单（按退款的营业日）都从净营业额里减
       SELECT c.business_date AS date, sum(p.amount) AS amount FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-      WHERE p.method IN ('discount', 'store_coupon', 'member_discount') AND c.business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      WHERE p.method IN ('discount', 'store_coupon', 'member_discount') AND c.business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'c.store_id')} GROUP BY 1
       UNION ALL
       SELECT c.void_business_date, -sum(p.amount) FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-      WHERE p.method IN ('discount', 'store_coupon', 'member_discount') AND c.void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      WHERE p.method IN ('discount', 'store_coupon', 'member_discount') AND c.void_business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'c.store_id')} GROUP BY 1
       UNION ALL
-      SELECT business_date, sum(amount) FROM refunds WHERE status = 'completed' AND business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      SELECT business_date, sum(amount) FROM refunds WHERE status = 'completed' AND business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')} GROUP BY 1
     ),
     g AS (
       SELECT c.business_date AS date, sum(cb.guests) AS n FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
-      WHERE c.business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      WHERE c.business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'c.store_id')} GROUP BY 1
       UNION ALL
       SELECT c.void_business_date, -sum(cb.guests) FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
-      WHERE c.void_business_date BETWEEN ${from} AND ${to} GROUP BY 1
+      WHERE c.void_business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'c.store_id')} GROUP BY 1
     ),
-    r AS (SELECT business_date AS date, sum(paid_amount) AS amount FROM recharges WHERE business_date BETWEEN ${from} AND ${to} GROUP BY 1)
+    r AS (SELECT business_date AS date, sum(paid_amount) AS amount FROM recharges WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')} GROUP BY 1)
     SELECT to_char(d.date, 'YYYY-MM-DD') AS date,
            (coalesce((SELECT sum(amount) FROM rec WHERE rec.date = d.date), 0) - coalesce((SELECT sum(amount) FROM dis WHERE dis.date = d.date), 0))::bigint AS net,
            coalesce((SELECT sum(n) FROM g WHERE g.date = d.date), 0)::int AS guests,
@@ -155,11 +157,11 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
       SELECT p.method, (coalesce(sum(p.amount) FILTER (WHERE ${inRange('c.business_date')}), 0)
                         - coalesce(sum(p.amount) FILTER (WHERE ${inRange('c.void_business_date')}), 0))::bigint AS amount
       FROM checkout_payments p JOIN checkouts c ON c.id = p.checkout_id
-      WHERE ${inRange('c.business_date')} OR ${inRange('c.void_business_date')}
+      WHERE (${inRange('c.business_date')} OR ${inRange('c.void_business_date')}) AND ${storeIn(db, 'c.store_id')}
       GROUP BY p.method
       UNION ALL
       SELECT p.method, -sum(p.amount)::bigint FROM refund_payments p JOIN refunds r ON r.id = p.refund_id
-      WHERE r.status = 'completed' AND ${inRange('r.business_date')} GROUP BY p.method
+      WHERE r.status = 'completed' AND ${inRange('r.business_date')} AND ${storeIn(db, 'r.store_id')} GROUP BY p.method
     )
     SELECT method, sum(amount)::bigint AS amount FROM x GROUP BY method HAVING sum(amount) <> 0 ORDER BY amount DESC`;
   const tickets = await db<ExecutiveReport['tickets']>`
@@ -168,7 +170,7 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
            (coalesce(sum(cb.ticket_amount) FILTER (WHERE ${inRange('c.business_date')}), 0)
              - coalesce(sum(cb.ticket_amount) FILTER (WHERE ${inRange('c.void_business_date')}), 0))::bigint AS amount
     FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id
-    WHERE (${inRange('c.business_date')} OR ${inRange('c.void_business_date')}) AND cb.ticket_name IS NOT NULL
+    WHERE (${inRange('c.business_date')} OR ${inRange('c.void_business_date')}) AND cb.ticket_name IS NOT NULL AND ${storeIn(db, 'c.store_id')}
     GROUP BY cb.ticket_name
     HAVING count(*) FILTER (WHERE ${inRange('c.business_date')}) <> count(*) FILTER (WHERE ${inRange('c.void_business_date')})
         OR coalesce(sum(cb.ticket_amount) FILTER (WHERE ${inRange('c.business_date')}), 0) <> coalesce(sum(cb.ticket_amount) FILTER (WHERE ${inRange('c.void_business_date')}), 0)
@@ -178,7 +180,7 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
   const items: DepartmentItem[] = departmentItemTable(lines).groups.flatMap((g) => g.items.map(({ net: _net, share: _share, ...i }) => i));
   const arrivals = await db<ExecutiveReport['arrivals']>`
     SELECT extract(hour FROM checked_in_at AT TIME ZONE ${c.tz})::int AS hour, count(*)::int AS count
-    FROM visits WHERE business_date BETWEEN ${from} AND ${to} AND status <> 'cancelled'
+    FROM visits WHERE business_date BETWEEN ${from} AND ${to} AND status <> 'cancelled' AND ${storeIn(db, 'store_id')}
     GROUP BY 1 ORDER BY 1`;
   return {
     from,
@@ -256,13 +258,13 @@ export async function membersReport(db: Db, from: string, to: string, c: Clock):
     FROM x`;
   const [p] = await db<MembersReport['period'][]>`
     SELECT (SELECT count(*) FROM members WHERE ${bizDate(db, 'created_at', c)} BETWEEN ${from} AND ${to})::int AS new_members,
-           (SELECT coalesce(sum(paid_amount), 0) FROM recharges WHERE business_date BETWEEN ${from} AND ${to}) AS recharge_paid,
-           (SELECT count(*) FROM recharges WHERE business_date BETWEEN ${from} AND ${to})::int AS recharge_count,
-           (SELECT count(DISTINCT member_id) FROM recharges WHERE business_date BETWEEN ${from} AND ${to})::int AS recharge_members,
-           (SELECT coalesce(sum(principal), 0) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to})::bigint AS member_refund,
-           (SELECT count(*) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to})::int AS member_refund_count,
-           (SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to} AND status = 'completed') AS wallet_consumed,
-           (SELECT count(DISTINCT member_id) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to} AND status = 'completed')::int AS consume_members`;
+           (SELECT coalesce(sum(paid_amount), 0) FROM recharges WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}) AS recharge_paid,
+           (SELECT count(*) FROM recharges WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')})::int AS recharge_count,
+           (SELECT count(DISTINCT member_id) FROM recharges WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')})::int AS recharge_members,
+           (SELECT coalesce(sum(principal), 0) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')})::bigint AS member_refund,
+           (SELECT count(*) FROM member_refunds WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')})::int AS member_refund_count,
+           (SELECT coalesce(sum(total_amount), 0) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')} AND status = 'completed') AS wallet_consumed,
+           (SELECT count(DISTINCT member_id) FROM consumptions WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')} AND status = 'completed')::int AS consume_members`;
   const channelRows = await db<{ channel: string | null; total: number; fresh: number }[]>`
     SELECT channel, count(*)::int AS total,
            count(*) FILTER (WHERE ${bizDate(db, 'created_at', c)} BETWEEN ${from} AND ${to})::int AS fresh
@@ -294,7 +296,7 @@ export async function membersReport(db: Db, from: string, to: string, c: Clock):
   const topRecharge = (await withLevel(
     await db`
       SELECT ${MEMBER_BRIEF(db)}, x.paid FROM (
-        SELECT member_id, sum(paid_amount) AS paid FROM recharges WHERE business_date BETWEEN ${from} AND ${to} GROUP BY member_id
+        SELECT member_id, sum(paid_amount) AS paid FROM recharges WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')} GROUP BY member_id
       ) x JOIN members m ON m.id = x.member_id ORDER BY x.paid DESC, m.id LIMIT 10`,
   )) as (MemberBrief & { paid: number })[];
   const dormantList = await withLevel(
@@ -326,9 +328,9 @@ export async function membersReport(db: Db, from: string, to: string, c: Clock):
 export async function dutyExtras(db: Db, today: string, c: Clock, opts: { inStore: boolean } = { inStore: true }): Promise<DutyExtras> {
   const rows = await db<{ hour: number; checkouts: number; arrivals: number }[]>`
     SELECT h AS hour,
-           (SELECT count(*) FROM checkouts WHERE business_date = ${today} AND status = 'completed'
+           (SELECT count(*) FROM checkouts WHERE business_date = ${today} AND status = 'completed' AND ${storeIn(db, 'store_id')}
               AND extract(hour FROM created_at AT TIME ZONE ${c.tz}) = h)::int AS checkouts,
-           (SELECT count(*) FROM visits WHERE business_date = ${today} AND status <> 'cancelled'
+           (SELECT count(*) FROM visits WHERE business_date = ${today} AND status <> 'cancelled' AND ${storeIn(db, 'store_id')}
               AND extract(hour FROM checked_in_at AT TIME ZONE ${c.tz}) = h)::int AS arrivals
     FROM generate_series(0, 23) h ORDER BY h`;
   // 按营业日的顺序排（从切换时刻起），例如 06 点切换时 06、07 … 23、00 … 05
@@ -337,7 +339,7 @@ export async function dutyExtras(db: Db, today: string, c: Clock, opts: { inStor
     ? await db<NonNullable<DutyExtras['longStays']>>`
         SELECT v.id AS visit_id, t.code AS tag_code, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest, v.checked_in_at, b.amount_cents
         FROM visits v JOIN hand_tags t ON t.id = v.tag_id JOIN bills b ON b.id = v.bill_id LEFT JOIN members m ON m.id = v.member_id
-        WHERE v.status = 'open' ORDER BY v.checked_in_at, v.id LIMIT 8`
+        WHERE v.status = 'open' AND ${storeIn(db, 'v.store_id')} ORDER BY v.checked_in_at, v.id LIMIT 8`
     : null;
   return { hourly, departments: byCategory(await itemLines(db, today, today)), longStays };
 }
@@ -348,18 +350,18 @@ const PeriodQuery = z.object({ from: dateSchema('开始日期'), to: dateSchema(
 /** 看板「客房」（S7）：此刻的房态与押金；时段内的入住、挂的晚数 / 段数、房费营业额（结账口径，与部门参考表同一口径）与押金 */
 export async function roomsReport(db: Db, from: string, to: string): Promise<RoomsReport> {
   const status = await db<{ housekeeping: string; occupied: boolean }[]>`
-    SELECT r.housekeeping, EXISTS (SELECT 1 FROM room_stays s WHERE s.room_id = r.id AND s.status = 'open') AS occupied FROM rooms r WHERE r.active`;
+    SELECT r.housekeeping, EXISTS (SELECT 1 FROM room_stays s WHERE s.room_id = r.id AND s.status = 'open') AS occupied FROM rooms r WHERE r.active AND ${storeIn(db, 'r.store_id')}`;
   const counts: Record<RoomBoardStatus, number> = { vacant: 0, occupied: 0, dirty: 0, maintenance: 0 };
   for (const r of status) counts[r.occupied ? 'occupied' : r.housekeeping === 'clean' ? 'vacant' : (r.housekeeping as RoomBoardStatus)] += 1;
   const [held] = await db<{ amount: number }[]>`
     SELECT coalesce(sum(CASE WHEN d.kind = 'receive' THEN d.amount ELSE -d.amount END), 0) AS amount
-    FROM room_deposits d JOIN room_stays s ON s.id = d.stay_id WHERE s.status = 'open'`;
+    FROM room_deposits d JOIN room_stays s ON s.id = d.stay_id WHERE s.status = 'open' AND ${storeIn(db, 's.store_id')}`;
   // 房费营业额：每张结账单结账那一刻的房费明细，时段内结的计正数、反结账的计负数
   const revenueRows = await db<{ date: string; kind: string; quantity: number; amount: number }[]>`
     WITH k AS (
-      SELECT id, created_at, business_date AS d, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to}
+      SELECT id, created_at, business_date AS d, 1 AS sign FROM checkouts WHERE business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}
       UNION ALL
-      SELECT id, created_at, void_business_date, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to}
+      SELECT id, created_at, void_business_date, -1 FROM checkouts WHERE void_business_date BETWEEN ${from} AND ${to} AND ${storeIn(db, 'store_id')}
     )
     SELECT k.d AS date, rc.kind, sum(k.sign * l.quantity)::int AS quantity, sum(k.sign * l.amount)::bigint AS amount
     FROM k JOIN checkout_bills cb ON cb.checkout_id = k.id
@@ -368,17 +370,19 @@ export async function roomsReport(db: Db, from: string, to: string): Promise<Roo
     GROUP BY 1, 2`;
   const stays = await db<{ date: string; checkins: number }[]>`
     SELECT business_date AS date, count(*)::int AS checkins FROM room_stays
-    WHERE business_date BETWEEN ${from} AND ${to} AND status <> 'cancelled' GROUP BY 1`;
+    WHERE business_date BETWEEN ${from} AND ${to} AND status <> 'cancelled' AND ${storeIn(db, 'store_id')} GROUP BY 1`;
   const nightRows = await db<{ date: string; nights: number }[]>`
     SELECT c.night_date AS date, count(*)::int AS nights FROM room_stay_charges c JOIN bill_lines l ON l.id = c.line_id
+    JOIN room_stays rs ON rs.id = c.stay_id AND ${storeIn(db, 'rs.store_id')}
     WHERE c.kind = 'night' AND l.status = 'active' AND c.night_date BETWEEN ${from} AND ${to} GROUP BY 1`;
   const [blocks] = await db<{ n: number }[]>`
     SELECT count(*)::int AS n FROM room_stay_charges c JOIN bill_lines l ON l.id = c.line_id
+    JOIN room_stays rs ON rs.id = c.stay_id AND ${storeIn(db, 'rs.store_id')}
     WHERE c.kind = 'block' AND l.status = 'active' AND l.business_date BETWEEN ${from} AND ${to}`;
   const [dep] = await db<{ received: number; refunded: number }[]>`
     SELECT coalesce(sum(amount) FILTER (WHERE kind = 'receive'), 0) AS received,
            coalesce(sum(amount) FILTER (WHERE kind = 'refund'), 0) AS refunded
-    FROM room_deposits WHERE business_date BETWEEN ${from} AND ${to}`;
+    FROM room_deposits WHERE business_date BETWEEN ${from} AND ${to} AND stay_id IN (SELECT id FROM room_stays WHERE ${storeIn(db, 'store_id')})`;
   const KIND_NAMES: Record<string, string> = { night: '房费（全天房）', half_day: '超时半天', block: '钟点房' };
   const byKind = ['night', 'half_day', 'block'].flatMap((kind) => {
     const rows = revenueRows.filter((r) => r.kind === kind);
@@ -436,14 +440,14 @@ export function registerDashboardReportRoutes(app: FastifyInstance, deps: Deps) 
   app.get('/api/reports/executive', { preHandler: guard('report.executive') }, async (req) => {
     const { c, today } = await clockAndToday();
     const { from, to } = period(req.query, today);
-    return readSnapshot(deps.sql, (tx) => executiveReport(tx, from, to, c));
+    return withReportScope(deps.sql, req, () => readSnapshot(deps.sql, (tx) => executiveReport(tx, from, to, c)));
   });
 
   // 部门项目明细的导出（8.0.15）：时段与权限同经营总览，记审计
   app.get('/api/reports/executive/items.csv', { preHandler: guard('report.executive') }, async (req, reply) => {
     const { c, today } = await clockAndToday();
     const { from, to } = period(req.query, today);
-    const { csv, rows } = await readSnapshot(deps.sql, (tx) => departmentItemsCsv(tx, from, to, c));
+    const { csv, rows } = await withReportScope(deps.sql, req, () => readSnapshot(deps.sql, (tx) => departmentItemsCsv(tx, from, to, c)));
     await writeAudit(deps.sql, { staffId: req.actor.id, action: 'export', targetType: 'executive_items', targetId: `${from}~${to}`, detail: { from, to, rows }, ip: req.ip });
     return csvReply(reply, `部门项目明细_${from}_${to}.csv`, csv);
   });
@@ -451,20 +455,20 @@ export function registerDashboardReportRoutes(app: FastifyInstance, deps: Deps) 
   app.get('/api/reports/members', { preHandler: guard('report.members') }, async (req) => {
     const { c, today } = await clockAndToday();
     const { from, to } = period(req.query, today);
-    return readSnapshot(deps.sql, (tx) => membersReport(tx, from, to, c));
+    return withReportScope(deps.sql, req, () => readSnapshot(deps.sql, (tx) => membersReport(tx, from, to, c)));
   });
 
   // 客房（S7）：经营总览的岗位看
   app.get('/api/reports/rooms', { preHandler: guard('report.executive') }, async (req) => {
     const { today } = await clockAndToday();
     const { from, to } = period(req.query, today);
-    return readSnapshot(deps.sql, (tx) => roomsReport(tx, from, to));
+    return withReportScope(deps.sql, req, () => readSnapshot(deps.sql, (tx) => roomsReport(tx, from, to)));
   });
 
   app.get('/api/reports/technicians', { preHandler: guard('report.technicians') }, async (req) => {
     const { today } = await clockAndToday();
     const { from, to } = period(req.query, today);
-    const report = await readSnapshot(deps.sql, (tx) => technicianReport(tx, from, to));
+    const report = await withReportScope(deps.sql, req, () => readSnapshot(deps.sql, (tx) => technicianReport(tx, from, to)));
     return can(req.actor, 'report.commission') ? report : withoutCommission(report);
   });
 
@@ -472,10 +476,12 @@ export function registerDashboardReportRoutes(app: FastifyInstance, deps: Deps) 
   app.get('/api/reports/technicians/commission.csv', { preHandler: guard('report.commission') }, async (req, reply) => {
     const { today } = await clockAndToday();
     const { from, to } = period(req.query, today);
-    const { lines, techs } = await readSnapshot(deps.sql, async (tx) => ({
-      lines: await withCommission(tx, await settledTechnicianLines(tx, from, to)),
-      techs: await loadTechnicians(tx),
-    }));
+    const { lines, techs } = await withReportScope(deps.sql, req, () =>
+      readSnapshot(deps.sql, async (tx) => ({
+        lines: await withCommission(tx, await settledTechnicianLines(tx, from, to)),
+        techs: await loadTechnicians(tx),
+      })),
+    );
     const yuan = csvYuan;
     await writeAudit(deps.sql, { staffId: req.actor.id, action: 'export', targetType: 'technician_commission', targetId: `${from}~${to}`, ip: req.ip });
     attachment(reply, `技师提成明细_${from}_${to}.csv`, CSV_TYPE);
@@ -506,6 +512,6 @@ export function registerDashboardReportRoutes(app: FastifyInstance, deps: Deps) 
   app.get('/api/reports/duty', { preHandler: guard('ledger.readToday') }, async (req) => {
     const { c, today } = await clockAndToday();
     // 在店客人（姓名、手牌、入场时间、未结金额）属于「查看在店手牌」：没有这项权限的岗位（例如客户经理）看不到
-    return readSnapshot(deps.sql, (tx) => dutyExtras(tx, today, c, { inStore: can(req.actor, 'frontdesk.read') }));
+    return withReportScope(deps.sql, req, () => readSnapshot(deps.sql, (tx) => dutyExtras(tx, today, c, { inStore: can(req.actor, 'frontdesk.read') })));
   });
 }

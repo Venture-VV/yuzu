@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { StoreBrief } from '@shared/stores';
 import { KeyRound, TabletSmartphone, UserPlus, UtensilsCrossed } from 'lucide-react';
 import { DUTY_LABELS, ROLE_HINTS, ROLE_LABELS } from '@shared/labels';
 import { DUTIES, dutyConflict, type Duty, type Role } from '@shared/permissions';
@@ -239,6 +240,14 @@ function StaffDialog({
   const departments = useDepartments(true);
   const [departmentId, setDepartmentId] = useState<number | null>(null);
   const [active, setActive] = useState(true);
+  // 挂哪几家门店（8.0.22）：只有一家店时不显示；店主不用挂（所有门店都能进）
+  const storesQ = useQuery({
+    queryKey: ['staff', 'stores', existing?.id ?? 0],
+    queryFn: () => api.get<{ storeIds: number[]; stores: StoreBrief[] }>(`/api/staff/${existing!.id}/stores`),
+    enabled: !!existing,
+  });
+  const [storeIds, setStoreIds] = useState<number[] | null>(null);
+  const shownStores = storesQ.data && storesQ.data.stores.length > 1 && role !== 'owner' ? storesQ.data.stores : null;
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [lastTarget, setLastTarget] = useState<typeof target>(null);
@@ -251,6 +260,7 @@ function StaffDialog({
     setDuties(existing?.duties ?? []);
     setDepartmentId(existing?.departmentId ?? null);
     setActive(existing?.active ?? true);
+    setStoreIds(null);
     setError(null);
   }
 
@@ -275,6 +285,10 @@ function StaffDialog({
           active,
           ...(departments.data ? { departmentId } : {}),
         });
+        if (shownStores && storeIds && storeIds.join(',') !== storesQ.data!.storeIds.join(',')) {
+          await api.put(`/api/staff/${existing.id}/stores`, { storeIds });
+          void qc.invalidateQueries({ queryKey: ['staff', 'stores', existing.id] });
+        }
         toast({ tone: 'success', title: '已保存' });
       }
       void qc.invalidateQueries({ queryKey: qk.staff });
@@ -382,6 +396,33 @@ function StaffDialog({
                   </option>
                 ))}
             </Select>
+          </Field>
+        )}
+        {shownStores && (
+          <Field label="门店" hint="挂了几家店的员工登录后可以换店；店主不用挂">
+            <div className="flex flex-wrap gap-2" data-testid="staff-stores">
+              {shownStores.map((st) => {
+                const current = storeIds ?? storesQ.data!.storeIds;
+                const on = current.includes(st.id);
+                return (
+                  <label
+                    key={st.id}
+                    className={cn('flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-[13.5px]', on ? 'border-pine bg-pine-tint' : 'border-line-strong bg-card')}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={(e) => setStoreIds(e.target.checked ? [...current, st.id].sort((a, b) => a - b) : current.filter((x) => x !== st.id))}
+                      className="size-4 accent-[var(--color-pine)]"
+                      data-testid={`staff-store-${st.code}`}
+                    />
+                    <span className="num text-ink-3">{st.code}</span>
+                    {st.name}
+                  </label>
+                );
+              })}
+            </div>
+            {storeIds && storeIds.length === 0 && <p className="text-[12.5px] font-semibold text-clay">至少挂一家门店</p>}
           </Field>
         )}
         {!isNew && (

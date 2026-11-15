@@ -44,7 +44,7 @@
 //   backup [--label 备注]                 立即备份一次：导出 → 临时库试恢复 → 自检与数据指纹，文件与 .json 说明写到 BACKUP_PATH
 //   backup-loop                           备份服务：按 BACKUP_INTERVAL_MINUTES 定时备份并清理过期文件（compose 的 backup 服务）
 //   verify-backup <备份文件.dump>         演练：在临时库恢复这份备份，核对文件摘要、数据指纹与自检（不碰当前数据库）
-//   daily-recon [--date YYYY-MM-DD] [--out 目录]
+//   daily-recon [--date YYYY-MM-DD] [--out 目录] [--store 门店代码]
 //                                         每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班、技师业绩、客房与押金，写到 <目录>/<营业日>/
 //   balance-changes --since "YYYY-MM-DD HH:MM" [--include-opening] [--out 文件.csv]
 //                                         某时刻之后有余额变动的会员（只读），退回旧系统时用于回写 EBC；不给 --out 时 CSV 打到标准输出
@@ -118,6 +118,7 @@ import { spacesGeoJson } from './floorplan/geojson';
 import { MAX_PDF_SCALE } from './floorplan/read-pdf';
 import { startConversion } from './floorplan/run';
 import { FLOORPLAN_TIMEOUT_MS } from './modules/floorplans';
+import { DEFAULT_STORE_ID, runInStore } from './lib/store-context';
 
 /** --control 人数,本金,赠金,累计充值（金额单位元），例如 1234,567890.12,12345,987654 */
 function parseControl(text: string | undefined) {
@@ -710,15 +711,27 @@ async function main() {
         break;
       }
       case 'daily-recon': {
-        const date = flag(args, 'date') ?? businessDateOf(new Date(), config.timezone, (await loadSettings(sql)).businessDayStartHour);
-        if (!ISO_DATE.test(date)) throw new Error('--date 应为 YYYY-MM-DD');
-        const recon = await buildDailyRecon(sql, config, date);
-        const dir = join(flag(args, 'out') ?? './recon', date);
-        await mkdir(dir, { recursive: true });
-        for (const f of recon.files) await writeFile(join(dir, f.name), f.content);
-        for (const line of recon.summary) console.log(line);
-        console.log(`${recon.ok ? '✓' : '✗'} 对账包已写到 ${dir}（${recon.files.length} 个文件）`);
-        if (!recon.ok) process.exitCode = 1;
+        // 多门店（8.0.22）：--store <门店代码> 出那家店的对账包，不给是本店（与以往一样）
+        const storeCode = flag(args, 'store');
+        let storeId = DEFAULT_STORE_ID;
+        let dirSuffix = '';
+        if (storeCode) {
+          const [st] = await sql<{ id: number; code: string }[]>`SELECT id, code FROM stores WHERE code = ${storeCode.trim().toUpperCase()}`;
+          if (!st) throw new Error(`没有代码为 ${storeCode} 的门店`);
+          storeId = Number(st.id);
+          if (storeId !== DEFAULT_STORE_ID) dirSuffix = `-${st.code}`;
+        }
+        await runInStore(storeId, async () => {
+          const date = flag(args, 'date') ?? businessDateOf(new Date(), config.timezone, (await loadSettings(sql)).businessDayStartHour);
+          if (!ISO_DATE.test(date)) throw new Error('--date 应为 YYYY-MM-DD');
+          const recon = await buildDailyRecon(sql, config, date);
+          const dir = join(flag(args, 'out') ?? './recon', `${date}${dirSuffix}`);
+          await mkdir(dir, { recursive: true });
+          for (const f of recon.files) await writeFile(join(dir, f.name), f.content);
+          for (const line of recon.summary) console.log(line);
+          console.log(`${recon.ok ? '✓' : '✗'} 对账包已写到 ${dir}（${recon.files.length} 个文件）`);
+          if (!recon.ok) process.exitCode = 1;
+        });
         break;
       }
       case 'balance-changes': {

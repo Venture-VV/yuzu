@@ -12,13 +12,15 @@ import { Money } from '../../components/Money';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { HBars, Kpi, PeriodPicker, presetRange, type Period } from './charts';
 import { TagMembersCard } from './TagMembersCard';
+import { useReportScope } from '../../lib/reportScope';
 
 export function MembersTab() {
+  const scope = useReportScope();
   const session = useSession();
   const [period, setPeriod] = useState<Period>(() => ({ preset: 'month', ...presetRange('month', session.today) }));
   const q = useQuery({
-    queryKey: ['reports', 'members', period.from, period.to],
-    queryFn: () => api.get<MembersReport>(`/api/reports/members?from=${period.from}&to=${period.to}`),
+    queryKey: ['reports', 'members', period.from, period.to, scope.merged],
+    queryFn: () => api.get<MembersReport>(`/api/reports/members?from=${period.from}&to=${period.to}${scope.q}`),
     enabled: period.from <= period.to,
   });
   const d = q.data;

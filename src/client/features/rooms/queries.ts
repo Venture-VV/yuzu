@@ -25,10 +25,10 @@ export const useStayClosePreview = (id: number, enabled: boolean) =>
 
 export const useRoomsAdmin = () => useQuery({ queryKey: roomsAdminKey, queryFn: () => api.get<RoomsAdmin>('/api/admin/rooms') });
 
-export const useRoomsReport = (from: string, to: string, enabled = true) =>
+export const useRoomsReport = (from: string, to: string, enabled = true, scopeQ = '') =>
   useQuery({
-    queryKey: ['reports', 'rooms', from, to],
-    queryFn: () => api.get<RoomsReport>(`/api/reports/rooms?from=${from}&to=${to}`),
+    queryKey: ['reports', 'rooms', from, to, scopeQ],
+    queryFn: () => api.get<RoomsReport>(`/api/reports/rooms?from=${from}&to=${to}${scopeQ}`),
     enabled,
     placeholderData: keepPreviousData,
   });

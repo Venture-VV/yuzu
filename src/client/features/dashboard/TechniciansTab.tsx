@@ -12,14 +12,16 @@ import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Badge, Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { HBars, Kpi, PeriodPicker, presetRange, type Period } from './charts';
+import { useReportScope } from '../../lib/reportScope';
 
 export function TechniciansTab() {
+  const scope = useReportScope();
   const session = useSession();
   const can = useCan();
   const [period, setPeriod] = useState<Period>(() => ({ preset: 'today', ...presetRange('today', session.today) }));
   const q = useQuery({
-    queryKey: ['reports', 'technicians', period.from, period.to],
-    queryFn: () => api.get<TechnicianReport>(`/api/reports/technicians?from=${period.from}&to=${period.to}`),
+    queryKey: ['reports', 'technicians', period.from, period.to, scope.merged],
+    queryFn: () => api.get<TechnicianReport>(`/api/reports/technicians?from=${period.from}&to=${period.to}${scope.q}`),
     enabled: period.from <= period.to,
   });
   const d = q.data;
@@ -32,7 +34,7 @@ export function TechniciansTab() {
         <p className="text-[12.5px] text-ink-3">按结账计：时段内结账的计入，反结账的冲回；在店未结的不算</p>
         {can('report.commission') && (
           <a
-            href={`/api/reports/technicians/commission.csv?from=${period.from}&to=${period.to}`}
+            href={`/api/reports/technicians/commission.csv?from=${period.from}&to=${period.to}${scope.q}`}
             className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line-strong px-3 text-[13px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
             data-testid="commission-export"
           >

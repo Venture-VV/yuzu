@@ -7,6 +7,7 @@ import { departmentItemTable, sharePercent, type ExecutiveReport } from '@shared
 import { cn, downloadUrl } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Button, Card, SectionTitle } from '../../components/ui';
+import { useReportScope } from '../../lib/reportScope';
 
 const TH = 'py-2 font-semibold whitespace-nowrap';
 const NUM = 'num py-1.5 text-right whitespace-nowrap';
@@ -17,6 +18,7 @@ function Amount({ cents, className }: { cents: number; className?: string }) {
 }
 
 export function DepartmentItemsCard({ report }: { report: ExecutiveReport }) {
+  const scope = useReportScope();
   const table = useMemo(() => departmentItemTable(report.items ?? []), [report.items]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const categories = table.groups.map((g) => g.category);
@@ -48,7 +50,7 @@ export function DepartmentItemsCard({ report }: { report: ExecutiveReport }) {
               size="sm"
               variant="secondary"
               icon={<Download className="size-4" />}
-              onClick={() => downloadUrl(`/api/reports/executive/items.csv?from=${report.from}&to=${report.to}`)}
+              onClick={() => downloadUrl(`/api/reports/executive/items.csv?from=${report.from}&to=${report.to}${scope.q}`)}
               data-testid="overview-items-export"
             >
               导出 CSV

@@ -36,6 +36,7 @@ import { listShifts } from '../modules/shifts';
 import { technicianReport, technicianTextSql } from '../modules/technicians';
 import { consistencyChecks, type CheckLine } from './consistency';
 import { computeFingerprint } from './fingerprint';
+import { storeIn } from '../lib/store-context';
 
 export interface ReconFile {
   name: string;
@@ -127,23 +128,23 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
             LEFT JOIN staff ap ON ap.id = p.approved_by
             WHERE p.checkout_id = c.id) AS payments
     FROM checkouts c JOIN staff s ON s.id = c.operator_id LEFT JOIN staff vs ON vs.id = c.voided_by
-    WHERE c.business_date = ${date} OR c.void_business_date = ${date}
+    WHERE (c.business_date = ${date} OR c.void_business_date = ${date}) AND ${storeIn(tx, 'c.store_id')}
     ORDER BY c.created_at, c.id`;
   // 部门参考表：结账时记下的快照（v0.7.6，以后改价目、改分类不影响已结的单）；当天结的计正数、当天反结账的计负数；
   // discount 是按金额比例分摊到这一项的优惠 / 免单与券抵扣（v0.7.20 只分摊到券适用的明细）；
   // refund 是当天的退款单退的金额（v0.7.20，作废的不算），数量减去退的份数
   const departments = await tx<{ category: string; name: string; quantity: number; amount: number; discount: number; refund: number }[]>`
     WITH k AS (
-      SELECT id, 1 AS sign FROM checkouts WHERE business_date = ${date}
+      SELECT id, 1 AS sign FROM checkouts WHERE business_date = ${date} AND ${storeIn(tx, 'store_id')}
       UNION ALL
-      SELECT id, -1 FROM checkouts WHERE void_business_date = ${date}
+      SELECT id, -1 FROM checkouts WHERE void_business_date = ${date} AND ${storeIn(tx, 'store_id')}
     ),
     x AS (
       SELECT ci.category, ci.name, k.sign * ci.quantity AS quantity, k.sign * ci.amount AS amount, k.sign * ci.discount AS discount, 0::bigint AS refund
       FROM k JOIN checkout_items ci ON ci.checkout_id = k.id
       UNION ALL
       SELECT ri.category, ri.name, -ri.quantity, 0, 0, ri.amount
-      FROM refund_items ri JOIN refunds r ON r.id = ri.refund_id WHERE r.status = 'completed' AND r.business_date = ${date}
+      FROM refund_items ri JOIN refunds r ON r.id = ri.refund_id WHERE r.status = 'completed' AND r.business_date = ${date} AND ${storeIn(tx, 'r.store_id')}
     )
     SELECT category, name, sum(quantity)::int AS quantity, sum(amount)::bigint AS amount, sum(discount)::bigint AS discount, sum(refund)::bigint AS refund
     FROM x
@@ -166,7 +167,7 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
             FROM refund_payments p WHERE p.refund_id = r.id) AS pays
     FROM refunds r JOIN checkouts c ON c.id = r.checkout_id JOIN staff s ON s.id = r.operator_id JOIN refund_items ri ON ri.refund_id = r.id
     LEFT JOIN staff vb ON vb.id = r.voided_by
-    WHERE r.business_date = ${date}
+    WHERE r.business_date = ${date} AND ${storeIn(tx, 'r.store_id')}
     ORDER BY r.id, ri.amount DESC, ri.category COLLATE "C", ri.name COLLATE "C"`;
   // 按分类、项目名排序（逐字符比较，结果与数据库的排序规则无关）
   departments.sort((a, b) => (a.category === b.category ? (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : a.category < b.category ? -1 : 1));
@@ -175,7 +176,7 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
            l.name, l.quantity, l.amount, l.void_reason AS reason, ps.display_name AS posted_by_name, ${technicianTextSql(tx, 'l')} AS technician
     FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
     JOIN staff vs ON vs.id = l.voided_by JOIN staff ps ON ps.id = l.posted_by
-    WHERE l.status = 'voided' AND l.voided_at >= ${from} AND l.voided_at < ${to}
+    WHERE l.status = 'voided' AND l.voided_at >= ${from} AND l.voided_at < ${to} AND ${storeIn(tx, 'v.store_id')}
       AND NOT (l.ticket_type_id IS NOT NULL AND l.void_reason LIKE '反结账 %')
     UNION ALL
     -- 桌台退菜（餐饮第二步）：单号是开台号，「手牌」一栏写桌号
@@ -183,13 +184,13 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
            l.name, l.quantity, l.amount, l.void_reason, ps.display_name, NULL
     FROM bill_lines l JOIN table_sessions s ON s.bill_id = l.bill_id JOIN dining_tables dt ON dt.id = s.table_id LEFT JOIN members m ON m.id = s.member_id
     JOIN staff vs ON vs.id = l.voided_by JOIN staff ps ON ps.id = l.posted_by
-    WHERE l.status = 'voided' AND l.voided_at >= ${from} AND l.voided_at < ${to}
+    WHERE l.status = 'voided' AND l.voided_at >= ${from} AND l.voided_at < ${to} AND ${storeIn(tx, 's.store_id')}
     ORDER BY 1, 2`;
   const cancelled = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; reason: string | null; checkedInAt: string }[]>`
     SELECT v.closed_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest,
            coalesce(s.display_name, '') AS staff, v.close_reason AS reason, v.checked_in_at
     FROM visits v JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id LEFT JOIN staff s ON s.id = v.closed_by
-    WHERE v.status = 'cancelled' AND v.closed_at >= ${from} AND v.closed_at < ${to}
+    WHERE v.status = 'cancelled' AND v.closed_at >= ${from} AND v.closed_at < ${to} AND ${storeIn(tx, 'v.store_id')}
     ORDER BY v.closed_at, v.id`;
   // 改票种：降低票种或改成免票时记下当场授权的人与原因（R1.2 起；之前的记录与改贵的没有）
   const ticketChanges = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; fromName: string; toName: string; price12h: number; price24h: number; approverName: string | null; reason: string | null }[]>`
@@ -198,7 +199,7 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     FROM visit_ticket_changes c JOIN visits v ON v.id = c.visit_id JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
     JOIN staff s ON s.id = c.operator_id JOIN ticket_types ft ON ft.id = c.from_type_id JOIN ticket_types tt ON tt.id = c.to_type_id
     LEFT JOIN staff ap ON ap.id = c.approved_by
-    WHERE c.created_at >= ${from} AND c.created_at < ${to}
+    WHERE c.created_at >= ${from} AND c.created_at < ${to} AND ${storeIn(tx, 'v.store_id')}
     ORDER BY c.created_at, c.id`;
   // 免票入场：接待时就是免票（之后改过票种的，按第一次改票种之前的票种算；在店期间改成免票的列在「改票种」）。
   // 接待时直接选免票的授权记在这次接待的审计记录里（R1.2 起），按手牌对上这次接待（接待的第一位来访编号不大于本来访）
@@ -216,7 +217,7 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
       ORDER BY (CASE WHEN a.target_id ~ '^[0-9]+$' THEN a.target_id::bigint END) DESC
       LIMIT 1
     ) fa ON true
-    WHERE v.checked_in_at >= ${from} AND v.checked_in_at < ${to} AND v.status <> 'cancelled'
+    WHERE v.checked_in_at >= ${from} AND v.checked_in_at < ${to} AND v.status <> 'cancelled' AND ${storeIn(tx, 'v.store_id')}
       AND coalesce(
         (SELECT ft.price_12h = 0 AND ft.price_24h = 0 FROM visit_ticket_changes c JOIN ticket_types ft ON ft.id = c.from_type_id
          WHERE c.visit_id = v.id ORDER BY c.created_at, c.id LIMIT 1),
@@ -231,35 +232,35 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
            CASE s.kind WHEN 'daily' THEN '全天房，房价每晚' ELSE '钟点房，房价每段 ' || s.block_minutes || ' 分钟' END AS note
     FROM room_stays s JOIN rooms r ON r.id = s.room_id JOIN staff st ON st.id = s.checked_in_by
     JOIN visits v ON v.id = s.visit_id JOIN hand_tags ht ON ht.id = v.tag_id
-    WHERE s.checked_in_at >= ${from} AND s.checked_in_at < ${to}
+    WHERE s.checked_in_at >= ${from} AND s.checked_in_at < ${to} AND ${storeIn(tx, 's.store_id')}
     UNION ALL
     SELECT c.created_at, CASE c.source WHEN 'checkin' THEN '房费（随入住）' WHEN 'audit' THEN '房费（夜审）' WHEN 'checkout' THEN '房费（退房补挂）' ELSE '房费（续住）' END,
            s.stay_no, r.room_no, s.guest_label, ht.code, NULL, c.amount, st.display_name,
            l.name || CASE WHEN l.status = 'voided' THEN '（已作废：' || l.void_reason || '）' ELSE '' END
     FROM room_stay_charges c JOIN room_stays s ON s.id = c.stay_id JOIN rooms r ON r.id = s.room_id JOIN bill_lines l ON l.id = c.line_id
     JOIN staff st ON st.id = c.created_by JOIN visits v ON v.id = s.visit_id JOIN hand_tags ht ON ht.id = v.tag_id
-    WHERE c.created_at >= ${from} AND c.created_at < ${to}
+    WHERE c.created_at >= ${from} AND c.created_at < ${to} AND ${storeIn(tx, 's.store_id')}
     UNION ALL
     SELECT d.created_at, CASE d.kind WHEN 'receive' THEN '收押金' ELSE '退押金' END,
            s.stay_no, r.room_no, s.guest_label, ht.code, d.method, CASE WHEN d.kind = 'receive' THEN d.amount ELSE -d.amount END,
            st.display_name, concat_ws('；', nullif(d.ref, ''), d.reason)
     FROM room_deposits d JOIN room_stays s ON s.id = d.stay_id JOIN rooms r ON r.id = s.room_id JOIN staff st ON st.id = d.operator_id
     JOIN visits v ON v.id = s.visit_id JOIN hand_tags ht ON ht.id = v.tag_id
-    WHERE d.business_date = ${date}
+    WHERE d.business_date = ${date} AND ${storeIn(tx, 's.store_id')}
     UNION ALL
     SELECT mv.created_at, '换房', s.stay_no, tr.room_no, s.guest_label, ht.code, NULL, NULL, st.display_name, fr.room_no || ' → ' || tr.room_no || '：' || mv.reason
     FROM room_moves mv JOIN room_stays s ON s.id = mv.stay_id JOIN rooms fr ON fr.id = mv.from_room_id JOIN rooms tr ON tr.id = mv.to_room_id
     JOIN staff st ON st.id = mv.operator_id JOIN visits v ON v.id = s.visit_id JOIN hand_tags ht ON ht.id = v.tag_id
-    WHERE mv.created_at >= ${from} AND mv.created_at < ${to}
+    WHERE mv.created_at >= ${from} AND mv.created_at < ${to} AND ${storeIn(tx, 's.store_id')}
     UNION ALL
     SELECT s.closed_at, CASE s.status WHEN 'checked_out' THEN '退房' ELSE '撤销入住' END,
            s.stay_no, r.room_no, s.guest_label, ht.code, NULL, NULL, st.display_name, coalesce(s.close_reason, '')
     FROM room_stays s JOIN rooms r ON r.id = s.room_id JOIN staff st ON st.id = s.closed_by
     JOIN visits v ON v.id = s.visit_id JOIN hand_tags ht ON ht.id = v.tag_id
-    WHERE s.status <> 'open' AND s.closed_at >= ${from} AND s.closed_at < ${to}
+    WHERE s.status <> 'open' AND s.closed_at >= ${from} AND s.closed_at < ${to} AND ${storeIn(tx, 's.store_id')}
     UNION ALL
     SELECT a.run_at, '夜审', '', '', '', NULL, NULL, a.amount, st.display_name, '挂了 ' || a.nights || ' 晚房费'
-    FROM room_audits a JOIN staff st ON st.id = a.run_by WHERE a.business_date = ${date}
+    FROM room_audits a JOIN staff st ON st.id = a.run_by WHERE a.business_date = ${date} AND ${storeIn(tx, 'a.store_id')}
     ORDER BY 1, 3`;
   // 派对房等的使用单（v0.7.19）：当天开的（营业日），以及当天结束的、前一天开的
   const usages = await tx<{ usageNo: string; spaceCode: string; spaceName: string; businessType: string; tagCode: string; guests: number; openedAt: string; openedBy: string; closedAt: string | null; closedBy: string | null; status: string; closeKind: string | null; closeReason: string | null; note: string; businessDate: string }[]>`
@@ -268,7 +269,7 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
            u.business_date::text AS business_date
     FROM space_usages u JOIN spaces sp ON sp.id = u.space_id JOIN visits v ON v.id = u.visit_id JOIN hand_tags ht ON ht.id = v.tag_id
     JOIN staff so ON so.id = u.opened_by LEFT JOIN staff sc ON sc.id = u.closed_by
-    WHERE u.business_date = ${date} OR (u.closed_at >= ${from} AND u.closed_at < ${to})
+    WHERE (u.business_date = ${date} OR (u.closed_at >= ${from} AND u.closed_at < ${to})) AND ${storeIn(tx, 'u.store_id')}
     ORDER BY u.opened_at, u.id`;
   // 券（v0.7.20）：当天的发券记录与券的变动（用、退回、作废）
   const couponIssues = await tx<{ at: string; issueNo: string; kind: string; template: string; member: string | null; quantity: number; staff: string | null; reason: string }[]>`
