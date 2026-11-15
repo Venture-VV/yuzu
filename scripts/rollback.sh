@@ -14,7 +14,7 @@ source scripts/lib/common.sh
 
 state=.deploy/last-update
 if [[ ! -f "$state" ]]; then
-  echo "✗ 没有找到上一次升级的记录（$state）：用 v0.3.3 及之后的 update.sh 升级过，才能一键回退" >&2
+  echo "✗ 没有找到上一次升级的记录（${state}）：用 v0.3.3 及之后的 update.sh 升级过，才能一键回退" >&2
   exit 1
 fi
 state_of() { grep -E "^$1=" "$state" | tail -n 1 | cut -d= -f2- || true; }
@@ -34,7 +34,7 @@ if [[ "$head" != "$current" ]]; then
   exit 1
 fi
 if ! docker image inspect "$prev_image" >/dev/null 2>&1; then
-  echo "✗ 找不到上一版的镜像 $prev_image：可以 git checkout ${prev:0:12} 后用 update.sh 的步骤重新构建" >&2
+  echo "✗ 找不到上一版的镜像 ${prev_image}：可以 git checkout ${prev:0:12} 后用 update.sh 的步骤重新构建" >&2
   exit 1
 fi
 if $restore; then
@@ -48,7 +48,7 @@ fi
 app_env=$(env_of APP_ENV)
 echo "即将回退：${current:0:12} → ${prev:0:12}（APP_ENV=${app_env:-未设置}，实例 $(env_of YUZU_INSTANCE)）"
 if $restore; then
-  echo "· 同时恢复升级前的备份 $(basename "$before")${migrations:+（新版本加了迁移 $migrations）}。"
+  echo "· 同时恢复升级前的备份 $(basename "$before")${migrations:+（新版本加了迁移 ${migrations}）}。"
   echo "  升级之后录入的数据会丢失，要按纸质单补录；回退前会先备份当前数据，以便核对。"
 else
   echo "· 新版本没有加数据库迁移：只切回上一版的程序，数据保留。"
@@ -90,18 +90,21 @@ if $restore; then
   fi
   cat "$report"
   changes=$(grep -o '^CHANGES=[0-9]*' "$report" | tail -n 1 | cut -d= -f2 || true)
-  if [[ "${changes:-1}" != "0" ]]; then
-    echo "以上是升级以后写进系统的。恢复升级前的备份后，它们会从系统里消失，要按纸质单补录。"
-    echo "回退前的备份里都留着：${rollback_dump:-见备份目录}；这份清单存在 $report。"
-    if [[ "$app_env" == "production" ]]; then
-      read -r -p "核对过、确认按纸质单补录，请输入 DISCARD-AFTER-UPGRADE（输入别的就不回退）：" answer
-      [[ "$answer" == "DISCARD-AFTER-UPGRADE" ]] || resume_current "已取消回退：应用照旧在新版本上启动"
-    elif [[ "${YUZU_ROLLBACK_CONFIRM:-}" != "yes" ]]; then
-      read -r -p "确认按纸质单补录，请输入 DISCARD（输入别的就不回退）：" answer
-      [[ "$answer" == "DISCARD" ]] || resume_current "已取消回退：应用照旧在新版本上启动"
-    fi
+  # 清单只是帮人核对，不是闸门：数得到的是有时间列的表与审计，数不到不等于没有（3b58876 复验：员工端饭堂反馈
+  # 这类写入原来数出来是 0，脚本就跳过了确认）。恢复旧快照之前一律当面确认
+  if [[ "${changes:-1}" == "0" ]]; then
+    echo "· 清单里没有数到写入。清单只数得到有时间列的表与审计里的业务动作，数不到的不等于没有。"
   else
-    echo "· 升级以后没有业务写入。"
+    echo "以上是升级以后写进系统的（清单不一定全）。"
+  fi
+  echo "恢复升级前的备份以后，升级以后写进系统的不论列没列出来都会消失，要按纸质单补录。"
+  echo "回退前的备份里都留着：${rollback_dump:-见备份目录}；这份清单存在 ${report}。"
+  if [[ "$app_env" == "production" ]]; then
+    read -r -p "核对过、确认按纸质单补录，请输入 DISCARD-AFTER-UPGRADE（输入别的就不回退）：" answer
+    [[ "$answer" == "DISCARD-AFTER-UPGRADE" ]] || resume_current "已取消回退：应用照旧在新版本上启动"
+  elif [[ "${YUZU_ROLLBACK_CONFIRM:-}" != "yes" ]]; then
+    read -r -p "确认按纸质单补录，请输入 DISCARD（输入别的就不回退）：" answer
+    [[ "$answer" == "DISCARD" ]] || resume_current "已取消回退：应用照旧在新版本上启动"
   fi
 fi
 mark_dirty

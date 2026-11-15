@@ -51,7 +51,7 @@ command -v sftp >/dev/null 2>&1 || die "找不到 sftp"
 key=$(env_of OFFSITE_SSH_KEY)
 key=${key:-$HOME/.ssh/yuzu_offsite}
 case "$key" in \~/*) key="$HOME/${key#\~/}" ;; esac
-[[ -f "$key" ]] || die "找不到 SSH 私钥 $key（生成见 Mac mini 部署手册 9.8）"
+[[ -f "$key" ]] || die "找不到 SSH 私钥 ${key}（生成见 Mac mini 部署手册 9.8）"
 port=$(env_of OFFSITE_PORT)
 port=${port:-22}
 keep=$(env_of OFFSITE_KEEP_DAYS)
@@ -70,7 +70,7 @@ if [[ "${1:-}" == "--check" ]]; then
   probe="yuzu-offsite-check-$(date +%Y%m%d-%H%M%S).txt"
   echo "浴族异地副本连通测试 $(date '+%Y-%m-%d %H:%M:%S')" > "$tmp/$probe"
   if printf 'put "%s" "%s"\nls -l "%s"\n' "$tmp/$probe" "$probe" "$probe" | sftp_batch > /dev/null 2> "$tmp/sftp.err"; then
-    log "✓ 能连上 $target，备份目录可写（测试文件 $probe 由服务器的定时清理删掉）"
+    log "✓ 能连上 ${target}，备份目录可写（测试文件 $probe 由服务器的定时清理删掉）"
     exit 0
   fi
   die "连不上 $target 或目录不可写：$(last_error)"
@@ -84,7 +84,7 @@ fi
 
 # 服务器上已有的副本
 if ! printf 'ls -1\n' | sftp_batch > "$tmp/remote" 2> "$tmp/sftp.err"; then
-  die "连不上 $target：$(last_error)"
+  die "连不上 ${target}：$(last_error)"
 fi
 
 now=$(date +%s)
@@ -130,7 +130,7 @@ for ((i = ${#dumps[@]} - 1; i >= 0; i--)); do
   } | sftp_batch > /dev/null 2> "$tmp/sftp.err"; then
     mark_sent "$base" "$mt"
     sent=$((sent + 1))
-    log "已传 $base（加密后 $(wc -c < "$tmp/$base.age" | tr -d ' ') 字节）"
+    log "已传 ${base}（加密后 $(wc -c < "$tmp/$base.age" | tr -d ' ') 字节）"
   else
     log "✗ 传 $base 失败：$(last_error)"
     failed=$((failed + 1))

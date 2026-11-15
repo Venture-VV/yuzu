@@ -44,7 +44,7 @@ node dist/server/cli.js fingerprint        # 数据指纹（只读）；--expect
 ./scripts/daily-recon.sh [营业日]           # 每日对账包（只读）：日结汇总、结账单、部门参考表、异常清单、交班、技师业绩，写到 recon/<营业日>/
 node dist/server/cli.js daily-recon --store <门店代码> [--date YYYY-MM-DD]   # 别的门店的对账包（8.0.22，目录名带门店代码；不给 --store 是本店，与上一行一样）
 node dist/server/cli.js balance-changes --since "YYYY-MM-DD HH:MM"   # 某时刻之后有余额变动的会员（只读，回写 EBC 用）
-node dist/server/cli.js changes-since --since "YYYY-MM-DD HH:MM"     # 某时刻之后写进系统的业务（只读，8.1.0）：接待、结账、充值、消费、库存单据的笔数、余额有变动的会员、审计里的业务动作；rollback.sh 恢复前用
+node dist/server/cli.js changes-since --since "YYYY-MM-DD HH:MM"     # 某时刻之后写进系统的（只读，8.1.0）：每一张有时间列的表新增、改过的行数，余额有变动的会员，审计里的业务动作；rollback.sh 恢复前列给人看（清单只帮核对，恢复前一律当面确认）
 node dist/server/cli.js import-hand-tags --store-list   # 预览导入店主 747 个真实柜号；--apply 才写入（真实业务数据，门店环境须店主同意）
 node dist/server/cli.js import-price-list --tangqi      # 预览导入汤崎价目表（29 个项目、多档价格）；--apply 才写入（同上）
 node dist/server/cli.js import-legacy <原始.xlsx> --operator <店主账号>   # 预览导入 8–10 月旧账（四份原始 Excel 之一）的只读对照；--apply 才写入（真实业务数据，门店环境须店主同意；不进正式账）
