@@ -76,6 +76,7 @@ export function Stage({
   motion = true,
   lang = 'zh',
   big = false,
+  vars,
 }: {
   children: ReactNode;
   testId?: string;
@@ -84,6 +85,8 @@ export function Stage({
   lang?: 'zh' | 'en';
   /** 字与按钮放大的一档（后台设置；菜单还没取到时不放大） */
   big?: boolean;
+  /** UI 工作台（8.1.1）发布的主题：改过的颜色、字体（--em-*）；默认版面一个都不给 */
+  vars?: Record<string, string>;
 }) {
   const stable = useRef<StableSize | null>(null);
   const lastEditAt = useRef(0);
@@ -144,7 +147,7 @@ export function Stage({
       <div
         className="emenu"
         // 高度写成稳定的那个数（不用 inset: 0）：键盘把窗口压矮时这一层不跟着变矮，舞台不会被挤
-        style={{ position: 'fixed', left: 0, top: 0, width: '100%', height: height ?? '100%', overflow: 'hidden', background: 'var(--em-bg)' }}
+        style={{ position: 'fixed', left: 0, top: 0, width: '100%', height: height ?? '100%', overflow: 'hidden', background: 'var(--em-bg)', ...vars }}
         data-motion={animated ? undefined : 'off'}
         data-lang={lang}
         data-size={big ? 'large' : 'design'}
@@ -172,6 +175,32 @@ export function Stage({
           <div data-emenu-ghosts aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }} />
         </div>
       </div>
+      </BigContext.Provider>
+    </StageContext.Provider>
+  );
+}
+
+/**
+ * 编辑器画布里的舞台（UI 工作台，8.1.1）：与平板同一套样式与上下文，但不铺满窗口、不跟键盘挪，按给的倍数缩放；没有动效。
+ * 里面照设计稿的像素画（1024×768），外面的盒子是缩放以后的大小。
+ */
+export function EmbeddedStage({ children, scale, lang = 'zh', big = false, vars, testId }: { children: ReactNode; scale: number; lang?: 'zh' | 'en'; big?: boolean; vars?: Record<string, string>; testId?: string }) {
+  return (
+    <StageContext.Provider value={{ scale, visible: STAGE_H, keyboard: false, animated: false }}>
+      <BigContext.Provider value={big}>
+        <div
+          className="emenu"
+          style={{ position: 'relative', width: STAGE_W * scale, height: STAGE_H * scale, overflow: 'hidden', background: 'var(--em-bg)', ...vars }}
+          data-motion="off"
+          data-lang={lang}
+          data-size={big ? 'large' : 'design'}
+          data-testid={testId}
+        >
+          <div style={{ position: 'absolute', left: 0, top: 0, width: STAGE_W, height: STAGE_H, transform: `scale(${scale})`, transformOrigin: '0 0', overflow: 'hidden', background: 'var(--em-bg)' }} data-emenu-stage>
+            {children}
+            <div data-emenu-ghosts aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }} />
+          </div>
+        </div>
       </BigContext.Provider>
     </StageContext.Provider>
   );

@@ -28,15 +28,18 @@ import {
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { uuid } from '../../lib/utils';
-import { Header, LangToggle } from './header';
+import { Header } from './header';
 import { blockLabel, dishNames, dishTagline, guestErrorEn, LangProvider, messages, namePair, optionLabel, specLabel, useLang, useM, type Lang, type Messages } from './i18n';
 import { LogoStacked } from './logo';
 import { Backdrop, Frame, InfoModal, ModalButton, ModalNote, SmallDialog, SuccessModal, Toast, type InfoField } from './modals';
 import { DishDetail, OrderDrawer, RemarkDrawer, SearchOverlay, type CartRow, type SearchHit } from './overlays';
 import { flyToOrder, overlayNav } from './motion';
 import { PageCanvas, yuan, type PageCtx } from './pages';
-import { BIG, box, Stage, useBig, ZoomAt } from './stage';
+import { BIG, box, Stage, useBig } from './stage';
 import { MenuStrip, type StripHandle } from './strip';
+import { LangBlock, LogoBlock, LogoRowBlock, StartCoverBlock, StartFooterBlock, StartPendingBlock, StudioPreviewBand, StudioVersionMark, studioAssetUrl, useEmenuLayout } from './studio';
+import { colorValue, EMENU_SURFACE, type StudioDoc } from '@shared/studio';
+import { StudioNodes, type StudioRenderCtx } from '../../studio-render/StudioNodes';
 import {
   EMPTY_REMARK,
   lastTable,
@@ -106,6 +109,8 @@ export function EmenuPage() {
   const [flashId, setFlashId] = useState<number | null>(null);
   const [bump, setBump] = useState(0);
   const pending = usePendingOrder();
+  // UI 工作台的版面（8.1.1）：预览码 > 已发布的最新一版 > 内置的默认版面；新的一版只在停在起始页、没有弹窗时才换（GZ6）
+  const layout = useEmenuLayout(menuQ.data ?? null, phase === 'start' && !overlay);
   const lastTouch = useRef(saved?.touchedAt ?? Date.now());
 
   // 这一次点餐随手存在平板上：页面被系统刷新了还在。
@@ -551,58 +556,76 @@ export function EmenuPage() {
   // 抽屉里换内容（未下单 ⇄ 备注）：新的那一块不重新滑进来
   const swap = cameFrom.current === 'drawer' || cameFrom.current === 'remark';
   return (
-    <Stage testId="emenu" motion={menu.rules.motion} lang={shown} big={menu.rules.textSize !== 'design'}>
+    <Stage testId="emenu" motion={menu.rules.motion} lang={shown} big={menu.rules.textSize !== 'design'} vars={layout.vars}>
       <LangProvider value={shown}>
       {inMenu ? (
-        <>
-          {flat.length === 0 ? (
-            <NoMenu menu={menu} />
-          ) : (
-            <div key={session.visitId} className="em-page-in" style={{ ...box(0, 0, 1024, 768) }}>
-              <MenuStrip
-                ref={strip}
-                count={flat.length}
-                index={Math.min(index, flat.length - 1)}
-                onIndex={setIndex}
-                pageKey={(i) => `${flat[i]!.category.id}-${flat[i]!.pageNo}`}
-                renderPage={(i) => <PageCanvas page={flat[i]!.page} ctx={pageCtx(flat[i]!)} />}
-              />
-            </div>
-          )}
-          {detail && (
-            <DishDetail
-              dish={detail.dish}
-              open={detail.category.open}
-              origin={detail.origin}
-              onClose={() => setOverlay(null)}
-              onPrev={detail.prev}
-              onNext={detail.next}
-              onAdd={(spec, from) => addSpec(detail.dish, spec, detail.category.open, from)}
-            />
-          )}
-          <Header
-            categories={categories}
-            activeId={detail?.category.id ?? at?.category.id ?? null}
-            onCategory={(id) => {
-              setOverlay(null);
-              const i = flat.findIndex((f) => f.category.id === id);
-              // 直接到那个分类的第一页（不横向滚过中间的页），那一页轻微放大缓入
-              if (i >= 0) goTo(i, 'zoom');
-            }}
-            tagCode={session.tagCode}
-            count={count}
-            bump={bump}
-            pending={!!pending}
-            onSearch={() => setOverlay({ kind: 'search' })}
-            onOrder={() => setOverlay(pending ? { kind: 'pending' } : { kind: 'drawer', tab: 'cart' })}
-            onTag={() => setOverlay({ kind: 'end' })}
-            onLang={langOn ? toggleLang : undefined}
-          />
-          {!detail && at && <PageDots flat={flat} index={index} onGo={goTo} />}
-        </>
+        // 菜单页的几块（UI 工作台的版面，8.1.1）：菜单页、顶栏（菜品详情在顶栏下面打开）、翻页圆点，以及设计师加的装饰
+        <StudioNodes
+          nodes={layout.doc.screens.menu?.nodes ?? []}
+          ctx={{
+            surface: EMENU_SURFACE,
+            lang: shown,
+            assetUrl: studioAssetUrl,
+            blocks: {
+              'menu.pages': () =>
+                flat.length === 0 ? (
+                  <NoMenu menu={menu} />
+                ) : (
+                  <div key={session.visitId} className="em-page-in" style={{ ...box(0, 0, 1024, 768) }}>
+                    <MenuStrip
+                      ref={strip}
+                      count={flat.length}
+                      index={Math.min(index, flat.length - 1)}
+                      onIndex={setIndex}
+                      pageKey={(i) => `${flat[i]!.category.id}-${flat[i]!.pageNo}`}
+                      renderPage={(i) => <PageCanvas page={flat[i]!.page} ctx={pageCtx(flat[i]!)} />}
+                    />
+                  </div>
+                ),
+              'menu.header': () => (
+                <>
+                  {detail && (
+                    <DishDetail
+                      dish={detail.dish}
+                      open={detail.category.open}
+                      origin={detail.origin}
+                      onClose={() => setOverlay(null)}
+                      onPrev={detail.prev}
+                      onNext={detail.next}
+                      onAdd={(spec, from) => addSpec(detail.dish, spec, detail.category.open, from)}
+                    />
+                  )}
+                  <Header
+                    categories={categories}
+                    activeId={detail?.category.id ?? at?.category.id ?? null}
+                    onCategory={(id) => {
+                      setOverlay(null);
+                      const i = flat.findIndex((f) => f.category.id === id);
+                      // 直接到那个分类的第一页（不横向滚过中间的页），那一页轻微放大缓入
+                      if (i >= 0) goTo(i, 'zoom');
+                    }}
+                    tagCode={session.tagCode}
+                    count={count}
+                    bump={bump}
+                    pending={!!pending}
+                    onSearch={() => setOverlay({ kind: 'search' })}
+                    onOrder={() => setOverlay(pending ? { kind: 'pending' } : { kind: 'drawer', tab: 'cart' })}
+                    onTag={() => setOverlay({ kind: 'end' })}
+                    onLang={langOn ? toggleLang : undefined}
+                  />
+                </>
+              ),
+              'menu.dots': (n) => (!detail && at ? <PageDots flat={flat} index={index} onGo={goTo} width={n.w} /> : null),
+              'brand.logo': (n) => <LogoBlock node={n} tone="var(--em-ink)" />,
+              'brand.logoRow': (n) => <LogoRowBlock node={n} tone="var(--em-ink)" />,
+            },
+          }}
+        />
       ) : (
         <StartPage
           menu={menu}
+          doc={layout.doc}
+          version={layout.version}
           asking={phase === 'input'}
           pending={!!pending}
           onStart={() => setPhase('input')}
@@ -650,6 +673,11 @@ export function EmenuPage() {
           onQuantity={setQuantity}
           onRemark={() => setOverlay({ kind: 'remark' })}
           onSubmit={() => {
+            // 工作台的预览（预览码打开的草稿）：不能下单
+            if (layout.preview) {
+              say('这是工作台的预览：不能下单');
+              return;
+            }
             setOpNote(null);
             // 记下客人这时看到的合计：输密码的这段时间菜单又取了一次、价格变了的话，门店系统按这个数拒绝（PRICE_CHANGED），不会按没看过的价格下单
             setOverlay({ kind: 'confirm', total });
@@ -802,6 +830,7 @@ export function EmenuPage() {
           退出以后要重新登录才能点餐。
         </SmallDialog>
       )}
+      <StudioPreviewBand preview={layout.preview} error={layout.previewError} />
       <Toast text={toast} />
       </LangProvider>
     </Stage>
@@ -825,6 +854,8 @@ function StartBackdrop({ coverUrl }: { coverUrl: string | null }) {
 
 function StartPage({
   menu,
+  doc,
+  version,
   asking,
   pending,
   onStart,
@@ -834,6 +865,10 @@ function StartPage({
   onLang,
 }: {
   menu: EmenuMenu;
+  /** UI 工作台的版面（8.1.1）：起始页的几块放在哪、长什么样；没发布过是内置的默认版面（= 改造前的样子） */
+  doc: StudioDoc;
+  /** 用的已发布的第几版（右下角很小的标记；默认版面不显示） */
+  version: number | null;
   asking: boolean;
   pending: boolean;
   onStart: () => void;
@@ -844,11 +879,25 @@ function StartPage({
 }) {
   const lang = useLang();
   const m = useM();
-  const hold = useRef<number | null>(null);
   const cover = menu.rules.coverUrl;
   // 压在氛围图上的字：有图时用浅色（图一般偏深），没图时照设计稿的深棕
   const tone = cover ? '#f4f3f2' : 'var(--em-ink)';
-  const large = useBig();
+  const screen = doc.screens.start ?? { background: '$photo', nodes: [] };
+  const ctx: StudioRenderCtx = {
+    surface: EMENU_SURFACE,
+    lang,
+    assetUrl: studioAssetUrl,
+    blocks: {
+      'start.cover': (n) => <StartCoverBlock node={n} coverUrl={cover} />,
+      'brand.logo': (n) => <LogoBlock node={n} tone={tone} />,
+      'brand.logoRow': (n) => <LogoRowBlock node={n} tone={tone} />,
+      'start.pending': (n) => <StartPendingBlock node={n} tone={tone} show={!asking && pending} />,
+      // 长按版权行 3 秒：员工退出这台平板的登录
+      'start.footer': (n) => <StartFooterBlock node={n} tone={tone} text={menu.rules.footerText} onExit={onExit} />,
+      // 「中 | EN」：输入信息的弹窗开着时也能点（盖在弹窗上面的那一层，见下面）
+      lang: (n) => (onLang ? <LangBlock node={n} lang={lang} onToggle={onLang} autoLight={!!cover && !asking} /> : null),
+    },
+  };
   return (
     <>
       <div
@@ -856,54 +905,14 @@ function StartPage({
         aria-label={m.startAria}
         onClick={() => !asking && onStart()}
         className="em-settle"
-        style={{ ...box(0, 0, 1024, 768), background: 'var(--em-photo)', cursor: asking ? undefined : 'pointer', overflow: 'hidden' }}
+        style={{ ...box(0, 0, 1024, 768), background: colorValue(screen.background, EMENU_SURFACE.cssVar), cursor: asking ? undefined : 'pointer', overflow: 'hidden' }}
         data-testid="emenu-start"
       >
-        {/* 氛围大图极慢地放大缩小（24 秒一个来回） */}
-        {cover && <img src={cover} alt="" draggable={false} className="em-kenburns" style={{ ...box(0, 0, 1024, 768), objectFit: 'cover' }} />}
-        {cover && <div style={{ ...box(0, 0, 1024, 768), background: 'rgb(0 0 0 / 0.18)' }} />}
-        <div style={{ ...box(472.6, 342.8), color: tone }}>
-          <LogoStacked />
-        </div>
-        {!asking && pending && (
-          <div style={{ ...box(0, 600, 1024), textAlign: 'center', fontSize: large ? 16 : 12, color: tone }} data-testid="emenu-start-pending">
-            有一单结果待确认，请服务员输入手牌后在订单里处理
-          </div>
-        )}
-        {/* 长按版权行 3 秒：员工退出这台平板的登录 */}
-        <div
-          className="em-en"
-          onPointerDown={() => {
-            hold.current = window.setTimeout(onExit, 3000);
-          }}
-          onPointerUp={() => hold.current && window.clearTimeout(hold.current)}
-          onPointerLeave={() => hold.current && window.clearTimeout(hold.current)}
-          style={{ ...box(0, 715.2, 1024), textAlign: 'center', fontSize: 12, lineHeight: '12px', letterSpacing: '0.09em', color: tone, transform: large ? 'scale(1.2)' : undefined, transformOrigin: '50% 100%' }}
-          data-testid="emenu-footer"
-        >
-          {/* 设计稿：英文 12 号、夹在中间的中文（汤崎）13 号，同一条基线 */}
-          {menu.rules.footerText.split(/([\u2E80-\u9FFF\uF900-\uFAFF]+)/).map((part, i) =>
-            i % 2 ? (
-              <span key={i} style={{ fontFamily: 'var(--em-zh)', fontSize: 13, letterSpacing: '0.5px' }}>
-                {part}
-              </span>
-            ) : (
-              part
-            ),
-          )}
-        </div>
+        <StudioNodes nodes={screen.nodes} ctx={ctx} layer="content" />
+        <StudioVersionMark version={version} tone={tone} />
       </div>
       {asking && <AskInfo onCancel={onCancel} onReady={onReady} />}
-      {/* 「中 | EN」：输入信息的弹窗开着时也能点（画在弹窗的后面一层之上） */}
-      {onLang &&
-        (large ? (
-          // 放大的一档：开关绕自己的中心放大，右边仍贴在 984
-          <ZoomAt x={984 - 24 * BIG.ui} y={55.45} k={BIG.ui}>
-            <LangToggle lang={lang} onToggle={onLang} x={-24} y={-11.15} light={!!cover && !asking} />
-          </ZoomAt>
-        ) : (
-          <LangToggle lang={lang} onToggle={onLang} x={936} y={44.3} light={!!cover && !asking} />
-        ))}
+      <StudioNodes nodes={screen.nodes} ctx={ctx} layer="top" />
     </>
   );
 }
@@ -1246,7 +1255,7 @@ function PendingOrderModal({
 // ───────────────────────── 顶栏、翻页小点、没有菜单 ─────────────────────────
 
 /** 页面底部的翻页小点（设计稿之外补的）：只画当前分类的各页 */
-function PageDots({ flat, index, onGo }: { flat: FlatPage[]; index: number; onGo: (i: number, mode?: 'slide' | 'jump' | 'zoom') => void }) {
+function PageDots({ flat, index, onGo, width = 1024 }: { flat: FlatPage[]; index: number; onGo: (i: number, mode?: 'slide' | 'jump' | 'zoom') => void; width?: number }) {
   const at = flat[index];
   if (!at) return null;
   const first = index - at.pageNo;
@@ -1255,7 +1264,8 @@ function PageDots({ flat, index, onGo }: { flat: FlatPage[]; index: number; onGo
   const large = useBig();
   if (!hasMore) return null;
   return (
-    <div style={{ ...box(0, 742, 1024, 14), display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 7, transform: large ? 'scale(1.5)' : undefined }} data-testid="emenu-dots" data-page={index} data-pages={flat.length}>
+    // 画在「翻页圆点」那一块的左上角（默认在 0, 742、宽 1024：与改造前一样），圆点在块里居中
+    <div style={{ ...box(0, 0, width, 14), display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 7, transform: large ? 'scale(1.5)' : undefined }} data-testid="emenu-dots" data-page={index} data-pages={flat.length}>
       {first > 0 && <Dot onClick={() => onGo(first - 1)} label="上一个分类" small testId="emenu-dot-prev" />}
       {Array.from({ length: n }, (_, i) => (
         <Dot key={i} on={first + i === index} onClick={() => onGo(first + i)} label={`第 ${i + 1} 页`} testId={`emenu-dot-${i}`} />
