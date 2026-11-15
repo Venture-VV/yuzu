@@ -46,16 +46,23 @@ async function linkStates(db: Db, where: { eventId?: number; poId?: number }): P
   return rows.map((r) => ({ ...r, id: Number(r.id), supplierId: Number(r.supplierId) }));
 }
 
+/** 当前版次的订单确认（迁移 152：一张采购单的一个版次一次确认；改版前的留着，不算） */
 async function confirmationOf(db: Db, poId: number): Promise<SupplierConfirmation | null> {
   const [c] = await db<SupplierConfirmation[]>`
-    SELECT promised_date::text AS promised_date, reply_name, note, created_at FROM po_supplier_confirmations WHERE purchase_order_id = ${poId}`;
+    SELECT c.promised_date::text AS promised_date, c.reply_name, c.note, c.created_at
+    FROM po_supplier_confirmations c JOIN purchase_orders p ON p.id = c.purchase_order_id AND c.po_revision = p.revision
+    WHERE c.purchase_order_id = ${poId}`;
   return c ?? null;
 }
 
 export async function deliveryNotices(db: Db, poId: number): Promise<DeliveryNotice[]> {
   const rows = await db<{ id: number; content: { shipDate: string; eta: string | null; trackingNo: string; lines: { lineId: number; qtyMilli: number }[]; note: string }; replyName: string; createdAt: string }[]>`
-    SELECT r.id, r.content, r.reply_name, r.created_at FROM supplier_link_replies r JOIN supplier_links l ON l.id = r.link_id
-    WHERE l.purchase_order_id = ${poId} AND l.kind = 'delivery' ORDER BY r.id`;
+    SELECT r.id, r.content, r.reply_name, r.created_at
+    FROM supplier_link_replies r JOIN supplier_links l ON l.id = r.link_id JOIN purchase_orders p ON p.id = l.purchase_order_id
+    WHERE l.purchase_order_id = ${poId} AND l.kind = 'delivery'
+      -- 只认当前版次、当前供应商的链接报的（改版前、换供应商前的不算）
+      AND l.supplier_id = p.supplier_id AND coalesce((l.snapshot ->> 'revision')::int, p.revision) = p.revision
+    ORDER BY r.id`;
   return rows.map((r) => ({ id: Number(r.id), ...r.content, replyName: r.replyName, createdAt: r.createdAt }));
 }
 
@@ -94,7 +101,14 @@ async function poSnapshot(db: Db, poId: number): Promise<SupplierLinkSnapshot> {
     note: po.note,
     lines: po.lines.map((l) => ({ lineId: l.id, lineNo: l.lineNo, materialName: l.materialName, spec: l.spec || l.specification, purchaseUnit: l.purchaseUnit, purchaseQtyMilli: l.purchaseQtyMilli, priceCents: l.priceCents, amountCents: l.amountCents })),
     totalCents: po.totalCents,
+    // 发链接时的版次：采购单改版以后这条链接不能再回复（Codex 审查 beabd59 后补）
+    revision: po.revision,
   };
+}
+
+/** 采购单的链接还算数吗：供应商还是这一家，发链接以后没改过版 */
+function poLinkCurrent(l: { supplierId: number; snapshot: SupplierLinkSnapshot }, po: { supplierId: number; revision: number }) {
+  return Number(po.supplierId) === l.supplierId && (l.snapshot.revision === undefined || l.snapshot.revision === Number(po.revision));
 }
 
 async function insertLink(tx: Tx, a: { kind: SupplierLinkKind; eventId: number | null; poId: number | null; supplierId: number; snapshot: SupplierLinkSnapshot; days: number }, actor: Actor, ip?: string) {
@@ -220,10 +234,14 @@ async function viewOf(db: Db, l: LinkRow): Promise<SupplierPublicView> {
     }
     quote = await currentQuote(db, l.eventId!, l.supplierId);
   } else {
-    const [po] = await db<{ status: string }[]>`SELECT status FROM purchase_orders WHERE id = ${l.poId!}`;
-    confirmation = await confirmationOf(db, l.poId!);
-    if (l.kind === 'delivery') notices = await deliveryNotices(db, l.poId!);
-    if (po!.status !== 'approved') {
+    const [po] = await db<{ status: string; supplierId: number; revision: number }[]>`SELECT status, supplier_id, revision FROM purchase_orders WHERE id = ${l.poId!}`;
+    const current = poLinkCurrent(l, po!);
+    confirmation = current ? await confirmationOf(db, l.poId!) : null;
+    if (l.kind === 'delivery' && current) notices = await deliveryNotices(db, l.poId!);
+    if (!current) {
+      open = false;
+      closedReason = '这张采购单改过了（或换了供应商），这个链接不再用；请以门店重新发的链接为准。';
+    } else if (po!.status !== 'approved') {
       open = false;
       closedReason = po!.status === 'closed' ? '这张采购单已经关闭，不用再回复。' : '这张采购单已经撤回，请以门店的通知为准。';
     } else if (l.kind === 'po_confirm' && confirmation) {
@@ -306,7 +324,7 @@ export function registerSupplierPortalRoutes(app: FastifyInstance, deps: Deps) {
         await setTxTimeouts(tx);
         // 对象一行（与员工端同一把锁）→ 链接一行
         if (first.kind === 'quote') await lockEvent(tx, first.eventId!);
-        else await tx`SELECT id FROM purchase_orders WHERE id = ${first.poId!} FOR NO KEY UPDATE`;
+        const [poRow] = first.kind === 'quote' ? [] : await tx<{ revision: number }[]>`SELECT revision FROM purchase_orders WHERE id = ${first.poId!} FOR NO KEY UPDATE`;
         const l = await findByToken(tx, token, true);
         if (!l || l.voidedAt) throw notFound('链接已失效，请联系门店重新发一份');
         // 同一个操作编号：原样重提照样返回，内容不同的拒绝
@@ -348,8 +366,8 @@ export function registerSupplierPortalRoutes(app: FastifyInstance, deps: Deps) {
           if (c.promisedDate < today) throw unprocessable('DATE_PASSED', '承诺到货日不能早于今天');
           const replyId = await insertReply({ promisedDate: c.promisedDate, note: c.note }, null);
           await tx`
-            INSERT INTO po_supplier_confirmations (purchase_order_id, link_id, reply_id, promised_date, reply_name, note)
-            VALUES (${l.poId!}, ${l.id}, ${replyId}, ${c.promisedDate}, ${input.name}, ${c.note})`;
+            INSERT INTO po_supplier_confirmations (purchase_order_id, link_id, reply_id, promised_date, reply_name, note, po_revision)
+            VALUES (${l.poId!}, ${l.id}, ${replyId}, ${c.promisedDate}, ${input.name}, ${c.note}, ${Number(poRow!.revision)})`;
           await writeAudit(tx, { staffId: null, action: 'supplier_reply', targetType: 'purchase_order', targetId: l.poId!, detail: { kind: 'po_confirm', linkId: l.id, name: input.name, promisedDate: c.promisedDate }, ip: req.ip });
         } else {
           const d = input as z.infer<typeof DeliveryReply>;
@@ -371,7 +389,7 @@ export function registerSupplierPortalRoutes(app: FastifyInstance, deps: Deps) {
       if (isUniqueViolation(error, 'supplier_link_replies_client_key_key')) {
         const [prev] = await sql<{ requestHash: string }[]>`SELECT request_hash FROM supplier_link_replies WHERE client_key = ${input.clientKey}`;
         if (!prev || prev.requestHash !== requestHash) throw conflict('IDEMPOTENCY_CONFLICT', '这次提交的内容和刚才的不一样，请刷新页面后重新填写');
-      } else if (isUniqueViolation(error, 'po_supplier_confirmations_purchase_order_id_key')) {
+      } else if (isUniqueViolation(error, 'po_supplier_confirmations_po_revision')) {
         throw conflict('LINK_CLOSED', '这张采购单已经确认过了');
       } else throw error;
     }

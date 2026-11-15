@@ -239,6 +239,20 @@ async function exportBatch(deps: Deps, id: number, raw: unknown, actor: Actor, i
     if (b.version !== version) throw conflict('BATCH_CHANGED', '这一批刚被别人改过，请刷新后再看');
     if (b.status === 'exported') return;
     if (b.status !== 'draft') throw conflict('BATCH_CLOSED', '这一批已经完成或作废了');
+    // 导出前再核对一次（Codex 审查 beabd59 后补）：每一行的申请还是待付款、没付的还够这一行的金额；
+    // 没挂合同的，申请里选的货款还能核销这么多（单独登记付款、作废、结束在批次占着时已经拦了，这里兜底）——对不上的不导出，作废重开
+    const today = todayIn(deps.config.timezone);
+    const items = await tx<{ lineNo: number; requestId: number; amountCents: string }[]>`
+      SELECT line_no, payment_request_id AS request_id, amount_cents::text AS amount_cents FROM payment_batch_items
+      WHERE batch_id = ${id} AND status = 'pending' ORDER BY line_no`;
+    for (const i of items) {
+      const req = await getPaymentRequest(tx, Number(i.requestId), today);
+      const amount = Number(i.amountCents);
+      const left = req.amountCents - req.paidCents;
+      const room = req.payMode === 'ap' && req.contractId === null ? req.targets.reduce((sum, t) => sum + Math.max(0, Math.min(t.amountCents - t.paidCents, t.openCents)), 0) : left;
+      if (req.status !== 'approved' || left < amount || room < amount)
+        throw conflict('BATCH_STALE', `第 ${i.lineNo} 行（付款申请 ${req.requestNo}）生成以后变了（${req.status !== 'approved' ? '申请已经不是待付款' : `还没付的只剩 ¥${yuanText(Math.min(left, room))}`}）：请作废这一批、重新生成`);
+    }
     await tx`UPDATE payment_batches SET status = 'exported', exported_by = ${actor.id}, exported_at = now(), version = version + 1 WHERE id = ${id}`;
     await writeAudit(tx, { staffId: actor.id, action: 'payment_batch', targetType: 'payment_batch', targetId: id, detail: { op: 'export', batchNo: b.batchNo }, ip });
   });

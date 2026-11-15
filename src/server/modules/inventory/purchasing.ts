@@ -745,6 +745,9 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
         } as never)}, ${actor.id})`;
       await tx`UPDATE purchase_orders SET status = 'returned', revision = revision + 1, updated_at = now() WHERE id = ${poId}`;
       po = { ...po, status: 'returned', revision: po.revision + 1 };
+      // 发给供应商的订单确认、发货预告链接都作废（8.0.21 Codex 审查 beabd59 后补）：改完重新确认以后另发；
+      // 改版前的确认留着，但只认当前版次的（迁移 152）。锁顺序与供应商回复相同：采购单 → 链接
+      await tx`UPDATE supplier_links SET voided_by = ${actor.id}, voided_at = now() WHERE purchase_order_id = ${poId} AND voided_at IS NULL`;
       await logApproval(tx, 'purchase_order', poId, 'revise', actor.id, '', po.revision);
     } else if (po.status !== 'draft' && po.status !== 'returned') {
       throw conflict('INVALID_STATE', po.status === 'approved' ? '已确认的采购单请使用「改版」' : '采购单当前状态不能修改');

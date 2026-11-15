@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { detectOtaColumns, parseOtaRows } from '../src/shared/ota';
 import { COUPON_CODE_PATTERN } from '../src/shared/checkout';
 import { hashRequest } from '../src/server/lib/idempotency';
-import { otaCouponCode } from '../src/server/modules/ota';
+import { otaCouponCode, otaPrepaidHints, roomShare } from '../src/server/modules/ota';
 import { shiftDate } from '../src/shared/labels';
 import { api, setup, type TestContext } from './helpers';
 
@@ -49,7 +49,13 @@ describe('解析', () => {
     expect(new Set(codes).size).toBe(codes.length);
     expect(otaCouponCode(1, 'AB-123')).toBe(otaCouponCode(1, 'AB-123'));
     expect(otaCouponCode(1, 'AB-123')).toMatch(/^OTA1AB123[0-9A-F]{8}$/);
-    for (const c of [...codes, otaCouponCode(999_999, 'x'.repeat(64))]) expect(c).toMatch(COUPON_CODE_PATTERN);
+    for (const c of [...codes, otaCouponCode(999_999, 'x'.repeat(64), 123_456_789)]) expect(c).toMatch(COUPON_CODE_PATTERN);
+    // 几间的订单每间一张券：同一订单不同的预约不撞
+    expect(otaCouponCode(1, 'AB-123', 7)).not.toBe(otaCouponCode(1, 'AB-123', 8));
+    // 订单金额按间数分：分不尽的摊在前面，加起来正好
+    expect([0, 1, 2].map((i) => roomShare(100_000, 3, i))).toEqual([33_333, 33_333, 33_334]);
+    expect([0, 1].map((i) => roomShare(100_001, 2, i))).toEqual([50_000, 50_001]);
+    expect(roomShare(500, 1, 3)).toBe(500);
   });
 });
 
@@ -140,6 +146,45 @@ describe('渠道订单', () => {
     const o = await order('C2001');
     expect(o).toMatchObject({ rooms: 2, amountCents: 60_000 });
     expect(o.bookings.filter((b: { status: string }) => b.status === 'confirmed')).toHaveLength(2);
+  });
+
+  it('预付的几间订单：到店的每一间各带一行团购券（各自的券码、按间数分的金额），分开结账各用各的；用过的不再带', async () => {
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'Q', from: 1, to: 5, width: 3, zone: 'male' })).status).toBe(200);
+    await api(ctx.app, ctx.clerk, 'POST', '/api/shifts', { openingCash: 0 });
+    const r = await importFile([`C3001,郑十,,豪华大床房,${today},${shiftDate(today, 1)},2,1000.01,预付,已确认`]);
+    expect(r.body).toMatchObject({ created: 1 });
+    const o = await order('C3001');
+    expect(o.bookings).toHaveLength(2);
+    const visits: number[] = [];
+    for (const [i, b] of (o.bookings as { id: number }[]).entries()) {
+      const tag = `Q00${i + 1}`;
+      const v = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male' }] });
+      expect(v.status, JSON.stringify(v.body)).toBe(201);
+      visits.push(v.body.visits[0].id);
+      const arrived = await api(ctx.app, ctx.clerk, 'POST', `/api/bookings/${b.id}/change`, { clientKey: randomUUID(), action: 'arrive', tagCode: tag });
+      expect(arrived.status, JSON.stringify(arrived.body)).toBe(200);
+    }
+    const preview = async (vid: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${vid}`)).body as { totalAmount: number; otaPrepaid: { couponCode: string; amountCents: number }[] };
+    const p1 = await preview(visits[0]!);
+    const p2 = await preview(visits[1]!);
+    expect(p1.otaPrepaid).toHaveLength(1);
+    expect(p2.otaPrepaid).toHaveLength(1);
+    expect(p1.otaPrepaid[0]!.couponCode).not.toBe(p2.otaPrepaid[0]!.couponCode);
+    expect(p1.otaPrepaid[0]!.amountCents + p2.otaPrepaid[0]!.amountCents).toBe(100_001);
+    // 第一间先结账，用掉自己那一张
+    const settle = (vid: number, p: typeof p1) => {
+      const coupon = Math.min(p.otaPrepaid[0]!.amountCents, p.totalAmount);
+      const pays: Record<string, unknown>[] = [{ method: 'coupon', platform: 'other', code: p.otaPrepaid[0]!.couponCode, amount: coupon, dealName: '携程 · 渠道大床房' }];
+      if (p.totalAmount > coupon) pays.push({ method: 'cash', amount: p.totalAmount - coupon });
+      return api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [vid], expectedTotal: p.totalAmount, payments: pays });
+    };
+    const c1 = await settle(visits[0]!, p1);
+    expect(c1.status, JSON.stringify(c1.body)).toBe(200);
+    // 第二间分开结账：带的是它自己的那一张，照样能用（原来同一个券码，这里会 COUPON_USED）
+    const c2 = await settle(visits[1]!, await preview(visits[1]!));
+    expect(c2.status, JSON.stringify(c2.body)).toBe(200);
+    // 用过的不再带
+    expect(await otaPrepaidHints(ctx.sql, visits)).toEqual([]);
   });
 
   it('对账：按入住月份，订单数、间夜、金额、佣金（15%）、净额；导出 CSV', async () => {

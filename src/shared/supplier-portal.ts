@@ -29,6 +29,8 @@ export interface SupplierLinkSnapshot {
   note: string;
   lines: SupplierLinkLine[];
   totalCents: number | null;
+  /** 采购单链接：发链接时采购单的版次（8.0.21 Codex 审查 beabd59 后补；之前发的没有）。改版以后链接不能再回复 */
+  revision?: number;
 }
 
 export interface SupplierConfirmation {

@@ -121,14 +121,17 @@ interface Raw extends Omit<SalesInvoice, 'id' | 'sourceId' | 'amountCents' | 'ha
   sourceVoided: boolean;
 }
 
+/** 来源已经反结账 / 冲销（开了票的要红冲）：列、「要红冲」筛选、红冲计数共用这一个条件 */
+const SOURCE_VOIDED = (db: Db) => db`
+  CASE i.source_type
+    WHEN 'checkout' THEN EXISTS (SELECT 1 FROM checkouts c WHERE c.id = i.source_id AND c.status = 'voided')
+    WHEN 'ar_collection' THEN EXISTS (SELECT 1 FROM ar_collections a WHERE a.id = i.source_id AND a.voided_at IS NOT NULL)
+    ELSE false END`;
 const COLUMNS = (db: Db) => db`
   i.id, i.request_no, i.source_type, i.source_id, i.source_no, i.amount_cents::text AS amount_cents, i.title_type, i.title, i.tax_no, i.email, i.phone,
   i.invoice_kind, i.note, i.status, i.invoice_no, i.invoice_date::text AS invoice_date, i.file_id, i.issued_via, i.provider_ref, i.reject_reason, i.void_reason,
   i.version, rq.display_name AS requested_by_name, i.requested_at, hd.display_name AS handled_by_name, i.handled_at, vd.display_name AS voided_by_name, i.voided_at,
-  CASE i.source_type
-    WHEN 'checkout' THEN EXISTS (SELECT 1 FROM checkouts c WHERE c.id = i.source_id AND c.status = 'voided')
-    WHEN 'ar_collection' THEN EXISTS (SELECT 1 FROM ar_collections a WHERE a.id = i.source_id AND a.voided_at IS NOT NULL)
-    ELSE false END AS source_voided`;
+  ${SOURCE_VOIDED(db)} AS source_voided`;
 const FROM = (db: Db) => db`
   invoice_requests i JOIN staff rq ON rq.id = i.requested_by LEFT JOIN staff hd ON hd.id = i.handled_by LEFT JOIN staff vd ON vd.id = i.voided_by`;
 
@@ -177,24 +180,19 @@ const ListQuery = z.object({
 export async function listSalesInvoices(db: Db, raw: unknown, mode: SalesInvoiceList['providerMode']): Promise<SalesInvoiceList> {
   const q = parse(ListQuery, raw);
   const like = `%${q.q.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+  // 「要红冲」在 SQL 里先筛再取最近的 500 张（Codex 审查 beabd59 后补：原来先取 500 张已开的再在内存里筛，早的那张会漏掉）
   const rows = (
     await db<Raw[]>`
       SELECT ${COLUMNS(db)} FROM ${FROM(db)}
-      WHERE (${q.status} = 'all' OR (${q.status} = 'red' AND i.status = 'issued') OR i.status = ${q.status})
+      WHERE (${q.status} = 'all' OR i.status = ${q.status} OR (${q.status} = 'red' AND i.status = 'issued' AND ${SOURCE_VOIDED(db)}))
         AND (${q.q} = '' OR i.request_no ILIKE ${like} OR i.source_no ILIKE ${like} OR i.title ILIKE ${like} OR coalesce(i.invoice_no, '') ILIKE ${like})
       ORDER BY i.id DESC LIMIT 500`
-  )
-    .map(toInvoice)
-    .filter((r) => q.status !== 'red' || r.sourceVoided);
+  ).map(toInvoice);
   const [c] = await db<{ requested: number; issued: number; sending: number }[]>`
     SELECT count(*) FILTER (WHERE status = 'requested')::int AS requested, count(*) FILTER (WHERE status = 'issued')::int AS issued,
            count(*) FILTER (WHERE status = 'requested' AND issued_via = 'sending')::int AS sending
     FROM invoice_requests`;
-  const [red] = await db<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM invoice_requests i
-    WHERE i.status = 'issued' AND (
-      (i.source_type = 'checkout' AND EXISTS (SELECT 1 FROM checkouts c WHERE c.id = i.source_id AND c.status = 'voided'))
-      OR (i.source_type = 'ar_collection' AND EXISTS (SELECT 1 FROM ar_collections a WHERE a.id = i.source_id AND a.voided_at IS NOT NULL)))`;
+  const [red] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM invoice_requests i WHERE i.status = 'issued' AND ${SOURCE_VOIDED(db)}`;
   return { rows, counts: { ...c!, redFlag: red!.n }, providerMode: mode };
 }
 

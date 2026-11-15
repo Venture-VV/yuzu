@@ -71,6 +71,18 @@ describe('开票申请', () => {
     const red = (await api(ctx.app, payer, 'GET', '/api/erp/sales-invoices?status=red')).body;
     expect(red.rows.map((r: { id: number }) => r.id)).toContain(id);
     expect(red.counts.redFlag).toBeGreaterThanOrEqual(1);
+    // 之后又开了 501 张（来源都好好的）：「要红冲」里照样有这一张（先筛再取最近的 500 张）
+    const [me] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff ORDER BY id LIMIT 1`;
+    await ctx.sql`
+      INSERT INTO invoice_requests (request_no, source_type, source_id, source_no, amount_cents, title_type, title, invoice_kind, status,
+                                    invoice_no, invoice_date, issued_via, client_key, request_hash, requested_by)
+      SELECT 'KP-BULK-' || g, 'recharge', 900000000 + g, 'CZ-BULK-' || g, 100, 'personal', '批量', 'normal', 'issued',
+             'BULK' || g, ${today}::date, 'manual', gen_random_uuid(), 'bulk', ${me!.id}
+      FROM generate_series(1, 501) g`;
+    const redAfter = (await api(ctx.app, payer, 'GET', '/api/erp/sales-invoices?status=red')).body;
+    expect(redAfter.rows.map((r: { id: number }) => r.id)).toContain(id);
+    expect(redAfter.rows.every((r: { sourceVoided: boolean }) => r.sourceVoided)).toBe(true);
+    expect(redAfter.counts.redFlag).toBe(red.counts.redFlag);
     expect((await source('checkout', done.id)).invoiceableCents).toBe(0);
     // 红冲 = 作废（写原因）；旧版本号拒绝
     expect((await api(ctx.app, payer, 'POST', `/api/erp/sales-invoices/${id}/void`, { version: 1, reason: '来源已反结账' })).body.error.code).toBe('INVOICE_REQUEST_CHANGED');

@@ -58,13 +58,40 @@ export function VerifyButton({ platform, code, disabled, onVerified }: { platfor
   );
 }
 
+// 结果待确认（AGENTS.md）：验券请求发出去之前先把操作编号与原请求存在本机、读回核对（存不了就不发）；
+// 超时、断网、5xx 以后关掉对话框、刷新页面再打开，照样能按原编号查回或确认作废（Codex 审查 beabd59 后补，与扫码收款同一个做法）
+const PENDING_KEY = 'yuzu.platformVerify.pending';
+interface PendingVerify {
+  key: string;
+  platform: VoucherPlatform;
+  code: string;
+  expectedFaceCents: number;
+  at: string;
+}
+function savePending(p: PendingVerify | null): boolean {
+  try {
+    if (p) localStorage.setItem(PENDING_KEY, JSON.stringify(p));
+    else localStorage.removeItem(PENDING_KEY);
+    return p ? localStorage.getItem(PENDING_KEY) === JSON.stringify(p) : true;
+  } catch {
+    return false;
+  }
+}
+function loadPending(): PendingVerify | null {
+  try {
+    const v = localStorage.getItem(PENDING_KEY);
+    return v ? (JSON.parse(v) as PendingVerify) : null;
+  } catch {
+    return null;
+  }
+}
+
 function VerifyDialog({ open, onClose, platform, code, onVerified }: { open: boolean; onClose: () => void; platform: VoucherPlatform; code: string; onVerified: (v: VerificationView) => void }) {
   const qc = useQueryClient();
   const [preview, setPreview] = useState<VoucherPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [key, setKey] = useState(uuid);
-  const [uncertain, setUncertain] = useState(false);
+  const [uncertain, setUncertain] = useState<PendingVerify | null>(null);
   const openList = useOpenVerifications(open);
   const reusable = (openList.data ?? []).filter((v) => v.status === 'verified' && !v.checkout && !v.cancelling && v.platform === platform);
 
@@ -72,8 +99,8 @@ function VerifyDialog({ open, onClose, platform, code, onVerified }: { open: boo
     if (!open) return;
     setPreview(null);
     setError(null);
-    setUncertain(false);
-    setKey(uuid());
+    // 上一次没收到结果的（哪怕是别的券码、刷新过页面）：先查清或确认作废，才能再验
+    setUncertain(loadPending());
     if (!code.trim()) return;
     setBusy(true);
     api
@@ -89,23 +116,33 @@ function VerifyDialog({ open, onClose, platform, code, onVerified }: { open: boo
     else setError(`${VERIFICATION_STATUS_LABELS[v.status]}：${v.failReason ?? ''}`);
   };
   const verify = async () => {
-    if (!preview) return;
+    if (!preview || uncertain) return;
+    const pending: PendingVerify = { key: uuid(), platform, code: preview.code, expectedFaceCents: preview.faceCents, at: new Date().toISOString() };
+    if (!savePending(pending)) return setError('本机存不了操作编号（浏览器存储被关了），不能在这里验券；请手输券码，在平台 App 里核销');
     setBusy(true);
     setError(null);
     try {
-      done(await api.post<VerificationView>('/api/platform/verify', { clientKey: key, platform, code: preview.code, expectedFaceCents: preview.faceCents }, { timeoutMs: 30_000 }));
+      const v = await api.post<VerificationView>('/api/platform/verify', { clientKey: pending.key, platform, code: pending.code, expectedFaceCents: pending.expectedFaceCents }, { timeoutMs: 30_000 });
+      savePending(null);
+      done(v);
     } catch (e) {
-      if (e instanceof UncertainError) setUncertain(true);
-      else setError(errorMessage(e));
+      if (e instanceof UncertainError) setUncertain(pending);
+      else {
+        savePending(null);
+        setError(errorMessage(e));
+      }
     } finally {
       setBusy(false);
     }
   };
   const lookup = async () => {
+    if (!uncertain) return;
     setBusy(true);
+    setError(null);
     try {
-      const v = await api.get<VerificationView>(`/api/platform/verifications/by-key/${key}`);
-      setUncertain(false);
+      const v = await api.get<VerificationView>(`/api/platform/verifications/by-key/${uncertain.key}`);
+      setUncertain(null);
+      savePending(null);
       done(v);
     } catch (e) {
       setError(`${errorMessage(e)}。不能断定没核销：可以再查一次，或确认作废这一次（作废以后它就算晚到也不会核销）`);
@@ -114,15 +151,14 @@ function VerifyDialog({ open, onClose, platform, code, onVerified }: { open: boo
     }
   };
   const abandon = async () => {
+    if (!uncertain) return;
     setBusy(true);
     try {
-      const r = await api.post<{ abandoned: boolean; verification: VerificationView | null }>(`/api/platform/verifications/by-key/${key}/abandon`, {});
-      setUncertain(false);
+      const r = await api.post<{ abandoned: boolean; verification: VerificationView | null }>(`/api/platform/verifications/by-key/${uncertain.key}/abandon`, {});
+      setUncertain(null);
+      savePending(null);
       if (r.verification) done(r.verification);
-      else {
-        setKey(uuid());
-        setError('已确认作废：这一次没有核销，可以重新验券');
-      }
+      else setError('已确认作废：这一次没有核销，可以重新验券');
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -168,7 +204,7 @@ function VerifyDialog({ open, onClose, platform, code, onVerified }: { open: boo
           </dl>
         )}
         {uncertain && (
-          <Notice tone="warning" title="核销没收到结果">
+          <Notice tone="warning" title={`核销没收到结果（${COUPON_PLATFORM_LABELS[uncertain.platform]}券码 ${uncertain.code}）`}>
             <div className="flex flex-wrap gap-2">
               <Button size="sm" variant="secondary" loading={busy} onClick={() => void lookup()}>
                 查一下

@@ -856,5 +856,29 @@ describe('批量付款（8.0.21）', () => {
     expect(resumed.status).toBe('done');
     expect(resumed.items[0]).toMatchObject({ status: 'paid', paymentKind: 'payment', paymentId: first.payment.id });
     expect(await detail(r3.id)).toMatchObject({ status: 'paid', paidCents: 15_000 });
+
+    // 批次占着申请时：单独登记付款、作废都拦（只有那一行自己能记）；生成以后货款被直接付掉一部分，导出时拦下（作废重开）
+    const free4 = await receiveUnderContract(null, 2); // 100 元
+    await ok(invoice([{ poId: free4.poId, amountCents: 10_000 }]));
+    const r4 = await approveAll((await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 10_000 }] } }))).request);
+    const b5 = (await ok(make([r4.id]))).batch;
+    expect((await payReq(r4.id, { amountCents: 10_000, allocations: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 10_000 }] })).body.error.code).toBe('REQUEST_IN_BATCH');
+    expect((await api(ctx.app, payer, 'POST', `/api/erp/payments/requests/${r4.id}/void`, { version: r4.version, reason: '不付了' })).body.error.code).toBe('REQUEST_IN_BATCH');
+    const directPay = await api(ctx.app, payer, 'POST', '/api/payables/payments', {
+      clientKey: randomUUID(),
+      supplierId,
+      payDate: today,
+      amountCents: 4_000,
+      method: 'bank_transfer',
+      evidence: '流水尾号 0404',
+      allocations: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 4_000 }],
+    });
+    expect(directPay.status, JSON.stringify(directPay.body)).toBe(201);
+    const stale = await api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b5.id}/export`, { version: b5.version });
+    expect(stale.body.error?.code).toBe('BATCH_STALE');
+    expect(stale.body.error.message).toContain('¥60.00');
+    // 作废以后申请又能单独处理
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b5.id}/void`, { version: b5.version, reason: '货款已经单独付了一部分', confirmNotPaid: true }), 200);
+    expect((await payReq(r4.id, { amountCents: 6_000, allocations: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 6_000 }] })).status).toBe(201);
   });
 });

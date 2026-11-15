@@ -1,5 +1,5 @@
 // 8.0.21 供应商门户（docs/FINANCE_V8021.md 第 7 节，CW-F / CW6；迁移 147）：报价、订单确认、发货预告三种链接。
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { todayIn } from '../src/server/modules/inventory/common';
 import { seedInventoryDemo } from '../src/server/seed-inventory';
@@ -154,6 +154,50 @@ describe('订单确认与发货预告', () => {
     expect((await pub(dt)).statusCode).toBe(404);
     // 乱写的链接、试太多次限次
     expect((await pub('x'.repeat(30))).statusCode).toBe(404);
+  });
+
+  it('采购单改版（换了供应商）：发出去的链接都作废、改版前的确认不算；新供应商重新确认，以新的承诺日为准；版次对不上的链接不能回复', async () => {
+    const a = await supplier('S005');
+    const b = await supplier('S006');
+    const mat = await material('M016');
+    const created = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), orderDate: today, action: 'submit', supplierId: a.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    let po = created.body.po.status === 'approved' ? created.body.po : (await api(ctx.app, ctx.owner, 'POST', `/api/purchase-orders/${created.body.po.id}/approve`, {})).body;
+    expect(po.status).toBe('approved');
+    // 甲确认、再发一条发货预告
+    const tA = (await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/supplier-links`, { kind: 'po_confirm' })).body.token as string;
+    expect((await reply(tA, { clientKey: randomUUID(), name: '甲', promisedDate: shiftDate(today, 3) })).statusCode).toBe(200);
+    const dA = (await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/supplier-links`, { kind: 'delivery' })).body.token as string;
+    expect((await pub(dA)).statusCode).toBe(200);
+    // 改版换成乙：发给甲的链接都作废
+    const rev = await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/revise`, { supplierId: b.id, orderDate: today, lines: [{ id: po.lines[0].id, materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] });
+    expect(rev.status, JSON.stringify(rev.body)).toBe(200);
+    expect((await pub(tA)).statusCode).toBe(404);
+    expect((await pub(dA)).statusCode).toBe(404);
+    po = rev.body.status === 'approved' ? rev.body : (await api(ctx.app, ctx.owner, 'POST', `/api/purchase-orders/${po.id}/approve`, {})).body;
+    expect(po).toMatchObject({ status: 'approved', revision: 2 });
+    // 改版前的确认不算：可以给乙发确认链接，乙确认以后以乙的承诺日为准
+    expect((await api(ctx.app, keeper, 'GET', `/api/purchase-orders/${po.id}/supplier-portal`)).body.confirmation).toBeNull();
+    const tB = (await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/supplier-links`, { kind: 'po_confirm' })).body.token as string;
+    expect((await pub(tB)).json()).toMatchObject({ open: true, confirmation: null, snapshot: { supplierName: b.name, revision: 2 } });
+    const promisedB = shiftDate(today, 6);
+    const okB = await reply(tB, { clientKey: randomUUID(), name: '乙', promisedDate: promisedB });
+    expect(okB.statusCode, okB.body).toBe(200);
+    expect((await api(ctx.app, keeper, 'GET', `/api/purchase-orders/${po.id}/supplier-portal`)).body.confirmation).toMatchObject({ promisedDate: promisedB, replyName: '乙' });
+    const [cnt] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM po_supplier_confirmations WHERE purchase_order_id = ${po.id}`;
+    expect(cnt!.n).toBe(2);
+    // 兜底：链接没作废、快照里的版次却对不上（库里直接写一条旧版次的链接）也不能回复
+    const dB = 'StaleRevisionLink_' + String(Date.now()).slice(-8);
+    const [fresh] = await ctx.sql<{ snapshot: Record<string, unknown>; createdBy: number }[]>`
+      SELECT snapshot, created_by FROM supplier_links WHERE purchase_order_id = ${po.id} AND kind = 'po_confirm' ORDER BY id DESC LIMIT 1`;
+    await ctx.sql`
+      INSERT INTO supplier_links (kind, purchase_order_id, supplier_id, token_hash, snapshot, expires_at, created_by)
+      VALUES ('delivery', ${po.id}, ${b.id}, ${createHash('sha256').update(dB).digest('hex')}, ${ctx.sql.json({ ...fresh!.snapshot, revision: 1 } as never)}, now() + interval '1 day', ${fresh!.createdBy})`;
+    const stale = (await pub(dB)).json();
+    expect(stale).toMatchObject({ open: false });
+    expect(stale.closedReason).toContain('改过了');
+    const lineId = stale.snapshot.lines[0].lineId;
+    expect((await reply(dB, { clientKey: randomUUID(), name: '乙', shipDate: today, lines: [{ lineId, qtyMilli: q(1) }] })).json().error.code).toBe('LINK_CLOSED');
   });
 
   it('采购模块关着：链接打不开', async () => {
