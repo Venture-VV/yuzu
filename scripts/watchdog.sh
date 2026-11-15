@@ -41,7 +41,7 @@ now=$(date +%s)
 
 json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 send() {
-  local text="【浴族·$label】$1" resp
+  local text="【浴族·${label}】$1" resp
   log "$text"
   [[ -n "$webhook" ]] || return 0
   if ! resp=$(curl -sS -m 10 -H 'Content-Type: application/json' -d "{\"msgtype\":\"text\",\"text\":{\"content\":\"$(json_escape "$text")\"}}" "$webhook" 2>&1); then
@@ -170,11 +170,11 @@ for path in "$dir" "$PWD"; do
   [[ -d "$path" ]] || continue
   read -r avail_kb used_pct <<< "$(df -Pk "$path" | awk 'NR==2 {gsub("%", "", $5); print $4, $5}')"
   if [[ -n "$avail_kb" && ( $avail_kb -lt 5242880 || $used_pct -ge 90 ) ]]; then
-    low="$low $path（剩 $((avail_kb / 1048576)) GB，已用 $used_pct%）"
+    low="$low ${path}（剩 $((avail_kb / 1048576)) GB，已用 $used_pct%）"
   fi
 done
 if [[ -n "$low" ]]; then
-  alert disk "磁盘空间不足：$low。请清理或更换外置盘。"
+  alert disk "磁盘空间不足：${low}。请清理或更换外置盘。"
 else
   resolve disk "磁盘空间恢复正常"
 fi
