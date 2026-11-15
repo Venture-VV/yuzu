@@ -23,6 +23,8 @@ import { StorePricesCard } from './StorePricesCard';
 
 type Editing = { kind: 'plan'; data: RechargePlan | null } | { kind: 'item'; data: ServiceItem | null } | null;
 
+/** 本店价（8.0.22）：只在第二家店里打开时有；是清单，排在「导入价目表」前面 */
+const STORE_PRICE_TAB = { key: 'store', label: '本店价' };
 /** 二级页签（8.0.17）：清单 → 导入与工具（价目没有规则类的设置） */
 const CATALOG_TABS = [
   { key: 'items', label: '消费项目' },
@@ -36,7 +38,7 @@ export function CatalogTab() {
   const [editing, setEditing] = useState<Editing>(null);
   // 本店价（8.0.22）：只在第二家店里打开时有
   const session = useSession();
-  const tabs = session.store.id === 1 ? CATALOG_TABS : [...CATALOG_TABS, { key: 'store', label: '本店价' }];
+  const tabs = session.store.id === 1 ? CATALOG_TABS : [...CATALOG_TABS.slice(0, -1), STORE_PRICE_TAB, ...CATALOG_TABS.slice(-1)];
 
   return (
     <AdminPage section="catalog" description="消费项目（多档价格）、门票票种与票价、充值套餐、价目表导入。" tabs={tabs}>

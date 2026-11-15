@@ -51,7 +51,8 @@ describe('挪到后台的三个模块', () => {
   it('后台：员工食堂、安保巡场在「人员与行政」，跟着 ERP 模块开关走；只有这几项权限的也进得了后台', () => {
     const staff = ADMIN_GROUPS.find((g) => g.key === 'staff')!;
     expect(staff.title).toBe('人员与行政');
-    expect(staff.items).toEqual(['staff', 'permissions', 'canteen', 'patrol']);
+    // 8.0.22 多门店：「门店与主体」排在最前（门店、公司主体、门店之间的储值结算）
+    expect(staff.items).toEqual(['stores', 'staff', 'permissions', 'canteen', 'patrol']);
     expect(ADMIN_SECTION_MODULES).toEqual({ canteen: 'canteen', patrol: 'patrol' });
     expect(ADMIN_STANDALONE_SECTIONS).toEqual(['dashboard', 'canteen', 'patrol']);
     for (const p of ['canteen.manage', 'patrol.read', 'patrol.manage', 'erp.revenue'] as Permission[]) expect(ADMIN_ENTRY_PERMISSIONS, p).toContain(p);
