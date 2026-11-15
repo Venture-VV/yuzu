@@ -408,6 +408,8 @@ export const ERP_OP_TYPES = [
   'bank_import',
   // 8.0.21 批量付款：生成一批
   'payment_batch',
+  // 8.0.21 渠道订单导入（前台「预约 → 渠道订单」；Codex 审查 e64932b 后补，接进同一套「结果待确认」）
+  'ota_import',
   'customer_note',
   'customer_binding_request',
   'customer_binding_review',
@@ -476,6 +478,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   invoice_request: '开票申请',
   bank_import: '网银流水导入',
   payment_batch: '批量付款',
+  ota_import: '渠道订单导入',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

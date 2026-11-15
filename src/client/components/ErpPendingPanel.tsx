@@ -72,6 +72,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 批量付款（8.0.21）：返回那一批
     case 'payment_batch':
       return d.batch && typeof d.batch === 'object' ? { refId: d.batch.id } : null;
+    // 渠道订单导入（8.0.21）：返回那次导入
+    case 'ota_import':
+      return typeof d.importId === 'number' ? { refId: d.importId } : null;
     case 'supplier_recon':
     case 'supplier_recon_void':
       return d.reconciliation && typeof d.reconciliation === 'object' ? { refId: d.reconciliation.id } : null;

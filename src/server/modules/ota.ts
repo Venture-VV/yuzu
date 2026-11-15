@@ -25,7 +25,7 @@ import { hashRequest } from '../lib/idempotency';
 import { setTxTimeouts } from '../lib/tx';
 import { idParam, parse } from '../lib/validate';
 import { readSheet } from '../lib/sheet-read';
-import { changeOtaBookingTx, createOtaBookingTx } from './bookings';
+import { changeOtaBookingTx, createOtaBookingTx, roomBookingsOverbooked } from './bookings';
 import { loadSettings } from './settings';
 
 /** 渠道订单的预计到店：入住日下午两点（当天已经过了的按现在） */
@@ -184,20 +184,18 @@ async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, 
       changed = true;
     }
     open = open.filter((x) => Number(x.roomTypeId) === roomTypeId);
-    // 日期改了：没到店的改时间
+    // 日期改了：没到店的改时间（新日期的房量不够照样改，超订在最后按处理完的预约重算）
     if (o.checkin !== before.checkin && open.length) {
       const startsAt = startOf();
       for (const b of open) await changeOtaBookingTx(tx, deps, Number(b.id), { action: 'reschedule', startsAt, expectedVersion: Number(b.version) }, ctx);
       changed = true;
     }
     // 间数：多退少补（已经到店的算进去）
-    let overbooked = false;
     const have = open.length + arrived.length;
     if (have < o.rooms) {
       for (let i = have; i < o.rooms; i++) {
         const r = await createOtaBookingTx(tx, deps, { roomTypeId, startsAt: startOf(), guestName: o.guestName, guestPhone: o.guestPhone, guests: 1, note: `${reason} · ${o.checkout > o.checkin ? `${Math.round((Date.parse(o.checkout) - Date.parse(o.checkin)) / 86_400_000)} 晚` : ''}${o.payMode === 'prepaid' ? ' · 预付' : ' · 现付'}` }, actor, new Date());
         await tx`INSERT INTO ota_order_bookings (order_id, booking_id) VALUES (${id}, ${r.id})`;
-        overbooked ||= r.overbooked;
       }
       changed = true;
     } else if (have > o.rooms) {
@@ -207,7 +205,10 @@ async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, 
       changed = true;
     }
     const notice = arrived.length && (o.checkin !== before.checkin || o.rooms !== before.rooms) ? `渠道改了订单，但 ${arrived.length} 间的客人已经到店，请和渠道核对` : null;
-    await setStatus('booked', { notice, overbooked: overbooked || (ord!.overbooked && !changed) });
+    // 超订：按处理完以后这张订单没到店的预约重算（改到约满的日期也标；只改了金额、间数减到放得下时照实际的来，Codex 审查 e64932b 后补）
+    const after = await tx<{ bookingId: number }[]>`SELECT booking_id FROM ota_order_bookings WHERE order_id = ${id}`;
+    const overbooked = await roomBookingsOverbooked(tx, after.map((x) => Number(x.bookingId)), today);
+    await setStatus('booked', { notice, overbooked });
     if (changed) await writeAudit(tx, { staffId: actor.id, action: 'ota_order', targetType: 'ota_order', targetId: id, detail: { op: isNew ? 'create' : 'update', orderNo: o.orderNo, rooms: o.rooms, checkin: o.checkin, overbooked }, ip });
     return isNew ? 'created' : changed ? 'updated' : 'unchanged';
   });
@@ -405,8 +406,9 @@ export function registerOtaRoutes(app: FastifyInstance, deps: Deps) {
     return r;
   });
   app.put('/api/ota/channels/:id', { preHandler: admin }, async (req) => updateChannel(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
-  app.post('/api/ota/import/preview', { preHandler: guardAny('booking.manage') }, async (req) => previewOtaImport(sql, req.body));
-  app.post('/api/ota/import', { preHandler: guardAny('booking.manage') }, async (req) => importOtaOrders(deps, req.body, req.actor, req.ip));
+  // 订单表放在请求体里（CSV 文本或 Excel 的 base64）：与银行流水导入一样放宽到 15 MB（全局默认 64 KB，Codex 审查 e64932b 后补）
+  app.post('/api/ota/import/preview', { preHandler: guardAny('booking.manage'), bodyLimit: 15_000_000 }, async (req) => previewOtaImport(sql, req.body));
+  app.post('/api/ota/import', { preHandler: guardAny('booking.manage'), bodyLimit: 15_000_000 }, async (req) => importOtaOrders(deps, req.body, req.actor, req.ip));
   app.get('/api/ota/orders', { preHandler: desk }, async (req) => {
     const q = parse(z.object({ status: z.enum(['new', 'booked', 'cancelled', 'failed', 'skipped']).optional(), channelId: z.coerce.number().int().positive().optional() }), req.query);
     return orderViews(sql, sql`${q.status ? sql`o.status = ${q.status}` : sql`true`} AND ${q.channelId ? sql`o.channel_id = ${q.channelId}` : sql`true`}`);

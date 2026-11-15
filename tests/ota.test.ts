@@ -175,6 +175,32 @@ describe('渠道订单', () => {
     expect(r2.body).toMatchObject({ status: 'booked', roomTypeName: '渠道湖景套房' });
   });
 
+  it('渠道把订单改到一天房已经约满的日子：照样改时间、标超订；只改金额不清掉、放得下了才清；订单表大（超过 64 KB）也能导', async () => {
+    const d1 = shiftDate(today, 12);
+    const d2 = shiftDate(today, 13);
+    // 渠道大床房只有一间：X1 占 d1，X2 先在 d2（不超订）
+    expect((await importFile([`X1001,冯一,,豪华大床房,${d1},${shiftDate(d1, 1)},1,300,现付,已确认`, `X1002,陈二,,豪华大床房,${d2},${shiftDate(d2, 1)},1,300,现付,已确认`])).body).toMatchObject({ created: 2 });
+    expect(await order('X1002')).toMatchObject({ status: 'booked', overbooked: false });
+    // X2 改到 d1：那天已经约满 → 照样改、标超订
+    const moved = await importFile([`X1002,陈二,,豪华大床房,${d1},${shiftDate(d1, 1)},1,300,现付,已确认`]);
+    expect(moved.body).toMatchObject({ updated: 1 });
+    expect(await order('X1002')).toMatchObject({ status: 'booked', overbooked: true, checkinDate: d1 });
+    expect(await order('X1001')).toMatchObject({ overbooked: false });
+    // 只改了金额：还是超订（原来「改过」就把提醒清掉）
+    expect((await importFile([`X1002,陈二,,豪华大床房,${d1},${shiftDate(d1, 1)},1,320,现付,已确认`])).body).toMatchObject({ updated: 1 });
+    expect(await order('X1002')).toMatchObject({ overbooked: true, amountCents: 32000 });
+    // X1 取消了，d1 放得下了：X2 再处理时清掉提醒（按处理完的预约算，不是沿用上一次的）
+    expect((await importFile([`X1001,冯一,,豪华大床房,${d1},${shiftDate(d1, 1)},1,300,现付,已取消`, `X1002,陈二,,豪华大床房,${d1},${shiftDate(d1, 1)},1,320,现付,已确认`])).body).toMatchObject({ cancelled: 1 });
+    expect(await order('X1002')).toMatchObject({ status: 'booked', overbooked: false });
+    // 大文件：预览照常（全局默认的请求体上限是 64 KB）
+    const many = Array.from({ length: 1500 }, (_, i) => `BIG${String(i).padStart(5, '0')},客人${i},,豪华大床房,${shiftDate(today, 20)},${shiftDate(today, 21)},1,300,现付,已确认`);
+    const big = csv(many);
+    expect(big.length).toBeGreaterThan(64 * 1024);
+    const preview = await api(ctx.app, ctx.clerk, 'POST', '/api/ota/import/preview', { channelId, fileName: 'big.csv', csv: big });
+    expect(preview.status, JSON.stringify(preview.body).slice(0, 200)).toBe(200);
+    expect(preview.body.total).toBe(1500);
+  });
+
   it('预付的几间订单：到店的每一间各带一行团购券（各自的券码、按间数分的金额），分开结账各用各的；用过的不再带', async () => {
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'Q', from: 1, to: 5, width: 3, zone: 'male' })).status).toBe(200);
     await api(ctx.app, ctx.clerk, 'POST', '/api/shifts', { openingCash: 0 });

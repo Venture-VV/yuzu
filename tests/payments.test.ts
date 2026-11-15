@@ -935,6 +935,35 @@ describe('批量付款（8.0.21）', () => {
     });
     expect(direct6b.status, JSON.stringify(direct6b.body)).toBe(201);
 
+    // 导入流水提交了、批量付款那一行的记账没做完（这里先把那一行的付款编号「确认作废」拦住来模拟中途停了）：原样重提接着记（Codex 审查 e64932b 后补）
+    const free7 = await receiveUnderContract(null, 7); // 350 元
+    await ok(invoice([{ poId: free7.poId, amountCents: 35_000 }]));
+    const r7 = await approveAll((await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free7.receipt.id, amountCents: 35_000 }] } }))).request);
+    const b7 = (await ok(make([r7.id]))).batch;
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b7.id}/export`, { version: b7.version }), 200);
+    const [item7] = await ctx.sql<{ id: number; payClientKey: string }[]>`SELECT id, pay_client_key FROM payment_batch_items WHERE batch_id = ${b7.id}`;
+    expect((await api(ctx.app, payer, 'POST', `/api/erp/ops/${item7!.payClientKey}/abandon`, { type: 'payment' })).status).toBe(200);
+    const key7 = randomUUID();
+    const body7 = {
+      clientKey: key7,
+      accountId: acc.id,
+      fileName: 'pl7.csv',
+      csv: ['交易日期,摘要,借方发生额,贷方发生额,余额,对方户名,对方账号,交易流水号', `${today},批量代付,350.00,,1.00,付款流测试供应商,6227000012345678,PL-T-0007`].join('\n'),
+    };
+    const imp7 = await ok(api(ctx.app, payer, 'POST', '/api/erp/bank/import', body7));
+    expect(imp7.import.autoMatched).toBe(1);
+    expect(imp7.import.followUps).toHaveLength(1);
+    expect((await ok(api(ctx.app, payer, 'GET', `/api/erp/payments/batches/${b7.id}`), 200)).items[0].status).toBe('pending');
+    // 去掉那条作废登记（当作「当时停了，没记成」），原样重提：接着记账
+    await ctx.sql`ALTER TABLE op_fences DISABLE TRIGGER op_fences_append_only`;
+    await ctx.sql`DELETE FROM op_fences WHERE key = ${item7!.payClientKey}`;
+    await ctx.sql`ALTER TABLE op_fences ENABLE TRIGGER op_fences_append_only`;
+    const replay7 = await api(ctx.app, payer, 'POST', '/api/erp/bank/import', body7);
+    expect(replay7.status, JSON.stringify(replay7.body)).toBe(200);
+    expect(replay7.body).toMatchObject({ replayed: true, import: { followUps: [] } });
+    expect((await ok(api(ctx.app, payer, 'GET', `/api/erp/payments/batches/${b7.id}`), 200)).items[0]).toMatchObject({ status: 'paid', bankRef: 'PL-T-0007' });
+    expect((await detail(r7.id)).status).toBe('paid');
+
     // 批量付款对上流水、记了账以后，那笔付款被冲销：流水那一行要标「对象已失效」（不再显示对平了）
     const lineOf = async () =>
       ((await ok(api(ctx.app, payer, 'GET', '/api/erp/bank?status=all'), 200)).lines as { bankRef: string; targetVoided: boolean; status: string }[]).find((l) => l.bankRef === 'PL-T-0001')!;

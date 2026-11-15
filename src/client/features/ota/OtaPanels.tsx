@@ -9,7 +9,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Upload } from 'lucide-react';
 import { formatYuan } from '@shared/money';
 import { OTA_FIELD_LABELS, OTA_ORDER_STATUS_LABELS, type OtaChannel, type OtaColumnMap, type OtaImportResult, type OtaOrderStatus, type OtaOrderView, type OtaReconRow, type ParsedOtaOrder } from '@shared/ota';
-import { api, errorMessage } from '../../lib/api';
+import { api, errorMessage, UncertainError } from '../../lib/api';
+import { sendErpOp } from '../../lib/erpPending';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useCan, useSession } from '../../lib/session';
 import { downloadUrl, uuid } from '../../lib/utils';
 import { useRoomsAdmin } from '../rooms/queries';
@@ -59,7 +61,6 @@ export function OtaOrdersPanel() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [key, setKey] = useState(uuid);
   const [result, setResult] = useState<OtaImportResult | null>(null);
   const [status, setStatus] = useState<OtaOrderStatus | ''>('');
   const orders = useQuery({ queryKey: otaKeys.orders(status), queryFn: () => api.get<OtaOrderView[]>(`/api/ota/orders${status ? `?status=${status}` : ''}`) });
@@ -70,7 +71,6 @@ export function OtaOrdersPanel() {
     setPreview(null);
     setResult(null);
     setError(null);
-    setKey(uuid());
     if (!f || !cid) return setFile(null);
     try {
       const payload = await fileToPayload(f);
@@ -83,21 +83,29 @@ export function OtaOrdersPanel() {
       setBusy(false);
     }
   };
+  // 结果待确认（AGENTS.md；Codex 审查 e64932b 后补）：与网银流水导入同一套——发出去之前把编号与原请求存进本机（存不了不发），
+  // 超时、断网、5xx 以后记在上面的「结果待确认」里，刷新页面、关掉再开也能按原编号查回、原样重提（接着处理没做完的订单）或确认作废
   const doImport = async () => {
     if (!file || !cid) return;
     setBusy(true);
     setError(null);
+    // 每次提交一个新编号（与网银流水导入一样）：没收到结果的那一次留在「结果待确认」里按它自己的编号处理，接着导别的文件不会盖掉它
+    const key = uuid();
+    const body = { clientKey: key, channelId: cid, fileName: file.name, ...file.payload };
     try {
-      const r = await api.post<OtaImportResult>('/api/ota/import', { clientKey: key, channelId: cid, fileName: file.name, ...file.payload }, { timeoutMs: 60_000 });
+      const r = await sendErpOp<OtaImportResult>({ key, type: 'ota_import', url: '/api/ota/import', body, summary: `导入渠道订单 ${file.name}`, staffName: session.staff.displayName });
       setResult(r);
       setPreview(null);
       toast({ tone: 'success', title: `导入完成：新建 ${r.created}、改了 ${r.updated}、取消 ${r.cancelled}`, body: r.failed ? `${r.failed} 张没建成，看下面的原因` : undefined });
-      await qc.invalidateQueries({ queryKey: ['ota'] });
-      await qc.invalidateQueries({ queryKey: ['bookings'] });
     } catch (e) {
-      setError(`${errorMessage(e)}${/超时|没有收到|网络/.test(errorMessage(e)) ? '。可以再点一次「导入」（同一个编号，不会导两次）' : ''}`);
+      if (e instanceof UncertainError) {
+        setPreview(null);
+        setError('导入没收到结果：记在上面的「结果待确认」里，查回或原样重提（没处理完的订单会接着处理），不要换一个文件重新导');
+      } else setError(errorMessage(e));
     } finally {
       setBusy(false);
+      await qc.invalidateQueries({ queryKey: ['ota'] });
+      await qc.invalidateQueries({ queryKey: ['bookings'] });
     }
   };
   const retry = async (o: OtaOrderView) => {
@@ -114,6 +122,13 @@ export function OtaOrdersPanel() {
   if (channels.data && !active.length) return <Notice tone="info" title="还没有渠道：请到后台「营业项目 → 客房 → 渠道」先加渠道和房型对照。" />;
   return (
     <div className="space-y-4" data-testid="ota-orders">
+      <ErpPendingPanel
+        types={['ota_import']}
+        onFound={() => {
+          void qc.invalidateQueries({ queryKey: ['ota'] });
+          void qc.invalidateQueries({ queryKey: ['bookings'] });
+        }}
+      />
       <Card className="space-y-3 p-4">
         <div className="flex flex-wrap items-end gap-3">
           <Field label="渠道" htmlFor="ota-channel">

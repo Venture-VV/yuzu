@@ -194,8 +194,9 @@ async function importStatement(deps: Deps, raw: unknown, actor: Actor, ip?: stri
     await writeAudit(tx, { staffId: actor.id, action: 'bank_import', targetType: 'bank_import', targetId: importId, detail: { account: account.name, fileName: f.fileName, lines: r.lines.length, fresh: fresh.length, autoMatched: auto }, ip });
     return { importId, replayed: false };
   });
-  // 自动对上的批量付款行：照「按申请登记付款」记账（事务外，各自的操作编号；记不了的留给人手工处理）
-  const followUps = result.replayed ? [] : await recordBatchMatches(deps, deps.sql`l.import_id = ${result.importId} AND m.auto`, actor, ip);
+  // 自动对上的批量付款行：照「按申请登记付款」记账（事务外，各自的操作编号；记不了的留给人手工处理）。
+  // 原样重提也跑一遍（Codex 审查 e64932b 后补）：上一次导入提交了、记账没做完就停了的接着记——只挑还没结论的行，各行用自己固定的付款编号，不会记两次
+  const followUps = await recordBatchMatches(deps, deps.sql`l.import_id = ${result.importId} AND m.auto`, actor, ip);
   const [summary] = await deps.sql<{ lineCount: number; newCount: number; dupCount: number; autoMatched: number }[]>`
     SELECT i.line_count, i.new_count, i.dup_count,
            (SELECT count(DISTINCT m.line_id)::int FROM bank_matches m JOIN bank_statement_lines l ON l.id = m.line_id WHERE l.import_id = i.id AND m.auto AND m.status = 'active') AS auto_matched

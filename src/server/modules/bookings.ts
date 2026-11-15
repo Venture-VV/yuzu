@@ -260,6 +260,26 @@ async function spaceBusy(db: Db, spaceId: number, from: number, to: number, excl
 
 /** 这个房型当天还剩几间：启用的房间（不含维修）− 当天还占着名额的预约 − （当天）在住 */
 async function roomTypeFree(db: Db, roomTypeId: number, date: string, today: string, excludeBookingId?: number): Promise<number> {
+  return Math.max(0, await roomTypeBalance(db, roomTypeId, date, today, excludeBookingId));
+}
+
+/**
+ * 渠道订单（ota.ts）：这几张客房预约（没到店的）所在的房型、营业日，此刻的预约是不是比能用的房间多。
+ * 订单处理完（新建、改日期、加减间数、只改了金额都一样）按处理完的预约重算「超订」，不靠这一次做了哪几步来推（Codex 审查 e64932b 后补：
+ * 改到约满的日期原来不标，只改金额又会把原来的提醒清掉）。只读、不加锁（只是提醒；建、改预约时房型一行已经在 claimSlot 里锁过）
+ */
+export async function roomBookingsOverbooked(db: Db, bookingIds: number[], today: string): Promise<boolean> {
+  if (!bookingIds.length) return false;
+  const slots = await db<{ roomTypeId: number; businessDate: string }[]>`
+    SELECT DISTINCT room_type_id, business_date::text AS business_date FROM bookings
+    WHERE id IN ${db(bookingIds)} AND kind = 'room' AND room_type_id IS NOT NULL AND status IN ${db(ACTIVE_BOOKING_STATUSES)}
+    ORDER BY 1, 2`;
+  for (const s of slots) if ((await roomTypeBalance(db, Number(s.roomTypeId), s.businessDate, today)) < 0) return true;
+  return false;
+}
+
+/** 某房型某营业日还剩几间：能用的房间 − 占着名额的预约 −（当天的）在住；渠道订单超订时是负数 */
+async function roomTypeBalance(db: Db, roomTypeId: number, date: string, today: string, excludeBookingId?: number): Promise<number> {
   const [r] = await db<{ rooms: number; booked: number; staying: number }[]>`
     SELECT (SELECT count(*)::int FROM rooms WHERE room_type_id = ${roomTypeId} AND active AND housekeeping <> 'maintenance') AS rooms,
            (SELECT count(*)::int FROM bookings bk WHERE bk.room_type_id = ${roomTypeId} AND bk.business_date = ${date} AND bk.id <> ${excludeBookingId ?? 0}
@@ -270,7 +290,7 @@ async function roomTypeFree(db: Db, roomTypeId: number, date: string, today: str
                        AND NOT EXISTS (SELECT 1 FROM room_stays rs WHERE rs.booking_id = bk.id AND rs.status <> 'cancelled')
                        AND EXISTS (SELECT 1 FROM visits av WHERE av.id = bk.arrival_visit_id AND av.status = 'open')))) AS booked,
            (SELECT count(*)::int FROM room_stays s JOIN rooms ro ON ro.id = s.room_id WHERE ro.room_type_id = ${roomTypeId} AND s.status = 'open') AS staying`;
-  return Math.max(0, r!.rooms - r!.booked - (date === today ? r!.staying : 0));
+  return r!.rooms - r!.booked - (date === today ? r!.staying : 0);
 }
 
 interface TechnicianTarget {
