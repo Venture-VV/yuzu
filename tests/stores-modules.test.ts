@@ -121,6 +121,38 @@ describe('多门店的各块', () => {
     expect(settle.net).toEqual([{ fromStoreId: 1, toStoreId: ft, principal: total }]);
   });
 
+  it('本店价：福田店给一个项目单独定价，福田店挂账按本店价；本店照旧按全公司的价', async () => {
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '本店价测试的毛巾', category: '零售', price: 1500 })).status).toBeLessThan(300);
+    const catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/catalog')).body as { items: { id: number; name: string; technicianRequired: boolean; prices: { tier: string; price: number }[] }[] };
+    const item = catalog.items.find((i) => i.name === '本店价测试的毛巾')!;
+    const tier = item.prices[0]!.tier;
+    const base = item.prices[0]!.price;
+    // 本店里设本店价：拒绝
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/catalog/store-prices', { itemId: item.id, tier, price: base + 100 })).status).toBe(400);
+    const set = await api(ctx.app, ftDesk, 'PUT', '/api/admin/catalog/store-prices', { itemId: item.id, tier, price: base + 1000 });
+    expect(set.status, JSON.stringify(set.body)).toBe(200);
+    const ftItem = ((await api(ctx.app, ftDesk, 'GET', '/api/catalog')).body.items as typeof catalog.items).find((i) => i.id === item.id)!;
+    expect(ftItem.prices.find((p) => p.tier === tier)!.price).toBe(base + 1000);
+    // 后台维护价目（?all=1）看到的是全公司的价
+    const adminItem = ((await api(ctx.app, ftDesk, 'GET', '/api/catalog?all=1')).body.items as typeof catalog.items).find((i) => i.id === item.id)!;
+    expect(adminItem.prices.find((p) => p.tier === tier)!.price).toBe(base);
+    const hqItem = ((await api(ctx.app, ctx.owner, 'GET', '/api/catalog')).body.items as typeof catalog.items).find((i) => i.id === item.id)!;
+    expect(hqItem.prices.find((p) => p.tier === tier)!.price).toBe(base);
+    // 福田店挂账按本店价
+    const vin = await api(ctx.app, ftDesk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: 'F002', zone: 'male' }] });
+    expect(vin.status, JSON.stringify(vin.body)).toBe(201);
+    const post = await api(ctx.app, ftDesk, 'POST', `/api/frontdesk/visits/${vin.body.visits[0].id}/charges`, {
+      clientKey: randomUUID(),
+      lines: [{ itemId: item.id, quantity: 1, tier }],
+      expectedTotal: base + 1000,
+    });
+    expect(post.status, JSON.stringify(post.body)).toBeLessThan(300);
+    // 取消本店价：按全公司的
+    expect((await api(ctx.app, ftDesk, 'PUT', '/api/admin/catalog/store-prices', { itemId: item.id, tier, price: null })).status).toBe(200);
+    const back = ((await api(ctx.app, ftDesk, 'GET', '/api/catalog')).body.items as typeof catalog.items).find((i) => i.id === item.id)!;
+    expect(back.prices.find((p) => p.tier === tier)!.price).toBe(base);
+  });
+
   it('审计按店记、按店看', async () => {
     const [row] = await ctx.sql<{ storeId: number }[]>`SELECT store_id FROM audit_logs WHERE action = 'device_created' ORDER BY id DESC LIMIT 1`;
     expect(Number(row!.storeId)).toBe(ft);

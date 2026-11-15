@@ -18,6 +18,8 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Skeleton } from '../../components/ui';
 import { SubPane } from '../../components/SubNav';
 import { AdminPage } from './AdminShell';
+import { useSession } from '../../lib/session';
+import { StorePricesCard } from './StorePricesCard';
 
 type Editing = { kind: 'plan'; data: RechargePlan | null } | { kind: 'item'; data: ServiceItem | null } | null;
 
@@ -32,9 +34,17 @@ const CATALOG_TABS = [
 export function CatalogTab() {
   const catalog = useCatalog(true);
   const [editing, setEditing] = useState<Editing>(null);
+  // 本店价（8.0.22）：只在第二家店里打开时有
+  const session = useSession();
+  const tabs = session.store.id === 1 ? CATALOG_TABS : [...CATALOG_TABS, { key: 'store', label: '本店价' }];
 
   return (
-    <AdminPage section="catalog" description="消费项目（多档价格）、门票票种与票价、充值套餐、价目表导入。" tabs={CATALOG_TABS}>
+    <AdminPage section="catalog" description="消费项目（多档价格）、门票票种与票价、充值套餐、价目表导入。" tabs={tabs}>
+      {session.store.id !== 1 && (
+        <SubPane tab="store">
+          <StorePricesCard />
+        </SubPane>
+      )}
       <SubPane tab="items">
       <Card className="p-5">
         <SectionTitle
