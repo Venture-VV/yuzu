@@ -33,7 +33,7 @@ export function PanelTitle({ children, aside }: { children: ReactNode; aside?: R
 function Row({ label, children, narrow }: { label: string; children: ReactNode; narrow?: boolean }) {
   return (
     <label className="flex items-center gap-2 text-[12.5px]">
-      <span className={cn('shrink-0 text-ink-3', narrow ? 'w-6' : 'w-16')}>{label}</span>
+      <span className={cn('shrink-0 whitespace-nowrap text-ink-3', narrow ? 'w-7' : 'w-16')}>{label}</span>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">{children}</div>
     </label>
   );

@@ -19,7 +19,8 @@ import { consistencyChecks } from '../ops/consistency';
 import { fingerprintIn } from '../ops/fingerprint';
 import { noAppRunning } from '../presence';
 import { demoSeedTime, rememberDemoAnchor } from '../ops/demo-time';
-import { seedDemo } from '../seed';
+import { DEMO_PASSWORD, seedDemo } from '../seed';
+import { createStaff } from '../modules/staff';
 import { seedBillingDemo } from '../seed-billing';
 import { seedFrontdeskDemo } from '../seed-frontdesk';
 import { seedInventoryDemo } from '../seed-inventory';
@@ -149,6 +150,14 @@ export async function demoPrepare(
   else {
     blocks.push({ block: MEMBERSHIP_P3_BLOCK, written: true, detail: `${trialDemo.done.length} 步`, items: trialDemo.done });
     notes.push(...trialDemo.notes);
+  }
+
+  // UI 工作台（8.1.1）：一个设计师账号（只进工作台）；版面照旧是内置的默认版面（不发布，平板与以前一样）
+  const [designer] = await sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'sheji'`;
+  if (designer) skip('工作台的设计师账号');
+  else {
+    await createStaff(sql, { username: 'sheji', displayName: '设计师·小汤', role: 'designer', password: DEMO_PASSWORD, mustChangePassword: false });
+    blocks.push({ block: '工作台的设计师账号', written: true, detail: '账号 sheji（设计师·小汤），只进后台的「工作台」' });
   }
 
   // 最后照应用每分钟的自动任务跑一次（v0.7.31，main 定时测试 v0.7.29 报的）：后面的块会改到前面的块已经用过的规则
