@@ -120,6 +120,8 @@ export function parseStatementRows(
   map: ColumnMap,
 ): { lines: ParsedStatementLine[]; problems: { row: number; message: string }[] } {
   const idx = (f: StatementField) => (map[f] ? header.indexOf(map[f]!) : -1);
+  /** 没有流水号、内容完全一样的几笔在这份文件里出现到第几次 */
+  const repeats = new Map<string, number>();
   const cell = (r: { cells: string[] }, f: StatementField) => {
     const i = idx(f);
     return i >= 0 ? (r.cells[i] ?? '').trim() : '';
@@ -162,7 +164,16 @@ export function parseStatementRows(
     const counterpartyAccount = cell(r, 'counterpartyAccount').replace(/\s/g, '').slice(0, 40);
     const summary = cell(r, 'summary').slice(0, 200);
     const bankRef = cell(r, 'ref').slice(0, 64);
-    const dedupeKey = bankRef ? `ref:${bankRef}` : `row:${txnDate}|${direction}|${cents}|${counterparty}|${balance ?? ''}|${summary}`.slice(0, 400);
+    // 没有银行流水号时按看得到的内容认（Codex 审查 d72ea42 后补）：对方账号也算进去（同一天、同金额、同户名、同摘要但打给不同账号的是两笔）；
+    // 同一份文件里内容完全一样的几笔按出现的先后编上 #2、#3……（是几笔就记几笔，不当成重复），另一份覆盖同一天的对账单里同样的几笔编号相同、照样认出重复
+    let dedupeKey: string;
+    if (bankRef) dedupeKey = `ref:${bankRef}`;
+    else {
+      const base = `row:${txnDate}|${direction}|${cents}|${counterparty}|${counterpartyAccount}|${balance ?? ''}|${summary}`.slice(0, 390);
+      const n = (repeats.get(base) ?? 0) + 1;
+      repeats.set(base, n);
+      dedupeKey = n === 1 ? base : `${base}#${n}`;
+    }
     lines.push({ row: r.row, txnDate, direction, amountCents: cents, balanceCents: balance, counterparty, counterpartyAccount, summary, bankRef, dedupeKey });
   }
   return { lines, problems };

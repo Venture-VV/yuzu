@@ -4,7 +4,8 @@
 //     → 回到询价单，报价里有这一家、标「供应商链接」；
 //   · 已确认的采购单发订单确认链接 → 供应商确认、写承诺到货日 → 采购单详情显示「供应商已确认，承诺 X 到」
 //     → 再发发货预告链接、供应商报一批 → 采购单详情列出这一批；
-//   · 发货预告提交上了、回复丢了：供应商页面记着「没收到结果」，刷新以后还在、不能另填一份，按原内容重新提交 → 只记一批（Codex 审查 73ae462 后补）。
+//   · 发货预告提交上了、回复丢了：供应商页面记着「没收到结果」，刷新以后还在、不能另填一份，按原内容重新提交 → 只记一批（Codex 审查 73ae462 后补）；
+//   · 采购单的「供应商确认与发货」取不回来：写明加载失败、可以重试，不把整块藏起来（Codex 审查 d72ea42 后补）。
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
@@ -166,5 +167,26 @@ test.describe('8.0.21 供应商门户', () => {
     await expect(s.p.getByTestId('sp-notices')).toContainText(`${mat.name} 2箱`);
     await expect(s.p.getByTestId('sp-submit')).toBeVisible();
     await s.close();
+  });
+
+  test('采购单的「供应商确认与发货」取不回来：写明加载失败、可以重试', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const { sup, mat, today } = await setup(page);
+    const created = await page.request.post('/api/purchase-orders', {
+      data: { clientKey: randomUUID(), orderDate: today, action: 'submit', supplierId: sup.id, lines: [{ materialId: mat.id, purchaseQtyMilli: 1_000, priceCents: 3_000 }] },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    let po = (await created.json()).po as { id: number; status: string };
+    if (po.status !== 'approved') po = (await (await page.request.post(`/api/purchase-orders/${po.id}/approve`, { data: {} })).json()) as typeof po;
+    const url = `**/api/purchase-orders/${po.id}/supplier-portal`;
+    await page.route(url, (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.goto(`/purchasing?po=${po.id}`);
+    const failed = page.getByTestId('po-supplier-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await page.unroute(url);
+    await failed.getByTestId('po-supplier-error-retry').click();
+    await expect(page.getByTestId('po-supplier-card')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('po-supplier-card')).toContainText('供应商还没确认');
   });
 });

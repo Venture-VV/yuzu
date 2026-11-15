@@ -13,6 +13,7 @@ import { SUPPLIER_LINK_LABELS, type DeliveryNotice, type PoSupplierPortal, type 
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { formatDateTime } from '../../lib/utils';
+import { LoadFailed } from '../../components/LoadFailed';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Notice, Select } from '../../components/ui';
 import { useSuppliers } from '../inventory/queries';
@@ -122,7 +123,8 @@ export function SourcingSupplierLinks({ eventId, open }: { eventId: number; open
   const suppliers = useSuppliers(false, open && can('purchase.manage'));
   const [supplierId, setSupplierId] = useState<number | null>(null);
   const a = useLinkActions(key);
-  if (!open && !links.data?.length) return null;
+  // 取不回来（也没有上一次的）不当成「没有链接」（Codex 审查 d72ea42 后补）
+  if (!open && !links.data?.length && !(links.isError && !links.data)) return null;
   return (
     <Card className="space-y-2 p-4" data-testid="sourcing-supplier-links">
       <div className="flex flex-wrap items-center gap-2">
@@ -145,7 +147,11 @@ export function SourcingSupplierLinks({ eventId, open }: { eventId: number; open
         </div>
       )}
       {a.url && <FreshUrl url={a.url} onDone={() => a.setUrl(null)} />}
-      <LinkList links={links.data ?? []} busy={a.busy} onVoid={(id) => void a.revoke(id)} />
+      {links.isError && !links.data ? (
+        <LoadFailed title="发出去的报价链接取不回来，请检查网络" onRetry={() => void links.refetch()} retrying={links.isFetching} testId="sourcing-links-error" />
+      ) : (
+        <LinkList links={links.data ?? []} busy={a.busy} onVoid={(id) => void a.revoke(id)} />
+      )}
     </Card>
   );
 }
@@ -170,6 +176,13 @@ export function PoSupplierCard({ po }: { po: PurchaseOrder }) {
   const a = useLinkActions(key);
   const d = portal.data;
   const live = po.status === 'approved' && !po.backfill;
+  // 取不回来（也没有上一次的）：写明加载失败、可以重试，不把整块（含发链接的按钮、供应商的回复）藏起来（Codex 审查 d72ea42 后补）
+  if (portal.isError && !d)
+    return (
+      <LoadFailed title="供应商确认与发货取不回来，请检查网络" onRetry={() => void portal.refetch()} retrying={portal.isFetching} testId="po-supplier-error">
+        供应商有没有确认、报了哪几批发货，重试取回来以后再看。
+      </LoadFailed>
+    );
   if (!d || (!live && !d.links.length && !d.confirmation)) return null;
   const make = (kind: SupplierLinkKind) => void a.create(`/api/purchase-orders/${po.id}/supplier-links`, { kind });
   return (
@@ -218,6 +231,12 @@ export function PoSupplierCard({ po }: { po: PurchaseOrder }) {
 export function DeliveryNoticesHint({ po }: { po: PurchaseOrder }) {
   const portal = usePoSupplierPortal(po.id);
   const d = portal.data;
+  if (portal.isError && !d)
+    return (
+      <LoadFailed title="供应商的发货预告取不回来，请检查网络" onRetry={() => void portal.refetch()} retrying={portal.isFetching} testId="delivery-notices-error">
+        按实际到的数量收货；预告只是参考。
+      </LoadFailed>
+    );
   if (!d || (!d.notices.length && !d.confirmation)) return null;
   return (
     <Notice tone="info" title={d.notices.length ? `供应商预告了 ${d.notices.length} 批发货` : `供应商已确认，承诺 ${d.confirmation!.promisedDate} 到货`}>

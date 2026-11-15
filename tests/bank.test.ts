@@ -92,6 +92,19 @@ describe('对账单解析', () => {
     expect(ls.map((l) => [l.txnDate, l.direction, l.amountCents, l.summary])).toEqual([['2026-11-14', 'out', 12_345, '合计支付11月货款']]);
     expect(problems).toEqual([]);
   });
+  it('没有流水号、没有余额：打给不同账号的是两笔；内容完全一样的几笔按先后编号，各记各的', () => {
+    const header = ['交易日期', '交易金额', '对方户名', '对方账号', '摘要'];
+    const map = detectColumns(header);
+    const parse = (rows: string[][]) => parseStatementRows(header, rows.map((cells, i) => ({ row: i + 2, cells })), map).lines.map((l) => l.dedupeKey);
+    const a = ['2026-11-14', '-100', '城东蔬菜', '6222 0000 0000 0001', '货款'];
+    const b = ['2026-11-14', '-100', '城东蔬菜', '6222 0000 0000 0002', '货款'];
+    const keys = parse([a, b, a]);
+    expect(new Set(keys).size).toBe(3);
+    expect(keys[0]).toContain('6222000000000001');
+    expect(keys[2]).toBe(`${keys[0]}#2`);
+    // 另一份覆盖同一天的对账单里同样的几笔：编号相同，认得出重复
+    expect(parse([b, a, a])).toEqual([keys[1], keys[0], keys[2]]);
+  });
 });
 
 describe('银行流水', () => {
@@ -168,6 +181,16 @@ describe('银行流水', () => {
     });
     expect(zh.status, JSON.stringify(zh.body)).toBe(200);
     expect(zh.body.lines[0]).toMatchObject({ txnDate: today, direction: 'in', amountCents: 8_800 });
+  });
+
+  it('没有流水号、没有余额的两笔：同一天同金额同户名同摘要、打给不同账号，导入时两笔都记（原来按重复只记一笔）', async () => {
+    const content = csv([
+      ['2026-11-12', '代付', '100.00', '', '', '同名供应商', '6222000000000101', ''],
+      ['2026-11-12', '代付', '100.00', '', '', '同名供应商', '6222000000000202', ''],
+    ]);
+    const r = await doImport(content, 'no-ref.csv');
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body.import).toMatchObject({ newCount: 2, dupCount: 0 });
   });
 
   it('人工勾对：候选里有同金额的；合计超过流水拒绝；同一笔不能对两条；撤销写原因；不用对的（利息）要写原因', async () => {
