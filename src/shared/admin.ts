@@ -46,6 +46,8 @@ export const ADMIN_SECTIONS = {
   guide: { path: '/admin/guide', label: '对客导览', perms: ['settings.manage', 'catalog.manage'] },
   // 设备（RQ-001，v0.7.21，见 docs/HARDWARE.md）：设备登记、按采购清单导入、打印任务与设备事件；默认店主、店总
   devices: { path: '/admin/devices', label: '设备', perms: ['device.manage'] },
+  // 对外接口（8.0.21，docs/INTEGRATIONS_V8021.md 第 1 节）：每一样的模式（只看运行环境）、门店开关、最近的对外调用
+  integrations: { path: '/admin/integrations', label: '对外接口', perms: ['settings.manage'] },
   // 微信小程序（小程序线，docs/MINIPROGRAM.md 第 5 节）：开关、门店信息、首页轮播、项目介绍、会员的微信绑定与解绑。
   // 进后台的权限不变（客户经理照旧不进后台，v0.6.0）：能进后台、又有这两项之一的才看得到
   mp: { path: '/admin/mp', label: '微信小程序', perms: ['mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite', 'mp.food', 'mp.booking'] },
@@ -71,7 +73,7 @@ export const ADMIN_GROUPS: readonly { key: string; title: string; items: readonl
   { key: 'rules', title: '规则中心', items: ['settings', 'rules', 'dictionaries'] },
   { key: 'members', title: '会员与营销', items: ['membership', 'coupons'] },
   { key: 'business', title: '营业项目', items: ['catalog', 'tags', 'technicians', 'dining', 'emenu', 'rooms', 'bookings'] },
-  { key: 'venue', title: '场地、设备与线上', items: ['spaces', 'guide', 'devices', 'mp'] },
+  { key: 'venue', title: '场地、设备与线上', items: ['spaces', 'guide', 'devices', 'integrations', 'mp'] },
   { key: 'staff', title: '人员与行政', items: ['staff', 'permissions', 'canteen', 'patrol'] },
   { key: 'data', title: '数据与审计', items: ['audit', 'opening'] },
 ];

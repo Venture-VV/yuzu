@@ -76,6 +76,7 @@ import { MAX_COUNT_CARD_USES, MAX_COUNT_CARDS_PER_CHECKOUT } from '@shared/count
 import { recordSaleUsage, reverseSaleUsage } from '../stock-usage';
 import { lockPayTxForUse, markPayTxUsed, releasePayTxs } from '../pay-terminal';
 import { assertNotVerified, lockVerificationForUse, markVerificationUsed, releaseVerifications } from '../platform-verify';
+import { otaPrepaidHints } from '../ota';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -322,6 +323,7 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
       dishes: await unservedDishesOf(tx, ids),
       rooms: await openRoomsOf(tx, ids),
       usages: await openUsagesOf(tx, ids, at),
+      otaPrepaid: await otaPrepaidHints(tx, ids),
     };
   });
 }

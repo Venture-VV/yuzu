@@ -14,6 +14,7 @@ const CouponsSection = lazyPage(() => import('./CouponsSection').then((m) => m.C
 const DashboardPage = lazyPage(() => import('../dashboard/DashboardPage').then((m) => m.DashboardPage));
 const DevicesSection = lazyPage(() => import('./DevicesSection').then((m) => m.DevicesSection));
 const DictionariesSection = lazyPage(() => import('./DictionariesSection').then((m) => m.DictionariesSection));
+const IntegrationsSection = lazyPage(() => import('./IntegrationsSection').then((m) => m.IntegrationsSection));
 const DiningSection = lazyPage(() => import('./DiningSection').then((m) => m.DiningSection));
 // 电子菜单（8.0.10，docs/EMENU.md）：餐桌平板上的菜单在这里排
 const EmenuAdminSection = lazyPage(() => import('../emenu/EmenuAdminSection').then((m) => m.EmenuAdminSection));
@@ -50,6 +51,8 @@ export const adminRoutes: RouteObject[] = [
   { path: 'rules/:tab?', element: <RulesTab /> },
   // 数据字典与字段（8.0.21）
   { path: 'dictionaries/:tab?', element: <DictionariesSection /> },
+  // 对外接口（8.0.21）
+  { path: 'integrations', element: <IntegrationsSection /> },
   // 会员体系（8.0.19，IA5）：会员规则、会员权益、渠道与标签合成一个分区的三个页签；旧地址带着查询参数跳过来
   { path: 'membership/:tab?', element: <MembershipSection /> },
   { path: 'benefits', element: <MovedWithSearch to="/admin/membership/benefits" /> },

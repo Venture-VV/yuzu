@@ -234,6 +234,8 @@ export function usePayRows(opts: {
       }
       setRows((list) => [...list, row]);
     });
+  /** 带好内容的一笔（8.0.21：预付的渠道订单默认带一行团购券） */
+  const addPreset = (method: CheckoutMethod, amount: number, patch: Partial<PayRow>) => setRows((list) => [...list, { ...newRow(method, amount), ...patch }]);
   const update = (id: number, patch: Partial<PayRow>) => edit(() => setRows((list) => list.map((r) => (r.id === id ? { ...r, ...patch } : r))));
   const remove = (id: number) => edit(() => setRows((list) => list.filter((x) => x.id !== id)));
   /** 授权弹窗签发后记到那一笔上（不经过 edit：授权时表单没有锁） */
@@ -291,6 +293,7 @@ export function usePayRows(opts: {
     grantFits: opts.grantFits,
     locked: opts.locked,
     addRow,
+    addPreset,
     update,
     remove,
     setGrant,

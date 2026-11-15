@@ -317,6 +317,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '147_supplier_links.sql',
   '148_pay_terminal.sql',
   '149_platform_verify.sql',
+  '150_ota.sql',
   '161_replenish_mode.sql',
   '162_customer_workbench.sql',
   '163_customer_credit_canonical.sql',

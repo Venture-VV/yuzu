@@ -124,6 +124,8 @@ export const FENCED_OPS = [
   'pay_terminal',
   // 8.0.21 平台验券（迁移 149）：编号记在验券记录上（platform_verifications.client_key）
   'platform_verify',
+  // 8.0.21 渠道订单导入（迁移 150）：编号记在导入记录上（ota_imports.client_key）
+  'ota_import',
   'customer_note',
   'customer_binding_request',
   'customer_binding_review',
@@ -185,6 +187,7 @@ export async function fenceKey(
   if (isErpP2Op(opType) && (await erpP2OpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   if (opType === 'pay_terminal' && (await tx`SELECT 1 FROM pay_transactions WHERE client_key = ${key}`).length) return { existingOpType: opType };
   if (opType === 'platform_verify' && (await tx`SELECT 1 FROM platform_verifications WHERE client_key = ${key}`).length) return { existingOpType: opType };
+  if (opType === 'ota_import' && (await tx`SELECT 1 FROM ota_imports WHERE client_key = ${key}`).length) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;

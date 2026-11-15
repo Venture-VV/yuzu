@@ -38,6 +38,7 @@ import { rateText } from '../rooms/parts';
 import { AdminPage } from './AdminShell';
 import { UsageRulesCard } from './UsageRulesCard';
 import { SubPane } from '../../components/SubNav';
+import { OtaChannelsCard } from '../ota/OtaPanels';
 
 
 /** 二级页签（8.0.17）：规则 → 清单 */
@@ -45,6 +46,8 @@ const ROOM_TABS = [
   { key: 'rules', label: '客房规则' },
   { key: 'types', label: '房型与房价' },
   { key: 'rooms', label: '房间' },
+  // 8.0.21 OTA 渠道：渠道、佣金、渠道房型 → 本店房型的对照
+  { key: 'channels', label: '渠道' },
 ];
 
 export function RoomsSection() {
@@ -59,6 +62,9 @@ export function RoomsSection() {
       </SubPane>
       <SubPane tab="rooms">
         <RoomsCard />
+      </SubPane>
+      <SubPane tab="channels">
+        <OtaChannelsCard />
       </SubPane>
     </AdminPage>
   );

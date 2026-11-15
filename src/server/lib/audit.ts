@@ -258,7 +258,11 @@ export type AuditAction =
   // 8.0.21 扫码收款（docs/INTEGRATIONS_V8021.md 第 2 节）：开始收款、原路退回、重试、线下已退
   | 'pay_terminal'
   // 8.0.21 平台验券（同上第 3 节）：验券、撤销核销、转补录
-  | 'platform_verify';
+  | 'platform_verify'
+  // 8.0.21 OTA 渠道订单（同上第 4 节）：渠道的新建与修改、导入、订单建 / 改 / 取消预约
+  | 'ota_channel'
+  | 'ota_import'
+  | 'ota_order';
 
 export interface AuditEntry {
   staffId: number | null;

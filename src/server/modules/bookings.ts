@@ -403,16 +403,19 @@ async function claimSlot(tx: Tx, deps: Pick<Deps, 'config'>, a: CreateArgs, rule
   const start = a.startsAt.getTime();
   const date = businessDateOf(a.startsAt, clock.timezone, clock.startHour);
   const today = businessDateOf(new Date(now), clock.timezone, clock.startHour);
-  if (start < now - 5 * 60_000) throw unprocessable('BOOKING_PAST', a.kind === 'room' ? '预计到店时间已经过了，请重新选' : '开始时间已经过了，请重新选');
+  // 渠道订单（8.0.21 OTA）：入住日由渠道定，不受「最远约几天」限制；导入时入住时刻已过的由导入那边处理；房量不够照样建、标超订
+  const ota = a.source === 'ota';
+  if (!ota && start < now - 5 * 60_000) throw unprocessable('BOOKING_PAST', a.kind === 'room' ? '预计到店时间已经过了，请重新选' : '开始时间已经过了，请重新选');
   const lastDay = businessDateOf(new Date(Date.parse(`${today}T12:00:00Z`) + rules.maxDaysAhead * 86_400_000), 'UTC', 0);
-  if (date < today || date > lastDay) throw unprocessable('BOOKING_RANGE', `只能约今天到 ${rules.maxDaysAhead} 天后（${lastDay}）`);
+  if (!ota && (date < today || date > lastDay)) throw unprocessable('BOOKING_RANGE', `只能约今天到 ${rules.maxDaysAhead} 天后（${lastDay}）`);
   if (a.kind === 'room') {
     if (!a.roomTypeId) throw badRequest('请选择房型');
     const [rt] = await tx<{ id: number; name: string; active: boolean }[]>`SELECT id, name, active FROM room_types WHERE id = ${a.roomTypeId} FOR NO KEY UPDATE`;
     if (!rt || !rt.active) throw unprocessable('BOOKING_ROOM_TYPE', '房型不存在或已停用');
-    if ((await roomTypeFree(tx, a.roomTypeId, date, today, excludeBookingId)) < 1) throw conflict('BOOKING_FULL', `「${rt.name}」${date} 已经约满了`);
+    const full = (await roomTypeFree(tx, a.roomTypeId, date, today, excludeBookingId)) < 1;
+    if (full && !ota) throw conflict('BOOKING_FULL', `「${rt.name}」${date} 已经约满了`);
     const end = plusMinutes(a.startsAt, 60);
-    return { end, holdUntil: plusMinutes(a.startsAt, rules.roomHoldMinutes), date, label: rt.name };
+    return { end, holdUntil: plusMinutes(a.startsAt, rules.roomHoldMinutes), date, label: rt.name, overbooked: full };
   }
   if (a.kind === 'space') {
     if (!a.spaceId) throw badRequest('请选择房间');
@@ -426,7 +429,7 @@ async function claimSlot(tx: Tx, deps: Pick<Deps, 'config'>, a: CreateArgs, rule
     const end = plusMinutes(a.startsAt, duration);
     const busy = await spaceBusy(tx, sp.id, start, end.getTime(), excludeBookingId);
     if (busy.some((b) => overlaps(start, end.getTime(), b.start, b.end))) throw conflict('BOOKING_TAKEN', `${sp.code} 这个时段已经有人约了或正在用，请换一个时段`);
-    return { end, holdUntil: null, date, label: sp.code };
+    return { end, holdUntil: null, date, label: sp.code, overbooked: false };
   }
   if (!a.itemId) throw badRequest('请选择项目');
   const target = await technicianTarget(tx, a.itemId, rules);
@@ -444,7 +447,7 @@ async function claimSlot(tx: Tx, deps: Pick<Deps, 'config'>, a: CreateArgs, rule
   } else if (free.length - loose < 1) {
     throw conflict('BOOKING_TAKEN', `这个时段能做「${target.item.name}」的技师都约满了，请换一个时段`);
   }
-  return { end, holdUntil: null, date, label: target.item.name };
+  return { end, holdUntil: null, date, label: target.item.name, overbooked: false };
 }
 
 function assertInWindow(start: Date, duration: number, date: string, rules: BookingRules, timezone: string, strictGrid: boolean) {
@@ -458,6 +461,11 @@ function assertInWindow(start: Date, duration: number, date: string, rules: Book
 
 /** 新建（调用方的事务里，已核对过重提）：返回预约单编号 */
 async function createBookingTx(tx: Tx, deps: Pick<Deps, 'config'>, a: CreateArgs, actor: { id: number }, clientKey: string, requestHash: string, at: Date): Promise<number> {
+  return (await createBookingTxFull(tx, deps, a, actor, clientKey, requestHash, at)).id;
+}
+
+/** 同上，另外返回房量够不够（渠道订单超订提醒用） */
+async function createBookingTxFull(tx: Tx, deps: Pick<Deps, 'config'>, a: CreateArgs, actor: { id: number }, clientKey: string, requestHash: string, at: Date): Promise<{ id: number; overbooked: boolean }> {
   const rules = await loadBookingRules(tx);
   if (a.memberId !== null) {
     const [m] = await tx<{ status: string }[]>`SELECT status FROM members WHERE id = ${a.memberId}`;
@@ -487,7 +495,29 @@ async function createBookingTx(tx: Tx, deps: Pick<Deps, 'config'>, a: CreateArgs
     detail: { bookingNo, kind: BOOKING_KIND_LABELS[a.kind], source: a.source, target: slot.label, startsAt: a.startsAt.toISOString(), memberId: a.memberId ?? undefined },
     businessDate: slot.date,
   });
-  return id;
+  return { id, overbooked: slot.overbooked };
+}
+
+/**
+ * 渠道订单建客房预约（8.0.21 OTA，ota.ts 在每张订单自己的事务里调用）：来源「渠道」、直接已预约；
+ * 不受最远天数限制，房量不够照样建（返回 overbooked）。锁与前台新建一样（房型一行 `FOR NO KEY UPDATE`）
+ */
+export async function createOtaBookingTx(
+  tx: Tx,
+  deps: Pick<Deps, 'config'>,
+  a: { roomTypeId: number; startsAt: Date; guestName: string; guestPhone: string; guests: number; note: string },
+  actor: { id: number },
+  at: Date,
+): Promise<{ id: number; overbooked: boolean }> {
+  const clientKey = randomUUID();
+  const args: CreateArgs = { kind: 'room', source: 'ota', memberId: null, guestName: a.guestName || '渠道客人', guestPhone: /^1\d{10}$/.test(a.guestPhone) ? a.guestPhone : '', guests: a.guests, roomTypeId: a.roomTypeId, startsAt: a.startsAt, note: a.note.slice(0, MAX_BOOKING_NOTE), strictGrid: false };
+  return createBookingTxFull(tx, deps, args, actor, clientKey, hashRequest({ ota: true, clientKey }), at);
+}
+
+/** 渠道订单改了日期、取消了（ota.ts）：没到店的预约改时间或取消，与前台同一条路径（锁预约一行，改时间再取房型的锁） */
+export async function changeOtaBookingTx(tx: Tx, deps: Deps, id: number, p: { action: 'reschedule'; startsAt: Date; expectedVersion: number } | { action: 'cancel'; reason: string }, ctx: OpContext) {
+  const payload: ChangePayload = p.action === 'cancel' ? { action: 'cancel', reason: p.reason } : { action: 'reschedule', startsAt: p.startsAt.toISOString(), expectedVersion: p.expectedVersion };
+  await changeBookingTx(tx, deps, id, payload, ctx, randomUUID());
 }
 
 /** 前台、电话新建（「预约」页）：直接「已预约」 */

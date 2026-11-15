@@ -305,6 +305,8 @@ export interface CheckoutPreview {
   countCards?: import('./count-cards').CheckoutCountCardOption[];
   /** 次卡按份抵扣用的明细（已挂的明细加上此刻的门票，门票用负数编号），页面与服务端用同一个算法分配 */
   countCardLines?: import('./count-cards').CountCardLine[];
+  /** 预付的渠道订单（8.0.21 OTA）：收款区默认带一行团购券（平台「其他」、券码 = 订单号） */
+  otaPrepaid?: import('./ota').OtaPrepaidHint[];
   /** 「门票跳档宽限」（不含会员的浴票延迟；每位客人用的见 visits[].graceMinutes） */
   graceMinutes: number;
   pricedAt: string;

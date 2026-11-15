@@ -31,6 +31,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, Notice, Segmented, Select, Skeleton } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
+import { OtaOrdersPanel } from '../ota/OtaPanels';
 
 const boardKey = (date: string) => ['bookings', date] as const;
 const STATUS_TONE: Record<BookingStatus, 'lake' | 'pine' | 'ember' | 'clay' | 'ink'> = {
@@ -60,12 +61,43 @@ export function BookingsPage() {
     p.delete('b');
     return p;
   });
+  // 8.0.21 OTA：渠道订单（导入渠道后台导出的订单表，建客房预约）
+  const view = params.get('view') === 'ota' ? 'ota' : 'board';
+  const setView = (v: 'board' | 'ota') =>
+    setParams((p) => {
+      if (v === 'ota') p.set('view', 'ota');
+      else p.delete('view');
+      return p;
+    });
+  const viewSwitch = (
+    <Segmented
+      value={view}
+      onChange={setView}
+      ariaLabel="页面"
+      size="sm"
+      options={[
+        { value: 'board', label: '预约' },
+        { value: 'ota', label: '渠道订单' },
+      ]}
+    />
+  );
+  if (view === 'ota') {
+    return (
+      <>
+        <PageHeader title="预约 · 渠道订单" actions={viewSwitch} />
+        <div className="space-y-5 p-5 md:p-7">
+          <OtaOrdersPanel />
+        </div>
+      </>
+    );
+  }
   return (
     <>
       <PageHeader
         title="预约"
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {viewSwitch}
             <DateNav value={date} today={session.today} onChange={setDate} />
             <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setCreating(true)} data-testid="booking-new">
               新建预约
