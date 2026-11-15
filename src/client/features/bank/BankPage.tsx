@@ -2,7 +2,7 @@
 // 导入时按同义词认列，认不准的在预览里改；同一份文件只导一次。勾对：导入时自动对上「金额、日期前后 3 天、户名都对得上且只有一个」的，
 // 其余在这里挑；对平了才算这条对上。超过 7 天没对上的进待办。
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, FileUp, Link2, Plus } from 'lucide-react';
 import {
@@ -379,36 +379,51 @@ function ImportDialog({ open, accounts, onClose }: { open: boolean; accounts: Ba
   const [accountId, setAccountId] = useState<number | null>(null);
   const [file, setFile] = useState<{ name: string; payload: { csv?: string; xlsxBase64?: string } } | null>(null);
   const [map, setMap] = useState<ColumnMap | null>(null);
-  const [preview, setPreview] = useState<BankImportPreview | null>(null);
+  // 预览记着是按哪个账户、哪份文件看的（列对照就是它自己的 columnMap）：换账户、换文件作废，改列对照时重新预览、新的回来之前不能导入；
+  // 每发一次预览加一，回来晚了的旧预览不再用（Codex 审查 0edd8df 后补：原来旧的回来晚了会盖掉新的，导入时拿当前文件配旧的列对照）
+  const [preview, setPreview] = useState<(BankImportPreview & { forAccount: number; forFile: object }) | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const previewSeq = useRef(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useResetOnOpen(open, () => {
+    previewSeq.current += 1;
     setAccountId(accounts[0]?.id ?? null);
     setFile(null);
     setMap(null);
     setPreview(null);
+    setPreviewing(false);
     setError(null);
   });
   const runPreview = async (f = file, m = map, acc = accountId) => {
-    if (!f || !acc) return;
-    setBusy(true);
+    const seq = ++previewSeq.current;
+    if (!f || !acc) {
+      setPreviewing(false);
+      return;
+    }
+    setPreviewing(true);
     setError(null);
     try {
       const p = await api.post<BankImportPreview>('/api/erp/bank/import/preview', { accountId: acc, fileName: f.name, ...f.payload, ...(m ? { columnMap: m } : {}) });
-      setPreview(p);
+      if (seq !== previewSeq.current) return;
+      setPreview({ ...p, forAccount: acc, forFile: f });
       setMap(p.columnMap);
     } catch (e) {
+      if (seq !== previewSeq.current) return;
       setError(errorMessage(e));
       setPreview(null);
     } finally {
-      setBusy(false);
+      if (seq === previewSeq.current) setPreviewing(false);
     }
   };
+  /** 预览是不是就是现在选的账户、文件（而且没有更新的预览在路上） */
+  const previewCurrent = !!preview && !previewing && preview.forAccount === accountId && preview.forFile === file;
   const commit = async () => {
-    if (!file || !accountId || !preview) return;
+    if (!file || !accountId || !preview || !previewCurrent) return;
     setBusy(true);
     setError(null);
-    const body = { clientKey: uuid(), accountId, fileName: file.name, ...file.payload, columnMap: map ?? preview.columnMap };
+    // 交的列对照就是这一份预览用的（服务端认出来的或员工改过的），与看到的预览一致
+    const body = { clientKey: uuid(), accountId, fileName: file.name, ...file.payload, columnMap: preview.columnMap };
     try {
       const r = await sendErpOp<{ import: { newCount: number; dupCount: number; autoMatched: number } }>({
         key: body.clientKey,
@@ -442,7 +457,13 @@ function ImportDialog({ open, accounts, onClose }: { open: boolean; accounts: Ba
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" loading={busy} disabled={!preview || !!preview.problem || preview.alreadyImported || preview.lines.length === 0 || pending.length > 0} onClick={() => void commit()} data-testid="bank-import-confirm">
+          <Button
+            variant="primary"
+            loading={busy || previewing}
+            disabled={!preview || !previewCurrent || !!preview.problem || preview.alreadyImported || preview.lines.length === 0 || pending.length > 0}
+            onClick={() => void commit()}
+            data-testid="bank-import-confirm"
+          >
             导入 {preview ? `${preview.lines.length - preview.duplicates} 条新的` : ''}
           </Button>
         </>
@@ -454,10 +475,12 @@ function ImportDialog({ open, accounts, onClose }: { open: boolean; accounts: Ba
             <Select
               id="bi-account"
               value={accountId ?? ''}
+              disabled={busy}
               onChange={(e) => {
                 const v = Number(e.target.value) || null;
                 setAccountId(v);
                 setMap(null);
+                setPreview(null);
                 void runPreview(file, null, v);
               }}
             >
@@ -475,9 +498,12 @@ function ImportDialog({ open, accounts, onClose }: { open: boolean; accounts: Ba
               accept=".csv,.xlsx,text/csv"
               className="text-[13px]"
               data-testid="bank-import-file"
+              disabled={busy}
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
+                previewSeq.current += 1;
+                setPreview(null);
                 const payload = await fileToPayload(f);
                 const next = { name: f.name, payload };
                 setFile(next);
@@ -498,6 +524,7 @@ function ImportDialog({ open, accounts, onClose }: { open: boolean; accounts: Ba
                   <Select
                     value={map?.[f] ?? ''}
                     className="h-8 text-[12.5px]"
+                    disabled={busy}
                     onChange={(e) => {
                       const next = { ...(map ?? {}), [f]: e.target.value || undefined };
                       setMap(next);

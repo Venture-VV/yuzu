@@ -163,6 +163,7 @@ function SalesInvoiceSheet({ id, providerMode, onClose }: { id: number | null; p
             <dd className="num">
               {INVOICE_SOURCE_LABELS[r.sourceType]} {r.sourceNo}
               {r.sourceVoided && <Badge tone="clay" className="ml-2">已反结账 / 作废</Badge>}
+              {!r.sourceVoided && r.sourceReduced && <Badge tone="clay" className="ml-2">退了款，超过现在可开的</Badge>}
             </dd>
             <dt className="text-ink-3">金额</dt>
             <dd className="num font-bold">¥{formatAmount(r.amountCents)}</dd>
@@ -230,6 +231,16 @@ function SalesInvoiceSheet({ id, providerMode, onClose }: { id: number | null; p
           {r.status === 'issued' && r.sourceVoided && (
             <Notice tone="error" title="来源已反结账或作废">
               这张发票要红冲：在开票系统里作废 / 红冲以后，这里点「作废」写原因；需要的话再按新的结账单重新申请。
+            </Notice>
+          )}
+          {r.status === 'issued' && !r.sourceVoided && r.sourceReduced && (
+            <Notice tone="error" title="开票以后结账单退了款">
+              发票金额超过了现在能开的：在开票系统里作废 / 红冲以后，这里点「作废」写原因，再按现在的金额重新申请。
+            </Notice>
+          )}
+          {r.status === 'requested' && (r.sourceVoided || r.sourceReduced) && (
+            <Notice tone="error" title={r.sourceVoided ? '来源已反结账或作废' : '申请以后结账单退了款'} data-testid="sales-invoice-stale">
+              这张申请的金额超过现在能开的，开不了：请「驳回」写明原因，需要的话按现在的金额重新申请。
             </Notice>
           )}
           {error && <Notice tone="error" title={error} />}

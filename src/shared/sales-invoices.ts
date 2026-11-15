@@ -48,6 +48,8 @@ export interface SalesInvoice {
   voidedAt: string | null;
   /** 来源已反结账、作废（已开的要红冲：作废后重新申请，CW15） */
   sourceVoided: boolean;
+  /** 结账单在申请或开票以后退了款，这张的金额超过现在可开的（没开的处理时拦下、要驳回重申；已开的要红冲后重开，Codex 审查 0edd8df 后补） */
+  sourceReduced: boolean;
 }
 
 /** 申请页要的：来源的情况、可开金额、这一笔现在的申请与历史 */

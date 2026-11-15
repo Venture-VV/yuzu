@@ -81,7 +81,7 @@ describe('开票申请', () => {
       FROM generate_series(1, 501) g`;
     const redAfter = (await api(ctx.app, payer, 'GET', '/api/erp/sales-invoices?status=red')).body;
     expect(redAfter.rows.map((r: { id: number }) => r.id)).toContain(id);
-    expect(redAfter.rows.every((r: { sourceVoided: boolean }) => r.sourceVoided)).toBe(true);
+    expect(redAfter.rows.every((r: { sourceVoided: boolean; sourceReduced: boolean }) => r.sourceVoided || r.sourceReduced)).toBe(true);
     expect(redAfter.counts.redFlag).toBe(red.counts.redFlag);
     expect((await source('checkout', done.id)).invoiceableCents).toBe(0);
     // 红冲 = 作废（写原因）；旧版本号拒绝
@@ -90,6 +90,39 @@ describe('开票申请', () => {
     expect(voided.body).toMatchObject({ status: 'voided', voidReason: '来源已反结账' });
     // 反结账的来源不能再申请
     expect((await ask({ sourceType: 'checkout', sourceId: done.id, amountCents: 100 })).body.error.code).toBe('SOURCE_VOIDED');
+  });
+
+  it('申请以后结账单退了款：处理时按现在的可开金额再核对，超了开不了（驳回后重申）；开票以后退了款的标「要红冲」', async () => {
+    const done = await enterAndPay([{ method: 'wechat', amount: 49_900, ref: '尾号 1234' }]);
+    const refundSome = async (amount: number) => {
+      const opts = (await api(ctx.app, ctx.owner, 'GET', `/api/frontdesk/checkouts/${done.id}/refund-options`)).body;
+      const item = (opts.items as { category: string; name: string; remainingAmount: number }[]).find((i) => i.remainingAmount >= amount)!;
+      const r = await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${done.id}/refunds`, {
+        clientKey: randomUUID(),
+        reason: '客人提前离店',
+        items: [{ category: item.category, name: item.name, quantity: 0, amount }],
+        payments: [{ method: 'wechat', amount, ref: '退 1234' }],
+      });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+    };
+    const req = (await ask({ sourceType: 'checkout', sourceId: done.id, amountCents: 49_900 })).body.request as { id: number };
+    // 申请以后退了 ¥100：登记已开、交给服务商开都拦下
+    await refundSome(10_000);
+    const stale = await api(ctx.app, payer, 'POST', `/api/erp/sales-invoices/${req.id}/issue`, { version: 1, invoiceNo: '26440000000000000101', invoiceDate: today });
+    expect(stale.body.error.code).toBe('SOURCE_CHANGED');
+    expect(stale.body.error.message).toContain('¥399.00');
+    expect((await api(ctx.app, payer, 'POST', `/api/erp/sales-invoices/${req.id}/provider`, { version: 1 })).body.error.code).toBe('SOURCE_CHANGED');
+    const view = (await api(ctx.app, payer, 'GET', `/api/erp/sales-invoices/${req.id}`)).body;
+    expect(view).toMatchObject({ status: 'requested', sourceReduced: true, sourceVoided: false });
+    // 驳回，按现在的金额重新申请、开出
+    expect((await api(ctx.app, payer, 'POST', `/api/erp/sales-invoices/${req.id}/reject`, { version: 1, reason: '结账单退了款，按现在的金额重新申请' })).body).toMatchObject({ status: 'rejected' });
+    const again = (await ask({ sourceType: 'checkout', sourceId: done.id, amountCents: 39_900 })).body.request as { id: number };
+    const ok2 = await api(ctx.app, payer, 'POST', `/api/erp/sales-invoices/${again.id}/issue`, { version: 1, invoiceNo: '26440000000000000102', invoiceDate: today });
+    expect(ok2.body).toMatchObject({ status: 'issued', sourceReduced: false });
+    // 开票以后又退了 ¥50：已开的这张标「要红冲」
+    await refundSome(5_000);
+    const red = (await api(ctx.app, payer, 'GET', '/api/erp/sales-invoices?status=red')).body;
+    expect((red.rows as { id: number; sourceReduced: boolean }[]).find((r) => r.id === again.id)).toMatchObject({ sourceReduced: true });
   });
 
   it('会员充值按实收开（赠金不开）；交给服务商开（模拟），记对外调用；驳回的不占「只能开一次」', async () => {

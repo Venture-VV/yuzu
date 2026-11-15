@@ -17,6 +17,7 @@ import { formatDateTime, uuid } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Badge, Button, Card, Input, Notice, Select, Skeleton } from '../../components/ui';
 
 const vKeys = { status: ['voucher', 'status'] as const, open: ['voucher', 'open'] as const, recon: (f: string, t: string) => ['voucher', 'recon', f, t] as const };
@@ -249,6 +250,15 @@ export function UnusedVerificationsBanner() {
   const [open, setOpen] = useState(false);
   const [cancelling, setCancelling] = useState<VerificationView | null>(null);
   const rows = list.data ?? [];
+  // 取不回来（也没有上一次的）：写明查不到、可以重试，不当成「没有验过没用的券」（Codex 审查 0edd8df 后补）
+  if (status.isError && !status.data)
+    return <LoadFailed title="平台验券的状态取不回来，请检查网络" onRetry={() => void status.refetch()} retrying={status.isFetching} testId="unused-vouchers-error" />;
+  if (on && list.isError && !list.data)
+    return (
+      <LoadFailed title="验过没结账的团购券查不到，请检查网络" onRetry={() => void list.refetch()} retrying={list.isFetching} testId="unused-vouchers-error">
+        验过没用的券要挂到结账或撤销核销；重试取回来以后再看。
+      </LoadFailed>
+    );
   if (!on || !rows.length) return null;
   const refresh = () => qc.invalidateQueries({ queryKey: vKeys.open });
   const record = async (v: VerificationView) => {

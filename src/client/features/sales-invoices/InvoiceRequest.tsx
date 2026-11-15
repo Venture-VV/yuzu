@@ -33,6 +33,8 @@ export function SalesInvoiceStatus({ inv }: { inv: SalesInvoice }) {
     <span className="inline-flex flex-wrap items-center gap-1.5">
       <Badge tone={STATUS_TONE[inv.status]}>{inv.issuedVia === 'sending' && inv.status === 'requested' ? '服务商开票中' : SALES_INVOICE_STATUS_LABELS[inv.status]}</Badge>
       {inv.status === 'issued' && inv.sourceVoided && <Badge tone="clay">来源已作废，要红冲</Badge>}
+      {inv.status === 'issued' && !inv.sourceVoided && inv.sourceReduced && <Badge tone="clay">开票后退了款，要红冲</Badge>}
+      {inv.status === 'requested' && (inv.sourceVoided || inv.sourceReduced) && <Badge tone="clay">金额超过现在可开的，要驳回重申</Badge>}
     </span>
   );
 }

@@ -127,11 +127,21 @@ const SOURCE_VOIDED = (db: Db) => db`
     WHEN 'checkout' THEN EXISTS (SELECT 1 FROM checkouts c WHERE c.id = i.source_id AND c.status = 'voided')
     WHEN 'ar_collection' THEN EXISTS (SELECT 1 FROM ar_collections a WHERE a.id = i.source_id AND a.voided_at IS NOT NULL)
     ELSE false END`;
+/**
+ * 开票金额超过来源现在的可开金额（结账单申请或开票以后退了款；反结账、作废的由 SOURCE_VOIDED 标）。可开金额与 loadSource 同一个口径：
+ * 现金类实收 − 已完成的退款（Codex 审查 0edd8df 后补：已开的要红冲后按现在的金额重开，没开的处理时拦下）
+ */
+const SOURCE_REDUCED = (db: Db) => db`
+  CASE i.source_type
+    WHEN 'checkout' THEN i.amount_cents > (
+      (SELECT coalesce(sum(p.amount), 0) FROM checkout_payments p WHERE p.checkout_id = i.source_id AND p.method IN ${db([...PAYMENT_METHODS])})
+      - (SELECT coalesce(sum(rp.amount), 0) FROM refund_payments rp JOIN refunds r ON r.id = rp.refund_id WHERE r.checkout_id = i.source_id AND r.status = 'completed'))
+    ELSE false END`;
 const COLUMNS = (db: Db) => db`
   i.id, i.request_no, i.source_type, i.source_id, i.source_no, i.amount_cents::text AS amount_cents, i.title_type, i.title, i.tax_no, i.email, i.phone,
   i.invoice_kind, i.note, i.status, i.invoice_no, i.invoice_date::text AS invoice_date, i.file_id, i.issued_via, i.provider_ref, i.reject_reason, i.void_reason,
   i.version, rq.display_name AS requested_by_name, i.requested_at, hd.display_name AS handled_by_name, i.handled_at, vd.display_name AS voided_by_name, i.voided_at,
-  ${SOURCE_VOIDED(db)} AS source_voided`;
+  ${SOURCE_VOIDED(db)} AS source_voided, ${SOURCE_REDUCED(db)} AS source_reduced`;
 const FROM = (db: Db) => db`
   invoice_requests i JOIN staff rq ON rq.id = i.requested_by LEFT JOIN staff hd ON hd.id = i.handled_by LEFT JOIN staff vd ON vd.id = i.voided_by`;
 
@@ -184,7 +194,7 @@ export async function listSalesInvoices(db: Db, raw: unknown, mode: SalesInvoice
   const rows = (
     await db<Raw[]>`
       SELECT ${COLUMNS(db)} FROM ${FROM(db)}
-      WHERE (${q.status} = 'all' OR i.status = ${q.status} OR (${q.status} = 'red' AND i.status = 'issued' AND ${SOURCE_VOIDED(db)}))
+      WHERE (${q.status} = 'all' OR i.status = ${q.status} OR (${q.status} = 'red' AND i.status = 'issued' AND (${SOURCE_VOIDED(db)} OR ${SOURCE_REDUCED(db)})))
         AND (${q.q} = '' OR i.request_no ILIKE ${like} OR i.source_no ILIKE ${like} OR i.title ILIKE ${like} OR coalesce(i.invoice_no, '') ILIKE ${like})
       ORDER BY i.id DESC LIMIT 500`
   ).map(toInvoice);
@@ -192,7 +202,7 @@ export async function listSalesInvoices(db: Db, raw: unknown, mode: SalesInvoice
     SELECT count(*) FILTER (WHERE status = 'requested')::int AS requested, count(*) FILTER (WHERE status = 'issued')::int AS issued,
            count(*) FILTER (WHERE status = 'requested' AND issued_via = 'sending')::int AS sending
     FROM invoice_requests`;
-  const [red] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM invoice_requests i WHERE i.status = 'issued' AND ${SOURCE_VOIDED(db)}`;
+  const [red] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM invoice_requests i WHERE i.status = 'issued' AND (${SOURCE_VOIDED(db)} OR ${SOURCE_REDUCED(db)})`;
   return { rows, counts: { ...c!, redFlag: red!.n }, providerMode: mode };
 }
 
@@ -291,6 +301,23 @@ async function lockRequest(tx: Tx, id: number, version: number) {
   return r;
 }
 
+/**
+ * 处理（登记已开、交给服务商开）之前按来源现在的情况再核对一次：申请以后反结账、作废，或退了款、金额超过现在可开的，
+ * 这张就不能开，要驳回后按现在的金额重新申请（Codex 审查 0edd8df 后补）。在锁住申请一行以后对来源加共享键锁（与申请时同一把），
+ * 与反结账、退款单（锁结账单一行）串行
+ */
+async function assertStillInvoiceable(tx: Tx, id: number) {
+  const [q] = await tx<{ sourceType: InvoiceSourceType; sourceId: number; amountCents: string }[]>`
+    SELECT source_type, source_id, amount_cents::text AS amount_cents FROM invoice_requests WHERE id = ${id}`;
+  const label = INVOICE_SOURCE_LABELS[q!.sourceType];
+  const src = await loadSource(tx, q!.sourceType, Number(q!.sourceId), true);
+  if (src.voided) throw conflict('SOURCE_VOIDED', `${label} ${src.no} 已反结账或作废：这张申请开不了，请驳回`);
+  const amount = Number(q!.amountCents);
+  if (amount > src.invoiceableCents) {
+    throw conflict('SOURCE_CHANGED', `这张申请 ${yuan(amount)}，${label} ${src.no} 现在只能开 ${yuan(src.invoiceableCents)}（${src.basis.join('；')}）：请驳回后按现在的金额重新申请`);
+  }
+}
+
 const IssueInput = z.object({
   version: Version,
   invoiceNo: z.string('请填写发票号码').trim().min(1, '请填写发票号码').max(40, '发票号码最多 40 位'),
@@ -307,6 +334,7 @@ export async function issueManually(deps: Deps, id: number, raw: unknown, actor:
     const r = await lockRequest(tx, id, input.version);
     if (r.status !== 'requested') throw conflict('INVOICE_REQUEST_DONE', '这张申请已经处理过了');
     if (r.issuedVia === 'sending') throw conflict('INVOICE_SENDING', '这张已经交给开票服务商、结果还没回来；确认服务商没开出以后先改回「申请中」');
+    await assertStillInvoiceable(tx, id);
     const file = input.pdf ? await storePdf(tx, 'sales_invoice', input.pdf.data, actor) : null;
     await tx`
       UPDATE invoice_requests
@@ -327,6 +355,7 @@ export async function issueViaProvider(deps: Deps, id: number, raw: unknown, act
     const r = await lockRequest(tx, id, version);
     if (r.status !== 'requested') throw conflict('INVOICE_REQUEST_DONE', '这张申请已经处理过了');
     if (r.issuedVia === 'sending') throw conflict('INVOICE_SENDING', '这张已经交给开票服务商了，等结果');
+    await assertStillInvoiceable(tx, id);
     await tx`UPDATE invoice_requests SET issued_via = 'sending', handled_by = ${actor.id}, handled_at = now(), version = version + 1 WHERE id = ${id}`;
     const [d] = await tx<{ titleType: 'personal' | 'company'; title: string; taxNo: string; invoiceKind: 'normal' | 'special' }[]>`
       SELECT title_type, title, tax_no, invoice_kind FROM invoice_requests WHERE id = ${id}`;

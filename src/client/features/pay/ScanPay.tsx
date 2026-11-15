@@ -18,6 +18,7 @@ import { formatDateTime, uuid } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Badge, Button, Input, Notice, Spinner } from '../../components/ui';
 
 export const payKeys = { status: ['pay', 'status'] as const, open: ['pay', 'open'] as const };
@@ -274,6 +275,15 @@ export function UnsettledPayBanner() {
   const list = useOpenPayTxs(on);
   const [open, setOpen] = useState(false);
   const rows = list.data ?? [];
+  // 取不回来（也没有上一次的）：写明查不到、可以重试，不当成「没有没入账的」把整条提示藏起来（Codex 审查 0edd8df 后补）
+  if (status.isError && !status.data)
+    return <LoadFailed title="扫码收款的状态取不回来，请检查网络" onRetry={() => void status.refetch()} retrying={status.isFetching} testId="unsettled-pay-error" />;
+  if (on && list.isError && !list.data)
+    return (
+      <LoadFailed title="收了钱没入账的扫码收款查不到，请检查网络" onRetry={() => void list.refetch()} retrying={list.isFetching} testId="unsettled-pay-error">
+        交班前要处理完没入账的；重试取回来以后再看。
+      </LoadFailed>
+    );
   if (!on || !rows.length) return null;
   const unconsumed = rows.filter((t) => t.status === 'paid' && !t.consumed && t.refundCents === 0).length;
   const paying = rows.filter((t) => t.status === 'paying').length;

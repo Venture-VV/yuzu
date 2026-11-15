@@ -122,4 +122,19 @@ test.describe('8.0.21 平台验券', () => {
     expect(mine).toBeTruthy();
     expect((await page.request.post(`/api/platform/verifications/${mine!.id}/cancel`, { data: { reason: '浏览器用例收尾' } })).ok()).toBe(true);
   });
+
+  test('「验过没结账的券」取不回来：前台顶上写明查不到、可以重试', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const status = (await (await page.request.get('/api/platform/verify/status')).json()) as { mode: string };
+    test.skip(status.mode !== 'mock', '应用没有带 INTEGRATIONS_MOCK=true 启动（只在开发、测试实例）');
+    await page.route('**/api/platform/verifications/open', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.goto('/frontdesk');
+    const failed = page.getByTestId('unused-vouchers-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await expect(failed).toContainText('验过没结账的团购券查不到');
+    await page.unroute('**/api/platform/verifications/open');
+    await failed.getByTestId('unused-vouchers-error-retry').click();
+    await expect(page.getByTestId('unused-vouchers-error')).toHaveCount(0, { timeout: 20_000 });
+  });
 });

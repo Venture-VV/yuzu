@@ -2,7 +2,8 @@
 // 应用要带 INTEGRATIONS_MOCK=true 启动（只许开发、测试实例）；没带时整组跳过。付款码尾号 8888 直接到账。
 // 依赖演示数据（仅独立演示库），账号：店主 linlan，密码 yuzu2026。
 //   · 接待一位客人 → 结账加一笔「微信」→「扫码收款」扫码 → 这一笔锁定为已扫码到账 → 结清，收款参考号是支付方单号；
-//   · 收了钱没入账的一笔（接口造）→ 前台顶上提示 → 去处理 → 原路退回 → 提示消失。
+//   · 收了钱没入账的一笔（接口造）→ 前台顶上提示 → 去处理 → 原路退回 → 提示消失；
+//   · 「收了钱没入账」取不回来：前台顶上写明查不到、可以重试（Codex 审查 0edd8df 后补）。
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 
@@ -74,5 +75,20 @@ test.describe('8.0.21 扫码收款', () => {
     await expect(page.getByText('已提交原路退回')).toBeVisible();
     const tx = (await (await page.request.get(`/api/pay/terminal/${looseId}`)).json()) as { refunds: { status: string }[] };
     expect(tx.refunds[0]!.status).toBe('done');
+  });
+
+  test('「收了钱没入账」取不回来：前台顶上写明查不到、可以重试', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const status = (await (await page.request.get('/api/pay/terminal/status')).json()) as { mode: string };
+    test.skip(status.mode !== 'mock', '应用没有带 INTEGRATIONS_MOCK=true 启动（只在开发、测试实例）');
+    await page.route('**/api/pay/terminal/open', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.goto('/frontdesk');
+    const failed = page.getByTestId('unsettled-pay-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await expect(failed).toContainText('收了钱没入账的扫码收款查不到');
+    await page.unroute('**/api/pay/terminal/open');
+    await failed.getByTestId('unsettled-pay-error-retry').click();
+    await expect(page.getByTestId('unsettled-pay-error')).toHaveCount(0, { timeout: 20_000 });
   });
 });
