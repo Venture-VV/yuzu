@@ -13,6 +13,7 @@ import { DepartmentItemsCard } from './DepartmentItems';
 import { Columns, HBars, Kpi, PeriodPicker, presetRange, yuan, yuanShort, type Period } from './charts';
 import { Stagger } from '../../lib/motion';
 import { useReportScope } from '../../lib/reportScope';
+import { AiSummaryCard } from '../ai/AiSummaryCard';
 
 const people = (n: number) => `${n} 位`;
 const count = (n: number) => `${n}`;
@@ -30,6 +31,8 @@ export function OverviewTab() {
   const startHour = session.rules.businessDayStartHour;
   return (
     <div className="space-y-5" data-testid="dashboard-overview">
+      {/* 昨日小结（8.0.22 AI 辅助）：关着时不显示 */}
+      <AiSummaryCard />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PeriodPicker value={period} onChange={setPeriod} today={session.today} />
         {d && (

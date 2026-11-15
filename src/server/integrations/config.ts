@@ -9,7 +9,7 @@
 import type { InstanceKind } from '@shared/instance';
 import type { AppEnv } from '../config';
 
-export const INTEGRATION_KINDS = ['pay_terminal', 'platform_voucher', 'einvoice', 'bank_direct', 'ota'] as const;
+export const INTEGRATION_KINDS = ['pay_terminal', 'platform_voucher', 'einvoice', 'bank_direct', 'ota', 'ai'] as const;
 export type IntegrationKind = (typeof INTEGRATION_KINDS)[number];
 export type IntegrationMode = 'off' | 'mock' | 'live';
 
@@ -19,6 +19,8 @@ export const LIVE_ENV: Record<string, { kind: IntegrationKind; label: string; va
   alipay_f2f: { kind: 'pay_terminal', label: '支付宝当面付', vars: ['ALIPAY_APP_ID', 'ALIPAY_PRIVATE_KEY_PATH', 'ALIPAY_PUBLIC_KEY_PATH'] },
   meituan: { kind: 'platform_voucher', label: '美团团购', vars: ['MEITUAN_APP_KEY', 'MEITUAN_APP_SECRET', 'MEITUAN_SESSION'] },
   douyin: { kind: 'platform_voucher', label: '抖音来客', vars: ['DOUYIN_CLIENT_KEY', 'DOUYIN_CLIENT_SECRET', 'DOUYIN_ACCOUNT_ID'] },
+  // AI 辅助（8.0.22，docs/AI_V8022.md 第 4 节）：只认专门给浴族配的密钥（YUZU_AI_BASE_URL、YUZU_AI_MODEL 选填）
+  claude: { kind: 'ai', label: 'AI 辅助（Claude）', vars: ['YUZU_AI_API_KEY'] },
 };
 
 export interface IntegrationsConfig {

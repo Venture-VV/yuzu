@@ -34,7 +34,9 @@ export interface AiToolCall {
 export interface AiTool {
   name: string;
   description: string;
-  schema: z.ZodObject;
+  schema: z.ZodType<Record<string, unknown>>;
+  /** 一份合格的参数（模拟模式按它取一次数；正式模式不用） */
+  example: Record<string, unknown>;
   /** 只读：返回给模型看的结果（已经打码的汇总） */
   run: (input: unknown) => Promise<unknown>;
 }
@@ -71,8 +73,9 @@ function translate(error: unknown): Error {
 }
 
 /** 正式：Anthropic 的 Claude（官方 SDK） */
-export function claudeProvider(opts: { apiKey: string; baseURL?: string; model?: string; fallbacks?: boolean }): AiProvider {
-  const client = new Anthropic({ apiKey: opts.apiKey, ...(opts.baseURL ? { baseURL: opts.baseURL } : {}), timeout: REQUEST_TIMEOUT_MS, maxRetries: 2 });
+export function claudeProvider(opts: { apiKey: string; baseURL?: string; model?: string; fallbacks?: boolean; client?: Anthropic }): AiProvider {
+  // client：用例换一个假的 SDK 客户端核对请求形状（正式不传）
+  const client = opts.client ?? new Anthropic({ apiKey: opts.apiKey, ...(opts.baseURL ? { baseURL: opts.baseURL } : {}), timeout: REQUEST_TIMEOUT_MS, maxRetries: 2 });
   const model = opts.model?.trim() || AI_DEFAULT_MODEL;
   const fallback = opts.fallbacks === false ? {} : { betas: [FALLBACK_BETA], fallbacks: 'default' as const };
   const refused = (stop: string | null | undefined) => {
@@ -97,6 +100,8 @@ export function claudeProvider(opts: { apiKey: string; baseURL?: string; model?:
           name: t.name,
           description: t.description,
           inputSchema: t.schema,
+          // 工具定义 strict：模型给的参数一定合 schema；服务端执行前仍按 zod 再校验一次（日期范围等）
+          strict: true,
           run: async (input) => {
             const started = Date.now();
             try {
@@ -117,7 +122,7 @@ export function claudeProvider(opts: { apiKey: string; baseURL?: string; model?:
           ...fallback,
           output_config: { effort: 'medium' },
           system,
-          tools: runnable.map((t) => ({ ...t, strict: true })),
+          tools: runnable,
           max_iterations: maxIterations,
           messages: [{ role: 'user', content: question }],
         });
@@ -140,29 +145,72 @@ export function claudeProvider(opts: { apiKey: string; baseURL?: string; model?:
   };
 }
 
+type MockStoreFacts = {
+  store: string;
+  date: string;
+  revenue: { net: string; checkouts: number; guests: number };
+  compare: { lastWeekSameDay: string };
+  members: { newMembers: number; rechargePaid: string };
+  anomalies: { kind: string; count: number }[];
+  erpTodo?: string[];
+};
+const mockStoreLine = (f: MockStoreFacts) =>
+  `${f.store}：净营业额 ${f.revenue.net}（上周同一天 ${f.compare.lastWeekSameDay}），结账 ${f.revenue.checkouts} 张、客人 ${f.revenue.guests} 位；` +
+  `新会员 ${f.members.newMembers} 位、充值 ${f.members.rechargePaid}。` +
+  (f.anomalies.length ? `对账要看一下：${f.anomalies.map((a) => `${a.kind} ${a.count} 条`).join('、')}。` : '对账没有要看的。');
+
+/** 模拟的小结：按事实包套模板（单店的、全公司的两种）；认不出的返回空 */
+function mockSummaryText(facts: unknown): string | null {
+  const f = facts as Partial<MockStoreFacts> & { stores?: MockStoreFacts[]; erpTodo?: string[] };
+  const todo = (list?: string[]) => (list?.length ? `ERP 待办：${list.join('；')}。` : '');
+  const tail = '（模拟模式：没有调用模型，按数字套的固定模板）';
+  if (Array.isArray(f.stores)) return `【模拟小结】${f.date} 全公司：${f.stores.map(mockStoreLine).join(' ')}${todo(f.erpTodo)}${tail}`;
+  if (f.revenue && f.compare && f.members && f.anomalies) return `【模拟小结】${f.date} ${mockStoreLine(f as MockStoreFacts)}${todo(f.erpTodo)}今天可以先看看昨天变化大的项目。${tail}`;
+  return null;
+}
+
 /** 模拟：不出网，按材料套固定模板（开发、测试实例；用例与演示用） */
 export function mockAiProvider(): AiProvider {
   return {
     mode: 'mock',
     model: 'mock',
     async write({ prompt }) {
-      return { text: `【模拟小结】${prompt.slice(0, 200)}`, usage: { inputTokens: 0, outputTokens: 0 } };
+      // 按材料（提示第一行之后的 JSON）套固定模板；认不出的照原样截一段
+      let text = `【模拟小结】${prompt.slice(0, 200)}`;
+      try {
+        text = mockSummaryText(JSON.parse(prompt.slice(prompt.indexOf('\n') + 1))) ?? text;
+      } catch {
+        // 不是 JSON：用截的那一段
+      }
+      return { text, usage: { inputTokens: 0, outputTokens: 0 } };
     },
     async ask({ question, tools }) {
       // 模拟：按问题里的关键字挑第一样工具、用它的默认参数取一次数，把结果摘要写成答案
       const calls: AiToolCall[] = [];
       const tool = tools.find((t) => question.includes(t.description.slice(0, 2))) ?? tools[0];
       if (!tool) return { text: '【模拟回答】没有可用的报表', usage: { inputTokens: 0, outputTokens: 0 }, calls };
-      const parsed = tool.schema.safeParse({});
+      const parsed = tool.schema.safeParse(tool.example);
       const started = Date.now();
       const out = parsed.success ? await tool.run(parsed.data) : null;
       calls.push({ name: tool.name, input: parsed.success ? parsed.data : {}, ms: Date.now() - started, ok: parsed.success });
-      return { text: `【模拟回答】按「${tool.name}」取了一次数：${JSON.stringify(out).slice(0, 300)}`, usage: { inputTokens: 0, outputTokens: 0 }, calls };
+      // 只摘结果最外一层的数（文字、数字），写成一句话
+      const facts =
+        out && typeof out === 'object' && !Array.isArray(out)
+          ? Object.entries(out as Record<string, unknown>)
+              .filter(([, v]) => typeof v === 'string' || typeof v === 'number')
+              .map(([k, v]) => `${k} ${String(v)}`)
+              .slice(0, 12)
+              .join('，')
+          : `${Array.isArray(out) ? out.length : 0} 行`;
+      const input = (parsed.success ? parsed.data : {}) as { from?: string; to?: string };
+      const range = input.from ? `（${input.from === input.to ? input.from : `${input.from} 至 ${input.to}`}）` : '';
+      return { text: `【模拟回答】按「${tool.description.split('：')[0]}」${range}取了一次数：${facts}。（模拟模式：没有调用模型，只把取到的数原样列出来）`, usage: { inputTokens: 0, outputTokens: 0 }, calls };
     },
     async structured<T>({ schema }: { schema: z.ZodType<T> }) {
-      // 模拟：交一份空的提示清单（各字段取 schema 能接受的最小值由调用方给默认）
-      const value = schema.parse({ hints: [] });
-      return { value, usage: { inputTokens: 0, outputTokens: 0 } };
+      // 模拟：交一条固定的提示（合同条款提示的格式；别的格式交空清单）
+      const sample = { hints: [{ kind: 'missing', title: '【模拟】保密条款', detail: '模拟模式：没有调用模型，这一条是固定的示例。' }] };
+      const parsed = schema.safeParse(sample);
+      return { value: parsed.success ? parsed.data : schema.parse({ hints: [] }), usage: { inputTokens: 0, outputTokens: 0 } };
     },
   };
 }

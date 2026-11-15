@@ -44,6 +44,7 @@ import { ErpPage } from '../erp/ErpHome';
 import { useAcceptanceTemplates, useContract, useContractMeta, useInvalidateContracts } from './queries';
 import { TemplateSection } from './TemplateSection';
 import { useEntities } from '../../lib/entities';
+import { ContractHintsCard } from '../ai/ContractHintsCard';
 
 export type ContractFormMode = 'new' | 'edit' | 'change' | 'change-edit';
 
@@ -814,6 +815,15 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
           <Textarea id="ct-note" rows={2} maxLength={200} value={form.note} disabled={fieldsDisabled} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder="选填" />
         </Field>
       </Card>
+
+      {/* AI 看一下条款（8.0.22）：表单上现在的内容，没保存的也行；关着、没配模型服务时不显示 */}
+      <ContractHintsCard
+        input={() => ({
+          category: header.category,
+          counterparty: header.supplierId ? (meta.suppliers.find((s) => s.id === header.supplierId)?.name ?? '') : header.counterparty.trim(),
+          content: 'content' in built ? built.content : form,
+        })}
+      />
 
       <div className="flex flex-wrap items-center justify-end gap-2 pb-6">
         {blocking ? (

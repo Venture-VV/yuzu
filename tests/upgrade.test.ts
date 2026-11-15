@@ -57,7 +57,8 @@ beforeAll(async () => {
   // 现版本消费时算充值当日的储值额度（8.0.4，默认 70%），撤销退回的钱要减去随即作废的赠金、会查过期单（012 才有）：写入期间临时建空表，迁移前删掉
   await sql`CREATE TABLE bonus_expiries (id bigserial PRIMARY KEY, member_id bigint, amount bigint, reversal_id bigint)`;
   await sql`CREATE TABLE checkouts (id bigserial PRIMARY KEY, checkout_no text, status text)`;
-  await sql`CREATE TABLE shifts (id bigserial PRIMARY KEY, staff_id bigint, status text)`;
+  // 收款按当前门店找班次（8.0.22 多门店，154 才有 store_id）
+  await sql`CREATE TABLE shifts (id bigserial PRIMARY KEY, staff_id bigint, status text, store_id bigint NOT NULL DEFAULT 1)`;
   // 收款按当班成员找班次（059 才有）：写入期间临时建空表，迁移前删掉
   await sql`CREATE TABLE shift_members (shift_id bigint, staff_id bigint, left_at timestamptz)`;
   await sql`ALTER TABLE recharges ADD COLUMN shift_id bigint`;

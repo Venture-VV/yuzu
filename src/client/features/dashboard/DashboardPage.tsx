@@ -20,6 +20,8 @@ import { RevenuePage } from '../erp/RevenuePage';
 import { RoomsTab } from './RoomsTab';
 import { TechniciansTab } from './TechniciansTab';
 import { useReportScope } from '../../lib/reportScope';
+import { AskTab } from '../ai/AskTab';
+import { useAiStatus } from '../ai/queries';
 
 // 看板按岗位分页（v0.6.0）：今日（值班经理、收银）、经营总览（总经理）、会员总览（客户经理）；各页按权限显示
 // v0.7.0 加「技师业绩」（店主、店总、值班经理）；技师功能关闭时不显示（店主 2026-10-30 定，数据保留，重新开启后照常显示）
@@ -40,6 +42,8 @@ const TABS = [
   { key: 'marketing', label: '营销成本', perm: 'marketing.cost' },
   // 8.0.18：ERP 的「营业数据」并进来（任选时段、每天的明细与日结情况）；权限照旧是 erp.revenue，ERP 里把这个模块关了就不显示
   { key: 'revenue', label: '营业数据', perm: 'erp.revenue' },
+  // 8.0.22 AI 辅助：用一句话问经营数据（只读报表；后台把问数关了就不显示）
+  { key: 'ask', label: '问数', perm: 'report.executive' },
 ] as const satisfies readonly { key: string; label: string; perm: Permission }[];
 type TabKey = (typeof TABS)[number]['key'];
 
@@ -65,12 +69,21 @@ export function DashboardPage() {
   const can = useCan();
   const { tab } = useParams();
   const [pref, setPref] = useState(readPref);
-  const tabs = TABS.filter((t) => can(t.perm) && (t.key !== 'technicians' || session.technicians) && (t.key !== 'rooms' || session.rooms) && (t.key !== 'revenue' || session.erpModules.includes('revenue')));
+  const ai = useAiStatus(can('report.executive'));
+  const askOff = !!ai.data && (!ai.data.rules.enabled || !ai.data.rules.questions);
+  const tabs = TABS.filter(
+    (t) =>
+      can(t.perm) &&
+      (t.key !== 'technicians' || session.technicians) &&
+      (t.key !== 'rooms' || session.rooms) &&
+      (t.key !== 'revenue' || session.erpModules.includes('revenue')) &&
+      (t.key !== 'ask' || !askOff),
+  );
   const current = tabs.find((t) => t.key === tab) ?? (tab ? undefined : (tabs.find((t) => t.key === pref) ?? tabs[0]));
   const scope = useReportScope();
   if (!current) return <Navigate to={tabs.length ? DASHBOARD_PATH : '/'} replace />;
   // 合并看（8.0.22）：能进几家店的人看这几家店的合计；只有一家店时没有这个开关
-  const scopeToggle = scope.multi && current.key !== 'revenue' && (
+  const scopeToggle = scope.multi && current.key !== 'revenue' && current.key !== 'ask' && (
     <span data-testid="report-scope">
       <Segmented
         size="sm"
@@ -106,7 +119,9 @@ export function DashboardPage() {
           ? `营业日 ${session.today} · 每分钟刷新`
           : current.key === 'revenue'
             ? '只读：任选时段的营业收入、每天的明细与日结情况、收款与部门构成；与经营总览同一口径'
-            : '口径与日结一致：按营业日，反结账冲回'
+            : current.key === 'ask'
+              ? '只读：AI 用看板上的报表取数回答，答案注明用了哪张报表、哪个日期范围；发给模型的只有汇总数'
+              : '口径与日结一致：按营业日，反结账冲回'
       }
       actions={
         <>
@@ -147,6 +162,8 @@ export function DashboardPage() {
           <MarketingCostTab />
         ) : current.key === 'revenue' ? (
           <RevenuePage />
+        ) : current.key === 'ask' ? (
+          <AskTab />
         ) : (
           <TodayTab />
         )}

@@ -22,6 +22,7 @@ import { MEAL_LABELS } from '@shared/canteen';
 import { WECOM_MAX_ATTEMPTS } from '@shared/wecom';
 import { sweepPaying, sweepRefunds } from './modules/pay-terminal';
 import { runVoucherReconcile, sweepVerifying } from './modules/platform-verify';
+import { runAiSummaries } from './modules/ai';
 
 export interface JobLog {
   info: (msg: string) => void;
@@ -172,6 +173,16 @@ export async function runMinuteJobs(
     if (n > 0) log.info(`平台验券：${n} 张核销中的补上了结果`);
   } catch (error) {
     log.error('平台验券的核销结果查询失败，下一分钟重试', error);
+  }
+  // AI 经营小结（8.0.22）：每家店的营业日切换以后生成前一天的一份（几家店时另有全公司的一份）；已生成、关着的什么都不做。
+  // 没配模型服务时只生成事实包（看板上照样能看数字）
+  try {
+    for (const r of await runAiSummaries({ sql, config }, now)) {
+      if (r.status === 'failed') log.error(`AI 经营小结（${r.date}${r.storeId === null ? ' 全公司' : ''}）没生成出来，隔 5 分钟再试`);
+      else log.info(`AI 经营小结（${r.date}${r.storeId === null ? ' 全公司' : ''}）：${r.status === 'done' ? '已生成' : '没配模型服务，只记了数字'}`);
+    }
+  } catch (error) {
+    log.error('AI 经营小结失败，下一分钟重试', error);
   }
   // 平台验券（8.0.21）：每天过了设定的时间（默认 06:10），按平台拉前一个营业日的核销明细对账（没配置时什么都不做）
   try {

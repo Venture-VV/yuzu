@@ -5,10 +5,11 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { ArrowRight, SlidersHorizontal } from 'lucide-react';
 import { ERP_MODULE_KEYS, ERP_MODULES } from '@shared/erp';
-import { useSession } from '../../lib/session';
+import { useCan, useSession } from '../../lib/session';
 import { Badge, Card } from '../../components/ui';
 import { useErpAccess } from './access';
 import { Stagger } from '../../lib/motion';
+import { AiSummaryLine } from '../ai/AiSummaryCard';
 
 /** ERP 里的设置页、首页：标题与说明（模块页沿用各自的页头） */
 export function ErpPage({ title, description, actions, tabs, children }: { title: string; description?: ReactNode; actions?: ReactNode; /** 标题下面的一排二级页签（8.0.18） */ tabs?: ReactNode; children: ReactNode }) {
@@ -29,12 +30,15 @@ export function ErpPage({ title, description, actions, tabs, children }: { title
 
 export function ErpHome() {
   const session = useSession();
+  const can = useCan();
   const access = useErpAccess();
   const off = access.canSettings ? ERP_MODULE_KEYS.filter((k) => !session.erpModules.includes(k)) : [];
   // 页面在 ERP 里的模块（8.0.19）：员工食堂、安保巡场、营业数据的页面在管理后台，这里不再列
   const here = access.modules.filter((k) => ERP_MODULES[k].group !== '后台');
   return (
     <ErpPage title="ERP 首页" description="财务、采购用的功能都在这里（含供应链：供应商、采购、库存、应付货款）；门店前台看不到。模块开关与各模块的规则在「ERP 设置」里。">
+      {/* AI 经营小结（8.0.22）：能看经营总览的人看到一行 */}
+      {can('report.executive') && <AiSummaryLine />}
       {here.length === 0 ? (
         <Card className="p-6 text-center text-[13.5px] text-ink-3" data-testid="erp-empty">
           现在没有能用的 ERP 模块。{access.canSettings ? '在「ERP 设置 → 模块开关」里开启需要的模块。' : '请店主在「ERP 设置 → 模块开关」里开启，或在「岗位权限」里给你相应的权限。'}

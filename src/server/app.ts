@@ -94,6 +94,7 @@ import { registerDashboardReportRoutes } from './modules/reports';
 import { registerSettingsRoutes } from './modules/settings';
 import { registerStoreRoutes } from './modules/stores';
 import { registerWecomRoutes } from './modules/wecom';
+import { registerAiRoutes } from './modules/ai';
 import { registerSettlementRoutes } from './modules/settlement';
 import { registerStaffRoutes } from './modules/staff';
 import { registerTechnicianRoutes } from './modules/technicians';
@@ -267,6 +268,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerSettingsRoutes(app, deps);
   registerStoreRoutes(app, deps);
   registerWecomRoutes(app, deps);
+  registerAiRoutes(app, deps);
   registerAuditRoutes(app, deps);
   registerAdminRoutes(app, deps);
   registerMasterRoutes(app, deps);
