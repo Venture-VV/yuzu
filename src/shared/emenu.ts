@@ -539,6 +539,8 @@ export interface EmenuAdmin {
   pinHolders: number;
   /** 卡片模板（8.1.2）：现在发布的版面里改过的那几块（版面预览照它画；没发布过、没改过为空） */
   templates?: import('./studio').StudioDoc['templates'] | null;
+  /** 菜的几种样子（8.1.2 变体）：现在发布的版面里改过的 */
+  dishStates?: import('./studio').StudioDoc['dishStates'] | null;
 }
 
 /** 图片地址（要登录、要能打开平板点餐或维护电子菜单） */

@@ -72,7 +72,7 @@ export function PhonePreviewPage() {
   // 手机上看：铺满屏幕宽；电脑上看：375 宽、居中
   const k = width < 420 ? width / def.size.w : 1;
   const frame: CSSProperties = { width: def.size.w * k, ...(vars as CSSProperties) };
-  const ctx = { surface: def, lang, assetUrl: (id: string) => `/api/studio/assets/${id}`, blocks, onAction: (a: StudioAction) => setTapped(describe(surface, a)) };
+  const ctx = { surface: def, lang, assetUrl: (id: string) => `/api/studio/assets/${id}`, blocks, components: doc.components, onAction: (a: StudioAction) => setTapped(describe(surface, a)) };
   if (bare) {
     return (
       <div style={frame} data-testid="studio-phone-preview">

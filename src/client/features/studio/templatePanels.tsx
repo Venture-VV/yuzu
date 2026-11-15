@@ -3,10 +3,30 @@
 
 import { RotateCcw } from 'lucide-react';
 import { EMENU_LAYOUT_INFO, EMENU_LAYOUTS, type EmenuLayout, type EmenuMenu } from '@shared/emenu';
-import { EMENU_TEMPLATES, resetLayoutTemplate, resetSlot, resolveSlot, setSlotFlags, setSlotSpot, slotHideable, slotResizable, slotSpot, type EmenuSlotKind, type StudioDoc } from '@shared/studio';
+import {
+  DISH_STATE_DEFAULT,
+  DISH_STATE_LABELS,
+  DISH_STATES,
+  dishStateStyle,
+  EMENU_SURFACE,
+  EMENU_TEMPLATES,
+  resetLayoutTemplate,
+  resetSlot,
+  resolveSlot,
+  setDishState,
+  setSlotFlags,
+  setSlotSpot,
+  slotHideable,
+  slotResizable,
+  slotSpot,
+  type EmenuSlotKind,
+  type StudioDishState,
+  type StudioDishStateStyle,
+  type StudioDoc,
+} from '@shared/studio';
 import { cn } from '../../lib/utils';
 import { Button } from '../../components/ui';
-import { NumberInput, PanelTitle, Row } from './panels';
+import { ColorField, NumberInput, PanelTitle, Row } from './panels';
 import { round1 } from './model';
 import { pagesWithLayout } from './templateModel';
 
@@ -24,6 +44,8 @@ export function TemplatesPanel({
   onLayout,
   slot,
   onSlot,
+  state,
+  onState,
   onChange,
 }: {
   doc: StudioDoc;
@@ -32,6 +54,9 @@ export function TemplatesPanel({
   onLayout: (l: EmenuLayout) => void;
   slot: string | null;
   onSlot: (key: string | null) => void;
+  /** 在改菜的哪种状态（变体）；选了就不选块 */
+  state: StudioDishState | null;
+  onState: (s: StudioDishState | null) => void;
   onChange: Change;
 }) {
   const overrides = doc.templates?.[layout] ?? {};
@@ -96,7 +121,10 @@ export function TemplatesPanel({
                 key={def.key}
                 type="button"
                 className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[12.5px]', slot === def.key ? 'bg-[#2f7cf6]/10 text-[#2f7cf6]' : 'text-ink-2 hover:bg-paper-2')}
-                onClick={() => onSlot(def.key)}
+                onClick={() => {
+                  onState(null);
+                  onSlot(def.key);
+                }}
                 data-testid={`studio-slot-item-${def.key}`}
               >
                 <span className="w-9 shrink-0 text-[10.5px] text-ink-3">{KIND_LABELS[def.kind]}</span>
@@ -108,6 +136,104 @@ export function TemplatesPanel({
           })}
         </div>
       </div>
+      <div>
+        <PanelTitle>菜的几种样子（变体）</PanelTitle>
+        <p className="mb-1.5 text-[11.5px] text-ink-3">卖完了、不在供应时段、下架了的菜在菜单页上怎么显示（所有版式通用）。选一种，画布上这一页的菜都变成这个样子。</p>
+        <div className="space-y-0.5">
+          {DISH_STATES.map((k) => (
+            <button
+              key={k}
+              type="button"
+              className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[12.5px]', state === k ? 'bg-[#2f7cf6]/10 text-[#2f7cf6]' : 'text-ink-2 hover:bg-paper-2')}
+              onClick={() => {
+                onSlot(null);
+                onState(state === k ? null : k);
+              }}
+              data-testid={`studio-state-${k}`}
+            >
+              <span className="min-w-0 flex-1 truncate">{DISH_STATE_LABELS[k]}</span>
+              {doc.dishStates?.[k] && <span className="size-1.5 shrink-0 rounded-full bg-yuzu" title="改过" />}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const STYLE_LABELS: Record<NonNullable<StudioDishStateStyle['style']>, string> = { center: '居中写字', badge: '角上小标签', dim: '只压暗' };
+const seg = (on: boolean) => cn('h-7 flex-1 rounded border text-[12px]', on ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2');
+
+/** 菜的一种状态（变体）的样子：照片上怎么写、压暗的颜色与深浅、字的颜色、没有图时文字变浅到多少、照片变灰 */
+export function DishStatePanel({ doc, state, onChange }: { doc: StudioDoc; state: StudioDishState; onChange: Change }) {
+  const st = dishStateStyle(doc.dishStates, state);
+  const changed = !!doc.dishStates?.[state];
+  const set = (patch: StudioDishStateStyle, field: string) => onChange((d) => setDishState(d, state, patch), `state.${state}.${field}`);
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  return (
+    <div className="space-y-4" data-testid="studio-state-panel">
+      <div>
+        <PanelTitle>{DISH_STATE_LABELS[state]}</PanelTitle>
+        <p className="text-[11.5px] leading-relaxed text-ink-3">
+          {state === 'sold_out' ? '厨房估清、今天卖完了的菜。' : state === 'closed' ? '分类不在供应时段时，这一页的菜都是这个样子。' : '后台下架了、还排在页上的菜。'}
+          所有版式通用；客人点不了，点了会说明原因。
+        </p>
+      </div>
+      <div className="space-y-2">
+        <PanelTitle>照片上</PanelTitle>
+        <div className="flex gap-1">
+          {(['center', 'badge', 'dim'] as const).map((k) => (
+            <button key={k} type="button" className={seg(st.style === k)} onClick={() => set({ style: k }, 'style')} data-testid={`studio-state-style-${k}`}>
+              {STYLE_LABELS[k]}
+            </button>
+          ))}
+        </div>
+        <Row label="压暗颜色">
+          <ColorField value={st.shade} onChange={(v) => v && set({ shade: v }, 'shade')} surface={EMENU_SURFACE} doc={doc} testId="studio-state-shade" />
+        </Row>
+        <Row label="压暗多少">
+          <input
+            type="range"
+            min={0}
+            max={0.9}
+            step={0.05}
+            value={st.shadeOpacity}
+            onChange={(e) => set({ shadeOpacity: Number(e.target.value) }, 'shadeOpacity')}
+            className="min-w-0 flex-1 accent-[var(--color-pine)]"
+            data-testid="studio-state-shade-opacity"
+          />
+          <span className="w-10 text-right text-[12px] tabular-nums text-ink-3">{pct(st.shadeOpacity)}</span>
+        </Row>
+        {st.style !== 'dim' && (
+          <Row label="字的颜色">
+            <ColorField value={st.textColor} onChange={(v) => v && set({ textColor: v }, 'textColor')} surface={EMENU_SURFACE} doc={doc} testId="studio-state-text" />
+          </Row>
+        )}
+        <label className="flex items-center gap-2 text-[12.5px] text-ink-2">
+          <input type="checkbox" checked={st.grayscale} onChange={(e) => set({ grayscale: e.target.checked }, 'grayscale')} data-testid="studio-state-gray" />
+          照片变成黑白
+        </label>
+      </div>
+      <div className="space-y-2">
+        <PanelTitle>没有图的菜</PanelTitle>
+        <Row label="文字浅到">
+          <input
+            type="range"
+            min={0.2}
+            max={1}
+            step={0.05}
+            value={st.textOpacity}
+            onChange={(e) => set({ textOpacity: Number(e.target.value) }, 'textOpacity')}
+            className="min-w-0 flex-1 accent-[var(--color-pine)]"
+            data-testid="studio-state-text-opacity"
+          />
+          <span className="w-10 text-right text-[12px] tabular-nums text-ink-3">{pct(st.textOpacity)}</span>
+        </Row>
+        <p className="text-[11px] leading-relaxed text-ink-3">文字陈列、没配图的菜：菜名价格那一块变浅，价格旁写原因。</p>
+      </div>
+      <Button size="sm" variant="secondary" disabled={!changed} onClick={() => onChange((d) => setDishState(d, state, { ...DISH_STATE_DEFAULT }))} data-testid="studio-state-reset">
+        <RotateCcw className="size-3.5" /> 恢复设计稿的样子
+      </Button>
     </div>
   );
 }

@@ -274,7 +274,7 @@ function PagePreview({ page, category, data, scale }: { page: EmenuPageAdmin; ca
         <BigProvider value={data.rules.textSize !== 'design'}>
           <LangProvider value={lang}>
             {/* 卡片模板（8.1.2）：照现在发布的版面里改过的位置画 */}
-            <EmenuTemplatesProvider value={data.templates}>
+            <EmenuTemplatesProvider templates={data.templates} dishStates={data.dishStates}>
               <PageCanvas page={{ layout: page.layout, title: page.title, titleEn: page.titleEn, dishes }} ctx={{ categoryName: category.name, categoryNameEn: category.nameEn, open: true, preview: true }} />
             </EmenuTemplatesProvider>
             <Header categories={tabs} activeId={category.id} onCategory={noop} tagCode="A8060" count={0} bump={0} pending={false} onSearch={noop} onOrder={noop} onTag={noop} onLang={data.rules.langSwitch ? noop : undefined} />

@@ -6,7 +6,7 @@
 // 所以没改过的版面与以前逐屏一致。文字块的高跟着内容走，这里的 h 只是编辑器里画框用。
 
 import type { EmenuLayout } from '../emenu';
-import type { StudioDoc, StudioSlotOverride } from './format';
+import type { StudioDishState, StudioDishStateStyle, StudioDoc, StudioSlotOverride } from './format';
 
 export type EmenuSlotKind = 'photo' | 'text' | 'title' | 'coverTitle' | 'intro' | 'row';
 
@@ -350,3 +350,27 @@ export function resetLayoutTemplate(doc: StudioDoc, layout: string): StudioDoc {
 export const slotHideable = (def: EmenuSlotDef) => def.kind === 'photo' || def.kind === 'title' || def.kind === 'intro' || def.kind === 'coverTitle';
 /** 能改宽的块：照片、文字、介绍（竖排小标题、封面标题、文字陈列的一行只能挪） */
 export const slotResizable = (def: EmenuSlotDef): { w: boolean; h: boolean } => ({ w: def.kind === 'photo' || def.kind === 'text' || def.kind === 'intro', h: def.kind === 'photo' });
+
+// ───────────────────────── 菜的几种状态（变体） ─────────────────────────
+
+/** 设计稿里三种状态的样子：照片压暗 55% 的黑、浅色字居中两行；没有图的文字变浅一半 */
+export const DISH_STATE_DEFAULT: Required<StudioDishStateStyle> = { style: 'center', shade: '#000000', shadeOpacity: 0.55, textColor: '#F4F3F2', textOpacity: 0.5, grayscale: false };
+
+export const DISH_STATE_LABELS: Record<StudioDishState, string> = { sold_out: '已售罄', closed: '当前时段不可售', off: '已下架' };
+
+/** 一种状态叠上改动以后的样子 */
+export function dishStateStyle(states: StudioDoc['dishStates'] | null | undefined, state: StudioDishState): Required<StudioDishStateStyle> {
+  return { ...DISH_STATE_DEFAULT, ...(states?.[state] ?? {}) };
+}
+
+/** 改一种状态的样子：与设计稿一样的项去掉，全去掉时版面里没有 dishStates */
+export function setDishState(doc: StudioDoc, state: StudioDishState, patch: StudioDishStateStyle): StudioDoc {
+  const cur: StudioDishStateStyle = { ...(doc.dishStates?.[state] ?? {}), ...patch };
+  for (const k of Object.keys(cur) as (keyof StudioDishStateStyle)[]) if (cur[k] === undefined || cur[k] === DISH_STATE_DEFAULT[k]) delete cur[k];
+  const all = { ...(doc.dishStates ?? {}) };
+  if (Object.keys(cur).length) all[state] = cur;
+  else delete all[state];
+  const next: StudioDoc = { ...doc, dishStates: all };
+  if (!Object.keys(all).length) delete next.dishStates;
+  return next;
+}

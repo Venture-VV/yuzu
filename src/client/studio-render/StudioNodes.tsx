@@ -11,10 +11,13 @@
 import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import {
   colorValue,
+  instanceView,
   isFlow,
   SHADOW_CSS,
+  STUDIO_LIMITS,
   type StudioAction,
   type StudioBlockNode,
+  type StudioDoc,
   type StudioLayout,
   type StudioNode,
   type StudioScreen,
@@ -34,6 +37,10 @@ export interface StudioRenderCtx {
   data?: (field: string, lang: 'zh' | 'en') => string | null;
   /** 点了做什么（编辑器里不给：点一下是选中） */
   onAction?: (action: StudioAction) => void;
+  /** 版面里的组件（8.1.2）：实例照它画 */
+  components?: StudioDoc['components'];
+  /** 实例套了几层（防止组件里又放了自己：核对拦着，这里再兜一下） */
+  depth?: number;
 }
 
 type Flow = StudioLayout | null;
@@ -202,6 +209,12 @@ function NodeView({ node: n, ctx, flow }: { node: StudioNode; ctx: StudioRenderC
           </span>
         </div>
       );
+    case 'instance': {
+      // 组件的实例（8.1.2）：照组件画，位置、大小、转角、藏不藏用实例的；编号用实例的（编辑器按它量、选中）
+      const master = ctx.components?.[n.component]?.node;
+      if (!master || (ctx.depth ?? 0) >= STUDIO_LIMITS.depth) return null;
+      return <NodeView node={instanceView(n, master)} ctx={{ ...ctx, depth: (ctx.depth ?? 0) + 1 }} flow={flow} />;
+    }
     case 'button': {
       const tap = tapProps(n.action, ctx, `studio-tap-${n.id}`);
       return (

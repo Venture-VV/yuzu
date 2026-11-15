@@ -2,8 +2,10 @@
 // 都是纯函数：拿一份版面、返回新的一份（不改原来的），撤销、重做存的就是这一份一份。
 
 import {
+  componentUses,
   isFlow,
   STUDIO_LIMITS,
+  walkNodes,
   type StudioBlockDef,
   type StudioDoc,
   type StudioFieldDef,
@@ -21,7 +23,7 @@ export interface Box {
   h: number;
 }
 
-const clone = <T,>(v: T): T => (typeof structuredClone === 'function' ? structuredClone(v) : (JSON.parse(JSON.stringify(v)) as T));
+const clone = <T>(v: T): T => (typeof structuredClone === 'function' ? structuredClone(v) : (JSON.parse(JSON.stringify(v)) as T));
 
 /** 新节点的编号：随机 8 位 */
 export function newId(prefix = 'n'): string {
@@ -31,7 +33,21 @@ export function newId(prefix = 'n'): string {
   return `${prefix}-${s}`;
 }
 
+/**
+ * 组件（8.1.2）在编辑器里当成一屏来改：屏的名字是「@组件编号」，这一屏只有一个节点——组件本身；
+ * 改它用的是改屏的那一套（选中、拖动、属性、插入到框里），写回到 doc.components。
+ */
+export const COMPONENT_SCREEN = '@';
+export const isComponentScreen = (screen: string) => screen.startsWith(COMPONENT_SCREEN);
+export const componentScreen = (cid: string) => `${COMPONENT_SCREEN}${cid}`;
+export const componentIdOf = (screen: string) => (isComponentScreen(screen) ? screen.slice(COMPONENT_SCREEN.length) : null);
+
 export function screenOf(doc: StudioDoc, screen: string): StudioScreen {
+  const cid = componentIdOf(screen);
+  if (cid) {
+    const c = doc.components?.[cid];
+    return { background: null, nodes: c ? [c.node] : [] };
+  }
   return doc.screens[screen] ?? { background: null, nodes: [] };
 }
 
@@ -80,6 +96,16 @@ export function absBox(doc: StudioDoc, screen: string, id: string): Box | null {
 /** 改一屏（返回新的一份版面） */
 export function withScreen(doc: StudioDoc, screen: string, fn: (s: StudioScreen) => void): StudioDoc {
   const next = clone(doc);
+  const cid = componentIdOf(screen);
+  if (cid) {
+    // 组件：改完写回去；组件本身不会被删掉、外面也加不了第二块（只认第一块）
+    const c = next.components?.[cid];
+    if (!c) return doc;
+    const s: StudioScreen = { background: null, nodes: [c.node] };
+    fn(s);
+    if (s.nodes[0]) c.node = s.nodes[0];
+    return next;
+  }
   const s = next.screens[screen] ?? (next.screens[screen] = { background: null, nodes: [] });
   fn(s);
   return next;
@@ -106,8 +132,7 @@ export function updateNodes(doc: StudioDoc, screen: string, patches: Record<stri
 
 export function removeNodes(doc: StudioDoc, screen: string, ids: readonly string[]): StudioDoc {
   return withScreen(doc, screen, (s) => {
-    const drop = (list: StudioNode[]): StudioNode[] =>
-      list.filter((n) => !ids.includes(n.id)).map((n) => (n.type === 'frame' ? { ...n, children: drop(n.children) } : n));
+    const drop = (list: StudioNode[]): StudioNode[] => list.filter((n) => !ids.includes(n.id)).map((n) => (n.type === 'frame' ? { ...n, children: drop(n.children) } : n));
     s.nodes = drop(s.nodes);
   });
 }
@@ -199,8 +224,9 @@ export function hitTest(nodes: readonly StudioNode[], x: number, y: number, boxO
 }
 
 /** 节点叫什么（图层里显示）：取的名字 > 文字的内容 > 功能块的名字 > 类型 */
-export function nodeLabel(n: StudioNode, surface: StudioSurfaceDef): string {
+export function nodeLabel(n: StudioNode, surface: StudioSurfaceDef, doc?: StudioDoc): string {
   if (n.name) return n.name;
+  if (n.type === 'instance') return doc?.components?.[n.component]?.name ?? '组件';
   if (n.type === 'text') return n.text.zh.slice(0, 16) || '文字';
   if (n.type === 'block') return surface.blocks[n.block]?.label ?? n.block;
   if (n.type === 'button') return n.text.zh.slice(0, 16) || '按钮';
@@ -237,10 +263,11 @@ export function snapBox(moving: Box, others: readonly Box[], canvas: { w: number
   const mine = (axis: 'x' | 'y') => (axis === 'x' ? [moving.x, moving.x + moving.w / 2, moving.x + moving.w] : [moving.y, moving.y + moving.h / 2, moving.y + moving.h]);
   const best = (axis: 'x' | 'y', targets: number[]) => {
     let pick: { d: number; at: number } | null = null;
-    for (const m of mine(axis)) for (const t of targets) {
-      const d = t - m;
-      if (Math.abs(d) <= threshold && (!pick || Math.abs(d) < Math.abs(pick.d))) pick = { d, at: t };
-    }
+    for (const m of mine(axis))
+      for (const t of targets) {
+        const d = t - m;
+        if (Math.abs(d) <= threshold && (!pick || Math.abs(d) < Math.abs(pick.d))) pick = { d, at: t };
+      }
     return pick;
   };
   const bx = best('x', xs);
@@ -266,7 +293,23 @@ const EMENU_TOKENS: Tokens = { text: '$ink', fill: '$tan', panel: '$modal', line
 export type FlowHint = 'phone' | null;
 
 export function makeText(x: number, y: number, zh = '双击右边改文字', t: Tokens = EMENU_TOKENS, size = 24): StudioNode {
-  return { type: 'text', id: newId('t'), ...base(x, y, 320, 40), text: { zh, en: '' }, font: 'zh', size, weight: 400, color: t.text, align: 'left', valign: 'top', lineHeight: 1.4, letterSpacing: 0, italic: false, underline: false, fill: null };
+  return {
+    type: 'text',
+    id: newId('t'),
+    ...base(x, y, 320, 40),
+    text: { zh, en: '' },
+    font: 'zh',
+    size,
+    weight: 400,
+    color: t.text,
+    align: 'left',
+    valign: 'top',
+    lineHeight: 1.4,
+    letterSpacing: 0,
+    italic: false,
+    underline: false,
+    fill: null,
+  };
 }
 export function makeRect(x: number, y: number, t: Tokens = EMENU_TOKENS): StudioNode {
   return { type: 'rect', id: newId('r'), ...base(x, y, 200, 120), fill: t.fill, stroke: null, strokeWidth: 0, radius: 8, shadow: 'none' };
@@ -350,4 +393,98 @@ export function sizeForFlow(n: StudioNode, flow: StudioLayout | null, surface: S
   if (n.type === 'text' || n.type === 'field') return { ...n, sizing: row ? { w: 'hug', h: 'hug' } : { w: 'fill', h: 'hug' } };
   if (n.type === 'frame') return { ...n, sizing: row ? { w: 'fill', h: 'hug' } : { w: 'fill', h: n.layout && n.layout.mode !== 'free' ? 'hug' : 'fixed' } };
   return { ...n, sizing: { w: 'fixed', h: 'fixed' } };
+}
+
+// ───────────────────────── 组件（8.1.2） ─────────────────────────
+
+/** 一块连同里面的都换上新编号（复制、拆开组件时用，免得与原来的撞） */
+export function reid<T extends StudioNode>(n: T): T {
+  const copy = { ...n, id: newId(n.type.slice(0, 1)) } as T;
+  if (copy.type === 'frame') return { ...copy, children: copy.children.map(reid) } as T;
+  return copy;
+}
+
+/**
+ * 存成组件：选中的这一块（框连着里面的）变成组件，原来的位置换成它的实例（编号、位置、大小不变）。
+ * 组件本身放在画布中间（改组件时看得清）；里面的编号沿用（只在这个组件里）。功能块、实例不能存。
+ */
+export function makeComponentFrom(doc: StudioDoc, screen: string, id: string, surface: StudioSurfaceDef, measured?: Box): { doc: StudioDoc; cid: string } | null {
+  const f = findNode(doc, screen, id);
+  if (!f || f.node.type === 'block' || f.node.type === 'instance' || isComponentScreen(screen)) return null;
+  let hasBlock = false;
+  walkNodes([f.node], (n) => n.type === 'block' && (hasBlock = true));
+  if (hasBlock) return null;
+  const cid = newId('c');
+  // 自动排列里撑满、跟内容的边，版面里的宽高不准：组件用画布上量到的大小
+  const sz = f.node.sizing;
+  const w = round1(measured && (f.flow ? sz?.w !== undefined && sz.w !== 'fixed' : false) ? measured.w : f.node.w || measured?.w || 0);
+  const h = round1(measured && (f.flow ? sz?.h !== undefined && sz.h !== 'fixed' : false) ? measured.h : f.node.h || measured?.h || 0);
+  const master = { ...clone(f.node), w, h, x: round1(Math.max(0, (surface.size.w - w) / 2)), y: round1(Math.max(0, Math.min(200, (surface.size.h - h) / 2))) } as StudioNode;
+  const name = (f.node.name || nodeLabel(f.node, surface)).slice(0, 40) || '组件';
+  const inst: StudioNode = {
+    type: 'instance',
+    id: f.node.id,
+    name: f.node.name,
+    x: f.node.x,
+    y: f.node.y,
+    w: f.node.w,
+    h: f.node.h,
+    rotate: f.node.rotate,
+    opacity: 1,
+    hidden: f.node.hidden,
+    locked: false,
+    component: cid,
+    ...(f.node.sizing ? { sizing: f.node.sizing } : {}),
+  };
+  const withComp: StudioDoc = { ...doc, components: { ...(doc.components ?? {}), [cid]: { name, node: master } } };
+  return { doc: updateNode(withComp, screen, id, () => inst), cid };
+}
+
+/** 放一个组件的实例（大小照组件） */
+export function makeInstance(doc: StudioDoc, cid: string, x: number, y: number): StudioNode | null {
+  const c = doc.components?.[cid];
+  if (!c) return null;
+  return { type: 'instance', id: newId('i'), name: '', x: round1(x), y: round1(y), w: c.node.w, h: c.node.h, rotate: 0, opacity: 1, hidden: false, locked: false, component: cid };
+}
+
+/** 拆开：实例换成组件的一份副本（新编号、实例的位置大小），之后各改各的 */
+export function detachInstance(doc: StudioDoc, screen: string, id: string): StudioDoc {
+  const f = findNode(doc, screen, id);
+  if (!f || f.node.type !== 'instance') return doc;
+  const c = doc.components?.[f.node.component];
+  if (!c) return doc;
+  const inst = f.node;
+  // 最外面那一块沿用实例的编号（选中不丢），里面的换新编号
+  const copy = { ...reid(clone(c.node)), id: inst.id } as StudioNode;
+  const placed = {
+    ...copy,
+    x: inst.x,
+    y: inst.y,
+    w: inst.w,
+    h: inst.h,
+    rotate: inst.rotate,
+    opacity: Math.round(inst.opacity * copy.opacity * 1000) / 1000,
+    hidden: inst.hidden,
+    name: inst.name || c.name,
+  } as StudioNode;
+  if (inst.sizing) placed.sizing = inst.sizing;
+  else delete placed.sizing;
+  return updateNode(doc, screen, id, () => placed);
+}
+
+/** 组件改名 */
+export function renameComponent(doc: StudioDoc, cid: string, name: string): StudioDoc {
+  const c = doc.components?.[cid];
+  if (!c) return doc;
+  return { ...doc, components: { ...doc.components, [cid]: { ...c, name: name.slice(0, 40) } } };
+}
+
+/** 删掉组件：只删没人用的（还在用的先拆开或删掉那几处） */
+export function deleteComponent(doc: StudioDoc, cid: string): StudioDoc {
+  if (!doc.components?.[cid] || componentUses(doc, cid) > 0) return doc;
+  const all = { ...doc.components };
+  delete all[cid];
+  const next: StudioDoc = { ...doc, components: all };
+  if (!Object.keys(all).length) delete next.components;
+  return next;
 }

@@ -24,6 +24,7 @@ import {
   STUDIO_SURFACES,
   themeVars,
   type StudioAssetView,
+  type StudioDishState,
   type StudioDoc,
   type StudioIssue,
   type StudioNode,
@@ -45,8 +46,14 @@ import { StudioCanvas } from './Canvas';
 import { emenuEditorBlocks, flatPages } from './emenuBlocks';
 import { useDocHistory } from './history';
 import {
+  componentIdOf,
+  componentScreen,
+  deleteComponent,
+  detachInstance,
   duplicateNodes,
   findNode,
+  isComponentScreen,
+  makeComponentFrom,
   geometryRules,
   insertNode,
   makeEllipse,
@@ -63,9 +70,9 @@ import {
   updateNodes,
 } from './model';
 import { phoneEditorBlocks } from './phoneBlocks';
-import { AssetsPanel, ChecksPanel, InsertPanel, LayersPanel, PropsPanel, ThemePanel } from './panels';
+import { AssetsPanel, ChecksPanel, InsertPanel, LayersPanel, PropsPanel, ThemePanel, type ComponentOps } from './panels';
 import { TemplateCanvas } from './TemplateCanvas';
-import { SlotPanel, TemplatesPanel } from './templatePanels';
+import { DishStatePanel, SlotPanel, TemplatesPanel } from './templatePanels';
 import { pagesWithLayout, templatePage } from './templateModel';
 
 type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
@@ -138,6 +145,8 @@ export function StudioPage() {
   // 卡片模板（8.1.2，平板菜单）：左栏「版式」打开时画布改成那种版式的一页，选中的是版式里的一块
   const [tplLayout, setTplLayout] = useState<EmenuLayout>('cover');
   const [tplSlot, setTplSlot] = useState<string | null>(null);
+  // 菜的几种样子（变体，8.1.2）：选了一种时画布上的菜都按这种状态画，右栏改它的样子
+  const [tplState, setTplState] = useState<StudioDishState | null>(null);
   const [tplPageNo, setTplPageNo] = useState(0);
   const tplMode = isEmenu && left === 'templates';
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -213,8 +222,8 @@ export function StudioPage() {
   const red = issues.filter((i) => i.level === 'error').length;
   const vars = useMemo(() => themeVars(doc), [doc]);
   const blocks = useMemo(
-    () => (isEmenu ? emenuEditorBlocks(menuQ.data ?? null, { lang, pageIndex, templates: doc.templates }) : phoneEditorBlocks(def)),
-    [isEmenu, def, menuQ.data, lang, pageIndex, doc.templates],
+    () => (isEmenu ? emenuEditorBlocks(menuQ.data ?? null, { lang, pageIndex, templates: doc.templates, dishStates: doc.dishStates }) : phoneEditorBlocks(def)),
+    [isEmenu, def, menuQ.data, lang, pageIndex, doc.templates, doc.dishStates],
   );
   const flat = useMemo(() => flatPages(menuQ.data ?? null), [menuQ.data]);
   const tplPages = useMemo(() => pagesWithLayout(menuQ.data ?? null, tplLayout), [menuQ.data, tplLayout]);
@@ -243,7 +252,16 @@ export function StudioPage() {
     (node: StudioNode) => {
       const d0 = latest.current;
       const sel = selection.length === 1 ? findNode(d0, screen, selection[0]!) : null;
-      const into = sel && sel.node.type === 'frame' && node.type !== 'block' ? sel.node : null;
+      let into = sel && sel.node.type === 'frame' && node.type !== 'block' ? sel.node : null;
+      // 改组件时：只能加在组件这个框里（没选中框就加在最外面那个框里）；组件不是框的加不了
+      if (isComponentScreen(screen) && !into) {
+        const master = screenOf(d0, screen).nodes[0];
+        if (!master || master.type !== 'frame' || node.type === 'block') {
+          toast({ tone: 'info', title: '这个组件不是框，里面加不了东西', body: '要加的话：回到屏上把它拆开，放进一个框里，再存成组件。' });
+          return;
+        }
+        into = master;
+      }
       const sc = screenOf(d0, screen);
       const flow = into ? (into.layout && isFlow(into.layout) ? into.layout : null) : sc.layout && isFlow(sc.layout) ? sc.layout : null;
       let n = sizeForFlow(node, flow, def);
@@ -253,14 +271,17 @@ export function StudioPage() {
       setLeft('layers');
       setRight('props');
     },
-    [change, screen, selection, def],
+    [change, screen, selection, def, toast],
   );
   const deleteSelection = useCallback(() => {
     const removable = selection.filter((id) => {
       const f = findNode(latest.current, screen, id);
+      // 改组件时最外面那一块就是组件本身：删组件到「插入 → 组件」里删
+      if (f && isComponentScreen(screen) && !f.parent) return false;
       return f && !(f.node.type === 'block' && def.blocks[f.node.block]?.required);
     });
-    if (removable.length < selection.length) toast({ tone: 'info', title: '必需的功能块不能删（可以挪、改样子）' });
+    if (removable.length < selection.length)
+      toast({ tone: 'info', title: isComponentScreen(screen) ? '组件本身不能在这里删（到「插入 → 组件」里删没人用的）' : '必需的功能块不能删（可以挪、改样子）' });
     if (!removable.length) return;
     change((d) => removeNodes(d, screen, removable));
     setSelection([]);
@@ -300,6 +321,50 @@ export function StudioPage() {
     },
     [tplSlot, tplLayout, big, change],
   );
+  // ── 组件（8.1.2）：存成组件、打开组件那一屏改、拆开、改完回到原来那一屏 ──
+  const backTo = useRef(def.screens[0]!.key);
+  /** 画布上量到的各块（存成组件时用量到的大小） */
+  const measuredRef = useRef<ReadonlyMap<string, { x: number; y: number; w: number; h: number }>>(new Map());
+  const componentOps: ComponentOps = useMemo(
+    () => ({
+      make: (id) => {
+        const r = makeComponentFrom(latest.current, screen, id, def, measuredRef.current.get(id));
+        if (!r) {
+          toast({ tone: 'info', title: '这一块存不成组件', body: '功能块、已经是组件的、里面有功能块的不能存。' });
+          return;
+        }
+        history.set(r.doc);
+        setSelection([id]);
+        toast({ tone: 'success', title: `已存成组件「${r.doc.components![r.cid]!.name}」`, body: '「插入 → 组件」里可以再放几个；改组件时各处一起变。' });
+      },
+      edit: (cid) => {
+        if (!isComponentScreen(screen)) backTo.current = screen;
+        setLeft('layers');
+        setScreen(componentScreen(cid));
+        setSelection([]);
+        setRight('props');
+      },
+      detach: (id) => {
+        change((d) => detachInstance(d, screen, id));
+        setSelection([id]);
+      },
+      finish: () => {
+        setScreen(backTo.current);
+        setSelection([]);
+      },
+      remove: (cid) => change((d) => deleteComponent(d, cid)),
+    }),
+    [screen, def, history, change, toast],
+  );
+  // 改着的组件没了（撤销了「存成组件」、删掉了）：回到原来那一屏
+  useEffect(() => {
+    const cid = componentIdOf(screen);
+    if (cid && !doc.components?.[cid]) {
+      setScreen(backTo.current);
+      setSelection([]);
+    }
+  }, [doc, screen]);
+
   const openTemplates = useCallback(() => {
     setLeft('templates');
     setScreen('menu');
@@ -330,6 +395,10 @@ export function StudioPage() {
           const step = e.shiftKey ? 10 : 1;
           nudgeSlot(e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0, e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0);
         } else if (e.key === 'Escape') setTplSlot(null);
+      } else if (mod && e.altKey && e.code === 'KeyK') {
+        // 存成组件（照 Figma）
+        e.preventDefault();
+        if (selection.length === 1) componentOps.make(selection[0]!);
       } else if (mod && k === 'd') {
         e.preventDefault();
         const r = duplicateNodes(latest.current, screen, selection, def);
@@ -375,7 +444,7 @@ export function StudioPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dialog, history, save, selection, screen, def, phone, deleteSelection, nudge, insert, tplMode, tplSlot, nudgeSlot]);
+  }, [dialog, history, save, selection, screen, def, phone, deleteSelection, nudge, insert, tplMode, tplSlot, nudgeSlot, componentOps]);
 
   // 选中的不在这一屏了（撤销、删掉、换屏）：去掉
   useEffect(() => {
@@ -429,6 +498,14 @@ export function StudioPage() {
             </button>
           ))}
         </div>
+        {isComponentScreen(screen) && (
+          <div className="ml-1 flex h-8 items-center gap-1.5 rounded-md bg-[#7b61ff]/10 px-2 text-[12.5px] text-[#5b45d6]" data-testid="studio-component-bar">
+            ◆ 改组件「{doc.components?.[componentIdOf(screen)!]?.name ?? ''}」
+            <button type="button" className="rounded bg-[#5b45d6] px-2 py-0.5 text-[12px] text-white" onClick={componentOps.finish} data-testid="studio-component-finish">
+              改好了
+            </button>
+          </div>
+        )}
         {tplMode ? (
           <select
             className="ml-1 h-8 max-w-52 rounded-md border border-line bg-card px-1.5 text-[12px]"
@@ -556,7 +633,7 @@ export function StudioPage() {
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             {left === 'layers' && <LayersPanel doc={doc} screen={screen} surface={def} selection={selection} onSelect={setSelection} onChange={change} />}
-            {left === 'insert' && <InsertPanel doc={doc} screen={screen} surface={def} onInsert={insert} />}
+            {left === 'insert' && <InsertPanel doc={doc} screen={screen} surface={def} onInsert={insert} components={componentOps} />}
             {left === 'assets' && (
               <AssetsPanel
                 assets={assetsQ.data ?? []}
@@ -579,6 +656,11 @@ export function StudioPage() {
                 slot={tplSlot}
                 onSlot={(k) => {
                   setTplSlot(k);
+                  setRight('props');
+                }}
+                state={tplState}
+                onState={(k) => {
+                  setTplState(k);
                   setRight('props');
                 }}
                 onChange={change}
@@ -608,8 +690,12 @@ export function StudioPage() {
               selected={tplSlot}
               onSelect={(k) => {
                 setTplSlot(k);
-                if (k) setRight('props');
+                if (k) {
+                  setTplState(null);
+                  setRight('props');
+                }
               }}
+              previewState={tplState}
               scale={scale}
               lang={lang}
               big={big}
@@ -640,6 +726,7 @@ export function StudioPage() {
                 setRight('props');
                 window.setTimeout(() => textRef.current?.focus(), 30);
               }}
+              onMeasure={(m) => (measuredRef.current = m)}
             />
           )}
         </main>
@@ -657,7 +744,11 @@ export function StudioPage() {
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             {right === 'props' ? (
               tplMode ? (
-                <SlotPanel doc={doc} layout={tplLayout} slot={tplSlot} big={big} onToggleBig={() => setBig((b) => !b)} onChange={change} />
+                tplState ? (
+                  <DishStatePanel doc={doc} state={tplState} onChange={change} />
+                ) : (
+                  <SlotPanel doc={doc} layout={tplLayout} slot={tplSlot} big={big} onToggleBig={() => setBig((b) => !b)} onChange={change} />
+                )
               ) : (
                 <PropsPanel
                   doc={doc}
@@ -669,6 +760,7 @@ export function StudioPage() {
                   onLayer={(dir) => selection[0] && change((d) => moveLayer(d, screen, selection[0]!, dir))}
                   textRef={textRef}
                   onOpenTemplates={isEmenu ? openTemplates : undefined}
+                  components={componentOps}
                 />
               )
             ) : (

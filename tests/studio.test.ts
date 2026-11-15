@@ -239,6 +239,40 @@ describe('8.1.2：微信小程序的版面（给小程序线读）', () => {
     expect(await readStudioAssetFor(ctx.sql, 'emenu', used)).toBeNull();
   });
 
+  it('组件（8.1.2）：小程序读到的版面里组件已经展开成普通节点（没有 instance、没有 components）；组件里的图取得到', async () => {
+    const s = (await api(ctx.app, designer, 'GET', '/api/studio/mp')).body;
+    const pic = (await api(ctx.app, designer, 'POST', '/api/studio/assets', { name: '组件里的图.png', data: PNG_2x1 })).body.id as string;
+    const doc = clone(s.draft.doc);
+    const base = { name: '', rotate: 0, opacity: 1, hidden: false, locked: false };
+    doc.components = {
+      'c-promo01': {
+        name: '活动卡',
+        node: { type: 'frame', id: 'card', ...base, x: 0, y: 0, w: 160, h: 90, fill: '$surface', stroke: null, strokeWidth: 0, radius: 12, shadow: 'none', clip: true, children: [{ ...image('pic', pic), w: 160, h: 60 }] },
+      },
+    };
+    doc.screens.activity!.nodes.push(
+      { type: 'instance', id: 'promo-a', ...base, x: 12, y: 500, w: 160, h: 90, component: 'c-promo01' },
+      { type: 'instance', id: 'promo-b', ...base, x: 190, y: 500, w: 160, h: 90, component: 'c-promo01' },
+    );
+    const saved = await api(ctx.app, designer, 'PUT', '/api/studio/mp/draft', { rev: s.draft.rev, doc });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    const pub = await api(ctx.app, designer, 'POST', '/api/studio/mp/publish', { clientKey: randomUUID(), rev: saved.body.rev, note: '活动页放两张活动卡（组件）' });
+    expect(pub.status, JSON.stringify(pub.body)).toBe(200);
+    expect(pub.body.screensChanged).toEqual(expect.arrayContaining(['activity', 'components']));
+
+    const read = (await readPublishedStudio(ctx.sql, 'mp'))!;
+    expect(read.version).toBe(pub.body.version);
+    expect(read.doc.components).toBeUndefined();
+    const nodes = read.doc.screens.activity!.nodes;
+    expect(JSON.stringify(nodes)).not.toContain('"instance"');
+    expect(nodes.find((n) => n.id === 'promo-b')).toMatchObject({ type: 'frame', x: 190, y: 500, w: 160, h: 90, children: [{ id: 'promo-b__pic', type: 'image', asset: pic }] });
+    // 组件里的图：发布过的版面里用到，取得到
+    expect((await readStudioAssetFor(ctx.sql, 'mp', pic))?.mime).toBe('image/png');
+    // 编辑器、版本里存的还是组件本来的样子
+    const v = (await api(ctx.app, designer, 'GET', `/api/studio/mp/versions/${pub.body.version}`)).body;
+    expect(Object.keys(v.doc.components)).toEqual(['c-promo01']);
+  });
+
   it('小程序的版面里不认识的动作、字段存不进去；预览码在手机预览页取得到', async () => {
     const s = (await api(ctx.app, designer, 'GET', '/api/studio/mp')).body;
     const bad = clone(s.draft.doc);

@@ -31,7 +31,10 @@ function Placeholder({ w, h, text }: { w: number; h: number; text: string }) {
 }
 
 /** 编辑器画布上平板菜单的功能块 */
-export function emenuEditorBlocks(menu: EmenuMenu | null, opts: { lang: Lang; pageIndex: number; templates?: StudioDoc['templates'] }): Record<string, (n: StudioBlockNode) => ReactNode> {
+export function emenuEditorBlocks(
+  menu: EmenuMenu | null,
+  opts: { lang: Lang; pageIndex: number; templates?: StudioDoc['templates']; dishStates?: StudioDoc['dishStates'] },
+): Record<string, (n: StudioBlockNode) => ReactNode> {
   const cover = menu?.rules.coverUrl ?? null;
   const tone = cover ? '#f4f3f2' : 'var(--em-ink)';
   const flat = flatPages(menu);
@@ -46,7 +49,7 @@ export function emenuEditorBlocks(menu: EmenuMenu | null, opts: { lang: Lang; pa
     lang: (n) => <LangBlock node={n} lang={opts.lang} onToggle={noop} autoLight={!!cover} />,
     'menu.pages': (n) =>
       at ? (
-        <EmenuTemplatesProvider value={opts.templates}>
+        <EmenuTemplatesProvider templates={opts.templates} dishStates={opts.dishStates}>
           <PageCanvas page={at.page} ctx={{ categoryName: at.category.name, categoryNameEn: at.category.nameEn, open: true }} />
         </EmenuTemplatesProvider>
       ) : (

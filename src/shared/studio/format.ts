@@ -21,7 +21,7 @@ import { z } from 'zod';
 export const STUDIO_SCHEMA = 1;
 
 /** 一屏最多几个节点（连同框里的）、一份版面最多几个、框最多套几层、整份最大多少字节 */
-export const STUDIO_LIMITS = { nodesPerScreen: 300, nodesPerDoc: 1500, depth: 6, bytes: 512 * 1024, text: 2000 } as const;
+export const STUDIO_LIMITS = { nodesPerScreen: 300, nodesPerDoc: 1500, depth: 6, bytes: 512 * 1024, text: 2000, components: 100, expanded: 3000 } as const;
 
 /** 颜色：#rrggbb、#rrggbbaa，或者主题色（$ink） */
 export const ColorSchema = z.string().regex(/^(#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?|\$[a-z][a-zA-Z0-9]{0,23})$/, '颜色写成 #RRGGBB 或主题色');
@@ -129,6 +129,14 @@ export const ImageSchema = z.object({
 });
 
 /** 功能块的属性：只能是简单的值，按界面登记的格式再核对 */
+/** 组件的编号（8.1.2）：c- 开头 */
+export const ComponentId = z.string().regex(/^c-[a-z0-9]{4,20}$/, '组件编号不对');
+/**
+ * 组件的实例（8.1.2）：屏上放的一个组件。位置、大小、转角、藏不藏、尺寸规则是实例自己的（透明度与组件的相乘），
+ * 长什么样跟着组件——改了组件，各处的实例一起变。
+ */
+export const InstanceSchema = z.object({ type: z.literal('instance'), ...Base, component: ComponentId });
+
 export const BlockPropValue = z.union([z.string().max(200), z.number().finite(), z.boolean()]);
 export const BlockSchema = z.object({
   type: z.literal('block'),
@@ -145,7 +153,8 @@ export type StudioBlockNode = z.infer<typeof BlockSchema>;
 export type StudioButtonNode = z.infer<typeof ButtonSchema>;
 export type StudioFieldNode = z.infer<typeof FieldSchema>;
 export type StudioFrameNode = z.infer<typeof BaseFrameSchema> & { children: StudioNode[] };
-export type StudioNode = StudioTextNode | StudioRectNode | StudioEllipseNode | StudioImageNode | StudioBlockNode | StudioButtonNode | StudioFieldNode | StudioFrameNode;
+export type StudioInstanceNode = z.infer<typeof InstanceSchema>;
+export type StudioNode = StudioTextNode | StudioRectNode | StudioEllipseNode | StudioImageNode | StudioBlockNode | StudioButtonNode | StudioFieldNode | StudioFrameNode | StudioInstanceNode;
 export type StudioNodeType = StudioNode['type'];
 
 /**
@@ -174,9 +183,14 @@ export const NodeSchema: z.ZodType<StudioNode> = z.lazy(() =>
     BlockSchema,
     ButtonSchema,
     FieldSchema,
+    InstanceSchema,
     BaseFrameSchema.extend({ children: z.array(NodeSchema).max(STUDIO_LIMITS.nodesPerScreen) }),
   ]),
 ) as z.ZodType<StudioNode>;
+
+/** 组件（8.1.2）：设计师存下来的一块（框连着里面的也行），屏上放它的实例；里面不能有功能块 */
+export const ComponentSchema = z.object({ name: z.string().trim().min(1).max(40), node: NodeSchema });
+export type StudioComponent = z.infer<typeof ComponentSchema>;
 
 export const ScreenSchema = z.object({
   /** 这一屏的底色（null：用界面自己的底） */
@@ -210,6 +224,22 @@ const SlotPatchSchema = z.object({ x: num(-2048, 4096).optional(), y: num(-2048,
 export const SlotOverrideSchema = z.object({ design: SlotPatchSchema.optional(), big: SlotPatchSchema.optional(), hidden: z.boolean().optional(), radius: num(0, 400).optional() });
 export type StudioSlotOverride = z.infer<typeof SlotOverrideSchema>;
 
+/** 菜的三种状态（8.1.2，变体）：售罄、当前时段不可售、已下架——菜单页上照片、文字的样子 */
+export const DISH_STATES = ['sold_out', 'closed', 'off'] as const;
+export type StudioDishState = (typeof DISH_STATES)[number];
+/** 照片上怎么写：居中两行（设计稿）、左上角小标签、只压暗不写字 */
+export const DISH_STATE_STYLES = ['center', 'badge', 'dim'] as const;
+/** 一种状态的样子：只存改过的项（没写的照设计稿） */
+export const DishStateSchema = z.object({
+  style: z.enum(DISH_STATE_STYLES).optional(),
+  shade: ColorSchema.optional(),
+  shadeOpacity: num(0, 0.9).optional(),
+  textColor: ColorSchema.optional(),
+  textOpacity: num(0.2, 1).optional(),
+  grayscale: z.boolean().optional(),
+});
+export type StudioDishStateStyle = z.infer<typeof DishStateSchema>;
+
 export const DocSchema = z.object({
   schema: z.literal(STUDIO_SCHEMA),
   surface: z.enum(STUDIO_SURFACES),
@@ -217,6 +247,10 @@ export const DocSchema = z.object({
   screens: z.record(z.string().regex(/^[a-z][a-zA-Z0-9]{0,23}$/), ScreenSchema),
   /** 卡片模板的改动（8.1.2）：templates[版式][块]，只存改过的；界面登记了模板的才有（平板菜单） */
   templates: z.record(z.string().regex(/^[a-z][a-z_]{0,23}$/), z.record(z.string().regex(/^[a-z0-9][a-z0-9.]{0,15}$/), SlotOverrideSchema)).optional(),
+  /** 组件（8.1.2）：编号 → 名字与样子；屏上的实例按编号找 */
+  components: z.record(ComponentId, ComponentSchema).optional(),
+  /** 菜的几种状态的样子（8.1.2，变体）：只存改过的；与卡片模板一样只有平板菜单有 */
+  dishStates: z.object({ sold_out: DishStateSchema.optional(), closed: DishStateSchema.optional(), off: DishStateSchema.optional() }).optional(),
 });
 export type StudioDoc = z.infer<typeof DocSchema>;
 
@@ -235,10 +269,11 @@ export function walkNodes(nodes: readonly StudioNode[], fn: (node: StudioNode, d
   }
 }
 
-/** 一份版面里用到的素材（按出现的先后，不重复） */
+/** 一份版面里用到的素材（按出现的先后，不重复；组件里的也算） */
 export function docAssets(doc: StudioDoc): string[] {
   const out = new Set<string>();
   for (const s of Object.values(doc.screens)) walkNodes(s.nodes, (n) => n.type === 'image' && out.add(n.asset));
+  for (const c of Object.values(doc.components ?? {})) walkNodes([c.node], (n) => n.type === 'image' && out.add(n.asset));
   return [...out];
 }
 

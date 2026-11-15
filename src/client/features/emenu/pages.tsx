@@ -9,7 +9,7 @@ import { blockLabel, dishAttrs, dishDescription, dishNames, dishTagline, dishUni
 import { PlusDot } from './icons';
 import { designPoint, FadeImg } from './motion';
 import { BIG, box, useBig, ZoomAt } from './stage';
-import { useSlotPos, useSlots, type ResolvedSlot } from './templates';
+import { inkCss, shadeCss, useDishState, useSlotPos, useSlots, type ResolvedSlot } from './templates';
 
 export interface PageCtx {
   /** 这一页所在的分类：封面用它的名字；不在供应时段时整页的菜都标「当前时段不可售」 */
@@ -113,6 +113,8 @@ export function Photo({
   const block = dish ? dishBlock(dish, ctx.open) : null;
   const clickable = !!dish && !ctx.preview && !!ctx.onOpen;
   const why = block ? blockLabel(block, lang) : null;
+  // 售罄、当前时段不可售、已下架的样子（8.1.2 变体，工作台里改；没改过是设计稿：压暗 55%、浅色字居中两行）
+  const st = useDishState(block);
   return (
     <div
       role={clickable ? 'button' : undefined}
@@ -123,13 +125,51 @@ export function Photo({
       data-studio-slot={slot}
     >
       {url ? (
-        <FadeImg src={url} loading="lazy" decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <FadeImg
+          src={url}
+          loading="lazy"
+          decoding="async"
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', ...(why && st.grayscale ? { filter: 'grayscale(1)' } : {}) }}
+        />
       ) : (
         ctx.preview && <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{label}</span>
       )}
-      {why && url && (
+      {why && url && st.style !== 'center' && (
+        // 左上角小标签 / 只压暗
+        <span style={{ position: 'absolute', inset: 0, background: shadeCss(st.shade, st.shadeOpacity) }} data-testid={`emenu-block-${dish!.id}`} data-style={st.style}>
+          {st.style === 'badge' && (
+            <span
+              className={why.mainEn ? 'em-en' : undefined}
+              style={{
+                position: 'absolute',
+                left: 10 * f,
+                top: 10 * f,
+                padding: `${4 * f}px ${8 * f}px`,
+                borderRadius: 999,
+                background: shadeCss(st.shade, Math.max(0.75, st.shadeOpacity)),
+                color: inkCss(st.textColor),
+                fontSize: 11 * f,
+                lineHeight: `${12 * f}px`,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {why.main}
+            </span>
+          )}
+        </span>
+      )}
+      {why && url && st.style === 'center' && (
         <span
-          style={{ position: 'absolute', inset: 0, background: 'rgb(0 0 0 / 0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#f4f3f2' }}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: shadeCss(st.shade, st.shadeOpacity),
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: inkCss(st.textColor),
+          }}
           data-testid={`emenu-block-${dish!.id}`}
         >
           {why.mainEn ? (
@@ -221,6 +261,7 @@ export function DishText({
 }) {
   const lang = useLang();
   const block = dishBlock(dish, ctx.open);
+  const textOpacity = useDishState(block).textOpacity;
   const spec = displaySpec(dish);
   const name = dishNames(dish, lang);
   const intro = dishDescription(dish, lang);
@@ -236,7 +277,7 @@ export function DishText({
   const gapUnderName = name.sub ? 0 : 8.7;
   return (
     <div
-      style={{ position: 'absolute', left: at.x, ...(at.bottom === undefined ? { top: at.y } : { bottom: 768 - at.bottom }), width: at.w, opacity: block && noteByPrice ? 0.5 : 1 }}
+      style={{ position: 'absolute', left: at.x, ...(at.bottom === undefined ? { top: at.y } : { bottom: 768 - at.bottom }), width: at.w, opacity: block && noteByPrice ? textOpacity : 1 }}
       data-testid={`emenu-dish-${dish.id}`}
       data-block={block ?? undefined}
     >
@@ -611,12 +652,13 @@ function TextRow({ dish, x, y, ctx, slot }: { dish: EmenuDishView; x: number; y:
   const name = dishNames(dish, lang);
   const attrs = dishAttrs(dish, lang);
   const why = block ? blockLabel(block, lang) : null;
+  const textOpacity = useDishState(block).textOpacity;
   const clickable = !ctx.preview && !!ctx.onOpen;
   const open = clickable ? (e: { currentTarget: Element }) => ctx.onOpen!(dish, designPoint(e.currentTarget)) : undefined;
   // 放大的一档：这一行整块放大（x、y 由 ListText 另给）
   const k = useBig() ? BIG.row : 1;
   return (
-    <div style={{ ...box(x, y, 232 * k, 74 * k), opacity: block ? 0.5 : 1 }} data-testid={`emenu-dish-${dish.id}`} data-block={block ?? undefined} data-studio-slot={slot}>
+    <div style={{ ...box(x, y, 232 * k, 74 * k), opacity: block ? textOpacity : 1 }} data-testid={`emenu-dish-${dish.id}`} data-block={block ?? undefined} data-studio-slot={slot}>
       <div className={ctx.flashId === dish.id ? 'em-flash' : undefined} style={{ ...box(0, 0, 232, 74), transform: k === 1 ? undefined : `scale(${k})`, transformOrigin: '0 0' }}>
         {name.mainEn ? (
           <div style={{ width: 186 }}>

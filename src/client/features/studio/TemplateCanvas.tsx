@@ -18,6 +18,7 @@ import {
   type EmenuSlotSpot,
   type ResolvedSlot,
   type StudioBlockNode,
+  type StudioDishState,
   type StudioDoc,
   type StudioSurfaceDef,
 } from '@shared/studio';
@@ -28,6 +29,7 @@ import { EmenuTemplatesProvider } from '../emenu/templates';
 import { StudioNodes } from '../../studio-render/StudioNodes';
 import { cn } from '../../lib/utils';
 import { round1, screenOf, snapBox, type Box, type Guide } from './model';
+import { pageInState } from './templateModel';
 
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 const CURSORS: Record<Handle, string> = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' };
@@ -67,6 +69,7 @@ export function TemplateCanvas({
   blocks,
   onLive,
   onCommit,
+  previewState,
 }: {
   doc: StudioDoc;
   surface: StudioSurfaceDef;
@@ -83,6 +86,8 @@ export function TemplateCanvas({
   blocks: Record<string, (n: StudioBlockNode) => ReactNode>;
   onLive: (doc: StudioDoc) => void;
   onCommit: (before: StudioDoc) => void;
+  /** 在看菜的哪种状态（变体）：这一页的菜都按这种状态画 */
+  previewState?: StudioDishState | null;
 }) {
   const layer = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -100,12 +105,12 @@ export function TemplateCanvas({
     () => ({
       ...blocks,
       'menu.pages': () => (
-        <EmenuTemplatesProvider value={doc.templates}>
-          <PageCanvas page={page} ctx={{ categoryName, categoryNameEn, open: true, preview: true }} />
+        <EmenuTemplatesProvider templates={doc.templates} dishStates={doc.dishStates}>
+          <PageCanvas page={pageInState(page, previewState ?? null)} ctx={{ categoryName, categoryNameEn, open: previewState !== 'closed', preview: true }} />
         </EmenuTemplatesProvider>
       ),
     }),
-    [blocks, doc.templates, page, categoryName, categoryNameEn],
+    [blocks, doc.templates, doc.dishStates, page, categoryName, categoryNameEn, previewState],
   );
 
   // ── 量：每一块在画布上看到的框（每次画完量一遍；字体晚到时再量一遍） ──
@@ -134,7 +139,7 @@ export function TemplateCanvas({
     });
     setMeasured((m) => (sameBoxes(m, boxes) ? m : boxes));
     // fontsTick：字体到了以后重新量
-  }, [doc, page, layout, big, lang, scale, fontsTick, W]);
+  }, [doc, page, layout, big, lang, scale, fontsTick, W, previewState]);
 
   /** 一块在画布上的框：画出来的按量的；藏起来的按登记的位置（往上长的文字按下沿往上推一个登记的高） */
   const boxOf = (s: ResolvedSlot): Box => {
@@ -254,7 +259,7 @@ export function TemplateCanvas({
   const can = sel ? slotResizable(sel.def) : null;
   const handles: Handle[] = !sel || sel.hidden || !can ? [] : can.h ? ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] : can.w ? ['w', 'e'] : [];
   const background = colorValue(menuScreen.background, surface.cssVar);
-  const ctx = { surface, lang, assetUrl: (id: string) => `/api/studio/assets/${id}`, blocks: pageBlocks, editor: true };
+  const ctx = { surface, lang, assetUrl: (id: string) => `/api/studio/assets/${id}`, blocks: pageBlocks, editor: true, components: doc.components };
 
   return (
     <div style={{ position: 'relative', width: W * scale, height: H * scale }} className="shadow-[0_8px_30px_rgb(0_0_0/0.18)]" data-testid="studio-template-canvas" data-mode={mode}>

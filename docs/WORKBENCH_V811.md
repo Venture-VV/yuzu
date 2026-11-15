@@ -134,7 +134,7 @@
 
 - `164`（8.1.1）：版面 `studio_designs`（每个界面、每家店一份草稿，带版本号）、已发布的版本 `studio_versions`（只追加）、素材 `studio_assets`（按内容摘要唯一）、预览码 `studio_preview_codes`；岗位加「设计师」（`staff.role` 的约束在当时的约束上追加 `designer`）；「确认作废」与操作编号加业务类型 `studio_publish`（照 `162_customer_workbench.sql` 的写法在当时的约束上追加）。
 - `165`（8.1.2）：界面加微信小程序（`mp`）与员工食堂（`canteen`）：版面、版本、预览码三张表的界面约束在当时的约束上追加。
-- `166`（8.1.2）：组件 `studio_components`、批注 `studio_comments`、定时发布（`studio_versions` 加生效时间）。设计师可以直接发布（GZ3），不另做发布申请。
+- `166`（8.1.2）：批注 `studio_comments`、定时发布（`studio_versions` 加生效时间）。组件实现时改成存在版面里（`doc.components`，跟着版面发布、回滚、导出，GZ25），不另建 `studio_components`。设计师可以直接发布（GZ3），不另做发布申请。
 - `167`–`169`：8.1.1–8.1.2 备用，用不完不回收。
 
 ## 12. 实现记录（8.1.1）
@@ -207,4 +207,21 @@
 - **用例**：
   - `tests/studio-templates.test.ts` 9 条：登记的数与设计稿一致、只存改了的、放大一档跟着原样、往上长的挪下沿、藏与圆角与恢复默认、核对拦得住；
   - `e2e/studio.spec.ts` 加一段：「版式」里拖一块、用数字定位置、加圆角、放大一档单独挪一块，发布的版面里正好是这几项。
+
+**第 2 步（下）：菜的几种样子（变体，GZ24）与组件（GZ25）**
+- **菜的几种样子**：版面里 `dishStates.{sold_out,closed,off}`，每种只存改过的项（`style` 居中写字 / 左上角小标签 / 只压暗、`shade` 压暗颜色、`shadeOpacity`、`textColor`、`textOpacity` 没有图的菜文字变浅到多少、`grayscale`）；没改过照设计稿（压暗 55% 的黑、浅色字居中两行、文字 50%），平板逐屏一致。
+  - 渲染：`EmenuTemplatesProvider` 同时给 `dishStates`，照片上的那一层与文字的深浅读 `useDishState`；
+  - 编辑器：「版式」左栏下面「菜的几种样子」，选一种，画布上这一页的菜都变成这种状态（示例菜带示意图，看得到压在图上的样子），右栏改样子、一键恢复；
+  - 「推荐」「新品」的角标要后台先给菜加标记，没做（GZ24）。
+- **组件**：版面里 `components`（编号 `c-…` → 名字与样子），屏上放 `instance` 节点（位置、大小、转角、藏不藏、尺寸规则是自己的，透明度与组件的相乘）。
+  - 共用的纯函数 `src/shared/studio/components.ts`：`instanceView`（实例画出来是什么）、`expandInstances`（展开成普通节点，编号加「实例编号__」前缀）、`componentCycles`、`componentUses`、`expandedCount`；
+  - 渲染器遇到实例照组件画（`ctx.components`，套太深的不画）；平板、编辑器、手机预览都带上组件；
+  - 核对：用的组件删掉了、功能块进组件、组件里编号重复、组件套自己（直接或间接）都拦下；一份版面最多 100 个组件，展开以后最多 3000 个节点；
+  - 编辑器：选中一块「存成组件」（⌘/Ctrl+Alt+K；自动排列里撑满、跟内容的块用画布上量到的大小），「插入 → 组件」放一个、改、删（只删没人用的），实例的属性里「改组件」「拆开（只改这一处）」；改组件时组件当成一屏（`@组件编号`）来改，顶上紫色的「改组件」条点「改好了」回去；
+  - 小程序线读到的已经展开（`readPublishedStudio`），格式说明 `docs/STUDIO_MP.md` 第 2 节加了一条；组件里的图照样能取（`readStudioAssetFor` 查整份版面）；
+  - 发布记录的「改了」多一项「组件」；组件存在版面里、跟着发布回滚，不另建 `studio_components` 表（迁移 `166` 只剩批注、定时发布）。
+- **用例**：
+  - `tests/studio-templates.test.ts` 加 2 条（菜的几种样子）；
+  - `tests/studio-components.test.ts` 8 条：实例怎么画、展开、核对、素材与发布记录，存成组件、量到的大小、改组件写回、拆开与删除；
+  - `tests/studio.test.ts` 加 1 条：发布带组件的小程序版面，读到的已经展开、组件里的图取得到、版本里存的还是组件。
 

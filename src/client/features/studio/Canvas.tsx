@@ -43,6 +43,7 @@ export function StudioCanvas({
   onLive,
   onCommit,
   onEditText,
+  onMeasure,
 }: {
   doc: StudioDoc;
   screen: string;
@@ -57,6 +58,8 @@ export function StudioCanvas({
   onLive: (doc: StudioDoc) => void;
   onCommit: (before: StudioDoc) => void;
   onEditText: (id: string) => void;
+  /** 量到的各块在画布上的位置大小（存成组件时用：自动排列里撑满、跟内容的块版面里的宽高不准） */
+  onMeasure?: (boxes: ReadonlyMap<string, Box>) => void;
 }) {
   const layer = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -82,6 +85,7 @@ export function StudioCanvas({
     });
     const height = phone ? Math.max(screenH, root.scrollHeight) : surface.size.h;
     setMeasured((m) => (sameBoxes(m.boxes, boxes) && m.height === height ? m : { boxes, height }));
+    onMeasure?.(boxes);
   });
   const H = phone ? measured.height : surface.size.h;
   // 在图层里点中的一块不在眼前（手机界面往下长）：画布滚到它那里
@@ -161,7 +165,12 @@ export function StudioCanvas({
       // 贴齐：按这几块合起来的外框，跟别的块与画布比
       const abs = d.ids.map((id) => boxOf(id, d.before)).filter((b): b is Box => !!b);
       if (!abs.length) return;
-      const union = abs.reduce((u, b) => ({ x: Math.min(u.x, b.x), y: Math.min(u.y, b.y), w: Math.max(u.x + u.w, b.x + b.w) - Math.min(u.x, b.x), h: Math.max(u.y + u.h, b.y + b.h) - Math.min(u.y, b.y) }));
+      const union = abs.reduce((u, b) => ({
+        x: Math.min(u.x, b.x),
+        y: Math.min(u.y, b.y),
+        w: Math.max(u.x + u.w, b.x + b.w) - Math.min(u.x, b.x),
+        h: Math.max(u.y + u.h, b.y + b.h) - Math.min(u.y, b.y),
+      }));
       const others: Box[] = [];
       const collect = (nodes: readonly StudioNode[]) => {
         for (const n of nodes) {
@@ -253,7 +262,7 @@ export function StudioCanvas({
   const singleRules = single ? geometryRules(single.node, surface, single.flow) : null;
   const singleBox = single ? boxOf(single.node.id) : null;
   const background = colorValue(s.background, surface.cssVar);
-  const ctx = { surface, lang, assetUrl: (id: string) => `/api/studio/assets/${id}`, blocks, editor: true };
+  const ctx = { surface, lang, assetUrl: (id: string) => `/api/studio/assets/${id}`, blocks, editor: true, components: doc.components };
 
   return (
     <div style={{ position: 'relative', width: W * scale, height: H * scale }} className="shadow-[0_8px_30px_rgb(0_0_0/0.18)]" data-testid="studio-canvas">
@@ -291,38 +300,51 @@ export function StudioCanvas({
           // 手机的一屏有多高（下面是内容多出来往下长的部分）：一条虚线
           <div className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-[#2f7cf6]/40" style={{ top: screenH * scale }} />
         )}
-        {hover && !selection.includes(hover) && (() => {
-          const b = boxOf(hover);
-          return b ? <div className="pointer-events-none absolute border border-[#2f7cf6]/70" style={box(b)} /> : null;
-        })()}
+        {hover &&
+          !selection.includes(hover) &&
+          (() => {
+            const b = boxOf(hover);
+            return b ? <div className="pointer-events-none absolute border border-[#2f7cf6]/70" style={box(b)} /> : null;
+          })()}
         {selection.map((id) => {
           const b = boxOf(id);
           if (!b) return null;
           return <div key={id} className="pointer-events-none absolute border-2 border-[#2f7cf6]" style={box(b)} data-testid={`studio-selected-${id}`} />;
         })}
-        {single && singleRules && singleBox && singleRules.resize !== 'none' && (() => {
-          const b = singleBox;
-          const pos: Record<Handle, [number, number]> = { nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], s: [0.5, 1], sw: [0, 1], w: [0, 0.5] };
-          // 等比缩放的块只给四个角
-          const list = singleRules.resize === 'scale' ? (['nw', 'ne', 'se', 'sw'] as Handle[]) : HANDLES;
-          return list.map((h) => (
-            <div
-              key={h}
-              data-handle={h}
-              className="absolute size-[10px] rounded-[2px] border border-[#2f7cf6] bg-white"
-              style={{ left: (b.x + b.w * pos[h][0]) * scale - 5, top: (b.y + b.h * pos[h][1]) * scale - 5, cursor: CURSORS[h] }}
-              data-testid={`studio-handle-${h}`}
-            />
-          ));
-        })()}
+        {single &&
+          singleRules &&
+          singleBox &&
+          singleRules.resize !== 'none' &&
+          (() => {
+            const b = singleBox;
+            const pos: Record<Handle, [number, number]> = { nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], s: [0.5, 1], sw: [0, 1], w: [0, 0.5] };
+            // 等比缩放的块只给四个角
+            const list = singleRules.resize === 'scale' ? (['nw', 'ne', 'se', 'sw'] as Handle[]) : HANDLES;
+            return list.map((h) => (
+              <div
+                key={h}
+                data-handle={h}
+                className="absolute size-[10px] rounded-[2px] border border-[#2f7cf6] bg-white"
+                style={{ left: (b.x + b.w * pos[h][0]) * scale - 5, top: (b.y + b.h * pos[h][1]) * scale - 5, cursor: CURSORS[h] }}
+                data-testid={`studio-handle-${h}`}
+              />
+            ));
+          })()}
         {single && singleBox && (
-          <div className="pointer-events-none absolute rounded bg-[#2f7cf6] px-1.5 py-0.5 text-[11px] leading-none text-white tabular-nums" style={{ left: singleBox.x * scale, top: (singleBox.y + singleBox.h) * scale + 6 }}>
+          <div
+            className="pointer-events-none absolute rounded bg-[#2f7cf6] px-1.5 py-0.5 text-[11px] leading-none text-white tabular-nums"
+            style={{ left: singleBox.x * scale, top: (singleBox.y + singleBox.h) * scale + 6 }}
+          >
             {Math.round(singleBox.w)} × {Math.round(singleBox.h)}
             {single.flow && '（自动排列）'}
           </div>
         )}
         {guides.map((g, i) => (
-          <div key={i} className="pointer-events-none absolute bg-[#f2545b]" style={g.axis === 'x' ? { left: g.at * scale, top: 0, width: 1, height: H * scale } : { top: g.at * scale, left: 0, height: 1, width: W * scale }} />
+          <div
+            key={i}
+            className="pointer-events-none absolute bg-[#f2545b]"
+            style={g.axis === 'x' ? { left: g.at * scale, top: 0, width: 1, height: H * scale } : { top: g.at * scale, left: 0, height: 1, width: W * scale }}
+          />
         ))}
       </div>
     </div>

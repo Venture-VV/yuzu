@@ -25,6 +25,7 @@ import {
   Unlock,
 } from 'lucide-react';
 import {
+  componentUses,
   defaultStudioDoc,
   SHADOWS,
   type StudioAction,
@@ -41,7 +42,27 @@ import { api, errorMessage } from '../../lib/api';
 import { useToast } from '../../components/Toast';
 import { Button } from '../../components/ui';
 import { cn } from '../../lib/utils';
-import { canAddNode, findNode, geometryRules, makeBlock, makeButton, makeEllipse, makeField, makeFrame, makeImage, makeRect, makeText, moveOutOfFrame, nodeLabel, round1, screenOf } from './model';
+import {
+  canAddNode,
+  componentIdOf,
+  findNode,
+  geometryRules,
+  isComponentScreen,
+  makeBlock,
+  makeButton,
+  makeEllipse,
+  makeField,
+  makeFrame,
+  makeImage,
+  makeInstance,
+  makeRect,
+  makeText,
+  moveOutOfFrame,
+  nodeLabel,
+  renameComponent,
+  round1,
+  screenOf,
+} from './model';
 
 const SHADOW_LABELS: Record<(typeof SHADOWS)[number], string> = { none: '无', sm: '轻', md: '中', lg: '重' };
 
@@ -212,10 +233,11 @@ export function LayersPanel({
                 rect: '□',
                 button: '钮',
                 field: '数',
+                instance: '◆',
               }[n.type]
             }
           </span>
-          <span className={cn('min-w-0 flex-1 truncate', n.hidden && 'text-ink-4 line-through')}>{nodeLabel(n, surface)}</span>
+          <span className={cn('min-w-0 flex-1 truncate', n.hidden && 'text-ink-4 line-through')}>{nodeLabel(n, surface, doc)}</span>
           {required && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[10px] text-yuzu-deep">必需</span>}
           <button
             type="button"
@@ -263,7 +285,28 @@ function updateFlag(d: StudioDoc, screen: string, id: string, key: 'hidden' | 'l
 
 // ───────────────────────── 插入 ─────────────────────────
 
-export function InsertPanel({ doc, screen, surface, onInsert }: { doc: StudioDoc; screen: string; surface: StudioSurfaceDef; onInsert: (node: StudioNode) => void }) {
+/** 组件的几个操作（8.1.2）：存成组件、改组件（打开它那一屏）、拆开、改完回去、删掉没人用的 */
+export interface ComponentOps {
+  make: (id: string) => void;
+  edit: (cid: string) => void;
+  detach: (id: string) => void;
+  finish: () => void;
+  remove: (cid: string) => void;
+}
+
+export function InsertPanel({
+  doc,
+  screen,
+  surface,
+  onInsert,
+  components,
+}: {
+  doc: StudioDoc;
+  screen: string;
+  surface: StudioSurfaceDef;
+  onInsert: (node: StudioNode) => void;
+  components?: ComponentOps;
+}) {
   const cx = surface.size.w / 2;
   const cy = surface.size.h / 2;
   const nodes = screenOf(doc, screen).nodes;
@@ -331,6 +374,54 @@ export function InsertPanel({ doc, screen, surface, onInsert }: { doc: StudioDoc
               </button>
             ))}
           </div>
+        </div>
+      )}
+      {components && (
+        <div data-testid="studio-components">
+          <PanelTitle>组件（自己存的，改一处各处跟着变）</PanelTitle>
+          {Object.keys(doc.components ?? {}).length === 0 ? (
+            <p className="text-[11.5px] leading-snug text-ink-3">还没有。选中画布上的一块（框连着里面的也行），在右边点「存成组件」（⌘/Ctrl+Alt+K）。</p>
+          ) : (
+            <div className="space-y-1">
+              {Object.entries(doc.components ?? {}).map(([cid, c]) => {
+                const uses = componentUses(doc, cid);
+                // 改组件时不能往它自己里面放自己
+                const self = componentIdOf(screen) === cid;
+                return (
+                  <div key={cid} className="flex items-center gap-1.5 rounded-md border border-line bg-card px-2 py-1.5 text-[12.5px]" data-testid={`studio-component-${cid}`}>
+                    <span className="text-[11px] text-ink-3">◆</span>
+                    <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                    <span className="shrink-0 text-[11px] text-ink-3">{uses} 处</span>
+                    <button
+                      type="button"
+                      disabled={full || self}
+                      className="shrink-0 rounded px-1.5 text-[12px] text-pine hover:bg-pine-tint disabled:opacity-40"
+                      onClick={() => {
+                        const n = makeInstance(doc, cid, cx - c.node.w / 2, cy - c.node.h / 2);
+                        if (n) onInsert(n);
+                      }}
+                      data-testid={`studio-component-insert-${cid}`}
+                    >
+                      放一个
+                    </button>
+                    <button type="button" className="shrink-0 rounded px-1.5 text-[12px] text-ink-2 hover:bg-paper-2" onClick={() => components.edit(cid)} data-testid={`studio-component-edit-${cid}`}>
+                      改
+                    </button>
+                    <button
+                      type="button"
+                      disabled={uses > 0}
+                      title={uses > 0 ? `还有 ${uses} 处在用：先拆开或删掉那几处` : '删掉这个组件'}
+                      className="shrink-0 rounded px-1 text-ink-3 hover:bg-paper-2 hover:text-clay disabled:opacity-30"
+                      onClick={() => components.remove(cid)}
+                      data-testid={`studio-component-remove-${cid}`}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
       <div>
@@ -754,6 +845,7 @@ export function PropsPanel({
   onLayer,
   textRef,
   onOpenTemplates,
+  components,
 }: {
   doc: StudioDoc;
   screen: string;
@@ -765,9 +857,38 @@ export function PropsPanel({
   textRef: React.RefObject<HTMLTextAreaElement | null>;
   /** 菜单页这一块：去左边「版式」改里面每一块的位置（8.1.2） */
   onOpenTemplates?: () => void;
+  /** 组件的几个操作（8.1.2） */
+  components?: ComponentOps;
 }) {
   const screenDef = surface.screens.find((s) => s.key === screen);
   const s = screenOf(doc, screen);
+  const cid = componentIdOf(screen);
+  if (selection.length === 0 && cid) {
+    // 改组件时什么都没选：组件的名字、在几处用、改完回去
+    const comp = doc.components?.[cid];
+    return (
+      <div className="space-y-3" data-testid="studio-props-component">
+        <PanelTitle>组件</PanelTitle>
+        <Row label="名字">
+          <input
+            className={inputCls}
+            value={comp?.name ?? ''}
+            maxLength={40}
+            onChange={(e) => onChange((d) => renameComponent(d, cid, e.target.value), `comp.${cid}.name`)}
+            data-testid="studio-component-name"
+          />
+        </Row>
+        <p className="text-[12px] leading-relaxed text-ink-3">
+          这份版面里有 {componentUses(doc, cid)} 处放了它：这里改了，那几处一起变（位置、大小是各处自己的）。点画布上的组件选中它，像平常一样改；选中组件这个框再「插入」就加在里面。
+        </p>
+        {components && (
+          <Button size="sm" variant="primary" onClick={components.finish} data-testid="studio-component-done">
+            改好了，回去
+          </Button>
+        )}
+      </div>
+    );
+  }
   if (selection.length === 0) {
     return (
       <div className="space-y-3" data-testid="studio-props-screen">
@@ -846,13 +967,33 @@ export function PropsPanel({
         <PanelTitle
           aside={
             <span className="text-[11px] text-ink-3">
-              {block ? '功能块' : { text: '文字', rect: '矩形', ellipse: '椭圆', frame: '框', image: '图片', button: '按钮', field: '数据字段' }[n.type as 'text']}
+              {block ? '功能块' : { text: '文字', rect: '矩形', ellipse: '椭圆', frame: '框', image: '图片', button: '按钮', field: '数据字段', instance: '组件' }[n.type as 'text']}
             </span>
           }
         >
-          {nodeLabel(n, surface)}
+          {nodeLabel(n, surface, doc)}
         </PanelTitle>
         {block && <p className="mb-2 text-[11.5px] leading-snug text-ink-3">{block.hint}</p>}
+        {n.type === 'instance' && components && (
+          <div className="mb-2 space-y-1.5 rounded-md border border-line bg-paper-2/60 px-2.5 py-2 text-[12px] text-ink-2" data-testid="studio-instance">
+            <div>
+              组件「{doc.components?.[n.component]?.name ?? '已删掉'}」，这份版面里 {componentUses(doc, n.component)} 处。位置、大小是这一处自己的，长什么样跟着组件。
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => components.edit(n.component)} data-testid="studio-instance-edit">
+                改组件
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => components.detach(n.id)} data-testid="studio-instance-detach">
+                拆开（只改这一处）
+              </Button>
+            </div>
+          </div>
+        )}
+        {components && !cid && n.type !== 'block' && n.type !== 'instance' && (
+          <Button size="sm" variant="secondary" className="mb-2" onClick={() => components.make(n.id)} title="⌘/Ctrl+Alt+K" data-testid="studio-make-component">
+            存成组件（各处重复用，改一处都变）
+          </Button>
+        )}
         {block && n.type === 'block' && n.block === 'menu.pages' && onOpenTemplates && (
           <Button size="sm" variant="secondary" className="mb-2" onClick={onOpenTemplates} data-testid="studio-open-templates">
             改里面每一块的位置（版式）

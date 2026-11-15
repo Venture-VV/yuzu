@@ -3,12 +3,16 @@
 import { describe, expect, it } from 'vitest';
 import { EMENU_LAYOUT_INFO, EMENU_LAYOUTS } from '../src/shared/emenu';
 import {
+  changedScreens,
+  DISH_STATE_DEFAULT,
+  dishStateStyle,
   defaultStudioDoc,
   DocSchema,
   EMENU_TEMPLATES,
   resetLayoutTemplate,
   resetSlot,
   resolveSlot,
+  setDishState,
   setSlotFlags,
   setSlotSpot,
   slotDefault,
@@ -146,5 +150,36 @@ describe('卡片模板：格式与核对', () => {
   it('手机界面没有卡片模板', () => {
     const d = { ...defaultStudioDoc('mp'), templates: { cover: { photo: { hidden: true } } } };
     expect(errorsOf(d)).toEqual([expect.stringContaining('没有卡片模板')]);
+  });
+});
+
+describe('菜的几种样子（变体）', () => {
+  it('没改过是设计稿的样子；只存改过的项，改回去就去掉', () => {
+    expect(dishStateStyle(undefined, 'sold_out')).toEqual(DISH_STATE_DEFAULT);
+    expect(DISH_STATE_DEFAULT).toMatchObject({ style: 'center', shade: '#000000', shadeOpacity: 0.55, textOpacity: 0.5 });
+    let d = setDishState(doc0(), 'sold_out', { style: 'badge', shadeOpacity: 0.2 });
+    d = setDishState(d, 'off', { textOpacity: 0.3, grayscale: true });
+    expect(d.dishStates).toEqual({ sold_out: { style: 'badge', shadeOpacity: 0.2 }, off: { textOpacity: 0.3, grayscale: true } });
+    expect(dishStateStyle(d.dishStates, 'sold_out')).toMatchObject({ style: 'badge', shadeOpacity: 0.2, shade: '#000000' });
+    expect(dishStateStyle(d.dishStates, 'closed')).toEqual(DISH_STATE_DEFAULT);
+    expect(DocSchema.parse(d)).toEqual(d);
+    expect(errorsOf(d)).toEqual([]);
+    d = setDishState(d, 'sold_out', { style: 'center', shadeOpacity: 0.55 });
+    d = setDishState(d, 'off', { ...DISH_STATE_DEFAULT });
+    expect(d.dishStates).toBeUndefined();
+    expect(d).toEqual(doc0());
+  });
+
+  it('格式拦下乱写的样子、颜色、深浅；手机界面没有；发布记录算在「卡片模板」里', () => {
+    const bad = (dishStates: unknown) => DocSchema.safeParse({ ...doc0(), dishStates }).success;
+    expect(bad({ sold_out: { style: 'blink' } })).toBe(false);
+    expect(bad({ sold_out: { shade: 'red' } })).toBe(false);
+    expect(bad({ sold_out: { shadeOpacity: 1 } })).toBe(false);
+    expect(bad({ off: { textOpacity: 0.1 } })).toBe(false);
+    expect(bad({ closed: { shade: '$tan', textColor: '#FFFFFF' } })).toBe(true);
+    expect(errorsOf({ ...defaultStudioDoc('mp'), dishStates: { sold_out: { style: 'dim' } } })).toEqual([expect.stringContaining('没有「菜的几种样子」')]);
+    const before = doc0();
+    expect(changedScreens(before, setDishState(before, 'closed', { style: 'dim' }))).toEqual(['templates']);
+    expect(changedScreens(before, before)).toEqual([]);
   });
 });

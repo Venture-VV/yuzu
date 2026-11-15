@@ -5,6 +5,7 @@
 
 import { isFlow, STUDIO_LIMITS, walkNodes, type StudioAction, type StudioBlockNode, type StudioColor, type StudioDoc, type StudioNode } from './format';
 import { slotHideable, slotResizable } from './emenu-templates';
+import { componentCycles, expandedCount } from './components';
 import { STUDIO_SURFACE_DEFS, type StudioBlockDef, type StudioPropDef, type StudioSurfaceDef } from './surfaces';
 
 export interface StudioIssue {
@@ -47,6 +48,16 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
   const def = STUDIO_SURFACE_DEFS[doc.surface];
   const issues: StudioIssue[] = [];
   const err = (message: string, screen?: string, nodeId?: string) => issues.push({ level: 'error', message, screen, nodeId });
+  const comps = doc.components ?? {};
+  /** 屏上、组件里都一样的：动作、数据字段按登记，实例的组件要在 */
+  const nodeRules = (n: StudioNode, where: string) => {
+    if ((n.type === 'button' || n.type === 'frame' || n.type === 'image') && n.action) {
+      const why = actionIssue(def, n.action);
+      if (why) err(why, where, n.id);
+    }
+    if (n.type === 'field' && !def.fields.some((f) => f.key === n.field)) err(`没有「${n.field}」这个数据字段`, where, n.id);
+    if (n.type === 'instance' && !comps[n.component]) err(`「${n.name || n.id}」用的组件已经删掉了：拆开前先从版本里找回，或删掉这一块`, where, n.id);
+  };
   for (const key of Object.keys(doc.theme.colors)) if (!def.colors.some((c) => c.key === key)) err(`没有「${key}」这个主题色`);
   if (!def.fonts.zh.some((f) => f.key === doc.theme.fonts.zh)) err(`中文字体「${doc.theme.fonts.zh}」不在可选的里面`);
   if (!def.fonts.en.some((f) => f.key === doc.theme.fonts.en)) err(`英文字体「${doc.theme.fonts.en}」不在可选的里面`);
@@ -66,11 +77,7 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
       if (ids.has(n.id)) err(`节点编号「${n.id}」重复了`, screen, n.id);
       ids.add(n.id);
       if (depth > STUDIO_LIMITS.depth) err(`框最多套 ${STUDIO_LIMITS.depth} 层`, screen, n.id);
-      if ((n.type === 'button' || n.type === 'frame' || n.type === 'image') && n.action) {
-        const why = actionIssue(def, n.action);
-        if (why) err(why, screen, n.id);
-      }
-      if (n.type === 'field' && !def.fields.some((f) => f.key === n.field)) err(`没有「${n.field}」这个数据字段`, screen, n.id);
+      nodeRules(n, screen);
       if (n.type !== 'block') return;
       const b = def.blocks[n.block];
       if (!b) return err(`没有「${n.block}」这个功能块`, screen, n.id);
@@ -91,7 +98,25 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
     if (count > STUDIO_LIMITS.nodesPerScreen) err(`一屏最多 ${STUDIO_LIMITS.nodesPerScreen} 个图层`, screen);
     total += count;
   }
+  // 组件（8.1.2）：里面的节点按同样的规矩，不能有功能块；编号在一个组件里不重；不能套自己
+  if (Object.keys(comps).length > STUDIO_LIMITS.components) err(`一份版面最多 ${STUDIO_LIMITS.components} 个组件`);
+  for (const [cid, c] of Object.entries(comps)) {
+    const where = `@${cid}`;
+    const cids = new Set<string>();
+    walkNodes([c.node], (n, depth) => {
+      total += 1;
+      if (cids.has(n.id)) err(`组件「${c.name}」里节点编号「${n.id}」重复了`, where, n.id);
+      cids.add(n.id);
+      if (depth > STUDIO_LIMITS.depth) err(`框最多套 ${STUDIO_LIMITS.depth} 层`, where, n.id);
+      if (n.type === 'block') err(`功能块不能存进组件（「${c.name}」）`, where, n.id);
+      nodeRules(n, where);
+    });
+  }
+  for (const cid of componentCycles(doc)) err(`组件「${comps[cid]!.name}」里又放了它自己（直接或间接），画不出来`, `@${cid}`);
   if (total > STUDIO_LIMITS.nodesPerDoc) err(`一份版面最多 ${STUDIO_LIMITS.nodesPerDoc} 个图层`);
+  else if (doc.components && !componentCycles(doc).length && expandedCount(doc) > STUDIO_LIMITS.expanded) err(`组件展开以后图层太多（最多 ${STUDIO_LIMITS.expanded} 个）：少放几处，或把组件拆小`);
+  // 菜的几种状态（8.1.2）：与卡片模板一样只有登记了模板的界面有
+  if (doc.dishStates && !def.templates) err(`${def.label}没有「菜的几种样子」`);
   // 卡片模板的改动（8.1.2）：只有登记了模板的界面有；版式、块按登记；藏、改大小、圆角只给能改的块
   for (const [layout, slots] of Object.entries(doc.templates ?? {})) {
     const t = def.templates?.[layout];
@@ -252,8 +277,11 @@ export function changedScreens(before: StudioDoc | null, after: StudioDoc): stri
   const out: string[] = [];
   if (!before || canonicalJson(before.theme) !== canonicalJson(after.theme)) out.push('theme');
   for (const s of def.screens) if (!before || canonicalJson(before.screens[s.key] ?? null) !== canonicalJson(after.screens[s.key] ?? null)) out.push(s.key);
-  // 卡片模板（8.1.2）：改过、或恢复了默认
-  if (canonicalJson(before?.templates ?? null) !== canonicalJson(after.templates ?? null)) out.push('templates');
+  // 卡片模板与菜的几种样子（8.1.2）：改过、或恢复了默认
+  const cards = (d: StudioDoc | null) => canonicalJson({ templates: d?.templates ?? null, dishStates: d?.dishStates ?? null });
+  if (cards(before) !== cards(after)) out.push('templates');
+  // 组件（8.1.2）：改了组件，用到它的屏也跟着变；这里单记一项
+  if (canonicalJson(before?.components ?? null) !== canonicalJson(after.components ?? null)) out.push('components');
   return out;
 }
 
@@ -261,5 +289,7 @@ export function changedScreens(before: StudioDoc | null, after: StudioDoc): stri
 export function screenLabel(surface: StudioDoc['surface'], key: string): string {
   if (key === 'theme') return '主题';
   if (key === 'templates') return '卡片模板';
+  if (key === 'components') return '组件';
+  if (key.startsWith('@')) return '组件';
   return STUDIO_SURFACE_DEFS[surface].screens.find((s) => s.key === key)?.label ?? key;
 }
