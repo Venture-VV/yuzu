@@ -3,7 +3,27 @@
 // 8.1.2：自动排列（横排、竖排、换行、间距、内边距、对齐）、尺寸规则（固定 / 撑满 / 跟内容）、按钮、数据字段、点了做什么。
 
 import { useRef, useState, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, Circle, Columns3, Database, Eye, EyeOff, Frame, ImagePlus, Lock, LogOut, MousePointerClick, Rows3, Square, Trash2, Type, Unlock } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronsDown,
+  ChevronsUp,
+  Circle,
+  Columns3,
+  Database,
+  Eye,
+  EyeOff,
+  Frame,
+  ImagePlus,
+  Lock,
+  LogOut,
+  MousePointerClick,
+  Rows3,
+  Square,
+  Trash2,
+  Type,
+  Unlock,
+} from 'lucide-react';
 import {
   defaultStudioDoc,
   SHADOWS,
@@ -19,6 +39,7 @@ import {
 } from '@shared/studio';
 import { api, errorMessage } from '../../lib/api';
 import { useToast } from '../../components/Toast';
+import { Button } from '../../components/ui';
 import { cn } from '../../lib/utils';
 import { canAddNode, findNode, geometryRules, makeBlock, makeButton, makeEllipse, makeField, makeFrame, makeImage, makeRect, makeText, moveOutOfFrame, nodeLabel, round1, screenOf } from './model';
 
@@ -33,7 +54,7 @@ export function PanelTitle({ children, aside }: { children: ReactNode; aside?: R
   );
 }
 
-function Row({ label, children, narrow }: { label: string; children: ReactNode; narrow?: boolean }) {
+export function Row({ label, children, narrow }: { label: string; children: ReactNode; narrow?: boolean }) {
   return (
     <label className="flex items-center gap-2 text-[12.5px]">
       <span className={cn('shrink-0 whitespace-nowrap text-ink-3', narrow ? 'w-7' : 'w-16')}>{label}</span>
@@ -45,7 +66,7 @@ function Row({ label, children, narrow }: { label: string; children: ReactNode; 
 const inputCls = 'h-8 w-full min-w-0 rounded-md border border-line bg-card px-2 text-[12.5px] text-ink outline-none focus:border-pine';
 
 /** 数字：失焦或回车时生效；拖动以外的精确调整 */
-function NumberInput({ value, onChange, min, max, step = 1, testId }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; testId?: string }) {
+export function NumberInput({ value, onChange, min, max, step = 1, testId }: { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; testId?: string }) {
   const [text, setText] = useState<string | null>(null);
   const commit = () => {
     if (text === null) return;
@@ -96,7 +117,12 @@ export function ColorField({
   return (
     <div className="flex w-full flex-col gap-1.5" data-testid={testId}>
       <div className="flex items-center gap-1.5">
-        <input type="color" className="h-8 w-9 shrink-0 cursor-pointer rounded border border-line bg-card p-0.5" value={(resolved ?? '#ffffff').slice(0, 7)} onChange={(e) => onChange(e.target.value)} />
+        <input
+          type="color"
+          className="h-8 w-9 shrink-0 cursor-pointer rounded border border-line bg-card p-0.5"
+          value={(resolved ?? '#ffffff').slice(0, 7)}
+          onChange={(e) => onChange(e.target.value)}
+        />
         <input
           className={inputCls}
           value={hex ?? (value === 'auto' ? '自动' : value === null ? '无' : value.startsWith('$') ? `主题：${surface.colors.find((c) => c.key === value.slice(1))?.label ?? value}` : value)}
@@ -175,7 +201,20 @@ export function LayersPanel({
           onClick={(e) => onSelect(e.shiftKey ? (on ? selection.filter((x) => x !== n.id) : [...selection, n.id]) : [n.id])}
           data-testid={`studio-layer-${n.id}`}
         >
-          <span className="w-4 shrink-0 text-center text-[10px] text-ink-3">{{ text: 'T', image: '图', block: '块', frame: n.type === 'frame' && n.layout && n.layout.mode !== 'free' ? (n.layout.mode === 'row' ? '⇥' : '⇩') : '框', ellipse: '○', rect: '□', button: '钮', field: '数' }[n.type]}</span>
+          <span className="w-4 shrink-0 text-center text-[10px] text-ink-3">
+            {
+              {
+                text: 'T',
+                image: '图',
+                block: '块',
+                frame: n.type === 'frame' && n.layout && n.layout.mode !== 'free' ? (n.layout.mode === 'row' ? '⇥' : '⇩') : '框',
+                ellipse: '○',
+                rect: '□',
+                button: '钮',
+                field: '数',
+              }[n.type]
+            }
+          </span>
           <span className={cn('min-w-0 flex-1 truncate', n.hidden && 'text-ink-4 line-through')}>{nodeLabel(n, surface)}</span>
           {required && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[10px] text-yuzu-deep">必需</span>}
           <button
@@ -334,7 +373,19 @@ const toBase64 = (file: File) =>
     r.readAsDataURL(file);
   });
 
-export function AssetsPanel({ assets, loading, onUploaded, onUse, disabled }: { assets: StudioAssetView[]; loading: boolean; onUploaded: () => void; onUse: (a: StudioAssetView) => void; disabled: boolean }) {
+export function AssetsPanel({
+  assets,
+  loading,
+  onUploaded,
+  onUse,
+  disabled,
+}: {
+  assets: StudioAssetView[];
+  loading: boolean;
+  onUploaded: () => void;
+  onUse: (a: StudioAssetView) => void;
+  disabled: boolean;
+}) {
   const toast = useToast();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -378,7 +429,14 @@ export function AssetsPanel({ assets, loading, onUploaded, onUse, disabled }: { 
       ) : (
         <div className="grid grid-cols-3 gap-1.5">
           {assets.map((a) => (
-            <button key={a.id} type="button" disabled={disabled} title={`${a.name} · ${a.width ?? '?'}×${a.height ?? '?'} · ${Math.round(a.size / 1024)} KB`} className="aspect-square overflow-hidden rounded-md border border-line bg-paper-2 hover:border-pine disabled:opacity-50" onClick={() => onUse(a)}>
+            <button
+              key={a.id}
+              type="button"
+              disabled={disabled}
+              title={`${a.name} · ${a.width ?? '?'}×${a.height ?? '?'} · ${Math.round(a.size / 1024)} KB`}
+              className="aspect-square overflow-hidden rounded-md border border-line bg-paper-2 hover:border-pine disabled:opacity-50"
+              onClick={() => onUse(a)}
+            >
               <img src={`/api/studio/assets/${a.id}`} alt={a.name} className="size-full object-contain" loading="lazy" />
             </button>
           ))}
@@ -395,7 +453,13 @@ export function ThemePanel({ doc, surface, onChange }: { doc: StudioDoc; surface
   return (
     <div className="space-y-4" data-testid="studio-theme">
       <div>
-        <PanelTitle aside={<button type="button" className="text-[11.5px] text-pine hover:underline" onClick={() => onChange((d) => ({ ...d, theme: defaultStudioDoc(surface.key).theme }))}>恢复默认</button>}>
+        <PanelTitle
+          aside={
+            <button type="button" className="text-[11.5px] text-pine hover:underline" onClick={() => onChange((d) => ({ ...d, theme: defaultStudioDoc(surface.key).theme }))}>
+              恢复默认
+            </button>
+          }
+        >
           主题色（改一处，用到它的地方一起变）
         </PanelTitle>
         <div className="space-y-1.5">
@@ -416,7 +480,12 @@ export function ThemePanel({ doc, surface, onChange }: { doc: StudioDoc; surface
         <div className="space-y-2">
           {(['zh', 'en'] as const).map((k) => (
             <Row key={k} label={k === 'zh' ? '中文' : '英文、数字'}>
-              <select className={inputCls} value={doc.theme.fonts[k]} onChange={(e) => onChange((d) => ({ ...d, theme: { ...d.theme, fonts: { ...d.theme.fonts, [k]: e.target.value } } }))} data-testid={`studio-font-${k}`}>
+              <select
+                className={inputCls}
+                value={doc.theme.fonts[k]}
+                onChange={(e) => onChange((d) => ({ ...d, theme: { ...d.theme, fonts: { ...d.theme.fonts, [k]: e.target.value } } }))}
+                data-testid={`studio-font-${k}`}
+              >
                 {surface.fonts[k].map((f) => (
                   <option key={f.key} value={f.key}>
                     {f.label}
@@ -441,7 +510,15 @@ function BlockPropField({ def, value, onChange, surface, doc }: { def: StudioPro
     case 'number':
       return (
         <div className="flex w-full items-center gap-2">
-          <input type="range" className="min-w-0 flex-1 accent-[var(--color-pine)]" min={def.min} max={def.max} step={def.step} value={Number(value ?? def.default)} onChange={(e) => onChange(Number(e.target.value))} />
+          <input
+            type="range"
+            className="min-w-0 flex-1 accent-[var(--color-pine)]"
+            min={def.min}
+            max={def.max}
+            step={def.step}
+            value={Number(value ?? def.default)}
+            onChange={(e) => onChange(Number(e.target.value))}
+          />
           <span className="w-10 shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">{Number(value ?? def.default)}</span>
         </div>
       );
@@ -482,7 +559,12 @@ function LayoutEditor({ value, onChange, allowFree = true, testId }: { value: St
         <button type="button" className={seg(v.mode === 'column')} onClick={() => set({ ...(flow ? {} : DEFAULT_LAYOUT), mode: 'column' })} data-testid={testId && `${testId}-column`}>
           竖排
         </button>
-        <button type="button" className={seg(v.mode === 'row')} onClick={() => set({ ...(flow ? {} : DEFAULT_LAYOUT), mode: 'row', align: v.align === 'stretch' && !flow ? 'center' : v.align })} data-testid={testId && `${testId}-row`}>
+        <button
+          type="button"
+          className={seg(v.mode === 'row')}
+          onClick={() => set({ ...(flow ? {} : DEFAULT_LAYOUT), mode: 'row', align: v.align === 'stretch' && !flow ? 'center' : v.align })}
+          data-testid={testId && `${testId}-row`}
+        >
           横排
         </button>
       </Row>
@@ -671,6 +753,7 @@ export function PropsPanel({
   onDelete,
   onLayer,
   textRef,
+  onOpenTemplates,
 }: {
   doc: StudioDoc;
   screen: string;
@@ -680,6 +763,8 @@ export function PropsPanel({
   onDelete: () => void;
   onLayer: (dir: 'up' | 'down' | 'top' | 'bottom') => void;
   textRef: React.RefObject<HTMLTextAreaElement | null>;
+  /** 菜单页这一块：去左边「版式」改里面每一块的位置（8.1.2） */
+  onOpenTemplates?: () => void;
 }) {
   const screenDef = surface.screens.find((s) => s.key === screen);
   const s = screenOf(doc, screen);
@@ -689,12 +774,24 @@ export function PropsPanel({
         <PanelTitle>{screenDef?.label ?? screen}</PanelTitle>
         <p className="text-[12px] leading-relaxed text-ink-3">{screenDef?.hint}</p>
         <Row label="底色">
-          <ColorField value={s.background} onChange={(v) => onChange((d) => ({ ...d, screens: { ...d.screens, [screen]: { ...screenOf(d, screen), background: v } } }), 'screen.bg')} surface={surface} doc={doc} allowNone />
+          <ColorField
+            value={s.background}
+            onChange={(v) => onChange((d) => ({ ...d, screens: { ...d.screens, [screen]: { ...screenOf(d, screen), background: v } } }), 'screen.bg')}
+            surface={surface}
+            doc={doc}
+            allowNone
+          />
         </Row>
         {surface.kind === 'phone' && (
           <>
             <Row label="屏高">
-              <NumberInput value={s.height ?? surface.size.h} min={100} max={20000} onChange={(v) => onChange((d) => ({ ...d, screens: { ...d.screens, [screen]: { ...screenOf(d, screen), height: v } } }), 'screen.h')} testId="studio-screen-height" />
+              <NumberInput
+                value={s.height ?? surface.size.h}
+                min={100}
+                max={20000}
+                onChange={(v) => onChange((d) => ({ ...d, screens: { ...d.screens, [screen]: { ...screenOf(d, screen), height: v } } }), 'screen.h')}
+                testId="studio-screen-height"
+              />
             </Row>
             <p className="text-[11.5px] leading-snug text-ink-3">手机往下滚：自动排列时内容多了会往下长，屏高是最少这么高。</p>
             <PanelTitle>整屏的排列</PanelTitle>
@@ -713,7 +810,9 @@ export function PropsPanel({
             />
           </>
         )}
-        <p className="text-[11.5px] leading-snug text-ink-3">点画布上的一块选中它；按住 Shift 点可以多选。方向键挪 1 像素（Shift 10 像素；在自动排列里是往前、往后排），Delete 删除，⌘/Ctrl+Z 撤销，⌘/Ctrl+D 复制一份。</p>
+        <p className="text-[11.5px] leading-snug text-ink-3">
+          点画布上的一块选中它；按住 Shift 点可以多选。方向键挪 1 像素（Shift 10 像素；在自动排列里是往前、往后排），Delete 删除，⌘/Ctrl+Z 撤销，⌘/Ctrl+D 复制一份。
+        </p>
       </div>
     );
   }
@@ -744,8 +843,21 @@ export function PropsPanel({
   return (
     <div className="space-y-4" data-testid="studio-props">
       <div>
-        <PanelTitle aside={<span className="text-[11px] text-ink-3">{block ? '功能块' : { text: '文字', rect: '矩形', ellipse: '椭圆', frame: '框', image: '图片', button: '按钮', field: '数据字段' }[n.type as 'text']}</span>}>{nodeLabel(n, surface)}</PanelTitle>
+        <PanelTitle
+          aside={
+            <span className="text-[11px] text-ink-3">
+              {block ? '功能块' : { text: '文字', rect: '矩形', ellipse: '椭圆', frame: '框', image: '图片', button: '按钮', field: '数据字段' }[n.type as 'text']}
+            </span>
+          }
+        >
+          {nodeLabel(n, surface)}
+        </PanelTitle>
         {block && <p className="mb-2 text-[11.5px] leading-snug text-ink-3">{block.hint}</p>}
+        {block && n.type === 'block' && n.block === 'menu.pages' && onOpenTemplates && (
+          <Button size="sm" variant="secondary" className="mb-2" onClick={onOpenTemplates} data-testid="studio-open-templates">
+            改里面每一块的位置（版式）
+          </Button>
+        )}
         <Row label="名字">
           <input className={inputCls} value={n.name} maxLength={40} placeholder="给这一块起个名字" onChange={(e) => set({ name: e.target.value }, 'name')} />
         </Row>
@@ -756,45 +868,76 @@ export function PropsPanel({
           <p className="text-[11px] leading-snug text-ink-3">位置按先后排：方向键或右边「前后」换位置。</p>
           <SizingRows node={n} onChange={(patch) => set(patch, 'sizing')} />
           <Row label="不透明">
-            <input type="range" className="min-w-0 flex-1 accent-[var(--color-pine)]" min={0} max={1} step={0.05} value={n.opacity} onChange={(e) => set({ opacity: Number(e.target.value) }, 'opacity')} />
+            <input
+              type="range"
+              className="min-w-0 flex-1 accent-[var(--color-pine)]"
+              min={0}
+              max={1}
+              step={0.05}
+              value={n.opacity}
+              onChange={(e) => set({ opacity: Number(e.target.value) }, 'opacity')}
+            />
             <span className="w-9 shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">{Math.round(n.opacity * 100)}%</span>
           </Row>
         </div>
       ) : (
-      <div className="space-y-1.5">
-        <PanelTitle>位置与大小</PanelTitle>
-        <div className="grid grid-cols-2 gap-1.5">
-          <Row label="左" narrow>
-            <NumberInput value={n.x} onChange={(v) => rules.move && set({ x: v }, 'x')} testId="studio-prop-x" />
-          </Row>
-          <Row label="上" narrow>
-            <NumberInput value={n.y} onChange={(v) => rules.move && set({ y: v }, 'y')} testId="studio-prop-y" />
-          </Row>
-          <Row label="宽" narrow>
-            <NumberInput value={n.w} min={4} onChange={(v) => rules.resize !== 'none' && set(rules.resize === 'scale' ? { w: v, h: round1(v / ratio) } : { w: v }, 'w')} testId="studio-prop-w" />
-          </Row>
-          <Row label="高" narrow>
-            <NumberInput value={n.h} min={4} onChange={(v) => rules.resize !== 'none' && set(rules.resize === 'scale' ? { h: v, w: round1(v * ratio) } : { h: v }, 'h')} testId="studio-prop-h" />
+        <div className="space-y-1.5">
+          <PanelTitle>位置与大小</PanelTitle>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Row label="左" narrow>
+              <NumberInput value={n.x} onChange={(v) => rules.move && set({ x: v }, 'x')} testId="studio-prop-x" />
+            </Row>
+            <Row label="上" narrow>
+              <NumberInput value={n.y} onChange={(v) => rules.move && set({ y: v }, 'y')} testId="studio-prop-y" />
+            </Row>
+            <Row label="宽" narrow>
+              <NumberInput value={n.w} min={4} onChange={(v) => rules.resize !== 'none' && set(rules.resize === 'scale' ? { w: v, h: round1(v / ratio) } : { w: v }, 'w')} testId="studio-prop-w" />
+            </Row>
+            <Row label="高" narrow>
+              <NumberInput value={n.h} min={4} onChange={(v) => rules.resize !== 'none' && set(rules.resize === 'scale' ? { h: v, w: round1(v * ratio) } : { h: v }, 'h')} testId="studio-prop-h" />
+            </Row>
+          </div>
+          {(!rules.move || rules.resize === 'none') && <p className="text-[11px] text-ink-3">{n.locked ? '锁住了：在图层里解锁再改' : '这一块的位置与大小不能改（8.1.1）'}</p>}
+          {n.type !== 'block' && (
+            <Row label="旋转">
+              <NumberInput value={n.rotate} min={-360} max={360} onChange={(v) => set({ rotate: v }, 'rotate')} />
+            </Row>
+          )}
+          <Row label="不透明">
+            <input
+              type="range"
+              className="min-w-0 flex-1 accent-[var(--color-pine)]"
+              min={0}
+              max={1}
+              step={0.05}
+              value={n.opacity}
+              onChange={(e) => set({ opacity: Number(e.target.value) }, 'opacity')}
+            />
+            <span className="w-9 shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">{Math.round(n.opacity * 100)}%</span>
           </Row>
         </div>
-        {(!rules.move || rules.resize === 'none') && <p className="text-[11px] text-ink-3">{n.locked ? '锁住了：在图层里解锁再改' : '这一块的位置与大小不能改（8.1.1）'}</p>}
-        {n.type !== 'block' && (
-          <Row label="旋转">
-            <NumberInput value={n.rotate} min={-360} max={360} onChange={(v) => set({ rotate: v }, 'rotate')} />
-          </Row>
-        )}
-        <Row label="不透明">
-          <input type="range" className="min-w-0 flex-1 accent-[var(--color-pine)]" min={0} max={1} step={0.05} value={n.opacity} onChange={(e) => set({ opacity: Number(e.target.value) }, 'opacity')} />
-          <span className="w-9 shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">{Math.round(n.opacity * 100)}%</span>
-        </Row>
-      </div>
       )}
 
       {n.type === 'text' && (
         <div className="space-y-1.5">
           <PanelTitle>文字</PanelTitle>
-          <textarea ref={textRef} className={cn(inputCls, 'h-20 py-1.5')} value={n.text.zh} maxLength={2000} placeholder="中文" onChange={(e) => set({ text: { ...n.text, zh: e.target.value } }, 'zh')} data-testid="studio-text-zh" />
-          <textarea className={cn(inputCls, 'h-16 py-1.5')} value={n.text.en} maxLength={2000} placeholder="English（切到 EN 时显示；不填就显示中文）" onChange={(e) => set({ text: { ...n.text, en: e.target.value } }, 'en')} data-testid="studio-text-en" />
+          <textarea
+            ref={textRef}
+            className={cn(inputCls, 'h-20 py-1.5')}
+            value={n.text.zh}
+            maxLength={2000}
+            placeholder="中文"
+            onChange={(e) => set({ text: { ...n.text, zh: e.target.value } }, 'zh')}
+            data-testid="studio-text-zh"
+          />
+          <textarea
+            className={cn(inputCls, 'h-16 py-1.5')}
+            value={n.text.en}
+            maxLength={2000}
+            placeholder="English（切到 EN 时显示；不填就显示中文）"
+            onChange={(e) => set({ text: { ...n.text, en: e.target.value } }, 'en')}
+            data-testid="studio-text-en"
+          />
           <TextStyleRows n={n} set={set} surface={surface} doc={doc} />
           <Row label="底色">
             <ColorField value={n.fill} onChange={(v) => set({ fill: v }, 'fill')} surface={surface} doc={doc} allowNone />
@@ -805,8 +948,23 @@ export function PropsPanel({
       {n.type === 'button' && (
         <div className="space-y-1.5">
           <PanelTitle>按钮上的字</PanelTitle>
-          <input ref={textRef as unknown as React.RefObject<HTMLInputElement>} className={inputCls} value={n.text.zh} maxLength={80} placeholder="中文" onChange={(e) => set({ text: { ...n.text, zh: e.target.value } }, 'zh')} data-testid="studio-button-zh" />
-          <input className={inputCls} value={n.text.en} maxLength={80} placeholder="English（不填就显示中文）" onChange={(e) => set({ text: { ...n.text, en: e.target.value } }, 'en')} data-testid="studio-button-en" />
+          <input
+            ref={textRef as unknown as React.RefObject<HTMLInputElement>}
+            className={inputCls}
+            value={n.text.zh}
+            maxLength={80}
+            placeholder="中文"
+            onChange={(e) => set({ text: { ...n.text, zh: e.target.value } }, 'zh')}
+            data-testid="studio-button-zh"
+          />
+          <input
+            className={inputCls}
+            value={n.text.en}
+            maxLength={80}
+            placeholder="English（不填就显示中文）"
+            onChange={(e) => set({ text: { ...n.text, en: e.target.value } }, 'en')}
+            data-testid="studio-button-en"
+          />
           <TextStyleRows n={n} set={set} surface={surface} doc={doc} />
         </div>
       )}
@@ -859,7 +1017,12 @@ export function PropsPanel({
           </div>
           <Row label="投影">
             {SHADOWS.map((sh) => (
-              <button key={sh} type="button" className={cn('h-7 flex-1 rounded border text-[12px]', n.shadow === sh ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2')} onClick={() => set({ shadow: sh }, 'shadow')}>
+              <button
+                key={sh}
+                type="button"
+                className={cn('h-7 flex-1 rounded border text-[12px]', n.shadow === sh ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2')}
+                onClick={() => set({ shadow: sh }, 'shadow')}
+              >
                 {SHADOW_LABELS[sh]}
               </button>
             ))}
@@ -958,7 +1121,13 @@ export function PropsPanel({
               ['bottom', <ChevronsDown key="b" className="size-3.5" />, f.flow ? '排到最前' : '到最下'],
             ] as const
           ).map(([dir, icon, label]) => (
-            <button key={dir} type="button" title={label} className="flex h-8 flex-1 items-center justify-center rounded-md border border-line text-ink-2 hover:border-pine hover:text-pine" onClick={() => onLayer(dir)}>
+            <button
+              key={dir}
+              type="button"
+              title={label}
+              className="flex h-8 flex-1 items-center justify-center rounded-md border border-line text-ink-2 hover:border-pine hover:text-pine"
+              onClick={() => onLayer(dir)}
+            >
               {icon}
             </button>
           ))}
@@ -997,7 +1166,10 @@ export function ChecksPanel({ issues, surface, onGo }: { issues: StudioIssue[]; 
     <button
       key={k}
       type="button"
-      className={cn('w-full rounded-md border px-2.5 py-2 text-left text-[12px] leading-snug', i.level === 'error' ? 'border-clay/40 bg-[#fbecea] text-clay' : 'border-yuzu/50 bg-yuzu-soft text-yuzu-deep')}
+      className={cn(
+        'w-full rounded-md border px-2.5 py-2 text-left text-[12px] leading-snug',
+        i.level === 'error' ? 'border-clay/40 bg-[#fbecea] text-clay' : 'border-yuzu/50 bg-yuzu-soft text-yuzu-deep',
+      )}
       onClick={() => onGo(i.screen, i.nodeId)}
     >
       {i.screen && <span className="mr-1 font-medium">{surface.screens.find((s) => s.key === i.screen)?.label ?? i.screen} ·</span>}

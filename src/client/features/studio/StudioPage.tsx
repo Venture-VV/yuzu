@@ -9,13 +9,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2, Eye, History, Maximize2, Minus, Plus, Redo2, Send, TriangleAlert, Undo2 } from 'lucide-react';
-import type { EmenuMenu } from '@shared/emenu';
+import type { EmenuLayout, EmenuMenu } from '@shared/emenu';
 import { qrShape } from '@shared/qr-svg';
 import {
   checkStudioDoc,
   defaultStudioDoc,
+  EMENU_TEMPLATES,
   isFlow,
+  resolveSlot,
   screenLabel,
+  setSlotSpot,
+  slotSpot,
   STUDIO_SURFACE_DEFS,
   STUDIO_SURFACES,
   themeVars,
@@ -60,6 +64,9 @@ import {
 } from './model';
 import { phoneEditorBlocks } from './phoneBlocks';
 import { AssetsPanel, ChecksPanel, InsertPanel, LayersPanel, PropsPanel, ThemePanel } from './panels';
+import { TemplateCanvas } from './TemplateCanvas';
+import { SlotPanel, TemplatesPanel } from './templatePanels';
+import { pagesWithLayout, templatePage } from './templateModel';
 
 type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
 const ZOOMS = [0.5, 0.75, 1, 1.25] as const;
@@ -121,13 +128,18 @@ export function StudioPage() {
   const [status, setStatus] = useState<SaveStatus>('saved');
   const [selection, setSelection] = useState<string[]>([]);
   const [screen, setScreen] = useState(def.screens[0]!.key);
-  const [left, setLeft] = useState<'layers' | 'insert' | 'assets' | 'theme'>('layers');
+  const [left, setLeft] = useState<'layers' | 'insert' | 'assets' | 'theme' | 'templates'>('layers');
   const [right, setRight] = useState<'props' | 'checks'>('props');
   const [zoom, setZoom] = useState<'fit' | (typeof ZOOMS)[number]>('fit');
   const [lang, setLang] = useState<'zh' | 'en'>('zh');
   const [big, setBig] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
   const [dialog, setDialog] = useState<null | 'publish' | 'versions' | 'preview'>(null);
+  // 卡片模板（8.1.2，平板菜单）：左栏「版式」打开时画布改成那种版式的一页，选中的是版式里的一块
+  const [tplLayout, setTplLayout] = useState<EmenuLayout>('cover');
+  const [tplSlot, setTplSlot] = useState<string | null>(null);
+  const [tplPageNo, setTplPageNo] = useState(0);
+  const tplMode = isEmenu && left === 'templates';
   const textRef = useRef<HTMLTextAreaElement>(null);
   const clipboard = useRef<StudioNode[]>([]);
 
@@ -200,8 +212,13 @@ export function StudioPage() {
   );
   const red = issues.filter((i) => i.level === 'error').length;
   const vars = useMemo(() => themeVars(doc), [doc]);
-  const blocks = useMemo(() => (isEmenu ? emenuEditorBlocks(menuQ.data ?? null, { lang, pageIndex }) : phoneEditorBlocks(def)), [isEmenu, def, menuQ.data, lang, pageIndex]);
+  const blocks = useMemo(
+    () => (isEmenu ? emenuEditorBlocks(menuQ.data ?? null, { lang, pageIndex, templates: doc.templates }) : phoneEditorBlocks(def)),
+    [isEmenu, def, menuQ.data, lang, pageIndex, doc.templates],
+  );
   const flat = useMemo(() => flatPages(menuQ.data ?? null), [menuQ.data]);
+  const tplPages = useMemo(() => pagesWithLayout(menuQ.data ?? null, tplLayout), [menuQ.data, tplLayout]);
+  const tplPage = useMemo(() => templatePage(menuQ.data ?? null, tplLayout, tplPageNo), [menuQ.data, tplLayout, tplPageNo]);
 
   // ── 缩放：适应画布区域 ──
   const area = useRef<HTMLDivElement>(null);
@@ -269,6 +286,27 @@ export function StudioPage() {
     [selection, screen, change, def],
   );
 
+  /** 卡片模板里选中的一块：方向键挪（放大一档里往上长的文字挪的是下沿） */
+  const nudgeSlot = useCallback(
+    (dx: number, dy: number) => {
+      const def = tplSlot ? EMENU_TEMPLATES[tplLayout].slots.find((x) => x.key === tplSlot) : undefined;
+      if (!def) return;
+      const s = resolveSlot(def, latest.current.templates?.[tplLayout]?.[def.key]);
+      if (s.hidden) return;
+      const mode = big ? 'big' : 'design';
+      const p = slotSpot(s, mode);
+      const next = p.bottom !== undefined ? { x: round1(p.x + dx), bottom: round1(p.bottom + dy) } : { x: round1(p.x + dx), y: round1(p.y + dy) };
+      change((d) => setSlotSpot(d, tplLayout, def.key, mode, next), `nudge.slot.${tplLayout}.${def.key}.${mode}`);
+    },
+    [tplSlot, tplLayout, big, change],
+  );
+  const openTemplates = useCallback(() => {
+    setLeft('templates');
+    setScreen('menu');
+    setSelection([]);
+    setRight('props');
+  }, []);
+
   // ── 快捷键（照 Figma 的习惯） ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -285,6 +323,13 @@ export function StudioPage() {
       } else if (mod && k === 's') {
         e.preventDefault();
         void save();
+      } else if (tplMode) {
+        // 改卡片模板时：方向键挪选中的一块，Esc 取消选中；别的快捷键（插入、复制、删除）不管
+        if (e.key.startsWith('Arrow') && tplSlot) {
+          e.preventDefault();
+          const step = e.shiftKey ? 10 : 1;
+          nudgeSlot(e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0, e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0);
+        } else if (e.key === 'Escape') setTplSlot(null);
       } else if (mod && k === 'd') {
         e.preventDefault();
         const r = duplicateNodes(latest.current, screen, selection, def);
@@ -330,7 +375,7 @@ export function StudioPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dialog, history, save, selection, screen, def, phone, deleteSelection, nudge, insert]);
+  }, [dialog, history, save, selection, screen, def, phone, deleteSelection, nudge, insert, tplMode, tplSlot, nudgeSlot]);
 
   // 选中的不在这一屏了（撤销、删掉、换屏）：去掉
   useEffect(() => {
@@ -376,6 +421,7 @@ export function StudioPage() {
               onClick={() => {
                 setScreen(s.key);
                 setSelection([]);
+                if (tplMode) setLeft('layers');
               }}
               data-testid={`studio-screen-${s.key}`}
             >
@@ -383,14 +429,37 @@ export function StudioPage() {
             </button>
           ))}
         </div>
-        {screen === 'menu' && flat.length > 0 && (
-          <select className="ml-1 h-8 max-w-44 rounded-md border border-line bg-card px-1.5 text-[12px]" value={pageIndex} onChange={(e) => setPageIndex(Number(e.target.value))} title="画布上显示哪一页菜单（只是预览）">
-            {flat.map((f, i) => (
+        {tplMode ? (
+          <select
+            className="ml-1 h-8 max-w-52 rounded-md border border-line bg-card px-1.5 text-[12px]"
+            value={tplPage.real ? tplPageNo : -1}
+            onChange={(e) => setTplPageNo(Number(e.target.value))}
+            title={tplPage.filled && tplPage.real ? `这一页空着的 ${tplPage.filled} 个位置补上了示例菜（只在工作台里）` : '画布上用哪一页看（只是预览）'}
+            data-testid="studio-template-page"
+          >
+            {tplPages.map((f, i) => (
               <option key={i} value={i}>
                 {f.category.name} · 第 {f.pageNo + 1} 页
               </option>
             ))}
+            <option value={-1}>示例菜（整页）</option>
           </select>
+        ) : (
+          screen === 'menu' &&
+          flat.length > 0 && (
+            <select
+              className="ml-1 h-8 max-w-44 rounded-md border border-line bg-card px-1.5 text-[12px]"
+              value={pageIndex}
+              onChange={(e) => setPageIndex(Number(e.target.value))}
+              title="画布上显示哪一页菜单（只是预览）"
+            >
+              {flat.map((f, i) => (
+                <option key={i} value={i}>
+                  {f.category.name} · 第 {f.pageNo + 1} 页
+                </option>
+              ))}
+            </select>
+          )
         )}
         <div className="mx-1 h-5 w-px bg-line" />
         <ToolButton title="看中文 / 英文的样子" onClick={() => setLang((l) => (l === 'zh' ? 'en' : 'zh'))} testId="studio-lang">
@@ -438,7 +507,14 @@ export function StudioPage() {
         <ToolButton title="已发布的各版，可以回到任何一版" onClick={() => setDialog('versions')} testId="studio-open-versions">
           <History className="size-4" /> 版本
         </ToolButton>
-        <Button size="sm" variant="primary" disabled={!canPublish} onClick={() => setDialog('publish')} data-testid="studio-open-publish" title={canPublish ? undefined : '这个账号没有「工作台：发布」'}>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!canPublish}
+          onClick={() => setDialog('publish')}
+          data-testid="studio-open-publish"
+          title={canPublish ? undefined : '这个账号没有「工作台：发布」'}
+        >
           <Send className="size-3.5" /> 发布
         </Button>
       </header>
@@ -456,16 +532,24 @@ export function StudioPage() {
       <div className="flex min-h-0 flex-1">
         {/* 左栏 */}
         <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-card">
-          <div className="grid grid-cols-4 border-b border-line text-[12.5px]">
+          <div className={cn('grid border-b border-line text-[12.5px]', isEmenu ? 'grid-cols-5' : 'grid-cols-4')}>
             {(
               [
                 ['layers', '图层'],
                 ['insert', '插入'],
                 ['assets', '素材'],
                 ['theme', '主题'],
+                // 卡片模板只有平板菜单有（菜单页的 11 种版式）
+                ...(isEmenu ? ([['templates', '版式']] as const) : []),
               ] as const
             ).map(([k, label]) => (
-              <button key={k} type="button" className={cn('h-9 border-b-2', left === k ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3 hover:text-ink')} onClick={() => setLeft(k)} data-testid={`studio-tab-${k}`}>
+              <button
+                key={k}
+                type="button"
+                className={cn('h-9 border-b-2', left === k ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3 hover:text-ink')}
+                onClick={() => (k === 'templates' ? openTemplates() : setLeft(k))}
+                data-testid={`studio-tab-${k}`}
+              >
                 {label}
               </button>
             ))}
@@ -483,33 +567,81 @@ export function StudioPage() {
               />
             )}
             {left === 'theme' && <ThemePanel doc={doc} surface={def} onChange={change} />}
+            {tplMode && (
+              <TemplatesPanel
+                doc={doc}
+                menu={menuQ.data ?? null}
+                layout={tplLayout}
+                onLayout={(l) => {
+                  setTplLayout(l);
+                  setTplPageNo(0);
+                }}
+                slot={tplSlot}
+                onSlot={(k) => {
+                  setTplSlot(k);
+                  setRight('props');
+                }}
+                onChange={change}
+              />
+            )}
           </div>
         </aside>
 
         {/* 画布 */}
-        <main ref={area} className={cn('flex min-w-0 flex-1 justify-center overflow-auto p-6', phone ? 'items-start' : 'items-center')} onPointerDown={(e) => e.target === e.currentTarget && setSelection([])}>
-          <StudioCanvas
-            doc={doc}
-            screen={screen}
-            surface={def}
-            selection={selection}
-            onSelect={(ids) => {
-              setSelection(ids);
-              if (ids.length) setRight('props');
-            }}
-            scale={scale}
-            lang={lang}
-            big={big}
-            vars={vars}
-            blocks={blocks}
-            onLive={history.live}
-            onCommit={history.commit}
-            onEditText={(id) => {
-              setSelection([id]);
-              setRight('props');
-              window.setTimeout(() => textRef.current?.focus(), 30);
-            }}
-          />
+        <main
+          ref={area}
+          className={cn('flex min-w-0 flex-1 justify-center overflow-auto p-6', phone ? 'items-start' : 'items-center')}
+          onPointerDown={(e) => {
+            if (e.target !== e.currentTarget) return;
+            setSelection([]);
+            setTplSlot(null);
+          }}
+        >
+          {tplMode ? (
+            <TemplateCanvas
+              doc={doc}
+              surface={def}
+              layout={tplLayout}
+              page={tplPage.page}
+              categoryName={tplPage.categoryName}
+              categoryNameEn={tplPage.categoryNameEn}
+              selected={tplSlot}
+              onSelect={(k) => {
+                setTplSlot(k);
+                if (k) setRight('props');
+              }}
+              scale={scale}
+              lang={lang}
+              big={big}
+              vars={vars}
+              blocks={blocks}
+              onLive={history.live}
+              onCommit={history.commit}
+            />
+          ) : (
+            <StudioCanvas
+              doc={doc}
+              screen={screen}
+              surface={def}
+              selection={selection}
+              onSelect={(ids) => {
+                setSelection(ids);
+                if (ids.length) setRight('props');
+              }}
+              scale={scale}
+              lang={lang}
+              big={big}
+              vars={vars}
+              blocks={blocks}
+              onLive={history.live}
+              onCommit={history.commit}
+              onEditText={(id) => {
+                setSelection([id]);
+                setRight('props');
+                window.setTimeout(() => textRef.current?.focus(), 30);
+              }}
+            />
+          )}
         </main>
 
         {/* 右栏 */}
@@ -524,7 +656,21 @@ export function StudioPage() {
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             {right === 'props' ? (
-              <PropsPanel doc={doc} screen={screen} surface={def} selection={selection} onChange={change} onDelete={deleteSelection} onLayer={(dir) => selection[0] && change((d) => moveLayer(d, screen, selection[0]!, dir))} textRef={textRef} />
+              tplMode ? (
+                <SlotPanel doc={doc} layout={tplLayout} slot={tplSlot} big={big} onToggleBig={() => setBig((b) => !b)} onChange={change} />
+              ) : (
+                <PropsPanel
+                  doc={doc}
+                  screen={screen}
+                  surface={def}
+                  selection={selection}
+                  onChange={change}
+                  onDelete={deleteSelection}
+                  onLayer={(dir) => selection[0] && change((d) => moveLayer(d, screen, selection[0]!, dir))}
+                  textRef={textRef}
+                  onOpenTemplates={isEmenu ? openTemplates : undefined}
+                />
+              )
             ) : (
               <ChecksPanel
                 issues={issues}
@@ -624,7 +770,14 @@ function PublishDialog({
         return;
       }
       const key = uuid();
-      const v = await sendErpOp<StudioVersionView>({ key, type: 'studio_publish', url: `/api/studio/${surface}/publish`, body: { clientKey: key, rev: revOf(), note: note.trim() }, summary: `发布：${note.trim()}`.slice(0, 200), staffName });
+      const v = await sendErpOp<StudioVersionView>({
+        key,
+        type: 'studio_publish',
+        url: `/api/studio/${surface}/publish`,
+        body: { clientKey: key, rev: revOf(), note: note.trim() },
+        summary: `发布：${note.trim()}`.slice(0, 200),
+        staffName,
+      });
       onDone(v);
     } catch (e) {
       if (e instanceof UncertainError) toast({ tone: 'info', title: '发布的结果没有收到', body: '顶上的「结果待确认」里可以查回、按原内容重新提交或作废；不要另发一次。' });
@@ -634,7 +787,14 @@ function PublishDialog({
     }
   };
   return (
-    <Dialog open title="发布" description={published ? `平板现在用的是第 ${published.version} 版（${published.publishedBy} ${new Date(published.publishedAt).toLocaleString('zh-CN')}）` : '平板现在用的是内置的默认版面（还没发布过）'} onClose={onClose}>
+    <Dialog
+      open
+      title="发布"
+      description={
+        published ? `平板现在用的是第 ${published.version} 版（${published.publishedBy} ${new Date(published.publishedAt).toLocaleString('zh-CN')}）` : '平板现在用的是内置的默认版面（还没发布过）'
+      }
+      onClose={onClose}
+    >
       <div className="space-y-3" data-testid="studio-publish">
         {red.length > 0 ? (
           <div className="rounded-md border border-clay/40 bg-[#fbecea] px-3 py-2 text-[12.5px] text-clay">
@@ -650,7 +810,15 @@ function PublishDialog({
         )}
         <label className="block text-[12.5px] text-ink-2">
           这一版改了什么（版本列表里看得到）
-          <Textarea className="mt-1" rows={2} maxLength={200} value={note} onChange={(e) => setNote(e.target.value)} placeholder="例如：起始页加了冬季海报、强调色换深一点" data-testid="studio-publish-note" />
+          <Textarea
+            className="mt-1"
+            rows={2}
+            maxLength={200}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="例如：起始页加了冬季海报、强调色换深一点"
+            data-testid="studio-publish-note"
+          />
         </label>
         <p className="text-[12px] leading-relaxed text-ink-3">发布以后各台平板在停在起始页、或空闲回到起始页时换成新样子（客人点菜中途不换）；改坏了在「版本」里一键回到上一版。发布记在操作审计里。</p>
         <div className="flex justify-end gap-2">
@@ -668,7 +836,19 @@ function PublishDialog({
 
 // ───────────────────────── 版本 ─────────────────────────
 
-function VersionsDialog({ surface, canPublish, staffName, onClose, onUseAsDraft }: { surface: StudioSurface; canPublish: boolean; staffName: string; onClose: () => void; onUseAsDraft: (doc: StudioDoc) => void }) {
+function VersionsDialog({
+  surface,
+  canPublish,
+  staffName,
+  onClose,
+  onUseAsDraft,
+}: {
+  surface: StudioSurface;
+  canPublish: boolean;
+  staffName: string;
+  onClose: () => void;
+  onUseAsDraft: (doc: StudioDoc) => void;
+}) {
   const toast = useToast();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['studio', 'versions', surface], queryFn: () => api.get<StudioVersionView[]>(`/api/studio/${surface}/versions`) });
@@ -678,7 +858,14 @@ function VersionsDialog({ surface, canPublish, staffName, onClose, onUseAsDraft 
     setBusy(v.version);
     try {
       const key = uuid();
-      const r = await sendErpOp<StudioVersionView>({ key, type: 'studio_publish', url: `/api/studio/${surface}/rollback`, body: { clientKey: key, version: v.version, note: '' }, summary: `回到第 ${v.version} 版`, staffName });
+      const r = await sendErpOp<StudioVersionView>({
+        key,
+        type: 'studio_publish',
+        url: `/api/studio/${surface}/rollback`,
+        body: { clientKey: key, version: v.version, note: '' },
+        summary: `回到第 ${v.version} 版`,
+        staffName,
+      });
       toast({ tone: 'success', title: `已回到第 ${v.version} 版（发成第 ${r.version} 版）` });
       void qc.invalidateQueries({ queryKey: ['studio'] });
     } catch (e) {
@@ -760,7 +947,12 @@ function PreviewDialog({ surface, doc, onClose }: { surface: StudioSurface; doc:
   // 平板菜单：点餐平板打开 /emenu?studio=<码>；手机界面：在手机大小的预览页上看（登录着工作台的账号）
   const url = code ? (phone ? `${window.location.origin}/studio-preview/${surface}/${code.code}` : `${window.location.origin}/emenu?studio=${code.code}`) : '';
   return (
-    <Dialog open title="预览（现在的草稿）" description={phone ? '在手机大小的页面上点一点：按钮、入口点了会写出「会打开哪一页」，不真的跳' : '像客人一样点一点：翻分类、加菜、开订单；预览里不能下单'} onClose={onClose}>
+    <Dialog
+      open
+      title="预览（现在的草稿）"
+      description={phone ? '在手机大小的页面上点一点：按钮、入口点了会写出「会打开哪一页」，不真的跳' : '像客人一样点一点：翻分类、加菜、开订单；预览里不能下单'}
+      onClose={onClose}
+    >
       <div className="space-y-3" data-testid="studio-preview">
         {!code ? (
           <Skeleton className="h-40" />
@@ -769,14 +961,20 @@ function PreviewDialog({ surface, doc, onClose }: { surface: StudioSurface; doc:
             <QrCode text={url} className="size-36 shrink-0 rounded border border-line" />
             <div className="min-w-0 space-y-2 text-[12.5px] text-ink-2">
               <p>
-                预览码 <span className="font-mono text-[15px] font-bold tracking-wider text-ink" data-testid="studio-preview-code">{code.code}</span>，{new Date(code.expiresAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 前有效（30 分钟）。
+                预览码{' '}
+                <span className="font-mono text-[15px] font-bold tracking-wider text-ink" data-testid="studio-preview-code">
+                  {code.code}
+                </span>
+                ，{new Date(code.expiresAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 前有效（30 分钟）。
               </p>
               {phone ? (
                 <p>
                   在手机上看：手机浏览器登录着工作台的账号，扫左边的码，或打开 <span className="break-all font-mono text-[11.5px]">{url}</span>。小程序里的样子以小程序线照这份版面画的为准。
                 </p>
               ) : (
-                <p>在真平板上看：平板登录着「点餐平板」账号，扫左边的码，或打开 <span className="break-all font-mono text-[11.5px]">{url}</span></p>
+                <p>
+                  在真平板上看：平板登录着「点餐平板」账号，扫左边的码，或打开 <span className="break-all font-mono text-[11.5px]">{url}</span>
+                </p>
               )}
               <div className="flex gap-2">
                 <Button size="sm" variant="primary" onClick={() => window.open(url, '_blank', 'noopener')} data-testid="studio-preview-open">

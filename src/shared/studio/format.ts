@@ -81,19 +81,10 @@ const TextStyle = {
   italic: z.boolean().default(false),
   underline: z.boolean().default(false),
 };
-export const TextSchema = z.object({
-  type: z.literal('text'),
-  ...Base,
-  text: Bilingual(STUDIO_LIMITS.text),
-  ...TextStyle,
-  fill: ColorSchema.nullable().default(null),
-});
+export const TextSchema = z.object({ type: z.literal('text'), ...Base, text: Bilingual(STUDIO_LIMITS.text), ...TextStyle, fill: ColorSchema.nullable().default(null) });
 
 /** 点了做什么：只能是界面登记的动作（打开哪一页、拨打门店电话……），arg 按登记核对 */
-export const ActionSchema = z.object({
-  action: z.string().regex(/^[a-z][a-zA-Z0-9.]{0,47}$/, '动作的名字不对'),
-  arg: z.string().max(80).default(''),
-});
+export const ActionSchema = z.object({ action: z.string().regex(/^[a-z][a-zA-Z0-9.]{0,47}$/, '动作的名字不对'), arg: z.string().max(80).default('') });
 export type StudioAction = z.infer<typeof ActionSchema>;
 
 /** 按钮：一个框里一行字，点了做登记的动作（没设动作的只是样子） */
@@ -210,11 +201,22 @@ export const STUDIO_SURFACES = ['emenu', 'mp'] as const;
 export type StudioSurface = (typeof STUDIO_SURFACES)[number];
 export const STUDIO_SURFACE_LABELS: Record<StudioSurface, string> = { emenu: '平板电子菜单', mp: '微信小程序' };
 
+/**
+ * 卡片模板里一块在一档里的改动：只写改了的（没写的照登记的位置）。bottom 只给放大一档里「下沿贴线、往上长」的文字块
+ * （照登记的那样往上长，挪的是下沿）；写了 y 的改成从上往下排。
+ */
+const SlotPatchSchema = z.object({ x: num(-2048, 4096).optional(), y: num(-2048, 4096).optional(), w: num(4, 4096).optional(), h: num(4, 4096).optional(), bottom: num(-2048, 4096).optional() });
+/** 卡片模板里一块的改动（8.1.2，平板菜单的 11 种版式）：原样、放大两档各自的位置大小，藏起来，照片的圆角 */
+export const SlotOverrideSchema = z.object({ design: SlotPatchSchema.optional(), big: SlotPatchSchema.optional(), hidden: z.boolean().optional(), radius: num(0, 400).optional() });
+export type StudioSlotOverride = z.infer<typeof SlotOverrideSchema>;
+
 export const DocSchema = z.object({
   schema: z.literal(STUDIO_SCHEMA),
   surface: z.enum(STUDIO_SURFACES),
   theme: ThemeSchema,
   screens: z.record(z.string().regex(/^[a-z][a-zA-Z0-9]{0,23}$/), ScreenSchema),
+  /** 卡片模板的改动（8.1.2）：templates[版式][块]，只存改过的；界面登记了模板的才有（平板菜单） */
+  templates: z.record(z.string().regex(/^[a-z][a-z_]{0,23}$/), z.record(z.string().regex(/^[a-z0-9][a-z0-9.]{0,15}$/), SlotOverrideSchema)).optional(),
 });
 export type StudioDoc = z.infer<typeof DocSchema>;
 

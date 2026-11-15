@@ -5,6 +5,8 @@
 // 默认版面 = 现在的样子：每一块的位置、大小都是现在页面上的那个数（emenu/EmenuPage.tsx、header.tsx），
 // 平板没有发布过版面时就用它，升级以后客人看不出变化（GZ12，浏览器用例逐屏截图比对）。
 
+import type { EmenuTemplateDef } from './emenu-templates';
+import { EMENU_TEMPLATES } from './emenu-templates';
 import { STUDIO_SCHEMA, type StudioBlockNode, type StudioButtonNode, type StudioDoc, type StudioFrameNode, type StudioLayout, type StudioNode, type StudioSurface, type StudioTextNode } from './format';
 
 export interface StudioPropDef {
@@ -102,6 +104,8 @@ export interface StudioSurfaceDef {
   fontVars: { zh: string; en: string };
   /** 主题色、字体的变量是不是全写在页面上（平板菜单的默认值在样式表里，只写改过的；手机界面的全写） */
   inlineAllVars: boolean;
+  /** 卡片模板（8.1.2，平板菜单的 11 种版式）：每种版式里有哪几块、各在哪 */
+  templates?: Readonly<Record<string, EmenuTemplateDef>>;
 }
 
 const AUTO_COLOR = { kind: 'color', auto: true, default: 'auto' } as const;
@@ -236,7 +240,7 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
     'menu.pages': {
       key: 'menu.pages',
       label: '菜单页',
-      hint: '分类、版面、菜品在后台「电子菜单」里维护；8.1.1 位置不能改',
+      hint: '分类、版面、菜品在后台「电子菜单」里维护；11 种版式里面每一块的位置在左边「版式」里改（8.1.2）',
       screens: ['menu'],
       size: { w: 1024, h: 768 },
       resize: 'none',
@@ -277,6 +281,7 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
   cssVar: (token) => `var(--em-${token === 'key2' ? 'key-2' : token})`,
   fontVars: { zh: '--em-zh', en: '--em-en' },
   inlineAllVars: false,
+  templates: EMENU_TEMPLATES,
 };
 
 /** 小程序能打开的页（与 miniprogram/src/app.json 的页对应；activity 是工作台里排的活动页） */

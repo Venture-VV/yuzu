@@ -1,6 +1,7 @@
 // 8.1.1 UI 工作台的浏览器验收（docs/WORKBENCH_V811.md 第 10 节）：只在「门店电脑」这一组执行。
 //   店主建（或重置）设计师账号 e2esheji → 设计师第一次登录先改密码，之后直接到后台的「工作台」→ 打开编辑器（起始页画的就是平板的样子）→
 //   拖动字标、撤销重做 → 插入文字、写中英文 → 主题换强调色 → 自动保存 → 检查没有红的 → 发布 → 版本列表里有这一版 →
+//   8.1.2：「版式」里挪一块、加圆角、放大一档单独挪一块（卡片模板）→
 //   平板的菜单接口带上这一版、预览码打开看得到那行字 → 用完照内置的默认版面再发一版（演示库的平板照旧是原来的样子）、停用 e2esheji。
 // 只要 seed-demo 的店主 linlan（密码 yuzu2026），不依赖 demo-prepare；演示库的设计师 sheji 留给人手工试，用例不碰它。
 // 只在独立演示库。可重复执行（e2esheji 下次启用、重置密码接着用）。
@@ -122,6 +123,33 @@ test.describe('8.1.1 UI 工作台', () => {
       await page.getByTestId('studio-theme-tan').locator('input[type=color]').fill('#7a5c3a');
       await expect(page.getByTestId('studio-theme-tan')).toContainText('#7a5c3a');
 
+      // 卡片模板（8.1.2）：「版式」里「单菜 · 左图」的餐品图拖一下、再用数字定到 x = 60，加圆角 16；放大一档单独挪特写图
+      await page.getByTestId('studio-tab-templates').click();
+      await expect(page.getByTestId('studio-template-canvas')).toBeVisible();
+      await page.getByTestId('studio-layout-single_left').click();
+      const tpl = (await page.getByTestId('studio-template-layer').boundingBox())!;
+      const tk = tpl.width / 1024;
+      const grab = { x: tpl.x + (40 + 214) * tk, y: tpl.y + (133.8 + 300) * tk };
+      await page.mouse.move(grab.x, grab.y);
+      await page.mouse.down();
+      await page.mouse.move(grab.x + 30 * tk, grab.y + 12 * tk, { steps: 8 });
+      await page.mouse.up();
+      await expect(page.getByTestId('studio-slot-panel')).toContainText('餐品图');
+      expect(Number(await page.getByTestId('studio-slot-x').inputValue())).toBeGreaterThan(40);
+      await page.getByTestId('studio-slot-x').fill('60');
+      await page.getByTestId('studio-slot-x').press('Enter');
+      await page.getByTestId('studio-slot-y').fill('133.8');
+      await page.getByTestId('studio-slot-y').press('Enter');
+      await page.getByTestId('studio-slot-radius').fill('16');
+      await page.getByTestId('studio-slot-radius').press('Enter');
+      await expect(page.getByTestId('studio-layout-single_left')).toContainText('改过 1 块');
+      await page.getByTestId('studio-slot-item-detail').click();
+      await page.getByTestId('studio-slot-mode').click();
+      await page.getByTestId('studio-slot-y').fill('150');
+      await page.getByTestId('studio-slot-y').press('Enter');
+      await expect(page.getByTestId('studio-template-canvas')).toHaveAttribute('data-mode', 'big');
+      await page.getByTestId('studio-slot-mode').click();
+
       // 自动保存、检查没有红的
       await expect(page.getByTestId('studio-save-status')).toHaveAttribute('data-status', 'saved', { timeout: 15_000 });
       await page.getByTestId('studio-open-checks').click();
@@ -134,7 +162,7 @@ test.describe('8.1.1 UI 工作台', () => {
       await expect(page.getByText(/已发布第 \d+ 版/)).toBeVisible({ timeout: 15_000 });
       const versions = await getJson<StudioVersionView[]>(page, '/api/studio/emenu/versions');
       expect(versions[0]).toMatchObject({ kind: 'publish', note: `E2E 起始页加字、换强调色 ${stamp}`, publishedBy: DESIGNER.displayName });
-      expect(versions[0]!.screensChanged).toEqual(expect.arrayContaining(['theme', 'start']));
+      expect(versions[0]!.screensChanged).toEqual(expect.arrayContaining(['theme', 'start', 'templates']));
       await page.getByTestId('studio-open-versions').click();
       await expect(page.getByTestId(`studio-version-${versions[0]!.version}`)).toContainText('平板现在用的');
       await page.keyboard.press('Escape');
@@ -145,6 +173,7 @@ test.describe('8.1.1 UI 工作台', () => {
       const doc = await getJson<{ doc: { theme: { colors: Record<string, string> } } }>(pad, `/api/studio/docs/${versions[0]!.id}`);
       expect(JSON.stringify(doc.doc)).toContain(words);
       expect(doc.doc.theme.colors.tan).toBe('#7a5c3a');
+      expect((doc.doc as { templates?: unknown }).templates).toEqual({ single_left: { photo: { design: { x: 60 }, radius: 16 }, detail: { big: { y: 150 } } } });
 
       // 预览码：平板打开 /emenu?studio=<码>，起始页看得到那行字、顶上写着预览、不能下单
       const code = await send<{ code: string }>(page, 'post', '/api/studio/emenu/preview-code', { doc: doc.doc });

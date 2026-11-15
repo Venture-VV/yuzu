@@ -10,6 +10,7 @@
 //   · 导入英文对照表（8.0.13）：一个事务里按菜品编号升序锁菜品一行，只改有变化的、版本号加一；同样的内容再导一次什么都不改。
 
 import { z } from 'zod';
+import { readPublishedStudio } from '../studio/published';
 import { defaultTier, type TierPrice } from '@shared/catalog';
 import {
   DEFAULT_EMENU_RULES,
@@ -141,6 +142,7 @@ export async function emenuAdmin(db: Db): Promise<EmenuAdmin> {
     tables: await emenuTables(db),
     tabletAccounts: counts!.tablets,
     pinHolders: counts!.pins,
+    templates: (await readPublishedStudio(db, 'emenu'))?.doc.templates ?? null,
   };
 }
 

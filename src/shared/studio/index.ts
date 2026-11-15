@@ -3,3 +3,4 @@ export * from './format';
 export * from './surfaces';
 export * from './check';
 export * from './api';
+export * from './emenu-templates';
