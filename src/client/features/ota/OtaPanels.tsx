@@ -15,27 +15,13 @@ import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { LoadFailed } from '../../components/LoadFailed';
 import { useCan, useSession } from '../../lib/session';
 import { downloadUrl, uuid } from '../../lib/utils';
+import { readTablePayload } from '../../lib/import-file';
 import { useRoomsAdmin } from '../rooms/queries';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, IconButton, Input, Notice, Select, Skeleton } from '../../components/ui';
 
 const otaKeys = { channels: ['ota', 'channels'] as const, orders: (s: string) => ['ota', 'orders', s] as const, recon: (m: string) => ['ota', 'recon', m] as const };
 const useChannels = () => useQuery({ queryKey: otaKeys.channels, queryFn: () => api.get<OtaChannel[]>('/api/ota/channels') });
-
-function fileToPayload(file: File): Promise<{ csv?: string; xlsxBase64?: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    const isXlsx = /\.xlsx$/i.test(file.name);
-    reader.onerror = () => reject(new Error('文件读不出来'));
-    reader.onload = () => {
-      const s = String(reader.result ?? '');
-      if (isXlsx) resolve({ xlsxBase64: s.slice(s.indexOf(',') + 1) });
-      else resolve({ csv: s });
-    };
-    if (isXlsx) reader.readAsDataURL(file);
-    else reader.readAsText(file);
-  });
-}
 
 interface Preview {
   header: string[];
@@ -95,7 +81,7 @@ export function OtaOrdersPanel() {
     setError(null);
     if (!f || !cid) return setFile(null);
     try {
-      const picked = { name: f.name, payload: await fileToPayload(f) };
+      const picked = { name: f.name, payload: await readTablePayload(f) };
       setFile(picked);
       await runPreview(picked, cid);
     } catch (e) {

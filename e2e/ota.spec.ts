@@ -164,6 +164,24 @@ test.describe('8.0.21 OTA 渠道订单', () => {
     await expect(page.getByTestId('ota-recon')).toBeVisible({ timeout: 20_000 });
   });
 
+  test('中文 Excel / WPS 另存的 GBK 订单表：自动识别编码，列都认得出来（Codex 审查 970c95c 后补）', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const made = await page.request.post('/api/ota/channels', { data: { name: `GBK渠道${stamp}`, commissionBp: 0, roomMap: {}, columnMap: {}, active: true } });
+    expect(made.ok(), await made.text()).toBe(true);
+    // 「订单号,入住人,房型,入住日期,离店日期,间数,金额 / GBK001,张三,大床房,2026-12-01,2026-12-03,1,￥600」按 GBK 存
+    const gbk = Buffer.from(
+      'b6a9b5a5bac52cc8ebd7a1c8cb2cb7bfd0cd2cc8ebd7a1c8d5c6da2cc0ebb5eac8d5c6da2cbce4cafd2cbdf0b6ee0d0a47424b3030312cd5c5c8fd2cb4f3b4b2b7bf2c323032362d31322d30312c323032362d31322d30332c312ca3a43630300d0a',
+      'hex',
+    );
+    await page.goto('/bookings?view=ota');
+    await page.getByTestId('ota-channel').selectOption({ label: `GBK渠道${stamp}` });
+    await page.getByTestId('ota-file').setInputFiles({ name: '携程订单.csv', mimeType: 'text/csv', buffer: gbk });
+    // 旧代码按 UTF-8 读：表头乱码，必须有的列一个都认不出来
+    await expect(page.getByTestId('ota-preview')).toContainText('认出 1 张订单');
+    await expect(page.getByTestId('ota-preview')).toContainText('大床房');
+  });
+
   test('后台渠道表单里本店房型取不回来：写明加载失败、可以重试，不显示成空的对照（主动扫一遍后补）', async ({ page }) => {
     test.setTimeout(90_000);
     await login(page);

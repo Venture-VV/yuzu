@@ -200,7 +200,7 @@ describe('订单确认与发货预告', () => {
     expect((await reply(dB, { clientKey: randomUUID(), name: '乙', shipDate: today, lines: [{ lineId, qtyMilli: q(1) }] })).json().error.code).toBe('LINK_CLOSED');
   });
 
-  it('采购模块关着：链接打不开', async () => {
+  it('采购模块关着：链接打不开（PORTAL_PAUSED，与作废、过期分开）', async () => {
     const s = await supplier('S005');
     const mat = await material('M016');
     let po = (await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), orderDate: today, action: 'submit', supplierId: s.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000 }] })).body.po;
@@ -208,8 +208,54 @@ describe('订单确认与发货预告', () => {
     const token = (await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/supplier-links`, { kind: 'po_confirm' })).body.token as string;
     const off = await api(ctx.app, ctx.owner, 'PUT', '/api/erp/modules', { modules: { purchasing: false } });
     expect(off.status, JSON.stringify(off.body)).toBe(200);
-    expect((await pub(token)).statusCode).toBe(404);
-    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/erp/modules', { modules: { purchasing: true } })).status).toBe(200);
+    try {
+      const closed = await pub(token);
+      expect(closed.statusCode).toBe(404);
+      expect(closed.json().error.code).toBe('PORTAL_PAUSED');
+      expect((await reply(token, { clientKey: randomUUID(), name: '李', promisedDate: today })).json().error.code).toBe('PORTAL_PAUSED');
+    } finally {
+      expect((await api(ctx.app, ctx.owner, 'PUT', '/api/erp/modules', { modules: { purchasing: true } })).status).toBe(200);
+    }
     expect((await pub(token)).statusCode).toBe(200);
+  });
+
+  it('原样重提先认原编号：采购模块关着、链接作废以后，登记过的那一份照样返回，不报「没有」（Codex 审查 970c95c 后补）', async () => {
+    const s = await supplier('S005');
+    const mat = await material('M016');
+    let po = (await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), orderDate: today, action: 'submit', supplierId: s.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] })).body.po;
+    if (po.status !== 'approved') po = (await api(ctx.app, ctx.owner, 'POST', `/api/purchase-orders/${po.id}/approve`, {})).body;
+    const ct = (await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/supplier-links`, { kind: 'po_confirm' })).body.token as string;
+    expect((await reply(ct, { clientKey: randomUUID(), name: '李', promisedDate: today })).statusCode).toBe(200);
+    const dl = await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/supplier-links`, { kind: 'delivery' });
+    const dt = dl.body.token as string;
+    const lineId = (await pub(dt)).json().snapshot.lines[0].lineId as number;
+    const body = { clientKey: randomUUID(), name: '李', shipDate: today, lines: [{ lineId, qtyMilli: q(1) }] };
+    // 登记上了（假装回复丢了）
+    expect((await reply(dt, body)).statusCode).toBe(200);
+    const notices = async () => (await api(ctx.app, buyer, 'GET', `/api/purchase-orders/${po.id}/supplier-portal`)).body.notices as unknown[];
+    expect(await notices()).toHaveLength(1);
+
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/erp/modules', { modules: { purchasing: false } })).status).toBe(200);
+    try {
+      // 旧代码：模块关着先报 404「链接不存在」，页面据此清掉本机记着的那一份，再开以后重新填写就记两批
+      const again = await reply(dt, body);
+      expect(again.statusCode, again.body).toBe(200);
+      expect(again.json().notices).toHaveLength(1);
+      // 同一个编号、内容不同：照样拒绝
+      expect((await reply(dt, { ...body, shipDate: shiftDate(today, 1) })).json().error.code).toBe('IDEMPOTENCY_CONFLICT');
+      // 新的一份：关着，不记
+      expect((await reply(dt, { ...body, clientKey: randomUUID() })).json().error.code).toBe('PORTAL_PAUSED');
+    } finally {
+      expect((await api(ctx.app, ctx.owner, 'PUT', '/api/erp/modules', { modules: { purchasing: true } })).status).toBe(200);
+    }
+    // 链接作废以后：原样重提照样返回登记过的那一份；新的打不开
+    expect((await api(ctx.app, buyer, 'POST', `/api/purchase-supplier-links/${dl.body.link.id}/void`, {})).status).toBe(200);
+    const afterVoid = await reply(dt, body);
+    expect(afterVoid.statusCode, afterVoid.body).toBe(200);
+    expect(afterVoid.json().notices).toHaveLength(1);
+    expect((await reply(dt, { ...body, clientKey: randomUUID() })).json().error.code).toBe('NOT_FOUND');
+    // 别的链接拿这个编号来：不当成它登记过的，照常处理——编号已经用在别的链接上，拒绝
+    expect((await reply(ct, { clientKey: body.clientKey, name: '李', promisedDate: today })).json().error.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect(await notices()).toHaveLength(1);
   });
 });

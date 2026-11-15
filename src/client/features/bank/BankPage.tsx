@@ -25,6 +25,7 @@ import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
+import { readTablePayload } from '../../lib/import-file';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { LoadFailed } from '../../components/LoadFailed';
@@ -348,34 +349,6 @@ function LineSheet({ id, manage, onClose }: { id: number | null; manage: boolean
   );
 }
 
-function fileToPayload(file: File): Promise<{ csv?: string; xlsxBase64?: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    const isXlsx = /\.xlsx$/i.test(file.name);
-    reader.onerror = () => reject(new Error('文件读不出来'));
-    reader.onload = () => {
-      if (isXlsx) {
-        const s = String(reader.result);
-        resolve({ xlsxBase64: s.slice(s.indexOf(',') + 1) });
-      } else {
-        // 网银导出的 CSV 常是 GBK：先按 UTF-8 读，读出乱码再按 GBK 读
-        const buf = reader.result as ArrayBuffer;
-        let text = new TextDecoder('utf-8').decode(buf);
-        if (text.includes('�')) {
-          try {
-            text = new TextDecoder('gbk').decode(buf);
-          } catch {
-            /* 浏览器不认 GBK 就按 UTF-8 */
-          }
-        }
-        resolve({ csv: text });
-      }
-    };
-    if (isXlsx) reader.readAsDataURL(file);
-    else reader.readAsArrayBuffer(file);
-  });
-}
-
 function ImportDialog({ open, accounts, onClose }: { open: boolean; accounts: BankAccount[]; onClose: () => void }) {
   const session = useSession();
   const toast = useToast();
@@ -509,7 +482,17 @@ function ImportDialog({ open, accounts, onClose }: { open: boolean; accounts: Ba
                 if (!f) return;
                 previewSeq.current += 1;
                 setPreview(null);
-                const payload = await fileToPayload(f);
+                // 网银导出的 CSV 常是 GBK：与别的导入一样自动识别 UTF-8 / GBK，识别不了、有乱码的写明原因
+                let payload: { csv?: string; xlsxBase64?: string };
+                try {
+                  payload = await readTablePayload(f);
+                } catch (err) {
+                  setFile(null);
+                  setMap(null);
+                  setPreviewing(false);
+                  setError(errorMessage(err));
+                  return;
+                }
                 const next = { name: f.name, payload };
                 setFile(next);
                 setMap(null);

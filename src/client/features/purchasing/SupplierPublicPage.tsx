@@ -5,8 +5,10 @@
 // 每次提交带页面生成的操作编号：没收到结果再点一次只记一次。
 // 结果待确认（AGENTS.md；Codex 审查 73ae462 后补）：发出去之前把编号与原内容存进本机并读回核对，存不了不发；
 // 断网、超时、服务器出错以后这一份留着，刷新、关掉再开链接都还在，只能「按原内容重新提交」（服务端先认原编号：
-// 已经登记过的直接返回那一份，不会再记一次），不能另填一份。重新提交被明确拒绝（链接作废、过期、已经关了、日期过了）
-// 时原来那次也不可能再登记（服务端在这些检查之前先认原编号，这些条件也不会倒回去），这时才清掉、可以重新填写。
+// 已经登记过的直接返回那一份，不会再记一次），不能另填一份。
+// 被拒绝时分两种（Codex 审查 970c95c 后补）：以后也登记不上的（链接作废、过期，内容本身不合规则、日期过了，编号已经用在别的内容上）
+// 才清掉、可以重新填写——服务端在所有检查之前先认原编号，这些条件也不会倒回去，原来那次晚到也一样被拒；
+// 别的（门店暂时关了供应商链接、链接暂时关着……情况可能会变）照旧留着，只能按原内容重新提交。
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
@@ -21,6 +23,22 @@ const yuan = (cents: number) => `¥${formatAmount(cents)}`;
 /** 没收到结果（断网、超时、服务器出错、太频繁）：可能已经登记了，也可能没有 */
 class UncertainReply extends Error {}
 
+/** 服务端明确拒绝了（4xx）：带错误码，据此判断原来那次以后还会不会登记 */
+class RejectedReply extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * 这些拒绝说明原来那次没有登记、以后也登记不上（服务端先认原编号，这些条件不会倒回去）：可以清掉本机的记录重新填写。
+ * 别的（`PORTAL_PAUSED` 门店暂时关了链接、`LINK_CLOSED` 链接暂时关着、没见过的）都留着。
+ */
+const FINAL_REJECTIONS = new Set(['NOT_FOUND', 'LINK_EXPIRED', 'BAD_REQUEST', 'QUOTE_EXPIRED', 'DATE_PASSED', 'DATE_ORDER', 'QTY_OVER', 'IDEMPOTENCY_CONFLICT']);
+
 async function call<T>(url: string, init?: RequestInit, timeoutMs = 20_000): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -32,10 +50,10 @@ async function call<T>(url: string, init?: RequestInit, timeoutMs = 20_000): Pro
   } finally {
     clearTimeout(timer);
   }
-  const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+  const body = (await res.json().catch(() => null)) as { error?: { message?: string; code?: string } } | null;
   if (!res.ok) {
     if (res.status >= 500 || res.status === 429) throw new UncertainReply(body?.error?.message ?? `服务器出错（${res.status}），没收到结果`);
-    throw new Error(body?.error?.message ?? `出错了（${res.status}），请稍后再试`);
+    throw new RejectedReply(body?.error?.message ?? `出错了（${res.status}），请稍后再试`, body?.error?.code ?? '');
   }
   return body as T;
 }
@@ -157,11 +175,17 @@ function useSubmit(token: string, onDone: (v: SupplierPublicView) => void) {
         // 可能已经登记了：留着这一份，只能按原内容重新提交
         setPending(p);
         setError(`${e.message}。可能已经提交上了，也可能没有：请点「按原内容重新提交」（同一份只会登记一次），不要重新填一份。`);
-      } else {
-        // 明确拒绝：这一份（以及之前没收到结果的那次）都没有、也不会再登记，清掉，可以重新填写
+      } else if (e instanceof RejectedReply && FINAL_REJECTIONS.has(e.code)) {
+        // 以后也登记不上：这一份（以及之前没收到结果的那次）都没有、也不会再登记，清掉，可以重新填写
         clearPending(token);
         setPending(null);
-        setError((e as Error).message);
+        setError(e.message);
+      } else {
+        // 别的拒绝（门店暂时关了链接、链接暂时关着……）：情况可能会变，原来那次也说不定还会到——留着这一份，只能按原内容重新提交
+        setPending(p);
+        setError(`${(e as Error).message}。这一份先留在这台设备上：等门店那边好了再点「按原内容重新提交」（同一份只会登记一次），处理完之前不能另填一份；急的话直接联系门店采购。`);
+        // 链接可能已经关了：刷新一下页面上的状态（取不回来就算了）
+        call<SupplierPublicView>(`/api/public/supplier/${encodeURIComponent(token)}`).then(onDone, () => undefined);
       }
     } finally {
       setBusy(false);
@@ -181,12 +205,12 @@ function useSubmit(token: string, onDone: (v: SupplierPublicView) => void) {
   return { busy, error, sent, submit, pending, resend };
 }
 
-/** 上次提交没收到结果：只能按原内容重新提交 */
+/** 上次提交的还没有确认登记上（没收到结果，或被暂时拒绝）：只能按原内容重新提交 */
 function PendingReplyNotice({ pending, busy, onResend }: { pending: PendingReply; busy: boolean; onResend: () => void }) {
   return (
     <Notice
       tone="warning"
-      title="上次提交没收到结果"
+      title="上次提交的还没有确认登记上"
       data-testid="sp-pending"
       action={
         <Button size="sm" variant="primary" loading={busy} onClick={onResend} data-testid="sp-pending-resend">

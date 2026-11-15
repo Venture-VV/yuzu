@@ -6,6 +6,9 @@
 //   · 发货预告（供应商已确认的采购单）：发货日、预计到货、各行发多少、物流单号 → 每次记一条（可以分批），收货时提示。
 // 链接只存摘要（原文只在生成时给一次）；同一来源地址 10 分钟里试错最多 30 次；采购模块关着、过期、作废的打不开。
 // 供应商的每次回复带页面生成的操作编号（client_key 唯一），没收到结果再点一次只记一次、内容不同的拒绝。
+// 原样重提先认原编号（在采购模块开关、链接作废 / 过期 / 关了这些检查之前）：已经登记过的直接返回那一份；
+// 采购模块关着报 `PORTAL_PAUSED`（会再开），与链接作废、过期的 `NOT_FOUND` 分开——页面只在后者这类以后也登记不上的拒绝时
+// 清掉本机记着的那一份（Codex 审查 `970c95c` 后补）。
 //
 // 锁（没有反过来的路径）：生成先锁对象一行（询价单 / 采购单 `FOR NO KEY UPDATE`）→ 作废同一对象、同一家、同种类还在用的旧链接 → 写新链接；
 // 回复：先不加锁读出链接对应的对象 → 锁对象一行（与员工端同一把：询价单 `FOR UPDATE`，与登记报价、定标串行；采购单 `FOR NO KEY UPDATE`）
@@ -19,7 +22,7 @@ import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../../db';
 import { guard } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
-import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
+import { AppError, badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { hashRequest } from '../../lib/idempotency';
 import { idParam, parse } from '../../lib/validate';
 import { AttemptLimiter } from '../canteen/portal-auth';
@@ -297,7 +300,8 @@ export function registerSupplierPortalRoutes(app: FastifyInstance, deps: Deps) {
   // ── 供应商打开链接（不用登录）──
   const open = async (token: string, ip: string, db: Db = sql) => {
     limiter.check(ip);
-    if (!(await enabledErpModules(db)).has('purchasing')) throw notFound('链接不存在或已失效');
+    // 采购模块关着：会再开，与链接作废、过期分开（页面据此留着本机记着的那一份，不当成「以后也登记不上」）
+    if (!(await enabledErpModules(db)).has('purchasing')) throw new AppError(404, 'PORTAL_PAUSED', '门店暂时关了供应商链接，请稍后再打开，或直接联系门店采购');
     const l = await findByToken(db, token, false);
     if (!l || l.voidedAt || l.expired) {
       limiter.fail(ip);
@@ -311,12 +315,26 @@ export function registerSupplierPortalRoutes(app: FastifyInstance, deps: Deps) {
     return viewOf(sql, await open(token, req.ip));
   });
 
+  const parseReply = (kind: SupplierLinkKind, raw: unknown) => (kind === 'quote' ? parse(QuoteReply, raw) : kind === 'po_confirm' ? parse(ConfirmReply, raw) : parse(DeliveryReply, raw));
+
   app.post('/api/public/supplier/:token/reply', async (req, reply) => {
     const { token } = parse(TokenParam, req.params);
     reply.header('cache-control', 'no-store');
+    // 原样重提先认原编号，在采购模块开关、链接作废 / 过期 / 关了这些检查之前：已经登记过的直接返回那一份。
+    // 原来模块暂时关着时先报「链接不存在」，页面据此清掉本机记着的那一份，再开以后重新填写就记两次（Codex 审查 970c95c 后补）
+    limiter.check(req.ip);
+    const key = z.object({ clientKey: z.uuid() }).safeParse(req.body);
+    if (key.success) {
+      const [prev] = await sql<{ linkId: number; requestHash: string }[]>`SELECT link_id, request_hash FROM supplier_link_replies WHERE client_key = ${key.data.clientKey}`;
+      const mine = prev ? await findByToken(sql, token, false) : null;
+      if (prev && mine && Number(prev.linkId) === mine.id) {
+        const again = parseReply(mine.kind, req.body);
+        if (prev.requestHash !== hashRequest({ ...again, clientKey: undefined, linkId: mine.id })) throw conflict('IDEMPOTENCY_CONFLICT', '这次提交的内容和刚才的不一样，请刷新页面后重新填写');
+        return viewOf(sql, mine);
+      }
+    }
     const first = await open(token, req.ip);
-    const raw = req.body;
-    const input = first.kind === 'quote' ? parse(QuoteReply, raw) : first.kind === 'po_confirm' ? parse(ConfirmReply, raw) : parse(DeliveryReply, raw);
+    const input = parseReply(first.kind, req.body);
     const requestHash = hashRequest({ ...input, clientKey: undefined, linkId: first.id });
     const today = todayIn(config.timezone);
     try {

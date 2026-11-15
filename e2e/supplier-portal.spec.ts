@@ -5,7 +5,8 @@
 //   · 已确认的采购单发订单确认链接 → 供应商确认、写承诺到货日 → 采购单详情显示「供应商已确认，承诺 X 到」
 //     → 再发发货预告链接、供应商报一批 → 采购单详情列出这一批；
 //   · 发货预告提交上了、回复丢了：供应商页面记着「没收到结果」，刷新以后还在、不能另填一份，按原内容重新提交 → 只记一批（Codex 审查 73ae462 后补）；
-//   · 采购单的「供应商确认与发货」取不回来：写明加载失败、可以重试，不把整块藏起来（Codex 审查 d72ea42 后补）。
+//   · 采购单的「供应商确认与发货」取不回来：写明加载失败、可以重试，不把整块藏起来（Codex 审查 d72ea42 后补）；
+//   · 发货预告没送到、重新提交时门店暂时关了链接（PORTAL_PAUSED）：这一份还留着、不能另填，恢复以后按原内容重新提交只记一批（Codex 审查 970c95c 后补）。
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
@@ -166,6 +167,51 @@ test.describe('8.0.21 供应商门户', () => {
     await expect(s.p.getByTestId('sp-notices').locator('li')).toHaveCount(1);
     await expect(s.p.getByTestId('sp-notices')).toContainText(`${mat.name} 2箱`);
     await expect(s.p.getByTestId('sp-submit')).toBeVisible();
+    await s.close();
+  });
+
+  test('发货预告没送到、重新提交时门店暂时关了链接：这一份还留着，恢复以后按原内容重新提交只记一批', async ({ page, browser }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const { sup, mat, today } = await setup(page);
+    const created = await page.request.post('/api/purchase-orders', {
+      data: { clientKey: randomUUID(), orderDate: today, action: 'submit', supplierId: sup.id, lines: [{ materialId: mat.id, purchaseQtyMilli: 3_000, priceCents: 3_000 }] },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    let po = (await created.json()).po as { id: number; status: string };
+    if (po.status !== 'approved') po = (await (await page.request.post(`/api/purchase-orders/${po.id}/approve`, { data: {} })).json()) as typeof po;
+    const confirmLink = await page.request.post(`/api/purchase-orders/${po.id}/supplier-links`, { data: { kind: 'po_confirm' } });
+    expect(confirmLink.status(), await confirmLink.text()).toBe(201);
+    const confirmed = await page.request.post(`/api/public/supplier/${(await confirmLink.json()).token}/reply`, { data: { clientKey: randomUUID(), name: '李', promisedDate: today, note: '' } });
+    expect(confirmed.status(), await confirmed.text()).toBe(200);
+    const deliveryLink = await page.request.post(`/api/purchase-orders/${po.id}/supplier-links`, { data: { kind: 'delivery' } });
+    expect(deliveryLink.status(), await deliveryLink.text()).toBe(201);
+    const s = await supplierPage(browser, `${new URL(page.url()).origin}/s/${(await deliveryLink.json()).token}`);
+
+    // 第一次：请求断在路上，没送到服务器
+    await s.p.route('**/api/public/supplier/*/reply', (route) => route.abort('connectionreset'));
+    await s.p.locator('[data-testid^="sp-qty-"]').first().fill('2');
+    await s.p.getByTestId('sp-name').fill('李');
+    await s.p.getByTestId('sp-submit').click();
+    await expect(s.p.getByTestId('sp-pending')).toBeVisible();
+    await s.p.unroute('**/api/public/supplier/*/reply');
+    // 重新提交时门店暂时关了供应商链接（服务端的 PORTAL_PAUSED）：会再开，原来那次也说不定还会到——这一份留着，不能另填一份
+    // （旧代码在任何 4xx 时都清掉本机记着的那一份，再开以后重新填写就记两批）
+    await s.p.route('**/api/public/supplier/*/reply', (route) =>
+      route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { code: 'PORTAL_PAUSED', message: '门店暂时关了供应商链接，请稍后再打开，或直接联系门店采购' } }) }),
+    );
+    await s.p.getByTestId('sp-pending-resend').click();
+    await expect(s.p.getByText(/门店暂时关了供应商链接/)).toBeVisible();
+    await expect(s.p.getByTestId('sp-pending')).toBeVisible();
+    await expect(s.p.getByTestId('sp-submit')).toHaveCount(0);
+    await s.p.unroute('**/api/public/supplier/*/reply');
+    await s.p.reload();
+    await expect(s.p.getByTestId('sp-pending')).toContainText('发货预告');
+    // 恢复以后按原内容重新提交：只记一批
+    await s.p.getByTestId('sp-pending-resend').click();
+    await expect(s.p.getByTestId('sp-pending')).toHaveCount(0);
+    await expect(s.p.getByTestId('sp-notices').locator('li')).toHaveCount(1);
+    await expect(s.p.getByTestId('sp-notices')).toContainText(`${mat.name} 2箱`);
     await s.close();
   });
 
