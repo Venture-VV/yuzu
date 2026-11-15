@@ -416,6 +416,8 @@ export const ERP_OP_TYPES = [
   'customer_credit_claim',
   'customer_credit_review',
   'customer_target',
+  // 8.0.22 门店间调拨（迁移 155）
+  'stock_transfer',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -479,6 +481,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   bank_import: '网银流水导入',
   payment_batch: '批量付款',
   ota_import: '渠道订单导入',
+  stock_transfer: '门店间调拨',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

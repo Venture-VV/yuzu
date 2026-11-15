@@ -183,12 +183,15 @@ const OPERATE_PERMISSION: Record<InvDocType, Permission> = {
   damage: 'inventory.operate',
   count: 'inventory.operate',
   supplier_return: 'supplierReturn.create',
+  // 调拨（8.0.22）：调出、调入由「调拨」生成
+  transfer_out: 'inventory.operate',
+  transfer_in: 'inventory.operate',
 };
 
 /** 单据动的仓（领料、退回是部门小仓那一头；迁移前的领料、退回为空） */
 export interface WarehouseRef {
   id: number;
-  kind: 'central' | 'department';
+  kind: 'central' | 'department' | 'store_main';
   departmentId: number | null;
   name: string;
   active: boolean;
@@ -443,6 +446,8 @@ export async function listDocs(
 async function voidability(db: Db, doc: InvDoc, timeZone?: string): Promise<InvDoc['voidable']> {
   if (doc.status !== 'confirmed') return { ok: false, reason: '只有已生效的单据可以冲销' };
   if (doc.docType === 'count') return { ok: false, reason: '盘点调整不能冲销，如有错误请重新盘点' };
+  // 调拨生成的调出、调入（8.0.22）：在途的在「调拨」里撤回；调入以后要退回，另开一张反方向的调拨单
+  if (doc.docType === 'transfer_out' || doc.docType === 'transfer_in') return { ok: false, reason: '调拨生成的单据不能单独冲销：在途的到「调拨」里撤回，调入以后要退回请另开一张反方向的调拨单' };
   // 退供应商按供应商同意（生效）那天算月份（v0.7.12）
   const effectiveDate = effectiveDateOf(doc);
   if (timeZone && effectiveDate.slice(0, 7) !== todayIn(timeZone).slice(0, 7)) {

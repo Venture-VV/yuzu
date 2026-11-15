@@ -1,5 +1,5 @@
 import { NavLink, Navigate, useParams } from 'react-router';
-import { Archive, BarChart3, Boxes, Calculator, FileStack, Gift, Hourglass, PackageMinus } from 'lucide-react';
+import { Archive, ArrowRightLeft, BarChart3, Boxes, Calculator, FileStack, Gift, Hourglass, PackageMinus } from 'lucide-react';
 import { useCan } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
@@ -8,7 +8,8 @@ import { CostTab } from './CostTab';
 import { DocsTab } from './DocsTab';
 import { GiftsTab } from './GiftsTab';
 import { MasterTab } from './MasterTab';
-import { useInvSettings } from './queries';
+import { useInvSettings, useWarehouses } from './queries';
+import { TransfersTab } from './TransfersTab';
 import { StockTab } from './StockTab';
 import { SummaryTab } from './SummaryTab';
 import { UsageTab } from './UsageTab';
@@ -21,6 +22,8 @@ const TABS = [
   { key: 'aging', label: '呆滞与临期', icon: Hourglass },
   // 赠品台账（8.0.1 采购组整改 09）：只记台账，不进库存
   { key: 'gifts', label: '赠品台账', icon: Gift },
+  // 门店间调拨（8.0.22）：有第二家店（门店主仓）时才有
+  { key: 'transfers', label: '调拨', icon: ArrowRightLeft },
   // 用料与扣料、成本（8.0.20，docs/ERP_V8020.md）
   { key: 'usage', label: '用料与扣料', icon: PackageMinus },
   { key: 'cost', label: '成本', icon: Calculator },
@@ -34,7 +37,9 @@ export function InventoryPage() {
   const { tab = 'stock' } = useParams<{ tab?: TabKey }>();
   // 成本只给有「看成本」权限的人；别的页签要「查看库存」。有「看成本」没有「查看库存」的（店总默认如此）只有「成本」一个页签
   const read = can('inventory.read');
-  const tabs = TABS.filter((t) => (t.key === 'cost' ? can('inventory.cost') : read));
+  const warehouses = useWarehouses(read);
+  const multiStore = (warehouses.data ?? []).some((w) => w.kind === 'store_main');
+  const tabs = TABS.filter((t) => (t.key === 'cost' ? can('inventory.cost') : t.key === 'transfers' ? read && (multiStore || tab === 'transfers') : read));
   if (tabs.length === 0) return <Navigate to="/" replace />;
   if (!tabs.some((t) => t.key === tab)) return <Navigate to={tabs[0]!.key === 'stock' ? '/inventory' : `/inventory/${tabs[0]!.key}`} replace />;
   return (
@@ -65,6 +70,7 @@ export function InventoryPage() {
       {tab === 'summary' && <SummaryTab />}
       {tab === 'aging' && <AgingTab />}
       {tab === 'gifts' && <GiftsTab />}
+      {tab === 'transfers' && <TransfersTab />}
       {tab === 'usage' && <UsageTab />}
       {tab === 'cost' && <CostTab />}
       {tab === 'master' && <MasterTab />}

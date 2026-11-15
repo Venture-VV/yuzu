@@ -18,6 +18,7 @@ import { dateSchema } from '../../lib/validate';
 import { dateIn, todayIn } from '../../lib/dates';
 import { nextDocNo, setTxTimeouts } from '../../lib/tx';
 import { loadPurchaseRules } from './purchase-rules';
+import { currentStoreId } from '../../lib/store-context';
 
 // 通用的日期与事务小工具已移到 lib（v0.7.22）；库存模块内部照旧从这里取
 export { dateIn, nextDocNo, setTxTimeouts, todayIn };
@@ -189,7 +190,7 @@ export async function canOperateDept(db: Db, actor: Actor, departmentId: number 
 export async function departmentWarehouse(db: Db, departmentId: number): Promise<{ id: number; name: string; active: boolean } | null> {
   const [row] = await db<{ id: number; name: string; active: boolean }[]>`
     SELECT w.id, d.name || '小仓' AS name, d.active FROM warehouses w JOIN departments d ON d.id = w.department_id
-    WHERE w.department_id = ${departmentId}`;
+    WHERE w.department_id = ${departmentId} AND w.store_id = ${currentStoreId()}`;
   return row ?? null;
 }
 
@@ -199,6 +200,13 @@ export async function departmentWarehouse(db: Db, departmentId: number): Promise
  */
 export async function lockDeptWarehouse(tx: Tx, warehouseId: number) {
   if (warehouseId === CENTRAL_WAREHOUSE_ID) return;
+  // 门店主仓（8.0.22）：对门店一行加共享锁，确认门店没停用（停用门店与收发串行）
+  const [main] = await tx<{ active: boolean; name: string }[]>`
+    SELECT s.active, w.name FROM warehouses w JOIN stores s ON s.id = w.store_id WHERE w.id = ${warehouseId} AND w.kind = 'store_main' FOR SHARE OF s`;
+  if (main) {
+    if (!main.active) throw unprocessable('STORE_INACTIVE', `「${main.name}」所在的门店已停用，不能再收发`);
+    return;
+  }
   const [row] = await tx<{ active: boolean; name: string }[]>`
     SELECT d.active, d.name FROM warehouses w JOIN departments d ON d.id = w.department_id WHERE w.id = ${warehouseId} FOR SHARE OF d`;
   if (!row) throw unprocessable('WAREHOUSE_NOT_FOUND', '仓库不存在，请刷新后重试');
@@ -207,12 +215,13 @@ export async function lockDeptWarehouse(tx: Tx, warehouseId: number) {
 
 /** 仓的名称、类别与所属部门（总仓用「库存范围名称」） */
 export async function warehouseInfo(db: Db, warehouseId: number) {
-  const [row] = await db<{ id: number; kind: 'central' | 'department'; departmentId: number | null; name: string; active: boolean }[]>`
+  const [row] = await db<{ id: number; kind: 'central' | 'department' | 'store_main'; departmentId: number | null; name: string; active: boolean }[]>`
     SELECT w.id, w.kind, w.department_id,
            CASE WHEN w.kind = 'central'
                 THEN coalesce((SELECT value #>> '{}' FROM settings WHERE key = 'inventory_scope_name'), '后勤总库')
-                ELSE d.name || '小仓' END AS name,
-           coalesce(d.active, true) AS active
+                WHEN w.kind = 'store_main' THEN w.name
+                ELSE d.name || '小仓' || CASE WHEN w.store_id <> 1 THEN '（' || (SELECT name FROM stores WHERE id = w.store_id) || '）' ELSE '' END END AS name,
+           coalesce(d.active, (SELECT active FROM stores WHERE id = w.store_id)) AS active
     FROM warehouses w LEFT JOIN departments d ON d.id = w.department_id WHERE w.id = ${warehouseId}`;
   return row ?? null;
 }

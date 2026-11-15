@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import {
+  ArrowRightLeft,
   ClipboardCheck,
   Droplets,
   Flag,
@@ -24,6 +25,8 @@ export const DOC_VISUAL: Record<InvDocType, { icon: LucideIcon; tone: string; do
   damage: { icon: PackageX, tone: 'bg-clay-soft text-clay', dot: 'bg-clay' },
   count: { icon: ClipboardCheck, tone: 'bg-lake-soft text-lake', dot: 'bg-lake' },
   supplier_return: { icon: Truck, tone: 'bg-clay-soft text-clay', dot: 'bg-clay' },
+  transfer_out: { icon: ArrowRightLeft, tone: 'bg-yuzu-soft text-yuzu-deep', dot: 'bg-yuzu' },
+  transfer_in: { icon: ArrowRightLeft, tone: 'bg-pine-soft text-pine', dot: 'bg-pine' },
 };
 
 const MOVE_VISUAL: Record<MoveType, LucideIcon> = {
@@ -36,6 +39,8 @@ const MOVE_VISUAL: Record<MoveType, LucideIcon> = {
   count_adjust: ClipboardCheck,
   supplier_return: Truck,
   void: RotateCcw,
+  transfer_out: ArrowRightLeft,
+  transfer_in: ArrowRightLeft,
 };
 
 export function MoveIcon({ type, className }: { type: MoveType; className?: string }) {

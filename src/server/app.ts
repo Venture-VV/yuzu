@@ -50,6 +50,7 @@ import { registerAssetRoutes } from './modules/assets';
 import { registerExpiryRoutes } from './modules/inventory/expiry';
 import { registerCompareRoutes } from './modules/inventory/compare';
 import { registerGiftRoutes } from './modules/inventory/gifts';
+import { registerTransferRoutes } from './modules/inventory/transfers';
 import { registerPettyAccountRoutes } from './modules/petty-accounts';
 import { registerReplenishRoutes } from './modules/inventory/replenish';
 import { registerSourcingRoutes } from './modules/inventory/sourcing';
@@ -290,6 +291,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerExpiryRoutes(app, deps);
   registerCompareRoutes(app, deps);
   registerGiftRoutes(app, deps);
+  registerTransferRoutes(app, deps);
   registerPettyAccountRoutes(app, deps);
   registerReplenishRoutes(app, deps);
   registerSourcingRoutes(app, deps);

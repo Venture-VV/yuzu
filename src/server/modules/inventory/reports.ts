@@ -43,10 +43,13 @@ export async function listWarehouses(db: Db): Promise<Warehouse[]> {
     SELECT w.id, w.kind, w.department_id,
            CASE WHEN w.kind = 'central'
                 THEN coalesce((SELECT value #>> '{}' FROM settings WHERE key = 'inventory_scope_name'), '后勤总库')
-                ELSE d.name || '小仓' END AS name,
-           coalesce(d.active, true) AS active
-    FROM warehouses w LEFT JOIN departments d ON d.id = w.department_id
-    ORDER BY w.kind = 'department', d.active DESC, d.sort_order, d.id`;
+                WHEN w.kind = 'store_main' THEN w.name
+                ELSE d.name || '小仓' || CASE WHEN w.store_id <> 1 THEN '（' || st.name || '）' ELSE '' END END AS name,
+           coalesce(d.active, st.active) AS active,
+           w.store_id, st.name AS store_name
+    FROM warehouses w LEFT JOIN departments d ON d.id = w.department_id JOIN stores st ON st.id = w.store_id
+    -- 本店的在前（总仓、本店的部门小仓），再按门店：主仓、部门小仓（8.0.22）
+    ORDER BY w.store_id <> 1, st.sort_order, w.store_id, w.kind = 'department', d.active DESC, d.sort_order, d.id`;
 }
 
 /** 部门小仓的结存（有过收发的物料；结存为 0 的排在后面），带近期日均用量与可用天数（#22，v0.7.12） */

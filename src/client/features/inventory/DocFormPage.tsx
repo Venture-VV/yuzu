@@ -297,6 +297,9 @@ const INTRO: Record<InvDocType, string> = {
   damage: '已知损坏单独登记并注明原因；与盘点差异分开处理。',
   count: '先记下账面数，再填实盘数。差异先叫「待核差异」，负责人确认后才调整库存。',
   supplier_return: '已验收入库后退回供应商，关联原收货单，同时扣减库存与该批货款。',
+  // 调出、调入由「调拨」生成，不在这里新建（8.0.22）
+  transfer_out: '门店间调拨的调出：在「调拨」里新建，调出仓扣减、记在途。',
+  transfer_in: '门店间调拨的调入：在「调拨」里按实收登记，调入仓增加。',
 };
 
 /** 本部门小仓的说明（v0.7.11） */
@@ -328,6 +331,8 @@ const NOTE_SPAN: Record<InvDocType, string> = {
   direct_use: 'lg:col-span-3',
   damage: 'lg:col-span-3',
   receipt: 'sm:col-span-2 lg:col-span-4',
+  transfer_out: 'lg:col-span-3',
+  transfer_in: 'lg:col-span-3',
   issue: 'sm:col-span-2 lg:col-span-4',
   issue_return: 'sm:col-span-2 lg:col-span-4',
   supplier_return: 'sm:col-span-2 lg:col-span-1',
@@ -1321,6 +1326,8 @@ const GRID: Record<InvDocType, string> = {
   count: '@3xl:grid-cols-[minmax(0,1fr)_120px_200px_130px_minmax(0,0.5fr)_40px]',
   // 收货列多：容器足够宽（≥1024px）才排成一行，平板上分两行并显示字段名
   receipt: '@lg:grid-cols-3 @5xl:grid-cols-[minmax(0,1fr)_170px_170px_130px_140px_100px_40px]',
+  transfer_out: '@3xl:grid-cols-[minmax(0,1fr)_200px_minmax(0,0.6fr)_40px]',
+  transfer_in: '@3xl:grid-cols-[minmax(0,1fr)_200px_minmax(0,0.6fr)_40px]',
 };
 
 const HEADERS: Record<InvDocType, string[]> = {
@@ -1332,6 +1339,8 @@ const HEADERS: Record<InvDocType, string[]> = {
   supplier_return: ['物料（原收货）', '可退', '退货数量', '退货后库存', '扣款', ''],
   count: ['物料', '账面数', '实盘数', '差异', '备注', ''],
   receipt: ['物料', '送达数量', '合格实收', '拒收', '单价', '金额', ''],
+  transfer_out: ['物料', '调出数量', '备注', ''],
+  transfer_in: ['物料', '调入数量', '备注', ''],
 };
 
 function LineHeader({ type }: { type: InvDocType }) {

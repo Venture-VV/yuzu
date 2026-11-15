@@ -132,6 +132,8 @@ export const FENCED_OPS = [
   'customer_credit_claim',
   'customer_credit_review',
   'customer_target',
+  // 8.0.22 门店间调拨（迁移 155）：编号记在 idempotency_keys（ref_id 是那张调拨单）
+  'stock_transfer',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

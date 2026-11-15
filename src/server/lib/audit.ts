@@ -220,6 +220,7 @@ export type AuditAction =
   | 'receipt_attachment'
   | 'request_import'
   | 'gift_receipt'
+  | 'stock_transfer'
   // 8.0.3 费用预算与进项发票台账：改预算额度；台账里的发票（登记、认证状态、照片、作废）
   | 'expense_budget'
   | 'input_invoice'

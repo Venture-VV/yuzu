@@ -141,7 +141,14 @@ export function registerStoreRoutes(app: FastifyInstance, { sql }: Deps) {
         const [row] = await tx<{ id: number }[]>`
           INSERT INTO stores (code, name, entity_id, address, phone, sort_order)
           VALUES (${input.code}, ${input.name}, ${input.entityId}, ${input.address}, ${input.phone}, ${input.sortOrder}) RETURNING id`;
-        await writeAudit(tx, { staffId: req.actor.id, action: 'store_saved', targetType: 'store', targetId: row!.id, detail: { created: input }, ip: req.ip });
+        // 这家店的主仓（8.0.22 MD-B）；扣料默认从这家店的主仓扣（门店设置，后台可以改）
+        const [wh] = await tx<{ id: number }[]>`
+          INSERT INTO warehouses (kind, store_id, name) VALUES ('store_main', ${row!.id}, ${`${input.name}主仓`.slice(0, 40)}) RETURNING id`;
+        const usage = (await tx<{ value: Record<string, unknown> }[]>`SELECT value FROM settings WHERE key = 'stock_usage_rules'`)[0]?.value ?? {};
+        await tx`
+          INSERT INTO store_settings (store_id, key, value, updated_by)
+          VALUES (${row!.id}, 'stock_usage_rules', ${tx.json({ enabled: true, ...usage, saleWarehouseId: Number(wh!.id), recipeWarehouseId: Number(wh!.id) } as never)}, ${req.actor.id})`;
+        await writeAudit(tx, { staffId: req.actor.id, action: 'store_saved', targetType: 'store', targetId: row!.id, detail: { created: input, warehouseId: Number(wh!.id) }, ip: req.ip });
         return Number(row!.id);
       });
       reply.code(201);
@@ -168,6 +175,10 @@ export function registerStoreRoutes(app: FastifyInstance, { sql }: Deps) {
           UPDATE stores SET code = ${input.code}, name = ${input.name}, entity_id = ${input.entityId}, address = ${input.address}, phone = ${input.phone},
                  sort_order = ${input.sortOrder}, active = ${input.active}, version = version + 1, updated_at = now()
           WHERE id = ${id}`;
+        // 主仓的名称跟着门店改（8.0.22）
+        if (before.name !== input.name) {
+          await tx`UPDATE warehouses SET name = ${`${input.name}主仓`.slice(0, 40)} WHERE store_id = ${id} AND kind = 'store_main'`;
+        }
         // 本店的名称也是设置里的门店名（登录页、小票抬头照旧取它）
         if (id === DEFAULT_STORE_ID && before.name !== input.name) {
           await tx`
