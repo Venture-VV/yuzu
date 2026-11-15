@@ -302,6 +302,35 @@ describe('渠道订单', () => {
     expect(await otaPrepaidHints(ctx.sql, visits)).toEqual([]);
   });
 
+  it('预付按还没用掉的分：一间的订单用掉了预付以后渠道加成两间、总额不变，新加的那一间只带剩下的（用完了就不带）', async () => {
+    expect((await importFile([`C3101,钱十一,,豪华大床房,${today},${shiftDate(today, 1)},1,100.00,预付,已确认`])).body).toMatchObject({ created: 1 });
+    const arriveAt = async (bookingId: number, tag: string) => {
+      const v = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male' }] });
+      expect(v.status, JSON.stringify(v.body)).toBe(201);
+      const arrived = await api(ctx.app, ctx.clerk, 'POST', `/api/bookings/${bookingId}/change`, { clientKey: randomUUID(), action: 'arrive', tagCode: tag });
+      expect(arrived.status, JSON.stringify(arrived.body)).toBe(200);
+      return v.body.visits[0].id as number;
+    };
+    const preview = async (vid: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${vid}`)).body as { totalAmount: number; otaPrepaid: { couponCode: string; amountCents: number }[] };
+    const first = (await order('C3101')).bookings[0] as { id: number };
+    const v1 = await arriveAt(first.id, 'Q003');
+    const p1 = await preview(v1);
+    expect(p1.otaPrepaid).toEqual([expect.objectContaining({ amountCents: 10_000 })]);
+    const used = Math.min(10_000, p1.totalAmount);
+    const pays: Record<string, unknown>[] = [{ method: 'coupon', platform: 'other', code: p1.otaPrepaid[0]!.couponCode, amount: used, dealName: '携程 · 渠道大床房' }];
+    if (p1.totalAmount > used) pays.push({ method: 'cash', amount: p1.totalAmount - used });
+    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [v1], expectedTotal: p1.totalAmount, payments: pays })).status).toBe(200);
+    // 渠道把这张改成两间、总额还是 100：新加一张预约
+    expect((await importFile([`C3101,钱十一,,豪华大床房,${today},${shiftDate(today, 1)},2,100.00,预付,已确认`])).body).toMatchObject({ updated: 1 });
+    const second = ((await order('C3101')).bookings as { id: number; status: string }[]).find((b) => b.id !== first.id && b.status !== 'cancelled')!;
+    const v2 = await arriveAt(second.id, 'Q004');
+    // 只带还没用掉的（原来按 100 ÷ 2 又带 50，合计记成 150）
+    const left = 10_000 - used;
+    const p2 = await preview(v2);
+    if (left === 0) expect(p2.otaPrepaid).toEqual([]);
+    else expect(p2.otaPrepaid).toEqual([expect.objectContaining({ amountCents: left })]);
+  });
+
   it('对账：按入住月份，订单数、间夜、金额、佣金（15%）、净额；导出 CSV', async () => {
     const month = shiftDate(today, 4).slice(0, 7);
     const rows = (await api(ctx.app, ctx.clerk, 'GET', `/api/ota/recon?month=${month}`)).body as { channelName: string; orders: number; roomNights: number; amountCents: number; commissionCents: number; netCents: number }[];

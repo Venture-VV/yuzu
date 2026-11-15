@@ -157,12 +157,13 @@ export function registerContractDocRoutes(app: FastifyInstance, deps: Deps) {
     return listContractTemplates(sql, all);
   });
   app.get('/api/erp/contracts/doc-templates/:id', { preHandler: guard('contract.read') }, async (req) => getTemplate(sql, parse(idParam, req.params).id));
-  app.post('/api/erp/contracts/doc-templates', { preHandler: guard('contract.manage') }, async (req, reply) => {
+  // 正文最多 3 万字、条款最多 30 条 × 2000 字：按 UTF-8 的 JSON 超过全局默认的 64 KB，新建、改版放宽到 1 MB（Codex 审查 58100ca 后补）
+  app.post('/api/erp/contracts/doc-templates', { preHandler: guard('contract.manage'), bodyLimit: 1_000_000 }, async (req, reply) => {
     const t = await createTemplate(deps, req.body, req.actor, req.ip);
     reply.code(201);
     return t;
   });
-  app.post('/api/erp/contracts/doc-templates/:id/revise', { preHandler: guard('contract.manage') }, async (req, reply) => {
+  app.post('/api/erp/contracts/doc-templates/:id/revise', { preHandler: guard('contract.manage'), bodyLimit: 1_000_000 }, async (req, reply) => {
     const t = await reviseTemplate(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip);
     reply.code(201);
     return t;

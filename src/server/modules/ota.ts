@@ -397,31 +397,43 @@ export const roomShare = (amountCents: number, rooms: number, i: number) => {
 };
 
 /**
- * 结账时：这几位客人是按预付的渠道订单到店的 → 收款区默认带团购券，到店的每一间一行（各自的券码、订单金额按间数分的那一份）；
- * 那一间的券已经用在别的结账单上（没反结账）的不再带。
+ * 结账时：这几位客人是按预付的渠道订单到店的 → 收款区默认带团购券，到店的每一间一行（各自的券码；金额是订单还没用掉的预付
+ * 按还没用券的几间分的那一份）；那一间的券已经用在别的结账单上（没反结账）的不再带。
  */
 export async function otaPrepaidHints(db: Db, visitIds: number[]): Promise<OtaPrepaidHint[]> {
   if (!visitIds.length) return [];
-  const rows = await db<{ bookingId: number; channelId: number; orderNo: string; channelName: string; roomTypeName: string | null; amountCents: number; rooms: number; idx: number }[]>`
-    SELECT b.id AS booking_id, o.channel_id, o.order_no, c.name AS channel_name, rt.name AS room_type_name, o.amount_cents, o.rooms,
-           (SELECT count(*)::int FROM ota_order_bookings ob2 JOIN bookings b2 ON b2.id = ob2.booking_id
-            WHERE ob2.order_id = o.id AND b2.status <> 'cancelled' AND b2.id < b.id) AS idx
+  // 这几位客人到店用的预付渠道订单
+  const orders = await db<{ orderId: number; channelId: number; orderNo: string; channelName: string; roomTypeName: string | null; amountCents: number }[]>`
+    SELECT DISTINCT o.id AS order_id, o.channel_id, o.order_no, c.name AS channel_name, rt.name AS room_type_name, o.amount_cents
     FROM bookings b JOIN ota_order_bookings ob ON ob.booking_id = b.id JOIN ota_orders o ON o.id = ob.order_id JOIN ota_channels c ON c.id = o.channel_id
     LEFT JOIN room_types rt ON rt.id = o.room_type_id
     WHERE b.arrival_visit_id IN ${db(visitIds)} AND b.status = 'arrived' AND o.pay_mode = 'prepaid' AND o.status = 'booked'
-    ORDER BY o.id, b.id`;
-  const hints = rows.map((r) => ({
-    orderNo: r.orderNo,
-    couponCode: otaCouponCode(Number(r.channelId), r.orderNo, Number(r.bookingId)),
-    channelName: r.channelName,
-    roomTypeName: r.roomTypeName ?? '',
-    amountCents: roomShare(Number(r.amountCents), Number(r.rooms), Number(r.idx)),
-  }));
-  if (!hints.length) return [];
-  const used = new Set(
-    (await db<{ code: string }[]>`SELECT code FROM group_buy_coupons WHERE platform = 'other' AND status = 'active' AND code IN ${db(hints.map((h) => h.couponCode))}`).map((r) => r.code),
-  );
-  return hints.filter((h) => !used.has(h.couponCode) && h.amountCents > 0);
+    ORDER BY o.id`;
+  const hints: OtaPrepaidHint[] = [];
+  for (const o of orders) {
+    // 这张订单的预付按「还没用掉的」分（Codex 审查 58100ca 后补）：先减掉这张订单各间的券已经用在有效结账单上的金额，
+    // 剩下的按还没用券的几间（没取消、没爽约）均分、分不尽的摊在前面几间——订单后来加了间数、改了金额，也不会多带
+    const bookings = await db<{ bookingId: number; status: string; arrivalVisitId: number | null }[]>`
+      SELECT b.id AS booking_id, b.status, b.arrival_visit_id FROM ota_order_bookings ob JOIN bookings b ON b.id = ob.booking_id
+      WHERE ob.order_id = ${o.orderId} ORDER BY b.id`;
+    const codeOf = (bookingId: number) => otaCouponCode(Number(o.channelId), o.orderNo, bookingId);
+    const used = new Map(
+      (
+        await db<{ code: string; amount: string }[]>`
+          SELECT code, amount::text AS amount FROM group_buy_coupons
+          WHERE platform = 'other' AND status = 'active' AND code IN ${db(bookings.map((b) => codeOf(Number(b.bookingId))))}`
+      ).map((r) => [r.code, Number(r.amount)]),
+    );
+    const redeemed = [...used.values()].reduce((sum, a) => sum + a, 0);
+    const remaining = Math.max(0, Number(o.amountCents) - redeemed);
+    const open = bookings.filter((b) => b.status !== 'cancelled' && b.status !== 'no_show' && !used.has(codeOf(Number(b.bookingId))));
+    open.forEach((b, i) => {
+      const share = roomShare(remaining, open.length, i);
+      if (share <= 0 || b.status !== 'arrived' || b.arrivalVisitId === null || !visitIds.includes(Number(b.arrivalVisitId))) return;
+      hints.push({ orderNo: o.orderNo, couponCode: codeOf(Number(b.bookingId)), channelName: o.channelName, roomTypeName: o.roomTypeName ?? '', amountCents: share });
+    });
+  }
+  return hints;
 }
 
 // ───────────────────────── 路由 ─────────────────────────

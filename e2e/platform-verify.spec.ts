@@ -137,4 +137,19 @@ test.describe('8.0.21 平台验券', () => {
     await failed.getByTestId('unused-vouchers-error-retry').click();
     await expect(page.getByTestId('unused-vouchers-error')).toHaveCount(0, { timeout: 20_000 });
   });
+
+  test('「验券对账」取不回来：写明加载失败、可以重试', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const status = (await (await page.request.get('/api/platform/verify/status')).json()) as { mode: string };
+    test.skip(status.mode !== 'mock', '应用没有带 INTEGRATIONS_MOCK=true 启动（只在开发、测试实例）');
+    await page.route('**/api/platform/recon?*', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.goto('/platform');
+    await page.getByRole('radio', { name: '验券对账' }).click();
+    const failed = page.getByTestId('voucher-recon-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await page.unroute('**/api/platform/recon?*');
+    await failed.getByTestId('voucher-recon-error-retry').click();
+    await expect(page.getByTestId('voucher-recon-error')).toHaveCount(0, { timeout: 20_000 });
+  });
 });

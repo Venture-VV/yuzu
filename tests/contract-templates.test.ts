@@ -173,4 +173,21 @@ describe('合同模板', () => {
     expect(xml).toContain('<w:tbl>');
     expect(unzipEntry(docx.rawPayload, 'word/header1.xml')).toContain(c.contractNo);
   });
+
+  it('长模板：正文与条款在上限以内、请求体超过 64 KB 的也能新建、改版（Codex 审查 58100ca 后补）', async () => {
+    const long = {
+      name: '长篇服务合同',
+      category: 'service',
+      body: `# 总则\n\n${'甲乙双方本着平等互利的原则协商一致订立本合同'.repeat(1_000)}`,
+      fields: [],
+      clauses: [],
+    };
+    expect(Buffer.byteLength(JSON.stringify(long))).toBeGreaterThan(64 * 1024);
+    const t = await api(ctx.app, legal, 'POST', '/api/erp/contracts/doc-templates', long);
+    expect(t.status, JSON.stringify(t.body).slice(0, 200)).toBe(201);
+    const clauses = Array.from({ length: 30 }, (_, i) => ({ key: `c${i}`, title: `第 ${i + 1} 条补充`, text: '条款内容'.repeat(500), default: false }));
+    const revised = await api(ctx.app, legal, 'POST', `/api/erp/contracts/doc-templates/${t.body.id}/revise`, { ...long, body: long.body.slice(0, 29_000), clauses });
+    expect(revised.status, JSON.stringify(revised.body).slice(0, 200)).toBe(201);
+    expect(revised.body).toMatchObject({ version: 2 });
+  });
 });

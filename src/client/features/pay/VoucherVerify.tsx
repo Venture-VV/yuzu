@@ -381,8 +381,15 @@ export function VoucherReconTab({ from, to }: { from: string; to: string }) {
           对这一天的账
         </Button>
       </Card>
+      {/* 取不回来（也没有上一次的）写明加载失败、可以重试，不一直转圈（Codex 审查 58100ca 后补；「对这一天的账」是再跑一次对账，不是重新读） */}
       {!data.data ? (
-        <Skeleton className="h-40" />
+        data.isError ? (
+          <LoadFailed title="验券对账取不回来，请检查网络" onRetry={() => void data.refetch()} retrying={data.isFetching} testId="voucher-recon-error">
+            已经对出来的差异与处理情况，重试取回来以后再看。
+          </LoadFailed>
+        ) : (
+          <Skeleton className="h-40" />
+        )
       ) : (
         <>
           <ul className="space-y-1 text-[12.5px] text-ink-3">
