@@ -870,6 +870,7 @@ describe('批量付款（8.0.21）', () => {
     const b5 = (await ok(make([r4.id]))).batch;
     expect((await payReq(r4.id, { amountCents: 10_000, allocations: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 10_000 }] })).body.error.code).toBe('REQUEST_IN_BATCH');
     expect((await api(ctx.app, payer, 'POST', `/api/erp/payments/requests/${r4.id}/void`, { version: r4.version, reason: '不付了' })).body.error.code).toBe('REQUEST_IN_BATCH');
+    // 不走申请的付款登记也拦（批次还没导出时也一样，测试会话在 ee51abe 上报的 P1）
     const directPay = await api(ctx.app, payer, 'POST', '/api/payables/payments', {
       clientKey: randomUUID(),
       supplierId,
@@ -879,13 +880,60 @@ describe('批量付款（8.0.21）', () => {
       evidence: '流水尾号 0404',
       allocations: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 4_000 }],
     });
-    expect(directPay.status, JSON.stringify(directPay.body)).toBe(201);
+    expect(directPay.body.error?.code, JSON.stringify(directPay.body)).toBe('TARGET_IN_BATCH');
+    // 兜底：库里直接记一笔核销掉 ¥40 的已确认付款（绕开了上面的拦截）→ 导出拦下
+    const [p4] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO payments (doc_no, supplier_id, pay_date, amount_cents, method, status, created_by, confirmed_by, confirmed_at)
+      VALUES (${`FK-T-${randomUUID().slice(0, 8)}`}, ${supplierId}, ${today}, 4000, 'bank_transfer', 'confirmed', ${ctx.ownerId}, ${ctx.ownerId}, now())
+      RETURNING id`;
+    await ctx.sql`INSERT INTO payment_allocations (payment_id, receipt_doc_id, amount_cents) VALUES (${p4!.id}, ${free4.receipt.id}, 4000)`;
     const stale = await api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b5.id}/export`, { version: b5.version });
     expect(stale.body.error?.code).toBe('BATCH_STALE');
     expect(stale.body.error.message).toContain('¥60.00');
     // 作废以后申请又能单独处理
     await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b5.id}/void`, { version: b5.version, reason: '货款已经单独付了一部分', confirmNotPaid: true }), 200);
     expect((await payReq(r4.id, { amountCents: 6_000, allocations: [{ kind: 'receipt', targetId: free4.receipt.id, amountCents: 6_000 }] })).status).toBe(201);
+
+    // 导出以后：不走申请的付款登记不能再付这笔货款（测试会话在 ee51abe 上报的 P1）；下载文件前也再核对一次
+    const free6 = await receiveUnderContract(null, 4); // 200 元
+    await ok(invoice([{ poId: free6.poId, amountCents: 20_000 }]));
+    const r6 = await approveAll((await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free6.receipt.id, amountCents: 20_000 }] } }))).request);
+    const b6 = (await ok(make([r6.id]))).batch;
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batches/${b6.id}/export`, { version: b6.version }), 200);
+    const direct6 = await api(ctx.app, payer, 'POST', '/api/payables/payments', {
+      clientKey: randomUUID(),
+      supplierId,
+      payDate: today,
+      amountCents: 4_000,
+      method: 'bank_transfer',
+      evidence: '流水尾号 0606',
+      allocations: [{ kind: 'receipt', targetId: free6.receipt.id, amountCents: 4_000 }],
+    });
+    expect(direct6.body.error?.code, JSON.stringify(direct6.body)).toBe('TARGET_IN_BATCH');
+    const file6 = () => ctx.app.inject({ method: 'GET', url: `/api/erp/payments/batches/${b6.id}/file`, headers: { cookie: payer } });
+    expect((await file6()).statusCode).toBe(200);
+    // 兜底：库里直接记一笔核销到这张收货单的已确认付款（绕开了上面的拦截）→ 文件不给下载
+    const [p6] = await ctx.sql<{ id: number }[]>`
+      INSERT INTO payments (doc_no, supplier_id, pay_date, amount_cents, method, status, created_by, confirmed_by, confirmed_at)
+      VALUES (${`FK-T-${randomUUID().slice(0, 8)}`}, ${supplierId}, ${today}, 4000, 'bank_transfer', 'confirmed', ${ctx.ownerId}, ${ctx.ownerId}, now())
+      RETURNING id`;
+    await ctx.sql`INSERT INTO payment_allocations (payment_id, receipt_doc_id, amount_cents) VALUES (${p6!.id}, ${free6.receipt.id}, 4000)`;
+    const stale6 = await file6();
+    expect(stale6.statusCode).toBe(409);
+    expect(stale6.json().error).toMatchObject({ code: 'BATCH_STALE' });
+    expect(stale6.json().error.message).toContain('¥160.00');
+    // 没在网银里付：这一行标失败，这张收货单又能单独登记
+    await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/batch-items/${b6.items[0].id}/failed`, { reason: '文件作废了，没付' }), 200);
+    const direct6b = await api(ctx.app, payer, 'POST', '/api/payables/payments', {
+      clientKey: randomUUID(),
+      supplierId,
+      payDate: today,
+      amountCents: 1_000,
+      method: 'bank_transfer',
+      evidence: '流水尾号 0607',
+      allocations: [{ kind: 'receipt', targetId: free6.receipt.id, amountCents: 1_000 }],
+    });
+    expect(direct6b.status, JSON.stringify(direct6b.body)).toBe(201);
 
     // 批量付款对上流水、记了账以后，那笔付款被冲销：流水那一行要标「对象已失效」（不再显示对平了）
     const lineOf = async () =>

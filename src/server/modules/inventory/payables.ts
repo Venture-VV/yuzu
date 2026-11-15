@@ -385,6 +385,32 @@ export async function checkAllocations(tx: Tx, supplierId: number, allocations: 
   }
 }
 
+/**
+ * 不走付款申请的付款与核销（付款登记、它的确认与退回再提交、供应商往来核销）：核销到的收货单 / 期初未付，
+ * 正被一批没结束的批量付款里的付款申请占着时拒绝（8.0.21，测试会话在 ee51abe 上报的 P1）——批量付款文件里是生成时的金额，
+ * 这里再付一次，网银上传那份文件就多付了。走付款申请的付款不用核：申请占的金额在建申请时已经与别的申请、收货单的未付分开（OVER_REQUESTED）。
+ * 调用方已锁住供应商与收货单；批次明细只读（生成批次锁付款申请、导出与下载前再核对一遍未付，见 payment-batches.ts）。
+ */
+export async function assertNotReservedByBatch(tx: Tx, allocations: { kind: 'receipt' | 'opening'; targetId: number }[]) {
+  const receiptIds = allocations.filter((a) => a.kind === 'receipt').map((a) => a.targetId);
+  const openingIds = allocations.filter((a) => a.kind === 'opening').map((a) => a.targetId);
+  if (!receiptIds.length && !openingIds.length) return;
+  const [hit] = await tx<{ batchNo: string; requestNo: string; docNo: string }[]>`
+    SELECT b.batch_no, r.request_no, coalesce(d.doc_no, o.doc_no) AS doc_no
+    FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id JOIN payment_requests r ON r.id = i.payment_request_id
+    JOIN payment_request_targets t ON t.request_id = i.payment_request_id
+    LEFT JOIN inv_docs d ON d.id = t.receipt_doc_id LEFT JOIN opening_payables o ON o.id = t.opening_payable_id
+    WHERE i.active AND b.status IN ('draft', 'exported')
+      AND (${receiptIds.length ? tx`t.receipt_doc_id IN ${tx(receiptIds)}` : tx`false`} OR ${openingIds.length ? tx`t.opening_payable_id IN ${tx(openingIds)}` : tx`false`})
+    ORDER BY i.id LIMIT 1`;
+  if (hit) {
+    throw conflict(
+      'TARGET_IN_BATCH',
+      `${hit.docNo} 正在批量付款 ${hit.batchNo}（付款申请 ${hit.requestNo}）里：等那一批有结论（记已付、标失败，或作废那一批）以后再登记，免得网银上传那份文件时多付`,
+    );
+  }
+}
+
 export async function confirmPayment(tx: Tx, p: { id: number; supplierId: number; amountCents: number; payDate: string }, actor: Actor, comment = '') {
   const allocs = await tx<{ kind: 'receipt' | 'opening'; targetId: number; amountCents: number }[]>`
     SELECT CASE WHEN receipt_doc_id IS NOT NULL THEN 'receipt' ELSE 'opening' END AS kind,
@@ -437,6 +463,7 @@ export async function createPayment(deps: Deps, raw: unknown, actor: Actor, ip?:
       // 挂合同的货款要走付款申请（v0.7.32，P7）
       await assertNoContractReceipts(tx, input.allocations);
       await checkAllocations(tx, input.supplierId, input.allocations, null);
+      await assertNotReservedByBatch(tx, input.allocations);
       const docNo = await nextDocNo(tx, 'payment', 'FK', input.payDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO payments (doc_no, supplier_id, pay_date, amount_cents, method, evidence, note, status, client_key, created_by)
@@ -494,6 +521,11 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
         if (p!.paymentRequestId === null) {
           const held = await tx<{ id: number }[]>`SELECT receipt_doc_id AS id FROM payment_allocations WHERE payment_id = ${p!.id} AND receipt_doc_id IS NOT NULL ORDER BY receipt_doc_id`;
           await assertNoHoldOnReceipts(tx, held.map((r) => Number(r.id)));
+          // 登记以后、确认之前，这几笔货款进了批量付款：不确认（8.0.21）
+          const allocs = await tx<{ kind: 'receipt' | 'opening'; targetId: number }[]>`
+            SELECT CASE WHEN receipt_doc_id IS NOT NULL THEN 'receipt' ELSE 'opening' END AS kind, coalesce(receipt_doc_id, opening_payable_id) AS target_id
+            FROM payment_allocations WHERE payment_id = ${p!.id}`;
+          await assertNotReservedByBatch(tx, allocs.map((a) => ({ kind: a.kind, targetId: Number(a.targetId) })));
         }
         return confirmPayment(tx, p!, actor, comment);
       }
@@ -513,6 +545,7 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
         // 退回后再提交也是新的提交：挂合同的货款要走付款申请（v0.7.32，P7）
         await assertNoContractReceipts(tx, allocs);
         await checkAllocations(tx, p!.supplierId, allocs, p!.id);
+        if (p!.paymentRequestId === null) await assertNotReservedByBatch(tx, allocs.map((a) => ({ kind: a.kind, targetId: Number(a.targetId) })));
         await tx`UPDATE payments SET status = 'submitted', updated_at = now() WHERE id = ${p!.id}`;
         // 退回后再提交按当时的规则从第一级重新走；没有规则命中按默认规则（与以前一样，退回的再提交都要确认）
         await submitForApproval(tx, 'payment', p!.id, ctx, { fallback: true });
@@ -848,6 +881,7 @@ export async function createOffset(deps: Deps, raw: unknown, actor: Actor, ip?: 
       }
       // 应付一方：与付款核销同样的校验（锁收货单、不超过未付、待确认付款占用的不能再核销）
       await checkAllocations(tx, input.supplierId, input.lines, null);
+      await assertNotReservedByBatch(tx, input.lines);
       const docNo = await nextDocNo(tx, 'ap_offset', 'HX', input.offsetDate);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO ap_offsets (doc_no, supplier_id, offset_date, credit_payment_id, credit_return_id, amount_cents, note, status, client_key, created_by)

@@ -231,6 +231,25 @@ const TEMPLATE_COLUMNS: Record<BankTemplate, { headers: string[]; row: (i: { lin
   generic: { headers: ['序号', '收款户名', '收款账号', '收款开户行', '金额（元）', '用途'], row: (i) => [i.lineNo, i.payeeName, i.payeeAccount, i.payeeBank, yuanText(i.amountCents), i.purpose] },
 };
 
+/**
+ * 批次里还没有结论的每一行：申请还是待付款、没付的还够这一行的金额；没挂合同的，申请里选的货款还能核销这么多。
+ * 导出前、下载文件前各核对一次（Codex 审查 beabd59、测试会话 ee51abe 后补）——单独登记付款、作废、结束、不走申请的付款登记与核销
+ * 在批次占着时已经拦了，这里兜底：对不上的不导出、不给下载（照这份文件付就多付了）。
+ */
+async function assertBatchCurrent(db: Db, batchId: number, today: string, remedy: string) {
+  const items = await db<{ lineNo: number; requestId: number; amountCents: string }[]>`
+    SELECT line_no, payment_request_id AS request_id, amount_cents::text AS amount_cents FROM payment_batch_items
+    WHERE batch_id = ${batchId} AND status = 'pending' ORDER BY line_no`;
+  for (const i of items) {
+    const req = await getPaymentRequest(db, Number(i.requestId), today);
+    const amount = Number(i.amountCents);
+    const left = req.amountCents - req.paidCents;
+    const room = req.payMode === 'ap' && req.contractId === null ? req.targets.reduce((sum, t) => sum + Math.max(0, Math.min(t.amountCents - t.paidCents, t.openCents)), 0) : left;
+    if (req.status !== 'approved' || left < amount || room < amount)
+      throw conflict('BATCH_STALE', `第 ${i.lineNo} 行（付款申请 ${req.requestNo}）生成以后变了（${req.status !== 'approved' ? '申请已经不是待付款' : `还没付的只剩 ¥${yuanText(Math.min(left, room))}`}）：${remedy}`);
+  }
+}
+
 async function exportBatch(deps: Deps, id: number, raw: unknown, actor: Actor, ip?: string): Promise<BatchView> {
   const { version } = parse(z.object({ version: z.number().int().min(1) }), raw);
   await deps.sql.begin(async (tx) => {
@@ -239,30 +258,20 @@ async function exportBatch(deps: Deps, id: number, raw: unknown, actor: Actor, i
     if (b.version !== version) throw conflict('BATCH_CHANGED', '这一批刚被别人改过，请刷新后再看');
     if (b.status === 'exported') return;
     if (b.status !== 'draft') throw conflict('BATCH_CLOSED', '这一批已经完成或作废了');
-    // 导出前再核对一次（Codex 审查 beabd59 后补）：每一行的申请还是待付款、没付的还够这一行的金额；
-    // 没挂合同的，申请里选的货款还能核销这么多（单独登记付款、作废、结束在批次占着时已经拦了，这里兜底）——对不上的不导出，作废重开
-    const today = todayIn(deps.config.timezone);
-    const items = await tx<{ lineNo: number; requestId: number; amountCents: string }[]>`
-      SELECT line_no, payment_request_id AS request_id, amount_cents::text AS amount_cents FROM payment_batch_items
-      WHERE batch_id = ${id} AND status = 'pending' ORDER BY line_no`;
-    for (const i of items) {
-      const req = await getPaymentRequest(tx, Number(i.requestId), today);
-      const amount = Number(i.amountCents);
-      const left = req.amountCents - req.paidCents;
-      const room = req.payMode === 'ap' && req.contractId === null ? req.targets.reduce((sum, t) => sum + Math.max(0, Math.min(t.amountCents - t.paidCents, t.openCents)), 0) : left;
-      if (req.status !== 'approved' || left < amount || room < amount)
-        throw conflict('BATCH_STALE', `第 ${i.lineNo} 行（付款申请 ${req.requestNo}）生成以后变了（${req.status !== 'approved' ? '申请已经不是待付款' : `还没付的只剩 ¥${yuanText(Math.min(left, room))}`}）：请作废这一批、重新生成`);
-    }
+    // 导出前再核对一次（Codex 审查 beabd59 后补）
+    await assertBatchCurrent(tx, id, todayIn(deps.config.timezone), '请作废这一批、重新生成');
     await tx`UPDATE payment_batches SET status = 'exported', exported_by = ${actor.id}, exported_at = now(), version = version + 1 WHERE id = ${id}`;
     await writeAudit(tx, { staffId: actor.id, action: 'payment_batch', targetType: 'payment_batch', targetId: id, detail: { op: 'export', batchNo: b.batchNo }, ip });
   });
   return getBatch(deps.sql, id);
 }
 
-async function batchFile(db: Db, id: number): Promise<{ name: string; type: string; body: Buffer | string }> {
+async function batchFile(db: Db, id: number, today: string): Promise<{ name: string; type: string; body: Buffer | string }> {
   const [b] = await db<{ batchNo: string; template: BankTemplate; status: string }[]>`SELECT batch_no, template, status FROM payment_batches WHERE id = ${id}`;
   if (!b) throw notFound('批次不存在');
   if (b.status === 'draft' || b.status === 'voided') throw conflict('BATCH_NOT_EXPORTED', b.status === 'draft' ? '先点「导出」把这一批定下来' : '这一批已经作废了');
+  // 下载前再核对一次还没有结论的行：导出以后货款被别的路径付掉的，这份文件不能再用
+  await assertBatchCurrent(db, id, today, '这份文件不能再用：没在网银里付的，把这一行标「失败」或作废这一批后重新生成');
   const items = await db<{ lineNo: number; payeeName: string; payeeBank: string; payeeAccount: string; amountCents: string; purpose: string }[]>`
     SELECT line_no, payee_name, payee_bank, payee_account, amount_cents::text AS amount_cents, purpose FROM payment_batch_items WHERE batch_id = ${id} AND status <> 'removed' ORDER BY line_no`;
   const t = TEMPLATE_COLUMNS[b.template];
@@ -397,7 +406,7 @@ export function registerPaymentBatchRoutes(app: FastifyInstance, deps: Deps) {
   });
   app.post('/api/erp/payments/batches/:id/export', { preHandler: MANAGE }, async (req) => exportBatch(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
   app.get('/api/erp/payments/batches/:id/file', { preHandler: MANAGE }, async (req, reply) => {
-    const f = await batchFile(sql, parse(idParam, req.params).id);
+    const f = await batchFile(sql, parse(idParam, req.params).id, today());
     await writeAudit(sql, { staffId: req.actor.id, action: 'payment_batch', targetType: 'payment_batch', targetId: parse(idParam, req.params).id, detail: { op: 'download', file: f.name }, ip: req.ip });
     attachment(reply, f.name, f.type);
     return reply.send(f.body);
