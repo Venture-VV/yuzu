@@ -24,10 +24,12 @@ const state = async () => (await api(ctx.app, designer, 'GET', '/api/studio/emen
 const save = (rev: number, doc: StudioDoc) => api(ctx.app, designer, 'PUT', '/api/studio/emenu/draft', { rev, doc });
 
 describe('设计师只进工作台', () => {
-  it('能进工作台、取菜单内容；进不了会员、前台、后台电子菜单、平板点餐；别的岗位进不了工作台', async () => {
+  it('能进工作台、取菜单内容；进不了会员、前台、后台电子菜单、按手牌找客人；别的岗位进不了工作台', async () => {
     expect((await api(ctx.app, designer, 'GET', '/api/studio')).status).toBe(200);
     expect((await api(ctx.app, designer, 'GET', '/api/studio/emenu/menu')).status).toBe(200);
-    for (const url of ['/api/members?q=1', '/api/frontdesk/board', '/api/admin/emenu', '/api/emenu/menu', '/api/admin/overview', '/api/ai/status']) {
+    // 平板菜单只读给设计师（「预览 → 在这台电脑上打开」）；按手牌找客人、下单照旧不给
+    expect((await api(ctx.app, designer, 'GET', '/api/emenu/menu')).status).toBe(200);
+    for (const url of ['/api/members?q=1', '/api/frontdesk/board', '/api/admin/emenu', '/api/emenu/guest?tag=8060', '/api/emenu/table?table=01', '/api/admin/overview', '/api/ai/status']) {
       expect((await api(ctx.app, designer, 'GET', url)).status, url).toBe(403);
     }
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/studio')).status).toBe(403);

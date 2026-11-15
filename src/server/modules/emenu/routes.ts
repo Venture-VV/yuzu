@@ -20,7 +20,8 @@ export function registerEmenuRoutes(app: FastifyInstance, deps: Deps) {
 
   // ── 平板 ──
   // 维护电子菜单的人预览时也读这一份
-  app.get('/api/emenu/menu', { preHandler: guardAny('emenu.view', 'emenu.manage') }, async () => readSnapshot(sql, (tx) => emenuMenu(tx, deps)));
+  // 设计师在工作台点「预览 → 在这台电脑上打开」也读这一份（8.1.1，只读；按手牌找客人、下单照旧只给平板）
+  app.get('/api/emenu/menu', { preHandler: guardAny('emenu.view', 'emenu.manage', 'studio.edit') }, async () => readSnapshot(sql, (tx) => emenuMenu(tx, deps)));
   app.get('/api/emenu/guest', { preHandler: tablet }, async (req) => emenuGuest(sql, req.query ?? {}));
   app.get('/api/emenu/table', { preHandler: tablet }, async (req) => checkEmenuTable(sql, req.query ?? {}));
   app.post('/api/emenu/orders', { preHandler: tablet }, async (req) => placeEmenuOrder(deps, req.body, req.actor, req.ip));

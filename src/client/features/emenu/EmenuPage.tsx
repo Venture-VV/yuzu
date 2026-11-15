@@ -301,7 +301,8 @@ export function EmenuPage() {
   const guestQ = useQuery({
     queryKey: guestKey(session?.visitId ?? null),
     queryFn: () => api.get<EmenuGuest>(`/api/emenu/guest?tag=${encodeURIComponent(session!.tagCode)}`),
-    enabled: !!session && drawerOrdered,
+    // 工作台的预览不找真的客人（「已下单」一页是空的）
+    enabled: !!session && drawerOrdered && session.visitId > 0,
     refetchInterval: drawerOrdered ? 15_000 : false,
     retry: false,
   });
@@ -482,7 +483,8 @@ export function EmenuPage() {
     );
   }
 
-  if (!menu.enabled) {
+  // 工作台的预览：平板点餐还没开也能看样子
+  if (!menu.enabled && !layout.preview) {
     return (
       <Stage testId="emenu">
         <StartBackdrop coverUrl={null} />
@@ -929,8 +931,18 @@ function parseGuests(text: string): number | null {
   return /^[0-9]{1,2}$/.test(text) && n >= 1 && n <= EMENU_MAX_GUESTS ? n : null;
 }
 
+/** 工作台的预览（/emenu?studio=<码>，8.1.1）：不找真的客人、不核对真的桌号、不能下单——设计师的账号也能点一遍 */
+const inStudioPreview = () => {
+  try {
+    return new URLSearchParams(window.location.search).has('studio');
+  } catch {
+    return false;
+  }
+};
+
 /** 向门店系统核对手牌与桌号：对上了返回这一次点餐；数字重了返回候选让客人点选 */
 async function resolveInfo(tag: string, table: string, m: Messages): Promise<{ guest: EmenuGuest; tableName: string } | { pick: 'tag' | 'table'; candidates: string[]; text: string }> {
+  if (inStudioPreview()) return { guest: { visitId: -1, tagCode: tag.toUpperCase() || 'A8060', ordered: [], orderedTotal: 0 }, tableName: table || 'A01' };
   let guest: EmenuGuest;
   try {
     guest = await api.get<EmenuGuest>(`/api/emenu/guest?tag=${encodeURIComponent(tag)}`);
