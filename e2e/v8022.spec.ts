@@ -86,10 +86,12 @@ test.describe('8.0.22 多门店、调拨与 AI 辅助', () => {
     await expect(page.getByTestId('ai-rules')).toBeVisible();
     await expect(page.getByTestId('ai-rule-enabled')).toBeChecked();
 
-    // 经营总览顶上「昨日小结」：应用每分钟的自动任务已经生成了前一天的一份（没配模型时只有数字）
+    // 经营总览顶上「昨日小结」：不依赖每分钟的任务刚好生成过（刚过营业日切换时还没有），点「生成 / 重新生成」再看；
+    // 没配模型时只有数字
     await page.goto('/admin/dashboard/overview');
     const card = page.getByTestId('ai-summary');
     await expect(card).toBeVisible();
+    await card.getByTestId('ai-summary-regenerate').click({ timeout: 20_000 });
     await expect(card).toContainText(status.mode === 'off' ? '只有数字' : '已生成', { timeout: 20_000 });
     await card.getByTestId('ai-summary-toggle').click();
     await expect(card.getByTestId('ai-summary-facts')).toContainText('净营业额');
