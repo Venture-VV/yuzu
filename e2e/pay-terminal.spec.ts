@@ -91,4 +91,31 @@ test.describe('8.0.21 扫码收款', () => {
     await failed.getByTestId('unsettled-pay-error-retry').click();
     await expect(page.getByTestId('unsettled-pay-error')).toHaveCount(0, { timeout: 20_000 });
   });
+
+  test('扫码收款弹窗里「收了钱没入账」取不回来：写明查不到、可以重试（不让人以为没有、再扫一次）', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const status = (await (await page.request.get('/api/pay/terminal/status')).json()) as { mode: string };
+    test.skip(status.mode !== 'mock', '应用没有带 INTEGRATIONS_MOCK=true 启动（只在开发、测试实例）');
+    await ensureShift(page);
+    await page.goto('/frontdesk');
+    const free = page.locator('[data-testid^="tag-"][data-state="free"]').first();
+    const tag = ((await free.getAttribute('data-testid')) ?? '').replace(/^tag-/, '');
+    const checkin = await page.request.post('/api/frontdesk/checkins', { data: { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: tag.startsWith('B') ? 'female' : 'male' }] } });
+    expect(checkin.status(), await checkin.text()).toBe(201);
+    await page.route('**/api/pay/terminal/open', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.reload();
+    await page.getByTestId(`tag-${tag}`).click();
+    await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
+    await page.getByTestId('pay-add-wechat').click();
+    await page.getByTestId('pay-row-wechat').getByTestId('scan-pay-wechat').click();
+    const dialog = page.getByRole('dialog').filter({ hasText: '微信扫码收款' });
+    const failed = dialog.getByTestId('scan-pay-reusable-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await expect(failed).toContainText('有的话直接用，不用再扫一次');
+    await page.unroute('**/api/pay/terminal/open');
+    await failed.getByTestId('scan-pay-reusable-error-retry').click();
+    await expect(dialog.getByTestId('scan-pay-reusable-error')).toHaveCount(0, { timeout: 20_000 });
+    await expect(dialog.getByTestId('scan-pay-code')).toBeVisible();
+  });
 });

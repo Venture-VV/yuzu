@@ -21,6 +21,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Badge, Button, Card, Field, Input, Notice, Skeleton } from '../../components/ui';
 import { ErpPage } from '../erp/ErpHome';
 import { SalesInvoiceStatus } from './InvoiceRequest';
@@ -76,7 +77,13 @@ export function SalesInvoicesPage() {
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="申请号、单号、抬头、发票号码" fullWidth={false} className="ml-auto h-9 w-60" aria-label="搜索开票申请" />
         </div>
         {!list.data ? (
-          list.error ? <Notice tone="error" title={errorMessage(list.error)} /> : <Skeleton className="h-60" />
+          list.isError ? (
+            <LoadFailed title="开票申请取不回来，请检查网络" onRetry={() => void list.refetch()} retrying={list.isFetching} testId="sales-invoices-error">
+              {errorMessage(list.error)}
+            </LoadFailed>
+          ) : (
+            <Skeleton className="h-60" />
+          )
         ) : list.data.rows.length === 0 ? (
           <EmptyState art="leaf" title="没有开票申请" description={view === 'requested' ? '前台申请以后会出现在这里' : '换个视图看看'} />
         ) : (
@@ -154,7 +161,7 @@ function SalesInvoiceSheet({ id, providerMode, onClose }: { id: number | null; p
       </div>
       {!r ? (
         <div className="p-5">
-          <Skeleton className="h-40" />
+          {detail.isError ? <LoadFailed title="这张开票申请取不回来，请检查网络" onRetry={() => void detail.refetch()} retrying={detail.isFetching} testId="sales-invoice-detail-error" /> : <Skeleton className="h-40" />}
         </div>
       ) : (
         <div className="space-y-4 p-5 text-[13.5px]" data-testid="sales-invoice-sheet">

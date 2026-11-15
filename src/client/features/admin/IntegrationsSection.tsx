@@ -9,6 +9,7 @@ import { INTEGRATION_MODE_LABELS, type IntegrationMode, type IntegrationSwitches
 import { api, errorMessage } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Badge, Button, Card, Field, Input, Select, Skeleton } from '../../components/ui';
 import { AdminPage } from './AdminShell';
 
@@ -74,7 +75,11 @@ export function IntegrationsSection() {
         <Card className="p-5">
           <h2 className="mb-3 text-[15px] font-bold">模式</h2>
           {!info.data ? (
-            <Skeleton className="h-32" />
+            info.isError ? (
+              <LoadFailed title="对外接口的模式取不回来，请检查网络" onRetry={() => void info.refetch()} retrying={info.isFetching} testId="integration-kinds-error" />
+            ) : (
+              <Skeleton className="h-32" />
+            )
           ) : (
             <ul className="divide-y divide-line/70 text-[13px]" data-testid="integration-kinds">
               {info.data.kinds.map((k) => (
@@ -140,7 +145,11 @@ export function IntegrationsSection() {
             </label>
           </div>
           {!calls.data ? (
-            <Skeleton className="h-32" />
+            calls.isError ? (
+              <LoadFailed title="对外调用记录取不回来，请检查网络" onRetry={() => void calls.refetch()} retrying={calls.isFetching} testId="integration-calls-error" />
+            ) : (
+              <Skeleton className="h-32" />
+            )
           ) : calls.data.length === 0 ? (
             <p className="text-[13px] text-ink-3">还没有对外调用。</p>
           ) : (

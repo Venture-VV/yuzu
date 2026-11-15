@@ -27,6 +27,7 @@ import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
@@ -247,7 +248,7 @@ function LineSheet({ id, manage, onClose }: { id: number | null; manage: boolean
       </div>
       {!l ? (
         <div className="p-5">
-          <Skeleton className="h-40" />
+          {line.isError ? <LoadFailed title="这条流水取不回来，请检查网络" onRetry={() => void line.refetch()} retrying={line.isFetching} testId="bank-line-error" /> : <Skeleton className="h-40" />}
         </div>
       ) : (
         <div className="space-y-4 p-5" data-testid="bank-line-sheet">
@@ -288,7 +289,11 @@ function LineSheet({ id, manage, onClose }: { id: number | null; manage: boolean
                 挑系统里的记录（还差 <span className="num">{yuan(remaining)}</span>）
               </p>
               {!cand.data ? (
-                <Skeleton className="h-24" />
+                cand.isError ? (
+                  <LoadFailed title="能对的记录取不回来，请检查网络" onRetry={() => void cand.refetch()} retrying={cand.isFetching} testId="bank-candidates-error" />
+                ) : (
+                  <Skeleton className="h-24" />
+                )
               ) : all.length === 0 ? (
                 <p className="text-[13px] text-ink-3">前后 30 天里没有金额不超过它、还没对上的记录。利息、手续费这类可以标「不用对」。</p>
               ) : (

@@ -33,6 +33,7 @@ import { cn, downloadUrl } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { SubPane } from '../../components/SubNav';
 import { useToast } from '../../components/Toast';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Badge, Button, Card, Field, IconButton, Input, Notice, Segmented, SectionTitle, Select, Skeleton } from '../../components/ui';
 import { AdminPage } from './AdminShell';
 
@@ -67,7 +68,12 @@ export function DictionariesSection() {
 
 function ReasonsBody() {
   const settings = useSettings();
-  if (!settings.data) return <Skeleton className="h-60" />;
+  if (!settings.data)
+    return settings.isError ? (
+      <LoadFailed title="快捷原因取不回来，请检查网络" onRetry={() => void settings.refetch()} retrying={settings.isFetching} testId="dict-reasons-error" />
+    ) : (
+      <Skeleton className="h-60" />
+    );
   const dicts = (settings.data as { dictionaries?: Dictionaries }).dictionaries ?? DEFAULT_DICTIONARIES;
   return (
     <div className="max-w-[1024px] space-y-4">
@@ -207,7 +213,14 @@ const DEFS_KEY = ['custom-fields', 'defs'] as const;
 function FieldsBody() {
   const defs = useQuery({ queryKey: DEFS_KEY, queryFn: () => api.get<CustomFieldDef[]>('/api/custom-fields/defs') });
   const [editing, setEditing] = useState<{ entity: CustomFieldEntity; def: CustomFieldDef | null } | null>(null);
-  if (!defs.data) return defs.error ? <Notice tone="error" title={errorMessage(defs.error)} /> : <Skeleton className="h-60" />;
+  if (!defs.data)
+    return defs.isError ? (
+      <LoadFailed title="自定义字段取不回来，请检查网络" onRetry={() => void defs.refetch()} retrying={defs.isFetching} testId="dict-fields-error">
+        {errorMessage(defs.error)}
+      </LoadFailed>
+    ) : (
+      <Skeleton className="h-60" />
+    );
   return (
     <div className="max-w-[1024px] space-y-4">
       <p className="text-[13px] text-ink-3">
@@ -407,6 +420,9 @@ function SearchBody() {
     enabled: !!submitted,
   });
   if (!entities.length) return <Notice tone="info" title="当前岗位看不了会员、供应商、物料、合同，没有可查的" />;
+  // 字段定义取不回来：写明加载失败、可以重试，不显示成「没有字段可查」
+  if (defs.isError && !defs.data)
+    return <LoadFailed title="自定义字段取不回来，请检查网络" onRetry={() => void defs.refetch()} retrying={defs.isFetching} testId="dict-search-error" />;
   return (
     <div className="max-w-[1024px] space-y-4">
       <Card className="p-4">
@@ -488,7 +504,7 @@ function SearchBody() {
           </Button>
         </div>
       </Card>
-      {result.error && <Notice tone="error" title={errorMessage(result.error)} />}
+      {result.error && !result.data && <LoadFailed title={`没查出来：${errorMessage(result.error)}`} onRetry={() => void result.refetch()} retrying={result.isFetching} testId="cf-search-error" />}
       {submitted && result.data && (
         <Card className="overflow-hidden" data-testid="cf-search-result">
           {result.data.rows.length === 0 ? (

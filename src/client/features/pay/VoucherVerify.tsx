@@ -217,6 +217,9 @@ function VerifyDialog({ open, onClose, platform, code, onVerified }: { open: boo
           </Notice>
         )}
         {error && <Notice tone="error" title={error} />}
+        {openList.isError && !openList.data && (
+          <LoadFailed title="验过没结账的券查不到（有的话直接用，不用再验），请检查网络" onRetry={() => void openList.refetch()} retrying={openList.isFetching} testId="voucher-reusable-error" />
+        )}
         {reusable.length > 0 && (
           <div className="rounded-lg border border-line p-2" data-testid="voucher-reusable">
             <p className="mb-1 font-semibold text-ink-2">验过还没结账的，可以直接用：</p>

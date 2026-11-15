@@ -25,6 +25,7 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
+import { LoadFailed } from '../../components/LoadFailed';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { PoReceiptsList } from '../../components/ReceiptAttachments';
@@ -326,6 +327,8 @@ export function ClaimFormPage() {
   const setLine = (key: string, patch: Partial<AdhocLine>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   const setPick = (id: number, patch: Partial<(typeof poPick)[number]>) => setPoPick((p) => ({ ...p, [id]: { ...p[id]!, ...patch } }));
 
+  const listsFailed = [rules, departments, handlers].filter((q) => q.isError && !q.data);
+
   return (
     <>
       <PageHeader
@@ -346,6 +349,14 @@ export function ClaimFormPage() {
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1080px] space-y-4 px-5 py-5 md:px-7" data-testid="claim-form">
           <ErpPendingPanel types={['expense_claim']} onFound={(_, ref) => navigate(`/erp/expenses?claim=${ref.refId}`)} />
+          {listsFailed.length > 0 && (
+            <LoadFailed
+              title="报销要用的清单取不回来（用途、发票类型、部门或经办人），请检查网络"
+              onRetry={() => listsFailed.forEach((q) => void q.refetch())}
+              retrying={listsFailed.some((q) => q.isFetching)}
+              testId="claim-lists-error"
+            />
+          )}
           {mode === 'po' && pf && pf.basis.length > 0 && (
             <Notice tone="info" title="已按采购单带好，请核对后提交（与实际不一样的直接改）" data-testid="claim-prefill-note">
               <ul className="list-disc pl-5 text-[12.5px]">

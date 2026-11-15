@@ -234,6 +234,9 @@ export function ScanPayDialog({ open, onClose, provider, amountCents, purpose, o
           </form>
         )}
         {error && <Notice tone="error" title={error} />}
+        {openTxs.isError && !openTxs.data && !tx && (
+          <LoadFailed title="收了钱没入账的扫码收款查不到（有的话直接用，不用再扫一次），请检查网络" onRetry={() => void openTxs.refetch()} retrying={openTxs.isFetching} testId="scan-pay-reusable-error" />
+        )}
         {reusable.length > 0 && !tx && (
           <div className="rounded-lg border border-line p-2 text-[13px]" data-testid="scan-pay-reusable">
             <p className="mb-1 font-semibold text-ink-2">收了钱还没入账的（同方式、同金额），可以直接用：</p>

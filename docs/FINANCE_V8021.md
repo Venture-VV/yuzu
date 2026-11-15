@@ -125,6 +125,8 @@
 
 新模块默认开（功能开关默认开的约定），依赖：`sales_invoices` 不依赖别的；`bank` 依赖 `payables`。
 
+页面取数据的地方（上表各入口、各自的详情与弹窗，以及登记报销要用的用途、发票类型、部门与经办人）取不回来时一律写明加载失败、可以重试（`components/LoadFailed`），不显示成「还没有」或空的下拉——Codex 审查一轮轮报了几处以后主动扫了一遍，浏览器用例用 503 逐处核对（`e2e/dictionaries.spec.ts`、`expenses.spec.ts` 等）。
+
 ## 9. 迁移号
 
 `141` 自定义字段 · `142` 发票登记方式 · `143` 开票申请（含对外调用记录 `integration_calls`）· `144` 银行账户与流水、勾对 · `145` 供应商收款账户与批量付款 · `146` 合同模板 · `147` 供应商门户链接 · `148`–`150` 见 `docs/INTEGRATIONS_V8021.md` · `151` 供应商收款账户的双人复核 · `152` 订单确认按采购单的版次（这两个是合并前 Codex 审查后补的）。新的业务类型（`invoice_request`、`bank_import`、`bank_match`、`payment_batch`、`supplier_link` 等）给 `op_fences` / `idempotency_keys` 的约束**在当时的约束上追加**（写法同 `140`、`162`），`tests/op-fences-constraint.test.ts` 核对。

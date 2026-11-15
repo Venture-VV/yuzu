@@ -148,6 +148,8 @@ export function OtaOrdersPanel() {
     }
   };
 
+  if (channels.isError && !channels.data)
+    return <LoadFailed title="渠道取不回来，请检查网络" onRetry={() => void channels.refetch()} retrying={channels.isFetching} testId="ota-channels-error" />;
   if (channels.data && !active.length) return <Notice tone="info" title="还没有渠道：请到后台「营业项目 → 客房 → 渠道」先加渠道和房型对照。" />;
   return (
     <div className="space-y-4" data-testid="ota-orders">
@@ -351,7 +353,11 @@ export function OtaChannelsCard() {
         )}
       </div>
       {!channels.data ? (
-        <Skeleton className="h-20" />
+        channels.isError ? (
+          <LoadFailed title="渠道取不回来，请检查网络" onRetry={() => void channels.refetch()} retrying={channels.isFetching} testId="ota-channel-list-error" />
+        ) : (
+          <Skeleton className="h-20" />
+        )
       ) : (
         <ul className="divide-y divide-line/70 rounded-md border border-line text-[13px]">
           {channels.data.map((c) => (
@@ -386,7 +392,11 @@ export function OtaChannelsCard() {
             </label>
           </div>
           <p className="text-[13px] font-semibold text-ink-2">渠道房型 → 本店房型</p>
-          {editing.rows.map((r, i) => (
+          {types.isError && !types.data && (
+            <LoadFailed title="本店房型取不回来，对照选不了（已有的对照保存时照旧留着），请检查网络" onRetry={() => void types.refetch()} retrying={types.isFetching} testId="ota-room-types-error" />
+          )}
+          {!types.data && !types.isError && <Skeleton className="h-9" />}
+          {types.data && editing.rows.map((r, i) => (
             <div key={i} className="flex flex-wrap items-center gap-2">
               <Input value={r.name} fullWidth={false} placeholder="渠道上的房型名（照订单表写）" className="h-9 w-56" onChange={(e) => setEditing({ ...editing, rows: editing.rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} aria-label={`渠道房型 ${i + 1}`} />
               <Select value={r.roomTypeId} fullWidth={false} className="h-9 w-44" onChange={(e) => setEditing({ ...editing, rows: editing.rows.map((x, j) => (j === i ? { ...x, roomTypeId: Number(e.target.value) || '' } : x)) })} aria-label={`本店房型 ${i + 1}`}>
@@ -403,7 +413,7 @@ export function OtaChannelsCard() {
             </div>
           ))}
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="ghost" icon={<Plus className="size-3.5" />} onClick={() => setEditing({ ...editing, rows: [...editing.rows, { name: '', roomTypeId: '' }] })}>
+            <Button size="sm" variant="ghost" icon={<Plus className="size-3.5" />} disabled={!types.data} onClick={() => setEditing({ ...editing, rows: [...editing.rows, { name: '', roomTypeId: '' }] })}>
               加一条对照
             </Button>
             <span className="flex-1" />

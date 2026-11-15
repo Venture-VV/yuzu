@@ -108,4 +108,24 @@ test.describe('8.0.21 数据字典与自定义字段', () => {
       }
     }
   });
+
+  test('后台字段、按字段查与「对外接口」页取不回来：写明加载失败、可以重试（主动扫一遍后补）', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const unavailable = JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } });
+    const expectFailThenRetry = async (url: string, path: string, testId: string) => {
+      await page.route(url, (route) => route.fulfill({ status: 503, contentType: 'application/json', body: unavailable }));
+      await page.goto(path);
+      const failed = page.getByTestId(testId);
+      await expect(failed).toBeVisible({ timeout: 20_000 });
+      await page.unroute(url);
+      await failed.getByTestId(`${testId}-retry`).click();
+      await expect(page.getByTestId(testId)).toHaveCount(0, { timeout: 20_000 });
+    };
+    await expectFailThenRetry('**/api/custom-fields/defs', '/admin/dictionaries/fields', 'dict-fields-error');
+    await expectFailThenRetry('**/api/custom-fields/defs', '/admin/dictionaries/search', 'dict-search-error');
+    await expect(page.getByLabel('类别')).toBeVisible();
+    await expectFailThenRetry('**/api/admin/integrations', '/admin/integrations', 'integration-kinds-error');
+    await expectFailThenRetry('**/api/admin/integrations/calls?*', '/admin/integrations', 'integration-calls-error');
+  });
 });

@@ -22,6 +22,7 @@ import { useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { formatDateTime, uuid } from '../../lib/utils';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, MoneyInput, Notice, Segmented, Skeleton } from '../../components/ui';
@@ -178,7 +179,7 @@ export function InvoiceRequestDialog({ open, sourceType, sourceId, onClose }: { 
       <div className="space-y-4" data-testid="invoice-request-dialog">
         <ErpPendingPanel types={['invoice_request']} onFound={() => void info.refetch()} />
         {!d ? (
-          info.error ? <Notice tone="error" title={errorMessage(info.error)} /> : <Skeleton className="h-40" />
+          info.error ? <LoadFailed title={`可开票的金额取不回来：${errorMessage(info.error)}`} onRetry={() => void info.refetch()} retrying={info.isFetching} testId="invoice-request-error" /> : <Skeleton className="h-40" />
         ) : (
           <>
             <div className="rounded-lg bg-paper-2/60 px-4 py-3 text-[13px]">

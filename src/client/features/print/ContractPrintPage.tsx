@@ -4,6 +4,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
 import { api, errorMessage } from '../../lib/api';
+import { LoadFailed } from '../../components/LoadFailed';
 
 interface Doc {
   contractNo: string;
@@ -28,8 +29,8 @@ export function ContractPrintPage() {
         <span className="text-[13px] text-ink-3">{d?.templateName ? `按模板「${d.templateName}」排版` : d ? '没用模板：合同要素与两张表' : ''}</span>
       </div>
       <article className="mx-auto w-[210mm] max-w-full bg-white px-[16mm] py-[14mm] text-[12pt] leading-[1.75] text-black shadow-card print:w-auto print:p-0 print:shadow-none" data-testid="print-contract">
-        {q.error ? (
-          <p className="text-clay">{errorMessage(q.error)}</p>
+        {q.error && !d ? (
+          <LoadFailed title={`合同取不回来：${errorMessage(q.error)}`} onRetry={() => void q.refetch()} retrying={q.isFetching} className="no-print" testId="contract-print-error" />
         ) : !d ? (
           <p className="text-ink-3">正在准备……</p>
         ) : (

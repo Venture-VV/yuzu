@@ -131,7 +131,10 @@ export function SourcingSupplierLinks({ eventId, open }: { eventId: number; open
         <h3 className="text-[14px] font-bold">请供应商在线报价</h3>
         <span className="text-[12.5px] text-ink-3">发一条链接给供应商，对方不用登录、按行填单价就行；报的价直接进上面的报价（标「供应商链接」）。</span>
       </div>
-      {open && can('purchase.manage') && (
+      {open && can('purchase.manage') && suppliers.isError && !suppliers.data && (
+        <LoadFailed title="供应商名单取不回来，请检查网络" onRetry={() => void suppliers.refetch()} retrying={suppliers.isFetching} testId="sourcing-suppliers-error" />
+      )}
+      {open && can('purchase.manage') && !(suppliers.isError && !suppliers.data) && (
         <div className="flex flex-wrap items-center gap-2">
           <Select value={supplierId ?? ''} fullWidth={false} className="h-9 w-56" onChange={(e) => setSupplierId(Number(e.target.value) || null)} aria-label="发给哪家供应商" data-testid="supplier-link-supplier">
             <option value="">选供应商</option>

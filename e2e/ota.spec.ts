@@ -163,4 +163,20 @@ test.describe('8.0.21 OTA 渠道订单', () => {
     await page.getByTestId('ota-recon-error-retry').click();
     await expect(page.getByTestId('ota-recon')).toBeVisible({ timeout: 20_000 });
   });
+
+  test('后台渠道表单里本店房型取不回来：写明加载失败、可以重试，不显示成空的对照（主动扫一遍后补）', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const fail = (route: import('@playwright/test').Route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) });
+    await page.route('**/api/admin/rooms', fail);
+    await page.goto('/admin/rooms/channels');
+    await page.getByTestId('ota-channel-new').click();
+    const failed = page.getByTestId('ota-room-types-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByLabel('本店房型 1')).toHaveCount(0);
+    await page.unroute('**/api/admin/rooms');
+    await failed.getByTestId('ota-room-types-error-retry').click();
+    await expect(page.getByTestId('ota-room-types-error')).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByLabel('本店房型 1')).toBeVisible();
+  });
 });

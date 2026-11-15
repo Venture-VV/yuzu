@@ -152,4 +152,33 @@ test.describe('8.0.21 平台验券', () => {
     await failed.getByTestId('voucher-recon-error-retry').click();
     await expect(page.getByTestId('voucher-recon-error')).toHaveCount(0, { timeout: 20_000 });
   });
+
+  test('验券弹窗里「验过没结账的」取不回来：写明查不到、可以重试（主动扫一遍后补）', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page);
+    const status = (await (await page.request.get('/api/platform/verify/status')).json()) as { mode: string };
+    test.skip(status.mode !== 'mock', '应用没有带 INTEGRATIONS_MOCK=true 启动（只在开发、测试实例）');
+    const cur = (await (await page.request.get('/api/shifts/current')).json()) as { shift: unknown };
+    if (!cur.shift) expect((await page.request.post('/api/shifts', { data: { openingCash: 0 } })).ok()).toBe(true);
+    await page.goto('/frontdesk');
+    const free = page.locator('[data-testid^="tag-"][data-state="free"]').first();
+    const tag = ((await free.getAttribute('data-testid')) ?? '').replace(/^tag-/, '');
+    const checkin = await page.request.post('/api/frontdesk/checkins', { data: { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: tag.startsWith('B') ? 'female' : 'male' }] } });
+    expect(checkin.status(), await checkin.text()).toBe(201);
+    await page.route('**/api/platform/verifications/open', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.reload();
+    await page.getByTestId(`tag-${tag}`).click();
+    await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
+    await page.getByTestId('pay-add-coupon').click();
+    await page.getByLabel('团购平台').selectOption('meituan');
+    await page.getByTestId('coupon-code').fill(`E2EV${stamp}4004`);
+    await page.getByTestId('voucher-verify').click();
+    const failed = page.getByTestId('voucher-reusable-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await expect(failed).toContainText('有的话直接用，不用再验');
+    await page.unroute('**/api/platform/verifications/open');
+    await failed.getByTestId('voucher-reusable-error-retry').click();
+    await expect(page.getByTestId('voucher-reusable-error')).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId('voucher-preview')).toContainText('¥99.00');
+  });
 });

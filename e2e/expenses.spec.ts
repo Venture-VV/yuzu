@@ -80,4 +80,17 @@ test.describe('费用与备用金', () => {
     const checks = (await (await page.request.get('/api/erp/expenses/checks')).json()) as { label: string; ok: boolean }[];
     for (const c of checks) expect(c.ok, c.label).toBe(true);
   });
+
+  test('登记报销要用的清单取不回来：写明加载失败、可以重试，不显示成空的下拉（8.0.21 主动扫一遍后补）', async ({ page }) => {
+    test.setTimeout(90_000);
+    await login(page, 'linlan');
+    await page.route('**/api/erp/expenses/rules', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.goto('/erp/expenses/new');
+    const failed = page.getByTestId('claim-lists-error');
+    await expect(failed).toBeVisible({ timeout: 20_000 });
+    await page.unroute('**/api/erp/expenses/rules');
+    await failed.getByTestId('claim-lists-error-retry').click();
+    await expect(page.getByTestId('claim-lists-error')).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId('claim-form')).toBeVisible();
+  });
 });
