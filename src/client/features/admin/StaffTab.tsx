@@ -273,7 +273,7 @@ function StaffDialog({
           username,
           displayName: name,
           role,
-          duties: role === 'owner' || role === 'other_store' || role === 'tablet' ? [] : duties,
+          duties: role === 'owner' || role === 'other_store' || role === 'tablet' || role === 'designer' ? [] : duties,
           departmentId: departments.data ? departmentId : null,
         });
         onCreated(name, r.temporaryPassword);
@@ -281,7 +281,7 @@ function StaffDialog({
         await api.put(`/api/staff/${existing.id}`, {
           displayName: name,
           role,
-          duties: role === 'owner' || role === 'other_store' || role === 'tablet' ? [] : duties,
+          duties: role === 'owner' || role === 'other_store' || role === 'tablet' || role === 'designer' ? [] : duties,
           active,
           ...(departments.data ? { departmentId } : {}),
         });
@@ -339,6 +339,7 @@ function StaffDialog({
               { value: 'backoffice', label: '后勤人员' },
               { value: 'other_store', label: '他店查询' },
               { value: 'tablet', label: '点餐平板' },
+              { value: 'designer', label: '设计师' },
               { value: 'owner', label: '店主' },
             ]}
           />
@@ -351,6 +352,8 @@ function StaffDialog({
             <p className="rounded-md bg-paper-2/70 px-3 py-2.5 text-[13px] text-ink-2">他店查询只查会员档阶，没有库存与采购职责。</p>
           ) : role === 'tablet' ? (
             <p className="rounded-md bg-paper-2/70 px-3 py-2.5 text-[13px] text-ink-2">点餐平板是放在餐桌上的设备账号，只能打开平板点餐（下单要服务员输点单密码），没有库存与采购职责。</p>
+          ) : role === 'designer' ? (
+            <p className="rounded-md bg-paper-2/70 px-3 py-2.5 text-[13px] text-ink-2">设计师只进后台的「工作台」改版面、预览、发布、回滚，看不到会员、账与经营数据，没有库存与采购职责。</p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               {DUTIES.map((d) => {

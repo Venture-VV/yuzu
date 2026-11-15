@@ -20,14 +20,16 @@ export function registerEmenuRoutes(app: FastifyInstance, deps: Deps) {
 
   // ── 平板 ──
   // 维护电子菜单的人预览时也读这一份
-  app.get('/api/emenu/menu', { preHandler: guardAny('emenu.view', 'emenu.manage') }, async () => readSnapshot(sql, (tx) => emenuMenu(tx, deps)));
+  // 设计师在工作台点「预览 → 在这台电脑上打开」也读这一份（8.1.1，只读；按手牌找客人、下单照旧只给平板）
+  app.get('/api/emenu/menu', { preHandler: guardAny('emenu.view', 'emenu.manage', 'studio.edit') }, async () => readSnapshot(sql, (tx) => emenuMenu(tx, deps)));
   app.get('/api/emenu/guest', { preHandler: tablet }, async (req) => emenuGuest(sql, req.query ?? {}));
   app.get('/api/emenu/table', { preHandler: tablet }, async (req) => checkEmenuTable(sql, req.query ?? {}));
   app.post('/api/emenu/orders', { preHandler: tablet }, async (req) => placeEmenuOrder(deps, req.body, req.actor, req.ip));
   app.get('/api/emenu/orders/by-key/:key', { preHandler: tablet }, async (req) => emenuOpLookup(sql, req.params));
   app.post('/api/emenu/orders/by-key/:key/abandon', { preHandler: tablet }, async (req) => abandonEmenuOrder(deps, req.params, req.body, req.actor, req.ip));
   // 图片的内容不会变（按内容去重、只追加）：浏览器长期缓存
-  app.get('/api/emenu/images/:id', { preHandler: guardAny('emenu.view', 'emenu.manage') }, async (req, reply) => {
+  // 设计师在工作台里画菜单页也要看菜品图（8.1.1）
+  app.get('/api/emenu/images/:id', { preHandler: guardAny('emenu.view', 'emenu.manage', 'studio.edit') }, async (req, reply) => {
     const img = await emenuImage(sql, parse(idParam, req.params).id);
     reply.header('content-type', img.mime).header('cache-control', 'private, max-age=31536000, immutable');
     return reply.send(img.data);

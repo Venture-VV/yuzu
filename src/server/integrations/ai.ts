@@ -1,4 +1,6 @@
 // AI 辅助的模型适配器（8.0.22，docs/AI_V8022.md 第 4 节）。
+//   · 8.1.1 起默认用 DeepSeek（店主 2026-11-15 定 MD8，适配器在 ai-deepseek.ts）；这里的 Claude 适配器留作可选
+//     （YUZU_AI_PROVIDER=claude），服务端回退（MD9）只对它有用。
 //   · 只认 YUZU_AI_API_KEY（显式传给 SDK）：不读 ANTHROPIC_API_KEY、`ant auth` 的登录或机器上别处的密钥——
 //     店主没给浴族专门配，就一条数据都不发出去（MD7：发出去的只有打码后的汇总）。
 //   · 模型默认 claude-opus-5-5（YUZU_AI_MODEL 可换），思考深度显式设 medium；请求带服务端回退
@@ -16,7 +18,7 @@ const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 /** 一次请求最多等多久（SDK 自己会重试 2 次） */
 const REQUEST_TIMEOUT_MS = 120_000;
 
-/** 模型（连同回退的模型）拒答了：页面写「这个问题答不了」 */
+/** 模型（连同回退的模型）拒答了、或内容被模型服务的审核拦下：页面写「这个问题答不了（原因）」；message 是括号里的原因 */
 export class AiRefused extends Error {}
 /** 连不上模型服务、密钥不对、额度用完……：页面写明原因，别的功能不受影响 */
 export class AiUnavailable extends Error {}
@@ -41,8 +43,12 @@ export interface AiTool {
   run: (input: unknown) => Promise<unknown>;
 }
 
+/** 用的哪家（记在对外调用里、页面上显示） */
+export type AiProviderName = 'deepseek' | 'claude' | 'mock';
+
 export interface AiProvider {
   mode: 'mock' | 'live';
+  name: AiProviderName;
   model: string;
   /** 一次请求写一段文字（每天的经营小结） */
   write(input: { system: string; prompt: string }): Promise<{ text: string; usage: AiUsage }>;
@@ -79,10 +85,11 @@ export function claudeProvider(opts: { apiKey: string; baseURL?: string; model?:
   const model = opts.model?.trim() || AI_DEFAULT_MODEL;
   const fallback = opts.fallbacks === false ? {} : { betas: [FALLBACK_BETA], fallbacks: 'default' as const };
   const refused = (stop: string | null | undefined) => {
-    if (stop === 'refusal') throw new AiRefused('这个问题答不了（模型拒答）');
+    if (stop === 'refusal') throw new AiRefused('模型拒答');
   };
   return {
     mode: 'live',
+    name: 'claude',
     model,
     async write({ system, prompt }) {
       try {
@@ -173,6 +180,7 @@ function mockSummaryText(facts: unknown): string | null {
 export function mockAiProvider(): AiProvider {
   return {
     mode: 'mock',
+    name: 'mock',
     model: 'mock',
     async write({ prompt }) {
       // 按材料（提示第一行之后的 JSON）套固定模板；认不出的照原样截一段

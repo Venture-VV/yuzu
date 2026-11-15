@@ -37,7 +37,7 @@ services:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         ALPINE_MIRROR: ${ALPINE_MIRROR:-}
-        APP_VERSION: ${YUZU_VERSION:-8.1.0}
+        APP_VERSION: ${YUZU_VERSION:-8.1.1}
         APP_COMMIT: ${YUZU_COMMIT:-}
     # 不同 Compose 项目使用独立标签，演示构建不会覆盖试用 / 正式镜像。
     image: ${APP_IMAGE:-yuzu-app:${COMPOSE_PROJECT_NAME:-local}}
@@ -70,6 +70,12 @@ services:
       # 企业微信群机器人（8.0.7 ERP 每周一推，开关在「经营规则 → 可调的数值」）：.env 里配了才传进容器；
       # 地址相当于密码，与看门狗的告警群（WECOM_WEBHOOK_URL，宿主机上的脚本用）分开配
       ERP_WECOM_WEBHOOK: ${ERP_WECOM_WEBHOOK:-}
+      # AI 辅助的模型服务（8.1.1 默认 DeepSeek，docs/AI_V8022.md 第 4 节）：.env 里配了才传进容器；不配时什么都不发。
+      # 8.0.22 起这几项没列在这里，配了也传不进容器（8.1.1 补上）
+      YUZU_AI_PROVIDER: ${YUZU_AI_PROVIDER:-}
+      YUZU_AI_API_KEY: ${YUZU_AI_API_KEY:-}
+      YUZU_AI_BASE_URL: ${YUZU_AI_BASE_URL:-}
+      YUZU_AI_MODEL: ${YUZU_AI_MODEL:-}
       TZ: ${APP_TIMEZONE:-Asia/Shanghai}
     # APP_PORT 只写端口（8080）时开在所有网卡上，门店局域网这样用；写成「地址:端口」只开在这个地址上：云服务器上写
     # 127.0.0.1:8080（只给本机的 Caddy）或 <Tailscale 地址>:8080——Docker 发布的端口会绕过主机防火墙，不能只靠 ufw 挡。

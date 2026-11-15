@@ -13,7 +13,7 @@ export function useAiStatus(enabled = true) {
 /** 没配模型服务、模拟时页面上写的一句话 */
 export function aiModeNote(status: AiStatus | undefined): string | null {
   if (!status) return null;
-  if (status.mode === 'off') return '还没配置模型服务（服务器 .env 的 YUZU_AI_API_KEY）：只记数字，不写小结、不能问数';
+  if (status.mode === 'off') return '还没配置模型服务（服务器 .env 的 YUZU_AI_API_KEY，填 DeepSeek 的密钥）：只记数字，不写小结、不能问数';
   if (status.mode === 'mock') return '模拟模式（只在开发、测试实例）：没有调用模型，文字是固定模板';
   return null;
 }

@@ -125,7 +125,7 @@ export function AskTab() {
         {off ? (
           <Notice tone="info" title="问数已关闭">店主可以在后台「对外接口」→ AI 辅助里打开。</Notice>
         ) : status.data?.mode === 'off' ? (
-          <Notice tone="info" title="还没配置模型服务">服务器 .env 里配了 YUZU_AI_API_KEY 以后才能问数。</Notice>
+          <Notice tone="info" title="还没配置模型服务">服务器 .env 里配了 YUZU_AI_API_KEY（DeepSeek 的密钥）以后才能问数。</Notice>
         ) : (
           <>
             <Textarea

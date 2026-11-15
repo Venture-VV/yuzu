@@ -357,6 +357,8 @@ export interface EmenuMenu {
   later: { name: string; nameEn: string; window: EmenuWindow }[];
   /** 启用的桌台（空 = 店里没建桌台，桌号照输入的记） */
   tables: { name: string; area: string }[];
+  /** UI 工作台（8.1.1）：这家店现在用哪一版版面（没发布过为空，用内置的默认版面）；inherited = 用的是本店的 */
+  studio?: { id: number; version: number; inherited: boolean } | null;
 }
 
 /** 一道菜整体的状态：有一个规格能点就算能点；都不能点时，全是下架算下架，否则算售罄 */

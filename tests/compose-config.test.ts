@@ -69,6 +69,15 @@ describe.skipIf(!hasCompose && !process.env.CI)('compose.yaml：已有实例的 
     expect(app({ ERP_WECOM_WEBHOOK: url }).environment.ERP_WECOM_WEBHOOK).toBe(url);
   });
 
+  it('AI 辅助的模型服务（8.1.1 默认 DeepSeek）的四项传进容器；不设时为空、什么都不发（8.0.22 起没列、配了也传不进去）', () => {
+    const keys = ['YUZU_AI_PROVIDER', 'YUZU_AI_API_KEY', 'YUZU_AI_BASE_URL', 'YUZU_AI_MODEL'];
+    const off = app({}).environment;
+    expect(keys.map((k) => off[k] ?? '')).toEqual(['', '', '', '']);
+    const set = { YUZU_AI_PROVIDER: 'deepseek', YUZU_AI_API_KEY: 'sk-compose-check', YUZU_AI_BASE_URL: 'https://example.invalid', YUZU_AI_MODEL: 'deepseek-flash' };
+    const on = app(set).environment;
+    expect(Object.fromEntries(keys.map((k) => [k, on[k]]))).toEqual(set);
+  });
+
   it('COOKIE_SECURE、TRUST_PROXY 传进容器；不设时不加 Secure、不信任代理', () => {
     const off = app({}).environment;
     expect([off.COOKIE_SECURE, off.TRUST_PROXY ?? '']).toEqual(['false', '']);

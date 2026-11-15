@@ -18,6 +18,7 @@ const IntegrationsSection = lazyPage(() => import('./IntegrationsSection').then(
 const DiningSection = lazyPage(() => import('./DiningSection').then((m) => m.DiningSection));
 // 电子菜单（8.0.10，docs/EMENU.md）：餐桌平板上的菜单在这里排
 const EmenuAdminSection = lazyPage(() => import('../emenu/EmenuAdminSection').then((m) => m.EmenuAdminSection));
+const StudioSection = lazyPage(() => import('../studio/StudioSection').then((m) => m.StudioSection));
 // 微信小程序（小程序线）
 const MpAdminSection = lazyPage(() => import('../mp/MpAdminSection').then((m) => m.MpAdminSection));
 const MembershipSection = lazyPage(() => import('../membership/MembershipSection').then((m) => m.MembershipSection));
@@ -70,6 +71,7 @@ export const adminRoutes: RouteObject[] = [
   { path: 'technicians/:tab?', element: <TechniciansSection /> },
   { path: 'dining/:tab?', element: <DiningSection /> },
   { path: 'emenu/:tab?', element: <EmenuAdminSection /> },
+  { path: 'studio', element: <StudioSection /> },
   { path: 'rooms/:tab?', element: <RoomsSection /> },
   { path: 'bookings', element: <BookingsSection /> },
   { path: 'spaces/:tab?', element: <SpacesSection /> },

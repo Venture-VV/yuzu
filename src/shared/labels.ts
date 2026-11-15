@@ -21,6 +21,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   backoffice: '后勤人员',
   other_store: '他店查询',
   tablet: '点餐平板',
+  designer: '设计师',
 };
 
 export const ROLE_HINTS: Record<Role, string> = {
@@ -32,6 +33,7 @@ export const ROLE_HINTS: Record<Role, string> = {
   backoffice: '没有会员与储值权限，只按职责处理库存与采购',
   other_store: '另一家店的同事：只能按手机号或会员号查会员的档阶与会籍到期日，看不到余额与流水（会员体系 v2，待确认）',
   tablet: '放在餐桌上的平板登录用：只能打开点餐页（电子菜单），下单要服务员输点单密码；看不到门店系统别的页面（8.0.10，待确认）',
+  designer: 'UI 设计师用：只进后台的「工作台」改版面、预览、发布、回滚（8.1.1，GZ3）；看得到菜单内容，看不到会员、账与经营数据',
 };
 
 export const DUTY_LABELS: Record<Duty, { title: string; hint: string }> = {

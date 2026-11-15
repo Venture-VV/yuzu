@@ -6,7 +6,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { DEFAULT_INTEGRATION_SWITCHES, type IntegrationMode, type IntegrationSwitches } from '@shared/integrations';
 import { guard } from '../auth/guard';
-import { INTEGRATION_KINDS, LIVE_ENV, modeOf, type IntegrationKind } from '../integrations/config';
+import { AI_DEFAULT_MODEL } from '../integrations/ai';
+import { DEEPSEEK_DEFAULT_BASE_URL, DEEPSEEK_DEFAULT_MODEL } from '../integrations/ai-deepseek';
+import { INTEGRATION_KINDS, LIVE_ENV, modeOf, type AiService, type IntegrationKind } from '../integrations/config';
 import { ctxOf, type Deps } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { parse } from '../lib/validate';
@@ -21,8 +23,12 @@ const KIND_LABELS: Record<IntegrationKind, string> = {
   ai: 'AI 辅助（经营小结、问数、合同条款提示）',
 };
 /** 正式实现已经写好、配了环境变量就直接用的（不用等联调）：页面上「已配置」不写「等联调」 */
-const LIVE_READY: Partial<Record<IntegrationKind, string>> = {
-  ai: '配了 YUZU_AI_API_KEY 就直接调 Claude（默认 claude-opus-5-5，YUZU_AI_MODEL 可换）；正式服在大陆连不上时经代理（YUZU_AI_BASE_URL，MD8）。开关在下面「AI 辅助」',
+const LIVE_READY: Partial<Record<IntegrationKind, (aiService: AiService) => string>> = {
+  // 8.1.1 起默认 DeepSeek（MD8）；YUZU_AI_PROVIDER=claude 时 Claude
+  ai: (aiService) =>
+    aiService === 'claude'
+      ? `配了 YUZU_AI_API_KEY 就直接调 Claude（YUZU_AI_PROVIDER=claude；默认 ${AI_DEFAULT_MODEL}，YUZU_AI_MODEL 可换；正式服在大陆连不上，要经代理 YUZU_AI_BASE_URL）。开关在下面「AI 辅助」`
+      : `配了 YUZU_AI_API_KEY（DeepSeek 开放平台的 API key）就直接调 DeepSeek（默认 ${DEEPSEEK_DEFAULT_MODEL}，YUZU_AI_MODEL 可换 deepseek-flash；地址默认 ${DEEPSEEK_DEFAULT_BASE_URL}）。开关在下面「AI 辅助」`,
 };
 /** 这一版还只能用文件的（没有接口，也没有模拟） */
 const FILE_ONLY: Partial<Record<IntegrationKind, string>> = {
@@ -70,7 +76,7 @@ export function registerIntegrationsAdminRoutes(app: FastifyInstance, deps: Deps
       kind,
       label: KIND_LABELS[kind],
       mode: FILE_ONLY[kind] ? 'off' : modeOf(config.integrations, kind),
-      note: FILE_ONLY[kind] ?? LIVE_READY[kind] ?? null,
+      note: FILE_ONLY[kind] ?? LIVE_READY[kind]?.(config.integrations.aiService ?? 'deepseek') ?? null,
       liveReady: !!LIVE_READY[kind],
       live: Object.entries(LIVE_ENV)
         .filter(([, v]) => v.kind === kind)
