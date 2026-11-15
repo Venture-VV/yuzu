@@ -43,6 +43,7 @@ import { Badge, Button, Card, Field, Input, MoneyInput, Notice, Select, Skeleton
 import { ErpPage } from '../erp/ErpHome';
 import { useAcceptanceTemplates, useContract, useContractMeta, useInvalidateContracts } from './queries';
 import { TemplateSection } from './TemplateSection';
+import { useEntities } from '../../lib/entities';
 
 export type ContractFormMode = 'new' | 'edit' | 'change' | 'change-edit';
 
@@ -283,6 +284,9 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
   const changeUrl = contract ? `/api/erp/contracts/${contract.id}/changes` : '';
   const pending = mode === 'new' ? pendingCreate : mode === 'change' ? pendingChange.filter((p) => p.url === changeUrl) : [];
 
+  // 我方公司主体（8.0.22）：只在新建、有几个主体时选
+  const entities = useEntities(mode === 'new');
+  const [entityId, setEntityId] = useState<number | null>(null);
   const [header, setHeader] = useState<HeaderForm>(() =>
     contract && mode !== 'new'
       ? { category: contract.category, supplierId: contract.supplierId, counterparty: contract.counterparty, departmentId: contract.departmentId, handlerId: contract.handlerId }
@@ -364,7 +368,7 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
     let saved: ChangeView | null = null;
     try {
       if (mode === 'new') {
-        const body = { clientKey: uuid(), ...headerBody(), renewalOf: renew && contract ? contract.id : null, content };
+        const body = { clientKey: uuid(), ...headerBody(), renewalOf: renew && contract ? contract.id : null, content, ...(entityId ? { entityId } : {}) };
         const party = header.supplierId ? (meta.suppliers.find((s) => s.id === header.supplierId)?.name ?? '') : header.counterparty.trim();
         const r = await sendErpOp<{ contract: ContractDetail }>({
           key: body.clientKey,
@@ -477,6 +481,18 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {mode === 'new' && (entities.data?.length ?? 0) > 1 && (
+              <Field label="我方公司主体" htmlFor="ct-entity" hint="不选是当前门店的主体；建好以后不改">
+                <Select id="ct-entity" value={entityId ?? ''} onChange={(e) => setEntityId(Number(e.target.value) || null)} data-testid="contract-entity">
+                  <option value="">当前门店的主体</option>
+                  {entities.data!.map((en) => (
+                    <option key={en.id} value={en.id}>
+                      {en.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Field label="合同类型" htmlFor="ct-category">
               <Select
                 id="ct-category"

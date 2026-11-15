@@ -8,7 +8,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { DEFAULT_ENTITY_ID, DEFAULT_STORE_ID, STORE_CODE_PATTERN, type EntityView, type StoreBrief, type StoreSettlementPair, type StoreSettlementReport, type StoreView } from '@shared/stores';
 import { isUniqueViolation, type Db } from '../db';
-import { guard } from '../auth/guard';
+import { guard, guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { badRequest, conflict, notFound } from '../lib/errors';
@@ -240,6 +240,13 @@ export function registerStoreRoutes(app: FastifyInstance, { sql }: Deps) {
   });
 
   // 员工挂哪几家店（员工档案里的「门店」）
+  // 启用的公司主体（8.0.22）：合同、付款、银行账户、开票里选「我方」用；只有一个主体时页面不显示选择
+  app.get('/api/entities', { preHandler: guardAny('contract.read', 'payable.read', 'invoice.issue', 'settings.manage') }, async () =>
+    sql<{ id: number; name: string; taxNo: string }[]>`SELECT id, name, tax_no FROM legal_entities WHERE active ORDER BY id`.then((rows) =>
+      rows.map((r) => ({ ...r, id: Number(r.id) })),
+    ),
+  );
+
   // 门店之间的储值结算表（第 7 节）：只是报表，不记账；只列自己能进的门店之间的
   app.get('/api/reports/store-settlement', { preHandler: guard('report.executive') }, async (req) => {
     const q = parse(z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD'), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期格式应为 YYYY-MM-DD') }), req.query ?? {});

@@ -198,6 +198,9 @@ export interface ContractSummary {
   /** 在审的变更单 */
   openChangeNo: string | null;
   updatedAt: string;
+  /** 我方公司主体（8.0.22；只有一个主体时都是本公司） */
+  entityId: number;
+  entityName: string;
 }
 
 export interface ContractLineView extends ContractLineInput {

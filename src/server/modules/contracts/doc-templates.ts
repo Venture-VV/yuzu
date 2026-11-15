@@ -133,7 +133,11 @@ export interface ContractDocument {
 /** 合同当时的内容渲染出来（起草中、已退回的是草稿；之后是生效的那一版） */
 export async function contractDocument(db: Db, contractId: number, today: string): Promise<ContractDocument> {
   const c = await getContract(db, today, contractId);
-  const { storeName } = await loadSettings(db);
+  // 我方（8.0.22）：只有一个公司主体时照旧用门店名；有几个主体时用这份合同的主体（发票抬头）
+  const { storeName: shopName } = await loadSettings(db);
+  const [ent] = await db<{ name: string; many: boolean }[]>`
+    SELECT e.name, (SELECT count(*) FROM legal_entities) > 1 AS many FROM contracts c JOIN legal_entities e ON e.id = c.entity_id WHERE c.id = ${contractId}`;
+  const storeName = ent?.many ? ent.name : shopName;
   const draft = c.status === 'draft' || c.status === 'returned' || c.status === 'reviewing' || c.currentVersion === 0;
   const versionLabel = draft ? (c.status === 'reviewing' ? '审查中的稿' : '草稿') : `第 ${c.currentVersion} 版`;
   const ref = c.content.template ?? null;

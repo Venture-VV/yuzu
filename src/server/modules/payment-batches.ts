@@ -181,11 +181,14 @@ async function createBatch(deps: Deps, raw: unknown, actor: Actor, ip?: string):
         if (existing.requestHash !== requestHash) throw conflict('IDEMPOTENCY_CONFLICT', '这个操作编号已用于另一批付款，请刷新页面后重新勾选');
         return { id: Number(existing.id), replayed: true };
       }
-      const [acc] = await tx<{ template: BankTemplate; active: boolean }[]>`SELECT template, active FROM bank_accounts WHERE id = ${input.accountId}`;
+      const [acc] = await tx<{ template: BankTemplate; active: boolean; entityId: number }[]>`SELECT template, active, entity_id FROM bank_accounts WHERE id = ${input.accountId}`;
       if (!acc || !acc.active) throw unprocessable('BANK_ACCOUNT_INVALID', '付款账户不存在或已停用');
       // 付款申请按 id 升序锁住，锁住以后再核对
-      const locked = await tx<{ id: number }[]>`SELECT id FROM payment_requests WHERE id IN ${tx(ids)} ORDER BY id FOR NO KEY UPDATE`;
+      const locked = await tx<{ id: number; entityId: number; requestNo: string }[]>`SELECT id, entity_id, request_no FROM payment_requests WHERE id IN ${tx(ids)} ORDER BY id FOR NO KEY UPDATE`;
       if (locked.length !== ids.length) throw notFound('有付款申请不存在，请刷新后重选');
+      // 多公司主体（8.0.22）：一批只付一个主体的款，付款账户也要是这个主体的
+      const other = locked.find((r) => Number(r.entityId) !== Number(acc.entityId));
+      if (other) throw unprocessable('BATCH_ENTITY_MISMATCH', `付款申请 ${other.requestNo} 不是这个付款账户所属主体的款：一批只付一个主体的，请分开生成`);
       const pool = new Map((await candidates(tx)).map((c) => [c.requestId, c]));
       const picked = ids.map((id) => {
         const c = pool.get(id);
@@ -198,8 +201,8 @@ async function createBatch(deps: Deps, raw: unknown, actor: Actor, ip?: string):
       const batchNo = await nextDocNo(tx, 'payment_batch', 'PL', today);
       const total = picked.reduce((s, c) => s + c.leftCents, 0);
       const [b] = await tx<{ id: number }[]>`
-        INSERT INTO payment_batches (batch_no, account_id, template, total_cents, item_count, note, client_key, request_hash, created_by)
-        VALUES (${batchNo}, ${input.accountId}, ${acc.template}, ${total}, ${picked.length}, ${input.note}, ${input.clientKey}, ${requestHash}, ${actor.id})
+        INSERT INTO payment_batches (batch_no, account_id, template, total_cents, item_count, note, client_key, request_hash, created_by, entity_id)
+        VALUES (${batchNo}, ${input.accountId}, ${acc.template}, ${total}, ${picked.length}, ${input.note}, ${input.clientKey}, ${requestHash}, ${actor.id}, ${acc.entityId})
         RETURNING id`;
       const batchId = Number(b!.id);
       let n = 0;

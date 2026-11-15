@@ -16,12 +16,12 @@ export const ck = {
   options: (supplierId: number) => ['inv', 'contracts', 'options', supplierId] as const,
 };
 
-export const useContracts = (filter: ContractFilter, category: ContractCategory | '', q: string) =>
+export const useContracts = (filter: ContractFilter, category: ContractCategory | '', q: string, entityId = '') =>
   useQuery({
-    queryKey: ck.list(filter, category, q),
+    queryKey: [...ck.list(filter, category, q), entityId],
     queryFn: () =>
       api.get<ContractSummary[]>(
-        `/api/erp/contracts?${new URLSearchParams(Object.entries({ filter, category, q: q.trim() }).filter(([, v]) => v) as [string, string][]).toString()}`,
+        `/api/erp/contracts?${new URLSearchParams(Object.entries({ filter, category, q: q.trim(), entityId }).filter(([, v]) => v) as [string, string][]).toString()}`,
       ),
     placeholderData: keepPreviousData,
   });

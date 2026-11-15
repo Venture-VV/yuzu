@@ -18,6 +18,7 @@ import { useContractExpiring, useContracts, type ContractFilter } from './querie
 import { TemplatesDialog } from './TemplatesDialog';
 import { DocTemplatesDialog } from './DocTemplatesDialog';
 import { CustomFieldInline, useCustomListValues } from '../custom-fields/CustomFieldsCard';
+import { useEntities } from '../../lib/entities';
 
 const FILTERS: { value: ContractFilter; label: string }[] = [
   { value: 'all', label: '全部' },
@@ -36,8 +37,11 @@ export function ContractsPage() {
   const [params, setParams] = useSearchParams();
   const filter = FILTERS.find((f) => f.value === params.get('filter'))?.value ?? 'all';
   const [category, setCategory] = useState<ContractCategory | ''>('');
+  // 按公司主体筛（8.0.22）：只有一个主体时不显示
+  const [entityId, setEntityId] = useState('');
+  const entities = useEntities();
   const [q, setQ] = useState('');
-  const list = useContracts(filter, category, q);
+  const list = useContracts(filter, category, q, entityId);
   const custom = useCustomListValues('contract', (list.data ?? []).map((c) => c.id));
   const expiring = useContractExpiring();
   const manage = can('contract.manage');
@@ -130,6 +134,16 @@ export function ContractsPage() {
               </button>
             ))}
           </div>
+          {(entities.data?.length ?? 0) > 1 && (
+            <Select aria-label="公司主体" value={entityId} fullWidth={false} onChange={(e) => setEntityId(e.target.value)} className="h-9 w-44" data-testid="contract-entity-filter">
+              <option value="">全部主体</option>
+              {entities.data!.map((en) => (
+                <option key={en.id} value={en.id}>
+                  {en.name}
+                </option>
+              ))}
+            </Select>
+          )}
           <Select aria-label="合同类型" value={category} fullWidth={false} onChange={(e) => setCategory(e.target.value as ContractCategory | '')} className="h-9 w-32" data-testid="contract-category-filter">
             <option value="">全部类型</option>
             {CONTRACT_CATEGORIES.map((c) => (
