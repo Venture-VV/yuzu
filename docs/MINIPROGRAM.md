@@ -168,6 +168,7 @@
    - 会员端提醒：yuzu 小程序端口 `GET /api/mp/notices`、`POST /api/mp/notices/read`（接主线 `listMemberNotices`、`markMemberNoticeRead`），网关 `/v1/notices`、`/v1/notices/read`，小程序首页弹窗、看过记已读（MP38，店主 2026-11-10 定按默认：一直停在首页时不实时撤下；弹哪几天照主线 HY16）；
    - 线上充值与充值当日的储值消费比例：线上充值按入账那天算进「当天充值」（主线的算法本来就算，补了模拟支付的用例）；充值页不写这条规则（MP39，店主 2026-11-10 定按默认：前台拦下时会显示剩余额度并说明）。
 10. 2026-11-15 起小程序线由 Gemini 开发（交接见 `docs/HANDOFF_MP_GEMINI.md`）。
+11. 工作台版面渲染组件与定时发布刷新（8.1.2，规格 `docs/STUDIO_MP.md`，交接见 `docs/HANDOFF_MP_STUDIO.md`）：小程序端口 `GET /api/mp/studio`、`GET /api/mp/studio/assets/:id`（接主线 `readPublishedStudio`、`readStudioAssetFor`），网关 `/v1/studio`（在线 `freshMs = 0` 直读、断网回退缓存）与 `/v1/studio/assets/:id`，小程序递归渲染组件（`studio-screen`、`studio-node`）接入首页、活动页与「我的」，其余页面跟随已发布主题色与字体；每次进页面（`Page.onShow`）与回到前台（`App.onShow`）重新拉取版面，未发布或不可读时回退原页面。
 
 ## 11. 测试
 

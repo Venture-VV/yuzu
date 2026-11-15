@@ -1,0 +1,44 @@
+<block wx:if="{{node}}">
+  <block wx:if="{{node.type === 'frame'}}">
+    <view wx:if="{{node.hasAction}}" class="sn-box" hover-class="tap" style="{{node.style}}" catchtap="onTap">
+      <view wx:if="{{node.innerWrapStyle}}" style="{{node.innerWrapStyle}}">
+        <studio-node wx:for="{{node.children}}" wx:key="id" node="{{item}}" bindaction="onChildAction" />
+      </view>
+      <block wx:else>
+        <studio-node wx:for="{{node.children}}" wx:key="id" node="{{item}}" bindaction="onChildAction" />
+      </block>
+    </view>
+    <view wx:else class="sn-box" style="{{node.style}}">
+      <view wx:if="{{node.innerWrapStyle}}" style="{{node.innerWrapStyle}}">
+        <studio-node wx:for="{{node.children}}" wx:key="id" node="{{item}}" bindaction="onChildAction" />
+      </view>
+      <block wx:else>
+        <studio-node wx:for="{{node.children}}" wx:key="id" node="{{item}}" bindaction="onChildAction" />
+      </block>
+    </view>
+  </block>
+
+  <view wx:elif="{{node.type === 'rect' || node.type === 'ellipse'}}" class="sn-box" style="{{node.style}}" />
+
+  <block wx:elif="{{node.type === 'image'}}">
+    <view wx:if="{{node.hasAction}}" class="sn-box" hover-class="tap" style="{{node.style}}" catchtap="onTap">
+      <image wx:if="{{node.imageSrc}}" class="sn-img" src="{{node.imageSrc}}" mode="{{node.imageMode}}" />
+    </view>
+    <view wx:else class="sn-box" style="{{node.style}}">
+      <image wx:if="{{node.imageSrc}}" class="sn-img" src="{{node.imageSrc}}" mode="{{node.imageMode}}" />
+    </view>
+  </block>
+
+  <view wx:elif="{{node.type === 'text' || node.type === 'field'}}" class="sn-box" style="{{node.style}}">
+    <text class="sn-txt">{{node.text}}</text>
+  </view>
+
+  <block wx:elif="{{node.type === 'button'}}">
+    <view wx:if="{{node.hasAction}}" class="sn-box" hover-class="tap" style="{{node.style}}" catchtap="onTap">
+      <text class="sn-txt">{{node.text}}</text>
+    </view>
+    <view wx:else class="sn-box" style="{{node.style}}">
+      <text class="sn-txt">{{node.text}}</text>
+    </view>
+  </block>
+</block>

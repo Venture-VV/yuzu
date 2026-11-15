@@ -2,5 +2,8 @@
   "navigationStyle": "custom",
   "navigationBarTextStyle": "white",
   "enablePullDownRefresh": true,
-  "backgroundTextStyle": "dark"
+  "backgroundTextStyle": "dark",
+  "usingComponents": {
+    "studio-screen": "../../components/studio-screen/index"
+  }
 }

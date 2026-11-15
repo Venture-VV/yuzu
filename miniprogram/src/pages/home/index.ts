@@ -2,18 +2,25 @@
 // 三块业务（TASTE、WELLNESS、EXPERIENCE）、服务入口、门店公告。门店连不上时用之前的信息并标出来。
 // 会员端提醒（RQ-014）：首页显示时问一次，有收到券、券快到期的提醒就弹出来，看过记已读（utils/notices.ts）；
 // 不在首页时不问、不弹，要再问的等回到首页再问。
-import type { MpBanner, MpHome, MpStore } from '../../../../src/shared/mp';
-import { imageUrl, latestBindVersion, messageOf, show, watchBindVersion } from '../../utils/api';
+import type { MpBanner, MpHome, MpMe, MpStore, MpStudioAction } from '../../../../src/shared/mp';
+import { imageUrl, latestBindVersion, member, messageOf, show, watchBindVersion } from '../../utils/api';
 import { appData } from '../../utils/app-state';
+import { cardView } from '../../utils/member-card';
+import type { CardView } from '../../utils/member-card';
 import { navMetrics } from '../../utils/nav';
 import { loadNotices, markRead } from '../../utils/notices';
 import type { NoticeView } from '../../utils/notices';
+import { currentStudio, currentThemeStyle, refreshStudio, studioAssetUrl, watchStudio } from '../../utils/studio';
+import { prepareScreenRender, runMpStudioAction, screenUsesMemberField } from '../../utils/studio-style';
+import type { RenderScreen } from '../../utils/studio-style';
 
 type Banner = MpBanner & { src: string };
 const HERO_RPX = 600;
 
 Page({
   data: {
+    themeStyle: '',
+    studioScreen: null as RenderScreen | null,
     statusBar: 20,
     bar: 44,
     capsuleRight: 96,
@@ -56,10 +63,18 @@ Page({
    */
   noticeShown: true,
   stopWatch: null as (() => void) | null,
+  stopStudio: null as (() => void) | null,
+  studioCard: null as CardView | null,
+  studioCardVersion: -1,
 
   onLoad() {
     // 别的页面看到了更新的绑定状态（解绑、换绑过；比如「我的」的回答晚到，顾客已经回到首页）：弹着的是之前那位会员的，马上关上、重新问
     this.stopWatch = watchBindVersion((v) => this.onBindVersion(v));
+    this.syncStudio();
+    this.stopStudio = watchStudio(() => {
+      this.syncStudio();
+      this.maybeLoadStudioMember();
+    });
     const n = navMetrics();
     let width = 375;
     try {
@@ -69,17 +84,24 @@ Page({
     }
     this.heroPx = (HERO_RPX * width) / 750 - n.statusBar - n.bar;
     this.setData({ statusBar: n.statusBar, bar: n.bar, capsuleRight: n.capsuleRight });
+    refreshStudio().catch(() => undefined);
     this.load();
+    this.maybeLoadStudioMember();
   },
 
   onUnload() {
     if (this.stopWatch) this.stopWatch();
+    if (this.stopStudio) this.stopStudio();
     this.stopWatch = null;
+    this.stopStudio = null;
     this.noticeShown = false;
   },
 
   onShow() {
     this.noticeShown = true;
+    // 每次进首页都重新问一次已发布版面，定时发布到点立即切换
+    refreshStudio().catch(() => undefined);
+    this.maybeLoadStudioMember();
     if (Date.now() - this.noticeAt > 30000) this.loadNotices();
   },
 
@@ -92,19 +114,30 @@ Page({
     const pending = this.data.noticeOpen || this.noticeBusy;
     this.noticeShown = false;
     this.noticeRound += 1;
+    if (this.studioCard) {
+      this.studioCard = null;
+      this.studioCardVersion = -1;
+      this.syncStudio();
+    }
     if (this.data.noticeOpen) this.setData({ noticeOpen: false, notices: [], noticeCoupon: false });
     if (pending) this.noticeAt = 0;
   },
 
   /** 绑定状态版本号变新：弹着的是之前那位会员的，关上、重新问；正在问的那一次回来时按版本号核对（旧的丢掉、再问一次） */
   onBindVersion(v: number) {
+    if (this.studioCard && this.studioCardVersion < v) {
+      this.studioCard = null;
+      this.studioCardVersion = -1;
+      this.syncStudio();
+      if (this.noticeShown) this.maybeLoadStudioMember();
+    }
     if (!this.data.noticeOpen || this.noticeVersion >= v) return;
     this.setData({ noticeOpen: false, notices: [], noticeCoupon: false });
     if (!this.noticeBusy) this.loadNotices();
   },
 
   onPullDownRefresh() {
-    this.load().then(() => wx.stopPullDownRefresh());
+    Promise.all([refreshStudio().catch(() => null), this.load(), this.maybeLoadStudioMember()]).then(() => wx.stopPullDownRefresh());
   },
 
   /** retry：丢掉旧回答以后再问的那一次（只再问一次，不会一直问）。不在首页时不问，约好回到首页再问 */
@@ -196,6 +229,51 @@ Page({
     if (!store) return;
     const acts = (store.latitude !== null && store.longitude !== null ? 1 : 0) + (store.phone ? 1 : 0) + (store.isHome ? 1 : 0);
     this.setData({ storeIndex: index, store, actCount: acts, heroImage: store.imageId ? imageUrl(store.imageId) : '' });
+    this.syncStudio();
+  },
+
+  syncStudio() {
+    const active = currentStudio();
+    const themeStyle = currentThemeStyle();
+    const studioScreen = active
+      ? prepareScreenRender(active.doc, 'home', { store: this.data.store, card: this.studioCard }, studioAssetUrl)
+      : null;
+    this.setData({ themeStyle, studioScreen });
+  },
+
+  /** 只有首页版面里放了 member.* 数据字段时才去读 /v1/me，默认版面和未发布版面零额外请求 */
+  async maybeLoadStudioMember() {
+    const active = currentStudio();
+    if (!active || !screenUsesMemberField(active.doc.screens.home)) {
+      if (this.studioCard) {
+        this.studioCard = null;
+        this.studioCardVersion = -1;
+        this.syncStudio();
+      }
+      return;
+    }
+    const round = this.noticeRound;
+    try {
+      const me = await member<MpMe>('GET', '/v1/me');
+      if (!this.noticeShown || round !== this.noticeRound) return;
+      if (typeof me.bindVersion === 'number' && me.bindVersion < latestBindVersion()) return;
+      this.studioCard = me.bound && me.member ? cardView(me.member) : null;
+      this.studioCardVersion = typeof me.bindVersion === 'number' ? me.bindVersion : -1;
+      this.syncStudio();
+    } catch {
+      if (!this.noticeShown || round !== this.noticeRound) return;
+      this.studioCard = null;
+      this.studioCardVersion = -1;
+      this.syncStudio();
+    }
+  },
+
+  onStudioAction(e: WechatMiniprogram.CustomEvent<MpStudioAction>) {
+    runMpStudioAction(e && e.detail, {
+      store: this.data.store,
+      cardFrozen: !!(this.studioCard && this.studioCard.frozen),
+      currentRoute: 'pages/home/index',
+    });
   },
 
   onStore(e: WechatMiniprogram.TouchEvent) {

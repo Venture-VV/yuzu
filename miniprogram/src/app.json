@@ -16,7 +16,8 @@
     "pages/bill/index",
     "pages/booking/index",
     "pages/bookings/index",
-    "pages/unbind/index"
+    "pages/unbind/index",
+    "pages/activity/index"
   ],
   "window": {
     "navigationBarBackgroundColor": "#F5F1EA",

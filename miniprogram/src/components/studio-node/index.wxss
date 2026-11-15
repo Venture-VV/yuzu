@@ -1,0 +1,15 @@
+.sn-box {
+  box-sizing: border-box;
+}
+.sn-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.sn-txt {
+  display: block;
+  width: 100%;
+}
+.tap {
+  opacity: 0.6;
+}

@@ -60,6 +60,8 @@ const LedgerQuery = z.object({ limit: z.coerce.number().int().min(1).max(100).de
 const FloorParams = z.object({ floor: z.string().regex(/^[A-Za-z0-9-]{1,10}$/, '楼层不正确') });
 const SvgQuery = z.object({ b: z.coerce.number().int().positive('底图批次不正确') });
 const IdParams = z.object({ id: z.coerce.number().int().positive('编号不正确') });
+const StudioQuery = z.object({ store: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/, '门店代码不正确').optional() });
+const StudioAssetParams = z.object({ id: z.string().regex(/^[0-9a-f]{64}$/, '素材编号不正确') });
 const RechargeNo = z.object({ no: z.string().regex(MP_RECHARGE_ORDER_NO, '充值单号不正确') });
 const RechargeCreate = z.object({
   clientKey: z.uuid('操作编号不正确'),
@@ -209,6 +211,9 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     // 这份内容是什么时候从门店取到的：给旧的时小程序照这个算还能用多久（最多 7 天），不重新计时
     if (fetchedAt) reply.header('x-fetched-at', new Date(fetchedAt).toISOString());
     if (r.status === 200 && r.cacheControl) reply.header('cache-control', r.cacheControl);
+    if (r.status === 200 && r.contentType.startsWith('image/svg+xml')) {
+      reply.header('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox");
+    }
     return reply.send(r.body);
   };
 
@@ -292,6 +297,16 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   app.get('/v1/images/:id', async (req, reply) => {
     const { id } = parse(IdParams, req.params);
     return show(reply, `img:${id}`, `/api/mp/images/${id}`, 30 * 86_400_000);
+  });
+  // 工作台 · 小程序版面（8.1.2，docs/STUDIO_MP.md 第 5 节）：设计师可以定时发布，在线时每次直读门店系统（freshMs = 0，到点立即生效），
+  // 门店断外网时才给上次存下的版面（最多 7 天）；素材按内容 SHA-256 长期缓存
+  app.get('/v1/studio', async (req, reply) => {
+    const { store } = parse(StudioQuery, req.query);
+    return show(reply, store ? `studio:${store}` : 'studio', store ? `/api/mp/studio?store=${encodeURIComponent(store)}` : '/api/mp/studio', 0);
+  });
+  app.get('/v1/studio/assets/:id', async (req, reply) => {
+    const { id } = parse(StudioAssetParams, req.params);
+    return show(reply, `studio-asset:${id}`, `/api/mp/studio/assets/${id}`, 30 * 86_400_000);
   });
 
   app.post('/v1/bind', async (req, reply) => {

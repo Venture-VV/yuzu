@@ -1,0 +1,6 @@
+.ss-root {
+  box-sizing: border-box;
+}
+.ss-block {
+  box-sizing: border-box;
+}

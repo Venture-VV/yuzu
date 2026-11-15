@@ -22,6 +22,7 @@ import { registerMpReminderRoutes } from './reminder-routes';
 import { planReminders } from './reminders';
 import { purgeOldBindings } from './retention';
 import { registerMpMemberRoutes } from './routes';
+import { registerMpStudioRoutes } from './studio-routes';
 
 const digest = (s: string) => createHash('sha256').update(s, 'utf8').digest();
 
@@ -71,6 +72,8 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
   });
 
   registerMpPublicRoutes(app, { sql, config });
+  // 工作台 · 小程序版面与素材（8.1.2，docs/STUDIO_MP.md）：只读，定时发布每次直读门店系统
+  registerMpStudioRoutes(app, { sql, config });
   registerMpMemberRoutes(app, { sql, config });
   // 线上领券（第二期 2c）
   registerMpCouponRoutes(app, { sql, config });

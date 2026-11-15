@@ -1,0 +1,40 @@
+<view class="page-root" style="{{themeStyle}}">
+  <view wx:if="{{stale}}" class="offline">门店系统连接中，显示的是之前的信息</view>
+
+  <studio-screen wx:if="{{studioScreen}}" screen="{{studioScreen}}" bindaction="onStudioAction">
+    <view slot="banner" class="act-hero">
+      <swiper
+        wx:if="{{banners.length}}"
+        class="act-hero-media"
+        autoplay="{{studioScreen.bannerProps.autoplay && banners.length > 1}}"
+        circular="{{banners.length > 1}}"
+        interval="5000"
+        duration="600"
+        bindchange="onBannerChange"
+      >
+        <swiper-item wx:for="{{banners}}" wx:key="id" data-index="{{index}}" bindtap="onBanner">
+          <image class="act-hero-img" src="{{item.src}}" mode="aspectFill" aria-label="{{item.title}}" />
+        </swiper-item>
+      </swiper>
+      <image wx:elif="{{heroImage}}" class="act-hero-media act-hero-img" src="{{heroImage}}" mode="aspectFill" />
+      <view class="act-hero-shade" style="{{studioScreen.bannerProps.shadeStyle}}" />
+      <view wx:if="{{studioScreen.bannerProps.wordmark}}" class="act-hero-body">
+        <view class="wordmark" aria-label="汤崎 TOUCHILL">
+          <image class="wm-logo" src="/assets/brand/logo-stacked-light.png" mode="aspectFit" />
+          <image class="wm-en" src="/assets/brand/touchill-light.png" mode="aspectFit" />
+        </view>
+        <view class="act-hero-line" />
+        <text class="act-hero-tag">都市新旅生活目的地</text>
+        <text class="act-hero-en">YOUR NEXT URBAN PLEASURE</text>
+      </view>
+    </view>
+  </studio-screen>
+
+  <view wx:else class="view">
+    <view class="panel wait">
+      <text class="h3">近期活动准备中</text>
+      <text class="sub">门店活动发布后将在这里呈现</text>
+      <button class="btn ghost" hover-class="btn-hover" bindtap="onHome">回首页</button>
+    </view>
+  </view>
+</view>
