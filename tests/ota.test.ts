@@ -57,6 +57,56 @@ describe('解析', () => {
     expect([0, 1].map((i) => roomShare(100_001, 2, i))).toEqual([50_000, 50_001]);
     expect(roomShare(500, 1, 3)).toBe(500);
   });
+
+  it('间数、晚数按数值读：「1.0」是 1 间、「2.0」是 2 晚，带单位、全角也认；「1.5」「1-2」读不出来，不把数字拼在一起（Codex 审查 4d191f4 后补）', () => {
+    const h = ['订单号', '房型', '入住日', '晚数', '间数', '金额'];
+    const map = detectOtaColumns(h);
+    const r = parseOtaRows(h, [
+      { row: 2, cells: ['N1', '大床', '2026-12-01', '2.0', '1.0', '300'] },
+      { row: 3, cells: ['N2', '大床', '2026-12-01', '３晚', '2 间', '600'] },
+      { row: 4, cells: ['N3', '大床', '2026-12-01', '1', '1.5', '100'] },
+      { row: 5, cells: ['N4', '大床', '2026-12-01', '1', '1-2', '100'] },
+      { row: 6, cells: ['N5', '大床', '2026-12-01', '1.5', '1', '100'] },
+      { row: 7, cells: ['N6', '大床', '2026-12-01', '2-3', '1', '100'] },
+    ], map);
+    // 旧代码把「1.0」间读成 10 间、「2.0」晚读成 20 晚（去掉非数字再拼）
+    expect(r.orders).toMatchObject([
+      { orderNo: 'N1', checkin: '2026-12-01', checkout: '2026-12-03', nights: 2, rooms: 1 },
+      { orderNo: 'N2', checkin: '2026-12-01', checkout: '2026-12-04', nights: 3, rooms: 2 },
+    ]);
+    expect(r.orders).toHaveLength(2);
+    expect(r.problems).toEqual([
+      { row: 4, message: '订单 N3：间数要是 1–20' },
+      { row: 5, message: '订单 N4：间数要是 1–20' },
+      { row: 6, message: '订单 N5：离店日读不出来，或不晚于入住日' },
+      { row: 7, message: '订单 N6：离店日读不出来，或不晚于入住日' },
+    ]);
+  });
+
+  it('「间夜」是间数 × 晚数：按间数折回晚数，除不尽的读不出来；有离店日的以离店日为准', () => {
+    const h = ['订单号', '房型', '入住日', '间夜', '间数', '金额'];
+    const map = detectOtaColumns(h);
+    expect(map.nights).toBe('间夜');
+    const r = parseOtaRows(h, [
+      { row: 2, cells: ['R1', '大床', '2026-12-01', '6', '2', '1200'] },
+      { row: 3, cells: ['R2', '大床', '2026-12-01', '5', '2', '1000'] },
+      { row: 4, cells: ['R3', '大床', '2026-12-01', '3', '1', '600'] },
+    ], map);
+    // 旧代码把两间 6 间夜读成住 6 晚
+    expect(r.orders).toMatchObject([
+      { orderNo: 'R1', checkout: '2026-12-04', nights: 3, rooms: 2 },
+      { orderNo: 'R3', checkout: '2026-12-04', nights: 3, rooms: 1 },
+    ]);
+    expect(r.problems).toEqual([{ row: 3, message: '订单 R2：离店日读不出来，或不晚于入住日' }]);
+    // 晚数一列里写着「6间夜」的同样按间数折
+    const h2 = ['订单号', '房型', '入住日', '晚数', '间数', '金额'];
+    const r2 = parseOtaRows(h2, [{ row: 2, cells: ['R4', '大床', '2026-12-01', '6间夜', '2', '1200'] }], detectOtaColumns(h2));
+    expect(r2.orders).toMatchObject([{ orderNo: 'R4', checkout: '2026-12-04', nights: 3, rooms: 2 }]);
+    // 有离店日的以离店日为准（间夜不参与）
+    const h3 = ['订单号', '房型', '入住日', '离店日', '间夜', '间数', '金额'];
+    const r3 = parseOtaRows(h3, [{ row: 2, cells: ['R5', '大床', '2026-12-01', '2026-12-02', '4', '2', '400'] }], detectOtaColumns(h3));
+    expect(r3.orders).toMatchObject([{ orderNo: 'R5', checkout: '2026-12-02', nights: 1, rooms: 2 }]);
+  });
 });
 
 describe('渠道订单', () => {

@@ -96,10 +96,26 @@ export function parseOtaAmount(v: string): number | null {
   return Number(i) * 100 + Number(f.padEnd(2, '0'));
 }
 
+const ROOM_UNITS = /(间房|房间|间|房|rooms?)$/i;
+const NIGHT_UNITS = /(间夜|晚|夜|天|nights?|days?)$/i;
+/**
+ * 间数、晚数：整数，可以带「.0」与单位（「1.0」「2 间」「3晚」，全角数字也认）；
+ * 别的（「1.5」「1-2」「两间」）读不出来，返回 NaN——不把里面的数字拼在一起（「1.0」原来读成 10，Codex 审查 `4d191f4` 后补）。
+ */
+export function parseOtaCount(text: string, units: RegExp): number {
+  const s = text
+    .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
+    .replace(/．/g, '.')
+    .replace(/\s/g, '')
+    .replace(units, '');
+  return /^\d{1,4}(\.0+)?$/.test(s) ? Number(s.split('.')[0]) : NaN;
+}
+
 export function parseOtaRows(header: string[], rows: { row: number; cells: string[] }[], map: OtaColumnMap): { orders: ParsedOtaOrder[]; problems: { row: number; message: string }[] } {
   const col = (f: OtaField) => (map[f] ? header.indexOf(map[f]!) : -1);
   const idx = Object.fromEntries(OTA_FIELDS.map((f) => [f, col(f)])) as Record<OtaField, number>;
   const get = (cells: string[], f: OtaField) => (idx[f] >= 0 ? (cells[idx[f]] ?? '').trim() : '');
+  const roomNights = /间夜/.test(map.nights ?? '');
   const orders: ParsedOtaOrder[] = [];
   const problems: { row: number; message: string }[] = [];
   const seen = new Set<string>();
@@ -120,21 +136,23 @@ export function parseOtaRows(header: string[], rows: { row: number; cells: strin
       bad('入住日读不出来');
       continue;
     }
+    const roomsText = get(r.cells, 'rooms');
+    const rooms = roomsText ? parseOtaCount(roomsText, ROOM_UNITS) : 1;
+    if (!Number.isInteger(rooms) || rooms < 1 || rooms > 20) {
+      bad('间数要是 1–20');
+      continue;
+    }
     let checkout = get(r.cells, 'checkout') ? parseOtaDate(get(r.cells, 'checkout')) : null;
     const nightsText = get(r.cells, 'nights');
-    let nights = nightsText ? Number(nightsText.replace(/[^\d]/g, '')) : NaN;
+    let nights = nightsText ? parseOtaCount(nightsText, NIGHT_UNITS) : NaN;
+    // 「间夜」是间数 × 晚数：两间住三晚是 6 间夜，按间数折回晚数（除不尽的读不出来）
+    if ((roomNights || /间夜/.test(nightsText)) && Number.isInteger(nights)) nights = nights % rooms === 0 ? nights / rooms : NaN;
     if (!checkout && Number.isInteger(nights) && nights > 0) checkout = addDays(checkin, nights);
     if (!checkout || checkout <= checkin) {
       bad('离店日读不出来，或不晚于入住日');
       continue;
     }
     nights = daysBetween(checkin, checkout);
-    const roomsText = get(r.cells, 'rooms');
-    const rooms = roomsText ? Number(roomsText.replace(/[^\d]/g, '')) : 1;
-    if (!Number.isInteger(rooms) || rooms < 1 || rooms > 20) {
-      bad('间数要是 1–20');
-      continue;
-    }
     const amountCents = parseOtaAmount(get(r.cells, 'amount'));
     if (amountCents === null) {
       bad('金额读不出来');

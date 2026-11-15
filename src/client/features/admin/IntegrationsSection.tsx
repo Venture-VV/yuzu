@@ -106,7 +106,11 @@ export function IntegrationsSection() {
         <Card className="p-5">
           <h2 className="mb-3 text-[15px] font-bold">门店开关</h2>
           {!sw ? (
-            <Skeleton className="h-20" />
+            info.isError && !info.data ? (
+              <LoadFailed title="门店开关取不回来，请检查网络（取回来以前不能保存）" onRetry={() => void info.refetch()} retrying={info.isFetching} testId="integration-switches-error" />
+            ) : (
+              <Skeleton className="h-20" />
+            )
           ) : (
             <div className="space-y-3 text-[13.5px]">
               <label className="flex items-center gap-2">

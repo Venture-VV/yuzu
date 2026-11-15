@@ -125,7 +125,17 @@ test.describe('8.0.21 数据字典与自定义字段', () => {
     await expectFailThenRetry('**/api/custom-fields/defs', '/admin/dictionaries/fields', 'dict-fields-error');
     await expectFailThenRetry('**/api/custom-fields/defs', '/admin/dictionaries/search', 'dict-search-error');
     await expect(page.getByLabel('类别')).toBeVisible();
-    await expectFailThenRetry('**/api/admin/integrations', '/admin/integrations', 'integration-kinds-error');
+    await page.route('**/api/admin/integrations', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: unavailable }));
+    await page.goto('/admin/integrations');
+    // 模式与门店开关都写明取不回来（门店开关原来一直转圈）
+    await expect(page.getByTestId('integration-kinds-error')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('integration-switches-error')).toBeVisible();
+    await expect(page.getByTestId('sw-save')).toHaveCount(0);
+    await page.unroute('**/api/admin/integrations');
+    await page.getByTestId('integration-switches-error-retry').click();
+    await expect(page.getByTestId('integration-kinds-error')).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId('integration-switches-error')).toHaveCount(0);
+    await expect(page.getByTestId('sw-save')).toBeVisible();
     await expectFailThenRetry('**/api/admin/integrations/calls?*', '/admin/integrations', 'integration-calls-error');
   });
 });
