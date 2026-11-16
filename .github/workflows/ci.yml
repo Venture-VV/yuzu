@@ -59,6 +59,8 @@ jobs:
       - run: npm run typecheck
       - name: 代码整洁检查（没用到的导入与变量、事务里没等结果的查询、类型导入写法；8.1.3）
         run: npm run check:code
+      - name: 排版检查（Prettier；没过就本地跑 npm run format；8.1.3）
+        run: npm run format:check
       - run: npm test
       - run: npm run build
 
