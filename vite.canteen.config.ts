@@ -2,6 +2,7 @@ import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
+import { dvhFallback } from './scripts/dvh-fallback';
 
 // 柚子饭堂（员工手机端，docs/CANTEEN.md）：产物输出到 dist/canteen-app，由 yuzu 的员工端口（CANTEEN_PORT）托管。
 // 本机调界面：npm run dev:canteen（接口转到 CANTEEN_PORT，默认 8090）。
@@ -9,6 +10,8 @@ export default defineConfig({
   root: 'src/canteen-app',
   publicDir: 'public',
   plugins: [react(), tailwindcss()],
+  // 不认识 dvh 的老浏览器退回 vh（8.1.4，scripts/dvh-fallback.ts）
+  css: { postcss: { plugins: [dvhFallback()] } },
   resolve: {
     alias: {
       '@shared': fileURLToPath(new URL('./src/shared', import.meta.url)),

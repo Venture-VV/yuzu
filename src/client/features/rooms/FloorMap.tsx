@@ -594,8 +594,8 @@ function PlanCanvas({
       {/* 画布按楼层的长宽比定高度（不超过一屏），竖屏、手机上不留大片空白 */}
       <div
         ref={boxRef}
-        className="relative min-h-[260px] w-full cursor-grab touch-none overflow-hidden rounded-lg border border-line bg-white select-none active:cursor-grabbing"
-        style={{ aspectRatio: `${W} / ${H}`, maxHeight: 'max(260px, calc(100dvh - 330px))' }}
+        className="relative max-h-[max(260px,calc(100dvh_-_330px))] min-h-[260px] w-full cursor-grab touch-none overflow-hidden rounded-lg border border-line bg-white select-none active:cursor-grabbing"
+        style={{ aspectRatio: `${W} / ${H}` }}
         onPointerDown={onPointerDown}
         data-testid="floormap-canvas"
       >

@@ -1,5 +1,12 @@
 # 变更记录
 
+## v8.1.4（开发中）
+
+内容等店主排。这个草稿 PR 先收 `main v8.1.3` 的验收报告，交接说明在 `docs/HANDOFF_V813.md`。
+
+- **工作台打开时的「原样 / 放大」按平板现在的设置**：之前草稿先回来、菜单还没到时一直停在「原样」，开在哪一档看两个请求谁先回来（PR #119 的 CI 里 `e2e/studio.spec.ts` 因此时过时不过）。现在等菜单回来（取不回来也算）再开；用例先核对开在哪一档、再切到「原样」。
+- **老浏览器上侧栏划不动、右边一滚左边跑出屏幕**（店主 2026-11-16 报）：门店、后台、ERP 的整屏版面用 `dvh`（随地址栏伸缩的屏幕高度）定高，Chrome 108、Safari 15.4 以前的浏览器（没法更新内核的安卓平板、内核偏老的浏览器）不认识，整条当没写，版面没了高度、变成整页跟着内容滚：侧栏被撑得和内容一样长、自己划不动，右边一滚、左边跟着跑出屏幕。现在打包时给每条用到 `dvh` 的样式补一块只给这类浏览器用的 `vh`（`scripts/dvh-fallback.ts`；写成单独的 `@supports not (height: 1dvh)`，Vite 压缩时不会当多余的删掉）；新浏览器不受影响。平面图画布的最大高度从行内样式改成类名，一并有了后备。用例：`tests/dvh-fallback.test.ts`、`e2e/viewports.spec.ts`「不认识 dvh 的老浏览器」。
+
 ## v8.1.3 · 代码整洁与网络波动防护
 
 设计与开源方案调研 `docs/RESILIENCE_V813.md`（Odoo POS、ERPNext、TanStack Query、Vite、Workbox、Fastify 的 under-pressure 与 rate-limit、close-with-grace、PostgreSQL 文档、postgres.js、Stripe / brandur 的幂等键、AWS 的退避与随机），交接 `docs/HANDOFF_V813.md`，默认做法 `docs/PENDING_DECISIONS.md` WL1–WL12；**没有迁移，不改业务规则与账**。网络正常时页面与 8.1.2 一样。

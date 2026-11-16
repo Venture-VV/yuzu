@@ -99,6 +99,12 @@ test.describe('8.1.1 UI 工作台', () => {
       await page.getByTestId('studio-open-emenu').click();
       await expect(page.getByTestId('studio-canvas')).toBeVisible();
       await expect(page.getByTestId('studio-save-status')).toHaveAttribute('data-status', 'saved');
+      // 「原样 / 放大」按平板现在的设置开（8.1.4：之前开在哪一档看草稿、菜单两个请求谁先回来，PR #119 的 CI）；下面的流程都在「原样」一档里走
+      const tablet = await getJson<{ rules: { textSize: string } }>(page, '/api/studio/emenu/menu');
+      const textSize = page.getByTestId('studio-text-size');
+      await expect(textSize).toHaveText(tablet.rules.textSize === 'design' ? '原样' : '放大');
+      if (tablet.rules.textSize !== 'design') await textSize.click();
+      await expect(textSize).toHaveText('原样');
       // 起始页的图层：默认版面的五块
       await expect(page.getByTestId('studio-layer-start-logo')).toBeVisible();
       await expect(page.getByTestId('studio-layer-start-footer')).toContainText('必需');

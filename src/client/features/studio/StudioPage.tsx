@@ -214,14 +214,17 @@ export function StudioPage() {
   const textRef = useRef<HTMLTextAreaElement>(null);
   const clipboard = useRef<StudioNode[]>([]);
 
-  // 第一次取到草稿：放进编辑器（之后不再被服务端的覆盖，除非刷新）
+  // 第一次取到草稿：放进编辑器（之后不再被服务端的覆盖，除非刷新）。
+  // 平板菜单还要等菜单回来（取不回来也算回来了）再开：「原样 / 放大」按平板现在的设置——
+  // 之前草稿先回来时菜单还没到，就一直停在「原样」，开在哪一档看两个请求谁先回来（8.1.4，PR #119 的 CI）
   useEffect(() => {
     if (!stateQ.data || loaded) return;
+    if (isEmenu && menuQ.isPending) return;
     history.reset(stateQ.data.draft.doc);
     rev.current = stateQ.data.draft.rev;
     setBig(menuQ.data ? menuQ.data.rules.textSize !== 'design' : false);
     setLoaded(true);
-  }, [stateQ.data, loaded, history, menuQ.data]);
+  }, [stateQ.data, loaded, history, menuQ.data, menuQ.isPending, isEmenu]);
 
   // ── 自动保存：改了以后停 1.2 秒存一次；带版本号，别处改过时拒绝 ──
   const saving = useRef<Promise<boolean> | null>(null);
@@ -611,7 +614,7 @@ export function StudioPage() {
           {lang === 'zh' ? '中' : 'EN'}
         </ToolButton>
         {isEmenu && (
-          <ToolButton title="字与按钮：设计稿原样 / 放大（平板上按后台「电子菜单 → 设置」）" onClick={() => setBig((b) => !b)} active={big}>
+          <ToolButton title="字与按钮：设计稿原样 / 放大（平板上按后台「电子菜单 → 设置」）" onClick={() => setBig((b) => !b)} active={big} testId="studio-text-size">
             {big ? '放大' : '原样'}
           </ToolButton>
         )}
