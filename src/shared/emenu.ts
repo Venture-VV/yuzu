@@ -40,9 +40,38 @@ export interface EmenuRules {
    * design 设计稿原样（设计师量的像素，字小）。
    */
   textSize: EmenuTextSize;
+  /**
+   * 早、中、晚三个时段（8.1.5，PP1）：开始时间与名称。三段首尾相接、盖满一天，一段的结束就是下一段的开始；
+   * 分类勾了在哪几段供应的，只在那几段显示（没勾的是全天）。
+   */
+  periods: EmenuPeriod[];
 }
 
 export type EmenuTextSize = 'large' | 'design';
+
+// ───────────────────────── 早、中、晚三个时段（8.1.5，docs/EMENU.md 第 14.1 节） ─────────────────────────
+
+export const EMENU_PERIODS = ['breakfast', 'lunch', 'dinner'] as const;
+export type EmenuPeriodKey = (typeof EMENU_PERIODS)[number];
+/** 后台勾选时的简称 */
+export const EMENU_PERIOD_SHORT: Record<EmenuPeriodKey, string> = { breakfast: '早', lunch: '中', dinner: '晚' };
+export const EMENU_MAX_PERIOD_NAME = 8;
+export const EMENU_MAX_PERIOD_NAME_EN = 24;
+
+/** 一个时段：从 start 开始，到下一段的 start 结束 */
+export interface EmenuPeriod {
+  key: EmenuPeriodKey;
+  name: string;
+  nameEn: string;
+  /** 一天里的第几分钟开始（0–1439） */
+  start: number;
+}
+
+export const DEFAULT_EMENU_PERIODS: readonly EmenuPeriod[] = [
+  { key: 'breakfast', name: '早餐', nameEn: 'Breakfast', start: 6 * 60 },
+  { key: 'lunch', name: '午餐', nameEn: 'Lunch', start: 11 * 60 },
+  { key: 'dinner', name: '晚餐', nameEn: 'Dinner', start: 17 * 60 },
+];
 
 export const DEFAULT_EMENU_RULES: EmenuRules = {
   // 8.0.20：功能开关都默认开（店主 2026-11-14，docs/PENDING_DECISIONS.md KG1–KG4）；要关在设置页关
@@ -58,6 +87,7 @@ export const DEFAULT_EMENU_RULES: EmenuRules = {
   motion: true,
   requirePin: false,
   textSize: 'large',
+  periods: DEFAULT_EMENU_PERIODS.map((p) => ({ ...p })),
 };
 
 /** 点单密码：6 位数字（设计稿「密码 ******」） */
@@ -278,6 +308,71 @@ export function parseMinute(text: string): number | null {
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 
+/** 三段的开始时间是不是早 < 午 < 晚（都在 0–1439 里） */
+export function periodsValid(list: readonly Pick<EmenuPeriod, 'start'>[]): boolean {
+  return list.length === EMENU_PERIODS.length && list.every((p, i) => Number.isInteger(p.start) && p.start >= 0 && p.start < 1440 && (i === 0 || p.start > list[i - 1]!.start));
+}
+
+/**
+ * 设置里存的三段（保存时核对过）：按早、中、晚排，缺的项用默认补上；开始时间对不上「早 < 午 < 晚」的旧数据整套用默认。
+ * 名称空着的用默认的名称。
+ */
+export function normalizePeriods(list: readonly Partial<EmenuPeriod>[] | null | undefined): EmenuPeriod[] {
+  const merged = DEFAULT_EMENU_PERIODS.map((d) => {
+    const got = (list ?? []).find((p) => p?.key === d.key);
+    return {
+      key: d.key,
+      name: typeof got?.name === 'string' && got.name.trim() ? got.name.trim() : d.name,
+      nameEn: typeof got?.nameEn === 'string' && got.nameEn.trim() ? got.nameEn.trim() : d.nameEn,
+      start: typeof got?.start === 'number' ? got.start : d.start,
+    };
+  });
+  return periodsValid(merged) ? merged : merged.map((p, i) => ({ ...p, start: DEFAULT_EMENU_PERIODS[i]!.start }));
+}
+
+/** 这个时刻在哪一段：开始时间不晚于它的最后一段；比早餐还早的算前一天的晚餐 */
+export function periodAt(periods: readonly EmenuPeriod[], minute: number): EmenuPeriod {
+  let at = periods[periods.length - 1]!;
+  for (const p of periods) if (p.start <= minute) at = p;
+  return at;
+}
+
+/** 一段的起止：结束是下一段的开始（晚餐的结束是第二天早餐的开始） */
+export function periodWindow(periods: readonly EmenuPeriod[], key: EmenuPeriodKey): EmenuWindow {
+  const i = periods.findIndex((p) => p.key === key);
+  return { start: periods[i]!.start, end: periods[(i + 1) % periods.length]!.start };
+}
+
+/** 分类在不在这一段供应：没勾的是全天 */
+export const periodsCover = (categoryPeriods: readonly string[], key: EmenuPeriodKey) => categoryPeriods.length === 0 || categoryPeriods.includes(key);
+
+/** 分类现在供不供应：在现在这一段（或全天），并且在另外限定的时间里 */
+export function categoryOpenAt(category: { periods: readonly string[]; window: EmenuWindow | null }, periods: readonly EmenuPeriod[], minute: number): boolean {
+  return periodsCover(category.periods, periodAt(periods, minute).key) && windowOpen(category.window, minute);
+}
+
+/** 从这一分钟起，再过几分钟（1–1440）可能有分类开、关：时段交界与各分类另外限定时间的起止里最近的一个 */
+export function minutesToNextChange(minute: number, periods: readonly EmenuPeriod[], windows: readonly (EmenuWindow | null)[]): number {
+  const marks = [...periods.map((p) => p.start), ...windows.flatMap((w) => (w ? [w.start, w.end] : []))];
+  return Math.min(...marks.map((m) => ((m - minute + 1439) % 1440) + 1));
+}
+
+/** 分类勾的几段按早中晚排好、去掉重复与认不出的 */
+export const sortPeriods = (list: readonly string[]): EmenuPeriodKey[] => EMENU_PERIODS.filter((k) => list.includes(k));
+
+/** 后台、提示里的写法：早餐 06:00–11:00 */
+export function formatPeriod(periods: readonly EmenuPeriod[], key: EmenuPeriodKey): string {
+  const p = periods.find((x) => x.key === key)!;
+  return `${p.name} ${formatWindow(periodWindow(periods, key))}`;
+}
+
+/** 分类什么时候供应（后台列表用）：全天 / 早餐、午餐；另外限定时间的写在后面 */
+export function describeCategoryHours(category: { periods: readonly string[]; window: EmenuWindow | null }, periods: readonly EmenuPeriod[]): string {
+  const keys = sortPeriods(category.periods);
+  const base = keys.length === 0 || keys.length === EMENU_PERIODS.length ? '全天' : keys.map((k) => periods.find((p) => p.key === k)!.name).join('、');
+  return category.window ? `${base} · 限 ${formatWindow(category.window)}` : base;
+}
+
 // ───────────────────────── 平板上看到的菜单 ─────────────────────────
 
 /** 一个规格现在能不能点 */
@@ -327,6 +422,9 @@ export interface EmenuCategoryView {
   id: number;
   name: string;
   nameEn: string;
+  /** 在哪几段供应（8.1.5；空的是全天） */
+  periods: EmenuPeriodKey[];
+  /** 另外限定的时间（8.0.10 的「指定时段」）；null 为不限 */
   window: EmenuWindow | null;
   /** 现在在供应时段里（不在的整类不能点，标「当前时段不可售」） */
   open: boolean;
@@ -338,13 +436,20 @@ export interface EmenuMenu {
   businessDate: string;
   /** 平板点餐与餐饮功能都开着 */
   enabled: boolean;
-  rules: Pick<EmenuRules, 'footerText' | 'avoidOptions' | 'serveOptions' | 'idleMinutes' | 'offHours' | 'langSwitch' | 'optionsEn' | 'motion' | 'requirePin' | 'textSize'> & {
+  rules: Pick<EmenuRules, 'footerText' | 'avoidOptions' | 'serveOptions' | 'idleMinutes' | 'offHours' | 'langSwitch' | 'optionsEn' | 'motion' | 'requirePin' | 'textSize' | 'periods'> & {
     coverUrl: string | null;
   };
+  /** 现在是哪一段（8.1.5）：工作台按某一段看时是那一段，看「全部」时为 null */
+  period: (EmenuPeriod & { end: number }) | null;
+  /** 下一次可能有分类开、关的时刻（时段交界、分类另外限定时间的起止）：平板到点马上重新取菜单；工作台按某一段看时为 null */
+  nextChangeAt: string | null;
   /** 现在显示的分类（按排序；不在时段的只有设置成「显示」时才在） */
   categories: EmenuCategoryView[];
-  /** 不在时段、没显示出来的分类（没有分类可点时告诉客人什么时候供应） */
-  later: { name: string; nameEn: string; window: EmenuWindow }[];
+  /**
+   * 不在时段、没显示出来的分类（没有分类可点时告诉客人什么时候供应）。itemIds 是排在这一类里的价目项目（8.1.5）：
+   * 「未下单」里的菜在这里时标「当前时段不可售」，不当成已不在菜单上
+   */
+  later: { name: string; nameEn: string; periods: EmenuPeriodKey[]; window: EmenuWindow | null; itemIds: number[] }[];
   /** 启用的桌台（空 = 店里没建桌台，桌号照输入的记） */
   tables: { name: string; area: string }[];
   /** UI 工作台（8.1.1）：这家店现在用哪一版版面（没发布过为空，用内置的默认版面）；inherited = 用的是本店的 */
@@ -505,6 +610,9 @@ export interface EmenuCategoryAdmin {
   id: number;
   name: string;
   nameEn: string;
+  /** 在哪几段供应（8.1.5；空的是全天） */
+  periods: EmenuPeriodKey[];
+  /** 另外限定的时间；null 为不限 */
   window: EmenuWindow | null;
   sortOrder: number;
   active: boolean;

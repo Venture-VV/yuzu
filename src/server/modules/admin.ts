@@ -15,7 +15,7 @@ import { DEFAULT_MEMBERSHIP_RULES, type MembershipRules } from '@shared/membersh
 import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES } from '@shared/technicians';
 import { AFTER_DESIGNATED_LABELS, AFTER_ROTATION_LABELS, DEFAULT_CLOCKROOM_RULES, DEFAULT_COMMISSION_RULES, describeCommissionBase } from '@shared/clockroom';
 import { DEFAULT_DINING_RULES } from '@shared/dining';
-import { DEFAULT_EMENU_RULES } from '@shared/emenu';
+import { DEFAULT_EMENU_RULES, EMENU_PERIODS, formatPeriod } from '@shared/emenu';
 import { DEFAULT_ROOM_RULES } from '@shared/rooms';
 import { formatYuan } from '@shared/money';
 import { DEFAULT_PURCHASE_RULES, DEPT_CONFIRM_RULE_LABELS, REPLENISH_LOOKBACK_DAYS } from '@shared/purchasing';
@@ -720,6 +720,21 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     section: 'emenu',
     current: em.offHours,
     dflt: emd.offHours,
+    metaKey: 'emenu_rules',
+  });
+  // 早中晚时段（8.1.5，PP1）：三段的名称与起止
+  const periodText = (list: typeof em.periods) => EMENU_PERIODS.map((k) => formatPeriod(list, k)).join('；');
+  add({
+    key: 'emenu_rules.periods',
+    group: 'emenu',
+    label: '早中晚时段',
+    value: periodText(em.periods),
+    defaultValue: periodText(emd.periods),
+    pending: true,
+    section: 'emenu',
+    hint: '分类勾了在哪几段供应的只在那几段显示，没勾的是全天',
+    current: em.periods,
+    dflt: emd.periods,
     metaKey: 'emenu_rules',
   });
   // ── 客房（S7，v0.7.4）──

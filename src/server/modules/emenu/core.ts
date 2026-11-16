@@ -22,8 +22,15 @@ import {
   EMENU_MAX_OPTION_LENGTH,
   matchByDigits,
   matchTable,
+  minutesToNextChange,
   minuteOfDay,
+  normalizePeriods,
+  periodAt,
+  periodsCover,
+  periodWindow,
+  sortPeriods,
   windowOpen,
+  type EmenuPeriodKey,
   type EmenuCategoryView,
   type EmenuDishView,
   type EmenuGuest,
@@ -59,7 +66,9 @@ import { studioPublishedRef } from '../studio/published';
 
 export async function loadEmenuRules(db: Db): Promise<EmenuRules> {
   const row = await settingRow<Partial<EmenuRules>>(db, 'emenu_rules');
-  return { ...DEFAULT_EMENU_RULES, ...(row?.value ?? {}) };
+  const rules = { ...DEFAULT_EMENU_RULES, ...(row?.value ?? {}) };
+  // 早中晚时段（8.1.5）：8.1.5 以前存的设置里没有这一项，用默认；按早中晚排好
+  return { ...rules, periods: normalizePeriods(rules.periods) };
 }
 
 /** 平板点餐现在能不能用：自己的开关与餐饮功能都开着 */
@@ -191,15 +200,24 @@ export async function emenuTables(db: Db): Promise<{ name: string; area: string 
   return db<{ name: string; area: string }[]>`SELECT name, area FROM dining_tables WHERE active AND store_id = ${currentStoreId()} ORDER BY sort_order, id`;
 }
 
-/** 平板上的菜单：设置、现在显示的分类与各页、每道菜的状态、桌台。每 15 秒取一次，价格、估清、上下架、版面都跟得上 */
-export async function emenuMenu(db: Db, deps: Deps): Promise<EmenuMenu> {
+/**
+ * 工作台按某一段看菜单（8.1.5，PP8）：早餐 / 午餐 / 晚餐只显示那一段的分类（分类另外限定的时间不算），all 全部分类都显示；
+ * 不给是现在（与平板一样）
+ */
+export type EmenuMenuView = EmenuPeriodKey | 'all';
+
+/**
+ * 平板上的菜单：设置、现在显示的分类与各页、每道菜的状态、桌台。每 15 秒取一次，价格、估清、上下架、版面都跟得上；
+ * 时段交界（8.1.5）与分类另外限定时间的起止由 nextChangeAt 告诉平板，到点马上再取。
+ */
+export async function emenuMenu(db: Db, deps: Deps, view?: EmenuMenuView): Promise<EmenuMenu> {
   const now = new Date();
   const today = await businessDate(db, deps, now);
   const rules = await loadEmenuRules(db);
   const diningOn = (await loadDiningRules(db)).enabled;
   const minute = minuteOfDay(now, deps.config.timezone);
-  const cats = await db<{ id: number; name: string; nameEn: string; startMinute: number | null; endMinute: number | null }[]>`
-    SELECT id, name, name_en, start_minute, end_minute FROM emenu_categories WHERE active ORDER BY sort_order, id`;
+  const cats = await db<{ id: number; name: string; nameEn: string; periods: string[]; startMinute: number | null; endMinute: number | null }[]>`
+    SELECT id, name, name_en, periods, start_minute, end_minute FROM emenu_categories WHERE active ORDER BY sort_order, id`;
   const pages = await db<{ id: number; categoryId: number; layout: EmenuLayout; title: string; titleEn: string }[]>`
     SELECT p.id, p.category_id, p.layout, p.title, p.title_en FROM emenu_pages p JOIN emenu_categories c ON c.id = p.category_id AND c.active
     ORDER BY p.category_id, p.sort_no`;
@@ -214,16 +232,23 @@ export async function emenuMenu(db: Db, deps: Deps): Promise<EmenuMenu> {
     diningOn,
   );
 
+  // 现在是哪一段：工作台按某一段看时是那一段，看全部时没有
+  const nowPeriod = periodAt(rules.periods, minute);
+  const viewPeriod = view === 'all' ? null : view ? rules.periods.find((p) => p.key === view)! : nowPeriod;
   const categories: EmenuCategoryView[] = [];
   const later: EmenuMenu['later'] = [];
   for (const c of cats) {
     const window = windowOf(c.startMinute, c.endMinute);
-    const open = windowOpen(window, minute);
+    const periods = sortPeriods(c.periods);
+    // 在这一段（或全天）并且在另外限定的时间里；工作台按某一段看时不算另外限定的时间，看全部时都算开着
+    const open = viewPeriod === null ? true : periodsCover(periods, viewPeriod.key) && (view ? true : windowOpen(window, minute));
     const mine = pages.filter((p) => Number(p.categoryId) === Number(c.id));
     // 一页都没排的分类不显示（后台还在编）
     if (mine.length === 0) continue;
     if (!open && rules.offHours === 'hide') {
-      later.push({ name: c.name, nameEn: c.nameEn, window: window! });
+      const itemIds = new Set<number>();
+      for (const p of mine) for (const sl of slots) if (Number(sl.pageId) === Number(p.id)) for (const sp of dishes.get(Number(sl.dishId))?.specs ?? []) itemIds.add(sp.itemId);
+      later.push({ name: c.name, nameEn: c.nameEn, periods, window, itemIds: [...itemIds] });
       continue;
     }
     const views: EmenuPageView[] = mine.map((p) => {
@@ -233,12 +258,26 @@ export async function emenuMenu(db: Db, deps: Deps): Promise<EmenuMenu> {
       for (const s of mineSlots) list[s.slotNo] = dishes.get(Number(s.dishId)) ?? null;
       return { layout: p.layout, title: p.title, titleEn: p.titleEn, dishes: list };
     });
-    categories.push({ id: Number(c.id), name: c.name, nameEn: c.nameEn, window, open, pages: views });
+    categories.push({ id: Number(c.id), name: c.name, nameEn: c.nameEn, periods, window, open, pages: views });
   }
+  // 下一次可能有分类开、关：到那一分钟的 0 秒（平板到点再取）
+  const next = view
+    ? null
+    : new Date(
+        Math.floor(now.getTime() / 60_000) * 60_000 +
+          minutesToNextChange(
+            minute,
+            rules.periods,
+            cats.map((c) => windowOf(c.startMinute, c.endMinute)),
+          ) *
+            60_000,
+      );
   return {
     serverTime: now.toISOString(),
     businessDate: today,
     enabled: rules.enabled && diningOn,
+    period: viewPeriod ? { ...viewPeriod, end: periodWindow(rules.periods, viewPeriod.key).end } : null,
+    nextChangeAt: next ? next.toISOString() : null,
     rules: {
       footerText: rules.footerText,
       avoidOptions: rules.avoidOptions,
@@ -250,6 +289,7 @@ export async function emenuMenu(db: Db, deps: Deps): Promise<EmenuMenu> {
       motion: rules.motion,
       requirePin: rules.requirePin,
       textSize: rules.textSize,
+      periods: rules.periods,
       coverUrl: emenuImageUrl(rules.coverImageId),
     },
     categories,
@@ -339,12 +379,14 @@ export async function checkEmenuTable(db: Db, raw: unknown): Promise<{ tableName
 
 /**
  * 这几个价目项目现在能不能在平板上点：要在电子菜单上（是一道启用的菜的规格、这道菜排在启用的分类的某一页上），
- * 而且所在的分类里至少有一个现在在供应时段（DC9：页面可能还没刷新，门店系统再核对一次）
+ * 而且所在的分类里至少有一个现在供应——在现在这一段（8.1.5，没勾时段的是全天）并且在另外限定的时间里
+ * （DC9、PP3：页面可能还没刷新，门店系统按下单这一刻再核对一次）
  */
-async function assertOnMenuNow(tx: Tx, itemIds: number[], minute: number) {
-  const rows = await tx<{ itemId: number; name: string; dishActive: boolean | null; windows: { start: number | null; end: number | null }[] | null }[]>`
+async function assertOnMenuNow(tx: Tx, itemIds: number[], minute: number, periods: EmenuRules['periods']) {
+  const now = periodAt(periods, minute).key;
+  const rows = await tx<{ itemId: number; name: string; dishActive: boolean | null; windows: { start: number | null; end: number | null; periods: string[] }[] | null }[]>`
     SELECT i.id AS item_id, i.name, d.active AS dish_active,
-           (SELECT json_agg(json_build_object('start', c.start_minute, 'end', c.end_minute))
+           (SELECT json_agg(json_build_object('start', c.start_minute, 'end', c.end_minute, 'periods', c.periods))
             FROM emenu_categories c
             WHERE c.active AND EXISTS (SELECT 1 FROM emenu_pages p JOIN emenu_page_dishes pd ON pd.page_id = p.id WHERE p.category_id = c.id AND pd.dish_id = d.id)) AS windows
     FROM service_items i LEFT JOIN emenu_dish_specs sp ON sp.item_id = i.id LEFT JOIN emenu_dishes d ON d.id = sp.dish_id
@@ -353,7 +395,7 @@ async function assertOnMenuNow(tx: Tx, itemIds: number[], minute: number) {
     const r = rows.find((x) => Number(x.itemId) === id);
     if (!r) throw unprocessable('DISH_NOT_ON_MENU', '有菜不在电子菜单上，请刷新后重新点');
     if (!r.dishActive || !r.windows?.length) throw unprocessable('DISH_NOT_ON_MENU', `「${r.name}」不在电子菜单上，请从菜单里重新点`, { itemId: id });
-    if (!r.windows.some((w) => windowOpen(windowOf(w.start, w.end), minute))) {
+    if (!r.windows.some((w) => periodsCover(w.periods, now) && windowOpen(windowOf(w.start, w.end), minute))) {
       throw unprocessable('DISH_NOT_AVAILABLE_NOW', `「${r.name}」现在不在供应时段，请从未下单里去掉`, { itemId: id });
     }
   }
@@ -410,7 +452,7 @@ export async function placeEmenuOrder(deps: Deps, raw: unknown, device: Actor, s
       throw conflict('TAG_CHANGED', `这位客人现在用的是手牌 ${tag!.code}，不是 ${tagCode}，请回到起始页重新输入手牌`);
     }
     const tableName = await resolveTable(tx, input.tableName);
-    await assertOnMenuNow(tx, itemIds, minuteOfDay(at, deps.config.timezone));
+    await assertOnMenuNow(tx, itemIds, minuteOfDay(at, deps.config.timezone), rules.periods);
     const posted = await postChargesTx(
       tx,
       deps,

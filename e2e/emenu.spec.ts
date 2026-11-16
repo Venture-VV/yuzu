@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import type { DiningAdmin, KitchenBoard } from '../src/shared/dining';
-import type { EmenuAdmin, EmenuMenu } from '../src/shared/emenu';
+import { DEFAULT_EMENU_PERIODS, type EmenuAdmin, type EmenuMenu } from '../src/shared/emenu';
 import type { StaffRecord } from '../src/shared/types';
 
 const PASSWORD = 'yuzu2026';
@@ -178,14 +178,18 @@ function syntheticMenu(rules: Partial<EmenuMenu['rules']> = {}): EmenuMenu {
       motion: true,
       requirePin: true,
       textSize: 'design',
+      periods: [...DEFAULT_EMENU_PERIODS],
       coverUrl: null,
       ...rules,
     },
+    period: { ...DEFAULT_EMENU_PERIODS[1]!, end: DEFAULT_EMENU_PERIODS[2]!.start },
+    nextChangeAt: null,
     categories: [
       {
         id: 1,
         name: '西式午餐',
         nameEn: 'WESTERN LUNCH',
+        periods: [],
         window: null,
         open: true,
         pages: [
@@ -201,6 +205,7 @@ function syntheticMenu(rules: Partial<EmenuMenu['rules']> = {}): EmenuMenu {
         id: 2,
         name: '中式午餐',
         nameEn: 'CHINESE LUNCH',
+        periods: [],
         window: null,
         open: true,
         pages: [{ layout: 'cover', title: '', titleEn: '', dishes: [dish(3, '广式猪脚姜浸花胶', 'Cantonese Pork Trotter Ginger Vinegar Fish Maw', 4200)] }],

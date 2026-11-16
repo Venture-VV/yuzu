@@ -40,6 +40,7 @@ import { currentStoreId, DEFAULT_STORE_ID } from '../../lib/store-context';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
 import { erpOpAbandoned } from '../erp-ops';
+import { EMENU_PERIODS } from '@shared/emenu';
 import { emenuMenu, loadEmenuRules } from '../emenu/core';
 import { assetHeaders, parseStudioAsset } from './assets';
 import { registerStudioCollab } from './collab';
@@ -465,8 +466,12 @@ export function registerStudioRoutes(app: FastifyInstance, deps: Deps) {
     return { surface: r.surface, doc: parseDoc(r.doc, r.surface), expiresAt: new Date(r.expiresAt).toISOString() };
   });
 
-  // 编辑器里用真实的菜单画菜单页、顶栏（设计师看不到「打开平板点餐」的接口）：与平板读的是同一份
-  app.get('/api/studio/emenu/menu', { preHandler: edit }, async () => readSnapshot(sql, (tx) => emenuMenu(tx, deps)));
+  // 编辑器里用真实的菜单画菜单页、顶栏（设计师看不到「打开平板点餐」的接口）：与平板读的是同一份。
+  // period（8.1.5，PP8）：按早餐 / 午餐 / 晚餐某一段看、all 看全部分类；不给是现在
+  app.get('/api/studio/emenu/menu', { preHandler: edit }, async (req) => {
+    const { period } = parse(z.object({ period: z.enum([...EMENU_PERIODS, 'all'], '时段不对').optional() }), req.query);
+    return readSnapshot(sql, (tx) => emenuMenu(tx, deps, period));
+  });
 
   // ── 素材 ──
   app.get('/api/studio/assets', { preHandler: edit }, async (): Promise<StudioAssetView[]> => {

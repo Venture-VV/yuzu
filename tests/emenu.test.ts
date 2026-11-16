@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_EMENU_RULES, minuteOfDay, type EmenuAdmin, type EmenuMenu } from '../src/shared/emenu';
+import { DEFAULT_EMENU_PERIODS, DEFAULT_EMENU_RULES, EMENU_PERIODS, minuteOfDay, periodAt, type EmenuAdmin, type EmenuMenu } from '../src/shared/emenu';
 import { resetLoginThrottle } from '../src/server/auth/lockout';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
@@ -293,6 +293,7 @@ describe('后台「电子菜单」', () => {
       'emenu_rules.serveOptions',
       'emenu_rules.idleMinutes',
       'emenu_rules.offHours',
+      'emenu_rules.periods',
     ]);
     expect(catalog.find((r) => r.key === 'emenu_rules.idleMinutes')).toMatchObject({ isDefault: false, value: '5 分钟没人动回到起始页、清掉没下单的菜', section: 'emenu' });
     expect(catalog.find((r) => r.key === 'emenu_rules.idleMinutes')!.updatedBy).not.toBeNull();
@@ -386,7 +387,7 @@ describe('平板上的菜单', () => {
     expect((await api(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/categories/${c.id}`, { ...c, window: closed })).status).toBe(200);
     let m = await menu();
     expect(m.categories.map((x) => x.name)).toEqual(['西式午餐', '中式午餐']);
-    expect(m.later).toEqual([{ name: '茶', nameEn: '', window: closed }]);
+    expect(m.later).toEqual([{ name: '茶', nameEn: '', periods: [], window: closed, itemIds: [item['陈皮普洱']] }]);
     expect((await rules({ offHours: 'show' })).status).toBe(200);
     m = await menu();
     expect(m.categories.find((x) => x.name === '茶')).toMatchObject({ open: false, window: closed });
@@ -399,6 +400,75 @@ describe('平板上的菜单', () => {
     const c3 = (await admin()).categories.find((x) => x.id === cat.tea)!;
     await api(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/categories/${c3.id}`, { ...c3, window: closed });
     await rules({ offHours: 'hide' });
+  });
+
+  it('早中晚时段（8.1.5）：只显示现在这一段与全天的分类；别的段的列在 later（带价目项目）；下单再核对；工作台能按某一段看', async () => {
+    const now = minuteOfDay(new Date(), ctx.config.timezone);
+    const nowKey = periodAt(DEFAULT_EMENU_PERIODS, now).key;
+    const other = EMENU_PERIODS.find((k) => k !== nowKey)!;
+    const put = async (id: number, patch: Record<string, unknown>) => {
+      const c = (await admin()).categories.find((x) => x.id === id)!;
+      return api(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/categories/${id}`, { ...c, ...patch });
+    };
+    // 升级以后原来的分类都是全天：现在这一段、下一次可能切换的时刻
+    let m = await menu();
+    expect(m.categories.map((x) => [x.name, x.periods])).toEqual([
+      ['西式午餐', []],
+      ['中式午餐', []],
+    ]);
+    expect(m.period).toMatchObject({ key: nowKey });
+    expect(m.rules.periods).toEqual(DEFAULT_EMENU_PERIODS);
+    const wait = Date.parse(m.nextChangeAt!) - Date.parse(m.serverTime);
+    expect(wait).toBeGreaterThan(0);
+    expect(wait).toBeLessThanOrEqual(1440 * 60_000);
+    // 西式午餐只在别的段供应：不显示，列在 later 里（带这一类的价目项目，平板据此标「当前时段不可售」）；中式午餐勾上现在这一段：照常
+    expect((await put(cat.west!, { periods: [other] })).status).toBe(200);
+    expect((await put(cat.lunch!, { periods: [nowKey, nowKey] })).status).toBe(200);
+    expect((await admin()).categories.find((x) => x.id === cat.lunch)!.periods).toEqual([nowKey]);
+    m = await menu();
+    expect(m.categories.map((x) => x.name)).toEqual(['中式午餐']);
+    const westLater = m.later.find((x) => x.name === '西式午餐')!;
+    expect(westLater).toMatchObject({ periods: [other], window: null });
+    expect(westLater.itemIds).toContain(item['华夫牛角']);
+    // 下单时门店系统再核对：别的段的菜不能点
+    const res = await order([{ itemId: item['华夫牛角']!, quantity: 1 }], 3800);
+    expect(res.body.error?.code).toBe('DISH_NOT_AVAILABLE_NOW');
+    // 设成「显示但不能点」：在、open=false
+    expect((await rules({ offHours: 'show' })).status).toBe(200);
+    expect((await menu()).categories.find((x) => x.name === '西式午餐')).toMatchObject({ open: false, periods: [other] });
+    expect((await rules({ offHours: 'hide' })).status).toBe(200);
+    // 工作台按某一段看：那一段的分类都显示（另外限定的时间不算）；all 全部；不认识的拒绝；平板账号用不了
+    const studio = async (q: string) => api<EmenuMenu>(ctx.app, ctx.owner, 'GET', `/api/studio/emenu/menu${q}`);
+    const asOther = (await studio(`?period=${other}`)).body;
+    expect(asOther.period).toMatchObject({ key: other });
+    expect(asOther.nextChangeAt).toBeNull();
+    // 「茶」是全天的、另外限定了时间（现在关着）：按某一段看时不算另外限定的时间，所以也在
+    expect(asOther.categories.map((x) => x.name)).toEqual(['西式午餐', '茶']);
+    const all = (await studio('?period=all')).body;
+    expect(all.period).toBeNull();
+    expect(all.categories.map((x) => x.name)).toEqual(['西式午餐', '中式午餐', '茶']);
+    expect((await studio('?period=brunch')).status).toBe(400);
+    expect((await api(ctx.app, pad, 'GET', `/api/studio/emenu/menu?period=${other}`)).status).toBe(403);
+    // 分类的时段只认早中晚
+    expect((await put(cat.west!, { periods: ['brunch'] })).status).toBe(400);
+    // 设置：三段要按早中晚、开始时间从早到晚、名称不能空；改了以后菜单跟着变，规则总表看得到
+    const bad = DEFAULT_EMENU_PERIODS.map((p) => ({ ...p }));
+    bad[1]!.start = bad[0]!.start;
+    expect((await rules({ periods: bad })).status).toBe(400);
+    expect((await rules({ periods: [DEFAULT_EMENU_PERIODS[1], DEFAULT_EMENU_PERIODS[0], DEFAULT_EMENU_PERIODS[2]] })).status).toBe(400);
+    expect((await rules({ periods: DEFAULT_EMENU_PERIODS.map((p, i) => (i === 2 ? { ...p, name: ' ' } : p)) })).status).toBe(400);
+    const renamed = DEFAULT_EMENU_PERIODS.map((p) => ({ ...p, name: `${p.name}时段`, nameEn: `${p.nameEn} Time` }));
+    expect((await rules({ periods: renamed })).status).toBe(200);
+    expect((await menu()).period).toMatchObject({ key: nowKey, name: `${DEFAULT_EMENU_PERIODS.find((p) => p.key === nowKey)!.name}时段` });
+    type Entry = { key: string; isDefault: boolean; value: string };
+    const catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as Entry[];
+    expect(catalog.find((r) => r.key === 'emenu_rules.periods')).toMatchObject({ isDefault: false });
+    expect(catalog.find((r) => r.key === 'emenu_rules.periods')!.value).toContain('早餐时段 06:00–11:00');
+    // 还原：两个分类回到全天，时段回到默认
+    expect((await rules({ periods: DEFAULT_EMENU_PERIODS })).status).toBe(200);
+    expect((await put(cat.west!, { periods: [] })).status).toBe(200);
+    expect((await put(cat.lunch!, { periods: [] })).status).toBe(200);
+    expect((await menu()).categories.map((x) => x.name)).toEqual(['西式午餐', '中式午餐']);
   });
 });
 

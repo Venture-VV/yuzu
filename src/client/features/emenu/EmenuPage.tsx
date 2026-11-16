@@ -15,6 +15,7 @@ import {
   EMENU_MAX_LINES,
   EMENU_PIN_LENGTH,
   formatWindow,
+  periodWindow,
   type EmenuCategoryView,
   type EmenuDishView,
   type EmenuGuest,
@@ -121,9 +122,9 @@ export function EmenuPage() {
     saveState(phase === 'menu' && session && !ended ? { session, cart, remark, lang } : null);
   }, [phase, session, cart, remark, lang, ended]);
 
-  const say = useCallback((text: string) => {
+  const say = useCallback((text: string, ms = 2200) => {
     setToast(text);
-    window.setTimeout(() => setToast((t) => (t === text ? null : t)), 2200);
+    window.setTimeout(() => setToast((t) => (t === text ? null : t)), ms);
   }, []);
 
   const reset = useCallback(() => {
@@ -219,6 +220,30 @@ export function EmenuPage() {
     if (next !== index || (strip.current && strip.current.page() !== next)) goTo(next, 'jump');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flat]);
+  // 时段交界（8.1.5，PP3）：门店系统告诉了下一次可能有分类开、关的时刻，到点马上再取菜单（不等 15 秒一次的刷新）。
+  // 平板的钟可能不准，按门店系统的时间算还差多少；多等 1.5 秒，确保门店系统那边已经过了这一分钟
+  const nextChangeAt = menu?.nextChangeAt ?? null;
+  const serverTime = menu?.serverTime ?? null;
+  const fetchedAt = menuQ.dataUpdatedAt;
+  const refetchMenu = menuQ.refetch;
+  useEffect(() => {
+    if (!nextChangeAt || !serverTime) return;
+    const wait = Date.parse(nextChangeAt) - Date.parse(serverTime) - (Date.now() - fetchedAt);
+    const t = window.setTimeout(() => void refetchMenu(), Math.max(0, wait) + 1500);
+    return () => window.clearTimeout(t);
+  }, [nextChangeAt, serverTime, fetchedAt, refetchMenu]);
+  // 换了时段、显示的分类也跟着变了：停在菜单里的客人弹一句「已到午餐时段，菜单已换成午餐」
+  const period = menu?.period ?? null;
+  const categoryKey = categories.map((c) => c.id).join(',');
+  const lastShape = useRef<{ period: string; categories: string } | null>(null);
+  useEffect(() => {
+    if (!period) return;
+    const before = lastShape.current;
+    lastShape.current = { period: period.key, categories: categoryKey };
+    if (before && before.period !== period.key && before.categories !== categoryKey && phase === 'menu') {
+      say(m.periodSwitched(shown === 'en' && period.nameEn ? period.nameEn : period.name), 4000);
+    }
+  }, [period, categoryKey, phase, say, m, shown]);
   useEffect(() => {
     if (phase !== 'menu' || overlay) return;
     const onKey = (e: KeyboardEvent) => {
@@ -245,11 +270,19 @@ export function EmenuPage() {
     }
     return map;
   }, [categories]);
+  // 时段切换（8.1.5，PP3）：「未下单」里上一段的菜所在的分类不显示了，菜名照旧用之前看到的，标「当前时段不可售」
+  //（只在 later 里有的才这样认；真的从菜单上撤掉的仍是「已不在菜单上」）
+  const seenSpecs = useRef(new Map<number, { dish: EmenuDishView; spec: EmenuSpecView }>());
+  useEffect(() => {
+    for (const [itemId, hit] of specIndex) seenSpecs.current.set(itemId, { dish: hit.dish, spec: hit.spec });
+  }, [specIndex]);
+  const laterItems = useMemo(() => new Set((menu?.later ?? []).flatMap((c) => c.itemIds)), [menu]);
 
   const rows = useMemo<CartRow[]>(
     () =>
       cart.map((l) => {
-        const hit = specIndex.get(l.itemId);
+        const seen = laterItems.has(l.itemId) ? seenSpecs.current.get(l.itemId) : undefined;
+        const hit = specIndex.get(l.itemId) ?? (seen ? { ...seen, open: false } : undefined);
         if (!hit) return { ...l, names: { main: m.goneDish, sub: '', mainEn: shown === 'en' }, tagline: { text: '', en: false }, label: '', price: 0, problem: m.goneProblem };
         const { dish, spec, open } = hit;
         const why = (block: 'off' | 'closed' | 'sold_out') => m.blockedProblem(blockLabel(block, shown).main);
@@ -265,7 +298,7 @@ export function EmenuPage() {
                   : null;
         return { ...l, names: dishNames(dish, shown), tagline: dishTagline(dish, shown), label: specLabel(spec, shown), price: spec.price, problem };
       }),
-    [cart, specIndex, shown, m],
+    [cart, specIndex, laterItems, shown, m],
   );
   const total = rows.reduce((s, r) => s + r.price * r.quantity, 0);
   const count = cart.reduce((s, l) => s + l.quantity, 0);
@@ -1379,6 +1412,12 @@ function Dot({ on, onClick, label, small, testId }: { on?: boolean; onClick: () 
   );
 }
 
+/** 一类菜什么时候供应：另外限定了时间的写那段时间，否则写它那几段的时间（8.1.5） */
+function laterHours(c: EmenuMenu['later'][number], periods: EmenuMenu['rules']['periods']): string {
+  if (c.window || c.periods.length === 0) return formatWindow(c.window);
+  return c.periods.map((k) => formatWindow(periodWindow(periods, k))).join(' / ');
+}
+
 /** 现在没有可点的分类（设计稿之外补的）：告诉客人各分类什么时候供应 */
 function NoMenu({ menu }: { menu: EmenuMenu }) {
   const lang = useLang();
@@ -1407,7 +1446,7 @@ function NoMenu({ menu }: { menu: EmenuMenu }) {
             <div key={c.name}>
               {namePair(c.name, c.nameEn, lang).mainEn ? <span className="em-en">{c.nameEn}</span> : c.name}
               <span className="em-en" style={{ color: 'var(--em-mute)', marginLeft: 12 }}>
-                {formatWindow(c.window)}
+                {laterHours(c, menu.rules.periods)}
               </span>
             </div>
           ))}

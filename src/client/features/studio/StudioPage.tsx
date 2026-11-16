@@ -7,9 +7,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2, Clock, Ellipsis, Eye, History, Languages, Maximize2, MessageSquare, Minus, Package, Plus, Redo2, Send, TriangleAlert, Undo2 } from 'lucide-react';
-import type { EmenuLayout, EmenuMenu } from '@shared/emenu';
+import { formatWindow, periodWindow, type EmenuLayout, type EmenuMenu, type EmenuPeriodKey } from '@shared/emenu';
 import { qrShape } from '@shared/qr-svg';
 import {
   checkStudioDoc,
@@ -177,8 +177,16 @@ export function StudioPage() {
   const stateQ = useQuery({ queryKey: ['studio', 'state', surface], queryFn: () => api.get<StudioState>(`/api/studio/${surface}`), refetchOnWindowFocus: false, staleTime: Infinity });
   const isEmenu = surface === 'emenu';
   const phone = def.kind === 'phone';
-  // 平板菜单的画布用真实的菜单画菜单页、顶栏；手机界面的功能块画示意，不用菜单
-  const menuQ = useQuery({ queryKey: ['studio', 'menu'], queryFn: () => api.get<EmenuMenu>('/api/studio/emenu/menu'), staleTime: 60_000, enabled: isEmenu });
+  // 平板菜单的画布用真实的菜单画菜单页、顶栏；手机界面的功能块画示意，不用菜单。
+  // 时段（8.1.5，PP8）：画布上按现在 / 早餐 / 午餐 / 晚餐 / 全部分类看，只是预览、不改平板
+  const [periodView, setPeriodView] = useState<'now' | EmenuPeriodKey | 'all'>('now');
+  const menuQ = useQuery({
+    queryKey: ['studio', 'menu', periodView],
+    queryFn: () => api.get<EmenuMenu>(periodView === 'now' ? '/api/studio/emenu/menu' : `/api/studio/emenu/menu?period=${periodView}`),
+    staleTime: 60_000,
+    enabled: isEmenu,
+    placeholderData: keepPreviousData,
+  });
   const assetsQ = useQuery({ queryKey: ['studio', 'assets'], queryFn: () => api.get<StudioAssetView[]>('/api/studio/assets') });
 
   const history = useDocHistory(defaultStudioDoc(surface));
@@ -576,6 +584,27 @@ export function StudioPage() {
               改好了
             </button>
           </div>
+        )}
+        {isEmenu && (tplMode || screen === 'menu') && menuQ.data && (
+          <select
+            className="ml-1 h-8 max-w-40 rounded-md border border-line bg-card px-1.5 text-[12px]"
+            value={periodView}
+            onChange={(e) => {
+              setPeriodView(e.target.value as typeof periodView);
+              setPageIndex(0);
+              setTplPageNo(0);
+            }}
+            title="画布上按哪个时段看菜单（只是预览，不改平板；按某一段看时分类另外限定的时间不算）"
+            data-testid="studio-period"
+          >
+            <option value="now">时段：现在</option>
+            {menuQ.data.rules.periods.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.name} {formatWindow(periodWindow(menuQ.data!.rules.periods, p.key))}
+              </option>
+            ))}
+            <option value="all">全部分类</option>
+          </select>
         )}
         {tplMode ? (
           <select

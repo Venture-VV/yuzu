@@ -2,7 +2,19 @@
 // 以及切到英文时每样内容取哪一份（录了英文的用英文，没录的显示中文，单位、规格、常见忌口有内置的英文）。不开浏览器、不连数据库。
 
 import { describe, expect, it } from 'vitest';
-import { dishMissingEnglish, emenuOptionEn, emenuSpecLabelEn, emenuUnitEn } from '../src/shared/emenu';
+import {
+  categoryOpenAt,
+  DEFAULT_EMENU_PERIODS,
+  describeCategoryHours,
+  dishMissingEnglish,
+  emenuOptionEn,
+  emenuSpecLabelEn,
+  emenuUnitEn,
+  minutesToNextChange,
+  normalizePeriods,
+  periodAt,
+  periodWindow,
+} from '../src/shared/emenu';
 import { blockLabel, dishAttrs, dishDescription, dishNames, dishTagline, dishUnit, guestErrorEn, messages, namePair, optionLabel, specLabel } from '../src/client/features/emenu/i18n';
 import { dragPosition, nextStable, rubberBand, settlePage, STAGE_H, STAGE_W, stageLayout, type ViewportNow } from '../src/client/features/emenu/viewport';
 
@@ -190,5 +202,60 @@ describe('中 / EN：每样内容取哪一份', () => {
     // 服务员那一步的原因（密码不对、估清）不翻
     expect(guestErrorEn('PIN_INVALID')).toBeNull();
     expect(guestErrorEn('DISH_SOLD_OUT')).toBeNull();
+  });
+});
+
+describe('早中晚时段（8.1.5，docs/EMENU.md 第 14.1 节）', () => {
+  const P = DEFAULT_EMENU_PERIODS;
+  const hm = (h: number, m = 0) => h * 60 + m;
+  it('哪一段：开始时间算这一段，比早餐还早的算前一天的晚餐；晚餐的结束是第二天早餐的开始', () => {
+    expect(periodAt(P, hm(6)).key).toBe('breakfast');
+    expect(periodAt(P, hm(10, 59)).key).toBe('breakfast');
+    expect(periodAt(P, hm(11)).key).toBe('lunch');
+    expect(periodAt(P, hm(17)).key).toBe('dinner');
+    expect(periodAt(P, hm(23, 59)).key).toBe('dinner');
+    expect(periodAt(P, 0).key).toBe('dinner');
+    expect(periodAt(P, hm(5, 59)).key).toBe('dinner');
+    expect(periodWindow(P, 'dinner')).toEqual({ start: hm(17), end: hm(6) });
+  });
+
+  it('分类供不供应：没勾的是全天；勾了的只在那几段；另外限定的时间同时满足才算', () => {
+    expect(categoryOpenAt({ periods: [], window: null }, P, hm(3))).toBe(true);
+    expect(categoryOpenAt({ periods: ['breakfast'], window: null }, P, hm(7))).toBe(true);
+    expect(categoryOpenAt({ periods: ['breakfast'], window: null }, P, hm(12))).toBe(false);
+    expect(categoryOpenAt({ periods: ['lunch', 'dinner'], window: null }, P, hm(18))).toBe(true);
+    // 晚餐里的宵夜 22:00–02:00（跨零点）
+    const supper = { periods: ['dinner'], window: { start: hm(22), end: hm(2) } };
+    expect(categoryOpenAt(supper, P, hm(21))).toBe(false);
+    expect(categoryOpenAt(supper, P, hm(23))).toBe(true);
+    expect(categoryOpenAt(supper, P, hm(1))).toBe(true);
+    expect(categoryOpenAt(supper, P, hm(3))).toBe(false);
+  });
+
+  it('下一次可能切换：时段交界与另外限定时间的起止里最近的一个，正好在交界上算到下一次（1–1440 分钟）', () => {
+    expect(minutesToNextChange(hm(10, 30), P, [])).toBe(30);
+    expect(minutesToNextChange(hm(11), P, [])).toBe(hm(6));
+    expect(minutesToNextChange(hm(20), P, [{ start: hm(22), end: hm(2) }])).toBe(120);
+    expect(minutesToNextChange(hm(23), P, [null, { start: hm(22), end: hm(2) }])).toBe(180);
+    expect(
+      minutesToNextChange(
+        hm(5, 59),
+        [
+          { ...P[0]!, start: hm(6) },
+          { ...P[1]!, start: hm(6, 1) },
+          { ...P[2]!, start: hm(6, 2) },
+        ],
+        [],
+      ),
+    ).toBe(1);
+  });
+
+  it('存的设置：缺的补默认、名称空着用默认、开始时间顺序不对的整套用默认的时间；后台列表的写法', () => {
+    expect(normalizePeriods(undefined)).toEqual(P);
+    expect(normalizePeriods([{ key: 'lunch', name: ' 中午 ', nameEn: '', start: hm(10, 30) }])).toEqual([P[0], { key: 'lunch', name: '中午', nameEn: 'Lunch', start: hm(10, 30) }, P[2]]);
+    expect(normalizePeriods([{ key: 'breakfast', start: hm(12) }]).map((p) => p.start)).toEqual(P.map((p) => p.start));
+    expect(describeCategoryHours({ periods: [], window: null }, P)).toBe('全天');
+    expect(describeCategoryHours({ periods: ['breakfast', 'lunch', 'dinner'], window: null }, P)).toBe('全天');
+    expect(describeCategoryHours({ periods: ['dinner', 'breakfast'], window: { start: hm(22), end: hm(2) } }, P)).toBe('早餐、晚餐 · 限 22:00–02:00');
   });
 });
