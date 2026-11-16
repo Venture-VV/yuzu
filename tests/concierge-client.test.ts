@@ -4,16 +4,23 @@ const mocks = vi.hoisted(() => ({
   post: vi.fn(),
   request: vi.fn(),
 }));
-vi.mock('../src/client/lib/api', () => ({
-  api: { get: mocks.get, post: mocks.post },
-  request: mocks.request,
-  ApiError: class ApiError extends Error {
+vi.mock('../src/client/lib/api', () => {
+  class ApiError extends Error {
     constructor(public status: number) {
       super('rejected');
     }
-  },
-  UncertainError: class UncertainError extends Error {},
-}));
+  }
+  class UncertainError extends Error {}
+  return {
+    api: { get: mocks.get, post: mocks.post },
+    request: mocks.request,
+    ApiError,
+    UncertainError,
+    // 8.1.3：管家部判断「明确没处理」、「第一次提交没发出去」改用 lib/api 的这两个（这里没有断网的情况，原样返回）
+    isRejected: (e: unknown) => e instanceof ApiError && e.status < 500,
+    notSentAsRejection: (e: unknown) => e,
+  };
+});
 import { ApiError, UncertainError } from '../src/client/lib/api';
 import { conciergeFetch, pendingRequests, setConciergeActor, loadReceipt, loadWorkspace, unresolvedPending, retryPending } from '../src/client/features/concierge/api';
 let actor = 1000;
