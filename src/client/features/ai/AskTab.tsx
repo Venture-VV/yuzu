@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MessageSquareText, Send } from 'lucide-react';
 import { AI_QUESTION_MAX, type AiQuestionView } from '@shared/ai';
-import { api, ApiError, errorMessage } from '../../lib/api';
+import { api, errorMessage, isRejected } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { formatDateTime, uuid } from '../../lib/utils';
 import { LoadFailed } from '../../components/LoadFailed';
@@ -95,7 +95,7 @@ export function AskTab() {
       void qc.invalidateQueries({ queryKey: AI_STATUS_KEY });
     } catch (e) {
       // 明确被拒绝的（限额、关着、没配置……）换个问题再问；连不上的留着编号，原样再发一次
-      if (e instanceof ApiError && e.status < 500) setPending(null);
+      if (isRejected(e)) setPending(null);
       setSendError(errorMessage(e));
     } finally {
       setBusy(false);

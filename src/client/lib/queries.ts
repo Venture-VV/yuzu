@@ -13,7 +13,7 @@ import type {
 } from '@shared/types';
 import type { StoreRules } from '@shared/types';
 import { MP_CODE, type MpCodeLookup } from '@shared/mp';
-import { api, ApiError } from './api';
+import { api, shouldRetryQuery } from './api';
 
 export const qk = {
   session: ['session'] as const,
@@ -33,7 +33,7 @@ export const useSessionQuery = () =>
   useQuery({
     queryKey: qk.session,
     queryFn: () => api.get<SessionInfo>('/api/auth/me'),
-    retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 2,
+    retry: shouldRetryQuery,
     staleTime: 60_000,
   });
 

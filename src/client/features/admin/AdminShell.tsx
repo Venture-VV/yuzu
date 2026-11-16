@@ -47,6 +47,7 @@ import { cn } from '../../lib/utils';
 import { LogoMark } from '../../components/Brand';
 import { InstanceBadge } from '../../components/InstanceTag';
 import { Notice } from '../../components/ui';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 
 const ICONS: Record<AdminSection, LucideIcon> = {
   home: LayoutGrid,
@@ -178,7 +179,9 @@ export function AdminShell() {
         {/* 换分区重新挂载、内容区淡入（8.0.16）。按分区那一段地址算（/admin/technicians），分区里换二级页签不重新挂载：
             别的页签里填到一半的东西还在（8.0.17） */}
         <main className="scroll-thin min-h-0 min-w-0 flex-1 animate-page-in overflow-y-auto" key={location.pathname.split('/').slice(0, 3).join('/')}>
-          <Outlet />
+          <ErrorBoundary resetKey={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

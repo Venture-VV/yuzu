@@ -25,7 +25,7 @@ import {
   type EmenuPageView,
   type EmenuSpecView,
 } from '@shared/emenu';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { api, ApiError, errorMessage, isRejected, notSentAsRejection, UncertainError } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { uuid } from '../../lib/utils';
 import { Header } from './header';
@@ -361,8 +361,10 @@ export function EmenuPage() {
         removePending(p.key);
         finish(order);
         return { outcome: 'ok' };
-      } catch (error) {
-        if (error instanceof ApiError && error.status < 500) {
+      } catch (raw) {
+        // 第一次发被「连不上服务器、没发出去」挡下（8.1.3）：等同明确拒绝，这一单没下、菜还在；重提时照旧待确认
+        const error = isRetry ? raw : notSentAsRejection(raw);
+        if (isRejected(error)) {
           // 点单密码不对、锁了、这位员工没有权限：门店系统在动账单之前就拒绝了，这一次什么都没做
           const pinProblem = PIN_ERRORS.includes(error.code) || error.status === 401;
           if (!isRetry) {
@@ -446,7 +448,7 @@ export function EmenuPage() {
       try {
         settle(pending.key, await api.post<EmenuOpLookup>(`/api/emenu/orders/by-key/${pending.key}/abandon`, { pin }), '作废没有完成，原来那一单仍待确认');
       } catch (error) {
-        setOpNote({ error: error instanceof ApiError && error.status < 500 ? error.message : `作废没有完成，原来那一单仍待确认：${errorMessage(error)}` });
+        setOpNote({ error: isRejected(error) ? error.message : `作废没有完成，原来那一单仍待确认：${errorMessage(error)}` });
       } finally {
         opEnd();
       }

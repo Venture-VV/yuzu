@@ -1,4 +1,4 @@
-import { api, request, ApiError, UncertainError } from "../../lib/api";
+import { api, request, isRejected, notSentAsRejection, UncertainError } from "../../lib/api";
 import type { WorkspaceData, Receipt } from "./types";
 export type Pending = {
   requestId: string;
@@ -219,8 +219,10 @@ export async function conciergeFetch(
       forgetPending(operation.requestId);
       cached = undefined;
       return response(result);
-    } catch (e) {
-      if (e instanceof ApiError && e.status < 500 && !operation.uncertain)
+    } catch (raw) {
+      // 第一次发被「连不上服务器、没发出去」挡下（8.1.3）：等同明确拒绝；本机已经有这一笔（重试）时照旧待确认
+      const e = previous ? raw : notSentAsRejection(raw);
+      if (isRejected(e) && !operation.uncertain)
         forgetPending(operation.requestId);
       else {
         try {

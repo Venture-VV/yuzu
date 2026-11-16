@@ -23,6 +23,7 @@ import { InstanceBadge } from '../../components/InstanceTag';
 import { Notice } from '../../components/ui';
 import { useErpAccess } from './access';
 import { erpSettingsTabs } from './settingsTabs';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 
 const ICONS: Record<ErpModuleKey, LucideIcon> = {
   inventory: Boxes,
@@ -259,7 +260,9 @@ export function ErpShell() {
         {/* 不按地址重新挂载：库存的各个页签之间切换时，页面里的状态与原来在门店里一样保留 */}
         <main ref={content} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
           <ErpModuleGate module={erpModuleOfPage(pathname)}>
+            <ErrorBoundary resetKey={pathname}>
             <Outlet />
+          </ErrorBoundary>
           </ErpModuleGate>
         </main>
       </div>

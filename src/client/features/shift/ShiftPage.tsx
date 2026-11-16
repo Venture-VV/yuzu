@@ -12,6 +12,7 @@ import { formatYuan } from '@shared/money';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
+import { LocalPendingNotice } from '../../components/LocalPendingNotice';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, MoneyInput, Notice, SectionTitle, Skeleton } from '../../components/ui';
@@ -194,6 +195,7 @@ function OpenShift({ shift }: { shift: ShiftRecord }) {
             </span>
           </Notice>
         )}
+        <LocalPendingNotice action="交班" className="mt-3" />
         <Input className="mt-3" value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} placeholder="交班备注（选填），例如短款原因" aria-label="交班备注" />
         <Button className="mt-3" variant="primary" size="lg" disabled={countedCents === null} loading={busy} onClick={() => void close()} data-testid="shift-close">
           确认交班

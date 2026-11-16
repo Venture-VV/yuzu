@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { invalidateRevenue } from '../../lib/revenue';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MemberDetail, OperationLookup, OperationResult } from '@shared/types';
-import { api, ApiError, UncertainError } from '../../lib/api';
+import { api, ApiError, isRejected, notSentAsRejection, UncertainError } from '../../lib/api';
 import {
+  hasPending,
   PENDING_LABELS,
   PendingStoreError,
   removePending,
@@ -44,7 +45,8 @@ export function abandonOnServer(op: PendingOp) {
   });
 }
 
-const uncertainReason = (error: unknown) => (error instanceof UncertainError ? error.reason : error instanceof ApiError ? 'server' : 'network');
+const uncertainReason = (error: unknown): 'timeout' | 'network' | 'server' =>
+  error instanceof UncertainError ? (error.reason === 'offline' ? 'network' : error.reason) : error instanceof ApiError ? 'server' : 'network';
 
 /**
  * 记账操作的提交状态机。
@@ -149,6 +151,8 @@ export function useOperation(spec: OperationSpec) {
 
   const send = useCallback(
     async (op: PendingOp) => {
+      // 本机已经有这一笔（之前发出去过、结果不明，或页面刷新前在路上）：这是重提
+      const resend = unsettledRef.current.has(op.key) || hasPending(op.key);
       try {
         savePending(op);
       } catch (error) {
@@ -162,8 +166,11 @@ export function useOperation(spec: OperationSpec) {
       try {
         const result = await api.post<OperationResult>(op.url, op.body);
         succeed(op.key, result, result.replayed);
-      } catch (error) {
-        if (error instanceof ApiError && error.status < 500) {
+      } catch (raw) {
+        // 第一次提交被「连不上服务器、没发出去」挡下（8.1.3）：等同被明确拒绝，这笔没处理、填的内容还在；
+        // 重提时被挡下照旧待确认（之前那次可能已经入账）
+        const error = resend ? raw : notSentAsRejection(raw);
+        if (isRejected(error)) {
           await rejected(op, error);
         } else {
           // 超时、断网或服务器异常（例如入账后读取结果失败）：无法确定是否已入账，按待确认处理

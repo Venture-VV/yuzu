@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Hourglass } from 'lucide-react';
 import type { FrontdeskOpLookup } from '@shared/frontdesk';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { api, ApiError, errorMessage, isRejected, notSentAsRejection, UncertainError } from '../../lib/api';
 import { formatDateTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Button, Notice } from '../../components/ui';
@@ -336,8 +336,10 @@ export function useFrontdeskOp<T>(opts: {
         removeFrontdeskPending(op.key);
         setState({ phase: 'idle' });
         return result;
-      } catch (error) {
-        if (error instanceof ApiError && error.status < 500) {
+      } catch (raw) {
+        // 第一次发被「连不上服务器、没发出去」挡下（8.1.3）：等同明确拒绝；重提时照旧待确认
+        const error = isRetry ? raw : notSentAsRejection(raw);
+        if (isRejected(error)) {
           if (isRetry && error.code !== 'OP_ABANDONED') {
             // 重提被明确拒绝，不代表之前那次结果不明的请求不会随后生效：先在服务端作废编号，再下结论
             let fenced: FrontdeskOpLookup | null = null;

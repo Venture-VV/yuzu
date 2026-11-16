@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Navigate, NavLink, useLocation, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Building2, KeyRound, LogOut, MonitorSmartphone } from 'lucide-react';
+import { Building2, KeyRound, LogOut, MonitorSmartphone, Wifi } from 'lucide-react';
 import { useTerminalState } from '../features/devices/terminal';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
@@ -14,6 +14,8 @@ import { InstanceTag } from './InstanceTag';
 import { StoreSwitcher } from './StoreSwitcher';
 import { storePageOf, useStoreNav } from './storeNav';
 import { PendingOpsBanner } from './PendingOpsBanner';
+import { useLocalPendingCount } from './LocalPendingNotice';
+import { useConnection } from '../lib/connection';
 import { FrontdeskPendingBanner } from '../features/frontdesk/PendingBanner';
 import { useErpAccess } from '../features/erp/access';
 import { TerminalBridgeRunner } from '../features/devices/terminal';
@@ -98,6 +100,8 @@ function UserMenu() {
   const erp = useErpAccess();
   // 这台电脑现在设成了哪台终端（记在本机浏览器里；没设 = 不上报）
   const terminalCode = useTerminalState().terminal;
+  const link = useConnection();
+  const pendingCount = useLocalPendingCount();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -157,6 +161,14 @@ function UserMenu() {
               本机终端<span className="ml-auto max-w-[96px] truncate text-[12px] text-ink-3" data-testid="user-menu-terminal-current">{terminalCode ?? '未设置'}</span>
             </MenuItem>
           )}
+          {/* 网络与同步（8.1.3 WL12）：连接、版本、这台电脑上的待确认、最近的问题 */}
+          <MenuItem icon={<Wifi className="size-4" />} onClick={() => { setOpen(false); navigate('/network'); }} testId="user-menu-network">
+            网络与同步
+            <span className="ml-auto flex items-center gap-1.5 text-[12px] text-ink-3">
+              {pendingCount > 0 && <span data-testid="user-menu-network-pending">{pendingCount} 笔待确认</span>}
+              <span className={cn('size-2 rounded-full', link.state === 'offline' ? 'bg-clay' : link.updated ? 'bg-lake' : 'bg-pine')} />
+            </span>
+          </MenuItem>
           <MenuItem icon={<KeyRound className="size-4" />} onClick={() => { setOpen(false); navigate('/password'); }}>
             修改密码
           </MenuItem>

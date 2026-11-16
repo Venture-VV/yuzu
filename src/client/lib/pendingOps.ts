@@ -83,6 +83,11 @@ function notify() {
   listeners.forEach((fn) => fn());
 }
 
+/** 本机已经有这个编号的待确认记录（之前发出去过、结果不明，或页面刷新前在路上）：再发就是重提 */
+export function hasPending(key: string): boolean {
+  return readAll().some((p) => p.key === key);
+}
+
 /** 提交前保存待确认记录；保存不了时抛出 PendingStoreError，调用方不得发出请求 */
 export function savePending(op: PendingOp) {
   const list = readAll();

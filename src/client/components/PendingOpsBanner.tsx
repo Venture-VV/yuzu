@@ -10,6 +10,7 @@ import { useCan } from '../lib/session';
 import { formatDateTime } from '../lib/utils';
 import { Money } from './Money';
 import { useToast } from './Toast';
+import { onReconnect } from '../lib/connection';
 
 const REQUIRED: Record<PendingOp['type'], Permission> = {
   recharge: 'recharge.create',
@@ -69,7 +70,15 @@ export function PendingOpsBanner() {
       checked.current.clear();
       run();
     }, 60_000);
-    return () => clearInterval(timer);
+    // 网络恢复（8.1.3）：马上按原编号再查一遍，不等下一分钟
+    const off = onReconnect(() => {
+      checked.current.clear();
+      run();
+    });
+    return () => {
+      clearInterval(timer);
+      off();
+    };
   }, [ops, qc, toast]);
 
   if (ops.length === 0) return null;

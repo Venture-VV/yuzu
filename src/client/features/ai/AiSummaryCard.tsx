@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { ChevronDown, ChevronUp, RefreshCw, Sparkles } from 'lucide-react';
 import type { AiCompanyFacts, AiDailyFacts, AiSummaryResponse, AiSummaryView } from '@shared/ai';
-import { api, ApiError, errorMessage } from '../../lib/api';
+import { api, ApiError, errorMessage, shouldRetryQuery } from '../../lib/api';
 import { useReportScope } from '../../lib/reportScope';
 import { formatDateTime } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
@@ -67,7 +67,7 @@ export function AiSummaryCard() {
     queryKey: key,
     queryFn: () => api.get<AiSummaryResponse>(`/api/ai/summaries${scope.qs}`),
     enabled: on,
-    retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 2,
+    retry: shouldRetryQuery,
     // 生成中时每 2 秒看一次
     refetchInterval: (query) => (query.state.data?.summary?.status === 'running' ? 2000 : false),
   });

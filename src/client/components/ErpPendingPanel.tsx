@@ -12,6 +12,7 @@ import { abandonErpOp, lookupErpOp, removeErpPending, sendErpOp, useErpPending, 
 import { formatDateTime } from '../lib/utils';
 import { useToast } from './Toast';
 import { Button, Notice } from './ui';
+import { useReconnectTick } from '../lib/connection';
 
 export interface ErpOpRef {
   refId: number;
@@ -185,6 +186,8 @@ export function ErpPendingPanel({
   // 断网时页面一刷新数据就再发一遍查回；网络一恢复，又会抢在员工点「按原内容重新提交」之前把这一行处理掉。
   // 没传 filter 的页面本来就只在列表变了时查。查不回的由员工点「查回」或重新提交、作废。
   const opKeys = ops.map((op) => op.key).join('\n');
+  // 网络恢复（8.1.3）：上次没查成的（查回失败时从 checked 里拿掉了）再查一次；查到「没有」的不重查，不抢员工正在处理的
+  const reconnects = useReconnectTick();
   useEffect(() => {
     for (const op of ops) {
       if (checked.current.has(op.key)) continue;
@@ -204,7 +207,7 @@ export function ErpPendingPanel({
     }
     // ops 只在 opKeys 变了时读：同一组编号的新数组不再触发
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opKeys, qc, toast]);
+  }, [opKeys, qc, toast, reconnects]);
 
   if (ops.length === 0) return null;
   return (
