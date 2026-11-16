@@ -7,8 +7,8 @@
 
 import { isApiError } from './api';
 
-/** 结果不确定：连不上网关、超时、网关或门店出错（5xx）、门店连不上 */
-export const uncertain = (e: unknown) => !isApiError(e) || e.status === 0 || e.status >= 500 || e.code === 'STORE_OFFLINE';
+/** 结果不确定：连不上网关、超时、网关或门店出错（5xx，不含过载保护明确没处理的 OVERLOADED）、门店连不上 */
+export const uncertain = (e: unknown) => !isApiError(e) || e.status === 0 || (e.status >= 500 && e.code !== 'OVERLOADED') || e.code === 'STORE_OFFLINE';
 
 export type Stored = { state: 'none' } | { state: 'ok'; value: Record<string, unknown> } | { state: 'unreadable' };
 

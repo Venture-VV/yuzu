@@ -154,6 +154,14 @@ describe('记已读', () => {
     const m2 = await load();
     await m2.markRead([13], 3);
     expect(s2.tq_notice_read_pending).toEqual([P(13)]);
+
+    // 数据库忙（409 BUSY）也不算永久拒绝：已读留在手机上下次补发
+    const { storage: s3 } = installWx({ '/v1/notices/read': { status: 409, data: { error: { code: 'BUSY', message: '门店系统正忙' } } } });
+    const api3 = await import('../src/utils/api');
+    api3.setRetryDelayForTest(() => 0);
+    const m3 = await import('../src/utils/notices');
+    await m3.markRead([14], 3);
+    expect(s3.tq_notice_read_pending).toEqual([P(14)]);
   });
 
   it('不同版本号下看过的分开发、各带各的版本号（换绑以前的那一批门店系统会拒绝）', async () => {

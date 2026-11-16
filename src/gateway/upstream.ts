@@ -9,6 +9,7 @@ export interface UpstreamResponse {
   status: number;
   contentType: string;
   cacheControl: string | null;
+  retryAfter?: string | null;
   body: Buffer;
 }
 
@@ -34,6 +35,7 @@ export function createUpstream(baseUrl: string, gatewayKey: string, timeoutMs = 
           status: res.status,
           contentType: res.headers.get('content-type') ?? 'application/octet-stream',
           cacheControl: res.headers.get('cache-control'),
+          retryAfter: res.headers.get('retry-after'),
           body: Buffer.from(await res.arrayBuffer()),
         };
       } catch {

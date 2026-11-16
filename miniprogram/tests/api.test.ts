@@ -238,3 +238,61 @@ describe('模拟微信', () => {
     expect(fake.requests[0]!.url).toBe('https://api-test.domain.invalid/v1/health');
   });
 });
+
+describe('门店正忙与过载保护（8.1.3）', () => {
+  it('不带一次性 phoneCode 的接口遇到 BUSY / OVERLOADED 带原编号短暂重发；带 phoneCode 的在网关重发、小程序不重发', async () => {
+    let claimCalls = 0;
+    let bindCalls = 0;
+    let holdCalls = 0;
+    installWx((req) => {
+      const p = path(req.url);
+      if (p === '/v1/login') return { status: 200, data: { token: 'v1.tok', expiresAt: future() } };
+      if (p === '/v1/coupon-claims') {
+        claimCalls++;
+        if (claimCalls === 1) return { status: 503, data: { error: { code: 'OVERLOADED', message: '系统正忙，这次没有处理，页面会自动稍后再试' } }, header: { 'retry-after': '2' } };
+        if (claimCalls === 2) return { status: 409, data: { error: { code: 'BUSY', message: '门店系统正忙，这次没有生效，请稍后再试' } } };
+        return { status: 200, data: { claimId: 1, replayed: false } };
+      }
+      if (p === '/v1/bind') {
+        bindCalls++;
+        return { status: 503, data: { error: { code: 'OVERLOADED', message: '系统正忙，这次没有处理，页面会自动稍后再试' } } };
+      }
+      if (p === '/v1/code') {
+        holdCalls++;
+        return { status: 503, data: { error: { code: 'OVERLOADED', message: '系统正忙，这次没有处理，页面会自动稍后再试' } } };
+      }
+      return { status: 404, data: {} };
+    });
+    const api = await loadApi();
+    api.setRetryDelayForTest(() => 0);
+
+    const res = await api.member('POST', '/v1/coupon-claims', { clientKey: 'k1', templateId: 9, bindVersion: 0 });
+    expect(res).toEqual({ claimId: 1, replayed: false });
+    expect(claimCalls).toBe(3);
+
+    // 带 phoneCode 的请求小程序只发 1 次；最终给顾客的文字不带「页面会自动稍后再试」
+    const bindErr = await api.member('POST', '/v1/bind', { phoneCode: 'wx-one-shot', clientKey: 'k2', bindVersion: 0 }).catch((e: unknown) => e);
+    expect(bindCalls).toBe(1);
+    expect(bindErr).toMatchObject({ code: 'OVERLOADED', status: 503, message: '门店系统正忙，这次没有处理，请稍后再试' });
+
+    // 重发 2 次后仍忙：一共 3 次，不再继续重发
+    const codeErr = await api.member('POST', '/v1/code').catch((e: unknown) => e);
+    expect(holdCalls).toBe(3);
+    expect(codeErr).toMatchObject({ code: 'OVERLOADED', status: 503, message: '门店系统正忙，这次没有处理，请稍后再试' });
+  });
+
+  it('展示内容遇到持续 OVERLOADED / BUSY 时先给手机上 7 天内的旧内容', async () => {
+    let busy = false;
+    installWx((req) => {
+      if (path(req.url) !== '/v1/studio') return { status: 404, data: {} };
+      if (busy) return { status: 503, data: { error: { code: 'OVERLOADED', message: '系统正忙' } } };
+      return { status: 200, data: { version: 5 }, header: { 'x-cache': 'miss' } };
+    });
+    const api = await loadApi();
+    api.setRetryDelayForTest(() => 0);
+    expect(await api.show('/v1/studio')).toEqual({ data: { version: 5 }, stale: false });
+    busy = true;
+    expect(await api.show('/v1/studio')).toEqual({ data: { version: 5 }, stale: true });
+  });
+});
+

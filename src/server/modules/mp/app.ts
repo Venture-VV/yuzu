@@ -8,6 +8,8 @@ import { MP_GATEWAY_HEADER } from '@shared/mp';
 import type { AppConfig } from '../../config';
 import type { Sql } from '../../db';
 import { AppError } from '../../lib/errors';
+import { decodedPath } from '../../lib/paths';
+import { createProtection } from '../../lib/protect';
 import { registerMpBookingRoutes } from './booking-routes';
 import { registerMpCouponRoutes } from './coupon-routes';
 import { registerMpFoodRoutes } from './food-routes';
@@ -48,6 +50,17 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
       throw new AppError(401, 'MP_GATEWAY_REJECTED', '请求来源不正确');
     }
   });
+  // 过载保护（8.1.3，docs/RESILIENCE_V813.md 第 3.5 节）：忙的时候新请求直接回 503 OVERLOADED + Retry-After（确定没处理）。
+  // 网关已经按 IP 与每个微信限了频率，这里不再叠一层；/api/mp/health（网关探活）不受过载保护影响
+  const protection = createProtection({ ...config.protection, sessionPerMin: 0, ipPerMin: 0, allowCidrs: [] });
+  app.addHook('onRequest', async (req, reply) => {
+    if (decodedPath(req.url) === '/api/mp/health') return undefined;
+    return protection.gate(req, reply);
+  });
+  app.addHook('onResponse', protection.done);
+  app.addHook('onRequestAbort', protection.done);
+  app.addHook('onClose', async () => protection.close());
+
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('x-content-type-options', 'nosniff');
     return payload;
@@ -59,7 +72,13 @@ export async function buildMpApp(sql: Sql, config: AppConfig, opts: MpAppOptions
       reply.status(error.status).send({ error: { code: error.code, message: error.message } });
       return;
     }
-    const e = error as { statusCode?: number };
+    const e = error as { statusCode?: number; code?: string };
+    if (e.code === '55P03' || e.code === '57014' || e.code === '40P01' || e.code === '40001') {
+      // 等锁或执行超时、死锁、串行化冲突（8.1.3）：事务已回滚，确定没有生效
+      req.log.warn({ err: error }, e.code === '40P01' ? '死锁，事务已回滚' : e.code === '40001' ? '串行化冲突，事务已回滚' : '记账等待超时');
+      reply.status(409).send({ error: { code: 'BUSY', message: '门店系统正忙，这次没有生效，请稍后再试' } });
+      return;
+    }
     if (e.statusCode && e.statusCode < 500) {
       reply.status(e.statusCode).send({ error: { code: 'BAD_REQUEST', message: '请求格式不正确' } });
       return;

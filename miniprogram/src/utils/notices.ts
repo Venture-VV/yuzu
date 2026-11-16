@@ -66,9 +66,9 @@ function writePending(items: PendingRead[]): void {
   }
 }
 
-/** 门店系统回了：记上了，或者明确拒绝（没绑定、换绑过、编号不对）。连不上、超时、出错、太频繁的还不算 */
+/** 门店系统回了：记上了，或者明确拒绝（没绑定、换绑过、编号不对）。连不上、超时、出错、太频繁、暂时忙（BUSY）的还不算 */
 function settled(e: unknown): boolean {
-  return isApiError(e) && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429;
+  return isApiError(e) && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429 && e.code !== 'BUSY';
 }
 
 /** 按版本号分组、每组每批最多 20 条（先来的先发） */

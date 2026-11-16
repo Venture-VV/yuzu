@@ -149,11 +149,35 @@ export interface GatewayDeps {
   cache?: ShowCache;
   /** 到期提醒多少毫秒取一次（不给按配置；测试给 0 不开，直接调 sendDueReminders） */
   reminderMs?: number;
+  /** 换完手机号以后门店正忙（OVERLOADED / BUSY）时的重发间隔（测试给很短的值） */
+  retryDelayMs?: (attempt: number, retryAfterSec?: number) => number;
+}
+
+const defaultRetryDelay = (attempt: number, retryAfterSec?: number) =>
+  retryAfterSec !== undefined
+    ? Math.round(Math.min(retryAfterSec * 1000, 1500) * (0.75 + Math.random() * 0.25))
+    : Math.round(300 * 2 ** attempt * (0.5 + Math.random() * 0.5));
+
+function upstreamErrorCode(r: UpstreamResponse): string | null {
+  if (r.status < 400 || !r.contentType.includes('application/json')) return null;
+  try {
+    const parsed = JSON.parse(r.body.toString('utf8')) as { error?: { code?: unknown } };
+    return typeof parsed?.error?.code === 'string' ? parsed.error.code : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 门店明确没处理的忙（8.1.3）：过载保护 503 OVERLOADED、等锁或死锁回滚 409 BUSY */
+function isUpstreamBusy(r: UpstreamResponse): boolean {
+  const code = upstreamErrorCode(r);
+  return code === 'OVERLOADED' || code === 'BUSY';
 }
 
 export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> {
   const { config, wechat, upstream } = deps;
   const cache = deps.cache ?? new ShowCache();
+  const retryDelay = deps.retryDelayMs ?? defaultRetryDelay;
   const app = Fastify({
     logger: { level: config.logLevel, redact: ['req.headers.authorization'] },
     bodyLimit: 8 * 1024,
@@ -210,6 +234,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     if (cacheState) reply.header('x-cache', cacheState);
     // 这份内容是什么时候从门店取到的：给旧的时小程序照这个算还能用多久（最多 7 天），不重新计时
     if (fetchedAt) reply.header('x-fetched-at', new Date(fetchedAt).toISOString());
+    if ((!cacheState || cacheState === 'miss') && r.retryAfter) reply.header('retry-after', r.retryAfter);
     if (r.status === 200 && r.cacheControl) reply.header('cache-control', r.cacheControl);
     if (r.status === 200 && r.contentType.startsWith('image/svg+xml')) {
       reply.header('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox");
@@ -217,7 +242,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
     return reply.send(r.body);
   };
 
-  /** 展示内容：新鲜的直接给；过期了去 yuzu 取；连不上时给旧的，没有旧的就提示门店系统连接中 */
+  /** 展示内容：新鲜的直接给；过期了去 yuzu 取；连不上或门店正忙（OVERLOADED / BUSY）时给旧的，没有旧的就照实回 */
   const show = async (reply: FastifyReply, key: string, path: string, freshMs: number) => {
     const hit = cache.get(key);
     if (hit?.fresh) return relay(reply, hit.value, 'fresh', hit.fetchedAt);
@@ -229,6 +254,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
       if (hit) return relay(reply, hit.value, 'stale', hit.fetchedAt);
       throw OFFLINE();
     }
+    if (isUpstreamBusy(r) && hit) return relay(reply, hit.value, 'stale', hit.fetchedAt);
     const now = Date.now();
     if (r.status === 200) cache.set(key, r, freshMs, undefined, now);
     return relay(reply, r, 'miss', r.status === 200 ? now : undefined);
@@ -244,6 +270,25 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
   const member = async (reply: FastifyReply, method: 'GET' | 'POST', path: string, openid: string, body?: unknown) => {
     try {
       return relay(reply, await upstream.call(method, path, { openid, body }));
+    } catch (error) {
+      if (error instanceof UpstreamDown) throw OFFLINE();
+      throw error;
+    }
+  };
+
+  /**
+   * 微信手机号快速验证的 phoneCode 只能用一次（网关已经向微信换出手机号，小程序不能拿同一个 phoneCode 重发）：
+   * 门店回 503 OVERLOADED 或 409 BUSY（确定没处理）时，只在网关这一层带同一个 clientKey 短暂重发最多 2 次；
+   * 其余接口网关不重发，交给小程序单层自动重发，避免两层重试叠加放大。
+   */
+  const memberAfterPhone = async (reply: FastifyReply, path: string, openid: string, body: unknown) => {
+    try {
+      for (let attempt = 0; ; attempt++) {
+        const r = await upstream.call('POST', path, { openid, body });
+        if (!isUpstreamBusy(r) || attempt >= 2) return relay(reply, r);
+        const ra = Number(r.retryAfter);
+        await new Promise((res) => setTimeout(res, retryDelay(attempt, Number.isFinite(ra) && ra > 0 ? ra : undefined)));
+      }
     } catch (error) {
       if (error instanceof UpstreamDown) throw OFFLINE();
       throw error;
@@ -320,7 +365,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
       if (error instanceof WechatError) throw new GatewayError(400, error.code, error.message);
       throw error;
     }
-    return member(reply, 'POST', '/api/mp/bind', openid, { clientKey, phone, mock: wechat.mock, bindVersion });
+    return memberAfterPhone(reply, '/api/mp/bind', openid, { clientKey, phone, mock: wechat.mock, bindVersion });
   });
   // 绑定结果不确定（超时、断网、门店出错）时，小程序请门店系统作废这个编号：已经绑上了返回绑定的结果
   app.post('/v1/bind/abandon', async (req, reply) => {
@@ -438,7 +483,7 @@ export async function buildGateway(deps: GatewayDeps): Promise<FastifyInstance> 
       if (error instanceof WechatError) throw new GatewayError(400, error.code, error.message);
       throw error;
     }
-    return member(reply, 'POST', `/api/mp/invites/${code}/claim`, openid, { clientKey, phone, ...(name ? { name } : {}), bindVersion, mock: wechat.mock });
+    return memberAfterPhone(reply, `/api/mp/invites/${code}/claim`, openid, { clientKey, phone, ...(name ? { name } : {}), bindVersion, mock: wechat.mock });
   });
 
   // 扫码点餐（第三期 3c）：点餐页（扫到的桌码带上）、下单、结果不确定时确认作废、我的账单

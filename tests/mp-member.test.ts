@@ -159,11 +159,9 @@ describe('绑定会员', () => {
 });
 
 describe('会员卡、余额、流水、券（只读）', () => {
-  let memberId: number;
   let openid: string;
   beforeAll(async () => {
     const m = await createMember(ctx, '演示·沈先生', phoneOf(10));
-    memberId = m.id;
     openid = newOpenid();
     expect((await bind(openid, phoneOf(10))).statusCode).toBe(200);
     const recharge = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 500000));
