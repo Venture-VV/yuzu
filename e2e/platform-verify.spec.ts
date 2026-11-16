@@ -128,7 +128,9 @@ test.describe('8.0.21 平台验券', () => {
     await login(page);
     const status = (await (await page.request.get('/api/platform/verify/status')).json()) as { mode: string };
     test.skip(status.mode !== 'mock', '应用没有带 INTEGRATIONS_MOCK=true 启动（只在开发、测试实例）');
-    await page.route('**/api/platform/verifications/open', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.route('**/api/platform/verifications/open', (route) =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }),
+    );
     await page.goto('/frontdesk');
     const failed = page.getByTestId('unused-vouchers-error');
     await expect(failed).toBeVisible({ timeout: 20_000 });
@@ -143,7 +145,9 @@ test.describe('8.0.21 平台验券', () => {
     await login(page);
     const status = (await (await page.request.get('/api/platform/verify/status')).json()) as { mode: string };
     test.skip(status.mode !== 'mock', '应用没有带 INTEGRATIONS_MOCK=true 启动（只在开发、测试实例）');
-    await page.route('**/api/platform/recon?*', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.route('**/api/platform/recon?*', (route) =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }),
+    );
     await page.goto('/platform');
     await page.getByRole('radio', { name: '验券对账' }).click();
     const failed = page.getByTestId('voucher-recon-error');
@@ -165,7 +169,9 @@ test.describe('8.0.21 平台验券', () => {
     const tag = ((await free.getAttribute('data-testid')) ?? '').replace(/^tag-/, '');
     const checkin = await page.request.post('/api/frontdesk/checkins', { data: { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: tag.startsWith('B') ? 'female' : 'male' }] } });
     expect(checkin.status(), await checkin.text()).toBe(201);
-    await page.route('**/api/platform/verifications/open', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }));
+    await page.route('**/api/platform/verifications/open', (route) =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }),
+    );
     await page.reload();
     await page.getByTestId(`tag-${tag}`).click();
     await page.getByTestId('bill-panel').getByTestId('action-checkout').click();

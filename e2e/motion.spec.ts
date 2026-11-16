@@ -89,7 +89,10 @@ test.describe('8.0.16 动效套件', () => {
     await admission.locator('input[type="file"]').setInputFiles({ name: 'motion-probe.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n% e2e motion\n%%EOF\n') });
     await expect(admission.getByRole('button', { name: /motion-probe\.pdf/ })).toBeVisible();
     const before = await ghosts(page);
-    await dialog.getByRole('button', { name: /^(取消|关闭)$/ }).last().click();
+    await dialog
+      .getByRole('button', { name: /^(取消|关闭)$/ })
+      .last()
+      .click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     // 页面没有变成错误页：供应商列表还在、还能再打开
     await expect(page.getByText('Unexpected Application Error')).toHaveCount(0);

@@ -6,7 +6,18 @@ import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate } from 'react-router';
 import { Plus, Printer, ScanLine } from 'lucide-react';
-import { ASSET_CATEGORIES, ASSET_CATEGORY_LABELS, ASSET_STATUS_LABELS, ASSET_STATUSES, type AssetCard, type AssetCategory, type AssetDetail, type AssetReceiptLine, type AssetStatus, type AssetStocktake } from '@shared/assets';
+import {
+  ASSET_CATEGORIES,
+  ASSET_CATEGORY_LABELS,
+  ASSET_STATUS_LABELS,
+  ASSET_STATUSES,
+  type AssetCard,
+  type AssetCategory,
+  type AssetDetail,
+  type AssetReceiptLine,
+  type AssetStatus,
+  type AssetStocktake,
+} from '@shared/assets';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
@@ -88,7 +99,12 @@ export function AssetsPage() {
             ) : cards.isPending ? (
               <Skeleton className="h-48" />
             ) : cards.data.length === 0 ? (
-              <EmptyState art="leaf" title="还没有资产卡片" description={manage ? '点「建卡」：手工建（期初）或从收货单的某一行转过来。' : undefined} className="rounded-lg border border-dashed border-line-strong" />
+              <EmptyState
+                art="leaf"
+                title="还没有资产卡片"
+                description={manage ? '点「建卡」：手工建（期初）或从收货单的某一行转过来。' : undefined}
+                className="rounded-lg border border-dashed border-line-strong"
+              />
             ) : (
               <div className="overflow-x-auto rounded-lg border border-line bg-card">
                 <table className="w-full min-w-[760px] text-[13px]" data-testid="asset-table">
@@ -383,7 +399,11 @@ function AssetSheet({ id, manage, onClose }: { id: number | null; manage: boolea
               </Select>
               <Input value={transfer.location} maxLength={60} onChange={(e) => setTransfer({ ...transfer, location: e.target.value })} placeholder="存放位置" className="h-9" />
               <Input value={transfer.keeper} maxLength={20} onChange={(e) => setTransfer({ ...transfer, keeper: e.target.value })} placeholder="保管人" className="h-9" />
-              <Button size="sm" variant="primary" onClick={() => void change({ kind: 'transfer', departmentId: Number(transfer.departmentId) || null, location: transfer.location.trim(), keeper: transfer.keeper.trim() })}>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => void change({ kind: 'transfer', departmentId: Number(transfer.departmentId) || null, location: transfer.location.trim(), keeper: transfer.keeper.trim() })}
+              >
                 保存调拨
               </Button>
             </div>
@@ -393,7 +413,15 @@ function AssetSheet({ id, manage, onClose }: { id: number | null; manage: boolea
             <ul className="space-y-1 text-[12.5px]">
               {a.changes.map((c) => (
                 <li key={c.id} className="rounded-md border border-line px-2.5 py-1">
-                  {c.kind === 'create' ? '建卡' : c.kind === 'transfer' ? '调拨' : c.kind === 'status' ? `改状态：${ASSET_STATUS_LABELS[(c.detail as { to: AssetStatus }).to] ?? ''}` : c.kind === 'scrap' ? '报废' : '修改'}
+                  {c.kind === 'create'
+                    ? '建卡'
+                    : c.kind === 'transfer'
+                      ? '调拨'
+                      : c.kind === 'status'
+                        ? `改状态：${ASSET_STATUS_LABELS[(c.detail as { to: AssetStatus }).to] ?? ''}`
+                        : c.kind === 'scrap'
+                          ? '报废'
+                          : '修改'}
                   {c.reason ? ` · ${c.reason}` : ''}
                   <span className="ml-1.5 text-ink-3">
                     {c.createdByName} · {formatDateTime(c.createdAt)}
@@ -426,7 +454,10 @@ function StocktakeView({ manage }: { manage: boolean }) {
   const toast = useToast();
   const session = useSession();
   const departments = useDepartments(false, true);
-  const list = useQuery({ queryKey: [...KEY, 'stocktakes'], queryFn: () => api.get<{ id: number; docNo: string; departmentName: string | null; status: string; startedAt: string; closedAt: string | null }[]>('/api/erp/assets/stocktakes') });
+  const list = useQuery({
+    queryKey: [...KEY, 'stocktakes'],
+    queryFn: () => api.get<{ id: number; docNo: string; departmentName: string | null; status: string; startedAt: string; closedAt: string | null }[]>('/api/erp/assets/stocktakes'),
+  });
   const [openId, setOpenId] = useState<number | null>(null);
   const [dept, setDept] = useState('');
   const st = useQuery({ queryKey: [...KEY, 'stocktake', openId], queryFn: () => api.get<AssetStocktake>(`/api/erp/assets/stocktakes/${openId}`), enabled: openId !== null });
@@ -437,7 +468,14 @@ function StocktakeView({ manage }: { manage: boolean }) {
     const body = { clientKey: uuid(), departmentId: Number(dept) || null };
     const scope = departments.data?.find((d) => d.id === body.departmentId)?.name ?? '全部';
     try {
-      const r = await sendErpOp<AssetStocktake>({ key: body.clientKey, type: 'asset_stocktake', url: '/api/erp/assets/stocktakes', body, summary: `开始扫码盘点（${scope}）`, staffName: session.staff.displayName });
+      const r = await sendErpOp<AssetStocktake>({
+        key: body.clientKey,
+        type: 'asset_stocktake',
+        url: '/api/erp/assets/stocktakes',
+        body,
+        summary: `开始扫码盘点（${scope}）`,
+        staffName: session.staff.displayName,
+      });
       setOpenId(r.id);
     } catch (e) {
       if (e instanceof UncertainError) toast({ tone: 'error', title: '开始盘点没收到结果', body: '记在页面上方的「结果待确认」里，查回或按原内容重新提交' });
@@ -517,7 +555,15 @@ function StocktakeView({ manage }: { manage: boolean }) {
                 void scan();
               }}
             >
-              <Input ref={input} autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder="扫资产标签的二维码，或输入资产编号后回车" className="h-10" data-testid="stocktake-code" />
+              <Input
+                ref={input}
+                autoFocus
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="扫资产标签的二维码，或输入资产编号后回车"
+                className="h-10"
+                data-testid="stocktake-code"
+              />
               <Button type="submit" variant="primary">
                 记下
               </Button>

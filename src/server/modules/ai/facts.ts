@@ -75,7 +75,5 @@ export const SUMMARY_SYSTEM = [
 ].join('\n');
 
 export function summaryPrompt(facts: AiDailyFacts | AiCompanyFacts): string {
-  return 'stores' in facts
-    ? `前一天全公司的经营材料（几家店各一份，另有 ERP 待办）：\n${JSON.stringify(facts)}`
-    : `前一天的经营材料：\n${JSON.stringify(facts)}`;
+  return 'stores' in facts ? `前一天全公司的经营材料（几家店各一份，另有 ERP 待办）：\n${JSON.stringify(facts)}` : `前一天的经营材料：\n${JSON.stringify(facts)}`;
 }

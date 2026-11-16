@@ -4,7 +4,26 @@
 
 import type { Permission } from './permissions';
 
-export const ERP_MODULE_KEYS = ['inventory', 'purchasing', 'requests', 'deptStock', 'payables', 'assets', 'linen', 'approvals', 'contracts', 'payments', 'expenses', 'invoices', 'salesInvoices', 'receivables', 'bank', 'revenue', 'canteen', 'patrol'] as const;
+export const ERP_MODULE_KEYS = [
+  'inventory',
+  'purchasing',
+  'requests',
+  'deptStock',
+  'payables',
+  'assets',
+  'linen',
+  'approvals',
+  'contracts',
+  'payments',
+  'expenses',
+  'invoices',
+  'salesInvoices',
+  'receivables',
+  'bank',
+  'revenue',
+  'canteen',
+  'patrol',
+] as const;
 export type ErpModuleKey = (typeof ERP_MODULE_KEYS)[number];
 
 export interface ErpModuleDef {
@@ -54,7 +73,17 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     // 供应商比价看板（8.0.1 采购组整改 07）也跟采购模块走
     // 采购流程图（8.0.17）也跟采购模块走；只有需求单权限的部门同事从需求单里看（需求单依赖采购）
     // 供应商门户的链接（8.0.21）也跟采购模块走；供应商打开的公开接口在 /api/public/supplier，采购关着时 404
-    apis: ['/api/purchase-orders', '/api/purchase-baseline', '/api/erp/images', '/api/purchase-suggestions', '/api/purchase-sourcing', '/api/purchase-price-history', '/api/purchase-compare', '/api/purchase-flow', '/api/purchase-supplier-links'],
+    apis: [
+      '/api/purchase-orders',
+      '/api/purchase-baseline',
+      '/api/erp/images',
+      '/api/purchase-suggestions',
+      '/api/purchase-sourcing',
+      '/api/purchase-price-history',
+      '/api/purchase-compare',
+      '/api/purchase-flow',
+      '/api/purchase-supplier-links',
+    ],
     // 物资经办要看采购单、按单收货（采购单的读接口按「查看库存与物资单据」开放）
     perms: ['inventory.read', 'purchase.manage', 'inventory.approve', 'payable.read'],
     defaultEnabled: true,
@@ -177,8 +206,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     label: '发票台账',
     group: '财务',
     description:
-      '进项发票台账：三单匹配登记的供应商发票、报销单上的专票与普票、直接登记的；认证状态与所属期、认证期限到期前提醒、' +
-      '异常票（重号、税额税率不符、过期、与报销金额不符）标记、拍照上传（8.0.3）',
+      '进项发票台账：三单匹配登记的供应商发票、报销单上的专票与普票、直接登记的；认证状态与所属期、认证期限到期前提醒、' + '异常票（重号、税额税率不符、过期、与报销金额不符）标记、拍照上传（8.0.3）',
     path: '/erp/invoices',
     pages: ['/erp/invoices'],
     apis: ['/api/erp/invoices'],
@@ -501,7 +529,19 @@ export interface ErpRevenue {
   to: string;
   days: number;
   /** 净营业额 = 应收 − 优惠；结账客人、客单价、充值收款（与经营总览同一口径） */
-  kpis: { receivable: number; discount: number; coupon: number; memberDiscount: number; refund: number; net: number; guests: number; checkouts: number; perGuest: number; rechargePaid: number; memberRefund: number };
+  kpis: {
+    receivable: number;
+    discount: number;
+    coupon: number;
+    memberDiscount: number;
+    refund: number;
+    net: number;
+    guests: number;
+    checkouts: number;
+    perGuest: number;
+    rechargePaid: number;
+    memberRefund: number;
+  };
   trend: { date: string; net: number; guests: number; rechargePaid: number }[];
   byMethod: { method: import('./checkout').CheckoutMethod; amount: number }[];
   departments: import('./reports').DepartmentRevenue[];

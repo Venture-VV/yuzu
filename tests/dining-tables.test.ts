@@ -14,14 +14,26 @@ let today: string;
 const item: Record<string, number> = {};
 const table: Record<string, number> = {};
 
-type Detail = { id: number; sessionNo: string; status: string; tableName: string; guests: number; amount: number; lines: { id: number; name: string; status: string; source: string; kitchen: { status: string; note: string } | null }[]; moves: { fromTable: string; toTable: string; reason: string }[] };
+type Detail = {
+  id: number;
+  sessionNo: string;
+  status: string;
+  tableName: string;
+  guests: number;
+  amount: number;
+  lines: { id: number; name: string; status: string; source: string; kitchen: { status: string; note: string } | null }[];
+  moves: { fromTable: string; toTable: string; reason: string }[];
+};
 
 const open = (tableId: number, body: Record<string, unknown> = {}, cookie = ctx.clerk, clientKey = randomUUID()) =>
   api(ctx.app, cookie, 'POST', '/api/dining/tables/open', { clientKey, tableId, guests: 2, ...body });
 const order = (sessionId: number, lines: { itemId: number; quantity: number; note?: string }[], expectedTotal: number, cookie = ctx.clerk, clientKey = randomUUID()) =>
   api(ctx.app, cookie, 'POST', `/api/dining/tables/sessions/${sessionId}/orders`, { clientKey, lines, expectedTotal });
 const detail = async (id: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/dining/tables/sessions/${id}`)).body as Detail;
-const board = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/dining/tables')).body as { tables: { id: number; name: string; session: { id: number; guests: number; amount: number; pendingDishes: number } | null }[] };
+const board = async () =>
+  (await api(ctx.app, ctx.clerk, 'GET', '/api/dining/tables')).body as {
+    tables: { id: number; name: string; session: { id: number; guests: number; amount: number; pendingDishes: number } | null }[];
+  };
 const pay = (sessionIds: number[], expectedTotal: number, payments: unknown[], cookie = ctx.clerk, clientKey = randomUUID()) =>
   api(ctx.app, cookie, 'POST', '/api/dining/tables/checkout', { clientKey, sessionIds, expectedTotal, payments });
 const voidCheckout = (id: number, reason = '收错桌了') => api(ctx.app, duty, 'POST', `/api/frontdesk/checkouts/${id}/void`, { reason });
@@ -53,7 +65,14 @@ beforeAll(async () => {
     item[name] = r.body.items.find((i: { name: string }) => i.name === name).id;
   }
   expect(
-    (await api(ctx.app, boss, 'PUT', '/api/admin/dining/items', { items: [{ id: item['宫保鸡丁'], stationId: station['热菜'] }, { id: item['柠檬茶'], stationId: station['水吧'] }] })).status,
+    (
+      await api(ctx.app, boss, 'PUT', '/api/admin/dining/items', {
+        items: [
+          { id: item['宫保鸡丁'], stationId: station['热菜'] },
+          { id: item['柠檬茶'], stationId: station['水吧'] },
+        ],
+      })
+    ).status,
   ).toBe(200);
   // 8.0.8（A05）起桌台点单默认下架：这组用例测的是桌台，先打开
   expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/rules', { enabled: true, tablesEnabled: true })).status).toBe(200);
@@ -114,14 +133,36 @@ describe('开台、点单、转台、退菜、撤台', () => {
   it('点单到桌台：记在这桌的账单（餐饮），出品单显示桌号；只能点进厨房的菜；估清同样扣减；同一编号只下一次', async () => {
     const s = (await board()).tables.find((t) => t.name === 'A1')!.session!;
     const key = randomUUID();
-    const r = await order(s.id, [{ itemId: item['宫保鸡丁']!, quantity: 2, note: '少辣' }, { itemId: item['柠檬茶']!, quantity: 1 }], 4800 * 2 + 1500, ctx.clerk, key);
+    const r = await order(
+      s.id,
+      [
+        { itemId: item['宫保鸡丁']!, quantity: 2, note: '少辣' },
+        { itemId: item['柠檬茶']!, quantity: 1 },
+      ],
+      4800 * 2 + 1500,
+      ctx.clerk,
+      key,
+    );
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.amount).toBe(11100);
     expect(r.body.lines.map((l: Detail['lines'][number]) => [l.name, l.source, l.kitchen?.status, l.kitchen?.note])).toEqual([
       ['宫保鸡丁', 'dining', 'queued', '少辣'],
       ['柠檬茶', 'dining', 'queued', ''],
     ]);
-    expect((await order(s.id, [{ itemId: item['宫保鸡丁']!, quantity: 2, note: '少辣' }, { itemId: item['柠檬茶']!, quantity: 1 }], 11100, ctx.clerk, key)).body.lines).toHaveLength(2);
+    expect(
+      (
+        await order(
+          s.id,
+          [
+            { itemId: item['宫保鸡丁']!, quantity: 2, note: '少辣' },
+            { itemId: item['柠檬茶']!, quantity: 1 },
+          ],
+          11100,
+          ctx.clerk,
+          key,
+        )
+      ).body.lines,
+    ).toHaveLength(2);
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${key}?type=table_post`)).body).toMatchObject({ found: true, type: 'table_post', session: { id: s.id } });
     expect((await order(s.id, [{ itemId: item['一次性拖鞋']!, quantity: 1 }], 500)).body.error.code).toBe('DISH_NOT_KITCHEN');
     const kds = (await api(ctx.app, cook, 'GET', '/api/kitchen')).body.items as { tableName: string | null; tagCode: string | null; guest: string; name: string }[];
@@ -222,7 +263,14 @@ describe('桌台结账与反结账', () => {
     // 手牌结账的授权不能拿来结桌台
     const wrong = await authorize({ visitIds: [999999], amount: 800, reason: '抹零' });
     expect(wrong.status).toBe(200);
-    expect((await pay([s.id], 4800, [{ method: 'discount', amount: 800, grantId: wrong.body.grantId }, { method: 'cash', amount: 4000 }])).body.error.code).toBe('GRANT_SCOPE');
+    expect(
+      (
+        await pay([s.id], 4800, [
+          { method: 'discount', amount: 800, grantId: wrong.body.grantId },
+          { method: 'cash', amount: 4000 },
+        ])
+      ).body.error.code,
+    ).toBe('GRANT_SCOPE');
     const g = await authorize({ tableSessionIds: [s.id], amount: 800, reason: '抹零' });
     expect(g.status, JSON.stringify(g.body)).toBe(200);
     expect(g.body.scope).toMatchObject({ visitIds: [], tableSessionIds: [s.id], amount: 800 });

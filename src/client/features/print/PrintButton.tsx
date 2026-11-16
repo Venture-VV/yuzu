@@ -3,19 +3,7 @@ import { Button } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 
 /** 在新窗口打开打印页：读到数据后自动调出打印，打完关闭；弹出窗口被浏览器拦下时提示。A4 的页面窗口开宽一些 */
-export function PrintButton({
-  path,
-  children,
-  testId,
-  size = 'md',
-  paper = '80mm',
-}: {
-  path: string;
-  children: string;
-  testId?: string;
-  size?: 'sm' | 'md' | 'lg';
-  paper?: '80mm' | 'a4';
-}) {
+export function PrintButton({ path, children, testId, size = 'md', paper = '80mm' }: { path: string; children: string; testId?: string; size?: 'sm' | 'md' | 'lg'; paper?: '80mm' | 'a4' }) {
   const toast = useToast();
   return (
     <Button

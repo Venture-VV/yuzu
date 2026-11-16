@@ -103,7 +103,9 @@ beforeAll(async () => {
   }
   const st = await api(ctx.app, ctx.owner, 'POST', '/api/admin/dining/stations', { name: '厨房' });
   const stationId = st.body.stations.find((s: { name: string }) => s.name === '厨房').id;
-  const kitchen = Object.entries(item).filter(([n]) => n !== '搓澡').map(([, id]) => ({ id, stationId }));
+  const kitchen = Object.entries(item)
+    .filter(([n]) => n !== '搓澡')
+    .map(([, id]) => ({ id, stationId }));
   expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/items', { items: kitchen })).status).toBe(200);
   await enter('A8001');
   clerkPin = await pinFor(ctx.clerkId);
@@ -131,7 +133,11 @@ describe('岗位「点餐平板」与开关', () => {
 
   it('默认关着：菜单 enabled=false，找客人、核对桌号、下单都拒绝；开了平板点餐、没开餐饮功能也不行', async () => {
     expect((await menu()).enabled).toBe(false);
-    for (const r of [await api(ctx.app, pad, 'GET', '/api/emenu/guest?tag=8001'), await api(ctx.app, pad, 'GET', '/api/emenu/table?table=1'), await order([{ itemId: item['华夫牛角']!, quantity: 1 }], 3800)]) {
+    for (const r of [
+      await api(ctx.app, pad, 'GET', '/api/emenu/guest?tag=8001'),
+      await api(ctx.app, pad, 'GET', '/api/emenu/table?table=1'),
+      await order([{ itemId: item['华夫牛角']!, quantity: 1 }], 3800),
+    ]) {
       expect(r.status).toBe(422);
       expect(r.body.error.code).toBe('EMENU_DISABLED');
     }
@@ -279,7 +285,15 @@ describe('后台「电子菜单」', () => {
     // 规则总表有「点餐系统」一组（不混进「餐饮」那一组）；改过的那一项标出来，改回默认以后不标
     type Entry = { key: string; group: string; isDefault: boolean; value: string; section: string; updatedBy: string | null };
     let catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as Entry[];
-    expect(catalog.filter((r) => r.group === 'emenu').map((r) => r.key)).toEqual(['emenu_rules.enabled', 'emenu_rules.requirePin', 'emenu_rules.textSize', 'emenu_rules.avoidOptions', 'emenu_rules.serveOptions', 'emenu_rules.idleMinutes', 'emenu_rules.offHours']);
+    expect(catalog.filter((r) => r.group === 'emenu').map((r) => r.key)).toEqual([
+      'emenu_rules.enabled',
+      'emenu_rules.requirePin',
+      'emenu_rules.textSize',
+      'emenu_rules.avoidOptions',
+      'emenu_rules.serveOptions',
+      'emenu_rules.idleMinutes',
+      'emenu_rules.offHours',
+    ]);
     expect(catalog.find((r) => r.key === 'emenu_rules.idleMinutes')).toMatchObject({ isDefault: false, value: '5 分钟没人动回到起始页、清掉没下单的菜', section: 'emenu' });
     expect(catalog.find((r) => r.key === 'emenu_rules.idleMinutes')!.updatedBy).not.toBeNull();
     expect(catalog.find((r) => r.key === 'emenu_rules.offHours')).toMatchObject({ isDefault: true, value: '平板上不显示' });
@@ -294,7 +308,12 @@ describe('后台「电子菜单」', () => {
     const tea = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '陈皮普洱', category: '茶', price: 6800 });
     item['陈皮普洱'] = tea.body.items.find((i: { name: string }) => i.name === '陈皮普洱').id;
     const stationId = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/dining')).body.stations[0].id;
-    await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/items', { items: [{ id: item['干锅杂菌'], stationId }, { id: item['陈皮普洱'], stationId }] });
+    await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/items', {
+      items: [
+        { id: item['干锅杂菌'], stationId },
+        { id: item['陈皮普洱'], stationId },
+      ],
+    });
     const before = await admin();
     const r = await api<EmenuAdmin & { draft: { dishes: number; categories: number; pages: number } }>(ctx.app, ctx.owner, 'POST', '/api/admin/emenu/draft');
     expect(r.status, JSON.stringify(r.body)).toBe(200);
@@ -333,7 +352,12 @@ describe('平板上的菜单', () => {
     // 中间的空位是 null
     expect(lunch.pages[1]!.dishes.map((d) => d?.name ?? null)).toEqual(['小梦若奇白葡萄酒', null, '砂锅黄椒酱焗溪鳗']);
 
-    const specOf = async (itemId: number) => (await menu()).categories.flatMap((c) => c.pages).flatMap((p) => p.dishes).flatMap((d) => d?.specs ?? []).find((s) => s.itemId === itemId)!;
+    const specOf = async (itemId: number) =>
+      (await menu()).categories
+        .flatMap((c) => c.pages)
+        .flatMap((p) => p.dishes)
+        .flatMap((d) => d?.specs ?? [])
+        .find((s) => s.itemId === itemId)!;
     // 估清
     expect((await api(ctx.app, ctx.owner, 'PUT', `/api/kitchen/limits/${item['砂锅焗溪鳗（小份）']}`, { remaining: 0 })).status).toBe(200);
     expect(await specOf(item['砂锅焗溪鳗（小份）']!)).toMatchObject({ state: 'sold_out', remaining: 0 });
@@ -465,7 +489,11 @@ describe('点单密码', () => {
     // 锁着的时候对的密码也不行
     expect((await order(line, 3800)).body.error.code).toBe('PIN_LOCKED');
     // 同一来源的另一台平板（另一个账号）照常
-    const pad2 = await login(ctx.app, 'pad2', (await api(ctx.app, ctx.owner, 'POST', `/api/staff/${(await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'pad2'`)[0]!.id}/reset-password`)).body.temporaryPassword);
+    const pad2 = await login(
+      ctx.app,
+      'pad2',
+      (await api(ctx.app, ctx.owner, 'POST', `/api/staff/${(await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'pad2'`)[0]!.id}/reset-password`)).body.temporaryPassword,
+    );
     // pad2 首次登录要改密码：直接在库里放行，测的是限次
     await ctx.sql`UPDATE staff SET must_change_password = false WHERE username = 'pad2'`;
     const other = await order(line, 3800, { cookie: pad2, pin: bad });
@@ -485,7 +513,25 @@ describe('点单密码', () => {
     expect([lockedRight.status, lockedRight.body.error.code]).toEqual([429, 'PIN_LOCKED']);
     // 点单密码单独计数：平板上错了这么多次，这个来源照常能登录；换个来源地址也还是锁着（只按平板的账号记）
     expect(await login(ctx.app, 'clerk')).toContain('yuzu_sid=');
-    const elsewhere = await ctx.app.inject({ method: 'POST', url: '/api/emenu/orders', remoteAddress: '10.9.8.7', headers: { cookie: pad }, payload: { clientKey: randomUUID(), visitId: visit.A8001, tagCode: 'A8001', tableName: 'A01', guests: 2, lines: line, avoid: [], serve: null, customNote: '', expectedTotal: 3800, pin: clerkPin } });
+    const elsewhere = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/emenu/orders',
+      remoteAddress: '10.9.8.7',
+      headers: { cookie: pad },
+      payload: {
+        clientKey: randomUUID(),
+        visitId: visit.A8001,
+        tagCode: 'A8001',
+        tableName: 'A01',
+        guests: 2,
+        lines: line,
+        avoid: [],
+        serve: null,
+        customNote: '',
+        expectedTotal: 3800,
+        pin: clerkPin,
+      },
+    });
     expect(elsewhere.json().error.code).toBe('PIN_LOCKED');
     resetLoginThrottle();
     // 格式不对不算输错
@@ -534,9 +580,37 @@ describe('下单', () => {
       { name: '砂锅焗溪鳗（大份）', quantity: 1, amount: 8800, postedBy: ctx.clerkId, status: 'active', deliverTo: 'A01', note },
       { name: '华夫牛角', quantity: 2, amount: 7600, postedBy: ctx.clerkId, status: 'active', deliverTo: 'A01', note },
     ]);
-    const [o] = await ctx.sql<{ tagCode: string; tableName: string; guests: number; avoid: string[]; serve: string; customNote: string; note: string; total: number; lineCount: number; quantity: number; waiterId: number; deviceStaffId: number }[]>`
+    const [o] = await ctx.sql<
+      {
+        tagCode: string;
+        tableName: string;
+        guests: number;
+        avoid: string[];
+        serve: string;
+        customNote: string;
+        note: string;
+        total: number;
+        lineCount: number;
+        quantity: number;
+        waiterId: number;
+        deviceStaffId: number;
+      }[]
+    >`
       SELECT tag_code, table_name, guests, avoid, serve, custom_note, note, total, line_count, quantity, waiter_id, device_staff_id FROM emenu_orders WHERE client_key = ${key}`;
-    expect(o).toEqual({ tagCode: 'A8001', tableName: 'A01', guests: 3, avoid: ['不加香菜', '少辣'], serve: '慢起', customNote: '老人牙口不好', note, total: 16400, lineCount: 2, quantity: 3, waiterId: ctx.clerkId, deviceStaffId: padId });
+    expect(o).toEqual({
+      tagCode: 'A8001',
+      tableName: 'A01',
+      guests: 3,
+      avoid: ['不加香菜', '少辣'],
+      serve: '慢起',
+      customNote: '老人牙口不好',
+      note,
+      total: 16400,
+      lineCount: 2,
+      quantity: 3,
+      waiterId: ctx.clerkId,
+      deviceStaffId: padId,
+    });
     // 厨房屏看得到桌号与备注
     const board = (await api(ctx.app, ctx.clerk, 'GET', '/api/kitchen')).body.items as { name: string; deliverTo: string; note: string; tagCode: string }[];
     expect(board.find((k) => k.name === '华夫牛角')).toMatchObject({ deliverTo: 'A01', note, tagCode: 'A8001' });
@@ -544,7 +618,9 @@ describe('下单', () => {
     const v = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${visit.A8001}`)).body;
     expect(v.lines.filter((l: { source: string }) => l.source === 'dining')).toHaveLength(2);
     // 审计：经办人是服务员，记下哪台平板
-    const [log] = await ctx.sql<{ staffId: number; detail: { deviceUsername: string; summary: string } }[]>`SELECT staff_id, detail FROM audit_logs WHERE action = 'emenu_order' ORDER BY id DESC LIMIT 1`;
+    const [log] = await ctx.sql<
+      { staffId: number; detail: { deviceUsername: string; summary: string } }[]
+    >`SELECT staff_id, detail FROM audit_logs WHERE action = 'emenu_order' ORDER BY id DESC LIMIT 1`;
     expect(Number(log!.staffId)).toBe(ctx.clerkId);
     expect(log!.detail.deviceUsername).toBe('pad1');
     expect(log!.detail.summary).toContain('桌 A01');
@@ -559,7 +635,9 @@ describe('下单', () => {
     expect(other.status).toBe(409);
     expect(other.body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     // 重提也要输对密码
-    expect((await order(lines, 16400, { key, table: 'a01', guests: 3, avoid: ['少辣', '不加香菜'], serve: '慢起', customNote: ' 老人牙口不好 ', pin: wrongPin(clerkPin) })).body.error.code).toBe('PIN_INVALID');
+    expect((await order(lines, 16400, { key, table: 'a01', guests: 3, avoid: ['少辣', '不加香菜'], serve: '慢起', customNote: ' 老人牙口不好 ', pin: wrongPin(clerkPin) })).body.error.code).toBe(
+      'PIN_INVALID',
+    );
     // 已下单里看得到；别的渠道点的也在
     await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', { clientKey: randomUUID(), visitId: visit.A8001, lines: [{ itemId: item['龙虾班尼迪蛋'], quantity: 1 }], expectedTotal: 4200 });
     const g = (await api(ctx.app, pad, 'GET', '/api/emenu/guest?tag=A8001')).body;
@@ -599,7 +677,17 @@ describe('下单', () => {
     expect(await code(order(waffle, 3800, { serve: '快点' }))).toBe('REMARK_OPTION_INVALID');
     // 格式
     expect((await order([], 3800)).status).toBe(400);
-    expect((await order([{ itemId: item['华夫牛角']!, quantity: 1 }, { itemId: item['华夫牛角']!, quantity: 1 }], 7600)).status).toBe(400);
+    expect(
+      (
+        await order(
+          [
+            { itemId: item['华夫牛角']!, quantity: 1 },
+            { itemId: item['华夫牛角']!, quantity: 1 },
+          ],
+          7600,
+        )
+      ).status,
+    ).toBe(400);
     expect((await order([{ itemId: item['华夫牛角']!, quantity: 100 }], 380000)).status).toBe(400);
     expect((await order(waffle, 3800, { guests: 0 })).status).toBe(400);
     expect((await order(waffle, 3800, { customNote: '字'.repeat(31) })).status).toBe(400);
@@ -699,7 +787,9 @@ describe('不要点单密码（8.0.15，默认）', () => {
     expect(await dishLinesOf(visit.A8009!)).toEqual([{ name: '华夫牛角', quantity: 1, amount: 3800, postedBy: padId, status: 'active', deliverTo: 'A01', note: '' }]);
     const [o] = await ctx.sql<{ waiterId: number; deviceStaffId: number }[]>`SELECT waiter_id, device_staff_id FROM emenu_orders WHERE client_key = ${key}`;
     expect({ waiterId: Number(o!.waiterId), deviceStaffId: Number(o!.deviceStaffId) }).toEqual({ waiterId: padId, deviceStaffId: padId });
-    const [log] = await ctx.sql<{ staffId: number; detail: { deviceUsername: string; noPin?: boolean } }[]>`SELECT staff_id, detail FROM audit_logs WHERE action = 'emenu_order' ORDER BY id DESC LIMIT 1`;
+    const [log] = await ctx.sql<
+      { staffId: number; detail: { deviceUsername: string; noPin?: boolean } }[]
+    >`SELECT staff_id, detail FROM audit_logs WHERE action = 'emenu_order' ORDER BY id DESC LIMIT 1`;
     expect(Number(log!.staffId)).toBe(padId);
     expect(log!.detail).toMatchObject({ deviceUsername: 'pad1', noPin: true });
     // 原样重提：返回第一次的结果

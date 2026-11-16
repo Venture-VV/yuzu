@@ -160,8 +160,7 @@ export const SupplierInput = z.object({
   active: z.boolean().default(true),
 });
 
-const BANK_SEPARATE = () =>
-  unprocessable('SUPPLIER_BANK_SEPARATE', '收款账户不在供应商档案里改：请应付岗在供应商的「收款账户」里改（改了要另一人复核才能批量付款）');
+const BANK_SEPARATE = () => unprocessable('SUPPLIER_BANK_SEPARATE', '收款账户不在供应商档案里改：请应付岗在供应商的「收款账户」里改（改了要另一人复核才能批量付款）');
 
 /** 收款账户：户名、开户行、账号（账号去掉空格与短横） */
 const BankInput = z.object({
@@ -200,7 +199,10 @@ async function assertDeptWarehouseEmpty(tx: Tx, departmentId: number) {
   if (left.length > 0) {
     throw unprocessable(
       'DEPT_STOCK_NOT_EMPTY',
-      `这个部门的小仓还有存货（${left.slice(0, 5).map((r) => `${r.name} ${formatQty(r.stockMilli)} ${r.inventoryUnit}`).join('、')}${left.length > 5 ? ' 等' : ''}），请先退回总仓或盘点到 0 再停用`,
+      `这个部门的小仓还有存货（${left
+        .slice(0, 5)
+        .map((r) => `${r.name} ${formatQty(r.stockMilli)} ${r.inventoryUnit}`)
+        .join('、')}${left.length > 5 ? ' 等' : ''}），请先退回总仓或盘点到 0 再停用`,
     );
   }
   const [pending] = await tx<{ docNo: string }[]>`
@@ -246,7 +248,10 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
         if (left.length > 0) {
           throw unprocessable(
             'COUNTER_USE_DEPT_STOCK',
-            `${left.slice(0, 5).map((r) => `${r.name} ${formatQty(r.stockMilli)} ${m.inventoryUnit}`).join('、')}${left.length > 5 ? ' 等' : ''} 的小仓里还有这个物料，请先在部门小仓登记耗用或退回总仓，再改成台面日耗品`,
+            `${left
+              .slice(0, 5)
+              .map((r) => `${r.name} ${formatQty(r.stockMilli)} ${m.inventoryUnit}`)
+              .join('、')}${left.length > 5 ? ' 等' : ''} 的小仓里还有这个物料，请先在部门小仓登记耗用或退回总仓，再改成台面日耗品`,
           );
         }
       }
@@ -269,12 +274,7 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
   }
 }
 
-export async function saveSupplier(
-  db: Db,
-  id: number | null,
-  raw: SupplierInputData,
-  extra: { isSynthetic?: boolean; today?: string; admission?: 'pending' | 'approved' } = {},
-): Promise<number> {
+export async function saveSupplier(db: Db, id: number | null, raw: SupplierInputData, extra: { isSynthetic?: boolean; today?: string; admission?: 'pending' | 'approved' } = {}): Promise<number> {
   const s = parse(SupplierInput, raw);
   // 改成按批次对账的那天（#23，v0.7.13）：之前的收货不提醒对账
   const today = extra.today ?? null;
@@ -284,7 +284,12 @@ export async function saveSupplier(
   if (id !== null && (s.bankPayee !== undefined || s.bankName !== undefined || s.bankAccount !== undefined)) {
     const [cur] = await db<{ bankPayee: string; bankName: string; bankAccount: string }[]>`SELECT bank_payee, bank_name, bank_account FROM suppliers WHERE id = ${id}`;
     const account = s.bankAccount?.replace(/[\s-]/g, '');
-    if (cur && ((s.bankPayee !== undefined && s.bankPayee !== cur.bankPayee) || (s.bankName !== undefined && s.bankName !== cur.bankName) || (account !== undefined && account !== '' && account !== cur.bankAccount)))
+    if (
+      cur &&
+      ((s.bankPayee !== undefined && s.bankPayee !== cur.bankPayee) ||
+        (s.bankName !== undefined && s.bankName !== cur.bankName) ||
+        (account !== undefined && account !== '' && account !== cur.bankAccount))
+    )
       throw BANK_SEPARATE();
   }
   try {
@@ -363,7 +368,10 @@ export async function saveSupplierBank(db: Sql, id: number, raw: unknown, actor:
              bank_verified_by = ${self ? actor.id : null}, bank_verified_at = ${self ? tx`now()` : null}, updated_at = now()
       WHERE id = ${id}`;
     await writeAudit(tx, {
-      staffId: actor.id, action: 'supplier_bank', targetType: 'supplier', targetId: id,
+      staffId: actor.id,
+      action: 'supplier_bank',
+      targetType: 'supplier',
+      targetId: id,
       detail: { op: 'change', bankPayee: b.bankPayee, bankName: b.bankName, tail: account.slice(-4), beforeTail: cur.bankAccount.slice(-4), verified: self },
       ip,
     });
@@ -386,8 +394,7 @@ export async function verifySupplierBank(db: Sql, id: number, raw: unknown, acto
     if (!cur.bankAccount) throw unprocessable('SUPPLIER_BANK_ACCOUNT', '这家供应商还没有收款账户');
     if (cur.bankAccount.slice(-4) !== tail || cur.rowVersion !== rowVersion) throw conflict('SUPPLIER_BANK_CHANGED', '供应商档案（收款账户）刚被改过，请刷新后重新核对');
     if (cur.verifiedAt) return;
-    if (cur.changedBy !== null && Number(cur.changedBy) === actor.id && actor.role !== 'owner')
-      throw forbidden('改收款账户的人不能自己复核：请另一位应付或店主跟供应商核对后复核');
+    if (cur.changedBy !== null && Number(cur.changedBy) === actor.id && actor.role !== 'owner') throw forbidden('改收款账户的人不能自己复核：请另一位应付或店主跟供应商核对后复核');
     await tx`UPDATE suppliers SET bank_verified_by = ${actor.id}, bank_verified_at = now(), updated_at = now() WHERE id = ${id}`;
     await writeAudit(tx, { staffId: actor.id, action: 'supplier_bank', targetType: 'supplier', targetId: id, detail: { op: 'verify', tail }, ip });
   });
@@ -433,9 +440,7 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
     return loadInventorySettings(sql);
   });
 
-  app.get('/api/inventory/materials', { preHandler: guard('inventory.read') }, async (req) =>
-    listMaterials(sql, { includeInactive: all(req.query), timeZone: config.timezone }),
-  );
+  app.get('/api/inventory/materials', { preHandler: guard('inventory.read') }, async (req) => listMaterials(sql, { includeInactive: all(req.query), timeZone: config.timezone }));
   app.get('/api/inventory/materials/:id', { preHandler: guard('inventory.read') }, async (req) => {
     const { id } = parse(idParam, req.params);
     return getMaterial(sql, id, config.timezone);
@@ -477,8 +482,12 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
       }
       await tx`UPDATE materials SET replenish_mode = ${mode}, replenish_rev = replenish_rev + 1, updated_at = now() WHERE id = ${id}`;
       await writeAudit(tx, {
-        staffId: req.actor.id, action: 'inventory_master_saved', targetType: 'material', targetId: id,
-        detail: { replenishMode: mode, before: before.replenishMode }, ip: req.ip,
+        staffId: req.actor.id,
+        action: 'inventory_master_saved',
+        targetType: 'material',
+        targetId: id,
+        detail: { replenishMode: mode, before: before.replenishMode },
+        ip: req.ip,
       });
     });
     return getMaterial(sql, id, config.timezone);
@@ -512,20 +521,23 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
   });
 
   // 收货时一起验收的采购经办（#17，v0.7.11）：在职的采购经办与店主
-  app.get('/api/inventory/co-acceptors', { preHandler: guard('inventory.read') }, async () =>
-    sql<{ id: number; displayName: string }[]>`
+  app.get(
+    '/api/inventory/co-acceptors',
+    { preHandler: guard('inventory.read') },
+    async () =>
+      sql<{ id: number; displayName: string }[]>`
       SELECT id, display_name FROM staff WHERE active AND (role = 'owner' OR 'purchase' = ANY (duties)) ORDER BY role = 'owner', display_name`,
   );
 
   // 选部门主管用的名单（8.0.17，LC1）：在职的员工
-  app.get('/api/inventory/department-head-options', { preHandler: guard('inventory.master') }, async () =>
-    sql<{ id: number; name: string }[]>`SELECT id, display_name AS name FROM staff WHERE active ORDER BY role = 'owner' DESC, display_name, id`,
+  app.get(
+    '/api/inventory/department-head-options',
+    { preHandler: guard('inventory.master') },
+    async () => sql<{ id: number; name: string }[]>`SELECT id, display_name AS name FROM staff WHERE active ORDER BY role = 'owner' DESC, display_name, id`,
   );
 
   // 部门：库存之外，费用报销（只有费用职责的员工也要选部门）与需求单也要用
-  app.get('/api/inventory/departments', { preHandler: guardAny('inventory.read', 'expense.read', 'request.create', 'request.review') }, async (req) =>
-    listDepartments(sql, all(req.query)),
-  );
+  app.get('/api/inventory/departments', { preHandler: guardAny('inventory.read', 'expense.read', 'request.create', 'request.review') }, async (req) => listDepartments(sql, all(req.query)));
   app.post('/api/inventory/departments', { preHandler: guard('inventory.master') }, async (req) => {
     const d = parse(DepartmentInput, req.body);
     try {

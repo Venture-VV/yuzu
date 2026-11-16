@@ -207,10 +207,7 @@ test.describe('收银完善（v0.7.20）', () => {
         guests: [{ tagCode: tag, zone, memberId: member!.id }],
       });
       visitId = checkin.visits[0]!.id;
-      const preview = await getJson<{ totalAmount: number; storeCoupons: { code: string; usable: boolean; amount: number }[] }>(
-        page,
-        `/api/frontdesk/checkout-preview?ids=${visitId}`,
-      );
+      const preview = await getJson<{ totalAmount: number; storeCoupons: { code: string; usable: boolean; amount: number }[] }>(page, `/api/frontdesk/checkout-preview?ids=${visitId}`);
       expect(preview.totalAmount, '门票够 100 元门槛').toBeGreaterThanOrEqual(10000);
       expect(preview.storeCoupons.find((c) => c.code === code)).toMatchObject({ usable: true, amount: 2000 });
 

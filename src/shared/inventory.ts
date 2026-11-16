@@ -253,12 +253,7 @@ export const DEFAULT_COUNT_BIG_CENTS = 50_000;
  * 盘点这一行是不是「大差异」（v0.7.30，A8）：差异数量超过账面数的 countBigPct%（账面是 0 的有差异就算），
  * 或差异金额（差异数量 × 参考价，取绝对值）超过 countBigCents。没有参考价的只按比例看。
  */
-export function isBigVariance(
-  bookMilli: number,
-  diffMilli: number,
-  diffAmountCents: number | null,
-  rules: Pick<InventorySettings, 'countBigPct' | 'countBigCents'>,
-): boolean {
+export function isBigVariance(bookMilli: number, diffMilli: number, diffAmountCents: number | null, rules: Pick<InventorySettings, 'countBigPct' | 'countBigCents'>): boolean {
   if (diffMilli === 0) return false;
   if (bookMilli === 0) return true;
   if (Math.abs(diffMilli) * 100 > Math.abs(bookMilli) * rules.countBigPct) return true;

@@ -35,7 +35,7 @@ const Reason = z.string().trim().min(2, '请填写原因（至少 2 个字）').
 // ───────────────────────── 读取 ─────────────────────────
 
 export async function getSourcing(db: Db, eventId: number): Promise<SourcingEvent> {
-  const [e] = await db<(Omit<SourcingEvent, 'lines' | 'quotes' | 'lowest' | 'purchaseOrder' | 'minQuotes'>)[]>`
+  const [e] = await db<Omit<SourcingEvent, 'lines' | 'quotes' | 'lowest' | 'purchaseOrder' | 'minQuotes'>[]>`
     SELECT e.id, e.doc_no, e.title, e.status, e.need_by, e.note, e.single_source, e.awarded_quote_id, e.award_reason,
            ab.display_name AS awarded_by_name, e.awarded_at, e.cancel_reason, cb.display_name AS created_by_name, e.created_at
     FROM sourcing_events e JOIN staff cb ON cb.id = e.created_by LEFT JOIN staff ab ON ab.id = e.awarded_by
@@ -66,7 +66,16 @@ export async function getSourcing(db: Db, eventId: number): Promise<SourcingEven
     const requests = links
       .filter((x) => Number(x.sourcingLineId) === Number(l.id))
       .map(({ sourcingLineId: _s, ...x }) => ({ ...x, lineId: Number(x.lineId), requestId: Number(x.requestId), qtyMilli: Number(x.qtyMilli) }));
-    lines.push({ ...l, id: Number(l.id), materialId: Number(l.materialId), factorMilli: Number(l.factorMilli), purchaseQtyMilli: Number(l.purchaseQtyMilli), baseQtyMilli: Number(l.baseQtyMilli), baseline, requests });
+    lines.push({
+      ...l,
+      id: Number(l.id),
+      materialId: Number(l.materialId),
+      factorMilli: Number(l.factorMilli),
+      purchaseQtyMilli: Number(l.purchaseQtyMilli),
+      baseQtyMilli: Number(l.baseQtyMilli),
+      baseline,
+      requests,
+    });
   }
   const quotesRaw = await db<(Omit<SourcingQuote, 'supplier' | 'prices' | 'rank' | 'landedCents'> & { supplierId: number; supplierName: string })[]>`
     SELECT q.id, q.supplier_id, s.name AS supplier_name, q.status, q.goods_cents, q.freight_cents, q.pay_terms, q.credit_days, q.delivery_days,
@@ -169,9 +178,10 @@ const CreateInput = z.object({
 
 /** 同一操作编号重提：内容一样返回原来那一行，不一样拒绝（询价单、报价各自记操作编号与原请求摘要，不用共用的幂等表） */
 async function findByKey(db: Db, table: 'sourcing_events' | 'sourcing_quotes', key: string, requestHash: string): Promise<number | null> {
-  const [row] = table === 'sourcing_events'
-    ? await db<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM sourcing_events WHERE client_key = ${key}`
-    : await db<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM sourcing_quotes WHERE client_key = ${key}`;
+  const [row] =
+    table === 'sourcing_events'
+      ? await db<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM sourcing_events WHERE client_key = ${key}`
+      : await db<{ id: number; requestHash: string }[]>`SELECT id, request_hash FROM sourcing_quotes WHERE client_key = ${key}`;
   if (!row) return null;
   if (row.requestHash !== requestHash) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一笔不同的登记，请刷新页面后重新填写');
   return Number(row.id);
@@ -230,7 +240,9 @@ export async function createSourcing(deps: Deps, raw: unknown, actor: Actor, ip?
       await checkSourcingRequests(tx, input.lines, actor);
       const mats = new Map(
         (
-          await tx<{ id: number; name: string; purchaseUnit: string; purchaseFactorMilli: number; inventoryUnit: string; decimals: number; tracked: boolean; active: boolean; specification: string }[]>`
+          await tx<
+            { id: number; name: string; purchaseUnit: string; purchaseFactorMilli: number; inventoryUnit: string; decimals: number; tracked: boolean; active: boolean; specification: string }[]
+          >`
             SELECT id, name, purchase_unit, purchase_factor_milli, inventory_unit, decimals, tracked, active, specification FROM materials WHERE id IN ${tx(ids)}`
         ).map((m) => [Number(m.id), m]),
       );
@@ -256,7 +268,14 @@ export async function createSourcing(deps: Deps, raw: unknown, actor: Actor, ip?
         }
       }
       const requestLines = input.lines.reduce((n, l) => n + (l.requestLineIds?.length ?? 0), 0);
-      await writeAudit(tx, { staffId: actor.id, action: 'sourcing_doc', targetType: 'sourcing_event', targetId: row!.id, detail: { docNo, action: 'create', ...(requestLines ? { requestLines } : {}) }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'sourcing_doc',
+        targetType: 'sourcing_event',
+        targetId: row!.id,
+        detail: { docNo, action: 'create', ...(requestLines ? { requestLines } : {}) },
+        ip,
+      });
       return { id: Number(row!.id), replayed: false };
     });
     eventId = r.id;
@@ -283,7 +302,10 @@ const QuoteInput = z.object({
   deliveryDays: z.number().int().min(0).max(365).nullable().default(null),
   validUntil: docDateSchema.nullable().default(null),
   note: z.string().trim().max(200).default(''),
-  prices: z.array(z.object({ lineId: id, priceCents: z.number('请填写单价').int().min(0, '单价不能为负').max(100_000_000) })).min(1).max(30),
+  prices: z
+    .array(z.object({ lineId: id, priceCents: z.number('请填写单价').int().min(0, '单价不能为负').max(100_000_000) }))
+    .min(1)
+    .max(30),
 });
 
 export async function lockEvent(tx: Tx, eventId: number) {
@@ -309,7 +331,11 @@ export async function insertQuoteLocked(tx: Tx, eventId: number, input: QuoteFie
   const given = new Map(input.prices.map((p) => [p.lineId, p.priceCents]));
   if (given.size !== input.prices.length) throw badRequest('同一行只能报一个价');
   if (lines.length !== given.size || lines.some((l) => !given.has(Number(l.id)))) throw unprocessable('QUOTE_LINES', '每份报价要报全部物料的单价');
-  const amounts = lines.map((l) => ({ lineId: Number(l.id), priceCents: given.get(Number(l.id))!, amountCents: lineAmountCents(Number(l.baseQtyMilli), given.get(Number(l.id))!, Number(l.factorMilli)) }));
+  const amounts = lines.map((l) => ({
+    lineId: Number(l.id),
+    priceCents: given.get(Number(l.id))!,
+    amountCents: lineAmountCents(Number(l.baseQtyMilli), given.get(Number(l.id))!, Number(l.factorMilli)),
+  }));
   const goods = amounts.reduce((t, a) => t + a.amountCents, 0);
   const [q] = await tx<{ id: number }[]>`
     INSERT INTO sourcing_quotes (event_id, supplier_id, goods_cents, freight_cents, pay_terms, credit_days, delivery_days, valid_until, note,
@@ -337,7 +363,14 @@ export async function addQuote(deps: Deps, eventId: number, raw: unknown, actor:
       if (e.status !== 'open') throw conflict('INVALID_STATE', e.status === 'awarded' ? '询价单已定标，要改报价请先撤销定标' : '询价单已撤销');
       const q = await insertQuoteLocked(tx, eventId, input, requestHash, actor.id, null);
       await tx`UPDATE sourcing_events SET updated_at = now() WHERE id = ${eventId}`;
-      await writeAudit(tx, { staffId: actor.id, action: 'sourcing_doc', targetType: 'sourcing_quote', targetId: q.id, detail: { docNo: e.docNo, supplierId: input.supplierId, goodsCents: q.goodsCents, freightCents: input.freightCents }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'sourcing_doc',
+        targetType: 'sourcing_quote',
+        targetId: q.id,
+        detail: { docNo: e.docNo, supplierId: input.supplierId, goodsCents: q.goodsCents, freightCents: input.freightCents },
+        ip,
+      });
     });
   } catch (error) {
     if (isUniqueViolation(error, 'sourcing_quotes_client_key_key')) {
@@ -400,7 +433,13 @@ export async function awardSourcing(deps: Deps, eventId: number, raw: unknown, a
       UPDATE sourcing_events SET status = 'awarded', awarded_quote_id = ${input.quoteId}, award_reason = ${input.reason}, single_source = ${singleSource},
              awarded_by = ${actor.id}, awarded_at = now(), updated_at = now()
       WHERE id = ${eventId}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'sourcing_doc', targetType: 'sourcing_event', targetId: eventId, detail: { docNo: e.docNo, action: 'award', quoteId: input.quoteId, singleSource, reason: input.reason } });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'sourcing_doc',
+      targetType: 'sourcing_event',
+      targetId: eventId,
+      detail: { docNo: e.docNo, action: 'award', quoteId: input.quoteId, singleSource, reason: input.reason },
+    });
   });
   return getSourcing(deps.sql, eventId);
 }

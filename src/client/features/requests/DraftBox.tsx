@@ -113,7 +113,13 @@ export function DraftBox({ open, onClose, currentKey }: { open: boolean; onClose
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                        <Button size="sm" variant="ghost" icon={isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />} onClick={() => void toggle(d)} data-testid={`draft-view-${d.key}`}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                          onClick={() => void toggle(d)}
+                          data-testid={`draft-view-${d.key}`}
+                        >
                           查看
                         </Button>
                         {!current && (

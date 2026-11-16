@@ -58,7 +58,11 @@ const allChecksOk = async () => {
 
 beforeAll(async () => {
   ctx = await setup();
-  for (const [username, role] of [['manager', 'store_manager'], ['am', 'account_manager'], ['other', 'other_store']] as const) {
+  for (const [username, role] of [
+    ['manager', 'store_manager'],
+    ['am', 'account_manager'],
+    ['other', 'other_store'],
+  ] as const) {
     await createStaff(ctx.sql, { username, displayName: username, role, password: PASSWORD, mustChangePassword: false });
   }
   manager = await login(ctx.app, 'manager');
@@ -136,9 +140,7 @@ describe('充值：最低、赠金、升档', () => {
       next: { grade: 5, needCents: yuan(50000), bonusBp: 1500 },
       lockerLevel: 2,
     });
-    expect(info.events.map((e) => [e.kind, e.fromGrade, e.toGrade, e.rollingRecharge, e.rechargeDocNo])).toEqual([
-      ['recharge_up', 0, 4, yuan(50000), big.body.recharge.docNo],
-    ]);
+    expect(info.events.map((e) => [e.kind, e.fromGrade, e.toGrade, e.rollingRecharge, e.rechargeDocNo])).toEqual([['recharge_up', 0, 4, yuan(50000), big.body.recharge.docNo]]);
   });
 
   it('续充最低；赠金与预览不一致拒绝（BONUS_CHANGED）；没有权限不能自定义赠金；有权限的可以', async () => {
@@ -152,7 +154,13 @@ describe('充值：最低、赠金、升档', () => {
     expect(custom.body.recharge.bonusAmount).toBe(0);
     // 不带 bonusMode（升级前的请求）：等于按档的赠金就照常入账
     const legacy = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', {
-      idempotencyKey: randomUUID(), memberId: a, planId: null, paidAmount: yuan(1000), bonusAmount: yuan(100), paymentMethod: 'cash', paymentConfirmed: true,
+      idempotencyKey: randomUUID(),
+      memberId: a,
+      planId: null,
+      paidAmount: yuan(1000),
+      bonusAmount: yuan(100),
+      paymentMethod: 'cash',
+      paymentConfirmed: true,
     });
     expect(legacy.status, JSON.stringify(legacy.body)).toBe(200);
     expect((await gradeOf(a)).state.grade).toBe(4);
@@ -183,7 +191,12 @@ describe('每天的自动任务（按营业日推到周期结束之后）', () =
   it('保级保持尊阶、30%–60% 进补充期、不够降一档进尊阶、L1 降到 L0；同一天再跑什么都不做', async () => {
     await setRules({ firstRechargeMinCents: 0, topUpMinCents: 0 });
     ids.a = (await api(ctx.app, ctx.owner, 'GET', '/api/members?q=19911110001')).body[0].id;
-    for (const [key, phone, paid] of [['b', '19911110002', 10000], ['c', '19911110003', 10000], ['d', '19911110004', 5000], ['e', '19911110005', 10000]] as const) {
+    for (const [key, phone, paid] of [
+      ['b', '19911110002', 10000],
+      ['c', '19911110003', 10000],
+      ['d', '19911110004', 5000],
+      ['e', '19911110005', 10000],
+    ] as const) {
       ids[key] = (await createMember(ctx, `会员${key}`, phone)).id;
       expect((await recharge(ids[key]!, yuan(paid))).status).toBe(200);
     }
@@ -273,7 +286,7 @@ describe('手动调整与他店查询', () => {
       member: expect.objectContaining({ maskedName: '甲*员', maskedPhone: '199****0001', grade: 4, tier: 2, label: 'L4 望岳 · 尊', inGrace: false, status: 'active' }),
     });
     expect(JSON.stringify(r.body)).not.toMatch(/balance|Balance|principal/);
-    const no = (await api(ctx.app, other, 'GET', `/api/members/${(await api(ctx.app, ctx.owner, 'GET', '/api/members?q=19911110001')).body[0].id}`));
+    const no = await api(ctx.app, other, 'GET', `/api/members/${(await api(ctx.app, ctx.owner, 'GET', '/api/members?q=19911110001')).body[0].id}`);
     expect(no.status).toBe(403);
     const memberNo = r.body.member.memberNo as string;
     expect((await api(ctx.app, other, 'GET', `/api/membership/lookup?q=${memberNo.toLowerCase()}`)).body.found).toBe(true);

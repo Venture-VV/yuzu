@@ -75,10 +75,8 @@ const KIND_ORDER: Record<LedgerKind, number> = { advance: 0, expense: 1, return:
 
 // 部门、经办人筛选：打款与退回补付按所属打款（别名 a），报销按报销单（别名 c）。
 // 逐笔、合计、导出前的笔数都用这两个，口径一致（v0.7.9 审查修正：导出笔数原来没按部门、经办人筛选）
-const byAdvance = (db: Db, f: LedgerFilter) =>
-  db`${f.departmentId ? db`AND a.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND a.handler_id = ${f.handlerId}` : db``}`;
-const byClaim = (db: Db, f: LedgerFilter) =>
-  db`${f.departmentId ? db`AND c.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND c.handler_id = ${f.handlerId}` : db``}`;
+const byAdvance = (db: Db, f: LedgerFilter) => db`${f.departmentId ? db`AND a.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND a.handler_id = ${f.handlerId}` : db``}`;
+const byClaim = (db: Db, f: LedgerFilter) => db`${f.departmentId ? db`AND c.department_id = ${f.departmentId}` : db``} ${f.handlerId ? db`AND c.handler_id = ${f.handlerId}` : db``}`;
 
 async function ledgerRows(db: Db, f: LedgerFilter, limit: number | null): Promise<PurchaseLedgerRow[]> {
   const rows = await db<PurchaseLedgerRow[]>`
@@ -298,13 +296,30 @@ export async function orderedLines(db: Db, timezone: string, f: OrderedFilter, l
       overdue: (state === 'open' || state === 'partial') && dueDate < today,
     };
   });
-  const wanted = all.filter((l) =>
-    f.state === 'open' ? l.state === 'open' || l.state === 'partial' : f.state === 'overdue' ? l.overdue : f.state === 'received' ? l.state === 'received' : true,
-  );
+  const wanted = all.filter((l) => (f.state === 'open' ? l.state === 'open' || l.state === 'partial' : f.state === 'overdue' ? l.overdue : f.state === 'received' ? l.state === 'received' : true));
   return { lines: limit ? wanted.slice(0, limit) : wanted, truncated: limit ? wanted.length > limit : false };
 }
 
-const ORDERED_HEADERS = ['下单日期', '采购单号', '供应商', '采购途径', '物料编码', '物料', '规格', '采购数量', '采购单位', '库存数量', '已到', '未到', '库存单位', '单价（元）', '金额（元）', '应到日期', '状态', '需求部门'];
+const ORDERED_HEADERS = [
+  '下单日期',
+  '采购单号',
+  '供应商',
+  '采购途径',
+  '物料编码',
+  '物料',
+  '规格',
+  '采购数量',
+  '采购单位',
+  '库存数量',
+  '已到',
+  '未到',
+  '库存单位',
+  '单价（元）',
+  '金额（元）',
+  '应到日期',
+  '状态',
+  '需求部门',
+];
 function orderedCells(l: OrderedLine): (string | number)[] {
   return [
     l.orderDate,
@@ -431,8 +446,13 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
       AND (c.amount_cents <= 0 OR EXISTS (SELECT 1 FROM expense_claim_lines l WHERE l.claim_id = c.id
                                           AND (btrim(l.name) = '' OR l.amount_cents <= 0)))
     ORDER BY c.expense_date DESC LIMIT 500`;
-  push(1, '支出必须有日期、金额、类别、部门、经办人', 'block', '有效报销单（待确认、退回、已确认）的日期、部门、经办人、每一行的物品、费用科目与金额',
-    r1.map((c) => ({ text: `${c.docNo} 缺少金额或明细`, date: c.expenseDate, link: claimLink(c.id) })));
+  push(
+    1,
+    '支出必须有日期、金额、类别、部门、经办人',
+    'block',
+    '有效报销单（待确认、退回、已确认）的日期、部门、经办人、每一行的物品、费用科目与金额',
+    r1.map((c) => ({ text: `${c.docNo} 缺少金额或明细`, date: c.expenseDate, link: claimLink(c.id) })),
+  );
 
   // 2 用备用金付、但没有采购单的报销
   const r2 = await db<{ id: number; docNo: string; expenseDate: string; advanceNo: string; amountCents: number; summary: string }[]>`
@@ -441,8 +461,13 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
     FROM expense_claims c JOIN petty_advances a ON a.id = c.advance_id
     WHERE c.pay_source = 'petty' AND c.status IN ${db(ACTIVE_CLAIM)} AND c.purchase_order_id IS NULL
     ORDER BY c.expense_date DESC LIMIT 500`;
-  push(2, '一笔打款必须能分摊到具体采购单', 'warn', '用备用金付、但没有对应采购单的报销（按次报销），请补采购单或在报销里说明（待确认）',
-    r2.map((c) => ({ text: `${c.docNo}（打款 ${c.advanceNo}）${c.summary} ¥${formatAmount(Number(c.amountCents))}`, date: c.expenseDate, link: claimLink(c.id) })));
+  push(
+    2,
+    '一笔打款必须能分摊到具体采购单',
+    'warn',
+    '用备用金付、但没有对应采购单的报销（按次报销），请补采购单或在报销里说明（待确认）',
+    r2.map((c) => ({ text: `${c.docNo}（打款 ${c.advanceNo}）${c.summary} ¥${formatAmount(Number(c.amountCents))}`, date: c.expenseDate, link: claimLink(c.id) })),
+  );
 
   // 3、4 平账：未平的付款日；超期未退
   const advances = (await advanceRows(db, {})).map((r) => toAdvanceSummary(r, today, rules.overdueDays)).filter((a) => a.state !== 'settled');
@@ -455,15 +480,29 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
     byDay.set(key, d);
   }
   const unsettledDays = [...byDay.values()].sort((x, y) => (x.date < y.date ? 1 : -1));
-  push(3, '每日打款减支出必须等于应退回，不平即报警', 'warn', '每个付款日、每个部门：打款 − 已确认支出 − 实际退回 ≠ 0（钱还在经办人手里，或待补付）',
+  push(
+    3,
+    '每日打款减支出必须等于应退回，不平即报警',
+    'warn',
+    '每个付款日、每个部门：打款 − 已确认支出 − 实际退回 ≠ 0（钱还在经办人手里，或待补付）',
     unsettledDays.map((d) => ({
       text: `${d.date} ${d.dept}：${d.outstanding > 0 ? `未退回 ¥${formatAmount(d.outstanding)}` : `待补付 ¥${formatAmount(-d.outstanding)}`}（${d.n} 笔打款）`,
       date: d.date,
       link: { kind: 'advance' as const, id: d.advanceId },
-    })));
+    })),
+  );
   const overdue = advances.filter((a) => a.state === 'overdue');
-  push(4, `应退回减实际退回为未退回，超 ${rules.overdueDays} 天预警`, 'warn', `打款日起超过 ${rules.overdueDays} 天（费用报销规则里改）还没平的打款`,
-    overdue.map((a) => ({ text: `${a.docNo} ${a.department.name} · ${a.handler.name}：未退回 ¥${formatAmount(a.outstandingCents)}，已 ${a.ageDays} 天`, date: a.advanceDate, link: { kind: 'advance' as const, id: a.id } })));
+  push(
+    4,
+    `应退回减实际退回为未退回，超 ${rules.overdueDays} 天预警`,
+    'warn',
+    `打款日起超过 ${rules.overdueDays} 天（费用报销规则里改）还没平的打款`,
+    overdue.map((a) => ({
+      text: `${a.docNo} ${a.department.name} · ${a.handler.name}：未退回 ¥${formatAmount(a.outstandingCents)}，已 ${a.ageDays} 天`,
+      date: a.advanceDate,
+      link: { kind: 'advance' as const, id: a.id },
+    })),
+  );
 
   // 5 发票类型与税点匹配字典
   const claims5 = await db<{ id: number; docNo: string; expenseDate: string; invoiceType: string; invoiceLabel: string; taxRateBp: number; invoiceNo: string }[]>`
@@ -471,37 +510,62 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
     WHERE status IN ${db(ACTIVE_CLAIM)} ORDER BY expense_date DESC`;
   const types = new Map(rules.invoiceTypes.map((t) => [t.key, t]));
   const bad5 = claims5.filter((c) => !types.get(c.invoiceType)?.taxRatesBp.includes(Number(c.taxRateBp)));
-  push(5, '发票类型与税点必须匹配字典', 'block', '有效报销单的发票类型与税点在当前的费用报销规则里（规则改过之后的旧单会列出来）',
-    bad5.map((c) => ({ text: `${c.docNo}：${c.invoiceLabel} · 税点 ${Number(c.taxRateBp) / 100}% 不在当前规则里`, date: c.expenseDate, link: claimLink(c.id) })));
+  push(
+    5,
+    '发票类型与税点必须匹配字典',
+    'block',
+    '有效报销单的发票类型与税点在当前的费用报销规则里（规则改过之后的旧单会列出来）',
+    bad5.map((c) => ({ text: `${c.docNo}：${c.invoiceLabel} · 税点 ${Number(c.taxRateBp) / 100}% 不在当前规则里`, date: c.expenseDate, link: claimLink(c.id) })),
+  );
 
   // 6 费用科目只允许固定选项（v0.7.12 起加「运费」，#15）
   const r6 = await db<{ id: number; docNo: string; expenseDate: string; category: string }[]>`
     SELECT c.id, c.doc_no, c.expense_date, l.category FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id
     WHERE c.status IN ${db(ACTIVE_CLAIM)} AND l.category NOT IN ('office', 'fixed_asset', 'low_value', 'freight') LIMIT 500`;
-  push(6, '费用科目只允许办公费、固定资产、低值易耗、运费', 'block', '报销明细的费用科目（数据库约束，只能是这四种；运费 v0.7.12 起单独记）',
-    r6.map((c) => ({ text: `${c.docNo}：${c.category}`, date: c.expenseDate, link: claimLink(c.id) })));
+  push(
+    6,
+    '费用科目只允许办公费、固定资产、低值易耗、运费',
+    'block',
+    '报销明细的费用科目（数据库约束，只能是这四种；运费 v0.7.12 起单独记）',
+    r6.map((c) => ({ text: `${c.docNo}：${c.category}`, date: c.expenseDate, link: claimLink(c.id) })),
+  );
 
   // 7 部门走字典：引用的部门都在档案里；部门名里不能像是几个部门拼在一起
   const r7 = await db<{ id: number; name: string }[]>`SELECT id, name FROM departments WHERE name ~ '[、/／,，+＋&＆]' ORDER BY id`;
-  push(7, '部门走字典，禁止多部门拼接', 'block', '报销、打款、需求单的部门都引用部门档案（数据库外键）；部门档案里名称像是几个部门拼在一起的列出来',
-    r7.map((d) => ({ text: `部门档案「${d.name}」像是几个部门拼在一起，请拆开`, date: null, link: null })));
+  push(
+    7,
+    '部门走字典，禁止多部门拼接',
+    'block',
+    '报销、打款、需求单的部门都引用部门档案（数据库外键）；部门档案里名称像是几个部门拼在一起的列出来',
+    r7.map((d) => ({ text: `部门档案「${d.name}」像是几个部门拼在一起，请拆开`, date: null, link: null })),
+  );
 
   // 8 数量不一致写原因
   const r8 = await db<{ id: number; docNo: string; expenseDate: string; name: string }[]>`
     SELECT c.id, c.doc_no, c.expense_date, l.name FROM expense_claim_lines l JOIN expense_claims c ON c.id = l.claim_id
     WHERE c.status IN ${db(ACTIVE_CLAIM)} AND l.bought_milli <> l.received_milli AND btrim(l.diff_reason) = '' LIMIT 500`;
-  push(8, '到货数量不等于购买数量时必须填差异原因', 'block', '报销明细：购买数量与到货数量不一致的，都写了原因',
-    r8.map((c) => ({ text: `${c.docNo}「${c.name}」没写差异原因`, date: c.expenseDate, link: claimLink(c.id) })));
+  push(
+    8,
+    '到货数量不等于购买数量时必须填差异原因',
+    'block',
+    '报销明细：购买数量与到货数量不一致的，都写了原因',
+    r8.map((c) => ({ text: `${c.docNo}「${c.name}」没写差异原因`, date: c.expenseDate, link: claimLink(c.id) })),
+  );
 
   // 9 已下单未到货超期：所有没到齐的已确认采购单，不限下单日期（不能因为单子下得早就从预警里消失，v0.7.9 审查修正）
   const late = (await orderedLines(db, timezone, { state: 'overdue' }, null)).lines;
   const arrivalDays = (await loadPurchaseRules(db)).arrivalOverdueDays;
-  push(9, `已下单未到货超约定天数预警`, 'warn', `已确认的采购单行没到齐：有预计到货日的过了预计日，没有的过了下单后 ${arrivalDays} 天（采购 → 采购规则里改）`,
+  push(
+    9,
+    `已下单未到货超约定天数预警`,
+    'warn',
+    `已确认的采购单行没到齐：有预计到货日的过了预计日，没有的过了下单后 ${arrivalDays} 天（采购 → 采购规则里改）`,
     late.map((l) => ({
       text: `${l.docNo} ${l.materialName}：应到 ${l.dueDate}，已到 ${formatQty(l.receivedMilli)} / ${formatQty(l.baseQtyMilli)} ${l.inventoryUnit}`,
       date: l.orderDate,
       link: { kind: 'po' as const, id: l.poId },
-    })));
+    })),
+  );
 
   // 10 同一物品同一天重复下单
   const r10 = await db<{ materialName: string; orderDate: string; docs: string[]; poId: number }[]>`
@@ -510,13 +574,23 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
     WHERE po.status <> 'cancelled' AND po.backfill = false
     GROUP BY pl.material_id, m.name, po.order_date HAVING count(DISTINCT po.id) > 1
     ORDER BY po.order_date DESC LIMIT 500`;
-  push(10, '同一物品同一天重复下单提示', 'warn', '同一物料、同一下单日出现在两张以上有效的采购单里（撤回的不算）',
-    r10.map((r) => ({ text: `${r.orderDate}「${r.materialName}」：${r.docs.join('、')}`, date: r.orderDate, link: { kind: 'po' as const, id: Number(r.poId) } })));
+  push(
+    10,
+    '同一物品同一天重复下单提示',
+    'warn',
+    '同一物料、同一下单日出现在两张以上有效的采购单里（撤回的不算）',
+    r10.map((r) => ({ text: `${r.orderDate}「${r.materialName}」：${r.docs.join('、')}`, date: r.orderDate, link: { kind: 'po' as const, id: Number(r.poId) } })),
+  );
 
   // 11 标有发票的都有发票号
   const bad11 = claims5.filter((c) => types.get(c.invoiceType)?.needsNumber && !c.invoiceNo.trim());
-  push(11, '标注有发票但实际无票直接拦截', 'block', '发票类型要求发票号的报销单都填了发票号（登记时拦截）',
-    bad11.map((c) => ({ text: `${c.docNo}：${c.invoiceLabel} 没有发票号`, date: c.expenseDate, link: claimLink(c.id) })));
+  push(
+    11,
+    '标注有发票但实际无票直接拦截',
+    'block',
+    '发票类型要求发票号的报销单都填了发票号（登记时拦截）',
+    bad11.map((c) => ({ text: `${c.docNo}：${c.invoiceLabel} 没有发票号`, date: c.expenseDate, link: claimLink(c.id) })),
+  );
 
   // 12 新产品的图片与链接（集采导入的不要求，8.0.1 CG06：导入的就是采购自己整理的需求）
   const r12 = await db<{ id: number; docNo: string; createdDate: string; name: string }[]>`
@@ -525,8 +599,13 @@ export async function ledgerAudit(db: Db, timezone: string): Promise<LedgerAudit
     WHERE l.material_id IS NULL AND r.source = 'form'
       AND (l.link = '' OR NOT EXISTS (SELECT 1 FROM purchase_request_line_images i WHERE i.request_line_id = l.id))
     LIMIT 500`;
-  push(12, '图片与链接为必填', 'block', '需求单里的新产品（不在物料档案里的）都有参考链接与图片（提交时拦截）',
-    r12.map((r) => ({ text: `${r.docNo}「${r.name}」缺链接或图片`, date: r.createdDate, link: { kind: 'request' as const, id: Number(r.id) } })));
+  push(
+    12,
+    '图片与链接为必填',
+    'block',
+    '需求单里的新产品（不在物料档案里的）都有参考链接与图片（提交时拦截）',
+    r12.map((r) => ({ text: `${r.docNo}「${r.name}」缺链接或图片`, date: r.createdDate, link: { kind: 'request' as const, id: Number(r.id) } })),
+  );
 
   void AUDIT_KIND_LABELS;
   return { today, rules: out };

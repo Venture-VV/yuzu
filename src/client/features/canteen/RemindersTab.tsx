@@ -30,8 +30,7 @@ import { Badge, Button, Card, ConfirmCheck, Field, Input, Notice, SectionTitle, 
 import { useToast } from '../../components/Toast';
 import { Mascot } from '../../../canteen-app/Mascot';
 
-export const useReminders = () =>
-  useQuery({ queryKey: ['canteen', 'reminders'], queryFn: () => api.get<ReminderOverview>('/api/erp/canteen/reminders'), refetchInterval: 60_000 });
+export const useReminders = () => useQuery({ queryKey: ['canteen', 'reminders'], queryFn: () => api.get<ReminderOverview>('/api/erp/canteen/reminders'), refetchInterval: 60_000 });
 
 /** 预览里的员工与菜（真的发的时候换成每个人的名字、这一顿发布了的菜） */
 const SAMPLE_NAME = '小林';
@@ -57,7 +56,12 @@ export function RemindersTab() {
     if (!form || (base && JSON.stringify(form) === JSON.stringify(base))) adopt(q.data.settings);
     // 只跟着门店系统的数据变（form、base 是这里自己改的）
   }, [q.data]);
-  if (q.isError) return <Notice tone="error" title="取不到饭点提醒的情况">{errorMessage(q.error)}</Notice>;
+  if (q.isError)
+    return (
+      <Notice tone="error" title="取不到饭点提醒的情况">
+        {errorMessage(q.error)}
+      </Notice>
+    );
   if (!q.data || !form) return <Skeleton className="h-96" />;
   const o = q.data;
 
@@ -360,7 +364,10 @@ function PeopleCard({ o }: { o: ReminderOverview }) {
           <ul className="mt-2 space-y-1.5 text-[12.5px]" data-testid="reminders-failures">
             {o.failures.map((f, i) => (
               <li key={i} className="rounded-md bg-paper-2 px-3 py-2">
-                <span className="font-semibold">{f.name}</span> <span className="text-ink-3">{f.empNo} · {PLATFORM_LABELS[f.platform] ?? f.platform} · {relativeTime(f.at)}</span>
+                <span className="font-semibold">{f.name}</span>{' '}
+                <span className="text-ink-3">
+                  {f.empNo} · {PLATFORM_LABELS[f.platform] ?? f.platform} · {relativeTime(f.at)}
+                </span>
                 <span className="block text-ink-2">{f.error}</span>
               </li>
             ))}
@@ -384,9 +391,7 @@ function TestCard({ o }: { o: ReminderOverview }) {
     try {
       const r = await api.post<PushTestResult>('/api/erp/canteen/reminders/test', { employeeId, meal: meal || null });
       setResult(
-        r.sent === r.devices
-          ? { ok: true, text: `送到了 ${r.sent} 台手机，请对方看看手机上的通知` }
-          : { ok: r.sent > 0, text: `${r.devices} 台手机送到 ${r.sent} 台：${r.errors.join('；')}` },
+        r.sent === r.devices ? { ok: true, text: `送到了 ${r.sent} 台手机，请对方看看手机上的通知` } : { ok: r.sent > 0, text: `${r.devices} 台手机送到 ${r.sent} 台：${r.errors.join('；')}` },
       );
     } catch (e) {
       setResult({ ok: false, text: errorMessage(e) });
@@ -439,9 +444,7 @@ function HowCard() {
         <li>微信里打开的、店里局域网 http 打开的都收不到。</li>
       </ul>
       <p className="font-bold text-ink">手机桌面的快捷入口</p>
-      <p>
-        安卓手机把柚子饭堂装到桌面以后，长按桌面上的柚子会出现「亮饭卡码」「扫码」「跟柚子说」三个入口（「扫码」是负责人用的，员工点了打开饭卡码）。iPhone 不支持长按入口。
-      </p>
+      <p>安卓手机把柚子饭堂装到桌面以后，长按桌面上的柚子会出现「亮饭卡码」「扫码」「跟柚子说」三个入口（「扫码」是负责人用的，员工点了打开饭卡码）。iPhone 不支持长按入口。</p>
     </Card>
   );
 }

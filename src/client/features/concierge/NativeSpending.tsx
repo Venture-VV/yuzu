@@ -1,19 +1,19 @@
-import { useEffect, useState } from "react";
-import { money, stamp } from "./format";
-import { liveRefresh } from "./live";
-import { api } from "../../lib/api";
-import type { NativeSpendingPage, Member } from "./types";
-import { useLivePoll } from "../../lib/livePoll";
+import { useEffect, useState } from 'react';
+import { money, stamp } from './format';
+import { liveRefresh } from './live';
+import { api } from '../../lib/api';
+import type { NativeSpendingPage, Member } from './types';
+import { useLivePoll } from '../../lib/livePoll';
 const time = (s: string) => stamp(s);
 export function NativeSpendingList({ member }: { member: Member }) {
   const [page, setPage] = useState(0),
     [data, setData] = useState<NativeSpendingPage | null>(null),
-    [error, setError] = useState(""),
+    [error, setError] = useState(''),
     [refresh, setRefresh] = useState(0),
     [loading, setLoading] = useState(true);
   useEffect(() => {
     setData(null);
-    setError("");
+    setError('');
     setLoading(true);
   }, [member.id, page, refresh]);
   // 同步发现有变化、每 15 秒、回到页面、网络恢复时再取（lib/livePoll，8.1.3）
@@ -23,7 +23,7 @@ export function NativeSpendingList({ member }: { member: Member }) {
         const result = await api.get<NativeSpendingPage>(`/api/concierge/members/${member.id}/spending?offset=${page * 50}`);
         if (isLive()) {
           setData((old) => (old && JSON.stringify(old.records) === JSON.stringify(result.records) && old.hasMore === result.hasMore ? old : result));
-          setError("");
+          setError('');
         }
       } catch (e) {
         if (isLive()) setError((e as Error).message);
@@ -34,45 +34,30 @@ export function NativeSpendingList({ member }: { member: Member }) {
     [member.id, page, refresh],
     { subscribe: (wake) => liveRefresh(wake, 15_000) },
   );
-  if (!member.nativeMemberId)
-    return (
-      <p className="detail-notice">
-        关联前台系统会员后，这里同步显示系统储值扣费明细。
-      </p>
-    );
+  if (!member.nativeMemberId) return <p className="detail-notice">关联前台系统会员后，这里同步显示系统储值扣费明细。</p>;
   return (
     <section className="native-spending" aria-label="系统储值扣费">
       <div className="panel-header">
         <h3>系统储值扣费</h3>
-        <button
-          type="button"
-          className="text-btn"
-          onClick={() => setRefresh((n) => n + 1)}
-        >
+        <button type="button" className="text-btn" onClick={() => setRefresh((n) => n + 1)}>
           刷新扣费记录
         </button>
       </div>
-      <p className="detail-notice">
-        自动同步会员系统的实际扣卡单；已撤销保留原单。结账整单项目作消费依据，本会员扣款单独列示，不重复扣款。
-      </p>
+      <p className="detail-notice">自动同步会员系统的实际扣卡单；已撤销保留原单。结账整单项目作消费依据，本会员扣款单独列示，不重复扣款。</p>
       {error && (
         <p role="alert" className="orange-text">
           扣费记录同步失败：{error}。请重试，当前列表可能未更新。
         </p>
       )}
       {loading && !data && <p role="status">正在读取系统扣费记录…</p>}
-      {data && !data.records.length && !error && (
-        <p>暂无系统储值扣费记录。现金等未扣会员钱包的支付不列入本区。</p>
-      )}
+      {data && !data.records.length && !error && <p>暂无系统储值扣费记录。现金等未扣会员钱包的支付不列入本区。</p>}
       {data?.records.map((r) => (
         <article className="history-item native-spending-record" key={r.id}>
           <div className="history-top">
             <strong>
-              {r.docNo} · {r.status === "reversed" ? "已撤销" : "已扣费"}
+              {r.docNo} · {r.status === 'reversed' ? '已撤销' : '已扣费'}
             </strong>
-            <strong className={r.status === "reversed" ? "muted" : ""}>
-              ¥{money(r.totalCents)}
-            </strong>
+            <strong className={r.status === 'reversed' ? 'muted' : ''}>¥{money(r.totalCents)}</strong>
           </div>
           <p>
             {time(r.occurredAt)} · 经办：{r.operatorName}
@@ -85,9 +70,8 @@ export function NativeSpendingList({ member }: { member: Member }) {
           </small>
           {r.checkout && (
             <p>
-              结账单 {r.checkout.number} · 整单金额 ¥
-              {money(r.checkout.totalCents)}
-              {r.checkout.status === "voided" ? " · 已反结账" : ""}
+              结账单 {r.checkout.number} · 整单金额 ¥{money(r.checkout.totalCents)}
+              {r.checkout.status === 'voided' ? ' · 已反结账' : ''}
             </p>
           )}
           {r.reversal && (
@@ -98,11 +82,7 @@ export function NativeSpendingList({ member }: { member: Member }) {
           )}
           <details>
             <summary>查看消费明细（{r.items.length}项）</summary>
-            {r.checkout && (
-              <p className="muted small">
-                以下为结账时保存的整单项目，可能含其他支付或同行消费；项目合计不等同于本会员扣卡金额。未留存原单价时不反推单价。
-              </p>
-            )}
+            {r.checkout && <p className="muted small">以下为结账时保存的整单项目，可能含其他支付或同行消费；项目合计不等同于本会员扣卡金额。未留存原单价时不反推单价。</p>}
             {r.items.length ? (
               <div className="table-scroll">
                 <table className="data-table">
@@ -120,16 +100,10 @@ export function NativeSpendingList({ member }: { member: Member }) {
                       <tr key={k}>
                         <td>
                           {i.name}
-                          {i.category && (
-                            <small className="cell-sub">{i.category}</small>
-                          )}
+                          {i.category && <small className="cell-sub">{i.category}</small>}
                         </td>
                         <td>{i.quantity}</td>
-                        <td>
-                          {i.unitPriceCents == null
-                            ? "未留存"
-                            : `¥${money(i.unitPriceCents)}`}
-                        </td>
+                        <td>{i.unitPriceCents == null ? '未留存' : `¥${money(i.unitPriceCents)}`}</td>
                         <td>¥{money(i.amountCents)}</td>
                         <td>¥{money(i.discountCents)}</td>
                       </tr>
@@ -145,21 +119,11 @@ export function NativeSpendingList({ member }: { member: Member }) {
       ))}
       {data && (
         <div className="table-footer">
-          <button
-            type="button"
-            className="btn btn-secondary small-btn"
-            disabled={!page}
-            onClick={() => setPage((p) => p - 1)}
-          >
+          <button type="button" className="btn btn-secondary small-btn" disabled={!page} onClick={() => setPage((p) => p - 1)}>
             上一页
           </button>
           <span>第{page + 1}页 · 每页最多50笔</span>
-          <button
-            type="button"
-            className="btn btn-secondary small-btn"
-            disabled={!data.hasMore}
-            onClick={() => setPage((p) => p + 1)}
-          >
+          <button type="button" className="btn btn-secondary small-btn" disabled={!data.hasMore} onClick={() => setPage((p) => p + 1)}>
             下一页
           </button>
         </div>

@@ -126,11 +126,7 @@ export function FrontdeskPendingBanner() {
             <span className="hidden text-[12px] text-ink-3 sm:inline">
               {formatDateTime(op.createdAt)} · {op.staffName}
             </span>
-            <button
-              type="button"
-              onClick={() => open(op)}
-              className="flex h-7 items-center gap-1 rounded-full bg-pine px-3 text-[12.5px] font-bold text-paper hover:bg-pine-hover"
-            >
+            <button type="button" onClick={() => open(op)} className="flex h-7 items-center gap-1 rounded-full bg-pine px-3 text-[12.5px] font-bold text-paper hover:bg-pine-hover">
               去处理 <ArrowRight className="size-3.5" />
             </button>
           </span>

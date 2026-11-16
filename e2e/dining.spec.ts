@@ -135,7 +135,10 @@ test.describe('S5 餐饮', () => {
       // ② 前台：接待一位男宾；主导航有「餐饮」
       await login(page, 'xiaozhou');
       const board = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
-      const tag = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+      const tag = board.tags
+        .filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+        .map((t) => t.code)
+        .reverse()[0]!;
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 点单客人' }] });
       const visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
       await page.goto('/');
@@ -180,7 +183,11 @@ test.describe('S5 餐饮', () => {
       await page.getByTestId('dining-tab-kitchen').click();
       const all = page.getByTestId('kds-station-全部档口');
       if (await all.isVisible()) await all.click();
-      const hot = page.getByTestId('kds-col-queued').getByTestId(/^kds-\d+$/).filter({ hasText: tag }).filter({ hasText: HOT.name });
+      const hot = page
+        .getByTestId('kds-col-queued')
+        .getByTestId(/^kds-\d+$/)
+        .filter({ hasText: tag })
+        .filter({ hasText: HOT.name });
       await expect(hot).toContainText('少辣');
       const hotId = (await hot.getAttribute('data-testid'))!.replace('kds-', '');
       await page.getByTestId(`kds-start-${hotId}`).click();
@@ -202,10 +209,17 @@ test.describe('S5 餐饮', () => {
       await expect(pending.getByTestId(`dining-pending-${TEA.name}`)).toHaveCount(0);
       await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toContainText('剩 2');
       const kb = await getJson<KitchenBoard>(page, '/api/kitchen');
-      expect(kb.items.filter((k) => k.visitId === visitId).map((k) => [k.name, k.status]).sort()).toEqual([
-        [HOT.name, 'served'],
-        [TEA.name, 'cancelled'],
-      ].sort());
+      expect(
+        kb.items
+          .filter((k) => k.visitId === visitId)
+          .map((k) => [k.name, k.status])
+          .sort(),
+      ).toEqual(
+        [
+          [HOT.name, 'served'],
+          [TEA.name, 'cancelled'],
+        ].sort(),
+      );
 
       // ⑦ 估清：柠檬茶卖完了，点单页不能点；取消后恢复
       await page.getByTestId('dining-tab-limits').click();
@@ -259,14 +273,21 @@ test.describe('S5 餐饮', () => {
       await page.request.post('/api/auth/logout');
       await login(page, 'xiaozhou');
       const board = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
-      const tag = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+      const tag = board.tags
+        .filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+        .map((t) => t.code)
+        .reverse()[0]!;
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male' }] });
       const visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
       // 下单请求真实到达服务器并入账，但浏览器收不到响应；查回也先连不上
-      await page.route('**/api/dining/orders', async (route) => {
-        await route.fetch();
-        await route.abort('connectionreset');
-      }, { times: 1 });
+      await page.route(
+        '**/api/dining/orders',
+        async (route) => {
+          await route.fetch();
+          await route.abort('connectionreset');
+        },
+        { times: 1 },
+      );
       await page.route('**/api/frontdesk/ops/*', (route) => route.abort('connectionreset'));
       await page.goto('/dining/order');
       await page.getByTestId('dining-tag').fill(tag);
@@ -310,7 +331,10 @@ test.describe('S5 餐饮', () => {
       await prepareByApi(page);
       await page.request.post('/api/auth/logout');
       await login(page, 'xiaozhou');
-      const free = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse();
+      const free = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags
+        .filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+        .map((t) => t.code)
+        .reverse();
       const [a, b] = [free[0]!, free[1]!];
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: a, zone: 'male', guestLabel: 'E2E 甲' }] });
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: b, zone: 'male', guestLabel: 'E2E 乙' }] });

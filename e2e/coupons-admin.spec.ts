@@ -98,7 +98,10 @@ test.describe('券与会员权益（v0.7.20）', () => {
       const exportLink = page.getByTestId(`coupon-batch-export-${batch.id}`);
       await expect(exportLink).toBeVisible();
       const csv = await (await page.request.get((await exportLink.getAttribute('href'))!)).text();
-      const codes = csv.split(/\r?\n/).slice(1).filter((l) => /[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}/.test(l));
+      const codes = csv
+        .split(/\r?\n/)
+        .slice(1)
+        .filter((l) => /[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}/.test(l));
       expect(codes).toHaveLength(3);
 
       // ④ 会员详情：发两张、作废一张
@@ -138,7 +141,10 @@ test.describe('券与会员权益（v0.7.20）', () => {
 
       // ⑤ 充值页：选挂了券的套餐，显示「另赠」
       await page.getByRole('button', { name: /^充值(\s|$)/ }).click(); // 不是「充值记录」的展开按钮（8.0.4）
-      await page.getByRole('button', { name: new RegExp(plan.name) }).first().click();
+      await page
+        .getByRole('button', { name: new RegExp(plan.name) })
+        .first()
+        .click();
       await expect(page.getByTestId('coupon-plan-gifts')).toContainText(`另赠：${name} × 1`);
       await page.keyboard.press('Escape');
 

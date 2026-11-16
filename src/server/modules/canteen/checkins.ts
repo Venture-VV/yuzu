@@ -5,18 +5,7 @@
 // 锁：先对那位员工一行加共享锁（与停用、重新开通串行），再写打卡；撤销只锁那条打卡。
 
 import { z } from 'zod';
-import {
-  mealAt,
-  MEAL_LABELS,
-  MEALS,
-  mealWindowText,
-  parseCanteenCode,
-  type CanteenCheckinRow,
-  type CanteenPerson,
-  type CanteenToday,
-  type CheckinResult,
-  type Meal,
-} from '@shared/canteen';
+import { mealAt, MEAL_LABELS, MEALS, mealWindowText, parseCanteenCode, type CanteenCheckinRow, type CanteenPerson, type CanteenToday, type CheckinResult, type Meal } from '@shared/canteen';
 import { businessDateOf } from '@shared/business-date';
 import type { Db, Fragment, Sql } from '../../db';
 import type { AppConfig } from '../../config';
@@ -80,7 +69,10 @@ export async function recordCheckin(deps: { sql: Sql; config: AppConfig }, recor
   const settings = await loadCanteenSettings(sql);
   const slot = mealAt(settings.meals, new Date(atMs), config.timezone);
   if (!slot) {
-    const open = settings.meals.filter((m) => m.enabled).map(mealWindowText).join('，');
+    const open = settings.meals
+      .filter((m) => m.enabled)
+      .map(mealWindowText)
+      .join('，');
     throw unprocessable('NOT_MEAL_TIME', `现在不是开饭时间（${open || '还没设开饭时间'}）`);
   }
 
@@ -136,13 +128,7 @@ const VoidInput = z.object({ reason: z.string('请写撤销原因').trim().min(1
 /**
  * 撤销一笔（只做标记、不删，K9）：负责人只能撤销自己当天（门店日期）登记的；管理员随时可以。已经撤销过的原样返回。
  */
-export async function voidCheckin(
-  sql: Sql,
-  id: number,
-  raw: unknown,
-  by: { employee: CanteenSessionEmployee } | { staffId: number },
-  timeZone: string,
-): Promise<CanteenCheckinRow> {
+export async function voidCheckin(sql: Sql, id: number, raw: unknown, by: { employee: CanteenSessionEmployee } | { staffId: number }, timeZone: string): Promise<CanteenCheckinRow> {
   const { reason } = parse(VoidInput, raw);
   return sql.begin(async (tx) => {
     await setTxTimeouts(tx);
@@ -185,8 +171,12 @@ export async function searchPeople(db: Db, config: AppConfig, rawQ: unknown, now
   const like = `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
   return db<CanteenPerson[]>`
     SELECT e.id, e.emp_no, e.name, coalesce(d.name, '') AS department, e.avatar,
-           ${slot ? db`EXISTS (SELECT 1 FROM canteen_checkins c WHERE c.employee_id = e.id AND c.meal_date = ${slot.date}
-                                AND c.meal = ${slot.meal} AND c.voided_at IS NULL)` : db`false`} AS checked_in
+           ${
+             slot
+               ? db`EXISTS (SELECT 1 FROM canteen_checkins c WHERE c.employee_id = e.id AND c.meal_date = ${slot.date}
+                                AND c.meal = ${slot.meal} AND c.voided_at IS NULL)`
+               : db`false`
+           } AS checked_in
     FROM canteen_employees e LEFT JOIN departments d ON d.id = e.department_id
     WHERE e.active AND (${q} = '' OR e.emp_no ILIKE ${like} OR e.name ILIKE ${like})
     ORDER BY e.emp_no LIMIT 30`;
@@ -249,8 +239,7 @@ export async function countCheckins(db: Db, raw: unknown): Promise<{ total: numb
 
 /** 导出用的表格行（第一行是表头） */
 export function checkinCsvRows(rows: CanteenCheckinRow[], timeZone: string): (string | number)[][] {
-  const time = (iso: string) =>
-    new Intl.DateTimeFormat('zh-CN', { timeZone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+  const time = (iso: string) => new Intl.DateTimeFormat('zh-CN', { timeZone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
   return [
     ['日期', '餐次', '工号', '姓名', '部门', '方式', '扫到的时间', '登记人', '备注', '状态', '撤销原因'],
     ...rows.map((r) => [
@@ -281,4 +270,3 @@ export async function dailyCounts(db: Db, from: string, to: string): Promise<{ d
   }
   return out;
 }
-

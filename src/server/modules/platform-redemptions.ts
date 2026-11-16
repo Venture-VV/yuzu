@@ -32,10 +32,7 @@ export async function redemptionOfCode(db: Db, platform: CouponPlatform, code: s
   return r?.redemptionNo ?? null;
 }
 
-const CodeInput = z
-  .string('请填写完整券码')
-  .transform(normalizeCouponCode)
-  .pipe(z.string().regex(COUPON_CODE_PATTERN, '请填写完整券码（6–64 位数字或字母）'));
+const CodeInput = z.string('请填写完整券码').transform(normalizeCouponCode).pipe(z.string().regex(COUPON_CODE_PATTERN, '请填写完整券码（6–64 位数字或字母）'));
 
 // ───────────────────────── 补登记 ─────────────────────────
 
@@ -146,7 +143,15 @@ export async function voidRedemption(deps: Deps, id: number, raw: unknown, ctx: 
     if (!r) throw notFound('补登记不存在');
     if (r.status !== 'active') throw conflict('ALREADY_VOIDED', `补登记 ${r.redemptionNo} 已作废`);
     await tx`UPDATE platform_redemptions SET status = 'voided', voided_by = ${ctx.actor.id}, voided_at = ${ctx.at ?? new Date()}, void_reason = ${reason} WHERE id = ${id}`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'platform_redemption_void', targetType: 'platform_redemption', targetId: id, detail: { docNo: r.redemptionNo, reason }, ip: ctx.ip, businessDate: r.businessDate });
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'platform_redemption_void',
+      targetType: 'platform_redemption',
+      targetId: id,
+      detail: { docNo: r.redemptionNo, reason },
+      ip: ctx.ip,
+      businessDate: r.businessDate,
+    });
   });
   return getRedemption(deps.sql, id);
 }
@@ -308,4 +313,3 @@ export function registerPlatformRoutes(app: FastifyInstance, deps: Deps) {
     return voidSettlement(deps, id, req.body, ctxOf(req));
   });
 }
-

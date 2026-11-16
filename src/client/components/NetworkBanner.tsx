@@ -45,14 +45,24 @@ export function NetworkBanner({ path, openNetwork }: { path: string; openNetwork
     const since = conn.downSince ? hhmm(conn.downSince) : null;
     if (compact) {
       return (
-        <div role="status" data-testid="network-banner" data-state="offline" className="fixed right-3 bottom-3 z-[80] flex items-center gap-2 rounded-full bg-clay px-3.5 py-2 text-[13px] font-bold text-paper shadow-pop print:hidden">
+        <div
+          role="status"
+          data-testid="network-banner"
+          data-state="offline"
+          className="fixed right-3 bottom-3 z-[80] flex items-center gap-2 rounded-full bg-clay px-3.5 py-2 text-[13px] font-bold text-paper shadow-pop print:hidden"
+        >
           <WifiOff className="size-4" />
           网络断了，正在重新连接
         </div>
       );
     }
     return (
-      <div role="alert" data-testid="network-banner" data-state="offline" className="fixed top-2 left-1/2 z-[80] w-max max-w-[min(94vw,760px)] -translate-x-1/2 animate-notice-in rounded-lg bg-clay px-4 py-2.5 text-paper shadow-pop print:hidden">
+      <div
+        role="alert"
+        data-testid="network-banner"
+        data-state="offline"
+        className="fixed top-2 left-1/2 z-[80] w-max max-w-[min(94vw,760px)] -translate-x-1/2 animate-notice-in rounded-lg bg-clay px-4 py-2.5 text-paper shadow-pop print:hidden"
+      >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <WifiOff className="size-4 shrink-0" />
           <span className="text-[14px] font-bold">连不上服务器（网络断了或很慢），正在重新连接…</span>
@@ -70,16 +80,22 @@ export function NetworkBanner({ path, openNetwork }: { path: string; openNetwork
             网络与同步
           </button>
         </div>
-        <p className="mt-1 text-[12.5px] opacity-90">
-          {since ? `页面上的数据截至 ${since}。` : ''}现在提交不会发出去，填的内容还在；恢复以后页面会自己刷新。
-        </p>
+        <p className="mt-1 text-[12.5px] opacity-90">{since ? `页面上的数据截至 ${since}。` : ''}现在提交不会发出去，填的内容还在；恢复以后页面会自己刷新。</p>
       </div>
     );
   }
 
   if (recovered) {
     return (
-      <div role="status" data-testid="network-banner" data-state="recovered" className={cn('fixed z-[80] flex animate-notice-in items-center gap-2 rounded-full bg-pine px-4 py-2 text-[13.5px] font-bold text-paper shadow-pop print:hidden', compact ? 'right-3 bottom-3' : 'top-2 left-1/2 -translate-x-1/2')}>
+      <div
+        role="status"
+        data-testid="network-banner"
+        data-state="recovered"
+        className={cn(
+          'fixed z-[80] flex animate-notice-in items-center gap-2 rounded-full bg-pine px-4 py-2 text-[13.5px] font-bold text-paper shadow-pop print:hidden',
+          compact ? 'right-3 bottom-3' : 'top-2 left-1/2 -translate-x-1/2',
+        )}
+      >
         <CircleCheck className="size-4" />
         网络恢复了，页面数据已刷新
       </div>
@@ -88,10 +104,20 @@ export function NetworkBanner({ path, openNetwork }: { path: string; openNetwork
 
   if (conn.updated && !snoozedUpdate && !compact) {
     return (
-      <div role="status" data-testid="network-banner" data-state="updated" className="fixed top-2 left-1/2 z-[80] flex w-max max-w-[min(94vw,760px)] -translate-x-1/2 animate-notice-in flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-ink px-4 py-2.5 text-paper shadow-pop print:hidden">
+      <div
+        role="status"
+        data-testid="network-banner"
+        data-state="updated"
+        className="fixed top-2 left-1/2 z-[80] flex w-max max-w-[min(94vw,760px)] -translate-x-1/2 animate-notice-in flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-ink px-4 py-2.5 text-paper shadow-pop print:hidden"
+      >
         <Sparkles className="size-4 shrink-0 text-yuzu" />
         <span className="text-[13.5px] font-bold">系统已更新{conn.server ? `到 ${conn.server.version}` : ''}，方便时点「刷新」换成新版（没提交的内容先提交）</span>
-        <button type="button" onClick={() => window.location.reload()} data-testid="network-reload" className="flex h-7 items-center rounded-full bg-yuzu px-3 text-[12.5px] font-bold text-ink hover:bg-yuzu-hover">
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          data-testid="network-reload"
+          className="flex h-7 items-center rounded-full bg-yuzu px-3 text-[12.5px] font-bold text-ink hover:bg-yuzu-hover"
+        >
           刷新
         </button>
         <button type="button" onClick={() => setSnoozedUpdate(true)} className="h-7 rounded-full px-2 text-[12.5px] font-semibold text-paper/75 hover:text-paper">

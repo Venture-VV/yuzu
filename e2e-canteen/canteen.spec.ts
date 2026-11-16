@@ -61,7 +61,10 @@ async function hardCodeImage(browser: Browser, path: string) {
   const text = 'YZC1:H:ZMBGD:ZSV7GIBF';
   const s = qrShape(text);
   const eyes = s.eyes
-    .map((e) => `<rect x="${e.x + 0.5}" y="${e.y + 0.5}" width="6" height="6" rx="1.8" fill="none" stroke="#24493A" stroke-width="1"/><rect x="${e.x + 2}" y="${e.y + 2}" width="3" height="3" rx="0.9" fill="#24493A"/>`)
+    .map(
+      (e) =>
+        `<rect x="${e.x + 0.5}" y="${e.y + 0.5}" width="6" height="6" rx="1.8" fill="none" stroke="#24493A" stroke-width="1"/><rect x="${e.x + 2}" y="${e.y + 2}" width="3" height="3" rx="0.9" fill="#24493A"/>`,
+    )
     .join('');
   const svg = `<svg viewBox="-2 -2 ${s.size + 4} ${s.size + 4}" style="display:block;width:100%;aspect-ratio:1/1" shape-rendering="geometricPrecision"><rect x="-2" y="-2" width="${s.size + 4}" height="${s.size + 4}" fill="#fff" rx="2.5"/><path d="${s.modules}" fill="#3B2F2A"/>${eyes}</svg>`;
   const ctx = await browser.newContext({ viewport: { width: 390, height: 800 }, deviceScaleFactor: 3 });
@@ -477,7 +480,10 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
     // 用餐记录默认列最近两天（过了零点还在开的那一餐记在前一天）
     await admin.getByRole('radio', { name: '用餐记录' }).click();
     await expect(admin.getByText('有效 3 条')).toBeVisible();
-    await admin.getByRole('row', { name: /王师傅/ }).getByRole('button', { name: '撤销' }).click();
+    await admin
+      .getByRole('row', { name: /王师傅/ })
+      .getByRole('button', { name: '撤销' })
+      .click();
     await admin.getByRole('dialog').getByRole('textbox').fill('后台核对：登记错了');
     await admin.getByRole('dialog').getByRole('button', { name: '撤销' }).click();
     await expect(admin.getByText('有效 2 条')).toBeVisible();
@@ -630,9 +636,7 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
       await p.getByLabel('再输一遍密码').fill('fang-2026');
       await p.getByRole('button', { name: /开吃/ }).click();
       await expect(p.getByTestId('tab-home')).toBeVisible();
-      await expect
-        .poll(async () => ((await (await admin.request.get('/api/erp/canteen/reminders')).json()).recipients as { name: string }[]).map((r) => r.name))
-        .toEqual(['小芳']);
+      await expect.poll(async () => ((await (await admin.request.get('/api/erp/canteen/reminders')).json()).recipients as { name: string }[]).map((r) => r.name)).toEqual(['小芳']);
       await ctx.close();
 
       // 后台「饭点提醒」：看得到小芳开着；改午餐的标题和第一句，存好，刷新以后还在
@@ -689,7 +693,10 @@ test.describe.serial('员工食堂 · 柚子饭堂', () => {
           const ok = await expect
             .poll(shown, { timeout: 5_000 })
             .not.toEqual([])
-            .then(() => true, () => false);
+            .then(
+              () => true,
+              () => false,
+            );
           if (ok) break;
         }
         await expect.poll(shown).toEqual([{ title: msg.title, body: msg.body, tag: 'test-lunch', url: '/#/code' }]);
@@ -1004,7 +1011,6 @@ test.describe.serial('第二期：开场动画、新同事登记、新手教程�
     await expect(intro).toHaveCount(0);
     await ctx.close();
   });
-
 });
 
 async function currentSlot(ctx: BrowserContext): Promise<{ meal: string; date: string }> {

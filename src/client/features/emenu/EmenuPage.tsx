@@ -209,7 +209,13 @@ export function EmenuPage() {
     const a = anchor.current;
     if (!a || flat.length === 0) return;
     const same = flat.findIndex((f) => f.category.id === a.categoryId && f.pageNo === a.pageNo);
-    const next = same >= 0 ? same : Math.max(0, flat.findIndex((f) => f.category.id === a.categoryId));
+    const next =
+      same >= 0
+        ? same
+        : Math.max(
+            0,
+            flat.findIndex((f) => f.category.id === a.categoryId),
+          );
     if (next !== index || (strip.current && strip.current.page() !== next)) goTo(next, 'jump');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flat]);
@@ -263,12 +269,16 @@ export function EmenuPage() {
   );
   const total = rows.reduce((s, r) => s + r.price * r.quantity, 0);
   const count = cart.reduce((s, l) => s + l.quantity, 0);
-  const cartProblem = rows.length === 0 ? m.cartEmpty : (rows.find((r) => r.problem) ? m.cartHasBlocked : null);
+  const cartProblem = rows.length === 0 ? m.cartEmpty : rows.find((r) => r.problem) ? m.cartHasBlocked : null;
   // 页面上显示的备注（切到英文时选项显示英文）；送进厨房的仍是中文选项，由门店系统按交上去的选项拼
   const optionsEn = menu?.rules.optionsEn ?? {};
   // 下单要不要服务员输点单密码（后台设置，8.0.15 起默认不要）；菜单还没取到时按不要
   const requirePin = menu?.rules.requirePin ?? false;
-  const remarkText = [...remark.avoid.map((o) => optionLabel(o, shown, optionsEn)), ...(remark.serve ? [optionLabel(remark.serve, shown, optionsEn)] : []), ...(remark.custom.trim() ? [remark.custom.trim()] : [])].join(shown === 'en' ? ', ' : '，');
+  const remarkText = [
+    ...remark.avoid.map((o) => optionLabel(o, shown, optionsEn)),
+    ...(remark.serve ? [optionLabel(remark.serve, shown, optionsEn)] : []),
+    ...(remark.custom.trim() ? [remark.custom.trim()] : []),
+  ].join(shown === 'en' ? ', ' : '，');
 
   const addSpec = useCallback(
     (dish: EmenuDishView, spec: EmenuSpecView, open: boolean, from?: Element) => {
@@ -282,7 +292,9 @@ export function EmenuPage() {
       if (want > 99) return say(m.maxPerDish);
       if (spec.remaining !== null && want > spec.remaining) return say(m.onlyLeft(name, spec.remaining));
       if (!cur && cart.length >= EMENU_MAX_LINES) return say(m.maxLines);
-      setCart((c) => (c.some((l) => l.itemId === spec.itemId) ? c.map((l) => (l.itemId === spec.itemId ? { ...l, quantity: l.quantity + 1 } : l)) : [...c, { itemId: spec.itemId, dishId: dish.id, quantity: 1 }]));
+      setCart((c) =>
+        c.some((l) => l.itemId === spec.itemId) ? c.map((l) => (l.itemId === spec.itemId ? { ...l, quantity: l.quantity + 1 } : l)) : [...c, { itemId: spec.itemId, dishId: dish.id, quantity: 1 }],
+      );
       setBump((n) => n + 1);
       // 一个小圆点从加号飞向右上角的订单图标
       if (from) flyToOrder(from);
@@ -433,7 +445,11 @@ export function EmenuPage() {
     if (!pending) return;
     opBegin();
     try {
-      settle(pending.key, await api.get<EmenuOpLookup>(`/api/emenu/orders/by-key/${pending.key}`), `暂时没有查到已经下单，原来的请求可能还在路上。可以${requirePin ? '输点单密码' : ''}重新提交（不会重复），或者作废后重填。`);
+      settle(
+        pending.key,
+        await api.get<EmenuOpLookup>(`/api/emenu/orders/by-key/${pending.key}`),
+        `暂时没有查到已经下单，原来的请求可能还在路上。可以${requirePin ? '输点单密码' : ''}重新提交（不会重复），或者作废后重填。`,
+      );
     } catch (error) {
       setOpNote({ error: `还是确认不了：${errorMessage(error)}` });
     } finally {
@@ -474,7 +490,11 @@ export function EmenuPage() {
             <>
               连不上门店系统
               <br />
-              <button type="button" onClick={() => void menuQ.refetch()} style={{ marginTop: 14, height: 28, padding: '0 22px', border: '0.5px solid var(--em-mute)', background: 'transparent', fontSize: 14, color: 'var(--em-ink)' }}>
+              <button
+                type="button"
+                onClick={() => void menuQ.refetch()}
+                style={{ marginTop: 14, height: 28, padding: '0 22px', border: '0.5px solid var(--em-mute)', background: 'transparent', fontSize: 14, color: 'var(--em-ink)' }}
+              >
                 再试一次
               </button>
             </>
@@ -527,7 +547,14 @@ export function EmenuPage() {
     if (overlay?.kind !== 'detail') return null;
     const category = categories.find((c) => c.id === overlay.categoryId);
     if (!category) return null;
-    const dishes = [...new Map(category.pages.flatMap((p) => p.dishes).filter((d): d is EmenuDishView => !!d).map((d) => [d.id, d])).values()];
+    const dishes = [
+      ...new Map(
+        category.pages
+          .flatMap((p) => p.dishes)
+          .filter((d): d is EmenuDishView => !!d)
+          .map((d) => [d.id, d]),
+      ).values(),
+    ];
     const i = dishes.findIndex((d) => d.id === overlay.dishId);
     if (i < 0) return null;
     const move = (to: number) => () => {
@@ -563,284 +590,284 @@ export function EmenuPage() {
   return (
     <Stage testId="emenu" motion={menu.rules.motion} lang={shown} big={menu.rules.textSize !== 'design'} vars={layout.vars}>
       <LangProvider value={shown}>
-      {/* 卡片模板（8.1.2）：菜单页 11 种版式里每一块的位置照版面里设计师改过的 */}
-      <EmenuTemplatesProvider templates={layout.doc.templates} dishStates={layout.doc.dishStates}>
-      {inMenu ? (
-        // 菜单页的几块（UI 工作台的版面，8.1.1）：菜单页、顶栏（菜品详情在顶栏下面打开）、翻页圆点，以及设计师加的装饰
-        <StudioNodes
-          nodes={layout.doc.screens.menu?.nodes ?? []}
-          ctx={{
-            surface: EMENU_SURFACE,
-            lang: shown,
-            assetUrl: studioAssetUrl,
-            components: layout.doc.components,
-            blocks: {
-              'menu.pages': () =>
-                flat.length === 0 ? (
-                  <NoMenu menu={menu} />
-                ) : (
-                  <div key={session.visitId} className="em-page-in" style={{ ...box(0, 0, 1024, 768) }}>
-                    <MenuStrip
-                      ref={strip}
-                      count={flat.length}
-                      index={Math.min(index, flat.length - 1)}
-                      onIndex={setIndex}
-                      pageKey={(i) => `${flat[i]!.category.id}-${flat[i]!.pageNo}`}
-                      renderPage={(i) => <PageCanvas page={flat[i]!.page} ctx={pageCtx(flat[i]!)} />}
-                    />
-                  </div>
-                ),
-              'menu.header': () => (
-                <>
-                  {detail && (
-                    <DishDetail
-                      dish={detail.dish}
-                      open={detail.category.open}
-                      origin={detail.origin}
-                      onClose={() => setOverlay(null)}
-                      onPrev={detail.prev}
-                      onNext={detail.next}
-                      onAdd={(spec, from) => addSpec(detail.dish, spec, detail.category.open, from)}
-                    />
-                  )}
-                  <Header
-                    categories={categories}
-                    activeId={detail?.category.id ?? at?.category.id ?? null}
-                    onCategory={(id) => {
-                      setOverlay(null);
-                      const i = flat.findIndex((f) => f.category.id === id);
-                      // 直接到那个分类的第一页（不横向滚过中间的页），那一页轻微放大缓入
-                      if (i >= 0) goTo(i, 'zoom');
-                    }}
-                    tagCode={session.tagCode}
-                    count={count}
-                    bump={bump}
-                    pending={!!pending}
-                    onSearch={() => setOverlay({ kind: 'search' })}
-                    onOrder={() => setOverlay(pending ? { kind: 'pending' } : { kind: 'drawer', tab: 'cart' })}
-                    onTag={() => setOverlay({ kind: 'end' })}
-                    onLang={langOn ? toggleLang : undefined}
-                  />
-                </>
-              ),
-              'menu.dots': (n) => (!detail && at ? <PageDots flat={flat} index={index} onGo={goTo} width={n.w} /> : null),
-              'brand.logo': (n) => <LogoBlock node={n} tone="var(--em-ink)" />,
-              'brand.logoRow': (n) => <LogoRowBlock node={n} tone="var(--em-ink)" />,
-            },
-          }}
-        />
-      ) : (
-        <StartPage
-          menu={menu}
-          doc={layout.doc}
-          version={layout.version}
-          asking={phase === 'input'}
-          pending={!!pending}
-          onStart={() => setPhase('input')}
-          onCancel={() => setPhase('start')}
-          onReady={(s, g) => {
-            qc.setQueryData(guestKey(s.visitId), g);
-            setSession(s);
-            setCart([]);
-            setRemark(EMPTY_REMARK);
-            setIndex(0);
-            setPhase('menu');
-            lastTouch.current = Date.now();
-          }}
-          onExit={() => setOverlay({ kind: 'exit' })}
-          onLang={langOn ? toggleLang : undefined}
-        />
-      )}
+        {/* 卡片模板（8.1.2）：菜单页 11 种版式里每一块的位置照版面里设计师改过的 */}
+        <EmenuTemplatesProvider templates={layout.doc.templates} dishStates={layout.doc.dishStates}>
+          {inMenu ? (
+            // 菜单页的几块（UI 工作台的版面，8.1.1）：菜单页、顶栏（菜品详情在顶栏下面打开）、翻页圆点，以及设计师加的装饰
+            <StudioNodes
+              nodes={layout.doc.screens.menu?.nodes ?? []}
+              ctx={{
+                surface: EMENU_SURFACE,
+                lang: shown,
+                assetUrl: studioAssetUrl,
+                components: layout.doc.components,
+                blocks: {
+                  'menu.pages': () =>
+                    flat.length === 0 ? (
+                      <NoMenu menu={menu} />
+                    ) : (
+                      <div key={session.visitId} className="em-page-in" style={{ ...box(0, 0, 1024, 768) }}>
+                        <MenuStrip
+                          ref={strip}
+                          count={flat.length}
+                          index={Math.min(index, flat.length - 1)}
+                          onIndex={setIndex}
+                          pageKey={(i) => `${flat[i]!.category.id}-${flat[i]!.pageNo}`}
+                          renderPage={(i) => <PageCanvas page={flat[i]!.page} ctx={pageCtx(flat[i]!)} />}
+                        />
+                      </div>
+                    ),
+                  'menu.header': () => (
+                    <>
+                      {detail && (
+                        <DishDetail
+                          dish={detail.dish}
+                          open={detail.category.open}
+                          origin={detail.origin}
+                          onClose={() => setOverlay(null)}
+                          onPrev={detail.prev}
+                          onNext={detail.next}
+                          onAdd={(spec, from) => addSpec(detail.dish, spec, detail.category.open, from)}
+                        />
+                      )}
+                      <Header
+                        categories={categories}
+                        activeId={detail?.category.id ?? at?.category.id ?? null}
+                        onCategory={(id) => {
+                          setOverlay(null);
+                          const i = flat.findIndex((f) => f.category.id === id);
+                          // 直接到那个分类的第一页（不横向滚过中间的页），那一页轻微放大缓入
+                          if (i >= 0) goTo(i, 'zoom');
+                        }}
+                        tagCode={session.tagCode}
+                        count={count}
+                        bump={bump}
+                        pending={!!pending}
+                        onSearch={() => setOverlay({ kind: 'search' })}
+                        onOrder={() => setOverlay(pending ? { kind: 'pending' } : { kind: 'drawer', tab: 'cart' })}
+                        onTag={() => setOverlay({ kind: 'end' })}
+                        onLang={langOn ? toggleLang : undefined}
+                      />
+                    </>
+                  ),
+                  'menu.dots': (n) => (!detail && at ? <PageDots flat={flat} index={index} onGo={goTo} width={n.w} /> : null),
+                  'brand.logo': (n) => <LogoBlock node={n} tone="var(--em-ink)" />,
+                  'brand.logoRow': (n) => <LogoRowBlock node={n} tone="var(--em-ink)" />,
+                },
+              }}
+            />
+          ) : (
+            <StartPage
+              menu={menu}
+              doc={layout.doc}
+              version={layout.version}
+              asking={phase === 'input'}
+              pending={!!pending}
+              onStart={() => setPhase('input')}
+              onCancel={() => setPhase('start')}
+              onReady={(s, g) => {
+                qc.setQueryData(guestKey(s.visitId), g);
+                setSession(s);
+                setCart([]);
+                setRemark(EMPTY_REMARK);
+                setIndex(0);
+                setPhase('menu');
+                lastTouch.current = Date.now();
+              }}
+              onExit={() => setOverlay({ kind: 'exit' })}
+              onLang={langOn ? toggleLang : undefined}
+            />
+          )}
 
-      {inMenu && overlay?.kind === 'search' && (
-        <SearchOverlay
-          hits={searchHits}
-          onClose={() => setOverlay(null)}
-          onPick={(hit) => {
-            setOverlay(null);
-            goTo(hit.pageIndex, 'zoom');
-            setFlashId(hit.dish.id);
-            window.setTimeout(() => setFlashId((id) => (id === hit.dish.id ? null : id)), 2400);
-          }}
-        />
-      )}
-      {inMenu && overlay?.kind === 'drawer' && (
-        <OrderDrawer
-          tab={overlay.tab}
-          swap={swap}
-          onTab={(tab) => setOverlay({ kind: 'drawer', tab })}
-          rows={rows}
-          total={total}
-          guest={guest}
-          guestLoading={guestQ.isFetching}
-          tableName={session.tableName}
-          remarkText={remarkText}
-          locked={!!pending}
-          problem={cartProblem}
-          callStaff={requirePin}
-          onQuantity={setQuantity}
-          onRemark={() => setOverlay({ kind: 'remark' })}
-          onSubmit={() => {
-            // 工作台的预览（预览码打开的草稿）：不能下单
-            if (layout.preview) {
-              say('这是工作台的预览：不能下单');
-              return;
-            }
-            setOpNote(null);
-            // 记下客人这时看到的合计：输密码的这段时间菜单又取了一次、价格变了的话，门店系统按这个数拒绝（PRICE_CHANGED），不会按没看过的价格下单
-            setOverlay({ kind: 'confirm', total });
-          }}
-          onClose={() => setOverlay(null)}
-        />
-      )}
-      {inMenu && overlay?.kind === 'remark' && (
-        <RemarkDrawer
-          remark={remark}
-          avoidOptions={menu.rules.avoidOptions}
-          serveOptions={menu.rules.serveOptions}
-          optionsEn={optionsEn}
-          swap={swap}
-          tableName={session.tableName}
-          onChange={setRemark}
-          onDone={() => setOverlay({ kind: 'drawer', tab: 'cart' })}
-        />
-      )}
-      {inMenu && overlay?.kind === 'confirm' && (
-        <ConfirmOrder
-          session={session}
-          requirePin={requirePin}
-          busy={opBusy}
-          note={opNote}
-          onCancel={() => {
-            setOpNote(null);
-            setOverlay({ kind: 'drawer', tab: 'cart' });
-          }}
-          onResolved={(next) => setSession(next)}
-          onSubmit={async (next, pin) => {
-            // 还有一单结果待确认（正在发的也算）：不发新的
-            if (pending) {
-              setOverlay({ kind: 'pending' });
-              return;
-            }
-            const body: EmenuOrderBody = {
-              clientKey: uuid(),
-              visitId: next.visitId,
-              tagCode: next.tagCode,
-              tableName: next.tableName,
-              guests: next.guests,
-              lines: cart.map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
-              avoid: remark.avoid,
-              serve: remark.serve,
-              customNote: remark.custom.trim(),
-              expectedTotal: overlay.total,
-            };
-            const result = await send({ key: body.clientKey, body, quantity: count, createdAt: new Date().toISOString() }, pin, false);
-            if (result.outcome === 'uncertain') setOverlay({ kind: 'pending' });
-            // 价格、估清、时段刚变过的：马上取一次最新的菜单
-            if (result.outcome === 'rejected') void qc.invalidateQueries({ queryKey: MENU_KEY });
-          }}
-        />
-      )}
-      {overlay?.kind === 'pending' && pending && (
-        <PendingOrderModal
-          pending={pending}
-          requirePin={requirePin}
-          busy={opBusy}
-          note={opNote}
-          onClose={() => {
-            setOpNote(null);
-            setOverlay(null);
-          }}
-          onCheck={() => void checkPending()}
-          onRetry={(pin) =>
-            void send(pending, pin, true).then((r) => {
-              // 重新提交被明确拒绝：待确认的记录已经没有了（弹窗跟着关），要告诉服务员这一单没有下成、为什么
-              if (r.outcome === 'rejected') {
-                void qc.invalidateQueries({ queryKey: MENU_KEY });
-                setOverlay({ kind: 'notice', text: `这一单没有下成：${r.message ?? '门店系统拒绝了'}。菜还在「未下单」里，可以改了再下单。` });
+          {inMenu && overlay?.kind === 'search' && (
+            <SearchOverlay
+              hits={searchHits}
+              onClose={() => setOverlay(null)}
+              onPick={(hit) => {
+                setOverlay(null);
+                goTo(hit.pageIndex, 'zoom');
+                setFlashId(hit.dish.id);
+                window.setTimeout(() => setFlashId((id) => (id === hit.dish.id ? null : id)), 2400);
+              }}
+            />
+          )}
+          {inMenu && overlay?.kind === 'drawer' && (
+            <OrderDrawer
+              tab={overlay.tab}
+              swap={swap}
+              onTab={(tab) => setOverlay({ kind: 'drawer', tab })}
+              rows={rows}
+              total={total}
+              guest={guest}
+              guestLoading={guestQ.isFetching}
+              tableName={session.tableName}
+              remarkText={remarkText}
+              locked={!!pending}
+              problem={cartProblem}
+              callStaff={requirePin}
+              onQuantity={setQuantity}
+              onRemark={() => setOverlay({ kind: 'remark' })}
+              onSubmit={() => {
+                // 工作台的预览（预览码打开的草稿）：不能下单
+                if (layout.preview) {
+                  say('这是工作台的预览：不能下单');
+                  return;
+                }
+                setOpNote(null);
+                // 记下客人这时看到的合计：输密码的这段时间菜单又取了一次、价格变了的话，门店系统按这个数拒绝（PRICE_CHANGED），不会按没看过的价格下单
+                setOverlay({ kind: 'confirm', total });
+              }}
+              onClose={() => setOverlay(null)}
+            />
+          )}
+          {inMenu && overlay?.kind === 'remark' && (
+            <RemarkDrawer
+              remark={remark}
+              avoidOptions={menu.rules.avoidOptions}
+              serveOptions={menu.rules.serveOptions}
+              optionsEn={optionsEn}
+              swap={swap}
+              tableName={session.tableName}
+              onChange={setRemark}
+              onDone={() => setOverlay({ kind: 'drawer', tab: 'cart' })}
+            />
+          )}
+          {inMenu && overlay?.kind === 'confirm' && (
+            <ConfirmOrder
+              session={session}
+              requirePin={requirePin}
+              busy={opBusy}
+              note={opNote}
+              onCancel={() => {
+                setOpNote(null);
+                setOverlay({ kind: 'drawer', tab: 'cart' });
+              }}
+              onResolved={(next) => setSession(next)}
+              onSubmit={async (next, pin) => {
+                // 还有一单结果待确认（正在发的也算）：不发新的
+                if (pending) {
+                  setOverlay({ kind: 'pending' });
+                  return;
+                }
+                const body: EmenuOrderBody = {
+                  clientKey: uuid(),
+                  visitId: next.visitId,
+                  tagCode: next.tagCode,
+                  tableName: next.tableName,
+                  guests: next.guests,
+                  lines: cart.map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
+                  avoid: remark.avoid,
+                  serve: remark.serve,
+                  customNote: remark.custom.trim(),
+                  expectedTotal: overlay.total,
+                };
+                const result = await send({ key: body.clientKey, body, quantity: count, createdAt: new Date().toISOString() }, pin, false);
+                if (result.outcome === 'uncertain') setOverlay({ kind: 'pending' });
+                // 价格、估清、时段刚变过的：马上取一次最新的菜单
+                if (result.outcome === 'rejected') void qc.invalidateQueries({ queryKey: MENU_KEY });
+              }}
+            />
+          )}
+          {overlay?.kind === 'pending' && pending && (
+            <PendingOrderModal
+              pending={pending}
+              requirePin={requirePin}
+              busy={opBusy}
+              note={opNote}
+              onClose={() => {
+                setOpNote(null);
+                setOverlay(null);
+              }}
+              onCheck={() => void checkPending()}
+              onRetry={(pin) =>
+                void send(pending, pin, true).then((r) => {
+                  // 重新提交被明确拒绝：待确认的记录已经没有了（弹窗跟着关），要告诉服务员这一单没有下成、为什么
+                  if (r.outcome === 'rejected') {
+                    void qc.invalidateQueries({ queryKey: MENU_KEY });
+                    setOverlay({ kind: 'notice', text: `这一单没有下成：${r.message ?? '门店系统拒绝了'}。菜还在「未下单」里，可以改了再下单。` });
+                  }
+                })
               }
-            })
-          }
-          onAbandon={(pin) => void abandonPending(pin)}
-        />
-      )}
-      {/* 下单成功提示 2 秒（点一下马上关）之后回到起始页：手牌、桌号、人数、备注都清掉，下一位客人不用服务员先退出（需求 7）。
+              onAbandon={(pin) => void abandonPending(pin)}
+            />
+          )}
+          {/* 下单成功提示 2 秒（点一下马上关）之后回到起始页：手牌、桌号、人数、备注都清掉，下一位客人不用服务员先退出（需求 7）。
           下单没成（断网、超时、密码不对、被拒绝）不走这里：留在原页，菜还在 */}
-      {overlay?.kind === 'success' && <SuccessModal onDone={reset} />}
-      {overlay?.kind === 'notice' && (
-        <SmallDialog
-          title="没有下成"
-          subtitle="ORDER NOT PLACED"
-          testId="emenu-notice"
-          actions={
-            <ModalButton x={110} y={196} w={140} primary onClick={() => setOverlay(session ? { kind: 'drawer', tab: 'cart' } : null)} testId="emenu-notice-ok">
-              知道了
-            </ModalButton>
-          }
-        >
-          {overlay.text}
-        </SmallDialog>
-      )}
-      {overlay?.kind === 'end' && session && (
-        <SmallDialog
-          title="结束点餐"
-          subtitle="FINISH ORDERING"
-          onClose={() => setOverlay(null)}
-          testId="emenu-end"
-          actions={
-            <>
-              <ModalButton x={28} y={196} w={140} onClick={() => setOverlay(null)} testId="emenu-end-cancel">
-                {m.keepOrdering}
-              </ModalButton>
-              <ModalButton x={192} y={196} w={140} primary onClick={reset} testId="emenu-end-ok">
-                {m.finish}
-              </ModalButton>
-            </>
-          }
-        >
-          <span className={shown === 'en' ? 'em-en' : undefined}>
-            {m.endBody(session.tagCode)[0]}
-            <span className="em-en">{session.tagCode}</span>
-            {m.endBody(session.tagCode)[2]}
-            <br />
-            {count > 0 ? m.endCart(count) : m.endNoCart}
-          </span>
-        </SmallDialog>
-      )}
-      {overlay?.kind === 'exit' && (
-        <SmallDialog
-          title="退出登录"
-          subtitle="STAFF ONLY"
-          onClose={() => setOverlay(null)}
-          testId="emenu-exit"
-          actions={
-            <>
-              <ModalButton x={28} y={196} w={140} onClick={() => setOverlay(null)} testId="emenu-exit-cancel">
-                取消
-              </ModalButton>
-              <ModalButton
-                x={192}
-                y={196}
-                w={140}
-                primary
-                onClick={() => {
-                  void api.post('/api/auth/logout').finally(() => window.location.assign('/login'));
-                }}
-                testId="emenu-exit-ok"
-              >
-                退出
-              </ModalButton>
-            </>
-          }
-        >
-          这一步是给员工用的：退出这台平板登录的账号。
-          <br />
-          退出以后要重新登录才能点餐。
-        </SmallDialog>
-      )}
-      <StudioPreviewBand preview={layout.preview} error={layout.previewError} />
-      <Toast text={toast} />
-      </EmenuTemplatesProvider>
+          {overlay?.kind === 'success' && <SuccessModal onDone={reset} />}
+          {overlay?.kind === 'notice' && (
+            <SmallDialog
+              title="没有下成"
+              subtitle="ORDER NOT PLACED"
+              testId="emenu-notice"
+              actions={
+                <ModalButton x={110} y={196} w={140} primary onClick={() => setOverlay(session ? { kind: 'drawer', tab: 'cart' } : null)} testId="emenu-notice-ok">
+                  知道了
+                </ModalButton>
+              }
+            >
+              {overlay.text}
+            </SmallDialog>
+          )}
+          {overlay?.kind === 'end' && session && (
+            <SmallDialog
+              title="结束点餐"
+              subtitle="FINISH ORDERING"
+              onClose={() => setOverlay(null)}
+              testId="emenu-end"
+              actions={
+                <>
+                  <ModalButton x={28} y={196} w={140} onClick={() => setOverlay(null)} testId="emenu-end-cancel">
+                    {m.keepOrdering}
+                  </ModalButton>
+                  <ModalButton x={192} y={196} w={140} primary onClick={reset} testId="emenu-end-ok">
+                    {m.finish}
+                  </ModalButton>
+                </>
+              }
+            >
+              <span className={shown === 'en' ? 'em-en' : undefined}>
+                {m.endBody(session.tagCode)[0]}
+                <span className="em-en">{session.tagCode}</span>
+                {m.endBody(session.tagCode)[2]}
+                <br />
+                {count > 0 ? m.endCart(count) : m.endNoCart}
+              </span>
+            </SmallDialog>
+          )}
+          {overlay?.kind === 'exit' && (
+            <SmallDialog
+              title="退出登录"
+              subtitle="STAFF ONLY"
+              onClose={() => setOverlay(null)}
+              testId="emenu-exit"
+              actions={
+                <>
+                  <ModalButton x={28} y={196} w={140} onClick={() => setOverlay(null)} testId="emenu-exit-cancel">
+                    取消
+                  </ModalButton>
+                  <ModalButton
+                    x={192}
+                    y={196}
+                    w={140}
+                    primary
+                    onClick={() => {
+                      void api.post('/api/auth/logout').finally(() => window.location.assign('/login'));
+                    }}
+                    testId="emenu-exit-ok"
+                  >
+                    退出
+                  </ModalButton>
+                </>
+              }
+            >
+              这一步是给员工用的：退出这台平板登录的账号。
+              <br />
+              退出以后要重新登录才能点餐。
+            </SmallDialog>
+          )}
+          <StudioPreviewBand preview={layout.preview} error={layout.previewError} />
+          <Toast text={toast} />
+        </EmenuTemplatesProvider>
       </LangProvider>
     </Stage>
   );
@@ -928,7 +955,7 @@ function StartPage({
 }
 
 /** 给客人看的出错提示：切到英文时按拒绝码换成英文（没有对应英文的照门店系统给的） */
-const guestMessage = (error: unknown, m: Messages, lang: Lang) => (error instanceof ApiError ? ((lang === 'en' && guestErrorEn(error.code)) || error.message) : m.network);
+const guestMessage = (error: unknown, m: Messages, lang: Lang) => (error instanceof ApiError ? (lang === 'en' && guestErrorEn(error.code)) || error.message : m.network);
 /** 给服务员看的（确认下单那一步）：照门店系统给的中文 */
 const message = (error: unknown) => (error instanceof ApiError ? error.message : messages('zh').network);
 const candidatesOf = (error: unknown): string[] | null =>
@@ -1093,7 +1120,15 @@ function ConfirmOrder({
   const go = async (v = values) => {
     if (off) return;
     const guests = parseGuests(v.guests);
-    const missing = !v.tag ? ['tag', m.needTag] : !v.table ? ['table', m.needTable] : guests === null ? ['guests', m.needGuests] : requirePin && v.pin.length !== EMENU_PIN_LENGTH ? ['pin', m.needPin] : null;
+    const missing = !v.tag
+      ? ['tag', m.needTag]
+      : !v.table
+        ? ['table', m.needTable]
+        : guests === null
+          ? ['guests', m.needGuests]
+          : requirePin && v.pin.length !== EMENU_PIN_LENGTH
+            ? ['pin', m.needPin]
+            : null;
     if (missing) {
       setActive(missing[0]!);
       setLocal({ error: missing[1] });
@@ -1230,7 +1265,19 @@ function PendingOrderModal({
           hint={local || note?.error ? null : (note?.hint ?? '刚才那一单没有收到门店系统的答复。请服务员处理：先查回；查不到就输密码重新提交（不会重复下单），或作废后重填。')}
         />
       ) : (
-        <div style={{ ...box(40, 232, 349.1, 178), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, textAlign: 'center', fontSize: 14, lineHeight: '22px' }}>
+        <div
+          style={{
+            ...box(40, 232, 349.1, 178),
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            textAlign: 'center',
+            fontSize: 14,
+            lineHeight: '22px',
+          }}
+        >
           {note?.error && (
             <span role="alert" style={{ color: 'var(--em-error)' }} data-testid="emenu-error">
               {note.error}
@@ -1241,7 +1288,14 @@ function PendingOrderModal({
           </span>
         </div>
       )}
-      <button type="button" onClick={onClose} disabled={busy} style={{ ...box(388, 8, 30, 30), padding: 0, border: 0, background: 'none', fontSize: 18, color: 'var(--em-mute)' }} aria-label="先不处理" data-testid="emenu-pending-close">
+      <button
+        type="button"
+        onClick={onClose}
+        disabled={busy}
+        style={{ ...box(388, 8, 30, 30), padding: 0, border: 0, background: 'none', fontSize: 18, color: 'var(--em-mute)' }}
+        aria-label="先不处理"
+        data-testid="emenu-pending-close"
+      >
         ×
       </button>
     </>
@@ -1285,7 +1339,12 @@ function PageDots({ flat, index, onGo, width = 1024 }: { flat: FlatPage[]; index
   if (!hasMore) return null;
   return (
     // 画在「翻页圆点」那一块的左上角（默认在 0, 742、宽 1024：与改造前一样），圆点在块里居中
-    <div style={{ ...box(0, 0, width, 14), display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 7, transform: large ? 'scale(1.5)' : undefined }} data-testid="emenu-dots" data-page={index} data-pages={flat.length}>
+    <div
+      style={{ ...box(0, 0, width, 14), display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 7, transform: large ? 'scale(1.5)' : undefined }}
+      data-testid="emenu-dots"
+      data-page={index}
+      data-pages={flat.length}
+    >
       {first > 0 && <Dot onClick={() => onGo(first - 1)} label="上一个分类" small testId="emenu-dot-prev" />}
       {Array.from({ length: n }, (_, i) => (
         <Dot key={i} on={first + i === index} onClick={() => onGo(first + i)} label={`第 ${i + 1} 页`} testId={`emenu-dot-${i}`} />
@@ -1298,7 +1357,23 @@ function PageDots({ flat, index, onGo, width = 1024 }: { flat: FlatPage[]; index
 function Dot({ on, onClick, label, small, testId }: { on?: boolean; onClick: () => void; label: string; small?: boolean; testId: string }) {
   const size = small ? 2.4 : 4;
   return (
-    <button type="button" onClick={onClick} aria-label={label} aria-current={on || undefined} style={{ position: 'relative', width: on ? 12 : size, height: size, padding: 0, border: 0, borderRadius: 2, background: on ? 'var(--em-tan)' : 'var(--em-photo)', transition: 'width var(--em-in) var(--em-ease), background-color var(--em-in) ease' }} data-testid={testId}>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-current={on || undefined}
+      style={{
+        position: 'relative',
+        width: on ? 12 : size,
+        height: size,
+        padding: 0,
+        border: 0,
+        borderRadius: 2,
+        background: on ? 'var(--em-tan)' : 'var(--em-photo)',
+        transition: 'width var(--em-in) var(--em-ease), background-color var(--em-in) ease',
+      }}
+      data-testid={testId}
+    >
       <span style={{ position: 'absolute', inset: '-10px -3.5px' }} />
     </button>
   );
@@ -1311,32 +1386,34 @@ function NoMenu({ menu }: { menu: EmenuMenu }) {
   const large = useBig();
   return (
     <div className="em-page-in" style={{ ...box(0, 0, 1024, 768) }} data-testid="emenu-empty">
-     <div style={{ ...box(0, 0, 1024, 768), transform: large ? `scale(${BIG.ui})` : undefined, transformOrigin: '512px 384px' }}>
-      {title.mainEn ? (
-        <>
-          <div className="em-en" style={{ ...box(0, 304, 1024), textAlign: 'center', fontSize: 22, lineHeight: '22px', letterSpacing: '0.06em' }}>{title.main}</div>
-          <div style={{ ...box(0, 336, 1024), textAlign: 'center', fontSize: 13, color: 'var(--em-mute)' }}>{title.sub}</div>
-        </>
-      ) : (
-        <>
-          <div style={{ ...box(0, 300, 1024), textAlign: 'center', fontSize: 28, lineHeight: '28px' }}>{title.main}</div>
-          <div className="em-en" style={{ ...box(0, 336, 1024), textAlign: 'center', fontSize: 11, color: 'var(--em-mute)', letterSpacing: '0.4px' }}>
-            {title.sub}
-          </div>
-        </>
-      )}
-      <div style={{ ...box(312, 384, 400), fontSize: 14, lineHeight: '28px', textAlign: 'center' }}>
-        {menu.later.map((c) => (
-          <div key={c.name}>
-            {namePair(c.name, c.nameEn, lang).mainEn ? <span className="em-en">{c.nameEn}</span> : c.name}
-            <span className="em-en" style={{ color: 'var(--em-mute)', marginLeft: 12 }}>
-              {formatWindow(c.window)}
-            </span>
-          </div>
-        ))}
-        {menu.later.length === 0 && <span style={{ fontSize: 12, color: 'var(--em-mute)' }}>请店主在「后台 → 电子菜单」里排好分类与版面</span>}
+      <div style={{ ...box(0, 0, 1024, 768), transform: large ? `scale(${BIG.ui})` : undefined, transformOrigin: '512px 384px' }}>
+        {title.mainEn ? (
+          <>
+            <div className="em-en" style={{ ...box(0, 304, 1024), textAlign: 'center', fontSize: 22, lineHeight: '22px', letterSpacing: '0.06em' }}>
+              {title.main}
+            </div>
+            <div style={{ ...box(0, 336, 1024), textAlign: 'center', fontSize: 13, color: 'var(--em-mute)' }}>{title.sub}</div>
+          </>
+        ) : (
+          <>
+            <div style={{ ...box(0, 300, 1024), textAlign: 'center', fontSize: 28, lineHeight: '28px' }}>{title.main}</div>
+            <div className="em-en" style={{ ...box(0, 336, 1024), textAlign: 'center', fontSize: 11, color: 'var(--em-mute)', letterSpacing: '0.4px' }}>
+              {title.sub}
+            </div>
+          </>
+        )}
+        <div style={{ ...box(312, 384, 400), fontSize: 14, lineHeight: '28px', textAlign: 'center' }}>
+          {menu.later.map((c) => (
+            <div key={c.name}>
+              {namePair(c.name, c.nameEn, lang).mainEn ? <span className="em-en">{c.nameEn}</span> : c.name}
+              <span className="em-en" style={{ color: 'var(--em-mute)', marginLeft: 12 }}>
+                {formatWindow(c.window)}
+              </span>
+            </div>
+          ))}
+          {menu.later.length === 0 && <span style={{ fontSize: 12, color: 'var(--em-mute)' }}>请店主在「后台 → 电子菜单」里排好分类与版面</span>}
+        </div>
       </div>
-     </div>
     </div>
   );
 }

@@ -39,8 +39,7 @@ export function MembersTab() {
           <>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               <Kpi icon={<UsersRound className="size-4" />} label="会员总数" testId="members-total">
-                {d.totals.members} 位
-                <span className="block text-[12px] font-semibold text-ink-3">有余额 {d.totals.withBalance} 位</span>
+                {d.totals.members} 位<span className="block text-[12px] font-semibold text-ink-3">有余额 {d.totals.withBalance} 位</span>
               </Kpi>
               <Kpi icon={<Wallet className="size-4" />} label="储值余额（本金 + 赠金）" tone="pine">
                 <Money cents={d.totals.principal + d.totals.bonus} />
@@ -105,7 +104,16 @@ export function MembersTab() {
                   empty="还没有会员"
                   rows={d.levels
                     .filter((l) => l.level > 0 || l.count > 0)
-                    .map((l) => ({ key: String(l.level), label: l.name, value: l.count, note: <>余额 <Money cents={l.balance} /></> }))}
+                    .map((l) => ({
+                      key: String(l.level),
+                      label: l.name,
+                      value: l.count,
+                      note: (
+                        <>
+                          余额 <Money cents={l.balance} />
+                        </>
+                      ),
+                    }))}
                 />
               </Card>
             </div>
@@ -113,7 +121,13 @@ export function MembersTab() {
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <MemberList title="余额最高" rows={d.topBalance} value={(m) => <Money cents={m.balance} className="font-bold" />} />
               <MemberList title="本期充值最多" rows={d.topRecharge} value={(m) => <Money cents={(m as MemberBrief & { paid: number }).paid} className="font-bold" />} />
-              <MemberList title="待回访：沉睡会员" hint="90 天没有余额变动、余额最高的 10 位" rows={d.dormantList} value={(m) => <Money cents={m.balance} className="font-bold" />} testId="members-dormant" />
+              <MemberList
+                title="待回访：沉睡会员"
+                hint="90 天没有余额变动、余额最高的 10 位"
+                rows={d.dormantList}
+                value={(m) => <Money cents={m.balance} className="font-bold" />}
+                testId="members-dormant"
+              />
             </div>
           </>
         )
@@ -166,4 +180,3 @@ function MemberList({ title, hint, rows, value, testId }: { title: string; hint?
     </Card>
   );
 }
-

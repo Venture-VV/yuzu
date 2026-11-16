@@ -8,5 +8,4 @@ export interface EntityBrief {
   taxNo: string;
 }
 
-export const useEntities = (enabled = true) =>
-  useQuery({ queryKey: ['entities'], queryFn: () => api.get<EntityBrief[]>('/api/entities'), staleTime: 5 * 60_000, enabled });
+export const useEntities = (enabled = true) => useQuery({ queryKey: ['entities'], queryFn: () => api.get<EntityBrief[]>('/api/entities'), staleTime: 5 * 60_000, enabled });

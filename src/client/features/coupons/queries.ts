@@ -31,8 +31,7 @@ export interface PlanGift {
 export const planGiftText = (g: PlanGift) => `${g.templateName} × ${g.quantity}${g.levels.length ? `（限第 ${g.levels.join('、')} 级会员）` : ''}`;
 
 /** 券模板：维护（coupon.manage）或发券（coupon.issue）的岗位能看 */
-export const useCouponTemplates = (enabled = true) =>
-  useQuery({ queryKey: couponKeys.templates, queryFn: () => api.get<CouponTemplate[]>('/api/coupons/templates'), enabled });
+export const useCouponTemplates = (enabled = true) => useQuery({ queryKey: couponKeys.templates, queryFn: () => api.get<CouponTemplate[]>('/api/coupons/templates'), enabled });
 
 export const useCouponMeta = () => useQuery({ queryKey: couponKeys.meta, queryFn: () => api.get<CouponMeta>('/api/coupons/meta'), staleTime: 60_000 });
 
@@ -49,8 +48,7 @@ export const useCouponStats = (from: string, to: string, enabled: boolean) =>
   });
 
 /** 充值页的「另赠」：接口要「会员充值」权限，没有时不查 */
-export const usePlanGifts = (enabled: boolean) =>
-  useQuery({ queryKey: couponKeys.planGifts, queryFn: () => api.get<PlanGift[]>('/api/coupons/plan-gifts'), enabled, staleTime: 60_000 });
+export const usePlanGifts = (enabled: boolean) => useQuery({ queryKey: couponKeys.planGifts, queryFn: () => api.get<PlanGift[]>('/api/coupons/plan-gifts'), enabled, staleTime: 60_000 });
 
 export const useMemberCoupons = (memberId: number, enabled: boolean) =>
   useQuery({ queryKey: couponKeys.member(memberId), queryFn: () => api.get<MemberCoupons>(`/api/members/${memberId}/coupons`), enabled });

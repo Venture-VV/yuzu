@@ -4,8 +4,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { Ledger, LedgerAudit, OrderedLines } from '@shared/purchase-ledger';
 import { api } from '../../lib/api';
 
-export const search = (params: Record<string, string | undefined>) =>
-  new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
+export const search = (params: Record<string, string | undefined>) => new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
 
 export const useLedger = (params: Record<string, string | undefined>, enabled = true) =>
   useQuery({ queryKey: ['inv', 'purchase-ledger', params], queryFn: () => api.get<Ledger>(`/api/erp/ledger?${search(params)}`), placeholderData: keepPreviousData, enabled });

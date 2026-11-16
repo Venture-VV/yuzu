@@ -61,7 +61,13 @@ test.describe('8.0.17 ERP 采购流程图', () => {
     const suppliers = await getJson<{ id: number; code: string; name: string }[]>(api, '/api/inventory/suppliers?all=1');
     const supplier = suppliers.find((s) => s.code === 'S004')!;
     const newRequest = async (qty: number) => {
-      const r = (await post<{ request: Req }>(api, '/api/erp/requests', { clientKey: randomUUID(), departmentId: dept.id, lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: qty * 1000, unit: '箱', refPriceCents: 900 }] })).request;
+      const r = (
+        await post<{ request: Req }>(api, '/api/erp/requests', {
+          clientKey: randomUUID(),
+          departmentId: dept.id,
+          lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: qty * 1000, unit: '箱', refPriceCents: 900 }],
+        })
+      ).request;
       await post(api, `/api/erp/requests/${r.id}/approve`, {});
       return r;
     };
@@ -82,7 +88,13 @@ test.describe('8.0.17 ERP 采购流程图', () => {
 
     // 流程 B：发起询价，只登记 1 家报价
     const reqB = await newRequest(2);
-    const ev = (await post<{ event: { id: number; docNo: string; lines: { id: number }[] } }>(api, '/api/purchase-sourcing', { clientKey: randomUUID(), title: `E2E 流程图 ${reqB.docNo}`, lines: [{ materialId: mat.id, purchaseQtyMilli: 2000, requestLineIds: [reqB.lines[0]!.id] }] })).event;
+    const ev = (
+      await post<{ event: { id: number; docNo: string; lines: { id: number }[] } }>(api, '/api/purchase-sourcing', {
+        clientKey: randomUUID(),
+        title: `E2E 流程图 ${reqB.docNo}`,
+        lines: [{ materialId: mat.id, purchaseQtyMilli: 2000, requestLineIds: [reqB.lines[0]!.id] }],
+      })
+    ).event;
     await post(api, `/api/purchase-sourcing/${ev.id}/quotes`, { clientKey: randomUUID(), supplierId: supplier.id, payTerms: '月结 30 天', prices: [{ lineId: ev.lines[0]!.id, priceCents: 900 }] });
 
     // ① 采购 → 流程进度
@@ -194,7 +206,9 @@ test.describe('8.0.17 ERP 采购流程图', () => {
       // ② 部门同事提一张需求单：等主管确认
       expect((await asRequester.post('/api/auth/login', { data: { username: requester, password } })).ok()).toBe(true);
       expect((await asRequester.post('/api/auth/change-password', { data: { currentPassword: password, newPassword: `${password}9` } })).ok()).toBe(true);
-      const made = await asRequester.post('/api/erp/requests', { data: { clientKey: randomUUID(), lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: 1000, unit: '箱', refPriceCents: 900 }] } });
+      const made = await asRequester.post('/api/erp/requests', {
+        data: { clientKey: randomUUID(), lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: 1000, unit: '箱', refPriceCents: 900 }] },
+      });
       expect(made.status(), await made.text()).toBe(201);
       const r = ((await made.json()) as { request: { id: number; docNo: string; deptConfirm: { state: string } } }).request;
       expect(r.deptConfirm.state).toBe('pending');

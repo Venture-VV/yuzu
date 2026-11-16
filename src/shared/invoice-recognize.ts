@@ -52,7 +52,10 @@ const dateText = (y: number, m: number, d: number) => `${y}-${String(m).padStart
  * 数电票发票代码为空、号码 20 位。认不出返回 null。
  */
 export function parseInvoiceQr(raw: string): RecognizedInvoice | null {
-  const parts = raw.trim().split(/[,，]/).map((p) => p.trim());
+  const parts = raw
+    .trim()
+    .split(/[,，]/)
+    .map((p) => p.trim());
   if (parts.length < 6 || parts[0] !== '01') return null;
   const [, kindCode = '', code = '', no = '', amount = '', date = ''] = parts;
   if (!/^(\d{8}|\d{20})$/.test(no)) return null;
@@ -77,7 +80,11 @@ const MONEY = String.raw`(\d[\d,]{0,15}\.\d{2})`;
  */
 export function parseInvoiceText(text: string): RecognizedInvoice | null {
   // 文字识别常把字拆开：去掉字与字之间的空白再找；冒号统一成半角
-  const flat = text.replace(/：/g, ':').replace(/[（]/g, '(').replace(/[）]/g, ')').replace(/[ \t　]+/g, '');
+  const flat = text
+    .replace(/：/g, ':')
+    .replace(/[（]/g, '(')
+    .replace(/[）]/g, ')')
+    .replace(/[ \t　]+/g, '');
   const out: RecognizedInvoice = { method: 'ocr' };
   const no = /发票号码:?(\d{20}|\d{8})(?!\d)/.exec(flat);
   if (no) out.invoiceNo = no[1]!;

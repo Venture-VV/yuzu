@@ -94,12 +94,21 @@ async function prepareByApi(page: Page) {
     const specs = d.specs.map((s) => ({ itemId: itemId(s.name), label: d.specs.length > 1 ? (s.name.includes('大份') ? '大份' : '小份') : '' }));
     const body = { name: d.name, nameEn: d.nameEn, tagline: '', description: d === FISH ? 'E2E：砂锅慢焗的鱼。' : '', attrs: [], unit: '份', imageId: null, detailImageId: null, specs };
     const old = admin.dishes.find((x) => x.name === d.name);
-    admin = old ? await send<EmenuAdmin>(page, 'put', `/api/admin/emenu/dishes/${old.id}`, { ...body, active: true, version: old.version }) : await send<EmenuAdmin>(page, 'post', '/api/admin/emenu/dishes', body);
+    admin = old
+      ? await send<EmenuAdmin>(page, 'put', `/api/admin/emenu/dishes/${old.id}`, { ...body, active: true, version: old.version })
+      : await send<EmenuAdmin>(page, 'post', '/api/admin/emenu/dishes', body);
   }
   // 分类留着就清空各页（下面在页面上重新排）；设置恢复默认、先关着
   const cat = admin.categories.find((c) => c.name === CATEGORY);
   if (cat) {
-    admin = await send<EmenuAdmin>(page, 'put', `/api/admin/emenu/categories/${cat.id}`, { name: CATEGORY, nameEn: 'E2E TABLET', window: null, sortOrder: cat.sortOrder, active: true, version: cat.version });
+    admin = await send<EmenuAdmin>(page, 'put', `/api/admin/emenu/categories/${cat.id}`, {
+      name: CATEGORY,
+      nameEn: 'E2E TABLET',
+      window: null,
+      sortOrder: cat.sortOrder,
+      active: true,
+      version: cat.version,
+    });
     const again = admin.categories.find((c) => c.name === CATEGORY)!;
     admin = await send<EmenuAdmin>(page, 'put', `/api/admin/emenu/categories/${again.id}/pages`, { version: again.version, pages: [] });
   }
@@ -158,10 +167,44 @@ function syntheticMenu(rules: Partial<EmenuMenu['rules']> = {}): EmenuMenu {
     serverTime: new Date().toISOString(),
     businessDate: '2026-11-11',
     enabled: true,
-    rules: { footerText: 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED', avoidOptions: ['不加香菜'], serveOptions: ['即起'], idleMinutes: 0, offHours: 'hide', langSwitch: true, optionsEn: {}, motion: true, requirePin: true, textSize: 'design', coverUrl: null, ...rules },
+    rules: {
+      footerText: 'COPYRIGHT©2026 汤崎 ALL RIGHTS RESERVED',
+      avoidOptions: ['不加香菜'],
+      serveOptions: ['即起'],
+      idleMinutes: 0,
+      offHours: 'hide',
+      langSwitch: true,
+      optionsEn: {},
+      motion: true,
+      requirePin: true,
+      textSize: 'design',
+      coverUrl: null,
+      ...rules,
+    },
     categories: [
-      { id: 1, name: '西式午餐', nameEn: 'WESTERN LUNCH', window: null, open: true, pages: [{ layout: 'duo_row', title: '', titleEn: '', dishes: [dish(1, '温泉蛋黑松露奶油意粉', 'Hot Spring Egg And Black Truffle Cream Spaghetti', 4200), dish(2, '和牛牛肉汉堡', 'Wagyu Beef Burger', 4200)] }] },
-      { id: 2, name: '中式午餐', nameEn: 'CHINESE LUNCH', window: null, open: true, pages: [{ layout: 'cover', title: '', titleEn: '', dishes: [dish(3, '广式猪脚姜浸花胶', 'Cantonese Pork Trotter Ginger Vinegar Fish Maw', 4200)] }] },
+      {
+        id: 1,
+        name: '西式午餐',
+        nameEn: 'WESTERN LUNCH',
+        window: null,
+        open: true,
+        pages: [
+          {
+            layout: 'duo_row',
+            title: '',
+            titleEn: '',
+            dishes: [dish(1, '温泉蛋黑松露奶油意粉', 'Hot Spring Egg And Black Truffle Cream Spaghetti', 4200), dish(2, '和牛牛肉汉堡', 'Wagyu Beef Burger', 4200)],
+          },
+        ],
+      },
+      {
+        id: 2,
+        name: '中式午餐',
+        nameEn: 'CHINESE LUNCH',
+        window: null,
+        open: true,
+        pages: [{ layout: 'cover', title: '', titleEn: '', dishes: [dish(3, '广式猪脚姜浸花胶', 'Cantonese Pork Trotter Ginger Vinegar Fish Maw', 4200)] }],
+      },
     ],
     later: [],
     tables: [],
@@ -199,7 +242,12 @@ async function enterMenu(page: Page) {
 }
 
 /** 清掉这台浏览器里平板点餐页存的东西（这一次点餐、待确认的记录） */
-const clearEmenuStorage = (page: Page) => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('yuzu.emenu.')).forEach((k) => localStorage.removeItem(k)));
+const clearEmenuStorage = (page: Page) =>
+  page.evaluate(() =>
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith('yuzu.emenu.'))
+      .forEach((k) => localStorage.removeItem(k)),
+  );
 
 test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
   test('后台排菜单、发点单密码 → 平板账号登录 → 点餐、备注、服务员确认下单 → 账单与厨房屏 → 估清 → 结束点餐', async ({ page, browser, baseURL }, info) => {
@@ -281,7 +329,11 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       const exported = await page.request.get('/api/admin/emenu/english.csv');
       expect(exported.ok()).toBe(true);
       expect(await exported.text()).toContain(`${fishId},${FISH.name},${FISH.nameEn},`);
-      await sheet.getByTestId('emenu-admin-english-file').setInputFiles({ name: '英文对照表.csv', mimeType: 'text/csv', buffer: Buffer.from(`\uFEFF编号,菜名,英文名\r\n${porkId},${PORK.name},E2E Wok Fried Pork\r\n999999999,没有这道菜,Ghost\r\n`, 'utf8') });
+      await sheet.getByTestId('emenu-admin-english-file').setInputFiles({
+        name: '英文对照表.csv',
+        mimeType: 'text/csv',
+        buffer: Buffer.from(`\uFEFF编号,菜名,英文名\r\n${porkId},${PORK.name},E2E Wok Fried Pork\r\n999999999,没有这道菜,Ghost\r\n`, 'utf8'),
+      });
       await expect(sheet.getByTestId('emenu-admin-english-preview')).toContainText('读到 2 行');
       await expect(sheet.getByTestId('emenu-admin-english-preview')).toContainText('1 行的编号对不上');
       await page.getByTestId('emenu-admin-english-apply').click();
@@ -312,7 +364,10 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
 
       // ③ 接待一位客人（接口办理）
       const board = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
-      const tag = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+      const tag = board.tags
+        .filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+        .map((t) => t.code)
+        .reverse()[0]!;
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 平板点餐客人' }] });
       visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
       // 桌号：店里建了桌台的用第一张（平板上只输里面的数字，对得上几张时点选）；没建桌台的照输入的记
@@ -889,10 +944,12 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     const custom = page.getByTestId('emenu-remark-custom');
     await expect(custom).toBeFocused();
     await page.setViewportSize({ width: full.width, height: short });
-    await expect.poll(async () => {
-      const b = (await custom.boundingBox())!;
-      return b.y + b.height;
-    }).toBeLessThanOrEqual(short);
+    await expect
+      .poll(async () => {
+        const b = (await custom.boundingBox())!;
+        return b.y + b.height;
+      })
+      .toBeLessThanOrEqual(short);
     expect((await stageBox()).width).toBeCloseTo(before.width, 0);
     await page.setViewportSize(full);
     await page.getByTestId('emenu-remark-done').click();

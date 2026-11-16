@@ -4,14 +4,7 @@ import { ArchiveRestore, FileUp, RotateCcw, Search } from 'lucide-react';
 import { formatPhone } from '@shared/labels';
 import { lastUsableDate } from '@shared/business-date';
 import { parseYuan } from '@shared/money';
-import type {
-  OpeningBalanceRow,
-  OpeningControlCheck,
-  OpeningImportDetail,
-  OpeningImportReport,
-  OpeningImportSummary,
-  OpeningTotals,
-} from '@shared/opening-import';
+import type { OpeningBalanceRow, OpeningControlCheck, OpeningImportDetail, OpeningImportReport, OpeningImportSummary, OpeningTotals } from '@shared/opening-import';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { readImportFile } from '../../lib/import-file';
 import { useSession } from '../../lib/session';
@@ -230,9 +223,7 @@ function ImportCard() {
       </div>
 
       <fieldset className="mt-3 rounded-lg border border-line p-3" data-testid="opening-control-form">
-        <legend className="px-1 text-[12.5px] font-semibold text-ink-2">
-          EBC 控制总数（旧系统报表上的数字；{production ? '正式环境必填' : '填了才比对'}）
-        </legend>
+        <legend className="px-1 text-[12.5px] font-semibold text-ink-2">EBC 控制总数（旧系统报表上的数字；{production ? '正式环境必填' : '填了才比对'}）</legend>
         <div className="grid gap-3 sm:grid-cols-4">
           {CONTROL_FIELDS.map(([key, label]) => (
             <Field key={key} label={label} htmlFor={`opening-control-${key}`}>
@@ -367,9 +358,7 @@ function ImportCard() {
                       <td className="px-3 py-2">
                         <span className="font-semibold">{r.name}</span> <span className="num text-ink-3">{formatPhone(r.phone)}</span>
                       </td>
-                      <td className="px-3 py-2">
-                        {r.action === 'create' ? <Badge tone="lake">新建档案</Badge> : <Badge tone="neutral">匹配 {r.memberNo}</Badge>}
-                      </td>
+                      <td className="px-3 py-2">{r.action === 'create' ? <Badge tone="lake">新建档案</Badge> : <Badge tone="neutral">匹配 {r.memberNo}</Badge>}</td>
                       <td className="px-3 py-2 text-right">
                         <Money cents={r.principal} />
                       </td>
@@ -380,15 +369,14 @@ function ImportCard() {
                   ))}
                 </tbody>
               </table>
-              {preview.total > preview.samples.length && (
-                <p className="border-t border-line px-3 py-2 text-[12px] text-ink-3">只显示前 {preview.samples.length} 位，导入后可在导入记录里查看全部</p>
-              )}
+              {preview.total > preview.samples.length && <p className="border-t border-line px-3 py-2 text-[12px] text-ink-3">只显示前 {preview.samples.length} 位，导入后可在导入记录里查看全部</p>}
             </div>
           )}
           {preview.errors.length === 0 && (
             <>
               <ConfirmCheck checked={checked} onChange={setChecked}>
-                我已核对：期初本金 <Money cents={preview.principalTotal} />、期初赠金 <Money cents={preview.bonusTotal} /> 与旧系统一致
+                我已核对：期初本金 <Money cents={preview.principalTotal} />
+                、期初赠金 <Money cents={preview.bonusTotal} /> 与旧系统一致
                 <span className="block text-[12.5px] font-normal text-ink-3">导入后记入今天的营业日；导入错了可以在导入记录里作废（会员还没有后续余额变动时）</span>
               </ConfirmCheck>
               <Button
@@ -460,9 +448,7 @@ function ControlCompare({ check }: { check: OpeningControlCheck }) {
   const show = (key: keyof OpeningTotals, v: number) => (key === 'count' ? <span className="num">{v}</span> : <Money cents={v} />);
   return (
     <div className={cn('rounded-lg border p-3', check.ok ? 'border-pine/30 bg-pine-soft/30' : 'border-clay/40 bg-clay-soft/40')} data-testid="opening-control">
-      <p className={cn('text-[13.5px] font-bold', check.ok ? 'text-pine' : 'text-clay')}>
-        {check.ok ? '导入 + 排除清单 = EBC 控制总数，四项一致' : '与 EBC 控制总数不一致，不能导入'}
-      </p>
+      <p className={cn('text-[13.5px] font-bold', check.ok ? 'text-pine' : 'text-clay')}>{check.ok ? '导入 + 排除清单 = EBC 控制总数，四项一致' : '与 EBC 控制总数不一致，不能导入'}</p>
       <div className="scroll-thin overflow-x-auto">
         <table className="mt-2 w-full min-w-[420px] text-[13px]">
           <thead className="text-[12px] text-ink-3">
@@ -589,9 +575,7 @@ function ImportDetailDialog({ id, onClose }: { id: number; onClose: () => void }
               </Button>
             )}
           </div>
-          {!voidableAll && d.activeCount > 0 && (
-            <p className="text-[12.5px] text-ink-3">批内有会员在期初之后已有余额变动，不能整批作废；可以逐位作废还没有后续变动的会员。</p>
-          )}
+          {!voidableAll && d.activeCount > 0 && <p className="text-[12.5px] text-ink-3">批内有会员在期初之后已有余额变动，不能整批作废；可以逐位作废还没有后续变动的会员。</p>}
           <div className="scroll-thin max-h-[55vh] overflow-auto rounded-lg border border-line">
             <table className="w-full text-[13px]">
               <thead className="sticky top-0 bg-paper-2 text-[12px] font-bold text-ink-3">
@@ -620,11 +604,7 @@ function ImportDetailDialog({ id, onClose }: { id: number; onClose: () => void }
                     </td>
                     <td className="px-3 py-2 text-right">
                       <Money cents={r.bonus} />
-                      {r.bonusExpiresAt && (
-                        <span className="block text-[12px] text-ink-3">
-                          有效至 {lastUsableDate(r.bonusExpiresAt, session.timezone, session.rules.businessDayStartHour)}
-                        </span>
-                      )}
+                      {r.bonusExpiresAt && <span className="block text-[12px] text-ink-3">有效至 {lastUsableDate(r.bonusExpiresAt, session.timezone, session.rules.businessDayStartHour)}</span>}
                     </td>
                     <td className="px-3 py-2">
                       {r.status === 'voided' ? (
@@ -711,7 +691,8 @@ function VoidDialog({ target, importId, onClose }: { target: VoidTarget; importI
     >
       <div className="space-y-3">
         <p className="text-[13.5px] text-ink-2">
-          将扣回本金 <Money cents={amount.principal} className="font-bold text-pine" />、赠金 <Money cents={amount.bonus} className="font-bold text-yuzu-deep" />
+          将扣回本金 <Money cents={amount.principal} className="font-bold text-pine" />
+          、赠金 <Money cents={amount.bonus} className="font-bold text-yuzu-deep" />
         </p>
         <Field label="作废原因" htmlFor="opening-void-reason">
           <Input id="opening-void-reason" value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} placeholder="例如：旧系统导出的金额有误，更正后重新导入" />

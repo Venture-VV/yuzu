@@ -21,15 +21,7 @@ import {
   UtensilsCrossed,
   Shuffle,
 } from 'lucide-react';
-import {
-  BILL_SOURCE_LABELS,
-  BILL_SOURCES,
-  VISIT_STATUS_LABELS,
-  ZONE_LABELS,
-  type BillLine,
-  type FrontdeskBoardRules,
-  type VisitDetail,
-} from '@shared/frontdesk';
+import { BILL_SOURCE_LABELS, BILL_SOURCES, VISIT_STATUS_LABELS, ZONE_LABELS, type BillLine, type FrontdeskBoardRules, type VisitDetail } from '@shared/frontdesk';
 import { minutesText } from '@shared/benefits';
 import { backfillText } from '@shared/backfill';
 import { KITCHEN_STATUS_LABELS } from '@shared/dining';
@@ -102,8 +94,7 @@ export function BillPanel({
   const voided = visit.lines.filter((l) => l.status === 'voided');
   const long = open && stayMinutes(visit.checkedInAt, now) >= LONG_STAY_MINUTES;
   const selfMinutes = rules?.selfVoidMinutes ?? 10;
-  const canFix = (ownerId: number, at: string) =>
-    can('frontdesk.correct') || (ownerId === session.staff.id && (now - new Date(at).getTime()) / 60_000 <= selfMinutes);
+  const canFix = (ownerId: number, at: string) => can('frontdesk.correct') || (ownerId === session.staff.id && (now - new Date(at).getTime()) / 60_000 <= selfMinutes);
 
   const leaveGroup = async () => {
     try {
@@ -135,7 +126,8 @@ export function BillPanel({
             <p className="num mt-1.5 flex flex-wrap items-center gap-x-2 text-[12.5px] text-ink-3">
               <span>{visit.visitNo}</span>
               <span className="flex items-center gap-1">
-                <Clock3 className="size-3.5" />入场 {formatTime(visit.checkedInAt)}
+                <Clock3 className="size-3.5" />
+                入场 {formatTime(visit.checkedInAt)}
               </span>
               {open && (
                 <span className={cn('font-semibold', long ? 'rounded-sm bg-yuzu-soft px-1 text-yuzu-deep' : 'text-ink-2')} data-testid="bill-stay">
@@ -168,7 +160,9 @@ export function BillPanel({
                     体验 {visit.memberGrade.trial.label}
                   </span>
                 )}{' '}
-                <span className="num text-[12px] font-semibold text-ink-3">{visit.member.memberNo} · {maskPhone(visit.member.phone)}</span>
+                <span className="num text-[12px] font-semibold text-ink-3">
+                  {visit.member.memberNo} · {maskPhone(visit.member.phone)}
+                </span>
               </p>
               <p className="num text-[12px] text-ink-3">
                 本金 <Money cents={visit.member.principalBalance} /> · 赠金 <Money cents={visit.member.bonusBalance} />
@@ -176,9 +170,7 @@ export function BillPanel({
               </p>
             </div>
           ) : (
-            <p className="min-w-0 flex-1 truncate text-[13.5px] text-ink-2">
-              散客{visit.guestLabel ? ` · ${visit.guestLabel}` : ''}
-            </p>
+            <p className="min-w-0 flex-1 truncate text-[13.5px] text-ink-2">散客{visit.guestLabel ? ` · ${visit.guestLabel}` : ''}</p>
           )}
         </div>
         {visit.vipOverrideByName && (
@@ -399,14 +391,7 @@ export function BillPanel({
                 预结账
               </Button>
               {can('frontdesk.checkout') && (
-                <Button
-                  variant="accent"
-                  className="flex-1 @min-[22rem]:flex-none"
-                  icon={<Banknote className="size-4" />}
-                  onClick={() => onAction('checkout')}
-                  kbd="F9"
-                  data-testid="action-checkout"
-                >
+                <Button variant="accent" className="flex-1 @min-[22rem]:flex-none" icon={<Banknote className="size-4" />} onClick={() => onAction('checkout')} kbd="F9" data-testid="action-checkout">
                   结账
                 </Button>
               )}
@@ -490,11 +475,7 @@ export function BillPanel({
       <QuickReasonDialog
         open={cancelling}
         title={`撤销来访 · ${visit.tag.code}`}
-        description={
-          active.length
-            ? `账单上还有 ${active.length} 项未结消费，不能直接释放手牌。请先结账，或作废登记错的明细。`
-            : '只用于开错牌、客人未入场等情况：撤销后手牌立即空闲，来访记录保留。'
-        }
+        description={active.length ? `账单上还有 ${active.length} 项未结消费，不能直接释放手牌。请先结账，或作废登记错的明细。` : '只用于开错牌、客人未入场等情况：撤销后手牌立即空闲，来访记录保留。'}
         reasons={cancelReasons}
         confirmLabel="撤销并释放手牌"
         disabled={active.length > 0}
@@ -520,7 +501,8 @@ function LineRow({ line, canVoid, allowed, selfMinutes, onVoid }: { line: BillLi
             × {line.quantity}
             {line.quantity > 1 && (
               <>
-                {' '}· 单价 <Money cents={line.unitPrice} />
+                {' '}
+                · 单价 <Money cents={line.unitPrice} />
               </>
             )}
           </span>
@@ -550,13 +532,7 @@ function LineRow({ line, canVoid, allowed, selfMinutes, onVoid }: { line: BillLi
           onClick={onVoid}
           disabled={!allowed}
           aria-label={`作废 ${line.name}`}
-          title={
-            line.source === 'dining'
-              ? '退菜：小额直接退，超过的请值班经理及以上当场授权'
-              : allowed
-                ? '作废这项明细'
-                : `超过 ${selfMinutes} 分钟或不是你登记的，请店主处理`
-          }
+          title={line.source === 'dining' ? '退菜：小额直接退，超过的请值班经理及以上当场授权' : allowed ? '作废这项明细' : `超过 ${selfMinutes} 分钟或不是你登记的，请店主处理`}
           className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-ink-4 transition-colors hover:bg-clay-soft hover:text-clay disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-4"
         >
           <CircleSlash className="size-4" />
@@ -680,7 +656,10 @@ function QuickReasonDialog({
                 key={r}
                 type="button"
                 onClick={() => setReason(r)}
-                className={cn('h-9 rounded-full border px-3.5 text-[13px] font-semibold', reason === r ? 'border-clay bg-clay-soft text-clay' : 'border-line bg-card text-ink-2 hover:border-line-strong')}
+                className={cn(
+                  'h-9 rounded-full border px-3.5 text-[13px] font-semibold',
+                  reason === r ? 'border-clay bg-clay-soft text-clay' : 'border-line bg-card text-ink-2 hover:border-line-strong',
+                )}
               >
                 {r}
               </button>
@@ -693,4 +672,3 @@ function QuickReasonDialog({
     </Dialog>
   );
 }
-

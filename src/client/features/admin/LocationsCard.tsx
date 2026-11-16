@@ -82,7 +82,11 @@ function RulesCard({ data }: { data: LocationAdmin }) {
       qc.setQueryData(adminKey, next);
       setDraft(next.rules);
       void qc.invalidateQueries({ queryKey: ['rooms', 'locations'] });
-      toast({ tone: 'success', title: '实时位置的设置已保存', body: next.rules.enabled ? '之后的发牌、挂账、开房、上下钟、刷卡按新设置推导位置。' : '已关闭：不再推导，离开、离店照样清掉已有的位置。' });
+      toast({
+        tone: 'success',
+        title: '实时位置的设置已保存',
+        body: next.rules.enabled ? '之后的发牌、挂账、开房、上下钟、刷卡按新设置推导位置。' : '已关闭：不再推导，离开、离店照样清掉已有的位置。',
+      });
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -93,10 +97,18 @@ function RulesCard({ data }: { data: LocationAdmin }) {
     <Card className="space-y-4 p-5" data-testid="locations-rules">
       <SectionTitle aside={<PendingBadge title="开发时按常见做法定的默认，待店主确认（docs/PENDING_DECISIONS.md「第一级实时位置」）" />}>开关与区域</SectionTitle>
       <label className="flex items-start gap-2.5 text-[14px]">
-        <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-pine)]" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} data-testid="locations-enabled" />
+        <input
+          type="checkbox"
+          className="mt-0.5 size-4 accent-[var(--color-pine)]"
+          checked={draft.enabled}
+          onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+          data-testid="locations-enabled"
+        />
         <span>
           <b>开启实时位置</b>
-          <span className="block text-[12.5px] text-ink-3">由刷卡点刷卡与业务动作（发手牌、挂账、开房、上下钟、结账）推出客人在哪个区、技师在哪间房，「客房 → 平面图」显示人员。关着时不推导、刷卡上报拒绝。</span>
+          <span className="block text-[12.5px] text-ink-3">
+            由刷卡点刷卡与业务动作（发手牌、挂账、开房、上下钟、结账）推出客人在哪个区、技师在哪间房，「客房 → 平面图」显示人员。关着时不推导、刷卡上报拒绝。
+          </span>
         </span>
       </label>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -136,7 +148,9 @@ function ReadersCard({ data, ledger }: { data: LocationAdmin; ledger: SpaceLedge
       >
         刷卡点
       </SectionTitle>
-      <p className="text-[12.5px] text-ink-3">需求文档有 16 个 RC300（接待 2、收银 4、助浴 2、水吧 2、娱乐 2、餐厅 1、休息 1、按摩 2），各自装在哪、编号多少由现场补。读卡器的设备接入在 RQ-001；之前用「模拟刷卡」试。</p>
+      <p className="text-[12.5px] text-ink-3">
+        需求文档有 16 个 RC300（接待 2、收银 4、助浴 2、水吧 2、娱乐 2、餐厅 1、休息 1、按摩 2），各自装在哪、编号多少由现场补。读卡器的设备接入在 RQ-001；之前用「模拟刷卡」试。
+      </p>
       {data.readers.length === 0 ? (
         <p className="rounded-md border border-dashed border-line-strong px-4 py-5 text-center text-[13px] text-ink-3">还没有登记刷卡点。</p>
       ) : (
@@ -167,7 +181,14 @@ function ReadersCard({ data, ledger }: { data: LocationAdmin; ledger: SpaceLedge
                       修改
                     </Button>
                     {canReport && r.active && (
-                      <Button size="sm" variant="ghost" disabled={!data.rules.enabled} title={data.rules.enabled ? undefined : '先打开实时位置'} onClick={() => setSwiping(r)} data-testid="reader-swipe">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!data.rules.enabled}
+                        title={data.rules.enabled ? undefined : '先打开实时位置'}
+                        onClick={() => setSwiping(r)}
+                        data-testid="reader-swipe"
+                      >
                         模拟刷卡
                       </Button>
                     )}
@@ -210,7 +231,9 @@ function ReaderDialog({ reader, zones, ledger, onClose }: { reader: LocationRead
   });
   if (!open) return null;
   const floors = new Map(ledger.floors.map((f) => [f.id, f.code]));
-  const spaces = ledger.spaces.filter((s) => s.active || s.id === existing?.spaceId).sort((a, b) => (floors.get(a.floorId) ?? '').localeCompare(floors.get(b.floorId) ?? '') || a.code.localeCompare(b.code));
+  const spaces = ledger.spaces
+    .filter((s) => s.active || s.id === existing?.spaceId)
+    .sort((a, b) => (floors.get(a.floorId) ?? '').localeCompare(floors.get(b.floorId) ?? '') || a.code.localeCompare(b.code));
   const save = async () => {
     setBusy(true);
     setError(null);
@@ -241,7 +264,13 @@ function ReaderDialog({ reader, zones, ledger, onClose }: { reader: LocationRead
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="primary" loading={busy} disabled={!code.trim() || !name.trim() || (where === 'zone' ? zoneId === null : spaceId === null)} onClick={() => void save()} data-testid="reader-save">
+          <Button
+            variant="primary"
+            loading={busy}
+            disabled={!code.trim() || !name.trim() || (where === 'zone' ? zoneId === null : spaceId === null)}
+            onClick={() => void save()}
+            data-testid="reader-save"
+          >
             保存
           </Button>
         </>
@@ -257,7 +286,16 @@ function ReaderDialog({ reader, zones, ledger, onClose }: { reader: LocationRead
           </Field>
         </div>
         <Field label="装在哪">
-          <Segmented<'zone' | 'space'> size="sm" value={where} onChange={setWhere} ariaLabel="装在哪" options={[{ value: 'zone', label: '区域' }, { value: 'space', label: '空间' }]} />
+          <Segmented<'zone' | 'space'>
+            size="sm"
+            value={where}
+            onChange={setWhere}
+            ariaLabel="装在哪"
+            options={[
+              { value: 'zone', label: '区域' },
+              { value: 'space', label: '空间' },
+            ]}
+          />
         </Field>
         {where === 'zone' ? (
           <ZoneSelect zones={zones} value={zoneId} onChange={setZoneId} empty="选区域" testId="reader-zone" />
@@ -377,7 +415,10 @@ function SwipeDialog({ reader, onClose }: { reader: LocationReader | null; onClo
           value={who}
           onChange={setWho}
           ariaLabel="谁刷卡"
-          options={[{ value: 'guest', label: '客人（手牌号）' }, { value: 'technician', label: '技师（工号）' }]}
+          options={[
+            { value: 'guest', label: '客人（手牌号）' },
+            { value: 'technician', label: '技师（工号）' },
+          ]}
         />
         <Input
           value={value}

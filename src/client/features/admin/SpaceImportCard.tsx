@@ -5,14 +5,7 @@
 
 import { useRef, useState } from 'react';
 import { CircleCheck, Download, FileSearch, FileUp } from 'lucide-react';
-import {
-  SPACE_IMPORT_COLUMNS,
-  SPACE_IMPORT_LABELS,
-  ZONE_IMPORT_COLUMNS,
-  type SpaceImportKind,
-  type SpaceImportPreview,
-  type SpaceImportRecord,
-} from '@shared/spaces';
+import { SPACE_IMPORT_COLUMNS, SPACE_IMPORT_LABELS, ZONE_IMPORT_COLUMNS, type SpaceImportKind, type SpaceImportPreview, type SpaceImportRecord } from '@shared/spaces';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { ErpPendingStoreError, sendErpOp, useErpPending } from '../../lib/erpPending';
 import { bytesToBase64, readImportFile } from '../../lib/import-file';
@@ -201,15 +194,7 @@ export function SpaceImportCard() {
             {preview.skipCount > 0 && <span className="text-ink-3">已在台账里 {preview.skipCount} 个（不覆盖）</span>}
             {preview.inferredCount > 0 && <Badge tone="yuzu">推断 {preview.inferredCount} 个</Badge>}
             {preview.siteCheckCount > 0 && <Badge tone="ember">待现场核对 {preview.siteCheckCount} 个</Badge>}
-            {preview.issues.length === 0 ? (
-              preview.createCount > 0 ? (
-                <Badge tone="pine">可以写入</Badge>
-              ) : (
-                <Badge>没有要新建的</Badge>
-              )
-            ) : (
-              <Badge tone="clay">{preview.issues.length} 行要先改好</Badge>
-            )}
+            {preview.issues.length === 0 ? preview.createCount > 0 ? <Badge tone="pine">可以写入</Badge> : <Badge>没有要新建的</Badge> : <Badge tone="clay">{preview.issues.length} 行要先改好</Badge>}
           </div>
           {preview.duplicateOf && (
             <Notice tone="warning" title={`这个文件已经在 ${formatDateTime(preview.duplicateOf.createdAt)} 由 ${preview.duplicateOf.createdByName} 导入过`}>

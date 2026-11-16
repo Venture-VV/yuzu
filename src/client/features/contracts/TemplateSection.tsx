@@ -11,8 +11,7 @@ import { LoadFailed } from '../../components/LoadFailed';
 import { Card, Field, Input, Notice, Select, Skeleton } from '../../components/ui';
 
 export const docTemplatesKey = ['contracts', 'doc-templates'] as const;
-export const useDocTemplates = (all = false) =>
-  useQuery({ queryKey: [...docTemplatesKey, all], queryFn: () => api.get<ContractTemplate[]>(`/api/erp/contracts/doc-templates${all ? '?all=1' : ''}`) });
+export const useDocTemplates = (all = false) => useQuery({ queryKey: [...docTemplatesKey, all], queryFn: () => api.get<ContractTemplate[]>(`/api/erp/contracts/doc-templates${all ? '?all=1' : ''}`) });
 
 export function TemplateSection({ category, value, onChange }: { category: ContractCategory; value: ContractTemplateRef | null; onChange: (v: ContractTemplateRef | null) => void }) {
   const list = useDocTemplates(true);
@@ -32,7 +31,7 @@ export function TemplateSection({ category, value, onChange }: { category: Contr
     );
   }
   const all = list.data;
-  const current = value ? all.find((t) => t.id === value.id) ?? null : null;
+  const current = value ? (all.find((t) => t.id === value.id) ?? null) : null;
   const choices = all.filter((t) => t.status === 'active' || t.id === value?.id);
   const pick = (id: number | null) => {
     const t = all.find((x) => x.id === id);
@@ -58,9 +57,7 @@ export function TemplateSection({ category, value, onChange }: { category: Contr
           与这份合同的类型不一样，确认一下是不是选错了。
         </Notice>
       )}
-      {value && current?.status === 'retired' && (
-        <p className="mt-2 text-[12.5px] text-ink-3">这份合同用的是第 {value.version} 版；模板已经改过，新起草的合同用新的一版。</p>
-      )}
+      {value && current?.status === 'retired' && <p className="mt-2 text-[12.5px] text-ink-3">这份合同用的是第 {value.version} 版；模板已经改过，新起草的合同用新的一版。</p>}
       {value && current && (
         <div className="mt-3 space-y-3">
           {current.fields.length > 0 && (

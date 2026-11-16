@@ -78,13 +78,7 @@ export function DelegationsPanel() {
                 {g.startsOn} 至 {g.endsOn}
               </span>
               {g.reason && <span className="text-ink-3">{g.reason}</span>}
-              {g.revokedAt ? (
-                <Badge>已收回 · {formatDateTime(g.revokedAt)}</Badge>
-              ) : g.active ? (
-                <Badge tone="pine">代理中</Badge>
-              ) : (
-                <Badge tone="neutral">未到或已过</Badge>
-              )}
+              {g.revokedAt ? <Badge>已收回 · {formatDateTime(g.revokedAt)}</Badge> : g.active ? <Badge tone="pine">代理中</Badge> : <Badge tone="neutral">未到或已过</Badge>}
               {!g.revokedAt && (g.staffId === session.staff.id || manage) && (
                 <Button size="sm" variant="ghost" className="ml-auto" loading={busy === g.id} onClick={() => void revoke(g.id)}>
                   收回

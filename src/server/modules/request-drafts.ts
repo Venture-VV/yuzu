@@ -46,7 +46,10 @@ const DraftLine = z.object({
 });
 const DraftBody = z.object({
   departmentId: id.nullable().default(null),
-  needBy: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/, '日期格式应为 YYYY-MM-DD').default(''),
+  needBy: z
+    .string()
+    .regex(/^(\d{4}-\d{2}-\d{2})?$/, '日期格式应为 YYYY-MM-DD')
+    .default(''),
   priority: z.enum(['urgent', 'normal']).default('normal'),
   note: text(DRAFT_LIMITS.note),
   lines: z.array(DraftLine).min(1, '至少一行').max(50, '一张需求单最多 50 行'),
@@ -141,9 +144,13 @@ async function saveOnce(deps: Deps, key: string, input: z.infer<typeof SaveInput
     // 别人的草稿编号：当作不存在
     if (row && Number(row.staffId) !== actor.id) throw notFound('草稿不存在');
     if (row?.closedReason) {
-      throw conflict('DRAFT_CLOSED', row.closedReason === 'submitted' ? '这份草稿已经提交成需求单了，不再保存' : row.closedReason === 'deleted' ? '这份草稿已经删除，不再保存' : '这张需求单已经结束审核，草稿不再保存', {
-        reason: row.closedReason,
-      });
+      throw conflict(
+        'DRAFT_CLOSED',
+        row.closedReason === 'submitted' ? '这份草稿已经提交成需求单了，不再保存' : row.closedReason === 'deleted' ? '这份草稿已经删除，不再保存' : '这张需求单已经结束审核，草稿不再保存',
+        {
+          reason: row.closedReason,
+        },
+      );
     }
     // 同一次保存再发一次（上一次没收到回复）：已经存过了
     if (row && row.lastSaveId === input.saveId) return;

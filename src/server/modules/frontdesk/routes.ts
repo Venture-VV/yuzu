@@ -129,9 +129,7 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     return listTicketTypes(sql, all === '1');
   });
 
-  app.post('/api/frontdesk/ticket-types', { preHandler: guard('catalog.manage') }, async (req) =>
-    saveTicketType(sql, null, req.body as TicketTypeInputData, ctxOf(req)),
-  );
+  app.post('/api/frontdesk/ticket-types', { preHandler: guard('catalog.manage') }, async (req) => saveTicketType(sql, null, req.body as TicketTypeInputData, ctxOf(req)));
 
   app.put('/api/frontdesk/ticket-types/:id', { preHandler: guard('catalog.manage') }, async (req) => {
     const { id } = parse(idParam, req.params);
@@ -157,9 +155,7 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     return previewCheckout(deps, ids, at ? checkBackfillAt(new Date(at), req.actor) : undefined);
   });
 
-  app.post('/api/frontdesk/checkouts', { preHandler: guard('frontdesk.checkout') }, async (req) =>
-    checkout(deps, req.body as CheckoutInputData, ctxOf(req)),
-  );
+  app.post('/api/frontdesk/checkouts', { preHandler: guard('frontdesk.checkout') }, async (req) => checkout(deps, req.body as CheckoutInputData, ctxOf(req)));
 
   // 结账时输入券码核对（v0.7.20）：手牌结账按所选手牌（含此刻的门票），桌台结账按所选的桌；能不能用、能抵多少
   app.post('/api/frontdesk/checkout-coupon', { preHandler: guard('frontdesk.checkout') }, async (req) => {
@@ -171,7 +167,7 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
       }),
       req.body ?? {},
     );
-    if ((input.visitIds.length > 0) === (input.tableSessionIds.length > 0)) throw badRequest('请选择要结账的手牌或桌台');
+    if (input.visitIds.length > 0 === input.tableSessionIds.length > 0) throw badRequest('请选择要结账的手牌或桌台');
     const at = new Date();
     let billIds: number[];
     let memberIds: number[];
@@ -271,9 +267,7 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   // ── 手牌池 ──
   app.get('/api/frontdesk/tags', { preHandler: guard('frontdesk.read') }, async () => listTags(sql));
 
-  app.post('/api/frontdesk/tags/import', { preHandler: guard('frontdesk.tags') }, async (req) =>
-    importHandTags(sql, req.body as ImportInputData, { staffId: req.actor.id, ip: req.ip, via: 'web' }),
-  );
+  app.post('/api/frontdesk/tags/import', { preHandler: guard('frontdesk.tags') }, async (req) => importHandTags(sql, req.body as ImportInputData, { staffId: req.actor.id, ip: req.ip, via: 'web' }));
 
   app.post('/api/frontdesk/tags/batch', { preHandler: guard('frontdesk.tags') }, async (req) => batchCreate(deps, req.body, ctxOf(req)));
 

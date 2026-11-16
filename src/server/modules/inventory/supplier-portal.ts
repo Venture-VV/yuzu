@@ -59,7 +59,9 @@ async function confirmationOf(db: Db, poId: number): Promise<SupplierConfirmatio
 }
 
 export async function deliveryNotices(db: Db, poId: number): Promise<DeliveryNotice[]> {
-  const rows = await db<{ id: number; content: { shipDate: string; eta: string | null; trackingNo: string; lines: { lineId: number; qtyMilli: number }[]; note: string }; replyName: string; createdAt: string }[]>`
+  const rows = await db<
+    { id: number; content: { shipDate: string; eta: string | null; trackingNo: string; lines: { lineId: number; qtyMilli: number }[]; note: string }; replyName: string; createdAt: string }[]
+  >`
     SELECT r.id, r.content, r.reply_name, r.created_at
     FROM supplier_link_replies r JOIN supplier_links l ON l.id = r.link_id JOIN purchase_orders p ON p.id = l.purchase_order_id
     WHERE l.purchase_order_id = ${poId} AND l.kind = 'delivery'
@@ -86,7 +88,16 @@ async function quoteSnapshot(db: Db, eventId: number, supplierName: string): Pro
     needBy: ev.needBy,
     orderDate: null,
     note: ev.note,
-    lines: ev.lines.map((l) => ({ lineId: l.id, lineNo: l.lineNo, materialName: l.materialName, spec: l.spec, purchaseUnit: l.purchaseUnit, purchaseQtyMilli: l.purchaseQtyMilli, priceCents: null, amountCents: null })),
+    lines: ev.lines.map((l) => ({
+      lineId: l.id,
+      lineNo: l.lineNo,
+      materialName: l.materialName,
+      spec: l.spec,
+      purchaseUnit: l.purchaseUnit,
+      purchaseQtyMilli: l.purchaseQtyMilli,
+      priceCents: null,
+      amountCents: null,
+    })),
     totalCents: null,
   };
 }
@@ -102,7 +113,16 @@ async function poSnapshot(db: Db, poId: number): Promise<SupplierLinkSnapshot> {
     needBy: po.expectedDate,
     orderDate: po.orderDate,
     note: po.note,
-    lines: po.lines.map((l) => ({ lineId: l.id, lineNo: l.lineNo, materialName: l.materialName, spec: l.spec || l.specification, purchaseUnit: l.purchaseUnit, purchaseQtyMilli: l.purchaseQtyMilli, priceCents: l.priceCents, amountCents: l.amountCents })),
+    lines: po.lines.map((l) => ({
+      lineId: l.id,
+      lineNo: l.lineNo,
+      materialName: l.materialName,
+      spec: l.spec || l.specification,
+      purchaseUnit: l.purchaseUnit,
+      purchaseQtyMilli: l.purchaseQtyMilli,
+      priceCents: l.priceCents,
+      amountCents: l.amountCents,
+    })),
     totalCents: po.totalCents,
     // 发链接时的版次：采购单改版以后这条链接不能再回复（Codex 审查 beabd59 后补）
     revision: po.revision,
@@ -114,7 +134,12 @@ function poLinkCurrent(l: { supplierId: number; snapshot: SupplierLinkSnapshot }
   return Number(po.supplierId) === l.supplierId && (l.snapshot.revision === undefined || l.snapshot.revision === Number(po.revision));
 }
 
-async function insertLink(tx: Tx, a: { kind: SupplierLinkKind; eventId: number | null; poId: number | null; supplierId: number; snapshot: SupplierLinkSnapshot; days: number }, actor: Actor, ip?: string) {
+async function insertLink(
+  tx: Tx,
+  a: { kind: SupplierLinkKind; eventId: number | null; poId: number | null; supplierId: number; snapshot: SupplierLinkSnapshot; days: number },
+  actor: Actor,
+  ip?: string,
+) {
   const token = randomBytes(24).toString('base64url');
   // 同一对象、同一家、同种类还在用的旧链接作废（只留新发的一条能用）
   await tx`
@@ -178,7 +203,14 @@ export async function voidSupplierLink(deps: Deps, linkId: number, actor: Actor,
     if (!l) throw notFound('链接不存在');
     if (l.voidedAt) return;
     await tx`UPDATE supplier_links SET voided_by = ${actor.id}, voided_at = now() WHERE id = ${linkId}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'supplier_link', targetType: l.eventId ? 'sourcing_event' : 'purchase_order', targetId: Number(l.eventId ?? l.poId), detail: { op: 'void', kind: l.kind, linkId }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'supplier_link',
+      targetType: l.eventId ? 'sourcing_event' : 'purchase_order',
+      targetId: Number(l.eventId ?? l.poId),
+      detail: { op: 'void', kind: l.kind, linkId },
+      ip,
+    });
   });
   const [l] = await deps.sql<{ eventId: number | null; poId: number | null }[]>`SELECT sourcing_event_id AS event_id, purchase_order_id AS po_id FROM supplier_links WHERE id = ${linkId}`;
   return linkStates(deps.sql, l!.eventId ? { eventId: Number(l!.eventId) } : { poId: Number(l!.poId) });
@@ -260,7 +292,10 @@ const Name = z.string('请留下您的姓名').trim().min(1, '请留下您的姓
 const Base = { clientKey: z.uuid('页面过期了，请刷新后重试'), name: Name };
 const QuoteReply = z.object({
   ...Base,
-  prices: z.array(z.object({ lineId: z.number().int().positive(), priceCents: z.number('请填写单价').int().min(0, '单价不能为负').max(100_000_000) })).min(1).max(30),
+  prices: z
+    .array(z.object({ lineId: z.number().int().positive(), priceCents: z.number('请填写单价').int().min(0, '单价不能为负').max(100_000_000) }))
+    .min(1)
+    .max(30),
   freightCents: z.number().int().min(0, '运费不能为负').max(100_000_000).default(0),
   payTerms: z.string().trim().min(1, '请写付款条件，例如「月结 30 天」「现付」').max(30, '付款条件最多 30 个字'),
   creditDays: z.number().int().min(0).max(365).default(0),
@@ -274,7 +309,10 @@ const DeliveryReply = z.object({
   shipDate: docDateSchema,
   eta: docDateSchema.nullable().default(null),
   trackingNo: z.string().trim().max(40, '物流单号最多 40 个字').default(''),
-  lines: z.array(z.object({ lineId: z.number().int().positive(), qtyMilli: z.number().int().positive('发货数量要大于 0').max(1_000_000_000) })).min(1, '至少写一行发了多少').max(60),
+  lines: z
+    .array(z.object({ lineId: z.number().int().positive(), qtyMilli: z.number().int().positive('发货数量要大于 0').max(1_000_000_000) }))
+    .min(1, '至少写一行发了多少')
+    .max(60),
   note: z.string().trim().max(300, '备注最多 300 个字').default(''),
 });
 
@@ -371,14 +409,31 @@ export function registerSupplierPortalRoutes(app: FastifyInstance, deps: Deps) {
           const quote = await insertQuoteLocked(
             tx,
             l.eventId!,
-            { supplierId: l.supplierId, clientKey: q.clientKey, freightCents: q.freightCents, payTerms: q.payTerms, creditDays: q.creditDays, deliveryDays: q.deliveryDays, validUntil: q.validUntil, note: q.note, prices: q.prices },
+            {
+              supplierId: l.supplierId,
+              clientKey: q.clientKey,
+              freightCents: q.freightCents,
+              payTerms: q.payTerms,
+              creditDays: q.creditDays,
+              deliveryDays: q.deliveryDays,
+              validUntil: q.validUntil,
+              note: q.note,
+              prices: q.prices,
+            },
             requestHash,
             l.createdBy,
             l.id,
           );
           await tx`UPDATE sourcing_events SET updated_at = now() WHERE id = ${l.eventId!}`;
           await insertReply({ goodsCents: quote.goodsCents, freightCents: q.freightCents, payTerms: q.payTerms, deliveryDays: q.deliveryDays, validUntil: q.validUntil, note: q.note }, quote.id);
-          await writeAudit(tx, { staffId: null, action: 'supplier_reply', targetType: 'sourcing_event', targetId: l.eventId!, detail: { kind: 'quote', linkId: l.id, quoteId: quote.id, name: input.name, goodsCents: quote.goodsCents, freightCents: q.freightCents }, ip: req.ip });
+          await writeAudit(tx, {
+            staffId: null,
+            action: 'supplier_reply',
+            targetType: 'sourcing_event',
+            targetId: l.eventId!,
+            detail: { kind: 'quote', linkId: l.id, quoteId: quote.id, name: input.name, goodsCents: quote.goodsCents, freightCents: q.freightCents },
+            ip: req.ip,
+          });
         } else if (l.kind === 'po_confirm') {
           const c = input as z.infer<typeof ConfirmReply>;
           if (c.promisedDate < today) throw unprocessable('DATE_PASSED', '承诺到货日不能早于今天');
@@ -386,7 +441,14 @@ export function registerSupplierPortalRoutes(app: FastifyInstance, deps: Deps) {
           await tx`
             INSERT INTO po_supplier_confirmations (purchase_order_id, link_id, reply_id, promised_date, reply_name, note, po_revision)
             VALUES (${l.poId!}, ${l.id}, ${replyId}, ${c.promisedDate}, ${input.name}, ${c.note}, ${Number(poRow!.revision)})`;
-          await writeAudit(tx, { staffId: null, action: 'supplier_reply', targetType: 'purchase_order', targetId: l.poId!, detail: { kind: 'po_confirm', linkId: l.id, name: input.name, promisedDate: c.promisedDate }, ip: req.ip });
+          await writeAudit(tx, {
+            staffId: null,
+            action: 'supplier_reply',
+            targetType: 'purchase_order',
+            targetId: l.poId!,
+            detail: { kind: 'po_confirm', linkId: l.id, name: input.name, promisedDate: c.promisedDate },
+            ip: req.ip,
+          });
         } else {
           const d = input as z.infer<typeof DeliveryReply>;
           if (d.eta && d.eta < d.shipDate) throw unprocessable('DATE_ORDER', '预计到货不能早于发货日');
@@ -400,7 +462,14 @@ export function registerSupplierPortalRoutes(app: FastifyInstance, deps: Deps) {
             if (x.qtyMilli > line.purchaseQtyMilli) throw unprocessable('QTY_OVER', `「${line.materialName}」发货数量超过了下单数量`);
           }
           await insertReply({ shipDate: d.shipDate, eta: d.eta, trackingNo: d.trackingNo, lines: d.lines, note: d.note }, null);
-          await writeAudit(tx, { staffId: null, action: 'supplier_reply', targetType: 'purchase_order', targetId: l.poId!, detail: { kind: 'delivery', linkId: l.id, name: input.name, shipDate: d.shipDate, eta: d.eta, lines: d.lines.length }, ip: req.ip });
+          await writeAudit(tx, {
+            staffId: null,
+            action: 'supplier_reply',
+            targetType: 'purchase_order',
+            targetId: l.poId!,
+            detail: { kind: 'delivery', linkId: l.id, name: input.name, shipDate: d.shipDate, eta: d.eta, lines: d.lines.length },
+            ip: req.ip,
+          });
         }
       });
     } catch (error) {
@@ -414,4 +483,3 @@ export function registerSupplierPortalRoutes(app: FastifyInstance, deps: Deps) {
     return viewOf(sql, (await findByToken(sql, token, false))!);
   });
 }
-

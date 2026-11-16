@@ -54,11 +54,7 @@ export async function submitPatrol(employeeId: number, body: PatrolScanBody): Pr
     return { kind: 'done', result };
   } catch (e) {
     // 没网、超时、服务器出错（结果不明），饭堂 / 巡场暂时没开、正忙、要重新登录、这台手机现在登录的是另一位：留着补交
-    if (
-      e instanceof NetworkError ||
-      (e instanceof ApiError && (e.status === 503 || e.status === 401 || e.code === 'BUSY' || e.code === 'PATROL_OTHER_EMPLOYEE'))
-    )
-      return { kind: 'queued' };
+    if (e instanceof NetworkError || (e instanceof ApiError && (e.status === 503 || e.status === 401 || e.code === 'BUSY' || e.code === 'PATROL_OTHER_EMPLOYEE'))) return { kind: 'queued' };
     dequeuePatrol(employeeId, body.clientKey);
     return { kind: 'rejected', error: e as ApiError };
   } finally {

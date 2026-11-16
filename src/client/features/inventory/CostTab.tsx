@@ -58,9 +58,7 @@ export function CostTab() {
             </Card>
             <Card className="p-4" data-testid="cost-total-margin">
               <div className="text-[12.5px] font-semibold text-ink-3">设了用料的项目 · 理论毛利</div>
-              <div className="num mt-1 text-[24px] font-bold">
-                {formatYuan(r.margin.rows.filter((x) => x.marginCents !== null).reduce((a, x) => a + (x.marginCents ?? 0), 0))}
-              </div>
+              <div className="num mt-1 text-[24px] font-bold">{formatYuan(r.margin.rows.filter((x) => x.marginCents !== null).reduce((a, x) => a + (x.marginCents ?? 0), 0))}</div>
               <div className="text-[12.5px] text-ink-3">销售额（减去优惠后）− 配方 × 现在的平均成本，不是当时真实耗用</div>
             </Card>
           </div>

@@ -56,8 +56,7 @@ function checkoutMatchSql(db: Db, q: string) {
   const like = `%${escapeLike(q)}%`;
   const phone = orderPhoneQuery(q);
   const digits = /^[0-9]+$/.test(q);
-  const phoneOf = (m: string) =>
-    phone === 'tail' ? db`OR right(${db(`${m}.phone`)}, 4) = ${q}` : phone === 'full' ? db`OR ${db(`${m}.phone`)} = ${q}` : db``;
+  const phoneOf = (m: string) => (phone === 'tail' ? db`OR right(${db(`${m}.phone`)}, 4) = ${q}` : phone === 'full' ? db`OR ${db(`${m}.phone`)} = ${q}` : db``);
   return db`(
     c.checkout_no ILIKE ${like}
     OR EXISTS (
@@ -96,7 +95,13 @@ const holdersSql = (db: Db, checkoutId: string) => db`
 
 type RowRecord = Omit<OrderRow, 'createdAt'> & { createdAt: string | Date };
 
-const toRow = (r: RowRecord): OrderRow => ({ ...r, createdAt: new Date(r.createdAt).toISOString(), guests: [...new Set(r.guests)], amount: Number(r.amount), refundedAmount: Number(r.refundedAmount) });
+const toRow = (r: RowRecord): OrderRow => ({
+  ...r,
+  createdAt: new Date(r.createdAt).toISOString(),
+  guests: [...new Set(r.guests)],
+  amount: Number(r.amount),
+  refundedAmount: Number(r.refundedAmount),
+});
 
 /**
  * 查订单。没有搜索词：所选营业日的全部结账单（含这一天反结账的）与退款单，不限张数。
@@ -216,10 +221,7 @@ export async function checkoutOrderDetail(db: Db, id: number): Promise<CheckoutO
 
 // ───────────────────────── 导出 ─────────────────────────
 
-const EXPORT_HEADER = [
-  '营业日', '时间', '单号', '类型', '状态', '手牌 / 桌号', '会员 / 称呼', '部门', '项目', '技师',
-  '数量', '单价', '金额', '优惠', '实收', '整单收款方式', '经办人', '原结账单号',
-];
+const EXPORT_HEADER = ['营业日', '时间', '单号', '类型', '状态', '手牌 / 桌号', '会员 / 称呼', '部门', '项目', '技师', '数量', '单价', '金额', '优惠', '实收', '整单收款方式', '经办人', '原结账单号'];
 
 const money = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(cents);
 const methodLabel = (m: string) => CHECKOUT_METHOD_LABELS[m as CheckoutMethod] ?? m;
@@ -243,7 +245,10 @@ export async function ordersCsv(db: Db, rows: readonly OrderRow[], timeZone: str
     const head = [r.businessDate, time(r.createdAt), r.docNo, r.kind === 'checkout' ? '结账单' : '退款单', orderStatusLabel(r)];
     const tail = [r.methods.map(methodLabel).join('、'), r.operatorName, r.kind === 'refund' ? r.checkoutNo : ''];
     if (r.kind === 'checkout') {
-      const { lines } = resolveLines(allLines.filter((l) => l.checkoutId === r.id), allItems.filter((i) => i.checkoutId === r.id));
+      const { lines } = resolveLines(
+        allLines.filter((l) => l.checkoutId === r.id),
+        allItems.filter((i) => i.checkoutId === r.id),
+      );
       for (const l of lines) {
         body.push([
           ...head,

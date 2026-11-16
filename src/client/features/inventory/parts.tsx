@@ -1,17 +1,5 @@
 import type { ReactNode } from 'react';
-import {
-  ArrowRightLeft,
-  ClipboardCheck,
-  Droplets,
-  Flag,
-  PackageMinus,
-  PackagePlus,
-  PackageX,
-  RotateCcw,
-  Truck,
-  Undo2,
-  type LucideIcon,
-} from 'lucide-react';
+import { ArrowRightLeft, ClipboardCheck, Droplets, Flag, PackageMinus, PackagePlus, PackageX, RotateCcw, Truck, Undo2, type LucideIcon } from 'lucide-react';
 import { INV_DOC_META, INV_STATUS_LABELS, MOVE_TYPE_LABELS, type InvDocStatus, type InvDocType, type MoveType } from '@shared/inventory';
 import { formatQty, packText } from '@shared/quantity';
 import { cn } from '../../lib/utils';
@@ -79,19 +67,7 @@ export function StatusChip({ status, className }: { status: InvDocStatus; classN
 }
 
 /** 数量 + 单位；单位缩小弱化，「10 箱」和「10 瓶」一眼可辨 */
-export function Qty({
-  milli,
-  unit,
-  signed,
-  className,
-  unitClassName,
-}: {
-  milli: number;
-  unit: string;
-  signed?: boolean;
-  className?: string;
-  unitClassName?: string;
-}) {
+export function Qty({ milli, unit, signed, className, unitClassName }: { milli: number; unit: string; signed?: boolean; className?: string; unitClassName?: string }) {
   const sign = signed ? (milli > 0 ? '+' : milli < 0 ? '−' : '') : milli < 0 ? '−' : '';
   return (
     <span className={cn('num inline-flex items-baseline gap-[0.22em] whitespace-nowrap', className)}>

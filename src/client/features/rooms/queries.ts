@@ -11,8 +11,7 @@ export const roomsAdminKey = ['admin', 'rooms'] as const;
 export const useRoomBoard = (enabled = true, refetchInterval = 15_000) =>
   useQuery({ queryKey: roomsKey, queryFn: () => api.get<RoomBoard>('/api/rooms'), refetchInterval, placeholderData: keepPreviousData, enabled });
 
-export const useStay = (id: number | null) =>
-  useQuery({ queryKey: stayKey(id), queryFn: () => api.get<StayDetail>(`/api/rooms/stays/${id}`), enabled: id !== null, refetchInterval: 30_000 });
+export const useStay = (id: number | null) => useQuery({ queryKey: stayKey(id), queryFn: () => api.get<StayDetail>(`/api/rooms/stays/${id}`), enabled: id !== null, refetchInterval: 30_000 });
 
 /** 退房前核对（要补的房费、押金）；30 秒刷新一次，过了退房时间要补的房费会变 */
 export const useStayClosePreview = (id: number, enabled: boolean) =>

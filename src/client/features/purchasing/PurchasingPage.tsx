@@ -107,7 +107,13 @@ export function PurchasingPage() {
         </Select>
         <div className="relative min-w-[200px] flex-1 md:max-w-xs">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="单号 / 供应商 / 备注" aria-label="搜索采购单" className="h-9 w-full rounded-md border border-line-strong bg-card pr-3 pl-9 text-[13px] outline-none focus:border-pine" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="单号 / 供应商 / 备注"
+            aria-label="搜索采购单"
+            className="h-9 w-full rounded-md border border-line-strong bg-card pr-3 pl-9 text-[13px] outline-none focus:border-pine"
+          />
         </div>
       </div>
 
@@ -117,7 +123,12 @@ export function PurchasingPage() {
         ) : pos.isPending ? (
           <Skeleton className="h-64" />
         ) : pos.data.length === 0 ? (
-          <EmptyState art="leaf" title="没有符合条件的采购单" description={can('purchase.manage') ? '新建采购单后，负责人确认即可按单收货。' : undefined} className="rounded-lg border border-dashed border-line-strong" />
+          <EmptyState
+            art="leaf"
+            title="没有符合条件的采购单"
+            description={can('purchase.manage') ? '新建采购单后，负责人确认即可按单收货。' : undefined}
+            className="rounded-lg border border-dashed border-line-strong"
+          />
         ) : (
           <ul className="overflow-hidden rounded-lg border border-line bg-card shadow-card">
             {pos.data.map((p) => (

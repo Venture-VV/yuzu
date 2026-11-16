@@ -97,12 +97,9 @@ export interface CouponLine {
   usageCharge?: 'fee' | 'open_fee' | null;
 }
 
-export type CouponEvaluation =
-  | { usable: true; amount: number; lineIds: number[]; base: number }
-  | { usable: false; reason: string; base: number };
+export type CouponEvaluation = { usable: true; amount: number; lineIds: number[]; base: number } | { usable: false; reason: string; base: number };
 
-const inScope = (t: CouponTerms, l: CouponLine) =>
-  t.scope === 'all' || (t.scope === 'categories' ? t.scopeCategories.includes(l.category) : l.itemId !== null && t.scopeItems.includes(l.itemId));
+const inScope = (t: CouponTerms, l: CouponLine) => t.scope === 'all' || (t.scope === 'categories' ? t.scopeCategories.includes(l.category) : l.itemId !== null && t.scopeItems.includes(l.itemId));
 
 /**
  * 这张券在这些明细上能抵多少（不找零）：
@@ -114,9 +111,7 @@ const inScope = (t: CouponTerms, l: CouponLine) =>
 export function evaluateCoupon(t: CouponTerms, lines: readonly CouponLine[]): CouponEvaluation {
   if (t.kind === 'bogo') return evaluateBogo(t, lines);
   if (t.kind === 'exchange') {
-    const candidates = lines.filter(
-      (l) => l.amount > 0 && (t.exchangeItemId !== null ? l.itemId === t.exchangeItemId : l.ticketTypeId !== null && l.ticketTypeId === t.exchangeTicketTypeId),
-    );
+    const candidates = lines.filter((l) => l.amount > 0 && (t.exchangeItemId !== null ? l.itemId === t.exchangeItemId : l.ticketTypeId !== null && l.ticketTypeId === t.exchangeTicketTypeId));
     if (candidates.length === 0) return { usable: false, reason: '账单上没有这张券能兑换的项目', base: 0 };
     const best = candidates.reduce((a, b) => (b.unitPrice > a.unitPrice || (b.unitPrice === a.unitPrice && b.id < a.id) ? b : a));
     const unit = Math.min(best.unitPrice, best.amount);

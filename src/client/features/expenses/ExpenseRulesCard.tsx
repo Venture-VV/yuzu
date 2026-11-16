@@ -69,7 +69,10 @@ export function ExpenseRulesCard() {
   const save = async () => {
     const threshold = parseYuan(draft.threshold);
     const overdueDays = Number(draft.overdueDays);
-    const purposes = draft.purposes.split('\n').map((p) => p.trim()).filter(Boolean);
+    const purposes = draft.purposes
+      .split('\n')
+      .map((p) => p.trim())
+      .filter(Boolean);
     const invoiceTypes = draft.invoiceTypes.map((t) => ({ key: t.key, label: t.label.trim(), needsNumber: t.needsNumber, taxRatesBp: parseRates(t.rates), certify: t.certify }));
     const budgetWarnPercent = intIn(draft.warnPercent, 50, 100);
     const invoiceCertifyDays = intIn(draft.certifyDays, 0, 3650);
@@ -105,8 +108,7 @@ export function ExpenseRulesCard() {
       setBusy(false);
     }
   };
-  const setType = (i: number, patch: Partial<Draft['invoiceTypes'][number]>) =>
-    setDraft((d) => d && { ...d, invoiceTypes: d.invoiceTypes.map((t, j) => (j === i ? { ...t, ...patch } : t)) });
+  const setType = (i: number, patch: Partial<Draft['invoiceTypes'][number]>) => setDraft((d) => d && { ...d, invoiceTypes: d.invoiceTypes.map((t, j) => (j === i ? { ...t, ...patch } : t)) });
 
   return (
     <Card className="space-y-4 p-5" data-testid="expense-rules">
@@ -153,10 +155,23 @@ export function ExpenseRulesCard() {
                 必须填发票号
               </label>
               <label className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-2" title="进项发票台账：要认证的发票记待认证、算认证期限">
-                <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={t.certify} onChange={(e) => setType(i, { certify: e.target.checked })} data-testid={`er-type-certify-${t.key}`} />
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[var(--color-pine)]"
+                  checked={t.certify}
+                  onChange={(e) => setType(i, { certify: e.target.checked })}
+                  data-testid={`er-type-certify-${t.key}`}
+                />
                 要认证
               </label>
-              <Button variant="ghost" size="sm" icon={<Trash2 className="size-4" />} disabled={draft.invoiceTypes.length === 1} onClick={() => setDraft({ ...draft, invoiceTypes: draft.invoiceTypes.filter((_, j) => j !== i) })} aria-label={`删除${t.label}`} />
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Trash2 className="size-4" />}
+                disabled={draft.invoiceTypes.length === 1}
+                onClick={() => setDraft({ ...draft, invoiceTypes: draft.invoiceTypes.filter((_, j) => j !== i) })}
+                aria-label={`删除${t.label}`}
+              />
             </li>
           ))}
         </ul>

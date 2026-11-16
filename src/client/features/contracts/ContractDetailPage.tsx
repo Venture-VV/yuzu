@@ -67,14 +67,7 @@ export function ContractDetailPage() {
   );
 }
 
-type DialogState =
-  | { kind: 'void' }
-  | { kind: 'sign' }
-  | { kind: 'archive' }
-  | { kind: 'terminate' }
-  | { kind: 'seal'; seal: SealView | null }
-  | { kind: 'change-void'; change: ChangeView }
-  | null;
+type DialogState = { kind: 'void' } | { kind: 'sign' } | { kind: 'archive' } | { kind: 'terminate' } | { kind: 'seal'; seal: SealView | null } | { kind: 'change-void'; change: ChangeView } | null;
 
 function Detail({ c }: { c: ContractDetail }) {
   const remindDays = useSession().rules.contractRemindDays;
@@ -112,13 +105,7 @@ function Detail({ c }: { c: ContractDetail }) {
 
   return (
     <div className="space-y-4" data-testid="contract-detail">
-      {manage && (
-        <ErpPendingPanel
-          types={['contract_change', 'contract_seal']}
-          filter={(op) => op.url.startsWith(`/api/erp/contracts/${c.id}/`)}
-          onFound={() => void invalidate()}
-        />
-      )}
+      {manage && <ErpPendingPanel types={['contract_change', 'contract_seal']} filter={(op) => op.url.startsWith(`/api/erp/contracts/${c.id}/`)} onFound={() => void invalidate()} />}
       {effective && c.daysLeft !== null && c.daysLeft <= remindDays && !c.renewal && (
         <Notice tone={c.daysLeft < 0 ? 'error' : 'warning'} title={`${c.endDate} ${daysLeftText(c.daysLeft)}，还没有续签`} data-testid="contract-expiry-notice">
           {manage ? '要接着合作就续签（照这份合同预填一份新合同，走审查）；不再合作的可以不管，过了结束日台账里标「已过期」。' : '请经办人续签或确认不再合作。'}
@@ -131,7 +118,11 @@ function Detail({ c }: { c: ContractDetail }) {
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <ContractStatusBadge status={c.status} />
           {c.currentVersion > 0 && <Badge tone="neutral">第 {c.currentVersion} 版</Badge>}
-          {openChange && <Badge tone="yuzu">变更单 {openChange.changeNo} {CHANGE_STATUS_LABELS[openChange.status]}</Badge>}
+          {openChange && (
+            <Badge tone="yuzu">
+              变更单 {openChange.changeNo} {CHANGE_STATUS_LABELS[openChange.status]}
+            </Badge>
+          )}
           <Money cents={c.totalCents} className="ml-auto text-[20px] font-bold" />
         </div>
         <Facts>
@@ -193,13 +184,27 @@ function Detail({ c }: { c: ContractDetail }) {
               <Button size="sm" variant="secondary" icon={<FilePen className="size-4" />} onClick={() => navigate(`/erp/contracts/${c.id}/edit`)} data-testid="contract-edit">
                 修改
               </Button>
-              <Button size="sm" variant="primary" icon={<Send className="size-4" />} loading={busy === 'submit'} onClick={() => void run('submit', `/api/erp/contracts/${c.id}/submit`, { version: c.version }, '已提交审查')} data-testid="contract-submit">
+              <Button
+                size="sm"
+                variant="primary"
+                icon={<Send className="size-4" />}
+                loading={busy === 'submit'}
+                onClick={() => void run('submit', `/api/erp/contracts/${c.id}/submit`, { version: c.version }, '已提交审查')}
+                data-testid="contract-submit"
+              >
                 提交审查
               </Button>
             </>
           )}
           {manage && c.status === 'reviewing' && (
-            <Button size="sm" variant="secondary" icon={<Undo2 className="size-4" />} loading={busy === 'withdraw'} onClick={() => void run('withdraw', `/api/erp/contracts/${c.id}/withdraw`, { version: c.version }, '已撤回，回到起草中')} data-testid="contract-withdraw">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Undo2 className="size-4" />}
+              loading={busy === 'withdraw'}
+              onClick={() => void run('withdraw', `/api/erp/contracts/${c.id}/withdraw`, { version: c.version }, '已撤回，回到起草中')}
+              data-testid="contract-withdraw"
+            >
               撤回
             </Button>
           )}
@@ -253,9 +258,7 @@ function Detail({ c }: { c: ContractDetail }) {
 
       {/* 内容 */}
       <Card className="space-y-4 p-5">
-        <h2 className="text-[14px] font-bold">
-          {editable ? '草稿内容（还没提交审查）' : c.status === 'reviewing' ? '提交审查的内容' : `合同内容（第 ${c.currentVersion} 版）`}
-        </h2>
+        <h2 className="text-[14px] font-bold">{editable ? '草稿内容（还没提交审查）' : c.status === 'reviewing' ? '提交审查的内容' : `合同内容（第 ${c.currentVersion} 版）`}</h2>
         <TermsView content={c.content} />
         <div>
           <h4 className="mb-1.5 text-[12.5px] font-bold text-ink-2">单价表</h4>
@@ -495,7 +498,13 @@ function Detail({ c }: { c: ContractDetail }) {
         </Card>
       )}
 
-      <SignDialog open={dialog?.kind === 'sign'} c={c} busy={busy === 'sign'} onClose={() => setDialog(null)} onConfirm={(body) => void run('sign', `/api/erp/contracts/${c.id}/sign`, { version: c.version, ...body }, '已登记签署，合同生效')} />
+      <SignDialog
+        open={dialog?.kind === 'sign'}
+        c={c}
+        busy={busy === 'sign'}
+        onClose={() => setDialog(null)}
+        onConfirm={(body) => void run('sign', `/api/erp/contracts/${c.id}/sign`, { version: c.version, ...body }, '已登记签署，合同生效')}
+      />
       <ArchiveDialog
         open={dialog?.kind === 'archive'}
         c={c}
@@ -542,7 +551,19 @@ function Detail({ c }: { c: ContractDetail }) {
 
 // ───────────────────────── 签署、归档、终止 ─────────────────────────
 
-function SignDialog({ open, c, busy, onClose, onConfirm }: { open: boolean; c: ContractDetail; busy: boolean; onClose: () => void; onConfirm: (body: { signedOn: string; ourSignatory: string; theirSignatory: string }) => void }) {
+function SignDialog({
+  open,
+  c,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  c: ContractDetail;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (body: { signedOn: string; ourSignatory: string; theirSignatory: string }) => void;
+}) {
   const session = useSession();
   const [signedOn, setSignedOn] = useState('');
   const [ours, setOurs] = useState('');
@@ -867,7 +888,12 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
                   <span className="line-clamp-2 break-all">{f.name || 'PDF'}</span>
                 </a>
               ) : (
-                <button type="button" onClick={() => setViewing(f.url)} className="block size-20 overflow-hidden rounded-md border border-line bg-paper-2 hover:border-line-strong" aria-label={`查看第 ${i + 1} 页`}>
+                <button
+                  type="button"
+                  onClick={() => setViewing(f.url)}
+                  className="block size-20 overflow-hidden rounded-md border border-line bg-paper-2 hover:border-line-strong"
+                  aria-label={`查看第 ${i + 1} 页`}
+                >
                   <img src={f.url} alt="" loading="lazy" className="size-full object-cover" />
                 </button>
               )}

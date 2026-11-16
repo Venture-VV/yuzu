@@ -80,18 +80,33 @@ export function BankPage() {
       <div className="space-y-4" data-testid="bank-page">
         {manage && <ErpPendingPanel types={['bank_import']} />}
         {!d ? (
-          data.error ? <Notice tone="error" title={errorMessage(data.error)} /> : <Skeleton className="h-60" />
+          data.error ? (
+            <Notice tone="error" title={errorMessage(data.error)} />
+          ) : (
+            <Skeleton className="h-60" />
+          )
         ) : (
           <>
             {d.accounts.length === 0 ? (
               <EmptyState art="leaf" title="还没有银行账户" description={manage ? '先「新增账户」：名称、开户行、账号后四位' : '对账付款的同事先建账户'} />
             ) : (
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => setAccountId(null)} className={cn('h-9 rounded-full px-3.5 text-[13px] font-semibold', accountId === null ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2')}>
+                <button
+                  type="button"
+                  onClick={() => setAccountId(null)}
+                  className={cn('h-9 rounded-full px-3.5 text-[13px] font-semibold', accountId === null ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2')}
+                >
                   全部账户
                 </button>
                 {d.accounts.map((a) => (
-                  <span key={a.id} className={cn('inline-flex h-9 items-center gap-1 rounded-full pl-3.5 pr-1 text-[13px] font-semibold', accountId === a.id ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2', !a.active && 'opacity-60')}>
+                  <span
+                    key={a.id}
+                    className={cn(
+                      'inline-flex h-9 items-center gap-1 rounded-full pl-3.5 pr-1 text-[13px] font-semibold',
+                      accountId === a.id ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2',
+                      !a.active && 'opacity-60',
+                    )}
+                  >
                     <button type="button" onClick={() => setAccountId(a.id)}>
                       <Building2 className="mr-1 inline size-3.5" />
                       {a.name} · {a.bankName} 尾号 {a.accountTail}
@@ -135,7 +150,12 @@ export function BankPage() {
                 <ul className="divide-y divide-line/70" data-testid="bank-lines">
                   {d.lines.map((l) => (
                     <li key={l.id}>
-                      <button type="button" onClick={() => setOpenId(l.id)} className="grid w-full grid-cols-[5.5em_minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-2.5 text-left hover:bg-paper-2/50" data-testid={`bank-line-${l.bankRef || l.id}`}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenId(l.id)}
+                        className="grid w-full grid-cols-[5.5em_minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-2.5 text-left hover:bg-paper-2/50"
+                        data-testid={`bank-line-${l.bankRef || l.id}`}
+                      >
                         <span className="num text-[12.5px] text-ink-3">{l.txnDate}</span>
                         <span className="min-w-0">
                           <span className="block truncate text-[14px] font-semibold">{l.counterparty || '（没有对方户名）'}</span>
@@ -223,7 +243,13 @@ function LineSheet({ id, manage, onClose }: { id: number | null; manage: boolean
     const k = `${c.type}:${c.id}`;
     return (
       <label key={k} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] hover:bg-paper-2/60">
-        <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={picked.includes(k)} onChange={(e) => setPicked(e.target.checked ? [...picked, k] : picked.filter((x) => x !== k))} data-testid={`bank-cand-${c.docNo}`} />
+        <input
+          type="checkbox"
+          className="size-4 accent-[var(--color-pine)]"
+          checked={picked.includes(k)}
+          onChange={(e) => setPicked(e.target.checked ? [...picked, k] : picked.filter((x) => x !== k))}
+          data-testid={`bank-cand-${c.docNo}`}
+        />
         <span className="num w-[5.5em] text-ink-3">{c.date}</span>
         <span className="min-w-0 flex-1 truncate">
           {MATCH_TARGET_LABELS[c.type]} · <span className="num">{c.docNo}</span> · {c.party}
@@ -269,7 +295,11 @@ function LineSheet({ id, manage, onClose }: { id: number | null; manage: boolean
                   <li key={m.id} className="flex items-center gap-2 rounded-md border border-line px-3 py-1.5 text-[13px]">
                     <span className="min-w-0 flex-1 truncate">
                       {MATCH_TARGET_LABELS[m.target.type]} · <span className="num">{m.target.docNo}</span> · {m.target.party}
-                      {m.target.voided && <Badge tone="clay" className="ml-1.5">已作废</Badge>}
+                      {m.target.voided && (
+                        <Badge tone="clay" className="ml-1.5">
+                          已作废
+                        </Badge>
+                      )}
                       <span className="ml-1.5 text-[12px] text-ink-3">
                         {m.auto ? '自动' : m.createdByName} · {formatDateTime(m.createdAt)}
                       </span>
@@ -319,7 +349,13 @@ function LineSheet({ id, manage, onClose }: { id: number | null; manage: boolean
                   variant="primary"
                   loading={busy}
                   disabled={!picked.length || sum > remaining}
-                  onClick={() => void post(`/api/erp/bank/lines/${l.id}/match`, { version: l.version, targets: picked.map((k) => ({ type: k.split(':')[0], id: Number(k.split(':')[1]) })) }, sum === remaining ? '已勾对，这条对平了' : '已勾对')}
+                  onClick={() =>
+                    void post(
+                      `/api/erp/bank/lines/${l.id}/match`,
+                      { version: l.version, targets: picked.map((k) => ({ type: k.split(':')[0], id: Number(k.split(':')[1]) })) },
+                      sum === remaining ? '已勾对，这条对平了' : '已勾对',
+                    )
+                  }
                   data-testid="bank-match"
                 >
                   勾对
@@ -345,7 +381,15 @@ function LineSheet({ id, manage, onClose }: { id: number | null; manage: boolean
         onClose={() => setIgnoring(false)}
         onConfirm={(reason) => l && void post(`/api/erp/bank/lines/${l.id}/ignore`, { version: l.version, reason }, '已标不用对')}
       />
-      <ReasonDialog open={unmatching !== null} title="撤销勾对" confirmLabel="撤销" danger busy={busy} onClose={() => setUnmatching(null)} onConfirm={(reason) => void post(`/api/erp/bank/matches/${unmatching}/void`, { reason }, '已撤销勾对')} />
+      <ReasonDialog
+        open={unmatching !== null}
+        title="撤销勾对"
+        confirmLabel="撤销"
+        danger
+        busy={busy}
+        onClose={() => setUnmatching(null)}
+        onConfirm={(reason) => void post(`/api/erp/bank/matches/${unmatching}/void`, { reason }, '已撤销勾对')}
+      />
     </Sheet>
   );
 }
@@ -533,7 +577,11 @@ function ImportDialog({ open, accounts, onClose }: { open: boolean; accounts: Ba
             </div>
             <p className="text-[12.5px] text-ink-3">
               认出 {preview.lines.length} 条流水，其中 {preview.duplicates} 条已经在系统里
-              {preview.problems.length > 0 && `；${preview.problems.length} 行认不出（${preview.problems.slice(0, 3).map((p) => `第 ${p.row} 行${p.message}`).join('，')}）`}
+              {preview.problems.length > 0 &&
+                `；${preview.problems.length} 行认不出（${preview.problems
+                  .slice(0, 3)
+                  .map((p) => `第 ${p.row} 行${p.message}`)
+                  .join('，')}）`}
             </p>
             {preview.lines.length > 0 && (
               <div className="max-h-56 overflow-y-auto rounded-lg border border-line">

@@ -89,7 +89,9 @@ export function NetworkPage() {
             {conn.state === 'offline' && (
               <>
                 <dt className="text-ink-3">从几点开始连不上</dt>
-                <dd>{time(conn.downSince)}（已经重新问了 {conn.attempts} 次）</dd>
+                <dd>
+                  {time(conn.downSince)}（已经重新问了 {conn.attempts} 次）
+                </dd>
               </>
             )}
             <dt className="text-ink-3">往返时间</dt>
@@ -105,7 +107,14 @@ export function NetworkPage() {
             <dd className={cn(!storageOk && 'font-bold text-clay')}>{storageOk ? '能用（「结果待确认」存得下）' : '不能用：记账类操作会拦着不让提交，请联系店主清理浏览器数据'}</dd>
           </dl>
           {versionMismatch && (
-            <Notice tone="warning" action={<Button size="sm" variant="primary" onClick={() => window.location.reload()}>刷新</Button>}>
+            <Notice
+              tone="warning"
+              action={
+                <Button size="sm" variant="primary" onClick={() => window.location.reload()}>
+                  刷新
+                </Button>
+              }
+            >
               系统已经更新，这一页还是更新前打开的；方便时刷新（没提交的内容先提交）。
             </Notice>
           )}
@@ -124,10 +133,24 @@ export function NetworkPage() {
           <p className="text-[13px] text-ink-3">提交时网络断了、超时，结果不知道的记录存在这台电脑的浏览器里，刷新、重新登录都不会丢；查回、按原内容重提或确认作废都用原来的编号，不会重复入账。</p>
           <ul className="space-y-1 text-[13.5px]">
             <li>
-              会员记账（充值、消费、撤销）：{memberOps.length} 笔{memberOps.length ? <Link to="/" className="ml-2 text-pine underline">去会员工作台处理</Link> : null}
+              会员记账（充值、消费、撤销）：{memberOps.length} 笔
+              {memberOps.length ? (
+                <Link to="/" className="ml-2 text-pine underline">
+                  去会员工作台处理
+                </Link>
+              ) : null}
             </li>
-            <li>前台（手牌、结账、客房、预约等）：{frontdeskOps.length} 笔{frontdeskOps.length ? <Link to="/frontdesk" className="ml-2 text-pine underline">去前台处理</Link> : null}</li>
-            <li>ERP 单据：{erpOps.length} 笔{erpOps.length ? <span className="ml-2 text-ink-3">（在登记它的那一页上方处理）</span> : null}</li>
+            <li>
+              前台（手牌、结账、客房、预约等）：{frontdeskOps.length} 笔
+              {frontdeskOps.length ? (
+                <Link to="/frontdesk" className="ml-2 text-pine underline">
+                  去前台处理
+                </Link>
+              ) : null}
+            </li>
+            <li>
+              ERP 单据：{erpOps.length} 笔{erpOps.length ? <span className="ml-2 text-ink-3">（在登记它的那一页上方处理）</span> : null}
+            </li>
           </ul>
         </Card>
 
@@ -182,7 +205,9 @@ export function NetworkPage() {
                 ))}
               </ul>
             ) : (
-              <p className="text-[13px] text-ink-3">{storeErrors.fetchStatus === 'paused' ? '连上服务器以后再取。' : storeErrors.isPending ? '正在取…' : storeErrors.isError ? '没取回来，稍后会自己再取。' : '没有。'}</p>
+              <p className="text-[13px] text-ink-3">
+                {storeErrors.fetchStatus === 'paused' ? '连上服务器以后再取。' : storeErrors.isPending ? '正在取…' : storeErrors.isError ? '没取回来，稍后会自己再取。' : '没有。'}
+              </p>
             )}
           </Card>
         )}

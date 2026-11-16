@@ -208,7 +208,14 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
                 testIdPrefix="approval-chain"
                 waitedText={waited(d.levelStartedAt)}
                 overdue={d.overdue}
-                levels={d.levelsDetail.map((lv) => ({ level: lv.level, label: lv.label, mode: APPROVAL_MODE_LABELS[lv.mode], state: lv.state === 'waiting' ? 'pending' : lv.state, waitingFor: lv.waitingFor, actions: lv.actions }))}
+                levels={d.levelsDetail.map((lv) => ({
+                  level: lv.level,
+                  label: lv.label,
+                  mode: APPROVAL_MODE_LABELS[lv.mode],
+                  state: lv.state === 'waiting' ? 'pending' : lv.state,
+                  waitingFor: lv.waitingFor,
+                  actions: lv.actions,
+                }))}
               />
               {d.stuck && (
                 <Notice tone="warning" className="mt-2" icon={<TriangleAlert className="size-4" />} title="这一级目前没人能审">
@@ -238,41 +245,47 @@ function Body({ id, onClose }: { id: number; onClose: () => void }) {
         <footer className="shrink-0 border-t border-line bg-card px-5 py-3 pb-[max(12px,env(safe-area-inset-bottom))]">
           <ApprovalResend sent={uncertain} onDone={refresh} />
         </footer>
-      ) : d?.canAct && (
-        <footer className="shrink-0 space-y-2 border-t border-line bg-card px-5 py-3 pb-[max(12px,env(safe-area-inset-bottom))]">
-          {d.actingFor.length > 0 && <p className="text-[12.5px] font-semibold text-lake">你是 {d.actingFor.join('、')} 的代理人，这次记「代 {d.actingFor.join('、')}」</p>}
-          {legal && (approveProblem || returnProblem) && (
-            <p className="text-[12.5px] font-semibold text-ember" data-testid="approval-legal-problem">
-              {returnProblem ?? approveProblem}
-              {!returnProblem && approveProblem && '（退回可以只填有问题的几条）'}
-            </p>
-          )}
-          <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="意见（选填）" maxLength={200} data-testid="approval-comment" />
-          <div className="flex gap-2">
-            <Button variant="secondary" className="flex-1" icon={<CornerUpLeft className="size-4" />} disabled={!!returnProblem} onClick={() => setReturning(true)} data-testid="approval-return">
-              退回
-            </Button>
-            <Button
-              variant="primary"
-              className="flex-[2]"
-              loading={busy === 'approve'}
-              disabled={!!approveProblem}
-              icon={<CircleCheck className="size-4" />}
-              data-testid="approval-approve"
-              onClick={() =>
-                void act(
-                  'approve',
-                  withChecklist({
-                    comment: comment.trim(),
-                    ...(Object.values(reasons).some(Boolean) ? { countReasons: Object.fromEntries(Object.entries(reasons).filter(([, v]) => v)) } : {}),
-                  }),
-                )
-              }
-            >
-              {d.levels > 1 ? `同意（第 ${d.currentLevel}/${d.levels} 级）` : '同意'}
-            </Button>
-          </div>
-        </footer>
+      ) : (
+        d?.canAct && (
+          <footer className="shrink-0 space-y-2 border-t border-line bg-card px-5 py-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+            {d.actingFor.length > 0 && (
+              <p className="text-[12.5px] font-semibold text-lake">
+                你是 {d.actingFor.join('、')} 的代理人，这次记「代 {d.actingFor.join('、')}」
+              </p>
+            )}
+            {legal && (approveProblem || returnProblem) && (
+              <p className="text-[12.5px] font-semibold text-ember" data-testid="approval-legal-problem">
+                {returnProblem ?? approveProblem}
+                {!returnProblem && approveProblem && '（退回可以只填有问题的几条）'}
+              </p>
+            )}
+            <Input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="意见（选填）" maxLength={200} data-testid="approval-comment" />
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" icon={<CornerUpLeft className="size-4" />} disabled={!!returnProblem} onClick={() => setReturning(true)} data-testid="approval-return">
+                退回
+              </Button>
+              <Button
+                variant="primary"
+                className="flex-[2]"
+                loading={busy === 'approve'}
+                disabled={!!approveProblem}
+                icon={<CircleCheck className="size-4" />}
+                data-testid="approval-approve"
+                onClick={() =>
+                  void act(
+                    'approve',
+                    withChecklist({
+                      comment: comment.trim(),
+                      ...(Object.values(reasons).some(Boolean) ? { countReasons: Object.fromEntries(Object.entries(reasons).filter(([, v]) => v)) } : {}),
+                    }),
+                  )
+                }
+              >
+                {d.levels > 1 ? `同意（第 ${d.currentLevel}/${d.levels} 级）` : '同意'}
+              </Button>
+            </div>
+          </footer>
+        )
       )}
 
       <ReasonDialog

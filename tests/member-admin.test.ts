@@ -268,8 +268,7 @@ const groupCheckin = (memberId: number, codes: [string, string]) =>
       { tagCode: codes[1], zone: 'male', memberId: null },
     ],
   });
-const openVisitsOf = async (memberId: number) =>
-  (await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM visits WHERE member_id = ${memberId} AND status = 'open'`)[0]!.n;
+const openVisitsOf = async (memberId: number) => (await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM visits WHERE member_id = ${memberId} AND status = 'open'`)[0]!.n;
 
 describe('接待与合并、停用并发（测试会话 dcbf252 的 P2：接待在会员一行的共享锁里再核对一次）', () => {
   it('接待已经核对过「没合并」、还没写来访时合并提交：接待被拒 MEMBER_MERGED，原档案不会在店', async () => {

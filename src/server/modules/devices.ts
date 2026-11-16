@@ -163,7 +163,13 @@ const DeviceFields = z.object({
   area: z.string('请选择区域').trim().min(1, '请选择区域').max(20, '区域最多 20 个字'),
   connection: z.enum(DEVICE_CONNECTIONS, '请选择接法'),
   host: optionalText(253).refine((v) => v === null || HOST_RE.test(v), 'IP 或主机名只能用字母、数字、「.」「-」「:」'),
-  port: z.number('端口必须是整数').int('端口必须是整数').min(1, '端口在 1 到 65535 之间').max(65535, '端口在 1 到 65535 之间').nullish().transform((v) => v ?? null),
+  port: z
+    .number('端口必须是整数')
+    .int('端口必须是整数')
+    .min(1, '端口在 1 到 65535 之间')
+    .max(65535, '端口在 1 到 65535 之间')
+    .nullish()
+    .transform((v) => v ?? null),
   /** 挂在哪台终端或打印服务器下（设备编号） */
   hostDeviceCode: optionalText(32),
   bridgeKey: optionalText(40).refine((v) => v === null || /^[a-z0-9][a-z0-9_-]{0,39}$/.test(v), '设备键用小写字母、数字、「_」「-」'),
@@ -210,7 +216,11 @@ async function normalizeFields(db: Db, f: Fields, selfId: number | null) {
     hostDeviceId = h.id;
   }
   const options =
-    f.kind === 'printer' ? { paperWidth: f.options.paperWidth ?? 80 } : f.kind === 'label_printer' ? { labelLanguage: f.options.labelLanguage ?? 'tspl', labelWidthMm: f.options.labelWidthMm ?? 40, labelHeightMm: f.options.labelHeightMm ?? 30 } : {};
+    f.kind === 'printer'
+      ? { paperWidth: f.options.paperWidth ?? 80 }
+      : f.kind === 'label_printer'
+        ? { labelLanguage: f.options.labelLanguage ?? 'tspl', labelWidthMm: f.options.labelWidthMm ?? 40, labelHeightMm: f.options.labelHeightMm ?? 30 }
+        : {};
   return { host, port, bridgeKey, hostDeviceId, options };
 }
 
@@ -301,7 +311,20 @@ export async function updateDevice(deps: Deps, id: number, raw: unknown, ctx: Op
         action: 'device_updated',
         targetType: 'device',
         targetId: id,
-        detail: { code: cur.code, before: { name: before.name, area: before.area, connection: before.connection, host: before.host, port: before.port, hostDeviceCode: before.hostDeviceCode, bridgeKey: before.bridgeKey, note: before.note }, after },
+        detail: {
+          code: cur.code,
+          before: {
+            name: before.name,
+            area: before.area,
+            connection: before.connection,
+            host: before.host,
+            port: before.port,
+            hostDeviceCode: before.hostDeviceCode,
+            bridgeKey: before.bridgeKey,
+            note: before.note,
+          },
+          after,
+        },
         ip: ctx.ip,
       });
     });
@@ -463,7 +486,10 @@ export async function checkDevicesOnce(deps: Pick<Deps, 'sql'>, now = new Date()
 const ReportInput = z.object({
   terminal: z.string('缺少终端编号').trim().toUpperCase().min(1).max(32),
   bridge: z.object({ connected: z.boolean(), version: z.string().max(32).optional() }),
-  devices: z.array(z.object({ key: z.string().min(1).max(40), status: z.enum(DEVICE_STATUSES), code: z.string().max(40).nullish() })).max(32).default([]),
+  devices: z
+    .array(z.object({ key: z.string().min(1).max(40), status: z.enum(DEVICE_STATUSES), code: z.string().max(40).nullish() }))
+    .max(32)
+    .default([]),
   events: z
     .array(
       z.object({
@@ -718,7 +744,14 @@ export async function cancelJob(deps: Deps, id: number, ctx: OpContext, canManag
       throw conflict('JOB_NOT_CANCELABLE', j.status === 'sending' ? '这张正在发送，不能取消' : '这张已经结束了，不用取消');
     }
     await tx`UPDATE device_jobs SET status = 'canceled', canceled_by = ${ctx.actor.id}, finished_at = now() WHERE id = ${id}`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'device_job_canceled', targetType: 'device', targetId: Number(j.deviceId), detail: { jobId: id, kind: j.kind, doc: j.docLabel, from: j.status }, ip: ctx.ip });
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'device_job_canceled',
+      targetType: 'device',
+      targetId: Number(j.deviceId),
+      detail: { jobId: id, kind: j.kind, doc: j.docLabel, from: j.status },
+      ip: ctx.ip,
+    });
   });
   return getJob(deps.sql, id);
 }
@@ -835,7 +868,14 @@ export async function createJob(deps: Deps, deviceId: number, raw: unknown, ctx:
         VALUES (${deviceId}, ${input.kind}, ${offline ? 'failed' : 'queued'}, ${input.clientKey}, ${ctx.actor.id},
                 ${offline ? 'DEVICE_OFFLINE' : null}, ${offline ? `${DEVICE_ERROR_LABELS.DEVICE_OFFLINE}，没有发送` : null}, ${offline ? tx`now()` : null})
         RETURNING id`;
-      await writeAudit(tx, { staffId: ctx.actor.id, action: 'device_job_created', targetType: 'device', targetId: deviceId, detail: { code: d.code, kind: input.kind, jobId: row!.id, offline }, ip: ctx.ip });
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'device_job_created',
+        targetType: 'device',
+        targetId: deviceId,
+        detail: { code: d.code, kind: input.kind, jobId: row!.id, offline },
+        ip: ctx.ip,
+      });
       return { id: Number(row!.id), queued: !offline };
     });
   } catch (error) {

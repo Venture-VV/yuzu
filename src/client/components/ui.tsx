@@ -1,12 +1,4 @@
-import {
-  forwardRef,
-  useId,
-  type ButtonHTMLAttributes,
-  type InputHTMLAttributes,
-  type ReactNode,
-  type SelectHTMLAttributes,
-  type TextareaHTMLAttributes,
-} from 'react';
+import { forwardRef, useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
 import { useSlidingIndicator } from '../lib/motion';
 import { useOptionalSession } from '../lib/session';
@@ -60,10 +52,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {children}
       {kbd && !loading && (
         <kbd
-          className={cn(
-            'ml-0.5 rounded-[5px] px-1.5 py-px text-[11px] font-semibold leading-4',
-            variant === 'primary' || variant === 'danger' ? 'bg-white/14 text-paper/80' : 'bg-ink/6 text-ink-3',
-          )}
+          className={cn('ml-0.5 rounded-[5px] px-1.5 py-px text-[11px] font-semibold leading-4', variant === 'primary' || variant === 'danger' ? 'bg-white/14 text-paper/80' : 'bg-ink/6 text-ink-3')}
         >
           {kbd}
         </kbd>
@@ -72,12 +61,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   );
 });
 
-export function IconButton({
-  label,
-  className,
-  children,
-  ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
+export function IconButton({ label, className, children, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
     <button
       type="button"
@@ -137,25 +121,18 @@ const inputBase =
   'rounded-md border border-line-strong bg-card px-3.5 text-ink outline-none transition-[border-color,box-shadow] placeholder:text-ink-4 hover:border-ink-4 focus:border-pine focus:shadow-[0_0_0_3px_rgb(36_73_58/0.12)] disabled:bg-paper-2 disabled:text-ink-3 aria-[invalid=true]:border-clay';
 
 /** 默认撑满容器；需要固定宽度（如日期、并排的搜索框）时传 fullWidth={false} 再给宽度，否则 w-full 会盖过传入的宽度 */
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean; fullWidth?: boolean }>(
-  function Input({ className, invalid, fullWidth = true, ...rest }, ref) {
-    return <input ref={ref} aria-invalid={invalid || undefined} className={cn(inputBase, 'h-11', fullWidth && 'w-full', className)} {...rest} />;
-  },
-);
-
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea(
-  { className, ...rest },
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean; fullWidth?: boolean }>(function Input(
+  { className, invalid, fullWidth = true, ...rest },
   ref,
 ) {
+  return <input ref={ref} aria-invalid={invalid || undefined} className={cn(inputBase, 'h-11', fullWidth && 'w-full', className)} {...rest} />;
+});
+
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...rest }, ref) {
   return <textarea ref={ref} className={cn(inputBase, 'min-h-20 w-full resize-none py-2.5', className)} {...rest} />;
 });
 
-export function Select({
-  className,
-  children,
-  fullWidth = true,
-  ...rest
-}: SelectHTMLAttributes<HTMLSelectElement> & { fullWidth?: boolean }) {
+export function Select({ className, children, fullWidth = true, ...rest }: SelectHTMLAttributes<HTMLSelectElement> & { fullWidth?: boolean }) {
   return (
     <select
       className={cn(
@@ -172,20 +149,13 @@ export function Select({
 }
 
 /** 金额输入：左侧 ¥，等宽数字，移动端弹出小数键盘 */
-export const MoneyInput = forwardRef<
-  HTMLInputElement,
-  Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { invalid?: boolean; large?: boolean }
->(function MoneyInput({ className, invalid, large, ...rest }, ref) {
+export const MoneyInput = forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { invalid?: boolean; large?: boolean }>(function MoneyInput(
+  { className, invalid, large, ...rest },
+  ref,
+) {
   return (
     <div className="relative">
-      <span
-        className={cn(
-          'pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 font-semibold text-ink-3',
-          large ? 'text-xl' : 'text-[15px]',
-        )}
-      >
-        ¥
-      </span>
+      <span className={cn('pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 font-semibold text-ink-3', large ? 'text-xl' : 'text-[15px]')}>¥</span>
       <input
         ref={ref}
         inputMode="decimal"
@@ -243,28 +213,14 @@ export function Segmented<T extends string>({
 }
 
 /** 大号确认勾选框（触控友好） */
-export function ConfirmCheck({
-  checked,
-  onChange,
-  children,
-  tone = 'pine',
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  children: ReactNode;
-  tone?: 'pine' | 'clay';
-}) {
+export function ConfirmCheck({ checked, onChange, children, tone = 'pine' }: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; tone?: 'pine' | 'clay' }) {
   const id = useId();
   return (
     <label
       htmlFor={id}
       className={cn(
         'flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3.5 transition-colors',
-        checked
-          ? tone === 'pine'
-            ? 'border-pine bg-pine-tint'
-            : 'border-clay bg-clay-soft/50'
-          : 'border-line-strong bg-card hover:border-ink-4',
+        checked ? (tone === 'pine' ? 'border-pine bg-pine-tint' : 'border-clay bg-clay-soft/50') : 'border-line-strong bg-card hover:border-ink-4',
       )}
     >
       <input id={id} type="checkbox" className="peer sr-only" checked={checked} onChange={(e) => onChange(e.target.checked)} />
@@ -298,13 +254,7 @@ const TONES: Record<Tone, string> = {
 
 export function Badge({ tone = 'neutral', className, children, icon }: { tone?: Tone; className?: string; children: ReactNode; icon?: ReactNode }) {
   return (
-    <span
-      className={cn(
-        'inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[12px] leading-none font-semibold whitespace-nowrap',
-        TONES[tone],
-        className,
-      )}
-    >
+    <span className={cn('inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[12px] leading-none font-semibold whitespace-nowrap', TONES[tone], className)}>
       {icon}
       {children}
     </span>

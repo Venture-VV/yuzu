@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { api } from "../../lib/api";
-import { useLivePoll } from "../../lib/livePoll";
+import { useEffect, useRef, useState } from 'react';
+import { api } from '../../lib/api';
+import { useLivePoll } from '../../lib/livePoll';
 
 export function customerUrl(path: string, params: Record<string, string | number | undefined> = {}) {
   const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== "") search.set(key, String(value));
-  return `/api/customer/${path}${search.size ? `?${search}` : ""}`;
+  for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') search.set(key, String(value));
+  return `/api/customer/${path}${search.size ? `?${search}` : ''}`;
 }
 
 /**
@@ -20,7 +20,7 @@ export function useCustomerRevision(onChange: () => void) {
   useLivePoll(
     async (isLive) => {
       try {
-        const { revision } = await api.get<{ revision: string }>("/api/customer/revision");
+        const { revision } = await api.get<{ revision: string }>('/api/customer/revision');
         if (!isLive()) return;
         if (last.current !== null && revision !== last.current) changed.current();
         last.current = revision;
@@ -40,10 +40,10 @@ type ReadState<T> = { url: string | null; data: T | null; error: string; loading
 
 /** One request at a time per view; responses from a previous filter/session are discarded. */
 export function useCustomerRead<T>(url: string | null, revision = 0) {
-  const [state, setState] = useState<ReadState<T>>({ url: null, data: null, error: "", loading: false, receivedAt: "" });
+  const [state, setState] = useState<ReadState<T>>({ url: null, data: null, error: '', loading: false, receivedAt: '' });
   useEffect(() => {
     if (!url) return;
-    setState((old) => (old.url === url ? { ...old, error: "", loading: old.data == null } : { url, data: null, error: "", loading: true, receivedAt: "" }));
+    setState((old) => (old.url === url ? { ...old, error: '', loading: old.data == null } : { url, data: null, error: '', loading: true, receivedAt: '' }));
   }, [url, revision]);
   // 有变化时页面会换 revision 让这里重读（useCustomerRevision）；这里只留慢速刷新
   useLivePoll(
@@ -55,16 +55,16 @@ export function useCustomerRead<T>(url: string | null, revision = 0) {
           setState((old) => ({
             url,
             data: old.url === url && JSON.stringify(old.data) === JSON.stringify(next) ? old.data : next,
-            error: "",
+            error: '',
             loading: false,
             receivedAt: new Date().toISOString(),
           }));
       } catch (error) {
-        if (isLive()) setState((old) => ({ ...old, error: error instanceof Error ? error.message : "读取失败，请重试。", loading: false }));
+        if (isLive()) setState((old) => ({ ...old, error: error instanceof Error ? error.message : '读取失败，请重试。', loading: false }));
       }
     },
     [url, revision],
-    { intervalMs: SLOW_REFRESH_MS, onOffline: () => url && setState((old) => ({ ...old, error: "设备离线，联网后会自动继续同步。", loading: false })) },
+    { intervalMs: SLOW_REFRESH_MS, onOffline: () => url && setState((old) => ({ ...old, error: '设备离线，联网后会自动继续同步。', loading: false })) },
   );
-  return state.url === url ? state : { url, data: null, error: "", loading: Boolean(url), receivedAt: "" };
+  return state.url === url ? state : { url, data: null, error: '', loading: Boolean(url), receivedAt: '' };
 }

@@ -52,7 +52,10 @@ interface BoardTag {
 /** 前台接待一位客人（接口办理，按默认票种），返回手牌与来访 */
 async function checkinGuest(page: Page, zone: 'male' | 'female', label: string) {
   const board = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
-  const tag = board.tags.filter((t) => t.zone === zone && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+  const tag = board.tags
+    .filter((t) => t.zone === zone && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+    .map((t) => t.code)
+    .reverse()[0]!;
   await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone, guestLabel: label }] });
   const visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
   return { tag, visitId };
@@ -101,7 +104,8 @@ test.describe('8.0.8 前台整改', () => {
     try {
       const itemId = await ensureItem(page, ITEM);
       await send(page, 'put', '/api/admin/technicians/items', { items: [{ id: itemId, required: true }] });
-      const roster = (await getJson<{ technicians: { id: number; techNo: string; name: string; gender: string; grade: string; skills: string[]; active: boolean }[] }>(page, '/api/admin/technicians')).technicians;
+      const roster = (await getJson<{ technicians: { id: number; techNo: string; name: string; gender: string; grade: string; skills: string[]; active: boolean }[] }>(page, '/api/admin/technicians'))
+        .technicians;
       const old = roster.find((x) => x.techNo === TECH.techNo);
       if (!old) await send(page, 'post', '/api/admin/technicians', TECH);
       else if (!old.active || old.skills.length > 0) await send(page, 'put', `/api/admin/technicians/${old.id}`, { name: old.name, gender: old.gender, grade: old.grade, skills: [], active: true });
@@ -174,7 +178,12 @@ test.describe('8.0.8 前台整改', () => {
       if (!st) admin = await send<DiningAdmin>(page, 'post', '/api/admin/dining/stations', { name: STATION });
       else if (!st.active) admin = await send<DiningAdmin>(page, 'put', `/api/admin/dining/stations/${st.id}`, { name: STATION, sortOrder: st.sortOrder, active: true });
       const stationId = admin.stations.find((s) => s.name === STATION)!.id;
-      await send(page, 'put', '/api/admin/dining/items', { items: [{ id: juiceId, stationId }, { id: seafoodId, stationId }] });
+      await send(page, 'put', '/api/admin/dining/items', {
+        items: [
+          { id: juiceId, stationId },
+          { id: seafoodId, stationId },
+        ],
+      });
       await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15, tablesEnabled: false, voidFreeCents: 5000 });
       await clearGuests(page, LABEL);
       // 店主替客人点了两道（不是服务员自己点的，服务员不能按「本人 15 分钟内」退）
@@ -229,10 +238,14 @@ test.describe('8.0.8 前台整改', () => {
       const again = pending.getByTestId(`dining-pending-${JUICE.name}`);
       await again.getByRole('button', { name: '改', exact: true }).click();
       const v3 = page.getByRole('dialog').filter({ hasText: `改单 · ${JUICE.name}` });
-      await page.route('**/api/frontdesk/lines/*/void', async (route) => {
-        await route.fetch();
-        await route.abort('failed');
-      }, { times: 1 });
+      await page.route(
+        '**/api/frontdesk/lines/*/void',
+        async (route) => {
+          await route.fetch();
+          await route.abort('failed');
+        },
+        { times: 1 },
+      );
       await v3.getByTestId('dish-void-confirm').click();
       await expect(v3).toContainText('可能已经生效');
       await v3.getByTestId('dish-void-confirm').click();
@@ -292,7 +305,11 @@ test.describe('8.0.8 前台整改', () => {
       // ① 空闲的房：入住对话框左下角「改房态」→ 选待打扫、写备注 → 确认「从哪到哪」→ 看板马上变
       await page.goto('/rooms');
       await page.getByTestId(`room-tile-${ROOM}`).click();
-      await page.getByRole('dialog').filter({ hasText: `入住 · ${ROOM}` }).getByTestId('room-checkin-housekeep').click();
+      await page
+        .getByRole('dialog')
+        .filter({ hasText: `入住 · ${ROOM}` })
+        .getByTestId('room-checkin-housekeep')
+        .click();
       const hk = page.getByRole('dialog').filter({ hasText: `改房态 · ${ROOM}` });
       await hk.getByRole('radio', { name: '待打扫' }).click();
       await hk.getByTestId('room-maintenance-note').fill('E2E 换床品');
@@ -366,7 +383,8 @@ test.describe('8.0.8 前台整改', () => {
     // E6–E9 别的用例在用
     const TECH = { techNo: 'E5', name: 'E2E 小许', gender: 'female', grade: 'standard' } as const;
     await login(page, 'linlan');
-    const roster = (await getJson<{ technicians: { id: number; techNo: string; name: string; gender: string; grade: string; skills: string[]; active: boolean }[] }>(page, '/api/admin/technicians')).technicians;
+    const roster = (await getJson<{ technicians: { id: number; techNo: string; name: string; gender: string; grade: string; skills: string[]; active: boolean }[] }>(page, '/api/admin/technicians'))
+      .technicians;
     const old = roster.find((x) => x.techNo === TECH.techNo);
     if (!old) await send(page, 'post', '/api/admin/technicians', TECH);
     else if (!old.active) await send(page, 'put', `/api/admin/technicians/${old.id}`, { name: old.name, gender: old.gender, grade: old.grade, skills: old.skills, active: true });

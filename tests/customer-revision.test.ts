@@ -61,7 +61,12 @@ describe('客户部同步指纹', () => {
     await changed('撤销挂账');
     // 客户部记录一条服务
     const note = await api(ctx.app, ctx.owner, 'POST', '/api/customer/notes', {
-      requestKey: randomUUID(), memberId, kind: 'maintenance', occurredAt: new Date().toISOString(), outcome: '已联系', content: '指纹用例的合成记录',
+      requestKey: randomUUID(),
+      memberId,
+      kind: 'maintenance',
+      occurredAt: new Date().toISOString(),
+      outcome: '已联系',
+      content: '指纹用例的合成记录',
     });
     expect(note.status, JSON.stringify(note.body)).toBe(200);
     await changed('客户部记录服务');
@@ -96,7 +101,13 @@ describe('客户部在店与到店列表', () => {
       expect(r.status, JSON.stringify(r.body)).toBe(200);
       return r.body as { businessDate: string; filteredTotal: number; rows: { id: number; status: string }[] };
     };
-    const checkin = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: 'R002', zone: 'male' }, { tagCode: 'R003', zone: 'male' }] });
+    const checkin = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', {
+      clientKey: randomUUID(),
+      guests: [
+        { tagCode: 'R002', zone: 'male' },
+        { tagCode: 'R003', zone: 'male' },
+      ],
+    });
     expect(checkin.status, JSON.stringify(checkin.body)).toBe(201);
     const [gone, staying] = checkin.body.visits.map((v: { id: number }) => v.id) as [number, number];
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${gone}/cancel`, { reason: '列表用例撤销' })).status).toBe(200);

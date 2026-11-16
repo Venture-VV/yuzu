@@ -25,8 +25,7 @@ let checkoutId: number;
 let checkoutNo: string;
 
 const later = (ms: number) => new Date(Date.now() + ms);
-const printDoc = (doc: Record<string, unknown>, cookie = ctx.clerk, deviceId = prnId, clientKey = randomUUID()) =>
-  api(ctx.app, cookie, 'POST', '/api/print/jobs', { clientKey, deviceId, doc });
+const printDoc = (doc: Record<string, unknown>, cookie = ctx.clerk, deviceId = prnId, clientKey = randomUUID()) => api(ctx.app, cookie, 'POST', '/api/print/jobs', { clientKey, deviceId, doc });
 const getJob = async (id: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/print/jobs/${id}`)).body as DeviceJob;
 const lastText = () => printer.texts().at(-1) ?? '';
 /** 一个没人听的本机端口（连上去被拒） */
@@ -49,7 +48,16 @@ beforeAll(async () => {
   expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { printMode: 'network' })).status).toBe(200);
   today = (await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.today;
   printer = await startMockPrinter();
-  const d = await api(ctx.app, ctx.owner, 'POST', '/api/devices', { clientKey: randomUUID(), code: 'PRN-SY-09', name: '收银小票机', kind: 'printer', area: '收银', connection: 'network', host: printer.host, port: printer.port });
+  const d = await api(ctx.app, ctx.owner, 'POST', '/api/devices', {
+    clientKey: randomUUID(),
+    code: 'PRN-SY-09',
+    name: '收银小票机',
+    kind: 'printer',
+    area: '收银',
+    connection: 'network',
+    host: printer.host,
+    port: printer.port,
+  });
   expect(d.status, JSON.stringify(d.body)).toBe(200);
   prnId = d.body.id;
   await checkDevicesOnce(ctx);
@@ -174,7 +182,16 @@ describe('断网打印队列', () => {
   });
 
   it('还没开始发就连不上的也排队（不算失败）；等超过 30 分钟不再打', async () => {
-    const d = await api(ctx.app, ctx.owner, 'POST', '/api/devices', { clientKey: randomUUID(), code: 'PRN-SY-10', name: '收银小票机 2', kind: 'printer', area: '收银', connection: 'network', host: '127.0.0.1', port: await closedPort() });
+    const d = await api(ctx.app, ctx.owner, 'POST', '/api/devices', {
+      clientKey: randomUUID(),
+      code: 'PRN-SY-10',
+      name: '收银小票机 2',
+      kind: 'printer',
+      area: '收银',
+      connection: 'network',
+      host: '127.0.0.1',
+      port: await closedPort(),
+    });
     expect(d.status).toBe(200);
     // 状态还是「未知」（还没心跳过）：照常排队去发，连不上（被拒）三次后进「等打印机恢复」
     const r = await printDoc({ type: 'checkout', id: checkoutId }, ctx.clerk, d.body.id);

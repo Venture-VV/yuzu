@@ -20,8 +20,7 @@ if (typeof window !== 'undefined') {
 
 export const inWeChat = () => /MicroMessenger/i.test(navigator.userAgent);
 export const isIos = () => /iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-export const isStandalone = () =>
-  window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+export const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
 
 export function useInstallPrompt() {
   const [, force] = useState(0);
@@ -52,7 +51,9 @@ export function InstallGuide() {
       )}
       {isIos() ? (
         <ol className="list-decimal space-y-2 pl-5">
-          <li>用 <b className="text-ink">Safari</b> 打开柚子饭堂（别的浏览器不行）</li>
+          <li>
+            用 <b className="text-ink">Safari</b> 打开柚子饭堂（别的浏览器不行）
+          </li>
           <li>
             点 <b className="text-ink">分享按钮</b>（方框加向上的箭头）。底部工具栏上没有的话（iOS 26），先点地址栏旁边的 <b className="text-ink">「···」</b>，再点「分享」
           </li>
@@ -63,7 +64,9 @@ export function InstallGuide() {
       ) : (
         !install && (
           <ol className="list-decimal space-y-2 pl-5">
-            <li>点浏览器右上角的 <b className="text-ink">⋮ 菜单</b></li>
+            <li>
+              点浏览器右上角的 <b className="text-ink">⋮ 菜单</b>
+            </li>
             <li>
               选 <b className="text-ink">「安装应用」</b> 或 <b className="text-ink">「添加到主屏幕」</b>
             </li>

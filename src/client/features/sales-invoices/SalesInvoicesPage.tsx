@@ -6,13 +6,7 @@ import { useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileOutput, Send } from 'lucide-react';
 import { formatAmount } from '@shared/money';
-import {
-  INVOICE_SOURCE_LABELS,
-  INVOICE_TITLE_TYPE_LABELS,
-  SALES_INVOICE_KIND_LABELS,
-  type SalesInvoice,
-  type SalesInvoiceList,
-} from '@shared/sales-invoices';
+import { INVOICE_SOURCE_LABELS, INVOICE_TITLE_TYPE_LABELS, SALES_INVOICE_KIND_LABELS, type SalesInvoice, type SalesInvoiceList } from '@shared/sales-invoices';
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
@@ -46,13 +40,13 @@ export function SalesInvoicesPage() {
   });
   const counts = list.data?.counts;
   return (
-    <ErpPage
-      title="开票"
-      description="客人的开票申请：前台在结账记录、充值记录上申请，协议单位按回款申请。可开金额只算实收（储值在充值时开、挂账按回款开）。同一笔只能开一次，开错了作废后重新申请。"
-    >
+    <ErpPage title="开票" description="客人的开票申请：前台在结账记录、充值记录上申请，协议单位按回款申请。可开金额只算实收（储值在充值时开、挂账按回款开）。同一笔只能开一次，开错了作废后重新申请。">
       <div className="space-y-4" data-testid="sales-invoices-page">
         {list.data && (
-          <Notice tone={list.data.providerMode === 'off' ? 'info' : 'warning'} title={list.data.providerMode === 'off' ? '开票服务商还没接（等服务商账号联调）' : list.data.providerMode === 'mock' ? '开票服务商是模拟的（只在开发、测试环境）' : '开票服务商已接'}>
+          <Notice
+            tone={list.data.providerMode === 'off' ? 'info' : 'warning'}
+            title={list.data.providerMode === 'off' ? '开票服务商还没接（等服务商账号联调）' : list.data.providerMode === 'mock' ? '开票服务商是模拟的（只在开发、测试环境）' : '开票服务商已接'}
+          >
             {list.data.providerMode === 'off' ? '在开票系统里开好以后，点「登记已开」填发票号码、传 PDF。' : '「交给服务商开」开出来的号码与 PDF 都写着「模拟」，不是真发票。'}
           </Notice>
         )}
@@ -91,7 +85,12 @@ export function SalesInvoicesPage() {
             <ul className="divide-y divide-line/70">
               {list.data.rows.map((r) => (
                 <li key={r.id}>
-                  <button type="button" onClick={() => setOpenId(r.id)} className="grid w-full gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/50 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_auto]" data-testid={`sales-invoice-row-${r.requestNo}`}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenId(r.id)}
+                    className="grid w-full gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/50 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_auto]"
+                    data-testid={`sales-invoice-row-${r.requestNo}`}
+                  >
                     <span className="min-w-0">
                       <span className="block truncate text-[14px] font-bold">{r.title}</span>
                       <span className="num block truncate text-[12.5px] text-ink-3">
@@ -161,7 +160,11 @@ function SalesInvoiceSheet({ id, providerMode, onClose }: { id: number | null; p
       </div>
       {!r ? (
         <div className="p-5">
-          {detail.isError ? <LoadFailed title="这张开票申请取不回来，请检查网络" onRetry={() => void detail.refetch()} retrying={detail.isFetching} testId="sales-invoice-detail-error" /> : <Skeleton className="h-40" />}
+          {detail.isError ? (
+            <LoadFailed title="这张开票申请取不回来，请检查网络" onRetry={() => void detail.refetch()} retrying={detail.isFetching} testId="sales-invoice-detail-error" />
+          ) : (
+            <Skeleton className="h-40" />
+          )}
         </div>
       ) : (
         <div className="space-y-4 p-5 text-[13.5px]" data-testid="sales-invoice-sheet">
@@ -169,8 +172,16 @@ function SalesInvoiceSheet({ id, providerMode, onClose }: { id: number | null; p
             <dt className="text-ink-3">来源</dt>
             <dd className="num">
               {INVOICE_SOURCE_LABELS[r.sourceType]} {r.sourceNo}
-              {r.sourceVoided && <Badge tone="clay" className="ml-2">已反结账 / 作废</Badge>}
-              {!r.sourceVoided && r.sourceReduced && <Badge tone="clay" className="ml-2">退了款，超过现在可开的</Badge>}
+              {r.sourceVoided && (
+                <Badge tone="clay" className="ml-2">
+                  已反结账 / 作废
+                </Badge>
+              )}
+              {!r.sourceVoided && r.sourceReduced && (
+                <Badge tone="clay" className="ml-2">
+                  退了款，超过现在可开的
+                </Badge>
+              )}
             </dd>
             <dt className="text-ink-3">金额</dt>
             <dd className="num font-bold">¥{formatAmount(r.amountCents)}</dd>
@@ -281,7 +292,16 @@ function SalesInvoiceSheet({ id, providerMode, onClose }: { id: number | null; p
         </div>
       )}
       <IssueDialog open={issuing} inv={r ?? null} onClose={() => setIssuing(false)} onDone={refresh} />
-      <ReasonDialog open={rejecting} title="驳回开票申请" description="写清楚原因，前台改好以后可以重新申请。" confirmLabel="驳回" danger busy={busy} onClose={() => setRejecting(false)} onConfirm={(reason) => void act('reject', { reason }, '已驳回')} />
+      <ReasonDialog
+        open={rejecting}
+        title="驳回开票申请"
+        description="写清楚原因，前台改好以后可以重新申请。"
+        confirmLabel="驳回"
+        danger
+        busy={busy}
+        onClose={() => setRejecting(false)}
+        onConfirm={(reason) => void act('reject', { reason }, '已驳回')}
+      />
       <ReasonDialog
         open={voiding}
         title={r?.status === 'issued' ? '作废（红冲）这张发票' : '作废开票申请'}

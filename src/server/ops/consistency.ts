@@ -66,5 +66,26 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   // 应收与挂账（8.0.7）：挂账与结账一一对应、核销不超过挂账、回款与核销对得上
   const receivables = await readSnapshot(sql, receivableChecks);
   const customer = await readSnapshot(sql, customerChecks);
-  return [...summary.checks, ...inventory, ...expenses, ...pettyAccounts, ...sourcing, ...requests, ...frontdesk, legacy, ...spaces, ...floorplans, ...locations, ...membership, ...benefits, ...trials, ...refunds, ...merges, ...contracts, ...payments, ...receivables, ...customer].map(({ label, ok, detail }) => ({ label, ok, detail }));
+  return [
+    ...summary.checks,
+    ...inventory,
+    ...expenses,
+    ...pettyAccounts,
+    ...sourcing,
+    ...requests,
+    ...frontdesk,
+    legacy,
+    ...spaces,
+    ...floorplans,
+    ...locations,
+    ...membership,
+    ...benefits,
+    ...trials,
+    ...refunds,
+    ...merges,
+    ...contracts,
+    ...payments,
+    ...receivables,
+    ...customer,
+  ].map(({ label, ok, detail }) => ({ label, ok, detail }));
 }

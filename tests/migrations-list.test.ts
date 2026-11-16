@@ -8,7 +8,9 @@ import { describe, expect, it } from 'vitest';
 import { ALL_MIGRATIONS, migrationsFrom } from './helpers';
 
 const dir = fileURLToPath(new URL('../src/server/migrations/', import.meta.url));
-const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+const files = readdirSync(dir)
+  .filter((f) => f.endsWith('.sql'))
+  .sort();
 
 describe('迁移清单', () => {
   it('与迁移目录里的文件一致（不缺、不多、没有改名）', () => {

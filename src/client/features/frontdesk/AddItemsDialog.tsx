@@ -26,25 +26,14 @@ import { TechnicianPicker } from './TechnicianPicker';
 const isVisitDetail = (r: unknown): r is VisitDetail => !!r && typeof r === 'object' && 'tag' in r && 'lines' in r;
 
 /** 购物车的键：「项目:价格档」，选了技师时再加「:技师:点钟 / 轮钟」（同一项目不同技师分开计数） */
-const lineKey = (itemId: number, tier: PriceTier, tech: { id: number; callType: CallType } | null) =>
-  tech ? `${cartKey(itemId, tier)}:${tech.id}:${tech.callType}` : cartKey(itemId, tier);
+const lineKey = (itemId: number, tier: PriceTier, tech: { id: number; callType: CallType } | null) => (tech ? `${cartKey(itemId, tier)}:${tech.id}:${tech.callType}` : cartKey(itemId, tier));
 const techOfKey = (key: string): { technicianId: number; callType: CallType } | null => {
   const [, , id, callType] = key.split(':');
   return id ? { technicianId: Number(id), callType: callType as CallType } : null;
 };
 
 /** 挂账：点选项目（多档项目按档位点选）累加数量，确认后一次登记到手牌账单（只挂账，不收款）；需要技师的项目先选技师 */
-export function AddItemsDialog({
-  open,
-  visit,
-  onClose,
-  onDone,
-}: {
-  open: boolean;
-  visit: VisitDetail;
-  onClose: () => void;
-  onDone: (v: VisitDetail) => void;
-}) {
+export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean; visit: VisitDetail; onClose: () => void; onDone: (v: VisitDetail) => void }) {
   const can = useCan();
   const session = useSession();
   const catalog = useCatalog();
@@ -59,10 +48,7 @@ export function AddItemsDialog({
   // 补录纸质单时不看今天的余量：那些菜之前已经上过了，服务端补录也不扣估清（Codex 审查 fb67dca）
   const backfill = useBackfill();
   const dining = useDiningMenu(open && session.dining);
-  const remainingOf = useMemo(
-    () => new Map(backfill.state.active ? [] : (dining.data?.dishes ?? []).map((d) => [d.id, d.remaining])),
-    [dining.data, backfill.state.active],
-  );
+  const remainingOf = useMemo(() => new Map(backfill.state.active ? [] : (dining.data?.dishes ?? []).map((d) => [d.id, d.remaining])), [dining.data, backfill.state.active]);
   const techRules = techs.data?.rules;
   const techOn = !!techRules?.enabled;
   const [picking, setPicking] = useState<{ item: ServiceItem; tier: PriceTier } | null>(null);
@@ -84,13 +70,9 @@ export function AddItemsDialog({
   });
   // 每次打开按规则的默认上钟方式
   const defaultCallType = techRules?.defaultCallType;
-  useResetOnOpen(
-    open,
-    () => {
-      if (defaultCallType) setCallType(defaultCallType);
-    },
-    [defaultCallType],
-  );
+  useResetOnOpen(open, () => {
+    if (defaultCallType) setCallType(defaultCallType);
+  }, [defaultCallType]);
 
   const items = useMemo(() => (catalog.data?.items ?? []).filter((i) => i.active), [catalog.data]);
   const categories = useMemo(() => ['全部', ...new Set(items.map((i) => i.category || '其他'))], [items]);
@@ -167,11 +149,11 @@ export function AddItemsDialog({
       ? `仅限${ZONE_LABELS[i.gender].title}`
       : remainingOf.get(i.id) === 0
         ? '已估清'
-      : i.technicianRequired && techs.isPending
-        ? '正在加载技师…'
-        : i.technicianRequired && !techs.data
-          ? '技师名单没有加载出来'
-          : null;
+        : i.technicianRequired && techs.isPending
+          ? '正在加载技师…'
+          : i.technicianRequired && !techs.data
+            ? '技师名单没有加载出来'
+            : null;
   const missingTech = techOn && !!techRules?.requireTechnician && lines.some((l) => l.item.technicianRequired && !l.technicianId);
   const staleTech = lines.some((l) => l.technicianId && !techById.has(l.technicianId));
   const customParsed = custom.map((c) => ({ name: c.name.trim(), amount: parseYuan(c.amount) }));
@@ -213,8 +195,7 @@ export function AddItemsDialog({
       footer={
         <>
           <span className="mr-auto self-center text-[13px] text-ink-3">
-            本次 <b className="num text-ink">{lines.reduce((s, l) => s + l.quantity, 0) + custom.length}</b> 项，合计{' '}
-            <Money cents={total} className="text-[17px] font-bold text-ink" />
+            本次 <b className="num text-ink">{lines.reduce((s, l) => s + l.quantity, 0) + custom.length}</b> 项，合计 <Money cents={total} className="text-[17px] font-bold text-ink" />
           </span>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
@@ -258,10 +239,7 @@ export function AddItemsDialog({
                     key={c}
                     type="button"
                     onClick={() => setCategory(c)}
-                    className={cn(
-                      'h-8 shrink-0 rounded-full px-3.5 text-[13px] font-semibold transition-colors',
-                      category === c ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3',
-                    )}
+                    className={cn('h-8 shrink-0 rounded-full px-3.5 text-[13px] font-semibold transition-colors', category === c ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
                   >
                     {c}
                   </button>
@@ -336,7 +314,12 @@ export function AddItemsDialog({
                       className="h-10"
                     />
                   </div>
-                  <button type="button" aria-label="移除" onClick={() => setCustom((list) => list.filter((_, j) => j !== i))} className="flex size-10 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay">
+                  <button
+                    type="button"
+                    aria-label="移除"
+                    onClick={() => setCustom((list) => list.filter((_, j) => j !== i))}
+                    className="flex size-10 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay"
+                  >
                     <Trash2 className="size-4" />
                   </button>
                 </div>
@@ -372,7 +355,16 @@ export function AddItemsDialog({
                     <button type="button" aria-label={`减少 ${l.name}`} onClick={() => add(l.key, -1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
                       <Minus className="size-3.5" />
                     </button>
-                    <QtyInput value={l.quantity} max={maxOf(l.key)} onChange={(n) => setQty(l.key, n)} onHint={setQtyHint} label={`${l.name} 的数量`} disabled={locked} className="h-7 w-8 text-[13px]" testId={`add-items-qty-${l.item.id}`} />
+                    <QtyInput
+                      value={l.quantity}
+                      max={maxOf(l.key)}
+                      onChange={(n) => setQty(l.key, n)}
+                      onHint={setQtyHint}
+                      label={`${l.name} 的数量`}
+                      disabled={locked}
+                      className="h-7 w-8 text-[13px]"
+                      testId={`add-items-qty-${l.item.id}`}
+                    />
                     <button type="button" aria-label={`增加 ${l.name}`} onClick={() => add(l.key, 1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
                       <Plus className="size-3.5" />
                     </button>

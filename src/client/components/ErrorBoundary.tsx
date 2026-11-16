@@ -40,8 +40,7 @@ export class ErrorBoundary extends Component<Props, { error: unknown }> {
         <TriangleAlert className="size-8 text-clay" />
         <p className="text-[16px] font-bold text-ink">{root ? '页面出了点问题' : '这一块出了点问题'}</p>
         <p className="max-w-md text-[13px] leading-relaxed text-ink-3">
-          先点「重试」；还不行就「刷新页面」（这一页没提交的内容会丢，先记下）。已经自动报给了系统，店主在「网络与同步」里看得到。
-          已经提交过、还在「结果待确认」的记录存在这台电脑上，刷新不会丢。
+          先点「重试」；还不行就「刷新页面」（这一页没提交的内容会丢，先记下）。已经自动报给了系统，店主在「网络与同步」里看得到。 已经提交过、还在「结果待确认」的记录存在这台电脑上，刷新不会丢。
         </p>
         <div className="flex flex-wrap justify-center gap-2">
           <Button variant="primary" onClick={() => this.setState({ error: null })} data-testid="page-error-retry">

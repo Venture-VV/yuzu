@@ -208,7 +208,5 @@ export function registerMarketingCostRoutes(app: FastifyInstance, deps: Deps) {
     return csvReply(reply, `营销成本测算-${from}至${to}.csv`, marketingCostCsv(m));
   });
   app.get('/api/marketing-cost/params', { preHandler: guard('marketing.cost') }, async () => listCostParams(sql));
-  app.put('/api/marketing-cost/params/:id', { preHandler: guard('marketing.cost') }, async (req) =>
-    saveCostParam(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip),
-  );
+  app.put('/api/marketing-cost/params/:id', { preHandler: guard('marketing.cost') }, async (req) => saveCostParam(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
 }

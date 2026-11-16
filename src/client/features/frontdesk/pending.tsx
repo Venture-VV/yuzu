@@ -118,8 +118,7 @@ let cachedRaw: string | null | undefined;
 let cachedList: FrontdeskPendingOp[] = [];
 
 /** 待确认记录无法可靠保存到本机：为防止断网后重复登记，这笔不能提交 */
-export const PENDING_STORE_FAILED =
-  '本机浏览器无法保存「结果待确认」记录（存储空间已满或被禁用），为防止断网后重复发牌或挂账，这笔没有提交。请联系店主清理浏览器数据，或换一台终端办理。';
+export const PENDING_STORE_FAILED = '本机浏览器无法保存「结果待确认」记录（存储空间已满或被禁用），为防止断网后重复发牌或挂账，这笔没有提交。请联系店主清理浏览器数据，或换一台终端办理。';
 
 function readAll(): FrontdeskPendingOp[] {
   let raw: string | null;
@@ -266,12 +265,7 @@ export function pendingFor(
   });
 }
 
-export type OpState =
-  | { phase: 'idle' }
-  | { phase: 'busy' }
-  | { phase: 'error'; message: string; code?: string }
-  | { phase: 'uncertain'; message: string }
-  | { phase: 'not_found' };
+export type OpState = { phase: 'idle' } | { phase: 'busy' } | { phase: 'error'; message: string; code?: string } | { phase: 'uncertain'; message: string } | { phase: 'not_found' };
 
 type Pick<T> = (found: Extract<FrontdeskOpLookup, { found: true }>) => T | null;
 
@@ -458,13 +452,7 @@ export function useFrontdeskOp<T>(opts: {
 }
 
 /** 对话框里的待确认处理区：查回 / 按原内容重新提交 / 确认作废 */
-export function PendingPanel<T>({
-  op,
-  onResolved,
-}: {
-  op: ReturnType<typeof useFrontdeskOp<T>>;
-  onResolved: (result: T) => void;
-}) {
+export function PendingPanel<T>({ op, onResolved }: { op: ReturnType<typeof useFrontdeskOp<T>>; onResolved: (result: T) => void }) {
   const p = op.pending;
   const run = async (fn: () => Promise<T | null>) => {
     const r = await fn();

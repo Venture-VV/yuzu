@@ -126,7 +126,9 @@ export function RequestsPage() {
           </Notice>
         )}
         {me && !me.canReview && me.canCreate && !me.departmentId && (
-          <Notice tone="warning" title="你的员工档案里还没有填所属部门">请店主在「后台 → 员工」里给你选所属部门，之后才能提需求单。</Notice>
+          <Notice tone="warning" title="你的员工档案里还没有填所属部门">
+            请店主在「后台 → 员工」里给你选所属部门，之后才能提需求单。
+          </Notice>
         )}
         {canConvert && (
           <Segmented
@@ -166,10 +168,23 @@ export function RequestsPage() {
                 提交日期
                 <Input type="date" fullWidth={false} value={from} max={to || session.calendarToday} onChange={(e) => setFrom(e.target.value)} className="h-9 w-36" aria-label="提交日期从" />
                 到
-                <Input type="date" fullWidth={false} value={to} min={from || undefined} max={session.calendarToday} onChange={(e) => setTo(e.target.value)} className="h-9 w-36" aria-label="提交日期到" />
+                <Input
+                  type="date"
+                  fullWidth={false}
+                  value={to}
+                  min={from || undefined}
+                  max={session.calendarToday}
+                  onChange={(e) => setTo(e.target.value)}
+                  className="h-9 w-36"
+                  aria-label="提交日期到"
+                />
               </label>
               {me && !me.canReview && me.departmentName && <span className="text-[13px] text-ink-2">只显示 {me.departmentName} 的需求单与你提的</span>}
-              {status === 'submitted' && <span className="text-[12.5px] text-ink-3" data-testid="requests-review-order">按紧急在前、期望到货日期早的在前排</span>}
+              {status === 'submitted' && (
+                <span className="text-[12.5px] text-ink-3" data-testid="requests-review-order">
+                  按紧急在前、期望到货日期早的在前排
+                </span>
+              )}
               {meta.data?.cutoff.enabled && <span className="text-[12.5px] text-ink-3">每天 {meta.data.cutoff.time} 截单</span>}
             </Card>
             {list.isPending ? (
@@ -433,7 +448,11 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
       </div>
       <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4" data-testid="request-sheet">
         {!r ? (
-          request.error ? <Notice tone="error" title={errorMessage(request.error)} /> : <Skeleton className="h-64" />
+          request.error ? (
+            <Notice tone="error" title={errorMessage(request.error)} />
+          ) : (
+            <Skeleton className="h-64" />
+          )
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2">
@@ -452,7 +471,11 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
               )}
             </div>
             {/* 这张需求走到哪了（8.0.17）：审核、询价、下单、到货、付款 */}
-            <PurchaseFlowPanel kind="request" id={r.id} version={`${r.status}|${r.deptConfirm.state}|${r.submittedAt}|${r.orderedLines}|${r.receivedLines}|${r.lines.map((l) => `${l.progress.state}${l.progress.po?.status ?? ''}`).join(',')}`} />
+            <PurchaseFlowPanel
+              kind="request"
+              id={r.id}
+              version={`${r.status}|${r.deptConfirm.state}|${r.submittedAt}|${r.orderedLines}|${r.receivedLines}|${r.lines.map((l) => `${l.progress.state}${l.progress.po?.status ?? ''}`).join(',')}`}
+            />
             {/* 部门主管确认（8.0.17，LC1） */}
             {r.deptConfirm.state === 'pending' && r.status === 'submitted' && (
               <Notice tone="warning" title={`等部门主管${r.deptConfirm.head ? `（${r.deptConfirm.head.name}）` : ''}确认`} data-testid="request-dept-pending">
@@ -530,7 +553,9 @@ function RequestSheet({ id, onClose }: { id: number | null; onClose: () => void 
                 loading={busy}
                 disabled={r.lockedToday || r.deptConfirm.state === 'pending'}
                 title={r.deptConfirm.state === 'pending' ? '要部门主管先确认' : r.lockedToday ? `${r.approvableOn} 起可以通过` : undefined}
-                onClick={() => void act('approve')} data-testid="request-approve">
+                onClick={() => void act('approve')}
+                data-testid="request-approve"
+              >
                 通过
               </Button>
             </>

@@ -39,8 +39,7 @@ describe('功能开关都默认开（8.0.20）', () => {
   });
 
   it('迁移 126：已经保存成关的改成开，同一个键里别的数不动；规矩类与小程序线的键不碰；再执行一次什么都不变', async () => {
-    const put = (key: string, value: unknown) =>
-      ctx.sql`INSERT INTO settings (key, value) VALUES (${key}, ${ctx.sql.json(value as never)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+    const put = (key: string, value: unknown) => ctx.sql`INSERT INTO settings (key, value) VALUES (${key}, ${ctx.sql.json(value as never)}) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
     await put('technician_rules', { enabled: false, requireTechnician: false });
     await put('room_rules', { enabled: false, defaultDeposit: 12300 });
     await put('emenu_rules', { enabled: false, requirePin: false, footerText: '合成页脚' });
@@ -53,8 +52,7 @@ describe('功能开关都默认开（8.0.20）', () => {
     await put('mp_rules', { enabled: false, version: 2 });
     await put('purchase_rules', { cutoffEnabled: false });
     await ctx.sql.unsafe(MIGRATION);
-    const read = async () =>
-      Object.fromEntries((await ctx.sql<{ key: string; value: unknown }[]>`SELECT key, value FROM settings ORDER BY key`).map((r) => [r.key, r.value]));
+    const read = async () => Object.fromEntries((await ctx.sql<{ key: string; value: unknown }[]>`SELECT key, value FROM settings ORDER BY key`).map((r) => [r.key, r.value]));
     const after = await read();
     expect(after.technician_rules).toEqual({ enabled: true, requireTechnician: false });
     expect(after.room_rules).toEqual({ enabled: true, defaultDeposit: 12300 });

@@ -48,8 +48,7 @@ async function say(content: string, kind: 'wish' | 'chat' = 'chat') {
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return r.body.id as number;
 }
-const reply = (who: { cookie: string }, id: number, text: string, clientKey = randomUUID()) =>
-  c(who.cookie, 'POST', `/api/canteen/mailbox/${id}/reply`, { clientKey, reply: text });
+const reply = (who: { cookie: string }, id: number, text: string, clientKey = randomUUID()) => c(who.cookie, 'POST', `/api/canteen/mailbox/${id}/reply`, { clientKey, reply: text });
 const adminRow = async (id: number) => (await admin('GET', '/api/erp/canteen/feedback')).body.rows.find((r: { id: number }) => r.id === id);
 const dbRow = async (id: number) =>
   (

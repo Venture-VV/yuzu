@@ -139,7 +139,13 @@ export async function recognizeInvoiceFile(file: File, onProgress: (message: str
   const qr = await findQr(canvas);
   if (qr) {
     // 二维码给号码、日期、不含税金额；PDF 文字补上价税合计、税额、开票方
-    return { ...(fromText ?? {}), ...qr, method: 'qr', ...(fromText?.totalCents !== undefined ? { totalCents: fromText.totalCents } : {}), ...(fromText?.taxCents !== undefined ? { taxCents: fromText.taxCents } : {}) };
+    return {
+      ...(fromText ?? {}),
+      ...qr,
+      method: 'qr',
+      ...(fromText?.totalCents !== undefined ? { totalCents: fromText.totalCents } : {}),
+      ...(fromText?.taxCents !== undefined ? { taxCents: fromText.taxCents } : {}),
+    };
   }
   if (fromText) return fromText;
   onProgress('没找到二维码，改用文字识别');

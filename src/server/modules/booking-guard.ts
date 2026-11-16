@@ -13,17 +13,13 @@ import { lockOpKey } from '../lib/fences';
 /** 技师预约全部串行的那把咨询锁（预约新建、改时间与建钟单、加钟共用） */
 export const lockTechnicianBookings = (tx: Tx) => lockOpKey(tx, 'booking:technicians');
 
-const hm = (at: Date, timeZone: string) =>
-  new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(at);
+const hm = (at: Date, timeZone: string) => new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(at);
 
 /**
  * 这位技师在 [from, to) 里有还占着时段的预约就拒绝（TECHNICIAN_BOOKED）。memberId：这一钟的客人是会员时，
  * 这位会员自己约的预约不算冲突（同一位客人）
  */
-export async function assertTechnicianNotBooked(
-  tx: Tx,
-  a: { technicianId: number; techLabel: string; from: number; to: number; memberId: number | null; timeZone: string },
-): Promise<void> {
+export async function assertTechnicianNotBooked(tx: Tx, a: { technicianId: number; techLabel: string; from: number; to: number; memberId: number | null; timeZone: string }): Promise<void> {
   if (a.to <= a.from) return;
   await lockTechnicianBookings(tx);
   const [b] = await tx<{ bookingNo: string; startsAt: Date; endsAt: Date; who: string }[]>`

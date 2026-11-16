@@ -211,8 +211,7 @@ test.describe('部门采购需求单', () => {
     const name = `E2E 重提被拒${String(Date.now()).slice(-5)}`;
     const isPost = (url: URL) => url.pathname === '/api/erp/expenses';
     type Stored = { key: string; body: unknown; uncertain?: boolean };
-    const stored = async () =>
-      (JSON.parse((await page.evaluate(() => localStorage.getItem('yuzu.erpPending.v1'))) ?? '[]') as Stored[]).find((r) => JSON.stringify(r.body).includes(name));
+    const stored = async () => (JSON.parse((await page.evaluate(() => localStorage.getItem('yuzu.erpPending.v1'))) ?? '[]') as Stored[]).find((r) => JSON.stringify(r.body).includes(name));
     const count = async () => {
       const list = (await (await page.request.get(`/api/erp/expenses?from=${calendarToday}&to=${calendarToday}`)).json()) as { claims: { summary: string }[] };
       return list.claims.filter((c) => c.summary.includes(name)).length;

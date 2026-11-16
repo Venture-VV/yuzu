@@ -36,10 +36,7 @@ import { lockPlatformCode, redemptionOfCode } from './platform-redemptions';
 import { loadSettings } from './settings';
 
 const Platform = z.enum(['meituan', 'douyin'], '验券只支持美团、抖音');
-const Code = z
-  .string('请填写完整券码')
-  .transform(normalizeCouponCode)
-  .pipe(z.string().regex(COUPON_CODE_PATTERN, '请填写完整券码（6–64 位数字或字母）'));
+const Code = z.string('请填写完整券码').transform(normalizeCouponCode).pipe(z.string().regex(COUPON_CODE_PATTERN, '请填写完整券码（6–64 位数字或字母）'));
 
 export async function voucherStatus(deps: Deps): Promise<PayTerminalStatus> {
   return { mode: modeOf(deps.config.integrations, 'platform_voucher'), enabled: (await loadIntegrationSwitches(deps.sql)).platformVoucher };
@@ -47,7 +44,11 @@ export async function voucherStatus(deps: Deps): Promise<PayTerminalStatus> {
 
 async function adapterOrThrow(deps: Deps): Promise<PlatformVoucher> {
   const a = platformVoucherAdapter(deps.config.integrations);
-  if (!a) throw conflict('VOUCHER_OFF', modeOf(deps.config.integrations, 'platform_voucher') === 'live' ? '平台验券已配置，等联调以后才能用；现在请手输券码，在平台 App 里核销' : '没有配置平台验券；请手输券码，在平台 App 里核销');
+  if (!a)
+    throw conflict(
+      'VOUCHER_OFF',
+      modeOf(deps.config.integrations, 'platform_voucher') === 'live' ? '平台验券已配置，等联调以后才能用；现在请手输券码，在平台 App 里核销' : '没有配置平台验券；请手输券码，在平台 App 里核销',
+    );
   if (!(await loadIntegrationSwitches(deps.sql)).platformVoucher) throw conflict('VOUCHER_OFF', '门店关了平台验券（后台「对外接口」）；请手输券码，在平台 App 里核销');
   return a;
 }
@@ -133,7 +134,8 @@ export async function verifyVoucher(deps: Deps, raw: unknown, actor: Actor, ip?:
   await deps.sql.begin(async (tx) => assertCodeFree(tx, input.platform, input.code));
   // 核销前再问一次平台（只读）：面值变了的拒绝
   const info = await prepareVoucher(deps, { platform: input.platform, code: input.code }, actor);
-  if (info.faceCents !== input.expectedFaceCents) throw conflict('VOUCHER_CHANGED', `平台说这张券的面值是 ${formatYuan(info.faceCents)}，和刚才看到的不一样，请重新验券`, { faceCents: info.faceCents });
+  if (info.faceCents !== input.expectedFaceCents)
+    throw conflict('VOUCHER_CHANGED', `平台说这张券的面值是 ${formatYuan(info.faceCents)}，和刚才看到的不一样，请重新验券`, { faceCents: info.faceCents });
   const settings = await loadSettings(deps.sql);
   const businessDate = businessDateOf(new Date(), deps.config.timezone, settings.businessDayStartHour);
   const r = await deps.sql.begin(async (tx) => {
@@ -151,13 +153,29 @@ export async function verifyVoucher(deps: Deps, raw: unknown, actor: Actor, ip?:
       VALUES (${input.platform}, ${input.code}, ${info.dealName.slice(0, 48)}, ${info.faceCents}, ${info.settleCents}, ${info.quantity}, ${a.mode}, ${businessDate},
               ${input.clientKey}, ${requestHash}, ${actor.id})
       RETURNING id`;
-    await writeAudit(tx, { staffId: actor.id, action: 'platform_verify', targetType: 'platform_verification', targetId: Number(row!.id), detail: { op: 'verify', platform: input.platform, code: input.code, faceCents: info.faceCents }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'platform_verify',
+      targetType: 'platform_verification',
+      targetId: Number(row!.id),
+      detail: { op: 'verify', platform: input.platform, code: input.code, faceCents: info.faceCents },
+      ip,
+    });
     return { id: Number(row!.id), replayed: false };
   });
   if (!r.replayed) {
     const result = await withCallLog(
       deps.sql,
-      { kind: 'platform_voucher', provider: input.platform, action: 'verify', mode: a.mode, refType: 'platform_verification', refId: r.id, request: { code: input.code, quantity: info.quantity }, staffId: actor.id },
+      {
+        kind: 'platform_voucher',
+        provider: input.platform,
+        action: 'verify',
+        mode: a.mode,
+        refType: 'platform_verification',
+        refId: r.id,
+        request: { code: input.code, quantity: info.quantity },
+        staffId: actor.id,
+      },
       () => a.verify({ platform: input.platform, code: input.code, quantity: info.quantity, outNo: String(r.id).padStart(8, '0'), businessDate }),
       (x) => (x.status === 'verified' ? { status: x.status, verifyNo: x.verifyNo } : { status: x.status, error: x.error }),
     ).catch((e: unknown) => ({ status: 'unknown' as const, error: `平台没有回应：${e instanceof Error ? e.message : String(e)}` }));
@@ -299,7 +317,16 @@ async function cancelHeld(deps: Deps, a: PlatformVoucher, id: number, reason: st
   try {
     const r = await withCallLog(
       deps.sql,
-      { kind: 'platform_voucher', provider: v.platform, action: 'cancel', mode: a.mode, refType: 'platform_verification', refId: id, request: { code: v.code, verifyNo: v.verifyNo }, staffId: actor.id },
+      {
+        kind: 'platform_voucher',
+        provider: v.platform,
+        action: 'cancel',
+        mode: a.mode,
+        refType: 'platform_verification',
+        refId: id,
+        request: { code: v.code, verifyNo: v.verifyNo },
+        staffId: actor.id,
+      },
       () => a.cancel({ platform: v.platform, code: v.code, verifyNo: v.verifyNo }),
       (x) => ({ ok: x.ok, error: x.error ?? null }),
     );
@@ -332,7 +359,9 @@ export async function recordVerification(deps: Deps, id: number, actor: Actor, i
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     await lockPlatformCode(tx, peek.platform, peek.code);
-    const [v] = await tx<{ status: string; couponId: number | null; cancelling: boolean; dealName: string; faceCents: number; settleCents: number; quantity: number; verifiedAt: Date; businessDate: string }[]>`
+    const [v] = await tx<
+      { status: string; couponId: number | null; cancelling: boolean; dealName: string; faceCents: number; settleCents: number; quantity: number; verifiedAt: Date; businessDate: string }[]
+    >`
       SELECT status, group_buy_coupon_id AS coupon_id, cancelled_by IS NOT NULL AS cancelling, deal_name, face_cents, settle_cents, quantity, verified_at,
              to_char(business_date, 'YYYY-MM-DD') AS business_date
       FROM platform_verifications WHERE id = ${id} FOR UPDATE`;
@@ -351,7 +380,15 @@ export async function recordVerification(deps: Deps, id: number, actor: Actor, i
               ${'验券没结账，平台不让撤了，转补录'}, ${actor.id}, ${key}, ${hashRequest({ verificationId: id })})
       RETURNING id`;
     await tx`UPDATE platform_verifications SET status = 'recorded', redemption_id = ${row!.id}, updated_at = now() WHERE id = ${id}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'platform_verify', targetType: 'platform_verification', targetId: id, detail: { op: 'record', code: peek.code, redemptionNo: no }, ip, businessDate: v!.businessDate });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'platform_verify',
+      targetType: 'platform_verification',
+      targetId: id,
+      detail: { op: 'record', code: peek.code, redemptionNo: no },
+      ip,
+      businessDate: v!.businessDate,
+    });
   });
   return verificationView(deps.sql, id);
 }
@@ -466,9 +503,7 @@ export function registerPlatformVerifyRoutes(app: FastifyInstance, deps: Deps) {
     return r.verification;
   });
   /** 已验券没结账、还在核销中的 */
-  app.get('/api/platform/verifications/open', { preHandler: anyone }, async () =>
-    views(sql, sql`(v.status = 'verified' AND v.group_buy_coupon_id IS NULL) OR v.status = 'verifying'`),
-  );
+  app.get('/api/platform/verifications/open', { preHandler: anyone }, async () => views(sql, sql`(v.status = 'verified' AND v.group_buy_coupon_id IS NULL) OR v.status = 'verifying'`));
   app.get('/api/platform/verifications', { preHandler: guardAny('platform.redeem', 'platform.settle') }, async (req) => {
     const { from, to } = parse(z.object({ from: z.string().regex(ISO_DATE), to: z.string().regex(ISO_DATE) }), req.query);
     return views(sql, sql`v.business_date BETWEEN ${from} AND ${to}`);
@@ -513,4 +548,3 @@ export function registerPlatformVerifyRoutes(app: FastifyInstance, deps: Deps) {
     return { ok: true };
   });
 }
-

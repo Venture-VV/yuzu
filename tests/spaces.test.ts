@@ -56,8 +56,7 @@ const fieldsOf = (s: SpaceLedger['spaces'][number], patch: Record<string, unknow
   version: s.version,
   ...patch,
 });
-const saveRoom = (body: Record<string, unknown>, id?: number) =>
-  id ? api(ctx.app, boss, 'PUT', `/api/admin/rooms/rooms/${id}`, body) : api(ctx.app, boss, 'POST', '/api/admin/rooms/rooms', body);
+const saveRoom = (body: Record<string, unknown>, id?: number) => (id ? api(ctx.app, boss, 'PUT', `/api/admin/rooms/rooms/${id}`, body) : api(ctx.app, boss, 'POST', '/api/admin/rooms/rooms', body));
 const allChecksOk = async () => {
   for (const c of await spaceChecks(ctx.sql)) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
 };
@@ -296,9 +295,7 @@ describe('逐条维护：新建、编辑、核对、别名、批量设区域', (
     // 核对状态同样按版本号
     const s305 = await space('S305');
     expect((await api(ctx.app, boss, 'POST', `/api/admin/spaces/${s305.id}/verify`, { status: 'site_check', note: '要现场看', version: s305.version })).status).toBe(200);
-    expect((await api(ctx.app, boss, 'POST', `/api/admin/spaces/${s305.id}/verify`, { status: 'confirmed', note: '迟到的那次', version: s305.version })).body.error.code).toBe(
-      'SPACE_STALE',
-    );
+    expect((await api(ctx.app, boss, 'POST', `/api/admin/spaces/${s305.id}/verify`, { status: 'confirmed', note: '迟到的那次', version: s305.version })).body.error.code).toBe('SPACE_STALE');
     expect((await space('S305')).verifyStatus).toBe('site_check');
     // 楼层、区域
     const l1 = (await ledger()).floors.find((f) => f.code === 'L1')!;

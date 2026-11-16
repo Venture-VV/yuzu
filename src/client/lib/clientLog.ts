@@ -32,8 +32,7 @@ export function useProblems(): Problem[] {
 }
 
 /** 这一页的入口文件（构建好的 /assets/index-xxxx.js，和服务器 /api/ping 回的比，不一样就是系统更新过）；开发模式下没有 */
-export const PAGE_ENTRY: string | null =
-  typeof document === 'undefined' ? null : (document.querySelector<HTMLScriptElement>('script[type="module"][src^="/assets/"]')?.getAttribute('src') ?? null);
+export const PAGE_ENTRY: string | null = typeof document === 'undefined' ? null : (document.querySelector<HTMLScriptElement>('script[type="module"][src^="/assets/"]')?.getAttribute('src') ?? null);
 
 type ReportKind = 'render' | 'chunk' | 'error' | 'rejection';
 

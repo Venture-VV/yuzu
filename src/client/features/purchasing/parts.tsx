@@ -60,10 +60,7 @@ export function CompareChip({ compare, unit, className }: { compare: PriceCompar
   const p = compare.changePercent;
   const b = compare.baseline;
   return (
-    <span
-      className={cn('inline-flex items-center gap-1 text-[11.5px] whitespace-nowrap', className)}
-      title={`比较对象：${b.docNo}（${b.docDate} · ${b.supplierName}）同规格、同单位、同价格口径`}
-    >
+    <span className={cn('inline-flex items-center gap-1 text-[11.5px] whitespace-nowrap', className)} title={`比较对象：${b.docNo}（${b.docDate} · ${b.supplierName}）同规格、同单位、同价格口径`}>
       {p > 0 ? (
         <span className="inline-flex items-center gap-0.5 rounded-full bg-clay-soft px-1.5 font-bold text-clay">
           <TrendingUp className="size-3" />+{p.toFixed(2)}%

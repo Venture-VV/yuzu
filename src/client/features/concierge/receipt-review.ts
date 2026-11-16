@@ -1,1 +1,1 @@
-export * from "@shared/concierge/receipt-review";
+export * from '@shared/concierge/receipt-review';

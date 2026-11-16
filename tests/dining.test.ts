@@ -30,7 +30,8 @@ const itemsOf = async (visitId: number) => ((await board()).items as KItem[]).fi
 const act = (id: number, action: string, cookie = cook, from?: string) => api(ctx.app, cookie, 'POST', `/api/kitchen/items/${id}/${action}`, from ? { from } : undefined);
 const limit = (itemId: number, remaining: number | null, cookie = cook) => api(ctx.app, cookie, 'PUT', `/api/kitchen/limits/${itemId}`, { remaining });
 const rules = (body: Record<string, unknown>, cookie = ctx.owner) => api(ctx.app, cookie, 'PUT', '/api/admin/dining/rules', body);
-const remainingOf = async (itemId: number) => ((await api(ctx.app, ctx.clerk, 'GET', '/api/dining/menu')).body.dishes as { id: number; remaining: number | null }[]).find((d) => d.id === itemId)?.remaining;
+const remainingOf = async (itemId: number) =>
+  ((await api(ctx.app, ctx.clerk, 'GET', '/api/dining/menu')).body.dishes as { id: number; remaining: number | null }[]).find((d) => d.id === itemId)?.remaining;
 
 beforeAll(async () => {
   ctx = await setup();
@@ -63,7 +64,11 @@ describe('餐饮功能关闭（默认）', () => {
     expect(r.status).toBe(200);
     expect(r.body.lines.at(-1)).toMatchObject({ source: 'bath', kitchen: null });
     expect((await order(v.id, [{ itemId: item['宫保鸡丁']!, quantity: 1 }], 4800)).body.error.code).toBe('DISH_NOT_KITCHEN');
-    const noted = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${v.id}/charges`, { clientKey: randomUUID(), lines: [{ itemId: item['宫保鸡丁'], quantity: 1, note: '少辣' }], expectedTotal: 4800 });
+    const noted = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${v.id}/charges`, {
+      clientKey: randomUUID(),
+      lines: [{ itemId: item['宫保鸡丁'], quantity: 1, note: '少辣' }],
+      expectedTotal: 4800,
+    });
     expect(noted.body.error.code).toBe('DISH_NOTE_NOT_ALLOWED');
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/auth/me')).body.dining).toBe(false);
   });
@@ -97,14 +102,27 @@ describe('后台「餐饮」', () => {
     expect((await rules({ enabled: true })).status).toBe(200);
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/auth/me')).body.dining).toBe(true);
     const catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as { key: string; group: string }[];
-    expect(catalog.filter((r) => r.group === 'dining').map((r) => r.key)).toEqual(['dining_rules.enabled', 'dining_rules.trackServed', 'dining_rules.warnMinutes', 'mp_food_max_quantity', 'mp_food_max_total_cents']); // 8.0.7：扫码点餐的上限（N1）可调
+    expect(catalog.filter((r) => r.group === 'dining').map((r) => r.key)).toEqual([
+      'dining_rules.enabled',
+      'dining_rules.trackServed',
+      'dining_rules.warnMinutes',
+      'mp_food_max_quantity',
+      'mp_food_max_total_cents',
+    ]); // 8.0.7：扫码点餐的上限（N1）可调
   });
 });
 
 describe('点单与厨房出品', () => {
   it('点单挂到客人的账单（记在餐饮），同一次下单一张出品单，口味备注进厨房；不进厨房的菜只能到前台登记', async () => {
     const v = await enter();
-    const r = await order(v.id, [{ itemId: item['宫保鸡丁']!, quantity: 2, note: '少辣' }, { itemId: item['柠檬茶']!, quantity: 1 }], 4800 * 2 + 1500);
+    const r = await order(
+      v.id,
+      [
+        { itemId: item['宫保鸡丁']!, quantity: 2, note: '少辣' },
+        { itemId: item['柠檬茶']!, quantity: 1 },
+      ],
+      4800 * 2 + 1500,
+    );
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.pending.map((p: { name: string; quantity: number; note: string; status: string; rushCount: number }) => [p.name, p.quantity, p.note, p.status, p.rushCount])).toEqual([
       ['宫保鸡丁', 2, '少辣', 'queued', 0],
@@ -168,7 +186,14 @@ describe('点单与厨房出品', () => {
 
   it('连点两下「撤回」只退一步；只有点单权限的岗位只能上菜与撤回上菜（在锁内判断）', async () => {
     const v = await enter();
-    await order(v.id, [{ itemId: item['柠檬茶']!, quantity: 1 }, { itemId: item['拍黄瓜']!, quantity: 1 }], 3300);
+    await order(
+      v.id,
+      [
+        { itemId: item['柠檬茶']!, quantity: 1 },
+        { itemId: item['拍黄瓜']!, quantity: 1 },
+      ],
+      3300,
+    );
     const [a, b] = await itemsOf(v.id);
     // 没开始做就出餐：撤回回到待做；第二下带着旧状态（已出餐）被拒绝
     expect((await act(a!.id, 'done', cook, 'queued')).status).toBe(200);
@@ -176,7 +201,7 @@ describe('点单与厨房出品', () => {
     expect((await act(a!.id, 'undo', cook, 'done')).body.error.code).toBe('DISH_CHANGED');
     expect((await itemsOf(v.id)).find((k) => k.id === a!.id)!.status).toBe('queued');
     // 值班经理去掉「厨房出品屏」权限后只能上菜
-    const before = ((await api(ctx.app, ctx.owner, 'GET', '/api/admin/permissions')).body.effective.duty_manager as string[]);
+    const before = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/permissions')).body.effective.duty_manager as string[];
     const setDuty = (list: string[]) => api(ctx.app, ctx.owner, 'PUT', '/api/admin/permissions', { roles: { duty_manager: list } });
     expect((await setDuty(before.filter((p) => p !== 'dining.kitchen'))).status).toBe(200);
     try {

@@ -52,14 +52,10 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
   });
 
   // 换了撤销对象时，填写的原因在这一次渲染里就清空（下面的 effect 只处理待确认的撤销）
-  useResetOnOpen(
-    open,
-    () => {
-      setPreset(null);
-      setDetail('');
-    },
-    [consumptionId],
-  );
+  useResetOnOpen(open, () => {
+    setPreset(null);
+    setDetail('');
+  }, [consumptionId]);
   useEffect(() => {
     if (!target) {
       // 对话框关闭：未确认的撤销交给页面顶部的提醒继续处理

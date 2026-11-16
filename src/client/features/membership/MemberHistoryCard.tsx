@@ -57,9 +57,7 @@ export function MemberHistoryCard({ member }: { member: MemberDetail }) {
                 {e.bonus !== null && e.bonus !== 0 && <span className="text-[12px] text-ink-3">赠金 {describeHistoryAmount(e.bonus)}</span>}
                 {e.balance !== null && <span className="text-[12px] text-ink-3">余额 {describeHistoryAmount(e.balance)}</span>}
                 <span className="flex-1" />
-                <span className="text-[12px] text-ink-4">
-                  {[e.docNo, e.store, e.operator, e.note].filter(Boolean).join(' · ')}
-                </span>
+                <span className="text-[12px] text-ink-4">{[e.docNo, e.store, e.operator, e.note].filter(Boolean).join(' · ')}</span>
               </li>
             ))}
           </ul>

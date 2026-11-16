@@ -57,7 +57,10 @@ export const useStage = () => useContext(StageContext);
 export const useStageScale = () => useContext(StageContext).scale;
 
 const isEditable = (el: Element | null): el is HTMLElement =>
-  !!el && (el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'file', 'range', 'color', 'submit', 'reset'].includes(el.type)) || (el as HTMLElement).isContentEditable);
+  !!el &&
+  (el instanceof HTMLTextAreaElement ||
+    (el instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'file', 'range', 'color', 'submit', 'reset'].includes(el.type)) ||
+    (el as HTMLElement).isContentEditable);
 
 /** 失去焦点以后这么久之内仍当作正在输入：键盘收起（窗口变回原来的高度）比失去焦点晚一点 */
 const EDIT_GRACE_MS = 900;
@@ -144,37 +147,37 @@ export function Stage({
   return (
     <StageContext.Provider value={{ scale: layout.scale, visible: layout.visible, keyboard: layout.keyboard, animated }}>
       <BigContext.Provider value={big}>
-      <div
-        className="emenu"
-        // 高度写成稳定的那个数（不用 inset: 0）：键盘把窗口压矮时这一层不跟着变矮，舞台不会被挤
-        style={{ position: 'fixed', left: 0, top: 0, width: '100%', height: height ?? '100%', overflow: 'hidden', background: 'var(--em-bg)', ...vars }}
-        data-motion={animated ? undefined : 'off'}
-        data-lang={lang}
-        data-size={big ? 'large' : 'design'}
-        data-keyboard={layout.keyboard || undefined}
-        data-testid={testId}
-      >
         <div
-          ref={stageEl}
-          style={{
-            position: 'absolute',
-            left: layout.left,
-            top: layout.top,
-            width: STAGE_W,
-            height: STAGE_H,
-            transform: `scale(${layout.scale})`,
-            transformOrigin: '0 0',
-            overflow: 'hidden',
-            background: 'var(--em-bg)',
-            transition: layout.keyboard || layout.shift ? 'top 0.28s ease' : undefined,
-          }}
-          data-emenu-stage
+          className="emenu"
+          // 高度写成稳定的那个数（不用 inset: 0）：键盘把窗口压矮时这一层不跟着变矮，舞台不会被挤
+          style={{ position: 'fixed', left: 0, top: 0, width: '100%', height: height ?? '100%', overflow: 'hidden', background: 'var(--em-bg)', ...vars }}
+          data-motion={animated ? undefined : 'off'}
+          data-lang={lang}
+          data-size={big ? 'large' : 'design'}
+          data-keyboard={layout.keyboard || undefined}
+          data-testid={testId}
         >
-          {children}
-          {/* 退场的影子、飞向订单的小圆点画在这一层（motion.tsx 直接往里放节点，React 不管它的内容） */}
-          <div data-emenu-ghosts aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }} />
+          <div
+            ref={stageEl}
+            style={{
+              position: 'absolute',
+              left: layout.left,
+              top: layout.top,
+              width: STAGE_W,
+              height: STAGE_H,
+              transform: `scale(${layout.scale})`,
+              transformOrigin: '0 0',
+              overflow: 'hidden',
+              background: 'var(--em-bg)',
+              transition: layout.keyboard || layout.shift ? 'top 0.28s ease' : undefined,
+            }}
+            data-emenu-stage
+          >
+            {children}
+            {/* 退场的影子、飞向订单的小圆点画在这一层（motion.tsx 直接往里放节点，React 不管它的内容） */}
+            <div data-emenu-ghosts aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }} />
+          </div>
         </div>
-      </div>
       </BigContext.Provider>
     </StageContext.Provider>
   );
@@ -184,7 +187,21 @@ export function Stage({
  * 编辑器画布里的舞台（UI 工作台，8.1.1）：与平板同一套样式与上下文，但不铺满窗口、不跟键盘挪，按给的倍数缩放；没有动效。
  * 里面照设计稿的像素画（1024×768），外面的盒子是缩放以后的大小。
  */
-export function EmbeddedStage({ children, scale, lang = 'zh', big = false, vars, testId }: { children: ReactNode; scale: number; lang?: 'zh' | 'en'; big?: boolean; vars?: Record<string, string>; testId?: string }) {
+export function EmbeddedStage({
+  children,
+  scale,
+  lang = 'zh',
+  big = false,
+  vars,
+  testId,
+}: {
+  children: ReactNode;
+  scale: number;
+  lang?: 'zh' | 'en';
+  big?: boolean;
+  vars?: Record<string, string>;
+  testId?: string;
+}) {
   return (
     <StageContext.Provider value={{ scale, visible: STAGE_H, keyboard: false, animated: false }}>
       <BigContext.Provider value={big}>
@@ -196,7 +213,10 @@ export function EmbeddedStage({ children, scale, lang = 'zh', big = false, vars,
           data-size={big ? 'large' : 'design'}
           data-testid={testId}
         >
-          <div style={{ position: 'absolute', left: 0, top: 0, width: STAGE_W, height: STAGE_H, transform: `scale(${scale})`, transformOrigin: '0 0', overflow: 'hidden', background: 'var(--em-bg)' }} data-emenu-stage>
+          <div
+            style={{ position: 'absolute', left: 0, top: 0, width: STAGE_W, height: STAGE_H, transform: `scale(${scale})`, transformOrigin: '0 0', overflow: 'hidden', background: 'var(--em-bg)' }}
+            data-emenu-stage
+          >
             {children}
             <div data-emenu-ghosts aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }} />
           </div>

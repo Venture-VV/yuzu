@@ -8,9 +8,7 @@ import { decodeImportFile, FileEncodingError } from '../src/shared/text-decode';
 
 const hex = (h: string) => Uint8Array.from(Buffer.from(h, 'hex'));
 // 「姓名,手机号,本金,赠金,累计充值 / 张三,13800001234,100.50,20,3000」按 GBK 存
-const GBK_OPENING = hex(
-  'd0d5c3fb2ccad6bbfabac52cb1bebdf02cd4f9bdf02cc0dbbcc6b3e4d6b50d0ad5c5c8fd2c31333830303030313233342c3130302e35302c32302c333030300d0a',
-);
+const GBK_OPENING = hex('d0d5c3fb2ccad6bbfabac52cb1bebdf02cd4f9bdf02cc0dbbcc6b3e4d6b50d0ad5c5c8fd2c31333830303030313233342c3130302e35302c32302c333030300d0a');
 // 「柜号,性别,类型,等级 / A8001,男,普通,」按 GBK 存
 const GBK_TAGS = hex('b9f1bac52cd0d4b1f02cc0e0d0cd2cb5c8bcb60d0a41383030312cc4d02cc6d5cda82c0d0a');
 

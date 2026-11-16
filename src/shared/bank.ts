@@ -116,11 +116,7 @@ const OUT_FLAGS = /^(借|借方|借记|支|支出|支取|付|付出|付款|出|�
 const IN_FLAGS = /^(贷|贷方|贷记|收|收入|收款|存|存入|入|转入|c|cr|credit|\+)$/i;
 
 /** 按列对出来的映射解析每一行；解析不了的行记在 problems 里（不进库） */
-export function parseStatementRows(
-  header: string[],
-  rows: { row: number; cells: string[] }[],
-  map: ColumnMap,
-): { lines: ParsedStatementLine[]; problems: { row: number; message: string }[] } {
+export function parseStatementRows(header: string[], rows: { row: number; cells: string[] }[], map: ColumnMap): { lines: ParsedStatementLine[]; problems: { row: number; message: string }[] } {
   const idx = (f: StatementField) => (map[f] ? header.indexOf(map[f]!) : -1);
   /** 没有流水号、内容完全一样的几笔在这份文件里出现到第几次 */
   const repeats = new Map<string, number>();
@@ -146,8 +142,8 @@ export function parseStatementRows(
     if (map.in || map.out) {
       const i = parseMoney(cell(r, 'in'));
       const o = parseMoney(cell(r, 'out'));
-      if (i && i !== 0) (direction = i > 0 ? 'in' : 'out'), (cents = Math.abs(i));
-      else if (o && o !== 0) (direction = o > 0 ? 'out' : 'in'), (cents = Math.abs(o));
+      if (i && i !== 0) ((direction = i > 0 ? 'in' : 'out'), (cents = Math.abs(i)));
+      else if (o && o !== 0) ((direction = o > 0 ? 'out' : 'in'), (cents = Math.abs(o)));
     }
     if (direction === null && map.amount) {
       const a = parseMoney(cell(r, 'amount'));

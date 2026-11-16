@@ -40,9 +40,11 @@ export async function customerChecks(db: Db): Promise<CheckLine[]> {
     (SELECT count(*)::int FROM customer_binding_events) AS bindings,
     (SELECT count(*)::int FROM customer_target_versions) AS targets`;
   const bad = [...issues.map((r) => r.ref), ...noteIssues.map((r) => '服务会员关联 ' + r.id)];
-  return [{
-    label: '客户部的服务、维护绑定、成交归属及目标历史一致',
-    ok: bad.length === 0,
-    detail: bad.length ? bad.join('、') : `${counts!.notes}条服务记录、${counts!.bindings}次维护绑定、${counts!.credits}笔成交归属、${counts!.targets}份目标修订；未建立第二套资金账本`,
-  }];
+  return [
+    {
+      label: '客户部的服务、维护绑定、成交归属及目标历史一致',
+      ok: bad.length === 0,
+      detail: bad.length ? bad.join('、') : `${counts!.notes}条服务记录、${counts!.bindings}次维护绑定、${counts!.credits}笔成交归属、${counts!.targets}份目标修订；未建立第二套资金账本`,
+    },
+  ];
 }

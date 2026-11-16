@@ -25,8 +25,8 @@ function StoreFacts({ f }: { f: AiDailyFacts }) {
   return (
     <div className="space-y-1">
       <p>
-        <span className="font-semibold">{f.store}</span>：净营业额 {f.revenue.net}（上周同一天 {f.compare.lastWeekSameDay}，近 7 天日均 {f.compare.avg7}）· 结账 {f.revenue.checkouts} 张 ·
-        客人 {f.revenue.guests} 位 · 客单价 {f.revenue.perGuest}
+        <span className="font-semibold">{f.store}</span>：净营业额 {f.revenue.net}（上周同一天 {f.compare.lastWeekSameDay}，近 7 天日均 {f.compare.avg7}）· 结账 {f.revenue.checkouts} 张 · 客人{' '}
+        {f.revenue.guests} 位 · 客单价 {f.revenue.perGuest}
         {f.revenue.refund !== '¥0.00' && ` · 退款 ${f.revenue.refund}`}
       </p>
       <p className="text-ink-3">
@@ -93,7 +93,13 @@ export function AiSummaryCard() {
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <Sparkles className="size-4 text-yuzu-deep" />
         <h2 className="text-[15px] font-bold">
-          昨日小结{q.data && <span className="ml-1.5 font-normal text-ink-3">{q.data.date}{scope.merged ? ' · 全公司' : ''}</span>}
+          昨日小结
+          {q.data && (
+            <span className="ml-1.5 font-normal text-ink-3">
+              {q.data.date}
+              {scope.merged ? ' · 全公司' : ''}
+            </span>
+          )}
         </h2>
         {s && <Badge tone={STATUS_LABEL[s.status].tone}>{STATUS_LABEL[s.status].text}</Badge>}
         <span className="flex-1" />
@@ -134,7 +140,8 @@ export function AiSummaryCard() {
             </div>
           )}
           <p className="text-[12px] text-ink-4">
-            AI 按当天的汇总数写的，数字以看板为准；发给模型的只有汇总，没有会员的姓名、手机号。{s.model && s.status === 'done' ? `（${s.model === 'mock' ? '模拟' : s.model}，${formatDateTime(s.updatedAt)}）` : ''}
+            AI 按当天的汇总数写的，数字以看板为准；发给模型的只有汇总，没有会员的姓名、手机号。
+            {s.model && s.status === 'done' ? `（${s.model === 'mock' ? '模拟' : s.model}，${formatDateTime(s.updatedAt)}）` : ''}
             {s.pushedAt && ' 已推送到企业微信。'}
             {s.pushError && ` 企业微信没推出去：${s.pushError}`}
           </p>

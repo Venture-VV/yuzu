@@ -31,7 +31,11 @@ export function FlowPage() {
   const count = (key: string) => (key === '' ? flows.length : key === 'alert' ? flows.filter((f) => f.alert).length : flows.filter((f) => f.stage === key).length);
   const shown = filter === '' ? flows : filter === 'alert' ? flows.filter((f) => f.alert) : flows.filter((f) => f.stage === filter);
   const rules = list.data?.rules;
-  const chips: { value: string; label: string }[] = [{ value: '', label: '全部' }, { value: 'alert', label: '卡住或超期' }, ...STAGES.map((s) => ({ value: s as string, label: FLOW_STAGE_LABELS[s] }))];
+  const chips: { value: string; label: string }[] = [
+    { value: '', label: '全部' },
+    { value: 'alert', label: '卡住或超期' },
+    ...STAGES.map((s) => ({ value: s as string, label: FLOW_STAGE_LABELS[s] })),
+  ];
 
   return (
     <>
@@ -60,7 +64,8 @@ export function FlowPage() {
             按金额分流：
             {rules.quoteThresholdCents > 0 ? (
               <>
-                <b className="font-bold text-ink">小于 {flowYuan(rules.quoteThresholdCents)}</b> 免比价（流程 A） ｜ <b className="font-bold text-ink">达到 {flowYuan(rules.quoteThresholdCents)}</b> 必须 ≥ {rules.minQuotes} 家比价并审批（流程 B）
+                <b className="font-bold text-ink">小于 {flowYuan(rules.quoteThresholdCents)}</b> 免比价（流程 A） ｜ <b className="font-bold text-ink">达到 {flowYuan(rules.quoteThresholdCents)}</b>{' '}
+                必须 ≥ {rules.minQuotes} 家比价并审批（流程 B）
               </>
             ) : (
               <>采购规则没设询价门槛，都走流程 A（免比价）；发起了询价的走流程 B</>
@@ -106,7 +111,11 @@ export function FlowPage() {
             {errorMessage(list.error)}
           </Notice>
         ) : shown.length === 0 ? (
-          <EmptyState art="leaf" title={flows.length === 0 ? '现在没有进行中的采购' : '这一类现在没有'} description={flows.length === 0 ? '部门提了需求、采购建了采购单或询价单以后，会在这里画出它走到哪了' : undefined} />
+          <EmptyState
+            art="leaf"
+            title={flows.length === 0 ? '现在没有进行中的采购' : '这一类现在没有'}
+            description={flows.length === 0 ? '部门提了需求、采购建了采购单或询价单以后，会在这里画出它走到哪了' : undefined}
+          />
         ) : (
           <>
             {list.data?.truncated && <Notice tone="info" title="进行中的太多，只列了最近的 60 条" className="mb-4" />}

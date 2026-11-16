@@ -12,9 +12,7 @@ export interface WalletBalance {
   bonus: Cents;
 }
 
-export type DeductionResult =
-  | { ok: true; principal: Cents; bonus: Cents }
-  | { ok: false; reason: 'insufficient'; available: Cents; shortfall: Cents };
+export type DeductionResult = { ok: true; principal: Cents; bonus: Cents } | { ok: false; reason: 'insufficient'; available: Cents; shortfall: Cents };
 
 export function splitDeduction(amount: Cents, balance: WalletBalance, rule: DeductionRule): DeductionResult {
   if (!Number.isSafeInteger(amount) || amount <= 0) {

@@ -7,16 +7,7 @@
 // 登记的锁：同一个手机号的那一行（有的话，FOR UPDATE，与登录同一把）；新建前取登录名的咨询锁再核对不撞，最后靠用户名、手机号、工号的唯一索引兜底。
 
 import { z } from 'zod';
-import {
-  defaultAvatar,
-  normalizePhone,
-  normalizeUsername,
-  PHONE,
-  registrationLink,
-  usernameProblem,
-  type CanteenRegistration,
-  type RegisterInfo,
-} from '@shared/canteen';
+import { defaultAvatar, normalizePhone, normalizeUsername, PHONE, registrationLink, usernameProblem, type CanteenRegistration, type RegisterInfo } from '@shared/canteen';
 import { hashPassword } from '../../auth/password';
 import { isUniqueViolation, type Db, type Sql, type Tx } from '../../db';
 import { writeAudit } from '../../lib/audit';

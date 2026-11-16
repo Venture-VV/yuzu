@@ -180,7 +180,16 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
         <div className="sm:col-span-3">
           <InvoiceScanButton onResult={applyScan} disabled={busy} />
         </div>
-        <Field label={<>供应商<RecognizedMark on={rec.isRecognized('supplier')} /></>} htmlFor="iv-supplier" className="sm:col-span-3">
+        <Field
+          label={
+            <>
+              供应商
+              <RecognizedMark on={rec.isRecognized('supplier')} />
+            </>
+          }
+          htmlFor="iv-supplier"
+          className="sm:col-span-3"
+        >
           <Select id="iv-supplier" value={supplierId ?? ''} onChange={(e) => (setSupplierId(Number(e.target.value) || null), setSplit({}))} data-testid="invoice-supplier">
             <option value="">选择供应商</option>
             {(meta.data?.suppliers ?? []).map((s) => (
@@ -190,7 +199,15 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
             ))}
           </Select>
         </Field>
-        <Field label={<>发票类型<RecognizedMark on={rec.isRecognized('kind')} /></>} htmlFor="iv-kind">
+        <Field
+          label={
+            <>
+              发票类型
+              <RecognizedMark on={rec.isRecognized('kind')} />
+            </>
+          }
+          htmlFor="iv-kind"
+        >
           <Select id="iv-kind" value={kinds.length === 0 || kindDef ? kind : ''} onChange={(e) => setKind(e.target.value)} data-testid="invoice-kind">
             {kinds.length === 0 && <option value="vat_special">增值税专用发票</option>}
             {kinds.length > 0 && !kindDef && <option value="">选择发票类型</option>}
@@ -201,19 +218,59 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
             ))}
           </Select>
         </Field>
-        <Field label={<>发票号码<RecognizedMark on={rec.isRecognized('no')} /></>} htmlFor="iv-no">
+        <Field
+          label={
+            <>
+              发票号码
+              <RecognizedMark on={rec.isRecognized('no')} />
+            </>
+          }
+          htmlFor="iv-no"
+        >
           <Input id="iv-no" value={invoiceNo} maxLength={40} onChange={(e) => setInvoiceNo(e.target.value)} className="h-10" data-testid="invoice-no" />
         </Field>
-        <Field label={<>开票日<RecognizedMark on={rec.isRecognized('date')} /></>} htmlFor="iv-date">
+        <Field
+          label={
+            <>
+              开票日
+              <RecognizedMark on={rec.isRecognized('date')} />
+            </>
+          }
+          htmlFor="iv-date"
+        >
           <Input id="iv-date" type="date" value={invoiceDate} max={session.calendarToday} onChange={(e) => setInvoiceDate(e.target.value)} className="h-10" />
         </Field>
-        <Field label={<>税率（%）<RecognizedMark on={rec.isRecognized('rate')} /></>} htmlFor="iv-rate">
+        <Field
+          label={
+            <>
+              税率（%）
+              <RecognizedMark on={rec.isRecognized('rate')} />
+            </>
+          }
+          htmlFor="iv-rate"
+        >
           <Input id="iv-rate" value={rate} onChange={(e) => setRate(e.target.value)} className="h-10 text-right" />
         </Field>
-        <Field label={<>价税合计<RecognizedMark on={rec.isRecognized('total')} /></>} htmlFor="iv-total">
+        <Field
+          label={
+            <>
+              价税合计
+              <RecognizedMark on={rec.isRecognized('total')} />
+            </>
+          }
+          htmlFor="iv-total"
+        >
           <MoneyInput id="iv-total" value={total} onChange={(e) => setTotal(e.target.value)} data-testid="invoice-total" />
         </Field>
-        <Field label={<>其中税额<RecognizedMark on={rec.isRecognized('tax')} /></>} htmlFor="iv-tax">
+        <Field
+          label={
+            <>
+              其中税额
+              <RecognizedMark on={rec.isRecognized('tax')} />
+            </>
+          }
+          htmlFor="iv-tax"
+        >
           <MoneyInput id="iv-tax" value={tax} onChange={(e) => setTax(e.target.value)} />
         </Field>
         <Field label="备注（选填）" htmlFor="iv-note">
@@ -256,7 +313,12 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
                       <Money cents={p.invoicedCents} />
                     </td>
                     <td className="py-1.5">
-                      <MoneyInput aria-label={`分到 ${p.poNo}`} value={split[p.poId] ?? ''} onChange={(e) => setSplit((s) => ({ ...s, [p.poId]: e.target.value }))} data-testid={`invoice-split-${p.poNo}`} />
+                      <MoneyInput
+                        aria-label={`分到 ${p.poNo}`}
+                        value={split[p.poId] ?? ''}
+                        onChange={(e) => setSplit((s) => ({ ...s, [p.poId]: e.target.value }))}
+                        data-testid={`invoice-split-${p.poNo}`}
+                      />
                     </td>
                   </tr>
                 ))}

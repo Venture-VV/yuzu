@@ -295,9 +295,16 @@ export async function applyRequestImport(deps: Deps, raw: unknown, actor: Actor,
     const p = await plan(tx, f, deps.config.timezone);
     if (p.issueCount) {
       const bad = p.rows.filter((x) => !x.skipped && x.issues.length);
-      throw unprocessable('IMPORT_INVALID', `有 ${bad.length} 行要先改好才能导入：${bad.slice(0, 3).map((x) => `第 ${x.row} 行 ${x.issues[0]}`).join('；')}`, {
-        rows: bad.map((x) => ({ row: x.row, issues: x.issues })),
-      });
+      throw unprocessable(
+        'IMPORT_INVALID',
+        `有 ${bad.length} 行要先改好才能导入：${bad
+          .slice(0, 3)
+          .map((x) => `第 ${x.row} 行 ${x.issues[0]}`)
+          .join('；')}`,
+        {
+          rows: bad.map((x) => ({ row: x.row, issues: x.issues })),
+        },
+      );
     }
     const todo = p.rows.filter((x) => !x.skipped);
     if (todo.length === 0) throw unprocessable('IMPORT_EMPTY', '没有要导入的行：表里的行都标了线下已下单、到货或退货（要导入请勾「线下已下单的也导入」）');
@@ -392,7 +399,14 @@ export function requestImportTemplate(): Buffer {
       { height: 26, cells: [{ v: `${REQUEST_IMPORT_TITLE} · 填写说明`, style: 'title' }] },
       { cells: [{ v: '第 1 行标题、第 2 行表头不要改；从第 3 行起一行写一样东西。橙色表头必填、灰色选填。', style: 'note' }] },
       { height: 22, cells: ['列', '必填', '怎么填', '例子'].map((v) => ({ v, style: 'optional' as const })) },
-      ...REQUEST_IMPORT_COLUMNS.map((c) => ({ cells: [{ v: c, style: 'body' as const }, { v: required.has(c) ? '必填' : '选填', style: 'body' as const }, { v: COLUMN_SPEC[c].how, style: 'body' as const }, { v: COLUMN_SPEC[c].example, style: 'body' as const }] })),
+      ...REQUEST_IMPORT_COLUMNS.map((c) => ({
+        cells: [
+          { v: c, style: 'body' as const },
+          { v: required.has(c) ? '必填' : '选填', style: 'body' as const },
+          { v: COLUMN_SPEC[c].how, style: 'body' as const },
+          { v: COLUMN_SPEC[c].example, style: 'body' as const },
+        ],
+      })),
       { cells: [] },
       { cells: [{ v: '导入：「采购 → 集采导入」选这份清单记在哪个部门 → 选文件 →「预览」→ 没有问题再「导入」。一份最多 500 行，同一份文件只能导入一次。', style: 'note' }] },
       { cells: [{ v: '导入的需求单直接是「已通过」，进「待转采购单」。表里贴的图片不导入；系统里的下单、到货、退货按采购单与收货单自动回写。', style: 'note' }] },

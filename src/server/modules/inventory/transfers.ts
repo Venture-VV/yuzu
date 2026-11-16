@@ -97,15 +97,7 @@ export async function getTransfer(db: Db, id: number): Promise<StockTransfer> {
 export const listTransfers = (db: Db, status?: string) => readTransfers(db, { status });
 
 /** 一张已生效的调出 / 调入单据（一建就生效，不走审批），每行按调拨的数量记流水 */
-async function postDoc(
-  tx: Tx,
-  kind: 'transfer_out' | 'transfer_in',
-  warehouseId: number,
-  date: string,
-  note: string,
-  lines: { m: LockedMaterial; qtyMilli: number }[],
-  actor: Actor,
-): Promise<number> {
+async function postDoc(tx: Tx, kind: 'transfer_out' | 'transfer_in', warehouseId: number, date: string, note: string, lines: { m: LockedMaterial; qtyMilli: number }[], actor: Actor): Promise<number> {
   const docNo = await nextDocNo(tx, `inv_${kind}`, kind === 'transfer_out' ? 'DC' : 'DR', date);
   const [doc] = await tx<{ id: number }[]>`
     INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, warehouse_id, note, created_by, confirmed_by, confirmed_at)
@@ -169,8 +161,15 @@ export async function createTransfer(deps: Deps, raw: unknown, actor: Actor, ip?
     }
     await lockWarehouses(tx, [input.fromWarehouseId, input.toWarehouseId]);
     const transferNo = await nextDocNo(tx, 'stock_transfer', 'DB', date);
-    const outDocId = await postDoc(tx, 'transfer_out', input.fromWarehouseId, date, `调拨 ${transferNo} 调出${input.note ? `：${input.note}` : ''}`,
-      input.lines.map((l) => ({ m: mats.get(l.materialId)!, qtyMilli: l.qtyMilli })), actor);
+    const outDocId = await postDoc(
+      tx,
+      'transfer_out',
+      input.fromWarehouseId,
+      date,
+      `调拨 ${transferNo} 调出${input.note ? `：${input.note}` : ''}`,
+      input.lines.map((l) => ({ m: mats.get(l.materialId)!, qtyMilli: l.qtyMilli })),
+      actor,
+    );
     const [row] = await tx<{ id: number }[]>`
       INSERT INTO stock_transfers (transfer_no, from_warehouse_id, to_warehouse_id, note, out_doc_id, sent_by)
       VALUES (${transferNo}, ${input.fromWarehouseId}, ${input.toWarehouseId}, ${input.note}, ${outDocId}, ${actor.id}) RETURNING id`;
@@ -221,10 +220,20 @@ export async function receiveTransfer(deps: Deps, id: number, raw: unknown, acto
       if (g.receivedMilli > l.qtyMilli) throw unprocessable('RECEIVED_OVER', '实收不能多于调出的数量；多出来的另开调拨单或盘点');
       if (g.receivedMilli < l.qtyMilli && g.varianceReason.length < 2) throw unprocessable('VARIANCE_REASON', '实收少于调出的，请写原因（短少、损坏……）');
     }
-    const mats = await lockMaterials(tx, t.lines.map((l) => l.materialId));
+    const mats = await lockMaterials(
+      tx,
+      t.lines.map((l) => l.materialId),
+    );
     await lockWarehouses(tx, [t.toWarehouseId]);
-    const inDocId = await postDoc(tx, 'transfer_in', t.toWarehouseId, date, `调拨 ${t.transferNo} 调入`,
-      t.lines.map((l) => ({ m: mats.get(l.materialId)!, qtyMilli: got.get(l.materialId)!.receivedMilli })), actor);
+    const inDocId = await postDoc(
+      tx,
+      'transfer_in',
+      t.toWarehouseId,
+      date,
+      `调拨 ${t.transferNo} 调入`,
+      t.lines.map((l) => ({ m: mats.get(l.materialId)!, qtyMilli: got.get(l.materialId)!.receivedMilli })),
+      actor,
+    );
     for (const l of t.lines) {
       const g = got.get(l.materialId)!;
       await tx`
@@ -240,7 +249,11 @@ export async function receiveTransfer(deps: Deps, id: number, raw: unknown, acto
       action: 'stock_transfer',
       targetType: 'stock_transfer',
       targetId: id,
-      detail: { transferNo: t.transferNo, step: 'receive', short: short.map((l) => `${mats.get(l.materialId)!.name} 少 ${formatQty(l.qtyMilli - got.get(l.materialId)!.receivedMilli)}：${got.get(l.materialId)!.varianceReason}`) },
+      detail: {
+        transferNo: t.transferNo,
+        step: 'receive',
+        short: short.map((l) => `${mats.get(l.materialId)!.name} 少 ${formatQty(l.qtyMilli - got.get(l.materialId)!.receivedMilli)}：${got.get(l.materialId)!.varianceReason}`),
+      },
       ip,
     });
   });
@@ -254,10 +267,20 @@ export async function cancelTransfer(deps: Deps, id: number, raw: unknown, actor
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const t = await lockTransfer(tx, id, input.expectedVersion);
-    const mats = await lockMaterials(tx, t.lines.map((l) => l.materialId));
+    const mats = await lockMaterials(
+      tx,
+      t.lines.map((l) => l.materialId),
+    );
     await lockWarehouses(tx, [t.fromWarehouseId]);
-    const inDocId = await postDoc(tx, 'transfer_in', t.fromWarehouseId, date, `撤回调拨 ${t.transferNo}：${input.reason}`,
-      t.lines.map((l) => ({ m: mats.get(l.materialId)!, qtyMilli: l.qtyMilli })), actor);
+    const inDocId = await postDoc(
+      tx,
+      'transfer_in',
+      t.fromWarehouseId,
+      date,
+      `撤回调拨 ${t.transferNo}：${input.reason}`,
+      t.lines.map((l) => ({ m: mats.get(l.materialId)!, qtyMilli: l.qtyMilli })),
+      actor,
+    );
     await tx`
       UPDATE stock_transfers SET status = 'cancelled', in_doc_id = ${inDocId}, cancelled_by = ${actor.id}, cancelled_at = now(), cancel_reason = ${input.reason},
              version = version + 1
@@ -276,10 +299,6 @@ export function registerTransferRoutes(app: FastifyInstance, deps: Deps) {
     reply.code(r.replayed ? 200 : 201);
     return r.transfer;
   });
-  app.post('/api/inventory/transfers/:id/receive', { preHandler: guard('inventory.operate') }, async (req) =>
-    receiveTransfer(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip),
-  );
-  app.post('/api/inventory/transfers/:id/cancel', { preHandler: guard('inventory.operate') }, async (req) =>
-    cancelTransfer(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip),
-  );
+  app.post('/api/inventory/transfers/:id/receive', { preHandler: guard('inventory.operate') }, async (req) => receiveTransfer(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
+  app.post('/api/inventory/transfers/:id/cancel', { preHandler: guard('inventory.operate') }, async (req) => cancelTransfer(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
 }

@@ -31,10 +31,7 @@ export function StoresSection() {
   const [entity, setEntity] = useState<{ mode: 'new' } | { mode: 'edit'; entity: EntityView } | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ['admin', 'stores'] });
   return (
-    <AdminPage
-      section="stores"
-      description="只有一家店时什么都不用设。开第二家店：先建它所属的公司主体（同一家公司就用「本公司」），再建门店，然后到「员工账号」给员工挂门店。"
-    >
+    <AdminPage section="stores" description="只有一家店时什么都不用设。开第二家店：先建它所属的公司主体（同一家公司就用「本公司」），再建门店，然后到「员工账号」给员工挂门店。">
       {data.isPending ? (
         <Skeleton className="h-64" />
       ) : data.isError && !data.data ? (
@@ -222,7 +219,11 @@ function StoreDialog({ target, entities, onClose, onSaved }: { target: { mode: '
           </Field>
         )}
       </div>
-      {error && <p className="mt-3 text-[13.5px] text-clay" role="alert">{error}</p>}
+      {error && (
+        <p className="mt-3 text-[13.5px] text-clay" role="alert">
+          {error}
+        </p>
+      )}
     </Dialog>
   );
 }
@@ -296,7 +297,11 @@ function EntityDialog({ target, onClose, onSaved }: { target: { mode: 'new' } | 
           </Field>
         )}
       </div>
-      {error && <p className="mt-3 text-[13.5px] text-clay" role="alert">{error}</p>}
+      {error && (
+        <p className="mt-3 text-[13.5px] text-clay" role="alert">
+          {error}
+        </p>
+      )}
     </Dialog>
   );
 }
@@ -324,9 +329,7 @@ function SettlementCard() {
           <Input type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} data-testid="settle-to" />
         </Field>
       </div>
-      <p className="mb-3 text-[13px] text-ink-3">
-        会员在开卡店（第一笔充值所在的门店）以外的门店用储值：开卡店收着钱、别家店做了服务。时段内的储值消费计正、撤销冲回；只是报表，不记账。
-      </p>
+      <p className="mb-3 text-[13px] text-ink-3">会员在开卡店（第一笔充值所在的门店）以外的门店用储值：开卡店收着钱、别家店做了服务。时段内的储值消费计正、撤销冲回；只是报表，不记账。</p>
       {report.isPending ? (
         <Skeleton className="h-24" />
       ) : report.isError && !report.data ? (

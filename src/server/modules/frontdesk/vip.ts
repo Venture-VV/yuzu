@@ -25,10 +25,7 @@ export interface VipShortfall extends VipGrantTag {
 }
 
 /** 找出客人能用的等级低于柜子等级的 VIP 柜 */
-export function vipShortfalls(
-  guests: { tag: LockedTag; memberId: number | null; memberName: string | null }[],
-  grades: Map<number, MemberGradeBadge>,
-): VipShortfall[] {
+export function vipShortfalls(guests: { tag: LockedTag; memberId: number | null; memberName: string | null }[], grades: Map<number, MemberGradeBadge>): VipShortfall[] {
   return guests
     .filter((g) => g.tag.kind === 'vip')
     .map((g) => ({
@@ -66,13 +63,7 @@ export function assertVipAllowed(shortfalls: VipShortfall[], grades: Map<number,
 }
 
 /** 核销授权（在事务最后、写操作编号之前调用）；没有等级不够的柜时不核销，返回 null */
-export async function consumeVipShortfalls(
-  tx: Tx,
-  shortfalls: VipShortfall[],
-  grantId: string | null,
-  actor: Actor,
-  usedRef: string,
-): Promise<{ approverId: number; approverName: string } | null> {
+export async function consumeVipShortfalls(tx: Tx, shortfalls: VipShortfall[], grantId: string | null, actor: Actor, usedRef: string): Promise<{ approverId: number; approverName: string } | null> {
   if (shortfalls.length === 0) return null;
   return consumeVipGrant(tx, {
     grantId: grantId!,

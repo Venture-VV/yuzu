@@ -25,13 +25,15 @@ const code = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^
 describe('页面上生成操作编号', () => {
   it('页面与前后端共用的代码里不直接调用 crypto.randomUUID（内网 HTTP 下没有）', () => {
     // src/client：门店系统与管家部；src/canteen：员工手机端；src/shared：两边共用
-    const dirs = ['src/client', 'src/canteen', 'src/shared'].map((d) => join(ROOT, d)).filter((d) => {
-      try {
-        return statSync(d).isDirectory();
-      } catch {
-        return false;
-      }
-    });
+    const dirs = ['src/client', 'src/canteen', 'src/shared']
+      .map((d) => join(ROOT, d))
+      .filter((d) => {
+        try {
+          return statSync(d).isDirectory();
+        } catch {
+          return false;
+        }
+      });
     expect(dirs.length).toBeGreaterThanOrEqual(2);
     const files = dirs.flatMap(sources);
     expect(files.length).toBeGreaterThan(100);

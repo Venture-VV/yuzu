@@ -69,7 +69,11 @@ function RuleRow({ r }: { r: AuditRule }) {
               </li>
             );
           })}
-          {r.count > r.items.length && <li className="text-[12px] text-ink-3">只列前 {r.items.length} 条，共 {r.count} 条</li>}
+          {r.count > r.items.length && (
+            <li className="text-[12px] text-ink-3">
+              只列前 {r.items.length} 条，共 {r.count} 条
+            </li>
+          )}
         </ul>
       )}
     </li>
@@ -101,13 +105,7 @@ export function AuditPage() {
           <>
             <Notice
               tone={blockBad > 0 ? 'error' : warnBad > 0 ? 'warning' : 'success'}
-              title={
-                blockBad > 0
-                  ? `有 ${blockBad} 条录入规则查出问题，请联系开发会话核查`
-                  : warnBad > 0
-                    ? `录入规则都没有问题；${warnBad} 条每日预警要处理`
-                    : '12 条都没有问题'
-              }
+              title={blockBad > 0 ? `有 ${blockBad} 条录入规则查出问题，请联系开发会话核查` : warnBad > 0 ? `录入规则都没有问题；${warnBad} 条每日预警要处理` : '12 条都没有问题'}
             >
               检查日期 {audit.data!.today}。点开每一条看是哪几张单，点单号直接打开。
             </Notice>

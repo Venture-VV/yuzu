@@ -5,8 +5,38 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 import type { BookingDetail } from '@shared/bookings';
-import { ArrowDownToLine, ArrowRightLeft, BadgeX, CalendarOff, ClipboardList, Coffee, DoorOpen, Hourglass, ListOrdered, LogIn, LogOut, Play, Plus, RotateCcw, ScrollText, Square, Undo2, UsersRound } from 'lucide-react';
-import { EVENT_KIND_LABELS, TECH_FILTER_LABELS, TECH_FILTERS, techFilterOf, type BoardSession, type BoardTechnician, type ClockEvent, type ClockroomBoard, type PendingLine, type TechFilter } from '@shared/clockroom';
+import {
+  ArrowDownToLine,
+  ArrowRightLeft,
+  BadgeX,
+  CalendarOff,
+  ClipboardList,
+  Coffee,
+  DoorOpen,
+  Hourglass,
+  ListOrdered,
+  LogIn,
+  LogOut,
+  Play,
+  Plus,
+  RotateCcw,
+  ScrollText,
+  Square,
+  Undo2,
+  UsersRound,
+} from 'lucide-react';
+import {
+  EVENT_KIND_LABELS,
+  TECH_FILTER_LABELS,
+  TECH_FILTERS,
+  techFilterOf,
+  type BoardSession,
+  type BoardTechnician,
+  type ClockEvent,
+  type ClockroomBoard,
+  type PendingLine,
+  type TechFilter,
+} from '@shared/clockroom';
 import { CALL_TYPE_LABELS, gradeLabel } from '@shared/technicians';
 import { spaceLabel } from '@shared/spaces';
 import { api, errorMessage } from '../../lib/api';
@@ -186,7 +216,9 @@ export function ClockroomPage() {
       <>
         <PageHeader title="钟房" />
         <div className="p-8">
-          <Notice tone="info" title="技师功能没有开启">店主在「后台 → 技师」开启技师功能后，这里排钟、派钟、上下钟。</Notice>
+          <Notice tone="info" title="技师功能没有开启">
+            店主在「后台 → 技师」开启技师功能后，这里排钟、派钟、上下钟。
+          </Notice>
         </div>
       </>
     );
@@ -215,242 +247,284 @@ export function ClockroomPage() {
           </div>
         ) : (
           <>
-          <div className="mx-auto flex max-w-[1280px] flex-wrap gap-1.5 px-5 pt-5 md:px-7" role="group" aria-label="按状态筛选技师" data-testid="clock-filter">
-            {TECH_FILTERS.map((f) => (
-              <button
-                key={f}
-                type="button"
-                onClick={() => setFilter(f)}
-                aria-pressed={filter === f}
-                className={cn('h-8 rounded-full border px-3 text-[13px] font-semibold', filter === f ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2 hover:border-ink-4')}
-                data-testid={`clock-filter-${f}`}
-              >
-                {TECH_FILTER_LABELS[f]} <span className="num">{counts[f]}</span>
-              </button>
-            ))}
-          </div>
-          {filter !== 'all' ? (
-            <FilteredTechs
-              filter={filter}
-              board={d}
-              now={now}
-              busy={busy}
-              canPost={can('frontdesk.operate')}
-              onState={(t, action, ok) => state(t, action, ok)}
-              onSuspend={openSuspend}
-              onToEnd={(t) => !blockedByPending(t) && setToEnd(t)}
-              onStart={(s) => run(`start-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/start`), `${s.techNo} 号上钟`)}
-              onFinish={(s) => run(`finish-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/finish`), `${s.techNo} 号下钟`)}
-              onTransfer={(s) => setTransferring(s)}
-            />
-          ) : (
-          <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-5 px-5 py-5 md:px-7 lg:grid-cols-[340px_minmax(0,1fr)]" data-testid="clockroom">
-            <div className="space-y-4">
-              <Card className="p-4" data-testid="clock-queue">
-                <SectionTitle aside={<span className="text-[12px] text-ink-3">在岗 {queue.length} 人</span>}>
-                  <span className="flex items-center gap-1.5">
-                    <ListOrdered className="size-4 text-pine" /> 轮钟排队
-                  </span>
-                </SectionTitle>
-                {queue.length === 0 ? (
-                  <p className="mt-3 rounded-lg border border-dashed border-line-strong px-3 py-6 text-center text-[13px] text-ink-3">还没有技师上牌</p>
-                ) : (
-                  <ol className="mt-3 space-y-1.5">
-                    {queue.map((t) => (
-                      <QueueRow
-                        key={t.id}
-                        t={t}
-                        next={t.id === nextFree?.id}
-                        sessions={d.sessions}
-                        now={now}
-                        busy={busy}
-                        onRest={() => state(t, 'rest', `${t.techNo} 号休息`)}
-                        onOff={() => state(t, 'sign_out', `${t.techNo} 号下牌`)}
-                        onToEnd={() => !blockedByPending(t) && setToEnd(t)}
-                      />
-                    ))}
-                  </ol>
-                )}
-                <p className="mt-3 text-[11.5px] leading-relaxed text-ink-4">
-                  轮钟按排位派给第一位空闲的技师；派了轮钟的排到队尾，点钟不动牌（规则在「后台 → 技师」）。
-                </p>
-              </Card>
-              {resting.length > 0 && (
-                <Card className="p-4">
-                  <SectionTitle>休息中</SectionTitle>
-                  <ul className="mt-2 space-y-1.5">
-                    {resting.map((t) => (
-                      <li key={t.id} className="flex items-center gap-2 text-[13px]" data-testid={`clock-rest-${t.techNo}`}>
-                        <span className="num w-9 font-bold">{t.techNo}</span>
-                        <span className="min-w-0 flex-1 truncate font-semibold">{t.name}</span>
-                        {t.busy && <Badge tone="yuzu">在钟上</Badge>}
-                        <Button size="sm" variant="secondary" icon={<LogIn className="size-3.5" />} loading={busy === `back-${t.id}`} onClick={() => state(t, 'back', `${t.techNo} 号回牌`)}>
-                          回牌
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-              )}
-              {onLeave.length > 0 && (
-                <Card className="p-4" data-testid="clock-leave">
-                  <SectionTitle>休假 {onLeave.length} 人</SectionTitle>
-                  <ul className="mt-2 space-y-1.5">
-                    {onLeave.map((t) => (
-                      <li key={t.id} className="flex items-center gap-2 text-[13px]" data-testid={`clock-leave-${t.techNo}`}>
-                        <span className="num w-9 font-bold">{t.techNo}</span>
-                        <span className="min-w-0 flex-1 truncate font-semibold">{t.name}</span>
-                        <Button size="sm" variant="ghost" loading={busy === `sign_out-${t.id}`} onClick={() => state(t, 'sign_out', `${t.techNo} 号已取消休假`)}>
-                          取消休假
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-              )}
-              {suspended.length > 0 && (
-                <Card className="p-4" data-testid="clock-suspended">
-                  <SectionTitle>停牌 {suspended.length} 人</SectionTitle>
-                  <ul className="mt-2 space-y-1.5">
-                    {suspended.map((t) => (
-                      <li key={t.id} className="flex items-center gap-2 text-[13px]" data-testid={`clock-suspended-${t.techNo}`}>
-                        <span className="num w-9 font-bold">{t.techNo}</span>
-                        <span className="min-w-0 flex-1 truncate">
-                          <span className="font-semibold">{t.name}</span> <span className="text-[12px] text-ink-3">{t.suspendedReason}</span>
-                        </span>
-                        <Button size="sm" variant="secondary" icon={<RotateCcw className="size-3.5" />} loading={busy === `resume-${t.id}`} onClick={() => state(t, 'resume', `${t.techNo} 号已复牌`)} data-testid={`clock-resume-${t.techNo}`}>
-                          复牌
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-              )}
-              <Card className="p-4" data-testid="clock-off">
-                <SectionTitle
-                  aside={
-                    off.length > 0 && (
-                      <Button size="sm" variant="ghost" loading={busy === 'all'} onClick={() => run('all', () => api.post('/api/clockroom/sign-in-all'), '已全部上牌')} data-testid="clock-sign-in-all">
-                        全部上牌
-                      </Button>
-                    )
-                  }
+            <div className="mx-auto flex max-w-[1280px] flex-wrap gap-1.5 px-5 pt-5 md:px-7" role="group" aria-label="按状态筛选技师" data-testid="clock-filter">
+              {TECH_FILTERS.map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setFilter(f)}
+                  aria-pressed={filter === f}
+                  className={cn('h-8 rounded-full border px-3 text-[13px] font-semibold', filter === f ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2 hover:border-ink-4')}
+                  data-testid={`clock-filter-${f}`}
                 >
-                  未上牌 {off.length ? `${off.length} 人` : ''}
-                </SectionTitle>
-                {off.length === 0 ? (
-                  <p className="mt-2 text-[12.5px] text-ink-3">在职技师都已上牌</p>
-                ) : (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {off.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => state(t, 'sign_in', `${t.techNo} 号上牌`)}
-                        disabled={busy === `sign_in-${t.id}`}
-                        className="flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[13px] font-semibold text-ink-2 hover:border-pine hover:text-pine disabled:opacity-50"
-                        data-testid={`clock-sign-in-${t.techNo}`}
-                      >
-                        <span className="num font-bold">{t.techNo}</span> {t.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </Card>
+                  {TECH_FILTER_LABELS[f]} <span className="num">{counts[f]}</span>
+                </button>
+              ))}
             </div>
-
-            <div className="min-w-0 space-y-4">
-              {pending.length > 0 && (
-                <section data-testid="clock-pending">
-                  <h2 className="mb-2 flex items-center gap-1.5 text-[14px] font-bold text-ink-2">
-                    <ClipboardList className="size-4 text-clay" /> 待派钟 {pending.length}
-                    <span className="text-[12px] font-normal text-ink-3">前台已点、交给钟房派技师（派钟不另收费）</span>
-                  </h2>
-                  <Card className="divide-y divide-line/70">
-                    {pending.map((p) => (
-                      <div key={p.lineId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3" data-testid={`clock-pending-${p.lineId}`}>
-                        <span className="num text-[15px] font-bold">{p.tagCode}</span>
-                        <span className="min-w-0 flex-1 truncate text-[13px] text-ink-2">
-                          {p.guest} · <span className="font-semibold text-ink">{p.itemName}</span> × {p.quantity} · <Money cents={p.amount} />
-                        </span>
-                        <span className="text-[12px] text-ink-3">
-                          {formatTime(p.postedAt)} {p.postedByName} 点
-                        </span>
-                        <Button size="sm" variant="primary" icon={<Plus className="size-3.5" />} disabled={!can('frontdesk.operate')} onClick={() => setAssigning(p)} data-testid={`clock-assign-${p.lineId}`}>
-                          派钟
-                        </Button>
-                      </div>
-                    ))}
+            {filter !== 'all' ? (
+              <FilteredTechs
+                filter={filter}
+                board={d}
+                now={now}
+                busy={busy}
+                canPost={can('frontdesk.operate')}
+                onState={(t, action, ok) => state(t, action, ok)}
+                onSuspend={openSuspend}
+                onToEnd={(t) => !blockedByPending(t) && setToEnd(t)}
+                onStart={(s) => run(`start-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/start`), `${s.techNo} 号上钟`)}
+                onFinish={(s) => run(`finish-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/finish`), `${s.techNo} 号下钟`)}
+                onTransfer={(s) => setTransferring(s)}
+              />
+            ) : (
+              <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-5 px-5 py-5 md:px-7 lg:grid-cols-[340px_minmax(0,1fr)]" data-testid="clockroom">
+                <div className="space-y-4">
+                  <Card className="p-4" data-testid="clock-queue">
+                    <SectionTitle aside={<span className="text-[12px] text-ink-3">在岗 {queue.length} 人</span>}>
+                      <span className="flex items-center gap-1.5">
+                        <ListOrdered className="size-4 text-pine" /> 轮钟排队
+                      </span>
+                    </SectionTitle>
+                    {queue.length === 0 ? (
+                      <p className="mt-3 rounded-lg border border-dashed border-line-strong px-3 py-6 text-center text-[13px] text-ink-3">还没有技师上牌</p>
+                    ) : (
+                      <ol className="mt-3 space-y-1.5">
+                        {queue.map((t) => (
+                          <QueueRow
+                            key={t.id}
+                            t={t}
+                            next={t.id === nextFree?.id}
+                            sessions={d.sessions}
+                            now={now}
+                            busy={busy}
+                            onRest={() => state(t, 'rest', `${t.techNo} 号休息`)}
+                            onOff={() => state(t, 'sign_out', `${t.techNo} 号下牌`)}
+                            onToEnd={() => !blockedByPending(t) && setToEnd(t)}
+                          />
+                        ))}
+                      </ol>
+                    )}
+                    <p className="mt-3 text-[11.5px] leading-relaxed text-ink-4">轮钟按排位派给第一位空闲的技师；派了轮钟的排到队尾，点钟不动牌（规则在「后台 → 技师」）。</p>
                   </Card>
-                </section>
-              )}
-              <section>
-                <h2 className="mb-2 flex items-center gap-1.5 text-[14px] font-bold text-ink-2">
-                  <Hourglass className="size-4 text-pine" /> 上钟中 {serving.length}
-                </h2>
-                {serving.length === 0 ? (
-                  <Card className="px-4 py-8 text-center text-[13px] text-ink-3">现在没有技师在钟上</Card>
-                ) : (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    {serving.map((s) => (
-                      <ServingCard
-                        key={s.id}
-                        s={s}
-                        now={now}
-                        remindMinutes={d.rules.remindMinutes}
-                        busy={busy}
-                        canPost={can('frontdesk.operate')}
-                        onFinish={() => run(`finish-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/finish`), `${s.techNo} 号下钟`)}
-                        onExtend={() => setExtending(s)}
-                        onVoid={() => setVoiding(s)}
-                        onRoom={() => setRooming(s)}
-                        onTransfer={() => setTransferring(s)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-              <section>
-                <h2 className="mb-2 flex items-center gap-1.5 text-[14px] font-bold text-ink-2">
-                  <UsersRound className="size-4 text-lake" /> 待上钟 {waiting.length}
-                </h2>
-                {waiting.length === 0 ? (
-                  <Card className="px-4 py-6 text-center text-[13px] text-ink-3">没有待上钟的</Card>
-                ) : (
-                  <Card className="divide-y divide-line/70">
-                    {waiting.map((s) => {
-                      const t = d.technicians.find((x) => x.id === s.technicianId);
-                      const queued = t?.busy?.status === 'serving';
-                      return (
-                        <div key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3" data-testid={`clock-waiting-${s.sessionNo}`}>
-                          <span className="num text-[16px] font-bold">{s.techNo}</span>
-                          <span className="font-semibold">{s.techName}</span>
-                          <Badge tone={s.callType === 'designated' ? 'yuzu' : 'neutral'}>{CALL_TYPE_LABELS[s.callType]}</Badge>
-                          <span className="min-w-0 flex-1 truncate text-[13px] text-ink-2">
-                            <span className="num font-bold">{s.tagCode}</span> {s.guest} · {s.itemName} × {s.clocks}
-                          </span>
-                          <span className="text-[12px] text-ink-3">{formatTime(s.createdAt)} 派{queued ? ' · 在等上一钟' : ''}</span>
-                          <RoomChip s={s} onClick={() => setRooming(s)} />
-                          <div className="flex gap-1.5">
-                            <Button size="sm" variant="primary" icon={<Play className="size-3.5" />} disabled={queued} loading={busy === `start-${s.id}`} onClick={() => run(`start-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/start`), `${s.techNo} 号上钟`)} data-testid={`clock-start-${s.sessionNo}`}>
-                              上钟
+                  {resting.length > 0 && (
+                    <Card className="p-4">
+                      <SectionTitle>休息中</SectionTitle>
+                      <ul className="mt-2 space-y-1.5">
+                        {resting.map((t) => (
+                          <li key={t.id} className="flex items-center gap-2 text-[13px]" data-testid={`clock-rest-${t.techNo}`}>
+                            <span className="num w-9 font-bold">{t.techNo}</span>
+                            <span className="min-w-0 flex-1 truncate font-semibold">{t.name}</span>
+                            {t.busy && <Badge tone="yuzu">在钟上</Badge>}
+                            <Button size="sm" variant="secondary" icon={<LogIn className="size-3.5" />} loading={busy === `back-${t.id}`} onClick={() => state(t, 'back', `${t.techNo} 号回牌`)}>
+                              回牌
                             </Button>
-                            <Button size="sm" variant="ghost" icon={<ArrowRightLeft className="size-3.5" />} disabled={!can('frontdesk.operate')} onClick={() => setTransferring(s)} data-testid={`clock-transfer-${s.sessionNo}`}>
-                              转钟
+                          </li>
+                        ))}
+                      </ul>
+                    </Card>
+                  )}
+                  {onLeave.length > 0 && (
+                    <Card className="p-4" data-testid="clock-leave">
+                      <SectionTitle>休假 {onLeave.length} 人</SectionTitle>
+                      <ul className="mt-2 space-y-1.5">
+                        {onLeave.map((t) => (
+                          <li key={t.id} className="flex items-center gap-2 text-[13px]" data-testid={`clock-leave-${t.techNo}`}>
+                            <span className="num w-9 font-bold">{t.techNo}</span>
+                            <span className="min-w-0 flex-1 truncate font-semibold">{t.name}</span>
+                            <Button size="sm" variant="ghost" loading={busy === `sign_out-${t.id}`} onClick={() => state(t, 'sign_out', `${t.techNo} 号已取消休假`)}>
+                              取消休假
                             </Button>
-                            <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" />} disabled={!can('frontdesk.operate')} onClick={() => setVoiding(s)} data-testid={`clock-cancel-${s.sessionNo}`}>
-                              取消
+                          </li>
+                        ))}
+                      </ul>
+                    </Card>
+                  )}
+                  {suspended.length > 0 && (
+                    <Card className="p-4" data-testid="clock-suspended">
+                      <SectionTitle>停牌 {suspended.length} 人</SectionTitle>
+                      <ul className="mt-2 space-y-1.5">
+                        {suspended.map((t) => (
+                          <li key={t.id} className="flex items-center gap-2 text-[13px]" data-testid={`clock-suspended-${t.techNo}`}>
+                            <span className="num w-9 font-bold">{t.techNo}</span>
+                            <span className="min-w-0 flex-1 truncate">
+                              <span className="font-semibold">{t.name}</span> <span className="text-[12px] text-ink-3">{t.suspendedReason}</span>
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              icon={<RotateCcw className="size-3.5" />}
+                              loading={busy === `resume-${t.id}`}
+                              onClick={() => state(t, 'resume', `${t.techNo} 号已复牌`)}
+                              data-testid={`clock-resume-${t.techNo}`}
+                            >
+                              复牌
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    </Card>
+                  )}
+                  <Card className="p-4" data-testid="clock-off">
+                    <SectionTitle
+                      aside={
+                        off.length > 0 && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            loading={busy === 'all'}
+                            onClick={() => run('all', () => api.post('/api/clockroom/sign-in-all'), '已全部上牌')}
+                            data-testid="clock-sign-in-all"
+                          >
+                            全部上牌
+                          </Button>
+                        )
+                      }
+                    >
+                      未上牌 {off.length ? `${off.length} 人` : ''}
+                    </SectionTitle>
+                    {off.length === 0 ? (
+                      <p className="mt-2 text-[12.5px] text-ink-3">在职技师都已上牌</p>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {off.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => state(t, 'sign_in', `${t.techNo} 号上牌`)}
+                            disabled={busy === `sign_in-${t.id}`}
+                            className="flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[13px] font-semibold text-ink-2 hover:border-pine hover:text-pine disabled:opacity-50"
+                            data-testid={`clock-sign-in-${t.techNo}`}
+                          >
+                            <span className="num font-bold">{t.techNo}</span> {t.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                </div>
+
+                <div className="min-w-0 space-y-4">
+                  {pending.length > 0 && (
+                    <section data-testid="clock-pending">
+                      <h2 className="mb-2 flex items-center gap-1.5 text-[14px] font-bold text-ink-2">
+                        <ClipboardList className="size-4 text-clay" /> 待派钟 {pending.length}
+                        <span className="text-[12px] font-normal text-ink-3">前台已点、交给钟房派技师（派钟不另收费）</span>
+                      </h2>
+                      <Card className="divide-y divide-line/70">
+                        {pending.map((p) => (
+                          <div key={p.lineId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3" data-testid={`clock-pending-${p.lineId}`}>
+                            <span className="num text-[15px] font-bold">{p.tagCode}</span>
+                            <span className="min-w-0 flex-1 truncate text-[13px] text-ink-2">
+                              {p.guest} · <span className="font-semibold text-ink">{p.itemName}</span> × {p.quantity} · <Money cents={p.amount} />
+                            </span>
+                            <span className="text-[12px] text-ink-3">
+                              {formatTime(p.postedAt)} {p.postedByName} 点
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="primary"
+                              icon={<Plus className="size-3.5" />}
+                              disabled={!can('frontdesk.operate')}
+                              onClick={() => setAssigning(p)}
+                              data-testid={`clock-assign-${p.lineId}`}
+                            >
+                              派钟
                             </Button>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </Card>
-                )}
-              </section>
-            </div>
-          </div>
-          )}
+                        ))}
+                      </Card>
+                    </section>
+                  )}
+                  <section>
+                    <h2 className="mb-2 flex items-center gap-1.5 text-[14px] font-bold text-ink-2">
+                      <Hourglass className="size-4 text-pine" /> 上钟中 {serving.length}
+                    </h2>
+                    {serving.length === 0 ? (
+                      <Card className="px-4 py-8 text-center text-[13px] text-ink-3">现在没有技师在钟上</Card>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {serving.map((s) => (
+                          <ServingCard
+                            key={s.id}
+                            s={s}
+                            now={now}
+                            remindMinutes={d.rules.remindMinutes}
+                            busy={busy}
+                            canPost={can('frontdesk.operate')}
+                            onFinish={() => run(`finish-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/finish`), `${s.techNo} 号下钟`)}
+                            onExtend={() => setExtending(s)}
+                            onVoid={() => setVoiding(s)}
+                            onRoom={() => setRooming(s)}
+                            onTransfer={() => setTransferring(s)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                  <section>
+                    <h2 className="mb-2 flex items-center gap-1.5 text-[14px] font-bold text-ink-2">
+                      <UsersRound className="size-4 text-lake" /> 待上钟 {waiting.length}
+                    </h2>
+                    {waiting.length === 0 ? (
+                      <Card className="px-4 py-6 text-center text-[13px] text-ink-3">没有待上钟的</Card>
+                    ) : (
+                      <Card className="divide-y divide-line/70">
+                        {waiting.map((s) => {
+                          const t = d.technicians.find((x) => x.id === s.technicianId);
+                          const queued = t?.busy?.status === 'serving';
+                          return (
+                            <div key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3" data-testid={`clock-waiting-${s.sessionNo}`}>
+                              <span className="num text-[16px] font-bold">{s.techNo}</span>
+                              <span className="font-semibold">{s.techName}</span>
+                              <Badge tone={s.callType === 'designated' ? 'yuzu' : 'neutral'}>{CALL_TYPE_LABELS[s.callType]}</Badge>
+                              <span className="min-w-0 flex-1 truncate text-[13px] text-ink-2">
+                                <span className="num font-bold">{s.tagCode}</span> {s.guest} · {s.itemName} × {s.clocks}
+                              </span>
+                              <span className="text-[12px] text-ink-3">
+                                {formatTime(s.createdAt)} 派{queued ? ' · 在等上一钟' : ''}
+                              </span>
+                              <RoomChip s={s} onClick={() => setRooming(s)} />
+                              <div className="flex gap-1.5">
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  icon={<Play className="size-3.5" />}
+                                  disabled={queued}
+                                  loading={busy === `start-${s.id}`}
+                                  onClick={() => run(`start-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/start`), `${s.techNo} 号上钟`)}
+                                  data-testid={`clock-start-${s.sessionNo}`}
+                                >
+                                  上钟
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  icon={<ArrowRightLeft className="size-3.5" />}
+                                  disabled={!can('frontdesk.operate')}
+                                  onClick={() => setTransferring(s)}
+                                  data-testid={`clock-transfer-${s.sessionNo}`}
+                                >
+                                  转钟
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  icon={<Undo2 className="size-3.5" />}
+                                  disabled={!can('frontdesk.operate')}
+                                  onClick={() => setVoiding(s)}
+                                  data-testid={`clock-cancel-${s.sessionNo}`}
+                                >
+                                  取消
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </Card>
+                    )}
+                  </section>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -499,7 +573,16 @@ export function ClockroomPage() {
           if (cur) toast({ tone: 'success', title: how === 'done' ? `${cur.t.techNo} 号${TECH_STATE_DONE[cur.action]}` : `${cur.t.techNo} 号的待确认已处理` });
         }}
       />
-      {d && extending && <ExtendDialog session={extending} onClose={() => setExtending(null)} onDone={() => { setExtending(null); void qc.invalidateQueries({ queryKey: clockKey }); }} />}
+      {d && extending && (
+        <ExtendDialog
+          session={extending}
+          onClose={() => setExtending(null)}
+          onDone={() => {
+            setExtending(null);
+            void qc.invalidateQueries({ queryKey: clockKey });
+          }}
+        />
+      )}
       <RoomDialog
         session={rooming}
         onClose={() => setRooming(null)}
@@ -584,11 +667,20 @@ function QueueRow({
         <span className="text-[11.5px] text-ink-4">今日 {t.todayClocks} 钟</span>
       )}
       <span className="flex w-full items-center justify-end gap-1 pl-8 text-[11.5px] whitespace-nowrap">
-        <span className="mr-auto min-w-0 truncate text-ink-4">{gradeLabel(t.grade)}{t.rejectStreak ? ` · 已连续被退 ${t.rejectStreak} 次` : ''}</span>
+        <span className="mr-auto min-w-0 truncate text-ink-4">
+          {gradeLabel(t.grade)}
+          {t.rejectStreak ? ` · 已连续被退 ${t.rejectStreak} 次` : ''}
+        </span>
         <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onToEnd} disabled={busy !== null}>
           <ArrowDownToLine className="size-3" /> 排尾
         </button>
-        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onRest} disabled={busy !== null} data-testid={`clock-rest-btn-${t.techNo}`}>
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink"
+          onClick={onRest}
+          disabled={busy !== null}
+          data-testid={`clock-rest-btn-${t.techNo}`}
+        >
           <Coffee className="size-3" /> 休息
         </button>
         <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onOff} disabled={busy !== null}>
@@ -712,7 +804,15 @@ function FilteredTechs({
             const s = t.busy ? board.sessions.find((x) => x.id === t.busy!.sessionId) : undefined;
             const left = s?.plannedEnd ? new Date(s.plannedEnd).getTime() - now : null;
             const act = (action: StateAction, ok: string, label: string, icon: React.ReactNode, variant: 'primary' | 'secondary' | 'ghost' = 'ghost') => (
-              <Button size="sm" variant={variant} icon={icon} loading={busy === `${action}-${t.id}`} disabled={busy !== null} onClick={() => onState(t, action, ok)} data-testid={`clock-tech-${action}-${t.techNo}`}>
+              <Button
+                size="sm"
+                variant={variant}
+                icon={icon}
+                loading={busy === `${action}-${t.id}`}
+                disabled={busy !== null}
+                onClick={() => onState(t, action, ok)}
+                data-testid={`clock-tech-${action}-${t.techNo}`}
+              >
                 {label}
               </Button>
             );

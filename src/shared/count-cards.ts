@@ -94,8 +94,7 @@ export interface CountCardMove {
 }
 
 /** 退卡默认退多少：售价 × 剩下次数 ÷ 总次数，舍到分；用完的、没有售价（期初）的为 0 */
-export const defaultCountCardRefund = (c: Pick<CountCard, 'price' | 'remaining' | 'totalUses'>) =>
-  c.totalUses > 0 ? Math.floor((c.price * c.remaining) / c.totalUses) : 0;
+export const defaultCountCardRefund = (c: Pick<CountCard, 'price' | 'remaining' | 'totalUses'>) => (c.totalUses > 0 ? Math.floor((c.price * c.remaining) / c.totalUses) : 0);
 
 /** 这张卡今天能不能用（不看次数） */
 export function countCardUsable(c: Pick<CountCard, 'status' | 'expiresOn' | 'remaining'>, date: string): string | null {
@@ -129,14 +128,9 @@ export interface CountCardAllocation {
  * 这一次结账里几张卡（按卡号 id 升序）依次抵：每张卡在还没被前面的卡抵掉的份里，挑能抵的、单价高的先抵（同价先门票、再按明细编号），
  * 抵 uses 份（不够就抵能抵的那几份）。每份抵 min(单价, 这条明细剩下没抵的金额)。前后端用同一个函数，结果一致才能结账。
  */
-export function allocateCountCards(
-  cards: { cardId: number; itemIds: number[]; ticketTypeIds: number[]; uses: number }[],
-  lines: readonly CountCardLine[],
-): CountCardAllocation[] {
+export function allocateCountCards(cards: { cardId: number; itemIds: number[]; ticketTypeIds: number[]; uses: number }[], lines: readonly CountCardLine[]): CountCardAllocation[] {
   const left = new Map(lines.map((l) => [l.id, { qty: l.quantity, amount: l.amount }]));
-  const order = [...lines].sort(
-    (a, b) => b.unitPrice - a.unitPrice || Number(b.ticketTypeId !== null) - Number(a.ticketTypeId !== null) || a.id - b.id,
-  );
+  const order = [...lines].sort((a, b) => b.unitPrice - a.unitPrice || Number(b.ticketTypeId !== null) - Number(a.ticketTypeId !== null) || a.id - b.id);
   return [...cards]
     .sort((a, b) => a.cardId - b.cardId)
     .map((c) => {

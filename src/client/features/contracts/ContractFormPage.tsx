@@ -30,7 +30,8 @@ import {
   type ContractMeta,
   type PaymentStage,
   type WarrantyBasis,
-  type ContractTemplateRef } from '@shared/contracts';
+  type ContractTemplateRef,
+} from '@shared/contracts';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { formatQty, parseQty } from '@shared/quantity';
 import { api, errorMessage, UncertainError } from '../../lib/api';
@@ -170,7 +171,16 @@ function build(f: ContentForm): { content: ContractContent; termsBp: number } | 
       note: f.note.trim(),
       lines,
       // 接口只认 id、values、clauses（别的几项是页面上显示用的）
-      template: f.template ? { ...f.template, values: Object.fromEntries(Object.entries(f.template.values).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v)) } : null,
+      template: f.template
+        ? {
+            ...f.template,
+            values: Object.fromEntries(
+              Object.entries(f.template.values)
+                .map(([k, v]) => [k, v.trim()])
+                .filter(([, v]) => v),
+            ),
+          }
+        : null,
     },
     termsBp: paymentTerms.reduce((t, x) => t + x.percentBp, 0),
   };
@@ -202,7 +212,12 @@ function AcceptanceItemsField({
   };
   const current = templates.data?.find((x) => x.name === templateName);
   return (
-    <Field label="验收标准（每行一条）" htmlFor="ct-acc-items" className="sm:col-span-2 lg:col-span-4" hint="登记验收时按条打勾，有一条不合格整次就是不合格；不合格时这份合同的付款挂起（可在经营规则里关掉）">
+    <Field
+      label="验收标准（每行一条）"
+      htmlFor="ct-acc-items"
+      className="sm:col-span-2 lg:col-span-4"
+      hint="登记验收时按条打勾，有一条不合格整次就是不合格；不合格时这份合同的付款挂起（可在经营规则里关掉）"
+    >
       <div className="space-y-2">
         <Select
           aria-label="验收标准模板"
@@ -431,9 +446,7 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
   return (
     <div className="space-y-4" data-testid="contract-form">
       {mode === 'new' && <ErpPendingPanel types={['contract_create']} onFound={(_, ref) => navigate(`/erp/contracts/${ref.refId}`)} />}
-      {mode === 'change' && contract && (
-        <ErpPendingPanel types={['contract_change']} filter={(op) => op.url === changeUrl} onFound={() => navigate(`/erp/contracts/${contract.id}`)} />
-      )}
+      {mode === 'change' && contract && <ErpPendingPanel types={['contract_change']} filter={(op) => op.url === changeUrl} onFound={() => navigate(`/erp/contracts/${contract.id}`)} />}
       {mode === 'edit' && contract?.status === 'returned' && <Notice tone="warning" title="审批退回了：看合同详情里的审批意见与法务审查清单，改好后再提交审查" />}
       {change?.status === 'returned' && <Notice tone="warning" title="变更单被退回了：看合同详情里的审批意见，改好后再提交" />}
       {uncertainEdit && (
@@ -453,8 +466,7 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
         {isChange ? (
           <div className="space-y-3">
             <p className="text-[13px] text-ink-2">
-              <span className="num font-bold text-ink">{contract!.contractNo}</span> · {contract!.title} · {contract!.counterparty} · 在第 {change?.baseVersion ?? contract!.currentVersion}{' '}
-              版上变更
+              <span className="num font-bold text-ink">{contract!.contractNo}</span> · {contract!.title} · {contract!.counterparty} · 在第 {change?.baseVersion ?? contract!.currentVersion} 版上变更
             </p>
             <Field label="变更类型">
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="变更类型">
@@ -477,7 +489,16 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
               </div>
             </Field>
             <Field label="变更原因" htmlFor="cc-reason">
-              <Textarea id="cc-reason" rows={2} maxLength={200} value={reason} disabled={fieldsDisabled} onChange={(e) => setReason(e.target.value)} placeholder="例如：原材料涨价，单价从 50 元调到 55 元" data-testid="change-reason" />
+              <Textarea
+                id="cc-reason"
+                rows={2}
+                maxLength={200}
+                value={reason}
+                disabled={fieldsDisabled}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="例如：原材料涨价，单价从 50 元调到 55 元"
+                data-testid="change-reason"
+              />
             </Field>
           </div>
         ) : (
@@ -583,10 +604,27 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
             />
           </Field>
           <Field label="开始日期" htmlFor="ct-start">
-            <Input id="ct-start" type="date" value={form.startDate} disabled={fieldsDisabled} onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))} className="h-10" data-testid="contract-start" />
+            <Input
+              id="ct-start"
+              type="date"
+              value={form.startDate}
+              disabled={fieldsDisabled}
+              onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
+              className="h-10"
+              data-testid="contract-start"
+            />
           </Field>
           <Field label="结束日期" htmlFor="ct-end" hint="空着 = 不定期">
-            <Input id="ct-end" type="date" value={form.endDate} min={form.startDate || undefined} disabled={fieldsDisabled} onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))} className="h-10" data-testid="contract-end" />
+            <Input
+              id="ct-end"
+              type="date"
+              value={form.endDate}
+              min={form.startDate || undefined}
+              disabled={fieldsDisabled}
+              onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+              className="h-10"
+              data-testid="contract-end"
+            />
           </Field>
           <Field
             label="合同总价（含税）"
@@ -594,7 +632,8 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
             aside={
               computed !== null && computed !== parseYuan(form.total) ? (
                 <button type="button" className="flex items-center gap-1 text-[12px] font-semibold text-lake hover:underline" onClick={() => setForm((f) => ({ ...f, total: centsToInput(computed) }))}>
-                  <Calculator className="size-3.5" />按单价表 ¥{formatAmount(computed)}
+                  <Calculator className="size-3.5" />
+                  按单价表 ¥{formatAmount(computed)}
                 </button>
               ) : undefined
             }
@@ -673,7 +712,14 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
             </Select>
           </Field>
           <Field label="质保期限（月）" htmlFor="ct-wmonths" hint={`质保金 ${formatPercentBp(warrantyBp)}`}>
-            <Input id="ct-wmonths" inputMode="numeric" value={form.warrantyMonths} disabled={fieldsDisabled} onChange={(e) => setForm((f) => ({ ...f, warrantyMonths: e.target.value }))} className="h-10 text-right" />
+            <Input
+              id="ct-wmonths"
+              inputMode="numeric"
+              value={form.warrantyMonths}
+              disabled={fieldsDisabled}
+              onChange={(e) => setForm((f) => ({ ...f, warrantyMonths: e.target.value }))}
+              className="h-10 text-right"
+            />
           </Field>
           <Field label="验收签字" htmlFor="ct-signer" className="lg:col-span-2">
             <Input
@@ -753,7 +799,11 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
                         disabled={fieldsDisabled}
                         onChange={(e) => {
                           const next = materials.get(Number(e.target.value));
-                          setLine(l.key, { materialId: next?.id ?? null, unit: next && !l.unit.trim() ? next.purchaseUnit.slice(0, 8) : l.unit, spec: next && !l.spec.trim() ? next.specification.slice(0, 80) : l.spec });
+                          setLine(l.key, {
+                            materialId: next?.id ?? null,
+                            unit: next && !l.unit.trim() ? next.purchaseUnit.slice(0, 8) : l.unit,
+                            spec: next && !l.spec.trim() ? next.specification.slice(0, 80) : l.spec,
+                          });
                         }}
                         data-testid={`contract-line-material-${i}`}
                       >
@@ -792,16 +842,44 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
                       />
                     </Field>
                     <Field label="含税单价" className="sm:col-span-2 lg:col-span-3">
-                      <MoneyInput aria-label={`第 ${i + 1} 行含税单价`} value={l.price} disabled={fieldsDisabled} onChange={(e) => setLine(l.key, { price: e.target.value })} className="h-10 text-right" data-testid={`contract-line-price-${i}`} />
+                      <MoneyInput
+                        aria-label={`第 ${i + 1} 行含税单价`}
+                        value={l.price}
+                        disabled={fieldsDisabled}
+                        onChange={(e) => setLine(l.key, { price: e.target.value })}
+                        className="h-10 text-right"
+                        data-testid={`contract-line-price-${i}`}
+                      />
                     </Field>
                     <Field label="税率（%）" className="sm:col-span-1 lg:col-span-2">
-                      <Input aria-label={`第 ${i + 1} 行税率`} inputMode="decimal" value={l.taxRate} disabled={fieldsDisabled} onChange={(e) => setLine(l.key, { taxRate: e.target.value })} className="h-10 text-right" />
+                      <Input
+                        aria-label={`第 ${i + 1} 行税率`}
+                        inputMode="decimal"
+                        value={l.taxRate}
+                        disabled={fieldsDisabled}
+                        onChange={(e) => setLine(l.key, { taxRate: e.target.value })}
+                        className="h-10 text-right"
+                      />
                     </Field>
                     <Field label="合同数量" hint="空着 = 不限量" className="sm:col-span-2 lg:col-span-3">
-                      <Input aria-label={`第 ${i + 1} 行数量`} inputMode="decimal" value={l.qty} disabled={fieldsDisabled} onChange={(e) => setLine(l.key, { qty: e.target.value })} className="h-10 text-right" data-testid={`contract-line-qty-${i}`} />
+                      <Input
+                        aria-label={`第 ${i + 1} 行数量`}
+                        inputMode="decimal"
+                        value={l.qty}
+                        disabled={fieldsDisabled}
+                        onChange={(e) => setLine(l.key, { qty: e.target.value })}
+                        className="h-10 text-right"
+                        data-testid={`contract-line-qty-${i}`}
+                      />
                     </Field>
                     <div className="flex items-end justify-end sm:col-span-6 lg:col-span-4">
-                      <Button variant="ghost" size="sm" icon={<Trash2 className="size-4" />} disabled={fieldsDisabled} onClick={() => setForm((f) => ({ ...f, lines: f.lines.filter((x) => x.key !== l.key) }))}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={<Trash2 className="size-4" />}
+                        disabled={fieldsDisabled}
+                        onClick={() => setForm((f) => ({ ...f, lines: f.lines.filter((x) => x.key !== l.key) }))}
+                      >
                         删除这一行
                       </Button>
                     </div>

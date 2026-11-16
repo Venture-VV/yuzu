@@ -74,12 +74,7 @@ import { hashRequest } from '../lib/idempotency';
 import { ctxOf } from '../lib/context';
 import { currentStoreId } from '../lib/store-context';
 
-const text = (label: string, max: number) =>
-  z
-    .string(`请填写${label}`)
-    .trim()
-    .min(1, `请填写${label}`)
-    .max(max, `${label}最多 ${max} 个字`);
+const text = (label: string, max: number) => z.string(`请填写${label}`).trim().min(1, `请填写${label}`).max(max, `${label}最多 ${max} 个字`);
 const optionalText = (label: string, max: number) => z.string().trim().max(max, `${label}最多 ${max} 个字`).default('');
 const reasonText = (label: string) => z.string(`请填写${label}`).trim().min(2, `请填写${label}（至少 2 个字）`).max(200, `${label}最多 200 字`);
 
@@ -94,8 +89,7 @@ export async function lockLedger(tx: Tx) {
 
 /** 修改时带回的版本号 */
 const versionField = z.number('缺少版本号，请刷新后重试').int('缺少版本号，请刷新后重试').min(1, '缺少版本号，请刷新后重试');
-const stale = (code: string, what: string) =>
-  conflict(code, `${what}刚被修改过（可能是刚才没收到结果的那次提交已经生效，或有人同时在改），这次没有保存；请刷新后看一下再改`);
+const stale = (code: string, what: string) => conflict(code, `${what}刚被修改过（可能是刚才没收到结果的那次提交已经生效，或有人同时在改），这次没有保存；请刷新后看一下再改`);
 
 // ───────────────────────── 读取 ─────────────────────────
 
@@ -173,9 +167,7 @@ export async function spaceTree(db: Db): Promise<SpaceTree> {
         id: f.id,
         code: f.code,
         name: f.name,
-        zones: ledger.zones
-          .filter((z) => z.floorId === f.id && z.active)
-          .map((z) => ({ id: z.id, name: z.name, nameEn: z.nameEn, spaces: live.filter((s) => s.zoneId === z.id).map(node) })),
+        zones: ledger.zones.filter((z) => z.floorId === f.id && z.active).map((z) => ({ id: z.id, name: z.name, nameEn: z.nameEn, spaces: live.filter((s) => s.zoneId === z.id).map(node) })),
         spaces: live.filter((s) => s.floorId === f.id && s.zoneId === null).map(node),
       })),
   };
@@ -184,11 +176,7 @@ export async function spaceTree(db: Db): Promise<SpaceTree> {
 // ───────────────────────── 楼层与区域 ─────────────────────────
 
 const FloorCreateInput = z.object({
-  code: z
-    .string('请填写楼层编码')
-    .trim()
-    .toUpperCase()
-    .regex(FLOOR_CODE_RE, '楼层编码是大写字母开头、最多 4 位的字母或数字，例如 L4、B1'),
+  code: z.string('请填写楼层编码').trim().toUpperCase().regex(FLOOR_CODE_RE, '楼层编码是大写字母开头、最多 4 位的字母或数字，例如 L4、B1'),
   name: text('楼层名称', MAX_FLOOR_NAME),
   sortOrder: z.number().int().min(0).max(9999).default(0),
 });
@@ -316,11 +304,7 @@ const SpaceFields = {
   sourceLabel: optionalText('编码图原始标注', MAX_SOURCE_LABEL),
   note: optionalText('备注', MAX_SPACE_NOTE),
 };
-export const SpaceCodeSchema = z
-  .string('请填写编码')
-  .trim()
-  .toUpperCase()
-  .regex(SPACE_CODE_RE, '编码是大写字母开头、2 到 8 位的字母或数字，例如 S301');
+export const SpaceCodeSchema = z.string('请填写编码').trim().toUpperCase().regex(SPACE_CODE_RE, '编码是大写字母开头、2 到 8 位的字母或数字，例如 S301');
 const SpaceCreateInput = z.object({
   code: SpaceCodeSchema,
   ...SpaceFields,
@@ -557,14 +541,28 @@ async function bulkSetZone(deps: Deps, raw: unknown, ctx: OpContext) {
       SELECT id, code, floor_id, version FROM spaces WHERE id IN ${tx(ids)} AND store_id = ${currentStoreId()} ORDER BY id FOR UPDATE`;
     if (rows.length !== ids.length) throw notFound('有空间不存在，请刷新后重试');
     const changed = rows.filter((r) => r.version !== expected.get(r.id));
-    if (changed.length) throw stale('SPACE_STALE', `空间 ${changed.map((r) => r.code).slice(0, 5).join('、')} `);
+    if (changed.length)
+      throw stale(
+        'SPACE_STALE',
+        `空间 ${changed
+          .map((r) => r.code)
+          .slice(0, 5)
+          .join('、')} `,
+      );
     let zoneName = '（不分区域）';
     if (b.zoneId !== null) {
       const [zone] = await tx<{ floorId: number; name: string; active: boolean }[]>`SELECT floor_id, name, active FROM zones WHERE id = ${b.zoneId} AND store_id = ${currentStoreId()} FOR SHARE`;
       if (!zone) throw notFound('区域不存在，请刷新后重试');
       if (!zone.active) throw conflict('ZONE_INACTIVE', `区域「${zone.name}」已停用`);
       const off = rows.filter((r) => r.floorId !== zone.floorId);
-      if (off.length) throw unprocessable('ZONE_FLOOR_MISMATCH', `${off.map((r) => r.code).slice(0, 5).join('、')} 不在区域「${zone.name}」那一层`);
+      if (off.length)
+        throw unprocessable(
+          'ZONE_FLOOR_MISMATCH',
+          `${off
+            .map((r) => r.code)
+            .slice(0, 5)
+            .join('、')} 不在区域「${zone.name}」那一层`,
+        );
       zoneName = `「${zone.name}」`;
     }
     await tx`UPDATE spaces SET zone_id = ${b.zoneId}, version = version + 1, updated_at = now() WHERE id IN ${tx(ids)}`;
@@ -572,7 +570,13 @@ async function bulkSetZone(deps: Deps, raw: unknown, ctx: OpContext) {
       staffId: ctx.actor.id,
       action: 'space_saved',
       targetType: 'space',
-      detail: { summary: `${rows.length} 个空间设为区域${zoneName}（${rows.map((r) => r.code).slice(0, 6).join('、')}${rows.length > 6 ? '…' : ''}）`, codes: rows.map((r) => r.code) },
+      detail: {
+        summary: `${rows.length} 个空间设为区域${zoneName}（${rows
+          .map((r) => r.code)
+          .slice(0, 6)
+          .join('、')}${rows.length > 6 ? '…' : ''}）`,
+        codes: rows.map((r) => r.code),
+      },
       ip: ctx.ip,
     });
   });
@@ -657,7 +661,10 @@ async function plan(db: Db, f: FileInputData): Promise<Plan> {
   const floors = await db<{ id: number; code: string; active: boolean }[]>`SELECT id, code, active FROM floors WHERE store_id = ${currentStoreId()}`;
   const floorByCode = new Map(floors.map((x) => [x.code, x]));
   const floorCodeById = new Map(floors.map((x) => [x.id, x.code]));
-  const floorList = floors.filter((x) => x.active).map((x) => x.code).join('、');
+  const floorList = floors
+    .filter((x) => x.active)
+    .map((x) => x.code)
+    .join('、');
   const zones = await db<{ id: number; floorId: number; name: string; nameEn: string; note: string; active: boolean }[]>`
     SELECT id, floor_id, name, name_en, note, active FROM zones WHERE store_id = ${currentStoreId()}`;
   const zoneKey = (floorId: number, name: string) => `${floorId}:${name.trim().toLowerCase()}`;
@@ -883,9 +890,16 @@ export async function applySpaceImport(deps: Deps, raw: unknown, actor: Actor, i
     }
     const p = await plan(tx, f);
     if (p.issues.length) {
-      throw unprocessable('IMPORT_INVALID', `有 ${p.issues.length} 行要先改好才能导入：${p.issues.slice(0, 3).map((i) => `第 ${i.row} 行 ${i.message}`).join('；')}`, {
-        issues: p.issues,
-      });
+      throw unprocessable(
+        'IMPORT_INVALID',
+        `有 ${p.issues.length} 行要先改好才能导入：${p.issues
+          .slice(0, 3)
+          .map((i) => `第 ${i.row} 行 ${i.message}`)
+          .join('；')}`,
+        {
+          issues: p.issues,
+        },
+      );
     }
     const created = f.kind === 'spaces' ? p.spaces.length : p.zones.length;
     if (created === 0) throw unprocessable('IMPORT_NOTHING_NEW', `文件里的${f.kind === 'spaces' ? '编码' : '区域'}都已在台账里，没有要新建的（与台账不同的地方见预览里的差异）`);
@@ -1092,7 +1106,5 @@ export function registerSpaceRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   // 只读的楼层 → 区域 → 空间树：以后的房态图、对客导览用；后台与前台客房岗位都能看
-  app.get('/api/spaces/tree', { preHandler: guardAny('settings.manage', 'catalog.manage', 'room.operate', 'room.housekeep', 'frontdesk.checkout') }, async () =>
-    spaceTree(sql),
-  );
+  app.get('/api/spaces/tree', { preHandler: guardAny('settings.manage', 'catalog.manage', 'room.operate', 'room.housekeep', 'frontdesk.checkout') }, async () => spaceTree(sql));
 }

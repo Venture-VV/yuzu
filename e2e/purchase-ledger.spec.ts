@@ -42,8 +42,16 @@ test.describe('采购台账、账目自检、下单物料', () => {
     const claim = (await (
       await page.request.post('/api/erp/expenses', {
         data: {
-          clientKey: randomUUID(), expenseDate: today, departmentId: dept.id, handlerId: me.staff.id, purpose: '办公', paySource: 'petty', advanceId: adv.advance.id,
-          invoiceType: 'none', taxRateBp: 0, lines: [{ name: `E2E 台账物品${tag}`, category: 'office', unit: '包', boughtMilli: 2000, receivedMilli: 2000, amountCents: 5_000 }],
+          clientKey: randomUUID(),
+          expenseDate: today,
+          departmentId: dept.id,
+          handlerId: me.staff.id,
+          purpose: '办公',
+          paySource: 'petty',
+          advanceId: adv.advance.id,
+          invoiceType: 'none',
+          taxRateBp: 0,
+          lines: [{ name: `E2E 台账物品${tag}`, category: 'office', unit: '包', boughtMilli: 2000, receivedMilli: 2000, amountCents: 5_000 }],
         },
       })
     ).json()) as { claim: { id: number; docNo: string } };
@@ -55,7 +63,13 @@ test.describe('采购台账、账目自检、下单物料', () => {
     const mat = mats.find((m) => m.code === 'M016') ?? mats.find((m) => m.tracked && m.active)!;
     const po = (await (
       await page.request.post('/api/purchase-orders', {
-        data: { clientKey: randomUUID(), supplierId: sups[0]!.id, orderDate: today, approveNow: true, lines: [{ materialId: mat.id, purchaseQtyMilli: 1000, priceCents: 100, spec: `E2E 规格${tag}`, imageIds: [img.id] }] },
+        data: {
+          clientKey: randomUUID(),
+          supplierId: sups[0]!.id,
+          orderDate: today,
+          approveNow: true,
+          lines: [{ materialId: mat.id, purchaseQtyMilli: 1000, priceCents: 100, spec: `E2E 规格${tag}`, imageIds: [img.id] }],
+        },
       })
     ).json()) as { po: { id: number; docNo: string; status: string } };
     if (po.po.status === 'submitted') await page.request.post(`/api/purchase-orders/${po.po.id}/approve`, { data: {} });

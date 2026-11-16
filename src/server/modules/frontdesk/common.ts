@@ -90,8 +90,7 @@ export const FRONTDESK_OP_PERMISSIONS: Record<FrontdeskOp, readonly Permission[]
   technician_state: ['technician.dispatch'],
 };
 
-export const abandonedError = () =>
-  conflict('OP_ABANDONED', '这笔操作已在「结果待确认」时由员工作废，不会再生效；如仍需要，请重新填写一笔');
+export const abandonedError = () => conflict('OP_ABANDONED', '这笔操作已在「结果待确认」时由员工作废，不会再生效；如仍需要，请重新填写一笔');
 
 interface KeyRow {
   opType: string;
@@ -130,11 +129,7 @@ export async function saveKey(tx: Tx, key: string, opType: FrontdeskOp, requestH
  * 这两种失败都先按编号查回：是同一笔就返回第一次的结果，不提示「被其他终端」占用（店主 2026-10-30）；
  * 查不到，或编号属于另一笔，照原样拒绝。
  */
-export async function runIdempotent(
-  deps: Deps,
-  opts: { key: string; opType: FrontdeskOp; requestHash: string },
-  body: (tx: Tx) => Promise<number>,
-): Promise<{ refId: number; replayed: boolean }> {
+export async function runIdempotent(deps: Deps, opts: { key: string; opType: FrontdeskOp; requestHash: string }, body: (tx: Tx) => Promise<number>): Promise<{ refId: number; replayed: boolean }> {
   try {
     return await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
@@ -214,11 +209,10 @@ export function assertTagIssuable(tag: LockedTag, zone: TagZone) {
   if (!tag.active) throw unprocessable('TAG_INACTIVE', `手牌 ${tag.code} 已停用，请换一张`);
   if (tag.locked) throw unprocessable('TAG_LOCKED', `手牌 ${tag.code} 已锁定（${tag.lockReason}），请换一张`);
   if (tag.zone !== zone) {
-    throw unprocessable(
-      'ZONE_MISMATCH',
-      `手牌 ${tag.code} 是${ZONE_LABELS[tag.zone].title}牌，不能发给${ZONE_LABELS[zone].title}，请换一张${ZONE_LABELS[zone].title}牌`,
-      { tagZone: tag.zone, guestZone: zone },
-    );
+    throw unprocessable('ZONE_MISMATCH', `手牌 ${tag.code} 是${ZONE_LABELS[tag.zone].title}牌，不能发给${ZONE_LABELS[zone].title}，请换一张${ZONE_LABELS[zone].title}牌`, {
+      tagZone: tag.zone,
+      guestZone: zone,
+    });
   }
 }
 
@@ -282,9 +276,5 @@ export function assertCanFix(actor: Actor, ownerId: number, createdAt: string, r
   if (can(actor, 'frontdesk.correct')) return;
   const minutes = (now.getTime() - new Date(createdAt).getTime()) / 60_000;
   if (ownerId === actor.id && minutes <= rules.selfVoidMinutes) return;
-  throw forbidden(
-    ownerId === actor.id
-      ? `${what}已超过 ${rules.selfVoidMinutes} 分钟，请由店主处理`
-      : `${what}不是你登记的，请由店主或登记人处理`,
-  );
+  throw forbidden(ownerId === actor.id ? `${what}已超过 ${rules.selfVoidMinutes} 分钟，请由店主处理` : `${what}不是你登记的，请由店主或登记人处理`);
 }

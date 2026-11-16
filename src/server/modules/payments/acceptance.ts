@@ -74,7 +74,14 @@ export async function createAcceptance(deps: Deps, contractId: number, raw: unkn
         VALUES (${contractId}, ${input.acceptedOn}, ${input.result}, ${input.signer}, ${input.note},
                 ${input.items.length ? tx.json(input.items) : null}, ${input.clientKey}, ${requestHash}, ${actor.id})
         RETURNING id`;
-      await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract', targetId: contractId, detail: { op: 'acceptance', contractNo: c.contractNo, result: input.result, acceptedOn: input.acceptedOn }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'contract_doc',
+        targetType: 'contract',
+        targetId: contractId,
+        detail: { op: 'acceptance', contractNo: c.contractNo, result: input.result, acceptedOn: input.acceptedOn },
+        ip,
+      });
       return { id: Number(row!.id), replayed: false };
     });
   } catch (error) {
@@ -97,7 +104,14 @@ export async function voidAcceptance(deps: Deps, acceptanceId: number, raw: unkn
     const [cur] = await tx<{ voidedAt: string | null }[]>`SELECT voided_at FROM contract_acceptances WHERE id = ${acceptanceId}`;
     if (cur!.voidedAt) return;
     await tx`UPDATE contract_acceptances SET voided_by = ${actor.id}, voided_at = now(), void_reason = ${reason} WHERE id = ${acceptanceId}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract', targetId: Number(a.contractId), detail: { op: 'acceptance_void', contractNo: c.contractNo, acceptanceId, reason }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'contract_doc',
+      targetType: 'contract',
+      targetId: Number(a.contractId),
+      detail: { op: 'acceptance_void', contractNo: c.contractNo, acceptanceId, reason },
+      ip,
+    });
   });
 }
 
@@ -130,7 +144,14 @@ export async function createQualityIssue(deps: Deps, contractId: number, raw: un
         INSERT INTO contract_quality_issues (contract_id, found_on, description, client_key, request_hash, created_by)
         VALUES (${contractId}, ${input.foundOn}, ${input.description}, ${input.clientKey}, ${requestHash}, ${actor.id})
         RETURNING id`;
-      await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract', targetId: contractId, detail: { op: 'quality_issue', contractNo: c.contractNo, foundOn: input.foundOn }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'contract_doc',
+        targetType: 'contract',
+        targetId: contractId,
+        detail: { op: 'quality_issue', contractNo: c.contractNo, foundOn: input.foundOn },
+        ip,
+      });
       return { id: Number(row!.id), replayed: false };
     });
   } catch (error) {
@@ -152,10 +173,7 @@ async function lockIssue(tx: Tx, issueId: number) {
 
 /** 标记已处理（处理日、处理结果） */
 export async function resolveQualityIssue(deps: Deps, issueId: number, raw: unknown, actor: Actor, ip?: string) {
-  const input = parse(
-    z.object({ resolvedOn: dateSchema('处理日'), resolution: z.string('请写处理结果').trim().min(2, '请写处理结果（至少 2 个字）').max(200, '处理结果最多 200 个字') }),
-    raw,
-  );
+  const input = parse(z.object({ resolvedOn: dateSchema('处理日'), resolution: z.string('请写处理结果').trim().min(2, '请写处理结果（至少 2 个字）').max(200, '处理结果最多 200 个字') }), raw);
   if (input.resolvedOn > todayIn(deps.config.timezone)) throw badRequest('处理日不能晚于今天');
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);

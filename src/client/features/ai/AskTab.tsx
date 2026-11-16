@@ -121,11 +121,18 @@ export function AskTab() {
             {session.store.name} · 今天问了 {status.data?.usedToday ?? 0} / {rules?.dailyQuestionLimit ?? '—'} 次
           </span>
         </div>
-        <p className="mb-3 text-[13px] text-ink-3">用一句话问经营数据：AI 只能用看板上的只读报表取数（你看得到的那几张），答案里会写用了哪张、哪个日期范围；数字以看板为准。问数只看汇总的数、查不了某一位会员——问题里不要写会员的姓名、会员号、手机号、证件号：认出来会拦下、什么都不发。</p>
+        <p className="mb-3 text-[13px] text-ink-3">
+          用一句话问经营数据：AI
+          只能用看板上的只读报表取数（你看得到的那几张），答案里会写用了哪张、哪个日期范围；数字以看板为准。问数只看汇总的数、查不了某一位会员——问题里不要写会员的姓名、会员号、手机号、证件号：认出来会拦下、什么都不发。
+        </p>
         {off ? (
-          <Notice tone="info" title="问数已关闭">店主可以在后台「对外接口」→ AI 辅助里打开。</Notice>
+          <Notice tone="info" title="问数已关闭">
+            店主可以在后台「对外接口」→ AI 辅助里打开。
+          </Notice>
         ) : status.data?.mode === 'off' ? (
-          <Notice tone="info" title="还没配置模型服务">服务器 .env 里配了 YUZU_AI_API_KEY（DeepSeek 的密钥）以后才能问数。</Notice>
+          <Notice tone="info" title="还没配置模型服务">
+            服务器 .env 里配了 YUZU_AI_API_KEY（DeepSeek 的密钥）以后才能问数。
+          </Notice>
         ) : (
           <>
             <Textarea
@@ -163,7 +170,12 @@ export function AskTab() {
                   </button>
                 ))}
             </div>
-            {sendError && <p className="mt-2 text-[13px] text-clay">{sendError}{pending ? '（没收到结果：原样再发一次不会多问一次）' : ''}</p>}
+            {sendError && (
+              <p className="mt-2 text-[13px] text-clay">
+                {sendError}
+                {pending ? '（没收到结果：原样再发一次不会多问一次）' : ''}
+              </p>
+            )}
           </>
         )}
         {note && <p className="mt-2 text-[12px] text-ink-3">{note}</p>}

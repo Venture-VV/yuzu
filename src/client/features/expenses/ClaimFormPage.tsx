@@ -7,15 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
 import { ArrowLeft, CircleAlert, CircleCheck, Plus, ReceiptText, Trash2 } from 'lucide-react';
-import {
-  EXPENSE_CATEGORIES,
-  EXPENSE_CATEGORY_LABELS,
-  PAY_SOURCE_LABELS,
-  taxRateText,
-  type ExpenseCategory,
-  type ExpenseClaim,
-  type PaySource,
-} from '@shared/expenses';
+import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS, PAY_SOURCE_LABELS, taxRateText, type ExpenseCategory, type ExpenseClaim, type PaySource } from '@shared/expenses';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { channelText } from '@shared/purchasing';
 import { formatQty, parseQty } from '@shared/quantity';
@@ -130,11 +122,7 @@ export function ClaimFormPage() {
   const pfCategories = pf?.categories;
   useEffect(() => {
     if (!po.data) return;
-    setPoPick(
-      Object.fromEntries(
-        po.data.lines.map((l) => [l.poLineId, { on: !l.claimedBy, category: pfCategories?.[l.poLineId] ?? '', amount: centsToInput(l.amountCents), diffReason: '' }]),
-      ),
-    );
+    setPoPick(Object.fromEntries(po.data.lines.map((l) => [l.poLineId, { on: !l.claimedBy, category: pfCategories?.[l.poLineId] ?? '', amount: centsToInput(l.amountCents), diffReason: '' }])));
   }, [po.data, pfCategories]);
 
   const inv = rules.data?.invoiceTypes.find((t) => t.key === invoiceType);
@@ -168,22 +156,13 @@ export function ClaimFormPage() {
     const pick = poPick[pl.poLineId] ?? { on: false, category: '' as const, amount: '', diffReason: '' };
     const cents = pick.amount.trim() ? parseYuan(pick.amount) : null;
     const differs = pl.boughtMilli !== pl.receivedMilli;
-    const err = !pick.on
-      ? null
-      : !pick.category
-        ? '请选费用科目'
-        : differs && pick.diffReason.trim().length < 2
-          ? '数量不一致，请写原因'
-          : cents === null || cents <= 0
-            ? '请填写金额'
-            : null;
+    const err = !pick.on ? null : !pick.category ? '请选费用科目' : differs && pick.diffReason.trim().length < 2 ? '数量不一致，请写原因' : cents === null || cents <= 0 ? '请填写金额' : null;
     return { pl, pick, cents, differs, err };
   });
   const chosenPo = poRows.filter((r) => r.pick.on);
   // 按采购单报销时单独加一行运费（#15，v0.7.12）：不对应物料，不进物料成本
   const freightCents = mode === 'po' && freightOn ? parseYuan(freightText) : null;
-  const total =
-    mode === 'adhoc' ? adhocRows.reduce((t, r) => t + (r.cents ?? 0), 0) : chosenPo.reduce((t, r) => t + (r.cents ?? 0), 0) + (freightCents ?? 0);
+  const total = mode === 'adhoc' ? adhocRows.reduce((t, r) => t + (r.cents ?? 0), 0) : chosenPo.reduce((t, r) => t + (r.cents ?? 0), 0) + (freightCents ?? 0);
   const threshold = rules.data?.approvalThresholdCents ?? 200_000;
   const needsApproval = total > threshold;
   // 费用预算（8.0.3）：这张报销各科目的金额
@@ -201,43 +180,43 @@ export function ClaimFormPage() {
   const invoiceLookup = useInvoiceLookup(invoiceNo.trim(), ledgerInvoice);
   const supplierName = mode === 'po' && po.data ? po.data.supplierName : null;
   const invoiceProblem = ledgerInvoice
-    ? invoiceBlocking(invoiceLookup.data, invoiceNo, supplierName ?? invExtras.issuer, invExtras.invoiceId) ??
-      (invExtras.tax.trim() && parseYuan(invExtras.tax) === null ? '税额格式不对' : null)
+    ? (invoiceBlocking(invoiceLookup.data, invoiceNo, supplierName ?? invExtras.issuer, invExtras.invoiceId) ?? (invExtras.tax.trim() && parseYuan(invExtras.tax) === null ? '税额格式不对' : null))
     : null;
 
-  const blocking = pending.length > 0
-    ? '上一笔报销结果待确认，请先在上方查回、重新提交或作废'
-    : !departmentId
-    ? '请选择部门'
-    : !handlerId
-      ? '请选择经办人'
-      : !purpose
-        ? '请选择用途'
-        : paySource === 'petty' && !advanceId
-          ? '请选择这笔钱出自哪一笔打款'
-          : mode === 'adhoc' && channels.length > 0 && !channelDef
-            ? '请选择采购途径'
-          : pickChannel && channelDef?.needsNote && channelNote.trim().length < 2
-            ? `采购途径选了「${channelDef.label}」，请写明在哪买的`
-          : !inv
-            ? '请选择发票类型'
-            : taxRateBp === null
-              ? '请选择税点'
-              : inv.needsNumber && !invoiceNo.trim()
-                ? `${inv.label}要填发票号码`
-                : invoiceProblem
-                  ? invoiceProblem
-                : rec.needsCheck
-                  ? '请对照票面核对识别出来的内容并勾选'
-                : mode === 'po'
-                  ? !poId
-                    ? '请选择采购单'
-                    : chosenPo.length === 0
-                      ? '请勾选要报销的行'
-                      : freightOn && (!freightCents || freightCents <= 0)
-                        ? '请填写运费金额'
-                        : chosenPo.find((r) => r.err)?.err ?? null
-                  : adhocRows.find((r) => r.err)?.err ?? null;
+  const blocking =
+    pending.length > 0
+      ? '上一笔报销结果待确认，请先在上方查回、重新提交或作废'
+      : !departmentId
+        ? '请选择部门'
+        : !handlerId
+          ? '请选择经办人'
+          : !purpose
+            ? '请选择用途'
+            : paySource === 'petty' && !advanceId
+              ? '请选择这笔钱出自哪一笔打款'
+              : mode === 'adhoc' && channels.length > 0 && !channelDef
+                ? '请选择采购途径'
+                : pickChannel && channelDef?.needsNote && channelNote.trim().length < 2
+                  ? `采购途径选了「${channelDef.label}」，请写明在哪买的`
+                  : !inv
+                    ? '请选择发票类型'
+                    : taxRateBp === null
+                      ? '请选择税点'
+                      : inv.needsNumber && !invoiceNo.trim()
+                        ? `${inv.label}要填发票号码`
+                        : invoiceProblem
+                          ? invoiceProblem
+                          : rec.needsCheck
+                            ? '请对照票面核对识别出来的内容并勾选'
+                            : mode === 'po'
+                              ? !poId
+                                ? '请选择采购单'
+                                : chosenPo.length === 0
+                                  ? '请勾选要报销的行'
+                                  : freightOn && (!freightCents || freightCents <= 0)
+                                    ? '请填写运费金额'
+                                    : (chosenPo.find((r) => r.err)?.err ?? null)
+                              : (adhocRows.find((r) => r.err)?.err ?? null);
 
   if (!can('expense.manage')) return <Navigate to="/erp/expenses" replace />;
 
@@ -294,33 +273,36 @@ export function ClaimFormPage() {
     const names = payloadLines.map((l) => l.name);
     const what = mode === 'po' && po.data ? `采购单 ${po.data.docNo}` : `${names[0] ?? ''}${names.length > 1 ? ` 等 ${names.length} 项` : ''}`;
     // 每次提交用新的操作编号：结果不明的那一笔留在本机，由页面顶部按原编号处理
-    void send({
-      clientKey: uuid(),
-      expenseDate,
-      departmentId,
-      handlerId,
-      purpose,
-      paySource,
-      advanceId: paySource === 'petty' ? advanceId : null,
-      invoiceType,
-      taxRateBp,
-      invoiceNo: invoiceNo.trim(),
-      ...(ledgerInvoice
-        ? {
-            invoiceId: invExtras.invoiceId,
-            invoiceIssuer: mode === 'adhoc' ? invExtras.issuer.trim() : '',
-            invoiceDate: invExtras.date || null,
-            invoiceTaxCents: invExtras.tax.trim() ? parseYuan(invExtras.tax) : null,
-            invoiceEntryMethod: rec.entryMethod,
-          }
-        : {}),
-      purchaseOrderId: mode === 'po' ? poId : null,
-      channel: pickChannel && channelDef ? channelDef.key : null,
-      channelNote: pickChannel && channelDef ? channelNote.trim() : '',
-      note: note.trim(),
-      approveNow: needsApproval && approveNow,
-      lines: payloadLines,
-    }, `${deptName} · ${purpose} · ${what} · ¥${formatAmount(total)}`);
+    void send(
+      {
+        clientKey: uuid(),
+        expenseDate,
+        departmentId,
+        handlerId,
+        purpose,
+        paySource,
+        advanceId: paySource === 'petty' ? advanceId : null,
+        invoiceType,
+        taxRateBp,
+        invoiceNo: invoiceNo.trim(),
+        ...(ledgerInvoice
+          ? {
+              invoiceId: invExtras.invoiceId,
+              invoiceIssuer: mode === 'adhoc' ? invExtras.issuer.trim() : '',
+              invoiceDate: invExtras.date || null,
+              invoiceTaxCents: invExtras.tax.trim() ? parseYuan(invExtras.tax) : null,
+              invoiceEntryMethod: rec.entryMethod,
+            }
+          : {}),
+        purchaseOrderId: mode === 'po' ? poId : null,
+        channel: pickChannel && channelDef ? channelDef.key : null,
+        channelNote: pickChannel && channelDef ? channelNote.trim() : '',
+        note: note.trim(),
+        approveNow: needsApproval && approveNow,
+        lines: payloadLines,
+      },
+      `${deptName} · ${purpose} · ${what} · ¥${formatAmount(total)}`,
+    );
   };
 
   const locked = busy;
@@ -400,10 +382,16 @@ export function ClaimFormPage() {
               </Select>
             </Field>
             <Field label="经办人" htmlFor="ex-handler">
-              <Select id="ex-handler" value={handlerId ?? ''} disabled={locked} onChange={(e) => {
+              <Select
+                id="ex-handler"
+                value={handlerId ?? ''}
+                disabled={locked}
+                onChange={(e) => {
                   touch('handler');
                   setHandlerId(Number(e.target.value) || null);
-                }} data-testid="ex-handler">
+                }}
+                data-testid="ex-handler"
+              >
                 <option value="">选择经办人</option>
                 {handlers.data?.map((h) => (
                   <option key={h.id} value={h.id}>
@@ -413,10 +401,16 @@ export function ClaimFormPage() {
               </Select>
             </Field>
             <Field label="用途" htmlFor="ex-purpose">
-              <Select id="ex-purpose" value={purpose} disabled={locked} onChange={(e) => {
+              <Select
+                id="ex-purpose"
+                value={purpose}
+                disabled={locked}
+                onChange={(e) => {
                   touch('purpose');
                   setPurpose(e.target.value);
-                }} data-testid="ex-purpose">
+                }}
+                data-testid="ex-purpose"
+              >
                 <option value="">选择用途</option>
                 {rules.data?.purposes.map((p) => (
                   <option key={p} value={p}>
@@ -439,10 +433,16 @@ export function ClaimFormPage() {
             </Field>
             {paySource === 'petty' && (
               <Field label="出自哪一笔打款" htmlFor="ex-adv" className="sm:col-span-2" hint={departmentId ? '只列这个部门没平账的打款' : '先选部门'}>
-                <Select id="ex-adv" value={advanceId ?? ''} disabled={locked || !departmentId} onChange={(e) => {
-                  touch('paySource');
-                  setAdvanceId(Number(e.target.value) || null);
-                }} data-testid="ex-advance">
+                <Select
+                  id="ex-adv"
+                  value={advanceId ?? ''}
+                  disabled={locked || !departmentId}
+                  onChange={(e) => {
+                    touch('paySource');
+                    setAdvanceId(Number(e.target.value) || null);
+                  }}
+                  data-testid="ex-advance"
+                >
                   <option value="">选择打款</option>
                   {advances.data?.map((a) => (
                     <option key={a.id} value={a.id}>
@@ -480,7 +480,15 @@ export function ClaimFormPage() {
                 />
               </div>
             )}
-            <Field label={<>发票类型<RecognizedMark on={rec.isRecognized('kind')} /></>} htmlFor="ex-inv">
+            <Field
+              label={
+                <>
+                  发票类型
+                  <RecognizedMark on={rec.isRecognized('kind')} />
+                </>
+              }
+              htmlFor="ex-inv"
+            >
               <Select
                 id="ex-inv"
                 value={invoiceType}
@@ -501,11 +509,25 @@ export function ClaimFormPage() {
                 ))}
               </Select>
             </Field>
-            <Field label={<>税点<RecognizedMark on={rec.isRecognized('rate')} /></>} htmlFor="ex-tax">
-              <Select id="ex-tax" value={taxRateBp ?? ''} disabled={locked || !inv} onChange={(e) => {
+            <Field
+              label={
+                <>
+                  税点
+                  <RecognizedMark on={rec.isRecognized('rate')} />
+                </>
+              }
+              htmlFor="ex-tax"
+            >
+              <Select
+                id="ex-tax"
+                value={taxRateBp ?? ''}
+                disabled={locked || !inv}
+                onChange={(e) => {
                   touch('invoice');
                   setTaxRateBp(e.target.value === '' ? null : Number(e.target.value));
-                }} data-testid="ex-tax">
+                }}
+                data-testid="ex-tax"
+              >
                 <option value="">{inv ? '选择税点' : '先选发票类型'}</option>
                 {inv?.taxRatesBp.map((bp) => (
                   <option key={bp} value={bp}>
@@ -514,7 +536,16 @@ export function ClaimFormPage() {
                 ))}
               </Select>
             </Field>
-            <Field label={<>发票号码<RecognizedMark on={rec.isRecognized('no')} /></>} htmlFor="ex-invno" hint={inv?.needsNumber ? '有发票必须填' : '没有发票可以不填'}>
+            <Field
+              label={
+                <>
+                  发票号码
+                  <RecognizedMark on={rec.isRecognized('no')} />
+                </>
+              }
+              htmlFor="ex-invno"
+              hint={inv?.needsNumber ? '有发票必须填' : '没有发票可以不填'}
+            >
               <Input
                 id="ex-invno"
                 value={invoiceNo}
@@ -612,8 +643,23 @@ export function ClaimFormPage() {
               <ul className="divide-y divide-line/70">
                 {adhocRows.map(({ l, differs, err }, i) => (
                   <li key={l.key} className="grid grid-cols-2 gap-x-3 gap-y-2 px-5 py-3 md:grid-cols-[minmax(0,2fr)_130px_70px_80px_80px_120px_32px]">
-                    <Input aria-label={`第 ${i + 1} 行物品`} placeholder="物品或内容" value={l.name} maxLength={40} disabled={locked} onChange={(e) => setLine(l.key, { name: e.target.value })} className="col-span-2 h-10 md:col-span-1" data-testid={`line-name-${i}`} />
-                    <Select aria-label={`第 ${i + 1} 行费用科目`} value={l.category} disabled={locked} onChange={(e) => setLine(l.key, { category: e.target.value as ExpenseCategory })} data-testid={`line-cat-${i}`}>
+                    <Input
+                      aria-label={`第 ${i + 1} 行物品`}
+                      placeholder="物品或内容"
+                      value={l.name}
+                      maxLength={40}
+                      disabled={locked}
+                      onChange={(e) => setLine(l.key, { name: e.target.value })}
+                      className="col-span-2 h-10 md:col-span-1"
+                      data-testid={`line-name-${i}`}
+                    />
+                    <Select
+                      aria-label={`第 ${i + 1} 行费用科目`}
+                      value={l.category}
+                      disabled={locked}
+                      onChange={(e) => setLine(l.key, { category: e.target.value as ExpenseCategory })}
+                      data-testid={`line-cat-${i}`}
+                    >
                       <option value="">费用科目</option>
                       {EXPENSE_CATEGORIES.map((c) => (
                         <option key={c} value={c}>
@@ -621,13 +667,58 @@ export function ClaimFormPage() {
                         </option>
                       ))}
                     </Select>
-                    <Input aria-label={`第 ${i + 1} 行单位`} placeholder="单位" value={l.unit} maxLength={8} disabled={locked} onChange={(e) => setLine(l.key, { unit: e.target.value })} className="h-10" data-testid={`line-unit-${i}`} />
-                    <Input aria-label={`第 ${i + 1} 行购买数量`} inputMode="decimal" value={l.bought} disabled={locked} onChange={(e) => setLine(l.key, { bought: e.target.value })} className="h-10 text-right" />
-                    <Input aria-label={`第 ${i + 1} 行到货数量`} inputMode="decimal" value={l.received} disabled={locked} onChange={(e) => setLine(l.key, { received: e.target.value })} className="h-10 text-right" />
-                    <MoneyInput aria-label={`第 ${i + 1} 行金额`} value={l.amount} disabled={locked} onChange={(e) => setLine(l.key, { amount: e.target.value })} className="h-10 text-right" data-testid={`line-amount-${i}`} />
-                    <Button variant="ghost" size="sm" icon={<Trash2 className="size-4" />} disabled={locked || lines.length === 1} onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} aria-label={`删除第 ${i + 1} 行`} />
+                    <Input
+                      aria-label={`第 ${i + 1} 行单位`}
+                      placeholder="单位"
+                      value={l.unit}
+                      maxLength={8}
+                      disabled={locked}
+                      onChange={(e) => setLine(l.key, { unit: e.target.value })}
+                      className="h-10"
+                      data-testid={`line-unit-${i}`}
+                    />
+                    <Input
+                      aria-label={`第 ${i + 1} 行购买数量`}
+                      inputMode="decimal"
+                      value={l.bought}
+                      disabled={locked}
+                      onChange={(e) => setLine(l.key, { bought: e.target.value })}
+                      className="h-10 text-right"
+                    />
+                    <Input
+                      aria-label={`第 ${i + 1} 行到货数量`}
+                      inputMode="decimal"
+                      value={l.received}
+                      disabled={locked}
+                      onChange={(e) => setLine(l.key, { received: e.target.value })}
+                      className="h-10 text-right"
+                    />
+                    <MoneyInput
+                      aria-label={`第 ${i + 1} 行金额`}
+                      value={l.amount}
+                      disabled={locked}
+                      onChange={(e) => setLine(l.key, { amount: e.target.value })}
+                      className="h-10 text-right"
+                      data-testid={`line-amount-${i}`}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<Trash2 className="size-4" />}
+                      disabled={locked || lines.length === 1}
+                      onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
+                      aria-label={`删除第 ${i + 1} 行`}
+                    />
                     {differs && (
-                      <Input aria-label={`第 ${i + 1} 行差异原因`} placeholder="购买与到货数量不一致的原因" value={l.diffReason} maxLength={100} disabled={locked} onChange={(e) => setLine(l.key, { diffReason: e.target.value })} className="col-span-2 h-10 md:col-span-7" />
+                      <Input
+                        aria-label={`第 ${i + 1} 行差异原因`}
+                        placeholder="购买与到货数量不一致的原因"
+                        value={l.diffReason}
+                        maxLength={100}
+                        disabled={locked}
+                        onChange={(e) => setLine(l.key, { diffReason: e.target.value })}
+                        className="col-span-2 h-10 md:col-span-7"
+                      />
                     )}
                     {err && l.name.trim() && <p className="col-span-2 text-[12px] font-semibold text-clay md:col-span-7">{err}</p>}
                   </li>
@@ -674,7 +765,13 @@ export function ClaimFormPage() {
                     <ul className="divide-y divide-line/70 rounded-lg border border-line">
                       {candidates.data!.map((c) => (
                         <li key={c.id}>
-                          <button type="button" disabled={c.openLines === 0} onClick={() => setPoId(c.id)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-paper-2 disabled:opacity-50" data-testid={`po-pick-${c.id}`}>
+                          <button
+                            type="button"
+                            disabled={c.openLines === 0}
+                            onClick={() => setPoId(c.id)}
+                            className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-paper-2 disabled:opacity-50"
+                            data-testid={`po-pick-${c.id}`}
+                          >
                             <span className="num font-bold">{c.docNo}</span>
                             <span className="min-w-0 flex-1 truncate text-[13px] text-ink-2">
                               {c.supplierName} · {c.orderDate}
@@ -694,8 +791,18 @@ export function ClaimFormPage() {
               ) : (
                 <ul className="divide-y divide-line/70">
                   {poRows.map(({ pl, pick, differs, err }) => (
-                    <li key={pl.poLineId} className={cn('grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 px-5 py-3 md:grid-cols-[auto_minmax(0,1fr)_150px_130px_130px]', pick.on && 'bg-pine-tint/40')}>
-                      <input type="checkbox" className="mt-1 size-4 accent-[var(--color-pine)]" aria-label={`报销 ${pl.name}`} checked={pick.on} disabled={locked || !!pl.claimedBy} onChange={(e) => setPick(pl.poLineId, { on: e.target.checked })} />
+                    <li
+                      key={pl.poLineId}
+                      className={cn('grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 px-5 py-3 md:grid-cols-[auto_minmax(0,1fr)_150px_130px_130px]', pick.on && 'bg-pine-tint/40')}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-1 size-4 accent-[var(--color-pine)]"
+                        aria-label={`报销 ${pl.name}`}
+                        checked={pick.on}
+                        disabled={locked || !!pl.claimedBy}
+                        onChange={(e) => setPick(pl.poLineId, { on: e.target.checked })}
+                      />
                       <span className="min-w-0">
                         <span className="block font-semibold">{pl.name}</span>
                         <span className={cn('block text-[12.5px]', differs ? 'font-semibold text-yuzu-deep' : 'text-ink-3')}>
@@ -703,7 +810,13 @@ export function ClaimFormPage() {
                         </span>
                         {pl.claimedBy && <span className="block text-[12px] text-ink-3">已在报销单 {pl.claimedBy} 里</span>}
                       </span>
-                      <Select aria-label={`${pl.name} 费用科目`} value={pick.category} disabled={locked || !pick.on} onChange={(e) => setPick(pl.poLineId, { category: e.target.value as ExpenseCategory })} className="col-start-2 md:col-start-auto">
+                      <Select
+                        aria-label={`${pl.name} 费用科目`}
+                        value={pick.category}
+                        disabled={locked || !pick.on}
+                        onChange={(e) => setPick(pl.poLineId, { category: e.target.value as ExpenseCategory })}
+                        className="col-start-2 md:col-start-auto"
+                      >
                         <option value="">费用科目</option>
                         {EXPENSE_CATEGORIES.filter((c) => c !== 'freight').map((c) => (
                           <option key={c} value={c}>
@@ -711,17 +824,38 @@ export function ClaimFormPage() {
                           </option>
                         ))}
                       </Select>
-                      <MoneyInput aria-label={`${pl.name} 实付金额`} value={pick.amount} disabled={locked || !pick.on} onChange={(e) => setPick(pl.poLineId, { amount: e.target.value })} className="col-start-2 h-10 text-right md:col-start-auto" />
+                      <MoneyInput
+                        aria-label={`${pl.name} 实付金额`}
+                        value={pick.amount}
+                        disabled={locked || !pick.on}
+                        onChange={(e) => setPick(pl.poLineId, { amount: e.target.value })}
+                        className="col-start-2 h-10 text-right md:col-start-auto"
+                      />
                       <span className="col-start-2 text-[12px] text-ink-3 md:col-start-auto md:self-center">实付金额，可与采购单不同</span>
                       {pick.on && differs && (
-                        <Input aria-label={`${pl.name} 差异原因`} placeholder="购买与到货数量不一致的原因" value={pick.diffReason} maxLength={100} disabled={locked} onChange={(e) => setPick(pl.poLineId, { diffReason: e.target.value })} className="col-start-2 h-10 md:col-span-4" />
+                        <Input
+                          aria-label={`${pl.name} 差异原因`}
+                          placeholder="购买与到货数量不一致的原因"
+                          value={pick.diffReason}
+                          maxLength={100}
+                          disabled={locked}
+                          onChange={(e) => setPick(pl.poLineId, { diffReason: e.target.value })}
+                          className="col-start-2 h-10 md:col-span-4"
+                        />
                       )}
                       {err && <p className="col-start-2 text-[12px] font-semibold text-clay md:col-span-4">{err}</p>}
                     </li>
                   ))}
                   <li className={cn('flex flex-wrap items-center gap-3 px-5 py-3', freightOn && 'bg-pine-tint/40')}>
                     <label className="flex cursor-pointer items-center gap-2 text-[13px] font-semibold">
-                      <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={freightOn} disabled={locked} onChange={(e) => setFreightOn(e.target.checked)} data-testid="claim-freight" />
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-[var(--color-pine)]"
+                        checked={freightOn}
+                        disabled={locked}
+                        onChange={(e) => setFreightOn(e.target.checked)}
+                        data-testid="claim-freight"
+                      />
                       另有运费
                     </label>
                     <span className="flex-1 text-[12px] text-ink-3">单独一行记「运费」科目，不进物料成本</span>
@@ -771,4 +905,3 @@ export function ClaimFormPage() {
     </>
   );
 }
-

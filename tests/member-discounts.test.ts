@@ -28,8 +28,7 @@ const catalog = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/benefits
 const byCode = async (code: string) => (await catalog()).items.find((b) => b.code === code)!;
 const edit = async (code: string, patch: Partial<Benefit>) => {
   const b = await byCode(code);
-  const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } =
-    b;
+  const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } = b;
   const r = await api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
     expectedVersion: version,
     ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions },
@@ -186,9 +185,7 @@ describe('包房房费折扣（QY-011）', () => {
     const base = await roomFee(b.tagCode, b.billId);
     expect(base).toBeGreaterThan(0);
     const p = await preview([b.visitId]);
-    expect(p.memberDiscounts).toEqual([
-      expect.objectContaining({ memberId: l3, code: 'QY-011', rate: 75, target: 'room', base, amount: off(base, 75), tagCode: b.tagCode }),
-    ]);
+    expect(p.memberDiscounts).toEqual([expect.objectContaining({ memberId: l3, code: 'QY-011', rate: 75, target: 'room', base, amount: off(base, 75), tagCode: b.tagCode })]);
     // 半分：128.10 元 × 25% = 32.025 元 → 省 32.03 元（对折后应付取整会只省 32.02 元）
     expect([base, p.memberDiscounts![0]!.amount]).toEqual([12810, 3203]);
     open = { ...b, base };
@@ -224,7 +221,12 @@ describe('包房房费折扣（QY-011）', () => {
     // 部门快照：会员折扣只分摊到客房，门票不分
     const items = await ctx.sql<{ category: string; discount: number }[]>`
       SELECT category, sum(discount)::int AS discount FROM checkout_items WHERE checkout_id = ${c.id} GROUP BY 1 ORDER BY 1`;
-    expect(items).toEqual(expect.arrayContaining([{ category: '客房', discount: off(base, 75) }, { category: '门票', discount: 0 }]));
+    expect(items).toEqual(
+      expect.arrayContaining([
+        { category: '客房', discount: off(base, 75) },
+        { category: '门票', discount: 0 },
+      ]),
+    );
     // ERP「营业数据」与经营总览同一口径：今天的会员折扣 = 今天结了的会员折扣合计（测试会话预检 b49f23b）
     const today = (await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.today as string;
     const q = `?from=${today}&to=${today}`;
@@ -358,8 +360,7 @@ describe('用过的会员折扣不能再改类别', () => {
     expect(used!.n).toBeGreaterThan(0);
     const toCategory = async (code: string, category: Benefit['category']) => {
       const b = await byCode(code);
-      const { id, version, name, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } =
-        b;
+      const { id, version, name, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } = b;
       return api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
         expectedVersion: version,
         ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions },

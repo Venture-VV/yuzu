@@ -218,19 +218,7 @@ export function emenuNoteWorstCase(avoidOptions: readonly string[], serveOptions
 
 // ───────────────────────── 版面 ─────────────────────────
 
-export const EMENU_LAYOUTS = [
-  'cover',
-  'list_image',
-  'single_wide',
-  'single_left',
-  'single_right',
-  'duo_stagger',
-  'duo_row',
-  'duo_mixed',
-  'trio_row',
-  'trio_mixed',
-  'list_text',
-] as const;
+export const EMENU_LAYOUTS = ['cover', 'list_image', 'single_wide', 'single_left', 'single_right', 'duo_stagger', 'duo_row', 'duo_mixed', 'trio_row', 'trio_mixed', 'list_text'] as const;
 export type EmenuLayout = (typeof EMENU_LAYOUTS)[number];
 
 export interface EmenuLayoutInfo {
@@ -350,7 +338,9 @@ export interface EmenuMenu {
   businessDate: string;
   /** 平板点餐与餐饮功能都开着 */
   enabled: boolean;
-  rules: Pick<EmenuRules, 'footerText' | 'avoidOptions' | 'serveOptions' | 'idleMinutes' | 'offHours' | 'langSwitch' | 'optionsEn' | 'motion' | 'requirePin' | 'textSize'> & { coverUrl: string | null };
+  rules: Pick<EmenuRules, 'footerText' | 'avoidOptions' | 'serveOptions' | 'idleMinutes' | 'offHours' | 'langSwitch' | 'optionsEn' | 'motion' | 'requirePin' | 'textSize'> & {
+    coverUrl: string | null;
+  };
   /** 现在显示的分类（按排序；不在时段的只有设置成「显示」时才在） */
   categories: EmenuCategoryView[];
   /** 不在时段、没显示出来的分类（没有分类可点时告诉客人什么时候供应） */
@@ -637,7 +627,13 @@ export function readSheetCell(cell: string, now: string | undefined): string | n
 }
 
 const ENGLISH_LIMITS = { nameEn: 80, taglineEn: 80, descriptionEn: 400, unitEn: 12 } as const;
-const ENGLISH_HEADERS: Record<keyof typeof ENGLISH_LIMITS | 'attrsEn', string> = { nameEn: '英文名', taglineEn: '小字的英文', descriptionEn: '英文介绍', attrsEn: '属性行的英文', unitEn: '单位的英文' };
+const ENGLISH_HEADERS: Record<keyof typeof ENGLISH_LIMITS | 'attrsEn', string> = {
+  nameEn: '英文名',
+  taglineEn: '小字的英文',
+  descriptionEn: '英文介绍',
+  attrsEn: '属性行的英文',
+  unitEn: '单位的英文',
+};
 export const EMENU_ATTR_EN_MAX = 48;
 
 /**

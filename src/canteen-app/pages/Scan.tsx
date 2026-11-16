@@ -15,11 +15,7 @@ import { CameraError, decodeImageFile, preloadDecoder, startScanner } from '../s
 import { Button, Card, cn, inputClass, Pill, Sheet, toast } from '../ui';
 import { useYuzuVoice } from '../voice';
 
-type Shown = (
-  | { status: 'ok' | 'already'; result: CheckinResult }
-  | { status: 'error'; message: string; code: string }
-  | { status: 'queued'; label: string }
-) & {
+type Shown = ({ status: 'ok' | 'already'; result: CheckinResult } | { status: 'error'; message: string; code: string } | { status: 'queued'; label: string }) & {
   /** 柚子念的那一句 */
   say?: ScanVoiceKey;
 };
@@ -185,7 +181,10 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
               aria-pressed={voice.on}
               aria-label={voice.on ? '关掉柚子播报' : '打开柚子播报'}
               data-testid="scan-voice-toggle"
-              className={cn('flex h-9 items-center gap-1 rounded-full px-2.5 text-[13px] font-extrabold ring-1 active:scale-95', voice.on ? 'bg-yuzu-soft text-wood-deep ring-yuzu-deep/30' : 'bg-card text-ink-3 ring-line')}
+              className={cn(
+                'flex h-9 items-center gap-1 rounded-full px-2.5 text-[13px] font-extrabold ring-1 active:scale-95',
+                voice.on ? 'bg-yuzu-soft text-wood-deep ring-yuzu-deep/30' : 'bg-card text-ink-3 ring-line',
+              )}
             >
               <IconSound size={20} on={voice.on} fill={voice.on ? 'var(--color-yuzu)' : 'none'} />
               {voice.on ? '播报' : '静音'}
@@ -256,11 +255,14 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
           <>
             {/* 取景框：四个圆角 */}
             <div className="pointer-events-none absolute inset-[14%] rounded-[24px] shadow-[0_0_0_999px_rgb(59_47_42/0.35)]">
-              {['top-0 left-0 border-t-4 border-l-4 rounded-tl-[24px]', 'top-0 right-0 border-t-4 border-r-4 rounded-tr-[24px]', 'bottom-0 left-0 border-b-4 border-l-4 rounded-bl-[24px]', 'bottom-0 right-0 border-b-4 border-r-4 rounded-br-[24px]'].map(
-                (c) => (
-                  <span key={c} className={cn('absolute size-10 border-yuzu', c)} />
-                ),
-              )}
+              {[
+                'top-0 left-0 border-t-4 border-l-4 rounded-tl-[24px]',
+                'top-0 right-0 border-t-4 border-r-4 rounded-tr-[24px]',
+                'bottom-0 left-0 border-b-4 border-l-4 rounded-bl-[24px]',
+                'bottom-0 right-0 border-b-4 border-r-4 rounded-br-[24px]',
+              ].map((c) => (
+                <span key={c} className={cn('absolute size-10 border-yuzu', c)} />
+              ))}
             </div>
             <button type="button" onClick={stop} className="absolute top-3 right-3 rounded-full bg-black/50 px-3 py-1.5 text-[13px] font-bold text-white">
               暂停
@@ -371,10 +373,16 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
 }
 
 function ResultCard({ shown, speaking, onClose }: { shown: Shown; speaking: boolean; onClose: () => void }) {
-  const tone =
-    shown.status === 'ok' ? 'bg-leaf text-white' : shown.status === 'already' ? 'bg-yuzu text-ink' : shown.status === 'queued' ? 'bg-sky text-white' : 'bg-berry text-white';
+  const tone = shown.status === 'ok' ? 'bg-leaf text-white' : shown.status === 'already' ? 'bg-yuzu text-ink' : shown.status === 'queued' ? 'bg-sky text-white' : 'bg-berry text-white';
   return (
-    <button type="button" onClick={onClose} className={cn('absolute inset-0 flex animate-pop flex-col items-center justify-center gap-2 p-6 text-center', tone)} data-testid="scan-result" data-status={shown.status} data-code={shown.status === 'error' ? shown.code : undefined}>
+    <button
+      type="button"
+      onClick={onClose}
+      className={cn('absolute inset-0 flex animate-pop flex-col items-center justify-center gap-2 p-6 text-center', tone)}
+      data-testid="scan-result"
+      data-status={shown.status}
+      data-code={shown.status === 'error' ? shown.code : undefined}
+    >
       {shown.status === 'ok' || shown.status === 'already' ? (
         <>
           <span className="text-[56px] leading-none">{shown.result.checkin.avatar}</span>
@@ -384,9 +392,7 @@ function ResultCard({ shown, speaking, onClose }: { shown: Shown; speaking: bool
             {shown.result.checkin.department && ` · ${shown.result.checkin.department}`}
           </p>
           <p className="mt-2 rounded-full bg-black/15 px-4 py-1.5 text-[18px] font-black">
-            {shown.status === 'ok'
-              ? `✓ ${MEAL_LABELS[shown.result.checkin.meal]}打卡成功 · 第 ${shown.result.mealCount} 位`
-              : `已经打过卡啦（${timeText(shown.result.checkin.scannedAt)}）`}
+            {shown.status === 'ok' ? `✓ ${MEAL_LABELS[shown.result.checkin.meal]}打卡成功 · 第 ${shown.result.mealCount} 位` : `已经打过卡啦（${timeText(shown.result.checkin.scannedAt)}）`}
           </p>
         </>
       ) : shown.status === 'queued' ? (
@@ -430,7 +436,12 @@ function ManualPicker({ onPick }: { onPick: (p: CanteenPerson, note: string) => 
       <input className={inputClass} placeholder="搜姓名或工号" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜姓名或工号" />
       <div className="flex flex-wrap gap-1.5">
         {['手机没电', '没带手机', '码打不开'].map((n) => (
-          <button key={n} type="button" onClick={() => setNote(note === n ? '' : n)} className={cn('rounded-full px-3 py-1 text-[13px] font-bold', note === n ? 'bg-ink text-cream' : 'bg-card ring-1 ring-line')}>
+          <button
+            key={n}
+            type="button"
+            onClick={() => setNote(note === n ? '' : n)}
+            className={cn('rounded-full px-3 py-1 text-[13px] font-bold', note === n ? 'bg-ink text-cream' : 'bg-card ring-1 ring-line')}
+          >
             {n}
           </button>
         ))}

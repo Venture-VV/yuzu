@@ -105,7 +105,9 @@ export function parsePriceListCsv(text: string): PriceListCsvResult {
     else if (name.length > 32) problems.push(`项目「${name}」名称超过 32 字`);
     if (category.length > 16) problems.push(`分类「${category}」超过 16 字`);
 
-    const durationText = cell('duration_minutes').replace(/分钟|min/gi, '').trim();
+    const durationText = cell('duration_minutes')
+      .replace(/分钟|min/gi, '')
+      .trim();
     let durationMinutes: number | null = null;
     if (durationText) {
       durationMinutes = Number(durationText);

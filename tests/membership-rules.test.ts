@@ -1,16 +1,6 @@
 // 会员体系 v2 的纯计算（v0.7.23，src/shared/membership.ts；docs/MEMBERSHIP.md 第 2 节）
 import { describe, expect, it } from 'vitest';
-import {
-  bonusFor,
-  DEFAULT_MEMBERSHIP_RULES as R,
-  expiryStep,
-  gradeForAmount,
-  gradeLabel,
-  rechargeOutcome,
-  tierForSpend,
-  tierTargets,
-  type GradeState,
-} from '../src/shared/membership';
+import { bonusFor, DEFAULT_MEMBERSHIP_RULES as R, expiryStep, gradeForAmount, gradeLabel, rechargeOutcome, tierForSpend, tierTargets, type GradeState } from '../src/shared/membership';
 
 const yuan = (n: number) => Math.round(n * 100);
 

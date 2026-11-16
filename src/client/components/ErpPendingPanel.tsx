@@ -261,8 +261,7 @@ function PendingRow({ op, onFound }: { op: ErpPendingOp; onFound?: (op: ErpPendi
     } catch (e) {
       if (e instanceof UncertainError) {
         setMessage(e.reason === 'server' ? '服务器还是出错，结果待确认。稍后再查回或重新提交（同一编号只登记一次）。' : '仍然连不上服务器，结果待确认。稍后再查回或重新提交。');
-      }
-      else if (e instanceof ApiError && e.code === 'OP_ABANDONED') settle({ found: false, abandoned: true }, null);
+      } else if (e instanceof ApiError && e.code === 'OP_ABANDONED') settle({ found: false, abandoned: true }, null);
       else setMessage(`${errorMessage(e)}（之前那次提交可能仍会登记：请先查回，确认没有登记时再确认作废）`);
     } finally {
       setBusy(null);
@@ -297,7 +296,15 @@ function PendingRow({ op, onFound }: { op: ErpPendingOp; onFound?: (op: ErpPendi
             按原内容重新提交
           </Button>
           {confirming ? (
-            <Button size="sm" variant="danger" icon={<Trash2 className="size-4" />} loading={busy === 'abandon'} disabled={!!busy && busy !== 'abandon'} onClick={() => void abandon()} data-testid="erp-pending-abandon-confirm">
+            <Button
+              size="sm"
+              variant="danger"
+              icon={<Trash2 className="size-4" />}
+              loading={busy === 'abandon'}
+              disabled={!!busy && busy !== 'abandon'}
+              onClick={() => void abandon()}
+              data-testid="erp-pending-abandon-confirm"
+            >
               确认作废这笔
             </Button>
           ) : (
@@ -311,9 +318,7 @@ function PendingRow({ op, onFound }: { op: ErpPendingOp; onFound?: (op: ErpPendi
       <span className="block">
         {op.summary} · {op.staffName} · {formatDateTime(op.createdAt)}
       </span>
-      <span className="block text-[12.5px]">
-        上次提交时网络中断，可能已经登记，也可能没有。重新提交用同一操作编号，不会重复登记；作废后原请求即使晚到也不会登记。
-      </span>
+      <span className="block text-[12.5px]">上次提交时网络中断，可能已经登记，也可能没有。重新提交用同一操作编号，不会重复登记；作废后原请求即使晚到也不会登记。</span>
       {confirming && <span className="block text-[12.5px] font-semibold">确认作废：服务器先登记作废，如果这笔其实已经登记，会直接显示原单据，不会作废。</span>}
       {message && <span className="block text-[12.5px] font-semibold text-clay">{message}</span>}
     </Notice>

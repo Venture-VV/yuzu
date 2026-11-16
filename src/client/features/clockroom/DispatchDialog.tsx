@@ -114,33 +114,21 @@ export function DispatchDialog({
   const eligible = board.technicians
     .filter((t) => t.state === 'on' && !t.busy && !t.suspendedAt && shape && !canServe(t, shape, board.techRules.tierByGrade) && tierOk(t))
     .sort((a, b) => a.position! - b.position!);
-  const filtered = (list: BoardTechnician[]) =>
-    list.filter((t) => (gender === 'all' || t.gender === gender) && (listFilter === 'all' || listFilterOf(t) === listFilter));
+  const filtered = (list: BoardTechnician[]) => list.filter((t) => (gender === 'all' || t.gender === gender) && (listFilter === 'all' || listFilterOf(t) === listFilter));
   const rotationList = filtered(eligible);
-  const designatedBase = board.technicians
-    .filter((t) => dispatchable(t) && tierOk(t))
-    .sort((a, b) => Number(a.techNo) - Number(b.techNo) || a.techNo.localeCompare(b.techNo));
+  const designatedBase = board.technicians.filter((t) => dispatchable(t) && tierOk(t)).sort((a, b) => Number(a.techNo) - Number(b.techNo) || a.techNo.localeCompare(b.techNo));
   const designatedList = filtered(designatedBase);
   const firstEligible = eligible[0] ?? null;
   // 切换项目、方式或筛选后，轮钟默认选队列里的第一位；点钟带入了预约的技师就选他（同样在这一次渲染里定，不会盖掉随后点选的技师）
   useResetOnOpen(
     open,
-    () =>
-      setTechnicianId(
-        callType === 'rotation'
-          ? (rotationList[0]?.id ?? null)
-          : prefill?.technicianId && (!prefill.itemId || prefill.itemId === itemId)
-            ? prefill.technicianId
-            : null,
-      ),
+    () => setTechnicianId(callType === 'rotation' ? (rotationList[0]?.id ?? null) : prefill?.technicianId && (!prefill.itemId || prefill.itemId === itemId) ? prefill.technicianId : null),
     [itemId, callType, gender, listFilter, target?.lineId],
   );
   const tech = board.technicians.find((t) => t.id === technicianId) ?? null;
   const skipping = callType === 'rotation' && !!tech && !!firstEligible && tech.id !== firstEligible.id;
   const why = tech && shape ? canServe(tech, shape, board.techRules.tierByGrade) : null;
-  const chosenTier: PriceTier | null = item
-    ? fixedTier ?? (tech ? tierFor(tech, item, tier ?? item.prices[0]!.tier, board.techRules.tierByGrade) : (tier ?? item.prices[0]!.tier))
-    : null;
+  const chosenTier: PriceTier | null = item ? (fixedTier ?? (tech ? tierFor(tech, item, tier ?? item.prices[0]!.tier, board.techRules.tierByGrade) : (tier ?? item.prices[0]!.tier))) : null;
   const unit = item && chosenTier ? tierPrice(item.prices, chosenTier) : null;
   const total = target ? target.amount : unit !== null ? unit * quantity : 0;
   // 这位客人前台已经点了同一个项目、还没派技师：给那一条派，免得重复收费（8.0.8，A01）
@@ -269,7 +257,16 @@ export function DispatchDialog({
       <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
         <div className="space-y-4">
           <Field label="手牌" htmlFor="dispatch-tag" hint={visit ? `${tag!.zone === 'female' ? '女宾' : '男宾'} · ${visit.memberName ?? (visit.guestLabel || '散客')}` : '输入在店客人的手牌号'}>
-            <Input id="dispatch-tag" value={tagText} onChange={(e) => setTagText(e.target.value)} className="num" placeholder="例如 A8062" data-autofocus disabled={!!target} data-testid="dispatch-tag" />
+            <Input
+              id="dispatch-tag"
+              value={tagText}
+              onChange={(e) => setTagText(e.target.value)}
+              className="num"
+              placeholder="例如 A8062"
+              data-autofocus
+              disabled={!!target}
+              data-testid="dispatch-tag"
+            />
           </Field>
           <Field label="钟数">
             <div className="flex items-center gap-2">
@@ -321,7 +318,10 @@ export function DispatchDialog({
                     key={i.id}
                     type="button"
                     onClick={() => setItemId(i.id)}
-                    className={cn('h-9 rounded-full border px-3 text-[13px] font-semibold', itemId === i.id ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-2 hover:border-ink-4')}
+                    className={cn(
+                      'h-9 rounded-full border px-3 text-[13px] font-semibold',
+                      itemId === i.id ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-2 hover:border-ink-4',
+                    )}
                     data-testid={`dispatch-item-${i.name}`}
                   >
                     {i.name}
@@ -332,7 +332,12 @@ export function DispatchDialog({
           </Field>
           {!target && item && !board.techRules.tierByGrade && item.prices.length > 1 && (
             <Field label="价格档">
-              <Segmented ariaLabel="价格档" value={tier ?? item.prices[0]!.tier} onChange={setTier} options={item.prices.map((p) => ({ value: p.tier, label: `${{ standard: '标准', professional: '专业', premium: '优选' }[p.tier]} ¥${p.price / 100}` }))} />
+              <Segmented
+                ariaLabel="价格档"
+                value={tier ?? item.prices[0]!.tier}
+                onChange={setTier}
+                options={item.prices.map((p) => ({ value: p.tier, label: `${{ standard: '标准', professional: '专业', premium: '优选' }[p.tier]} ¥${p.price / 100}` }))}
+              />
             </Field>
           )}
           <Field
@@ -361,7 +366,10 @@ export function DispatchDialog({
                       type="button"
                       onClick={() => setListFilter(f)}
                       aria-pressed={listFilter === f}
-                      className={cn('h-7 rounded-full border px-2.5 text-[12px] font-semibold', listFilter === f ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-3 hover:border-ink-4')}
+                      className={cn(
+                        'h-7 rounded-full border px-2.5 text-[12px] font-semibold',
+                        listFilter === f ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-3 hover:border-ink-4',
+                      )}
                       data-testid={`dispatch-filter-${f}`}
                     >
                       {LIST_FILTER_LABELS[f]} {n}
@@ -374,11 +382,7 @@ export function DispatchDialog({
               <p className="text-[13px] text-ink-3">先选项目</p>
             ) : list.length === 0 ? (
               <p className="rounded-lg border border-dashed border-line-strong px-3 py-4 text-center text-[13px] text-ink-3">
-                {listFilter !== 'all'
-                  ? `没有「${LIST_FILTER_LABELS[listFilter]}」的技师`
-                  : callType === 'rotation'
-                    ? '没有空闲、能做这个项目的在岗技师（可以点钟让客人等钟）'
-                    : '没有上牌的技师'}
+                {listFilter !== 'all' ? `没有「${LIST_FILTER_LABELS[listFilter]}」的技师` : callType === 'rotation' ? '没有空闲、能做这个项目的在岗技师（可以点钟让客人等钟）' : '没有上牌的技师'}
               </p>
             ) : (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" data-testid="dispatch-techs">
@@ -432,7 +436,10 @@ export function ExtendDialog({ session: s, onClose, onDone }: { session: BoardSe
   const catalog = useCatalog();
   const [quantity, setQuantity] = useState(1);
   const op = useFrontdeskOp<true>({ type: 'bill_post', visitId: s.visitId, staffName: me.staff.displayName, pick: doneOnFound });
-  const visit = useQuery({ queryKey: ['frontdesk', 'visit', s.visitId], queryFn: () => api.get<{ lines: { sessionId?: number; unitPrice: number; technician: { id: number } | null; itemId: number | null }[] }>(`/api/frontdesk/visits/${s.visitId}`) });
+  const visit = useQuery({
+    queryKey: ['frontdesk', 'visit', s.visitId],
+    queryFn: () => api.get<{ lines: { sessionId?: number; unitPrice: number; technician: { id: number } | null; itemId: number | null }[] }>(`/api/frontdesk/visits/${s.visitId}`),
+  });
   // 加钟按这张钟单第一条明细的单价（同一项目、同一价格档）
   const unit = visit.data?.lines.find((l) => l.itemId === s.itemId && l.technician?.id === s.technicianId)?.unitPrice ?? null;
   const item = catalog.data?.items.find((i) => i.id === s.itemId);
@@ -557,7 +564,13 @@ export function TransferDialog({ session: s, board, onClose, onDone }: { session
       footer={
         <>
           <span className="mr-auto self-center text-[13px] text-ink-3">
-            {problem ? <span className="text-clay">{problem}</span> : <>金额不变 <Money cents={amount} className="font-bold text-ink" /></>}
+            {problem ? (
+              <span className="text-clay">{problem}</span>
+            ) : (
+              <>
+                金额不变 <Money cents={amount} className="font-bold text-ink" />
+              </>
+            )}
           </span>
           <Button variant="ghost" onClick={onClose} disabled={op.busy}>
             取消
@@ -608,7 +621,10 @@ export function TransferDialog({ session: s, board, onClose, onDone }: { session
                   type="button"
                   disabled={!!(shape && canServe(t, shape, board.techRules.tierByGrade))}
                   onClick={() => setTechnicianId(t.id)}
-                  className={cn('flex flex-col rounded-lg border px-3 py-2 text-left disabled:opacity-50', technicianId === t.id ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-line-strong')}
+                  className={cn(
+                    'flex flex-col rounded-lg border px-3 py-2 text-left disabled:opacity-50',
+                    technicianId === t.id ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-line-strong',
+                  )}
                   data-testid={`transfer-tech-${t.techNo}`}
                 >
                   <span className="flex items-baseline gap-1.5">
@@ -625,7 +641,15 @@ export function TransferDialog({ session: s, board, onClose, onDone }: { session
           )}
         </Field>
         <Field label="转钟原因" htmlFor="transfer-reason" hint="记进钟房日志与作废原因">
-          <Input id="transfer-reason" value={reason} maxLength={100} placeholder="例如：客人要换技师、技师临时有事" onChange={(e) => setReason(e.target.value)} data-autofocus data-testid="transfer-reason" />
+          <Input
+            id="transfer-reason"
+            value={reason}
+            maxLength={100}
+            placeholder="例如：客人要换技师、技师临时有事"
+            onChange={(e) => setReason(e.target.value)}
+            data-autofocus
+            data-testid="transfer-reason"
+          />
         </Field>
         {skipping && (
           <Field label={`改派原因（轮钟应转给 ${firstEligible!.techNo} 号 ${firstEligible!.name}）`} htmlFor="transfer-skip">

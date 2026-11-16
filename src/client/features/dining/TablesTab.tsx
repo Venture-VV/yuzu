@@ -146,23 +146,8 @@ export function TablesTab() {
           }}
         />
       )}
-      {sessionId !== null && (
-        <SessionDialog
-          id={sessionId}
-          board={board.data!}
-          onClose={() => setSessionId(null)}
-          onCheckout={() => setCheckoutFor(sessionId)}
-        />
-      )}
-      {checkoutFor !== null && (
-        <TableCheckoutDialog
-          open
-          sessionId={checkoutFor}
-          choices={choices}
-          onClose={() => setCheckoutFor(null)}
-          onDone={done}
-        />
-      )}
+      {sessionId !== null && <SessionDialog id={sessionId} board={board.data!} onClose={() => setSessionId(null)} onCheckout={() => setCheckoutFor(sessionId)} />}
+      {checkoutFor !== null && <TableCheckoutDialog open sessionId={checkoutFor} choices={choices} onClose={() => setCheckoutFor(null)} onDone={done} />}
       <CheckoutRecordsDialog open={records} onClose={() => setRecords(false)} />
     </div>
   );
@@ -331,13 +316,26 @@ export function MemberField({
       <div>
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="手机号 / 姓名 / 会员号" className="pl-9" aria-label="查找会员" disabled={disabled} data-testid={`${testPrefix}-member-search`} />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="手机号 / 姓名 / 会员号"
+            className="pl-9"
+            aria-label="查找会员"
+            disabled={disabled}
+            data-testid={`${testPrefix}-member-search`}
+          />
         </div>
         {q.trim() && (
           <ul className="mt-1.5 space-y-0.5">
             {members.data?.slice(0, 5).map((m) => (
               <li key={m.id}>
-                <button type="button" onClick={() => onChange(m)} className="flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-left hover:bg-paper-2" data-testid={`${testPrefix}-member-${m.memberNo}`}>
+                <button
+                  type="button"
+                  onClick={() => onChange(m)}
+                  className="flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-left hover:bg-paper-2"
+                  data-testid={`${testPrefix}-member-${m.memberNo}`}
+                >
                   <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{m.name}</span>
                   <span className="num text-[12.5px] text-ink-3">{maskPhone(m.phone)}</span>
                   <span className="num text-[12px] text-ink-4">{m.memberNo}</span>
@@ -484,7 +482,9 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
             明细
           </SectionTitle>
           {active.length === 0 && !showVoided ? (
-            <p className="mt-2 rounded-lg border border-dashed border-line-strong px-3 py-6 text-center text-[13px] text-ink-3">还没有点菜{open && can('dining.order') ? '，点「点单」给这桌点菜' : ''}</p>
+            <p className="mt-2 rounded-lg border border-dashed border-line-strong px-3 py-6 text-center text-[13px] text-ink-3">
+              还没有点菜{open && can('dining.order') ? '，点「点单」给这桌点菜' : ''}
+            </p>
           ) : (
             <ul className="mt-2 divide-y divide-line/70 rounded-lg border border-line" data-testid="table-lines">
               {[...active, ...(showVoided ? voided : [])].map((l) => {
@@ -532,7 +532,9 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
                             size="sm"
                             variant="ghost"
                             icon={<Undo2 className="size-3.5" />}
-                            onClick={() => setVoiding({ lineId: l.id, name: l.name, quantity: l.quantity, amount: l.amount, postedBy: l.postedById, postedAt: l.postedAt, status: l.kitchen?.status ?? null })}
+                            onClick={() =>
+                              setVoiding({ lineId: l.id, name: l.name, quantity: l.quantity, amount: l.amount, postedBy: l.postedById, postedAt: l.postedAt, status: l.kitchen?.status ?? null })
+                            }
                             data-testid={`table-void-${l.id}`}
                           >
                             退菜
@@ -564,7 +566,19 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
 
       {/* 8.0.8（B02）：小额直接退；超过的本人 15 分钟内、经理，或值班经理及以上当场授权 */}
       <DishVoidDialog
-        dish={voiding ? { billLineId: voiding.lineId, name: voiding.name, quantity: voiding.quantity, amount: voiding.amount, postedBy: voiding.postedBy, postedAt: voiding.postedAt, served: voiding.status === 'done' || voiding.status === 'served' } : null}
+        dish={
+          voiding
+            ? {
+                billLineId: voiding.lineId,
+                name: voiding.name,
+                quantity: voiding.quantity,
+                amount: voiding.amount,
+                postedBy: voiding.postedBy,
+                postedAt: voiding.postedAt,
+                served: voiding.status === 'done' || voiding.status === 'served',
+              }
+            : null
+        }
         url={voiding ? `/api/dining/tables/lines/${voiding.lineId}/void` : ''}
         onClose={() => setVoiding(null)}
         onDone={(dish) => {
@@ -716,7 +730,14 @@ function MoveDialog({ detail, free, onClose, onMoved }: { detail: TableSessionDe
             </button>
           ))}
         </div>
-        <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="转台原因（至少 2 个字），例如：客人要靠窗" maxLength={100} aria-label="转台原因" data-testid="table-move-reason" />
+        <Input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="转台原因（至少 2 个字），例如：客人要靠窗"
+          maxLength={100}
+          aria-label="转台原因"
+          data-testid="table-move-reason"
+        />
         {error && <Notice tone="error" title={error} />}
       </div>
     </Dialog>

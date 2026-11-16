@@ -11,7 +11,20 @@ export const ADMIN_SECTIONS = {
   home: {
     path: '/admin',
     label: '后台首页',
-    perms: ['settings.manage', 'catalog.manage', 'staff.manage', 'audit.read', 'wallet.opening', 'frontdesk.tags', 'technician.manage', 'coupon.manage', 'device.manage', 'member.rules', 'benefit.publish', 'emenu.manage'],
+    perms: [
+      'settings.manage',
+      'catalog.manage',
+      'staff.manage',
+      'audit.read',
+      'wallet.opening',
+      'frontdesk.tags',
+      'technician.manage',
+      'coupon.manage',
+      'device.manage',
+      'member.rules',
+      'benefit.publish',
+      'emenu.manage',
+    ],
   },
   // 数据看板（原门店主导航的「看板」，店主 2026-11-10 整合到后台）：各页签照旧按权限显示——今日、经营总览、会员总览、会员体系、技师业绩、客房、营销成本
   dashboard: {
@@ -91,9 +104,7 @@ export const ADMIN_STANDALONE_SECTIONS: readonly AdminSection[] = ['dashboard', 
 /** 跟着 ERP 模块开关走的分区：模块关着时只有能改模块开关的人还看得到（页面上提示去开启） */
 export const ADMIN_SECTION_MODULES: Partial<Record<AdminSection, ErpModuleKey>> = { canteen: 'canteen', patrol: 'patrol' };
 /** 能进后台的权限（有其一即可）：后台首页的权限，加上不进首页也看得到的那几个分区的权限 */
-export const ADMIN_ENTRY_PERMISSIONS: readonly Permission[] = [
-  ...new Set<Permission>([...ADMIN_SECTIONS.home.perms, ...ADMIN_STANDALONE_SECTIONS.flatMap((k) => ADMIN_SECTIONS[k].perms)]),
-];
+export const ADMIN_ENTRY_PERMISSIONS: readonly Permission[] = [...new Set<Permission>([...ADMIN_SECTIONS.home.perms, ...ADMIN_STANDALONE_SECTIONS.flatMap((k) => ADMIN_SECTIONS[k].perms)])];
 
 export const RULE_GROUPS = {
   store: '门店与营业',

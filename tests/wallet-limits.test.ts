@@ -43,8 +43,7 @@ const grantOf = async (cookie: string, scope: { kind: Kind; memberId: number; am
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return r.body.grantId as string;
 };
-const grantRow = async (id: string) =>
-  (await ctx.sql<{ usedAt: string | null; usedRef: string | null }[]>`SELECT used_at, used_ref FROM auth_grants WHERE id = ${id}`)[0]!;
+const grantRow = async (id: string) => (await ctx.sql<{ usedAt: string | null; usedRef: string | null }[]>`SELECT used_at, used_ref FROM auth_grants WHERE id = ${id}`)[0]!;
 
 describe('单笔上限默认 50 万元', () => {
   it('新库默认值：充值、消费上限都是 50 万；撤销时限 48 小时（2026-10-29 签认）、全天营业', async () => {
@@ -180,9 +179,7 @@ describe('超过上限的当场授权', () => {
   it('并发：同一个授权同时用于两笔（不同编号），只有一笔入账', async () => {
     const m = await createMember(ctx, '并发授权会员', '19900005005');
     const grantId = await grantOf(ctx.clerk, { kind: 'recharge', memberId: m.id, amount: 55 * WAN });
-    const results = await Promise.all(
-      [0, 1].map(() => api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 55 * WAN, 0, { overLimitGrantId: grantId }))),
-    );
+    const results = await Promise.all([0, 1].map(() => api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 55 * WAN, 0, { overLimitGrantId: grantId }))));
     expect(results.map((r) => r.status).sort()).toEqual([200, 422]);
     expect(results.find((r) => r.status === 422)!.body.error.code).toBe('GRANT_USED');
     expect(await balanceOf(ctx, m.id)).toEqual({ principal: 55 * WAN, bonus: 0 });

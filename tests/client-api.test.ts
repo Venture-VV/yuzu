@@ -8,8 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 type ApiModule = typeof import('../src/client/lib/api');
 let mod: ApiModule;
 
-const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
+const json = (status: number, body: unknown, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 const PING = { ok: true, version: '8.1.3', commit: '', instance: 'test', client: null, time: new Date().toISOString() };
 
 /** 服务器：/api/ping 照常回（连得上），其余按给的顺序回；calls 记下除 ping 以外的请求 */

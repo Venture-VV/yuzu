@@ -191,7 +191,8 @@ function OpenShift({ shift }: { shift: ShiftRecord }) {
         {crossDrawer > 0 && (
           <Notice tone="warning" className="mt-3" title={`应有现金是负数：本班退给客人的现金比收进的多 ¥${(crossDrawer / 100).toFixed(2)}`}>
             <span data-testid="shift-cross-drawer">
-              多出的这部分不是从你的钱箱出的（例如从收银员的钱箱或保险柜拿的）。实点按你钱箱里实际的现金填，没有钱箱填 0；交班表会记成长款，与出钱那个钱箱的短款相抵（同一钱箱合并核对）。请在交班备注里写明这笔现金是从哪里拿的。以后反结账时在「从哪个钱箱退现金」里选实际出钱的钱箱，退款就记到那个班次，不会再出现负数。
+              多出的这部分不是从你的钱箱出的（例如从收银员的钱箱或保险柜拿的）。实点按你钱箱里实际的现金填，没有钱箱填
+              0；交班表会记成长款，与出钱那个钱箱的短款相抵（同一钱箱合并核对）。请在交班备注里写明这笔现金是从哪里拿的。以后反结账时在「从哪个钱箱退现金」里选实际出钱的钱箱，退款就记到那个班次，不会再出现负数。
             </span>
           </Notice>
         )}
@@ -258,7 +259,11 @@ function RefundSlipsView({ slips }: { slips: NonNullable<ShiftSummary['refundSli
           <li key={r.refundNo}>
             {r.refundNo}（原单 {r.checkoutNo}，¥{(r.amount / 100).toFixed(2)}，{r.reason}
             {r.operatorName ? `，${r.operatorName}从本班钱箱退` : ''}
-            {r.refs.filter((x) => x.method !== 'cash').map((x) => `；${PAYMENT_METHOD_LABELS[x.method]}${x.method === 'other' ? '：' : '退款单号 '}${x.ref}`).join('')}）
+            {r.refs
+              .filter((x) => x.method !== 'cash')
+              .map((x) => `；${PAYMENT_METHOD_LABELS[x.method]}${x.method === 'other' ? '：' : '退款单号 '}${x.ref}`)
+              .join('')}
+            ）
           </li>
         ))}
       </ul>
@@ -286,11 +291,7 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
             </li>
           ))}
         </ul>
-        {summary.coupons.length > 0 && (
-          <p className="mt-2 text-[12px] text-ink-3">
-            团购：{summary.coupons.map((c) => `${COUPON_PLATFORM_LABELS[c.platform]} ${c.count} 张`).join('、')}
-          </p>
-        )}
+        {summary.coupons.length > 0 && <p className="mt-2 text-[12px] text-ink-3">团购：{summary.coupons.map((c) => `${COUPON_PLATFORM_LABELS[c.platform]} ${c.count} 张`).join('、')}</p>}
       </div>
       <div className="rounded-lg border border-line p-4">
         <p className="text-[13px] font-bold text-ink-2">
@@ -308,7 +309,8 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
           ))}
         </ul>
         <p className="mt-2 text-[12px] text-ink-3">
-          赠金 <Money cents={summary.recharges.bonus} /> · 会员工作台储值消费 {summary.walletConsumes.count} 笔 <Money cents={summary.walletConsumes.total} />（不是现金）
+          赠金 <Money cents={summary.recharges.bonus} /> · 会员工作台储值消费 {summary.walletConsumes.count} 笔 <Money cents={summary.walletConsumes.total} />
+          （不是现金）
         </p>
       </div>
       {summary.byOperator && summary.byOperator.length > 0 && <OperatorsView operators={summary.byOperator} />}
@@ -326,7 +328,8 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
           </Notice>
         ) : (
           <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`本班次反结账 ${summary.voids.length} 张`} className="md:col-span-2">
-            {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}${v.voidedByName ? `，${v.voidedByName}反结账、从本班钱箱退` : ''}）`).join('；')}。原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。
+            {summary.voids.map((v) => `${v.checkoutNo}（¥${(v.amount / 100).toFixed(2)}，${v.reason}${v.voidedByName ? `，${v.voidedByName}反结账、从本班钱箱退` : ''}）`).join('；')}
+            。原单收过的现金不计入应有现金，请核对是否已退还或已重新收取。
           </Notice>
         ))}
     </div>
@@ -358,8 +361,7 @@ function OperatorsView({ operators }: { operators: NonNullable<ShiftSummary['byO
 
 /** 次卡（v0.7.28）：本班次卖的卡、退的卡，按方式；售卡是预收、不是营业额，现金计入应有现金 */
 function CountCardsView({ cards }: { cards: NonNullable<ShiftSummary['countCards']> }) {
-  const line = (list: typeof cards.sales.byMethod) =>
-    list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 张 ¥${(m.amount / 100).toFixed(2)}`).join('、') : '无';
+  const line = (list: typeof cards.sales.byMethod) => (list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 张 ¥${(m.amount / 100).toFixed(2)}`).join('、') : '无');
   return (
     <div className="rounded-lg border border-line p-4 md:col-span-2" data-testid="shift-count-cards">
       <p className="text-[13px] font-bold text-ink-2">次卡（售卡是预收，不算营业额）</p>
@@ -372,8 +374,7 @@ function CountCardsView({ cards }: { cards: NonNullable<ShiftSummary['countCards
 
 /** 客房押金（S7）：本班次收、退的押金，按收款方式；押金是负债、不算营业额，现金押金计入应有现金 */
 function DepositsView({ deposits }: { deposits: NonNullable<ShiftSummary['deposits']> }) {
-  const line = (list: typeof deposits.received) =>
-    list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 笔 ¥${(m.amount / 100).toFixed(2)}`).join('、') : '无';
+  const line = (list: typeof deposits.received) => (list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 笔 ¥${(m.amount / 100).toFixed(2)}`).join('、') : '无');
   return (
     <div className="rounded-lg border border-line p-4 md:col-span-2" data-testid="shift-deposits">
       <p className="text-[13px] font-bold text-ink-2">客房押金（不算营业额）</p>
@@ -391,9 +392,7 @@ function ShiftRow({ s }: { s: ShiftRecord }) {
     <li>
       <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/60">
         <span className="num font-bold">{s.shiftNo}</span>
-        <span className="text-[13px] font-semibold text-ink-2">
-          {s.drawerName ? `${s.drawerName}（${[...new Set(s.members.map((m) => m.staffName))].join('、')}）` : s.staffName}
-        </span>
+        <span className="text-[13px] font-semibold text-ink-2">{s.drawerName ? `${s.drawerName}（${[...new Set(s.members.map((m) => m.staffName))].join('、')}）` : s.staffName}</span>
         <span className="text-[12.5px] text-ink-3">
           {formatTime(s.startedAt)} – {s.endedAt ? formatTime(s.endedAt) : '当班中'}
         </span>

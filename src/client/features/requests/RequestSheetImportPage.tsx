@@ -149,8 +149,8 @@ export function RequestSheetImportPage() {
                 </Button>
               </a>
               <span className="text-[12.5px] text-ink-3">
-                模板里有填写说明和下拉（部门、物品、用途、优先级）；{DEPT_SHEET_REQUIRED.join('、')}必填。只收物料档案里已有的物品——新产品要带参考链接和图片，请在「提需求」页面上填。
-                一份最多 {DEPT_SHEET_MAX_ROWS} 行，按部门 + 优先级 + 期望到货日期合成需求单，一张最多 {DEPT_SHEET_LINES_PER_REQUEST} 行。
+                模板里有填写说明和下拉（部门、物品、用途、优先级）；{DEPT_SHEET_REQUIRED.join('、')}必填。只收物料档案里已有的物品——新产品要带参考链接和图片，请在「提需求」页面上填。 一份最多{' '}
+                {DEPT_SHEET_MAX_ROWS} 行，按部门 + 优先级 + 期望到货日期合成需求单，一张最多 {DEPT_SHEET_LINES_PER_REQUEST} 行。
               </span>
             </div>
             <label className="flex cursor-pointer flex-wrap items-center gap-3 rounded-md border border-dashed border-line-strong px-4 py-3 text-[13px] hover:border-ink-3">
@@ -167,10 +167,24 @@ export function RequestSheetImportPage() {
               />
             </label>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="secondary" icon={<FileSearch className="size-4" />} disabled={!file || busy !== null} loading={busy === 'preview'} onClick={() => void runPreview()} data-testid="request-sheet-preview">
+              <Button
+                variant="secondary"
+                icon={<FileSearch className="size-4" />}
+                disabled={!file || busy !== null}
+                loading={busy === 'preview'}
+                onClick={() => void runPreview()}
+                data-testid="request-sheet-preview"
+              >
                 预览
               </Button>
-              <Button variant="primary" icon={<CircleCheck className="size-4" />} disabled={blocked || busy !== null} loading={busy === 'apply'} onClick={() => void apply()} data-testid="request-sheet-apply">
+              <Button
+                variant="primary"
+                icon={<CircleCheck className="size-4" />}
+                disabled={blocked || busy !== null}
+                loading={busy === 'apply'}
+                onClick={() => void apply()}
+                data-testid="request-sheet-apply"
+              >
                 {preview && preview.issueCount === 0 ? `导入（合成 ${preview.groups.length} 张需求单）` : '导入'}
               </Button>
             </div>
@@ -259,7 +273,10 @@ export function RequestSheetImportPage() {
               <ul className="flex flex-wrap gap-2">
                 {result.requests.map((r) => (
                   <li key={r.id}>
-                    <Link to={`/erp/requests?request=${r.id}`} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-card px-2.5 py-1 text-[13px] font-semibold hover:border-line-strong">
+                    <Link
+                      to={`/erp/requests?request=${r.id}`}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-line bg-card px-2.5 py-1 text-[13px] font-semibold hover:border-line-strong"
+                    >
                       <PriorityDot priority={r.priority} />
                       <span className="num">{r.docNo}</span> · {r.department} · {r.lineCount} 行
                     </Link>

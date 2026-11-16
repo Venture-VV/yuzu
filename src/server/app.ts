@@ -212,13 +212,14 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
       // 等锁或执行超时、死锁、串行化冲突（8.1.3）：事务已回滚，操作没有生效；页面带原操作编号自动重发
       req.log.warn({ err: error }, e.code === '40P01' ? '死锁，事务已回滚' : e.code === '40001' ? '串行化冲突，事务已回滚' : '记账等待超时');
       const path = routePath(req);
-      const what = path.startsWith('/api/inventory') || path.startsWith('/api/purchase') || path.startsWith('/api/payables')
-        ? '相关物料或单据'
-        : path.startsWith('/api/frontdesk') || path.startsWith('/api/emenu')
-          ? '这张手牌或账单'
-          : path.startsWith('/api/admin/spaces')
-            ? '空间台账'
-            : '该会员';
+      const what =
+        path.startsWith('/api/inventory') || path.startsWith('/api/purchase') || path.startsWith('/api/payables')
+          ? '相关物料或单据'
+          : path.startsWith('/api/frontdesk') || path.startsWith('/api/emenu')
+            ? '这张手牌或账单'
+            : path.startsWith('/api/admin/spaces')
+              ? '空间台账'
+              : '该会员';
       reply.status(409).send({ error: { code: 'BUSY', message: `${what}正在被其他终端操作，本次未生效，请稍后重试` } });
       return;
     }

@@ -52,7 +52,23 @@ describe('线范围检查 · 每个文件归哪一类', () => {
   });
 
   it('登记处：允许改，列出来复核；但不能删', () => {
-    for (const p of ['src/server/app.ts', 'src/shared/permissions.ts', 'src/client/App.tsx', 'src/server/lib/audit.ts', 'src/shared/admin.ts', 'src/server/config.ts', 'src/shared/types.ts', 'tests/helpers.ts', '.env.example', 'docs/ROADMAP.md', 'docs/PENDING_DECISIONS.md', 'docs/DEPLOY_MAC_MINI.md', 'docs/DEPLOY_TEST_SERVER.md', 'GEMINI.md', '.gemini/settings.json'])
+    for (const p of [
+      'src/server/app.ts',
+      'src/shared/permissions.ts',
+      'src/client/App.tsx',
+      'src/server/lib/audit.ts',
+      'src/shared/admin.ts',
+      'src/server/config.ts',
+      'src/shared/types.ts',
+      'tests/helpers.ts',
+      '.env.example',
+      'docs/ROADMAP.md',
+      'docs/PENDING_DECISIONS.md',
+      'docs/DEPLOY_MAC_MINI.md',
+      'docs/DEPLOY_TEST_SERVER.md',
+      'GEMINI.md',
+      '.gemini/settings.json',
+    ])
       expect(kindOf('M', p), p).toBe('registry');
     expect(kindOf('D', 'src/server/app.ts')).toBe('blocked');
     expect(kindOf('R', 'src/server/app2.ts', 'src/server/app.ts')).toBe('blocked');
@@ -67,7 +83,19 @@ describe('线范围检查 · 每个文件归哪一类', () => {
   });
 
   it('核心与其余文件：不许改；改名进出小程序线目录也不行', () => {
-    for (const p of ['src/server/modules/wallet.ts', 'src/server/modules/frontdesk/checkout.ts', 'src/server/modules/coupons.ts', 'package.json', 'package-lock.json', 'AGENTS.md', '.github/workflows/ci.yml', '.github/workflows/line-scope.yml', 'scripts/check-line-scope.mjs', 'tests/wallet-limits.test.ts', 'e2e/frontdesk.spec.ts'])
+    for (const p of [
+      'src/server/modules/wallet.ts',
+      'src/server/modules/frontdesk/checkout.ts',
+      'src/server/modules/coupons.ts',
+      'package.json',
+      'package-lock.json',
+      'AGENTS.md',
+      '.github/workflows/ci.yml',
+      '.github/workflows/line-scope.yml',
+      'scripts/check-line-scope.mjs',
+      'tests/wallet-limits.test.ts',
+      'e2e/frontdesk.spec.ts',
+    ])
       expect(kindOf('M', p), p).toBe('blocked');
     expect(kindOf('R', 'miniprogram/src/wallet.ts', 'src/server/modules/wallet.ts')).toBe('blocked');
     expect(kindOf('R', 'src/server/modules/wallet2.ts', 'miniprogram/src/wallet.ts')).toBe('blocked');
@@ -75,7 +103,13 @@ describe('线范围检查 · 每个文件归哪一类', () => {
 });
 
 describe('线范围检查 · 汇总与结果', () => {
-  const diff = ['M\tminiprogram/src/app.ts', 'A\tsrc/server/migrations/170_mp_feedback.sql', 'M\tsrc/server/app.ts', 'R100\tsrc/gateway/a.ts\tsrc/gateway/b.ts', 'C80\tsrc/gateway/b.ts\tsrc/gateway/c.ts'].join('\n');
+  const diff = [
+    'M\tminiprogram/src/app.ts',
+    'A\tsrc/server/migrations/170_mp_feedback.sql',
+    'M\tsrc/server/app.ts',
+    'R100\tsrc/gateway/a.ts\tsrc/gateway/b.ts',
+    'C80\tsrc/gateway/b.ts\tsrc/gateway/c.ts',
+  ].join('\n');
 
   it('解析 git diff --name-status：改名、复制两头都认出来', () => {
     expect(parseNameStatus(`${diff}\n`)).toEqual([
@@ -127,7 +161,11 @@ describe('线范围检查 · 命令行（在临时 git 仓库里走一遍）', (
     writeFileSync(join(repo, path), text);
   };
   const run = (head: string, env: Record<string, string>) => {
-    const r = spawnSync('node', [script, '--base', 'main', '--head', head], { cwd: repo, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '', PR_BRANCH: '', PR_TITLE: '', PR_LABELS: '', ...env } });
+    const r = spawnSync('node', [script, '--base', 'main', '--head', head], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, GITHUB_STEP_SUMMARY: '', PR_BRANCH: '', PR_TITLE: '', PR_LABELS: '', ...env },
+    });
     return { code: r.status, out: `${r.stdout}${r.stderr}` };
   };
 

@@ -61,15 +61,10 @@ export interface LineTechnician {
   callType: CallType;
 }
 
-export const technicianText = (t: { techNo: string; name: string; callType?: CallType }) =>
-  `${t.techNo} 号 ${t.name}${t.callType ? ` · ${CALL_TYPE_LABELS[t.callType]}` : ''}`;
+export const technicianText = (t: { techNo: string; name: string; callType?: CallType }) => `${t.techNo} 号 ${t.name}${t.callType ? ` · ${CALL_TYPE_LABELS[t.callType]}` : ''}`;
 
 /** 这位技师能不能做这个项目：可做分类为空表示全部；价格跟等级时，多档项目要有他这一档的价格 */
-export function canServe(
-  t: Pick<Technician, 'skills' | 'grade' | 'active'>,
-  item: { category: string; prices: { tier: PriceTier }[] },
-  tierByGrade: boolean,
-): string | null {
+export function canServe(t: Pick<Technician, 'skills' | 'grade' | 'active'>, item: { category: string; prices: { tier: PriceTier }[] }, tierByGrade: boolean): string | null {
   if (!t.active) return '已停用';
   const category = item.category || '其他';
   if (t.skills.length > 0 && !t.skills.includes(category)) return `不做「${category}」`;

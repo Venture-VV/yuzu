@@ -44,20 +44,13 @@ export function InventoryPage() {
   if (!tabs.some((t) => t.key === tab)) return <Navigate to={tabs[0]!.key === 'stock' ? '/inventory' : `/inventory/${tabs[0]!.key}`} replace />;
   return (
     <>
-      <PageHeader
-        dateMode="calendar"
-        title="库存"
-        subtitle={`${settings.data?.scopeName ?? '后勤总库'} · 数量按各自库存单位记录，每一笔变化都可追溯`}
-      />
+      <PageHeader dateMode="calendar" title="库存" subtitle={`${settings.data?.scopeName ?? '后勤总库'} · 数量按各自库存单位记录，每一笔变化都可追溯`} />
       <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-5 md:px-7">
         {tabs.map(({ key, label, icon: Icon }) => (
           <NavLink
             key={key}
             to={key === 'stock' ? '/inventory' : `/inventory/${key}`}
-            className={cn(
-              'relative flex h-11 items-center gap-2 px-3.5 text-[14px] font-semibold whitespace-nowrap transition-colors',
-              tab === key ? 'text-ink' : 'text-ink-3 hover:text-ink',
-            )}
+            className={cn('relative flex h-11 items-center gap-2 px-3.5 text-[14px] font-semibold whitespace-nowrap transition-colors', tab === key ? 'text-ink' : 'text-ink-3 hover:text-ink')}
           >
             <Icon className="size-4" />
             {label}

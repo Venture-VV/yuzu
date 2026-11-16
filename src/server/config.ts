@@ -117,7 +117,10 @@ export function loadCanteenConfig(env: NodeJS.ProcessEnv, mainPort: number, mpPo
   const host = env.CANTEEN_HOST?.trim() || env.HOST || '0.0.0.0';
   const codeSecret = env.CANTEEN_CODE_SECRET?.trim() || null;
   const cookieSecure = env.CANTEEN_COOKIE_SECURE === 'true';
-  const trustProxy = (env.CANTEEN_TRUST_PROXY ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const trustProxy = (env.CANTEEN_TRUST_PROXY ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   const contact = env.CANTEEN_PUSH_CONTACT?.trim() ?? '';
   const pushContact = /^(mailto:[^\s@]+@[^\s@]+|https:\/\/[^\s]+)$/.test(contact) ? contact : null;
   const appEnv = env.APP_ENV ?? 'development';
@@ -198,16 +201,16 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     timezone: process.env.APP_TIMEZONE ?? 'Asia/Shanghai',
     sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? 12),
     cookieSecure: process.env.COOKIE_SECURE === 'true',
-    trustProxy: (process.env.TRUST_PROXY ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+    trustProxy: (process.env.TRUST_PROXY ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
     logLevel: process.env.LOG_LEVEL ?? (env === 'test' ? 'silent' : 'info'),
     // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉
     version: (process.env.APP_VERSION || '8.1.3').replace(/^v/, ''),
     commit: /^[0-9a-f]{7,40}$/.test(process.env.APP_COMMIT ?? '') ? process.env.APP_COMMIT! : '',
     instance,
-    initOwner:
-      ownerUser && ownerPass
-        ? { username: ownerUser, password: ownerPass, displayName: process.env.INIT_OWNER_NAME?.trim() || '店主' }
-        : null,
+    initOwner: ownerUser && ownerPass ? { username: ownerUser, password: ownerPass, displayName: process.env.INIT_OWNER_NAME?.trim() || '店主' } : null,
     mp,
     canteen: overrides.canteen ?? loadCanteenConfig(process.env, mainPort, mp.port),
     sms: overrides.sms ?? loadSmsConfig(process.env, env),

@@ -27,11 +27,7 @@ const MY_ROW = (db: Db) => db`
 const SubmitInput = z.object({
   clientKey: z.uuid('操作编号不正确'),
   kind: z.enum(FEEDBACK_KINDS, '选一下：想要柚子做的，还是碎碎念'),
-  content: z
-    .string('写点什么吧')
-    .trim()
-    .min(1, '写点什么吧')
-    .max(FEEDBACK_LIMITS.content, `最多 ${FEEDBACK_LIMITS.content} 个字`),
+  content: z.string('写点什么吧').trim().min(1, '写点什么吧').max(FEEDBACK_LIMITS.content, `最多 ${FEEDBACK_LIMITS.content} 个字`),
 });
 
 /** 员工发一条：每人每天（门店时间）最多 20 条；同一个操作编号重发返回原来那条 */
@@ -134,11 +130,7 @@ export async function markFeedbackRead(sql: Sql, id: number, ctx: OpContext): Pr
 
 const ReplyInput = z.object({
   clientKey: z.uuid('操作编号不正确'),
-  reply: z
-    .string('写一句回信')
-    .trim()
-    .min(1, '写一句回信')
-    .max(FEEDBACK_LIMITS.reply, `回信最多 ${FEEDBACK_LIMITS.reply} 个字`),
+  reply: z.string('写一句回信').trim().min(1, '写一句回信').max(FEEDBACK_LIMITS.reply, `回信最多 ${FEEDBACK_LIMITS.reply} 个字`),
 });
 
 /**
@@ -254,6 +246,16 @@ export function feedbackCsvRows(rows: CanteenFeedbackRow[], timeZone: string): s
   const text = (v: string) => (/^-/.test(v) ? `'${v}` : v);
   return [
     ['时间', '工号', '名字', '种类', '内容', '看过', '回信', '回信时间', '回信人'],
-    ...rows.map((r) => [at(r.createdAt), r.empNo, text(r.name), FEEDBACK_KIND_LABELS[r.kind], text(r.content), r.readAt ? '看过' : '没看', text(r.reply ?? ''), at(r.repliedAt), r.repliedByName ?? '']),
+    ...rows.map((r) => [
+      at(r.createdAt),
+      r.empNo,
+      text(r.name),
+      FEEDBACK_KIND_LABELS[r.kind],
+      text(r.content),
+      r.readAt ? '看过' : '没看',
+      text(r.reply ?? ''),
+      at(r.repliedAt),
+      r.repliedByName ?? '',
+    ]),
   ];
 }

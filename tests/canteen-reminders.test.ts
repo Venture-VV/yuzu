@@ -49,7 +49,13 @@ type Person = Awaited<ReturnType<typeof hire>>;
 async function subscribe(who: Person, label: string, platform: 'ios' | 'android' | 'other' = 'ios') {
   const phone = fakePhone();
   const endpoint = `${push.base}/push/${label}`;
-  const r = await c(who.cookie, 'PUT', '/api/canteen/push/subscription', { endpoint, keys: { p256dh: phone.p256dh, auth: phone.auth }, platform }, { origin: 'https://staff.example.com', host: 'staff.example.com' });
+  const r = await c(
+    who.cookie,
+    'PUT',
+    '/api/canteen/push/subscription',
+    { endpoint, keys: { p256dh: phone.p256dh, auth: phone.auth }, platform },
+    { origin: 'https://staff.example.com', host: 'staff.example.com' },
+  );
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return { ...phone, endpoint, path: `/push/${label}` };
 }

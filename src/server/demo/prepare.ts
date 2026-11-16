@@ -39,7 +39,6 @@ import {
 } from './membership-demo';
 import { seedShowcaseDemo, SHOWCASE_DAILY_FIELDS, SHOWCASE_KEY, showcaseState, type ShowcaseState } from './showcase';
 
-
 export interface BlockResult {
   block: string;
   written: boolean;
@@ -75,11 +74,7 @@ export function refuseLiveDemo(config: Pick<AppConfig, 'env'>, what = '写入演
 
 const count = async (q: Promise<{ n: number }[]>) => Number((await q)[0]?.n ?? 0);
 
-export async function demoPrepare(
-  sql: Sql,
-  config: AppConfig,
-  opts: { previousDay?: boolean; now?: Date; log?: (line: string) => void } = {},
-): Promise<PrepareResult> {
+export async function demoPrepare(sql: Sql, config: AppConfig, opts: { previousDay?: boolean; now?: Date; log?: (line: string) => void } = {}): Promise<PrepareResult> {
   refuseLiveDemo(config);
   const log = opts.log ?? (() => {});
   const previousDay = !!opts.previousDay;
@@ -180,13 +175,21 @@ const MEMBERSHIP_P3_BLOCK = '会员折扣与邀请体验（发布包房折扣 QY
 /** 对象按键排序后再比（数据库读出来的顺序不固定） */
 function canon(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(canon);
-  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon((v as Record<string, unknown>)[k])]));
+  if (v && typeof v === 'object')
+    return Object.fromEntries(
+      Object.keys(v)
+        .sort()
+        .map((k) => [k, canon((v as Record<string, unknown>)[k])]),
+    );
   return v;
 }
 
 function fmt(v: unknown): string {
   if (Array.isArray(v)) return v.length ? v.map((x) => (x && typeof x === 'object' ? Object.values(x).map(String).join(' ') : String(x))).join('、') : '（无）';
-  if (v && typeof v === 'object') return Object.entries(v).map(([k, x]) => `${k} ${x && typeof x === 'object' ? JSON.stringify(x) : String(x)}`).join('、');
+  if (v && typeof v === 'object')
+    return Object.entries(v)
+      .map(([k, x]) => `${k} ${x && typeof x === 'object' ? JSON.stringify(x) : String(x)}`)
+      .join('、');
   return String(v);
 }
 

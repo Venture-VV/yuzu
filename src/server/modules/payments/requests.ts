@@ -13,16 +13,7 @@
 import { z } from 'zod';
 import { PAYMENT_STAGES, PAYMENT_STAGE_LABELS, type ContractCategory, type PaymentStage } from '@shared/contracts';
 import { formatAmount } from '@shared/money';
-import type {
-  PaymentRequestDetail,
-  PaymentRequestMeta,
-  PaymentRequestStatus,
-  PaymentRequestSummary,
-  PaymentRequestTarget,
-  PayMode,
-  RequestPaymentView,
-  StagePlan,
-} from '@shared/payments';
+import type { PaymentRequestDetail, PaymentRequestMeta, PaymentRequestStatus, PaymentRequestSummary, PaymentRequestTarget, PayMode, RequestPaymentView, StagePlan } from '@shared/payments';
 import { can } from '@shared/permissions';
 import { PAYMENT_METHODS, type PayMethod } from '@shared/purchasing';
 import { isUniqueViolation, type Db, type Tx } from '../../db';
@@ -152,11 +143,7 @@ function toSummary(r: RequestRow): PaymentRequestSummary {
 export type RequestListFilter = 'all' | 'reviewing' | 'returned' | 'approved' | 'done' | 'mine';
 
 /** 付款申请列表（最近的在前，最多 300 张） */
-export async function listPaymentRequests(
-  db: Db,
-  actor: Actor,
-  f: { filter?: RequestListFilter; supplierId?: number; contractId?: number; q?: string } = {},
-): Promise<PaymentRequestSummary[]> {
+export async function listPaymentRequests(db: Db, actor: Actor, f: { filter?: RequestListFilter; supplierId?: number; contractId?: number; q?: string } = {}): Promise<PaymentRequestSummary[]> {
   const filter = f.filter ?? 'all';
   const q = f.q ? `%${f.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
   const rows = await db<RequestRow[]>`
@@ -211,7 +198,21 @@ async function targetsOf(db: Db, r: Pick<RequestRow, 'id' | 'supplierId'>): Prom
 }
 
 async function paymentsOf(db: Db, requestId: number): Promise<RequestPaymentView[]> {
-  const pays = await db<{ id: number; docNo: string; payDate: string; amountCents: number; method: PayMethod; evidence: string; note: string; status: string; createdByName: string; createdAt: string; voidReason: string | null }[]>`
+  const pays = await db<
+    {
+      id: number;
+      docNo: string;
+      payDate: string;
+      amountCents: number;
+      method: PayMethod;
+      evidence: string;
+      note: string;
+      status: string;
+      createdByName: string;
+      createdAt: string;
+      voidReason: string | null;
+    }[]
+  >`
     SELECT p.id, p.doc_no, p.pay_date, p.amount_cents, p.method, p.evidence, p.note, p.status, cb.display_name AS created_by_name, p.created_at, p.void_reason
     FROM payments p JOIN staff cb ON cb.id = p.created_by WHERE p.payment_request_id = ${requestId} AND p.status IN ('confirmed', 'voided') ORDER BY p.id`;
   const allocs = pays.length
@@ -220,7 +221,21 @@ async function paymentsOf(db: Db, requestId: number): Promise<RequestPaymentView
         FROM payment_allocations pa LEFT JOIN inv_docs d ON d.id = pa.receipt_doc_id LEFT JOIN opening_payables o ON o.id = pa.opening_payable_id
         WHERE pa.payment_id IN ${db(pays.map((p) => Number(p.id)))} ORDER BY pa.id`
     : [];
-  const payouts = await db<{ id: number; docNo: string; payDate: string; amountCents: number; method: PayMethod; evidence: string; note: string; status: string; createdByName: string; createdAt: string; voidReason: string | null }[]>`
+  const payouts = await db<
+    {
+      id: number;
+      docNo: string;
+      payDate: string;
+      amountCents: number;
+      method: PayMethod;
+      evidence: string;
+      note: string;
+      status: string;
+      createdByName: string;
+      createdAt: string;
+      voidReason: string | null;
+    }[]
+  >`
     SELECT o.id, o.doc_no, o.pay_date, o.amount_cents, o.method, o.evidence, o.note, o.status, cb.display_name AS created_by_name, o.created_at, o.void_reason
     FROM contract_payouts o JOIN staff cb ON cb.id = o.created_by WHERE o.payment_request_id = ${requestId} ORDER BY o.id`;
   const out: RequestPaymentView[] = [];
@@ -290,7 +305,10 @@ export async function getPaymentRequest(db: Db, requestId: number, today: string
   const r = await loadRow(db, requestId);
   const targets = await targetsOf(db, r);
   const threeWay = await poThreeWay(db, await requestPoIds(db, r));
-  const required = threeWayRequired(r, targets.some((t) => t.kind === 'receipt'));
+  const required = threeWayRequired(
+    r,
+    targets.some((t) => t.kind === 'receipt'),
+  );
   const noPoReceipts = targets.filter((t) => t.kind === 'receipt' && t.purchaseOrderNo === null).length;
   let stagePlan: StagePlan | null = null;
   if (r.contractId !== null) stagePlan = (await contractPlan(db, r.contractId, today)).stages.find((s) => s.stage === r.stage) ?? null;
@@ -376,18 +394,12 @@ async function checkContractRequest(
   if (st.plannedCents === 0) throw unprocessable('STAGE_NOT_APPLICABLE', `合同 ${plan.contractNo} 的${label}段比例为 0，不用付`);
   const room = stageRoom(st, exclude);
   if (input.amountCents > room.remaining) {
-    throw unprocessable(
-      'REQUEST_OVER_PLAN',
-      `${label}段计划 ${yuan(st.plannedCents)}，已申请 ${yuan(room.requested)}、已付 ${yuan(st.paidCents)}，最多还能申请 ${yuan(room.remaining)}`,
-      { remainingCents: room.remaining },
-    );
+    throw unprocessable('REQUEST_OVER_PLAN', `${label}段计划 ${yuan(st.plannedCents)}，已申请 ${yuan(room.requested)}、已付 ${yuan(st.paidCents)}，最多还能申请 ${yuan(room.remaining)}`, {
+      remainingCents: room.remaining,
+    });
   }
   if (input.amountCents > room.available && !input.early) {
-    throw unprocessable(
-      'EARLY_REQUIRED',
-      `${label}段现在可付 ${yuan(room.available)}（${st.reason}），超出的部分要勾「提前付款」并写原因，多审一级`,
-      { availableCents: room.available },
-    );
+    throw unprocessable('EARLY_REQUIRED', `${label}段现在可付 ${yuan(room.available)}（${st.reason}），超出的部分要勾「提前付款」并写原因，多审一级`, { availableCents: room.available });
   }
   if (input.early && input.earlyReason.trim().length < 2) throw badRequest('提前付款请写明原因（至少 2 个字）');
   if (plan.category === 'purchase' && input.stage !== 'prepay') {
@@ -434,9 +446,7 @@ async function checkPayablesRequest(tx: Tx, supplierId: number, targets: TargetI
   for (const t of targets) {
     const item = items.find((i) => i.kind === t.kind && i.id === t.targetId);
     if (!item) throw unprocessable('ALLOCATION_TARGET_INVALID', '选的货款不属于这家供应商，或还没生效 / 已冲销 / 是现付的');
-    const held = Number(
-      reserved.find((x) => (t.kind === 'receipt' ? Number(x.receiptDocId) === t.targetId : Number(x.openingPayableId) === t.targetId))?.cents ?? 0,
-    );
+    const held = Number(reserved.find((x) => (t.kind === 'receipt' ? Number(x.receiptDocId) === t.targetId : Number(x.openingPayableId) === t.targetId))?.cents ?? 0);
     const room = item.openCents - held;
     if (t.amountCents > room) {
       throw conflict(
@@ -452,7 +462,15 @@ async function checkPayablesRequest(tx: Tx, supplierId: number, targets: TargetI
     const docs = await tx<{ id: number; docNo: string; poId: number | null }[]>`
       SELECT id, doc_no, purchase_order_id AS po_id FROM inv_docs WHERE id IN ${tx(receiptIds)} ORDER BY id`;
     const noPo = docs.filter((d) => d.poId === null).map((d) => `${d.docNo}：急采还没补采购单`);
-    const problems = [...noPo, ...threeWayProblems(await poThreeWay(tx, docs.filter((d) => d.poId !== null).map((d) => Number(d.poId))))];
+    const problems = [
+      ...noPo,
+      ...threeWayProblems(
+        await poThreeWay(
+          tx,
+          docs.filter((d) => d.poId !== null).map((d) => Number(d.poId)),
+        ),
+      ),
+    ];
     if (problems.length) throw unprocessable('THREE_WAY_NOT_MATCHED', `三单还没对上，先登记发票或请财务放行：${problems.join('；')}`, { problems });
   }
 }
@@ -490,7 +508,16 @@ export async function createPaymentRequest(deps: Deps, raw: unknown, actor: Acto
         const src = input.source;
         const sup = await lockSupplier(tx, src.supplierId);
         await checkPayablesRequest(tx, src.supplierId, src.targets, null);
-        head = { supplierId: src.supplierId, payee: sup.name, payMode: 'ap', departmentId: null, contractId: null, stage: null, amountCents: src.targets.reduce((s, t) => s + t.amountCents, 0), label: sup.name };
+        head = {
+          supplierId: src.supplierId,
+          payee: sup.name,
+          payMode: 'ap',
+          departmentId: null,
+          contractId: null,
+          stage: null,
+          amountCents: src.targets.reduce((s, t) => s + t.amountCents, 0),
+          label: sup.name,
+        };
       }
       const requestNo = await nextDocNo(tx, 'payment_request', 'FS', today);
       const [row] = await tx<{ id: number }[]>`
@@ -506,7 +533,14 @@ export async function createPaymentRequest(deps: Deps, raw: unknown, actor: Acto
       if (input.source.kind === 'payables') await insertTargets(tx, requestId, input.source.targets);
       const r = await submitForApproval(tx, 'payment_request', requestId, { actor, timeZone: deps.config.timezone }, { fallback: true });
       if (r.outcome === 'effective') await tx`UPDATE payment_requests SET status = 'approved', approved_at = now() WHERE id = ${requestId}`;
-      await writeAudit(tx, { staffId: actor.id, action: 'payment_doc', targetType: 'payment_request', targetId: requestId, detail: { op: 'create', requestNo, for: head.label, amountCents: head.amountCents, early: input.early }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'payment_doc',
+        targetType: 'payment_request',
+        targetId: requestId,
+        detail: { op: 'create', requestNo, for: head.label, amountCents: head.amountCents, early: input.early },
+        ip,
+      });
       return { id: requestId, replayed: false };
     });
   } catch (error) {
@@ -595,7 +629,12 @@ export async function resubmitPaymentRequest(deps: Deps, requestId: number, raw:
     if (r.contractId !== null) {
       if (input.targets) throw badRequest('合同的付款申请不选收货单');
       amount = input.amountCents ?? r.amountCents;
-      await checkContractRequest(tx, today, { contractId: r.contractId, stage: r.stage!, amountCents: amount, early: input.early, earlyReason: input.earlyReason }, { amountCents: r.amountCents, paidCents: r.paidCents });
+      await checkContractRequest(
+        tx,
+        today,
+        { contractId: r.contractId, stage: r.stage!, amountCents: amount, early: input.early, earlyReason: input.earlyReason },
+        { amountCents: r.amountCents, paidCents: r.paidCents },
+      );
     } else {
       if (input.early) throw badRequest('没挂合同的应付不用按提前付款申请');
       if (input.targets) {
@@ -607,7 +646,12 @@ export async function resubmitPaymentRequest(deps: Deps, requestId: number, raw:
         const current = await tx<TargetIn[]>`
           SELECT CASE WHEN receipt_doc_id IS NOT NULL THEN 'receipt' ELSE 'opening' END AS kind, coalesce(receipt_doc_id, opening_payable_id) AS target_id, amount_cents
           FROM payment_request_targets WHERE request_id = ${r.id}`;
-        await checkPayablesRequest(tx, r.supplierId!, current.map((t) => ({ ...t, targetId: Number(t.targetId), amountCents: Number(t.amountCents) })), r.id);
+        await checkPayablesRequest(
+          tx,
+          r.supplierId!,
+          current.map((t) => ({ ...t, targetId: Number(t.targetId), amountCents: Number(t.amountCents) })),
+          r.id,
+        );
       }
     }
     await tx`
@@ -674,7 +718,14 @@ export async function endPaymentRequest(deps: Deps, requestId: number, raw: unkn
     if (r.paidCents <= 0) throw conflict('REQUEST_NOT_PAID', '这张申请还没付过钱，不用的话请作废');
     await assertNotInBatch(tx, r.id, null);
     await tx`UPDATE payment_requests SET status = 'ended', closed_reason = ${input.reason}, closed_by = ${actor.id}, closed_at = now(), version = version + 1, updated_at = now() WHERE id = ${r.id}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'payment_doc', targetType: 'payment_request', targetId: r.id, detail: { op: 'end', requestNo: r.requestNo, paidCents: r.paidCents, reason: input.reason }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'payment_doc',
+      targetType: 'payment_request',
+      targetId: r.id,
+      detail: { op: 'end', requestNo: r.requestNo, paidCents: r.paidCents, reason: input.reason },
+      ip,
+    });
   });
 }
 
@@ -786,7 +837,8 @@ export async function payFromRequest(deps: Deps, requestId: number, raw: unknown
         for (const a of input.allocations) {
           const t = targets.find((x) => x.kind === a.kind && x.targetId === a.targetId);
           if (!t) throw unprocessable('ALLOCATION_NOT_REQUESTED', '只能核销到申请里选的货款上');
-          if (a.amountCents > t.amountCents - t.paidCents) throw conflict('OVER_REQUEST', `${t.docNo} 申请了 ${yuan(t.amountCents)}，已付 ${yuan(t.paidCents)}，这次最多 ${yuan(t.amountCents - t.paidCents)}`);
+          if (a.amountCents > t.amountCents - t.paidCents)
+            throw conflict('OVER_REQUEST', `${t.docNo} 申请了 ${yuan(t.amountCents)}，已付 ${yuan(t.paidCents)}，这次最多 ${yuan(t.amountCents - t.paidCents)}`);
         }
       }
       await checkAllocations(tx, supplierId, input.allocations, null);
@@ -808,7 +860,14 @@ export async function payFromRequest(deps: Deps, requestId: number, raw: unknown
       await confirmPayment(tx, { id: paymentId, supplierId, amountCents: input.amountCents, payDate: input.payDate }, actor, `按付款申请 ${r.requestNo}（已审批）`);
       if (r.paidCents + input.amountCents === r.amountCents) await tx`UPDATE payment_requests SET status = 'paid', version = version + 1, updated_at = now() WHERE id = ${r.id}`;
       else await tx`UPDATE payment_requests SET version = version + 1, updated_at = now() WHERE id = ${r.id}`;
-      await writeAudit(tx, { staffId: actor.id, action: 'payable_doc', targetType: 'payment', targetId: paymentId, detail: { docNo, amountCents: input.amountCents, paymentRequest: r.requestNo }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'payable_doc',
+        targetType: 'payment',
+        targetId: paymentId,
+        detail: { docNo, amountCents: input.amountCents, paymentRequest: r.requestNo },
+        ip,
+      });
       return { paymentId, replayed: false };
     });
   } catch (error) {
@@ -855,7 +914,14 @@ export async function payoutFromRequest(deps: Deps, requestId: number, raw: unkn
       const payoutId = Number(row!.id);
       if (r.paidCents + input.amountCents === r.amountCents) await tx`UPDATE payment_requests SET status = 'paid', version = version + 1, updated_at = now() WHERE id = ${r.id}`;
       else await tx`UPDATE payment_requests SET version = version + 1, updated_at = now() WHERE id = ${r.id}`;
-      await writeAudit(tx, { staffId: actor.id, action: 'payment_doc', targetType: 'contract_payout', targetId: payoutId, detail: { op: 'create', docNo, amountCents: input.amountCents, paymentRequest: r.requestNo }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'payment_doc',
+        targetType: 'contract_payout',
+        targetId: payoutId,
+        detail: { op: 'create', docNo, amountCents: input.amountCents, paymentRequest: r.requestNo },
+        ip,
+      });
       return { payoutId, replayed: false };
     });
   } catch (error) {
@@ -890,4 +956,3 @@ export async function payoutRequestId(db: Db, payoutId: number): Promise<number 
   const [r] = await db<{ requestId: number }[]>`SELECT payment_request_id AS request_id FROM contract_payouts WHERE id = ${payoutId}`;
   return r ? Number(r.requestId) : null;
 }
-

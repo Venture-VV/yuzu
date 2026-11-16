@@ -133,14 +133,14 @@ export function OrderTab() {
     : !target.open
       ? '这桌已经结账或撤台，不能再点单'
       : cart.length === 0
-      ? '点了菜才能下单'
-      : lines.some((l) => !l.dish)
-        ? '有菜刚下架了，请从已点的菜里删掉'
-        : short
-          ? short.remaining === 0
-            ? `「${short.name}」今天已估清，请删掉或换一道`
-            : `「${short.name}」今天只剩 ${short.remaining} 份`
-          : null;
+        ? '点了菜才能下单'
+        : lines.some((l) => !l.dish)
+          ? '有菜刚下架了，请从已点的菜里删掉'
+          : short
+            ? short.remaining === 0
+              ? `「${short.name}」今天已估清，请删掉或换一道`
+              : `「${short.name}」今天只剩 ${short.remaining} 份`
+            : null;
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['dining'] });
@@ -390,10 +390,7 @@ export function OrderTab() {
                     key={c}
                     type="button"
                     onClick={() => setCategory(c)}
-                    className={cn(
-                      'h-8 shrink-0 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap',
-                      category === c ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink',
-                    )}
+                    className={cn('h-8 shrink-0 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap', category === c ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
                   >
                     {c === 'all' ? '全部' : c}
                   </button>
@@ -421,11 +418,7 @@ export function OrderTab() {
                         <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink-4">{d.stationName}</span>
                         {out ? <Badge tone="clay">已估清</Badge> : d.remaining !== null && <Badge tone="yuzu">剩 {d.remaining}</Badge>}
                       </span>
-                      {n > 0 && (
-                        <span className="num absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-pine px-1.5 text-[12.5px] font-bold text-paper">
-                          {n}
-                        </span>
-                      )}
+                      {n > 0 && <span className="num absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-pine px-1.5 text-[12.5px] font-bold text-paper">{n}</span>}
                     </button>
                   );
                 })}
@@ -504,7 +497,15 @@ export function OrderTab() {
                       >
                         {l.quantity === 1 ? <Trash2 className="size-3.5" /> : <Minus className="size-3.5" />}
                       </button>
-                      <QtyInput value={l.quantity} onChange={(n) => update(l.key, { quantity: n })} onHint={setQtyHint} label={`${l.dish?.name ?? '已下架的菜'} 的份数`} disabled={op.locked} className="h-8 w-9 text-[15px]" testId={`dining-qty-${i}`} />
+                      <QtyInput
+                        value={l.quantity}
+                        onChange={(n) => update(l.key, { quantity: n })}
+                        onHint={setQtyHint}
+                        label={`${l.dish?.name ?? '已下架的菜'} 的份数`}
+                        disabled={op.locked}
+                        className="h-8 w-9 text-[15px]"
+                        testId={`dining-qty-${i}`}
+                      />
                       <button
                         type="button"
                         className="flex size-8 items-center justify-center rounded-full bg-paper-2 hover:bg-paper-3"
@@ -682,7 +683,19 @@ export function OrderTab() {
         })()}
 
       <DishVoidDialog
-        dish={voiding ? { billLineId: voiding.dish.billLineId, name: voiding.dish.name, quantity: voiding.dish.quantity, amount: voiding.dish.amount, postedBy: voiding.dish.postedBy, postedAt: voiding.dish.postedAt, served: voiding.dish.status === 'done' } : null}
+        dish={
+          voiding
+            ? {
+                billLineId: voiding.dish.billLineId,
+                name: voiding.dish.name,
+                quantity: voiding.dish.quantity,
+                amount: voiding.dish.amount,
+                postedBy: voiding.dish.postedBy,
+                postedAt: voiding.dish.postedAt,
+                served: voiding.dish.status === 'done',
+              }
+            : null
+        }
         mode={voiding?.mode ?? 'void'}
         // 桌台的明细在桌台账单上，退菜走桌台的接口；手牌客人的照旧走前台作废
         url={voiding ? (t ? `/api/dining/tables/lines/${voiding.dish.billLineId}/void` : `/api/frontdesk/lines/${voiding.dish.billLineId}/void`) : ''}
@@ -768,7 +781,9 @@ function TablePicker({
             <span>
               {detail.guests} 人 · {detail.member?.name ?? (detail.guestLabel || '散客')}
             </span>
-            <span className="text-ink-3">已点 <Money cents={detail.amount} className="font-bold" /></span>
+            <span className="text-ink-3">
+              已点 <Money cents={detail.amount} className="font-bold" />
+            </span>
             {detail.status !== 'open' && <Badge tone="clay">{detail.status === 'settled' ? '已结账' : '已撤台'}</Badge>}
           </p>
         ) : (

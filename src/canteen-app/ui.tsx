@@ -36,10 +36,7 @@ export function Button({ tone = 'wood', big, className, children, ...rest }: But
 /** 卡片：sketch 时多一圈手抖的描边（像用笔描过），用在想让人注意的那几张上 */
 export function Card({ className, children, sketch, ...rest }: { className?: string; children: ReactNode; sketch?: boolean } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      className={cn('rounded-[var(--radius-card)] bg-card p-4', sketch ? 'sketch shadow-[var(--shadow-sticker)]' : 'shadow-[var(--shadow-soft)] ring-1 ring-line/80', className)}
-      {...rest}
-    >
+    <div className={cn('rounded-[var(--radius-card)] bg-card p-4', sketch ? 'sketch shadow-[var(--shadow-sticker)]' : 'shadow-[var(--shadow-soft)] ring-1 ring-line/80', className)} {...rest}>
       {children}
     </div>
   );

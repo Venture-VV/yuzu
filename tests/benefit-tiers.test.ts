@@ -24,8 +24,7 @@ const draftCoupon = (id: number, templateId: number | null): Benefit =>
     parkingHoursByTier: [],
   }) as unknown as Benefit;
 
-const templateRanks = (tiers: BenefitTiers, templateId: number) =>
-  tiers.grades.flatMap((g) => g.stages.filter((s) => s.coupons.some((e) => e.templateId === templateId)).map((s) => s.label));
+const templateRanks = (tiers: BenefitTiers, templateId: number) => tiers.grades.flatMap((g) => g.stages.filter((s) => s.coupons.some((e) => e.templateId === templateId)).map((s) => s.label));
 
 describe('按档阶排：每张券模板都在某一阶', () => {
   it('还没设起点的草稿权益挂着的券模板，照样按限定的档级单放', () => {

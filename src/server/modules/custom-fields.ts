@@ -49,8 +49,7 @@ const WRITE_PERMS: Record<CustomFieldEntity, Permission> = {
   contract: 'contract.manage',
 };
 
-const canRead = (req: FastifyRequest, entity: CustomFieldEntity) =>
-  can(req.actor, 'settings.manage') || READ_PERMS[entity].some((p) => can(req.actor, p));
+const canRead = (req: FastifyRequest, entity: CustomFieldEntity) => can(req.actor, 'settings.manage') || READ_PERMS[entity].some((p) => can(req.actor, p));
 
 function assertRead(req: FastifyRequest, entity: CustomFieldEntity) {
   if (req.actor.mustChangePassword) throw forbidden('首次登录请先修改密码');
@@ -95,11 +94,7 @@ async function getDef(db: Db, id: number): Promise<CustomFieldDef> {
   return toDef(r);
 }
 
-const LabelField = z
-  .string('请填写字段名称')
-  .trim()
-  .min(1, '请填写字段名称')
-  .max(MAX_CUSTOM_FIELD_LABEL, `字段名称最多 ${MAX_CUSTOM_FIELD_LABEL} 个字`);
+const LabelField = z.string('请填写字段名称').trim().min(1, '请填写字段名称').max(MAX_CUSTOM_FIELD_LABEL, `字段名称最多 ${MAX_CUSTOM_FIELD_LABEL} 个字`);
 const OptionsField = z
   .array(z.string().trim().min(1, '选项不能为空').max(MAX_CUSTOM_FIELD_OPTION_LENGTH, `每个选项最多 ${MAX_CUSTOM_FIELD_OPTION_LENGTH} 个字`))
   .max(MAX_CUSTOM_FIELD_OPTIONS, `选项最多 ${MAX_CUSTOM_FIELD_OPTIONS} 个`)
@@ -189,12 +184,7 @@ export async function updateDef(deps: Deps, id: number, raw: unknown, ctx: OpCon
       };
       if (d.type === 'select' && next.options.length === 0) throw badRequest('选项类的字段至少要有一个选项');
       if (input.options && d.type !== 'select') throw badRequest('只有选项类的字段有选项');
-      const same =
-        next.label === d.label &&
-        JSON.stringify(next.options) === JSON.stringify(d.options) &&
-        next.inList === d.inList &&
-        next.active === d.active &&
-        next.sort === d.sort;
+      const same = next.label === d.label && JSON.stringify(next.options) === JSON.stringify(d.options) && next.inList === d.inList && next.active === d.active && next.sort === d.sort;
       if (same) return;
       if (next.active && !d.active) await assertActiveRoom(tx, d.entity);
       await tx`
@@ -339,8 +329,7 @@ export async function searchByField(db: Db, entity: CustomFieldEntity, raw: unkn
   const def = await getDef(db, q.fieldId);
   if (def.entity !== entity) throw badRequest('这个字段不是这一类的');
   const pattern = def.type === 'text' ? `%${q.q.replace(/[\\%_]/g, (c) => '\\' + c)}%` : q.q;
-  const match =
-    q.q === '' ? db`TRUE` : def.type === 'text' ? db`v.value ILIKE ${pattern}` : db`v.value = ${pattern}`;
+  const match = q.q === '' ? db`TRUE` : def.type === 'text' ? db`v.value ILIKE ${pattern}` : db`v.value = ${pattern}`;
   const source =
     entity === 'member'
       ? db`SELECT id, member_no AS code, name, status <> 'active' AS inactive FROM members`
@@ -379,9 +368,7 @@ export function registerCustomFieldRoutes(app: FastifyInstance, deps: Deps) {
     reply.code(201);
     return def;
   });
-  app.put('/api/custom-fields/defs/:id', { preHandler: guard('settings.manage') }, async (req) =>
-    updateDef(deps, parse(idParam, req.params).id, req.body, ctxOf(req)),
-  );
+  app.put('/api/custom-fields/defs/:id', { preHandler: guard('settings.manage') }, async (req) => updateDef(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
 
   // 按字段查、导出（后台「数据字典与字段」）
   app.get('/api/custom-fields/:entity/search', { preHandler: guard('settings.manage') }, async (req) => {
@@ -403,10 +390,7 @@ export function registerCustomFieldRoutes(app: FastifyInstance, deps: Deps) {
     });
     const codeTitle = { member: '会员号', supplier: '供应商编码', material: '物料编码', contract: '合同号' }[entity];
     const nameTitle = { member: '姓名', supplier: '供应商', material: '物料', contract: '合同标题' }[entity];
-    const csv = toCsv([
-      [codeTitle, nameTitle, result.def.label, '状态'],
-      ...result.rows.map((r) => [r.code, r.name, r.value, r.inactive ? '已停用' : '在用']),
-    ]);
+    const csv = toCsv([[codeTitle, nameTitle, result.def.label, '状态'], ...result.rows.map((r) => [r.code, r.name, r.value, r.inactive ? '已停用' : '在用'])]);
     return csvReply(reply, `${CUSTOM_FIELD_ENTITY_LABELS[entity]}-${result.def.label}.csv`, csv);
   });
 
@@ -440,4 +424,3 @@ export function registerCustomFieldRoutes(app: FastifyInstance, deps: Deps) {
     return saveSheet(deps, entity, id, req.body, ctxOf(req));
   });
 }
-

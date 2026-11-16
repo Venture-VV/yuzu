@@ -50,8 +50,14 @@ async function expectTable(page: Page, r: Report) {
   expect(categories).toEqual(r.departments.map((d) => d.category));
   for (const d of r.departments) {
     const rows = r.items.filter((i) => i.category === d.category);
-    expect(rows.reduce((s, i) => s + i.amount, 0), d.category).toBe(d.amount);
-    expect(rows.reduce((s, i) => s + i.quantity, 0), d.category).toBe(d.quantity);
+    expect(
+      rows.reduce((s, i) => s + i.amount, 0),
+      d.category,
+    ).toBe(d.amount);
+    expect(
+      rows.reduce((s, i) => s + i.quantity, 0),
+      d.category,
+    ).toBe(d.quantity);
   }
   expect(r.items.reduce((s, i) => s + i.amount, 0)).toBe(r.kpis.receivable);
   expect(r.items.reduce((s, i) => s + i.amount - i.discount - i.refund, 0)).toBe(r.kpis.net);
@@ -128,7 +134,10 @@ test.describe('8.0.15 经营总览 · 部门项目明细', () => {
     expect(download.url()).toContain(`/api/reports/executive/items.csv?from=${day.from}&to=${day.to}`);
     const text = await readFile((await download.path())!, 'utf8');
     expect(text.charCodeAt(0)).toBe(0xfeff);
-    const lines = text.replace(/^\uFEFF/, '').trimEnd().split('\r\n');
+    const lines = text
+      .replace(/^\uFEFF/, '')
+      .trimEnd()
+      .split('\r\n');
     expect(lines[0]).toBe('部门,项目,销售数量,销售金额（应收，元）,占该部门金额比,优惠（元）,退款（元）,净额（元）');
     // 表头 + 每个项目一行 + 每个部门一行小计 + 合计 + 两行对照
     expect(lines).toHaveLength(1 + day.items.length + day.departments.length + 3);

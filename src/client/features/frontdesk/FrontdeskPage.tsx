@@ -164,11 +164,7 @@ function FrontdeskBoard() {
 
   /** 状态板上的分区：男宾、女宾；库里还有旧儿童区手牌时另列 */
   const zonesInPool = TAG_ZONES.filter((z) => z !== 'child' || tags.some((t) => t.zone === 'child'));
-  const visible = tags.filter(
-    (t) =>
-      (zone === 'all' || t.zone === zone) &&
-      (status === 'all' || (status === 'in' ? !!t.visit : status === 'free' ? !t.visit && !t.locked : t.locked)),
-  );
+  const visible = tags.filter((t) => (zone === 'all' || t.zone === zone) && (status === 'all' || (status === 'in' ? !!t.visit : status === 'free' ? !t.visit && !t.locked : t.locked)));
 
   const afterCheckin = (r: CheckinResult) => {
     setDialog(null);
@@ -196,7 +192,10 @@ function FrontdeskBoard() {
       rules={board.data?.rules}
       onAction={(a) => {
         if (a === 'companion' && visit.data) {
-          setDialog({ kind: 'checkin', prefill: { zone: visit.data.zone === 'child' ? undefined : visit.data.zone, join: { visitId: visit.data.id, tagCode: visit.data.tag.code, groupNo: visit.data.group?.groupNo ?? null } } });
+          setDialog({
+            kind: 'checkin',
+            prefill: { zone: visit.data.zone === 'child' ? undefined : visit.data.zone, join: { visitId: visit.data.id, tagCode: visit.data.tag.code, groupNo: visit.data.group?.groupNo ?? null } },
+          });
         } else setDialog({ kind: a });
       }}
       onSelectVisit={select}
@@ -321,7 +320,15 @@ function FrontdeskBoard() {
                 )}
               </div>
               {can('frontdesk.operate') && (
-                <Button variant="primary" size="lg" className="h-[52px] rounded-[14px] px-6" icon={<UserPlus className="size-5" />} kbd="F2" onClick={() => setDialog({ kind: 'checkin', prefill: {} })} data-testid="open-checkin">
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="h-[52px] rounded-[14px] px-6"
+                  icon={<UserPlus className="size-5" />}
+                  kbd="F2"
+                  onClick={() => setDialog({ kind: 'checkin', prefill: {} })}
+                  data-testid="open-checkin"
+                >
                   接待发牌
                 </Button>
               )}
@@ -364,10 +371,7 @@ function FrontdeskBoard() {
                   value={zone}
                   onChange={setZone}
                   ariaLabel="分区"
-                  options={[
-                    { value: 'all', label: '全部分区' },
-                    ...zonesInPool.map((z) => ({ value: z, label: `${ZONE_LABELS[z].title} ${stats ? stats.inStoreByZone[z] : ''}` })),
-                  ]}
+                  options={[{ value: 'all', label: '全部分区' }, ...zonesInPool.map((z) => ({ value: z, label: `${ZONE_LABELS[z].title} ${stats ? stats.inStoreByZone[z] : ''}` }))]}
                 />
                 <Segmented
                   size="sm"
@@ -399,11 +403,7 @@ function FrontdeskBoard() {
             ) : board.error ? (
               <Notice tone="error" title={board.error.message} />
             ) : tags.length === 0 ? (
-              <EmptyState
-                art="pool"
-                title="手牌池还是空的"
-                description={can('frontdesk.tags') ? '先在「管理 → 手牌」导入柜号清单，或按号段建牌。' : '请店主先在「管理 → 手牌」导入柜号清单。'}
-              />
+              <EmptyState art="pool" title="手牌池还是空的" description={can('frontdesk.tags') ? '先在「管理 → 手牌」导入柜号清单，或按号段建牌。' : '请店主先在「管理 → 手牌」导入柜号清单。'} />
             ) : (
               zonesInPool
                 .filter((z) => zone === 'all' || z === zone)
@@ -488,12 +488,8 @@ function FrontdeskBoard() {
         )}
       </div>
 
-      {dialog?.kind === 'checkin' && (
-        <CheckinDialog open tags={tags} rules={board.data?.rules} prefill={dialog.prefill} onClose={() => setDialog(null)} onDone={afterCheckin} />
-      )}
-      {visit.data && dialog?.kind === 'add' && (
-        <AddItemsDialog open visit={visit.data} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `已挂到 ${v.tag.code}`)} />
-      )}
+      {dialog?.kind === 'checkin' && <CheckinDialog open tags={tags} rules={board.data?.rules} prefill={dialog.prefill} onClose={() => setDialog(null)} onDone={afterCheckin} />}
+      {visit.data && dialog?.kind === 'add' && <AddItemsDialog open visit={visit.data} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `已挂到 ${v.tag.code}`)} />}
       {visit.data && dialog?.kind === 'swap' && (
         <SwapDialog open visit={visit.data} tags={tags} rules={board.data?.rules} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `已换牌，现为 ${v.tag.code}`)} />
       )}
@@ -514,13 +510,7 @@ function FrontdeskBoard() {
         <JoinGroupDialog open visit={visit.data} tags={tags} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `${v.tag.code} 已加入同行组 ${v.group?.groupNo ?? ''}`)} />
       )}
       {visit.data && dialog?.kind === 'preview' && (
-        <PreviewDialog
-          open
-          visit={visit.data}
-          tags={tags}
-          onClose={() => setDialog(null)}
-          onCheckout={can('frontdesk.checkout') ? (ids) => setDialog({ kind: 'checkout', ids }) : undefined}
-        />
+        <PreviewDialog open visit={visit.data} tags={tags} onClose={() => setDialog(null)} onCheckout={can('frontdesk.checkout') ? (ids) => setDialog({ kind: 'checkout', ids }) : undefined} />
       )}
       {visit.data && dialog?.kind === 'checkout' && (
         <CheckoutDialog

@@ -24,8 +24,7 @@ const staff = async (username: string, displayName: string, role: 'clerk' | 'dut
 };
 const board = async (cookie: string) => (await api(ctx.app, cookie, 'GET', '/api/shifts/drawers')).body as DrawerBoard;
 const current = async (cookie: string) => (await api(ctx.app, cookie, 'GET', '/api/shifts/current')).body.shift as ShiftRecord | null;
-const cash = (cookie: string, amount: number) =>
-  api(ctx.app, cookie, 'POST', '/api/recharges', { ...rechargeBody(memberId, amount, 0, { paymentMethod: 'cash' }), idempotencyKey: randomUUID() });
+const cash = (cookie: string, amount: number) => api(ctx.app, cookie, 'POST', '/api/recharges', { ...rechargeBody(memberId, amount, 0, { paymentMethod: 'cash' }), idempotencyKey: randomUUID() });
 const shiftOfRecharge = async (id: number) => (await ctx.sql<{ shiftId: number | null }[]>`SELECT shift_id FROM recharges WHERE id = ${id}`)[0]!.shiftId;
 const settings = (body: Record<string, unknown>) => api(ctx.app, ctx.owner, 'PUT', '/api/settings', body);
 
@@ -57,7 +56,13 @@ describe('按钱箱交班', () => {
     expect((await settings({ cashDrawers: [] })).status).toBe(400);
     expect((await settings({ cashDrawers: [{ key: 'k1', label: '1 号钱箱' }, { label: '1 号钱箱' }] })).status).toBe(400);
     expect((await settings({ shiftMode: 'drawer', cashDrawers: [{ key: 'k1', label: '1 号钱箱', active: false }] })).status).toBe(400);
-    const saved = await settings({ shiftMode: 'drawer', cashDrawers: [{ key: 'k1', label: '1 号钱箱', active: true }, { label: '2 号钱箱', active: true }] });
+    const saved = await settings({
+      shiftMode: 'drawer',
+      cashDrawers: [
+        { key: 'k1', label: '1 号钱箱', active: true },
+        { label: '2 号钱箱', active: true },
+      ],
+    });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
     expect(saved.body).toMatchObject({ shiftMode: 'drawer', cashDrawers: [{ key: 'k1' }, { key: 'k2', label: '2 号钱箱' }] });
     expect((await board(amy.cookie)).drawers.map((d) => [d.key, d.shift])).toEqual([
@@ -170,7 +175,17 @@ describe('按钱箱交班', () => {
     expect(mine.status, JSON.stringify(mine.body)).toBe(200);
     expect(mine.body.drawerName).toBeNull();
     // 还开着班的 1 号钱箱也能停用（开着的班照旧到交班为止）；看板只列启用的与还开着班的钱箱
-    expect((await settings({ shiftMode: 'drawer', cashDrawers: [{ key: 'k1', label: '1 号钱箱', active: false }, { key: 'k2', label: '2 号钱箱', active: true }] })).status).toBe(200);
+    expect(
+      (
+        await settings({
+          shiftMode: 'drawer',
+          cashDrawers: [
+            { key: 'k1', label: '1 号钱箱', active: false },
+            { key: 'k2', label: '2 号钱箱', active: true },
+          ],
+        })
+      ).status,
+    ).toBe(200);
     expect((await board(duty.cookie)).drawers.map((d) => [d.key, d.active, d.shift?.id ?? null])).toEqual([
       ['k1', false, k1.body.id],
       ['k2', true, null],

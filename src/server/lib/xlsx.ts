@@ -292,8 +292,7 @@ export function buildXlsx(sheet: XlsxSheet): Buffer {
       {
         name: 'xl/drawings/_rels/drawing1.xml.rels',
         data: Buffer.from(
-          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
-            `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${drawingRels.join('')}</Relationships>`,
+          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${drawingRels.join('')}</Relationships>`,
         ),
       },
       ...media,
@@ -463,7 +462,10 @@ export function buildWorkbook(sheets: WbSheet[], names: WbName[] = []): Buffer {
       data: Buffer.from(
         `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
           `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
-          `<bookViews><workbookView activeTab="${Math.max(0, sheets.findIndex((s) => s.active))}"/></bookViews>` +
+          `<bookViews><workbookView activeTab="${Math.max(
+            0,
+            sheets.findIndex((s) => s.active),
+          )}"/></bookViews>` +
           `<sheets>${sheets.map((s, i) => `<sheet name="${esc(sheetNameOf(s.name))}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets>` +
           (names.length ? `<definedNames>${names.map((d) => `<definedName name="${esc(d.name)}">${esc(`${quoteSheet(d.sheet)}!${d.range}`)}</definedName>`).join('')}</definedNames>` : '') +
           `</workbook>`,
@@ -489,7 +491,9 @@ export function buildWorkbook(sheets: WbSheet[], names: WbName[] = []): Buffer {
         data: Buffer.from(
           `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
             `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-            b.links.map((t, j) => `<Relationship Id="rId${j + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${esc(t)}" TargetMode="External"/>`).join('') +
+            b.links
+              .map((t, j) => `<Relationship Id="rId${j + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${esc(t)}" TargetMode="External"/>`)
+              .join('') +
             `</Relationships>`,
         ),
       });

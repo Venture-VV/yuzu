@@ -42,7 +42,10 @@ function decode(bytes: Uint8Array): string {
 }
 
 export function isDxf(bytes: Uint8Array): boolean {
-  const head = new TextDecoder('latin1').decode(bytes.subarray(0, 4096)).replace(/^﻿/, '').replace(/^\xEF\xBB\xBF/, '');
+  const head = new TextDecoder('latin1')
+    .decode(bytes.subarray(0, 4096))
+    .replace(/^﻿/, '')
+    .replace(/^\xEF\xBB\xBF/, '');
   // 开头可能有 999 注释
   return /^\s*(999\s*\r?\n[^\n]*\r?\n\s*)*0\s*\r?\n\s*SECTION\b/.test(head);
 }

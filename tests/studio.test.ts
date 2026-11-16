@@ -96,7 +96,23 @@ describe('草稿、发布、回滚', () => {
 
     const doc = clone((await state()).draft.doc);
     doc.screens.start!.nodes = doc.screens.start!.nodes.filter((n) => n.id !== 'start-footer');
-    doc.screens.start!.nodes.push({ type: 'image', id: 'poster', name: '海报', x: 100, y: 100, w: 200, h: 100, rotate: 0, opacity: 1, hidden: false, locked: false, asset: 'f'.repeat(64), fit: 'cover', radius: 0, fill: null });
+    doc.screens.start!.nodes.push({
+      type: 'image',
+      id: 'poster',
+      name: '海报',
+      x: 100,
+      y: 100,
+      w: 200,
+      h: 100,
+      rotate: 0,
+      opacity: 1,
+      hidden: false,
+      locked: false,
+      asset: 'f'.repeat(64),
+      fit: 'cover',
+      radius: 0,
+      fill: null,
+    });
     expect((await save(1, doc)).body.rev).toBe(2);
     const r = await api(ctx.app, designer, 'POST', '/api/studio/emenu/publish', { clientKey: randomUUID(), rev: 2, note: '加海报' });
     expect(r.status).toBe(422);
@@ -110,7 +126,31 @@ describe('草稿、发布、回滚', () => {
     // 先把草稿改好发第 2 版（起始页加一行字）
     const doc = clone(defaultStudioDoc('emenu'));
     doc.theme.colors.tan = '#8a6d3b';
-    doc.screens.start!.nodes.push({ type: 'text', id: 'hello', name: '欢迎', x: 300, y: 200, w: 424, h: 40, rotate: 0, opacity: 1, hidden: false, locked: false, text: { zh: '欢迎光临', en: 'Welcome' }, font: 'zh', size: 28, weight: 400, color: '$ink', align: 'center', valign: 'top', lineHeight: 1.4, letterSpacing: 0, italic: false, underline: false, fill: null });
+    doc.screens.start!.nodes.push({
+      type: 'text',
+      id: 'hello',
+      name: '欢迎',
+      x: 300,
+      y: 200,
+      w: 424,
+      h: 40,
+      rotate: 0,
+      opacity: 1,
+      hidden: false,
+      locked: false,
+      text: { zh: '欢迎光临', en: 'Welcome' },
+      font: 'zh',
+      size: 28,
+      weight: 400,
+      color: '$ink',
+      align: 'center',
+      valign: 'top',
+      lineHeight: 1.4,
+      letterSpacing: 0,
+      italic: false,
+      underline: false,
+      fill: null,
+    });
     expect((await save(2, doc)).body.rev).toBe(3);
     const v2 = await api(ctx.app, ctx.owner, 'POST', '/api/studio/emenu/publish', { clientKey: randomUUID(), rev: 3, note: '起始页加欢迎语' });
     expect(v2.body).toMatchObject({ version: 2, screensChanged: ['start'], publishedBy: '测试店主' });
@@ -195,7 +235,24 @@ describe('素材与预览码', () => {
 
 describe('8.1.2：微信小程序的版面（给小程序线读）', () => {
   const PNG_2x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEUlEQVR42mNk+M9Qz8DAwMAAAA4AAf8Y9gqmAAAAAElFTkSuQmCC';
-  const image = (id: string, asset: string): StudioNode => ({ type: 'image', id, name: '海报', x: 0, y: 0, w: 375, h: 200, rotate: 0, opacity: 1, hidden: false, locked: false, sizing: { w: 'fill', h: 'fixed' }, asset, fit: 'cover', radius: 0, fill: null });
+  const image = (id: string, asset: string): StudioNode => ({
+    type: 'image',
+    id,
+    name: '海报',
+    x: 0,
+    y: 0,
+    w: 375,
+    h: 200,
+    rotate: 0,
+    opacity: 1,
+    hidden: false,
+    locked: false,
+    sizing: { w: 'fill', h: 'fixed' },
+    asset,
+    fit: 'cover',
+    radius: 0,
+    fill: null,
+  });
 
   it('设计师能改小程序的版面；发布以前读不到（小程序用自己原来的页面），发布以后读得到这一版；图只给发布过的版面里用到的', async () => {
     const overview = (await api(ctx.app, designer, 'GET', '/api/studio')).body;
@@ -247,7 +304,22 @@ describe('8.1.2：微信小程序的版面（给小程序线读）', () => {
     doc.components = {
       'c-promo01': {
         name: '活动卡',
-        node: { type: 'frame', id: 'card', ...base, x: 0, y: 0, w: 160, h: 90, fill: '$surface', stroke: null, strokeWidth: 0, radius: 12, shadow: 'none', clip: true, children: [{ ...image('pic', pic), w: 160, h: 60 }] },
+        node: {
+          type: 'frame',
+          id: 'card',
+          ...base,
+          x: 0,
+          y: 0,
+          w: 160,
+          h: 90,
+          fill: '$surface',
+          stroke: null,
+          strokeWidth: 0,
+          radius: 12,
+          shadow: 'none',
+          clip: true,
+          children: [{ ...image('pic', pic), w: 160, h: 60 }],
+        },
       },
     };
     doc.screens.activity!.nodes.push(
@@ -277,9 +349,34 @@ describe('8.1.2：微信小程序的版面（给小程序线读）', () => {
     const s = (await api(ctx.app, designer, 'GET', '/api/studio/mp')).body;
     const bad = clone(s.draft.doc);
     bad.screens.activity!.nodes.push({
-      type: 'button', id: 'evil', name: '', x: 0, y: 0, w: 160, h: 44, rotate: 0, opacity: 1, hidden: false, locked: false,
-      fill: '$wood', stroke: null, strokeWidth: 0, radius: 8, shadow: 'none', text: { zh: '去', en: '' }, font: 'zh', size: 15, weight: 600, color: '#FFFFFF',
-      align: 'center', valign: 'middle', lineHeight: 1.4, letterSpacing: 0, italic: false, underline: false, action: { action: 'open.page', arg: 'pay-anything' },
+      type: 'button',
+      id: 'evil',
+      name: '',
+      x: 0,
+      y: 0,
+      w: 160,
+      h: 44,
+      rotate: 0,
+      opacity: 1,
+      hidden: false,
+      locked: false,
+      fill: '$wood',
+      stroke: null,
+      strokeWidth: 0,
+      radius: 8,
+      shadow: 'none',
+      text: { zh: '去', en: '' },
+      font: 'zh',
+      size: 15,
+      weight: 600,
+      color: '#FFFFFF',
+      align: 'center',
+      valign: 'middle',
+      lineHeight: 1.4,
+      letterSpacing: 0,
+      italic: false,
+      underline: false,
+      action: { action: 'open.page', arg: 'pay-anything' },
     });
     const r = await api(ctx.app, designer, 'PUT', '/api/studio/mp/draft', { rev: s.draft.rev, doc: bad });
     expect(r.status).toBe(422);

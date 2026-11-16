@@ -29,9 +29,9 @@ const enter = async () => {
   expect(r.status).toBe(201);
   return r.body.visits[0].id as number;
 };
-const dispatch = (body: Record<string, unknown>, cookie = ctx.clerk) =>
-  api(ctx.app, cookie, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), quantity: 1, startNow: true, ...body });
-const sessionOf = async (visitId: number) => ((await board()).sessions as { id: number; visitId: number; status: string; clocks: number; minutes: number; techNo: string }[]).find((s) => s.visitId === visitId)!;
+const dispatch = (body: Record<string, unknown>, cookie = ctx.clerk) => api(ctx.app, cookie, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), quantity: 1, startNow: true, ...body });
+const sessionOf = async (visitId: number) =>
+  ((await board()).sessions as { id: number; visitId: number; status: string; clocks: number; minutes: number; techNo: string }[]).find((s) => s.visitId === visitId)!;
 const act = (id: number, what: 'start' | 'finish', cookie = ctx.clerk) => api(ctx.app, cookie, 'POST', `/api/clockroom/sessions/${id}/${what}`);
 const pay = async (visitId: number) => {
   const preview = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body;
@@ -221,7 +221,12 @@ describe('派钟、上钟、加钟、下钟', () => {
     for (const r of rows) expect(new Date(r.endedAt).getTime()).toBe(new Date(paid.createdAt).getTime());
     expect(rows[1]!.startedAt).toBe(rows[1]!.endedAt);
     const events = (await api(ctx.app, ctx.clerk, 'GET', '/api/clockroom/events')).body as { kind: string; techNo: string | null; text: string }[];
-    expect(events.filter((e) => e.kind === 'finish' && e.text.startsWith('自动下钟')).map((e) => e.techNo).sort()).toEqual(['01', '04']);
+    expect(
+      events
+        .filter((e) => e.kind === 'finish' && e.text.startsWith('自动下钟'))
+        .map((e) => e.techNo)
+        .sort(),
+    ).toEqual(['01', '04']);
     let b = await board();
     for (const no of ['01', '04']) expect(b.technicians.find((t: { techNo: string }) => t.techNo === no).busy).toBeNull();
     // 反结账重开账单：钟单已经结束，不会再冒出来占着技师；重结时没有要收尾的钟
@@ -321,7 +326,9 @@ describe('提成', () => {
     vi.setSystemTime(appNow);
     try {
       const linesOf = async (checkoutId: number) =>
-        (await withCommission(ctx.sql, await settledTechnicianLines(ctx.sql, '2000-01-01', '2999-12-31'))).filter((l) => l.checkoutId === checkoutId && l.sign === 1).map((l) => ({ versionId: l.versionId, total: l.base + l.bonus }));
+        (await withCommission(ctx.sql, await settledTechnicianLines(ctx.sql, '2000-01-01', '2999-12-31')))
+          .filter((l) => l.checkoutId === checkoutId && l.sign === 1)
+          .map((l) => ({ versionId: l.versionId, total: l.base + l.bonus }));
       const v = await enter();
       expect((await dispatch({ visitId: v, itemId: foot, technicianId: tech['02'], callType: 'designated', expectedTotal: 23800 })).status).toBe(200);
       const first = await pay(v);

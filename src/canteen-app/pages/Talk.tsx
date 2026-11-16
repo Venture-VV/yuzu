@@ -121,7 +121,12 @@ export function TalkPage({ me, online }: { me: CanteenMe; online: boolean }) {
         <div className="relative w-28 shrink-0">
           <Mascot pose={flying ? 'cheer' : 'rest'} mood={flying ? 'love' : 'wink'} className="h-36 w-auto" title="柚子" />
           {flying > 0 && (
-            <span key={flying} className="absolute top-10 -left-10 text-wood-deep" style={{ ['--fx' as string]: '70px', ['--fy' as string]: '-40px', animation: 'yz-fly .9s ease-in forwards' }} aria-hidden>
+            <span
+              key={flying}
+              className="absolute top-10 -left-10 text-wood-deep"
+              style={{ ['--fx' as string]: '70px', ['--fy' as string]: '-40px', animation: 'yz-fly .9s ease-in forwards' }}
+              aria-hidden
+            >
               <IconLetter size={34} fill="var(--color-yuzu)" />
             </span>
           )}

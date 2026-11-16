@@ -14,10 +14,10 @@ export function CanteenPosterPrintPage() {
   const error = reg.error
     ? errorMessage(reg.error)
     : r && !r.link
-        ? '还没填员工入口地址：在「员工食堂 → 设置」里填好再打印'
-        : r && !r.enabled
-          ? '自己登记关着：在「员工食堂 → 设置」里打开再打印'
-          : null;
+      ? '还没填员工入口地址：在「员工食堂 → 设置」里填好再打印'
+      : r && !r.enabled
+        ? '自己登记关着：在「员工食堂 → 设置」里打开再打印'
+        : null;
   return (
     <PrintFrame title="柚子饭堂 · 注册海报" ready={reg.isSuccess} error={error} paper="a4">
       {r?.link && (

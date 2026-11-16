@@ -138,7 +138,8 @@ describe('P0-03 次卡停售', () => {
     expect(type.status, JSON.stringify(type.body)).toBe(200);
     const t = (type.body as { id: number; name: string; version: number; price: number }[]).find((x) => x.name === '整改搓澡卡')!;
     const m = await createMember(ctx, '次卡会员', '13900180001');
-    const sell = () => api(ctx.app, ctx.clerk, 'POST', '/api/count-cards', { clientKey: randomUUID(), memberId: m.id, typeId: t.id, expectedVersion: t.version, expectedPrice: t.price, method: 'cash' });
+    const sell = () =>
+      api(ctx.app, ctx.clerk, 'POST', '/api/count-cards', { clientKey: randomUUID(), memberId: m.id, typeId: t.id, expectedVersion: t.version, expectedPrice: t.price, method: 'cash' });
     expect((await sell()).body.error.code).toBe('COUNT_CARD_SALES_CLOSED');
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/settings', { countCardSales: true })).status).toBe(200);
     expect((await sell()).status).toBe(200);
@@ -399,8 +400,29 @@ describe('P1-07 充值记录与消费记录', () => {
 
 describe('P2-09 买一赠一与生日礼', () => {
   it('买一赠一：有买的项目又有赠的项目（同一项目 2 份）才能用，抵最便宜的一份，可设最多抵', () => {
-    const terms = { kind: 'bogo' as const, faceValue: null, ratePercent: null, maxOff: null, threshold: 0, scope: 'all' as const, scopeCategories: [], scopeItems: [], exchangeItemId: 1, exchangeTicketTypeId: null, buyItemId: 1 };
-    const line = (id: number, itemId: number, unitPrice: number, quantity: number) => ({ id, itemId, ticketTypeId: null, name: `项目${itemId}`, category: '洗浴', unitPrice, quantity, amount: unitPrice * quantity });
+    const terms = {
+      kind: 'bogo' as const,
+      faceValue: null,
+      ratePercent: null,
+      maxOff: null,
+      threshold: 0,
+      scope: 'all' as const,
+      scopeCategories: [],
+      scopeItems: [],
+      exchangeItemId: 1,
+      exchangeTicketTypeId: null,
+      buyItemId: 1,
+    };
+    const line = (id: number, itemId: number, unitPrice: number, quantity: number) => ({
+      id,
+      itemId,
+      ticketTypeId: null,
+      name: `项目${itemId}`,
+      category: '洗浴',
+      unitPrice,
+      quantity,
+      amount: unitPrice * quantity,
+    });
     expect(evaluateCoupon(terms, [line(1, 1, 6800, 1)]).usable).toBe(false);
     expect(evaluateCoupon(terms, [line(1, 1, 6800, 2)])).toMatchObject({ usable: true, amount: 6800 });
     expect(evaluateCoupon({ ...terms, maxOff: 5000 }, [line(1, 1, 6800, 2)])).toMatchObject({ usable: true, amount: 5000 });
@@ -480,7 +502,13 @@ describe('P2-09 买一赠一与生日礼', () => {
     expect(failed!.lastError).toBeTruthy();
 
     // ② 补库存，营销成本页重试：出库
-    const opening = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, docType: 'opening', approveNow: true, lines: [{ materialId, qtyMilli: 10_000 }] });
+    const opening = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', {
+      clientKey: randomUUID(),
+      docDate: today,
+      docType: 'opening',
+      approveNow: true,
+      lines: [{ materialId, qtyMilli: 10_000 }],
+    });
     expect(opening.status, JSON.stringify(opening.body)).toBe(201);
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/gift-outs/${failed!.id}/retry`, {})).status).toBe(403);
     const retried = await api(ctx.app, ctx.owner, 'POST', `/api/gift-outs/${failed!.id}/retry`, {});
@@ -515,7 +543,13 @@ describe('P2-09 买一赠一与生日礼', () => {
     expect(material.status, JSON.stringify(material.body)).toBe(201);
     const materialId = material.body.id as number;
     const warehouseId = ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/meta')).body as { warehouses: { id: number }[] }).warehouses[0]!.id;
-    const opening = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, docType: 'opening', approveNow: true, lines: [{ materialId, qtyMilli: 5_000 }] });
+    const opening = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', {
+      clientKey: randomUUID(),
+      docDate: today,
+      docType: 'opening',
+      approveNow: true,
+      lines: [{ materialId, qtyMilli: 5_000 }],
+    });
     expect(opening.status, JSON.stringify(opening.body)).toBe(201);
     const stock = async () => (await api(ctx.app, ctx.owner, 'GET', `/api/inventory/materials/${materialId}`)).body.stockMilli as number;
     const t = await template({ name: '对账买一赠一', kind: 'bogo', buyItemId: item['整改果盘'], giftMaterialId: materialId, giftQtyMilli: 1000, giftWarehouseId: warehouseId });

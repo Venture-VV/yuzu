@@ -42,10 +42,8 @@ async function material(code: string, over: Record<string, unknown> = {}) {
   return res.body as { id: number };
 }
 
-const doc = (cookie: string, body: Record<string, unknown>) =>
-  api(ctx.app, cookie, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, ...body });
-const deptDoc = (cookie: string, body: Record<string, unknown>) =>
-  api(ctx.app, cookie, 'POST', '/api/erp/dept-stock/docs', { clientKey: randomUUID(), docDate: today, ...body });
+const doc = (cookie: string, body: Record<string, unknown>) => api(ctx.app, cookie, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, ...body });
+const deptDoc = (cookie: string, body: Record<string, unknown>) => api(ctx.app, cookie, 'POST', '/api/erp/dept-stock/docs', { clientKey: randomUUID(), docDate: today, ...body });
 
 async function ok(res: Promise<{ status: number; body: { doc: Record<string, unknown> & { id: number; lines: { id: number }[] } } }>) {
   const r = await res;
@@ -58,11 +56,9 @@ async function opening(materialId: number, qtyMilli: number) {
   expect(d.status).toBe('confirmed');
 }
 
-const central = async (materialId: number) =>
-  (await ctx.sql<{ stock: number }[]>`SELECT stock_milli AS stock FROM materials WHERE id = ${materialId}`)[0]!.stock;
+const central = async (materialId: number) => (await ctx.sql<{ stock: number }[]>`SELECT stock_milli AS stock FROM materials WHERE id = ${materialId}`)[0]!.stock;
 const deptStock = async (warehouseId: number, materialId: number) =>
-  (await ctx.sql<{ stock: number }[]>`SELECT stock_milli AS stock FROM warehouse_stock WHERE warehouse_id = ${warehouseId} AND material_id = ${materialId}`)[0]
-    ?.stock ?? 0;
+  (await ctx.sql<{ stock: number }[]>`SELECT stock_milli AS stock FROM warehouse_stock WHERE warehouse_id = ${warehouseId} AND material_id = ${materialId}`)[0]?.stock ?? 0;
 
 async function approvedPo(materialId: number, purchaseQtyMilli: number, priceCents: number) {
   const res = await api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
@@ -76,8 +72,7 @@ async function approvedPo(materialId: number, purchaseQtyMilli: number, priceCen
   return res.body.po as { id: number; lines: { id: number; materialId: number }[] };
 }
 
-const issue = (materialId: number, qtyMilli: number, departmentId = bathId) =>
-  ok(doc(keeper, { docType: 'issue', departmentId, handler: '部门同事', lines: [{ materialId, qtyMilli }] }));
+const issue = (materialId: number, qtyMilli: number, departmentId = bathId) => ok(doc(keeper, { docType: 'issue', departmentId, handler: '部门同事', lines: [{ materialId, qtyMilli }] }));
 
 beforeAll(async () => {
   ctx = await setup();
@@ -151,9 +146,7 @@ describe('领料：总仓出、部门小仓进；部门签收（#17）', () => {
       { warehouseId: bathWh, name: '浴区小仓', kind: 'department', stockMilli: q(30) },
     ]);
     const deptCard = (await api(ctx.app, keeper, 'GET', `/api/inventory/materials/${m.id}/card?warehouse=${bathWh}`)).body;
-    expect(deptCard.moves.map((x: { moveType: string; qtyDeltaMilli: number; qtyAfterMilli: number }) => [x.moveType, x.qtyDeltaMilli, x.qtyAfterMilli])).toEqual([
-      ['issue', q(30), q(30)],
-    ]);
+    expect(deptCard.moves.map((x: { moveType: string; qtyDeltaMilli: number; qtyAfterMilli: number }) => [x.moveType, x.qtyDeltaMilli, x.qtyAfterMilli])).toEqual([['issue', q(30), q(30)]]);
     expect((await api(ctx.app, keeper, 'GET', `/api/inventory/materials/${m.id}/card?warehouse=all`)).status).toBe(400);
 
     // 部门看自己的小仓；看不到别的部门，也没有「查看库存」
@@ -247,9 +240,7 @@ describe('部门小仓的盘点、耗用、报损与期初', () => {
     await opening(m.id, q(500));
     await issue(m.id, q(200));
     // 差 2 瓶（1%）：小差异，提交即生效
-    const count = await ok(
-      deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(198), expectedBookMilli: q(200) }] }),
-    );
+    const count = await ok(deptDoc(bath, { docType: 'count', warehouseId: bathWh, lines: [{ materialId: m.id, countedMilli: q(198), expectedBookMilli: q(200) }] }));
     expect(count).toMatchObject({ status: 'confirmed', warehouse: { id: bathWh } });
     expect(count.lines[0]).toMatchObject({ bookMilli: q(200), qtyMilli: q(-2), diffReason: 'consumed' });
     expect(await deptStock(bathWh, m.id)).toBe(q(198));
@@ -359,7 +350,16 @@ describe('急采（#19；8.0.1 收拢到采购、按金额分级审批，CG05）
     expect((await doc(keeper, body(15_000))).status).toBe(403);
 
     const rc = await ok(doc(buyer, body(15_000)));
-    expect(rc).toMatchObject({ status: 'submitted', urgent: true, urgentApprovedAt: null, noPo: true, urgentCapCents: 3_000_000, amountCents: 30_000, warehouse: { id: bathWh }, department: { id: bathId } });
+    expect(rc).toMatchObject({
+      status: 'submitted',
+      urgent: true,
+      urgentApprovedAt: null,
+      noPo: true,
+      urgentCapCents: 3_000_000,
+      amountCents: 30_000,
+      warehouse: { id: bathWh },
+      department: { id: bathId },
+    });
     // 还在审批中：仓库不能验收；登记的人不能审自己的急采
     const early = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.id}/verify-urgent`, {});
     expect(early.status).toBe(409);
@@ -426,7 +426,12 @@ describe('急采（#19；8.0.1 收拢到采购、按金额分级审批，CG05）
     const before = (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/purchase-rules')).body;
     const approverId = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'wh-appr'`)[0]!.id;
     // 仓库（物资经办）没有审批中心的权限，不能指定
-    const bad = await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/purchase-rules', { urgentTiers: [{ maxCents: 500_000, approverIds: [keeperId] }, { maxCents: 3_000_000, approverIds: [] }] });
+    const bad = await api(ctx.app, ctx.owner, 'PUT', '/api/inventory/purchase-rules', {
+      urgentTiers: [
+        { maxCents: 500_000, approverIds: [keeperId] },
+        { maxCents: 3_000_000, approverIds: [] },
+      ],
+    });
     expect(bad.status).toBe(422);
     expect(bad.body.error.code).toBe('APPROVER_INVALID');
     // 采购经办不能改采购规则（默认只有店主有「维护采购规则」）
@@ -438,7 +443,8 @@ describe('急采（#19；8.0.1 收拢到采购、按金额分级审批，CG05）
       ],
     });
     expect(set.status, JSON.stringify(set.body)).toBe(200);
-    const one = (priceCents: number) => ok(doc(buyer, { docType: 'receipt', urgent: true, departmentId: barId, supplierId, lines: [{ materialId: m.id, deliveredMilli: q(1), acceptedMilli: q(1), priceCents }] }));
+    const one = (priceCents: number) =>
+      ok(doc(buyer, { docType: 'receipt', urgent: true, departmentId: barId, supplierId, lines: [{ materialId: m.id, deliveredMilli: q(1), acceptedMilli: q(1), priceCents }] }));
     const small = await one(30_000);
     const big = await one(1_000_000);
     const req = async (docId: number) => (await ctx.sql<{ steps: unknown }[]>`SELECT steps FROM approval_requests WHERE doc_kind = 'inv_doc' AND doc_id = ${docId} AND status = 'pending'`)[0]!.steps;
@@ -579,9 +585,7 @@ describe('按仓的收发汇总与自检', () => {
   it('总仓、部门小仓、全部合计；各仓结存与流水一致', async () => {
     const [m] = await ctx.sql<{ id: number }[]>`SELECT id FROM materials WHERE code = 'W001'`;
     const row = async (warehouse: string) =>
-      ((await api(ctx.app, keeper, 'GET', `/api/inventory/summary?from=${today}&to=${today}&warehouse=${warehouse}`)).body as { materialId: number }[]).find(
-        (r) => r.materialId === m!.id,
-      );
+      ((await api(ctx.app, keeper, 'GET', `/api/inventory/summary?from=${today}&to=${today}&warehouse=${warehouse}`)).body as { materialId: number }[]).find((r) => r.materialId === m!.id);
     // 总仓：期初 100 − 领料 30 + 退回 10 = 80
     expect(await row('1')).toMatchObject({ opening: q(100), issued: q(30), issueReturned: q(10), closing: q(80) });
     // 浴区小仓：领进 30 − 耗用 1 − 退回 10 − 耗用 15 = 4（部门小仓的领料是进、退回是出）
@@ -596,9 +600,7 @@ describe('按仓的收发汇总与自检', () => {
     expect(String(csv.body)).toContain('浴区小仓 收发汇总');
 
     const checks = (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/checks')).body as { key: string; ok: boolean; detail: string }[];
-    expect(checks.map((c) => c.key)).toEqual(
-      expect.arrayContaining(['stock_equals_moves', 'dept_stock_equals_moves', 'move_chain', 'move_warehouse', 'receipt_po', 'dept_warehouses']),
-    );
+    expect(checks.map((c) => c.key)).toEqual(expect.arrayContaining(['stock_equals_moves', 'dept_stock_equals_moves', 'move_chain', 'move_warehouse', 'receipt_po', 'dept_warehouses']));
     for (const c of checks) expect(c, `${c.key} ${c.detail}`).toMatchObject({ ok: true });
   });
 

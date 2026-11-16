@@ -107,21 +107,8 @@ export function RegisterPage({ onDone, onLogin }: { onDone: (me: CanteenMe) => v
             style={{ backgroundImage: 'repeating-linear-gradient(transparent 0 47px, rgb(147 112 81 / .16) 47px 48px)', backgroundPosition: '0 30px' }}
             noValidate
           >
-            <Line
-              icon={<IconMe size={22} />}
-              label="用户名"
-              hint="同事们怎么叫你：登录用，扫码打卡时负责人也看到它"
-              error={fieldError('username')}
-            >
-              <input
-                className={inputClass}
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="例如 林小雨"
-                autoComplete="username"
-                maxLength={16}
-                aria-label="用户名"
-              />
+            <Line icon={<IconMe size={22} />} label="用户名" hint="同事们怎么叫你：登录用，扫码打卡时负责人也看到它" error={fieldError('username')}>
+              <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="例如 林小雨" autoComplete="username" maxLength={16} aria-label="用户名" />
             </Line>
             <Line icon={<IconPhone size={22} />} label="手机号" hint="登录也可以用手机号" error={fieldError('phone')}>
               <input

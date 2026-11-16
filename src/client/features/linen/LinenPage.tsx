@@ -31,7 +31,11 @@ export function LinenPage() {
   const qc = useQueryClient();
   const data = useQuery({ queryKey: key, queryFn: () => api.get<LinenOverview>('/api/erp/linen'), enabled: can('linen.read') });
   const [month, setMonth] = useState(session.calendarToday.slice(0, 7));
-  const statement = useQuery({ queryKey: [...key, 'statement', month], queryFn: () => api.get<LinenStatement>(`/api/erp/linen/statement?month=${month}`), enabled: can('linen.read') && /^\d{4}-\d{2}$/.test(month) });
+  const statement = useQuery({
+    queryKey: [...key, 'statement', month],
+    queryFn: () => api.get<LinenStatement>(`/api/erp/linen/statement?month=${month}`),
+    enabled: can('linen.read') && /^\d{4}-\d{2}$/.test(month),
+  });
   const [opening, setOpening] = useState<LinenDocKind | null>(null);
   const [editing, setEditing] = useState<LinenItem | 'new' | null>(null);
   const [voiding, setVoiding] = useState<LinenDoc | null>(null);
@@ -68,7 +72,14 @@ export function LinenPage() {
               {(['send', 'return', 'add', 'scrap'] as const).map((k) => {
                 const Icon = KIND_ICON[k];
                 return (
-                  <Button key={k} size="sm" variant={k === 'send' || k === 'return' ? 'primary' : 'secondary'} icon={<Icon className="size-4" />} onClick={() => setOpening(k)} data-testid={`linen-new-${k}`}>
+                  <Button
+                    key={k}
+                    size="sm"
+                    variant={k === 'send' || k === 'return' ? 'primary' : 'secondary'}
+                    icon={<Icon className="size-4" />}
+                    onClick={() => setOpening(k)}
+                    data-testid={`linen-new-${k}`}
+                  >
                     {LINEN_DOC_LABELS[k]}
                   </Button>
                 );
@@ -239,7 +250,15 @@ export function LinenPage() {
       </div>
       {opening && d && <DocDialog kind={opening} items={d.items.filter((i) => i.active)} suppliers={d.suppliers} onClose={() => setOpening(null)} onDone={refresh} />}
       {editing && <ItemDialog item={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onDone={refresh} />}
-      <ReasonDialog open={!!voiding} title={`作废 ${voiding?.docNo ?? ''}`} description="作废以后单据还在，数量冲回去。后面已经有送洗、收回挡着的作废不了，要先处理后面的单。" confirmLabel="作废" busy={busy} onClose={() => setVoiding(null)} onConfirm={(reason) => void doVoid(reason)} />
+      <ReasonDialog
+        open={!!voiding}
+        title={`作废 ${voiding?.docNo ?? ''}`}
+        description="作废以后单据还在，数量冲回去。后面已经有送洗、收回挡着的作废不了，要先处理后面的单。"
+        confirmLabel="作废"
+        busy={busy}
+        onClose={() => setVoiding(null)}
+        onConfirm={(reason) => void doVoid(reason)}
+      />
     </>
   );
 }
@@ -312,7 +331,19 @@ interface Line {
   lost: string;
 }
 
-function DocDialog({ kind, items, suppliers, onClose, onDone }: { kind: LinenDocKind; items: LinenItem[]; suppliers: LinenOverview['suppliers']; onClose: () => void; onDone: () => Promise<unknown> }) {
+function DocDialog({
+  kind,
+  items,
+  suppliers,
+  onClose,
+  onDone,
+}: {
+  kind: LinenDocKind;
+  items: LinenItem[];
+  suppliers: LinenOverview['suppliers'];
+  onClose: () => void;
+  onDone: () => Promise<unknown>;
+}) {
   const toast = useToast();
   const session = useSession();
   const needsSupplier = kind === 'send' || kind === 'return';
@@ -417,7 +448,13 @@ function DocDialog({ kind, items, suppliers, onClose, onDone }: { kind: LinenDoc
             return (
               <li key={l.key} className={cn('grid items-end gap-2', kind === 'return' ? 'grid-cols-[minmax(0,1fr)_84px_84px_84px_auto]' : 'grid-cols-[minmax(0,1fr)_110px_auto]')}>
                 <Field label={index === 0 ? '品类' : ''} htmlFor={`linen-l-${l.key}`} hint={it ? `在店 ${it.inHouseQty} · 在洗 ${it.atLaundryQty}` : undefined}>
-                  <Select id={`linen-l-${l.key}`} value={l.itemId} disabled={uncertain} onChange={(e) => set(l.key, { itemId: e.target.value === '' ? '' : Number(e.target.value) })} data-testid={`linen-doc-item-${index}`}>
+                  <Select
+                    id={`linen-l-${l.key}`}
+                    value={l.itemId}
+                    disabled={uncertain}
+                    onChange={(e) => set(l.key, { itemId: e.target.value === '' ? '' : Number(e.target.value) })}
+                    data-testid={`linen-doc-item-${index}`}
+                  >
                     <option value="">请选择</option>
                     {items.map((x) => (
                       <option key={x.id} value={x.id}>
@@ -432,19 +469,46 @@ function DocDialog({ kind, items, suppliers, onClose, onDone }: { kind: LinenDoc
                 {kind === 'return' && (
                   <>
                     <Field label={index === 0 ? '破损' : ''} htmlFor={`linen-d-${l.key}`}>
-                      <Input id={`linen-d-${l.key}`} inputMode="numeric" value={l.damaged} disabled={uncertain} onChange={(e) => set(l.key, { damaged: e.target.value })} data-testid={`linen-doc-damaged-${index}`} />
+                      <Input
+                        id={`linen-d-${l.key}`}
+                        inputMode="numeric"
+                        value={l.damaged}
+                        disabled={uncertain}
+                        onChange={(e) => set(l.key, { damaged: e.target.value })}
+                        data-testid={`linen-doc-damaged-${index}`}
+                      />
                     </Field>
                     <Field label={index === 0 ? '丢失' : ''} htmlFor={`linen-x-${l.key}`}>
-                      <Input id={`linen-x-${l.key}`} inputMode="numeric" value={l.lost} disabled={uncertain} onChange={(e) => set(l.key, { lost: e.target.value })} data-testid={`linen-doc-lost-${index}`} />
+                      <Input
+                        id={`linen-x-${l.key}`}
+                        inputMode="numeric"
+                        value={l.lost}
+                        disabled={uncertain}
+                        onChange={(e) => set(l.key, { lost: e.target.value })}
+                        data-testid={`linen-doc-lost-${index}`}
+                      />
                     </Field>
                   </>
                 )}
-                <Button variant="ghost" size="sm" aria-label="去掉这一行" disabled={lines.length === 1 || uncertain} onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} icon={<Trash2 className="size-4" />} />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="去掉这一行"
+                  disabled={lines.length === 1 || uncertain}
+                  onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
+                  icon={<Trash2 className="size-4" />}
+                />
               </li>
             );
           })}
         </ul>
-        <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} disabled={uncertain || lines.length >= 50} onClick={() => setLines((ls) => [...ls, { key: Math.max(...ls.map((x) => x.key)) + 1, itemId: '', qty: '', damaged: '', lost: '' }])}>
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<Plus className="size-4" />}
+          disabled={uncertain || lines.length >= 50}
+          onClick={() => setLines((ls) => [...ls, { key: Math.max(...ls.map((x) => x.key)) + 1, itemId: '', qty: '', damaged: '', lost: '' }])}
+        >
           加一行
         </Button>
         <Field label="备注" htmlFor="linen-note">

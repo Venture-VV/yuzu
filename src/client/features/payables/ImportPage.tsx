@@ -2,14 +2,7 @@ import { useRef, useState } from 'react';
 import { Link, Navigate } from 'react-router';
 import { ArrowLeft, CircleCheck, Download, FileSearch, FileUp } from 'lucide-react';
 import { formatAmount } from '@shared/money';
-import {
-  ERP_IMPORT_LABELS,
-  OPENING_IMPORT_COLUMNS,
-  SUPPLIER_IMPORT_COLUMNS,
-  type ErpImportKind,
-  type ErpImportPreview,
-  type ErpImportRecord,
-} from '@shared/purchasing';
+import { ERP_IMPORT_LABELS, OPENING_IMPORT_COLUMNS, SUPPLIER_IMPORT_COLUMNS, type ErpImportKind, type ErpImportPreview, type ErpImportRecord } from '@shared/purchasing';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { ErpPendingStoreError, sendErpOp, useErpPending } from '../../lib/erpPending';
 import { bytesToBase64, readImportFile } from '../../lib/import-file';
@@ -164,56 +157,56 @@ export function ImportPage() {
               导入的期初未付超过免确认门槛时，在下面的导入记录里一次确认整批。
             </Notice>
           ) : (
-          <section className="space-y-3 rounded-lg border border-line bg-card p-5 shadow-card">
-            <div className="flex flex-wrap items-center gap-3">
-              <Segmented<ErpImportKind>
-                size="sm"
-                value={kind}
-                onChange={(k) => {
-                  setKind(k);
-                  reset();
-                }}
-                ariaLabel="导入什么"
-                options={kinds.map((k) => ({ value: k, label: ERP_IMPORT_LABELS[k], disabled: busy !== null }))}
-              />
-              <Button size="sm" variant="ghost" icon={<Download className="size-4" />} onClick={() => downloadTemplate(kind)}>
-                下载模板
-              </Button>
-            </div>
-            <p className="text-[12.5px] text-ink-3">
-              列：{t.columns.join('、')}。{t.hint}
-            </p>
-            <label className="flex cursor-pointer flex-wrap items-center gap-3 rounded-md border border-dashed border-line-strong px-4 py-3 text-[13px] hover:border-ink-3">
-              <FileUp className="size-5 text-ink-3" />
-              <span className="font-semibold">{file ? `${file.fileName}（${file.encoding}）` : '选择 CSV 或 Excel 文件'}</span>
-              <input
-                type="file"
-                accept=".csv,.xlsx,text/csv"
-                className="sr-only"
-                aria-label="选择导入文件"
-                disabled={busy === 'preview' || busy === 'apply'}
-                onChange={(e) => void choose(e.target.files?.[0])}
-                data-testid="import-file"
-              />
-            </label>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" disabled={!file} loading={busy === 'preview'} icon={<FileSearch className="size-4" />} onClick={runPreview}>
-                预览
-              </Button>
-              <Button
-                variant="primary"
-                disabled={!preview || preview.issues.length > 0 || !!preview.duplicateOf || pending.length > 0}
-                loading={busy === 'apply'}
-                icon={<CircleCheck className="size-4" />}
-                onClick={apply}
-                data-testid="import-apply"
-              >
-                写入
-              </Button>
-            </div>
-            {pending.length > 0 && <Notice tone="warning" title="上一次导入结果待确认：请先在页面上方处理，再写入新的一份" />}
-            {error && <Notice tone="error" title={error} />}
-          </section>
+            <section className="space-y-3 rounded-lg border border-line bg-card p-5 shadow-card">
+              <div className="flex flex-wrap items-center gap-3">
+                <Segmented<ErpImportKind>
+                  size="sm"
+                  value={kind}
+                  onChange={(k) => {
+                    setKind(k);
+                    reset();
+                  }}
+                  ariaLabel="导入什么"
+                  options={kinds.map((k) => ({ value: k, label: ERP_IMPORT_LABELS[k], disabled: busy !== null }))}
+                />
+                <Button size="sm" variant="ghost" icon={<Download className="size-4" />} onClick={() => downloadTemplate(kind)}>
+                  下载模板
+                </Button>
+              </div>
+              <p className="text-[12.5px] text-ink-3">
+                列：{t.columns.join('、')}。{t.hint}
+              </p>
+              <label className="flex cursor-pointer flex-wrap items-center gap-3 rounded-md border border-dashed border-line-strong px-4 py-3 text-[13px] hover:border-ink-3">
+                <FileUp className="size-5 text-ink-3" />
+                <span className="font-semibold">{file ? `${file.fileName}（${file.encoding}）` : '选择 CSV 或 Excel 文件'}</span>
+                <input
+                  type="file"
+                  accept=".csv,.xlsx,text/csv"
+                  className="sr-only"
+                  aria-label="选择导入文件"
+                  disabled={busy === 'preview' || busy === 'apply'}
+                  onChange={(e) => void choose(e.target.files?.[0])}
+                  data-testid="import-file"
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" disabled={!file} loading={busy === 'preview'} icon={<FileSearch className="size-4" />} onClick={runPreview}>
+                  预览
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={!preview || preview.issues.length > 0 || !!preview.duplicateOf || pending.length > 0}
+                  loading={busy === 'apply'}
+                  icon={<CircleCheck className="size-4" />}
+                  onClick={apply}
+                  data-testid="import-apply"
+                >
+                  写入
+                </Button>
+              </div>
+              {pending.length > 0 && <Notice tone="warning" title="上一次导入结果待确认：请先在页面上方处理，再写入新的一份" />}
+              {error && <Notice tone="error" title={error} />}
+            </section>
           )}
 
           {preview && (

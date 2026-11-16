@@ -279,7 +279,14 @@ describe('饭卡码与打卡', () => {
     const code = makeCanteenCode(SECRET, emp.id, emp.epoch, clock);
     expect((await scan(boss.cookie, { code })).body.error.code).toBe('EMPLOYEE_INACTIVE');
     expect((await c(emp.cookie, 'GET', '/api/canteen/me')).status).toBe(401);
-    const on = await admin('PUT', `/api/erp/canteen/employees/${emp.id}`, { empNo: row.empNo, name: row.name, departmentId: row.departmentId, role: row.role, active: true, version: off.body.version });
+    const on = await admin('PUT', `/api/erp/canteen/employees/${emp.id}`, {
+      empNo: row.empNo,
+      name: row.name,
+      departmentId: row.departmentId,
+      role: row.role,
+      active: true,
+      version: off.body.version,
+    });
     expect(on.status).toBe(200);
     clock = at('18:30');
     expect((await scan(boss.cookie, { code: makeCanteenCode(SECRET, emp.id, emp.epoch, clock) })).body.error.code).toBe('CODE_INVALID');
@@ -430,8 +437,7 @@ describe('员工端口的边界：编码过的地址、登录限次', () => {
   });
 
   it('同一来源 IP 只记失败：大家一起登录不会互相挡住；失败 30 次后先拦下', async () => {
-    const from = (remoteAddress: string, password: string) =>
-      canteen.inject({ method: 'POST', url: '/api/canteen/login', remoteAddress, payload: { empNo: 'E002', password } });
+    const from = (remoteAddress: string, password: string) => canteen.inject({ method: 'POST', url: '/api/canteen/login', remoteAddress, payload: { empNo: 'E002', password } });
     for (let i = 0; i < 35; i++) expect((await from('10.9.0.1', 'zhou-2026')).statusCode).toBe(200);
     for (let i = 0; i < 30; i++) {
       const r = await from('10.9.0.2', 'definitely-wrong');
@@ -469,7 +475,12 @@ describe('Codex 审查 9d12ae8 的修正', () => {
     expect(r.truncated).toBe(true);
     expect(r.total).toBeGreaterThan(2001);
     const csv = await ctx.app.inject({ method: 'GET', url: `/api/erp/canteen/checkins.csv?from=${yesterday}&to=${today}`, headers: { cookie: ctx.owner } });
-    expect(csv.body.replace(/^\uFEFF/, '').trim().split(/\r?\n/)).toHaveLength(r.total + 1);
+    expect(
+      csv.body
+        .replace(/^\uFEFF/, '')
+        .trim()
+        .split(/\r?\n/),
+    ).toHaveLength(r.total + 1);
   });
 });
 

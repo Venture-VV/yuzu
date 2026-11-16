@@ -37,8 +37,7 @@ async function hold(statement: (tx: typeof ctx.sql) => Promise<unknown>) {
   return { release: () => end('ROLLBACK'), commit: () => end('COMMIT') };
 }
 
-const abandon = (key: string, body: Record<string, unknown> = {}, cookie = ctx.clerk) =>
-  api(ctx.app, cookie, 'POST', `/api/operations/${key}/abandon`, body);
+const abandon = (key: string, body: Record<string, unknown> = {}, cookie = ctx.clerk) => api(ctx.app, cookie, 'POST', `/api/operations/${key}/abandon`, body);
 const lookup = (key: string) => api(ctx.app, ctx.clerk, 'GET', `/api/operations/${key}`);
 
 async function walletRows(memberId: number) {
@@ -181,9 +180,7 @@ describe('结果待确认的会员记账：查回与作废', () => {
     expect(audits).toHaveLength(1);
     expect(audits[0]!.detail).toMatchObject({ amount: 50000, summary: '充值 · 常泡 500 · 微信' });
     const s = await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${today}`);
-    const anomaly = (s.body.anomalies as { kind: string; memberName: string | null; amount: number | null; description: string }[]).find(
-      (a) => a.kind === 'abandoned' && a.memberName === '作废留痕',
-    );
+    const anomaly = (s.body.anomalies as { kind: string; memberName: string | null; amount: number | null; description: string }[]).find((a) => a.kind === 'abandoned' && a.memberName === '作废留痕');
     expect(anomaly).toMatchObject({ amount: 50000 });
     expect(anomaly!.description).toContain('常泡 500 · 微信');
   });
@@ -267,10 +264,8 @@ describe('作废只对原业务类型生效（G2 第 2 轮复测意见 2）', ()
     const items = (await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '跨模块搓背', category: '护理', price: 5800 })).body.items;
     const itemId = items.find((i: { name: string }) => i.name === '跨模块搓背').id as number;
     const visitId = (await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: 'F001', zone: 'male' }] })).body.visits[0].id as number;
-    const post = (key: string) =>
-      api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${visitId}/charges`, { clientKey: key, lines: [{ itemId, quantity: 1 }], expectedTotal: 5800 });
-    const amount = async () =>
-      (await ctx.sql<{ amountCents: number }[]>`SELECT b.amount_cents FROM bills b JOIN visits v ON v.bill_id = b.id WHERE v.id = ${visitId}`)[0]!.amountCents;
+    const post = (key: string) => api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${visitId}/charges`, { clientKey: key, lines: [{ itemId, quantity: 1 }], expectedTotal: 5800 });
+    const amount = async () => (await ctx.sql<{ amountCents: number }[]>`SELECT b.amount_cents FROM bills b JOIN visits v ON v.bill_id = b.id WHERE v.id = ${visitId}`)[0]!.amountCents;
 
     // ① 会员接口伪报类型：登记不生效
     const key1 = randomUUID();

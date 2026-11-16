@@ -23,8 +23,7 @@ export function StocktakeNotice({
   const pending = data.warehouses.filter((w) => !w.done);
   if (pending.length === 0) return null;
   const month = Number(data.month.slice(5, 7));
-  const title =
-    data.warehouses.length === 1 ? `${month} 月盘点：${pending[0]!.warehouseName}还没盘完` : `${month} 月盘点：还有 ${pending.length} 个仓没盘完`;
+  const title = data.warehouses.length === 1 ? `${month} 月盘点：${pending[0]!.warehouseName}还没盘完` : `${month} 月盘点：还有 ${pending.length} 个仓没盘完`;
   return (
     <Notice tone={data.overdue ? 'error' : 'warning'} icon={<ClipboardCheck className="size-5" />} title={data.overdue ? `${title}（已过 ${md(data.dueDate)}）` : title} className={className}>
       <p>

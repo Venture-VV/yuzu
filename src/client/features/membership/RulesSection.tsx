@@ -18,7 +18,9 @@ import { membershipKeys, useMembershipRules } from './queries';
 export function MembershipRulesBody() {
   return (
     <div className="max-w-[1024px]">
-      <p className="mb-4 text-[13px] text-ink-3">档级门槛与赠送比例、享阶 / 尊阶、会籍周期与补充期、最低充值、到期提醒、生日礼到账、邀请体验。改了只影响以后的充值、消费与到期判断，已经记下的档阶不重算。</p>
+      <p className="mb-4 text-[13px] text-ink-3">
+        档级门槛与赠送比例、享阶 / 尊阶、会籍周期与补充期、最低充值、到期提醒、生日礼到账、邀请体验。改了只影响以后的充值、消费与到期判断，已经记下的档阶不重算。
+      </p>
       <RulesEditor />
     </div>
   );
@@ -117,11 +119,15 @@ function effects(before: MembershipRules, after: MembershipRules): string[] {
   if (after.cycleDays !== before.cycleDays) out.push(`会籍周期 ${before.cycleDays} → ${after.cycleDays} 天：以后新开始的周期按新天数，累计充值按新天数滚动；已经在走的周期到期日不变`);
   if (after.graceDays !== before.graceDays) out.push(`补充期 ${before.graceDays} → ${after.graceDays} 天：以后进补充期的会员按新天数；已经在补充期的不变`);
   if (after.firstRechargeMinCents !== before.firstRechargeMinCents || after.topUpMinCents !== before.topUpMinCents)
-    out.push(`最低充值改为首充 ${after.firstRechargeMinCents ? formatYuan(after.firstRechargeMinCents) : '不限'}、续充 ${after.topUpMinCents ? formatYuan(after.topUpMinCents) : '不限'}：下一笔充值起生效`);
+    out.push(
+      `最低充值改为首充 ${after.firstRechargeMinCents ? formatYuan(after.firstRechargeMinCents) : '不限'}、续充 ${after.topUpMinCents ? formatYuan(after.topUpMinCents) : '不限'}：下一笔充值起生效`,
+    );
   if (after.reminderDays.join() !== before.reminderDays.join()) out.push(`到期提醒改为前 ${after.reminderDays.join('、')} 天：提醒名单马上按新天数`);
   if (after.onboardMaxGrade !== before.onboardMaxGrade) out.push(`期初导入定档最高 L${before.onboardMaxGrade} → L${after.onboardMaxGrade}：以后的期初导入按新上限`);
   if (after.birthdayLeadDays !== before.birthdayLeadDays)
-    out.push(`生日礼 ${before.birthdayLeadDays ? `生日前 ${before.birthdayLeadDays} 天` : '生日当天'} → ${after.birthdayLeadDays ? `生日前 ${after.birthdayLeadDays} 天` : '生日当天'}到账：今年还没发的按新天数`);
+    out.push(
+      `生日礼 ${before.birthdayLeadDays ? `生日前 ${before.birthdayLeadDays} 天` : '生日当天'} → ${after.birthdayLeadDays ? `生日前 ${after.birthdayLeadDays} 天` : '生日当天'}到账：今年还没发的按新天数`,
+    );
   if (after.trialInviteDays !== before.trialInviteDays) out.push(`邀请体验 ${before.trialInviteDays} → ${after.trialInviteDays} 天：以后发起的按新天数，已经在体验中的到期日不变`);
   if (after.trialInvitesPerMonth !== before.trialInvitesPerMonth)
     out.push(`每位会员每月能邀请 ${before.trialInvitesPerMonth} → ${after.trialInvitesPerMonth} 次${after.trialInvitesPerMonth === 0 ? '（0 = 不开放邀请体验）' : ''}：马上生效`);
@@ -187,17 +193,41 @@ function RulesEditor() {
                 <tr key={i}>
                   <td className="px-3 py-2 font-semibold">L{i}</td>
                   <td className="px-3 py-1.5">
-                    <Input value={g.name} maxLength={8} className="h-9" disabled={!editable} aria-label={`L${i} 名称`} data-testid={`rule-grade-name-${i}`} onChange={(e) => setGrade(i, { name: e.target.value })} />
+                    <Input
+                      value={g.name}
+                      maxLength={8}
+                      className="h-9"
+                      disabled={!editable}
+                      aria-label={`L${i} 名称`}
+                      data-testid={`rule-grade-name-${i}`}
+                      onChange={(e) => setGrade(i, { name: e.target.value })}
+                    />
                   </td>
                   <td className="px-3 py-1.5">
                     {i === 0 ? (
                       <span className="text-ink-3">免费注册</span>
                     ) : (
-                      <Input value={g.threshold} inputMode="decimal" className="num h-9" disabled={!editable} aria-label={`L${i} 门槛`} data-testid={`rule-grade-threshold-${i}`} onChange={(e) => setGrade(i, { threshold: e.target.value })} />
+                      <Input
+                        value={g.threshold}
+                        inputMode="decimal"
+                        className="num h-9"
+                        disabled={!editable}
+                        aria-label={`L${i} 门槛`}
+                        data-testid={`rule-grade-threshold-${i}`}
+                        onChange={(e) => setGrade(i, { threshold: e.target.value })}
+                      />
                     )}
                   </td>
                   <td className="px-3 py-1.5">
-                    <Input value={g.bonus} inputMode="decimal" className="num h-9" disabled={!editable} aria-label={`L${i} 赠送比例`} data-testid={`rule-grade-bonus-${i}`} onChange={(e) => setGrade(i, { bonus: e.target.value })} />
+                    <Input
+                      value={g.bonus}
+                      inputMode="decimal"
+                      className="num h-9"
+                      disabled={!editable}
+                      aria-label={`L${i} 赠送比例`}
+                      data-testid={`rule-grade-bonus-${i}`}
+                      onChange={(e) => setGrade(i, { bonus: e.target.value })}
+                    />
                   </td>
                 </tr>
               ))}
@@ -241,7 +271,14 @@ function RulesEditor() {
             <Input id="reminder-days" value={draft.reminderDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, reminderDays: e.target.value })} />
           </Field>
           <Field label="生日礼提前几天到账" htmlFor="birthday-lead" hint="发券规则的生日礼、权益的生日礼遇都按它；0 = 生日当天（HY13）">
-            <Input id="birthday-lead" value={draft.birthdayLead} inputMode="numeric" disabled={!editable} data-testid="rule-birthday-lead" onChange={(e) => setDraft({ ...draft, birthdayLead: e.target.value })} />
+            <Input
+              id="birthday-lead"
+              value={draft.birthdayLead}
+              inputMode="numeric"
+              disabled={!editable}
+              data-testid="rule-birthday-lead"
+              onChange={(e) => setDraft({ ...draft, birthdayLead: e.target.value })}
+            />
           </Field>
           <Field label="期初导入定档最高" htmlFor="onboard-max" hint="最高档要新充值达到门槛">
             <Select id="onboard-max" value={draft.onboardMaxGrade} disabled={!editable} onChange={(e) => setDraft({ ...draft, onboardMaxGrade: Number(e.target.value) })}>
@@ -262,13 +299,34 @@ function RulesEditor() {
         </p>
         <div className="mt-3 grid gap-4 sm:grid-cols-3">
           <Field label="体验几天" htmlFor="trial-days" hint="从发起当天算起">
-            <Input id="trial-days" value={draft.inviteDays} inputMode="numeric" disabled={!editable} data-testid="rule-trial-days" onChange={(e) => setDraft({ ...draft, inviteDays: e.target.value })} />
+            <Input
+              id="trial-days"
+              value={draft.inviteDays}
+              inputMode="numeric"
+              disabled={!editable}
+              data-testid="rule-trial-days"
+              onChange={(e) => setDraft({ ...draft, inviteDays: e.target.value })}
+            />
           </Field>
           <Field label="每位会员每月能邀请几次" htmlFor="trial-per-month" hint="0 = 不开放；撤销的不退">
-            <Input id="trial-per-month" value={draft.invitesPerMonth} inputMode="numeric" disabled={!editable} data-testid="rule-trial-per-month" onChange={(e) => setDraft({ ...draft, invitesPerMonth: e.target.value })} />
+            <Input
+              id="trial-per-month"
+              value={draft.invitesPerMonth}
+              inputMode="numeric"
+              disabled={!editable}
+              data-testid="rule-trial-per-month"
+              onChange={(e) => setDraft({ ...draft, invitesPerMonth: e.target.value })}
+            />
           </Field>
           <Field label="受邀人几个月内只能一次" htmlFor="trial-interval" hint="邀请体验、赠送会籍合计；撤销的不算">
-            <Input id="trial-interval" value={draft.inviteeMonths} inputMode="numeric" disabled={!editable} data-testid="rule-trial-interval" onChange={(e) => setDraft({ ...draft, inviteeMonths: e.target.value })} />
+            <Input
+              id="trial-interval"
+              value={draft.inviteeMonths}
+              inputMode="numeric"
+              disabled={!editable}
+              data-testid="rule-trial-interval"
+              onChange={(e) => setDraft({ ...draft, inviteeMonths: e.target.value })}
+            />
           </Field>
         </div>
       </Card>

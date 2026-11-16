@@ -2,13 +2,7 @@
 // 质保金提前几天提醒（P9）、本周应付看几周（P11）按付款规则（8.0.6，ERP「付款 → 付款规则」里改）。
 
 import { PAYMENT_STAGE_LABELS } from '@shared/contracts';
-import type {
-  PaymentTodo,
-  WarrantyRow,
-  WarrantyRowStatus,
-  WeeklyItem,
-  WeeklyPayables,
-} from '@shared/payments';
+import type { PaymentTodo, WarrantyRow, WarrantyRowStatus, WeeklyItem, WeeklyPayables } from '@shared/payments';
 import type { Db } from '../../db';
 import { openItems } from '../inventory/payables';
 import { invoiceChecks } from './match';
@@ -97,7 +91,9 @@ export async function weeklyPayables(db: Db, today: string): Promise<WeeklyPayab
   };
 
   // 已批待付
-  const approved = await db<{ id: number; requestNo: string; payee: string; contractId: number | null; contractNo: string | null; stage: string | null; expectedDate: string; amountCents: string; paidCents: string }[]>`
+  const approved = await db<
+    { id: number; requestNo: string; payee: string; contractId: number | null; contractNo: string | null; stage: string | null; expectedDate: string; amountCents: string; paidCents: string }[]
+  >`
     SELECT r.id, r.request_no, r.payee, r.contract_id, c.contract_no, r.stage, r.expected_date, r.amount_cents::text AS amount_cents, ${requestPaidSql(db)}::text AS paid_cents
     FROM payment_requests r LEFT JOIN contracts c ON c.id = r.contract_id
     WHERE r.status = 'approved' ORDER BY r.expected_date, r.id`;
@@ -124,7 +120,18 @@ export async function weeklyPayables(db: Db, today: string): Promise<WeeklyPayab
     for (const st of plan.stages) {
       // 申请「结束」了的段（P12，剩下的不付了）不算可付未申请
       if (st.availableCents > 0 && !st.done) {
-        put({ kind: 'available', date: today, amountCents: st.availableCents, payee: plan.payee, requestId: null, requestNo: null, contractId, contractNo: plan.contractNo, stage: st.stage, note: st.reason });
+        put({
+          kind: 'available',
+          date: today,
+          amountCents: st.availableCents,
+          payee: plan.payee,
+          requestId: null,
+          requestNo: null,
+          contractId,
+          contractNo: plan.contractNo,
+          stage: st.stage,
+          note: st.reason,
+        });
       }
     }
     const w = plan.warranty;
@@ -227,4 +234,3 @@ export async function paymentChecks(db: Db): Promise<{ key: string; label: strin
     },
   ];
 }
-

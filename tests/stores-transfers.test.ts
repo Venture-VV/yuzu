@@ -24,10 +24,24 @@ beforeAll(async () => {
   today = todayIn(ctx.config.timezone);
   const entity = await api(ctx.app, ctx.owner, 'POST', '/api/admin/entities', { name: '福田主体' });
   ft = (await api(ctx.app, ctx.owner, 'POST', '/api/admin/stores', { code: 'FT', name: '福田店', entityId: entity.body.id })).body.id;
-  const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'DB-01', name: '调拨用的毛巾', inventoryUnit: '条', decimals: 0, purchaseUnit: '包', purchaseFactorMilli: q(10), refPriceCents: 500 });
+  const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', {
+    code: 'DB-01',
+    name: '调拨用的毛巾',
+    inventoryUnit: '条',
+    decimals: 0,
+    purchaseUnit: '包',
+    purchaseFactorMilli: q(10),
+    refPriceCents: 500,
+  });
   expect(m.status, JSON.stringify(m.body)).toBe(201);
   materialId = m.body.id;
-  const opening = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, docType: 'opening', approveNow: true, lines: [{ materialId, qtyMilli: q(100) }] });
+  const opening = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', {
+    clientKey: randomUUID(),
+    docDate: today,
+    docType: 'opening',
+    approveNow: true,
+    lines: [{ materialId, qtyMilli: q(100) }],
+  });
   expect(opening.status, JSON.stringify(opening.body)).toBe(201);
 }, 90_000);
 afterAll(async () => ctx.close());

@@ -27,7 +27,12 @@ const RecordsQuery = z
   })
   .transform((q) => {
     const all = SECTION_TYPES[q.section];
-    const picked = q.types ? q.types.split(',').map((t) => t.trim()).filter(Boolean) : [...all];
+    const picked = q.types
+      ? q.types
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [...all];
     const bad = picked.find((t) => !all.includes(t as EntryType));
     if (bad) throw badRequest(`「${RECORD_SECTION_LABELS[q.section]}」里没有「${bad}」这种记录`);
     if (q.from && q.to && q.from > q.to) throw badRequest('开始日期不能晚于结束日期');
@@ -92,22 +97,38 @@ export function registerMemberRecordRoutes(app: FastifyInstance, deps: Deps) {
       ip: req.ip,
     });
     const time = (iso: string) => new Date(iso).toLocaleString('zh-CN', { timeZone: deps.config.timezone, hour12: false });
-    const body = [...rows].reverse().map((r) => [
-      r.businessDate,
-      time(r.createdAt),
-      r.docNo,
-      ENTRY_TYPE_LABELS[r.entryType],
-      r.summary,
-      r.paidAmount == null ? '' : formatAmount(r.paidAmount),
-      r.paymentMethod ? PAYMENT_METHOD_LABELS[r.paymentMethod] : '',
-      signed(r.principalDelta),
-      signed(r.bonusDelta),
-      formatAmount(r.principalAfter),
-      formatAmount(r.bonusAfter),
-      r.operatorName,
-      r.entryType === 'consume' && r.consumptionStatus === 'reversed' ? `已撤销（${r.relatedDocNo ?? ''}）` : '',
-    ]);
-    const sum = ['合计', '', `${totals.count} 笔`, '', '', q.section === 'recharge' ? formatAmount(totals.paid) : '', '', signed(q.section === 'consume' ? -totals.principal : totals.principal), signed(q.section === 'consume' ? -totals.bonus : totals.bonus), '', '', '', ''];
+    const body = [...rows]
+      .reverse()
+      .map((r) => [
+        r.businessDate,
+        time(r.createdAt),
+        r.docNo,
+        ENTRY_TYPE_LABELS[r.entryType],
+        r.summary,
+        r.paidAmount == null ? '' : formatAmount(r.paidAmount),
+        r.paymentMethod ? PAYMENT_METHOD_LABELS[r.paymentMethod] : '',
+        signed(r.principalDelta),
+        signed(r.bonusDelta),
+        formatAmount(r.principalAfter),
+        formatAmount(r.bonusAfter),
+        r.operatorName,
+        r.entryType === 'consume' && r.consumptionStatus === 'reversed' ? `已撤销（${r.relatedDocNo ?? ''}）` : '',
+      ]);
+    const sum = [
+      '合计',
+      '',
+      `${totals.count} 笔`,
+      '',
+      '',
+      q.section === 'recharge' ? formatAmount(totals.paid) : '',
+      '',
+      signed(q.section === 'consume' ? -totals.principal : totals.principal),
+      signed(q.section === 'consume' ? -totals.bonus : totals.bonus),
+      '',
+      '',
+      '',
+      '',
+    ];
     const csv = toCsv([['营业日', '时间', '单号', '类型', '内容', '实收', '收款方式', '本金变动', '赠金变动', '本金余额', '赠金余额', '经办人', '状态'], ...body, sum]);
     return csvReply(reply, `${member.name}-${RECORD_SECTION_LABELS[q.section]}${q.from || q.to ? `-${q.from ?? ''}至${q.to ?? ''}` : ''}.csv`, csv);
   });

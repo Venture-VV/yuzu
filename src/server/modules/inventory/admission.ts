@@ -48,7 +48,20 @@ const AdmissionInput = z.object({
 const licenseUrl = (id: number) => `/api/inventory/supplier-licenses/${id}/download`;
 
 export async function supplierLicenses(db: Db, supplierId: number): Promise<SupplierLicense[]> {
-  const rows = await db<{ id: number; supplierId: number; kind: SupplierLicense['kind']; name: string; licenseNo: string; validUntil: string | null; imageId: number | null; fileId: number | null; addedByName: string; addedAt: string }[]>`
+  const rows = await db<
+    {
+      id: number;
+      supplierId: number;
+      kind: SupplierLicense['kind'];
+      name: string;
+      licenseNo: string;
+      validUntil: string | null;
+      imageId: number | null;
+      fileId: number | null;
+      addedByName: string;
+      addedAt: string;
+    }[]
+  >`
     SELECT l.id, l.supplier_id, l.kind, l.name, l.license_no, l.valid_until::text AS valid_until, l.image_id, l.file_id,
            s.display_name AS added_by_name, l.added_at
     FROM supplier_licenses l JOIN staff s ON s.id = l.added_by
@@ -141,7 +154,14 @@ export async function removeLicense(deps: Deps, licenseId: number, raw: unknown,
       SELECT removed_at, kind, license_no FROM supplier_licenses WHERE id = ${licenseId} FOR UPDATE`;
     if (!row || row.removedAt) return; // 已经撤下了
     await tx`UPDATE supplier_licenses SET removed_by = ${actor.id}, removed_at = now(), remove_reason = ${reason} WHERE id = ${licenseId}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'supplier_license', targetType: 'supplier', targetId: supplierId, detail: { op: 'remove', supplier: s.name, licenseId, kind: row.kind, licenseNo: row.licenseNo, reason }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'supplier_license',
+      targetType: 'supplier',
+      targetId: supplierId,
+      detail: { op: 'remove', supplier: s.name, licenseId, kind: row.kind, licenseNo: row.licenseNo, reason },
+      ip,
+    });
   });
   return admissionView(deps.sql, supplierId, todayIn(deps.config.timezone));
 }
@@ -166,7 +186,14 @@ export async function setAdmission(deps: Deps, supplierId: number, raw: unknown,
     await tx`
       UPDATE suppliers SET admission = ${next}, admission_note = ${input.note}, admission_by = ${actor.id}, admission_at = now(), updated_at = now()
       WHERE id = ${supplierId}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'supplier_admission', targetType: 'supplier', targetId: supplierId, detail: { supplier: s.name, from: s.admission, to: next, note: input.note }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'supplier_admission',
+      targetType: 'supplier',
+      targetId: supplierId,
+      detail: { supplier: s.name, from: s.admission, to: next, note: input.note },
+      ip,
+    });
   });
   return admissionView(deps.sql, supplierId, today);
 }
@@ -216,9 +243,7 @@ export function registerAdmissionRoutes(app: FastifyInstance, deps: Deps) {
     reply.code(201);
     return view;
   });
-  app.post('/api/inventory/supplier-licenses/:id/remove', { preHandler: guard('inventory.master') }, async (req) =>
-    removeLicense(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip),
-  );
+  app.post('/api/inventory/supplier-licenses/:id/remove', { preHandler: guard('inventory.master') }, async (req) => removeLicense(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
   app.get('/api/inventory/supplier-licenses/:id/download', { preHandler: guard('inventory.read') }, async (req, reply) => {
     const { id } = parse(idParam, req.params);
     const [l] = await sql<{ fileId: number | null; licenseNo: string; kind: string }[]>`SELECT file_id, license_no, kind FROM supplier_licenses WHERE id = ${id}`;
@@ -228,9 +253,7 @@ export function registerAdmissionRoutes(app: FastifyInstance, deps: Deps) {
     attachment(reply, `证照-${l.licenseNo}.pdf`, file.mime);
     return reply.send(file.data);
   });
-  app.post('/api/inventory/suppliers/:id/admission', { preHandler: guard('inventory.approve') }, async (req) =>
-    setAdmission(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip),
-  );
+  app.post('/api/inventory/suppliers/:id/admission', { preHandler: guard('inventory.approve') }, async (req) => setAdmission(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
   app.get('/api/inventory/supplier-licenses/due', { preHandler: guard('inventory.read') }, async () => {
     const { licenseRemindDays } = await loadSettings(sql);
     return licensesDue(sql, today(), licenseRemindDays);

@@ -5,16 +5,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HandHeart, Plus } from 'lucide-react';
 import { PRICE_TIER_LABELS, PRICE_TIERS, type PriceTier } from '@shared/catalog';
-import {
-  CALL_TYPE_LABELS,
-  DEFAULT_TECHNICIAN_RULES,
-  gradeLabel,
-  MAX_TECH_NAME,
-  TECH_NO_PATTERN,
-  type CallType,
-  type TechnicianAdmin,
-  type TechnicianRules,
-} from '@shared/technicians';
+import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES, gradeLabel, MAX_TECH_NAME, TECH_NO_PATTERN, type CallType, type TechnicianAdmin, type TechnicianRules } from '@shared/technicians';
 import { api, errorMessage } from '../../lib/api';
 import { ClockroomRulesCard, CommissionCard } from './ClockroomCards';
 import { qk, useCatalog } from '../../lib/queries';
@@ -204,9 +195,7 @@ function RosterCard() {
       >
         技师名册
       </SectionTitle>
-      <p className="mt-1 text-[12.5px] text-ink-3">
-        工号保存后不变，纸质单与历史明细都按工号对得上；离职的停用（不删除，历史明细照常显示）。等级对应价目表的「标准 / 专业 / 优选」三档价格。
-      </p>
+      <p className="mt-1 text-[12.5px] text-ink-3">工号保存后不变，纸质单与历史明细都按工号对得上；离职的停用（不删除，历史明细照常显示）。等级对应价目表的「标准 / 专业 / 优选」三档价格。</p>
       <p className="mt-2 flex flex-wrap gap-1.5 text-[12.5px]">
         <Badge tone="pine">在职 {all.length - inactive} 人</Badge>
         {byGrade.map((x) => (
@@ -282,7 +271,8 @@ function TechnicianDialog({ target, categories, onClose }: { target: Tech | 'new
   }
   // 名册里的分类可能已不在价目表里（项目改了分类），照样列出，方便去掉
   const options = [...new Set([...categories, ...skills])];
-  const problem = isNew && !TECH_NO_PATTERN.test(techNo.trim()) ? '工号为 1–6 位数字或字母，例如 08、A12' : !name.trim() ? '请填写技师名字' : !/^\d{1,4}$/.test(sortOrder) ? '排序请填 0–9999 的整数' : null;
+  const problem =
+    isNew && !TECH_NO_PATTERN.test(techNo.trim()) ? '工号为 1–6 位数字或字母，例如 08、A12' : !name.trim() ? '请填写技师名字' : !/^\d{1,4}$/.test(sortOrder) ? '排序请填 0–9999 的整数' : null;
 
   const save = async () => {
     setSaving(true);
@@ -362,7 +352,10 @@ function TechnicianDialog({ target, categories, onClose }: { target: Tech | 'new
                   type="button"
                   aria-pressed={on}
                   onClick={() => setSkills(on ? skills.filter((x) => x !== c) : [...skills, c])}
-                  className={cn('h-8 rounded-full border px-3 text-[13px] font-semibold transition-colors', on ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-2 hover:border-ink-4')}
+                  className={cn(
+                    'h-8 rounded-full border px-3 text-[13px] font-semibold transition-colors',
+                    on ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-2 hover:border-ink-4',
+                  )}
                 >
                   {c}
                 </button>
@@ -444,9 +437,7 @@ function ItemsCard() {
   return (
     <Card className="p-5" data-testid="technician-items">
       <SectionTitle aside={!editable && <Badge>能管理价目的岗位可改</Badge>}>需要技师的项目</SectionTitle>
-      <p className="mt-1 text-[12.5px] text-ink-3">
-        勾上的项目在技师功能开启后挂账时要选技师（按摩、足疗、搓澡等）。也可以在「价目与套餐」里逐个项目设置。现在 {required} 个在售项目需要技师。
-      </p>
+      <p className="mt-1 text-[12.5px] text-ink-3">勾上的项目在技师功能开启后挂账时要选技师（按摩、足疗、搓澡等）。也可以在「价目与套餐」里逐个项目设置。现在 {required} 个在售项目需要技师。</p>
       {items.length === 0 ? (
         <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">价目表里还没有项目</p>
       ) : (
@@ -481,9 +472,7 @@ function ItemsCard() {
                         </label>
                         {!i.active && <Badge>已停用</Badge>}
                         {draft.has(i.id) && <Badge tone="lake">未保存</Badge>}
-                        <span className="text-[12px] text-ink-3">
-                          {i.prices.length > 1 ? `${i.prices.length} 档` : <Money cents={i.prices[0]!.price} />}
-                        </span>
+                        <span className="text-[12px] text-ink-3">{i.prices.length > 1 ? `${i.prices.length} 档` : <Money cents={i.prices[0]!.price} />}</span>
                         {on && <HandHeart className="size-4 text-pine" aria-label="需要技师" />}
                       </li>
                     );

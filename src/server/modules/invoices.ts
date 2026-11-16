@@ -265,7 +265,10 @@ export async function loadLedger(db: Db, raw: unknown, today: string, limit = LE
   const rows = await rowsWhere(db, where, limit + 1);
   const truncated = rows.length > limit;
   const shown = truncated ? rows.slice(0, limit) : rows;
-  const pos = await poSplits(db, shown.map((r) => Number(r.id)));
+  const pos = await poSplits(
+    db,
+    shown.map((r) => Number(r.id)),
+  );
   const invoices = shown.map((r) => toInvoice(r, pos.get(Number(r.id)) ?? [], rules, today));
   // 上方的数字：全部有效的发票，在 SQL 里数（不受列表张数限制）
   const [counts] = await db<{ pending: number; due: number; anomaly: number; recognized: number; valid: number }[]>`
@@ -333,8 +336,42 @@ export async function invoiceTodo(db: Db, today: string): Promise<InvoiceTodo> {
 }
 
 /** 登记报销页按号码找台账里的发票（没作废的） */
-export async function findByNo(db: Db, invoiceNo: string): Promise<{ id: number; invoiceNo: string; kind: string; kindLabel: string; issuerName: string; supplierId: number | null; invoiceDate: string; totalCents: number; taxCents: number; taxRateBp: number; usedBy: string | null; inPayables: boolean }[]> {
-  const rows = await db<{ id: number; invoiceNo: string; kind: string; kindLabel: string; issuerName: string; supplierId: number | null; supplierName: string | null; invoiceDate: string; totalCents: string; taxCents: string; taxRateBp: number; usedBy: string | null; poLines: number }[]>`
+export async function findByNo(
+  db: Db,
+  invoiceNo: string,
+): Promise<
+  {
+    id: number;
+    invoiceNo: string;
+    kind: string;
+    kindLabel: string;
+    issuerName: string;
+    supplierId: number | null;
+    invoiceDate: string;
+    totalCents: number;
+    taxCents: number;
+    taxRateBp: number;
+    usedBy: string | null;
+    inPayables: boolean;
+  }[]
+> {
+  const rows = await db<
+    {
+      id: number;
+      invoiceNo: string;
+      kind: string;
+      kindLabel: string;
+      issuerName: string;
+      supplierId: number | null;
+      supplierName: string | null;
+      invoiceDate: string;
+      totalCents: string;
+      taxCents: string;
+      taxRateBp: number;
+      usedBy: string | null;
+      poLines: number;
+    }[]
+  >`
     SELECT i.id, i.invoice_no, i.kind, i.kind_label, i.issuer_name, i.supplier_id, s.name AS supplier_name, i.invoice_date,
            i.total_cents::text AS total_cents, i.tax_cents::text AS tax_cents, i.tax_rate_bp,
            (SELECT c.doc_no FROM expense_claims c WHERE c.invoice_id = i.id AND c.status IN ${db(ACTIVE_CLAIM)} LIMIT 1) AS used_by,
@@ -387,11 +424,7 @@ export async function resolveClaimInvoice(tx: Tx, input: ClaimInvoiceInput, acto
   if (targetId === null) {
     const candidates = await findByNo(tx, input.invoiceNo);
     const issuer = (input.supplier?.name ?? input.issuerName).trim().toLowerCase();
-    const matched = issuer
-      ? candidates.filter(
-          (c) => (input.supplier && c.supplierId === input.supplier.id) || c.issuerName.trim().toLowerCase() === issuer || !c.issuerName.trim(),
-        )
-      : candidates;
+    const matched = issuer ? candidates.filter((c) => (input.supplier && c.supplierId === input.supplier.id) || c.issuerName.trim().toLowerCase() === issuer || !c.issuerName.trim()) : candidates;
     if (matched.length > 1) {
       throw conflict('INVOICE_AMBIGUOUS', `台账里有 ${matched.length} 张号码是 ${input.invoiceNo} 的发票，请在登记页选是哪一张`, {
         candidates: matched.map((c) => ({ id: c.id, issuerName: c.issuerName, invoiceDate: c.invoiceDate, totalCents: c.totalCents })),
@@ -474,9 +507,7 @@ export async function createManualInvoice(deps: Deps, raw: unknown, actor: Actor
       }
       await lockInvoiceNo(tx, input.invoiceNo);
       const issuer = (supplierName || input.issuerName).trim().toLowerCase();
-      const dup = (await findByNo(tx, input.invoiceNo)).find(
-        (c) => (input.supplierId && c.supplierId === input.supplierId) || c.issuerName.trim().toLowerCase() === issuer,
-      );
+      const dup = (await findByNo(tx, input.invoiceNo)).find((c) => (input.supplierId && c.supplierId === input.supplierId) || c.issuerName.trim().toLowerCase() === issuer);
       if (dup) throw conflict('INVOICE_DUPLICATE', `${dup.issuerName || '这个开票方'}的发票 ${input.invoiceNo} 已经在台账里了（登错了先作废原来那张）`, { invoiceId: dup.id });
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO supplier_invoices (invoice_no, supplier_id, issuer_name, invoice_date, total_cents, tax_cents, tax_rate_bp, note,
@@ -639,7 +670,14 @@ export async function voidInputInvoice(deps: Deps, invoiceId: number, reason: st
       SELECT doc_no FROM expense_claims WHERE invoice_id = ${invoiceId} AND status IN ${tx(ACTIVE_CLAIM)} LIMIT 1`;
     if (used) throw conflict('INVOICE_IN_CLAIM', `发票 ${inv.invoiceNo} 挂在报销单 ${used.docNo} 上，先撤回或冲销报销单再作废`, { docNo: used.docNo });
     await tx`UPDATE supplier_invoices SET status = 'voided', voided_by = ${actor.id}, voided_at = now(), void_reason = ${reason} WHERE id = ${invoiceId}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'payment_doc', targetType: 'supplier_invoice', targetId: invoiceId, detail: { op: 'void', invoiceNo: inv.invoiceNo, reason, source: inv.source }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'payment_doc',
+      targetType: 'supplier_invoice',
+      targetId: invoiceId,
+      detail: { op: 'void', invoiceNo: inv.invoiceNo, reason, source: inv.source },
+      ip,
+    });
   });
 }
 

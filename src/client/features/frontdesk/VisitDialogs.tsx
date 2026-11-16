@@ -1,15 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, CircleAlert, CircleCheck, ReceiptText, ShieldCheck } from 'lucide-react';
-import {
-  BILL_SOURCE_LABELS,
-  matchTags,
-  normalizeTagCode,
-  uniqueTagMatch,
-  ZONE_LABELS,
-  type BoardTag,
-  type FrontdeskBoardRules,
-  type VisitDetail,
-} from '@shared/frontdesk';
+import { BILL_SOURCE_LABELS, matchTags, normalizeTagCode, uniqueTagMatch, ZONE_LABELS, type BoardTag, type FrontdeskBoardRules, type VisitDetail } from '@shared/frontdesk';
 import { grantCovers, type VipGrant } from '@shared/grants';
 import { formatYuan } from '@shared/money';
 import { api } from '../../lib/api';
@@ -156,7 +147,14 @@ export function SwapDialog({
               label="新手牌"
               htmlFor="swap-code"
               error={candidates.length ? null : problem}
-              hint={!c && free[0] ? `同分区空闲牌如 ${free.slice(0, 4).map((t) => t.code).join('、')}` : undefined}
+              hint={
+                !c && free[0]
+                  ? `同分区空闲牌如 ${free
+                      .slice(0, 4)
+                      .map((t) => t.code)
+                      .join('、')}`
+                  : undefined
+              }
             >
               <Input
                 id="swap-code"
@@ -205,7 +203,10 @@ export function SwapDialog({
                     setChargeFee(r === LOST_REASON && fee > 0);
                   })
                 }
-                className={cn('h-9 rounded-full border px-3.5 text-[13px] font-semibold', reason === r ? 'border-pine bg-pine-tint text-pine' : 'border-line bg-card text-ink-2 hover:border-line-strong')}
+                className={cn(
+                  'h-9 rounded-full border px-3.5 text-[13px] font-semibold',
+                  reason === r ? 'border-pine bg-pine-tint text-pine' : 'border-line bg-card text-ink-2 hover:border-line-strong',
+                )}
               >
                 {r}
               </button>
@@ -276,19 +277,7 @@ export function SwapDialog({
 
 // ───────────────────────── 加入同行 ─────────────────────────
 
-export function JoinGroupDialog({
-  open,
-  visit,
-  tags,
-  onClose,
-  onDone,
-}: {
-  open: boolean;
-  visit: VisitDetail;
-  tags: BoardTag[];
-  onClose: () => void;
-  onDone: (v: VisitDetail) => void;
-}) {
+export function JoinGroupDialog({ open, visit, tags, onClose, onDone }: { open: boolean; visit: VisitDetail; tags: BoardTag[]; onClose: () => void; onDone: (v: VisitDetail) => void }) {
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -316,7 +305,11 @@ export function JoinGroupDialog({
   return (
     <Dialog open={open} onClose={onClose} title={`${visit.tag.code} 加入同行`} description="选择一位已在店的客人；对方已有同行组时加入该组，没有时自动新建。离店时可勾选同组手牌合并结账。">
       <Input data-autofocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="输入对方牌号（末位即可）" className="num text-[16px]" aria-label="对方牌号" />
-      {visit.group && <p className="mt-2 text-[12.5px] text-ink-3">{visit.tag.code} 目前在同行组 {visit.group.groupNo}，加入新组会先退出原组。</p>}
+      {visit.group && (
+        <p className="mt-2 text-[12.5px] text-ink-3">
+          {visit.tag.code} 目前在同行组 {visit.group.groupNo}，加入新组会先退出原组。
+        </p>
+      )}
       <ul className="mt-3 grid max-h-[320px] grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
         {candidates.slice(0, 30).map((t) => (
           <li key={t.id}>
@@ -357,14 +350,10 @@ export function PreviewDialog({
   onCheckout?: (visitIds: number[]) => void;
 }) {
   const [selected, setSelected] = useState<number[]>([]);
-  useResetOnOpen(
-    open,
-    () => {
-      const mates = visit.group?.mates.filter((m) => m.status === 'open').map((m) => m.visitId) ?? [];
-      setSelected(mates.length ? mates : [visit.id]);
-    },
-    [visit],
-  );
+  useResetOnOpen(open, () => {
+    const mates = visit.group?.mates.filter((m) => m.status === 'open').map((m) => m.visitId) ?? [];
+    setSelected(mates.length ? mates : [visit.id]);
+  }, [visit]);
   const preview = usePreview(selected, open);
   // 门票（与结账共用计价）：按此刻的在店时长估算，结账时按结账时刻重新计算
   const priced = useCheckoutPreview(selected, open);

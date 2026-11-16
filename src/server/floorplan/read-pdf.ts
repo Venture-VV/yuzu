@@ -93,8 +93,7 @@ const multiply = (m: Mat, n: ArrayLike<number>): Mat => [
   m[1] * n[4]! + m[3] * n[5]! + m[5],
 ];
 const apply = (m: Mat, x: number, y: number): Pt => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
-const isMatrix = (v: unknown): v is ArrayLike<number> =>
-  !!v && typeof v === 'object' && (v as ArrayLike<number>).length === 6 && Array.from(v as ArrayLike<number>).every(Number.isFinite);
+const isMatrix = (v: unknown): v is ArrayLike<number> => !!v && typeof v === 'object' && (v as ArrayLike<number>).length === 6 && Array.from(v as ArrayLike<number>).every(Number.isFinite);
 
 function cubicTo(out: number[], x0: number, y0: number, [x1, y1]: Pt, [x2, y2]: Pt, [x3, y3]: Pt) {
   const len = Math.hypot(x1 - x0, y1 - y0) + Math.hypot(x2 - x1, y2 - y1) + Math.hypot(x3 - x2, y3 - y2);
@@ -187,8 +186,7 @@ async function readPage(pdfjs: PdfJs, page: PDFPageProxy, ocgName: (id: string) 
   const toPage = multiply([1, 0, 0, -1, 0, vp.height], vp.transform);
   const width = vp.width;
   const height = vp.height;
-  const onPage = (x0: number, y0: number, x1: number, y1: number) =>
-    x1 >= -PAGE_TOLERANCE_PT && y1 >= -PAGE_TOLERANCE_PT && x0 <= width + PAGE_TOLERANCE_PT && y0 <= height + PAGE_TOLERANCE_PT;
+  const onPage = (x0: number, y0: number, x1: number, y1: number) => x1 >= -PAGE_TOLERANCE_PT && y1 >= -PAGE_TOLERANCE_PT && x0 <= width + PAGE_TOLERANCE_PT && y0 <= height + PAGE_TOLERANCE_PT;
   const count = (layer: string | null, type?: string) => {
     if (layer) counts.layerCounts[layer] = (counts.layerCounts[layer] ?? 0) + 1;
     if (type) counts.skipped[type] = (counts.skipped[type] ?? 0) + 1;
@@ -487,9 +485,7 @@ export async function readPdf(bytes: Uint8Array, opts: { scale?: number } = {}):
   const textCount = pages.reduce((n, pg) => n + pg.texts.length, 0);
   if (!pathCount) {
     const img = counts.skipped.IMAGE ?? 0;
-    throw new Error(
-      `PDF 里没有矢量线条${img ? `（只有 ${img} 张图片）` : ''}，可能是扫描件或图片转成的 PDF，转换不了；请让设计方从 CAD 导出矢量 PDF，或直接上传 DWG / DXF`,
-    );
+    throw new Error(`PDF 里没有矢量线条${img ? `（只有 ${img} 张图片）` : ''}，可能是扫描件或图片转成的 PDF，转换不了；请让设计方从 CAD 导出矢量 PDF，或直接上传 DWG / DXF`);
   }
   if (!textCount) throw new Error('PDF 里没有可读的文字（可能导出时把文字转成了曲线），认不出房号；请导出时保留文字，或直接上传 DWG / DXF');
   const fromText = scaleFromTexts(pages.flatMap((pg) => pg.texts.map((t) => t.text)));

@@ -105,9 +105,7 @@ export function rollUp<C extends CouponCell, V extends object>(
       g,
       [...acc[g].values()]
         .sort((a, b) =>
-          g === 'template' || g === 'benefit'
-            ? size(b.v) - size(a.v) || String(a.k.order).localeCompare(String(b.k.order))
-            : a.k.order < b.k.order ? -1 : a.k.order > b.k.order ? 1 : 0,
+          g === 'template' || g === 'benefit' ? size(b.v) - size(a.v) || String(a.k.order).localeCompare(String(b.k.order)) : a.k.order < b.k.order ? -1 : a.k.order > b.k.order ? 1 : 0,
         )
         .map(({ k: { order: _order, ...k }, v }) => ({ ...k, ...v })),
     ]),
@@ -186,8 +184,7 @@ export function usageCsv(u: CouponUsage): string {
 
 export function registerCouponUsageRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
-  const load = (q: UsageQueryInput) =>
-    readSnapshot(sql, async (tx) => couponUsage(tx, q, await businessToday(tx, deps), await loadMembershipRules(tx)));
+  const load = (q: UsageQueryInput) => readSnapshot(sql, async (tx) => couponUsage(tx, q, await businessToday(tx, deps), await loadMembershipRules(tx)));
 
   app.get('/api/coupons/usage', { preHandler: guardAny('coupon.manage', 'report.members') }, async (req) => load(parse(UsageQuery, req.query ?? {})));
 

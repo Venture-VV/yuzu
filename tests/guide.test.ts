@@ -81,7 +81,9 @@ describe('识别与坐标（纯函数）', () => {
     expect(detectMarkerKind('自助餐厅')).toBe('dining');
     expect(detectMarkerKind('吸烟区')).toBe('smoking');
     for (const t of ['员工更衣', '货梯', '布草间', '设备间', '技师休息', '大厅', '']) expect(detectMarkerKind(t)).toBeNull();
-    expect(svgLabels('<svg><g class="labels" fill="#6b7280"><text x="10" y="-2" font-size="30">卫生间</text><text x="5" y="6" font-size="30" transform="rotate(90 5 6)">A&amp;B</text></g></svg>')).toEqual([
+    expect(
+      svgLabels('<svg><g class="labels" fill="#6b7280"><text x="10" y="-2" font-size="30">卫生间</text><text x="5" y="6" font-size="30" transform="rotate(90 5 6)">A&amp;B</text></g></svg>'),
+    ).toEqual([
       { x: 10, y: -2, text: '卫生间' },
       { x: 5, y: 6, text: 'A&B' },
     ]);
@@ -197,7 +199,15 @@ describe('后台：设施图标', () => {
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/guide/markers', { ...body, kind: 'toilet' })).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     expect(manual).toMatchObject({ kind: 'smoking', x: 100, y: 100, label: '室外吸烟区', labelEn: 'Outdoor Smoking' });
     // 挪位置（存图纸坐标）
-    const moved = await api(ctx.app, ctx.owner, 'PUT', `/api/admin/guide/markers/${manual.id}`, { kind: 'smoking', x: floor.width - 50, y: 60, hidden: false, label: '室外吸烟区', labelEn: 'Outdoor Smoking', version: manual.version });
+    const moved = await api(ctx.app, ctx.owner, 'PUT', `/api/admin/guide/markers/${manual.id}`, {
+      kind: 'smoking',
+      x: floor.width - 50,
+      y: 60,
+      hidden: false,
+      label: '室外吸烟区',
+      labelEn: 'Outdoor Smoking',
+      version: manual.version,
+    });
     expect(moved.status, JSON.stringify(moved.body)).toBe(200);
     const m2 = (moved.body as GuideAdmin).markers.find((m) => m.id === manual.id)!;
     expect([m2.x, m2.y, m2.version]).toEqual([floor.width - 50, 60, manual.version + 1]);

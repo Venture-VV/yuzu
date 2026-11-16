@@ -218,9 +218,7 @@ export function createProtection(cfg: ProtectionConfig): Protection {
       const path = decodedPath(req.url);
       if (!path.startsWith('/api/') || PROBE_PATHS.has(path)) return undefined;
       const token = req.hasSession ? req.cookies[SESSION_COOKIE] : undefined;
-      const hit = token
-        ? sessions?.take(`s:${createHash('sha256').update(token).digest('base64url').slice(0, 22)}`)
-        : ips?.take(`ip:${req.ip}`);
+      const hit = token ? sessions?.take(`s:${createHash('sha256').update(token).digest('base64url').slice(0, 22)}`) : ips?.take(`ip:${req.ip}`);
       if (!hit || hit.ok) return undefined;
       counters.limited += 1;
       req.log.warn({ ip: req.ip, path, session: Boolean(token) }, '请求太频繁，这次没处理');

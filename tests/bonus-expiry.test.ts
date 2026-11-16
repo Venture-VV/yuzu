@@ -178,17 +178,29 @@ describe('先用最早到期的批次；到期作废', () => {
     const base = Date.now() - 40 * DAY;
     await recharge(deps, planRecharge(m.id, plan30, 50000, 5000), { actor: owner, at: at(0, base) });
     // 员工看到的还是 50000 + 5000（到期的赠金尚未作废）
-    const stale = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', spend(m.id, 1000, {
-      expectedBalance: { principal: 50000, bonus: 5000 },
-      expectedSplit: { principal: 0, bonus: 1000 },
-    }));
+    const stale = await api(
+      ctx.app,
+      ctx.clerk,
+      'POST',
+      '/api/consumptions',
+      spend(m.id, 1000, {
+        expectedBalance: { principal: 50000, bonus: 5000 },
+        expectedSplit: { principal: 0, bonus: 1000 },
+      }),
+    );
     expect(stale.body.error.code).toBe('BALANCE_CHANGED');
     // 记账前的单独事务已把到期赠金作废并提交：刷新后余额只剩本金
     expect(await balanceOf(ctx, m.id)).toEqual({ principal: 50000, bonus: 0 });
-    const ok = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', spend(m.id, 1000, {
-      expectedBalance: { principal: 50000, bonus: 0 },
-      expectedSplit: { principal: 1000, bonus: 0 },
-    }));
+    const ok = await api(
+      ctx.app,
+      ctx.clerk,
+      'POST',
+      '/api/consumptions',
+      spend(m.id, 1000, {
+        expectedBalance: { principal: 50000, bonus: 0 },
+        expectedSplit: { principal: 1000, bonus: 0 },
+      }),
+    );
     expect(ok.status).toBe(200);
     await allChecksOk(today);
   });
@@ -254,8 +266,10 @@ describe('撤销消费时赠金回到原批次', () => {
     expect(r.body.balanceBefore).toEqual({ principal: 49000, bonus: 0 });
     expect(r.body.balanceAfter).toEqual({ principal: 50000, bonus: 0 });
     expect(await balanceOf(ctx, m.id)).toEqual({ principal: 50000, bonus: 0 });
-    const types = (await ctx.sql<{ entryType: string; bonusDelta: number }[]>`
-      SELECT entry_type, bonus_delta FROM ledger_entries WHERE member_id = ${m.id} ORDER BY id`).map((e) => `${e.entryType}:${e.bonusDelta}`);
+    const types = (
+      await ctx.sql<{ entryType: string; bonusDelta: number }[]>`
+      SELECT entry_type, bonus_delta FROM ledger_entries WHERE member_id = ${m.id} ORDER BY id`
+    ).map((e) => `${e.entryType}:${e.bonusDelta}`);
     expect(types).toEqual(['recharge:5000', 'consume:-5000', 'reversal:5000', 'expire:-5000']);
     const rows = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${m.id}/activity`)).body as { entryType: string; summary: string }[];
     expect(rows[0]).toMatchObject({ entryType: 'expire', summary: '赠金到期作废（撤销恢复时已过期）' });

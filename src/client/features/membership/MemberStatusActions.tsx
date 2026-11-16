@@ -197,9 +197,20 @@ function MergeDialog({ member, onClose, onDone }: { member: MemberDetail; onClos
         ) : (
           <div className="flex items-center justify-between gap-3 rounded-md bg-paper-2 px-3 py-2 text-[13px]">
             <span>
-              合并到 <b className="text-ink">{target.name}</b> <span className="num text-ink-3">{target.memberNo} · {formatPhone(target.phone)}</span>
+              合并到 <b className="text-ink">{target.name}</b>{' '}
+              <span className="num text-ink-3">
+                {target.memberNo} · {formatPhone(target.phone)}
+              </span>
             </span>
-            <Button size="sm" variant="ghost" onClick={() => { setTarget(null); setConfirmed(false); }} disabled={busy}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setTarget(null);
+                setConfirmed(false);
+              }}
+              disabled={busy}
+            >
               换一位
             </Button>
           </div>
@@ -222,7 +233,10 @@ function MergeDialog({ member, onClose, onDone }: { member: MemberDetail; onClos
                     onClick={() => setTarget(m)}
                   >
                     <span>
-                      <b className="text-ink">{m.name}</b> <span className="num text-ink-3">{m.memberNo} · {formatPhone(m.phone)}</span>
+                      <b className="text-ink">{m.name}</b>{' '}
+                      <span className="num text-ink-3">
+                        {m.memberNo} · {formatPhone(m.phone)}
+                      </span>
                     </span>
                     <span className="flex items-center gap-1.5">
                       {m.mergedIntoId !== null && <Badge tone="neutral">已合并</Badge>}

@@ -38,7 +38,12 @@ test.describe('8.0.21 开票申请', () => {
     const visitId = checkin.visits[0]!.id;
     await json(page, 'post', `/api/frontdesk/visits/${visitId}/charges`, { clientKey: randomUUID(), lines: [], customLines: [{ name: `E2E 开票按摩${stamp}`, amount: 6800 }], expectedTotal: 6800 });
     const preview = await json<{ totalAmount: number }>(page, 'get', `/api/frontdesk/checkout-preview?ids=${visitId}`);
-    const paid = await json<{ id: number; checkoutNo: string }>(page, 'post', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [visitId], expectedTotal: preview.totalAmount, payments: [{ method: 'cash', amount: preview.totalAmount }] });
+    const paid = await json<{ id: number; checkoutNo: string }>(page, 'post', '/api/frontdesk/checkouts', {
+      clientKey: randomUUID(),
+      visitIds: [visitId],
+      expectedTotal: preview.totalAmount,
+      payments: [{ method: 'cash', amount: preview.totalAmount }],
+    });
 
     await page.goto('/frontdesk');
     await page.getByTestId('open-checkouts').click();

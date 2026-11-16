@@ -52,10 +52,7 @@ export function TodayPanel() {
               <p className="text-[12px] text-ink-3">{s.data.reversal.count} 笔</p>
             </div>
           </div>
-          <Link
-            to="/settlement"
-            className="flex items-center justify-between border-t border-line px-4 py-2.5 text-[13px] font-semibold text-pine hover:bg-pine-tint"
-          >
+          <Link to="/settlement" className="flex items-center justify-between border-t border-line px-4 py-2.5 text-[13px] font-semibold text-pine hover:bg-pine-tint">
             {s.data.checks.every((c) => c.ok) ? '余额核对一致 · 查看日结' : '核对发现差异 · 查看日结'}
             <ArrowRight className="size-4" />
           </Link>
@@ -104,12 +101,24 @@ export function TodayPanel() {
       <div className="mt-auto rounded-lg border border-dashed border-line-strong px-4 py-3 text-[12.5px] text-ink-2">
         <p className="mb-2 font-bold text-ink-3">键盘快捷键</p>
         <ul className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-          <li className="flex items-center gap-2"><Kbd>/</Kbd> 搜索会员</li>
-          <li className="flex items-center gap-2"><Kbd>↵</Kbd> 选中第一位</li>
-          <li className="flex items-center gap-2"><Kbd>R</Kbd> 充值</li>
-          <li className="flex items-center gap-2"><Kbd>X</Kbd> 消费</li>
-          <li className="flex items-center gap-2"><Kbd>N</Kbd> 新建会员</li>
-          <li className="flex items-center gap-2"><Kbd>Esc</Kbd> 关闭面板</li>
+          <li className="flex items-center gap-2">
+            <Kbd>/</Kbd> 搜索会员
+          </li>
+          <li className="flex items-center gap-2">
+            <Kbd>↵</Kbd> 选中第一位
+          </li>
+          <li className="flex items-center gap-2">
+            <Kbd>R</Kbd> 充值
+          </li>
+          <li className="flex items-center gap-2">
+            <Kbd>X</Kbd> 消费
+          </li>
+          <li className="flex items-center gap-2">
+            <Kbd>N</Kbd> 新建会员
+          </li>
+          <li className="flex items-center gap-2">
+            <Kbd>Esc</Kbd> 关闭面板
+          </li>
         </ul>
       </div>
     </div>

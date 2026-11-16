@@ -19,26 +19,28 @@ export function createSql(
     idleInTransactionMs?: number;
   } = {},
 ): Sql {
-  return withStoreContext(postgres(databaseUrl, {
-    max: options.max ?? 10,
-    idle_timeout: 30,
-    connect_timeout: 10,
-    onnotice: () => {},
-    ...(options.idleInTransactionMs ? { connection: { idle_in_transaction_session_timeout: options.idleInTransactionMs } } : {}),
-    // 结果列名转为驼峰；金额（bigint / sum 结果）转为 number；
-    // 营业日 date 保持 "YYYY-MM-DD"；时间戳统一为 ISO 字符串，便于直接输出 JSON。
-    transform: { column: { from: postgres.toCamel } },
-    types: {
-      bigint: { to: 20, from: [20, 1700], serialize: (x: unknown) => String(x), parse: (x: string) => Number(x) },
-      dateOnly: { to: 1082, from: [1082], serialize: (x: unknown) => String(x), parse: (x: string) => x },
-      timestamptz: {
-        to: 1184,
-        from: [1184],
-        serialize: (x: unknown) => (x instanceof Date ? x.toISOString() : String(x)),
-        parse: (x: string) => new Date(x).toISOString(),
+  return withStoreContext(
+    postgres(databaseUrl, {
+      max: options.max ?? 10,
+      idle_timeout: 30,
+      connect_timeout: 10,
+      onnotice: () => {},
+      ...(options.idleInTransactionMs ? { connection: { idle_in_transaction_session_timeout: options.idleInTransactionMs } } : {}),
+      // 结果列名转为驼峰；金额（bigint / sum 结果）转为 number；
+      // 营业日 date 保持 "YYYY-MM-DD"；时间戳统一为 ISO 字符串，便于直接输出 JSON。
+      transform: { column: { from: postgres.toCamel } },
+      types: {
+        bigint: { to: 20, from: [20, 1700], serialize: (x: unknown) => String(x), parse: (x: string) => Number(x) },
+        dateOnly: { to: 1082, from: [1082], serialize: (x: unknown) => String(x), parse: (x: string) => x },
+        timestamptz: {
+          to: 1184,
+          from: [1184],
+          serialize: (x: unknown) => (x instanceof Date ? x.toISOString() : String(x)),
+          parse: (x: string) => new Date(x).toISOString(),
+        },
       },
-    },
-  }) as unknown as Sql);
+    }) as unknown as Sql,
+  );
 }
 
 /**

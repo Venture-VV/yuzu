@@ -25,16 +25,14 @@ export const useDeptStocktake = (deptId: number | null) =>
   });
 
 /** 对账提醒：月结的上个月、按批次的收货单 */
-export const useReconReminders = (enabled = true) =>
-  useQuery({ queryKey: cyclesKeys.recon, queryFn: () => api.get<ReconReminders>('/api/payables/cycles'), enabled });
+export const useReconReminders = (enabled = true) => useQuery({ queryKey: cyclesKeys.recon, queryFn: () => api.get<ReconReminders>('/api/payables/cycles'), enabled });
 
 const RECON_PAGE = 50;
 /** 对账登记记录按页往前翻（新的在前；v0.7.14：超过一页的也能找到并撤销） */
 export const useReconciliationPages = (enabled = true) =>
   useInfiniteQuery({
     queryKey: ['inv', 'cycles', 'recon-pages'] as const,
-    queryFn: ({ pageParam }) =>
-      api.get<SupplierReconciliation[]>(`/api/payables/reconciliations?limit=${RECON_PAGE}${pageParam ? `&beforeId=${pageParam}` : ''}`),
+    queryFn: ({ pageParam }) => api.get<SupplierReconciliation[]>(`/api/payables/reconciliations?limit=${RECON_PAGE}${pageParam ? `&beforeId=${pageParam}` : ''}`),
     initialPageParam: 0,
     getNextPageParam: (last) => (last.length === RECON_PAGE ? last[last.length - 1]!.id : undefined),
     enabled,

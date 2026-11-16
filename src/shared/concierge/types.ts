@@ -3,7 +3,7 @@ export type TeamUser = {
   userId: string | null;
   name: string;
   email: string;
-  role: "manager" | "butler";
+  role: 'manager' | 'butler';
   active: boolean;
   login?: string;
   hasPassword?: boolean;
@@ -26,7 +26,7 @@ export type NativeMemberSummary = {
 };
 export type NativeResourceOption = {
   key: string;
-  kind: "space" | "dining_table" | "room";
+  kind: 'space' | 'dining_table' | 'room';
   id: number;
   category: string;
   categoryLabel: string;
@@ -42,7 +42,7 @@ export type NativeSpending = {
   docNo: string;
   occurredAt: string;
   businessDate: string;
-  status: "completed" | "reversed";
+  status: 'completed' | 'reversed';
   operatorName: string;
   totalCents: number;
   principalCents: number;
@@ -122,7 +122,7 @@ export type Visit = {
   appointmentId: string;
   hostId: string;
   partySize: number;
-  status: "接待中" | "已完成";
+  status: '接待中' | '已完成';
   feedback: string;
   pending: string;
   createdByName: string;
@@ -133,12 +133,12 @@ export type Visit = {
 export type Task = {
   id: string;
   memberId: string;
-  kind: "回访" | "交班";
+  kind: '回访' | '交班';
   category: string;
   content: string;
   assigneeId: string;
   dueAt: string;
-  status: "待处理" | "处理中" | "待接收" | "已接收" | "已完成";
+  status: '待处理' | '处理中' | '待接收' | '已接收' | '已完成';
   result: string;
   nextAction: string;
   createdByName: string;
@@ -177,13 +177,13 @@ export type ReceiptItem = {
   packageIncluded?: boolean;
 };
 export type ReceiptReview = {
-  mode: "exceptions";
+  mode: 'exceptions';
   checkedIssueKeys: string[];
   summaryConfirmed: boolean;
 };
 export type ReceiptReviewIssue = {
   key: string;
-  scope: "name" | "amount" | "quantity" | "payment" | "total" | "header";
+  scope: 'name' | 'amount' | 'quantity' | 'payment' | 'total' | 'header';
   itemIndex?: number;
   message: string;
   blocking: boolean;
@@ -212,8 +212,8 @@ export type Receipt = {
   number: string;
   store: string;
   occurredAt: string;
-  kind: "结算单" | "消费清单" | "退款单" | "作废单";
-  status: "待核对" | "待补全" | "待复核" | "已确认" | "已作废";
+  kind: '结算单' | '消费清单' | '退款单' | '作废单';
+  status: '待核对' | '待补全' | '待复核' | '已确认' | '已作废';
   amountCents: number | null;
   payments: Payment[];
   itemsText: string;
@@ -271,7 +271,7 @@ export type WorkspaceData = {
   sync: { serverTime: string; pollSeconds: number };
   resourceOptions?: NativeResourceOption[];
   capabilities: {
-    ocr: "browser";
+    ocr: 'browser';
     staffLogin: boolean;
     accessRestricted: boolean;
     operate?: boolean;

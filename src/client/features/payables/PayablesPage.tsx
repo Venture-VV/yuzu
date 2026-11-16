@@ -199,7 +199,9 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
                     {s.balanceCents < 0 && <span className="block text-[11px] font-semibold text-clay">供应商欠我们（预付 / 退货余额）</span>}
                   </td>
                   <td className="num px-2 py-2.5 text-right">{s.creditCents ? <Money cents={s.creditCents} className="text-ember" /> : <span className="text-ink-4">·</span>}</td>
-                  <td className="num px-2 py-2.5 text-right" data-testid={`warranty-held-${s.code}`}>{s.warrantyHeldCents ? <Money cents={s.warrantyHeldCents} /> : <span className="text-ink-4">·</span>}</td>
+                  <td className="num px-2 py-2.5 text-right" data-testid={`warranty-held-${s.code}`}>
+                    {s.warrantyHeldCents ? <Money cents={s.warrantyHeldCents} /> : <span className="text-ink-4">·</span>}
+                  </td>
                   <td className="num px-2 py-2.5 text-right text-yuzu-deep">{s.pendingPaymentCents ? <Money cents={s.pendingPaymentCents} /> : <span className="text-ink-4">·</span>}</td>
                   <td className="px-4 py-2.5 text-right">
                     <span className="flex justify-end gap-1.5">
@@ -207,7 +209,10 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
                         对账单
                       </Button>
                       {can('payable.manage') && s.balanceCents > 0 && (
-                        <Link to={`/payables/pay?supplier=${s.supplierId}`} className="flex h-8 items-center rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold whitespace-nowrap hover:border-ink-3">
+                        <Link
+                          to={`/payables/pay?supplier=${s.supplierId}`}
+                          className="flex h-8 items-center rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold whitespace-nowrap hover:border-ink-3"
+                        >
                           付款
                         </Link>
                       )}
@@ -256,7 +261,15 @@ function StatementView({
           ))}
         </Select>
         <span className="flex items-center gap-1.5 text-[13px] text-ink-3">
-          <Input fullWidth={false} type="date" value={range.from} max={range.to} onChange={(e) => setRange({ ...range, from: e.target.value })} className="h-9 w-[150px] text-[13px]" aria-label="开始日期" />
+          <Input
+            fullWidth={false}
+            type="date"
+            value={range.from}
+            max={range.to}
+            onChange={(e) => setRange({ ...range, from: e.target.value })}
+            className="h-9 w-[150px] text-[13px]"
+            aria-label="开始日期"
+          />
           至
           <Input fullWidth={false} type="date" value={range.to} max={today} onChange={(e) => setRange({ ...range, to: e.target.value })} className="h-9 w-[150px] text-[13px]" aria-label="结束日期" />
         </span>
@@ -265,7 +278,12 @@ function StatementView({
         </Button>
         <span className="flex-1" />
         {supplierId && can('inventory.export') && (
-          <Button size="sm" variant="secondary" icon={<Download className="size-4" />} onClick={() => downloadUrl(`/api/payables/statement/export?supplierId=${supplierId}&from=${range.from}&to=${range.to}`)}>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Download className="size-4" />}
+            onClick={() => downloadUrl(`/api/payables/statement/export?supplierId=${supplierId}&from=${range.from}&to=${range.to}`)}
+          >
             导出对账单
           </Button>
         )}
@@ -277,10 +295,14 @@ function StatementView({
       ) : !st.data ? (
         <Skeleton className="h-64" />
       ) : (
-        <StatementBody st={st.data} onPayment={onPayment} onOpening={(id) => {
-          const doc = openings.data?.find((o) => o.id === id);
-          if (doc) onOpening(doc);
-        }} />
+        <StatementBody
+          st={st.data}
+          onPayment={onPayment}
+          onOpening={(id) => {
+            const doc = openings.data?.find((o) => o.id === id);
+            if (doc) onOpening(doc);
+          }}
+        />
       )}
       {supplierId && st.data && <CreditsSection supplierId={supplierId} />}
     </div>
@@ -308,9 +330,7 @@ function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment:
         <Op>=</Op>
         <Formula label="期末余额" cents={st.endCents} strong />
       </div>
-      <p className="text-[12px] text-ink-3">
-        价格口径：{st.priceBasis}。门店内部管理口径，不是发票或税务核算；对账、导出不会新增应付。
-      </p>
+      <p className="text-[12px] text-ink-3">价格口径：{st.priceBasis}。门店内部管理口径，不是发票或税务核算；对账、导出不会新增应付。</p>
 
       <section>
         <h3 className="mb-2 text-[13px] font-bold text-ink-2">本期明细</h3>
@@ -335,7 +355,11 @@ function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment:
                     <td className="num px-4 py-2 whitespace-nowrap text-ink-2">{r.date}</td>
                     <td className="px-2 py-2">
                       <span className="font-semibold">{KIND_LABEL[r.kind]}</span>
-                      {r.isVoid && <Badge tone="clay" className="ml-1">冲销</Badge>}
+                      {r.isVoid && (
+                        <Badge tone="clay" className="ml-1">
+                          冲销
+                        </Badge>
+                      )}
                     </td>
                     <td className="num px-2 py-2">
                       {r.docKind === 'inv_doc' ? (
@@ -517,8 +541,24 @@ function SettlementsView() {
   const [refundId, setRefundId] = useState<number | null>(null);
   const rows =
     kind === 'offsets'
-      ? (offsets.data ?? []).map((o) => ({ id: o.id, docNo: o.docNo, supplier: o.supplier.name, date: o.offsetDate, amountCents: o.amountCents, status: o.status, detail: `用 ${o.credit.docNo} 抵扣 ${o.lines.map((l) => l.docNo).join('、')}` }))
-      : (refunds.data ?? []).map((r) => ({ id: r.id, docNo: r.docNo, supplier: r.supplier.name, date: r.refundDate, amountCents: r.amountCents, status: r.status, detail: `退回 ${r.credit.docNo} · ${PAY_METHOD_LABELS[r.method]} · ${r.evidence}` }));
+      ? (offsets.data ?? []).map((o) => ({
+          id: o.id,
+          docNo: o.docNo,
+          supplier: o.supplier.name,
+          date: o.offsetDate,
+          amountCents: o.amountCents,
+          status: o.status,
+          detail: `用 ${o.credit.docNo} 抵扣 ${o.lines.map((l) => l.docNo).join('、')}`,
+        }))
+      : (refunds.data ?? []).map((r) => ({
+          id: r.id,
+          docNo: r.docNo,
+          supplier: r.supplier.name,
+          date: r.refundDate,
+          amountCents: r.amountCents,
+          status: r.status,
+          detail: `退回 ${r.credit.docNo} · ${PAY_METHOD_LABELS[r.method]} · ${r.evidence}`,
+        }));
   const pending = kind === 'offsets' ? offsets.isPending : refunds.isPending;
   return (
     <div className="space-y-3">
@@ -541,7 +581,11 @@ function SettlementsView() {
         <ul className="overflow-hidden rounded-lg border border-line bg-card shadow-card">
           {rows.map((r) => (
             <li key={r.id} className="border-b border-line/70 last:border-0">
-              <button type="button" onClick={() => (kind === 'offsets' ? setOffsetId(r.id) : setRefundId(r.id))} className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-4 px-4 py-2.5 text-left hover:bg-pine-tint/50">
+              <button
+                type="button"
+                onClick={() => (kind === 'offsets' ? setOffsetId(r.id) : setRefundId(r.id))}
+                className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-4 px-4 py-2.5 text-left hover:bg-pine-tint/50"
+              >
                 <span className="min-w-0">
                   <span className="flex items-center gap-2">
                     <span className="num text-[13.5px] font-bold">{r.docNo}</span>

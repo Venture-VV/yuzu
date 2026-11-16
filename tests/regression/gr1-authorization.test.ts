@@ -37,8 +37,7 @@ const checkoutBody = (visitIds: number[], discount: number, grantId: string, cas
   payments: [{ method: 'discount', amount: discount, grantId }, ...(cash > 0 ? [{ method: 'cash', amount: cash }] : [])],
 });
 const pay = (cookie: string, body: unknown) => api(ctx.app, cookie, 'POST', '/api/frontdesk/checkouts', body);
-const grantRow = async (id: string) =>
-  (await ctx.sql<{ usedAt: string | null; usedRef: string | null }[]>`SELECT used_at, used_ref FROM auth_grants WHERE id = ${id}`)[0]!;
+const grantRow = async (id: string) => (await ctx.sql<{ usedAt: string | null; usedRef: string | null }[]>`SELECT used_at, used_ref FROM auth_grants WHERE id = ${id}`)[0]!;
 const visitStatus = async (id: number) => (await ctx.sql<{ status: string }[]>`SELECT status FROM visits WHERE id = ${id}`)[0]!.status;
 const breakdown = async () => businessBreakdown((await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${today}`)).body.business);
 

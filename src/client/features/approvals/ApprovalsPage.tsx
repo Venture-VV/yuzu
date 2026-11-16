@@ -5,13 +5,7 @@
 import { useMemo, useState } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { CheckCheck, ChevronDown, ChevronUp, PackageCheck, PackageX, RotateCcw, TriangleAlert } from 'lucide-react';
-import {
-  APPROVAL_DOC_TYPE_LABELS,
-  NO_BATCH_DOC_TYPES,
-  type ApprovalCard,
-  type BatchApproveResult,
-  type UrgentAcceptItem,
-} from '@shared/approvals';
+import { APPROVAL_DOC_TYPE_LABELS, NO_BATCH_DOC_TYPES, type ApprovalCard, type BatchApproveResult, type UrgentAcceptItem } from '@shared/approvals';
 import { formatAmount } from '@shared/money';
 import { errorMessage, UncertainError } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -220,7 +214,9 @@ function CardList({ cards, tab, onOpen }: { cards: ApprovalCard[]; tab: Approval
                 {c.stuck && <Badge tone="ember">没人能审</Badge>}
                 {c.actingFor.length > 0 && <Badge tone="moss">代 {c.actingFor.join('、')}</Badge>}
                 {sent.get(c.id) && <Badge tone="ember">结果待确认</Badge>}
-                {tab === 'submitted' && c.status !== 'pending' && <Badge tone={c.status === 'approved' ? 'pine' : 'neutral'}>{c.status === 'approved' ? '已通过' : c.status === 'returned' ? '已退回' : '已撤回'}</Badge>}
+                {tab === 'submitted' && c.status !== 'pending' && (
+                  <Badge tone={c.status === 'approved' ? 'pine' : 'neutral'}>{c.status === 'approved' ? '已通过' : c.status === 'returned' ? '已退回' : '已撤回'}</Badge>
+                )}
                 <span className="ml-auto">
                   {c.amountCents !== null ? <Money cents={c.amountCents} className="text-[15px] font-bold" /> : <span className="text-[12px] text-ink-3">金额算不出</span>}
                 </span>
@@ -408,7 +404,11 @@ function AcceptStrip({ items }: { items: UrgentAcceptItem[] }) {
   );
 }
 
-function BackfillStrip({ items }: { items: { receiptId: number; docNo: string; departmentName: string | null; supplierName: string | null; amountCents: number; confirmedAt: string; daysOver: number; handlerName: string }[] }) {
+function BackfillStrip({
+  items,
+}: {
+  items: { receiptId: number; docNo: string; departmentName: string | null; supplierName: string | null; amountCents: number; confirmedAt: string; daysOver: number; handlerName: string }[];
+}) {
   const [open, setOpen] = useState(false);
   const escalateDays = useSession().rules.urgentEscalateDays;
   return (

@@ -53,13 +53,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
 }
 
-const AVATAR_TONES = [
-  'bg-pine-soft text-pine',
-  'bg-moss-soft text-moss',
-  'bg-yuzu-soft text-yuzu-deep',
-  'bg-ember-soft text-ember',
-  'bg-lake-soft text-lake',
-];
+const AVATAR_TONES = ['bg-pine-soft text-pine', 'bg-moss-soft text-moss', 'bg-yuzu-soft text-yuzu-deep', 'bg-ember-soft text-ember', 'bg-lake-soft text-lake'];
 export const avatarTone = (seed: number) => AVATAR_TONES[seed % AVATAR_TONES.length]!;
 
 /**

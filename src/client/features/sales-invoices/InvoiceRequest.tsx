@@ -179,7 +179,11 @@ export function InvoiceRequestDialog({ open, sourceType, sourceId, onClose }: { 
       <div className="space-y-4" data-testid="invoice-request-dialog">
         <ErpPendingPanel types={['invoice_request']} onFound={() => void info.refetch()} />
         {!d ? (
-          info.error ? <LoadFailed title={`可开票的金额取不回来：${errorMessage(info.error)}`} onRetry={() => void info.refetch()} retrying={info.isFetching} testId="invoice-request-error" /> : <Skeleton className="h-40" />
+          info.error ? (
+            <LoadFailed title={`可开票的金额取不回来：${errorMessage(info.error)}`} onRetry={() => void info.refetch()} retrying={info.isFetching} testId="invoice-request-error" />
+          ) : (
+            <Skeleton className="h-40" />
+          )
         ) : (
           <>
             <div className="rounded-lg bg-paper-2/60 px-4 py-3 text-[13px]">

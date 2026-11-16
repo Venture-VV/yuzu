@@ -98,7 +98,10 @@ function TemplateEditor({ editing, onClose }: { editing: ContractTemplate | 'new
     setLast(editing);
     setName(t?.name ?? '');
     setCategory(t?.category ?? 'purchase');
-    setBody(t?.body ?? '# 第一条 合同标的\n\n甲方 {{我方}} 与乙方 {{相对方}} 就……订立本合同，合同编号 {{合同编号}}。\n\n# 第二条 价款与付款\n\n含税总价 {{总价}}（{{总价大写}}），按下表付款：\n\n{{付款节点}}');
+    setBody(
+      t?.body ??
+        '# 第一条 合同标的\n\n甲方 {{我方}} 与乙方 {{相对方}} 就……订立本合同，合同编号 {{合同编号}}。\n\n# 第二条 价款与付款\n\n含税总价 {{总价}}（{{总价大写}}），按下表付款：\n\n{{付款节点}}',
+    );
     setFields(t?.fields ?? []);
     setClauses(t?.clauses ?? []);
     setError(null);
@@ -164,15 +167,39 @@ function TemplateEditor({ editing, onClose }: { editing: ContractTemplate | 'new
             </div>
             {fields.map((f, i) => (
               <div key={i} className="mb-1.5 flex flex-wrap items-center gap-2">
-                <Input value={f.key} fullWidth={false} className="h-9 w-36" placeholder="字段名" onChange={(e) => setFields(fields.map((x, j) => (j === i ? { ...x, key: e.target.value.trim(), label: x.label || e.target.value.trim() } : x)))} aria-label={`字段 ${i + 1} 名`} />
-                <Input value={f.label} fullWidth={false} className="h-9 w-40" placeholder="起草时显示的说明" onChange={(e) => setFields(fields.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} aria-label={`字段 ${i + 1} 说明`} />
-                <Select value={f.type} fullWidth={false} className="h-9 w-24" onChange={(e) => setFields(fields.map((x, j) => (j === i ? { ...x, type: e.target.value as TemplateField['type'] } : x)))}>
+                <Input
+                  value={f.key}
+                  fullWidth={false}
+                  className="h-9 w-36"
+                  placeholder="字段名"
+                  onChange={(e) => setFields(fields.map((x, j) => (j === i ? { ...x, key: e.target.value.trim(), label: x.label || e.target.value.trim() } : x)))}
+                  aria-label={`字段 ${i + 1} 名`}
+                />
+                <Input
+                  value={f.label}
+                  fullWidth={false}
+                  className="h-9 w-40"
+                  placeholder="起草时显示的说明"
+                  onChange={(e) => setFields(fields.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                  aria-label={`字段 ${i + 1} 说明`}
+                />
+                <Select
+                  value={f.type}
+                  fullWidth={false}
+                  className="h-9 w-24"
+                  onChange={(e) => setFields(fields.map((x, j) => (j === i ? { ...x, type: e.target.value as TemplateField['type'] } : x)))}
+                >
                   <option value="text">文字</option>
                   <option value="number">数字</option>
                   <option value="date">日期</option>
                 </Select>
                 <label className="flex items-center gap-1 text-[12.5px]">
-                  <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={f.required} onChange={(e) => setFields(fields.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} />
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-[var(--color-pine)]"
+                    checked={f.required}
+                    onChange={(e) => setFields(fields.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))}
+                  />
                   必填
                 </label>
                 <IconButton label="删掉" onClick={() => setFields(fields.filter((_, j) => j !== i))}>
@@ -191,9 +218,21 @@ function TemplateEditor({ editing, onClose }: { editing: ContractTemplate | 'new
             {clauses.map((c, i) => (
               <div key={i} className="mb-2 space-y-1 rounded-md border border-line p-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Input value={c.title} fullWidth={false} className="h-9 w-48" placeholder="条款标题" onChange={(e) => setClauses(clauses.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} aria-label={`条款 ${i + 1} 标题`} />
+                  <Input
+                    value={c.title}
+                    fullWidth={false}
+                    className="h-9 w-48"
+                    placeholder="条款标题"
+                    onChange={(e) => setClauses(clauses.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))}
+                    aria-label={`条款 ${i + 1} 标题`}
+                  />
                   <label className="flex items-center gap-1 text-[12.5px]">
-                    <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={c.default} onChange={(e) => setClauses(clauses.map((x, j) => (j === i ? { ...x, default: e.target.checked } : x)))} />
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-[var(--color-pine)]"
+                      checked={c.default}
+                      onChange={(e) => setClauses(clauses.map((x, j) => (j === i ? { ...x, default: e.target.checked } : x)))}
+                    />
                     默认勾上
                   </label>
                   <span className="flex-1" />
@@ -201,7 +240,12 @@ function TemplateEditor({ editing, onClose }: { editing: ContractTemplate | 'new
                     <Trash2 className="size-4" />
                   </IconButton>
                 </div>
-                <Textarea value={c.text} onChange={(e) => setClauses(clauses.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))} className="min-h-14 text-[13px]" aria-label={`条款 ${i + 1} 内容`} />
+                <Textarea
+                  value={c.text}
+                  onChange={(e) => setClauses(clauses.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))}
+                  className="min-h-14 text-[13px]"
+                  aria-label={`条款 ${i + 1} 内容`}
+                />
               </div>
             ))}
           </div>

@@ -28,14 +28,9 @@ describe('全天房', () => {
 
   it('漏做夜审：退房时把少挂的几晚补上；已挂、作废过的不再补', () => {
     const stay = daily('2026-11-01T23:00:00', '2026-11-01');
-    expect(short(roomDues(stay, { ...none, nights: new Set(['2026-11-01']) }, at('2026-11-04T10:00:00'), DEFAULT_ROOM_RULES, clock))).toEqual([
-      '晚2026-11-02:38800',
-      '晚2026-11-03:38800',
-    ]);
+    expect(short(roomDues(stay, { ...none, nights: new Set(['2026-11-01']) }, at('2026-11-04T10:00:00'), DEFAULT_ROOM_RULES, clock))).toEqual(['晚2026-11-02:38800', '晚2026-11-03:38800']);
     // 11-02 那晚作废过（前台有意的更正）：不再补
-    expect(short(roomDues(stay, { ...none, nights: new Set(['2026-11-01', '2026-11-02']) }, at('2026-11-04T10:00:00'), DEFAULT_ROOM_RULES, clock))).toEqual([
-      '晚2026-11-03:38800',
-    ]);
+    expect(short(roomDues(stay, { ...none, nights: new Set(['2026-11-01', '2026-11-02']) }, at('2026-11-04T10:00:00'), DEFAULT_ROOM_RULES, clock))).toEqual(['晚2026-11-03:38800']);
   });
 
   it('退房时间、加收时刻按规则；半天按房价的一半取整到分', () => {

@@ -46,7 +46,10 @@ export function registerClientErrorRoutes(app: FastifyInstance): void {
     };
     recent.unshift(record);
     if (recent.length > KEEP) recent.length = KEEP;
-    req.log.warn({ clientError: { kind: record.kind, message: record.message, path: record.path, entry: record.entry, staffId: record.staff?.id ?? null, stack: record.stack?.slice(0, 600) } }, '页面报错');
+    req.log.warn(
+      { clientError: { kind: record.kind, message: record.message, path: record.path, entry: record.entry, staffId: record.staff?.id ?? null, stack: record.stack?.slice(0, 600) } },
+      '页面报错',
+    );
     return { ok: true };
   });
 

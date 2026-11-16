@@ -135,7 +135,8 @@ export function StayDialog({
         )}
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-lake-soft/50 px-3 py-2 text-[12.5px] text-ink-2">
           <span className="min-w-0 flex-1">
-            手牌 <b className="num">{d.tagCode}</b>：房费挂在手牌账单 {d.billNo} 上（账单合计 <Money cents={d.billAmount} />），离店时随手牌在前台一起结账。
+            手牌 <b className="num">{d.tagCode}</b>：房费挂在手牌账单 {d.billNo} 上（账单合计 <Money cents={d.billAmount} />
+            ），离店时随手牌在前台一起结账。
           </span>
           {onRoomDetail && (
             <button type="button" onClick={() => onRoomDetail(d.roomId)} className="inline-flex items-center gap-1 font-semibold text-pine hover:underline" data-testid="stay-room-detail">
@@ -177,7 +178,15 @@ export function StayDialog({
 
         {/* 房费 */}
         <div>
-          <SectionTitle aside={<span className="text-[12.5px] text-ink-3">已挂 <Money cents={d.chargedAmount} className="font-bold text-ink" /></span>}>房费</SectionTitle>
+          <SectionTitle
+            aside={
+              <span className="text-[12.5px] text-ink-3">
+                已挂 <Money cents={d.chargedAmount} className="font-bold text-ink" />
+              </span>
+            }
+          >
+            房费
+          </SectionTitle>
           {d.charges.length === 0 ? (
             <p className="mt-2 rounded-lg border border-dashed border-line-strong px-3 py-4 text-center text-[13px] text-ink-3">没有房费（都作废了）</p>
           ) : (
@@ -222,9 +231,7 @@ export function StayDialog({
                 <li key={x.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-3 py-2">
                   <span className="font-semibold">{DEPOSIT_KIND_LABELS[x.kind]}</span>
                   <span className="text-ink-3">{PAYMENT_METHOD_LABELS[x.method]}</span>
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">
-                    {[x.reason, x.ref, `${formatTime(x.createdAt)} ${x.operatorName}`].filter(Boolean).join(' · ')}
-                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">{[x.reason, x.ref, `${formatTime(x.createdAt)} ${x.operatorName}`].filter(Boolean).join(' · ')}</span>
                   <Money cents={x.kind === 'receive' ? x.amount : -x.amount} signed className="font-bold" />
                 </li>
               ))}
@@ -338,7 +345,17 @@ function ExtendDialog({ stay, onClose, onDone }: { stay: StayDetail; onClose: ()
       <PendingPanel op={op} onResolved={finish} />
       {!hourly && (
         <Field label="预计离店" htmlFor="stay-leave">
-          <Input fullWidth={false} id="stay-leave" type="date" min={stay.businessDate} value={leave} onChange={(e) => setLeave(e.target.value)} disabled={op.locked} className="w-48" data-testid="stay-extend-date" />
+          <Input
+            fullWidth={false}
+            id="stay-leave"
+            type="date"
+            min={stay.businessDate}
+            value={leave}
+            onChange={(e) => setLeave(e.target.value)}
+            disabled={op.locked}
+            className="w-48"
+            data-testid="stay-extend-date"
+          />
         </Field>
       )}
       {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} className="mt-3" />}
@@ -457,7 +474,15 @@ function DepositDialog({ stay, mode, onClose, onDone }: { stay: StayDetail; mode
                 data-testid="stay-refund-amount"
               />
             </div>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="退押金原因（至少 2 个字），例如：客人要求少押一些" maxLength={200} disabled={op.locked} aria-label="退押金原因" data-testid="stay-refund-reason" />
+            <Input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="退押金原因（至少 2 个字），例如：客人要求少押一些"
+              maxLength={200}
+              disabled={op.locked}
+              aria-label="退押金原因"
+              data-testid="stay-refund-reason"
+            />
           </>
         )}
         {problem && (receive ? draft.amount : true) && <p className="text-[12.5px] font-semibold text-clay">{problem}</p>}

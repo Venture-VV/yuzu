@@ -59,14 +59,7 @@ export const DEFAULT_USAGE_WINDOW_DAYS = 28;
 /** 称重容差与盘点、对账提醒的规则（#14、#23，v0.7.13，可调）：存成一条设置 inventory_cycle_rules */
 export type CycleRules = Pick<
   InventorySettings,
-  | 'weighTolerancePct'
-  | 'stocktakeDay'
-  | 'stocktakeGraceDays'
-  | 'monthlyReconDay'
-  | 'monthlyReconGraceDays'
-  | 'batchReconGraceDays'
-  | 'countBigPct'
-  | 'countBigCents'
+  'weighTolerancePct' | 'stocktakeDay' | 'stocktakeGraceDays' | 'monthlyReconDay' | 'monthlyReconGraceDays' | 'batchReconGraceDays' | 'countBigPct' | 'countBigCents'
 >;
 export const DEFAULT_CYCLE_RULES: CycleRules = {
   weighTolerancePct: 10,
@@ -156,9 +149,7 @@ export function coverFor(
   const isLow =
     m.tracked !== false &&
     m.replenishMode !== 'on_demand' &&
-    (m.coverDays !== null && daysOfCover !== null
-      ? daysOfCover < m.coverDays
-      : m.lowStockMilli !== undefined && m.lowStockMilli !== null && stockMilli < m.lowStockMilli);
+    (m.coverDays !== null && daysOfCover !== null ? daysOfCover < m.coverDays : m.lowStockMilli !== undefined && m.lowStockMilli !== null && stockMilli < m.lowStockMilli);
   return { dailyUsageMilli, daysOfCover, isLow };
 }
 
@@ -225,7 +216,6 @@ export async function warehouseInfo(db: Db, warehouseId: number) {
   return row ?? null;
 }
 
-
 export const docDateSchema = dateSchema();
 
 /**
@@ -245,7 +235,6 @@ export const sourcingHolds = (db: Db) => db`
 export function assertNotFuture(date: string, timeZone: string) {
   if (date > todayIn(timeZone)) throw unprocessable('FUTURE_DATE', '单据日期不能晚于今天');
 }
-
 
 export interface LockedMaterial {
   id: number;
@@ -282,11 +271,11 @@ export async function lockMaterials(tx: Tx, ids: number[]): Promise<Map<number, 
 }
 
 export function insufficient(m: LockedMaterial, needMilli: number): AppError {
-  return unprocessable(
-    'INSUFFICIENT_STOCK',
-    `「${m.name}」库存不足：当前 ${formatQty(m.stockMilli)} ${m.inventoryUnit}，需要 ${formatQty(needMilli)} ${m.inventoryUnit}`,
-    { materialId: m.id, stockMilli: m.stockMilli, needMilli },
-  );
+  return unprocessable('INSUFFICIENT_STOCK', `「${m.name}」库存不足：当前 ${formatQty(m.stockMilli)} ${m.inventoryUnit}，需要 ${formatQty(needMilli)} ${m.inventoryUnit}`, {
+    materialId: m.id,
+    stockMilli: m.stockMilli,
+    needMilli,
+  });
 }
 
 /** 出库前按物料汇总校验（同一单里同一物料出现多行时一起计算） */
@@ -320,11 +309,12 @@ export async function assertEnoughDeptStock(db: Db, warehouseId: number, warehou
     const stock = have.get(id)!.stockMilli;
     if (stock < qty) {
       const m = materials.get(id)!;
-      throw unprocessable(
-        'INSUFFICIENT_STOCK',
-        `「${m.name}」${warehouseName}库存不足：当前 ${formatQty(stock)} ${m.inventoryUnit}，需要 ${formatQty(qty)} ${m.inventoryUnit}`,
-        { materialId: m.id, stockMilli: stock, needMilli: qty, warehouseId },
-      );
+      throw unprocessable('INSUFFICIENT_STOCK', `「${m.name}」${warehouseName}库存不足：当前 ${formatQty(stock)} ${m.inventoryUnit}，需要 ${formatQty(qty)} ${m.inventoryUnit}`, {
+        materialId: m.id,
+        stockMilli: stock,
+        needMilli: qty,
+        warehouseId,
+      });
     }
   }
 }
@@ -422,20 +412,10 @@ export async function applyMove(
   m.costEstimated = estimated;
 }
 
-export type DocKind =
-  | 'inv_doc' | 'purchase_order' | 'payment' | 'opening_payable' | 'expense_claim' | 'petty_advance' | 'petty_settlement' | 'purchase_request'
-  | 'ap_offset' | 'supplier_refund';
+export type DocKind = 'inv_doc' | 'purchase_order' | 'payment' | 'opening_payable' | 'expense_claim' | 'petty_advance' | 'petty_settlement' | 'purchase_request' | 'ap_offset' | 'supplier_refund';
 export type ApprovalAction = 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise' | 'sign' | 'supplier_agree' | 'supplier_reject';
 
-export async function logApproval(
-  tx: Db,
-  kind: DocKind,
-  docId: number,
-  action: ApprovalAction,
-  actorId: number,
-  reason = '',
-  revision: number | null = null,
-) {
+export async function logApproval(tx: Db, kind: DocKind, docId: number, action: ApprovalAction, actorId: number, reason = '', revision: number | null = null) {
   await tx`
     INSERT INTO approval_logs (doc_kind, doc_id, action, actor_id, reason, revision)
     VALUES (${kind}, ${docId}, ${action}, ${actorId}, ${reason}, ${revision})`;
@@ -458,7 +438,6 @@ export async function poSettlement(db: Db, poId: number): Promise<'credit' | 'ca
     FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id WHERE p.id = ${poId}`;
   return row?.settlement ?? 'credit';
 }
-
 
 /**
  * 同口径的最近一次成交价：同一物料（即同规格）、同采购单位与换算、同价格口径的已生效收货。

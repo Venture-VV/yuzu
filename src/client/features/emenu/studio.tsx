@@ -164,7 +164,16 @@ export function StartFooterBlock({ node, tone, text, onExit }: { node: StudioBlo
       }
       onPointerUp={onExit ? stop : undefined}
       onPointerLeave={onExit ? stop : undefined}
-      style={{ ...box(0, 0, node.w), textAlign: 'center', fontSize: size, lineHeight: `${size}px`, letterSpacing: '0.09em', color: blockColor(node.props.color, tone), transform: large ? 'scale(1.2)' : undefined, transformOrigin: '50% 100%' }}
+      style={{
+        ...box(0, 0, node.w),
+        textAlign: 'center',
+        fontSize: size,
+        lineHeight: `${size}px`,
+        letterSpacing: '0.09em',
+        color: blockColor(node.props.color, tone),
+        transform: large ? 'scale(1.2)' : undefined,
+        transformOrigin: '50% 100%',
+      }}
       data-testid="emenu-footer"
     >
       {/* 设计稿：英文 12 号、夹在中间的中文（汤崎）13 号，同一条基线 */}
@@ -195,7 +204,13 @@ export function LangBlock({ node, lang, onToggle, autoLight }: { node: StudioBlo
     );
   }
   const toggle = <LangToggle lang={lang} onToggle={onToggle} x={0} y={0} light={light} />;
-  return Math.abs(k - 1) < 0.001 ? toggle : <ZoomAt x={0} y={0} k={k}>{toggle}</ZoomAt>;
+  return Math.abs(k - 1) < 0.001 ? (
+    toggle
+  ) : (
+    <ZoomAt x={0} y={0} k={k}>
+      {toggle}
+    </ZoomAt>
+  );
 }
 
 /** 起始页右下角很小的版本标记（发布过的才有）：出问题时好对是哪一版 */
@@ -213,7 +228,18 @@ export function StudioPreviewBand({ preview, error }: { preview: EmenuLayout['pr
   if (!preview && !error) return null;
   return (
     <div
-      style={{ ...box(0, 0, 1024, 22), zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: error ? 'var(--em-error)' : 'var(--em-tan)', color: 'var(--em-light)', fontSize: 11, pointerEvents: 'none' }}
+      style={{
+        ...box(0, 0, 1024, 22),
+        zIndex: 50,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        background: error ? 'var(--em-error)' : 'var(--em-tan)',
+        color: 'var(--em-light)',
+        fontSize: 11,
+        pointerEvents: 'none',
+      }}
       data-testid="emenu-studio-preview"
     >
       {error ?? `工作台预览（码 ${preview!.code}）· 这是草稿，不能下单 · ${new Date(preview!.expiresAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 前有效`}

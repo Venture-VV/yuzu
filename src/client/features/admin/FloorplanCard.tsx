@@ -52,13 +52,7 @@ export function FloorplanCard() {
   const [picked, setPicked] = useState<number | null>(null);
   const batches = list.data?.batches ?? [];
   // 默认看：转换中的 → 最新的待启用 → 在用的 → 最新的一批
-  const current =
-    picked ??
-    list.data?.converting?.id ??
-    batches.find((b) => b.status === 'ready')?.id ??
-    list.data?.activeId ??
-    batches[0]?.id ??
-    null;
+  const current = picked ?? list.data?.converting?.id ?? batches.find((b) => b.status === 'ready')?.id ?? list.data?.activeId ?? batches[0]?.id ?? null;
   return (
     <div className="space-y-4" data-testid="floorplans">
       <UploadCard converting={list.data?.converting ?? null} onUploaded={setPicked} />
@@ -171,11 +165,7 @@ function UploadCard({ converting, onUploaded }: { converting: FloorplanBatch | n
       onUploaded(r.batch.id);
       await invalidate();
     } catch (e) {
-      setError(
-        e instanceof UncertainError
-          ? '上传结果不明（网络中断或服务器很久没回应）。稍后刷新看列表里有没有这份图纸；同一份图纸重新上传不会重复转换。'
-          : errorMessage(e),
-      );
+      setError(e instanceof UncertainError ? '上传结果不明（网络中断或服务器很久没回应）。稍后刷新看列表里有没有这份图纸；同一份图纸重新上传不会重复转换。' : errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -225,7 +215,15 @@ function UploadCard({ converting, onUploaded }: { converting: FloorplanBatch | n
             </Field>
             {isPdf && (
               <Field label="图纸比例 1:" htmlFor="fp-scale" hint="选填；不填按页面上的比例文字（如「1:100」），都没有时转换失败" error={scaleOk ? null : `比例要是 1–${PDF_SCALE_MAX} 的整数`}>
-                <Input id="fp-scale" inputMode="numeric" value={scale} onChange={(e) => setScale(e.target.value.replace(/[^0-9]/g, ''))} placeholder="100" className="num w-28" data-testid="floorplan-pdf-scale" />
+                <Input
+                  id="fp-scale"
+                  inputMode="numeric"
+                  value={scale}
+                  onChange={(e) => setScale(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="100"
+                  className="num w-28"
+                  data-testid="floorplan-pdf-scale"
+                />
               </Field>
             )}
             <Field label="备注" htmlFor="fp-note" className={isPdf ? '' : 'lg:col-span-2'}>
@@ -488,7 +486,13 @@ function BatchDetail({ id }: { id: number }) {
             补画 {drawing.room.code}（{drawing.room.floorCode}）：在底图上按墙角顺序依次点，已点 {drawing.points.length} 个
           </span>
           <span className="flex-1" />
-          <Button size="sm" variant="ghost" icon={<Undo2 className="size-4" />} disabled={!drawing.points.length || outlineBusy} onClick={() => setDrawing({ ...drawing, points: drawing.points.slice(0, -1) })}>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Undo2 className="size-4" />}
+            disabled={!drawing.points.length || outlineBusy}
+            onClick={() => setDrawing({ ...drawing, points: drawing.points.slice(0, -1) })}
+          >
             撤销一点
           </Button>
           <Button size="sm" variant="ghost" disabled={outlineBusy} onClick={() => setDrawing(null)}>
@@ -592,7 +596,8 @@ function PlanViewer({
           options={floors.map((f) => ({ value: f.code, label: f.title ? `${f.code} ${f.title}` : f.code }))}
         />
         <span className="text-[12.5px] text-ink-3">
-          编码 {here.length} 个（配上轮廓 {here.filter((r) => r.status === 'ok').length} 个{here.some((r) => r.drawn) ? `，补画 ${here.filter((r) => r.drawn).length} 个` : ''}）· 底图 {fileSizeText(floor.svgBytes)}
+          编码 {here.length} 个（配上轮廓 {here.filter((r) => r.status === 'ok').length} 个{here.some((r) => r.drawn) ? `，补画 ${here.filter((r) => r.drawn).length} 个` : ''}）· 底图{' '}
+          {fileSizeText(floor.svgBytes)}
         </span>
         <span className="flex-1" />
         <Button size="sm" variant="ghost" icon={<Minus className="size-4" />} aria-label="缩小" onClick={() => setZoom((z) => Math.max(1, z / 1.5))} disabled={zoom <= 1} />
@@ -729,7 +734,12 @@ function Exceptions({
                 )}
               </span>
             )}
-            {r.status !== 'ok' && !r.drawn && <p className="w-full text-[12.5px] leading-relaxed text-ink-2">{FLOORPLAN_ROOM_HINTS[r.status]}{r.status !== 'duplicate' ? '；也可以在这一批的底图上补画轮廓' : ''}</p>}
+            {r.status !== 'ok' && !r.drawn && (
+              <p className="w-full text-[12.5px] leading-relaxed text-ink-2">
+                {FLOORPLAN_ROOM_HINTS[r.status]}
+                {r.status !== 'duplicate' ? '；也可以在这一批的底图上补画轮廓' : ''}
+              </p>
+            )}
           </li>
         ))}
       </ul>
@@ -857,7 +867,10 @@ function ReportView({ detail }: { detail: FloorplanDetail }) {
         )}
         <p className="text-ink-3">
           展开块参照 {r.source.inserts} 个；转成线 {r.source.paths} 条、文字 {r.source.texts} 个
-          {Object.keys(r.source.skipped).length > 0 && `；没转换的：${Object.entries(r.source.skipped).map(([k, v]) => `${k} ${v}`).join('、')}`}
+          {Object.keys(r.source.skipped).length > 0 &&
+            `；没转换的：${Object.entries(r.source.skipped)
+              .map(([k, v]) => `${k} ${v}`)
+              .join('、')}`}
         </p>
         <div className="max-h-72 overflow-auto rounded border border-line">
           <table className="w-full text-left text-[12.5px]">

@@ -77,9 +77,7 @@ test.describe('需求单草稿箱', () => {
         Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
         document.dispatchEvent(new Event('visibilitychange'));
       });
-      await expect
-        .poll(async () => ((await (await page.request.get(`/api/erp/requests/drafts/${key}`)).json()) as { body: { lines: { unit: string }[] } }).body.lines[0]!.unit)
-        .toBe('个');
+      await expect.poll(async () => ((await (await page.request.get(`/api/erp/requests/drafts/${key}`)).json()) as { body: { lines: { unit: string }[] } }).body.lines[0]!.unit).toBe('个');
 
       // 刷新：填过的内容和图片都在
       await page.reload();
@@ -90,7 +88,13 @@ test.describe('需求单草稿箱', () => {
       await expect(page.getByTestId('rq-unit-0')).toHaveValue('个');
       await expect(page.getByLabel('删除图片 1')).toBeVisible();
       await expect(page.getByTestId('rq-line-0').locator('img').first()).toHaveJSProperty('complete', true);
-      expect(await page.getByTestId('rq-line-0').locator('img').first().evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+      expect(
+        await page
+          .getByTestId('rq-line-0')
+          .locator('img')
+          .first()
+          .evaluate((img: HTMLImageElement) => img.naturalWidth),
+      ).toBeGreaterThan(0);
 
       // 改了数量，点返回离开：马上存一次，提示「已保存草稿」
       await page.getByTestId('rq-qty-0').fill('25');
@@ -160,7 +164,18 @@ test.describe('需求单草稿箱', () => {
       // 草稿箱里删除：另存一份新需求的草稿，在草稿箱里删掉
       const extra = randomUUID();
       const put = await page.request.put(`/api/erp/requests/drafts/${extra}`, {
-        data: { rev: 0, saveId: randomUUID(), requestId: null, body: { departmentId: dept.id, needBy: '', priority: 'normal', note: '', lines: [{ kind: 'new', materialId: null, name: `E2E 要删的草稿${tag}`, purpose: '', qty: '1', unit: '', refPrice: '', link: '', details: '', note: '', imageIds: [] }] } },
+        data: {
+          rev: 0,
+          saveId: randomUUID(),
+          requestId: null,
+          body: {
+            departmentId: dept.id,
+            needBy: '',
+            priority: 'normal',
+            note: '',
+            lines: [{ kind: 'new', materialId: null, name: `E2E 要删的草稿${tag}`, purpose: '', qty: '1', unit: '', refPrice: '', link: '', details: '', note: '', imageIds: [] }],
+          },
+        },
       });
       expect(put.ok()).toBe(true);
       await page.goto('/erp/requests');

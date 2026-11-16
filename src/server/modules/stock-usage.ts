@@ -91,7 +91,20 @@ export async function listRecipes(db: Db, actor: Actor): Promise<ItemRecipe[]> {
   const dining = { enabled: dr?.value?.enabled ?? DEFAULT_DINING_RULES.enabled };
   const cost = canSeeCost(actor);
   const items = await db<
-    { id: number; name: string; category: string; price: number; active: boolean; kitchen: boolean; recipeId: number | null; version: number | null; warehouseId: number | null; note: string | null; createdAt: string | null; createdBy: string | null }[]
+    {
+      id: number;
+      name: string;
+      category: string;
+      price: number;
+      active: boolean;
+      kitchen: boolean;
+      recipeId: number | null;
+      version: number | null;
+      warehouseId: number | null;
+      note: string | null;
+      createdAt: string | null;
+      createdBy: string | null;
+    }[]
   >`
     SELECT i.id, i.name, i.category, i.price, i.active,
            (i.station_id IS NOT NULL AND NOT i.technician_required AND COALESCE(ks.active, false)) AS kitchen,

@@ -35,9 +35,31 @@ export const DEMO_ITEMS = [
 ];
 
 const NAMES = [
-  '林小满', '周以安', '陈一禾', '沈知夏', '许嘉木', '苏晚晴', '顾青山', '叶闻溪', '江屿白', '宋雨棠',
-  '程野', '白露', '秦朗', '温言', '夏栀', '陆川', '姜禾', '方澄', '唐果', '孟夏',
-  '何溪', '黎明月', '杜若', '简一', '欧阳山野与温泉同行',
+  '林小满',
+  '周以安',
+  '陈一禾',
+  '沈知夏',
+  '许嘉木',
+  '苏晚晴',
+  '顾青山',
+  '叶闻溪',
+  '江屿白',
+  '宋雨棠',
+  '程野',
+  '白露',
+  '秦朗',
+  '温言',
+  '夏栀',
+  '陆川',
+  '姜禾',
+  '方澄',
+  '唐果',
+  '孟夏',
+  '何溪',
+  '黎明月',
+  '杜若',
+  '简一',
+  '欧阳山野与温泉同行',
 ];
 
 /** 可复现的伪随机数 */
@@ -102,7 +124,7 @@ async function seedMemberDemo(sql: Sql, config: AppConfig, options: { force?: bo
   const today = businessDateOf(now, config.timezone, settings.businessDayStartHour);
   const days = options.days ?? 6;
   const random = rng(20261025);
-  const pick = <T,>(list: T[]) => list[Math.floor(random() * list.length)]!;
+  const pick = <T>(list: T[]) => list[Math.floor(random() * list.length)]!;
   const staffPool = [owner, clerk, clerk, clerk2];
 
   // 会员
@@ -180,9 +202,7 @@ async function seedMemberDemo(sql: Sql, config: AppConfig, options: { force?: bo
     const count = isToday ? 7 : 6 + Math.floor(random() * 6);
     const times: Date[] = [];
     for (let k = 0; k < count; k++) {
-      const t = isToday
-        ? new Date(now.getTime() - (count - k) * 11 * 60_000)
-        : localTime(date, 10 + Math.floor((k / count) * 14), Math.floor(random() * 60));
+      const t = isToday ? new Date(now.getTime() - (count - k) * 11 * 60_000) : localTime(date, 10 + Math.floor((k / count) * 14), Math.floor(random() * 60));
       if (businessDateOf(t, config.timezone, settings.businessDayStartHour) === date) times.push(t);
     }
     const consumed: number[] = [];

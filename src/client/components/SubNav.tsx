@@ -55,7 +55,14 @@ export function SubNav({ tabs, base, active, label, className }: { tabs: readonl
   if (tabs.length < 2) return null;
   return (
     <nav ref={line.ref} aria-label={label} className={cn('scroll-thin relative flex gap-1 overflow-x-auto border-b border-line', className)} data-testid="subnav">
-      {line.style && <span aria-hidden className="mo-indicator rounded-t-full bg-pine" data-settled={line.settled} style={{ ...line.style, height: 2, transform: `translate3d(${line.box!.x}px, ${line.box!.y + line.box!.h - 2}px, 0)` }} />}
+      {line.style && (
+        <span
+          aria-hidden
+          className="mo-indicator rounded-t-full bg-pine"
+          data-settled={line.settled}
+          style={{ ...line.style, height: 2, transform: `translate3d(${line.box!.x}px, ${line.box!.y + line.box!.h - 2}px, 0)` }}
+        />
+      )}
       {tabs.map((t, i) => {
         const on = t.key === active;
         return (
@@ -106,7 +113,17 @@ export function SubTabPage({ tabs, base, label, header, children }: { tabs: read
  * 一个页签里的内容。不是当前页签时藏起来（不卸掉）：里面填到一半的东西、已经取到的数据都留着。
  * 页面没有二级页签（没包在 SubTabPage 里）时照常显示。
  */
-export function SubPane({ tab, children, className, lazy }: { tab: string; children: ReactNode; className?: string; /** 第一次点到这个页签才挂上（里面的东西重的时候用）；挂上以后照样只藏不卸 */ lazy?: boolean }) {
+export function SubPane({
+  tab,
+  children,
+  className,
+  lazy,
+}: {
+  tab: string;
+  children: ReactNode;
+  className?: string;
+  /** 第一次点到这个页签才挂上（里面的东西重的时候用）；挂上以后照样只藏不卸 */ lazy?: boolean;
+}) {
   const active = useActiveSubTab();
   const shown = active === null || active === tab;
   const [visited, setVisited] = useState(shown);

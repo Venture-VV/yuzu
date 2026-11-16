@@ -50,19 +50,25 @@ describe('迁移 029 · 原有库存与还没生效的领料、退回', () => {
       INSERT INTO materials (code, name, inventory_unit, purchase_unit, purchase_factor_milli) VALUES ('U001', '升级测试拖鞋', '双', '箱', 100000) RETURNING id`;
     // 028 时期：期初 10 双 → 领给浴区 4 双（都已生效）；之后一张领料退回 2 双、一张领料 1 双都还是草稿
     const docAt = async (no: string, type: string, status: string, extra: { departmentId?: number; sourceDocId?: number } = {}) =>
-      (await sql<{ id: number }[]>`
+      (
+        await sql<{ id: number }[]>`
         INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, department_id, source_doc_id, created_by, confirmed_by, confirmed_at)
         VALUES (${no}, ${type}, ${status}, ${today}, ${extra.departmentId ?? null}, ${extra.sourceDocId ?? null}, ${keeper!.id},
                 ${status === 'confirmed' ? keeper!.id : null}, ${status === 'confirmed' ? sql`now()` : null})
-        RETURNING id`)[0]!.id;
+        RETURNING id`
+      )[0]!.id;
     const lineOf = async (docId: number, qty: number, sourceLineId: number | null = null) =>
-      (await sql<{ id: number }[]>`
+      (
+        await sql<{ id: number }[]>`
         INSERT INTO inv_doc_lines (doc_id, line_no, material_id, qty_milli, inventory_unit, purchase_unit, factor_milli, source_line_id)
-        VALUES (${docId}, 1, ${mat!.id}, ${qty}, '双', '箱', 100000, ${sourceLineId}) RETURNING id`)[0]!.id;
+        VALUES (${docId}, 1, ${mat!.id}, ${qty}, '双', '箱', 100000, ${sourceLineId}) RETURNING id`
+      )[0]!.id;
     const move = async (docId: number, lineId: number, type: string, delta: number, after: number) =>
-      (await sql<{ id: number }[]>`
+      (
+        await sql<{ id: number }[]>`
         INSERT INTO stock_moves (material_id, move_type, doc_id, doc_line_id, qty_delta_milli, qty_after_milli, doc_date, operator_id)
-        VALUES (${mat!.id}, ${type}, ${docId}, ${lineId}, ${delta}, ${after}, ${today}, ${keeper!.id}) RETURNING id`)[0]!.id;
+        VALUES (${mat!.id}, ${type}, ${docId}, ${lineId}, ${delta}, ${after}, ${today}, ${keeper!.id}) RETURNING id`
+      )[0]!.id;
     const opening = await docAt('QC-U1', 'opening', 'confirmed');
     await move(opening, await lineOf(opening, 10_000), 'opening', 10_000, 10_000);
     const issue = await docAt('LY-U1', 'issue', 'confirmed', { departmentId: dept!.id });
@@ -94,7 +100,12 @@ describe('迁移 029 · 原有库存与还没生效的领料、退回', () => {
     expect(await sql`SELECT 1 FROM warehouse_stock WHERE material_id = ${mat!.id}`).toHaveLength(0);
     // 还没生效的领料提交后进部门小仓
     const issued = await api(app, cookie, 'PUT', `/api/inventory/docs/${pendingIssue}`, {
-      docType: 'issue', docDate: today, departmentId: dept!.id, handler: '浴区', action: 'submit', lines: [{ materialId: mat!.id, qtyMilli: 1_000 }],
+      docType: 'issue',
+      docDate: today,
+      departmentId: dept!.id,
+      handler: '浴区',
+      action: 'submit',
+      lines: [{ materialId: mat!.id, qtyMilli: 1_000 }],
     });
     expect(issued.status, JSON.stringify(issued.body)).toBe(200);
     expect(issued.body.warehouse.id).toBe(bathWh!.id);
@@ -102,7 +113,11 @@ describe('迁移 029 · 原有库存与还没生效的领料、退回', () => {
     for (const c of await inventoryChecks(sql)) expect(c, `${c.key} ${c.detail}`).toMatchObject({ ok: true });
     // 新登记的单据照常有操作编号（升级不影响建单）
     const fresh = await api(app, cookie, 'POST', '/api/inventory/docs', {
-      clientKey: randomUUID(), docType: 'issue_return', docDate: today, sourceDocId: pendingIssue, lines: [{ sourceLineId: issued.body.lines[0].id, qtyMilli: 1_000 }],
+      clientKey: randomUUID(),
+      docType: 'issue_return',
+      docDate: today,
+      sourceDocId: pendingIssue,
+      lines: [{ sourceLineId: issued.body.lines[0].id, qtyMilli: 1_000 }],
     });
     expect(fresh.status, JSON.stringify(fresh.body)).toBe(201);
     expect(fresh.body.doc.warehouse.id).toBe(bathWh!.id);

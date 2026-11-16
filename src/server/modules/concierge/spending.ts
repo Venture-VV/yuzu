@@ -1,25 +1,15 @@
-import type {
-  NativeSpending,
-  NativeSpendingPage,
-} from "@shared/concierge/types";
-import type { Db } from "../../db";
-import { memberFamily } from "../membership";
-import { canonicalMemberId } from "./native-links";
-import { uuid, WorkspaceError } from "./validation";
+import type { NativeSpending, NativeSpendingPage } from '@shared/concierge/types';
+import type { Db } from '../../db';
+import { memberFamily } from '../membership';
+import { canonicalMemberId } from './native-links';
+import { uuid, WorkspaceError } from './validation';
 
 /** Read only the actual wallet payer's documents. Checkout item snapshots are context,
  * never additional debits and never inferred unit prices. No wallet read-with-expiry API. */
-export async function nativeSpending(
-  db: Db,
-  profileId: string,
-  offset: number,
-): Promise<NativeSpendingPage> {
-  const [profile] =
-    await db`SELECT native_member_id FROM concierge_members WHERE id=${uuid(profileId)}::uuid`;
-  if (!profile) throw new WorkspaceError("服务档案不存在", 404);
-  const id = profile.nativeMemberId
-    ? await canonicalMemberId(db, Number(profile.nativeMemberId))
-    : null;
+export async function nativeSpending(db: Db, profileId: string, offset: number): Promise<NativeSpendingPage> {
+  const [profile] = await db`SELECT native_member_id FROM concierge_members WHERE id=${uuid(profileId)}::uuid`;
+  if (!profile) throw new WorkspaceError('服务档案不存在', 404);
+  const id = profile.nativeMemberId ? await canonicalMemberId(db, Number(profile.nativeMemberId)) : null;
   const empty = {
     records: [],
     hasMore: false,
@@ -28,8 +18,7 @@ export async function nativeSpending(
   };
   if (!id) return empty;
   const family = await memberFamily(db, id);
-  const rows =
-    await db`SELECT c.id,c.doc_no,c.created_at,c.business_date,c.status,c.total_amount,c.principal_amount,c.bonus_amount,
+  const rows = await db`SELECT c.id,c.doc_no,c.created_at,c.business_date,c.status,c.total_amount,c.principal_amount,c.bonus_amount,
     s.display_name AS operator_name,m.id AS payer_id,m.member_no AS payer_no,m.name AS payer_name,
     k.id AS checkout_id,k.checkout_no,k.status AS checkout_status,k.total_amount AS checkout_total,
     r.doc_no AS reversal_no,r.reason AS reversal_reason,r.created_at AS reversed_at,
@@ -70,11 +59,10 @@ export async function nativeSpending(
           occurredAt: r.reversedAt,
         }
       : null,
-    items: r.items.map((i: NativeSpending["items"][number]) => ({
+    items: r.items.map((i: NativeSpending['items'][number]) => ({
       ...i,
       quantity: Number(i.quantity),
-      unitPriceCents:
-        i.unitPriceCents == null ? null : Number(i.unitPriceCents),
+      unitPriceCents: i.unitPriceCents == null ? null : Number(i.unitPriceCents),
       amountCents: Number(i.amountCents),
       discountCents: Number(i.discountCents),
     })),

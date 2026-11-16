@@ -23,15 +23,30 @@ async function material(code: string, over: Record<string, unknown> = {}) {
   if (res.status !== 201) throw new Error(JSON.stringify(res.body));
   return res.body as { id: number };
 }
-const cost = async (id: number) => (await ctx.sql<{ avg: number; estimated: boolean; stock: number }[]>`SELECT avg_cost_e4 AS avg, cost_estimated AS estimated, stock_milli AS stock FROM materials WHERE id = ${id}`)[0]!;
+const cost = async (id: number) =>
+  (await ctx.sql<{ avg: number; estimated: boolean; stock: number }[]>`SELECT avg_cost_e4 AS avg, cost_estimated AS estimated, stock_milli AS stock FROM materials WHERE id = ${id}`)[0]!;
 const moves = (id: number) =>
   ctx.sql<{ type: string; delta: number; unit: number | null; cents: number | null }[]>`
     SELECT move_type AS type, qty_delta_milli AS delta, unit_cost_e4 AS unit, cost_cents AS cents FROM stock_moves WHERE material_id = ${id} ORDER BY id`;
 async function receive(materialId: number, boxes: number, priceCents: number) {
-  const po = await api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, approveNow: true, lines: [{ materialId, purchaseQtyMilli: q(boxes), priceCents }] });
+  const po = await api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+    clientKey: randomUUID(),
+    supplierId,
+    orderDate: today,
+    approveNow: true,
+    lines: [{ materialId, purchaseQtyMilli: q(boxes), priceCents }],
+  });
   expect(po.status, JSON.stringify(po.body)).toBe(201);
   const p = po.body.po as { id: number; lines: { id: number }[] };
-  return ok(doc(keeper, { docType: 'receipt', supplierId, purchaseOrderId: p.id, coAcceptorId: null, lines: [{ materialId, poLineId: p.lines[0]!.id, deliveredMilli: q(boxes * 10), acceptedMilli: q(boxes * 10) }] }));
+  return ok(
+    doc(keeper, {
+      docType: 'receipt',
+      supplierId,
+      purchaseOrderId: p.id,
+      coAcceptorId: null,
+      lines: [{ materialId, poLineId: p.lines[0]!.id, deliveredMilli: q(boxes * 10), acceptedMilli: q(boxes * 10) }],
+    }),
+  );
 }
 
 beforeAll(async () => {

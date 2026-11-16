@@ -104,12 +104,19 @@ class Slip {
     return this;
   }
   sign(label: string, name?: string | null) {
-    this.p.line(`${label}：${name ?? ''}`).newline().newline().rule(this.cols, '_');
+    this.p
+      .line(`${label}：${name ?? ''}`)
+      .newline()
+      .newline()
+      .rule(this.cols, '_');
     return this;
   }
   /** 出单信息（打印时间在发送时另记：补打的注明） */
   footer(jobNote?: string) {
-    this.p.newline().align(1).line(`出单 ${slipStamp(this.meta.issuedAt, this.meta.timeZone)} · ${this.meta.issuedBy}`);
+    this.p
+      .newline()
+      .align(1)
+      .line(`出单 ${slipStamp(this.meta.issuedAt, this.meta.timeZone)} · ${this.meta.issuedBy}`);
     if (jobNote) this.p.line(jobNote);
     this.p.align(0);
     return this;
@@ -122,7 +129,11 @@ class Slip {
 /** 发送时补上末尾：等过打印机恢复的注明补打与补打时间，然后走纸、切纸 */
 export function finishSlip(body: Buffer, opts: { waitedSince: Date | null; now: Date; timeZone: string }): Buffer {
   const tail = new EscPos();
-  if (opts.waitedSince) tail.align(1).line(`（打印机恢复后补打 ${slipStamp(opts.now, opts.timeZone)}）`).align(0);
+  if (opts.waitedSince)
+    tail
+      .align(1)
+      .line(`（打印机恢复后补打 ${slipStamp(opts.now, opts.timeZone)}）`)
+      .align(0);
   return Buffer.concat([body, tail.feed(4).cut().bytes()]);
 }
 
@@ -134,7 +145,11 @@ export function buildCheckoutSlip(d: CheckoutPrint, meta: SlipMeta): Buffer {
   s.pair('单号', d.checkoutNo).pair('营业日', d.businessDate).pair('结账时间', slipStamp(d.createdAt, tz)).pair('收银', d.operatorName);
   if (d.backfill) s.strong(`补录 · 纸质单 ${d.backfill.slipNo}（${d.backfill.enteredByName} ${slipStamp(d.backfill.enteredAt, tz)} 补录）`);
   if (d.status === 'voided') {
-    s.rule(true).strong('已反结账（本单作废）').text(`${d.voidedByName ?? ''} ${d.voidedAt ? slipStamp(d.voidedAt, tz) : ''}`.trim()).text(`原因：${d.voidReason ?? ''}`).rule(true);
+    s.rule(true)
+      .strong('已反结账（本单作废）')
+      .text(`${d.voidedByName ?? ''} ${d.voidedAt ? slipStamp(d.voidedAt, tz) : ''}`.trim())
+      .text(`原因：${d.voidReason ?? ''}`)
+      .rule(true);
   }
   s.rule();
   d.bills.forEach((b, i) => {
@@ -166,7 +181,10 @@ export function buildCheckoutSlip(d: CheckoutPrint, meta: SlipMeta): Buffer {
       if (p.consumption.status === 'reversed') s.text('已随反结账撤销，储值已退回', 2);
     }
     if (p.method === 'coupon' && p.coupon) {
-      s.text(`${COUPON_PLATFORM_LABELS[p.coupon.platform]}${p.coupon.dealName ? ` ${p.coupon.dealName}` : ''} · 券码尾号 ${p.coupon.code.slice(-4)}${p.coupon.status === 'voided' ? '（已作废）' : ''}`, 2);
+      s.text(
+        `${COUPON_PLATFORM_LABELS[p.coupon.platform]}${p.coupon.dealName ? ` ${p.coupon.dealName}` : ''} · 券码尾号 ${p.coupon.code.slice(-4)}${p.coupon.status === 'voided' ? '（已作废）' : ''}`,
+        2,
+      );
     }
     if (p.method !== 'wallet' && p.method !== 'coupon' && p.ref) s.text(p.ref, 2);
     const approver = (p as { approvedByName?: string | null }).approvedByName;
@@ -187,7 +205,11 @@ export function buildRefundSlip(d: RefundDetail, meta: SlipMeta): Buffer {
   if (d.tagCodes.length > 0 || d.tableNames.length > 0) s.pair(d.tableNames.length ? '桌台' : '手牌', [...d.tagCodes, ...d.tableNames].join('、'));
   s.pair('营业日', d.businessDate).pair('退款时间', slipStamp(d.createdAt, tz)).pair('经办', d.operatorName);
   if (d.status === 'voided') {
-    s.rule(true).strong('已作废（本单不算）').text(`${d.voidedByName ?? ''} ${d.voidedAt ? slipStamp(d.voidedAt, tz) : ''}`.trim()).text(`原因：${d.voidReason ?? ''}`).rule(true);
+    s.rule(true)
+      .strong('已作废（本单不算）')
+      .text(`${d.voidedByName ?? ''} ${d.voidedAt ? slipStamp(d.voidedAt, tz) : ''}`.trim())
+      .text(`原因：${d.voidReason ?? ''}`)
+      .rule(true);
   }
   s.rule().strong('退的项目');
   for (const i of d.items) {
@@ -224,7 +246,9 @@ export function buildShiftSlip(r: ShiftRecord, meta: SlipMeta): Buffer {
   // 按钱箱交班：钱箱名与在上面待过的人；按人交班：交班人
   if (r.drawerName) s.pair('钱箱', r.drawerName).text(`当班：${shiftPeople(r, tz)}`);
   else s.pair('交班人', r.staffName);
-  s.pair('营业日', r.businessDate).pair('开班', slipStamp(r.startedAt, tz)).pair('交班', r.endedAt ? slipStamp(r.endedAt, tz) : '—');
+  s.pair('营业日', r.businessDate)
+    .pair('开班', slipStamp(r.startedAt, tz))
+    .pair('交班', r.endedAt ? slipStamp(r.endedAt, tz) : '—');
   s.rule().pair('备用金', yuan(r.openingCash), { strong: true });
   s.strong(`前台结账 ${sum.checkouts.count} 张`);
   if (sum.checkoutByMethod.length === 0) s.text('无');
@@ -272,7 +296,10 @@ export function buildShiftSlip(r: ShiftRecord, meta: SlipMeta): Buffer {
   if (sum.refundSlips) {
     s.rule().strong(`退款单 ${sum.refundSlips.count} 张 · ${yuan(sum.refundSlips.total)}`);
     for (const x of sum.refundSlips.list) {
-      const refs = x.refs.filter((f) => f.method !== 'cash').map((f) => ` · ${payLabel(f.method)} ${f.ref}`).join('');
+      const refs = x.refs
+        .filter((f) => f.method !== 'cash')
+        .map((f) => ` · ${payLabel(f.method)} ${f.ref}`)
+        .join('');
       s.text(`${x.refundNo}（原单 ${x.checkoutNo}）${yuan(x.amount)} · ${x.reason}${x.operatorName ? ` · ${x.operatorName}从本班钱箱退` : ''}${refs}`);
     }
   }

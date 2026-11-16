@@ -147,7 +147,13 @@ describe('售卡与结账', () => {
   });
 
   it('结账用次卡：核对列出能抵几份；抵两份足疗，其余现金；金额对不上、和券或优惠同用都拒绝；反结账退回', async () => {
-    const visit = await enter([{ itemId: item['次卡足疗']!, quantity: 2, price: 19800 }, { itemId: item['次卡果盘']!, quantity: 1, price: 3800 }], member);
+    const visit = await enter(
+      [
+        { itemId: item['次卡足疗']!, quantity: 2, price: 19800 },
+        { itemId: item['次卡果盘']!, quantity: 1, price: 3800 },
+      ],
+      member,
+    );
     const p = await preview(visit);
     const opt = p.countCards.find((c) => c.cardId === card.id)!;
     expect(opt).toMatchObject({ remaining: 3, coverable: 2, reason: null });
@@ -155,16 +161,36 @@ describe('售卡与结账', () => {
     expect(alloc!.amount).toBe(39600);
     const rest = p.totalAmount - 39600;
     // 金额对不上（页面算错）
-    expect((await pay(visit, p.totalAmount, [{ method: 'count_card', cardId: card.id, uses: 2, amount: 30000 }, { method: 'cash', amount: p.totalAmount - 30000 }])).body.error.code).toBe(
-      'COUNT_CARD_CHANGED',
-    );
+    expect(
+      (
+        await pay(visit, p.totalAmount, [
+          { method: 'count_card', cardId: card.id, uses: 2, amount: 30000 },
+          { method: 'cash', amount: p.totalAmount - 30000 },
+        ])
+      ).body.error.code,
+    ).toBe('COUNT_CARD_CHANGED');
     // 抵 3 次：能抵的只有 2 份
-    expect((await pay(visit, p.totalAmount, [{ method: 'count_card', cardId: card.id, uses: 3, amount: 39600 }, { method: 'cash', amount: rest }])).body.error.code).toBe('COUNT_CARD_CHANGED');
+    expect(
+      (
+        await pay(visit, p.totalAmount, [
+          { method: 'count_card', cardId: card.id, uses: 3, amount: 39600 },
+          { method: 'cash', amount: rest },
+        ])
+      ).body.error.code,
+    ).toBe('COUNT_CARD_CHANGED');
     // 不和优惠 / 免单同用
     expect(
-      (await pay(visit, p.totalAmount, [{ method: 'count_card', cardId: card.id, uses: 2, amount: 39600 }, { method: 'discount', amount: rest, grantId: randomUUID() }])).status,
+      (
+        await pay(visit, p.totalAmount, [
+          { method: 'count_card', cardId: card.id, uses: 2, amount: 39600 },
+          { method: 'discount', amount: rest, grantId: randomUUID() },
+        ])
+      ).status,
     ).toBe(400);
-    const ok = await pay(visit, p.totalAmount, [{ method: 'count_card', cardId: card.id, uses: 2, amount: 39600 }, { method: 'cash', amount: rest }]);
+    const ok = await pay(visit, p.totalAmount, [
+      { method: 'count_card', cardId: card.id, uses: 2, amount: 39600 },
+      { method: 'cash', amount: rest },
+    ]);
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.payments.find((x: { method: string }) => x.method === 'count_card')).toMatchObject({ amount: 39600 });
     expect((await cardsOf(member)).find((c) => c.id === card.id)).toMatchObject({ remaining: 1, status: 'active' });
@@ -187,7 +213,10 @@ describe('售卡与结账', () => {
     const visit = await enter([{ itemId: item['次卡足疗']!, quantity: 1, price: 19800 }]);
     const p = await preview(visit);
     expect(p.countCards).toEqual([]);
-    const r = await pay(visit, p.totalAmount, [{ method: 'count_card', cardId: card.id, uses: 1, amount: 19800 }, { method: 'cash', amount: p.totalAmount - 19800 }]);
+    const r = await pay(visit, p.totalAmount, [
+      { method: 'count_card', cardId: card.id, uses: 1, amount: 19800 },
+      { method: 'cash', amount: p.totalAmount - 19800 },
+    ]);
     expect(r.body.error.code).toBe('COUNT_CARD_NOT_IN_CHECKOUT');
     expect((await pay(visit, p.totalAmount, [{ method: 'cash', amount: p.totalAmount }])).status).toBe(200);
     const t = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/tables/checkout', {
@@ -204,7 +233,10 @@ describe('售卡与结账', () => {
     // 先用掉一次，再退卡
     const visit = await enter([{ itemId: item['次卡足疗']!, quantity: 1, price: 19800 }], member);
     const p = await preview(visit);
-    const used = await pay(visit, p.totalAmount, [{ method: 'count_card', cardId: card.id, uses: 1, amount: 19800 }, { method: 'cash', amount: p.totalAmount - 19800 }]);
+    const used = await pay(visit, p.totalAmount, [
+      { method: 'count_card', cardId: card.id, uses: 1, amount: 19800 },
+      { method: 'cash', amount: p.totalAmount - 19800 },
+    ]);
     expect(used.status, JSON.stringify(used.body)).toBe(200);
     const now = (await cardsOf(member)).find((c) => c.id === card.id)!;
     expect(now.remaining).toBe(2);

@@ -135,12 +135,24 @@ function RefList({ refs, count, onOpen }: { refs: LegacyRowRef[]; count: number 
           </button>
         </li>
       ))}
-      {count !== null && count > refs.length && <li className="text-[12px] text-ink-3">只列前 {refs.length} 行，共 {count} 行</li>}
+      {count !== null && count > refs.length && (
+        <li className="text-[12px] text-ink-3">
+          只列前 {refs.length} 行，共 {count} 行
+        </li>
+      )}
     </ul>
   );
 }
 
-function FindingRow({ f, onOpen, testId }: { f: LegacyFinding | { key: string; title: string; detail: string; count: number | null; rows: LegacyRowRef[] }; onOpen: (r: LegacyRowRef) => void; testId: string }) {
+function FindingRow({
+  f,
+  onOpen,
+  testId,
+}: {
+  f: LegacyFinding | { key: string; title: string; detail: string; count: number | null; rows: LegacyRowRef[] };
+  onOpen: (r: LegacyRowRef) => void;
+  testId: string;
+}) {
   const [open, setOpen] = useState(false);
   const canOpen = f.rows.length > 0;
   return (
@@ -244,11 +256,7 @@ function AuditTab({ audit, paymentSheet, onOpen }: { audit: LegacyAudit; payment
         <ul className="mt-1 divide-y divide-line/70">
           {audit.rules.map((r) => (
             <li key={r.no} data-testid={`legacy-rule-${r.no}`}>
-              <FindingRow
-                f={{ key: String(r.no), title: `${r.no}. ${r.title}`, detail: r.result, count: r.count, rows: r.rows }}
-                onOpen={onOpen}
-                testId={`legacy-rule-row-${r.no}`}
-              />
+              <FindingRow f={{ key: String(r.no), title: `${r.no}. ${r.title}`, detail: r.result, count: r.count, rows: r.rows }} onOpen={onOpen} testId={`legacy-rule-row-${r.no}`} />
               <span className="sr-only">{r.count === null ? '无法核对' : r.count === 0 ? '没有问题' : `${r.count} 条`}</span>
             </li>
           ))}
@@ -355,7 +363,10 @@ function PaymentsTab({ highlight }: { highlight: string | null }) {
     <Card className="overflow-hidden" data-testid="legacy-payments">
       {Object.keys(totals).length > 0 && (
         <p className="border-b border-line px-4 py-2 text-[12.5px] text-ink-2">
-          表里自带的合计：{Object.entries(totals).map(([k, v]) => `${k} ${formatYuan(v)}`).join('、')}
+          表里自带的合计：
+          {Object.entries(totals)
+            .map(([k, v]) => `${k} ${formatYuan(v)}`)
+            .join('、')}
         </p>
       )}
       <ul className="divide-y divide-line/70">
@@ -481,9 +492,7 @@ function OrderedTab({ highlight }: { highlight: string | null }) {
                 <FormulaFlag cents={o.amountCents} formula={o.amountFormula} />
               </>
             }
-            lines={
-              [o.date ?? o.dateText, o.variant, o.department, o.orderer, o.qtyMilli !== null ? `数量 ${formatQty(o.qtyMilli)}` : o.qtyText, o.note].filter(Boolean).join(' · ') || '—'
-            }
+            lines={[o.date ?? o.dateText, o.variant, o.department, o.orderer, o.qtyMilli !== null ? `数量 ${formatQty(o.qtyMilli)}` : o.qtyText, o.note].filter(Boolean).join(' · ') || '—'}
           />
         ))}
       </ul>

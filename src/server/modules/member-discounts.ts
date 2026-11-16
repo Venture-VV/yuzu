@@ -194,7 +194,14 @@ export async function memberDiscountPreview(
     const own = await projectedGrade(db, v.memberId, date);
     if (!own) continue;
     const s = await benefitState(db, v.memberId, own, date);
-    guests.push({ memberId: v.memberId, memberName: v.memberName, tagCode: v.tagCode, grade: s.grade, tier: s.tier, lines: [...(await discountableLines(db, [v.billId])), ...(v.ticket ? [v.ticket] : [])] });
+    guests.push({
+      memberId: v.memberId,
+      memberName: v.memberName,
+      tagCode: v.tagCode,
+      grade: s.grade,
+      tier: s.tier,
+      lines: [...(await discountableLines(db, [v.billId])), ...(v.ticket ? [v.ticket] : [])],
+    });
   }
   const companions: CompanionGuest[] = [];
   if (defs.some((d) => d.discountTarget && isCompanionTarget(d.discountTarget))) {

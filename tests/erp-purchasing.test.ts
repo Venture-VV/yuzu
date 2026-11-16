@@ -20,10 +20,8 @@ let approver: string; // 负责人
 let deptA: number;
 const q = (n: number) => Math.round(n * 1000);
 
-const supplier = async (code: string) =>
-  (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/suppliers?all=1')).body.find((s: { code: string }) => s.code === code);
-const material = async (code: string) =>
-  (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/materials?all=1')).body.find((m: { code: string }) => m.code === code);
+const supplier = async (code: string) => (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/suppliers?all=1')).body.find((s: { code: string }) => s.code === code);
+const material = async (code: string) => (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/materials?all=1')).body.find((m: { code: string }) => m.code === code);
 const rules = async () => (await api(ctx.app, boss, 'GET', '/api/inventory/purchase-rules')).body;
 const saveRules = (cookie: string, body: object) => api(ctx.app, cookie, 'PUT', '/api/inventory/purchase-rules', body as Record<string, unknown>);
 
@@ -77,7 +75,16 @@ describe('① 采购途径（E1）', () => {
     expect((await saveRules(buyer, { minQuotes: 3 })).status).toBe(403);
     expect((await saveRules(boss, { reorderDays: 14, targetDays: 7 })).status).toBe(400);
     expect((await saveRules(boss, { cutoffTime: '25:00' })).status).toBe(400);
-    expect((await saveRules(boss, { urgentTiers: [{ maxCents: 3_000_000, approverIds: [] }, { maxCents: 500_000, approverIds: [] }] })).status).toBe(400);
+    expect(
+      (
+        await saveRules(boss, {
+          urgentTiers: [
+            { maxCents: 3_000_000, approverIds: [] },
+            { maxCents: 500_000, approverIds: [] },
+          ],
+        })
+      ).status,
+    ).toBe(400);
     // 传了途径也不认：仍是固定三类；只改提交的字段，别的保持原样
     const tried = await saveRules(boss, { channels: [...PURCHASE_CHANNELS, { key: 'custom_live', label: '直播间', needsNote: true }], minQuotes: 3 });
     expect(tried.status, JSON.stringify(tried.body)).toBe(200);
@@ -156,7 +163,9 @@ describe('① 采购途径（E1）', () => {
       purpose: '客用消耗',
       channel: 'self',
       channelNote: '页面传的不算',
-      lines: [{ name: pl.name, category: 'low_value', unit: pl.unit, boughtMilli: pl.boughtMilli, receivedMilli: pl.receivedMilli, amountCents: 90_000, poLineId: pl.poLineId, diffReason: '还没到货' }],
+      lines: [
+        { name: pl.name, category: 'low_value', unit: pl.unit, boughtMilli: pl.boughtMilli, receivedMilli: pl.receivedMilli, amountCents: 90_000, poLineId: pl.poLineId, diffReason: '还没到货' },
+      ],
     });
     expect(byPo.status).toBe(201);
     expect(byPo.body.claim.channel).toEqual({ key: 'online', label: '网购', note: '某某专营店' });
@@ -200,15 +209,17 @@ describe('② 采购单一键转报销（E2）', () => {
     // 采购经办的档案部门 = 采购部；他在采购部有两笔没平的打款，最早的那笔被带出
     await ctx.sql`UPDATE staff SET department_id = ${deptA} WHERE id = ${buyerId}`;
     const adv = async (advanceDate: string) =>
-      (await api(ctx.app, coster, 'POST', '/api/erp/petty/advances', {
-        clientKey: randomUUID(),
-        departmentId: deptA,
-        handlerId: buyerId,
-        advanceDate,
-        amountCents: 200_000,
-        method: 'wechat',
-        evidence: '转账尾号 0002',
-      })).body.advance;
+      (
+        await api(ctx.app, coster, 'POST', '/api/erp/petty/advances', {
+          clientKey: randomUUID(),
+          departmentId: deptA,
+          handlerId: buyerId,
+          advanceDate,
+          amountCents: 200_000,
+          method: 'wechat',
+          evidence: '转账尾号 0002',
+        })
+      ).body.advance;
     const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     const older = await adv(yesterday);
     await adv(today);
@@ -261,7 +272,9 @@ describe('② 采购单一键转报销（E2）', () => {
       invoiceType: 'vat_normal',
       taxRateBp: 300,
       invoiceNo: 'FP-0001',
-      lines: [{ name: pl.name, category: 'office', unit: pl.unit, boughtMilli: pl.boughtMilli, receivedMilli: pl.receivedMilli, amountCents: pl.amountCents, poLineId: pl.poLineId, diffReason: '货在路上' }],
+      lines: [
+        { name: pl.name, category: 'office', unit: pl.unit, boughtMilli: pl.boughtMilli, receivedMilli: pl.receivedMilli, amountCents: pl.amountCents, poLineId: pl.poLineId, diffReason: '货在路上' },
+      ],
     });
     expect(done.status).toBe(201);
     expect(done.body.claim.channel).toMatchObject({ key: 'self', note: '3 号档' });
@@ -300,15 +313,17 @@ describe('③ 部门备用金台账（E3）', () => {
     expect((await api(ctx.app, coster, 'PUT', `/api/erp/petty/accounts/${deptB}`, { custodianId: costerId, limitCents: 0, version: 1 })).status).toBe(400);
 
     const advance = async (advanceDate: string, amountCents: number) =>
-      (await api(ctx.app, coster, 'POST', '/api/erp/petty/advances', {
-        clientKey: randomUUID(),
-        departmentId: deptB,
-        handlerId: costerId,
-        advanceDate,
-        amountCents,
-        method: 'cash',
-        evidence: '现金当面点清',
-      })).body.advance;
+      (
+        await api(ctx.app, coster, 'POST', '/api/erp/petty/advances', {
+          clientKey: randomUUID(),
+          departmentId: deptB,
+          handlerId: costerId,
+          advanceDate,
+          amountCents,
+          method: 'cash',
+          evidence: '现金当面点清',
+        })
+      ).body.advance;
     const old = await advance(daysAgo(3), 30_000);
     const a1 = await advance(today, 200_000);
     const pettyClaim = (advanceId: number, amountCents: number, body: Record<string, unknown> = {}) =>
@@ -394,7 +409,16 @@ describe('④ 补货建议（E4）', () => {
       expect(res.status, JSON.stringify(res.body)).toBe(201);
       return (await material(body.code as string)) as { id: number };
     };
-    const x = await mkMaterial({ code: 'RX01', name: '矿泉水（补货）', inventoryUnit: '瓶', purchaseUnit: '箱', purchaseFactorMilli: q(12), refPriceCents: 6_000, defaultSupplierId: s3.id, lowStockMilli: q(24) });
+    const x = await mkMaterial({
+      code: 'RX01',
+      name: '矿泉水（补货）',
+      inventoryUnit: '瓶',
+      purchaseUnit: '箱',
+      purchaseFactorMilli: q(12),
+      refPriceCents: 6_000,
+      defaultSupplierId: s3.id,
+      lowStockMilli: q(24),
+    });
     const y = await mkMaterial({ code: 'RY01', name: '纸巾（补货）', inventoryUnit: '包', purchaseUnit: '包', purchaseFactorMilli: q(1), refPriceCents: 500, coverDays: 5 });
     const suggest = async () => (await api(ctx.app, keeper, 'GET', '/api/purchase-suggestions')).body;
     const lineOf = (d: { groups: { supplier: { id: number } | null; lines: { materialId: number }[] }[] }, id: number) => {
@@ -410,7 +434,16 @@ describe('④ 补货建议（E4）', () => {
     expect(d).toMatchObject({ windowDays: 28, reorderDays: 7, targetDays: 14 });
     expect(lineOf(d, x.id)).toEqual({
       supplierId: s3.id,
-      line: expect.objectContaining({ reason: 'low_stock', stockMilli: 0, inTransitMilli: 0, suggestedPurchaseMilli: q(2), suggestedBaseMilli: q(24), priceCents: 6_000, priceSource: 'ref', amountCents: 12_000 }),
+      line: expect.objectContaining({
+        reason: 'low_stock',
+        stockMilli: 0,
+        inTransitMilli: 0,
+        suggestedPurchaseMilli: q(2),
+        suggestedBaseMilli: q(24),
+        priceCents: 6_000,
+        priceSource: 'ref',
+        amountCents: 12_000,
+      }),
     });
     // Y 没有用量、也没设提醒数量：不建议
     expect(lineOf(d, y.id)).toBeNull();

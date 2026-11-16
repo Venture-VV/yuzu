@@ -150,7 +150,11 @@ test('店主：前台结账的储值消费不能在会员这里单独撤销，�
   }
   await page.goto(`/ledger?date=${date}&q=${encodeURIComponent('沈先生')}`);
   await expect(page.getByLabel('搜索流水')).toHaveValue('沈先生');
-  await page.getByText(/^手牌结账 JZ/).filter({ visible: true }).first().click();
+  await page
+    .getByText(/^手牌结账 JZ/)
+    .filter({ visible: true })
+    .first()
+    .click();
   const drawer = page.getByRole('dialog', { name: '单据详情' });
   await expect(drawer.getByText(/^结账单 JZ\d{8}-\d{4} 的储值支付$/)).toBeVisible();
   await expect(drawer.getByText(/前台 → 结账记录/)).toBeVisible();

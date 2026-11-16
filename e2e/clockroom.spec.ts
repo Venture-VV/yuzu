@@ -62,7 +62,8 @@ test.describe('v0.7.1 钟房', () => {
       for (const t of TECHS) {
         const old = roster.find((x) => x.techNo === t.techNo);
         if (!old) await send(page, 'post', '/api/admin/technicians', t);
-        else if (!old.active || old.grade !== t.grade || old.skills.length > 0) await send(page, 'put', `/api/admin/technicians/${old.id}`, { name: old.name, gender: old.gender, grade: t.grade, skills: [], active: true });
+        else if (!old.active || old.grade !== t.grade || old.skills.length > 0)
+          await send(page, 'put', `/api/admin/technicians/${old.id}`, { name: old.name, gender: old.gender, grade: t.grade, skills: [], active: true });
       }
       await send(page, 'put', '/api/admin/technicians/rules', { enabled: true, tierByGrade: true });
       const admin = await getJson<{ clockroomRules: typeof DEFAULT_CLOCKROOM_RULES }>(page, '/api/admin/technicians');
@@ -91,7 +92,10 @@ test.describe('v0.7.1 钟房', () => {
         if (t.state === 'rest') await send(page, 'post', `/api/clockroom/technicians/${t.id}/state`, { action: 'back' });
       }
       const tags = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
-      const tag = tags.tags.filter((t) => t.zone === 'female' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+      const tag = tags.tags
+        .filter((t) => t.zone === 'female' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+        .map((t) => t.code)
+        .reverse()[0]!;
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'female', guestLabel: 'E2E 钟房客人' }] });
       const visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
 
@@ -189,7 +193,12 @@ test.describe('v0.7.1 钟房', () => {
       // ⑧ 结账（现金）；收款前没开班时临时开一个，结完按应有现金交掉
       const preview = await getJson<{ totalAmount: number }>(page, `/api/frontdesk/checkout-preview?ids=${visitId}`);
       const opened = (await page.request.post('/api/shifts', { data: { openingCash: 0 } })).status() === 200;
-      const paid = await send(page, 'post', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [visitId], expectedTotal: preview.totalAmount, payments: [{ method: 'cash', amount: preview.totalAmount }] });
+      const paid = await send(page, 'post', '/api/frontdesk/checkouts', {
+        clientKey: randomUUID(),
+        visitIds: [visitId],
+        expectedTotal: preview.totalAmount,
+        payments: [{ method: 'cash', amount: preview.totalAmount }],
+      });
       const checkoutNo = ((await paid.json()) as { checkoutNo: string }).checkoutNo;
       if (opened) {
         const { shift } = await getJson<{ shift: { id: number; summary: { cash: { expected: number } } } }>(page, '/api/shifts/current');

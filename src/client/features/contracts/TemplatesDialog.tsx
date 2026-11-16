@@ -36,7 +36,15 @@ export function TemplatesDialog({ open, onClose, manage }: { open: boolean; onCl
     .split('\n')
     .map((x) => x.trim())
     .filter(Boolean);
-  const problem = !draft ? null : !draft.name.trim() ? '请填写模板名称' : items.length === 0 ? '至少写一条验收标准' : items.length > ACCEPTANCE_ITEMS_MAX ? `验收标准最多 ${ACCEPTANCE_ITEMS_MAX} 条` : null;
+  const problem = !draft
+    ? null
+    : !draft.name.trim()
+      ? '请填写模板名称'
+      : items.length === 0
+        ? '至少写一条验收标准'
+        : items.length > ACCEPTANCE_ITEMS_MAX
+          ? `验收标准最多 ${ACCEPTANCE_ITEMS_MAX} 条`
+          : null;
   const save = async () => {
     if (!draft || problem) return;
     setBusy(true);

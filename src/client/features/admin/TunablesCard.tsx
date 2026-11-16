@@ -85,8 +85,7 @@ const GROUPS: { title: string; code: string; scope: Scope; fields: FieldDef[] }[
   },
 ];
 
-type Draft = Record<IntTunable, string> &
-  Record<BoolTunable, boolean> & { printMode: PrintMode; printWaitMinutes: string; countCardSales: boolean; consumptionPurposes: string };
+type Draft = Record<IntTunable, string> & Record<BoolTunable, boolean> & { printMode: PrintMode; printWaitMinutes: string; countCardSales: boolean; consumptionPurposes: string };
 
 const toDraft = (s: Tunables & { countCardSales: boolean }): Draft => {
   const out = {} as Record<IntTunable, string>;
@@ -196,7 +195,14 @@ export function TunablesCard({ scope }: { scope?: Scope } = {}) {
                 {MONEY_KEYS.includes(f.key) ? (
                   <MoneyInput id={`tun-${f.key}`} value={draft[f.key]} onChange={(e) => set({ [f.key]: e.target.value } as Partial<Draft>)} className="h-10" data-testid={`tun-${f.key}`} />
                 ) : (
-                  <Input id={`tun-${f.key}`} inputMode="numeric" value={draft[f.key]} onChange={(e) => set({ [f.key]: e.target.value } as Partial<Draft>)} className="h-10" data-testid={`tun-${f.key}`} />
+                  <Input
+                    id={`tun-${f.key}`}
+                    inputMode="numeric"
+                    value={draft[f.key]}
+                    onChange={(e) => set({ [f.key]: e.target.value } as Partial<Draft>)}
+                    className="h-10"
+                    data-testid={`tun-${f.key}`}
+                  />
                 )}
               </Field>
             ))}
@@ -205,52 +211,69 @@ export function TunablesCard({ scope }: { scope?: Scope } = {}) {
       ))}
 
       {scope !== 'erp' && (
-      <section className="space-y-3 rounded-lg border border-line p-4">
-        <p className="text-[13.5px] font-bold">
-          打印 <span className="font-normal text-ink-3">（店主 2026-11-10：设置打印功能，连接打印机由各自的电脑负责；N7）</span>
-        </p>
-        <Segmented
-          ariaLabel="打印方式"
-          value={draft.printMode}
-          onChange={(v) => set({ printMode: v as PrintMode })}
-          options={PRINT_MODES.map((m) => ({ value: m, label: PRINT_MODE_LABELS[m] }))}
-        />
-        <p className="text-[12.5px] text-ink-3">
-          {draft.printMode === 'local'
-            ? '各台电脑用浏览器打印到自己连的打印机（装好打印机驱动、设成默认打印机）；服务器不连门店的小票机，页面上不显示「打到小票机」。正式服在云上时用这个。'
-            : '服务器直接把单据发到「设备」里登记的网口小票机；服务器和打印机要在同一个局域网里。'}
-        </p>
-        {draft.printMode === 'network' && (
-          <Field label="小票机断网时最多等几分钟" htmlFor="tun-printWaitMinutes" hint="等恢复后自动补打，过了不再打（N7）" className="max-w-xs">
-            <Input id="tun-printWaitMinutes" inputMode="numeric" value={draft.printWaitMinutes} onChange={(e) => set({ printWaitMinutes: e.target.value })} className="h-10" data-testid="tun-printWaitMinutes" />
-          </Field>
-        )}
-      </section>
+        <section className="space-y-3 rounded-lg border border-line p-4">
+          <p className="text-[13.5px] font-bold">
+            打印 <span className="font-normal text-ink-3">（店主 2026-11-10：设置打印功能，连接打印机由各自的电脑负责；N7）</span>
+          </p>
+          <Segmented ariaLabel="打印方式" value={draft.printMode} onChange={(v) => set({ printMode: v as PrintMode })} options={PRINT_MODES.map((m) => ({ value: m, label: PRINT_MODE_LABELS[m] }))} />
+          <p className="text-[12.5px] text-ink-3">
+            {draft.printMode === 'local'
+              ? '各台电脑用浏览器打印到自己连的打印机（装好打印机驱动、设成默认打印机）；服务器不连门店的小票机，页面上不显示「打到小票机」。正式服在云上时用这个。'
+              : '服务器直接把单据发到「设备」里登记的网口小票机；服务器和打印机要在同一个局域网里。'}
+          </p>
+          {draft.printMode === 'network' && (
+            <Field label="小票机断网时最多等几分钟" htmlFor="tun-printWaitMinutes" hint="等恢复后自动补打，过了不再打（N7）" className="max-w-xs">
+              <Input
+                id="tun-printWaitMinutes"
+                inputMode="numeric"
+                value={draft.printWaitMinutes}
+                onChange={(e) => set({ printWaitMinutes: e.target.value })}
+                className="h-10"
+                data-testid="tun-printWaitMinutes"
+              />
+            </Field>
+          )}
+        </section>
       )}
 
       {scope !== 'erp' && (
-      <section className="space-y-3 rounded-lg border border-line p-4">
-        <p className="text-[13.5px] font-bold">
-          次卡与营销成本 <span className="font-normal text-ink-3">（HY05、HY14）</span>
-        </p>
-        {toggle('次卡照常售卖（关着时停售：价目与套餐不显示次卡，已售的照常用、退、打印）', draft.countCardSales, (v) => set({ countCardSales: v }), 'tun-countCardSales')}
-        {toggle('有财务职责（对账付款、成本核算）的账号看不到营销成本测算（关掉以后按岗位权限给）', draft.financeHidesMarketingCost, (v) => set({ financeHidesMarketingCost: v }), 'tun-financeHidesMarketingCost')}
-      </section>
+        <section className="space-y-3 rounded-lg border border-line p-4">
+          <p className="text-[13.5px] font-bold">
+            次卡与营销成本 <span className="font-normal text-ink-3">（HY05、HY14）</span>
+          </p>
+          {toggle('次卡照常售卖（关着时停售：价目与套餐不显示次卡，已售的照常用、退、打印）', draft.countCardSales, (v) => set({ countCardSales: v }), 'tun-countCardSales')}
+          {toggle(
+            '有财务职责（对账付款、成本核算）的账号看不到营销成本测算（关掉以后按岗位权限给）',
+            draft.financeHidesMarketingCost,
+            (v) => set({ financeHidesMarketingCost: v }),
+            'tun-financeHidesMarketingCost',
+          )}
+        </section>
       )}
 
       {scope !== 'store' && (
-      <section className="space-y-3 rounded-lg border border-line p-4">
-        <p className="text-[13.5px] font-bold">
-          供应链与付款的开关 <span className="font-normal text-ink-3">（8.0.7：V2、V6、V9、V20）</span>
-        </p>
-        {toggle('采购单只能给已准入的供应商（关着时待准入、暂停的只提醒，不拦）', draft.supplierApprovedOnly, (v) => set({ supplierApprovedOnly: v }), 'tun-supplierApprovedOnly')}
-        {toggle('合同最近一次验收不合格时挂起付款（新的付款申请、按申请登记付款、合同付款都拒绝，重新验收合格解除）', draft.acceptanceHoldsPayment, (v) => set({ acceptanceHoldsPayment: v }), 'tun-acceptanceHoldsPayment')}
-        {toggle('每周一 9:00 把本周应付、待审批、快到期的、逾期应收推到企业微信群（机器人地址在服务器 .env 的 ERP_WECOM_WEBHOOK）', draft.wecomWeeklyPush, (v) => set({ wecomWeeklyPush: v }), 'tun-wecomWeeklyPush')}
-        <WecomRow />
-        <Field label="部门耗用的用途（每行一个，最多 12 个字）" htmlFor="tun-consumptionPurposes" hint="部门小仓登记耗用时从这里选（V6）" className="max-w-md">
-          <Textarea id="tun-consumptionPurposes" rows={6} value={draft.consumptionPurposes} onChange={(e) => set({ consumptionPurposes: e.target.value })} data-testid="tun-consumptionPurposes" />
-        </Field>
-      </section>
+        <section className="space-y-3 rounded-lg border border-line p-4">
+          <p className="text-[13.5px] font-bold">
+            供应链与付款的开关 <span className="font-normal text-ink-3">（8.0.7：V2、V6、V9、V20）</span>
+          </p>
+          {toggle('采购单只能给已准入的供应商（关着时待准入、暂停的只提醒，不拦）', draft.supplierApprovedOnly, (v) => set({ supplierApprovedOnly: v }), 'tun-supplierApprovedOnly')}
+          {toggle(
+            '合同最近一次验收不合格时挂起付款（新的付款申请、按申请登记付款、合同付款都拒绝，重新验收合格解除）',
+            draft.acceptanceHoldsPayment,
+            (v) => set({ acceptanceHoldsPayment: v }),
+            'tun-acceptanceHoldsPayment',
+          )}
+          {toggle(
+            '每周一 9:00 把本周应付、待审批、快到期的、逾期应收推到企业微信群（机器人地址在服务器 .env 的 ERP_WECOM_WEBHOOK）',
+            draft.wecomWeeklyPush,
+            (v) => set({ wecomWeeklyPush: v }),
+            'tun-wecomWeeklyPush',
+          )}
+          <WecomRow />
+          <Field label="部门耗用的用途（每行一个，最多 12 个字）" htmlFor="tun-consumptionPurposes" hint="部门小仓登记耗用时从这里选（V6）" className="max-w-md">
+            <Textarea id="tun-consumptionPurposes" rows={6} value={draft.consumptionPurposes} onChange={(e) => set({ consumptionPurposes: e.target.value })} data-testid="tun-consumptionPurposes" />
+          </Field>
+        </section>
       )}
 
       {scope === 'store' && (

@@ -157,7 +157,9 @@ describe('合同与法务审查', () => {
     expect(ret.status, JSON.stringify(ret.body)).toBe(200);
     c = await get(c.id);
     expect(c.status).toBe('returned');
-    expect(c.revisions[0]!.reviews).toEqual([expect.objectContaining({ level: 2, action: 'return', reviewerName: '法务吴', items: [{ key: 'liability', verdict: 'revise', note: '违约金比例太低' }] })]);
+    expect(c.revisions[0]!.reviews).toEqual([
+      expect.objectContaining({ level: 2, action: 'return', reviewerName: '法务吴', items: [{ key: 'liability', verdict: 'revise', note: '违约金比例太低' }] }),
+    ]);
 
     // 改了再提交：新的一份提交记录，从第一级重新走
     const edited = await api(ctx.app, buyer, 'PUT', `/api/erp/contracts/${c.id}`, {
@@ -193,7 +195,9 @@ describe('合同与法务审查', () => {
     expect(c.status).toBe('approved');
     expect(c.currentVersion).toBe(1);
     expect(c.revisions[0]).toMatchObject({ seq: 2, versionNo: 1 });
-    expect(c.revisions[0]!.reviews).toEqual([expect.objectContaining({ level: 2, action: 'approve', items: expect.arrayContaining([{ key: 'dispute', verdict: 'risk', note: '管辖法院在对方所在地' }]) })]);
+    expect(c.revisions[0]!.reviews).toEqual([
+      expect.objectContaining({ level: 2, action: 'approve', items: expect.arrayContaining([{ key: 'dispute', verdict: 'risk', note: '管辖法院在对方所在地' }]) }),
+    ]);
     expect(c.revisions[1]).toMatchObject({ seq: 1, versionNo: null });
   });
 
@@ -370,7 +374,13 @@ describe('合同与法务审查', () => {
     expect(noLegal.body.error.code).toBe('RULE_LEGAL_REQUIRED');
     const misuse = await api(ctx.app, boss, 'POST', '/api/approvals/rules', { clientKey: randomUUID(), docType: 'purchase_order', steps: [{ group: 'legal' }] });
     expect(misuse.body.error.code).toBe('RULE_LEGAL_NOT_ALLOWED');
-    const ok = await api(ctx.app, boss, 'POST', '/api/approvals/rules', { clientKey: randomUUID(), docType: 'contract', minCents: 50_000_00, steps: [{ group: 'legal' }, { group: 'owner' }], note: '大额合同' });
+    const ok = await api(ctx.app, boss, 'POST', '/api/approvals/rules', {
+      clientKey: randomUUID(),
+      docType: 'contract',
+      minCents: 50_000_00,
+      steps: [{ group: 'legal' }, { group: 'owner' }],
+      note: '大额合同',
+    });
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
   });
 

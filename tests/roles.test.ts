@@ -48,8 +48,7 @@ describe('值班经理', () => {
     await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 10000));
     const c = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(m.id, 3000));
     // 店员不能撤销，值班经理可以
-    const reverse = (cookie: string) =>
-      api(ctx.app, cookie, 'POST', `/api/consumptions/${c.body.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '项目选错' });
+    const reverse = (cookie: string) => api(ctx.app, cookie, 'POST', `/api/consumptions/${c.body.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '项目选错' });
     expect((await reverse(ctx.clerk)).status).toBe(403);
     expect((await reverse(dutyManager)).status).toBe(200);
 

@@ -92,7 +92,16 @@ const pay = async (visitId: number) => {
   expect(r.status, JSON.stringify(r.body)).toBe(200);
 };
 const dispatch = (body: Record<string, unknown>) =>
-  api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), quantity: 1, startNow: true, itemId: itemId('足疗'), tier: 'standard', expectedTotal: 19800, callType: 'designated', ...body });
+  api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', {
+    clientKey: randomUUID(),
+    quantity: 1,
+    startNow: true,
+    itemId: itemId('足疗'),
+    tier: 'standard',
+    expectedTotal: 19800,
+    callType: 'designated',
+    ...body,
+  });
 const sessionOf = async (visitId: number) =>
   ((await api(ctx.app, ctx.clerk, 'GET', '/api/clockroom')).body.sessions as { id: number; visitId: number; status: string; spaceVersion: number }[]).find((s) => s.visitId === visitId)!;
 const allChecksOk = async () => {
@@ -221,10 +230,33 @@ describe('业务动作推导位置', () => {
     expect((await post(g.visitId, [{ itemId: itemId('毛巾'), quantity: 1 }], 500)).status).toBe(200);
     expect((await guestAt(g.visitId))!.zoneName).toBe('合成接待区');
     // 一样多（各一个）：先挂的那个区域
-    expect((await post(g.visitId, [{ itemId: itemId('炒饭'), quantity: 1 }, { itemId: itemId('果汁'), quantity: 1 }], 6600)).status).toBe(200);
+    expect(
+      (
+        await post(
+          g.visitId,
+          [
+            { itemId: itemId('炒饭'), quantity: 1 },
+            { itemId: itemId('果汁'), quantity: 1 },
+          ],
+          6600,
+        )
+      ).status,
+    ).toBe(200);
     expect(await guestAt(g.visitId)).toMatchObject({ zoneName: '合成餐厅区', lastSource: 'consume' });
     // 项目多的区域：果汁 + 茶（水吧）比炒饭（餐厅）多
-    expect((await post(g.visitId, [{ itemId: itemId('炒饭'), quantity: 3 }, { itemId: itemId('果汁'), quantity: 1 }, { itemId: itemId('茶'), quantity: 1 }], 3800 * 3 + 2800 + 1800)).status).toBe(200);
+    expect(
+      (
+        await post(
+          g.visitId,
+          [
+            { itemId: itemId('炒饭'), quantity: 3 },
+            { itemId: itemId('果汁'), quantity: 1 },
+            { itemId: itemId('茶'), quantity: 1 },
+          ],
+          3800 * 3 + 2800 + 1800,
+        )
+      ).status,
+    ).toBe(200);
     expect((await guestAt(g.visitId))!.zoneName).toBe('合成水吧区');
     // 同一个区域再消费：续在同一段
     expect((await post(g.visitId, [{ itemId: itemId('茶'), quantity: 1 }], 1800)).status).toBe(200);

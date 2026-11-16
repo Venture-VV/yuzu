@@ -38,8 +38,7 @@ async function material(code: string, over: Record<string, unknown> = {}) {
   return res.body as { id: number };
 }
 
-const doc = (cookie: string, body: Record<string, unknown>) =>
-  api(ctx.app, cookie, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, ...body });
+const doc = (cookie: string, body: Record<string, unknown>) => api(ctx.app, cookie, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, ...body });
 
 async function ok<T = Record<string, any>>(res: Promise<{ status: number; body: any }>, status = 201): Promise<T> {
   const r = await res;
@@ -48,26 +47,30 @@ async function ok<T = Record<string, any>>(res: Promise<{ status: number; body: 
 }
 
 async function approvedPo(materialId: number, purchaseQtyMilli: number, priceCents: number, sup = supplierId) {
-  const r = await ok(api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
-    clientKey: randomUUID(),
-    supplierId: sup,
-    orderDate: today,
-    approveNow: true,
-    lines: [{ materialId, purchaseQtyMilli, priceCents }],
-  }));
+  const r = await ok(
+    api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(),
+      supplierId: sup,
+      orderDate: today,
+      approveNow: true,
+      lines: [{ materialId, purchaseQtyMilli, priceCents }],
+    }),
+  );
   return r.po as { id: number; lines: { id: number; materialId: number }[] };
 }
 
 /** 按采购单收货（10 个 / 箱）：返回收货单 */
 async function receive(materialId: number, boxes: number, priceCents: number, sup = supplierId) {
   const po = await approvedPo(materialId, q(boxes), priceCents, sup);
-  const r = await ok(doc(keeper, {
-    docType: 'receipt',
-    supplierId: sup,
-    purchaseOrderId: po.id,
-    coAcceptorId: buyerId,
-    lines: [{ materialId, poLineId: po.lines[0]!.id, deliveredMilli: q(boxes * 10), acceptedMilli: q(boxes * 10) }],
-  }));
+  const r = await ok(
+    doc(keeper, {
+      docType: 'receipt',
+      supplierId: sup,
+      purchaseOrderId: po.id,
+      coAcceptorId: buyerId,
+      lines: [{ materialId, poLineId: po.lines[0]!.id, deliveredMilli: q(boxes * 10), acceptedMilli: q(boxes * 10) }],
+    }),
+  );
   expect(r.doc.status).toBe('confirmed');
   return r.doc as { id: number; amountCents: number; lines: { id: number }[] };
 }
@@ -76,8 +79,7 @@ const returnOf = (receipt: { id: number; lines: { id: number }[] }, qty: number,
   doc(cookie, { docType: 'supplier_return', sourceDocId: receipt.id, note: '质量问题退货', lines: [{ sourceLineId: receipt.lines[0]!.id, qtyMilli: q(qty) }] });
 
 const answer = (id: number, body: Record<string, unknown>, cookie = buyer) => api(ctx.app, cookie, 'POST', `/api/inventory/docs/${id}/supplier-answer`, body);
-const centralStock = async (materialId: number) =>
-  (await ctx.sql<{ s: number }[]>`SELECT stock_milli AS s FROM materials WHERE id = ${materialId}`)[0]!.s;
+const centralStock = async (materialId: number) => (await ctx.sql<{ s: number }[]>`SELECT stock_milli AS s FROM materials WHERE id = ${materialId}`)[0]!.s;
 const balanceOf = async (sup = supplierId) =>
   (await api(ctx.app, payer, 'GET', '/api/payables/overview')).body.suppliers.find((s: { supplierId: number }) => s.supplierId === sup) as {
     balanceCents: number;
@@ -270,13 +272,15 @@ describe('退货余额、预付款、核销与供应商退款（#25、#20）', (
     const p = await ok(pay(3_000, [], { prepay: true, note: '订下月的货先付定金' }));
     expect(p.payment).toMatchObject({ status: 'confirmed', prepaidCents: 3_000, prepayAvailableCents: 3_000 });
     expect((await creditsOf()).find((c) => c.kind === 'prepayment')).toMatchObject({ id: p.payment.id, availableCents: 3_000, canOffset: true });
-    const o = await ok(api(ctx.app, payer, 'POST', '/api/payables/offsets', {
-      clientKey: randomUUID(),
-      supplierId,
-      offsetDate: today,
-      credit: { kind: 'prepayment', id: p.payment.id },
-      lines: [{ kind: 'receipt', targetId: rcB.id, amountCents: 3_000 }],
-    }));
+    const o = await ok(
+      api(ctx.app, payer, 'POST', '/api/payables/offsets', {
+        clientKey: randomUUID(),
+        supplierId,
+        offsetDate: today,
+        credit: { kind: 'prepayment', id: p.payment.id },
+        lines: [{ kind: 'receipt', targetId: rcB.id, amountCents: 3_000 }],
+      }),
+    );
     expect(o.offset.credit).toMatchObject({ kind: 'prepayment', id: p.payment.id });
     expect((await openOf(rcB.id)).openCents).toBe(2_000);
     const detail = (await api(ctx.app, payer, 'GET', `/api/payables/payments/${p.payment.id}`)).body;
@@ -320,15 +324,17 @@ describe('退货余额、预付款、核销与供应商退款（#25、#20）', (
       lines: [{ kind: 'receipt', targetId: rc.id, amountCents: 100 }],
     });
     expect(offset.body.error.code).toBe('CREDIT_NOT_OFFSETTABLE');
-    const r = await ok(api(ctx.app, payer, 'POST', '/api/payables/refunds', {
-      clientKey: randomUUID(),
-      supplierId: cashSupplierId,
-      refundDate: today,
-      amountCents: 1_000,
-      method: 'wechat',
-      evidence: '微信转回',
-      credit: { kind: 'return', id: ret.id },
-    }));
+    const r = await ok(
+      api(ctx.app, payer, 'POST', '/api/payables/refunds', {
+        clientKey: randomUUID(),
+        supplierId: cashSupplierId,
+        refundDate: today,
+        amountCents: 1_000,
+        method: 'wechat',
+        evidence: '微信转回',
+        credit: { kind: 'return', id: ret.id },
+      }),
+    );
     expect(r.refund.postsAp).toBe(false);
     expect(await ctx.sql`SELECT 1 FROM ap_entries WHERE supplier_refund_id = ${r.refund.id}`).toHaveLength(0);
     expect((await creditsOf(cashSupplierId)).find((c) => c.id === ret.id)).toBeUndefined();
@@ -400,8 +406,7 @@ describe('核销、供应商退款、付款与期初未付的「结果待确认�
     const lookup = (key: string, type: string, cookie = payer) => api(ctx.app, cookie, 'GET', `/api/erp/ops/${key}?type=${type}`);
     const abandon = (key: string, type: string, cookie = payer) => api(ctx.app, cookie, 'POST', `/api/erp/ops/${key}/abandon`, { type, summary: '测试作废' });
     const payOn = (key: string) => pay(1_000, [{ kind: 'receipt', targetId: rc.id, amountCents: 1_000 }], { clientKey: key });
-    const opening = (key: string) =>
-      api(ctx.app, payer, 'POST', '/api/payables/openings', { clientKey: key, supplierId, amountCents: 2_000, asOfDate: today, note: '截至上月对账单' });
+    const opening = (key: string) => api(ctx.app, payer, 'POST', '/api/payables/openings', { clientKey: key, supplierId, amountCents: 2_000, asOfDate: today, note: '截至上月对账单' });
 
     // ① 付款登记了、响应丢了：按编号查回到这笔付款；已经登记的不能作废（作废返回查回的结果）
     const k1 = randomUUID();
@@ -442,11 +447,19 @@ describe('免确认门槛（#18）', () => {
       api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: m.id, purchaseQtyMilli: q(1), priceCents: cents }] });
     expect((await ok(po(10_000))).po.status).toBe('approved');
     expect((await ok(po(300_000))).po.status).toBe('submitted');
-    const opening = (cents: number) =>
-      api(ctx.app, payer, 'POST', '/api/payables/openings', { clientKey: randomUUID(), supplierId, amountCents: cents, asOfDate: today, note: '门槛测试' });
+    const opening = (cents: number) => api(ctx.app, payer, 'POST', '/api/payables/openings', { clientKey: randomUUID(), supplierId, amountCents: cents, asOfDate: today, note: '门槛测试' });
     expect((await ok(opening(10_000))).opening.status).toBe('confirmed');
     expect((await ok(opening(300_000))).opening.status).toBe('submitted');
-    await ok(doc(ctx.owner, { docType: 'opening', approveNow: true, lines: [{ materialId: m.id, qtyMilli: q(50) }, { materialId: noRef.id, qtyMilli: q(50) }] }));
+    await ok(
+      doc(ctx.owner, {
+        docType: 'opening',
+        approveNow: true,
+        lines: [
+          { materialId: m.id, qtyMilli: q(50) },
+          { materialId: noRef.id, qtyMilli: q(50) },
+        ],
+      }),
+    );
     // 报损按物料参考价估算：1 个 = 1 元；没有参考价的照旧要确认
     expect((await ok(doc(keeper, { docType: 'damage', note: '破损', lines: [{ materialId: m.id, qtyMilli: q(2) }] }))).doc.status).toBe('confirmed');
     expect((await ok(doc(keeper, { docType: 'damage', note: '破损', lines: [{ materialId: noRef.id, qtyMilli: q(2) }] }))).doc.status).toBe('submitted');
@@ -462,8 +475,7 @@ describe('免确认门槛（#18）', () => {
 
 describe('分岗不兼任（#17）', () => {
   it('员工的职责跨组时拒绝保存；财务组内可以同时有；停用的员工不用先改', async () => {
-    const create = (username: string, duties: string[]) =>
-      api(ctx.app, ctx.owner, 'POST', '/api/staff', { username, displayName: username, role: 'backoffice', duties, password: 'Strong-pass-2026' });
+    const create = (username: string, duties: string[]) => api(ctx.app, ctx.owner, 'POST', '/api/staff', { username, displayName: username, role: 'backoffice', duties, password: 'Strong-pass-2026' });
     const bad = await create('dc-1', ['stock', 'purchase']);
     expect(bad.status).toBe(422);
     expect(bad.body.error.code).toBe('DUTY_CONFLICT');
@@ -521,12 +533,14 @@ describe('按可用天数提醒（#22）', () => {
     const book = (await api(ctx.app, keeper, 'GET', `/api/inventory/warehouses/${bathWh}/stock`)).body.find((r: { materialId: number }) => r.materialId === m.id);
     expect(book.stockMilli).toBe(q(86));
     // 差 28 个是大差异（v0.7.30）：写原因，店主一并确认
-    const count = await ok(doc(ctx.owner, {
-      docType: 'count',
-      warehouseId: bathWh,
-      approveNow: true,
-      lines: [{ materialId: m.id, countedMilli: q(58), expectedBookMilli: q(86), diffReason: 'consumed', diffNote: '本月客用耗用' }],
-    }));
+    const count = await ok(
+      doc(ctx.owner, {
+        docType: 'count',
+        warehouseId: bathWh,
+        approveNow: true,
+        lines: [{ materialId: m.id, countedMilli: q(58), expectedBookMilli: q(86), diffReason: 'consumed', diffNote: '本月客用耗用' }],
+      }),
+    );
     expect(count.doc.status).toBe('confirmed');
     const row = (await api(ctx.app, keeper, 'GET', `/api/inventory/warehouses/${bathWh}/stock`)).body.find((r: { materialId: number }) => r.materialId === m.id);
     expect(row).toMatchObject({ stockMilli: q(58), coverDays: 7, dailyUsageMilli: q(1), daysOfCover: 58, isLow: false });
@@ -536,8 +550,7 @@ describe('按可用天数提醒（#22）', () => {
 describe('供应商与期初未付批量导入（#16）', () => {
   const file = (kind: string, csv: string, fileName = `${kind}.csv`) => ({ kind, fileName, csv });
   /** 写入要带操作编号（页面先存本机，断网后按编号查回或作废） */
-  const write = (cookie: string, body: Record<string, unknown>, clientKey: string = randomUUID()) =>
-    api(ctx.app, cookie, 'POST', '/api/payables/imports', { ...body, clientKey });
+  const write = (cookie: string, body: Record<string, unknown>, clientKey: string = randomUUID()) => api(ctx.app, cookie, 'POST', '/api/payables/imports', { ...body, clientKey });
 
   it('预览逐行校验；有问题整份不写；同一个文件只写一次；没有权限的看不到', async () => {
     const bad = file('suppliers', '编码,名称,联系人,电话,结算方式,备注\nIM01,导入供应商一,张三,13800000001,挂账,\nIM01,重复的编码,,,,\nIM03,,,,月付,');
@@ -586,7 +599,7 @@ describe('供应商与期初未付批量导入（#16）', () => {
   it('CSV 引号里的换行算同一格：多行备注不会拆成两行，后半截像一行数据也不会多写一笔', async () => {
     const preview = (body: Record<string, unknown>) => api(ctx.app, payer, 'POST', '/api/payables/imports/preview', body);
     const csv = `供应商编码,金额,截至日期,备注\nIM01,100,${today},"对账备注第一行\r\nIM01,999,${today} 是备注的第二行"\r\n`;
-    expect((await ok(preview(file('opening_payables', csv, 'multiline.csv')), 200))).toMatchObject({ rowCount: 1, totalCents: 10_000, issues: [] });
+    expect(await ok(preview(file('opening_payables', csv, 'multiline.csv')), 200)).toMatchObject({ rowCount: 1, totalCents: 10_000, issues: [] });
     const applied = await ok(write(payer, file('opening_payables', csv, 'multiline.csv')));
     const ops = await ctx.sql<{ amountCents: number; note: string }[]>`SELECT amount_cents, note FROM opening_payables WHERE import_id = ${applied.import.id}`;
     expect(ops).toEqual([{ amountCents: 10_000, note: `对账备注第一行\nIM01,999,${today} 是备注的第二行` }]);
@@ -639,13 +652,17 @@ describe('采购单的货款与应付同一口径（Codex 审查）', () => {
     const m = await material('SP02');
     const po = await approvedPo(m.id, q(20), 1_000); // 20 箱 × 10 元
     const receiveOn = async () =>
-      (await ok(doc(keeper, {
-        docType: 'receipt',
-        supplierId,
-        purchaseOrderId: po.id,
-        coAcceptorId: buyerId,
-        lines: [{ materialId: m.id, poLineId: po.lines[0]!.id, deliveredMilli: q(100), acceptedMilli: q(100) }],
-      }))).doc as { id: number; amountCents: number; lines: { id: number }[] };
+      (
+        await ok(
+          doc(keeper, {
+            docType: 'receipt',
+            supplierId,
+            purchaseOrderId: po.id,
+            coAcceptorId: buyerId,
+            lines: [{ materialId: m.id, poLineId: po.lines[0]!.id, deliveredMilli: q(100), acceptedMilli: q(100) }],
+          }),
+        )
+      ).doc as { id: number; amountCents: number; lines: { id: number }[] };
     const a = await receiveOn(); // 100 元
     const b = await receiveOn(); // 100 元
     await ok(pay(10_000, [{ kind: 'receipt', targetId: a.id, amountCents: 10_000 }]));
@@ -656,13 +673,15 @@ describe('采购单的货款与应付同一口径（Codex 审查）', () => {
     const poOf = async () => (await api(ctx.app, payer, 'GET', `/api/purchase-orders/${po.id}`)).body;
     expect(await poOf()).toMatchObject({ receivedCents: 20_000, returnCreditCents: 0, returnBalanceCents: 2_000, paidCents: 10_000, unpaidCents: 10_000 });
     // 退货余额核销到 B：本单未付 80 元（不是 60 元），与 B 的未结清一致
-    await ok(api(ctx.app, payer, 'POST', '/api/payables/offsets', {
-      clientKey: randomUUID(),
-      supplierId,
-      offsetDate: today,
-      credit: { kind: 'return', id: ret.id },
-      lines: [{ kind: 'receipt', targetId: b.id, amountCents: 2_000 }],
-    }));
+    await ok(
+      api(ctx.app, payer, 'POST', '/api/payables/offsets', {
+        clientKey: randomUUID(),
+        supplierId,
+        offsetDate: today,
+        credit: { kind: 'return', id: ret.id },
+        lines: [{ kind: 'receipt', targetId: b.id, amountCents: 2_000 }],
+      }),
+    );
     expect(await poOf()).toMatchObject({ returnCreditCents: 0, returnBalanceCents: 0, paidCents: 12_000, unpaidCents: 8_000 });
     expect((await openOf(a.id)).openCents + (await openOf(b.id)).openCents).toBe(8_000);
     await checksOk();

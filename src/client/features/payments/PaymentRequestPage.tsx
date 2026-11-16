@@ -92,7 +92,11 @@ function Detail({ r }: { r: PaymentRequestDetail }) {
           改好金额、期望付款日或用途后重新提交，从第一级重新走审批；不要了就作废。
         </Notice>
       )}
-      {r.status === 'approved' && payer && <Notice tone="info" title={`批了，待付款：还要付 ¥${formatAmount(left)}`}>线下付好款以后在这里登记（不再审一次）；付了一部分、剩下的不付了就「结束」。</Notice>}
+      {r.status === 'approved' && payer && (
+        <Notice tone="info" title={`批了，待付款：还要付 ¥${formatAmount(left)}`}>
+          线下付好款以后在这里登记（不再审一次）；付了一部分、剩下的不付了就「结束」。
+        </Notice>
+      )}
 
       <Card className="p-5">
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -188,9 +192,7 @@ function Detail({ r }: { r: PaymentRequestDetail }) {
 
       {r.stagePlan && (
         <Card className="p-5" data-testid="request-stage">
-          <h2 className="mb-2 text-[14px] font-bold">
-            {PAYMENT_STAGE_LABELS[r.stagePlan.stage]}段现在的情况
-          </h2>
+          <h2 className="mb-2 text-[14px] font-bold">{PAYMENT_STAGE_LABELS[r.stagePlan.stage]}段现在的情况</h2>
           <Facts>
             <Fact label="计划">
               <Money cents={r.stagePlan.plannedCents} />
@@ -262,9 +264,15 @@ function Detail({ r }: { r: PaymentRequestDetail }) {
                 <li key={t.poId} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 py-1.5">
                   <span className="num font-semibold">{t.poNo}</span>
                   <ThreeWayBadge status={t.status} />
-                  <span>采购单 <Money cents={t.poTotalCents} /></span>
-                  <span>收货 <Money cents={t.receivedCents} /></span>
-                  <span>发票 <Money cents={t.invoicedCents} /></span>
+                  <span>
+                    采购单 <Money cents={t.poTotalCents} />
+                  </span>
+                  <span>
+                    收货 <Money cents={t.receivedCents} />
+                  </span>
+                  <span>
+                    发票 <Money cents={t.invoicedCents} />
+                  </span>
                   <span className={cn('min-w-0 text-[12px]', t.status === 'held' ? 'text-clay' : 'text-ink-3')}>{t.reason}</span>
                   {payer && (t.status === 'held' || t.status === 'incomplete') && (
                     <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setReleasing(t)}>
@@ -385,8 +393,12 @@ function PayDialog({ open, r, onClose, onDone }: { open: boolean; r: PaymentRequ
   // 能核销的：合同的申请 = 这份合同的收货单（没结清的）；没挂合同的 = 申请里选的、还没付完的
   const rows =
     r.contractId !== null
-      ? (items.data ?? []).filter((i) => i.kind === 'receipt' && i.contractNo === r.contractNo && i.openCents > 0).map((i) => ({ key: `receipt:${i.id}`, kind: 'receipt' as const, id: i.id, docNo: i.docNo, max: i.openCents }))
-      : r.targets.filter((t) => t.amountCents - t.paidCents > 0).map((t) => ({ key: `${t.kind}:${t.targetId}`, kind: t.kind, id: t.targetId, docNo: t.docNo, max: Math.min(t.amountCents - t.paidCents, t.openCents) }));
+      ? (items.data ?? [])
+          .filter((i) => i.kind === 'receipt' && i.contractNo === r.contractNo && i.openCents > 0)
+          .map((i) => ({ key: `receipt:${i.id}`, kind: 'receipt' as const, id: i.id, docNo: i.docNo, max: i.openCents }))
+      : r.targets
+          .filter((t) => t.amountCents - t.paidCents > 0)
+          .map((t) => ({ key: `${t.kind}:${t.targetId}`, kind: t.kind, id: t.targetId, docNo: t.docNo, max: Math.min(t.amountCents - t.paidCents, t.openCents) }));
   useResetOnOpen(open, () => {
     setAmount(String((left / 100).toFixed(2)));
     setPayDate(session.calendarToday);
@@ -394,7 +406,11 @@ function PayDialog({ open, r, onClose, onDone }: { open: boolean; r: PaymentRequ
     setEvidence('');
     setNote('');
     setError(null);
-    setAlloc(r.contractId === null ? Object.fromEntries(r.targets.filter((t) => t.amountCents - t.paidCents > 0).map((t) => [`${t.kind}:${t.targetId}`, ((t.amountCents - t.paidCents) / 100).toFixed(2)])) : {});
+    setAlloc(
+      r.contractId === null
+        ? Object.fromEntries(r.targets.filter((t) => t.amountCents - t.paidCents > 0).map((t) => [`${t.kind}:${t.targetId}`, ((t.amountCents - t.paidCents) / 100).toFixed(2)]))
+        : {},
+    );
   });
   const cents = amount.trim() ? parseYuan(amount) : null;
   const chosen = rows.map((x) => ({ ...x, cents: alloc[x.key]?.trim() ? parseYuan(alloc[x.key]!) : null })).filter((x) => alloc[x.key]?.trim());
@@ -533,7 +549,16 @@ function PayoutDialog({ open, r, onClose, onDone }: { open: boolean; r: PaymentR
     setError(null);
   });
   const cents = amount.trim() ? parseYuan(amount) : null;
-  const problem = pending.length > 0 ? '上一笔合同付款结果待确认，请先在上方处理' : !cents ? '请填写付款金额' : cents > left ? `这次最多付 ¥${formatAmount(left)}` : evidence.trim().length < 2 ? '请填写凭据说明' : null;
+  const problem =
+    pending.length > 0
+      ? '上一笔合同付款结果待确认，请先在上方处理'
+      : !cents
+        ? '请填写付款金额'
+        : cents > left
+          ? `这次最多付 ¥${formatAmount(left)}`
+          : evidence.trim().length < 2
+            ? '请填写凭据说明'
+            : null;
   const submit = async () => {
     if (problem) return;
     setBusy(true);

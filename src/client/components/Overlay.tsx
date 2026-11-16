@@ -73,10 +73,7 @@ export function Dialog({
         aria-labelledby={titleId}
         tabIndex={-1}
         data-mo-out="dialog"
-        className={cn(
-          'relative flex max-h-[92vh] w-full animate-dialog-in flex-col overflow-hidden rounded-t-xl border border-line bg-card shadow-pop outline-none sm:rounded-xl',
-          width,
-        )}
+        className={cn('relative flex max-h-[92vh] w-full animate-dialog-in flex-col overflow-hidden rounded-t-xl border border-line bg-card shadow-pop outline-none sm:rounded-xl', width)}
       >
         <header className="flex items-start gap-4 border-b border-line px-6 pt-5 pb-4">
           <div className="min-w-0 flex-1">
@@ -113,19 +110,7 @@ function ExitLayer({ className, children }: { className: string; children: React
 }
 
 /** 右侧抽屉：平板上承载充值/消费流程，以及流水单据详情 */
-export function Sheet({
-  open,
-  onClose,
-  children,
-  label,
-  width = 'w-[min(460px,100vw)]',
-}: {
-  open: boolean;
-  onClose: () => void;
-  children: ReactNode;
-  label: string;
-  width?: string;
-}) {
+export function Sheet({ open, onClose, children, label, width = 'w-[min(460px,100vw)]' }: { open: boolean; onClose: () => void; children: ReactNode; label: string; width?: string }) {
   const panel = useRef<HTMLDivElement>(null);
   useEscape(onClose, open, panel);
   useFocusReturn(open, panel);

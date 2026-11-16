@@ -263,8 +263,7 @@ describe('同时只转换一份；应用重启时没转完的记失败（v0.7.15
 const list = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/admin/floorplans')).body as FloorplanList;
 const byName = async (name: string) => (await list()).batches.find((b) => b.fileName === name)!;
 /** 换回：不给在用历史版本时取现在的 */
-const restore = async (id: number, body: Record<string, unknown>, cookie = ctx.owner) =>
-  api(ctx.app, cookie, 'POST', `/api/admin/floorplans/${id}/restore`, { expectedSeq: await seqNow(), ...body });
+const restore = async (id: number, body: Record<string, unknown>, cookie = ctx.owner) => api(ctx.app, cookie, 'POST', `/api/admin/floorplans/${id}/restore`, { expectedSeq: await seqNow(), ...body });
 const original = (id: number, cookie = ctx.owner) => ctx.app.inject({ method: 'GET', url: `/api/admin/floorplans/${id}/original`, headers: { cookie } });
 
 describe('图纸治理（v0.7.19）：入库登记、原图纸、底图档案与在用历史、换回旧底图', () => {
@@ -383,12 +382,43 @@ describe('例外房间补画轮廓（v0.7.19）', () => {
     expect((await put('W306', { polygon: square(100), expectedOutlineId: null }, ctx.clerk)).status).toBe(403);
     expect((await put('T301', { polygon: square(100), expectedOutlineId: null })).body.error.code).toBe('OUTLINE_NOT_EXCEPTION');
     expect((await put('Z999', { polygon: square(100), expectedOutlineId: null })).status).toBe(404);
-    expect((await put('W306', { polygon: [[-5, 0], [100, 0], [100, 100]], expectedOutlineId: null })).body.error.code).toBe('OUTLINE_OUTSIDE');
     expect(
-      (await put('W306', { polygon: [[x - 100, y - 100], [x + 100, y + 100], [x + 100, y - 100], [x - 100, y + 100]], expectedOutlineId: null })).body.error.code,
+      (
+        await put('W306', {
+          polygon: [
+            [-5, 0],
+            [100, 0],
+            [100, 100],
+          ],
+          expectedOutlineId: null,
+        })
+      ).body.error.code,
+    ).toBe('OUTLINE_OUTSIDE');
+    expect(
+      (
+        await put('W306', {
+          polygon: [
+            [x - 100, y - 100],
+            [x + 100, y + 100],
+            [x + 100, y - 100],
+            [x - 100, y + 100],
+          ],
+          expectedOutlineId: null,
+        })
+      ).body.error.code,
     ).toBe('OUTLINE_CROSSED');
     expect((await put('W306', { polygon: square(3), expectedOutlineId: null })).body.error.code).toBe('OUTLINE_TOO_SMALL');
-    expect((await put('W306', { polygon: [[x, y], [x + 10, y]], expectedOutlineId: null })).status).toBe(400);
+    expect(
+      (
+        await put('W306', {
+          polygon: [
+            [x, y],
+            [x + 10, y],
+          ],
+          expectedOutlineId: null,
+        })
+      ).status,
+    ).toBe(400);
 
     const rev0 = (await map()).floorplanRev;
     const r = await put('W306', { polygon: square(150), expectedOutlineId: null });

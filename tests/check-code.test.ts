@@ -25,7 +25,16 @@ describe('事务里没等结果的查询', () => {
 
 describe('只用到类型的导入', () => {
   it('import { type A, type B } 认出来（跨几行的也算）；import type、混着值的导入放过', () => {
-    const code = ["import { type A, type B } from './x';", "import type { C } from './y';", "import { d, type E } from './z';", "import { type F } from '@shared/f';", 'import {', '  type G,', '  type H,', "} from './g';"].join('\n');
+    const code = [
+      "import { type A, type B } from './x';",
+      "import type { C } from './y';",
+      "import { d, type E } from './z';",
+      "import { type F } from '@shared/f';",
+      'import {',
+      '  type G,',
+      '  type H,',
+      "} from './g';",
+    ].join('\n');
     expect((inlineTypeImports(code) as { line: number }[]).map((f) => f.line)).toEqual([1, 4, 5]);
   });
 });
@@ -36,7 +45,7 @@ describe('没用到的导入、变量、参数', () => {
       "src/client/a.tsx(1,10): error TS6133: 'x' is declared but its value is never read.",
       "src/server/modules/mp/coupon-center.ts(51,9): error TS6133: 'boundMember' is declared but its value is never read.",
       "tests/mp-member.test.ts(162,11): error TS6133: 'memberId' is declared but its value is never read.",
-      "src/server/b.ts(3,1): error TS6192: All imports in import declaration are unused.",
+      'src/server/b.ts(3,1): error TS6192: All imports in import declaration are unused.',
       "src/server/c.ts(9,9): error TS2322: Type 'string' is not assignable to type 'number'.",
     ].join('\n');
     expect(unusedFindings(out)).toEqual([

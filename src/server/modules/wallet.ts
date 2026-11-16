@@ -130,7 +130,6 @@ type AbandonInputParsed = z.output<typeof AbandonInput>;
 
 // ───────────────────────── 基础工具 ─────────────────────────
 
-
 interface KeyRow {
   /** 会员记账之外，还可能是作废登记（abandoned）或其他模块的编号 */
   opType: string;
@@ -367,9 +366,19 @@ async function insertConsumption(
       INSERT INTO consumption_lines (consumption_id, item_id, tier, name, unit_price, quantity, amount)
       VALUES (${id}, ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount})`;
   }
-  await applyBalance(tx, member, { principal: -o.split.principal, bonus: -o.split.bonus }, {
-    entryType: 'consume', docNo, consumptionId: id, businessDate: o.businessDate, operatorId: o.operatorId, at: o.at,
-  });
+  await applyBalance(
+    tx,
+    member,
+    { principal: -o.split.principal, bonus: -o.split.bonus },
+    {
+      entryType: 'consume',
+      docNo,
+      consumptionId: id,
+      businessDate: o.businessDate,
+      operatorId: o.operatorId,
+      at: o.at,
+    },
+  );
   // 扣用的赠金先用最早到期的批次
   await takeFromLots(tx, { memberId: member.id, consumptionId: id, amount: o.split.bonus, at: o.at });
   // 会员体系 v2：周期净储值消费到 30% / 60% 升享阶 / 尊阶，补充期内到 60% 当场保级
@@ -395,9 +404,20 @@ async function insertReversal(
   const id = row!.id;
   await tx`UPDATE consumptions SET status = 'reversed' WHERE id = ${c.id}`;
   // 按原单扣款构成恢复，本金归本金、赠金归赠金；赠金回到原来的批次，原批次已到期的随即作废
-  const restored = await applyBalance(tx, member, { principal: c.principalAmount, bonus: c.bonusAmount }, {
-    entryType: 'reversal', docNo, consumptionId: c.id, reversalId: id, businessDate: o.businessDate, operatorId: o.operatorId, at: o.at,
-  });
+  const restored = await applyBalance(
+    tx,
+    member,
+    { principal: c.principalAmount, bonus: c.bonusAmount },
+    {
+      entryType: 'reversal',
+      docNo,
+      consumptionId: c.id,
+      reversalId: id,
+      businessDate: o.businessDate,
+      operatorId: o.operatorId,
+      at: o.at,
+    },
+  );
   await restoreToLots(tx, { memberId: member.id, consumptionId: c.id, reversalId: id, amount: c.bonusAmount, at: o.at });
   await expireDueLots(tx, deps, restored, o.at, id);
   return { id, docNo };
@@ -519,69 +539,63 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
   // 收款开始处理时经办人所在的班次：入账前这个班次已交班则整笔拒绝（见 shifts.ts lockPaymentShift）
   const seenShift = await openShiftOf(deps.sql, ctx.actor.id);
   await expireMemberBonus(deps, input.memberId, ctx.at ?? new Date());
-  const run = await runIdempotent(
-    deps.sql,
-    { key, opType: 'recharge', requestHash: hashRequest(payload), memberId: input.memberId, staffId: ctx.actor.id },
-    async (tx, locked) => {
-      // 先对班次加共享锁，再核对、取号：交班等这笔提交后再汇总，这笔记入本班次（充值单只追加，班次在入账时写入）
-      const shiftId = await lockPaymentShift(tx, ctx.actor.id, seenShift);
-      const settings = await loadSettings(tx);
-      const at = ctx.at ?? new Date();
-      // 先作废到期的赠金（通常已由记账前的单独事务处理），入账后余额从最新余额算起
-      const member = await expireDueLots(tx, deps, locked, at);
-      if (member.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能充值');
-      const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
+  const run = await runIdempotent(deps.sql, { key, opType: 'recharge', requestHash: hashRequest(payload), memberId: input.memberId, staffId: ctx.actor.id }, async (tx, locked) => {
+    // 先对班次加共享锁，再核对、取号：交班等这笔提交后再汇总，这笔记入本班次（充值单只追加，班次在入账时写入）
+    const shiftId = await lockPaymentShift(tx, ctx.actor.id, seenShift);
+    const settings = await loadSettings(tx);
+    const at = ctx.at ?? new Date();
+    // 先作废到期的赠金（通常已由记账前的单独事务处理），入账后余额从最新余额算起
+    const member = await expireDueLots(tx, deps, locked, at);
+    if (member.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能充值');
+    const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
 
-      // 会员体系 v2：先把到期没处理的处理掉，再算这笔充完的档级、按档的赠金与首充 / 续充最低
-      const grade = await planRechargeGrade(tx, member.id, input.paidAmount, businessDate);
-      if (!options.history && grade.minimum > 0 && input.paidAmount < grade.minimum) {
-        throw unprocessable(
-          'RECHARGE_BELOW_MIN',
-          `${grade.first ? '首充' : '续充'}单笔最低 ${formatYuan(grade.minimum)}，这笔 ${formatYuan(input.paidAmount)} 不够`,
-          { minimum: grade.minimum, first: grade.first },
-        );
-      }
-      const autoBonus = grade.outcome.bonusCents;
-      const canCustom = can(ctx.actor, 'recharge.customBonus');
-      const bonusMode = options.history ? 'custom' : (input.bonusMode ?? (input.bonusAmount === autoBonus || !canCustom ? 'auto' : 'custom'));
-      if (bonusMode === 'custom' && !canCustom && !options.history) throw forbidden('当前岗位不能自定义赠金，赠金按充值后所在档的比例自动算');
-      if (bonusMode === 'auto' && input.bonusAmount !== autoBonus) {
-        const after = gradeLabel(grade.rules, grade.outcome.gradeAfter, grade.outcome.upgraded ? 0 : grade.state.tier);
-        throw conflict('BONUS_CHANGED', `赠金按充值后所在档的比例自动算：这笔充完是「${after}」，应赠 ${formatYuan(autoBonus)}，请核对后重新确认`, {
-          bonusCents: autoBonus,
-          gradeAfter: grade.outcome.gradeAfter,
-        });
-      }
+    // 会员体系 v2：先把到期没处理的处理掉，再算这笔充完的档级、按档的赠金与首充 / 续充最低
+    const grade = await planRechargeGrade(tx, member.id, input.paidAmount, businessDate);
+    if (!options.history && grade.minimum > 0 && input.paidAmount < grade.minimum) {
+      throw unprocessable('RECHARGE_BELOW_MIN', `${grade.first ? '首充' : '续充'}单笔最低 ${formatYuan(grade.minimum)}，这笔 ${formatYuan(input.paidAmount)} 不够`, {
+        minimum: grade.minimum,
+        first: grade.first,
+      });
+    }
+    const autoBonus = grade.outcome.bonusCents;
+    const canCustom = can(ctx.actor, 'recharge.customBonus');
+    const bonusMode = options.history ? 'custom' : (input.bonusMode ?? (input.bonusAmount === autoBonus || !canCustom ? 'auto' : 'custom'));
+    if (bonusMode === 'custom' && !canCustom && !options.history) throw forbidden('当前岗位不能自定义赠金，赠金按充值后所在档的比例自动算');
+    if (bonusMode === 'auto' && input.bonusAmount !== autoBonus) {
+      const after = gradeLabel(grade.rules, grade.outcome.gradeAfter, grade.outcome.upgraded ? 0 : grade.state.tier);
+      throw conflict('BONUS_CHANGED', `赠金按充值后所在档的比例自动算：这笔充完是「${after}」，应赠 ${formatYuan(autoBonus)}，请核对后重新确认`, {
+        bonusCents: autoBonus,
+        gradeAfter: grade.outcome.gradeAfter,
+      });
+    }
 
-      // 充值套餐只是常用金额的快捷按钮（会员体系 v2），赠金不再按套餐
-      let planName: string | null = null;
-      let bonusValidDays = settings.customBonusValidDays;
-      if (input.planId) {
-        const [plan] = await tx<{ name: string; payAmount: number; active: boolean; bonusValidDays: number | null }[]>`
+    // 充值套餐只是常用金额的快捷按钮（会员体系 v2），赠金不再按套餐
+    let planName: string | null = null;
+    let bonusValidDays = settings.customBonusValidDays;
+    if (input.planId) {
+      const [plan] = await tx<{ name: string; payAmount: number; active: boolean; bonusValidDays: number | null }[]>`
           SELECT name, pay_amount, active, bonus_valid_days FROM recharge_plans WHERE id = ${input.planId}`;
-        if (!plan || !plan.active) throw conflict('PLAN_UNAVAILABLE', '该充值套餐已停用，请重新选择');
-        if (plan.payAmount !== input.paidAmount) throw conflict('PLAN_CHANGED', '充值套餐金额刚刚有调整，请核对后重新确认');
-        planName = plan.name;
-        bonusValidDays = plan.bonusValidDays;
-      }
-      // 赠金有效期以员工确认时看到的为准：期间店主调整了有效期时拒绝，按新的有效期重新确认
-      if (input.bonusAmount > 0 && input.bonusValidDays !== undefined && input.bonusValidDays !== bonusValidDays) {
-        throw conflict('PLAN_CHANGED', '赠金有效期刚刚有调整，请核对后重新确认', { bonusValidDays });
-      }
-      const bonusExpiresAt =
-        input.bonusAmount > 0 && bonusValidDays !== null
-          ? bonusExpiryAt(at, bonusValidDays, deps.config.timezone, settings.businessDayStartHour)
-          : null;
-      // 超过单笔上限：需要店主或店总当场授权，授权在这个事务里核销（业务回滚时一起回滚）
-      const overLimit = input.paidAmount > settings.maxRechargeCents
+      if (!plan || !plan.active) throw conflict('PLAN_UNAVAILABLE', '该充值套餐已停用，请重新选择');
+      if (plan.payAmount !== input.paidAmount) throw conflict('PLAN_CHANGED', '充值套餐金额刚刚有调整，请核对后重新确认');
+      planName = plan.name;
+      bonusValidDays = plan.bonusValidDays;
+    }
+    // 赠金有效期以员工确认时看到的为准：期间店主调整了有效期时拒绝，按新的有效期重新确认
+    if (input.bonusAmount > 0 && input.bonusValidDays !== undefined && input.bonusValidDays !== bonusValidDays) {
+      throw conflict('PLAN_CHANGED', '赠金有效期刚刚有调整，请核对后重新确认', { bonusValidDays });
+    }
+    const bonusExpiresAt = input.bonusAmount > 0 && bonusValidDays !== null ? bonusExpiryAt(at, bonusValidDays, deps.config.timezone, settings.businessDayStartHour) : null;
+    // 超过单笔上限：需要店主或店总当场授权，授权在这个事务里核销（业务回滚时一起回滚）
+    const overLimit =
+      input.paidAmount > settings.maxRechargeCents
         ? await approveOverLimit(tx, input.overLimitGrantId, ctx, { kind: 'recharge', memberId: member.id, amount: input.paidAmount, limit: settings.maxRechargeCents, key })
         : null;
 
-      // 扫码收款（8.0.21）：在会员之后锁交易一行，核对到账、没被用过、方式与金额一致；参考号记支付方单号
-      if (input.payTxId && input.paymentMethod !== 'wechat' && input.paymentMethod !== 'alipay') throw badRequest('只有微信、支付宝能用扫码收款');
-      const paymentRef = input.payTxId ? await lockPayTxForUse(tx, input.payTxId, { provider: input.paymentMethod, amountCents: input.paidAmount }) : input.paymentRef;
-      const docNo = await nextDocNo(tx, 'recharge', businessDate);
-      const [row] = await tx<{ id: number }[]>`
+    // 扫码收款（8.0.21）：在会员之后锁交易一行，核对到账、没被用过、方式与金额一致；参考号记支付方单号
+    if (input.payTxId && input.paymentMethod !== 'wechat' && input.paymentMethod !== 'alipay') throw badRequest('只有微信、支付宝能用扫码收款');
+    const paymentRef = input.payTxId ? await lockPayTxForUse(tx, input.payTxId, { provider: input.paymentMethod, amountCents: input.paidAmount }) : input.paymentRef;
+    const docNo = await nextDocNo(tx, 'recharge', businessDate);
+    const [row] = await tx<{ id: number }[]>`
         INSERT INTO recharges (doc_no, member_id, plan_id, plan_name, paid_amount, bonus_amount, payment_method,
                                payment_ref, note, business_date, operator_id, created_at, over_limit_approved_by, bonus_expires_at, shift_id
                                ${input.payTxId ? tx`, pay_tx_id` : tx``})
@@ -590,44 +604,60 @@ export async function recharge(deps: Deps, raw: RechargeInputData, ctx: OpContex
                 ${overLimit?.approverId ?? null}, ${bonusExpiresAt}, ${shiftId}
                 ${input.payTxId ? tx`, ${input.payTxId}` : tx``})
         RETURNING id`;
-      const id = row!.id;
-      if (input.payTxId) await markPayTxUsed(tx, input.payTxId, 'recharge', Number(id), ctx.actor.id);
-      await applyBalance(tx, member, { principal: input.paidAmount, bonus: input.bonusAmount }, {
-        entryType: 'recharge', docNo, rechargeId: id, businessDate, operatorId: ctx.actor.id, at,
-      });
-      await addRechargeLot(tx, { memberId: member.id, rechargeId: id, amount: input.bonusAmount, expiresAt: bonusExpiresAt, at });
-      // 升档：进新档的初阶，会籍周期从今天起算（会员体系 v2）
-      await applyRechargeGrade(tx, grade, { memberId: member.id, rechargeId: id, today: businessDate });
-      // 充值赠券与升级礼（v0.7.20）：套餐上挂的券；这笔充值升档时，新达到的每一档发升级礼
-      await issueRechargeCoupons(tx, {
-        memberId: member.id,
-        planId: input.planId,
+    const id = row!.id;
+    if (input.payTxId) await markPayTxUsed(tx, input.payTxId, 'recharge', Number(id), ctx.actor.id);
+    await applyBalance(
+      tx,
+      member,
+      { principal: input.paidAmount, bonus: input.bonusAmount },
+      {
+        entryType: 'recharge',
+        docNo,
         rechargeId: id,
-        levelBefore: grade.state.grade,
-        levelAfter: grade.outcome.gradeAfter,
-        staffId: ctx.actor.id,
-        at,
-        date: businessDate,
-        ip: ctx.ip,
-      });
-      // 会员权益（v0.7.24）：首笔充值发首充礼（按充完以后的档阶；升档的升级礼、券类补发在记升档时已发）
-      await onRecharge(tx, { memberId: member.id, first: grade.first, date: businessDate, staffId: ctx.actor.id });
-      await writeAudit(tx, {
-        staffId: ctx.actor.id,
-        action: 'recharge_created',
-        targetType: 'recharge',
-        targetId: id,
-        detail: {
-          docNo, memberId: member.id, paid: input.paidAmount, bonus: input.bonusAmount, method: input.paymentMethod,
-          bonusMode, autoBonus, gradeBefore: grade.state.grade, gradeAfter: grade.outcome.gradeAfter,
-          ...(overLimit ? { overLimitApprovedBy: overLimit.approverId, overLimitApproverName: overLimit.approverName } : {}),
-        },
-        ip: ctx.ip,
         businessDate,
-      });
-      return id;
-    },
-  );
+        operatorId: ctx.actor.id,
+        at,
+      },
+    );
+    await addRechargeLot(tx, { memberId: member.id, rechargeId: id, amount: input.bonusAmount, expiresAt: bonusExpiresAt, at });
+    // 升档：进新档的初阶，会籍周期从今天起算（会员体系 v2）
+    await applyRechargeGrade(tx, grade, { memberId: member.id, rechargeId: id, today: businessDate });
+    // 充值赠券与升级礼（v0.7.20）：套餐上挂的券；这笔充值升档时，新达到的每一档发升级礼
+    await issueRechargeCoupons(tx, {
+      memberId: member.id,
+      planId: input.planId,
+      rechargeId: id,
+      levelBefore: grade.state.grade,
+      levelAfter: grade.outcome.gradeAfter,
+      staffId: ctx.actor.id,
+      at,
+      date: businessDate,
+      ip: ctx.ip,
+    });
+    // 会员权益（v0.7.24）：首笔充值发首充礼（按充完以后的档阶；升档的升级礼、券类补发在记升档时已发）
+    await onRecharge(tx, { memberId: member.id, first: grade.first, date: businessDate, staffId: ctx.actor.id });
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'recharge_created',
+      targetType: 'recharge',
+      targetId: id,
+      detail: {
+        docNo,
+        memberId: member.id,
+        paid: input.paidAmount,
+        bonus: input.bonusAmount,
+        method: input.paymentMethod,
+        bonusMode,
+        autoBonus,
+        gradeBefore: grade.state.grade,
+        gradeAfter: grade.outcome.gradeAfter,
+        ...(overLimit ? { overLimitApprovedBy: overLimit.approverId, overLimitApproverName: overLimit.approverName } : {}),
+      },
+      ip: ctx.ip,
+      businessDate,
+    });
+    return id;
+  });
   return finish(deps, ctx, 'recharge', key, run);
 }
 
@@ -640,83 +670,91 @@ export async function consume(deps: Deps, raw: ConsumeInputData, ctx: OpContext)
     throw forbidden('当前岗位不能手动输入消费金额');
   }
   await expireMemberBonus(deps, input.memberId, ctx.at ?? new Date());
-  const run = await runIdempotent(
-    deps.sql,
-    { key, opType: 'consume', requestHash: hashRequest(payload), memberId: input.memberId, staffId: ctx.actor.id },
-    async (tx, locked) => {
-      const settings = await loadSettings(tx);
-      const at = ctx.at ?? new Date();
-      // 先作废到期的赠金：到期赠金不能再用，员工确认的余额若含到期赠金，下面的余额核对会要求重新确认
-      const member = await expireDueLots(tx, deps, locked, at);
-      if (member.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能消费');
-      // 会员持有在店手牌时，储值统一在前台结账时扣（店主 2026-10-29 签认），防止同一笔在两处各扣一次
-      const [inStore] = await tx<{ code: string }[]>`
+  const run = await runIdempotent(deps.sql, { key, opType: 'consume', requestHash: hashRequest(payload), memberId: input.memberId, staffId: ctx.actor.id }, async (tx, locked) => {
+    const settings = await loadSettings(tx);
+    const at = ctx.at ?? new Date();
+    // 先作废到期的赠金：到期赠金不能再用，员工确认的余额若含到期赠金，下面的余额核对会要求重新确认
+    const member = await expireDueLots(tx, deps, locked, at);
+    if (member.status !== 'active') throw unprocessable('MEMBER_FROZEN', '该会员已停用，不能消费');
+    // 会员持有在店手牌时，储值统一在前台结账时扣（店主 2026-10-29 签认），防止同一笔在两处各扣一次
+    const [inStore] = await tx<{ code: string }[]>`
         SELECT t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE v.member_id = ${member.id} AND v.status = 'open' LIMIT 1`;
-      if (inStore) {
-        throw conflict('MEMBER_IN_STORE', `会员持有在店手牌 ${inStore.code}：请把消费挂到手牌账单，结账时用会员储值支付，不在会员工作台直接扣款`, {
-          tagCode: inStore.code,
-        });
-      }
-
-      // 项目价格以服务端为准，按所选价格档计价
-      const items = await loadPricedItems(tx, input.lines.map((l) => l.itemId));
-      const lines: { itemId: number | null; name: string; tier: PriceTier | null; unitPrice: number; quantity: number; amount: number }[] = [
-        ...input.lines.map((l) => priceLine(items.get(l.itemId), l.tier, l.quantity, '有消费项目已停用，请重新选择')),
-        ...input.customLines.map((l) => ({ itemId: null, name: l.name, tier: null, unitPrice: l.amount, quantity: 1, amount: l.amount })),
-      ];
-      const total = lines.reduce((sum, l) => sum + l.amount, 0);
-      if (total !== input.expectedTotal) {
-        throw conflict('PRICE_CHANGED', '消费金额与当前项目价格不一致，请核对后重新确认', { total });
-      }
-      const balance = { principal: member.principalBalance, bonus: member.bonusBalance };
-      if (
-        input.expectedBalance &&
-        (input.expectedBalance.principal !== balance.principal || input.expectedBalance.bonus !== balance.bonus)
-      ) {
-        throw conflict('BALANCE_CHANGED', '会员余额刚刚发生变化，请核对最新余额后重新确认', { balance });
-      }
-      const split = splitDeduction(total, balance, settings.deductionRule);
-      if (!split.ok) {
-        throw unprocessable('INSUFFICIENT_BALANCE', `余额不足，还差 ¥${(split.shortfall / 100).toFixed(2)}`, {
-          available: split.available,
-          shortfall: split.shortfall,
-          total,
-        });
-      }
-      if (input.expectedSplit && (input.expectedSplit.principal !== split.principal || input.expectedSplit.bonus !== split.bonus)) {
-        throw conflict('SPLIT_CHANGED', '扣款规则刚刚有调整，本金 / 赠金的扣款构成与确认时不同，请重新核对', {
-          split: { principal: split.principal, bonus: split.bonus },
-          rule: settings.deductionRule,
-          balance,
-        });
-      }
-      const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
-      // 充值当日的储值消费比例（8.0.4 需求表 04，HY01–HY02）：超过剩余额度直接拒绝，不能当场授权放行
-      assertWithinSpendQuota(await spendQuotaOf(tx, member.id, businessDate, settings.rechargeSpendPct), total, member.name);
-      // 超过单笔上限：其余核对都通过后再核销授权
-      const overLimit = total > settings.maxConsumeCents
-        ? await approveOverLimit(tx, input.overLimitGrantId, ctx, { kind: 'consume', memberId: member.id, amount: total, limit: settings.maxConsumeCents, key })
-        : null;
-
-      const { id, docNo } = await insertConsumption(tx, member, {
-        total, split, rule: settings.deductionRule, lines, note: input.note, businessDate, operatorId: ctx.actor.id, at,
-        overLimitApproverId: overLimit?.approverId ?? null, checkoutId: null,
+    if (inStore) {
+      throw conflict('MEMBER_IN_STORE', `会员持有在店手牌 ${inStore.code}：请把消费挂到手牌账单，结账时用会员储值支付，不在会员工作台直接扣款`, {
+        tagCode: inStore.code,
       });
-      await writeAudit(tx, {
-        staffId: ctx.actor.id,
-        action: 'consumption_created',
-        targetType: 'consumption',
-        targetId: id,
-        detail: {
-          docNo, memberId: member.id, total, principal: split.principal, bonus: split.bonus, rule: settings.deductionRule,
-          ...(overLimit ? { overLimitApprovedBy: overLimit.approverId, overLimitApproverName: overLimit.approverName } : {}),
-        },
-        ip: ctx.ip,
-        businessDate,
+    }
+
+    // 项目价格以服务端为准，按所选价格档计价
+    const items = await loadPricedItems(
+      tx,
+      input.lines.map((l) => l.itemId),
+    );
+    const lines: { itemId: number | null; name: string; tier: PriceTier | null; unitPrice: number; quantity: number; amount: number }[] = [
+      ...input.lines.map((l) => priceLine(items.get(l.itemId), l.tier, l.quantity, '有消费项目已停用，请重新选择')),
+      ...input.customLines.map((l) => ({ itemId: null, name: l.name, tier: null, unitPrice: l.amount, quantity: 1, amount: l.amount })),
+    ];
+    const total = lines.reduce((sum, l) => sum + l.amount, 0);
+    if (total !== input.expectedTotal) {
+      throw conflict('PRICE_CHANGED', '消费金额与当前项目价格不一致，请核对后重新确认', { total });
+    }
+    const balance = { principal: member.principalBalance, bonus: member.bonusBalance };
+    if (input.expectedBalance && (input.expectedBalance.principal !== balance.principal || input.expectedBalance.bonus !== balance.bonus)) {
+      throw conflict('BALANCE_CHANGED', '会员余额刚刚发生变化，请核对最新余额后重新确认', { balance });
+    }
+    const split = splitDeduction(total, balance, settings.deductionRule);
+    if (!split.ok) {
+      throw unprocessable('INSUFFICIENT_BALANCE', `余额不足，还差 ¥${(split.shortfall / 100).toFixed(2)}`, {
+        available: split.available,
+        shortfall: split.shortfall,
+        total,
       });
-      return id;
-    },
-  );
+    }
+    if (input.expectedSplit && (input.expectedSplit.principal !== split.principal || input.expectedSplit.bonus !== split.bonus)) {
+      throw conflict('SPLIT_CHANGED', '扣款规则刚刚有调整，本金 / 赠金的扣款构成与确认时不同，请重新核对', {
+        split: { principal: split.principal, bonus: split.bonus },
+        rule: settings.deductionRule,
+        balance,
+      });
+    }
+    const businessDate = businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
+    // 充值当日的储值消费比例（8.0.4 需求表 04，HY01–HY02）：超过剩余额度直接拒绝，不能当场授权放行
+    assertWithinSpendQuota(await spendQuotaOf(tx, member.id, businessDate, settings.rechargeSpendPct), total, member.name);
+    // 超过单笔上限：其余核对都通过后再核销授权
+    const overLimit =
+      total > settings.maxConsumeCents ? await approveOverLimit(tx, input.overLimitGrantId, ctx, { kind: 'consume', memberId: member.id, amount: total, limit: settings.maxConsumeCents, key }) : null;
+
+    const { id, docNo } = await insertConsumption(tx, member, {
+      total,
+      split,
+      rule: settings.deductionRule,
+      lines,
+      note: input.note,
+      businessDate,
+      operatorId: ctx.actor.id,
+      at,
+      overLimitApproverId: overLimit?.approverId ?? null,
+      checkoutId: null,
+    });
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'consumption_created',
+      targetType: 'consumption',
+      targetId: id,
+      detail: {
+        docNo,
+        memberId: member.id,
+        total,
+        principal: split.principal,
+        bonus: split.bonus,
+        rule: settings.deductionRule,
+        ...(overLimit ? { overLimitApprovedBy: overLimit.approverId, overLimitApproverName: overLimit.approverName } : {}),
+      },
+      ip: ctx.ip,
+      businessDate,
+    });
+    return id;
+  });
   return finish(deps, ctx, 'consume', key, run);
 }
 
@@ -743,7 +781,9 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
       await assertNotMerged(tx, locked.id, '这笔储值消费不能再撤销');
       const member = await expireDueLots(tx, deps, locked, at);
       // 锁顺序始终是「会员 → 消费单 → 赠金批次」，避免死锁（结账单只读、不加锁）
-      const [c] = await tx<{ id: number; docNo: string; status: string; principalAmount: number; bonusAmount: number; businessDate: string; createdAt: Date; checkoutId: number | null; checkoutNo: string | null }[]>`
+      const [c] = await tx<
+        { id: number; docNo: string; status: string; principalAmount: number; bonusAmount: number; businessDate: string; createdAt: Date; checkoutId: number | null; checkoutNo: string | null }[]
+      >`
         SELECT c.id, c.doc_no, c.status, c.principal_amount, c.bonus_amount, c.business_date, c.created_at, c.checkout_id, k.checkout_no
         FROM consumptions c LEFT JOIN checkouts k ON k.id = c.checkout_id
         WHERE c.id = ${consumptionId} FOR UPDATE OF c`;
@@ -756,11 +796,10 @@ export async function reverse(deps: Deps, consumptionId: number, raw: ReverseInp
       // 拒绝时整笔回滚、不写操作编号，重提同样拒绝、查回为未找到、可确认作废；
       // 同一编号之前已成功的撤销，runIdempotent 在执行到这里之前就按原结果返回
       if (c.checkoutId !== null) {
-        throw conflict(
-          'CHECKOUT_LINKED',
-          `这笔储值消费是前台结账单 ${c.checkoutNo} 的收款，不能单独撤销；如需更正，请在「前台 → 结账记录」对结账单 ${c.checkoutNo} 反结账`,
-          { checkoutId: c.checkoutId, checkoutNo: c.checkoutNo },
-        );
+        throw conflict('CHECKOUT_LINKED', `这笔储值消费是前台结账单 ${c.checkoutNo} 的收款，不能单独撤销；如需更正，请在「前台 → 结账记录」对结账单 ${c.checkoutNo} 反结账`, {
+          checkoutId: c.checkoutId,
+          checkoutNo: c.checkoutNo,
+        });
       }
       // 撤销时限（#10，待确认）：超过时限只有店主可以撤销
       const windowHours = settings.reversalWindowHours;
@@ -856,9 +895,7 @@ const OP_PERMISSION: Record<OpType, Permission> = { recharge: 'recharge.create',
 export function registerWalletRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
 
-  app.post('/api/recharges', { preHandler: guard('recharge.create') }, async (req) =>
-    recharge(deps, req.body as RechargeInputData, ctxOf(req)),
-  );
+  app.post('/api/recharges', { preHandler: guard('recharge.create') }, async (req) => recharge(deps, req.body as RechargeInputData, ctxOf(req)));
 
   app.get('/api/recharges/:id', { preHandler: guard('member.read') }, async (req) => {
     const { id } = parse(idParam, req.params);

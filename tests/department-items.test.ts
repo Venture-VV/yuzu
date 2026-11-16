@@ -55,7 +55,12 @@ const sale = async (lines: { itemId: number; quantity: number }[], discount = 0)
   const total = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${id}`)).body.totalAmount as number;
   const payments: Record<string, unknown>[] = [{ method: 'cash', amount: total - discount }];
   if (discount) {
-    const grant = await api(ctx.app, ctx.clerk, 'POST', '/api/auth/authorize', { username: 'duty', password: PASSWORD, purpose: 'checkout_discount', scope: { visitIds: [id], amount: discount, reason: '老客人抹零' } });
+    const grant = await api(ctx.app, ctx.clerk, 'POST', '/api/auth/authorize', {
+      username: 'duty',
+      password: PASSWORD,
+      purpose: 'checkout_discount',
+      scope: { visitIds: [id], amount: discount, reason: '老客人抹零' },
+    });
     expect(grant.status, JSON.stringify(grant.body)).toBe(200);
     payments.unshift({ method: 'discount', amount: discount, grantId: grant.body.grantId });
   }
@@ -142,7 +147,14 @@ describe('经营总览的部门项目明细', () => {
   let a: { id: number; totalAmount: number };
 
   it('结账以后：每个部门各项相加 = 部门构成，合计 = 应收与净营业额；优惠按项目分摊', async () => {
-    a = await sale([{ itemId: item['明细搓澡']!, quantity: 2 }, { itemId: item['明细修脚']!, quantity: 1 }, { itemId: item['明细按摩']!, quantity: 1 }], 1000);
+    a = await sale(
+      [
+        { itemId: item['明细搓澡']!, quantity: 2 },
+        { itemId: item['明细修脚']!, quantity: 1 },
+        { itemId: item['明细按摩']!, quantity: 1 },
+      ],
+      1000,
+    );
     await sale([{ itemId: item['明细搓澡']!, quantity: 1 }]);
     const r = await exec();
     const t = expectReconciled(r);

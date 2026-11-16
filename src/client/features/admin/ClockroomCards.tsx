@@ -79,12 +79,24 @@ export function ClockroomRulesCard() {
         {row(
           '轮钟排到队尾',
           '技师按上牌先后排队，轮钟派给排在第一位、空闲的技师。',
-          <Segmented ariaLabel="轮钟排到队尾" value={draft.afterRotation} onChange={(v) => set({ afterRotation: v })} options={(['dispatch', 'finish'] as const).map((v) => ({ value: v, label: AFTER_ROTATION_LABELS[v], disabled: !editable }))} className="flex-wrap" />,
+          <Segmented
+            ariaLabel="轮钟排到队尾"
+            value={draft.afterRotation}
+            onChange={(v) => set({ afterRotation: v })}
+            options={(['dispatch', 'finish'] as const).map((v) => ({ value: v, label: AFTER_ROTATION_LABELS[v], disabled: !editable }))}
+            className="flex-wrap"
+          />,
         )}
         {row(
           '点钟后的排位',
           '客人点名的钟会不会占技师的轮次。',
-          <Segmented ariaLabel="点钟后的排位" value={draft.afterDesignated} onChange={(v) => set({ afterDesignated: v })} options={(['keep', 'passed', 'end'] as const).map((v) => ({ value: v, label: AFTER_DESIGNATED_LABELS[v], disabled: !editable }))} className="flex-wrap" />,
+          <Segmented
+            ariaLabel="点钟后的排位"
+            value={draft.afterDesignated}
+            onChange={(v) => set({ afterDesignated: v })}
+            options={(['keep', 'passed', 'end'] as const).map((v) => ({ value: v, label: AFTER_DESIGNATED_LABELS[v], disabled: !editable }))}
+            className="flex-wrap"
+          />,
         )}
         {row(
           '被退钟、取消派钟',
@@ -100,7 +112,15 @@ export function ClockroomRulesCard() {
               ]}
             />
             <span className="text-[13px] text-ink-3">连续</span>
-            <Input value={String(draft.rejectEndAfter)} inputMode="numeric" disabled={!editable} onChange={(e) => set({ rejectEndAfter: num(e.target.value, 0, 20) })} fullWidth={false} className="num h-9 w-14" aria-label="连续被退钟次数" />
+            <Input
+              value={String(draft.rejectEndAfter)}
+              inputMode="numeric"
+              disabled={!editable}
+              onChange={(e) => set({ rejectEndAfter: num(e.target.value, 0, 20) })}
+              fullWidth={false}
+              className="num h-9 w-14"
+              aria-label="连续被退钟次数"
+            />
             <span className="text-[13px] text-ink-3">次排到队尾</span>
           </div>,
         )}
@@ -148,9 +168,25 @@ export function ClockroomRulesCard() {
           '项目里没写时长时一钟按多少分钟；快到钟提前几分钟在钟房提醒。',
           <div className="flex flex-wrap items-center gap-2 text-[13px] text-ink-3">
             一钟
-            <Input value={String(draft.defaultMinutes)} inputMode="numeric" disabled={!editable} onChange={(e) => set({ defaultMinutes: num(e.target.value, 10, 240) })} fullWidth={false} className="num h-9 w-16" aria-label="一钟分钟数" />
+            <Input
+              value={String(draft.defaultMinutes)}
+              inputMode="numeric"
+              disabled={!editable}
+              onChange={(e) => set({ defaultMinutes: num(e.target.value, 10, 240) })}
+              fullWidth={false}
+              className="num h-9 w-16"
+              aria-label="一钟分钟数"
+            />
             分钟，提前
-            <Input value={String(draft.remindMinutes)} inputMode="numeric" disabled={!editable} onChange={(e) => set({ remindMinutes: num(e.target.value, 0, 60) })} fullWidth={false} className="num h-9 w-14" aria-label="提前提醒分钟数" />
+            <Input
+              value={String(draft.remindMinutes)}
+              inputMode="numeric"
+              disabled={!editable}
+              onChange={(e) => set({ remindMinutes: num(e.target.value, 0, 60) })}
+              fullWidth={false}
+              className="num h-9 w-14"
+              aria-label="提前提醒分钟数"
+            />
             分钟提醒
           </div>,
         )}
@@ -212,7 +248,16 @@ function BaseEditor({ value, onChange, disabled, label }: { value: BaseDraft; on
       />
       {value.kind === 'percent' ? (
         <span className="flex items-center gap-1 text-[13px] text-ink-3">
-          <Input value={value.rate} inputMode="decimal" disabled={disabled} onChange={(e) => onChange({ kind: 'percent', rate: e.target.value })} fullWidth={false} className="num h-9 w-20" aria-label={`${label}提成比例`} />%
+          <Input
+            value={value.rate}
+            inputMode="decimal"
+            disabled={disabled}
+            onChange={(e) => onChange({ kind: 'percent', rate: e.target.value })}
+            fullWidth={false}
+            className="num h-9 w-20"
+            aria-label={`${label}提成比例`}
+          />
+          %
         </span>
       ) : (
         PRICE_TIERS.map((t) => (
@@ -318,7 +363,16 @@ export function CommissionCard() {
           <BaseEditor value={base} onChange={(v) => editable && setBase(v)} disabled={!editable} label="默认" />
         </Field>
         <Field label="点钟每钟另加（元）" hint="加钟记为点钟时同样另加">
-          <Input value={bonus} inputMode="decimal" disabled={!editable} onChange={(e) => setBonus(e.target.value)} fullWidth={false} className="num h-9 w-28" aria-label="点钟奖励" data-testid="commission-bonus" />
+          <Input
+            value={bonus}
+            inputMode="decimal"
+            disabled={!editable}
+            onChange={(e) => setBonus(e.target.value)}
+            fullWidth={false}
+            className="num h-9 w-28"
+            aria-label="点钟奖励"
+            data-testid="commission-bonus"
+          />
         </Field>
         <Field label="单独设置的项目">
           <div className="space-y-2">
@@ -326,9 +380,19 @@ export function CommissionCard() {
             {items.map((it, i) => (
               <div key={it.itemId} className="flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2">
                 <span className="min-w-[120px] text-[13.5px] font-semibold">{techItems.find((x) => x.id === it.itemId)?.name ?? `项目 ${it.itemId}`}</span>
-                <BaseEditor value={it.base} onChange={(v) => editable && setItems(items.map((x, j) => (j === i ? { ...x, base: v } : x)))} disabled={!editable} label={techItems.find((x) => x.id === it.itemId)?.name ?? ''} />
+                <BaseEditor
+                  value={it.base}
+                  onChange={(v) => editable && setItems(items.map((x, j) => (j === i ? { ...x, base: v } : x)))}
+                  disabled={!editable}
+                  label={techItems.find((x) => x.id === it.itemId)?.name ?? ''}
+                />
                 {editable && (
-                  <button type="button" aria-label="移除" className="ml-auto flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay" onClick={() => setItems(items.filter((_, j) => j !== i))}>
+                  <button
+                    type="button"
+                    aria-label="移除"
+                    className="ml-auto flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay"
+                    onClick={() => setItems(items.filter((_, j) => j !== i))}
+                  >
                     <Trash2 className="size-4" />
                   </button>
                 )}
@@ -338,13 +402,24 @@ export function CommissionCard() {
               <div className="flex flex-wrap items-center gap-2">
                 <select value={pick} onChange={(e) => setPick(e.target.value)} className="h-9 rounded-md border border-line-strong bg-card px-2 text-[13px]" aria-label="选择项目">
                   <option value="">选择需要技师的项目…</option>
-                  {techItems.filter((i) => !items.some((x) => x.itemId === i.id)).map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.name}
-                    </option>
-                  ))}
+                  {techItems
+                    .filter((i) => !items.some((x) => x.itemId === i.id))
+                    .map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.name}
+                      </option>
+                    ))}
                 </select>
-                <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} disabled={!pick} onClick={() => { setItems([...items, { itemId: Number(pick), base: { kind: 'fixed', perClock: { standard: '', professional: '', premium: '' } } }]); setPick(''); }}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<Plus className="size-4" />}
+                  disabled={!pick}
+                  onClick={() => {
+                    setItems([...items, { itemId: Number(pick), base: { kind: 'fixed', perClock: { standard: '', professional: '', premium: '' } } }]);
+                    setPick('');
+                  }}
+                >
                   单独设置
                 </Button>
               </div>

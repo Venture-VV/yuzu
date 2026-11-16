@@ -95,7 +95,11 @@ export function OrderedPage() {
             </option>
           ))}
         </Select>
-        {list.data && <span className="ml-auto text-[12.5px] text-ink-3">{lines.length} 行{list.data.truncated ? '（只显示前 2000 行）' : ''}</span>}
+        {list.data && (
+          <span className="ml-auto text-[12.5px] text-ink-3">
+            {lines.length} 行{list.data.truncated ? '（只显示前 2000 行）' : ''}
+          </span>
+        )}
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto" data-testid="ordered-page">
         <div className="mx-auto w-full max-w-[1180px] px-5 py-4 md:px-7">
@@ -108,7 +112,11 @@ export function OrderedPage() {
           ) : (
             <ul className="divide-y divide-line/70 rounded-lg border border-line bg-card shadow-card">
               {lines.map((l) => (
-                <li key={l.lineId} className={cn('grid grid-cols-[56px_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 px-4 py-3', l.overdue && 'bg-clay-soft/20')} data-testid={`ordered-line-${l.lineId}`}>
+                <li
+                  key={l.lineId}
+                  className={cn('grid grid-cols-[56px_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 px-4 py-3', l.overdue && 'bg-clay-soft/20')}
+                  data-testid={`ordered-line-${l.lineId}`}
+                >
                   <span className="pt-0.5">
                     {l.images.length > 0 ? (
                       <ImageThumbs images={l.images.slice(0, 1)} size={52} />

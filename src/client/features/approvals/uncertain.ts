@@ -41,15 +41,7 @@ export interface SentApproval {
  * （APPROVAL_MOVED，级别只往前走），单据已经不在待确认（INVALID_STATE），金额超过批量上限（BATCH_OVER_LIMIT，原来那批一样）；
  * 合同类（v0.7.31）：这种单据不能批量（APPROVAL_NO_BATCH），审查清单没填全、有「要修改」、风险提示没写意见（原样再发，原来那次一样被拒）。
  */
-const CONCLUSIVE = new Set([
-  'APPROVAL_MOVED',
-  'INVALID_STATE',
-  'BATCH_OVER_LIMIT',
-  'APPROVAL_NO_BATCH',
-  'LEGAL_CHECKLIST_REQUIRED',
-  'LEGAL_CHECKLIST_REVISE',
-  'LEGAL_CHECKLIST_NOTE',
-]);
+const CONCLUSIVE = new Set(['APPROVAL_MOVED', 'INVALID_STATE', 'BATCH_OVER_LIMIT', 'APPROVAL_NO_BATCH', 'LEGAL_CHECKLIST_REQUIRED', 'LEGAL_CHECKLIST_REVISE', 'LEGAL_CHECKLIST_NOTE']);
 
 const STORAGE_KEY = 'yuzu.approvalPending.v1';
 const listeners = new Set<() => void>();
@@ -260,12 +252,7 @@ export function postDocAction<T = unknown>(url: string, body: unknown, docNo: st
  * 批量同意：整批先存本机（每张一条，记着同一批与意见）再发；每张的结果都是明确的（成功或写明原因的没成功）。
  * 重新提交那一批时带上原来的批号与意见，各张照上次的级别再发。
  */
-export async function sendBatchApprove(
-  staffId: number,
-  items: { requestId: number; docNo: string; level: number }[],
-  comment: string,
-  batchId: string = uuid(),
-): Promise<BatchApproveResult> {
+export async function sendBatchApprove(staffId: number, items: { requestId: number; docNo: string; level: number }[], comment: string, batchId: string = uuid()): Promise<BatchApproveResult> {
   const createdAt = new Date().toISOString();
   const records: SentApproval[] = items.map((i) => ({
     staffId,
@@ -295,11 +282,7 @@ export async function sendBatchApprove(
   }
   try {
     // 一批最多 50 张、一张一个事务：多给一些时间，少一些「没收到结果」
-    const r = await api.post<BatchApproveResult>(
-      '/api/approvals/batch-approve',
-      { items: records.map((x) => ({ id: x.requestId, level: x.level })), comment },
-      { timeoutMs: 60_000 },
-    );
+    const r = await api.post<BatchApproveResult>('/api/approvals/batch-approve', { items: records.map((x) => ({ id: x.requestId, level: x.level })), comment }, { timeoutMs: 60_000 });
     // 每张的结果：成功的、第一次发的、拒绝原因能断定的删掉；重新提交没被受理的留着（上次那批可能还在处理这一张）
     const kept = new Map<string, string>();
     for (const x of r.results) {

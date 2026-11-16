@@ -161,7 +161,12 @@ export function Intro({ cta, onDone }: { cta: string; onDone: (skipped: boolean)
             <IconSound size={24} on={voice.on} fill={voice.on ? 'var(--color-yuzu)' : 'none'} />
           </button>
         )}
-        <button type="button" onClick={() => onDone(true)} className="shrink-0 rounded-full px-2.5 py-1.5 text-[14px] font-bold whitespace-nowrap text-ink-3 active:bg-cream-2" data-testid="intro-skip">
+        <button
+          type="button"
+          onClick={() => onDone(true)}
+          className="shrink-0 rounded-full px-2.5 py-1.5 text-[14px] font-bold whitespace-nowrap text-ink-3 active:bg-cream-2"
+          data-testid="intro-skip"
+        >
           跳过
         </button>
       </div>

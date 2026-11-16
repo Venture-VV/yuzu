@@ -10,7 +10,18 @@ import { Link } from 'react-router';
 import { Minus, Plus, Scan, Search, X } from 'lucide-react';
 import type { FloorplanFloor } from '@shared/floorplans';
 import type { LocationPerson } from '@shared/locations';
-import { DASHED_STATES, FLOOR_MAP_LEGEND, FLOOR_MAP_STATES, spaceMatches, spaceStatus, type FloorMapSession, type FloorMapSpace, type FloorMapState, type FloorMapUsage, type SpaceStatus } from '@shared/floormap';
+import {
+  DASHED_STATES,
+  FLOOR_MAP_LEGEND,
+  FLOOR_MAP_STATES,
+  spaceMatches,
+  spaceStatus,
+  type FloorMapSession,
+  type FloorMapSpace,
+  type FloorMapState,
+  type FloorMapUsage,
+  type SpaceStatus,
+} from '@shared/floormap';
 import { durationText, usageEstimate, usageMinutes, type UsageDetail } from '@shared/usages';
 import { formatYuan } from '@shared/money';
 import { ROOM_BOARD_LABELS, type RoomBoard, type RoomBoardRoom } from '@shared/rooms';
@@ -57,17 +68,7 @@ export interface UsageResume {
   usageId: number | null;
 }
 
-export function FloorMapView({
-  board,
-  onAction,
-  resume = null,
-  onResumed,
-}: {
-  board: RoomBoard;
-  onAction: (a: MapAction) => void;
-  resume?: UsageResume | null;
-  onResumed?: () => void;
-}) {
+export function FloorMapView({ board, onAction, resume = null, onResumed }: { board: RoomBoard; onAction: (a: MapAction) => void; resume?: UsageResume | null; onResumed?: () => void }) {
   const fm = useFloorMap();
   const plan = useActiveFloorplan(fm.data ? fm.data.floorplanBatchId : undefined, fm.data?.floorplanRev ?? 0);
   const [floorCode, setFloorCode] = useState<string | null>(null);
@@ -154,7 +155,10 @@ export function FloorMapView({
   const typeOptions = useMemo(() => [...new Set(here.flatMap((e) => (e.space ? [e.space.businessType] : [])))].sort(), [here]);
 
   const q = query.trim();
-  const matchOf = useCallback((e: { code: string; label?: string; space: FloorMapSpace | null }) => (e.space ? spaceMatches(e.space, q) : spaceMatches({ code: e.code, displayName: e.label ?? '', aliases: [] }, q)), [q]);
+  const matchOf = useCallback(
+    (e: { code: string; label?: string; space: FloorMapSpace | null }) => (e.space ? spaceMatches(e.space, q) : spaceMatches({ code: e.code, displayName: e.label ?? '', aliases: [] }, q)),
+    [q],
+  );
   const dim = useMemo(() => {
     const set = new Set<string>();
     for (const e of here) {
@@ -574,7 +578,15 @@ function PlanCanvas({
           {k > 1.01 ? `放大 ${k.toFixed(1)} 倍 · ` : ''}滚轮或双指缩放，拖动平移
         </span>
         <Button size="sm" variant="ghost" icon={<Minus className="size-4" />} aria-label="缩小" disabled={k <= 1.001} onClick={() => zoomAt(W / 2, H / 2, 1 / 1.5)} data-testid="floormap-zoom-out" />
-        <Button size="sm" variant="ghost" icon={<Plus className="size-4" />} aria-label="放大" disabled={k >= MAX_ZOOM - 0.001} onClick={() => zoomAt(W / 2, H / 2, 1.5)} data-testid="floormap-zoom-in" />
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<Plus className="size-4" />}
+          aria-label="放大"
+          disabled={k >= MAX_ZOOM - 0.001}
+          onClick={() => zoomAt(W / 2, H / 2, 1.5)}
+          data-testid="floormap-zoom-in"
+        />
         <Button size="sm" variant="ghost" icon={<Scan className="size-4" />} onClick={reset} data-testid="floormap-fit">
           适应屏幕
         </Button>
@@ -640,7 +652,15 @@ const RoomsLayer = memo(function RoomsLayer({
         const dashed = DASHED_STATES.includes(e.state);
         const isSel = selected === e.code;
         return (
-          <g key={e.key} data-code={e.code} data-testid={`map-space-${e.code}`} data-state={e.state} data-dim={dim.has(e.key) ? 'true' : 'false'} className="cursor-pointer" opacity={dim.has(e.key) ? 0.22 : 1}>
+          <g
+            key={e.key}
+            data-code={e.code}
+            data-testid={`map-space-${e.code}`}
+            data-state={e.state}
+            data-dim={dim.has(e.key) ? 'true' : 'false'}
+            className="cursor-pointer"
+            opacity={dim.has(e.key) ? 0.22 : 1}
+          >
             {e.polygon ? (
               <polygon
                 points={e.polygon.map((pt) => pt.join(',')).join(' ')}
@@ -652,7 +672,16 @@ const RoomsLayer = memo(function RoomsLayer({
                 vectorEffect="non-scaling-stroke"
               />
             ) : (
-              <circle cx={e.labelAt[0]} cy={e.labelAt[1]} r={font * 1.1} fill={c.fill} stroke={isSel ? '#a87508' : c.stroke} strokeWidth={sw(isSel ? 3.5 : 1.5)} strokeDasharray={dashed ? dash(4, 3) : undefined} vectorEffect="non-scaling-stroke" />
+              <circle
+                cx={e.labelAt[0]}
+                cy={e.labelAt[1]}
+                r={font * 1.1}
+                fill={c.fill}
+                stroke={isSel ? '#a87508' : c.stroke}
+                strokeWidth={sw(isSel ? 3.5 : 1.5)}
+                strokeDasharray={dashed ? dash(4, 3) : undefined}
+                vectorEffect="non-scaling-stroke"
+              />
             )}
             <text
               x={e.labelAt[0]}
@@ -693,9 +722,27 @@ const RoomsLayer = memo(function RoomsLayer({
           .filter((e) => e.code === flash)
           .map((e) =>
             e.polygon ? (
-              <polygon key={`flash-${e.key}-${flashN}`} points={e.polygon.map((pt) => pt.join(',')).join(' ')} fill="none" stroke="#f2c230" strokeWidth={sw(6)} vectorEffect="non-scaling-stroke" className="pointer-events-none animate-flash" />
+              <polygon
+                key={`flash-${e.key}-${flashN}`}
+                points={e.polygon.map((pt) => pt.join(',')).join(' ')}
+                fill="none"
+                stroke="#f2c230"
+                strokeWidth={sw(6)}
+                vectorEffect="non-scaling-stroke"
+                className="pointer-events-none animate-flash"
+              />
             ) : (
-              <circle key={`flash-${e.key}-${flashN}`} cx={e.labelAt[0]} cy={e.labelAt[1]} r={font * 1.6} fill="none" stroke="#f2c230" strokeWidth={sw(6)} vectorEffect="non-scaling-stroke" className="pointer-events-none animate-flash" />
+              <circle
+                key={`flash-${e.key}-${flashN}`}
+                cx={e.labelAt[0]}
+                cy={e.labelAt[1]}
+                r={font * 1.6}
+                fill="none"
+                stroke="#f2c230"
+                strokeWidth={sw(6)}
+                vectorEffect="non-scaling-stroke"
+                className="pointer-events-none animate-flash"
+              />
             ),
           )}
     </>
@@ -704,7 +751,13 @@ const RoomsLayer = memo(function RoomsLayer({
 
 function Swatch({ state, className }: { state: FloorMapState; className?: string }) {
   const c = FLOOR_MAP_LEGEND[state];
-  return <span className={cn('inline-block size-3.5 shrink-0 rounded-[4px] border', DASHED_STATES.includes(state) && 'border-dashed', className)} style={{ background: c.fill, borderColor: c.stroke }} aria-hidden />;
+  return (
+    <span
+      className={cn('inline-block size-3.5 shrink-0 rounded-[4px] border', DASHED_STATES.includes(state) && 'border-dashed', className)}
+      style={{ background: c.fill, borderColor: c.stroke }}
+      aria-hidden
+    />
+  );
 }
 
 function Legend({ counts }: { counts: Record<FloorMapState, number> }) {
@@ -767,7 +820,16 @@ function SpacePanel({
         <div className="min-w-0 flex-1">
           <h3 className="text-[17px] leading-tight font-bold">{space ? spaceLabel(space.code, space.displayName) : code}</h3>
           <p className="mt-0.5 text-[12.5px] text-ink-3">
-            {space ? [space.businessType, `${space.floorCode}${space.zoneName ? ` · ${space.zoneName}` : ''}`, space.capacity ? `${space.capacity} 人` : '', space.areaCentiM2 ? `${areaText(space.areaCentiM2)} ㎡` : ''].filter(Boolean).join(' · ') : `图上原文：${entry!.label}`}
+            {space
+              ? [
+                  space.businessType,
+                  `${space.floorCode}${space.zoneName ? ` · ${space.zoneName}` : ''}`,
+                  space.capacity ? `${space.capacity} 人` : '',
+                  space.areaCentiM2 ? `${areaText(space.areaCentiM2)} ㎡` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+              : `图上原文：${entry!.label}`}
           </p>
         </div>
         <button type="button" onClick={onClose} className="rounded p-1 text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="关闭">
@@ -869,7 +931,8 @@ function RoomPart({ space, status, canOperate, canHousekeep, onAction }: { space
             {guestOf(s)} <Badge tone="lake">手牌 {s.tagCode}</Badge>
           </p>
           <p className="text-ink-2">
-            {s.kind === 'daily' ? `${dayText(s.businessDate)}入住${s.expectedCheckoutDate ? ` · 预离 ${dayText(s.expectedCheckoutDate)}` : ''}` : `钟点房 · ${formatTime(s.checkedInAt)} 入住`} · {s.guests} 人
+            {s.kind === 'daily' ? `${dayText(s.businessDate)}入住${s.expectedCheckoutDate ? ` · 预离 ${dayText(s.expectedCheckoutDate)}` : ''}` : `钟点房 · ${formatTime(s.checkedInAt)} 入住`} ·{' '}
+            {s.guests} 人
           </p>
           <p className="text-ink-2">
             房费 <Money cents={s.chargedAmount} />
@@ -976,7 +1039,9 @@ function SessionsPart({ sessions, now, canDispatch }: { sessions: FloorMapSessio
                 <p className="flex items-baseline gap-1.5">
                   <span className="num font-bold">{s.techNo}</span>
                   <span className="font-semibold">{s.techName}</span>
-                  <span className="ml-auto text-[12px] font-semibold text-lake">{s.status === 'serving' ? (left === null ? '服务中' : left >= 0 ? `服务中 · 剩 ${left} 分` : `超时 ${-left} 分`) : '待上钟'}</span>
+                  <span className="ml-auto text-[12px] font-semibold text-lake">
+                    {s.status === 'serving' ? (left === null ? '服务中' : left >= 0 ? `服务中 · 剩 ${left} 分` : `超时 ${-left} 分`) : '待上钟'}
+                  </span>
                 </p>
                 <p className="text-[12.5px] text-ink-3">
                   手牌 <span className="num font-semibold text-ink-2">{s.tagCode}</span> · {s.itemName} × {s.clocks}

@@ -162,8 +162,10 @@ async function applyEvent(tx: Tx, cur: CurrentRow, ev: NewEvent, tagCode: string
   if (ev.kind === 'at' && here && samePlace(here, ev.place!)) {
     // 同一个地方：续上当前这一段
     await tx`UPDATE location_tracks SET last_at = ${ev.at}, last_event_id = ${eventId}, event_count = event_count + 1 WHERE id = ${cur.trackId}`;
-    next = (await tx<CurrentRow[]>`
-      UPDATE current_locations SET last_at = ${ev.at}, last_event_id = ${eventId}, updated_at = now() WHERE id = ${cur.id} RETURNING *`)[0]!;
+    next = (
+      await tx<CurrentRow[]>`
+      UPDATE current_locations SET last_at = ${ev.at}, last_event_id = ${eventId}, updated_at = now() WHERE id = ${cur.id} RETURNING *`
+    )[0]!;
   } else {
     // 换了地方、离开、离店：结束当前这一段
     if (here) await tx`UPDATE location_tracks SET left_at = ${effective}, end_event_id = ${eventId} WHERE id = ${cur.trackId}`;
@@ -173,15 +175,19 @@ async function applyEvent(tx: Tx, cur: CurrentRow, ev: NewEvent, tagCode: string
         INSERT INTO location_tracks (visit_id, technician_id, floor_id, zone_id, space_id, entered_at, first_event_id, last_at, last_event_id)
         VALUES (${cur.visitId}, ${cur.technicianId}, ${p.floorId}, ${p.zoneId}, ${p.spaceId}, ${ev.at}, ${eventId}, ${ev.at}, ${eventId})
         RETURNING id`;
-      next = (await tx<CurrentRow[]>`
+      next = (
+        await tx<CurrentRow[]>`
         UPDATE current_locations SET state = 'at', floor_id = ${p.floorId}, zone_id = ${p.zoneId}, space_id = ${p.spaceId}, since = ${ev.at},
                track_id = ${track!.id}, last_at = ${ev.at}, last_event_id = ${eventId}, updated_at = now()
-        WHERE id = ${cur.id} RETURNING *`)[0]!;
+        WHERE id = ${cur.id} RETURNING *`
+      )[0]!;
     } else {
-      next = (await tx<CurrentRow[]>`
+      next = (
+        await tx<CurrentRow[]>`
         UPDATE current_locations SET state = ${ev.kind}, floor_id = NULL, zone_id = NULL, space_id = NULL, since = NULL, track_id = NULL,
                last_at = ${effective}, last_event_id = ${eventId}, updated_at = now()
-        WHERE id = ${cur.id} RETURNING *`)[0]!;
+        WHERE id = ${cur.id} RETURNING *`
+      )[0]!;
     }
   }
   return { eventId, applied, cur: next };
@@ -200,7 +206,8 @@ async function writeEvents(tx: Tx, events: NewEvent[]): Promise<({ eventId: numb
     subjects.set(k, { s: e.subject, create: (prev?.create ?? false) || e.kind === 'at' });
   }
   const ordered = [...subjects.values()].sort((a, b) => {
-    const av = a.s.visitId !== undefined, bv = b.s.visitId !== undefined;
+    const av = a.s.visitId !== undefined,
+      bv = b.s.visitId !== undefined;
     if (av !== bv) return av ? -1 : 1;
     return (a.s.visitId ?? a.s.technicianId!) - (b.s.visitId ?? b.s.technicianId!);
   });
@@ -258,7 +265,10 @@ export async function locateCheckin(tx: Tx, visitIds: number[], c: LocateContext
     if (!rules.enabled || rules.checkinZoneId === null) return;
     const place = await zonePlace(sp, rules.checkinZoneId);
     if (!place) return;
-    await writeEvents(sp, visitIds.map((id) => ({ subject: { visitId: id }, kind: 'at', place, source: 'checkin', ref: { type: 'visit', id }, at: c.at, staffId: c.staffId })));
+    await writeEvents(
+      sp,
+      visitIds.map((id) => ({ subject: { visitId: id }, kind: 'at', place, source: 'checkin', ref: { type: 'visit', id }, at: c.at, staffId: c.staffId })),
+    );
   });
 }
 
@@ -615,7 +625,16 @@ export async function currentLocations(db: Db, deps: Deps): Promise<LocationsCur
 
 const MAX_TRACK_EVENTS = 500;
 
-const placeFrom = (r: { floorId: number | null; floorCode: string | null; floorName: string | null; zoneId: number | null; zoneName: string | null; spaceId: number | null; spaceCode: string | null; spaceName: string | null }): LocationPlace | null =>
+const placeFrom = (r: {
+  floorId: number | null;
+  floorCode: string | null;
+  floorName: string | null;
+  zoneId: number | null;
+  zoneName: string | null;
+  spaceId: number | null;
+  spaceCode: string | null;
+  spaceName: string | null;
+}): LocationPlace | null =>
   r.floorId === null
     ? null
     : { floorId: r.floorId, floorCode: r.floorCode!, floorName: r.floorName!, zoneId: r.zoneId, zoneName: r.zoneName, spaceId: r.spaceId, spaceCode: r.spaceCode, spaceName: r.spaceName };
@@ -807,7 +826,10 @@ async function saveRules(deps: Deps, raw: unknown, ctx: OpContext) {
     loadLocationRules,
     async (before, tx) => {
       const after = parse(RulesInput, { ...before, ...parse(RulesInput.partial(), raw) });
-      for (const [label, id] of [['接待区', after.checkinZoneId], ['技师休息区', after.restZoneId]] as const) {
+      for (const [label, id] of [
+        ['接待区', after.checkinZoneId],
+        ['技师休息区', after.restZoneId],
+      ] as const) {
         if (id === null || id === before[label === '接待区' ? 'checkinZoneId' : 'restZoneId']) continue;
         if (!(await zonePlace(tx, id))) throw unprocessable('ZONE_INACTIVE', `${label}选的区域不存在或已停用`);
       }
@@ -914,9 +936,7 @@ async function saveItemZones(deps: Deps, raw: unknown, ctx: OpContext) {
     const changed = rows.filter((r) => r.zoneId !== want.get(r.id));
     if (changed.length === 0) return;
     for (const r of changed) await tx`UPDATE service_items SET zone_id = ${want.get(r.id)!}, updated_at = now() WHERE id = ${r.id}`;
-    const zoneNames = new Map(
-      (zoneIds.length ? await tx<{ id: number; name: string }[]>`SELECT id, name FROM zones WHERE id IN ${tx(zoneIds)}` : []).map((z) => [z.id, z.name]),
-    );
+    const zoneNames = new Map((zoneIds.length ? await tx<{ id: number; name: string }[]>`SELECT id, name FROM zones WHERE id IN ${tx(zoneIds)}` : []).map((z) => [z.id, z.name]));
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'items_zone_updated',
@@ -986,9 +1006,7 @@ export async function locationChecks(db: Db): Promise<{ label: string; ok: boole
     {
       label: '实时位置：离店的客人、下了牌的技师没有当前位置',
       ok: goneDiff.length === 0,
-      detail: goneDiff.length
-        ? `${goneDiff.length} 位已离店的客人或下了牌的技师还记着位置（如 ${refs(goneDiff)}）`
-        : `在店、有位置的客人 ${stats!.located} 位；离店的客人、下了牌的技师都没有当前位置`,
+      detail: goneDiff.length ? `${goneDiff.length} 位已离店的客人或下了牌的技师还记着位置（如 ${refs(goneDiff)}）` : `在店、有位置的客人 ${stats!.located} 位；离店的客人、下了牌的技师都没有当前位置`,
     },
   ];
 }
@@ -1023,4 +1041,3 @@ export function registerLocationRoutes(app: FastifyInstance, deps: Deps) {
     return locationAdmin(sql);
   });
 }
-

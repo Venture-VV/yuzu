@@ -78,7 +78,17 @@ describe('测试会话问题 2：跨营业日反结账时看板与日结同一�
     const at = new Date(businessDayStart(yesterday, ctx.config.timezone, startHour).getTime() + 3 * H);
     const m = await createMember(ctx, '跨日会员', '19900099902');
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/recharges', rechargeBody(m.id, 100000))).status).toBe(200);
-    const v = await checkin(deps, { clientKey: randomUUID(), guests: [{ tagCode: 'R002', zone: 'male', memberId: m.id }, { tagCode: 'R003', zone: 'male' }] }, { actor: clerk, at: new Date(at.getTime() - H) });
+    const v = await checkin(
+      deps,
+      {
+        clientKey: randomUUID(),
+        guests: [
+          { tagCode: 'R002', zone: 'male', memberId: m.id },
+          { tagCode: 'R003', zone: 'male' },
+        ],
+      },
+      { actor: clerk, at: new Date(at.getTime() - H) },
+    );
     const ids = v.visits.map((x) => x.id);
     // 按实际时间核对要有补录权限（店主）
     const preview = (await api(ctx.app, ctx.owner, 'GET', `/api/frontdesk/checkout-preview?ids=${ids.join(',')}&at=${encodeURIComponent(at.toISOString())}`)).body;
@@ -101,7 +111,16 @@ describe('测试会话问题 2：跨营业日反结账时看板与日结同一�
     // 今天反结账（店主），客人再用现金重结
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/checkouts/${done.id}/void`, { reason: '收款方式记错' })).status).toBe(200);
     const pre2 = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${ids.join(',')}`)).body;
-    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: ids, expectedTotal: pre2.totalAmount, payments: [{ method: 'cash', amount: pre2.totalAmount }] })).status).toBe(200);
+    expect(
+      (
+        await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', {
+          clientKey: randomUUID(),
+          visitIds: ids,
+          expectedTotal: pre2.totalAmount,
+          payments: [{ method: 'cash', amount: pre2.totalAmount }],
+        })
+      ).status,
+    ).toBe(200);
 
     for (const date of [yesterday, today]) {
       const st = (await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${date}`)).body;
@@ -111,7 +130,10 @@ describe('测试会话问题 2：跨营业日反结账时看板与日结同一�
       expect(methods(ex.byMethod), date).toEqual(methods(biz.byMethod));
       expect(ex.kpis.receivable, date).toBe(biz.net);
       expect(ex.kpis.checkouts, date).toBe(biz.checkouts.count - biz.voids.count);
-      expect(ex.tickets.reduce((t: number, x: { amount: number }) => t + x.amount, 0), date).toBe(biz.ticket);
+      expect(
+        ex.tickets.reduce((t: number, x: { amount: number }) => t + x.amount, 0),
+        date,
+      ).toBe(biz.ticket);
       expect(ex.kpis.walletConsumed, date).toBe(st.consume.total - (st.reversal.principal + st.reversal.bonus));
     }
     // 昨天：两位客人、一张单、储值 300；今天：反结账冲回两位客人与一张单，重结又加回

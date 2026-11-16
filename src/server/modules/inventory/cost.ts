@@ -111,7 +111,17 @@ export async function costReport(db: Db, timezone: string, raw: unknown): Promis
     const cost = unit === null ? null : unit * s.quantity;
     const discount = Math.min(Number(s.discount), Number(s.revenue));
     const net = Number(s.revenue) - discount;
-    return { itemId: Number(s.id), itemName: s.name, category: s.category, quantity: s.quantity, revenueCents: net, discountCents: discount, unitCostCents: unit, costCents: cost, marginCents: cost === null ? null : net - cost };
+    return {
+      itemId: Number(s.id),
+      itemName: s.name,
+      category: s.category,
+      quantity: s.quantity,
+      revenueCents: net,
+      discountCents: discount,
+      unitCostCents: unit,
+      costCents: cost,
+      marginCents: cost === null ? null : net - cost,
+    };
   });
 
   return {

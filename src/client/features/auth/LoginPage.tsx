@@ -60,12 +60,8 @@ export function LoginPage() {
             <span className="text-[13px] font-bold tracking-[0.32em] text-pine">浴族 · YUZU</span>
           </div>
           <div className="mt-6 max-w-md sm:mt-10 lg:mt-24">
-            <p className="font-display text-[56px] leading-[0.9] tracking-tight text-ink italic sm:text-[76px] lg:text-[104px]">
-              yuzu
-            </p>
-            <p className="mt-3 text-[15px] font-semibold tracking-[0.2em] text-ink-2 sm:text-[17px] lg:mt-5">
-              城市里的山野汤泉
-            </p>
+            <p className="font-display text-[56px] leading-[0.9] tracking-tight text-ink italic sm:text-[76px] lg:text-[104px]">yuzu</p>
+            <p className="mt-3 text-[15px] font-semibold tracking-[0.2em] text-ink-2 sm:text-[17px] lg:mt-5">城市里的山野汤泉</p>
           </div>
         </div>
       </section>
@@ -140,8 +136,7 @@ export function LoginPage() {
             <div className="mt-8 rounded-lg border border-dashed border-line-strong bg-card/70 px-4 py-3 text-[13px] text-ink-2">
               <p className="font-bold text-ink">演示环境 · 合成数据</p>
               <p className="mt-1">
-                店主 <code className="num font-semibold text-pine">linlan</code>、店员{' '}
-                <code className="num font-semibold text-pine">xiaozhou</code>，密码均为{' '}
+                店主 <code className="num font-semibold text-pine">linlan</code>、店员 <code className="num font-semibold text-pine">xiaozhou</code>，密码均为{' '}
                 <code className="num font-semibold text-pine">yuzu2026</code>
               </p>
             </div>

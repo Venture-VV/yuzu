@@ -110,7 +110,11 @@ async function sha256File(file: string): Promise<string> {
   return hash.digest('hex');
 }
 
-const exists = (path: string) => access(path).then(() => true, () => false);
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
 
 /** 门店时区的日期与时刻：备份文件名、每天第一份的判断都按门店时间 */
 function localStamp(now: Date, timezone: string) {
@@ -297,9 +301,7 @@ export async function listBackups(dir: string): Promise<BackupEntry[]> {
 
 /** 按保留策略算出要删除的备份：hourly 保留 hourlyKeepHours 小时，其余（daily、升级前、手动等）保留 keepDays 天 */
 export function planPrune(entries: BackupEntry[], now: number, policy: Pick<BackupPolicy, 'hourlyKeepHours' | 'keepDays'>): string[] {
-  return entries
-    .filter((e) => now - e.mtimeMs > (e.label === 'hourly' ? policy.hourlyKeepHours * 3600_000 : policy.keepDays * 86400_000))
-    .map((e) => e.name);
+  return entries.filter((e) => now - e.mtimeMs > (e.label === 'hourly' ? policy.hourlyKeepHours * 3600_000 : policy.keepDays * 86400_000)).map((e) => e.name);
 }
 
 async function prune(dir: string, policy: BackupPolicy, now: number): Promise<string[]> {

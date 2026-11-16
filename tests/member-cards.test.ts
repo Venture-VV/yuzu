@@ -14,8 +14,7 @@ import { api, createMember, login, PASSWORD, setup, type TestContext } from './h
 let ctx: TestContext;
 let am: string;
 
-const issue = (memberId: number, body: Record<string, unknown>, cookie = ctx.clerk, clientKey = randomUUID()) =>
-  api(ctx.app, cookie, 'POST', `/api/members/${memberId}/cards`, { clientKey, ...body });
+const issue = (memberId: number, body: Record<string, unknown>, cookie = ctx.clerk, clientKey = randomUUID()) => api(ctx.app, cookie, 'POST', `/api/members/${memberId}/cards`, { clientKey, ...body });
 const cardsOf = async (memberId: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/members/${memberId}/cards`)).body as MemberCard[];
 const search = async (q: string) => (await api(ctx.app, ctx.clerk, 'GET', `/api/members?q=${encodeURIComponent(q)}`)).body as MemberSummary[];
 const lookup = async (cardNo: string) => (await api(ctx.app, ctx.clerk, 'GET', `/api/member-cards/lookup?cardNo=${encodeURIComponent(cardNo)}`)).body as MemberCardLookup;

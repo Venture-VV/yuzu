@@ -130,28 +130,81 @@ describe('读 Excel 与规整', () => {
     const ordered = ['下单时间', '产品名称', '图片', '选款', '部门', '下单人', '数量', '金额', '备注'];
     const orderedBad = ordered.map((h) => (h === '下单人' ? '经办人' : h));
     expect(() =>
-      parseLegacyWorkbook(buildWorkbook([{ name: '10月', rows: { 1: ordered, 2: [46318, '样例-芝士'] } }, { name: '11月', rows: { 1: orderedBad, 2: [46330, '样例-乳酪'] } }])),
+      parseLegacyWorkbook(
+        buildWorkbook([
+          { name: '10月', rows: { 1: ordered, 2: [46318, '样例-芝士'] } },
+          { name: '11月', rows: { 1: orderedBad, 2: [46330, '样例-乳酪'] } },
+        ]),
+      ),
     ).toThrow('「11月」第 1 行的表头缺「下单人」');
     // 品牌清单只导入一张：另一张写了东西又认不出也拒绝
-    expect(() => parseLegacyWorkbook(buildWorkbook([{ name: '工作表1', rows: { 1: ['标题'], 2: ['序号', '是否下单', '是否到货', '是否退货', '产品名称', '用途', '采购数量', '备注', '产品详情', '参考链接渠道'], 3: [1] } }, { name: '备忘', rows: { 1: ['随手记'] } }]))).toThrow(
-      '「备忘」前 6 行认不出表头',
-    );
+    expect(() =>
+      parseLegacyWorkbook(
+        buildWorkbook([
+          { name: '工作表1', rows: { 1: ['标题'], 2: ['序号', '是否下单', '是否到货', '是否退货', '产品名称', '用途', '采购数量', '备注', '产品详情', '参考链接渠道'], 3: [1] } },
+          { name: '备忘', rows: { 1: ['随手记'] } },
+        ]),
+      ),
+    ).toThrow('「备忘」前 6 行认不出表头');
   });
 });
 
 describe('核验规则（纯计算）', () => {
   const types = DEFAULT_EXPENSE_RULES.invoiceTypes;
   const mat = (i: number, extra: Partial<LegacyMaterialLine> = {}): LegacyMaterialLine => ({
-    sheet: '8月', rowNo: i + 3, seq: String(i + 1), date: '2026-08-31', dateText: '', item: `样例-${i}`, purpose: '', amountCents: 100, amountFormula: null,
-    boughtText: '', boughtMilli: null, receivedText: '', receivedMilli: null, department: '保洁', invoice: '普票', taxText: '0.01', taxRateBp: 100,
-    category: '低值易耗', mergedInto: null, raw: {}, ...extra,
+    sheet: '8月',
+    rowNo: i + 3,
+    seq: String(i + 1),
+    date: '2026-08-31',
+    dateText: '',
+    item: `样例-${i}`,
+    purpose: '',
+    amountCents: 100,
+    amountFormula: null,
+    boughtText: '',
+    boughtMilli: null,
+    receivedText: '',
+    receivedMilli: null,
+    department: '保洁',
+    invoice: '普票',
+    taxText: '0.01',
+    taxRateBp: 100,
+    category: '低值易耗',
+    mergedInto: null,
+    raw: {},
+    ...extra,
   });
   const brandLine = (rowNo: number, extra: Partial<LegacyBrandLine>): LegacyBrandLine => ({
-    rowNo, seq: String(rowNo), ordered: false, received: false, returned: false, product: '样例-杯', purpose: '客房', qtyText: '1', qtyMilli: 1000, note: '', details: '', linkText: '', linkUrl: '', raw: {}, ...extra,
+    rowNo,
+    seq: String(rowNo),
+    ordered: false,
+    received: false,
+    returned: false,
+    product: '样例-杯',
+    purpose: '客房',
+    qtyText: '1',
+    qtyMilli: 1000,
+    note: '',
+    details: '',
+    linkText: '',
+    linkUrl: '',
+    raw: {},
+    ...extra,
   });
   const data = (over: Partial<LegacyData>): LegacyData => ({
-    imported: ['material_detail', 'brand_requests'], ledger: [], ledgerSheet: '', payments: [], paymentSheet: '', materials: [], materialSheets: [{ name: '8月', rows: 0 }],
-    ordered: [], brand: [], brandSheet: '工作表1', brandTableRows: 0, invoiceTypes: types, ...over,
+    imported: ['material_detail', 'brand_requests'],
+    ledger: [],
+    ledgerSheet: '',
+    payments: [],
+    paymentSheet: '',
+    materials: [],
+    materialSheets: [{ name: '8月', rows: 0 }],
+    ordered: [],
+    brand: [],
+    brandSheet: '工作表1',
+    brandTableRows: 0,
+    invoiceTypes: types,
+    ...over,
   });
 
   it('第 5 条：发票写法换成新账字典的类别，再核对税点（Codex PR #26）', () => {
@@ -198,10 +251,21 @@ describe('核验规则（纯计算）', () => {
 
   it('付款台账没写日期的行：金额算进合计并单列，不算进每日平账（Codex PR #26）', () => {
     const pay = (rowNo: number, date: string | null, advance: number | null, should: number | null, returned: number | null): LegacyPaymentDay => ({
-      rowNo, date, dateText: date ?? '九月初', advanceCents: advance, advanceFormula: null, shouldReturnCents: should, shouldReturnFormula: null,
-      returnedCents: returned, returnedFormula: null, note: '', raw: {},
+      rowNo,
+      date,
+      dateText: date ?? '九月初',
+      advanceCents: advance,
+      advanceFormula: null,
+      shouldReturnCents: should,
+      shouldReturnFormula: null,
+      returnedCents: returned,
+      returnedFormula: null,
+      note: '',
+      raw: {},
     });
-    const audit = legacyAudit(data({ imported: ['purchase_ledger'], ledgerSheet: 'Sheet1', paymentSheet: 'Sheet2', payments: [pay(2, '2026-09-01', 10000, null, null), pay(3, null, 50000, 20000, 15000)] }));
+    const audit = legacyAudit(
+      data({ imported: ['purchase_ledger'], ledgerSheet: 'Sheet1', paymentSheet: 'Sheet2', payments: [pay(2, '2026-09-01', 10000, null, null), pay(3, null, 50000, 20000, 15000)] }),
+    );
     const ov = audit.overview.find((o) => o.label === '采购台账（付款台账）')!;
     expect(ov.amountText).toBe('打款 ¥600.00 / 应退回 ¥200.00 / 实际退回 ¥150.00');
     expect(ov.problems).toBe('应退回比实际退回多 ¥50.00；1 行没有日期（金额算进合计，没算进每日平账）');
@@ -299,10 +363,13 @@ describe('导入只读表与核验', () => {
     const rule3 = audit.rules.find((r) => r.no === 3)!;
     expect(rule3.rows[0]!.text).toContain('2026-09-02');
     const inv = expected.materials.invoiceIssues;
-    expect(audit.rules.find((r) => r.no === 5)!.result).toContain(
-      `${expected.rules['5']} 行对不上（${inv.missing} 行没填、${inv.unknown} 行写法认不出、${inv.rate} 行税点不在这类发票的范围里）`,
-    );
-    expect(audit.rules.find((r) => r.no === 12)!.rows.map((r) => r.text).join('；')).toContain('只写了「样例店铺 香薰」，没有能点开的网址');
+    expect(audit.rules.find((r) => r.no === 5)!.result).toContain(`${expected.rules['5']} 行对不上（${inv.missing} 行没填、${inv.unknown} 行写法认不出、${inv.rate} 行税点不在这类发票的范围里）`);
+    expect(
+      audit.rules
+        .find((r) => r.no === 12)!
+        .rows.map((r) => r.text)
+        .join('；'),
+    ).toContain('只写了「样例店铺 香薰」，没有能点开的网址');
   });
 
   it('逐行接口、原图；只读表不能改不能删；同一个文件再导入返回原来那次；换文件要写原因', async () => {

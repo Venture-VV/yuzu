@@ -69,7 +69,15 @@ describe('资产卡片', () => {
   it('从收货单转资产建卡：一件一张，不超过收货数量', async () => {
     const m = await ok(api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'AS-M1', name: '吸尘器', inventoryUnit: '台', purchaseUnit: '台', purchaseFactorMilli: q(1) }));
     const sup = (await ctx.sql<{ id: number }[]>`SELECT id FROM suppliers WHERE active ORDER BY id LIMIT 1`)[0]!.id;
-    const po = await ok(api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId: sup, orderDate: today, approveNow: true, lines: [{ materialId: m.id, purchaseQtyMilli: q(3), priceCents: 899_00 }] }));
+    const po = await ok(
+      api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId: sup,
+        orderDate: today,
+        approveNow: true,
+        lines: [{ materialId: m.id, purchaseQtyMilli: q(3), priceCents: 899_00 }],
+      }),
+    );
     const rc = await ok(
       api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
         clientKey: randomUUID(),

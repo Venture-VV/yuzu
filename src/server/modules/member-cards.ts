@@ -172,9 +172,7 @@ const LookupQuery = z.object({ cardNo: z.string('请刷卡或输入卡号').trim
 export function registerMemberCardRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   app.get('/api/members/:id/cards', { preHandler: guard('member.read') }, async (req) => listMemberCards(sql, parse(idParam, req.params).id));
-  app.post('/api/members/:id/cards', { preHandler: guard('member.card') }, async (req) =>
-    issueMemberCard(deps, parse(idParam, req.params).id, req.body as IssueCardInput, ctxOf(req)),
-  );
+  app.post('/api/members/:id/cards', { preHandler: guard('member.card') }, async (req) => issueMemberCard(deps, parse(idParam, req.params).id, req.body as IssueCardInput, ctxOf(req)));
   app.post('/api/member-cards/:id/lost', { preHandler: guard('member.card') }, async (req) => reportCardLost(deps, parse(idParam, req.params).id, req.body ?? {}, ctxOf(req)));
   app.get('/api/member-cards/lookup', { preHandler: guard('member.read') }, async (req) => lookupMemberCard(sql, parse(LookupQuery, req.query ?? {}).cardNo));
 }

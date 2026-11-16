@@ -25,9 +25,7 @@ export function RuleCatalog() {
   const rows = useMemo(() => {
     const t = text.trim();
     return (q.data ?? []).filter(
-      (r) =>
-        (filter === 'all' || (filter === 'changed' ? !r.isDefault : r.pending && r.isDefault)) &&
-        (!t || r.label.includes(t) || r.value.includes(t) || (r.hint ?? '').includes(t)),
+      (r) => (filter === 'all' || (filter === 'changed' ? !r.isDefault : r.pending && r.isDefault)) && (!t || r.label.includes(t) || r.value.includes(t) || (r.hint ?? '').includes(t)),
     );
   }, [q.data, filter, text]);
   const groups = (Object.keys(RULE_GROUPS) as RuleGroup[]).map((g) => ({ g, items: rows.filter((r) => r.group === g) })).filter((x) => x.items.length > 0);
@@ -39,11 +37,7 @@ export function RuleCatalog() {
           ariaLabel="筛选规则"
           value={filter}
           onChange={setFilter}
-          options={[
-            { value: 'all', label: '全部' },
-            { value: 'changed', label: '改过的' },
-            ...(showPending ? [{ value: 'pending' as const, label: '待确认的默认做法' }] : []),
-          ]}
+          options={[{ value: 'all', label: '全部' }, { value: 'changed', label: '改过的' }, ...(showPending ? [{ value: 'pending' as const, label: '待确认的默认做法' }] : [])]}
         />
         <label className="relative min-w-[200px] flex-1 sm:max-w-[280px]">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-4" />
@@ -82,20 +76,18 @@ export function RuleCatalog() {
                           {r.updatedBy} · {formatDateTime(r.updatedAt!)}
                         </span>
                       )}
-                      {r.href ? (
-                        // ERP 的规则在「ERP 设置」里改（8.0.18）；能不能改由那一页按权限定
-                        erp.canEnter && (
-                          <Link to={r.href} className="text-[12.5px] font-semibold text-pine hover:underline" data-testid={`rule-go-${r.key}`}>
-                            去 ERP 设置 →
-                          </Link>
-                        )
-                      ) : (
-                        sections.includes(r.section) && (
-                          <Link to={r.tab ? `${ADMIN_SECTIONS[r.section].path}/${r.tab}` : ADMIN_SECTIONS[r.section].path} className="text-[12.5px] font-semibold text-pine hover:underline">
-                            去设置 →
-                          </Link>
-                        )
-                      )}
+                      {r.href
+                        ? // ERP 的规则在「ERP 设置」里改（8.0.18）；能不能改由那一页按权限定
+                          erp.canEnter && (
+                            <Link to={r.href} className="text-[12.5px] font-semibold text-pine hover:underline" data-testid={`rule-go-${r.key}`}>
+                              去 ERP 设置 →
+                            </Link>
+                          )
+                        : sections.includes(r.section) && (
+                            <Link to={r.tab ? `${ADMIN_SECTIONS[r.section].path}/${r.tab}` : ADMIN_SECTIONS[r.section].path} className="text-[12.5px] font-semibold text-pine hover:underline">
+                              去设置 →
+                            </Link>
+                          )}
                     </div>
                   </li>
                 ))}

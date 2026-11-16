@@ -131,7 +131,10 @@ describe('权限（D10：岗位 + 职责）', () => {
     expect(depts.body.map((d: { id: number }) => d.id)).toEqual(expect.arrayContaining([deptA, deptB]));
     // v0.7.11 起成本核算可看库存（#21：库存冲销由仓库或成本岗做），但不能录入收发
     expect((await api(ctx.app, coster, 'GET', '/api/inventory/materials')).status).toBe(200);
-    expect((await api(ctx.app, coster, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'direct_use', docDate: today, note: '越权测试', lines: [{ materialId: 1, qtyMilli: 1000 }] })).status).toBe(403);
+    expect(
+      (await api(ctx.app, coster, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'direct_use', docDate: today, note: '越权测试', lines: [{ materialId: 1, qtyMilli: 1000 }] }))
+        .status,
+    ).toBe(403);
     // 规则只有店主能改
     const rules = (await api(ctx.app, coster, 'GET', '/api/erp/expenses/rules')).body;
     expect(rules.approvalThresholdCents).toBe(200_000);
@@ -211,8 +214,7 @@ describe('备用金：按部门平账（D14）', () => {
     const a = (await advance(coster)).body.advance;
     expect(a).toMatchObject({ advanceCents: 100_000, spentCents: 0, dueCents: 100_000, outstandingCents: 100_000, state: 'open' });
 
-    const spend = (amountCents: number, extra: Record<string, unknown> = {}) =>
-      claim(coster, { paySource: 'petty', advanceId: a.id, lines: [line({ amountCents })], ...extra });
+    const spend = (amountCents: number, extra: Record<string, unknown> = {}) => claim(coster, { paySource: 'petty', advanceId: a.id, lines: [line({ amountCents })], ...extra });
     expect((await spend(60_000)).body.claim.status).toBe('confirmed');
     // 待确认的不算进支出
     const pending = await spend(250_000);
@@ -295,12 +297,14 @@ describe('现付供应商与按采购单报销', () => {
   });
 
   const newPo = async (supplierId: number) => {
-    const po = (await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
-      clientKey: randomUUID(),
-      supplierId,
-      orderDate: today,
-      lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }],
-    })).body.po;
+    const po = (
+      await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId,
+        orderDate: today,
+        lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }],
+      })
+    ).body.po;
     await api(ctx.app, approver, 'POST', `/api/purchase-orders/${po.id}/approve`, {});
     return po;
   };
@@ -392,8 +396,7 @@ describe('现付供应商与按采购单报销', () => {
 
   it('供应商改了结算方式：挂账收下的采购单不能再报销；已按采购单报销的，之后收货也不记应付', async () => {
     const s2 = await supplier('S002');
-    const setSettlement = (settlement: 'credit' | 'cash') =>
-      api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${s2.id}`, { code: s2.code, name: s2.name, settlement });
+    const setSettlement = (settlement: 'credit' | 'cash') => api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${s2.id}`, { code: s2.code, name: s2.name, settlement });
     expect(s2.settlement).toBe('credit');
     // ① 挂账时收的货（已记应付），之后供应商改成现付：这张采购单仍按挂账，不能报销
     const credited = await newPo(s2.id);
@@ -418,7 +421,18 @@ describe('现付供应商与按采购单报销', () => {
     const paid = await claim(coster, {
       purchaseOrderId: cashPo.id,
       purpose: '客用消耗',
-      lines: [{ name: fc.lines[0].name, category: 'low_value', unit: fc.lines[0].unit, boughtMilli: q(1000), receivedMilli: 0, diffReason: '先付款后到货', amountCents: 90_000, poLineId: fc.lines[0].poLineId }],
+      lines: [
+        {
+          name: fc.lines[0].name,
+          category: 'low_value',
+          unit: fc.lines[0].unit,
+          boughtMilli: q(1000),
+          receivedMilli: 0,
+          diffReason: '先付款后到货',
+          amountCents: 90_000,
+          poLineId: fc.lines[0].poLineId,
+        },
+      ],
     });
     expect(paid.status).toBe(201);
     await setSettlement('credit');

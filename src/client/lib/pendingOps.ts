@@ -119,9 +119,7 @@ export function setClaimed(key: string, active: boolean) {
 
 /** 某位会员某类操作的待确认记录（撤销还要对上消费单） */
 export function findPending(memberId: number, type: PendingType, consumptionId?: number): PendingOp | undefined {
-  return readAll().find(
-    (p) => p.memberId === memberId && p.type === type && (type !== 'reversal' || p.consumptionId === consumptionId) && !inFlight.has(p.key),
-  );
+  return readAll().find((p) => p.memberId === memberId && p.type === type && (type !== 'reversal' || p.consumptionId === consumptionId) && !inFlight.has(p.key));
 }
 
 let snapshotCache: { source: PendingOp[]; result: PendingOp[] } | null = null;

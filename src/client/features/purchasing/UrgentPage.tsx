@@ -100,7 +100,12 @@ export function UrgentPage() {
         ) : docs.isPending ? (
           <Skeleton className="h-64" />
         ) : rows.length === 0 ? (
-          <EmptyState art="leaf" title={filter === 'all' ? '还没有急采' : '这一栏没有急采'} description={can('purchase.manage') ? '部门临时要的东西，点「登记急采」。' : undefined} className="rounded-lg border border-dashed border-line-strong" />
+          <EmptyState
+            art="leaf"
+            title={filter === 'all' ? '还没有急采' : '这一栏没有急采'}
+            description={can('purchase.manage') ? '部门临时要的东西，点「登记急采」。' : undefined}
+            className="rounded-lg border border-dashed border-line-strong"
+          />
         ) : (
           <ul className="overflow-hidden rounded-lg border border-line bg-card shadow-card" data-testid="urgent-list">
             {rows.map((d) => {
@@ -110,7 +115,10 @@ export function UrgentPage() {
                   <button
                     type="button"
                     onClick={() => set({ doc: String(d.id) })}
-                    className={cn('grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 text-left hover:bg-paper-2 md:grid-cols-[150px_minmax(0,1fr)_120px_auto]', openId === d.id && 'bg-pine-tint/40')}
+                    className={cn(
+                      'grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 text-left hover:bg-paper-2 md:grid-cols-[150px_minmax(0,1fr)_120px_auto]',
+                      openId === d.id && 'bg-pine-tint/40',
+                    )}
                     data-testid={`urgent-row-${d.id}`}
                   >
                     <span className="num text-[13.5px] font-bold">
@@ -126,9 +134,7 @@ export function UrgentPage() {
                       </span>
                     </span>
                     <Money cents={d.amountCents} className="hidden text-right text-[14px] font-bold md:block" />
-                    <span className="flex flex-wrap items-center justify-end gap-1.5">
-                      {stage ? <Badge tone={stage.tone}>{stage.label}</Badge> : <StatusChip status={d.status} />}
-                    </span>
+                    <span className="flex flex-wrap items-center justify-end gap-1.5">{stage ? <Badge tone={stage.tone}>{stage.label}</Badge> : <StatusChip status={d.status} />}</span>
                   </button>
                 </li>
               );

@@ -44,7 +44,10 @@ const MODE_TONE: Record<IntegrationMode, 'neutral' | 'yuzu' | 'pine'> = { off: '
 export function IntegrationsSection() {
   const qc = useQueryClient();
   const toast = useToast();
-  const info = useQuery({ queryKey: ['admin', 'integrations'], queryFn: () => api.get<{ kinds: KindInfo[]; switches: IntegrationSwitches; defaults: IntegrationSwitches }>('/api/admin/integrations') });
+  const info = useQuery({
+    queryKey: ['admin', 'integrations'],
+    queryFn: () => api.get<{ kinds: KindInfo[]; switches: IntegrationSwitches; defaults: IntegrationSwitches }>('/api/admin/integrations'),
+  });
   const [kind, setKind] = useState('');
   const [failed, setFailed] = useState(false);
   const calls = useQuery({
@@ -72,7 +75,10 @@ export function IntegrationsSection() {
     }
   };
   return (
-    <AdminPage section="integrations" description="扫码收款、平台验券、开票服务商、银企直连、OTA 渠道、AI 辅助：现在是哪种模式（只看运行环境的配置）、门店开关、最近的对外调用。密钥只放运行环境，这里只显示配没配。">
+    <AdminPage
+      section="integrations"
+      description="扫码收款、平台验券、开票服务商、银企直连、OTA 渠道、AI 辅助：现在是哪种模式（只看运行环境的配置）、门店开关、最近的对外调用。密钥只放运行环境，这里只显示配没配。"
+    >
       <div className="space-y-5" data-testid="integrations">
         <Card className="p-5">
           <h2 className="mb-3 text-[15px] font-bold">模式</h2>
@@ -116,11 +122,23 @@ export function IntegrationsSection() {
           ) : (
             <div className="space-y-3 text-[13.5px]">
               <label className="flex items-center gap-2">
-                <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={sw.payTerminal} onChange={(e) => setSw({ ...sw, payTerminal: e.target.checked })} data-testid="sw-pay-terminal" />
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[var(--color-pine)]"
+                  checked={sw.payTerminal}
+                  onChange={(e) => setSw({ ...sw, payTerminal: e.target.checked })}
+                  data-testid="sw-pay-terminal"
+                />
                 结账、充值显示「扫码收款」
               </label>
               <label className="flex items-center gap-2">
-                <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={sw.platformVoucher} onChange={(e) => setSw({ ...sw, platformVoucher: e.target.checked })} data-testid="sw-platform-voucher" />
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[var(--color-pine)]"
+                  checked={sw.platformVoucher}
+                  onChange={(e) => setSw({ ...sw, platformVoucher: e.target.checked })}
+                  data-testid="sw-platform-voucher"
+                />
                 结账登记团购券时「验券」，每天自动对账
               </label>
               <Field label="平台验券每天自动对账的时间（对前一个营业日）" htmlFor="sw-recon">
@@ -184,7 +202,8 @@ export function IntegrationsSection() {
                       <td className="px-2 py-1">{c.action}</td>
                       <td className="px-2 py-1 text-ink-3">{c.refType ? `${c.refType} #${c.refId}` : '—'}</td>
                       <td className="max-w-[360px] truncate px-2 py-1" title={JSON.stringify(c.ok ? c.result : c.error)}>
-                        {c.ok ? <span className="text-pine">成功</span> : <span className="text-clay">失败：{c.error}</span>} <span className="text-ink-3">{JSON.stringify(c.ok ? c.result : c.request)}</span>
+                        {c.ok ? <span className="text-pine">成功</span> : <span className="text-clay">失败：{c.error}</span>}{' '}
+                        <span className="text-ink-3">{JSON.stringify(c.ok ? c.result : c.request)}</span>
                       </td>
                       <td className="num px-2 py-1 text-right">{c.durationMs} ms</td>
                     </tr>

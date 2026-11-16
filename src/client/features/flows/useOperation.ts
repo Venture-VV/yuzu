@@ -3,17 +3,7 @@ import { invalidateRevenue } from '../../lib/revenue';
 import { useQueryClient } from '@tanstack/react-query';
 import type { MemberDetail, OperationLookup, OperationResult } from '@shared/types';
 import { api, ApiError, isRejected, notSentAsRejection, UncertainError } from '../../lib/api';
-import {
-  hasPending,
-  PENDING_LABELS,
-  PendingStoreError,
-  removePending,
-  savePending,
-  setClaimed,
-  setInFlight,
-  type PendingOp,
-  type PendingType,
-} from '../../lib/pendingOps';
+import { hasPending, PENDING_LABELS, PendingStoreError, removePending, savePending, setClaimed, setInFlight, type PendingOp, type PendingType } from '../../lib/pendingOps';
 import { qk } from '../../lib/queries';
 import { uuid } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
@@ -259,6 +249,5 @@ export function useOperation(spec: OperationSpec) {
   return { state, submit, retry, check, adopt, discard, reset, adopted, pending: pendingRef };
 }
 
-export const isLocked = (s: OperationState) =>
-  s.status === 'uncertain' || s.status === 'checking' || s.status === 'not_found' || s.status === 'abandoning';
+export const isLocked = (s: OperationState) => s.status === 'uncertain' || s.status === 'checking' || s.status === 'not_found' || s.status === 'abandoning';
 export const isBusy = (s: OperationState) => s.status === 'submitting' || s.status === 'checking' || s.status === 'abandoning';

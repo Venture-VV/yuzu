@@ -29,11 +29,7 @@ export interface JobLog {
   error: (msg: string, err?: unknown) => void;
 }
 
-export async function runMinuteJobs(
-  deps: { sql: Sql; config: AppConfig },
-  log: JobLog,
-  opts: { now?: Date; birthday?: boolean } = {},
-): Promise<void> {
+export async function runMinuteJobs(deps: { sql: Sql; config: AppConfig }, log: JobLog, opts: { now?: Date; birthday?: boolean } = {}): Promise<void> {
   const { sql, config } = deps;
   const now = opts.now ?? new Date();
   // 赠金到期作废（会员记账、打开会员详情时也会先处理这位会员）
@@ -82,7 +78,9 @@ export async function runMinuteJobs(
   // 员工食堂 · 饭点提醒（docs/CANTEEN.md 第 19 节）：到点以后 30 分钟之内，每天每顿给开着提醒的员工手机发一次（几个进程同时跑也只发一次）
   try {
     for (const r of await runCanteenReminders({ sql, config }, now)) {
-      log.info(`饭点提醒（${r.date} ${MEAL_LABELS[r.meal]}）：送到 ${r.sent} 台手机${r.failed ? `、${r.failed} 台没送到` : ''}${r.skippedCheckedIn ? `；${r.skippedCheckedIn} 人已经打过卡、没再提醒` : ''}`);
+      log.info(
+        `饭点提醒（${r.date} ${MEAL_LABELS[r.meal]}）：送到 ${r.sent} 台手机${r.failed ? `、${r.failed} 台没送到` : ''}${r.skippedCheckedIn ? `；${r.skippedCheckedIn} 人已经打过卡、没再提醒` : ''}`,
+      );
     }
   } catch (error) {
     log.error('饭点提醒没发完，下一分钟接着发', error);
@@ -126,7 +124,9 @@ export async function runMinuteJobs(
   try {
     const r = await processStockUsage({ sql, config });
     if (r.docs || r.released || r.reconciled) {
-      log.info(`自动扣料：开了 ${r.docs} 张耗用单（${r.lines} 样物料）${r.blocked ? `、${r.blocked} 样库存不够先留着` : ''}${r.released ? `、${r.released} 批没开成（下一分钟再试）` : ''}${r.reconciled ? `、${r.reconciled} 批对上了账` : ''}`);
+      log.info(
+        `自动扣料：开了 ${r.docs} 张耗用单（${r.lines} 样物料）${r.blocked ? `、${r.blocked} 样库存不够先留着` : ''}${r.released ? `、${r.released} 批没开成（下一分钟再试）` : ''}${r.reconciled ? `、${r.reconciled} 批对上了账` : ''}`,
+      );
     }
   } catch (error) {
     log.error('自动扣料失败，下一分钟重试', error);
@@ -134,7 +134,10 @@ export async function runMinuteJobs(
   // 自动补货（8.0.20）：每天过了设定的时间，把补货建议按供应商各建一张采购单草稿（不提交）；今天跑过就什么都不做
   try {
     const r = await runAutoReplenish({ sql, config }, now);
-    if (r) log.info(`自动补货 ${r.date}：建了 ${r.poIds.length} 张采购单草稿（${r.lineCount} 样物料）${r.skippedNoSupplier ? `、${r.skippedNoSupplier} 样没有供应商` : ''}${r.error ? `；出错：${r.error}` : ''}`);
+    if (r)
+      log.info(
+        `自动补货 ${r.date}：建了 ${r.poIds.length} 张采购单草稿（${r.lineCount} 样物料）${r.skippedNoSupplier ? `、${r.skippedNoSupplier} 样没有供应商` : ''}${r.error ? `；出错：${r.error}` : ''}`,
+      );
   } catch (error) {
     log.error('自动补货失败，下一分钟重试', error);
   }

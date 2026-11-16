@@ -36,25 +36,13 @@ export function DateNav({
   return (
     <div className="flex items-center gap-2">
       <div className="flex h-10 items-center rounded-md border border-line bg-card shadow-card">
-        <button
-          type="button"
-          aria-label="前一天"
-          onClick={() => onChange(shiftDate(value, -1))}
-          className="flex h-full w-9 items-center justify-center rounded-l-md text-ink-2 hover:bg-paper-2"
-        >
+        <button type="button" aria-label="前一天" onClick={() => onChange(shiftDate(value, -1))} className="flex h-full w-9 items-center justify-center rounded-l-md text-ink-2 hover:bg-paper-2">
           <ChevronLeft className="size-4" />
         </button>
         <label className="relative flex h-full cursor-pointer items-center gap-2 border-x border-line px-3 text-[13.5px] font-semibold hover:bg-paper-2">
           <span className="num">{d.md}</span>
           <span className="text-ink-3">{d.weekday}</span>
-          <input
-            type="date"
-            aria-label="选择营业日"
-            value={value}
-            max={last}
-            onChange={(e) => e.target.value && onChange(e.target.value)}
-            className="absolute inset-0 cursor-pointer opacity-0"
-          />
+          <input type="date" aria-label="选择营业日" value={value} max={last} onChange={(e) => e.target.value && onChange(e.target.value)} className="absolute inset-0 cursor-pointer opacity-0" />
         </label>
         <button
           type="button"
@@ -70,10 +58,7 @@ export function DateNav({
         type="button"
         onClick={() => onChange(today)}
         disabled={isToday}
-        className={cn(
-          'h-10 rounded-md px-3 text-[13px] font-semibold transition-colors',
-          isToday ? 'text-ink-4' : 'text-pine hover:bg-pine-tint',
-        )}
+        className={cn('h-10 rounded-md px-3 text-[13px] font-semibold transition-colors', isToday ? 'text-ink-4' : 'text-pine hover:bg-pine-tint')}
       >
         今天
       </button>

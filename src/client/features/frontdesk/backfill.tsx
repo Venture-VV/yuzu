@@ -96,11 +96,7 @@ export function BackfillBar() {
         退出补录
       </Button>
       <p className="w-full text-[12.5px] leading-relaxed text-ink-2">
-        {problem ? (
-          <b className="text-clay">{problem}</b>
-        ) : (
-          '接待、加项目、结账都按这个时间办理（门票按实际在店时长计算），每一步换成纸质单上对应的时间。补录的结账不能用会员储值。'
-        )}
+        {problem ? <b className="text-clay">{problem}</b> : '接待、加项目、结账都按这个时间办理（门票按实际在店时长计算），每一步换成纸质单上对应的时间。补录的结账不能用会员储值。'}
       </p>
     </div>
   );
@@ -111,7 +107,11 @@ export function BackfillNotice({ action }: { action: string }) {
   const b = useBackfill();
   if (!b.state.active) return null;
   if (b.problem || !b.request) {
-    return <Notice tone="error" icon={<FilePenLine className="size-4" />} title={`补录信息没填好：${b.problem ?? ''}`}>请在前台顶部的补录条里填好纸质单号与实际时间，再{action}。</Notice>;
+    return (
+      <Notice tone="error" icon={<FilePenLine className="size-4" />} title={`补录信息没填好：${b.problem ?? ''}`}>
+        请在前台顶部的补录条里填好纸质单号与实际时间，再{action}。
+      </Notice>
+    );
   }
   return (
     <Notice tone="warning" icon={<FilePenLine className="size-4" />} title={`补录纸质单 ${b.request.slipNo} · 实际时间 ${formatDateTime(b.request.at)}`}>

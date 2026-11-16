@@ -136,7 +136,14 @@ export function SourcingSupplierLinks({ eventId, open }: { eventId: number; open
       )}
       {open && can('purchase.manage') && !(suppliers.isError && !suppliers.data) && (
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={supplierId ?? ''} fullWidth={false} className="h-9 w-56" onChange={(e) => setSupplierId(Number(e.target.value) || null)} aria-label="发给哪家供应商" data-testid="supplier-link-supplier">
+          <Select
+            value={supplierId ?? ''}
+            fullWidth={false}
+            className="h-9 w-56"
+            onChange={(e) => setSupplierId(Number(e.target.value) || null)}
+            aria-label="发给哪家供应商"
+            data-testid="supplier-link-supplier"
+          >
             <option value="">选供应商</option>
             {(suppliers.data ?? []).map((s) => (
               <option key={s.id} value={s.id}>
@@ -144,7 +151,15 @@ export function SourcingSupplierLinks({ eventId, open }: { eventId: number; open
               </option>
             ))}
           </Select>
-          <Button size="sm" variant="secondary" icon={<Link2 className="size-3.5" />} loading={a.busy} disabled={!supplierId} onClick={() => void a.create(`/api/purchase-sourcing/${eventId}/supplier-links`, { supplierId })} data-testid="supplier-link-create">
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Link2 className="size-3.5" />}
+            loading={a.busy}
+            disabled={!supplierId}
+            onClick={() => void a.create(`/api/purchase-sourcing/${eventId}/supplier-links`, { supplierId })}
+            data-testid="supplier-link-create"
+          >
             生成报价链接
           </Button>
         </div>
@@ -203,7 +218,14 @@ export function PoSupplierCard({ po }: { po: PurchaseOrder }) {
         )}
         <span className="flex-1" />
         {live && can('purchase.manage') && (
-          <Button size="sm" variant="secondary" icon={<Send className="size-3.5" />} loading={a.busy} onClick={() => make(d.confirmation ? 'delivery' : 'po_confirm')} data-testid="po-supplier-link-create">
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Send className="size-3.5" />}
+            loading={a.busy}
+            onClick={() => make(d.confirmation ? 'delivery' : 'po_confirm')}
+            data-testid="po-supplier-link-create"
+          >
             {d.confirmation ? '发发货预告链接' : '发订单确认链接'}
           </Button>
         )}

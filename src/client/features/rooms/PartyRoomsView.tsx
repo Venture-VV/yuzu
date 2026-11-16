@@ -136,9 +136,7 @@ export function PartyRoomsView({ canOperate }: { canOperate: boolean }) {
           }}
         />
       )}
-      <p className="text-[11.5px] text-ink-4">
-        房间来自空间台账里业态是派对房、宠物轰趴房等的房间；房费按后台「客房 → 派对房等」里设的每小时价，结束时挂到使用人的手牌账单上，账单上写明房型和房间。
-      </p>
+      <p className="text-[11.5px] text-ink-4">房间来自空间台账里业态是派对房、宠物轰趴房等的房间；房费按后台「客房 → 派对房等」里设的每小时价，结束时挂到使用人的手牌账单上，账单上写明房型和房间。</p>
     </div>
   );
 }

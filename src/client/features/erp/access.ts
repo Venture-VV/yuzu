@@ -10,7 +10,9 @@ export function useErpAccess() {
   const session = useSession();
   const can = useCan();
   // 对客导览不算门店的工作页面（所有岗位都能看，只用 ERP 的人不因此多出「返回门店」）
-  const storeNav = useStoreNav().flat().filter((n) => !n.guestFacing);
+  const storeNav = useStoreNav()
+    .flat()
+    .filter((n) => !n.guestFacing);
   const modules = ERP_MODULE_KEYS.filter((k) => session.erpModules.includes(k) && ERP_MODULES[k].perms.some((p) => can(p)));
   const canSettings = can('settings.manage');
   return {

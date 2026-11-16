@@ -31,7 +31,25 @@ describe('可调的数值（8.0.7 A1）', () => {
     // 企业微信周推 8.0.20 起默认开；用例的基线把它关着（tests/helpers.ts 的 legacySwitchesOff），默认值在 switches-default 里核对
     expect(s).toMatchObject({ ...DEFAULT_TUNABLES, wecomWeeklyPush: false });
     expect(DEFAULT_TUNABLES.wecomWeeklyPush).toBe(true);
-    expect(s).toMatchObject({ approvalBatchMaxCents: 500_000, approvalBatchMax: 50, approvalOverdueHours: 24, delegationMaxDays: 31, urgentEscalateDays: 3, contractRemindDays: 60, pdfMaxMb: 10, receiptAttachmentsMax: 9, mpFoodMaxQuantity: 20, mpFoodMaxTotalCents: 50_000, platformBackfillDays: 31, printMode: 'local', printWaitMinutes: 30, campaignMaxMembers: 2000, campaignNoticeDays: 30, smsMaxAttempts: 3, financeHidesMarketingCost: true });
+    expect(s).toMatchObject({
+      approvalBatchMaxCents: 500_000,
+      approvalBatchMax: 50,
+      approvalOverdueHours: 24,
+      delegationMaxDays: 31,
+      urgentEscalateDays: 3,
+      contractRemindDays: 60,
+      pdfMaxMb: 10,
+      receiptAttachmentsMax: 9,
+      mpFoodMaxQuantity: 20,
+      mpFoodMaxTotalCents: 50_000,
+      platformBackfillDays: 31,
+      printMode: 'local',
+      printWaitMinutes: 30,
+      campaignMaxMembers: 2000,
+      campaignNoticeDays: 30,
+      smsMaxAttempts: 3,
+      financeHidesMarketingCost: true,
+    });
     // 会话（各页面读它）
     expect((await api(ctx.app, duty, 'GET', '/api/auth/me')).body.rules).toMatchObject({ approvalOverdueHours: 24, printMode: 'local' });
     // 只有店主能改
@@ -52,8 +70,24 @@ describe('可调的数值（8.0.7 A1）', () => {
     const rules = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as { key: string; value: string; isDefault: boolean }[];
     expect(rules.find((r) => r.key === 'approval_overdue_hours')).toMatchObject({ value: '当前这一级等了超过 12 小时', isDefault: false });
     expect(rules.find((r) => r.key === 'print_mode')).toMatchObject({ isDefault: true });
-    for (const key of ['approval_batch_max_cents', 'delegation_max_days', 'urgent_escalate_days', 'contract_remind_days', 'pdf_max_mb', 'receipt_attachments_max', 'mp_food_max_quantity', 'platform_backfill_days', 'campaign_max_members', 'sms_max_attempts', 'count_card_sales', 'finance_hides_marketing_cost']) {
-      expect(rules.some((r) => r.key === key), key).toBe(true);
+    for (const key of [
+      'approval_batch_max_cents',
+      'delegation_max_days',
+      'urgent_escalate_days',
+      'contract_remind_days',
+      'pdf_max_mb',
+      'receipt_attachments_max',
+      'mp_food_max_quantity',
+      'platform_backfill_days',
+      'campaign_max_members',
+      'sms_max_attempts',
+      'count_card_sales',
+      'finance_hides_marketing_cost',
+    ]) {
+      expect(
+        rules.some((r) => r.key === key),
+        key,
+      ).toBe(true);
     }
     expect((await settings({ approvalOverdueHours: 24, contractRemindDays: 60 })).status).toBe(200);
   });
@@ -102,7 +136,16 @@ describe('可调的数值（8.0.7 A1）', () => {
 
   it('打印方式：默认本机打印，服务器不发、不探测网口小票机；改成服务器直连以后照旧', async () => {
     // 一台连不上的网口小票机（端口没人听）
-    const created = await api(ctx.app, ctx.owner, 'POST', '/api/devices', { clientKey: randomUUID(), code: 'PRN-TUN-1', name: '测试小票机', kind: 'printer', area: '收银', connection: 'network', host: '127.0.0.1', port: 9 });
+    const created = await api(ctx.app, ctx.owner, 'POST', '/api/devices', {
+      clientKey: randomUUID(),
+      code: 'PRN-TUN-1',
+      name: '测试小票机',
+      kind: 'printer',
+      area: '收银',
+      connection: 'network',
+      host: '127.0.0.1',
+      port: 9,
+    });
     expect(created.status, JSON.stringify(created.body)).toBeLessThan(300);
     const id = Number(created.body.id);
     const status = async () => (await ctx.sql<{ status: string }[]>`SELECT status FROM devices WHERE id = ${id}`)[0]!.status;
@@ -110,17 +153,33 @@ describe('可调的数值（8.0.7 A1）', () => {
     expect(await status()).toBe('unknown'); // 本机打印：不探测
     const job = await api(ctx.app, ctx.owner, 'POST', `/api/devices/${id}/jobs`, { clientKey: randomUUID(), kind: 'test_page' });
     expect(job.body.error.code).toBe('PRINT_MODE_LOCAL');
-    const doc = await api(ctx.app, ctx.owner, 'POST', '/api/print/jobs', { clientKey: randomUUID(), deviceId: id, doc: { type: 'settlement', date: (await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.today } });
+    const doc = await api(ctx.app, ctx.owner, 'POST', '/api/print/jobs', {
+      clientKey: randomUUID(),
+      deviceId: id,
+      doc: { type: 'settlement', date: (await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body.today },
+    });
     expect(doc.body.error.code).toBe('PRINT_MODE_LOCAL');
     await settings({ printMode: 'network' });
     await checkDevicesOnce(ctx);
     expect(await status()).toBe('offline'); // 服务器直连：照旧探测，连不上记离线
     await settings({ printMode: 'local' });
-    await api(ctx.app, ctx.owner, 'POST', `/api/devices/${id}/enabled`, { enabled: false, expectedVersion: (await ctx.sql<{ version: number }[]>`SELECT version FROM devices WHERE id = ${id}`)[0]!.version });
+    await api(ctx.app, ctx.owner, 'POST', `/api/devices/${id}/enabled`, {
+      enabled: false,
+      expectedVersion: (await ctx.sql<{ version: number }[]>`SELECT version FROM devices WHERE id = ${id}`)[0]!.version,
+    });
   });
 
   it('打印方式改成本机打印以后，之前排着、等打印机恢复的任务不再发（升级前留下的也一样；Codex 审查 9ad0f56）', async () => {
-    const created = await api(ctx.app, ctx.owner, 'POST', '/api/devices', { clientKey: randomUUID(), code: 'PRN-TUN-2', name: '升级前的小票机', kind: 'printer', area: '收银', connection: 'network', host: '127.0.0.1', port: 9 });
+    const created = await api(ctx.app, ctx.owner, 'POST', '/api/devices', {
+      clientKey: randomUUID(),
+      code: 'PRN-TUN-2',
+      name: '升级前的小票机',
+      kind: 'printer',
+      area: '收银',
+      connection: 'network',
+      host: '127.0.0.1',
+      port: 9,
+    });
     expect(created.status, JSON.stringify(created.body)).toBeLessThan(300);
     const id = Number(created.body.id);
     // 升级前（或改成本机打印前）留下的：一张排着的测试页、一张等打印机恢复的日结单
@@ -135,7 +194,10 @@ describe('可调的数值（8.0.7 A1）', () => {
     expect(await jobOf(Number(queued!.id))).toEqual({ status: 'failed', errorCode: 'PRINT_MODE_LOCAL' });
     expect((await resumeWaitingJobs({ sql: ctx.sql, config: ctx.config })).resumed).toBe(0);
     expect(await jobOf(Number(waiting!.id))).toEqual({ status: 'failed', errorCode: 'PRINT_MODE_LOCAL' });
-    await api(ctx.app, ctx.owner, 'POST', `/api/devices/${id}/enabled`, { enabled: false, expectedVersion: (await ctx.sql<{ version: number }[]>`SELECT version FROM devices WHERE id = ${id}`)[0]!.version });
+    await api(ctx.app, ctx.owner, 'POST', `/api/devices/${id}/enabled`, {
+      enabled: false,
+      expectedVersion: (await ctx.sql<{ version: number }[]>`SELECT version FROM devices WHERE id = ${id}`)[0]!.version,
+    });
   });
 
   it('财务账号看营销成本（HY14）：默认看不到，关掉以后按岗位权限给', async () => {

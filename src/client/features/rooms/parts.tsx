@@ -4,8 +4,7 @@ import { ROOM_KIND_LABELS, type RoomKind } from '@shared/rooms';
 import { Input, MoneyInput, Select } from '../../components/ui';
 
 /** 住客的叫法：手牌上登记的会员、入住时的称呼，都没有时写手牌号 */
-export const guestOf = (s: { memberName: string | null; guestLabel: string; tagCode?: string | null }) =>
-  s.memberName ?? (s.guestLabel || (s.tagCode ? `手牌 ${s.tagCode}` : '散客'));
+export const guestOf = (s: { memberName: string | null; guestLabel: string; tagCode?: string | null }) => s.memberName ?? (s.guestLabel || (s.tagCode ? `手牌 ${s.tagCode}` : '散客'));
 
 /** 「¥288 / 晚」「¥60 / 小时」「¥98 / 段（3 小时）」 */
 export function rateText(kind: RoomKind, price: number, blockMinutes: number | null) {
@@ -52,7 +51,14 @@ export function DepositFields({ value, onChange, disabled, label = '押金' }: {
         ))}
       </Select>
       <div className="w-[140px]">
-        <MoneyInput value={value.amount} onChange={(e) => onChange({ ...value, amount: e.target.value })} disabled={disabled} aria-label={`${label}金额`} className="h-10" data-testid="deposit-amount" />
+        <MoneyInput
+          value={value.amount}
+          onChange={(e) => onChange({ ...value, amount: e.target.value })}
+          disabled={disabled}
+          aria-label={`${label}金额`}
+          className="h-10"
+          data-testid="deposit-amount"
+        />
       </div>
       <Input
         fullWidth={false}

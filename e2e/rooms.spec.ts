@@ -89,7 +89,10 @@ async function clearStay(page: Page, roomNo: string, reason: string) {
 /** 前台接待一位男宾（接口办理，按默认票种），返回手牌与来访 */
 async function checkinGuest(page: Page, label: string) {
   const board = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
-  const tag = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+  const tag = board.tags
+    .filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+    .map((t) => t.code)
+    .reverse()[0]!;
   await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: label }] });
   const visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
   return { tag, visitId };
@@ -265,7 +268,11 @@ test.describe('S7 客房', () => {
       await expect(tile1).toHaveAttribute('data-state', 'vacant');
       await page.getByTestId(`room-tile-${R3}`).click();
       // 空闲的房点开是入住；改房态在入住对话框左下角
-      await page.getByRole('dialog').filter({ hasText: `入住 · ${R3}` }).getByTestId('room-checkin-housekeep').click();
+      await page
+        .getByRole('dialog')
+        .filter({ hasText: `入住 · ${R3}` })
+        .getByTestId('room-checkin-housekeep')
+        .click();
       const hk3 = page.getByRole('dialog').filter({ hasText: `改房态 · ${R3}` });
       await hk3.getByRole('radio', { name: '维修' }).click();
       await expect(hk3.getByTestId('room-housekeeping-save')).toBeDisabled();
@@ -312,10 +319,14 @@ test.describe('S7 客房', () => {
       const g = await checkinGuest(page, 'E2E 断网');
       visit = g.visitId;
       // 入住请求真实到达服务器并生效，但浏览器收不到响应；查回也先连不上
-      await page.route('**/api/rooms/checkin', async (route) => {
-        await route.fetch();
-        await route.abort('connectionreset');
-      }, { times: 1 });
+      await page.route(
+        '**/api/rooms/checkin',
+        async (route) => {
+          await route.fetch();
+          await route.abort('connectionreset');
+        },
+        { times: 1 },
+      );
       await page.route('**/api/frontdesk/ops/*', (route) => route.abort('connectionreset'));
       await page.goto('/rooms');
       await page.getByTestId(`room-tile-${R1}`).click();

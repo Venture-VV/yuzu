@@ -76,17 +76,17 @@ function readFrame(buf: Buffer): { opcode: number; payload: Buffer; size: number
   return { opcode, payload, size: offset + len };
 }
 
-export async function startMockBridge(
-  opts: { host?: string; port?: number; terminal?: string; devices?: MockBridgeDevice[]; delayMs?: number; version?: string } = {},
-): Promise<MockBridge> {
+export async function startMockBridge(opts: { host?: string; port?: number; terminal?: string; devices?: MockBridgeDevice[]; delayMs?: number; version?: string } = {}): Promise<MockBridge> {
   const host = opts.host ?? '127.0.0.1';
   const delay = opts.delayMs ?? 0;
   const sockets = new Set<Duplex>();
-  const devices: MockBridgeDevice[] = (opts.devices ?? [
-    { key: 'rc300', kind: 'card_reader', status: 'online' },
-    { key: 'scanner', kind: 'scanner', status: 'online' },
-    { key: 'nfc', kind: 'card_reader', status: 'online' },
-  ]).map((d) => ({ ...d }));
+  const devices: MockBridgeDevice[] = (
+    opts.devices ?? [
+      { key: 'rc300', kind: 'card_reader', status: 'online' },
+      { key: 'scanner', kind: 'scanner', status: 'online' },
+      { key: 'nfc', kind: 'card_reader', status: 'online' },
+    ]
+  ).map((d) => ({ ...d }));
   const terminal = opts.terminal ?? 'TRM-MOCK-01';
 
   const send = (socket: Duplex, text: string) => {
@@ -112,7 +112,9 @@ export async function startMockBridge(
       socket.destroy();
       return;
     }
-    const accept = createHash('sha1').update(key + GUID).digest('base64');
+    const accept = createHash('sha1')
+      .update(key + GUID)
+      .digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     sockets.add(socket);
     let pending = Buffer.alloc(0);

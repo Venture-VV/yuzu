@@ -41,7 +41,22 @@ afterAll(async () => ctx.close());
 
 describe('每日对账包', () => {
   it('十四个文件（v0.7.28 加了次卡、平台核销补录）；自检全部一致，部门参考表合计 = 应收，再单列优惠 / 免单、券抵扣、退款与净营业额', () => {
-    expect(recon.files.map((f) => f.name)).toEqual(['00-说明.txt', '01-日结汇总.csv', '02-结账单.csv', '03-部门参考表.csv', '04-异常清单.csv', '05-交班.csv', '06-技师业绩.csv', '07-客房与押金.csv', '08-使用单.csv', '09-退款单.csv', '10-券.csv', '11-储值退回.csv', '12-次卡.csv', '13-平台核销补录.csv']);
+    expect(recon.files.map((f) => f.name)).toEqual([
+      '00-说明.txt',
+      '01-日结汇总.csv',
+      '02-结账单.csv',
+      '03-部门参考表.csv',
+      '04-异常清单.csv',
+      '05-交班.csv',
+      '06-技师业绩.csv',
+      '07-客房与押金.csv',
+      '08-使用单.csv',
+      '09-退款单.csv',
+      '10-券.csv',
+      '11-储值退回.csv',
+      '12-次卡.csv',
+      '13-平台核销补录.csv',
+    ]);
     expect(recon.ok).toBe(true);
     const dept = rowsOf(file('03-部门参考表.csv'));
     const total = dept.find((r) => r[0] === '合计')!;
@@ -132,11 +147,7 @@ describe('余额变动清单', () => {
   it('期初导入、期初作废默认不算变动；--include-opening 时列出并注明', async () => {
     const since = new Date();
     const actor = { id: ctx.ownerId, username: 'owner', displayName: '测试店主', role: 'owner' as const, duties: [], mustChangePassword: false };
-    await applyOpeningImport(
-      { sql: ctx.sql, config: ctx.config },
-      { source: 'EBC', fileName: 'ebc.csv', csv: '姓名,手机号,本金,赠金\n变动甲,13900009999,88,0', clientKey: randomUUID() },
-      { actor },
-    );
+    await applyOpeningImport({ sql: ctx.sql, config: ctx.config }, { source: 'EBC', fileName: 'ebc.csv', csv: '姓名,手机号,本金,赠金\n变动甲,13900009999,88,0', clientKey: randomUUID() }, { actor });
     expect((await balanceChanges(ctx.sql, since)).find((r) => r.phone === '13900009999')).toBeUndefined();
     expect((await balanceChanges(ctx.sql, since, true)).find((r) => r.phone === '13900009999')).toMatchObject({
       principalBefore: 0,
