@@ -27,15 +27,16 @@
 
 ## 3. 已执行的验证
 
-- 类型检查、`npm run check:code`、构建；集成用例全量（本机 4 个进程）：见第 3.1 条的数字；新加的用例 `tests/protection.test.ts`（13，含真的死锁回 `BUSY`）、`tests/client-api.test.ts`（8）、`tests/check-code.test.ts`（3）。
+- 类型检查、`npm run check:code`、`npm run format:check`、构建；集成用例全量（本机 4 个进程）：见第 3.1 条的数字；新加的用例 `tests/protection.test.ts`（14，含真的死锁回 `BUSY`、事务空闲时限真的断开）、`tests/client-api.test.ts`（8）、`tests/check-code.test.ts`（3）。
 - 浏览器（新的演示库，`demo-prepare` 准备）：`e2e/resilience.spec.ts` 7 条；回归 21 个文件 105 条（flows、frontdesk-recovery、storage-failure、pending-marks、emenu、requests、requests-1114、dining、concierge、customer、ota、platform-verify、pay-terminal、supplier-portal、frontdesk、cashier、r1-funds、backfill、contract-templates、dictionaries、resilience）；收拢定时取数、拆管家部以后再跑 concierge、customer、spaces、studio（门店电脑与手机）；员工食堂手机端整套 13 条。
 - 手工（Chromium）：断网 → 约 2 秒提示条 → 「网络与同步」写着连不上 → 恢复 → 提示「网络恢复了」4 秒后收起；服务器换了页面入口 → 提示「系统已更新」。
 - 排版那一个提交：前后类型检查、整洁检查、构建、全量集成用例、浏览器回归都一样，平板电子菜单与员工食堂逐屏截图像素一致（见第 3.1 条）。
 
 ### 3.1 数字（最终提交上）
 
-- 集成用例：（收尾时填）
-- 截图比对：（收尾时填）
+- 集成用例全量（本机 4 个进程，`04bf45f`）：221 个文件、2,019 项全过；`tests/protection.test.ts` 14 条（含事务空闲时限真的断开）。
+- 浏览器回归（排版以后的构建、新的演示库）：26 个文件 130 条，128 过、2 条是只在别的尺寸跑的跳过（resilience、flows、frontdesk*、storage-failure、pending-marks、emenu、requests*、dining、concierge、customer、ota、platform-verify、pay-terminal、supplier-portal、cashier、r1-funds、backfill、contract-templates、dictionaries、spaces、studio、admin-ia、erp-ia、viewports）。
+- 截图比对（排版前后各一份构建、同一个库）：平板电子菜单 20 屏 + 11 种版式 44 屏像素差 0；员工食堂 4 屏最大 0.003%（小柚子动画本来就有的抖动）；门店 / 后台 / ERP 10 页只有前台的在店时长随时间走（两次截图相隔 19 分钟），其余像素差 0。
 
 ## 4. 验收要点
 
