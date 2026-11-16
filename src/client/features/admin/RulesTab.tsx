@@ -8,7 +8,6 @@ import { DEDUCTION_RULE_LABELS, describeHours } from '@shared/labels';
 import { centsToInput, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { qk, useSettings } from '../../lib/queries';
-import { useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
@@ -43,7 +42,6 @@ interface Draft {
 }
 
 export function RulesTab() {
-  const session = useSession();
   const settings = useSettings();
   const qc = useQueryClient();
   const toast = useToast();
@@ -116,193 +114,204 @@ export function RulesTab() {
     { key: 'tunables', label: '可调的数值' },
   ];
   return (
-    <AdminPage section="rules" description="门店与营业时间、扣款顺序、单笔上限、撤销时限、收款前开班；交班方式；可调的数值。库存、采购、审批、付款这些 ERP 的规则在「ERP 设置」里。修改只影响之后的业务。" tabs={tabs}>
-     <SubPane tab="basic" className="space-y-5">
-      {settings.data?.hidePendingMarks ? (
-        <Notice tone="info" title="店主已签认经营规则，「待确认」标记已隐藏">
-          修改只影响之后的业务；已入账单据按当时的规则记录，撤销按原单构成恢复。
-        </Notice>
-      ) : (
-        <Notice tone="warning" title="标着「待确认」的是模拟规则，正式试用前需店主确认">
-          扣款顺序、营业日口径、岗位权限都标为「待确认」。修改只影响之后的业务；已入账单据按当时的规则记录，撤销按原单构成恢复。店主签认后，可以在下面把「待确认」标记设为隐藏。
-        </Notice>
-      )}
+    <AdminPage
+      section="rules"
+      description="门店与营业时间、扣款顺序、单笔上限、撤销时限、收款前开班；交班方式；可调的数值。库存、采购、审批、付款这些 ERP 的规则在「ERP 设置」里。修改只影响之后的业务。"
+      tabs={tabs}
+    >
+      <SubPane tab="basic" className="space-y-5">
+        {settings.data?.hidePendingMarks ? (
+          <Notice tone="info" title="店主已签认经营规则，「待确认」标记已隐藏">
+            修改只影响之后的业务；已入账单据按当时的规则记录，撤销按原单构成恢复。
+          </Notice>
+        ) : (
+          <Notice tone="warning" title="标着「待确认」的是模拟规则，正式试用前需店主确认">
+            扣款顺序、营业日口径、岗位权限都标为「待确认」。修改只影响之后的业务；已入账单据按当时的规则记录，撤销按原单构成恢复。店主签认后，可以在下面把「待确认」标记设为隐藏。
+          </Notice>
+        )}
 
-      <Card className="p-5">
-        <SectionTitle aside={<PendingBadge />}>本金与赠金的扣款顺序</SectionTitle>
-        <p className="mt-1 text-[12.5px] text-ink-3">
-          示例：会员本金 <Money cents={EXAMPLE.balance.principal} />、赠金 <Money cents={EXAMPLE.balance.bonus} />，消费 <Money cents={EXAMPLE.amount} />
-        </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {DEDUCTION_RULES.map((rule) => {
-            const r = splitDeduction(EXAMPLE.amount, EXAMPLE.balance, rule);
-            const active = draft.deductionRule === rule;
-            return (
-              <button
-                key={rule}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setDraft({ ...draft, deductionRule: rule })}
-                className={cn(
-                  'rounded-lg border bg-card p-4 text-left transition-all',
-                  active ? 'border-pine shadow-[0_0_0_3px_rgb(36_73_58/0.12)]' : 'border-line hover:border-line-strong',
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <p className="text-[14.5px] font-bold">{DEDUCTION_RULE_LABELS[rule].title}</p>
-                  <span className={cn('flex size-5 items-center justify-center rounded-full border-2', active ? 'border-pine bg-pine text-paper' : 'border-ink-4')}>
-                    {active && <Check className="size-3" strokeWidth={3.5} />}
-                  </span>
-                </div>
-                <p className="mt-1 text-[12.5px] text-ink-3">{DEDUCTION_RULE_LABELS[rule].description}</p>
-                {r.ok && (
-                  <div className="mt-3 grid grid-cols-2 gap-2 rounded-md bg-paper-2/70 p-2.5 text-[12px]">
-                    <div>
-                      <p className="text-ink-3">扣本金</p>
-                      <Money cents={r.principal} className="text-[14px] font-bold text-pine" />
-                    </div>
-                    <div>
-                      <p className="text-ink-3">扣赠金</p>
-                      <Money cents={r.bonus} className="text-[14px] font-bold text-yuzu-deep" />
-                    </div>
+        <Card className="p-5">
+          <SectionTitle aside={<PendingBadge />}>本金与赠金的扣款顺序</SectionTitle>
+          <p className="mt-1 text-[12.5px] text-ink-3">
+            示例：会员本金 <Money cents={EXAMPLE.balance.principal} />
+            、赠金 <Money cents={EXAMPLE.balance.bonus} />
+            ，消费 <Money cents={EXAMPLE.amount} />
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            {DEDUCTION_RULES.map((rule) => {
+              const r = splitDeduction(EXAMPLE.amount, EXAMPLE.balance, rule);
+              const active = draft.deductionRule === rule;
+              return (
+                <button
+                  key={rule}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setDraft({ ...draft, deductionRule: rule })}
+                  className={cn('rounded-lg border bg-card p-4 text-left transition-all', active ? 'border-pine shadow-[0_0_0_3px_rgb(36_73_58/0.12)]' : 'border-line hover:border-line-strong')}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-[14.5px] font-bold">{DEDUCTION_RULE_LABELS[rule].title}</p>
+                    <span className={cn('flex size-5 items-center justify-center rounded-full border-2', active ? 'border-pine bg-pine text-paper' : 'border-ink-4')}>
+                      {active && <Check className="size-3" strokeWidth={3.5} />}
+                    </span>
                   </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </Card>
+                  <p className="mt-1 text-[12.5px] text-ink-3">{DEDUCTION_RULE_LABELS[rule].description}</p>
+                  {r.ok && (
+                    <div className="mt-3 grid grid-cols-2 gap-2 rounded-md bg-paper-2/70 p-2.5 text-[12px]">
+                      <div>
+                        <p className="text-ink-3">扣本金</p>
+                        <Money cents={r.principal} className="text-[14px] font-bold text-pine" />
+                      </div>
+                      <div>
+                        <p className="text-ink-3">扣赠金</p>
+                        <Money cents={r.bonus} className="text-[14px] font-bold text-yuzu-deep" />
+                      </div>
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </Card>
 
-      <Card className="grid gap-5 p-5 md:grid-cols-2">
-        <Field label="门店名称" htmlFor="r-store">
-          <Input id="r-store" value={draft.storeName} maxLength={32} onChange={(e) => setDraft({ ...draft, storeName: e.target.value })} />
-        </Field>
-        <Field label={<span className="inline-flex items-center gap-2">营业日切换时间 <PendingBadge /></span>} hint="例如 6:00：凌晨 2 点的业务仍记入前一天营业日">
-          <Select value={draft.businessDayStartHour} onChange={(e) => setDraft({ ...draft, businessDayStartHour: Number(e.target.value) })}>
-            {Array.from({ length: 13 }, (_, h) => (
-              <option key={h} value={h}>
-                每天 {String(h).padStart(2, '0')}:00
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="单笔充值上限" htmlFor="r-maxr" hint="超过时需店主或店总在弹窗里输入账号密码当场授权（店主确认默认 50 万元）">
-          <MoneyInput id="r-maxr" value={draft.maxRecharge} onChange={(e) => setDraft({ ...draft, maxRecharge: e.target.value })} />
-        </Field>
-        <Field label="单笔消费上限" htmlFor="r-maxc" hint="同上，超过需当场授权">
-          <MoneyInput id="r-maxc" value={draft.maxConsume} onChange={(e) => setDraft({ ...draft, maxConsume: e.target.value })} />
-        </Field>
-        <Field
-          label={<span className="inline-flex items-center gap-2">充值当日的储值消费比例（%） <PendingBadge title="HY01：会员充了值的那一天，储值支付不超过「当天第一笔充值前的余额 + 当天充值实收 × 这个比例」；默认 70，待店主确认" /></span>}
-          htmlFor="r-spend-pct"
-          hint="会员充了值的那一天，用储值付的钱不超过「充值前的余额 + 当天充值实收 × 这个比例」；例：新会员充 10 万、比例 70，当天最多用 7 万储值。超过的直接拒绝并显示剩余额度；留空不限"
-        >
-          <Input id="r-spend-pct" value={draft.spendPct} inputMode="numeric" placeholder="不限" data-testid="rules-spend-pct" onChange={(e) => setDraft({ ...draft, spendPct: e.target.value })} />
-        </Field>
-        <Field
-          label="撤销与反结账时限"
-          htmlFor="r-window"
-          hint="消费或结账后多长时间内，值班经理及以上可以撤销消费、反结账；超过后只有店主可以（店主 2026-10-29 签认默认 48 小时）"
-        >
-          <Select
-            id="r-window"
-            value={draft.reversalWindowHours ?? ''}
-            onChange={(e) => setDraft({ ...draft, reversalWindowHours: e.target.value ? Number(e.target.value) : null })}
+        <Card className="grid gap-5 p-5 md:grid-cols-2">
+          <Field label="门店名称" htmlFor="r-store">
+            <Input id="r-store" value={draft.storeName} maxLength={32} onChange={(e) => setDraft({ ...draft, storeName: e.target.value })} />
+          </Field>
+          <Field
+            label={
+              <span className="inline-flex items-center gap-2">
+                营业日切换时间 <PendingBadge />
+              </span>
+            }
+            hint="例如 6:00：凌晨 2 点的业务仍记入前一天营业日"
           >
-            {windowOptions.map((h) => (
-              <option key={h ?? 'none'} value={h ?? ''}>
-                {h === null ? '不限' : `消费 / 结账后 ${describeHours(h)}内`}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field
-          label="「待确认」标记"
-          hint="页面上标着「待确认」的是还没签认、先按推荐做的模拟规则；店主签认后可以隐藏这些标记（只影响显示，不改任何规则，随时可以再显示）"
-        >
-          <Segmented
-            ariaLabel="「待确认」标记"
-            value={draft.hidePendingMarks ? 'hide' : 'show'}
-            onChange={(v) => setDraft({ ...draft, hidePendingMarks: v === 'hide' })}
-            options={[
-              { value: 'show', label: '显示' },
-              { value: 'hide', label: '隐藏（店主已签认）' },
-            ]}
-          />
-        </Field>
-        <Field label="收款前必须先开班" hint="开启时充值、结账、反结账前都要先开班（页面上可以就地开班），每笔收款都记到当班的交班表（店主 2026-10-29 签认默认开启）">
-          <Segmented
-            ariaLabel="收款前必须先开班"
-            value={draft.requireOpenShift ? 'on' : 'off'}
-            onChange={(v) => setDraft({ ...draft, requireOpenShift: v === 'on' })}
-            options={[
-              { value: 'on', label: '必须先开班' },
-              { value: 'off', label: '不要求（不记班次）' },
-            ]}
-          />
-        </Field>
-        <Field
-          label={<span className="inline-flex items-center gap-2">自定义赠金有效期（天） <PendingBadge /></span>}
-          htmlFor="r-bonus-days"
-          hint="不按套餐、手动填写赠金时使用；留空为长期有效。套餐的赠金有效期在「套餐与项目」里设置"
-        >
-          <Input
-            id="r-bonus-days"
-            inputMode="numeric"
-            className="num"
-            maxLength={4}
-            placeholder="长期有效"
-            value={draft.customBonusValidDays}
-            onChange={(e) => setDraft({ ...draft, customBonusValidDays: e.target.value.replace(/\D/g, '') })}
-          />
-        </Field>
-        <Field
-          label={<span className="inline-flex items-center gap-2">营业时间 <PendingBadge /></span>}
-          hint={`${describeBusinessHours(draft.businessHours)}；只用于显示与提醒，不影响营业日切换与记账`}
-        >
-          <div className="flex flex-wrap items-center gap-2">
+            <Select value={draft.businessDayStartHour} onChange={(e) => setDraft({ ...draft, businessDayStartHour: Number(e.target.value) })}>
+              {Array.from({ length: 13 }, (_, h) => (
+                <option key={h} value={h}>
+                  每天 {String(h).padStart(2, '0')}:00
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="单笔充值上限" htmlFor="r-maxr" hint="超过时需店主或店总在弹窗里输入账号密码当场授权（店主确认默认 50 万元）">
+            <MoneyInput id="r-maxr" value={draft.maxRecharge} onChange={(e) => setDraft({ ...draft, maxRecharge: e.target.value })} />
+          </Field>
+          <Field label="单笔消费上限" htmlFor="r-maxc" hint="同上，超过需当场授权">
+            <MoneyInput id="r-maxc" value={draft.maxConsume} onChange={(e) => setDraft({ ...draft, maxConsume: e.target.value })} />
+          </Field>
+          <Field
+            label={
+              <span className="inline-flex items-center gap-2">
+                充值当日的储值消费比例（%） <PendingBadge title="HY01：会员充了值的那一天，储值支付不超过「当天第一笔充值前的余额 + 当天充值实收 × 这个比例」；默认 70，待店主确认" />
+              </span>
+            }
+            htmlFor="r-spend-pct"
+            hint="会员充了值的那一天，用储值付的钱不超过「充值前的余额 + 当天充值实收 × 这个比例」；例：新会员充 10 万、比例 70，当天最多用 7 万储值。超过的直接拒绝并显示剩余额度；留空不限"
+          >
+            <Input id="r-spend-pct" value={draft.spendPct} inputMode="numeric" placeholder="不限" data-testid="rules-spend-pct" onChange={(e) => setDraft({ ...draft, spendPct: e.target.value })} />
+          </Field>
+          <Field label="撤销与反结账时限" htmlFor="r-window" hint="消费或结账后多长时间内，值班经理及以上可以撤销消费、反结账；超过后只有店主可以（店主 2026-10-29 签认默认 48 小时）">
+            <Select id="r-window" value={draft.reversalWindowHours ?? ''} onChange={(e) => setDraft({ ...draft, reversalWindowHours: e.target.value ? Number(e.target.value) : null })}>
+              {windowOptions.map((h) => (
+                <option key={h ?? 'none'} value={h ?? ''}>
+                  {h === null ? '不限' : `消费 / 结账后 ${describeHours(h)}内`}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="「待确认」标记" hint="页面上标着「待确认」的是还没签认、先按推荐做的模拟规则；店主签认后可以隐藏这些标记（只影响显示，不改任何规则，随时可以再显示）">
             <Segmented
-              ariaLabel="营业时间"
-              value={draft.businessHours ? 'hours' : 'all_day'}
-              onChange={(v) => setDraft({ ...draft, businessHours: v === 'all_day' ? null : (draft.businessHours ?? { open: '10:00', close: '02:00' }) })}
+              ariaLabel="「待确认」标记"
+              value={draft.hidePendingMarks ? 'hide' : 'show'}
+              onChange={(v) => setDraft({ ...draft, hidePendingMarks: v === 'hide' })}
               options={[
-                { value: 'all_day', label: '全天 24 小时' },
-                { value: 'hours', label: '指定时间' },
+                { value: 'show', label: '显示' },
+                { value: 'hide', label: '隐藏（店主已签认）' },
               ]}
             />
-            {draft.businessHours && (
-              <span className="flex items-center gap-1.5">
-                <Input
-                  type="time"
-                  aria-label="开门时间"
-                  fullWidth={false}
-                  className="w-[140px]"
-                  value={draft.businessHours.open}
-                  onChange={(e) => setDraft({ ...draft, businessHours: { ...draft.businessHours!, open: e.target.value } })}
-                />
-                <span className="text-ink-3">至</span>
-                <Input
-                  type="time"
-                  aria-label="打烊时间"
-                  fullWidth={false}
-                  className="w-[140px]"
-                  value={draft.businessHours.close}
-                  onChange={(e) => setDraft({ ...draft, businessHours: { ...draft.businessHours!, close: e.target.value } })}
-                />
+          </Field>
+          <Field label="收款前必须先开班" hint="开启时充值、结账、反结账前都要先开班（页面上可以就地开班），每笔收款都记到当班的交班表（店主 2026-10-29 签认默认开启）">
+            <Segmented
+              ariaLabel="收款前必须先开班"
+              value={draft.requireOpenShift ? 'on' : 'off'}
+              onChange={(v) => setDraft({ ...draft, requireOpenShift: v === 'on' })}
+              options={[
+                { value: 'on', label: '必须先开班' },
+                { value: 'off', label: '不要求（不记班次）' },
+              ]}
+            />
+          </Field>
+          <Field
+            label={
+              <span className="inline-flex items-center gap-2">
+                自定义赠金有效期（天） <PendingBadge />
               </span>
-            )}
-          </div>
-        </Field>
-      </Card>
+            }
+            htmlFor="r-bonus-days"
+            hint="不按套餐、手动填写赠金时使用；留空为长期有效。套餐的赠金有效期在「套餐与项目」里设置"
+          >
+            <Input
+              id="r-bonus-days"
+              inputMode="numeric"
+              className="num"
+              maxLength={4}
+              placeholder="长期有效"
+              value={draft.customBonusValidDays}
+              onChange={(e) => setDraft({ ...draft, customBonusValidDays: e.target.value.replace(/\D/g, '') })}
+            />
+          </Field>
+          <Field
+            label={
+              <span className="inline-flex items-center gap-2">
+                营业时间 <PendingBadge />
+              </span>
+            }
+            hint={`${describeBusinessHours(draft.businessHours)}；只用于显示与提醒，不影响营业日切换与记账`}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented
+                ariaLabel="营业时间"
+                value={draft.businessHours ? 'hours' : 'all_day'}
+                onChange={(v) => setDraft({ ...draft, businessHours: v === 'all_day' ? null : (draft.businessHours ?? { open: '10:00', close: '02:00' }) })}
+                options={[
+                  { value: 'all_day', label: '全天 24 小时' },
+                  { value: 'hours', label: '指定时间' },
+                ]}
+              />
+              {draft.businessHours && (
+                <span className="flex items-center gap-1.5">
+                  <Input
+                    type="time"
+                    aria-label="开门时间"
+                    fullWidth={false}
+                    className="w-[140px]"
+                    value={draft.businessHours.open}
+                    onChange={(e) => setDraft({ ...draft, businessHours: { ...draft.businessHours!, open: e.target.value } })}
+                  />
+                  <span className="text-ink-3">至</span>
+                  <Input
+                    type="time"
+                    aria-label="打烊时间"
+                    fullWidth={false}
+                    className="w-[140px]"
+                    value={draft.businessHours.close}
+                    onChange={(e) => setDraft({ ...draft, businessHours: { ...draft.businessHours!, close: e.target.value } })}
+                  />
+                </span>
+              )}
+            </div>
+          </Field>
+        </Card>
 
-      {error && <Notice tone="error" title={error} />}
-      <div className="flex justify-end">
-        <Button variant="primary" loading={saving} onClick={save}>
-          保存规则
-        </Button>
-      </div>
-      <Notice tone="info" title="渠道来源与会员标签在「渠道与标签」设置，档级与会籍在「会员规则」设置；各岗位的权限在「岗位权限」设置" />
-     </SubPane>
+        {error && <Notice tone="error" title={error} />}
+        <div className="flex justify-end">
+          <Button variant="primary" loading={saving} onClick={save}>
+            保存规则
+          </Button>
+        </div>
+        <Notice tone="info" title="渠道来源与会员标签在「渠道与标签」设置，档级与会籍在「会员规则」设置；各岗位的权限在「岗位权限」设置" />
+      </SubPane>
 
       {/* 交班方式与钱箱（v0.7.28 ⑨）单独保存 */}
       <SubPane tab="shift">
@@ -394,7 +403,10 @@ export function InventoryRules() {
   return (
     <Card className="p-5">
       <SectionTitle aside={<PendingBadge />}>库存与采购</SectionTitle>
-      <p className="mt-1 text-[12.5px] text-ink-3">库存范围、价格口径、急采上限与负责人确认（没有审批规则命中时的默认规则；多级审批在 ERP「审批中心」设）。常规领料、收货、退回不需要逐笔审批；总仓的盘点调整固定需要确认，部门小仓只有大差异的要审批。</p>
+      <p className="mt-1 text-[12.5px] text-ink-3">
+        库存范围、价格口径、急采上限与负责人确认（没有审批规则命中时的默认规则；多级审批在
+        ERP「审批中心」设）。常规领料、收货、退回不需要逐笔审批；总仓的盘点调整固定需要确认，部门小仓只有大差异的要审批。
+      </p>
       <div className="mt-4 grid gap-4 md:grid-cols-3">
         <Field label="库存范围" htmlFor="i-scope" hint="库存数字代表哪里，避免重复管理">
           <Input id="i-scope" value={draft.scopeName} maxLength={20} onChange={(e) => setDraft({ ...draft, scopeName: e.target.value })} />

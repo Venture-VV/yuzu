@@ -41,11 +41,7 @@ function ChannelsCard() {
     [next[i], next[i + d]] = [next[i + d]!, next[i]!];
     setDraft(next);
   };
-  const problem = draft.some((c) => !c.label.trim())
-    ? '渠道名称不能为空'
-    : new Set(draft.map((c) => c.label.trim())).size !== draft.length
-      ? '渠道名称不能重复'
-      : null;
+  const problem = draft.some((c) => !c.label.trim()) ? '渠道名称不能为空' : new Set(draft.map((c) => c.label.trim())).size !== draft.length ? '渠道名称不能重复' : null;
 
   const save = async () => {
     setSaving(true);
@@ -67,7 +63,13 @@ function ChannelsCard() {
     <Card className="p-5" data-testid="channels-card">
       <SectionTitle
         aside={
-          <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} disabled={draft.length >= MAX_MEMBER_CHANNELS} onClick={() => setDraft([...draft, { key: null, label: '', active: true }])}>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Plus className="size-4" />}
+            disabled={draft.length >= MAX_MEMBER_CHANNELS}
+            onClick={() => setDraft([...draft, { key: null, label: '', active: true }])}
+          >
             新增渠道
           </Button>
         }

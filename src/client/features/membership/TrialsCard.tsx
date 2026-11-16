@@ -7,15 +7,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Gift, UserPlus } from 'lucide-react';
-import {
-  GIFT_BENEFIT_CODE,
-  TRIAL_KIND_LABELS,
-  TRIAL_STATUS_LABELS,
-  type MemberTrials,
-  type TrialKind,
-  type TrialOptions,
-  type TrialRow,
-} from '@shared/trials';
+import { GIFT_BENEFIT_CODE, TRIAL_KIND_LABELS, TRIAL_STATUS_LABELS, type MemberTrials, type TrialKind, type TrialOptions, type TrialRow } from '@shared/trials';
 import type { MemberDetail } from '@shared/types';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending, type ErpPendingOp } from '../../lib/erpPending';
@@ -119,14 +111,8 @@ export function TrialsCard({ member }: { member: MemberDetail }) {
       {canStart && <ErpPendingPanel types={['member_trial']} filter={ofMember} className="mt-3 space-y-2" onFound={() => void refresh()} />}
 
       {d.active ? (
-        <Notice
-          tone="info"
-          className="mt-3"
-          title={`体验中：${d.active.label}（${d.active.startsOn} 至 ${d.active.endsOn}）`}
-          data-testid="trial-active"
-        >
-          {d.active.inviterName}的{TRIAL_KIND_LABELS[d.active.kind]}。只享服务类、结账会员折扣与 VIP 柜（按体验的与自己的取高的），不发券、不进升档保级；自己充值到 L
-          {d.active.grade} 或更高时自动转正。
+        <Notice tone="info" className="mt-3" title={`体验中：${d.active.label}（${d.active.startsOn} 至 ${d.active.endsOn}）`} data-testid="trial-active">
+          {d.active.inviterName}的{TRIAL_KIND_LABELS[d.active.kind]}。只享服务类、结账会员折扣与 VIP 柜（按体验的与自己的取高的），不发券、不进升档保级；自己充值到 L{d.active.grade} 或更高时自动转正。
           {can('benefit.publish') && (
             <Button size="sm" variant="ghost" className="ml-2" onClick={() => setCancelling(d.active)} data-testid={`trial-cancel-${d.active.id}`}>
               撤销
@@ -139,8 +125,8 @@ export function TrialsCard({ member }: { member: MemberDetail }) {
 
       {canStart && o && (
         <p className="mt-2 text-[12.5px] text-ink-3" data-testid="trial-quota">
-          自己是「{o.own.label}」：邀请体验本月 {o.invite.used} / {o.invite.limit ?? 0} 次
-          {o.invite.allowed ? `（给对方 ${o.invite.label}，到 ${o.invite.endsOn}）` : `（${o.invite.reason}）`}；赠送会籍
+          自己是「{o.own.label}」：邀请体验本月 {o.invite.used} / {o.invite.limit ?? 0} 次{o.invite.allowed ? `（给对方 ${o.invite.label}，到 ${o.invite.endsOn}）` : `（${o.invite.reason}）`}
+          ；赠送会籍
           {o.gift.limit === null ? ` 本月 ${o.gift.used} 次` : ` ${o.gift.limitText} ${o.gift.used} / ${o.gift.limit} 次`}
           {o.gift.allowed ? `（给对方 ${o.gift.label}，到 ${o.gift.endsOn}）` : `（${o.gift.reason}）`}
         </p>
@@ -171,19 +157,7 @@ export function TrialsCard({ member }: { member: MemberDetail }) {
   );
 }
 
-function TrialList({
-  title,
-  rows,
-  who,
-  onCancel,
-  testId,
-}: {
-  title: string;
-  rows: TrialRow[];
-  who: 'member' | 'inviter';
-  onCancel?: (t: TrialRow) => void;
-  testId: string;
-}) {
+function TrialList({ title, rows, who, onCancel, testId }: { title: string; rows: TrialRow[]; who: 'member' | 'inviter'; onCancel?: (t: TrialRow) => void; testId: string }) {
   return (
     <div className="mt-4 border-t border-line pt-3">
       <p className="text-[12.5px] font-bold text-ink-2">{title}</p>
@@ -305,7 +279,11 @@ function TrialDialog({ member, initial, onClose, onDone }: { member: MemberDetai
         </Field>
         {phoneOk(digits) && check.isPending && <Skeleton className="h-10" />}
         {check.error && phoneOk(digits) && <Notice tone="error" title={errorMessage(check.error)} />}
-        {opt && !opt.allowed && <Notice tone="warning" title={`现在不能${TRIAL_KIND_LABELS[kind]}`}>{opt.reason}</Notice>}
+        {opt && !opt.allowed && (
+          <Notice tone="warning" title={`现在不能${TRIAL_KIND_LABELS[kind]}`}>
+            {opt.reason}
+          </Notice>
+        )}
         {opt?.allowed && invitee?.exists && (
           <Notice tone={problem ? 'warning' : 'info'} title={`${invitee.name}（${invitee.memberNo}）· 现在是 ${invitee.label}`} data-testid="trial-invitee">
             {problem ?? `给对方 ${opt.label}，${o!.today} 至 ${opt.endsOn}。`}

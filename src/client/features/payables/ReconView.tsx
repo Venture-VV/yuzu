@@ -128,13 +128,7 @@ export function ReconView({ onStatement }: { onStatement: (supplierId: number, f
                     {docs.map((d) => (
                       <li key={d.docId} className="flex flex-wrap items-center gap-3 px-4 py-2 text-[13px]">
                         {r.canBatch && (
-                          <input
-                            type="checkbox"
-                            className="size-4 accent-[var(--color-pine)]"
-                            checked={picked.has(d.docId)}
-                            onChange={() => toggle(d.docId)}
-                            aria-label={`对账 ${d.docNo}`}
-                          />
+                          <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={picked.has(d.docId)} onChange={() => toggle(d.docId)} aria-label={`对账 ${d.docNo}`} />
                         )}
                         <span className="num font-semibold">{d.docNo}</span>
                         <span className="num text-ink-3">{d.docDate}</span>
@@ -274,8 +268,8 @@ function RecordRow({ rec, canVoid, onVoid }: { rec: SupplierReconciliation; canV
       </p>
       {rec.kind === 'month' && rec.changed && rec.snapshot && rec.current && (
         <p className="mt-0.5 text-[12px] text-yuzu-deep">
-          登记时期末 ¥{formatAmount(rec.snapshot.endCents)}，现在 ¥{formatAmount(rec.current.endCents)}（收货 ¥{formatAmount(rec.snapshot.receivedCents)} → ¥{formatAmount(rec.current.receivedCents)}，付款 ¥
-          {formatAmount(rec.snapshot.paidCents)} → ¥{formatAmount(rec.current.paidCents)}）
+          登记时期末 ¥{formatAmount(rec.snapshot.endCents)}，现在 ¥{formatAmount(rec.current.endCents)}（收货 ¥{formatAmount(rec.snapshot.receivedCents)} → ¥{formatAmount(rec.current.receivedCents)}
+          ，付款 ¥{formatAmount(rec.snapshot.paidCents)} → ¥{formatAmount(rec.current.paidCents)}）
         </p>
       )}
       {rec.voided && (
@@ -444,7 +438,11 @@ function MonthDialog({ target, onClose }: { target: MonthTarget | null; onClose:
       }
     >
       <div className="space-y-3">
-        {pending.length > 0 && <Notice tone="warning" title="上一笔对账登记结果待确认">请先在页面上方查回、按原内容重新提交或作废。</Notice>}
+        {pending.length > 0 && (
+          <Notice tone="warning" title="上一笔对账登记结果待确认">
+            请先在页面上方查回、按原内容重新提交或作废。
+          </Notice>
+        )}
         {st.isPending ? (
           <Spinner />
         ) : st.data ? (
@@ -514,7 +512,11 @@ function BatchDialog({ target, onClose }: { target: BatchTarget | null; onClose:
       }
     >
       <div className="space-y-3">
-        {pending.length > 0 && <Notice tone="warning" title="上一笔对账登记结果待确认">请先在页面上方查回、按原内容重新提交或作废。</Notice>}
+        {pending.length > 0 && (
+          <Notice tone="warning" title="上一笔对账登记结果待确认">
+            请先在页面上方查回、按原内容重新提交或作废。
+          </Notice>
+        )}
         <ul className="divide-y divide-line/70 rounded-lg border border-line">
           {(target?.docs ?? []).map((d) => (
             <li key={d.docId} className="flex items-center gap-3 px-3 py-2 text-[13px]">
@@ -549,7 +551,13 @@ function VoidDialog({ rec, onClose }: { rec: SupplierReconciliation | null; onCl
       confirmLabel="撤销登记"
       danger
       busy={busy}
-      extra={pending.length > 0 ? <Notice tone="warning" title="上一笔撤销结果待确认">请先在页面上方查回、按原内容重新提交或作废。</Notice> : undefined}
+      extra={
+        pending.length > 0 ? (
+          <Notice tone="warning" title="上一笔撤销结果待确认">
+            请先在页面上方查回、按原内容重新提交或作废。
+          </Notice>
+        ) : undefined
+      }
       onClose={onClose}
       onConfirm={async (reason) => {
         if (!rec) return;

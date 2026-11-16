@@ -20,19 +20,7 @@ type IconProps = Omit<SVGProps<SVGSVGElement>, 'children' | 'fill'> & { size?: n
 
 function Doodle({ size = 24, fill, children, ...rest }: IconProps & { children: (fill: string) => ReactNode }) {
   return (
-    <svg
-      viewBox="0 0 32 32"
-      width={size}
-      height={size}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      focusable="false"
-      {...rest}
-    >
+    <svg viewBox="0 0 32 32" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden focusable="false" {...rest}>
       {children(fill ?? 'none')}
     </svg>
   );
@@ -70,7 +58,10 @@ export const IconTicket = (p: IconProps) => (
   <Doodle {...p}>
     {(f) => (
       <>
-        <path d="M6.2 7.6c6.6-.4 13.2-.3 19.8.1.3 2.2.2 3.4-.1 4.6-1.6.4-2.4 1.6-2.4 3.2s.9 2.8 2.5 3.2c.3 1.6.3 3.2 0 5.6-6.6.6-13.2.6-19.8.1-.3-2.2-.2-3.8.1-5.6 1.6-.4 2.5-1.6 2.5-3.2S7.9 12.8 6.3 12.4c-.4-1.6-.4-3.2-.1-4.8Z" fill={f} />
+        <path
+          d="M6.2 7.6c6.6-.4 13.2-.3 19.8.1.3 2.2.2 3.4-.1 4.6-1.6.4-2.4 1.6-2.4 3.2s.9 2.8 2.5 3.2c.3 1.6.3 3.2 0 5.6-6.6.6-13.2.6-19.8.1-.3-2.2-.2-3.8.1-5.6 1.6-.4 2.5-1.6 2.5-3.2S7.9 12.8 6.3 12.4c-.4-1.6-.4-3.2-.1-4.8Z"
+          fill={f}
+        />
         <path d="M13 12.6h2.6v2.6H13zM16.8 16.8h2.6v2.6h-2.6zM13 17.2h1.4M18.2 12.6v1.6" strokeWidth={1.8} />
       </>
     )}
@@ -95,7 +86,10 @@ export const IconCamera = (p: IconProps) => (
   <Doodle {...p}>
     {(f) => (
       <>
-        <path d="M5.4 11.4c.1-1.6 1-2.4 2.6-2.4h2.8l1.8-2.6c2.4-.2 5-.2 7.4 0l1.8 2.6h2.6c1.6 0 2.6.8 2.6 2.4.3 4.2.3 8.4 0 12.6-.1 1.4-1 2.2-2.6 2.2-5.6.3-11.2.3-16.6 0-1.6 0-2.4-.8-2.6-2.2-.3-4.2-.2-8.4.2-12.6Z" fill={f} />
+        <path
+          d="M5.4 11.4c.1-1.6 1-2.4 2.6-2.4h2.8l1.8-2.6c2.4-.2 5-.2 7.4 0l1.8 2.6h2.6c1.6 0 2.6.8 2.6 2.4.3 4.2.3 8.4 0 12.6-.1 1.4-1 2.2-2.6 2.2-5.6.3-11.2.3-16.6 0-1.6 0-2.4-.8-2.6-2.2-.3-4.2-.2-8.4.2-12.6Z"
+          fill={f}
+        />
         <path d="M16 13.2c2.6 0 4.4 1.8 4.4 4.2 0 2.6-1.8 4.4-4.4 4.4s-4.4-1.8-4.4-4.4c0-2.4 1.8-4.2 4.4-4.2Z" />
       </>
     )}
@@ -129,16 +123,10 @@ export const IconLetter = (p: IconProps) => (
 );
 
 export const IconHeart = (p: IconProps) => (
-  <Doodle {...p}>
-    {(f) => <path d="M16 26.2C8.8 21.6 4.6 17.4 5.2 12.4c.4-3.6 3.8-5.6 6.8-4.6 1.8.6 3.2 2 4 3.6.8-1.8 2.4-3.2 4.2-3.6 3.2-.8 6.4 1.4 6.6 5 .2 4.6-4 8.8-10.8 13.4Z" fill={f} />}
-  </Doodle>
+  <Doodle {...p}>{(f) => <path d="M16 26.2C8.8 21.6 4.6 17.4 5.2 12.4c.4-3.6 3.8-5.6 6.8-4.6 1.8.6 3.2 2 4 3.6.8-1.8 2.4-3.2 4.2-3.6 3.2-.8 6.4 1.4 6.6 5 .2 4.6-4 8.8-10.8 13.4Z" fill={f} />}</Doodle>
 );
 
-export const IconSparkle = (p: IconProps) => (
-  <Doodle {...p}>
-    {(f) => <path d="M16 4.6c.6 5.6 2.4 8 8.6 9.4-6 1.6-8 3.6-8.6 9.6-.8-6-2.6-8-8.6-9.6 6-1.4 8-3.8 8.6-9.4Z" fill={f} />}
-  </Doodle>
-);
+export const IconSparkle = (p: IconProps) => <Doodle {...p}>{(f) => <path d="M16 4.6c.6 5.6 2.4 8 8.6 9.4-6 1.6-8 3.6-8.6 9.6-.8-6-2.6-8-8.6-9.6 6-1.4 8-3.8 8.6-9.4Z" fill={f} />}</Doodle>;
 
 export const IconPhone = (p: IconProps) => (
   <Doodle {...p}>
@@ -173,11 +161,7 @@ export const IconDoor = (p: IconProps) => (
   </Doodle>
 );
 
-export const IconPlay = (p: IconProps) => (
-  <Doodle {...p}>
-    {(f) => <path d="M10.2 6.4c5.4 2.8 10 5.8 13.8 9.4-3.8 3.6-8.4 6.8-13.8 9.8-.6-6.4-.6-12.8 0-19.2Z" fill={f} />}
-  </Doodle>
-);
+export const IconPlay = (p: IconProps) => <Doodle {...p}>{(f) => <path d="M10.2 6.4c5.4 2.8 10 5.8 13.8 9.4-3.8 3.6-8.4 6.8-13.8 9.8-.6-6.4-.6-12.8 0-19.2Z" fill={f} />}</Doodle>;
 
 export const IconInstall = (p: IconProps) => (
   <Doodle {...p}>

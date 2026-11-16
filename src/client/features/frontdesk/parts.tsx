@@ -73,8 +73,7 @@ export function GroupMark({ groupNo, count, className }: { groupNo: string; coun
       title={`同行组 ${groupNo}${count ? `，${count} 人在店` : ''}`}
       className={cn('inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-full bg-pine px-1.5 text-[11px] leading-none font-bold text-paper', className)}
     >
-      <Link2 className="size-3" strokeWidth={2.6} />
-      联{groupShort(groupNo)}
+      <Link2 className="size-3" strokeWidth={2.6} />联{groupShort(groupNo)}
       {count ? <span className="font-semibold opacity-75">·{count}</span> : null}
     </span>
   );
@@ -147,14 +146,8 @@ export function TagCard({
             {v.groupNo && <GroupMark groupNo={v.groupNo} />}
           </span>
           <span className="mt-auto flex items-end justify-between gap-1 pr-2.5 pb-2 pl-3.5">
-            <span className={cn('num whitespace-nowrap text-[12px] font-semibold', long ? 'rounded-sm bg-yuzu-soft px-1 text-yuzu-deep' : 'text-ink-3')}>
-              {stayText(v.checkedInAt, now)}
-            </span>
-            {v.amountCents > 0 ? (
-              <CardMoney cents={v.amountCents} />
-            ) : (
-              <span className="text-[11.5px] text-ink-4">未挂账</span>
-            )}
+            <span className={cn('num whitespace-nowrap text-[12px] font-semibold', long ? 'rounded-sm bg-yuzu-soft px-1 text-yuzu-deep' : 'text-ink-3')}>{stayText(v.checkedInAt, now)}</span>
+            {v.amountCents > 0 ? <CardMoney cents={v.amountCents} /> : <span className="text-[11.5px] text-ink-4">未挂账</span>}
           </span>
         </>
       ) : (

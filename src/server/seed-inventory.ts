@@ -94,8 +94,7 @@ export async function seedInventoryDemo(sql: Sql, config: AppConfig) {
   }
   const departments = new Map((await sql<{ id: number; name: string }[]>`SELECT id, name FROM departments`).map((d) => [d.name, d.id]));
 
-  const mark = (table: 'inv_docs' | 'purchase_orders' | 'payments' | 'opening_payables', id: number) =>
-    sql`UPDATE ${sql(table)} SET is_synthetic = true WHERE id = ${id}`;
+  const mark = (table: 'inv_docs' | 'purchase_orders' | 'payments' | 'opening_payables', id: number) => sql`UPDATE ${sql(table)} SET is_synthetic = true WHERE id = ${id}`;
 
   // ── 按日期依次发生的业务 ──
   const docIds = new Map<string, number>();
@@ -225,7 +224,13 @@ export async function seedInventoryDemo(sql: Sql, config: AppConfig) {
   for (const r of demo.supplierReturns) {
     at(r.date, 8, async () => {
       const src = docIds.get(r.sourceReceiptId)!;
-      const created = await doc(r.id, keeper, { docType: 'supplier_return', docDate: r.date, sourceDocId: src, note: r.reason, lines: [{ sourceLineId: await lineOf(src, r.materialCode), qtyMilli: q(r.quantity) }] });
+      const created = await doc(r.id, keeper, {
+        docType: 'supplier_return',
+        docDate: r.date,
+        sourceDocId: src,
+        note: r.reason,
+        lines: [{ sourceLineId: await lineOf(src, r.materialCode), qtyMilli: q(r.quantity) }],
+      });
       if (r.status === 'confirmed') {
         // 负责人确认后等供应商同意（#20，v0.7.12）：采购登记供应商已同意，才出库、扣款
         await approveDoc(deps, created.id, {}, owner);

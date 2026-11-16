@@ -31,16 +31,26 @@ async function ownerSetup(page: Page) {
   const mat = materials.find((m) => m.code === 'M011')!;
   const buyer = (await getJson<{ id: number; displayName: string }[]>(page, '/api/inventory/co-acceptors')).find((s) => s.displayName.startsWith('周一'))!;
   const receive = async (priceCents: number) => {
-    const po = (await post(page, '/api/purchase-orders', { clientKey: crypto.randomUUID(), supplierId: sup.id, orderDate: today, approveNow: true, lines: [{ materialId: mat.id, purchaseQtyMilli: 2000, priceCents }] })).po;
-    return (await post(page, '/api/inventory/docs', {
-      clientKey: crypto.randomUUID(),
-      docType: 'receipt',
-      docDate: today,
-      supplierId: sup.id,
-      purchaseOrderId: po.id,
-      coAcceptorId: buyer.id,
-      lines: [{ materialId: mat.id, poLineId: po.lines[0].id, deliveredMilli: po.lines[0].baseQtyMilli, acceptedMilli: po.lines[0].baseQtyMilli }],
-    })).doc as { id: number; docNo: string; amountCents: number; lines: { id: number; qtyMilli: number }[] };
+    const po = (
+      await post(page, '/api/purchase-orders', {
+        clientKey: crypto.randomUUID(),
+        supplierId: sup.id,
+        orderDate: today,
+        approveNow: true,
+        lines: [{ materialId: mat.id, purchaseQtyMilli: 2000, priceCents }],
+      })
+    ).po;
+    return (
+      await post(page, '/api/inventory/docs', {
+        clientKey: crypto.randomUUID(),
+        docType: 'receipt',
+        docDate: today,
+        supplierId: sup.id,
+        purchaseOrderId: po.id,
+        coAcceptorId: buyer.id,
+        lines: [{ materialId: mat.id, poLineId: po.lines[0].id, deliveredMilli: po.lines[0].baseQtyMilli, acceptedMilli: po.lines[0].baseQtyMilli }],
+      })
+    ).doc as { id: number; docNo: string; amountCents: number; lines: { id: number; qtyMilli: number }[] };
   };
   return { today, sup, receive };
 }
@@ -53,27 +63,31 @@ test.describe('供应商结算：退货待供应商确认、退货余额核销�
     await login(page, 'linlan', '会员工作台');
     const { today, sup, receive } = await ownerSetup(page);
     const paid = await receive(5_000);
-    const pay = (await post(page, '/api/payables/payments', {
-      clientKey: crypto.randomUUID(),
-      supplierId: sup.id,
-      payDate: today,
-      amountCents: paid.amountCents,
-      method: 'bank_transfer',
-      evidence: 'E2E 付清',
-      approveNow: true,
-      allocations: [{ kind: 'receipt', targetId: paid.id, amountCents: paid.amountCents }],
-    })).payment;
+    const pay = (
+      await post(page, '/api/payables/payments', {
+        clientKey: crypto.randomUUID(),
+        supplierId: sup.id,
+        payDate: today,
+        amountCents: paid.amountCents,
+        method: 'bank_transfer',
+        evidence: 'E2E 付清',
+        approveNow: true,
+        allocations: [{ kind: 'receipt', targetId: paid.id, amountCents: paid.amountCents }],
+      })
+    ).payment;
     expect(pay.status).toBe('confirmed');
     const fresh = await receive(4_000); // 还没付的新货款，用来核销
-    const ret = (await post(page, '/api/inventory/docs', {
-      clientKey: crypto.randomUUID(),
-      docType: 'supplier_return',
-      docDate: today,
-      sourceDocId: paid.id,
-      note: 'E2E 质量问题',
-      lines: [{ sourceLineId: paid.lines[0]!.id, qtyMilli: paid.lines[0]!.qtyMilli / 2 }],
-      approveNow: true,
-    })).doc as { id: number; docNo: string; status: string; amountCents: number };
+    const ret = (
+      await post(page, '/api/inventory/docs', {
+        clientKey: crypto.randomUUID(),
+        docType: 'supplier_return',
+        docDate: today,
+        sourceDocId: paid.id,
+        note: 'E2E 质量问题',
+        lines: [{ sourceLineId: paid.lines[0]!.id, qtyMilli: paid.lines[0]!.qtyMilli / 2 }],
+        approveNow: true,
+      })
+    ).doc as { id: number; docNo: string; status: string; amountCents: number };
     // 演示库的免确认门槛是 0：店主「提交并确认」后进入等供应商确认
     expect(ret.status).toBe('awaiting_supplier');
     await logout(page);
@@ -119,26 +133,27 @@ test.describe('供应商结算：退货待供应商确认、退货余额核销�
     await login(page, 'linlan', '会员工作台');
     const { today, sup, receive } = await ownerSetup(page);
     const fresh = await receive(3_000);
-    const prepaid = (await post(page, '/api/payables/payments', {
-      clientKey: crypto.randomUUID(),
-      supplierId: sup.id,
-      payDate: today,
-      amountCents: 2_000,
-      method: 'bank_transfer',
-      evidence: 'E2E 定金',
-      note: 'E2E 先付定金',
-      prepay: true,
-      approveNow: true,
-      allocations: [],
-    })).payment as { docNo: string; status: string };
+    const prepaid = (
+      await post(page, '/api/payables/payments', {
+        clientKey: crypto.randomUUID(),
+        supplierId: sup.id,
+        payDate: today,
+        amountCents: 2_000,
+        method: 'bank_transfer',
+        evidence: 'E2E 定金',
+        note: 'E2E 先付定金',
+        prepay: true,
+        approveNow: true,
+        allocations: [],
+      })
+    ).payment as { docNo: string; status: string };
     expect(prepaid.status).toBe('confirmed');
     await logout(page);
 
     await login(page, 'qianfen', '库存');
     const offsetsOf = async () =>
-      (await getJson<{ credit: { docNo: string }; status: string }[]>(page, `/api/payables/offsets?supplierId=${sup.id}`)).filter(
-        (o) => o.credit.docNo === prepaid.docNo && o.status === 'confirmed',
-      ).length;
+      (await getJson<{ credit: { docNo: string }; status: string }[]>(page, `/api/payables/offsets?supplierId=${sup.id}`)).filter((o) => o.credit.docNo === prepaid.docNo && o.status === 'confirmed')
+        .length;
     const isPost = (url: URL) => url.pathname === '/api/payables/offsets';
     const openOffset = async (amount: string) => {
       await page.goto(`/payables?view=statement&supplier=${sup.id}`);

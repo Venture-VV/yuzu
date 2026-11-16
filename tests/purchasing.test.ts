@@ -49,7 +49,17 @@ describe('合成数据：与附件预期结果逐项一致', () => {
     for (const e of demo.expected.inventory) {
       const row = res.body.find((r: { code: string }) => r.code === e.materialCode);
       expect(row, e.materialCode).toBeTruthy();
-      expect({ code: e.materialCode, closing: row.closing, received: row.received, issued: row.issued, returned: row.issueReturned, direct: row.directUsed, damaged: row.damaged, count: row.countAdjusted, supplierReturn: row.supplierReturned }).toEqual({
+      expect({
+        code: e.materialCode,
+        closing: row.closing,
+        received: row.received,
+        issued: row.issued,
+        returned: row.issueReturned,
+        direct: row.directUsed,
+        damaged: row.damaged,
+        count: row.countAdjusted,
+        supplierReturn: row.supplierReturned,
+      }).toEqual({
         code: e.materialCode,
         closing: q(Number(e.closing)),
         received: q(Number(e.received)),
@@ -145,7 +155,12 @@ describe('合成数据：与附件预期结果逐项一致', () => {
 
   it('低库存提醒与待处理事项', async () => {
     const res = await api(ctx.app, boss, 'GET', '/api/inventory/materials');
-    expect(res.body.filter((m: { isLow: boolean }) => m.isLow).map((m: { code: string }) => m.code).sort()).toEqual([...demo.expected.lowStockCodes].sort());
+    expect(
+      res.body
+        .filter((m: { isLow: boolean }) => m.isLow)
+        .map((m: { code: string }) => m.code)
+        .sort(),
+    ).toEqual([...demo.expected.lowStockCodes].sort());
     // PO-008 尚未批准：没有收货、入库或应付
     const pending = await api(ctx.app, boss, 'GET', '/api/purchase-orders?status=submitted');
     expect(pending.body).toHaveLength(1);
@@ -266,7 +281,14 @@ describe('采购单', () => {
     expect(direct.status).toBe(422);
     expect(direct.body.error.code).toBe('PO_REQUIRED');
     const [dept] = await ctx.sql<{ id: number }[]>`SELECT id FROM departments WHERE name = '浴区'`;
-    const urgent = { docType: 'receipt', docDate: today, supplierId: sup, urgent: true, departmentId: dept!.id, lines: [{ materialId: mat.id, deliveredMilli: q(500), acceptedMilli: q(500), priceCents: 45000 }] };
+    const urgent = {
+      docType: 'receipt',
+      docDate: today,
+      supplierId: sup,
+      urgent: true,
+      departmentId: dept!.id,
+      lines: [{ materialId: mat.id, deliveredMilli: q(500), acceptedMilli: q(500), priceCents: 45000 }],
+    };
     // 8.0.1 起部门申购不能登记急采（收拢到采购，CG05）
     await createStaff(ctx.sql, { username: 'bath-req', displayName: '浴区申购', role: 'backoffice', duties: ['request'], departmentId: dept!.id, password: PASSWORD, mustChangePassword: false });
     const deptUser = await login(ctx.app, 'bath-req');

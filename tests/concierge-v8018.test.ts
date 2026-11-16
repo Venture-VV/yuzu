@@ -11,8 +11,7 @@ import type { WorkspaceData } from '../src/shared/concierge/types';
 let ctx: TestContext;
 let butler: string; // 只有「管家」职责：没有「查找与查看会员」
 const path = '/api/concierge/workspace';
-const mutate = (action: string, payload: Record<string, unknown>, cookie = butler) =>
-  api(ctx.app, cookie, 'POST', path, { action, payload, requestId: randomUUID() });
+const mutate = (action: string, payload: Record<string, unknown>, cookie = butler) => api(ctx.app, cookie, 'POST', path, { action, payload, requestId: randomUUID() });
 const revision = async () => (await api(ctx.app, butler, 'GET', '/api/concierge/revision')).body.revision as string;
 async function enroll(nativeMemberId: number) {
   const r = await mutate('createMember', { nativeMemberId, joinedAt: '2026-11-13' });
@@ -73,7 +72,15 @@ describe('没有会员查看权限的管家建服务档案', () => {
     const [row] = await ctx.sql<{ phone: string }[]>`SELECT data->>'phone' AS phone FROM concierge_members WHERE id=${created.body.id}::uuid`;
     expect(row!.phone).toBe('19900018051');
     // 建了服务档案以后看到的是完整的；再交一个乱写的手机号上来也不采用、不报错
-    const updated = await mutate('updateMember', { id: created.body.id, version: profile.version, nativeMemberId: m.id, name: profile.name, phone: '199 **** 8051', changeReason: '补接待称呼', serviceAlias: '打码先生' });
+    const updated = await mutate('updateMember', {
+      id: created.body.id,
+      version: profile.version,
+      nativeMemberId: m.id,
+      name: profile.name,
+      phone: '199 **** 8051',
+      changeReason: '补接待称呼',
+      serviceAlias: '打码先生',
+    });
     expect(updated.status, JSON.stringify(updated.body)).toBe(200);
     const [after] = await ctx.sql<{ phone: string }[]>`SELECT data->>'phone' AS phone FROM concierge_members WHERE id=${created.body.id}::uuid`;
     expect(after!.phone).toBe('19900018051');
@@ -89,7 +96,11 @@ describe('会员摘要一批取', () => {
     await enroll(other.id);
     const check = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${from.id}/merge-check?targetId=${to.id}`)).body;
     const merged = await api(ctx.app, ctx.owner, 'POST', `/api/members/${from.id}/merge`, {
-      clientKey: randomUUID(), targetId: to.id, reason: '同一位客人', expectedPrincipal: check.principal, expectedBonus: check.bonus,
+      clientKey: randomUUID(),
+      targetId: to.id,
+      reason: '同一位客人',
+      expectedPrincipal: check.principal,
+      expectedBonus: check.bonus,
     });
     expect(merged.status, JSON.stringify(merged.body)).toBe(200);
 
@@ -136,7 +147,9 @@ describe('不给原生表的行加锁', () => {
   it('别的事务锁着空间一行、会员一行时，管家照样能保存预约与建档（原来会等到超时）', async () => {
     const [floor] = await ctx.sql<{ id: number }[]>`SELECT id FROM floors ORDER BY id LIMIT 1`;
     const [zone] = await ctx.sql<{ id: number }[]>`INSERT INTO zones(floor_id,name) VALUES(${floor!.id},'整合专区') RETURNING id`;
-    const [space] = await ctx.sql<{ id: number }[]>`INSERT INTO spaces(code,floor_id,zone_id,business_type,capacity,display_name) VALUES('GJ1801',${floor!.id},${zone!.id},'按摩房',3,'听泉') RETURNING id`;
+    const [space] = await ctx.sql<
+      { id: number }[]
+    >`INSERT INTO spaces(code,floor_id,zone_id,business_type,capacity,display_name) VALUES('GJ1801',${floor!.id},${zone!.id},'按摩房',3,'听泉') RETURNING id`;
     const m = await createMember(ctx, '加锁会员', '19900018031');
     const second = await createMember(ctx, '加锁会员二', '19900018032');
     const profile = await enroll(m.id);
@@ -154,8 +167,15 @@ describe('不给原生表的行加锁', () => {
     try {
       const started = Date.now();
       const saved = await mutate('createAppointment', {
-        memberId: profile, resourceKey: `space:${space!.id}`, service: '按摩', resource: '听泉',
-        startAt: '2026-12-20T02:00:00Z', endAt: '2026-12-20T03:00:00Z', partySize: 2, hostId: '', status: '已确认',
+        memberId: profile,
+        resourceKey: `space:${space!.id}`,
+        service: '按摩',
+        resource: '听泉',
+        startAt: '2026-12-20T02:00:00Z',
+        endAt: '2026-12-20T03:00:00Z',
+        partySize: 2,
+        hostId: '',
+        status: '已确认',
       });
       const enrolled = await mutate('createMember', { nativeMemberId: second.id, joinedAt: '2026-11-14' });
       expect(saved.status, JSON.stringify(saved.body)).toBe(200);
@@ -175,8 +195,14 @@ describe('自检', () => {
     const m = await createMember(ctx, '自检会员', '19900018041');
     const profile = await enroll(m.id);
     const saved = await mutate('createAppointment', {
-      memberId: profile, service: '茶歇', resource: '手写的地方',
-      startAt: '2026-12-21T02:00:00Z', endAt: '2026-12-21T03:00:00Z', partySize: 1, hostId: '', status: '已确认',
+      memberId: profile,
+      service: '茶歇',
+      resource: '手写的地方',
+      startAt: '2026-12-21T02:00:00Z',
+      endAt: '2026-12-21T03:00:00Z',
+      partySize: 1,
+      hostId: '',
+      status: '已确认',
     });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
     expect((await conciergeCheck(ctx.sql)).ok).toBe(true);

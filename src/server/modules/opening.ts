@@ -203,19 +203,13 @@ async function reportOfImport(db: Db, importId: number, replayed: boolean): Prom
   };
 }
 
-const invalid = (errors: LineError[]) =>
-  unprocessable('OPENING_INVALID', `有 ${errors.length} 处需要修改，整批未导入`, { errors: errors.slice(0, 100) });
+const invalid = (errors: LineError[]) => unprocessable('OPENING_INVALID', `有 ${errors.length} 处需要修改，整批未导入`, { errors: errors.slice(0, 100) });
 
 /**
  * 导入：整批在一个事务里完成。clientKey 是页面或命令行的操作编号：同一编号重提返回第一次的结果；
  * 编号丢了重新导入同一个文件时，文件里的会员都已有期初，会被逐行拒绝，不会重复记账。
  */
-export async function applyOpeningImport(
-  deps: Deps,
-  raw: OpeningApplyInputData,
-  ctx: OpContext,
-  options: { via?: 'cli' } = {},
-): Promise<OpeningImportReport> {
+export async function applyOpeningImport(deps: Deps, raw: OpeningApplyInputData, ctx: OpContext, options: { via?: 'cli' } = {}): Promise<OpeningImportReport> {
   const input = parse(ApplyInput, raw);
   const parsed = parseOpeningCsv(input.csv);
   const fileSha = sha256(input.csv);
@@ -278,13 +272,7 @@ export async function applyOpeningImport(
       for (const row of planned) {
         seq += 1;
         const memberId =
-          row.member?.id ??
-          (await insertMember(
-            tx,
-            { name: row.name, phone: row.phone, gender: row.gender, birthday: row.birthday, note: row.note },
-            ctx,
-            { enforceRequired: false, audit: false },
-          ));
+          row.member?.id ?? (await insertMember(tx, { name: row.name, phone: row.phone, gender: row.gender, birthday: row.birthday, note: row.note }, ctx, { enforceRequired: false, audit: false }));
         importedIds.push(memberId);
         const docNo = `${importNo}-${String(seq).padStart(4, '0')}`;
         const [ob] = await tx<{ id: number }[]>`
@@ -297,9 +285,19 @@ export async function applyOpeningImport(
         let member = await lockMember(tx, memberId);
         // 已有会员先作废到期的赠金，与其他记账一致
         if (row.member) member = await expireDueLots(tx, deps, member, at);
-        await applyBalance(tx, member, { principal: row.principal, bonus: row.bonus }, {
-          entryType: 'opening', docNo, openingId: ob!.id, businessDate, operatorId: ctx.actor.id, at,
-        });
+        await applyBalance(
+          tx,
+          member,
+          { principal: row.principal, bonus: row.bonus },
+          {
+            entryType: 'opening',
+            docNo,
+            openingId: ob!.id,
+            businessDate,
+            operatorId: ctx.actor.id,
+            at,
+          },
+        );
         if (row.bonus > 0) {
           await tx`
             INSERT INTO bonus_lots (member_id, source, opening_id, amount, remaining, expires_at, created_at)
@@ -383,16 +381,29 @@ async function voidRows(tx: Tx, deps: Deps, targets: VoidTarget[], reason: strin
   if (blocked.length) {
     throw conflict(
       'OPENING_IN_USE',
-      `${blocked.map((b) => `「${b.memberName}」`).slice(0, 5).join('、')}${blocked.length > 5 ? ` 等 ${blocked.length} 位会员` : ''}在期初之后已有消费、充值或赠金过期等余额变动，不能作废期初；请改为按实际情况办理后续业务`,
+      `${blocked
+        .map((b) => `「${b.memberName}」`)
+        .slice(0, 5)
+        .join('、')}${blocked.length > 5 ? ` 等 ${blocked.length} 位会员` : ''}在期初之后已有消费、充值或赠金过期等余额变动，不能作废期初；请改为按实际情况办理后续业务`,
       { blocked },
     );
   }
   for (const t of targets) {
     if (t.principal + t.bonus > 0) {
       const member = await lockMember(tx, t.memberId);
-      await applyBalance(tx, member, { principal: -t.principal, bonus: -t.bonus }, {
-        entryType: 'opening_void', docNo: t.docNo, openingId: t.id, businessDate, operatorId: ctx.actor.id, at,
-      });
+      await applyBalance(
+        tx,
+        member,
+        { principal: -t.principal, bonus: -t.bonus },
+        {
+          entryType: 'opening_void',
+          docNo: t.docNo,
+          openingId: t.id,
+          businessDate,
+          operatorId: ctx.actor.id,
+          at,
+        },
+      );
       if (t.bonus > 0) {
         const [lot] = await tx<{ id: number; remaining: number }[]>`SELECT id, remaining FROM bonus_lots WHERE opening_id = ${t.id} FOR UPDATE`;
         // 期初之后没有余额变动，批次一定原封未动
@@ -521,13 +532,9 @@ export function registerOpeningRoutes(app: FastifyInstance, deps: Deps) {
   // 文件内容随请求提交（最多 OPENING_MAX_ROWS 行）
   const bodyLimit = 4 * 1024 * 1024;
 
-  app.post('/api/opening-imports/preview', { preHandler: guard('wallet.opening'), bodyLimit }, async (req) =>
-    previewOpeningImport(deps, req.body as OpeningPreviewInputData),
-  );
+  app.post('/api/opening-imports/preview', { preHandler: guard('wallet.opening'), bodyLimit }, async (req) => previewOpeningImport(deps, req.body as OpeningPreviewInputData));
 
-  app.post('/api/opening-imports', { preHandler: guard('wallet.opening'), bodyLimit }, async (req) =>
-    applyOpeningImport(deps, req.body as OpeningApplyInputData, ctxOf(req)),
-  );
+  app.post('/api/opening-imports', { preHandler: guard('wallet.opening'), bodyLimit }, async (req) => applyOpeningImport(deps, req.body as OpeningApplyInputData, ctxOf(req)));
 
   app.get('/api/opening-imports', { preHandler: guard('wallet.opening') }, async () => listOpeningImports(sql));
 

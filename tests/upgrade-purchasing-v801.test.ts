@@ -46,7 +46,11 @@ describe('8.0.0 → 8.0.1 · 采购组整改', () => {
       INSERT INTO purchase_requests (doc_no, department_id, requester_id, status, created_at)
       VALUES ('XQ-1', ${dept!.id}, ${staff!.id}, 'submitted', '2026-11-01 09:30:00+08') RETURNING id`;
     // 结束审核的需求单（守护不许改）：升级时照样补上提交时间，别的不动
-    for (const [no, status] of [['XQ-A', 'approved'], ['XQ-R', 'rejected'], ['XQ-C', 'cancelled']] as const) {
+    for (const [no, status] of [
+      ['XQ-A', 'approved'],
+      ['XQ-R', 'rejected'],
+      ['XQ-C', 'cancelled'],
+    ] as const) {
       await sql`
         INSERT INTO purchase_requests (doc_no, department_id, requester_id, status, reviewed_by, reviewed_at, created_at)
         VALUES (${no}, ${dept!.id}, ${staff!.id}, ${status}, ${status === 'cancelled' ? null : staff!.id}, ${status === 'cancelled' ? null : '2026-11-02 10:00:00+08'},
@@ -87,9 +91,9 @@ describe('8.0.0 → 8.0.1 · 采购组整改', () => {
     // 生效以后审批时间不能改；不是急采的不能有审批时间
     await expect(sql`UPDATE inv_docs SET urgent_approved_at = now() WHERE id = ${ids.confirmed!}`).rejects.toThrow(/已生效的库存单据不可修改/);
     await sql`UPDATE inv_docs SET urgent_approved_at = NULL WHERE id = ${ids.submitted!}`;
-    await expect(
-      sql`INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, created_by, urgent_approved_at) VALUES ('BS-1', 'damage', 'draft', '2026-11-02', ${staff!.id}, now())`,
-    ).rejects.toThrow(/inv_docs_urgent_approved/);
+    await expect(sql`INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, created_by, urgent_approved_at) VALUES ('BS-1', 'damage', 'draft', '2026-11-02', ${staff!.id}, now())`).rejects.toThrow(
+      /inv_docs_urgent_approved/,
+    );
 
     // 供应商：未签约，旧的默认途径原样留着（读的时候按三类对应）
     expect(await sql`SELECT contracted, default_channel FROM suppliers`).toEqual([{ contracted: false, defaultChannel: 'market' }]);

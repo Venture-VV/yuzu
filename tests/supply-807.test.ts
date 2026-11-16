@@ -125,7 +125,9 @@ describe('2.1 供应商准入与证照', () => {
     // 「其他」证照要写名称
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${sid}/licenses`, { kind: 'other', licenseNo: 'X1' })).status).toBe(400);
     // 新的营业执照（PDF），20 天后到期；食品经营许可证长期
-    const view = await ok(api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${sid}/licenses`, { kind: 'business', licenseNo: 'NEW-002', validUntil: shiftDate(today, 20), mime: 'application/pdf', data: PDF }));
+    const view = await ok(
+      api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${sid}/licenses`, { kind: 'business', licenseNo: 'NEW-002', validUntil: shiftDate(today, 20), mime: 'application/pdf', data: PDF }),
+    );
     await ok(api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${sid}/licenses`, { kind: 'food', licenseNo: 'JY-003', validUntil: null }));
     expect(view.canApprove).toBe(true);
     const pdf = view.licenses.find((l: { licenseNo: string }) => l.licenseNo === 'NEW-002');
@@ -227,9 +229,26 @@ describe('2.3 部门耗用的用途与经办人', () => {
     const depId = Number(dep!.id);
     const whId = Number(dep!.warehouseId);
     // 先领料到这个部门的小仓
-    await ok(api(ctx.app, keeper, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'issue', docDate: today, departmentId: depId, handler: '领料人', lines: [{ materialId: matId, qtyMilli: q(30) }] }));
+    await ok(
+      api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+        clientKey: randomUUID(),
+        docType: 'issue',
+        docDate: today,
+        departmentId: depId,
+        handler: '领料人',
+        lines: [{ materialId: matId, qtyMilli: q(30) }],
+      }),
+    );
     const use = (body: Record<string, unknown>) =>
-      api(ctx.app, ctx.owner, 'POST', '/api/erp/dept-stock/docs', { clientKey: randomUUID(), docType: 'direct_use', docDate: today, warehouseId: whId, note: '客房补充', lines: [{ materialId: matId, qtyMilli: q(2) }], ...body });
+      api(ctx.app, ctx.owner, 'POST', '/api/erp/dept-stock/docs', {
+        clientKey: randomUUID(),
+        docType: 'direct_use',
+        docDate: today,
+        warehouseId: whId,
+        note: '客房补充',
+        lines: [{ materialId: matId, qtyMilli: q(2) }],
+        ...body,
+      });
     const bad = await use({ purpose: '随便用' });
     expect(bad.status).toBe(422);
     expect(bad.body.error.code).toBe('PURPOSE_INVALID');
@@ -262,8 +281,25 @@ describe('2.3 部门耗用的用途与经办人', () => {
 
 describe('2.4 呆滞与周转', () => {
   it('有结存、超过设置的天数没出库的标呆滞；导出', async () => {
-    const m = await ok(api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'S807-SLOW', name: '放着不用的物料', inventoryUnit: '个', purchaseUnit: '个', purchaseFactorMilli: q(1), refPriceCents: 3_00 }));
-    await ok(api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'opening', docDate: shiftDate(today, -40), lines: [{ materialId: m.id, qtyMilli: q(5) }], approveNow: true }));
+    const m = await ok(
+      api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', {
+        code: 'S807-SLOW',
+        name: '放着不用的物料',
+        inventoryUnit: '个',
+        purchaseUnit: '个',
+        purchaseFactorMilli: q(1),
+        refPriceCents: 3_00,
+      }),
+    );
+    await ok(
+      api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', {
+        clientKey: randomUUID(),
+        docType: 'opening',
+        docDate: shiftDate(today, -40),
+        lines: [{ materialId: m.id, qtyMilli: q(5) }],
+        approveNow: true,
+      }),
+    );
     await settings({ slowMovingDays: 30 });
     const r = (await api(ctx.app, keeper, 'GET', '/api/inventory/slow-moving?warehouseId=1')).body;
     expect(r.slowDays).toBe(30);
@@ -272,7 +308,14 @@ describe('2.4 呆滞与周转', () => {
     // 领出去又冲销了：不算出库，最近出库日、用量照旧（Codex 审查 9ad0f56）
     const [dep] = await ctx.sql<{ id: number }[]>`SELECT id FROM departments WHERE active ORDER BY id LIMIT 1`;
     const issued = await ok(
-      api(ctx.app, keeper, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'issue', docDate: today, departmentId: Number(dep!.id), handler: '领料人', lines: [{ materialId: m.id, qtyMilli: q(2) }] }),
+      api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+        clientKey: randomUUID(),
+        docType: 'issue',
+        docDate: today,
+        departmentId: Number(dep!.id),
+        handler: '领料人',
+        lines: [{ materialId: m.id, qtyMilli: q(2) }],
+      }),
     );
     const voided = await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${issued.doc.id}/void`, { reason: '领错了' });
     expect(voided.status, JSON.stringify(voided.body)).toBeLessThan(300);
@@ -298,7 +341,10 @@ describe('2.5 验收标准模板与不合格挂起付款；A4 合同扫描件 PD
     expect((await api(ctx.app, buyer, 'POST', '/api/erp/contracts/acceptance-templates', { name: '布草到货验收', items: ['x'] })).status).toBe(409);
     expect((await api(ctx.app, buyer, 'POST', '/api/erp/contracts/acceptance-templates', { name: '空的', items: [] })).status).toBe(400);
     expect((await api(ctx.app, buyer, 'PUT', `/api/erp/contracts/acceptance-templates/${t.id}`, { name: '布草到货验收', items: ['a'], expectedVersion: 99 })).body.error.code).toBe('VERSION_CONFLICT');
-    await ok(api(ctx.app, buyer, 'PUT', `/api/erp/contracts/acceptance-templates/${t.id}`, { name: '布草到货验收', items: ['规格与样品一致', '洗涤 3 次不褪色', '包装完好'], expectedVersion: t.version }), 200);
+    await ok(
+      api(ctx.app, buyer, 'PUT', `/api/erp/contracts/acceptance-templates/${t.id}`, { name: '布草到货验收', items: ['规格与样品一致', '洗涤 3 次不褪色', '包装完好'], expectedVersion: t.version }),
+      200,
+    );
     expect((await api(ctx.app, keeper, 'POST', '/api/erp/contracts/acceptance-templates', { name: '仓库建的', items: ['x'] })).status).toBe(403);
 
     const supplierId = await newSupplier('S807C', '合同验收供应商');
@@ -352,7 +398,12 @@ describe('2.5 验收标准模板与不合格挂起付款；A4 合同扫描件 PD
     expect(plan.canRequest).toBe(false);
     expect(plan.latestAcceptance.items.filter((x: { pass: boolean }) => !x.pass)).toHaveLength(1);
     const request = () =>
-      api(ctx.app, buyer, 'POST', '/api/erp/payments/requests', { clientKey: randomUUID(), expectedDate: today, purpose: '预付', source: { kind: 'contract', contractId: contract.id, stage: 'prepay', amountCents: 100_000 } });
+      api(ctx.app, buyer, 'POST', '/api/erp/payments/requests', {
+        clientKey: randomUUID(),
+        expectedDate: today,
+        purpose: '预付',
+        source: { kind: 'contract', contractId: contract.id, stage: 'prepay', amountCents: 100_000 },
+      });
     const held = await request();
     expect(held.status, JSON.stringify(held.body)).toBe(422);
     expect(held.body.error.code).toBe('ACCEPTANCE_HOLD');
@@ -414,7 +465,9 @@ describe('2.5 验收标准模板与不合格挂起付款；A4 合同扫描件 PD
     const again = await ok(api(ctx.app, buyer, 'POST', `/api/erp/contracts/${contract.id}/files`, { name: '合同全文', mime: 'application/pdf', data: PDF }));
     expect((again as ContractDetail).files.filter((x) => x.kind === 'pdf')).toHaveLength(1);
     // 不是 PDF 的内容
-    expect((await api(ctx.app, buyer, 'POST', `/api/erp/contracts/${contract.id}/files`, { mime: 'application/pdf', data: Buffer.from('not a pdf at all').toString('base64') })).body.error.code).toBe('FILE_NOT_PDF');
+    expect((await api(ctx.app, buyer, 'POST', `/api/erp/contracts/${contract.id}/files`, { mime: 'application/pdf', data: Buffer.from('not a pdf at all').toString('base64') })).body.error.code).toBe(
+      'FILE_NOT_PDF',
+    );
   });
 });
 
@@ -545,11 +598,29 @@ describe('CG10 采购不参与库管收货（店主 2026-11-10）', () => {
 
 describe('3.3 批次与效期', () => {
   it('管效期的物料收货要填到期日（或生产日期 + 保质期）；先进先出推算剩下的批次；临期进待办；生效后不能改', async () => {
-    const m = await ok(api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'S807-EXP', name: '鲜牛奶', inventoryUnit: '盒', purchaseUnit: '盒', purchaseFactorMilli: q(1), expiryTracked: true, shelfLifeDays: 10 }));
+    const m = await ok(
+      api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', {
+        code: 'S807-EXP',
+        name: '鲜牛奶',
+        inventoryUnit: '盒',
+        purchaseUnit: '盒',
+        purchaseFactorMilli: q(1),
+        expiryTracked: true,
+        shelfLifeDays: 10,
+      }),
+    );
     expect(m).toMatchObject({ expiryTracked: true, shelfLifeDays: 10 });
     const sid = await newSupplier('S807E', '效期供应商');
     const receiveLot = async (boxes: number, lot: Record<string, unknown>) => {
-      const po = await ok(api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId: sid, orderDate: today, approveNow: true, lines: [{ materialId: m.id, purchaseQtyMilli: q(boxes), priceCents: 5_00 }] }));
+      const po = await ok(
+        api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+          clientKey: randomUUID(),
+          supplierId: sid,
+          orderDate: today,
+          approveNow: true,
+          lines: [{ materialId: m.id, purchaseQtyMilli: q(boxes), priceCents: 5_00 }],
+        }),
+      );
       return api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
         clientKey: randomUUID(),
         docDate: today,
@@ -573,7 +644,16 @@ describe('3.3 批次与效期', () => {
     let todo = (await api(ctx.app, keeper, 'GET', '/api/inventory/supply-todo')).body;
     expect(todo.expiringLots).toBeGreaterThanOrEqual(1);
     // 用掉 6 盒（总仓直接耗用）：先进先出，剩下的 3 盒都是 B-NEW，临期的没了
-    await ok(api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'direct_use', docDate: today, note: '早餐用', lines: [{ materialId: m.id, qtyMilli: q(6) }], approveNow: true }));
+    await ok(
+      api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', {
+        clientKey: randomUUID(),
+        docType: 'direct_use',
+        docDate: today,
+        note: '早餐用',
+        lines: [{ materialId: m.id, qtyMilli: q(6) }],
+        approveNow: true,
+      }),
+    );
     lots = (await api(ctx.app, keeper, 'GET', '/api/inventory/expiry-lots')).body;
     expect(lots.some((l) => l.batchNo === 'B-OLD')).toBe(false);
     await settings({ expiryRemindDays: 90 });

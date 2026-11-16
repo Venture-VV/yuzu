@@ -126,10 +126,7 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
   const matTotal = sum(M.map((m) => m.amountCents));
   const mNoAmount = M.filter((m) => m.amountCents === null);
   const mNoItem = M.filter((m) => !m.item);
-  const matMissingRefs = () => [
-    ...mNoAmount.map((m) => matRef(m, m.mergedInto !== null ? `金额与第 ${m.mergedInto} 行合并` : '没有金额')),
-    ...mNoItem.map((m) => matRef(m, '没有物品名')),
-  ];
+  const matMissingRefs = () => [...mNoAmount.map((m) => matRef(m, m.mergedInto !== null ? `金额与第 ${m.mergedInto} 行合并` : '没有金额')), ...mNoItem.map((m) => matRef(m, '没有物品名'))];
   const matMonth = (m: LegacyMaterialLine) => sheetMonth(m.sheet) ?? monthOf(m.date);
 
   // ── 已下单物料 ──
@@ -144,7 +141,12 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
 
   // ── 品牌清单 ──
   const B = d.brand;
-  const brandRef = (b: LegacyBrandLine, why: string): LegacyRowRef => ({ source: 'brand_requests', sheet: d.brandSheet, rowNo: b.rowNo, text: `第 ${b.rowNo} 行${b.product ? `「${b.product}」` : ''}：${why}` });
+  const brandRef = (b: LegacyBrandLine, why: string): LegacyRowRef => ({
+    source: 'brand_requests',
+    sheet: d.brandSheet,
+    rowNo: b.rowNo,
+    text: `第 ${b.rowNo} 行${b.product ? `「${b.product}」` : ''}：${why}`,
+  });
   // 链接要能点开（超链接或格里写的网址）；格里只写了商品、店铺名称的算没有链接
   const noLink = B.filter((b) => legacyBrandLink(b) === null);
   const brandComplete = B.filter((b) => b.product && b.purpose && b.qtyMilli !== null && !noLink.includes(b));
@@ -167,10 +169,7 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
       rows: PAll.length,
       period: range(P.map((p) => p.date)),
       amountText: `打款 ${y(advanceTotal)} / 应退回 ${y(shouldTotal)} / 实际退回 ${y(returnedTotal)}`,
-      problems: [
-        shouldTotal === returnedTotal ? '应退回与实际退回相等' : `应退回比实际退回${shouldTotal < returnedTotal ? '少' : '多'} ${y(Math.abs(returnedTotal - shouldTotal))}`,
-        undatedNote,
-      ]
+      problems: [shouldTotal === returnedTotal ? '应退回与实际退回相等' : `应退回比实际退回${shouldTotal < returnedTotal ? '少' : '多'} ${y(Math.abs(returnedTotal - shouldTotal))}`, undatedNote]
         .filter(Boolean)
         .join('；'),
     });
@@ -305,7 +304,11 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
         'ledger_missing',
         '台账必填缺失',
         `${noAmount.length} 行无金额（其中 ${noAmount.filter((l) => l.mergedInto !== null).length} 行是合并的金额格）、${noDate.length} 行无日期、${noCategory.length} 行无类别`,
-        [...noAmount.map((l) => ledgerRef(l, l.mergedInto !== null ? `金额与第 ${l.mergedInto} 行合并` : '没有金额')), ...noDate.map((l) => ledgerRef(l, '没有日期')), ...noCategory.map((l) => ledgerRef(l, '没有类别'))],
+        [
+          ...noAmount.map((l) => ledgerRef(l, l.mergedInto !== null ? `金额与第 ${l.mergedInto} 行合并` : '没有金额')),
+          ...noDate.map((l) => ledgerRef(l, '没有日期')),
+          ...noCategory.map((l) => ledgerRef(l, '没有类别')),
+        ],
       ),
     );
     if (undatedPay.length)
@@ -404,7 +407,13 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
   );
   rules.push(
     has('purchase_ledger')
-      ? rule(2, '一笔打款必须能分摊到具体采购单', `旧账没有采购单：推定的 ${payouts.length} 笔打款（${y(-payoutTotal)}）都分摊不到采购单`, payouts.length, payouts.map((l) => ledgerRef(l, '推定打款')))
+      ? rule(
+          2,
+          '一笔打款必须能分摊到具体采购单',
+          `旧账没有采购单：推定的 ${payouts.length} 笔打款（${y(-payoutTotal)}）都分摊不到采购单`,
+          payouts.length,
+          payouts.map((l) => ledgerRef(l, '推定打款')),
+        )
       : skip(2, '一笔打款必须能分摊到具体采购单', 'purchase_ledger'),
   );
   rules.push(
@@ -417,7 +426,12 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
           [...daily.days]
             .filter((x) => x.state === 'unbalanced')
             .sort((a, b) => Math.abs(b.diffCents) - Math.abs(a.diffCents))
-            .map((x) => ({ source: 'purchase_ledger' as const, sheet: d.paymentSheet, rowNo: P.find((p) => p.date === x.date)?.rowNo ?? 0, text: `${x.date}：差额 ${x.diffCents > 0 ? '+' : ''}${y(x.diffCents)}` })),
+            .map((x) => ({
+              source: 'purchase_ledger' as const,
+              sheet: d.paymentSheet,
+              rowNo: P.find((p) => p.date === x.date)?.rowNo ?? 0,
+              text: `${x.date}：差额 ${x.diffCents > 0 ? '+' : ''}${y(x.diffCents)}`,
+            })),
         )
       : skip(3, '每日打款减支出必须等于应退回，不平即报警', 'purchase_ledger'),
   );
@@ -448,19 +462,35 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
   );
   const syn = fieldIssues.find((f) => f.key === 'category_synonyms');
   // count 是全部行数；rows 只列前 MAX_ROWS 行
-  rules.push(has('material_detail') ? rule(6, '费用科目只允许办公费、固定资产、低值易耗', syn?.detail ?? '', syn?.count ?? 0, syn?.rows) : skip(6, '费用科目只允许办公费、固定资产、低值易耗', 'material_detail'));
+  rules.push(
+    has('material_detail')
+      ? rule(6, '费用科目只允许办公费、固定资产、低值易耗', syn?.detail ?? '', syn?.count ?? 0, syn?.rows)
+      : skip(6, '费用科目只允许办公费、固定资产、低值易耗', 'material_detail'),
+  );
   const dep = fieldIssues.find((f) => f.key === 'department_text');
   rules.push(has('material_detail') ? rule(7, '部门走字典，禁止多部门拼接', dep?.detail ?? '', dep?.count ?? 0, dep?.rows) : skip(7, '部门走字典，禁止多部门拼接', 'material_detail'));
   const diffQty = M.filter((m) => m.boughtMilli !== null && m.receivedMilli !== null && m.boughtMilli !== m.receivedMilli);
   rules.push(
     has('material_detail')
-      ? rule(8, '到货数量不等于购买数量时必须填差异原因', `明细表 ${diffQty.length} 行购买数量与到货数量不同（旧表没有原因列）`, diffQty.length, diffQty.map((m) => matRef(m, `购买 ${m.boughtText}、到货 ${m.receivedText}`)))
+      ? rule(
+          8,
+          '到货数量不等于购买数量时必须填差异原因',
+          `明细表 ${diffQty.length} 行购买数量与到货数量不同（旧表没有原因列）`,
+          diffQty.length,
+          diffQty.map((m) => matRef(m, `购买 ${m.boughtText}、到货 ${m.receivedText}`)),
+        )
       : skip(8, '到货数量不等于购买数量时必须填差异原因', 'material_detail'),
   );
   const notArrived = B.filter((b) => b.ordered && !b.received);
   rules.push(
     has('brand_requests')
-      ? rule(9, '已下单未到货超约定天数预警', `品牌清单 ${notArrived.length} 行已下单未到货；旧表没有下单日期，分不出超没超期`, notArrived.length, notArrived.map((b) => brandRef(b, '已下单未到货')))
+      ? rule(
+          9,
+          '已下单未到货超约定天数预警',
+          `品牌清单 ${notArrived.length} 行已下单未到货；旧表没有下单日期，分不出超没超期`,
+          notArrived.length,
+          notArrived.map((b) => brandRef(b, '已下单未到货')),
+        )
       : skip(9, '已下单未到货超约定天数预警', 'brand_requests'),
   );
   const dupKey = new Map<string, (typeof O)[number][]>();
@@ -468,7 +498,13 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
   const dups = [...dupKey.values()].filter((v) => v.length > 1);
   rules.push(
     has('ordered_materials')
-      ? rule(10, '同一物品同一天重复下单提示', dups.length ? `已下单物料里同一天同名产品出现两次以上：${dups.map((v) => `${v[0]!.date}「${v[0]!.product}」${v.length} 次`).join('、')}` : '已下单物料里没有同一天重复下单', dups.length, dups.flatMap((v) => v.map((o) => ordRef(o, `同一天下了 ${v.length} 次`))))
+      ? rule(
+          10,
+          '同一物品同一天重复下单提示',
+          dups.length ? `已下单物料里同一天同名产品出现两次以上：${dups.map((v) => `${v[0]!.date}「${v[0]!.product}」${v.length} 次`).join('、')}` : '已下单物料里没有同一天重复下单',
+          dups.length,
+          dups.flatMap((v) => v.map((o) => ordRef(o, `同一天下了 ${v.length} 次`))),
+        )
       : skip(10, '同一物品同一天重复下单提示', 'ordered_materials'),
   );
   rules.push(rule(11, '标注有发票但实际无票直接拦截', '旧表没有发票号，核对不了（新账登记时按发票类型要求发票号）', null));
@@ -478,7 +514,10 @@ export function legacyAudit(d: LegacyData): LegacyAudit {
       ? rule(
           12,
           '图片与链接为必填',
-          [has('brand_requests') ? `品牌清单有内容的 ${B.length} 行里 ${noLink.length} 行没有链接（表格共 ${brandRows} 行，${brandRows - B.length} 行是空行）` : notImported('brand_requests'), has('ordered_materials') ? `已下单物料 ${noImage.length} 行没有图片` : notImported('ordered_materials')].join('；'),
+          [
+            has('brand_requests') ? `品牌清单有内容的 ${B.length} 行里 ${noLink.length} 行没有链接（表格共 ${brandRows} 行，${brandRows - B.length} 行是空行）` : notImported('brand_requests'),
+            has('ordered_materials') ? `已下单物料 ${noImage.length} 行没有图片` : notImported('ordered_materials'),
+          ].join('；'),
           noLink.length + noImage.length,
           [...noLink.map((b) => brandRef(b, b.linkText ? `只写了「${b.linkText.slice(0, 40)}」，没有能点开的网址` : '没有链接')), ...noImage.map((o) => ordRef(o, '没有图片'))],
         )

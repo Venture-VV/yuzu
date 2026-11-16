@@ -66,7 +66,10 @@ describe('挪到后台的三个模块', () => {
 
 describe('「ERP 设置」的页签', () => {
   const all = [...ERP_MODULE_KEYS];
-  const can = (...perms: Permission[]) => (p: Permission) => perms.includes(p);
+  const can =
+    (...perms: Permission[]) =>
+    (p: Permission) =>
+      perms.includes(p);
 
   it('店主：七个页签，顺序固定（开关 → 各模块的规则 → 其他数值）', () => {
     const owner = () => true;
@@ -75,7 +78,12 @@ describe('「ERP 设置」的页签', () => {
 
   it('物资经办（只有查看库存）：只看得到采购规则；模块关着的页签不显示', () => {
     expect(erpSettingsTabs(can('inventory.read'), all).map((t) => t.key)).toEqual(['purchase']);
-    expect(erpSettingsTabs(can('inventory.read'), all.filter((k) => k !== 'purchasing'))).toEqual([]);
+    expect(
+      erpSettingsTabs(
+        can('inventory.read'),
+        all.filter((k) => k !== 'purchasing'),
+      ),
+    ).toEqual([]);
     expect(erpSettingsTabs(() => true, ['inventory']).map((t) => t.key)).toEqual(['modules', 'inventory', 'tunables']);
   });
 

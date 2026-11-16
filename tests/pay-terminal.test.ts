@@ -55,7 +55,14 @@ describe('扫码收款', () => {
     expect(calls[0]!.request.authCode).toMatch(/^\*+8888$/);
 
     // 金额、方式对不上
-    expect((await checkout([v1], amount, [{ method: 'wechat', amount: amount - 100, payTxId: paid.body.id }, { method: 'cash', amount: 100 }])).body.error.code).toBe('PAY_TX_MISMATCH');
+    expect(
+      (
+        await checkout([v1], amount, [
+          { method: 'wechat', amount: amount - 100, payTxId: paid.body.id },
+          { method: 'cash', amount: 100 },
+        ])
+      ).body.error.code,
+    ).toBe('PAY_TX_MISMATCH');
     expect((await checkout([v1], amount, [{ method: 'alipay', amount, payTxId: paid.body.id }])).body.error.code).toBe('PAY_TX_MISMATCH');
     expect((await checkout([v1], amount, [{ method: 'cash', amount, payTxId: paid.body.id }])).status).toBe(400);
     const done = await checkout([v1], amount, [{ method: 'wechat', amount, payTxId: paid.body.id }]);
@@ -105,7 +112,14 @@ describe('扫码收款', () => {
     expect((await api(ctx.app, duty, 'POST', `/api/pay/terminal/${waiting[0]!.id}/refund`, { clientKey: refundKey, reason: '客人不要了' })).body.refunds).toHaveLength(1);
     // 退过款的不能再入账
     const v = await enter();
-    expect((await checkout([v], await total([v]), [{ method: 'wechat', amount: 1_000, payTxId: waiting[0]!.id }, { method: 'cash', amount: (await total([v])) - 1_000 }])).body.error.code).toBe('PAY_TX_REFUNDED');
+    expect(
+      (
+        await checkout([v], await total([v]), [
+          { method: 'wechat', amount: 1_000, payTxId: waiting[0]!.id },
+          { method: 'cash', amount: (await total([v])) - 1_000 },
+        ])
+      ).body.error.code,
+    ).toBe('PAY_TX_REFUNDED');
     const fresh = (await api(ctx.app, ctx.clerk, 'GET', `/api/shifts/${shift.id}`)).body;
     const ok = await api(ctx.app, ctx.clerk, 'POST', `/api/shifts/${shift.id}/close`, { countedCash: fresh.summary.cash.expected, expectedCash: fresh.summary.cash.expected });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);

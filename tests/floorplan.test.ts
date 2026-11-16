@@ -36,11 +36,26 @@ const drawing = (paths: PlanPath[], texts: PlanText[]): PlanDrawing => ({
 function room(x0: number, y0: number, w: number, h: number, layer = 'A-WALL'): PlanPath[] {
   const door = x0 + w / 2;
   return [
-    path(layer, [[x0, y0], [door - 450, y0]]),
-    path(layer, [[door + 450, y0], [x0 + w, y0]]),
-    path(layer, [[x0 + w, y0], [x0 + w, y0 + h]]),
-    path(layer, [[x0 + w, y0 + h], [x0, y0 + h]]),
-    path(layer, [[x0, y0 + h], [x0, y0]]),
+    path(layer, [
+      [x0, y0],
+      [door - 450, y0],
+    ]),
+    path(layer, [
+      [door + 450, y0],
+      [x0 + w, y0],
+    ]),
+    path(layer, [
+      [x0 + w, y0],
+      [x0 + w, y0 + h],
+    ]),
+    path(layer, [
+      [x0 + w, y0 + h],
+      [x0, y0 + h],
+    ]),
+    path(layer, [
+      [x0, y0 + h],
+      [x0, y0],
+    ]),
   ];
 }
 
@@ -85,8 +100,29 @@ describe('解析规则', () => {
     const c = textCenter({ ...left, rotation: Math.PI / 2 });
     expect(c[0]).toBeCloseTo(-50);
     expect(c[1]).toBeCloseTo(100);
-    expect(simplifyLine([[0, 0], [1, 0.01], [2, 0], [3, 5]], 0.5)).toEqual([[0, 0], [2, 0], [3, 5]]);
-    expect(polygonArea([[0, 0], [10, 0], [10, 5], [0, 5]])).toBe(50);
+    expect(
+      simplifyLine(
+        [
+          [0, 0],
+          [1, 0.01],
+          [2, 0],
+          [3, 5],
+        ],
+        0.5,
+      ),
+    ).toEqual([
+      [0, 0],
+      [2, 0],
+      [3, 5],
+    ]);
+    expect(
+      polygonArea([
+        [0, 0],
+        [10, 0],
+        [10, 5],
+        [0, 5],
+      ]),
+    ).toBe(50);
   });
 
   it('认文件格式：DWG 看文件头版本号，DXF 看段落开头，PDF 看文件头「%PDF-」（读法见 floorplan-pdf.test.ts），其余拒绝', () => {
@@ -102,9 +138,27 @@ describe('读 DWG（libredwg-web 输出的形状）', () => {
   const db: DwgDatabaseLike = {
     entities: [
       // 外部参照绑定后的图层名带前缀
-      { type: 'LWPOLYLINE', layer: '02-二层平面$0$A-WALL', flag: 512, vertices: [{ x: 0, y: 0, bulge: 0 }, { x: 1000, y: 0, bulge: 0 }, { x: 1000, y: 1000, bulge: 0 }, { x: 0, y: 1000, bulge: 0 }] },
+      {
+        type: 'LWPOLYLINE',
+        layer: '02-二层平面$0$A-WALL',
+        flag: 512,
+        vertices: [
+          { x: 0, y: 0, bulge: 0 },
+          { x: 1000, y: 0, bulge: 0 },
+          { x: 1000, y: 1000, bulge: 0 },
+          { x: 0, y: 1000, bulge: 0 },
+        ],
+      },
       // 凸度 1 = 半圆，逆时针：从 (0,0) 到 (1000,0) 经过 (500,-500)
-      { type: 'LWPOLYLINE', layer: 'A-WALL', flag: 0, vertices: [{ x: 0, y: 0, bulge: 1 }, { x: 1000, y: 0, bulge: 0 }] },
+      {
+        type: 'LWPOLYLINE',
+        layer: 'A-WALL',
+        flag: 0,
+        vertices: [
+          { x: 0, y: 0, bulge: 1 },
+          { x: 1000, y: 0, bulge: 0 },
+        ],
+      },
       // 块参照：旋转 90°；块里画在 0 层的随块参照的图层；块属性也随
       {
         type: 'INSERT',
@@ -177,7 +231,12 @@ describe('读 DXF', () => {
   });
 
   it('R2007 之前的文件按 $DWGCODEPAGE 解码（ANSI_936 = GBK）', () => {
-    const head = enc('0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n9\n$DWGCODEPAGE\n3\nANSI_936\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nTEXT\n8\nW-区域文字\n10\n0\n20\n0\n40\n300\n1\n'.replace('W-区域文字', 'LABEL'));
+    const head = enc(
+      '0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n9\n$DWGCODEPAGE\n3\nANSI_936\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nTEXT\n8\nW-区域文字\n10\n0\n20\n0\n40\n300\n1\n'.replace(
+        'W-区域文字',
+        'LABEL',
+      ),
+    );
     const gbk = new Uint8Array([0xd7, 0xdf, 0xb5, 0xc0]); // 「走道」的 GBK 编码
     const tail = enc('\n0\nENDSEC\n0\nEOF\n');
     const bytes = new Uint8Array(head.length + gbk.length + tail.length);
@@ -188,8 +247,7 @@ describe('读 DXF', () => {
   });
 
   it('多行文字的旋转：组码 50 按度（AutoCAD 实际按度写，DXF 参考手册写的弧度有误，ezdxf 同样按度），有方向向量时以方向向量为准', () => {
-    const mtext = (extra: string) =>
-      readDxf(enc(`0\nSECTION\n2\nENTITIES\n0\nMTEXT\n8\nW-区域文字\n10\n0\n20\n0\n40\n300\n71\n5\n${extra}1\nG301\n0\nENDSEC\n0\nEOF\n`)).texts[0]!.rotation;
+    const mtext = (extra: string) => readDxf(enc(`0\nSECTION\n2\nENTITIES\n0\nMTEXT\n8\nW-区域文字\n10\n0\n20\n0\n40\n300\n71\n5\n${extra}1\nG301\n0\nENDSEC\n0\nEOF\n`)).texts[0]!.rotation;
     expect(mtext('50\n90\n')).toBeCloseTo(Math.PI / 2);
     expect(mtext('11\n0\n21\n1\n50\n45\n')).toBeCloseTo(Math.PI / 2);
     expect(mtext('')).toBe(0);
@@ -268,7 +326,13 @@ describe('转换：例外与提示', () => {
   it('同一层两处写了同一个编码：编码重复；文字压在密密的墙线里：找不到空地', () => {
     const paths = [...room(0, 0, 5000, 5000), ...room(6000, 0, 5000, 5000), ...room(12000, 0, 5000, 5000)];
     // 一块 6 × 6 米、间距 100 的密线（例如画错图层的填充），文字放在中间
-    for (let y = 10000; y <= 16000; y += 100) paths.push(path('A-WALL', [[20000, y], [26000, y]]));
+    for (let y = 10000; y <= 16000; y += 100)
+      paths.push(
+        path('A-WALL', [
+          [20000, y],
+          [26000, y],
+        ]),
+      );
     const texts = [text('W-区域文字', 'G301', 2500, 2500), text('W-区域文字', 'G301', 8500, 2500), text('W-区域文字', 'G302', 14500, 2500), text('W-区域文字', 'G303', 23000, 13000)];
     const r = convertDrawing(drawing(paths, texts));
     expect(r.rooms.map((x) => [x.code, x.status])).toEqual([
@@ -281,8 +345,18 @@ describe('转换：例外与提示', () => {
   it('隔得很远的两块图形分成两层；没有房号与标题的零星小块不报，大块报出来；图框外的编码、楼层位不符的编码列为提示', () => {
     const l3 = [...room(0, 0, 5000, 5000), ...room(6000, 0, 5000, 5000), ...room(12000, 0, 5000, 5000)];
     const l2 = [...room(100000, 0, 5000, 5000), ...room(106000, 0, 5000, 5000)];
-    const legend = Array.from({ length: 12 }, (_, i) => path('A-WALL', [[300000, i * 100], [301000, i * 100]]));
-    const big = Array.from({ length: 60 }, (_, i) => path('A-WALL', [[500000, i * 300], [520000, i * 300]]));
+    const legend = Array.from({ length: 12 }, (_, i) =>
+      path('A-WALL', [
+        [300000, i * 100],
+        [301000, i * 100],
+      ]),
+    );
+    const big = Array.from({ length: 60 }, (_, i) =>
+      path('A-WALL', [
+        [500000, i * 300],
+        [520000, i * 300],
+      ]),
+    );
     const texts = [
       text('W-区域文字', 'G301', 2500, 2500),
       text('W-区域文字', 'G202', 8500, 2500),
@@ -320,7 +394,12 @@ describe('转换：例外与提示', () => {
       ['L3', '三层'],
     ]);
     expect(r.rooms.find((x) => x.code === 'G303')).toMatchObject({ floor: 'L2', status: 'ok' });
-    expect(r.issues.filter((i) => i.kind === 'code_floor_digit').map((i) => i.code).sort()).toEqual(['G303', 'P201']);
+    expect(
+      r.issues
+        .filter((i) => i.kind === 'code_floor_digit')
+        .map((i) => i.code)
+        .sort(),
+    ).toEqual(['G303', 'P201']);
     expect(r.issues.some((i) => i.kind === 'floor_duplicate')).toBe(false);
   });
 

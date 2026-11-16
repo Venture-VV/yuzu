@@ -180,7 +180,18 @@ export interface FlowFacts {
 
 // ───────────────────────── 小工具 ─────────────────────────
 
-export const FLOW_GLYPHS: Record<FlowNodeKey, string> = { request: '部', confirm: '确', review: '审', sourcing: '价', award: '定', approval: '批', order: '订', receive: '收', stockin: '入', pay: '付' };
+export const FLOW_GLYPHS: Record<FlowNodeKey, string> = {
+  request: '部',
+  confirm: '确',
+  review: '审',
+  sourcing: '价',
+  award: '定',
+  approval: '批',
+  order: '订',
+  receive: '收',
+  stockin: '入',
+  pay: '付',
+};
 export const FLOW_STAGE_LABELS: Record<FlowNodeKey, string> = {
   request: '提需求',
   confirm: '待主管确认',
@@ -298,7 +309,15 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
     drafts.push(
       one
         ? { key: 'request', title: '部门提需求', role: `${one.departmentName} · ${one.requesterName}`, state: 'done', text: '已提交', at: one.submittedAt, link: reqLink(one) }
-        : { key: 'request', title: '部门提需求', role: names(reqs.map((r) => r.departmentName)), state: 'done', text: `${reqs.length} 张需求单`, at: latest(reqs.map((r) => r.submittedAt)), link: reqLink(reqs[0]!) },
+        : {
+            key: 'request',
+            title: '部门提需求',
+            role: names(reqs.map((r) => r.departmentName)),
+            state: 'done',
+            text: `${reqs.length} 张需求单`,
+            at: latest(reqs.map((r) => r.submittedAt)),
+            link: reqLink(reqs[0]!),
+          },
     );
     const waiting = reqs.find((r) => r.status !== 'approved');
     // ①′ 部门确认（要主管确认的才有这一环）：等主管确认时球在主管那里，「需求审核」先灰着
@@ -310,9 +329,26 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
       if (atHead && waiting!.status === 'submitted') {
         drafts.push({ key: 'confirm', title: '部门确认', role: head, state: 'current', text: '待主管确认', since: waiting!.submittedAt, link: reqLink(waiting!) });
       } else if (atHead) {
-        drafts.push({ key: 'confirm', title: '部门确认', role: head, state: 'current', text: '等部门修改后再提交', since: waiting!.submittedAt, alert: `已退回${waiting!.reason ? `：${waiting!.reason}` : ''}`, link: reqLink(waiting!) });
+        drafts.push({
+          key: 'confirm',
+          title: '部门确认',
+          role: head,
+          state: 'current',
+          text: '等部门修改后再提交',
+          since: waiting!.submittedAt,
+          alert: `已退回${waiting!.reason ? `：${waiting!.reason}` : ''}`,
+          link: reqLink(waiting!),
+        });
       } else if (confirming.every((r) => r.deptConfirm.state === 'confirmed')) {
-        drafts.push({ key: 'confirm', title: '部门确认', role: names(confirming.map((r) => r.deptConfirm.confirmedByName ?? '')) || head, state: 'done', text: '已确认', at: latest(confirming.map((r) => r.deptConfirm.confirmedAt)), link: reqLink(c) });
+        drafts.push({
+          key: 'confirm',
+          title: '部门确认',
+          role: names(confirming.map((r) => r.deptConfirm.confirmedByName ?? '')) || head,
+          state: 'done',
+          text: '已确认',
+          at: latest(confirming.map((r) => r.deptConfirm.confirmedAt)),
+          link: reqLink(c),
+        });
       } else {
         // 等主管确认的时候被采购定了不采购、被提单人撤回
         drafts.push({ key: 'confirm', title: '部门确认', role: head, state: 'pending', text: '没有确认', link: reqLink(c) });
@@ -323,7 +359,15 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
     } else if (!waiting) {
       drafts.push({ key: 'review', title: '需求审核', role: names(reqs.map((r) => r.reviewedByName ?? '')) || '采购', state: 'done', text: '已通过', at: reviewedAt, link: reqLink(reqs[0]!) });
     } else if (waiting.status === 'submitted') {
-      drafts.push({ key: 'review', title: '需求审核', role: '采购审核', state: 'current', text: waiting.lockedToday ? '截单后提交，明天起可审核' : '待审核', since: waiting.submittedAt, link: reqLink(waiting) });
+      drafts.push({
+        key: 'review',
+        title: '需求审核',
+        role: '采购审核',
+        state: 'current',
+        text: waiting.lockedToday ? '截单后提交，明天起可审核' : '待审核',
+        since: waiting.submittedAt,
+        link: reqLink(waiting),
+      });
     } else if (waiting.status === 'returned') {
       drafts.push({
         key: 'review',
@@ -336,7 +380,17 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
         link: reqLink(waiting),
       });
     } else if (waiting.status === 'rejected') {
-      drafts.push({ key: 'review', title: '需求审核', role: waiting.reviewedByName ?? '采购', state: 'current', text: '不采购', at: waiting.reviewedAt, alert: `不采购${waiting.reason ? `：${waiting.reason}` : ''}`, noStall: true, link: reqLink(waiting) });
+      drafts.push({
+        key: 'review',
+        title: '需求审核',
+        role: waiting.reviewedByName ?? '采购',
+        state: 'current',
+        text: '不采购',
+        at: waiting.reviewedAt,
+        alert: `不采购${waiting.reason ? `：${waiting.reason}` : ''}`,
+        noStall: true,
+        link: reqLink(waiting),
+      });
     } else {
       drafts.push({ key: 'review', title: '需求审核', role: '采购审核', state: 'pending', text: '需求单已撤回', link: reqLink(waiting) });
     }
@@ -351,7 +405,15 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
       const got = `已收 ${sourcing.activeQuotes} 家报价${sourcing.singleSource ? ' · 单一来源' : ''}`;
       if (sourcing.status === 'awarded') {
         drafts.push({ key: 'sourcing', title: '询价比价', role: `采购 · ${sourcing.createdByName}`, state: 'done', text: got, at: sourcing.lastQuoteAt ?? sourcing.createdAt, link });
-        drafts.push({ key: 'award', title: '比价定标', role: sourcing.awardedByName ?? '采购', state: 'done', text: sourcing.awardedSupplierName ? `中标：${sourcing.awardedSupplierName}` : '已定标', at: sourcing.awardedAt, link });
+        drafts.push({
+          key: 'award',
+          title: '比价定标',
+          role: sourcing.awardedByName ?? '采购',
+          state: 'done',
+          text: sourcing.awardedSupplierName ? `中标：${sourcing.awardedSupplierName}` : '已定标',
+          at: sourcing.awardedAt,
+          link,
+        });
       } else if (sourcing.activeQuotes < minQuotes) {
         drafts.push({
           key: 'sourcing',
@@ -401,7 +463,15 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
       });
     } else if (!open) {
       const p = pos[pos.length - 1]!;
-      drafts.push({ key: 'approval', title: '采购单审批', role: names(pos.map((x) => x.approvedByName ?? '')) || '负责人', state: 'done', text: pos.length > 1 ? `${pos.length} 张采购单已确认` : '已确认', at: latest(pos.map((x) => x.approvedAt)), link: poLink(p) });
+      drafts.push({
+        key: 'approval',
+        title: '采购单审批',
+        role: names(pos.map((x) => x.approvedByName ?? '')) || '负责人',
+        state: 'done',
+        text: pos.length > 1 ? `${pos.length} 张采购单已确认` : '已确认',
+        at: latest(pos.map((x) => x.approvedAt)),
+        link: poLink(p),
+      });
     } else if (!sourced) {
       // 合计达到门槛、还没询价的草稿：先去询价
       drafts.push({ key: 'approval', title: '采购单审批', role: '采购', state: 'pending', text: '待定标后', link: poLink(open) });
@@ -439,7 +509,15 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
   const orderTitle = variant === 'B' ? '下单中标方' : '采购下单';
   if (pos.length === 0) {
     const start = !approvalShown && reqs.length > 0 && upstream;
-    drafts.push({ key: 'order', title: orderTitle, role: '采购', state: start ? 'current' : 'pending', text: start ? '已通过，待转采购单' : approvalShown ? '待审批后' : '待审核通过后', since: start ? reviewedAt : null, link: start && one ? reqLink(one) : null });
+    drafts.push({
+      key: 'order',
+      title: orderTitle,
+      role: '采购',
+      state: start ? 'current' : 'pending',
+      text: start ? '已通过，待转采购单' : approvalShown ? '待审批后' : '待审核通过后',
+      since: start ? reviewedAt : null,
+      link: start && one ? reqLink(one) : null,
+    });
   } else {
     const open = pos.find((p) => !ordered(p));
     const suppliers = names(pos.map((p) => p.supplierName));

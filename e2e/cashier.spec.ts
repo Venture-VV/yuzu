@@ -66,7 +66,10 @@ const boardTags = async (page: Page) => (await getJson<{ tags: BoardTag[] }>(pag
 
 /** 空闲普通柜：从清单末尾挑，避开演示数据里的在店手牌 */
 const freeTags = (tags: BoardTag[], zone: BoardTag['zone']) =>
-  tags.filter((t) => t.zone === zone && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse();
+  tags
+    .filter((t) => t.zone === zone && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+    .map((t) => t.code)
+    .reverse();
 
 interface Member {
   id: number;
@@ -133,7 +136,10 @@ test.describe('完整收银', () => {
     await checkin.getByLabel('查找会员').fill(member.phone);
     await checkin.getByRole('button').filter({ hasText: member.name }).first().click();
     await expect(checkin.getByTestId('checkin-member')).toContainText(member.name);
-    await checkin.getByRole('radiogroup', { name: '第 1 位宾客分区' }).getByRole('radio', { name: memberZone === 'male' ? '男宾' : '女宾' }).click();
+    await checkin
+      .getByRole('radiogroup', { name: '第 1 位宾客分区' })
+      .getByRole('radio', { name: memberZone === 'male' ? '男宾' : '女宾' })
+      .click();
     await checkin.getByLabel('第 1 位牌号').fill(memberTag);
     await expect(checkin.getByTestId('guest-row-0')).toContainText('空闲可发');
     await checkin.getByRole('button', { name: '添加同行客人' }).click();
@@ -250,9 +256,7 @@ test.describe('完整收银', () => {
       await expect(page.getByText(/已结清 · /)).toBeVisible();
       await page.getByTestId('checkout-finish').click();
       const today = (await getJson<{ today: string }>(page, '/api/auth/me')).today;
-      const redone = (await getJson<CheckoutSummary[]>(page, `/api/frontdesk/checkouts?date=${today}`)).find(
-        (c) => c.status === 'completed' && c.tagCodes.includes(memberTag) && c.id !== checkoutId,
-      );
+      const redone = (await getJson<CheckoutSummary[]>(page, `/api/frontdesk/checkouts?date=${today}`)).find((c) => c.status === 'completed' && c.tagCodes.includes(memberTag) && c.id !== checkoutId);
       expect(redone, '重新结账的单').toBeTruthy();
       board = await boardTags(page);
       for (const code of [memberTag, friendTag]) expect(board.find((t) => t.code === code)!.visit, `${code} 重新结清后释放`).toBeNull();

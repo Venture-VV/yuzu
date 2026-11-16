@@ -44,6 +44,8 @@
 
 **测试数据库要给够内存**（main v8.1.1 独立回归的首轮报告）：几个进程同时复制模板库、跑用例，数据库容器限在 768 MiB 时首轮出现数据库「进入恢复状态」、随后连接被拒，用例一片 500 或连不上（多半是某个数据库进程到了内存上限被系统杀掉，数据库自己重启恢复；被杀的不是容器的主进程，所以容器不一定记 OOM）；同一份代码给到 1.5–2.25 GiB 全量都过。给测试数据库 2 GiB 以上；内存紧的机器用 `TEST_WORKERS=2`（或 1）少开几个进程。
 
+交 PR 前另跑 `npm run check:code`（没用到的导入与变量、事务里没等结果的查询、类型导入写法）与 `npm run format:check`（8.1.3 起 CI 都查；改了就 `npm run format`）。服务端的频率限制、过载保护在用例里照默认值开着（每个会话每分钟 600 次、同时 256 个请求）；测试环境不看事件循环卡顿（`OVERLOAD_MAX_LAG_MS` 默认 0，跑用例的机器忙起来会误判），要测它在用例里自己设。
+
 ```bash
 npx vitest run tests/locations.test.ts                          # 一个或几个集成测试文件
 E2E_BASE_URL=http://127.0.0.1:<端口> npx playwright test e2e/locations.spec.ts --project=门店电脑
@@ -65,6 +67,7 @@ npm run typecheck && npm test && npm run build                  # 交 PR 前
 | 后台、岗位权限、看板 | `admin-v060`、`roles`、`instance` | `admin-v060`、`review-v060`、`viewports`、`pending-marks` |
 | 演示数据 | `*-seed`、`demo-time`、`demo-prepare`（新增） | `demo-showcase`（新增） |
 | 退储值的「门店系统原路退回」（要小程序端口与模拟微信支付） | `member-refunds-online`、`mp-refund` | `member-refund-online`（设了 `E2E_MP_PORT`、`E2E_MP_GATEWAY_KEY` 才收，见下） |
+| 请求层、连接状态、页面不白屏、服务端防护（`lib/api`、`lib/connection`、`lib/livePoll`、`lib/lazyPage`、错误边界、`lib/protect`；8.1.3） | `client-api`、`protection`、`check-code` | `resilience`、`flows`、`frontdesk-recovery`、`storage-failure`、`concierge`、`customer` |
 | 迁移 | `upgrade*`；加了迁移一定跑全量 `npm test` | — |
 | 备份与运维脚本 | `backup`、`static-compression`、`import-encoding`；`shellcheck` | — |
 

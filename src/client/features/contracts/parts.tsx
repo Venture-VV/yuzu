@@ -152,8 +152,7 @@ export function ReviewsView({ reviews }: { reviews: ReviewView[] }) {
       {reviews.map((r) => (
         <li key={r.id} className="rounded-md border border-line bg-card px-3 py-2 text-[12.5px]">
           <p className="font-semibold">
-            第 {r.level} 级法务审查 ·{' '}
-            <span className={r.action === 'return' ? 'text-clay' : 'text-pine'}>{r.action === 'return' ? '退回' : '同意'}</span> · {r.reviewerName}
+            第 {r.level} 级法务审查 · <span className={r.action === 'return' ? 'text-clay' : 'text-pine'}>{r.action === 'return' ? '退回' : '同意'}</span> · {r.reviewerName}
             {r.onBehalfOfName && `（代 ${r.onBehalfOfName}）`}
             <span className="num font-normal text-ink-3"> · {formatDateTime(r.createdAt)}</span>
           </p>

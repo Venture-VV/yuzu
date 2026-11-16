@@ -161,9 +161,7 @@ export function usePayRows(opts: {
   const paid = rowCents.reduce<number>((s, c) => s + (c ?? 0), 0) + (memberDiscount?.amount ?? 0) + (countCard?.amount ?? 0);
   const remaining = opts.total === null ? null : opts.total - paid;
   const splitOf = (r: PayRow, cents: number | null) =>
-    r.member && cents && cents > 0
-      ? splitDeduction(cents, { principal: r.member.principalBalance, bonus: r.member.bonusBalance }, session.rules.deductionRule)
-      : null;
+    r.member && cents && cents > 0 ? splitDeduction(cents, { principal: r.member.principalBalance, bonus: r.member.bonusBalance }, session.rules.deductionRule) : null;
   const rowProblem = (r: PayRow, i: number): string | null => {
     const c = rowCents[i];
     if (c === null || c === undefined || c <= 0) return '请填写金额';
@@ -179,7 +177,8 @@ export function usePayRows(opts: {
       const q = r.member.spendQuota;
       if (q) {
         const used = rows.reduce((sum, x, j) => (x.method === 'wallet' && x.member?.id === r.member!.id ? sum + (rowCents[j] ?? 0) : sum), 0);
-        if (used > q.remaining) return `超过今天的储值额度：剩余 ${formatYuan(q.remaining)}（充值前余额 ${formatYuan(q.priorBalance)} + 今日充值 ${formatYuan(q.recharged)} × ${q.pct}%），其余请用别的方式付`;
+        if (used > q.remaining)
+          return `超过今天的储值额度：剩余 ${formatYuan(q.remaining)}（充值前余额 ${formatYuan(q.priorBalance)} + 今日充值 ${formatYuan(q.recharged)} × ${q.pct}%），其余请用别的方式付`;
       }
     }
     if (r.method === 'coupon' && !COUPON_CODE_PATTERN.test(normalizeCouponCode(r.code))) return '请填写完整券码';
@@ -243,9 +242,7 @@ export function usePayRows(opts: {
 
   /** 按登记的收款生成提交内容（调用前 ok 必须为 true） */
   const payments = (): PaymentBody[] => [
-    ...(memberDiscount
-      ? [{ method: 'member_discount' as const, memberId: memberDiscount.memberId, benefitId: memberDiscount.benefitId, amount: memberDiscount.amount }]
-      : []),
+    ...(memberDiscount ? [{ method: 'member_discount' as const, memberId: memberDiscount.memberId, benefitId: memberDiscount.benefitId, amount: memberDiscount.amount }] : []),
     ...(countCard?.payments ?? []),
     ...rows.map((r, i): PaymentBody => {
       const amount = rowCents[i]!;
@@ -254,7 +251,8 @@ export function usePayRows(opts: {
         return { method: 'wallet' as const, memberId: r.member!.id, amount, expectedSplit: s && s.ok ? { principal: s.principal, bonus: s.bonus } : { principal: amount, bonus: 0 } };
       }
       if (r.method === 'coupon') {
-        if (r.verification) return { method: 'coupon' as const, platform: r.verification.platform, code: r.verification.code, dealName: r.verification.dealName, amount, verificationId: r.verification.id };
+        if (r.verification)
+          return { method: 'coupon' as const, platform: r.verification.platform, code: r.verification.code, dealName: r.verification.dealName, amount, verificationId: r.verification.id };
         return { method: 'coupon' as const, platform: r.platform, code: normalizeCouponCode(r.code), dealName: r.dealName.trim(), amount };
       }
       if (r.method === 'discount') return { method: 'discount' as const, amount, grantId: r.grant!.grantId };
@@ -466,10 +464,7 @@ export function PayRowEditor({
   return (
     <li className={cn('rounded-lg border bg-card p-3', problem ? 'border-clay/40' : 'border-line')} data-testid={`pay-row-${row.method}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge
-          tone={row.method === 'wallet' ? 'pine' : row.method === 'coupon' || row.method === 'discount' || row.method === 'store_coupon' ? 'yuzu' : 'neutral'}
-          className="h-7 px-3 text-[13px]"
-        >
+        <Badge tone={row.method === 'wallet' ? 'pine' : row.method === 'coupon' || row.method === 'discount' || row.method === 'store_coupon' ? 'yuzu' : 'neutral'} className="h-7 px-3 text-[13px]">
           {row.method === 'wallet' ? (
             <WalletCards className="size-3.5" />
           ) : row.method === 'coupon' ? (
@@ -525,7 +520,14 @@ export function PayRowEditor({
         )}
         {row.method === 'coupon' && (
           <>
-            <Select fullWidth={false} value={row.platform} onChange={(e) => onChange({ platform: e.target.value as CouponPlatform })} disabled={locked || !!row.verification} className="h-10 w-[120px]" aria-label="团购平台">
+            <Select
+              fullWidth={false}
+              value={row.platform}
+              onChange={(e) => onChange({ platform: e.target.value as CouponPlatform })}
+              disabled={locked || !!row.verification}
+              className="h-10 w-[120px]"
+              aria-label="团购平台"
+            >
               {COUPON_PLATFORMS.map((pl) => (
                 <option key={pl} value={pl}>
                   {COUPON_PLATFORM_LABELS[pl]}
@@ -564,19 +566,41 @@ export function PayRowEditor({
           </>
         )}
         <span className="flex-1" />
-        <button type="button" aria-label="移除这笔收款" onClick={onRemove} disabled={locked} className="flex size-9 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay disabled:opacity-40">
+        <button
+          type="button"
+          aria-label="移除这笔收款"
+          onClick={onRemove}
+          disabled={locked}
+          className="flex size-9 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay disabled:opacity-40"
+        >
           <Trash2 className="size-4" />
         </button>
       </div>
 
       {row.method === 'coupon' && (
-        <Input value={row.dealName} onChange={(e) => onChange({ dealName: e.target.value })} placeholder="团购项目（选填，例如「不含餐 12 小时」）" maxLength={48} disabled={locked || !!row.verification} className="mt-2 h-9 text-[13px]" aria-label="团购项目" />
+        <Input
+          value={row.dealName}
+          onChange={(e) => onChange({ dealName: e.target.value })}
+          placeholder="团购项目（选填，例如「不含餐 12 小时」）"
+          maxLength={48}
+          disabled={locked || !!row.verification}
+          className="mt-2 h-9 text-[13px]"
+          aria-label="团购项目"
+        />
       )}
 
       {row.method === 'on_account' && (
         // 挂账（8.0.7 A3）：选协议单位、写签单人；算营业额不算实收，回款在 ERP「应收与挂账」登记
         <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="on-account-row">
-          <Select fullWidth={false} value={row.accountId ?? ''} onChange={(e) => onChange({ accountId: Number(e.target.value) || null })} disabled={locked} className="h-9 min-w-[180px] text-[13px]" aria-label="协议单位" data-testid="on-account-unit">
+          <Select
+            fullWidth={false}
+            value={row.accountId ?? ''}
+            onChange={(e) => onChange({ accountId: Number(e.target.value) || null })}
+            disabled={locked}
+            className="h-9 min-w-[180px] text-[13px]"
+            aria-label="协议单位"
+            data-testid="on-account-unit"
+          >
             <option value="">选协议单位</option>
             {arAccounts.map((a) => (
               <option key={a.id} value={a.id}>
@@ -584,11 +608,23 @@ export function PayRowEditor({
               </option>
             ))}
           </Select>
-          <Input fullWidth={false} value={row.signer} onChange={(e) => onChange({ signer: e.target.value })} placeholder="签单人（必填）" maxLength={20} disabled={locked} className="h-9 w-40 text-[13px]" aria-label="签单人" data-testid="on-account-signer" />
+          <Input
+            fullWidth={false}
+            value={row.signer}
+            onChange={(e) => onChange({ signer: e.target.value })}
+            placeholder="签单人（必填）"
+            maxLength={20}
+            disabled={locked}
+            className="h-9 w-40 text-[13px]"
+            aria-label="签单人"
+            data-testid="on-account-signer"
+          />
           {account && (
             <span className="text-[12px] text-ink-3">
               没结清 {formatYuan(account.outstandingCents)}
-              {account.creditLimitCents !== null ? ` · 额度 ${formatYuan(account.creditLimitCents)}，还能挂 ${formatYuan(Math.max(0, account.creditLimitCents - account.outstandingCents))}` : ' · 不限额'}
+              {account.creditLimitCents !== null
+                ? ` · 额度 ${formatYuan(account.creditLimitCents)}，还能挂 ${formatYuan(Math.max(0, account.creditLimitCents - account.outstandingCents))}`
+                : ' · 不限额'}
             </span>
           )}
         </div>
@@ -647,7 +683,8 @@ export function PayRowEditor({
           </div>
           {tendered !== null && cents !== null && tendered >= cents && (
             <span className="font-semibold text-ink-2">
-              找零 <Money cents={tendered - cents} className="font-bold text-pine" />（找零不用登记）
+              找零 <Money cents={tendered - cents} className="font-bold text-pine" />
+              （找零不用登记）
             </span>
           )}
         </div>

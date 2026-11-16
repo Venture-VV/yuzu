@@ -32,8 +32,7 @@ const enter = (tagCode: string, guest: Record<string, unknown> = {}, body: Recor
   api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode, zone: 'male', ...guest }], ...body });
 const visitOf = async (tagCode: string, guest: Record<string, unknown> = {}) => (await enter(tagCode, guest)).body.visits[0].id as number;
 /** 在 at 时刻接待（直接调用模块，便于制造在店时长） */
-const enterAt = async (tagCode: string, at: Date) =>
-  (await checkin(deps(), { clientKey: randomUUID(), guests: [{ tagCode, zone: 'male' }] }, { actor: clerkActor(), at })).visits[0]!.id;
+const enterAt = async (tagCode: string, at: Date) => (await checkin(deps(), { clientKey: randomUUID(), guests: [{ tagCode, zone: 'male' }] }, { actor: clerkActor(), at })).visits[0]!.id;
 const authorize = (cookie: string, approver: string, purpose: string, scope: unknown) =>
   api(ctx.app, cookie, 'POST', '/api/auth/authorize', { username: approver, password: PASSWORD, purpose, scope });
 const pay = (cookie: string, visitIds: number[], expectedTotal: number, payments: unknown[]) =>
@@ -97,7 +96,14 @@ describe('收款前必须先开班（默认开）', () => {
 describe('优惠 / 免单：值班经理及以上当场授权', () => {
   it('不带授权不能登记；店员不能授权；授权绑定客人与金额、只能用一次；免单时优惠等于应收', async () => {
     const v = await visitOf('R010');
-    expect((await pay(ctx.clerk, [v], 49900, [{ method: 'discount', amount: 2100 }, { method: 'cash', amount: 47800 }])).status).toBe(400);
+    expect(
+      (
+        await pay(ctx.clerk, [v], 49900, [
+          { method: 'discount', amount: 2100 },
+          { method: 'cash', amount: 47800 },
+        ])
+      ).status,
+    ).toBe(400);
     const byClerk = await authorize(ctx.clerk, 'clerk', 'checkout_discount', { visitIds: [v], amount: 2100, reason: '抹零' });
     expect(byClerk.status).toBe(403);
     expect(byClerk.body.error.code).toBe('AUTH_NOT_ALLOWED');
@@ -106,11 +112,17 @@ describe('优惠 / 免单：值班经理及以上当场授权', () => {
     expect(g.body).toMatchObject({ purpose: 'checkout_discount', approverName: '值班经理', scope: { visitIds: [v], amount: 2100, reason: '抹零' } });
 
     // 金额与授权不一致：整笔拒绝，客人仍在店，授权没有用掉
-    const wrong = await pay(ctx.clerk, [v], 49900, [{ method: 'discount', amount: 3000, grantId: g.body.grantId }, { method: 'cash', amount: 46900 }]);
+    const wrong = await pay(ctx.clerk, [v], 49900, [
+      { method: 'discount', amount: 3000, grantId: g.body.grantId },
+      { method: 'cash', amount: 46900 },
+    ]);
     expect(wrong.body.error.code).toBe('GRANT_SCOPE');
     const [st] = await ctx.sql<{ status: string }[]>`SELECT status FROM visits WHERE id = ${v}`;
     expect(st!.status).toBe('open');
-    const ok = await pay(ctx.clerk, [v], 49900, [{ method: 'discount', amount: 2100, grantId: g.body.grantId }, { method: 'cash', amount: 47800 }]);
+    const ok = await pay(ctx.clerk, [v], 49900, [
+      { method: 'discount', amount: 2100, grantId: g.body.grantId },
+      { method: 'cash', amount: 47800 },
+    ]);
     expect(ok.status).toBe(200);
     expect(ok.body.payments.find((p: { method: string }) => p.method === 'discount')).toMatchObject({ amount: 2100, ref: '抹零', approvedByName: '值班经理' });
     const [used] = await ctx.sql<{ usedRef: string }[]>`SELECT used_ref FROM auth_grants WHERE id = ${g.body.grantId}`;
@@ -118,7 +130,10 @@ describe('优惠 / 免单：值班经理及以上当场授权', () => {
 
     // 同一个授权不能再用
     const v2 = await visitOf('R011');
-    const reuse = await pay(ctx.clerk, [v2], 49900, [{ method: 'discount', amount: 2100, grantId: g.body.grantId }, { method: 'cash', amount: 47800 }]);
+    const reuse = await pay(ctx.clerk, [v2], 49900, [
+      { method: 'discount', amount: 2100, grantId: g.body.grantId },
+      { method: 'cash', amount: 47800 },
+    ]);
     expect(reuse.body.error.code).toBe('GRANT_USED');
     // 授权的客人不一致
     const g2 = await authorize(ctx.clerk, 'duty', 'checkout_discount', { visitIds: [v], amount: 49900, reason: '投诉补偿' });
@@ -181,7 +196,15 @@ describe('优惠 / 免单：值班经理及以上当场授权', () => {
     expect(g.status).toBe(200);
     const c = await checkout(
       deps(),
-      { clientKey: randomUUID(), visitIds: [v], expectedTotal: 49900, payments: [{ method: 'discount', amount: 2000, grantId: g.body.grantId }, { method: 'cash', amount: 47900 }] },
+      {
+        clientKey: randomUUID(),
+        visitIds: [v],
+        expectedTotal: 49900,
+        payments: [
+          { method: 'discount', amount: 2000, grantId: g.body.grantId },
+          { method: 'cash', amount: 47900 },
+        ],
+      },
       { actor: clerkActor(), at },
     );
     expect(c.businessDate).not.toBe(today);
@@ -222,9 +245,20 @@ describe('降低票种与免票：值班经理及以上当场授权并填原因'
     const no = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests });
     expect(no.body.error).toMatchObject({
       code: 'TICKET_AUTH_REQUIRED',
-      details: { items: [{ tagCode: 'R022', ticketTypeId: child }, { tagCode: 'R023', ticketTypeId: child }] },
+      details: {
+        items: [
+          { tagCode: 'R022', ticketTypeId: child },
+          { tagCode: 'R023', ticketTypeId: child },
+        ],
+      },
     });
-    const g = await authorize(ctx.clerk, 'duty', 'ticket_discount', { items: [{ tagCode: 'R022', ticketTypeId: child }, { tagCode: 'R023', ticketTypeId: child }], reason: '1 米以下儿童' });
+    const g = await authorize(ctx.clerk, 'duty', 'ticket_discount', {
+      items: [
+        { tagCode: 'R022', ticketTypeId: child },
+        { tagCode: 'R023', ticketTypeId: child },
+      ],
+      reason: '1 米以下儿童',
+    });
     const key = randomUUID();
     const ok = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: key, guests, ticketGrantId: g.body.grantId });
     expect(ok.status).toBe(201);
@@ -281,7 +315,11 @@ describe('会员持有在店手牌时不在会员工作台扣储值', () => {
 describe('撤销与反结账时限、反结账后重结、跳档宽限', () => {
   it('结账超过 48 小时：值班经理不能反结账（REVERSAL_WINDOW），店主可以', async () => {
     const v = await enterAt('R040', new Date(Date.now() - 50 * H));
-    const c = await checkout(deps(), { clientKey: randomUUID(), visitIds: [v], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }] }, { actor: clerkActor(), at: new Date(Date.now() - 49 * H) });
+    const c = await checkout(
+      deps(),
+      { clientKey: randomUUID(), visitIds: [v], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }] },
+      { actor: clerkActor(), at: new Date(Date.now() - 49 * H) },
+    );
     const late = await voidCheckout(duty, c.id, '超过时限');
     expect(late.status).toBe(422);
     expect(late.body.error).toMatchObject({ code: 'REVERSAL_WINDOW', details: { windowHours: 48 } });
@@ -291,7 +329,11 @@ describe('撤销与反结账时限、反结账后重结、跳档宽限', () => {
 
   it('在店 11 小时结账，反结账后过了 2 小时重结：仍是 12 小时档；多次反结账仍按第一次结账的时刻；这个时刻不能改', async () => {
     const v = await enterAt('R050', new Date(Date.now() - 13 * H));
-    const first = await checkout(deps(), { clientKey: randomUUID(), visitIds: [v], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }] }, { actor: clerkActor(), at: new Date(Date.now() - 2 * H) });
+    const first = await checkout(
+      deps(),
+      { clientKey: randomUUID(), visitIds: [v], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }] },
+      { actor: clerkActor(), at: new Date(Date.now() - 2 * H) },
+    );
     expect((await voidCheckout(duty, first.id, '收款方式记错')).status).toBe(200);
     const preview = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${v}`)).body;
     expect(preview.visits[0].ticket).toMatchObject({ segments: 1, amount: 49900 });
@@ -318,7 +360,10 @@ describe('撤销与反结账时限、反结账后重结、跳档宽限', () => {
 describe('反结账退款的交班口径与结账记录', () => {
   it('退款按原收款方式列在反结账人的班次：现金扣减应有现金，扫码只列提醒；收银员的班次仍算这笔收款', async () => {
     const v = await visitOf('R070');
-    const c = await pay(ctx.clerk, [v], 49900, [{ method: 'cash', amount: 9900 }, { method: 'wechat', amount: 40000, ref: '尾号 1234' }]);
+    const c = await pay(ctx.clerk, [v], 49900, [
+      { method: 'cash', amount: 9900 },
+      { method: 'wechat', amount: 40000, ref: '尾号 1234' },
+    ]);
     expect(c.status).toBe(200);
     const mineBefore = (await currentShift(ctx.clerk)).summary;
     const before = (await currentShift(duty)).summary;
@@ -366,7 +411,12 @@ describe('反结账退款的交班口径与结账记录', () => {
     const late = await enterAt('R075', new Date(Date.now() - 20 * 60_000));
     expect((await api(ctx.app, duty, 'POST', `/api/frontdesk/visits/${late}/cancel`, { reason: '开错了牌' })).status).toBe(200);
     const v = await visitOf('R076');
-    const posted = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${v}/charges`, { clientKey: randomUUID(), lines: [], customLines: [{ name: '挂错的饮料', amount: 1800 }], expectedTotal: 1800 });
+    const posted = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${v}/charges`, {
+      clientKey: randomUUID(),
+      lines: [],
+      customLines: [{ name: '挂错的饮料', amount: 1800 }],
+      expectedTotal: 1800,
+    });
     expect(posted.status).toBe(200);
     const lineId = posted.body.lines.find((l: { name: string }) => l.name === '挂错的饮料').id;
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/lines/${lineId}/void`, { reason: '挂错手牌' })).status).toBe(200);

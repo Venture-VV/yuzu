@@ -14,16 +14,7 @@ import { BedDouble, History, LayoutGrid, Map as MapIcon, MoonStar, PartyPopper, 
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
 import { PAYMENT_METHOD_LABELS, shiftDate } from '@shared/labels';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
-import {
-  MAX_STAY_GUESTS,
-  ROOM_BOARD_LABELS,
-  type RoomAuditReport,
-  type RoomBoard,
-  type RoomBoardRoom,
-  type RoomBoardStatus,
-  type RoomQuote,
-  type StayDetail,
-} from '@shared/rooms';
+import { MAX_STAY_GUESTS, ROOM_BOARD_LABELS, type RoomAuditReport, type RoomBoard, type RoomBoardRoom, type RoomBoardStatus, type RoomQuote, type StayDetail } from '@shared/rooms';
 import { spaceLabel } from '@shared/spaces';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -177,9 +168,33 @@ function RoomsBoardView() {
           value={view}
           onChange={setView}
           options={[
-            { value: 'board', label: <span className="flex items-center gap-1"><LayoutGrid className="size-3.5" />房态看板</span> },
-            { value: 'map', label: <span className="flex items-center gap-1"><MapIcon className="size-3.5" />平面图</span> },
-            { value: 'party', label: <span className="flex items-center gap-1" data-testid="rooms-view-party"><PartyPopper className="size-3.5" />派对房</span> },
+            {
+              value: 'board',
+              label: (
+                <span className="flex items-center gap-1">
+                  <LayoutGrid className="size-3.5" />
+                  房态看板
+                </span>
+              ),
+            },
+            {
+              value: 'map',
+              label: (
+                <span className="flex items-center gap-1">
+                  <MapIcon className="size-3.5" />
+                  平面图
+                </span>
+              ),
+            },
+            {
+              value: 'party',
+              label: (
+                <span className="flex items-center gap-1" data-testid="rooms-view-party">
+                  <PartyPopper className="size-3.5" />
+                  派对房
+                </span>
+              ),
+            },
           ]}
         />
         <span className="flex flex-wrap gap-x-3 gap-y-1 text-[13.5px] text-ink-2" data-testid="rooms-counts">
@@ -205,7 +220,11 @@ function RoomsBoardView() {
       <AuditStrip board={b} onRun={canOperate ? () => setAuditing(true) : undefined} />
 
       {forBooking && (
-        <Notice tone="info" title={`预约 ${forBooking.bookingNo} 到店：${forBooking.roomTypeName ?? ''} · 手牌 ${forBooking.arrivalTagCode ?? ''} · ${forBooking.guests} 人`} data-testid="rooms-for-booking">
+        <Notice
+          tone="info"
+          title={`预约 ${forBooking.bookingNo} 到店：${forBooking.roomTypeName ?? ''} · 手牌 ${forBooking.arrivalTagCode ?? ''} · ${forBooking.guests} 人`}
+          data-testid="rooms-for-booking"
+        >
           <span className="block">点一间空闲的房入住（同房型的空房已标出）；手牌、人数已带好，入住记到这张预约，同一张预约不会重复开房。</span>
           <Button size="sm" variant="ghost" className="mt-1" onClick={() => setForBooking(null)}>
             不按预约开房
@@ -498,11 +517,7 @@ function CheckinDialog({
         {quote.data && (quote.data.memberGrade !== null || quote.data.reason) && (
           <Notice
             tone={quote.data.memberGrade !== null ? 'success' : 'info'}
-            title={
-              quote.data.memberGrade !== null
-                ? `会员价 ${formatYuan(quote.data.rate)}（L${quote.data.memberGrade} 起的价，门市价 ${formatYuan(quote.data.listRate)}）`
-                : quote.data.reason
-            }
+            title={quote.data.memberGrade !== null ? `会员价 ${formatYuan(quote.data.rate)}（L${quote.data.memberGrade} 起的价，门市价 ${formatYuan(quote.data.listRate)}）` : quote.data.reason}
             data-testid="room-checkin-quote"
           >
             {quote.data.memberGrade !== null ? '按会员价入住的房费，结账时不再打会员折扣（券照常能用）。' : null}
@@ -550,12 +565,29 @@ function CheckinDialog({
         </div>
         {room.kind === 'daily' && (
           <Field label="预计离店" htmlFor="room-leave" hint={`只做提醒；房费按实际住的晚数算：${minuteText(rules.checkoutMinute)} 以后退房加收半天，${minuteText(rules.lateFullMinute)} 以后加收一晚`}>
-            <Input fullWidth={false} id="room-leave" type="date" min={session.today} value={leave} onChange={(e) => setLeave(e.target.value)} disabled={op.locked} className="w-48" data-testid="room-checkin-leave" />
+            <Input
+              fullWidth={false}
+              id="room-leave"
+              type="date"
+              min={session.today}
+              value={leave}
+              onChange={(e) => setLeave(e.target.value)}
+              disabled={op.locked}
+              className="w-48"
+              data-testid="room-checkin-leave"
+            />
           </Field>
         )}
         <div className="rounded-lg border border-line bg-paper/50 p-3">
           <label className="flex items-center gap-2 text-[13.5px] font-semibold">
-            <input type="checkbox" checked={withDeposit} onChange={(e) => setWithDeposit(e.target.checked)} disabled={op.locked} className="size-4 accent-pine" data-testid="room-checkin-with-deposit" />
+            <input
+              type="checkbox"
+              checked={withDeposit}
+              onChange={(e) => setWithDeposit(e.target.checked)}
+              disabled={op.locked}
+              className="size-4 accent-pine"
+              data-testid="room-checkin-with-deposit"
+            />
             收押金
             <span className="text-[12px] font-normal text-ink-3">押金不算营业额，退房时原路退回；现金押金计入交班</span>
           </label>
@@ -663,8 +695,16 @@ function AuditDialog({ board, onClose }: { board: RoomBoard; onClose: () => void
         </div>
       ) : (
         <div className="space-y-3" data-testid="room-audit">
-          {a.done && a.runAt && <Notice tone="info" title={`今天 ${formatTime(a.runAt)} ${a.runByName ?? ''}已做过夜审`}>再做一次只会补挂之后入住、还没挂今晚房费的房间。</Notice>}
-          {!a.allowed && <Notice tone="warning" title={`夜审要在 ${minuteText(board.rules.lateFullMinute)} 以后做`}>这时还在住的客人才要付今晚的房费。</Notice>}
+          {a.done && a.runAt && (
+            <Notice tone="info" title={`今天 ${formatTime(a.runAt)} ${a.runByName ?? ''}已做过夜审`}>
+              再做一次只会补挂之后入住、还没挂今晚房费的房间。
+            </Notice>
+          )}
+          {!a.allowed && (
+            <Notice tone="warning" title={`夜审要在 ${minuteText(board.rules.lateFullMinute)} 以后做`}>
+              这时还在住的客人才要付今晚的房费。
+            </Notice>
+          )}
           <p className="text-[13.5px] text-ink-2">
             今晚还没挂房费的在住全天房：<b className="num">{a.pending}</b> 间
           </p>

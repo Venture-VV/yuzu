@@ -46,7 +46,9 @@ describe('对外接口', () => {
     expect(blocked.body.error.code).toBe('PAY_TERMINAL_OFF');
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/integrations/switches', { payTerminal: true })).status).toBe(200);
     // 最近的对外调用：扫一次，后台看得到（付款码只留后四位）
-    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/pay/terminal', { clientKey: randomUUID(), provider: 'wechat', purpose: 'checkout', amountCents: 100, authCode: '134500000000008888' })).status).toBe(201);
+    expect(
+      (await api(ctx.app, ctx.clerk, 'POST', '/api/pay/terminal', { clientKey: randomUUID(), provider: 'wechat', purpose: 'checkout', amountCents: 100, authCode: '134500000000008888' })).status,
+    ).toBe(201);
     const calls = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/integrations/calls?kind=pay_terminal')).body;
     expect(calls[0]).toMatchObject({ kind: 'pay_terminal', action: 'pay', mode: 'mock', ok: true, staffName: '测试店员' });
     expect(calls[0].request.authCode).toBe('******8888');

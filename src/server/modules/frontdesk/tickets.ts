@@ -150,15 +150,7 @@ export async function setVisitTicket(deps: Deps, visitId: number, raw: unknown, 
 }
 
 /** 写入来访的票种与票价快照，并记一条改票种记录（调用方已锁来访）；降档 / 免票时记下授权人与原因 */
-export async function applyVisitTicket(
-  tx: Tx,
-  visitId: number,
-  fromTypeId: number | null,
-  type: TicketType,
-  operatorId: number,
-  at: Date,
-  approval: TicketApproval | null = null,
-) {
+export async function applyVisitTicket(tx: Tx, visitId: number, fromTypeId: number | null, type: TicketType, operatorId: number, at: Date, approval: TicketApproval | null = null) {
   await tx`
     UPDATE visits SET ticket_type_id = ${type.id}, ticket_price_12h = ${type.price12h}, ticket_price_24h = ${type.price24h}
     WHERE id = ${visitId}`;
@@ -175,10 +167,18 @@ export async function applyVisitTicket(
  * 已结账离店的按结账单记下的（快照），不再按现在的档阶重算
  */
 export async function visitTicket(db: Db, visitId: number, at: Date, today: string): Promise<VisitDetail['ticket']> {
-  const [v] = await db<{
-    typeId: number | null; name: string | null; price12h: number | null; price24h: number | null; checkedInAt: string; ticketEndAt: string | null;
-    memberId: number | null; status: string;
-  }[]>`
+  const [v] = await db<
+    {
+      typeId: number | null;
+      name: string | null;
+      price12h: number | null;
+      price24h: number | null;
+      checkedInAt: string;
+      ticketEndAt: string | null;
+      memberId: number | null;
+      status: string;
+    }[]
+  >`
     SELECT v.ticket_type_id AS type_id, t.name, v.ticket_price_12h AS price12h, v.ticket_price_24h AS price24h, v.checked_in_at, v.ticket_end_at,
            v.member_id, v.status
     FROM visits v LEFT JOIN ticket_types t ON t.id = v.ticket_type_id WHERE v.id = ${visitId}`;

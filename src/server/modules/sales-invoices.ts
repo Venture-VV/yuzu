@@ -12,15 +12,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { PAYMENT_METHODS } from '@shared/labels';
 import { can, type Permission } from '@shared/permissions';
-import {
-  INVOICE_SOURCE_LABELS,
-  INVOICE_SOURCE_TYPES,
-  TAX_NO_PATTERN,
-  type InvoiceSourceInfo,
-  type InvoiceSourceType,
-  type SalesInvoice,
-  type SalesInvoiceList,
-} from '@shared/sales-invoices';
+import { INVOICE_SOURCE_LABELS, INVOICE_SOURCE_TYPES, TAX_NO_PATTERN, type InvoiceSourceInfo, type InvoiceSourceType, type SalesInvoice, type SalesInvoiceList } from '@shared/sales-invoices';
 import { guard, sessionOnly } from '../auth/guard';
 import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../db';
 import { eInvoiceAdapter } from '../integrations/einvoice';
@@ -330,7 +322,10 @@ const IssueInput = z.object({
   version: Version,
   invoiceNo: z.string('请填写发票号码').trim().min(1, '请填写发票号码').max(40, '发票号码最多 40 位'),
   invoiceDate: dateSchema('开票日'),
-  pdf: z.object({ name: z.string().trim().min(1).max(80), data: z.string().min(16) }).nullable().default(null),
+  pdf: z
+    .object({ name: z.string().trim().min(1).max(80), data: z.string().min(16) })
+    .nullable()
+    .default(null),
 });
 
 /** 登记已开（手工在开票系统里开好，回来填号码、可传 PDF） */
@@ -349,7 +344,14 @@ export async function issueManually(deps: Deps, id: number, raw: unknown, actor:
       SET status = 'issued', invoice_no = ${input.invoiceNo}, invoice_date = ${input.invoiceDate}, file_id = ${file?.id ?? null}, issued_via = 'manual',
           handled_by = ${actor.id}, handled_at = now(), version = version + 1
       WHERE id = ${id}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'invoice_request', targetType: 'invoice_request', targetId: id, detail: { op: 'issue', requestNo: r.requestNo, invoiceNo: input.invoiceNo, via: 'manual' }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'invoice_request',
+      targetType: 'invoice_request',
+      targetId: id,
+      detail: { op: 'issue', requestNo: r.requestNo, invoiceNo: input.invoiceNo, via: 'manual' },
+      ip,
+    });
   });
   return getSalesInvoice(deps.sql, id);
 }
@@ -374,7 +376,16 @@ export async function issueViaProvider(deps: Deps, id: number, raw: unknown, act
   try {
     result = await withCallLog(
       deps.sql,
-      { kind: 'einvoice', provider: adapter.provider, action: 'issue', mode: adapter.mode, refType: 'invoice_request', refId: id, staffId: actor.id, request: { requestNo: req.requestNo, amountCents: req.amountCents, kind: req.invoiceKind, titleType: req.titleType } },
+      {
+        kind: 'einvoice',
+        provider: adapter.provider,
+        action: 'issue',
+        mode: adapter.mode,
+        refType: 'invoice_request',
+        refId: id,
+        staffId: actor.id,
+        request: { requestNo: req.requestNo, amountCents: req.amountCents, kind: req.invoiceKind, titleType: req.titleType },
+      },
       () => adapter.issue({ requestId: id, requestNo: req.requestNo, titleType: req.titleType, title: req.title, taxNo: req.taxNo, kind: req.invoiceKind, amountCents: req.amountCents }, today),
       (r) => ({ invoiceNo: r.invoiceNo, providerRef: r.providerRef }),
     );
@@ -389,7 +400,14 @@ export async function issueViaProvider(deps: Deps, id: number, raw: unknown, act
     const [r] = await tx<{ status: string; issuedVia: string | null }[]>`SELECT status, issued_via FROM invoice_requests WHERE id = ${id} FOR UPDATE`;
     if (!r || r.status !== 'requested' || r.issuedVia !== 'sending') {
       // 中间被人改回了「申请中」或手工登记了：服务商这张记进审计，由财务去服务商那边作废
-      await writeAudit(tx, { staffId: actor.id, action: 'invoice_request', targetType: 'invoice_request', targetId: id, detail: { op: 'provider_late', invoiceNo: result.invoiceNo, providerRef: result.providerRef }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'invoice_request',
+        targetType: 'invoice_request',
+        targetId: id,
+        detail: { op: 'provider_late', invoiceNo: result.invoiceNo, providerRef: result.providerRef },
+        ip,
+      });
       return;
     }
     const file = await storePdf(tx, 'sales_invoice', result.pdf.toString('base64'), actor);
@@ -398,7 +416,14 @@ export async function issueViaProvider(deps: Deps, id: number, raw: unknown, act
       SET status = 'issued', invoice_no = ${result.invoiceNo}, invoice_date = ${result.invoiceDate}, file_id = ${file.id}, issued_via = ${adapter.provider},
           provider_ref = ${result.providerRef}, handled_by = ${actor.id}, handled_at = now(), version = version + 1
       WHERE id = ${id}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'invoice_request', targetType: 'invoice_request', targetId: id, detail: { op: 'issue', requestNo: req.requestNo, invoiceNo: result.invoiceNo, via: adapter.provider }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'invoice_request',
+      targetType: 'invoice_request',
+      targetId: id,
+      detail: { op: 'issue', requestNo: req.requestNo, invoiceNo: result.invoiceNo, via: adapter.provider },
+      ip,
+    });
   });
   const after = await getSalesInvoice(deps.sql, id);
   if (after.status !== 'issued') throw conflict('INVOICE_REQUEST_CHANGED', '服务商开出来了，但这张申请中间被人改过，请刷新后核对（服务商那边的发票号码记在操作审计里）');
@@ -412,7 +437,14 @@ export async function resetSending(deps: Deps, id: number, raw: unknown, actor: 
     const r = await lockRequest(tx, id, input.version);
     if (r.status !== 'requested' || r.issuedVia !== 'sending') throw conflict('INVOICE_REQUEST_DONE', '这张不在「发送中」');
     await tx`UPDATE invoice_requests SET issued_via = NULL, version = version + 1 WHERE id = ${id}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'invoice_request', targetType: 'invoice_request', targetId: id, detail: { op: 'reset_sending', requestNo: r.requestNo, reason: input.reason }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'invoice_request',
+      targetType: 'invoice_request',
+      targetId: id,
+      detail: { op: 'reset_sending', requestNo: r.requestNo, reason: input.reason },
+      ip,
+    });
   });
   return getSalesInvoice(deps.sql, id);
 }
@@ -437,7 +469,14 @@ export async function voidRequest(deps: Deps, id: number, raw: unknown, actor: A
     if (r.status !== 'requested' && r.status !== 'issued') throw conflict('INVOICE_REQUEST_DONE', '这张已经驳回或作废了');
     if (r.issuedVia === 'sending') throw conflict('INVOICE_SENDING', '这张已经交给开票服务商、结果还没回来，不能作废');
     await tx`UPDATE invoice_requests SET status = 'voided', void_reason = ${input.reason}, voided_by = ${actor.id}, voided_at = now(), version = version + 1 WHERE id = ${id}`;
-    await writeAudit(tx, { staffId: actor.id, action: 'invoice_request', targetType: 'invoice_request', targetId: id, detail: { op: 'void', requestNo: r.requestNo, wasIssued: r.status === 'issued', reason: input.reason }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'invoice_request',
+      targetType: 'invoice_request',
+      targetId: id,
+      detail: { op: 'void', requestNo: r.requestNo, wasIssued: r.status === 'issued', reason: input.reason },
+      ip,
+    });
   });
   return getSalesInvoice(deps.sql, id);
 }

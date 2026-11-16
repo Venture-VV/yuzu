@@ -9,7 +9,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { applyCopy, collectCopy, copyFromCsv, copyToCsv, type StudioCommentView, type StudioDoc, type StudioPresence, type StudioSurface } from '@shared/studio';
 import { api, errorMessage } from '../../lib/api';
 import { readImportFile } from '../../lib/import-file';
-import { cn, uuid } from '../../lib/utils';
+import { cn, downloadBlob, uuid } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { LoadFailed } from '../../components/LoadFailed';
 import { useToast } from '../../components/Toast';
@@ -17,17 +17,7 @@ import { Button, Textarea } from '../../components/ui';
 
 type Change = (fn: (d: StudioDoc) => StudioDoc, coalesce?: string) => void;
 
-const download = (text: string, name: string, type: string) => {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  // 挂到页面上再点：有的浏览器不认没挂上的链接的文件名
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-};
+const download = (text: string, name: string, type: string) => downloadBlob(new Blob([text], { type }), name);
 
 // ───────────────────────── 中英文案 ─────────────────────────
 

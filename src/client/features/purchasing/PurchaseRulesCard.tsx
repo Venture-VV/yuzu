@@ -143,7 +143,15 @@ export function PurchaseRulesCard() {
         <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
           {toggle('每日截单', draft.cutoffEnabled, (v) => setDraft({ ...draft, cutoffEnabled: v }), 'pr-cutoff')}
           <Field label="截单时间" htmlFor="pr-cutoff-time" hint="截单以后提交的需求单照常提交，当天不能审核通过（第二天起可以）" className="min-w-[220px]">
-            <Input id="pr-cutoff-time" type="time" value={draft.cutoffTime} disabled={!editable || !draft.cutoffEnabled} onChange={(e) => setDraft({ ...draft, cutoffTime: e.target.value })} className="h-10 w-36" data-testid="pr-cutoff-time" />
+            <Input
+              id="pr-cutoff-time"
+              type="time"
+              value={draft.cutoffTime}
+              disabled={!editable || !draft.cutoffEnabled}
+              onChange={(e) => setDraft({ ...draft, cutoffTime: e.target.value })}
+              className="h-10 w-36"
+              data-testid="pr-cutoff-time"
+            />
           </Field>
         </div>
         {toggle('需求单转的采购单提交即确认（部门 → 供应链审核 → 可以采购，不用再等负责人确认）', draft.requestPoDirect, (v) => setDraft({ ...draft, requestPoDirect: v }), 'pr-request-direct')}
@@ -163,7 +171,14 @@ export function PurchaseRulesCard() {
                   <Badge tone="yuzu">{TIER_NAMES[i]}</Badge>
                   <span className="text-ink-2">{prev ? `超过 ¥${prev} 、` : ''}不超过</span>
                   <div className="w-36">
-                    <MoneyInput aria-label={`第 ${i + 1} 档上限`} value={t.max} disabled={!editable} onChange={(e) => setTier(i, { max: e.target.value })} className="h-9" data-testid={`pr-tier-max-${i}`} />
+                    <MoneyInput
+                      aria-label={`第 ${i + 1} 档上限`}
+                      value={t.max}
+                      disabled={!editable}
+                      onChange={(e) => setTier(i, { max: e.target.value })}
+                      className="h-9"
+                      data-testid={`pr-tier-max-${i}`}
+                    />
                   </div>
                   <span className="text-ink-2">的急采由</span>
                   <span className="font-semibold">{t.approverIds.length ? t.approverIds.map((id) => names.get(id) ?? `#${id}`).join('、') : '负责人'}</span>
@@ -190,7 +205,10 @@ export function PurchaseRulesCard() {
                           type="button"
                           disabled={!on && t.approverIds.length >= APPROVAL_MAX_STAFF}
                           onClick={() => setTier(i, { approverIds: on ? t.approverIds.filter((x) => x !== a.id) : [...t.approverIds, a.id] })}
-                          className={cn('h-8 rounded-full border px-3 text-[12.5px] font-semibold disabled:opacity-40', on ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2')}
+                          className={cn(
+                            'h-8 rounded-full border px-3 text-[12.5px] font-semibold disabled:opacity-40',
+                            on ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2',
+                          )}
                           aria-pressed={on}
                           data-testid={`pr-tier-${i}-approver-${a.id}`}
                         >
@@ -213,7 +231,14 @@ export function PurchaseRulesCard() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="采购单合计到多少要先询价比价" htmlFor="pr-quote" hint="默认 1000 元（8.0.17 起，原来 5000）；填 0 不要求。补单与已确认后的改版不拦">
-          <MoneyInput id="pr-quote" value={draft.quoteThreshold} disabled={!editable} onChange={(e) => setDraft({ ...draft, quoteThreshold: e.target.value })} className="h-10" data-testid="pr-quote" />
+          <MoneyInput
+            id="pr-quote"
+            value={draft.quoteThreshold}
+            disabled={!editable}
+            onChange={(e) => setDraft({ ...draft, quoteThreshold: e.target.value })}
+            className="h-10"
+            data-testid="pr-quote"
+          />
         </Field>
         <Field label="定标至少要几家报价" htmlFor="pr-min" hint="默认 2 家；不够的标单一来源、由负责人定标">
           <Input id="pr-min" inputMode="numeric" value={draft.minQuotes} disabled={!editable} onChange={(e) => setDraft({ ...draft, minQuotes: e.target.value })} className="h-10" />
@@ -229,13 +254,40 @@ export function PurchaseRulesCard() {
           htmlFor="pr-regular"
           hint={`补货方式是「自动识别」、没设提醒、也不是台面日耗品这类消耗品的物料：近 ${REPLENISH_LOOKBACK_DAYS} 天里有领用的天数不到这个数的，看作一次性采购、不提补货（手机这类领一次就完的）。默认 2 天，填 1 = 领过一次就算。单个物料在物料档案里可以直接定成「常备」或「按需采购」`}
         >
-          <Input id="pr-regular" inputMode="numeric" value={draft.regularUseDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, regularUseDays: e.target.value })} className="h-10" data-testid="pr-regular" />
+          <Input
+            id="pr-regular"
+            inputMode="numeric"
+            value={draft.regularUseDays}
+            disabled={!editable}
+            onChange={(e) => setDraft({ ...draft, regularUseDays: e.target.value })}
+            className="h-10"
+            data-testid="pr-regular"
+          />
         </Field>
         <Field label="下单后几天没到货算超期" htmlFor="pr-arrival" hint="采购单没填预计到货日时用（账目自检第 9 条），默认 7 天；8.0.1 从费用报销规则挪过来">
-          <Input id="pr-arrival" inputMode="numeric" value={draft.arrivalOverdueDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, arrivalOverdueDays: e.target.value })} className="h-10" data-testid="pr-arrival" />
+          <Input
+            id="pr-arrival"
+            inputMode="numeric"
+            value={draft.arrivalOverdueDays}
+            disabled={!editable}
+            onChange={(e) => setDraft({ ...draft, arrivalOverdueDays: e.target.value })}
+            className="h-10"
+            data-testid="pr-arrival"
+          />
         </Field>
-        <Field label="哪些需求单要部门主管先确认" htmlFor="pr-dept-confirm" hint="8.0.17：主管确认以后采购才能审核通过。估价 = 各行参考价 × 数量（没填参考价的行不算）；主管在「库存 → 档案 → 部门」里设，没设主管的部门不拦">
-          <Select id="pr-dept-confirm" value={draft.deptConfirm} disabled={!editable} onChange={(e) => setDraft({ ...draft, deptConfirm: e.target.value as DeptConfirmRule })} className="h-10" data-testid="pr-dept-confirm">
+        <Field
+          label="哪些需求单要部门主管先确认"
+          htmlFor="pr-dept-confirm"
+          hint="8.0.17：主管确认以后采购才能审核通过。估价 = 各行参考价 × 数量（没填参考价的行不算）；主管在「库存 → 档案 → 部门」里设，没设主管的部门不拦"
+        >
+          <Select
+            id="pr-dept-confirm"
+            value={draft.deptConfirm}
+            disabled={!editable}
+            onChange={(e) => setDraft({ ...draft, deptConfirm: e.target.value as DeptConfirmRule })}
+            className="h-10"
+            data-testid="pr-dept-confirm"
+          >
             {DEPT_CONFIRM_RULES.map((v) => (
               <option key={v} value={v}>
                 {DEPT_CONFIRM_RULE_LABELS[v]}
@@ -243,8 +295,20 @@ export function PurchaseRulesCard() {
             ))}
           </Select>
         </Field>
-        <Field label="流程图里一个环节等了几天标红" htmlFor="pr-stall" hint="采购 → 流程进度（8.0.17）：待审核、询价、定标、待审批、待下单、待入库等了这么多天就标红；默认 2 天，0 = 不标。到货按预计到货日，另算">
-          <Input id="pr-stall" inputMode="numeric" value={draft.flowStallDays} disabled={!editable} onChange={(e) => setDraft({ ...draft, flowStallDays: e.target.value })} className="h-10" data-testid="pr-stall" />
+        <Field
+          label="流程图里一个环节等了几天标红"
+          htmlFor="pr-stall"
+          hint="采购 → 流程进度（8.0.17）：待审核、询价、定标、待审批、待下单、待入库等了这么多天就标红；默认 2 天，0 = 不标。到货按预计到货日，另算"
+        >
+          <Input
+            id="pr-stall"
+            inputMode="numeric"
+            value={draft.flowStallDays}
+            disabled={!editable}
+            onChange={(e) => setDraft({ ...draft, flowStallDays: e.target.value })}
+            className="h-10"
+            data-testid="pr-stall"
+          />
         </Field>
       </div>
       {error && <Notice tone="error" title={error} />}

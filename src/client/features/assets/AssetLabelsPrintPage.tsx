@@ -14,7 +14,14 @@ const LABEL_BATCH = 300;
 export function AssetLabelsPrintPage() {
   const { ids = '' } = useParams();
   const session = useSession();
-  const wanted = [...new Set(ids.split(',').map(Number).filter((x) => Number.isInteger(x) && x > 0))];
+  const wanted = [
+    ...new Set(
+      ids
+        .split(',')
+        .map(Number)
+        .filter((x) => Number.isInteger(x) && x > 0),
+    ),
+  ];
   // 按编号直接取这几张（不从列表里筛：列表最多 1,000 张，老卡片会漏掉）；按选的先后排
   // 接口一次最多 300 张：选得多的分几批取（Codex 审查 0048165）
   const cards = useQuery({

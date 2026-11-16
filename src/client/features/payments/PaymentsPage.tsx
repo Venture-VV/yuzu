@@ -88,7 +88,10 @@ export function PaymentsPage() {
       <div className="space-y-4">
         {todo.data?.weekly && (
           <Notice tone="info" title={`本周应付 ¥${formatAmount(todo.data.weekly.totalCents)} / ${todo.data.weekly.count} 笔`} data-testid="payment-weekly-notice">
-            每周一提醒一次：已批待付、可付还没申请的合同段、到期的质保金。<Link to="/erp/payments?tab=weekly" className="ml-1 font-semibold text-lake hover:underline">去看本周应付</Link>
+            每周一提醒一次：已批待付、可付还没申请的合同段、到期的质保金。
+            <Link to="/erp/payments?tab=weekly" className="ml-1 font-semibold text-lake hover:underline">
+              去看本周应付
+            </Link>
           </Notice>
         )}
         <div className="flex flex-wrap gap-1.5 border-b border-line pb-2" role="tablist">
@@ -103,7 +106,9 @@ export function PaymentsPage() {
               data-testid={`payments-tab-${t.value}`}
             >
               {t.label}
-              {t.value === 'requests' && !!todo.data?.awaitingPayment && can('payable.manage') && <span className="num ml-1.5 rounded-full bg-yuzu px-1.5 text-[11px] text-ink">{todo.data.awaitingPayment}</span>}
+              {t.value === 'requests' && !!todo.data?.awaitingPayment && can('payable.manage') && (
+                <span className="num ml-1.5 rounded-full bg-yuzu px-1.5 text-[11px] text-ink">{todo.data.awaitingPayment}</span>
+              )}
               {t.value === 'warranty' && !!todo.data?.warrantyDue && <span className="num ml-1.5 rounded-full bg-ember px-1.5 text-[11px] text-paper">{todo.data.warrantyDue}</span>}
             </button>
           ))}
@@ -154,7 +159,11 @@ function RequestsTab() {
           <ul className="divide-y divide-line/70" data-testid="payment-request-list">
             {list.data!.map((r) => (
               <li key={r.id}>
-                <Link to={`/erp/payments/requests/${r.id}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-3 hover:bg-paper-2 md:grid-cols-[170px_minmax(0,1fr)_140px_120px]" data-testid={`payment-request-row-${r.requestNo}`}>
+                <Link
+                  to={`/erp/payments/requests/${r.id}`}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-3 hover:bg-paper-2 md:grid-cols-[170px_minmax(0,1fr)_140px_120px]"
+                  data-testid={`payment-request-row-${r.requestNo}`}
+                >
                   <span className="num text-[13.5px] font-bold">
                     {r.requestNo}
                     <span className="block font-sans text-[12px] font-medium text-ink-3">期望 {r.expectedDate}</span>
@@ -317,9 +326,15 @@ function ThreeWayTab() {
                 <span className="min-w-0">
                   <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                     <ThreeWayBadge status={r.status} />
-                    <span>采购单 <Money cents={r.poTotalCents} /></span>
-                    <span>收货 <Money cents={r.receivedCents} /></span>
-                    <span>发票 <Money cents={r.invoicedCents} /></span>
+                    <span>
+                      采购单 <Money cents={r.poTotalCents} />
+                    </span>
+                    <span>
+                      收货 <Money cents={r.receivedCents} />
+                    </span>
+                    <span>
+                      发票 <Money cents={r.invoicedCents} />
+                    </span>
                     {r.contractNo && <span className="text-ink-3">合同 {r.contractNo}</span>}
                   </span>
                   <span className={cn('mt-0.5 block text-[12.5px]', r.status === 'held' ? 'text-clay' : 'text-ink-3')}>
@@ -364,7 +379,11 @@ export function ReleaseDialog({ row, onClose }: { row: ThreeWayRow | null; onClo
       toast({ tone: 'success', title: '已放行', body: row.poNo });
       onClose();
     } catch (e) {
-      toast({ tone: 'error', title: e instanceof UncertainError ? `没收到结果：${errorMessage(e)}` : errorMessage(e), body: e instanceof UncertainError ? '刷新后看状态；再放行一次不会重复' : row.poNo });
+      toast({
+        tone: 'error',
+        title: e instanceof UncertainError ? `没收到结果：${errorMessage(e)}` : errorMessage(e),
+        body: e instanceof UncertainError ? '刷新后看状态；再放行一次不会重复' : row.poNo,
+      });
       if (!(e instanceof UncertainError)) key.current = uuid();
     } finally {
       setBusy(false);
@@ -377,7 +396,9 @@ export function ReleaseDialog({ row, onClose }: { row: ThreeWayRow | null; onClo
       busy={busy}
       title={`确认放行 ${row?.poNo ?? ''}`}
       description={
-        row ? `采购单 ¥${formatAmount(row.poTotalCents)}、收货 ¥${formatAmount(row.receivedCents)}、发票 ¥${formatAmount(row.invoicedCents)}：${row.reason}。放行时记下这三个金额，之后变了要重新放行。` : undefined
+        row
+          ? `采购单 ¥${formatAmount(row.poTotalCents)}、收货 ¥${formatAmount(row.receivedCents)}、发票 ¥${formatAmount(row.invoicedCents)}：${row.reason}。放行时记下这三个金额，之后变了要重新放行。`
+          : undefined
       }
       label="放行原因"
       confirmLabel="确认放行"
@@ -462,7 +483,9 @@ function WeeklyTab() {
     <div className="space-y-3" data-testid="weekly-payables">
       <div className="flex flex-wrap items-end gap-3">
         <div>
-          <p className="text-[12.5px] text-ink-3">{w.from} 起 {w.weeks.length} 周合计</p>
+          <p className="text-[12.5px] text-ink-3">
+            {w.from} 起 {w.weeks.length} 周合计
+          </p>
           <Money cents={w.totalCents} className="text-[22px] font-bold" />
         </div>
         <label className="text-[12.5px] text-ink-3">
@@ -474,7 +497,11 @@ function WeeklyTab() {
             {fundsCents < w.totalCents ? `资金缺口 ¥${formatAmount(w.totalCents - fundsCents)}` : `够付，余 ¥${formatAmount(fundsCents - w.totalCents)}`}
           </p>
         )}
-        <a href="/api/erp/payments/weekly/export" className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[13px] font-semibold text-ink-2 hover:bg-paper-2" data-testid="weekly-export">
+        <a
+          href="/api/erp/payments/weekly/export"
+          className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[13px] font-semibold text-ink-2 hover:bg-paper-2"
+          data-testid="weekly-export"
+        >
           <Download className="size-4" />
           导出
         </a>
@@ -483,7 +510,10 @@ function WeeklyTab() {
         <Card key={wk.start} className="p-4">
           <div className="mb-2 flex items-center gap-2">
             <h3 className="text-[14px] font-bold">
-              第 {i + 1} 周 <span className="num font-normal text-ink-3">{wk.start} 至 {wk.end}</span>
+              第 {i + 1} 周{' '}
+              <span className="num font-normal text-ink-3">
+                {wk.start} 至 {wk.end}
+              </span>
             </h3>
             <Money cents={wk.totalCents} className="ml-auto text-[15px] font-bold" />
           </div>
@@ -523,7 +553,17 @@ function WeeklyTab() {
         </p>
       )}
       {w.weeks.every((wk) => wk.items.length === 0) && (
-        <EmptyState art="search" title={`${w.weeks.length} 周内没有要付的`} description="已批待付的付款申请、可付还没申请的合同段、到期的质保金会列在这里。" action={<Link to="/erp/payments/requests/new" className="inline-flex items-center gap-1 font-semibold text-lake"><FilePlus2 className="size-4" />发起付款申请</Link>} />
+        <EmptyState
+          art="search"
+          title={`${w.weeks.length} 周内没有要付的`}
+          description="已批待付的付款申请、可付还没申请的合同段、到期的质保金会列在这里。"
+          action={
+            <Link to="/erp/payments/requests/new" className="inline-flex items-center gap-1 font-semibold text-lake">
+              <FilePlus2 className="size-4" />
+              发起付款申请
+            </Link>
+          }
+        />
       )}
     </div>
   );

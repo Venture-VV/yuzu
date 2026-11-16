@@ -211,7 +211,11 @@ function EmployeeDialog({ open, row, onClose, onSaved }: { open: boolean; row: C
   const [error, setError] = useState('');
   useResetOnOpen(open, () => {
     setError('');
-    setForm(row ? { empNo: row.empNo, name: row.name, departmentId: row.departmentId ? String(row.departmentId) : '', role: row.role, active: row.active } : { empNo: '', name: '', departmentId: '', role: 'staff', active: true });
+    setForm(
+      row
+        ? { empNo: row.empNo, name: row.name, departmentId: row.departmentId ? String(row.departmentId) : '', role: row.role, active: row.active }
+        : { empNo: '', name: '', departmentId: '', role: 'staff', active: true },
+    );
   }, [row?.id]);
 
   const save = async () => {
@@ -381,7 +385,13 @@ function BatchDialog({ open, onClose, onDone }: { open: boolean; onClose: () => 
                   <td className="px-2 py-1.5">{r.name}</td>
                   <td className="px-2 py-1.5 text-ink-3">{r.department}</td>
                   <td className="px-3 py-1.5 text-right">
-                    {r.status === 'new' ? <Badge tone="pine">新加</Badge> : r.status === 'same' ? <Badge tone="neutral">已有，跳过</Badge> : <span className="text-[12.5px] font-semibold text-clay">{r.message}</span>}
+                    {r.status === 'new' ? (
+                      <Badge tone="pine">新加</Badge>
+                    ) : r.status === 'same' ? (
+                      <Badge tone="neutral">已有，跳过</Badge>
+                    ) : (
+                      <span className="text-[12.5px] font-semibold text-clay">{r.message}</span>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -193,11 +193,7 @@ export function minutesText(minutes: number): string {
  * 浴票延迟（v0.7.25 续，MEMBERSHIP_P3 第 4 节）：这位会员（档阶已取自己的与临时身份高的）能享的几项里分钟数最多的一项（不相加，M64）；
  * 分钟数相同时按清单顺序。不享的为空
  */
-export function ticketExtensionFor<B extends BenefitTerms & { id: number; sortOrder: number }>(
-  defs: readonly B[],
-  grade: number,
-  tier: number | null,
-): { benefit: B; minutes: number } | null {
+export function ticketExtensionFor<B extends BenefitTerms & { id: number; sortOrder: number }>(defs: readonly B[], grade: number, tier: number | null): { benefit: B; minutes: number } | null {
   let best: { benefit: B; minutes: number } | null = null;
   for (const d of defs) {
     if (!benefitEligible(d, grade, tier)) continue;
@@ -220,7 +216,13 @@ export function rateText(rate: number): string {
 /** 「每天」「每周一、周四」「每月 8 日」「每月 8 日（周一至周日都行）」 */
 export function discountDaysText(weekdays: readonly number[], monthDays: readonly number[]): string {
   const parts: string[] = [];
-  if (weekdays.length) parts.push(`每${[...weekdays].sort((a, b) => a - b).map((d) => WEEKDAY_LABELS[d - 1]).join('、')}`);
+  if (weekdays.length)
+    parts.push(
+      `每${[...weekdays]
+        .sort((a, b) => a - b)
+        .map((d) => WEEKDAY_LABELS[d - 1])
+        .join('、')}`,
+    );
   if (monthDays.length) parts.push(`每月 ${[...monthDays].sort((a, b) => a - b).join('、')} 日`);
   return parts.length ? parts.join('，且') : '每天';
 }
@@ -235,10 +237,7 @@ export function discountDayMatches(d: { weekdays: readonly number[]; monthDays: 
 }
 
 /** 适用的明细：客房房费按部门「客房」、门票按「门票」（与部门营业额快照同一口径），整张账单是全部明细 */
-export function discountLines<L extends { category: string; partyRoomDay?: boolean; usageCharge?: 'fee' | 'open_fee' | null }>(
-  target: DiscountTarget,
-  lines: readonly L[],
-): L[] {
+export function discountLines<L extends { category: string; partyRoomDay?: boolean; usageCharge?: 'fee' | 'open_fee' | null }>(target: DiscountTarget, lines: readonly L[]): L[] {
   // 同行优惠按同行客人的明细，口径与本人的门票、整张账单一样
   if (target === 'bill' || target === 'companion_bill') return [...lines];
   // 包房房费折扣：客房房费，加上派对房等的房费（营业日是周一至周四的，M44；v0.7.28）。
@@ -307,16 +306,52 @@ export function parseStart(text: string): { grade: Grade; tier: Tier | null } | 
 }
 
 const service = (code: string, name: string, start: string, content: string, conditions: string, status: 'draft' | 'paused' = 'draft'): CatalogEntry => ({
-  code, name, start, content, conditions, category: 'service', period: 'none', quantity: null, events: [], status,
+  code,
+  name,
+  start,
+  content,
+  conditions,
+  category: 'service',
+  period: 'none',
+  quantity: null,
+  events: [],
+  status,
 });
 const monthlyCoupon = (code: string, name: string, start: string, content: string, conditions: string, period: 'month' | 'year' = 'month', status: 'draft' | 'paused' = 'draft'): CatalogEntry => ({
-  code, name, start, content, conditions, category: 'coupon', period, quantity: 1, events: [], status,
+  code,
+  name,
+  start,
+  content,
+  conditions,
+  category: 'coupon',
+  period,
+  quantity: 1,
+  events: [],
+  status,
 });
 const eventGift = (code: string, name: string, start: string, content: string, conditions: string, events: BenefitEvent[]): CatalogEntry => ({
-  code, name, start, content, conditions, category: 'event', period: 'none', quantity: 1, events, status: 'draft',
+  code,
+  name,
+  start,
+  content,
+  conditions,
+  category: 'event',
+  period: 'none',
+  quantity: 1,
+  events,
+  status: 'draft',
 });
 const listed = (category: 'discount' | 'extension' | 'info', code: string, name: string, start: string, content: string, conditions: string): CatalogEntry => ({
-  code, name, start, content, conditions, category, period: 'none', quantity: null, events: [], status: 'draft',
+  code,
+  name,
+  start,
+  content,
+  conditions,
+  category,
+  period: 'none',
+  quantity: null,
+  events: [],
+  status: 'draft',
 });
 
 /**

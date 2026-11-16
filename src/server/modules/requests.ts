@@ -180,15 +180,19 @@ async function summaries(
       ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
       ${f.from && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date >= ${f.from}` : db``}
       ${f.to && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date <= ${f.to}` : db``}
-      ${f.requesterOrDept
-        ? db`AND (r.requester_id = ${f.requesterOrDept.staffId} OR r.department_id = ${f.requesterOrDept.departmentId ?? 0}
+      ${
+        f.requesterOrDept
+          ? db`AND (r.requester_id = ${f.requesterOrDept.staffId} OR r.department_id = ${f.requesterOrDept.departmentId ?? 0}
                   OR r.dept_head_id = ${f.requesterOrDept.staffId}
                   OR r.department_id IN (SELECT hd2.id FROM departments hd2 WHERE hd2.head_id = ${f.requesterOrDept.staffId}))`
-        : db``}
-    ${f.status === 'submitted'
-      ? // 待审核（CG02）：紧急在前 → 期望到货日期早的在前（没填的排后）→ 提交早的在前（与 @shared/requests 的 reviewOrder 一样）
-        db`ORDER BY (r.priority = 'urgent') DESC, r.need_by ASC NULLS LAST, r.submitted_at, r.id`
-      : db`ORDER BY r.created_at DESC, r.id DESC`}
+          : db``
+      }
+    ${
+      f.status === 'submitted'
+        ? // 待审核（CG02）：紧急在前 → 期望到货日期早的在前（没填的排后）→ 提交早的在前（与 @shared/requests 的 reviewOrder 一样）
+          db`ORDER BY (r.priority = 'urgent') DESC, r.need_by ASC NULLS LAST, r.submitted_at, r.id`
+        : db`ORDER BY r.created_at DESC, r.id DESC`
+    }
     LIMIT 500`;
 }
 
@@ -444,7 +448,17 @@ export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?:
 
 async function lockRequest(tx: Db, requestId: number) {
   const [r] = await tx<
-    { id: number; status: RequestStatus; requesterId: number; departmentId: number; docNo: string; approvableOn: string | null; priority: RequestPriority; deptConfirm: 'none' | 'pending' | 'confirmed'; deptHeadId: number | null }[]
+    {
+      id: number;
+      status: RequestStatus;
+      requesterId: number;
+      departmentId: number;
+      docNo: string;
+      approvableOn: string | null;
+      priority: RequestPriority;
+      deptConfirm: 'none' | 'pending' | 'confirmed';
+      deptHeadId: number | null;
+    }[]
   >`
     SELECT id, status, requester_id, department_id, doc_no, approvable_on, priority, dept_confirm, dept_head_id FROM purchase_requests WHERE id = ${requestId} FOR UPDATE`;
   if (!r) throw notFound('需求单不存在');
@@ -483,14 +497,7 @@ export async function updateRequest(deps: Deps, requestId: number, raw: unknown,
   return getRequest(deps.sql, actor, requestId, deps.config.timezone);
 }
 
-export async function actOnRequest(
-  deps: Deps,
-  requestId: number,
-  action: 'approve' | 'return' | 'reject' | 'cancel' | 'dept-confirm' | 'dept-return',
-  raw: unknown,
-  actor: Actor,
-  ip?: string,
-) {
+export async function actOnRequest(deps: Deps, requestId: number, action: 'approve' | 'return' | 'reject' | 'cancel' | 'dept-confirm' | 'dept-return', raw: unknown, actor: Actor, ip?: string) {
   const reason = action === 'approve' || action === 'dept-confirm' ? '' : parse(ReasonInput, raw).reason;
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
@@ -634,28 +641,30 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
     WHERE (r.created_at AT TIME ZONE ${timezone})::date BETWEEN ${f.from} AND ${f.to}
       ${f.status ? db`AND r.status = ${f.status}` : db``} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}`;
   if (n!.count > EXPORT_LIMIT) throw unprocessable('EXPORT_TOO_LARGE', `这段时间有 ${n!.count} 行需求，一次最多导出 ${EXPORT_LIMIT} 行，请缩短日期范围`);
-  const rows = await db<{
-    docNo: string;
-    /** 门店时区的提交时间（与按提交日期筛选同一时区，v0.7.9 审查修正：原来按 UTC 写） */
-    createdLocal: string;
-    departmentName: string;
-    requesterName: string;
-    status: RequestStatus;
-    needBy: string | null;
-    lineNo: number;
-    name: string;
-    materialName: string | null;
-    purpose: string;
-    qtyMilli: number;
-    unit: string;
-    refPriceCents: number | null;
-    link: string;
-    details: string;
-    note: string;
-    imageCount: number;
-    progress: RawProgress | null;
-    sourcing: { id: number; docNo: string } | null;
-  }[]>`
+  const rows = await db<
+    {
+      docNo: string;
+      /** 门店时区的提交时间（与按提交日期筛选同一时区，v0.7.9 审查修正：原来按 UTC 写） */
+      createdLocal: string;
+      departmentName: string;
+      requesterName: string;
+      status: RequestStatus;
+      needBy: string | null;
+      lineNo: number;
+      name: string;
+      materialName: string | null;
+      purpose: string;
+      qtyMilli: number;
+      unit: string;
+      refPriceCents: number | null;
+      link: string;
+      details: string;
+      note: string;
+      imageCount: number;
+      progress: RawProgress | null;
+      sourcing: { id: number; docNo: string } | null;
+    }[]
+  >`
     SELECT r.doc_no, to_char(r.created_at AT TIME ZONE ${timezone}, 'YYYY-MM-DD HH24:MI') AS created_local,
            d.name AS department_name, s.display_name AS requester_name, r.status, r.need_by,
            l.line_no, l.name, m.name AS material_name, l.purpose, l.qty_milli, l.unit, l.ref_price_cents, l.link, l.details, l.note,
@@ -668,8 +677,32 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
       ${f.status ? db`AND r.status = ${f.status}` : db``} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
     ORDER BY r.created_at, r.id, l.line_no`;
   const out: (string | number)[][] = [
-    ['需求单号', '提交时间', '部门', '提单人', '状态', '需要日期', '行号', '产品名', '物料', '用途', '数量', '单位', '参考单价（元）', '参考链接', '详情 / 规格', '备注', '图片张数',
-     '进度', '采购单号', '供应商', '下单数量', '到货数量', '退货数量', '库存单位'],
+    [
+      '需求单号',
+      '提交时间',
+      '部门',
+      '提单人',
+      '状态',
+      '需要日期',
+      '行号',
+      '产品名',
+      '物料',
+      '用途',
+      '数量',
+      '单位',
+      '参考单价（元）',
+      '参考链接',
+      '详情 / 规格',
+      '备注',
+      '图片张数',
+      '进度',
+      '采购单号',
+      '供应商',
+      '下单数量',
+      '到货数量',
+      '退货数量',
+      '库存单位',
+    ],
   ];
   for (const r of rows) {
     const p = progressOf(r.progress, r.sourcing);
@@ -713,7 +746,12 @@ const ListQuery = z.object({
   to: docDateSchema.optional(),
 });
 const ExportQuery = ListQuery.extend({ from: docDateSchema, to: docDateSchema });
-const IdsQuery = z.object({ ids: z.string().regex(/^\d+(,\d+)*$/).optional() });
+const IdsQuery = z.object({
+  ids: z
+    .string()
+    .regex(/^\d+(,\d+)*$/)
+    .optional(),
+});
 const keyParam = z.object({ key: z.uuid('操作编号格式不正确') });
 
 export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
@@ -721,9 +759,7 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
   const docId = (req: { params: unknown }) => parse(idParam, req.params).id;
   const anyRequest = guardAny('request.create', 'request.review');
 
-  app.get('/api/erp/requests', { preHandler: anyRequest }, async (req) =>
-    readSnapshot(sql, (tx) => listRequests(tx, req.actor, { ...parse(ListQuery, req.query), timezone: deps.config.timezone })),
-  );
+  app.get('/api/erp/requests', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => listRequests(tx, req.actor, { ...parse(ListQuery, req.query), timezone: deps.config.timezone })));
   app.get('/api/erp/requests/open-lines', { preHandler: guardAny('request.review') }, async (req) => {
     const { ids } = parse(IdsQuery, req.query);
     return openLines(sql, ids ? ids.split(',').map(Number) : undefined);

@@ -1,17 +1,10 @@
-import type { NativeMemberSummary } from "./types";
+import type { NativeMemberSummary } from './types';
 
 /** Calendar-month anniversaries in the store timezone, rather than 30/90-day approximations. */
-export const INSIGHT_BUCKETS = [
-  "recent",
-  "oneToThree",
-  "threeToSix",
-  "sixToTwelve",
-  "twelvePlus",
-  "never",
-] as const;
+export const INSIGHT_BUCKETS = ['recent', 'oneToThree', 'threeToSix', 'sixToTwelve', 'twelvePlus', 'never'] as const;
 export type InsightDormancyBucket = (typeof INSIGHT_BUCKETS)[number];
 /** A combined filter only; each member keeps its exclusive dormancy classification. */
-export const INSIGHT_FILTER_BUCKETS = [...INSIGHT_BUCKETS, "dormant"] as const;
+export const INSIGHT_FILTER_BUCKETS = [...INSIGHT_BUCKETS, 'dormant'] as const;
 export type InsightBucketFilter = (typeof INSIGHT_FILTER_BUCKETS)[number];
 
 export interface InsightMember extends NativeMemberSummary {

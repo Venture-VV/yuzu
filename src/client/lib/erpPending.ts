@@ -1,6 +1,6 @@
 import { useMemo, useSyncExternalStore } from 'react';
 import type { ErpOpLookup, ErpOpType } from '@shared/erp';
-import { api, ApiError, UncertainError } from './api';
+import { api, ApiError, notSentAsRejection, UncertainError } from './api';
 
 // ERP 单据「结果待确认」的登记（费用报销、备用金打款与退回补付、部门需求单，v0.7.8），保存在本机浏览器里。
 //
@@ -167,7 +167,9 @@ export async function sendErpOp<T>(op: Omit<ErpPendingOp, 'createdAt' | 'uncerta
     const result = await api.post<T>(record.url, record.body, { timeoutMs: 20_000 });
     removeErpPending(record.key);
     return result;
-  } catch (e) {
+  } catch (raw) {
+    // 第一次提交被「连不上服务器、没发出去」挡下（8.1.3）：等同被明确拒绝，删记录、调用方照常显示原因（填的内容还在）
+    const e = retry ? raw : notSentAsRejection(raw);
     if (e instanceof UncertainError) markUncertain(record.key);
     // 只有第一次提交就被服务端明确拒绝才删：重提被拒绝时，之前那次请求可能随后登记，要先查回或作废（v0.7.9 修正）
     else if (retry) markUncertain(record.key);

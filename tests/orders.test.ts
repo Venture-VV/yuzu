@@ -91,11 +91,22 @@ beforeAll(async () => {
 
   // ① 张先生：搓澡分两次挂（同一个项目两行）+ 按摩，抹零 10 元
   const v1 = await enter('Q9001', { guestLabel: '张先生' });
-  await post(v1, [{ itemId: item['查询搓澡']!, quantity: 1 }, { itemId: item['查询按摩']!, quantity: 1 }]);
+  await post(v1, [
+    { itemId: item['查询搓澡']!, quantity: 1 },
+    { itemId: item['查询按摩']!, quantity: 1 },
+  ]);
   await post(v1, [{ itemId: item['查询搓澡']!, quantity: 2 }]);
-  const grant = await api(ctx.app, ctx.clerk, 'POST', '/api/auth/authorize', { username: 'duty', password: PASSWORD, purpose: 'checkout_discount', scope: { visitIds: [v1], amount: 1000, reason: '老客人抹零' } });
+  const grant = await api(ctx.app, ctx.clerk, 'POST', '/api/auth/authorize', {
+    username: 'duty',
+    password: PASSWORD,
+    purpose: 'checkout_discount',
+    scope: { visitIds: [v1], amount: 1000, reason: '老客人抹零' },
+  });
   expect(grant.status, JSON.stringify(grant.body)).toBe(200);
-  zhang = await pay(v1, (t) => [{ method: 'discount', amount: 1000, grantId: grant.body.grantId }, { method: 'cash', amount: t - 1000 }]);
+  zhang = await pay(v1, (t) => [
+    { method: 'discount', amount: 1000, grantId: grant.body.grantId },
+    { method: 'cash', amount: t - 1000 },
+  ]);
 
   // ② 会员王查询：微信
   const m = await createMember(ctx, '王查询', PHONE);
@@ -118,9 +129,18 @@ beforeAll(async () => {
   const tableId = tb.body.tables.find((t: { name: string }) => t.name === '查1').id;
   const open = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/tables/open', { clientKey: randomUUID(), tableId, guests: 2 });
   expect(open.status, JSON.stringify(open.body)).toBe(200);
-  const order = await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/sessions/${open.body.id}/orders`, { clientKey: randomUUID(), lines: [{ itemId: item['查询炒饭']!, quantity: 2 }], expectedTotal: 5600 });
+  const order = await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/sessions/${open.body.id}/orders`, {
+    clientKey: randomUUID(),
+    lines: [{ itemId: item['查询炒饭']!, quantity: 2 }],
+    expectedTotal: 5600,
+  });
   expect(order.status, JSON.stringify(order.body)).toBe(200);
-  const done = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/tables/checkout', { clientKey: randomUUID(), sessionIds: [open.body.id], expectedTotal: 5600, payments: [{ method: 'wechat', amount: 5600 }] });
+  const done = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/tables/checkout', {
+    clientKey: randomUUID(),
+    sessionIds: [open.body.id],
+    expectedTotal: 5600,
+    payments: [{ method: 'wechat', amount: 5600 }],
+  });
   expect(done.status, JSON.stringify(done.body)).toBe(200);
   table = done.body;
 
@@ -138,7 +158,15 @@ afterAll(async () => ctx.close());
 
 describe('摊优惠与搜索词（不连数据库）', () => {
   const line = (lineId: number, name: string, quantity: number, unitPrice: number, category = '洗浴'): RawOrderLine => ({
-    lineId, itemName: name, holder: '手牌 A1', name, category, technician: null, quantity, unitPrice, amount: quantity * unitPrice,
+    lineId,
+    itemName: name,
+    holder: '手牌 A1',
+    name,
+    category,
+    technician: null,
+    quantity,
+    unitPrice,
+    amount: quantity * unitPrice,
   });
 
   it('同一个项目的优惠按金额比例摊到行，尾差按舍去的部分从大到小补 1 分；各行相加 = 这个项目的优惠', () => {
@@ -172,10 +200,12 @@ describe('摊优惠与搜索词（不连数据库）', () => {
     expect(allocateLineDiscounts([], [{ category: '洗浴', name: '搓澡', quantity: 1, amount: 6800, discount: 0 }])).toBeNull();
     expect(allocateLineDiscounts([], [])).toEqual([]);
     // 按快照显示：快照里没有单价，只有 1 份的才显示
-    expect(linesFromItems([
-      { category: '按摩', name: '按摩', quantity: 1, amount: 19800, discount: 100 },
-      { category: '门票', name: '门票 · 不含餐', quantity: 2, amount: 109800 + 49900, discount: 0 },
-    ]).map((l) => [l.holder, l.name, l.technician, l.quantity, l.unitPrice, l.amount, l.discount])).toEqual([
+    expect(
+      linesFromItems([
+        { category: '按摩', name: '按摩', quantity: 1, amount: 19800, discount: 100 },
+        { category: '门票', name: '门票 · 不含餐', quantity: 2, amount: 109800 + 49900, discount: 0 },
+      ]).map((l) => [l.holder, l.name, l.technician, l.quantity, l.unitPrice, l.amount, l.discount]),
+    ).toEqual([
       ['', '按摩', null, 1, 19800, 19800, 100],
       ['', '门票 · 不含餐', null, 2, null, 159700, 0],
     ]);
@@ -200,8 +230,18 @@ describe('订单查询', () => {
     expect(docNos(r)).toEqual([refund.refundNo, table.checkoutNo, voided.checkoutNo, wang.checkoutNo, zhang.checkoutNo]);
     const z = r.rows.find((x) => x.docNo === zhang.checkoutNo)!;
     expect(z).toMatchObject({
-      kind: 'checkout', id: zhang.id, checkoutId: zhang.id, checkoutNo: zhang.checkoutNo, businessDate: today, status: 'completed',
-      amount: 49900 + 6800 * 3 + 19800, refundedAmount: 6000, tagCodes: ['Q9001'], tableNames: [], guests: ['张先生'], operatorName: '测试店员',
+      kind: 'checkout',
+      id: zhang.id,
+      checkoutId: zhang.id,
+      checkoutNo: zhang.checkoutNo,
+      businessDate: today,
+      status: 'completed',
+      amount: 49900 + 6800 * 3 + 19800,
+      refundedAmount: 6000,
+      tagCodes: ['Q9001'],
+      tableNames: [],
+      guests: ['张先生'],
+      operatorName: '测试店员',
     });
     expect([...z.methods].sort()).toEqual(['cash', 'discount']);
     expect(orderStatusLabel(z)).toBe('已结账 · 有退款');
@@ -209,8 +249,17 @@ describe('订单查询', () => {
     expect(r.rows.find((x) => x.docNo === wang.checkoutNo)).toMatchObject({ guests: ['王查询'], methods: ['wechat'], refundedAmount: 0 });
     expect(r.rows.find((x) => x.docNo === table.checkoutNo)).toMatchObject({ tagCodes: [], tableNames: ['查1'], amount: 5600 });
     expect(r.rows[0]).toMatchObject({
-      kind: 'refund', id: refund.id, checkoutId: zhang.id, checkoutNo: zhang.checkoutNo, status: 'completed', amount: 6000, refundedAmount: 0,
-      tagCodes: ['Q9001'], guests: ['张先生'], methods: ['cash'], operatorName: '值班经理',
+      kind: 'refund',
+      id: refund.id,
+      checkoutId: zhang.id,
+      checkoutNo: zhang.checkoutNo,
+      status: 'completed',
+      amount: 6000,
+      refundedAmount: 0,
+      tagCodes: ['Q9001'],
+      guests: ['张先生'],
+      methods: ['cash'],
+      operatorName: '值班经理',
     });
     // 翻到前一个营业日：结账演示的单
     const [d] = await ctx.sql<{ date: string }[]>`SELECT DISTINCT to_char(business_date, 'YYYY-MM-DD') AS date FROM checkouts WHERE note = '结账演示'`;
@@ -313,7 +362,10 @@ describe('逐行明细', () => {
     // 与结账时记下的项目快照一分不差；同一个项目的两行按金额比例
     const items = await ctx.sql<{ category: string; name: string; discount: number }[]>`SELECT category, name, discount FROM checkout_items WHERE checkout_id = ${zhang.id}`;
     for (const i of items) {
-      expect(d.lines.filter((l) => l.category === i.category && l.name === i.name).reduce((s, l) => s + l.discount, 0), i.name).toBe(Number(i.discount));
+      expect(
+        d.lines.filter((l) => l.category === i.category && l.name === i.name).reduce((s, l) => s + l.discount, 0),
+        i.name,
+      ).toBe(Number(i.discount));
     }
     const [one, , two] = posted;
     expect(Math.abs(two!.discount - one!.discount * 2)).toBeLessThanOrEqual(1);
@@ -340,8 +392,12 @@ describe('逐行明细', () => {
     const r = await api<RefundDetail>(ctx.app, duty, 'GET', `/api/ledger/orders/refunds/${refund.id}`);
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({
-      refundNo: refund.refundNo, checkoutNo: zhang.checkoutNo, amount: 6000, reason: '客人投诉服务',
-      items: [{ category: '查询洗浴', name: '查询搓澡', quantity: 1, amount: 6000 }], payments: [{ method: 'cash', amount: 6000 }],
+      refundNo: refund.refundNo,
+      checkoutNo: zhang.checkoutNo,
+      amount: 6000,
+      reason: '客人投诉服务',
+      items: [{ category: '查询洗浴', name: '查询搓澡', quantity: 1, amount: 6000 }],
+      payments: [{ method: 'cash', amount: 6000 }],
     });
   });
 
@@ -365,7 +421,16 @@ describe('逐行明细', () => {
 
 describe('导出明细 CSV', () => {
   const parseCsv = (text: string) =>
-    text.replace(/^﻿/, '').trim().split('\r\n').map((row) => row.match(/("([^"]|"")*"|[^,]*)(,|$)/g)!.slice(0, -1).map((c) => c.replace(/,$/, '').replace(/^"|"$/g, '').replace(/""/g, '"')));
+    text
+      .replace(/^﻿/, '')
+      .trim()
+      .split('\r\n')
+      .map((row) =>
+        row
+          .match(/("([^"]|"")*"|[^,]*)(,|$)/g)!
+          .slice(0, -1)
+          .map((c) => c.replace(/,$/, '').replace(/^"|"$/g, '').replace(/""/g, '"')),
+      );
   const cents = (s: string) => Math.round(Number(s.replace(/,/g, '')) * 100);
 
   it('一行一个消费项目；金额相加 = 这些结账单的金额相加；退款单的行是负数；记审计', async () => {
@@ -375,7 +440,26 @@ describe('导出明细 CSV', () => {
     expect(decodeURIComponent(String(res.headers['content-disposition']))).toContain(`浴族订单明细-${today}.csv`);
     expect(res.body.startsWith('﻿')).toBe(true);
     const [header, ...rows] = parseCsv(res.body);
-    expect(header).toEqual(['营业日', '时间', '单号', '类型', '状态', '手牌 / 桌号', '会员 / 称呼', '部门', '项目', '技师', '数量', '单价', '金额', '优惠', '实收', '整单收款方式', '经办人', '原结账单号']);
+    expect(header).toEqual([
+      '营业日',
+      '时间',
+      '单号',
+      '类型',
+      '状态',
+      '手牌 / 桌号',
+      '会员 / 称呼',
+      '部门',
+      '项目',
+      '技师',
+      '数量',
+      '单价',
+      '金额',
+      '优惠',
+      '实收',
+      '整单收款方式',
+      '经办人',
+      '原结账单号',
+    ]);
     const col = (name: string) => header!.indexOf(name);
     const list = await search({});
     const checkoutRows = rows.filter((r) => r[col('类型')] === '结账单');
@@ -392,7 +476,14 @@ describe('导出明细 CSV', () => {
     expect(rows.find((r) => r[col('单号')] === voided.checkoutNo)![col('状态')]).toBe('已反结账');
     const back = rows.find((r) => r[col('类型')] === '退款单')!;
     expect([back[col('单号')], back[col('部门')], back[col('项目')], back[col('数量')], back[col('金额')], back[col('实收')], back[col('原结账单号')], back[col('经办人')]]).toEqual([
-      refund.refundNo, '查询洗浴', '查询搓澡', '-1', '-60.00', '-60.00', zhang.checkoutNo, '值班经理',
+      refund.refundNo,
+      '查询洗浴',
+      '查询搓澡',
+      '-1',
+      '-60.00',
+      '-60.00',
+      zhang.checkoutNo,
+      '值班经理',
     ]);
 
     const [audit] = await ctx.sql<{ targetId: string; detail: { q: string; orders: number; lines: number } }[]>`

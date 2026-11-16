@@ -143,19 +143,7 @@ export function OpenUsageDialog({
 }
 
 /** 结束使用（正常结束）或撤单（开错了，写原因；挂过的费用另到前台作废） */
-export function CloseUsageDialog({
-  usage,
-  space,
-  mode,
-  onClose,
-  onDone,
-}: {
-  usage: FloorMapUsage;
-  space: UsageSpace;
-  mode: 'end' | 'cancel';
-  onClose: () => void;
-  onDone: (u: UsageDetail) => void;
-}) {
+export function CloseUsageDialog({ usage, space, mode, onClose, onDone }: { usage: FloorMapUsage; space: UsageSpace; mode: 'end' | 'cancel'; onClose: () => void; onDone: (u: UsageDetail) => void }) {
   const session = useSession();
   const qc = useQueryClient();
   const toast = useToast();

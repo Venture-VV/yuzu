@@ -160,10 +160,7 @@ export function rechargeOutcome(rules: MembershipRules, gradeBefore: Grade, roll
     upgraded: gradeAfter > gradeBefore,
     bonusCents: bonusFor(rules, gradeAfter, paidCents),
     rollingAfterCents,
-    next:
-      nextGrade === null || !nextRule
-        ? null
-        : { grade: nextGrade, name: nextRule.name, needCents: Math.max(0, nextRule.thresholdCents - rollingAfterCents), bonusBp: nextRule.bonusBp },
+    next: nextGrade === null || !nextRule ? null : { grade: nextGrade, name: nextRule.name, needCents: Math.max(0, nextRule.thresholdCents - rollingAfterCents), bonusBp: nextRule.bonusBp },
   };
 }
 

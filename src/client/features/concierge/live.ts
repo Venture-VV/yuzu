@@ -4,7 +4,7 @@
 // 各部件听到再取；指纹管不到的（没建服务档案的会员、别人的到访）另按慢一些的间隔自己刷新。
 // 进页面、回到页面、重新联网时照旧各自马上取一次。
 
-export const REVISION_EVENT = "concierge-revision-changed";
+export const REVISION_EVENT = 'concierge-revision-changed';
 
 /** 工作区的同步发现版本号或指纹变了 */
 export function announceRevision() {

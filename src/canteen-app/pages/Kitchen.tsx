@@ -24,7 +24,40 @@ import { ApiError, addDays, call, dayLabel, messageOf, monthDay, NetworkError, r
 import { Mascot } from '../Mascot';
 import { Button, Card, cn, inputClass, Pill, Sheet, toast } from '../ui';
 
-const FOOD = ['🍚', '🍜', '🥟', '🍲', '🥣', '🐟', '🍤', '🦐', '🍗', '🥩', '🍖', '🥓', '🥚', '🫘', '🥬', '🥦', '🍅', '🥕', '🌽', '🍄', '🥔', '🍠', '🍆', '🌶️', '🍞', '🥯', '🍡', '🍮', '🍉', '🍎', '🧋', '🍵'];
+const FOOD = [
+  '🍚',
+  '🍜',
+  '🥟',
+  '🍲',
+  '🥣',
+  '🐟',
+  '🍤',
+  '🦐',
+  '🍗',
+  '🥩',
+  '🍖',
+  '🥓',
+  '🥚',
+  '🫘',
+  '🥬',
+  '🥦',
+  '🍅',
+  '🥕',
+  '🌽',
+  '🍄',
+  '🥔',
+  '🍠',
+  '🍆',
+  '🌶️',
+  '🍞',
+  '🥯',
+  '🍡',
+  '🍮',
+  '🍉',
+  '🍎',
+  '🧋',
+  '🍵',
+];
 const newId = () => Math.random().toString(36).slice(2, 8);
 type Draft = { dishes: (Dish & { auto: boolean })[]; note: string };
 const fromMenu = (m?: CanteenMenu): Draft => ({ dishes: (m?.dishes ?? []).map((d) => ({ ...d, auto: false })), note: m?.note ?? '' });
@@ -150,10 +183,7 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
       } else {
         // 没网、超时、门店系统出错、饭堂暂时关着、没有权限、正忙：都说明不了原来那次存没存上。本机留着原来的编号和内容，原样重试不会存两遍
         setPending(p);
-        toast(
-          e instanceof NetworkError ? '没收到门店系统的回复：这次可能存好了，也可能没有，联网后点「原样重试」' : `${messageOf(e)}（上一次保存先留在手机上，之后点「原样重试」）`,
-          'error',
-        );
+        toast(e instanceof NetworkError ? '没收到门店系统的回复：这次可能存好了，也可能没有，联网后点「原样重试」' : `${messageOf(e)}（上一次保存先留在手机上，之后点「原样重试」）`, 'error');
       }
     } finally {
       setBusy(false);
@@ -214,7 +244,10 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
             type="button"
             onClick={() => (!dirty || confirm('改的还没保存，换餐次会丢掉，确定吗？')) && setMeal(m)}
             aria-pressed={m === meal}
-            className={cn('flex-1 rounded-2xl py-2.5 text-[15px] font-extrabold', m === meal ? 'bg-wood-deep text-white shadow-[0_3px_0_var(--color-wood-ink)]' : 'bg-card text-ink-2 ring-1 ring-line')}
+            className={cn(
+              'flex-1 rounded-2xl py-2.5 text-[15px] font-extrabold',
+              m === meal ? 'bg-wood-deep text-white shadow-[0_3px_0_var(--color-wood-ink)]' : 'bg-card text-ink-2 ring-1 ring-line',
+            )}
           >
             {MEAL_EMOJI[m]} {MEAL_LABELS[m]}
           </button>
@@ -239,7 +272,11 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
             {dayLabel(date, today)} {MEAL_LABELS[meal]}
           </h2>
           {server ? server.published ? <Pill tone="leaf">已发布</Pill> : <Pill tone="ink">草稿</Pill> : <Pill tone="ink">还没写</Pill>}
-          {server?.updatedByName && <span className="ml-auto text-[12px] text-ink-3">{server.updatedByName} {timeText(server.updatedAt)} 改的</span>}
+          {server?.updatedByName && (
+            <span className="ml-auto text-[12px] text-ink-3">
+              {server.updatedByName} {timeText(server.updatedAt)} 改的
+            </span>
+          )}
         </div>
         {loadError ? (
           <div className="flex flex-col items-center gap-3 py-6 text-center">
@@ -262,7 +299,12 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
               {draft.dishes.map((d, i) => (
                 <li key={d.id} className="rounded-2xl bg-cream p-2.5" data-testid="dish-editor">
                   <div className="flex items-center gap-2">
-                    <button type="button" onClick={() => setEmojiFor(d.id)} className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white text-[24px] ring-1 ring-line" aria-label="换表情">
+                    <button
+                      type="button"
+                      onClick={() => setEmojiFor(d.id)}
+                      className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white text-[24px] ring-1 ring-line"
+                      aria-label="换表情"
+                    >
                       {d.emoji || suggestDishEmoji(d.name)}
                     </button>
                     <input
@@ -273,7 +315,12 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
                       aria-label={`第 ${i + 1} 道菜的名字`}
                       onChange={(e) => setDish(d.id, { name: e.target.value, ...(d.auto ? { emoji: suggestDishEmoji(e.target.value) } : {}) })}
                     />
-                    <button type="button" onClick={() => edit((x) => ({ ...x, dishes: x.dishes.filter((y) => y.id !== d.id) }))} className="size-9 shrink-0 rounded-full text-[18px] text-ink-3 active:bg-white" aria-label={`删掉第 ${i + 1} 道菜`}>
+                    <button
+                      type="button"
+                      onClick={() => edit((x) => ({ ...x, dishes: x.dishes.filter((y) => y.id !== d.id) }))}
+                      className="size-9 shrink-0 rounded-full text-[18px] text-ink-3 active:bg-white"
+                      aria-label={`删掉第 ${i + 1} 道菜`}
+                    >
                       ✕
                     </button>
                   </div>

@@ -31,8 +31,7 @@ async function send<T = unknown>(page: Page, method: 'post' | 'put', url: string
   return (await res.json()) as T;
 }
 const csvOf = (file: string) => readFileSync(new URL(`../docs/data/${file}`, import.meta.url), 'utf8').replace(/^﻿/, '');
-const noHorizontalScroll = async (page: Page) =>
-  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+const noHorizontalScroll = async (page: Page) => expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 
 /** 店主：样例台账（区域挂上）、带设施文字的样例底图在用 */
 async function prepare(page: Page) {
@@ -152,9 +151,60 @@ test.describe('v0.7.19 对客导览', () => {
       { code: 'L2', title: '二层', width: W, height: H, svgUrl: '/api/guide/floors/L2/svg?b=900201' },
     ],
     zones: [
-      { id: 1, floorCode: 'L1', name: '合成水区', nameEn: 'Sample Pool', kind: 'active', color: '#f4ad85', polygons: [[[100, 100], [1400, 100], [1400, 1400], [100, 1400]]], labelAt: [750, 750], area: 1300 * 1300 },
-      { id: 2, floorCode: 'L1', name: '合成休息区', nameEn: 'Sample Lounge', kind: 'quiet', color: '#9fc4e6', polygons: [[[1600, 100], [2900, 100], [2900, 1400], [1600, 1400]]], labelAt: [2250, 750], area: 1300 * 1300 },
-      { id: 3, floorCode: 'L2', name: '合成大堂', nameEn: '', kind: 'public', color: '#ebe4d6', polygons: [[[100, 100], [2900, 100], [2900, 1400], [100, 1400]]], labelAt: [1500, 750], area: 2800 * 1300 },
+      {
+        id: 1,
+        floorCode: 'L1',
+        name: '合成水区',
+        nameEn: 'Sample Pool',
+        kind: 'active',
+        color: '#f4ad85',
+        polygons: [
+          [
+            [100, 100],
+            [1400, 100],
+            [1400, 1400],
+            [100, 1400],
+          ],
+        ],
+        labelAt: [750, 750],
+        area: 1300 * 1300,
+      },
+      {
+        id: 2,
+        floorCode: 'L1',
+        name: '合成休息区',
+        nameEn: 'Sample Lounge',
+        kind: 'quiet',
+        color: '#9fc4e6',
+        polygons: [
+          [
+            [1600, 100],
+            [2900, 100],
+            [2900, 1400],
+            [1600, 1400],
+          ],
+        ],
+        labelAt: [2250, 750],
+        area: 1300 * 1300,
+      },
+      {
+        id: 3,
+        floorCode: 'L2',
+        name: '合成大堂',
+        nameEn: '',
+        kind: 'public',
+        color: '#ebe4d6',
+        polygons: [
+          [
+            [100, 100],
+            [2900, 100],
+            [2900, 1400],
+            [100, 1400],
+          ],
+        ],
+        labelAt: [1500, 750],
+        area: 2800 * 1300,
+      },
     ],
     markers: [
       { id: 1, floorCode: 'L1', kind: 'toilet', x: 1500, y: 200, label: '卫生间', labelEn: 'Restroom' },
@@ -167,7 +217,10 @@ test.describe('v0.7.19 对客导览', () => {
   const mock = async (page: Page) => {
     await page.route('**/api/guide', (route: Route) => route.fulfill({ json: fake }));
     await page.route('**/api/guide/floors/*/svg*', (route: Route) =>
-      route.fulfill({ contentType: 'image/svg+xml', body: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}"><rect x="10" y="10" width="${W - 20}" height="${H - 20}" fill="none" stroke="#333" stroke-width="12"/></svg>` }),
+      route.fulfill({
+        contentType: 'image/svg+xml',
+        body: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}"><rect x="10" y="10" width="${W - 20}" height="${H - 20}" fill="none" stroke="#333" stroke-width="12"/></svg>`,
+      }),
     );
   };
 

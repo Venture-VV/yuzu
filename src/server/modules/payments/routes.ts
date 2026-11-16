@@ -175,7 +175,10 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps) {
     readSnapshot(sql, async (tx) => {
       const rows = await tx<{ id: number }[]>`
         SELECT id FROM purchase_orders WHERE supplier_id = ${docId(req)} AND status IN ('submitted', 'approved', 'closed') ORDER BY id DESC LIMIT 100`;
-      return poThreeWay(tx, rows.map((r) => Number(r.id)));
+      return poThreeWay(
+        tx,
+        rows.map((r) => Number(r.id)),
+      );
     }),
   );
 
@@ -193,7 +196,17 @@ export function registerPaymentRoutes(app: FastifyInstance, deps: Deps) {
     ];
     w.weeks.forEach((wk, i) => {
       for (const it of wk.items) {
-        rows.push([`第 ${i + 1} 周（${wk.start} 至 ${wk.end}）`, it.date, WEEKLY_ITEM_LABELS[it.kind], it.payee, it.requestNo ?? '', it.contractNo ?? '', it.stage ? PAYMENT_STAGE_LABELS[it.stage] : '', yuanText(it.amountCents), it.note]);
+        rows.push([
+          `第 ${i + 1} 周（${wk.start} 至 ${wk.end}）`,
+          it.date,
+          WEEKLY_ITEM_LABELS[it.kind],
+          it.payee,
+          it.requestNo ?? '',
+          it.contractNo ?? '',
+          it.stage ? PAYMENT_STAGE_LABELS[it.stage] : '',
+          yuanText(it.amountCents),
+          it.note,
+        ]);
       }
       rows.push([`第 ${i + 1} 周合计`, '', '', '', '', '', '', yuanText(wk.totalCents), '']);
     });

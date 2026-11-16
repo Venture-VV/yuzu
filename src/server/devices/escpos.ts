@@ -207,7 +207,7 @@ export function parseEscPosStatus(reply: Buffer): DeviceErrorCode | null {
   if (bytes.length < 2) return null;
   const [printer, offline, paper] = bytes as [number, number, number | undefined];
   if (offline & 0x04) return 'DEVICE_COVER_OPEN';
-  if ((offline & 0x20) || (paper !== undefined && (paper & 0x60) === 0x60)) return 'DEVICE_PAPER_OUT';
+  if (offline & 0x20 || (paper !== undefined && (paper & 0x60) === 0x60)) return 'DEVICE_PAPER_OUT';
   if (offline & 0x40) return 'DEVICE_FAULT';
   if (printer & 0x08) return 'DEVICE_FAULT';
   return null;

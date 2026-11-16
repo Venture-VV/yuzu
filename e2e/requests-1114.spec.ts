@@ -168,7 +168,12 @@ test.describe('店主 2026-11-14 的需求：登记消费与预约', () => {
     await page.route(/\/api\/bookings\?date=/, async (route) => {
       const res = await route.fetch();
       const body = (await res.json()) as BookingBoard;
-      const extra = ['肩颈按摩', '全身精油', '头疗 60 分钟', '面部护理', '泰式按摩', '足疗 90 分钟', '采耳'].map((name, i) => ({ id: 900_000 + i, name: `E2E 多 ${name}`, minutes: 60, category: i < 4 ? 'E2E 按摩' : 'E2E 其他' }));
+      const extra = ['肩颈按摩', '全身精油', '头疗 60 分钟', '面部护理', '泰式按摩', '足疗 90 分钟', '采耳'].map((name, i) => ({
+        id: 900_000 + i,
+        name: `E2E 多 ${name}`,
+        minutes: 60,
+        category: i < 4 ? 'E2E 按摩' : 'E2E 其他',
+      }));
       await route.fulfill({ response: res, json: { ...body, items: [...body.items, ...extra] } });
     });
     await page.reload();

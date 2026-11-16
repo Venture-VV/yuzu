@@ -119,9 +119,7 @@ describe('线上充值那一行的原路退回', () => {
       ['counter', 'wechat', yuan(200), 'WXR-COUNTER-1', 'manual'],
     ]);
     const rows = await listOnlineRefundLines(ctx.sql);
-    expect(rows).toEqual([
-      expect.objectContaining({ refundId: doc.id, refundNo: doc.refundNo, memberId, paymentRef: 'WX4200000001202611049001', amount: yuan(1000) }),
-    ]);
+    expect(rows).toEqual([expect.objectContaining({ refundId: doc.id, refundNo: doc.refundNo, memberId, paymentRef: 'WX4200000001202611049001', amount: yuan(1000) })]);
     expect(await listOnlineRefundLines(ctx.sql, { afterId: rows[0]!.lineId })).toEqual([]);
 
     const date = doc.businessDate;

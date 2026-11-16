@@ -123,17 +123,7 @@ export function Columns({
 }
 
 /** 横条：构成（收款方式、部门、渠道、等级），数值与占比写在条旁边 */
-export function HBars({
-  rows,
-  format,
-  empty,
-  testId,
-}: {
-  rows: { key: string; label: ReactNode; value: number; note?: ReactNode }[];
-  format: (v: number) => string;
-  empty: string;
-  testId?: string;
-}) {
+export function HBars({ rows, format, empty, testId }: { rows: { key: string; label: ReactNode; value: number; note?: ReactNode }[]; format: (v: number) => string; empty: string; testId?: string }) {
   const total = rows.reduce((t, r) => t + Math.max(0, r.value), 0);
   const max = Math.max(1, ...rows.map((r) => r.value));
   if (rows.length === 0) return <p className="mt-3 text-[13px] text-ink-4">{empty}</p>;
@@ -208,9 +198,26 @@ export function PeriodPicker({ value, onChange, today }: { value: Period; onChan
       </div>
       {value.preset === 'custom' && (
         <span className="flex items-center gap-1.5 text-[13px] text-ink-3">
-          <Input type="date" value={value.from} max={value.to} onChange={(e) => e.target.value && onChange({ ...value, from: e.target.value })} fullWidth={false} className="h-8 w-[150px]" aria-label="开始日期" />
+          <Input
+            type="date"
+            value={value.from}
+            max={value.to}
+            onChange={(e) => e.target.value && onChange({ ...value, from: e.target.value })}
+            fullWidth={false}
+            className="h-8 w-[150px]"
+            aria-label="开始日期"
+          />
           至
-          <Input type="date" value={value.to} min={value.from} max={today} onChange={(e) => e.target.value && onChange({ ...value, to: e.target.value })} fullWidth={false} className="h-8 w-[150px]" aria-label="结束日期" />
+          <Input
+            type="date"
+            value={value.to}
+            min={value.from}
+            max={today}
+            onChange={(e) => e.target.value && onChange({ ...value, to: e.target.value })}
+            fullWidth={false}
+            className="h-8 w-[150px]"
+            aria-label="结束日期"
+          />
         </span>
       )}
     </div>

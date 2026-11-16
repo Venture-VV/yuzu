@@ -13,8 +13,7 @@ export const ik = {
   todo: ['erp', 'invoices', 'todo'] as const,
 };
 
-export const search = (params: Record<string, string | undefined>) =>
-  new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
+export const search = (params: Record<string, string | undefined>) => new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
 
 export function useInvalidateInvoices() {
   const qc = useQueryClient();
@@ -31,8 +30,7 @@ export const useInvoiceLedger = (params: { view: InvoiceView; source?: string; f
     placeholderData: keepPreviousData,
   });
 
-export const useInputInvoice = (id: number | null) =>
-  useQuery({ queryKey: ik.one(id ?? 0), queryFn: () => api.get<InputInvoiceDetail>(`/api/erp/invoices/${id}`), enabled: !!id });
+export const useInputInvoice = (id: number | null) => useQuery({ queryKey: ik.one(id ?? 0), queryFn: () => api.get<InputInvoiceDetail>(`/api/erp/invoices/${id}`), enabled: !!id });
 
 export interface InvoiceMatch {
   id: number;
@@ -58,9 +56,7 @@ export const useInvoiceLookup = (no: string, enabled: boolean) =>
     staleTime: 10_000,
   });
 
-export const useInvoiceTodo = (enabled: boolean) =>
-  useQuery({ queryKey: ik.todo, queryFn: () => api.get<InvoiceTodo>('/api/erp/invoices/todo'), enabled, refetchInterval: 300_000 });
+export const useInvoiceTodo = (enabled: boolean) => useQuery({ queryKey: ik.todo, queryFn: () => api.get<InvoiceTodo>('/api/erp/invoices/todo'), enabled, refetchInterval: 300_000 });
 
 /** 登记发票要的发票类型与供应商（台账模块自己的接口，不依赖费用报销模块） */
-export const useInvoiceMeta = (enabled: boolean) =>
-  useQuery({ queryKey: ik.meta, queryFn: () => api.get<InvoiceMeta>('/api/erp/invoices/meta'), enabled, staleTime: 60_000 });
+export const useInvoiceMeta = (enabled: boolean) => useQuery({ queryKey: ik.meta, queryFn: () => api.get<InvoiceMeta>('/api/erp/invoices/meta'), enabled, staleTime: 60_000 });

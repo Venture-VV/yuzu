@@ -447,8 +447,7 @@ export async function listShifts(db: Db, date: string): Promise<ShiftRecord[]> {
 }
 
 /** 能看这个班次：自己开的或在上面待过的（按钱箱交班），或能看历史营业日的岗位（默认值班经理及以上） */
-const canSeeShift = (actor: OpContext['actor'], s: ShiftRecord) =>
-  s.staffId === actor.id || s.members.some((m) => m.staffId === actor.id) || can(actor, 'ledger.readHistory');
+const canSeeShift = (actor: OpContext['actor'], s: ShiftRecord) => s.staffId === actor.id || s.members.some((m) => m.staffId === actor.id) || can(actor, 'ledger.readHistory');
 
 /** 按钱箱交班时开班页选钱箱：每个钱箱此刻有没有开着的班次、谁在上面；本人此刻所在的班次 */
 export async function drawerBoard(db: Db, actorId: number): Promise<DrawerBoard> {
@@ -465,9 +464,7 @@ export async function drawerBoard(db: Db, actorId: number): Promise<DrawerBoard>
     shiftNo: o.shiftNo,
     startedAt: new Date(o.startedAt).toISOString(),
     openingCash: Number(o.openingCash),
-    members: members
-      .filter((m) => m.shiftId === o.id)
-      .map((m) => ({ staffId: m.staffId, staffName: m.staffName, joinedAt: new Date(m.joinedAt).toISOString(), leftAt: null })),
+    members: members.filter((m) => m.shiftId === o.id).map((m) => ({ staffId: m.staffId, staffName: m.staffName, joinedAt: new Date(m.joinedAt).toISOString(), leftAt: null })),
   });
   const listed = new Set(settings.cashDrawers.map((d) => d.key));
   const drawers: DrawerBoard['drawers'] = [
@@ -643,9 +640,7 @@ export async function closeShift(deps: Deps, id: number, raw: unknown, ctx: OpCo
     if (pay.unconsumed || pay.paying) {
       throw conflict(
         'PAY_UNSETTLED',
-        pay.paying
-          ? `这个班次还有 ${pay.paying} 笔扫码收款在支付中，等出了结果再交班`
-          : `这个班次还有 ${pay.unconsumed} 笔扫码收款收了钱没入账：先挂到结账、充值，或原路退回，再交班`,
+        pay.paying ? `这个班次还有 ${pay.paying} 笔扫码收款在支付中，等出了结果再交班` : `这个班次还有 ${pay.unconsumed} 笔扫码收款收了钱没入账：先挂到结账、充值，或原路退回，再交班`,
         pay,
       );
     }

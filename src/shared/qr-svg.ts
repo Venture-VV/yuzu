@@ -24,5 +24,13 @@ export function qrShape(text: string, ecc: 'L' | 'M' | 'Q' | 'H' = 'M'): QrShape
       if (qr.data[y]![x] && qr.types[y]![x] !== QrCodeDataType.Position) modules += cell(x, y);
     }
   }
-  return { size: qr.size, modules, eyes: [{ x: 0, y: 0 }, { x: qr.size - 7, y: 0 }, { x: 0, y: qr.size - 7 }] };
+  return {
+    size: qr.size,
+    modules,
+    eyes: [
+      { x: 0, y: 0 },
+      { x: qr.size - 7, y: 0 },
+      { x: 0, y: qr.size - 7 },
+    ],
+  };
 }

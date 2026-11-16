@@ -15,15 +15,7 @@ import type { ReversalTarget } from '../flows/ReversalDialog';
 import { ENTRY_META } from '../workbench/ActivityList';
 
 /** 流水单据详情：充值单 / 消费单 / 撤销单，含余额变化与关联单据 */
-export function DocDrawer({
-  row,
-  onClose,
-  onReverse,
-}: {
-  row: LedgerRow | null;
-  onClose: () => void;
-  onReverse: (target: ReversalTarget) => void;
-}) {
+export function DocDrawer({ row, onClose, onReverse }: { row: LedgerRow | null; onClose: () => void; onReverse: (target: ReversalTarget) => void }) {
   const can = useCan();
   const url =
     row?.entryType === 'recharge'
@@ -122,7 +114,12 @@ export function DocDrawer({
               不能在这里单独撤销。如需更正，请到「前台 → 结账记录」对结账单 {row.checkoutNo} 反结账，储值随之按原单恢复。
             </Notice>
           ) : (
-            <Button variant="danger" className="w-full" icon={<Undo2 className="size-4" />} onClick={() => onReverse({ consumptionId: row.consumptionId!, memberId: row.memberId, memberName: row.memberName })}>
+            <Button
+              variant="danger"
+              className="w-full"
+              icon={<Undo2 className="size-4" />}
+              onClick={() => onReverse({ consumptionId: row.consumptionId!, memberId: row.memberId, memberName: row.memberName })}
+            >
               撤销这张消费单
             </Button>
           )}
@@ -146,9 +143,7 @@ function RechargeBody({ d }: { d: RechargeDoc }) {
         <Money cents={d.bonusAmount} className="text-yuzu-deep" signed />
       </SummaryRow>
       {d.bonusAmount > 0 && (
-        <SummaryRow label="赠金有效期">
-          {d.bonusExpiresAt ? `至 ${lastUsableDate(d.bonusExpiresAt, session.timezone, session.rules.businessDayStartHour)}` : '长期有效'}
-        </SummaryRow>
+        <SummaryRow label="赠金有效期">{d.bonusExpiresAt ? `至 ${lastUsableDate(d.bonusExpiresAt, session.timezone, session.rules.businessDayStartHour)}` : '长期有效'}</SummaryRow>
       )}
       {d.overLimitApproverName && <SummaryRow label="超限授权">{d.overLimitApproverName}</SummaryRow>}
       {d.paymentRef && <SummaryRow label={d.channel === 'mp' ? '微信支付交易单号' : '收款备注'}>{d.paymentRef}</SummaryRow>}
@@ -170,8 +165,7 @@ function ConsumeBody({ d }: { d: ConsumptionDoc }) {
           <Money cents={d.totalAmount} className="text-[16px]" />
         </SummaryRow>
         <SummaryRow label="扣本金 / 扣赠金">
-          <Money cents={d.principalAmount} className="text-pine" /> <span className="text-ink-4">/</span>{' '}
-          <Money cents={d.bonusAmount} className="text-yuzu-deep" />
+          <Money cents={d.principalAmount} className="text-pine" /> <span className="text-ink-4">/</span> <Money cents={d.bonusAmount} className="text-yuzu-deep" />
         </SummaryRow>
         <SummaryRow label="扣款规则">{DEDUCTION_RULE_LABELS[d.deductionRule].title}</SummaryRow>
         {d.note && <SummaryRow label="备注">{d.note}</SummaryRow>}

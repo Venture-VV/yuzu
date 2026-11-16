@@ -73,7 +73,15 @@ export function KitchenTab() {
     }
   };
   const btn = (k: KitchenItem, action: Action, label: string, variant: 'primary' | 'secondary' | 'ghost', icon?: React.ReactNode) => (
-    <Button size="sm" variant={variant} icon={icon} disabled={busy !== null && busy !== `${action}-${k.id}`} loading={busy === `${action}-${k.id}`} onClick={() => void act(k, action)} data-testid={`kds-${action}-${k.id}`}>
+    <Button
+      size="sm"
+      variant={variant}
+      icon={icon}
+      disabled={busy !== null && busy !== `${action}-${k.id}`}
+      loading={busy === `${action}-${k.id}`}
+      onClick={() => void act(k, action)}
+      data-testid={`kds-${action}-${k.id}`}
+    >
       {label}
     </Button>
   );
@@ -150,7 +158,11 @@ export function KitchenTab() {
           {d.today.avgMinutes !== null && ` · 平均 ${d.today.avgMinutes} 分钟出餐`}
         </p>
       </div>
-      {!kitchen && <Notice tone="info" title="出餐后在「待上菜」里点「上菜」">开始做、出餐由厨房在出品屏上操作。</Notice>}
+      {!kitchen && (
+        <Notice tone="info" title="出餐后在「待上菜」里点「上菜」">
+          开始做、出餐由厨房在出品屏上操作。
+        </Notice>
+      )}
       <div className={cn('grid grid-cols-1 gap-4', columns.length === 3 ? 'md:grid-cols-3' : 'md:grid-cols-2')}>
         {columns.map((c) => (
           <section key={c.key} className="min-w-0 rounded-lg bg-paper-2/60 p-3" data-testid={`kds-col-${c.key}`}>
@@ -302,13 +314,7 @@ export function LimitsTab() {
                       <span className="ml-2 text-[12px] font-normal text-ink-4">{dish.category}</span>
                     </span>
                     <Money cents={dish.price} className="text-[13px] text-ink-3" />
-                    {dish.remaining === null ? (
-                      <Badge>不限量</Badge>
-                    ) : dish.remaining === 0 ? (
-                      <Badge tone="clay">已估清</Badge>
-                    ) : (
-                      <Badge tone="yuzu">剩 {dish.remaining} 份</Badge>
-                    )}
+                    {dish.remaining === null ? <Badge>不限量</Badge> : dish.remaining === 0 ? <Badge tone="clay">已估清</Badge> : <Badge tone="yuzu">剩 {dish.remaining} 份</Badge>}
                     {edit ? (
                       <span className="flex items-center gap-1.5">
                         <Input
@@ -333,7 +339,13 @@ export function LimitsTab() {
                       </span>
                     ) : (
                       <span className="flex items-center gap-1.5">
-                        <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => setEditing({ id: dish.id, value: dish.remaining ? String(dish.remaining) : '' })} data-testid={`limit-set-${dish.name}`}>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy !== null}
+                          onClick={() => setEditing({ id: dish.id, value: dish.remaining ? String(dish.remaining) : '' })}
+                          data-testid={`limit-set-${dish.name}`}
+                        >
                           限量
                         </Button>
                         {dish.remaining !== 0 && (

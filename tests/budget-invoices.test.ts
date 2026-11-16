@@ -149,7 +149,13 @@ describe('费用预算（BI01–BI06）', () => {
     expect((await ok(approveClaim(big.id, approver), 200)).status).toBe('submitted');
     expect((await ok(approveClaim(big.id, boss), 200)).status).toBe('confirmed');
     // 店主建了「超预算报销」的规则：按规则（一级财务）
-    const rule = await api(ctx.app, boss, 'POST', '/api/approvals/rules', { clientKey: randomUUID(), docType: 'expense_over_budget', minCents: 0, steps: [{ group: 'finance' }], note: '超预算财务看' });
+    const rule = await api(ctx.app, boss, 'POST', '/api/approvals/rules', {
+      clientKey: randomUUID(),
+      docType: 'expense_over_budget',
+      minCents: 0,
+      steps: [{ group: 'finance' }],
+      note: '超预算财务看',
+    });
     expect(rule.status, JSON.stringify(rule.body)).toBe(201);
     const ruled = (await ok(claim({ departmentId: deptD, lines: [line({ amountCents: 10_000 })] }))).claim;
     expect(ruled.approval.stepLabels).toEqual(['财务']);
@@ -183,7 +189,14 @@ describe('费用预算（BI01–BI06）', () => {
   });
 
   it('门槛以内、命中了审批规则的报销：登记进审批，不再报错（报销单的守护放开「要不要审批」）', async () => {
-    const rule = await api(ctx.app, boss, 'POST', '/api/approvals/rules', { clientKey: randomUUID(), docType: 'expense_claim', minCents: 0, maxCents: 1_000, steps: [{ group: 'owner' }], note: '十块以内店主看' });
+    const rule = await api(ctx.app, boss, 'POST', '/api/approvals/rules', {
+      clientKey: randomUUID(),
+      docType: 'expense_claim',
+      minCents: 0,
+      maxCents: 1_000,
+      steps: [{ group: 'owner' }],
+      note: '十块以内店主看',
+    });
     expect(rule.status, JSON.stringify(rule.body)).toBe(201);
     const small = (await ok(claim({ lines: [line({ amountCents: 500 })] }))).claim;
     expect(small).toMatchObject({ status: 'submitted', needsApproval: true, overBudget: false });
@@ -202,7 +215,8 @@ describe('进项发票台账（BI07–BI12）', () => {
     expect(inv).toMatchObject({ source: 'expense', kindLabel: '增值税专用发票', totalCents: 11_300, taxCents: 1_300, taxRateBp: 1300, invoiceDate: today, anomalies: [] });
     expect(inv.claim).toMatchObject({ id: c.id, docNo: c.docNo });
     expect(inv.certDueDate).toBe(shiftDate(today, 360));
-    const normal = (await ok(claim({ invoiceType: 'vat_normal', taxRateBp: 300, invoiceNo: 'PP-0001', invoiceIssuer: '城南文具店', invoiceTaxCents: 291, lines: [line({ amountCents: 10_000 })] }))).claim;
+    const normal = (await ok(claim({ invoiceType: 'vat_normal', taxRateBp: 300, invoiceNo: 'PP-0001', invoiceIssuer: '城南文具店', invoiceTaxCents: 291, lines: [line({ amountCents: 10_000 })] })))
+      .claim;
     const n = (await api(ctx.app, payer, 'GET', `/api/erp/invoices/${normal.invoice.id}`)).body;
     expect(n).toMatchObject({ certStatus: 'not_required', certDueDate: null, taxCents: 291 });
     const receipt = (await ok(claim())).claim;
@@ -277,7 +291,14 @@ describe('进项发票台账（BI07–BI12）', () => {
     const sups = (await api(ctx.app, boss, 'GET', '/api/inventory/suppliers?all=1')).body as { id: number; code: string; name: string }[];
     const sup = sups.find((s) => s.code === 'S004')!;
     const mats = (await api(ctx.app, boss, 'GET', '/api/inventory/materials?all=1')).body as { id: number; code: string }[];
-    const po = await ok(api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId: sup.id, orderDate: today, lines: [{ materialId: mats.find((m) => m.code === 'M016')!.id, purchaseQtyMilli: q(1), priceCents: 45_000 }] }));
+    const po = await ok(
+      api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId: sup.id,
+        orderDate: today,
+        lines: [{ materialId: mats.find((m) => m.code === 'M016')!.id, purchaseQtyMilli: q(1), priceCents: 45_000 }],
+      }),
+    );
     const inv = await ok(
       api(ctx.app, payer, 'POST', '/api/erp/payments/invoices', {
         clientKey: randomUUID(),
@@ -298,7 +319,14 @@ describe('进项发票台账（BI07–BI12）', () => {
 
     // 反过来（Codex 自动审查 84f5fe5）：先报销、开票方写的就是这家供应商的名称（没挂供应商），再到付款页按三单登记同一张：拦下，
     // 不然同一张发票既报销、又分到采购单走货款付款
-    const po2 = await ok(api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId: sup.id, orderDate: today, lines: [{ materialId: mats.find((m) => m.code === 'M016')!.id, purchaseQtyMilli: q(1), priceCents: 1_130 }] }));
+    const po2 = await ok(
+      api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId: sup.id,
+        orderDate: today,
+        lines: [{ materialId: mats.find((m) => m.code === 'M016')!.id, purchaseQtyMilli: q(1), priceCents: 1_130 }],
+      }),
+    );
     const threeWay = (no: string) =>
       api(ctx.app, payer, 'POST', '/api/erp/payments/invoices', {
         clientKey: randomUUID(),
@@ -316,7 +344,18 @@ describe('进项发票台账（BI07–BI12）', () => {
     expect(again.body.error).toMatchObject({ code: 'INVOICE_ALREADY_CLAIMED', details: { invoiceId: reimbursed.invoice.id } });
     // 台账里直接登记的（开票方写供应商名称、还没报销）：三单登记同一张也拦，登错了先作废原来那张
     const manual = (
-      await ok(api(ctx.app, payer, 'POST', '/api/erp/invoices', { clientKey: randomUUID(), kind: 'vat_special', invoiceNo: 'ZP-0006', issuerName: sup.name, invoiceDate: today, totalCents: 1_130, taxCents: 130, taxRateBp: 1300 }))
+      await ok(
+        api(ctx.app, payer, 'POST', '/api/erp/invoices', {
+          clientKey: randomUUID(),
+          kind: 'vat_special',
+          invoiceNo: 'ZP-0006',
+          issuerName: sup.name,
+          invoiceDate: today,
+          totalCents: 1_130,
+          taxCents: 130,
+          taxRateBp: 1300,
+        }),
+      )
     ).invoice;
     const dup = await threeWay('ZP-0006');
     expect(dup.status).toBe(409);
@@ -348,7 +387,18 @@ describe('进项发票台账（BI07–BI12）', () => {
 
   it('异常票：重号、税额不符、税率不符、超过认证期限、开票方未填；导航的待办数字', async () => {
     const mk = (over: Record<string, unknown>) =>
-      ok(api(ctx.app, payer, 'POST', '/api/erp/invoices', { clientKey: randomUUID(), kind: 'vat_special', invoiceDate: today, totalCents: 11_300, taxCents: 1_300, taxRateBp: 1300, issuerName: '异常测试甲', ...over }));
+      ok(
+        api(ctx.app, payer, 'POST', '/api/erp/invoices', {
+          clientKey: randomUUID(),
+          kind: 'vat_special',
+          invoiceDate: today,
+          totalCents: 11_300,
+          taxCents: 1_300,
+          taxRateBp: 1300,
+          issuerName: '异常测试甲',
+          ...over,
+        }),
+      );
     const dupA = (await mk({ invoiceNo: 'YC-001' })).invoice;
     const dupB = (await mk({ invoiceNo: 'YC-001', issuerName: '异常测试乙' })).invoice;
     const tax = (await mk({ invoiceNo: 'YC-002', taxCents: 900 })).invoice;
@@ -494,12 +544,13 @@ describe('进项发票台账（BI07–BI12）', () => {
     expect(anomaly.counts.anomaly).toBe(anomaly.invoices.length);
     // SQL 的筛法与逐张算的异常标记一致（这个文件里造过重号、税额不符、税率不符、过期、开票方未填、金额不符）
     const everything = await loadLedger(ctx.sql, { view: 'all' }, today, 100_000);
-    const flagged = everything.invoices.filter((r) => r.anomalies.length > 0).map((r) => r.id).sort((x, y) => x - y);
+    const flagged = everything.invoices
+      .filter((r) => r.anomalies.length > 0)
+      .map((r) => r.id)
+      .sort((x, y) => x - y);
     const viaSql = (await loadLedger(ctx.sql, { view: 'anomaly' }, today, 100_000)).invoices.map((r) => r.id).sort((x, y) => x - y);
     expect(viaSql).toEqual(flagged);
-    expect(new Set(everything.invoices.flatMap((r) => r.anomalies))).toEqual(
-      new Set(['duplicate_no', 'tax_mismatch', 'rate_not_allowed', 'cert_overdue', 'amount_mismatch', 'issuer_missing']),
-    );
+    expect(new Set(everything.invoices.flatMap((r) => r.anomalies))).toEqual(new Set(['duplicate_no', 'tax_mismatch', 'rate_not_allowed', 'cert_overdue', 'amount_mismatch', 'issuer_missing']));
     const dueAll = (await loadLedger(ctx.sql, { view: 'due' }, today, 100_000)).invoices.map((r) => r.id).sort((x, y) => x - y);
     const dueJs = everything.invoices
       .filter((r) => r.certDueDate !== null && r.certDueDate <= shiftDate(today, 7))

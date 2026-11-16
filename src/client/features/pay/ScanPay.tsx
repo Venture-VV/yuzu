@@ -33,8 +33,7 @@ export function usePayTerminalStatus(enabled = true) {
   });
 }
 
-export const useOpenPayTxs = (enabled = true) =>
-  useQuery({ queryKey: payKeys.open, queryFn: () => api.get<PayTxView[]>('/api/pay/terminal/open'), enabled, refetchInterval: 30_000 });
+export const useOpenPayTxs = (enabled = true) => useQuery({ queryKey: payKeys.open, queryFn: () => api.get<PayTxView[]>('/api/pay/terminal/open'), enabled, refetchInterval: 30_000 });
 
 const PENDING_KEY = 'yuzu.payTerminal.pending';
 interface PendingScan {
@@ -63,13 +62,32 @@ function loadPending(): PendingScan | null {
 }
 
 /** 结账、充值那一笔旁边的按钮：配置了扫码收款、门店开着才显示 */
-export function ScanPayButton({ provider, amountCents, purpose, disabled, onPaid }: { provider: PayProvider; amountCents: number | null; purpose: PayPurpose; disabled?: boolean; onPaid: (tx: PayTxView) => void }) {
+export function ScanPayButton({
+  provider,
+  amountCents,
+  purpose,
+  disabled,
+  onPaid,
+}: {
+  provider: PayProvider;
+  amountCents: number | null;
+  purpose: PayPurpose;
+  disabled?: boolean;
+  onPaid: (tx: PayTxView) => void;
+}) {
   const status = usePayTerminalStatus();
   const [open, setOpen] = useState(false);
   if (!status.data || status.data.mode === 'off' || status.data.mode === 'live' || !status.data.enabled) return null;
   return (
     <>
-      <Button size="sm" variant="secondary" icon={<ScanLine className="size-3.5" />} disabled={disabled || !amountCents || amountCents <= 0} onClick={() => setOpen(true)} data-testid={`scan-pay-${provider}`}>
+      <Button
+        size="sm"
+        variant="secondary"
+        icon={<ScanLine className="size-3.5" />}
+        disabled={disabled || !amountCents || amountCents <= 0}
+        onClick={() => setOpen(true)}
+        data-testid={`scan-pay-${provider}`}
+      >
         扫码收款
       </Button>
       <ScanPayDialog
@@ -87,7 +105,21 @@ export function ScanPayButton({ provider, amountCents, purpose, disabled, onPaid
   );
 }
 
-export function ScanPayDialog({ open, onClose, provider, amountCents, purpose, onPaid }: { open: boolean; onClose: () => void; provider: PayProvider; amountCents: number; purpose: PayPurpose; onPaid: (tx: PayTxView) => void }) {
+export function ScanPayDialog({
+  open,
+  onClose,
+  provider,
+  amountCents,
+  purpose,
+  onPaid,
+}: {
+  open: boolean;
+  onClose: () => void;
+  provider: PayProvider;
+  amountCents: number;
+  purpose: PayPurpose;
+  onPaid: (tx: PayTxView) => void;
+}) {
   const qc = useQueryClient();
   const [authCode, setAuthCode] = useState('');
   const [tx, setTx] = useState<PayTxView | null>(null);
@@ -227,7 +259,17 @@ export function ScanPayDialog({ open, onClose, provider, amountCents, purpose, o
               void submit();
             }}
           >
-            <Input ref={input} value={authCode} inputMode="numeric" autoComplete="off" placeholder="扫付款码" onChange={(e) => setAuthCode(e.target.value.replace(/\D/g, ''))} className="num h-11 text-[16px] tracking-wider" aria-label="付款码" data-testid="scan-pay-code" />
+            <Input
+              ref={input}
+              value={authCode}
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="扫付款码"
+              onChange={(e) => setAuthCode(e.target.value.replace(/\D/g, ''))}
+              className="num h-11 text-[16px] tracking-wider"
+              aria-label="付款码"
+              data-testid="scan-pay-code"
+            />
             <Button type="submit" variant="primary" icon={<QrCode className="size-4" />} loading={busy} disabled={!authCode} data-testid="scan-pay-submit">
               收款
             </Button>
@@ -235,7 +277,12 @@ export function ScanPayDialog({ open, onClose, provider, amountCents, purpose, o
         )}
         {error && <Notice tone="error" title={error} />}
         {openTxs.isError && !openTxs.data && !tx && (
-          <LoadFailed title="收了钱没入账的扫码收款查不到（有的话直接用，不用再扫一次），请检查网络" onRetry={() => void openTxs.refetch()} retrying={openTxs.isFetching} testId="scan-pay-reusable-error" />
+          <LoadFailed
+            title="收了钱没入账的扫码收款查不到（有的话直接用，不用再扫一次），请检查网络"
+            onRetry={() => void openTxs.refetch()}
+            retrying={openTxs.isFetching}
+            testId="scan-pay-reusable-error"
+          />
         )}
         {reusable.length > 0 && !tx && (
           <div className="rounded-lg border border-line p-2 text-[13px]" data-testid="scan-pay-reusable">
@@ -260,14 +307,23 @@ export function ScanPayDialog({ open, onClose, provider, amountCents, purpose, o
 }
 
 function TxState({ tx, polling }: { tx: PayTxView; polling: boolean }) {
-  if (tx.status === 'paid') return <Notice tone="success" title={`已到账 ${formatYuan(tx.amountCents)}`}>支付方单号 {tx.providerTradeNo}</Notice>;
+  if (tx.status === 'paid')
+    return (
+      <Notice tone="success" title={`已到账 ${formatYuan(tx.amountCents)}`}>
+        支付方单号 {tx.providerTradeNo}
+      </Notice>
+    );
   if (tx.status === 'paying')
     return (
       <Notice tone="info" title="等客人在手机上输密码……" icon={polling ? <Spinner /> : undefined} data-testid="scan-pay-paying">
         {polling ? '每 3 秒查一次。' : '一分钟还没结果：先别重扫，系统会继续去支付方查，5 分钟没结果自动撤单；可以先关掉，之后在前台顶上的提示里看结果。'}
       </Notice>
     );
-  return <Notice tone="error" title={`${PAY_TX_STATUS_LABELS[tx.status]}：${tx.failReason ?? ''}`}>可以请客人换一个付款码重扫。</Notice>;
+  return (
+    <Notice tone="error" title={`${PAY_TX_STATUS_LABELS[tx.status]}：${tx.failReason ?? ''}`}>
+      可以请客人换一个付款码重扫。
+    </Notice>
+  );
 }
 
 /** 前台顶上：收了钱没入账、还在支付中、原路退款失败的 */
@@ -279,8 +335,7 @@ export function UnsettledPayBanner() {
   const [open, setOpen] = useState(false);
   const rows = list.data ?? [];
   // 取不回来（也没有上一次的）：写明查不到、可以重试，不当成「没有没入账的」把整条提示藏起来（Codex 审查 0edd8df 后补）
-  if (status.isError && !status.data)
-    return <LoadFailed title="扫码收款的状态取不回来，请检查网络" onRetry={() => void status.refetch()} retrying={status.isFetching} testId="unsettled-pay-error" />;
+  if (status.isError && !status.data) return <LoadFailed title="扫码收款的状态取不回来，请检查网络" onRetry={() => void status.refetch()} retrying={status.isFetching} testId="unsettled-pay-error" />;
   if (on && list.isError && !list.data)
     return (
       <LoadFailed title="收了钱没入账的扫码收款查不到，请检查网络" onRetry={() => void list.refetch()} retrying={list.isFetching} testId="unsettled-pay-error">
@@ -365,7 +420,12 @@ function UnsettledPayDialog({ open, onClose, rows, canRefund }: { open: boolean;
                     </span>
                     {/* 退款中的（记下以后没去成支付方，系统每分钟也会自己再退一次）也能手动再退：同一个退款编号，支付方只退一次 */}
                     {canRefund && (r.status === 'failed' || r.status === 'pending') && (
-                      <Button size="sm" variant="ghost" onClick={() => void act(() => api.post(`/api/pay/refunds/${r.id}/resolve`, { action: 'retry' }), '已重新去支付方退')} data-testid={`pay-refund-retry-${r.id}`}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void act(() => api.post(`/api/pay/refunds/${r.id}/resolve`, { action: 'retry' }), '已重新去支付方退')}
+                        data-testid={`pay-refund-retry-${r.id}`}
+                      >
                         {r.status === 'pending' ? '再去退一次' : '重试'}
                       </Button>
                     )}

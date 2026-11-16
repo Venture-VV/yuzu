@@ -138,8 +138,7 @@ const ItemsInput = z.object({
     .max(500),
 });
 
-const describeTechnician = (t: { techNo: string; name: string; grade: PriceTier; active: boolean }) =>
-  `${t.techNo} 号 ${t.name}（${gradeLabel(t.grade)}${t.active ? '' : '，已停用'}）`;
+const describeTechnician = (t: { techNo: string; name: string; grade: PriceTier; active: boolean }) => `${t.techNo} 号 ${t.name}（${gradeLabel(t.grade)}${t.active ? '' : '，已停用'}）`;
 
 /** 技师业绩与提成：时段内结账的技师明细，结账那一刻的明细（与部门构成、对账包的部门参考表同一口径）；时段内反结账的冲回 */
 export async function technicianReport(db: Db, from: string, to: string): Promise<TechnicianReport> {
@@ -210,9 +209,7 @@ export function registerTechnicianRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/frontdesk/technicians', { preHandler: guard('frontdesk.read') }, async () => frontdeskTechnicians(sql, deps));
 
-  app.get('/api/admin/technicians', { preHandler: guardAny('technician.manage', 'settings.manage', 'catalog.manage', 'audit.read') }, async () =>
-    technicianAdmin(sql),
-  );
+  app.get('/api/admin/technicians', { preHandler: guardAny('technician.manage', 'settings.manage', 'catalog.manage', 'audit.read') }, async () => technicianAdmin(sql));
 
   app.post('/api/admin/technicians', { preHandler: guard('technician.manage') }, async (req) => {
     const t = parse(NewTechnicianInput, req.body);
@@ -273,13 +270,7 @@ export function registerTechnicianRoutes(app: FastifyInstance, deps: Deps) {
 
   // 钟房与轮钟规则：只改提交的字段（与技师规则相同的做法）
   app.put('/api/admin/technicians/clockroom-rules', { preHandler: guard('settings.manage') }, async (req) => {
-    await saveRuleSetting(
-      sql,
-      'clockroom_rules',
-      loadClockroomRules,
-      (before) => parse(ClockroomRulesInput, { ...before, ...parse(ClockroomRulesInput.partial(), req.body) }),
-      ctxOf(req),
-    );
+    await saveRuleSetting(sql, 'clockroom_rules', loadClockroomRules, (before) => parse(ClockroomRulesInput, { ...before, ...parse(ClockroomRulesInput.partial(), req.body) }), ctxOf(req));
     return technicianAdmin(sql);
   });
 

@@ -91,9 +91,7 @@ export async function buildWeeklyMessage(db: Db, config: Pick<AppConfig, 'timezo
   const lines = await weeklyDigestLines(db, today);
   const title = `**浴族 ERP ${test ? '推送试发' : '每周提醒'}** · ${today} · ${INSTANCE_LABELS[config.instance]}`;
   const body = lines.length ? lines.map((l) => `> ${l}`).join('\n') : '> ERP 里没有开着的相关模块（付款、审批、合同、库存、应收）';
-  const foot = test
-    ? `收到这条说明机器人地址配好了；每周一 ${WECOM_WEEKLY_AT} 以后（开关打开时）推一次，内容同上。`
-    : `数字是 ${clockIn(config.timezone, now)} 的，详情到 ERP 里看。`;
+  const foot = test ? `收到这条说明机器人地址配好了；每周一 ${WECOM_WEEKLY_AT} 以后（开关打开时）推一次，内容同上。` : `数字是 ${clockIn(config.timezone, now)} 的，详情到 ERP 里看。`;
   return truncateBytes(`${title}\n${body}\n${foot}`, MAX_BYTES);
 }
 
@@ -146,11 +144,7 @@ async function finish(sql: Sql, id: number, content: string, error: string | nul
  * 每分钟的自动任务调用：周一 9:00 以后推这一周的（已经推过、开关关着、没配地址的什么都不做）。
  * 返回这一次的结果；没轮到推时返回 null。
  */
-export async function runWecomWeekly(
-  deps: { sql: Sql; config: AppConfig },
-  now: Date = new Date(),
-  opts: { send?: Send } = {},
-): Promise<{ id: number; ok: boolean; error: string | null } | null> {
+export async function runWecomWeekly(deps: { sql: Sql; config: AppConfig }, now: Date = new Date(), opts: { send?: Send } = {}): Promise<{ id: number; ok: boolean; error: string | null } | null> {
   const { sql, config } = deps;
   const url = config.wecom.webhook;
   if (!url) return null;

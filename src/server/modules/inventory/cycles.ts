@@ -8,18 +8,11 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type {
-  BatchReconItem,
-  MonthlyReconItem,
-  ReconReminders,
-  StocktakeProgress,
-  StocktakeReminders,
-  SupplierReconciliation,
-} from '@shared/cycles';
+import type { BatchReconItem, MonthlyReconItem, ReconReminders, StocktakeProgress, StocktakeReminders, SupplierReconciliation } from '@shared/cycles';
 import { CENTRAL_WAREHOUSE_ID } from '@shared/inventory';
 import { shiftDate } from '@shared/labels';
 import { can } from '@shared/permissions';
-import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../../db';
+import { isUniqueViolation, readSnapshot, type Db } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
@@ -64,16 +57,10 @@ interface WarehouseLite {
 /**
  * 这些仓的盘点进度：bookBefore 那一刻（月初 0 点）有结存的物料里，from–to 之间的盘点单（已提交或已生效）盘到了几种
  */
-export async function stocktakeProgress(
-  db: Db,
-  warehouses: WarehouseLite[],
-  window: { bookBefore: Date | string; from: string; to: string },
-): Promise<StocktakeProgress[]> {
+export async function stocktakeProgress(db: Db, warehouses: WarehouseLite[], window: { bookBefore: Date | string; from: string; to: string }): Promise<StocktakeProgress[]> {
   if (warehouses.length === 0) return [];
   const ids = warehouses.map((w) => w.id);
-  const rows = await db<
-    { warehouseId: number; materialId: number; code: string; name: string; bookMilli: number; inventoryUnit: string; decimals: number; counted: boolean }[]
-  >`
+  const rows = await db<{ warehouseId: number; materialId: number; code: string; name: string; bookMilli: number; inventoryUnit: string; decimals: number; counted: boolean }[]>`
     WITH start_book AS (
       SELECT DISTINCT ON (sm.warehouse_id, sm.material_id) sm.warehouse_id, sm.material_id, sm.qty_after_milli
       FROM stock_moves sm
@@ -561,9 +548,7 @@ export function registerCycleRoutes(app: FastifyInstance, deps: Deps) {
     readSnapshot(sql, (tx) => stocktakeReminders(tx, req.actor, config.timezone)),
   );
   // 对账提醒与登记
-  app.get('/api/payables/cycles', { preHandler: guard('payable.read') }, async (req) =>
-    readSnapshot(sql, (tx) => reconReminders(tx, req.actor, config.timezone)),
-  );
+  app.get('/api/payables/cycles', { preHandler: guard('payable.read') }, async (req) => readSnapshot(sql, (tx) => reconReminders(tx, req.actor, config.timezone)));
   app.get('/api/payables/reconciliations', { preHandler: guard('payable.read') }, async (req) => {
     const q = parse(
       z.object({
@@ -575,9 +560,7 @@ export function registerCycleRoutes(app: FastifyInstance, deps: Deps) {
     );
     return readSnapshot(sql, (tx) => listReconciliations(tx, q));
   });
-  app.get('/api/payables/reconciliations/:id', { preHandler: guard('payable.read') }, async (req) =>
-    readSnapshot(sql, (tx) => getReconciliation(tx, parse(idParam, req.params).id)),
-  );
+  app.get('/api/payables/reconciliations/:id', { preHandler: guard('payable.read') }, async (req) => readSnapshot(sql, (tx) => getReconciliation(tx, parse(idParam, req.params).id)));
   app.post('/api/payables/reconciliations', { preHandler: guardAny('payable.manage', 'purchase.manage') }, async (req, reply) => {
     const r = await createReconciliation(deps, req.body, req.actor, req.ip);
     reply.code(r.replayed ? 200 : 201);

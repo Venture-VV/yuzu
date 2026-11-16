@@ -141,9 +141,7 @@ export async function updateTag(deps: Deps, id: number, raw: unknown, ctx: OpCon
   return getTag(deps.sql, id);
 }
 
-export const TagIdsField = z
-  .array(z.number('标签编号不对').int('标签编号不对').positive('标签编号不对'))
-  .max(MAX_MEMBER_TAGS, `一位会员最多挂 ${MAX_MEMBER_TAGS} 个标签`);
+export const TagIdsField = z.array(z.number('标签编号不对').int('标签编号不对').positive('标签编号不对')).max(MAX_MEMBER_TAGS, `一位会员最多挂 ${MAX_MEMBER_TAGS} 个标签`);
 
 /**
  * 整组替换会员的标签（在编辑、新建会员的事务里，会员一行已锁或刚建）：新挂的只能是启用的标签，已经挂着的停用标签可以留着；
@@ -162,9 +160,7 @@ export async function setMemberTags(tx: Tx, memberId: number, tagIds: number[], 
   const off = fresh.find((t) => !t.active);
   if (off) throw unprocessable('TAG_INACTIVE', `标签「${tagLabel(off)}」已停用，不能再挂`, { field: 'tagIds' });
   const drop = [...have].filter((id) => !want.includes(id));
-  const dropped = drop.length
-    ? await tx<{ groupName: string; name: string }[]>`SELECT group_name, name FROM member_tags WHERE id IN ${tx(drop)} ORDER BY id`
-    : [];
+  const dropped = drop.length ? await tx<{ groupName: string; name: string }[]>`SELECT group_name, name FROM member_tags WHERE id IN ${tx(drop)} ORDER BY id` : [];
   if (drop.length) await tx`DELETE FROM member_tag_links WHERE member_id = ${memberId} AND tag_id IN ${tx(drop)}`;
   for (const t of fresh) {
     await tx`INSERT INTO member_tag_links (member_id, tag_id, created_by) VALUES (${memberId}, ${t.id}, ${staffId}) ON CONFLICT DO NOTHING`;
@@ -177,7 +173,14 @@ export async function setMemberTags(tx: Tx, memberId: number, tagIds: number[], 
 const ReportQuery = z.object({
   tagIds: z
     .string('请选择标签')
-    .transform((s) => [...new Set(s.split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n > 0))])
+    .transform((s) => [
+      ...new Set(
+        s
+          .split(',')
+          .map((x) => Number(x.trim()))
+          .filter((n) => Number.isInteger(n) && n > 0),
+      ),
+    ])
     .pipe(z.array(z.number()).min(1, '请至少选一个标签').max(50, '一次最多选 50 个标签')),
   mode: z.enum(['any', 'all']).default('any'),
 });
@@ -197,7 +200,10 @@ async function tagMembers(db: Db, tagIds: number[], mode: TagMatchMode, limit: n
     FROM members m WHERE m.id IN ${db(ids)}
     ORDER BY last_activity_at DESC NULLS LAST, m.id DESC
     LIMIT ${limit}`;
-  const tags = await memberTagsOf(db, rows.map((r) => Number(r.id)));
+  const tags = await memberTagsOf(
+    db,
+    rows.map((r) => Number(r.id)),
+  );
   return {
     count: ids.length,
     rows: rows.map(({ grade, tier, ...r }) => ({
@@ -245,7 +251,17 @@ export function registerMemberTagRoutes(app: FastifyInstance, deps: Deps) {
     });
     const csv = toCsv([
       ['会员号', '姓名', '手机号', '档阶', '状态', '本金', '赠金', '最近余额变动', '标签'],
-      ...rows.map((r) => [r.memberNo, r.name, r.phone, r.gradeLabel, r.status === 'active' ? '正常' : '已停用', yuanText(r.principalBalance), yuanText(r.bonusBalance), r.lastActivityAt ?? '', r.tags.join('、')]),
+      ...rows.map((r) => [
+        r.memberNo,
+        r.name,
+        r.phone,
+        r.gradeLabel,
+        r.status === 'active' ? '正常' : '已停用',
+        yuanText(r.principalBalance),
+        yuanText(r.bonusBalance),
+        r.lastActivityAt ?? '',
+        r.tags.join('、'),
+      ]),
     ]);
     return csvReply(reply, `会员标签-${names.join('+').slice(0, 40) || '名单'}.csv`, csv);
   });

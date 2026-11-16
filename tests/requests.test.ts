@@ -44,8 +44,7 @@ const newLine = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-const submit = (cookie: string, lines: unknown[], body: Record<string, unknown> = {}) =>
-  api(ctx.app, cookie, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines, ...body });
+const submit = (cookie: string, lines: unknown[], body: Record<string, unknown> = {}) => api(ctx.app, cookie, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines, ...body });
 
 beforeAll(async () => {
   ctx = await setup();
@@ -102,7 +101,7 @@ describe('提需求单', () => {
     const noDept = await submit(reqNoDept, [newLine({ imageIds: [img.id] })]);
     expect(noDept.body.error.code).toBe('DEPARTMENT_REQUIRED');
     expect((await submit(reqA, [newLine({ imageIds: [img.id] })], { departmentId: deptB })).status).toBe(403);
-    expect((await submit(reqA, [newLine({ link: '' , imageIds: [img.id] })])).body.error.code).toBe('LINK_REQUIRED');
+    expect((await submit(reqA, [newLine({ link: '', imageIds: [img.id] })])).body.error.code).toBe('LINK_REQUIRED');
     expect((await submit(reqA, [newLine()])).body.error.code).toBe('IMAGE_REQUIRED');
     expect((await submit(reqA, [newLine({ link: 'ftp://x', imageIds: [img.id] })])).body.error.code).toBe('LINK_REQUIRED');
     expect((await submit(reqA, [newLine({ purpose: '随便', imageIds: [img.id] })])).body.error.code).toBe('PURPOSE_INVALID');
@@ -143,7 +142,8 @@ describe('提需求单', () => {
 describe('审核、转采购单、进度回写', () => {
   it('退回后改了再提交；通过后不能再改；转采购单后下单 / 到货 / 退货自动回写；采购单撤回后回到未下单', async () => {
     const img = await upload(reqA, 'flow');
-    const created = (await submit(reqA, [newLine({ name: '一次性床单（新款）', materialId: mat.id, link: '', imageIds: [] , qtyMilli: q(2), unit: '箱' }), newLine({ imageIds: [img.id] })])).body.request;
+    const created = (await submit(reqA, [newLine({ name: '一次性床单（新款）', materialId: mat.id, link: '', imageIds: [], qtyMilli: q(2), unit: '箱' }), newLine({ imageIds: [img.id] })])).body
+      .request;
     // 提单人不能审核
     expect((await api(ctx.app, reqA, 'POST', `/api/erp/requests/${created.id}/approve`, {})).status).toBe(403);
     const ret = await api(ctx.app, buyer, 'POST', `/api/erp/requests/${created.id}/return`, { reason: '数量再确认' });
@@ -187,7 +187,16 @@ describe('审核、转采购单、进度回写', () => {
     const dup = await po([{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000, requestLineIds: [lineMat.id] }]);
     expect(dup.body.error.code).toBe('REQUEST_LINE_ORDERED');
     // 部门申购不能转采购单（也不能编采购单）
-    expect((await api(ctx.app, reqA, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 1, requestLineIds: [lineMat.id] }] })).status).toBe(403);
+    expect(
+      (
+        await api(ctx.app, reqA, 'POST', '/api/purchase-orders', {
+          clientKey: randomUUID(),
+          supplierId,
+          orderDate: today,
+          lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 1, requestLineIds: [lineMat.id] }],
+        })
+      ).status,
+    ).toBe(403);
 
     let detail = (await api(ctx.app, reqA, 'GET', `/api/erp/requests/${created.id}`)).body;
     // 需求单转的采购单：供应链审核过需求单，提交即确认（8.0.1 CG04）
@@ -203,8 +212,21 @@ describe('审核、转采购单、进度回写', () => {
     await api(ctx.app, approver, 'POST', `/api/purchase-orders/${second.id}/approve`, {});
 
     // 修改采购单（没带规格、图片）：保持原样；需求关联不变
-    const withSpec = (await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, action: 'save', lines: [{ materialId: other.id, purchaseQtyMilli: q(1), priceCents: 100, spec: '大号', imageIds: [img.id] }] })).body.po;
-    const saved = await api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${withSpec.id}`, { supplierId, orderDate: today, action: 'save', lines: [{ id: withSpec.lines[0].id, materialId: other.id, purchaseQtyMilli: q(2), priceCents: 100 }] });
+    const withSpec = (
+      await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId,
+        orderDate: today,
+        action: 'save',
+        lines: [{ materialId: other.id, purchaseQtyMilli: q(1), priceCents: 100, spec: '大号', imageIds: [img.id] }],
+      })
+    ).body.po;
+    const saved = await api(ctx.app, buyer, 'PUT', `/api/purchase-orders/${withSpec.id}`, {
+      supplierId,
+      orderDate: today,
+      action: 'save',
+      lines: [{ id: withSpec.lines[0].id, materialId: other.id, purchaseQtyMilli: q(2), priceCents: 100 }],
+    });
     expect(saved.body.lines[0]).toMatchObject({ spec: '大号', images: [{ id: img.id }], purchaseQtyMilli: q(2) });
 
     // 收货：部分到货 → 到齐；退供应商回写退货数量
@@ -243,7 +265,12 @@ describe('审核、转采购单、进度回写', () => {
   it('没通过的需求单不能转；不采购与撤回都要原因', async () => {
     const img = await upload(reqA, 'np');
     const r = (await submit(reqA, [newLine({ imageIds: [img.id] })])).body.request;
-    const po = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: other.id, purchaseQtyMilli: q(1), priceCents: 1, requestLineIds: [r.lines[0].id] }] });
+    const po = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(),
+      supplierId,
+      orderDate: today,
+      lines: [{ materialId: other.id, purchaseQtyMilli: q(1), priceCents: 1, requestLineIds: [r.lines[0].id] }],
+    });
     expect(po.body.error.code).toBe('REQUEST_NOT_APPROVED');
     expect((await api(ctx.app, buyer, 'POST', `/api/erp/requests/${r.id}/reject`, {})).status).toBe(400);
     expect((await api(ctx.app, buyer, 'POST', `/api/erp/requests/${r.id}/reject`, { reason: '已有库存' })).body).toMatchObject({ status: 'rejected', reason: '已有库存' });
@@ -287,14 +314,30 @@ describe('审核、转采购单、进度回写', () => {
     const r = (await submit(reqA, [{ materialId: other.id, name: '纸巾', purpose: '客用消耗', qtyMilli: q(2), unit: '箱' }])).body.request;
     // 负责人（只有确认职责）退回、通过需求单；转采购单仍要能编采购单
     expect((await api(ctx.app, approver, 'POST', `/api/erp/requests/${r.id}/return`, { reason: '数量再核一下' })).body.status).toBe('returned');
-    expect((await api(ctx.app, reqA, 'PUT', `/api/erp/requests/${r.id}`, { lines: [{ materialId: other.id, name: '纸巾', purpose: '客用消耗', qtyMilli: q(2), unit: '箱' }] })).body.status).toBe('submitted');
+    expect((await api(ctx.app, reqA, 'PUT', `/api/erp/requests/${r.id}`, { lines: [{ materialId: other.id, name: '纸巾', purpose: '客用消耗', qtyMilli: q(2), unit: '箱' }] })).body.status).toBe(
+      'submitted',
+    );
     const approvedReq = (await api(ctx.app, approver, 'POST', `/api/erp/requests/${r.id}/approve`, {})).body;
     expect(approvedReq.status).toBe('approved');
     // 修改时整单替换了明细：按通过后的行下单
     const lineId = approvedReq.lines[0].id as number;
-    expect((await api(ctx.app, approver, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: other.id, purchaseQtyMilli: q(2), priceCents: 100, requestLineIds: [lineId] }] })).status).toBe(403);
+    expect(
+      (
+        await api(ctx.app, approver, 'POST', '/api/purchase-orders', {
+          clientKey: randomUUID(),
+          supplierId,
+          orderDate: today,
+          lines: [{ materialId: other.id, purchaseQtyMilli: q(2), priceCents: 100, requestLineIds: [lineId] }],
+        })
+      ).status,
+    ).toBe(403);
     // 下单后没到货就关闭：不再挂在「已下单」
-    const created = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines: [{ materialId: other.id, purchaseQtyMilli: q(2), priceCents: 100, requestLineIds: [lineId] }] });
+    const created = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(),
+      supplierId,
+      orderDate: today,
+      lines: [{ materialId: other.id, purchaseQtyMilli: q(2), priceCents: 100, requestLineIds: [lineId] }],
+    });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const po = created.body.po;
     await api(ctx.app, approver, 'POST', `/api/purchase-orders/${po.id}/approve`, {});
@@ -346,10 +389,17 @@ describe('审核、转采购单、进度回写', () => {
 
 describe('员工所属部门', () => {
   it('店主在员工档案里设所属部门；不存在的部门拒绝；不传保持原样', async () => {
-    const staff = (await api(ctx.app, boss, 'GET', '/api/staff')).body as { id: number; username: string; displayName: string; role: string; duties: string[]; departmentId: number | null; departmentName: string | null }[];
+    const staff = (await api(ctx.app, boss, 'GET', '/api/staff')).body as {
+      id: number;
+      username: string;
+      displayName: string;
+      role: string;
+      duties: string[];
+      departmentId: number | null;
+      departmentName: string | null;
+    }[];
     const none = staff.find((s) => s.username === 'req_none')!;
-    const put = (body: Record<string, unknown>) =>
-      api(ctx.app, boss, 'PUT', `/api/staff/${none.id}`, { displayName: none.displayName, role: none.role, duties: none.duties, active: true, ...body });
+    const put = (body: Record<string, unknown>) => api(ctx.app, boss, 'PUT', `/api/staff/${none.id}`, { displayName: none.displayName, role: none.role, duties: none.duties, active: true, ...body });
     expect((await put({ departmentId: 999_999 })).body.error.code).toBe('DEPARTMENT_INVALID');
     const set = (await put({ departmentId: deptB })).body.find((s: { id: number }) => s.id === none.id);
     expect(set).toMatchObject({ departmentId: deptB, departmentName: '水吧' });

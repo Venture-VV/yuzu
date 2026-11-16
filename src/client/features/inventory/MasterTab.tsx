@@ -2,7 +2,18 @@ import { SUPPLIER_SETTLEMENT_LABELS, type SupplierSettlement } from '@shared/exp
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Plus, Search, Upload } from 'lucide-react';
-import { RECONCILE_CYCLE_LABELS, RECONCILE_CYCLES, REPLENISH_MODE_LABELS, REPLENISH_MODES, type Department, type Material, type ReconcileCycle, type ReplenishMode, type Supplier, type SupplierContractFile } from '@shared/inventory';
+import {
+  RECONCILE_CYCLE_LABELS,
+  RECONCILE_CYCLES,
+  REPLENISH_MODE_LABELS,
+  REPLENISH_MODES,
+  type Department,
+  type Material,
+  type ReconcileCycle,
+  type ReplenishMode,
+  type Supplier,
+  type SupplierContractFile,
+} from '@shared/inventory';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { conversionText, formatQty, parseQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
@@ -58,13 +69,22 @@ function Materials({ editable }: { editable: boolean }) {
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<Material | 'new' | null>(null);
   const list = (materials.data ?? []).filter((m) => !q.trim() || `${m.code} ${m.name} ${m.specification} ${m.category}`.toLowerCase().includes(q.trim().toLowerCase()));
-  const custom = useCustomListValues('material', list.map((m) => m.id));
+  const custom = useCustomListValues(
+    'material',
+    list.map((m) => m.id),
+  );
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1 md:max-w-xs">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-3" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="编码 / 名称 / 规格 / 分类" aria-label="搜索物料档案" className="h-9 w-full rounded-md border border-line-strong bg-card pr-3 pl-9 text-[13px] outline-none focus:border-pine" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="编码 / 名称 / 规格 / 分类"
+            aria-label="搜索物料档案"
+            className="h-9 w-full rounded-md border border-line-strong bg-card pr-3 pl-9 text-[13px] outline-none focus:border-pine"
+          />
         </div>
         <span className="flex-1" />
         {editable && (
@@ -310,10 +330,22 @@ export function MaterialDialog({
           className="sm:col-span-3"
           hint={onDemand ? '按需采购的不提醒' : '可用天数少于它时提醒：一般用品约 7 天，新鲜食材 1–2 天；按近期用量算，没有用量时用右边的固定数量'}
         >
-          <Input id="m-cover" value={form.coverDays} inputMode="numeric" placeholder="不按天数" disabled={onDemand} onChange={(e) => set({ coverDays: e.target.value.replace(/\D/g, '') })} className="num text-right" />
+          <Input
+            id="m-cover"
+            value={form.coverDays}
+            inputMode="numeric"
+            placeholder="不按天数"
+            disabled={onDemand}
+            onChange={(e) => set({ coverDays: e.target.value.replace(/\D/g, '') })}
+            className="num text-right"
+          />
         </Field>
         <Field
-          label={<span className="flex items-center gap-1.5">低库存提醒线 <SimRule>人工设定</SimRule></span>}
+          label={
+            <span className="flex items-center gap-1.5">
+              低库存提醒线 <SimRule>人工设定</SimRule>
+            </span>
+          }
           htmlFor="m-low"
           className="sm:col-span-3"
           hint={onDemand ? '按需采购的不提醒' : `低于此数提醒（${form.inventoryUnit || '库存单位'}，只看总仓），留空不提醒`}
@@ -344,7 +376,13 @@ export function MaterialDialog({
             </span>
           </label>
           <label className="flex items-start gap-2.5 text-[13px]">
-            <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-pine)]" checked={form.expiryTracked} onChange={(e) => set({ expiryTracked: e.target.checked })} data-testid="m-expiry" />
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 accent-[var(--color-pine)]"
+              checked={form.expiryTracked}
+              onChange={(e) => set({ expiryTracked: e.target.checked })}
+              data-testid="m-expiry"
+            />
             <span>
               <span className="font-bold">效期管理</span>
               <span className="block text-[12px] text-ink-3">食品、药品、化学品等：收货时填批号与到期日，库存「呆滞与临期」里看快到期的批次（先进先出推算剩下的是哪几批）</span>
@@ -426,7 +464,10 @@ function Suppliers({ editable }: { editable: boolean }) {
   // 负责人（「审核」权限）没有维护档案的权限也能打开，看证照、准入或暂停（8.0.7 2.1）
   const openable = editable || can('inventory.approve') || can('payable.manage');
   const [editing, setEditing] = useState<Supplier | 'new' | null>(null);
-  const supplierCustom = useCustomListValues('supplier', (suppliers.data ?? []).map((s) => s.id));
+  const supplierCustom = useCustomListValues(
+    'supplier',
+    (suppliers.data ?? []).map((s) => s.id),
+  );
   return (
     <>
       <div className="mb-3 flex justify-end">
@@ -563,97 +604,92 @@ function SupplierDialog({ editing, readOnly, onClose }: { editing: Supplier | 'n
           <SupplierBankSection supplier={s} />
         </div>
       ) : (
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Field label="编码" htmlFor="s-code">
-          <Input id="s-code" value={form.code} maxLength={16} onChange={(e) => setForm({ ...form, code: e.target.value })} data-autofocus />
-        </Field>
-        <Field label="名称" htmlFor="s-name" className="sm:col-span-2">
-          <Input id="s-name" value={form.name} maxLength={40} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        </Field>
-        <Field label="联系人" htmlFor="s-contact">
-          <Input id="s-contact" value={form.contact} maxLength={40} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
-        </Field>
-        <Field label="电话" htmlFor="s-phone" className="sm:col-span-2">
-          <Input id="s-phone" value={form.phone} maxLength={32} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-        </Field>
-        <Field label="备注" htmlFor="s-note" className="sm:col-span-3" hint="如 含税到货价、结算周期（待确认）">
-          <Input id="s-note" value={form.note} maxLength={200} onChange={(e) => setForm({ ...form, note: e.target.value })} />
-        </Field>
-        <Field label="结算方式" className="sm:col-span-3" hint={SUPPLIER_SETTLEMENT_LABELS[form.settlement].hint}>
-          <Segmented
-            ariaLabel="结算方式"
-            value={form.settlement}
-            onChange={(v) => setForm({ ...form, settlement: v })}
-            className="w-full"
-            options={(['credit', 'cash'] as const).map((v) => ({ value: v, label: SUPPLIER_SETTLEMENT_LABELS[v].title }))}
-          />
-        </Field>
-        {form.settlement === 'credit' && (
-          <Field
-            label="对账方式"
-            className="sm:col-span-3"
-            hint={
-              form.reconcileCycle === 'batch' && s?.reconcileCycle !== 'batch'
-                ? '按批次：每批货到后对一次账，只提醒今天以后的收货'
-                : RECONCILE_CYCLE_LABELS[form.reconcileCycle].hint
-            }
-          >
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field label="编码" htmlFor="s-code">
+            <Input id="s-code" value={form.code} maxLength={16} onChange={(e) => setForm({ ...form, code: e.target.value })} data-autofocus />
+          </Field>
+          <Field label="名称" htmlFor="s-name" className="sm:col-span-2">
+            <Input id="s-name" value={form.name} maxLength={40} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </Field>
+          <Field label="联系人" htmlFor="s-contact">
+            <Input id="s-contact" value={form.contact} maxLength={40} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
+          </Field>
+          <Field label="电话" htmlFor="s-phone" className="sm:col-span-2">
+            <Input id="s-phone" value={form.phone} maxLength={32} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          </Field>
+          <Field label="备注" htmlFor="s-note" className="sm:col-span-3" hint="如 含税到货价、结算周期（待确认）">
+            <Input id="s-note" value={form.note} maxLength={200} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+          </Field>
+          <Field label="结算方式" className="sm:col-span-3" hint={SUPPLIER_SETTLEMENT_LABELS[form.settlement].hint}>
             <Segmented
-              ariaLabel="对账方式"
-              value={form.reconcileCycle}
-              onChange={(v) => setForm({ ...form, reconcileCycle: v })}
+              ariaLabel="结算方式"
+              value={form.settlement}
+              onChange={(v) => setForm({ ...form, settlement: v })}
               className="w-full"
-              options={RECONCILE_CYCLES.map((v) => ({ value: v, label: RECONCILE_CYCLE_LABELS[v].title }))}
+              options={(['credit', 'cash'] as const).map((v) => ({ value: v, label: SUPPLIER_SETTLEMENT_LABELS[v].title }))}
             />
           </Field>
-        )}
-        <Field label="签约" className="sm:col-span-3" hint="签约的供应商可以上传合同 PDF（保存成签约以后在下面上传）">
-          <Segmented
-            ariaLabel="签约"
-            value={form.contracted ? 'yes' : 'no'}
-            onChange={(v) => setForm({ ...form, contracted: v === 'yes' })}
-            className="w-full"
-            options={[
-              { value: 'yes', label: '签约' },
-              { value: 'no', label: '未签约' },
-            ]}
-          />
-        </Field>
-        <Field label="默认采购途径" htmlFor="s-channel" className="sm:col-span-3" hint="新建这家的采购单时按它带出，可改；固定三类：网购、自采（现采/零采）、供应商">
-          <Select
-            id="s-channel"
-            value={form.defaultChannel ?? ''}
-            onChange={(e) => setForm({ ...form, defaultChannel: e.target.value || null })}
-            data-testid="s-channel"
-          >
-            <option value="">不设</option>
-            {(purchaseRules.data?.channels ?? []).map((c) => (
-              <option key={c.key} value={c.key}>
-                {c.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="状态" className="sm:col-span-3">
-          <Segmented
-            value={form.active ? 'on' : 'off'}
-            onChange={(v) => setForm({ ...form, active: v === 'on' })}
-            className="w-full"
-            options={[
-              { value: 'on', label: '启用' },
-              { value: 'off', label: '停用' },
-            ]}
-          />
-        </Field>
-        {error && <Notice tone="error" title={error} className="sm:col-span-3" />}
-        {s && <AdmissionSection supplier={s} />}
-        {!s && <p className="text-[12.5px] text-ink-3 sm:col-span-3">新建的供应商是「待准入」：保存以后登记营业执照，由负责人准入（经营规则里打开「采购单只能给已准入的供应商」以后，没准入的不能下采购单）。</p>}
-        {s && <ContractFiles supplier={s} pendingContracted={form.contracted} />}
-        {/* 收款账户（8.0.21 安全审查后补）：应付岗单独改、另一人复核，不随上面的「保存」 */}
-        {s && <SupplierBankSection supplier={s} />}
-        {/* 自定义字段（8.0.21）：单独保存，不动供应商本身 */}
-        {s && <CustomFieldsCard entity="supplier" entityId={s.id} bare readOnly={readOnly} className="border-t border-line pt-3 sm:col-span-3" />}
-      </div>
+          {form.settlement === 'credit' && (
+            <Field
+              label="对账方式"
+              className="sm:col-span-3"
+              hint={form.reconcileCycle === 'batch' && s?.reconcileCycle !== 'batch' ? '按批次：每批货到后对一次账，只提醒今天以后的收货' : RECONCILE_CYCLE_LABELS[form.reconcileCycle].hint}
+            >
+              <Segmented
+                ariaLabel="对账方式"
+                value={form.reconcileCycle}
+                onChange={(v) => setForm({ ...form, reconcileCycle: v })}
+                className="w-full"
+                options={RECONCILE_CYCLES.map((v) => ({ value: v, label: RECONCILE_CYCLE_LABELS[v].title }))}
+              />
+            </Field>
+          )}
+          <Field label="签约" className="sm:col-span-3" hint="签约的供应商可以上传合同 PDF（保存成签约以后在下面上传）">
+            <Segmented
+              ariaLabel="签约"
+              value={form.contracted ? 'yes' : 'no'}
+              onChange={(v) => setForm({ ...form, contracted: v === 'yes' })}
+              className="w-full"
+              options={[
+                { value: 'yes', label: '签约' },
+                { value: 'no', label: '未签约' },
+              ]}
+            />
+          </Field>
+          <Field label="默认采购途径" htmlFor="s-channel" className="sm:col-span-3" hint="新建这家的采购单时按它带出，可改；固定三类：网购、自采（现采/零采）、供应商">
+            <Select id="s-channel" value={form.defaultChannel ?? ''} onChange={(e) => setForm({ ...form, defaultChannel: e.target.value || null })} data-testid="s-channel">
+              <option value="">不设</option>
+              {(purchaseRules.data?.channels ?? []).map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="状态" className="sm:col-span-3">
+            <Segmented
+              value={form.active ? 'on' : 'off'}
+              onChange={(v) => setForm({ ...form, active: v === 'on' })}
+              className="w-full"
+              options={[
+                { value: 'on', label: '启用' },
+                { value: 'off', label: '停用' },
+              ]}
+            />
+          </Field>
+          {error && <Notice tone="error" title={error} className="sm:col-span-3" />}
+          {s && <AdmissionSection supplier={s} />}
+          {!s && (
+            <p className="text-[12.5px] text-ink-3 sm:col-span-3">
+              新建的供应商是「待准入」：保存以后登记营业执照，由负责人准入（经营规则里打开「采购单只能给已准入的供应商」以后，没准入的不能下采购单）。
+            </p>
+          )}
+          {s && <ContractFiles supplier={s} pendingContracted={form.contracted} />}
+          {/* 收款账户（8.0.21 安全审查后补）：应付岗单独改、另一人复核，不随上面的「保存」 */}
+          {s && <SupplierBankSection supplier={s} />}
+          {/* 自定义字段（8.0.21）：单独保存，不动供应商本身 */}
+          {s && <CustomFieldsCard entity="supplier" entityId={s.id} bare readOnly={readOnly} className="border-t border-line pt-3 sm:col-span-3" />}
+        </div>
       )}
     </Dialog>
   );
@@ -693,7 +729,11 @@ function ContractFiles({ supplier, pendingContracted }: { supplier: Supplier; pe
     setBusy('upload');
     try {
       const name = file.name.replace(/\.pdf$/i, '').slice(0, 80) || '合同';
-      const next = await api.post<SupplierContractFile[]>(`/api/inventory/suppliers/${supplier.id}/contract-files`, { name, mime: 'application/pdf', data: await toBase64(file) }, { timeoutMs: 60_000 });
+      const next = await api.post<SupplierContractFile[]>(
+        `/api/inventory/suppliers/${supplier.id}/contract-files`,
+        { name, mime: 'application/pdf', data: await toBase64(file) },
+        { timeoutMs: 60_000 },
+      );
       await set(next);
       toast({ tone: 'success', title: '合同已上传', body: name });
     } catch (e) {
@@ -784,7 +824,9 @@ function Departments({ editable }: { editable: boolean }) {
       <p className="mb-2 text-[12.5px] text-ink-3" data-testid="department-head-hint">
         部门主管：需求单要主管先确认时（「采购 → 采购规则」里定哪些要确认）由他确认，确认以后采购才能审核通过。没设主管的部门不拦。
       </p>
-      <p className="mb-3 text-[12.5px] text-ink-3">每个部门有一个小仓（新建部门时自动建）：仓库登记领料进部门小仓，部门在「本部门小仓」签收、耗用、盘点。停用部门前要先把它的小仓清空（退回总仓或盘点到 0）。</p>
+      <p className="mb-3 text-[12.5px] text-ink-3">
+        每个部门有一个小仓（新建部门时自动建）：仓库登记领料进部门小仓，部门在「本部门小仓」签收、耗用、盘点。停用部门前要先把它的小仓清空（退回总仓或盘点到 0）。
+      </p>
       <ul className="divide-y divide-line/70 rounded-lg border border-line bg-card shadow-card">
         {departments.data?.map((d) => (
           <li key={d.id} className={cn('flex items-center gap-3 px-4 py-2.5', !d.active && 'opacity-55')}>
@@ -800,7 +842,12 @@ function Departments({ editable }: { editable: boolean }) {
               >
                 <option value="">没设主管</option>
                 {/* 现在的主管停用了、不在名单里：照样列出来，免得一打开就像是没设 */}
-                {d.head && !heads.data?.some((h) => h.id === d.head!.id) && <option value={d.head.id}>{d.head.name}{d.head.active ? '' : '（已停用）'}</option>}
+                {d.head && !heads.data?.some((h) => h.id === d.head!.id) && (
+                  <option value={d.head.id}>
+                    {d.head.name}
+                    {d.head.active ? '' : '（已停用）'}
+                  </option>
+                )}
                 {heads.data?.map((h) => (
                   <option key={h.id} value={h.id}>
                     {h.name}

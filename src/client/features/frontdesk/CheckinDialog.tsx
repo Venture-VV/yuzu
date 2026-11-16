@@ -1,16 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CircleAlert, CircleCheck, Crown, Link2, Plus, Search, ShieldCheck, Trash2, UserRound, Users } from 'lucide-react';
-import {
-  matchTags,
-  normalizeTagCode,
-  uniqueTagMatch,
-  ZONE_LABELS,
-  ZONES,
-  type BoardTag,
-  type CheckinResult,
-  type FrontdeskBoardRules,
-  type Zone,
-} from '@shared/frontdesk';
+import { matchTags, normalizeTagCode, uniqueTagMatch, ZONE_LABELS, ZONES, type BoardTag, type CheckinResult, type FrontdeskBoardRules, type Zone } from '@shared/frontdesk';
 import { grantCovers, ticketGrantCovers, type TicketGrant, type TicketGrantItem, type TicketGrantRequest, type VipGrant, type VipGrantTag } from '@shared/grants';
 import { isFreeTicket } from '@shared/checkout';
 import { maskPhone } from '@shared/labels';
@@ -58,7 +48,10 @@ function statusOf(tags: BoardTag[], code: string, zone: Zone, usedElsewhere: Set
   if (!tag) {
     // 只输了末位：能唯一确定一张同分区空闲牌时提示回车补全；对上多张时要求点选，不自动取第一张；
     // 只匹配到在店 / 锁定的牌时直接说明原因
-    const sameZone = matchTags(tags.filter((t) => t.zone === zone && !usedElsewhere.has(t.code)), c);
+    const sameZone = matchTags(
+      tags.filter((t) => t.zone === zone && !usedElsewhere.has(t.code)),
+      c,
+    );
     const freeMatches = sameZone.filter(issuable);
     const unique = uniqueTagMatch(freeMatches, c);
     if (unique) return { ok: false, message: `按回车补全为 ${unique.code}` };
@@ -135,13 +128,18 @@ export function CheckinDialog({
   const freeOf = (zone: Zone, except: Set<string>) => tags.filter((t) => t.zone === zone && t.active && !t.locked && !t.visit && !except.has(t.code));
 
   const statuses = rows.map((r) => {
-    const others = new Set(rows.filter((x) => x.id !== r.id).map((x) => normalizeTagCode(x.code)).filter(Boolean));
+    const others = new Set(
+      rows
+        .filter((x) => x.id !== r.id)
+        .map((x) => normalizeTagCode(x.code))
+        .filter(Boolean),
+    );
     return statusOf(tags, r.code, r.zone, others);
   });
   // VIP 柜：会员本人（第 1 位）按档级能用的柜子等级（会员规则里的对应表），其他同行与散客为 0
   const level = useMemberGrade(guestType === 'member' && member ? member.id : null);
   const guestLevelOf = (i: number): number | null => (i === 0 && guestType === 'member' && member ? (level.data?.lockerLevel ?? null) : 0);
-  const vipRows = rows.map((r, i) => {
+  const vipRows = rows.map((_r, i) => {
     const s = statuses[i];
     if (!s?.ok || s.tag.kind !== 'vip') return null;
     return { code: s.tag.code, memberId: i === 0 && guestType === 'member' && member ? member.id : null, tagLevel: s.tag.vipLevel!, guestLevel: guestLevelOf(i) };
@@ -158,15 +156,8 @@ export function CheckinDialog({
     return t && isFreeTicket(t) && code ? [{ tagCode: code, ticketTypeId: t.id }] : [];
   });
   const freeNames = [...new Set(freeItems.map((f) => ticketTypes.data?.find((t) => t.id === f.ticketTypeId)?.name ?? '免票'))].join('、');
-  const ticketGrantOk =
-    freeItems.length === 0 || (!!ticketGrant && ticketGrantCovers(ticketGrant.scope, freeItems) && new Date(ticketGrant.expiresAt).getTime() > Date.now());
-  const ready =
-    rows.length > 0 &&
-    statuses.every((s) => s?.ok) &&
-    (guestType === 'walkin' || !!member) &&
-    !levelPending &&
-    (needs.length === 0 || (overrideOn && grantOk)) &&
-    ticketGrantOk;
+  const ticketGrantOk = freeItems.length === 0 || (!!ticketGrant && ticketGrantCovers(ticketGrant.scope, freeItems) && new Date(ticketGrant.expiresAt).getTime() > Date.now());
+  const ready = rows.length > 0 && statuses.every((s) => s?.ok) && (guestType === 'walkin' || !!member) && !levelPending && (needs.length === 0 || (overrideOn && grantOk)) && ticketGrantOk;
   const guestText = (v: { memberId: number | null; guestLevel: number | null }) =>
     v.memberId && member ? `会员「${member.name}」（${level.data?.label ?? ''}，能用 ${v.guestLevel} 级柜）` : '散客 / 同行客人';
   const authLines = short.map((v) => `${guestText(v)} · VIP 柜 ${v.code}（第 ${v.tagLevel} 级）`);
@@ -284,10 +275,7 @@ export function CheckinDialog({
               })
             }
             ariaLabel="客人类型"
-            options={[
-              { value: 'walkin', label: '散客' },
-              ...(can('member.read') ? [{ value: 'member' as const, label: '会员' }] : []),
-            ]}
+            options={[{ value: 'walkin', label: '散客' }, ...(can('member.read') ? [{ value: 'member' as const, label: '会员' }] : [])]}
           />
           {guestType === 'member' && member && (
             <div className="flex min-w-0 flex-1 items-center gap-3 rounded-lg border border-pine/25 bg-pine-tint px-3 py-2" data-testid="checkin-member">
@@ -329,11 +317,7 @@ export function CheckinDialog({
               {memberQ.trim() &&
                 members.data?.slice(0, 5).map((m) => (
                   <li key={m.id}>
-                    <button
-                      type="button"
-                      onClick={() => pickMember(m)}
-                      className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-card"
-                    >
+                    <button type="button" onClick={() => pickMember(m)} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-card">
                       <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{m.name}</span>
                       <span className="num text-[12.5px] text-ink-3">{maskPhone(m.phone)}</span>
                       <span className="num text-[12px] text-ink-4">{m.memberNo}</span>
@@ -454,11 +438,7 @@ export function CheckinDialog({
                 </div>
                 <div className="mt-2 flex min-h-5 flex-wrap items-center gap-2 pl-[38px] text-[12.5px]">
                   {s?.ok && vipShort ? (
-                    <span
-                      className={cn('flex items-center gap-1 font-semibold', overrideOn ? 'text-yuzu-deep' : 'text-clay')}
-                      role={overrideOn ? undefined : 'alert'}
-                      data-testid={`vip-short-${i}`}
-                    >
+                    <span className={cn('flex items-center gap-1 font-semibold', overrideOn ? 'text-yuzu-deep' : 'text-clay')} role={overrideOn ? undefined : 'alert'} data-testid={`vip-short-${i}`}>
                       <VipChip level={v!.tagLevel} />
                       {s.tag.code} 是第 {v!.tagLevel} 级 VIP 柜，{v!.memberId ? `会员第 ${v!.guestLevel} 级不够` : '散客不能使用'}
                       {overrideOn
@@ -479,16 +459,18 @@ export function CheckinDialog({
                   ) : (
                     <span className="text-ink-3">输入牌号，或</span>
                   )}
-                  {s && !s.ok && s.choices?.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => update(r.id, { code: t.code })}
-                      className="num rounded-full border border-yuzu-deep/40 bg-yuzu-tint px-2.5 py-0.5 font-bold text-ink hover:border-pine hover:text-pine"
-                    >
-                      {t.code}
-                    </button>
-                  ))}
+                  {s &&
+                    !s.ok &&
+                    s.choices?.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => update(r.id, { code: t.code })}
+                        className="num rounded-full border border-yuzu-deep/40 bg-yuzu-tint px-2.5 py-0.5 font-bold text-ink hover:border-pine hover:text-pine"
+                      >
+                        {t.code}
+                      </button>
+                    ))}
                   {!s?.ok && !(s && 'choices' in s && s.choices) && next && (
                     <button type="button" onClick={() => update(r.id, { code: next.code })} className="rounded-full bg-paper-2 px-2 py-0.5 font-semibold text-ink-2 hover:bg-pine-soft hover:text-pine">
                       用 {next.code}
@@ -527,11 +509,7 @@ export function CheckinDialog({
         {needs.length > 0 && overrideOn && (
           <Notice tone={grantOk ? 'success' : 'warning'} icon={<ShieldCheck className="size-4" />} title={grantOk && grant ? `已由${grant.approverName}当场授权` : 'VIP 柜需要当场授权'}>
             <div className="flex flex-wrap items-center gap-3">
-              <span>
-                {grantOk && grant
-                  ? `授权 ${formatTime(grant.expiresAt)} 前有效，只能用于这一次发牌。`
-                  : `${authLines.join('；')}。请值班经理、店总或店主输入账号密码授权。`}
-              </span>
+              <span>{grantOk && grant ? `授权 ${formatTime(grant.expiresAt)} 前有效，只能用于这一次发牌。` : `${authLines.join('；')}。请值班经理、店总或店主输入账号密码授权。`}</span>
               {!grantOk && (
                 <Button size="sm" variant="secondary" icon={<ShieldCheck className="size-4" />} disabled={locked} onClick={() => setAuthOpen(true)} data-testid="request-authorize">
                   请经理授权

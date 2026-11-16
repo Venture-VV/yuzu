@@ -117,10 +117,20 @@ describe('技师名册', () => {
 
   it('需要技师的项目：能管理价目的岗位按项目勾选；编辑项目时不带这一项保持原值', async () => {
     expect((await api(ctx.app, ctx.clerk, 'PUT', '/api/admin/technicians/items', { items: [{ id: foot, required: true }] })).status).toBe(403);
-    const r = await api(ctx.app, boss, 'PUT', '/api/admin/technicians/items', { items: [{ id: foot, required: true }, { id: gua, required: true }] });
+    const r = await api(ctx.app, boss, 'PUT', '/api/admin/technicians/items', {
+      items: [
+        { id: foot, required: true },
+        { id: gua, required: true },
+      ],
+    });
     expect(r.status).toBe(200);
     const items = (await api(ctx.app, ctx.clerk, 'GET', '/api/catalog')).body.items as { id: number; technicianRequired: boolean }[];
-    expect(items.filter((i) => i.technicianRequired).map((i) => i.id).sort()).toEqual([foot, gua].sort());
+    expect(
+      items
+        .filter((i) => i.technicianRequired)
+        .map((i) => i.id)
+        .sort(),
+    ).toEqual([foot, gua].sort());
     // 旧页面编辑项目（不带 technicianRequired）不会清掉
     const edit = await api(ctx.app, ctx.owner, 'PUT', `/api/items/${gua}`, { name: '刮痧', category: '理疗', price: 12800 });
     expect(edit.body.items.find((i: { id: number }) => i.id === gua).technicianRequired).toBe(true);
@@ -140,7 +150,14 @@ describe('挂账选技师', () => {
     // 只带技师不带点钟 / 轮钟
     expect((await post(v, [{ itemId: foot, quantity: 1, technicianId: li }], 23800)).status).toBe(400);
     // 专业技师做足疗：按专业档 238
-    const ok = await post(v, [{ itemId: foot, quantity: 1, technicianId: li, callType: 'designated' }, { itemId: scrub, quantity: 1 }], 30600);
+    const ok = await post(
+      v,
+      [
+        { itemId: foot, quantity: 1, technicianId: li, callType: 'designated' },
+        { itemId: scrub, quantity: 1 },
+      ],
+      30600,
+    );
     expect(ok.status).toBe(200);
     const footLine = ok.body.lines.find((l: { itemId: number }) => l.itemId === foot);
     expect(footLine).toMatchObject({ name: '足疗（专业）', tier: 'professional', unitPrice: 23800, source: 'therapist', technician: { id: li, techNo: '08', name: '李娜', callType: 'designated' } });
@@ -189,7 +206,14 @@ describe('挂账选技师', () => {
     const li = await techId('08');
     await setRules({ tierByGrade: false, requireTechnician: false });
     const v = await enter();
-    const r = await post(v, [{ itemId: foot, quantity: 1, tier: 'premium', technicianId: li, callType: 'rotation' }, { itemId: foot, quantity: 1, tier: 'standard' }], 49600);
+    const r = await post(
+      v,
+      [
+        { itemId: foot, quantity: 1, tier: 'premium', technicianId: li, callType: 'rotation' },
+        { itemId: foot, quantity: 1, tier: 'standard' },
+      ],
+      49600,
+    );
     expect(r.status).toBe(200);
     const lines = r.body.lines as { tier: string; amount: number; source: string; technician: unknown }[];
     expect(lines.map((l) => [l.tier, l.amount, l.source, !!l.technician])).toEqual([
@@ -238,7 +262,9 @@ describe('挂账选技师', () => {
     await expect(ctx.sql`UPDATE bill_lines SET status = 'voided', technician_id = NULL, call_type = NULL WHERE id = ${line.id}`).rejects.toThrow();
     // 技师与上钟方式同空同非空
     await expect(ctx.sql`INSERT INTO bill_lines (bill_id, source, name, unit_price, quantity, amount, post_key, business_date, posted_by, technician_id)
-                         SELECT bill_id, 'therapist', 'x', 1, 1, 1, ${randomUUID()}, ${today}, ${ctx.ownerId}, ${li} FROM bill_lines WHERE id = ${line.id}`).rejects.toThrow('bill_lines_technician_check');
+                         SELECT bill_id, 'therapist', 'x', 1, 1, 1, ${randomUUID()}, ${today}, ${ctx.ownerId}, ${li} FROM bill_lines WHERE id = ${line.id}`).rejects.toThrow(
+      'bill_lines_technician_check',
+    );
     const voided = await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/lines/${line.id}/void`, { reason: '挂错技师' });
     expect(voided.status).toBe(200);
     expect(voided.body.lines.find((l: { id: number }) => l.id === line.id)).toMatchObject({ status: 'voided', technician: { techNo: '08', callType: 'designated' } });
@@ -251,7 +277,14 @@ describe('技师业绩', () => {
     const li = await techId('08');
     const wang = await techId('12');
     const v = await enter();
-    await post(v, [{ itemId: foot, quantity: 1, technicianId: li, callType: 'designated' }, { itemId: gua, quantity: 2, technicianId: wang, callType: 'rotation' }], 23800 + 25600);
+    await post(
+      v,
+      [
+        { itemId: foot, quantity: 1, technicianId: li, callType: 'designated' },
+        { itemId: gua, quantity: 2, technicianId: wang, callType: 'rotation' },
+      ],
+      23800 + 25600,
+    );
     // 还没结账：不算
     expect((await report()).body.totals).toEqual(base.totals);
     const preview = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${v}`)).body;

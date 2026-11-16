@@ -57,7 +57,9 @@ export function StoreSwitcher() {
         className="flex w-full flex-col items-center gap-0.5 rounded-md bg-white/10 px-1 py-1.5 text-[11px] leading-tight font-bold text-paper transition hover:bg-white/18"
       >
         <Store className="size-4" />
-        <span className="num w-full truncate" data-testid="store-current">{session.store.code}</span>
+        <span className="num w-full truncate" data-testid="store-current">
+          {session.store.code}
+        </span>
       </button>
       {open && (
         <StoreMenu>
@@ -70,10 +72,7 @@ export function StoreSwitcher() {
               disabled={busy !== null}
               onClick={() => void pick(s.id)}
               data-testid={`store-pick-${s.code}`}
-              className={cn(
-                'flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium hover:bg-paper-2',
-                s.id === session.store.id ? 'text-ink' : 'text-ink-2',
-              )}
+              className={cn('flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium hover:bg-paper-2', s.id === session.store.id ? 'text-ink' : 'text-ink-2')}
             >
               <span className="num w-10 shrink-0 text-[12.5px] text-ink-3">{s.code}</span>
               <span className="min-w-0 flex-1 truncate">{s.name}</span>
@@ -90,7 +89,12 @@ export function StoreSwitcher() {
 function StoreMenu({ children }: { children: React.ReactNode }) {
   const ref = useExitGhost<HTMLDivElement>();
   return (
-    <div ref={ref} role="menu" data-mo-out="menu" className="absolute bottom-0 left-[calc(100%+12px)] z-30 w-60 origin-bottom-left animate-menu-in rounded-lg border border-line bg-card p-1.5 text-ink shadow-pop">
+    <div
+      ref={ref}
+      role="menu"
+      data-mo-out="menu"
+      className="absolute bottom-0 left-[calc(100%+12px)] z-30 w-60 origin-bottom-left animate-menu-in rounded-lg border border-line bg-card p-1.5 text-ink shadow-pop"
+    >
       {children}
     </div>
   );

@@ -25,15 +25,7 @@ interface CustomLine {
   amountText: string;
 }
 
-export function ConsumeFlow({
-  member,
-  onClose,
-  onSwitchToRecharge,
-}: {
-  member: MemberDetail;
-  onClose: () => void;
-  onSwitchToRecharge: () => void;
-}) {
+export function ConsumeFlow({ member, onClose, onSwitchToRecharge }: { member: MemberDetail; onClose: () => void; onSwitchToRecharge: () => void }) {
   const can = useCan();
   const session = useSession();
   const qc = useQueryClient();
@@ -118,10 +110,7 @@ export function ConsumeFlow({
         memberId: member.id,
         memberName: member.name,
         amount: total,
-        summary: [
-          ...cartLines.map((l) => `${l.name}${l.qty > 1 ? ` ×${l.qty}` : ''}`),
-          ...(custom && customAmount ? [custom.name.trim() || '其他消费'] : []),
-        ].join('、'),
+        summary: [...cartLines.map((l) => `${l.name}${l.qty > 1 ? ` ×${l.qty}` : ''}`), ...(custom && customAmount ? [custom.name.trim() || '其他消费'] : [])].join('、'),
         staffName: session.staff.displayName,
       },
     }),
@@ -230,8 +219,7 @@ export function ConsumeFlow({
             <Money cents={r.consumption.totalAmount} className="text-[16px]" />
           </SummaryRow>
           <SummaryRow label="其中本金 / 赠金">
-            <Money cents={r.consumption.principalAmount} className="text-pine" /> <span className="text-ink-4">/</span>{' '}
-            <Money cents={r.consumption.bonusAmount} className="text-yuzu-deep" />
+            <Money cents={r.consumption.principalAmount} className="text-pine" /> <span className="text-ink-4">/</span> <Money cents={r.consumption.bonusAmount} className="text-yuzu-deep" />
           </SummaryRow>
           {r.consumption.overLimitApproverName && <SummaryRow label="超限授权">{r.consumption.overLimitApproverName}</SummaryRow>}
         </div>
@@ -447,8 +435,8 @@ export function ConsumeFlow({
         )}
         {split?.ok && (
           <p className="mt-1.5 text-[12.5px] text-ink-3">
-            按「{rule.title}」将扣本金 <Money cents={split.principal} className="font-semibold text-pine" />、赠金{' '}
-            <Money cents={split.bonus} className="font-semibold text-yuzu-deep" />
+            按「{rule.title}」将扣本金 <Money cents={split.principal} className="font-semibold text-pine" />
+            、赠金 <Money cents={split.bonus} className="font-semibold text-yuzu-deep" />
           </p>
         )}
       </div>

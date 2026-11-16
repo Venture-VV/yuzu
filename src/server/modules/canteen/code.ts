@@ -4,15 +4,7 @@
 // 手机离线按 30 秒一个时间段签名生成饭卡码。停用、重新开通时 code_epoch 加一，旧手机上的码钥匙随之失效。
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import {
-  base32,
-  CODE_ACCEPT_FUTURE_STEPS,
-  CODE_ACCEPT_PAST_STEPS,
-  CODE_MAC_LENGTH,
-  codeMessage,
-  codeStepOf,
-  formatCanteenCode,
-} from '@shared/canteen';
+import { base32, CODE_ACCEPT_FUTURE_STEPS, CODE_ACCEPT_PAST_STEPS, CODE_MAC_LENGTH, codeMessage, codeStepOf, formatCanteenCode } from '@shared/canteen';
 
 export function employeeCodeKey(secret: string, employeeId: number, epoch: number): Buffer {
   return createHmac('sha256', secret).update(`canteen-key:v1:${employeeId}:${epoch}`).digest();

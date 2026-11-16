@@ -38,16 +38,13 @@ export function BudgetHint({ departmentId, expenseDate, amounts }: { departmentI
             {EXPENSE_CATEGORY_LABELS[c.category]}：额度 ¥{formatAmount(c.budgetCents!)}，已占用 ¥{formatAmount(c.usedCents)}
             {claim > 0 && (
               <>
-                ，这张 ¥{formatAmount(claim)}，
-                {after > c.budgetCents! ? `超出 ¥${formatAmount(after - c.budgetCents!)}` : `报完剩 ¥${formatAmount(c.budgetCents! - after)}`}
+                ，这张 ¥{formatAmount(claim)}，{after > c.budgetCents! ? `超出 ¥${formatAmount(after - c.budgetCents!)}` : `报完剩 ¥${formatAmount(c.budgetCents! - after)}`}
               </>
             )}
           </li>
         ))}
       </ul>
-      {over.length > 0 && (
-        <Notice tone="warning" title="这张报销会超预算：照常登记，但要走「超预算报销」审批（在原来的审批后面多一级店主）" className="mt-3" data-testid="claim-over-budget" />
-      )}
+      {over.length > 0 && <Notice tone="warning" title="这张报销会超预算：照常登记，但要走「超预算报销」审批（在原来的审批后面多一级店主）" className="mt-3" data-testid="claim-over-budget" />}
     </section>
   );
 }
@@ -107,9 +104,18 @@ export function InvoiceLedgerFields({
     <div className="space-y-3 sm:col-span-2 lg:col-span-4" data-testid="claim-invoice-ledger">
       {chosen ? (
         chosen.usedBy || chosen.inPayables ? (
-          <Notice tone="error" title={chosen.usedBy ? `这张发票已在报销单 ${chosen.usedBy} 里，同一张发票不能报销两次` : '这张发票已在三单匹配里分到采购单（走货款付款），不能再报销'} data-testid="claim-invoice-blocked" />
+          <Notice
+            tone="error"
+            title={chosen.usedBy ? `这张发票已在报销单 ${chosen.usedBy} 里，同一张发票不能报销两次` : '这张发票已在三单匹配里分到采购单（走货款付款），不能再报销'}
+            data-testid="claim-invoice-blocked"
+          />
         ) : (
-          <Notice tone="info" icon={<FileCheck2 className="size-4" />} title={`台账里已有这张${chosen.kindLabel}：${chosen.issuerName || '开票方未填'} · ${chosen.invoiceDate} · ¥${formatAmount(chosen.totalCents)}，提交后直接关联`} data-testid="claim-invoice-found">
+          <Notice
+            tone="info"
+            icon={<FileCheck2 className="size-4" />}
+            title={`台账里已有这张${chosen.kindLabel}：${chosen.issuerName || '开票方未填'} · ${chosen.invoiceDate} · ¥${formatAmount(chosen.totalCents)}，提交后直接关联`}
+            data-testid="claim-invoice-found"
+          >
             {chosen.totalCents !== totalCents && totalCents > 0 && <span className="text-[12.5px] text-clay">报销金额与发票金额不一样，会在台账里标「与报销金额不符」</span>}
           </Notice>
         )
@@ -145,11 +151,29 @@ export function InvoiceLedgerFields({
               </Field>
             ) : (
               <Field label="开票方" htmlFor="ex-inv-issuer" hint="发票上的销售方名称（不填记「未填」）">
-                <Input id="ex-inv-issuer" value={value.issuer} maxLength={60} disabled={disabled} onChange={(e) => onChange({ ...value, issuer: e.target.value })} className="h-10" data-testid="ex-invoice-issuer" />
+                <Input
+                  id="ex-inv-issuer"
+                  value={value.issuer}
+                  maxLength={60}
+                  disabled={disabled}
+                  onChange={(e) => onChange({ ...value, issuer: e.target.value })}
+                  className="h-10"
+                  data-testid="ex-invoice-issuer"
+                />
               </Field>
             )}
             <Field label="开票日" htmlFor="ex-inv-date" hint="不填按支出日期">
-              <Input id="ex-inv-date" type="date" value={value.date} max={today} disabled={disabled} onChange={(e) => onChange({ ...value, date: e.target.value })} placeholder={expenseDate} className="h-10" data-testid="ex-invoice-date" />
+              <Input
+                id="ex-inv-date"
+                type="date"
+                value={value.date}
+                max={today}
+                disabled={disabled}
+                onChange={(e) => onChange({ ...value, date: e.target.value })}
+                placeholder={expenseDate}
+                className="h-10"
+                data-testid="ex-invoice-date"
+              />
             </Field>
             <Field label="税额" htmlFor="ex-inv-tax" hint={computedTax !== null ? `不填按税点 ${taxRateText(taxRateBp!)} 算：¥${formatAmount(computedTax)}` : '不填按税点算'}>
               <MoneyInput id="ex-inv-tax" value={value.tax} disabled={disabled} onChange={(e) => onChange({ ...value, tax: e.target.value })} className="h-10" data-testid="ex-invoice-tax" />

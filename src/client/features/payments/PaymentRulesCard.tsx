@@ -42,7 +42,8 @@ const inRange = (n: number, l: { min: number; max: number }) => Number.isInteger
 function fromDraft(d: Draft): PaymentRules | string {
   const L = PAYMENT_RULE_LIMITS;
   const ownerLevelCents = d.ownerLevelOn ? parseYuan(d.ownerLevel) : null;
-  if (d.ownerLevelOn && (ownerLevelCents === null || !inRange(ownerLevelCents, L.ownerLevelCents))) return `加店主一级的金额要在 ¥${centsToInput(L.ownerLevelCents.min)} 到 ¥${centsToInput(L.ownerLevelCents.max)} 之间`;
+  if (d.ownerLevelOn && (ownerLevelCents === null || !inRange(ownerLevelCents, L.ownerLevelCents)))
+    return `加店主一级的金额要在 ¥${centsToInput(L.ownerLevelCents.min)} 到 ¥${centsToInput(L.ownerLevelCents.max)} 之间`;
   const threeWayPctBp = parsePercentBp(d.pct);
   if (threeWayPctBp === null || !inRange(threeWayPctBp, L.threeWayPctBp)) return '三单差额比例写成 1 或 0.5 这样（百分之几，0–100，最多两位小数）';
   const threeWayCapCents = d.cap.trim() === '' ? 0 : parseYuan(d.cap);
@@ -52,7 +53,10 @@ function fromDraft(d: Draft): PaymentRules | string {
   const weeklyWeeks = Number(d.weeks);
   if (!inRange(weeklyWeeks, L.weeklyWeeks)) return `本周应付的周数要是 ${L.weeklyWeeks.min}–${L.weeklyWeeks.max} 的整数`;
   // 固定付款日：用顿号、逗号或空格隔开的几号；空着 = 没有固定付款日
-  const dayTexts = d.payDays.split(/[、,，\s/]+/).map((x) => x.replace(/号$/, '').trim()).filter(Boolean);
+  const dayTexts = d.payDays
+    .split(/[、,，\s/]+/)
+    .map((x) => x.replace(/号$/, '').trim())
+    .filter(Boolean);
   const dayNumbers = dayTexts.map(Number);
   if (dayNumbers.some((n) => !Number.isInteger(n) || n < 1 || n > 31)) return '固定付款日写成「15、30」这样（每月几号，1–31）；空着就是没有固定付款日';
   const payDays = normalizePayDays(dayNumbers);
@@ -134,13 +138,19 @@ export function PaymentRulesCard() {
       <section className="space-y-3 rounded-lg border border-line p-4">
         <p className="text-[13.5px] font-bold">付款申请的审批（P5）</p>
         <p className="text-[12.5px] text-ink-3">
-          没有在「审批中心 → 审批规则」里为付款申请建规则时：财务 → 负责人，满下面的金额再加一级店主；提前付款一律 财务 → 负责人 → 店主（P6）。
-          审批人在审批规则里另定。
+          没有在「审批中心 → 审批规则」里为付款申请建规则时：财务 → 负责人，满下面的金额再加一级店主；提前付款一律 财务 → 负责人 → 店主（P6）。 审批人在审批规则里另定。
         </p>
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
           {toggle('满这个金额加一级店主', draft.ownerLevelOn, (v) => set({ ownerLevelOn: v }), 'pay-rules-owner-on')}
           <Field label="加店主一级的金额" htmlFor="pay-rules-owner" hint="默认 ¥50,000；不勾上时付款申请一律两级" className="min-w-[220px]">
-            <MoneyInput id="pay-rules-owner" value={draft.ownerLevel} disabled={!editable || !draft.ownerLevelOn} onChange={(e) => set({ ownerLevel: e.target.value })} className="h-10 w-44" data-testid="pay-rules-owner" />
+            <MoneyInput
+              id="pay-rules-owner"
+              value={draft.ownerLevel}
+              disabled={!editable || !draft.ownerLevelOn}
+              onChange={(e) => set({ ownerLevel: e.target.value })}
+              className="h-10 w-44"
+              data-testid="pay-rules-owner"
+            />
           </Field>
         </div>
       </section>
@@ -161,7 +171,16 @@ export function PaymentRulesCard() {
         </p>
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
           <Field label="差额比例（%）" htmlFor="pay-rules-pct" hint="默认 1" className="min-w-[160px]">
-            <Input id="pay-rules-pct" inputMode="decimal" value={draft.pct} disabled={!editable} onChange={(e) => set({ pct: e.target.value })} fullWidth={false} className="h-10 w-28" data-testid="pay-rules-pct" />
+            <Input
+              id="pay-rules-pct"
+              inputMode="decimal"
+              value={draft.pct}
+              disabled={!editable}
+              onChange={(e) => set({ pct: e.target.value })}
+              fullWidth={false}
+              className="h-10 w-28"
+              data-testid="pay-rules-pct"
+            />
           </Field>
           <Field label="差额上限" htmlFor="pay-rules-cap" hint="默认 ¥50" className="min-w-[180px]">
             <MoneyInput id="pay-rules-cap" value={draft.cap} disabled={!editable} onChange={(e) => set({ cap: e.target.value })} className="h-10 w-36" data-testid="pay-rules-cap" />
@@ -174,10 +193,28 @@ export function PaymentRulesCard() {
         <p className="text-[13.5px] font-bold">质保金与本周应付（P9、P11）</p>
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
           <Field label="质保金到期前几天提醒" htmlFor="pay-rules-remind" hint="默认 30 天；进 ERP 待办，已到期没付的一直提醒" className="min-w-[220px]">
-            <Input id="pay-rules-remind" inputMode="numeric" value={draft.remindDays} disabled={!editable} onChange={(e) => set({ remindDays: e.target.value })} fullWidth={false} className="h-10 w-28" data-testid="pay-rules-remind" />
+            <Input
+              id="pay-rules-remind"
+              inputMode="numeric"
+              value={draft.remindDays}
+              disabled={!editable}
+              onChange={(e) => set({ remindDays: e.target.value })}
+              fullWidth={false}
+              className="h-10 w-28"
+              data-testid="pay-rules-remind"
+            />
           </Field>
           <Field label="本周应付看几周" htmlFor="pay-rules-weeks" hint="默认 4 周，从本周一算起" className="min-w-[200px]">
-            <Input id="pay-rules-weeks" inputMode="numeric" value={draft.weeks} disabled={!editable} onChange={(e) => set({ weeks: e.target.value })} fullWidth={false} className="h-10 w-28" data-testid="pay-rules-weeks" />
+            <Input
+              id="pay-rules-weeks"
+              inputMode="numeric"
+              value={draft.weeks}
+              disabled={!editable}
+              onChange={(e) => set({ weeks: e.target.value })}
+              fullWidth={false}
+              className="h-10 w-28"
+              data-testid="pay-rules-weeks"
+            />
           </Field>
         </div>
       </section>
@@ -190,7 +227,16 @@ export function PaymentRulesCard() {
         </p>
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
           <Field label="每月几号付款" htmlFor="pay-rules-days" hint={`默认 15、30；最多 ${PAY_DAYS_MAX} 个，用顿号或逗号隔开`} className="min-w-[220px]">
-            <Input id="pay-rules-days" value={draft.payDays} disabled={!editable} onChange={(e) => set({ payDays: e.target.value })} fullWidth={false} placeholder="15、30" className="h-10 w-44" data-testid="pay-rules-days" />
+            <Input
+              id="pay-rules-days"
+              value={draft.payDays}
+              disabled={!editable}
+              onChange={(e) => set({ payDays: e.target.value })}
+              fullWidth={false}
+              placeholder="15、30"
+              className="h-10 w-44"
+              data-testid="pay-rules-days"
+            />
           </Field>
           {saved && saved.payDays.length > 0 && (
             <p className="pb-2 text-[12.5px] text-ink-2" data-testid="pay-rules-next-day">

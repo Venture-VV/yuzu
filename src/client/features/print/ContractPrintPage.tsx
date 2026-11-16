@@ -23,12 +23,21 @@ export function ContractPrintPage() {
     <div className="min-h-screen bg-paper-2 py-6 print:bg-white print:py-0">
       <style>{'@page { size: A4; margin: 18mm 16mm; } @media print { .no-print { display: none !important; } }'}</style>
       <div className="no-print mx-auto mb-4 flex w-[210mm] max-w-full items-center gap-3 px-2">
-        <button type="button" onClick={() => window.print()} disabled={!d} className="h-10 rounded-md bg-pine px-4 text-[14px] font-semibold text-paper disabled:opacity-50" data-testid="contract-print-go">
+        <button
+          type="button"
+          onClick={() => window.print()}
+          disabled={!d}
+          className="h-10 rounded-md bg-pine px-4 text-[14px] font-semibold text-paper disabled:opacity-50"
+          data-testid="contract-print-go"
+        >
           打印 / 存为 PDF
         </button>
         <span className="text-[13px] text-ink-3">{d?.templateName ? `按模板「${d.templateName}」排版` : d ? '没用模板：合同要素与两张表' : ''}</span>
       </div>
-      <article className="mx-auto w-[210mm] max-w-full bg-white px-[16mm] py-[14mm] text-[12pt] leading-[1.75] text-black shadow-card print:w-auto print:p-0 print:shadow-none" data-testid="print-contract">
+      <article
+        className="mx-auto w-[210mm] max-w-full bg-white px-[16mm] py-[14mm] text-[12pt] leading-[1.75] text-black shadow-card print:w-auto print:p-0 print:shadow-none"
+        data-testid="print-contract"
+      >
         {q.error && !d ? (
           <LoadFailed title={`合同取不回来：${errorMessage(q.error)}`} onRetry={() => void q.refetch()} retrying={q.isFetching} className="no-print" testId="contract-print-error" />
         ) : !d ? (
@@ -77,8 +86,20 @@ export function ContractPrintPage() {
               ),
             )}
             <div className="mt-10 grid grid-cols-2 gap-8 text-[11pt]">
-              <p>甲方（盖章）：<br />代表签字：<br />日期：</p>
-              <p>乙方（盖章）：<br />代表签字：<br />日期：</p>
+              <p>
+                甲方（盖章）：
+                <br />
+                代表签字：
+                <br />
+                日期：
+              </p>
+              <p>
+                乙方（盖章）：
+                <br />
+                代表签字：
+                <br />
+                日期：
+              </p>
             </div>
           </>
         )}

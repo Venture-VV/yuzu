@@ -84,11 +84,7 @@ export async function materialBalances(db: Db, materialId: number): Promise<Stoc
       WHERE ws.material_id = ${materialId} ORDER BY d.sort_order, d.id) x`;
 }
 
-export async function stockCard(
-  db: Db,
-  materialId: number,
-  f: { from?: string; to?: string; limit?: number; warehouseId?: number; timeZone?: string } = {},
-): Promise<StockCard> {
+export async function stockCard(db: Db, materialId: number, f: { from?: string; to?: string; limit?: number; warehouseId?: number; timeZone?: string } = {}): Promise<StockCard> {
   const material = await getMaterial(db, materialId, f.timeZone);
   const whId = f.warehouseId ?? CENTRAL_WAREHOUSE_ID;
   const wh = await warehouseInfo(db, whId);
@@ -226,9 +222,7 @@ export async function inventoryChecks(db: Db): Promise<CheckItem[]> {
     key: 'dept_stock_equals_moves',
     label: '部门小仓结存与流水一致',
     ok: deptMismatch.length === 0,
-    detail: deptMismatch.length
-      ? deptMismatch.map((m) => `${m.warehouseName} ${m.name}：结存 ${formatQty(m.stockMilli)}，流水 ${formatQty(m.sumMilli)}`).join('；')
-      : '全部一致',
+    detail: deptMismatch.length ? deptMismatch.map((m) => `${m.warehouseName} ${m.name}：结存 ${formatQty(m.stockMilli)}，流水 ${formatQty(m.sumMilli)}`).join('；') : '全部一致',
   });
 
   const broken = await db<{ name: string; count: number }[]>`
@@ -383,9 +377,7 @@ export async function inventoryChecks(db: Db): Promise<CheckItem[]> {
     key: 'ap_balance',
     label: '供应商余额 = 应付未付合计 − 可抵扣合计',
     ok: apBad.length === 0,
-    detail: apBad.length
-      ? apBad.map((r) => `${r.name}：余额 ${r.balance / 100}，未付 ${r.open / 100}，可抵扣 ${r.credit / 100}`).join('；')
-      : '全部供应商一致',
+    detail: apBad.length ? apBad.map((r) => `${r.name}：余额 ${r.balance / 100}，未付 ${r.open / 100}，可抵扣 ${r.credit / 100}`).join('；') : '全部供应商一致',
   });
 
   // 核销、退款不超过可抵扣；核销单的明细合计等于核销金额；没有负的未付或可抵扣
@@ -443,10 +435,7 @@ export async function inventoryChecks(db: Db): Promise<CheckItem[]> {
     key: 'supplier_reconciliations',
     label: '对账登记：按批次的收货单属于这个供应商、一张最多登记一次，合计与明细一致',
     ok: recon.bad.length === 0 && recon.badTotals.length === 0,
-    detail:
-      recon.bad.length || recon.badTotals.length
-        ? [...recon.bad, ...recon.badTotals.map((id) => `对账登记 #${id} 合计不一致`)].join('、')
-        : '一致',
+    detail: recon.bad.length || recon.badTotals.length ? [...recon.bad, ...recon.badTotals.map((id) => `对账登记 #${id} 合计不一致`)].join('、') : '一致',
   });
 
   // 审批中心（v0.7.30）
@@ -508,9 +497,21 @@ export function registerReportRoutes(app: FastifyInstance, deps: Deps) {
     if (!scope) throw notFound('仓库不存在');
     const dept = warehouse !== 'all' && warehouse !== CENTRAL_WAREHOUSE_ID;
     const head = [
-      '物料编码', '物料名称', '规格', '库存单位', '期初结存', '期初建账', '收货入库',
-      dept ? '从总仓领料（进）' : '部门领料（出）', dept ? '退回总仓（出）' : '领料退回（进）',
-      '直接耗用', '报损', '盘点调整', '退供应商', '冲销', '期末结存',
+      '物料编码',
+      '物料名称',
+      '规格',
+      '库存单位',
+      '期初结存',
+      '期初建账',
+      '收货入库',
+      dept ? '从总仓领料（进）' : '部门领料（出）',
+      dept ? '退回总仓（出）' : '领料退回（进）',
+      '直接耗用',
+      '报损',
+      '盘点调整',
+      '退供应商',
+      '冲销',
+      '期末结存',
     ];
     const csv = toCsv([
       [`${scope} 收发汇总 ${from} 至 ${to}（数量按各自库存单位，不跨单位合计）`],
@@ -546,17 +547,19 @@ export function registerReportRoutes(app: FastifyInstance, deps: Deps) {
     const csv = toCsv([
       [`库存卡 ${m.code} ${m.name} ${m.specification}（${card.warehouse.name}，单位：${m.inventoryUnit}）`],
       ['日期', '单号', '类型', '对象', '变动', '结存', '经办', '备注', '记录时间'],
-      ...[...card.moves].reverse().map((mv) => [
-        mv.docDate,
-        mv.docNo,
-        MOVE_TYPE_LABELS[mv.moveType],
-        mv.partyName ?? '',
-        (mv.qtyDeltaMilli > 0 ? '+' : '') + qtyCell(mv.qtyDeltaMilli),
-        qtyCell(mv.qtyAfterMilli),
-        mv.operatorName,
-        mv.note,
-        mv.createdAt,
-      ]),
+      ...[...card.moves]
+        .reverse()
+        .map((mv) => [
+          mv.docDate,
+          mv.docNo,
+          MOVE_TYPE_LABELS[mv.moveType],
+          mv.partyName ?? '',
+          (mv.qtyDeltaMilli > 0 ? '+' : '') + qtyCell(mv.qtyDeltaMilli),
+          qtyCell(mv.qtyAfterMilli),
+          mv.operatorName,
+          mv.note,
+          mv.createdAt,
+        ]),
     ]);
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'stock_card', targetId: id, detail: { ...f, warehouseId: card.warehouse.id }, ip: req.ip });
     attachment(reply, `库存卡_${m.code}.csv`, CSV_TYPE);

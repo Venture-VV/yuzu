@@ -43,15 +43,13 @@ import {
   type BenefitEvent,
   type BenefitPeriod,
   type BenefitStatus,
-  type ParkingUseRow,
   type DiscountTarget,
   type TierQuantity,
 } from '@shared/benefits';
 import { GRADE_STATES, type Grade, type Tier } from '@shared/membership';
 import { api, ApiError, errorMessage } from '../../lib/api';
-import { useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { cn, downloadUrl, formatDateTime, formatTime } from '../../lib/utils';
+import { cn, formatTime } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
@@ -71,7 +69,10 @@ export function BenefitsBody() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-start gap-x-4 gap-y-2">
-        <p className="min-w-0 flex-1 basis-80 text-[13px] text-ink-3">本店权益清单（会员文档附录三 A 与补充项）：逐项设好配置起点、数量与券，发布后券类每月自动发、事件礼按事件自动发，服务类列在会员详情「本月可享」。改了只影响以后，已经发出的券、登记的使用不变。</p>
+        <p className="min-w-0 flex-1 basis-80 text-[13px] text-ink-3">
+          本店权益清单（会员文档附录三 A
+          与补充项）：逐项设好配置起点、数量与券，发布后券类每月自动发、事件礼按事件自动发，服务类列在会员详情「本月可享」。改了只影响以后，已经发出的券、登记的使用不变。
+        </p>
         <Link to="/admin/coupons/usage" className="text-[13px] font-semibold text-pine hover:underline" data-testid="benefits-usage-link">
           看使用率
         </Link>
@@ -151,7 +152,11 @@ function BenefitsEditor({ view }: { view: 'tiers' | 'list' }) {
     setBusy(`${b.id}`);
     try {
       await api.post(`/api/benefits/${b.id}/status`, { expectedVersion: b.version, status: next });
-      toast({ tone: 'success', title: next === 'published' ? `已发布「${b.name}」` : `已暂缓「${b.name}」`, body: next === 'published' ? publishHint(b) : '以后不再发、不能登记；已经发出的券照常可用。' });
+      toast({
+        tone: 'success',
+        title: next === 'published' ? `已发布「${b.name}」` : `已暂缓「${b.name}」`,
+        body: next === 'published' ? publishHint(b) : '以后不再发、不能登记；已经发出的券照常可用。',
+      });
     } catch (e) {
       toast({ tone: 'error', title: next === 'published' ? '还不能发布' : '没有暂缓', body: errorMessage(e) });
     } finally {
@@ -188,133 +193,143 @@ function BenefitsEditor({ view }: { view: 'tiers' | 'list' }) {
             本月（{d.month.from} 起）发券 <b className="num text-ink">{month.coupons}</b> 张 · 登记使用 <b className="num text-ink">{month.uses}</b> 次
           </span>
           <span className="text-ink-3">
-            {d.job ? `自动发放：营业日 ${d.job.businessDate}，${d.job.error ? `出错（${d.job.error}）` : d.job.finishedAt ? `${formatTime(d.job.finishedAt)} 跑完` : '进行中'}` : '自动发放还没有运行记录'}
+            {d.job
+              ? `自动发放：营业日 ${d.job.businessDate}，${d.job.error ? `出错（${d.job.error}）` : d.job.finishedAt ? `${formatTime(d.job.finishedAt)} 跑完` : '进行中'}`
+              : '自动发放还没有运行记录'}
           </span>
           <PendingBadge title="归类、默认数量与发放时机按 PENDING_DECISIONS M27–M35（待店主确认）" />
         </div>
-        {view === 'list' && <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Segmented
-            ariaLabel="状态"
-            size="sm"
-            value={status}
-            onChange={setStatus}
-            options={[
-              { value: 'all', label: '全部' },
-              { value: 'published', label: '已发布' },
-              { value: 'draft', label: '草稿' },
-              { value: 'paused', label: '暂缓' },
-            ]}
-          />
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-4" />
-            <Input fullWidth={false} className="h-9 w-56 pl-9" placeholder="编号或名称" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="搜索权益" />
+        {view === 'list' && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Segmented
+              ariaLabel="状态"
+              size="sm"
+              value={status}
+              onChange={setStatus}
+              options={[
+                { value: 'all', label: '全部' },
+                { value: 'published', label: '已发布' },
+                { value: 'draft', label: '草稿' },
+                { value: 'paused', label: '暂缓' },
+              ]}
+            />
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-4" />
+              <Input fullWidth={false} className="h-9 w-56 pl-9" placeholder="编号或名称" value={keyword} onChange={(e) => setKeyword(e.target.value)} aria-label="搜索权益" />
+            </div>
           </div>
-        </div>}
+        )}
       </Card>
 
       {view === 'tiers' && <BenefitTiersView onEdit={(id) => setEditing(d.items.find((b) => b.id === id) ?? null)} />}
-      {view === 'list' && BENEFIT_CATEGORIES.map((cat) => {
-        const rows = shown.filter((b) => b.category === cat);
-        if (!rows.length) return null;
-        return (
-          <Card key={cat} className="p-5" data-testid={`benefits-${cat}`}>
-            <SectionTitle aside={<span className="text-[12px] text-ink-3">{rows.length} 项</span>}>{BENEFIT_CATEGORY_LABELS[cat]}</SectionTitle>
-            <p className="mt-1 text-[12.5px] text-ink-3">{BENEFIT_CATEGORY_HINTS[cat]}</p>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[860px] text-[13px]">
-                <thead className="text-left text-[12px] text-ink-3">
-                  <tr>
-                    <th className="py-1.5 pr-3">编号</th>
-                    <th className="py-1.5 pr-3">名称</th>
-                    <th className="py-1.5 pr-3">起点</th>
-                    <th className="py-1.5 pr-3">数量</th>
-                    <th className="py-1.5 pr-3">{cat === 'event' ? '什么时候发 · 券' : cat === 'coupon' ? '券' : '内容'}</th>
-                    <th className="py-1.5 pr-3">本月</th>
-                    <th className="py-1.5 pr-3">状态</th>
-                    <th className="py-1.5 text-right">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line/70">
-                  {rows.map((b) => (
-                    <tr key={b.id} data-testid={`benefit-row-${b.code}`} className="align-top">
-                      <td className="num py-2 pr-3 whitespace-nowrap text-ink-3">{b.code}</td>
-                      <td className="py-2 pr-3 font-semibold text-ink">{b.name}</td>
-                      <td className={cn('py-2 pr-3 whitespace-nowrap', b.startGrade === null && 'text-clay')}>{b.startLabel}</td>
-                      <td className="py-2 pr-3">
-                        <span className="whitespace-nowrap">{b.parking ? parkingText(b) : quantityText(b.category, b.period, b.quantity)}</span>
-                        {b.tierQuantities.length > 0 && (
-                          <span className="block text-[12px] text-ink-3">
-                            {b.tierQuantities
-                              .map((t) => `${startLabel(t.grade, t.tier)} 起 ${cat === 'discount' ? rateText(t.quantity) : cat === 'extension' ? minutesText(t.quantity) : t.quantity}`)
-                              .join('；')}
-                          </span>
-                        )}
-                      </td>
-                      <td className="max-w-[300px] py-2 pr-3 text-ink-2">
-                        {cat === 'event' && (
-                          <span className="block">
-                            {b.events.map((e) => (e === 'monthly_visits' ? `每月到店满 ${b.visitTarget ?? '?'} 次` : BENEFIT_EVENT_LABELS[e])).join('、') || '—'}
-                          </span>
-                        )}
-                        {b.parking && <span className="block text-[12px] font-semibold text-pine">停车优惠 · 前台登记车牌</span>}
-                        {cat === 'coupon' || cat === 'event' ? (
-                          b.templateName ? (
-                            <span className={cn('block text-[12.5px]', b.templateActive === false && 'text-clay')} title={b.templateSummary ?? undefined}>
-                              {b.templateName}
-                              {b.templateActive === false && '（已停用）'}
-                            </span>
-                          ) : (
-                            <span className="text-[12.5px] text-ink-4">还没选券</span>
-                          )
-                        ) : (
-                          <span className="line-clamp-2 text-[12.5px]">{b.content}</span>
-                        )}
-                        {b.festivalDates.length > 0 && <span className="block text-[12px] text-ink-3">节日 {b.festivalDates.join('、')}</span>}
-                        {cat === 'discount' && (
-                          <span className="block text-[12px] text-ink-3" data-testid={`benefit-discount-${b.code}`}>
-                            {b.discountTarget
-                              ? `${DISCOUNT_TARGET_LABELS[b.discountTarget]}${isCompanionTarget(b.discountTarget) ? `（${companionText(b)}）` : ''} · ${discountDaysText(b.weekdays, b.monthDays)}`
-                              : '还没选打哪些明细'}
-                          </span>
-                        )}
-                      </td>
-                      <td className="num py-2 pr-3 whitespace-nowrap text-ink-2">
-                        {cat === 'service' ? `${b.month.uses} 次` : cat === 'coupon' || cat === 'event' ? `${b.month.coupons} 张 · ${b.month.members} 位` : '—'}
-                      </td>
-                      <td className="py-2 pr-3">
-                        <Badge tone={STATUS_TONE[b.status]}>{BENEFIT_STATUS_LABELS[b.status]}</Badge>
-                      </td>
-                      <td className="py-2 text-right whitespace-nowrap">
-                        <span className="inline-flex gap-1.5">
-                          <Button size="sm" variant="ghost" icon={<PencilLine className="size-3.5" />} onClick={() => setEditing(b)} data-testid={`benefit-edit-${b.code}`}>
-                            编辑
-                          </Button>
-                          {b.status === 'published' ? (
-                            <Button size="sm" variant="ghost" icon={<PauseCircle className="size-3.5" />} loading={busy === `${b.id}`} onClick={() => void changeStatus(b, 'paused')} data-testid={`benefit-pause-${b.code}`}>
-                              暂缓
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              icon={<Send className="size-3.5" />}
-                              loading={busy === `${b.id}`}
-                              onClick={() => void changeStatus(b, 'published')}
-                              data-testid={`benefit-publish-${b.code}`}
-                            >
-                              发布
-                            </Button>
-                          )}
-                        </span>
-                      </td>
+      {view === 'list' &&
+        BENEFIT_CATEGORIES.map((cat) => {
+          const rows = shown.filter((b) => b.category === cat);
+          if (!rows.length) return null;
+          return (
+            <Card key={cat} className="p-5" data-testid={`benefits-${cat}`}>
+              <SectionTitle aside={<span className="text-[12px] text-ink-3">{rows.length} 项</span>}>{BENEFIT_CATEGORY_LABELS[cat]}</SectionTitle>
+              <p className="mt-1 text-[12.5px] text-ink-3">{BENEFIT_CATEGORY_HINTS[cat]}</p>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[860px] text-[13px]">
+                  <thead className="text-left text-[12px] text-ink-3">
+                    <tr>
+                      <th className="py-1.5 pr-3">编号</th>
+                      <th className="py-1.5 pr-3">名称</th>
+                      <th className="py-1.5 pr-3">起点</th>
+                      <th className="py-1.5 pr-3">数量</th>
+                      <th className="py-1.5 pr-3">{cat === 'event' ? '什么时候发 · 券' : cat === 'coupon' ? '券' : '内容'}</th>
+                      <th className="py-1.5 pr-3">本月</th>
+                      <th className="py-1.5 pr-3">状态</th>
+                      <th className="py-1.5 text-right">操作</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        );
-      })}
+                  </thead>
+                  <tbody className="divide-y divide-line/70">
+                    {rows.map((b) => (
+                      <tr key={b.id} data-testid={`benefit-row-${b.code}`} className="align-top">
+                        <td className="num py-2 pr-3 whitespace-nowrap text-ink-3">{b.code}</td>
+                        <td className="py-2 pr-3 font-semibold text-ink">{b.name}</td>
+                        <td className={cn('py-2 pr-3 whitespace-nowrap', b.startGrade === null && 'text-clay')}>{b.startLabel}</td>
+                        <td className="py-2 pr-3">
+                          <span className="whitespace-nowrap">{b.parking ? parkingText(b) : quantityText(b.category, b.period, b.quantity)}</span>
+                          {b.tierQuantities.length > 0 && (
+                            <span className="block text-[12px] text-ink-3">
+                              {b.tierQuantities
+                                .map((t) => `${startLabel(t.grade, t.tier)} 起 ${cat === 'discount' ? rateText(t.quantity) : cat === 'extension' ? minutesText(t.quantity) : t.quantity}`)
+                                .join('；')}
+                            </span>
+                          )}
+                        </td>
+                        <td className="max-w-[300px] py-2 pr-3 text-ink-2">
+                          {cat === 'event' && (
+                            <span className="block">{b.events.map((e) => (e === 'monthly_visits' ? `每月到店满 ${b.visitTarget ?? '?'} 次` : BENEFIT_EVENT_LABELS[e])).join('、') || '—'}</span>
+                          )}
+                          {b.parking && <span className="block text-[12px] font-semibold text-pine">停车优惠 · 前台登记车牌</span>}
+                          {cat === 'coupon' || cat === 'event' ? (
+                            b.templateName ? (
+                              <span className={cn('block text-[12.5px]', b.templateActive === false && 'text-clay')} title={b.templateSummary ?? undefined}>
+                                {b.templateName}
+                                {b.templateActive === false && '（已停用）'}
+                              </span>
+                            ) : (
+                              <span className="text-[12.5px] text-ink-4">还没选券</span>
+                            )
+                          ) : (
+                            <span className="line-clamp-2 text-[12.5px]">{b.content}</span>
+                          )}
+                          {b.festivalDates.length > 0 && <span className="block text-[12px] text-ink-3">节日 {b.festivalDates.join('、')}</span>}
+                          {cat === 'discount' && (
+                            <span className="block text-[12px] text-ink-3" data-testid={`benefit-discount-${b.code}`}>
+                              {b.discountTarget
+                                ? `${DISCOUNT_TARGET_LABELS[b.discountTarget]}${isCompanionTarget(b.discountTarget) ? `（${companionText(b)}）` : ''} · ${discountDaysText(b.weekdays, b.monthDays)}`
+                                : '还没选打哪些明细'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="num py-2 pr-3 whitespace-nowrap text-ink-2">
+                          {cat === 'service' ? `${b.month.uses} 次` : cat === 'coupon' || cat === 'event' ? `${b.month.coupons} 张 · ${b.month.members} 位` : '—'}
+                        </td>
+                        <td className="py-2 pr-3">
+                          <Badge tone={STATUS_TONE[b.status]}>{BENEFIT_STATUS_LABELS[b.status]}</Badge>
+                        </td>
+                        <td className="py-2 text-right whitespace-nowrap">
+                          <span className="inline-flex gap-1.5">
+                            <Button size="sm" variant="ghost" icon={<PencilLine className="size-3.5" />} onClick={() => setEditing(b)} data-testid={`benefit-edit-${b.code}`}>
+                              编辑
+                            </Button>
+                            {b.status === 'published' ? (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                icon={<PauseCircle className="size-3.5" />}
+                                loading={busy === `${b.id}`}
+                                onClick={() => void changeStatus(b, 'paused')}
+                                data-testid={`benefit-pause-${b.code}`}
+                              >
+                                暂缓
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                icon={<Send className="size-3.5" />}
+                                loading={busy === `${b.id}`}
+                                onClick={() => void changeStatus(b, 'published')}
+                                data-testid={`benefit-publish-${b.code}`}
+                              >
+                                发布
+                              </Button>
+                            )}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          );
+        })}
       {view === 'list' && shown.length === 0 && d.items.length > 0 && <p className="text-center text-[13px] text-ink-3">没有符合条件的权益。</p>}
       <EditDialog benefit={editing} catalog={d} onClose={() => setEditing(null)} onSaved={() => void refresh()} />
     </div>
@@ -322,11 +337,7 @@ function BenefitsEditor({ view }: { view: 'tiers' | 'list' }) {
 }
 
 const publishHint = (b: Benefit) =>
-  b.category === 'coupon'
-    ? '够格的会员当天就发本期的券（之后每期第一天发），月中升档当场补发。'
-    : b.category === 'event'
-      ? '之后有这些事件时自动发券。'
-      : '会员详情「本月可享」会列出这一项。';
+  b.category === 'coupon' ? '够格的会员当天就发本期的券（之后每期第一天发），月中升档当场补发。' : b.category === 'event' ? '之后有这些事件时自动发券。' : '会员详情「本月可享」会列出这一项。';
 
 interface Draft {
   name: string;
@@ -385,10 +396,14 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useResetOnOpen(!!benefit, () => {
-    setDraft(benefit ? toDraft(benefit) : null);
-    setError(null);
-  }, [benefit?.id]);
+  useResetOnOpen(
+    !!benefit,
+    () => {
+      setDraft(benefit ? toDraft(benefit) : null);
+      setError(null);
+    },
+    [benefit?.id],
+  );
   if (!benefit || !draft) return null;
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
   const couponLike = draft.category === 'coupon' || draft.category === 'event';
@@ -413,9 +428,7 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
     const start = draft.start ? parseState(draft.start) : null;
     const quantity = counted ? (draft.quantity.trim() ? intOf(draft.quantity) : null) : null;
     if (quantity !== null && (Number.isNaN(quantity) || quantity < minQty || quantity > maxQty)) {
-      return setError(
-        isDiscount ? `折扣填「付几成」：${minQty}–${maxQty} 的整数（75 = 7.5 折）` : isExtension ? `浴票延迟填分钟数：${minQty}–${maxQty} 的整数` : `数量要是 1–${maxQty} 的整数`,
-      );
+      return setError(isDiscount ? `折扣填「付几成」：${minQty}–${maxQty} 的整数（75 = 7.5 折）` : isExtension ? `浴票延迟填分钟数：${minQty}–${maxQty} 的整数` : `数量要是 1–${maxQty} 的整数`);
     }
     const tierQuantities: TierQuantity[] = [];
     for (const t of counted ? draft.tiers : []) {
@@ -596,7 +609,9 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
                   onChange={(e) => set({ parkingTiers: draft.parkingTiers.map((x, j) => (j === i ? { ...x, state: e.target.value } : x)) })}
                 >
                   <option value="">选档阶</option>
-                  {STATE_OPTIONS.filter((o) => !draft.start || stateRank(parseState(o.value).grade, parseState(o.value).tier) > stateRank(parseState(draft.start).grade, parseState(draft.start).tier)).map((o) => (
+                  {STATE_OPTIONS.filter(
+                    (o) => !draft.start || stateRank(parseState(o.value).grade, parseState(o.value).tier) > stateRank(parseState(draft.start).grade, parseState(draft.start).tier),
+                  ).map((o) => (
                     <option key={o.value} value={o.value}>
                       {o.label} 起
                     </option>
@@ -622,9 +637,7 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         )}
         {counted && (
           <Field
-            label={
-              draft.category === 'coupon' ? '每期几张' : draft.category === 'event' ? '每次几张' : isDiscount ? '起点的折扣（付几成）' : isExtension ? '起点多给几分钟（不跳档）' : '每期几次'
-            }
+            label={draft.category === 'coupon' ? '每期几张' : draft.category === 'event' ? '每次几张' : isDiscount ? '起点的折扣（付几成）' : isExtension ? '起点多给几分钟（不跳档）' : '每期几次'}
             htmlFor="benefit-quantity"
             hint={
               draft.category === 'service'
@@ -652,14 +665,11 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
             <div className="mt-2 space-y-2">
               {draft.tiers.map((t, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <Select
-                    aria-label="从哪个档阶起"
-                    className="w-40"
-                    value={t.state}
-                    onChange={(e) => set({ tiers: draft.tiers.map((x, j) => (j === i ? { ...x, state: e.target.value } : x)) })}
-                  >
+                  <Select aria-label="从哪个档阶起" className="w-40" value={t.state} onChange={(e) => set({ tiers: draft.tiers.map((x, j) => (j === i ? { ...x, state: e.target.value } : x)) })}>
                     <option value="">选档阶</option>
-                    {STATE_OPTIONS.filter((o) => !draft.start || stateRank(parseState(o.value).grade, parseState(o.value).tier) > stateRank(parseState(draft.start).grade, parseState(draft.start).tier)).map((o) => (
+                    {STATE_OPTIONS.filter(
+                      (o) => !draft.start || stateRank(parseState(o.value).grade, parseState(o.value).tier) > stateRank(parseState(draft.start).grade, parseState(draft.start).tier),
+                    ).map((o) => (
                       <option key={o.value} value={o.value}>
                         {o.label} 起
                       </option>
@@ -735,12 +745,7 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
               hint="客房房费、门票、整张账单打会员本人手牌账单上的；「同行的」打合并结账里不是会员的同行客人的。一张结账单只享一种会员折扣、不与券同用"
               className="sm:col-span-2"
             >
-              <Select
-                id="benefit-discount-target"
-                value={draft.discountTarget}
-                onChange={(e) => set({ discountTarget: e.target.value as DiscountTarget | '' })}
-                data-testid="benefit-discount-target"
-              >
+              <Select id="benefit-discount-target" value={draft.discountTarget} onChange={(e) => set({ discountTarget: e.target.value as DiscountTarget | '' })} data-testid="benefit-discount-target">
                 <option value="">请选择（不能发布）</option>
                 {DISCOUNT_TARGETS.map((t) => (
                   <option key={t} value={t}>
@@ -770,7 +775,9 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
                       onChange={(e) => set({ companionTiers: draft.companionTiers.map((x, j) => (j === i ? { ...x, state: e.target.value } : x)) })}
                     >
                       <option value="">选档阶</option>
-                      {STATE_OPTIONS.filter((o) => !draft.start || stateRank(parseState(o.value).grade, parseState(o.value).tier) > stateRank(parseState(draft.start).grade, parseState(draft.start).tier)).map((o) => (
+                      {STATE_OPTIONS.filter(
+                        (o) => !draft.start || stateRank(parseState(o.value).grade, parseState(o.value).tier) > stateRank(parseState(draft.start).grade, parseState(draft.start).tier),
+                      ).map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label} 起
                         </option>
@@ -820,7 +827,13 @@ function EditDialog({ benefit, catalog, onClose, onSaved }: { benefit: Benefit |
         )}
         {draft.category === 'event' && draft.events.includes('festival') && (
           <Field label="节日日期" htmlFor="benefit-festivals" hint="YYYY-MM-DD，几个日期用顿号隔开；农历节日每年填当年的日期；当天起 7 天内发" className="sm:col-span-2">
-            <Input id="benefit-festivals" value={draft.festivals} placeholder="2027-01-01、2027-02-06、2027-09-15" onChange={(e) => set({ festivals: e.target.value })} data-testid="benefit-festivals" />
+            <Input
+              id="benefit-festivals"
+              value={draft.festivals}
+              placeholder="2027-01-01、2027-02-06、2027-09-15"
+              onChange={(e) => set({ festivals: e.target.value })}
+              data-testid="benefit-festivals"
+            />
           </Field>
         )}
         <Field label="内容" htmlFor="benefit-content" className="sm:col-span-2">

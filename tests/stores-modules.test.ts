@@ -64,9 +64,18 @@ describe('多门店的各块', () => {
       expect(table.status, JSON.stringify(table.body)).toBeLessThan(300);
     }
     const count = async (sql: string) => (await ctx.sql.unsafe<{ storeId: number; n: number }[]>(sql)).map((r) => [Number(r.storeId), Number(r.n)]);
-    expect(await count(`SELECT store_id, count(*)::int AS n FROM rooms WHERE room_no = '801' GROUP BY 1 ORDER BY 1`)).toEqual([[1, 1], [ft, 1]]);
-    expect(await count(`SELECT store_id, count(*)::int AS n FROM technicians WHERE tech_no = '01' GROUP BY 1 ORDER BY 1`)).toEqual([[1, 1], [ft, 1]]);
-    expect(await count(`SELECT store_id, count(*)::int AS n FROM dining_tables WHERE name = 'A1' GROUP BY 1 ORDER BY 1`)).toEqual([[1, 1], [ft, 1]]);
+    expect(await count(`SELECT store_id, count(*)::int AS n FROM rooms WHERE room_no = '801' GROUP BY 1 ORDER BY 1`)).toEqual([
+      [1, 1],
+      [ft, 1],
+    ]);
+    expect(await count(`SELECT store_id, count(*)::int AS n FROM technicians WHERE tech_no = '01' GROUP BY 1 ORDER BY 1`)).toEqual([
+      [1, 1],
+      [ft, 1],
+    ]);
+    expect(await count(`SELECT store_id, count(*)::int AS n FROM dining_tables WHERE name = 'A1' GROUP BY 1 ORDER BY 1`)).toEqual([
+      [1, 1],
+      [ft, 1],
+    ]);
     const ftRooms = (await api(ctx.app, ftDesk, 'GET', '/api/admin/rooms')).body;
     expect(ftRooms.rooms.map((r: { roomNo: string }) => r.roomNo)).toEqual(['801']);
     const ftTechs = (await api(ctx.app, ftDesk, 'GET', '/api/admin/technicians')).body.technicians as { techNo: string }[];

@@ -28,13 +28,8 @@ const dayCount = (from: string, to: string) => Math.round((Date.parse(`${to}T00:
 function useRange(today: string) {
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
-  const problem = !ISO.test(from) || !ISO.test(to)
-    ? '请选择起止日期'
-    : from > to
-      ? '开始日期不能晚于结束日期'
-      : dayCount(from, to) > MAX_DINING_LEDGER_DAYS
-        ? `一次最多查 ${MAX_DINING_LEDGER_DAYS} 天`
-        : null;
+  const problem =
+    !ISO.test(from) || !ISO.test(to) ? '请选择起止日期' : from > to ? '开始日期不能晚于结束日期' : dayCount(from, to) > MAX_DINING_LEDGER_DAYS ? `一次最多查 ${MAX_DINING_LEDGER_DAYS} 天` : null;
   return { from, to, setFrom, setTo, problem };
 }
 
@@ -180,7 +175,11 @@ export function LedgerTab() {
                         ) : (
                           <span className="inline-flex items-center gap-1.5">
                             <Badge tone="clay">已退</Badge>
-                            {r.voidReason && <span className="max-w-[16em] truncate text-[12px]" title={r.voidReason}>{r.voidReason}</span>}
+                            {r.voidReason && (
+                              <span className="max-w-[16em] truncate text-[12px]" title={r.voidReason}>
+                                {r.voidReason}
+                              </span>
+                            )}
                           </span>
                         )}
                       </td>
@@ -277,7 +276,9 @@ export function VoidsTab() {
               </table>
             </div>
           )}
-          <p className="px-1 text-[12px] text-ink-3">按退菜的时间落在哪个营业日。「怎么批的」：小额直接退、本人 15 分钟内、经理（有更正权限的自己退）、当场授权（括号里是授权人）；升级到 8.0.8 以前退的记「—」。</p>
+          <p className="px-1 text-[12px] text-ink-3">
+            按退菜的时间落在哪个营业日。「怎么批的」：小额直接退、本人 15 分钟内、经理（有更正权限的自己退）、当场授权（括号里是授权人）；升级到 8.0.8 以前退的记「—」。
+          </p>
         </>
       ) : null}
     </div>

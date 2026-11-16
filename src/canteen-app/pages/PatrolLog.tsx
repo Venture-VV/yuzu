@@ -82,13 +82,25 @@ export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) =
       </div>
 
       <div className="flex items-center justify-between gap-2">
-        <Button tone="leaf" className="h-10 px-3 text-[14px]" disabled={!shownDate || !oldest || shownDate <= oldest || loading} onClick={() => setDate(addDays(shownDate!, -1))} data-testid="patrol-log-prev">
+        <Button
+          tone="leaf"
+          className="h-10 px-3 text-[14px]"
+          disabled={!shownDate || !oldest || shownDate <= oldest || loading}
+          onClick={() => setDate(addDays(shownDate!, -1))}
+          data-testid="patrol-log-prev"
+        >
           ‹ 前一天
         </Button>
         <p className="text-center text-[16px] font-black" data-testid="patrol-log-date">
           {shownDate && today ? `${monthDay(shownDate)} · ${dayLabel(shownDate, today)}` : '…'}
         </p>
-        <Button tone="leaf" className="h-10 px-3 text-[14px]" disabled={!shownDate || !today || shownDate >= today || loading} onClick={() => setDate(addDays(shownDate!, 1))} data-testid="patrol-log-next">
+        <Button
+          tone="leaf"
+          className="h-10 px-3 text-[14px]"
+          disabled={!shownDate || !today || shownDate >= today || loading}
+          onClick={() => setDate(addDays(shownDate!, 1))}
+          data-testid="patrol-log-next"
+        >
           后一天 ›
         </Button>
       </div>
@@ -162,15 +174,22 @@ export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) =
                     <button type="button" className="flex w-full items-center gap-2 py-1 text-left" onClick={() => toggle(r.no)} aria-expanded={open}>
                       <span className="min-w-0 flex-1">
                         <span className="block text-[15px] font-black">
-                          第 {r.no} 轮 <span className="text-[13px] font-bold text-ink-3">{timeText(r.start)}–{timeText(r.end)}</span>
+                          第 {r.no} 轮{' '}
+                          <span className="text-[13px] font-bold text-ink-3">
+                            {timeText(r.start)}–{timeText(r.end)}
+                          </span>
                         </span>
                       </span>
                       {r.state === 'current' ? (
-                        <Pill tone="yuzu">正在巡 · {r.done}/{r.expected}</Pill>
+                        <Pill tone="yuzu">
+                          正在巡 · {r.done}/{r.expected}
+                        </Pill>
                       ) : missed > 0 ? (
                         <Pill tone="berry">漏巡 {missed} 处</Pill>
                       ) : (
-                        <Pill tone="leaf">全部巡了 {r.done}/{r.expected}</Pill>
+                        <Pill tone="leaf">
+                          全部巡了 {r.done}/{r.expected}
+                        </Pill>
                       )}
                       <span className="text-[14px] text-ink-3">{open ? '▾' : '▸'}</span>
                     </button>

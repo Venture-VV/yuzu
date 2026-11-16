@@ -36,7 +36,10 @@ const openShift = async (cookie: string, openingCash = 0) => {
 const current = async (cookie: string) =>
   (await api(ctx.app, cookie, 'GET', '/api/shifts/current')).body.shift as {
     id: number;
-    summary: { cash: { expected: number; refundSlip?: number }; refundSlips?: { count: number; total: number; list: { refundNo: string; cash: number; operatorName?: string; refs: { ref: string }[] }[] } };
+    summary: {
+      cash: { expected: number; refundSlip?: number };
+      refundSlips?: { count: number; total: number; list: { refundNo: string; cash: number; operatorName?: string; refs: { ref: string }[] }[] };
+    };
   };
 /** 接待一位客人、挂项目、结账，返回结账单 */
 const sale = async (payments: (total: number) => Record<string, unknown>[], lines: { itemId: number; quantity: number }[] = [], memberId?: number, cookie = ctx.clerk) => {
@@ -93,10 +96,16 @@ describe('开退款单', () => {
   let first: RefundDetail;
 
   it('核对：每项的实收、每种方式还能退多少；店员没有开退款单的权限', async () => {
-    const c = await sale((t) => [{ method: 'wechat', amount: 30000 }, { method: 'cash', amount: t - 30000 }], [
-      { itemId: item['退款搓澡']!, quantity: 2 },
-      { itemId: item['退款按摩']!, quantity: 1 },
-    ]);
+    const c = await sale(
+      (t) => [
+        { method: 'wechat', amount: 30000 },
+        { method: 'cash', amount: t - 30000 },
+      ],
+      [
+        { itemId: item['退款搓澡']!, quantity: 2 },
+        { itemId: item['退款按摩']!, quantity: 1 },
+      ],
+    );
     checkoutId = c.id;
     expect(c.totalAmount).toBe(49900 + 13600 + 19800);
     const o = await options(c.id);
@@ -161,14 +170,12 @@ describe('开退款单', () => {
     expect(await code({ items: [{ ...wash, quantity: 2, amount: 6800 }], payments: [{ method: 'cash', amount: 6800 }] })).toBe('REFUND_EXCEEDS');
     expect(await code({ items: [{ ...wash, quantity: 1, amount: 6801 }], payments: [{ method: 'cash', amount: 6801 }] })).toBe('REFUND_EXCEEDS');
     expect(await code({ items: [{ ...wash, quantity: 1, amount: 6800 }], payments: [{ method: 'alipay', amount: 6800, ref: 'AL-9' }] })).toBe('REFUND_METHOD_NOT_PAID');
-    expect(
-      await code({ items: [{ category: '门票', name: '门票 · 标准票（12 小时档）', quantity: 1, amount: 40000 }], payments: [{ method: 'wechat', amount: 40000, ref: 'WX-1' }] }),
-    ).toMatch(/REFUND_METHOD_EXCEEDS|REFUND_ITEM_NOT_FOUND/);
+    expect(await code({ items: [{ category: '门票', name: '门票 · 标准票（12 小时档）', quantity: 1, amount: 40000 }], payments: [{ method: 'wechat', amount: 40000, ref: 'WX-1' }] })).toMatch(
+      /REFUND_METHOD_EXCEEDS|REFUND_ITEM_NOT_FOUND/,
+    );
     expect(await code({ items: [{ ...wash, quantity: 1, amount: 6800 }], payments: [{ method: 'cash', amount: 6000 }] })).toBe('REFUND_NOT_BALANCED');
     expect((await refund(checkoutId, { items: [{ ...wash, quantity: 1, amount: 6800 }], payments: [{ method: 'wechat', amount: 6800 }] })).status).toBe(400);
-    expect(await code({ items: [{ category: '退款洗浴', name: '不存在的项目', quantity: 1, amount: 100 }], payments: [{ method: 'cash', amount: 100 }] })).toBe(
-      'REFUND_ITEM_NOT_FOUND',
-    );
+    expect(await code({ items: [{ category: '退款洗浴', name: '不存在的项目', quantity: 1, amount: 100 }], payments: [{ method: 'cash', amount: 100 }] })).toBe('REFUND_ITEM_NOT_FOUND');
     // 没退过、没改过
     expect((await options(checkoutId)).refunds).toHaveLength(1);
   });
@@ -264,9 +271,7 @@ describe('钱箱、班次与作废', () => {
     const late = new Date(Date.now() + 49 * 3_600_000);
     const dutyActor = { id: (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'duty'`)[0]!.id, role: 'duty_manager' as const, username: 'duty', displayName: '值班经理' };
     const input = { clientKey: randomUUID(), items: [{ category: '退款洗浴', name: '退款搓澡', quantity: 0, amount: 100 }], payments: [{ method: 'cash' as const, amount: 100 }], reason: '超时退款' };
-    await expect(
-      createRefund({ sql: ctx.sql, config: ctx.config } as never, c.id, input, { actor: dutyActor as never, ip: '127.0.0.1', at: late }),
-    ).rejects.toMatchObject({ code: 'REFUND_WINDOW' });
+    await expect(createRefund({ sql: ctx.sql, config: ctx.config } as never, c.id, input, { actor: dutyActor as never, ip: '127.0.0.1', at: late })).rejects.toMatchObject({ code: 'REFUND_WINDOW' });
   });
 
   it('只用会员储值付的结账单不能部分退款：提示用反结账', async () => {

@@ -17,7 +17,19 @@ export interface TimelineLevel {
   actions: ApprovalActionView[];
 }
 
-export function ApprovalTimeline({ levels, waitedText, overdue, testIdPrefix, className }: { levels: readonly TimelineLevel[]; /** 当前这一级等了多久 */ waitedText: string; overdue?: boolean; testIdPrefix: string; className?: string }) {
+export function ApprovalTimeline({
+  levels,
+  waitedText,
+  overdue,
+  testIdPrefix,
+  className,
+}: {
+  levels: readonly TimelineLevel[];
+  /** 当前这一级等了多久 */ waitedText: string;
+  overdue?: boolean;
+  testIdPrefix: string;
+  className?: string;
+}) {
   return (
     <ol className={className} data-testid={testIdPrefix === 'approval-chain' ? 'approval-chain' : undefined}>
       {levels.map((lv, i) => {
@@ -32,7 +44,12 @@ export function ApprovalTimeline({ levels, waitedText, overdue, testIdPrefix, cl
                 <span className="num">{lv.level}</span>
               </FlowDot>
             </span>
-            <div className={cn('min-w-0 flex-1 rounded-lg border px-3 py-2 text-[12.5px]', lv.state === 'current' ? 'border-yuzu-deep/40 bg-yuzu-tint' : lv.state === 'returned' ? 'border-clay/30 bg-clay-soft/40' : 'border-line bg-card')}>
+            <div
+              className={cn(
+                'min-w-0 flex-1 rounded-lg border px-3 py-2 text-[12.5px]',
+                lv.state === 'current' ? 'border-yuzu-deep/40 bg-yuzu-tint' : lv.state === 'returned' ? 'border-clay/30 bg-clay-soft/40' : 'border-line bg-card',
+              )}
+            >
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="num text-ink-3">第 {lv.level} 级</span>
                 <span className="font-bold text-ink">{lv.label}</span>

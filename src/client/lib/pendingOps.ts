@@ -83,6 +83,11 @@ function notify() {
   listeners.forEach((fn) => fn());
 }
 
+/** 本机已经有这个编号的待确认记录（之前发出去过、结果不明，或页面刷新前在路上）：再发就是重提 */
+export function hasPending(key: string): boolean {
+  return readAll().some((p) => p.key === key);
+}
+
 /** 提交前保存待确认记录；保存不了时抛出 PendingStoreError，调用方不得发出请求 */
 export function savePending(op: PendingOp) {
   const list = readAll();
@@ -114,9 +119,7 @@ export function setClaimed(key: string, active: boolean) {
 
 /** 某位会员某类操作的待确认记录（撤销还要对上消费单） */
 export function findPending(memberId: number, type: PendingType, consumptionId?: number): PendingOp | undefined {
-  return readAll().find(
-    (p) => p.memberId === memberId && p.type === type && (type !== 'reversal' || p.consumptionId === consumptionId) && !inFlight.has(p.key),
-  );
+  return readAll().find((p) => p.memberId === memberId && p.type === type && (type !== 'reversal' || p.consumptionId === consumptionId) && !inFlight.has(p.key));
 }
 
 let snapshotCache: { source: PendingOp[]; result: PendingOp[] } | null = null;

@@ -29,7 +29,11 @@ const KIND_LEVEL_MESSAGE = 'VIP 柜需要选择等级，普通柜不设等级';
 
 export const BatchInput = z
   .object({
-    prefix: z.string().trim().toUpperCase().regex(/^[A-Z]{0,2}$/, '前缀只能是 0–2 个英文字母'),
+    prefix: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z]{0,2}$/, '前缀只能是 0–2 个英文字母'),
     from: z.number().int().min(0).max(99999),
     to: z.number().int().min(0).max(99999),
     /** 数字位数，不足补 0，例如 3 → 001 */
@@ -184,9 +188,7 @@ export async function importHandTags(
     await setTxTimeouts(tx);
     const existing = await tx<{ id: number; code: string; zone: string; kind: string; vipLevel: number | null; active: boolean }[]>`
       SELECT id, code, zone, kind, vip_level, active FROM hand_tags WHERE store_id = ${currentStoreId()} ORDER BY id ${input.dryRun ? tx`` : tx`FOR UPDATE`}`;
-    const inUse = new Set(
-      (await tx<{ tagId: number }[]>`SELECT tag_id FROM visits WHERE status = 'open'`).map((r) => r.tagId),
-    );
+    const inUse = new Set((await tx<{ tagId: number }[]>`SELECT tag_id FROM visits WHERE status = 'open'`).map((r) => r.tagId));
     const byCode = new Map(existing.map((t) => [t.code, t]));
     const listed = new Set(input.rows.map((r) => r.code));
 

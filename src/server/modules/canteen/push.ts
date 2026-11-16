@@ -143,7 +143,13 @@ export async function pushInfo(sql: Sql, employeeId: number): Promise<PushInfo> 
   const [settings, reminders] = await Promise.all([loadCanteenSettings(sql), loadReminderSettings(sql)]);
   const meals = reminders.reminders
     .filter((r) => r.enabled)
-    .map((r) => ({ meal: r.meal, time: reminderTime(r, settings.meals.find((w) => w.meal === r.meal)) }))
+    .map((r) => ({
+      meal: r.meal,
+      time: reminderTime(
+        r,
+        settings.meals.find((w) => w.meal === r.meal),
+      ),
+    }))
     .filter((m): m is { meal: Meal; time: string } => m.time !== null);
   const [pref] = await sql<{ mutedMeals: Meal[] }[]>`SELECT muted_meals FROM canteen_push_prefs WHERE employee_id = ${employeeId}`;
   const [count] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM canteen_push_subscriptions WHERE employee_id = ${employeeId} AND disabled_at IS NULL`;
@@ -506,7 +512,16 @@ export async function reminderOverview(db: Db, config: AppConfig, now: Date = ne
         finishedAt: row.finishedAt,
       });
     } else {
-      runs.push({ meal: r.meal, time, state: minute < due ? 'waiting' : minute - due < REMINDER_GRACE_MINUTES ? 'waiting' : 'missed', sent: 0, failed: 0, skippedCheckedIn: 0, line: null, finishedAt: null });
+      runs.push({
+        meal: r.meal,
+        time,
+        state: minute < due ? 'waiting' : minute - due < REMINDER_GRACE_MINUTES ? 'waiting' : 'missed',
+        sent: 0,
+        failed: 0,
+        skippedCheckedIn: 0,
+        line: null,
+        finishedAt: null,
+      });
     }
   }
   const [devices] = await db<{ people: number; total: number; ios: number; android: number; other: number }[]>`

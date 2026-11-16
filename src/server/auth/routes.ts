@@ -41,8 +41,12 @@ async function sessionInfoInStore({ sql, config }: Deps, actor: Actor): Promise<
   const settings = await loadSettings(sql);
   const stores = await allowedStores(sql, actor);
   const storeId = actor.storeId ?? DEFAULT_STORE_ID;
-  const [current] = stores.some((s) => s.id === storeId) ? stores.filter((s) => s.id === storeId) : await sql<{ id: number; code: string; name: string }[]>`SELECT id, code, name FROM stores WHERE id = ${storeId}`;
-  const [synthetic] = await sql<{ exists: boolean }[]>`SELECT (EXISTS (SELECT 1 FROM members WHERE is_synthetic) OR EXISTS (SELECT 1 FROM materials WHERE is_synthetic) OR EXISTS (SELECT 1 FROM hand_tags WHERE is_synthetic)) AS exists`;
+  const [current] = stores.some((s) => s.id === storeId)
+    ? stores.filter((s) => s.id === storeId)
+    : await sql<{ id: number; code: string; name: string }[]>`SELECT id, code, name FROM stores WHERE id = ${storeId}`;
+  const [synthetic] = await sql<
+    { exists: boolean }[]
+  >`SELECT (EXISTS (SELECT 1 FROM members WHERE is_synthetic) OR EXISTS (SELECT 1 FROM materials WHERE is_synthetic) OR EXISTS (SELECT 1 FROM hand_tags WHERE is_synthetic)) AS exists`;
   const { storeName, ...rules } = settings;
   return {
     staff: { id: actor.id, username: actor.username, displayName: actor.displayName, role: actor.role, duties: actor.duties, mustChangePassword: actor.mustChangePassword },
@@ -83,7 +87,9 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
   // 登录页使用：门店名称、实例标识与版本；只有开发环境（演示库）且存在演示数据时才提示演示账号
   app.get('/api/public/info', async () => {
     const settings = await loadSettings(sql);
-    const [synthetic] = await sql<{ exists: boolean }[]>`SELECT (EXISTS (SELECT 1 FROM members WHERE is_synthetic) OR EXISTS (SELECT 1 FROM materials WHERE is_synthetic) OR EXISTS (SELECT 1 FROM hand_tags WHERE is_synthetic)) AS exists`;
+    const [synthetic] = await sql<
+      { exists: boolean }[]
+    >`SELECT (EXISTS (SELECT 1 FROM members WHERE is_synthetic) OR EXISTS (SELECT 1 FROM materials WHERE is_synthetic) OR EXISTS (SELECT 1 FROM hand_tags WHERE is_synthetic)) AS exists`;
     return {
       storeName: settings.storeName,
       env: config.env,

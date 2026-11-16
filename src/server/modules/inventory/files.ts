@@ -23,7 +23,10 @@ export type FileScope = 'supplier_contract' | 'receipt' | 'invoice' | 'supplier_
 const PdfInput = z.object({
   name: z.string().trim().min(1, '请写文件名').max(80, '文件名最多 80 个字'),
   mime: z.literal('application/pdf', '只能上传 PDF 文件'),
-  data: z.string().min(16).max(Math.ceil((MAX_PDF_BYTES * 4) / 3) + 16, '文件不能超过 10 MB'),
+  data: z
+    .string()
+    .min(16)
+    .max(Math.ceil((MAX_PDF_BYTES * 4) / 3) + 16, '文件不能超过 10 MB'),
 });
 
 /** 核对 PDF 的文件头与大小，按内容摘要存一份（已有的直接用），返回文件编号 */
@@ -67,7 +70,14 @@ async function uploadContract(deps: Deps, supplierId: number, raw: unknown, acto
       SELECT id FROM supplier_contract_files WHERE supplier_id = ${supplierId} AND file_id = ${file.id} AND removed_at IS NULL`;
     if (dup) return; // 同一份文件已经挂着
     await tx`INSERT INTO supplier_contract_files (supplier_id, file_id, name, uploaded_by) VALUES (${supplierId}, ${file.id}, ${input.name}, ${actor.id})`;
-    await writeAudit(tx, { staffId: actor.id, action: 'supplier_contract_file', targetType: 'supplier', targetId: supplierId, detail: { name: input.name, fileId: file.id, sizeBytes: file.sizeBytes }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'supplier_contract_file',
+      targetType: 'supplier',
+      targetId: supplierId,
+      detail: { name: input.name, fileId: file.id, sizeBytes: file.sizeBytes },
+      ip,
+    });
   });
   return supplierContractFiles(deps.sql, supplierId);
 }
@@ -101,9 +111,7 @@ export function registerFileRoutes(app: FastifyInstance, deps: Deps) {
     reply.code(201);
     return files;
   });
-  app.post('/api/inventory/supplier-contract-files/:id/remove', { preHandler: guard('inventory.master') }, async (req) =>
-    removeContract(deps, parse(idParam, req.params).id, req.actor, req.ip),
-  );
+  app.post('/api/inventory/supplier-contract-files/:id/remove', { preHandler: guard('inventory.master') }, async (req) => removeContract(deps, parse(idParam, req.params).id, req.actor, req.ip));
   app.get('/api/inventory/supplier-contract-files/:id/download', { preHandler: readers }, async (req, reply) => {
     const { id } = parse(idParam, req.params);
     const [f] = await sql<{ fileId: number; name: string; removedAt: string | null }[]>`

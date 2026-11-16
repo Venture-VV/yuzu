@@ -59,8 +59,7 @@ beforeAll(async () => {
 });
 afterAll(async () => ctx.close());
 
-const checkin = (cookie: string, guests: unknown[], extra: Record<string, unknown> = {}) =>
-  api(ctx.app, cookie, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests, ...extra });
+const checkin = (cookie: string, guests: unknown[], extra: Record<string, unknown> = {}) => api(ctx.app, cookie, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests, ...extra });
 const authorize = (cookie: string, tags: { code: string; memberId: number | null }[], who = 'duty', password = PASSWORD) =>
   api(ctx.app, cookie, 'POST', '/api/auth/authorize', { username: who, password, purpose: 'vip_tag', scope: { tags } });
 const setRules = async (patch: Record<string, unknown>) => {
@@ -69,8 +68,10 @@ const setRules = async (patch: Record<string, unknown>) => {
   return r.body;
 };
 const openOn = async (code: string) =>
-  (await ctx.sql<{ id: number; vipOverrideBy: number | null }[]>`
-    SELECT v.id, v.vip_override_by FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${code} AND v.status = 'open'`)[0] ?? null;
+  (
+    await ctx.sql<{ id: number; vipOverrideBy: number | null }[]>`
+    SELECT v.id, v.vip_override_by FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${code} AND v.status = 'open'`
+  )[0] ?? null;
 const cancel = (cookie: string, visitId: number) => api(ctx.app, cookie, 'POST', `/api/frontdesk/visits/${visitId}/cancel`, { reason: '开错手牌' });
 const gradeOf = async (memberId: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/members/${memberId}/grade`)).body;
 const memberWith = async (name: string, phone: string, recharges: number[]) => {
@@ -248,7 +249,14 @@ describe('当场授权（开关开启）', () => {
   it('业务没成功时核销一起回滚，授权仍可在有效期内使用；不需要授权时不核销', async () => {
     const g = (await authorize(ctx.clerk, [{ code: '9062', memberId: null }])).body.grantId;
     // 第二位客人的牌已在店 → 整笔失败
-    const fail = await checkin(ctx.clerk, [{ tagCode: '9062', zone: 'male' }, { tagCode: '9060', zone: 'male' }], { vipGrantId: g });
+    const fail = await checkin(
+      ctx.clerk,
+      [
+        { tagCode: '9062', zone: 'male' },
+        { tagCode: '9060', zone: 'male' },
+      ],
+      { vipGrantId: g },
+    );
     expect(fail.body.error.code).toBe('TAG_OCCUPIED');
     const [unused] = await ctx.sql<{ usedAt: string | null }[]>`SELECT used_at FROM auth_grants WHERE id = ${g}`;
     expect(unused!.usedAt).toBeNull();
@@ -259,11 +267,13 @@ describe('当场授权（开关开启）', () => {
   });
 
   it('同一授权并发用于两笔：只有一笔成功', async () => {
-    const g = (await authorize(ctx.clerk, [{ code: '9035', memberId: null }, { code: '9059', memberId: null }])).body.grantId;
-    const results = await Promise.all([
-      checkin(ctx.clerk, [{ tagCode: '9035', zone: 'male' }], { vipGrantId: g }),
-      checkin(ctx.clerk, [{ tagCode: '9059', zone: 'male' }], { vipGrantId: g }),
-    ]);
+    const g = (
+      await authorize(ctx.clerk, [
+        { code: '9035', memberId: null },
+        { code: '9059', memberId: null },
+      ])
+    ).body.grantId;
+    const results = await Promise.all([checkin(ctx.clerk, [{ tagCode: '9035', zone: 'male' }], { vipGrantId: g }), checkin(ctx.clerk, [{ tagCode: '9059', zone: 'male' }], { vipGrantId: g })]);
     expect(results.map((r) => r.status).sort()).toEqual([201, 422]);
     expect(results.find((r) => r.status === 422)!.body.error.code).toBe('GRANT_USED');
   });
@@ -383,14 +393,16 @@ describe('按清单导入', () => {
     await api(ctx.app, ctx.owner, 'PUT', `/api/frontdesk/tags/${b.id}`, { zone: 'male', active: false });
     const inStore = 'A8069';
     expect((await checkin(ctx.clerk, [{ tagCode: inStore, zone: 'male' }])).status).toBe(201);
-    const r = (await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/import', {
-      rows: [
-        { code: 'B8186', zone: 'male', kind: 'normal', vipLevel: null },
-        { code: inStore, zone: 'male', kind: 'vip', vipLevel: 2 },
-        { code: '9070', zone: 'male', kind: 'vip', vipLevel: 5 },
-      ],
-      dryRun: false,
-    })).body;
+    const r = (
+      await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/import', {
+        rows: [
+          { code: 'B8186', zone: 'male', kind: 'normal', vipLevel: null },
+          { code: inStore, zone: 'male', kind: 'vip', vipLevel: 2 },
+          { code: '9070', zone: 'male', kind: 'vip', vipLevel: 5 },
+        ],
+        dryRun: false,
+      })
+    ).body;
     expect(r).toMatchObject({ updated: 2, unchanged: 0, blocked: [{ code: inStore }] });
     const rows = await ctx.sql<{ code: string; kind: string; vipLevel: number | null; active: boolean }[]>`
       SELECT code, kind, vip_level, active FROM hand_tags WHERE code IN ('B8186', '9070', ${inStore}) ORDER BY code`;

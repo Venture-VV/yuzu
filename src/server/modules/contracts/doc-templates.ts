@@ -48,7 +48,10 @@ const FieldInput = z.object({
   required: z.boolean().default(false),
 });
 const ClauseInput = z.object({
-  key: z.string().trim().regex(/^[A-Za-z0-9_-]{1,24}$/, '条款编号用字母数字，最多 24 位'),
+  key: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_-]{1,24}$/, '条款编号用字母数字，最多 24 位'),
   title: z.string().trim().min(1, '请填写条款标题').max(30, '条款标题最多 30 个字'),
   text: z.string().trim().min(1, '请填写条款内容').max(2000, '每条最多 2000 个字'),
   default: z.boolean().default(false),
@@ -141,7 +144,7 @@ export async function contractDocument(db: Db, contractId: number, today: string
   const draft = c.status === 'draft' || c.status === 'returned' || c.status === 'reviewing' || c.currentVersion === 0;
   const versionLabel = draft ? (c.status === 'reviewing' ? '审查中的稿' : '草稿') : `第 ${c.currentVersion} 版`;
   const ref = c.content.template ?? null;
-  const tpl = ref ? (await db<{ body: string; clauses: TemplateClause[] }[]>`SELECT body, clauses FROM contract_templates WHERE id = ${ref.id}`)[0] ?? null : null;
+  const tpl = ref ? ((await db<{ body: string; clauses: TemplateClause[] }[]>`SELECT body, clauses FROM contract_templates WHERE id = ${ref.id}`)[0] ?? null) : null;
   const head = { contractNo: c.contractNo, counterparty: c.counterparty, storeName, versionLabel };
   return {
     contractNo: c.contractNo,
@@ -178,7 +181,14 @@ export function registerContractDocRoutes(app: FastifyInstance, deps: Deps) {
     const id = parse(idParam, req.params).id;
     const doc = await readSnapshot(sql, (tx) => contractDocument(tx, id, today()));
     if (!doc.blocks.length) throw badRequest('合同没有内容');
-    await writeAudit(sql, { staffId: req.actor.id, action: 'contract_template', targetType: 'contract', targetId: id, detail: { op: 'export_docx', contractNo: doc.contractNo, version: doc.versionLabel }, ip: req.ip });
+    await writeAudit(sql, {
+      staffId: req.actor.id,
+      action: 'contract_template',
+      targetType: 'contract',
+      targetId: id,
+      detail: { op: 'export_docx', contractNo: doc.contractNo, version: doc.versionLabel },
+      ip: req.ip,
+    });
     attachment(reply, `合同-${doc.contractNo}-${doc.versionLabel}.docx`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     return reply.send(buildDocx(doc.blocks, doc.headerText));
   });

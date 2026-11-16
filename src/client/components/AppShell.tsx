@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Navigate, NavLink, useLocation, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { Building2, KeyRound, LogOut, MonitorSmartphone } from 'lucide-react';
+import { Building2, KeyRound, LogOut, MonitorSmartphone, Wifi } from 'lucide-react';
 import { useTerminalState } from '../features/devices/terminal';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
@@ -14,6 +14,8 @@ import { InstanceTag } from './InstanceTag';
 import { StoreSwitcher } from './StoreSwitcher';
 import { storePageOf, useStoreNav } from './storeNav';
 import { PendingOpsBanner } from './PendingOpsBanner';
+import { useLocalPendingCount } from './LocalPendingNotice';
+import { useConnection } from '../lib/connection';
 import { FrontdeskPendingBanner } from '../features/frontdesk/PendingBanner';
 import { useErpAccess } from '../features/erp/access';
 import { TerminalBridgeRunner } from '../features/devices/terminal';
@@ -36,16 +38,19 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex h-dvh min-h-0 bg-paper">
       {/* 设备（v0.7.21）：选了「这台终端」的设备常连本机的设备服务、替它上报（不在设备页也照常） */}
       <TerminalBridgeRunner />
-      <nav
-        aria-label="主导航"
-        className="flex w-[76px] shrink-0 flex-col items-center gap-1 bg-[#1d3f31] pt-4 pb-4 text-paper short:gap-0.5 short:pt-2.5 short:pb-2.5 md:w-[84px]"
-      >
+      <nav aria-label="主导航" className="flex w-[76px] shrink-0 flex-col items-center gap-1 bg-[#1d3f31] pt-4 pb-4 text-paper short:gap-0.5 short:pt-2.5 short:pb-2.5 md:w-[84px]">
         <NavLink to="/" aria-label="浴族 yuzu 首页" className="mb-5 rounded-[14px] ring-1 ring-white/10 short:mb-2">
           <LogoMark className="size-10 short:size-8" />
         </NavLink>
         <div ref={pill.ref} className="scroll-thin relative flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto short:gap-0.5">
           {pill.style && (
-            <span key={pill.jump} aria-hidden className={cn('mo-indicator rounded-[14px] bg-white/12 short:rounded-[12px]', pill.jump > 0 && 'mo-indicator-jump')} data-settled={pill.settled} style={pill.style}>
+            <span
+              key={pill.jump}
+              aria-hidden
+              className={cn('mo-indicator rounded-[14px] bg-white/12 short:rounded-[12px]', pill.jump > 0 && 'mo-indicator-jump')}
+              data-settled={pill.settled}
+              style={pill.style}
+            >
               <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />
             </span>
           )}
@@ -98,6 +103,8 @@ function UserMenu() {
   const erp = useErpAccess();
   // 这台电脑现在设成了哪台终端（记在本机浏览器里；没设 = 不上报）
   const terminalCode = useTerminalState().terminal;
+  const link = useConnection();
+  const pendingCount = useLocalPendingCount();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -147,17 +154,55 @@ function UserMenu() {
           <div className="my-1 h-px bg-line" />
           {erp.canEnter && (
             // ERP 不在主导航里显示（店主 2026-10-30 定）：有 ERP 权限的人从这里进
-            <MenuItem icon={<Building2 className="size-4" />} onClick={() => { setOpen(false); navigate('/erp'); }} testId="user-menu-erp">
+            <MenuItem
+              icon={<Building2 className="size-4" />}
+              onClick={() => {
+                setOpen(false);
+                navigate('/erp');
+              }}
+              testId="user-menu-erp"
+            >
               进入 ERP
             </MenuItem>
           )}
           {can('device.view') && (
             // 本机终端（8.0.19，IA 第 3.4 节）：这台电脑是哪台终端在门店「设备」页右边设；从哪一页都点得到
-            <MenuItem icon={<MonitorSmartphone className="size-4" />} onClick={() => { setOpen(false); navigate('/devices#terminal'); }} testId="user-menu-terminal">
-              本机终端<span className="ml-auto max-w-[96px] truncate text-[12px] text-ink-3" data-testid="user-menu-terminal-current">{terminalCode ?? '未设置'}</span>
+            <MenuItem
+              icon={<MonitorSmartphone className="size-4" />}
+              onClick={() => {
+                setOpen(false);
+                navigate('/devices#terminal');
+              }}
+              testId="user-menu-terminal"
+            >
+              本机终端
+              <span className="ml-auto max-w-[96px] truncate text-[12px] text-ink-3" data-testid="user-menu-terminal-current">
+                {terminalCode ?? '未设置'}
+              </span>
             </MenuItem>
           )}
-          <MenuItem icon={<KeyRound className="size-4" />} onClick={() => { setOpen(false); navigate('/password'); }}>
+          {/* 网络与同步（8.1.3 WL12）：连接、版本、这台电脑上的待确认、最近的问题 */}
+          <MenuItem
+            icon={<Wifi className="size-4" />}
+            onClick={() => {
+              setOpen(false);
+              navigate('/network');
+            }}
+            testId="user-menu-network"
+          >
+            网络与同步
+            <span className="ml-auto flex items-center gap-1.5 text-[12px] text-ink-3">
+              {pendingCount > 0 && <span data-testid="user-menu-network-pending">{pendingCount} 笔待确认</span>}
+              <span className={cn('size-2 rounded-full', link.state === 'offline' ? 'bg-clay' : link.updated ? 'bg-lake' : 'bg-pine')} />
+            </span>
+          </MenuItem>
+          <MenuItem
+            icon={<KeyRound className="size-4" />}
+            onClick={() => {
+              setOpen(false);
+              navigate('/password');
+            }}
+          >
             修改密码
           </MenuItem>
           <MenuItem icon={<LogOut className="size-4" />} onClick={logout}>
@@ -173,7 +218,12 @@ function UserMenu() {
 function MenuPanel({ children }: { children: ReactNode }) {
   const ref = useExitGhost<HTMLDivElement>();
   return (
-    <div ref={ref} role="menu" data-mo-out="menu" className="absolute bottom-0 left-[calc(100%+12px)] z-30 w-56 origin-bottom-left animate-menu-in rounded-lg border border-line bg-card p-1.5 text-ink shadow-pop">
+    <div
+      ref={ref}
+      role="menu"
+      data-mo-out="menu"
+      className="absolute bottom-0 left-[calc(100%+12px)] z-30 w-56 origin-bottom-left animate-menu-in rounded-lg border border-line bg-card p-1.5 text-ink shadow-pop"
+    >
       {children}
     </div>
   );
@@ -199,17 +249,7 @@ function MenuItem({ icon, children, onClick, testId }: { icon: ReactNode; childr
 }
 
 /** 页面顶栏：标题 + 营业日（库存页为自然日）+ 演示数据标记 */
-export function PageHeader({
-  title,
-  subtitle,
-  actions,
-  dateMode = 'business',
-}: {
-  title: ReactNode;
-  subtitle?: ReactNode;
-  actions?: ReactNode;
-  dateMode?: 'business' | 'calendar';
-}) {
+export function PageHeader({ title, subtitle, actions, dateMode = 'business' }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; dateMode?: 'business' | 'calendar' }) {
   const session = useSession();
   const d = describeDate(dateMode === 'business' ? session.today : session.calendarToday);
   const hours = session.rules.businessHours;

@@ -15,7 +15,12 @@ async function login(page: Page, username: string) {
   await page.fill('#username', username);
   await page.fill('#password', PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
-  await expect(page.getByRole('navigation', { name: '主导航' }).or(page.getByRole('navigation', { name: 'ERP 导航' })).first()).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page
+      .getByRole('navigation', { name: '主导航' })
+      .or(page.getByRole('navigation', { name: 'ERP 导航' }))
+      .first(),
+  ).toBeVisible({ timeout: 30_000 });
 }
 
 async function postJson<T>(page: Page, url: string, data: unknown): Promise<T> {
@@ -144,7 +149,15 @@ test.describe('8.0.4 会员体系整改', () => {
     const member = await postJson<{ id: number }>(page, '/api/members', { name: `E2E额度${run}`, phone: phone(3) });
     try {
       if (settings.rechargeSpendPct !== 70) expect((await page.request.put('/api/settings', { data: { rechargeSpendPct: 70 } })).ok()).toBe(true);
-      await postJson(page, '/api/recharges', { idempotencyKey: randomUUID(), memberId: member.id, planId: null, paidAmount: 1_000_000, bonusAmount: 0, paymentMethod: 'wechat', paymentConfirmed: true });
+      await postJson(page, '/api/recharges', {
+        idempotencyKey: randomUUID(),
+        memberId: member.id,
+        planId: null,
+        paidAmount: 1_000_000,
+        bonusAmount: 0,
+        paymentMethod: 'wechat',
+        paymentConfirmed: true,
+      });
       await page.goto(`/?m=${member.id}`);
       await expect(page.getByTestId('member-spend-quota')).toContainText('今日储值可用 ¥7,000.00');
 

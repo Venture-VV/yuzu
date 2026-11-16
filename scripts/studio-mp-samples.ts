@@ -72,13 +72,47 @@ export function samplePoster(): { id: string; bytes: Buffer } {
 
 // ── 节点的简写（照格式把每一项都写全，小程序那边读到的就是这个样子） ──
 const at = (x = 0, y = 0, w = 0, h = 0) => ({ name: '', x, y, w, h, rotate: 0, opacity: 1, hidden: false, locked: false });
-const flow = (mode: 'row' | 'column', gap: number, padding: [number, number, number, number], align: StudioLayout['align'] = 'start', justify: StudioLayout['justify'] = 'start', wrap = false): StudioLayout => ({ mode, wrap, gap, padding, align, justify });
-const textStyle = { font: 'zh' as const, size: 14, weight: 400 as const, color: '$ink', align: 'left' as const, valign: 'top' as const, lineHeight: 1.4, letterSpacing: 0, italic: false, underline: false };
+const flow = (
+  mode: 'row' | 'column',
+  gap: number,
+  padding: [number, number, number, number],
+  align: StudioLayout['align'] = 'start',
+  justify: StudioLayout['justify'] = 'start',
+  wrap = false,
+): StudioLayout => ({ mode, wrap, gap, padding, align, justify });
+const textStyle = {
+  font: 'zh' as const,
+  size: 14,
+  weight: 400 as const,
+  color: '$ink',
+  align: 'left' as const,
+  valign: 'top' as const,
+  lineHeight: 1.4,
+  letterSpacing: 0,
+  italic: false,
+  underline: false,
+};
 type Over = Record<string, unknown>;
-const text = (id: string, zh: string, more: Over = {}): StudioNode => ({ type: 'text', id, ...at(0, 0, 339, 20), sizing: { w: 'fill', h: 'hug' }, text: { zh, en: '' }, ...textStyle, fill: null, ...more }) as StudioNode;
-const rect = (id: string, w: number, h: number, more: Over = {}): StudioNode => ({ type: 'rect', id, ...at(0, 0, w, h), sizing: { w: 'fixed', h: 'fixed' }, fill: '$wood', stroke: null, strokeWidth: 0, radius: 4, shadow: 'none', ...more }) as StudioNode;
+const text = (id: string, zh: string, more: Over = {}): StudioNode =>
+  ({ type: 'text', id, ...at(0, 0, 339, 20), sizing: { w: 'fill', h: 'hug' }, text: { zh, en: '' }, ...textStyle, fill: null, ...more }) as StudioNode;
+const rect = (id: string, w: number, h: number, more: Over = {}): StudioNode =>
+  ({ type: 'rect', id, ...at(0, 0, w, h), sizing: { w: 'fixed', h: 'fixed' }, fill: '$wood', stroke: null, strokeWidth: 0, radius: 4, shadow: 'none', ...more }) as StudioNode;
 const frame = (id: string, layout: StudioLayout | undefined, children: StudioNode[], more: Over = {}): StudioNode =>
-  ({ type: 'frame', id, ...at(0, 0, 339, 0), sizing: { w: 'fill', h: 'hug' }, fill: null, stroke: null, strokeWidth: 0, radius: 0, shadow: 'none', clip: false, ...(layout ? { layout } : {}), children, ...more }) as StudioNode;
+  ({
+    type: 'frame',
+    id,
+    ...at(0, 0, 339, 0),
+    sizing: { w: 'fill', h: 'hug' },
+    fill: null,
+    stroke: null,
+    strokeWidth: 0,
+    radius: 0,
+    shadow: 'none',
+    clip: false,
+    ...(layout ? { layout } : {}),
+    children,
+    ...more,
+  }) as StudioNode;
 const button = (id: string, zh: string, action: { action: string; arg: string } | null, more: Over = {}): StudioNode =>
   ({
     type: 'button',
@@ -101,7 +135,8 @@ const button = (id: string, zh: string, action: { action: string; arg: string } 
     ...(action ? { action } : {}),
     ...more,
   }) as StudioNode;
-const field = (id: string, key: string, more: Over = {}): StudioNode => ({ type: 'field', id, ...at(0, 0, 339, 20), sizing: { w: 'fill', h: 'hug' }, field: key, prefix: { zh: '', en: '' }, suffix: { zh: '', en: '' }, ...textStyle, fill: null, ...more }) as StudioNode;
+const field = (id: string, key: string, more: Over = {}): StudioNode =>
+  ({ type: 'field', id, ...at(0, 0, 339, 20), sizing: { w: 'fill', h: 'hug' }, field: key, prefix: { zh: '', en: '' }, suffix: { zh: '', en: '' }, ...textStyle, fill: null, ...more }) as StudioNode;
 
 /** 换掉一屏（其余照默认版面） */
 function withScreen(screen: string, nodes: StudioNode[], layout: StudioLayout | undefined, extra: { background?: string | null; height?: number } = {}): StudioDoc {
@@ -119,14 +154,18 @@ export function buildMpSamples(): MpSample[] {
       text('intro-h', '冬日汤泉季', { size: 24, weight: 600 }),
       text('intro-p', '12 月 1 日至 2 月 28 日，会员泡汤赠送姜茶一份；周末夜场延长到凌晨两点。', { size: 14, lineHeight: 1.6, color: '$muted' }),
     ]),
-    frame(
-      'facts',
-      flow('row', 10, [16, 18, 0, 18], 'stretch'),
-      [
-        frame('fact-hours', flow('column', 4, [12, 12, 12, 12]), [text('fact-hours-k', '营业时间', { size: 11, color: '$muted' }), field('fact-hours-v', 'store.hours', { size: 14, weight: 600 })], { fill: '$surface', radius: 8, sizing: { w: 'fill', h: 'hug' } }),
-        frame('fact-phone', flow('column', 4, [12, 12, 12, 12]), [text('fact-phone-k', '订位电话', { size: 11, color: '$muted' }), field('fact-phone-v', 'store.phone', { size: 14, weight: 600 })], { fill: '$surface', radius: 8, sizing: { w: 'fill', h: 'hug' } }),
-      ],
-    ),
+    frame('facts', flow('row', 10, [16, 18, 0, 18], 'stretch'), [
+      frame('fact-hours', flow('column', 4, [12, 12, 12, 12]), [text('fact-hours-k', '营业时间', { size: 11, color: '$muted' }), field('fact-hours-v', 'store.hours', { size: 14, weight: 600 })], {
+        fill: '$surface',
+        radius: 8,
+        sizing: { w: 'fill', h: 'hug' },
+      }),
+      frame('fact-phone', flow('column', 4, [12, 12, 12, 12]), [text('fact-phone-k', '订位电话', { size: 11, color: '$muted' }), field('fact-phone-v', 'store.phone', { size: 14, weight: 600 })], {
+        fill: '$surface',
+        radius: 8,
+        sizing: { w: 'fill', h: 'hug' },
+      }),
+    ]),
     frame('cta', flow('column', 10, [20, 18, 0, 18], 'stretch'), [
       button('cta-coupon', '领取冬日券', { action: 'open.page', arg: 'coupon-center' }, { fill: '$energy', h: 48 }),
       button('cta-home', '回首页', { action: 'open.page', arg: 'home' }, { fill: null, stroke: '$ink', strokeWidth: 1, color: '$ink', weight: 500 }),
@@ -139,22 +178,39 @@ export function buildMpSamples(): MpSample[] {
   const lane = (id: string, layout: StudioLayout, children: StudioNode[], more: Over = {}) => frame(id, layout, children, { fill: '$wood6', radius: 6, ...more });
   const layoutSheet: StudioNode[] = [
     label('l-j', '横排 · 分布：靠左 / 居中 / 靠右 / 两头'),
-    ...(['start', 'center', 'end', 'between'] as const).map((j) => lane(`j-${j}`, flow('row', 8, [8, 8, 8, 8], 'center', j), [sq(`j-${j}-1`), sq(`j-${j}-2`, 40, 40, '$wood3'), sq(`j-${j}-3`, 40, 40, '$wood2')])),
+    ...(['start', 'center', 'end', 'between'] as const).map((j) =>
+      lane(`j-${j}`, flow('row', 8, [8, 8, 8, 8], 'center', j), [sq(`j-${j}-1`), sq(`j-${j}-2`, 40, 40, '$wood3'), sq(`j-${j}-3`, 40, 40, '$wood2')]),
+    ),
     label('l-a', '横排 · 对齐：上 / 中 / 下 / 撑满（高 64 的框里）'),
     ...(['start', 'center', 'end', 'stretch'] as const).map((a) =>
       lane(
         `a-${a}`,
         flow('row', 8, [8, 8, 8, 8], a),
-        [sq(`a-${a}-1`, 40, 20), a === 'stretch' ? rect(`a-${a}-2`, 40, 20, { fill: '$wood3', sizing: { w: 'fixed', h: 'fill' } }) : sq(`a-${a}-2`, 40, 32, '$wood3'), sq(`a-${a}-3`, 40, 44, '$wood2')],
+        [
+          sq(`a-${a}-1`, 40, 20),
+          a === 'stretch' ? rect(`a-${a}-2`, 40, 20, { fill: '$wood3', sizing: { w: 'fixed', h: 'fill' } }) : sq(`a-${a}-2`, 40, 32, '$wood3'),
+          sq(`a-${a}-3`, 40, 44, '$wood2'),
+        ],
         { sizing: { w: 'fill', h: 'fixed' }, h: 64 },
       ),
     ),
     label('l-w', '横排 · 放不下换行（每个 76 宽、间距 11）'),
-    lane('wrap', flow('row', 11, [8, 8, 8, 8], 'start', 'start', true), Array.from({ length: 7 }, (_, i) => sq(`w-${i}`, 76, 32, i % 2 ? '$wood3' : '$wood'))),
+    lane(
+      'wrap',
+      flow('row', 11, [8, 8, 8, 8], 'start', 'start', true),
+      Array.from({ length: 7 }, (_, i) => sq(`w-${i}`, 76, 32, i % 2 ? '$wood3' : '$wood')),
+    ),
     label('l-s', '宽：固定 80 + 撑满 + 撑满'),
-    lane('fill', flow('row', 8, [8, 8, 8, 8], 'center'), [sq('f-1', 80, 32), rect('f-2', 10, 32, { fill: '$wood3', sizing: { w: 'fill', h: 'fixed' } }), rect('f-3', 10, 32, { fill: '$wood2', sizing: { w: 'fill', h: 'fixed' } })]),
+    lane('fill', flow('row', 8, [8, 8, 8, 8], 'center'), [
+      sq('f-1', 80, 32),
+      rect('f-2', 10, 32, { fill: '$wood3', sizing: { w: 'fill', h: 'fixed' } }),
+      rect('f-3', 10, 32, { fill: '$wood2', sizing: { w: 'fill', h: 'fixed' } }),
+    ]),
     label('l-p', '竖排 · 内边距 上 20 右 10 下 4 左 30、间距 6、跟内容的高'),
-    lane('pad', flow('column', 6, [20, 10, 4, 30], 'stretch'), [rect('p-1', 10, 24, { sizing: { w: 'fill', h: 'fixed' } }), rect('p-2', 10, 24, { fill: '$wood3', sizing: { w: 'fill', h: 'fixed' } })]),
+    lane('pad', flow('column', 6, [20, 10, 4, 30], 'stretch'), [
+      rect('p-1', 10, 24, { sizing: { w: 'fill', h: 'fixed' } }),
+      rect('p-2', 10, 24, { fill: '$wood3', sizing: { w: 'fill', h: 'fixed' } }),
+    ]),
     label('l-free', '自由摆放的框（按 x / y）套在竖排里：圆、转 15 度的方块、文字'),
     frame(
       'free',
@@ -171,8 +227,16 @@ export function buildMpSamples(): MpSample[] {
   // 文字与样式测试表：字号、粗细、字距、行高、对齐、竖直对齐、斜体下划线、英文字体、数据字段、颜色（主题 / 十六进制 / 带透明度）、
   // 透明度、投影、描边、圆角、椭圆、按钮的几种样子
   const textSheet: StudioNode[] = [
-    frame('sizes', flow('row', 10, [0, 0, 0, 0], 'end'), [12, 16, 24, 32].map((n) => text(`size-${n}`, `${n}号`, { size: n, sizing: { w: 'hug', h: 'hug' } }))),
-    frame('weights', flow('row', 10, [0, 0, 0, 0], 'center'), [300, 400, 600, 900].map((w) => text(`w-${w}`, `粗细${w}`, { size: 16, weight: w, sizing: { w: 'hug', h: 'hug' } }))),
+    frame(
+      'sizes',
+      flow('row', 10, [0, 0, 0, 0], 'end'),
+      [12, 16, 24, 32].map((n) => text(`size-${n}`, `${n}号`, { size: n, sizing: { w: 'hug', h: 'hug' } })),
+    ),
+    frame(
+      'weights',
+      flow('row', 10, [0, 0, 0, 0], 'center'),
+      [300, 400, 600, 900].map((w) => text(`w-${w}`, `粗细${w}`, { size: 16, weight: w, sizing: { w: 'hug', h: 'hug' } })),
+    ),
     text('spacing', '字距 0.2em：汤崎 TOUCHILL', { size: 15, letterSpacing: 0.2 }),
     text('en', 'Helvetica · YOUR NEXT URBAN PLEASURE', { font: 'en', size: 13, weight: 700, letterSpacing: 0.12 }),
     text('lh', '行高 2 倍：第一行字\n第二行字', { size: 14, lineHeight: 2, fill: '$wood6' }),
@@ -180,7 +244,9 @@ export function buildMpSamples(): MpSample[] {
     frame(
       'valigns',
       flow('row', 8, [0, 0, 0, 0], 'start'),
-      (['top', 'middle', 'bottom'] as const).map((v) => text(`valign-${v}`, `竖直${{ top: '上', middle: '中', bottom: '下' }[v]}`, { valign: v, fill: '$wood6', sizing: { w: 'fill', h: 'fixed' }, h: 56, align: 'center' })),
+      (['top', 'middle', 'bottom'] as const).map((v) =>
+        text(`valign-${v}`, `竖直${{ top: '上', middle: '中', bottom: '下' }[v]}`, { valign: v, fill: '$wood6', sizing: { w: 'fill', h: 'fixed' }, h: 56, align: 'center' }),
+      ),
     ),
     text('deco', '斜体加下划线', { italic: true, underline: true }),
     field('field-name', 'store.name', { size: 18, weight: 600 }),
@@ -206,11 +272,31 @@ export function buildMpSamples(): MpSample[] {
   ];
 
   return [
-    { name: '01-home-default', screen: 'home', note: '内置的默认首页：整屏竖排；版头大图、门店信息是功能块（小程序画真的），三块业务、服务入口是框与文字（点了打开别的页）', doc: defaultStudioDoc('mp') },
+    {
+      name: '01-home-default',
+      screen: 'home',
+      note: '内置的默认首页：整屏竖排；版头大图、门店信息是功能块（小程序画真的），三块业务、服务入口是框与文字（点了打开别的页）',
+      doc: defaultStudioDoc('mp'),
+    },
     { name: '02-member-default', screen: 'member', note: '内置的默认会员页：会员卡是功能块；入口是横排换行的小卡片', doc: defaultStudioDoc('mp') },
-    { name: '03-activity-poster', screen: 'activity', note: '活动页：海报图（铺满）、文字、两栏数据字段（横排 + 撑满）、两种按钮', doc: withScreen('activity', activity, flow('column', 0, [0, 0, 32, 0], 'stretch')) },
-    { name: '04-layout-sheet', screen: 'activity', note: '排列测试表：分布、对齐、换行、撑满与固定、内边距、自由摆放套在竖排里、旋转', doc: withScreen('activity', layoutSheet, flow('column', 8, [16, 18, 24, 18], 'stretch')) },
-    { name: '05-text-sheet', screen: 'activity', note: '文字与样式测试表：字号、粗细、字距、英文字体、行高、对齐、竖直对齐、斜体下划线、数据字段、颜色、透明度、投影、描边、圆角、按钮', doc: withScreen('activity', textSheet, flow('column', 12, [16, 18, 24, 18], 'stretch')) },
+    {
+      name: '03-activity-poster',
+      screen: 'activity',
+      note: '活动页：海报图（铺满）、文字、两栏数据字段（横排 + 撑满）、两种按钮',
+      doc: withScreen('activity', activity, flow('column', 0, [0, 0, 32, 0], 'stretch')),
+    },
+    {
+      name: '04-layout-sheet',
+      screen: 'activity',
+      note: '排列测试表：分布、对齐、换行、撑满与固定、内边距、自由摆放套在竖排里、旋转',
+      doc: withScreen('activity', layoutSheet, flow('column', 8, [16, 18, 24, 18], 'stretch')),
+    },
+    {
+      name: '05-text-sheet',
+      screen: 'activity',
+      note: '文字与样式测试表：字号、粗细、字距、英文字体、行高、对齐、竖直对齐、斜体下划线、数据字段、颜色、透明度、投影、描边、圆角、按钮',
+      doc: withScreen('activity', textSheet, flow('column', 12, [16, 18, 24, 18], 'stretch')),
+    },
   ];
 }
 

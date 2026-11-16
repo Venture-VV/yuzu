@@ -7,7 +7,18 @@ import { shiftDate } from '@shared/labels';
 import { channelLabel } from '@shared/members';
 import { gradeLabel } from '@shared/membership';
 import { can } from '@shared/permissions';
-import { departmentItemTable, MAX_REPORT_DAYS, sharePercent, type DepartmentItem, type DepartmentRevenue, type DutyExtras, type ExecutiveReport, type MemberBrief, type MembersReport, type PeriodKpis } from '@shared/reports';
+import {
+  departmentItemTable,
+  MAX_REPORT_DAYS,
+  sharePercent,
+  type DepartmentItem,
+  type DepartmentRevenue,
+  type DutyExtras,
+  type ExecutiveReport,
+  type MemberBrief,
+  type MembersReport,
+  type PeriodKpis,
+} from '@shared/reports';
 import type { RoomBoardStatus, RoomsReport } from '@shared/rooms';
 import { readSnapshot, type Db } from '../db';
 import { guard } from '../auth/guard';
@@ -194,7 +205,10 @@ export async function executiveReport(db: Db, from: string, to: string, c: Clock
     byMethod,
     tickets,
     departments: byCategory(lines),
-    topItems: lines.filter((l) => l.category !== '门票' && l.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, 10),
+    topItems: lines
+      .filter((l) => l.category !== '门票' && l.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 10),
     items,
     arrivals,
   };
@@ -290,9 +304,7 @@ export async function membersReport(db: Db, from: string, to: string, c: Clock):
     const map = new Map(lv.map((x) => [x.id, gradeLabel(rules, x.grade, x.tier)]));
     return rows.map((r) => ({ ...r, levelName: map.get(r.id) ?? '' }));
   };
-  const topBalance = await withLevel(
-    await db`SELECT ${MEMBER_BRIEF(db)} FROM members m WHERE m.principal_balance + m.bonus_balance > 0 ORDER BY balance DESC, m.id LIMIT 10`,
-  );
+  const topBalance = await withLevel(await db`SELECT ${MEMBER_BRIEF(db)} FROM members m WHERE m.principal_balance + m.bonus_balance > 0 ORDER BY balance DESC, m.id LIMIT 10`);
   const topRecharge = (await withLevel(
     await db`
       SELECT ${MEMBER_BRIEF(db)}, x.paid FROM (

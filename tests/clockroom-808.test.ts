@@ -11,7 +11,15 @@ let foot: number; // 足疗：一档 128
 let tagNo = 0;
 const tech: Record<string, number> = {};
 
-type BoardTech = { id: number; techNo: string; state: 'on' | 'rest' | 'off' | 'leave'; position: number | null; suspendedAt: string | null; busy: { status: 'waiting' | 'serving' } | null; rejectStreak: number };
+type BoardTech = {
+  id: number;
+  techNo: string;
+  state: 'on' | 'rest' | 'off' | 'leave';
+  position: number | null;
+  suspendedAt: string | null;
+  busy: { status: 'waiting' | 'serving' } | null;
+  rejectStreak: number;
+};
 type BoardSession = { id: number; visitId: number; status: string; techNo: string; clocks: number; space: { id: number } | null };
 type Pending = { lineId: number; visitId: number; itemName: string; tier: string; quantity: number; amount: number };
 
@@ -43,8 +51,7 @@ const visitLines = async (visitId: number) =>
   }[];
 const assign = (lineId: number, body: Record<string, unknown>, key = randomUUID()) =>
   api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/lines/${lineId}/assign`, { clientKey: key, startNow: true, ...body });
-const dispatch = (body: Record<string, unknown>) =>
-  api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), quantity: 1, startNow: true, ...body });
+const dispatch = (body: Record<string, unknown>) => api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), quantity: 1, startNow: true, ...body });
 const transfer = (sessionId: number, body: Record<string, unknown>, key = randomUUID()) =>
   api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${sessionId}/transfer`, { clientKey: key, reason: '客人要换技师', ...body });
 const events = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/clockroom/events')).body as { kind: string; techNo: string; text: string }[];
@@ -324,8 +331,7 @@ describe('转钟（B05）', () => {
   });
 
   /** 在岗、空闲、没停牌的技师，按轮钟排位 */
-  const idleQueue = async () =>
-    (await board()).technicians.filter((t) => t.state === 'on' && !t.busy && !t.suspendedAt && t.position !== null).sort((x, y) => x.position! - y.position!);
+  const idleQueue = async () => (await board()).technicians.filter((t) => t.state === 'on' && !t.busy && !t.suspendedAt && t.position !== null).sort((x, y) => x.position! - y.position!);
 
   it('轮钟转给排在后面的那位：原技师（按退钟回到原位）不算在「该派给谁」里，不用写跳过原因（Codex 审查 9470097）', async () => {
     const v = await enter();

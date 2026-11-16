@@ -41,7 +41,18 @@ describe('CSV 解析', () => {
   it('中文表头、金额带符号与千分位、日期多种写法', () => {
     const r = parseOpeningCsv(csvOf('张三,138 0000 0001,EBC001,"¥1,200.50",100,2027/1/5,3000,男,1990-02-03,老客', '李四,13800000002,,0,,,,,,'));
     expect(r.errors).toEqual([]);
-    expect(r.rows[0]).toMatchObject({ line: 2, name: '张三', phone: '13800000001', legacyNo: 'EBC001', principal: 120050, bonus: 10000, bonusExpiresOn: '2027-01-05', totalRecharged: 300000, gender: 'male', birthday: '1990-02-03' });
+    expect(r.rows[0]).toMatchObject({
+      line: 2,
+      name: '张三',
+      phone: '13800000001',
+      legacyNo: 'EBC001',
+      principal: 120050,
+      bonus: 10000,
+      bonusExpiresOn: '2027-01-05',
+      totalRecharged: 300000,
+      gender: 'male',
+      birthday: '1990-02-03',
+    });
     expect(r.rows[0]!.raw['旧卡号']).toBe('EBC001');
     expect(r.rows[1]).toMatchObject({ principal: 0, bonus: 0, bonusExpiresOn: null, totalRecharged: null, gender: null });
   });
@@ -74,12 +85,7 @@ describe('预览与导入', () => {
     const existing = await createMember(ctx, '老会员甲', '13900000001');
     const before = await ctx.sql`SELECT count(*)::int AS n FROM members`;
     const r = await preview(
-      csvOf(
-        '老会员甲,13900000001,E1,100,20,,,,,',
-        '新会员乙,13900000002,E2,50,0,,,,,',
-        '冒名丙,13900000001,E3,1,0,,,,,',
-        `过期丁,13900000003,E4,1,5,${shiftDate(today, -1)},,,,`,
-      ),
+      csvOf('老会员甲,13900000001,E1,100,20,,,,,', '新会员乙,13900000002,E2,50,0,,,,,', '冒名丙,13900000001,E3,1,0,,,,,', `过期丁,13900000003,E4,1,5,${shiftDate(today, -1)},,,,`),
     );
     expect(r.status).toBe(200);
     // 第 4 行与第 2 行手机号重复（解析阶段报错），第 5 行赠金已过期
@@ -105,11 +111,7 @@ describe('预览与导入', () => {
 
   it('导入：本金、赠金分开记期初流水，不计入充值实收；赠金进批次（含到期日）；日结全部一致', async () => {
     const expiresOn = shiftDate(today, 30);
-    const csv = csvOf(
-      '老会员甲,13900000001,E1,100,20,,5000,,,',
-      `新会员乙,13900000002,E2,"1,000",88.8,${expiresOn},,女,1992-03-04,旧会员`,
-      '只建档丙,13900000004,E5,0,0,,800,,,',
-    );
+    const csv = csvOf('老会员甲,13900000001,E1,100,20,,5000,,,', `新会员乙,13900000002,E2,"1,000",88.8,${expiresOn},,女,1992-03-04,旧会员`, '只建档丙,13900000004,E5,0,0,,800,,,');
     const key = randomUUID();
     const r = await apply(csv, key);
     expect(r.status).toBe(200);
@@ -172,9 +174,7 @@ describe('预览与导入', () => {
     // 旧系统累计充值 5,000 元 → L1 云涧（VIP 柜按会员规则的对应表）
     expect(detail).toMatchObject({ grade: 1, tier: 0 });
     expect(detail.gradeInfo).toMatchObject({ label: 'L1 云涧 · 初', lockerLevel: 1, state: { cycleStart: detail.gradeInfo.today } });
-    expect(detail.gradeInfo.events.map((e: { kind: string; rollingRecharge: number; staffName: string }) => [e.kind, e.rollingRecharge, e.staffName])).toEqual([
-      ['import', 500000, '测试店主'],
-    ]);
+    expect(detail.gradeInfo.events.map((e: { kind: string; rollingRecharge: number; staffName: string }) => [e.kind, e.rollingRecharge, e.staffName])).toEqual([['import', 500000, '测试店主']]);
   });
 });
 
@@ -266,9 +266,11 @@ describe('导入期间会员资料变动（G3 复测）', () => {
     return importing;
   }
   const counts = async () =>
-    (await ctx.sql<{ imports: number; balances: number; ledger: number; members: number }[]>`
+    (
+      await ctx.sql<{ imports: number; balances: number; ledger: number; members: number }[]>`
       SELECT (SELECT count(*)::int FROM opening_imports) AS imports, (SELECT count(*)::int FROM opening_balances) AS balances,
-             (SELECT count(*)::int FROM ledger_entries) AS ledger, (SELECT count(*)::int FROM members) AS members`)[0]!;
+             (SELECT count(*)::int FROM ledger_entries) AS ledger, (SELECT count(*)::int FROM members) AS members`
+    )[0]!;
 
   it('核对后、加锁前会员改了姓名和手机号：整批拒绝，期初不会记到身份已变的会员上', async () => {
     const m = await createMember(ctx, '并发期初原身份', '19900009701');
@@ -297,7 +299,10 @@ describe('导入期间会员资料变动（G3 复测）', () => {
     expect(r.body.error.code).toBe('OPENING_STALE');
     expect(r.body.error.details.errors).toEqual([{ line: 2, message: '手机号 19900009711 对应的会员刚刚有变动' }]);
     expect(await counts()).toEqual(before);
-    expect([await balanceOf(ctx, a.id), await balanceOf(ctx, b.id)]).toEqual([{ principal: 0, bonus: 0 }, { principal: 0, bonus: 0 }]);
+    expect([await balanceOf(ctx, a.id), await balanceOf(ctx, b.id)]).toEqual([
+      { principal: 0, bonus: 0 },
+      { principal: 0, bonus: 0 },
+    ]);
   });
 
   it('期间只改了不影响身份的资料（备注）：照常导入', async () => {

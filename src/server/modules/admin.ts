@@ -51,14 +51,7 @@ import { sameJson } from '../lib/rule-settings';
 import { parse } from '../lib/validate';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { loadMembershipRules } from './membership';
-import {
-  DEFAULT_APPROVAL_RULES,
-  DEFAULT_APPROVAL_THRESHOLD_CENTS,
-  DEFAULT_URGENT_CAP_CENTS,
-  DEFAULT_USAGE_WINDOW_DAYS,
-  DEFAULT_CYCLE_RULES,
-  loadInventorySettings,
-} from './inventory/common';
+import { DEFAULT_APPROVAL_RULES, DEFAULT_APPROVAL_THRESHOLD_CENTS, DEFAULT_URGENT_CAP_CENTS, DEFAULT_USAGE_WINDOW_DAYS, DEFAULT_CYCLE_RULES, loadInventorySettings } from './inventory/common';
 import { DEFAULT_SETTINGS, loadSettings, SETTINGS_KEYS } from './settings';
 import { loadTechnicianRules } from './technicians';
 import { loadClockroomRules } from './clockroom';
@@ -135,119 +128,456 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   };
 
   // ── 门店与营业 ──
-  add({ key: 'store_name', group: 'store', label: '门店名称', value: s.storeName, defaultValue: d.storeName, pending: false, section: 'rules', current: s.storeName, dflt: d.storeName, metaKey: sk('storeName') });
   add({
-    key: 'business_day_start_hour', group: 'store', label: '营业日切换时间', value: hours(s.businessDayStartHour), defaultValue: hours(d.businessDayStartHour),
-    pending: true, section: 'rules', hint: '凌晨的业务记入前一个营业日', current: s.businessDayStartHour, dflt: d.businessDayStartHour, metaKey: sk('businessDayStartHour'),
+    key: 'store_name',
+    group: 'store',
+    label: '门店名称',
+    value: s.storeName,
+    defaultValue: d.storeName,
+    pending: false,
+    section: 'rules',
+    current: s.storeName,
+    dflt: d.storeName,
+    metaKey: sk('storeName'),
   });
   add({
-    key: 'business_hours', group: 'store', label: '营业时间', value: describeBusinessHours(s.businessHours), defaultValue: describeBusinessHours(d.businessHours),
-    pending: true, section: 'rules', hint: '只用于显示与提醒', current: s.businessHours, dflt: d.businessHours, metaKey: sk('businessHours'),
+    key: 'business_day_start_hour',
+    group: 'store',
+    label: '营业日切换时间',
+    value: hours(s.businessDayStartHour),
+    defaultValue: hours(d.businessDayStartHour),
+    pending: true,
+    section: 'rules',
+    hint: '凌晨的业务记入前一个营业日',
+    current: s.businessDayStartHour,
+    dflt: d.businessDayStartHour,
+    metaKey: sk('businessDayStartHour'),
   });
   add({
-    key: 'hide_pending_marks', group: 'store', label: '「待确认」标记', value: onOff(s.hidePendingMarks, '隐藏（店主已签认）', '显示'), defaultValue: '显示',
-    pending: false, section: 'rules', current: s.hidePendingMarks, dflt: d.hidePendingMarks, metaKey: sk('hidePendingMarks'),
+    key: 'business_hours',
+    group: 'store',
+    label: '营业时间',
+    value: describeBusinessHours(s.businessHours),
+    defaultValue: describeBusinessHours(d.businessHours),
+    pending: true,
+    section: 'rules',
+    hint: '只用于显示与提醒',
+    current: s.businessHours,
+    dflt: d.businessHours,
+    metaKey: sk('businessHours'),
+  });
+  add({
+    key: 'hide_pending_marks',
+    group: 'store',
+    label: '「待确认」标记',
+    value: onOff(s.hidePendingMarks, '隐藏（店主已签认）', '显示'),
+    defaultValue: '显示',
+    pending: false,
+    section: 'rules',
+    current: s.hidePendingMarks,
+    dflt: d.hidePendingMarks,
+    metaKey: sk('hidePendingMarks'),
   });
   // ── 储值与收款 ──
   add({
-    key: 'deduction_rule', group: 'wallet', label: '本金与赠金的扣款顺序', value: DEDUCTION_RULE_LABELS[s.deductionRule].title, defaultValue: DEDUCTION_RULE_LABELS[d.deductionRule].title,
-    pending: true, section: 'rules', current: s.deductionRule, dflt: d.deductionRule, metaKey: sk('deductionRule'),
+    key: 'deduction_rule',
+    group: 'wallet',
+    label: '本金与赠金的扣款顺序',
+    value: DEDUCTION_RULE_LABELS[s.deductionRule].title,
+    defaultValue: DEDUCTION_RULE_LABELS[d.deductionRule].title,
+    pending: true,
+    section: 'rules',
+    current: s.deductionRule,
+    dflt: d.deductionRule,
+    metaKey: sk('deductionRule'),
   });
   add({
-    key: 'max_recharge_cents', group: 'wallet', label: '单笔充值上限', value: formatYuan(s.maxRechargeCents), defaultValue: formatYuan(d.maxRechargeCents),
-    pending: false, section: 'rules', hint: '超过需店主或店总当场授权', current: s.maxRechargeCents, dflt: d.maxRechargeCents, metaKey: sk('maxRechargeCents'),
+    key: 'max_recharge_cents',
+    group: 'wallet',
+    label: '单笔充值上限',
+    value: formatYuan(s.maxRechargeCents),
+    defaultValue: formatYuan(d.maxRechargeCents),
+    pending: false,
+    section: 'rules',
+    hint: '超过需店主或店总当场授权',
+    current: s.maxRechargeCents,
+    dflt: d.maxRechargeCents,
+    metaKey: sk('maxRechargeCents'),
   });
   add({
-    key: 'max_consume_cents', group: 'wallet', label: '单笔消费上限', value: formatYuan(s.maxConsumeCents), defaultValue: formatYuan(d.maxConsumeCents),
-    pending: false, section: 'rules', hint: '超过需店主或店总当场授权', current: s.maxConsumeCents, dflt: d.maxConsumeCents, metaKey: sk('maxConsumeCents'),
+    key: 'max_consume_cents',
+    group: 'wallet',
+    label: '单笔消费上限',
+    value: formatYuan(s.maxConsumeCents),
+    defaultValue: formatYuan(d.maxConsumeCents),
+    pending: false,
+    section: 'rules',
+    hint: '超过需店主或店总当场授权',
+    current: s.maxConsumeCents,
+    dflt: d.maxConsumeCents,
+    metaKey: sk('maxConsumeCents'),
   });
   // 充值当日的储值消费比例（8.0.4 需求表 04，HY01）
   const spendPct = (p: number | null) => (p === null ? '不限' : `当天第一笔充值前的余额 + 当天充值实收 × ${p}%`);
   add({
-    key: 'recharge_spend_pct', group: 'wallet', label: '充值当日的储值消费上限', value: spendPct(s.rechargeSpendPct), defaultValue: spendPct(d.rechargeSpendPct),
-    pending: true, section: 'rules', hint: '超过的储值支付直接拒绝并显示剩余额度；没充值的日子不限', current: s.rechargeSpendPct, dflt: d.rechargeSpendPct, metaKey: sk('rechargeSpendPct'),
+    key: 'recharge_spend_pct',
+    group: 'wallet',
+    label: '充值当日的储值消费上限',
+    value: spendPct(s.rechargeSpendPct),
+    defaultValue: spendPct(d.rechargeSpendPct),
+    pending: true,
+    section: 'rules',
+    hint: '超过的储值支付直接拒绝并显示剩余额度；没充值的日子不限',
+    current: s.rechargeSpendPct,
+    dflt: d.rechargeSpendPct,
+    metaKey: sk('rechargeSpendPct'),
   });
   add({
-    key: 'reversal_window_hours', group: 'wallet', label: '撤销与反结账时限', value: window(s.reversalWindowHours), defaultValue: window(d.reversalWindowHours),
-    pending: false, section: 'rules', hint: '超过后只有店主可以', current: s.reversalWindowHours, dflt: d.reversalWindowHours, metaKey: sk('reversalWindowHours'),
+    key: 'reversal_window_hours',
+    group: 'wallet',
+    label: '撤销与反结账时限',
+    value: window(s.reversalWindowHours),
+    defaultValue: window(d.reversalWindowHours),
+    pending: false,
+    section: 'rules',
+    hint: '超过后只有店主可以',
+    current: s.reversalWindowHours,
+    dflt: d.reversalWindowHours,
+    metaKey: sk('reversalWindowHours'),
   });
   add({
-    key: 'require_open_shift', group: 'wallet', label: '收款前必须先开班', value: onOff(s.requireOpenShift, '必须先开班', '不要求'), defaultValue: '必须先开班',
-    pending: false, section: 'rules', current: s.requireOpenShift, dflt: d.requireOpenShift, metaKey: sk('requireOpenShift'),
+    key: 'require_open_shift',
+    group: 'wallet',
+    label: '收款前必须先开班',
+    value: onOff(s.requireOpenShift, '必须先开班', '不要求'),
+    defaultValue: '必须先开班',
+    pending: false,
+    section: 'rules',
+    current: s.requireOpenShift,
+    dflt: d.requireOpenShift,
+    metaKey: sk('requireOpenShift'),
   });
   // 交班方式（v0.7.28 ⑨，N11 待确认）
-  const drawers = (list: typeof s.cashDrawers) => list.filter((d) => d.active).map((d) => d.label).join('、') || '没有启用的钱箱';
+  const drawers = (list: typeof s.cashDrawers) =>
+    list
+      .filter((d) => d.active)
+      .map((d) => d.label)
+      .join('、') || '没有启用的钱箱';
   add({
-    key: 'shift_mode', group: 'wallet', label: '交班方式', value: SHIFT_MODE_LABELS[s.shiftMode], defaultValue: SHIFT_MODE_LABELS[d.shiftMode],
-    pending: true, section: 'rules', hint: '按钱箱交班：同一个钱箱的人在同一个班次上，交班时点这个钱箱的钱', current: s.shiftMode, dflt: d.shiftMode, metaKey: sk('shiftMode'),
+    key: 'shift_mode',
+    group: 'wallet',
+    label: '交班方式',
+    value: SHIFT_MODE_LABELS[s.shiftMode],
+    defaultValue: SHIFT_MODE_LABELS[d.shiftMode],
+    pending: true,
+    section: 'rules',
+    hint: '按钱箱交班：同一个钱箱的人在同一个班次上，交班时点这个钱箱的钱',
+    current: s.shiftMode,
+    dflt: d.shiftMode,
+    metaKey: sk('shiftMode'),
   });
   add({
-    key: 'cash_drawers', group: 'wallet', label: '钱箱', value: drawers(s.cashDrawers), defaultValue: drawers(d.cashDrawers),
-    pending: true, section: 'rules', hint: '按钱箱交班时开班选钱箱', current: s.cashDrawers, dflt: d.cashDrawers, metaKey: sk('cashDrawers'),
+    key: 'cash_drawers',
+    group: 'wallet',
+    label: '钱箱',
+    value: drawers(s.cashDrawers),
+    defaultValue: drawers(d.cashDrawers),
+    pending: true,
+    section: 'rules',
+    hint: '按钱箱交班时开班选钱箱',
+    current: s.cashDrawers,
+    dflt: d.cashDrawers,
+    metaKey: sk('cashDrawers'),
   });
   add({
-    key: 'custom_bonus_valid_days', group: 'wallet', label: '自定义赠金有效期', value: days(s.customBonusValidDays), defaultValue: days(d.customBonusValidDays),
-    pending: true, section: 'rules', hint: '套餐的赠金有效期在「价目与套餐」里设置', current: s.customBonusValidDays, dflt: d.customBonusValidDays, metaKey: sk('customBonusValidDays'),
+    key: 'custom_bonus_valid_days',
+    group: 'wallet',
+    label: '自定义赠金有效期',
+    value: days(s.customBonusValidDays),
+    defaultValue: days(d.customBonusValidDays),
+    pending: true,
+    section: 'rules',
+    hint: '套餐的赠金有效期在「价目与套餐」里设置',
+    current: s.customBonusValidDays,
+    dflt: d.customBonusValidDays,
+    metaKey: sk('customBonusValidDays'),
   });
   // ── 会员与渠道 ──
-  add({ key: 'member_channels', group: 'members', label: '渠道来源', value: channels(s.memberChannels), defaultValue: channels(d.memberChannels), pending: true, section: 'membership', tab: 'channels', current: s.memberChannels, dflt: d.memberChannels, metaKey: sk('memberChannels') });
+  add({
+    key: 'member_channels',
+    group: 'members',
+    label: '渠道来源',
+    value: channels(s.memberChannels),
+    defaultValue: channels(d.memberChannels),
+    pending: true,
+    section: 'membership',
+    tab: 'channels',
+    current: s.memberChannels,
+    dflt: d.memberChannels,
+    metaKey: sk('memberChannels'),
+  });
   // 会员自定义字段 8.0.4 起改成会员标签（数据，不是规则；在「会员与渠道 → 会员标签」维护），不在规则总表里
   // ── 会员体系 v2（v0.7.23，后台「会员体系 → 会员规则」）──
   const mr = await loadMembershipRules(db);
   const mrd = DEFAULT_MEMBERSHIP_RULES;
-  const ladder = (r: MembershipRules) => r.grades.slice(1).map((g, i) => `L${i + 1} ${g.name} ${formatYuan(g.thresholdCents)} / ${g.bonusBp / 100}%`).join('，');
+  const ladder = (r: MembershipRules) =>
+    r.grades
+      .slice(1)
+      .map((g, i) => `L${i + 1} ${g.name} ${formatYuan(g.thresholdCents)} / ${g.bonusBp / 100}%`)
+      .join('，');
   const cycle = (r: MembershipRules) => `周期 ${r.cycleDays} 天；享阶 ${r.enjoyPct}%、尊阶（保级）${r.honorPct}%；补充期 ${r.graceDays} 天`;
   const mins = (r: MembershipRules) => `首充 ${r.firstRechargeMinCents ? formatYuan(r.firstRechargeMinCents) : '不限'}，续充 ${r.topUpMinCents ? formatYuan(r.topUpMinCents) : '不限'}`;
-  add({ key: 'membership_rules.grades', group: 'members', label: '档级：门槛 / 赠送比例', value: ladder(mr), defaultValue: ladder(mrd), pending: true, section: 'membership', tab: 'rules', hint: '按滚动 365 天累计充值升档', current: mr.grades, dflt: mrd.grades, metaKey: 'membership_rules' });
-  add({ key: 'membership_rules.cycle', group: 'members', label: '阶位与会籍周期', value: cycle(mr), defaultValue: cycle(mrd), pending: true, section: 'membership', tab: 'rules', current: [mr.cycleDays, mr.enjoyPct, mr.honorPct, mr.graceDays], dflt: [mrd.cycleDays, mrd.enjoyPct, mrd.honorPct, mrd.graceDays], metaKey: 'membership_rules' });
-  add({ key: 'membership_rules.minimum', group: 'members', label: '单笔最低充值', value: mins(mr), defaultValue: mins(mrd), pending: true, section: 'membership', tab: 'rules', hint: '建议续充改成 1,000 或不限（M4）', current: [mr.firstRechargeMinCents, mr.topUpMinCents], dflt: [mrd.firstRechargeMinCents, mrd.topUpMinCents], metaKey: 'membership_rules' });
-  add({ key: 'membership_rules.reminderDays', group: 'members', label: '到期提醒', value: mr.reminderDays.map((d) => `${d} 天`).join('、'), defaultValue: mrd.reminderDays.map((d) => `${d} 天`).join('、'), pending: true, section: 'membership', tab: 'rules', current: mr.reminderDays, dflt: mrd.reminderDays, metaKey: 'membership_rules' });
+  add({
+    key: 'membership_rules.grades',
+    group: 'members',
+    label: '档级：门槛 / 赠送比例',
+    value: ladder(mr),
+    defaultValue: ladder(mrd),
+    pending: true,
+    section: 'membership',
+    tab: 'rules',
+    hint: '按滚动 365 天累计充值升档',
+    current: mr.grades,
+    dflt: mrd.grades,
+    metaKey: 'membership_rules',
+  });
+  add({
+    key: 'membership_rules.cycle',
+    group: 'members',
+    label: '阶位与会籍周期',
+    value: cycle(mr),
+    defaultValue: cycle(mrd),
+    pending: true,
+    section: 'membership',
+    tab: 'rules',
+    current: [mr.cycleDays, mr.enjoyPct, mr.honorPct, mr.graceDays],
+    dflt: [mrd.cycleDays, mrd.enjoyPct, mrd.honorPct, mrd.graceDays],
+    metaKey: 'membership_rules',
+  });
+  add({
+    key: 'membership_rules.minimum',
+    group: 'members',
+    label: '单笔最低充值',
+    value: mins(mr),
+    defaultValue: mins(mrd),
+    pending: true,
+    section: 'membership',
+    tab: 'rules',
+    hint: '建议续充改成 1,000 或不限（M4）',
+    current: [mr.firstRechargeMinCents, mr.topUpMinCents],
+    dflt: [mrd.firstRechargeMinCents, mrd.topUpMinCents],
+    metaKey: 'membership_rules',
+  });
+  add({
+    key: 'membership_rules.reminderDays',
+    group: 'members',
+    label: '到期提醒',
+    value: mr.reminderDays.map((d) => `${d} 天`).join('、'),
+    defaultValue: mrd.reminderDays.map((d) => `${d} 天`).join('、'),
+    pending: true,
+    section: 'membership',
+    tab: 'rules',
+    current: mr.reminderDays,
+    dflt: mrd.reminderDays,
+    metaKey: 'membership_rules',
+  });
   // 生日礼提前几天到账（8.0.4，HY13）；VIP 柜 8.0.4 起归「会员权益」，不在规则总表里
   const lead = (d: number) => (d === 0 ? '生日当天' : `生日前 ${d} 天`);
-  add({ key: 'membership_rules.birthdayLeadDays', group: 'members', label: '生日礼到账', value: lead(mr.birthdayLeadDays), defaultValue: lead(mrd.birthdayLeadDays), pending: true, section: 'membership', tab: 'rules', hint: '发券规则的生日礼、权益清单的生日礼遇都按它', current: mr.birthdayLeadDays, dflt: mrd.birthdayLeadDays, metaKey: 'membership_rules' });
+  add({
+    key: 'membership_rules.birthdayLeadDays',
+    group: 'members',
+    label: '生日礼到账',
+    value: lead(mr.birthdayLeadDays),
+    defaultValue: lead(mrd.birthdayLeadDays),
+    pending: true,
+    section: 'membership',
+    tab: 'rules',
+    hint: '发券规则的生日礼、权益清单的生日礼遇都按它',
+    current: mr.birthdayLeadDays,
+    dflt: mrd.birthdayLeadDays,
+    metaKey: 'membership_rules',
+  });
   // ── 前台与结账 ──
   add({
-    key: 'frontdesk_rules.selfVoidMinutes', group: 'frontdesk', label: '店员自行更正时限', value: `${fd.selfVoidMinutes} 分钟`, defaultValue: `${fdd.selfVoidMinutes} 分钟`,
-    pending: false, section: 'tags', hint: '超时或他人登记的由值班经理及以上处理', current: fd.selfVoidMinutes, dflt: fdd.selfVoidMinutes, metaKey: 'frontdesk_rules',
+    key: 'frontdesk_rules.selfVoidMinutes',
+    group: 'frontdesk',
+    label: '店员自行更正时限',
+    value: `${fd.selfVoidMinutes} 分钟`,
+    defaultValue: `${fdd.selfVoidMinutes} 分钟`,
+    pending: false,
+    section: 'tags',
+    hint: '超时或他人登记的由值班经理及以上处理',
+    current: fd.selfVoidMinutes,
+    dflt: fdd.selfVoidMinutes,
+    metaKey: 'frontdesk_rules',
   });
   add({
-    key: 'frontdesk_rules.lostTagFeeCents', group: 'frontdesk', label: '丢牌赔偿', value: fd.lostTagFeeCents ? formatYuan(fd.lostTagFeeCents) : '不收', defaultValue: formatYuan(fdd.lostTagFeeCents),
-    pending: false, section: 'tags', current: fd.lostTagFeeCents, dflt: fdd.lostTagFeeCents, metaKey: 'frontdesk_rules',
+    key: 'frontdesk_rules.lostTagFeeCents',
+    group: 'frontdesk',
+    label: '丢牌赔偿',
+    value: fd.lostTagFeeCents ? formatYuan(fd.lostTagFeeCents) : '不收',
+    defaultValue: formatYuan(fdd.lostTagFeeCents),
+    pending: false,
+    section: 'tags',
+    current: fd.lostTagFeeCents,
+    dflt: fdd.lostTagFeeCents,
+    metaKey: 'frontdesk_rules',
   });
   add({
-    key: 'frontdesk_rules.overtimeGraceMinutes', group: 'frontdesk', label: '门票跳档宽限', value: `${fd.overtimeGraceMinutes} 分钟`, defaultValue: `${fdd.overtimeGraceMinutes} 分钟`,
-    pending: false, section: 'tags', hint: '12 小时分界点之后多少分钟内不跳档', current: fd.overtimeGraceMinutes, dflt: fdd.overtimeGraceMinutes, metaKey: 'frontdesk_rules',
+    key: 'frontdesk_rules.overtimeGraceMinutes',
+    group: 'frontdesk',
+    label: '门票跳档宽限',
+    value: `${fd.overtimeGraceMinutes} 分钟`,
+    defaultValue: `${fdd.overtimeGraceMinutes} 分钟`,
+    pending: false,
+    section: 'tags',
+    hint: '12 小时分界点之后多少分钟内不跳档',
+    current: fd.overtimeGraceMinutes,
+    dflt: fdd.overtimeGraceMinutes,
+    metaKey: 'frontdesk_rules',
   });
   // ── 技师（v0.7.0）──
   add({
-    key: 'technician_rules.enabled', group: 'technicians', label: '技师功能', value: onOff(tech.enabled, '开启（挂需要技师的项目时选技师）', '关闭（与升级前一样）'),
-    defaultValue: '关闭（与升级前一样）', pending: false, section: 'technicians', current: tech.enabled, dflt: techd.enabled, metaKey: 'technician_rules',
+    key: 'technician_rules.enabled',
+    group: 'technicians',
+    label: '技师功能',
+    value: onOff(tech.enabled, '开启（挂需要技师的项目时选技师）', '关闭（与升级前一样）'),
+    defaultValue: '关闭（与升级前一样）',
+    pending: false,
+    section: 'technicians',
+    current: tech.enabled,
+    dflt: techd.enabled,
+    metaKey: 'technician_rules',
   });
   add({
-    key: 'technician_rules.requireTechnician', group: 'technicians', label: '挂技师项目必须选技师', value: onOff(tech.requireTechnician, '必须选', '可以暂不指定'),
-    defaultValue: '必须选', pending: true, section: 'technicians', current: tech.requireTechnician, dflt: techd.requireTechnician, metaKey: 'technician_rules',
+    key: 'technician_rules.requireTechnician',
+    group: 'technicians',
+    label: '挂技师项目必须选技师',
+    value: onOff(tech.requireTechnician, '必须选', '可以暂不指定'),
+    defaultValue: '必须选',
+    pending: true,
+    section: 'technicians',
+    current: tech.requireTechnician,
+    dflt: techd.requireTechnician,
+    metaKey: 'technician_rules',
   });
   add({
-    key: 'technician_rules.tierByGrade', group: 'technicians', label: '价格跟技师等级', value: onOff(tech.tierByGrade, '按技师等级取价（标准 / 专业 / 优选）', '前台自选价格档'),
-    defaultValue: '按技师等级取价（标准 / 专业 / 优选）', pending: true, section: 'technicians', hint: '只有一档价格的项目不分等级', current: tech.tierByGrade, dflt: techd.tierByGrade, metaKey: 'technician_rules',
+    key: 'technician_rules.tierByGrade',
+    group: 'technicians',
+    label: '价格跟技师等级',
+    value: onOff(tech.tierByGrade, '按技师等级取价（标准 / 专业 / 优选）', '前台自选价格档'),
+    defaultValue: '按技师等级取价（标准 / 专业 / 优选）',
+    pending: true,
+    section: 'technicians',
+    hint: '只有一档价格的项目不分等级',
+    current: tech.tierByGrade,
+    dflt: techd.tierByGrade,
+    metaKey: 'technician_rules',
   });
   add({
-    key: 'technician_rules.defaultCallType', group: 'technicians', label: '默认上钟方式', value: CALL_TYPE_LABELS[tech.defaultCallType], defaultValue: CALL_TYPE_LABELS[techd.defaultCallType],
-    pending: true, section: 'technicians', hint: '客人点名的改成点钟', current: tech.defaultCallType, dflt: techd.defaultCallType, metaKey: 'technician_rules',
+    key: 'technician_rules.defaultCallType',
+    group: 'technicians',
+    label: '默认上钟方式',
+    value: CALL_TYPE_LABELS[tech.defaultCallType],
+    defaultValue: CALL_TYPE_LABELS[techd.defaultCallType],
+    pending: true,
+    section: 'technicians',
+    hint: '客人点名的改成点钟',
+    current: tech.defaultCallType,
+    dflt: techd.defaultCallType,
+    metaKey: 'technician_rules',
   });
   // ── 钟房与提成（v0.7.1）──
   const cr = await loadClockroomRules(db);
   const crd = DEFAULT_CLOCKROOM_RULES;
   const rejectText = (r: typeof cr) => `${r.rejectKeepsPlace ? '回到原位' : '不回原位'}${r.rejectEndAfter ? `，连续 ${r.rejectEndAfter} 次排到队尾` : ''}`;
-  add({ key: 'clockroom_rules.afterRotation', group: 'technicians', label: '轮钟排尾', value: AFTER_ROTATION_LABELS[cr.afterRotation], defaultValue: AFTER_ROTATION_LABELS[crd.afterRotation], pending: true, section: 'technicians', current: cr.afterRotation, dflt: crd.afterRotation, metaKey: 'clockroom_rules' });
-  add({ key: 'clockroom_rules.afterDesignated', group: 'technicians', label: '点钟后的排位', value: AFTER_DESIGNATED_LABELS[cr.afterDesignated], defaultValue: AFTER_DESIGNATED_LABELS[crd.afterDesignated], pending: true, section: 'technicians', current: cr.afterDesignated, dflt: crd.afterDesignated, metaKey: 'clockroom_rules' });
-  add({ key: 'clockroom_rules.reject', group: 'technicians', label: '被退钟、取消派钟', value: rejectText(cr), defaultValue: rejectText(crd), pending: true, section: 'technicians', current: [cr.rejectKeepsPlace, cr.rejectEndAfter], dflt: [crd.rejectKeepsPlace, crd.rejectEndAfter], metaKey: 'clockroom_rules' });
-  add({ key: 'clockroom_rules.backToEnd', group: 'technicians', label: '休息回牌', value: onOff(cr.backToEnd, '排到队尾', '回到原位'), defaultValue: '排到队尾', pending: true, section: 'technicians', current: cr.backToEnd, dflt: crd.backToEnd, metaKey: 'clockroom_rules' });
-  add({ key: 'clockroom_rules.skipNeedsReason', group: 'technicians', label: '轮钟跳过排第一的技师', value: onOff(cr.skipNeedsReason, '必须写原因（记钟房日志）', '不用写原因'), defaultValue: '必须写原因（记钟房日志）', pending: true, section: 'technicians', current: cr.skipNeedsReason, dflt: crd.skipNeedsReason, metaKey: 'clockroom_rules' });
-  add({ key: 'clockroom_rules.extensionAsDesignated', group: 'technicians', label: '加钟', value: onOff(cr.extensionAsDesignated, '原技师继续，记为点钟', '原技师继续，按原上钟方式'), defaultValue: '原技师继续，记为点钟', pending: true, section: 'technicians', current: cr.extensionAsDesignated, dflt: crd.extensionAsDesignated, metaKey: 'clockroom_rules' });
-  add({ key: 'clockroom_rules.minutes', group: 'technicians', label: '上钟计时', value: `没写时长的项目一钟 ${cr.defaultMinutes} 分钟；提前 ${cr.remindMinutes} 分钟提醒快到钟`, defaultValue: `没写时长的项目一钟 ${crd.defaultMinutes} 分钟；提前 ${crd.remindMinutes} 分钟提醒快到钟`, pending: true, section: 'technicians', current: [cr.defaultMinutes, cr.remindMinutes], dflt: [crd.defaultMinutes, crd.remindMinutes], metaKey: 'clockroom_rules' });
+  add({
+    key: 'clockroom_rules.afterRotation',
+    group: 'technicians',
+    label: '轮钟排尾',
+    value: AFTER_ROTATION_LABELS[cr.afterRotation],
+    defaultValue: AFTER_ROTATION_LABELS[crd.afterRotation],
+    pending: true,
+    section: 'technicians',
+    current: cr.afterRotation,
+    dflt: crd.afterRotation,
+    metaKey: 'clockroom_rules',
+  });
+  add({
+    key: 'clockroom_rules.afterDesignated',
+    group: 'technicians',
+    label: '点钟后的排位',
+    value: AFTER_DESIGNATED_LABELS[cr.afterDesignated],
+    defaultValue: AFTER_DESIGNATED_LABELS[crd.afterDesignated],
+    pending: true,
+    section: 'technicians',
+    current: cr.afterDesignated,
+    dflt: crd.afterDesignated,
+    metaKey: 'clockroom_rules',
+  });
+  add({
+    key: 'clockroom_rules.reject',
+    group: 'technicians',
+    label: '被退钟、取消派钟',
+    value: rejectText(cr),
+    defaultValue: rejectText(crd),
+    pending: true,
+    section: 'technicians',
+    current: [cr.rejectKeepsPlace, cr.rejectEndAfter],
+    dflt: [crd.rejectKeepsPlace, crd.rejectEndAfter],
+    metaKey: 'clockroom_rules',
+  });
+  add({
+    key: 'clockroom_rules.backToEnd',
+    group: 'technicians',
+    label: '休息回牌',
+    value: onOff(cr.backToEnd, '排到队尾', '回到原位'),
+    defaultValue: '排到队尾',
+    pending: true,
+    section: 'technicians',
+    current: cr.backToEnd,
+    dflt: crd.backToEnd,
+    metaKey: 'clockroom_rules',
+  });
+  add({
+    key: 'clockroom_rules.skipNeedsReason',
+    group: 'technicians',
+    label: '轮钟跳过排第一的技师',
+    value: onOff(cr.skipNeedsReason, '必须写原因（记钟房日志）', '不用写原因'),
+    defaultValue: '必须写原因（记钟房日志）',
+    pending: true,
+    section: 'technicians',
+    current: cr.skipNeedsReason,
+    dflt: crd.skipNeedsReason,
+    metaKey: 'clockroom_rules',
+  });
+  add({
+    key: 'clockroom_rules.extensionAsDesignated',
+    group: 'technicians',
+    label: '加钟',
+    value: onOff(cr.extensionAsDesignated, '原技师继续，记为点钟', '原技师继续，按原上钟方式'),
+    defaultValue: '原技师继续，记为点钟',
+    pending: true,
+    section: 'technicians',
+    current: cr.extensionAsDesignated,
+    dflt: crd.extensionAsDesignated,
+    metaKey: 'clockroom_rules',
+  });
+  add({
+    key: 'clockroom_rules.minutes',
+    group: 'technicians',
+    label: '上钟计时',
+    value: `没写时长的项目一钟 ${cr.defaultMinutes} 分钟；提前 ${cr.remindMinutes} 分钟提醒快到钟`,
+    defaultValue: `没写时长的项目一钟 ${crd.defaultMinutes} 分钟；提前 ${crd.remindMinutes} 分钟提醒快到钟`,
+    pending: true,
+    section: 'technicians',
+    current: [cr.defaultMinutes, cr.remindMinutes],
+    dflt: [crd.defaultMinutes, crd.remindMinutes],
+    metaKey: 'clockroom_rules',
+  });
   const cs = await commissionSettings(db);
-  const commissionText = (r: typeof cs.current.rules) => `${describeCommissionBase(r.base)}；点钟每钟另加 ${formatYuan(r.designatedBonus)}${Object.keys(r.items).length ? `；${Object.keys(r.items).length} 个项目单独设置` : ''}`;
+  const commissionText = (r: typeof cs.current.rules) =>
+    `${describeCommissionBase(r.base)}；点钟每钟另加 ${formatYuan(r.designatedBonus)}${Object.keys(r.items).length ? `；${Object.keys(r.items).length} 个项目单独设置` : ''}`;
   entries.push({
     key: 'commission_rules',
     group: 'technicians',
@@ -264,34 +594,190 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   // ── 餐饮（S5 第一步）──
   const dn = await loadDiningRules(db);
   const dnd = DEFAULT_DINING_RULES;
-  add({ key: 'dining_rules.enabled', group: 'dining', label: '餐饮功能', value: onOff(dn.enabled, '开启（点单、厨房出品屏、估清）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'dining', current: dn.enabled, dflt: dnd.enabled, metaKey: 'dining_rules' });
-  add({ key: 'dining_rules.trackServed', group: 'dining', label: '上菜确认', value: onOff(dn.trackServed, '出餐后服务员点「上菜」', '出餐即算上菜'), defaultValue: '出餐后服务员点「上菜」', pending: true, section: 'dining', current: dn.trackServed, dflt: dnd.trackServed, metaKey: 'dining_rules' });
-  add({ key: 'dining_rules.warnMinutes', group: 'dining', label: '出品超时提醒', value: `下单 ${dn.warnMinutes} 分钟还没出餐标红`, defaultValue: `下单 ${dnd.warnMinutes} 分钟还没出餐标红`, pending: true, section: 'dining', current: dn.warnMinutes, dflt: dnd.warnMinutes, metaKey: 'dining_rules' });
+  add({
+    key: 'dining_rules.enabled',
+    group: 'dining',
+    label: '餐饮功能',
+    value: onOff(dn.enabled, '开启（点单、厨房出品屏、估清）', '关闭（与升级前一样）'),
+    defaultValue: '关闭（与升级前一样）',
+    pending: false,
+    section: 'dining',
+    current: dn.enabled,
+    dflt: dnd.enabled,
+    metaKey: 'dining_rules',
+  });
+  add({
+    key: 'dining_rules.trackServed',
+    group: 'dining',
+    label: '上菜确认',
+    value: onOff(dn.trackServed, '出餐后服务员点「上菜」', '出餐即算上菜'),
+    defaultValue: '出餐后服务员点「上菜」',
+    pending: true,
+    section: 'dining',
+    current: dn.trackServed,
+    dflt: dnd.trackServed,
+    metaKey: 'dining_rules',
+  });
+  add({
+    key: 'dining_rules.warnMinutes',
+    group: 'dining',
+    label: '出品超时提醒',
+    value: `下单 ${dn.warnMinutes} 分钟还没出餐标红`,
+    defaultValue: `下单 ${dnd.warnMinutes} 分钟还没出餐标红`,
+    pending: true,
+    section: 'dining',
+    current: dn.warnMinutes,
+    dflt: dnd.warnMinutes,
+    metaKey: 'dining_rules',
+  });
   // ── 点餐系统 · 平板电子菜单（8.0.10，docs/EMENU.md）──
   const em = await loadEmenuRules(db);
   const emd = DEFAULT_EMENU_RULES;
   const idleText = (m: number) => (m === 0 ? '不自动回' : `${m} 分钟没人动回到起始页、清掉没下单的菜`);
-  add({ key: 'emenu_rules.enabled', group: 'emenu', label: '平板点餐', value: onOff(em.enabled, '开启（餐桌平板翻菜单、下单）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'emenu', current: em.enabled, dflt: emd.enabled, metaKey: 'emenu_rules' });
+  add({
+    key: 'emenu_rules.enabled',
+    group: 'emenu',
+    label: '平板点餐',
+    value: onOff(em.enabled, '开启（餐桌平板翻菜单、下单）', '关闭（与升级前一样）'),
+    defaultValue: '关闭（与升级前一样）',
+    pending: false,
+    section: 'emenu',
+    current: em.enabled,
+    dflt: emd.enabled,
+    metaKey: 'emenu_rules',
+  });
   const pinText = (on: boolean) => (on ? '要（下单、重新提交、作废都要服务员输 6 位点单密码）' : '不要（核对手牌与桌号后直接下单，经办人记平板的账号）');
   const sizeText = (v: string) => (v === 'design' ? '设计稿原样' : '放大');
-  add({ key: 'emenu_rules.requirePin', group: 'emenu', label: '点单密码', value: pinText(em.requirePin), defaultValue: pinText(emd.requirePin), pending: true, section: 'emenu', current: em.requirePin, dflt: emd.requirePin, metaKey: 'emenu_rules' });
-  add({ key: 'emenu_rules.textSize', group: 'emenu', label: '平板上字与按钮的大小', value: sizeText(em.textSize), defaultValue: sizeText(emd.textSize), pending: true, section: 'emenu', current: em.textSize, dflt: emd.textSize, metaKey: 'emenu_rules' });
-  add({ key: 'emenu_rules.avoidOptions', group: 'emenu', label: '忌口选项', value: em.avoidOptions.join('、') || '没有', defaultValue: emd.avoidOptions.join('、'), pending: true, section: 'emenu', hint: '多选，写在这一单每道菜的口味备注上', current: em.avoidOptions, dflt: emd.avoidOptions, metaKey: 'emenu_rules' });
-  add({ key: 'emenu_rules.serveOptions', group: 'emenu', label: '起菜方式', value: em.serveOptions.join('、') || '没有', defaultValue: emd.serveOptions.join('、'), pending: true, section: 'emenu', hint: '单选，可以不选', current: em.serveOptions, dflt: emd.serveOptions, metaKey: 'emenu_rules' });
-  add({ key: 'emenu_rules.idleMinutes', group: 'emenu', label: '没人动多久回到起始页', value: idleText(em.idleMinutes), defaultValue: idleText(emd.idleMinutes), pending: true, section: 'emenu', current: em.idleMinutes, dflt: emd.idleMinutes, metaKey: 'emenu_rules' });
-  add({ key: 'emenu_rules.offHours', group: 'emenu', label: '不在供应时段的分类', value: em.offHours === 'hide' ? '平板上不显示' : '显示但不能点', defaultValue: emd.offHours === 'hide' ? '平板上不显示' : '显示但不能点', pending: true, section: 'emenu', current: em.offHours, dflt: emd.offHours, metaKey: 'emenu_rules' });
+  add({
+    key: 'emenu_rules.requirePin',
+    group: 'emenu',
+    label: '点单密码',
+    value: pinText(em.requirePin),
+    defaultValue: pinText(emd.requirePin),
+    pending: true,
+    section: 'emenu',
+    current: em.requirePin,
+    dflt: emd.requirePin,
+    metaKey: 'emenu_rules',
+  });
+  add({
+    key: 'emenu_rules.textSize',
+    group: 'emenu',
+    label: '平板上字与按钮的大小',
+    value: sizeText(em.textSize),
+    defaultValue: sizeText(emd.textSize),
+    pending: true,
+    section: 'emenu',
+    current: em.textSize,
+    dflt: emd.textSize,
+    metaKey: 'emenu_rules',
+  });
+  add({
+    key: 'emenu_rules.avoidOptions',
+    group: 'emenu',
+    label: '忌口选项',
+    value: em.avoidOptions.join('、') || '没有',
+    defaultValue: emd.avoidOptions.join('、'),
+    pending: true,
+    section: 'emenu',
+    hint: '多选，写在这一单每道菜的口味备注上',
+    current: em.avoidOptions,
+    dflt: emd.avoidOptions,
+    metaKey: 'emenu_rules',
+  });
+  add({
+    key: 'emenu_rules.serveOptions',
+    group: 'emenu',
+    label: '起菜方式',
+    value: em.serveOptions.join('、') || '没有',
+    defaultValue: emd.serveOptions.join('、'),
+    pending: true,
+    section: 'emenu',
+    hint: '单选，可以不选',
+    current: em.serveOptions,
+    dflt: emd.serveOptions,
+    metaKey: 'emenu_rules',
+  });
+  add({
+    key: 'emenu_rules.idleMinutes',
+    group: 'emenu',
+    label: '没人动多久回到起始页',
+    value: idleText(em.idleMinutes),
+    defaultValue: idleText(emd.idleMinutes),
+    pending: true,
+    section: 'emenu',
+    current: em.idleMinutes,
+    dflt: emd.idleMinutes,
+    metaKey: 'emenu_rules',
+  });
+  add({
+    key: 'emenu_rules.offHours',
+    group: 'emenu',
+    label: '不在供应时段的分类',
+    value: em.offHours === 'hide' ? '平板上不显示' : '显示但不能点',
+    defaultValue: emd.offHours === 'hide' ? '平板上不显示' : '显示但不能点',
+    pending: true,
+    section: 'emenu',
+    current: em.offHours,
+    dflt: emd.offHours,
+    metaKey: 'emenu_rules',
+  });
   // ── 客房（S7，v0.7.4）──
   const rm = await loadRoomRules(db);
   const rmd = DEFAULT_ROOM_RULES;
   const clock = (minute: number) => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
   const lateText = (r: typeof rm) => `${clock(r.checkoutMinute)} 退房；${clock(r.checkoutMinute)}–${clock(r.lateFullMinute)} 加收半天，${clock(r.lateFullMinute)} 以后加收一晚`;
-  add({ key: 'room_rules.enabled', group: 'rooms', label: '客房功能', value: onOff(rm.enabled, '开启（房态、入住、押金、夜审）', '关闭（与升级前一样）'), defaultValue: '关闭（与升级前一样）', pending: false, section: 'rooms', current: rm.enabled, dflt: rmd.enabled, metaKey: 'room_rules' });
   add({
-    key: 'room_rules.checkout', group: 'rooms', label: '全天房退房时间', value: lateText(rm), defaultValue: lateText(rmd), pending: true, section: 'rooms',
-    hint: '夜审也在加收一晚的时刻以后做', current: [rm.checkoutMinute, rm.lateFullMinute], dflt: [rmd.checkoutMinute, rmd.lateFullMinute], metaKey: 'room_rules',
+    key: 'room_rules.enabled',
+    group: 'rooms',
+    label: '客房功能',
+    value: onOff(rm.enabled, '开启（房态、入住、押金、夜审）', '关闭（与升级前一样）'),
+    defaultValue: '关闭（与升级前一样）',
+    pending: false,
+    section: 'rooms',
+    current: rm.enabled,
+    dflt: rmd.enabled,
+    metaKey: 'room_rules',
   });
-  add({ key: 'room_rules.hourlyGraceMinutes', group: 'rooms', label: '钟点房超时宽限', value: `${rm.hourlyGraceMinutes} 分钟`, defaultValue: `${rmd.hourlyGraceMinutes} 分钟`, pending: true, section: 'rooms', hint: '超过已付时段加宽限才按段补', current: rm.hourlyGraceMinutes, dflt: rmd.hourlyGraceMinutes, metaKey: 'room_rules' });
-  add({ key: 'room_rules.defaultDeposit', group: 'rooms', label: '入住默认押金', value: rm.defaultDeposit ? `默认收 ${formatYuan(rm.defaultDeposit)}` : '默认不收', defaultValue: '默认不收', pending: true, section: 'rooms', hint: '住客都有手牌、离店前在前台结清；入住时可以改', current: rm.defaultDeposit, dflt: rmd.defaultDeposit, metaKey: 'room_rules' });
+  add({
+    key: 'room_rules.checkout',
+    group: 'rooms',
+    label: '全天房退房时间',
+    value: lateText(rm),
+    defaultValue: lateText(rmd),
+    pending: true,
+    section: 'rooms',
+    hint: '夜审也在加收一晚的时刻以后做',
+    current: [rm.checkoutMinute, rm.lateFullMinute],
+    dflt: [rmd.checkoutMinute, rmd.lateFullMinute],
+    metaKey: 'room_rules',
+  });
+  add({
+    key: 'room_rules.hourlyGraceMinutes',
+    group: 'rooms',
+    label: '钟点房超时宽限',
+    value: `${rm.hourlyGraceMinutes} 分钟`,
+    defaultValue: `${rmd.hourlyGraceMinutes} 分钟`,
+    pending: true,
+    section: 'rooms',
+    hint: '超过已付时段加宽限才按段补',
+    current: rm.hourlyGraceMinutes,
+    dflt: rmd.hourlyGraceMinutes,
+    metaKey: 'room_rules',
+  });
+  add({
+    key: 'room_rules.defaultDeposit',
+    group: 'rooms',
+    label: '入住默认押金',
+    value: rm.defaultDeposit ? `默认收 ${formatYuan(rm.defaultDeposit)}` : '默认不收',
+    defaultValue: '默认不收',
+    pending: true,
+    section: 'rooms',
+    hint: '住客都有手牌、离店前在前台结清；入住时可以改',
+    current: rm.defaultDeposit,
+    dflt: rmd.defaultDeposit,
+    metaKey: 'room_rules',
+  });
   // ── 预约（v0.7.28 ③，N4）──
   const bk = await loadBookingRules(db);
   const bkd = DEFAULT_BOOKING_RULES;
@@ -299,10 +785,23 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const mpText = (r: BookingRules) => `每人同时最多 ${r.mpMaxOpen} 个；开始前 ${r.confirmLeadMinutes} 分钟还没确认自动取消；开始前 ${r.mpCancelLeadMinutes} 分钟以前可以自己取消`;
   const noShowText = (r: BookingRules) =>
     `过了开始 ${r.noShowMinutes} 分钟没到店记爽约；${r.noShowWindowDays} 天内爽约 ${r.noShowLimit} 次${r.noShowBanDays ? `，之后 ${r.noShowBanDays} 天不能在小程序预约` : '，不限制'}`;
-  const lengthText = (r: BookingRules) => `派对房等可约 ${r.spaceDurations.map((m) => `${m / 60} 小时`).join('、')}；技师项目没写时长按 ${r.defaultServiceMinutes} 分钟；客房电话预订保留到预计到店后 ${r.roomHoldMinutes} 分钟`;
+  const lengthText = (r: BookingRules) =>
+    `派对房等可约 ${r.spaceDurations.map((m) => `${m / 60} 小时`).join('、')}；技师项目没写时长按 ${r.defaultServiceMinutes} 分钟；客房电话预订保留到预计到店后 ${r.roomHoldMinutes} 分钟`;
   const pick = <K extends keyof BookingRules>(r: BookingRules, keys: K[]) => keys.map((x) => r[x]);
   const bookingEntry = (key: string, label: string, text: (r: BookingRules) => string, keys: (keyof BookingRules)[], hint?: string) =>
-    add({ key: `booking_rules.${key}`, group: 'bookings', label, value: text(bk), defaultValue: text(bkd), pending: true, section: 'bookings', hint, current: pick(bk, keys), dflt: pick(bkd, keys), metaKey: 'booking_rules' });
+    add({
+      key: `booking_rules.${key}`,
+      group: 'bookings',
+      label,
+      value: text(bk),
+      defaultValue: text(bkd),
+      pending: true,
+      section: 'bookings',
+      hint,
+      current: pick(bk, keys),
+      dflt: pick(bkd, keys),
+      metaKey: 'booking_rules',
+    });
   bookingEntry('window', '能约的时段', windowText, ['openTime', 'closeTime', 'slotMinutes', 'maxDaysAhead'], '前台、电话、小程序都按这个时段约');
   bookingEntry('mp', '小程序预约', mpText, ['mpMaxOpen', 'confirmLeadMinutes', 'mpCancelLeadMinutes'], '小程序的预约先「待确认」，前台确认');
   bookingEntry('noShow', '爽约', noShowText, ['noShowMinutes', 'noShowWindowDays', 'noShowLimit', 'noShowBanDays']);
@@ -311,173 +810,424 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   const ur = await loadUsageRules(db);
   const usageText = (types: string[]) => (types.length ? `${types.join('、')}：有开着的使用单算使用中` : '没有（派对房等只显示业态）');
   add({
-    key: 'usage_rules.businessTypes', group: 'floormap', label: '开单即占用的业态', value: usageText(ur.businessTypes), defaultValue: usageText(DEFAULT_USAGE_RULES.businessTypes),
-    pending: true, section: 'spaces', hint: '这些业态的房间不派技师，开单即「使用中」，结束、使用人结账或撤单后空闲', current: ur.businessTypes, dflt: DEFAULT_USAGE_RULES.businessTypes, metaKey: 'usage_rules',
+    key: 'usage_rules.businessTypes',
+    group: 'floormap',
+    label: '开单即占用的业态',
+    value: usageText(ur.businessTypes),
+    defaultValue: usageText(DEFAULT_USAGE_RULES.businessTypes),
+    pending: true,
+    section: 'spaces',
+    hint: '这些业态的房间不派技师，开单即「使用中」，结束、使用人结账或撤单后空闲',
+    current: ur.businessTypes,
+    dflt: DEFAULT_USAGE_RULES.businessTypes,
+    metaKey: 'usage_rules',
   });
   const gr = await loadGuideRules(db);
   add({
-    key: 'guide_rules.carouselSeconds', group: 'floormap', label: '对客导览大屏轮播', value: `每层停 ${gr.carouselSeconds} 秒`, defaultValue: `每层停 ${DEFAULT_GUIDE_RULES.carouselSeconds} 秒`,
-    pending: true, section: 'spaces', hint: '门店大屏打开「对客导览 → 大屏模式」按楼层轮播', current: gr.carouselSeconds, dflt: DEFAULT_GUIDE_RULES.carouselSeconds, metaKey: 'guide_rules',
+    key: 'guide_rules.carouselSeconds',
+    group: 'floormap',
+    label: '对客导览大屏轮播',
+    value: `每层停 ${gr.carouselSeconds} 秒`,
+    defaultValue: `每层停 ${DEFAULT_GUIDE_RULES.carouselSeconds} 秒`,
+    pending: true,
+    section: 'spaces',
+    hint: '门店大屏打开「对客导览 → 大屏模式」按楼层轮播',
+    current: gr.carouselSeconds,
+    dflt: DEFAULT_GUIDE_RULES.carouselSeconds,
+    metaKey: 'guide_rules',
   });
   // ── 第一级实时位置（RQ-004，v0.7.17）──
   const lr = await loadLocationRules(db);
-  const zoneNames = new Map(
-    (await db<{ id: number; name: string }[]>`SELECT id, name FROM zones WHERE id IN ${db([lr.checkinZoneId ?? 0, lr.restZoneId ?? 0])}`).map((z) => [z.id, z.name]),
-  );
+  const zoneNames = new Map((await db<{ id: number; name: string }[]>`SELECT id, name FROM zones WHERE id IN ${db([lr.checkinZoneId ?? 0, lr.restZoneId ?? 0])}`).map((z) => [z.id, z.name]));
   const zoneText = (r: typeof lr) =>
     `接待区：${r.checkinZoneId ? (zoneNames.get(r.checkinZoneId) ?? '已删除的区域') : '不推导'}；技师休息区：${r.restZoneId ? (zoneNames.get(r.restZoneId) ?? '已删除的区域') : '不推导（下钟后位置不明）'}`;
-  add({ key: 'location_rules.enabled', group: 'locations', label: '实时位置', value: onOff(lr.enabled, '开启（刷卡与业务动作推导客人、技师在哪）', '关闭'), defaultValue: '关闭', pending: true, section: 'spaces', hint: '关着时不推导、刷卡上报拒绝；离店照样清掉已有的位置', current: lr.enabled, dflt: DEFAULT_LOCATION_RULES.enabled, metaKey: 'location_rules' });
-  add({ key: 'location_rules.zones', group: 'locations', label: '接待区与技师休息区', value: zoneText(lr), defaultValue: zoneText(DEFAULT_LOCATION_RULES), pending: true, section: 'spaces', hint: '发手牌后客人在接待区；技师上牌、下钟后在休息区', current: [lr.checkinZoneId, lr.restZoneId], dflt: [null, null], metaKey: 'location_rules' });
-  // ── 库存与采购 ──
-  add({ key: 'inventory_scope_name', group: 'inventory', label: '库存范围', value: inv.scopeName, defaultValue: '后勤总库', pending: true, section: 'rules', href: '/erp/settings/inventory', current: inv.scopeName, dflt: '后勤总库', metaKey: 'inventory_scope_name' });
-  // 迁移 002 写入的初始口径
-  const basis = '含税到货价（模拟口径，待确认）';
-  add({ key: 'inventory_price_basis', group: 'inventory', label: '价格口径', value: inv.priceBasis, defaultValue: basis, pending: true, section: 'rules', href: '/erp/settings/inventory', current: inv.priceBasis, dflt: basis, metaKey: 'inventory_price_basis' });
   add({
-    key: 'inventory_urgent_cap_cents', group: 'inventory', label: '急采上限', value: `每张急采单不超过 ${formatYuan(inv.urgentCapCents)}`,
-    defaultValue: `每张急采单不超过 ${formatYuan(DEFAULT_URGENT_CAP_CENTS)}`, pending: true, section: 'rules', href: '/erp/settings/inventory',
-    hint: '8.0.1 起由采购在「采购 → 急采」登记，按金额分级审批后仓库验收、采购补单；上限就是「采购规则」里急采分级的最高一档，在那里改',
-    current: inv.urgentCapCents, dflt: DEFAULT_URGENT_CAP_CENTS, metaKey: 'purchase_rules',
+    key: 'location_rules.enabled',
+    group: 'locations',
+    label: '实时位置',
+    value: onOff(lr.enabled, '开启（刷卡与业务动作推导客人、技师在哪）', '关闭'),
+    defaultValue: '关闭',
+    pending: true,
+    section: 'spaces',
+    hint: '关着时不推导、刷卡上报拒绝；离店照样清掉已有的位置',
+    current: lr.enabled,
+    dflt: DEFAULT_LOCATION_RULES.enabled,
+    metaKey: 'location_rules',
   });
   add({
-    key: 'inventory_approval_rules', group: 'inventory', label: '需要负责人确认的单据', value: approvals(inv.approvalRules), defaultValue: approvals(DEFAULT_APPROVAL_RULES),
-    pending: true, section: 'rules', href: '/erp/settings/inventory', current: inv.approvalRules, dflt: DEFAULT_APPROVAL_RULES, metaKey: 'inventory_approval_rules',
+    key: 'location_rules.zones',
+    group: 'locations',
+    label: '接待区与技师休息区',
+    value: zoneText(lr),
+    defaultValue: zoneText(DEFAULT_LOCATION_RULES),
+    pending: true,
+    section: 'spaces',
+    hint: '发手牌后客人在接待区；技师上牌、下钟后在休息区',
+    current: [lr.checkinZoneId, lr.restZoneId],
+    dflt: [null, null],
+    metaKey: 'location_rules',
+  });
+  // ── 库存与采购 ──
+  add({
+    key: 'inventory_scope_name',
+    group: 'inventory',
+    label: '库存范围',
+    value: inv.scopeName,
+    defaultValue: '后勤总库',
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/inventory',
+    current: inv.scopeName,
+    dflt: '后勤总库',
+    metaKey: 'inventory_scope_name',
+  });
+  // 迁移 002 写入的初始口径
+  const basis = '含税到货价（模拟口径，待确认）';
+  add({
+    key: 'inventory_price_basis',
+    group: 'inventory',
+    label: '价格口径',
+    value: inv.priceBasis,
+    defaultValue: basis,
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/inventory',
+    current: inv.priceBasis,
+    dflt: basis,
+    metaKey: 'inventory_price_basis',
+  });
+  add({
+    key: 'inventory_urgent_cap_cents',
+    group: 'inventory',
+    label: '急采上限',
+    value: `每张急采单不超过 ${formatYuan(inv.urgentCapCents)}`,
+    defaultValue: `每张急采单不超过 ${formatYuan(DEFAULT_URGENT_CAP_CENTS)}`,
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/inventory',
+    hint: '8.0.1 起由采购在「采购 → 急采」登记，按金额分级审批后仓库验收、采购补单；上限就是「采购规则」里急采分级的最高一档，在那里改',
+    current: inv.urgentCapCents,
+    dflt: DEFAULT_URGENT_CAP_CENTS,
+    metaKey: 'purchase_rules',
+  });
+  add({
+    key: 'inventory_approval_rules',
+    group: 'inventory',
+    label: '需要负责人确认的单据',
+    value: approvals(inv.approvalRules),
+    defaultValue: approvals(DEFAULT_APPROVAL_RULES),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/inventory',
+    current: inv.approvalRules,
+    dflt: DEFAULT_APPROVAL_RULES,
+    metaKey: 'inventory_approval_rules',
   });
   const threshold = (c: number) => (c > 0 ? `${formatYuan(c)} 以内不用负责人确认` : '全部要负责人确认');
   add({
-    key: 'inventory_approval_threshold_cents', group: 'inventory', label: '免确认门槛', value: threshold(inv.approvalThresholdCents),
-    defaultValue: threshold(DEFAULT_APPROVAL_THRESHOLD_CENTS), pending: true, section: 'rules', href: '/erp/settings/inventory',
+    key: 'inventory_approval_threshold_cents',
+    group: 'inventory',
+    label: '免确认门槛',
+    value: threshold(inv.approvalThresholdCents),
+    defaultValue: threshold(DEFAULT_APPROVAL_THRESHOLD_CENTS),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/inventory',
     hint: '采购单、报损、退供应商、付款、期初在设为需要确认时，金额不超过门槛的提交即生效；总仓盘点调整照旧要确认',
-    current: inv.approvalThresholdCents, dflt: DEFAULT_APPROVAL_THRESHOLD_CENTS, metaKey: 'inventory_approval_threshold_cents',
+    current: inv.approvalThresholdCents,
+    dflt: DEFAULT_APPROVAL_THRESHOLD_CENTS,
+    metaKey: 'inventory_approval_threshold_cents',
   });
   add({
-    key: 'inventory_usage_window_days', group: 'inventory', label: '可用天数的用量统计', value: `按近 ${inv.usageWindowDays} 天的用量`,
-    defaultValue: `按近 ${DEFAULT_USAGE_WINDOW_DAYS} 天的用量`, pending: true, section: 'rules', href: '/erp/settings/inventory',
+    key: 'inventory_usage_window_days',
+    group: 'inventory',
+    label: '可用天数的用量统计',
+    value: `按近 ${inv.usageWindowDays} 天的用量`,
+    defaultValue: `按近 ${DEFAULT_USAGE_WINDOW_DAYS} 天的用量`,
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/inventory',
     hint: '物料设了提醒天数时，可用天数 = 结存 ÷ 这段时间的日均用量，少于提醒天数就提醒',
-    current: inv.usageWindowDays, dflt: DEFAULT_USAGE_WINDOW_DAYS, metaKey: 'inventory_usage_window_days',
+    current: inv.usageWindowDays,
+    dflt: DEFAULT_USAGE_WINDOW_DAYS,
+    metaKey: 'inventory_usage_window_days',
   });
   // 称重与盘点、对账提醒（#14、#23，v0.7.13）：存成一条 inventory_cycle_rules
   const cyc = DEFAULT_CYCLE_RULES;
   add({
-    key: 'inventory_cycle_rules.weighTolerancePct', group: 'inventory', label: '称重收货容差', value: `可以比采购单多 ${inv.weighTolerancePct}%`,
-    defaultValue: `可以比采购单多 ${cyc.weighTolerancePct}%`, pending: true, section: 'rules', href: '/erp/settings/inventory',
+    key: 'inventory_cycle_rules.weighTolerancePct',
+    group: 'inventory',
+    label: '称重收货容差',
+    value: `可以比采购单多 ${inv.weighTolerancePct}%`,
+    defaultValue: `可以比采购单多 ${cyc.weighTolerancePct}%`,
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/inventory',
     hint: '物料设为称重的，按实际称重收货，可以比采购单这一行的订购数量多出这么多；货款按实收重量算',
-    current: inv.weighTolerancePct, dflt: cyc.weighTolerancePct, metaKey: 'inventory_cycle_rules',
+    current: inv.weighTolerancePct,
+    dflt: cyc.weighTolerancePct,
+    metaKey: 'inventory_cycle_rules',
   });
   const stText = (d: number, g: number) => `每月 ${d} 号起提醒，过 ${g} 天没盘完标红`;
   add({
-    key: 'inventory_cycle_rules.stocktake', group: 'inventory', label: '每月盘点提醒', value: stText(inv.stocktakeDay, inv.stocktakeGraceDays),
-    defaultValue: stText(cyc.stocktakeDay, cyc.stocktakeGraceDays), pending: true, section: 'rules', href: '/erp/settings/inventory',
+    key: 'inventory_cycle_rules.stocktake',
+    group: 'inventory',
+    label: '每月盘点提醒',
+    value: stText(inv.stocktakeDay, inv.stocktakeGraceDays),
+    defaultValue: stText(cyc.stocktakeDay, cyc.stocktakeGraceDays),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/inventory',
     hint: '每个仓按「月初有结存的物料本月都在盘点单里盘到」算盘完；部门小仓的台面日耗品不用清点',
-    current: [inv.stocktakeDay, inv.stocktakeGraceDays], dflt: [cyc.stocktakeDay, cyc.stocktakeGraceDays], metaKey: 'inventory_cycle_rules',
+    current: [inv.stocktakeDay, inv.stocktakeGraceDays],
+    dflt: [cyc.stocktakeDay, cyc.stocktakeGraceDays],
+    metaKey: 'inventory_cycle_rules',
   });
   const rcText = (d: number, g: number, b: number) => `月结：每月 ${d} 号起提醒对上个月的账，过 ${g} 天标红；按批次：收货后 ${b} 天标红`;
   add({
-    key: 'inventory_cycle_rules.recon', group: 'inventory', label: '供应商对账提醒', value: rcText(inv.monthlyReconDay, inv.monthlyReconGraceDays, inv.batchReconGraceDays),
-    defaultValue: rcText(cyc.monthlyReconDay, cyc.monthlyReconGraceDays, cyc.batchReconGraceDays), pending: true, section: 'rules', href: '/erp/settings/inventory',
+    key: 'inventory_cycle_rules.recon',
+    group: 'inventory',
+    label: '供应商对账提醒',
+    value: rcText(inv.monthlyReconDay, inv.monthlyReconGraceDays, inv.batchReconGraceDays),
+    defaultValue: rcText(cyc.monthlyReconDay, cyc.monthlyReconGraceDays, cyc.batchReconGraceDays),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/inventory',
     hint: '挂账供应商在档案里选「月结」或「按批次」；对完账在「货款 → 对账」登记',
     current: [inv.monthlyReconDay, inv.monthlyReconGraceDays, inv.batchReconGraceDays],
-    dflt: [cyc.monthlyReconDay, cyc.monthlyReconGraceDays, cyc.batchReconGraceDays], metaKey: 'inventory_cycle_rules',
+    dflt: [cyc.monthlyReconDay, cyc.monthlyReconGraceDays, cyc.batchReconGraceDays],
+    metaKey: 'inventory_cycle_rules',
   });
   // 采购规则（v0.7.29 ERP 采购五项，docs/ERP_PURCHASING.md）：存成一条 purchase_rules
   const prd = DEFAULT_PURCHASE_RULES;
   const channelText = (r: typeof pr) => r.channels.map((c) => (c.needsNote ? `${c.label}（写说明）` : c.label)).join('、');
   add({
-    key: 'purchase_rules.channels', group: 'inventory', label: '采购途径', value: channelText(pr), defaultValue: channelText(prd), pending: true, section: 'rules', href: '/erp/settings/purchase',
+    key: 'purchase_rules.channels',
+    group: 'inventory',
+    label: '采购途径',
+    value: channelText(pr),
+    defaultValue: channelText(prd),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/purchase',
     hint: '采购单、报销单记在哪买的；供应商档案可设默认途径。在「ERP 设置 → 采购规则」里改',
-    current: pr.channels, dflt: prd.channels, metaKey: 'purchase_rules',
+    current: pr.channels,
+    dflt: prd.channels,
+    metaKey: 'purchase_rules',
   });
   const quoteText = (r: typeof pr) => (r.quoteThresholdCents > 0 ? `${formatYuan(r.quoteThresholdCents)} 及以上要询价比价，至少 ${r.minQuotes} 家报价` : '不要求询价比价');
   add({
-    key: 'purchase_rules.quotes', group: 'inventory', label: '询价比价门槛', value: quoteText(pr), defaultValue: quoteText(prd), pending: true, section: 'rules', href: '/erp/settings/purchase',
+    key: 'purchase_rules.quotes',
+    group: 'inventory',
+    label: '询价比价门槛',
+    value: quoteText(pr),
+    defaultValue: quoteText(prd),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/purchase',
     hint: '合计到门槛的采购单第一次提交时要来自已定标的询价单；只有一家报价的标单一来源、由负责人定标；补单与改版不拦',
-    current: [pr.quoteThresholdCents, pr.minQuotes], dflt: [prd.quoteThresholdCents, prd.minQuotes], metaKey: 'purchase_rules',
+    current: [pr.quoteThresholdCents, pr.minQuotes],
+    dflt: [prd.quoteThresholdCents, prd.minQuotes],
+    metaKey: 'purchase_rules',
   });
   const replText = (r: typeof pr) =>
     `可用天数少于 ${r.reorderDays} 天（物料设了提醒天数按物料的）就建议补，补到 ${r.targetDays} 天；` +
     (r.regularUseDays > 1 ? `近 ${REPLENISH_LOOKBACK_DAYS} 天有领用的天数不到 ${r.regularUseDays} 天的看作一次性采购、不提` : '领过一次就算常用');
   add({
-    key: 'purchase_rules.replenish', group: 'inventory', label: '补货建议', value: replText(pr), defaultValue: replText(prd), pending: true, section: 'rules', href: '/erp/settings/purchase',
+    key: 'purchase_rules.replenish',
+    group: 'inventory',
+    label: '补货建议',
+    value: replText(pr),
+    defaultValue: replText(prd),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/purchase',
     hint: '只看总仓；在途（没到的采购单）算进去；按采购单位向上取整。物料档案里的补货方式是「按需采购」的不提，「常备」的一直提，「自动识别」的按领用次数与资产卡片认',
-    current: [pr.reorderDays, pr.targetDays, pr.regularUseDays], dflt: [prd.reorderDays, prd.targetDays, prd.regularUseDays], metaKey: 'purchase_rules',
+    current: [pr.reorderDays, pr.targetDays, pr.regularUseDays],
+    dflt: [prd.reorderDays, prd.targetDays, prd.regularUseDays],
+    metaKey: 'purchase_rules',
   });
   // 8.0.20（docs/ERP_V8020.md 第 2、3 节）：两个新开关在「ERP 设置」里改
   const autoText = (r: typeof ar) => (r.enabled ? `开着：每天 ${r.time} 以后按补货建议给每家供应商建一张采购单草稿（不提交）` : '关着');
   add({
-    key: 'auto_replenish', group: 'inventory', label: '自动补货', value: autoText(ar), defaultValue: autoText(DEFAULT_AUTO_REPLENISH), pending: true, section: 'rules', href: '/erp/settings/purchase',
+    key: 'auto_replenish',
+    group: 'inventory',
+    label: '自动补货',
+    value: autoText(ar),
+    defaultValue: autoText(DEFAULT_AUTO_REPLENISH),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/purchase',
     hint: '只给补货建议里真正建议、有供应商的行建草稿；草稿算在途、不重复建，删掉的第二天会再建——不想再提的物料在建议行点「不用备货」',
-    current: [ar.enabled, ar.time], dflt: [DEFAULT_AUTO_REPLENISH.enabled, DEFAULT_AUTO_REPLENISH.time], metaKey: 'auto_replenish',
+    current: [ar.enabled, ar.time],
+    dflt: [DEFAULT_AUTO_REPLENISH.enabled, DEFAULT_AUTO_REPLENISH.time],
+    metaKey: 'auto_replenish',
   });
   const stockUsageText = (r: typeof sur) => (r.enabled ? '开着：进厨房 / 水吧的出品完成时扣，不进的结账时扣；没设用料的项目不扣' : '关着');
   add({
-    key: 'stock_usage_rules', group: 'inventory', label: '结账、出品时按用料扣库存', value: stockUsageText(sur), defaultValue: stockUsageText(DEFAULT_STOCK_USAGE_RULES), pending: true, section: 'rules', href: '/erp/settings/inventory',
+    key: 'stock_usage_rules',
+    group: 'inventory',
+    label: '结账、出品时按用料扣库存',
+    value: stockUsageText(sur),
+    defaultValue: stockUsageText(DEFAULT_STOCK_USAGE_RULES),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/inventory',
     hint: '库存不够不拦结账与出品，欠着的列在「库存 → 用料与扣料」的待扣料里，补货后自动扣；从哪个仓扣也在那里设',
-    current: [sur.enabled], dflt: [DEFAULT_STOCK_USAGE_RULES.enabled], metaKey: 'stock_usage_rules',
+    current: [sur.enabled],
+    dflt: [DEFAULT_STOCK_USAGE_RULES.enabled],
+    metaKey: 'stock_usage_rules',
   });
   // 8.0.18 规则总表补全（docs/IA_V8017.md 第 3.3 节）：8.0.17 加的两项采购规则，付款、报销、员工食堂、安保巡场的规则原来不在总表里
   add({
-    key: 'purchase_rules.deptConfirm', group: 'inventory', label: '部门主管确认', value: DEPT_CONFIRM_RULE_LABELS[pr.deptConfirm], defaultValue: DEPT_CONFIRM_RULE_LABELS[prd.deptConfirm],
-    pending: true, section: 'rules', href: '/erp/settings/purchase', hint: '哪些需求单要部门主管先确认，采购才能审核通过；部门没设主管、提单人就是主管、店主提的不拦',
-    current: pr.deptConfirm, dflt: prd.deptConfirm, metaKey: 'purchase_rules',
+    key: 'purchase_rules.deptConfirm',
+    group: 'inventory',
+    label: '部门主管确认',
+    value: DEPT_CONFIRM_RULE_LABELS[pr.deptConfirm],
+    defaultValue: DEPT_CONFIRM_RULE_LABELS[prd.deptConfirm],
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/purchase',
+    hint: '哪些需求单要部门主管先确认，采购才能审核通过；部门没设主管、提单人就是主管、店主提的不拦',
+    current: pr.deptConfirm,
+    dflt: prd.deptConfirm,
+    metaKey: 'purchase_rules',
   });
   add({
-    key: 'purchase_rules.flowStall', group: 'inventory', label: '流程图里一个环节等了几天标红', value: `${pr.flowStallDays} 天`, defaultValue: `${prd.flowStallDays} 天`,
-    pending: true, section: 'rules', href: '/erp/settings/purchase', hint: '采购流程图；到货按预计到货日另算',
-    current: pr.flowStallDays, dflt: prd.flowStallDays, metaKey: 'purchase_rules',
+    key: 'purchase_rules.flowStall',
+    group: 'inventory',
+    label: '流程图里一个环节等了几天标红',
+    value: `${pr.flowStallDays} 天`,
+    defaultValue: `${prd.flowStallDays} 天`,
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/purchase',
+    hint: '采购流程图；到货按预计到货日另算',
+    current: pr.flowStallDays,
+    dflt: prd.flowStallDays,
+    metaKey: 'purchase_rules',
   });
   const pay = await loadPaymentRules(db);
   const payd = DEFAULT_PAYMENT_RULES;
   const payDaysText = (r: typeof pay) => payDaysLabel(r.payDays) || '没有固定付款日';
   add({
-    key: 'payment_rules.payDays', group: 'erp', label: '固定付款日', value: payDaysText(pay), defaultValue: payDaysText(payd), pending: true, section: 'rules', href: '/erp/settings/payments',
+    key: 'payment_rules.payDays',
+    group: 'erp',
+    label: '固定付款日',
+    value: payDaysText(pay),
+    defaultValue: payDaysText(payd),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/payments',
     hint: '只是日子：新建付款申请默认取下一个付款日，流程图的付款环节按它提示',
-    current: pay.payDays, dflt: payd.payDays, metaKey: PAYMENT_RULES_KEY,
+    current: pay.payDays,
+    dflt: payd.payDays,
+    metaKey: PAYMENT_RULES_KEY,
   });
   const threeWayText = (r: typeof pay) => `差额不超过收货金额的 ${r.threeWayPctBp / 100}% 且不超过 ${formatYuan(r.threeWayCapCents)}`;
   add({
-    key: 'payment_rules.threeWay', group: 'erp', label: '三单比对的容差', value: threeWayText(pay), defaultValue: threeWayText(payd), pending: true, section: 'rules', href: '/erp/settings/payments',
+    key: 'payment_rules.threeWay',
+    group: 'erp',
+    label: '三单比对的容差',
+    value: threeWayText(pay),
+    defaultValue: threeWayText(payd),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/payments',
     hint: '采购单、收货、发票三个金额；超过的挂起、财务放行',
-    current: [pay.threeWayPctBp, pay.threeWayCapCents], dflt: [payd.threeWayPctBp, payd.threeWayCapCents], metaKey: PAYMENT_RULES_KEY,
+    current: [pay.threeWayPctBp, pay.threeWayCapCents],
+    dflt: [payd.threeWayPctBp, payd.threeWayCapCents],
+    metaKey: PAYMENT_RULES_KEY,
   });
   const contractGoodsText = (r: typeof pay) => (r.requireRequestForContractGoods ? '要先提付款申请' : '可以直接登记付款');
   add({
-    key: 'payment_rules.contractGoods', group: 'erp', label: '挂合同的货款', value: contractGoodsText(pay), defaultValue: contractGoodsText(payd), pending: true, section: 'rules', href: '/erp/settings/payments',
-    current: pay.requireRequestForContractGoods, dflt: payd.requireRequestForContractGoods, metaKey: PAYMENT_RULES_KEY,
+    key: 'payment_rules.contractGoods',
+    group: 'erp',
+    label: '挂合同的货款',
+    value: contractGoodsText(pay),
+    defaultValue: contractGoodsText(payd),
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/payments',
+    current: pay.requireRequestForContractGoods,
+    dflt: payd.requireRequestForContractGoods,
+    metaKey: PAYMENT_RULES_KEY,
   });
   const exp = await loadExpenseRules(db);
   const expd = DEFAULT_EXPENSE_RULES;
   add({
-    key: 'expense_rules.threshold', group: 'erp', label: '报销要负责人确认的门槛', value: `单笔超过 ${formatYuan(exp.approvalThresholdCents)}`, defaultValue: `单笔超过 ${formatYuan(expd.approvalThresholdCents)}`,
-    pending: true, section: 'rules', href: '/erp/settings/expenses',
-    current: exp.approvalThresholdCents, dflt: expd.approvalThresholdCents, metaKey: 'expense_rules',
+    key: 'expense_rules.threshold',
+    group: 'erp',
+    label: '报销要负责人确认的门槛',
+    value: `单笔超过 ${formatYuan(exp.approvalThresholdCents)}`,
+    defaultValue: `单笔超过 ${formatYuan(expd.approvalThresholdCents)}`,
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/expenses',
+    current: exp.approvalThresholdCents,
+    dflt: expd.approvalThresholdCents,
+    metaKey: 'expense_rules',
   });
   add({
-    key: 'expense_rules.overdue', group: 'erp', label: '备用金多久没平账标红', value: `打款后超过 ${exp.overdueDays} 天`, defaultValue: `打款后超过 ${expd.overdueDays} 天`,
-    pending: true, section: 'rules', href: '/erp/settings/expenses',
-    current: exp.overdueDays, dflt: expd.overdueDays, metaKey: 'expense_rules',
+    key: 'expense_rules.overdue',
+    group: 'erp',
+    label: '备用金多久没平账标红',
+    value: `打款后超过 ${exp.overdueDays} 天`,
+    defaultValue: `打款后超过 ${expd.overdueDays} 天`,
+    pending: true,
+    section: 'rules',
+    href: '/erp/settings/expenses',
+    current: exp.overdueDays,
+    dflt: expd.overdueDays,
+    metaKey: 'expense_rules',
   });
   // 人员与行政：员工食堂的开饭时间、安保巡场的间隔（页面在后台「人员与行政」，8.0.18）
   const canteen = await loadCanteenSettings(db);
   const mealsText = (list: typeof canteen.meals) => list.map(mealWindowText).join('、');
   add({
-    key: 'canteen.meals', group: 'workplace', label: '开饭时间', value: mealsText(canteen.meals), defaultValue: mealsText(DEFAULT_CANTEEN_SETTINGS.meals), pending: false, section: 'canteen',
+    key: 'canteen.meals',
+    group: 'workplace',
+    label: '开饭时间',
+    value: mealsText(canteen.meals),
+    defaultValue: mealsText(DEFAULT_CANTEEN_SETTINGS.meals),
+    pending: false,
+    section: 'canteen',
     hint: '员工食堂 → 设置；打卡按它算哪一餐',
-    current: canteen.meals, dflt: DEFAULT_CANTEEN_SETTINGS.meals, metaKey: 'canteen',
+    current: canteen.meals,
+    dflt: DEFAULT_CANTEEN_SETTINGS.meals,
+    metaKey: 'canteen',
   });
   const patrol = await loadPatrolSettings(db);
   add({
-    key: 'patrol.round', group: 'workplace', label: '巡场间隔', value: `每 ${patrol.roundMinutes} 分钟一轮`, defaultValue: `每 ${PATROL_ROUND_DEFAULT_MINUTES} 分钟一轮`, pending: false, section: 'patrol',
+    key: 'patrol.round',
+    group: 'workplace',
+    label: '巡场间隔',
+    value: `每 ${patrol.roundMinutes} 分钟一轮`,
+    defaultValue: `每 ${PATROL_ROUND_DEFAULT_MINUTES} 分钟一轮`,
+    pending: false,
+    section: 'patrol',
     hint: '安保巡场 → 设置；同一个场所每轮只记一次',
-    current: patrol.roundMinutes, dflt: PATROL_ROUND_DEFAULT_MINUTES, metaKey: 'patrol',
+    current: patrol.roundMinutes,
+    dflt: PATROL_ROUND_DEFAULT_MINUTES,
+    metaKey: 'patrol',
   });
   // ── 可调的数值（8.0.7 A1，店主 2026-11-10：有争议的规则不要写死；后台「门店基本规则 → 可调的数值」）──
   const tun = (key: keyof typeof k, group: RuleGroup, label: string, show: (v: never) => string, hint?: string) => {
     const prop = k[key] as keyof typeof s;
     add({
-      key, group, label, value: show(s[prop] as never), defaultValue: show(d[prop] as never), pending: true, section: 'rules',
+      key,
+      group,
+      label,
+      value: show(s[prop] as never),
+      defaultValue: show(d[prop] as never),
+      pending: true,
+      section: 'rules',
       // 属于 ERP 的数值（8.0.18）在「ERP 设置 → 其他数值」里改
       ...(group === 'erp' || group === 'inventory' ? { href: '/erp/settings/tunables' } : {}),
-      ...(hint ? { hint } : {}), current: s[prop], dflt: d[prop], metaKey: key,
+      ...(hint ? { hint } : {}),
+      current: s[prop],
+      dflt: d[prop],
+      metaKey: key,
     });
   };
   const n = (unit: string) => (v: number) => `${v} ${unit}`;
@@ -513,8 +1263,17 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   // ── 岗位与权限 ──
   const changed = overrideCount(overrides);
   add({
-    key: 'role_permissions', group: 'staff', label: '岗位权限', value: changed ? `在默认基础上调整了 ${changed} 处` : '按默认', defaultValue: '按默认',
-    pending: true, section: 'permissions', hint: '店主一栏固定拥有全部权限', current: changed, dflt: 0, metaKey: 'role_permissions',
+    key: 'role_permissions',
+    group: 'staff',
+    label: '岗位权限',
+    value: changed ? `在默认基础上调整了 ${changed} 处` : '按默认',
+    defaultValue: '按默认',
+    pending: true,
+    section: 'permissions',
+    hint: '店主一栏固定拥有全部权限',
+    current: changed,
+    dflt: 0,
+    metaKey: 'role_permissions',
   });
   return entries;
 }
@@ -635,7 +1394,18 @@ function describeChange(action: string, detail: Record<string, unknown>): string
 export async function adminOverview(db: Db, deps: Deps, actor: Actor): Promise<AdminOverview> {
   const s = await loadSettings(db);
   const [c] = await db<
-    { staffActive: number; members: number; membersNewToday: number; items: number; plans: number; tickets: number; tagsActive: number; tagsLocked: number; tagsInactive: number; techniciansActive: number }[]
+    {
+      staffActive: number;
+      members: number;
+      membersNewToday: number;
+      items: number;
+      plans: number;
+      tickets: number;
+      tagsActive: number;
+      tagsLocked: number;
+      tagsInactive: number;
+      techniciansActive: number;
+    }[]
   >`
     SELECT (SELECT count(*) FROM staff WHERE active)::int AS staff_active,
            (SELECT count(*) FROM members)::int AS members,
@@ -721,9 +1491,7 @@ export function registerAdminRoutes(app: FastifyInstance, deps: Deps) {
     await sql.begin(async (tx) => {
       await lockSettings(tx);
       const before = await loadRoleOverrides(tx);
-      const target = Object.fromEntries(
-        EDITABLE_ROLES.map((r) => [r, roles[r] ?? ALL_PERMISSIONS.filter((p) => roleHas(r, p, before))]),
-      ) as Record<(typeof EDITABLE_ROLES)[number], Permission[]>;
+      const target = Object.fromEntries(EDITABLE_ROLES.map((r) => [r, roles[r] ?? ALL_PERMISSIONS.filter((p) => roleHas(r, p, before))])) as Record<(typeof EDITABLE_ROLES)[number], Permission[]>;
       const after = overridesFrom(target);
       await tx`
         INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('role_permissions', ${tx.json(after as never)}, now(), ${req.actor.id})

@@ -269,10 +269,14 @@ test.describe('S5 餐饮第二步 · 桌台', () => {
       await prepare(page);
       await relogin(page, 'xiaozhou');
       // 开台请求真实到达服务器并生效，但浏览器收不到响应；查回也先连不上
-      await page.route('**/api/dining/tables/open', async (route) => {
-        await route.fetch();
-        await route.abort('connectionreset');
-      }, { times: 1 });
+      await page.route(
+        '**/api/dining/tables/open',
+        async (route) => {
+          await route.fetch();
+          await route.abort('connectionreset');
+        },
+        { times: 1 },
+      );
       await page.route('**/api/frontdesk/ops/*', (route) => route.abort('connectionreset'));
       await page.goto('/dining/tables');
       await page.getByTestId(`table-tile-${B2}`).click();

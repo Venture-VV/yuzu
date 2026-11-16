@@ -47,17 +47,7 @@ import {
   saveKey,
   setTxTimeouts,
 } from './common';
-import {
-  assertAfterVisits,
-  assertFreeAt,
-  assertNotReused,
-  backfillDetail,
-  backfillMarkSql,
-  BackfillInput,
-  normalizeMark,
-  recordBackfill,
-  resolveBackfill,
-} from './backfill';
+import { assertAfterVisits, assertFreeAt, assertNotReused, backfillDetail, backfillMarkSql, BackfillInput, normalizeMark, recordBackfill, resolveBackfill } from './backfill';
 import { locateCheckin, locateGone } from '../locations';
 import { loadSettings } from '../settings';
 import { getCheckout } from './checkout';
@@ -72,10 +62,7 @@ import { assertVipAllowed, consumeVipShortfalls, memberLockerGrades, vipShortfal
 import { currentStoreId } from '../../lib/store-context';
 
 const clientKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
-const tagCode = z
-  .string('请输入牌号')
-  .transform(normalizeTagCode)
-  .pipe(z.string().regex(TAG_CODE_PATTERN, '牌号格式不正确（例如 A023、1088）'));
+const tagCode = z.string('请输入牌号').transform(normalizeTagCode).pipe(z.string().regex(TAG_CODE_PATTERN, '牌号格式不正确（例如 A023、1088）'));
 
 // ───────────────────────── 接待发牌 ─────────────────────────
 
@@ -134,18 +121,27 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
   const backfill = resolveBackfill(input.backfill, ctx.actor);
   const run = await runIdempotent(deps, { key, opType: 'checkin', requestHash }, async (tx) => {
     const at = backfill?.at ?? ctx.at ?? new Date();
-    const rules = await loadFrontdeskRules(tx);
     // ① 手牌（id 升序）
     const tags = await lockTagsByCode(tx, codes);
     for (const g of input.guests) assertTagIssuable(tags.get(g.tagCode)!, g.zone);
-    const busy = await openVisitsOnTags(tx, [...tags.values()].map((t) => t.id));
+    const busy = await openVisitsOnTags(
+      tx,
+      [...tags.values()].map((t) => t.id),
+    );
     if (busy.length) {
       const b = busy[0]!;
       const code = [...tags.values()].find((t) => t.id === b.tagId)!.code;
       throw conflict('TAG_OCCUPIED', `手牌 ${code} 已在店（来访 ${b.visitNo}），请换一张空闲手牌`, { code, visitNo: b.visitNo });
     }
     // 补录：实际时间那一刻手牌、会员不能已被别的来访占用（已离店的也算），否则时间重叠
-    if (backfill) await assertFreeAt(tx, at, [...tags.values()].map((t) => t.id), memberIds, deps.config.timezone);
+    if (backfill)
+      await assertFreeAt(
+        tx,
+        at,
+        [...tags.values()].map((t) => t.id),
+        memberIds,
+        deps.config.timezone,
+      );
 
     // 会员只读：确认存在、没有其他在店手牌（下面 ④ 再在会员一行的共享锁里核对一次）
     const names = new Map<number, string>();
@@ -414,10 +410,7 @@ export async function swapTag(deps: Deps, visitId: number, raw: SwapInputData, c
 
 // ───────────────────────── 同行组 ─────────────────────────
 
-export const GroupInput = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('join'), targetVisitId: z.number().int().positive() }),
-  z.object({ action: z.literal('leave') }),
-]);
+export const GroupInput = z.discriminatedUnion('action', [z.object({ action: z.literal('join'), targetVisitId: z.number().int().positive() }), z.object({ action: z.literal('leave') })]);
 export type GroupInputData = z.input<typeof GroupInput>;
 
 export async function changeGroup(deps: Deps, visitId: number, raw: GroupInputData, ctx: OpContext) {
@@ -430,7 +423,10 @@ export async function changeGroup(deps: Deps, visitId: number, raw: GroupInputDa
     const peek = await tx<{ id: number; groupId: number | null }[]>`SELECT id, group_id FROM visits WHERE id IN ${tx(ids)}`;
     if (peek.length !== ids.length) throw notFound('来访记录不存在，请刷新状态板');
     // ② 同行组 → ③ 来访；加锁后核对组没有被其他终端改过
-    await lockGroups(tx, peek.map((p) => p.groupId));
+    await lockGroups(
+      tx,
+      peek.map((p) => p.groupId),
+    );
     const visits = await lockVisits(tx, ids);
     for (const p of peek) {
       if (visits.get(p.id)!.groupId !== p.groupId) throw conflict('VISIT_CHANGED', '同行组刚刚有变化，请刷新后重试');
@@ -519,11 +515,10 @@ export async function cancelVisit(deps: Deps, visitId: number, raw: unknown, ctx
     const [bill] = await tx<{ lineCount: number; amountCents: number }[]>`
       SELECT line_count, amount_cents FROM bills WHERE id = ${visit.billId} FOR UPDATE`;
     if (bill!.lineCount > 0) {
-      throw conflict(
-        'BILL_UNSETTLED',
-        `手牌账单上还有 ${bill!.lineCount} 项未结消费（${formatYuan(bill!.amountCents)}），不能直接释放手牌；请先结账，或作废登记错的明细`,
-        { lineCount: bill!.lineCount, amountCents: bill!.amountCents },
-      );
+      throw conflict('BILL_UNSETTLED', `手牌账单上还有 ${bill!.lineCount} 项未结消费（${formatYuan(bill!.amountCents)}），不能直接释放手牌；请先结账，或作废登记错的明细`, {
+        lineCount: bill!.lineCount,
+        amountCents: bill!.amountCents,
+      });
     }
     assertCanFix(ctx.actor, visit.checkedInBy, visit.checkedInAt, await loadFrontdeskRules(tx), at, '这张手牌');
     await tx`UPDATE bills SET status = 'cancelled', closed_at = ${at} WHERE id = ${visit.billId}`;
@@ -551,11 +546,23 @@ export async function cancelVisit(deps: Deps, visitId: number, raw: unknown, ctx
 // ───────────────────────── 读取 ─────────────────────────
 
 export async function getBoard(db: Db): Promise<FrontdeskBoard> {
-  const rows = await db<(Omit<FrontdeskBoard['tags'][number], 'visit'> & {
-    visitId: number | null; visitNo: string | null; billId: number | null; checkedInAt: string | null;
-    memberId: number | null; memberName: string | null; memberPhoneTail: string | null; guestLabel: string | null; groupId: number | null;
-    groupNo: string | null; groupOpenCount: number; amountCents: number | null; lineCount: number | null;
-  })[]>`
+  const rows = await db<
+    (Omit<FrontdeskBoard['tags'][number], 'visit'> & {
+      visitId: number | null;
+      visitNo: string | null;
+      billId: number | null;
+      checkedInAt: string | null;
+      memberId: number | null;
+      memberName: string | null;
+      memberPhoneTail: string | null;
+      guestLabel: string | null;
+      groupId: number | null;
+      groupNo: string | null;
+      groupOpenCount: number;
+      amountCents: number | null;
+      lineCount: number | null;
+    })[]
+  >`
     SELECT t.id, t.code, t.zone, t.kind, t.vip_level, t.locked, t.lock_reason, t.active, t.is_synthetic,
            v.id AS visit_id, v.visit_no, v.bill_id, v.checked_in_at, v.member_id, m.name AS member_name, right(m.phone, 4) AS member_phone_tail,
            v.guest_label,
@@ -619,15 +626,40 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
 
 /** 来访详情。timezone 是门店时区（算门店当前营业日：在店客人的门票按它推算会员的浴票延迟，与结账核对一致） */
 export async function getVisit(db: Db, id: number, timezone: string): Promise<VisitDetail> {
-  const [v] = await db<{
-    id: number; visitNo: string; status: VisitDetail['status']; zone: TagZone; guestLabel: string; businessDate: string;
-    checkedInAt: string; checkedInById: number; checkedInByName: string; closedAt: string | null; closeReason: string | null;
-    closedByName: string | null; memberId: number | null; groupId: number | null; billId: number; billNo: string;
-    billStatus: VisitDetail['status']; amountCents: number; lineCount: number;
-    tagId: number; tagCode: string; tagZone: TagZone; tagKind: VisitDetail['tag']['kind']; tagVipLevel: number | null;
-    tagLocked: boolean; tagLockReason: string | null; tagActive: boolean; tagSynthetic: boolean; vipOverrideByName: string | null;
-    backfill: BackfillMark | null;
-  }[]>`
+  const [v] = await db<
+    {
+      id: number;
+      visitNo: string;
+      status: VisitDetail['status'];
+      zone: TagZone;
+      guestLabel: string;
+      businessDate: string;
+      checkedInAt: string;
+      checkedInById: number;
+      checkedInByName: string;
+      closedAt: string | null;
+      closeReason: string | null;
+      closedByName: string | null;
+      memberId: number | null;
+      groupId: number | null;
+      billId: number;
+      billNo: string;
+      billStatus: VisitDetail['status'];
+      amountCents: number;
+      lineCount: number;
+      tagId: number;
+      tagCode: string;
+      tagZone: TagZone;
+      tagKind: VisitDetail['tag']['kind'];
+      tagVipLevel: number | null;
+      tagLocked: boolean;
+      tagLockReason: string | null;
+      tagActive: boolean;
+      tagSynthetic: boolean;
+      vipOverrideByName: string | null;
+      backfill: BackfillMark | null;
+    }[]
+  >`
     SELECT v.id, v.visit_no, v.status, v.zone, v.guest_label, v.business_date, v.checked_in_at, ${backfillMarkSql(db, 'v.checkin_key')} AS backfill,
            v.checked_in_by AS checked_in_by_id, s.display_name AS checked_in_by_name, v.closed_at, v.close_reason,
            cs.display_name AS closed_by_name, v.member_id, v.group_id,
@@ -723,7 +755,19 @@ export async function getVisit(db: Db, id: number, timezone: string): Promise<Vi
     history.push({ at: c.createdAt, kind: 'ticket', text: c.fromName ? `改票种 ${c.fromName} → ${c.toName}` : `选定票种 ${c.toName}`, operatorName: c.operatorName });
   }
   // 结账与反结账（反结账后来访恢复在店，可能再次结账）
-  const checkouts = await db<{ id: number; checkoutNo: string; status: 'completed' | 'voided'; createdAt: string; operatorName: string; voidedAt: string | null; voidedByName: string | null; voidReason: string | null; amount: number }[]>`
+  const checkouts = await db<
+    {
+      id: number;
+      checkoutNo: string;
+      status: 'completed' | 'voided';
+      createdAt: string;
+      operatorName: string;
+      voidedAt: string | null;
+      voidedByName: string | null;
+      voidReason: string | null;
+      amount: number;
+    }[]
+  >`
     SELECT c.id, c.checkout_no, c.status, c.created_at, s.display_name AS operator_name, c.voided_at, vs.display_name AS voided_by_name,
            c.void_reason, cb.amount
     FROM checkout_bills cb JOIN checkouts c ON c.id = cb.checkout_id JOIN staff s ON s.id = c.operator_id
@@ -782,7 +826,9 @@ export async function getVisit(db: Db, id: number, timezone: string): Promise<Vi
 export async function previewBills(db: Db, visitIds: number[]): Promise<PreviewBill> {
   const ids = [...new Set(visitIds)];
   if (ids.length === 0) throw badRequest('请至少选择一张手牌');
-  const visits = await db<{ visitId: number; visitNo: string; tagCode: string; zone: TagZone; memberName: string | null; guestLabel: string; checkedInAt: string; amountCents: number; status: string; billId: number }[]>`
+  const visits = await db<
+    { visitId: number; visitNo: string; tagCode: string; zone: TagZone; memberName: string | null; guestLabel: string; checkedInAt: string; amountCents: number; status: string; billId: number }[]
+  >`
     SELECT v.id AS visit_id, v.visit_no, t.code AS tag_code, v.zone, m.name AS member_name, v.guest_label, v.checked_in_at,
            b.amount_cents, v.status, v.bill_id
     FROM visits v JOIN hand_tags t ON t.id = v.tag_id JOIN bills b ON b.id = v.bill_id LEFT JOIN members m ON m.id = v.member_id

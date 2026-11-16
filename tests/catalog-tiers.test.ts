@@ -15,8 +15,7 @@ let ctx: TestContext;
 type Item = { id: number; name: string; price: number; prices: { tier: string; price: number }[]; active: boolean; sortOrder: number } & Record<string, unknown>;
 const items = async (all = true) => (await api(ctx.app, ctx.owner, 'GET', `/api/catalog${all ? '?all=1' : ''}`)).body.items as Item[];
 const itemNamed = async (name: string) => (await items()).find((i) => i.name === name)!;
-const saveItem = (body: Record<string, unknown>, id?: number) =>
-  id ? api(ctx.app, ctx.owner, 'PUT', `/api/items/${id}`, body) : api(ctx.app, ctx.owner, 'POST', '/api/items', body);
+const saveItem = (body: Record<string, unknown>, id?: number) => (id ? api(ctx.app, ctx.owner, 'PUT', `/api/items/${id}`, body) : api(ctx.app, ctx.owner, 'POST', '/api/items', body));
 
 beforeAll(async () => {
   ctx = await setup();

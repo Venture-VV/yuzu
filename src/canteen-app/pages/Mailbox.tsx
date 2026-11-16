@@ -186,7 +186,11 @@ export function MailboxPage({ me, online }: { me: CanteenMe; online: boolean }) 
             className={cn('rounded-full px-3.5 py-1.5 text-[14px] font-bold active:scale-95', filter === f.key ? 'bg-wood-deep text-white' : 'bg-card text-ink-2 ring-1 ring-line')}
           >
             {f.label}
-            {f.key === 'unread' && !!list?.unread && <span className="num ml-1" data-testid="mailbox-unread">{list.unread}</span>}
+            {f.key === 'unread' && !!list?.unread && (
+              <span className="num ml-1" data-testid="mailbox-unread">
+                {list.unread}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -223,7 +227,12 @@ export function MailboxPage({ me, online }: { me: CanteenMe; online: boolean }) 
                   <div className="min-w-0">
                     <p className="text-[12px] font-black text-wood-deep">
                       柚子回信 · {r.repliedByName}
-                      {r.repliedAt && <span className="num font-semibold text-ink-3"> · {dayText(r.repliedAt)} {timeText(r.repliedAt)}</span>}
+                      {r.repliedAt && (
+                        <span className="num font-semibold text-ink-3">
+                          {' '}
+                          · {dayText(r.repliedAt)} {timeText(r.repliedAt)}
+                        </span>
+                      )}
                     </p>
                     <p className="text-[14px] leading-relaxed whitespace-pre-wrap text-ink-2">{r.reply}</p>
                   </div>
@@ -245,7 +254,11 @@ export function MailboxPage({ me, online }: { me: CanteenMe; online: boolean }) 
           </li>
         ))}
       </ul>
-      {list && list.total > list.rows.length && <p className="px-1 text-center text-[12.5px] text-ink-3">只列了最近 {list.rows.length} 条（一共 {list.total} 条），更早的在电脑上的柚子信箱里看</p>}
+      {list && list.total > list.rows.length && (
+        <p className="px-1 text-center text-[12.5px] text-ink-3">
+          只列了最近 {list.rows.length} 条（一共 {list.total} 条），更早的在电脑上的柚子信箱里看
+        </p>
+      )}
 
       <Sheet open={!!writing} onClose={() => setWriting(null)} title={writing ? `回信给 ${writing.name}` : '回信'}>
         {writing && (

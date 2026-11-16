@@ -101,7 +101,18 @@ describe('翻页的手感', () => {
 });
 
 describe('中 / EN：每样内容取哪一份', () => {
-  const dish = { name: '砂锅焗溪鳗', nameEn: 'Clay Pot Baked Stream Eel', tagline: '煎档', taglineEn: 'Pan-fried', description: '砂锅慢焗。', descriptionEn: 'Slow-baked.', attrs: ['产地：法国'], attrsEn: ['Origin: France'], unit: '份', unitEn: '' };
+  const dish = {
+    name: '砂锅焗溪鳗',
+    nameEn: 'Clay Pot Baked Stream Eel',
+    tagline: '煎档',
+    taglineEn: 'Pan-fried',
+    description: '砂锅慢焗。',
+    descriptionEn: 'Slow-baked.',
+    attrs: ['产地：法国'],
+    attrsEn: ['Origin: France'],
+    unit: '份',
+    unitEn: '',
+  };
   const bare = { name: '小炒黑猪肉', nameEn: '', tagline: '例份', taglineEn: '', description: '现炒。', descriptionEn: '', attrs: ['微辣'], attrsEn: [], unit: '盅', unitEn: '' };
 
   it('中文模式与 8.0.12 一样：中文为主、英文名是下面的小字', () => {

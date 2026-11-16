@@ -136,9 +136,39 @@ async function rawSources(db: Db, memberId: number): Promise<Omit<RefundSourceRo
     FROM member_merges g WHERE g.target_id = ${memberId} AND g.principal > 0`;
   const iso = (d: Date) => new Date(d).toISOString();
   return [
-    ...recharges.map((r) => ({ source: 'recharge' as const, id: Number(r.id), docNo: r.docNo, date: r.date, at: iso(r.at), method: r.method, channel: r.channel, amount: Number(r.amount), refunded: Number(r.refunded) })),
-    ...openings.map((o) => ({ source: 'opening' as const, id: Number(o.id), docNo: o.docNo, date: o.date, at: iso(o.at), method: null, channel: null, amount: Number(o.amount), refunded: Number(o.refunded) })),
-    ...merges.map((g) => ({ source: 'merge' as const, id: Number(g.id), docNo: g.docNo, date: g.date, at: iso(g.at), method: null, channel: null, amount: Number(g.amount), refunded: Number(g.refunded) })),
+    ...recharges.map((r) => ({
+      source: 'recharge' as const,
+      id: Number(r.id),
+      docNo: r.docNo,
+      date: r.date,
+      at: iso(r.at),
+      method: r.method,
+      channel: r.channel,
+      amount: Number(r.amount),
+      refunded: Number(r.refunded),
+    })),
+    ...openings.map((o) => ({
+      source: 'opening' as const,
+      id: Number(o.id),
+      docNo: o.docNo,
+      date: o.date,
+      at: iso(o.at),
+      method: null,
+      channel: null,
+      amount: Number(o.amount),
+      refunded: Number(o.refunded),
+    })),
+    ...merges.map((g) => ({
+      source: 'merge' as const,
+      id: Number(g.id),
+      docNo: g.docNo,
+      date: g.date,
+      at: iso(g.at),
+      method: null,
+      channel: null,
+      amount: Number(g.amount),
+      refunded: Number(g.refunded),
+    })),
   ];
 }
 
@@ -225,14 +255,18 @@ export const MemberRefundInput = z.object({
   lines: z.array(LineInput).min(1, '请核对退回的明细').max(60, '退回的明细最多 60 行'),
   reason: z.string('请填写原因').trim().min(2, '请填写原因（至少 2 个字）').max(200, '原因最多 200 字'),
   /** 退现金从哪个钱箱退（所选钱箱当班的班次）；不带时记到经办人自己的班次 */
-  refundShiftId: z.number('钱箱班次不正确').int('钱箱班次不正确').positive('钱箱班次不正确').nullish().transform((v) => v ?? undefined),
+  refundShiftId: z
+    .number('钱箱班次不正确')
+    .int('钱箱班次不正确')
+    .positive('钱箱班次不正确')
+    .nullish()
+    .transform((v) => v ?? undefined),
   /** 店主或店总的当场授权（不进请求摘要：授权过期后重新授权、原样重提仍是同一笔） */
   grantId: z.uuid('请先请店主或店总当场授权'),
 });
 export type MemberRefundInputData = z.input<typeof MemberRefundInput>;
 
-const sameLine = (a: { source: string; id: number; amount: number }, b: { source: string; id: number; amount: number }) =>
-  a.source === b.source && a.id === b.id && a.amount === b.amount;
+const sameLine = (a: { source: string; id: number; amount: number }, b: { source: string; id: number; amount: number }) => a.source === b.source && a.id === b.id && a.amount === b.amount;
 
 /** 退储值（同一编号重提返回原来那张；结果待确认时可以「确认作废」，之后原请求晚到也不生效） */
 export async function createMemberRefund(deps: Deps, memberId: number, raw: MemberRefundInputData, ctx: OpContext): Promise<{ refund: MemberRefundDetail; replayed: boolean }> {
@@ -250,11 +284,7 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
   }
   const missingRef = input.lines.find((l) => l.route === 'manual' && refundRefRequired(l.method) && l.ref.length < 2);
   if (missingRef) {
-    throw badRequest(
-      missingRef.method === 'other'
-        ? '「其他」方式退的请写明是怎么退的'
-        : `${PAYMENT_METHOD_LABELS[missingRef.method]}退的请登记商户后台的退款单号（在商户后台原路退回后填写）`,
-    );
+    throw badRequest(missingRef.method === 'other' ? '「其他」方式退的请写明是怎么退的' : `${PAYMENT_METHOD_LABELS[missingRef.method]}退的请登记商户后台的退款单号（在商户后台原路退回后填写）`);
   }
   const hasCash = input.lines.some((l) => l.method === 'cash');
   if (input.refundShiftId !== undefined && !hasCash) {
@@ -293,9 +323,7 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
       // 按此刻的余额重新分配：与页面核对时的不一致就拒绝（中间有人充值、消费或退过）
       const sources = attributeBalance(await rawSources(tx, memberId), locked.principalBalance);
       const plan = allocateRefund(sources, input.amount);
-      const changed =
-        plan.length !== input.lines.length ||
-        plan.some((p, i) => !sameLine(p, input.lines[i]!) || (p.method !== null && p.method !== input.lines[i]!.method));
+      const changed = plan.length !== input.lines.length || plan.some((p, i) => !sameLine(p, input.lines[i]!) || (p.method !== null && p.method !== input.lines[i]!.method));
       if (changed) {
         throw conflict('REFUND_ALLOCATION_CHANGED', '这位会员的储值刚刚有变化，退回的明细与核对时不同，请重新核对', {
           lines: plan,
@@ -336,9 +364,19 @@ export async function createMemberRefund(deps: Deps, memberId: number, raw: Memb
           VALUES (${refundId}, ${l.source}, ${l.source === 'recharge' ? l.id : null}, ${l.source === 'opening' ? l.id : null},
                   ${l.source === 'merge' ? l.id : null}, ${l.method}, ${l.amount}, ${l.ref}, ${l.route})`;
       }
-      await applyBalance(tx, locked, { principal: -input.amount, bonus: -bonus }, {
-        entryType: 'refund', docNo: refundNo, memberRefundId: refundId, businessDate: date, operatorId: ctx.actor.id, at,
-      });
+      await applyBalance(
+        tx,
+        locked,
+        { principal: -input.amount, bonus: -bonus },
+        {
+          entryType: 'refund',
+          docNo: refundNo,
+          memberRefundId: refundId,
+          businessDate: date,
+          operatorId: ctx.actor.id,
+          at,
+        },
+      );
       await takeForRefund(tx, {
         memberId,
         refundId,
@@ -399,7 +437,9 @@ type DetailRow = Omit<MemberRefundDetail, 'lines' | 'grade' | 'createdAt'> & {
 };
 
 async function toDetail(db: Db, r: DetailRow): Promise<MemberRefundDetail> {
-  const lines = await db<{ source: RefundPlanLine['source']; id: number; docNo: string; date: string; method: PaymentMethod; channel: 'counter' | 'mp' | null; amount: number; ref: string; route: RefundRoute }[]>`
+  const lines = await db<
+    { source: RefundPlanLine['source']; id: number; docNo: string; date: string; method: PaymentMethod; channel: 'counter' | 'mp' | null; amount: number; ref: string; route: RefundRoute }[]
+  >`
     SELECT l.source, coalesce(l.recharge_id, l.opening_id, l.member_merge_id) AS id,
            coalesce(rc.doc_no, ob.doc_no, mg.merge_no) AS doc_no,
            to_char(coalesce(rc.business_date, oi.business_date, mg.business_date), 'YYYY-MM-DD') AS date,

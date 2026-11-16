@@ -96,7 +96,15 @@ export function AutoReplenishCard() {
       <span className="ml-auto flex flex-wrap items-center gap-2">
         {can('purchase.rules') && (
           <>
-            <Input type="time" fullWidth={false} className="h-9 w-28" value={time ?? rules.time} onChange={(e) => setTime(e.target.value)} aria-label="每天几点以后跑" data-testid="auto-replenish-time" />
+            <Input
+              type="time"
+              fullWidth={false}
+              className="h-9 w-28"
+              value={time ?? rules.time}
+              onChange={(e) => setTime(e.target.value)}
+              aria-label="每天几点以后跑"
+              data-testid="auto-replenish-time"
+            />
             {time !== null && time !== rules.time && (
               <Button size="sm" variant="secondary" onClick={() => void save({ time })} data-testid="auto-replenish-time-save">
                 保存时间

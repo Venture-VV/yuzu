@@ -13,7 +13,19 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf, businessDayStart } from '@shared/business-date';
-import { detectOtaColumns, OTA_FIELDS, otaColumnProblem, parseOtaRows, type OtaChannel, type OtaColumnMap, type OtaImportResult, type OtaOrderView, type OtaPrepaidHint, type OtaReconRow, type ParsedOtaOrder } from '@shared/ota';
+import {
+  detectOtaColumns,
+  OTA_FIELDS,
+  otaColumnProblem,
+  parseOtaRows,
+  type OtaChannel,
+  type OtaColumnMap,
+  type OtaImportResult,
+  type OtaOrderView,
+  type OtaPrepaidHint,
+  type OtaReconRow,
+  type ParsedOtaOrder,
+} from '@shared/ota';
 import { isUniqueViolation, type Db, type Fragment } from '../db';
 import { guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -140,14 +152,34 @@ async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, 
               ${o.channelStatus}, ${tx.json(o as never)}, ${importId})
       ON CONFLICT (channel_id, order_no) DO NOTHING RETURNING id`;
     const isNew = inserted.length > 0;
-    const [ord] = await tx<{ id: number; status: string; checkinDate: string; rooms: number; roomTypeId: number | null; channelStatus: string; overbooked: boolean; amountCents: number; lastImportId: number | null; rev: string }[]>`
+    const [ord] = await tx<
+      {
+        id: number;
+        status: string;
+        checkinDate: string;
+        rooms: number;
+        roomTypeId: number | null;
+        channelStatus: string;
+        overbooked: boolean;
+        amountCents: number;
+        lastImportId: number | null;
+        rev: string;
+      }[]
+    >`
       SELECT id, status, to_char(checkin_date, 'YYYY-MM-DD') AS checkin_date, rooms, room_type_id, channel_status, overbooked, amount_cents, last_import_id, xmin::text AS rev
       FROM ota_orders WHERE channel_id = ${channel.id} AND order_no = ${o.orderNo} FOR UPDATE`;
     const id = Number(ord!.id);
     if (expectRev !== undefined && (isNew || ord!.rev !== expectRev)) throw conflict('OTA_ORDER_CHANGED', '这张订单刚被另一次导入或重试改过，请刷新后再看');
     // 这次导入（原样重提续做时）或更晚的一次导入已经处理过这张：不再处理（不拿旧文件盖掉新的）
     if (!isNew && importId !== null && ord!.lastImportId !== null && Number(ord!.lastImportId) >= importId) return 'unchanged';
-    const before = { status: ord!.status, checkin: ord!.checkinDate, rooms: Number(ord!.rooms), roomTypeId: ord!.roomTypeId === null ? null : Number(ord!.roomTypeId), channelStatus: ord!.channelStatus, amount: Number(ord!.amountCents) };
+    const before = {
+      status: ord!.status,
+      checkin: ord!.checkinDate,
+      rooms: Number(ord!.rooms),
+      roomTypeId: ord!.roomTypeId === null ? null : Number(ord!.roomTypeId),
+      channelStatus: ord!.channelStatus,
+      amount: Number(ord!.amountCents),
+    };
     if (o.channelStatus === 'cancelled' || roomTypeId !== null) {
       await tx`
         UPDATE ota_orders SET guest_name = ${o.guestName}, guest_phone = ${o.guestPhone}, channel_room = ${o.roomType}, room_type_id = ${roomTypeId},
@@ -173,7 +205,8 @@ async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, 
     if (o.channelStatus === 'cancelled') {
       for (const b of open) await changeOtaBookingTx(tx, deps, Number(b.id), { action: 'cancel', reason: `渠道取消（${reason}）` }, ctx);
       await setStatus('cancelled', { notice: arrived.length ? `渠道取消了，但 ${arrived.length} 间的客人已经到店，请和渠道核对` : null });
-      if (open.length || before.status !== 'cancelled') await writeAudit(tx, { staffId: actor.id, action: 'ota_order', targetType: 'ota_order', targetId: id, detail: { op: 'cancel', orderNo: o.orderNo, bookings: open.length }, ip });
+      if (open.length || before.status !== 'cancelled')
+        await writeAudit(tx, { staffId: actor.id, action: 'ota_order', targetType: 'ota_order', targetId: id, detail: { op: 'cancel', orderNo: o.orderNo, bookings: open.length }, ip });
       return before.status === 'cancelled' && !open.length ? 'unchanged' : 'cancelled';
     }
     if (!roomTypeId) {
@@ -206,12 +239,28 @@ async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, 
     const have = open.length + arrived.length;
     if (have < o.rooms) {
       for (let i = have; i < o.rooms; i++) {
-        const r = await createOtaBookingTx(tx, deps, { roomTypeId, startsAt: startOf(), guestName: o.guestName, guestPhone: o.guestPhone, guests: 1, note: `${reason} · ${o.checkout > o.checkin ? `${Math.round((Date.parse(o.checkout) - Date.parse(o.checkin)) / 86_400_000)} 晚` : ''}${o.payMode === 'prepaid' ? ' · 预付' : ' · 现付'}` }, actor, new Date());
+        const r = await createOtaBookingTx(
+          tx,
+          deps,
+          {
+            roomTypeId,
+            startsAt: startOf(),
+            guestName: o.guestName,
+            guestPhone: o.guestPhone,
+            guests: 1,
+            note: `${reason} · ${o.checkout > o.checkin ? `${Math.round((Date.parse(o.checkout) - Date.parse(o.checkin)) / 86_400_000)} 晚` : ''}${o.payMode === 'prepaid' ? ' · 预付' : ' · 现付'}`,
+          },
+          actor,
+          new Date(),
+        );
         await tx`INSERT INTO ota_order_bookings (order_id, booking_id) VALUES (${id}, ${r.id})`;
       }
       changed = true;
     } else if (have > o.rooms) {
-      for (const b of open.slice().reverse().slice(0, Math.min(open.length, have - o.rooms))) {
+      for (const b of open
+        .slice()
+        .reverse()
+        .slice(0, Math.min(open.length, have - o.rooms))) {
         await changeOtaBookingTx(tx, deps, Number(b.id), { action: 'cancel', reason: `渠道减了间数（${reason}）` }, ctx);
       }
       changed = true;
@@ -219,9 +268,21 @@ async function processOrder(deps: Deps, channel: OtaChannel, o: ParsedOtaOrder, 
     const notice = arrived.length && (o.checkin !== before.checkin || o.rooms !== before.rooms) ? `渠道改了订单，但 ${arrived.length} 间的客人已经到店，请和渠道核对` : null;
     // 超订：按处理完以后这张订单没到店的预约重算（改到约满的日期也标；只改了金额、间数减到放得下时照实际的来，Codex 审查 e64932b 后补）
     const after = await tx<{ bookingId: number }[]>`SELECT booking_id FROM ota_order_bookings WHERE order_id = ${id}`;
-    const overbooked = await roomBookingsOverbooked(tx, after.map((x) => Number(x.bookingId)), today);
+    const overbooked = await roomBookingsOverbooked(
+      tx,
+      after.map((x) => Number(x.bookingId)),
+      today,
+    );
     await setStatus('booked', { notice, overbooked });
-    if (changed) await writeAudit(tx, { staffId: actor.id, action: 'ota_order', targetType: 'ota_order', targetId: id, detail: { op: isNew ? 'create' : 'update', orderNo: o.orderNo, rooms: o.rooms, checkin: o.checkin, overbooked }, ip });
+    if (changed)
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'ota_order',
+        targetType: 'ota_order',
+        targetId: id,
+        detail: { op: isNew ? 'create' : 'update', orderNo: o.orderNo, rooms: o.rooms, checkin: o.checkin, overbooked },
+        ip,
+      });
     return isNew ? 'created' : changed ? 'updated' : 'unchanged';
   });
 }
@@ -255,7 +316,13 @@ function readOrders(f: z.infer<typeof FileInput>, saved: OtaColumnMap) {
   );
   const map = mapFor(sheet.header);
   const problem = otaColumnProblem(map);
-  const parsed = problem ? { orders: [], problems: [] } : parseOtaRows(sheet.header, sheet.rows.map((r) => ({ row: r.row, cells: r.cells })), map);
+  const parsed = problem
+    ? { orders: [], problems: [] }
+    : parseOtaRows(
+        sheet.header,
+        sheet.rows.map((r) => ({ row: r.row, cells: r.cells })),
+        map,
+      );
   const hash = createHash('sha256')
     .update(f.csv ?? f.xlsxBase64 ?? '')
     .digest('hex');
@@ -303,7 +370,14 @@ export async function importOtaOrders(deps: Deps, raw: unknown, actor: Actor, ip
       INSERT INTO ota_imports (channel_id, file_name, file_hash, rows, client_key, request_hash, staff_id)
       VALUES (${channel.id}, ${input.fileName}, ${r.hash}, ${r.orders.length}, ${input.clientKey}, ${requestHash}, ${actor.id})
       RETURNING id`;
-    await writeAudit(tx, { staffId: actor.id, action: 'ota_import', targetType: 'ota_import', targetId: Number(row!.id), detail: { channel: channel.name, fileName: input.fileName, rows: r.orders.length }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'ota_import',
+      targetType: 'ota_import',
+      targetId: Number(row!.id),
+      detail: { channel: channel.name, fileName: input.fileName, rows: r.orders.length },
+      ip,
+    });
     return { id: Number(row!.id), replayed: false };
   });
   const result: OtaImportResult = { importId: head.id, rows: r.orders.length, created: 0, updated: 0, cancelled: 0, failed: 0, skipped: 0, unchanged: 0, problems: r.problems, orders: [] };
@@ -386,7 +460,10 @@ export function otaCouponCode(channelId: number, orderNo: string, bookingId?: nu
     .digest('hex')
     .slice(0, 8)
     .toUpperCase();
-  return `OTA${channelId}${orderNo.toUpperCase().replace(/[^0-9A-Z]/g, '').slice(0, 40)}${digest}`;
+  return `OTA${channelId}${orderNo
+    .toUpperCase()
+    .replace(/[^0-9A-Z]/g, '')
+    .slice(0, 40)}${digest}`;
 }
 
 /** 第 i 间（从 0 起）分到订单金额的多少：按间数均分，分不尽的几分摊在前面几间，加起来正好是订单金额 */

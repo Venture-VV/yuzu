@@ -1,14 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type {
-  LegacyAudit,
-  LegacyBrandLine,
-  LegacyImport,
-  LegacyLedgerLine,
-  LegacyMaterialLine,
-  LegacyOrderedLine,
-  LegacyPaymentDay,
-  LegacySource,
-} from '@shared/legacy';
+import type { LegacyAudit, LegacyBrandLine, LegacyImport, LegacyLedgerLine, LegacyMaterialLine, LegacyOrderedLine, LegacyPaymentDay, LegacySource } from '@shared/legacy';
 import { api } from '../../lib/api';
 
 export interface LegacyRows {

@@ -9,7 +9,9 @@ import { buildMpSamples } from '../scripts/studio-mp-samples';
 const DIR = 'tests/fixtures/studio/mp';
 
 describe('小程序的样例版面', () => {
-  const files = readdirSync(DIR).filter((f) => f.endsWith('.json')).sort();
+  const files = readdirSync(DIR)
+    .filter((f) => f.endsWith('.json'))
+    .sort();
   const samples = buildMpSamples();
 
   it('仓库里的样例与生成脚本一致（改了格式或样例，跑 npx tsx scripts/studio-mp-samples.ts 重新生成）', () => {
@@ -30,7 +32,10 @@ describe('小程序的样例版面', () => {
       expect(doc.surface, f).toBe('mp');
       expect(doc.screens[s.screen], f).toBeDefined();
       expect(validateStudioDoc(doc), f).toEqual([]);
-      expect(checkStudioDoc(doc, { assets }).filter((i) => i.level === 'error'), f).toEqual([]);
+      expect(
+        checkStudioDoc(doc, { assets }).filter((i) => i.level === 'error'),
+        f,
+      ).toEqual([]);
       for (const a of docAssets(doc)) expect(assets.has(a), `${f} 用的图 ${a}`).toBe(true);
     }
   });
@@ -57,11 +62,36 @@ describe('小程序的样例版面', () => {
       });
     }
     for (const want of [
-      'type:frame', 'type:text', 'type:rect', 'type:ellipse', 'type:image', 'type:button', 'type:field', 'type:block',
-      'layout:row', 'layout:column', 'wrap', 'align:start', 'align:center', 'align:end', 'align:stretch',
-      'justify:start', 'justify:center', 'justify:end', 'justify:between',
-      'w:fixed', 'w:fill', 'w:hug', 'h:fixed', 'h:fill', 'h:hug',
-      'action:open.page', 'action:call.store', 'action:nav.store', 'rotate',
-    ]) expect(seen.has(want), want).toBe(true);
+      'type:frame',
+      'type:text',
+      'type:rect',
+      'type:ellipse',
+      'type:image',
+      'type:button',
+      'type:field',
+      'type:block',
+      'layout:row',
+      'layout:column',
+      'wrap',
+      'align:start',
+      'align:center',
+      'align:end',
+      'align:stretch',
+      'justify:start',
+      'justify:center',
+      'justify:end',
+      'justify:between',
+      'w:fixed',
+      'w:fill',
+      'w:hug',
+      'h:fixed',
+      'h:fill',
+      'h:hug',
+      'action:open.page',
+      'action:call.store',
+      'action:nav.store',
+      'rotate',
+    ])
+      expect(seen.has(want), want).toBe(true);
   });
 });

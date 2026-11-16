@@ -43,8 +43,7 @@ const approve = async (id: number) => {
   expect(res.status, JSON.stringify(res.body)).toBe(200);
   return res.body as { id: number; lines: { id: number }[] };
 };
-const po = (lines: unknown[], body: Record<string, unknown> = {}) =>
-  api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines, ...body });
+const po = (lines: unknown[], body: Record<string, unknown> = {}) => api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, lines, ...body });
 const openIds = async () => ((await api(ctx.app, buyer, 'GET', '/api/erp/requests/open-lines')).body as { id: number }[]).map((l) => l.id);
 
 beforeAll(async () => {
@@ -96,7 +95,9 @@ describe('需求单：采购优先级与待审核排序（02）、每日截单�
     const lineOf = new Map(approved.map((r) => [r.lines[0]!.id, r.id]));
     const open = (await openIds()).filter((id) => lineOf.has(id)).map((id) => lineOf.get(id));
     expect(open).toEqual([n2.id, u2.id, u1.id, n1.id, n3.id]);
-    const openLine = ((await api(ctx.app, buyer, 'GET', '/api/erp/requests/open-lines')).body as { id: number; priority: string; needBy: string | null }[]).find((l) => l.id === approved[2]!.lines[0]!.id);
+    const openLine = ((await api(ctx.app, buyer, 'GET', '/api/erp/requests/open-lines')).body as { id: number; priority: string; needBy: string | null }[]).find(
+      (l) => l.id === approved[2]!.lines[0]!.id,
+    );
     expect(openLine).toMatchObject({ priority: 'urgent', needBy: today });
     // 优先级只能是紧急 / 普通
     expect((await api(ctx.app, reqA, 'POST', '/api/erp/requests', { clientKey: randomUUID(), priority: 'asap', lines: [line()] })).status).toBe(400);
@@ -206,9 +207,11 @@ describe('采购单撤回与登记发票串行（8.0.2）', () => {
   const staffId = async (username: string) => (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = ${username}`)[0]!.id;
   const poStatus = async (poId: number) => (await ctx.sql<{ status: string }[]>`SELECT status FROM purchase_orders WHERE id = ${poId}`)[0]!.status;
   const validInvoiceLines = async (poId: number) =>
-    (await ctx.sql<{ n: number }[]>`
+    (
+      await ctx.sql<{ n: number }[]>`
       SELECT count(*)::int AS n FROM supplier_invoice_lines l JOIN supplier_invoices i ON i.id = l.invoice_id
-      WHERE l.purchase_order_id = ${poId} AND i.status = 'valid'`)[0]!.n;
+      WHERE l.purchase_order_id = ${poId} AND i.status = 'valid'`
+    )[0]!.n;
   const invoice = (poId: number, amountCents: number) =>
     api(ctx.app, boss, 'POST', '/api/erp/payments/invoices', {
       clientKey: randomUUID(),
@@ -233,8 +236,12 @@ describe('采购单撤回与登记发票串行（8.0.2）', () => {
   const holdRow = async (table: 'staff' | 'suppliers', id: number) => {
     let release!: () => void;
     let acquired!: () => void;
-    const locked = new Promise<void>((resolve) => { acquired = resolve; });
-    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const locked = new Promise<void>((resolve) => {
+      acquired = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const done = ctx.sql.begin(async (tx) => {
       if (table === 'staff') await tx`SELECT id FROM staff WHERE id = ${id} FOR UPDATE`;
       else await tx`SELECT id FROM suppliers WHERE id = ${id} FOR UPDATE`;
@@ -242,7 +249,10 @@ describe('采购单撤回与登记发票串行（8.0.2）', () => {
       await gate;
     });
     await locked;
-    return async () => { release(); await done; };
+    return async () => {
+      release();
+      await done;
+    };
   };
   /** 等到有一条语句卡在行锁上（语句里含其中一段）；请求先做完了（没有卡住）返回 'done' */
   const waitForLock = async (fragments: string[], finished: () => boolean = () => false) => {
@@ -267,7 +277,9 @@ describe('采购单撤回与登记发票串行（8.0.2）', () => {
       expect(await waitForLock(['INSERT INTO approval_logs'])).toBe('waiting');
       let finished = false;
       invoicing = invoice(p.id, p.totalCents);
-      void invoicing.then(() => { finished = true; });
+      void invoicing.then(() => {
+        finished = true;
+      });
       // 登记发票卡在采购单的锁上（修之前卡在写发票明细的外键上，等撤回提交以后照样写进去）
       expect(await waitForLock(['FROM purchase_orders WHERE id IN', 'INSERT INTO supplier_invoice_lines'], () => finished)).toBe('waiting');
     } finally {
@@ -294,7 +306,9 @@ describe('采购单撤回与登记发票串行（8.0.2）', () => {
       expect(await waitForLock(['INSERT INTO supplier_invoices'])).toBe('waiting');
       let finished = false;
       withdrawing = withdraw(p.id);
-      void withdrawing.then(() => { finished = true; });
+      void withdrawing.then(() => {
+        finished = true;
+      });
       // 撤回卡在采购单的锁上（修之前登记发票还没锁采购单，撤回直接做完）
       expect(await waitForLock(['FROM purchase_orders WHERE id = $1 FOR UPDATE'], () => finished)).toBe('waiting');
     } finally {
@@ -351,7 +365,12 @@ describe('采购规则（01）', () => {
     expect((await api(ctx.app, buyer, 'GET', '/api/inventory/purchase-rules')).body.arrivalOverdueDays).toBe(12);
     // 保存费用报销规则（页面不再带这一项）：原来的值留着
     const expense = (await api(ctx.app, boss, 'GET', '/api/erp/expenses/rules')).body;
-    const saved = await api(ctx.app, boss, 'PUT', '/api/erp/expenses/rules', { approvalThresholdCents: expense.approvalThresholdCents, overdueDays: 5, purposes: expense.purposes, invoiceTypes: expense.invoiceTypes });
+    const saved = await api(ctx.app, boss, 'PUT', '/api/erp/expenses/rules', {
+      approvalThresholdCents: expense.approvalThresholdCents,
+      overdueDays: 5,
+      purposes: expense.purposes,
+      invoiceTypes: expense.invoiceTypes,
+    });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
     expect((await api(ctx.app, buyer, 'GET', '/api/inventory/purchase-rules')).body.arrivalOverdueDays).toBe(12);
     // 在采购规则里改了以后按采购规则
@@ -589,7 +608,13 @@ describe('集采模板与一键导入（06）', () => {
 describe('供应商比价看板（07）', () => {
   it('每个物料 × 供应商一行：单价按现在的采购单位折算、加权平均、最低最高、比上一个时段涨跌；退货率；领用与耗用', async () => {
     const created = await api(ctx.app, boss, 'POST', '/api/inventory/materials', {
-      code: 'CMP01', name: '比价测试纸巾', category: '比价测试', inventoryUnit: '包', purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 10_000,
+      code: 'CMP01',
+      name: '比价测试纸巾',
+      category: '比价测试',
+      inventoryUnit: '包',
+      purchaseUnit: '箱',
+      purchaseFactorMilli: q(10),
+      refPriceCents: 10_000,
     });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const m = ((await api(ctx.app, boss, 'GET', '/api/inventory/materials?all=1')).body as { id: number; code: string }[]).find((x) => x.code === 'CMP01')!;
@@ -602,7 +627,7 @@ describe('供应商比价看板（07）', () => {
     // 直接写已生效的单据（看板只读单据与明细；单价、换算、日期可控）
     const doc = async (type: string, date: string, line: { qty: number; price?: number; factor?: number }, extra: Record<string, unknown> = {}) => {
       n += 1;
-      const amount = line.price === undefined ? null : Math.round(((line.qty / (line.factor ?? 10_000)) * line.price));
+      const amount = line.price === undefined ? null : Math.round((line.qty / (line.factor ?? 10_000)) * line.price);
       const [d] = await ctx.sql<{ id: number }[]>`
         INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, created_by, supplier_id, source_doc_id, department_id, warehouse_id, amount_cents)
         VALUES (${`CMP-${n}`}, ${type}, 'confirmed', ${date}, ${ownerId}, ${(extra.supplierId as number) ?? null}, ${(extra.sourceDocId as number) ?? null},

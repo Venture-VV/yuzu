@@ -46,7 +46,10 @@ test.describe('转单（v0.7.6）', () => {
     const board = (await (await page.request.get('/api/frontdesk/board')).json()) as {
       tags: { code: string; zone: string; kind: string; active: boolean; locked: boolean; visit: unknown }[];
     };
-    const [a, b] = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse();
+    const [a, b] = board.tags
+      .filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+      .map((t) => t.code)
+      .reverse();
     const ids: number[] = [];
     try {
       for (const code of [a!, b!]) {
@@ -106,7 +109,10 @@ test.describe('转单（v0.7.6）', () => {
     const board = (await (await page.request.get('/api/frontdesk/board')).json()) as {
       tags: { code: string; zone: string; kind: string; active: boolean; locked: boolean; visit: unknown }[];
     };
-    const code = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).at(-3)!;
+    const code = board.tags
+      .filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+      .map((t) => t.code)
+      .at(-3)!;
     let visitId: number | null = null;
     try {
       const r = await page.request.post('/api/frontdesk/checkins', { data: { clientKey: randomUUID(), guests: [{ tagCode: code, zone: 'male' }] } });

@@ -47,7 +47,11 @@ export function aiTools(s: AiToolScope): AiTool[] {
   const multi = s.stores.length > 1;
   const codes = s.stores.map((x) => x.code);
   const storeField = multi
-    ? { store: z.enum(['current', 'all', ...codes] as [string, ...string[]]).describe(`哪家店：current = 问的人当前所在的门店，all = 合并看能进的几家，或者门店代码（${s.stores.map((x) => `${x.code} ${x.name}`).join('、')}）`) }
+    ? {
+        store: z
+          .enum(['current', 'all', ...codes] as [string, ...string[]])
+          .describe(`哪家店：current = 问的人当前所在的门店，all = 合并看能进的几家，或者门店代码（${s.stores.map((x) => `${x.code} ${x.name}`).join('、')}）`),
+      }
     : {};
   const range = z
     .object({
@@ -76,12 +80,17 @@ export function aiTools(s: AiToolScope): AiTool[] {
         return fn(tx, { tz: s.timeZone, startHour: settings.businessDayStartHour });
       }).then((r) => maskForAi(r));
     if (!store || store === 'current') return run();
-    if (store === 'all') return runWithStoreSet(s.stores.map((x) => Number(x.id)).sort((a, b) => a - b), run);
+    if (store === 'all')
+      return runWithStoreSet(
+        s.stores.map((x) => Number(x.id)).sort((a, b) => a - b),
+        run,
+      );
     const target = s.stores.find((x) => x.code === store);
     if (!target) throw new Error(`不能看门店 ${store}`);
     return runInStore(Number(target.id), run);
   };
-  const scopeLabel = (store: string | undefined) => (!store || store === 'current' ? s.stores.find((x) => Number(x.id) === s.currentStoreId)?.name ?? '当前门店' : store === 'all' ? '合并' : (s.stores.find((x) => x.code === store)?.name ?? store));
+  const scopeLabel = (store: string | undefined) =>
+    !store || store === 'current' ? (s.stores.find((x) => Number(x.id) === s.currentStoreId)?.name ?? '当前门店') : store === 'all' ? '合并' : (s.stores.find((x) => x.code === store)?.name ?? store);
   const example = (from: string, to: string) => ({ from, to, ...(multi ? { store: 'current' } : {}) });
 
   const tools: AiTool[] = [];
@@ -123,7 +132,12 @@ export function aiTools(s: AiToolScope): AiTool[] {
           const { from, to, store } = check(range, raw) as Range;
           return inScope(store, async (tx, clock) => ({
             store: scopeLabel(store),
-            days: (await executiveReport(tx, from, to, clock)).trend.map((t) => ({ date: t.date, net: formatYuan(Number(t.net)), guests: Number(t.guests), rechargePaid: formatYuan(Number(t.rechargePaid)) })),
+            days: (await executiveReport(tx, from, to, clock)).trend.map((t) => ({
+              date: t.date,
+              net: formatYuan(Number(t.net)),
+              guests: Number(t.guests),
+              rechargePaid: formatYuan(Number(t.rechargePaid)),
+            })),
           }));
         },
       },
@@ -138,7 +152,13 @@ export function aiTools(s: AiToolScope): AiTool[] {
             const t = departmentItemTable((await executiveReport(tx, from, to, clock)).items);
             return {
               store: scopeLabel(store),
-              departments: t.groups.map((g) => ({ category: g.category, quantity: g.quantity, amount: formatYuan(g.amount), net: formatYuan(g.net), share: g.share === null ? null : `${Math.round(g.share * 1000) / 10}%` })),
+              departments: t.groups.map((g) => ({
+                category: g.category,
+                quantity: g.quantity,
+                amount: formatYuan(g.amount),
+                net: formatYuan(g.net),
+                share: g.share === null ? null : `${Math.round(g.share * 1000) / 10}%`,
+              })),
               topItems: t.groups
                 .flatMap((g) => g.items)
                 .sort((a, b) => b.amount - a.amount)
@@ -203,7 +223,14 @@ export function aiTools(s: AiToolScope): AiTool[] {
         const { from, to, store } = check(range, raw) as Range;
         return inScope(store, async (tx) => ({
           store: scopeLabel(store),
-          rows: withoutCommission(await technicianReport(tx, from, to)).rows.map((r) => ({ techNo: r.techNo, name: r.name, clocks: r.clocks, designated: r.designated, rotation: r.rotation, amount: formatYuan(r.amount) })),
+          rows: withoutCommission(await technicianReport(tx, from, to)).rows.map((r) => ({
+            techNo: r.techNo,
+            name: r.name,
+            clocks: r.clocks,
+            designated: r.designated,
+            rotation: r.rotation,
+            amount: formatYuan(r.amount),
+          })),
         }));
       },
     });

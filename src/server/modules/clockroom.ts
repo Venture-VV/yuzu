@@ -50,8 +50,7 @@ export async function loadClockroomRules(db: Db): Promise<ClockroomRules> {
 
 /** 改排位、派钟、上下钟都先拿这把锁：轮钟队列是全店共用的，按先后串行 */
 // 轮牌按门店各一条队列（8.0.22）：本店照旧用原来的键
-export const lockQueue = (tx: Tx) =>
-  tx`SELECT pg_advisory_xact_lock(hashtext(${currentStoreId() === DEFAULT_STORE_ID ? 'technician_queue' : `technician_queue:${currentStoreId()}`}))`;
+export const lockQueue = (tx: Tx) => tx`SELECT pg_advisory_xact_lock(hashtext(${currentStoreId() === DEFAULT_STORE_ID ? 'technician_queue' : `technician_queue:${currentStoreId()}`}))`;
 
 interface Status {
   state: TechState;
@@ -203,8 +202,10 @@ export async function attachSessions(
   const rules = await loadClockroomRules(tx);
   const today = await businessDate(tx, deps, at);
   const durations = new Map(
-    (await tx<{ id: number; durationMinutes: number | null; name: string }[]>`
-      SELECT id, duration_minutes, name FROM service_items WHERE id IN ${tx([...new Set(args.lines.map((l) => l.itemId))])}`).map((r) => [r.id, r]),
+    (
+      await tx<{ id: number; durationMinutes: number | null; name: string }[]>`
+      SELECT id, duration_minutes, name FROM service_items WHERE id IN ${tx([...new Set(args.lines.map((l) => l.itemId))])}`
+    ).map((r) => [r.id, r]),
   );
   const perClock = (itemId: number) => durations.get(itemId)?.durationMinutes ?? rules.defaultMinutes;
   const ids: number[] = [];
@@ -257,7 +258,15 @@ export async function attachSessions(
         VALUES (${sessionNo}, ${t.id}, ${args.visitId}, ${l.itemId}, ${l.callType}, ${l.quantity}, ${minutes}, 'done', ${date},
                 ${actor.id}, ${at}, ${actor.id}, ${at}, ${actor.id}, ${new Date(Math.min(at.getTime() + minutes * 60_000, Date.now()))})
         RETURNING id`;
-      await logEvent(tx, { technicianId: t.id, sessionId: row!.id, kind: 'dispatch', detail: { item: item.name, clocks: l.quantity, callType: l.callType, tag: args.tagCode, backfill: true }, staffId: actor.id, businessDate: today, at: new Date() });
+      await logEvent(tx, {
+        technicianId: t.id,
+        sessionId: row!.id,
+        kind: 'dispatch',
+        detail: { item: item.name, clocks: l.quantity, callType: l.callType, tag: args.tagCode, backfill: true },
+        staffId: actor.id,
+        businessDate: today,
+        at: new Date(),
+      });
       ids.push(row!.id);
       continue;
     }
@@ -350,12 +359,16 @@ export async function attachSessions(
     // 客人已离店、还记着在钟上的旧钟单先自动下钟，再上这一钟
     if (start) await closeStale(tx, deps, t.id, actor, at);
     const sessionNo = await nextDocNo(tx, 'technician_session', 'ZD', date);
-    const [row] = await insertSession(tx, bookingId, () => tx<{ id: number }[]>`
+    const [row] = await insertSession(
+      tx,
+      bookingId,
+      () => tx<{ id: number }[]>`
       INSERT INTO technician_sessions (session_no, technician_id, visit_id, item_id, call_type, clocks, minutes, status, business_date,
                                        queue_key_before, created_by, created_at, started_by, started_at, space_id, booking_id)
       VALUES (${sessionNo}, ${t.id}, ${args.visitId}, ${l.itemId}, ${l.callType}, ${l.quantity}, ${minutes}, ${start ? 'serving' : 'waiting'}, ${date},
               ${before}, ${actor.id}, ${at}, ${start ? actor.id : null}, ${start ? at : null}, ${space?.id ?? null}, ${bookingId})
-      RETURNING id`);
+      RETURNING id`,
+    );
     await logEvent(tx, {
       technicianId: t.id,
       sessionId: row!.id,
@@ -652,9 +665,19 @@ export const AssignInput = z.object({
   callType: z.enum(['designated', 'rotation'], '上钟方式应为点钟或轮钟'),
   startNow: z.boolean().default(true),
   skipReason: z.string().trim().max(100, '原因最多 100 字').optional(),
-  spaceId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
+  spaceId: z
+    .number()
+    .int()
+    .positive()
+    .nullish()
+    .transform((v) => v ?? undefined),
   /** 预约到店派钟（A04）：前台已点、再按预约派的 */
-  bookingId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
+  bookingId: z
+    .number()
+    .int()
+    .positive()
+    .nullish()
+    .transform((v) => v ?? undefined),
 });
 
 /** 明细上记的价格档（只有一档、没记档的旧明细按标准档） */
@@ -672,10 +695,7 @@ async function checkTechnicianForLine(tx: Tx, line: { itemId: number; tier: Pric
   if (why) throw unprocessable('TECHNICIAN_UNAVAILABLE', `${t.techNo} 号 ${t.name}：${why}，请换一位技师`);
   const tier = line.tier ?? item.prices[0]?.tier ?? 'standard';
   if (tierFor(t, item, tier, techRules.tierByGrade) !== tier) {
-    throw conflict(
-      'TECHNICIAN_TIER',
-      `${t.techNo} 号 ${t.name}是${gradeLabel(t.grade)}，「${line.name}」这一条按${PRICE_TIER_LABELS[tier]}档计价，请换一位同等级的技师（要换价格档请作废后重新点）`,
-    );
+    throw conflict('TECHNICIAN_TIER', `${t.techNo} 号 ${t.name}是${gradeLabel(t.grade)}，「${line.name}」这一条按${PRICE_TIER_LABELS[tier]}档计价，请换一位同等级的技师（要换价格档请作废后重新点）`);
   }
   return t;
 }
@@ -701,7 +721,18 @@ export async function assignLine(deps: Deps, lineId: number, raw: unknown, ctx: 
     const [bill] = await tx<{ status: string }[]>`SELECT status FROM bills WHERE id = ${visit.billId} FOR UPDATE`;
     if (bill!.status !== 'open') throw conflict('BILL_CLOSED', '账单已结束，不能再派钟');
     const [l] = await tx<
-      { id: number; billId: number; source: string; status: string; itemId: number | null; name: string; tier: PriceTier | null; quantity: number; technicianId: number | null; sessionId: number | null }[]
+      {
+        id: number;
+        billId: number;
+        source: string;
+        status: string;
+        itemId: number | null;
+        name: string;
+        tier: PriceTier | null;
+        quantity: number;
+        technicianId: number | null;
+        sessionId: number | null;
+      }[]
     >`SELECT id, bill_id, source, status, item_id, name, tier, quantity, technician_id, session_id FROM bill_lines WHERE id = ${lineId} FOR UPDATE`;
     if (!l || Number(l.billId) !== Number(visit.billId)) throw notFound('这条明细不存在');
     if (l.status !== 'active') throw conflict('LINE_VOIDED', `「${l.name}」已作废，不用再派钟`);
@@ -826,15 +857,39 @@ export async function transferSession(deps: Deps, sessionId: number, raw: unknow
     }
     const [from] = await tx<{ techNo: string; name: string }[]>`SELECT tech_no, name FROM technicians WHERE id = ${old.technicianId}`;
     const [news] = await tx<{ sessionNo: string }[]>`SELECT session_no FROM technician_sessions WHERE id = ${newId!}`;
-    await logEvent(tx, { technicianId: old.technicianId, sessionId, kind: 'transfer', detail: { to: `${t.techNo} 号 ${t.name}`, reason: input.reason, sessionNo: news!.sessionNo }, staffId: ctx.actor.id, businessDate: date, at });
-    await logEvent(tx, { technicianId: t.id, sessionId: newId!, kind: 'transfer', detail: { from: `${from!.techNo} 号 ${from!.name}`, reason: input.reason, sessionNo: old.sessionNo }, staffId: ctx.actor.id, businessDate: date, at });
+    await logEvent(tx, {
+      technicianId: old.technicianId,
+      sessionId,
+      kind: 'transfer',
+      detail: { to: `${t.techNo} 号 ${t.name}`, reason: input.reason, sessionNo: news!.sessionNo },
+      staffId: ctx.actor.id,
+      businessDate: date,
+      at,
+    });
+    await logEvent(tx, {
+      technicianId: t.id,
+      sessionId: newId!,
+      kind: 'transfer',
+      detail: { from: `${from!.techNo} 号 ${from!.name}`, reason: input.reason, sessionNo: old.sessionNo },
+      staffId: ctx.actor.id,
+      businessDate: date,
+      at,
+    });
     const amount = lines.reduce((n, l) => n + l.amount, 0);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'clock_transfer',
       targetType: 'visit',
       targetId: visit.id,
-      detail: { visitNo: visit.visitNo, from: `${from!.techNo} 号 ${from!.name}`, to: technicianText({ ...t, callType: input.callType }), sessions: [old.sessionNo, news!.sessionNo], quantity, amount, reason: input.reason },
+      detail: {
+        visitNo: visit.visitNo,
+        from: `${from!.techNo} 号 ${from!.name}`,
+        to: technicianText({ ...t, callType: input.callType }),
+        sessions: [old.sessionNo, news!.sessionNo],
+        quantity,
+        amount,
+        reason: input.reason,
+      },
       ip: ctx.ip,
       businessDate: date,
     });
@@ -1098,7 +1153,9 @@ function eventText(kind: ClockEventKind, d: Record<string, unknown>): string {
 }
 
 export async function clockEvents(db: Db, date: string): Promise<ClockEvent[]> {
-  const rows = await db<{ id: number; createdAt: string; kind: ClockEventKind; techNo: string | null; techName: string | null; sessionNo: string | null; staffName: string; detail: Record<string, unknown> }[]>`
+  const rows = await db<
+    { id: number; createdAt: string; kind: ClockEventKind; techNo: string | null; techName: string | null; sessionNo: string | null; staffName: string; detail: Record<string, unknown> }[]
+  >`
     SELECT e.id, e.created_at, e.kind, t.tech_no, t.name AS tech_name, s.session_no, st.display_name AS staff_name, e.detail
     FROM technician_events e LEFT JOIN technicians t ON t.id = e.technician_id LEFT JOIN technician_sessions s ON s.id = e.session_id
     JOIN staff st ON st.id = e.staff_id
@@ -1128,9 +1185,19 @@ export const DispatchInput = z.object({
   startNow: z.boolean().default(true),
   skipReason: z.string().trim().max(100, '原因最多 100 字').optional(),
   /** 服务的房间（v0.7.16，可不选）；不带时与升级前的请求完全相同（幂等摘要不变） */
-  spaceId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
+  spaceId: z
+    .number()
+    .int()
+    .positive()
+    .nullish()
+    .transform((v) => v ?? undefined),
   /** 预约到店派钟（8.0.8，A04）；不带时与升级前的请求完全相同（幂等摘要不变） */
-  bookingId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
+  bookingId: z
+    .number()
+    .int()
+    .positive()
+    .nullish()
+    .transform((v) => v ?? undefined),
   expectedTotal: positiveCents('本次合计'),
 });
 
@@ -1166,9 +1233,7 @@ export function registerClockroomRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get('/api/clockroom/spaces', { preHandler: guard('technician.dispatch') }, async () => clockSpaces(sql));
-  app.post('/api/clockroom/sessions/:id/space', { preHandler: guard('technician.dispatch') }, async (req) =>
-    setSessionSpace(deps, parse(idParam, req.params).id, req.body, ctxOf(req)),
-  );
+  app.post('/api/clockroom/sessions/:id/space', { preHandler: guard('technician.dispatch') }, async (req) => setSessionSpace(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
 
   app.post('/api/clockroom/sessions/:id/start', { preHandler: guard('technician.dispatch') }, async (req) => startSession(deps, parse(idParam, req.params).id, ctxOf(req)));
   app.post('/api/clockroom/sessions/:id/finish', { preHandler: guard('technician.dispatch') }, async (req) => finishSession(deps, parse(idParam, req.params).id, ctxOf(req)));
@@ -1202,15 +1267,11 @@ export function registerClockroomRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   // 8.0.8：待派钟补派（A01）、转钟（B05）
-  app.post('/api/clockroom/lines/:id/assign', { preHandler: guard('technician.dispatch', 'frontdesk.operate') }, async (req) =>
-    assignLine(deps, parse(idParam, req.params).id, req.body, ctxOf(req)),
-  );
+  app.post('/api/clockroom/lines/:id/assign', { preHandler: guard('technician.dispatch', 'frontdesk.operate') }, async (req) => assignLine(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.post('/api/clockroom/sessions/:id/transfer', { preHandler: guard('technician.dispatch', 'frontdesk.operate') }, async (req) =>
     transferSession(deps, parse(idParam, req.params).id, req.body, ctxOf(req)),
   );
 
-  app.post('/api/clockroom/technicians/:id/state', { preHandler: guard('technician.dispatch') }, async (req) =>
-    changeState(deps, parse(idParam, req.params).id, req.body, ctxOf(req)),
-  );
+  app.post('/api/clockroom/technicians/:id/state', { preHandler: guard('technician.dispatch') }, async (req) => changeState(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.post('/api/clockroom/sign-in-all', { preHandler: guard('technician.dispatch') }, async (req) => signInAll(deps, ctxOf(req)));
 }

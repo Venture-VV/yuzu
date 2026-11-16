@@ -70,12 +70,12 @@ export function DishVoidDialog({
   const tierText = !rules
     ? '退菜按金额分级：小额直接退，超过的请值班经理及以上当场授权'
     : small
-    ? `小额（不超过 ${formatYuan(limit)}）：写原因直接退`
-    : can('frontdesk.correct')
-      ? '你的岗位可以直接退'
-      : mine
-        ? `你点的、${selfMinutes} 分钟内：直接退`
-        : `超过${limit > 0 ? `小额上限 ${formatYuan(limit)}` : '上限'}：请值班经理及以上当场授权`;
+      ? `小额（不超过 ${formatYuan(limit)}）：写原因直接退`
+      : can('frontdesk.correct')
+        ? '你的岗位可以直接退'
+        : mine
+          ? `你点的、${selfMinutes} 分钟内：直接退`
+          : `超过${limit > 0 ? `小额上限 ${formatYuan(limit)}` : '上限'}：请值班经理及以上当场授权`;
   const ok = reason.trim().length >= 2;
 
   const send = async (grantId?: string) => {
@@ -140,7 +140,15 @@ export function DishVoidDialog({
           {forceGrant ? '请值班经理及以上当场授权' : tierText}
         </p>
         <Field label="原因" htmlFor="reason-text" hint="至少 2 个字，记在明细与退菜记录里">
-          <Input id="reason-text" value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} placeholder="例如：客人点错了、等太久不要了" data-autofocus data-testid="dish-void-reason" />
+          <Input
+            id="reason-text"
+            value={reason}
+            maxLength={200}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="例如：客人点错了、等太久不要了"
+            data-autofocus
+            data-testid="dish-void-reason"
+          />
         </Field>
         {error && <Notice tone="error" title={error} className="mt-3" />}
       </Dialog>

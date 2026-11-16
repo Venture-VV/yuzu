@@ -26,23 +26,27 @@ const stamp = () => String(Date.now()).slice(-5);
 async function receiveViaPo(page: Page, supplierId: number, materialId: number, purchaseQtyMilli: number, priceCents: number, acceptedMilli?: number) {
   const me = await getJson<{ calendarToday: string }>(page, '/api/auth/me');
   const buyer = (await getJson<{ id: number; displayName: string }[]>(page, '/api/inventory/co-acceptors')).find((s) => s.displayName.startsWith('周一'))!;
-  const po = (await send(page, 'POST', '/api/purchase-orders', {
-    clientKey: crypto.randomUUID(),
-    supplierId,
-    orderDate: me.calendarToday,
-    approveNow: true,
-    lines: [{ materialId, purchaseQtyMilli, priceCents }],
-  })).po as { id: number; docNo: string; lines: { id: number; baseQtyMilli: number }[] };
+  const po = (
+    await send(page, 'POST', '/api/purchase-orders', {
+      clientKey: crypto.randomUUID(),
+      supplierId,
+      orderDate: me.calendarToday,
+      approveNow: true,
+      lines: [{ materialId, purchaseQtyMilli, priceCents }],
+    })
+  ).po as { id: number; docNo: string; lines: { id: number; baseQtyMilli: number }[] };
   const qty = acceptedMilli ?? po.lines[0]!.baseQtyMilli;
-  const doc = (await send(page, 'POST', '/api/inventory/docs', {
-    clientKey: crypto.randomUUID(),
-    docType: 'receipt',
-    docDate: me.calendarToday,
-    supplierId,
-    purchaseOrderId: po.id,
-    coAcceptorId: buyer.id,
-    lines: [{ materialId, poLineId: po.lines[0]!.id, deliveredMilli: qty, acceptedMilli: qty }],
-  })).doc as { id: number; docNo: string; amountCents: number; status: string };
+  const doc = (
+    await send(page, 'POST', '/api/inventory/docs', {
+      clientKey: crypto.randomUUID(),
+      docType: 'receipt',
+      docDate: me.calendarToday,
+      supplierId,
+      purchaseOrderId: po.id,
+      coAcceptorId: buyer.id,
+      lines: [{ materialId, poLineId: po.lines[0]!.id, deliveredMilli: qty, acceptedMilli: qty }],
+    })
+  ).doc as { id: number; docNo: string; amountCents: number; status: string };
   return { po, doc, today: me.calendarToday };
 }
 
@@ -72,14 +76,16 @@ test.describe('台面日耗品、称重与对账（v0.7.13）', () => {
     await receiveViaPo(page, sup.id, mat.id, 1000, 3_000); // 1 盒 = 100 支
     const dept = (await getJson<{ id: number; name: string }[]>(page, '/api/inventory/departments')).find((d) => d.name === '浴区')!;
     const me = await getJson<{ calendarToday: string }>(page, '/api/auth/me');
-    const issue = (await send(page, 'POST', '/api/inventory/docs', {
-      clientKey: crypto.randomUUID(),
-      docType: 'issue',
-      docDate: me.calendarToday,
-      departmentId: dept.id,
-      handler: 'E2E 浴区',
-      lines: [{ materialId: mat.id, qtyMilli: 30_000 }],
-    })).doc as { id: number; lines: { autoConsumed: boolean }[] };
+    const issue = (
+      await send(page, 'POST', '/api/inventory/docs', {
+        clientKey: crypto.randomUUID(),
+        docType: 'issue',
+        docDate: me.calendarToday,
+        departmentId: dept.id,
+        handler: 'E2E 浴区',
+        lines: [{ materialId: mat.id, qtyMilli: 30_000 }],
+      })
+    ).doc as { id: number; lines: { autoConsumed: boolean }[] };
     expect(issue.lines[0]!.autoConsumed).toBe(true);
 
     // 领料单详情：标出「已记部门耗用」
@@ -115,13 +121,15 @@ test.describe('台面日耗品、称重与对账（v0.7.13）', () => {
     await expect(page.getByText(/称重多到 0\.6 斤/)).toBeVisible();
 
     // 仓库按另一张采购单收货：超过容差时表单直接提示
-    const po2 = (await send(page, 'POST', '/api/purchase-orders', {
-      clientKey: crypto.randomUUID(),
-      supplierId: sup.id,
-      orderDate: (await getJson<{ calendarToday: string }>(page, '/api/auth/me')).calendarToday,
-      approveNow: true,
-      lines: [{ materialId: mat.id, purchaseQtyMilli: 10_000, priceCents: 1_800 }],
-    })).po as { id: number };
+    const po2 = (
+      await send(page, 'POST', '/api/purchase-orders', {
+        clientKey: crypto.randomUUID(),
+        supplierId: sup.id,
+        orderDate: (await getJson<{ calendarToday: string }>(page, '/api/auth/me')).calendarToday,
+        approveNow: true,
+        lines: [{ materialId: mat.id, purchaseQtyMilli: 10_000, priceCents: 1_800 }],
+      })
+    ).po as { id: number };
     await logout(page);
     await login(page, 'lixiao', '库存');
     await page.goto(`/inventory/new/receipt?po=${po2.id}`);
@@ -166,7 +174,10 @@ test.describe('台面日耗品、称重与对账（v0.7.13）', () => {
 
     // 撤销登记：写原因
     await rec.getByRole('button', { name: '撤销' }).click();
-    await page.getByRole('dialog', { name: /撤销对账登记/ }).getByRole('textbox').fill('E2E 金额核错了');
+    await page
+      .getByRole('dialog', { name: /撤销对账登记/ })
+      .getByRole('textbox')
+      .fill('E2E 金额核错了');
     await page.getByRole('button', { name: '撤销登记' }).click();
     await expect(rec.getByText('已撤销')).toBeVisible();
     // 撤销后这张又回到待对账
@@ -176,7 +187,15 @@ test.describe('台面日耗品、称重与对账（v0.7.13）', () => {
     // 还原成月结（不影响别的用例）
     await login(page, 'linlan', '会员工作台');
     const full = (await getJson<Record<string, unknown>[]>(page, '/api/inventory/suppliers?all=1')).find((s) => s.code === 'S003')!;
-    await send(page, 'PUT', `/api/inventory/suppliers/${sup.id}`, { code: full.code, name: full.name, contact: full.contact, phone: full.phone, note: full.note, active: full.active, reconcileCycle: 'monthly' });
+    await send(page, 'PUT', `/api/inventory/suppliers/${sup.id}`, {
+      code: full.code,
+      name: full.name,
+      contact: full.contact,
+      phone: full.phone,
+      note: full.note,
+      active: full.active,
+      reconcileCycle: 'monthly',
+    });
   });
 
   test('规则总表：称重容差与盘点、对账提醒的规则可以改', async ({ page }) => {

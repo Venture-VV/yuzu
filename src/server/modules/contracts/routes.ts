@@ -86,15 +86,18 @@ export function registerContractRoutes(app: FastifyInstance, deps: Deps) {
     const q = parse(ListQuery, req.query);
     return readSnapshot(sql, (tx) => listContracts(tx, today(), { filter: q.filter as ContractListFilter, category: q.category, q: q.q, entityId: q.entityId }));
   });
-  app.get('/api/erp/contracts/meta', { preHandler: READ }, async (): Promise<ContractMeta> =>
-    readSnapshot(sql, async (tx) => ({
-      today: today(),
-      suppliers: await tx<ContractMeta['suppliers']>`SELECT id, name FROM suppliers WHERE active ORDER BY name`,
-      departments: await tx<ContractMeta['departments']>`SELECT id, name FROM departments WHERE active ORDER BY name`,
-      staff: await tx<ContractMeta['staff']>`SELECT id, display_name FROM staff WHERE active ORDER BY display_name`,
-      materials: await tx<ContractMeta['materials']>`
+  app.get(
+    '/api/erp/contracts/meta',
+    { preHandler: READ },
+    async (): Promise<ContractMeta> =>
+      readSnapshot(sql, async (tx) => ({
+        today: today(),
+        suppliers: await tx<ContractMeta['suppliers']>`SELECT id, name FROM suppliers WHERE active ORDER BY name`,
+        departments: await tx<ContractMeta['departments']>`SELECT id, name FROM departments WHERE active ORDER BY name`,
+        staff: await tx<ContractMeta['staff']>`SELECT id, display_name FROM staff WHERE active ORDER BY display_name`,
+        materials: await tx<ContractMeta['materials']>`
         SELECT id, code, name, purchase_unit, specification FROM materials WHERE active ORDER BY code`,
-    })),
+      })),
   );
   app.get('/api/erp/contracts/expiring', { preHandler: READ }, async () => readSnapshot(sql, (tx) => expiringContracts(tx, today())));
   // 采购单选合同、按单价表核对（C9）：采购经办与看合同的人能用

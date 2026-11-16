@@ -54,7 +54,9 @@ test.describe('8.0.21 供应商门户', () => {
     test.setTimeout(90_000);
     await login(page);
     const { sup, mat, today } = await setup(page);
-    const made = await page.request.post('/api/purchase-sourcing', { data: { clientKey: randomUUID(), title: `门户询价${tag}`, needBy: today, lines: [{ materialId: mat.id, purchaseQtyMilli: 5_000 }] } });
+    const made = await page.request.post('/api/purchase-sourcing', {
+      data: { clientKey: randomUUID(), title: `门户询价${tag}`, needBy: today, lines: [{ materialId: mat.id, purchaseQtyMilli: 5_000 }] },
+    });
     expect(made.status(), await made.text()).toBe(201);
     const ev = (await made.json()).event as { id: number; docNo: string };
 

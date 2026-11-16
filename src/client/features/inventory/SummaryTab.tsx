@@ -51,13 +51,7 @@ export function SummaryTab() {
   const [preset, setPreset] = useState<Preset>('month');
   const [custom, setCustom] = useState({ from: shiftDate(today, -6), to: today });
   const range =
-    preset === 'today'
-      ? { from: today, to: today }
-      : preset === '7d'
-        ? { from: shiftDate(today, -6), to: today }
-        : preset === 'month'
-          ? { from: `${today.slice(0, 8)}01`, to: today }
-          : custom;
+    preset === 'today' ? { from: today, to: today } : preset === '7d' ? { from: shiftDate(today, -6), to: today } : preset === 'month' ? { from: `${today.slice(0, 8)}01`, to: today } : custom;
   const warehouses = useWarehouses();
   const [warehouse, setWarehouse] = useState<WarehouseSel>(CENTRAL_WAREHOUSE_ID);
   const columns = columnsFor(warehouse);
@@ -83,9 +77,25 @@ export function SummaryTab() {
         />
         {preset === 'custom' && (
           <span className="flex items-center gap-1.5 text-[13px] text-ink-3">
-            <Input fullWidth={false} type="date" value={custom.from} max={today} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} className="h-9 w-[150px] text-[13px]" aria-label="开始日期" />
+            <Input
+              fullWidth={false}
+              type="date"
+              value={custom.from}
+              max={today}
+              onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))}
+              className="h-9 w-[150px] text-[13px]"
+              aria-label="开始日期"
+            />
             至
-            <Input fullWidth={false} type="date" value={custom.to} max={today} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} className="h-9 w-[150px] text-[13px]" aria-label="结束日期" />
+            <Input
+              fullWidth={false}
+              type="date"
+              value={custom.to}
+              max={today}
+              onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))}
+              className="h-9 w-[150px] text-[13px]"
+              aria-label="结束日期"
+            />
           </span>
         )}
         {(warehouses.data?.length ?? 0) > 1 && (
@@ -111,7 +121,12 @@ export function SummaryTab() {
         <Button size="sm" variant="ghost" icon={<ShieldCheck className="size-4" />} onClick={() => setShowChecks((v) => !v)}>
           数据自检
         </Button>
-        <Button size="sm" variant="secondary" icon={<Download className="size-4" />} onClick={() => downloadUrl(`/api/inventory/summary/export?from=${range.from}&to=${range.to}&warehouse=${warehouse}`)}>
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<Download className="size-4" />}
+          onClick={() => downloadUrl(`/api/inventory/summary/export?from=${range.from}&to=${range.to}&warehouse=${warehouse}`)}
+        >
           导出 CSV
         </Button>
       </div>

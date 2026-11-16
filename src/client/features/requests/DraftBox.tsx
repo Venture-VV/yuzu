@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ChevronDown, ChevronRight, FilePen, Inbox, Trash2, X } from 'lucide-react';
-import { type RequestDraft, type RequestDraftSummary } from '@shared/requests';
+import type { RequestDraft, RequestDraftSummary } from '@shared/requests';
 import { errorMessage } from '../../lib/api';
 import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
@@ -113,7 +113,13 @@ export function DraftBox({ open, onClose, currentKey }: { open: boolean; onClose
                         </p>
                       </div>
                       <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                        <Button size="sm" variant="ghost" icon={isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />} onClick={() => void toggle(d)} data-testid={`draft-view-${d.key}`}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                          onClick={() => void toggle(d)}
+                          data-testid={`draft-view-${d.key}`}
+                        >
                           查看
                         </Button>
                         {!current && (

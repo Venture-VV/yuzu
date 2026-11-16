@@ -161,9 +161,7 @@ export async function patrolSettingsAdmin(db: Db): Promise<PatrolSettingsAdmin> 
   const employees = await db<{ id: number; empNo: string; name: string; department: string; active: boolean }[]>`
     SELECT e.id, e.emp_no, e.name, coalesce(d.name, '') AS department, e.active
     FROM canteen_employees e LEFT JOIN departments d ON d.id = e.department_id ORDER BY e.active DESC, e.emp_no, e.id`;
-  const [count] = s.departmentIds.length
-    ? await db<{ n: number }[]>`SELECT count(*)::int AS n FROM canteen_employees WHERE active AND department_id IN ${db(s.departmentIds)}`
-    : [{ n: 0 }];
+  const [count] = s.departmentIds.length ? await db<{ n: number }[]>`SELECT count(*)::int AS n FROM canteen_employees WHERE active AND department_id IN ${db(s.departmentIds)}` : [{ n: 0 }];
   const [meta] = await db<{ updatedAt: string | null; updatedBy: string | null }[]>`
     SELECT s.updated_at, st.display_name AS updated_by FROM settings s LEFT JOIN staff st ON st.id = s.updated_by WHERE s.key = 'patrol'`;
   return { ...s, departments, employees, patrolStaffCount: count!.n, updatedAt: meta?.updatedAt ?? null, updatedBy: meta?.updatedBy ?? null };
@@ -222,11 +220,7 @@ export async function patrolPointOptions(db: Db): Promise<PatrolPointOption[]> {
   return db<PatrolPointOption[]>`SELECT p.id, p.name, p.area, p.active FROM patrol_points p ORDER BY p.active DESC, p.sort_order, p.id`;
 }
 
-const nameField = z
-  .string('请写场所名称')
-  .trim()
-  .min(1, '请写场所名称')
-  .max(MAX_PATROL_POINT_NAME, `场所名称最多 ${MAX_PATROL_POINT_NAME} 个字`);
+const nameField = z.string('请写场所名称').trim().min(1, '请写场所名称').max(MAX_PATROL_POINT_NAME, `场所名称最多 ${MAX_PATROL_POINT_NAME} 个字`);
 const areaField = z.string().trim().max(MAX_PATROL_POINT_AREA, `位置说明最多 ${MAX_PATROL_POINT_AREA} 个字`).default('');
 const sortField = z.number().int('排序要是整数').min(-9999).max(9999).default(0);
 
@@ -302,7 +296,11 @@ export async function updatePatrolPoint(sql: Sql, id: number, raw: unknown, ctx:
         action: 'patrol_point',
         targetType: 'patrol_point',
         targetId: id,
-        detail: { op, before: { name: p.name, area: p.area, sortOrder: p.sortOrder, active: p.active }, after: { name: input.name, area: input.area, sortOrder: input.sortOrder, active: input.active } },
+        detail: {
+          op,
+          before: { name: p.name, area: p.area, sortOrder: p.sortOrder, active: p.active },
+          after: { name: input.name, area: input.area, sortOrder: input.sortOrder, active: input.active },
+        },
         ip: ctx.ip,
       });
       return getPoint(tx, id);
@@ -401,17 +399,11 @@ async function replayedCheckin(db: Db, config: AppConfig, clientKey: string, emp
  * 同一个场所每一轮只记一次打卡（XC14，不论是谁打的；8.0.9 的「同一个人 2 分钟内只记一次」并进这一条）；
  * 扫到的时间不能比门店快 2 分钟以上、不能是 24 小时以前（XC7）。
  */
-export async function recordPatrolCheckin(
-  deps: { sql: Sql; config: AppConfig },
-  employee: CanteenSessionEmployee,
-  raw: unknown,
-  nowMs = Date.now(),
-): Promise<PatrolCheckinResult> {
+export async function recordPatrolCheckin(deps: { sql: Sql; config: AppConfig }, employee: CanteenSessionEmployee, raw: unknown, nowMs = Date.now()): Promise<PatrolCheckinResult> {
   const input = parse(CheckinInput, raw);
   const { sql, config } = deps;
   // 这一笔是别的员工扫的（这台手机后来换了人登录）：不记、不算拒绝，手机上留着等那一位登录再交
-  if (input.employeeId !== employee.id)
-    throw conflict('PATROL_OTHER_EMPLOYEE', '这台手机现在登录的是另一位员工：这一笔是之前那位扫的，留在手机上，等他登录以后再交');
+  if (input.employeeId !== employee.id) throw conflict('PATROL_OTHER_EMPLOYEE', '这台手机现在登录的是另一位员工：这一笔是之前那位扫的，留在手机上，等他登录以后再交');
   const replay = await replayedCheckin(sql, config, input.clientKey, employee.id);
   if (replay) return replay;
   const token = parsePatrolToken(input.code);
@@ -447,10 +439,7 @@ export async function recordPatrolCheckin(
     const again = await replayedCheckin(tx, config, input.clientKey, e.id);
     if (again) return again;
     // 这一轮（按扫到的时间）这个场所已经有没作废的打卡：不另记（按时间找，巡场间隔当天改过也照样只认一条）
-    const dup = await checkinById(
-      tx,
-      tx`c.point_id = ${p.id} AND c.voided_at IS NULL AND c.scanned_at >= ${new Date(round.start)} AND c.scanned_at < ${new Date(round.end)}`,
-    );
+    const dup = await checkinById(tx, tx`c.point_id = ${p.id} AND c.voided_at IS NULL AND c.scanned_at >= ${new Date(round.start)} AND c.scanned_at < ${new Date(round.end)}`);
     if (dup) {
       // 这一笔也记下操作编号：回复丢了原样重提时返回同样的「这一轮已打过卡」，不看那一条之后有没有被作废
       await tx`INSERT INTO patrol_checkin_repeats (client_key, checkin_id, employee_id) VALUES (${input.clientKey}, ${dup.id}, ${e.id})`;
@@ -510,8 +499,7 @@ export async function patrolDay(db: Db, config: AppConfig, date: string, today: 
     return { id: Number(p.id), name: p.name, area: p.area, active: p.active, count: list.length, scans: list, byRound };
   });
   const rounds: PatrolRound[] = spans.map((r, i) => {
-    const state: PatrolRound['state'] =
-      date < today || nowMs >= Date.parse(r.end) ? 'past' : nowMs >= Date.parse(r.start) ? 'current' : 'future';
+    const state: PatrolRound['state'] = date < today || nowMs >= Date.parse(r.end) ? 'past' : nowMs >= Date.parse(r.start) ? 'current' : 'future';
     const cells = rows.map((p) => p.byRound[i]).filter((x): x is PatrolScan[] => x !== null);
     return { ...r, state, expected: cells.length, done: cells.filter((x) => x.length > 0).length };
   });

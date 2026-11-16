@@ -1,18 +1,7 @@
 // UI 工作台的版面格式（8.1.1，docs/WORKBENCH_V811.md 第 3、5 节）：默认版面合格式、核对拦得住不合格的、发布前的检查。
 // 只测格式与检查（不连数据库）；接口与权限在 tests/studio.test.ts。
 import { describe, expect, it } from 'vitest';
-import {
-  changedScreens,
-  checkStudioDoc,
-  contrastRatio,
-  defaultStudioDoc,
-  DocSchema,
-  EMENU_SURFACE,
-  themeVars,
-  validateStudioDoc,
-  type StudioDoc,
-  type StudioNode,
-} from '../src/shared/studio';
+import { changedScreens, checkStudioDoc, contrastRatio, defaultStudioDoc, DocSchema, EMENU_SURFACE, themeVars, validateStudioDoc, type StudioDoc, type StudioNode } from '../src/shared/studio';
 
 const clone = (d: StudioDoc): StudioDoc => JSON.parse(JSON.stringify(d));
 const text = (id: string, zh: string, more: Record<string, unknown> = {}): StudioNode =>
@@ -67,7 +56,23 @@ describe('版面格式', () => {
     const d = clone(defaultStudioDoc('emenu'));
     d.screens.start!.nodes = d.screens.start!.nodes.filter((n) => n.id !== 'start-footer');
     (d.screens.menu!.nodes[1] as { hidden: boolean }).hidden = true;
-    d.screens.start!.nodes.push({ type: 'image', id: 'img', name: '海报', x: 0, y: 0, w: 100, h: 100, rotate: 0, opacity: 1, hidden: false, locked: false, asset: 'a'.repeat(64), fit: 'cover', radius: 0, fill: null });
+    d.screens.start!.nodes.push({
+      type: 'image',
+      id: 'img',
+      name: '海报',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      rotate: 0,
+      opacity: 1,
+      hidden: false,
+      locked: false,
+      asset: 'a'.repeat(64),
+      fit: 'cover',
+      radius: 0,
+      fill: null,
+    });
     d.screens.start!.nodes.push(text('t1', '欢迎', { color: '#d0d0d0' }));
     const lang = d.screens.start!.nodes.find((n) => n.id === 'start-lang')!;
     lang.w = 24;
@@ -100,8 +105,7 @@ describe('版面格式', () => {
 });
 
 describe('8.1.2：小程序的版面（自动排列、按钮、数据字段、点了做什么）', () => {
-  const mpNode = (n: Record<string, unknown>): StudioNode =>
-    DocSchema.shape.screens.parse({ s: { nodes: [{ id: 'x', x: 0, y: 0, w: 100, h: 40, ...n }] } }).s!.nodes[0]!;
+  const mpNode = (n: Record<string, unknown>): StudioNode => DocSchema.shape.screens.parse({ s: { nodes: [{ id: 'x', x: 0, y: 0, w: 100, h: 40, ...n }] } }).s!.nodes[0]!;
 
   it('默认版面合格式、核对没有问题、检查没有红的；主题变量全写在页面上（小程序这边没有样式表）', () => {
     const doc = defaultStudioDoc('mp');
@@ -120,9 +124,16 @@ describe('8.1.2：小程序的版面（自动排列、按钮、数据字段、�
   });
 
   it('自动排列、尺寸规则、按钮、数据字段合格式；乱写的排列、尺寸、动作名存不进去', () => {
-    expect(mpNode({ type: 'frame', layout: { mode: 'row', gap: 8 }, children: [] })).toMatchObject({ layout: { mode: 'row', wrap: false, gap: 8, padding: [0, 0, 0, 0], align: 'start', justify: 'start' } });
+    expect(mpNode({ type: 'frame', layout: { mode: 'row', gap: 8 }, children: [] })).toMatchObject({
+      layout: { mode: 'row', wrap: false, gap: 8, padding: [0, 0, 0, 0], align: 'start', justify: 'start' },
+    });
     expect(mpNode({ type: 'text', text: { zh: '字' }, sizing: { w: 'fill' } })).toMatchObject({ sizing: { w: 'fill', h: 'fixed' } });
-    expect(mpNode({ type: 'button', text: { zh: '去看看' }, action: { action: 'open.page', arg: 'coupons' } })).toMatchObject({ fill: '$ink', align: 'center', valign: 'middle', action: { action: 'open.page', arg: 'coupons' } });
+    expect(mpNode({ type: 'button', text: { zh: '去看看' }, action: { action: 'open.page', arg: 'coupons' } })).toMatchObject({
+      fill: '$ink',
+      align: 'center',
+      valign: 'middle',
+      action: { action: 'open.page', arg: 'coupons' },
+    });
     expect(mpNode({ type: 'field', field: 'store.hours' })).toMatchObject({ prefix: { zh: '', en: '' }, suffix: { zh: '', en: '' } });
     const parse = (n: Record<string, unknown>) => DocSchema.shape.screens.safeParse({ s: { nodes: [{ id: 'x', x: 0, y: 0, w: 1, h: 1, ...n }] } }).success;
     expect(parse({ type: 'frame', layout: { mode: 'grid' }, children: [] })).toBe(false);
@@ -157,12 +168,18 @@ describe('8.1.2：小程序的版面（自动排列、按钮、数据字段、�
     // 自动排列里的 x / y 不看：远在「画布外」也不报
     doc.screens.activity!.nodes.push(mpNode({ type: 'text', id: 'far', x: 5000, y: 5000, text: { zh: '很远' }, sizing: { w: 'fill', h: 'hug' } }));
     const msgs = checkStudioDoc(doc, { assets: new Map() }).map((i) => `${i.level}:${i.message}`);
-    expect(msgs).toEqual(expect.arrayContaining([expect.stringMatching(/^warn:「小」比 44×44 小/), expect.stringMatching(/^warn:「小」还没设「点了做什么」/), expect.stringMatching(/^warn:「小」字和底色对比不够/)]));
+    expect(msgs).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^warn:「小」比 44×44 小/), expect.stringMatching(/^warn:「小」还没设「点了做什么」/), expect.stringMatching(/^warn:「小」字和底色对比不够/)]),
+    );
     expect(msgs.some((m) => m.includes('画布外面'))).toBe(false);
     expect(msgs.filter((m) => m.startsWith('error'))).toEqual([]);
     // 门店信息是必需的：删了是红的
     doc.screens.home!.nodes = doc.screens.home!.nodes.filter((n) => n.id !== 'home-store');
-    expect(checkStudioDoc(doc).filter((i) => i.level === 'error').map((i) => i.message)).toEqual(['首页缺了「门店信息」：从左边「插入 → 功能块」加回来']);
+    expect(
+      checkStudioDoc(doc)
+        .filter((i) => i.level === 'error')
+        .map((i) => i.message),
+    ).toEqual(['首页缺了「门店信息」：从左边「插入 → 功能块」加回来']);
   });
 });
 
@@ -190,4 +207,3 @@ describe('8.1.2：员工食堂的版面', () => {
     expect(red.map((i) => i.message)).toEqual(expect.arrayContaining([expect.stringContaining('饭卡码'), expect.stringContaining('亮出饭卡码'), expect.stringContaining('按岗位的入口')]));
   });
 });
-

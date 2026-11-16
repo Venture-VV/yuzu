@@ -44,17 +44,18 @@ async function hold(statement: (tx: typeof ctx.sql) => Promise<unknown>) {
   };
 }
 
-const checkin = (code: string, key = randomUUID()) =>
-  api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: key, guests: [{ tagCode: code, zone: 'male' }] });
+const checkin = (code: string, key = randomUUID()) => api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: key, guests: [{ tagCode: code, zone: 'male' }] });
 
 const selfCheck = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { key: string; ok: boolean; detail: string }[];
 
 describe('发牌与锁定 / 停用 / 改分区并发', () => {
   // 让发牌拿到手牌锁后，卡在账单单号计数行上；随后的锁定请求排在手牌锁后面
   const holdBillCounter = () =>
-    hold((tx) => tx`
+    hold(
+      (tx) => tx`
       INSERT INTO doc_counters (doc_type, business_date, last_no) VALUES ('bill', ${today}, 0)
-      ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`);
+      ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`,
+    );
 
   for (const [name, code, change] of [
     ['锁定', 'A001', (id: number) => api(ctx.app, ctx.owner, 'POST', `/api/frontdesk/tags/${id}/lock`, { reason: '柜锁故障' })],
@@ -89,16 +90,17 @@ describe('发牌与锁定 / 停用 / 改分区并发', () => {
     expect(l.status).toBe(200);
     expect(c.status).toBe(422);
     expect(c.body.error.code).toBe('TAG_LOCKED');
-    const { n } = (await ctx.sql<{ n: number }[]>`
-      SELECT count(*) AS n FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = 'A004' AND v.status = 'open'`)[0]!;
+    const { n } = (
+      await ctx.sql<{ n: number }[]>`
+      SELECT count(*) AS n FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = 'A004' AND v.status = 'open'`
+    )[0]!;
     expect(n).toBe(0);
     for (const k of await selfCheck()) expect(k, k.detail).toMatchObject({ ok: true });
   });
 });
 
 describe('结果待确认：查回与作废', () => {
-  const post = (visitId: number, key: string) =>
-    api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${visitId}/charges`, { clientKey: key, lines: [{ itemId, quantity: 1 }], expectedTotal: 5800 });
+  const post = (visitId: number, key: string) => api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${visitId}/charges`, { clientKey: key, lines: [{ itemId, quantity: 1 }], expectedTotal: 5800 });
 
   it('原请求还在等锁时：查回为「未找到」但不能当作没生效；作废后原请求整笔回滚、同编号重提也被拒绝', async () => {
     const visitId = (await checkin('A010')).body.visits[0].id as number;
@@ -136,9 +138,11 @@ describe('结果待确认：查回与作废', () => {
 
   it('接待：发牌请求在等待时被作废，手牌保持空闲，原请求回滚', async () => {
     const key = randomUUID();
-    const release = await hold((tx) => tx`
+    const release = await hold(
+      (tx) => tx`
       INSERT INTO doc_counters (doc_type, business_date, last_no) VALUES ('bill', ${today}, 0)
-      ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`);
+      ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`,
+    );
     const original = checkin('A012', key);
     await waitForLockWaiters(1);
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${key}/abandon`, { type: 'checkin' })).body).toEqual({ found: false, abandoned: true });

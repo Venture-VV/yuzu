@@ -159,7 +159,12 @@ describe('采购流程图 · 推算函数', () => {
     const draft = buildPurchaseFlow(facts({ ...base, sourcing: awarded, pos: [po({ status: 'draft', totalCents: 899_900, approvedAt: null, submittedAt: null })] }));
     expect(node(draft, 'approval')).toMatchObject({ state: 'current', text: '采购单草稿，待提交', role: '采购 · 周一' });
     expect(node(draft, 'order')).toMatchObject({ state: 'pending', text: '待审批后' });
-    const pending = po({ status: 'submitted', totalCents: 899_900, approvedAt: null, approval: { requestId: 77, status: 'pending', currentLevel: 2, levels: 2, currentLabel: '店主', levelStartedAt: hoursAgo(26), overdue: true } });
+    const pending = po({
+      status: 'submitted',
+      totalCents: 899_900,
+      approvedAt: null,
+      approval: { requestId: 77, status: 'pending', currentLevel: 2, levels: 2, currentLabel: '店主', levelStartedAt: hoursAgo(26), overdue: true },
+    });
     const inApproval = buildPurchaseFlow(facts({ ...base, sourcing: awarded, pos: [pending] }));
     expect(node(inApproval, 'approval')).toMatchObject({ text: '第 2 / 2 级 · 审批中', role: '店主', alert: '已等待 26 小时 · 审批超时', link: { kind: 'approval', id: 77 } });
     expect(inApproval.stage).toBe('approval');
@@ -238,10 +243,18 @@ describe('采购流程图 · 推算函数', () => {
     const big = buildPurchaseFlow(facts({ requests: [req({ estimateCents: 250_000, unorderedLines: 1 })] }));
     expect(big.variant).toBe('B');
     expect(node(big, 'sourcing')).toMatchObject({ state: 'current', text: '待发起询价' });
-    expect(node(buildPurchaseFlow(facts({ requests: [req({ status: 'submitted', reviewedAt: null, estimateCents: 250_000 })] })), 'sourcing')).toMatchObject({ state: 'pending', text: '待审核通过后' });
-    expect(buildPurchaseFlow(facts({ rules: { ...RULES, quoteThresholdCents: 0 }, requests: [req({ estimateCents: 9_999_900, unorderedLines: 1 })] }))).toMatchObject({ variant: 'A', variantText: '免比价（采购规则没设询价门槛）' });
+    expect(node(buildPurchaseFlow(facts({ requests: [req({ status: 'submitted', reviewedAt: null, estimateCents: 250_000 })] })), 'sourcing')).toMatchObject({
+      state: 'pending',
+      text: '待审核通过后',
+    });
+    expect(buildPurchaseFlow(facts({ rules: { ...RULES, quoteThresholdCents: 0 }, requests: [req({ estimateCents: 9_999_900, unorderedLines: 1 })] }))).toMatchObject({
+      variant: 'A',
+      variantText: '免比价（采购规则没设询价门槛）',
+    });
     // 达到门槛的草稿采购单、还没询价：提交时会被拦下，图上先去询价
-    const draft = buildPurchaseFlow(facts({ anchor: { kind: 'po', id: 10, docNo: 'CG-0010' }, requests: [], pos: [po({ status: 'draft', totalCents: 250_000, approvedAt: null, submittedAt: null })] }));
+    const draft = buildPurchaseFlow(
+      facts({ anchor: { kind: 'po', id: 10, docNo: 'CG-0010' }, requests: [], pos: [po({ status: 'draft', totalCents: 250_000, approvedAt: null, submittedAt: null })] }),
+    );
     expect(draft.variant).toBe('B');
     expect(node(draft, 'sourcing')).toMatchObject({ state: 'current', text: '待发起询价', link: { kind: 'po', id: 10 } });
     expect(node(draft, 'approval')).toMatchObject({ state: 'pending', text: '待定标后' });
@@ -260,7 +273,12 @@ describe('采购流程图 · 推算函数', () => {
     expect(keys(draft)).toEqual(['order', 'receive', 'stockin', 'pay']);
     expect(node(draft, 'order')).toMatchObject({ state: 'current', text: '采购单草稿，待提交' });
     // 走过审批中心的，确认以后这一环留着（写谁确认的）
-    const done = buildPurchaseFlow(facts({ ...base, pos: [po({ approvedByName: '负责人', approval: { requestId: 3, status: 'approved', currentLevel: 1, levels: 1, currentLabel: '负责人', levelStartedAt: hoursAgo(30), overdue: false } })] }));
+    const done = buildPurchaseFlow(
+      facts({
+        ...base,
+        pos: [po({ approvedByName: '负责人', approval: { requestId: 3, status: 'approved', currentLevel: 1, levels: 1, currentLabel: '负责人', levelStartedAt: hoursAgo(30), overdue: false } })],
+      }),
+    );
     expect(keys(done)[0]).toBe('approval');
     expect(node(done, 'approval')).toMatchObject({ state: 'done', role: '负责人' });
   });
@@ -271,7 +289,12 @@ describe('采购流程图 · 推算函数', () => {
     expect(states(registered)).toBe('ddcp');
     expect(node(registered, 'receive')).toMatchObject({ text: '已登记收货 SH-0031', link: { kind: 'receipt', id: 31 } });
     expect(node(registered, 'stockin')).toMatchObject({ text: '收货单 SH-0031 待确认', role: '仓库 / 负责人', waited: '3 天', alert: '已等待 3 天' });
-    const partial = buildPurchaseFlow(facts({ ...base, pos: [po({ receiving: 'partial', receivedLines: 1, receivedCents: 40_000, unpaidCents: 40_000, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-11-10' }] })] }));
+    const partial = buildPurchaseFlow(
+      facts({
+        ...base,
+        pos: [po({ receiving: 'partial', receivedLines: 1, receivedCents: 40_000, unpaidCents: 40_000, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-11-10' }] })],
+      }),
+    );
     expect(states(partial)).toBe('dcpp');
     expect(node(partial, 'receive').text).toBe('部分到货（1 / 2 行到齐）');
     expect(node(partial, 'stockin').text).toBe('已入库 1 / 2 行');
@@ -292,7 +315,12 @@ describe('采购流程图 · 推算函数', () => {
     expect(node(buildPurchaseFlow(facts({ ...base, pos: [po({ ...full, settlement: 'cash', unclaimedLines: 0, claimsPending: 1 })] })), 'pay').text).toBe('报销单待确认');
     expect(buildPurchaseFlow(facts({ ...base, pos: [po({ ...full, settlement: 'cash', unclaimedLines: 0 })] })).end).toBe('done');
     // 关闭的采购单：没到的不再到，付清以后算「采购单关闭」
-    const closed = buildPurchaseFlow(facts({ ...base, pos: [po({ status: 'closed', closeReason: '供应商断货', receiving: 'partial', receivedLines: 1, receivedCents: 40_000, paidCents: 40_000, unpaidCents: 0, receipts: full.receipts })] }));
+    const closed = buildPurchaseFlow(
+      facts({
+        ...base,
+        pos: [po({ status: 'closed', closeReason: '供应商断货', receiving: 'partial', receivedLines: 1, receivedCents: 40_000, paidCents: 40_000, unpaidCents: 0, receipts: full.receipts })],
+      }),
+    );
     expect(node(closed, 'receive').text).toBe('采购单已关闭，没到的不再到');
     expect(closed).toMatchObject({ end: 'closed', endText: '采购单已关闭：供应商断货' });
   });
@@ -312,7 +340,14 @@ describe('采购流程图 · 推算函数', () => {
     const waiting = buildPurchaseFlow(facts({ ...base, pos: [po()] }));
     expect(node(waiting, 'pay')).toMatchObject({ state: 'pending', role: '财务 · 每月 15 / 30 号', text: '到货后付款' });
     // 11/10 入库、今天 11/13：下个付款日 11/15，还没过
-    const full = { receiving: 'full' as const, receivedLines: 2, receivedCents: 80_000, paidCents: 0, unpaidCents: 80_000, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed' as const, docDate: '2026-11-10' }] };
+    const full = {
+      receiving: 'full' as const,
+      receivedLines: 2,
+      receivedCents: 80_000,
+      paidCents: 0,
+      unpaidCents: 80_000,
+      receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed' as const, docDate: '2026-11-10' }],
+    };
     const due = buildPurchaseFlow(facts({ ...base, pos: [po(full)] }));
     expect(node(due, 'pay')).toMatchObject({ state: 'current', text: '已付 ¥0.00 · 未付 ¥800.00 · 下个付款日 11/15', alert: null });
     expect(due.alert).toBe(false);
@@ -324,13 +359,27 @@ describe('采购流程图 · 推算函数', () => {
     const sameDay = buildPurchaseFlow(facts({ ...base, today: '2026-11-16', pos: [po({ ...full, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-11-15' }] })] }));
     expect(node(sameDay, 'pay')).toMatchObject({ alert: null, text: '已付 ¥0.00 · 未付 ¥800.00 · 下个付款日 11/30' });
     // 现付的看报销，不按付款日
-    expect(node(buildPurchaseFlow(facts({ ...base, pos: [po({ ...full, settlement: 'cash', unclaimedLines: 1, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-10-20' }] })] })), 'pay').alert).toBeNull();
+    expect(
+      node(
+        buildPurchaseFlow(facts({ ...base, pos: [po({ ...full, settlement: 'cash', unclaimedLines: 1, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-10-20' }] })] })),
+        'pay',
+      ).alert,
+    ).toBeNull();
     // 看的人不能看金额：只写还没付清与付款日
     expect(node(buildPurchaseFlow(facts({ ...base, purchasing: false, pos: [po(full)] })), 'pay').text).toBe('还没付清 · 下个付款日 11/15');
   });
 
   it('几张单合在一起：一张需求拆成两张采购单（一张到齐、一张没到）；还有行没下单；几张需求并成一张采购单', () => {
-    const a = po({ id: 10, docNo: 'CG-0010', receiving: 'full', receivedLines: 2, receivedCents: 80_000, paidCents: 80_000, unpaidCents: 0, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-11-10' }] });
+    const a = po({
+      id: 10,
+      docNo: 'CG-0010',
+      receiving: 'full',
+      receivedLines: 2,
+      receivedCents: 80_000,
+      paidCents: 80_000,
+      unpaidCents: 0,
+      receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed', docDate: '2026-11-10' }],
+    });
     const b = po({ id: 11, docNo: 'CG-0011', supplierName: '山田洗护', totalCents: 10_000 });
     const split = buildPurchaseFlow(facts({ pos: [a, b] }));
     // 只有「到货验收」在等（没到的那张）；入库、付款有一张做完了，先灰着、字里写 1 / 2
@@ -346,7 +395,11 @@ describe('采购流程图 · 推算函数', () => {
     expect(more.end).toBeNull();
     // 从采购单看：三张需求单并成一张
     const merged = buildPurchaseFlow(
-      facts({ anchor: { kind: 'po', id: 10, docNo: 'CG-0010' }, requests: [req(), req({ id: 2, docNo: 'XQ-0002', departmentName: 'IT' }), req({ id: 3, docNo: 'XQ-0003', departmentName: '水吧', unorderedLines: 2 })], pos: [po()] }),
+      facts({
+        anchor: { kind: 'po', id: 10, docNo: 'CG-0010' },
+        requests: [req(), req({ id: 2, docNo: 'XQ-0002', departmentName: 'IT' }), req({ id: 3, docNo: 'XQ-0003', departmentName: '水吧', unorderedLines: 2 })],
+        pos: [po()],
+      }),
     );
     expect(node(merged, 'request')).toMatchObject({ text: '3 张需求单', role: '浴区、IT、水吧' });
     // 从采购单看不管别的需求行下没下单
@@ -354,7 +407,14 @@ describe('采购流程图 · 推算函数', () => {
   });
 
   it('看的人没有「查看库存」：不带金额、付款只写还没付清、采购单与询价单不给链接（需求单的留着）', () => {
-    const full = { receiving: 'full' as const, receivedLines: 2, receivedCents: 80_000, paidCents: 0, unpaidCents: 80_000, receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed' as const, docDate: '2026-11-10' }] };
+    const full = {
+      receiving: 'full' as const,
+      receivedLines: 2,
+      receivedCents: 80_000,
+      paidCents: 0,
+      unpaidCents: 80_000,
+      receipts: [{ id: 31, docNo: 'SH-0031', status: 'confirmed' as const, docDate: '2026-11-10' }],
+    };
     const f = buildPurchaseFlow(facts({ purchasing: false, pos: [po(full)] }));
     expect(f.amountCents).toBeNull();
     expect(node(f, 'pay').text).toBe('还没付清');
@@ -363,7 +423,9 @@ describe('采购流程图 · 推算函数', () => {
     expect(JSON.stringify(f)).not.toContain('¥800');
     // 标题只用自己这张需求单的：合并采购单、询价单的摘要里有别的部门的物料，不能带出来（Codex 2026-11-13 P2）
     const merged = po({ ...full, summary: '沐浴露补充装、水吧专用糖浆' });
-    const mine = buildPurchaseFlow(facts({ purchasing: false, requests: [req({ summary: '沐浴露补充装' })], sourcing: src({ status: 'awarded', title: '浴区与水吧合并询价：糖浆、沐浴露' }), pos: [merged] }));
+    const mine = buildPurchaseFlow(
+      facts({ purchasing: false, requests: [req({ summary: '沐浴露补充装' })], sourcing: src({ status: 'awarded', title: '浴区与水吧合并询价：糖浆、沐浴露' }), pos: [merged] }),
+    );
     expect(mine.title).toBe('沐浴露补充装');
     expect(JSON.stringify(mine)).not.toMatch(/糖浆|水吧/);
     // 采购从需求单看，标题也是这张需求单自己的；从采购单看才是整张采购单的
@@ -421,14 +483,25 @@ describe('采购流程图 · 接口', () => {
     expect((await api(ctx.app, boss, 'GET', '/api/inventory/purchase-rules')).body.flowStallDays).toBe(2);
     expect((await api(ctx.app, boss, 'PUT', '/api/inventory/purchase-rules', { flowStallDays: 31 })).status).toBe(400);
     expect((await api(ctx.app, boss, 'PUT', '/api/inventory/purchase-rules', { flowStallDays: 3 })).body.flowStallDays).toBe(3);
-    expect((await list(buyer)).rules).toEqual({ quoteThresholdCents: DEFAULT_PURCHASE_RULES.quoteThresholdCents, minQuotes: DEFAULT_PURCHASE_RULES.minQuotes, arrivalOverdueDays: DEFAULT_PURCHASE_RULES.arrivalOverdueDays, stallDays: 3, payDays: [15, 30] });
+    expect((await list(buyer)).rules).toEqual({
+      quoteThresholdCents: DEFAULT_PURCHASE_RULES.quoteThresholdCents,
+      minQuotes: DEFAULT_PURCHASE_RULES.minQuotes,
+      arrivalOverdueDays: DEFAULT_PURCHASE_RULES.arrivalOverdueDays,
+      stallDays: 3,
+      payDays: [15, 30],
+    });
     expect(DEFAULT_PAYMENT_RULES.payDays).toEqual([15, 30]);
     await api(ctx.app, boss, 'PUT', '/api/inventory/purchase-rules', { flowStallDays: 2 });
   });
 
   it('一条需求从提到付：每一步图都跟着单据走；部门同事只看自己看得到的需求单、不带金额；列表里做完的不列', async () => {
     // ① 提需求：停在需求审核
-    const created = (await api(ctx.app, reqA, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(2), unit: '箱', refPriceCents: 45_000 }] })).body.request;
+    const created = (
+      await api(ctx.app, reqA, 'POST', '/api/erp/requests', {
+        clientKey: randomUUID(),
+        lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(2), unit: '箱', refPriceCents: 45_000 }],
+      })
+    ).body.request;
     let mine = await one(reqA, 'request', created.id);
     expect(mine.status).toBe(200);
     expect(mine.body).toMatchObject({ anchor: { kind: 'request', id: created.id, docNo: created.docNo }, variant: 'A', stage: 'review', amountCents: null, end: null });
@@ -455,7 +528,15 @@ describe('采购流程图 · 接口', () => {
 
     // ③ 转采购单并确认：从需求单、从采购单看是同一条；需求单全部下单以后列表里由采购单那一条代表
     const detail = (await api(ctx.app, buyer, 'GET', `/api/erp/requests/${created.id}`)).body;
-    let p = (await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, action: 'submit', lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000, requestLineIds: [detail.lines[0].id] }] })).body.po;
+    let p = (
+      await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId,
+        orderDate: today,
+        action: 'submit',
+        lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000, requestLineIds: [detail.lines[0].id] }],
+      })
+    ).body.po;
     if (p.status === 'submitted') p = (await api(ctx.app, approver, 'POST', `/api/purchase-orders/${p.id}/approve`, {})).body;
     expect(p.status).toBe('approved');
     const byPo = (await one(buyer, 'po', p.id)).body as PurchaseFlow;
@@ -499,7 +580,9 @@ describe('采购流程图 · 接口', () => {
     if (poNow.reimbursement.settlement === 'credit') {
       expect(pay).toMatchObject({ state: 'current' });
       // 今天入库：下个付款日（默认每月 15、30 号）还没过
-      expect(pay.text).toMatch(new RegExp(`^已付 ¥${(poNow.paidCents / 100).toFixed(2)} · 未付 ¥${(poNow.unpaidCents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })} · 下个付款日 \\d+/\\d+$`));
+      expect(pay.text).toMatch(
+        new RegExp(`^已付 ¥${(poNow.paidCents / 100).toFixed(2)} · 未付 ¥${(poNow.unpaidCents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })} · 下个付款日 \\d+/\\d+$`),
+      );
       expect(pay.alert).toBeNull();
       // 部门同事看不到钱
       const hidden = (await one(reqA, 'request', created.id)).body as PurchaseFlow;
@@ -513,7 +596,15 @@ describe('采购流程图 · 接口', () => {
     expect(find((await list(buyer)).flows, 'po', p.id)).toMatchObject({ stage: 'pay' });
 
     // 撤回的采购单：没有这条流程
-    const gone = (await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, action: 'save', lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 100 }] })).body.po;
+    const gone = (
+      await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId,
+        orderDate: today,
+        action: 'save',
+        lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 100 }],
+      })
+    ).body.po;
     expect((await one(buyer, 'po', gone.id)).body).toMatchObject({ stage: 'order' });
     expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${gone.id}/cancel`, { reason: '不买了' })).status).toBe(200);
     expect((await one(buyer, 'po', gone.id)).status).toBe(404);
@@ -522,7 +613,12 @@ describe('采购流程图 · 接口', () => {
   it('两个部门的需求并进一张采购单：部门同事从自己的需求单看流程，看不到另一个部门的物料名称、部门、单号（Codex 2026-11-13 P2）', async () => {
     const other = ((await api(ctx.app, boss, 'GET', '/api/inventory/materials?all=1')).body as { id: number; code: string; name: string }[]).find((m) => m.code === 'M001')!;
     const mk = async (cookie: string, m: { id: number; name: string }) => {
-      const r = (await api(ctx.app, cookie, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines: [{ materialId: m.id, name: m.name, purpose: '客用消耗', qtyMilli: q(1), unit: '箱', refPriceCents: 100 }] })).body.request;
+      const r = (
+        await api(ctx.app, cookie, 'POST', '/api/erp/requests', {
+          clientKey: randomUUID(),
+          lines: [{ materialId: m.id, name: m.name, purpose: '客用消耗', qtyMilli: q(1), unit: '箱', refPriceCents: 100 }],
+        })
+      ).body.request;
       await api(ctx.app, buyer, 'POST', `/api/erp/requests/${r.id}/approve`, {});
       return (await api(ctx.app, buyer, 'GET', `/api/erp/requests/${r.id}`)).body;
     };
@@ -556,7 +652,12 @@ describe('采购流程图 · 接口', () => {
 
   it('流程 B：询价门槛默认就是 ¥1,000（店主图上的数，LC2），估价达到门槛的需求通过后停在「待发起询价」', async () => {
     expect((await api(ctx.app, boss, 'GET', '/api/inventory/purchase-rules')).body.quoteThresholdCents).toBe(100_000);
-    const r = (await api(ctx.app, reqA, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(4), unit: '箱', refPriceCents: 45_000 }] })).body.request;
+    const r = (
+      await api(ctx.app, reqA, 'POST', '/api/erp/requests', {
+        clientKey: randomUUID(),
+        lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(4), unit: '箱', refPriceCents: 45_000 }],
+      })
+    ).body.request;
     await api(ctx.app, buyer, 'POST', `/api/erp/requests/${r.id}/approve`, {});
     const f = (await one(buyer, 'request', r.id)).body as PurchaseFlow;
     expect(f).toMatchObject({ variant: 'B', variantText: '≥ ¥1,000 · 必须 ≥ 2 家比价 + 审批', stage: 'sourcing', amountCents: 180_000 });

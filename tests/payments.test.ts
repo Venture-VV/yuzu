@@ -53,7 +53,9 @@ async function ok<T = any>(res: Promise<{ status: number; body: any }>, status =
 }
 
 /** 起草、审查（财务 → 法务 → 负责人）、签署一份合同 */
-async function signedContract(over: { category?: string; supplierId?: number | null; counterparty?: string; totalCents?: number; paymentTerms?: PaymentTerm[]; warranty?: unknown; lines?: unknown[]; signedOn?: string } = {}) {
+async function signedContract(
+  over: { category?: string; supplierId?: number | null; counterparty?: string; totalCents?: number; paymentTerms?: PaymentTerm[]; warranty?: unknown; lines?: unknown[]; signedOn?: string } = {},
+) {
   const category = over.category ?? 'purchase';
   const total = over.totalCents ?? 1_000_000;
   const content = {
@@ -281,7 +283,8 @@ describe('付款流', () => {
     expect(plain.status).toBe(422);
     expect(plain.body.error.code).toBe('EARLY_REQUIRED');
     expect((await request({ source: { kind: 'contract', contractId: c.id, stage: 'acceptance', amountCents: 100_000 }, early: true, earlyReason: '' })).status).toBe(400);
-    const early = (await ok(request({ source: { kind: 'contract', contractId: c.id, stage: 'acceptance', amountCents: 100_000 }, early: true, earlyReason: '供应商资金紧张，先付一部分' }))).request as PaymentRequestDetail;
+    const early = (await ok(request({ source: { kind: 'contract', contractId: c.id, stage: 'acceptance', amountCents: 100_000 }, early: true, earlyReason: '供应商资金紧张，先付一部分' })))
+      .request as PaymentRequestDetail;
     expect(early).toMatchObject({ early: true, status: 'submitted' });
     expect(early.approval).toMatchObject({ levels: 3, stepLabels: ['财务', '负责人', '店主'] });
     const card = (await api(ctx.app, payer, 'GET', '/api/approvals?tab=mine')).body.find((x: { docId: number; docKind: string }) => x.docKind === 'payment_request' && x.docId === early.id);
@@ -390,7 +393,9 @@ describe('付款流', () => {
     const approved = await approveAll(dl);
     // 核销只能到这份合同的收货单上
     const other = await receiveUnderContract(null, 1);
-    expect((await payReq(approved.id, { amountCents: 100_000, allocations: [{ kind: 'receipt', targetId: other.receipt.id, amountCents: 100_000 }] })).body.error.code).toBe('ALLOCATION_NOT_IN_CONTRACT');
+    expect((await payReq(approved.id, { amountCents: 100_000, allocations: [{ kind: 'receipt', targetId: other.receipt.id, amountCents: 100_000 }] })).body.error.code).toBe(
+      'ALLOCATION_NOT_IN_CONTRACT',
+    );
     const paid = await ok(payReq(approved.id, { amountCents: 100_000, allocations: [{ kind: 'receipt', targetId: rc1.receipt.id, amountCents: 100_000 }] }));
     expect(paid.request.status).toBe('paid');
     p = await plan(c.id);
@@ -405,7 +410,10 @@ describe('付款流', () => {
     const seen = { poTotalCents: row.poTotalCents, receivedCents: row.receivedCents, invoicedCents: row.invoicedCents };
     // 采购不能放行；看到的金额不对拒绝
     expect((await api(ctx.app, buyer, 'POST', `/api/erp/payments/three-way/po/${rc.poId}/release`, { clientKey: randomUUID(), reason: '运费含在发票里', seen })).status).toBe(403);
-    expect((await api(ctx.app, payer, 'POST', `/api/erp/payments/three-way/po/${rc.poId}/release`, { clientKey: randomUUID(), reason: '运费含在发票里', seen: { ...seen, invoicedCents: 1 } })).body.error.code).toBe('THREE_WAY_MOVED');
+    expect(
+      (await api(ctx.app, payer, 'POST', `/api/erp/payments/three-way/po/${rc.poId}/release`, { clientKey: randomUUID(), reason: '运费含在发票里', seen: { ...seen, invoicedCents: 1 } })).body.error
+        .code,
+    ).toBe('THREE_WAY_MOVED');
     const rel = await ok(api(ctx.app, payer, 'POST', `/api/erp/payments/three-way/po/${rc.poId}/release`, { clientKey: randomUUID(), reason: '运费含在发票里', seen }), 200);
     expect(rel.row).toMatchObject({ status: 'released', release: expect.objectContaining({ reason: '运费含在发票里', byName: '钱芬（对账付款）' }) });
     // 再登记一张发票：金额变了，放行失效
@@ -422,7 +430,8 @@ describe('付款流', () => {
   });
 
   it('验收与质保：不合格要写怎么处理；合格放开验收段、质保起算；有未处理的质量问题质保段挂起', async () => {
-    const acc = (body: Record<string, unknown>) => api(ctx.app, buyer, 'POST', `/api/erp/contracts/${c.id}/acceptances`, { clientKey: randomUUID(), acceptedOn: today, signer: '仓库经办', note: '', ...body });
+    const acc = (body: Record<string, unknown>) =>
+      api(ctx.app, buyer, 'POST', `/api/erp/contracts/${c.id}/acceptances`, { clientKey: randomUUID(), acceptedOn: today, signer: '仓库经办', note: '', ...body });
     expect((await acc({ result: 'fail' })).status).toBe(400);
     expect((await acc({ result: 'pass', acceptedOn: shiftDate(today, 1) })).status).toBe(400);
     // 付款的人不能登记验收（维护合同的人登记）
@@ -473,7 +482,14 @@ describe('付款流', () => {
   });
 
   it('服务合同：没有供应商档案，批了以后登记合同付款（不进供应商往来）；冲销后回到待付款', async () => {
-    const s = await signedContract({ category: 'service', supplierId: null, counterparty: '城南保洁公司', totalCents: 300_000, paymentTerms: terms(0, 0, 100, 0), warranty: { basis: 'acceptance', months: 0 } });
+    const s = await signedContract({
+      category: 'service',
+      supplierId: null,
+      counterparty: '城南保洁公司',
+      totalCents: 300_000,
+      paymentTerms: terms(0, 0, 100, 0),
+      warranty: { basis: 'acceptance', months: 0 },
+    });
     let p = await plan(s.id);
     expect(p).toMatchObject({ payMode: 'direct', supplierId: null, payee: '城南保洁公司' });
     await ok(api(ctx.app, buyer, 'POST', `/api/erp/contracts/${s.id}/acceptances`, { clientKey: randomUUID(), acceptedOn: today, result: 'pass', signer: '店长' }));
@@ -505,13 +521,21 @@ describe('付款流', () => {
     const underContract = await request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: rc1.receipt.id, amountCents: 1_000 }] } });
     expect(underContract.body.error.code).toBe('RECEIPT_UNDER_CONTRACT');
     const r = (await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free.receipt.id, amountCents: 30_000 }] } }))).request as PaymentRequestDetail;
-    expect(r).toMatchObject({ amountCents: 30_000, contractId: null, threeWayRequired: true, threeWayOk: true, targets: [expect.objectContaining({ docNo: free.receipt.docNo, amountCents: 30_000 })] });
+    expect(r).toMatchObject({
+      amountCents: 30_000,
+      contractId: null,
+      threeWayRequired: true,
+      threeWayOk: true,
+      targets: [expect.objectContaining({ docNo: free.receipt.docNo, amountCents: 30_000 })],
+    });
     // 别的申请占着 300 元，没结清 500 元：再申请 300 元拒绝，200 元可以
     expect((await request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free.receipt.id, amountCents: 30_000 }] } })).body.error.code).toBe('OVER_REQUESTED');
     const second = (await ok(request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free.receipt.id, amountCents: 20_000 }] } }))).request;
     await ok(api(ctx.app, buyer, 'POST', `/api/erp/payments/requests/${second.id}/void`, { version: second.version, reason: '重复了' }), 200);
     // 没挂合同的不用按提前付款申请
-    expect((await request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free.receipt.id, amountCents: 1_000 }] }, early: true, earlyReason: '急' })).status).toBe(400);
+    expect((await request({ source: { kind: 'payables', supplierId, targets: [{ kind: 'receipt', targetId: free.receipt.id, amountCents: 1_000 }] }, early: true, earlyReason: '急' })).status).toBe(
+      400,
+    );
     const a = await approveAll(r);
     // 要全部核销到申请里选的货款上
     expect((await payReq(a.id, { amountCents: 30_000, prepay: true })).status).toBe(400);
@@ -586,7 +610,10 @@ describe('付款流', () => {
     });
     expect(late.body.error.code).toBe('OP_ABANDONED');
     const r = await ok(request({ source: { kind: 'contract', contractId: fresh.id, stage: 'prepay', amountCents: 1_000 } }));
-    const looked = await ok(api(ctx.app, buyer, 'GET', `/api/erp/ops/${(await ctx.sql<{ clientKey: string }[]>`SELECT client_key FROM payment_requests WHERE id = ${r.request.id}`)[0]!.clientKey}?type=payment_request`), 200);
+    const looked = await ok(
+      api(ctx.app, buyer, 'GET', `/api/erp/ops/${(await ctx.sql<{ clientKey: string }[]>`SELECT client_key FROM payment_requests WHERE id = ${r.request.id}`)[0]!.clientKey}?type=payment_request`),
+      200,
+    );
     expect(looked).toMatchObject({ found: true, refId: r.request.id });
   });
 
@@ -686,9 +713,7 @@ describe('付款规则（8.0.6）', () => {
     expect((await detail(before.id)).approval!.levels).toBe(2); // 已经提交的不回头改
     await ok(setRules({ ownerLevelCents: null }), 200); // 不加店主
     expect((await prepay(6_000_000)).approval).toMatchObject({ levels: 2, stepLabels: ['财务', '负责人'] }); // ¥60,000 也两级
-    const early = await ok(
-      request({ source: { kind: 'contract', contractId: k.id, stage: 'acceptance', amountCents: 1_000_000 }, early: true, earlyReason: '供应商资金周转' }),
-    );
+    const early = await ok(request({ source: { kind: 'contract', contractId: k.id, stage: 'acceptance', amountCents: 1_000_000 }, early: true, earlyReason: '供应商资金周转' }));
     expect((early.request as PaymentRequestDetail).approval!.levels).toBe(3); // 提前付款（P6）照旧三级
     await ok(setRules({ ownerLevelCents: DEFAULT_PAYMENT_RULES.ownerLevelCents }), 200);
     expect((await prepay(1_000_000)).approval!.levels).toBe(2);
@@ -777,14 +802,18 @@ describe('批量付款（8.0.21）', () => {
     expect(after).toMatchObject({ bankPayee: '付款流测试供应商', bankName: '建设银行城西支行', bankAccountTail: '5678', bankStatus: 'pending', bankChangedByName: '钱芬（对账付款）' });
     expect(JSON.stringify(after)).not.toContain('6227000012345678');
     // 采购保存档案的其他内容（带着原样的户名、开户行）不受影响，也不清掉复核状态
-    expect((await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${supplierId}`, { code: sup.code, name: sup.name, contact: '王经理', bankPayee: after.bankPayee, bankName: after.bankName })).status).toBe(200);
+    expect(
+      (await api(ctx.app, buyer, 'PUT', `/api/inventory/suppliers/${supplierId}`, { code: sup.code, name: sup.name, contact: '王经理', bankPayee: after.bankPayee, bankName: after.bankName })).status,
+    ).toBe(200);
     expect((await list()).candidates.find((c) => c.requestId === a.id)).toMatchObject({ bankOk: false, bankUnverified: true, bankAccountTail: '5678' });
     expect((await make([a.id])).body.error.code).toBe('BATCH_BANK_UNVERIFIED');
     const seen = await supOf();
     expect((await api(ctx.app, payer, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678', rowVersion: seen.rowVersion })).status).toBe(403);
     // 另一人（店主）复核：后四位对不上拒绝；看完以后又被改过（换成同样后四位的账号、改了户名）也拒绝；按刷新后的复核
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '0000', rowVersion: seen.rowVersion })).body.error.code).toBe('SUPPLIER_BANK_CHANGED');
-    expect((await api(ctx.app, payer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, { ...bankBody, bankPayee: '付款流测试供应商（新户）', bankAccount: '6227 9999 0000 5678' })).status).toBe(200);
+    expect((await api(ctx.app, payer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, { ...bankBody, bankPayee: '付款流测试供应商（新户）', bankAccount: '6227 9999 0000 5678' })).status).toBe(
+      200,
+    );
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/suppliers/${supplierId}/bank/verify`, { tail: '5678', rowVersion: seen.rowVersion })).body.error.code).toBe('SUPPLIER_BANK_CHANGED');
     expect((await api(ctx.app, payer, 'PUT', `/api/inventory/suppliers/${supplierId}/bank`, bankBody)).status).toBe(200);
     const reread = await supOf();

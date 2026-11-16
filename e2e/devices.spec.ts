@@ -48,7 +48,16 @@ test.describe('设备', () => {
     try {
       await login(page);
       await setPrintMode(page.request, 'network');
-      await postJson(page.request, '/api/devices', { clientKey: randomUUID(), code, name: `测试小票机 ${run}`, kind: 'printer', area: '收银', connection: 'network', host: printer.host, port: printer.port });
+      await postJson(page.request, '/api/devices', {
+        clientKey: randomUUID(),
+        code,
+        name: `测试小票机 ${run}`,
+        kind: 'printer',
+        area: '收银',
+        connection: 'network',
+        host: printer.host,
+        port: printer.port,
+      });
       await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '设备', exact: true }).click();
       const row = page.getByTestId(`device-${code}`);
       await expect(row).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
@@ -103,7 +112,16 @@ test.describe('设备', () => {
     try {
       await login(page);
       await postJson(page.request, '/api/devices', { clientKey: randomUUID(), code: terminal, name: `测试终端 ${run}`, kind: 'terminal', area: '收银', connection: 'none' });
-      await postJson(page.request, '/api/devices', { clientKey: randomUUID(), code: reader, name: `测试读卡器 ${run}`, kind: 'card_reader', area: '收银', connection: 'bridge', hostDeviceCode: terminal, bridgeKey: 'rc300' });
+      await postJson(page.request, '/api/devices', {
+        clientKey: randomUUID(),
+        code: reader,
+        name: `测试读卡器 ${run}`,
+        kind: 'card_reader',
+        area: '收银',
+        connection: 'bridge',
+        hostDeviceCode: terminal,
+        bridgeKey: 'rc300',
+      });
       await page.goto('/devices');
       const panel = page.getByTestId('terminal-panel');
       await panel.getByTestId('terminal-bridge-url').fill(bridge.url);
@@ -126,7 +144,11 @@ test.describe('设备', () => {
       await expect(page.getByTestId(`device-${terminal}`)).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
       await expect(page.getByTestId(`device-${reader}`)).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
       await expect
-        .poll(async () => ((await (await page.request.get('/api/devices/events?type=card&limit=50')).json()) as { deviceCode: string; data: { value: string } }[]).some((e) => e.deviceCode === reader && e.data.value === cardA))
+        .poll(async () =>
+          ((await (await page.request.get('/api/devices/events?type=card&limit=50')).json()) as { deviceCode: string; data: { value: string } }[]).some(
+            (e) => e.deviceCode === reader && e.data.value === cardA,
+          ),
+        )
         .toBe(true);
 
       // 读卡器拔掉：离线
@@ -225,7 +247,10 @@ test.describe('设备', () => {
     await expect(row).toContainText(`后台登记 ${run}（改）`);
 
     await row.getByTestId(`device-edit-${code}`).click();
-    await page.getByRole('dialog', { name: `修改设备 ${code}` }).getByTestId('device-toggle').click();
+    await page
+      .getByRole('dialog', { name: `修改设备 ${code}` })
+      .getByTestId('device-toggle')
+      .click();
     await expect(row).toContainText('已停用');
   });
 

@@ -28,8 +28,7 @@ const q = (n: number) => Math.round(n * 1000);
 const supplier = async (code: string) => (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/suppliers?all=1')).body.find((s: { code: string }) => s.code === code);
 const material = async (code: string) => (await api(ctx.app, ctx.owner, 'GET', '/api/inventory/materials?all=1')).body.find((m: { code: string }) => m.code === code);
 const sourcing = (body: Record<string, unknown>, cookie = buyer) => api(ctx.app, cookie, 'POST', '/api/purchase-sourcing', { clientKey: randomUUID(), ...body });
-const quote = (eventId: number, body: Record<string, unknown>) =>
-  api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${eventId}/quotes`, { clientKey: randomUUID(), payTerms: '月结 30 天', ...body });
+const quote = (eventId: number, body: Record<string, unknown>) => api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${eventId}/quotes`, { clientKey: randomUUID(), payTerms: '月结 30 天', ...body });
 const requestLine = (over: Record<string, unknown>) => ({ purpose: '客用消耗', unit: '箱', link: '', details: '', imageIds: [], ...over });
 // 新产品要带图片：最小的「JPEG」（服务端只核对文件头与大小）
 const jpeg = (seed: string) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(`yuzu-${seed}`)]).toString('base64');
@@ -43,7 +42,9 @@ async function approvedRequest(cookie: string, lines: Record<string, unknown>[])
   return approved.body as { id: number; docNo: string; lines: { id: number }[] };
 }
 const progressOf = async (requestId: number, cookie = buyer) =>
-  ((await api(ctx.app, cookie, 'GET', `/api/erp/requests/${requestId}`)).body.lines as { progress: { state: string; sourcing: { docNo: string } | null; po: { docNo: string } | null } }[]).map((l) => l.progress);
+  ((await api(ctx.app, cookie, 'GET', `/api/erp/requests/${requestId}`)).body.lines as { progress: { state: string; sourcing: { docNo: string } | null; po: { docNo: string } | null } }[]).map(
+    (l) => l.progress,
+  );
 const openIds = async () => ((await api(ctx.app, buyer, 'GET', '/api/erp/requests/open-lines')).body as { id: number }[]).map((l) => l.id);
 
 beforeAll(async () => {
@@ -205,7 +206,15 @@ describe('询价接上需求单（v0.7.29 的已知问题）', () => {
     // 物料不一致；同一行需求重复
     expect((await sourcing({ title: '床单', lines: [{ materialId: other.id, purchaseQtyMilli: q(2), requestLineIds: [lm] }] })).body.error.code).toBe('REQUEST_MATERIAL_MISMATCH');
     expect(
-      (await sourcing({ title: '床单', lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), requestLineIds: [lm] }, { materialId: other.id, purchaseQtyMilli: q(1), requestLineIds: [lm] }] })).status,
+      (
+        await sourcing({
+          title: '床单',
+          lines: [
+            { materialId: mat.id, purchaseQtyMilli: q(2), requestLineIds: [lm] },
+            { materialId: other.id, purchaseQtyMilli: q(1), requestLineIds: [lm] },
+          ],
+        })
+      ).status,
     ).toBe(400);
     // 没通过的需求单
     const pending = await api(ctx.app, reqA, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines: [requestLine({ materialId: mat.id, name: mat.name, qtyMilli: q(1) })] });
@@ -213,7 +222,13 @@ describe('询价接上需求单（v0.7.29 的已知问题）', () => {
     expect((await sourcing({ title: '床单', lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), requestLineIds: [pendingLine] }] })).body.error.code).toBe('REQUEST_NOT_APPROVED');
 
     // 新产品选了物料就能带（需求行没选物料的不核对物料）
-    const ok = await sourcing({ title: '床单与拖鞋', lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), requestLineIds: [lm] }, { materialId: other.id, purchaseQtyMilli: q(1), requestLineIds: [ln] }] });
+    const ok = await sourcing({
+      title: '床单与拖鞋',
+      lines: [
+        { materialId: mat.id, purchaseQtyMilli: q(2), requestLineIds: [lm] },
+        { materialId: other.id, purchaseQtyMilli: q(1), requestLineIds: [ln] },
+      ],
+    });
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
     expect(await progressOf(r.id)).toEqual([expect.objectContaining({ state: 'sourcing' }), expect.objectContaining({ state: 'sourcing' })]);
     // 撤销询价单：需求行回到未下单、重新出现在待转采购单里
@@ -232,12 +247,22 @@ describe('询价接上需求单（v0.7.29 的已知问题）', () => {
 
   it('补货建议：询价中、已定标没转出的询价单算在途；转出采购单以后按采购单算；自检报出一行需求在两张询价单里', async () => {
     const res = await api(ctx.app, buyer, 'POST', '/api/inventory/materials', {
-      code: 'SQ01', name: '洗衣液（询价）', category: '测试', inventoryUnit: '桶', purchaseUnit: '箱', purchaseFactorMilli: q(4), refPriceCents: 20_000, defaultSupplierId: s1.id, lowStockMilli: q(8),
+      code: 'SQ01',
+      name: '洗衣液（询价）',
+      category: '测试',
+      inventoryUnit: '桶',
+      purchaseUnit: '箱',
+      purchaseFactorMilli: q(4),
+      refPriceCents: 20_000,
+      defaultSupplierId: s1.id,
+      lowStockMilli: q(8),
     });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     const x = await material('SQ01');
     const lineOf = async () => {
-      const d = (await api(ctx.app, keeper, 'GET', '/api/purchase-suggestions')).body as { groups: { lines: { materialId: number; inTransitMilli: number; openPos: string[]; suggestedPurchaseMilli: number }[] }[] };
+      const d = (await api(ctx.app, keeper, 'GET', '/api/purchase-suggestions')).body as {
+        groups: { lines: { materialId: number; inTransitMilli: number; openPos: string[]; suggestedPurchaseMilli: number }[] }[];
+      };
       return d.groups.flatMap((g) => g.lines).find((l) => l.materialId === x.id) ?? null;
     };
     expect(await lineOf()).toMatchObject({ inTransitMilli: 0, suggestedPurchaseMilli: q(2) });

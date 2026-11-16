@@ -39,7 +39,10 @@ export async function withReportScope<T>(db: Db, req: FastifyRequest, fn: () => 
   if (scope !== 'all' || !req.actor) return fn();
   const stores = await allowedStores(db, req.actor);
   if (stores.length <= 1) return fn();
-  return runWithStoreSet(stores.map((x) => Number(x.id)).sort((a, b) => a - b), fn);
+  return runWithStoreSet(
+    stores.map((x) => Number(x.id)).sort((a, b) => a - b),
+    fn,
+  );
 }
 
 /** 门店之间的储值结算（只读）：消费店 ≠ 开卡店的储值消费（撤销冲回），按「开卡店 → 消费店」汇总，再两两轧差 */
@@ -88,11 +91,7 @@ export async function switchStore(db: Db, actor: Pick<Actor, 'id' | 'role'>, tok
     ON CONFLICT (staff_id, store_id) DO UPDATE SET last_used_at = now()`;
 }
 
-const Code = z
-  .string('请填写门店代码')
-  .trim()
-  .toUpperCase()
-  .regex(STORE_CODE_PATTERN, '门店代码是 2–8 位大写字母或数字，例如 FT');
+const Code = z.string('请填写门店代码').trim().toUpperCase().regex(STORE_CODE_PATTERN, '门店代码是 2–8 位大写字母或数字，例如 FT');
 const StoreInput = z.object({
   code: Code,
   name: z.string('请填写门店名称').trim().min(1, '请填写门店名称').max(32, '门店名称最多 32 个字'),
@@ -202,7 +201,14 @@ export function registerStoreRoutes(app: FastifyInstance, { sql }: Deps) {
         const [row] = await tx<{ id: number }[]>`
           INSERT INTO legal_entities (name, tax_no, address_phone, bank_name, bank_account)
           VALUES (${input.name}, ${input.taxNo}, ${input.addressPhone}, ${input.bankName}, ${input.bankAccount}) RETURNING id`;
-        await writeAudit(tx, { staffId: req.actor.id, action: 'entity_saved', targetType: 'legal_entity', targetId: row!.id, detail: { created: { ...input, bankAccount: input.bankAccount ? `****${input.bankAccount.slice(-4)}` : '' } }, ip: req.ip });
+        await writeAudit(tx, {
+          staffId: req.actor.id,
+          action: 'entity_saved',
+          targetType: 'legal_entity',
+          targetId: row!.id,
+          detail: { created: { ...input, bankAccount: input.bankAccount ? `****${input.bankAccount.slice(-4)}` : '' } },
+          ip: req.ip,
+        });
         return Number(row!.id);
       });
       reply.code(201);
@@ -230,7 +236,14 @@ export function registerStoreRoutes(app: FastifyInstance, { sql }: Deps) {
           UPDATE legal_entities SET name = ${input.name}, tax_no = ${input.taxNo}, address_phone = ${input.addressPhone}, bank_name = ${input.bankName},
                  bank_account = ${input.bankAccount}, active = ${input.active}, version = version + 1, updated_at = now()
           WHERE id = ${id}`;
-        await writeAudit(tx, { staffId: req.actor.id, action: 'entity_saved', targetType: 'legal_entity', targetId: id, detail: { updated: { ...input, bankAccount: input.bankAccount ? `****${input.bankAccount.slice(-4)}` : '' } }, ip: req.ip });
+        await writeAudit(tx, {
+          staffId: req.actor.id,
+          action: 'entity_saved',
+          targetType: 'legal_entity',
+          targetId: id,
+          detail: { updated: { ...input, bankAccount: input.bankAccount ? `****${input.bankAccount.slice(-4)}` : '' } },
+          ip: req.ip,
+        });
       });
     } catch (error) {
       if (isUniqueViolation(error, 'legal_entities_name_uq')) throw conflict('ENTITY_NAME_TAKEN', `已经有「${input.name}」这个主体`);
@@ -242,9 +255,7 @@ export function registerStoreRoutes(app: FastifyInstance, { sql }: Deps) {
   // 员工挂哪几家店（员工档案里的「门店」）
   // 启用的公司主体（8.0.22）：合同、付款、银行账户、开票里选「我方」用；只有一个主体时页面不显示选择
   app.get('/api/entities', { preHandler: guardAny('contract.read', 'payable.read', 'invoice.issue', 'settings.manage') }, async () =>
-    sql<{ id: number; name: string; taxNo: string }[]>`SELECT id, name, tax_no FROM legal_entities WHERE active ORDER BY id`.then((rows) =>
-      rows.map((r) => ({ ...r, id: Number(r.id) })),
-    ),
+    sql<{ id: number; name: string; taxNo: string }[]>`SELECT id, name, tax_no FROM legal_entities WHERE active ORDER BY id`.then((rows) => rows.map((r) => ({ ...r, id: Number(r.id) }))),
   );
 
   // 门店之间的储值结算表（第 7 节）：只是报表，不记账；只列自己能进的门店之间的

@@ -303,8 +303,7 @@ const INTRO: Record<InvDocType, string> = {
 };
 
 /** 本部门小仓的说明（v0.7.11） */
-const URGENT_INTRO =
-  '急采：没有采购单、临时给部门买的东西，由采购登记。合计不超过急采上限；提交后按金额分级审批，批了以后仓库到部门验收、进部门小仓，之后补采购单（提交即确认）。';
+const URGENT_INTRO = '急采：没有采购单、临时给部门买的东西，由采购登记。合计不超过急采上限；提交后按金额分级审批，批了以后仓库到部门验收、进部门小仓，之后补采购单（提交即确认）。';
 
 const DEPT_INTRO: Partial<Record<InvDocType, string>> = {
   direct_use: '本部门小仓里用掉的东西（客用、日耗品等），从本部门小仓扣。',
@@ -395,15 +394,7 @@ function NewDoc({ type, scope }: { type: InvDocType; scope: FormScope }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [round, type, session.calendarToday, prefillSource, prefillPo]);
   return (
-    <DocForm
-      key={round}
-      scope={scope}
-      type={type}
-      initial={initial.form}
-      restored={initial.restored}
-      prefillMaterialId={round === 0 ? prefillMaterial : null}
-      onAgain={() => setRound((r) => r + 1)}
-    />
+    <DocForm key={round} scope={scope} type={type} initial={initial.form} restored={initial.restored} prefillMaterialId={round === 0 ? prefillMaterial : null} onAgain={() => setRound((r) => r + 1)} />
   );
 }
 
@@ -494,8 +485,7 @@ function DocForm({
 
   const patch = (p: Partial<FormState>) => setForm((f) => ({ ...f, ...p }));
   const damageReasons = useReasons('damageReasons');
-  const patchLine = (key: string, p: Partial<LineDraft>) =>
-    setForm((f) => ({ ...f, lines: f.lines.map((l) => (l.key === key ? { ...l, ...p } : l)) }));
+  const patchLine = (key: string, p: Partial<LineDraft>) => setForm((f) => ({ ...f, lines: f.lines.map((l) => (l.key === key ? { ...l, ...p } : l)) }));
   const removeLine = (key: string) => setForm((f) => ({ ...f, lines: f.lines.filter((l) => l.key !== key) }));
 
   // 加入物料后把焦点交给新行的数量框：在提交渲染后同步移动，连续快速输入也不会落回搜索框
@@ -716,29 +706,29 @@ function DocForm({
       ? '请选择供应商'
       : urgent && !form.departmentId
         ? '请选给哪个部门买的'
-      : type === 'receipt' && central && !form.purchaseOrderId
-        ? '请选择采购单（没有采购单不能收货；没有采购单的临时采购由采购在「采购 → 急采」登记）'
-        : urgentOver
+        : type === 'receipt' && central && !form.purchaseOrderId
+          ? '请选择采购单（没有采购单不能收货；没有采购单的临时采购由采购在「采购 → 急采」登记）'
+          : urgentOver
             ? `急采合计超过上限 ¥${((data.urgentCapCents ?? 0) / 100).toFixed(2)}，请先开采购单`
             : type === 'issue' && !form.departmentId
-        ? '请选择领料部门'
-        : type === 'issue' && !form.handler.trim()
-          ? '请填写领料人'
-          : isReturn && !form.sourceDocId
-            ? type === 'issue_return'
-              ? '请选择原领料单'
-              : '请选择原收货单'
-            : type === 'direct_use' && !form.usePurpose
-              ? '请选择用途'
-            : (type === 'direct_use' || type === 'damage' || type === 'supplier_return') && form.note.trim().length < 2
-              ? type === 'direct_use'
-                ? '请填写说明'
-                : type === 'damage'
-                  ? '请填写报损原因'
-                  : '请填写退货原因'
-              : form.docDate > session.calendarToday
-                ? '单据日期不能晚于今天'
-                : null;
+              ? '请选择领料部门'
+              : type === 'issue' && !form.handler.trim()
+                ? '请填写领料人'
+                : isReturn && !form.sourceDocId
+                  ? type === 'issue_return'
+                    ? '请选择原领料单'
+                    : '请选择原收货单'
+                  : type === 'direct_use' && !form.usePurpose
+                    ? '请选择用途'
+                    : (type === 'direct_use' || type === 'damage' || type === 'supplier_return') && form.note.trim().length < 2
+                      ? type === 'direct_use'
+                        ? '请填写说明'
+                        : type === 'damage'
+                          ? '请填写报损原因'
+                          : '请填写退货原因'
+                      : form.docDate > session.calendarToday
+                        ? '单据日期不能晚于今天'
+                        : null;
   const noLines = activeRows.length === 0;
   const blocking =
     headerError ??
@@ -898,7 +888,11 @@ function DocForm({
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to={scope.home} className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label={central ? '返回库存' : urgent ? '返回急采' : '返回本部门小仓'}>
+            <Link
+              to={scope.home}
+              className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink"
+              aria-label={central ? '返回库存' : urgent ? '返回急采' : '返回本部门小仓'}
+            >
               <ArrowLeft className="size-[18px]" />
             </Link>
             <span className={cn('flex size-8 items-center justify-center rounded-full', visual.tone)}>
@@ -956,11 +950,11 @@ function DocForm({
               <>
                 <Field label="供应商" htmlFor="supplier">
                   <Select
-                  id="supplier"
-                  value={form.supplierId ?? ''}
-                  disabled={locked}
-                  onChange={(e) => patch({ supplierId: Number(e.target.value) || null, ...(form.purchaseOrderId ? { purchaseOrderId: null, lines: [] } : {}) })}
-                >
+                    id="supplier"
+                    value={form.supplierId ?? ''}
+                    disabled={locked}
+                    onChange={(e) => patch({ supplierId: Number(e.target.value) || null, ...(form.purchaseOrderId ? { purchaseOrderId: null, lines: [] } : {}) })}
+                  >
                     <option value="">选择供应商</option>
                     {data.suppliers?.map((s) => (
                       <option key={s.id} value={s.id}>
@@ -1011,7 +1005,14 @@ function DocForm({
                   </Field>
                 )}
                 <Field label={urgent ? '经手人' : '收货人'} htmlFor="handler">
-                  <Input id="handler" value={form.handler} disabled={locked} onChange={(e) => patch({ handler: e.target.value })} placeholder={urgent ? '实际去买的人' : '默认为当前账号'} className="h-10" />
+                  <Input
+                    id="handler"
+                    value={form.handler}
+                    disabled={locked}
+                    onChange={(e) => patch({ handler: e.target.value })}
+                    placeholder={urgent ? '实际去买的人' : '默认为当前账号'}
+                    className="h-10"
+                  />
                 </Field>
               </>
             )}
@@ -1046,13 +1047,7 @@ function DocForm({
 
             {sourceType && (
               <>
-                <SourcePicker
-                  type={sourceType}
-                  value={form.sourceDocId}
-                  disabled={locked || !!editing}
-                  onChange={chooseSource}
-                  className="sm:col-span-2 lg:col-span-2"
-                />
+                <SourcePicker type={sourceType} value={form.sourceDocId} disabled={locked || !!editing} onChange={chooseSource} className="sm:col-span-2 lg:col-span-2" />
                 {type === 'issue_return' && (
                   <Field label="退回人" htmlFor="handler">
                     <Input id="handler" value={form.handler} disabled={locked} onChange={(e) => patch({ handler: e.target.value })} className="h-10" />
@@ -1093,11 +1088,7 @@ function DocForm({
                 )}
               </>
             )}
-            <Field
-              label={type === 'direct_use' ? '说明' : type === 'damage' ? '报损原因' : type === 'supplier_return' ? '退货原因' : '备注'}
-              htmlFor="note"
-              className={NOTE_SPAN[type]}
-            >
+            <Field label={type === 'direct_use' ? '说明' : type === 'damage' ? '报损原因' : type === 'supplier_return' ? '退货原因' : '备注'} htmlFor="note" className={NOTE_SPAN[type]}>
               {type === 'damage' && !locked && <ReasonChips reasons={damageReasons} value={form.note} onPick={(r) => patch({ note: r })} testId="damage-reason-chips" />}
               <Input
                 id="note"
@@ -1113,7 +1104,8 @@ function DocForm({
 
           {urgent && (
             <Notice tone={urgentOver ? 'error' : 'warning'} title={`急采：合计不超过 ¥${((data.urgentCapCents ?? 0) / 100).toFixed(2)}`} icon={<CircleAlert className="size-5" />}>
-              没有采购单的临时采购登记成急采：提交后按金额分级审批，批了以后仓库到部门验收、确认后才进部门小仓；之后在「采购 → 急采」里补采购单（提交即确认）。上限是采购规则里急采分级的最高一档 <SimRule className="align-middle" />
+              没有采购单的临时采购登记成急采：提交后按金额分级审批，批了以后仓库到部门验收、确认后才进部门小仓；之后在「采购 → 急采」里补采购单（提交即确认）。上限是采购规则里急采分级的最高一档{' '}
+              <SimRule className="align-middle" />
             </Notice>
           )}
           {type === 'receipt' && po.data && form.purchaseOrderId === po.data.id && (
@@ -1131,7 +1123,9 @@ function DocForm({
               <h2 className="text-[14px] font-bold">明细</h2>
               <span className="num text-[12.5px] text-ink-3">{lineCount} 行</span>
               <div className="flex-1" />
-              {type === 'issue' && <UsualChips departmentId={form.departmentId} materials={materials} taken={takenMaterials} disabled={locked} onAdd={(m, qty) => addMaterial(m, { qty: qtyEntryFromMilli(qty, m) })} />}
+              {type === 'issue' && (
+                <UsualChips departmentId={form.departmentId} materials={materials} taken={takenMaterials} disabled={locked} onAdd={(m, qty) => addMaterial(m, { qty: qtyEntryFromMilli(qty, m) })} />
+              )}
               {type === 'count' && !locked && (
                 <CountFillMenu
                   materials={scope.kind !== 'dept' ? (data.materials ?? []) : (data.materials ?? []).filter((m) => m.hasMoves && !m.counterUse)}
@@ -1226,9 +1220,7 @@ function DocForm({
                 </>
               }
             >
-              {phase.notFound
-                ? '服务器上没有这张单，可以按原内容重新提交（使用同一操作编号，不会重复生效）。'
-                : '单据可能已经生效。请先查回结果，不要重新填写，以免重复记账。'}
+              {phase.notFound ? '服务器上没有这张单，可以按原内容重新提交（使用同一操作编号，不会重复生效）。' : '单据可能已经生效。请先查回结果，不要重新填写，以免重复记账。'}
             </Notice>
           )}
         </div>
@@ -1275,14 +1267,7 @@ function DocForm({
               存草稿
             </Button>
           )}
-          <Button
-            variant="primary"
-            size="lg"
-            disabled={locked || !!blocking}
-            loading={phase.kind === 'submitting'}
-            icon={<CircleCheck className="size-[18px]" />}
-            onClick={() => submit('submit')}
-          >
+          <Button variant="primary" size="lg" disabled={locked || !!blocking} loading={phase.kind === 'submitting'} icon={<CircleCheck className="size-[18px]" />} onClick={() => submit('submit')}>
             {urgent ? '提交急采' : needsApproval ? (approveNow ? '提交并确认' : '提交确认') : `确认${meta.verb}`}
           </Button>
         </div>
@@ -1412,17 +1397,7 @@ function LineRow({
       <Trash2 className="size-4" />
     </IconButton>
   );
-  const note = (
-    <Input
-      value={line.note}
-      onChange={(e) => onPatch({ note: e.target.value })}
-      disabled={locked}
-      placeholder="备注"
-      aria-label="行备注"
-      maxLength={100}
-      className="h-10 text-[13px]"
-    />
-  );
+  const note = <Input value={line.note} onChange={(e) => onPatch({ note: e.target.value })} disabled={locked} placeholder="备注" aria-label="行备注" maxLength={100} className="h-10 text-[13px]" />;
 
   return (
     <li className={cn('grid grid-cols-1 items-start gap-x-3 gap-y-2 px-5 py-3', type !== 'receipt' && '@lg:grid-cols-2', GRID[type], row.error && line.qty.text && 'bg-clay-soft/25')}>
@@ -1507,9 +1482,7 @@ function LineRow({
           )}
 
           {type === 'supplier_return' ? (
-            <Cell label="扣款">
-              {row.amount != null ? <Money cents={row.amount} className="text-[14px] font-bold text-clay @3xl:pt-2.5" /> : <span className="text-ink-4">—</span>}
-            </Cell>
+            <Cell label="扣款">{row.amount != null ? <Money cents={row.amount} className="text-[14px] font-bold text-clay @3xl:pt-2.5" /> : <span className="text-ink-4">—</span>}</Cell>
           ) : (
             note
           )}
@@ -1606,13 +1579,7 @@ function ReceiptCells({
       </div>
       <div className="min-w-0">
         {caption('送达数量')}
-        <QtyInput
-          label="送达数量"
-          material={m}
-          value={line.delivered}
-          inputRef={qtyRef}
-          onChange={(v) => onPatch(line.acceptedTouched ? { delivered: v } : { delivered: v, accepted: v })}
-        />
+        <QtyInput label="送达数量" material={m} value={line.delivered} inputRef={qtyRef} onChange={(v) => onPatch(line.acceptedTouched ? { delivered: v } : { delivered: v, accepted: v })} />
       </div>
       <div className="min-w-0">
         {caption('合格实收')}
@@ -1657,14 +1624,40 @@ function ReceiptCells({
       {m.expiryTracked && (
         <div className="flex flex-wrap items-center gap-2 @lg:col-span-3 @5xl:col-span-full" data-testid="receipt-expiry">
           <span className="text-[12px] font-semibold text-ink-3">效期</span>
-          <Input fullWidth={false} value={line.batchNo ?? ''} disabled={locked} onChange={(e) => onPatch({ batchNo: e.target.value })} placeholder="批号（选填）" maxLength={40} className="h-9 w-36 text-[13px]" aria-label="批号" />
+          <Input
+            fullWidth={false}
+            value={line.batchNo ?? ''}
+            disabled={locked}
+            onChange={(e) => onPatch({ batchNo: e.target.value })}
+            placeholder="批号（选填）"
+            maxLength={40}
+            className="h-9 w-36 text-[13px]"
+            aria-label="批号"
+          />
           <label className="flex items-center gap-1 text-[12px] text-ink-3">
             生产日期
-            <Input fullWidth={false} type="date" value={line.producedOn ?? ''} disabled={locked} onChange={(e) => onPatch({ producedOn: e.target.value })} className="h-9 w-36 text-[13px]" aria-label="生产日期" />
+            <Input
+              fullWidth={false}
+              type="date"
+              value={line.producedOn ?? ''}
+              disabled={locked}
+              onChange={(e) => onPatch({ producedOn: e.target.value })}
+              className="h-9 w-36 text-[13px]"
+              aria-label="生产日期"
+            />
           </label>
           <label className="flex items-center gap-1 text-[12px] text-ink-3">
             到期日
-            <Input fullWidth={false} type="date" value={line.expiresOn ?? ''} disabled={locked} onChange={(e) => onPatch({ expiresOn: e.target.value })} className="h-9 w-36 text-[13px]" aria-label="到期日" data-testid="receipt-expires-on" />
+            <Input
+              fullWidth={false}
+              type="date"
+              value={line.expiresOn ?? ''}
+              disabled={locked}
+              onChange={(e) => onPatch({ expiresOn: e.target.value })}
+              className="h-9 w-36 text-[13px]"
+              aria-label="到期日"
+              data-testid="receipt-expires-on"
+            />
           </label>
           {m.shelfLifeDays && <span className="text-[12px] text-ink-3">保质期 {m.shelfLifeDays} 天（只填生产日期的按它算）</span>}
         </div>
@@ -1676,7 +1669,19 @@ function ReceiptCells({
 
 // ───────────────────────── 辅助选择 ─────────────────────────
 
-function SourcePicker({ type, value, onChange, disabled, className }: { type: 'issue' | 'receipt'; value: number | null; onChange: (id: number | null) => void; disabled?: boolean; className?: string }) {
+function SourcePicker({
+  type,
+  value,
+  onChange,
+  disabled,
+  className,
+}: {
+  type: 'issue' | 'receipt';
+  value: number | null;
+  onChange: (id: number | null) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
   const docs = useInvDocs({ type, status: 'confirmed' });
   const [q, setQ] = useState('');
   const list = (docs.data ?? []).filter((d: InvDocSummary) => !q || `${d.docNo} ${d.partyName ?? ''} ${d.summary}`.includes(q.trim()));
@@ -1705,7 +1710,19 @@ function SourcePicker({ type, value, onChange, disabled, className }: { type: 'i
   );
 }
 
-function UsualChips({ departmentId, materials, taken, onAdd, disabled }: { departmentId: number | null; materials: Map<number, Material>; taken: Set<number>; onAdd: (m: Material, qty: number) => void; disabled?: boolean }) {
+function UsualChips({
+  departmentId,
+  materials,
+  taken,
+  onAdd,
+  disabled,
+}: {
+  departmentId: number | null;
+  materials: Map<number, Material>;
+  taken: Set<number>;
+  onAdd: (m: Material, qty: number) => void;
+  disabled?: boolean;
+}) {
   const usual = useUsual(departmentId);
   const items = (usual.data ?? []).map((u) => ({ ...u, m: materials.get(u.materialId) })).filter((u) => u.m && !taken.has(u.materialId));
   if (!departmentId || items.length === 0) return null;
@@ -1812,4 +1829,3 @@ function DoneView({ scope, type, doc, replayed, onAgain }: { scope: FormScope; t
     </>
   );
 }
-

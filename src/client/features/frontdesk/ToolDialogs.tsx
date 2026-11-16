@@ -78,34 +78,18 @@ export function FindGuestDialog({ open, tags, onClose, onPick }: { open: boolean
 }
 
 /** 锁牌 / 解锁：空闲手牌丢失、损坏时锁定，找回或修好后解锁（值班经理、店总、店主） */
-export function TagLockDialog({
-  open,
-  tags,
-  initialCode,
-  onClose,
-  onDone,
-}: {
-  open: boolean;
-  tags: BoardTag[];
-  initialCode?: string;
-  onClose: () => void;
-  onDone: (message: string) => void;
-}) {
+export function TagLockDialog({ open, tags, initialCode, onClose, onDone }: { open: boolean; tags: BoardTag[]; initialCode?: string; onClose: () => void; onDone: (message: string) => void }) {
   const can = useCan();
   const lockReasons = useReasons('lockReasons');
   const [code, setCode] = useState('');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useResetOnOpen(
-    open,
-    () => {
-      setCode(initialCode ?? '');
-      setReason('');
-      setError(null);
-    },
-    [initialCode],
-  );
+  useResetOnOpen(open, () => {
+    setCode(initialCode ?? '');
+    setReason('');
+    setError(null);
+  }, [initialCode]);
 
   const c = normalizeTagCode(code);
   const tag = c ? (tags.find((t) => t.code === c) ?? uniqueTagMatch(tags, c)) : null;
@@ -187,7 +171,11 @@ export function TagLockDialog({
             </span>
           </div>
         )}
-        {tag?.visit && <Notice tone="warning" title="这张牌上有在店客人，不能直接锁定">丢失或损坏时，请在手牌账单里给客人换牌并勾选「锁定原手牌」。</Notice>}
+        {tag?.visit && (
+          <Notice tone="warning" title="这张牌上有在店客人，不能直接锁定">
+            丢失或损坏时，请在手牌账单里给客人换牌并勾选「锁定原手牌」。
+          </Notice>
+        )}
         {tag && !tag.locked && !tag.visit && (
           <Field label="锁定原因">
             <div className="flex flex-wrap gap-1.5">

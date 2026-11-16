@@ -23,7 +23,10 @@ export const useOverview = () => useQuery({ queryKey: ['canteen', 'overview'], q
 
 export function CanteenPage() {
   return (
-    <AdminPage section="canteen" description="员工手机上的「柚子饭堂」：扫码自己登记、看菜单、点赞、亮饭卡码、跟柚子说；食堂负责人扫码打卡、厨师发布菜单。这里管注册二维码与名单、看用餐记录、回员工的话。">
+    <AdminPage
+      section="canteen"
+      description="员工手机上的「柚子饭堂」：扫码自己登记、看菜单、点赞、亮饭卡码、跟柚子说；食堂负责人扫码打卡、厨师发布菜单。这里管注册二维码与名单、看用餐记录、回员工的话。"
+    >
       {/* 模块关着时不画里面的内容（里面一进来就取数，接口会被拒绝） */}
       <AdminModuleGate section="canteen">
         <CanteenBody />
@@ -37,29 +40,29 @@ function CanteenBody() {
   const overview = useOverview();
   const unread = overview.data?.feedbackUnread ?? 0;
   return (
-      <div className="space-y-5" data-testid="canteen-page">
-        <Segmented<Tab>
-          value={tab}
-          onChange={setTab}
-          ariaLabel="员工食堂"
-          options={[
-            { value: 'today', label: '今天' },
-            { value: 'roster', label: '员工名单' },
-            { value: 'menus', label: '菜单' },
-            { value: 'records', label: '用餐记录' },
-            { value: 'mailbox', label: unread ? `柚子信箱 · ${unread}` : '柚子信箱' },
-            { value: 'reminders', label: '饭点提醒' },
-            { value: 'settings', label: '设置' },
-          ]}
-        />
-        {tab === 'today' && <TodayTab go={setTab} />}
-        {tab === 'roster' && <RosterTab />}
-        {tab === 'menus' && <MenusTab />}
-        {tab === 'records' && <RecordsTab />}
-        {tab === 'mailbox' && <FeedbackTab />}
-        {tab === 'reminders' && <RemindersTab />}
-        {tab === 'settings' && <SettingsTab />}
-      </div>
+    <div className="space-y-5" data-testid="canteen-page">
+      <Segmented<Tab>
+        value={tab}
+        onChange={setTab}
+        ariaLabel="员工食堂"
+        options={[
+          { value: 'today', label: '今天' },
+          { value: 'roster', label: '员工名单' },
+          { value: 'menus', label: '菜单' },
+          { value: 'records', label: '用餐记录' },
+          { value: 'mailbox', label: unread ? `柚子信箱 · ${unread}` : '柚子信箱' },
+          { value: 'reminders', label: '饭点提醒' },
+          { value: 'settings', label: '设置' },
+        ]}
+      />
+      {tab === 'today' && <TodayTab go={setTab} />}
+      {tab === 'roster' && <RosterTab />}
+      {tab === 'menus' && <MenusTab />}
+      {tab === 'records' && <RecordsTab />}
+      {tab === 'mailbox' && <FeedbackTab />}
+      {tab === 'reminders' && <RemindersTab />}
+      {tab === 'settings' && <SettingsTab />}
+    </div>
   );
 }
 
@@ -86,7 +89,8 @@ function TodayTab({ go }: { go: (t: Tab) => void }) {
     <div className="space-y-5">
       {!o.portOpen && (
         <Notice tone="warning" title="这台 yuzu 还没开员工端口" data-testid="canteen-port-closed">
-          员工的手机要经员工端口打开「柚子饭堂」：部署时设 <code>CANTEEN_PORT</code> 与 <code>CANTEEN_CODE_SECRET</code>，再经网关服务器的 HTTPS 转发（docs/CANTEEN.md 第 9 节）。名单、开通卡片可以先在这里准备好。
+          员工的手机要经员工端口打开「柚子饭堂」：部署时设 <code>CANTEEN_PORT</code> 与 <code>CANTEEN_CODE_SECRET</code>，再经网关服务器的 HTTPS 转发（docs/CANTEEN.md 第 9
+          节）。名单、开通卡片可以先在这里准备好。
         </Notice>
       )}
       {!ready && (
@@ -114,7 +118,11 @@ function TodayTab({ go }: { go: (t: Tab) => void }) {
           <Card key={m} className={`p-4 ${o.today.current?.meal === m ? 'ring-2 ring-yuzu' : ''}`} data-testid={`canteen-count-${m}`}>
             <p className="text-[13px] font-semibold text-ink-3">
               {MEAL_EMOJI[m]} 今天{MEAL_LABELS[m]}
-              {o.today.current?.meal === m && <Badge tone="yuzu" className="ml-1.5">开饭中</Badge>}
+              {o.today.current?.meal === m && (
+                <Badge tone="yuzu" className="ml-1.5">
+                  开饭中
+                </Badge>
+              )}
             </p>
             <p className="num mt-1 text-[30px] leading-none font-bold">{o.today.counts[m]}</p>
             <p className="mt-1 text-[12px] text-ink-3">人</p>
@@ -186,7 +194,15 @@ function TodayTab({ go }: { go: (t: Tab) => void }) {
       )}
 
       <Card className="p-5">
-        <SectionTitle aside={<span className="text-[12.5px] text-ink-3">名单：在用 {o.people.active} 位，已开通 {o.people.activated} 位</span>}>今天刚打卡的</SectionTitle>
+        <SectionTitle
+          aside={
+            <span className="text-[12.5px] text-ink-3">
+              名单：在用 {o.people.active} 位，已开通 {o.people.activated} 位
+            </span>
+          }
+        >
+          今天刚打卡的
+        </SectionTitle>
         {o.today.recent.length === 0 ? (
           <p className="mt-4 text-[13px] text-ink-3">今天还没有人打卡</p>
         ) : (

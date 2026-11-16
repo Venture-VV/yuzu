@@ -66,7 +66,12 @@ export function ReceivablesPage() {
           ) : accounts.isPending ? (
             <Skeleton className="h-48" />
           ) : accounts.data.length === 0 ? (
-            <EmptyState art="leaf" title="还没有协议单位" description={manage ? '点「新增协议单位」登记合作的公司、单位；前台结账时就能挂账到这里。' : undefined} className="rounded-lg border border-dashed border-line-strong" />
+            <EmptyState
+              art="leaf"
+              title="还没有协议单位"
+              description={manage ? '点「新增协议单位」登记合作的公司、单位；前台结账时就能挂账到这里。' : undefined}
+              className="rounded-lg border border-dashed border-line-strong"
+            />
           ) : (
             <ul className="grid gap-2.5 md:grid-cols-2" data-testid="ar-accounts">
               {accounts.data.map((a) => (
@@ -238,7 +243,14 @@ function CollectionDialog({ account, onClose }: { account: ArAccount | null; onC
     setError(null);
     const body = { clientKey: uuid(), accountId: account.id, collectedOn, method, amountCents: cents, evidence: evidence.trim(), note: note.trim() };
     try {
-      await sendErpOp({ key: body.clientKey, type: 'ar_collection', url: '/api/erp/receivables/collections', body, summary: `${account.name} 回款 ${formatYuan(cents)}`, staffName: session.staff.displayName });
+      await sendErpOp({
+        key: body.clientKey,
+        type: 'ar_collection',
+        url: '/api/erp/receivables/collections',
+        body,
+        summary: `${account.name} 回款 ${formatYuan(cents)}`,
+        staffName: session.staff.displayName,
+      });
       toast({ tone: 'success', title: '回款已登记', body: `${account.name} ${formatYuan(cents)}，从最早的挂账开始核销` });
       onClose();
     } catch (e) {
@@ -419,7 +431,10 @@ function AgingView() {
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-[15px] font-bold">账龄</h2>
           {aging.data && <span className="text-[12.5px] text-ink-3">超过 {aging.data.overdueDays} 天没回的标出、进 ERP 待办（经营规则「可调的数值」里改）</span>}
-          <a href="/api/erp/receivables/aging/export" className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3">
+          <a
+            href="/api/erp/receivables/aging/export"
+            className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+          >
             <Download className="size-4" />
             导出
           </a>

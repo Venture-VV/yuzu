@@ -12,7 +12,19 @@ import { Stagger } from '../../lib/motion';
 import { AiSummaryLine } from '../ai/AiSummaryCard';
 
 /** ERP 里的设置页、首页：标题与说明（模块页沿用各自的页头） */
-export function ErpPage({ title, description, actions, tabs, children }: { title: string; description?: ReactNode; actions?: ReactNode; /** 标题下面的一排二级页签（8.0.18） */ tabs?: ReactNode; children: ReactNode }) {
+export function ErpPage({
+  title,
+  description,
+  actions,
+  tabs,
+  children,
+}: {
+  title: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+  /** 标题下面的一排二级页签（8.0.18） */ tabs?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="mx-auto w-full max-w-[1080px] px-4 py-5 md:px-7 md:py-6">
       <div className={cn('flex flex-wrap items-end gap-x-4 gap-y-2', tabs ? 'mb-3' : 'mb-5')}>

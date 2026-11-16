@@ -78,7 +78,17 @@ describe('存草稿', () => {
     const img = await upload(reqA, 'one');
     const key = randomUUID();
     // 没选用途、没填单位、新产品没有链接：提交不了，草稿照样存
-    const first = await save(reqA, key, 0, body([line({ imageIds: [img.id] }), line({ kind: 'material', materialId: mat.id, name: mat.name, qty: '' })], { departmentId: deptA, note: '月底前要', needBy: '2027-01-05', priority: 'urgent' }));
+    const first = await save(
+      reqA,
+      key,
+      0,
+      body([line({ imageIds: [img.id] }), line({ kind: 'material', materialId: mat.id, name: mat.name, qty: '' })], {
+        departmentId: deptA,
+        note: '月底前要',
+        needBy: '2027-01-05',
+        priority: 'urgent',
+      }),
+    );
     expect(first.status).toBe(200);
     const s1 = first.body as RequestDraftSummary;
     expect(s1).toMatchObject({ key, rev: 1, lineCount: 2, title: `玻璃杯、${mat.name}`, request: null });

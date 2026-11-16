@@ -12,16 +12,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import {
-  channelCategory,
-  DEFAULT_CHANNEL_KEY,
-  DEFAULT_PURCHASE_RULES,
-  DEPT_CONFIRM_RULES,
-  PURCHASE_CHANNELS,
-  URGENT_TIERS_MAX,
-  type PurchaseChannelDef,
-  type PurchaseRules,
-} from '@shared/purchasing';
+import { channelCategory, DEFAULT_CHANNEL_KEY, DEFAULT_PURCHASE_RULES, DEPT_CONFIRM_RULES, PURCHASE_CHANNELS, URGENT_TIERS_MAX, type PurchaseChannelDef, type PurchaseRules } from '@shared/purchasing';
 import { APPROVAL_MAX_STAFF } from '@shared/approvals';
 import type { Db } from '../../db';
 import { guard } from '../../auth/guard';
@@ -126,7 +117,10 @@ export function registerPurchaseRulesRoutes(app: FastifyInstance, { sql }: Deps)
         const raw = (req.body ?? {}) as Record<string, unknown>;
         const { channels: _sent, ...patch } = raw;
         const rules = parse(RulesInput, { ...current, ...patch });
-        await assertApprovers(tx, rules.urgentTiers.flatMap((t) => t.approverIds));
+        await assertApprovers(
+          tx,
+          rules.urgentTiers.flatMap((t) => t.approverIds),
+        );
         return { ...rules, channels: PURCHASE_CHANNELS };
       },
       ctxOf(req),

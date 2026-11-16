@@ -61,8 +61,7 @@ function CheckoutSlip({ d }: { d: CheckoutPrint }) {
           />
           <p>
             {b.tableName !== null ? `用餐 ${b.guests} 人 · ` : '在店 '}
-            {Math.floor(b.stayMinutes / 60)} 小时 {b.stayMinutes % 60} 分
-            {b.ticketAmount === 0 && b.ticketSegments !== null && ` · ${b.ticketName}（${ticketTierLabel(b.ticketSegments)}，免票）`}
+            {Math.floor(b.stayMinutes / 60)} 小时 {b.stayMinutes % 60} 分{b.ticketAmount === 0 && b.ticketSegments !== null && ` · ${b.ticketName}（${ticketTierLabel(b.ticketSegments)}，免票）`}
             {b.ticketExtensionMinutes > 0 && ` · 会员浴票延迟 ${minutesText(b.ticketExtensionMinutes)}`}
           </p>
           <div className="mt-1 space-y-0.5">

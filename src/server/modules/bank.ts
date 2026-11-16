@@ -68,7 +68,10 @@ async function getAccount(db: Db, id: number): Promise<BankAccount> {
 const AccountInput = z.object({
   name: z.string('请填写账户名称').trim().min(1, '请填写账户名称').max(30, '账户名称最多 30 个字'),
   bankName: z.string('请填写开户行').trim().min(1, '请填写开户行').max(40, '开户行最多 40 个字'),
-  accountTail: z.string('请填写账号后四位').trim().regex(/^[0-9]{4}$/, '只填账号的后四位数字（完整账号不进系统）'),
+  accountTail: z
+    .string('请填写账号后四位')
+    .trim()
+    .regex(/^[0-9]{4}$/, '只填账号的后四位数字（完整账号不进系统）'),
   template: z.enum(BANK_TEMPLATES, '网银格式不对').default('generic'),
   // 所属公司主体（8.0.22）：不给是当前门店的主体；建好以后不改
   entityId: z.number().int().positive().optional(),
@@ -136,13 +139,16 @@ function readStatement(f: z.infer<typeof FileInput>, saved: ColumnMap) {
     const savedFits = Object.keys(saved).length > 0 && Object.values(saved).every((h) => !h || header.includes(h));
     return f.columnMap ?? (savedFits ? saved : detectColumns(header));
   };
-  const sheet = readSheet(
-    { csv: f.csv, xlsxBase64: f.xlsxBase64 },
-    { dateColumns: DATE_HEADERS, dateColumnsFor: (header) => [mapFor(header).date], findHeader: looksLikeHeader, headerScan: 30 },
-  );
+  const sheet = readSheet({ csv: f.csv, xlsxBase64: f.xlsxBase64 }, { dateColumns: DATE_HEADERS, dateColumnsFor: (header) => [mapFor(header).date], findHeader: looksLikeHeader, headerScan: 30 });
   const map = mapFor(sheet.header);
   const problem = columnMapProblem(map);
-  const parsed = problem ? { lines: [], problems: [] } : parseStatementRows(sheet.header, sheet.rows.map((r) => ({ row: r.row, cells: r.cells })), map);
+  const parsed = problem
+    ? { lines: [], problems: [] }
+    : parseStatementRows(
+        sheet.header,
+        sheet.rows.map((r) => ({ row: r.row, cells: r.cells })),
+        map,
+      );
   return { sheet, map, problem, ...parsed };
 }
 
@@ -151,11 +157,18 @@ async function previewImport(db: Db, raw: unknown): Promise<BankImportPreview> {
   const account = await getAccount(db, f.accountId);
   const r = readStatement(f, account.columnMap);
   const keys = r.lines.map((l) => l.dedupeKey);
-  const [dup] = keys.length
-    ? await db<{ n: number }[]>`SELECT count(*)::int AS n FROM bank_statement_lines WHERE account_id = ${f.accountId} AND dedupe_key IN ${db(keys)}`
-    : [{ n: 0 }];
+  const [dup] = keys.length ? await db<{ n: number }[]>`SELECT count(*)::int AS n FROM bank_statement_lines WHERE account_id = ${f.accountId} AND dedupe_key IN ${db(keys)}` : [{ n: 0 }];
   const [imp] = await db<{ n: number }[]>`SELECT count(*)::int AS n FROM bank_imports WHERE account_id = ${f.accountId} AND file_sha256 = ${r.sheet.sha256}`;
-  return { sha256: r.sheet.sha256, header: r.sheet.header, columnMap: r.map, problem: r.problem, lines: r.lines.slice(0, 200), problems: r.problems.slice(0, 50), duplicates: dup!.n, alreadyImported: imp!.n > 0 };
+  return {
+    sha256: r.sheet.sha256,
+    header: r.sheet.header,
+    columnMap: r.map,
+    problem: r.problem,
+    lines: r.lines.slice(0, 200),
+    problems: r.problems.slice(0, 50),
+    duplicates: dup!.n,
+    alreadyImported: imp!.n > 0,
+  };
 }
 
 const ImportInput = FileInput.and(z.object({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试') }));
@@ -199,7 +212,14 @@ async function importStatement(deps: Deps, raw: unknown, actor: Actor, ip?: stri
     // 记住这个账户的列怎么对（不算改账户，不加版本号）
     await tx`UPDATE bank_accounts SET column_map = ${tx.json(r.map as never)} WHERE id = ${f.accountId}`;
     const auto = await autoMatch(tx, ids, actor);
-    await writeAudit(tx, { staffId: actor.id, action: 'bank_import', targetType: 'bank_import', targetId: importId, detail: { account: account.name, fileName: f.fileName, lines: r.lines.length, fresh: fresh.length, autoMatched: auto }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'bank_import',
+      targetType: 'bank_import',
+      targetId: importId,
+      detail: { account: account.name, fileName: f.fileName, lines: r.lines.length, fresh: fresh.length, autoMatched: auto },
+      ip,
+    });
     return { importId, replayed: false };
   });
   // 自动对上的批量付款行：照「按申请登记付款」记账（事务外，各自的操作编号；记不了的留给人手工处理）。
@@ -320,9 +340,13 @@ async function autoMatch(tx: Tx, lineIds: number[], actor: Actor): Promise<numbe
       SELECT account_id, txn_date::text AS txn_date, direction, amount_cents::text AS amount_cents, counterparty FROM bank_statement_lines WHERE id = ${id} FOR UPDATE`;
     if (!l || !l.counterparty) continue;
     const list = (
-      await candidates(tx, l.direction === 'out' ? OUT_TARGETS : IN_TARGETS, { amountEq: Number(l.amountCents), from: shift(l.txnDate, -AUTO_DAYS), to: shift(l.txnDate, AUTO_DAYS), accountId: Number(l.accountId) })
-    )
-      .filter((c) => partyMatches(l.counterparty, c.party) && !claimed.has(`${c.type}:${c.id}`));
+      await candidates(tx, l.direction === 'out' ? OUT_TARGETS : IN_TARGETS, {
+        amountEq: Number(l.amountCents),
+        from: shift(l.txnDate, -AUTO_DAYS),
+        to: shift(l.txnDate, AUTO_DAYS),
+        accountId: Number(l.accountId),
+      })
+    ).filter((c) => partyMatches(l.counterparty, c.party) && !claimed.has(`${c.type}:${c.id}`));
     if (list.length !== 1) continue;
     const c = list[0]!;
     if (!(await lockTarget(tx, c.type, c.id))) continue;
@@ -349,7 +373,9 @@ async function lockTarget(tx: Tx, type: MatchTargetType, id: number): Promise<bo
               ? await tx<{ ok: boolean }[]>`SELECT voided_at IS NULL AS ok FROM ar_collections WHERE id = ${id} FOR KEY SHARE`
               : type === 'platform_settlement'
                 ? await tx<{ ok: boolean }[]>`SELECT status = 'active' AS ok FROM platform_settlements WHERE id = ${id} FOR KEY SHARE`
-                : await tx<{ ok: boolean }[]>`SELECT i.status = 'pending' AND b.status = 'exported' AS ok FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id WHERE i.id = ${id} FOR KEY SHARE OF i`;
+                : await tx<
+                    { ok: boolean }[]
+                  >`SELECT i.status = 'pending' AND b.status = 'exported' AS ok FROM payment_batch_items i JOIN payment_batches b ON b.id = i.batch_id WHERE i.id = ${id} FOR KEY SHARE OF i`;
   return !!rows[0]?.ok;
 }
 
@@ -362,7 +388,14 @@ const ListQuery = z.object({
 });
 
 async function linesWhere(db: Db, where: Fragment, limit: number): Promise<BankLine[]> {
-  const rows = await db<(Omit<BankLine, 'id' | 'accountId' | 'amountCents' | 'balanceCents' | 'matchedCents' | 'matches' | 'targetVoided'> & { id: number; accountId: number; amountCents: string; balanceCents: string | null })[]>`
+  const rows = await db<
+    (Omit<BankLine, 'id' | 'accountId' | 'amountCents' | 'balanceCents' | 'matchedCents' | 'matches' | 'targetVoided'> & {
+      id: number;
+      accountId: number;
+      amountCents: string;
+      balanceCents: string | null;
+    })[]
+  >`
     SELECT l.id, l.account_id, a.name AS account_name, l.txn_date::text AS txn_date, l.direction, l.amount_cents::text AS amount_cents,
            l.balance_cents::text AS balance_cents, l.counterparty, l.counterparty_account, l.summary, l.bank_ref, l.status, l.ignore_reason, l.version
     FROM bank_statement_lines l JOIN bank_accounts a ON a.id = l.account_id
@@ -375,7 +408,9 @@ async function linesWhere(db: Db, where: Fragment, limit: number): Promise<BankL
         FROM bank_matches m JOIN staff s ON s.id = m.created_by
         WHERE m.line_id IN ${db(ids)} AND m.status = 'active' ORDER BY m.id`
     : [];
-  const targets = matches.length ? await candidates(db, [...MATCH_TARGET_TYPES], { from: '1900-01-01', to: '2999-12-31', ids: matches.map((m) => ({ type: m.targetType, id: Number(m.targetId) })) }) : [];
+  const targets = matches.length
+    ? await candidates(db, [...MATCH_TARGET_TYPES], { from: '1900-01-01', to: '2999-12-31', ids: matches.map((m) => ({ type: m.targetType, id: Number(m.targetId) })) })
+    : [];
   const tKey = (t: { type: string; id: number }) => `${t.type}:${t.id}`;
   const tMap = new Map(targets.map((t) => [tKey(t), t]));
   return rows.map((r) => {
@@ -383,7 +418,15 @@ async function linesWhere(db: Db, where: Fragment, limit: number): Promise<BankL
       .filter((m) => Number(m.lineId) === Number(r.id))
       .map((m) => ({
         id: Number(m.id),
-        target: tMap.get(`${m.targetType}:${Number(m.targetId)}`) ?? { type: m.targetType, id: Number(m.targetId), docNo: `#${m.targetId}`, date: '', amountCents: Number(m.amountCents), party: '', voided: true },
+        target: tMap.get(`${m.targetType}:${Number(m.targetId)}`) ?? {
+          type: m.targetType,
+          id: Number(m.targetId),
+          docNo: `#${m.targetId}`,
+          date: '',
+          amountCents: Number(m.amountCents),
+          party: '',
+          voided: true,
+        },
         amountCents: Number(m.amountCents),
         auto: m.auto,
         createdByName: m.createdByName,
@@ -445,7 +488,10 @@ async function lineCandidates(db: Db, id: number): Promise<{ suggested: MatchTar
 
 const MatchInput = z.object({
   version: z.number().int().min(1),
-  targets: z.array(z.object({ type: z.enum(MATCH_TARGET_TYPES), id: z.number().int().positive() })).min(1, '请选要对的记录').max(30),
+  targets: z
+    .array(z.object({ type: z.enum(MATCH_TARGET_TYPES), id: z.number().int().positive() }))
+    .min(1, '请选要对的记录')
+    .max(30),
 });
 
 async function matchLine(deps: Deps, id: number, raw: unknown, actor: Actor, ip?: string): Promise<BankLine> {
@@ -486,7 +532,14 @@ async function matchLine(deps: Deps, id: number, raw: unknown, actor: Actor, ip?
       }
       const settled = Number(done!.n) + sum === Number(l.amountCents);
       await tx`UPDATE bank_statement_lines SET status = ${settled ? 'matched' : 'open'}, version = version + 1 WHERE id = ${id}`;
-      await writeAudit(tx, { staffId: actor.id, action: 'bank_match', targetType: 'bank_line', targetId: id, detail: { op: 'match', targets: picked.map((c) => `${MATCH_TARGET_LABELS[c.type]} ${c.docNo}`), settled }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'bank_match',
+        targetType: 'bank_line',
+        targetId: id,
+        detail: { op: 'match', targets: picked.map((c) => `${MATCH_TARGET_LABELS[c.type]} ${c.docNo}`), settled },
+        ip,
+      });
     });
   } catch (error) {
     if (isUniqueViolation(error, 'bank_matches_target_uq')) throw conflict('MATCH_TARGET_TAKEN', '选的记录已经对到别的流水上了，请刷新后重选');

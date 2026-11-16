@@ -265,9 +265,7 @@ describe('演示数据准备', () => {
       return m;
     };
     try {
-      await expect(demoReset(ctx.sql, dev, { confirm: db, backupDir: '/nonexistent', backup: appStartsDuringBackup })).rejects.toThrow(
-        /应用还开着.*没有清库.*备份已做好/,
-      );
+      await expect(demoReset(ctx.sql, dev, { confirm: db, backupDir: '/nonexistent', backup: appStartsDuringBackup })).rejects.toThrow(/应用还开着.*没有清库.*备份已做好/);
       expect(backups).toBe(1);
     } finally {
       await late?.release();

@@ -41,8 +41,7 @@ describe.skipIf(!hasCompose && !process.env.CI)('compose.yaml：已有实例的 
     expect(r.status, `docker compose config 失败：${r.stderr || String(r.error)}`).toBe(0);
     return JSON.parse(r.stdout).services.app as App;
   };
-  const ports = (vars: Record<string, string>) =>
-    app(vars).ports.map((p) => ({ host: p.host_ip ?? '', published: String(p.published), target: Number(p.target) }));
+  const ports = (vars: Record<string, string>) => app(vars).ports.map((p) => ({ host: p.host_ip ?? '', published: String(p.published), target: Number(p.target) }));
 
   it('APP_PORT 不设或只写端口：开在所有网卡上（门店局域网）', () => {
     expect(ports({})).toEqual([{ host: '', published: '8080', target: 8080 }]);
@@ -58,7 +57,14 @@ describe.skipIf(!hasCompose && !process.env.CI)('compose.yaml：已有实例的 
     const keys = ['SMS_PROVIDER', 'SMS_ACCESS_KEY_ID', 'SMS_ACCESS_KEY_SECRET', 'SMS_SIGN_NAME', 'SMS_TEMPLATE_COUPON', 'SMS_ENDPOINT'];
     const off = app({}).environment;
     expect(keys.map((k) => off[k] ?? '')).toEqual(['', '', '', '', '', '']);
-    const set = { SMS_PROVIDER: 'aliyun', SMS_ACCESS_KEY_ID: 'id-check', SMS_ACCESS_KEY_SECRET: 'secret-check', SMS_SIGN_NAME: '浴族', SMS_TEMPLATE_COUPON: 'SMS_1', SMS_ENDPOINT: 'https://example.invalid/' };
+    const set = {
+      SMS_PROVIDER: 'aliyun',
+      SMS_ACCESS_KEY_ID: 'id-check',
+      SMS_ACCESS_KEY_SECRET: 'secret-check',
+      SMS_SIGN_NAME: '浴族',
+      SMS_TEMPLATE_COUPON: 'SMS_1',
+      SMS_ENDPOINT: 'https://example.invalid/',
+    };
     const on = app(set).environment;
     expect(Object.fromEntries(keys.map((k) => [k, on[k]]))).toEqual(set);
   });

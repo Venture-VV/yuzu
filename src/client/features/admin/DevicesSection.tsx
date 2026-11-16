@@ -103,7 +103,13 @@ export function DevicesSection() {
                       {DEVICE_CONNECTION_LABELS[d.connection]}
                       <br />
                       <span className="text-ink-3">
-                        {NETWORK_CONNECTIONS.includes(d.connection) ? (d.host ? `${d.host}:${d.port}` : '没填 IP') : d.connection === 'bridge' ? `${d.hostDeviceCode ?? '没指定终端'} · ${d.bridgeKey}` : (d.hostDeviceCode ?? '')}
+                        {NETWORK_CONNECTIONS.includes(d.connection)
+                          ? d.host
+                            ? `${d.host}:${d.port}`
+                            : '没填 IP'
+                          : d.connection === 'bridge'
+                            ? `${d.hostDeviceCode ?? '没指定终端'} · ${d.bridgeKey}`
+                            : (d.hostDeviceCode ?? '')}
                       </span>
                     </td>
                     <td className="px-2 py-2">
@@ -144,7 +150,11 @@ function ImportCard({ onDone }: { onDone: () => void }) {
       toast({ tone: 'success', title: `已按采购清单登记 ${r.created} 台`, body: r.skipped ? `编号已有、跳过 ${r.skipped} 台` : undefined });
       onDone();
     } catch (e) {
-      toast({ tone: e instanceof UncertainError ? 'info' : 'error', title: e instanceof UncertainError ? '导入没收到结果' : '导入没成功', body: e instanceof UncertainError ? '刷新后看设备列表；再点导入只会补上缺的，不会重复' : errorMessage(e) });
+      toast({
+        tone: e instanceof UncertainError ? 'info' : 'error',
+        title: e instanceof UncertainError ? '导入没收到结果' : '导入没成功',
+        body: e instanceof UncertainError ? '刷新后看设备列表；再点导入只会补上缺的，不会重复' : errorMessage(e),
+      });
       onDone();
     } finally {
       setBusy(false);
@@ -387,7 +397,12 @@ function DeviceDialog({ target, devices, onClose, onSaved }: { target: { mode: '
         )}
         {draft.connection === 'bridge' && (
           <Field label="设备键" hint="设备服务里这台设备的名字（同一台终端下唯一），如 rc300、scanner">
-            <Input value={draft.bridgeKey} onChange={(e) => set({ bridgeKey: e.target.value.toLowerCase().trim() })} placeholder={draft.kind === 'scanner' ? 'scanner' : 'reader'} data-testid="device-bridge-key" />
+            <Input
+              value={draft.bridgeKey}
+              onChange={(e) => set({ bridgeKey: e.target.value.toLowerCase().trim() })}
+              placeholder={draft.kind === 'scanner' ? 'scanner' : 'reader'}
+              data-testid="device-bridge-key"
+            />
           </Field>
         )}
         {draft.kind === 'printer' && (

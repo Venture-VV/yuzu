@@ -48,116 +48,119 @@ export function CatalogTab() {
         </SubPane>
       )}
       <SubPane tab="items">
-      <Card className="p-5">
-        <SectionTitle
-          aside={
-            <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setEditing({ kind: 'item', data: null })}>
-              新增项目
-            </Button>
-          }
-        >
-          消费项目
-        </SectionTitle>
-        <p className="mt-1 text-[12.5px] text-ink-3">价格以这里为准；同一项目可设标准 / 专业 / 优选多档价格。改价后，正在登记的消费会提示重新核对。</p>
-        <div className="mt-3 divide-y divide-line/70 rounded-lg border border-line" data-testid="catalog-items">
-          {catalog.isPending ? (
-            <Skeleton className="m-3 h-32" />
-          ) : catalog.data?.items.length === 0 ? (
-            <EmptyState art="leaf" title="还没有消费项目" className="py-6" />
-          ) : (
-            catalog.data?.items.map((i) => {
-              const tags = itemTags(i);
-              return (
-                <button
-                  key={i.id}
-                  type="button"
-                  onClick={() => setEditing({ kind: 'item', data: i })}
-                  className={cn('flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-paper/60', !i.active && 'opacity-50')}
-                >
-                  <span className="w-20 shrink-0 truncate text-[12px] font-semibold text-ink-3">{i.category || '其他'}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[14px] font-semibold">{i.name}</span>
-                    {(i.durationMinutes || tags.length > 0 || i.gender || i.technicianRequired) && (
-                      <span className="block truncate text-[11.5px] text-ink-3">
-                        {[i.durationMinutes ? `${i.durationMinutes} 分钟` : '', i.gender ? `仅${i.gender === 'female' ? '女宾' : '男宾'}` : '', i.technicianRequired ? '需要技师' : '', ...tags]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                    )}
-                  </span>
-                  {!i.active && <Badge>已停用</Badge>}
-                  <span className="flex shrink-0 flex-col items-end">
-                    {i.prices.length === 1 ? (
-                      <Money cents={i.prices[0]!.price} className="text-[14px] font-bold" />
-                    ) : (
-                      i.prices.map((p) => (
-                        <span key={p.tier} className="flex items-baseline gap-1 text-[12.5px]">
-                          <span className="text-ink-3">{PRICE_TIER_LABELS[p.tier]}</span>
-                          <Money cents={p.price} className="font-bold" />
+        <Card className="p-5">
+          <SectionTitle
+            aside={
+              <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setEditing({ kind: 'item', data: null })}>
+                新增项目
+              </Button>
+            }
+          >
+            消费项目
+          </SectionTitle>
+          <p className="mt-1 text-[12.5px] text-ink-3">价格以这里为准；同一项目可设标准 / 专业 / 优选多档价格。改价后，正在登记的消费会提示重新核对。</p>
+          <div className="mt-3 divide-y divide-line/70 rounded-lg border border-line" data-testid="catalog-items">
+            {catalog.isPending ? (
+              <Skeleton className="m-3 h-32" />
+            ) : catalog.data?.items.length === 0 ? (
+              <EmptyState art="leaf" title="还没有消费项目" className="py-6" />
+            ) : (
+              catalog.data?.items.map((i) => {
+                const tags = itemTags(i);
+                return (
+                  <button
+                    key={i.id}
+                    type="button"
+                    onClick={() => setEditing({ kind: 'item', data: i })}
+                    className={cn('flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-paper/60', !i.active && 'opacity-50')}
+                  >
+                    <span className="w-20 shrink-0 truncate text-[12px] font-semibold text-ink-3">{i.category || '其他'}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14px] font-semibold">{i.name}</span>
+                      {(i.durationMinutes || tags.length > 0 || i.gender || i.technicianRequired) && (
+                        <span className="block truncate text-[11.5px] text-ink-3">
+                          {[i.durationMinutes ? `${i.durationMinutes} 分钟` : '', i.gender ? `仅${i.gender === 'female' ? '女宾' : '男宾'}` : '', i.technicianRequired ? '需要技师' : '', ...tags]
+                            .filter(Boolean)
+                            .join(' · ')}
                         </span>
-                      ))
-                    )}
-                  </span>
-                </button>
-              );
-            })
-          )}
-        </div>
-      </Card>
+                      )}
+                    </span>
+                    {!i.active && <Badge>已停用</Badge>}
+                    <span className="flex shrink-0 flex-col items-end">
+                      {i.prices.length === 1 ? (
+                        <Money cents={i.prices[0]!.price} className="text-[14px] font-bold" />
+                      ) : (
+                        i.prices.map((p) => (
+                          <span key={p.tier} className="flex items-baseline gap-1 text-[12.5px]">
+                            <span className="text-ink-3">{PRICE_TIER_LABELS[p.tier]}</span>
+                            <Money cents={p.price} className="font-bold" />
+                          </span>
+                        ))
+                      )}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </Card>
       </SubPane>
       <SubPane tab="tickets">
         <TicketTypesCard />
       </SubPane>
       <SubPane tab="plans">
-      <Card className="p-5">
-        <SectionTitle
-          aside={
-            <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setEditing({ kind: 'plan', data: null })}>
-              新增套餐
-            </Button>
-          }
-        >
-          <span className="flex items-center gap-2">
-            充值套餐 <PendingBadge title="实际充值与赠送方案待店主确认" />
-          </span>
-        </SectionTitle>
-        <p className="mt-1 text-[12.5px] text-ink-3">实收金额计入本金，赠送部分计入赠金。停用后不再出现在充值页，历史单据不受影响。</p>
-        <div className="mt-3 space-y-2">
-          {catalog.isPending ? (
-            <Skeleton className="h-32" />
-          ) : catalog.data?.plans.length === 0 ? (
-            <EmptyState art="leaf" title="还没有充值套餐" className="py-6" />
-          ) : (
-            catalog.data?.plans.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setEditing({ kind: 'plan', data: p })}
-                className={cn('flex w-full items-center gap-3 rounded-lg border border-line px-4 py-3 text-left transition-colors hover:border-line-strong hover:bg-paper/60', !p.active && 'opacity-50')}
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-bold">{p.name}</p>
-                  {p.note && <p className="text-[12px] text-ink-3">{p.note}</p>}
-                </div>
-                {!p.active && <Badge>已停用</Badge>}
-                <div className="text-right">
-                  <Money cents={p.payAmount} className="text-[15px] font-bold" />
-                  <p className="text-[12px] font-semibold text-yuzu-deep">
-                    {p.bonusAmount ? (
-                      <>
-                        送 <Money cents={p.bonusAmount} />
-                        <span className="ml-1 font-normal text-ink-3">{p.bonusValidDays ? `${p.bonusValidDays} 天有效` : '长期有效'}</span>
-                      </>
-                    ) : (
-                      <span className="text-ink-4">无赠送</span>
-                    )}
-                  </p>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </Card>
+        <Card className="p-5">
+          <SectionTitle
+            aside={
+              <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setEditing({ kind: 'plan', data: null })}>
+                新增套餐
+              </Button>
+            }
+          >
+            <span className="flex items-center gap-2">
+              充值套餐 <PendingBadge title="实际充值与赠送方案待店主确认" />
+            </span>
+          </SectionTitle>
+          <p className="mt-1 text-[12.5px] text-ink-3">实收金额计入本金，赠送部分计入赠金。停用后不再出现在充值页，历史单据不受影响。</p>
+          <div className="mt-3 space-y-2">
+            {catalog.isPending ? (
+              <Skeleton className="h-32" />
+            ) : catalog.data?.plans.length === 0 ? (
+              <EmptyState art="leaf" title="还没有充值套餐" className="py-6" />
+            ) : (
+              catalog.data?.plans.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setEditing({ kind: 'plan', data: p })}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-lg border border-line px-4 py-3 text-left transition-colors hover:border-line-strong hover:bg-paper/60',
+                    !p.active && 'opacity-50',
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[14px] font-bold">{p.name}</p>
+                    {p.note && <p className="text-[12px] text-ink-3">{p.note}</p>}
+                  </div>
+                  {!p.active && <Badge>已停用</Badge>}
+                  <div className="text-right">
+                    <Money cents={p.payAmount} className="text-[15px] font-bold" />
+                    <p className="text-[12px] font-semibold text-yuzu-deep">
+                      {p.bonusAmount ? (
+                        <>
+                          送 <Money cents={p.bonusAmount} />
+                          <span className="ml-1 font-normal text-ink-3">{p.bonusValidDays ? `${p.bonusValidDays} 天有效` : '长期有效'}</span>
+                        </>
+                      ) : (
+                        <span className="text-ink-4">无赠送</span>
+                      )}
+                    </p>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </Card>
       </SubPane>
       <SubPane tab="import">
         <PriceListCard />
@@ -251,7 +254,11 @@ function PlanDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'p
           </Field>
         </div>
         <Field
-          label={<span className="inline-flex items-center gap-2">赠金有效期（天） <PendingBadge /></span>}
+          label={
+            <span className="inline-flex items-center gap-2">
+              赠金有效期（天） <PendingBadge />
+            </span>
+          }
           htmlFor="c-valid"
           hint="留空为长期有效；填 30 表示从充值当天的营业日算起共 30 个营业日可用，第 31 天营业日开始时未用完的赠金作废"
         >
@@ -436,11 +443,7 @@ function ItemDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'i
         </div>
         <Field
           label="需要技师"
-          hint={
-            careDefault
-              ? '名称或分类含「护理」，默认需要技师（交给钟房派钟）；不需要的点「不需要」'
-              : '技师功能开启后，挂这个项目要选技师与点钟 / 轮钟；也可以在后台「技师」里按分类勾选'
-          }
+          hint={careDefault ? '名称或分类含「护理」，默认需要技师（交给钟房派钟）；不需要的点「不需要」' : '技师功能开启后，挂这个项目要选技师与点钟 / 轮钟；也可以在后台「技师」里按分类勾选'}
         >
           <Segmented
             value={needsTechnician ? 'on' : 'off'}
@@ -658,7 +661,8 @@ function TicketTypesCard() {
         </span>
       </SectionTitle>
       <p className="mt-1 text-[12.5px] text-ink-3">
-        接待时为每位客人选票种，留存当时的票价；离店结账按在店时长计算：每 12 小时一段，票价 = 24 小时档 × 整天数 + 剩余半天时再加一个 12 小时档（例：499 → 599 → 1098 → 1198）。跳档宽限在「手牌 → 前台规则」设置。
+        接待时为每位客人选票种，留存当时的票价；离店结账按在店时长计算：每 12 小时一段，票价 = 24 小时档 × 整天数 + 剩余半天时再加一个 12 小时档（例：499 → 599 → 1098 → 1198）。跳档宽限在「手牌 →
+        前台规则」设置。
       </p>
       {types.isPending ? (
         <Skeleton className="mt-3 h-24" />
@@ -666,7 +670,11 @@ function TicketTypesCard() {
         <ul className="mt-3 divide-y divide-line rounded-lg border border-line">
           {types.data?.map((t) => (
             <li key={t.id}>
-              <button type="button" onClick={() => setEditing(t)} className={cn('flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/60', !t.active && 'opacity-55')}>
+              <button
+                type="button"
+                onClick={() => setEditing(t)}
+                className={cn('flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left hover:bg-paper-2/60', !t.active && 'opacity-55')}
+              >
                 <span className="text-[14px] font-bold">{t.name}</span>
                 {t.isDefault && <Badge tone="pine">接待默认</Badge>}
                 {!t.active && <Badge tone="neutral">已停用</Badge>}

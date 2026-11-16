@@ -56,11 +56,7 @@ const ItemInput = z
   })
   .transform(({ price, prices, ...rest }) => ({
     ...rest,
-    tiers: prices
-      ? PRICE_TIERS.flatMap((tier) => (prices[tier] ? [{ tier, price: prices[tier]! }] : []))
-      : price !== undefined
-        ? [{ tier: 'standard' as const, price }]
-        : [],
+    tiers: prices ? PRICE_TIERS.flatMap((tier) => (prices[tier] ? [{ tier, price: prices[tier]! }] : [])) : price !== undefined ? [{ tier: 'standard' as const, price }] : [],
   }))
   .refine((v) => v.tiers.length > 0, '请至少填写一档价格');
 type ItemData = z.output<typeof ItemInput>;
@@ -143,8 +139,7 @@ export const PriceListImportInput = z.object({
 });
 export type PriceListImportData = z.input<typeof PriceListImportInput>;
 
-const samePrices = (a: TierPrice[], b: TierPrice[]) =>
-  a.length === b.length && sortTiers(a).every((p, k) => p.tier === sortTiers(b)[k]!.tier && p.price === sortTiers(b)[k]!.price);
+const samePrices = (a: TierPrice[], b: TierPrice[]) => a.length === b.length && sortTiers(a).every((p, k) => p.tier === sortTiers(b)[k]!.tier && p.price === sortTiers(b)[k]!.price);
 
 /**
  * 按名称导入价目表：清单是项目与价格的准确描述。
@@ -153,11 +148,7 @@ const samePrices = (a: TierPrice[], b: TierPrice[]) =>
  *   · 勾选 deactivateMissing 时停用清单外的项目；
  *   · 排序按清单顺序；同名项目不止一个时拒绝，请先在管理页改名或停用。
  */
-export async function importPriceList(
-  sql: Sql,
-  raw: PriceListImportData,
-  audit: { staffId: number | null; ip?: string; via: 'web' | 'cli' },
-): Promise<PriceListImportReport> {
+export async function importPriceList(sql: Sql, raw: PriceListImportData, audit: { staffId: number | null; ip?: string; via: 'web' | 'cli' }): Promise<PriceListImportReport> {
   const input = parse(PriceListImportInput, raw);
   const dupes = input.rows.map((r) => r.name).filter((n, i, all) => all.indexOf(n) !== i);
   if (dupes.length) throw badRequest(`清单里项目重复：${[...new Set(dupes)].slice(0, 5).join('、')}`);
@@ -367,7 +358,5 @@ export function registerCatalogRoutes(app: FastifyInstance, { sql }: Deps) {
   // 价目表：内置清单（店主提供）与按清单导入（默认只预览）
   app.get('/api/items/price-lists', { preHandler: guard('catalog.manage') }, async () => BUILTIN_PRICE_LISTS);
 
-  app.post('/api/items/import', { preHandler: guard('catalog.manage') }, async (req) =>
-    importPriceList(sql, req.body as PriceListImportData, { staffId: req.actor.id, ip: req.ip, via: 'web' }),
-  );
+  app.post('/api/items/import', { preHandler: guard('catalog.manage') }, async (req) => importPriceList(sql, req.body as PriceListImportData, { staffId: req.actor.id, ip: req.ip, via: 'web' }));
 }

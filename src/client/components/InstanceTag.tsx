@@ -19,10 +19,7 @@ const toneOf = (instance: InstanceKind) => TONE[instance] ?? TONE.unset;
 /** 登录页：一行标识 */
 export function InstanceBadge({ instance, className }: { instance: InstanceKind; className?: string }) {
   return (
-    <span
-      data-testid="instance-badge"
-      className={cn('inline-flex h-6 items-center rounded-full px-2.5 text-[12.5px] leading-none font-bold', toneOf(instance), className)}
-    >
+    <span data-testid="instance-badge" className={cn('inline-flex h-6 items-center rounded-full px-2.5 text-[12.5px] leading-none font-bold', toneOf(instance), className)}>
       {labelOf(instance)}
     </span>
   );
@@ -32,11 +29,7 @@ export function InstanceBadge({ instance, className }: { instance: InstanceKind;
 export function InstanceTag({ instance, version, commit }: { instance: InstanceKind; version: string; commit: string }) {
   const [main, sub] = labelOf(instance).split('·');
   return (
-    <div
-      data-testid="instance-tag"
-      title={`${labelOf(instance)} · ${versionText(version, commit)}`}
-      className="mb-3 flex w-[64px] flex-col items-center gap-1 text-center short:mb-2 short:gap-0.5"
-    >
+    <div data-testid="instance-tag" title={`${labelOf(instance)} · ${versionText(version, commit)}`} className="mb-3 flex w-[64px] flex-col items-center gap-1 text-center short:mb-2 short:gap-0.5">
       <span className={cn('w-full rounded-md px-1 py-1 text-[11px] leading-tight font-bold', toneOf(instance))}>
         {main}
         {sub && (

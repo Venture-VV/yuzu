@@ -90,7 +90,11 @@ export function FeedbackTab() {
         </Card>
       ) : (
         <>
-          {data.total > data.rows.length && <Notice tone="info">一共 {data.total} 条，这里列出最近的 {data.rows.length} 条；要看全部请导出表格。</Notice>}
+          {data.total > data.rows.length && (
+            <Notice tone="info">
+              一共 {data.total} 条，这里列出最近的 {data.rows.length} 条；要看全部请导出表格。
+            </Notice>
+          )}
           <ul className="space-y-3">
             {data.rows.map((r) => (
               <li key={r.id}>
@@ -130,9 +134,7 @@ export function FeedbackTab() {
                       variant={r.reply ? 'ghost' : 'primary'}
                       icon={<MessageCircleReply className="size-3.5" />}
                       disabled={pendingReplies.has(r.id)}
-                      title={
-                        unconfirmed.has(r.id) ? '上一次回信还没确认：先在上面查回、按原内容重新提交或作废' : pendingReplies.has(r.id) ? '上一次回信还在发送，等它有了结果再改' : undefined
-                      }
+                      title={unconfirmed.has(r.id) ? '上一次回信还没确认：先在上面查回、按原内容重新提交或作废' : pendingReplies.has(r.id) ? '上一次回信还在发送，等它有了结果再改' : undefined}
                       onClick={() => setReplying(r)}
                       data-testid={`feedback-reply-${r.id}`}
                     >

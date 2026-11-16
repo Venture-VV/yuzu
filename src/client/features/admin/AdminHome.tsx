@@ -59,15 +59,13 @@ export function AdminHome() {
             {/* 几张概况卡片依次出现（8.0.16） */}
             <Stagger className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Stat label="门店" value={d.store.name} sub={`${INSTANCE_LABELS[d.store.instance] ?? d.store.instance} · ${versionText(d.store.version, d.store.commit)}`} />
-              <Stat
-                label="营业"
-                value={`营业日 ${String(d.store.businessDayStartHour).padStart(2, '0')}:00 切换`}
-                sub={d.store.businessHours}
-              />
+              <Stat label="营业" value={`营业日 ${String(d.store.businessDayStartHour).padStart(2, '0')}:00 切换`} sub={d.store.businessHours} />
               <Stat
                 label="员工"
                 value={`${d.counts.staffActive} 人在职`}
-                sub={ROLES.filter((r) => d.counts.staffByRole[r]).map((r) => `${ROLE_LABELS[r]} ${d.counts.staffByRole[r]}`).join(' · ')}
+                sub={ROLES.filter((r) => d.counts.staffByRole[r])
+                  .map((r) => `${ROLE_LABELS[r]} ${d.counts.staffByRole[r]}`)
+                  .join(' · ')}
               />
               <Stat label="会员" value={`${d.counts.members} 位`} sub={`近 24 小时新建 ${d.counts.membersNewToday} 位`} />
               <Stat
@@ -75,11 +73,7 @@ export function AdminHome() {
                 value={`${d.counts.items} 个项目 · ${d.counts.tickets} 个票种`}
                 sub={`充值套餐 ${d.counts.plans} 个 · 技师 ${d.counts.technicians.active} 人${d.counts.technicians.enabled ? '' : '（技师功能未开启）'}`}
               />
-              <Stat
-                label="手牌池"
-                value={`${d.counts.tags.active} 张在用`}
-                sub={`锁定 ${d.counts.tags.locked} 张${d.counts.tags.inactive ? ` · 停用 ${d.counts.tags.inactive} 张` : ''}`}
-              />
+              <Stat label="手牌池" value={`${d.counts.tags.active} 张在用`} sub={`锁定 ${d.counts.tags.locked} 张${d.counts.tags.inactive ? ` · 停用 ${d.counts.tags.inactive} 张` : ''}`} />
               <Card className="p-4 sm:col-span-2" data-testid="admin-rule-status">
                 <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3">
                   <ListChecks className="size-4" /> 规则
@@ -88,9 +82,7 @@ export function AdminHome() {
                   共 {d.rules.total} 项 · 改过 {d.rules.changed} 项
                 </p>
                 <p className="mt-0.5 text-[12.5px] text-ink-3">
-                  {session.rules.hidePendingMarks
-                    ? '店主已签认经营规则，「待确认」标记已隐藏'
-                    : `${d.rules.pending} 项仍是推荐的默认做法、待店主确认`}
+                  {session.rules.hidePendingMarks ? '店主已签认经营规则，「待确认」标记已隐藏' : `${d.rules.pending} 项仍是推荐的默认做法、待店主确认`}
                   {sections.includes('settings') && (
                     <>
                       {' · '}

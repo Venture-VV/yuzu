@@ -65,19 +65,19 @@ const updateMaterial = async (id: number, patch: Record<string, unknown>) => {
   });
 };
 
-const doc = (cookie: string, body: Record<string, unknown>) =>
-  api(ctx.app, cookie, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, ...body });
-const deptDoc = (cookie: string, body: Record<string, unknown>) =>
-  api(ctx.app, cookie, 'POST', '/api/erp/dept-stock/docs', { clientKey: randomUUID(), docDate: today, ...body });
+const doc = (cookie: string, body: Record<string, unknown>) => api(ctx.app, cookie, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, ...body });
+const deptDoc = (cookie: string, body: Record<string, unknown>) => api(ctx.app, cookie, 'POST', '/api/erp/dept-stock/docs', { clientKey: randomUUID(), docDate: today, ...body });
 
 async function approvedPo(materialId: number, purchaseQtyMilli: number, priceCents: number, orderDate = today) {
-  const r = await ok(api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
-    clientKey: randomUUID(),
-    supplierId,
-    orderDate,
-    approveNow: true,
-    lines: [{ materialId, purchaseQtyMilli, priceCents }],
-  }));
+  const r = await ok(
+    api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(),
+      supplierId,
+      orderDate,
+      approveNow: true,
+      lines: [{ materialId, purchaseQtyMilli, priceCents }],
+    }),
+  );
   return r.po as { id: number; lines: { id: number; materialId: number }[] };
 }
 
@@ -100,13 +100,11 @@ async function stockIn(materialId: number, boxes: number) {
   return r.doc as { id: number; amountCents: number };
 }
 
-const issue = (materialId: number, qtyMilli: number) =>
-  doc(keeper, { docType: 'issue', departmentId: bathId, handler: '浴区同事', lines: [{ materialId, qtyMilli }] });
+const issue = (materialId: number, qtyMilli: number) => doc(keeper, { docType: 'issue', departmentId: bathId, handler: '浴区同事', lines: [{ materialId, qtyMilli }] });
 
 const deptStock = async (materialId: number) =>
   (await ctx.sql<{ s: number }[]>`SELECT coalesce((SELECT stock_milli FROM warehouse_stock WHERE warehouse_id = ${bathWh} AND material_id = ${materialId}), 0) AS s`)[0]!.s;
-const centralStock = async (materialId: number) =>
-  (await ctx.sql<{ s: number }[]>`SELECT stock_milli AS s FROM materials WHERE id = ${materialId}`)[0]!.s;
+const centralStock = async (materialId: number) => (await ctx.sql<{ s: number }[]>`SELECT stock_milli AS s FROM materials WHERE id = ${materialId}`)[0]!.s;
 
 async function checksOk() {
   for (const c of await inventoryChecks(ctx.sql)) expect(c, `${c.key} ${c.detail}`).toMatchObject({ ok: true });
@@ -143,7 +141,12 @@ describe('台面日耗品（#14）', () => {
     const draft = (await ok(doc(keeper, { docType: 'issue', action: 'save', departmentId: bathId, handler: '旧领用', lines: [{ materialId: m.id, qtyMilli: q(6) }] }))).doc as { id: number };
     // 模拟迁移 029 以前生效的领料：没有仓
     await ctx.sql`UPDATE inv_docs SET warehouse_id = NULL WHERE id = ${draft.id}`;
-    const legacy = (await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${draft.id}/submit`, {})).body as { id: number; status: string; warehouse: unknown; lines: { id: number; autoConsumed: boolean }[] };
+    const legacy = (await api(ctx.app, keeper, 'POST', `/api/inventory/docs/${draft.id}/submit`, {})).body as {
+      id: number;
+      status: string;
+      warehouse: unknown;
+      lines: { id: number; autoConsumed: boolean }[];
+    };
     expect(legacy).toMatchObject({ status: 'confirmed', warehouse: null });
     expect(legacy.lines[0]!.autoConsumed).toBe(false);
     expect(await centralStock(m.id)).toBe(q(14));
@@ -235,13 +238,15 @@ describe('台面日耗品（#14）', () => {
     expect((await updateMaterial(m.id, { counterUse: true })).status).toBe(200);
 
     // 急采（8.0.1 起由采购登记、按金额审批）：验收生效时进部门小仓即算耗用
-    const rc = await ok(doc(buyer, {
-      docType: 'receipt',
-      urgent: true,
-      departmentId: bathId,
-      supplierId,
-      lines: [{ materialId: m.id, deliveredMilli: q(4), acceptedMilli: q(4), priceCents: 1_000 }],
-    }));
+    const rc = await ok(
+      doc(buyer, {
+        docType: 'receipt',
+        urgent: true,
+        departmentId: bathId,
+        supplierId,
+        lines: [{ materialId: m.id, deliveredMilli: q(4), acceptedMilli: q(4), priceCents: 1_000 }],
+      }),
+    );
     expect(rc.doc.status).toBe('submitted');
     await ok(api(ctx.app, ctx.owner, 'POST', `/api/inventory/docs/${rc.doc.id}/approve`, {}), 200);
     const verified = await ok(api(ctx.app, keeper, 'POST', `/api/inventory/docs/${rc.doc.id}/verify-urgent`, {}), 200);
@@ -255,12 +260,14 @@ describe('台面日耗品（#14）', () => {
     const m = await material('CU04');
     await stockIn(m.id, 1);
     // 部门盘点单先存草稿（账面 0），物料再改成台面日耗品；账面是 0 的有差异算大差异（v0.7.30），写了原因、提交后要审批，生效（同意）时拒绝
-    const draft = await ok(deptDoc(bath, {
-      docType: 'count',
-      action: 'save',
-      warehouseId: bathWh,
-      lines: [{ materialId: m.id, countedMilli: q(2), expectedBookMilli: 0, diffReason: 'unrecorded', diffNote: '领料漏记' }],
-    }));
+    const draft = await ok(
+      deptDoc(bath, {
+        docType: 'count',
+        action: 'save',
+        warehouseId: bathWh,
+        lines: [{ materialId: m.id, countedMilli: q(2), expectedBookMilli: 0, diffReason: 'unrecorded', diffNote: '领料漏记' }],
+      }),
+    );
     expect((await updateMaterial(m.id, { counterUse: true })).status).toBe(200);
     const sub = await api(ctx.app, bath, 'POST', `/api/erp/dept-stock/docs/${draft.doc.id}/submit`, {});
     expect(sub.status).toBe(200);
@@ -347,7 +354,11 @@ describe('每月盘点提醒（#23）', () => {
     const central = { id: 1, name: '总仓', kind: 'central' as const, departmentId: null };
     const dept = { id: bathWh, name: '浴区小仓', kind: 'department' as const, departmentId: bathId };
     const before = await stocktakeProgress(ctx.sql, [central, dept], { bookBefore: at, from: today, to: today });
-    const mine = (w: number, ids: number[]) => before.find((x) => x.warehouseId === w)!.missing.filter((x) => ids.includes(x.materialId)).map((x) => x.materialId);
+    const mine = (w: number, ids: number[]) =>
+      before
+        .find((x) => x.warehouseId === w)!
+        .missing.filter((x) => ids.includes(x.materialId))
+        .map((x) => x.materialId);
     expect(mine(1, [a.id, b.id, c.id]).sort()).toEqual([a.id, b.id, c.id].sort());
     // 部门小仓：只有 a（c 是台面日耗品，没有结存）
     expect(mine(bathWh, [a.id, b.id, c.id])).toEqual([a.id]);
@@ -416,9 +427,11 @@ describe('对账提醒与登记（#23）', () => {
     const t = (await ctx.sql<{ e: number }[]>`SELECT coalesce(sum(amount_delta_cents), 0) AS e FROM ap_entries WHERE supplier_id = ${supplierId}`)[0]!.e;
     const [ownerRow] = await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE role = 'owner' ORDER BY id LIMIT 1`;
     const begin = (await ctx.sql<{ e: number }[]>`SELECT coalesce(sum(amount_delta_cents), 0) AS e FROM ap_entries WHERE supplier_id = ${supplierId} AND entry_date < ${monthStartOf(today)}`)[0]!.e;
-    const received = (await ctx.sql<{ e: number }[]>`
+    const received = (
+      await ctx.sql<{ e: number }[]>`
       SELECT coalesce(sum(e.amount_delta_cents), 0) AS e FROM ap_entries e JOIN inv_docs d ON d.id = e.inv_doc_id
-      WHERE e.supplier_id = ${supplierId} AND e.entry_date >= ${monthStartOf(today)} AND d.doc_type = 'receipt'`)[0]!.e;
+      WHERE e.supplier_id = ${supplierId} AND e.entry_date >= ${monthStartOf(today)} AND d.doc_type = 'receipt'`
+    )[0]!.e;
     await ctx.sql`
       INSERT INTO supplier_reconciliations (supplier_id, kind, period_month, begin_cents, opening_cents, received_cents, return_credit_cents,
                                             paid_cents, refunded_cents, end_cents, total_cents, created_by)

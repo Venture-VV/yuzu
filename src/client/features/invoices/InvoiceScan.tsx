@@ -67,14 +67,7 @@ export function InvoiceScanButton({ onResult, disabled }: { onResult: (r: Recogn
   };
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="invoice-scan">
-      <input
-        ref={input}
-        type="file"
-        accept="image/jpeg,image/png,image/webp,application/pdf"
-        className="hidden"
-        onChange={(e) => void pick(e.target.files?.[0])}
-        data-testid="invoice-scan-file"
-      />
+      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" onChange={(e) => void pick(e.target.files?.[0])} data-testid="invoice-scan-file" />
       <Button size="sm" variant="secondary" icon={<ScanLine className="size-4" />} loading={!!busy} disabled={disabled} onClick={() => input.current?.click()}>
         拍照 / 选文件识别
       </Button>

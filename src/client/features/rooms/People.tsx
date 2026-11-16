@@ -4,14 +4,7 @@
 
 import { memo, useMemo, useState } from 'react';
 import { MapPin, Search, X } from 'lucide-react';
-import {
-  LOCATION_EVENT_KIND_LABELS,
-  LOCATION_SOURCE_LABELS,
-  placeText,
-  type LocationPerson,
-  type LocationsCurrent,
-  type LocationTrackData,
-} from '@shared/locations';
+import { LOCATION_EVENT_KIND_LABELS, LOCATION_SOURCE_LABELS, placeText, type LocationPerson, type LocationsCurrent, type LocationTrackData } from '@shared/locations';
 import type { FloorMapSpace } from '@shared/floormap';
 import { errorMessage } from '../../lib/api';
 import { cn, formatTime } from '../../lib/utils';
@@ -35,8 +28,7 @@ export interface ZoneBadge {
 }
 
 /** 一个人的称呼：手牌 A023 / 技师 07 号 张三 */
-export const personText = (p: Pick<LocationPerson, 'kind' | 'tagCode' | 'techNo' | 'techName'>) =>
-  p.kind === 'guest' ? `手牌 ${p.tagCode}` : `技师 ${p.techNo} 号 ${p.techName ?? ''}`.trim();
+export const personText = (p: Pick<LocationPerson, 'kind' | 'tagCode' | 'techNo' | 'techName'>) => (p.kind === 'guest' ? `手牌 ${p.tagCode}` : `技师 ${p.techNo} 号 ${p.techName ?? ''}`.trim());
 
 /** 轨迹接口的查询串 */
 export const trackQuery = (p: Pick<LocationPerson, 'kind' | 'id'>) => (p.kind === 'guest' ? `visitId=${p.id}` : `technicianId=${p.id}`);
@@ -136,7 +128,18 @@ export const PeopleLayer = memo(function PeopleLayer({
         const on = highlightZone === z.zoneId;
         return (
           <g key={`z-${z.zoneId}`} data-zone={z.zoneId} data-testid={`map-zone-${z.zoneId}`} data-count={z.count} className="cursor-pointer">
-            <rect x={z.at[0] - w / 2} y={z.at[1] - h / 2} width={w} height={h} rx={h / 2} fill={on ? '#2c6066' : 'white'} stroke="#2c6066" strokeWidth={sw(1.5)} vectorEffect="non-scaling-stroke" opacity={0.95} />
+            <rect
+              x={z.at[0] - w / 2}
+              y={z.at[1] - h / 2}
+              width={w}
+              height={h}
+              rx={h / 2}
+              fill={on ? '#2c6066' : 'white'}
+              stroke="#2c6066"
+              strokeWidth={sw(1.5)}
+              vectorEffect="non-scaling-stroke"
+              opacity={0.95}
+            />
             <text x={z.at[0]} y={z.at[1]} fontSize={font * 0.9} textAnchor="middle" dominantBaseline="central" fill={on ? 'white' : '#2c6066'} className="pointer-events-none font-bold">
               {text}
             </text>
@@ -167,11 +170,7 @@ export function PeoplePanel({
   const query = q.trim().toLowerCase();
   const guests = data.people.filter((p) => p.kind === 'guest');
   const techs = data.people.filter((p) => p.kind === 'technician');
-  const shown = data.people.filter(
-    (p) =>
-      (!zoneFilter || p.zoneId === zoneFilter.id) &&
-      (!query || [p.tagCode, p.techNo, p.techName, p.spaceCode].some((x) => x?.toLowerCase().includes(query))),
-  );
+  const shown = data.people.filter((p) => (!zoneFilter || p.zoneId === zoneFilter.id) && (!query || [p.tagCode, p.techNo, p.techName, p.spaceCode].some((x) => x?.toLowerCase().includes(query))));
   // 当前楼层排在前面，再按楼层、地方
   const groups = useMemo(() => {
     const m = new Map<string, { floor: string; place: string; people: LocationPerson[] }>();
@@ -228,7 +227,11 @@ export function PeoplePanel({
               </p>
               <ul className="mt-1 space-y-1">
                 {g.people.map((p) => (
-                  <li key={`${p.kind}-${p.id}`} className="flex items-center gap-1.5 rounded-md border border-line px-2 py-1.5 text-[12.5px]" data-testid={`floormap-person-${p.kind}-${p.kind === 'guest' ? p.tagCode : p.techNo}`}>
+                  <li
+                    key={`${p.kind}-${p.id}`}
+                    className="flex items-center gap-1.5 rounded-md border border-line px-2 py-1.5 text-[12.5px]"
+                    data-testid={`floormap-person-${p.kind}-${p.kind === 'guest' ? p.tagCode : p.techNo}`}
+                  >
                     <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onLocate(p)}>
                       <span className={cn('font-bold', p.kind === 'technician' && 'text-lake')}>{personText(p)}</span>
                       <span className="block text-[11.5px] text-ink-3">
@@ -256,14 +259,14 @@ export function TrackDialog({ person, onClose }: { person: LocationPerson | null
   if (!person) return null;
   const d = t.data;
   return (
-    <Dialog open onClose={onClose} width="max-w-2xl" title={`${personText(person)} 的轨迹`} description={person.kind === 'guest' ? '这次来访的全部位置；位置停在上一次动作。' : '今天（营业日）的位置。'}>
-      {t.isPending ? (
-        <Skeleton className="h-40" />
-      ) : t.error ? (
-        <Notice tone="error" title={errorMessage(t.error)} />
-      ) : d ? (
-        <TrackBody data={d} />
-      ) : null}
+    <Dialog
+      open
+      onClose={onClose}
+      width="max-w-2xl"
+      title={`${personText(person)} 的轨迹`}
+      description={person.kind === 'guest' ? '这次来访的全部位置；位置停在上一次动作。' : '今天（营业日）的位置。'}
+    >
+      {t.isPending ? <Skeleton className="h-40" /> : t.error ? <Notice tone="error" title={errorMessage(t.error)} /> : d ? <TrackBody data={d} /> : null}
     </Dialog>
   );
 }

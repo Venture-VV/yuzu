@@ -260,8 +260,7 @@ function linesFromDraft(body: RequestDraftBody, meta: RequestMeta): FormLine[] {
   return rows.length ? rows : [blankLine()];
 }
 
-const lineBlank = (l: FormLine) =>
-  l.materialId === null && l.images.length === 0 && ![l.name, l.purpose, l.qty, l.unit, l.refPrice, l.link, l.details, l.note].some((s) => s.trim());
+const lineBlank = (l: FormLine) => l.materialId === null && l.images.length === 0 && ![l.name, l.purpose, l.qty, l.unit, l.refPrice, l.link, l.details, l.note].some((s) => s.trim());
 
 function RequestForm({
   meta,
@@ -348,13 +347,13 @@ function RequestForm({
       ? '上一张需求单结果待确认，请先在上方查回、重新提交或作废'
       : uploading.size > 0
         ? '图片还在上传，请稍等'
-      : !departmentId
-        ? free
-          ? '请选择部门'
-          : '你的员工档案里还没有填所属部门，请店主在「后台 → 员工」里补上'
-        : needBy && needBy < session.calendarToday
-          ? '需要日期不能早于今天'
-          : rows.find((r) => r.err)?.err ?? null;
+        : !departmentId
+          ? free
+            ? '请选择部门'
+            : '你的员工档案里还没有填所属部门，请店主在「后台 → 员工」里补上'
+          : needBy && needBy < session.calendarToday
+            ? '需要日期不能早于今天'
+            : (rows.find((r) => r.err)?.err ?? null);
 
   const setLine = (key: string, patch: Partial<FormLine>) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
@@ -458,7 +457,11 @@ function RequestForm({
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to={existing ? `/erp/requests?request=${existing.id}` : '/erp/requests'} className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回需求单">
+            <Link
+              to={existing ? `/erp/requests?request=${existing.id}` : '/erp/requests'}
+              className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink"
+              aria-label="返回需求单"
+            >
               <ArrowLeft className="size-[18px]" />
             </Link>
             <span className="flex size-8 items-center justify-center rounded-full bg-pine-soft text-pine">
@@ -529,7 +532,11 @@ function RequestForm({
               }
             />
           )}
-          {existing?.status === 'returned' && existing.reason && <Notice tone="warning" title={`采购退回：${existing.reason}`}>改好后提交，重新等待审核。</Notice>}
+          {existing?.status === 'returned' && existing.reason && (
+            <Notice tone="warning" title={`采购退回：${existing.reason}`}>
+              改好后提交，重新等待审核。
+            </Notice>
+          )}
           {meta.cutoff.enabled && (
             <Notice tone="info" title={`每天 ${meta.cutoff.time} 截单`} data-testid="rq-cutoff">
               {meta.cutoff.time} 以后提交的需求单照常提交，当天不能审核通过，第二天起可以。急需的选「紧急」并尽量在截单前提交，来不及的请找采购走急采。
@@ -558,8 +565,24 @@ function RequestForm({
                 value={priority}
                 onChange={(v) => setPriority(v)}
                 options={[
-                  { value: 'normal', label: <span className="inline-flex items-center gap-1.5"><PriorityDot priority="normal" />普通</span> },
-                  { value: 'urgent', label: <span className="inline-flex items-center gap-1.5"><PriorityDot priority="urgent" />紧急</span> },
+                  {
+                    value: 'normal',
+                    label: (
+                      <span className="inline-flex items-center gap-1.5">
+                        <PriorityDot priority="normal" />
+                        普通
+                      </span>
+                    ),
+                  },
+                  {
+                    value: 'urgent',
+                    label: (
+                      <span className="inline-flex items-center gap-1.5">
+                        <PriorityDot priority="urgent" />
+                        紧急
+                      </span>
+                    ),
+                  },
                 ]}
               />
             </Field>
@@ -620,7 +643,15 @@ function RequestForm({
                     </Field>
                   ) : (
                     <Field label="产品名" className="sm:col-span-3">
-                      <Input aria-label={`第 ${i + 1} 行产品名`} value={l.name} maxLength={40} disabled={busy} onChange={(e) => setLine(l.key, { name: e.target.value })} className="h-10" data-testid={`rq-name-${i}`} />
+                      <Input
+                        aria-label={`第 ${i + 1} 行产品名`}
+                        value={l.name}
+                        maxLength={40}
+                        disabled={busy}
+                        onChange={(e) => setLine(l.key, { name: e.target.value })}
+                        className="h-10"
+                        data-testid={`rq-name-${i}`}
+                      />
                     </Field>
                   )}
                   <Field label="用途" className="sm:col-span-3">
@@ -634,10 +665,26 @@ function RequestForm({
                     </Select>
                   </Field>
                   <Field label="数量" className="sm:col-span-2">
-                    <Input aria-label={`第 ${i + 1} 行数量`} inputMode="decimal" value={l.qty} disabled={busy} onChange={(e) => setLine(l.key, { qty: e.target.value })} className="h-10 text-right" data-testid={`rq-qty-${i}`} />
+                    <Input
+                      aria-label={`第 ${i + 1} 行数量`}
+                      inputMode="decimal"
+                      value={l.qty}
+                      disabled={busy}
+                      onChange={(e) => setLine(l.key, { qty: e.target.value })}
+                      className="h-10 text-right"
+                      data-testid={`rq-qty-${i}`}
+                    />
                   </Field>
                   <Field label="单位" className="sm:col-span-2">
-                    <Input aria-label={`第 ${i + 1} 行单位`} value={l.unit} maxLength={8} disabled={busy} onChange={(e) => setLine(l.key, { unit: e.target.value })} className="h-10" data-testid={`rq-unit-${i}`} />
+                    <Input
+                      aria-label={`第 ${i + 1} 行单位`}
+                      value={l.unit}
+                      maxLength={8}
+                      disabled={busy}
+                      onChange={(e) => setLine(l.key, { unit: e.target.value })}
+                      className="h-10"
+                      data-testid={`rq-unit-${i}`}
+                    />
                   </Field>
                   <Field label="参考单价" hint="选填" className="sm:col-span-2">
                     <MoneyInput aria-label={`第 ${i + 1} 行参考单价`} value={l.refPrice} disabled={busy} onChange={(e) => setLine(l.key, { refPrice: e.target.value })} className="h-10 text-right" />
@@ -656,26 +703,43 @@ function RequestForm({
                     />
                   </Field>
                   <Field label="产品详情 / 规格" className="sm:col-span-3">
-                    <Input aria-label={`第 ${i + 1} 行详情`} value={l.details} maxLength={200} disabled={busy} onChange={(e) => setLine(l.key, { details: e.target.value })} placeholder="颜色、尺寸、型号等" className="h-10" />
+                    <Input
+                      aria-label={`第 ${i + 1} 行详情`}
+                      value={l.details}
+                      maxLength={200}
+                      disabled={busy}
+                      onChange={(e) => setLine(l.key, { details: e.target.value })}
+                      placeholder="颜色、尺寸、型号等"
+                      className="h-10"
+                    />
                   </Field>
                   <Field label="备注" className="sm:col-span-3">
-                    <Input aria-label={`第 ${i + 1} 行备注`} value={l.note} maxLength={100} disabled={busy} onChange={(e) => setLine(l.key, { note: e.target.value })} placeholder="可选" className="h-10" />
+                    <Input
+                      aria-label={`第 ${i + 1} 行备注`}
+                      value={l.note}
+                      maxLength={100}
+                      disabled={busy}
+                      onChange={(e) => setLine(l.key, { note: e.target.value })}
+                      placeholder="可选"
+                      className="h-10"
+                    />
                   </Field>
                   <Field label="图片" hint={`${l.kind === 'new' ? '新产品至少一张；' : ''}最多 ${MAX_LINE_IMAGES} 张，上传前自动压缩`} className="sm:col-span-6">
-                    <ImagePicker
-                      value={l.images}
-                      onChange={(images) => setLine(l.key, { images })}
-                      disabled={busy}
-                      testId={`rq-images-${i}`}
-                      onBusyChange={(b) => setLineUploading(l.key, b)}
-                    />
+                    <ImagePicker value={l.images} onChange={(images) => setLine(l.key, { images })} disabled={busy} testId={`rq-images-${i}`} onBusyChange={(b) => setLineUploading(l.key, b)} />
                   </Field>
                 </div>
                 {err && l.name.trim() && <p className="mt-2 text-[12px] font-semibold text-clay">{err}</p>}
               </li>
             ))}
           </ul>
-          <Button variant="secondary" size="sm" icon={<Plus className="size-4" />} disabled={busy || lines.length >= 50} onClick={() => setLines((ls) => [...ls, blankLine()])} data-testid="rq-add-line">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Plus className="size-4" />}
+            disabled={busy || lines.length >= 50}
+            onClick={() => setLines((ls) => [...ls, blankLine()])}
+            data-testid="rq-add-line"
+          >
             加一行
           </Button>
 

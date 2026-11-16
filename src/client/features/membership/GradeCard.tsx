@@ -9,15 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Award, History, Info, PencilLine, ShieldCheck, TrendingUp } from 'lucide-react';
 import { formatYuan } from '@shared/money';
 import { shiftDate } from '@shared/labels';
-import {
-  GRADE_EVENT_LABELS,
-  gradeLabel,
-  MAX_GRADE,
-  TIER_LABELS,
-  type GradeEventRow,
-  type MemberGradeInfo,
-  type MembershipRules,
-} from '@shared/membership';
+import { GRADE_EVENT_LABELS, gradeLabel, MAX_GRADE, TIER_LABELS, type GradeEventRow, type MemberGradeInfo, type MembershipRules } from '@shared/membership';
 import type { MemberDetail } from '@shared/types';
 import { errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending, type ErpPendingOp } from '../../lib/erpPending';
@@ -98,8 +90,8 @@ export function GradeCard({ member }: { member: MemberDetail }) {
       </div>
       {info.inGrace && s.cycleEnd && (
         <Notice tone="warning" className="mt-3" title={`补充期至 ${s.graceUntil}（还有 ${info.daysLeft} 天）`} data-testid="member-grade-grace">
-          周期消费已过享阶、没到保级：补充期内（从周期第一天累计）储值消费到 <Money cents={info.targets?.honor ?? 0} /> 当场保级，新周期从{' '}
-          {shiftDate(s.cycleEnd, 1)} 起算；补充期满还不够降到 L{s.grade - 1}。
+          周期消费已过享阶、没到保级：补充期内（从周期第一天累计）储值消费到 <Money cents={info.targets?.honor ?? 0} /> 当场保级，新周期从 {shiftDate(s.cycleEnd, 1)} 起算；补充期满还不够降到 L
+          {s.grade - 1}。
         </Notice>
       )}
 
@@ -178,7 +170,12 @@ function SpendProgress({ info }: { info: MemberGradeInfo }) {
   const enjoyAt = Math.round((t.enjoy / Math.max(1, t.honor)) * 100);
   const tier = info.state.tier ?? 0;
   const lines: React.ReactNode[] = [];
-  if (tier < 1 && spend < t.enjoy) lines.push(<>再消费 <Money cents={t.enjoy - spend} className="font-bold text-ink" /> 升享阶</>);
+  if (tier < 1 && spend < t.enjoy)
+    lines.push(
+      <>
+        再消费 <Money cents={t.enjoy - spend} className="font-bold text-ink" /> 升享阶
+      </>,
+    );
   if (spend < t.honor) {
     lines.push(
       <>
@@ -203,7 +200,9 @@ function SpendProgress({ info }: { info: MemberGradeInfo }) {
       </div>
       <div className="mt-0.5 flex justify-between text-[11px] text-ink-3">
         <span>初</span>
-        <span style={{ marginLeft: `${enjoyAt - 10}%` }}>享 <Money cents={t.enjoy} /></span>
+        <span style={{ marginLeft: `${enjoyAt - 10}%` }}>
+          享 <Money cents={t.enjoy} />
+        </span>
         <span>尊 · 保级</span>
       </div>
       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-ink-2" data-testid="member-grade-spend-next">
@@ -248,7 +247,9 @@ function RechargeProgress({ rules, info }: { rules: MembershipRules; info: Membe
               再充 <Money cents={next.needCents} className="font-bold text-ink" /> 升到「L{next.grade} {next.name}」，这笔按 {pctOf(next.bonusBp)} 赠送
             </span>
           ) : (
-            <span>累计已够「L{next.grade} {next.name}」，下一笔充值即升档</span>
+            <span>
+              累计已够「L{next.grade} {next.name}」，下一笔充值即升档
+            </span>
           )
         ) : (
           <span>已是最高档</span>

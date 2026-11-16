@@ -137,7 +137,9 @@ describe('房间详情汇总（B07）', () => {
     // 换到 W304，再搓个背
     const moved = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/move`, { toRoomId: room['W304'], reason: '客人嫌吵' });
     expect(moved.status, JSON.stringify(moved.body)).toBe(200);
-    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${g.visitId}/charges`, { clientKey: randomUUID(), lines: [{ itemId: item['搓背'], quantity: 1 }], expectedTotal: 5000 })).status).toBe(200);
+    expect(
+      (await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${g.visitId}/charges`, { clientKey: randomUUID(), lines: [{ itemId: item['搓背'], quantity: 1 }], expectedTotal: 5000 })).status,
+    ).toBe(200);
     // 退房
     const preview = (await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/stays/${s.id}/checkout-preview`)).body;
     const close = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${s.id}/close`, { clientKey: randomUUID(), expectedDue: preview.dueAmount, expectedDeposits: preview.depositByMethod });
@@ -146,7 +148,12 @@ describe('房间详情汇总（B07）', () => {
     const w301 = await timeline('W301');
     const sessionNo = (await ctx.sql<{ sessionNo: string }[]>`SELECT session_no FROM technician_sessions WHERE visit_id = ${g.visitId}`)[0]!.sessionNo;
     // 时间倒序：最新的在前
-    expect([...w301.entries].map((e) => e.at)).toEqual([...w301.entries].map((e) => e.at).sort().reverse());
+    expect([...w301.entries].map((e) => e.at)).toEqual(
+      [...w301.entries]
+        .map((e) => e.at)
+        .sort()
+        .reverse(),
+    );
     const pick = (t: RoomTimeline) => t.entries.map((e) => [e.kind, e.title, e.amount, e.ref]).reverse();
     expect(pick(w301)).toEqual([
       ['stay', '入住', null, s.stayNo],

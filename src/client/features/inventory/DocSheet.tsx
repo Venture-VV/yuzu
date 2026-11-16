@@ -163,7 +163,11 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             {doc.returnedReason}
           </Notice>
         )}
-        {doc.status === 'cancelled' && <Notice tone="info" title="已撤回，没有影响库存">{doc.returnedReason}</Notice>}
+        {doc.status === 'cancelled' && (
+          <Notice tone="info" title="已撤回，没有影响库存">
+            {doc.returnedReason}
+          </Notice>
+        )}
         {doc.status === 'voided' && (
           <Notice tone="error" title={`已冲销 · ${doc.voidedByName ?? ''} ${doc.voidedAt ? formatDateTime(doc.voidedAt) : ''}`}>
             {doc.voidReason}。原单内容保留，库存已按原流水反向记回。
@@ -186,7 +190,9 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             </Notice>
           ))}
         {doc.urgent && doc.status === 'confirmed' && !doc.purchaseOrder && (
-          <Notice tone="warning" title="急采还没补采购单">由采购在「采购 → 急采」里补采购单，急采已经审批过，补单提交即确认。</Notice>
+          <Notice tone="warning" title="急采还没补采购单">
+            由采购在「采购 → 急采」里补采购单，急采已经审批过，补单提交即确认。
+          </Notice>
         )}
         {doc.deptSign && (
           <Notice tone="success" title={`${doc.deptSign.signedByName} 已签收 · ${formatDateTime(doc.deptSign.signedAt)}`}>
@@ -213,7 +219,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
               <p className="mt-1 text-ink-3">现付供应商的退货不记应付：退回的钱在「货款 → 对账单 → 可抵扣」登记供应商退款。</p>
             ) : (
               <p className="mt-1 text-ink-3">
-                抵原收货单 <Money cents={doc.returnCredit.appliedCents} className="font-semibold text-ink" />；多出来的是退货余额（原收货单已经付过款），在「货款 → 对账单 → 可抵扣」核销到以后的货款或登记供应商退款。
+                抵原收货单 <Money cents={doc.returnCredit.appliedCents} className="font-semibold text-ink" />
+                ；多出来的是退货余额（原收货单已经付过款），在「货款 → 对账单 → 可抵扣」核销到以后的货款或登记供应商退款。
               </p>
             )}
             <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
@@ -235,9 +242,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             <span className="num">{doc.docDate}</span>
           </Info>
           {doc.supplier && <Info label="供应商">{doc.supplier.name}</Info>}
-          {doc.department && (
-            <Info label={doc.docType === 'issue_return' ? '退回部门' : doc.docType === 'issue' ? '领料部门' : '部门'}>{doc.department.name}</Info>
-          )}
+          {doc.department && <Info label={doc.docType === 'issue_return' ? '退回部门' : doc.docType === 'issue' ? '领料部门' : '部门'}>{doc.department.name}</Info>}
           {doc.warehouse && (
             <Info label={doc.docType === 'issue' ? '进' : doc.docType === 'issue_return' ? '从' : '仓'}>
               {doc.warehouse.name}
@@ -327,9 +332,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                     <Mini label="合格实收">
                       <Qty milli={l.qtyMilli} unit={l.inventoryUnit} className="font-bold text-pine" />
                     </Mini>
-                    <Mini label="拒收">
-                      {l.rejectedMilli ? <Qty milli={l.rejectedMilli} unit={l.inventoryUnit} className="font-bold text-clay" /> : '—'}
-                    </Mini>
+                    <Mini label="拒收">{l.rejectedMilli ? <Qty milli={l.rejectedMilli} unit={l.inventoryUnit} className="font-bold text-clay" /> : '—'}</Mini>
                     <Mini label={`单价/${l.purchaseUnit}`}>{l.priceCents !== null ? <Money cents={l.priceCents} /> : '—'}</Mini>
                     {l.rejectReason && <p className="col-span-full text-clay">拒收原因：{l.rejectReason}（不入库、不计货款）</p>}
                     {(l.batchNo || l.expiresOn) && (
@@ -401,7 +404,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                     )}
                     {doc.docType === 'supplier_return' && l.amountCents !== null && (
                       <>
-                        扣款 <Money cents={l.amountCents} className="font-semibold text-clay" />（按原收货价 <Money cents={l.priceCents ?? 0} />/{l.purchaseUnit}）
+                        扣款 <Money cents={l.amountCents} className="font-semibold text-clay" />
+                        （按原收货价 <Money cents={l.priceCents ?? 0} />/{l.purchaseUnit}）
                       </>
                     )}
                   </p>
@@ -438,12 +442,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
 
         {/* 收货单的附件（8.0.1 采购组整改 11）：仓库、采购都能补传；现付的推送到财务待报销 */}
         {doc.docType === 'receipt' && doc.status !== 'cancelled' && (
-          <ReceiptAttachmentsPanel
-            docId={doc.id}
-            items={doc.attachments ?? []}
-            canUpload={doc.status !== 'voided' && (can('inventory.operate') || can('purchase.manage'))}
-            onChanged={invalidate}
-          />
+          <ReceiptAttachmentsPanel docId={doc.id} items={doc.attachments ?? []} canUpload={doc.status !== 'voided' && (can('inventory.operate') || can('purchase.manage'))} onChanged={invalidate} />
         )}
 
         <ApprovalProgress approval={doc.urgent && !doc.approval ? null : doc.approval} />
@@ -453,7 +452,12 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
           <ol className="space-y-2 border-l-2 border-line pl-4">
             {doc.approvals.map((a) => (
               <li key={a.id} className="relative text-[12.5px]">
-                <span className={cn('absolute top-1.5 -left-[21px] size-2.5 rounded-full ring-2 ring-paper', a.action === 'approve' ? 'bg-pine' : a.action === 'return' || a.action === 'void' ? 'bg-clay' : 'bg-ink-4')} />
+                <span
+                  className={cn(
+                    'absolute top-1.5 -left-[21px] size-2.5 rounded-full ring-2 ring-paper',
+                    a.action === 'approve' ? 'bg-pine' : a.action === 'return' || a.action === 'void' ? 'bg-clay' : 'bg-ink-4',
+                  )}
+                />
                 <span className="font-bold">{ACTION_LABELS[a.action]}</span>
                 <span className="text-ink-2"> · {a.actorName}</span>
                 <span className="num text-ink-3"> · {formatDateTime(a.createdAt)}</span>
@@ -551,7 +555,13 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                 )
               }
             >
-              {doc.approval && doc.approval.levels > 1 ? `同意（第 ${doc.approval.currentLevel}/${doc.approval.levels} 级）` : doc.urgent ? '批准急采' : doc.docType === 'count' ? '确认盘点调整' : '确认生效'}
+              {doc.approval && doc.approval.levels > 1
+                ? `同意（第 ${doc.approval.currentLevel}/${doc.approval.levels} 级）`
+                : doc.urgent
+                  ? '批准急采'
+                  : doc.docType === 'count'
+                    ? '确认盘点调整'
+                    : '确认生效'}
             </Button>
           </>
         )}

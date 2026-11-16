@@ -30,12 +30,7 @@ import { parse } from '../../lib/validate';
 import { lockLoginNames } from './portal-auth';
 import { loadCanteenSettings } from './settings';
 
-const EmpNo = z
-  .string('请写工号')
-  .trim()
-  .min(1, '请写工号')
-  .transform(normalizeEmpNo)
-  .pipe(z.string().regex(EMP_NO, '工号只能是字母、数字和短横线，1–16 位，例如 A012'));
+const EmpNo = z.string('请写工号').trim().min(1, '请写工号').transform(normalizeEmpNo).pipe(z.string().regex(EMP_NO, '工号只能是字母、数字和短横线，1–16 位，例如 A012'));
 const Name = z.string('请写姓名').trim().min(1, '请写姓名').max(16, '姓名最多 16 个字');
 
 const CreateInput = z.object({
@@ -164,18 +159,17 @@ const BatchInput = z.object({
  */
 export async function batchEmployees(sql: Sql, raw: unknown, ctx: OpContext): Promise<{ rows: BatchPreviewRow[]; created: number }> {
   const input = parse(BatchInput, raw);
-  const lines = input.text.split(/\r?\n/).map((l, i) => ({ line: i + 1, text: l.trim() })).filter((l) => l.text && !l.text.startsWith('#'));
+  const lines = input.text
+    .split(/\r?\n/)
+    .map((l, i) => ({ line: i + 1, text: l.trim() }))
+    .filter((l) => l.text && !l.text.startsWith('#'));
   if (!lines.length) throw badRequest('没有读到名单：一行一位，「工号 姓名 部门」');
   if (lines.length > 500) throw badRequest('一次最多 500 位');
   return sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const departments = await tx<{ id: number; name: string; active: boolean }[]>`SELECT id, name, active FROM departments`;
-    const existing = new Map(
-      (await tx<{ empNo: string; name: string; departmentId: number | null }[]>`SELECT emp_no, name, department_id FROM canteen_employees`).map((e) => [e.empNo, e]),
-    );
-    const usernames = new Map(
-      (await tx<{ username: string; name: string }[]>`SELECT username, name FROM canteen_employees WHERE username IS NOT NULL`).map((e) => [e.username.toUpperCase(), e.name]),
-    );
+    const existing = new Map((await tx<{ empNo: string; name: string; departmentId: number | null }[]>`SELECT emp_no, name, department_id FROM canteen_employees`).map((e) => [e.empNo, e]));
+    const usernames = new Map((await tx<{ username: string; name: string }[]>`SELECT username, name FROM canteen_employees WHERE username IS NOT NULL`).map((e) => [e.username.toUpperCase(), e.name]));
     const seen = new Set<string>();
     const rows: BatchPreviewRow[] = lines.map(({ line, text }) => {
       const parts = text.split(/[\s,，\t]+/).filter(Boolean);
@@ -197,9 +191,7 @@ export async function batchEmployees(sql: Sql, raw: unknown, ctx: OpContext): Pr
       seen.add(empNo);
       const old = existing.get(empNo);
       if (old) {
-        return old.name === name && old.departmentId === row.departmentId
-          ? { ...row, status: 'same', message: '已经有了，跳过' }
-          : bad(`工号已经有了（${old.name}）`);
+        return old.name === name && old.departmentId === row.departmentId ? { ...row, status: 'same', message: '已经有了，跳过' } : bad(`工号已经有了（${old.name}）`);
       }
       return row;
     });
@@ -209,7 +201,10 @@ export async function batchEmployees(sql: Sql, raw: unknown, ctx: OpContext): Pr
     let created = 0;
     const fresh = rows.filter((x) => x.status === 'new');
     // 取好这一批工号的登录名锁以后再核对一次（预览之后有人登记了同名的用户名）
-    await lockLoginNames(tx, fresh.map((r) => r.empNo));
+    await lockLoginNames(
+      tx,
+      fresh.map((r) => r.empNo),
+    );
     for (const r of fresh) await checkEmpNoFree(tx, r.empNo, null);
     for (const r of fresh) {
       const id = await insertEmployee(tx, { empNo: r.empNo, name: r.name, departmentId: r.departmentId, role: 'staff' }, ctx);

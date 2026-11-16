@@ -84,7 +84,12 @@ async function seedBilling(sql: Sql, config: AppConfig, options: { now?: Date })
   if (!memberId) {
     memberId = (await createMember(sql, { name: MEMBER.name, phone: MEMBER.phone, gender: 'male', birthday: null, note: '结账演示会员' }, { actor: owner }, { enforceRequired: false })).id;
     await sql`UPDATE members SET is_synthetic = true WHERE id = ${memberId}`;
-    await recharge(deps, { idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: MEMBER.paid, bonusAmount: MEMBER.bonus, paymentMethod: 'wechat', paymentConfirmed: true }, { actor: owner }, { history: true });
+    await recharge(
+      deps,
+      { idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: MEMBER.paid, bonusAmount: MEMBER.bonus, paymentMethod: 'wechat', paymentConfirmed: true },
+      { actor: owner },
+      { history: true },
+    );
   }
 
   const now = options.now ?? new Date();
@@ -96,20 +101,20 @@ async function seedBilling(sql: Sql, config: AppConfig, options: { now?: Date })
   const dayStart = businessDayStart(businessDateOf(now, config.timezone, businessDayStartHour), config.timezone, businessDayStartHour).getTime();
   const span = 300;
   const squeeze = now.getTime() - span * 60_000 < dayStart;
-  const ago = (min: number) =>
-    squeeze && min <= span ? new Date(dayStart + (now.getTime() - dayStart) * (1 - min / (span + 1))) : new Date(now.getTime() - min * 60_000);
+  const ago = (min: number) => (squeeze && min <= span ? new Date(dayStart + (now.getTime() - dayStart) * (1 - min / (span + 1))) : new Date(now.getTime() - min * 60_000));
   const as = (a: Actor, minAgo: number): OpContext => ({ actor: a, at: ago(minAgo) });
   const items = new Map((await sql<{ id: number; name: string }[]>`SELECT id, name FROM service_items`).map((r) => [r.name, r.id]));
   const price = (name: string) => DEMO_ITEMS.find((i) => i.name === name)!.price;
   const charge = (visitId: number, lines: [string, number][], ctx: OpContext) =>
-    postCharges(deps, visitId, { clientKey: randomUUID(), lines: lines.map(([n, q]) => ({ itemId: items.get(n)!, quantity: q })), expectedTotal: lines.reduce((s, [n, q]) => s + price(n) * q, 0) }, ctx);
+    postCharges(
+      deps,
+      visitId,
+      { clientKey: randomUUID(), lines: lines.map(([n, q]) => ({ itemId: items.get(n)!, quantity: q })), expectedTotal: lines.reduce((s, [n, q]) => s + price(n) * q, 0) },
+      ctx,
+    );
   const open = async (guests: { tagCode: string; zone: Zone; ticket: string; guestLabel?: string; memberId?: number }[], ctx: OpContext, ticketGrantId: string | null = null) =>
     (
-      await checkin(
-        deps,
-        { clientKey: randomUUID(), guests: guests.map(({ ticket: t, ...g }) => ({ memberId: null, guestLabel: '', ticketTypeId: ticket.get(t)!, ...g })), ticketGrantId },
-        ctx,
-      )
+      await checkin(deps, { clientKey: randomUUID(), guests: guests.map(({ ticket: t, ...g }) => ({ memberId: null, guestLabel: '', ticketTypeId: ticket.get(t)!, ...g })), ticketGrantId }, ctx)
     ).visits.map((v) => v.id);
   /** 值班经理张经理当场授权（演示数据直接签发，不经密码弹窗） */
   const grant = async (purpose: 'checkout_discount' | 'ticket_discount', requestedBy: Actor, scope: unknown) =>
@@ -179,7 +184,14 @@ async function seedBilling(sql: Sql, config: AppConfig, options: { now?: Date })
   // ⑥ 抹零：不含餐 499 + 柚子气泡水 22 = 521，值班经理授权优惠 21 元，现金 500
   const [s6] = await open([{ tagCode: 'A8072', zone: 'male', ticket: '不含餐', guestLabel: '散客丙' }], as(clerk, 60));
   await charge(s6!, [['柚子气泡水', 1]], as(clerk, 50));
-  await pay([s6!], [{ method: 'discount', amount: 2100, grantId: await grant('checkout_discount', cashier, { visitIds: [s6!], amount: 2100, reason: '抹零' }) }, { method: 'cash', amount: 0 }], as(cashier, 5));
+  await pay(
+    [s6!],
+    [
+      { method: 'discount', amount: 2100, grantId: await grant('checkout_discount', cashier, { visitIds: [s6!], amount: 2100, reason: '抹零' }) },
+      { method: 'cash', amount: 0 },
+    ],
+    as(cashier, 5),
+  );
 
   // ⑦ 陈茵交班：应有现金 = 备用金 500 + 现金结账 521 + 557（⑤ 原单，之后由张经理反结账）+ 500（⑥）= 2078；实点 2068（短款 10 元）
   const { summary } = await getShift(sql, cashierShift.id, ago(2));

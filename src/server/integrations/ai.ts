@@ -141,7 +141,14 @@ export function claudeProvider(opts: { apiKey: string; baseURL?: string; model?:
     },
     async structured({ system, prompt, schema }) {
       try {
-        const r = await client.beta.messages.parse({ model, max_tokens: 16000, ...fallback, output_config: { effort: 'medium', format: zodOutputFormat(schema) }, system, messages: [{ role: 'user', content: prompt }] });
+        const r = await client.beta.messages.parse({
+          model,
+          max_tokens: 16000,
+          ...fallback,
+          output_config: { effort: 'medium', format: zodOutputFormat(schema) },
+          system,
+          messages: [{ role: 'user', content: prompt }],
+        });
         refused(r.stop_reason);
         if (r.parsed_output == null) throw new AiUnavailable('模型的回复不合格式，请再试一次');
         return { value: r.parsed_output as never, usage: usageOf(r.usage) };
@@ -212,7 +219,11 @@ export function mockAiProvider(): AiProvider {
           : `${Array.isArray(out) ? out.length : 0} 行`;
       const input = (parsed.success ? parsed.data : {}) as { from?: string; to?: string };
       const range = input.from ? `（${input.from === input.to ? input.from : `${input.from} 至 ${input.to}`}）` : '';
-      return { text: `【模拟回答】按「${tool.description.split('：')[0]}」${range}取了一次数：${facts}。（模拟模式：没有调用模型，只把取到的数原样列出来）`, usage: { inputTokens: 0, outputTokens: 0 }, calls };
+      return {
+        text: `【模拟回答】按「${tool.description.split('：')[0]}」${range}取了一次数：${facts}。（模拟模式：没有调用模型，只把取到的数原样列出来）`,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        calls,
+      };
     },
     async structured<T>({ schema }: { schema: z.ZodType<T> }) {
       // 模拟：交一条固定的提示（合同条款提示的格式；别的格式交空清单）

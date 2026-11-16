@@ -57,8 +57,16 @@ describe('前台演示数据', () => {
     for (const [zone, z] of Object.entries({ male: expected.tags.male, female: expected.tags.female })) {
       const list = tags.filter((t) => t.zone === zone);
       expect(list).toHaveLength(z.total);
-      for (const [a, n] of Object.entries(z.normal)) expect(list.filter((t) => t.kind === 'normal' && area(t.code) === a), `${zone} ${a}`).toHaveLength(n);
-      for (const [lv, n] of Object.entries(z.vip)) expect(list.filter((t) => t.kind === 'vip' && t.vipLevel === Number(lv)), `${zone} VIP ${lv}`).toHaveLength(n);
+      for (const [a, n] of Object.entries(z.normal))
+        expect(
+          list.filter((t) => t.kind === 'normal' && area(t.code) === a),
+          `${zone} ${a}`,
+        ).toHaveLength(n);
+      for (const [lv, n] of Object.entries(z.vip))
+        expect(
+          list.filter((t) => t.kind === 'vip' && t.vipLevel === Number(lv)),
+          `${zone} VIP ${lv}`,
+        ).toHaveLength(n);
     }
     expect(tags.some((t) => t.zone === 'child')).toBe(false);
     expect(board.rules).toEqual(expected.rules);
@@ -70,8 +78,16 @@ describe('前台演示数据', () => {
       expect(card?.visit, e.tag).toBeTruthy();
       expect(card.visit).toMatchObject({ amountCents: e.amountCents, guestLabel: e.guest, memberName: e.member });
       const v = (await api(ctx.app, owner, 'GET', `/api/frontdesk/visits/${card.visit.id}`)).body;
-      expect(v.lines.filter((l: { status: string }) => l.status === 'active').map((l: { name: string; quantity: number }) => `${l.name} ×${l.quantity}`).sort()).toEqual([...e.lines].sort());
-      if (e.voided) expect(v.lines.filter((l: { status: string }) => l.status === 'voided').map((l: { name: string; quantity: number; voidReason: string }) => `${l.name} ×${l.quantity}（${l.voidReason}）`)).toEqual(e.voided);
+      expect(
+        v.lines
+          .filter((l: { status: string }) => l.status === 'active')
+          .map((l: { name: string; quantity: number }) => `${l.name} ×${l.quantity}`)
+          .sort(),
+      ).toEqual([...e.lines].sort());
+      if (e.voided)
+        expect(
+          v.lines.filter((l: { status: string }) => l.status === 'voided').map((l: { name: string; quantity: number; voidReason: string }) => `${l.name} ×${l.quantity}（${l.voidReason}）`),
+        ).toEqual(e.voided);
     }
     for (const g of Object.values(expected.groups)) {
       const first = board.tags.find((t: { code: string }) => t.code === g.tags[0]);
@@ -85,9 +101,11 @@ describe('前台演示数据', () => {
     expect(swapped.lines.find((l: { source: string }) => l.source === 'other')).toMatchObject({ amount: expected.swap.lostFeeCents, status: 'active' });
     const cancelled = expected.cancelled[0]!;
     expect(tags.find((t) => t.code === cancelled.tag)!.visit).toBeNull();
-    const { n } = (await ctx.sql<{ n: number }[]>`
+    const { n } = (
+      await ctx.sql<{ n: number }[]>`
       SELECT count(*) AS n FROM visits v JOIN hand_tags t ON t.id = v.tag_id
-      WHERE t.code = ${cancelled.tag} AND v.status = 'cancelled' AND v.close_reason = ${cancelled.reason}`)[0]!;
+      WHERE t.code = ${cancelled.tag} AND v.status = 'cancelled' AND v.close_reason = ${cancelled.reason}`
+    )[0]!;
     expect(n).toBe(1);
     // VIP 柜：柜子等级与会员等级
     for (const v of expected.vip) {

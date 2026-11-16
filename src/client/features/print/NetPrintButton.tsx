@@ -105,7 +105,8 @@ function NetPrintDialog({ doc, docName, onClose }: { doc: PrintDoc; docName: str
           title: `${printer.name}：${waitText(job.waitCode)}，${docName}已排队`,
           body: `打印机恢复后自动补打（最多等 ${session.rules.printWaitMinutes} 分钟）。可以在「设备」页的打印队列里看或取消，先别重复打`,
         });
-      else if (job.status === 'failed') toast({ tone: 'error', title: `${printer.name}：${docName}没打出来`, body: `${job.errorCode ? DEVICE_ERROR_LABELS[job.errorCode] : ''}${job.errorMessage ? `（${job.errorMessage}）` : ''}` });
+      else if (job.status === 'failed')
+        toast({ tone: 'error', title: `${printer.name}：${docName}没打出来`, body: `${job.errorCode ? DEVICE_ERROR_LABELS[job.errorCode] : ''}${job.errorMessage ? `（${job.errorMessage}）` : ''}` });
       else if (job.status === 'canceled') toast({ tone: 'info', title: `${docName}的打印任务已取消` });
       else if (lookupError) toast({ tone: 'info', title: `${printer.name}：已提交，查不到结果`, body: `打印任务 #${job.id}（${errorMessage(lookupError)}）。到「设备」页的打印队列里看，先别重复打` });
       else toast({ tone: 'info', title: `${printer.name}：${docName}还在排队`, body: `打印任务 #${job.id}：到「设备」页的打印队列里看` });

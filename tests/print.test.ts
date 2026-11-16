@@ -13,8 +13,7 @@ let ctx: TestContext;
 let cashier: string;
 let prints: CheckoutPrint[];
 
-const byTags = (tags: string[], status: 'completed' | 'voided') =>
-  prints.find((p) => p.status === status && p.bills.map((b) => b.tagCode).join() === tags.join())!;
+const byTags = (tags: string[], status: 'completed' | 'voided') => prints.find((p) => p.status === status && p.bills.map((b) => b.tagCode).join() === tags.join())!;
 
 async function printAll() {
   const [row] = await ctx.sql<{ date: string }[]>`SELECT DISTINCT business_date::text AS date FROM checkouts WHERE note = '结账演示'`;
@@ -54,7 +53,11 @@ describe('结账单打印数据', () => {
       after: { principal: expected.member.principalBalance, bonus: expected.member.bonusBalance },
     });
     // 其他收款方式没有余额
-    expect(byTags(e.tags, 'completed').payments.filter((x) => x.method !== 'wallet').every((x) => x.balance === null)).toBe(true);
+    expect(
+      byTags(e.tags, 'completed')
+        .payments.filter((x) => x.method !== 'wallet')
+        .every((x) => x.balance === null),
+    ).toBe(true);
   });
 
   it('明细含门票与挂账项目：过夜客 24 小时档 + 12 小时档，山野简餐 ×2', () => {

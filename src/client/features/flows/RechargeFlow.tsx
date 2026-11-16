@@ -29,15 +29,7 @@ const METHOD_ICONS: Record<PaymentMethod, typeof Smartphone> = {
   other: Ellipsis,
 };
 
-export function RechargeFlow({
-  member,
-  onClose,
-  onSwitchToConsume,
-}: {
-  member: MemberDetail;
-  onClose: () => void;
-  onSwitchToConsume: () => void;
-}) {
+export function RechargeFlow({ member, onClose, onSwitchToConsume }: { member: MemberDetail; onClose: () => void; onSwitchToConsume: () => void }) {
   const can = useCan();
   const session = useSession();
   const qc = useQueryClient();
@@ -121,9 +113,7 @@ export function RechargeFlow({
         memberId: member.id,
         memberName: member.name,
         amount: paid ?? 0,
-        summary: [plan?.name ?? '自定义金额', method ? PAYMENT_METHOD_LABELS[method] : '', bonus ? `赠金 ${formatYuan(bonus)}` : '']
-          .filter(Boolean)
-          .join(' · '),
+        summary: [plan?.name ?? '自定义金额', method ? PAYMENT_METHOD_LABELS[method] : '', bonus ? `赠金 ${formatYuan(bonus)}` : ''].filter(Boolean).join(' · '),
         staffName: session.staff.displayName,
       },
     }),
@@ -257,14 +247,7 @@ export function RechargeFlow({
             >
               返回修改
             </Button>
-            <Button
-              variant="primary"
-              size="lg"
-              className="flex-1"
-              disabled={!confirmed || !grantOk || locked || !shiftReady.ready}
-              loading={op.state.status === 'submitting'}
-              onClick={op.submit}
-            >
+            <Button variant="primary" size="lg" className="flex-1" disabled={!confirmed || !grantOk || locked || !shiftReady.ready} loading={op.state.status === 'submitting'} onClick={op.submit}>
               确认入账 {paid ? formatYuan(paid) : ''}
             </Button>
           </div>
@@ -277,9 +260,7 @@ export function RechargeFlow({
           <p className="text-[12.5px] font-semibold text-ink-3">本次实收</p>
           <div className="mt-1 flex items-end justify-between gap-3">
             <Money cents={paid ?? 0} className="text-[34px] leading-none font-bold text-lake" />
-            <span className="mb-1 rounded-full bg-lake-soft px-2.5 py-1 text-[12.5px] font-bold text-lake">
-              {method ? PAYMENT_METHOD_LABELS[method] : ''}
-            </span>
+            <span className="mb-1 rounded-full bg-lake-soft px-2.5 py-1 text-[12.5px] font-bold text-lake">{method ? PAYMENT_METHOD_LABELS[method] : ''}</span>
           </div>
           <div className="mt-4 border-t border-dashed border-line pt-1">
             <SummaryRow label="充值方案">{plan ? plan.name : '自定义金额'}</SummaryRow>
@@ -508,13 +489,21 @@ export function RechargeFlow({
                 ) : (
                   <>
                     充完是「{afterLabel}」{outcome.upgraded && <span className="text-pine">（升档）</span>}，
-                    {useCustom ? '赠金自定义' : <>按 {bonusRate}% 赠 <Money cents={outcome.bonusCents} className="text-yuzu-deep" /></>}
+                    {useCustom ? (
+                      '赠金自定义'
+                    ) : (
+                      <>
+                        按 {bonusRate}% 赠 <Money cents={outcome.bonusCents} className="text-yuzu-deep" />
+                      </>
+                    )}
                   </>
                 )}
               </p>
               {outcome.next && !belowMin && (
                 <p className="mt-0.5 text-ink-3" data-testid="recharge-grade-next">
-                  这笔再加 <Money cents={outcome.next.needCents} className="font-semibold text-ink-2" />（共 <Money cents={(paid ?? 0) + outcome.next.needCents} />）就升到「L
+                  这笔再加 <Money cents={outcome.next.needCents} className="font-semibold text-ink-2" />
+                  （共 <Money cents={(paid ?? 0) + outcome.next.needCents} />
+                  ）就升到「L
                   {outcome.next.grade} {outcome.next.name}」，整笔按 {outcome.next.bonusBp / 100}% 赠送（一次到位赠得更多）
                 </p>
               )}

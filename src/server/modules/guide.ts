@@ -257,7 +257,10 @@ export async function guideAdmin(db: Db): Promise<GuideAdmin> {
   const plan = await activePlan(db);
   const { zones, shapes, colors } = await zoneShapes(db, plan);
   const counts = new Map(
-    (await db<{ zoneId: number; n: number }[]>`SELECT zone_id, count(*)::int AS n FROM spaces WHERE active AND zone_id IS NOT NULL AND store_id = ${currentStoreId()} GROUP BY zone_id`).map((r) => [Number(r.zoneId), r.n]),
+    (await db<{ zoneId: number; n: number }[]>`SELECT zone_id, count(*)::int AS n FROM spaces WHERE active AND zone_id IS NOT NULL AND store_id = ${currentStoreId()} GROUP BY zone_id`).map((r) => [
+      Number(r.zoneId),
+      r.n,
+    ]),
   );
   const outZones: GuideAdminZone[] = zones
     .filter((z) => z.active)
@@ -276,7 +279,20 @@ export async function guideAdmin(db: Db): Promise<GuideAdmin> {
     }));
   const markers: GuideAdminMarker[] = (await markerRows(db)).map((m) => {
     const p = placeMarker(plan, m);
-    return { id: Number(m.id), floorCode: m.floorCode, kind: m.kind, x: p.x, y: p.y, ...markerLabel(m), source: m.source, hidden: m.hidden, version: m.version, xMm: Number(m.xMm), yMm: Number(m.yMm), onPlan: p.onPlan };
+    return {
+      id: Number(m.id),
+      floorCode: m.floorCode,
+      kind: m.kind,
+      x: p.x,
+      y: p.y,
+      ...markerLabel(m),
+      source: m.source,
+      hidden: m.hidden,
+      version: m.version,
+      xMm: Number(m.xMm),
+      yMm: Number(m.yMm),
+      onPlan: p.onPlan,
+    };
   });
   return { rules: await loadGuideRules(db), batchId: plan?.batchId ?? null, floors: plan ? plan.floors.map((f) => toGuideFloor(plan.batchId, f)) : [], zones: outZones, markers };
 }
@@ -372,7 +388,14 @@ async function addMarker(deps: Deps, raw: unknown, ctx: OpContext): Promise<{ id
   // 两次重提同时到：后到的那次落在唯一约束上，返回先到的那个
   if (!row) return (await replay())!;
   const id = Number(row.id);
-  await writeAudit(deps.sql, { staffId: ctx.actor.id, action: 'guide_marker_saved', targetType: 'guide_marker', targetId: id, detail: { floor: input.floorCode, kind: input.kind, added: true }, ip: ctx.ip });
+  await writeAudit(deps.sql, {
+    staffId: ctx.actor.id,
+    action: 'guide_marker_saved',
+    targetType: 'guide_marker',
+    targetId: id,
+    detail: { floor: input.floorCode, kind: input.kind, added: true },
+    ip: ctx.ip,
+  });
   return { id, replayed: false };
 }
 
@@ -482,10 +505,7 @@ export function registerGuideRoutes(app: FastifyInstance, deps: Deps) {
       reply.header('cache-control', 'no-store');
       throw notFound('这一层的底图已经换了或没有，请刷新页面');
     }
-    reply
-      .header('content-type', 'image/svg+xml; charset=utf-8')
-      .header('cache-control', 'private, max-age=86400')
-      .header('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'");
+    reply.header('content-type', 'image/svg+xml; charset=utf-8').header('cache-control', 'private, max-age=86400').header('content-security-policy', "default-src 'none'; style-src 'unsafe-inline'");
     return row.svg.replace(/<g class="labels"[^>]*>[\s\S]*?<\/g>/, '');
   });
 

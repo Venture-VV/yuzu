@@ -12,8 +12,7 @@ import { requireMember } from './store';
 import { idList, text, uuid, version, WorkspaceError } from './validation';
 
 const MAX_BYTES = 12 * 1024 * 1024;
-const isPraiseStaff = (row: { active: boolean; system: boolean; duties: string[] }) =>
-  row.active && !row.system && row.duties.some((d) => d === 'concierge' || d === 'concierge_manager');
+const isPraiseStaff = (row: { active: boolean; system: boolean; duties: string[] }) => row.active && !row.system && row.duties.some((d) => d === 'concierge' || d === 'concierge_manager');
 const staffId = (value: unknown) => {
   const s = text(value, 20, true);
   if (!/^[1-9]\d*$/.test(s) || !Number.isSafeInteger(Number(s))) throw new WorkspaceError('请选择真实管家员工');
@@ -21,17 +20,18 @@ const staffId = (value: unknown) => {
 };
 const day = (value: unknown) => {
   const s = text(value, 10, true);
-  if (!/^[1-9]\d{3}-\d{2}-\d{2}$/.test(s) || !Number.isFinite(Date.parse(`${s}T00:00:00Z`)) || new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) !== s)
-    throw new WorkspaceError('好评日期不正确');
+  if (!/^[1-9]\d{3}-\d{2}-\d{2}$/.test(s) || !Number.isFinite(Date.parse(`${s}T00:00:00Z`)) || new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) !== s) throw new WorkspaceError('好评日期不正确');
   return s;
 };
 function monthRange(value: string) {
   if (!/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(value)) throw new WorkspaceError('月份不正确');
-  const year = Number(value.slice(0, 4)), month = Number(value.slice(5));
+  const year = Number(value.slice(0, 4)),
+    month = Number(value.slice(5));
   return { from: `${value}-01`, to: `${month === 12 ? year + 1 : year}-${String(month === 12 ? 1 : month + 1).padStart(2, '0')}-01` };
 }
 function previousMonth(month: string) {
-  const year = Number(month.slice(0, 4)), n = Number(month.slice(5));
+  const year = Number(month.slice(0, 4)),
+    n = Number(month.slice(5));
   return `${n === 1 ? year - 1 : year}-${String(n === 1 ? 12 : n - 1).padStart(2, '0')}`;
 }
 type Cursor = { occurredOn: string; createdAt: string; id: string };
@@ -40,7 +40,9 @@ function parseCursor(value: unknown): Cursor | null {
   if (!s) return null;
   try {
     const v = JSON.parse(Buffer.from(s, 'base64url').toString('utf8'));
-    const occurredOn = day(v.occurredOn), id = uuid(text(v.id, 80, true)), createdAt = text(v.createdAt, 40, true);
+    const occurredOn = day(v.occurredOn),
+      id = uuid(text(v.id, 80, true)),
+      createdAt = text(v.createdAt, 40, true);
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(createdAt) || !Number.isFinite(Date.parse(createdAt))) throw new Error('invalid');
     // PostgreSQL保留微秒；转为JS Date会截成毫秒，分页会漏掉同一毫秒内的记录。
     return { occurredOn, createdAt, id };
@@ -61,12 +63,27 @@ const selectRecords = (db: Db) => db`
  LEFT JOIN staff voider ON voider.id=p.voided_by LEFT JOIN concierge_members m ON m.id=p.member_id`;
 function mapRecord(row: any): PraiseRecord {
   return {
-    id: String(row.id), staffId: String(row.staffId), staffName: row.staffNameSnapshot, staffActive: row.staffActive,
-    occurredOn: row.occurredOn, source: row.source, content: row.content, guestName: row.guestName,
-    memberId: row.memberId || '', memberName: row.memberName || '', memberCode: row.memberCode ? String(row.memberCode).padStart(6, '0') : '',
-    status: row.status, version: row.version, uploadIds: row.uploadIds,
-    createdById: String(row.createdBy), createdByName: row.createdByName, createdAt: row.createdAt,
-    voidedById: row.voidedBy ? String(row.voidedBy) : '', voidedByName: row.voidedByName || '', voidedAt: row.voidedAt || '', voidReason: row.voidReason,
+    id: String(row.id),
+    staffId: String(row.staffId),
+    staffName: row.staffNameSnapshot,
+    staffActive: row.staffActive,
+    occurredOn: row.occurredOn,
+    source: row.source,
+    content: row.content,
+    guestName: row.guestName,
+    memberId: row.memberId || '',
+    memberName: row.memberName || '',
+    memberCode: row.memberCode ? String(row.memberCode).padStart(6, '0') : '',
+    status: row.status,
+    version: row.version,
+    uploadIds: row.uploadIds,
+    createdById: String(row.createdBy),
+    createdByName: row.createdByName,
+    createdAt: row.createdAt,
+    voidedById: row.voidedBy ? String(row.voidedBy) : '',
+    voidedByName: row.voidedByName || '',
+    voidedAt: row.voidedAt || '',
+    voidReason: row.voidReason,
   };
 }
 export async function praiseDetail(db: Db, id: string): Promise<PraiseRecord> {
@@ -86,32 +103,49 @@ async function ranking(db: Db, month: string): Promise<PraiseRanking[]> {
     FROM staff s LEFT JOIN counts c ON c.staff_id=s.id
     WHERE (s.active AND NOT s.system AND s.duties && ARRAY['concierge','concierge_manager']::text[]) OR c.count>0
     ORDER BY count DESC,s.id`;
-  let lastCount = -1, rank = 0;
+  let lastCount = -1,
+    rank = 0;
   return rows.map((r, i) => {
-    if (r.count !== lastCount) { rank = i + 1; lastCount = r.count; }
+    if (r.count !== lastCount) {
+      rank = i + 1;
+      lastCount = r.count;
+    }
     return { id: String(r.id), name: r.displayName, active: r.active, count: r.count, rank: r.count ? rank : null };
   });
 }
 export async function praiseCenter(db: Db, actor: Actor, timezone: string): Promise<PraiseCenterData> {
-  const today = todayIn(timezone), month = today.slice(0, 7), previous = previousMonth(month);
-  const staff = await candidates(db), currentMonthRanking = await ranking(db, month), previousMonthRanking = await ranking(db, previous);
+  const today = todayIn(timezone),
+    month = today.slice(0, 7),
+    previous = previousMonth(month);
+  const staff = await candidates(db),
+    currentMonthRanking = await ranking(db, month),
+    previousMonthRanking = await ranking(db, previous);
   const [total] = await db`SELECT count(*)::int AS count FROM concierge_praise WHERE status='active'`;
   return {
-    today, timezone, month, previousMonth: previous,
+    today,
+    timezone,
+    month,
+    previousMonth: previous,
     monthCount: currentMonthRanking.reduce((sum, row) => sum + row.count, 0),
-    previousMonthCount: previousMonthRanking.reduce((sum, row) => sum + row.count, 0), totalCount: total!.count,
-    staff, currentMonthRanking, previousMonthRanking,
-    canOperate: can(actor, 'concierge.operate'), canManage: can(actor, 'concierge.manage'),
+    previousMonthCount: previousMonthRanking.reduce((sum, row) => sum + row.count, 0),
+    totalCount: total!.count,
+    staff,
+    currentMonthRanking,
+    previousMonthRanking,
+    canOperate: can(actor, 'concierge.operate'),
+    canManage: can(actor, 'concierge.manage'),
   };
 }
 export async function praiseList(db: Db, query: Record<string, unknown>): Promise<PraisePage> {
-  const month = text(query.month, 7), selectedStaff = query.staffId ? staffId(query.staffId) : '';
+  const month = text(query.month, 7),
+    selectedStaff = query.staffId ? staffId(query.staffId) : '';
   const range = month ? monthRange(month) : null;
   const status = text(query.status, 10) || 'active';
   if (!['active', 'voided', 'all'].includes(status)) throw new WorkspaceError('好评状态不正确');
   const limitText = query.limit === undefined ? '20' : text(query.limit, 2, true);
   if (!/^\d+$/.test(limitText) || Number(limitText) < 1 || Number(limitText) > 50) throw new WorkspaceError('每页数量须为1至50');
-  const limit = Number(limitText), cursor = parseCursor(query.cursor);
+  const limit = Number(limitText),
+    cursor = parseCursor(query.cursor);
   const rows = await db`${selectRecords(db)} WHERE true
     ${range ? db`AND p.occurred_on>=${range.from}::date AND p.occurred_on<${range.to}::date` : db``}
     ${selectedStaff ? db`AND p.staff_id=${selectedStaff}::bigint` : db``}
@@ -125,17 +159,26 @@ export async function praiseList(db: Db, query: Record<string, unknown>): Promis
 async function auditPraise(tx: Tx, actor: Actor, record: PraiseRecord, before: PraiseRecord | null, reason: string, ip?: string) {
   await tx`INSERT INTO concierge_revisions(object_type,object_id,version,snapshot,actor_id,reason) VALUES('praise',${record.id}::uuid,${record.version},${tx.json({ ...record })},${actor.id},${reason})`;
   await writeAudit(tx, {
-    staffId: actor.id, action: 'concierge_record', targetType: 'concierge_praise', targetId: record.id,
-    detail: { actorName: actor.displayName, label: before ? '撤销管家好评' : '录入管家好评', objectType: 'praise', memberId: record.memberId, before, after: record, reason }, ip,
+    staffId: actor.id,
+    action: 'concierge_record',
+    targetType: 'concierge_praise',
+    targetId: record.id,
+    detail: { actorName: actor.displayName, label: before ? '撤销管家好评' : '录入管家好评', objectType: 'praise', memberId: record.memberId, before, after: record, reason },
+    ip,
   });
 }
 /** 仅由既有 mutate 在同一个模块锁、幂等事务中调用，不在这里另建操作编号机制。 */
 export async function executePraise(tx: Tx, actor: Actor, action: string, p: Record<string, any>, timezone: string, ip?: string): Promise<{ id: string }> {
   if (action === 'savePraise') {
     if (p.id) throw new WorkspaceError('好评原始信息不能覆盖，请撤销后重新登记');
-    const selectedStaff = staffId(p.staffId), occurredOn = day(p.occurredOn);
+    const selectedStaff = staffId(p.staffId),
+      occurredOn = day(p.occurredOn);
     if (occurredOn > todayIn(timezone)) throw new WorkspaceError('好评发生日期不能在未来');
-    const source = text(p.source, 80, true), content = text(p.content, 4000, true), guestName = text(p.guestName, 80, true), rawMemberId = text(p.memberId, 80), memberId = rawMemberId ? uuid(rawMemberId) : '';
+    const source = text(p.source, 80, true),
+      content = text(p.content, 4000, true),
+      guestName = text(p.guestName, 80, true),
+      rawMemberId = text(p.memberId, 80),
+      memberId = rawMemberId ? uuid(rawMemberId) : '';
     const uploadIds = [...new Set(idList(p.uploadIds, 12).map(uuid))];
     if (!uploadIds.length) throw new WorkspaceError('请至少上传一张好评原图凭证');
     const [staff] = await tx`SELECT id,display_name,active,system,duties FROM staff WHERE id=${selectedStaff}::bigint`; // 只读核对，不锁员工一行（8.0.18 整合）
@@ -154,7 +197,9 @@ export async function executePraise(tx: Tx, actor: Actor, action: string, p: Rec
   }
   if (action === 'voidPraise') {
     if (!can(actor, 'concierge.manage')) throw new WorkspaceError('只有管家经理可以撤销好评', 403);
-    const id = uuid(text(p.id, 80, true)), reason = text(p.reason, 1000, true), expected = version(p.version);
+    const id = uuid(text(p.id, 80, true)),
+      reason = text(p.reason, 1000, true),
+      expected = version(p.version);
     const [row] = await tx`SELECT id,status,version FROM concierge_praise WHERE id=${id}::uuid FOR UPDATE`;
     if (!row) throw new WorkspaceError('好评记录不存在', 404);
     if (row.version !== expected || row.status !== 'active') throw new WorkspaceError('好评已被同事处理，请刷新核对', 409);
@@ -166,14 +211,20 @@ export async function executePraise(tx: Tx, actor: Actor, action: string, p: Rec
   throw new WorkspaceError('好评操作不正确');
 }
 function fail(error: unknown): never {
-  if (error instanceof WorkspaceError) throw new AppError(error.status, error.status === 404 ? 'NOT_FOUND' : error.status === 403 ? 'FORBIDDEN' : error.status === 409 ? 'CONCIERGE_CONFLICT' : 'CONCIERGE_VALIDATION', error.message);
+  if (error instanceof WorkspaceError)
+    throw new AppError(error.status, error.status === 404 ? 'NOT_FOUND' : error.status === 403 ? 'FORBIDDEN' : error.status === 409 ? 'CONCIERGE_CONFLICT' : 'CONCIERGE_VALIDATION', error.message);
   throw error;
 }
 export function registerConciergePraiseRoutes(app: FastifyInstance, deps: Deps) {
-  const route = (path: string, handler: (tx: Tx, req: any) => Promise<unknown>) => app.get(path, { preHandler: guard('concierge.read') }, async (req, reply) => {
-    reply.header('Cache-Control', 'private, no-store');
-    try { return await readSnapshot(deps.sql, (tx) => handler(tx, req)); } catch (error) { return fail(error); }
-  });
+  const route = (path: string, handler: (tx: Tx, req: any) => Promise<unknown>) =>
+    app.get(path, { preHandler: guard('concierge.read') }, async (req, reply) => {
+      reply.header('Cache-Control', 'private, no-store');
+      try {
+        return await readSnapshot(deps.sql, (tx) => handler(tx, req));
+      } catch (error) {
+        return fail(error);
+      }
+    });
   route('/api/concierge/praise/center', (tx, req) => praiseCenter(tx, req.actor, deps.config.timezone));
   route('/api/concierge/praise', (tx, req) => praiseList(tx, req.query));
   route('/api/concierge/praise/:id', (tx, req) => praiseDetail(tx, text(req.params.id, 80, true)));

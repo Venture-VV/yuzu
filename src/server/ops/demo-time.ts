@@ -39,10 +39,7 @@ export interface DemoSeedTime {
  * 决定这次灌演示数据用的时间。结账演示：前台演示放到了前一个营业日时沿用同一时间；
  * 没放而这次要求放（--previous-day）时拒绝——结账会早于接待。
  */
-export async function demoSeedTime(
-  db: Db,
-  opts: { timeZone: string; kind: 'frontdesk' | 'billing'; previousDay: boolean; now?: Date },
-): Promise<DemoSeedTime> {
+export async function demoSeedTime(db: Db, opts: { timeZone: string; kind: 'frontdesk' | 'billing'; previousDay: boolean; now?: Date }): Promise<DemoSeedTime> {
   const now = opts.now ?? new Date();
   const { businessDayStartHour } = await loadSettings(db);
   const day = (at: Date) => businessDateOf(at, opts.timeZone, businessDayStartHour);
@@ -67,10 +64,7 @@ export async function demoSeedTime(
     };
   }
   if (opts.kind === 'billing') {
-    throw new Error(
-      `前台演示不是加 --previous-day 灌的，结账演示不能单独放到前一个营业日（结账会早于接待）。` +
-        `请换一个新的演示库，两条命令都加 --previous-day；或在 ${safe} 之后按实际时间执行。`,
-    );
+    throw new Error(`前台演示不是加 --previous-day 灌的，结账演示不能单独放到前一个营业日（结账会早于接待）。` + `请换一个新的演示库，两条命令都加 --previous-day；或在 ${safe} 之后按实际时间执行。`);
   }
   return {
     now: w.anchor,

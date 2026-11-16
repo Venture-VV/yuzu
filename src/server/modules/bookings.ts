@@ -42,7 +42,7 @@ import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
 import { hashRequest } from '../lib/idempotency';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { idParam, parse } from '../lib/validate';
-import { businessDate, nextDocNo, runIdempotent, saveKey } from './frontdesk/common';
+import { nextDocNo, runIdempotent, saveKey } from './frontdesk/common';
 import { loadSettings } from './settings';
 import { systemStaffId } from './system-staff';
 import { loadTechnicianRules, loadTechnicians } from './technicians';
@@ -61,8 +61,7 @@ export async function loadBookingRules(db: Db): Promise<BookingRules> {
   return { ...DEFAULT_BOOKING_RULES, ...(row?.value ?? {}) };
 }
 
-const minutesField = (label: string, min: number, max: number) =>
-  z.number(`请填写${label}`).int(`${label}要是整数`).min(min, `${label}最少 ${min}`).max(max, `${label}最多 ${max}`);
+const minutesField = (label: string, min: number, max: number) => z.number(`请填写${label}`).int(`${label}要是整数`).min(min, `${label}最少 ${min}`).max(max, `${label}最多 ${max}`);
 
 const RulesInput = z.object({
   openTime: z.string().regex(HHMM, '时间格式应为 HH:MM'),
@@ -76,7 +75,10 @@ const RulesInput = z.object({
   noShowWindowDays: minutesField('爽约统计天数', 1, 365),
   noShowLimit: minutesField('爽约次数', 1, 20),
   noShowBanDays: minutesField('不能预约的天数', 0, 365),
-  spaceDurations: z.array(minutesField('时长', 30, 720)).min(1, '至少一个时长').max(8, '时长最多 8 个'),
+  spaceDurations: z
+    .array(minutesField('时长', 30, 720))
+    .min(1, '至少一个时长')
+    .max(8, '时长最多 8 个'),
   defaultServiceMinutes: minutesField('项目默认时长', 15, 480),
   roomHoldMinutes: minutesField('客房保留分钟', 0, 1440),
 });
@@ -94,9 +96,7 @@ const iso = (v: string | Date | null) => (v === null ? null : new Date(v).toISOS
 /** 门店时间的「M月D日 HH:mm」（给顾客看的提示用） */
 export function monthDayTime(at: Date, timeZone: string): string {
   const p = Object.fromEntries(
-    new Intl.DateTimeFormat('en-GB', { timeZone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-      .formatToParts(at)
-      .map((x) => [x.type, x.value]),
+    new Intl.DateTimeFormat('en-GB', { timeZone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at).map((x) => [x.type, x.value]),
   );
   return `${Number(p.month)}月${Number(p.day)}日 ${p.hour}:${p.minute}`;
 }
@@ -417,7 +417,6 @@ interface CreateArgs {
 
 // 与前台建钟单、加钟同一把锁（booking-guard.ts）
 
-
 /**
  * 核对时段、取时段的锁、算出结束时刻（新建、改时间共用）。返回结束时刻与客房的保留时刻
  */
@@ -489,7 +488,15 @@ async function createBookingTx(tx: Tx, deps: Pick<Deps, 'config'>, a: CreateArgs
 }
 
 /** 同上，另外返回房量够不够（渠道订单超订提醒用） */
-async function createBookingTxFull(tx: Tx, deps: Pick<Deps, 'config'>, a: CreateArgs, actor: { id: number }, clientKey: string, requestHash: string, at: Date): Promise<{ id: number; overbooked: boolean }> {
+async function createBookingTxFull(
+  tx: Tx,
+  deps: Pick<Deps, 'config'>,
+  a: CreateArgs,
+  actor: { id: number },
+  clientKey: string,
+  requestHash: string,
+  at: Date,
+): Promise<{ id: number; overbooked: boolean }> {
   const rules = await loadBookingRules(tx);
   if (a.memberId !== null) {
     const [m] = await tx<{ status: string }[]>`SELECT status FROM members WHERE id = ${a.memberId}`;
@@ -534,7 +541,18 @@ export async function createOtaBookingTx(
   at: Date,
 ): Promise<{ id: number; overbooked: boolean }> {
   const clientKey = randomUUID();
-  const args: CreateArgs = { kind: 'room', source: 'ota', memberId: null, guestName: a.guestName || '渠道客人', guestPhone: /^1\d{10}$/.test(a.guestPhone) ? a.guestPhone : '', guests: a.guests, roomTypeId: a.roomTypeId, startsAt: a.startsAt, note: a.note.slice(0, MAX_BOOKING_NOTE), strictGrid: false };
+  const args: CreateArgs = {
+    kind: 'room',
+    source: 'ota',
+    memberId: null,
+    guestName: a.guestName || '渠道客人',
+    guestPhone: /^1\d{10}$/.test(a.guestPhone) ? a.guestPhone : '',
+    guests: a.guests,
+    roomTypeId: a.roomTypeId,
+    startsAt: a.startsAt,
+    note: a.note.slice(0, MAX_BOOKING_NOTE),
+    strictGrid: false,
+  };
   return createBookingTxFull(tx, deps, args, actor, clientKey, hashRequest({ ota: true, clientKey }), at);
 }
 
@@ -550,15 +568,7 @@ export async function createBooking(deps: Deps, raw: unknown, ctx: OpContext): P
   const { clientKey: key, ...payload } = input;
   const requestHash = hashRequest(payload);
   const run = await runIdempotent(deps, { key, opType: 'booking_create', requestHash }, async (tx) => {
-    const id = await createBookingTx(
-      tx,
-      deps,
-      { ...payload, startsAt: new Date(payload.startsAt), strictGrid: false },
-      ctx.actor,
-      key,
-      requestHash,
-      ctx.at ?? new Date(),
-    );
+    const id = await createBookingTx(tx, deps, { ...payload, startsAt: new Date(payload.startsAt), strictGrid: false }, ctx.actor, key, requestHash, ctx.at ?? new Date());
     await saveKey(tx, key, 'booking_create', requestHash, id, ctx.actor.id);
     return id;
   });
@@ -870,10 +880,7 @@ export async function createBookingFromMp(tx: Tx, deps: Pick<Deps, 'config'>, ra
   const ban = await mpBookingBan(tx, input.memberId, ctx.at);
   // 限制到那一刻为止：按门店时间写日子和钟点（UTC 的日子在北京时间 0–8 点会早一天；小程序线 #55 的独立审查）
   if (ban.banned) {
-    throw unprocessable(
-      'BOOKING_BANNED',
-      `${rules.noShowWindowDays} 天内爽约 ${ban.noShows} 次，${monthDayTime(new Date(ban.until!), deps.config.timezone)} 以后才能在小程序预约，请打电话给门店`,
-    );
+    throw unprocessable('BOOKING_BANNED', `${rules.noShowWindowDays} 天内爽约 ${ban.noShows} 次，${monthDayTime(new Date(ban.until!), deps.config.timezone)} 以后才能在小程序预约，请打电话给门店`);
   }
   const [open] = await tx<{ n: number }[]>`
     SELECT count(*)::int AS n FROM bookings WHERE member_id = ${input.memberId} AND status IN ${tx(ACTIVE_BOOKING_STATUSES)} AND starts_at > ${ctx.at!}`;
@@ -959,4 +966,3 @@ export function registerBookingRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/admin/booking-rules', { preHandler: guardAny('settings.manage', 'booking.manage') }, async () => loadBookingRules(sql));
   app.put('/api/admin/booking-rules', { preHandler: guard('settings.manage') }, async (req) => saveBookingRules(deps, req.body, ctxOf(req)));
 }
-

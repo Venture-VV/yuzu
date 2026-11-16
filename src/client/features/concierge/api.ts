@@ -1,5 +1,5 @@
-import { api, request, ApiError, UncertainError } from "../../lib/api";
-import type { WorkspaceData, Receipt } from "./types";
+import { api, request, isRejected, notSentAsRejection, UncertainError } from '../../lib/api';
+import type { WorkspaceData, Receipt } from './types';
 export type Pending = {
   requestId: string;
   action: string;
@@ -7,9 +7,9 @@ export type Pending = {
   createdAt: string;
   uncertain?: boolean;
 };
-let actorId = "";
+let actorId = '';
 let cached: WorkspaceData | undefined;
-let revision = "";
+let revision = '';
 const receiptCache = new Map<string, Receipt>();
 /** 正在发、还没有答复的操作编号：这些不算「结果待确认」（整改：原来请求一发出去，页面上方就闪「结果待确认 · 1笔」，还能点重试、作废） */
 const inFlight = new Set<string>();
@@ -21,7 +21,7 @@ export function setConciergeActor(id: number) {
   if (actorId !== String(id)) {
     actorId = String(id);
     cached = undefined;
-    revision = "";
+    revision = '';
     receiptCache.clear();
     inFlight.clear();
     receiptStamp += 1;
@@ -30,7 +30,7 @@ export function setConciergeActor(id: number) {
 export function pendingRequests(): Pending[] {
   if (!actorId) return [];
   try {
-    const list = JSON.parse(localStorage.getItem(key()) || "[]");
+    const list = JSON.parse(localStorage.getItem(key()) || '[]');
     return Array.isArray(list) ? list : [];
   } catch {
     return [];
@@ -38,29 +38,20 @@ export function pendingRequests(): Pending[] {
 }
 /** 结果确实不明、要人处理的那几笔（不含正在发的） */
 export function unresolvedPending(): Pending[] {
-  return pendingRequests().filter(
-    (p) => p.uncertain && !inFlight.has(p.requestId),
-  );
+  return pendingRequests().filter((p) => p.uncertain && !inFlight.has(p.requestId));
 }
 function changed() {
-  window.dispatchEvent(new Event("concierge-pending-changed"));
+  window.dispatchEvent(new Event('concierge-pending-changed'));
 }
 function putPending(value: Pending) {
   const list = pendingRequests().filter((p) => p.requestId !== value.requestId);
   list.push(value);
   try {
     localStorage.setItem(key(), JSON.stringify(list));
-    const saved = JSON.parse(localStorage.getItem(key()) || "[]") as Pending[];
-    if (
-      !saved.some(
-        (p) =>
-          p.requestId === value.requestId &&
-          JSON.stringify(p.payload) === JSON.stringify(value.payload),
-      )
-    )
-      throw new Error("not durable");
+    const saved = JSON.parse(localStorage.getItem(key()) || '[]') as Pending[];
+    if (!saved.some((p) => p.requestId === value.requestId && JSON.stringify(p.payload) === JSON.stringify(value.payload))) throw new Error('not durable');
   } catch {
-    throw new Error("设备无法保存操作编号，请先释放存储空间；本次尚未发送。");
+    throw new Error('设备无法保存操作编号，请先释放存储空间；本次尚未发送。');
   }
   changed();
 }
@@ -78,7 +69,7 @@ export async function retryPending(value: Pending) {
   inFlight.add(value.requestId);
   changed();
   try {
-    const result = await api.post("/api/concierge/workspace", {
+    const result = await api.post('/api/concierge/workspace', {
       action: value.action,
       payload: value.payload,
       requestId: value.requestId,
@@ -109,13 +100,10 @@ export async function abandonPending(id: string) {
   return result;
 }
 export async function loadReceipt(id: string) {
-  const receipt = await api.get<Receipt>(
-    `/api/concierge/receipts/${encodeURIComponent(id)}`,
-  );
+  const receipt = await api.get<Receipt>(`/api/concierge/receipts/${encodeURIComponent(id)}`);
   receiptCache.set(id, receipt);
   receiptStamp += 1;
-  if (receiptCache.size > 20)
-    receiptCache.delete(receiptCache.keys().next().value!);
+  if (receiptCache.size > 20) receiptCache.delete(receiptCache.keys().next().value!);
   return receipt;
 }
 export function rememberReceipt(receipt: Receipt) {
@@ -130,10 +118,10 @@ export async function loadWorkspace(force = false): Promise<{
   data: WorkspaceData;
   changed: boolean;
 }> {
-  const rev = await api.get<{ revision: string }>("/api/concierge/revision");
+  const rev = await api.get<{ revision: string }>('/api/concierge/revision');
   const fetched = force || !cached || revision !== rev.revision;
   if (fetched) {
-    cached = await api.get<WorkspaceData>("/api/concierge/workspace");
+    cached = await api.get<WorkspaceData>('/api/concierge/workspace');
     revision = rev.revision;
   }
   const data = cached!;
@@ -143,8 +131,7 @@ export async function loadWorkspace(force = false): Promise<{
       const full = receiptCache.get(r.id);
       return full?.version === r.version ? full : r;
     });
-    for (const [id, detail] of receiptCache)
-      if (!data.receipts.some((r) => r.id === id)) data.receipts.push(detail);
+    for (const [id, detail] of receiptCache) if (!data.receipts.some((r) => r.id === id)) data.receipts.push(detail);
     seenStamp = receiptStamp;
   }
   return { data, changed: fetched || stale };
@@ -152,60 +139,41 @@ export async function loadWorkspace(force = false): Promise<{
 const response = (data: unknown) =>
   new Response(JSON.stringify(data), {
     status: 200,
-    headers: { "Content-Type": "application/json" },
+    headers: { 'Content-Type': 'application/json' },
   });
 async function base64(file: File) {
   const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 32768)
-    binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
   return btoa(binary);
 }
 /** Adapter keeps the verified receipt UI while all requests use yuzu's auth/error/uncertain-result handling. */
-export async function conciergeFetch(
-  url: string,
-  init: RequestInit = {},
-): Promise<Response> {
-  if (
-    url.startsWith("/api/concierge/uploads/") &&
-    (!init.method || init.method === "GET")
-  )
-    return window.fetch(url, { ...init, credentials: "same-origin" });
-  const method = (init.method || "GET") as "GET" | "POST" | "PUT";
-  if (url === "/api/concierge/workspace" && method === "GET")
-    return response((await loadWorkspace()).data);
+export async function conciergeFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  if (url.startsWith('/api/concierge/uploads/') && (!init.method || init.method === 'GET')) return window.fetch(url, { ...init, credentials: 'same-origin' });
+  const method = (init.method || 'GET') as 'GET' | 'POST' | 'PUT';
+  if (url === '/api/concierge/workspace' && method === 'GET') return response((await loadWorkspace()).data);
   if (init.body instanceof FormData) {
     const form = init.body,
-      files = form.getAll("files") as File[];
-    if (files.length > 4) throw new Error("每次最多上传4张照片");
+      files = form.getAll('files') as File[];
+    if (files.length > 4) throw new Error('每次最多上传4张照片');
     const result = await api.post(
       url,
       {
-        memberId: String(form.get("memberId") || ""),
-        files: await Promise.all(
-          files.map(async (f) => ({ mime: f.type, data: await base64(f) })),
-        ),
+        memberId: String(form.get('memberId') || ''),
+        files: await Promise.all(files.map(async (f) => ({ mime: f.type, data: await base64(f) }))),
       },
       { timeoutMs: 60000 },
     );
     cached = undefined;
     return response(result);
   }
-  const body =
-    typeof init.body === "string" ? JSON.parse(init.body) : undefined;
-  if (url === "/api/concierge/workspace" && method === "POST") {
-    const previous = pendingRequests().find(
-      (p) => p.requestId === body.requestId,
-    );
+  const body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+  if (url === '/api/concierge/workspace' && method === 'POST') {
+    const previous = pendingRequests().find((p) => p.requestId === body.requestId);
     // 还有别的操作结果待确认时，不发新的写入（整改）：原来关掉弹窗重新填一遍就是一个新编号，
     // 超时的那笔其实成功了的话，会多建一位会员、多记一条余额。先把上面那几笔查回、原样重试或确认不再执行。
-    const blocking = unresolvedPending().filter(
-      (p) => p.requestId !== body.requestId,
-    );
-    if (blocking.length)
-      throw new Error(
-        `还有${blocking.length}笔操作结果待确认，请先在页面上方查回、原样重试或确认不再执行，再继续录入；本次尚未发送。`,
-      );
+    const blocking = unresolvedPending().filter((p) => p.requestId !== body.requestId);
+    if (blocking.length) throw new Error(`还有${blocking.length}笔操作结果待确认，请先在页面上方查回、原样重试或确认不再执行，再继续录入；本次尚未发送。`);
     const operation: Pending = {
       ...body,
       createdAt: previous?.createdAt || new Date().toISOString(),
@@ -219,9 +187,10 @@ export async function conciergeFetch(
       forgetPending(operation.requestId);
       cached = undefined;
       return response(result);
-    } catch (e) {
-      if (e instanceof ApiError && e.status < 500 && !operation.uncertain)
-        forgetPending(operation.requestId);
+    } catch (raw) {
+      // 第一次发被「连不上服务器、没发出去」挡下（8.1.3）：等同明确拒绝；本机已经有这一笔（重试）时照旧待确认
+      const e = previous ? raw : notSentAsRejection(raw);
+      if (isRejected(e) && !operation.uncertain) forgetPending(operation.requestId);
       else {
         try {
           putPending({ ...operation, uncertain: true });
@@ -229,10 +198,7 @@ export async function conciergeFetch(
           // 发之前已经存下并读回过这条记录；这里再写不进去时原来那条还在，不拿「尚未发送」盖掉真正的错误
         }
       }
-      if (e instanceof UncertainError)
-        throw new Error(
-          "结果待确认：请保留原单，使用上方操作编号查回或原样重试，不能再次新建同一笔。",
-        );
+      if (e instanceof UncertainError) throw new Error('结果待确认：请保留原单，使用上方操作编号查回或原样重试，不能再次新建同一笔。');
       throw e;
     } finally {
       inFlight.delete(operation.requestId);
@@ -241,7 +207,7 @@ export async function conciergeFetch(
   }
   return response(
     await request(method, url, body, {
-      timeoutMs: url.endsWith("/backup") ? 60000 : 15000,
+      timeoutMs: url.endsWith('/backup') ? 60000 : 15000,
     }),
   );
 }

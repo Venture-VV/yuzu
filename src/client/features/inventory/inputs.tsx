@@ -112,11 +112,7 @@ export const MaterialPicker = forwardRef<
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(m)}
                 onPointerMove={() => setCursor(i)}
-                className={cn(
-                  'flex cursor-pointer items-center gap-3 rounded-md px-3 py-2',
-                  i === cursor && !reason && 'bg-pine-tint',
-                  reason && 'cursor-not-allowed opacity-55',
-                )}
+                className={cn('flex cursor-pointer items-center gap-3 rounded-md px-3 py-2', i === cursor && !reason && 'bg-pine-tint', reason && 'cursor-not-allowed opacity-55')}
               >
                 <span className="num w-12 shrink-0 text-[12px] font-semibold text-ink-3">{m.code}</span>
                 <span className="min-w-0 flex-1">

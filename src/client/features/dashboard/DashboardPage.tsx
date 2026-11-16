@@ -181,134 +181,135 @@ function TodayTab() {
   const d = q.data;
   return (
     <>
-          {q.isPending ? (
-            <Skeleton className="h-64" />
-          ) : q.error ? (
-            <Notice tone="error" title={q.error.message} />
-          ) : (
-            d && (
-              <>
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <Kpi icon={<TrendingUp className="size-4" />} label="今日净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）" tone="pine">
-                    <Money cents={d.todayStats.net - d.todayStats.discount - (d.todayStats.coupon ?? 0) - (d.todayStats.memberDiscount ?? 0) - (d.todayStats.refund ?? 0)} />
-                    {(d.todayStats.discount !== 0 || !!d.todayStats.coupon || !!d.todayStats.memberDiscount || !!d.todayStats.refund) && (
-                      <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-discount">
-                        应收 <Money cents={d.todayStats.net} />
-                        {d.todayStats.discount !== 0 && (
-                          <>
-                            {' '}
-                            · 优惠 <Money cents={-d.todayStats.discount} signed />
-                          </>
-                        )}
-                        {!!d.todayStats.coupon && (
-                          <>
-                            {' '}
-                            · 券抵扣 <Money cents={-d.todayStats.coupon} signed />
-                          </>
-                        )}
-                        {!!d.todayStats.memberDiscount && (
-                          <>
-                            {' '}
-                            · 会员折扣 <Money cents={-d.todayStats.memberDiscount} signed />
-                          </>
-                        )}
-                        {!!d.todayStats.refund && (
-                          <>
-                            {' '}
-                            · 退款 <Money cents={-d.todayStats.refund} signed />
-                          </>
-                        )}
-                      </span>
+      {q.isPending ? (
+        <Skeleton className="h-64" />
+      ) : q.error ? (
+        <Notice tone="error" title={q.error.message} />
+      ) : (
+        d && (
+          <>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Kpi icon={<TrendingUp className="size-4" />} label="今日净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）" tone="pine">
+                <Money cents={d.todayStats.net - d.todayStats.discount - (d.todayStats.coupon ?? 0) - (d.todayStats.memberDiscount ?? 0) - (d.todayStats.refund ?? 0)} />
+                {(d.todayStats.discount !== 0 || !!d.todayStats.coupon || !!d.todayStats.memberDiscount || !!d.todayStats.refund) && (
+                  <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-discount">
+                    应收 <Money cents={d.todayStats.net} />
+                    {d.todayStats.discount !== 0 && (
+                      <>
+                        {' '}
+                        · 优惠 <Money cents={-d.todayStats.discount} signed />
+                      </>
                     )}
-                  </Kpi>
-                  <Kpi icon={<UsersRound className="size-4" />} label="已结账客人">
-                    {d.todayStats.guests} 位 · {d.todayStats.checkouts} 张
-                  </Kpi>
-                  {d.inStore ? (
-                    <Kpi icon={<BedDouble className="size-4" />} label="在店（未结）">
-                      {d.inStore.count} 位 · <Money cents={d.inStore.unsettled + d.inStore.ticketEstimate} />
-                      {d.inStore.count > 0 && (
-                        <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-instore-estimate">
-                          已挂 <Money cents={d.inStore.unsettled} /> + 门票估算 <Money cents={d.inStore.ticketEstimate} />
-                          {d.inStore.noTicket > 0 && `（${d.inStore.noTicket} 位未选票种，未计入）`}
-                        </span>
-                      )}
-                    </Kpi>
-                  ) : (
-                    <Kpi icon={<BedDouble className="size-4" />} label="在店（未结）">
-                      <span className="text-[14px] font-semibold text-ink-3">前台岗位可见</span>
-                    </Kpi>
-                  )}
-                  <Kpi icon={<Banknote className="size-4" />} label="会员充值实收" tone="lake">
-                    <Money cents={d.todayStats.rechargePaid} /> <span className="text-[13px] font-semibold text-ink-3">· {d.todayStats.rechargeCount} 笔</span>
-                    {!!d.todayStats.rechargeOnlineCount && (
-                      <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-recharge-online">
-                        其中线上（小程序）<Money cents={d.todayStats.rechargeOnline ?? 0} /> · {d.todayStats.rechargeOnlineCount} 笔
-                      </span>
+                    {!!d.todayStats.coupon && (
+                      <>
+                        {' '}
+                        · 券抵扣 <Money cents={-d.todayStats.coupon} signed />
+                      </>
                     )}
-                    {!!d.todayStats.memberRefundCount && (
-                      <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-member-refund">
-                        退储值 −<Money cents={d.todayStats.memberRefund ?? 0} /> · {d.todayStats.memberRefundCount} 张
-                      </span>
+                    {!!d.todayStats.memberDiscount && (
+                      <>
+                        {' '}
+                        · 会员折扣 <Money cents={-d.todayStats.memberDiscount} signed />
+                      </>
                     )}
-                  </Kpi>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-                  <Card className="p-5">
-                    <SectionTitle>近 {d.days.length} 个营业日营业额</SectionTitle>
-                    <Bars days={d.days} />
-                  </Card>
-                  <Card className="p-5">
-                    <SectionTitle>今日收款构成</SectionTitle>
-                    <ul className="mt-3 space-y-2 text-[13px]">
-                      {d.todayStats.byMethod.length === 0 && <li className="text-ink-4">今天还没有结账</li>}
-                      {d.todayStats.byMethod.map((m) => (
-                        <li key={m.method} className="flex justify-between">
-                          <span className="text-ink-2">{CHECKOUT_METHOD_LABELS[m.method]}</span>
-                          <Money cents={m.amount} className="font-bold" />
-                        </li>
-                      ))}
-                    </ul>
-                    <SectionTitle className="mt-5">今日门票</SectionTitle>
-                    <ul className="mt-3 space-y-2 text-[13px]">
-                      {d.tickets.length === 0 && <li className="text-ink-4">今天还没有结账</li>}
-                      {d.tickets.map((t) => (
-                        <li key={t.name} className="flex items-center justify-between gap-2">
-                          <span className="flex items-center gap-1.5 text-ink-2">
-                            <Ticket className="size-3.5 text-pine" />
-                            {t.name} <span className="text-ink-3">· {t.count} 位</span>
-                          </span>
-                          <Money cents={t.amount} className="font-bold" />
-                        </li>
-                      ))}
-                    </ul>
-                  </Card>
-                </div>
-
-                {duty.data && <DutyCards duty={duty.data} startHour={session.rules.businessDayStartHour} />}
-
-                <Card className="p-5">
-                  <SectionTitle>
-                    <span className="flex items-center gap-2">
-                      <ClipboardCheck className="size-4 text-pine" /> 当班中
+                    {!!d.todayStats.refund && (
+                      <>
+                        {' '}
+                        · 退款 <Money cents={-d.todayStats.refund} signed />
+                      </>
+                    )}
+                  </span>
+                )}
+              </Kpi>
+              <Kpi icon={<UsersRound className="size-4" />} label="已结账客人">
+                {d.todayStats.guests} 位 · {d.todayStats.checkouts} 张
+              </Kpi>
+              {d.inStore ? (
+                <Kpi icon={<BedDouble className="size-4" />} label="在店（未结）">
+                  {d.inStore.count} 位 · <Money cents={d.inStore.unsettled + d.inStore.ticketEstimate} />
+                  {d.inStore.count > 0 && (
+                    <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-instore-estimate">
+                      已挂 <Money cents={d.inStore.unsettled} /> + 门票估算 <Money cents={d.inStore.ticketEstimate} />
+                      {d.inStore.noTicket > 0 && `（${d.inStore.noTicket} 位未选票种，未计入）`}
                     </span>
-                  </SectionTitle>
-                  {d.openShifts.length === 0 ? (
-                    <p className="mt-2 text-[13px] text-ink-3">没有未交班的班次</p>
-                  ) : (
-                    <ul className="mt-2 flex flex-wrap gap-2">
-                      {d.openShifts.map((s) => (
-                        <li key={s.shiftNo} className="rounded-full bg-pine-tint px-3 py-1 text-[13px] font-semibold text-pine">
-                          {s.staffName} · {formatTime(s.startedAt)} 开班
-                        </li>
-                      ))}
-                    </ul>
                   )}
-                </Card>
-              </>
-            )
-          )}
+                </Kpi>
+              ) : (
+                <Kpi icon={<BedDouble className="size-4" />} label="在店（未结）">
+                  <span className="text-[14px] font-semibold text-ink-3">前台岗位可见</span>
+                </Kpi>
+              )}
+              <Kpi icon={<Banknote className="size-4" />} label="会员充值实收" tone="lake">
+                <Money cents={d.todayStats.rechargePaid} /> <span className="text-[13px] font-semibold text-ink-3">· {d.todayStats.rechargeCount} 笔</span>
+                {!!d.todayStats.rechargeOnlineCount && (
+                  <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-recharge-online">
+                    其中线上（小程序）
+                    <Money cents={d.todayStats.rechargeOnline ?? 0} /> · {d.todayStats.rechargeOnlineCount} 笔
+                  </span>
+                )}
+                {!!d.todayStats.memberRefundCount && (
+                  <span className="block text-[12px] font-semibold text-ink-3" data-testid="dashboard-member-refund">
+                    退储值 −<Money cents={d.todayStats.memberRefund ?? 0} /> · {d.todayStats.memberRefundCount} 张
+                  </span>
+                )}
+              </Kpi>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+              <Card className="p-5">
+                <SectionTitle>近 {d.days.length} 个营业日营业额</SectionTitle>
+                <Bars days={d.days} />
+              </Card>
+              <Card className="p-5">
+                <SectionTitle>今日收款构成</SectionTitle>
+                <ul className="mt-3 space-y-2 text-[13px]">
+                  {d.todayStats.byMethod.length === 0 && <li className="text-ink-4">今天还没有结账</li>}
+                  {d.todayStats.byMethod.map((m) => (
+                    <li key={m.method} className="flex justify-between">
+                      <span className="text-ink-2">{CHECKOUT_METHOD_LABELS[m.method]}</span>
+                      <Money cents={m.amount} className="font-bold" />
+                    </li>
+                  ))}
+                </ul>
+                <SectionTitle className="mt-5">今日门票</SectionTitle>
+                <ul className="mt-3 space-y-2 text-[13px]">
+                  {d.tickets.length === 0 && <li className="text-ink-4">今天还没有结账</li>}
+                  {d.tickets.map((t) => (
+                    <li key={t.name} className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-ink-2">
+                        <Ticket className="size-3.5 text-pine" />
+                        {t.name} <span className="text-ink-3">· {t.count} 位</span>
+                      </span>
+                      <Money cents={t.amount} className="font-bold" />
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            </div>
+
+            {duty.data && <DutyCards duty={duty.data} startHour={session.rules.businessDayStartHour} />}
+
+            <Card className="p-5">
+              <SectionTitle>
+                <span className="flex items-center gap-2">
+                  <ClipboardCheck className="size-4 text-pine" /> 当班中
+                </span>
+              </SectionTitle>
+              {d.openShifts.length === 0 ? (
+                <p className="mt-2 text-[13px] text-ink-3">没有未交班的班次</p>
+              ) : (
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {d.openShifts.map((s) => (
+                    <li key={s.shiftNo} className="rounded-full bg-pine-tint px-3 py-1 text-[13px] font-semibold text-pine">
+                      {s.staffName} · {formatTime(s.startedAt)} 开班
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </>
+        )
+      )}
     </>
   );
 }
@@ -339,7 +340,17 @@ function DutyCards({ duty, startHour }: { duty: DutyExtras; startHour: number })
         </Card>
         <Card className="p-5">
           <SectionTitle aside={<span className="text-[12px] text-ink-3">结账明细，反结账冲回</span>}>今日部门构成</SectionTitle>
-          <HBars testId="dashboard-departments" format={yuan} empty="今天还没有结账" rows={duty.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}${x.refund ? ` · 退款 ${yuan(x.refund)}` : ''}` }))} />
+          <HBars
+            testId="dashboard-departments"
+            format={yuan}
+            empty="今天还没有结账"
+            rows={duty.departments.map((x) => ({
+              key: x.category,
+              label: x.category,
+              value: x.amount,
+              note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}${x.refund ? ` · 退款 ${yuan(x.refund)}` : ''}`,
+            }))}
+          />
         </Card>
       </div>
       {duty.longStays && duty.longStays.length > 0 && (
@@ -392,7 +403,11 @@ function Bars({ days }: { days: DashboardData['days'] }) {
         <div key={d.date} className="flex min-w-0 flex-1 flex-col items-center gap-1">
           <span className="num text-[11px] text-ink-3">{d.net ? `¥${Math.round(d.net / 100)}` : ''}</span>
           <div className="flex w-full flex-1 items-end">
-            <div className="w-full rounded-t-md bg-pine/80" style={{ height: `${Math.max(2, (Math.max(0, d.net) / max) * 100)}%` }} title={`${d.date} 营业额 ¥${(d.net / 100).toFixed(2)}，结账 ${d.checkouts} 张`} />
+            <div
+              className="w-full rounded-t-md bg-pine/80"
+              style={{ height: `${Math.max(2, (Math.max(0, d.net) / max) * 100)}%` }}
+              title={`${d.date} 营业额 ¥${(d.net / 100).toFixed(2)}，结账 ${d.checkouts} 张`}
+            />
           </div>
           <span className="num text-[11px] text-ink-3">{d.date.slice(5)}</span>
         </div>

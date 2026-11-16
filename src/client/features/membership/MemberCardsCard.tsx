@@ -70,8 +70,7 @@ export function MemberCardsCard({ member }: { member: MemberDetail }) {
               <span className="font-mono font-semibold">{c.cardNo}</span>
               <Badge tone={STATUS_TONES[c.status]}>{MEMBER_CARD_STATUS_LABELS[c.status]}</Badge>
               <span className="text-[12px] text-ink-3">
-                {c.issuedByName} {formatDateTime(c.issuedAt)} 发
-                {c.endedAt && ` · ${c.endedByName ?? ''} ${formatDateTime(c.endedAt)} ${c.status === 'lost' ? '挂失' : '换下'}（${c.endReason}）`}
+                {c.issuedByName} {formatDateTime(c.issuedAt)} 发{c.endedAt && ` · ${c.endedByName ?? ''} ${formatDateTime(c.endedAt)} ${c.status === 'lost' ? '挂失' : '换下'}（${c.endReason}）`}
               </span>
               {c.status === 'active' && can('member.card') && (
                 <span className="ml-auto flex gap-1.5">
@@ -126,19 +125,7 @@ function CardNoInput({ value, onChange, onEnter }: { value: string; onChange: (v
   );
 }
 
-function IssueDialog({
-  member,
-  mode,
-  current,
-  onClose,
-  onDone,
-}: {
-  member: MemberDetail;
-  mode: 'issue' | 'replace';
-  current: MemberCard | null;
-  onClose: () => void;
-  onDone: () => void;
-}) {
+function IssueDialog({ member, mode, current, onClose, onDone }: { member: MemberDetail; mode: 'issue' | 'replace'; current: MemberCard | null; onClose: () => void; onDone: () => void }) {
   const session = useSession();
   const toast = useToast();
   const [cardNo, setCardNo] = useState('');

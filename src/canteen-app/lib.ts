@@ -180,7 +180,9 @@ export function addDays(date: string, n: number): string {
 /** 门店此刻的「HH:MM」（按服务器时间差修正） */
 export function storeNow(offsetMs: number): { date: string; minute: number } {
   const at = new Date(Date.now() + offsetMs);
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at);
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(
+    at,
+  );
   const p = (t: string) => parts.find((x) => x.type === t)?.value ?? '00';
   return { date: `${p('year')}-${p('month')}-${p('day')}`, minute: Number(p('hour')) * 60 + Number(p('minute')) };
 }

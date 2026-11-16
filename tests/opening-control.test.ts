@@ -62,9 +62,9 @@ describe('预览与导入', () => {
 
   it('正式环境必须给控制总数', async () => {
     const actor = { id: ctx.ownerId, username: 'owner', displayName: '测试店主', role: 'owner' as const, duties: [], mustChangePassword: false };
-    await expect(
-      applyOpeningImport({ sql: ctx.sql, config: { ...ctx.config, env: 'production' } }, { ...body(), clientKey: randomUUID() }, { actor }),
-    ).rejects.toMatchObject({ code: 'OPENING_CONTROL_REQUIRED' });
+    await expect(applyOpeningImport({ sql: ctx.sql, config: { ...ctx.config, env: 'production' } }, { ...body(), clientKey: randomUUID() }, { actor })).rejects.toMatchObject({
+      code: 'OPENING_CONTROL_REQUIRED',
+    });
     expect(await importCount()).toBe(0);
   });
 

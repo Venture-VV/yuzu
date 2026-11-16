@@ -46,31 +46,34 @@ export function PatrolPage() {
   const manage = can('patrol.manage');
   const [tab, setTab] = useState<Tab>('day');
   return (
-    <AdminPage section="patrol" description="安保部门在柚子饭堂「工作台 → 巡场」扫场所二维码打卡。每天按巡场间隔（默认 3 小时）分轮，同一个场所每轮只记一次。这里按轮看每个场所巡了没有、巡场记录与导出；管场所与二维码、巡场部门、巡场间隔、手机上能看记录的人。">
-     <AdminModuleGate section="patrol">
-      <div className="space-y-5" data-testid="patrol-admin">
-        {manage && <ErpPendingPanel types={['patrol_point']} />}
-        <Segmented<Tab>
-          value={tab}
-          onChange={setTab}
-          ariaLabel="安保巡场"
-          options={[
-            { value: 'day', label: '今天' },
-            { value: 'records', label: '巡场记录' },
-            ...(manage
-              ? [
-                  { value: 'points' as const, label: '场所与二维码' },
-                  { value: 'settings' as const, label: '设置' },
-                ]
-              : []),
-          ]}
-        />
-        {tab === 'day' && <DayTab />}
-        {tab === 'records' && <RecordsTab manage={manage} />}
-        {tab === 'points' && manage && <PointsTab />}
-        {tab === 'settings' && manage && <SettingsTab />}
-      </div>
-     </AdminModuleGate>
+    <AdminPage
+      section="patrol"
+      description="安保部门在柚子饭堂「工作台 → 巡场」扫场所二维码打卡。每天按巡场间隔（默认 3 小时）分轮，同一个场所每轮只记一次。这里按轮看每个场所巡了没有、巡场记录与导出；管场所与二维码、巡场部门、巡场间隔、手机上能看记录的人。"
+    >
+      <AdminModuleGate section="patrol">
+        <div className="space-y-5" data-testid="patrol-admin">
+          {manage && <ErpPendingPanel types={['patrol_point']} />}
+          <Segmented<Tab>
+            value={tab}
+            onChange={setTab}
+            ariaLabel="安保巡场"
+            options={[
+              { value: 'day', label: '今天' },
+              { value: 'records', label: '巡场记录' },
+              ...(manage
+                ? [
+                    { value: 'points' as const, label: '场所与二维码' },
+                    { value: 'settings' as const, label: '设置' },
+                  ]
+                : []),
+            ]}
+          />
+          {tab === 'day' && <DayTab />}
+          {tab === 'records' && <RecordsTab manage={manage} />}
+          {tab === 'points' && manage && <PointsTab />}
+          {tab === 'settings' && manage && <SettingsTab />}
+        </div>
+      </AdminModuleGate>
     </AdminPage>
   );
 }
@@ -138,7 +141,9 @@ function DayTab() {
                   <p className="num text-[24px] font-bold" data-testid="patrol-day-current">
                     {current.done} / {current.expected}
                   </p>
-                  <p className="mt-0.5 text-[12px] text-ink-3">{roundSpan(current)} · 还没巡 {d.currentMissing ?? 0} 处</p>
+                  <p className="mt-0.5 text-[12px] text-ink-3">
+                    {roundSpan(current)} · 还没巡 {d.currentMissing ?? 0} 处
+                  </p>
                 </>
               ) : (
                 <p className="num text-[24px] font-bold">{d.rounds.length} 轮</p>
@@ -178,8 +183,7 @@ function DayTab() {
                           className={cn('min-w-28 px-3 py-2 font-semibold whitespace-nowrap', r.state === 'current' && 'bg-ember-soft', r.state === 'future' && 'text-ink-4')}
                           data-testid={`patrol-day-round-${r.no}`}
                         >
-                          第 {r.no} 轮
-                          <span className="block text-[11.5px] font-normal text-ink-3">{roundSpan(r)}</span>
+                          第 {r.no} 轮<span className="block text-[11.5px] font-normal text-ink-3">{roundSpan(r)}</span>
                           <span className={cn('block text-[11.5px] font-normal', r.state === 'past' && r.done < r.expected ? 'text-clay' : 'text-ink-3')}>
                             {r.state === 'future' ? '还没到' : `巡了 ${r.done} / ${r.expected}`}
                           </span>
@@ -516,14 +520,7 @@ function PointDialog({ editing, onClose, onSaved }: { editing: PatrolPoint | 'ne
     setError(null);
   });
   const sortOrder = Number(sort);
-  const problem =
-    isNew && pending.length > 0
-      ? '上一次新增场所结果待确认，请先在页面上方处理'
-      : !name.trim()
-        ? '请写场所名称'
-        : !Number.isInteger(sortOrder)
-          ? '排序要是整数'
-          : null;
+  const problem = isNew && pending.length > 0 ? '上一次新增场所结果待确认，请先在页面上方处理' : !name.trim() ? '请写场所名称' : !Number.isInteger(sortOrder) ? '排序要是整数' : null;
   const save = async () => {
     if (problem || !editing) return;
     setBusy(true);
@@ -689,12 +686,16 @@ function SettingsTab() {
               </option>
             ))}
           </Select>
-          <span className="text-[12.5px] text-ink-3">一天 {roundsPerDay} 轮{1440 % roundMinutes ? '（除不尽，最后一轮短一些）' : ''}</span>
+          <span className="text-[12.5px] text-ink-3">
+            一天 {roundsPerDay} 轮{1440 % roundMinutes ? '（除不尽，最后一轮短一些）' : ''}
+          </span>
         </div>
       </Card>
       <Card className="p-5">
         <SectionTitle>手机上能看巡场记录的人</SectionTitle>
-        <p className="mt-1 text-[12.5px] text-ink-3">从员工名单里挑（例如店总、安保主管），他们在柚子饭堂「工作台 → 巡场记录」里看任何一天的巡场清单（最多 {PATROL_MAX_DAYS} 天前）。巡场部门的人在手机上只看今天的。</p>
+        <p className="mt-1 text-[12.5px] text-ink-3">
+          从员工名单里挑（例如店总、安保主管），他们在柚子饭堂「工作台 → 巡场记录」里看任何一天的巡场清单（最多 {PATROL_MAX_DAYS} 天前）。巡场部门的人在手机上只看今天的。
+        </p>
         <Input placeholder="搜姓名、工号、部门" value={search} onChange={(e) => setSearch(e.target.value)} className="mt-3 w-64" />
         <div className="mt-3 grid max-h-72 grid-cols-1 gap-1.5 overflow-y-auto sm:grid-cols-2">
           {shownEmployees.map((e) => (

@@ -52,7 +52,8 @@ test.describe('v0.7.28 预约', () => {
     const roster = (await getJson<{ technicians: Tech[] }>(page, '/api/admin/technicians')).technicians;
     const old = roster.find((x) => x.techNo === TECH.techNo);
     if (!old) await send(page, 'post', '/api/admin/technicians', TECH);
-    else if (!old.active || old.grade !== TECH.grade || old.skills.length > 0) await send(page, 'put', `/api/admin/technicians/${old.id}`, { name: old.name, gender: old.gender, grade: TECH.grade, skills: [], active: true });
+    else if (!old.active || old.grade !== TECH.grade || old.skills.length > 0)
+      await send(page, 'put', `/api/admin/technicians/${old.id}`, { name: old.name, gender: old.gender, grade: TECH.grade, skills: [], active: true });
     const tech = (await getJson<{ technicians: Tech[] }>(page, '/api/admin/technicians')).technicians.find((x) => x.techNo === TECH.techNo)!;
 
     // 后台「预约」：规则卡片（待确认的默认值）

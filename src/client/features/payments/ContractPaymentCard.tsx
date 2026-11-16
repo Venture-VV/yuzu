@@ -51,7 +51,11 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
       toast({ tone: 'success', title: success, body: c.contractNo });
       setDialog(null);
     } catch (e) {
-      toast({ tone: 'error', title: e instanceof UncertainError ? `没收到结果：${errorMessage(e)}` : errorMessage(e), body: e instanceof UncertainError ? '刷新后看状态；再做一次不会重复' : c.contractNo });
+      toast({
+        tone: 'error',
+        title: e instanceof UncertainError ? `没收到结果：${errorMessage(e)}` : errorMessage(e),
+        body: e instanceof UncertainError ? '刷新后看状态；再做一次不会重复' : c.contractNo,
+      });
     } finally {
       setBusy(false);
       await invalidate();
@@ -81,7 +85,11 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
       ) : (
         !p.canRequest && <p className="text-[13px] text-ink-3">{p.whyNot}</p>
       )}
-      {p.legacyPaidCents > 0 && <p className="text-[12.5px] text-ink-3">另有不带付款申请、核销到这份合同收货单上的付款 ¥{formatAmount(p.legacyPaidCents)}（v0.7.32 以前登记的，或「付款规则」关掉「挂合同的货款要先提申请」以后直接登记的；不算在各段里）。</p>}
+      {p.legacyPaidCents > 0 && (
+        <p className="text-[12.5px] text-ink-3">
+          另有不带付款申请、核销到这份合同收货单上的付款 ¥{formatAmount(p.legacyPaidCents)}（v0.7.32 以前登记的，或「付款规则」关掉「挂合同的货款要先提申请」以后直接登记的；不算在各段里）。
+        </p>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-[13px]" data-testid="payment-plan-stages">
           <thead>
@@ -89,7 +97,9 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
               <th className="py-1.5 pr-2 font-semibold">节点</th>
               <th className="py-1.5 pr-2 text-right font-semibold">计划</th>
               <th className="py-1.5 pr-2 text-right font-semibold">现在可付</th>
-              <th className="py-1.5 pr-2 text-right font-semibold" title="审批中、退回待改、批了没付完的">在途申请</th>
+              <th className="py-1.5 pr-2 text-right font-semibold" title="审批中、退回待改、批了没付完的">
+                在途申请
+              </th>
               <th className="py-1.5 pr-2 text-right font-semibold">已付</th>
               <th className="py-1.5 pr-2 font-semibold">说明</th>
               <th className="py-1.5 font-semibold" />
@@ -170,7 +180,12 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
                     <Badge tone={a.voidedAt ? 'neutral' : a.result === 'pass' ? 'pine' : 'clay'}>{a.voidedAt ? '已作废' : ACCEPTANCE_RESULT_LABELS[a.result]}</Badge>
                     <span>签字 {a.signer}</span>
                     {manage && !a.voidedAt && (
-                      <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setDialog({ kind: 'acceptance-void', id: a.id, label: `${a.acceptedOn} ${ACCEPTANCE_RESULT_LABELS[a.result]}` })}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="ml-auto"
+                        onClick={() => setDialog({ kind: 'acceptance-void', id: a.id, label: `${a.acceptedOn} ${ACCEPTANCE_RESULT_LABELS[a.result]}` })}
+                      >
                         作废
                       </Button>
                     )}
@@ -219,7 +234,13 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
                     <span className="min-w-0">{i.description}</span>
                     {manage && i.status === 'open' && (
                       <span className="ml-auto flex gap-1">
-                        <Button size="sm" variant="secondary" icon={<CircleCheck className="size-4" />} onClick={() => setDialog({ kind: 'issue-resolve', issue: i })} data-testid={`quality-resolve-${i.id}`}>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={<CircleCheck className="size-4" />}
+                          onClick={() => setDialog({ kind: 'issue-resolve', issue: i })}
+                          data-testid={`quality-resolve-${i.id}`}
+                        >
                           已处理
                         </Button>
                         <Button size="sm" variant="ghost" onClick={() => setDialog({ kind: 'issue-void', issue: i })}>
@@ -243,7 +264,13 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
 
       <AcceptanceDialog open={dialog?.kind === 'acceptance'} c={c} onClose={() => setDialog(null)} onDone={invalidate} />
       <IssueDialog open={dialog?.kind === 'issue'} c={c} onClose={() => setDialog(null)} onDone={invalidate} />
-      <ResolveDialog open={dialog?.kind === 'issue-resolve'} issue={dialog?.kind === 'issue-resolve' ? dialog.issue : null} busy={busy} onClose={() => setDialog(null)} onConfirm={(body) => dialog?.kind === 'issue-resolve' && void post(`/api/erp/contracts/quality-issues/${dialog.issue.id}/resolve`, body, '质量问题已标记处理')} />
+      <ResolveDialog
+        open={dialog?.kind === 'issue-resolve'}
+        issue={dialog?.kind === 'issue-resolve' ? dialog.issue : null}
+        busy={busy}
+        onClose={() => setDialog(null)}
+        onConfirm={(body) => dialog?.kind === 'issue-resolve' && void post(`/api/erp/contracts/quality-issues/${dialog.issue.id}/resolve`, body, '质量问题已标记处理')}
+      />
       <ReasonDialog
         open={dialog?.kind === 'acceptance-void'}
         busy={busy}
@@ -313,7 +340,14 @@ function AcceptanceDialog({ open, c, onClose, onDone }: { open: boolean; c: Cont
     const items = byItems ? standards.map((item, i) => ({ item, pass: checks[i] === true })) : [];
     const body = { clientKey: uuid(), acceptedOn, result: effective, signer: signer.trim(), note: note.trim(), items };
     try {
-      await sendErpOp({ key: body.clientKey, type: 'contract_acceptance', url, body, summary: `${c.contractNo} 验收 ${acceptedOn} ${ACCEPTANCE_RESULT_LABELS[effective]}`, staffName: session.staff.displayName });
+      await sendErpOp({
+        key: body.clientKey,
+        type: 'contract_acceptance',
+        url,
+        body,
+        summary: `${c.contractNo} 验收 ${acceptedOn} ${ACCEPTANCE_RESULT_LABELS[effective]}`,
+        staffName: session.staff.displayName,
+      });
       toast({ tone: 'success', title: `已登记验收（${ACCEPTANCE_RESULT_LABELS[effective]}）`, body: c.contractNo });
       onClose();
     } catch (e) {
@@ -407,7 +441,8 @@ function IssueDialog({ open, c, onClose, onDone }: { open: boolean; c: ContractD
     setDescription('');
     setError(null);
   });
-  const problem = pending.length > 0 ? '上一条质量问题结果待确认，请先在上方处理' : !foundOn || foundOn > session.calendarToday ? '发现日不能晚于今天' : description.trim().length < 2 ? '请描述问题' : null;
+  const problem =
+    pending.length > 0 ? '上一条质量问题结果待确认，请先在上方处理' : !foundOn || foundOn > session.calendarToday ? '发现日不能晚于今天' : description.trim().length < 2 ? '请描述问题' : null;
   const submit = async () => {
     if (problem) return;
     setBusy(true);
@@ -457,7 +492,19 @@ function IssueDialog({ open, c, onClose, onDone }: { open: boolean; c: ContractD
   );
 }
 
-function ResolveDialog({ open, issue, busy, onClose, onConfirm }: { open: boolean; issue: QualityIssueView | null; busy: boolean; onClose: () => void; onConfirm: (body: { resolvedOn: string; resolution: string }) => void }) {
+function ResolveDialog({
+  open,
+  issue,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  issue: QualityIssueView | null;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (body: { resolvedOn: string; resolution: string }) => void;
+}) {
   const session = useSession();
   const [resolvedOn, setResolvedOn] = useState('');
   const [resolution, setResolution] = useState('');

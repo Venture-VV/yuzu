@@ -253,7 +253,14 @@ export async function createLinenDoc(deps: Deps, raw: unknown, ctx: OpContext): 
         VALUES (${doc!.id}, ${l.itemId}, ${l.qty}, ${l.damagedQty}, ${l.lostQty}, ${l.price}, ${l.lineAmount})`;
       await tx`UPDATE linen_items SET total_qty = ${l.total}, at_laundry_qty = ${l.atLaundry}, updated_at = now() WHERE id = ${l.itemId}`;
     }
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'linen_doc', targetType: 'linen_doc', targetId: doc!.id, detail: { docNo, kind: input.kind, amountCents: amount, lines: input.lines }, ip: ctx.ip });
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'linen_doc',
+      targetType: 'linen_doc',
+      targetId: doc!.id,
+      detail: { docNo, kind: input.kind, amountCents: amount, lines: input.lines },
+      ip: ctx.ip,
+    });
     return { doc: (await loadDocs(tx, tx`d.id = ${doc!.id}`, 1))[0]!, replayed: false };
   });
 }
@@ -267,9 +274,19 @@ export async function voidLinenDoc(deps: Deps, docId: number, raw: unknown, ctx:
     if (!doc) throw notFound('布草单据不存在');
     if (doc.status === 'voided') throw conflict('LINEN_DOC_VOIDED', '这张单已经作废了');
     const lines = await tx<{ itemId: number; qty: number; damagedQty: number; lostQty: number }[]>`SELECT item_id, qty, damaged_qty, lost_qty FROM linen_doc_lines WHERE doc_id = ${docId}`;
-    const items = await lockItems(tx, lines.map((l) => Number(l.itemId)));
+    const items = await lockItems(
+      tx,
+      lines.map((l) => Number(l.itemId)),
+    );
     // 作废送洗单：这家洗涤厂已经收回过的就不能直接作废（不然它手里的数量成了负的）——按这一家核对，不只看加起来的在洗数
-    const held = doc.kind === 'send' ? await supplierOutstanding(tx, Number(doc.supplierId), lines.map((l) => Number(l.itemId))) : null;
+    const held =
+      doc.kind === 'send'
+        ? await supplierOutstanding(
+            tx,
+            Number(doc.supplierId),
+            lines.map((l) => Number(l.itemId)),
+          )
+        : null;
     for (const l of lines) {
       const item = items.get(Number(l.itemId))!;
       if (held && (held.get(Number(l.itemId)) ?? 0) < l.qty) {
@@ -291,7 +308,15 @@ export async function voidLinenDoc(deps: Deps, docId: number, raw: unknown, ctx:
 }
 
 export async function linenStatement(db: Db, timezone: string, raw: unknown): Promise<LinenStatement> {
-  const { month } = parse(z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, '月份写成 2026-11 这样').optional() }), raw ?? {});
+  const { month } = parse(
+    z.object({
+      month: z
+        .string()
+        .regex(/^\d{4}-(0[1-9]|1[0-2])$/, '月份写成 2026-11 这样')
+        .optional(),
+    }),
+    raw ?? {},
+  );
   const m = month ?? todayIn(timezone).slice(0, 7);
   const rows = await db<{ supplierId: number; supplierName: string; docs: number; washed: number; damaged: number; lost: number; amount: number }[]>`
     SELECT d.supplier_id, s.name AS supplier_name, count(DISTINCT d.id)::int AS docs, COALESCE(sum(l.qty), 0)::int AS washed,
@@ -299,7 +324,15 @@ export async function linenStatement(db: Db, timezone: string, raw: unknown): Pr
     FROM linen_docs d JOIN linen_doc_lines l ON l.doc_id = d.id JOIN suppliers s ON s.id = d.supplier_id
     WHERE d.kind = 'return' AND d.status = 'confirmed' AND to_char(d.doc_date, 'YYYY-MM') = ${m}
     GROUP BY d.supplier_id, s.name ORDER BY s.name`;
-  const out = rows.map((r) => ({ supplierId: Number(r.supplierId), supplierName: r.supplierName, docs: r.docs, washedQty: r.washed, damagedQty: r.damaged, lostQty: r.lost, amountCents: Number(r.amount) }));
+  const out = rows.map((r) => ({
+    supplierId: Number(r.supplierId),
+    supplierName: r.supplierName,
+    docs: r.docs,
+    washedQty: r.washed,
+    damagedQty: r.damaged,
+    lostQty: r.lost,
+    amountCents: Number(r.amount),
+  }));
   return { month: m, rows: out, totalCents: out.reduce((a, r) => a + r.amountCents, 0) };
 }
 

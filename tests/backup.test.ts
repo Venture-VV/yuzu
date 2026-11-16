@@ -139,7 +139,10 @@ describe('备份与核验', () => {
     try {
       // 只应用前 3 个迁移，模拟旧版本的数据库
       const migrations = new URL('../src/server/migrations/', import.meta.url);
-      const files = (await readdir(migrations)).filter((f) => f.endsWith('.sql')).sort().slice(0, 3);
+      const files = (await readdir(migrations))
+        .filter((f) => f.endsWith('.sql'))
+        .sort()
+        .slice(0, 3);
       await old`CREATE TABLE schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
       for (const f of files) {
         await old.unsafe(await readFile(new URL(f, migrations), 'utf8'));

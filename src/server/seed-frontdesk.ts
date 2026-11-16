@@ -90,7 +90,12 @@ async function seedFrontdesk(sql: Sql, config: AppConfig, options: { now?: Date 
       id = (await createMember(sql, { name: m.name, phone: m.phone, gender: m.gender, birthday: null, note: '前台演示会员' }, { actor: owner }, { enforceRequired: false })).id;
       await sql`UPDATE members SET is_synthetic = true WHERE id = ${id}`;
       for (const r of m.recharges) {
-        await recharge(deps, { idempotencyKey: randomUUID(), memberId: id, planId: null, paidAmount: r.paid, bonusAmount: r.bonus, paymentMethod: 'wechat', paymentConfirmed: true }, { actor: owner }, { history: true });
+        await recharge(
+          deps,
+          { idempotencyKey: randomUUID(), memberId: id, planId: null, paidAmount: r.paid, bonusAmount: r.bonus, paymentMethod: 'wechat', paymentConfirmed: true },
+          { actor: owner },
+          { history: true },
+        );
       }
     }
     memberIds.set(m.name, id);
@@ -117,7 +122,14 @@ async function seedFrontdesk(sql: Sql, config: AppConfig, options: { now?: Date 
 
   // ③ 散客王先生：门票 + 两瓶气泡水
   const [wang] = await open([{ tagCode: 'A8062', zone: 'male', guestLabel: '王先生' }], as(clerk, 130));
-  await charge(wang!.id, [['汤泉入场 · 成人', 1], ['柚子气泡水', 2]], as(clerk, 128));
+  await charge(
+    wang!.id,
+    [
+      ['汤泉入场 · 成人', 1],
+      ['柚子气泡水', 2],
+    ],
+    as(clerk, 128),
+  );
 
   // ④ 一家三口一次接待：自动建同行组；孩子跟爸爸进男宾区，用男宾牌、挂儿童票
   const family = await open(
@@ -160,7 +172,14 @@ async function seedFrontdesk(sql: Sql, config: AppConfig, options: { now?: Date 
 
   // ⑩ 会员周董（累计充值 12 万，第 3 级）：用第 3 级 VIP 柜 9058
   const [boss] = await open([{ tagCode: '9058', zone: 'male', memberId: memberIds.get('周董（演示）')! }], as(clerk, 150));
-  await charge(boss!.id, [['精油按摩 60 分钟', 1], ['搓背', 1]], as(clerk, 140));
+  await charge(
+    boss!.id,
+    [
+      ['精油按摩 60 分钟', 1],
+      ['搓背', 1],
+    ],
+    as(clerk, 140),
+  );
 
   // ⑪ 会员林女士（累计充值正好 5 万，第 2 级）：用女宾第 2 级 VIP 柜 9001
   const [lin] = await open([{ tagCode: '9001', zone: 'female', memberId: memberIds.get('林女士（演示）')! }], as(clerk, 70));

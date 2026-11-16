@@ -37,13 +37,25 @@ beforeAll(async () => {
     ['AR-M4', 'AR-S1', 10, 50],
   ] as const) {
     const r = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', {
-      code, name: `自动补货物料${code}`, inventoryUnit: '个', purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 3000,
-      lowStockMilli: q(low), defaultSupplierId: sup ? supplier[sup] : null,
+      code,
+      name: `自动补货物料${code}`,
+      inventoryUnit: '个',
+      purchaseUnit: '箱',
+      purchaseFactorMilli: q(10),
+      refPriceCents: 3000,
+      lowStockMilli: q(low),
+      defaultSupplierId: sup ? supplier[sup] : null,
     });
     if (r.status !== 201) throw new Error(JSON.stringify(r.body));
     mat[code] = r.body.id;
     if (stock > 0) {
-      const o = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, docType: 'opening', approveNow: true, lines: [{ materialId: r.body.id, qtyMilli: q(stock) }] });
+      const o = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/docs', {
+        clientKey: randomUUID(),
+        docDate: today,
+        docType: 'opening',
+        approveNow: true,
+        lines: [{ materialId: r.body.id, qtyMilli: q(stock) }],
+      });
       expect(o.status, JSON.stringify(o.body)).toBe(201);
     }
   }
@@ -112,7 +124,11 @@ describe('自动补货', () => {
     expect(gone.body.status).toBe('cancelled');
     // 店主自己编的草稿：采购撤不了
     const own = await api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
-      clientKey: randomUUID(), supplierId: supplier['AR-S1'], orderDate: today, action: 'save', lines: [{ materialId: mat['AR-M4'], purchaseQtyMilli: q(1), priceCents: 3000 }],
+      clientKey: randomUUID(),
+      supplierId: supplier['AR-S1'],
+      orderDate: today,
+      action: 'save',
+      lines: [{ materialId: mat['AR-M4'], purchaseQtyMilli: q(1), priceCents: 3000 }],
     });
     expect(own.status, JSON.stringify(own.body)).toBe(201);
     expect(own.body.po).toMatchObject({ status: 'draft', createdBySystem: false });

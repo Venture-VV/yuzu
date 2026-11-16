@@ -185,7 +185,13 @@ describe('迁移 016 升级', () => {
     expect(cur.summary.cash.expected).toBe(10000 + 30000 + 49900);
 
     const after = await api(app, clerk, 'POST', '/api/recharges', {
-      idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: 20000, bonusAmount: 0, paymentMethod: 'cash', paymentConfirmed: true,
+      idempotencyKey: randomUUID(),
+      memberId,
+      planId: null,
+      paidAmount: 20000,
+      bonusAmount: 0,
+      paymentMethod: 'cash',
+      paymentConfirmed: true,
     });
     expect(after.status).toBe(200);
     const [r] = await sql<{ shiftId: number }[]>`SELECT shift_id FROM recharges WHERE id = ${after.body.recharge.id}`;

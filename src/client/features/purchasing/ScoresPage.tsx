@@ -116,17 +116,25 @@ export function ScoresPage() {
                         <Money cents={r.rejectedCents} /> / <Money cents={r.returnedCents} />
                       </td>
                       <td className="num px-3 py-1.5 text-right">{pct(r.qualityBp)}</td>
-                      <td className={cn('num px-3 py-1.5 text-right', r.priceIndexBp !== null && r.priceIndexBp > 10_000 ? 'text-clay' : r.priceIndexBp !== null && r.priceIndexBp < 10_000 ? 'text-pine' : '')}>
+                      <td
+                        className={cn(
+                          'num px-3 py-1.5 text-right',
+                          r.priceIndexBp !== null && r.priceIndexBp > 10_000 ? 'text-clay' : r.priceIndexBp !== null && r.priceIndexBp < 10_000 ? 'text-pine' : '',
+                        )}
+                      >
                         {r.priceIndexBp === null ? '—' : (r.priceIndexBp / 10_000).toFixed(3)}
                       </td>
-                      <td className={cn('num px-3 py-1.5 text-right font-bold', r.watch && 'text-clay')}>{r.scoreX10 === null ? <span className="font-normal text-ink-3">样本不足</span> : (r.scoreX10 / 10).toFixed(1)}</td>
+                      <td className={cn('num px-3 py-1.5 text-right font-bold', r.watch && 'text-clay')}>
+                        {r.scoreX10 === null ? <span className="font-normal text-ink-3">样本不足</span> : (r.scoreX10 / 10).toFixed(1)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <p className="text-[12px] text-ink-3">
-              准时：收货日不晚于采购单的预计到货日（没填的按下单日 + 采购规则的「到货超期天数」），急采、补单不算；合格：1 −（拒收 + 退货）÷ 送货；价格指数：这家的进价 ÷ 同一物料这个季度所有供应商的加权均价（只有一家供货的物料不计）。
+              准时：收货日不晚于采购单的预计到货日（没填的按下单日 + 采购规则的「到货超期天数」），急采、补单不算；合格：1 −（拒收 + 退货）÷ 送货；价格指数：这家的进价 ÷
+              同一物料这个季度所有供应商的加权均价（只有一家供货的物料不计）。
             </p>
           </div>
         )}

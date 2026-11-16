@@ -66,7 +66,9 @@ describe('桌台点单下架（A05）', () => {
     const opened = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/tables/open', { clientKey: randomUUID(), tableId, guests: 2 });
     expect(opened.status, JSON.stringify(opened.body)).toBe(200);
     const sid = opened.body.id as number;
-    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/sessions/${sid}/orders`, { clientKey: randomUUID(), lines: [{ itemId: item['炒饭'], quantity: 1 }], expectedTotal: 3800 })).status).toBe(200);
+    expect(
+      (await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/sessions/${sid}/orders`, { clientKey: randomUUID(), lines: [{ itemId: item['炒饭'], quantity: 1 }], expectedTotal: 3800 })).status,
+    ).toBe(200);
     expect((await rules({ tablesEnabled: false })).status).toBe(200);
     const more = await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/sessions/${sid}/orders`, { clientKey: randomUUID(), lines: [{ itemId: item['炒饭'], quantity: 1 }], expectedTotal: 3800 });
     expect(more.body.error.code).toBe('TABLES_DISABLED');
@@ -86,7 +88,19 @@ describe('退菜按金额分级（B02）', () => {
   it('小额（≤ ¥50）直接退、不受「本人 15 分钟内」限制；大额要经理或当场授权，授权绑定这一条和金额；退菜记录写明怎么批的', async () => {
     const v = await enter();
     // 店主点的单：店员不是登记人
-    expect((await order(v, [{ itemId: item['鲜榨橙汁']!, quantity: 1 }, { itemId: item['海鲜拼盘']!, quantity: 1 }], 19600, ctx.owner)).status).toBe(200);
+    expect(
+      (
+        await order(
+          v,
+          [
+            { itemId: item['鲜榨橙汁']!, quantity: 1 },
+            { itemId: item['海鲜拼盘']!, quantity: 1 },
+          ],
+          19600,
+          ctx.owner,
+        )
+      ).status,
+    ).toBe(200);
     const juice = await lineOf(v, '鲜榨橙汁');
     const seafood = await lineOf(v, '海鲜拼盘');
     // 小额：店员写原因直接退
@@ -121,7 +135,10 @@ describe('退菜按金额分级（B02）', () => {
     // 退菜记录导出：一条一行，最后一行合计
     const csv = await ctx.app.inject({ method: 'GET', url: `/api/dining/voids/export?from=${today}&to=${today}`, headers: { cookie: ctx.owner } });
     expect(csv.statusCode).toBe(200);
-    const rows = csv.body.replace(/^\uFEFF/, '').trim().split('\r\n');
+    const rows = csv.body
+      .replace(/^\uFEFF/, '')
+      .trim()
+      .split('\r\n');
     expect(rows.length).toBe(log.length + 2);
     expect(rows.some((r) => r.includes('当场授权（值班经理）'))).toBe(true);
     expect(rows.at(-1)!.startsWith('合计')).toBe(true);

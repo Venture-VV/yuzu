@@ -129,7 +129,9 @@ export function GuideAdminCard() {
           )
         }
       />
-      {can('settings.manage') && <CarouselCard seconds={d.rules.carouselSeconds} busy={busy} onSave={(s) => run(() => api.put<GuideAdmin>('/api/admin/guide/rules', { carouselSeconds: s }), '轮播秒数已保存')} />}
+      {can('settings.manage') && (
+        <CarouselCard seconds={d.rules.carouselSeconds} busy={busy} onSave={(s) => run(() => api.put<GuideAdmin>('/api/admin/guide/rules', { carouselSeconds: s }), '轮播秒数已保存')} />
+      )}
     </div>
   );
 }
@@ -139,9 +141,7 @@ function ZonesCard({ zones, busy, onSave }: { zones: GuideAdminZone[]; busy: boo
     <Card className="overflow-hidden" data-testid="guide-zones">
       <div className="border-b border-line px-5 py-3">
         <SectionTitle>区域的导览分类与颜色</SectionTitle>
-        <p className="mt-1 text-[12.5px] text-ink-3">
-          {GUIDE_KINDS.map((k) => `${GUIDE_KIND_LABELS[k]}：${GUIDE_KIND_HINTS[k]}`).join('；')}。没单独指定颜色的按分类轮流取色。
-        </p>
+        <p className="mt-1 text-[12.5px] text-ink-3">{GUIDE_KINDS.map((k) => `${GUIDE_KIND_LABELS[k]}：${GUIDE_KIND_HINTS[k]}`).join('；')}。没单独指定颜色的按分类轮流取色。</p>
       </div>
       {zones.length === 0 ? (
         <p className="px-5 py-4 text-[13px] text-ink-3">空间台账里还没有区域。</p>
@@ -278,7 +278,12 @@ function MarkersCard({
               </Button>
             </Notice>
           )}
-          <div ref={svgRef} onClick={click} className={cn('relative aspect-[16/10] w-full overflow-hidden rounded-md border border-line bg-white', placing && 'cursor-crosshair')} data-testid="guide-admin-map">
+          <div
+            ref={svgRef}
+            onClick={click}
+            className={cn('relative aspect-[16/10] w-full overflow-hidden rounded-md border border-line bg-white', placing && 'cursor-crosshair')}
+            data-testid="guide-admin-map"
+          >
             <GuideMap floor={floor} zones={(guide?.zones ?? []).filter((z) => z.floorCode === floor.code)} markers={here.filter((m) => !m.hidden && m.onPlan)} />
           </div>
           {here.length === 0 ? (

@@ -31,7 +31,9 @@ describe('报价链接', () => {
   it('发给一家 → 供应商打开看询价单、填报价 → 替他登记一份报价（来源记链接）；再报一次撤下旧的；原样重提只记一次；定标以后不能再报', async () => {
     const [s1, s2] = [await supplier('S002'), await supplier('S004')];
     const mat = await material('M016');
-    const ev = (await api(ctx.app, buyer, 'POST', '/api/purchase-sourcing', { clientKey: randomUUID(), title: '门户报价 10 箱', needBy: today, lines: [{ materialId: mat.id, purchaseQtyMilli: q(10) }] })).body.event;
+    const ev = (
+      await api(ctx.app, buyer, 'POST', '/api/purchase-sourcing', { clientKey: randomUUID(), title: '门户报价 10 箱', needBy: today, lines: [{ materialId: mat.id, purchaseQtyMilli: q(10) }] })
+    ).body.event;
     // 只有能编制采购单的能发；物资经办只能看
     expect((await api(ctx.app, keeper, 'POST', `/api/purchase-sourcing/${ev.id}/supplier-links`, { supplierId: s1.id })).status).toBe(403);
     const made = await api(ctx.app, buyer, 'POST', `/api/purchase-sourcing/${ev.id}/supplier-links`, { supplierId: s1.id });
@@ -47,7 +49,17 @@ describe('报价链接', () => {
     expect(view.json()).toMatchObject({ kind: 'quote', open: true, quote: null, snapshot: { docNo: ev.docNo, supplierName: s1.name, lines: [{ materialName: mat.name, purchaseQtyMilli: q(10) }] } });
     const lineId = view.json().snapshot.lines[0].lineId;
 
-    const body = { clientKey: randomUUID(), name: '王经理', prices: [{ lineId, priceCents: 42_000 }], freightCents: 2_000, payTerms: '月结 30 天', creditDays: 30, deliveryDays: 3, validUntil: shiftDate(today, 10), note: '含税' };
+    const body = {
+      clientKey: randomUUID(),
+      name: '王经理',
+      prices: [{ lineId, priceCents: 42_000 }],
+      freightCents: 2_000,
+      payTerms: '月结 30 天',
+      creditDays: 30,
+      deliveryDays: 3,
+      validUntil: shiftDate(today, 10),
+      note: '含税',
+    };
     expect((await reply(token, { ...body, name: '' })).statusCode).toBe(400);
     expect((await reply(token, { ...body, prices: [] })).statusCode).toBe(400);
     const r1 = await reply(token, body);
@@ -160,7 +172,13 @@ describe('订单确认与发货预告', () => {
     const a = await supplier('S005');
     const b = await supplier('S006');
     const mat = await material('M016');
-    const created = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), orderDate: today, action: 'submit', supplierId: a.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] });
+    const created = await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(),
+      orderDate: today,
+      action: 'submit',
+      supplierId: a.id,
+      lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }],
+    });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     let po = created.body.po.status === 'approved' ? created.body.po : (await api(ctx.app, ctx.owner, 'POST', `/api/purchase-orders/${created.body.po.id}/approve`, {})).body;
     expect(po.status).toBe('approved');
@@ -170,7 +188,11 @@ describe('订单确认与发货预告', () => {
     const dA = (await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/supplier-links`, { kind: 'delivery' })).body.token as string;
     expect((await pub(dA)).statusCode).toBe(200);
     // 改版换成乙：发给甲的链接都作废
-    const rev = await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/revise`, { supplierId: b.id, orderDate: today, lines: [{ id: po.lines[0].id, materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] });
+    const rev = await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/revise`, {
+      supplierId: b.id,
+      orderDate: today,
+      lines: [{ id: po.lines[0].id, materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }],
+    });
     expect(rev.status, JSON.stringify(rev.body)).toBe(200);
     expect((await pub(tA)).statusCode).toBe(404);
     expect((await pub(dA)).statusCode).toBe(404);
@@ -203,7 +225,15 @@ describe('订单确认与发货预告', () => {
   it('采购模块关着：链接打不开（PORTAL_PAUSED，与作废、过期分开）', async () => {
     const s = await supplier('S005');
     const mat = await material('M016');
-    let po = (await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), orderDate: today, action: 'submit', supplierId: s.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000 }] })).body.po;
+    let po = (
+      await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        orderDate: today,
+        action: 'submit',
+        supplierId: s.id,
+        lines: [{ materialId: mat.id, purchaseQtyMilli: q(1), priceCents: 45_000 }],
+      })
+    ).body.po;
     if (po.status !== 'approved') po = (await api(ctx.app, ctx.owner, 'POST', `/api/purchase-orders/${po.id}/approve`, {})).body;
     const token = (await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/supplier-links`, { kind: 'po_confirm' })).body.token as string;
     const off = await api(ctx.app, ctx.owner, 'PUT', '/api/erp/modules', { modules: { purchasing: false } });
@@ -222,7 +252,15 @@ describe('订单确认与发货预告', () => {
   it('原样重提先认原编号：采购模块关着、链接作废以后，登记过的那一份照样返回，不报「没有」（Codex 审查 970c95c 后补）', async () => {
     const s = await supplier('S005');
     const mat = await material('M016');
-    let po = (await api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), orderDate: today, action: 'submit', supplierId: s.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] })).body.po;
+    let po = (
+      await api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        orderDate: today,
+        action: 'submit',
+        supplierId: s.id,
+        lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }],
+      })
+    ).body.po;
     if (po.status !== 'approved') po = (await api(ctx.app, ctx.owner, 'POST', `/api/purchase-orders/${po.id}/approve`, {})).body;
     const ct = (await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${po.id}/supplier-links`, { kind: 'po_confirm' })).body.token as string;
     expect((await reply(ct, { clientKey: randomUUID(), name: '李', promisedDate: today })).statusCode).toBe(200);

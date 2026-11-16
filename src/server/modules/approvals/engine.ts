@@ -100,11 +100,7 @@ const INV_TYPES: Record<string, ApprovalDocType> = { damage: 'damage', supplier_
  * （P5：8.0.6 起在「付款 → 付款规则」里改，默认 ¥50,000，null 为不加），提前付款是 财务 → 负责人 → 店主（P6）。
  * 默认规则里提交人有资格的可以审（与 v0.7.30 的默认规则一样）
  */
-export function defaultPlanFor(
-  docType: ApprovalDocType,
-  amountCents: number | null = null,
-  ownerLevelCents: number | null = DEFAULT_PAYMENT_RULES.ownerLevelCents,
-): ApprovalPlan {
+export function defaultPlanFor(docType: ApprovalDocType, amountCents: number | null = null, ownerLevelCents: number | null = DEFAULT_PAYMENT_RULES.ownerLevelCents): ApprovalPlan {
   let steps: ApprovalStep[];
   switch (docType) {
     case 'contract':
@@ -149,7 +145,13 @@ export async function describeDoc(db: Db, kind: ApprovalDocKind, docId: number):
         JOIN purchase_order_line_requests x ON x.po_line_id = pl.id
         JOIN purchase_request_lines rl ON rl.id = x.request_line_id JOIN purchase_requests r ON r.id = rl.request_id
         WHERE pl.po_id = ${docId}`;
-      return { docType: 'purchase_order', docNo: p.docNo, amountCents: Number(p.totalCents), departmentId: depts.length === 1 ? Number(depts[0]!.departmentId) : null, submittedBy: Number(p.submittedBy) };
+      return {
+        docType: 'purchase_order',
+        docNo: p.docNo,
+        amountCents: Number(p.totalCents),
+        departmentId: depts.length === 1 ? Number(depts[0]!.departmentId) : null,
+        submittedBy: Number(p.submittedBy),
+      };
     }
     case 'inv_doc': {
       const [d] = await db<{ docNo: string; docType: string; urgent: boolean; submittedBy: number; departmentId: number | null }[]>`
@@ -207,7 +209,13 @@ export async function describeDoc(db: Db, kind: ApprovalDocKind, docId: number):
                coalesce((SELECT r.submitted_by FROM contract_revisions r WHERE r.change_id = x.id ORDER BY r.seq DESC LIMIT 1), x.created_by) AS submitted_by
         FROM contract_changes x JOIN contracts c ON c.id = x.contract_id WHERE x.id = ${docId}`;
       if (!c) throw new AppError(404, 'NOT_FOUND', '变更单不存在');
-      return { docType: 'contract_change', docNo: c.docNo, amountCents: Number(c.deltaCents), departmentId: c.departmentId === null ? null : Number(c.departmentId), submittedBy: Number(c.submittedBy) };
+      return {
+        docType: 'contract_change',
+        docNo: c.docNo,
+        amountCents: Number(c.deltaCents),
+        departmentId: c.departmentId === null ? null : Number(c.departmentId),
+        submittedBy: Number(c.submittedBy),
+      };
     }
     // 用印：金额 = 合同总价
     case 'contract_seal': {
@@ -355,9 +363,7 @@ export function standingOf(
   if (selfBlocked) return { self: false, behalf: [], selfBlocked };
   return {
     self: eligibleAt(step, who, req.docKind),
-    behalf: delegators
-      .filter((d) => d.id !== who.id && (req.allowSelf || d.id !== req.submittedBy) && eligibleAt(step, d, req.docKind))
-      .map((d) => d.id),
+    behalf: delegators.filter((d) => d.id !== who.id && (req.allowSelf || d.id !== req.submittedBy) && eligibleAt(step, d, req.docKind)).map((d) => d.id),
     selfBlocked,
   };
 }
@@ -548,18 +554,20 @@ export async function approvalBriefById(db: Db, requestId: number): Promise<Appr
 
 async function briefOf(db: Db, where: Fragment): Promise<ApprovalBrief | null> {
   const { approvalOverdueHours } = await loadSettings(db);
-  const [r] = await db<{
-    id: number;
-    docType: ApprovalDocType;
-    status: ApprovalStatus;
-    ruleId: number | null;
-    currentLevel: number;
-    steps: ApprovalStep[];
-    allowSelf: boolean;
-    submittedBy: number;
-    levelStartedAt: string;
-    overdue: boolean;
-  }[]>`
+  const [r] = await db<
+    {
+      id: number;
+      docType: ApprovalDocType;
+      status: ApprovalStatus;
+      ruleId: number | null;
+      currentLevel: number;
+      steps: ApprovalStep[];
+      allowSelf: boolean;
+      submittedBy: number;
+      levelStartedAt: string;
+      overdue: boolean;
+    }[]
+  >`
     SELECT id, doc_type, status, rule_id, current_level, steps, allow_self, submitted_by, level_started_at,
            (status = 'pending' AND level_started_at < now() - make_interval(hours => ${approvalOverdueHours})) AS overdue
     FROM approval_requests WHERE ${where}
@@ -567,7 +575,10 @@ async function briefOf(db: Db, where: Fragment): Promise<ApprovalBrief | null> {
   if (!r) return null;
   const id = Number(r.id);
   const actions = (await actionsOf(db, [id])).get(id) ?? [];
-  const names = await staffNames(db, r.steps.flatMap((s) => ('staffIds' in s ? s.staffIds : [])));
+  const names = await staffNames(
+    db,
+    r.steps.flatMap((s) => ('staffIds' in s ? s.staffIds : [])),
+  );
   return {
     requestId: id,
     docType: r.docType,
@@ -621,10 +632,7 @@ export async function approvalChecks(db: Db): Promise<{ key: string; label: stri
       WHEN 'contract_seal' THEN (SELECT CASE status WHEN 'reviewing' THEN 'submitted' ELSE status END FROM contract_seals WHERE id = r.doc_id)
       WHEN 'payment_request' THEN (SELECT status FROM payment_requests WHERE id = r.doc_id)
     END, '') <> 'submitted'`;
-  const bad = [
-    ...docs.map((d) => `${d.docNo} 待确认但${d.n === 0 ? '没有在审的审批单' : `有 ${d.n} 张在审的审批单`}`),
-    ...orphans.map((o) => `${o.docNo} 的审批单在审，单据已不在待确认`),
-  ];
+  const bad = [...docs.map((d) => `${d.docNo} 待确认但${d.n === 0 ? '没有在审的审批单' : `有 ${d.n} 张在审的审批单`}`), ...orphans.map((o) => `${o.docNo} 的审批单在审，单据已不在待确认`)];
   return {
     key: 'approval_requests',
     label: '审批中心：待确认的单据各有一张在审的审批单，在审的审批单单据都还在待确认',

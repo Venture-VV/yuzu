@@ -9,17 +9,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import {
-  BUDGET_CATEGORIES,
-  BUDGET_MAX_CENTS,
-  budgetLevel,
-  monthOf,
-  monthStart,
-  type BudgetCell,
-  type BudgetCheckItem,
-  type BudgetGrid,
-  type BudgetUsage,
-} from '@shared/budgets';
+import { BUDGET_CATEGORIES, BUDGET_MAX_CENTS, budgetLevel, monthOf, monthStart, type BudgetCell, type BudgetCheckItem, type BudgetGrid, type BudgetUsage } from '@shared/budgets';
 import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS, type ExpenseCategory } from '@shared/expenses';
 import { formatAmount } from '@shared/money';
 import type { Db, Tx } from '../db';
@@ -118,9 +108,7 @@ export async function budgetUsage(db: Db, departmentId: number, month: string): 
 /** 「部门 + 科目」的咨询锁：部门 id 升序、科目按固定顺序（报销登记、重新提交与预算修改串行） */
 async function lockCells(tx: Tx, cells: { departmentId: number; category: ExpenseCategory }[]) {
   const order = (c: ExpenseCategory) => EXPENSE_CATEGORIES.indexOf(c);
-  const sorted = [...new Map(cells.map((c) => [key(c.departmentId, c.category), c])).values()].sort(
-    (a, b) => a.departmentId - b.departmentId || order(a.category) - order(b.category),
-  );
+  const sorted = [...new Map(cells.map((c) => [key(c.departmentId, c.category), c])).values()].sort((a, b) => a.departmentId - b.departmentId || order(a.category) - order(b.category));
   for (const c of sorted) await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`expense_budget:${key(c.departmentId, c.category)}`}, 0))`;
 }
 
@@ -135,7 +123,10 @@ export async function checkClaimBudget(
   const byCat = new Map<ExpenseCategory, number>();
   for (const l of input.lines) byCat.set(l.category, (byCat.get(l.category) ?? 0) + l.amountCents);
   const categories = [...byCat.keys()];
-  await lockCells(tx, categories.map((category) => ({ departmentId: input.departmentId, category })));
+  await lockCells(
+    tx,
+    categories.map((category) => ({ departmentId: input.departmentId, category })),
+  );
   const month = monthOf(input.expenseDate);
   const effective = await effectiveBudgets(tx, month, input.departmentId);
   const used = await usage(tx, month, { departmentId: input.departmentId, excludeClaimId: input.excludeClaimId });
@@ -236,7 +227,16 @@ export function registerBudgetRoutes(app: FastifyInstance, deps: Deps) {
     return readSnapshot(sql, (tx) => loadBudgetGrid(tx, month ?? thisMonth()));
   });
   app.get('/api/erp/expenses/budgets/usage', { preHandler: guard('expense.read') }, async (req) => {
-    const q = parse(z.object({ departmentId: z.coerce.number().int().positive(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '日期要写成 YYYY-MM-DD').optional() }), req.query);
+    const q = parse(
+      z.object({
+        departmentId: z.coerce.number().int().positive(),
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, '日期要写成 YYYY-MM-DD')
+          .optional(),
+      }),
+      req.query,
+    );
     return readSnapshot(sql, (tx) => budgetUsage(tx, q.departmentId, q.date ? monthOf(q.date) : thisMonth()));
   });
   app.put('/api/erp/expenses/budgets', { preHandler: guard('budget.manage') }, async (req) => {
@@ -249,5 +249,8 @@ export function registerBudgetRoutes(app: FastifyInstance, deps: Deps) {
 export const budgetSummary = (items: BudgetCheckItem[]) =>
   items
     .filter((i) => i.usedBeforeCents + i.claimCents > i.budgetCents)
-    .map((i) => `${EXPENSE_CATEGORY_LABELS[i.category]}：${i.month} 额度 ${yuan(i.budgetCents)}，之前已占用 ${yuan(i.usedBeforeCents)}，这张 ${yuan(i.claimCents)}，超出 ${yuan(i.usedBeforeCents + i.claimCents - i.budgetCents)}`)
+    .map(
+      (i) =>
+        `${EXPENSE_CATEGORY_LABELS[i.category]}：${i.month} 额度 ${yuan(i.budgetCents)}，之前已占用 ${yuan(i.usedBeforeCents)}，这张 ${yuan(i.claimCents)}，超出 ${yuan(i.usedBeforeCents + i.claimCents - i.budgetCents)}`,
+    )
     .join('；');

@@ -8,16 +8,7 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import {
-  CENTRAL_WAREHOUSE_ID,
-  COUNT_REASONS,
-  INV_DOC_META,
-  isBigVariance,
-  type CountReason,
-  type InvDoc,
-  type InvDocSummary,
-  type InvDocType,
-} from '@shared/inventory';
+import { CENTRAL_WAREHOUSE_ID, COUNT_REASONS, INV_DOC_META, isBigVariance, type CountReason, type InvDoc, type InvDocSummary, type InvDocType } from '@shared/inventory';
 import type { SupplierSettlement } from '@shared/expenses';
 import { can, type Permission } from '@shared/permissions';
 import { fitsDecimals, formatQty, lineAmountCents, priceChangePercent, toBaseQty } from '@shared/quantity';
@@ -643,11 +634,7 @@ function assertUniqueMaterials(lines: { materialId: number }[], what: string) {
  * 台面日耗品（#14，v0.7.13）领到部门即算耗用，部门小仓始终没有结存：部门小仓不登记它的期初、耗用、报损、盘点，
  * 也不能退回总仓（领错了冲销整张领料单再重新登记）。
  */
-export function assertNoCounterUse(
-  mats: Map<number, { name: string; counterUse: boolean }>,
-  what: 'dept' | 'return',
-  status: 'prepare' | 'confirm' = 'prepare',
-) {
+export function assertNoCounterUse(mats: Map<number, { name: string; counterUse: boolean }>, what: 'dept' | 'return', status: 'prepare' | 'confirm' = 'prepare') {
   const hit = [...mats.values()].filter((m) => m.counterUse);
   if (hit.length === 0) return;
   const names = hit.map((m) => `「${m.name}」`).join('');
@@ -744,7 +731,10 @@ async function prepare(
   switch (body.docType) {
     case 'opening': {
       assertUniqueMaterials(body.lines, '期初单');
-      const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
+      const mats = await loadMaterials(
+        db,
+        body.lines.map((l) => l.materialId),
+      );
       if (wh?.kind === 'department') assertNoCounterUse(mats, 'dept');
       return {
         ...empty,
@@ -763,7 +753,10 @@ async function prepare(
         const [dep] = await db<{ active: boolean }[]>`SELECT active FROM departments WHERE id = ${body.departmentId}`;
         if (!dep || !dep.active) throw unprocessable('DEPARTMENT_INACTIVE', '领用部门不存在或已停用');
       }
-      const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
+      const mats = await loadMaterials(
+        db,
+        body.lines.map((l) => l.materialId),
+      );
       if (body.docType !== 'issue' && wh?.kind === 'department') assertNoCounterUse(mats, 'dept');
       const use = body.docType === 'direct_use' ? await prepareUse(db, body.purpose, body.handlerId, actor) : { usePurpose: null, useHandlerId: null };
       return {
@@ -781,11 +774,18 @@ async function prepare(
 
     case 'count': {
       assertUniqueMaterials(body.lines, '盘点单');
-      const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
+      const mats = await loadMaterials(
+        db,
+        body.lines.map((l) => l.materialId),
+      );
       if (wh?.kind === 'department') assertNoCounterUse(mats, 'dept');
       // 账面按盘点的仓：总仓在物料上，部门小仓在 warehouse_stock（v0.7.11）
       if (wh && wh.kind === 'department') {
-        const dept = await deptBalances(db, wh.id, body.lines.map((l) => l.materialId));
+        const dept = await deptBalances(
+          db,
+          wh.id,
+          body.lines.map((l) => l.materialId),
+        );
         for (const [mid, b] of dept) {
           const m = mats.get(mid)!;
           m.stockMilli = b.stockMilli;
@@ -838,10 +838,17 @@ async function prepare(
       const srcLines = await db<{ id: number; materialId: number; qtyMilli: number; priceCents: number | null; factorMilli: number; inventoryUnit: string; purchaseUnit: string }[]>`
         SELECT id, material_id, qty_milli, price_cents, factor_milli, inventory_unit, purchase_unit FROM inv_doc_lines WHERE doc_id = ${src.id}`;
       const byId = new Map(srcLines.map((l) => [l.id, l]));
-      const mats = await loadMaterials(db, srcLines.filter((l) => body.lines.some((b) => b.sourceLineId === l.id)).map((l) => l.materialId));
+      const mats = await loadMaterials(
+        db,
+        srcLines.filter((l) => body.lines.some((b) => b.sourceLineId === l.id)).map((l) => l.materialId),
+      );
       // 迁移 029 以前的领料没进部门小仓，退回只进总仓，不受台面日耗品的限制
       if (body.docType === 'issue_return' && wh?.kind === 'department') assertNoCounterUse(mats, 'return');
-      const already = await returnedBySourceLine(db, body.lines.map((l) => l.sourceLineId), existing?.id ?? null);
+      const already = await returnedBySourceLine(
+        db,
+        body.lines.map((l) => l.sourceLineId),
+        existing?.id ?? null,
+      );
       const seen = new Set<number>();
       let amount = 0;
       const prepared = body.lines.map((l) => {
@@ -853,11 +860,10 @@ async function prepare(
         checkDecimals(m, l.qtyMilli, '数量');
         const remaining = s.qtyMilli - (already.get(s.id) ?? 0);
         if (l.qtyMilli > remaining) {
-          throw unprocessable(
-            'RETURN_EXCEEDS_SOURCE',
-            `「${m.name}」最多还能${body.docType === 'issue_return' ? '退回' : '退货'} ${formatQty(Math.max(0, remaining))} ${s.inventoryUnit}`,
-            { materialId: m.id, remainingMilli: remaining },
-          );
+          throw unprocessable('RETURN_EXCEEDS_SOURCE', `「${m.name}」最多还能${body.docType === 'issue_return' ? '退回' : '退货'} ${formatQty(Math.max(0, remaining))} ${s.inventoryUnit}`, {
+            materialId: m.id,
+            remainingMilli: remaining,
+          });
         }
         const line: PreparedLine = {
           ...baseLine(m),
@@ -909,7 +915,10 @@ async function prepare(
         }
         coAcceptorId = body.coAcceptorId;
       }
-      const mats = await loadMaterials(db, body.lines.map((l) => l.materialId));
+      const mats = await loadMaterials(
+        db,
+        body.lines.map((l) => l.materialId),
+      );
       let poLines = new Map<number, { id: number; materialId: number; baseQtyMilli: number; priceCents: number; factorMilli: number; purchaseUnit: string; inventoryUnit: string }>();
       let received = new Map<number, number>();
       let priceBasis = (await loadInventorySettings(db)).priceBasis;
@@ -1130,7 +1139,10 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
       FROM inv_docs d JOIN purchase_orders p ON p.id = d.purchase_order_id WHERE d.id = ${doc.id}`;
     if (stale?.changed) throw conflict('PO_RECEIPT_STALE', '采购单内容已变化，请重新打开收货单，按最新采购单核对后再提交');
   }
-  const mats = await lockMaterials(tx, lines.map((l) => l.materialId));
+  const mats = await lockMaterials(
+    tx,
+    lines.map((l) => l.materialId),
+  );
   // v0.7.11 两级库存：这张单动的仓（迁移前的领料、退回为空，只动总仓）
   const wh = doc.warehouseId === null ? null : await warehouseRef(tx, doc.warehouseId);
   const whId = wh?.id ?? CENTRAL_WAREHOUSE_ID;
@@ -1167,7 +1179,13 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
   switch (doc.docType) {
     case 'opening': {
       // 每个仓每个物料只能建一次期初（这个仓已有流水或结存时用盘点调整）
-      const dept = isDept ? await deptBalances(tx, whId, lines.map((l) => l.materialId)) : null;
+      const dept = isDept
+        ? await deptBalances(
+            tx,
+            whId,
+            lines.map((l) => l.materialId),
+          )
+        : null;
       for (const l of lines) {
         const [other] = await tx<{ count: number }[]>`
           SELECT count(*) AS count FROM stock_moves sm JOIN inv_docs d ON d.id = sm.doc_id
@@ -1244,9 +1262,7 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
     case 'issue_return':
     case 'supplier_return': {
       // 在原单锁内复核可退数量（只算已生效的退回 / 退货）
-      const srcLines = new Map(
-        (await tx<{ id: number; qtyMilli: number }[]>`SELECT id, qty_milli FROM inv_doc_lines WHERE doc_id = ${doc.sourceDocId}`).map((r) => [r.id, r.qtyMilli]),
-      );
+      const srcLines = new Map((await tx<{ id: number; qtyMilli: number }[]>`SELECT id, qty_milli FROM inv_doc_lines WHERE doc_id = ${doc.sourceDocId}`).map((r) => [r.id, r.qtyMilli]));
       const done = await tx<{ sourceLineId: number; qty: number }[]>`
         SELECT l.source_line_id, sum(l.qty_milli) AS qty FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id
         WHERE d.source_doc_id = ${doc.sourceDocId} AND d.status = 'confirmed' AND d.id <> ${doc.id}
@@ -1297,7 +1313,13 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
     }
     case 'count': {
       // 记下账面数之后又有收发：不能用旧盘点结果覆盖新变动，需要重新核对（按盘点的仓）
-      const dept = isDept ? await deptBalances(tx, whId, lines.map((l) => l.materialId)) : null;
+      const dept = isDept
+        ? await deptBalances(
+            tx,
+            whId,
+            lines.map((l) => l.materialId),
+          )
+        : null;
       const lastMove = (mid: number) => (dept ? dept.get(mid)!.lastMoveId : mats.get(mid)!.lastMoveId);
       const stale = lines.filter((l) => l.bookMoveId !== lastMove(l.materialId));
       if (stale.length > 0) {
@@ -1398,7 +1420,6 @@ async function afterApproval(tx: Tx, doc: DocRow & { docNo: string; amountCents:
 }
 
 // ───────────────────────── 对外操作 ─────────────────────────
-
 
 export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, ip?: string): Promise<{ doc: InvDoc; replayed: boolean }> {
   const meta = parse(CreateInput, raw);
@@ -1615,7 +1636,10 @@ export async function voidDoc(deps: Deps, docId: number, raw: unknown, actor: Ac
     if (!check.ok) throw conflict('NOT_VOIDABLE', check.reason ?? '这张单据不能冲销');
     const moves = await tx<{ materialId: number; docLineId: number; qtyDeltaMilli: number; warehouseId: number; moveType: string; costCents: number | null }[]>`
       SELECT material_id, doc_line_id, qty_delta_milli, warehouse_id, move_type, cost_cents FROM stock_moves WHERE doc_id = ${docId} AND move_type <> 'void' ORDER BY id DESC`;
-    const mats = await lockMaterials(tx, moves.map((m) => m.materialId));
+    const mats = await lockMaterials(
+      tx,
+      moves.map((m) => m.materialId),
+    );
     const wh = await warehouseRef(tx, doc.warehouseId);
     // 部门停用后它的小仓已清空，不能再冲回去
     for (const w of [...new Set(moves.map((m) => m.warehouseId))].sort((a, b) => a - b)) await lockDeptWarehouse(tx, w);
@@ -1780,28 +1804,20 @@ export function registerDocRoutes(app: FastifyInstance, deps: Deps) {
     return doc ? { found: true, doc } : { found: false };
   });
   app.get('/api/inventory/docs/:id', { preHandler: guard('inventory.read') }, async (req) => getDoc(sql, docId(req), deps.config.timezone));
-  app.get('/api/inventory/departments/:id/usual', { preHandler: guard('inventory.read') }, async (req) =>
-    usualIssues(sql, parse(idParam, req.params).id),
-  );
+  app.get('/api/inventory/departments/:id/usual', { preHandler: guard('inventory.read') }, async (req) => usualIssues(sql, parse(idParam, req.params).id));
 
   app.post('/api/inventory/docs', { preHandler: guard('inventory.read') }, async (req, reply) => {
     const result = await createDoc(deps, req.body as CreateDocInput, req.actor, req.ip);
     reply.code(result.replayed ? 200 : 201);
     return result;
   });
-  app.put('/api/inventory/docs/:id', { preHandler: guard('inventory.read') }, async (req) =>
-    updateDoc(deps, docId(req), req.body as DocBodyInput, req.actor),
-  );
+  app.put('/api/inventory/docs/:id', { preHandler: guard('inventory.read') }, async (req) => updateDoc(deps, docId(req), req.body as DocBodyInput, req.actor));
   app.post('/api/inventory/docs/:id/submit', { preHandler: guard('inventory.read') }, async (req) => {
     const { approveNow } = parse(z.object({ approveNow: z.boolean().default(false) }), req.body ?? {});
     return submitDoc(deps, docId(req), req.actor, approveNow);
   });
-  app.post('/api/inventory/docs/:id/approve', { preHandler: guard('inventory.approve') }, async (req) =>
-    approveDoc(deps, docId(req), req.body, req.actor),
-  );
-  app.post('/api/inventory/docs/:id/return', { preHandler: guard('inventory.approve') }, async (req) =>
-    returnDoc(deps, docId(req), req.body, req.actor),
-  );
+  app.post('/api/inventory/docs/:id/approve', { preHandler: guard('inventory.approve') }, async (req) => approveDoc(deps, docId(req), req.body, req.actor));
+  app.post('/api/inventory/docs/:id/return', { preHandler: guard('inventory.approve') }, async (req) => returnDoc(deps, docId(req), req.body, req.actor));
   app.post('/api/inventory/docs/:id/cancel', { preHandler: guard('inventory.read') }, async (req) => {
     const id = docId(req);
     const row = await typeOf(id);
@@ -1809,15 +1825,9 @@ export function registerDocRoutes(app: FastifyInstance, deps: Deps) {
     return cancelDoc(deps, id, req.body, req.actor);
   });
   // #21：库存冲销由仓库或财务成本岗操作，只限当月（v0.7.11）
-  app.post('/api/inventory/docs/:id/supplier-answer', { preHandler: guard('supplierReturn.answer') }, async (req) =>
-    answerReturn(deps, docId(req), req.body, req.actor),
-  );
-  app.post('/api/inventory/docs/:id/void', { preHandler: guard('inventory.void') }, async (req) =>
-    voidDoc(deps, docId(req), req.body, req.actor),
-  );
+  app.post('/api/inventory/docs/:id/supplier-answer', { preHandler: guard('supplierReturn.answer') }, async (req) => answerReturn(deps, docId(req), req.body, req.actor));
+  app.post('/api/inventory/docs/:id/void', { preHandler: guard('inventory.void') }, async (req) => voidDoc(deps, docId(req), req.body, req.actor));
   // 急采：仓库到部门验收后确认（#19）
   app.post('/api/inventory/docs/:id/verify-urgent', { preHandler: guard('inventory.read') }, async (req) => verifyUrgent(deps, docId(req), req.actor));
-  app.post('/api/inventory/docs/:id/refresh-book', { preHandler: guard('inventory.operate') }, async (req) =>
-    refreshCountBook(deps, docId(req), req.actor),
-  );
+  app.post('/api/inventory/docs/:id/refresh-book', { preHandler: guard('inventory.operate') }, async (req) => refreshCountBook(deps, docId(req), req.actor));
 }

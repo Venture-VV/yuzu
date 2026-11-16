@@ -14,7 +14,15 @@ import { PrintFrame } from '../print/PrintFrame';
 export function PatrolCodesPrintPage() {
   const { ids } = useParams();
   const list = useQuery({ queryKey: ['patrol', 'points'], queryFn: () => api.get<PatrolPointsAdmin>('/api/erp/patrol/points') });
-  const wanted = ids === 'all' ? null : new Set((ids ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0));
+  const wanted =
+    ids === 'all'
+      ? null
+      : new Set(
+          (ids ?? '')
+            .split(',')
+            .map(Number)
+            .filter((n) => Number.isInteger(n) && n > 0),
+        );
   const points = (list.data?.points ?? []).filter((p) => p.active && (!wanted || wanted.has(p.id)));
   const portal = list.data?.portalUrl ?? '';
   const error = list.error

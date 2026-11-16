@@ -40,7 +40,11 @@ export async function runDeviceSelftest(log: (line: string) => void = () => {}):
     const sent = await sendToPrinter(ep, buildTestPage(info('PRN-SELF-01')), { timeoutMs: 3000 });
     await new Promise((r) => setTimeout(r, 50));
     const text = printer.texts().at(-1) ?? '';
-    check('网口打印测试页', sent.ok && text.includes('打印测试页') && text.includes('中文样张'), sent.ok ? `模拟打印机收到 ${printer.jobs.at(-1)?.length ?? 0} 字节，含中文样张` : `失败：${sent.errorCode}`);
+    check(
+      '网口打印测试页',
+      sent.ok && text.includes('打印测试页') && text.includes('中文样张'),
+      sent.ok ? `模拟打印机收到 ${printer.jobs.at(-1)?.length ?? 0} 字节，含中文样张` : `失败：${sent.errorCode}`,
+    );
 
     let p = await probe(ep, 'escpos');
     check('心跳：在线', p.reachable && p.code === null, p.reachable ? '连上、状态正常' : `连不上：${p.code}`);

@@ -71,18 +71,16 @@ export function SuggestionsPage() {
                   title={`「${modeOps.pending.name}」的补货方式结果待确认：要改成「${REPLENISH_MODE_LABELS[modeOps.pending.mode].title}」，网络断了或超时，不知道改没改成`}
                   data-testid="mode-pending"
                 >
-                  <p className="mb-2">点「再试一次」按原样重提（已经改成了的不会重复改；这之后被别人改过的会明确告诉你没改）。确认之前，补货建议页上的补货方式先不能改；刷新、离开再回来这一条都还在。</p>
+                  <p className="mb-2">
+                    点「再试一次」按原样重提（已经改成了的不会重复改；这之后被别人改过的会明确告诉你没改）。确认之前，补货建议页上的补货方式先不能改；刷新、离开再回来这一条都还在。
+                  </p>
                   <Button variant="secondary" size="sm" loading={modeOps.busyId !== null} onClick={() => void modeOps.retry()} data-testid="mode-pending-retry">
                     再试一次
                   </Button>
                 </Notice>
               )}
               {d!.count === 0 ? (
-                <EmptyState
-                  art="calm"
-                  title="现在没有要补的物料"
-                  description="常备的、经常领用的物料结存加在途都够用。手机、设备这类按需采购的东西不在这里提，部门提需求单再买。"
-                />
+                <EmptyState art="calm" title="现在没有要补的物料" description="常备的、经常领用的物料结存加在途都够用。手机、设备这类按需采购的东西不在这里提，部门提需求单再买。" />
               ) : (
                 d!.groups.map((g) => <GroupCard key={g.supplier?.id ?? 'none'} group={g} canCreate={can('purchase.manage')} canMode={can('inventory.master')} mode={modeOps} />)
               )}
@@ -233,9 +231,7 @@ function GroupCard({ group, canCreate, canMode, mode }: { group: ReplenishGroup;
       Object.fromEntries(
         group.lines.map((l) => [
           l.materialId,
-          prev[l.materialId]?.touched
-            ? prev[l.materialId]!
-            : { on: true, qty: formatQty(l.suggestedPurchaseMilli).replace(/,/g, ''), price: l.priceCents === null ? '' : centsToInput(l.priceCents) },
+          prev[l.materialId]?.touched ? prev[l.materialId]! : { on: true, qty: formatQty(l.suggestedPurchaseMilli).replace(/,/g, ''), price: l.priceCents === null ? '' : centsToInput(l.priceCents) },
         ]),
       ),
     );
@@ -247,15 +243,7 @@ function GroupCard({ group, canCreate, canMode, mode }: { group: ReplenishGroup;
         const qty = parseQty(p.qty, 3);
         const base = qty !== null ? toBaseQty(qty, l.factorMilli) : null;
         const price = p.price.trim() ? parseYuan(p.price) : null;
-        const err = !p.on
-          ? null
-          : qty === null || qty <= 0
-            ? '数量不正确'
-            : base === null || !fitsDecimals(base, l.decimals)
-              ? `换算后不是整${l.inventoryUnit}`
-              : price === null
-                ? '请填单价'
-                : null;
+        const err = !p.on ? null : qty === null || qty <= 0 ? '数量不正确' : base === null || !fitsDecimals(base, l.decimals) ? `换算后不是整${l.inventoryUnit}` : price === null ? '请填单价' : null;
         return { l, p, qty, price, err, amount: !err && base !== null && price !== null ? lineAmountCents(base, price, l.factorMilli) : null };
       }),
     [group, picks],
@@ -451,7 +439,10 @@ function GroupCard({ group, canCreate, canMode, mode }: { group: ReplenishGroup;
               />
               {l.purchaseUnit}
             </label>
-            <label className="col-start-2 flex items-center gap-1.5 text-[12.5px] text-ink-3 md:col-start-auto" title={l.priceSource === 'last' ? '最近一次成交价' : l.priceSource === 'ref' ? '参考价' : '没有价格，请填'}>
+            <label
+              className="col-start-2 flex items-center gap-1.5 text-[12.5px] text-ink-3 md:col-start-auto"
+              title={l.priceSource === 'last' ? '最近一次成交价' : l.priceSource === 'ref' ? '参考价' : '没有价格，请填'}
+            >
               <MoneyInput aria-label={`${l.name} 单价`} value={p.price} disabled={!canCreate || !p.on} onChange={(e) => setPick(l.materialId, { price: e.target.value })} className="h-9 text-right" />
             </label>
             <span className="col-start-2 text-right md:col-start-auto md:self-center">{amount !== null ? <Money cents={amount} className="font-bold" /> : <span className="text-ink-4">—</span>}</span>
@@ -500,7 +491,8 @@ function SkippedCard({ data, canMode, mode }: { data: ReplenishSuggestions; canM
       {open && (
         <>
           <p className="border-t border-line px-4 py-2.5 text-[12.5px] text-ink-3">
-            自动识别：设了提醒天数或提醒数量的、台面日耗品这类消耗品（还有管效期、称重的）、近 {data.lookbackDays} 天有 {data.regularUseDays} 天以上领用的才提补货；认错了在这里改，或者到「库存 → 档案」里改物料的补货方式。
+            自动识别：设了提醒天数或提醒数量的、台面日耗品这类消耗品（还有管效期、称重的）、近 {data.lookbackDays} 天有 {data.regularUseDays} 天以上领用的才提补货；认错了在这里改，或者到「库存 →
+            档案」里改物料的补货方式。
           </p>
           <ul className="divide-y divide-line/70 border-t border-line">
             {data.skipped.map((r) => (
@@ -520,11 +512,25 @@ function SkippedCard({ data, canMode, mode }: { data: ReplenishSuggestions; canM
                 {canMode && (
                   <span className="flex flex-wrap gap-2">
                     {r.mode === 'on_demand' ? (
-                      <Button variant="secondary" size="sm" disabled={mode.locked} loading={mode.busyId === r.materialId} onClick={() => void mode.setMode(r, 'auto')} data-testid={`suggest-skip-auto-${r.materialId}`}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={mode.locked}
+                        loading={mode.busyId === r.materialId}
+                        onClick={() => void mode.setMode(r, 'auto')}
+                        data-testid={`suggest-skip-auto-${r.materialId}`}
+                      >
                         改回自动识别
                       </Button>
                     ) : (
-                      <Button variant="secondary" size="sm" disabled={mode.locked} loading={mode.busyId === r.materialId} onClick={() => void mode.setMode(r, 'on_demand')} data-testid={`suggest-skip-off-${r.materialId}`}>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={mode.locked}
+                        loading={mode.busyId === r.materialId}
+                        onClick={() => void mode.setMode(r, 'on_demand')}
+                        data-testid={`suggest-skip-off-${r.materialId}`}
+                      >
                         定为按需采购
                       </Button>
                     )}

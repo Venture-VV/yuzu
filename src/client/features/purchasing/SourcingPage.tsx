@@ -104,10 +104,16 @@ export function SourcingPage() {
               <ul className="divide-y divide-line/70">
                 {list.data!.map((e) => (
                   <li key={e.id}>
-                    <Link to={`/purchasing/sourcing/${e.id}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-3 hover:bg-paper-2 md:grid-cols-[160px_minmax(0,1fr)_120px_140px]" data-testid={`sourcing-row-${e.id}`}>
+                    <Link
+                      to={`/purchasing/sourcing/${e.id}`}
+                      className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-3 hover:bg-paper-2 md:grid-cols-[160px_minmax(0,1fr)_120px_140px]"
+                      data-testid={`sourcing-row-${e.id}`}
+                    >
                       <span className="num text-[13.5px] font-bold">
                         {e.docNo}
-                        <span className="block font-sans text-[12px] font-medium text-ink-3">{e.createdAt.slice(0, 10)} · {e.createdByName}</span>
+                        <span className="block font-sans text-[12px] font-medium text-ink-3">
+                          {e.createdAt.slice(0, 10)} · {e.createdByName}
+                        </span>
                       </span>
                       <span className="min-w-0 text-[12.5px]">
                         <span className="block truncate text-[13.5px] font-semibold">{e.title}</span>
@@ -457,7 +463,11 @@ function Detail({ ev }: { ev: SourcingEvent }) {
             <Badge tone="pine" icon={<Award className="size-3.5" />}>
               中标 {awarded.supplier.name}
             </Badge>
-            {ev.singleSource && <Badge tone="ember" className="ml-1.5">单一来源</Badge>}
+            {ev.singleSource && (
+              <Badge tone="ember" className="ml-1.5">
+                单一来源
+              </Badge>
+            )}
             <span className="ml-2 text-ink-2">
               理由：{ev.awardReason}（{ev.awardedByName} · {ev.awardedAt ? formatDateTime(ev.awardedAt) : ''}）
             </span>
@@ -781,7 +791,14 @@ function QuoteDialog({ ev, open, onClose }: { ev: SourcingEvent; open: boolean; 
               </span>
             </span>
             <label className="flex items-center gap-1 text-[12px] text-ink-3">
-              <MoneyInput aria-label={`${l.materialName} 含税单价`} value={prices[l.id] ?? ''} onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} className="h-9 text-right" data-testid={`qt-price-${l.id}`} />/{l.purchaseUnit}
+              <MoneyInput
+                aria-label={`${l.materialName} 含税单价`}
+                value={prices[l.id] ?? ''}
+                onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))}
+                className="h-9 text-right"
+                data-testid={`qt-price-${l.id}`}
+              />
+              /{l.purchaseUnit}
             </label>
           </li>
         ))}
@@ -887,14 +904,20 @@ function AwardDialog({ ev, quotes, open, onClose }: { ev: SourcingEvent; quotes:
           <input type="checkbox" className="mt-0.5 size-4 accent-[var(--color-pine)]" checked={single} onChange={(e) => setSingle(e.target.checked)} data-testid="award-single" />
           <span>
             <b>单一来源</b>
-            <span className="block text-[12px] text-ink-3">
-              有效报价不够 {ev.minQuotes} 家；确实只能找这一家（品牌指定、独家代理等）的勾上并写清原因，由负责人定标
-            </span>
+            <span className="block text-[12px] text-ink-3">有效报价不够 {ev.minQuotes} 家；确实只能找这一家（品牌指定、独家代理等）的勾上并写清原因，由负责人定标</span>
           </span>
         </label>
       )}
       <Field label="定标理由" htmlFor="award-reason" className="mt-3">
-        <Textarea id="award-reason" rows={3} value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} placeholder="例如：综合到价最低、月结 30 天、上季度准时到货" data-testid="award-reason" />
+        <Textarea
+          id="award-reason"
+          rows={3}
+          value={reason}
+          maxLength={200}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="例如：综合到价最低、月结 30 天、上季度准时到货"
+          data-testid="award-reason"
+        />
       </Field>
       {blocking && <p className="mt-3 text-[12.5px] font-semibold text-clay">{blocking}</p>}
       {error && <Notice tone="error" title={error} className="mt-3" />}

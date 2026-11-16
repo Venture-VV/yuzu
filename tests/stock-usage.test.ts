@@ -102,7 +102,17 @@ describe('用料', () => {
     expect(r1.status, JSON.stringify(r1.body)).toBe(200);
     expect(r1.body.version).toBe(1);
     expect((await recipe(item['矿泉水']!, { expectedVersion: 0, lines: [{ materialId: mat['瓶装水'], qtyMilli: q(2) }] })).body.error.code).toBe('RECIPE_CHANGED');
-    expect((await recipe(item['宫保鸡丁']!, { expectedVersion: 0, lines: [{ materialId: mat['鸡腿肉'], qtyMilli: q(0.2) }, { materialId: mat['鸡腿肉'], qtyMilli: q(0.1) }] })).status).toBe(400);
+    expect(
+      (
+        await recipe(item['宫保鸡丁']!, {
+          expectedVersion: 0,
+          lines: [
+            { materialId: mat['鸡腿肉'], qtyMilli: q(0.2) },
+            { materialId: mat['鸡腿肉'], qtyMilli: q(0.1) },
+          ],
+        })
+      ).status,
+    ).toBe(400);
     expect((await recipe(item['宫保鸡丁']!, { expectedVersion: 0, lines: [{ materialId: mat['瓶装水'], qtyMilli: 500 }] })).status).toBe(400);
     expect((await recipe(item['宫保鸡丁']!, { expectedVersion: 0, lines: [] })).status).toBe(400);
     // 物资经办能看、不能改
@@ -116,7 +126,13 @@ describe('用料', () => {
       ],
     });
     expect(r2.status, JSON.stringify(r2.body)).toBe(200);
-    const list = (await api(ctx.app, keeper, 'GET', '/api/inventory/recipes')).body as { itemName: string; version: number; kitchen: boolean; unitCostCents: number | null; lines: { materialName: string; avgCostE4: number | null }[] }[];
+    const list = (await api(ctx.app, keeper, 'GET', '/api/inventory/recipes')).body as {
+      itemName: string;
+      version: number;
+      kitchen: boolean;
+      unitCostCents: number | null;
+      lines: { materialName: string; avgCostE4: number | null }[];
+    }[];
     const water = list.find((x) => x.itemName === '矿泉水')!;
     const dish = list.find((x) => x.itemName === '宫保鸡丁')!;
     expect(water).toMatchObject({ version: 1, kitchen: false });
@@ -199,9 +215,21 @@ describe('零售：结账时记、每分钟的任务开耗用单', () => {
     // 到一箱货（24 瓶）
     const sup = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/suppliers', { code: 'US01', name: '扣料测试供应商' });
     const supplierId = sup.body.find((x: { code: string }) => x.code === 'US01').id;
-    const po = await api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, approveNow: true, lines: [{ materialId: mat['瓶装水'], purchaseQtyMilli: q(1), priceCents: 2400 }] });
+    const po = await api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+      clientKey: randomUUID(),
+      supplierId,
+      orderDate: today,
+      approveNow: true,
+      lines: [{ materialId: mat['瓶装水'], purchaseQtyMilli: q(1), priceCents: 2400 }],
+    });
     expect(po.status, JSON.stringify(po.body)).toBe(201);
-    const received = await doc(keeper, { docType: 'receipt', supplierId, purchaseOrderId: po.body.po.id, coAcceptorId: null, lines: [{ materialId: mat['瓶装水'], poLineId: po.body.po.lines[0].id, deliveredMilli: q(24), acceptedMilli: q(24) }] });
+    const received = await doc(keeper, {
+      docType: 'receipt',
+      supplierId,
+      purchaseOrderId: po.body.po.id,
+      coAcceptorId: null,
+      lines: [{ materialId: mat['瓶装水'], poLineId: po.body.po.lines[0].id, deliveredMilli: q(24), acceptedMilli: q(24) }],
+    });
     expect(received.status, JSON.stringify(received.body)).toBe(201);
     const manual = await api(ctx.app, keeper, 'POST', '/api/inventory/usage/run');
     expect(manual.body).toMatchObject({ docs: 1, lines: 1, blocked: 0 });
@@ -264,7 +292,13 @@ describe('配方：出品完成时记', () => {
     const [stuck] = await ctx.sql<{ id: number; clientKey: string }[]>`
       INSERT INTO stock_usage_batches (kind, warehouse_id, doc_date, line_count) VALUES ('sale', 1, ${today}, 1) RETURNING id, client_key`;
     await ctx.sql`UPDATE stock_usage_events SET batch_id = ${stuck!.id} WHERE id = ${ea!.id}`;
-    const made = await api(ctx.app, keeper, 'POST', '/api/inventory/docs', { clientKey: stuck!.clientKey, docDate: today, docType: 'direct_use', note: '销售出库（模拟）', lines: [{ materialId: mat['瓶装水'], qtyMilli: q(1) }] });
+    const made = await api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+      clientKey: stuck!.clientKey,
+      docDate: today,
+      docType: 'direct_use',
+      note: '销售出库（模拟）',
+      lines: [{ materialId: mat['瓶装水'], qtyMilli: q(1) }],
+    });
     expect(made.status, JSON.stringify(made.body)).toBe(201);
     expect(await stock(mat['瓶装水']!)).toBe(q(21));
     // 另一批：停在 posting，单没有开出来
@@ -293,14 +327,32 @@ describe('合并前 Codex 审查 35d8b16', () => {
       ['U-OKA', '照扣的物料'],
       ['U-OFF', '被停用的物料'],
     ] as const) {
-      const r = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code, name, inventoryUnit: '个', decimals: 0, purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 1000 });
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', {
+        code,
+        name,
+        inventoryUnit: '个',
+        decimals: 0,
+        purchaseUnit: '箱',
+        purchaseFactorMilli: q(10),
+        refPriceCents: 1000,
+      });
       if (r.status !== 201) throw new Error(JSON.stringify(r.body));
       made[name] = r.body.id;
       await opening(r.body.id, q(10));
     }
     const it = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '两样物料的套装', category: '零售', price: 900 });
     const itemId = it.body.items.find((i: { name: string }) => i.name === '两样物料的套装').id;
-    expect((await recipe(itemId, { expectedVersion: 0, lines: [{ materialId: made['照扣的物料'], qtyMilli: q(1) }, { materialId: made['被停用的物料'], qtyMilli: q(1) }] })).status).toBe(200);
+    expect(
+      (
+        await recipe(itemId, {
+          expectedVersion: 0,
+          lines: [
+            { materialId: made['照扣的物料'], qtyMilli: q(1) },
+            { materialId: made['被停用的物料'], qtyMilli: q(1) },
+          ],
+        })
+      ).status,
+    ).toBe(200);
     await run();
     const v = await enter();
     expect((await charge(v.id, itemId, 2, 900)).status).toBe(200);
@@ -320,7 +372,15 @@ describe('合并前 Codex 审查 35d8b16', () => {
   });
 
   it('一份的理论成本按物料的小数位向上取整（与卖一份实际扣的一样）：整瓶的物料带 10% 损耗，一份算 2 瓶', async () => {
-    const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'U-WHOLE', name: '整瓶的饮料', inventoryUnit: '瓶', decimals: 0, purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 1000 });
+    const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', {
+      code: 'U-WHOLE',
+      name: '整瓶的饮料',
+      inventoryUnit: '瓶',
+      decimals: 0,
+      purchaseUnit: '箱',
+      purchaseFactorMilli: q(10),
+      refPriceCents: 1000,
+    });
     if (m.status !== 201) throw new Error(JSON.stringify(m.body));
     const it = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '带损耗的整瓶饮料', category: '零售', price: 500 });
     const itemId = it.body.items.find((i: { name: string }) => i.name === '带损耗的整瓶饮料').id;
@@ -335,7 +395,15 @@ describe('合并前 Codex 审查 35d8b16', () => {
 
 describe('合并前 Codex 审查 342941e', () => {
   it('买一赠一：项目设了用料时赠的那一件随用料扣，不另记赠品出库（不扣两次）；项目毛利的销售额减去分摊的优惠', async () => {
-    const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'U-BOGO', name: '买一赠一的水', inventoryUnit: '瓶', decimals: 0, purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 1000 });
+    const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', {
+      code: 'U-BOGO',
+      name: '买一赠一的水',
+      inventoryUnit: '瓶',
+      decimals: 0,
+      purchaseUnit: '箱',
+      purchaseFactorMilli: q(10),
+      refPriceCents: 1000,
+    });
     if (m.status !== 201) throw new Error(JSON.stringify(m.body));
     await opening(m.body.id, q(10));
     const made = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '买一赠一的瓶装水', category: '零售', price: 500 });
@@ -343,7 +411,15 @@ describe('合并前 Codex 审查 342941e', () => {
     expect((await recipe(itemId, { expectedVersion: 0, lines: [{ materialId: m.body.id, qtyMilli: q(1) }] })).status).toBe(200);
     const warehouseId = ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/meta')).body as { warehouses: { id: number }[] }).warehouses[0]!.id;
     const t = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', {
-      clientKey: randomUUID(), validity: 'days', validDays: 30, name: '瓶装水买一赠一', kind: 'bogo', buyItemId: itemId, giftMaterialId: m.body.id, giftQtyMilli: q(1), giftWarehouseId: warehouseId,
+      clientKey: randomUUID(),
+      validity: 'days',
+      validDays: 30,
+      name: '瓶装水买一赠一',
+      kind: 'bogo',
+      buyItemId: itemId,
+      giftMaterialId: m.body.id,
+      giftQtyMilli: q(1),
+      giftWarehouseId: warehouseId,
     });
     expect(t.status, JSON.stringify(t.body)).toBe(200);
     const member = await createMember(ctx, '买一赠一会员', '13900182001');
@@ -360,7 +436,13 @@ describe('合并前 Codex 审查 342941e', () => {
     expect((await charge(visitId, itemId, 2, 500)).status).toBe(200);
     const pre = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body;
     const paid = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', {
-      clientKey: randomUUID(), visitIds: [visitId], expectedTotal: pre.totalAmount, payments: [{ method: 'store_coupon', code, amount: 500 }, { method: 'cash', amount: pre.totalAmount - 500 }],
+      clientKey: randomUUID(),
+      visitIds: [visitId],
+      expectedTotal: pre.totalAmount,
+      payments: [
+        { method: 'store_coupon', code, amount: 500 },
+        { method: 'cash', amount: pre.totalAmount - 500 },
+      ],
     });
     expect(paid.status, JSON.stringify(paid.body)).toBe(200);
     // 没有另记赠品出库；用料扣两瓶（买的一瓶 + 赠的一瓶），不是三瓶
@@ -376,7 +458,15 @@ describe('合并前 Codex 审查 342941e', () => {
 
 describe('合并前 Codex 审查 7dbc313（8.0.21）', () => {
   it('进厨房的买一赠一：出品时开关关着、结账前才打开——出品时没记扣料，赠品出库照记；出品时记过的不再另记', async () => {
-    const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', { code: 'U-KBOGO', name: '买一赠一的果盘料', inventoryUnit: '份', decimals: 0, purchaseUnit: '箱', purchaseFactorMilli: q(10), refPriceCents: 1000 });
+    const m = await api(ctx.app, ctx.owner, 'POST', '/api/inventory/materials', {
+      code: 'U-KBOGO',
+      name: '买一赠一的果盘料',
+      inventoryUnit: '份',
+      decimals: 0,
+      purchaseUnit: '箱',
+      purchaseFactorMilli: q(10),
+      refPriceCents: 1000,
+    });
     if (m.status !== 201) throw new Error(JSON.stringify(m.body));
     await opening(m.body.id, q(20));
     const made = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '买一赠一的果盘', category: '热菜', price: 3000 });
@@ -386,7 +476,15 @@ describe('合并前 Codex 审查 7dbc313（8.0.21）', () => {
     expect((await recipe(itemId, { expectedVersion: 0, lines: [{ materialId: m.body.id, qtyMilli: q(1) }] })).status).toBe(200);
     const warehouseId = ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/meta')).body as { warehouses: { id: number }[] }).warehouses[0]!.id;
     const t = await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', {
-      clientKey: randomUUID(), validity: 'days', validDays: 30, name: '果盘买一赠一', kind: 'bogo', buyItemId: itemId, giftMaterialId: m.body.id, giftQtyMilli: q(1), giftWarehouseId: warehouseId,
+      clientKey: randomUUID(),
+      validity: 'days',
+      validDays: 30,
+      name: '果盘买一赠一',
+      kind: 'bogo',
+      buyItemId: itemId,
+      giftMaterialId: m.body.id,
+      giftQtyMilli: q(1),
+      giftWarehouseId: warehouseId,
     });
     expect(t.status, JSON.stringify(t.body)).toBe(200);
     const usageSwitch = (enabled: boolean) => api(ctx.app, ctx.owner, 'PUT', '/api/inventory/usage/rules', { enabled });
@@ -396,7 +494,10 @@ describe('合并前 Codex 审查 7dbc313（8.0.21）', () => {
       expect((await api(ctx.app, ctx.owner, 'POST', `/api/members/${member.id}/coupons`, { clientKey: randomUUID(), templateId: t.body.id, quantity: 1, reason: '审查用例' })).status).toBe(201);
       const code = ((await api(ctx.app, ctx.owner, 'GET', `/api/members/${member.id}/coupons`)).body.coupons as { code: string; templateId: number }[]).find((c) => c.templateId === t.body.id)!.code;
       tagNo += 1;
-      const v = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: `U${String(tagNo).padStart(3, '0')}`, zone: 'male', memberId: member.id }] });
+      const v = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', {
+        clientKey: randomUUID(),
+        guests: [{ tagCode: `U${String(tagNo).padStart(3, '0')}`, zone: 'male', memberId: member.id }],
+      });
       expect(v.status, JSON.stringify(v.body)).toBe(201);
       const visitId = v.body.visits[0].id as number;
       expect((await order(visitId, itemId, 2, 3000)).status).toBe(200);
@@ -405,16 +506,34 @@ describe('合并前 Codex 审查 7dbc313（8.0.21）', () => {
       await beforePay();
       const pre = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body;
       const paid = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', {
-        clientKey: randomUUID(), visitIds: [visitId], expectedTotal: pre.totalAmount, payments: [{ method: 'store_coupon', code, amount: 3000 }, { method: 'cash', amount: pre.totalAmount - 3000 }],
+        clientKey: randomUUID(),
+        visitIds: [visitId],
+        expectedTotal: pre.totalAmount,
+        payments: [
+          { method: 'store_coupon', code, amount: 3000 },
+          { method: 'cash', amount: pre.totalAmount - 3000 },
+        ],
       });
       expect(paid.status, JSON.stringify(paid.body)).toBe(200);
       return (await ctx.sql`SELECT 1 FROM coupon_gift_outs WHERE checkout_id = ${paid.body.id}`).length;
     };
     try {
       // ① 出品时开关关着（没记扣料），结账前打开：赠品出库照记一条
-      expect(await round('13900183001', () => usageSwitch(false), () => usageSwitch(true))).toBe(1);
+      expect(
+        await round(
+          '13900183001',
+          () => usageSwitch(false),
+          () => usageSwitch(true),
+        ),
+      ).toBe(1);
       // ② 出品时开着（记了两份的扣料）：不再另记赠品出库
-      expect(await round('13900183002', async () => undefined, async () => undefined)).toBe(0);
+      expect(
+        await round(
+          '13900183002',
+          async () => undefined,
+          async () => undefined,
+        ),
+      ).toBe(0);
     } finally {
       await usageSwitch(true);
     }
@@ -462,7 +581,6 @@ describe('成本报表（docs/ERP_V8020.md 第 1 节）', () => {
     expect(csv.body).toContain('瓶装水');
   });
 });
-
 
 describe('「现在扣一次」与每分钟的任务撞上（8.1.0：CI 上撞上过一次）', () => {
   it('任务正在跑时，现在扣一次等它跑完再扣、回还剩几笔没扣；一直等不到回 USAGE_BUSY，不说成「没有要扣的」', async () => {

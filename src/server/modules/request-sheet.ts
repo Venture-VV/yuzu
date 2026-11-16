@@ -11,15 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { parseYuan } from '@shared/money';
 import { can } from '@shared/permissions';
-import {
-  DEPT_SHEET_COLUMNS,
-  DEPT_SHEET_LINES_PER_REQUEST,
-  DEPT_SHEET_MAX_ROWS,
-  DEPT_SHEET_REQUIRED,
-  type DeptSheetPreview,
-  type DeptSheetResult,
-  type DeptSheetRow,
-} from '@shared/requests';
+import { DEPT_SHEET_COLUMNS, DEPT_SHEET_LINES_PER_REQUEST, DEPT_SHEET_MAX_ROWS, DEPT_SHEET_REQUIRED, type DeptSheetPreview, type DeptSheetResult, type DeptSheetRow } from '@shared/requests';
 import type { Db } from '../db';
 import { guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -262,9 +254,16 @@ export async function applyDeptSheet(deps: Deps, raw: unknown, actor: Actor, ip?
     const p = await plan(tx, f, actor, deps.config.timezone);
     if (p.issueCount) {
       const bad = p.rows.filter((x) => x.issues.length);
-      throw unprocessable('IMPORT_INVALID', `有 ${bad.length} 行要先改好才能导入：${bad.slice(0, 3).map((x) => `第 ${x.row} 行 ${x.issues[0]}`).join('；')}`, {
-        rows: bad.map((x) => ({ row: x.row, issues: x.issues })),
-      });
+      throw unprocessable(
+        'IMPORT_INVALID',
+        `有 ${bad.length} 行要先改好才能导入：${bad
+          .slice(0, 3)
+          .map((x) => `第 ${x.row} 行 ${x.issues[0]}`)
+          .join('；')}`,
+        {
+          rows: bad.map((x) => ({ row: x.row, issues: x.issues })),
+        },
+      );
     }
     if (p.previous && !f.confirmRepeat) {
       throw conflict('IMPORT_REPEAT', `这份文件 ${p.previous.createdByName} 已经导入过（合成 ${p.previous.requestCount} 张需求单）；要再导入一次请勾「确认再导入一次」`, { importId: p.previous.id });
@@ -283,7 +282,12 @@ export async function applyDeptSheet(deps: Deps, raw: unknown, actor: Actor, ip?
       const head = rows[0]!;
       const docNo = await nextDocNo(tx, 'purchase_request', 'XQ', today);
       // 主管确认（8.0.17，LC1）：与手填的一样，按这一张的估价与部门的主管算
-      const confirm = await deptConfirmFor(tx, head.department!.id, actor, rows.map((l) => ({ qtyMilli: l.qtyMilli ?? 0, refPriceCents: l.refPriceCents ?? null })));
+      const confirm = await deptConfirmFor(
+        tx,
+        head.department!.id,
+        actor,
+        rows.map((l) => ({ qtyMilli: l.qtyMilli ?? 0, refPriceCents: l.refPriceCents ?? null })),
+      );
       const [req] = await tx<{ id: number }[]>`
         INSERT INTO purchase_requests (doc_no, department_id, requester_id, need_by, note, status, priority, approvable_on, source, import_id,
                                        dept_confirm, dept_head_id, dept_confirmed_by, dept_confirmed_at)
@@ -371,7 +375,14 @@ export async function deptSheetTemplate(db: Db): Promise<Buffer> {
       { height: 26, cells: [{ v: '部门需求表 · 填写说明', style: 'title' }] },
       { cells: [{ v: '在「需求表」里一行写一样东西；橙色表头必填、灰色选填；表头的名字不要改（顺序可以换，多出来的列不管）。', style: 'note' }] },
       { height: 22, cells: ['列', '必填', '怎么填', '例子'].map((v) => ({ v, style: 'optional' as const })) },
-      ...DEPT_SHEET_COLUMNS.map((c) => ({ cells: [{ v: c, style: 'body' as const }, { v: required.has(c) ? '必填' : '选填', style: 'body' as const }, { v: COLUMN_SPEC[c].how, style: 'body' as const }, { v: COLUMN_SPEC[c].example, style: 'body' as const }] })),
+      ...DEPT_SHEET_COLUMNS.map((c) => ({
+        cells: [
+          { v: c, style: 'body' as const },
+          { v: required.has(c) ? '必填' : '选填', style: 'body' as const },
+          { v: COLUMN_SPEC[c].how, style: 'body' as const },
+          { v: COLUMN_SPEC[c].example, style: 'body' as const },
+        ],
+      })),
       { cells: [] },
       { cells: [{ v: `导入：在「提需求」页点「导入表格」，选这份文件 →「预览」逐行核对 → 没有问题再「导入」。一份最多 ${DEPT_SHEET_MAX_ROWS} 行。`, style: 'note' }] },
       { cells: [{ v: `按「部门 + 优先级 + 期望到货日期」合成需求单，一张最多 ${DEPT_SHEET_LINES_PER_REQUEST} 行；导入的需求单都是「待审核」，与手填的一样审核、每日截单。`, style: 'note' }] },

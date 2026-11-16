@@ -85,9 +85,7 @@ export function TechnicianPicker({
       ) : !rules ? (
         <Notice tone="error" title="技师名单没有加载出来，请关闭后重试" />
       ) : all.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">
-          还没有在职的技师，请店主或店总在「后台 → 技师」中添加
-        </p>
+        <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">还没有在职的技师，请店主或店总在「后台 → 技师」中添加</p>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {shown.map((t) => {

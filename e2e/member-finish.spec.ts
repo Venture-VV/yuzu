@@ -180,7 +180,10 @@ test.describe('会员体系收尾', () => {
     await page.getByTestId('member-account').getByTestId('member-merge-open').click();
     const dialog = page.getByRole('dialog').filter({ hasText: '合并会员' });
     await dialog.getByTestId('member-merge-search').fill(target.phone);
-    await dialog.getByTestId('member-merge-candidates').getByRole('button', { name: /E2E 新档案/ }).click();
+    await dialog
+      .getByTestId('member-merge-candidates')
+      .getByRole('button', { name: /E2E 新档案/ })
+      .click();
     const check = dialog.getByTestId('member-merge-check');
     await expect(check).toContainText('这一份（并走）');
     await expect(check).toContainText('E2E 旧档案');
@@ -211,7 +214,25 @@ test.describe('会员体系收尾', () => {
     const benefitOf = async () => (await getJson<{ items: BenefitRow[] }>(page, '/api/benefits')).items.find((b) => b.code === 'QY-041')!;
     // 同行优惠临时配成：同行的门票 8 折，L3·初 起带 1 位；发布，结束时暂缓
     const b = await benefitOf();
-    const keys = ['name', 'category', 'startGrade', 'startTier', 'period', 'quantity', 'tierQuantities', 'templateId', 'events', 'festivalDates', 'discountTarget', 'companionCount', 'companionCounts', 'weekdays', 'monthDays', 'content', 'conditions'];
+    const keys = [
+      'name',
+      'category',
+      'startGrade',
+      'startTier',
+      'period',
+      'quantity',
+      'tierQuantities',
+      'templateId',
+      'events',
+      'festivalDates',
+      'discountTarget',
+      'companionCount',
+      'companionCounts',
+      'weekdays',
+      'monthDays',
+      'content',
+      'conditions',
+    ];
     const editable = Object.fromEntries(Object.entries(b).filter(([k]) => keys.includes(k)));
     const saved = await page.request.put(`/api/benefits/${b.id}`, {
       data: { ...editable, expectedVersion: b.version, discountTarget: 'companion_ticket', quantity: 80, tierQuantities: [], companionCount: 1, companionCounts: [], weekdays: [], monthDays: [] },

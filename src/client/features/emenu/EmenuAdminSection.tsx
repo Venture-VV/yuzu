@@ -42,7 +42,6 @@ import {
   type EmenuDishView,
   type EmenuEnglishParsed,
   type EmenuEnglishResult,
-  type EmenuEnglishRow,
   type EmenuLang,
   type EmenuLayout,
   type EmenuPageAdmin,
@@ -68,7 +67,6 @@ import { SubPane, useGoSubTab } from '../../components/SubNav';
 const adminKey = ['admin', 'emenu'] as const;
 const useEmenuAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<EmenuAdmin>('/api/admin/emenu') });
 
-type Tab = 'pages' | 'dishes' | 'settings';
 type Apply = (next: EmenuAdmin) => void;
 const EMENU_BASE = '/admin/emenu';
 
@@ -275,9 +273,24 @@ function PagePreview({ page, category, data, scale }: { page: EmenuPageAdmin; ca
           <LangProvider value={lang}>
             {/* 卡片模板（8.1.2）：照现在发布的版面里改过的位置画 */}
             <EmenuTemplatesProvider templates={data.templates} dishStates={data.dishStates}>
-              <PageCanvas page={{ layout: page.layout, title: page.title, titleEn: page.titleEn, dishes }} ctx={{ categoryName: category.name, categoryNameEn: category.nameEn, open: true, preview: true }} />
+              <PageCanvas
+                page={{ layout: page.layout, title: page.title, titleEn: page.titleEn, dishes }}
+                ctx={{ categoryName: category.name, categoryNameEn: category.nameEn, open: true, preview: true }}
+              />
             </EmenuTemplatesProvider>
-            <Header categories={tabs} activeId={category.id} onCategory={noop} tagCode="A8060" count={0} bump={0} pending={false} onSearch={noop} onOrder={noop} onTag={noop} onLang={data.rules.langSwitch ? noop : undefined} />
+            <Header
+              categories={tabs}
+              activeId={category.id}
+              onCategory={noop}
+              tagCode="A8060"
+              count={0}
+              bump={0}
+              pending={false}
+              onSearch={noop}
+              onOrder={noop}
+              onTag={noop}
+              onLang={data.rules.langSwitch ? noop : undefined}
+            />
           </LangProvider>
         </BigProvider>
       </div>
@@ -375,7 +388,13 @@ function PagesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
                     {formatWindow(c.window)} · {c.pages.length} 页{c.nameEn ? ` · ${c.nameEn}` : ''}
                   </span>
                 </button>
-                <button type="button" className="rounded p-1.5 text-ink-3 hover:bg-card hover:text-ink" aria-label={`修改分类 ${c.name}`} onClick={() => setEditing(c)} data-testid={`emenu-admin-category-edit-${c.name}`}>
+                <button
+                  type="button"
+                  className="rounded p-1.5 text-ink-3 hover:bg-card hover:text-ink"
+                  aria-label={`修改分类 ${c.name}`}
+                  onClick={() => setEditing(c)}
+                  data-testid={`emenu-admin-category-edit-${c.name}`}
+                >
                   <Pencil className="size-3.5" />
                 </button>
               </div>
@@ -436,25 +455,25 @@ function PagesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
             {error && <Notice tone="error" title={error} data-testid="emenu-admin-pages-error" />}
             {pages.length === 0 && <Card className="p-8 text-center text-[14px] text-ink-3">这个分类还没有页。点下面的「加一页」。</Card>}
             <PreviewLang.Provider value={data.rules.langSwitch ? previewLang : 'zh'}>
-            {pages.map((p, i) => (
-              <PageCard
-                key={i}
-                index={i}
-                count={pages.length}
-                page={p}
-                category={cat}
-                data={data}
-                problem={problems[i] ?? null}
-                onChange={(patch) => patchPage(i, patch)}
-                onMove={(d) => {
-                  const next = [...pages];
-                  const [x] = next.splice(i, 1);
-                  next.splice(i + d, 0, x!);
-                  setPages(next);
-                }}
-                onRemove={() => setPages(pages.filter((_, k) => k !== i))}
-              />
-            ))}
+              {pages.map((p, i) => (
+                <PageCard
+                  key={i}
+                  index={i}
+                  count={pages.length}
+                  page={p}
+                  category={cat}
+                  data={data}
+                  problem={problems[i] ?? null}
+                  onChange={(patch) => patchPage(i, patch)}
+                  onMove={(d) => {
+                    const next = [...pages];
+                    const [x] = next.splice(i, 1);
+                    next.splice(i + d, 0, x!);
+                    setPages(next);
+                  }}
+                  onRemove={() => setPages(pages.filter((_, k) => k !== i))}
+                />
+              ))}
             </PreviewLang.Provider>
             <Button
               variant="secondary"
@@ -567,12 +586,7 @@ function PageCard({
             return (
               <div key={i} className="flex items-center gap-2">
                 <span className="w-[52px] shrink-0 text-[12.5px] font-semibold text-ink-3">位置 {i + 1}</span>
-                <Select
-                  aria-label={`第 ${index + 1} 页位置 ${i + 1}`}
-                  value={dishId ?? ''}
-                  onChange={(e) => setSlot(i, Number(e.target.value) || null)}
-                  data-testid={`emenu-admin-slot-${index}-${i}`}
-                >
+                <Select aria-label={`第 ${index + 1} 页位置 ${i + 1}`} value={dishId ?? ''} onChange={(e) => setSlot(i, Number(e.target.value) || null)} data-testid={`emenu-admin-slot-${index}-${i}`}>
                   <option value="">（空着）</option>
                   {picked && !picked.active && <option value={picked.id}>{picked.name}（已停用）</option>}
                   {usable.map((d) => (
@@ -617,7 +631,7 @@ function CategoryDialog({ target, data, onClose, onSaved }: { target: EmenuCateg
     setAllDay(!existing?.window);
     setStart(existing?.window ? formatMinute(existing.window.start) : '11:00');
     setEnd(existing?.window ? formatMinute(existing.window.end) : '14:00');
-    setSortOrder(String(existing?.sortOrder ?? (data.categories.reduce((m, c) => Math.max(m, c.sortOrder), 0) + 10)));
+    setSortOrder(String(existing?.sortOrder ?? data.categories.reduce((m, c) => Math.max(m, c.sortOrder), 0) + 10));
     setActive(existing?.active ?? true);
     setError(null);
   }
@@ -633,7 +647,9 @@ function CategoryDialog({ target, data, onClose, onSaved }: { target: EmenuCateg
     setError(null);
     try {
       const body = { name, nameEn, window: allDay ? null : { start: s!, end: e! }, sortOrder: order, active };
-      const next = existing ? await api.put<EmenuAdmin>(`/api/admin/emenu/categories/${existing.id}`, { ...body, version: existing.version }) : await api.post<EmenuAdmin>('/api/admin/emenu/categories', body);
+      const next = existing
+        ? await api.put<EmenuAdmin>(`/api/admin/emenu/categories/${existing.id}`, { ...body, version: existing.version })
+        : await api.post<EmenuAdmin>('/api/admin/emenu/categories', body);
       const id = existing?.id ?? next.categories.find((c) => c.name.trim().toLowerCase() === name.trim().toLowerCase())?.id ?? 0;
       onSaved(next, id);
       toast({ tone: 'success', title: existing ? '分类已保存' : `已新建分类「${name.trim()}」` });
@@ -795,7 +811,11 @@ function DishesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
       setDrafting(false);
       toast(
         next.draft.dishes
-          ? { tone: 'success', title: `生成了 ${next.draft.dishes} 道菜`, body: `新建 ${next.draft.categories} 个分类、${next.draft.pages} 页「文字陈列」。接着补图片、英文名与介绍，再换成带图的版面。` }
+          ? {
+              tone: 'success',
+              title: `生成了 ${next.draft.dishes} 道菜`,
+              body: `新建 ${next.draft.categories} 个分类、${next.draft.pages} 页「文字陈列」。接着补图片、英文名与介绍，再换成带图的版面。`,
+            }
           : { tone: 'info', title: '价目表里挂了出品档口的菜都已经在电子菜单里了' },
       );
     } catch (e) {
@@ -850,7 +870,13 @@ function DishesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
           const url = emenuImageUrl(d.imageId);
           const orderable = d.specs.some((s) => s.orderable);
           return (
-            <button key={d.id} type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-paper-2/60" onClick={() => setEditing(d)} data-testid={`emenu-admin-dish-${d.name}`}>
+            <button
+              key={d.id}
+              type="button"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-paper-2/60"
+              onClick={() => setEditing(d)}
+              data-testid={`emenu-admin-dish-${d.name}`}
+            >
               <span className="flex h-[54px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-line bg-paper-2 text-[11px] text-ink-4">
                 {url ? <img src={url} alt="" loading="lazy" className="size-full object-cover" /> : '无图'}
               </span>
@@ -942,7 +968,10 @@ function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; dat
       // 对照各道菜现在的英文来读（取一次最新的）：没改过的格子不导入；格子开头的单引号是防公式加的还是填的人自己写的，也按现在的值判断
       const fresh = await api.get<EmenuAdmin>('/api/admin/emenu');
       apply(fresh);
-      const parsed = parseEmenuEnglishCsv(text, new Map(fresh.dishes.map((d) => [d.id, { nameEn: d.nameEn, taglineEn: d.taglineEn, descriptionEn: d.descriptionEn, attrsEn: d.attrsEn, unitEn: d.unitEn }])));
+      const parsed = parseEmenuEnglishCsv(
+        text,
+        new Map(fresh.dishes.map((d) => [d.id, { nameEn: d.nameEn, taglineEn: d.taglineEn, descriptionEn: d.descriptionEn, attrsEn: d.attrsEn, unitEn: d.unitEn }])),
+      );
       setPicked({ name: file.name, ...parsed });
     } catch (e) {
       setError(e instanceof ApiError ? errorMessage(e) : '读不了这个文件，请确认是 CSV（表格软件里「另存为 CSV UTF-8」）');
@@ -991,12 +1020,20 @@ function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; dat
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>
             导出：每道菜一行，带编号、中文各列（给翻译的人看）与英文各列。
-            <Button className="ml-2" size="sm" variant="secondary" icon={<Download className="size-3.5" />} onClick={() => downloadUrl('/api/admin/emenu/english.csv')} data-testid="emenu-admin-english-export">
+            <Button
+              className="ml-2"
+              size="sm"
+              variant="secondary"
+              icon={<Download className="size-3.5" />}
+              onClick={() => downloadUrl('/api/admin/emenu/english.csv')}
+              data-testid="emenu-admin-english-export"
+            >
               导出 CSV（{data.dishes.length} 道）
             </Button>
           </li>
           <li>
-            填「英文名」「小字的英文」「英文介绍」「属性行的英文」「单位的英文」这几列。属性行有几条时用竖线隔开（<span className="num">Origin: France | Vintage: NV</span>）。编号那一列不要改；不想动的格子空着。
+            填「英文名」「小字的英文」「英文介绍」「属性行的英文」「单位的英文」这几列。属性行有几条时用竖线隔开（<span className="num">Origin: France | Vintage: NV</span>
+            ）。编号那一列不要改；不想动的格子空着。
           </li>
           <li>
             存成 CSV 再导入：
@@ -1007,7 +1044,8 @@ function EnglishSheetDialog({ open, data, onClose, apply }: { open: boolean; dat
           </li>
         </ol>
         <p className="text-[12.5px] leading-relaxed text-ink-3">
-          导入只更新英文、只认填了字的格子——空着的格子不会把原来的英文清掉（要清掉某一项请打开那道菜改）。同一份文件再导一次不会有变化。以 <span className="num">= + @ -</span> 开头的英文，导出时前面带一个单引号（免得表格软件当成公式），导入时自动去掉，不用管它；自己新填的内容照填的保存。
+          导入只更新英文、只认填了字的格子——空着的格子不会把原来的英文清掉（要清掉某一项请打开那道菜改）。同一份文件再导一次不会有变化。以 <span className="num">= + @ -</span>{' '}
+          开头的英文，导出时前面带一个单引号（免得表格软件当成公式），导入时自动去掉，不用管它；自己新填的内容照填的保存。
         </p>
         {picked && (
           <Notice tone={picked.rows.length ? 'info' : 'warning'} title={`${picked.name}：读到 ${picked.rows.length} 行要导入的英文`} data-testid="emenu-admin-english-preview">
@@ -1141,7 +1179,9 @@ function DishDialog({ target, data, onClose, apply }: { target: EmenuDishAdmin |
         detailImageId,
         specs: picked.map((s) => ({ itemId: s.itemId, label: s.label, labelEn: s.labelEn })),
       };
-      const next = existing ? await api.put<EmenuAdmin>(`/api/admin/emenu/dishes/${existing.id}`, { ...body, active, version: existing.version }) : await api.post<EmenuAdmin>('/api/admin/emenu/dishes', body);
+      const next = existing
+        ? await api.put<EmenuAdmin>(`/api/admin/emenu/dishes/${existing.id}`, { ...body, active, version: existing.version })
+        : await api.post<EmenuAdmin>('/api/admin/emenu/dishes', body);
       apply(next);
       toast({ tone: 'success', title: existing ? '菜品已保存' : `已添加「${name.trim()}」`, body: existing ? '平板上 15 秒内跟上。' : '到「分类与版面」里把它排进某一页。' });
       onClose();
@@ -1219,7 +1259,12 @@ function DishDialog({ target, data, onClose, apply }: { target: EmenuDishAdmin |
           <div className="space-y-2">
             {specs.map((s, i) => (
               <div key={i} className="flex items-center gap-2">
-                <Select aria-label={`规格 ${i + 1} 的价目项目`} value={s.itemId ?? ''} onChange={(e) => setSpec(i, { itemId: Number(e.target.value) || null })} data-testid={`emenu-admin-spec-item-${i}`}>
+                <Select
+                  aria-label={`规格 ${i + 1} 的价目项目`}
+                  value={s.itemId ?? ''}
+                  onChange={(e) => setSpec(i, { itemId: Number(e.target.value) || null })}
+                  data-testid={`emenu-admin-spec-item-${i}`}
+                >
                   <option value="">请选择价目项目</option>
                   {gone
                     .filter((g) => g.itemId === s.itemId)
@@ -1234,7 +1279,16 @@ function DishDialog({ target, data, onClose, apply }: { target: EmenuDishAdmin |
                     </option>
                   ))}
                 </Select>
-                <Input fullWidth={false} className="h-10 w-[110px]" placeholder="规格名" aria-label={`规格 ${i + 1} 的名称`} value={s.label} maxLength={8} onChange={(e) => setSpec(i, { label: e.target.value })} data-testid={`emenu-admin-spec-label-${i}`} />
+                <Input
+                  fullWidth={false}
+                  className="h-10 w-[110px]"
+                  placeholder="规格名"
+                  aria-label={`规格 ${i + 1} 的名称`}
+                  value={s.label}
+                  maxLength={8}
+                  onChange={(e) => setSpec(i, { label: e.target.value })}
+                  data-testid={`emenu-admin-spec-label-${i}`}
+                />
                 <Input
                   fullWidth={false}
                   className="h-10 w-[120px]"
@@ -1245,10 +1299,24 @@ function DishDialog({ target, data, onClose, apply }: { target: EmenuDishAdmin |
                   onChange={(e) => setSpec(i, { labelEn: e.target.value })}
                   data-testid={`emenu-admin-spec-en-${i}`}
                 />
-                <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} disabled={specs.length === 1} onClick={() => setSpecs(specs.filter((_, k) => k !== i))} aria-label={`去掉规格 ${i + 1}`} />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<Trash2 className="size-3.5" />}
+                  disabled={specs.length === 1}
+                  onClick={() => setSpecs(specs.filter((_, k) => k !== i))}
+                  aria-label={`去掉规格 ${i + 1}`}
+                />
               </div>
             ))}
-            <Button size="sm" variant="ghost" icon={<Plus className="size-3.5" />} disabled={specs.length >= 6} onClick={() => setSpecs([...specs, { itemId: null, label: '', labelEn: '' }])} data-testid="emenu-admin-spec-add">
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Plus className="size-3.5" />}
+              disabled={specs.length >= 6}
+              onClick={() => setSpecs([...specs, { itemId: null, label: '', labelEn: '' }])}
+              data-testid="emenu-admin-spec-add"
+            >
               加一个规格
             </Button>
           </div>
@@ -1347,7 +1415,15 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
   const worst = emenuNoteWorstCase(draft.avoidOptions, draft.serveOptions);
   const noteOk = worst <= EMENU_MAX_NOTE;
   const optionSet = new Set([...draft.avoidOptions, ...draft.serveOptions]);
-  const next: EmenuRules = { ...draft, idleMinutes: idleOk ? idle : draft.idleMinutes, optionsEn: Object.fromEntries(Object.entries(draft.optionsEn).filter(([k, v]) => optionSet.has(k) && v.trim()).map(([k, v]) => [k, v.trim()])) };
+  const next: EmenuRules = {
+    ...draft,
+    idleMinutes: idleOk ? idle : draft.idleMinutes,
+    optionsEn: Object.fromEntries(
+      Object.entries(draft.optionsEn)
+        .filter(([k, v]) => optionSet.has(k) && v.trim())
+        .map(([k, v]) => [k, v.trim()]),
+    ),
+  };
   const dirty = !same(next, data.rules);
   const stale = rev !== data.rulesRev;
 
@@ -1389,7 +1465,19 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
 
   return (
     <Card className="p-5" data-testid="emenu-admin-settings">
-      <SectionTitle aside={data.rulesUpdatedAt ? <span className="text-[12px] text-ink-3">上次保存：{data.rulesUpdatedBy ?? '—'} · {formatDateTime(data.rulesUpdatedAt)}</span> : <Badge>都是默认值</Badge>}>平板点餐的设置</SectionTitle>
+      <SectionTitle
+        aside={
+          data.rulesUpdatedAt ? (
+            <span className="text-[12px] text-ink-3">
+              上次保存：{data.rulesUpdatedBy ?? '—'} · {formatDateTime(data.rulesUpdatedAt)}
+            </span>
+          ) : (
+            <Badge>都是默认值</Badge>
+          )
+        }
+      >
+        平板点餐的设置
+      </SectionTitle>
       <div className="mt-1 divide-y divide-line/70">
         {row(
           '平板点餐',
@@ -1439,8 +1527,20 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
           `最多 ${EMENU_MAX_FOOTER} 个字；留空不显示。`,
           <Input fullWidth={false} className="w-full max-w-[420px]" aria-label="版权行" value={draft.footerText} maxLength={EMENU_MAX_FOOTER} onChange={(e) => set({ footerText: e.target.value })} />,
         )}
-        {row('忌口（多选）', '客人下单前在「备注」里勾选，写在这一单每道菜的口味备注上，厨房屏看得到。', <OptionList label="忌口" value={draft.avoidOptions} max={EMENU_MAX_AVOID_OPTIONS} onChange={(v) => set({ avoidOptions: v })} testId="emenu-admin-avoid" />, true, true)}
-        {row('起菜方式（单选）', '如「即起」「慢起」；可以不选。', <OptionList label="起菜方式" value={draft.serveOptions} max={EMENU_MAX_SERVE_OPTIONS} onChange={(v) => set({ serveOptions: v })} testId="emenu-admin-serve" />, true, true)}
+        {row(
+          '忌口（多选）',
+          '客人下单前在「备注」里勾选，写在这一单每道菜的口味备注上，厨房屏看得到。',
+          <OptionList label="忌口" value={draft.avoidOptions} max={EMENU_MAX_AVOID_OPTIONS} onChange={(v) => set({ avoidOptions: v })} testId="emenu-admin-avoid" />,
+          true,
+          true,
+        )}
+        {row(
+          '起菜方式（单选）',
+          '如「即起」「慢起」；可以不选。',
+          <OptionList label="起菜方式" value={draft.serveOptions} max={EMENU_MAX_SERVE_OPTIONS} onChange={(v) => set({ serveOptions: v })} testId="emenu-admin-serve" />,
+          true,
+          true,
+        )}
         {row(
           '中英切换',
           '开启后平板的起始页与顶栏有一个「中 | EN」开关，外宾点一下整套页面换成英文（英文在「菜品图文」里录，没录的显示中文）。关闭后页面只有中文。',

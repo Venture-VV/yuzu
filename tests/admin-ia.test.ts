@@ -39,7 +39,11 @@ describe('后台的一级分组', () => {
     for (const path of ["path: 'membership/:tab?'", "path: 'benefits'", "path: 'members'", "path: 'guide'", "path: 'spaces/guide'", "path: 'vip-lockers'"]) expect(routes, path).toContain(path);
     // 三个页签各自还是原来的权限，顺序：规则 → 清单 → 渠道与标签
     const section = readFileSync(join(ADMIN_DIR, '..', 'membership', 'MembershipSection.tsx'), 'utf8');
-    expect([...section.matchAll(/\{ key: '([a-z]+)', label: '[^']*', perm: '([a-z.]+)' \}/g)].map((m) => `${m[1]}:${m[2]}`)).toEqual(['rules:member.rules', 'benefits:benefit.publish', 'channels:settings.manage']);
+    expect([...section.matchAll(/\{ key: '([a-z]+)', label: '[^']*', perm: '([a-z.]+)' \}/g)].map((m) => `${m[1]}:${m[2]}`)).toEqual([
+      'rules:member.rules',
+      'benefits:benefit.publish',
+      'channels:settings.manage',
+    ]);
   });
 
   it('侧栏不再自己写一份分组', () => {
@@ -52,12 +56,20 @@ describe('后台的一级分组', () => {
 describe('二级页签', () => {
   /** 用了 SubPane 的分区组件：文件 → 里面写的页签 */
   const files = readdirSync(ADMIN_DIR).filter((f) => f.endsWith('.tsx'));
-  const withPanes = files
-    .map((f) => ({ f, text: readFileSync(join(ADMIN_DIR, f), 'utf8') }))
-    .filter((x) => /<SubPane tab="/.test(x.text));
+  const withPanes = files.map((f) => ({ f, text: readFileSync(join(ADMIN_DIR, f), 'utf8') })).filter((x) => /<SubPane tab="/.test(x.text));
 
   it('拆了页签的 9 个分区', () => {
-    expect(withPanes.map((x) => x.f).sort()).toEqual(['CatalogTab.tsx', 'DevicesSection.tsx', 'DictionariesSection.tsx', 'DiningSection.tsx', 'OpeningTab.tsx', 'RoomsSection.tsx', 'RulesTab.tsx', 'TagsTab.tsx', 'TechniciansSection.tsx']);
+    expect(withPanes.map((x) => x.f).sort()).toEqual([
+      'CatalogTab.tsx',
+      'DevicesSection.tsx',
+      'DictionariesSection.tsx',
+      'DiningSection.tsx',
+      'OpeningTab.tsx',
+      'RoomsSection.tsx',
+      'RulesTab.tsx',
+      'TagsTab.tsx',
+      'TechniciansSection.tsx',
+    ]);
   });
 
   it('每个页面里：写了的页签都有内容，有内容的页签都写了；页签的名字只用小写字母、数字、短横线', () => {

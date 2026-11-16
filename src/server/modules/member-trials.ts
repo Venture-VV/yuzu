@@ -15,17 +15,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
-import {
-  benefitEligible,
-  benefitQuantity,
-  periodKey,
-  startLabel,
-  stateRank,
-  type BenefitCategory,
-  type BenefitPeriod,
-  type BenefitStatus,
-  type TierQuantity,
-} from '@shared/benefits';
+import { benefitEligible, benefitQuantity, periodKey, startLabel, stateRank, type BenefitCategory, type BenefitPeriod, type BenefitStatus, type TierQuantity } from '@shared/benefits';
 import { shiftDate } from '@shared/labels';
 import { MEMBER_CHANNEL_KEY } from '@shared/members';
 import { asGrade, gradeLabel, type Grade, type MembershipRules, type Tier } from '@shared/membership';
@@ -82,12 +72,7 @@ export async function activeTrialOf(db: Db, memberId: number, date: string): Pro
 }
 
 /** 享权益用的档阶（M51）：自己的与生效中的临时身份取高的 */
-export async function benefitState(
-  db: Db,
-  memberId: number,
-  own: { grade: Grade; tier: Tier | null },
-  date: string,
-): Promise<{ grade: Grade; tier: Tier | null; trial: ActiveTrial | null }> {
+export async function benefitState(db: Db, memberId: number, own: { grade: Grade; tier: Tier | null }, date: string): Promise<{ grade: Grade; tier: Tier | null; trial: ActiveTrial | null }> {
   const trial = await activeTrialOf(db, memberId, date);
   if (trial && stateRank(trial.grade, trial.tier) > stateRank(own.grade, own.tier)) return { grade: trial.grade, tier: trial.tier, trial };
   return { grade: own.grade, tier: own.tier, trial };
@@ -173,14 +158,7 @@ interface InviterFacts {
   giftUsed: number;
 }
 
-async function inviterFacts(
-  db: Db,
-  inviterId: number,
-  own: { grade: Grade; tier: Tier | null },
-  date: string,
-  rules: MembershipRules,
-  opts: { lockGift?: boolean } = {},
-): Promise<InviterFacts> {
+async function inviterFacts(db: Db, inviterId: number, own: { grade: Grade; tier: Tier | null }, date: string, rules: MembershipRules, opts: { lockGift?: boolean } = {}): Promise<InviterFacts> {
   const [m] = await db<{ status: string }[]>`SELECT status FROM members WHERE id = ${inviterId}`;
   if (!m) throw notFound('会员不存在');
   // 本月发起过的邀请体验（撤销的也算：每月次数不退，M55）
@@ -652,10 +630,7 @@ export async function trialChecks(db: Db): Promise<{ label: string; ok: boolean;
            count(*) FILTER (WHERE ${lastDate}::date IS NOT NULL AND t.ends_on < ${lastDate}::date)::int AS overdue,
            count(*)::int AS active
     FROM member_trials t JOIN members m ON m.id = t.member_id WHERE t.status = 'active'`;
-  const problems = [
-    act!.reached ? `${act!.reached} 条的会员自己的档级已经够了、没有转正` : '',
-    act!.overdue ? `${act!.overdue} 条在 ${lastDate} 之前到期、还没有结束` : '',
-  ].filter(Boolean);
+  const problems = [act!.reached ? `${act!.reached} 条的会员自己的档级已经够了、没有转正` : '', act!.overdue ? `${act!.overdue} 条在 ${lastDate} 之前到期、还没有结束` : ''].filter(Boolean);
   return [
     {
       label: '赠送会籍与 QY-042 的使用登记对得上',

@@ -52,9 +52,7 @@ export function TodoPage() {
   const stocktake = useStocktakeReminders();
   const recon = useReconReminders(payableRead);
   const stocktakeLeft = stocktake.data?.active ? stocktake.data.warehouses.filter((w) => !w.done) : [];
-  const reconLeft = recon.data
-    ? (recon.data.monthly.active ? recon.data.monthly.items.length : recon.data.monthly.items.filter((i) => i.state === 'changed').length) + recon.data.batch.length
-    : 0;
+  const reconLeft = recon.data ? (recon.data.monthly.active ? recon.data.monthly.items.length : recon.data.monthly.items.filter((i) => i.state === 'changed').length) + recon.data.batch.length : 0;
 
   if (!can('inventory.approve')) return <Navigate to="/inventory" replace />;
   const open = (key: 'doc' | 'po' | 'payment', id: number | null) => setParams(id ? { [key]: String(id) } : {}, { replace: true });
@@ -88,7 +86,12 @@ export function TodoPage() {
             ) : loading ? (
               <Skeleton className="h-40" />
             ) : total === 0 ? (
-              <EmptyState art="calm" title="没有待确认的申请" description="采购单、报损、盘点调整、退货、付款与期初提交后会出现在这里。" className="rounded-lg border border-dashed border-line-strong bg-card" />
+              <EmptyState
+                art="calm"
+                title="没有待确认的申请"
+                description="采购单、报损、盘点调整、退货、付款与期初提交后会出现在这里。"
+                className="rounded-lg border border-dashed border-line-strong bg-card"
+              />
             ) : (
               <>
                 {(pos.data?.length ?? 0) > 0 && (
@@ -273,7 +276,10 @@ export function TodoPage() {
                 </ul>
               )}
               <p className="mt-2 text-[11.5px] text-ink-3">
-                直接收货已计入库存与货款；补采购单时只关联原收货，不会重复入库。<Badge tone="yuzu" className="ml-1">先收货后补单待确认</Badge>
+                直接收货已计入库存与货款；补采购单时只关联原收货，不会重复入库。
+                <Badge tone="yuzu" className="ml-1">
+                  先收货后补单待确认
+                </Badge>
               </p>
             </Card>
             {payableRead && credit.length > 0 && (

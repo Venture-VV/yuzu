@@ -122,8 +122,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   const materialsQ = useMaterials();
   const settings = useInvSettings();
   // 称重物料多到的（v0.7.13）：数量没改的照旧可以改单；改了的，已收货不超过新数量加容差就行（与服务端一致）
-  const weighedOk = (l: Line, base: number) =>
-    l.weighed && (base === l.origBaseMilli || base + Math.floor((base * (settings.data?.weighTolerancePct ?? 10)) / 100) >= l.receivedMilli);
+  const weighedOk = (l: Line, base: number) => l.weighed && (base === l.origBaseMilli || base + Math.floor((base * (settings.data?.weighTolerancePct ?? 10)) / 100) >= l.receivedMilli);
   const [clientKey] = useState(uuid);
   const [supplierId, setSupplierId] = useState<number | null>(existing?.supplier.id ?? null);
   const [orderDate, setOrderDate] = useState(existing?.orderDate ?? session.calendarToday);
@@ -220,9 +219,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
       const prevQty = parseQty(existingLine.qty, 3);
       const images = [...existingLine.images, ...o.images.filter((i) => !existingLine.images.some((x) => x.id === i.id))].slice(0, MAX_LINE_IMAGES);
       return ls.map((l) =>
-        l.key === existingLine.key
-          ? { ...l, requests: [...l.requests, asRequest(o)], images, qty: qty !== null && prevQty !== null ? formatQty(prevQty + qty).replace(/,/g, '') : l.qty }
-          : l,
+        l.key === existingLine.key ? { ...l, requests: [...l.requests, asRequest(o)], images, qty: qty !== null && prevQty !== null ? formatQty(prevQty + qty).replace(/,/g, '') : l.qty } : l,
       );
     }
     const line = newLine(m);
@@ -305,7 +302,10 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
     setContractId(null);
   }, [contractId, contractOptions.data, supplierId, existing]);
   const checkInput = useMemo(
-    () => rows.flatMap((r, i) => (r.ready && r.qty !== null && r.price !== null ? [{ lineNo: i + 1, materialId: r.l.materialId, purchaseUnit: r.l.purchaseUnit, purchaseQtyMilli: r.qty, priceCents: r.price }] : [])),
+    () =>
+      rows.flatMap((r, i) =>
+        r.ready && r.qty !== null && r.price !== null ? [{ lineNo: i + 1, materialId: r.l.materialId, purchaseUnit: r.l.purchaseUnit, purchaseQtyMilli: r.qty, priceCents: r.price }] : [],
+      ),
     [rows],
   );
   const checkKey = JSON.stringify(checkInput);
@@ -316,8 +316,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   }, [checkKey]);
   const contractCheck = useQuery({
     queryKey: ['inv', 'contract-check', contractId, existing?.id ?? 0, debouncedKey],
-    queryFn: () =>
-      api.post<ContractCheckResult>('/api/erp/contracts/check', { contractId, poId: existing?.id ?? null, lines: JSON.parse(debouncedKey) as typeof checkInput }),
+    queryFn: () => api.post<ContractCheckResult>('/api/erp/contracts/check', { contractId, poId: existing?.id ?? null, lines: JSON.parse(debouncedKey) as typeof checkInput }),
     enabled: contractsOn && !!contractId && debouncedKey !== '[]',
     placeholderData: keepPreviousData,
   });
@@ -329,23 +328,24 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   // 询价门槛（E5）：没改过版、不是补单、不是从已定标的询价单转来的，合计到门槛要先询价（与服务端提交时的核对一致）
   const quoteThreshold = purchaseRules.data?.quoteThresholdCents ?? 0;
   const overQuote = mode !== 'revise' && quoteThreshold > 0 && total >= quoteThreshold && !existing?.sourcing && !existing?.backfill;
-  const blocking = uploading.size > 0
-    ? '图片还在上传，请稍等'
-    : unmatched.length > 0
-    ? `还有 ${unmatched.length} 行新产品没选物料`
-    : !supplierId
-    ? '请选择供应商'
-    : noteRequired && channelNote.trim().length < 2
-    ? `采购途径选了「${channelDef!.label}」，请写明在哪买的`
-    : rows.length === 0
-      ? '请至少添加一项物料'
-      : rows.some((r) => r.err)
-        ? `有 ${rows.filter((r) => r.err).length} 行需要修改`
-        : rows.some((r) => !r.ready)
-          ? '还有行没填完整'
-          : expectedDate && expectedDate < orderDate
-            ? '预计到货日期不能早于下单日期'
-            : null;
+  const blocking =
+    uploading.size > 0
+      ? '图片还在上传，请稍等'
+      : unmatched.length > 0
+        ? `还有 ${unmatched.length} 行新产品没选物料`
+        : !supplierId
+          ? '请选择供应商'
+          : noteRequired && channelNote.trim().length < 2
+            ? `采购途径选了「${channelDef!.label}」，请写明在哪买的`
+            : rows.length === 0
+              ? '请至少添加一项物料'
+              : rows.some((r) => r.err)
+                ? `有 ${rows.filter((r) => r.err).length} 行需要修改`
+                : rows.some((r) => !r.ready)
+                  ? '还有行没填完整'
+                  : expectedDate && expectedDate < orderDate
+                    ? '预计到货日期不能早于下单日期'
+                    : null;
 
   const body = (action: 'save' | 'submit') => ({
     supplierId,
@@ -417,7 +417,11 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to={existing ? `/purchasing?po=${existing.id}` : '/purchasing'} className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回采购">
+            <Link
+              to={existing ? `/purchasing?po=${existing.id}` : '/purchasing'}
+              className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink"
+              aria-label="返回采购"
+            >
               <ArrowLeft className="size-[18px]" />
             </Link>
             <span className="flex size-8 items-center justify-center rounded-full bg-pine-soft text-pine">
@@ -435,7 +439,11 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
               确认前不能继续按单收货。已收货的行不能改价，数量不能少于已收货。
             </Notice>
           )}
-          {existing?.status === 'returned' && existing.returnedReason && <Notice tone="warning" title="负责人退回修改">{existing.returnedReason}</Notice>}
+          {existing?.status === 'returned' && existing.returnedReason && (
+            <Notice tone="warning" title="负责人退回修改">
+              {existing.returnedReason}
+            </Notice>
+          )}
           <SupplierHints supplier={suppliers.data?.find((s) => s.id === supplierId) ?? null} />
 
           <section className="grid gap-4 rounded-lg border border-line bg-card p-5 shadow-card sm:grid-cols-2 lg:grid-cols-4">
@@ -479,7 +487,12 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
                 ))}
               </Select>
             </Field>
-            <Field label="途径说明" htmlFor="po-channel-note" className="sm:col-span-1 lg:col-span-3" hint={noteRequired ? '必填：档口、平台与店铺、门店名' : channelDef?.needsNote ? '选填：这家供应商的默认途径' : '选填'}>
+            <Field
+              label="途径说明"
+              htmlFor="po-channel-note"
+              className="sm:col-span-1 lg:col-span-3"
+              hint={noteRequired ? '必填：档口、平台与店铺、门店名' : channelDef?.needsNote ? '选填：这家供应商的默认途径' : '选填'}
+            >
               <Input
                 id="po-channel-note"
                 value={channelNote}
@@ -577,7 +590,14 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
                           </div>
                           <div className="flex flex-wrap items-start gap-2">
                             <MaterialPicker materials={materials} onPick={(m) => placeRequest(m, o)} placeholder="选已有物料：编码 / 名称" className="min-w-[200px] flex-1" />
-                            <Button size="sm" variant="secondary" icon={<PackagePlus className="size-4" />} disabled={locked} onClick={() => setCreating(o)} data-testid={`po-unmatched-create-${o.id}`}>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              icon={<PackagePlus className="size-4" />}
+                              disabled={locked}
+                              onClick={() => setCreating(o)}
+                              data-testid={`po-unmatched-create-${o.id}`}
+                            >
                               新建物料
                             </Button>
                             <Button size="sm" variant="ghost" disabled={locked} onClick={() => setUnmatched((u) => u.filter((x) => x.id !== o.id))}>
@@ -718,7 +738,14 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
               存草稿
             </Button>
           )}
-          <Button variant="primary" size="lg" disabled={locked || !!blocking} loading={phase.kind === 'submitting'} icon={<CircleCheck className="size-[18px]" />} onClick={() => void send({ ...body('submit'), clientKey })}>
+          <Button
+            variant="primary"
+            size="lg"
+            disabled={locked || !!blocking}
+            loading={phase.kind === 'submitting'}
+            icon={<CircleCheck className="size-[18px]" />}
+            onClick={() => void send({ ...body('submit'), clientKey })}
+          >
             {mode === 'revise' ? '提交改版' : needsApproval ? (approveNow ? '提交并确认' : '提交确认') : '提交'}
           </Button>
         </div>
@@ -885,13 +912,21 @@ function ContractLineHint({ check, unit }: { check: ContractLineCheck; unit: str
  */
 function SupplierHints({ supplier }: { supplier: Supplier | null }) {
   const session = useSession();
-  const watch = useQuery({ queryKey: ['inv', 'supplier-watch'], queryFn: () => api.get<{ supplierId: number; quarter: string; scoreX10: number }[]>('/api/purchase-compare/watch'), staleTime: 300_000 });
+  const watch = useQuery({
+    queryKey: ['inv', 'supplier-watch'],
+    queryFn: () => api.get<{ supplierId: number; quarter: string; scoreX10: number }[]>('/api/purchase-compare/watch'),
+    staleTime: 300_000,
+  });
   if (!supplier) return null;
   const w = watch.data?.find((x) => x.supplierId === supplier.id);
   return (
     <>
       {supplier.admission !== 'approved' && (
-        <Notice tone={session.rules.supplierApprovedOnly ? 'error' : 'warning'} title={`供应商「${supplier.name}」${supplier.admission === 'suspended' ? '已暂停' : '还没准入'}`} data-testid="po-admission">
+        <Notice
+          tone={session.rules.supplierApprovedOnly ? 'error' : 'warning'}
+          title={`供应商「${supplier.name}」${supplier.admission === 'suspended' ? '已暂停' : '还没准入'}`}
+          data-testid="po-admission"
+        >
           {session.rules.supplierApprovedOnly
             ? '经营规则设了「采购单只能给已准入的供应商」：这张采购单提交会被拒，请负责人先在供应商档案里准入（要有没过期的营业执照）。'
             : '可以照常下单；请负责人在供应商档案里登记营业执照后准入。'}

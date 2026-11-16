@@ -20,14 +20,11 @@ export const useContracts = (filter: ContractFilter, category: ContractCategory 
   useQuery({
     queryKey: [...ck.list(filter, category, q), entityId],
     queryFn: () =>
-      api.get<ContractSummary[]>(
-        `/api/erp/contracts?${new URLSearchParams(Object.entries({ filter, category, q: q.trim(), entityId }).filter(([, v]) => v) as [string, string][]).toString()}`,
-      ),
+      api.get<ContractSummary[]>(`/api/erp/contracts?${new URLSearchParams(Object.entries({ filter, category, q: q.trim(), entityId }).filter(([, v]) => v) as [string, string][]).toString()}`),
     placeholderData: keepPreviousData,
   });
 
-export const useContract = (id: number | null) =>
-  useQuery({ queryKey: ck.one(id ?? 0), queryFn: () => api.get<ContractDetail>(`/api/erp/contracts/${id}`), enabled: !!id });
+export const useContract = (id: number | null) => useQuery({ queryKey: ck.one(id ?? 0), queryFn: () => api.get<ContractDetail>(`/api/erp/contracts/${id}`), enabled: !!id });
 
 export const useContractMeta = () => useQuery({ queryKey: ck.meta, queryFn: () => api.get<ContractMeta>('/api/erp/contracts/meta'), staleTime: 60_000 });
 

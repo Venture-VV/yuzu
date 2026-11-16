@@ -93,7 +93,11 @@ function CheckoutBody({ d, onOpen }: { d: CheckoutOrderDetail; onOpen: (t: Order
           <span className="num">{doc.businessDate}</span>
         </SummaryRow>
         <SummaryRow label="收银">{doc.operatorName}</SummaryRow>
-        {doc.backfill && <SummaryRow label="补录">纸质单 {doc.backfill.slipNo} · {doc.backfill.enteredByName}补录</SummaryRow>}
+        {doc.backfill && (
+          <SummaryRow label="补录">
+            纸质单 {doc.backfill.slipNo} · {doc.backfill.enteredByName}补录
+          </SummaryRow>
+        )}
         {doc.note && <SummaryRow label="备注">{doc.note}</SummaryRow>}
       </div>
 

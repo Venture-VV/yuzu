@@ -1,1 +1,1 @@
-export type * from "@shared/concierge/types";
+export type * from '@shared/concierge/types';

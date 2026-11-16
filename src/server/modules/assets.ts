@@ -77,7 +77,9 @@ export async function getAsset(db: Db, id: number): Promise<AssetDetail> {
 
 /** 按收货单号找能转资产建卡的行：生效的收货单，按整件算还能建几张 */
 export async function receiptLinesFor(db: Db, docNo: string): Promise<AssetReceiptLine[]> {
-  const rows = await db<{ lineId: number; docId: number; docNo: string; docDate: string; materialId: number; materialName: string; inventoryUnit: string; qtyMilli: string; carded: number; amountCents: string | null }[]>`
+  const rows = await db<
+    { lineId: number; docId: number; docNo: string; docDate: string; materialId: number; materialName: string; inventoryUnit: string; qtyMilli: string; carded: number; amountCents: string | null }[]
+  >`
     SELECT l.id AS line_id, d.id AS doc_id, d.doc_no, d.doc_date::text AS doc_date, l.material_id, m.name AS material_name, m.inventory_unit,
            l.qty_milli::text AS qty_milli, (SELECT count(*)::int FROM asset_cards c WHERE c.receipt_line_id = l.id) AS carded, l.amount_cents::text AS amount_cents
     FROM inv_doc_lines l JOIN inv_docs d ON d.id = l.doc_id JOIN materials m ON m.id = l.material_id
@@ -157,7 +159,14 @@ export async function createAssets(deps: Deps, raw: unknown, actor: Actor, ip?: 
       ids.push(Number(row!.id));
       await tx`INSERT INTO asset_changes (asset_id, kind, detail, created_by) VALUES (${row!.id}, 'create', ${tx.json({ assetNo, receiptLineId: input.receiptLineId } as never)}, ${actor.id})`;
     }
-    await writeAudit(tx, { staffId: actor.id, action: 'asset_card', targetType: 'asset_card', targetId: ids[0], detail: { op: 'create', name: input.name, quantity: input.quantity, receiptLineId: input.receiptLineId }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'asset_card',
+      targetType: 'asset_card',
+      targetId: ids[0],
+      detail: { op: 'create', name: input.name, quantity: input.quantity, receiptLineId: input.receiptLineId },
+      ip,
+    });
     return { ids, replayed: false };
   });
 }
@@ -227,14 +236,25 @@ async function liveResult(db: Db, id: number, departmentId: number | null): Prom
     expected: scope.length,
     found: [...scannedIds].filter((x) => inScope.has(x)).length,
     missing: scope.filter((a) => !scannedIds.has(Number(a.id))).map((a) => ({ ...a, id: Number(a.id) })),
-    extra: scans
-      .filter((x) => x.assetId === null || !inScope.has(Number(x.assetId)))
-      .map((x) => ({ code: x.code, assetNo: x.assetNo, name: x.name, departmentName: x.departmentName })),
+    extra: scans.filter((x) => x.assetId === null || !inScope.has(Number(x.assetId))).map((x) => ({ code: x.code, assetNo: x.assetNo, name: x.name, departmentName: x.departmentName })),
   };
 }
 
 export async function getStocktake(db: Db, id: number): Promise<AssetStocktake> {
-  const [s] = await db<{ id: number; docNo: string; departmentId: number | null; departmentName: string | null; status: 'open' | 'closed'; note: string; startedByName: string; startedAt: string; closedAt: string | null; result: StocktakeResult | null }[]>`
+  const [s] = await db<
+    {
+      id: number;
+      docNo: string;
+      departmentId: number | null;
+      departmentName: string | null;
+      status: 'open' | 'closed';
+      note: string;
+      startedByName: string;
+      startedAt: string;
+      closedAt: string | null;
+      result: StocktakeResult | null;
+    }[]
+  >`
     SELECT t.id, t.doc_no, t.department_id, d.name AS department_name, t.status, t.note, s.display_name AS started_by_name, t.started_at, t.closed_at, t.result
     FROM asset_stocktakes t JOIN staff s ON s.id = t.started_by LEFT JOIN departments d ON d.id = t.department_id WHERE t.id = ${id}`;
   if (!s) throw notFound('盘点不存在');

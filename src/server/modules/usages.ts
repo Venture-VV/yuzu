@@ -121,7 +121,10 @@ export const pricingOf = (rules: UsageRules, businessType: string): UsagePricing
 /** 设了计费的业态 → 页面估算用的计费（每小时价、开台费按此刻的价目；项目停用了的不列，结束时会提示去后台改） */
 export async function usagePricingViews(db: Db, rules: UsageRules): Promise<Map<string, UsagePricingView>> {
   const entries = Object.entries(rules.pricing);
-  const items = await loadPricedItems(db, entries.flatMap(([, p]) => [p.feeItemId, ...(p.openFeeItemId ? [p.openFeeItemId] : [])]));
+  const items = await loadPricedItems(
+    db,
+    entries.flatMap(([, p]) => [p.feeItemId, ...(p.openFeeItemId ? [p.openFeeItemId] : [])]),
+  );
   const price = (id: number | null) => {
     const item = id === null ? undefined : items.get(id);
     const tier = item?.active ? defaultTier(item.prices) : null;
@@ -171,10 +174,7 @@ async function readUsages(db: Db, where: { id?: number; date?: string; spaceId?:
     closedAt: iso(r.closedAt),
     priced: pricingOf(rules, r.businessType) !== null,
     pricing: views.get(r.businessType) ?? null,
-    fee:
-      feeAmount === null && openFee === null
-        ? null
-        : { amount: Number(feeAmount ?? 0), chargedMinutes: Number(chargedMinutes ?? 0), openFee: Number(openFee ?? 0) },
+    fee: feeAmount === null && openFee === null ? null : { amount: Number(feeAmount ?? 0), chargedMinutes: Number(chargedMinutes ?? 0), openFee: Number(openFee ?? 0) },
   }));
 }
 
@@ -240,13 +240,7 @@ export async function openUsage(deps: Deps, raw: unknown, ctx: OpContext): Promi
  * 开单（调用方的事务里；前台开单经 openUsage 的幂等外壳，预约到店经 bookings.ts）：返回使用单编号。
  * 锁：来访（共享锁）→ 空间一行 → 当前位置
  */
-export async function openUsageTx(
-  tx: Tx,
-  deps: Deps,
-  input: { spaceId: number; tagCode: string; guests: number; note: string },
-  key: string,
-  ctx: OpContext,
-): Promise<number> {
+export async function openUsageTx(tx: Tx, deps: Deps, input: { spaceId: number; tagCode: string; guests: number; note: string }, key: string, ctx: OpContext): Promise<number> {
   const at = ctx.at ?? new Date();
   const rules = await loadUsageRules(tx);
   // ① 来访（共享锁：开单不改来访，但要挡住同时结账、撤销）
@@ -402,7 +396,16 @@ async function chargeUsage(
     const o = priceOf(pricing.openFeeItemId, '开台费');
     if (o.price > 0) {
       openFee = o.price;
-      lines.push({ kind: 'open_fee', itemId: o.item.id, tier: o.tier, name: usageLineName(usage.businessType, usage.spaceCode, '开台费'), unitPrice: o.price, quantity: 1, amount: o.price, charged: 0 });
+      lines.push({
+        kind: 'open_fee',
+        itemId: o.item.id,
+        tier: o.tier,
+        name: usageLineName(usage.businessType, usage.spaceCode, '开台费'),
+        unitPrice: o.price,
+        quantity: 1,
+        amount: o.price,
+        charged: 0,
+      });
     }
   }
   for (const l of lines) {
@@ -465,10 +468,7 @@ export async function closeUsagesOfVisits(tx: Tx, visitIds: number[], kind: 'che
     SELECT id, usage_no, space_id FROM space_usages WHERE visit_id IN ${tx(visitIds)} AND status = 'open' ORDER BY id FOR UPDATE`;
   if (open.length === 0) return [];
   const spaces = new Map(
-    (await tx<{ id: number; code: string; businessType: string }[]>`SELECT id, code, business_type FROM spaces WHERE id IN ${tx(open.map((u) => u.spaceId))}`).map((x) => [
-      Number(x.id),
-      x,
-    ]),
+    (await tx<{ id: number; code: string; businessType: string }[]>`SELECT id, code, business_type FROM spaces WHERE id IN ${tx(open.map((u) => u.spaceId))}`).map((x) => [Number(x.id), x]),
   );
   const rows = open.map((u) => ({ id: u.id, usageNo: u.usageNo, spaceCode: spaces.get(Number(u.spaceId))?.code ?? '', businessType: spaces.get(Number(u.spaceId))?.businessType ?? '' }));
   if (kind === 'checkout') {
@@ -476,11 +476,9 @@ export async function closeUsagesOfVisits(tx: Tx, visitIds: number[], kind: 'che
     const rules = await loadUsageRules(tx);
     const priced = rows.filter((r) => pricingOf(rules, r.businessType) !== null);
     if (priced.length > 0) {
-      throw conflict(
-        'USAGE_UNCHARGED',
-        `${priced.map((r) => r.spaceCode).join('、')} 还在使用：这类房间按时长收房费，请先「结束使用」把房费挂到手牌账单上，再结账`,
-        { usageIds: priced.map((r) => Number(r.id)) },
-      );
+      throw conflict('USAGE_UNCHARGED', `${priced.map((r) => r.spaceCode).join('、')} 还在使用：这类房间按时长收房费，请先「结束使用」把房费挂到手牌账单上，再结账`, {
+        usageIds: priced.map((r) => Number(r.id)),
+      });
     }
   }
   await tx`

@@ -27,19 +27,7 @@ export const yuan = formatYuan;
  * 打印页外框。paper 默认 80mm 热敏小票；a4 用于日结单（办公打印机或存成 PDF，页边距 12mm）。
  * 全局样式把打印页边距设为 0（热敏机），A4 的页边距在这里另外声明，后声明的生效。
  */
-export function PrintFrame({
-  title,
-  ready,
-  error,
-  children,
-  paper = '80mm',
-}: {
-  title: string;
-  ready: boolean;
-  error: string | null;
-  children: ReactNode;
-  paper?: '80mm' | 'a4';
-}) {
+export function PrintFrame({ title, ready, error, children, paper = '80mm' }: { title: string; ready: boolean; error: string | null; children: ReactNode; paper?: '80mm' | 'a4' }) {
   const a4 = paper === 'a4';
   const [params] = useSearchParams();
   const auto = params.has('auto');
@@ -76,17 +64,13 @@ export function PrintFrame({
         <Button variant="ghost" onClick={() => (popup ? window.close() : window.history.back())}>
           {popup ? '关闭' : '返回'}
         </Button>
-        <p className="w-full text-[12px] text-ink-3">
-          {a4 ? '打印机选 A4 纸的办公打印机（或「存储为 PDF」），边距用默认，缩放 100%。' : '打印机选前台的 80mm 热敏机，边距选「无」，缩放 100%。'}
-        </p>
+        <p className="w-full text-[12px] text-ink-3">{a4 ? '打印机选 A4 纸的办公打印机（或「存储为 PDF」），边距用默认，缩放 100%。' : '打印机选前台的 80mm 热敏机，边距选「无」，缩放 100%。'}</p>
       </div>
       <div
         data-testid="print-paper"
         className={cn(
           'mx-auto bg-white text-black shadow-[0_1px_3px_rgba(0,0,0,0.15)] print:my-0 print:px-0 print:py-0 print:shadow-none',
-          a4
-            ? 'w-[210mm] max-w-full px-[12mm] py-[12mm] text-[12px] leading-[1.5] print:w-auto print:max-w-none'
-            : 'w-[80mm] px-[4mm] py-[5mm] text-[12px] leading-[1.45] print:w-[72mm]',
+          a4 ? 'w-[210mm] max-w-full px-[12mm] py-[12mm] text-[12px] leading-[1.5] print:w-auto print:max-w-none' : 'w-[80mm] px-[4mm] py-[5mm] text-[12px] leading-[1.45] print:w-[72mm]',
         )}
       >
         {error ? <p className="font-bold">{error}</p> : ready ? children : <p>正在读取…</p>}

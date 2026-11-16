@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Hourglass } from 'lucide-react';
 import type { FrontdeskOpLookup } from '@shared/frontdesk';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { api, errorMessage, isRejected, notSentAsRejection, UncertainError } from '../../lib/api';
 import { formatDateTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Button, Notice } from '../../components/ui';
@@ -118,8 +118,7 @@ let cachedRaw: string | null | undefined;
 let cachedList: FrontdeskPendingOp[] = [];
 
 /** 待确认记录无法可靠保存到本机：为防止断网后重复登记，这笔不能提交 */
-export const PENDING_STORE_FAILED =
-  '本机浏览器无法保存「结果待确认」记录（存储空间已满或被禁用），为防止断网后重复发牌或挂账，这笔没有提交。请联系店主清理浏览器数据，或换一台终端办理。';
+export const PENDING_STORE_FAILED = '本机浏览器无法保存「结果待确认」记录（存储空间已满或被禁用），为防止断网后重复发牌或挂账，这笔没有提交。请联系店主清理浏览器数据，或换一台终端办理。';
 
 function readAll(): FrontdeskPendingOp[] {
   let raw: string | null;
@@ -266,12 +265,7 @@ export function pendingFor(
   });
 }
 
-export type OpState =
-  | { phase: 'idle' }
-  | { phase: 'busy' }
-  | { phase: 'error'; message: string; code?: string }
-  | { phase: 'uncertain'; message: string }
-  | { phase: 'not_found' };
+export type OpState = { phase: 'idle' } | { phase: 'busy' } | { phase: 'error'; message: string; code?: string } | { phase: 'uncertain'; message: string } | { phase: 'not_found' };
 
 type Pick<T> = (found: Extract<FrontdeskOpLookup, { found: true }>) => T | null;
 
@@ -336,8 +330,10 @@ export function useFrontdeskOp<T>(opts: {
         removeFrontdeskPending(op.key);
         setState({ phase: 'idle' });
         return result;
-      } catch (error) {
-        if (error instanceof ApiError && error.status < 500) {
+      } catch (raw) {
+        // 第一次发被「连不上服务器、没发出去」挡下（8.1.3）：等同明确拒绝；重提时照旧待确认
+        const error = isRetry ? raw : notSentAsRejection(raw);
+        if (isRejected(error)) {
           if (isRetry && error.code !== 'OP_ABANDONED') {
             // 重提被明确拒绝，不代表之前那次结果不明的请求不会随后生效：先在服务端作废编号，再下结论
             let fenced: FrontdeskOpLookup | null = null;
@@ -456,13 +452,7 @@ export function useFrontdeskOp<T>(opts: {
 }
 
 /** 对话框里的待确认处理区：查回 / 按原内容重新提交 / 确认作废 */
-export function PendingPanel<T>({
-  op,
-  onResolved,
-}: {
-  op: ReturnType<typeof useFrontdeskOp<T>>;
-  onResolved: (result: T) => void;
-}) {
+export function PendingPanel<T>({ op, onResolved }: { op: ReturnType<typeof useFrontdeskOp<T>>; onResolved: (result: T) => void }) {
   const p = op.pending;
   const run = async (fn: () => Promise<T | null>) => {
     const r = await fn();

@@ -60,7 +60,26 @@ export const TECH_STATE_LABELS: Record<TechState, string> = { on: '在岗', rest
 export const SESSION_STATUSES = ['waiting', 'serving', 'done', 'cancelled', 'rejected'] as const;
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
-export const EVENT_KINDS = ['sign_in', 'rest', 'back', 'sign_out', 'to_end', 'dispatch', 'skip', 'start', 'extend', 'finish', 'cancel', 'reject', 'queue', 'room', 'leave', 'suspend', 'resume', 'transfer'] as const;
+export const EVENT_KINDS = [
+  'sign_in',
+  'rest',
+  'back',
+  'sign_out',
+  'to_end',
+  'dispatch',
+  'skip',
+  'start',
+  'extend',
+  'finish',
+  'cancel',
+  'reject',
+  'queue',
+  'room',
+  'leave',
+  'suspend',
+  'resume',
+  'transfer',
+] as const;
 export type ClockEventKind = (typeof EVENT_KINDS)[number];
 export const EVENT_KIND_LABELS: Record<ClockEventKind, string> = {
   sign_in: '上牌',
@@ -211,10 +230,7 @@ export const DEFAULT_COMMISSION_RULES: CommissionRules = {
 export const MAX_RATE_BP = 10_000;
 
 /** 一条技师明细的提成（金额与钟数取正数，冲回时由调用方乘 −1，保证正负完全相抵） */
-export function lineCommission(
-  rules: CommissionRules,
-  line: { itemId: number | null; tier: PriceTier | null; quantity: number; amount: number; callType: CallType },
-): { base: number; bonus: number } {
+export function lineCommission(rules: CommissionRules, line: { itemId: number | null; tier: PriceTier | null; quantity: number; amount: number; callType: CallType }): { base: number; bonus: number } {
   const rule = (line.itemId !== null && rules.items[String(line.itemId)]) || rules.base;
   let base: number;
   if (rule.kind === 'percent') {

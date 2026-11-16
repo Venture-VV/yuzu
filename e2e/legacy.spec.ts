@@ -120,9 +120,20 @@ test.describe('旧账对照（8–10 月）', () => {
     const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string; staff: { id: number; displayName: string } };
     const yesterday = new Date(Date.parse(`${me.today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     const shift = {
-      id: 999_001, shiftNo: 'BC-E2E-0001', staffId: me.staff.id, staffName: me.staff.displayName, status: 'open', businessDate: yesterday,
-      startedAt: `${yesterday}T10:00:00.000Z`, openingCash: 50_000, endedAt: null, expectedCash: null, countedCash: null, note: '',
-      handedToName: null, closedByName: null,
+      id: 999_001,
+      shiftNo: 'BC-E2E-0001',
+      staffId: me.staff.id,
+      staffName: me.staff.displayName,
+      status: 'open',
+      businessDate: yesterday,
+      startedAt: `${yesterday}T10:00:00.000Z`,
+      openingCash: 50_000,
+      endedAt: null,
+      expectedCash: null,
+      countedCash: null,
+      note: '',
+      handedToName: null,
+      closedByName: null,
       summary: { byMethod: [], checkouts: 0, checkoutTotal: 0, recharges: 0, rechargePaid: 0, refunds: [], expectedCash: 50_000, deposits: [] },
     };
     await page.route('**/api/shifts/current', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ shift }) }));
@@ -133,9 +144,7 @@ test.describe('旧账对照（8–10 月）', () => {
     await page.unroute('**/api/shifts/current');
 
     // 当天开的班不提醒
-    await page.route('**/api/shifts/current', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ shift: { ...shift, businessDate: me.today } }) }),
-    );
+    await page.route('**/api/shifts/current', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ shift: { ...shift, businessDate: me.today } }) }));
     await page.goto('/frontdesk');
     await expect(page.getByRole('heading', { name: /前台/ })).toBeVisible();
     await expect(page.getByTestId('shift-cross-day')).toHaveCount(0);

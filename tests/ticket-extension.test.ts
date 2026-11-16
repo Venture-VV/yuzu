@@ -10,19 +10,11 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  minutesText,
-  quantityText,
-  TICKET_EXTENSION_DEFAULT_ROWS,
-  ticketExtensionFor,
-  type Benefit,
-  type BenefitCatalog,
-  type MemberBenefits,
-} from '../src/shared/benefits';
+import { minutesText, quantityText, TICKET_EXTENSION_DEFAULT_ROWS, ticketExtensionFor, type Benefit, type BenefitCatalog, type MemberBenefits } from '../src/shared/benefits';
 import type { CheckoutPreview } from '../src/shared/checkout';
 import type { VisitDetail } from '../src/shared/frontdesk';
 import { shiftDate } from '../src/shared/labels';
-import { rechargeOutcome, type MemberGradeInfo, type MembershipRules } from '../src/shared/membership';
+import type { MemberGradeInfo, MembershipRules } from '../src/shared/membership';
 import type { Actor } from '../src/server/lib/context';
 import { benefitChecks } from '../src/server/modules/benefits';
 import { checkout } from '../src/server/modules/frontdesk/checkout';
@@ -42,8 +34,7 @@ const catalog = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/benefits
 const byCode = async (code: string) => (await catalog()).items.find((b) => b.code === code)!;
 const editRaw = async (code: string, patch: Partial<Benefit>) => {
   const b = await byCode(code);
-  const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } =
-    b;
+  const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } = b;
   return api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
     expectedVersion: version,
     ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions },
@@ -94,8 +85,7 @@ const preview = async (visitIds: number[]) => {
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return r.body as CheckoutPreview;
 };
-const pay = (visitIds: number[], total: number) =>
-  checkout(deps, { clientKey: randomUUID(), visitIds, expectedTotal: total, payments: [{ method: 'cash', amount: total }] }, { actor: clerk });
+const pay = (visitIds: number[], total: number) => checkout(deps, { clientKey: randomUUID(), visitIds, expectedTotal: total, payments: [{ method: 'cash', amount: total }] }, { actor: clerk });
 const visitOf = async (visitId: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${visitId}`)).body as VisitDetail;
 const allChecksOk = async () => {
   const fd = (await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { ok: boolean; label: string; detail: string }[];

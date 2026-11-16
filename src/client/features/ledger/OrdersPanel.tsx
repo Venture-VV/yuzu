@@ -112,18 +112,19 @@ export function OrdersPanel() {
             data-testid="orders-search"
           />
           {q && (
-            <button type="button" aria-label="清空搜索" onClick={() => setQ('')} className="absolute top-1/2 right-2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-ink-3 hover:bg-paper-2">
+            <button
+              type="button"
+              aria-label="清空搜索"
+              onClick={() => setQ('')}
+              className="absolute top-1/2 right-2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-ink-3 hover:bg-paper-2"
+            >
               <X className="size-4" />
             </button>
           )}
         </div>
         {!urlQ && <DateNav value={date} today={session.today} locked={!historyAllowed} onChange={(d) => update({ date: d === session.today ? null : d })} />}
         <p className="text-[12.5px] text-ink-3" data-testid="orders-scope">
-          {urlQ
-            ? historyAllowed
-              ? '在全部营业日里查，按时间从近到远'
-              : '当前岗位只查得到本营业日的单'
-            : '没输搜索词时列这个营业日的全部账单'}
+          {urlQ ? (historyAllowed ? '在全部营业日里查，按时间从近到远' : '当前岗位只查得到本营业日的单') : '没输搜索词时列这个营业日的全部账单'}
         </p>
       </div>
 
@@ -234,7 +235,10 @@ export function OrdersPanel() {
                       {r.guests.length > 0 && ` · ${r.guests.join('、')}`} · {methodsText(r)} · {r.operatorName}
                     </p>
                   </div>
-                  <Money cents={r.kind === 'refund' ? -r.amount : r.amount} className={cn('text-[15px] font-bold', r.status === 'voided' ? 'struck text-ink-4' : r.kind === 'refund' ? 'text-ember' : 'text-ink')} />
+                  <Money
+                    cents={r.kind === 'refund' ? -r.amount : r.amount}
+                    className={cn('text-[15px] font-bold', r.status === 'voided' ? 'struck text-ink-4' : r.kind === 'refund' ? 'text-ember' : 'text-ink')}
+                  />
                 </button>
               ))}
             </div>
@@ -252,7 +256,11 @@ function Tile({ label, cents, count, sub, bar, color }: { label: string; cents?:
     <div className="relative overflow-hidden rounded-lg border border-line bg-card px-4 py-3 shadow-card">
       <span className={cn('absolute top-0 left-0 h-full w-1', bar)} />
       <p className="text-[12px] font-semibold text-ink-3">{label}</p>
-      {cents !== undefined ? <Money cents={cents} className={cn('mt-0.5 text-[22px] leading-tight font-bold', color)} /> : <p className={cn('num mt-0.5 text-[22px] leading-tight font-bold', color)}>{count}</p>}
+      {cents !== undefined ? (
+        <Money cents={cents} className={cn('mt-0.5 text-[22px] leading-tight font-bold', color)} />
+      ) : (
+        <p className={cn('num mt-0.5 text-[22px] leading-tight font-bold', color)}>{count}</p>
+      )}
       <p className="truncate text-[12px] text-ink-3">{sub}</p>
     </div>
   );

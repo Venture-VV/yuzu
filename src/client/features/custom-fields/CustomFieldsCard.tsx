@@ -163,7 +163,10 @@ export function CustomFieldsCard({
 
 /** 列表上「列表里显示」的字段：一个列表取一次 */
 export function useCustomListValues(entity: CustomFieldEntity, ids: number[], enabled = true) {
-  const key = [...ids].sort((a, b) => a - b).slice(0, 500).join(',');
+  const key = [...ids]
+    .sort((a, b) => a - b)
+    .slice(0, 500)
+    .join(',');
   return useQuery({
     queryKey: ['custom-fields', 'values', entity, key],
     queryFn: () => api.get<{ defs: CustomFieldDef[]; values: Record<string, Record<string, string>> }>(`/api/custom-fields/${entity}/values?ids=${key}`),

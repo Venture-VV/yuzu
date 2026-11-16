@@ -13,7 +13,15 @@ import { isStoreScopedKey, upsertSetting } from './store-settings';
 /** 两份规则（JSON）是否相同：不看对象里键的先后（jsonb 存进去会重排键） */
 export function sameJson(a: unknown, b: unknown): boolean {
   const sorted = (v: unknown): unknown =>
-    Array.isArray(v) ? v.map(sorted) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])])) : v;
+    Array.isArray(v)
+      ? v.map(sorted)
+      : v && typeof v === 'object'
+        ? Object.fromEntries(
+            Object.keys(v)
+              .sort()
+              .map((k) => [k, sorted((v as Record<string, unknown>)[k])]),
+          )
+        : v;
   return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
 }
 
@@ -24,13 +32,7 @@ export const lockSettings = (tx: Tx) => tx`SELECT pg_advisory_xact_lock(hashtext
  * 在锁里读出当前规则，按 next 算出新规则（可以在 next 里校验、抛错回滚），写回并记审计；返回新规则。
  * 只改部分字段时 next 里合并 before：`(before) => parse(Input, { ...before, ...parse(Input.partial(), raw) })`。
  */
-export async function saveRuleSetting<T>(
-  sql: Sql,
-  key: string,
-  load: (tx: Tx) => Promise<T>,
-  next: (before: T, tx: Tx) => T | Promise<T>,
-  ctx: OpContext,
-): Promise<T> {
+export async function saveRuleSetting<T>(sql: Sql, key: string, load: (tx: Tx) => Promise<T>, next: (before: T, tx: Tx) => T | Promise<T>, ctx: OpContext): Promise<T> {
   let saved!: T;
   await sql.begin(async (tx) => {
     await lockSettings(tx);
@@ -38,7 +40,13 @@ export async function saveRuleSetting<T>(
     const after = await next(before, tx);
     // 按店的规则在第二家店里存进 store_settings（8.0.22，docs/MULTISTORE_V8022.md 第 4 节）
     await upsertSetting(tx, key, after, ctx.actor.id);
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'settings_updated', targetType: 'settings', detail: { key, before, after, ...(isStoreScopedKey(key) && currentStoreId() !== DEFAULT_STORE_ID ? { storeId: currentStoreId() } : {}) }, ip: ctx.ip });
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'settings_updated',
+      targetType: 'settings',
+      detail: { key, before, after, ...(isStoreScopedKey(key) && currentStoreId() !== DEFAULT_STORE_ID ? { storeId: currentStoreId() } : {}) },
+      ip: ctx.ip,
+    });
     saved = after;
   });
   return saved;

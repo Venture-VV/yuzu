@@ -46,7 +46,11 @@ export function LookupPage() {
             </Button>
           </form>
           {error && <Notice tone="error" title={error} />}
-          {result && !m && <Notice tone="info" title={`没有找到「${result.query}」`}>请核对完整的手机号或会员号；只按完整号码查，不支持模糊查找。</Notice>}
+          {result && !m && (
+            <Notice tone="info" title={`没有找到「${result.query}」`}>
+              请核对完整的手机号或会员号；只按完整号码查，不支持模糊查找。
+            </Notice>
+          )}
           {m && (
             <Card className="p-5" data-testid="member-lookup-result">
               <div className="flex flex-wrap items-center gap-2">

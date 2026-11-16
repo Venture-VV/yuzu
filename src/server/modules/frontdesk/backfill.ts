@@ -32,8 +32,7 @@ export interface Backfill {
 }
 
 /** 提示里的时间（门店时区，月-日 时:分） */
-const fmt = (d: Date | string, timeZone: string) =>
-  new Date(d).toLocaleString('zh-CN', { timeZone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+const fmt = (d: Date | string, timeZone: string) => new Date(d).toLocaleString('zh-CN', { timeZone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 
 /** 核对补录的权限与实际时间的范围（结账前核对按实际时间计价时也用它） */
 export function checkBackfillAt(at: Date, actor: Actor, now = new Date()) {
@@ -110,8 +109,7 @@ async function memberOverlap(tx: Tx, memberIds: number[], from: Date, to: Date, 
   return hit;
 }
 
-const period = (h: { since: string; until: string | null }, timeZone: string) =>
-  `${fmt(h.since, timeZone)}${h.until ? ` 至 ${fmt(h.until, timeZone)}` : ' 起（仍在店）'}`;
+const period = (h: { since: string; until: string | null }, timeZone: string) => `${fmt(h.since, timeZone)}${h.until ? ` 至 ${fmt(h.until, timeZone)}` : ' 起（仍在店）'}`;
 
 /**
  * 补录的接待：实际时间那一刻，手牌或会员已被别的来访占用时拒绝（时间重叠）。
@@ -150,20 +148,17 @@ export async function assertNotReused(tx: Tx, at: Date, visitIds: number[], time
     for (const seg of await visitSegments(tx, r.id, end)) {
       const tag = await tagOverlap(tx, [seg.tagId], new Date(seg.since), new Date(seg.until), [r.id]);
       if (tag) {
-        throw conflict(
-          'BACKFILL_TAG_REUSED',
-          `手牌 ${tag.code} 在 ${period(tag, timeZone)}已由别的客人使用（来访 ${tag.visitNo}）：补录接待的这位客人应在此之前离店，请按纸质单补录结账时间`,
-          { code: tag.code, visitNo: tag.visitNo },
-        );
+        throw conflict('BACKFILL_TAG_REUSED', `手牌 ${tag.code} 在 ${period(tag, timeZone)}已由别的客人使用（来访 ${tag.visitNo}）：补录接待的这位客人应在此之前离店，请按纸质单补录结账时间`, {
+          code: tag.code,
+          visitNo: tag.visitNo,
+        });
       }
     }
     const member = r.memberId ? await memberOverlap(tx, [r.memberId], new Date(r.checkedInAt), end, [r.id]) : undefined;
     if (member) {
-      throw conflict(
-        'BACKFILL_TAG_REUSED',
-        `会员「${member.name}」在 ${period(member, timeZone)}另有来访（${member.visitNo}）：补录接待的这次应在此之前离店，请按纸质单补录结账时间`,
-        { visitNo: member.visitNo },
-      );
+      throw conflict('BACKFILL_TAG_REUSED', `会员「${member.name}」在 ${period(member, timeZone)}另有来访（${member.visitNo}）：补录接待的这次应在此之前离店，请按纸质单补录结账时间`, {
+        visitNo: member.visitNo,
+      });
     }
   }
 }
@@ -186,11 +181,7 @@ export async function assertAfterVisits(tx: Tx, at: Date, visitIds: number[], ki
 }
 
 /** 记下一步补录（与单据同一事务） */
-export async function recordBackfill(
-  tx: Tx,
-  b: Backfill,
-  e: { kind: BackfillKind; opKey: string; visitId?: number | null; checkoutId?: number | null; businessDate: string; actor: Actor },
-) {
+export async function recordBackfill(tx: Tx, b: Backfill, e: { kind: BackfillKind; opKey: string; visitId?: number | null; checkoutId?: number | null; businessDate: string; actor: Actor }) {
   await tx`
     INSERT INTO backfill_entries (slip_no, kind, op_key, visit_id, checkout_id, actual_at, business_date, entered_by)
     VALUES (${b.slipNo}, ${e.kind}, ${e.opKey}, ${e.visitId ?? null}, ${e.checkoutId ?? null}, ${b.at}, ${e.businessDate}, ${e.actor.id})`;
@@ -206,5 +197,4 @@ export const backfillMarkSql = (db: Db, opKeyCol: string) => db`
    ORDER BY bf.id LIMIT 1)`;
 
 /** 补录标记里的时间统一成 ISO 字符串（json_build_object 里的 timestamptz 是数据库格式） */
-export const normalizeMark = (m: BackfillMark | null): BackfillMark | null =>
-  m ? { ...m, actualAt: new Date(m.actualAt).toISOString(), enteredAt: new Date(m.enteredAt).toISOString() } : null;
+export const normalizeMark = (m: BackfillMark | null): BackfillMark | null => (m ? { ...m, actualAt: new Date(m.actualAt).toISOString(), enteredAt: new Date(m.enteredAt).toISOString() } : null);

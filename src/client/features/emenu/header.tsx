@@ -32,7 +32,18 @@ export function LangToggle({ lang, onToggle, x, y, light }: { lang: Lang; onTogg
       <span className="em-lang-knob" style={{ ...box(0, 0, 24, 22.3), borderRadius: 2, background: 'var(--em-tan)', transform: lang === 'en' ? 'translateX(24px)' : 'none' }} />
       {/* 字的文字框在上沿往下 5.2：与手牌色块里的字同一条基线 */}
       <span style={{ ...box(0, 5.2, 24), textAlign: 'center', fontSize: 13, lineHeight: '13px', color: lang === 'zh' ? 'var(--em-light)' : off, transition: 'color var(--em-in) ease' }}>中</span>
-      <span className="em-en" style={{ ...box(24, 6, 24), textAlign: 'center', fontSize: 11, lineHeight: '11px', letterSpacing: '0.04em', color: lang === 'en' ? 'var(--em-light)' : off, transition: 'color var(--em-in) ease' }}>
+      <span
+        className="em-en"
+        style={{
+          ...box(24, 6, 24),
+          textAlign: 'center',
+          fontSize: 11,
+          lineHeight: '11px',
+          letterSpacing: '0.04em',
+          color: lang === 'en' ? 'var(--em-light)' : off,
+          transition: 'color var(--em-in) ease',
+        }}
+      >
         EN
       </span>
     </button>
@@ -119,30 +130,38 @@ export function Header({
             onClick={() => onCategory(c.id)}
             aria-pressed={on}
             className="em-cat"
-            style={{ ...box(first + i * gap - gap / 2, 57 - 23 * kc, gap, 46 * kc), padding: 0, border: 0, background: 'none', color: on ? 'var(--em-ink)' : 'var(--em-mute)', textAlign: 'center', overflow: 'hidden' }}
+            style={{
+              ...box(first + i * gap - gap / 2, 57 - 23 * kc, gap, 46 * kc),
+              padding: 0,
+              border: 0,
+              background: 'none',
+              color: on ? 'var(--em-ink)' : 'var(--em-mute)',
+              textAlign: 'center',
+              overflow: 'hidden',
+            }}
             data-testid={`emenu-cat-${c.id}`}
           >
-           {/* 里面照设计稿的像素写（46 高、gap 宽），放大的一档整块绕上沿的正中放大 */}
-           <span style={{ ...box(gap / 2, 0, 0, 0), transform: kc === 1 ? undefined : `scale(${kc})`, transformOrigin: '0 0' }}>
-            <span style={{ ...box(-gap / 2, 0, gap, 46) }}>
-            {/* 设计稿：中文文字框上沿 45.7、英文 60.3（按钮从 34 开始）。按钮里的内容浏览器会上下居中，所以两行都自己定位 */}
-            {name.mainEn ? (
-              <>
-                <span className="em-en" style={{ ...box(0, 12.6, gap), textAlign: 'center', fontSize: 12, lineHeight: '12px', whiteSpace: 'nowrap', letterSpacing: '0.058em' }}>
-                  {name.main}
-                </span>
-                <span style={{ ...box(0, 27.2, gap), textAlign: 'center', fontSize: 9, lineHeight: '9px', whiteSpace: 'nowrap' }}>{name.sub}</span>
-              </>
-            ) : (
-              <>
-                <span style={{ ...box(0, 11.7, gap), textAlign: 'center', fontSize: 14, lineHeight: '14px', whiteSpace: 'nowrap' }}>{name.main}</span>
-                <span className="em-en" style={{ ...box(0, 26.3, gap), textAlign: 'center', fontSize: 8, lineHeight: '8px', whiteSpace: 'nowrap', letterSpacing: '0.058em' }}>
-                  {name.sub}
-                </span>
-              </>
-            )}
+            {/* 里面照设计稿的像素写（46 高、gap 宽），放大的一档整块绕上沿的正中放大 */}
+            <span style={{ ...box(gap / 2, 0, 0, 0), transform: kc === 1 ? undefined : `scale(${kc})`, transformOrigin: '0 0' }}>
+              <span style={{ ...box(-gap / 2, 0, gap, 46) }}>
+                {/* 设计稿：中文文字框上沿 45.7、英文 60.3（按钮从 34 开始）。按钮里的内容浏览器会上下居中，所以两行都自己定位 */}
+                {name.mainEn ? (
+                  <>
+                    <span className="em-en" style={{ ...box(0, 12.6, gap), textAlign: 'center', fontSize: 12, lineHeight: '12px', whiteSpace: 'nowrap', letterSpacing: '0.058em' }}>
+                      {name.main}
+                    </span>
+                    <span style={{ ...box(0, 27.2, gap), textAlign: 'center', fontSize: 9, lineHeight: '9px', whiteSpace: 'nowrap' }}>{name.sub}</span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ ...box(0, 11.7, gap), textAlign: 'center', fontSize: 14, lineHeight: '14px', whiteSpace: 'nowrap' }}>{name.main}</span>
+                    <span className="em-en" style={{ ...box(0, 26.3, gap), textAlign: 'center', fontSize: 8, lineHeight: '8px', whiteSpace: 'nowrap', letterSpacing: '0.058em' }}>
+                      {name.sub}
+                    </span>
+                  </>
+                )}
+              </span>
             </span>
-           </span>
           </button>
         );
       })}
@@ -169,7 +188,18 @@ export function Header({
             <span
               key={bump}
               className="em-en em-bump"
-              style={{ ...box(10.6, -6.6, undefined, 11.4), minWidth: 11.4, padding: '0 2.6px', boxSizing: 'border-box', borderRadius: 6, background: pending ? 'var(--em-error)' : 'var(--em-tan)', color: '#fff', fontSize: 8, lineHeight: '11.4px', textAlign: 'center' }}
+              style={{
+                ...box(10.6, -6.6, undefined, 11.4),
+                minWidth: 11.4,
+                padding: '0 2.6px',
+                boxSizing: 'border-box',
+                borderRadius: 6,
+                background: pending ? 'var(--em-error)' : 'var(--em-tan)',
+                color: '#fff',
+                fontSize: 8,
+                lineHeight: '11.4px',
+                textAlign: 'center',
+              }}
               data-testid="emenu-order-count"
             >
               {pending ? '!' : count}
@@ -185,7 +215,22 @@ export function Header({
           onClick={onTag}
           aria-label={m.tagAria(tagCode)}
           className="em-tap-soft"
-          style={{ position: 'relative', display: 'block', boxSizing: 'border-box', height: 22.3, minWidth: 85.8, padding: '5.7px 5.9px 2.6px', border: 0, borderRadius: 2, background: 'var(--em-tan)', color: 'var(--em-light)', fontSize: 14, lineHeight: '14px', whiteSpace: 'nowrap', textAlign: 'left' }}
+          style={{
+            position: 'relative',
+            display: 'block',
+            boxSizing: 'border-box',
+            height: 22.3,
+            minWidth: 85.8,
+            padding: '5.7px 5.9px 2.6px',
+            border: 0,
+            borderRadius: 2,
+            background: 'var(--em-tan)',
+            color: 'var(--em-light)',
+            fontSize: 14,
+            lineHeight: '14px',
+            whiteSpace: 'nowrap',
+            textAlign: 'left',
+          }}
           data-testid="emenu-tag"
         >
           <span style={{ position: 'absolute', inset: '-11px -6px' }} />

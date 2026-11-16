@@ -411,7 +411,7 @@ function VerticalTitle({ x, y, title, titleEn, slot }: { x: number; y: number; t
 type Slot = EmenuDishView | null | undefined;
 
 /** 没配图的菜在有图的版面里：图片位是灰底、压不暗，原因写在价格旁 */
-const noteIfNoImage = (dish: EmenuDishView, url: string | null) => !url;
+const noteIfNoImage = (_dish: EmenuDishView, url: string | null) => !url;
 
 /** 卡片模板里的一张图（照片位）：藏起来的不画；当前这一档的位置；用菜品的餐品图或特写图 */
 function SlotPhoto({ s, dish, ctx }: { s: ResolvedSlot; dish: Slot; ctx: PageCtx }) {

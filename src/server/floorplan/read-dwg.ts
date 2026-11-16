@@ -154,7 +154,14 @@ export function fromDwgDatabase(db: DwgDatabaseLike): PlanDrawing {
       case 'LINE': {
         const s = e.startPoint as P;
         const t = e.endPoint as P;
-        addPath(layer, tf([[s.x, s.y], [t.x, t.y]]), false);
+        addPath(
+          layer,
+          tf([
+            [s.x, s.y],
+            [t.x, t.y],
+          ]),
+          false,
+        );
         return;
       }
       case 'LWPOLYLINE': {
@@ -240,10 +247,7 @@ export function fromDwgDatabase(db: DwgDatabaseLike): PlanDrawing {
         inserts++;
         const block = blocks.get(String(e.name));
         const at = e.insertionPoint as P;
-        const im = multiply(
-          m,
-          insertMatrix(at, (e.xScale as number) || 1, (e.yScale as number) || 1, (e.rotation as number) || 0, block?.basePoint ?? { x: 0, y: 0 }),
-        );
+        const im = multiply(m, insertMatrix(at, (e.xScale as number) || 1, (e.yScale as number) || 1, (e.rotation as number) || 0, block?.basePoint ?? { x: 0, y: 0 }));
         if (block?.entities && depth < 6) for (const child of block.entities) visit(child, im, layer, depth + 1);
         // 块属性已经是块参照所在坐标系里的位置（嵌套块里的按外层变换）
         for (const a of (e.attribs as { layer: string; text?: Record<string, unknown> }[]) ?? []) {

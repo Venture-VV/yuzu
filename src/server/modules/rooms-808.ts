@@ -83,10 +83,7 @@ export async function revertHousekeeping(deps: Deps, roomId: number, raw: unknow
       const [last] = await tx<{ id: number; fromState: Housekeeping; toState: Housekeeping; source: HousekeepingSource }[]>`
         SELECT id, from_state, to_state, source FROM room_housekeeping_events WHERE room_id = ${roomId} ORDER BY id DESC LIMIT 1`;
       if (!last || Number(last.id) !== input.eventId || last.source !== 'manual' || last.toState !== room.housekeeping) {
-        throw conflict(
-          'HOUSEKEEPING_CHANGED',
-          `房间「${room.roomNo}」的房态在这之后又变过（现在是「${HOUSEKEEPING_LABELS[room.housekeeping]}」），不能撤回；请刷新后再看`,
-        );
+        throw conflict('HOUSEKEEPING_CHANGED', `房间「${room.roomNo}」的房态在这之后又变过（现在是「${HOUSEKEEPING_LABELS[room.housekeeping]}」），不能撤回；请刷新后再看`);
       }
       const target = last.fromState;
       let maintenanceNote: string | null = null;
@@ -218,15 +215,45 @@ export async function roomTimeline(deps: Deps, roomId: number, raw: unknown): Pr
       current = Number(m.toRoomId);
       since = Date.parse(m.createdAt);
       if (Number(m.toRoomId) === roomId && inRange(m.createdAt)) {
-        entries.push({ key: `move-in-${m.id}`, kind: 'stay', at: m.createdAt, title: `换进（从 ${m.fromNo}）`, detail: `${guestText(s)} · ${m.reason}`, ref: s.stayNo, amount: null, status: null, staffName: m.staffName });
+        entries.push({
+          key: `move-in-${m.id}`,
+          kind: 'stay',
+          at: m.createdAt,
+          title: `换进（从 ${m.fromNo}）`,
+          detail: `${guestText(s)} · ${m.reason}`,
+          ref: s.stayNo,
+          amount: null,
+          status: null,
+          staffName: m.staffName,
+        });
       }
       if (Number(m.fromRoomId) === roomId && inRange(m.createdAt)) {
-        entries.push({ key: `move-out-${m.id}`, kind: 'stay', at: m.createdAt, title: `换出（到 ${m.toNo}）`, detail: `${guestText(s)} · ${m.reason}`, ref: s.stayNo, amount: null, status: null, staffName: m.staffName });
+        entries.push({
+          key: `move-out-${m.id}`,
+          kind: 'stay',
+          at: m.createdAt,
+          title: `换出（到 ${m.toNo}）`,
+          detail: `${guestText(s)} · ${m.reason}`,
+          ref: s.stayNo,
+          amount: null,
+          status: null,
+          staffName: m.staffName,
+        });
       }
     }
     if (current === roomId) segments.push({ stay: s, start: since, end: s.closedAt ? Date.parse(s.closedAt) : Number.POSITIVE_INFINITY, last: true });
     if (firstRoom === roomId && inRange(s.checkedInAt)) {
-      entries.push({ key: `checkin-${s.id}`, kind: 'stay', at: s.checkedInAt, title: '入住', detail: guestText(s), ref: s.stayNo, amount: null, status: s.status === 'cancelled' ? '已撤销' : null, staffName: s.checkedInByName });
+      entries.push({
+        key: `checkin-${s.id}`,
+        kind: 'stay',
+        at: s.checkedInAt,
+        title: '入住',
+        detail: guestText(s),
+        ref: s.stayNo,
+        amount: null,
+        status: s.status === 'cancelled' ? '已撤销' : null,
+        staffName: s.checkedInByName,
+      });
     }
     if (current === roomId && s.closedAt && s.status !== 'open' && inRange(s.closedAt)) {
       entries.push({
@@ -291,23 +318,25 @@ export async function roomTimeline(deps: Deps, roomId: number, raw: unknown): Pr
     }
     // 住客住在这间房期间挂在账单上的消费（房费另列）
     const billIds = [...new Set(stays.map((s) => Number(s.billId)))];
-    const lines = await db<{
-      id: number;
-      billId: number;
-      name: string;
-      source: string;
-      quantity: number;
-      amount: number;
-      status: string;
-      voidReason: string | null;
-      postedAt: string;
-      staffName: string;
-      sessionNo: string | null;
-      techNo: string | null;
-      techName: string | null;
-      clocks: number | null;
-      orderNo: string | null;
-    }[]>`
+    const lines = await db<
+      {
+        id: number;
+        billId: number;
+        name: string;
+        source: string;
+        quantity: number;
+        amount: number;
+        status: string;
+        voidReason: string | null;
+        postedAt: string;
+        staffName: string;
+        sessionNo: string | null;
+        techNo: string | null;
+        techName: string | null;
+        clocks: number | null;
+        orderNo: string | null;
+      }[]
+    >`
       SELECT l.id, l.bill_id, l.name, l.source, l.quantity, l.amount, l.status, l.void_reason, l.posted_at, st.display_name AS staff_name,
              ts.session_no, t.tech_no, t.name AS tech_name, ts.clocks, ki.order_no
       FROM bill_lines l JOIN staff st ON st.id = l.posted_by
@@ -321,13 +350,7 @@ export async function roomTimeline(deps: Deps, roomId: number, raw: unknown): Pr
       if (!g) continue;
       const kind = l.source === 'therapist' ? 'service' : l.source === 'dining' ? 'dining' : 'other';
       const extra =
-        kind === 'service' && l.techName
-          ? `技师 ${l.techNo} ${l.techName}${l.clocks ? ` · ${l.clocks} 钟` : ''}`
-          : kind === 'dining'
-            ? `${l.quantity} 份`
-            : l.quantity > 1
-              ? `× ${l.quantity}`
-              : '';
+        kind === 'service' && l.techName ? `技师 ${l.techNo} ${l.techName}${l.clocks ? ` · ${l.clocks} 钟` : ''}` : kind === 'dining' ? `${l.quantity} 份` : l.quantity > 1 ? `× ${l.quantity}` : '';
       entries.push({
         key: `line-${l.id}`,
         kind,
@@ -347,9 +370,7 @@ export async function roomTimeline(deps: Deps, roomId: number, raw: unknown): Pr
     SELECT e.id, e.from_state, e.to_state, e.note, e.source, e.ref, e.created_at, st.display_name AS staff_name
     FROM room_housekeeping_events e JOIN staff st ON st.id = e.staff_id
     WHERE e.room_id = ${roomId} AND e.created_at >= ${start} AND e.created_at < ${end} ORDER BY e.id`;
-  const reverted = new Set(
-    (await db<{ revertsId: number }[]>`SELECT reverts_id FROM room_housekeeping_events WHERE room_id = ${roomId} AND reverts_id IS NOT NULL`).map((r) => Number(r.revertsId)),
-  );
+  const reverted = new Set((await db<{ revertsId: number }[]>`SELECT reverts_id FROM room_housekeeping_events WHERE room_id = ${roomId} AND reverts_id IS NOT NULL`).map((r) => Number(r.revertsId)));
   for (const e of events) {
     entries.push({
       key: `hk-${e.id}`,

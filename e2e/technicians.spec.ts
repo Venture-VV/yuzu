@@ -96,7 +96,10 @@ test.describe('v0.7.0 技师', () => {
       // ③ 前台：接待一位女宾，加项目 → 选技师（点钟）
       await login(page, 'xiaozhou');
       const board = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
-      const tag = board.tags.filter((t) => t.zone === 'female' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+      const tag = board.tags
+        .filter((t) => t.zone === 'female' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+        .map((t) => t.code)
+        .reverse()[0]!;
       const checkin = await page.request.post('/api/frontdesk/checkins', { data: { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'female', guestLabel: 'E2E 技师客人' }] } });
       expect(checkin.ok(), await checkin.text()).toBe(true);
       await page.goto('/frontdesk');

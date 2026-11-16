@@ -34,7 +34,11 @@ const SYNONYMS: Record<OtaField, string[]> = {
   status: ['订单状态', '状态'],
 };
 
-const norm = (s: string) => s.replace(/\s+/g, '').replace(/[（）()]/g, '').toLowerCase();
+const norm = (s: string) =>
+  s
+    .replace(/\s+/g, '')
+    .replace(/[（）()]/g, '')
+    .toLowerCase();
 
 /** 按表头的同义词认列 */
 export function detectOtaColumns(header: string[]): OtaColumnMap {

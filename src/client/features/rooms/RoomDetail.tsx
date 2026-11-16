@@ -142,15 +142,17 @@ export function HousekeepingDialog({ room, onClose, onDetail }: { room: RoomBoar
           <p className="rounded-lg bg-paper-2 px-4 py-3 text-[16px] font-bold">
             {room.roomNo}：{stateText(current, occupied)} → <span className="text-pine">{stateText(status, occupied)}</span>
           </p>
-          {note.trim() && <p className="text-[13.5px] text-ink-2">{status === 'maintenance' ? '维修原因' : '备注'}：{note.trim()}</p>}
+          {note.trim() && (
+            <p className="text-[13.5px] text-ink-2">
+              {status === 'maintenance' ? '维修原因' : '备注'}：{note.trim()}
+            </p>
+          )}
           <p className="text-[12.5px] text-ink-3">确认后看板马上更新；改错了可以撤回（之后房态没再变过时）。</p>
           {error && <Notice tone="error" title={error} />}
         </div>
       ) : step === 'revert' && last ? (
         <div className="space-y-3">
-          <p className="rounded-lg bg-paper-2 px-4 py-3 text-[15px] font-bold">
-            撤回到「{stateText(last.from, occupied)}」？
-          </p>
+          <p className="rounded-lg bg-paper-2 px-4 py-3 text-[15px] font-bold">撤回到「{stateText(last.from, occupied)}」？</p>
           <p className="text-[13px] text-ink-2">
             撤回的是 {last.staffName} {formatDateTime(last.at)} 的修改：{HOUSEKEEPING_LABELS[last.from]} → {HOUSEKEEPING_LABELS[last.to]}
             {last.note ? `（${last.note}）` : ''}。撤回也会记一条房态记录。
@@ -233,12 +235,17 @@ export function RoomDetailDialog({ rooms, roomId, onClose }: { rooms: RoomBoardR
     placeholderData: keepPreviousData,
   });
   const entries = (q.data?.entries ?? []).filter((e) => filter === 'all' || e.kind === filter);
-  const sumOf = (kinds: RoomTimelineKind[]) =>
-    (q.data?.entries ?? []).filter((e) => kinds.includes(e.kind) && e.amount !== null && e.status === null).reduce((n, e) => n + (e.amount ?? 0), 0);
+  const sumOf = (kinds: RoomTimelineKind[]) => (q.data?.entries ?? []).filter((e) => kinds.includes(e.kind) && e.amount !== null && e.status === null).reduce((n, e) => n + (e.amount ?? 0), 0);
   const room = rooms.find((r) => r.id === id);
 
   return (
-    <Dialog open onClose={onClose} title={`房间详情${room ? ` · ${room.roomNo}` : ''}`} width="max-w-3xl" description="这间房的入住、房费、押金、住客住在这间期间的消费与房态记录，都从原单据现查；金额与账单一致。">
+    <Dialog
+      open
+      onClose={onClose}
+      title={`房间详情${room ? ` · ${room.roomNo}` : ''}`}
+      width="max-w-3xl"
+      description="这间房的入住、房费、押金、住客住在这间期间的消费与房态记录，都从原单据现查；金额与账单一致。"
+    >
       <div className="space-y-3" data-testid="room-detail">
         <div className="flex flex-wrap items-center gap-2 text-[13px]">
           <Select value={id ?? ''} onChange={(e) => setId(Number(e.target.value) || null)} fullWidth={false} className="w-40" aria-label="房间" data-testid="room-detail-room">
@@ -268,7 +275,11 @@ export function RoomDetailDialog({ rooms, roomId, onClose }: { rooms: RoomBoardR
         {problem ? (
           <Notice tone="warning" title={problem} />
         ) : !q.data ? (
-          q.error ? <Notice tone="error" title={errorMessage(q.error)} /> : <Skeleton className="h-40" />
+          q.error ? (
+            <Notice tone="error" title={errorMessage(q.error)} />
+          ) : (
+            <Skeleton className="h-40" />
+          )
         ) : (
           <>
             <p className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-ink-2" data-testid="room-detail-totals">

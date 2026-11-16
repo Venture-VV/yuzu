@@ -193,5 +193,16 @@ export function FadeImg({ className, ...props }: ImgHTMLAttributes<HTMLImageElem
   useLayoutEffect(() => {
     setLoaded(!!ref.current?.complete && (ref.current?.naturalWidth ?? 0) > 0);
   }, [props.src]);
-  return <img ref={ref} alt="" draggable={false} {...props} className={`em-img${className ? ` ${className}` : ''}`} data-loaded={loaded || undefined} onLoad={() => setLoaded(true)} onError={() => setLoaded(true)} />;
+  return (
+    <img
+      ref={ref}
+      alt=""
+      draggable={false}
+      {...props}
+      className={`em-img${className ? ` ${className}` : ''}`}
+      data-loaded={loaded || undefined}
+      onLoad={() => setLoaded(true)}
+      onError={() => setLoaded(true)}
+    />
+  );
 }

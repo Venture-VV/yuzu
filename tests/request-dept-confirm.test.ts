@@ -29,7 +29,11 @@ const q = (n: number) => Math.round(n * 1000);
 
 /** 浴区提一张：boxes 箱 × ¥450（2 箱 ¥900 不到门槛，4 箱 ¥1,800 到了） */
 const submit = (cookie: string, boxes: number, body: Record<string, unknown> = {}) =>
-  api(ctx.app, cookie, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(boxes), unit: '箱', refPriceCents: 45_000 }], ...body });
+  api(ctx.app, cookie, 'POST', '/api/erp/requests', {
+    clientKey: randomUUID(),
+    lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(boxes), unit: '箱', refPriceCents: 45_000 }],
+    ...body,
+  });
 const act = (cookie: string, id: number, action: string, body: Record<string, unknown> = {}) => api(ctx.app, cookie, 'POST', `/api/erp/requests/${id}/${action}`, body);
 const get = async (cookie: string, id: number) => (await api(ctx.app, cookie, 'GET', `/api/erp/requests/${id}`)).body;
 const setRules = (body: Record<string, unknown>) => api(ctx.app, boss, 'PUT', '/api/inventory/purchase-rules', body);
@@ -95,7 +99,10 @@ describe('哪些需求单要主管确认（LC11、LC12）', () => {
     expect(requestStatusLabel(big)).toBe('待主管确认');
     expect(big.canDeptConfirm).toBe(false);
     // 没填参考价：估不出来，不算进去
-    const unpriced = await api(ctx.app, reqA, 'POST', '/api/erp/requests', { clientKey: randomUUID(), lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(40), unit: '箱' }] });
+    const unpriced = await api(ctx.app, reqA, 'POST', '/api/erp/requests', {
+      clientKey: randomUUID(),
+      lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: q(40), unit: '箱' }],
+    });
     expect(unpriced.body.request.deptConfirm.state).toBe('none');
     // 水吧没设主管
     expect((await submit(reqB, 10)).body.request.deptConfirm.state).toBe('none');

@@ -11,12 +11,7 @@ const hashToken = (token: string) => createHash('sha256').update(token).digest('
 /** 会话令牌的摘要（换门店时按它找会话） */
 export const hashSessionToken = hashToken;
 
-export async function createSession(
-  db: Db,
-  staffId: number,
-  ttlHours: number,
-  meta: { ip?: string; userAgent?: string },
-): Promise<string> {
+export async function createSession(db: Db, staffId: number, ttlHours: number, meta: { ip?: string; userAgent?: string }): Promise<string> {
   const token = randomBytes(32).toString('base64url');
   await db`
     INSERT INTO sessions (token_hash, staff_id, expires_at, ip, user_agent)

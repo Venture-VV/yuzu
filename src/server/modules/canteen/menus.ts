@@ -4,17 +4,7 @@
 // 锁：只锁那一份菜单（新建靠「哪天哪餐」的唯一约束兜底）；点赞靠主键去重，不加锁。
 
 import { z } from 'zod';
-import {
-  DISH_ID,
-  DISH_TAGS,
-  MEAL_LABELS,
-  MEALS,
-  MENU_LIMITS,
-  suggestDishEmoji,
-  type CanteenMenu,
-  type Dish,
-  type Meal,
-} from '@shared/canteen';
+import { DISH_ID, DISH_TAGS, MEAL_LABELS, MEALS, MENU_LIMITS, suggestDishEmoji, type CanteenMenu, type Dish, type Meal } from '@shared/canteen';
 import { businessDateOf } from '@shared/business-date';
 import type { Db, Sql } from '../../db';
 import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
@@ -75,7 +65,12 @@ export async function listMenus(db: Db, rawFrom: unknown, rawTo: unknown, opts: 
   const likes = await db<{ menuId: number; dishId: string; n: number; mine: boolean }[]>`
     SELECT menu_id, dish_id, count(*)::int AS n, bool_or(employee_id = ${opts.viewerId ?? 0}) AS mine
     FROM canteen_likes WHERE menu_id = ANY(${ids}) GROUP BY menu_id, dish_id`;
-  return menus.map((m) => toMenu(m, likes.filter((l) => l.menuId === m.id)));
+  return menus.map((m) =>
+    toMenu(
+      m,
+      likes.filter((l) => l.menuId === m.id),
+    ),
+  );
 }
 
 function toMenu(m: MenuRow, likes: { dishId: string; n: number; mine: boolean }[]): CanteenMenu {
@@ -96,8 +91,7 @@ function toMenu(m: MenuRow, likes: { dishId: string; n: number; mine: boolean }[
   };
 }
 
-const sameContent = (m: MenuRow, dishes: Dish[], note: string, published: boolean) =>
-  JSON.stringify(m.dishes) === JSON.stringify(dishes) && m.note === note && m.published === published;
+const sameContent = (m: MenuRow, dishes: Dish[], note: string, published: boolean) => JSON.stringify(m.dishes) === JSON.stringify(dishes) && m.note === note && m.published === published;
 
 /** 保存（含发布、撤回发布）某天某餐的菜单 */
 export async function saveMenu(sql: Sql, editor: CanteenSessionEmployee, rawDate: unknown, rawMeal: unknown, raw: unknown, timeZone: string): Promise<CanteenMenu> {

@@ -29,10 +29,7 @@ export function StorePricesCard() {
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const rows = useQuery({ queryKey: ['catalog', 'store-prices'], queryFn: () => api.get<Row[]>('/api/admin/catalog/store-prices') });
-  const shown = useMemo(
-    () => (rows.data ?? []).filter((r) => !q.trim() || r.name.includes(q.trim()) || r.category.includes(q.trim())),
-    [rows.data, q],
-  );
+  const shown = useMemo(() => (rows.data ?? []).filter((r) => !q.trim() || r.name.includes(q.trim()) || r.category.includes(q.trim())), [rows.data, q]);
   const save = async (r: Row, clear = false) => {
     const key = `${r.itemId}:${r.tier}`;
     const text = draft[key] ?? '';

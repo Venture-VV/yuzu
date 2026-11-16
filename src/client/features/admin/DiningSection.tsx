@@ -207,17 +207,17 @@ function RulesCard() {
             draft.warnMinutes !== DEFAULT_DINING_RULES.warnMinutes ||
             draft.tablesEnabled !== DEFAULT_DINING_RULES.tablesEnabled ||
             draft.voidFreeCents !== DEFAULT_DINING_RULES.voidFreeCents) && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              setDraft({ ...DEFAULT_DINING_RULES, enabled: draft.enabled });
-              setFreeText(null);
-            }}
-          >
-            其他规则恢复默认
-          </Button>
-        )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setDraft({ ...DEFAULT_DINING_RULES, enabled: draft.enabled });
+                setFreeText(null);
+              }}
+            >
+              其他规则恢复默认
+            </Button>
+          )}
         {editable && (
           <Button variant="primary" loading={busy} disabled={!dirty || !minutesOk || !freeOk} onClick={save} data-testid="dining-rules-save">
             保存餐饮规则
@@ -248,13 +248,9 @@ function StationsCard() {
       >
         出品档口
       </SectionTitle>
-      <p className="mt-1 text-[12.5px] text-ink-3">
-        厨房按档口分屏（热菜、凉菜、主食、水吧……），每块屏只看自己档口的菜。停用的档口上的菜不再进厨房（照常挂账）；档口不删除，历史出品单照常显示。
-      </p>
+      <p className="mt-1 text-[12.5px] text-ink-3">厨房按档口分屏（热菜、凉菜、主食、水吧……），每块屏只看自己档口的菜。停用的档口上的菜不再进厨房（照常挂账）；档口不删除，历史出品单照常显示。</p>
       {stations.length === 0 ? (
-        <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">
-          还没有档口。{editable ? '点「新建档口」，例如「热菜」「水吧」。' : ''}
-        </p>
+        <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">还没有档口。{editable ? '点「新建档口」，例如「热菜」「水吧」。' : ''}</p>
       ) : (
         <ul className="mt-3 divide-y divide-line/70 rounded-lg border border-line">
           {stations.map((s) => (
@@ -439,11 +435,13 @@ function ItemsCard() {
               >
                 <option value="">整类设为…</option>
                 {prefix === 'dining-items' && <option value="none">不进厨房</option>}
-                {stations.filter((s) => s.active).map((s) => (
-                  <option key={s.id} value={String(s.id)}>
-                    {s.name}
-                  </option>
-                ))}
+                {stations
+                  .filter((s) => s.active)
+                  .map((s) => (
+                    <option key={s.id} value={String(s.id)}>
+                      {s.name}
+                    </option>
+                  ))}
               </Select>
             )}
           </div>
@@ -571,9 +569,7 @@ function TablesCard() {
         不洗浴的客人（只来吃饭）在桌台上开台、点单，单独结账；洗浴客人的菜照常挂在手牌上。可按区域分组（大厅、包间……）。正在用餐的桌不能停用；桌台不删除，历史结账单照常显示桌号。
       </p>
       {list.length === 0 ? (
-        <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">
-          还没有桌台。{editable ? '点「新建桌台」，例如「A1」「包间 1」。' : ''}
-        </p>
+        <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">还没有桌台。{editable ? '点「新建桌台」，例如「A1」「包间 1」。' : ''}</p>
       ) : (
         <ul className="mt-3 divide-y divide-line/70 rounded-lg border border-line">
           {list.map((t) => (
@@ -638,8 +634,7 @@ function TableDialog({ target, areas, onClose }: { target: DiningTable | 'new' |
     setError(null);
     try {
       const body = { name: name.trim(), area: area.trim(), seats: seatNum, sortOrder: order, active };
-      const next =
-        target === 'new' ? await api.post<TablesAdmin>('/api/admin/dining/tables', body) : await api.put<TablesAdmin>(`/api/admin/dining/tables/${target!.id}`, body);
+      const next = target === 'new' ? await api.post<TablesAdmin>('/api/admin/dining/tables', body) : await api.put<TablesAdmin>(`/api/admin/dining/tables/${target!.id}`, body);
       qc.setQueryData(tablesAdminKey, next);
       void qc.invalidateQueries({ queryKey: ['dining'] });
       toast({ tone: 'success', title: target === 'new' ? `已新建桌台「${body.name}」` : '桌台已保存' });

@@ -12,15 +12,7 @@ import { HandCoins, ShieldCheck } from 'lucide-react';
 import type { RefundShiftOptions } from '@shared/checkout';
 import type { Granted, MemberRefundGrantRequest } from '@shared/grants';
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from '@shared/labels';
-import {
-  onlineRoutable,
-  REFUND_SOURCE_LABELS,
-  refundRefRequired,
-  type MemberRefundDetail,
-  type MemberRefundPlan,
-  type RefundPlanLine,
-  type RefundRoute,
-} from '@shared/member-refunds';
+import { onlineRoutable, REFUND_SOURCE_LABELS, refundRefRequired, type MemberRefundDetail, type MemberRefundPlan, type RefundPlanLine, type RefundRoute } from '@shared/member-refunds';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import type { MemberDetail } from '@shared/types';
 import { api, errorMessage, UncertainError } from '../../lib/api';
@@ -129,11 +121,8 @@ export function AccountCard({ member }: { member: MemberDetail }) {
                 {r.grade && <Badge tone="ember">{`${r.grade.from} → ${r.grade.to}`}</Badge>}
               </div>
               <p className="mt-0.5 text-[12.5px] text-ink-3">
-                {r.lines
-                  .map((l) => `${PAYMENT_METHOD_LABELS[l.method]} ${formatYuan(l.amount)}${l.ref ? `（${l.ref}）` : l.route === 'mp_auto' ? '（门店系统原路退回）' : ''}`)
-                  .join('、')}{' '}
-                · {r.reason} · 经办 {r.operatorName}，
-                {r.approverName}授权
+                {r.lines.map((l) => `${PAYMENT_METHOD_LABELS[l.method]} ${formatYuan(l.amount)}${l.ref ? `（${l.ref}）` : l.route === 'mp_auto' ? '（门店系统原路退回）' : ''}`).join('、')} ·{' '}
+                {r.reason} · 经办 {r.operatorName}，{r.approverName}授权
               </p>
             </li>
           ))}
@@ -148,9 +137,7 @@ export function AccountCard({ member }: { member: MemberDetail }) {
 /** 停用 / 启用、换手机号、合并的记录（最近的在前） */
 function AccountHistory({ h }: { h: MemberAccountHistory }) {
   const rows = [
-    ...h.statusEvents
-      .filter((e) => !e.mergeNo)
-      .map((e) => ({ at: e.createdAt, key: `s${e.id}`, text: `${e.toStatus === 'frozen' ? '停用' : '启用'} · ${e.reason} · ${e.staffName}` })),
+    ...h.statusEvents.filter((e) => !e.mergeNo).map((e) => ({ at: e.createdAt, key: `s${e.id}`, text: `${e.toStatus === 'frozen' ? '停用' : '启用'} · ${e.reason} · ${e.staffName}` })),
     ...h.phoneChanges.map((c) => ({
       at: c.createdAt,
       key: `p${c.id}`,
@@ -162,7 +149,13 @@ function AccountHistory({ h }: { h: MemberAccountHistory }) {
       text: `合并转入 ${g.mergeNo}：${g.source.name}（${g.source.memberNo}）本金 ${formatYuan(g.principal)}、赠金 ${formatYuan(g.bonus)}${g.grade ? `，档阶 ${g.grade.from} → ${g.grade.to}` : ''} · ${g.staffName}`,
     })),
     ...(h.mergedInto
-      ? [{ at: h.mergedInto.createdAt, key: 'into', text: `合并到 ${h.mergedInto.target.name}（${h.mergedInto.target.memberNo}）${h.mergedInto.mergeNo} · ${h.mergedInto.reason} · ${h.mergedInto.staffName}` }]
+      ? [
+          {
+            at: h.mergedInto.createdAt,
+            key: 'into',
+            text: `合并到 ${h.mergedInto.target.name}（${h.mergedInto.target.memberNo}）${h.mergedInto.mergeNo} · ${h.mergedInto.reason} · ${h.mergedInto.staffName}`,
+          },
+        ]
       : []),
   ].sort((a, b) => (a.at < b.at ? 1 : -1));
   if (rows.length === 0) return null;
@@ -314,13 +307,7 @@ function RefundDialog({ member, onClose, onDone }: { member: MemberDetail; onClo
       <div className="grid gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="退的本金" htmlFor="member-refund-amount" hint={`本金余额 ${formatYuan(member.principalBalance)}，默认全退`}>
-            <MoneyInput
-              id="member-refund-amount"
-              value={amountText}
-              invalid={overBalance}
-              onChange={(e) => setAmountText(e.target.value)}
-              data-testid="member-refund-amount"
-            />
+            <MoneyInput id="member-refund-amount" value={amountText} invalid={overBalance} onChange={(e) => setAmountText(e.target.value)} data-testid="member-refund-amount" />
           </Field>
           <div className="rounded-md bg-paper-2 px-3 py-2 text-[13px]" data-testid="member-refund-bonus">
             <p className="text-ink-3">扣回赠金</p>
@@ -347,7 +334,11 @@ function RefundDialog({ member, onClose, onDone }: { member: MemberDetail; onClo
                     <p className="font-semibold text-ink">
                       {REFUND_SOURCE_LABELS[l.source]} <span className="num">{l.docNo}</span>
                       <span className="ml-1 font-normal text-ink-3">{l.date}</span>
-                      {l.channel === 'mp' && <Badge tone="lake" className="ml-1">小程序</Badge>}
+                      {l.channel === 'mp' && (
+                        <Badge tone="lake" className="ml-1">
+                          小程序
+                        </Badge>
+                      )}
                     </p>
                     <p className="text-[12.5px] text-ink-3">
                       退 <Money cents={l.amount} />
@@ -365,12 +356,7 @@ function RefundDialog({ member, onClose, onDone }: { member: MemberDetail; onClo
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     {l.method === null && (
-                      <Select
-                        aria-label="退款方式"
-                        value={l.draft.method}
-                        onChange={(e) => setDraft(l, { method: e.target.value as PaymentMethod })}
-                        data-testid={`member-refund-method-${i}`}
-                      >
+                      <Select aria-label="退款方式" value={l.draft.method} onChange={(e) => setDraft(l, { method: e.target.value as PaymentMethod })} data-testid={`member-refund-method-${i}`}>
                         {PAYMENT_METHODS.map((m) => (
                           <option key={m} value={m}>
                             {PAYMENT_METHOD_LABELS[m]}
@@ -379,12 +365,7 @@ function RefundDialog({ member, onClose, onDone }: { member: MemberDetail; onClo
                       </Select>
                     )}
                     {autoOk(l) && (
-                      <Select
-                        aria-label="怎么退"
-                        value={l.draft.route}
-                        onChange={(e) => setDraft(l, { route: e.target.value as RefundRoute })}
-                        data-testid={`member-refund-route-${i}`}
-                      >
+                      <Select aria-label="怎么退" value={l.draft.route} onChange={(e) => setDraft(l, { route: e.target.value as RefundRoute })} data-testid={`member-refund-route-${i}`}>
                         <option value="mp_auto">门店系统原路退回</option>
                         <option value="manual">已在商户平台退过</option>
                       </Select>

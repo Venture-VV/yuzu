@@ -69,7 +69,12 @@ describe('Excel 生成（lib/xlsx）', () => {
     expect(sheet).toContain('t="inlineStr"><is><t xml:space="preserve">=SUM(1,2)</t>');
     expect(sheet).not.toContain('<f>');
     expect(sheet).toContain('<v>1.5</v>');
-    expect(files.get('xl/drawings/drawing1.xml')!.toString('utf8').match(/<xdr:oneCellAnchor>/g)).toHaveLength(2);
+    expect(
+      files
+        .get('xl/drawings/drawing1.xml')!
+        .toString('utf8')
+        .match(/<xdr:oneCellAnchor>/g),
+    ).toHaveLength(2);
     // 同样的内容生成同样的文件
     expect(buildXlsx({ name: 'a', columns: [{ header: 'x' }], rows: [['1']] }).equals(buildXlsx({ name: 'a', columns: [{ header: 'x' }], rows: [['1']] }))).toBe(true);
   });
@@ -155,7 +160,13 @@ describe('采购台账（按日逐笔）', () => {
     const c1 = (await claim({ paySource: 'petty', advanceId: a.id })).body.claim;
     await claim({ lines: [{ name: '扫把', category: 'low_value', unit: '把', boughtMilli: q(3), receivedMilli: q(3), amountCents: 4_500 }] });
     await api(ctx.app, coster, 'POST', '/api/erp/petty/settlements', {
-      clientKey: randomUUID(), advanceId: a.id, kind: 'return', settleDate: today, amountCents: 44_000, method: 'cash', evidence: '现金当面点清',
+      clientKey: randomUUID(),
+      advanceId: a.id,
+      kind: 'return',
+      settleDate: today,
+      amountCents: 44_000,
+      method: 'cash',
+      evidence: '现金当面点清',
     });
 
     const ledger = (await api(ctx.app, keeper, 'GET', `/api/erp/ledger?from=${today}&to=${today}`)).body;
@@ -254,20 +265,33 @@ describe('v0.7.9 审查修正', () => {
     const day = daysAgo(20);
     const adv = (
       await api(ctx.app, coster, 'POST', '/api/erp/petty/advances', {
-        clientKey: randomUUID(), departmentId: deptB, handlerId: keeperId, advanceDate: day, amountCents: 20_000, method: 'wechat', evidence: '转账尾号 0002',
+        clientKey: randomUUID(),
+        departmentId: deptB,
+        handlerId: keeperId,
+        advanceDate: day,
+        amountCents: 20_000,
+        method: 'wechat',
+        evidence: '转账尾号 0002',
       })
     ).body.advance;
     expect((await claim({ expenseDate: day, departmentId: deptB, handlerId: keeperId, paySource: 'petty', advanceId: adv.id })).status).toBe(201);
     expect(
-      (await api(ctx.app, coster, 'POST', '/api/erp/petty/settlements', {
-        clientKey: randomUUID(), advanceId: adv.id, kind: 'return', settleDate: day, amountCents: 14_000, method: 'cash', evidence: '现金当面点清',
-      })).status,
+      (
+        await api(ctx.app, coster, 'POST', '/api/erp/petty/settlements', {
+          clientKey: randomUUID(),
+          advanceId: adv.id,
+          kind: 'return',
+          settleDate: day,
+          amountCents: 14_000,
+          method: 'cash',
+          evidence: '现金当面点清',
+        })
+      ).status,
     ).toBe(201);
     await advance(10_000, day);
 
     const from = daysAgo(30);
-    const shown = async (f: { departmentId?: number; handlerId?: number }) =>
-      (await buildLedger(ctx.sql, { from, to: today, ...f })).days.reduce((n, d) => n + d.entries.length, 0);
+    const shown = async (f: { departmentId?: number; handlerId?: number }) => (await buildLedger(ctx.sql, { from, to: today, ...f })).days.reduce((n, d) => n + d.entries.length, 0);
     for (const f of [{}, { departmentId: deptA }, { departmentId: deptB }, { handlerId: costerId }, { handlerId: keeperId }, { departmentId: deptB, handlerId: costerId }]) {
       expect(await ledgerCount(ctx.sql, { from, to: today, ...f }), JSON.stringify(f)).toBe(await shown(f));
     }

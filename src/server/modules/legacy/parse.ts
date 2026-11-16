@@ -229,8 +229,7 @@ function sheetDiagnosis(sheet: XlsxSheet, alternatives: ColumnSpec[][]): string 
 }
 
 /** 工作表里有没有写东西（有值或公式的格子） */
-const hasContent = (sheet: XlsxSheet) =>
-  [...sheet.rows.values()].some((row) => [...row.values()].some((c) => (c.value !== null && c.value.trim() !== '') || c.formula));
+const hasContent = (sheet: XlsxSheet) => [...sheet.rows.values()].some((row) => [...row.values()].some((c) => (c.value !== null && c.value.trim() !== '') || c.formula));
 
 /**
  * 认出是哪份表之后，其余写了东西的工作表也必须导入：认不出的整份拒绝，不悄悄少导入一个月；完全空白的表跳过
@@ -387,7 +386,11 @@ function parsePurchaseLedger(sheets: XlsxSheet[]): ParsedLegacy {
         return { cents: n === null ? null : toCents(n), formula: c?.formula ?? null };
       };
       if (isTotalRow(row)) {
-        for (const [key, label] of [['advance', '打款金额'], ['should', '应退回金额'], ['returned', '退回出纳']] as const) {
+        for (const [key, label] of [
+          ['advance', '打款金额'],
+          ['should', '应退回金额'],
+          ['returned', '退回出纳'],
+        ] as const) {
           const v = cellNum(key).cents;
           if (v !== null) out.fileTotals[label] = v;
         }
@@ -419,7 +422,12 @@ function parsePurchaseLedger(sheets: XlsxSheet[]): ParsedLegacy {
 function parseMaterialDetail(sheets: XlsxSheet[]): ParsedLegacy {
   const out = emptyResult('material_detail');
   const found = sheets.map((s) => ({ s, h: findHeader(s, MATERIAL_COLS) }));
-  rejectUnused('material_detail', sheets, found.filter((x) => x.h).map((x) => x.s), [MATERIAL_COLS]);
+  rejectUnused(
+    'material_detail',
+    sheets,
+    found.filter((x) => x.h).map((x) => x.s),
+    [MATERIAL_COLS],
+  );
   for (const { s, h } of found) {
     if (!h) continue;
     const top = mergedTop(s);
@@ -467,7 +475,12 @@ function parseMaterialDetail(sheets: XlsxSheet[]): ParsedLegacy {
 function parseOrdered(sheets: XlsxSheet[], cellImages: Map<string, { data: Buffer; ext: string }>): ParsedLegacy {
   const out = emptyResult('ordered_materials');
   const found = sheets.map((s) => ({ s, h: findHeader(s, ORDERED_COLS) }));
-  rejectUnused('ordered_materials', sheets, found.filter((x) => x.h).map((x) => x.s), [ORDERED_COLS]);
+  rejectUnused(
+    'ordered_materials',
+    sheets,
+    found.filter((x) => x.h).map((x) => x.s),
+    [ORDERED_COLS],
+  );
   for (const { s, h } of found) {
     if (!h) continue;
     const top = mergedTop(s);

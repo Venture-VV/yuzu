@@ -11,12 +11,37 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ERP_OP_TYPES, type ErpOpLookup, type ErpOpType } from '@shared/erp';
 import { can, type Permission } from '@shared/permissions';
-import { type Db } from '../db';
+import type { Db } from '../db';
 import { guard } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Deps } from '../lib/context';
 import { conflict, forbidden } from '../lib/errors';
-import { erpP2OpRef, isErpP2Op, approvalOpRef, benefitUseOpRef, contractOpRef, countCardOpRef, memberCardOpRef, couponOpRef, platformOpRef, deviceOpRef, fenceKey, gradeOpRef, isCouponOp, isContractOp, isCountCardOp, isApprovalOp, isDeviceOp, isFenced, isMemberOp, isPaymentFlowOp, isPlatformOp, memberOpRef, paymentFlowOpRef, trialOpRef } from '../lib/fences';
+import {
+  erpP2OpRef,
+  isErpP2Op,
+  approvalOpRef,
+  benefitUseOpRef,
+  contractOpRef,
+  countCardOpRef,
+  memberCardOpRef,
+  couponOpRef,
+  platformOpRef,
+  deviceOpRef,
+  fenceKey,
+  gradeOpRef,
+  isCouponOp,
+  isContractOp,
+  isCountCardOp,
+  isApprovalOp,
+  isDeviceOp,
+  isFenced,
+  isMemberOp,
+  isPaymentFlowOp,
+  isPlatformOp,
+  memberOpRef,
+  paymentFlowOpRef,
+  trialOpRef,
+} from '../lib/fences';
 import { parse } from '../lib/validate';
 import { setTxTimeouts } from '../lib/tx';
 
@@ -265,10 +290,10 @@ const KeyParam = z.object({ key: z.uuid('操作编号格式不正确') });
 const TypeQuery = z.object({ type: z.enum(ERP_OP_TYPES, '缺少原操作的业务类型') });
 const AbandonInput = TypeQuery.extend({ summary: z.string().trim().max(200).default('') });
 
-async function customerOpScope(db: Db, key: string, type: ErpOpType, actor: Parameters<typeof can>[0] & {id:number}) {
-  if (!type.startsWith('customer_') || can(actor,'customer.manage')) return;
-  const owners=await db`SELECT staff_id FROM idempotency_keys WHERE key=${key}::uuid UNION SELECT staff_id FROM op_fences WHERE key=${key}::uuid AND op_type=${type}`;
-  if (owners.some(row=>Number(row.staffId)!==actor.id)) throw forbidden('不能查回或作废其他员工的客户部操作');
+async function customerOpScope(db: Db, key: string, type: ErpOpType, actor: Parameters<typeof can>[0] & { id: number }) {
+  if (!type.startsWith('customer_') || can(actor, 'customer.manage')) return;
+  const owners = await db`SELECT staff_id FROM idempotency_keys WHERE key=${key}::uuid UNION SELECT staff_id FROM op_fences WHERE key=${key}::uuid AND op_type=${type}`;
+  if (owners.some((row) => Number(row.staffId) !== actor.id)) throw forbidden('不能查回或作废其他员工的客户部操作');
 }
 
 export function registerErpOpsRoutes(app: FastifyInstance, deps: Deps) {
@@ -279,10 +304,10 @@ export function registerErpOpsRoutes(app: FastifyInstance, deps: Deps) {
     const { key } = parse(KeyParam, req.params);
     const { type } = parse(TypeQuery, req.query ?? {});
     if (!allowed(req.actor, READ[type])) throw forbidden();
-    await customerOpScope(sql,key,type,req.actor);
+    await customerOpScope(sql, key, type, req.actor);
     const result = await lookupErpOp(sql, key, type);
     // A foreign submission may have committed between the first check and lookup.
-    await customerOpScope(sql,key,type,req.actor);
+    await customerOpScope(sql, key, type, req.actor);
     return result;
   });
 
@@ -293,7 +318,7 @@ export function registerErpOpsRoutes(app: FastifyInstance, deps: Deps) {
     const outcome = await sql.begin(async (tx) => {
       await setTxTimeouts(tx);
       const result = await fenceKey(tx, key, input.type, req.actor.id);
-      await customerOpScope(tx,key,input.type,req.actor);
+      await customerOpScope(tx, key, input.type, req.actor);
       if ('inserted' in result && result.inserted) {
         await writeAudit(tx, {
           staffId: req.actor.id,

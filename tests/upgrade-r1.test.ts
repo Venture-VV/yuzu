@@ -87,8 +87,10 @@ describe('迁移 017 · 反结账退款的交班口径只用于升级之后开�
     const config = loadConfig({ databaseUrl: TEST_DB, env: 'test', logLevel: 'silent' });
     const hash = await hashPassword(PASSWORD);
     const staff = async (username: string, role: string) =>
-      (await sql<{ id: number }[]>`
-        INSERT INTO staff (username, display_name, role, password_hash) VALUES (${username}, ${username}, ${role}, ${hash}) RETURNING id`)[0]!.id;
+      (
+        await sql<{ id: number }[]>`
+        INSERT INTO staff (username, display_name, role, password_hash) VALUES (${username}, ${username}, ${role}, ${hash}) RETURNING id`
+      )[0]!.id;
     const cashier = await staff('cashier', 'clerk');
     const mgrb = await staff('mgrb', 'duty_manager');
     await staff('mgrc', 'duty_manager');
@@ -97,9 +99,11 @@ describe('迁移 017 · 反结账退款的交班口径只用于升级之后开�
     const today = businessDateOf(new Date(now), config.timezone, 6);
     // 016 时期：收银员、经理 B 都在 3 小时前开班、升级时仍未交班；收银员 2 小时前的现金结账 557 已被经理 B 反结账（v0.3 口径）
     const shift = async (no: string, staffId: number) =>
-      (await sql<{ id: number }[]>`
+      (
+        await sql<{ id: number }[]>`
         INSERT INTO shifts (shift_no, staff_id, business_date, started_at, opening_cash)
-        VALUES (${no}, ${staffId}, ${today}, ${new Date(now - 3 * H)}, 0) RETURNING id`)[0]!.id;
+        VALUES (${no}, ${staffId}, ${today}, ${new Date(now - 3 * H)}, 0) RETURNING id`
+      )[0]!.id;
     const sa = await shift('BC-UP-A', cashier);
     const sb = await shift('BC-UP-B', mgrb);
     const [c1] = await sql<{ id: number }[]>`
@@ -124,7 +128,10 @@ describe('迁移 017 · 反结账退款的交班口径只用于升级之后开�
       const v = await api(app!, a, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode, zone: 'male' }] });
       expect(v.status).toBe(201);
       const r = await api(app!, a, 'POST', '/api/frontdesk/checkouts', {
-        clientKey: randomUUID(), visitIds: [v.body.visits[0].id], expectedTotal: 49900, payments: [{ method: 'cash', amount: 49900 }],
+        clientKey: randomUUID(),
+        visitIds: [v.body.visits[0].id],
+        expectedTotal: 49900,
+        payments: [{ method: 'cash', amount: 49900 }],
       });
       expect(r.status).toBe(200);
       return r.body.id as number;

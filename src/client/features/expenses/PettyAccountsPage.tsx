@@ -190,27 +190,24 @@ function Journal({ row }: { row: PettyAccountRow }) {
             </li>
             {j!.entries.length === 0 && <li className="px-4 py-6 text-center text-[13px] text-ink-3">这段时间没有进出</li>}
             {j!.entries.map((e) => (
-              <li key={`${e.kind}-${e.refId}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-2.5 md:grid-cols-[96px_minmax(0,1fr)_110px_120px]" data-testid={`journal-${e.docNo}`}>
+              <li
+                key={`${e.kind}-${e.refId}`}
+                className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-2.5 md:grid-cols-[96px_minmax(0,1fr)_110px_120px]"
+                data-testid={`journal-${e.docNo}`}
+              >
                 <span className="text-[12.5px]">
                   <span className="num block font-semibold">{e.date}</span>
                   <span className={cn('font-bold', KIND_TONE[e.kind])}>{PETTY_JOURNAL_LABELS[e.kind]}</span>
                 </span>
                 <span className="min-w-0 text-[12.5px]">
                   <span className="block truncate">
-                    <Link
-                      to={e.kind === 'expense' ? `/erp/expenses?claim=${e.refId}` : `/erp/petty?advance=${e.advanceId}`}
-                      className="num font-semibold text-lake hover:underline"
-                    >
+                    <Link to={e.kind === 'expense' ? `/erp/expenses?claim=${e.refId}` : `/erp/petty?advance=${e.advanceId}`} className="num font-semibold text-lake hover:underline">
                       {e.docNo}
                     </Link>
                     <span className="text-ink-3"> · {e.handler.name}</span>
                     {e.description && <span className="text-ink-2"> · {e.description}</span>}
                   </span>
-                  {e.items.length > 0 && (
-                    <span className="block text-ink-3">
-                      {e.items.map((i) => `${i.name} ${formatQty(i.boughtMilli)}${i.unit} ¥${formatAmount(i.amountCents)}`).join('；')}
-                    </span>
-                  )}
+                  {e.items.length > 0 && <span className="block text-ink-3">{e.items.map((i) => `${i.name} ${formatQty(i.boughtMilli)}${i.unit} ¥${formatAmount(i.amountCents)}`).join('；')}</span>}
                   {(e.channel || e.poNo) && (
                     <span className="block text-ink-3">
                       {e.channel}

@@ -17,7 +17,7 @@ async function login(page: Page, username: string) {
   await expect(page.getByRole('navigation', { name: /主导航|ERP 导航/ })).toBeVisible({ timeout: 30_000 });
 }
 
-const getJson = async <T,>(page: Page, url: string) => (await (await page.request.get(url)).json()) as T;
+const getJson = async <T>(page: Page, url: string) => (await (await page.request.get(url)).json()) as T;
 const COLUMNS = ['序号', '申请部门', '物品名称', '物料编号', '用途', '数量', '单位', '采购优先级', '期望到货日期', '参考单价', '参考链接', '产品详情', '备注'];
 
 test.describe('需求单表格导入', () => {
@@ -31,7 +31,10 @@ test.describe('需求单表格导入', () => {
     const purpose = meta.purposes[0]!;
     const tag = String(Date.now()).slice(-6);
     const row = (o: Record<string, string | number>) => COLUMNS.map((c) => o[c] ?? '').join(',');
-    const good = [row({ 序号: 1, 申请部门: dept.name, 物品名称: m1!.name, 物料编号: m1!.code, 用途: purpose, 数量: 3, 备注: `E2E 表格${tag}` }), row({ 序号: 2, 申请部门: dept.name, 物品名称: m2!.name, 物料编号: m2!.code, 用途: purpose, 数量: 1.5, 采购优先级: '紧急' })];
+    const good = [
+      row({ 序号: 1, 申请部门: dept.name, 物品名称: m1!.name, 物料编号: m1!.code, 用途: purpose, 数量: 3, 备注: `E2E 表格${tag}` }),
+      row({ 序号: 2, 申请部门: dept.name, 物品名称: m2!.name, 物料编号: m2!.code, 用途: purpose, 数量: 1.5, 采购优先级: '紧急' }),
+    ];
     const bad = row({ 序号: 3, 申请部门: dept.name, 物品名称: `E2E 没有的东西${tag}`, 用途: purpose, 数量: 1 });
 
     await page.goto('/erp/requests/new');

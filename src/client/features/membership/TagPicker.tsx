@@ -9,8 +9,7 @@ import { cn } from '../../lib/utils';
 
 export const memberTagKeys = { all: ['member-tags'] as const };
 
-export const useMemberTags = (enabled = true) =>
-  useQuery({ queryKey: memberTagKeys.all, queryFn: () => api.get<MemberTag[]>('/api/member-tags'), enabled, staleTime: 60_000 });
+export const useMemberTags = (enabled = true) => useQuery({ queryKey: memberTagKeys.all, queryFn: () => api.get<MemberTag[]>('/api/member-tags'), enabled, staleTime: 60_000 });
 
 export function TagPicker({ value, onChange, current = [] }: { value: number[]; onChange: (ids: number[]) => void; current?: MemberTagBrief[] }) {
   const tags = useMemberTags();
@@ -64,7 +63,11 @@ export function MemberTagChips({ tags }: { tags: MemberTagBrief[] }) {
     <div className="flex flex-wrap items-center gap-1.5" data-testid="member-tags">
       <Tag className="size-3.5 text-ink-3" />
       {tags.map((t) => (
-        <span key={t.id} className={cn('rounded-full bg-paper-2 px-2 py-0.5 text-[12px] font-semibold text-ink-2', !t.active && 'text-ink-4 line-through')} title={t.active ? undefined : '已停用的标签'}>
+        <span
+          key={t.id}
+          className={cn('rounded-full bg-paper-2 px-2 py-0.5 text-[12px] font-semibold text-ink-2', !t.active && 'text-ink-4 line-through')}
+          title={t.active ? undefined : '已停用的标签'}
+        >
           {tagLabel(t)}
         </span>
       ))}

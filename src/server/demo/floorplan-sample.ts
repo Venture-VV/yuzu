@@ -46,7 +46,16 @@ class DxfWriter implements SampleSink {
     }
   }
   rect(layer: string, x0: number, y0: number, x1: number, y1: number) {
-    this.poly(layer, [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], true);
+    this.poly(
+      layer,
+      [
+        [x0, y0],
+        [x1, y0],
+        [x1, y1],
+        [x0, y1],
+      ],
+      true,
+    );
   }
   arc(layer: string, cx: number, cy: number, r: number, a0: number, a1: number) {
     this.pair(0, 'ARC');
@@ -140,14 +149,7 @@ function floor3(w: SampleSink, variant: 1 | 2) {
   for (const [x] of south) doorH(w, x, 6000, -1);
   for (const x of [5000, 10000, 15000, 22000, 26000]) wallV(w, x, 0, 6000, 100);
   // 走道北墙：W303/W305 两个门；W306 第一版是 3 米宽的洞，第二版是门；设备间、楼梯间、布草间
-  const north: [number, number][] = [
-    [2000, 2900],
-    [7000, 7900],
-    variant === 1 ? [11000, 14000] : [12000, 12900],
-    [17000, 17900],
-    [21500, 22400],
-    [26000, 26900],
-  ];
+  const north: [number, number][] = [[2000, 2900], [7000, 7900], variant === 1 ? [11000, 14000] : [12000, 12900], [17000, 17900], [21500, 22400], [26000, 26900]];
   wallH(w, 0, 30000, 8000, 100, north);
   for (const [x0, x1] of north) if (x1 - x0 === 900) doorH(w, x0, 8000, 1);
   // W303 与 W305 之间（x = 5 米）没有隔墙
@@ -406,7 +408,15 @@ export function writePdf(pages: PdfPageSpec[], opts: { layers?: string[]; title?
   const ocgs = (opts.layers ?? []).map((name) => add(`<< /Type /OCG /Name ${pdfString(name)} >>`));
   const kids = pages.map((p) => {
     const xobjects = Object.entries(p.xobjects ?? {}).map(
-      ([name, x]) => `/${name} ${ref(add(stream(x.dict.replace(/\{L(\d+)\}/g, (_, i: string) => ref(ocgs[Number(i)]!)), x.stream)))}`,
+      ([name, x]) =>
+        `/${name} ${ref(
+          add(
+            stream(
+              x.dict.replace(/\{L(\d+)\}/g, (_, i: string) => ref(ocgs[Number(i)]!)),
+              x.stream,
+            ),
+          ),
+        )}`,
     );
     const contents = add(stream('', p.content));
     const res = [`/Font << /F1 ${ref(font)} >>`];

@@ -141,7 +141,23 @@ test.describe('会员体系 v2 第三期', () => {
     const { id, version, status: _s, code: _c, ...rest } = b;
     const editable = Object.fromEntries(
       Object.entries(rest).filter(([k]) =>
-        ['name', 'category', 'startGrade', 'startTier', 'period', 'quantity', 'tierQuantities', 'templateId', 'events', 'festivalDates', 'discountTarget', 'weekdays', 'monthDays', 'content', 'conditions'].includes(k),
+        [
+          'name',
+          'category',
+          'startGrade',
+          'startTier',
+          'period',
+          'quantity',
+          'tierQuantities',
+          'templateId',
+          'events',
+          'festivalDates',
+          'discountTarget',
+          'weekdays',
+          'monthDays',
+          'content',
+          'conditions',
+        ].includes(k),
       ),
     );
     const saved = await page.request.put(`/api/benefits/${id}`, {

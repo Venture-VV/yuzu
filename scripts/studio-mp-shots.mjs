@@ -29,7 +29,9 @@ for (const f of readdirSync(`${DIR}/assets`)) {
   if (!r.ok()) throw new Error(`传图 ${f}：${r.status()} ${await r.text()}`);
 }
 
-for (const f of readdirSync(DIR).filter((x) => x.endsWith('.json')).sort()) {
+for (const f of readdirSync(DIR)
+  .filter((x) => x.endsWith('.json'))
+  .sort()) {
   const sample = JSON.parse(readFileSync(`${DIR}/${f}`, 'utf8'));
   const code = await page.request.post('/api/studio/mp/preview-code', { data: { doc: sample.doc } });
   if (!code.ok()) throw new Error(`${f} 生成预览码：${code.status()} ${await code.text()}`);

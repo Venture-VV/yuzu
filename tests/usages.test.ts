@@ -140,7 +140,17 @@ describe('开单、结束、撤单', () => {
     const r = await open({ spaceId: sid.X201, tagCode: g.tagCode.toLowerCase(), note: '合成生日会' });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const u = r.body as UsageDetail;
-    expect(u).toMatchObject({ spaceCode: 'X201', businessType: '派对房', tagCode: g.tagCode, visitStatus: 'open', guests: 4, note: '合成生日会', status: 'open', closedAt: null, openedByName: '测试店员' });
+    expect(u).toMatchObject({
+      spaceCode: 'X201',
+      businessType: '派对房',
+      tagCode: g.tagCode,
+      visitStatus: 'open',
+      guests: 4,
+      note: '合成生日会',
+      status: 'open',
+      closedAt: null,
+      openedByName: '测试店员',
+    });
     expect(u.usageNo).toMatch(/^SY\d{8}-0001$/);
     expect(await stateOf('X201')).toBe('in_use');
     const m = await map();
@@ -259,7 +269,14 @@ describe('空间台账、业态规则', () => {
     expect(r.body).toEqual({ businessTypes: ['派对房', '娱乐室'], pricing: {} });
     expect((await open({ spaceId: sid.X202, tagCode: g.tagCode })).body.error.code).toBe('USAGE_NOT_ALLOWED');
     expect(await stateOf('X202')).toBe('other');
-    const catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as { key: string; group: string; isDefault: boolean; pending: boolean; section: string; updatedBy: string | null }[];
+    const catalog = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/rules')).body as {
+      key: string;
+      group: string;
+      isDefault: boolean;
+      pending: boolean;
+      section: string;
+      updatedBy: string | null;
+    }[];
     expect(catalog.find((x) => x.key === 'usage_rules.businessTypes')).toMatchObject({ group: 'floormap', isDefault: false, pending: true, section: 'spaces', updatedBy: '测试店主' });
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/usage-rules', { businessTypes: ['派对房', '宠物轰趴房', '娱乐室'] })).status).toBe(200);
     expect(await stateOf('X202')).toBe('vacant');

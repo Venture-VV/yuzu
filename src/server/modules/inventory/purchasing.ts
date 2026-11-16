@@ -124,12 +124,29 @@ export async function poMoney(db: Db, poId: number): Promise<{ receivedCents: nu
       + coalesce((SELECT sum(ol.amount_cents) FROM ap_offset_lines ol JOIN ap_offsets o ON o.id = ol.offset_id
                   JOIN inv_docs d ON d.id = ol.receipt_doc_id
                   WHERE d.purchase_order_id = ${poId} AND o.status = 'confirmed'), 0) AS paid_cents`;
-  const m = { receivedCents: Number(money!.receivedCents), returnCreditCents: Number(money!.returnCreditCents), returnBalanceCents: Number(money!.returnBalanceCents), paidCents: Number(money!.paidCents) };
+  const m = {
+    receivedCents: Number(money!.receivedCents),
+    returnCreditCents: Number(money!.returnCreditCents),
+    returnBalanceCents: Number(money!.returnBalanceCents),
+    paidCents: Number(money!.paidCents),
+  };
   return { ...m, unpaidCents: m.receivedCents - m.returnCreditCents - m.paidCents };
 }
 
 export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
-  const [po] = await db<(Omit<PurchaseOrder, 'channel' | 'sourcing' | 'contract' | 'contractNote' | 'contractCheck'> & { supplierId: number; supplierName: string; backfillReceiptId: number | null; channelKey: string | null; channelLabel: string | null; channelNote: string; sourcingId: number | null; sourcingNo: string | null; sourcingStatus: string | null })[]>`
+  const [po] = await db<
+    (Omit<PurchaseOrder, 'channel' | 'sourcing' | 'contract' | 'contractNote' | 'contractCheck'> & {
+      supplierId: number;
+      supplierName: string;
+      backfillReceiptId: number | null;
+      channelKey: string | null;
+      channelLabel: string | null;
+      channelNote: string;
+      sourcingId: number | null;
+      sourcingNo: string | null;
+      sourcingStatus: string | null;
+    })[]
+  >`
     SELECT po.id, po.doc_no, po.status, po.order_date, po.expected_date, po.note, po.price_basis, po.revision, po.backfill,
            po.backfill_receipt_id, po.created_by, cb.display_name AS created_by_name, cb.system AS created_by_system, po.created_at,
            po.channel AS channel_key, po.channel_label, po.channel_note,
@@ -227,7 +244,9 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
 
 export async function listPos(db: Db, f: { status?: string; supplierId?: number; q?: string; open?: boolean }): Promise<PoSummary[]> {
   const like = f.q ? `%${f.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
-  const rows = await db<(Omit<PoSummary, 'receiving' | 'channel'> & { orderedMilli: number; receivedMilli: number; fullLines: number; channelKey: string | null; channelLabel: string | null; channelNote: string })[]>`
+  const rows = await db<
+    (Omit<PoSummary, 'receiving' | 'channel'> & { orderedMilli: number; receivedMilli: number; fullLines: number; channelKey: string | null; channelLabel: string | null; channelNote: string })[]
+  >`
     SELECT po.id, po.doc_no, po.status, s.name AS supplier_name, po.supplier_id, po.order_date, po.expected_date, po.total_cents,
            po.revision, po.backfill, cb.display_name AS created_by_name, po.created_at,
            po.channel AS channel_key, po.channel_label, po.channel_note,
@@ -367,14 +386,7 @@ async function prepareLines(db: Db, body: z.infer<typeof PoBody>, existing: Map<
  * 在没撤销的询价单里的需求行（v0.7.30）只能由那张询价单转采购单（sourcingEventId 是这张采购单来自的询价单）。
  * 加锁顺序：采购单 → 需求单。去掉关联（删行、撤回采购单）不需要审核权限，需求行回到「未下单」。
  */
-async function checkRequestLinks(
-  tx: Tx,
-  poId: number | null,
-  lines: PreparedLine[],
-  existing: Map<number, ExistingLine>,
-  actor: Actor,
-  sourcingEventId: number | null,
-) {
+async function checkRequestLinks(tx: Tx, poId: number | null, lines: PreparedLine[], existing: Map<number, ExistingLine>, actor: Actor, sourcingEventId: number | null) {
   const all = lines.flatMap((l) => l.requestLineIds);
   if (new Set(all).size !== all.length) throw badRequest('同一行需求在一张采购单里只能出现一次');
   if (all.length === 0) return;
@@ -533,7 +545,20 @@ async function approveLocked(tx: Tx, po: PoRow, actor: Actor, reason = '') {
 export async function assertQuotesForPo(tx: Tx, poId: number) {
   const rules = await loadPurchaseRules(tx);
   if (rules.quoteThresholdCents <= 0) return;
-  const [po] = await tx<{ totalCents: number; revision: number; backfill: boolean; isSynthetic: boolean; supplierId: number; contractId: number | null; eventId: number | null; eventStatus: string | null; awardedSupplierId: number | null; eventNo: string | null }[]>`
+  const [po] = await tx<
+    {
+      totalCents: number;
+      revision: number;
+      backfill: boolean;
+      isSynthetic: boolean;
+      supplierId: number;
+      contractId: number | null;
+      eventId: number | null;
+      eventStatus: string | null;
+      awardedSupplierId: number | null;
+      eventNo: string | null;
+    }[]
+  >`
     SELECT p.total_cents, p.revision, p.backfill, p.is_synthetic, p.supplier_id, p.contract_id, e.id AS event_id, e.status AS event_status,
            q.supplier_id AS awarded_supplier_id, e.doc_no AS event_no
     FROM purchase_orders p LEFT JOIN sourcing_events e ON e.id = p.sourcing_event_id LEFT JOIN sourcing_quotes q ON q.id = e.awarded_quote_id
@@ -543,7 +568,9 @@ export async function assertQuotesForPo(tx: Tx, poId: number) {
   const amount = `¥${formatAmount(Number(po.totalCents))}`;
   const gate = `¥${formatAmount(rules.quoteThresholdCents)}`;
   if (po.eventId) {
-    throw unprocessable('QUOTES_REQUIRED', `采购单的供应商与询价单 ${po.eventNo} 中标的不一致（或询价单已撤销定标），合计 ${amount} 到了询价门槛 ${gate}，请按中标的供应商下单`, { threshold: rules.quoteThresholdCents });
+    throw unprocessable('QUOTES_REQUIRED', `采购单的供应商与询价单 ${po.eventNo} 中标的不一致（或询价单已撤销定标），合计 ${amount} 到了询价门槛 ${gate}，请按中标的供应商下单`, {
+      threshold: rules.quoteThresholdCents,
+    });
   }
   throw unprocessable('QUOTES_REQUIRED', `合计 ${amount} 到了询价门槛 ${gate}：请先询价（至少 ${rules.minQuotes} 家报价）并定标，再从询价单转采购单`, { threshold: rules.quoteThresholdCents });
 }
@@ -606,13 +633,7 @@ async function submitLocked(tx: Tx, po: PoRow, actor: Actor, approveNow: boolean
   }
 }
 
-
-export async function createPo(
-  deps: Deps,
-  raw: unknown,
-  actor: Actor,
-  opts: { backfillReceiptId?: number; ip?: string; deptConfirm?: boolean; sourcingEventId?: number } = {},
-) {
+export async function createPo(deps: Deps, raw: unknown, actor: Actor, opts: { backfillReceiptId?: number; ip?: string; deptConfirm?: boolean; sourcingEventId?: number } = {}) {
   const meta = parse(CreateInput, raw);
   const body = parse(PoBody, raw);
   if (meta.approveNow && !can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认采购单，请提交给负责人');
@@ -704,12 +725,7 @@ export async function createPo(
 }
 
 /** 修改时的采购途径：传了按传的；没传保持原样（旧单据没记的按供应商的默认带上） */
-async function channelForUpdate(
-  tx: Tx,
-  poId: number,
-  body: { channel?: string; channelNote?: string },
-  supplierDefault: string | null,
-): Promise<ChannelColumns> {
+async function channelForUpdate(tx: Tx, poId: number, body: { channel?: string; channelNote?: string }, supplierDefault: string | null): Promise<ChannelColumns> {
   const rules = await loadPurchaseRules(tx);
   if (body.channel !== undefined) return resolveChannel(rules, body, supplierDefault);
   const [cur] = await tx<{ channel: string | null; channelLabel: string | null; channelNote: string }[]>`
@@ -741,7 +757,15 @@ export async function updatePo(deps: Deps, poId: number, raw: PoBodyInput & { ac
           supplierName: snapshot.supplier.name,
           channel: snapshot.channel ? (snapshot.channel.note ? `${snapshot.channel.label} · ${snapshot.channel.note}` : snapshot.channel.label) : null,
           totalCents: snapshot.totalCents,
-          lines: snapshot.lines.map((l) => ({ materialName: l.materialName, spec: l.spec, purchaseQtyMilli: l.purchaseQtyMilli, purchaseUnit: l.purchaseUnit, priceCents: l.priceCents, amountCents: l.amountCents, imageIds: l.images.map((i) => i.id) })),
+          lines: snapshot.lines.map((l) => ({
+            materialName: l.materialName,
+            spec: l.spec,
+            purchaseQtyMilli: l.purchaseQtyMilli,
+            purchaseUnit: l.purchaseUnit,
+            priceCents: l.priceCents,
+            amountCents: l.amountCents,
+            imageIds: l.images.map((i) => i.id),
+          })),
         } as never)}, ${actor.id})`;
       await tx`UPDATE purchase_orders SET status = 'returned', revision = revision + 1, updated_at = now() WHERE id = ${poId}`;
       po = { ...po, status: 'returned', revision: po.revision + 1 };
@@ -837,9 +861,7 @@ async function withdrawBlock(db: Db, poId: number): Promise<{ code: string; mess
   if (po.used > 0) {
     return {
       code: 'PO_IN_USE',
-      message: po.status === 'approved'
-        ? '这张采购单已经有报销、发票或三单放行，不能撤回；不再到货请关闭'
-        : '这张采购单已经有发票、报销或三单放行，不能撤回；发票登错了请先作废发票',
+      message: po.status === 'approved' ? '这张采购单已经有报销、发票或三单放行，不能撤回；不再到货请关闭' : '这张采购单已经有发票、报销或三单放行，不能撤回；发票登错了请先作废发票',
     };
   }
   if (po.receipts > 0) return { code: 'PO_HAS_RECEIPTS', message: '这张采购单已有收货，不能撤回；请负责人确认后关闭' };
@@ -890,7 +912,9 @@ export async function closePo(deps: Deps, poId: number, raw: unknown, actor: Act
  */
 export async function backfillPo(deps: Deps, raw: unknown, actor: Actor, ip?: string) {
   const input = parse(z.object({ receiptDocId: id, clientKey: z.uuid(), approveNow: z.boolean().default(false), note: z.string().trim().max(200).default('') }), raw);
-  const [rc] = await deps.sql<{ id: number; docType: string; status: string; supplierId: number; docDate: string; purchaseOrderId: number | null; docNo: string; urgent: boolean; departmentId: number | null }[]>`
+  const [rc] = await deps.sql<
+    { id: number; docType: string; status: string; supplierId: number; docDate: string; purchaseOrderId: number | null; docNo: string; urgent: boolean; departmentId: number | null }[]
+  >`
     SELECT d.id, d.doc_type, d.status, d.supplier_id, d.doc_date, d.purchase_order_id, d.doc_no, d.urgent, w.department_id
     FROM inv_docs d LEFT JOIN warehouses w ON w.id = d.warehouse_id WHERE d.id = ${input.receiptDocId}`;
   if (!rc || rc.docType !== 'receipt') throw notFound('收货单不存在');
@@ -950,11 +974,7 @@ export function registerPurchasingRoutes(app: FastifyInstance, deps: Deps) {
     const [m] = await sql<{ purchaseUnit: string; purchaseFactorMilli: number }[]>`SELECT purchase_unit, purchase_factor_milli FROM materials WHERE id = ${materialId}`;
     if (!m) throw notFound('物料不存在');
     const basis = (await loadInventorySettings(sql)).priceBasis;
-    const baseline = await priceBaseline(
-      sql,
-      { materialId, purchaseUnit: m.purchaseUnit, factorMilli: m.purchaseFactorMilli, priceBasis: basis },
-      { onOrBefore: todayIn(deps.config.timezone) },
-    );
+    const baseline = await priceBaseline(sql, { materialId, purchaseUnit: m.purchaseUnit, factorMilli: m.purchaseFactorMilli, priceBasis: basis }, { onOrBefore: todayIn(deps.config.timezone) });
     return { baseline, priceBasis: basis };
   });
 
@@ -969,9 +989,7 @@ export function registerPurchasingRoutes(app: FastifyInstance, deps: Deps) {
     return r;
   });
   app.put('/api/purchase-orders/:id', { preHandler: guard('purchase.manage') }, async (req) => updatePo(deps, poId(req), req.body as PoBodyInput, req.actor));
-  app.post('/api/purchase-orders/:id/revise', { preHandler: guard('purchase.manage') }, async (req) =>
-    updatePo(deps, poId(req), req.body as PoBodyInput, req.actor, true),
-  );
+  app.post('/api/purchase-orders/:id/revise', { preHandler: guard('purchase.manage') }, async (req) => updatePo(deps, poId(req), req.body as PoBodyInput, req.actor, true));
   app.post('/api/purchase-orders/:id/submit', { preHandler: guard('purchase.manage') }, async (req) => {
     const { approveNow } = parse(z.object({ approveNow: z.boolean().default(false) }), req.body ?? {});
     return submitPo(deps, poId(req), req.actor, approveNow);

@@ -173,8 +173,5 @@ export function registerPrintRoutes(app: FastifyInstance, deps: Deps) {
     return jobs.filter((j) => isDocJobKind(j.kind));
   });
 
-  app.post('/api/print/jobs/:id/cancel', { preHandler: guard('print.network') }, async (req) =>
-    cancelJob(deps, parse(idParam, req.params).id, ctxOf(req), can(req.actor, 'device.manage')),
-  );
+  app.post('/api/print/jobs/:id/cancel', { preHandler: guard('print.network') }, async (req) => cancelJob(deps, parse(idParam, req.params).id, ctxOf(req), can(req.actor, 'device.manage')));
 }
-

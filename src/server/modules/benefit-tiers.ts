@@ -17,7 +17,10 @@ import { loadSettings } from './settings';
  * 排序用的面值（HY17）：代金券按面额；兑换券、买一赠一按「最多抵」，没设按兑换（赠送）项目的单价、票种按 12 小时档；
  * 折扣券按「最多减」，没设为空（排在有面值的后面）
  */
-export function templateFaceValue(t: Pick<CouponTemplate, 'kind' | 'faceValue' | 'maxOff' | 'exchangeItemId' | 'exchangeTicketTypeId'>, prices: { items: Map<number, number>; tickets: Map<number, number> }): number | null {
+export function templateFaceValue(
+  t: Pick<CouponTemplate, 'kind' | 'faceValue' | 'maxOff' | 'exchangeItemId' | 'exchangeTicketTypeId'>,
+  prices: { items: Map<number, number>; tickets: Map<number, number> },
+): number | null {
   if (t.kind === 'cash') return t.faceValue;
   if (t.kind === 'discount') return t.maxOff;
   if (t.maxOff !== null) return t.maxOff;

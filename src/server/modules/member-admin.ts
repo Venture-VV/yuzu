@@ -17,7 +17,7 @@ import type { MemberAccountHistory, MemberMergeDetail, MemberPhoneChange, Member
 import { gradeLabel, type Grade, type Tier } from '@shared/membership';
 import { formatYuan } from '@shared/money';
 import { guard } from '../auth/guard';
-import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../db';
+import { isUniqueViolation, readSnapshot, type Db } from '../db';
 import { writeAudit } from '../lib/audit';
 import { ctxOf, type Deps, type OpContext } from '../lib/context';
 import { conflict, notFound, unprocessable } from '../lib/errors';
@@ -103,7 +103,14 @@ export async function setMemberStatus(deps: Deps, memberId: number, raw: unknown
         action: 'member_status_changed',
         targetType: 'member',
         targetId: memberId,
-        detail: { memberNo: m.memberNo, name: m.name, from: m.status, to: input.status, reason: input.reason, summary: `${input.status === 'frozen' ? '停用' : '启用'}会员 ${m.name}（${m.memberNo}）` },
+        detail: {
+          memberNo: m.memberNo,
+          name: m.name,
+          from: m.status,
+          to: input.status,
+          reason: input.reason,
+          summary: `${input.status === 'frozen' ? '停用' : '启用'}会员 ${m.name}（${m.memberNo}）`,
+        },
         ip: ctx.ip,
         businessDate: date,
       });
@@ -278,12 +285,32 @@ export async function mergeMember(deps: Deps, sourceId: number, raw: unknown, ct
       const mergeId = Number(row!.id);
       // 余额：来源「合并转出」、目标「合并转入」；赠金批次按原来的到期日搬过去
       if (from.principalBalance + from.bonusBalance > 0) {
-        await applyBalance(tx, from, { principal: -from.principalBalance, bonus: -from.bonusBalance }, {
-          entryType: 'merge_out', docNo: mergeNo, memberMergeId: mergeId, businessDate: date, operatorId: ctx.actor.id, at,
-        });
-        await applyBalance(tx, into, { principal: from.principalBalance, bonus: from.bonusBalance }, {
-          entryType: 'merge_in', docNo: mergeNo, memberMergeId: mergeId, businessDate: date, operatorId: ctx.actor.id, at,
-        });
+        await applyBalance(
+          tx,
+          from,
+          { principal: -from.principalBalance, bonus: -from.bonusBalance },
+          {
+            entryType: 'merge_out',
+            docNo: mergeNo,
+            memberMergeId: mergeId,
+            businessDate: date,
+            operatorId: ctx.actor.id,
+            at,
+          },
+        );
+        await applyBalance(
+          tx,
+          into,
+          { principal: from.principalBalance, bonus: from.bonusBalance },
+          {
+            entryType: 'merge_in',
+            docNo: mergeNo,
+            memberMergeId: mergeId,
+            businessDate: date,
+            operatorId: ctx.actor.id,
+            at,
+          },
+        );
       }
       await moveLotsForMerge(tx, { sourceId, targetId: input.targetId, mergeId, amount: from.bonusBalance, at });
       // 档阶：目标会员取两位里高的状态

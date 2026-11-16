@@ -105,7 +105,12 @@ test.describe('8.0.21 OTA 渠道订单', () => {
     await expect(page.getByText('渠道订单导入已登记').first()).toBeVisible();
     await expect(pending).toHaveCount(0);
     await page.getByTestId('ota-channel').selectOption({ label: name });
-    await expect(page.getByTestId('ota-order-list').locator('li').filter({ hasText: `P${stamp}01` })).toContainText('已建预约');
+    await expect(
+      page
+        .getByTestId('ota-order-list')
+        .locator('li')
+        .filter({ hasText: `P${stamp}01` }),
+    ).toContainText('已建预约');
     // 服务器上这个渠道只有这一张订单、一次导入建的一张预约
     const orders = (await (await page.request.get(`/api/ota/orders?channelId=${channelId}`)).json()) as { orderNo: string; status: string; bookings: unknown[] }[];
     expect(orders.map((o) => [o.orderNo, o.status, o.bookings.length])).toEqual([[`P${stamp}01`, 'booked', 1]]);
@@ -121,7 +126,14 @@ test.describe('8.0.21 OTA 渠道订单', () => {
     const b = ((await madeB.json()) as { id: number; name: string }[]).find((c) => c.name === `渠道${stamp}b`)!;
     const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string };
     const day = (n: number) => new Date(Date.parse(`${me.today}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-    const file = { name: `switch${stamp}.csv`, mimeType: 'text/csv', buffer: Buffer.from(['订单号,入住人,联系电话,房型,入住日期,离店日期,间数,订单金额,支付方式,订单状态', `S${stamp}01,换渠道客人,,豪华大床,${day(8)},${day(9)},1,368.00,预付,已确认`].join('\r\n'), 'utf8') };
+    const file = {
+      name: `switch${stamp}.csv`,
+      mimeType: 'text/csv',
+      buffer: Buffer.from(
+        ['订单号,入住人,联系电话,房型,入住日期,离店日期,间数,订单金额,支付方式,订单状态', `S${stamp}01,换渠道客人,,豪华大床,${day(8)},${day(9)},1,368.00,预付,已确认`].join('\r\n'),
+        'utf8',
+      ),
+    };
 
     await page.goto('/bookings?view=ota');
     // 甲导一次
@@ -150,7 +162,8 @@ test.describe('8.0.21 OTA 渠道订单', () => {
   test('渠道订单、渠道对账取不回来：写明加载失败、可以重试', async ({ page }) => {
     test.setTimeout(90_000);
     await login(page);
-    const fail = (route: import('@playwright/test').Route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) });
+    const fail = (route: import('@playwright/test').Route) =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) });
     await page.route('**/api/ota/orders*', fail);
     await page.route('**/api/ota/recon?*', fail);
     await page.goto('/bookings?view=ota');
@@ -185,7 +198,8 @@ test.describe('8.0.21 OTA 渠道订单', () => {
   test('后台渠道表单里本店房型取不回来：写明加载失败、可以重试，不显示成空的对照（主动扫一遍后补）', async ({ page }) => {
     test.setTimeout(90_000);
     await login(page);
-    const fail = (route: import('@playwright/test').Route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) });
+    const fail = (route: import('@playwright/test').Route) =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) });
     await page.route('**/api/admin/rooms', fail);
     await page.goto('/admin/rooms/channels');
     await page.getByTestId('ota-channel-new').click();

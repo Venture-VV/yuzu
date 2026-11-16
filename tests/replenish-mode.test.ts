@@ -50,7 +50,7 @@ interface Suggestions {
   groups: { lines: Line[] }[];
   skipped: Skipped[];
 }
-const suggest = async () => (await ok<Suggestions>(api(ctx.app, keeper, 'GET', '/api/purchase-suggestions'), 200));
+const suggest = async () => await ok<Suggestions>(api(ctx.app, keeper, 'GET', '/api/purchase-suggestions'), 200);
 const lineOf = (d: Suggestions, id: number) => d.groups.flatMap((g) => g.lines).find((l) => l.materialId === id) ?? null;
 const skipOf = (d: Suggestions, id: number) => d.skipped.find((s) => s.materialId === id) ?? null;
 
@@ -243,10 +243,22 @@ describe('补货建议按补货方式过滤', () => {
     const weighed = await mk('BH-X3', '柠檬（补货方式）', { weighed: true, decimals: 2, inventoryUnit: '斤', purchaseUnit: '斤' });
     for (const m of [plain, counter, weighed]) await stockIn(m.id, 10);
     // 管效期的收货要填到期日
-    const po = await ok(api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId, orderDate: today, approveNow: true, lines: [{ materialId: expiry.id, purchaseQtyMilli: q(10), priceCents: 100 }] }));
+    const po = await ok(
+      api(ctx.app, ctx.owner, 'POST', '/api/purchase-orders', {
+        clientKey: randomUUID(),
+        supplierId,
+        orderDate: today,
+        approveNow: true,
+        lines: [{ materialId: expiry.id, purchaseQtyMilli: q(10), priceCents: 100 }],
+      }),
+    );
     await ok(
       api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
-        clientKey: randomUUID(), docDate: today, docType: 'receipt', supplierId, purchaseOrderId: po.po.id,
+        clientKey: randomUUID(),
+        docDate: today,
+        docType: 'receipt',
+        supplierId,
+        purchaseOrderId: po.po.id,
         lines: [{ materialId: expiry.id, poLineId: po.po.lines[0].id, deliveredMilli: q(10), acceptedMilli: q(10), expiresOn: shiftDate(today, 300) }],
       }),
     );
@@ -274,7 +286,15 @@ describe('补货建议按补货方式过滤', () => {
     // 从收货单转资产建卡 2 张
     const lines = (await api(ctx.app, keeper, 'GET', `/api/erp/assets/receipt-lines?docNo=${rc.doc.docNo}`)).body;
     const made = await ok(
-      api(ctx.app, keeper, 'POST', '/api/erp/assets', { clientKey: randomUUID(), name: '吹风机', category: 'consumable', originalCents: 300_00, acquiredOn: today, receiptLineId: lines[0].lineId, quantity: 2 }),
+      api(ctx.app, keeper, 'POST', '/api/erp/assets', {
+        clientKey: randomUUID(),
+        name: '吹风机',
+        category: 'consumable',
+        originalCents: 300_00,
+        acquiredOn: today,
+        receiptLineId: lines[0].lineId,
+        quantity: 2,
+      }),
     );
     let d = await suggest();
     expect(lineOf(d, dryer.id)).toBeNull();
@@ -314,13 +334,18 @@ describe('物料档案的补货方式', () => {
     expect((await putMode(buyer, m.id, { mode: 'on_demand', expectedRev: -1 })).status).toBe(400);
     expect((await putMode(buyer, 99_999_999, { mode: 'on_demand', expectedRev: 0 })).status).toBe(404);
     const audits = async () =>
-      (await ctx.sql<{ detail: Record<string, unknown> }[]>`
-        SELECT detail FROM audit_logs WHERE action = 'inventory_master_saved' AND target_type = 'material' AND target_id = ${String(m.id)} AND detail ? 'before' ORDER BY id`).map((r) => r.detail);
+      (
+        await ctx.sql<{ detail: Record<string, unknown> }[]>`
+        SELECT detail FROM audit_logs WHERE action = 'inventory_master_saved' AND target_type = 'material' AND target_id = ${String(m.id)} AND detail ? 'before' ORDER BY id`
+      ).map((r) => r.detail);
     expect((await ok<{ replenishMode: string }>(setMode(buyer, m.id, 'on_demand'), 200)).replenishMode).toBe('on_demand');
     expect((await ok<{ replenishMode: string }>(setMode(buyer, m.id, 'on_demand'), 200)).replenishMode).toBe('on_demand');
     expect(await audits()).toEqual([{ replenishMode: 'on_demand', before: 'auto' }]);
     await ok(setMode(buyer, m.id, 'auto'), 200);
-    expect(await audits()).toEqual([{ replenishMode: 'on_demand', before: 'auto' }, { replenishMode: 'auto', before: 'on_demand' }]);
+    expect(await audits()).toEqual([
+      { replenishMode: 'on_demand', before: 'auto' },
+      { replenishMode: 'auto', before: 'on_demand' },
+    ]);
   });
 
   it('带上页面看到的版本号，对不上拒绝：晚到的旧请求不会盖掉后来的修改，改走又改回原来的值也一样；已经是要改成的值照常返回（原样重提）；等锁有时限', async () => {

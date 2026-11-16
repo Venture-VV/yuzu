@@ -142,7 +142,14 @@ function ApproveDialog({
             <Button variant="ghost" disabled={!!busy} onClick={() => setReturning(false)}>
               不退回了
             </Button>
-            <Button variant="danger" loading={busy === 'return'} disabled={moved || !!returnProblem || reason.trim().length < 2} icon={<CornerUpLeft className="size-4" />} onClick={() => void send('return')} data-testid="review-return-confirm">
+            <Button
+              variant="danger"
+              loading={busy === 'return'}
+              disabled={moved || !!returnProblem || reason.trim().length < 2}
+              icon={<CornerUpLeft className="size-4" />}
+              onClick={() => void send('return')}
+              data-testid="review-return-confirm"
+            >
               确认退回
             </Button>
           </>
@@ -151,7 +158,14 @@ function ApproveDialog({
             <Button variant="secondary" disabled={!!busy} icon={<CornerUpLeft className="size-4" />} onClick={() => setReturning(true)} data-testid="review-return">
               退回…
             </Button>
-            <Button variant="primary" loading={busy === 'approve'} disabled={moved || !!approveProblem} icon={<CircleCheck className="size-4" />} onClick={() => void send('approve')} data-testid="review-approve">
+            <Button
+              variant="primary"
+              loading={busy === 'approve'}
+              disabled={moved || !!approveProblem}
+              icon={<CircleCheck className="size-4" />}
+              onClick={() => void send('approve')}
+              data-testid="review-approve"
+            >
               同意
             </Button>
           </>
@@ -174,7 +188,9 @@ function ApproveDialog({
             <Input id="rv-comment" value={comment} maxLength={200} onChange={(e) => setComment(e.target.value)} className="h-10" />
           </Field>
         )}
-        {(returning ? legal && returnProblem : approveProblem) && <p className="text-[12.5px] font-semibold text-ember">{returning ? returnProblem : `${approveProblem}（退回可以只填有问题的几条）`}</p>}
+        {(returning ? legal && returnProblem : approveProblem) && (
+          <p className="text-[12.5px] font-semibold text-ember">{returning ? returnProblem : `${approveProblem}（退回可以只填有问题的几条）`}</p>
+        )}
       </div>
     </Dialog>
   );

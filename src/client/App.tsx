@@ -1,15 +1,19 @@
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation, useNavigate, useParams } from 'react-router';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { ApiError, onAuthError } from './lib/api';
+import { ApiError, onAuthError, queryRetryDelay, shouldRetryQuery } from './lib/api';
 import { qk, useSessionQuery } from './lib/queries';
 import { SessionProvider } from './lib/session';
 import { setDisplayTimeZone } from './lib/utils';
 import { AppShell } from './components/AppShell';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { NetworkBanner } from './components/NetworkBanner';
 import { ToastProvider } from './components/Toast';
 import { Button, Spinner } from './components/ui';
 import { LogoMark } from './components/Brand';
 import { LoginPage } from './features/auth/LoginPage';
+// 网络与同步随首屏加载：断网时还要打得开（按需加载的页面那时可能下载不下来）
+import { NetworkPage } from './features/network/NetworkPage';
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
@@ -107,7 +111,9 @@ const ImportPage = lazyPage(() => import('./features/payables/ImportPage').then(
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 2,
+      // 明确的拒绝不再取；系统忙、太频繁、过载在请求里已经重发过，不再叠一层；其余最多 2 次，间隔带随机（8.1.3 WL5）
+      retry: shouldRetryQuery,
+      retryDelay: queryRetryDelay,
       refetchOnWindowFocus: true,
       staleTime: 5_000,
     },
@@ -170,17 +176,22 @@ function AuthGate({ shell = 'app' }: { shell?: 'app' | 'admin' | 'erp' | 'bare' 
       </SessionProvider>
     );
   }
+  // 内容区出错只换掉内容区（8.1.3 WL7）：导航还能用，换页面自动重置；后台、ERP 的在各自的外壳里包
   return (
     <SessionProvider value={session.data}>
       {shell === 'bare' ? (
-        <Outlet />
+        <ErrorBoundary resetKey={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       ) : shell === 'admin' ? (
         <AdminShell />
       ) : shell === 'erp' ? (
         <ErpShell />
       ) : (
         <AppShell>
-          <Outlet />
+          <ErrorBoundary resetKey={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </AppShell>
       )}
     </SessionProvider>
@@ -221,6 +232,8 @@ function DashboardMoved() {
 
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
+  // 网络与同步（8.1.3 WL12）：不用登录也能打开——断网、登录页出问题时也要看得到
+  { path: '/network', element: <NetworkPage /> },
   { path: '/r/:token', element: <ReconPublicPage /> },
   // 8.0.21 供应商门户：报价、订单确认、发货预告（不用登录）
   { path: '/s/:token', element: <SupplierPublicPage /> },
@@ -368,11 +381,24 @@ const router = createBrowserRouter([
   },
 ]);
 
+/** 当前地址（网络提示条在路由外面，按地址决定缩成角落的小提示、打印页不显示） */
+const useRouterPath = () =>
+  useSyncExternalStore(
+    (fn) => router.subscribe(fn),
+    () => router.state.location.pathname,
+  );
+
+function NetworkBannerHost() {
+  const path = useRouterPath();
+  return <NetworkBanner path={path} openNetwork={() => void router.navigate('/network')} />;
+}
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <RouterProvider router={router} />
+        <NetworkBannerHost />
       </ToastProvider>
     </QueryClientProvider>
   );

@@ -5,17 +5,7 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import {
-  ACTIVATION_CODE,
-  AVATARS,
-  normalizeActivationCode,
-  normalizeEmpNo,
-  normalizePhone,
-  PASSWORD_MAX,
-  PASSWORD_MIN,
-  PHONE,
-  type CanteenRole,
-} from '@shared/canteen';
+import { ACTIVATION_CODE, AVATARS, normalizeActivationCode, normalizeEmpNo, normalizePhone, PASSWORD_MAX, PASSWORD_MIN, PHONE, type CanteenRole } from '@shared/canteen';
 import { hashPassword, verifyPassword } from '../../auth/password';
 import type { Db, Sql, Tx } from '../../db';
 import { AppError, badRequest, unauthorized, unprocessable } from '../../lib/errors';

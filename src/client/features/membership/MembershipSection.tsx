@@ -25,7 +25,12 @@ export function MembershipSection() {
   if (tabs.length === 0) return <Navigate to="/admin" replace />;
   const has = (key: string) => tabs.some((t) => t.key === key);
   return (
-    <AdminPage section="membership" wide tabs={tabs.map((t) => ({ key: t.key, label: t.label }))} description="档级与会籍的规则、本店权益清单、渠道来源与会员标签。每个页签各自保存，只影响以后的充值、消费与建档。">
+    <AdminPage
+      section="membership"
+      wide
+      tabs={tabs.map((t) => ({ key: t.key, label: t.label }))}
+      description="档级与会籍的规则、本店权益清单、渠道来源与会员标签。每个页签各自保存，只影响以后的充值、消费与建档。"
+    >
       {has('rules') && (
         <SubPane tab="rules" lazy>
           <MembershipRulesBody />

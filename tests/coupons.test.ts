@@ -142,9 +142,7 @@ describe('券模板', () => {
     expect([a.status, b.status], JSON.stringify([a.body, b.body])).toEqual([200, 200]);
     expect(b.body.id).toBe(a.body.id);
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', body)).body.id).toBe(a.body.id);
-    expect((await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { ...body, kind: 'discount', faceValue: null, ratePercent: 90 })).body.error.code).toBe(
-      'IDEMPOTENCY_CONFLICT',
-    );
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { ...body, kind: 'discount', faceValue: null, ratePercent: 90 })).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     expect(((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/templates')).body as CouponTemplate[]).length).toBe(before + 1);
     // 没带操作编号：拒绝
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/coupons/templates', { ...body, clientKey: undefined })).status).toBe(400);
@@ -157,9 +155,7 @@ describe('券模板', () => {
     expect(await rules()).toBe(n + 1);
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/coupons/rules', { ...ruleBody, quantity: 2 })).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     // 收尾：停用这条开卡礼（后面的用例按自己的规则核对开卡礼）
-    const added = ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/rules')).body as { id: number; templateId: number; active: boolean }[]).find(
-      (r) => r.templateId === a.body.id && r.active,
-    )!;
+    const added = ((await api(ctx.app, ctx.owner, 'GET', '/api/coupons/rules')).body as { id: number; templateId: number; active: boolean }[]).find((r) => r.templateId === a.body.id && r.active)!;
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/coupons/rules/${added.id}/deactivate`, {})).status).toBe(200);
   });
 });
@@ -210,7 +206,12 @@ describe('发券', () => {
     // 再充 ¥2,500：滚动累计 ¥3,500 升到 L2，发 L2 的升级礼；L1 不再发
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 250000, 0))).status).toBe(200);
     mine = (await couponsOf(m.id)).coupons;
-    expect(mine.filter((c) => c.issueKind === 'level_up').map((c) => c.templateId).sort()).toEqual([tpl.discount!.id, tpl.vip!.id].sort());
+    expect(
+      mine
+        .filter((c) => c.issueKind === 'level_up')
+        .map((c) => c.templateId)
+        .sort(),
+    ).toEqual([tpl.discount!.id, tpl.vip!.id].sort());
     // 一笔连跳两档：两档的升级礼都发
     const m2 = await createMember(ctx, '跨两级', '19900008005');
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m2.id, 500000, 0))).status).toBe(200);
@@ -296,15 +297,36 @@ describe('结账用券', () => {
     expect(dis).toMatchObject({ usable: true, amount: 1000 });
     // 与优惠同用、两张券、金额对不上：拒绝
     const grant = randomUUID();
-    expect((await pay(visitId, pre.totalAmount, [{ method: 'store_coupon', code: cash.code, amount: 3000 }, { method: 'discount', amount: 100, grantId: grant }, { method: 'cash', amount: pre.totalAmount - 3100 }])).status).toBe(400);
     expect(
-      (await pay(visitId, pre.totalAmount, [{ method: 'store_coupon', code: cash.code, amount: 3000 }, { method: 'store_coupon', code: pre.storeCoupons[1]!.code, amount: 1000 }, { method: 'cash', amount: pre.totalAmount - 4000 }]))
-        .status,
+      (
+        await pay(visitId, pre.totalAmount, [
+          { method: 'store_coupon', code: cash.code, amount: 3000 },
+          { method: 'discount', amount: 100, grantId: grant },
+          { method: 'cash', amount: pre.totalAmount - 3100 },
+        ])
+      ).status,
     ).toBe(400);
-    expect((await pay(visitId, pre.totalAmount, [{ method: 'store_coupon', code: cash.code, amount: 2900 }, { method: 'cash', amount: pre.totalAmount - 2900 }])).body.error.code).toBe(
-      'COUPON_AMOUNT_CHANGED',
-    );
-    const done = await pay(visitId, pre.totalAmount, [{ method: 'store_coupon', code: cash.code, amount: 3000 }, { method: 'cash', amount: pre.totalAmount - 3000 }]);
+    expect(
+      (
+        await pay(visitId, pre.totalAmount, [
+          { method: 'store_coupon', code: cash.code, amount: 3000 },
+          { method: 'store_coupon', code: pre.storeCoupons[1]!.code, amount: 1000 },
+          { method: 'cash', amount: pre.totalAmount - 4000 },
+        ])
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await pay(visitId, pre.totalAmount, [
+          { method: 'store_coupon', code: cash.code, amount: 2900 },
+          { method: 'cash', amount: pre.totalAmount - 2900 },
+        ])
+      ).body.error.code,
+    ).toBe('COUPON_AMOUNT_CHANGED');
+    const done = await pay(visitId, pre.totalAmount, [
+      { method: 'store_coupon', code: cash.code, amount: 3000 },
+      { method: 'cash', amount: pre.totalAmount - 3000 },
+    ]);
     expect(done.status, JSON.stringify(done.body)).toBe(200);
     checkoutId = done.body.id;
     expect(done.body.payments.find((p: { method: string }) => p.method === 'store_coupon')).toMatchObject({ amount: 3000 });
@@ -324,9 +346,14 @@ describe('结账用券', () => {
   it('用过的券不能再用、不能作废；部分退款最多退实收（扣掉券抵扣）；反结账退回券，可以再用', async () => {
     const v2 = await enter([{ itemId: item['券搓澡']!, quantity: 1, price: 6800 }]);
     const pre2 = await preview(v2);
-    expect((await pay(v2, pre2.totalAmount, [{ method: 'store_coupon', code: cash.code, amount: 3000 }, { method: 'cash', amount: pre2.totalAmount - 3000 }])).body.error.code).toMatch(
-      /COUPON_USED|COUPON_NOT_USABLE/,
-    );
+    expect(
+      (
+        await pay(v2, pre2.totalAmount, [
+          { method: 'store_coupon', code: cash.code, amount: 3000 },
+          { method: 'cash', amount: pre2.totalAmount - 3000 },
+        ])
+      ).body.error.code,
+    ).toMatch(/COUPON_USED|COUPON_NOT_USABLE/);
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/coupons/${cash.id}/void`, { reason: '想作废' })).body.error.code).toBe('COUPON_USED');
     const opts = (await api(ctx.app, duty, 'GET', `/api/frontdesk/checkouts/${checkoutId}/refund-options`)).body;
     expect(opts.items.find((i: { category: string }) => i.category === '券洗浴')).toMatchObject({ discount: 3000, remainingAmount: 3800 });
@@ -337,11 +364,17 @@ describe('结账用券', () => {
     await checks();
     // 别人的券：这位客人不是券的主人
     const pre3 = await preview(v2);
-    const r = await pay(v2, pre3.totalAmount, [{ method: 'store_coupon', code: cash.code, amount: 3000 }, { method: 'cash', amount: pre3.totalAmount - 3000 }]);
+    const r = await pay(v2, pre3.totalAmount, [
+      { method: 'store_coupon', code: cash.code, amount: 3000 },
+      { method: 'cash', amount: pre3.totalAmount - 3000 },
+    ]);
     expect(r.body.error.code).toBe('COUPON_NOT_USABLE');
     // 重新结账：券又能用
     const pre4 = await preview(visitId);
-    const again = await pay(visitId, pre4.totalAmount, [{ method: 'store_coupon', code: cash.code, amount: 3000 }, { method: 'cash', amount: pre4.totalAmount - 3000 }]);
+    const again = await pay(visitId, pre4.totalAmount, [
+      { method: 'store_coupon', code: cash.code, amount: 3000 },
+      { method: 'cash', amount: pre4.totalAmount - 3000 },
+    ]);
     expect(again.status, JSON.stringify(again.body)).toBe(200);
     await checks();
   });
@@ -352,7 +385,10 @@ describe('结账用券', () => {
     const v = await enter([], m.id);
     const pre = await preview(v);
     expect(pre.storeCoupons.find((c) => c.code === t.code)).toMatchObject({ usable: true, amount: Math.min(39900, pre.totalAmount) });
-    const done = await pay(v, pre.totalAmount, [{ method: 'store_coupon', code: t.code, amount: 39900 }, { method: 'cash', amount: pre.totalAmount - 39900 }]);
+    const done = await pay(v, pre.totalAmount, [
+      { method: 'store_coupon', code: t.code, amount: 39900 },
+      { method: 'cash', amount: pre.totalAmount - 39900 },
+    ]);
     expect(done.status, JSON.stringify(done.body)).toBe(200);
     // 折扣：8.8 折、最多减 ¥10 的模板这里用一个不封顶的
     const nine = await template({ name: '九折不封顶', kind: 'discount', ratePercent: 90 });
@@ -386,7 +422,10 @@ describe('结账用券', () => {
       clientKey: randomUUID(),
       sessionIds: [sessionId],
       expectedTotal: 5600,
-      payments: [{ method: 'store_coupon', code, amount: 2000 }, { method: 'wechat', amount: 3600 }],
+      payments: [
+        { method: 'store_coupon', code, amount: 2000 },
+        { method: 'wechat', amount: 3600 },
+      ],
     });
     expect(done.status, JSON.stringify(done.body)).toBe(200);
     const pack = await buildDailyRecon(ctx.sql, ctx.config, today);
