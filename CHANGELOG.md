@@ -1,5 +1,9 @@
 # 变更记录
 
+## v8.1.4（开发中）
+
+内容等店主排。这个草稿 PR 先收 `main v8.1.3` 的验收报告，交接说明在 `docs/HANDOFF_V813.md`。
+
 ## v8.1.3 · 代码整洁与网络波动防护
 
 设计与开源方案调研 `docs/RESILIENCE_V813.md`（Odoo POS、ERPNext、TanStack Query、Vite、Workbox、Fastify 的 under-pressure 与 rate-limit、close-with-grace、PostgreSQL 文档、postgres.js、Stripe / brandur 的幂等键、AWS 的退避与随机），交接 `docs/HANDOFF_V813.md`，默认做法 `docs/PENDING_DECISIONS.md` WL1–WL12；**没有迁移，不改业务规则与账**。网络正常时页面与 8.1.2 一样。
