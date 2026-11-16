@@ -8,6 +8,7 @@ import { useCan } from "../../lib/session";
 import type { NativeMemberSummary } from "./types";
 import type { InsightMember, MemberInsights, InsightDormancyBucket } from "@shared/concierge/insights-types";
 import "./member-insights.css";
+import { useLivePoll } from "../../lib/livePoll";
 
 const visitTime = (value: string | null) => stamp(value, "暂无到访记录");
 const BUCKETS: Array<{ id: Exclude<InsightDormancyBucket, "recent" | "never">; title: string; detail: string }> = [
@@ -25,33 +26,31 @@ const monthLabel = (month: string) => month.slice(0, 4) + "年" + Number(month.s
 function useInsights(params: string) {
   const [state, setState] = useState<{ params: string; data: MemberInsights | null; error: string }>({ params: "", data: null, error: "" });
   const [refresh, setRefresh] = useState(0);
-  useEffect(() => {
-    let live = true, inFlight = false;
-    setState({ params, data: null, error: "" });
-    const run = async () => {
-      if (!live || inFlight || document.hidden) return;
-      if (navigator.onLine === false) { setState((s) => ({ ...s, error: "当前离线，恢复联网后将自动同步" })); return; }
-      inFlight = true;
+  useEffect(() => setState({ params, data: null, error: "" }), [params, refresh]);
+  // 名单要读全部会员：不再 3 秒轮询，同步发现有变再取，另外每 30 秒刷新一次（8.0.18）；本页保存了也马上取（lib/livePoll，8.1.3）
+  useLivePoll(
+    async (isLive) => {
       try {
         const next = await api.get<MemberInsights>("/api/concierge/member-insights?" + params);
-        if (live) setState({ params, data: next, error: "" });
+        if (isLive()) setState({ params, data: next, error: "" });
       } catch (e) {
-        if (live) setState((s) => ({ ...s, error: e instanceof Error ? e.message : "会员情况暂时无法获取" }));
-      } finally { inFlight = false; }
-    };
-    const debounce = window.setTimeout(() => void run(), 220);
-    // 名单要读全部会员：不再 3 秒轮询，同步发现有变再取，另外每 30 秒刷新一次（8.0.18）
-    const wake = () => void run();
-    const stopLive = liveRefresh(wake, 30_000);
-    for (const name of ["focus", "online", "offline", "concierge-data-changed"]) window.addEventListener(name, wake);
-    document.addEventListener("visibilitychange", wake);
-    return () => {
-      live = false;
-      clearTimeout(debounce); stopLive();
-      for (const name of ["focus", "online", "offline", "concierge-data-changed"]) window.removeEventListener(name, wake);
-      document.removeEventListener("visibilitychange", wake);
-    };
-  }, [params, refresh]);
+        if (isLive()) setState((s) => ({ ...s, error: e instanceof Error ? e.message : "会员情况暂时无法获取" }));
+      }
+    },
+    [params, refresh],
+    {
+      delayMs: 220,
+      onOffline: () => setState((s) => ({ ...s, error: "当前离线，恢复联网后将自动同步" })),
+      subscribe: (wake) => {
+        const stop = liveRefresh(wake, 30_000);
+        window.addEventListener("concierge-data-changed", wake);
+        return () => {
+          stop();
+          window.removeEventListener("concierge-data-changed", wake);
+        };
+      },
+    },
+  );
   return { data: state.params === params ? state.data : null, error: state.params === params ? state.error : "", refresh: () => setRefresh((v) => v + 1) };
 }
 
@@ -249,31 +248,23 @@ export function NativeMemberPreview({ id, onClose, onCreate, onOpenService }: {
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   useEffect(() => {
-    let live = true, inFlight = false;
     setMember(null); setError("");
-    const load = async () => {
-      if (!live || inFlight || document.hidden) return;
-      if (navigator.onLine === false) { setError("当前离线，恢复联网后将自动同步"); return; }
-      inFlight = true;
+  }, [id, retry]);
+  // 详情开着时锁住背后的页面不滚
+  useEffect(() => {
+    const before = document.body.style.overflow; document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = before; };
+  }, []);
+  useLivePoll(
+    async (isLive) => {
       try {
         const r = await api.get<{ member: InsightMember }>("/api/concierge/member-insights/" + id);
-        if (live) { setMember(r.member); setError(""); }
-      } catch (e) { if (live) setError(e instanceof Error ? e.message : "会员详情暂不可用"); }
-      finally { inFlight = false; }
-    };
-    void load();
-    const wake = () => void load();
-    const stopLive = liveRefresh(wake, 10_000);
-    for (const name of ["focus", "online", "offline"]) window.addEventListener(name, wake);
-    document.addEventListener("visibilitychange", wake);
-    const before = document.body.style.overflow; document.body.style.overflow = "hidden";
-    return () => {
-      live = false; stopLive();
-      for (const name of ["focus", "online", "offline"]) window.removeEventListener(name, wake);
-      document.removeEventListener("visibilitychange", wake);
-      document.body.style.overflow = before;
-    };
-  }, [id, retry]);
+        if (isLive()) { setMember(r.member); setError(""); }
+      } catch (e) { if (isLive()) setError(e instanceof Error ? e.message : "会员详情暂不可用"); }
+    },
+    [id, retry],
+    { onOffline: () => setError("当前离线，恢复联网后将自动同步"), subscribe: (wake) => liveRefresh(wake, 10_000) },
+  );
   return <div className="drawer-layer">
     <div className="drawer-scrim" onClick={onClose} />
     <aside className="member-drawer native-insight-preview" role="dialog" aria-modal="true" aria-label="系统会员个人档案">

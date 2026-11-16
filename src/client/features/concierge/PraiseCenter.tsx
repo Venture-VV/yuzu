@@ -33,6 +33,7 @@ import type { Member, Upload, WorkspaceData } from "./types";
 import { conciergeFetch } from "./api";
 import { EvidenceImages, prepareEvidence } from "./ReceiptExperience";
 import "./praise-center.css";
+import { useLivePoll } from "../../lib/livePoll";
 
 type Mutate = (
   action: string,
@@ -65,55 +66,26 @@ function usePraiseRead<T>(url: string | null, refresh: number) {
     loading: boolean;
   }>({ url: null, data: null, error: "", loading: false });
   useEffect(() => {
-    if (!url) return;
-    let live = true;
-    let inFlight = false;
-    setState({ url, data: null, error: "", loading: true });
-    const run = async () => {
-      if (!live || inFlight || document.hidden) return;
-      if (!navigator.onLine) {
-        setState((old) => ({ ...old, error: "设备当前离线，联网后会自动继续同步", loading: false }));
-        return;
-      }
-      inFlight = true;
+    if (url) setState({ url, data: null, error: "", loading: true });
+  }, [url, refresh]);
+  // 同步发现有变化、每 30 秒、回到页面、网络恢复时再取（lib/livePoll，8.1.3）
+  useLivePoll(
+    async (isLive) => {
+      if (!url) return;
       try {
         const result = await api.get<T>(url);
-        if (live)
-          setState((old) => ({
-            url,
-            data:
-              old.url === url && JSON.stringify(old.data) === JSON.stringify(result)
-                ? old.data
-                : result,
-            error: "",
-            loading: false,
-          }));
+        if (isLive())
+          setState((old) => ({ url, data: old.url === url && JSON.stringify(old.data) === JSON.stringify(result) ? old.data : result, error: "", loading: false }));
       } catch (error) {
-        if (live)
-          setState((old) => ({
-            ...old,
-            url,
-            error: errorText(error),
-            loading: false,
-          }));
-      } finally {
-        inFlight = false;
+        if (isLive()) setState((old) => ({ ...old, url, error: errorText(error), loading: false }));
       }
-    };
-    void run();
-    const wake = () => void run();
-    const stopLive = liveRefresh(wake, 30_000);
-    window.addEventListener("online", wake);
-    window.addEventListener("focus", wake);
-    document.addEventListener("visibilitychange", wake);
-    return () => {
-      live = false;
-      stopLive();
-      window.removeEventListener("online", wake);
-      window.removeEventListener("focus", wake);
-      document.removeEventListener("visibilitychange", wake);
-    };
-  }, [url, refresh]);
+    },
+    [url, refresh],
+    {
+      onOffline: () => url && setState((old) => ({ ...old, error: "设备当前离线，联网后会自动继续同步", loading: false })),
+      subscribe: (wake) => liveRefresh(wake, 30_000),
+    },
+  );
   return state.url === url
     ? state
     : { url, data: null, error: "", loading: Boolean(url) };

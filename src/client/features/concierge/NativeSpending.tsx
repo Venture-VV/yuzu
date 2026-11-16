@@ -3,6 +3,7 @@ import { money, stamp } from "./format";
 import { liveRefresh } from "./live";
 import { api } from "../../lib/api";
 import type { NativeSpendingPage, Member } from "./types";
+import { useLivePoll } from "../../lib/livePoll";
 const time = (s: string) => stamp(s);
 export function NativeSpendingList({ member }: { member: Member }) {
   const [page, setPage] = useState(0),
@@ -11,49 +12,28 @@ export function NativeSpendingList({ member }: { member: Member }) {
     [refresh, setRefresh] = useState(0),
     [loading, setLoading] = useState(true);
   useEffect(() => {
-    let live = true,
-      inFlight = false;
     setData(null);
     setError("");
     setLoading(true);
-    const run = async () => {
-      if (!live || inFlight || document.hidden || !navigator.onLine) return;
-      inFlight = true;
+  }, [member.id, page, refresh]);
+  // 同步发现有变化、每 15 秒、回到页面、网络恢复时再取（lib/livePoll，8.1.3）
+  useLivePoll(
+    async (isLive) => {
       try {
-        const result = await api.get<NativeSpendingPage>(
-          `/api/concierge/members/${member.id}/spending?offset=${page * 50}`,
-        );
-        if (live) {
-          setData((old) =>
-            old &&
-            JSON.stringify(old.records) === JSON.stringify(result.records) &&
-            old.hasMore === result.hasMore
-              ? old
-              : result,
-          );
+        const result = await api.get<NativeSpendingPage>(`/api/concierge/members/${member.id}/spending?offset=${page * 50}`);
+        if (isLive()) {
+          setData((old) => (old && JSON.stringify(old.records) === JSON.stringify(result.records) && old.hasMore === result.hasMore ? old : result));
           setError("");
         }
       } catch (e) {
-        if (live) setError((e as Error).message);
+        if (isLive()) setError((e as Error).message);
       } finally {
-        inFlight = false;
-        if (live) setLoading(false);
+        if (isLive()) setLoading(false);
       }
-    };
-    void run();
-    const wake = () => void run();
-    const stopLive = liveRefresh(wake, 15_000);
-    window.addEventListener("online", wake);
-    window.addEventListener("focus", wake);
-    document.addEventListener("visibilitychange", wake);
-    return () => {
-      live = false;
-      stopLive();
-      window.removeEventListener("online", wake);
-      window.removeEventListener("focus", wake);
-      document.removeEventListener("visibilitychange", wake);
-    };
-  }, [member.id, page, refresh]);
+    },
+    [member.id, page, refresh],
+    { subscribe: (wake) => liveRefresh(wake, 15_000) },
+  );
   if (!member.nativeMemberId)
     return (
       <p className="detail-notice">

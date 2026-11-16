@@ -10,6 +10,7 @@ import type {
   Appointment,
   Balance,
 } from "./types";
+import { useLivePoll } from "../../lib/livePoll";
 
 export const memberGrade = (m: Member) =>
   m.nativeMember?.gradeLabel ||
@@ -41,44 +42,26 @@ function useMembers(q: string) {
     [error, setError] = useState(""),
     [loading, setLoading] = useState(true),
     [refresh, setRefresh] = useState(0);
-  useEffect(() => {
-    let live = true,
-      inFlight = false;
-    const run = async () => {
-      if (!live || inFlight || document.hidden || !navigator.onLine) return;
-      inFlight = true;
+  useEffect(() => setData([]), [q, refresh]);
+  // 边打边查：停 250 毫秒再取；同步发现有变化、每 30 秒、回到页面、网络恢复时再取（lib/livePoll，8.1.3）
+  useLivePoll(
+    async (isLive) => {
       setLoading(true);
       try {
-        const r = await api.get<{ members: NativeMemberSummary[] }>(
-          `/api/concierge/native-members?q=${encodeURIComponent(q.trim())}`,
-        );
-        if (live) {
+        const r = await api.get<{ members: NativeMemberSummary[] }>(`/api/concierge/native-members?q=${encodeURIComponent(q.trim())}`);
+        if (isLive()) {
           setData(r.members);
           setError("");
         }
       } catch (e) {
-        if (live) setError((e as Error).message);
+        if (isLive()) setError((e as Error).message);
       } finally {
-        inFlight = false;
-        if (live) setLoading(false);
+        if (isLive()) setLoading(false);
       }
-    };
-    setData([]);
-    const debounce = window.setTimeout(() => void run(), 250);
-    const wake = () => void run();
-    const stopLive = liveRefresh(wake, 30_000);
-    window.addEventListener("focus", wake);
-    window.addEventListener("online", wake);
-    document.addEventListener("visibilitychange", wake);
-    return () => {
-      live = false;
-      clearTimeout(debounce);
-      stopLive();
-      window.removeEventListener("focus", wake);
-      window.removeEventListener("online", wake);
-      document.removeEventListener("visibilitychange", wake);
-    };
-  }, [q, refresh]);
+    },
+    [q, refresh],
+    { delayMs: 250, subscribe: (wake) => liveRefresh(wake, 30_000) },
+  );
   return { data, error, loading, refresh: () => setRefresh((x) => x + 1) };
 }
 
@@ -196,41 +179,22 @@ export function MemberIdentityFields({
     [legacyPhone, setLegacyPhone] = useState(member?.phone || ""),
     [detailError, setDetailError] = useState("");
   const lookup = useMembers(q);
-  useEffect(() => {
-    if (!id) return;
-    let live = true,
-      inFlight = false;
-    const run = async () => {
-      if (!live || inFlight || document.hidden || !navigator.onLine) return;
-      inFlight = true;
+  useLivePoll(
+    async (isLive) => {
+      if (!id) return;
       try {
-        const r = await api.get<{ member: NativeMemberSummary }>(
-          `/api/concierge/native-members/${id}`,
-        );
-        if (live) {
-          setNative((old) =>
-            JSON.stringify(old) === JSON.stringify(r.member) ? old : r.member,
-          );
+        const r = await api.get<{ member: NativeMemberSummary }>(`/api/concierge/native-members/${id}`);
+        if (isLive()) {
+          setNative((old) => (JSON.stringify(old) === JSON.stringify(r.member) ? old : r.member));
           setDetailError("");
         }
       } catch (e) {
-        if (live) setDetailError((e as Error).message);
-      } finally {
-        inFlight = false;
+        if (isLive()) setDetailError((e as Error).message);
       }
-    };
-    void run();
-    const wake = () => void run();
-    const stopLive = liveRefresh(wake, 10_000);
-    window.addEventListener("focus", wake);
-    window.addEventListener("online", wake);
-    return () => {
-      live = false;
-      stopLive();
-      window.removeEventListener("focus", wake);
-      window.removeEventListener("online", wake);
-    };
-  }, [id]);
+    },
+    [id],
+    { subscribe: (wake) => liveRefresh(wake, 10_000) },
+  );
   function select(m: NativeMemberSummary) {
     setNative(m);
     setId(

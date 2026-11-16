@@ -71,6 +71,7 @@ import {
 } from "./ReceiptExperience";
 import { CatalogManager } from "./CatalogManager";
 import type { ReceiptDraft } from "./ReceiptExperience";
+import { connectionSnapshot, onReconnect } from "../../lib/connection";
 
 type View =
   | "dashboard"
@@ -541,7 +542,7 @@ export default function Workspace({
   useEffect(() => {
     mounted.current = true;
     const sync = () => {
-      if (document.visibilityState === "visible" && navigator.onLine !== false)
+      if (document.visibilityState === "visible" && connectionSnapshot().state !== "offline")
         void refresh(true);
     };
     // 回到页面、数据有变、重新联网：马上同步一次，不等放慢的那几拍
@@ -554,8 +555,11 @@ export default function Workspace({
     window.addEventListener("focus", now);
     window.addEventListener("online", now);
     document.addEventListener("visibilitychange", now);
+    // 网络恢复（8.1.3，按连接状态判断、不只看网卡）：马上同步一次
+    const offReconnect = onReconnect(now);
     return () => {
       mounted.current = false;
+      offReconnect();
       clearInterval(timer);
       window.removeEventListener("concierge-data-changed", now);
       window.removeEventListener("focus", now);
