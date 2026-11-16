@@ -62,6 +62,26 @@ const AVATAR_TONES = [
 ];
 export const avatarTone = (seed: number) => AVATAR_TONES[seed % AVATAR_TONES.length]!;
 
+/**
+ * 把页面上生成的内容存成文件（8.1.3 收拢：原来导入模板、工作台、管家部各写一份）。
+ * 挂到页面上再点（有的浏览器不认没挂上的链接的文件名），稍后再收回临时地址（点完马上收回，有的浏览器会存不下）。
+ */
+export function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** 存一份 CSV（开头带 BOM，Excel 打开中文不乱码）；rows 里的值照原样写，需要转义的调用方自己转 */
+export function downloadCsvRows(rows: readonly (readonly string[])[], name: string) {
+  downloadBlob(new Blob(['\uFEFF' + rows.map((r) => r.join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }), name);
+}
+
 export function downloadUrl(url: string) {
   const a = document.createElement('a');
   a.href = url;

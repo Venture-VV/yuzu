@@ -21,6 +21,9 @@
     "seed": "tsx src/server/cli.ts seed-demo",
     "cli": "tsx src/server/cli.ts",
     "typecheck": "node --max-old-space-size=4096 node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "check:code": "node scripts/check-code.mjs",
+    "format": "prettier --write --log-level warn \"src/**/*.{ts,tsx,js,mjs,cjs}\" \"tests/**/*.ts\" \"e2e/**/*.ts\" \"e2e-canteen/**/*.ts\" \"scripts/**/*.{ts,js,mjs,cjs}\" \"*.ts\"",
+    "format:check": "prettier --check --log-level warn \"src/**/*.{ts,tsx,js,mjs,cjs}\" \"tests/**/*.ts\" \"e2e/**/*.ts\" \"e2e-canteen/**/*.ts\" \"scripts/**/*.{ts,js,mjs,cjs}\" \"*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test"
@@ -51,6 +54,7 @@
     "esbuild": "^0.28.2",
     "jsqr": "1.4.0",
     "lucide-react": "^1.61.0",
+    "prettier": "3.8.5",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router": "^8.5.0",

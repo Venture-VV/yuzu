@@ -14,7 +14,7 @@ import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { ErpPendingStoreError, sendErpOp, useErpPending } from '../../lib/erpPending';
 import { bytesToBase64, readImportFile } from '../../lib/import-file';
 import { useCan, useSession } from '../../lib/session';
-import { cn, formatDateTime, uuid } from '../../lib/utils';
+import { cn, formatDateTime, downloadCsvRows, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
@@ -42,13 +42,7 @@ type Loaded = { fileName: string; csv?: string; xlsxBase64?: string; encoding: s
 
 function downloadTemplate(kind: ErpImportKind) {
   const t = TEMPLATES[kind];
-  const csv = '﻿' + [t.columns.join(','), ...t.sample.map((r) => r.join(','))].join('\r\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${ERP_IMPORT_LABELS[kind]}导入模板.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadCsvRows([t.columns, ...t.sample], `${ERP_IMPORT_LABELS[kind]}导入模板.csv`);
 }
 
 export function ImportPage() {

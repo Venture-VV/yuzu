@@ -17,7 +17,7 @@ import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { ErpPendingStoreError, sendErpOp, useErpPending } from '../../lib/erpPending';
 import { bytesToBase64, readImportFile } from '../../lib/import-file';
 import { useSession } from '../../lib/session';
-import { formatDateTime, uuid } from '../../lib/utils';
+import { formatDateTime, downloadCsvRows, uuid } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Notice, SectionTitle, Segmented, Skeleton } from '../../components/ui';
 import { useInvalidateSpaces, useSpaceImports } from '../spaces/queries';
@@ -39,13 +39,7 @@ type Loaded = { fileName: string; csv?: string; xlsxBase64?: string; encoding: s
 
 function downloadTemplate(kind: SpaceImportKind) {
   const t = TEMPLATES[kind];
-  const csv = '﻿' + [t.columns.join(','), ...t.sample.map((r) => r.join(','))].join('\r\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${SPACE_IMPORT_LABELS[kind]}导入模板.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadCsvRows([t.columns, ...t.sample], `${SPACE_IMPORT_LABELS[kind]}导入模板.csv`);
 }
 
 export function SpaceImportCard() {

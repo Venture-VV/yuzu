@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Hourglass } from 'lucide-react';
 import type { FrontdeskOpLookup } from '@shared/frontdesk';
-import { api, ApiError, errorMessage, isRejected, notSentAsRejection, UncertainError } from '../../lib/api';
+import { api, errorMessage, isRejected, notSentAsRejection, UncertainError } from '../../lib/api';
 import { formatDateTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Button, Notice } from '../../components/ui';
