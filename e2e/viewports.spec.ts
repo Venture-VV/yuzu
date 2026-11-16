@@ -405,3 +405,46 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
   });
 });
+
+// 不认识 dvh 的老浏览器（8.1.4，店主 2026-11-16 报「侧边栏划不动，右边滑着左边超了」）：老浏览器把用到 dvh 的声明整条丢掉，
+// 门店、后台、ERP 的整屏版面就没了高度，整页跟着内容滚、侧栏被撑长划不动、右边一滚左边跑出屏幕。打包时给每条 dvh 补了
+// 只给老浏览器用的 vh（scripts/dvh-fallback.ts）；这里把样式表里的 dvh 改成不认识的单位来模拟老浏览器。
+test.describe('不认识 dvh 的老浏览器', () => {
+  test('整屏版面照样一屏高：整页不滚，右边滚了侧栏不跑，后台的侧栏能单独滚', async ({ page }) => {
+    const viewport = page.viewportSize()!;
+    test.skip(viewport.width < 1024, '后台、ERP 的侧栏只在宽屏显示');
+    await page.route(/\/assets\/[^?]*\.css(\?.*)?$/, async (route) => {
+      const res = await route.fetch();
+      const css = (await res.text()).replace(/(\d)([dsl]v[hw])(?=[\s;),}!])/g, '$1x$2');
+      await route.fulfill({ status: res.status(), contentType: 'text/css', body: css });
+    });
+    await login(page, 'linlan');
+    for (const [path, name] of [
+      ['/', '主导航'],
+      ['/admin', '后台导航'],
+      ['/erp', 'ERP 导航'],
+    ] as const) {
+      await page.goto(path);
+      const nav = page.getByRole('navigation', { name });
+      await expect(nav).toBeVisible();
+      // 版面就是一屏高：整页不滚
+      await expect.poll(() => page.evaluate(() => document.scrollingElement!.scrollHeight - innerHeight), { message: path }).toBeLessThanOrEqual(1);
+      // 右边内容上往下滚：侧栏不跟着跑
+      const top = await nav.evaluate((el) => el.getBoundingClientRect().top);
+      await page.mouse.move(viewport.width - 120, viewport.height / 2);
+      await page.mouse.wheel(0, 800);
+      await page.waitForTimeout(300);
+      expect(await nav.evaluate((el) => el.getBoundingClientRect().top), path).toBe(top);
+      expect(await page.evaluate(() => window.scrollY), path).toBe(0);
+    }
+    // 后台的分区多，侧栏比一屏长：能单独滚
+    await page.goto('/admin');
+    const side = page.getByRole('navigation', { name: '后台导航' });
+    await expect(side).toBeVisible();
+    expect(await side.evaluate((el) => el.scrollHeight > el.clientHeight + 1)).toBe(true);
+    const box = (await side.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + 200);
+    await page.mouse.wheel(0, 400);
+    await expect.poll(() => side.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  });
+});
