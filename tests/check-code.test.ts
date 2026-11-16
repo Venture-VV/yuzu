@@ -24,9 +24,9 @@ describe('事务里没等结果的查询', () => {
 });
 
 describe('只用到类型的导入', () => {
-  it('import { type A, type B } 认出来；import type、混着值的导入放过', () => {
-    const code = ["import { type A, type B } from './x';", "import type { C } from './y';", "import { d, type E } from './z';", "import { type F } from '@shared/f';"].join('\n');
-    expect((inlineTypeImports(code) as { line: number }[]).map((f) => f.line)).toEqual([1, 4]);
+  it('import { type A, type B } 认出来（跨几行的也算）；import type、混着值的导入放过', () => {
+    const code = ["import { type A, type B } from './x';", "import type { C } from './y';", "import { d, type E } from './z';", "import { type F } from '@shared/f';", 'import {', '  type G,', '  type H,', "} from './g';"].join('\n');
+    expect((inlineTypeImports(code) as { line: number }[]).map((f) => f.line)).toEqual([1, 4, 5]);
   });
 });
 

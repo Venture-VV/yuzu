@@ -2,12 +2,12 @@
 // 质保金提前几天提醒（P9）、本周应付看几周（P11）按付款规则（8.0.6，ERP「付款 → 付款规则」里改）。
 
 import { PAYMENT_STAGE_LABELS } from '@shared/contracts';
-import {
-  type PaymentTodo,
-  type WarrantyRow,
-  type WarrantyRowStatus,
-  type WeeklyItem,
-  type WeeklyPayables,
+import type {
+  PaymentTodo,
+  WarrantyRow,
+  WarrantyRowStatus,
+  WeeklyItem,
+  WeeklyPayables,
 } from '@shared/payments';
 import type { Db } from '../../db';
 import { openItems } from '../inventory/payables';

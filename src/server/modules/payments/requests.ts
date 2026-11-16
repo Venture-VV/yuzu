@@ -13,15 +13,15 @@
 import { z } from 'zod';
 import { PAYMENT_STAGES, PAYMENT_STAGE_LABELS, type ContractCategory, type PaymentStage } from '@shared/contracts';
 import { formatAmount } from '@shared/money';
-import {
-  type PaymentRequestDetail,
-  type PaymentRequestMeta,
-  type PaymentRequestStatus,
-  type PaymentRequestSummary,
-  type PaymentRequestTarget,
-  type PayMode,
-  type RequestPaymentView,
-  type StagePlan,
+import type {
+  PaymentRequestDetail,
+  PaymentRequestMeta,
+  PaymentRequestStatus,
+  PaymentRequestSummary,
+  PaymentRequestTarget,
+  PayMode,
+  RequestPaymentView,
+  StagePlan,
 } from '@shared/payments';
 import { can } from '@shared/permissions';
 import { PAYMENT_METHODS, type PayMethod } from '@shared/purchasing';

@@ -54,12 +54,16 @@ export function floatingQueries(fileName, code) {
   return found;
 }
 
-/** 3. 一份源码里写成 import { type A } 的（整句都是类型） */
-export function inlineTypeImports(code) {
+/** 3. 一份源码里写成 import { type A, type B } 的（整句都是类型；跨几行的也算） */
+export function inlineTypeImports(code, fileName = 'x.ts') {
+  const src = ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, true);
   const found = [];
-  code.split('\n').forEach((line, i) => {
-    if (/^import \{\s*type [A-Za-z0-9_$]+(\s*,\s*type [A-Za-z0-9_$]+)*\s*\} from /.test(line)) found.push({ line: i + 1, text: line.trim() });
-  });
+  for (const st of src.statements) {
+    if (!ts.isImportDeclaration(st) || !st.importClause || st.importClause.isTypeOnly || st.importClause.name) continue;
+    const named = st.importClause.namedBindings;
+    if (!named || !ts.isNamedImports(named) || named.elements.length === 0) continue;
+    if (named.elements.every((el) => el.isTypeOnly)) found.push({ line: src.getLineAndCharacterOfPosition(st.getStart()).line + 1, text: st.getText().replace(/\s+/g, ' ') });
+  }
   return found;
 }
 
@@ -103,7 +107,7 @@ function main() {
       if (isMpLine(rel)) continue;
       const code = readFileSync(file, 'utf8');
       if (rel.startsWith('src/server/')) for (const f of floatingQueries(rel, code)) floating.push(`${rel}:${f.line}  ${f.text}`);
-      for (const f of inlineTypeImports(code)) typeImports.push(`${rel}:${f.line}  ${f.text}`);
+      for (const f of inlineTypeImports(code, rel)) typeImports.push(`${rel}:${f.line}  ${f.text}`);
     }
   }
   if (floating.length) problems.push(`事务里没等结果的查询 ${floating.length} 处（前面加 await，或 return / 交给 Promise.all）：\n  ${floating.join('\n  ')}`);
