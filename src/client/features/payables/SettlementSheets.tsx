@@ -2,16 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { ArrowRightLeft, HandCoins, RotateCcw, X } from 'lucide-react';
 import { formatAmount, parseYuan } from '@shared/money';
-import {
-  PAY_METHOD_LABELS,
-  PAYMENT_METHODS,
-  SETTLEMENT_STATUS_LABELS,
-  type ApOffsetDoc,
-  type OpenItem,
-  type PayMethod,
-  type SupplierCredit,
-  type SupplierRefundDoc,
-} from '@shared/purchasing';
+import { PAY_METHOD_LABELS, PAYMENT_METHODS, SETTLEMENT_STATUS_LABELS, type ApOffsetDoc, type OpenItem, type PayMethod, type SupplierCredit, type SupplierRefundDoc } from '@shared/purchasing';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
@@ -25,8 +16,7 @@ import { useCredits, useInvalidateAll, useOffset, useOffsets, useOpenItems, useR
 
 // 可抵扣（预付款、退货余额）的核销与供应商退款（v0.7.12，#25、#20）
 
-export const creditKindLabel = (c: Pick<SupplierCredit, 'kind' | 'canOffset'>) =>
-  c.kind === 'prepayment' ? '预付款' : c.canOffset ? '退货余额' : '现付退货待退款';
+export const creditKindLabel = (c: Pick<SupplierCredit, 'kind' | 'canOffset'>) => (c.kind === 'prepayment' ? '预付款' : c.canOffset ? '退货余额' : '现付退货待退款');
 
 const creditLink = (c: { kind: 'prepayment' | 'return'; id: number }) => (c.kind === 'return' ? `/inventory/docs?doc=${c.id}` : `/payables?view=payments&payment=${c.id}`);
 
@@ -89,7 +79,11 @@ export function CreditsSection({ supplierId }: { supplierId: number }) {
           <ul className="divide-y divide-line/70 rounded-lg border border-line bg-card">
             {history.map((h) => (
               <li key={`${h.kind}${h.id}`}>
-                <button type="button" onClick={() => (h.kind === 'offset' ? setOffsetId(h.id) : setRefundId(h.id))} className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] hover:bg-pine-tint/50">
+                <button
+                  type="button"
+                  onClick={() => (h.kind === 'offset' ? setOffsetId(h.id) : setRefundId(h.id))}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] hover:bg-pine-tint/50"
+                >
                   <span className="num font-semibold">{h.docNo}</span>
                   <span className="text-ink-3">
                     {h.kind === 'offset' ? '核销' : '供应商退款'} · {h.date} · 来自 {h.from}
@@ -136,9 +130,7 @@ export function OffsetDialog({ supplierId, credit, onClose }: { supplierId: numb
   }
   const open = (items.data ?? []).filter((i) => i.openCents > 0);
   const keyOf = (i: OpenItem) => `${i.kind}:${i.id}`;
-  const lines = open
-    .map((i) => ({ i, cents: parseYuan(amounts[keyOf(i)] ?? '') }))
-    .filter((l): l is { i: OpenItem; cents: number } => !!l.cents && l.cents > 0);
+  const lines = open.map((i) => ({ i, cents: parseYuan(amounts[keyOf(i)] ?? '') })).filter((l): l is { i: OpenItem; cents: number } => !!l.cents && l.cents > 0);
   const total = lines.reduce((t, l) => t + l.cents, 0);
   const fill = (i: OpenItem) => {
     const remaining = (credit?.availableCents ?? 0) - total + (parseYuan(amounts[keyOf(i)] ?? '') ?? 0);
@@ -204,11 +196,17 @@ export function OffsetDialog({ supplierId, credit, onClose }: { supplierId: numb
       }
     >
       <div className="space-y-3">
-        {pending.length > 0 && <Notice tone="warning" title="上一笔核销结果待确认">请先在页面上方查回、按原内容重新提交或作废，再登记新的核销。</Notice>}
+        {pending.length > 0 && (
+          <Notice tone="warning" title="上一笔核销结果待确认">
+            请先在页面上方查回、按原内容重新提交或作废，再登记新的核销。
+          </Notice>
+        )}
         {items.isPending ? (
           <Spinner />
         ) : open.length === 0 ? (
-          <Notice tone="info" title="这个供应商没有还没付的货款">有新的收货生效后再来核销。</Notice>
+          <Notice tone="info" title="这个供应商没有还没付的货款">
+            有新的收货生效后再来核销。
+          </Notice>
         ) : (
           <ul className="divide-y divide-line/70 rounded-lg border border-line">
             {open.map((i) => (
@@ -220,12 +218,7 @@ export function OffsetDialog({ supplierId, credit, onClose }: { supplierId: numb
                 <Button size="sm" variant="ghost" onClick={() => fill(i)}>
                   填满
                 </Button>
-                <MoneyInput
-                  aria-label={`核销 ${i.docNo}`}
-                  value={amounts[keyOf(i)] ?? ''}
-                  onChange={(e) => setAmounts({ ...amounts, [keyOf(i)]: e.target.value })}
-                  className="w-[130px]"
-                />
+                <MoneyInput aria-label={`核销 ${i.docNo}`} value={amounts[keyOf(i)] ?? ''} onChange={(e) => setAmounts({ ...amounts, [keyOf(i)]: e.target.value })} className="w-[130px]" />
               </li>
             ))}
           </ul>
@@ -426,7 +419,11 @@ export function OffsetSheet({ id, onClose }: { id: number | null; onClose: () =>
         <>
           <SheetHeader title="核销" docNo={o.data.docNo} status={o.data.status} synthetic={o.data.isSynthetic} onClose={onClose} />
           <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-            {o.data.status === 'voided' && <Notice tone="error" title={`已冲销 · ${o.data.voidedByName ?? ''}`}>{o.data.voidReason}</Notice>}
+            {o.data.status === 'voided' && (
+              <Notice tone="error" title={`已冲销 · ${o.data.voidedByName ?? ''}`}>
+                {o.data.voidReason}
+              </Notice>
+            )}
             <div className="rounded-lg border border-line bg-card px-4 py-3.5">
               <p className="text-[12px] font-semibold text-ink-3">核销金额</p>
               <Money cents={o.data.amountCents} className="text-[26px] font-bold" />
@@ -528,7 +525,11 @@ function RefundBody({ r, onClose, onVoid }: { r: SupplierRefundDoc; onClose: () 
     <>
       <SheetHeader title="供应商退款" docNo={r.docNo} status={r.status} synthetic={r.isSynthetic} onClose={onClose} />
       <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-        {r.status === 'voided' && <Notice tone="error" title={`已冲销 · ${r.voidedByName ?? ''}`}>{r.voidReason}</Notice>}
+        {r.status === 'voided' && (
+          <Notice tone="error" title={`已冲销 · ${r.voidedByName ?? ''}`}>
+            {r.voidReason}
+          </Notice>
+        )}
         <div className="rounded-lg border border-line bg-card px-4 py-3.5">
           <p className="text-[12px] font-semibold text-ink-3">退款金额</p>
           <Money cents={r.amountCents} className="text-[26px] font-bold text-pine" />
@@ -560,4 +561,3 @@ function RefundBody({ r, onClose, onVoid }: { r: SupplierRefundDoc; onClose: () 
     </>
   );
 }
-

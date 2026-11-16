@@ -126,8 +126,7 @@ test.describe('审批中心（v0.7.30）', () => {
     await login(page, 'linlan');
     await page.goto('/approvals?tab=rules');
     const stamp = Date.now();
-    const rulesNamed = async (note: string) =>
-      ((await (await page.request.get('/api/approvals/rules')).json()) as { id: number; version: number; note: string }[]).filter((r) => r.note === note);
+    const rulesNamed = async (note: string) => ((await (await page.request.get('/api/approvals/rules')).json()) as { id: number; version: number; note: string }[]).filter((r) => r.note === note);
     const fill = async (note: string, min: string) => {
       await page.getByTestId('approval-rule-new').click();
       await page.getByTestId('approval-rule-doctype').selectOption('damage');

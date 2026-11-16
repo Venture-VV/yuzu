@@ -80,7 +80,10 @@ const TemplateFields = z.object({
   validTo: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').nullable().default(null),
   validDays: z.number('有效天数必须是整数').int('有效天数必须是整数').min(1, '至少 1 天').max(3650, '最多 3650 天').nullable().default(null),
   // 限定发放的档级 L0–L6（会员体系 v2，v0.7.23）；空 = 不限
-  levels: z.array(z.number().int().min(0, '档级是 L0–L6').max(MAX_GRADE, '档级是 L0–L6')).max(MAX_GRADE + 1).default([]),
+  levels: z
+    .array(z.number().int().min(0, '档级是 L0–L6').max(MAX_GRADE, '档级是 L0–L6'))
+    .max(MAX_GRADE + 1)
+    .default([]),
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
   active: z.boolean().default(true),
 });
@@ -277,8 +280,22 @@ export async function createTemplate(deps: Deps, raw: unknown, ctx: OpContext): 
 }
 
 const TERM_KEYS = [
-  'kind', 'faceValue', 'ratePercent', 'maxOff', 'threshold', 'scope', 'scopeCategories', 'scopeItems', 'exchangeItemId', 'exchangeTicketTypeId',
-  'buyItemId', 'validity', 'validFrom', 'validTo', 'validDays', 'levels',
+  'kind',
+  'faceValue',
+  'ratePercent',
+  'maxOff',
+  'threshold',
+  'scope',
+  'scopeCategories',
+  'scopeItems',
+  'exchangeItemId',
+  'exchangeTicketTypeId',
+  'buyItemId',
+  'validity',
+  'validFrom',
+  'validTo',
+  'validDays',
+  'levels',
 ] as const;
 
 /** 改模板：带版本号（对不上拒绝）；发过券的只能改名称、备注、停用 */
@@ -501,7 +518,9 @@ export async function issueRechargeCoupons(
 ) {
   const issued = [];
   if (o.planId !== null) {
-    issued.push(...(await issueByRules(tx, { kind: 'recharge', memberId: o.memberId, memberLevel: o.levelAfter, planId: o.planId, rechargeId: o.rechargeId, staffId: o.staffId, at: o.at, date: o.date })));
+    issued.push(
+      ...(await issueByRules(tx, { kind: 'recharge', memberId: o.memberId, memberLevel: o.levelAfter, planId: o.planId, rechargeId: o.rechargeId, staffId: o.staffId, at: o.at, date: o.date })),
+    );
   }
   for (let level = o.levelBefore + 1; level <= o.levelAfter; level++) {
     issued.push(...(await issueByRules(tx, { kind: 'level_up', memberId: o.memberId, memberLevel: level, ruleLevel: level, staffId: o.staffId, at: o.at, date: o.date })));
@@ -560,10 +579,7 @@ const MpClaimInput = z.object({
   templateId: z.number('券模板编号不对').int('券模板编号不对').positive('券模板编号不对'),
   memberId: z.number('会员编号不对').int('会员编号不对').positive('会员编号不对'),
   /** 小程序线的领取记录：正整数，或 64 字以内的字母、数字、_、-（去重键 mp_claim:<claimId>） */
-  claimId: z.union(
-    [z.number().int().positive().max(Number.MAX_SAFE_INTEGER), z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)],
-    '领取记录编号不对',
-  ),
+  claimId: z.union([z.number().int().positive().max(Number.MAX_SAFE_INTEGER), z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)], '领取记录编号不对'),
   at: z.date().optional(),
 });
 export type MpClaimInput = z.input<typeof MpClaimInput>;
@@ -603,11 +619,7 @@ export interface MpClaimEligibility {
  * （会员停用 / 已合并、模板停用 / 过期、档级不在模板限定里）。领没领满是小程序线自己的领取记录，这里不管；
  * 列表与真正领取之间规则可能刚好变了，以领取时 issueMpClaimCoupon 的结果为准
  */
-export async function mpClaimEligibility(
-  db: Db,
-  deps: Pick<Deps, 'config'>,
-  o: { templateId: number; memberId: number; at?: Date },
-): Promise<MpClaimEligibility> {
+export async function mpClaimEligibility(db: Db, deps: Pick<Deps, 'config'>, o: { templateId: number; memberId: number; at?: Date }): Promise<MpClaimEligibility> {
   const date = await issueDate(db, deps, o.at ?? new Date());
   const [m] = await db<MpClaimMember[]>`SELECT id, name, status, grade, merged_into_id FROM members WHERE id = ${o.memberId}`;
   if (!m) return { ok: false, code: 'NOT_FOUND', message: '会员不存在' };
@@ -882,7 +894,15 @@ export async function voidCoupon(deps: Deps, id: number, raw: unknown, ctx: OpCo
     const date = await issueDate(tx, deps, at);
     await tx`UPDATE coupons SET status = 'voided' WHERE id = ${c.id}`;
     await tx`INSERT INTO coupon_events (coupon_id, kind, reason, staff_id, at, business_date) VALUES (${c.id}, 'void', ${reason}, ${ctx.actor.id}, ${at}, ${date})`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'coupon_voided', targetType: 'coupon', targetId: c.id, detail: { code: formatStoreCouponCode(c.code), memberId: c.memberId, reason }, ip: ctx.ip, businessDate: date });
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'coupon_voided',
+      targetType: 'coupon',
+      targetId: c.id,
+      detail: { code: formatStoreCouponCode(c.code), memberId: c.memberId, reason },
+      ip: ctx.ip,
+      businessDate: date,
+    });
   });
 }
 
@@ -901,7 +921,15 @@ export async function voidBatch(deps: Deps, issueId: number, raw: unknown, ctx: 
     await tx`
       INSERT INTO coupon_events (coupon_id, kind, reason, staff_id, at, business_date)
       SELECT unnest(${ids}::bigint[]), 'void', ${reason}, ${ctx.actor.id}, ${at}, ${date}`;
-    await writeAudit(tx, { staffId: ctx.actor.id, action: 'coupon_voided', targetType: 'coupon_issue', targetId: issueId, detail: { issueNo: b.issueNo, count: ids.length, reason }, ip: ctx.ip, businessDate: date });
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'coupon_voided',
+      targetType: 'coupon_issue',
+      targetId: issueId,
+      detail: { issueNo: b.issueNo, count: ids.length, reason },
+      ip: ctx.ip,
+      businessDate: date,
+    });
   });
 }
 
@@ -1067,7 +1095,13 @@ const BATCH_SELECT = (db: Db) => db`
   LEFT JOIN service_items xi ON xi.id = t.exchange_item_id LEFT JOIN ticket_types xt ON xt.id = t.exchange_ticket_type_id
   LEFT JOIN service_items bi ON bi.id = t.buy_item_id
   WHERE i.kind = 'batch'`;
-type BatchRow = Omit<CouponBatch, 'summary' | 'counts'> & CouponTerms & { exchangeItemName: string | null; exchangeTicketName: string | null; buyItemName: string | null; coupons: { status: 'available' | 'used' | 'voided'; validFrom: string; validTo: string }[] };
+type BatchRow = Omit<CouponBatch, 'summary' | 'counts'> &
+  CouponTerms & {
+    exchangeItemName: string | null;
+    exchangeTicketName: string | null;
+    buyItemName: string | null;
+    coupons: { status: 'available' | 'used' | 'voided'; validFrom: string; validTo: string }[];
+  };
 
 function toBatch(r: BatchRow, today: string): CouponBatch {
   const counts = emptyCounts();
@@ -1236,4 +1270,3 @@ export function registerCouponRoutes(app: FastifyInstance, deps: Deps) {
 }
 
 const couponStateLabel = (s: CouponState) => ({ available: '可用', pending: '未生效', expired: '已过期', used: '已用', voided: '已作废' })[s];
-

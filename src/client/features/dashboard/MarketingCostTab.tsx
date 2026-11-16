@@ -89,7 +89,15 @@ export function MarketingCostTab() {
             </div>
 
             <Card className="space-y-3 p-5" data-testid="marketing-cost-coupon-card">
-              <SectionTitle aside={<span className="text-[12px] text-ink-3">参考：这段时间发出 {d.coupons.issued} 张，代金券面值 <Money cents={d.coupons.issuedFace} /></span>}>券（含买一赠一）</SectionTitle>
+              <SectionTitle
+                aside={
+                  <span className="text-[12px] text-ink-3">
+                    参考：这段时间发出 {d.coupons.issued} 张，代金券面值 <Money cents={d.coupons.issuedFace} />
+                  </span>
+                }
+              >
+                券（含买一赠一）
+              </SectionTitle>
               <Segmented<UsageGroup>
                 size="sm"
                 ariaLabel="券成本怎么分"

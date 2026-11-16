@@ -53,24 +53,20 @@ export function MemberFormDialog({
   const cleanPhone = phone.replace(/[\s-]/g, '');
   const phoneChanged = !!member && cleanPhone !== member.phone;
 
-  useResetOnOpen(
-    open,
-    () => {
-      const digits = prefill?.replace(/\D/g, '') ?? '';
-      setName(member?.name ?? (prefill && !digits ? prefill : ''));
-      setPhone(member?.phone ?? (digits.length >= 3 ? digits : ''));
-      setGender(member?.gender ?? 'unknown');
-      setBirthday(member?.birthday ?? '');
-      setNote(member?.note ?? '');
-      setChannel(member?.channel ?? '');
-      setTagIds((member?.tags ?? []).map((t) => t.id));
-      setErrors({});
-      setExisting(null);
-      setPhoneReason('');
-      setAuthorizing(false);
-    },
-    [member, prefill],
-  );
+  useResetOnOpen(open, () => {
+    const digits = prefill?.replace(/\D/g, '') ?? '';
+    setName(member?.name ?? (prefill && !digits ? prefill : ''));
+    setPhone(member?.phone ?? (digits.length >= 3 ? digits : ''));
+    setGender(member?.gender ?? 'unknown');
+    setBirthday(member?.birthday ?? '');
+    setNote(member?.note ?? '');
+    setChannel(member?.channel ?? '');
+    setTagIds((member?.tags ?? []).map((t) => t.id));
+    setErrors({});
+    setExisting(null);
+    setPhoneReason('');
+    setAuthorizing(false);
+  }, [member, prefill]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -102,9 +98,7 @@ export function MemberFormDialog({
       ...(phoneChanged ? { phoneReason: phoneReason.trim(), ...(phoneGrantId ? { phoneGrantId } : {}) } : {}),
     };
     try {
-      const saved = member
-        ? await api.put<MemberDetail>(`/api/members/${member.id}`, body)
-        : await api.post<MemberSummary>('/api/members', body);
+      const saved = member ? await api.put<MemberDetail>(`/api/members/${member.id}`, body) : await api.post<MemberSummary>('/api/members', body);
       void qc.invalidateQueries({ queryKey: ['members'] });
       void qc.invalidateQueries({ queryKey: ['member', saved.id] });
       // 换手机号的记录列在「储值与账户」里（v0.7.26）

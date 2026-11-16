@@ -78,8 +78,7 @@ export async function loadMembershipRules(db: Db): Promise<MembershipRules> {
   return { ...DEFAULT_MEMBERSHIP_RULES, ...(row?.value ?? {}) };
 }
 
-const centsField = (label: string, max: number) =>
-  z.number(`请填写${label}`).int(`${label}要精确到分`).min(0, `${label}不能为负`).max(max, `${label}过大`);
+const centsField = (label: string, max: number) => z.number(`请填写${label}`).int(`${label}要精确到分`).min(0, `${label}不能为负`).max(max, `${label}过大`);
 
 const RulesInput = z
   .object({
@@ -652,10 +651,7 @@ export async function memberGradeInfo(db: Db, memberId: number, todayDate: strin
   const reached = gradeForAmount(rules, rolling);
   const nextGrade = reached > state.grade ? reached : state.grade < MAX_GRADE ? ((state.grade + 1) as Grade) : null;
   const nextRule = nextGrade === null ? undefined : rules.grades[nextGrade];
-  const next =
-    nextGrade === null || !nextRule
-      ? null
-      : { grade: nextGrade, name: nextRule.name, needCents: Math.max(0, nextRule.thresholdCents - rolling), bonusBp: nextRule.bonusBp };
+  const next = nextGrade === null || !nextRule ? null : { grade: nextGrade, name: nextRule.name, needCents: Math.max(0, nextRule.thresholdCents - rolling), bonusBp: nextRule.bonusBp };
   const daysLeft = state.grade > 0 ? daysToExpiry(state, todayDate) : null;
   return {
     memberId,
@@ -727,12 +723,14 @@ export async function membershipOverview(db: Db, todayDate: string): Promise<Mem
     SELECT kind, count(*)::int AS n FROM member_grade_events WHERE business_date BETWEEN ${from} AND ${todayDate} GROUP BY kind`;
   const counts = Object.fromEntries(GRADE_EVENT_KINDS.map((k) => [k, kindRows.find((r) => r.kind === k)?.n ?? 0])) as Record<GradeEventKind, number>;
   const expiring = await Promise.all(
-    [...rules.reminderDays].sort((a, b) => a - b).map(async (within) => {
-      const [r] = await db<{ n: number }[]>`
+    [...rules.reminderDays]
+      .sort((a, b) => a - b)
+      .map(async (within) => {
+        const [r] = await db<{ n: number }[]>`
         SELECT count(*)::int AS n FROM members
         WHERE grade > 0 AND grace_until IS NULL AND cycle_end BETWEEN ${todayDate} AND ${shiftDate(todayDate, within)}`;
-      return { within, count: r!.n };
-    }),
+        return { within, count: r!.n };
+      }),
   );
   const [g] = await db<{ grace: number; overdue: number }[]>`
     SELECT count(*) FILTER (WHERE grace_until >= ${todayDate})::int AS grace,
@@ -771,11 +769,7 @@ export async function retentionList(db: Db, todayDate: string, q: RetentionQuery
            (SELECT coalesce(sum(c.total_amount), 0) FROM consumptions c
              WHERE c.member_id = m.id AND c.status = 'completed' AND c.business_date >= m.cycle_start) AS spend_cents
     FROM members m
-    WHERE m.grade > 0 AND ${
-      q.kind === 'grace'
-        ? db`m.grace_until >= ${todayDate}`
-        : db`m.grace_until IS NULL AND m.cycle_end BETWEEN ${todayDate} AND ${shiftDate(todayDate, q.within)}`
-    }
+    WHERE m.grade > 0 AND ${q.kind === 'grace' ? db`m.grace_until >= ${todayDate}` : db`m.grace_until IS NULL AND m.cycle_end BETWEEN ${todayDate} AND ${shiftDate(todayDate, q.within)}`}
     ORDER BY coalesce(m.grace_until, m.cycle_end), m.id
     LIMIT 1000`;
   return rows.map((r) => {
@@ -1018,7 +1012,14 @@ export function registerMembershipRoutes(app: FastifyInstance, deps: Deps) {
     const date = await todayNow();
     const rules = await loadMembershipRules(sql);
     const rows = await retentionList(sql, date, q);
-    await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'membership_retention', detail: { kind: q.kind, within: q.within, rows: rows.length }, ip: req.ip, businessDate: date });
+    await writeAudit(sql, {
+      staffId: req.actor.id,
+      action: 'export',
+      targetType: 'membership_retention',
+      detail: { kind: q.kind, within: q.within, rows: rows.length },
+      ip: req.ip,
+      businessDate: date,
+    });
     const title = q.kind === 'grace' ? '补充期名单' : `到期提醒名单（${q.within} 天内）`;
     return csvReply(
       reply,
@@ -1062,4 +1063,3 @@ export function registerMembershipRoutes(app: FastifyInstance, deps: Deps) {
     return adjustMemberGrade(deps, id, req.body, ctxOf(req));
   });
 }
-

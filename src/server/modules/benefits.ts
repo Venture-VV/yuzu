@@ -304,10 +304,7 @@ const EVENT_OF_KIND: Partial<Record<GradeEventKind, BenefitEvent>> = { recharge_
  * 其余留到最后一步之后按处理完的状态补（onDueSettled）：中间的档阶早就过去了，按它发的券降档后也收不回
  * （Codex 自动审查 98806a3）
  */
-export async function onGradeChanged(
-  tx: Tx,
-  o: { memberId: number; kind: GradeEventKind; eventId: number; date: string; to: GradeState; staffId: number | null; deferPeriodic?: boolean },
-) {
+export async function onGradeChanged(tx: Tx, o: { memberId: number; kind: GradeEventKind; eventId: number; date: string; to: GradeState; staffId: number | null; deferPeriodic?: boolean }) {
   const benefits = await publishedForGrants(tx);
   if (!benefits.length) return;
   const g = await granteeOf(tx, o.memberId, o.date, o.staffId);
@@ -507,7 +504,14 @@ export async function runVisitChallenges(deps: Pick<Deps, 'sql' | 'config'>, now
         if ((await monthVisitDays(tx, Number(memberId), date)) < b.visitTarget!) return 0;
         const issued = await grantEvent(tx, g, 'monthly_visits', eventKey, [b]);
         if (issued) {
-          await writeAudit(tx, { staffId: null, action: 'benefit_granted', targetType: 'member', targetId: Number(memberId), detail: { coupons: issued, challenge: b.code, month: monthKey }, businessDate: date });
+          await writeAudit(tx, {
+            staffId: null,
+            action: 'benefit_granted',
+            targetType: 'member',
+            targetId: Number(memberId),
+            detail: { coupons: issued, challenge: b.code, month: monthKey },
+            businessDate: date,
+          });
         }
         return issued;
       });
@@ -859,8 +863,27 @@ async function lockBenefit(tx: Tx, id: number, expectedVersion: number): Promise
 }
 
 const FIELDS = [
-  'name', 'category', 'startGrade', 'startTier', 'period', 'quantity', 'tierQuantities', 'templateId', 'events', 'festivalDates',
-  'discountTarget', 'companionCount', 'companionCounts', 'weekdays', 'monthDays', 'visitTarget', 'parking', 'parkingHours', 'parkingHoursByTier', 'content', 'conditions',
+  'name',
+  'category',
+  'startGrade',
+  'startTier',
+  'period',
+  'quantity',
+  'tierQuantities',
+  'templateId',
+  'events',
+  'festivalDates',
+  'discountTarget',
+  'companionCount',
+  'companionCounts',
+  'weekdays',
+  'monthDays',
+  'visitTarget',
+  'parking',
+  'parkingHours',
+  'parkingHoursByTier',
+  'content',
+  'conditions',
 ] as const;
 
 /** 改一项（带版本号，对不上拒绝）；已发布的改完还要能发布。已经发出的券、登记的使用不变 */
@@ -1019,13 +1042,13 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
       periodKey: b.category === 'coupon' || (b.category === 'service' && b.period !== 'none') ? pk : null,
       granted: b.category === 'event' ? mine.length : inPeriod.reduce((s, g) => s + g.quantity, 0),
       available: mine.reduce((s, g) => s + g.available, 0),
-      used:
-        b.category !== 'service'
-          ? 0
-          : pk === null
-            ? uses.filter((u) => Number(u.benefitId) === id && u.periodKey === null).reduce((s, u) => s + u.monthN, 0)
-            : usedInPeriod,
-      lastGrantDate: mine.length ? mine.map((g) => g.businessDate).sort().at(-1)! : null,
+      used: b.category !== 'service' ? 0 : pk === null ? uses.filter((u) => Number(u.benefitId) === id && u.periodKey === null).reduce((s, u) => s + u.monthN, 0) : usedInPeriod,
+      lastGrantDate: mine.length
+        ? mine
+            .map((g) => g.businessDate)
+            .sort()
+            .at(-1)!
+        : null,
       templateName: b.templateName,
       events: b.events,
       discount:
@@ -1060,8 +1083,7 @@ export async function memberBenefits(db: Db, memberId: number, date: string): Pr
 }
 
 /** 停车优惠在「本月可享」里的说明（没填免费几小时的不能登记） */
-const parkingItem = (hours: number | null, usedToday: boolean) =>
-  hours === null ? null : { hours, usedToday, text: `每次免 ${hours} 小时 · 前台登记车牌（每个营业日一次，系统不收停车费）` };
+const parkingItem = (hours: number | null, usedToday: boolean) => (hours === null ? null : { hours, usedToday, text: `每次免 ${hours} 小时 · 前台登记车牌（每个营业日一次，系统不收停车费）` });
 
 const UseInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
@@ -1094,14 +1116,7 @@ export async function registerBenefitUse(deps: Deps, memberId: number, raw: unkn
     const [p] = await db<{ id: number; memberId: number; benefitId: number; quantity: number; note: string; plate: string | null; hours: number | null }[]>`
       SELECT id, member_id, benefit_id, quantity, note, plate, hours FROM benefit_uses WHERE client_key = ${input.clientKey}`;
     if (!p) return null;
-    if (
-      Number(p.memberId) !== memberId ||
-      Number(p.benefitId) !== input.benefitId ||
-      p.quantity !== input.quantity ||
-      p.note !== input.note ||
-      p.plate !== input.plate ||
-      p.hours !== input.hours
-    ) {
+    if (Number(p.memberId) !== memberId || Number(p.benefitId) !== input.benefitId || p.quantity !== input.quantity || p.note !== input.note || p.plate !== input.plate || p.hours !== input.hours) {
       throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一次登记，请刷新页面后重新登记');
     }
     return Number(p.id);
@@ -1134,7 +1149,10 @@ export async function registerBenefitUse(deps: Deps, memberId: number, raw: unkn
       // 临时身份（v0.7.25，M51）：服务类按自己的与临时身份的取高的
       const st = await benefitState(tx, memberId, m, date);
       if (!benefitEligible(b, st.grade, st.tier)) {
-        throw unprocessable('BENEFIT_NOT_ELIGIBLE', `这位会员现在是「${gradeLabel(rules, st.grade, st.tier)}」${st.trial ? '（含体验中的）' : ''}，「${b.name}」从「${startLabel(b.startGrade, b.startTier)}」起才能享`);
+        throw unprocessable(
+          'BENEFIT_NOT_ELIGIBLE',
+          `这位会员现在是「${gradeLabel(rules, st.grade, st.tier)}」${st.trial ? '（含体验中的）' : ''}，「${b.name}」从「${startLabel(b.startGrade, b.startTier)}」起才能享`,
+        );
       }
       // 停车优惠（v0.7.28）：要车牌与这次免费几小时，不超过这位会员现在的档阶能免的；每个营业日一次（数量 1、每天）
       if (b.parking) {
@@ -1173,7 +1191,17 @@ export async function registerBenefitUse(deps: Deps, memberId: number, raw: unkn
         action: 'benefit_used',
         targetType: 'member',
         targetId: memberId,
-        detail: { useId: row!.id, code: b.code, name: b.name, quantity: input.quantity, period: pk, limit, note: input.note || undefined, plate: b.parking ? input.plate : undefined, hours: b.parking ? input.hours : undefined },
+        detail: {
+          useId: row!.id,
+          code: b.code,
+          name: b.name,
+          quantity: input.quantity,
+          period: pk,
+          limit,
+          note: input.note || undefined,
+          plate: b.parking ? input.plate : undefined,
+          hours: b.parking ? input.hours : undefined,
+        },
         ip: ctx.ip,
         businessDate: date,
       });

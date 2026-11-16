@@ -178,7 +178,8 @@ async function clearStay(page: Page, stayId: number, reason: string) {
   if (s.status !== 'open') return;
   for (const c of s.charges.filter((x) => x.lineStatus === 'active')) await send(page, 'post', `/api/frontdesk/lines/${c.lineId}/void`, { reason });
   if (s.depositBalance > 0) await ensureShift(page);
-  for (const m of s.depositByMethod.filter((x) => x.balance > 0)) await send(page, 'post', `/api/rooms/stays/${s.id}/refunds`, { clientKey: randomUUID(), method: m.method, amount: m.balance, reason });
+  for (const m of s.depositByMethod.filter((x) => x.balance > 0))
+    await send(page, 'post', `/api/rooms/stays/${s.id}/refunds`, { clientKey: randomUUID(), method: m.method, amount: m.balance, reason });
   await send(page, 'post', `/api/rooms/stays/${s.id}/cancel`, { reason });
 }
 
@@ -203,7 +204,15 @@ async function cleanup(page: Page) {
   if (room) {
     const tile = (await getJson<RoomBoard>(page, '/api/rooms')).rooms.find((r) => r.id === room.id);
     if (tile?.stay) await clearStay(page, tile.stay.id, 'E2E：收尾');
-    await send(page, 'put', `/api/admin/rooms/rooms/${room.id}`, { roomNo: 'E2E-W301', floor: room.floor, roomTypeId: room.roomTypeId, sortOrder: room.sortOrder, active: false, spaceId: null, linkReason: 'E2E 房态图收尾' });
+    await send(page, 'put', `/api/admin/rooms/rooms/${room.id}`, {
+      roomNo: 'E2E-W301',
+      floor: room.floor,
+      roomTypeId: room.roomTypeId,
+      sortOrder: room.sortOrder,
+      active: false,
+      spaceId: null,
+      linkReason: 'E2E 房态图收尾',
+    });
   }
   const ledger = await getJson<SpaceLedger>(page, '/api/admin/spaces');
   for (const code of ['W301', 'W302']) {
@@ -238,7 +247,10 @@ test.describe('v0.7.16 房态图', () => {
       if (e7.state === 'off') await send(page, 'post', `/api/clockroom/technicians/${e7.id}/state`, { action: 'sign_in' });
       if (e7.state === 'rest') await send(page, 'post', `/api/clockroom/technicians/${e7.id}/state`, { action: 'back' });
       const tags = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
-      const tag = tags.tags.filter((t) => t.zone === 'female' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+      const tag = tags.tags
+        .filter((t) => t.zone === 'female' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+        .map((t) => t.code)
+        .reverse()[0]!;
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'female', guestLabel: 'E2E 平面图客人' }] });
       visit = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
 
@@ -407,14 +419,27 @@ test.describe('v0.7.16 房态图', () => {
       // ⑥ 钟房换房间：T301 → T302；平面图 5 秒内跟着变（不刷新页面）
       const rooms = page.url();
       await page.goto('/clockroom');
-      await page.getByTestId(/^clock-serving-/).filter({ hasText: tag }).getByTestId(/^clock-room-/).click();
+      await page
+        .getByTestId(/^clock-serving-/)
+        .filter({ hasText: tag })
+        .getByTestId(/^clock-room-/)
+        .click();
       const roomDialog = page.getByRole('dialog').filter({ hasText: '换房间' });
       await roomDialog.getByTestId('room-dialog-select').selectOption({ label: 'T302 · 样例 SPA 2人间 · 空闲' });
       await roomDialog.getByTestId('room-dialog-save').click();
-      await expect(page.getByTestId(/^clock-serving-/).filter({ hasText: tag }).getByTestId(/^clock-room-/)).toHaveText('T302 · 样例 SPA 2人间');
+      await expect(
+        page
+          .getByTestId(/^clock-serving-/)
+          .filter({ hasText: tag })
+          .getByTestId(/^clock-room-/),
+      ).toHaveText('T302 · 样例 SPA 2人间');
       // 换房间的版本号（测试报告建议补的浏览器用例）：对话框打开后房间被别人改过（这里改到 T301 再改回 T302），
       // 再按打开时的内容保存被拒绝（SESSION_SPACE_STALE），提示刷新后再选；房间还在 T302
-      await page.getByTestId(/^clock-serving-/).filter({ hasText: tag }).getByTestId(/^clock-room-/).click();
+      await page
+        .getByTestId(/^clock-serving-/)
+        .filter({ hasText: tag })
+        .getByTestId(/^clock-room-/)
+        .click();
       const staleDialog = page.getByRole('dialog').filter({ hasText: '换房间' });
       const mapNow = await getJson<FloorMapData>(page, '/api/floormap');
       const spaceIdOf = (code: string) => mapNow.spaces.find((x) => x.code === code)!.id;
@@ -426,7 +451,12 @@ test.describe('v0.7.16 房态图', () => {
       await staleDialog.getByTestId('room-dialog-save').click();
       await expect(staleDialog).toContainText('房间刚被改过');
       await page.keyboard.press('Escape');
-      await expect(page.getByTestId(/^clock-serving-/).filter({ hasText: tag }).getByTestId(/^clock-room-/)).toHaveText('T302 · 样例 SPA 2人间');
+      await expect(
+        page
+          .getByTestId(/^clock-serving-/)
+          .filter({ hasText: tag })
+          .getByTestId(/^clock-room-/),
+      ).toHaveText('T302 · 样例 SPA 2人间');
       await page.goto(rooms);
       await expect(space(page, 'T302')).toHaveAttribute('data-state', 'serving');
       await expect(space(page, 'T302')).toContainText('1/2');
@@ -468,21 +498,88 @@ function synthetic() {
     const y = CELL.gap + row * (CELL.h + CELL.gap);
     const code = codeOf(i);
     const businessType = TYPES[i % TYPES.length]!;
-    spaces.push({ id: i + 1, code, floorCode: 'L3', floorName: '三层', zoneId: null, zoneName: null, businessType, capacity: businessType === '足浴' ? 4 : 1, areaCentiM2: 2400, displayName: `合成${businessType}${i + 1}`, sellable: true, active: i % 37 !== 0, aliases: [], roomId: businessType === '客房' ? 1000 + i : null });
-    planRooms.push({ floorCode: 'L3', code, label: `合成 ${code}`, status: 'ok', mergedWith: [], closeMm: 600, polygon: [[x, y], [x + CELL.w, y], [x + CELL.w, y + CELL.h], [x, y + CELL.h]], labelAt: [x + CELL.w / 2, y + CELL.h / 2], areaM2: 24, spaceId: i + 1, displayName: `合成${businessType}${i + 1}` });
+    spaces.push({
+      id: i + 1,
+      code,
+      floorCode: 'L3',
+      floorName: '三层',
+      zoneId: null,
+      zoneName: null,
+      businessType,
+      capacity: businessType === '足浴' ? 4 : 1,
+      areaCentiM2: 2400,
+      displayName: `合成${businessType}${i + 1}`,
+      sellable: true,
+      active: i % 37 !== 0,
+      aliases: [],
+      roomId: businessType === '客房' ? 1000 + i : null,
+    });
+    planRooms.push({
+      floorCode: 'L3',
+      code,
+      label: `合成 ${code}`,
+      status: 'ok',
+      mergedWith: [],
+      closeMm: 600,
+      polygon: [
+        [x, y],
+        [x + CELL.w, y],
+        [x + CELL.w, y + CELL.h],
+        [x, y + CELL.h],
+      ],
+      labelAt: [x + CELL.w / 2, y + CELL.h / 2],
+      areaM2: 24,
+      spaceId: i + 1,
+      displayName: `合成${businessType}${i + 1}`,
+    });
     if (businessType === '客房') {
       const status = (['vacant', 'occupied', 'dirty', 'maintenance'] as const)[Math.floor(i / 5) % 4]!;
-      rooms.push({ id: 1000 + i, roomNo: code, spaceName: `合成客房${i + 1}`, spaceId: i + 1, floor: '3', typeName: '合成大床房', kind: 'daily', price: 28800, blockMinutes: null, status, maintenanceNote: null, housekeeping: status === 'dirty' || status === 'maintenance' ? status : 'clean', lastChange: null, stay: null });
+      rooms.push({
+        id: 1000 + i,
+        roomNo: code,
+        spaceName: `合成客房${i + 1}`,
+        spaceId: i + 1,
+        floor: '3',
+        typeName: '合成大床房',
+        kind: 'daily',
+        price: 28800,
+        blockMinutes: null,
+        status,
+        maintenanceNote: null,
+        housekeeping: status === 'dirty' || status === 'maintenance' ? status : 'clean',
+        lastChange: null,
+        stay: null,
+      });
     }
     if ((businessType === 'SPA' || businessType === '足浴') && i % 3 === 0) {
-      sessions.push({ id: i + 1, sessionNo: `ZD${i}`, spaceId: i + 1, techNo: String(i), techName: `合成技师${i}`, tagCode: `A${i}`, itemName: '合成项目', clocks: 1, minutes: 60, status: i % 2 ? 'serving' : 'waiting', createdAt: now, startedAt: i % 2 ? now : null, plannedEnd: null });
+      sessions.push({
+        id: i + 1,
+        sessionNo: `ZD${i}`,
+        spaceId: i + 1,
+        techNo: String(i),
+        techName: `合成技师${i}`,
+        tagCode: `A${i}`,
+        itemName: '合成项目',
+        clocks: 1,
+        minutes: 60,
+        status: i % 2 ? 'serving' : 'waiting',
+        createdAt: now,
+        startedAt: i % 2 ? now : null,
+        plannedEnd: null,
+      });
     }
   }
   const lines: string[] = [];
   for (let c = 0; c <= COLS; c += 1) lines.push(`<path d="M${c * (CELL.w + CELL.gap) + CELL.gap / 2} 0V${H}"/>`);
   for (let r = 0; r <= ROWS; r += 1) lines.push(`<path d="M0 ${r * (CELL.h + CELL.gap) + CELL.gap / 2}H${W}"/>`);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}"><g fill="none" stroke="#333" stroke-width="12">${lines.join('')}</g></svg>`;
-  const plan: ActiveFloorplan = { batchId: 900001, activatedAt: now, outlineRev: 0, floors: [{ code: 'L3', title: '三层', width: W, height: H, svgBytes: svg.length, pathCount: lines.length, svgUrl: '/api/floorplans/900001/floors/L3/svg' }], rooms: planRooms };
+  const plan: ActiveFloorplan = {
+    batchId: 900001,
+    activatedAt: now,
+    outlineRev: 0,
+    floors: [{ code: 'L3', title: '三层', width: W, height: H, svgBytes: svg.length, pathCount: lines.length, svgUrl: '/api/floorplans/900001/floors/L3/svg' }],
+    rooms: planRooms,
+  };
   const fm: FloorMapData = { serverTime: now, floorplanBatchId: 900001, floorplanRev: 0, spaces, sessions, usageTypes: [], usages: [] };
   const board: RoomBoard = {
     rules: { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 0 } as RoomBoard['rules'],
@@ -526,7 +623,9 @@ test.describe('v0.7.16 房态图 · 各尺寸', () => {
           const cx = r.x + r.width / 2;
           const cy = r.y + r.height / 2;
           const fire = (type: string, id: number, x: number) =>
-            (type === 'pointerdown' ? box : window).dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: x, clientY: cy, bubbles: true, cancelable: true }));
+            (type === 'pointerdown' ? box : window).dispatchEvent(
+              new PointerEvent(type, { pointerId: id, pointerType: 'touch', isPrimary: id === 1, clientX: x, clientY: cy, bubbles: true, cancelable: true }),
+            );
           fire('pointerdown', 1, cx - from);
           fire('pointerdown', 2, cx + from);
           const frame = () => new Promise((done) => requestAnimationFrame(done));

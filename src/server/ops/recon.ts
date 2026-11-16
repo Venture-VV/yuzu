@@ -151,10 +151,27 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     GROUP BY 1, 2
     HAVING sum(quantity) <> 0 OR sum(amount) <> 0 OR sum(discount) <> 0 OR sum(refund) <> 0`;
   // 退款单（v0.7.20）：当天开的（含当天作废的），每项一行
-  const refunds = await tx<{
-    refundNo: string; status: string; createdAt: string; checkoutNo: string; checkoutDate: string; tags: string | null; operatorName: string; reason: string;
-    amount: number; category: string; name: string; quantity: number; itemAmount: number; pays: string; voidedAt: string | null; voidedByName: string | null; voidReason: string | null;
-  }[]>`
+  const refunds = await tx<
+    {
+      refundNo: string;
+      status: string;
+      createdAt: string;
+      checkoutNo: string;
+      checkoutDate: string;
+      tags: string | null;
+      operatorName: string;
+      reason: string;
+      amount: number;
+      category: string;
+      name: string;
+      quantity: number;
+      itemAmount: number;
+      pays: string;
+      voidedAt: string | null;
+      voidedByName: string | null;
+      voidReason: string | null;
+    }[]
+  >`
     SELECT r.refund_no, r.status, r.created_at, c.checkout_no, c.business_date AS checkout_date, s.display_name AS operator_name, r.reason, r.amount,
            ri.category, ri.name, ri.quantity, ri.amount AS item_amount, r.voided_at, vb.display_name AS voided_by_name, r.void_reason,
            (SELECT string_agg(x.label, '、' ORDER BY x.label) FROM (
@@ -171,7 +188,9 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     ORDER BY r.id, ri.amount DESC, ri.category COLLATE "C", ri.name COLLATE "C"`;
   // 按分类、项目名排序（逐字符比较，结果与数据库的排序规则无关）
   departments.sort((a, b) => (a.category === b.category ? (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : a.category < b.category ? -1 : 1));
-  const voidedLines = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; name: string; quantity: number; amount: number; reason: string; postedByName: string; technician: string | null }[]>`
+  const voidedLines = await tx<
+    { at: string; visitNo: string; tag: string; guest: string; staff: string; name: string; quantity: number; amount: number; reason: string; postedByName: string; technician: string | null }[]
+  >`
     SELECT l.voided_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest, vs.display_name AS staff,
            l.name, l.quantity, l.amount, l.void_reason AS reason, ps.display_name AS posted_by_name, ${technicianTextSql(tx, 'l')} AS technician
     FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
@@ -193,7 +212,21 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     WHERE v.status = 'cancelled' AND v.closed_at >= ${from} AND v.closed_at < ${to} AND ${storeIn(tx, 'v.store_id')}
     ORDER BY v.closed_at, v.id`;
   // 改票种：降低票种或改成免票时记下当场授权的人与原因（R1.2 起；之前的记录与改贵的没有）
-  const ticketChanges = await tx<{ at: string; visitNo: string; tag: string; guest: string; staff: string; fromName: string; toName: string; price12h: number; price24h: number; approverName: string | null; reason: string | null }[]>`
+  const ticketChanges = await tx<
+    {
+      at: string;
+      visitNo: string;
+      tag: string;
+      guest: string;
+      staff: string;
+      fromName: string;
+      toName: string;
+      price12h: number;
+      price24h: number;
+      approverName: string | null;
+      reason: string | null;
+    }[]
+  >`
     SELECT c.created_at AS at, v.visit_no, t.code AS tag, coalesce(m.name, nullif(v.guest_label, ''), '散客') AS guest, s.display_name AS staff,
            ft.name AS from_name, tt.name AS to_name, c.price_12h, c.price_24h, ap.display_name AS approver_name, c.reason
     FROM visit_ticket_changes c JOIN visits v ON v.id = c.visit_id JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
@@ -226,7 +259,9 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
   const shifts = (await listShifts(tx, date)).filter((s) => s.businessDate === date);
   const technicians = await technicianReport(tx, date, date);
   // 客房（S7）：当天的入住、房费、换房、退房 / 撤销入住、夜审与押金台账，按时间排（房费挂在住客的手牌账单上，随手牌结账）
-  const rooms = await tx<{ at: string; event: string; stayNo: string; roomNo: string; guest: string; tagCode: string | null; method: string | null; amount: number | null; operator: string; note: string }[]>`
+  const rooms = await tx<
+    { at: string; event: string; stayNo: string; roomNo: string; guest: string; tagCode: string | null; method: string | null; amount: number | null; operator: string; note: string }[]
+  >`
     SELECT s.checked_in_at AS at, '入住' AS event, s.stay_no, r.room_no,
            s.guest_label AS guest, ht.code AS tag_code, NULL AS method, s.rate AS amount, st.display_name AS operator,
            CASE s.kind WHEN 'daily' THEN '全天房，房价每晚' ELSE '钟点房，房价每段 ' || s.block_minutes || ' 分钟' END AS note
@@ -263,7 +298,25 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     FROM room_audits a JOIN staff st ON st.id = a.run_by WHERE a.business_date = ${date} AND ${storeIn(tx, 'a.store_id')}
     ORDER BY 1, 3`;
   // 派对房等的使用单（v0.7.19）：当天开的（营业日），以及当天结束的、前一天开的
-  const usages = await tx<{ usageNo: string; spaceCode: string; spaceName: string; businessType: string; tagCode: string; guests: number; openedAt: string; openedBy: string; closedAt: string | null; closedBy: string | null; status: string; closeKind: string | null; closeReason: string | null; note: string; businessDate: string }[]>`
+  const usages = await tx<
+    {
+      usageNo: string;
+      spaceCode: string;
+      spaceName: string;
+      businessType: string;
+      tagCode: string;
+      guests: number;
+      openedAt: string;
+      openedBy: string;
+      closedAt: string | null;
+      closedBy: string | null;
+      status: string;
+      closeKind: string | null;
+      closeReason: string | null;
+      note: string;
+      businessDate: string;
+    }[]
+  >`
     SELECT u.usage_no, sp.code AS space_code, sp.display_name AS space_name, sp.business_type, ht.code AS tag_code, u.guests,
            u.opened_at, so.display_name AS opened_by, u.closed_at, sc.display_name AS closed_by, u.status, u.close_kind, u.close_reason, u.note,
            u.business_date::text AS business_date
@@ -283,7 +336,22 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     WHERE e.business_date = ${date} ORDER BY e.id`;
   const memberRefunds = await memberRefundsOfDate(tx, date);
   // 次卡（v0.7.28）：当天次数的变动（售卡、期初、结账使用、反结账退回、退卡、过期）
-  const countCardMoves = await tx<{ at: string; kind: CountCardMoveKind; cardNo: string; member: string; name: string; delta: number; amount: number; checkoutNo: string | null; method: string | null; ref: string; staff: string; note: string }[]>`
+  const countCardMoves = await tx<
+    {
+      at: string;
+      kind: CountCardMoveKind;
+      cardNo: string;
+      member: string;
+      name: string;
+      delta: number;
+      amount: number;
+      checkoutNo: string | null;
+      method: string | null;
+      ref: string;
+      staff: string;
+      note: string;
+    }[]
+  >`
     SELECT mv.at, mv.kind, c.card_no, m.name AS member, c.name, mv.delta, mv.amount, ck.checkout_no,
            CASE WHEN mv.kind = 'sale' THEN c.payment_method WHEN mv.kind = 'refund' THEN r.method END AS method,
            coalesce(CASE WHEN mv.kind = 'sale' THEN c.payment_ref WHEN mv.kind = 'refund' THEN r.ref END, '') AS ref,
@@ -293,7 +361,25 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     WHERE mv.business_date = ${date} ORDER BY mv.id`;
   // 平台核销补录（v0.7.28）：当天（按核销营业日）的补登记，含作废的
   const platformRedemptions = await listRedemptions(tx, date, date);
-  return { summary, checkouts, departments, voidedLines, cancelled, ticketChanges, freeEntries, shifts, technicians, rooms, usages, refunds, couponIssues, couponEvents, memberRefunds, countCardMoves, platformRedemptions };
+  return {
+    summary,
+    checkouts,
+    departments,
+    voidedLines,
+    cancelled,
+    ticketChanges,
+    freeEntries,
+    shifts,
+    technicians,
+    rooms,
+    usages,
+    refunds,
+    couponIssues,
+    couponEvents,
+    memberRefunds,
+    countCardMoves,
+    platformRedemptions,
+  };
 }
 
 export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string, now = new Date()): Promise<DailyRecon> {
@@ -327,8 +413,26 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
   files.push({
     name: '02-结账单.csv',
     content: toCsv([
-      ['结账单号', '状态', '结账营业日', '结账时间', '收银', '手牌', '应收合计', ...methods.map((m) => CHECKOUT_METHOD_LABELS[m]), '储值会员', '团购券码', '收款备注',
-        '计入本日结账', '计入本日反结账', '反结账营业日', '反结账时间', '反结账人', '反结账原因', '备注'],
+      [
+        '结账单号',
+        '状态',
+        '结账营业日',
+        '结账时间',
+        '收银',
+        '手牌',
+        '应收合计',
+        ...methods.map((m) => CHECKOUT_METHOD_LABELS[m]),
+        '储值会员',
+        '团购券码',
+        '收款备注',
+        '计入本日结账',
+        '计入本日反结账',
+        '反结账营业日',
+        '反结账时间',
+        '反结账人',
+        '反结账原因',
+        '备注',
+      ],
       ...day.checkouts.map((c) => {
         const pays = c.payments ?? [];
         const sumOf = (m: CheckoutMethod) => pays.filter((p) => p.method === m).reduce((t, p) => t + p.amount, 0);
@@ -380,7 +484,14 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
         const items = day.departments.filter((d) => d.category === cat);
         return [
           ...items.map((d) => row(cat, d.name, d.quantity, d.amount, d.discount, d.refund)),
-          row(cat, '小计', '', items.reduce((t, d) => t + d.amount, 0), items.reduce((t, d) => t + d.discount, 0), items.reduce((t, d) => t + d.refund, 0)),
+          row(
+            cat,
+            '小计',
+            '',
+            items.reduce((t, d) => t + d.amount, 0),
+            items.reduce((t, d) => t + d.discount, 0),
+            items.reduce((t, d) => t + d.refund, 0),
+          ),
         ];
       }),
       row('合计', '', '', deptTotal, deptDiscount, deptRefund),
@@ -486,8 +597,31 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
   files.push({
     name: '05-交班.csv',
     content: toCsv([
-      ['班次', '员工', '营业日', '状态', '开班', '交班', '备用金', '结账张数', '结账合计', ...methods.map((m) => `结账·${CHECKOUT_METHOD_LABELS[m]}`),
-        '充值实收', '赠金', '工作台储值消费', '反结账退现金', '押金现金（收 − 退）', '退款单退现金', '应有现金', '实点现金', '长短款', '反结账张数', '退款单张数', '接班人', '备注'],
+      [
+        '班次',
+        '员工',
+        '营业日',
+        '状态',
+        '开班',
+        '交班',
+        '备用金',
+        '结账张数',
+        '结账合计',
+        ...methods.map((m) => `结账·${CHECKOUT_METHOD_LABELS[m]}`),
+        '充值实收',
+        '赠金',
+        '工作台储值消费',
+        '反结账退现金',
+        '押金现金（收 − 退）',
+        '退款单退现金',
+        '应有现金',
+        '实点现金',
+        '长短款',
+        '反结账张数',
+        '退款单张数',
+        '接班人',
+        '备注',
+      ],
       ...day.shifts.map((r) => [
         r.shiftNo,
         // 按钱箱交班（v0.7.28）：钱箱名与在上面待过的人
@@ -536,7 +670,19 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
         yuan(r.commission?.bonus ?? 0),
         yuan(r.commission?.total ?? 0),
       ]),
-      ['合计', '', '', '', tr.totals.clocks, tr.totals.designated, tr.totals.rotation, yuan(tr.totals.amount), yuan(tr.totals.commission?.base ?? 0), yuan(tr.totals.commission?.bonus ?? 0), yuan(tr.totals.commission?.total ?? 0)],
+      [
+        '合计',
+        '',
+        '',
+        '',
+        tr.totals.clocks,
+        tr.totals.designated,
+        tr.totals.rotation,
+        yuan(tr.totals.amount),
+        yuan(tr.totals.commission?.base ?? 0),
+        yuan(tr.totals.commission?.bonus ?? 0),
+        yuan(tr.totals.commission?.total ?? 0),
+      ],
       ['未指定技师的技师项目', '', '', '', tr.unassigned.clocks, '', '', yuan(tr.unassigned.amount), '', '', ''],
     ]),
   });
@@ -598,8 +744,25 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
   files.push({
     name: '09-退款单.csv',
     content: toCsv([
-      ['退款单号', '状态', '退款时间', '原结账单', '原结账营业日', '手牌 / 桌台', '部门（项目分类）', '项目', '退的份数', '退的金额（元）', '退款单合计（元）',
-        '退款方式与退款单号', '经办人', '原因', '作废时间', '作废人', '作废原因'],
+      [
+        '退款单号',
+        '状态',
+        '退款时间',
+        '原结账单',
+        '原结账营业日',
+        '手牌 / 桌台',
+        '部门（项目分类）',
+        '项目',
+        '退的份数',
+        '退的金额（元）',
+        '退款单合计（元）',
+        '退款方式与退款单号',
+        '经办人',
+        '原因',
+        '作废时间',
+        '作废人',
+        '作废原因',
+      ],
       ...day.refunds.map((r) => [
         r.refundNo,
         r.status === 'voided' ? '已作废' : '生效',
@@ -660,7 +823,25 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
   files.push({
     name: '11-储值退回.csv',
     content: toCsv([
-      ['退储值单号', '退回时间', '会员号', '会员', '原收款', '原单号', '原营业日', '退款方式', '退回本金（元）', '退款单号 / 说明', '本单退回本金（元）', '本单扣回赠金（元）', '记到的班次', '经办人', '授权人', '原因', '降档'],
+      [
+        '退储值单号',
+        '退回时间',
+        '会员号',
+        '会员',
+        '原收款',
+        '原单号',
+        '原营业日',
+        '退款方式',
+        '退回本金（元）',
+        '退款单号 / 说明',
+        '本单退回本金（元）',
+        '本单扣回赠金（元）',
+        '记到的班次',
+        '经办人',
+        '授权人',
+        '原因',
+        '降档',
+      ],
       ...day.memberRefunds.flatMap((r) =>
         r.lines.map((l, i) => [
           r.refundNo,

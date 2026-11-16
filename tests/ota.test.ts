@@ -33,12 +33,26 @@ describe('解析', () => {
   it('认列、日期（几种写法）、晚数推离店、金额、预付 / 现付、取消', () => {
     const h = ['预订号', '客人姓名', '房型名称', '到店日期', '入住晚数', '房间数', '总价', '付款类型', '状态'];
     const map = detectOtaColumns(h);
-    expect(map).toMatchObject({ orderNo: '预订号', guestName: '客人姓名', roomType: '房型名称', checkin: '到店日期', nights: '入住晚数', rooms: '房间数', amount: '总价', payMode: '付款类型', status: '状态' });
-    const r = parseOtaRows(h, [
-      { row: 2, cells: ['A1', '张三', '大床', '2026/12/1', '2', '1', '¥1,234.50', '到店付', '已确认'] },
-      { row: 3, cells: ['A2', '李四', '大床', '2026年12月3日', '1', '2', '500', '预付', '已取消'] },
-      { row: 4, cells: ['A3', '', '大床', '不是日期', '1', '1', '100', '', ''] },
-    ], map);
+    expect(map).toMatchObject({
+      orderNo: '预订号',
+      guestName: '客人姓名',
+      roomType: '房型名称',
+      checkin: '到店日期',
+      nights: '入住晚数',
+      rooms: '房间数',
+      amount: '总价',
+      payMode: '付款类型',
+      status: '状态',
+    });
+    const r = parseOtaRows(
+      h,
+      [
+        { row: 2, cells: ['A1', '张三', '大床', '2026/12/1', '2', '1', '¥1,234.50', '到店付', '已确认'] },
+        { row: 3, cells: ['A2', '李四', '大床', '2026年12月3日', '1', '2', '500', '预付', '已取消'] },
+        { row: 4, cells: ['A3', '', '大床', '不是日期', '1', '1', '100', '', ''] },
+      ],
+      map,
+    );
     expect(r.orders).toMatchObject([
       { orderNo: 'A1', checkin: '2026-12-01', checkout: '2026-12-03', nights: 2, rooms: 1, amountCents: 123_450, payMode: 'pay_at_hotel', channelStatus: 'confirmed' },
       { orderNo: 'A2', checkin: '2026-12-03', checkout: '2026-12-04', rooms: 2, amountCents: 50_000, payMode: 'prepaid', channelStatus: 'cancelled' },
@@ -61,14 +75,18 @@ describe('解析', () => {
   it('间数、晚数按数值读：「1.0」是 1 间、「2.0」是 2 晚，带单位、全角也认；「1.5」「1-2」读不出来，不把数字拼在一起（Codex 审查 4d191f4 后补）', () => {
     const h = ['订单号', '房型', '入住日', '晚数', '间数', '金额'];
     const map = detectOtaColumns(h);
-    const r = parseOtaRows(h, [
-      { row: 2, cells: ['N1', '大床', '2026-12-01', '2.0', '1.0', '300'] },
-      { row: 3, cells: ['N2', '大床', '2026-12-01', '３晚', '2 间', '600'] },
-      { row: 4, cells: ['N3', '大床', '2026-12-01', '1', '1.5', '100'] },
-      { row: 5, cells: ['N4', '大床', '2026-12-01', '1', '1-2', '100'] },
-      { row: 6, cells: ['N5', '大床', '2026-12-01', '1.5', '1', '100'] },
-      { row: 7, cells: ['N6', '大床', '2026-12-01', '2-3', '1', '100'] },
-    ], map);
+    const r = parseOtaRows(
+      h,
+      [
+        { row: 2, cells: ['N1', '大床', '2026-12-01', '2.0', '1.0', '300'] },
+        { row: 3, cells: ['N2', '大床', '2026-12-01', '３晚', '2 间', '600'] },
+        { row: 4, cells: ['N3', '大床', '2026-12-01', '1', '1.5', '100'] },
+        { row: 5, cells: ['N4', '大床', '2026-12-01', '1', '1-2', '100'] },
+        { row: 6, cells: ['N5', '大床', '2026-12-01', '1.5', '1', '100'] },
+        { row: 7, cells: ['N6', '大床', '2026-12-01', '2-3', '1', '100'] },
+      ],
+      map,
+    );
     // 旧代码把「1.0」间读成 10 间、「2.0」晚读成 20 晚（去掉非数字再拼）
     expect(r.orders).toMatchObject([
       { orderNo: 'N1', checkin: '2026-12-01', checkout: '2026-12-03', nights: 2, rooms: 1 },
@@ -87,11 +105,15 @@ describe('解析', () => {
     const h = ['订单号', '房型', '入住日', '间夜', '间数', '金额'];
     const map = detectOtaColumns(h);
     expect(map.nights).toBe('间夜');
-    const r = parseOtaRows(h, [
-      { row: 2, cells: ['R1', '大床', '2026-12-01', '6', '2', '1200'] },
-      { row: 3, cells: ['R2', '大床', '2026-12-01', '5', '2', '1000'] },
-      { row: 4, cells: ['R3', '大床', '2026-12-01', '3', '1', '600'] },
-    ], map);
+    const r = parseOtaRows(
+      h,
+      [
+        { row: 2, cells: ['R1', '大床', '2026-12-01', '6', '2', '1200'] },
+        { row: 3, cells: ['R2', '大床', '2026-12-01', '5', '2', '1000'] },
+        { row: 4, cells: ['R3', '大床', '2026-12-01', '3', '1', '600'] },
+      ],
+      map,
+    );
     // 旧代码把两间 6 间夜读成住 6 晚
     expect(r.orders).toMatchObject([
       { orderNo: 'R1', checkout: '2026-12-04', nights: 3, rooms: 2 },
@@ -175,7 +197,9 @@ describe('渠道订单', () => {
     const keyA = randomUUID();
     const text = csv(rowsA);
     const fileHash = createHash('sha256').update(text).digest('hex');
-    const ownerId = Number((await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'owner' LIMIT 1`)[0]?.id ?? (await ctx.sql<{ id: number }[]>`SELECT id FROM staff ORDER BY id LIMIT 1`)[0]!.id);
+    const ownerId = Number(
+      (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'owner' LIMIT 1`)[0]?.id ?? (await ctx.sql<{ id: number }[]>`SELECT id FROM staff ORDER BY id LIMIT 1`)[0]!.id,
+    );
     await ctx.sql`
       INSERT INTO ota_imports (channel_id, file_name, file_hash, rows, client_key, request_hash, staff_id)
       VALUES (${channelId}, 'orders.csv', ${fileHash}, 2, ${keyA}, ${hashRequest({ channelId, fileHash })}, ${ownerId})`;
@@ -272,7 +296,9 @@ describe('渠道订单', () => {
     const d1 = shiftDate(today, 12);
     const d2 = shiftDate(today, 13);
     // 渠道大床房只有一间：X1 占 d1，X2 先在 d2（不超订）
-    expect((await importFile([`X1001,冯一,,豪华大床房,${d1},${shiftDate(d1, 1)},1,300,现付,已确认`, `X1002,陈二,,豪华大床房,${d2},${shiftDate(d2, 1)},1,300,现付,已确认`])).body).toMatchObject({ created: 2 });
+    expect((await importFile([`X1001,冯一,,豪华大床房,${d1},${shiftDate(d1, 1)},1,300,现付,已确认`, `X1002,陈二,,豪华大床房,${d2},${shiftDate(d2, 1)},1,300,现付,已确认`])).body).toMatchObject({
+      created: 2,
+    });
     expect(await order('X1002')).toMatchObject({ status: 'booked', overbooked: false });
     // X2 改到 d1：那天已经约满 → 照样改、标超订
     const moved = await importFile([`X1002,陈二,,豪华大床房,${d1},${shiftDate(d1, 1)},1,300,现付,已确认`]);
@@ -283,7 +309,9 @@ describe('渠道订单', () => {
     expect((await importFile([`X1002,陈二,,豪华大床房,${d1},${shiftDate(d1, 1)},1,320,现付,已确认`])).body).toMatchObject({ updated: 1 });
     expect(await order('X1002')).toMatchObject({ overbooked: true, amountCents: 32000 });
     // X1 取消了，d1 放得下了：X2 再处理时清掉提醒（按处理完的预约算，不是沿用上一次的）
-    expect((await importFile([`X1001,冯一,,豪华大床房,${d1},${shiftDate(d1, 1)},1,300,现付,已取消`, `X1002,陈二,,豪华大床房,${d1},${shiftDate(d1, 1)},1,320,现付,已确认`])).body).toMatchObject({ cancelled: 1 });
+    expect((await importFile([`X1001,冯一,,豪华大床房,${d1},${shiftDate(d1, 1)},1,300,现付,已取消`, `X1002,陈二,,豪华大床房,${d1},${shiftDate(d1, 1)},1,320,现付,已确认`])).body).toMatchObject({
+      cancelled: 1,
+    });
     expect(await order('X1002')).toMatchObject({ status: 'booked', overbooked: false });
     // 大文件：预览照常（全局默认的请求体上限是 64 KB）
     const many = Array.from({ length: 1500 }, (_, i) => `BIG${String(i).padStart(5, '0')},客人${i},,豪华大床房,${shiftDate(today, 20)},${shiftDate(today, 21)},1,300,现付,已确认`);
@@ -329,7 +357,8 @@ describe('渠道订单', () => {
       const arrived = await api(ctx.app, ctx.clerk, 'POST', `/api/bookings/${b.id}/change`, { clientKey: randomUUID(), action: 'arrive', tagCode: tag });
       expect(arrived.status, JSON.stringify(arrived.body)).toBe(200);
     }
-    const preview = async (vid: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${vid}`)).body as { totalAmount: number; otaPrepaid: { couponCode: string; amountCents: number }[] };
+    const preview = async (vid: number) =>
+      (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${vid}`)).body as { totalAmount: number; otaPrepaid: { couponCode: string; amountCents: number }[] };
     const p1 = await preview(visits[0]!);
     const p2 = await preview(visits[1]!);
     expect(p1.otaPrepaid).toHaveLength(1);
@@ -361,7 +390,8 @@ describe('渠道订单', () => {
       expect(arrived.status, JSON.stringify(arrived.body)).toBe(200);
       return v.body.visits[0].id as number;
     };
-    const preview = async (vid: number) => (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${vid}`)).body as { totalAmount: number; otaPrepaid: { couponCode: string; amountCents: number }[] };
+    const preview = async (vid: number) =>
+      (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${vid}`)).body as { totalAmount: number; otaPrepaid: { couponCode: string; amountCents: number }[] };
     const first = (await order('C3101')).bookings[0] as { id: number };
     const v1 = await arriveAt(first.id, 'Q003');
     const p1 = await preview(v1);
@@ -383,7 +413,14 @@ describe('渠道订单', () => {
 
   it('对账：按入住月份，订单数、间夜、金额、佣金（15%）、净额；导出 CSV', async () => {
     const month = shiftDate(today, 4).slice(0, 7);
-    const rows = (await api(ctx.app, ctx.clerk, 'GET', `/api/ota/recon?month=${month}`)).body as { channelName: string; orders: number; roomNights: number; amountCents: number; commissionCents: number; netCents: number }[];
+    const rows = (await api(ctx.app, ctx.clerk, 'GET', `/api/ota/recon?month=${month}`)).body as {
+      channelName: string;
+      orders: number;
+      roomNights: number;
+      amountCents: number;
+      commissionCents: number;
+      netCents: number;
+    }[];
     const ctrip = rows.find((x) => x.channelName === '携程')!;
     expect(ctrip.orders).toBeGreaterThanOrEqual(1);
     expect(ctrip.commissionCents).toBe(Math.round(ctrip.amountCents * 0.15));

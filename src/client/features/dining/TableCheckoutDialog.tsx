@@ -187,7 +187,8 @@ export function TableCheckoutDialog({
               </>
             ) : remaining < 0 ? (
               <>
-                多收 <Money cents={-remaining} className="font-bold text-clay" />（现金找零不用登记，按应收记）
+                多收 <Money cents={-remaining} className="font-bold text-clay" />
+                （现金找零不用登记，按应收记）
               </>
             ) : problems.some(Boolean) ? (
               <span className="font-semibold text-clay" data-testid="checkout-row-problem">

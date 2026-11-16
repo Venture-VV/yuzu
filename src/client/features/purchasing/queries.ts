@@ -51,8 +51,7 @@ export function useInvalidateAll() {
   return () => qc.invalidateQueries({ queryKey: pk.all });
 }
 
-const search = (params: Record<string, string | undefined>) =>
-  new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
+const search = (params: Record<string, string | undefined>) => new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
 
 export const usePos = (params: { status?: string; supplierId?: string; q?: string; open?: string }, enabled = true) =>
   useQuery({
@@ -62,8 +61,7 @@ export const usePos = (params: { status?: string; supplierId?: string; q?: strin
     enabled,
   });
 
-export const usePo = (id: number | null) =>
-  useQuery({ queryKey: pk.po(id ?? 0), queryFn: () => api.get<PurchaseOrder>(`/api/purchase-orders/${id}`), enabled: !!id });
+export const usePo = (id: number | null) => useQuery({ queryKey: pk.po(id ?? 0), queryFn: () => api.get<PurchaseOrder>(`/api/purchase-orders/${id}`), enabled: !!id });
 
 export const useBaseline = (materialId: number) =>
   useQuery({
@@ -72,8 +70,7 @@ export const useBaseline = (materialId: number) =>
     staleTime: 60_000,
   });
 
-export const usePayablesOverview = (enabled = true) =>
-  useQuery({ queryKey: pk.overview, queryFn: () => api.get<PayablesOverview>('/api/payables/overview'), enabled });
+export const usePayablesOverview = (enabled = true) => useQuery({ queryKey: pk.overview, queryFn: () => api.get<PayablesOverview>('/api/payables/overview'), enabled });
 
 export const useOpenItems = (supplierId: number | null) =>
   useQuery({
@@ -93,8 +90,7 @@ export const useStatement = (supplierId: number | null, from: string, to: string
 export const usePayments = (params: { supplierId?: string; status?: string }, enabled = true) =>
   useQuery({ queryKey: pk.payments(params), queryFn: () => api.get<PaymentDoc[]>(`/api/payables/payments?${search(params)}`), enabled });
 
-export const usePayment = (id: number | null) =>
-  useQuery({ queryKey: pk.payment(id ?? 0), queryFn: () => api.get<PaymentDoc>(`/api/payables/payments/${id}`), enabled: !!id });
+export const usePayment = (id: number | null) => useQuery({ queryKey: pk.payment(id ?? 0), queryFn: () => api.get<PaymentDoc>(`/api/payables/payments/${id}`), enabled: !!id });
 
 export const useOpenings = (params: { supplierId?: string; status?: string }, enabled = true) =>
   useQuery({ queryKey: pk.openings(params), queryFn: () => api.get<OpeningPayableDoc[]>(`/api/payables/openings?${search(params)}`), enabled });
@@ -111,24 +107,20 @@ export const useCredits = (supplierId: number | null) =>
 export const useOffsets = (params: { supplierId?: string; status?: string }, enabled = true) =>
   useQuery({ queryKey: pk.offsets(params), queryFn: () => api.get<ApOffsetDoc[]>(`/api/payables/offsets?${search(params)}`), enabled });
 
-export const useOffset = (id: number | null) =>
-  useQuery({ queryKey: pk.offset(id ?? 0), queryFn: () => api.get<ApOffsetDoc>(`/api/payables/offsets/${id}`), enabled: !!id });
+export const useOffset = (id: number | null) => useQuery({ queryKey: pk.offset(id ?? 0), queryFn: () => api.get<ApOffsetDoc>(`/api/payables/offsets/${id}`), enabled: !!id });
 
 export const useRefunds = (params: { supplierId?: string; status?: string }, enabled = true) =>
   useQuery({ queryKey: pk.refunds(params), queryFn: () => api.get<SupplierRefundDoc[]>(`/api/payables/refunds?${search(params)}`), enabled });
 
-export const useRefund = (id: number | null) =>
-  useQuery({ queryKey: pk.refund(id ?? 0), queryFn: () => api.get<SupplierRefundDoc>(`/api/payables/refunds/${id}`), enabled: !!id });
+export const useRefund = (id: number | null) => useQuery({ queryKey: pk.refund(id ?? 0), queryFn: () => api.get<SupplierRefundDoc>(`/api/payables/refunds/${id}`), enabled: !!id });
 
 export const useErpImports = (enabled = true) => useQuery({ queryKey: pk.imports, queryFn: () => api.get<ErpImportRecord[]>('/api/payables/imports'), enabled });
 
 /** 采购规则（v0.7.29）：采购途径字典、询价门槛、补货天数；编制采购单、登记报销、补货建议都读它 */
-export const usePurchaseRules = (enabled = true) =>
-  useQuery({ queryKey: pk.purchaseRules, queryFn: () => api.get<PurchaseRules>('/api/inventory/purchase-rules'), staleTime: 60_000, enabled });
+export const usePurchaseRules = (enabled = true) => useQuery({ queryKey: pk.purchaseRules, queryFn: () => api.get<PurchaseRules>('/api/inventory/purchase-rules'), staleTime: 60_000, enabled });
 
 /** 补货建议（v0.7.29 ERP 采购五项④）：与采购单共用 'inv' 缓存前缀，生成草稿后一起刷新 */
-export const useSuggestions = (enabled = true) =>
-  useQuery({ queryKey: pk.suggestions, queryFn: () => api.get<ReplenishSuggestions>('/api/purchase-suggestions'), enabled, staleTime: 30_000 });
+export const useSuggestions = (enabled = true) => useQuery({ queryKey: pk.suggestions, queryFn: () => api.get<ReplenishSuggestions>('/api/purchase-suggestions'), enabled, staleTime: 30_000 });
 
 /** 询价比价（v0.7.29 ERP 采购五项⑤） */
 export const useSourcingList = (params: { status?: string; q?: string }, enabled = true) =>
@@ -139,8 +131,7 @@ export const useSourcingList = (params: { status?: string; q?: string }, enabled
     enabled,
   });
 
-export const useSourcing = (id: number | null) =>
-  useQuery({ queryKey: pk.sourcing(id ?? 0), queryFn: () => api.get<SourcingEvent>(`/api/purchase-sourcing/${id}`), enabled: !!id });
+export const useSourcing = (id: number | null) => useQuery({ queryKey: pk.sourcing(id ?? 0), queryFn: () => api.get<SourcingEvent>(`/api/purchase-sourcing/${id}`), enabled: !!id });
 
 /** 价格曲线（E8）：近 12 个月的成交价与报价 */
 export const usePriceHistory = (materialId: number | null) =>

@@ -590,7 +590,13 @@ export async function actOnChange(deps: Deps, changeId: number, action: 'approve
                end_date = ${content.endDate}, total_cents = ${content.totalCents}, version = version + 1, updated_at = now()
         WHERE id = ${x.contractId}`;
       await tx`UPDATE contract_changes SET status = 'approved', result_version = ${versionNo}, version = version + 1, updated_at = now() WHERE id = ${changeId}`;
-      await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract_change', targetId: changeId, detail: { op: 'approved', changeNo: x.changeNo, contractNo: c.contractNo, version: versionNo } });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'contract_doc',
+        targetType: 'contract_change',
+        targetId: changeId,
+        detail: { op: 'approved', changeNo: x.changeNo, contractNo: c.contractNo, version: versionNo },
+      });
     } else {
       const input = parse(ReturnInput, raw ?? {});
       if (x.status === 'returned') return;
@@ -769,7 +775,14 @@ export async function addFile(deps: Deps, contractId: number, raw: unknown, acto
     const [row] = await tx<{ id: number }[]>`
       INSERT INTO contract_files (contract_id, image_id, file_id, name, sort_no, added_by)
       VALUES (${contractId}, ${stored.imageId}, ${stored.fileId}, ${name}, ${sortNo}, ${actor.id}) RETURNING id`;
-    await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract', targetId: contractId, detail: { op: 'file_add', contractNo: c.contractNo, fileId: row!.id, pdf: stored.fileId !== null }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'contract_doc',
+      targetType: 'contract',
+      targetId: contractId,
+      detail: { op: 'file_add', contractNo: c.contractNo, fileId: row!.id, pdf: stored.fileId !== null },
+      ip,
+    });
     return { id: Number(row!.id) };
   });
 }
@@ -789,4 +802,3 @@ export async function removeFile(deps: Deps, fileId: number, actor: Actor, ip?: 
     await writeAudit(tx, { staffId: actor.id, action: 'contract_doc', targetType: 'contract', targetId: c.id, detail: { op: 'file_remove', contractNo: c.contractNo, fileId }, ip });
   });
 }
-

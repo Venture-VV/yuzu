@@ -40,6 +40,7 @@ import { patrolAppsFor } from '../patrol/core';
 import { registerPatrolPortalRoutes } from '../patrol/routes';
 import { assetHeaders } from '../studio/assets';
 import { readPublishedStudio, readStudioAssetFor } from '../studio/published';
+import { createProtection } from '../../lib/protect';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -85,6 +86,13 @@ export async function buildCanteenApp(sql: Sql, config: AppConfig, opts: Canteen
   const now = opts.clock ?? Date.now;
   const app = Fastify({ logger: { level: config.logLevel }, bodyLimit: 32 * 1024, trustProxy: config.canteen.trustProxy.length ? config.canteen.trustProxy : false });
   await app.register(fastifyCookie);
+  // 过载保护（8.1.3，docs/RESILIENCE_V813.md 第 3.5 节）：和主端口一样，忙的时候新请求直接回「系统正忙、没处理」。
+  // 不做频率限制、不看访问网段：员工手机多在店里 Wi-Fi 上共用一个出口 IP，登录、自己登记原来就有失败次数限制
+  const protection = createProtection({ ...config.protection, sessionPerMin: 0, ipPerMin: 0, allowCidrs: [] });
+  app.addHook('onRequest', protection.gate);
+  app.addHook('onResponse', protection.done);
+  app.addHook('onRequestAbort', protection.done);
+  app.addHook('onClose', async () => protection.close());
   const limiter = new AttemptLimiter();
   /** 同一来源 IP 一小时最多登记 60 个账号（只记成功的，K14） */
   const registrations = new AttemptLimiter(60, 60 * 60_000);

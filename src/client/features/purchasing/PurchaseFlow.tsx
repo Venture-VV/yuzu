@@ -65,7 +65,10 @@ export function PurchaseFlowCard({ flow }: { flow: PurchaseFlow }) {
         {flow.alert && <Badge tone="clay">超期 / 卡住</Badge>}
         <Link
           to={anchorTo(flow) ?? '/purchasing'}
-          className={cn('ml-auto flex max-w-full items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] font-semibold hover:underline', flow.variant === 'B' ? 'bg-lake-soft text-lake' : 'bg-pine-tint text-pine')}
+          className={cn(
+            'ml-auto flex max-w-full items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] font-semibold hover:underline',
+            flow.variant === 'B' ? 'bg-lake-soft text-lake' : 'bg-pine-tint text-pine',
+          )}
           data-testid="flow-card-open"
         >
           <span className="num shrink-0">{flow.anchor.docNo}</span>

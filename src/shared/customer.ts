@@ -1,12 +1,11 @@
-import type { CheckoutOrderDetail } from "./orders";
-import type { Grade, Tier } from "./membership";
-import type { ConsumptionDoc } from "./types";
-import type { CustomerAmountGrade, CUSTOMER_RATING_RULES } from "./customer-ratings";
+import type { CheckoutOrderDetail } from './orders';
+import type { Grade, Tier } from './membership';
+import type { ConsumptionDoc } from './types';
+import type { CustomerAmountGrade, CUSTOMER_RATING_RULES } from './customer-ratings';
 
 /** Customer operations are an extension of native records. All amounts are integer cents. */
-export type CustomerCreditStatus =
-  "unclaimed" | "pending" | "verified" | "rejected" | "voided";
-export type CustomerRechargeKind = "unknown" | "first" | "renewal";
+export type CustomerCreditStatus = 'unclaimed' | 'pending' | 'verified' | 'rejected' | 'voided';
+export type CustomerRechargeKind = 'unknown' | 'first' | 'renewal';
 export interface CustomerStaff {
   id: number;
   name: string;
@@ -24,9 +23,8 @@ export interface CustomerVisitMember extends CustomerMemberRef {
   tier: Tier | null;
   gradeLabel: string;
 }
-export type CustomerAmountBand =
-  "all" | "lt1k" | "1k-3k" | "3k-5k" | "5k-10k" | "gte10k";
-export type CustomerGroupName = "A组" | "B组";
+export type CustomerAmountBand = 'all' | 'lt1k' | '1k-3k' | '3k-5k' | '5k-10k' | 'gte10k';
+export type CustomerGroupName = 'A组' | 'B组';
 export interface CustomerMeta {
   serverTime: string;
   timezone: string;
@@ -34,11 +32,11 @@ export interface CustomerMeta {
   capabilities: {
     manage: boolean;
     operate: boolean;
-    scope: "all" | "self";
+    scope: 'all' | 'self';
     actorId: number;
     financialReadToday: boolean;
     financialReadHistory: boolean;
-    financialScope: "all" | "self";
+    financialScope: 'all' | 'self';
     memberFinancialTimeline: boolean;
   };
 }
@@ -73,7 +71,7 @@ export interface CustomerCredit {
   version: number;
   status: CustomerCreditStatus;
   rechargeKind: CustomerRechargeKind;
-  ownerDepartment: "unknown" | "customer" | "frontdesk";
+  ownerDepartment: 'unknown' | 'customer' | 'frontdesk';
   claimedSeller: CustomerStaff | null;
   verifiedSeller: CustomerStaff | null;
   receptionist: CustomerStaff | null;
@@ -129,12 +127,12 @@ export interface CustomerRechargeDetail extends CustomerMeta {
   note: string;
 }
 export interface CustomerSettlementRow {
-  sourceKind: "checkout" | "consumption";
+  sourceKind: 'checkout' | 'consumption';
   id: number;
   docNo: string;
   occurredAt: string;
   businessDate: string;
-  status: "completed" | "voided" | "reversed";
+  status: 'completed' | 'voided' | 'reversed';
   principalCents: number | null;
   bonusCents: number | null;
   amountCents: number;
@@ -239,9 +237,7 @@ export interface CustomerBindingRequest {
   createdAt: string;
   resolvedAt: string | null;
 }
-export type CustomerBindingQueue = CustomerPage<
-  CustomerBindingRequest & { member: CustomerMemberRef }
->;
+export type CustomerBindingQueue = CustomerPage<CustomerBindingRequest & { member: CustomerMemberRef }>;
 export interface CustomerLedgerEvent {
   checkoutId: number | null;
   id: number;
@@ -314,7 +310,7 @@ export interface CustomerTargets extends CustomerMeta {
 }
 export interface CustomerPerformanceEvent {
   id: number;
-  eventType: "recharge" | "refund";
+  eventType: 'recharge' | 'refund';
   docNo: string;
   occurredAt: string;
   businessDate: string;
@@ -326,8 +322,8 @@ export interface CustomerPerformanceEvent {
   groupName: CustomerGroupName | null;
 }
 export interface CustomerPerformancePage extends CustomerPage<CustomerPerformanceEvent> {
-  period: "today" | "month" | "lastMonthSame";
-  scope: "department" | "group" | "staff";
+  period: 'today' | 'month' | 'lastMonthSame';
+  scope: 'department' | 'group' | 'staff';
   asOfDay: string;
   from: string;
   to: string;
@@ -371,5 +367,5 @@ export interface CustomerOverview extends CustomerMeta {
   }>;
   managers: CustomerTargetRow[];
   /** Confirmed recharge-principal basis; never a payroll or commission calculation. */
-  performanceBasis: "verified-native-recharge-principal";
+  performanceBasis: 'verified-native-recharge-principal';
 }

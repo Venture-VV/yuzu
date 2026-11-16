@@ -64,8 +64,7 @@ describe('changes-since：不只数固定的几张表（测试会话 3b58876 复
 describe('rollback.sh 用的 json_str：从备份说明里取 createdAt', () => {
   const dir = mkdtempSync(join(tmpdir(), 'yuzu-json-str-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
-  const run = (file: string, key: string) =>
-    spawnSync('bash', ['-c', `source scripts/lib/common.sh && json_str "$1" "$2"`, 'bash', key, file], { encoding: 'utf8' }).stdout.trim();
+  const run = (file: string, key: string) => spawnSync('bash', ['-c', `source scripts/lib/common.sh && json_str "$1" "$2"`, 'bash', key, file], { encoding: 'utf8' }).stdout.trim();
 
   it('取得到带时区的时刻；没有这一项或没有文件时为空（脚本改用升级记录里的时刻）', () => {
     const file = join(dir, 'b.dump.json');
@@ -78,7 +77,14 @@ describe('rollback.sh 用的 json_str：从备份说明里取 createdAt', () => 
 
 describe('运维脚本在 macOS 自带的 bash 3.2 上（测试会话 3b58876 复验的 P1）', () => {
   it('紧跟着中文等非 ASCII 字符的 $变量 一律加花括号：bash 3.2 在 UTF-8 下会把后面的字当成变量名的一部分（set -u 下 unbound variable）', () => {
-    const files = [...readdirSync('scripts').filter((f) => f.endsWith('.sh')).map((f) => `scripts/${f}`), ...readdirSync('scripts/lib').filter((f) => f.endsWith('.sh')).map((f) => `scripts/lib/${f}`)];
+    const files = [
+      ...readdirSync('scripts')
+        .filter((f) => f.endsWith('.sh'))
+        .map((f) => `scripts/${f}`),
+      ...readdirSync('scripts/lib')
+        .filter((f) => f.endsWith('.sh'))
+        .map((f) => `scripts/lib/${f}`),
+    ];
     expect(files).toContain('scripts/rollback.sh');
     const bad: string[] = [];
     for (const f of files) {

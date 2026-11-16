@@ -77,9 +77,7 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
   const [stage, setStage] = useState<PaymentStage>(existing?.stage ?? (PAYMENT_STAGES.find((s) => s === params.get('stage')) as PaymentStage | undefined) ?? 'prepay');
   const [supplierId, setSupplierId] = useState<number | null>(existing?.supplierId ?? (Number(params.get('supplier')) || null));
   const [amount, setAmount] = useState(existing ? (existing.amountCents / 100).toFixed(2) : '');
-  const [targets, setTargets] = useState<Record<string, string>>(
-    existing ? Object.fromEntries(existing.targets.map((t) => [`${t.kind}:${t.targetId}`, (t.amountCents / 100).toFixed(2)])) : {},
-  );
+  const [targets, setTargets] = useState<Record<string, string>>(existing ? Object.fromEntries(existing.targets.map((t) => [`${t.kind}:${t.targetId}`, (t.amountCents / 100).toFixed(2)])) : {});
   const [expectedDate, setExpectedDate] = useState(existing && existing.expectedDate >= session.calendarToday ? existing.expectedDate : session.calendarToday);
   // 固定付款日（8.0.17，LC7）：新建的申请默认取下一个付款日（今天就是付款日取今天）；自己改过日期、修改已有申请的不动
   const rules = usePaymentRules();
@@ -129,7 +127,7 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
         : !st
           ? '正在读付款计划…'
           : !plan.data!.canRequest
-            ? plan.data!.whyNot ?? '这份合同现在不能申请'
+            ? (plan.data!.whyNot ?? '这份合同现在不能申请')
             : st.plannedCents === 0
               ? '这一段比例为 0，不用付'
               : !amountCents
@@ -151,12 +149,7 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
   const problem =
     !existing && pending.length > 0
       ? '上一张付款申请结果待确认，请先在上方查回、按原内容重新提交或作废'
-      : (sourceProblem ??
-        (expectedDate < session.calendarToday
-          ? '期望付款日不能早于今天'
-          : purpose.trim().length < 2
-            ? '请写明用途（至少 2 个字）'
-            : null));
+      : (sourceProblem ?? (expectedDate < session.calendarToday ? '期望付款日不能早于今天' : purpose.trim().length < 2 ? '请写明用途（至少 2 个字）' : null));
 
   const submit = async () => {
     if (problem) return;
@@ -185,7 +178,14 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
         source === 'contract'
           ? `${plan.data?.contractNo ?? '合同'} ${PAYMENT_STAGE_LABELS[stage]}款 ¥${formatAmount(amountCents!)}${early ? '（提前付款）' : ''}`
           : `${meta.data?.suppliers.find((s) => s.id === supplierId)?.name ?? '供应商'} 应付 ${chosen.length} 笔 ¥${formatAmount(targetsTotal)}`;
-      const r = await sendErpOp<{ request: PaymentRequestDetail }>({ key: body.clientKey, type: 'payment_request', url: '/api/erp/payments/requests', body, summary, staffName: session.staff.displayName });
+      const r = await sendErpOp<{ request: PaymentRequestDetail }>({
+        key: body.clientKey,
+        type: 'payment_request',
+        url: '/api/erp/payments/requests',
+        body,
+        summary,
+        staffName: session.staff.displayName,
+      });
       toast({ tone: 'success', title: '付款申请已提交，等审批', body: `${r.request.requestNo} · ¥${formatAmount(r.request.amountCents)}` });
       await invalidate();
       navigate(`/erp/payments/requests/${r.request.id}`);
@@ -304,8 +304,9 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
             </Select>
           </Field>
           {supplierId && items.isPending && <Skeleton className="h-24" />}
-          {supplierId && items.data && (
-            rows.length === 0 ? (
+          {supplierId &&
+            items.data &&
+            (rows.length === 0 ? (
               <p className="text-[13px] text-ink-3">这家供应商没有没结清的货款。</p>
             ) : (
               <table className="w-full text-[13px]" data-testid="request-items">
@@ -334,18 +335,23 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
                         {r.blocked ? (
                           <span className="text-[12px]">—</span>
                         ) : (
-                          <MoneyInput aria-label={`申请 ${r.i.docNo}`} value={r.text} onChange={(e) => setTargets((t) => ({ ...t, [r.key]: e.target.value }))} data-testid={`request-item-${r.i.docNo}`} />
+                          <MoneyInput
+                            aria-label={`申请 ${r.i.docNo}`}
+                            value={r.text}
+                            onChange={(e) => setTargets((t) => ({ ...t, [r.key]: e.target.value }))}
+                            data-testid={`request-item-${r.i.docNo}`}
+                          />
                         )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            )
-          )}
+            ))}
           {chosen.length > 0 && (
             <p className="text-[13px]">
-              合计 <Money cents={targetsTotal} className="font-bold" />（选的收货单要三单对得上：先登记发票，差额大的请财务放行）
+              合计 <Money cents={targetsTotal} className="font-bold" />
+              （选的收货单要三单对得上：先登记发票，差额大的请财务放行）
             </p>
           )}
         </Card>
@@ -372,7 +378,15 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
           )}
         </Field>
         <Field label="用途" htmlFor="rq-purpose">
-          <Input id="rq-purpose" value={purpose} maxLength={200} onChange={(e) => setPurpose(e.target.value)} placeholder="例如：洗浴用品年度采购预付款" className="h-10" data-testid="request-purpose" />
+          <Input
+            id="rq-purpose"
+            value={purpose}
+            maxLength={200}
+            onChange={(e) => setPurpose(e.target.value)}
+            placeholder="例如：洗浴用品年度采购预付款"
+            className="h-10"
+            data-testid="request-purpose"
+          />
         </Field>
       </Card>
 

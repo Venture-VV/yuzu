@@ -8,15 +8,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import {
-  ERP_IMPORT_LABELS,
-  OPENING_IMPORT_COLUMNS,
-  SUPPLIER_IMPORT_COLUMNS,
-  type ErpImportKind,
-  type ErpImportPreview,
-  type ErpImportRecord,
-  type ErpImportRowIssue,
-} from '@shared/purchasing';
+import { ERP_IMPORT_LABELS, OPENING_IMPORT_COLUMNS, SUPPLIER_IMPORT_COLUMNS, type ErpImportKind, type ErpImportPreview, type ErpImportRecord, type ErpImportRowIssue } from '@shared/purchasing';
 import { parseYuan } from '@shared/money';
 import { can } from '@shared/permissions';
 import type { Db, Tx } from '../../db';
@@ -32,7 +24,6 @@ import { erpOpAbandoned } from '../erp-ops';
 import { actOnOpening, confirmOpening, lockSupplier } from './payables';
 import { hashRequest } from '../../lib/idempotency';
 import { submitForApproval } from '../approvals/engine';
-
 
 /** 一份文件最多多少行 */
 export const IMPORT_MAX_ROWS = 2000;
@@ -224,8 +215,7 @@ export async function applyImport(deps: Deps, raw: unknown, actor: Actor, ip?: s
     const first = readSheet(f, f.kind === 'opening_payables' ? ['截至日期'] : []);
     // 同一个文件串行处理
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`erp_import:${f.kind}:${first.sha256}`}, 0))`;
-    const keep = (importId: number) =>
-      tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${f.clientKey}, 'erp_import', ${requestHash}, ${importId}, ${actor.id})`;
+    const keep = (importId: number) => tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${f.clientKey}, 'erp_import', ${requestHash}, ${importId}, ${actor.id})`;
     const dup = await duplicateOf(tx, f.kind, first.sha256);
     if (dup) {
       await keep(dup.id);
@@ -235,9 +225,16 @@ export async function applyImport(deps: Deps, raw: unknown, actor: Actor, ip?: s
     if (f.kind === 'suppliers') await tx`LOCK TABLE suppliers IN SHARE ROW EXCLUSIVE MODE`;
     const p = await plan(tx, f, deps.config.timezone);
     if (p.issues.length) {
-      throw unprocessable('IMPORT_INVALID', `有 ${p.issues.length} 行要先改好才能导入：${p.issues.slice(0, 3).map((i) => `第 ${i.row} 行 ${i.message}`).join('；')}`, {
-        issues: p.issues,
-      });
+      throw unprocessable(
+        'IMPORT_INVALID',
+        `有 ${p.issues.length} 行要先改好才能导入：${p.issues
+          .slice(0, 3)
+          .map((i) => `第 ${i.row} 行 ${i.message}`)
+          .join('；')}`,
+        {
+          issues: p.issues,
+        },
+      );
     }
     const [imp] = await tx<{ id: number }[]>`
       INSERT INTO erp_imports (kind, file_name, file_sha256, row_count, total_cents, created_by)

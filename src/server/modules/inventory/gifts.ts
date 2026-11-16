@@ -101,7 +101,14 @@ export async function createGift(deps: Deps, raw: unknown, actor: Actor, ip?: st
               ${input.note}, ${actor.id})
       RETURNING id`;
     await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'gift_receipt', ${requestHash}, ${row!.id}, ${actor.id})`;
-    await writeAudit(tx, { staffId: actor.id, action: 'gift_receipt', targetType: 'gift_receipt', targetId: Number(row!.id), detail: { docNo, name: input.name, qtyMilli: input.qtyMilli, unit: input.unit }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'gift_receipt',
+      targetType: 'gift_receipt',
+      targetId: Number(row!.id),
+      detail: { docNo, name: input.name, qtyMilli: input.qtyMilli, unit: input.unit },
+      ip,
+    });
     return { id: Number(row!.id), replayed: false };
   });
   return { gift: await getGift(deps.sql, r.id), replayed: r.replayed };
@@ -129,7 +136,20 @@ export function registerGiftRoutes(app: FastifyInstance, deps: Deps) {
     const rows = await listGifts(sql, config.timezone, f);
     const csv = toCsv([
       ['单号', '收到日期', '赠品名称', '物料编码', '数量', '单位', '供应商', '随附收货单', '备注', '登记人', '状态', '作废原因'],
-      ...rows.map((g) => [g.docNo, g.receivedOn, g.name, g.material?.code ?? '', formatQty(g.qtyMilli), g.unit, g.supplier?.name ?? '', g.receipt?.docNo ?? '', g.note, g.createdByName, g.status === 'voided' ? '已作废' : '有效', g.voidReason ?? '']),
+      ...rows.map((g) => [
+        g.docNo,
+        g.receivedOn,
+        g.name,
+        g.material?.code ?? '',
+        formatQty(g.qtyMilli),
+        g.unit,
+        g.supplier?.name ?? '',
+        g.receipt?.docNo ?? '',
+        g.note,
+        g.createdByName,
+        g.status === 'voided' ? '已作废' : '有效',
+        g.voidReason ?? '',
+      ]),
     ]);
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'gift_receipts', detail: f, ip: req.ip });
     return csvReply(reply, `赠品台账_${f.from}_${f.to}.csv`, csv);

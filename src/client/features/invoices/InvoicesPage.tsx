@@ -172,9 +172,7 @@ export function InvoicesPage() {
                   onChange={(e) => setPicked(e.target.checked ? pickable.map((r) => r.id) : [])}
                   data-testid="invoice-pick-all"
                 />
-                {pendingRows.length > pickable.length
-                  ? `勾选前 ${pickable.length} 张待认证发票（一次最多 ${CERT_BATCH_MAX} 张）`
-                  : `勾选这里列出的待认证发票（${pendingRows.length} 张）`}
+                {pendingRows.length > pickable.length ? `勾选前 ${pickable.length} 张待认证发票（一次最多 ${CERT_BATCH_MAX} 张）` : `勾选这里列出的待认证发票（${pendingRows.length} 张）`}
               </label>
             )}
             <ul className="divide-y divide-line/70">
@@ -210,7 +208,14 @@ function InvoiceRow({ r, pickable, picked, onPick, onOpen }: { r: InputInvoice; 
   return (
     <li className={cn('flex items-start gap-3 px-4 py-3', r.status === 'voided' && 'opacity-60')} data-testid={`invoice-row-${r.invoiceNo}`}>
       {pickable ? (
-        <input type="checkbox" className="mt-1 size-4 accent-[var(--color-pine)]" checked={picked} onChange={(e) => onPick(e.target.checked)} aria-label={`勾选 ${r.invoiceNo}`} data-testid={`invoice-pick-${r.id}`} />
+        <input
+          type="checkbox"
+          className="mt-1 size-4 accent-[var(--color-pine)]"
+          checked={picked}
+          onChange={(e) => onPick(e.target.checked)}
+          aria-label={`勾选 ${r.invoiceNo}`}
+          data-testid={`invoice-pick-${r.id}`}
+        />
       ) : (
         <span className="w-4" />
       )}
@@ -332,7 +337,11 @@ function InvoiceSheet({ id, onClose }: { id: number | null; onClose: () => void 
       </div>
       <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4" data-testid="invoice-sheet">
         {!r ? (
-          inv.error ? <Notice tone="error" title={errorMessage(inv.error)} /> : <Skeleton className="h-64" />
+          inv.error ? (
+            <Notice tone="error" title={errorMessage(inv.error)} />
+          ) : (
+            <Skeleton className="h-64" />
+          )
         ) : (
           <>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[13px]">
@@ -409,7 +418,16 @@ function InvoiceSheet({ id, onClose }: { id: number | null; onClose: () => void 
                     </Field>
                     {certStatus === 'certified' && (
                       <Field label="所属期" htmlFor="inv-cert-period">
-                        <Input id="inv-cert-period" type="month" value={period} max={session.calendarToday.slice(0, 7)} disabled={busy} onChange={(e) => setPeriod(e.target.value)} className="h-10" data-testid="invoice-cert-period" />
+                        <Input
+                          id="inv-cert-period"
+                          type="month"
+                          value={period}
+                          max={session.calendarToday.slice(0, 7)}
+                          disabled={busy}
+                          onChange={(e) => setPeriod(e.target.value)}
+                          className="h-10"
+                          data-testid="invoice-cert-period"
+                        />
                       </Field>
                     )}
                     <Field label="说明" htmlFor="inv-cert-note">
@@ -613,7 +631,16 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
         <div className="sm:col-span-2">
           <InvoiceScanButton onResult={applyScan} disabled={busy} />
         </div>
-        <Field label={<>发票类型<RecognizedMark on={rec.isRecognized('kind')} /></>} htmlFor="inv-kind" hint={def ? (def.certify ? '要认证：登记后记「待认证」' : '不用认证') : meta.error ? errorMessage(meta.error) : undefined}>
+        <Field
+          label={
+            <>
+              发票类型
+              <RecognizedMark on={rec.isRecognized('kind')} />
+            </>
+          }
+          htmlFor="inv-kind"
+          hint={def ? (def.certify ? '要认证：登记后记「待认证」' : '不用认证') : meta.error ? errorMessage(meta.error) : undefined}
+        >
           <Select
             id="inv-kind"
             value={kind}
@@ -632,10 +659,27 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
             ))}
           </Select>
         </Field>
-        <Field label={<>发票号码<RecognizedMark on={rec.isRecognized('no')} /></>} htmlFor="inv-no">
+        <Field
+          label={
+            <>
+              发票号码
+              <RecognizedMark on={rec.isRecognized('no')} />
+            </>
+          }
+          htmlFor="inv-no"
+        >
           <Input id="inv-no" value={invoiceNo} maxLength={40} onChange={(e) => setInvoiceNo(e.target.value)} className="h-10" data-testid="inv-no" />
         </Field>
-        <Field label={<>供应商<RecognizedMark on={rec.isRecognized('supplier')} /></>} htmlFor="inv-supplier" hint="不是档案里的供应商就填开票方">
+        <Field
+          label={
+            <>
+              供应商
+              <RecognizedMark on={rec.isRecognized('supplier')} />
+            </>
+          }
+          htmlFor="inv-supplier"
+          hint="不是档案里的供应商就填开票方"
+        >
           <Select id="inv-supplier" value={supplierId ?? ''} onChange={(e) => setSupplierId(Number(e.target.value) || null)} data-testid="inv-supplier">
             <option value="">不是档案里的供应商</option>
             {meta.data?.suppliers.map((s) => (
@@ -645,16 +689,58 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
             ))}
           </Select>
         </Field>
-        <Field label={<>开票方<RecognizedMark on={rec.isRecognized('issuer')} /></>} htmlFor="inv-issuer">
-          <Input id="inv-issuer" value={supplierId ? '' : issuer} disabled={!!supplierId} maxLength={60} onChange={(e) => setIssuer(e.target.value)} placeholder={supplierId ? '按供应商' : '发票上的销售方名称'} className="h-10" data-testid="inv-issuer" />
+        <Field
+          label={
+            <>
+              开票方
+              <RecognizedMark on={rec.isRecognized('issuer')} />
+            </>
+          }
+          htmlFor="inv-issuer"
+        >
+          <Input
+            id="inv-issuer"
+            value={supplierId ? '' : issuer}
+            disabled={!!supplierId}
+            maxLength={60}
+            onChange={(e) => setIssuer(e.target.value)}
+            placeholder={supplierId ? '按供应商' : '发票上的销售方名称'}
+            className="h-10"
+            data-testid="inv-issuer"
+          />
         </Field>
-        <Field label={<>开票日<RecognizedMark on={rec.isRecognized('date')} /></>} htmlFor="inv-date">
+        <Field
+          label={
+            <>
+              开票日
+              <RecognizedMark on={rec.isRecognized('date')} />
+            </>
+          }
+          htmlFor="inv-date"
+        >
           <Input id="inv-date" type="date" value={invoiceDate} max={session.calendarToday} onChange={(e) => setInvoiceDate(e.target.value)} className="h-10" data-testid="inv-date" />
         </Field>
-        <Field label={<>价税合计<RecognizedMark on={rec.isRecognized('total')} /></>} htmlFor="inv-total" hint={exTax !== null && !total.trim() ? `二维码里的不含税金额 ¥${formatAmount(exTax)}，选了税率自动算` : undefined}>
+        <Field
+          label={
+            <>
+              价税合计
+              <RecognizedMark on={rec.isRecognized('total')} />
+            </>
+          }
+          htmlFor="inv-total"
+          hint={exTax !== null && !total.trim() ? `二维码里的不含税金额 ¥${formatAmount(exTax)}，选了税率自动算` : undefined}
+        >
           <MoneyInput id="inv-total" value={total} onChange={(e) => setTotal(e.target.value)} className="h-10" data-testid="inv-total" />
         </Field>
-        <Field label={<>税率<RecognizedMark on={rec.isRecognized('rate')} /></>} htmlFor="inv-rate">
+        <Field
+          label={
+            <>
+              税率
+              <RecognizedMark on={rec.isRecognized('rate')} />
+            </>
+          }
+          htmlFor="inv-rate"
+        >
           <Select
             id="inv-rate"
             value={rateBp ?? ''}
@@ -674,8 +760,24 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
             ))}
           </Select>
         </Field>
-        <Field label={<>税额<RecognizedMark on={rec.isRecognized('tax')} /></>} htmlFor="inv-tax" hint={totalCents && rateBp !== null ? `不填按税率算：¥${formatAmount(expectedTaxCents(totalCents, rateBp))}` : '不填按税率算'}>
-          <MoneyInput id="inv-tax" value={tax} onChange={(e) => setTax(e.target.value)} placeholder={totalCents && rateBp !== null ? centsToInput(expectedTaxCents(totalCents, rateBp)) : ''} className="h-10" data-testid="inv-tax" />
+        <Field
+          label={
+            <>
+              税额
+              <RecognizedMark on={rec.isRecognized('tax')} />
+            </>
+          }
+          htmlFor="inv-tax"
+          hint={totalCents && rateBp !== null ? `不填按税率算：¥${formatAmount(expectedTaxCents(totalCents, rateBp))}` : '不填按税率算'}
+        >
+          <MoneyInput
+            id="inv-tax"
+            value={tax}
+            onChange={(e) => setTax(e.target.value)}
+            placeholder={totalCents && rateBp !== null ? centsToInput(expectedTaxCents(totalCents, rateBp)) : ''}
+            className="h-10"
+            data-testid="inv-tax"
+          />
         </Field>
         <Field label="备注" htmlFor="inv-note" className="sm:col-span-2">
           <Input id="inv-note" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="可选" className="h-10" />
@@ -736,7 +838,15 @@ function CertifyDialog({ open, ids, onClose, onDone }: { open: boolean; ids: num
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="所属期" htmlFor="cert-period">
-          <Input id="cert-period" type="month" value={period} max={session.calendarToday.slice(0, 7)} onChange={(e) => setPeriod(e.target.value)} className="h-10" data-testid="invoice-certify-period" />
+          <Input
+            id="cert-period"
+            type="month"
+            value={period}
+            max={session.calendarToday.slice(0, 7)}
+            onChange={(e) => setPeriod(e.target.value)}
+            className="h-10"
+            data-testid="invoice-certify-period"
+          />
         </Field>
         <Field label="说明" htmlFor="cert-note">
           <Input id="cert-note" value={note} maxLength={100} onChange={(e) => setNote(e.target.value)} placeholder="可选" className="h-10" />

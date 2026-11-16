@@ -8,7 +8,17 @@ import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Upload } from 'lucide-react';
 import { formatYuan } from '@shared/money';
-import { OTA_FIELD_LABELS, OTA_ORDER_STATUS_LABELS, type OtaChannel, type OtaColumnMap, type OtaImportResult, type OtaOrderStatus, type OtaOrderView, type OtaReconRow, type ParsedOtaOrder } from '@shared/ota';
+import {
+  OTA_FIELD_LABELS,
+  OTA_ORDER_STATUS_LABELS,
+  type OtaChannel,
+  type OtaColumnMap,
+  type OtaImportResult,
+  type OtaOrderStatus,
+  type OtaOrderView,
+  type OtaReconRow,
+  type ParsedOtaOrder,
+} from '@shared/ota';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp } from '../../lib/erpPending';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
@@ -134,8 +144,7 @@ export function OtaOrdersPanel() {
     }
   };
 
-  if (channels.isError && !channels.data)
-    return <LoadFailed title="渠道取不回来，请检查网络" onRetry={() => void channels.refetch()} retrying={channels.isFetching} testId="ota-channels-error" />;
+  if (channels.isError && !channels.data) return <LoadFailed title="渠道取不回来，请检查网络" onRetry={() => void channels.refetch()} retrying={channels.isFetching} testId="ota-channels-error" />;
   if (channels.data && !active.length) return <Notice tone="info" title="还没有渠道：请到后台「营业项目 → 客房 → 渠道」先加渠道和房型对照。" />;
   return (
     <div className="space-y-4" data-testid="ota-orders">
@@ -149,7 +158,15 @@ export function OtaOrdersPanel() {
       <Card className="space-y-3 p-4">
         <div className="flex flex-wrap items-end gap-3">
           <Field label="渠道" htmlFor="ota-channel">
-            <Select id="ota-channel" value={cid ?? ''} fullWidth={false} className="h-10 w-40" disabled={importing} onChange={(e) => changeChannel(Number(e.target.value) || null)} data-testid="ota-channel">
+            <Select
+              id="ota-channel"
+              value={cid ?? ''}
+              fullWidth={false}
+              className="h-10 w-40"
+              disabled={importing}
+              onChange={(e) => changeChannel(Number(e.target.value) || null)}
+              data-testid="ota-channel"
+            >
               {active.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -158,7 +175,15 @@ export function OtaOrdersPanel() {
             </Select>
           </Field>
           <Field label="渠道后台导出的订单表（CSV / Excel）" htmlFor="ota-file">
-            <input id="ota-file" type="file" accept=".csv,.xlsx,text/csv" disabled={importing} onChange={(e) => void pick(e.target.files?.[0] ?? null)} className="block text-[13px]" data-testid="ota-file" />
+            <input
+              id="ota-file"
+              type="file"
+              accept=".csv,.xlsx,text/csv"
+              disabled={importing}
+              onChange={(e) => void pick(e.target.files?.[0] ?? null)}
+              className="block text-[13px]"
+              data-testid="ota-file"
+            />
           </Field>
           <span className="flex-1" />
           <Button
@@ -180,7 +205,11 @@ export function OtaOrdersPanel() {
               <Notice tone="warning" title="这份文件已经导过了：渠道有新的变化请重新导出一份" />
             ) : (
               <p>
-                认出 <b>{preview.total}</b> 张订单（列：{Object.entries(preview.columnMap).map(([f, h]) => `${OTA_FIELD_LABELS[f as keyof typeof OTA_FIELD_LABELS]}=${h}`).join('、')}）
+                认出 <b>{preview.total}</b> 张订单（列：
+                {Object.entries(preview.columnMap)
+                  .map(([f, h]) => `${OTA_FIELD_LABELS[f as keyof typeof OTA_FIELD_LABELS]}=${h}`)
+                  .join('、')}
+                ）
               </p>
             )}
             {preview.unmapped.length > 0 && <Notice tone="warning" title={`这些渠道房型还没对照本店房型，导入会记「没建成」：${preview.unmapped.join('、')}`} />}
@@ -196,7 +225,11 @@ export function OtaOrdersPanel() {
           </div>
         )}
         {result && (
-          <Notice tone={result.failed ? 'warning' : 'success'} title={`导入完成：${result.rows} 张，新建 ${result.created}、改了 ${result.updated}、取消 ${result.cancelled}、没建成 ${result.failed}、跳过 ${result.skipped}、没变 ${result.unchanged}`} data-testid="ota-result" />
+          <Notice
+            tone={result.failed ? 'warning' : 'success'}
+            title={`导入完成：${result.rows} 张，新建 ${result.created}、改了 ${result.updated}、取消 ${result.cancelled}、没建成 ${result.failed}、跳过 ${result.skipped}、没变 ${result.unchanged}`}
+            data-testid="ota-result"
+          />
         )}
         {error && <Notice tone="error" title={error} />}
       </Card>
@@ -232,7 +265,8 @@ export function OtaOrdersPanel() {
                   {o.channelName} · <span className="num">{o.orderNo}</span>
                 </span>
                 <span>
-                  {o.guestName || '—'} · {o.roomTypeName ?? o.channelRoom} × {o.rooms} 间 · {o.checkinDate} 起 {o.nights} 晚 · {formatYuan(o.amountCents)}（{o.payMode === 'prepaid' ? '预付' : '现付'}）
+                  {o.guestName || '—'} · {o.roomTypeName ?? o.channelRoom} × {o.rooms} 间 · {o.checkinDate} 起 {o.nights} 晚 · {formatYuan(o.amountCents)}（{o.payMode === 'prepaid' ? '预付' : '现付'}
+                  ）
                 </span>
                 <span className="flex-1" />
                 {o.status === 'failed' && (
@@ -242,7 +276,12 @@ export function OtaOrdersPanel() {
                 )}
               </div>
               {(o.failReason || o.notice) && <p className="text-[12.5px] text-clay">{o.notice ?? o.failReason}</p>}
-              {o.bookings.length > 0 && <p className="text-[12px] text-ink-3">预约：{o.bookings.map((b) => `${b.bookingNo}（${b.status === 'confirmed' ? '已预约' : b.status === 'arrived' ? '已到店' : b.status === 'cancelled' ? '已取消' : b.status}）`).join('、')}</p>}
+              {o.bookings.length > 0 && (
+                <p className="text-[12px] text-ink-3">
+                  预约：
+                  {o.bookings.map((b) => `${b.bookingNo}（${b.status === 'confirmed' ? '已预约' : b.status === 'arrived' ? '已到店' : b.status === 'cancelled' ? '已取消' : b.status}）`).join('、')}
+                </p>
+              )}
             </li>
           ))}
         </ul>
@@ -305,7 +344,11 @@ export function OtaChannelsCard() {
   const [busy, setBusy] = useState(false);
   const manage = can('settings.manage') || can('catalog.manage');
   const open = (c: OtaChannel | null) =>
-    setEditing(c ? { ...c, rows: Object.entries(c.roomMap).map(([name, roomTypeId]) => ({ name, roomTypeId })), commission: String(c.commissionBp / 100) } : { name: '', active: true, rows: [{ name: '', roomTypeId: '' }], commission: '0' });
+    setEditing(
+      c
+        ? { ...c, rows: Object.entries(c.roomMap).map(([name, roomTypeId]) => ({ name, roomTypeId })), commission: String(c.commissionBp / 100) }
+        : { name: '', active: true, rows: [{ name: '', roomTypeId: '' }], commission: '0' },
+    );
   const save = async () => {
     if (!editing) return;
     const commission = Number(editing.commission);
@@ -382,24 +425,44 @@ export function OtaChannelsCard() {
             <LoadFailed title="本店房型取不回来，对照选不了（已有的对照保存时照旧留着），请检查网络" onRetry={() => void types.refetch()} retrying={types.isFetching} testId="ota-room-types-error" />
           )}
           {!types.data && !types.isError && <Skeleton className="h-9" />}
-          {types.data && editing.rows.map((r, i) => (
-            <div key={i} className="flex flex-wrap items-center gap-2">
-              <Input value={r.name} fullWidth={false} placeholder="渠道上的房型名（照订单表写）" className="h-9 w-56" onChange={(e) => setEditing({ ...editing, rows: editing.rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} aria-label={`渠道房型 ${i + 1}`} />
-              <Select value={r.roomTypeId} fullWidth={false} className="h-9 w-44" onChange={(e) => setEditing({ ...editing, rows: editing.rows.map((x, j) => (j === i ? { ...x, roomTypeId: Number(e.target.value) || '' } : x)) })} aria-label={`本店房型 ${i + 1}`}>
-                <option value="">选本店房型</option>
-                {roomTypes.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </Select>
-              <IconButton label="删掉" onClick={() => setEditing({ ...editing, rows: editing.rows.filter((_, j) => j !== i) })}>
-                <Trash2 className="size-4" />
-              </IconButton>
-            </div>
-          ))}
+          {types.data &&
+            editing.rows.map((r, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <Input
+                  value={r.name}
+                  fullWidth={false}
+                  placeholder="渠道上的房型名（照订单表写）"
+                  className="h-9 w-56"
+                  onChange={(e) => setEditing({ ...editing, rows: editing.rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })}
+                  aria-label={`渠道房型 ${i + 1}`}
+                />
+                <Select
+                  value={r.roomTypeId}
+                  fullWidth={false}
+                  className="h-9 w-44"
+                  onChange={(e) => setEditing({ ...editing, rows: editing.rows.map((x, j) => (j === i ? { ...x, roomTypeId: Number(e.target.value) || '' } : x)) })}
+                  aria-label={`本店房型 ${i + 1}`}
+                >
+                  <option value="">选本店房型</option>
+                  {roomTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </Select>
+                <IconButton label="删掉" onClick={() => setEditing({ ...editing, rows: editing.rows.filter((_, j) => j !== i) })}>
+                  <Trash2 className="size-4" />
+                </IconButton>
+              </div>
+            ))}
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="ghost" icon={<Plus className="size-3.5" />} disabled={!types.data} onClick={() => setEditing({ ...editing, rows: [...editing.rows, { name: '', roomTypeId: '' }] })}>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Plus className="size-3.5" />}
+              disabled={!types.data}
+              onClick={() => setEditing({ ...editing, rows: [...editing.rows, { name: '', roomTypeId: '' }] })}
+            >
               加一条对照
             </Button>
             <span className="flex-1" />

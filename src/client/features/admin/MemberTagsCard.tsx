@@ -49,7 +49,8 @@ export function MemberTagsCard() {
         会员标签
       </SectionTitle>
       <p className="mt-1 text-[12.5px] text-ink-3">
-        给会员打上亲子客、商务客等标签做客群分层；前台新建、编辑会员时勾选，数据看板「会员总览 → 按标签」可以筛选、导出名单。原来的「会员资料字段」已改成标签：填过的值都转过来了，分组就是原来的字段名。标签不能删，不用时停用（已挂的会员保留）。
+        给会员打上亲子客、商务客等标签做客群分层；前台新建、编辑会员时勾选，数据看板「会员总览 →
+        按标签」可以筛选、导出名单。原来的「会员资料字段」已改成标签：填过的值都转过来了，分组就是原来的字段名。标签不能删，不用时停用（已挂的会员保留）。
       </p>
       {tags.data.length === 0 ? (
         <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-5 text-center text-[13px] text-ink-3">还没有会员标签</p>

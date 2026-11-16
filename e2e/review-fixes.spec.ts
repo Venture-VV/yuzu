@@ -299,7 +299,10 @@ test.describe('1280×720 门店电脑', () => {
     const summary = page.getByRole('region', { name: '今日概览' }).getByText('充值实收').locator('xpath=ancestor::div[contains(@class,"rounded-lg")][1]');
     const height = (await summary.boundingBox())!.height;
     expect(height).toBeGreaterThan(150);
-    await page.getByRole('region', { name: '今日概览' }).getByRole('link', { name: /查看日结/ }).click();
+    await page
+      .getByRole('region', { name: '今日概览' })
+      .getByRole('link', { name: /查看日结/ })
+      .click();
     await expect(page.getByRole('heading', { name: '日结' })).toBeVisible();
   });
 });

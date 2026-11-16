@@ -182,7 +182,13 @@ describe('升级后', () => {
     const m = await api(app, owner, 'POST', '/api/inventory/materials', { code: 'U001', name: '升级后物料', inventoryUnit: '包', purchaseUnit: '箱', purchaseFactorMilli: 20000 });
     expect(m.status).toBe(201);
     const today = (await api(app, owner, 'GET', '/api/auth/me')).body.calendarToday;
-    const d = await api(app, owner, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docType: 'opening', docDate: today, approveNow: true, lines: [{ materialId: m.body.id, qtyMilli: 5000 }] });
+    const d = await api(app, owner, 'POST', '/api/inventory/docs', {
+      clientKey: randomUUID(),
+      docType: 'opening',
+      docDate: today,
+      approveNow: true,
+      lines: [{ materialId: m.body.id, qtyMilli: 5000 }],
+    });
     expect(d.status).toBe(201);
     expect(d.body.doc.status).toBe('confirmed');
     // 店员仍看不到库存
@@ -202,7 +208,12 @@ describe('升级后', () => {
     expect((await api(app, owner, 'POST', '/api/frontdesk/tags/batch', { prefix: '', from: 1, to: 5, width: 3, zone: 'female' })).body.created).toBe(5);
     const v = await api(app, clerk, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: '003', zone: 'female', memberId }] });
     expect(v.status).toBe(201);
-    const p = await api(app, clerk, 'POST', `/api/frontdesk/visits/${v.body.visits[0].id}/charges`, { clientKey: randomUUID(), lines: [], customLines: [{ name: '升级后挂账', amount: 3000 }], expectedTotal: 3000 });
+    const p = await api(app, clerk, 'POST', `/api/frontdesk/visits/${v.body.visits[0].id}/charges`, {
+      clientKey: randomUUID(),
+      lines: [],
+      customLines: [{ name: '升级后挂账', amount: 3000 }],
+      expectedTotal: 3000,
+    });
     expect(p.body.bill.amountCents).toBe(3000);
     // 挂账不扣会员余额
     expect((await api(app, clerk, 'GET', `/api/members/${memberId}`)).body).toMatchObject({ principalBalance: 35200, bonusBalance: 5000 });

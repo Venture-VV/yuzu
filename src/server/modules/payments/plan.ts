@@ -94,22 +94,24 @@ async function stageRequests(db: Db, contractId: number): Promise<RequestAgg[]> 
  * 还没审批通过的合同按草稿算计划金额，但哪一段都不可付、不能申请。
  */
 export async function contractPlan(db: Db, contractId: number, today: string): Promise<ContractPaymentPlan> {
-  const [c] = await db<{
-    id: number;
-    contractNo: string;
-    title: string;
-    category: ContractCategory;
-    status: ContractStatus;
-    supplierId: number | null;
-    supplierName: string | null;
-    counterparty: string;
-    departmentId: number | null;
-    totalCents: number;
-    currentVersion: number;
-    currentRevisionId: number | null;
-    signedOn: string | null;
-    draft: unknown;
-  }[]>`
+  const [c] = await db<
+    {
+      id: number;
+      contractNo: string;
+      title: string;
+      category: ContractCategory;
+      status: ContractStatus;
+      supplierId: number | null;
+      supplierName: string | null;
+      counterparty: string;
+      departmentId: number | null;
+      totalCents: number;
+      currentVersion: number;
+      currentRevisionId: number | null;
+      signedOn: string | null;
+      draft: unknown;
+    }[]
+  >`
     SELECT c.id, c.contract_no, c.title, c.category, c.status, c.supplier_id, s.name AS supplier_name, c.counterparty, c.department_id,
            c.total_cents, c.current_version, c.current_revision_id, c.signed_on, c.draft
     FROM contracts c LEFT JOIN suppliers s ON s.id = c.supplier_id WHERE c.id = ${contractId}`;
@@ -122,13 +124,7 @@ export async function contractPlan(db: Db, contractId: number, today: string): P
   const total = content.totalCents;
   const payMode = payModeOf(c.category);
   const signed = PAYABLE_CONTRACT_STATUSES.includes(c.status) && c.signedOn !== null;
-  const whyNot = signed
-    ? null
-    : c.status === 'approved'
-      ? '合同审批通过了，还没登记签署，签署以后才能申请付款'
-      : c.status === 'voided'
-        ? '合同已作废'
-        : '合同还没审批通过';
+  const whyNot = signed ? null : c.status === 'approved' ? '合同审批通过了，还没登记签署，签署以后才能申请付款' : c.status === 'voided' ? '合同已作废' : '合同还没审批通过';
 
   const purchase = c.category === 'purchase';
   const receipts = purchase ? await contractReceipts(db, contractId) : null;
@@ -137,9 +133,7 @@ export async function contractPlan(db: Db, contractId: number, today: string): P
   const passed = latest?.result === 'pass';
   // 验收不合格挂起付款（8.0.7 2.5，V9，「门店基本规则 → 可调的数值」里的开关）：最近一次验收不合格时不能申请、不能登记付款
   const acceptanceHold = signed && latest?.result === 'fail' && (await loadSettings(db)).acceptanceHoldsPayment;
-  const holdWhy = acceptanceHold
-    ? `最近一次验收（${latest!.acceptedOn}）不合格${latest!.note ? `：${latest!.note}` : ''}，付款挂起；重新验收合格以后再申请、再付`
-    : null;
+  const holdWhy = acceptanceHold ? `最近一次验收（${latest!.acceptedOn}）不合格${latest!.note ? `：${latest!.note}` : ''}，付款挂起；重新验收合格以后再申请、再付` : null;
   const issues = await qualityIssuesOf(db, contractId);
   const openIssues = issues.filter((q) => q.status === 'open').length;
 

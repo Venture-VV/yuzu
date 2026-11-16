@@ -27,8 +27,7 @@ const ALL = (section: RecordSection): Filter => ({ types: [...SECTION_TYPES[sect
 const narrowed = (section: RecordSection, f: Filter) => !!f.from || !!f.to || f.types.length !== SECTION_TYPES[section].length;
 /** 展开时先列的笔数，再多的点「显示全部」 */
 const PREVIEW_ROWS = 20;
-const queryOf = (section: RecordSection, f: Filter) =>
-  `section=${section}&types=${f.types.join(',')}${f.from ? `&from=${f.from}` : ''}${f.to ? `&to=${f.to}` : ''}`;
+const queryOf = (section: RecordSection, f: Filter) => `section=${section}&types=${f.types.join(',')}${f.from ? `&from=${f.from}` : ''}${f.to ? `&to=${f.to}` : ''}`;
 
 /** 挂在 ['activity', 会员] 下面：充值、消费、撤销、退储值以后原来刷新余额记录的地方一起刷新 */
 function useRecords(memberId: number, section: RecordSection, f: Filter) {
@@ -167,16 +166,7 @@ function Section({
               查询与导出
             </Button>
           )}
-          {showBar && (
-            <FilterBar
-              section={section}
-              memberId={memberId}
-              totals={t}
-              filter={filter}
-              onFilter={onFilter}
-              onClose={narrowed(section, filter) ? undefined : () => setQuerying(false)}
-            />
-          )}
+          {showBar && <FilterBar section={section} memberId={memberId} totals={t} filter={filter} onFilter={onFilter} onClose={narrowed(section, filter) ? undefined : () => setQuerying(false)} />}
           {error ? (
             <Notice tone="error" className="mt-2" title={error} />
           ) : filter.types.length === 0 ? (

@@ -140,7 +140,12 @@ const SettingsInput = z
     businessDayStartHour: z.number().int().min(0, '营业日切换时间需在 0–12 点之间').max(12, '营业日切换时间需在 0–12 点之间'),
     maxRechargeCents: z.number().int().positive('单笔充值上限必须大于 0').max(100_000_000, '单笔充值上限最多 100 万元'),
     maxConsumeCents: z.number().int().positive('单笔消费上限必须大于 0').max(100_000_000, '单笔消费上限最多 100 万元'),
-    reversalWindowHours: z.number().int('撤销时限按整小时填写').min(1, '撤销时限至少 1 小时').max(24 * 90, '撤销时限最多 90 天').nullable(),
+    reversalWindowHours: z
+      .number()
+      .int('撤销时限按整小时填写')
+      .min(1, '撤销时限至少 1 小时')
+      .max(24 * 90, '撤销时限最多 90 天')
+      .nullable(),
     businessHours: z
       .object({ open: z.string().regex(HHMM, '开门时间格式应为 HH:MM'), close: z.string().regex(HHMM, '打烊时间格式应为 HH:MM') })
       .refine((h) => h.open !== h.close, '开门与打烊时间不能相同；全天营业请选「全天 24 小时」')
@@ -173,17 +178,13 @@ const SettingsInput = z
       .refine((l) => new Set(l).size === l.length, '耗用用途重复了'),
     ...tunableInputs(),
     // 数据字典（8.0.21）：只改提交上来的那几份，没提交的保持原样
-    dictionaries: z
-      .partialRecord(
-        z.enum(DICTIONARY_KEYS),
-        z
-          .array(
-            z.string().trim().min(1, '原因不能为空').max(MAX_DICTIONARY_ITEM_LENGTH, `每条原因最多 ${MAX_DICTIONARY_ITEM_LENGTH} 个字`),
-            '原因要是一组文字',
-          )
-          .max(MAX_DICTIONARY_ITEMS, `每份最多 ${MAX_DICTIONARY_ITEMS} 条`)
-          .refine((l) => new Set(l).size === l.length, '原因重复了'),
-      ),
+    dictionaries: z.partialRecord(
+      z.enum(DICTIONARY_KEYS),
+      z
+        .array(z.string().trim().min(1, '原因不能为空').max(MAX_DICTIONARY_ITEM_LENGTH, `每条原因最多 ${MAX_DICTIONARY_ITEM_LENGTH} 个字`), '原因要是一组文字')
+        .max(MAX_DICTIONARY_ITEMS, `每份最多 ${MAX_DICTIONARY_ITEMS} 条`)
+        .refine((l) => new Set(l).size === l.length, '原因重复了'),
+    ),
     cashDrawers: z
       .array(
         z.object({

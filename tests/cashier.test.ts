@@ -41,17 +41,17 @@ const visit = async (id: number) =>
     bill: { amountCents: number };
     lines: { id: number; name: string; status: string; amount: number; voidReason: string | null; postedByName: string }[];
   };
-const preview = async (visitIds: number[]) =>
-  (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitIds.join(',')}`)).body as { totalAmount: number };
+const preview = async (visitIds: number[]) => (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitIds.join(',')}`)).body as { totalAmount: number };
 const items = async (checkoutId: number) =>
   ctx.sql<{ category: string; quantity: number; amount: number; discount: number }[]>`
     SELECT category, quantity, amount::int AS amount, discount::int AS discount FROM checkout_items WHERE checkout_id = ${checkoutId} ORDER BY category COLLATE "C", name COLLATE "C"`;
 const departments = async () =>
-  ((await api(ctx.app, ctx.owner, 'GET', `/api/reports/executive?from=${today}&to=${today}`)).body as {
-    departments: { category: string; quantity: number; amount: number; discount: number }[];
-  }).departments;
-const move = (body: Record<string, unknown>, cookie = ctx.clerk, clientKey = randomUUID()) =>
-  api(ctx.app, cookie, 'POST', '/api/frontdesk/lines/move', { clientKey, reason: '挂错手牌', ...body });
+  (
+    (await api(ctx.app, ctx.owner, 'GET', `/api/reports/executive?from=${today}&to=${today}`)).body as {
+      departments: { category: string; quantity: number; amount: number; discount: number }[];
+    }
+  ).departments;
+const move = (body: Record<string, unknown>, cookie = ctx.clerk, clientKey = randomUUID()) => api(ctx.app, cookie, 'POST', '/api/frontdesk/lines/move', { clientKey, reason: '挂错手牌', ...body });
 
 beforeAll(async () => {
   ctx = await setup();
@@ -79,7 +79,14 @@ describe('部门营业额快照（结账时记下）', () => {
 
   it('各部门金额与优惠分摊：优惠按金额比例分到分，尾差按舍去部分从大到小补 1 分；合计等于结账金额与优惠', async () => {
     const v = await enter('C001');
-    await post(v, [{ itemId: item['快照搓澡']!, quantity: 1 }, { itemId: item['快照修脚']!, quantity: 1 }], 11800);
+    await post(
+      v,
+      [
+        { itemId: item['快照搓澡']!, quantity: 1 },
+        { itemId: item['快照修脚']!, quantity: 1 },
+      ],
+      11800,
+    );
     const total = (await preview([v])).totalAmount;
     expect(total).toBe(49900 + 11800);
     const grant = await api(ctx.app, ctx.clerk, 'POST', '/api/auth/authorize', {
@@ -93,7 +100,10 @@ describe('部门营业额快照（结账时记下）', () => {
       clientKey: randomUUID(),
       visitIds: [v],
       expectedTotal: total,
-      payments: [{ method: 'discount', amount: 1000, grantId: grant.body.grantId }, { method: 'cash', amount: total - 1000 }],
+      payments: [
+        { method: 'discount', amount: 1000, grantId: grant.body.grantId },
+        { method: 'cash', amount: total - 1000 },
+      ],
     });
     expect(paid.status, JSON.stringify(paid.body)).toBe(200);
     checkoutId = paid.body.id;
@@ -115,7 +125,14 @@ describe('部门营业额快照（结账时记下）', () => {
     const r2 = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '快照茶点', category: '快照水吧', price: 49900 });
     item['快照茶点'] = r2.body.items.find((i: { name: string }) => i.name === '快照茶点').id;
     const v = await enter('C002');
-    await post(v, [{ itemId: item['快照果盘']!, quantity: 1 }, { itemId: item['快照茶点']!, quantity: 1 }], 99800);
+    await post(
+      v,
+      [
+        { itemId: item['快照果盘']!, quantity: 1 },
+        { itemId: item['快照茶点']!, quantity: 1 },
+      ],
+      99800,
+    );
     const total = (await preview([v])).totalAmount;
     expect(total).toBe(3 * 49900);
     const grant = await api(ctx.app, ctx.clerk, 'POST', '/api/auth/authorize', {
@@ -128,7 +145,10 @@ describe('部门营业额快照（结账时记下）', () => {
       clientKey: randomUUID(),
       visitIds: [v],
       expectedTotal: total,
-      payments: [{ method: 'discount', amount: 200, grantId: grant.body.grantId }, { method: 'cash', amount: total - 200 }],
+      payments: [
+        { method: 'discount', amount: 200, grantId: grant.body.grantId },
+        { method: 'cash', amount: total - 200 },
+      ],
     });
     expect(paid.status, JSON.stringify(paid.body)).toBe(200);
     const rows = await ctx.sql<{ category: string; name: string; discount: number }[]>`
@@ -180,7 +200,14 @@ describe('明细转到另一张手牌（转单）', () => {
   it('把挂错手牌的明细转过去：原明细作废并写明转到哪张手牌，目标账单新增同样的明细；同一编号重提只转一次', async () => {
     from = await enter('C010');
     to = await enter('C011');
-    const posted = await post(from, [{ itemId: item['快照搓澡']!, quantity: 2 }, { itemId: item['快照修脚']!, quantity: 1 }], 18600);
+    const posted = await post(
+      from,
+      [
+        { itemId: item['快照搓澡']!, quantity: 2 },
+        { itemId: item['快照修脚']!, quantity: 1 },
+      ],
+      18600,
+    );
     scrubLine = posted.lines.find((l) => l.name === '快照搓澡')!.id;
     footLine = posted.lines.find((l) => l.name === '快照修脚')!.id;
     const key = randomUUID();
@@ -233,7 +260,9 @@ describe('明细转到另一张手牌（转单）', () => {
     ]);
     const total2 = (await preview([from])).totalAmount;
     expect(total2).toBe(49900);
-    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [from], expectedTotal: total2, payments: [{ method: 'cash', amount: total2 }] })).status).toBe(200);
+    expect(
+      (await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', { clientKey: randomUUID(), visitIds: [from], expectedTotal: total2, payments: [{ method: 'cash', amount: total2 }] })).status,
+    ).toBe(200);
     // 已结账的客人：不能再转
     const v = await enter('C012');
     const posted = await post(v, [{ itemId: item['快照修脚']!, quantity: 1 }], 5000);
@@ -258,8 +287,7 @@ describe('代码审查的修正（v0.7.6）', () => {
 
   it('补录到更早时刻的结账：之后才转走的明细不算进它的部门快照（按这一刻要结的有效明细记），转过去的那位结账时只算一次', async () => {
     const now = Date.now();
-    const enterAt = async (tagCode: string) =>
-      (await checkin(deps(), { clientKey: randomUUID(), guests: [{ tagCode, zone: 'male' }] }, { actor: owner(), at: new Date(now - 50 * M) })).visits[0]!.id;
+    const enterAt = async (tagCode: string) => (await checkin(deps(), { clientKey: randomUUID(), guests: [{ tagCode, zone: 'male' }] }, { actor: owner(), at: new Date(now - 50 * M) })).visits[0]!.id;
     const a = await enterAt('C025');
     const b = await enterAt('C026');
     // 40 分钟前挂一项，20 分钟前转给 C026；A 的结账补录在 30 分钟前（早于转单）

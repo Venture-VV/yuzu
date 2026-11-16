@@ -11,7 +11,21 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AGING_BUCKETS, agingKeyOf, AR_METHODS, type AgingKey, type AgingRow, type ArAccount, type ArAccountDetail, type ArAccountOption, type ArAging, type ArCharge, type ArCollection, type ArTodo, type PlatformReceivable } from '@shared/ar';
+import {
+  AGING_BUCKETS,
+  agingKeyOf,
+  AR_METHODS,
+  type AgingKey,
+  type AgingRow,
+  type ArAccount,
+  type ArAccountDetail,
+  type ArAccountOption,
+  type ArAging,
+  type ArCharge,
+  type ArCollection,
+  type ArTodo,
+  type PlatformReceivable,
+} from '@shared/ar';
 import { COUPON_PLATFORM_LABELS, COUPON_PLATFORMS, type CouponPlatform } from '@shared/checkout';
 import { formatYuan } from '@shared/money';
 import { isUniqueViolation, type Db, type Tx } from '../db';
@@ -32,7 +46,10 @@ import { loadSettings } from './settings';
 // ───────────────────────── 协议单位 ─────────────────────────
 
 const AccountInput = z.object({
-  code: z.string('请填写编码').trim().regex(/^[A-Za-z0-9-]{1,16}$/, '编码只能用字母、数字、短横线，最多 16 位'),
+  code: z
+    .string('请填写编码')
+    .trim()
+    .regex(/^[A-Za-z0-9-]{1,16}$/, '编码只能用字母、数字、短横线，最多 16 位'),
   name: z.string('请填写名称').trim().min(1, '请填写名称').max(40, '名称最多 40 个字'),
   contact: z.string().trim().max(40, '联系人最多 40 个字').default(''),
   phone: z.string().trim().max(32, '电话最多 32 个字').default(''),
@@ -154,7 +171,10 @@ const CollectionInput = z.object({
   evidence: z.string().trim().max(64, '凭据最多 64 个字').default(''),
   note: z.string().trim().max(200, '备注最多 200 个字').default(''),
   /** 核销到哪几笔挂账；不填从最早的开始 */
-  allocations: z.array(z.object({ chargeId: z.number().int().positive(), amountCents: z.number().int().positive() })).max(500).default([]),
+  allocations: z
+    .array(z.object({ chargeId: z.number().int().positive(), amountCents: z.number().int().positive() }))
+    .max(500)
+    .default([]),
 });
 
 export async function createCollection(deps: Deps, raw: unknown, actor: Actor, ip?: string): Promise<{ id: number; replayed: boolean }> {
@@ -218,7 +238,14 @@ export async function createCollection(deps: Deps, raw: unknown, actor: Actor, i
       for (const x of allocations) {
         await tx`INSERT INTO ar_allocations (collection_id, charge_id, amount_cents) VALUES (${row!.id}, ${x.chargeId}, ${x.amountCents})`;
       }
-      await writeAudit(tx, { staffId: actor.id, action: 'ar_collection', targetType: 'ar_collection', targetId: row!.id, detail: { op: 'create', docNo, account: acc.name, amountCents: input.amountCents, charges: allocations.length }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'ar_collection',
+        targetType: 'ar_collection',
+        targetId: row!.id,
+        detail: { op: 'create', docNo, account: acc.name, amountCents: input.amountCents, charges: allocations.length },
+        ip,
+      });
       return { id: Number(row!.id), replayed: false };
     });
   } catch (error) {
@@ -465,7 +492,7 @@ export function registerReceivableRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/receivables/aging', { preHandler: READ }, async () => arAging(sql, today()));
   app.get('/api/erp/receivables/platforms', { preHandler: READ }, async () => platformReceivables(sql));
   app.get('/api/erp/receivables/todo', { preHandler: READ }, async () => arTodo(sql, today()));
-  app.get('/api/erp/receivables/aging/export', { preHandler: READ }, async (req, reply) => {
+  app.get('/api/erp/receivables/aging/export', { preHandler: READ }, async (_req, reply) => {
     const r = await arAging(sql, today());
     const y = (c: number) => (c / 100).toFixed(2);
     const csv = toCsv([

@@ -51,13 +51,15 @@ describe('迁移 030 · 迁移前已生效的退货', () => {
     let n = 0;
     const docAt = async (type: string, supplierId: number, amountCents: number, settlement: string, sourceDocId: number | null = null, status = 'confirmed') => {
       n += 1;
-      return (await sql<{ id: number }[]>`
+      return (
+        await sql<{ id: number }[]>`
         INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, supplier_id, source_doc_id, amount_cents, settlement, warehouse_id, created_by,
                               confirmed_by, confirmed_at)
         VALUES (${`U-${n}`}, ${type}, ${status}, ${today}, ${supplierId}, ${sourceDocId}, ${amountCents},
                 ${status === 'confirmed' ? settlement : null}, 1, ${payer!.id},
                 ${status === 'confirmed' ? payer!.id : null}, ${status === 'confirmed' ? sql`now() + make_interval(secs => ${n})` : null})
-        RETURNING id`)[0]!.id;
+        RETURNING id`
+      )[0]!.id;
     };
     const ap = (supplierId: number, type: string, delta: number, refs: { inv?: number; payment?: number }) =>
       sql`INSERT INTO ap_entries (supplier_id, entry_type, amount_delta_cents, inv_doc_id, payment_id, entry_date, operator_id)
@@ -86,10 +88,7 @@ describe('迁移 030 · 迁移前已生效的退货', () => {
 
     expect(await migrate(sql)).toEqual(migrationsFrom('030_supplier_settlement.sql'));
     const applied = new Map(
-      (await sql<{ id: number; returnAppliedCents: number | null }[]>`SELECT id, return_applied_cents FROM inv_docs WHERE doc_type = 'supplier_return'`).map((r) => [
-        r.id,
-        r.returnAppliedCents,
-      ]),
+      (await sql<{ id: number; returnAppliedCents: number | null }[]>`SELECT id, return_applied_cents FROM inv_docs WHERE doc_type = 'supplier_return'`).map((r) => [r.id, r.returnAppliedCents]),
     );
     expect(applied.get(r1)).toBe(0);
     expect(applied.get(r2)).toBe(1_000);
@@ -99,7 +98,10 @@ describe('迁移 030 · 迁移前已生效的退货', () => {
     expect((await sql<{ s: number }[]>`SELECT sum(amount_delta_cents) AS s FROM ap_entries WHERE supplier_id = ${credit}`)[0]!.s).toBe(2_000);
     const checks = await inventoryChecks(sql);
     for (const key of ['ap_balance', 'ap_settlements', 'awaiting_supplier']) {
-      expect(checks.find((x) => x.key === key), key).toMatchObject({ ok: true });
+      expect(
+        checks.find((x) => x.key === key),
+        key,
+      ).toMatchObject({ ok: true });
     }
 
     app = await buildApp(sql, config);

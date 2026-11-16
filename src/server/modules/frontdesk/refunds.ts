@@ -12,17 +12,7 @@
 // 反结账同样先锁结账单再核对退款单，两边不会交错；交班只锁班次一行（排他），不会与这里成环。
 
 import { z } from 'zod';
-import {
-  defaultRefundAmount,
-  isCashLike,
-  REFUND_METHODS,
-  refundNeedsRef,
-  type CheckoutMethod,
-  type RefundDetail,
-  type RefundMethod,
-  type RefundOptions,
-  type RefundSummary,
-} from '@shared/checkout';
+import { defaultRefundAmount, isCashLike, REFUND_METHODS, refundNeedsRef, type CheckoutMethod, type RefundDetail, type RefundMethod, type RefundOptions, type RefundSummary } from '@shared/checkout';
 import { describeHours, PAYMENT_METHOD_LABELS } from '@shared/labels';
 import { formatYuan } from '@shared/money';
 import type { Db, Tx } from '../../db';
@@ -58,7 +48,12 @@ export const RefundInput = z.object({
   payments: z.array(RefundPaymentInput).min(1, '请填写退款方式').max(5, '退款方式最多 5 种'),
   reason: z.string('请填写退款原因').trim().min(2, '请填写退款原因（至少 2 个字）').max(200, '原因最多 200 字'),
   /** 退现金从哪个钱箱退（所选钱箱当班的班次）；不带时记到经办人自己的班次 */
-  refundShiftId: z.number('钱箱班次不正确').int('钱箱班次不正确').positive('钱箱班次不正确').nullish().transform((v) => v ?? undefined),
+  refundShiftId: z
+    .number('钱箱班次不正确')
+    .int('钱箱班次不正确')
+    .positive('钱箱班次不正确')
+    .nullish()
+    .transform((v) => v ?? undefined),
 });
 export type RefundInputData = z.input<typeof RefundInput>;
 
@@ -182,11 +177,7 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
   if (input.payments.some((p) => p.viaTerminal && p.method !== 'wechat' && p.method !== 'alipay')) throw badRequest('只有微信、支付宝能原路退回');
   const missingRef = input.payments.find((p) => refundNeedsRef(p.method) && !p.viaTerminal && p.ref.length < 2);
   if (missingRef) {
-    throw badRequest(
-      missingRef.method === 'other'
-        ? '「其他」退款请写明是怎么退的'
-        : `${PAYMENT_METHOD_LABELS[missingRef.method]}退款请登记商户后台的退款单号（在商户后台原路退回后填写）`,
-    );
+    throw badRequest(missingRef.method === 'other' ? '「其他」退款请写明是怎么退的' : `${PAYMENT_METHOD_LABELS[missingRef.method]}退款请登记商户后台的退款单号（在商户后台原路退回后填写）`);
   }
   const cash = input.payments.find((p) => p.method === 'cash');
   if (input.refundShiftId !== undefined && !cash) {
@@ -249,11 +240,10 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
         });
       }
       if (p.amount > m.remaining) {
-        throw unprocessable(
-          'REFUND_METHOD_EXCEEDS',
-          `${PAYMENT_METHOD_LABELS[p.method]}最多还能退 ${formatYuan(m.remaining)}（原单收 ${formatYuan(m.paid)}，已退 ${formatYuan(m.refunded)}）`,
-          { method: p.method, remaining: m.remaining },
-        );
+        throw unprocessable('REFUND_METHOD_EXCEEDS', `${PAYMENT_METHOD_LABELS[p.method]}最多还能退 ${formatYuan(m.remaining)}（原单收 ${formatYuan(m.paid)}，已退 ${formatYuan(m.refunded)}）`, {
+          method: p.method,
+          remaining: m.remaining,
+        });
       }
     }
 
@@ -272,7 +262,15 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
       if (p.viaTerminal) await tx`INSERT INTO refund_payments (refund_id, method, amount, ref, via_terminal) VALUES (${r!.id}, ${p.method}, ${p.amount}, '原路退回', true)`;
       else await tx`INSERT INTO refund_payments (refund_id, method, amount, ref) VALUES (${r!.id}, ${p.method}, ${p.amount}, ${p.ref})`;
       // 原路退回（8.0.21）：在结账单之后按交易 id 升序锁这张结账单用这种方式扫码收的交易，写待退；提交以后去支付方退
-      if (p.viaTerminal) await queueCheckoutRefund(tx, { checkoutId: c.id, provider: p.method, amountCents: p.amount, reason: `退款单 ${refundNo}：${input.reason}`.slice(0, 200), refundId: r!.id, staffId: ctx.actor.id });
+      if (p.viaTerminal)
+        await queueCheckoutRefund(tx, {
+          checkoutId: c.id,
+          provider: p.method,
+          amountCents: p.amount,
+          reason: `退款单 ${refundNo}：${input.reason}`.slice(0, 200),
+          refundId: r!.id,
+          staffId: ctx.actor.id,
+        });
     }
     // 从别人的钱箱退现金：审计写明记到了谁的哪个班次
     const drawer = shiftId ? await shiftDrawerLabel(tx, shiftId, ctx.actor.id) : null;
@@ -298,7 +296,11 @@ export async function createRefund(deps: Deps, checkoutId: number, raw: RefundIn
   });
   // 原路退回的去支付方退（事务外）；重提、上一次提交后没来得及退的也在这里补上
   const pending = await deps.sql<{ id: number }[]>`SELECT id FROM pay_refunds WHERE refund_id = ${run.refId} AND status = 'pending' ORDER BY id`;
-  if (pending.length) await processRefunds(deps, pending.map((x) => Number(x.id)));
+  if (pending.length)
+    await processRefunds(
+      deps,
+      pending.map((x) => Number(x.id)),
+    );
   return getRefund(deps.sql, run.refId);
 }
 

@@ -53,7 +53,12 @@ function Timeline({ items }: { items: PaymentDoc['approvals'] }) {
     <ol className="space-y-2 border-l-2 border-line pl-4">
       {items.map((a) => (
         <li key={a.id} className="relative text-[12.5px]">
-          <span className={cn('absolute top-1.5 -left-[21px] size-2.5 rounded-full ring-2 ring-paper', a.action === 'approve' ? 'bg-pine' : a.action === 'return' || a.action === 'void' ? 'bg-clay' : 'bg-ink-4')} />
+          <span
+            className={cn(
+              'absolute top-1.5 -left-[21px] size-2.5 rounded-full ring-2 ring-paper',
+              a.action === 'approve' ? 'bg-pine' : a.action === 'return' || a.action === 'void' ? 'bg-clay' : 'bg-ink-4',
+            )}
+          />
           <span className="font-bold">{ACTION_LABELS[a.action] ?? a.action}</span>
           <span className="text-ink-2"> · {a.actorName}</span>
           <span className="num text-ink-3"> · {formatDateTime(a.createdAt)}</span>
@@ -163,9 +168,21 @@ function PaymentBody({ p, onClose }: { p: PaymentDoc; onClose: () => void }) {
         </IconButton>
       </header>
       <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-        {p.status === 'submitted' && <Notice tone="warning" title="待负责人确认，确认前不计入已付款">付款审批安排为模拟规则 <SimRule className="align-middle" /></Notice>}
-        {p.status === 'returned' && p.returnedReason && <Notice tone="warning" title="负责人退回修改">{p.returnedReason}</Notice>}
-        {p.status === 'voided' && <Notice tone="error" title={`已冲销 · ${p.voidedByName ?? ''}`}>{p.voidReason}</Notice>}
+        {p.status === 'submitted' && (
+          <Notice tone="warning" title="待负责人确认，确认前不计入已付款">
+            付款审批安排为模拟规则 <SimRule className="align-middle" />
+          </Notice>
+        )}
+        {p.status === 'returned' && p.returnedReason && (
+          <Notice tone="warning" title="负责人退回修改">
+            {p.returnedReason}
+          </Notice>
+        )}
+        {p.status === 'voided' && (
+          <Notice tone="error" title={`已冲销 · ${p.voidedByName ?? ''}`}>
+            {p.voidReason}
+          </Notice>
+        )}
         <div className="rounded-lg border border-line bg-card px-4 py-3.5">
           <p className="text-[12px] font-semibold text-ink-3">付款金额</p>
           <Money cents={p.amountCents} className="text-[28px] font-bold text-lake" />
@@ -280,8 +297,16 @@ export function OpeningSheet({ doc, onClose }: { doc: OpeningPayableDoc | null; 
             </IconButton>
           </header>
           <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-            {doc.status === 'returned' && doc.returnedReason && <Notice tone="warning" title="负责人退回修改">{doc.returnedReason}</Notice>}
-            {doc.status === 'voided' && <Notice tone="error" title="已冲销">{doc.voidReason}</Notice>}
+            {doc.status === 'returned' && doc.returnedReason && (
+              <Notice tone="warning" title="负责人退回修改">
+                {doc.returnedReason}
+              </Notice>
+            )}
+            {doc.status === 'voided' && (
+              <Notice tone="error" title="已冲销">
+                {doc.voidReason}
+              </Notice>
+            )}
             <div className="rounded-lg border border-line bg-card px-4 py-3.5">
               <p className="text-[12px] font-semibold text-ink-3">上期已收货未付</p>
               <Money cents={doc.amountCents} className="text-[26px] font-bold" />
@@ -464,4 +489,3 @@ export function OpeningDialog({ open, onClose, supplierId }: { open: boolean; on
     </Dialog>
   );
 }
-

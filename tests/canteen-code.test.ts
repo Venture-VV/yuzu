@@ -16,9 +16,7 @@ describe('纯 JS 的 SHA-256 与 HMAC-SHA256', () => {
   it('SHA-256 的标准例子（空串、abc、跨两块的 448 位）', () => {
     expect(hex(sha256(text('')))).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
     expect(hex(sha256(text('abc')))).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
-    expect(hex(sha256(text('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq')))).toBe(
-      '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1',
-    );
+    expect(hex(sha256(text('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq')))).toBe('248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1');
   });
 
   it('RFC 4231 的 HMAC-SHA256 例子（含比一块长的钥匙）', () => {
@@ -68,7 +66,21 @@ describe('手机上生成的饭卡码与服务端一致', () => {
 
 describe('店里局域网的地址（K18）', () => {
   it('本机、私网 IP、Tailscale 的 100.64–127、.local/.lan 等算局域网', () => {
-    for (const h of ['localhost', '127.0.0.1', '10.0.0.8', '172.16.5.1', '172.31.255.254', '192.168.1.20', '100.64.0.1', '100.101.102.103', 'yuzu.local', 'canteen.lan', 'pos.home.arpa', 'yuzu.internal', 'YUZU.LOCAL.'])
+    for (const h of [
+      'localhost',
+      '127.0.0.1',
+      '10.0.0.8',
+      '172.16.5.1',
+      '172.31.255.254',
+      '192.168.1.20',
+      '100.64.0.1',
+      '100.101.102.103',
+      'yuzu.local',
+      'canteen.lan',
+      'pos.home.arpa',
+      'yuzu.internal',
+      'YUZU.LOCAL.',
+    ])
       expect(isLanHost(h), h).toBe(true);
   });
   it('公网地址、域名、不合法的 IP 不算', () => {

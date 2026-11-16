@@ -41,7 +41,10 @@ import { loadMembershipRules } from './membership';
 import { loadSettings } from './settings';
 
 const AudienceInput = z.object({
-  grades: z.array(z.number().int().min(0, '档级是 L0–L6').max(MAX_GRADE, '档级是 L0–L6')).max(MAX_GRADE + 1).default([]),
+  grades: z
+    .array(z.number().int().min(0, '档级是 L0–L6').max(MAX_GRADE, '档级是 L0–L6'))
+    .max(MAX_GRADE + 1)
+    .default([]),
   tagIds: z.array(z.number().int().positive()).max(50, '一次最多选 50 个标签').default([]),
   tagMode: z.enum(['any', 'all']).default('any'),
 });
@@ -187,7 +190,17 @@ export async function createCampaign(deps: Deps, raw: unknown, ctx: OpContext): 
           action: 'coupon_campaign_created',
           targetType: 'coupon_campaign',
           targetId: row!.id,
-          detail: { campaignNo: no, template: template.name, quantity: input.quantity, targeted: members.length, grades: audience.grades, tags: tagNames, sms: input.notifySms, popup: input.notifyPopup, reason: input.reason },
+          detail: {
+            campaignNo: no,
+            template: template.name,
+            quantity: input.quantity,
+            targeted: members.length,
+            grades: audience.grades,
+            tags: tagNames,
+            sms: input.notifySms,
+            popup: input.notifyPopup,
+            reason: input.reason,
+          },
           ip: ctx.ip,
           businessDate: date,
         });
@@ -236,8 +249,10 @@ export async function processCampaign(deps: Pick<Deps, 'sql' | 'config'>, id: nu
       const settings = await loadSettings(tx);
       const ids = pending.map((p) => Number(p.memberId));
       const members = new Map(
-        (await tx<{ id: number; phone: string; status: string; grade: number; mergedIntoId: number | null }[]>`
-          SELECT id, phone, status, grade, merged_into_id FROM members WHERE id IN ${tx(ids)}`).map((m) => [Number(m.id), m]),
+        (
+          await tx<{ id: number; phone: string; status: string; grade: number; mergedIntoId: number | null }[]>`
+          SELECT id, phone, status, grade, merged_into_id FROM members WHERE id IN ${tx(ids)}`
+        ).map((m) => [Number(m.id), m]),
       );
       let issued = 0;
       for (const memberId of ids) {

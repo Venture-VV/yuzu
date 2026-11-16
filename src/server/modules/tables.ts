@@ -194,7 +194,12 @@ const guestFields = {
   guests: z.number('请填写用餐人数').int('人数必须是整数').min(1, '至少 1 人').max(99, '最多 99 人'),
   guestLabel: z.string().trim().max(16, '客人称呼最多 16 字').default(''),
   /** 登记会员（可以用这位会员的储值结账）；散客不带 */
-  memberId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
+  memberId: z
+    .number()
+    .int()
+    .positive()
+    .nullish()
+    .transform((v) => v ?? undefined),
 };
 export const OpenTableInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
@@ -385,8 +390,14 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
     assertSessionOpen(s);
     const [bill] = await tx<{ status: string }[]>`SELECT status FROM bills WHERE id = ${s.billId} FOR UPDATE`;
     if (bill!.status !== 'open') throw conflict('BILL_CLOSED', '账单已结束，不能再点单');
-    const items = await loadPricedItems(tx, input.lines.map((l) => l.itemId));
-    const stations = await kitchenStationsOf(tx, input.lines.map((l) => l.itemId));
+    const items = await loadPricedItems(
+      tx,
+      input.lines.map((l) => l.itemId),
+    );
+    const stations = await kitchenStationsOf(
+      tx,
+      input.lines.map((l) => l.itemId),
+    );
     const lines = input.lines.map((l) => {
       const item = items.get(l.itemId);
       const priced = priceLine(item, undefined, l.quantity, '有菜已停用，请刷新后重新点');
@@ -400,7 +411,11 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
     }
     const date = await businessDate(tx, deps, at);
     // 估清（明细之前）：今天还剩的份数不够整笔拒绝
-    const limited = await takeDishLimits(tx, lines.map((l) => ({ itemId: l.itemId!, name: l.name, quantity: l.quantity })), date);
+    const limited = await takeDishLimits(
+      tx,
+      lines.map((l) => ({ itemId: l.itemId!, name: l.name, quantity: l.quantity })),
+      date,
+    );
     const kitchen: KitchenLine[] = [];
     for (const l of lines) {
       const [row] = await tx<{ id: number }[]>`
@@ -480,7 +495,21 @@ export async function previewTableCheckout(deps: Deps, sessionIds: number[], at 
   const memberIds = await deps.sql<{ memberId: number }[]>`SELECT DISTINCT member_id FROM table_sessions WHERE id IN ${deps.sql(ids)} AND member_id IS NOT NULL`;
   for (const m of memberIds) await expireMemberBonus(deps, m.memberId, at);
   return deps.sql.begin('isolation level repeatable read read only', async (tx) => {
-    const rows = await tx<{ id: number; sessionNo: string; billId: number; status: string; tableName: string; guests: number; guestLabel: string; memberId: number | null; memberName: string | null; openedAt: string; amount: number }[]>`
+    const rows = await tx<
+      {
+        id: number;
+        sessionNo: string;
+        billId: number;
+        status: string;
+        tableName: string;
+        guests: number;
+        guestLabel: string;
+        memberId: number | null;
+        memberName: string | null;
+        openedAt: string;
+        amount: number;
+      }[]
+    >`
       SELECT s.id, s.session_no, s.bill_id, s.status, t.name AS table_name, s.guests, s.guest_label, s.member_id, m.name AS member_name,
              s.opened_at, b.amount_cents AS amount
       FROM table_sessions s JOIN dining_tables t ON t.id = s.table_id JOIN bills b ON b.id = s.bill_id LEFT JOIN members m ON m.id = s.member_id
@@ -515,7 +544,15 @@ export async function previewTableCheckout(deps: Deps, sessionIds: number[], at 
       amount: r.amount,
     }));
     // 这几桌登记的会员的券（v0.7.20）
-    const storeCoupons = await memberCouponOptions(tx, members.map((m) => m.id), await couponLines(tx, rows.map((r) => r.billId)), await businessDate(tx, deps, at));
+    const storeCoupons = await memberCouponOptions(
+      tx,
+      members.map((m) => m.id),
+      await couponLines(
+        tx,
+        rows.map((r) => r.billId),
+      ),
+      await businessDate(tx, deps, at),
+    );
     return { sessions, totalAmount: sessions.reduce((sum, x) => sum + x.amount, 0), members, storeCoupons, pricedAt: at.toISOString(), dishes };
   });
 }
@@ -636,9 +673,7 @@ export function registerTableRoutes(app: FastifyInstance, deps: Deps) {
 
   // 桌台看板与详情：点单、厨房、收银都要看
   app.get('/api/dining/tables', { preHandler: guardAny('dining.order', 'dining.kitchen', 'frontdesk.checkout') }, async () => tablesBoard(sql, deps));
-  app.get('/api/dining/tables/sessions/:id', { preHandler: guardAny('dining.order', 'frontdesk.checkout') }, async (req) =>
-    getTableSession(sql, parse(idParam, req.params).id),
-  );
+  app.get('/api/dining/tables/sessions/:id', { preHandler: guardAny('dining.order', 'frontdesk.checkout') }, async (req) => getTableSession(sql, parse(idParam, req.params).id));
 
   // 开台、改人数、转台、撤台、点单、退菜：与前台挂账一样还要「前台挂账」权限（结果待确认按前台的操作编号查回、作废）
   const orderGuard = guard('dining.order', 'frontdesk.operate');
@@ -652,7 +687,10 @@ export function registerTableRoutes(app: FastifyInstance, deps: Deps) {
   // 桌台结账：与前台结账同一权限
   app.get('/api/dining/tables/checkout-preview', { preHandler: guard('frontdesk.checkout') }, async (req) => {
     const { ids } = parse(z.object({ ids: z.string('请选择要结账的桌') }), req.query ?? {});
-    const list = ids.split(',').map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0);
+    const list = ids
+      .split(',')
+      .map((x) => Number(x))
+      .filter((x) => Number.isInteger(x) && x > 0);
     if (list.length === 0 || list.length > MAX_TABLES_PER_CHECKOUT) throw badRequest('请选择要结账的桌');
     return previewTableCheckout(deps, list);
   });

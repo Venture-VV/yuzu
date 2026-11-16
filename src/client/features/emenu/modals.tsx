@@ -12,7 +12,19 @@ const M = { x: 297.5, y: 133.7, w: 429.1, h: 500.6 };
 const LINE = '0.5px solid var(--em-mute)';
 
 /** 盖在整页上的半透明层（设计稿里弹窗后面的页面压暗约四成）；blur：起始页输入信息时把氛围图虚化 */
-export function Backdrop({ onClick, blur, kind = 'modal', still, children }: { onClick?: () => void; blur?: boolean; kind?: string; /** 不播淡入（抽屉里换内容时背景本来就在） */ still?: boolean; children?: ReactNode }) {
+export function Backdrop({
+  onClick,
+  blur,
+  kind = 'modal',
+  still,
+  children,
+}: {
+  onClick?: () => void;
+  blur?: boolean;
+  kind?: string;
+  /** 不播淡入（抽屉里换内容时背景本来就在） */ still?: boolean;
+  children?: ReactNode;
+}) {
   // 关掉时留一个影子播退场动画（motion.tsx）：背景淡出，里面的弹窗缩小、抽屉滑出
   const ref = useExitGhost<HTMLDivElement>(kind);
   return (
@@ -21,7 +33,12 @@ export function Backdrop({ onClick, blur, kind = 'modal', still, children }: { o
       className={still ? undefined : 'em-fade'}
       onClick={onClick}
       data-em-kind={kind}
-      style={{ ...box(0, 0, 1024, 768), background: blur ? 'rgb(211 211 211 / 0.55)' : 'rgb(0 0 0 / 0.4)', backdropFilter: blur ? 'blur(14px)' : undefined, WebkitBackdropFilter: blur ? 'blur(14px)' : undefined }}
+      style={{
+        ...box(0, 0, 1024, 768),
+        background: blur ? 'rgb(211 211 211 / 0.55)' : 'rgb(0 0 0 / 0.4)',
+        backdropFilter: blur ? 'blur(14px)' : undefined,
+        WebkitBackdropFilter: blur ? 'blur(14px)' : undefined,
+      }}
     >
       {children}
     </div>
@@ -60,22 +77,22 @@ function Centered({ children }: { children: ReactNode }) {
 
 export function Frame({ title, subtitle, children, testId }: { title: string; subtitle: string; children: ReactNode; testId?: string }) {
   return (
-   <Centered>
-    <div
-      className="em-pop"
-      data-em-out="pop"
-      role="dialog"
-      aria-label={title}
-      onClick={(e) => e.stopPropagation()}
-      style={{ ...box(M.x, M.y, M.w, M.h), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden', pointerEvents: 'auto' }}
-      data-testid={testId}
-    >
-      <div style={{ ...box(0, 0, M.w, 84.5), background: 'var(--em-band)' }} />
-      <div style={{ ...box(21.4, 84.2, 386.2, 0), borderTop: LINE }} />
-      <Titles title={title} subtitle={subtitle} w={M.w} y={[25.4, 50.6]} size={[24, 12]} />
-      {children}
-    </div>
-   </Centered>
+    <Centered>
+      <div
+        className="em-pop"
+        data-em-out="pop"
+        role="dialog"
+        aria-label={title}
+        onClick={(e) => e.stopPropagation()}
+        style={{ ...box(M.x, M.y, M.w, M.h), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden', pointerEvents: 'auto' }}
+        data-testid={testId}
+      >
+        <div style={{ ...box(0, 0, M.w, 84.5), background: 'var(--em-band)' }} />
+        <div style={{ ...box(21.4, 84.2, 386.2, 0), borderTop: LINE }} />
+        <Titles title={title} subtitle={subtitle} w={M.w} y={[25.4, 50.6]} size={[24, 12]} />
+        {children}
+      </div>
+    </Centered>
   );
 }
 
@@ -192,7 +209,16 @@ export function InfoModal({
       onClick={onPress}
       aria-label={opts.aria}
       className="em-tap-soft"
-      style={{ ...box(x, y, w, h), background: opts.alt ? 'var(--em-key-2)' : 'var(--em-key)', border: 0, borderRadius: 2, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      style={{
+        ...box(x, y, w, h),
+        background: opts.alt ? 'var(--em-key-2)' : 'var(--em-key)',
+        border: 0,
+        borderRadius: 2,
+        padding: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
       data-testid={opts.testId}
     >
       <Hairline radius={2} />
@@ -324,7 +350,11 @@ export function ModalNote({ y = 458, error, hint, candidates, onPick }: { y?: nu
   return (
     <div style={{ ...box(21.4, y, 386.2, 34), display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
       {(error || hint) && (
-        <span role={error ? 'alert' : undefined} style={{ fontSize: 12, lineHeight: '15px', color: error ? 'var(--em-error)' : 'var(--em-mute)', textAlign: 'center' }} data-testid={error ? 'emenu-error' : 'emenu-hint'}>
+        <span
+          role={error ? 'alert' : undefined}
+          style={{ fontSize: 12, lineHeight: '15px', color: error ? 'var(--em-error)' : 'var(--em-mute)', textAlign: 'center' }}
+          data-testid={error ? 'emenu-error' : 'emenu-hint'}
+        >
           {error ?? hint}
         </span>
       )}
@@ -379,23 +409,23 @@ export function SmallDialog({
 }) {
   return (
     <Backdrop onClick={onClose}>
-     <Centered>
-      <div
-        className="em-pop"
-        data-em-out="pop"
-        role="dialog"
-        aria-label={title}
-        onClick={(e) => e.stopPropagation()}
-        style={{ ...box(332, 259, 360, 250), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden', pointerEvents: 'auto' }}
-        data-testid={testId}
-      >
-        <div style={{ ...box(0, 0, 360, 72), background: 'var(--em-band)' }} />
-        <div style={{ ...box(21.4, 71.7, 317.2, 0), borderTop: LINE }} />
-        <Titles title={title} subtitle={subtitle} w={360} y={[19, 44]} size={[22, 11]} />
-        <div style={{ ...box(28, 96, 304, 88), fontSize: 13, lineHeight: '21px', color: 'var(--em-ink)', textAlign: 'center' }}>{children}</div>
-        {actions}
-      </div>
-     </Centered>
+      <Centered>
+        <div
+          className="em-pop"
+          data-em-out="pop"
+          role="dialog"
+          aria-label={title}
+          onClick={(e) => e.stopPropagation()}
+          style={{ ...box(332, 259, 360, 250), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden', pointerEvents: 'auto' }}
+          data-testid={testId}
+        >
+          <div style={{ ...box(0, 0, 360, 72), background: 'var(--em-band)' }} />
+          <div style={{ ...box(21.4, 71.7, 317.2, 0), borderTop: LINE }} />
+          <Titles title={title} subtitle={subtitle} w={360} y={[19, 44]} size={[22, 11]} />
+          <div style={{ ...box(28, 96, 304, 88), fontSize: 13, lineHeight: '21px', color: 'var(--em-ink)', textAlign: 'center' }}>{children}</div>
+          {actions}
+        </div>
+      </Centered>
     </Backdrop>
   );
 }
@@ -406,7 +436,21 @@ export function Toast({ text }: { text: string | null }) {
   if (!text) return null;
   return (
     <div style={{ ...box(0, large ? 690 : 700, 1024), display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-      <span key={text} className="em-toast" role="status" style={{ background: 'rgb(75 57 42 / 0.9)', color: 'var(--em-light)', fontSize: large ? 16 : 12, lineHeight: large ? '16px' : '12px', padding: large ? '12px 22px' : '9px 16px', borderRadius: 2, letterSpacing: '0.5px' }} data-testid="emenu-toast">
+      <span
+        key={text}
+        className="em-toast"
+        role="status"
+        style={{
+          background: 'rgb(75 57 42 / 0.9)',
+          color: 'var(--em-light)',
+          fontSize: large ? 16 : 12,
+          lineHeight: large ? '16px' : '12px',
+          padding: large ? '12px 22px' : '9px 16px',
+          borderRadius: 2,
+          letterSpacing: '0.5px',
+        }}
+        data-testid="emenu-toast"
+      >
         {text}
       </span>
     </div>

@@ -49,10 +49,7 @@ import { checkLock, clearFailures, recordFailure } from './lockout';
 import { verifyPassword } from './password';
 import { subjectOf } from './role-permissions';
 
-const tagCode = z
-  .string('请输入牌号')
-  .transform(normalizeTagCode)
-  .pipe(z.string().regex(TAG_CODE_PATTERN, '牌号格式不正确'));
+const tagCode = z.string('请输入牌号').transform(normalizeTagCode).pipe(z.string().regex(TAG_CODE_PATTERN, '牌号格式不正确'));
 
 const Credentials = z.object({
   username: z.string().trim().toLowerCase().min(1, '请输入授权人账号'),
@@ -81,7 +78,7 @@ const DiscountScopeInput = z
     amount: positiveCents('优惠金额'),
     reason: z.string('请填写优惠原因').trim().min(2, '请填写优惠原因（至少 2 个字）').max(64, '优惠原因最多 64 字'),
   })
-  .refine((d) => (d.visitIds.length > 0) !== (d.tableSessionIds.length > 0), '请说明授权哪次结账');
+  .refine((d) => d.visitIds.length > 0 !== d.tableSessionIds.length > 0, '请说明授权哪次结账');
 
 const MemberRefundScopeInput = z.object({
   memberId: z.number().int().positive('请说明授权哪位会员'),
@@ -90,7 +87,10 @@ const MemberRefundScopeInput = z.object({
 
 const MemberPhoneScopeInput = z.object({
   memberId: z.number().int().positive('请说明授权哪位会员'),
-  phone: z.string('请填写新手机号').trim().regex(/^1\d{10}$/, '手机号应为 11 位数字'),
+  phone: z
+    .string('请填写新手机号')
+    .trim()
+    .regex(/^1\d{10}$/, '手机号应为 11 位数字'),
 });
 
 const LineVoidScopeInput = z.object({
@@ -215,10 +215,7 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
 }
 
 /** 写入一条当场授权（授权人已核对；合成演示数据也用它为演示单据签发授权），有效期 GRANT_TTL_MINUTES 分钟 */
-export async function insertGrant(
-  db: Db,
-  g: { purpose: GrantPurpose; requestedBy: number; approvedBy: number; scope: unknown },
-): Promise<{ id: string; expiresAt: string }> {
+export async function insertGrant(db: Db, g: { purpose: GrantPurpose; requestedBy: number; approvedBy: number; scope: unknown }): Promise<{ id: string; expiresAt: string }> {
   const [row] = await db<{ id: string; expiresAt: string }[]>`
     INSERT INTO auth_grants (purpose, requested_by, approved_by, scope, expires_at)
     VALUES (${g.purpose}, ${g.requestedBy}, ${g.approvedBy}, ${db.json(g.scope as never)}, now() + make_interval(mins => ${GRANT_TTL_MINUTES}))
@@ -240,10 +237,8 @@ interface LockedGrant {
 }
 
 /** 优惠 / 免单由收银的本人授权（店主除外）：R1.2-b 不允许 */
-const selfDiscount = (purpose: GrantPurpose, requestedBy: number, approver: { id: number; role: Role }) =>
-  purpose === 'checkout_discount' && approver.id === requestedBy && approver.role !== 'owner';
-const selfDiscountError = () =>
-  new AppError(403, 'AUTH_SELF_NOT_ALLOWED', '优惠 / 免单不能由收银的本人授权，请另一位值班经理、店总或店主授权');
+const selfDiscount = (purpose: GrantPurpose, requestedBy: number, approver: { id: number; role: Role }) => purpose === 'checkout_discount' && approver.id === requestedBy && approver.role !== 'owner';
+const selfDiscountError = () => new AppError(403, 'AUTH_SELF_NOT_ALLOWED', '优惠 / 免单不能由收银的本人授权，请另一位值班经理、店总或店主授权');
 
 /** 锁定授权并做通用核对：存在、用途一致、本人申请、未用过、未过期、授权人仍在职且仍有授权权限 */
 async function lockGrant(tx: Tx, grantId: string, purpose: GrantPurpose, actor: Actor): Promise<LockedGrant> {
@@ -287,10 +282,7 @@ export async function consumeLineVoidGrant(
  * 在充值 / 消费的事务里核销一次超限授权（会员锁之后加锁）。
  * 授权必须覆盖这位会员、这类业务、这个金额（金额改了要重新授权）。
  */
-export async function consumeOverLimitGrant(
-  tx: Tx,
-  opts: { grantId: string; actor: Actor; scope: OverLimitScope; usedRef: string },
-): Promise<{ approverId: number; approverName: string }> {
+export async function consumeOverLimitGrant(tx: Tx, opts: { grantId: string; actor: Actor; scope: OverLimitScope; usedRef: string }): Promise<{ approverId: number; approverName: string }> {
   const g = await lockGrant(tx, opts.grantId, 'over_limit', opts.actor);
   const s = g.scope as OverLimitScope;
   if (s.kind !== opts.scope.kind || s.memberId !== opts.scope.memberId || s.amount !== opts.scope.amount) {
@@ -307,10 +299,7 @@ export async function consumeOverLimitGrant(
  * 在业务事务里核销一次 VIP 柜授权（最后加锁：只有持有手牌锁的请求才会走到这里）。
  * 授权必须是本人申请、未用过、未过期，授权人仍在职且仍有授权权限，并且覆盖所有需要授权的柜与客人。
  */
-export async function consumeVipGrant(
-  tx: Tx,
-  opts: { grantId: string; actor: Actor; needed: VipGrantTag[]; usedRef: string },
-): Promise<{ approverId: number; approverName: string }> {
+export async function consumeVipGrant(tx: Tx, opts: { grantId: string; actor: Actor; needed: VipGrantTag[]; usedRef: string }): Promise<{ approverId: number; approverName: string }> {
   const g = await lockGrant(tx, opts.grantId, 'vip_tag', opts.actor);
   if (!grantCovers(g.scope as VipTagScope, opts.needed)) {
     throw unprocessable('GRANT_SCOPE', `授权不包含柜 ${opts.needed.map((n) => n.code).join('、')}（或客人已变更），请按当前内容重新授权`);
@@ -336,10 +325,7 @@ export async function consumeDiscountGrant(
   };
   // 手牌结账的授权只能用于这几张手牌，桌台结账的授权只能用于这几桌（升级前签发的授权没有桌台一项，按空处理）
   if (s.amount !== opts.amount || !same(s.visitIds, opts.visitIds) || !same(s.tableSessionIds ?? [], opts.tableSessionIds ?? [])) {
-    throw unprocessable(
-      'GRANT_SCOPE',
-      `授权的是优惠 ${formatYuan(s.amount)}，与这次结账的优惠 ${formatYuan(opts.amount)}（或结账的手牌）不一致，请按当前内容重新授权`,
-    );
+    throw unprocessable('GRANT_SCOPE', `授权的是优惠 ${formatYuan(s.amount)}，与这次结账的优惠 ${formatYuan(opts.amount)}（或结账的手牌）不一致，请按当前内容重新授权`);
   }
   await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
   return { approverId: g.approvedBy, approverName: g.approverName, reason: s.reason };
@@ -366,10 +352,7 @@ export async function consumeTicketGrant(
  * 在退储值的事务里核销一次授权（会员一行锁住之后）：授权必须覆盖这位会员、这个本金（金额改了要重新授权）。
  * 店主、店总自己办时，授权人可以就是本人（再输一次自己的密码确认）
  */
-export async function consumeMemberRefundGrant(
-  tx: Tx,
-  opts: { grantId: string; actor: Actor; scope: MemberRefundScope; usedRef: string },
-): Promise<{ approverId: number; approverName: string }> {
+export async function consumeMemberRefundGrant(tx: Tx, opts: { grantId: string; actor: Actor; scope: MemberRefundScope; usedRef: string }): Promise<{ approverId: number; approverName: string }> {
   const g = await lockGrant(tx, opts.grantId, 'member_refund', opts.actor);
   const s = g.scope as MemberRefundScope;
   if (s.memberId !== opts.scope.memberId || s.amount !== opts.scope.amount) {
@@ -380,10 +363,7 @@ export async function consumeMemberRefundGrant(
 }
 
 /** 在改会员手机号的事务里核销一次授权（会员一行锁住之后）：授权必须覆盖这位会员、这个新号码 */
-export async function consumeMemberPhoneGrant(
-  tx: Tx,
-  opts: { grantId: string; actor: Actor; scope: MemberPhoneScope; usedRef: string },
-): Promise<{ approverId: number; approverName: string }> {
+export async function consumeMemberPhoneGrant(tx: Tx, opts: { grantId: string; actor: Actor; scope: MemberPhoneScope; usedRef: string }): Promise<{ approverId: number; approverName: string }> {
   const g = await lockGrant(tx, opts.grantId, 'member_phone', opts.actor);
   const s = g.scope as MemberPhoneScope;
   if (s.memberId !== opts.scope.memberId || s.phone !== opts.scope.phone) {

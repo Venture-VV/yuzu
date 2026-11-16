@@ -31,31 +31,34 @@ export function registerCanteenAdminRoutes(app: FastifyInstance, deps: Deps) {
   const { sql, config } = deps;
   const manage = { preHandler: guard('canteen.manage') };
 
-  app.get('/api/erp/canteen/overview', manage, async (): Promise<CanteenOverview> =>
-    readSnapshot(sql, async (tx) => {
-      const settings = await loadCanteenSettings(tx);
-      const today = await canteenToday(tx, config);
-      const [people] = await tx<CanteenOverview['people'][]>`
+  app.get(
+    '/api/erp/canteen/overview',
+    manage,
+    async (): Promise<CanteenOverview> =>
+      readSnapshot(sql, async (tx) => {
+        const settings = await loadCanteenSettings(tx);
+        const today = await canteenToday(tx, config);
+        const [people] = await tx<CanteenOverview['people'][]>`
         SELECT count(*)::int AS total, count(*) FILTER (WHERE active)::int AS active,
                count(*) FILTER (WHERE active AND password_hash IS NOT NULL)::int AS activated,
                count(*) FILTER (WHERE active AND password_hash IS NULL)::int AS pending,
                count(*) FILTER (WHERE active AND role = 'cook')::int AS cooks,
                count(*) FILTER (WHERE active AND role = 'manager')::int AS managers
         FROM canteen_employees`;
-      const date = businessDateOf(new Date(), config.timezone, 0);
-      return {
-        enabled: (await enabledErpModules(tx)).has('canteen'),
-        settings,
-        departmentName: await canteenDepartmentName(tx, settings),
-        today,
-        people: people!,
-        days: await dailyCounts(tx, daysAgo(date, 13), date),
-        topDishes: await topDishes(tx, daysAgo(date, 6), date),
-        portOpen: canteenPortOpen(config),
-        registration: await registrationView(tx),
-        feedbackUnread: await unreadFeedbackCount(tx),
-      };
-    }),
+        const date = businessDateOf(new Date(), config.timezone, 0);
+        return {
+          enabled: (await enabledErpModules(tx)).has('canteen'),
+          settings,
+          departmentName: await canteenDepartmentName(tx, settings),
+          today,
+          people: people!,
+          days: await dailyCounts(tx, daysAgo(date, 13), date),
+          topDishes: await topDishes(tx, daysAgo(date, 6), date),
+          portOpen: canteenPortOpen(config),
+          registration: await registrationView(tx),
+          feedbackUnread: await unreadFeedbackCount(tx),
+        };
+      }),
   );
 
   // ── 设置 ──
@@ -64,8 +67,7 @@ export function registerCanteenAdminRoutes(app: FastifyInstance, deps: Deps) {
   /** 一键新建食堂部门（已有同名的就用那个） */
   app.post('/api/erp/canteen/department', manage, async (req) => createCanteenDepartment(sql, (req.body as { name?: unknown } | null)?.name, ctxOf(req)));
   /** 选部门用：在用的部门 */
-  app.get('/api/erp/canteen/departments', manage, async () =>
-    sql<{ id: number; name: string }[]>`SELECT id, name FROM departments WHERE active ORDER BY sort_order, id`);
+  app.get('/api/erp/canteen/departments', manage, async () => sql<{ id: number; name: string }[]>`SELECT id, name FROM departments WHERE active ORDER BY sort_order, id`);
 
   // ── 饭点提醒（店主 2026-11-10，docs/CANTEEN.md 第 19 节，K23、K24）：设置、今天发了没有、谁开着提醒、给某位员工发一条试试 ──
   app.get('/api/erp/canteen/reminders', manage, async () => readSnapshot(sql, (tx) => reminderOverview(tx, config)));
@@ -106,12 +108,15 @@ export function registerCanteenAdminRoutes(app: FastifyInstance, deps: Deps) {
 
   // ── 用餐记录 ──
   // 页面一次最多列 2,000 条，合计照实给；列不下时页面提示导出表格（导出不截断）
-  app.get('/api/erp/canteen/checkins', manage, async (req): Promise<CanteenCheckinList> =>
-    readSnapshot(sql, async (tx) => {
-      const rows = await listCheckins(tx, req.query);
-      const { total, valid } = await countCheckins(tx, req.query);
-      return { rows, total, valid, truncated: total > rows.length };
-    }),
+  app.get(
+    '/api/erp/canteen/checkins',
+    manage,
+    async (req): Promise<CanteenCheckinList> =>
+      readSnapshot(sql, async (tx) => {
+        const rows = await listCheckins(tx, req.query);
+        const { total, valid } = await countCheckins(tx, req.query);
+        return { rows, total, valid, truncated: total > rows.length };
+      }),
   );
   app.get('/api/erp/canteen/checkins.csv', manage, async (req, reply) => {
     const q = req.query as { from?: string; to?: string };

@@ -159,7 +159,8 @@ test.describe('v0.7.17 第一级实时位置', () => {
       } else {
         // 上次收尾停用了：启用
         const r = (await getJson<LocationAdmin>(page, '/api/admin/locations')).readers.find((x) => x.code === READER.code)!;
-        if (!r.active) await send(page, 'put', `/api/admin/locations/readers/${r.id}`, { code: r.code, name: r.name, zoneId: r.zoneId, spaceId: r.spaceId, note: r.note, active: true, expectedVersion: r.version });
+        if (!r.active)
+          await send(page, 'put', `/api/admin/locations/readers/${r.id}`, { code: r.code, name: r.name, zoneId: r.zoneId, spaceId: r.spaceId, note: r.note, active: true, expectedVersion: r.version });
         await page.reload();
         await page.getByTestId('subnav-locations').click();
       }
@@ -176,7 +177,10 @@ test.describe('v0.7.17 第一级实时位置', () => {
       // ② 前台发手牌：客人在接待区（样例SPA区）
       await relogin(page, 'xiaozhou');
       const tags = await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board');
-      const tag = tags.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
+      const tag = tags.tags
+        .filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+        .map((t) => t.code)
+        .reverse()[0]!;
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 实时位置客人' }] });
       visit = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
 
@@ -286,9 +290,27 @@ test.describe('v0.7.17 第一级实时位置', () => {
     const now = new Date().toISOString();
     const W = 4000;
     const H = 2400;
-    const box = (x: number, y: number): [number, number][] => [[x, y], [x + 600, y], [x + 600, y + 400], [x, y + 400]];
+    const box = (x: number, y: number): [number, number][] => [
+      [x, y],
+      [x + 600, y],
+      [x + 600, y + 400],
+      [x, y + 400],
+    ];
     const sp = (id: number, code: string, zoneId: number, zoneName: string, businessType: string): FloorMapSpace => ({
-      id, code, floorCode: 'L3', floorName: '三层', zoneId, zoneName, businessType, capacity: 2, areaCentiM2: null, displayName: `合成${businessType}`, sellable: true, active: true, aliases: [], roomId: null,
+      id,
+      code,
+      floorCode: 'L3',
+      floorName: '三层',
+      zoneId,
+      zoneName,
+      businessType,
+      capacity: 2,
+      areaCentiM2: null,
+      displayName: `合成${businessType}`,
+      sellable: true,
+      active: true,
+      aliases: [],
+      roomId: null,
     });
     const spaces = [sp(1, 'T301', 11, '合成SPA区', 'SPA'), sp(2, 'T302', 11, '合成SPA区', 'SPA'), sp(3, 'V312', 12, '合成足浴区', '足浴')];
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}"><rect width="${W}" height="${H}" fill="#fafafa"/></svg>`;
@@ -297,11 +319,38 @@ test.describe('v0.7.17 第一级实时位置', () => {
       outlineRev: 0,
       activatedAt: now,
       floors: [{ code: 'L3', title: '三层', width: W, height: H, svgBytes: svg.length, pathCount: 0, svgUrl: '/api/floorplans/900101/floors/L3/svg' }],
-      rooms: spaces.map((s, i) => ({ floorCode: 'L3', code: s.code, label: `合成 ${s.code}`, status: 'ok', mergedWith: [], closeMm: 600, polygon: box(400 + i * 900, 600), labelAt: [700 + i * 900, 800], areaM2: 24, spaceId: s.id, displayName: s.displayName })) as ActiveFloorplan['rooms'],
+      rooms: spaces.map((s, i) => ({
+        floorCode: 'L3',
+        code: s.code,
+        label: `合成 ${s.code}`,
+        status: 'ok',
+        mergedWith: [],
+        closeMm: 600,
+        polygon: box(400 + i * 900, 600),
+        labelAt: [700 + i * 900, 800],
+        areaM2: 24,
+        spaceId: s.id,
+        displayName: s.displayName,
+      })) as ActiveFloorplan['rooms'],
     };
     const person = (p: Partial<LocationPerson>): LocationPerson => ({
-      kind: 'guest', id: 1, tagCode: 'A001', techNo: null, techName: null, floorId: 3, floorCode: 'L3', floorName: '三层', zoneId: 11, zoneName: '合成SPA区',
-      spaceId: null, spaceCode: null, spaceName: null, since: now, lastAt: now, lastSource: 'checkin', ...p,
+      kind: 'guest',
+      id: 1,
+      tagCode: 'A001',
+      techNo: null,
+      techName: null,
+      floorId: 3,
+      floorCode: 'L3',
+      floorName: '三层',
+      zoneId: 11,
+      zoneName: '合成SPA区',
+      spaceId: null,
+      spaceCode: null,
+      spaceName: null,
+      since: now,
+      lastAt: now,
+      lastSource: 'checkin',
+      ...p,
     });
     const atV312 = { zoneId: 12, zoneName: '合成足浴区', spaceId: 3, spaceCode: 'V312', spaceName: '合成足浴', lastSource: 'session_start' as const };
     const located: LocationsCurrent = {
@@ -319,7 +368,25 @@ test.describe('v0.7.17 第一级实时位置', () => {
     const trackData: LocationTrackData = {
       subject: { kind: 'guest', visitId: 1, visitNo: 'LF0001', tagCode: 'A001', inStore: true, checkedInAt: now },
       current: located.people[0]!,
-      tracks: [{ id: 1, floorId: 3, floorCode: 'L3', floorName: '三层', zoneId: 11, zoneName: '合成SPA区', spaceId: null, spaceCode: null, spaceName: null, enteredAt: now, lastAt: now, leftAt: null, eventCount: 1, enterSource: 'checkin', endSource: null }],
+      tracks: [
+        {
+          id: 1,
+          floorId: 3,
+          floorCode: 'L3',
+          floorName: '三层',
+          zoneId: 11,
+          zoneName: '合成SPA区',
+          spaceId: null,
+          spaceCode: null,
+          spaceName: null,
+          enteredAt: now,
+          lastAt: now,
+          leftAt: null,
+          eventCount: 1,
+          enterSource: 'checkin',
+          endSource: null,
+        },
+      ],
       events: [],
       eventsTruncated: false,
     };

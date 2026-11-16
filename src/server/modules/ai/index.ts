@@ -264,7 +264,13 @@ async function produceSummary(
   try {
     const r = await provider.write({ system: SUMMARY_SYSTEM, prompt: summaryPrompt(facts) });
     text = r.text.trim().slice(0, 2000);
-    await recordCall(sql, { ...base, request: { storeId: target.storeId, date: target.date, factsHash: hash }, ok: true, result: { ...r.usage, chars: text.length }, durationMs: Date.now() - started });
+    await recordCall(sql, {
+      ...base,
+      request: { storeId: target.storeId, date: target.date, factsHash: hash },
+      ok: true,
+      result: { ...r.usage, chars: text.length },
+      durationMs: Date.now() - started,
+    });
     const done = await sql`
       UPDATE ai_summaries SET status = 'done', text = ${text || '（模型没有写出内容）'}, model = ${provider.model}, input_tokens = ${r.usage.inputTokens},
         output_tokens = ${r.usage.outputTokens}, error = NULL, lease_until = NULL, updated_at = now()
@@ -384,7 +390,13 @@ async function answerQuestion(deps: Deps, id: number, a: { actor: Actor; storeId
       const question = aiMaskText(guard.mask(a.question));
       const r = await a.provider.ask({ system: questionSystem(today, storeName, stores.length > 1), question, tools, maxIterations: AI_MAX_TOOL_ROUNDS });
       const answer = r.text.trim().slice(0, 4000) || '（模型没有写出答案）';
-      await recordCall(sql, { ...base, request: { tools: r.calls.map((c) => c.name) }, ok: true, result: { ...r.usage, rounds: r.calls.length, chars: answer.length }, durationMs: Date.now() - started });
+      await recordCall(sql, {
+        ...base,
+        request: { tools: r.calls.map((c) => c.name) },
+        ok: true,
+        result: { ...r.usage, rounds: r.calls.length, chars: answer.length },
+        durationMs: Date.now() - started,
+      });
       await sql`
         UPDATE ai_questions SET status = 'done', answer = ${answer}, tool_calls = ${sql.json(r.calls as never)}, model = ${a.provider.model},
           input_tokens = ${r.usage.inputTokens}, output_tokens = ${r.usage.outputTokens}, finished_at = now()
@@ -513,10 +525,7 @@ export function registerAiRoutes(app: FastifyInstance, deps: Deps) {
     const hits = (await memberTextGuard(sql)).find(body.question);
     if (hits.length || aiMaskText(body.question) !== body.question) {
       const seen = [...new Set(hits.map((h) => h.masked))].slice(0, 5);
-      throw unprocessable(
-        'AI_MEMBER_INFO',
-        `问数只看汇总的经营数据、查不了某一位会员：请把问题里的会员姓名、会员号、手机号、证件号去掉再问${seen.length ? `（认出来的：${seen.join('、')}）` : ''}`,
-      );
+      throw unprocessable('AI_MEMBER_INFO', `问数只看汇总的经营数据、查不了某一位会员：请把问题里的会员姓名、会员号、手机号、证件号去掉再问${seen.length ? `（认出来的：${seen.join('、')}）` : ''}`);
     }
     const storeId = currentStoreId();
     let id: number | null = null;
@@ -573,7 +582,13 @@ export function registerAiRoutes(app: FastifyInstance, deps: Deps) {
     try {
       const r = await provider.structured({ system: HINTS_SYSTEM, prompt: `合同草稿：\n${JSON.stringify(material)}`, schema: HintsSchema });
       const hints = r.value.hints.slice(0, 10).map((h) => ({ kind: h.kind, title: h.title.trim().slice(0, 60), detail: h.detail.trim().slice(0, 400) }));
-      await recordCall(sql, { ...base, request: { category: input.category, chars: json.length + (input.body?.length ?? 0) }, ok: true, result: { ...r.usage, hints: hints.length }, durationMs: Date.now() - started });
+      await recordCall(sql, {
+        ...base,
+        request: { category: input.category, chars: json.length + (input.body?.length ?? 0) },
+        ok: true,
+        result: { ...r.usage, hints: hints.length },
+        durationMs: Date.now() - started,
+      });
       return { hints };
     } catch (e) {
       const why = e instanceof AiRefused ? `这份合同 AI 看不了（${e.message}）` : message(e);

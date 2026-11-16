@@ -38,13 +38,7 @@ export function ActivityRow({
   const reversed = row.entryType === 'consume' && row.consumptionStatus === 'reversed';
   const crossDay = row.entryType === 'reversal' && row.relatedBusinessDate && row.relatedBusinessDate !== row.businessDate;
   return (
-    <div
-      className={cn(
-        'group flex items-start gap-3 px-3 py-3 transition-colors',
-        onOpen && 'cursor-pointer hover:bg-paper-2/70',
-      )}
-      onClick={onOpen ? () => onOpen(row) : undefined}
-    >
+    <div className={cn('group flex items-start gap-3 px-3 py-3 transition-colors', onOpen && 'cursor-pointer hover:bg-paper-2/70')} onClick={onOpen ? () => onOpen(row) : undefined}>
       <span className={cn('mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full', meta.tone)}>
         <Icon className="size-[18px]" />
       </span>
@@ -115,10 +109,7 @@ function DeltaLine({ label, cents, struck, bonus, emphasize }: { label: string; 
       <Money
         cents={cents}
         signed
-        className={cn(
-          emphasize ? 'text-[15px] font-bold' : 'text-[13px] font-semibold',
-          struck ? 'struck text-ink-4' : bonus ? 'text-yuzu-deep' : cents < 0 ? 'text-ink' : 'text-pine',
-        )}
+        className={cn(emphasize ? 'text-[15px] font-bold' : 'text-[13px] font-semibold', struck ? 'struck text-ink-4' : bonus ? 'text-yuzu-deep' : cents < 0 ? 'text-ink' : 'text-pine')}
       />
     </span>
   );

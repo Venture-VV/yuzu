@@ -76,9 +76,7 @@ describe('多人同时操作', () => {
     const member = await createMember(ctx, '并发扣款', '19900003101');
     await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(member.id, 10000));
     const other = await login(ctx.app, 'owner');
-    const results = await Promise.all(
-      Array.from({ length: 10 }, (_, i) => api(ctx.app, i % 2 ? ctx.clerk : other, 'POST', '/api/consumptions', consumeBody(member.id, 3000))),
-    );
+    const results = await Promise.all(Array.from({ length: 10 }, (_, i) => api(ctx.app, i % 2 ? ctx.clerk : other, 'POST', '/api/consumptions', consumeBody(member.id, 3000))));
     const ok = results.filter((r) => r.status === 200);
     const rejected = results.filter((r) => r.status === 422);
     expect(ok).toHaveLength(3);
@@ -96,9 +94,7 @@ describe('多人同时操作', () => {
     const c = await api(ctx.app, ctx.clerk, 'POST', '/api/consumptions', consumeBody(member.id, 4000));
     const owner2 = await login(ctx.app, 'owner');
     const results = await Promise.all(
-      [ctx.owner, owner2, ctx.owner].map((cookie) =>
-        api(ctx.app, cookie, 'POST', `/api/consumptions/${c.body.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '重复登记' }),
-      ),
+      [ctx.owner, owner2, ctx.owner].map((cookie) => api(ctx.app, cookie, 'POST', `/api/consumptions/${c.body.consumption.id}/reverse`, { idempotencyKey: randomUUID(), reason: '重复登记' })),
     );
     expect(results.filter((r) => r.status === 200)).toHaveLength(1);
     expect(results.filter((r) => r.status === 409 && r.body.error.code === 'ALREADY_REVERSED')).toHaveLength(2);

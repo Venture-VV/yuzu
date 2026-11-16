@@ -117,7 +117,9 @@ export async function runAutoReplenish(deps: Pick<Deps, 'sql' | 'config'>, now: 
 }
 
 export async function autoReplenishRuns(db: Db, limit = 7): Promise<AutoReplenishRun[]> {
-  const rows = await db<{ runDate: string; status: AutoReplenishRun['status']; poIds: number[]; lineCount: number; skippedNoSupplier: number; error: string | null; createdAt: string; poNos: string[] | null }[]>`
+  const rows = await db<
+    { runDate: string; status: AutoReplenishRun['status']; poIds: number[]; lineCount: number; skippedNoSupplier: number; error: string | null; createdAt: string; poNos: string[] | null }[]
+  >`
     SELECT r.run_date::text AS run_date, r.status, r.po_ids, r.line_count, r.skipped_no_supplier, r.error, r.created_at,
            (SELECT array_agg(p.doc_no ORDER BY p.id) FROM purchase_orders p WHERE p.id = ANY (r.po_ids)) AS po_nos
     FROM replenish_runs r ORDER BY r.run_date DESC LIMIT ${limit}`;

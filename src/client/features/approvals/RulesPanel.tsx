@@ -308,7 +308,13 @@ function RuleDialog({ rule, open, onClose }: { rule: ApprovalRuleView | null; op
             </div>
           ))}
           {steps.length < APPROVAL_MAX_LEVELS && (
-            <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setSteps((all) => [...all, { kind: 'group', group: 'owner' }])} data-testid="approval-rule-add-step">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Plus className="size-4" />}
+              onClick={() => setSteps((all) => [...all, { kind: 'group', group: 'owner' }])}
+              data-testid="approval-rule-add-step"
+            >
               加一级
             </Button>
           )}

@@ -103,7 +103,16 @@ describe('事实包与工具', () => {
   it('工具：按权限给；参数校验（不晚于今天、最多 92 天）；返回值里没有会员个人信息', async () => {
     const base = { sql: ctx.sql, today, timeZone: ctx.config.timezone, erp: new Set(['inventory', 'payments'] as const), stores: [{ id: 1, code: 'HQ', name: '本店' }], currentStoreId: 1 };
     const all = aiTools({ ...base, can: () => true });
-    expect(all.map((t) => t.name).sort()).toEqual(['bookings_overview', 'daily_close', 'dept_items', 'inventory_alerts', 'member_overview', 'payables_week', 'revenue_by_day', 'technician_performance']);
+    expect(all.map((t) => t.name).sort()).toEqual([
+      'bookings_overview',
+      'daily_close',
+      'dept_items',
+      'inventory_alerts',
+      'member_overview',
+      'payables_week',
+      'revenue_by_day',
+      'technician_performance',
+    ]);
     // 只有经营总览权限的：看不到会员、技师、库存、付款
     const exec = aiTools({ ...base, can: (p) => p === 'report.executive' });
     expect(exec.map((t) => t.name).sort()).toEqual(['bookings_overview', 'daily_close', 'dept_items', 'revenue_by_day']);
@@ -407,7 +416,15 @@ describe('DeepSeek 适配器（假的 fetch，8.1.1，MD8）', () => {
     const req = f.reqs[0]!;
     expect(req.url).toBe('https://api.deepseek.com/chat/completions');
     expect(req.headers.authorization).toBe('Bearer sk-test-key');
-    expect(req.body).toMatchObject({ model: 'deepseek-v4-pro', thinking: { type: 'disabled' }, stream: false, messages: [{ role: 'system', content: '系统' }, { role: 'user', content: '材料' }] });
+    expect(req.body).toMatchObject({
+      model: 'deepseek-v4-pro',
+      thinking: { type: 'disabled' },
+      stream: false,
+      messages: [
+        { role: 'system', content: '系统' },
+        { role: 'user', content: '材料' },
+      ],
+    });
     for (const k of ['tools', 'response_format', 'betas', 'fallbacks', 'output_config', 'user_id', 'reasoning_effort']) expect(req.body).not.toHaveProperty(k);
     // 地址（末尾的 / 去掉）与模型可以换
     const g = fakeFetch([answer({ content: '好' })]);
@@ -422,7 +439,10 @@ describe('DeepSeek 适配器（假的 fetch，8.1.1，MD8）', () => {
     const tool: AiTool = {
       name: 'revenue',
       description: '营业额：某段日期的净营业额',
-      schema: z.object({ from: z.iso.date(), to: z.iso.date() }).strict().refine((v) => v.from <= v.to, { message: '开始不能晚于结束' }) as never,
+      schema: z
+        .object({ from: z.iso.date(), to: z.iso.date() })
+        .strict()
+        .refine((v) => v.from <= v.to, { message: '开始不能晚于结束' }) as never,
       example: { from: '2026-11-01', to: '2026-11-02' },
       run: async (input) => (ran++, { net: '¥1,234.00', input }),
     };
@@ -455,7 +475,10 @@ describe('DeepSeek 适配器（假的 fetch，8.1.1，MD8）', () => {
     const tool: AiTool = {
       name: 'revenue',
       description: '营业额',
-      schema: z.object({ from: z.iso.date(), to: z.iso.date() }).strict().refine((v) => v.from <= v.to, { message: '开始不能晚于结束' }) as never,
+      schema: z
+        .object({ from: z.iso.date(), to: z.iso.date() })
+        .strict()
+        .refine((v) => v.from <= v.to, { message: '开始不能晚于结束' }) as never,
       example: {},
       run: async () => (ran++, {}),
     };
@@ -492,7 +515,18 @@ describe('DeepSeek 适配器（假的 fetch，8.1.1，MD8）', () => {
   });
 
   it('问数的真实工具都转得成 JSON Schema（交给模型的参数格式）', () => {
-    const tools = aiTools({ sql: ctx.sql, today, timeZone: ctx.config.timezone, can: () => true, erp: new Set(['inventory', 'payments'] as never), stores: [{ id: 1, code: 'HQ', name: '本店' }, { id: 2, code: 'B2', name: '二店' }], currentStoreId: 1 });
+    const tools = aiTools({
+      sql: ctx.sql,
+      today,
+      timeZone: ctx.config.timezone,
+      can: () => true,
+      erp: new Set(['inventory', 'payments'] as never),
+      stores: [
+        { id: 1, code: 'HQ', name: '本店' },
+        { id: 2, code: 'B2', name: '二店' },
+      ],
+      currentStoreId: 1,
+    });
     expect(tools.length).toBeGreaterThan(3);
     for (const t of tools) {
       const js = jsonSchemaOf(t.schema);
@@ -523,7 +557,9 @@ describe('DeepSeek 适配器（假的 fetch，8.1.1，MD8）', () => {
   });
 
   it('错误翻成看得懂的话：密钥不对、余额用完、太忙会再试、对方出错、连不上；审核拦下算拒答；错误里像密钥的打掉', async () => {
-    const fail = (status: number, body: unknown = {}) => (): Reply => ({ status, body });
+    const fail =
+      (status: number, body: unknown = {}) =>
+      (): Reply => ({ status, body });
     const err = async (replies: ((req: Req) => Reply)[]) => {
       const f = fakeFetch(replies);
       const e = await provider(f)

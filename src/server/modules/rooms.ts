@@ -79,7 +79,12 @@ async function roomClock(db: Db, deps: Deps) {
   return { timeZone: deps.config.timezone, startHour: (await loadSettings(db)).businessDayStartHour };
 }
 
-const minuteOfDay = (label: string) => z.number(`${label}不正确`).int(`${label}不正确`).min(0, `${label}不正确`).max(24 * 60 - 1, `${label}不正确`);
+const minuteOfDay = (label: string) =>
+  z
+    .number(`${label}不正确`)
+    .int(`${label}不正确`)
+    .min(0, `${label}不正确`)
+    .max(24 * 60 - 1, `${label}不正确`);
 const RulesInput = z
   .object({
     enabled: z.boolean(),
@@ -291,9 +296,7 @@ async function saveRoom(deps: Deps, id: number | null, raw: unknown, ctx: OpCont
       }
       if (nextSpace !== null) {
         // 挂着空间：房号就是空间编码（不能另改）
-        const space = relink
-          ? await lockLinkableSpace(tx, nextSpace, id)
-          : (await tx<{ code: string }[]>`SELECT code FROM spaces WHERE id = ${nextSpace} FOR SHARE`)[0]!;
+        const space = relink ? await lockLinkableSpace(tx, nextSpace, id) : (await tx<{ code: string }[]>`SELECT code FROM spaces WHERE id = ${nextSpace} FOR SHARE`)[0]!;
         roomNo = space.code;
         if (relink) linkNote = cur.spaceId === null ? `，挂接空间 ${space.code}` : `，换挂空间 ${space.code}（${r.linkReason}）`;
       } else {
@@ -377,8 +380,7 @@ async function depositBalances(db: Db, stayIds: number[]): Promise<Map<number, M
   return map;
 }
 
-const byMethodList = (m: Map<PaymentMethod, number> | undefined) =>
-  PAYMENT_METHODS.filter((k) => (m?.get(k) ?? 0) !== 0).map((k) => ({ method: k, balance: m!.get(k)! }));
+const byMethodList = (m: Map<PaymentMethod, number> | undefined) => PAYMENT_METHODS.filter((k) => (m?.get(k) ?? 0) !== 0).map((k) => ({ method: k, balance: m!.get(k)! }));
 
 export async function getStay(db: Db, id: number): Promise<StayDetail> {
   const [s] = await db<StayRow[]>`${staySelect(db)} WHERE s.id = ${id} AND s.store_id = ${currentStoreId()}`;
@@ -423,8 +425,7 @@ async function auditState(db: Db, deps: Deps, now: Date): Promise<RoomAuditState
   };
 }
 
-const boardStatus = (housekeeping: string, occupied: boolean): RoomBoardStatus =>
-  occupied ? 'occupied' : housekeeping === 'clean' ? 'vacant' : (housekeeping as RoomBoardStatus);
+const boardStatus = (housekeeping: string, occupied: boolean): RoomBoardStatus => (occupied ? 'occupied' : housekeeping === 'clean' ? 'vacant' : (housekeeping as RoomBoardStatus));
 
 async function roomStatusCounts(db: Db): Promise<Record<RoomBoardStatus, number>> {
   const rows = await db<{ housekeeping: string; occupied: boolean }[]>`
@@ -553,7 +554,10 @@ async function lockStays(tx: Tx, ids: number[], lockedRooms?: Map<number, number
   if (!roomOf) {
     const peek = await tx<{ id: number; roomId: number }[]>`SELECT id, room_id FROM room_stays WHERE id IN ${tx(unique)} AND store_id = ${currentStoreId()}`;
     if (peek.length !== unique.length) throw notFound('入住单不存在，请刷新后重试');
-    await lockRooms(tx, peek.map((p) => p.roomId));
+    await lockRooms(
+      tx,
+      peek.map((p) => p.roomId),
+    );
     roomOf = new Map(peek.map((p) => [p.id, p.roomId]));
   }
   const rows = await tx<LockedStay[]>`
@@ -663,7 +667,12 @@ export const CheckinInput = z.object({
   expectedRate: positiveCents('房价'),
   deposit: DepositInput.nullish().transform((v) => v ?? null),
   /** 预约到店入住（8.0.8，A04）；不带时与升级前的请求完全相同（幂等摘要不变） */
-  bookingId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
+  bookingId: z
+    .number()
+    .int()
+    .positive()
+    .nullish()
+    .transform((v) => v ?? undefined),
 });
 
 /**
@@ -1100,11 +1109,9 @@ export async function closeStay(deps: Deps, id: number, raw: unknown, ctx: OpCon
     const methods = new Set([...balances.keys(), ...expected.keys()]);
     if ([...methods].some((m) => (balances.get(m) ?? 0) !== (expected.get(m) ?? 0))) {
       const now = byMethodList(balances).map((x) => ({ method: x.method, amount: x.balance }));
-      throw conflict(
-        'DEPOSIT_CHANGED',
-        `押金刚刚有变动（其他终端刚收或退过），现在${now.length ? `是 ${describeMethods(now)}` : '没有押金'}，请核对后重新确认退房`,
-        { depositByMethod: byMethodList(balances) },
-      );
+      throw conflict('DEPOSIT_CHANGED', `押金刚刚有变动（其他终端刚收或退过），现在${now.length ? `是 ${describeMethods(now)}` : '没有押金'}，请核对后重新确认退房`, {
+        depositByMethod: byMethodList(balances),
+      });
     }
     const date = await businessDate(tx, deps, at);
     const [room] = await tx<{ roomNo: string }[]>`SELECT room_no FROM rooms WHERE id = ${s.roomId}`;
@@ -1134,7 +1141,12 @@ export async function closeStay(deps: Deps, id: number, raw: unknown, ctx: OpCon
 const HousekeepingInput = z.object({
   status: z.enum(HOUSEKEEPING_STATES, '请选择房态'),
   /** 备注（8.0.8 起改任何房态都能写；改「维修」必须写原因） */
-  note: z.string().trim().max(MAX_HOUSEKEEPING_NOTE, `备注最多 ${MAX_HOUSEKEEPING_NOTE} 字`).nullish().transform((v) => v || null),
+  note: z
+    .string()
+    .trim()
+    .max(MAX_HOUSEKEEPING_NOTE, `备注最多 ${MAX_HOUSEKEEPING_NOTE} 字`)
+    .nullish()
+    .transform((v) => v || null),
   /** 改之前看到的打扫状态（8.0.8，B04）：带了就核对，房态刚被别人改过拒绝（HOUSEKEEPING_CHANGED），请刷新 */
   expectedFrom: z.enum(HOUSEKEEPING_STATES).optional(),
 });
@@ -1188,7 +1200,10 @@ export async function runNightAudit(deps: Deps, ctx: OpContext): Promise<RoomAud
       throw unprocessable('AUDIT_TOO_EARLY', `今天的夜审要在 ${hhmm(rules.lateFullMinute)} 以后做（这时还在住的客人要付今晚的房费）`);
     }
     const open = await tx<{ id: number }[]>`SELECT id FROM room_stays WHERE status = 'open' AND kind = 'daily' AND store_id = ${currentStoreId()} ORDER BY id`;
-    const stays = await lockStays(tx, open.map((s) => s.id));
+    const stays = await lockStays(
+      tx,
+      open.map((s) => s.id),
+    );
     const postKey = randomUUID();
     const posted: RoomAuditReport['posted'] = [];
     for (const s of [...stays.values()].sort((a, b) => a.id - b.id)) {
@@ -1258,9 +1273,7 @@ export function registerRoomRoutes(app: FastifyInstance, deps: Deps) {
   const readGuard = guardAny('room.operate', 'room.housekeep', 'frontdesk.checkout');
   app.get('/api/rooms', { preHandler: readGuard }, async () => roomsBoard(deps));
   app.get('/api/rooms/stays/:id', { preHandler: guardAny('room.operate', 'frontdesk.checkout') }, async (req) => getStay(sql, parse(idParam, req.params).id));
-  app.get('/api/rooms/stays/:id/checkout-preview', { preHandler: guardAny('room.operate', 'frontdesk.checkout') }, async (req) =>
-    previewStayCheckout(deps, parse(idParam, req.params).id),
-  );
+  app.get('/api/rooms/stays/:id/checkout-preview', { preHandler: guardAny('room.operate', 'frontdesk.checkout') }, async (req) => previewStayCheckout(deps, parse(idParam, req.params).id));
 
   // 入住、续住、改登记、换房、押金、退房、撤销入住、夜审
   const opGuard = guard('room.operate');
@@ -1272,7 +1285,9 @@ export function registerRoomRoutes(app: FastifyInstance, deps: Deps) {
     if (!room) throw notFound('房间不存在');
     const tag = q.tag ? normalizeTagCode(q.tag) : '';
     const [visit] = tag
-      ? await deps.sql<{ memberId: number | null }[]>`SELECT v.member_id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${tag} AND v.status = 'open' AND t.store_id = ${currentStoreId()}`
+      ? await deps.sql<
+          { memberId: number | null }[]
+        >`SELECT v.member_id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${tag} AND v.status = 'open' AND t.store_id = ${currentStoreId()}`
       : [];
     return roomQuote(deps.sql, room.roomTypeId, room.price, visit?.memberId ?? null, await businessDate(deps.sql, deps, new Date()));
   });

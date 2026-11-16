@@ -1,8 +1,10 @@
 // 柚子饭堂的离线外壳（docs/CANTEEN.md 第 3 节）：只缓存页面外壳与静态资源，从不缓存 /api/*；饭点提醒的推送也在这里（第 19 节，文件末尾）。
-// 打开页面：先走网络，断网时用上次的外壳（饭卡码在手机上离线生成，没网也能亮码）。
+// 打开页面：先走网络，断网时用上次的外壳（饭卡码在手机上离线生成，没网也能亮码）；网络很慢、4 秒还没回来时也先用上次的外壳，
+// 网络回来以后照样更新缓存（8.1.3，docs/RESILIENCE_V813.md 第 2 节 Workbox 一行：「网络优先、超时用缓存」）。
 // 静态资源带内容摘要（/assets/…），缓存优先；页面每次打开把当前用到的资源告诉这里，旧的清掉。
 const CACHE = 'yuzu-canteen-v1';
 const SHELL = ['/', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/apple-touch-icon.png'];
+const NAV_TIMEOUT_MS = 4000;
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -23,16 +25,21 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
   if (req.mode === 'navigate') {
+    const network = fetch(req).then((res) => {
+      if (res.ok) {
+        const copy = res.clone();
+        return caches.open(CACHE).then((c) => c.put('/', copy)).then(() => res, () => res);
+      }
+      return res;
+    });
+    // 先用上次的外壳回了页面，网络这一份也要等它回来、存进缓存
+    event.waitUntil(network.then(() => undefined, () => undefined));
     event.respondWith(
-      fetch(req)
-        .then((res) => {
-          if (res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put('/', copy));
-          }
-          return res;
-        })
-        .catch(async () => (await caches.match('/')) || Response.error()),
+      caches.match('/').then((cached) => {
+        if (!cached) return network.catch(() => Response.error());
+        const slow = new Promise((resolve) => setTimeout(() => resolve(cached), NAV_TIMEOUT_MS));
+        return Promise.race([network.catch(() => cached), slow]);
+      }),
     );
     return;
   }

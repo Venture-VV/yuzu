@@ -23,22 +23,13 @@ import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { cn, formatDate, formatDateTime, uuid } from '../../lib/utils';
+import { cn, formatDate, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
-import {
-  COUPON_STATE_ORDER,
-  COUPON_STATE_TONES,
-  couponKeys,
-  couponRangeText,
-  templateExpired,
-  templateValidityText,
-  useCouponTemplates,
-  useMemberCoupons,
-} from '../coupons/queries';
+import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
+import { COUPON_STATE_ORDER, COUPON_STATE_TONES, couponKeys, couponRangeText, templateExpired, templateValidityText, useCouponTemplates, useMemberCoupons } from '../coupons/queries';
 
 /** 赠金明细：每笔赠送的额度——可用、已用完、已过期 */
 export function BonusLotsCard({ member }: { member: MemberDetail }) {
@@ -381,7 +372,14 @@ function IssueCouponDialog({ open, member, onClose }: { open: boolean; member: M
           <Skeleton className="h-11" />
         ) : (
           <Field label="券" htmlFor="coupon-issue-template" hint={choices.length === 0 ? '还没有启用的券模板，请店主或店总在后台「券」里建' : undefined}>
-            <Select id="coupon-issue-template" value={templateId ?? ''} onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : null)} disabled={busy} className="h-11" data-testid="coupon-issue-template">
+            <Select
+              id="coupon-issue-template"
+              value={templateId ?? ''}
+              onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : null)}
+              disabled={busy}
+              className="h-11"
+              data-testid="coupon-issue-template"
+            >
               <option value="">选择券</option>
               {choices.map((t) => {
                 const why = blocked(t);
@@ -397,8 +395,7 @@ function IssueCouponDialog({ open, member, onClose }: { open: boolean; member: M
         )}
         {template && (
           <p className="rounded-md bg-paper-2 px-3 py-2 text-[12.5px] text-ink-2" data-testid="coupon-issue-preview">
-            {template.summary} ·{' '}
-            {days !== null ? `今天发：有效期 ${couponRangeText(session.today, shiftDate(session.today, days - 1))}` : templateValidityText(template)}
+            {template.summary} · {days !== null ? `今天发：有效期 ${couponRangeText(session.today, shiftDate(session.today, days - 1))}` : templateValidityText(template)}
           </p>
         )}
         <Field label="张数" htmlFor="coupon-issue-quantity" hint={`一次最多 ${MAX_MANUAL_COUPONS} 张`}>

@@ -262,7 +262,11 @@ function CreateDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
           <Field label="备注">
             <Input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} />
           </Field>
-          {error && <p className="text-[13.5px] text-clay" role="alert">{error}</p>}
+          {error && (
+            <p className="text-[13.5px] text-clay" role="alert">
+              {error}
+            </p>
+          )}
         </div>
       )}
     </Dialog>
@@ -340,7 +344,11 @@ function ReceiveDialog({ transfer, onClose, onDone }: { transfer: StockTransfer;
             )}
           </div>
         ))}
-        {error && <p className="text-[13.5px] text-clay" role="alert">{error}</p>}
+        {error && (
+          <p className="text-[13.5px] text-clay" role="alert">
+            {error}
+          </p>
+        )}
       </div>
     </Dialog>
   );
@@ -385,7 +393,11 @@ function CancelDialog({ transfer, onClose, onDone }: { transfer: StockTransfer; 
       <Field label="原因">
         <Input value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} data-testid="transfer-cancel-reason" />
       </Field>
-      {error && <p className="mt-3 text-[13.5px] text-clay" role="alert">{error}</p>}
+      {error && (
+        <p className="mt-3 text-[13.5px] text-clay" role="alert">
+          {error}
+        </p>
+      )}
     </Dialog>
   );
 }

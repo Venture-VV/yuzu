@@ -6,13 +6,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import {
-  PETTY_JOURNAL_LABELS,
-  type PettyAccountRow,
-  type PettyJournal,
-  type PettyJournalEntry,
-  type PettyJournalKind,
-} from '@shared/expenses';
+import { PETTY_JOURNAL_LABELS, type PettyAccountRow, type PettyJournal, type PettyJournalEntry, type PettyJournalKind } from '@shared/expenses';
 import { formatAmount } from '@shared/money';
 import { PAY_METHOD_LABELS, type PayMethod } from '@shared/purchasing';
 import { formatQty } from '@shared/quantity';
@@ -76,7 +70,9 @@ export async function listPettyAccounts(db: Db, timezone: string): Promise<Petty
   const today = todayIn(timezone);
   const monthStart = `${today.slice(0, 8)}01`;
   const advances = (await advanceRows(db, {})).map((r) => toAdvanceSummary(r, today, rules.overdueDays));
-  const depts = await db<{ id: number; name: string; active: boolean; custodianId: number | null; custodianName: string | null; limitCents: number | null; note: string | null; version: number | null }[]>`
+  const depts = await db<
+    { id: number; name: string; active: boolean; custodianId: number | null; custodianName: string | null; limitCents: number | null; note: string | null; version: number | null }[]
+  >`
     SELECT d.id, d.name, d.active, pa.custodian_id, cs.display_name AS custodian_name, pa.limit_cents, pa.note, pa.version
     FROM departments d LEFT JOIN petty_accounts pa ON pa.department_id = d.id LEFT JOIN staff cs ON cs.id = pa.custodian_id
     ORDER BY d.active DESC, d.sort_order, d.id`;

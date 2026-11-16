@@ -76,7 +76,14 @@ export async function addReceiptAttachment(deps: Deps, docId: number, raw: unkno
     await tx`
       INSERT INTO inv_doc_attachments (doc_id, image_id, file_id, name, uploaded_by)
       VALUES (${docId}, ${stored.imageId}, ${stored.fileId}, ${name}, ${actor.id})`;
-    await writeAudit(tx, { staffId: actor.id, action: 'receipt_attachment', targetType: 'inv_doc', targetId: docId, detail: { docNo: d.docNo, name, imageId: stored.imageId, fileId: stored.fileId }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'receipt_attachment',
+      targetType: 'inv_doc',
+      targetId: docId,
+      detail: { docNo: d.docNo, name, imageId: stored.imageId, fileId: stored.fileId },
+      ip,
+    });
   });
   return (await receiptAttachments(deps.sql, [docId])).get(docId) ?? [];
 }

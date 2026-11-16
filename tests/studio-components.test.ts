@@ -18,22 +18,31 @@ import {
   type StudioInstanceNode,
   type StudioNode,
 } from '../src/shared/studio';
-import {
-  componentScreen,
-  deleteComponent,
-  detachInstance,
-  findNode,
-  insertNode,
-  makeComponentFrom,
-  makeInstance,
-  renameComponent,
-  screenOf,
-  updateNode,
-} from '../src/client/features/studio/model';
+import { componentScreen, deleteComponent, detachInstance, findNode, insertNode, makeComponentFrom, makeInstance, renameComponent, screenOf, updateNode } from '../src/client/features/studio/model';
 
 const base = { name: '', rotate: 0, opacity: 1, hidden: false, locked: false };
 const text = (id: string, zh: string, x = 0, y = 0): StudioNode =>
-  ({ type: 'text', id, ...base, x, y, w: 100, h: 20, text: { zh, en: '' }, font: 'zh', size: 14, weight: 400, color: '$ink', align: 'left', valign: 'top', lineHeight: 1.4, letterSpacing: 0, italic: false, underline: false, fill: null }) as StudioNode;
+  ({
+    type: 'text',
+    id,
+    ...base,
+    x,
+    y,
+    w: 100,
+    h: 20,
+    text: { zh, en: '' },
+    font: 'zh',
+    size: 14,
+    weight: 400,
+    color: '$ink',
+    align: 'left',
+    valign: 'top',
+    lineHeight: 1.4,
+    letterSpacing: 0,
+    italic: false,
+    underline: false,
+    fill: null,
+  }) as StudioNode;
 const frame = (id: string, children: StudioNode[], more: Record<string, unknown> = {}): StudioNode =>
   ({ type: 'frame', id, ...base, x: 0, y: 0, w: 160, h: 90, fill: '$surface', stroke: null, strokeWidth: 0, radius: 12, shadow: 'none', clip: false, children, ...more }) as StudioNode;
 const inst = (id: string, component: string, more: Partial<StudioInstanceNode> = {}): StudioNode => ({ type: 'instance', id, ...base, x: 10, y: 20, w: 200, h: 100, component, ...more });

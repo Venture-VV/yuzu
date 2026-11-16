@@ -69,11 +69,12 @@ export function BookingsPage() {
     const b = board.data.bookings.find((x) => x.id === focus);
     if (b) document.getElementById(`booking-${b.id}`)?.scrollIntoView({ block: 'center' });
   }, [focus, board.data]);
-  const setDate = (d: string) => setParams((p) => {
-    p.set('d', d);
-    p.delete('b');
-    return p;
-  });
+  const setDate = (d: string) =>
+    setParams((p) => {
+      p.set('d', d);
+      p.delete('b');
+      return p;
+    });
   // 8.0.21 OTA：渠道订单（导入渠道后台导出的订单表，建客房预约）
   const view = params.get('view') === 'ota' ? 'ota' : 'board';
   const setView = (v: 'board' | 'ota') =>
@@ -182,8 +183,7 @@ function BookingRow({ b, focused, onAction }: { b: BookingDetail; focused: boole
       </span>
       <Badge tone={STATUS_TONE[b.status]}>{BOOKING_STATUS_LABELS[b.status]}</Badge>
       <span className="min-w-0 flex-1 truncate">
-        <span className="font-semibold">{what}</span> · {who} · {b.guests} 人
-        {b.kind === 'room' && b.holdUntil && <span className="text-ink-3"> · 保留到 {formatTime(b.holdUntil)}</span>}
+        <span className="font-semibold">{what}</span> · {who} · {b.guests} 人{b.kind === 'room' && b.holdUntil && <span className="text-ink-3"> · 保留到 {formatTime(b.holdUntil)}</span>}
         {b.note && <span className="text-ink-3"> · {b.note}</span>}
       </span>
       <span className="text-[12px] text-ink-3">
@@ -464,13 +464,21 @@ function CreateBookingDialog({
       startsAt,
       note: note.trim(),
     };
-    const b = await op.submit((key) => ({ url: '/api/bookings', body: { clientKey: key, ...body }, tagCodes: ['预约'], summary: `新建${BOOKING_KIND_LABELS[kind]}预约 ${describeDate(day).md} ${formatTime(startsAt!)}`, amount: null }));
+    const b = await op.submit((key) => ({
+      url: '/api/bookings',
+      body: { clientKey: key, ...body },
+      tagCodes: ['预约'],
+      summary: `新建${BOOKING_KIND_LABELS[kind]}预约 ${describeDate(day).md} ${formatTime(startsAt!)}`,
+      amount: null,
+    }));
     if (b) finish(b);
   };
-  const pick = <T,>(set: (v: T) => void) => (v: T) => {
-    set(v);
-    setStartsAt(null);
-  };
+  const pick =
+    <T,>(set: (v: T) => void) =>
+    (v: T) => {
+      set(v);
+      setStartsAt(null);
+    };
   const setDay = pick(setDayRaw);
   const dayText = describeDate(day);
   const dayOffset = day === today ? '今天' : day === shiftDate(today, 1) ? '明天' : day === shiftDate(today, 2) ? '后天' : '';
@@ -549,7 +557,16 @@ function CreateBookingDialog({
           </div>
         </div>
         <Segmented value={kind} onChange={pick(setKind)} ariaLabel="预约什么" options={(['technician', 'space', 'room'] as const).map((k) => ({ value: k, label: BOOKING_KIND_LABELS[k] }))} />
-        <Segmented value={source} onChange={setSource} ariaLabel="来源" size="sm" options={[{ value: 'phone', label: '电话' }, { value: 'front', label: '前台' }]} />
+        <Segmented
+          value={source}
+          onChange={setSource}
+          ariaLabel="来源"
+          size="sm"
+          options={[
+            { value: 'phone', label: '电话' },
+            { value: 'front', label: '前台' },
+          ]}
+        />
         {member ? (
           <p className="flex items-center gap-2 text-[13.5px]">
             会员 <span className="font-bold">{member.name}</span> {member.memberNo}
@@ -583,7 +600,14 @@ function CreateBookingDialog({
         )}
         {kind === 'technician' && board.items.length > 6 && (
           <Field label={`搜项目（共 ${board.items.length} 个）`} htmlFor="booking-item-search">
-            <Input id="booking-item-search" value={itemQuery} onChange={(e) => searchItems(e.target.value)} placeholder="输项目名或分类，例如 足疗" autoComplete="off" data-testid="booking-item-search" />
+            <Input
+              id="booking-item-search"
+              value={itemQuery}
+              onChange={(e) => searchItems(e.target.value)}
+              placeholder="输项目名或分类，例如 足疗"
+              autoComplete="off"
+              data-testid="booking-item-search"
+            />
             {itemQuery.trim() && (
               <p className={cn('mt-1 text-[12.5px]', itemMatches.length ? 'text-ink-3' : 'font-semibold text-clay')} data-testid="booking-item-search-result">
                 {itemMatches.length ? `找到 ${itemMatches.length} 个，下面的「项目」里只列这些` : '没有叫这个的项目，下面列的是全部'}
@@ -697,10 +721,15 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
       ? { kind: b.kind, date, itemId: b.itemId, technicianId, spaceId: b.spaceId, roomTypeId: b.roomTypeId, durationMinutes: b.kind === 'space' ? duration : null }
       : { kind: b.kind, date },
   );
-  const op = useFrontdeskOp<BookingDetail>({ type: 'booking_change', visitId: null, bookingId: b.id, staffName: session.staff.displayName, pick: (f) => (f.type === 'booking_change' ? f.booking : null) });
+  const op = useFrontdeskOp<BookingDetail>({
+    type: 'booking_change',
+    visitId: null,
+    bookingId: b.id,
+    staffName: session.staff.displayName,
+    pick: (f) => (f.type === 'booking_change' ? f.booking : null),
+  });
   const tagCode = normalizeTagCode(tag);
-  const ok =
-    action === 'arrive' ? TAG_CODE_PATTERN.test(tagCode) : action === 'cancel' ? reason.trim().length >= 2 : action === 'reschedule' ? !!startsAt : true;
+  const ok = action === 'arrive' ? TAG_CODE_PATTERN.test(tagCode) : action === 'cancel' ? reason.trim().length >= 2 : action === 'reschedule' ? !!startsAt : true;
   const finish = (r: BookingDetail) => {
     void qc.invalidateQueries({ queryKey: ['bookings'] });
     toast({ tone: 'success', title: `${b.bookingNo} ${BOOKING_STATUS_LABELS[r.status]}`, body: r.arrivalRef ? `已开使用单 ${r.arrivalRef}` : undefined });
@@ -723,7 +752,13 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
             : action === 'cancel'
               ? { action, reason: reason.trim() }
               : { action };
-    const r = await op.submit((key) => ({ url: `/api/bookings/${b.id}/change`, body: { clientKey: key, ...body }, tagCodes: [b.bookingNo], summary: `${ACTION_TITLES[action]} ${b.bookingNo}`, amount: null }));
+    const r = await op.submit((key) => ({
+      url: `/api/bookings/${b.id}/change`,
+      body: { clientKey: key, ...body },
+      tagCodes: [b.bookingNo],
+      summary: `${ACTION_TITLES[action]} ${b.bookingNo}`,
+      amount: null,
+    }));
     if (r) finish(r);
   };
   const hint = useMemo(() => {
@@ -743,7 +778,14 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
           <Button variant="ghost" onClick={onClose} disabled={op.busy}>
             关闭
           </Button>
-          <Button variant={action === 'cancel' || action === 'no_show' ? 'danger' : 'primary'} size="lg" disabled={!ok || op.locked} loading={op.busy} onClick={submit} data-testid="booking-action-submit">
+          <Button
+            variant={action === 'cancel' || action === 'no_show' ? 'danger' : 'primary'}
+            size="lg"
+            disabled={!ok || op.locked}
+            loading={op.busy}
+            onClick={submit}
+            data-testid="booking-action-submit"
+          >
             {ACTION_TITLES[action]}
           </Button>
         </>
@@ -775,11 +817,26 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
         {action === 'reschedule' && (
           <>
             <Field label="日期" htmlFor="booking-date">
-              <Input id="booking-date" type="date" value={date} onChange={(e) => { setDate(e.target.value); setStartsAt(null); }} />
+              <Input
+                id="booking-date"
+                type="date"
+                value={date}
+                onChange={(e) => {
+                  setDate(e.target.value);
+                  setStartsAt(null);
+                }}
+              />
             </Field>
             {b.kind === 'technician' && (
               <Field label="技师" htmlFor="booking-retech">
-                <Select id="booking-retech" value={technicianId ?? ''} onChange={(e) => { setTechnicianId(Number(e.target.value) || null); setStartsAt(null); }}>
+                <Select
+                  id="booking-retech"
+                  value={technicianId ?? ''}
+                  onChange={(e) => {
+                    setTechnicianId(Number(e.target.value) || null);
+                    setStartsAt(null);
+                  }}
+                >
                   <option value="">不指定</option>
                   {board.technicians.map((t) => (
                     <option key={t.id} value={t.id}>

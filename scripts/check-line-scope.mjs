@@ -162,7 +162,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const pr = {
     branch: process.env.PR_BRANCH ?? '',
     title: process.env.PR_TITLE ?? '',
-    labels: (process.env.PR_LABELS ?? '').split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+    labels: (process.env.PR_LABELS ?? '')
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
   const { ok, text } = report(pr, parseNameStatus(diff));
   console.log(text);

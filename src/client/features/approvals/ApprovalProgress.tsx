@@ -6,7 +6,7 @@ import { ArrowRight, RotateCcw } from 'lucide-react';
 import { APPROVAL_STATUS_LABELS, inStep, type ApprovalBrief, type ApprovalDocKind } from '@shared/approvals';
 import { errorMessage, UncertainError } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
-import { cn, formatDateTime } from '../../lib/utils';
+import { cn } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 import { Badge, Button } from '../../components/ui';
 import { ApprovalTimeline } from './ApprovalTimeline';

@@ -104,7 +104,11 @@ export function CouponsSection() {
       section="coupons"
       tabs={COUPON_TABS}
       actions={
-        <Link to={COUPON_ISSUE_PATH} className="flex h-9 items-center rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3" data-testid="coupon-issue-link">
+        <Link
+          to={COUPON_ISSUE_PATH}
+          className="flex h-9 items-center rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+          data-testid="coupon-issue-link"
+        >
           去发券（批量发券、无记名券）
         </Link>
       }
@@ -122,15 +126,7 @@ export function CouponsSection() {
 /** 现在这个页签的那一块 */
 function CouponTabBody() {
   const tab = (useActiveSubTab() ?? TABS[0]!.value) as Tab;
-  return tab === 'templates' ? (
-    <TemplatesCard />
-  ) : tab === 'rules' ? (
-    <RulesCard />
-  ) : tab === 'stats' ? (
-    <StatsCard />
-  ) : (
-    <CouponUsageCard />
-  );
+  return tab === 'templates' ? <TemplatesCard /> : tab === 'rules' ? <RulesCard /> : tab === 'stats' ? <StatsCard /> : <CouponUsageCard />;
 }
 
 // ───────────────────────── 共用 ─────────────────────────
@@ -139,8 +135,7 @@ function CouponTabBody() {
 function levelLabel(levels: CouponMeta['levels'] | undefined, level: number) {
   return levels?.find((l) => l.level === level)?.name ?? `L${level}`;
 }
-const levelsText = (levels: CouponMeta['levels'] | undefined, picked: number[]) =>
-  picked.length ? `限 ${picked.map((l) => levelLabel(levels, l)).join('、')}` : '不限档级';
+const levelsText = (levels: CouponMeta['levels'] | undefined, picked: number[]) => (picked.length ? `限 ${picked.map((l) => levelLabel(levels, l)).join('、')}` : '不限档级');
 
 /** 张数输入：只留数字 */
 const digits = (v: string) => v.replace(/[^0-9]/g, '');
@@ -568,7 +563,11 @@ function TemplateDialog({
       description={editing && base ? `已发 ${base.issued} 张 · ${base.createdByName} ${formatDateTime(base.createdAt)} 建` : '金额按元填；有效期按营业日算'}
       footer={
         <>
-          {problem && <span className="mr-auto self-center text-[12.5px] text-ink-3" data-testid="coupon-template-problem">{problem}</span>}
+          {problem && (
+            <span className="mr-auto self-center text-[12.5px] text-ink-3" data-testid="coupon-template-problem">
+              {problem}
+            </span>
+          )}
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
@@ -651,9 +650,27 @@ function TemplateDialog({
           ) : (
             <div className="space-y-1.5">
               <div className="flex flex-wrap items-center gap-2 text-[13px] text-ink-2">
-                <Input fullWidth={false} type="date" value={draft.validFrom} max={draft.validTo || undefined} onChange={(e) => set({ validFrom: e.target.value })} className="w-[160px]" aria-label="开始日期" data-testid="coupon-template-from" />
+                <Input
+                  fullWidth={false}
+                  type="date"
+                  value={draft.validFrom}
+                  max={draft.validTo || undefined}
+                  onChange={(e) => set({ validFrom: e.target.value })}
+                  className="w-[160px]"
+                  aria-label="开始日期"
+                  data-testid="coupon-template-from"
+                />
                 至
-                <Input fullWidth={false} type="date" value={draft.validTo} min={draft.validFrom || undefined} onChange={(e) => set({ validTo: e.target.value })} className="w-[160px]" aria-label="结束日期" data-testid="coupon-template-to" />
+                <Input
+                  fullWidth={false}
+                  type="date"
+                  value={draft.validTo}
+                  min={draft.validFrom || undefined}
+                  onChange={(e) => set({ validTo: e.target.value })}
+                  className="w-[160px]"
+                  aria-label="结束日期"
+                  data-testid="coupon-template-to"
+                />
               </div>
               {fixedPassed && <p className="text-[12.5px] font-semibold text-ember">结束日期已经过了：这个模板发不出券（自动规则也会跳过）</p>}
             </div>
@@ -713,13 +730,7 @@ function TermsFields({ draft, set, meta }: { draft: Draft; set: (patch: Partial<
     <Field
       label={draft.kind === 'exchange' || draft.kind === 'bogo' ? '最多抵' : '最多减'}
       htmlFor="coupon-maxoff"
-      hint={
-        draft.kind === 'exchange'
-          ? '不填为不限；例如门票只抵 12 小时档，就填那一档的价格'
-          : draft.kind === 'bogo'
-            ? '不填为不限；抵赠的那一份（账单上这个项目单价最低的一份）'
-            : '不填为不限'
-      }
+      hint={draft.kind === 'exchange' ? '不填为不限；例如门票只抵 12 小时档，就填那一档的价格' : draft.kind === 'bogo' ? '不填为不限；抵赠的那一份（账单上这个项目单价最低的一份）' : '不填为不限'}
     >
       <MoneyInput id="coupon-maxoff" value={draft.maxOff} onChange={(e) => set({ maxOff: e.target.value })} placeholder="不限" data-testid="coupon-template-maxoff" />
     </Field>
@@ -762,7 +773,16 @@ function TermsFields({ draft, set, meta }: { draft: Draft; set: (patch: Partial<
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="几折" htmlFor="coupon-rate" hint="1 到 9.9，例如 8.8">
             <div className="relative">
-              <Input id="coupon-rate" inputMode="decimal" autoComplete="off" value={draft.rate} onChange={(e) => set({ rate: e.target.value })} placeholder="8.8" className="num pr-10 font-semibold" data-testid="coupon-template-rate" />
+              <Input
+                id="coupon-rate"
+                inputMode="decimal"
+                autoComplete="off"
+                value={draft.rate}
+                onChange={(e) => set({ rate: e.target.value })}
+                placeholder="8.8"
+                className="num pr-10 font-semibold"
+                data-testid="coupon-template-rate"
+              />
               <span className="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-[14px] font-semibold text-ink-3">折</span>
             </div>
           </Field>
@@ -869,7 +889,16 @@ function TermsFields({ draft, set, meta }: { draft: Draft; set: (patch: Partial<
                 </Field>
                 <Field label="每份出库" htmlFor="coupon-gift-qty" hint="按库存单位，最多三位小数">
                   <div className="relative">
-                    <Input id="coupon-gift-qty" inputMode="decimal" autoComplete="off" value={draft.giftQty} onChange={(e) => set({ giftQty: e.target.value })} placeholder="1" className="num pr-12 font-semibold" data-testid="coupon-template-gift-qty" />
+                    <Input
+                      id="coupon-gift-qty"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      value={draft.giftQty}
+                      onChange={(e) => set({ giftQty: e.target.value })}
+                      placeholder="1"
+                      className="num pr-12 font-semibold"
+                      data-testid="coupon-template-gift-qty"
+                    />
                     <span className="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-[13px] font-semibold text-ink-3">{giftMaterial?.unit ?? ''}</span>
                   </div>
                 </Field>
@@ -1011,8 +1040,7 @@ function RulesCard() {
   const inactiveCount = all.filter((r) => !r.active).length;
   const targetText = (r: CouponRule) => (needsLevel(r.kind) ? levelLabel(levels, r.level ?? 0) : r.kind === 'recharge' ? (r.planName ?? '充值套餐') : null);
   // 同一种类里：升级礼、生日礼按档级，充值赠券按套餐排在一起；启用的在前
-  const order = (a: CouponRule, b: CouponRule) =>
-    (a.level ?? 0) - (b.level ?? 0) || (a.planId ?? 0) - (b.planId ?? 0) || Number(b.active) - Number(a.active) || a.id - b.id;
+  const order = (a: CouponRule, b: CouponRule) => (a.level ?? 0) - (b.level ?? 0) || (a.planId ?? 0) - (b.planId ?? 0) || Number(b.active) - Number(a.active) || a.id - b.id;
   return (
     <Card className="space-y-4 p-5" data-testid="coupon-rules">
       <div>
@@ -1089,9 +1117,7 @@ function RuleRow({ r, target, onStop }: { r: CouponRule; target: string | null; 
           停用
         </Button>
       ) : (
-        <span className="text-[12px] text-ink-3">
-          已停用{r.deactivatedAt ? ` · ${r.deactivatedByName ?? ''} ${formatDateTime(r.deactivatedAt)}` : ''}
-        </span>
+        <span className="text-[12px] text-ink-3">已停用{r.deactivatedAt ? ` · ${r.deactivatedByName ?? ''} ${formatDateTime(r.deactivatedAt)}` : ''}</span>
       )}
     </li>
   );
@@ -1120,11 +1146,7 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
   const leveled = needsLevel(kind);
   /** 这张模板为什么不能配：限定的档级里没有选的这一档、固定有效期已过 */
   const blocked = (t: CouponTemplate) =>
-    leveled && level !== null && t.levels.length > 0 && !t.levels.includes(level)
-      ? `只发给 ${t.levels.map((l) => `L${l}`).join('、')}`
-      : templateExpired(t, session.today)
-        ? '有效期已过'
-        : null;
+    leveled && level !== null && t.levels.length > 0 && !t.levels.includes(level) ? `只发给 ${t.levels.map((l) => `L${l}`).join('、')}` : templateExpired(t, session.today) ? '有效期已过' : null;
   const choices = templates.filter((t) => t.active);
   const template = choices.find((t) => t.id === templateId) ?? null;
   const n = Number(quantity);
@@ -1210,19 +1232,35 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
         </Field>
         {leveled && (
           <Field label="会员档级" htmlFor="coupon-rule-level" hint={kind === 'level_up' ? '充值升到这一档时发（连跳几档的每一档都发）' : '生日当月按会员当时的档级发'}>
-            <Select id="coupon-rule-level" value={level ?? ''} onChange={(e) => setLevel(e.target.value ? Number(e.target.value) : null)} disabled={busy} className="h-11" data-testid="coupon-rule-level">
+            <Select
+              id="coupon-rule-level"
+              value={level ?? ''}
+              onChange={(e) => setLevel(e.target.value ? Number(e.target.value) : null)}
+              disabled={busy}
+              className="h-11"
+              data-testid="coupon-rule-level"
+            >
               <option value="">选择档级</option>
-              {meta.levels.filter((l) => kind !== 'level_up' || l.level > 0).map((l) => (
-                <option key={l.level} value={l.level}>
-                  {levelLabel(meta.levels, l.level)}
-                </option>
-              ))}
+              {meta.levels
+                .filter((l) => kind !== 'level_up' || l.level > 0)
+                .map((l) => (
+                  <option key={l.level} value={l.level}>
+                    {levelLabel(meta.levels, l.level)}
+                  </option>
+                ))}
             </Select>
           </Field>
         )}
         {kind === 'recharge' && (
           <Field label="充值套餐" htmlFor="coupon-rule-plan" hint="自定义金额的充值不发；套餐在「价目与套餐」里维护">
-            <Select id="coupon-rule-plan" value={planId ?? ''} onChange={(e) => setPlanId(e.target.value ? Number(e.target.value) : null)} disabled={busy} className="h-11" data-testid="coupon-rule-plan">
+            <Select
+              id="coupon-rule-plan"
+              value={planId ?? ''}
+              onChange={(e) => setPlanId(e.target.value ? Number(e.target.value) : null)}
+              disabled={busy}
+              className="h-11"
+              data-testid="coupon-rule-plan"
+            >
               <option value="">选择充值套餐</option>
               {meta.plans.map((p) => (
                 <option key={p.id} value={p.id} disabled={!p.active}>
@@ -1235,7 +1273,14 @@ function RuleDialog({ open, meta, templates, rules, onClose }: { open: boolean; 
           </Field>
         )}
         <Field label="发哪张券" htmlFor="coupon-rule-template" hint={choices.length === 0 ? '还没有启用的券模板，先在「券模板」里建一个' : undefined}>
-          <Select id="coupon-rule-template" value={templateId ?? ''} onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : null)} disabled={busy} className="h-11" data-testid="coupon-rule-template">
+          <Select
+            id="coupon-rule-template"
+            value={templateId ?? ''}
+            onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : null)}
+            disabled={busy}
+            className="h-11"
+            data-testid="coupon-rule-template"
+          >
             <option value="">选择券模板</option>
             {choices.map((t) => {
               const why = blocked(t);
@@ -1512,7 +1557,14 @@ function BatchDialog({ open, templates, onClose }: { open: boolean; templates: C
     >
       <div className="space-y-4" data-testid="coupon-batch-dialog">
         <Field label="券" htmlFor="coupon-batch-template" hint={choices.length === 0 ? '还没有启用的券模板，先在「券模板」里建一个' : '限定了会员档级的模板不能做无记名券'}>
-          <Select id="coupon-batch-template" value={templateId ?? ''} onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : null)} disabled={busy} className="h-11" data-testid="coupon-batch-template">
+          <Select
+            id="coupon-batch-template"
+            value={templateId ?? ''}
+            onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : null)}
+            disabled={busy}
+            className="h-11"
+            data-testid="coupon-batch-template"
+          >
             <option value="">选择券模板</option>
             {choices.map((t) => {
               const why = blocked(t);
@@ -1527,8 +1579,7 @@ function BatchDialog({ open, templates, onClose }: { open: boolean; templates: C
         </Field>
         {template && (
           <p className="rounded-md bg-paper-2 px-3 py-2 text-[12.5px] text-ink-2">
-            {template.summary} ·{' '}
-            {days !== null ? `今天生成：有效期 ${couponRangeText(session.today, shiftDate(session.today, days - 1))}` : templateValidityText(template)}
+            {template.summary} · {days !== null ? `今天生成：有效期 ${couponRangeText(session.today, shiftDate(session.today, days - 1))}` : templateValidityText(template)}
           </p>
         )}
         <Field label="张数" htmlFor="coupon-batch-quantity" hint={`一批 1–${MAX_BATCH_COUPONS} 张`}>
@@ -1621,11 +1672,28 @@ function StatsCard() {
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-[12.5px] font-semibold text-ink-3">
           从
-          <Input type="date" fullWidth={false} value={range.from} max={range.to || session.today} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="w-40" data-testid="coupon-stats-from" />
+          <Input
+            type="date"
+            fullWidth={false}
+            value={range.from}
+            max={range.to || session.today}
+            onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+            className="w-40"
+            data-testid="coupon-stats-from"
+          />
         </label>
         <label className="flex flex-col gap-1 text-[12.5px] font-semibold text-ink-3">
           到
-          <Input type="date" fullWidth={false} value={range.to} min={range.from || undefined} max={session.today} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} className="w-40" data-testid="coupon-stats-to" />
+          <Input
+            type="date"
+            fullWidth={false}
+            value={range.to}
+            min={range.from || undefined}
+            max={session.today}
+            onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+            className="w-40"
+            data-testid="coupon-stats-to"
+          />
         </label>
         <div className="flex gap-1.5">
           {quick(session.today, '今天', 'coupon-stats-today')}

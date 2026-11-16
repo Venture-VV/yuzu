@@ -30,9 +30,7 @@ import { currentStoreId, inRowStore } from '../lib/store-context';
 // ───────────────────────── claimKey 的去重 ─────────────────────────
 
 /** 小程序线的记录编号：正整数，或 64 字以内的字母、数字、_、-（与 v0.7.27 的 claimId 同一个格式） */
-export const ClaimKey = z
-  .union([z.number().int().positive().max(Number.MAX_SAFE_INTEGER), z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)], 'claimKey 不对')
-  .transform(String);
+export const ClaimKey = z.union([z.number().int().positive().max(Number.MAX_SAFE_INTEGER), z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)], 'claimKey 不对').transform(String);
 
 export type EntryKind = 'mp_invite' | 'mp_food' | 'mp_booking' | 'mp_booking_cancel';
 
@@ -111,13 +109,7 @@ export async function createTrialInviteFromMp(tx: Tx, deps: Deps, raw: MpInviteI
   try {
     // 存档点：建档、发开卡礼、建临时身份要么都成，要么都撤回；撞上唯一约束时翻译成看得懂的提示，调用方的事务还能接着用
     trialId = await tx.savepoint((sp) =>
-      createTrialTx(
-        sp as unknown as Tx,
-        deps,
-        { inviterId: input.inviterId, kind: 'invite', phone: input.invitee.phone, name, channel, clientKey: randomUUID(), requestHash },
-        ctx,
-        date,
-      ),
+      createTrialTx(sp as unknown as Tx, deps, { inviterId: input.inviterId, kind: 'invite', phone: input.invitee.phone, name, channel, clientKey: randomUUID(), requestHash }, ctx, date),
     );
   } catch (error) {
     throw trialUniqueError(error) ?? error;
@@ -136,11 +128,7 @@ const MpFoodInput = z.object({
         itemId: z.number('菜品编号不对').int('菜品编号不对').positive('菜品编号不对'),
         // 一单的份数与金额上限（N1，8.0.7 起在「经营规则 → 可调的数值」里改，最多 200 份）在下单时按设置核对（MP_ORDER_LIMIT）；
         // 一道菜一行最多 99 份是账单一行能存的上限（bill_lines 的约束），格式上就挡住，一单更多份请分几行（8.0.8，测试会话 v8.0.7 的 P2）
-        quantity: z
-          .number('份数不对')
-          .int('份数不对')
-          .min(1, '份数至少为 1')
-          .max(MAX_BILL_LINE_QUANTITY, `一道菜一单最多 ${MAX_BILL_LINE_QUANTITY} 份，多的请服务员点`),
+        quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(MAX_BILL_LINE_QUANTITY, `一道菜一单最多 ${MAX_BILL_LINE_QUANTITY} 份，多的请服务员点`),
         note: z.string().trim().max(MAX_DISH_NOTE, `口味备注最多 ${MAX_DISH_NOTE} 字`).optional(),
       }),
       '请选择菜品',

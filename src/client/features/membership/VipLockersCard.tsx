@@ -50,9 +50,7 @@ export function VipLockersCard() {
 
   return (
     <Card className="p-5" data-testid="vip-lockers" id="vip">
-      <SectionTitle aside={<PendingBadge title="各档能用几级柜按柜号清单的 1–5 级换算（L0–L3 → 1 级、L4 → 2 级、L5 → 4 级、L6 → 5 级），当场授权默认不开，待店主确认" />}>
-        VIP 柜
-      </SectionTitle>
+      <SectionTitle aside={<PendingBadge title="各档能用几级柜按柜号清单的 1–5 级换算（L0–L3 → 1 级、L4 → 2 级、L5 → 4 级、L6 → 5 级），当场授权默认不开，待店主确认" />}>VIP 柜</SectionTitle>
       <p className="mt-1 text-[12.5px] text-ink-3">
         会员能用的柜子等级不低于柜子的等级才能用那个 VIP 柜；散客为 0。8.0.4 起从「会员规则」「手牌与前台」移到这里，原来的设置已原样搬过来。
         {q.data.updatedAt && ` 最近修改：${formatDateTime(q.data.updatedAt)}${q.data.updatedByName ? `（${q.data.updatedByName}）` : ''}。`}

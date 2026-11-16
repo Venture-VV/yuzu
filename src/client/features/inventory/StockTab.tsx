@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ArrowRight, Download, Hourglass, Search, TriangleAlert, X } from 'lucide-react';
-import { CENTRAL_WAREHOUSE_ID, INV_DOC_META, INV_STATUS_LABELS, ISSUE_SIGN_DUE_DAYS, MOVE_TYPE_LABELS, SUPPLIER_ANSWER_DUE_DAYS, type InvDocType, type Material, type WarehouseStockRow } from '@shared/inventory';
+import {
+  CENTRAL_WAREHOUSE_ID,
+  INV_DOC_META,
+  INV_STATUS_LABELS,
+  ISSUE_SIGN_DUE_DAYS,
+  MOVE_TYPE_LABELS,
+  SUPPLIER_ANSWER_DUE_DAYS,
+  type InvDocType,
+  type Material,
+  type WarehouseStockRow,
+} from '@shared/inventory';
 import { formatAmount } from '@shared/money';
 import { conversionText, formatQty } from '@shared/quantity';
 import { errorMessage } from '../../lib/api';
@@ -88,9 +98,7 @@ export function StockTab() {
         { n: overview.data.urgentToBackfill, label: '急采待补采购单', to: '/purchasing/urgent?view=backfill' },
         {
           n: overview.data.awaitingSupplier,
-          label: overview.data.awaitingSupplierOverdue
-            ? `退货待供应商确认（其中 ${overview.data.awaitingSupplierOverdue} 张超过 ${SUPPLIER_ANSWER_DUE_DAYS} 天）`
-            : '退货待供应商确认',
+          label: overview.data.awaitingSupplierOverdue ? `退货待供应商确认（其中 ${overview.data.awaitingSupplierOverdue} 张超过 ${SUPPLIER_ANSWER_DUE_DAYS} 天）` : '退货待供应商确认',
           to: '/inventory/docs?type=supplier_return&status=awaiting_supplier',
         },
       ].filter((t) => t.n > 0)
@@ -111,7 +119,12 @@ export function StockTab() {
               sub={can('inventory.approve') ? '去待办处理' : '等待负责人确认'}
               onClick={() => navigate(can('inventory.approve') ? '/todo' : '/inventory/docs?status=submitted')}
             />
-            <Tile label="今日收发" value={overview.data ? overview.data.todayIn + overview.data.todayOut : undefined} sub={overview.data ? `入库 ${overview.data.todayIn} 单 · 出库 ${overview.data.todayOut} 单` : ' '} onClick={() => navigate('/inventory/docs')} />
+            <Tile
+              label="今日收发"
+              value={overview.data ? overview.data.todayIn + overview.data.todayOut : undefined}
+              sub={overview.data ? `入库 ${overview.data.todayIn} 单 · 出库 ${overview.data.todayOut} 单` : ' '}
+              onClick={() => navigate('/inventory/docs')}
+            />
           </div>
           {todo.length > 0 && (
             <div className="flex flex-wrap gap-2" data-testid="inv-todo-chips">
@@ -201,7 +214,12 @@ export function StockTab() {
             ) : deptStock.isPending ? (
               <Skeleton className="h-48" />
             ) : deptRows.length === 0 ? (
-              <EmptyState art="leaf" title="这个部门小仓里还没有东西" description="仓库登记领料、急采验收后，或者部门登记了期初，这里就会有结存。" className="rounded-lg border border-dashed border-line-strong" />
+              <EmptyState
+                art="leaf"
+                title="这个部门小仓里还没有东西"
+                description="仓库登记领料、急采验收后，或者部门登记了期初，这里就会有结存。"
+                className="rounded-lg border border-dashed border-line-strong"
+              />
             ) : (
               <ul className="overflow-hidden rounded-lg border border-line bg-card shadow-card" aria-label="部门小仓结存">
                 {deptRows.map((r) => (
@@ -343,7 +361,11 @@ function DeptRow({ r, selected, onSelect }: { r: WarehouseStockRow; selected: bo
         type="button"
         onClick={onSelect}
         aria-current={selected || undefined}
-        className={cn('grid w-full grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-2.5 text-left transition-colors', selected ? 'bg-pine-tint' : 'hover:bg-paper/70', r.stockMilli === 0 && 'opacity-60')}
+        className={cn(
+          'grid w-full grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-2.5 text-left transition-colors',
+          selected ? 'bg-pine-tint' : 'hover:bg-paper/70',
+          r.stockMilli === 0 && 'opacity-60',
+        )}
       >
         <span className="num text-[12px] font-semibold text-ink-3">{r.code}</span>
         <span className="min-w-0">
@@ -435,7 +457,11 @@ function MaterialDetail({ id, warehouseId: initialWarehouse, onClose, closable }
           <div className="text-right text-[12px] text-ink-3">
             <p>{conversionText(m.purchaseUnit, m.purchaseFactorMilli, m.inventoryUnit)}</p>
             <p>{coverText(m)}</p>
-            {m.refPriceCents !== null && <p>参考价 ¥{formatAmount(m.refPriceCents)}/{m.purchaseUnit}</p>}
+            {m.refPriceCents !== null && (
+              <p>
+                参考价 ¥{formatAmount(m.refPriceCents)}/{m.purchaseUnit}
+              </p>
+            )}
           </div>
         </div>
         {central && m.isLow && (
@@ -475,12 +501,7 @@ function MaterialDetail({ id, warehouseId: initialWarehouse, onClose, closable }
                   <span className="text-ink-3">{INV_DOC_META[p.docType].title}</span>
                   <span className="text-ink-3">{INV_STATUS_LABELS[p.status]}</span>
                   <span className="flex-1" />
-                  <Qty
-                    milli={INV_DOC_META[p.docType].direction === 'out' ? -p.qtyMilli : p.qtyMilli}
-                    unit={m.inventoryUnit}
-                    signed
-                    className="font-semibold text-ink-2"
-                  />
+                  <Qty milli={INV_DOC_META[p.docType].direction === 'out' ? -p.qtyMilli : p.qtyMilli} unit={m.inventoryUnit} signed className="font-semibold text-ink-2" />
                 </li>
               ))}
             </ul>

@@ -30,22 +30,24 @@ export async function slowMovingReport(db: Db, today: string, raw: unknown = {})
   const q = parse(Query, raw);
   const { slowMovingDays } = await loadSettings(db);
   const since = new Date(Date.parse(`${today}T00:00:00Z`) - (USAGE_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
-  const rows = await db<{
-    materialId: number;
-    code: string;
-    name: string;
-    specification: string;
-    inventoryUnit: string;
-    decimals: number;
-    warehouseId: number;
-    departmentId: number | null;
-    warehouseName: string;
-    stockMilli: string;
-    perMilli: string | null;
-    lastOutDate: string | null;
-    firstInDate: string | null;
-    usedMilli: string | null;
-  }[]>`
+  const rows = await db<
+    {
+      materialId: number;
+      code: string;
+      name: string;
+      specification: string;
+      inventoryUnit: string;
+      decimals: number;
+      warehouseId: number;
+      departmentId: number | null;
+      warehouseName: string;
+      stockMilli: string;
+      perMilli: string | null;
+      lastOutDate: string | null;
+      firstInDate: string | null;
+      usedMilli: string | null;
+    }[]
+  >`
     WITH stocks AS (
       SELECT m.id AS material_id, 1::bigint AS warehouse_id, NULL::bigint AS department_id, m.stock_milli
       FROM materials m WHERE m.tracked AND m.stock_milli > 0

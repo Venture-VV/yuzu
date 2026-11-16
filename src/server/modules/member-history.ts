@@ -278,9 +278,7 @@ export async function memberHistory(db: Db, memberId: number, opts: { before?: n
   const [t] = await db<{ n: number }[]>`
     SELECT count(*)::int AS n FROM member_history_rows h JOIN member_history_imports i ON i.id = h.import_id
     WHERE h.member_id = ANY(${memberIds}::bigint[]) AND i.status = 'active'`;
-  const before = opts.before
-    ? (await db<{ occurredAt: Date; id: number }[]>`SELECT occurred_at, id FROM member_history_rows WHERE id = ${opts.before}`)[0]
-    : undefined;
+  const before = opts.before ? (await db<{ occurredAt: Date; id: number }[]>`SELECT occurred_at, id FROM member_history_rows WHERE id = ${opts.before}`)[0] : undefined;
   const rows = await db<(Omit<MemberHistoryEntry, 'occurredAt'> & { occurredAt: Date })[]>`
     SELECT h.id, h.occurred_at, h.type_label, h.kind, h.amount, h.bonus, h.balance, h.bonus_balance, h.doc_no, h.store, h.operator, h.note,
            i.import_no, i.source

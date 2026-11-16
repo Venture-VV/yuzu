@@ -41,7 +41,11 @@ export function MembershipTab() {
           营业日开始后应用每分钟自动处理一次；一直不减少时请联系管理员看自动任务。
         </Notice>
       )}
-      {d.jobToday?.error && <Notice tone="error" title="今天的到期处理有出错的会员" >{d.jobToday.error}</Notice>}
+      {d.jobToday?.error && (
+        <Notice tone="error" title="今天的到期处理有出错的会员">
+          {d.jobToday.error}
+        </Notice>
+      )}
       <p className="text-[12.5px] text-ink-3">
         营业日 {d.today}
         {d.live ? ` · 会员体系 v2 自 ${d.live.businessDate} 启用（上线时按累计充值定档 ${d.live.graded} 位）` : ''}
@@ -265,10 +269,7 @@ function RetentionCard({ rules, expiring, grace }: { rules: MembershipRules; exp
               setWithin(Number(v));
             }
           }}
-          options={[
-            ...expiring.map((e) => ({ value: String(e.within), label: `${e.within} 天内 ${e.count}` })),
-            { value: 'grace', label: `补充期 ${grace}` },
-          ]}
+          options={[...expiring.map((e) => ({ value: String(e.within), label: `${e.within} 天内 ${e.count}` })), { value: 'grace', label: `补充期 ${grace}` }]}
         />
       </div>
       {list.isPending ? (

@@ -21,7 +21,25 @@ export const prefersReducedMotion = (): boolean => typeof window !== 'undefined'
 // ───────────────────────── 退场的影子 ─────────────────────────
 
 /** 影子身上要去掉的属性：不让读屏、测试、表单、标签关联认到它 */
-const STRIP = ['id', 'role', 'name', 'for', 'tabindex', 'data-testid', 'data-autofocus', 'aria-label', 'aria-labelledby', 'aria-describedby', 'aria-modal', 'aria-pressed', 'aria-checked', 'aria-current', 'aria-expanded', 'aria-haspopup', 'aria-live'];
+const STRIP = [
+  'id',
+  'role',
+  'name',
+  'for',
+  'tabindex',
+  'data-testid',
+  'data-autofocus',
+  'aria-label',
+  'aria-labelledby',
+  'aria-describedby',
+  'aria-modal',
+  'aria-pressed',
+  'aria-checked',
+  'aria-current',
+  'aria-expanded',
+  'aria-haspopup',
+  'aria-live',
+];
 
 /** 影子最多留多久（毫秒）：比最慢的退场（抽屉 220）长一点，到时间一定删掉 */
 export const GHOST_MS = 320;
@@ -63,7 +81,11 @@ const sheetCopies = new WeakMap<CSSStyleSheet, { rules: number; copy: CSSStyleSh
 
 /** 这个浏览器能不能建影子容器并给它样式表（很老的平板不能：那就不播退场，别的照常） */
 const ghostsSupported = (): boolean =>
-  typeof document !== 'undefined' && typeof document.body?.attachShadow === 'function' && typeof CSSStyleSheet === 'function' && 'replaceSync' in CSSStyleSheet.prototype && 'adoptedStyleSheets' in Document.prototype;
+  typeof document !== 'undefined' &&
+  typeof document.body?.attachShadow === 'function' &&
+  typeof CSSStyleSheet === 'function' &&
+  'replaceSync' in CSSStyleSheet.prototype &&
+  'adoptedStyleSheets' in Document.prototype;
 
 /** 把页面现在的样式表照抄给影子容器（读不到规则的外站样式表跳过） */
 function syncGhostStyles(root: ShadowRoot) {
@@ -189,7 +211,12 @@ const STAGGER_MS = 700;
  * 一组卡片、一列行第一次出现时依次升起（最多前 12 个，后面的直接显示）。只在这一组刚挂上来时播一次。
  * 直接的子元素就是要依次出现的那些：这一层照 className 排版（grid、flex……），不另套一层。
  */
-export function Stagger({ children, className, as: Tag = 'div', ...rest }: { children: ReactNode; className?: string; as?: 'div' | 'ul' | 'ol' | 'section' } & Record<`data-${string}`, string | undefined>) {
+export function Stagger({
+  children,
+  className,
+  as: Tag = 'div',
+  ...rest
+}: { children: ReactNode; className?: string; as?: 'div' | 'ul' | 'ol' | 'section' } & Record<`data-${string}`, string | undefined>) {
   const [fresh, setFresh] = useState(true);
   useEffect(() => {
     const t = window.setTimeout(() => setFresh(false), STAGGER_MS);
@@ -236,7 +263,8 @@ export function measureIndicator(container: HTMLElement, selector: string): Indi
   return { x: a.left - c.left + container.scrollLeft - container.clientLeft, y: a.top - c.top + container.scrollTop - container.clientTop, w: a.width, h: a.height };
 }
 
-const sameBox = (a: IndicatorBox | null, b: IndicatorBox | null) => a === b || (!!a && !!b && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.w - b.w) < 0.5 && Math.abs(a.h - b.h) < 0.5);
+const sameBox = (a: IndicatorBox | null, b: IndicatorBox | null) =>
+  a === b || (!!a && !!b && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.w - b.w) < 0.5 && Math.abs(a.h - b.h) < 0.5);
 
 /**
  * 量出容器里当前项（selector 找到的第一个）的位置，给「跟着当前项滑动的那一块」用。

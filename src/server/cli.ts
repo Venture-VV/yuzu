@@ -187,7 +187,10 @@ function printLegacyAudit(a: LegacyAudit) {
   for (const c of a.crossChecks) console.log(`  ${c.title}：${c.detail}`);
   if (a.daily) {
     console.log(`三、每日平账：${a.daily.days.length} 个付款日里 ${a.daily.unbalanced} 天不平（${a.daily.tail} 天尾差不到 1 元）；${a.daily.zeroAdvanceWithSpend.length} 天打款为 0 但当天有支出`);
-    const top = [...a.daily.days].filter((d) => d.state === 'unbalanced').sort((x, y) => Math.abs(y.diffCents) - Math.abs(x.diffCents)).slice(0, 5);
+    const top = [...a.daily.days]
+      .filter((d) => d.state === 'unbalanced')
+      .sort((x, y) => Math.abs(y.diffCents) - Math.abs(x.diffCents))
+      .slice(0, 5);
     if (top.length) console.log(`  差额最大：${top.map((d) => `${d.date} ${d.diffCents > 0 ? '+' : ''}${formatYuan(d.diffCents)}`).join('、')}`);
   }
   console.log('四、字段与口径问题');
@@ -295,7 +298,9 @@ async function offlineCommand(command: string | undefined, args: string[]): Prom
       await writeFile(join(out, 'spaces.geojson'), JSON.stringify(spacesGeoJson(r.rooms, { converter: r.converter, file: basename(file) }), null, 1));
       // PDF 另写页数、换算比例与比例来源（main 定时测试报告建议：原来只打在屏幕上）
       await writeFile(join(out, 'report.json'), JSON.stringify({ ...r, ...(res.pdf ? { pdf: res.pdf } : {}), floors: r.floors.map((f) => ({ ...f, svg: undefined })) }, null, 1));
-      console.log(`读图 ${((res.readMs ?? 0) / 1000).toFixed(1)} 秒，转换 ${(r.convertMs / 1000).toFixed(1)} 秒，共 ${((Date.now() - t0) / 1000).toFixed(1)} 秒；图元 ${r.source.entities} 个、图层 ${r.source.layers} 个`);
+      console.log(
+        `读图 ${((res.readMs ?? 0) / 1000).toFixed(1)} 秒，转换 ${(r.convertMs / 1000).toFixed(1)} 秒，共 ${((Date.now() - t0) / 1000).toFixed(1)} 秒；图元 ${r.source.entities} 个、图层 ${r.source.layers} 个`,
+      );
       if (res.pdf) {
         const from = res.pdf.scaleFrom === 'text' ? '图上的比例文字' : '--scale';
         // 填的比例优先（v0.7.19）；与图上写的不同时提示
@@ -458,11 +463,7 @@ async function main() {
           throw new Error(`清单有 ${parsed.errors.length} 处需要修改，未导入`);
         }
         const apply = args.includes('--apply');
-        const report = await importHandTags(
-          sql,
-          { rows: parsed.rows, deactivateMissing: args.includes('--deactivate-missing'), dryRun: !apply },
-          { staffId: null, via: 'cli' },
-        );
+        const report = await importHandTags(sql, { rows: parsed.rows, deactivateMissing: args.includes('--deactivate-missing'), dryRun: !apply }, { staffId: null, via: 'cli' });
         console.log(`清单共 ${report.total} 个柜号：`);
         for (const g of report.groups) {
           console.log(`  ${ZONE_LABELS[g.zone].title} ${g.kind === 'vip' ? `VIP 第 ${g.vipLevel} 级` : `普通柜 ${g.area || ''} 区`}：${g.count}`);
@@ -483,11 +484,7 @@ async function main() {
           throw new Error(`价目表有 ${parsed.errors.length} 处需要修改，未导入`);
         }
         const apply = args.includes('--apply');
-        const report = await importPriceList(
-          sql,
-          { rows: parsed.rows, deactivateMissing: args.includes('--deactivate-missing'), dryRun: !apply },
-          { staffId: null, via: 'cli' },
-        );
+        const report = await importPriceList(sql, { rows: parsed.rows, deactivateMissing: args.includes('--deactivate-missing'), dryRun: !apply }, { staffId: null, via: 'cli' });
         console.log(`价目表共 ${report.total} 个项目：`);
         for (const g of report.groups) console.log(`  ${g.category}：${g.count}`);
         console.log(`新建 ${report.created} · 更新 ${report.updated} · 未变 ${report.unchanged} · 停用清单外 ${report.deactivated}`);
@@ -561,7 +558,10 @@ async function main() {
         const deps = { sql, config };
         const p = await previewMemberHistory(deps, body);
         console.log(`文件共 ${p.totalRows} 行：认出会员 ${p.matchedRows} 行（${p.memberCount} 位会员；按旧卡号 ${p.byLegacyNo}、按手机号 ${p.byPhone}）· 认不出会员 ${p.unmatched.count} 行（不导入）`);
-        if (p.firstAt) console.log(`时间从 ${p.firstAt.slice(0, 10)} 到 ${p.lastAt!.slice(0, 10)}；${p.byKind.map((k) => `${MEMBER_HISTORY_KIND_LABELS[k.kind]} ${k.count} 笔 ${describeHistoryAmount(k.amount)}`).join('，')}`);
+        if (p.firstAt)
+          console.log(
+            `时间从 ${p.firstAt.slice(0, 10)} 到 ${p.lastAt!.slice(0, 10)}；${p.byKind.map((k) => `${MEMBER_HISTORY_KIND_LABELS[k.kind]} ${k.count} 笔 ${describeHistoryAmount(k.amount)}`).join('，')}`,
+          );
         for (const u of p.unmatched.lines.slice(0, 20)) console.log(`· 第 ${u.line} 行认不出会员（手机号 ${u.phone || '—'}，旧卡号 ${u.legacyNo || '—'}）`);
         if (p.duplicateOf) console.log(`✗ 这份文件已经导入过（批次 ${p.duplicateOf}），要重新导入请先在页面上作废那一批`);
         if (p.errors.length) {
@@ -598,17 +598,28 @@ async function main() {
         const meta = fileMeta(basename(file), buf);
         const { audit, existing } = await previewLegacyImport(sql, parsed, meta);
         console.log(`文件：${meta.fileName}（${(meta.bytes / 1024).toFixed(0)} KB，摘要 ${meta.sha256.slice(0, 12)}）`);
-        console.log(`认出是「${LEGACY_SOURCE_LABELS[parsed.source]}」：${parsed.sheets.map((s) => `「${s.name}」${s.rows} 行`).join('、')}${parsed.images.size ? `；单元格图 ${parsed.images.size} 张` : ''}`);
+        console.log(
+          `认出是「${LEGACY_SOURCE_LABELS[parsed.source]}」：${parsed.sheets.map((s) => `「${s.name}」${s.rows} 行`).join('、')}${parsed.images.size ? `；单元格图 ${parsed.images.size} 张` : ''}`,
+        );
         for (const w of parsed.warnings) console.log(`· ${w}`);
         for (const [k, v] of Object.entries(parsed.fileTotals)) console.log(`· 表里自带的合计「${k}」：${formatYuan(v)}`);
         printLegacyAudit(audit);
-        if (existing) console.log(existing.sha256 === meta.sha256 ? '· 同一个文件已经导入过（再导入直接返回原来那次）' : `· 这份表已经导入过（第 ${existing.id} 次导入：${existing.fileName}）；换成这个文件要加 --replace "原因"`);
+        if (existing)
+          console.log(
+            existing.sha256 === meta.sha256
+              ? '· 同一个文件已经导入过（再导入直接返回原来那次）'
+              : `· 这份表已经导入过（第 ${existing.id} 次导入：${existing.fileName}）；换成这个文件要加 --replace "原因"`,
+          );
         if (!args.includes('--apply')) {
           console.log('\n以上是预览，没有写入。核对无误后加 --apply 写进只读表（不进正式账）。');
           break;
         }
         const r = await applyLegacyImport(sql, parsed, meta, { operatorId: actor.id, replaceReason: flag(args, 'replace') ?? null });
-        console.log(r.replayed ? `同一个文件已经导入过：第 ${r.importId} 次导入，没有重复写入。` : `已写入只读表：第 ${r.importId} 次导入${r.voidedId ? `（第 ${r.voidedId} 次导入已作废）` : ''}。在 ERP「费用与备用金 → 旧账对照」查看。`);
+        console.log(
+          r.replayed
+            ? `同一个文件已经导入过：第 ${r.importId} 次导入，没有重复写入。`
+            : `已写入只读表：第 ${r.importId} 次导入${r.voidedId ? `（第 ${r.voidedId} 次导入已作废）` : ''}。在 ERP「费用与备用金 → 旧账对照」查看。`,
+        );
         break;
       }
       case 'void-legacy-import': {
@@ -803,7 +814,8 @@ async function main() {
         if (parsed.errors.length) throw new Error(`有 ${parsed.errors.length} 处格式不对，未导入（表头：${OPENING_COUNT_CARD_HEADER.join('、')}）`);
         const apply = args.includes('--apply');
         const r = await importOpeningCountCards({ sql, config }, parsed.rows, { operatorId: actor.id, apply, batch: flag(args, 'batch') ?? basename(file) });
-        for (const row of r.rows) console.log(`${row.ok ? '✓' : '✗'} 第 ${row.line} 行 ${row.memberName ?? '（找不到会员）'} · ${row.name} · 剩 ${row.remaining} 次${row.problem ? `：${row.problem}` : ''}`);
+        for (const row of r.rows)
+          console.log(`${row.ok ? '✓' : '✗'} 第 ${row.line} 行 ${row.memberName ?? '（找不到会员）'} · ${row.name} · 剩 ${row.remaining} 次${row.problem ? `：${row.problem}` : ''}`);
         if (r.bad) throw new Error(`有 ${r.bad} 行不对，整批没有写入；改好后重新预览`);
         console.log(apply ? `✓ 已导入 ${r.ok} 张旧次卡（只记次数，不是收款）。请运行 check 核对。` : `以上为预览（${r.ok} 张），没有写入。确认无误后加 --apply 执行导入（门店环境须店主同意）。`);
         break;
@@ -823,7 +835,9 @@ async function main() {
         break;
       }
       default:
-        console.log('可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock | membership-daily | import-benefits | import-count-cards');
+        console.log(
+          '可用命令：migrate | create-owner <账号> | reset-password <账号> | seed-demo [--force] | seed-inventory-demo | seed-frontdesk-demo [--previous-day] | seed-billing-demo [--previous-day] | seed-legacy-demo | demo-prepare [--previous-day] | demo-check | demo-reset --confirm <数据库名> | import-hand-tags | import-price-list | import-opening | check | fingerprint | backup | backup-loop | verify-backup | daily-recon | balance-changes | floorplan-convert | floorplan-sample | import-devices | device-selftest | device-printer-mock | device-bridge-mock | membership-daily | import-benefits | import-count-cards',
+        );
         process.exitCode = command ? 1 : 0;
     }
   } finally {

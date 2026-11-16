@@ -63,8 +63,7 @@ type Session = { id: number; visitId: number; status: string; techNo: string; sp
 const sessions = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/clockroom')).body.sessions as Session[];
 const sessionOf = async (visitId: number) => (await sessions()).find((s) => s.visitId === visitId)!;
 const map = async (cookie = ctx.clerk) => (await api(ctx.app, cookie, 'GET', '/api/floormap')).body as FloorMapData;
-const setRoom = (id: number, spaceId: number | null, expectedVersion: number) =>
-  api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${id}/space`, { spaceId, expectedVersion });
+const setRoom = (id: number, spaceId: number | null, expectedVersion: number) => api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${id}/space`, { spaceId, expectedVersion });
 const pay = async (visitId: number) => {
   const preview = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body;
   const r = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', {
@@ -335,7 +334,11 @@ describe('平面图接口', () => {
 
     const status = (code: string) => {
       const s = m.spaces.find((x) => x.code === code)!;
-      return spaceStatus(s, board.rooms.find((x) => x.spaceId === s.id), m.sessions).state;
+      return spaceStatus(
+        s,
+        board.rooms.find((x) => x.spaceId === s.id),
+        m.sessions,
+      ).state;
     };
     expect([status('G301'), status('G302'), status('F312'), status('S302'), status('S303'), status('P201')]).toEqual(['vacant', 'unlinked', 'serving', 'serving', 'off', 'other']);
 
@@ -344,6 +347,20 @@ describe('平面图接口', () => {
     expect((await api(ctx.app, bo, 'GET', '/api/floormap')).status).toBe(200);
     expect((await api(ctx.app, manager, 'GET', '/api/floormap')).status).toBe(403);
     // 只带手牌号与技师，不带会员姓名、手机号
-    expect(Object.keys(m.sessions[0]!).sort()).toEqual(['clocks', 'createdAt', 'id', 'itemName', 'minutes', 'plannedEnd', 'sessionNo', 'spaceId', 'startedAt', 'status', 'tagCode', 'techName', 'techNo']);
+    expect(Object.keys(m.sessions[0]!).sort()).toEqual([
+      'clocks',
+      'createdAt',
+      'id',
+      'itemName',
+      'minutes',
+      'plannedEnd',
+      'sessionNo',
+      'spaceId',
+      'startedAt',
+      'status',
+      'tagCode',
+      'techName',
+      'techNo',
+    ]);
   });
 });

@@ -11,8 +11,7 @@ let manager = '';
 let butlerId = 0;
 
 const endpoint = '/api/concierge/workspace';
-const mutate = (cookie: string, action: string, payload: Record<string, unknown>, requestId = randomUUID()) =>
-  api(ctx.app, cookie, 'POST', endpoint, { action, payload, requestId });
+const mutate = (cookie: string, action: string, payload: Record<string, unknown>, requestId = randomUUID()) => api(ctx.app, cookie, 'POST', endpoint, { action, payload, requestId });
 const revision = async () => (await api(ctx.app, butler, 'GET', '/api/concierge/revision')).body.revision as string;
 const profile = (name: string, cardNo: string) => ({ name, phone: '', cardNo, ownerId: String(butlerId), cardTier: '', preferences: '', source: '整改回归', joinedAt: '2026-11-12' });
 async function newMember(name: string, cardNo: string, extra: Record<string, unknown> = {}) {
@@ -21,8 +20,7 @@ async function newMember(name: string, cardNo: string, extra: Record<string, unk
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return r.body.id as string;
 }
-const versionOf = async (table: 'concierge_members' | 'concierge_records', id: string) =>
-  (await ctx.sql.unsafe<{ version: number }[]>(`SELECT version FROM ${table} WHERE id = $1`, [id]))[0]!.version;
+const versionOf = async (table: 'concierge_members' | 'concierge_records', id: string) => (await ctx.sql.unsafe<{ version: number }[]>(`SELECT version FROM ${table} WHERE id = $1`, [id]))[0]!.version;
 
 describe('8.0.12 管家部 · 主线整改', () => {
   beforeAll(async () => {
@@ -127,7 +125,9 @@ describe('8.0.12 管家部 · 主线整改', () => {
     };
     const saved = await mutate(butler, 'saveReceipt', draft);
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
-    const stored = async () => (await ctx.sql<{ data: { items: unknown[]; rawText: string; itemsText: string; payments: Record<string, unknown>[] } }[]>`SELECT data FROM concierge_records WHERE id = ${saved.body.id}`)[0]!.data;
+    const stored = async () =>
+      (await ctx.sql<{ data: { items: unknown[]; rawText: string; itemsText: string; payments: Record<string, unknown>[] } }[]>`SELECT data FROM concierge_records WHERE id = ${saved.body.id}`)[0]!
+        .data;
     expect(Object.keys((await stored()).payments[0]!).sort()).toEqual(['amountCents', 'memberId', 'method', 'originalMethod']);
     // 列表里的摘要：没有 items / rawText / itemsText / warnings，页面拿它去保存时发的就是空的
     const wiped = await mutate(butler, 'saveReceipt', { ...draft, id: saved.body.id, version: 1, items: [], rawText: '', itemsText: '', warnings: [], note: '只想改个备注' });
@@ -144,7 +144,25 @@ describe('8.0.12 管家部 · 主线整改', () => {
 
   it('作废的凭证不能当余额依据', async () => {
     const memberId = await newMember('依据会员', 'GJ-EVID-1');
-    const r = await mutate(manager, 'saveReceipt', { memberId, number: 'GJ-VOID-001', store: '合成店', occurredAt: '2026-11-12T03:00:00.000Z', kind: '结算单', status: '已作废', amount: '10.00', payments: [], items: [], totals: {}, details: {}, warnings: [], uploadIds: [], rawText: '', itemsText: '', note: '', reason: '录错作废' });
+    const r = await mutate(manager, 'saveReceipt', {
+      memberId,
+      number: 'GJ-VOID-001',
+      store: '合成店',
+      occurredAt: '2026-11-12T03:00:00.000Z',
+      kind: '结算单',
+      status: '已作废',
+      amount: '10.00',
+      payments: [],
+      items: [],
+      totals: {},
+      details: {},
+      warnings: [],
+      uploadIds: [],
+      rawText: '',
+      itemsText: '',
+      note: '',
+      reason: '录错作废',
+    });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const b = await mutate(butler, 'saveBalance', { memberId, expectedBalanceId: null, amount: '50000.00', note: '人工核对', receiptIds: [r.body.id], uploadIds: [] });
     expect(b.status).toBe(400);
@@ -193,7 +211,17 @@ describe('8.0.12 管家部 · 主线整改', () => {
     await expect(ctx.sql`DELETE FROM concierge_members WHERE id = ${id}`).rejects.toMatchObject({ code: 'P0001' });
     await expect(ctx.sql`UPDATE concierge_members SET data = '{}' WHERE id = ${id}`).rejects.toMatchObject({ code: 'P0001' });
     await expect(ctx.sql`UPDATE concierge_members SET created_by = ${ctx.ownerId}, version = version + 1 WHERE id = ${id}`).rejects.toMatchObject({ code: 'P0001' });
-    const t = await mutate(butler, 'saveTask', { memberId: id, kind: '回访', status: '待处理', assigneeId: String(butlerId), category: '', content: '回访一下', dueAt: '2026-11-13T02:00:00Z', result: '', nextAction: '' });
+    const t = await mutate(butler, 'saveTask', {
+      memberId: id,
+      kind: '回访',
+      status: '待处理',
+      assigneeId: String(butlerId),
+      category: '',
+      content: '回访一下',
+      dueAt: '2026-11-13T02:00:00Z',
+      result: '',
+      nextAction: '',
+    });
     expect(t.status, JSON.stringify(t.body)).toBe(200);
     await expect(ctx.sql`UPDATE concierge_records SET data = data || '{"status":"已完成"}'::jsonb WHERE id = ${t.body.id}`).rejects.toMatchObject({ code: 'P0001' });
     await expect(ctx.sql`UPDATE concierge_sync SET revision = -1`).rejects.toMatchObject({ code: '23514' });

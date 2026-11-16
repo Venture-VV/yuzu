@@ -46,19 +46,7 @@ import { loadSettings } from '../settings';
 import { withSpendQuota } from '../spend-quota';
 import { lockPaymentShift, lockRefundShift, openShiftOf, shiftDrawerLabel } from '../shifts';
 import { consumeForCheckout, reverseForCheckout } from '../wallet';
-import {
-  assertOpen,
-  businessDate,
-  closeGroupIfEmpty,
-  hashRequest,
-  loadFrontdeskRules,
-  lockGroups,
-  lockVisits,
-  nextDocNo,
-  runIdempotent,
-  saveKey,
-  setTxTimeouts,
-} from './common';
+import { assertOpen, businessDate, closeGroupIfEmpty, hashRequest, loadFrontdeskRules, lockGroups, lockVisits, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './common';
 import { assertAfterVisits, assertNotReused, backfillDetail, BackfillInput, backfillMarkSql, normalizeMark, recordBackfill, resolveBackfill } from './backfill';
 import { openSessionsOf, settleSessionsAtCheckout } from '../clockroom';
 import { locateGone, locateSessionEnd } from '../locations';
@@ -99,10 +87,7 @@ const WalletPayment = z.object({
 const CouponPayment = z.object({
   method: z.literal('coupon'),
   platform: z.enum(COUPON_PLATFORMS, '请选择团购平台'),
-  code: z
-    .string('请填写完整券码')
-    .transform(normalizeCouponCode)
-    .pipe(z.string().regex(COUPON_CODE_PATTERN, '请填写完整券码（6–64 位数字或字母）')),
+  code: z.string('请填写完整券码').transform(normalizeCouponCode).pipe(z.string().regex(COUPON_CODE_PATTERN, '请填写完整券码（6–64 位数字或字母）')),
   dealName: z.string().trim().max(48, '团购项目最多 48 字').default(''),
   amount: positiveCents('抵扣金额'),
   /** 平台验券（8.0.21）：验过的那一次；入账时核对平台、券码、金额 = 面值。不带时不进入请求摘要 */
@@ -155,7 +140,10 @@ export const CheckoutInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
   visitIds: z.array(z.number().int().positive()).min(1, '请选择要结账的手牌').max(30, '一次最多合并 30 张手牌'),
   /** 还没有选票种的客人（Batch 3 之前开的牌）在结账时补选 */
-  tickets: z.array(z.object({ visitId: z.number().int().positive(), ticketTypeId: z.number().int().positive() })).max(30).default([]),
+  tickets: z
+    .array(z.object({ visitId: z.number().int().positive(), ticketTypeId: z.number().int().positive() }))
+    .max(30)
+    .default([]),
   /** 员工确认时看到的应收合计（含门票）；与服务端此刻计算的不一致时拒绝 */
   expectedTotal: cents('应收合计'),
   payments: z.array(Payment).max(10, '收款最多 10 笔').default([]),
@@ -168,7 +156,12 @@ export type CheckoutInputData = z.input<typeof CheckoutInput>;
 export const VoidCheckoutInput = z.object({
   reason: z.string().trim().min(2, '请填写反结账原因（至少 2 个字）').max(200, '原因最多 200 字'),
   /** 跨钱箱退款（v0.7.1）：退款记到这个班次（所选钱箱当班的班次）；不带时记到反结账人自己的班次（原来的做法） */
-  refundShiftId: z.number('钱箱班次不正确').int('钱箱班次不正确').positive('钱箱班次不正确').nullish().transform((v) => v ?? undefined),
+  refundShiftId: z
+    .number('钱箱班次不正确')
+    .int('钱箱班次不正确')
+    .positive('钱箱班次不正确')
+    .nullish()
+    .transform((v) => v ?? undefined),
 });
 
 // ───────────────────────── 结账前核对 ─────────────────────────
@@ -233,7 +226,11 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
     // 充值当日的储值额度（8.0.4 需求表 04）：选储值支付时页面显示剩余额度、超了先拦
     const members = await withSpendQuota(tx, memberRows, date, (await loadSettings(tx)).rechargeSpendPct);
     // 浴票延迟（v0.7.25 续）：会员的门票在跳档宽限之上多给几分钟（按此刻推算的档阶，与结账时同一算法）
-    const extensions = await memberTicketExtensions(tx, rows.map((r) => r.memberId), date);
+    const extensions = await memberTicketExtensions(
+      tx,
+      rows.map((r) => r.memberId),
+      date,
+    );
     const visits = rows.map((r) => {
       const extension = r.memberId ? (extensions.get(Number(r.memberId)) ?? null) : null;
       const graceMinutes = rules.overtimeGraceMinutes + (extension?.minutes ?? 0);
@@ -273,7 +270,10 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
     // 会员的券（v0.7.20）：按已挂的明细加上此刻的门票算能抵多少
     const memberIds = members.map((m) => m.id);
     const couponBase = withTicketLines(
-      await couponLines(tx, rows.map((r) => r.billId)),
+      await couponLines(
+        tx,
+        rows.map((r) => r.billId),
+      ),
       visits.flatMap((v) => (v.ticket ? [{ visitId: v.visitId, typeId: v.ticket.typeId, name: v.ticket.name, amount: v.ticket.amount }] : [])),
     );
     const storeCoupons = await memberCouponOptions(tx, memberIds, couponBase, date);
@@ -291,7 +291,7 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
                 memberId: v.memberId,
                 memberName: v.memberName ?? '',
                 tagCode: v.tagCode,
-                ticket: v.ticket ? withTicketLines([], [{ visitId: v.visitId, typeId: v.ticket.typeId, name: v.ticket.name, amount: v.ticket.amount }])[0] ?? null : null,
+                ticket: v.ticket ? (withTicketLines([], [{ visitId: v.visitId, typeId: v.ticket.typeId, name: v.ticket.name, amount: v.ticket.amount }])[0] ?? null) : null,
               },
             ]
           : [],
@@ -305,7 +305,7 @@ export async function previewCheckout(deps: Deps, visitIds: number[], at = new D
               {
                 billId: v.billId,
                 tagCode: v.tagCode,
-                ticket: v.ticket ? withTicketLines([], [{ visitId: v.visitId, typeId: v.ticket.typeId, name: v.ticket.name, amount: v.ticket.amount }])[0] ?? null : null,
+                ticket: v.ticket ? (withTicketLines([], [{ visitId: v.visitId, typeId: v.ticket.typeId, name: v.ticket.name, amount: v.ticket.amount }])[0] ?? null) : null,
               },
             ],
       ),
@@ -382,17 +382,13 @@ export function splitPayments(payments: CheckoutPaymentInput[], actor: OpContext
 export function assertSettled(payments: CheckoutPaymentInput[], total: number) {
   const paid = payments.reduce((s, p) => s + p.amount, 0);
   if (paid !== total) {
-    throw unprocessable(
-      'NOT_SETTLED',
-      paid < total
-        ? `还差 ${formatYuan(total - paid)} 没有收，结清才能离店`
-        : `收款合计多了 ${formatYuan(paid - total)}，请核对（现金找零不用登记，按应收金额记）`,
-      { total, paid },
-    );
+    throw unprocessable('NOT_SETTLED', paid < total ? `还差 ${formatYuan(total - paid)} 没有收，结清才能离店` : `收款合计多了 ${formatYuan(paid - total)}，请核对（现金找零不用登记，按应收金额记）`, {
+      total,
+      paid,
+    });
   }
   return paid;
 }
-
 
 /**
  * 部门营业额快照（v0.7.6）：记好收款（含优惠 / 免单）之后调用，按这次要结的有效明细记下各部门、各项目的数量与金额，
@@ -521,7 +517,9 @@ export async function recordCheckoutPayments(
   }
   // 现金类；扫码收款的（8.0.21）在已有的锁之后按交易 id 升序锁交易行，核对到账、没被用过、方式与金额一致，参考号记支付方单号
   const cashPays = a.payments.flatMap((p) =>
-    p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount' || p.method === 'store_coupon' || p.method === 'member_discount' || p.method === 'count_card' || p.method === 'on_account' ? [] : [p],
+    p.method === 'wallet' || p.method === 'coupon' || p.method === 'discount' || p.method === 'store_coupon' || p.method === 'member_discount' || p.method === 'count_card' || p.method === 'on_account'
+      ? []
+      : [p],
   );
   for (const p of [...cashPays].sort((x, y) => (x.payTxId ?? 0) - (y.payTxId ?? 0))) {
     if (p.payTxId) {
@@ -570,7 +568,10 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     // ② 同行组 → ③ 来访 → 账单；加锁后核对同行组没有被其他终端改过
     const peek = await tx<{ id: number; groupId: number | null }[]>`SELECT id, group_id FROM visits WHERE id IN ${tx(ids)}`;
     if (peek.length !== ids.length) throw notFound('有手牌的来访记录不存在，请刷新后重试');
-    await lockGroups(tx, peek.map((p) => p.groupId));
+    await lockGroups(
+      tx,
+      peek.map((p) => p.groupId),
+    );
     const locked = await lockVisits(tx, ids);
     for (const p of peek) {
       const v = locked.get(p.id)!;
@@ -616,7 +617,11 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     }
     const date = await businessDate(tx, deps, at);
     // 浴票延迟（v0.7.25 续）：会员此刻的档阶多给几分钟不跳档（只读、不加锁；会员一行仍在下面的会员折扣里按 id 升序锁）
-    const extensions = await memberTicketExtensions(tx, rows.map((r) => r.memberId), date);
+    const extensions = await memberTicketExtensions(
+      tx,
+      rows.map((r) => r.memberId),
+      date,
+    );
     const priced = rows.map((r) => {
       const extension = r.memberId ? (extensions.get(Number(r.memberId)) ?? null) : null;
       const t = priceTicket({ price12h: r.price12h!, price24h: r.price24h! }, r.checkedInAt, ticketEnd(r, at), rules.overtimeGraceMinutes + (extension?.minutes ?? 0));
@@ -632,9 +637,7 @@ export async function checkout(deps: Deps, raw: CheckoutInputData, ctx: OpContex
     const paid = assertSettled(input.payments, total);
 
     // 优惠 / 免单：核销值班经理及以上的当场授权（这几张手牌、这个金额；业务回滚时核销一起回滚）
-    const discount = discounts[0]
-      ? await consumeDiscountGrant(tx, { grantId: discounts[0].grantId, actor: ctx.actor, visitIds: ids, amount: discounts[0].amount, usedRef: `checkout:${key}` })
-      : null;
+    const discount = discounts[0] ? await consumeDiscountGrant(tx, { grantId: discounts[0].grantId, actor: ctx.actor, visitIds: ids, amount: discounts[0].amount, usedRef: `checkout:${key}` }) : null;
 
     const checkoutNo = await nextDocNo(tx, 'checkout', 'JZ', date);
     const [c] = await tx<{ id: number }[]>`
@@ -798,8 +801,14 @@ export async function voidCheckout(deps: Deps, checkoutId: number, raw: unknown,
       if (inStore) throw conflict('MEMBER_IN_STORE', `会员「${inStore.name}」已持有其他在店手牌，不能反结账`);
     }
     // ② 同行组 → ③ 来访 → 账单
-    await lockGroups(tx, items.map((i) => i.groupId));
-    const visits = await lockVisits(tx, items.map((i) => i.visitId));
+    await lockGroups(
+      tx,
+      items.map((i) => i.groupId),
+    );
+    const visits = await lockVisits(
+      tx,
+      items.map((i) => i.visitId),
+    );
     for (const v of visits.values()) {
       if (v.status !== 'settled') throw conflict('VISIT_CHANGED', `来访 ${v.visitNo} 状态已变化，请刷新后重试`);
     }
@@ -946,4 +955,3 @@ export async function findCoupon(db: Db, platform: CouponPlatform, rawCode: stri
     FROM group_buy_coupons g JOIN checkouts c ON c.id = g.checkout_id JOIN staff s ON s.id = g.registered_by
     WHERE g.platform = ${platform} AND g.code = ${code} ORDER BY g.id DESC`;
 }
-

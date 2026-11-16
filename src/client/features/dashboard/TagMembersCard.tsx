@@ -73,7 +73,14 @@ export function TagMembersCard() {
               {report.data ? `共 ${report.data.count} 位会员` : '统计中…'}
             </span>
             <span className="flex-1" />
-            <Button size="sm" variant="secondary" icon={<Download className="size-4" />} disabled={!report.data?.count} onClick={() => downloadUrl(`/api/member-tags/members.csv?${query}`)} data-testid="tag-members-export">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Download className="size-4" />}
+              disabled={!report.data?.count}
+              onClick={() => downloadUrl(`/api/member-tags/members.csv?${query}`)}
+              data-testid="tag-members-export"
+            >
               导出名单
             </Button>
           </div>
@@ -114,4 +121,3 @@ export function TagMembersCard() {
     </Card>
   );
 }
-

@@ -1,7 +1,23 @@
 // 门店主导航的入口：主导航按它显示；ERP 顶栏的「返回门店」也按它判断门店那边有没有能用的页面、回到哪一页。
 // 库存、采购、货款、待办在 ERP 工作区（v0.7.3，用户菜单「进入 ERP」），不在这里。
 
-import { BedDouble, CalendarCheck2, CalendarClock, ClipboardCheck, ConciergeBell, Hourglass, MapPinned, Printer, ReceiptText, ScanSearch, Settings2, UsersRound, UtensilsCrossed, HandHeart, BriefcaseBusiness } from 'lucide-react';
+import {
+  BedDouble,
+  CalendarCheck2,
+  CalendarClock,
+  ClipboardCheck,
+  ConciergeBell,
+  Hourglass,
+  MapPinned,
+  Printer,
+  ReceiptText,
+  ScanSearch,
+  Settings2,
+  UsersRound,
+  UtensilsCrossed,
+  HandHeart,
+  BriefcaseBusiness,
+} from 'lucide-react';
 import { ADMIN_ENTRY_PERMISSIONS } from '@shared/admin';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../lib/session';
@@ -65,7 +81,5 @@ export function storePageOf(pathname: string): StoreNavItem | null {
 export function useStoreNav(): StoreNavItem[][] {
   const can = useCan();
   const session = useSession();
-  return STORE_NAV.map((group) => group.filter((n) => (Array.isArray(n.perm) ? n.perm : [n.perm]).some((p) => can(p)) && (!n.when || n.when(session)))).filter(
-    (group) => group.length > 0,
-  );
+  return STORE_NAV.map((group) => group.filter((n) => (Array.isArray(n.perm) ? n.perm : [n.perm]).some((p) => can(p)) && (!n.when || n.when(session)))).filter((group) => group.length > 0);
 }

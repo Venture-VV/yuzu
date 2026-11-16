@@ -35,7 +35,11 @@ export async function dashboard(db: Db, today: string, days: number, opts: { inS
   const open = await db<{ checkedInAt: string; price12h: number | null; price24h: number | null; ticketEndAt: string | null; memberId: number | null; now: string }[]>`
     SELECT checked_in_at, ticket_price_12h AS price12h, ticket_price_24h AS price24h, ticket_end_at, member_id, now() AS now
     FROM visits WHERE status = 'open' AND ${storeIn(db, 'store_id')}`;
-  const extensions = await memberTicketExtensions(db, open.map((v) => v.memberId), today);
+  const extensions = await memberTicketExtensions(
+    db,
+    open.map((v) => v.memberId),
+    today,
+  );
   let ticketEstimate = 0;
   for (const v of open) {
     if (v.price12h === null || v.price24h === null) continue;

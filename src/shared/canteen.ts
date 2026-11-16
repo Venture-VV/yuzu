@@ -90,7 +90,12 @@ export function mealWindowsOverlap(a: MealWindow, b: MealWindow): boolean {
   const spans = (w: MealWindow): [number, number][] => {
     const s = toMinute(w.start);
     const e = toMinute(w.end);
-    return s < e ? [[s, e]] : [[s, 1440], [0, e]];
+    return s < e
+      ? [[s, e]]
+      : [
+          [s, 1440],
+          [0, e],
+        ];
   };
   return spans(a).some(([s1, e1]) => spans(b).some(([s2, e2]) => s1 < e2 && s2 < e1));
 }
@@ -195,8 +200,7 @@ export function base32(bytes: Uint8Array, length: number): string {
 }
 
 /** 饭卡码：YZC1:<员工编号>:<时间段>:<签名>，编号与时间段用大写 36 进制 */
-export const formatCanteenCode = (employeeId: number, step: number, mac: string) =>
-  `${CODE_PREFIX}:${employeeId.toString(36).toUpperCase()}:${step.toString(36).toUpperCase()}:${mac}`;
+export const formatCanteenCode = (employeeId: number, step: number, mac: string) => `${CODE_PREFIX}:${employeeId.toString(36).toUpperCase()}:${step.toString(36).toUpperCase()}:${mac}`;
 
 /** base64url（不带 =）解成字节：码钥匙是这样交给手机的 */
 export function fromBase64Url(text: string): Uint8Array {

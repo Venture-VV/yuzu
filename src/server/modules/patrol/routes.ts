@@ -65,12 +65,7 @@ export function registerPatrolAdminRoutes(app: FastifyInstance, deps: Deps) {
  * 员工端口上的巡场接口（在柚子饭堂的 Fastify 实例里挂）：登录与来源核对、「员工食堂」开没开都由员工端口的钩子先管，
  * 这里另外核对「安保巡场」模块开没开（缓存 3 秒，与员工食堂的开关一样）。
  */
-export function registerPatrolPortalRoutes(
-  app: FastifyInstance,
-  sql: Sql,
-  config: AppConfig,
-  opts: { who: (req: FastifyRequest) => CanteenSessionEmployee; now: () => number; openCacheMs?: number },
-) {
+export function registerPatrolPortalRoutes(app: FastifyInstance, sql: Sql, config: AppConfig, opts: { who: (req: FastifyRequest) => CanteenSessionEmployee; now: () => number; openCacheMs?: number }) {
   const cacheMs = opts.openCacheMs ?? 3000;
   let cache: { at: number; open: boolean } | null = null;
   const assertOpen = async () => {

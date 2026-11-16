@@ -35,7 +35,7 @@ import {
   type FloorplanRoomStatus,
 } from '@shared/floorplans';
 import { can } from '@shared/permissions';
-import type { Db, Sql, Tx } from '../db';
+import type { Db, Sql } from '../db';
 import { isUniqueViolation } from '../db';
 import { guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -462,14 +462,7 @@ export class FloorplanJobs {
   }
 }
 
-export async function uploadFloorplan(
-  db: Sql,
-  jobs: FloorplanJobs,
-  raw: unknown,
-  actor: Actor,
-  ip?: string,
-  timeZone = 'Asia/Shanghai',
-): Promise<{ batch: FloorplanBatch; replayed: boolean }> {
+export async function uploadFloorplan(db: Sql, jobs: FloorplanJobs, raw: unknown, actor: Actor, ip?: string, timeZone = 'Asia/Shanghai'): Promise<{ batch: FloorplanBatch; replayed: boolean }> {
   const input = parse(UploadSchema, raw);
   if (input.receivedOn > todayIn(timeZone)) throw unprocessable('FUTURE_DATE', '收图日期不能晚于今天');
   const bytes = Buffer.from(input.contentBase64, 'base64');
@@ -662,7 +655,11 @@ export async function floorplanChecks(db: Db): Promise<{ label: string; ok: bool
 
 // ───────────────────────── 路由 ─────────────────────────
 
-export function registerFloorplanRoutes(app: FastifyInstance, deps: Deps, jobs = new FloorplanJobs(deps.sql, FLOORPLAN_TIMEOUT_MS, (msg, err) => (err ? app.log.error({ err }, msg) : app.log.info(msg)))) {
+export function registerFloorplanRoutes(
+  app: FastifyInstance,
+  deps: Deps,
+  jobs = new FloorplanJobs(deps.sql, FLOORPLAN_TIMEOUT_MS, (msg, err) => (err ? app.log.error({ err }, msg) : app.log.info(msg))),
+) {
   const { sql } = deps;
   const ADMIN = ['settings.manage', 'catalog.manage'] as const;
   // 与空间台账同一组权限（店主、店总）

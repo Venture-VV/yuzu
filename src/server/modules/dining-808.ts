@@ -76,7 +76,14 @@ const LedgerQuery = z.object({
   categories: z
     .string()
     .optional()
-    .transform((v) => (v ? v.split(',').map((x) => x.trim()).filter(Boolean) : [])),
+    .transform((v) =>
+      v
+        ? v
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean)
+        : [],
+    ),
   status: z.enum(['active', 'voided', 'all']).default('all'),
 });
 export type DiningLedgerQuery = z.output<typeof LedgerQuery>;
@@ -144,10 +151,24 @@ export function diningLedgerCsv(l: DiningLedger, timeZone: string): string {
       yuan(r.amount),
       r.status === 'active' ? '有效' : '已退',
       r.voidReason ?? '',
-      r.kitchenStatus ? KITCHEN_TEXT[r.kitchenStatus] ?? r.kitchenStatus : '',
+      r.kitchenStatus ? (KITCHEN_TEXT[r.kitchenStatus] ?? r.kitchenStatus) : '',
       r.postedByName,
     ]),
-    ['合计', '', '', '', `${l.totals.lines} 条（有效 ${l.totals.lines - l.totals.voidedLines}、已退 ${l.totals.voidedLines}）`, '', l.totals.quantity, '', yuan(l.totals.amount), '有效金额', `已退 ${yuan(l.totals.voidedAmount)}`, '', ''],
+    [
+      '合计',
+      '',
+      '',
+      '',
+      `${l.totals.lines} 条（有效 ${l.totals.lines - l.totals.voidedLines}、已退 ${l.totals.voidedLines}）`,
+      '',
+      l.totals.quantity,
+      '',
+      yuan(l.totals.amount),
+      '有效金额',
+      `已退 ${yuan(l.totals.voidedAmount)}`,
+      '',
+      '',
+    ],
   ]);
 }
 
@@ -181,8 +202,7 @@ export async function dishVoids(db: Db, deps: Deps, q: { from: string; to: strin
 }
 
 export function dishVoidsCsv(rows: DishVoidRow[], timeZone: string): string {
-  const at = (iso: string) =>
-    new Intl.DateTimeFormat('zh-CN', { timeZone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
+  const at = (iso: string) => new Intl.DateTimeFormat('zh-CN', { timeZone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
   const yuan = (c: number) => (c / 100).toFixed(2);
   return toCsv([
     ['退菜时间', '手牌', '桌台', '菜名', '数量', '金额', '原因', '谁退的', '谁点的', '怎么批的'],

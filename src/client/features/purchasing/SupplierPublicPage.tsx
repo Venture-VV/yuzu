@@ -266,7 +266,9 @@ function NameField({ name, setName }: { name: string; setName: (v: string) => vo
 
 function QuoteForm({ token, view, onDone }: { token: string; view: SupplierPublicView; onDone: (v: SupplierPublicView) => void }) {
   const q = view.quote;
-  const [prices, setPrices] = useState<Record<number, string>>(() => Object.fromEntries(view.snapshot.lines.map((l) => [l.lineId, q ? centsToInput(q.prices.find((p) => p.lineId === l.lineId)?.priceCents ?? 0) : ''])));
+  const [prices, setPrices] = useState<Record<number, string>>(() =>
+    Object.fromEntries(view.snapshot.lines.map((l) => [l.lineId, q ? centsToInput(q.prices.find((p) => p.lineId === l.lineId)?.priceCents ?? 0) : ''])),
+  );
   const [freight, setFreight] = useState(q ? centsToInput(q.freightCents) : '0');
   const [payTerms, setPayTerms] = useState(q?.payTerms ?? '');
   const [deliveryDays, setDeliveryDays] = useState(q?.deliveryDays?.toString() ?? '');
@@ -298,7 +300,15 @@ function QuoteForm({ token, view, onDone }: { token: string; view: SupplierPubli
         view={view}
         head="含税单价（元 / 采购单位）"
         cell={(id) => (
-          <Input inputMode="decimal" value={prices[id] ?? ''} disabled={!view.open} onChange={(e) => setPrices({ ...prices, [id]: e.target.value })} className="h-9 w-32" aria-label="单价" data-testid={`sp-price-${id}`} />
+          <Input
+            inputMode="decimal"
+            value={prices[id] ?? ''}
+            disabled={!view.open}
+            onChange={(e) => setPrices({ ...prices, [id]: e.target.value })}
+            className="h-9 w-32"
+            aria-label="单价"
+            data-testid={`sp-price-${id}`}
+          />
         )}
       />
       {pending && <PendingReplyNotice pending={pending} busy={busy} onResend={() => void resend()} />}
@@ -384,7 +394,14 @@ function ConfirmForm({ token, view, onDone }: { token: string; view: SupplierPub
             </Field>
             <NameField name={name} setName={setName} />
             {error && <Notice tone="error" title={error} />}
-            <Button variant="primary" className="w-full" loading={busy} disabled={!!problem} onClick={() => void submit({ name: name.trim(), promisedDate, note: note.trim() }, `确认：承诺 ${promisedDate} 到货，${name.trim()}`)} data-testid="sp-submit">
+            <Button
+              variant="primary"
+              className="w-full"
+              loading={busy}
+              disabled={!!problem}
+              onClick={() => void submit({ name: name.trim(), promisedDate, note: note.trim() }, `确认：承诺 ${promisedDate} 到货，${name.trim()}`)}
+              data-testid="sp-submit"
+            >
               {problem ?? '确认能供，按这个日期送到'}
             </Button>
           </>
@@ -403,9 +420,7 @@ function DeliveryForm({ token, view, onDone }: { token: string; view: SupplierPu
   const [note, setNote] = useState('');
   const [name, setName] = useState('');
   const { busy, error, sent, submit, pending, resend } = useSubmit(token, onDone);
-  const lines = view.snapshot.lines
-    .map((l) => ({ lineId: l.lineId, qtyMilli: (qty[l.lineId] ?? '').trim() ? parseQty(qty[l.lineId]!) : 0 }))
-    .filter((x) => x.qtyMilli !== 0);
+  const lines = view.snapshot.lines.map((l) => ({ lineId: l.lineId, qtyMilli: (qty[l.lineId] ?? '').trim() ? parseQty(qty[l.lineId]!) : 0 })).filter((x) => x.qtyMilli !== 0);
   const problem = lines.some((x) => x.qtyMilli === null || (x.qtyMilli ?? 0) <= 0)
     ? '发货数量写数字'
     : !lines.length
@@ -444,7 +459,9 @@ function DeliveryForm({ token, view, onDone }: { token: string; view: SupplierPu
           <LinesTable
             view={view}
             head="这一批发多少（采购单位）"
-            cell={(id) => <Input inputMode="decimal" value={qty[id] ?? ''} onChange={(e) => setQty({ ...qty, [id]: e.target.value })} className="h-9 w-28" aria-label="发货数量" data-testid={`sp-qty-${id}`} />}
+            cell={(id) => (
+              <Input inputMode="decimal" value={qty[id] ?? ''} onChange={(e) => setQty({ ...qty, [id]: e.target.value })} className="h-9 w-28" aria-label="发货数量" data-testid={`sp-qty-${id}`} />
+            )}
           />
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="发货日" htmlFor="sp-ship">

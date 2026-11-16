@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { shiftDate } from '../src/shared/labels';
 import type { Deps } from '../src/server/lib/context';
 import { consume } from '../src/server/modules/wallet';
-import { api, consumeBody, createMember, login, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
+import { api, createMember, login, PASSWORD, rechargeBody, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 beforeAll(async () => {

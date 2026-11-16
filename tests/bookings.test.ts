@@ -164,7 +164,11 @@ describe('可约时段与前台新建', () => {
     expect(arrived.status, JSON.stringify(arrived.body)).toBe(200);
     expect(arrived.body).toMatchObject({ status: 'arrived', arrivalTagCode: tag });
     expect(arrived.body.arrivalRef).toMatch(/^SY/);
-    const usage = (await api(ctx.app, ctx.clerk, 'GET', `/api/usages?date=${(await api(ctx.app, ctx.clerk, 'GET', '/api/auth/me')).body.today}`)).body as { usageNo: string; note: string; guests: number }[];
+    const usage = (await api(ctx.app, ctx.clerk, 'GET', `/api/usages?date=${(await api(ctx.app, ctx.clerk, 'GET', '/api/auth/me')).body.today}`)).body as {
+      usageNo: string;
+      note: string;
+      guests: number;
+    }[];
     expect(usage.find((u) => u.usageNo === arrived.body.arrivalRef)).toMatchObject({ note: `预约 ${party.bookingNo}`, guests: 8 });
     const ns = (await board()).bookings.find((x) => x.kind === 'room' && x.status === 'confirmed')!;
     expect((await change(ns.id, { action: 'no_show' })).body.status).toBe('no_show');
@@ -261,7 +265,12 @@ describe('每分钟的自动处理', () => {
     const m = await member('自动处理会员');
     const s = (await slots({ kind: 'space', date: tomorrow, spaceId, durationMinutes: 120 })).filter((x) => x.free > 0);
     const pending = await mp({ memberId: m, kind: 'space', spaceId, startsAt: s[0]!.startsAt, durationMinutes: 120, claimKey: 'auto-1' });
-    const front = await create({ kind: 'technician', itemId, technicianId: tech.B2, startsAt: (await slots({ kind: 'technician', date: tomorrow, itemId })).filter((x) => x.free > 0).at(-1)!.startsAt });
+    const front = await create({
+      kind: 'technician',
+      itemId,
+      technicianId: tech.B2,
+      startsAt: (await slots({ kind: 'technician', date: tomorrow, itemId })).filter((x) => x.free > 0).at(-1)!.startsAt,
+    });
     expect(front.status, JSON.stringify(front.body)).toBe(200);
     // 小程序那张开始前 50 分钟：自动取消；前台那张还没到时间：不动
     const r1 = await sweepBookings(ctx.sql, new Date(Date.parse(pending.booking.startsAt) - 50 * 60_000));

@@ -30,11 +30,22 @@ async function fixture() {
 }
 async function orderAndDraft() {
   const f = await fixture();
-  const po = await post('/api/purchase-orders', { clientKey: randomUUID(), supplierId: f.supplierId, orderDate: today, approveNow: true,
-    lines: [{ materialId: f.materialId, purchaseQtyMilli: 1000, priceCents: 1000 }] });
+  const po = await post('/api/purchase-orders', {
+    clientKey: randomUUID(),
+    supplierId: f.supplierId,
+    orderDate: today,
+    approveNow: true,
+    lines: [{ materialId: f.materialId, purchaseQtyMilli: 1000, priceCents: 1000 }],
+  });
   expect(po.status, JSON.stringify(po.body)).toBe(201);
-  const receiptBody = { docType: 'receipt', docDate: today, supplierId: f.supplierId, purchaseOrderId: po.body.po.id, coAcceptorId: buyerId,
-    lines: [{ materialId: f.materialId, poLineId: po.body.po.lines[0].id, deliveredMilli: 10000, acceptedMilli: 10000 }] };
+  const receiptBody = {
+    docType: 'receipt',
+    docDate: today,
+    supplierId: f.supplierId,
+    purchaseOrderId: po.body.po.id,
+    coAcceptorId: buyerId,
+    lines: [{ materialId: f.materialId, poLineId: po.body.po.lines[0].id, deliveredMilli: 10000, acceptedMilli: 10000 }],
+  };
   const draft = await post('/api/inventory/docs', { clientKey: randomUUID(), ...receiptBody, action: 'save' });
   expect(draft.status).toBe(201);
   return { ...f, po: po.body.po, draft: draft.body.doc, receiptBody };
@@ -43,30 +54,52 @@ async function orderAndDraft() {
 it.each(['price', 'supplier', 'material'] as const)('收货与采购改版交错（%s）时，旧快照不能入账', async (change) => {
   const f = await fixture();
   const other = await fixture();
-  const order = await post('/api/purchase-orders', { clientKey: randomUUID(), supplierId: f.supplierId, orderDate: today, approveNow: true,
-    lines: [{ materialId: f.materialId, purchaseQtyMilli: 1000, priceCents: 1000 }] });
+  const order = await post('/api/purchase-orders', {
+    clientKey: randomUUID(),
+    supplierId: f.supplierId,
+    orderDate: today,
+    approveNow: true,
+    lines: [{ materialId: f.materialId, purchaseQtyMilli: 1000, priceCents: 1000 }],
+  });
   expect(order.status).toBe(201);
   const po = order.body.po;
   await ctx.sql`INSERT INTO doc_counters (doc_type, business_date, last_no) VALUES ('inv_receipt', ${today}, 0) ON CONFLICT DO NOTHING`;
   let release!: () => void;
   let acquired!: () => void;
-  const locked = new Promise<void>((resolve) => { acquired = resolve; });
-  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const locked = new Promise<void>((resolve) => {
+    acquired = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   const blocker = ctx.sql.begin(async (tx) => {
     await tx`SELECT last_no FROM doc_counters WHERE doc_type = 'inv_receipt' AND business_date = ${today} FOR UPDATE`;
-    acquired(); await gate;
+    acquired();
+    await gate;
   });
   await locked;
-  const receipt = post('/api/inventory/docs', { clientKey: randomUUID(), docType: 'receipt', docDate: today, supplierId: f.supplierId, purchaseOrderId: po.id,
-    coAcceptorId: buyerId, lines: [{ materialId: f.materialId, poLineId: po.lines[0].id, deliveredMilli: 10000, acceptedMilli: 10000 }] });
+  const receipt = post('/api/inventory/docs', {
+    clientKey: randomUUID(),
+    docType: 'receipt',
+    docDate: today,
+    supplierId: f.supplierId,
+    purchaseOrderId: po.id,
+    coAcceptorId: buyerId,
+    lines: [{ materialId: f.materialId, poLineId: po.lines[0].id, deliveredMilli: 10000, acceptedMilli: 10000 }],
+  });
   try {
     await waitForLock('%INSERT INTO doc_counters%');
     const revision = await post(`/api/purchase-orders/${po.id}/revise`, {
-      supplierId: change === 'supplier' ? other.supplierId : f.supplierId, orderDate: today, approveNow: true,
+      supplierId: change === 'supplier' ? other.supplierId : f.supplierId,
+      orderDate: today,
+      approveNow: true,
       lines: [{ id: po.lines[0].id, materialId: change === 'material' ? other.materialId : f.materialId, purchaseQtyMilli: 1000, priceCents: change === 'price' ? 2000 : 1000 }],
     });
     expect(revision.status, JSON.stringify(revision.body)).toBe(200);
-  } finally { release(); await blocker; }
+  } finally {
+    release();
+    await blocker;
+  }
   const result = await receipt;
   expect(result.status, JSON.stringify(result.body)).toBe(409);
   expect(result.body.error.code).toBe('PO_RECEIPT_STALE');
@@ -97,12 +130,20 @@ it('按单收货的价格口径沿用采购单，急采（没有采购单）草�
   expect(await priceBasisOf(receipt.body.doc.id)).toBe(originalBasis);
   // v0.7.11 起没有采购单的收货只能是急采（#19）
   const urgent = { purchaseOrderId: null, coAcceptorId: null, urgent: true, departmentId: deptId };
-  const direct = await post('/api/inventory/docs', { clientKey: randomUUID(), ...f.receiptBody, ...urgent, action: 'save',
-    lines: [{ materialId: f.materialId, deliveredMilli: 1000, acceptedMilli: 1000, priceCents: 1000 }] });
+  const direct = await post('/api/inventory/docs', {
+    clientKey: randomUUID(),
+    ...f.receiptBody,
+    ...urgent,
+    action: 'save',
+    lines: [{ materialId: f.materialId, deliveredMilli: 1000, acceptedMilli: 1000, priceCents: 1000 }],
+  });
   expect(direct.status, JSON.stringify(direct.body)).toBe(201);
   await ctx.sql`UPDATE settings SET value = '"含税到货价"'::jsonb WHERE key = 'inventory_price_basis'`;
-  const edited = await api(ctx.app, ctx.owner, 'PUT', `/api/inventory/docs/${direct.body.doc.id}`, { ...f.receiptBody, ...urgent,
-    lines: [{ materialId: f.materialId, deliveredMilli: 1000, acceptedMilli: 1000, priceCents: 1000 }] });
+  const edited = await api(ctx.app, ctx.owner, 'PUT', `/api/inventory/docs/${direct.body.doc.id}`, {
+    ...f.receiptBody,
+    ...urgent,
+    lines: [{ materialId: f.materialId, deliveredMilli: 1000, acceptedMilli: 1000, priceCents: 1000 }],
+  });
   expect(edited.status).toBe(200);
   expect(await priceBasisOf(edited.body.id)).toBe('含税到货价');
 });
@@ -113,8 +154,12 @@ it('付款与收货冲销交错时，付款不得核销到已冲销的收货单'
   expect(receipt.status).toBe(201);
   let release!: () => void;
   let acquired!: () => void;
-  const locked = new Promise<void>((resolve) => { acquired = resolve; });
-  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const locked = new Promise<void>((resolve) => {
+    acquired = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   const blocker = ctx.sql.begin(async (tx) => {
     await tx`SELECT id FROM materials WHERE id = ${f.materialId} FOR UPDATE`;
     acquired();
@@ -129,21 +174,36 @@ it('付款与收货冲销交错时，付款不得核销到已冲销的收货单'
     for (let i = 0; i < 150; i++) {
       const rows = await ctx.sql`SELECT pid FROM pg_stat_activity WHERE datname = current_database()
         AND wait_event_type = 'Lock' AND query LIKE '%FROM materials WHERE id IN%'`;
-      if (rows.length) { waiting = true; break; }
+      if (rows.length) {
+        waiting = true;
+        break;
+      }
       await delay(10);
     }
     expect(waiting).toBe(true);
     let finished = false;
-    payment = post('/api/payables/payments', { clientKey: randomUUID(), supplierId: f.supplierId, payDate: today, amountCents: 1000,
-      method: 'cash', evidence: '复审合成凭据', allocations: [{ kind: 'receipt', targetId: receipt.body.doc.id, amountCents: 1000 }] });
-    void payment.then(() => { finished = true; });
+    payment = post('/api/payables/payments', {
+      clientKey: randomUUID(),
+      supplierId: f.supplierId,
+      payDate: today,
+      amountCents: 1000,
+      method: 'cash',
+      evidence: '复审合成凭据',
+      allocations: [{ kind: 'receipt', targetId: receipt.body.doc.id, amountCents: 1000 }],
+    });
+    void payment.then(() => {
+      finished = true;
+    });
     for (let i = 0; i < 150 && !finished; i++) {
       const rows = await ctx.sql`SELECT pid FROM pg_stat_activity WHERE datname = current_database()
         AND wait_event_type = 'Lock' AND (query LIKE '%FROM inv_docs%' OR query LIKE '%INSERT INTO payment_allocations%')`;
       if (rows.length) break;
       await delay(10);
     }
-  } finally { release(); await blocker; }
+  } finally {
+    release();
+    await blocker;
+  }
   expect((await voiding).status).toBe(200);
   expect(payment).toBeDefined();
   const result = await payment!;

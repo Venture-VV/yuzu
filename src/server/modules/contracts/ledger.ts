@@ -105,11 +105,7 @@ function toSummary(r: HeaderRow): ContractSummary {
 export type ContractListFilter = 'all' | 'drafting' | 'reviewing' | 'effective' | 'expiring' | 'closed';
 
 /** 台账：按状态、类型、关键字（合同号、标题、相对方）筛；最近更新的在前，最多 300 份 */
-export async function listContracts(
-  db: Db,
-  today: string,
-  f: { filter?: ContractListFilter; category?: ContractCategory; q?: string; entityId?: number } = {},
-): Promise<ContractSummary[]> {
+export async function listContracts(db: Db, today: string, f: { filter?: ContractListFilter; category?: ContractCategory; q?: string; entityId?: number } = {}): Promise<ContractSummary[]> {
   const filter = f.filter ?? 'all';
   const q = f.q ? `%${f.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
   // 到期提醒的天数（C11，8.0.7 起在「门店基本规则 → 可调的数值」里改）
@@ -174,17 +170,19 @@ export async function reviewsOf(db: Db, revisionIds: number[]): Promise<Map<numb
 
 /** 提交记录（合同本身与变更单的，按提交先后倒排） */
 export async function revisionsOf(db: Db, contractId: number): Promise<RevisionView[]> {
-  const rows = await db<{
-    id: number;
-    seq: number;
-    changeId: number | null;
-    changeNo: string | null;
-    versionNo: number | null;
-    content: unknown;
-    submittedByName: string;
-    submittedAt: string;
-    approvalRequestId: number | null;
-  }[]>`
+  const rows = await db<
+    {
+      id: number;
+      seq: number;
+      changeId: number | null;
+      changeNo: string | null;
+      versionNo: number | null;
+      content: unknown;
+      submittedByName: string;
+      submittedAt: string;
+      approvalRequestId: number | null;
+    }[]
+  >`
     SELECT r.id, r.seq, r.change_id, x.change_no, v.version_no, r.content, s.display_name AS submitted_by_name, r.submitted_at, r.approval_request_id
     FROM contract_revisions r JOIN staff s ON s.id = r.submitted_by
     LEFT JOIN contract_changes x ON x.id = r.change_id LEFT JOIN contract_versions v ON v.revision_id = r.id
@@ -214,20 +212,22 @@ export async function revisionsOf(db: Db, contractId: number): Promise<RevisionV
 }
 
 async function sealsOf(db: Db, contractId: number): Promise<SealView[]> {
-  const rows = await db<{
-    id: number;
-    sealNo: string;
-    sealType: SealType;
-    copies: number;
-    operatorId: number;
-    operatorName: string;
-    sealDate: string;
-    purpose: string;
-    status: SealStatus;
-    version: number;
-    createdByName: string;
-    createdAt: string;
-  }[]>`
+  const rows = await db<
+    {
+      id: number;
+      sealNo: string;
+      sealType: SealType;
+      copies: number;
+      operatorId: number;
+      operatorName: string;
+      sealDate: string;
+      purpose: string;
+      status: SealStatus;
+      version: number;
+      createdByName: string;
+      createdAt: string;
+    }[]
+  >`
     SELECT s.id, s.seal_no, s.seal_type, s.copies, s.operator_id, o.display_name AS operator_name, s.seal_date, s.purpose, s.status, s.version,
            c.display_name AS created_by_name, s.created_at
     FROM contract_seals s JOIN staff o ON o.id = s.operator_id JOIN staff c ON c.id = s.created_by
@@ -240,23 +240,25 @@ async function sealsOf(db: Db, contractId: number): Promise<SealView[]> {
 }
 
 async function changesOf(db: Db, contractId: number): Promise<ChangeView[]> {
-  const rows = await db<{
-    id: number;
-    changeNo: string;
-    baseVersion: number;
-    kinds: ChangeKind[];
-    reason: string;
-    draft: unknown;
-    totalCents: number;
-    baseTotalCents: number | null;
-    deltaCents: number;
-    status: ChangeStatus;
-    version: number;
-    resultVersion: number | null;
-    closedReason: string | null;
-    createdByName: string;
-    createdAt: string;
-  }[]>`
+  const rows = await db<
+    {
+      id: number;
+      changeNo: string;
+      baseVersion: number;
+      kinds: ChangeKind[];
+      reason: string;
+      draft: unknown;
+      totalCents: number;
+      baseTotalCents: number | null;
+      deltaCents: number;
+      status: ChangeStatus;
+      version: number;
+      resultVersion: number | null;
+      closedReason: string | null;
+      createdByName: string;
+      createdAt: string;
+    }[]
+  >`
     SELECT x.id, x.change_no, x.base_version, x.kinds, x.reason, x.draft, x.total_cents, x.delta_cents, x.status, x.version, x.result_version,
            x.closed_reason, c.display_name AS created_by_name, x.created_at,
            (SELECT (r.content->>'totalCents')::bigint FROM contract_versions v JOIN contract_revisions r ON r.id = v.revision_id
@@ -301,24 +303,26 @@ async function posOf(db: Db, contractId: number): Promise<ContractPoView[]> {
 
 /** 详情：没生效前的内容取草稿，生效以后取生效的那一版（含单价表） */
 export async function getContract(db: Db, today: string, contractId: number): Promise<ContractDetail> {
-  const [h] = await db<(HeaderRow & {
-    draft: unknown;
-    version: number;
-    renewalOf: number | null;
-    renewalOfNo: string | null;
-    signedOn: string | null;
-    ourSignatory: string | null;
-    theirSignatory: string | null;
-    signedByName: string | null;
-    archiveNo: string | null;
-    archiveLocation: string | null;
-    archivedAt: string | null;
-    closedReason: string | null;
-    closedOn: string | null;
-    closedByName: string | null;
-    createdByName: string;
-    createdAt: string;
-  })[]>`
+  const [h] = await db<
+    (HeaderRow & {
+      draft: unknown;
+      version: number;
+      renewalOf: number | null;
+      renewalOfNo: string | null;
+      signedOn: string | null;
+      ourSignatory: string | null;
+      theirSignatory: string | null;
+      signedByName: string | null;
+      archiveNo: string | null;
+      archiveLocation: string | null;
+      archivedAt: string | null;
+      closedReason: string | null;
+      closedOn: string | null;
+      closedByName: string | null;
+      createdByName: string;
+      createdAt: string;
+    })[]
+  >`
     SELECT x.*, c.draft, c.version, c.renewal_of, ro.contract_no AS renewal_of_no, c.signed_on, c.our_signatory, c.their_signatory,
            sb.display_name AS signed_by_name, c.archive_no, c.archive_location, c.archived_at, c.closed_reason, c.closed_on,
            cb.display_name AS closed_by_name, cr.display_name AS created_by_name, c.created_at
@@ -506,7 +510,10 @@ export async function contractChecks(db: Db): Promise<{ key: string; label: stri
 }
 
 /** 采购单挂的合同与按单价表核对的结果（采购单详情、审批中心的要点、提交时的核对共用；只读） */
-export async function poContract(db: Db, poId: number): Promise<{ contract: { id: number; contractNo: string; title: string } | null; contractNote: string; contractCheck: ContractCheckResult | null }> {
+export async function poContract(
+  db: Db,
+  poId: number,
+): Promise<{ contract: { id: number; contractNo: string; title: string } | null; contractNote: string; contractCheck: ContractCheckResult | null }> {
   const [p] = await db<{ contractId: number | null; contractNo: string | null; title: string | null; contractNote: string }[]>`
     SELECT po.contract_id, c.contract_no, c.title, po.contract_note
     FROM purchase_orders po LEFT JOIN contracts c ON c.id = po.contract_id WHERE po.id = ${poId}`;

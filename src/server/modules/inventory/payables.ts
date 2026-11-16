@@ -33,18 +33,7 @@ import { badRequest, conflict, forbidden, notFound, unprocessable } from '../../
 import { assertNotFenced, lockOpKey } from '../../lib/fences';
 import { erpOpAbandoned } from '../erp-ops';
 import { idParam, parse, positiveCents } from '../../lib/validate';
-import {
-  assertNotFuture,
-  assertSameMonth,
-  dateIn,
-  docDateSchema,
-  loadInventorySettings,
-  logApproval,
-  nextDocNo,
-  overThreshold,
-  setTxTimeouts,
-  todayIn,
-} from './common';
+import { assertNotFuture, assertSameMonth, dateIn, docDateSchema, loadInventorySettings, logApproval, nextDocNo, overThreshold, setTxTimeouts, todayIn } from './common';
 import { hashRequest } from '../../lib/idempotency';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
 import { contractPlan } from '../payments/plan';
@@ -210,7 +199,7 @@ async function lockOpening(tx: Tx, openingId: number) {
     SELECT id, status, supplier_id, amount_cents, as_of_date, created_by, confirmed_at FROM opening_payables WHERE id = ${openingId}`;
   if (!o) throw notFound('期初未付记录不存在');
   await lockSupplier(tx, o.supplierId);
-  const [locked] = await tx<typeof o[]>`
+  const [locked] = await tx<(typeof o)[]>`
     SELECT id, status, supplier_id, amount_cents, as_of_date, created_by, confirmed_at FROM opening_payables WHERE id = ${openingId} FOR UPDATE`;
   return locked!;
 }
@@ -352,11 +341,10 @@ async function assertNoContractReceipts(db: Db, allocations: { kind: 'receipt' |
   if (!(await loadPaymentRules(db)).requireRequestForContractGoods) return assertNoHoldOnReceipts(db, receiptIds);
   const hit = await contractReceiptAmong(db, receiptIds);
   if (hit) {
-    throw unprocessable(
-      'PAYMENT_REQUEST_REQUIRED',
-      `收货单 ${hit.docNo} 挂在合同 ${hit.contractNo} 下，合同的货款要先在「付款」里提付款申请，批了以后按申请登记付款`,
-      { docNo: hit.docNo, contractNo: hit.contractNo },
-    );
+    throw unprocessable('PAYMENT_REQUEST_REQUIRED', `收货单 ${hit.docNo} 挂在合同 ${hit.contractNo} 下，合同的货款要先在「付款」里提付款申请，批了以后按申请登记付款`, {
+      docNo: hit.docNo,
+      contractNo: hit.contractNo,
+    });
   }
 }
 
@@ -376,9 +364,7 @@ export async function checkAllocations(tx: Tx, supplierId: number, allocations: 
     if (a.amountCents > item.openCents) {
       throw conflict(
         'OVER_ALLOCATION',
-        item.openCents <= 0
-          ? `${item.docNo} 已没有未结清金额，不能重复核销`
-          : `${item.docNo} 未结清 ¥${formatAmount(item.openCents)}，本次核销 ¥${formatAmount(a.amountCents)} 超出`,
+        item.openCents <= 0 ? `${item.docNo} 已没有未结清金额，不能重复核销` : `${item.docNo} 未结清 ¥${formatAmount(item.openCents)}，本次核销 ¥${formatAmount(a.amountCents)} 超出`,
         { docNo: item.docNo, openCents: item.openCents },
       );
     }
@@ -404,10 +390,7 @@ export async function assertNotReservedByBatch(tx: Tx, allocations: { kind: 'rec
       AND (${receiptIds.length ? tx`t.receipt_doc_id IN ${tx(receiptIds)}` : tx`false`} OR ${openingIds.length ? tx`t.opening_payable_id IN ${tx(openingIds)}` : tx`false`})
     ORDER BY i.id LIMIT 1`;
   if (hit) {
-    throw conflict(
-      'TARGET_IN_BATCH',
-      `${hit.docNo} 正在批量付款 ${hit.batchNo}（付款申请 ${hit.requestNo}）里：等那一批有结论（记已付、标失败，或作废那一批）以后再登记，免得网银上传那份文件时多付`,
-    );
+    throw conflict('TARGET_IN_BATCH', `${hit.docNo} 正在批量付款 ${hit.batchNo}（付款申请 ${hit.requestNo}）里：等那一批有结论（记已付、标失败，或作废那一批）以后再登记，免得网银上传那份文件时多付`);
   }
 }
 
@@ -520,12 +503,18 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
         // 最后一级同意、确认之前再看一次：核销到的收货单挂着的合同最近一次验收不合格、付款挂起的，不确认（8.0.7 V9，Codex 审查 d8b314b）
         if (p!.paymentRequestId === null) {
           const held = await tx<{ id: number }[]>`SELECT receipt_doc_id AS id FROM payment_allocations WHERE payment_id = ${p!.id} AND receipt_doc_id IS NOT NULL ORDER BY receipt_doc_id`;
-          await assertNoHoldOnReceipts(tx, held.map((r) => Number(r.id)));
+          await assertNoHoldOnReceipts(
+            tx,
+            held.map((r) => Number(r.id)),
+          );
           // 登记以后、确认之前，这几笔货款进了批量付款：不确认（8.0.21）
           const allocs = await tx<{ kind: 'receipt' | 'opening'; targetId: number }[]>`
             SELECT CASE WHEN receipt_doc_id IS NOT NULL THEN 'receipt' ELSE 'opening' END AS kind, coalesce(receipt_doc_id, opening_payable_id) AS target_id
             FROM payment_allocations WHERE payment_id = ${p!.id}`;
-          await assertNotReservedByBatch(tx, allocs.map((a) => ({ kind: a.kind, targetId: Number(a.targetId) })));
+          await assertNotReservedByBatch(
+            tx,
+            allocs.map((a) => ({ kind: a.kind, targetId: Number(a.targetId) })),
+          );
         }
         return confirmPayment(tx, p!, actor, comment);
       }
@@ -545,7 +534,11 @@ export async function actOnPayment(deps: Deps, paymentId: number, action: 'appro
         // 退回后再提交也是新的提交：挂合同的货款要走付款申请（v0.7.32，P7）
         await assertNoContractReceipts(tx, allocs);
         await checkAllocations(tx, p!.supplierId, allocs, p!.id);
-        if (p!.paymentRequestId === null) await assertNotReservedByBatch(tx, allocs.map((a) => ({ kind: a.kind, targetId: Number(a.targetId) })));
+        if (p!.paymentRequestId === null)
+          await assertNotReservedByBatch(
+            tx,
+            allocs.map((a) => ({ kind: a.kind, targetId: Number(a.targetId) })),
+          );
         await tx`UPDATE payments SET status = 'submitted', updated_at = now() WHERE id = ${p!.id}`;
         // 退回后再提交按当时的规则从第一级重新走；没有规则命中按默认规则（与以前一样，退回的再提交都要确认）
         await submitForApproval(tx, 'payment', p!.id, ctx, { fallback: true });
@@ -605,9 +598,7 @@ const CATEGORIZED = (db: Db) => db`
 
 /** 对账单的合计数字（不含明细；对账登记与「登记后有变动」的比较用，v0.7.13） */
 export async function statementTotals(db: Db, supplierId: number, from: string, to: string) {
-  const [r] = await db<
-    { beginCents: number; openingCents: number; receivedCents: number; returnCreditCents: number; paidCents: number; refundedCents: number; endCents: number }[]
-  >`
+  const [r] = await db<{ beginCents: number; openingCents: number; receivedCents: number; returnCreditCents: number; paidCents: number; refundedCents: number; endCents: number }[]>`
     SELECT coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.entry_date < ${from}), 0) AS begin_cents,
            coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.entry_date BETWEEN ${from} AND ${to} AND x.kind = 'opening'), 0) AS opening_cents,
            coalesce(sum(x.amount_delta_cents) FILTER (WHERE x.entry_date BETWEEN ${from} AND ${to} AND x.kind = 'receipt'), 0) AS received_cents,
@@ -828,7 +819,9 @@ const findByKey = async (db: Db, key: string, opType: string, requestHash: strin
 };
 
 export async function getOffset(db: Db, offsetId: number): Promise<ApOffsetDoc> {
-  const [o] = await db<(Omit<ApOffsetDoc, 'lines' | 'supplier' | 'credit'> & { supplierId: number; supplierName: string; creditPaymentId: number | null; creditReturnId: number | null; creditDocNo: string })[]>`
+  const [o] = await db<
+    (Omit<ApOffsetDoc, 'lines' | 'supplier' | 'credit'> & { supplierId: number; supplierName: string; creditPaymentId: number | null; creditReturnId: number | null; creditDocNo: string })[]
+  >`
     SELECT o.id, o.doc_no, o.status, o.offset_date, o.amount_cents, o.note, o.is_synthetic, o.created_at, o.voided_at, o.void_reason,
            cb.display_name AS created_by_name, vb.display_name AS voided_by_name, s.id AS supplier_id, s.name AS supplier_name,
            o.credit_payment_id, o.credit_return_id, coalesce(p.doc_no, d.doc_no) AS credit_doc_no
@@ -930,7 +923,9 @@ export async function voidOffset(deps: Deps, offsetId: number, raw: unknown, act
 }
 
 export async function getRefund(db: Db, refundId: number): Promise<SupplierRefundDoc> {
-  const [r] = await db<(Omit<SupplierRefundDoc, 'supplier' | 'credit'> & { supplierId: number; supplierName: string; creditPaymentId: number | null; creditReturnId: number | null; creditDocNo: string })[]>`
+  const [r] = await db<
+    (Omit<SupplierRefundDoc, 'supplier' | 'credit'> & { supplierId: number; supplierName: string; creditPaymentId: number | null; creditReturnId: number | null; creditDocNo: string })[]
+  >`
     SELECT r.id, r.doc_no, r.status, r.refund_date, r.amount_cents, r.method, r.evidence, r.note, r.posts_ap, r.is_synthetic, r.created_at,
            r.voided_at, r.void_reason, cb.display_name AS created_by_name, vb.display_name AS voided_by_name,
            s.id AS supplier_id, s.name AS supplier_name, r.credit_payment_id, r.credit_return_id, coalesce(p.doc_no, d.doc_no) AS credit_doc_no
@@ -1047,7 +1042,22 @@ export function registerPayableRoutes(app: FastifyInstance, deps: Deps) {
     const st = await readSnapshot(sql, (tx) => statement(tx, q.supplierId, q.from, q.to));
     const csv = toCsv([
       [`供应商对账单 ${st.supplier.code} ${st.supplier.name} ${st.from} 至 ${st.to}（价格口径：${st.priceBasis}；门店内部管理口径，非发票或税务核算）`],
-      ['上期结余', yuan(st.beginCents), '期初未付', yuan(st.openingCents), '收货货款', yuan(st.receivedCents), '退货扣款', yuan(st.returnCreditCents), '付款', yuan(st.paidCents), '供应商退款', yuan(st.refundedCents), '期末余额', yuan(st.endCents)],
+      [
+        '上期结余',
+        yuan(st.beginCents),
+        '期初未付',
+        yuan(st.openingCents),
+        '收货货款',
+        yuan(st.receivedCents),
+        '退货扣款',
+        yuan(st.returnCreditCents),
+        '付款',
+        yuan(st.paidCents),
+        '供应商退款',
+        yuan(st.refundedCents),
+        '期末余额',
+        yuan(st.endCents),
+      ],
       [],
       ['日期', '类型', '单号', '金额（元）', '余额（元）', '说明', '经办'],
       ...st.rows.map((r) => [r.date, (r.isVoid ? '冲销·' : '') + KIND_LABELS[r.kind], r.docNo, yuan(r.amountDeltaCents), yuan(r.balanceCents), r.note, r.operatorName]),
@@ -1058,7 +1068,16 @@ export function registerPayableRoutes(app: FastifyInstance, deps: Deps) {
       [],
       ['可抵扣（预付款、退货余额）'],
       ['单号', '日期', '类型', '金额', '已用', '已核销', '已退款', '可抵扣'],
-      ...st.credits.map((c) => [c.docNo, c.date, c.kind === 'prepayment' ? '预付款' : c.canOffset ? '退货余额' : '现付退货待退款', yuan(c.amountCents), yuan(c.usedCents), yuan(c.offsetCents), yuan(c.refundedCents), yuan(c.availableCents)]),
+      ...st.credits.map((c) => [
+        c.docNo,
+        c.date,
+        c.kind === 'prepayment' ? '预付款' : c.canOffset ? '退货余额' : '现付退货待退款',
+        yuan(c.amountCents),
+        yuan(c.usedCents),
+        yuan(c.offsetCents),
+        yuan(c.refundedCents),
+        yuan(c.availableCents),
+      ]),
     ]);
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'supplier_statement', targetId: q.supplierId, detail: q, ip: req.ip });
     attachment(reply, `对账单_${st.supplier.code}_${q.from}_${q.to}.csv`, CSV_TYPE);

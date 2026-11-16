@@ -201,7 +201,13 @@ export function PaymentFormPage() {
                 {rows.map(({ i, key, text, err }) => {
                   const checked = text.trim() !== '';
                   return (
-                    <li key={key} className={cn('grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-5 py-3 md:grid-cols-[auto_minmax(0,1fr)_repeat(3,110px)_170px]', checked && 'bg-pine-tint/50')}>
+                    <li
+                      key={key}
+                      className={cn(
+                        'grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-5 py-3 md:grid-cols-[auto_minmax(0,1fr)_repeat(3,110px)_170px]',
+                        checked && 'bg-pine-tint/50',
+                      )}
+                    >
                       <input
                         type="checkbox"
                         aria-label={`核销 ${i.docNo}`}
@@ -213,7 +219,9 @@ export function PaymentFormPage() {
                       <span className="min-w-0">
                         <span className="num block text-[13.5px] font-bold">
                           {i.docNo}
-                          <span className="ml-2 font-sans text-[12px] font-semibold text-ink-3">{i.kind === 'opening' ? '期初未付' : i.purchaseOrderNo ? `采购单 ${i.purchaseOrderNo}` : '直接收货'}</span>
+                          <span className="ml-2 font-sans text-[12px] font-semibold text-ink-3">
+                            {i.kind === 'opening' ? '期初未付' : i.purchaseOrderNo ? `采购单 ${i.purchaseOrderNo}` : '直接收货'}
+                          </span>
                         </span>
                         <span className="block truncate text-[12px] text-ink-3">
                           {i.date} · {i.summary}
@@ -233,7 +241,14 @@ export function PaymentFormPage() {
                         {i.pendingCents > 0 && <span className="block text-[11px] text-yuzu-deep">另有待确认 ¥{formatAmount(i.pendingCents)}</span>}
                       </span>
                       <span>
-                        <MoneyInput value={text} disabled={busy} onChange={(e) => setAlloc((a) => ({ ...a, [key]: e.target.value }))} aria-label={`${i.docNo} 本次核销`} invalid={!!err} className="h-10 text-right" />
+                        <MoneyInput
+                          value={text}
+                          disabled={busy}
+                          onChange={(e) => setAlloc((a) => ({ ...a, [key]: e.target.value }))}
+                          aria-label={`${i.docNo} 本次核销`}
+                          invalid={!!err}
+                          className="h-10 text-right"
+                        />
                         {err && <span className="mt-1 block text-right text-[11.5px] font-semibold text-clay">{err}</span>}
                       </span>
                     </li>
@@ -243,7 +258,11 @@ export function PaymentFormPage() {
             )}
           </section>
 
-          {error && <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>付款没有登记，内容仍保留在页面上。</Notice>}
+          {error && (
+            <Notice tone="error" title={error} icon={<CircleAlert className="size-5" />}>
+              付款没有登记，内容仍保留在页面上。
+            </Notice>
+          )}
         </div>
       </div>
       <footer className="shrink-0 border-t border-line bg-card/95 px-5 py-3 backdrop-blur md:px-7">

@@ -41,10 +41,5 @@ export function lineName(name: string, prices: readonly TierPrice[], tier: Price
 
 /** 项目属性的简短标签，例如「力道适中」「精油」「热疗」「超人气」 */
 export function itemTags(item: { strength: Strength | null; essentialOil: boolean; heatTherapy: boolean; popular: boolean }): string[] {
-  return [
-    ...(item.strength ? [`力道${STRENGTH_LABELS[item.strength]}`] : []),
-    ...(item.essentialOil ? ['精油'] : []),
-    ...(item.heatTherapy ? ['热疗'] : []),
-    ...(item.popular ? ['超人气'] : []),
-  ];
+  return [...(item.strength ? [`力道${STRENGTH_LABELS[item.strength]}`] : []), ...(item.essentialOil ? ['精油'] : []), ...(item.heatTherapy ? ['热疗'] : []), ...(item.popular ? ['超人气'] : [])];
 }

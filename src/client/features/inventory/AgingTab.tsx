@@ -44,7 +44,10 @@ export function AgingTab() {
             <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={slowOnly} onChange={(e) => setSlowOnly(e.target.checked)} data-testid="slow-only" />
             只看呆滞的
           </label>
-          <a href={`/api/inventory/slow-moving/export?${qs}`} className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3">
+          <a
+            href={`/api/inventory/slow-moving/export?${qs}`}
+            className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+          >
             <Download className="size-4" />
             导出
           </a>
@@ -101,7 +104,10 @@ export function AgingTab() {
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-[15px] font-bold">临期批次</h2>
           <span className="text-[12.5px] text-ink-3">管效期的物料按先进先出推算总仓剩下的批次；到期前 {session.rules.expiryRemindDays} 天以内与已过期的</span>
-          <a href="/api/inventory/expiry-lots/export" className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3">
+          <a
+            href="/api/inventory/expiry-lots/export"
+            className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+          >
             <Download className="size-4" />
             导出
           </a>

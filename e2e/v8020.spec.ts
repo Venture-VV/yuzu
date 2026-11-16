@@ -35,7 +35,15 @@ test.describe('8.0.20 进销存做深与客房', () => {
     const today = (await get<{ calendarToday: string }>(page.request, '/api/auth/me')).calendarToday;
     // 准备：一样物料（期初 5 千克，参考价 240 元 / 箱 24 千克 = 10 元 / 千克）、一道进厨房的菜
     const code = `E2E-M${stamp}`;
-    const material = await send<{ id: number }>(page.request, 'post', '/api/inventory/materials', { code, name: `验收鸡肉${stamp}`, inventoryUnit: '千克', decimals: 3, purchaseUnit: '箱', purchaseFactorMilli: 24_000, refPriceCents: 24_000 });
+    const material = await send<{ id: number }>(page.request, 'post', '/api/inventory/materials', {
+      code,
+      name: `验收鸡肉${stamp}`,
+      inventoryUnit: '千克',
+      decimals: 3,
+      purchaseUnit: '箱',
+      purchaseFactorMilli: 24_000,
+      refPriceCents: 24_000,
+    });
     await send(page.request, 'post', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, docType: 'opening', approveNow: true, lines: [{ materialId: material.id, qtyMilli: 5_000 }] });
     const dish = `验收炒鸡${stamp}`;
     const items = await send<{ items: { id: number; name: string }[] }>(page.request, 'post', '/api/items', { name: dish, category: '热菜', price: 4800 });
@@ -70,8 +78,14 @@ test.describe('8.0.20 进销存做深与客房', () => {
 
     // 接待一位客人、点 2 份、出品完成
     const board = await get<{ tags: { code: string; zone: string; kind: string; active: boolean; locked: boolean; visit: { id: number } | null }[] }>(page.request, '/api/frontdesk/board');
-    const tag = board.tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse()[0]!;
-    const checked = await send<{ visits: { id: number }[] }>(page.request, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 扣料' }] });
+    const tag = board.tags
+      .filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+      .map((t) => t.code)
+      .reverse()[0]!;
+    const checked = await send<{ visits: { id: number }[] }>(page.request, 'post', '/api/frontdesk/checkins', {
+      clientKey: randomUUID(),
+      guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 扣料' }],
+    });
     const visitId = checked.visits[0]!.id;
     await send(page.request, 'post', '/api/dining/orders', { clientKey: randomUUID(), visitId, lines: [{ itemId, quantity: 2 }], expectedTotal: 9600 });
     const kitchen = await get<{ items: { id: number; visitId: number; name: string }[] }>(page.request, '/api/kitchen');

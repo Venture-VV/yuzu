@@ -47,6 +47,7 @@ import { cn } from '../../lib/utils';
 import { LogoMark } from '../../components/Brand';
 import { InstanceBadge } from '../../components/InstanceTag';
 import { Notice } from '../../components/ui';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 
 const ICONS: Record<AdminSection, LucideIcon> = {
   home: LayoutGrid,
@@ -151,23 +152,23 @@ export function AdminShell() {
         <span className="hidden text-[12.5px] text-paper/75 md:inline">
           {session.staff.displayName} · {ROLE_LABELS[session.staff.role]}
         </span>
-        <NavLink
-          to="/"
-          className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18"
-          data-testid="admin-exit"
-        >
+        <NavLink to="/" className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18" data-testid="admin-exit">
           <ArrowLeft className="size-4" />
           返回前台
         </NavLink>
       </header>
       {/* 窄屏：分区横排在顶部，可横向滑动 */}
       <nav ref={tabPill.ref} aria-label="后台分区" className="relative flex shrink-0 gap-1.5 overflow-x-auto border-b border-line bg-card px-3 py-2 lg:hidden">
-        {tabPill.style && <span key={tabPill.jump} aria-hidden className={cn('mo-indicator rounded-full bg-pine', tabPill.jump > 0 && 'mo-indicator-jump')} data-settled={tabPill.settled} style={tabPill.style} />}
+        {tabPill.style && (
+          <span key={tabPill.jump} aria-hidden className={cn('mo-indicator rounded-full bg-pine', tabPill.jump > 0 && 'mo-indicator-jump')} data-settled={tabPill.settled} style={tabPill.style} />
+        )}
         {groups.flatMap((g) => g.items).map((k) => link(k, true))}
       </nav>
       <div className="flex min-h-0 flex-1">
         <nav ref={sidePill.ref} aria-label="后台导航" className="scroll-thin relative hidden w-[212px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-line bg-card px-3 py-4 lg:flex">
-          {sidePill.style && <span key={sidePill.jump} aria-hidden className={cn('mo-indicator rounded-lg bg-pine', sidePill.jump > 0 && 'mo-indicator-jump')} data-settled={sidePill.settled} style={sidePill.style} />}
+          {sidePill.style && (
+            <span key={sidePill.jump} aria-hidden className={cn('mo-indicator rounded-lg bg-pine', sidePill.jump > 0 && 'mo-indicator-jump')} data-settled={sidePill.settled} style={sidePill.style} />
+          )}
           {groups.map((g) => (
             <div key={g.title} className="flex flex-col gap-0.5">
               <p className="px-3 pb-1 text-[11.5px] font-bold tracking-wide text-ink-4">{g.title}</p>
@@ -178,7 +179,9 @@ export function AdminShell() {
         {/* 换分区重新挂载、内容区淡入（8.0.16）。按分区那一段地址算（/admin/technicians），分区里换二级页签不重新挂载：
             别的页签里填到一半的东西还在（8.0.17） */}
         <main className="scroll-thin min-h-0 min-w-0 flex-1 animate-page-in overflow-y-auto" key={location.pathname.split('/').slice(0, 3).join('/')}>
-          <Outlet />
+          <ErrorBoundary resetKey={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

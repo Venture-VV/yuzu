@@ -56,9 +56,11 @@ async function hold(statement: (tx: typeof ctx.sql) => Promise<unknown>) {
 
 /** 占住今天某类单号的计数行：第一次拿到业务行的锁之后卡在取单号上 */
 const holdCounter = (docType: string) =>
-  hold((tx) => tx`
+  hold(
+    (tx) => tx`
     INSERT INTO doc_counters (doc_type, business_date, last_no) VALUES (${docType}, ${today}, 0)
-    ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`);
+    ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`,
+  );
 
 /** 第一次卡在 release 之前，第二次排在第一次的锁后面；放行后两次都返回 */
 async function race<T>(release: () => Promise<void>, first: () => Promise<T>, second = first): Promise<[T, T]> {

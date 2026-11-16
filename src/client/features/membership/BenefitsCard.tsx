@@ -133,22 +133,16 @@ export function BenefitsCard({ member }: { member: MemberDetail }) {
                         <span className="text-[12px] text-ink-3">在下方「邀请体验 / 赠送会籍」里赠送</span>
                       ) : (
                         can('benefit.use') && (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={full || pending.length > 0 || member.status !== 'active'}
-                          title={
-                            pending.length > 0
-                              ? '上一次登记结果待确认，请先在上方查回、按原内容重新提交或作废'
-                              : full
-                                ? `${periodSpan(i)}的次数已经用完`
-                                : undefined
-                          }
-                          onClick={() => setUsing(i)}
-                          data-testid={`benefit-use-${i.code}`}
-                        >
-                          登记使用
-                        </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={full || pending.length > 0 || member.status !== 'active'}
+                            title={pending.length > 0 ? '上一次登记结果待确认，请先在上方查回、按原内容重新提交或作废' : full ? `${periodSpan(i)}的次数已经用完` : undefined}
+                            onClick={() => setUsing(i)}
+                            data-testid={`benefit-use-${i.code}`}
+                          >
+                            登记使用
+                          </Button>
                         )
                       )
                     }
@@ -354,7 +348,11 @@ function UseDialog({ item, member, onClose, onDone }: { item: MemberBenefitItem 
       }
     >
       <div className="grid gap-4">
-        {item.conditions && <Notice tone="info" title="使用条件">{item.conditions}</Notice>}
+        {item.conditions && (
+          <Notice tone="info" title="使用条件">
+            {item.conditions}
+          </Notice>
+        )}
         {parking ? (
           <>
             <Field label="车牌" htmlFor="benefit-use-plate" hint={plate && !PLATE_RE.test(plateValue) ? '车牌是 2–12 位汉字、字母或数字（如 粤B12345）' : undefined}>

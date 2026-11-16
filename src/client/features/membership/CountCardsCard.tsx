@@ -7,14 +7,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ticket } from 'lucide-react';
-import {
-  COUNT_CARD_SOURCE_LABELS,
-  COUNT_CARD_STATUS_LABELS,
-  countCardTermsText,
-  defaultCountCardRefund,
-  type CountCard,
-  type CountCardType,
-} from '@shared/count-cards';
+import { COUNT_CARD_SOURCE_LABELS, COUNT_CARD_STATUS_LABELS, countCardTermsText, defaultCountCardRefund, type CountCard, type CountCardType } from '@shared/count-cards';
 import { PAYMENT_METHOD_LABELS, PAYMENT_METHODS, type PaymentMethod } from '@shared/labels';
 import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import type { MemberDetail } from '@shared/types';
@@ -40,8 +33,7 @@ export function CountCardsCard({ member }: { member: MemberDetail }) {
   const [refunding, setRefunding] = useState<CountCard | null>(null);
   const ids = new Set((cards.data ?? []).map((c) => c.id));
   // 售卡的待确认按会员分；退卡的按卡
-  const ofMember = (op: ErpPendingOp) =>
-    op.type === 'count_card_sale' ? (op.body as { memberId?: number }).memberId === member.id : ids.has(Number(op.url.split('/')[3]));
+  const ofMember = (op: ErpPendingOp) => (op.type === 'count_card_sale' ? (op.body as { memberId?: number }).memberId === member.id : ids.has(Number(op.url.split('/')[3])));
   const refresh = () => qc.invalidateQueries({ queryKey: cardsKey(member.id) });
   if (cards.isPending) return <Skeleton className="h-24" />;
   if (cards.error || !cards.data) return <Notice tone="error" title={cards.error?.message ?? '次卡没有加载出来'} />;
@@ -178,7 +170,9 @@ function SellDialog({ member, onClose, onDone }: { member: MemberDetail; onClose
         {types.isPending ? (
           <Skeleton className="h-10" />
         ) : active.length === 0 ? (
-          <Notice tone="warning" title="还没有在售的卡种" >请店主或店总在后台「价目与套餐 → 次卡」里添加。</Notice>
+          <Notice tone="warning" title="还没有在售的卡种">
+            请店主或店总在后台「价目与套餐 → 次卡」里添加。
+          </Notice>
         ) : (
           <Field label="卡种" htmlFor="count-card-type">
             <Select id="count-card-type" value={t?.id ?? ''} onChange={(e) => setTypeId(Number(e.target.value))} data-testid="count-card-type">

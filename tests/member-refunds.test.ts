@@ -181,14 +181,20 @@ describe('退储值', () => {
     const date = done.body.refund.businessDate as string;
     const settle = (await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${date}`)).body;
     expect(settle.memberRefund).toMatchObject({ count: 2, principal: 24000, bonus: 3000 });
-    expect(settle.checks.every((c: { ok: boolean }) => c.ok), JSON.stringify(settle.checks.filter((c: { ok: boolean }) => !c.ok))).toBe(true);
+    expect(
+      settle.checks.every((c: { ok: boolean }) => c.ok),
+      JSON.stringify(settle.checks.filter((c: { ok: boolean }) => !c.ok)),
+    ).toBe(true);
     expect(settle.anomalies.filter((a: { kind: string }) => a.kind === 'member_refund')).toHaveLength(2);
 
     // 对账包：11-储值退回.csv 每一行一笔原收款（第一行带本单合计与经办人），说明里写净充值
     const pack = await buildDailyRecon(ctx.sql, ctx.config, date);
     expect(pack.ok).toBe(true);
     const list = (await api(ctx.app, ctx.clerk, 'GET', `/api/members/${memberId}/refunds`)).body as MemberRefundDetail[];
-    const csv = pack.files.find((f) => f.name === '11-储值退回.csv')!.content.trim().split('\n');
+    const csv = pack.files
+      .find((f) => f.name === '11-储值退回.csv')!
+      .content.trim()
+      .split('\n');
     expect(csv).toHaveLength(1 + list.reduce((t, r) => t + r.lines.length, 0));
     expect(csv.find((l) => l.startsWith(done.body.refund.refundNo))).toContain('90.00');
     expect(pack.files[0]!.content).toContain('储值退回 ¥240.00（2 张，扣回赠金 ¥30.00）');

@@ -207,7 +207,12 @@ export async function emenuMenu(db: Db, deps: Deps): Promise<EmenuMenu> {
     ? await db<{ pageId: number; slotNo: number; dishId: number }[]>`
         SELECT page_id, slot_no, dish_id FROM emenu_page_dishes WHERE page_id IN ${db(pages.map((p) => p.id))} ORDER BY page_id, slot_no`
     : [];
-  const dishes = await dishViews(db, slots.map((s) => Number(s.dishId)), today, diningOn);
+  const dishes = await dishViews(
+    db,
+    slots.map((s) => Number(s.dishId)),
+    today,
+    diningOn,
+  );
 
   const categories: EmenuCategoryView[] = [];
   const later: EmenuMenu['later'] = [];

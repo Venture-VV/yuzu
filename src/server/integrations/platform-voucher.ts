@@ -26,7 +26,13 @@ export interface VoucherBillLine {
 export interface PlatformVoucher {
   mode: 'mock' | 'live';
   prepare(a: { platform: VoucherPlatform; code: string }): Promise<{ ok: true; info: VoucherInfo } | { ok: false; error: string }>;
-  verify(a: { platform: VoucherPlatform; code: string; quantity: number; outNo: string; businessDate: string }): Promise<{ status: 'verified'; verifyNo: string } | { status: 'failed' | 'unknown'; error: string }>;
+  verify(a: {
+    platform: VoucherPlatform;
+    code: string;
+    quantity: number;
+    outNo: string;
+    businessDate: string;
+  }): Promise<{ status: 'verified'; verifyNo: string } | { status: 'failed' | 'unknown'; error: string }>;
   cancel(a: { platform: VoucherPlatform; code: string; verifyNo: string }): Promise<{ ok: boolean; error?: string }>;
   /**
    * 按我们的核销编号（outNo）查这一次核销在平台上的结果，不改平台上的任何东西（8.0.21 Codex 审查 55ccc5e 后补）：
@@ -42,7 +48,9 @@ const mockCancelTimedOut = new Set<string>();
 function mockInfo(platform: VoucherPlatform, code: string): VoucherInfo | null {
   if (code.endsWith('0000')) return null;
   if (code.endsWith('2222')) return { dealName: '双人浴资（模拟）', faceCents: 39_800, settleCents: 36_600, quantity: 2 };
-  return platform === 'meituan' ? { dealName: '单人浴资（模拟）', faceCents: 9_900, settleCents: 9_200, quantity: 1 } : { dealName: '单人浴资·抖音（模拟）', faceCents: 8_800, settleCents: 8_200, quantity: 1 };
+  return platform === 'meituan'
+    ? { dealName: '单人浴资（模拟）', faceCents: 9_900, settleCents: 9_200, quantity: 1 }
+    : { dealName: '单人浴资·抖音（模拟）', faceCents: 8_800, settleCents: 8_200, quantity: 1 };
 }
 
 export const mockPlatformVoucher: PlatformVoucher = {

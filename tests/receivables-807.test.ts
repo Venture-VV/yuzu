@@ -65,7 +65,9 @@ describe('协议单位与结账挂账', () => {
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/erp/receivables/accounts', { code: 'XY09', name: '协议单位甲' })).body.error.code).toBe('NAME_EXISTS');
     const list = (await api(ctx.app, ctx.owner, 'POST', '/api/erp/receivables/accounts', { code: 'XY02', name: '已停用的单位', active: false })).body;
     const off = list.find((a: { code: string }) => a.code === 'XY02');
-    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/erp/receivables/accounts/${off.id}`, { code: 'XY02', name: '已停用的单位', active: false, expectedVersion: 9 })).body.error.code).toBe('VERSION_CONFLICT');
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/erp/receivables/accounts/${off.id}`, { code: 'XY02', name: '已停用的单位', active: false, expectedVersion: 9 })).body.error.code).toBe(
+      'VERSION_CONFLICT',
+    );
     const opts = (await api(ctx.app, ctx.owner, 'GET', '/api/ar-accounts/options')).body as { code: string }[];
     expect(opts.map((o) => o.code)).toEqual(['XY01']);
     // 店员没有「挂账」：看不到协议单位
@@ -99,7 +101,16 @@ describe('协议单位与结账挂账', () => {
     expect(limit.code).toBe('AR_LIMIT');
     await ctx.sql`UPDATE ar_accounts SET credit_limit_cents = NULL WHERE id = ${accountId}`;
     // 一张结账单只能挂一笔
-    expect((await errorOf(pay(manager, [v2], t2, [{ method: 'on_account', accountId, signer: 'a', amount: 1 }, { method: 'on_account', accountId, signer: 'a', amount: t2 - 1 }]))).status).toBe(400);
+    expect(
+      (
+        await errorOf(
+          pay(manager, [v2], t2, [
+            { method: 'on_account', accountId, signer: 'a', amount: 1 },
+            { method: 'on_account', accountId, signer: 'a', amount: t2 - 1 },
+          ]),
+        )
+      ).status,
+    ).toBe(400);
     // 停用的单位
     const [off] = await ctx.sql<{ id: number }[]>`SELECT id FROM ar_accounts WHERE code = 'XY02'`;
     expect((await errorOf(pay(manager, [v2], t2, [{ method: 'on_account', accountId: Number(off!.id), signer: 'a', amount: t2 }]))).code).toBe('AR_ACCOUNT_INVALID');
@@ -119,13 +130,29 @@ describe('回款与核销、反结账', () => {
     const open = before.account.outstandingCents as number;
     expect((await collect({ amountCents: open + 1 })).body.error.code).toBe('OVER_OUTSTANDING');
     const key = randomUUID();
-    const first = await api(ctx.app, ctx.owner, 'POST', '/api/erp/receivables/collections', { clientKey: key, accountId, collectedOn: today, method: 'bank_transfer', amountCents: 10_000, evidence: '流水 8899' });
+    const first = await api(ctx.app, ctx.owner, 'POST', '/api/erp/receivables/collections', {
+      clientKey: key,
+      accountId,
+      collectedOn: today,
+      method: 'bank_transfer',
+      amountCents: 10_000,
+      evidence: '流水 8899',
+    });
     expect(first.status).toBe(201);
-    const again = await api(ctx.app, ctx.owner, 'POST', '/api/erp/receivables/collections', { clientKey: key, accountId, collectedOn: today, method: 'bank_transfer', amountCents: 10_000, evidence: '流水 8899' });
+    const again = await api(ctx.app, ctx.owner, 'POST', '/api/erp/receivables/collections', {
+      clientKey: key,
+      accountId,
+      collectedOn: today,
+      method: 'bank_transfer',
+      amountCents: 10_000,
+      evidence: '流水 8899',
+    });
     expect(again.status).toBe(200);
     expect(again.body.replayed).toBe(true);
     // 编号相同、内容不同：拒绝
-    expect((await api(ctx.app, ctx.owner, 'POST', '/api/erp/receivables/collections', { clientKey: key, accountId, collectedOn: today, method: 'bank_transfer', amountCents: 9_000 })).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    expect(
+      (await api(ctx.app, ctx.owner, 'POST', '/api/erp/receivables/collections', { clientKey: key, accountId, collectedOn: today, method: 'bank_transfer', amountCents: 9_000 })).body.error.code,
+    ).toBe('IDEMPOTENCY_CONFLICT');
     const collection = first.body.collection;
     // 最早的那笔挂账先核销
     const oldest = [...before.charges].filter((c: { status: string }) => c.status === 'open').sort((a: { id: number }, b: { id: number }) => a.id - b.id)[0];
@@ -170,7 +197,14 @@ describe('回款与核销、反结账', () => {
     const v = await enter();
     const t = await totalOf(v);
     await pay(manager, [v], t, [{ method: 'coupon', platform: 'meituan', code: 'MT20261110001', dealName: '', amount: t }]);
-    const settle = await api(ctx.app, ctx.owner, 'POST', '/api/platform/settlements', { clientKey: randomUUID(), platform: 'meituan', periodFrom: today, periodTo: today, amount: 10_000, receivedOn: today });
+    const settle = await api(ctx.app, ctx.owner, 'POST', '/api/platform/settlements', {
+      clientKey: randomUUID(),
+      platform: 'meituan',
+      periodFrom: today,
+      periodTo: today,
+      amount: 10_000,
+      receivedOn: today,
+    });
     expect(settle.status, JSON.stringify(settle.body)).toBeLessThan(300);
     const platforms = (await api(ctx.app, ctx.owner, 'GET', '/api/erp/receivables/platforms')).body as { platform: string; redeemedCents: number; settledCents: number; outstandingCents: number }[];
     expect(platforms.find((p) => p.platform === 'meituan')).toMatchObject({ redeemedCents: t, settledCents: 10_000, outstandingCents: t - 10_000 });

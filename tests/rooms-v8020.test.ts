@@ -25,7 +25,16 @@ const member = async (name: string, paidYuan: number) => {
   if (paidYuan > 0) {
     const info = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${id}/grade`)).body as MemberGradeInfo;
     const bonus = rechargeOutcome(await rules(), info.state.grade, info.rollingRechargeCents, yuan(paidYuan)).bonusCents;
-    const c = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', { idempotencyKey: randomUUID(), memberId: id, planId: null, paidAmount: yuan(paidYuan), bonusAmount: bonus, paymentMethod: 'wechat', paymentConfirmed: true, bonusMode: 'auto' });
+    const c = await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', {
+      idempotencyKey: randomUUID(),
+      memberId: id,
+      planId: null,
+      paidAmount: yuan(paidYuan),
+      bonusAmount: bonus,
+      paymentMethod: 'wechat',
+      paymentConfirmed: true,
+      bonusMode: 'auto',
+    });
     expect(c.status, JSON.stringify(c.body)).toBe(200);
   }
   return id;
@@ -41,7 +50,8 @@ const enter = async (memberId: number | null) => {
   return { visitId, billId: Number(v!.billId), tagCode };
 };
 const quote = async (roomNo: string, tag = '') => (await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/quote?roomId=${room[roomNo]}&tag=${tag}`)).body as RoomQuote;
-const checkin = (roomNo: string, tagCode: string, expectedRate: number) => api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkin', { clientKey: randomUUID(), roomId: room[roomNo], expectedRate, tagCode, guests: 1 });
+const checkin = (roomNo: string, tagCode: string, expectedRate: number) =>
+  api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkin', { clientKey: randomUUID(), roomId: room[roomNo], expectedRate, tagCode, guests: 1 });
 const closeStay = async (stayId: number) => {
   const pre = (await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/stays/${stayId}/checkout-preview`)).body as { dueAmount: number; depositByMethod: unknown[] };
   const c = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${stayId}/close`, { clientKey: randomUUID(), expectedDue: pre.dueAmount, expectedDeposits: pre.depositByMethod });
@@ -70,7 +80,9 @@ beforeAll(async () => {
   const st = await api(ctx.app, ctx.owner, 'POST', '/api/admin/dining/stations', { name: '客房送餐' });
   const item = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '客房简餐', category: '热菜', price: 4800 });
   dishId = item.body.items.find((i: { name: string }) => i.name === '客房简餐').id;
-  expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/items', { items: [{ id: dishId, stationId: st.body.stations.find((s: { name: string }) => s.name === '客房送餐').id }] })).status).toBe(200);
+  expect(
+    (await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/items', { items: [{ id: dishId, stationId: st.body.stations.find((s: { name: string }) => s.name === '客房送餐').id }] })).status,
+  ).toBe(200);
   expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/rules', { enabled: true })).status).toBe(200);
 }, 60_000);
 afterAll(async () => ctx.close());
@@ -78,9 +90,23 @@ afterAll(async () => ctx.close());
 describe('会员联动房价', () => {
   it('房型的会员价：某一档起的价，要低于门市价、同一档只能一个；不传不动、传空清掉；门市价不能降到会员价以下', async () => {
     expect((await saveType({ memberPrices: [{ grade: 3, price: 30000 }] })).status).toBe(400);
-    expect((await saveType({ memberPrices: [{ grade: 3, price: 26000 }, { grade: 3, price: 25000 }] })).status).toBe(400);
+    expect(
+      (
+        await saveType({
+          memberPrices: [
+            { grade: 3, price: 26000 },
+            { grade: 3, price: 25000 },
+          ],
+        })
+      ).status,
+    ).toBe(400);
     expect((await saveType({ memberPrices: [{ grade: 7, price: 100 }] })).status).toBe(400);
-    const ok = await saveType({ memberPrices: [{ grade: 5, price: 20000 }, { grade: 3, price: 26000 }] });
+    const ok = await saveType({
+      memberPrices: [
+        { grade: 5, price: 20000 },
+        { grade: 3, price: 26000 },
+      ],
+    });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     const mine = ok.body.types.find((x: { id: number }) => x.id === typeId);
     expect(mine.memberPrices).toEqual([
@@ -145,7 +171,16 @@ describe('会员联动房价', () => {
     const l5 = await enter(await member('五档会员乙', 100000));
     expect(await quote('H505', l5.tagCode)).toMatchObject({ rate: 30000, memberGrade: null });
     // 把 L5 的会员价降到 150.00：比折后价低 → 用会员价
-    expect((await saveType({ memberPrices: [{ grade: 3, price: 26000 }, { grade: 5, price: 15000 }] })).status).toBe(200);
+    expect(
+      (
+        await saveType({
+          memberPrices: [
+            { grade: 3, price: 26000 },
+            { grade: 5, price: 15000 },
+          ],
+        })
+      ).status,
+    ).toBe(200);
     expect(await quote('H505', l5.tagCode)).toMatchObject({ rate: 15000, memberGrade: 5 });
     const s5 = await checkin('H505', l5.tagCode, 15000);
     expect(s5.body).toMatchObject({ rate: 15000, listRate: 30000, memberGrade: 5 });
@@ -166,7 +201,13 @@ describe('客房点餐', () => {
     expect(byTag.body).toMatchObject({ visitId: g.visitId, roomNo: 'H501', via: 'tag' });
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/dining/guest?tag=H999')).status).toBe(404);
     // 送到客房
-    const ordered = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', { clientKey: randomUUID(), visitId: g.visitId, lines: [{ itemId: dishId, quantity: 2 }], expectedTotal: 9600, toRoom: true });
+    const ordered = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', {
+      clientKey: randomUUID(),
+      visitId: g.visitId,
+      lines: [{ itemId: dishId, quantity: 2 }],
+      expectedTotal: 9600,
+      toRoom: true,
+    });
     expect(ordered.status, JSON.stringify(ordered.body)).toBe(200);
     // 不送到客房（客人在餐厅吃）
     const here = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', { clientKey: randomUUID(), visitId: g.visitId, lines: [{ itemId: dishId, quantity: 1 }], expectedTotal: 4800 });
@@ -181,7 +222,13 @@ describe('客房点餐', () => {
     expect(bill!.n).toBe(14400);
     // 没住店的客人：不能送到客房
     const walkIn = await enter(null);
-    const no = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', { clientKey: randomUUID(), visitId: walkIn.visitId, lines: [{ itemId: dishId, quantity: 1 }], expectedTotal: 4800, toRoom: true });
+    const no = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', {
+      clientKey: randomUUID(),
+      visitId: walkIn.visitId,
+      lines: [{ itemId: dishId, quantity: 1 }],
+      expectedTotal: 4800,
+      toRoom: true,
+    });
     expect(no.body.error.code).toBe('ROOM_NOT_STAYING');
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/dining/guest?tag=${walkIn.tagCode}`)).body).toMatchObject({ roomNo: null, via: 'tag' });
     // 同一个操作编号、换了「送到客房」再提交：拒绝（不是同一个请求）
@@ -203,7 +250,13 @@ describe('客房点餐', () => {
     expect(again.status, JSON.stringify(again.body)).toBe(200);
     expect(await count()).toBe(before);
     // 换房以后新下的单写新房号
-    const fresh = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', { clientKey: randomUUID(), visitId: g.visitId, lines: [{ itemId: dishId, quantity: 1 }], expectedTotal: 4800, toRoom: true });
+    const fresh = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/orders', {
+      clientKey: randomUUID(),
+      visitId: g.visitId,
+      lines: [{ itemId: dishId, quantity: 1 }],
+      expectedTotal: 4800,
+      toRoom: true,
+    });
     expect(fresh.status).toBe(200);
     const last = await ctx.sql<{ deliverTo: string }[]>`SELECT deliver_to FROM kitchen_items WHERE visit_id = ${g.visitId} ORDER BY id DESC LIMIT 2`;
     expect(last.map((t) => t.deliverTo)).toEqual(['客房 H506', '客房 H501']);

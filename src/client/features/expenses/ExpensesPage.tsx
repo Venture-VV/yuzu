@@ -3,15 +3,8 @@
 import { ExpenseTabs } from './ExpenseTabs';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { Archive, BookOpenCheck, Download, FileText, Gauge, Plus, ReceiptText, ShieldCheck, Wallet, X } from 'lucide-react';
-import {
-  CLAIM_STATUS_LABELS,
-  EXPENSE_CATEGORY_LABELS,
-  PAY_SOURCE_LABELS,
-  taxRateText,
-  type ClaimStatus,
-  type ExpenseClaim,
-} from '@shared/expenses';
+import { Download, FileText, Plus, ReceiptText, X } from 'lucide-react';
+import { CLAIM_STATUS_LABELS, EXPENSE_CATEGORY_LABELS, PAY_SOURCE_LABELS, taxRateText, type ClaimStatus, type ExpenseClaim } from '@shared/expenses';
 import { budgetCheckText, budgetOver } from '@shared/budgets';
 import { CERT_STATUS_LABELS } from '@shared/invoices';
 import { formatAmount } from '@shared/money';
@@ -240,7 +233,11 @@ function ClaimSheet({ id, onClose }: { id: number | null; onClose: () => void })
       </div>
       <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4" data-testid="claim-sheet">
         {!c ? (
-          claim.error ? <Notice tone="error" title={errorMessage(claim.error)} /> : <Skeleton className="h-64" />
+          claim.error ? (
+            <Notice tone="error" title={errorMessage(claim.error)} />
+          ) : (
+            <Skeleton className="h-64" />
+          )
         ) : (
           <>
             <div className="flex items-center gap-2">

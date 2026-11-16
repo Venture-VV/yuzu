@@ -63,7 +63,32 @@ const SKIP = /[\s\u200b-\u200d\u2060\ufeff·•・\-_.,，、。'"‘’“”()
  * 档案里常见的占位「名字」（导入的旧数据、前台随手填的），不当成某一位会员的姓名找——
  * 不然「这个月新会员多少」「客人数」都会被认成写了会员姓名。
  */
-const GENERIC_NAMES = new Set(['会员', '客人', '散客', '顾客', '客户', '先生', '女士', '小姐', '老板', '老师', '师傅', '贵宾', 'vip', '测试', '未知', '无名', '匿名', '本人', '朋友', '同事', '员工', '临时', '其他', '其它']);
+const GENERIC_NAMES = new Set([
+  '会员',
+  '客人',
+  '散客',
+  '顾客',
+  '客户',
+  '先生',
+  '女士',
+  '小姐',
+  '老板',
+  '老师',
+  '师傅',
+  '贵宾',
+  'vip',
+  '测试',
+  '未知',
+  '无名',
+  '匿名',
+  '本人',
+  '朋友',
+  '同事',
+  '员工',
+  '临时',
+  '其他',
+  '其它',
+]);
 
 function normChar(ch: string): string {
   return [...ch.normalize('NFKC').toLowerCase()].filter((c) => !SKIP.test(c)).join('');
@@ -144,8 +169,7 @@ export async function memberTextGuard(db: Db): Promise<MemberTextGuard> {
     }
     return hits;
   };
-  const show = (h: { kind: MemberHitKind; key: string }, original: string) =>
-    h.kind === 'name' ? aiMaskName(original) : h.kind === 'no' ? '[会员号]' : maskPhone(h.key);
+  const show = (h: { kind: MemberHitKind; key: string }, original: string) => (h.kind === 'name' ? aiMaskName(original) : h.kind === 'no' ? '[会员号]' : maskPhone(h.key));
 
   return {
     find(text) {

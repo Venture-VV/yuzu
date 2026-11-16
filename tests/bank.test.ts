@@ -120,7 +120,12 @@ describe('对账单解析', () => {
   it('没有流水号、没有余额：打给不同账号的是两笔；内容完全一样的几笔按先后编号，各记各的', () => {
     const header = ['交易日期', '交易金额', '对方户名', '对方账号', '摘要'];
     const map = detectColumns(header);
-    const parse = (rows: string[][]) => parseStatementRows(header, rows.map((cells, i) => ({ row: i + 2, cells })), map).lines.map((l) => l.dedupeKey);
+    const parse = (rows: string[][]) =>
+      parseStatementRows(
+        header,
+        rows.map((cells, i) => ({ row: i + 2, cells })),
+        map,
+      ).lines.map((l) => l.dedupeKey);
     const a = ['2026-11-14', '-100', '城东蔬菜', '6222 0000 0000 0001', '货款'];
     const b = ['2026-11-14', '-100', '城东蔬菜', '6222 0000 0000 0002', '货款'];
     const keys = parse([a, b, a]);
@@ -224,7 +229,10 @@ describe('银行流水', () => {
     const cand = (await api(ctx.app, payer, 'GET', `/api/erp/bank/lines/${line.id}/candidates`)).body;
     expect(cand.suggested.length).toBe(2);
     const [a, b] = cand.suggested;
-    expect((await api(ctx.app, payer, 'POST', `/api/erp/bank/lines/${line.id}/match`, { version: line.version, targets: [a, b].map((t: { type: string; id: number }) => ({ type: t.type, id: t.id })) })).body.error.code).toBe('MATCH_OVER');
+    expect(
+      (await api(ctx.app, payer, 'POST', `/api/erp/bank/lines/${line.id}/match`, { version: line.version, targets: [a, b].map((t: { type: string; id: number }) => ({ type: t.type, id: t.id })) }))
+        .body.error.code,
+    ).toBe('MATCH_OVER');
     const ok = await api(ctx.app, payer, 'POST', `/api/erp/bank/lines/${line.id}/match`, { version: line.version, targets: [{ type: a.type, id: a.id }] });
     expect(ok.body).toMatchObject({ status: 'matched', matchedCents: 12_000 });
     // 旧版本号拒绝
@@ -236,7 +244,10 @@ describe('银行流水', () => {
     const interest = all.lines.find((l: { bankRef: string }) => l.bankRef === 'ICBC004');
     expect((await api(ctx.app, payer, 'POST', `/api/erp/bank/lines/${interest.id}/match`, { version: interest.version, targets: [{ type: b.type, id: b.id }] })).status).toBe(400);
     expect((await api(ctx.app, payer, 'POST', `/api/erp/bank/lines/${interest.id}/ignore`, { version: interest.version })).status).toBe(400);
-    expect((await api(ctx.app, payer, 'POST', `/api/erp/bank/lines/${interest.id}/ignore`, { version: interest.version, reason: '存款利息' })).body).toMatchObject({ status: 'ignored', ignoreReason: '存款利息' });
+    expect((await api(ctx.app, payer, 'POST', `/api/erp/bank/lines/${interest.id}/ignore`, { version: interest.version, reason: '存款利息' })).body).toMatchObject({
+      status: 'ignored',
+      ignoreReason: '存款利息',
+    });
     // 撤销勾对
     const v = await api(ctx.app, payer, 'POST', `/api/erp/bank/matches/${ok.body.matches[0].id}/void`, { reason: '对错了' });
     expect(v.body).toMatchObject({ status: 'open', matchedCents: 0 });

@@ -181,13 +181,7 @@ function DocsView({ deptId, meta, onOpen }: { deptId: number; meta: DeptStockMet
           { value: 'urgent', label: '急采' },
         ]}
       />
-      <DocList
-        deptId={deptId}
-        meta={meta}
-        filter={filter === 'all' ? {} : { urgent: '1' }}
-        empty={filter === 'urgent' ? '还没有给本部门买的急采' : '还没有单据'}
-        onOpen={onOpen}
-      />
+      <DocList deptId={deptId} meta={meta} filter={filter === 'all' ? {} : { urgent: '1' }} empty={filter === 'urgent' ? '还没有给本部门买的急采' : '还没有单据'} onOpen={onOpen} />
     </div>
   );
 }
@@ -233,7 +227,12 @@ function DocList({
                 </span>
                 <span className="block truncate text-[12px] text-ink-3">
                   {d.partyName ?? ''} · {d.createdByName}
-                  {d.amountCents > 0 && <> · <Money cents={d.amountCents} /></>}
+                  {d.amountCents > 0 && (
+                    <>
+                      {' '}
+                      · <Money cents={d.amountCents} />
+                    </>
+                  )}
                 </span>
               </span>
               <span className="flex flex-wrap items-center justify-end gap-1.5">
@@ -312,7 +311,11 @@ function DeptDocDetail({ id, dept, meta, onClose }: { id: number; dept: { id: nu
           <h2 className="num text-[18px] font-bold">{doc.docNo}</h2>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <StatusChip status={doc.status} />
-            {doc.urgent && <Badge tone="yuzu">急采 · 上限 <Money cents={doc.urgentCapCents ?? 0} /></Badge>}
+            {doc.urgent && (
+              <Badge tone="yuzu">
+                急采 · 上限 <Money cents={doc.urgentCapCents ?? 0} />
+              </Badge>
+            )}
             {doc.deptSign && <Badge tone="pine">已签收</Badge>}
           </div>
         </div>
@@ -334,14 +337,20 @@ function DeptDocDetail({ id, dept, meta, onClose }: { id: number; dept: { id: nu
           {doc.note && <Info label="备注" value={doc.note} wide />}
         </dl>
 
-        {doc.status === 'returned' && doc.returnedReason && <Notice tone="warning" title="退回修改">{doc.returnedReason}</Notice>}
+        {doc.status === 'returned' && doc.returnedReason && (
+          <Notice tone="warning" title="退回修改">
+            {doc.returnedReason}
+          </Notice>
+        )}
         {doc.urgent && doc.status === 'submitted' && (
           <Notice tone="info" title={doc.urgentApprovedAt ? '急采已批准，等仓库到部门验收' : '急采审批中'}>
             采购给本部门买的急采：按金额分级审批，批了以后仓库到部门验收，确认后才进本部门小仓。
           </Notice>
         )}
         {doc.urgent && doc.status === 'confirmed' && !doc.purchaseOrder && (
-          <Notice tone="info" title="等采购补采购单">急采已经进本部门小仓；补采购单由采购办，部门不用管。</Notice>
+          <Notice tone="info" title="等采购补采购单">
+            急采已经进本部门小仓；补采购单由采购办，部门不用管。
+          </Notice>
         )}
         {doc.deptSign && (
           <Notice tone="success" title={`${doc.deptSign.signedByName} 已签收 · ${formatDateTime(doc.deptSign.signedAt)}`}>
@@ -366,7 +375,12 @@ function DeptDocDetail({ id, dept, meta, onClose }: { id: number; dept: { id: nu
                         {l.diffReason && ` · ${COUNT_REASON_LABELS[l.diffReason]}`}
                       </>
                     )}
-                    {l.priceCents !== null && doc.docType === 'receipt' && <> · 单价 <Money cents={l.priceCents} />/{l.purchaseUnit}</>}
+                    {l.priceCents !== null && doc.docType === 'receipt' && (
+                      <>
+                        {' '}
+                        · 单价 <Money cents={l.priceCents} />/{l.purchaseUnit}
+                      </>
+                    )}
                     {l.note && ` · ${l.note}`}
                   </span>
                 </span>
@@ -396,9 +410,7 @@ function DeptDocDetail({ id, dept, meta, onClose }: { id: number; dept: { id: nu
               部门签收（第二次验收）
               <SimRule />
             </p>
-            <p className="mt-1 text-[12.5px] text-ink-3">
-              对照实物核对数量；有差异写在下面，仓库据此做退回或盘点。超过 {meta.signDueDays} 天没签收会在仓库的待办里标出。
-            </p>
+            <p className="mt-1 text-[12.5px] text-ink-3">对照实物核对数量；有差异写在下面，仓库据此做退回或盘点。超过 {meta.signDueDays} 天没签收会在仓库的待办里标出。</p>
             <Textarea value={signNote} onChange={(e) => setSignNote(e.target.value)} maxLength={200} rows={2} placeholder="差异说明（没有差异可以不填）" aria-label="签收差异说明" className="mt-2" />
             <div className="mt-2 flex justify-end">
               <Button variant="primary" loading={busy === 'sign'} icon={<PackageCheck className="size-4" />} onClick={sign} data-testid="dept-sign-submit">
@@ -515,7 +527,10 @@ function ConsumptionView({ deptId, meta, onOpen }: { deptId: number; meta: DeptS
             </option>
           ))}
         </Select>
-        <a href={`/api/erp/dept-stock/${deptId}/consumption/export?${qs}`} className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3">
+        <a
+          href={`/api/erp/dept-stock/${deptId}/consumption/export?${qs}`}
+          className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+        >
           <Download className="size-4" />
           导出
         </a>

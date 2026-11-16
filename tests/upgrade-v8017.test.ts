@@ -46,7 +46,13 @@ describe('8.0.16 → 8.0.17', () => {
     expect(await migrate(sql)).toEqual([]);
 
     const m124 = await readFile(new URL('124_quote_threshold_default.sql', MIGRATIONS), 'utf8');
-    for (const [stored, after] of [[500_000, 100_000], [300_000, 300_000], [0, 0], [100_000, 100_000], [499_999, 499_999]] as const) {
+    for (const [stored, after] of [
+      [500_000, 100_000],
+      [300_000, 300_000],
+      [0, 0],
+      [100_000, 100_000],
+      [499_999, 499_999],
+    ] as const) {
       await sql`UPDATE settings SET value = ${sql.json({ quoteThresholdCents: stored, minQuotes: 3 })} WHERE key = 'purchase_rules'`;
       await sql.unsafe(m124);
       expect(await threshold()).toBe(after);
@@ -66,7 +72,12 @@ describe('8.0.16 → 8.0.17', () => {
     await schemaAt8016();
     const [staff] = await sql<{ id: number }[]>`INSERT INTO staff (username, display_name, role, password_hash) VALUES ('u_owner', '店主', 'owner', 'x') RETURNING id`;
     const [dept] = await sql<{ id: number }[]>`INSERT INTO departments (name) VALUES ('升级测试部') RETURNING id`;
-    for (const [no, status] of [['XQ-S', 'submitted'], ['XQ-A', 'approved'], ['XQ-R', 'rejected'], ['XQ-C', 'cancelled']] as const) {
+    for (const [no, status] of [
+      ['XQ-S', 'submitted'],
+      ['XQ-A', 'approved'],
+      ['XQ-R', 'rejected'],
+      ['XQ-C', 'cancelled'],
+    ] as const) {
       await sql`
         INSERT INTO purchase_requests (doc_no, department_id, requester_id, status, reviewed_by, reviewed_at)
         VALUES (${no}, ${dept!.id}, ${staff!.id}, ${status}, ${status === 'approved' || status === 'rejected' ? staff!.id : null},
@@ -74,8 +85,15 @@ describe('8.0.16 → 8.0.17', () => {
     }
     expect(await migrate(sql)).toEqual(NEW);
     expect((await sql<{ headId: number | null }[]>`SELECT head_id FROM departments`).every((d) => d.headId === null)).toBe(true);
-    const rows = await sql<{ docNo: string; status: string; deptConfirm: string; deptHeadId: number | null }[]>`SELECT doc_no, status, dept_confirm, dept_head_id FROM purchase_requests ORDER BY doc_no`;
-    expect(rows.map((r) => `${r.docNo}:${r.status}:${r.deptConfirm}:${r.deptHeadId}`)).toEqual(['XQ-A:approved:none:null', 'XQ-C:cancelled:none:null', 'XQ-R:rejected:none:null', 'XQ-S:submitted:none:null']);
+    const rows = await sql<
+      { docNo: string; status: string; deptConfirm: string; deptHeadId: number | null }[]
+    >`SELECT doc_no, status, dept_confirm, dept_head_id FROM purchase_requests ORDER BY doc_no`;
+    expect(rows.map((r) => `${r.docNo}:${r.status}:${r.deptConfirm}:${r.deptHeadId}`)).toEqual([
+      'XQ-A:approved:none:null',
+      'XQ-C:cancelled:none:null',
+      'XQ-R:rejected:none:null',
+      'XQ-S:submitted:none:null',
+    ]);
     // 约束：等主管确认要有主管；已确认要有人、有时间；等主管确认的不能通过
     await expect(sql`UPDATE purchase_requests SET dept_confirm = 'pending' WHERE doc_no = 'XQ-S'`).rejects.toThrow(/purchase_requests_dept_pending_head/);
     await expect(sql`UPDATE purchase_requests SET dept_confirm = 'confirmed' WHERE doc_no = 'XQ-S'`).rejects.toThrow(/purchase_requests_dept_confirmed/);

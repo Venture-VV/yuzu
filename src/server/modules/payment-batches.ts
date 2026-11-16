@@ -50,7 +50,22 @@ export interface BatchCandidate {
 
 /** 能进批次的：已审批、没付清、不在别的没结束的批次里 */
 async function candidates(db: Db): Promise<BatchCandidate[]> {
-  const rows = await db<{ requestId: number; requestNo: string; payee: string; supplierName: string | null; amount: string; paid: string; expectedDate: string; payMode: 'ap' | 'direct'; bankPayee: string | null; bankName: string | null; bankAccount: string | null; bankVerified: boolean | null }[]>`
+  const rows = await db<
+    {
+      requestId: number;
+      requestNo: string;
+      payee: string;
+      supplierName: string | null;
+      amount: string;
+      paid: string;
+      expectedDate: string;
+      payMode: 'ap' | 'direct';
+      bankPayee: string | null;
+      bankName: string | null;
+      bankAccount: string | null;
+      bankVerified: boolean | null;
+    }[]
+  >`
     SELECT r.id AS request_id, r.request_no, r.payee, s.name AS supplier_name, r.amount_cents::text AS amount, r.expected_date::text AS expected_date, r.pay_mode,
            s.bank_payee, s.bank_name, s.bank_account, s.bank_verified_at IS NOT NULL AS bank_verified,
            (coalesce((SELECT sum(p.amount_cents) FROM payments p WHERE p.payment_request_id = r.id AND p.status = 'confirmed'), 0)
@@ -127,7 +142,16 @@ async function batchesWhere(db: Db, where: ReturnType<Db>, limit = 100): Promise
     WHERE ${where} ORDER BY b.id DESC LIMIT ${limit}`;
   const ids = rows.map((r) => Number(r.id));
   const items = ids.length
-    ? await db<(Omit<BatchItemView, 'id' | 'requestId' | 'amountCents' | 'paymentId' | 'payeeAccountMasked'> & { id: number; batchId: number; requestId: number; amountCents: string; paymentId: number | null; payeeAccount: string })[]>`
+    ? await db<
+        (Omit<BatchItemView, 'id' | 'requestId' | 'amountCents' | 'paymentId' | 'payeeAccountMasked'> & {
+          id: number;
+          batchId: number;
+          requestId: number;
+          amountCents: string;
+          paymentId: number | null;
+          payeeAccount: string;
+        })[]
+      >`
         SELECT i.id, i.batch_id, i.line_no, i.payment_request_id AS request_id, r.request_no, i.amount_cents::text AS amount_cents, i.payee_name, i.payee_bank,
                i.payee_account, i.purpose, i.status, i.payment_kind, i.payment_id, i.paid_on::text AS paid_on, i.bank_ref, i.fail_reason,
                EXISTS (SELECT 1 FROM bank_matches m WHERE m.target_type = 'batch_item' AND m.target_id = i.id AND m.status = 'active') AS matched
@@ -216,7 +240,14 @@ async function createBatch(deps: Deps, raw: unknown, actor: Actor, ip?: string):
           WHERE r.id = ${c.requestId} AND s.bank_verified_at IS NOT NULL`;
         if (copied.count !== 1) throw conflict('BATCH_BANK_UNVERIFIED', `${c.supplierName ?? c.payee} 的收款账户刚被改过、还没复核，请刷新后重选`);
       }
-      await writeAudit(tx, { staffId: actor.id, action: 'payment_batch', targetType: 'payment_batch', targetId: batchId, detail: { op: 'create', batchNo, count: picked.length, totalCents: total }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'payment_batch',
+        targetType: 'payment_batch',
+        targetId: batchId,
+        detail: { op: 'create', batchNo, count: picked.length, totalCents: total },
+        ip,
+      });
       return { id: batchId, replayed: false };
     });
   } catch (error) {
@@ -227,7 +258,10 @@ async function createBatch(deps: Deps, raw: unknown, actor: Actor, ip?: string):
 
 // ───────────────────────── 导出 ─────────────────────────
 
-const TEMPLATE_COLUMNS: Record<BankTemplate, { headers: string[]; row: (i: { lineNo: number; payeeName: string; payeeBank: string; payeeAccount: string; amountCents: number; purpose: string }) => (string | number)[] }> = {
+const TEMPLATE_COLUMNS: Record<
+  BankTemplate,
+  { headers: string[]; row: (i: { lineNo: number; payeeName: string; payeeBank: string; payeeAccount: string; amountCents: number; purpose: string }) => (string | number)[] }
+> = {
   icbc: { headers: ['收款账号', '收款单位名称', '收款银行', '金额', '用途'], row: (i) => [i.payeeAccount, i.payeeName, i.payeeBank, yuanText(i.amountCents), i.purpose] },
   ccb: { headers: ['序号', '收款账号', '收款户名', '收款行名', '金额', '摘要'], row: (i) => [i.lineNo, i.payeeAccount, i.payeeName, i.payeeBank, yuanText(i.amountCents), i.purpose] },
   cmb: { headers: ['收方账号', '收方户名', '收方开户行', '金额', '用途'], row: (i) => [i.payeeAccount, i.payeeName, i.payeeBank, yuanText(i.amountCents), i.purpose] },
@@ -249,7 +283,10 @@ async function assertBatchCurrent(db: Db, batchId: number, today: string, remedy
     const left = req.amountCents - req.paidCents;
     const room = req.payMode === 'ap' && req.contractId === null ? req.targets.reduce((sum, t) => sum + Math.max(0, Math.min(t.amountCents - t.paidCents, t.openCents)), 0) : left;
     if (req.status !== 'approved' || left < amount || room < amount)
-      throw conflict('BATCH_STALE', `第 ${i.lineNo} 行（付款申请 ${req.requestNo}）生成以后变了（${req.status !== 'approved' ? '申请已经不是待付款' : `还没付的只剩 ¥${yuanText(Math.min(left, room))}`}）：${remedy}`);
+      throw conflict(
+        'BATCH_STALE',
+        `第 ${i.lineNo} 行（付款申请 ${req.requestNo}）生成以后变了（${req.status !== 'approved' ? '申请已经不是待付款' : `还没付的只剩 ¥${yuanText(Math.min(left, room))}`}）：${remedy}`,
+      );
   }
 }
 
@@ -280,14 +317,19 @@ async function batchFile(db: Db, id: number, today: string): Promise<{ name: str
   const t = TEMPLATE_COLUMNS[b.template];
   const rows = items.map((i) => t.row({ ...i, amountCents: Number(i.amountCents) }));
   if (b.template === 'generic') return { name: `批量付款-${b.batchNo}.csv`, type: 'text/csv; charset=utf-8', body: toCsv([t.headers, ...rows]) };
-  const wb = buildWorkbook([{ name: '批量转账', widths: t.headers.map((h) => Math.max(10, h.length * 2 + 4)), rows: [{ cells: t.headers }, ...rows.map((cells) => ({ cells: cells.map(String) }))], freezeRows: 1 }]);
+  const wb = buildWorkbook([
+    { name: '批量转账', widths: t.headers.map((h) => Math.max(10, h.length * 2 + 4)), rows: [{ cells: t.headers }, ...rows.map((cells) => ({ cells: cells.map(String) }))], freezeRows: 1 },
+  ]);
   return { name: `批量付款-${b.batchNo}-${BANK_TEMPLATE_LABELS[b.template]}.xlsx`, type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', body: wb };
 }
 
 // ───────────────────────── 作废、结果 ─────────────────────────
 
 async function voidBatch(deps: Deps, id: number, raw: unknown, actor: Actor, ip?: string): Promise<BatchView> {
-  const input = parse(z.object({ version: z.number().int().min(1), reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200), confirmNotPaid: z.literal(true, '请确认这一批没有在网银里付款') }), raw);
+  const input = parse(
+    z.object({ version: z.number().int().min(1), reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200), confirmNotPaid: z.literal(true, '请确认这一批没有在网银里付款') }),
+    raw,
+  );
   await deps.sql.begin(async (tx) => {
     const [b] = await tx<{ status: string; version: number; batchNo: string }[]>`SELECT status, version, batch_no FROM payment_batches WHERE id = ${id} FOR UPDATE`;
     if (!b) throw notFound('批次不存在');
@@ -343,7 +385,13 @@ async function payItem(
     }
     if (left > 0) throw unprocessable('BATCH_ALLOC', `付款申请 ${req.requestNo} 里选的货款不够核销 ¥${yuanText(claim.amountCents)}，请到付款申请里手工登记`);
   } else prepay = true;
-  const r = await payFromRequest(deps, claim.requestId, { clientKey: claim.key, payDate: claim.payDate, amountCents: claim.amountCents, method: 'bank_transfer', evidence, note: '', allocations, prepay }, actor, ip);
+  const r = await payFromRequest(
+    deps,
+    claim.requestId,
+    { clientKey: claim.key, payDate: claim.payDate, amountCents: claim.amountCents, method: 'bank_transfer', evidence, note: '', allocations, prepay },
+    actor,
+    ip,
+  );
   return { kind: 'payment', paymentId: r.paymentId };
 }
 
@@ -360,8 +408,17 @@ export async function recordItemPaid(deps: Deps, itemId: number, input: { payDat
     if (i!.status !== 'pending') throw conflict('BATCH_ITEM_CLOSED', '这一行已经标了失败或移出了');
     if (b!.status !== 'exported') throw conflict('BATCH_NOT_EXPORTED', b!.status === 'draft' ? '这一批还没导出' : '这一批已经结束了');
     // 第一次记下付款日与流水号，之后重来都按这一次的（原请求的摘要对得上）
-    if (i!.paidOn === null) await tx`UPDATE payment_batch_items SET paid_on = ${input.payDate}, bank_ref = ${input.bankRef.slice(0, 64)}, updated_by = ${actor.id}, updated_at = now() WHERE id = ${itemId}`;
-    return { batchId: Number(head.batchId), batchNo: b!.batchNo, requestId: Number(i!.requestId), amountCents: Number(i!.amountCents), payDate: i!.paidOn ?? input.payDate, bankRef: i!.paidOn === null ? input.bankRef.slice(0, 64) : i!.bankRef, key: i!.payClientKey };
+    if (i!.paidOn === null)
+      await tx`UPDATE payment_batch_items SET paid_on = ${input.payDate}, bank_ref = ${input.bankRef.slice(0, 64)}, updated_by = ${actor.id}, updated_at = now() WHERE id = ${itemId}`;
+    return {
+      batchId: Number(head.batchId),
+      batchNo: b!.batchNo,
+      requestId: Number(i!.requestId),
+      amountCents: Number(i!.amountCents),
+      payDate: i!.paidOn ?? input.payDate,
+      bankRef: i!.paidOn === null ? input.bankRef.slice(0, 64) : i!.bankRef,
+      key: i!.payClientKey,
+    };
   });
   if (!claim) return;
   const evidence = `批量付款 ${claim.batchNo}${claim.bankRef ? ` 流水 ${claim.bankRef}` : ''}`.slice(0, 200);
@@ -410,7 +467,14 @@ export function registerPaymentBatchRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/erp/payments/batches/:id/export', { preHandler: MANAGE }, async (req) => exportBatch(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
   app.get('/api/erp/payments/batches/:id/file', { preHandler: MANAGE }, async (req, reply) => {
     const f = await batchFile(sql, parse(idParam, req.params).id, today());
-    await writeAudit(sql, { staffId: req.actor.id, action: 'payment_batch', targetType: 'payment_batch', targetId: parse(idParam, req.params).id, detail: { op: 'download', file: f.name }, ip: req.ip });
+    await writeAudit(sql, {
+      staffId: req.actor.id,
+      action: 'payment_batch',
+      targetType: 'payment_batch',
+      targetId: parse(idParam, req.params).id,
+      detail: { op: 'download', file: f.name },
+      ip: req.ip,
+    });
     attachment(reply, f.name, f.type);
     return reply.send(f.body);
   });

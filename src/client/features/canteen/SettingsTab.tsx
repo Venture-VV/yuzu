@@ -87,9 +87,25 @@ export function SettingsTab() {
                     {MEAL_EMOJI[m.meal]} {MEAL_LABELS[m.meal]}
                   </ConfirmCheck>
                 </div>
-                <Input type="time" className="w-32" fullWidth={false} value={m.start} disabled={!m.enabled} onChange={(e) => setMeal(m.meal, { start: e.target.value })} aria-label={`${MEAL_LABELS[m.meal]}开始`} />
+                <Input
+                  type="time"
+                  className="w-32"
+                  fullWidth={false}
+                  value={m.start}
+                  disabled={!m.enabled}
+                  onChange={(e) => setMeal(m.meal, { start: e.target.value })}
+                  aria-label={`${MEAL_LABELS[m.meal]}开始`}
+                />
                 <span className="text-ink-3">到</span>
-                <Input type="time" className="w-32" fullWidth={false} value={m.end} disabled={!m.enabled} onChange={(e) => setMeal(m.meal, { end: e.target.value })} aria-label={`${MEAL_LABELS[m.meal]}结束`} />
+                <Input
+                  type="time"
+                  className="w-32"
+                  fullWidth={false}
+                  value={m.end}
+                  disabled={!m.enabled}
+                  onChange={(e) => setMeal(m.meal, { end: e.target.value })}
+                  aria-label={`${MEAL_LABELS[m.meal]}结束`}
+                />
               </div>
             ))}
           </div>
@@ -102,7 +118,12 @@ export function SettingsTab() {
             className="mt-3"
             hint="备案前可以填店里局域网的地址（例如 http://192.168.1.20:8090，员工连店里的 Wi-Fi 打开），或 Tailscale 给的 https 地址；备案后填 https://staff.你的域名。注册二维码、开通卡片上的二维码都是它。"
           >
-            <Input value={form.portalUrl} onChange={(e) => setForm({ ...form, portalUrl: e.target.value })} placeholder="https://staff.example.com 或 http://192.168.1.20:8090" aria-label="员工入口地址" />
+            <Input
+              value={form.portalUrl}
+              onChange={(e) => setForm({ ...form, portalUrl: e.target.value })}
+              placeholder="https://staff.example.com 或 http://192.168.1.20:8090"
+              aria-label="员工入口地址"
+            />
           </Field>
         </div>
         {error && <Notice tone="error">{error}</Notice>}

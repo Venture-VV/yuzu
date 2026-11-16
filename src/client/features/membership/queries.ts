@@ -28,8 +28,7 @@ export const membershipKeys = {
 };
 
 /** 会员规则（档名、门槛、比例、周期）：充值页、会员详情、前台徽标都用 */
-export const useMembershipRules = () =>
-  useQuery({ queryKey: membershipKeys.rules, queryFn: () => api.get<MembershipRules>('/api/membership/rules'), staleTime: 5 * 60_000 });
+export const useMembershipRules = () => useQuery({ queryKey: membershipKeys.rules, queryFn: () => api.get<MembershipRules>('/api/membership/rules'), staleTime: 5 * 60_000 });
 
 /** 会员的等级卡（到期没处理的已按规则推算到今天）；充值页用它预览充完的档阶 */
 export const useMemberGrade = (memberId: number | null) =>

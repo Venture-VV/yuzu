@@ -62,7 +62,11 @@ describe('部门表格导入（02）', () => {
     expect(book.sheets[0]!.merges).toEqual([]);
     // 选项表：部门、用途、物料（名称与编号同一行）
     const opts = book.sheets[2]!.rows;
-    const column = (c: number) => [...opts.keys()].filter((r) => r > 1).map((r) => opts.get(r)?.get(c)?.value).filter(Boolean);
+    const column = (c: number) =>
+      [...opts.keys()]
+        .filter((r) => r > 1)
+        .map((r) => opts.get(r)?.get(c)?.value)
+        .filter(Boolean);
     expect(column(0)).toEqual(expect.arrayContaining(['客房部', '水吧']));
     expect(column(1)).toContain('客用消耗');
     expect(column(3)).toContain(mats[0]!.code);
@@ -103,7 +107,16 @@ describe('部门表格导入（02）', () => {
     expect(p.groups).toEqual([]);
     const issue = (row: number) => p.rows.find((r) => r.row === row)!.issues.join('；');
     // 第 1 行没问题：部门按自己的，物料按名称认，单位按档案的采购单位
-    expect(p.rows[0]).toMatchObject({ issues: [], department: { id: deptA }, material: { id: m1!.id }, unit: m1!.purchaseUnit, needBy: later, refPriceCents: 3550, link: 'https://example.com/a', qtyMilli: q(20) });
+    expect(p.rows[0]).toMatchObject({
+      issues: [],
+      department: { id: deptA },
+      material: { id: m1!.id },
+      unit: m1!.purchaseUnit,
+      needBy: later,
+      refPriceCents: 3550,
+      link: 'https://example.com/a',
+      qtyMilli: q(20),
+    });
     expect(issue(3)).toMatch(/^申请部门：只能给自己的部门（客房部）导入/);
     expect(issue(4)).toMatch(/^物品名称：「没有这种东西」不在物料档案里/);
     expect(issue(5)).toMatch(/^用途：「买着玩」不是固定选项/);
@@ -126,7 +139,9 @@ describe('部门表格导入（02）', () => {
   });
 
   it('50 行一次导入成功：一张待审核的需求单（来源「表格导入」），与手填的一样审核；超过 50 行按顺序拆单', async () => {
-    const rows50 = Array.from({ length: 50 }, (_, i) => deptRow({ 序号: i + 1, 物品名称: mats[i % mats.length]!.name, 物料编号: mats[i % mats.length]!.code, 用途: '客用消耗', 数量: i + 1, 备注: `第 ${i + 1} 行` }));
+    const rows50 = Array.from({ length: 50 }, (_, i) =>
+      deptRow({ 序号: i + 1, 物品名称: mats[i % mats.length]!.name, 物料编号: mats[i % mats.length]!.code, 用途: '客用消耗', 数量: i + 1, 备注: `第 ${i + 1} 行` }),
+    );
     const csv = csvOf(DEPT_SHEET_COLUMNS, rows50);
     const p = (await sheetPreview(reqA, csv, '五十行.csv')).body as DeptSheetPreview;
     expect(p).toMatchObject({ issueCount: 0, previous: null, groups: [{ department: '客房部', priority: 'normal', needBy: null, lines: 50 }] });
@@ -165,7 +180,13 @@ describe('部门表格导入（02）', () => {
       ['normal', 2],
     ]);
     // 一份最多 500 行
-    const tooMany = await sheetPreview(reqA, csvOf(DEPT_SHEET_COLUMNS, Array.from({ length: 501 }, () => deptRow({ 物品名称: mats[0]!.name, 用途: '客用消耗', 数量: 1 }))));
+    const tooMany = await sheetPreview(
+      reqA,
+      csvOf(
+        DEPT_SHEET_COLUMNS,
+        Array.from({ length: 501 }, () => deptRow({ 物品名称: mats[0]!.name, 用途: '客用消耗', 数量: 1 })),
+      ),
+    );
     expect(tooMany.body.error.code).toBe('IMPORT_TOO_MANY');
   });
 
@@ -199,7 +220,10 @@ describe('部门表格导入（02）', () => {
     expect(late.body.error.code).toBe('OP_ABANDONED');
     // 手填需求单用过的编号不能拿来导入
     const formKey = randomUUID();
-    const form = await api(ctx.app, reqA, 'POST', '/api/erp/requests', { clientKey: formKey, lines: [{ materialId: mats[0]!.id, name: mats[0]!.name, purpose: '客用消耗', qtyMilli: q(1), unit: '个' }] });
+    const form = await api(ctx.app, reqA, 'POST', '/api/erp/requests', {
+      clientKey: formKey,
+      lines: [{ materialId: mats[0]!.id, name: mats[0]!.name, purpose: '客用消耗', qtyMilli: q(1), unit: '个' }],
+    });
     expect(form.status, JSON.stringify(form.body)).toBe(201);
     const reuse = await api(ctx.app, reqA, 'POST', '/api/erp/requests/sheet/import', { fileName: '每周补货.csv', csv, clientKey: formKey, confirmRepeat: true });
     expect(reuse.status).toBe(409);
@@ -213,7 +237,25 @@ describe('部门表格导入（02）', () => {
         widths: [],
         rows: [
           { cells: [...DEPT_SHEET_COLUMNS] },
-          { cells: DEPT_SHEET_COLUMNS.map((c) => (c === '申请部门' ? '水吧' : c === '物品名称' ? mats[4]!.name : c === '物料编号' ? mats[4]!.code : c === '用途' ? '客用消耗' : c === '数量' ? 2.5 : c === '期望到货日期' ? excelSerial(shiftDate(today, 10)) : c === '参考链接' ? { v: '某宝商品页', link: 'https://item.example.com/x?id=1' } : null)) },
+          {
+            cells: DEPT_SHEET_COLUMNS.map((c) =>
+              c === '申请部门'
+                ? '水吧'
+                : c === '物品名称'
+                  ? mats[4]!.name
+                  : c === '物料编号'
+                    ? mats[4]!.code
+                    : c === '用途'
+                      ? '客用消耗'
+                      : c === '数量'
+                        ? 2.5
+                        : c === '期望到货日期'
+                          ? excelSerial(shiftDate(today, 10))
+                          : c === '参考链接'
+                            ? { v: '某宝商品页', link: 'https://item.example.com/x?id=1' }
+                            : null,
+            ),
+          },
         ],
       },
     ]);
@@ -256,15 +298,37 @@ describe('集采模板最终版（01）', () => {
     const header = [...REQUEST_IMPORT_COLUMNS];
     const row = (o: Partial<Record<(typeof REQUEST_IMPORT_COLUMNS)[number], string | number | { v: string; link: string }>>) => REQUEST_IMPORT_COLUMNS.map((c) => o[c] ?? null);
     const rows = [
-      row({ 序号: 1, 是否下单: '是', 是否到货: '是', 产品名称: '玻璃杯', 用途: '客房漱口', 采购数量: 19, 备注: '大货，样品有1', 产品详情: '水波杯【300ml】', 参考链接渠道: { v: 'dirty咖啡杯-淘宝网', link: link1 } }),
-      row({ 序号: 2, 是否下单: '是', 是否到货: '是', 产品名称: '实木托盘', 用途: '客房桌面放置', 采购数量: 9, 备注: '大货，样品有1', 产品详情: '方舟托盘-炭烧黑30*24', 参考链接渠道: { v: '草木祠 实木托盘-tmall.com天猫', link: link2 } }),
+      row({
+        序号: 1,
+        是否下单: '是',
+        是否到货: '是',
+        产品名称: '玻璃杯',
+        用途: '客房漱口',
+        采购数量: 19,
+        备注: '大货，样品有1',
+        产品详情: '水波杯【300ml】',
+        参考链接渠道: { v: 'dirty咖啡杯-淘宝网', link: link1 },
+      }),
+      row({
+        序号: 2,
+        是否下单: '是',
+        是否到货: '是',
+        产品名称: '实木托盘',
+        用途: '客房桌面放置',
+        采购数量: 9,
+        备注: '大货，样品有1',
+        产品详情: '方舟托盘-炭烧黑30*24',
+        参考链接渠道: { v: '草木祠 实木托盘-tmall.com天猫', link: link2 },
+      }),
       row({ 序号: 3, 产品名称: '垃圾桶（待定）', 用途: '淋浴间', 采购数量: 1, 备注: '样品采购', 产品详情: '植物基·米白（ESG减塑）', 参考链接渠道: { v: link3, link: link3 } }),
       row({ 序号: 4, 是否下单: '否', 产品名称: mats[5]!.name, 采购数量: '2箱', 参考链接渠道: '自采' }),
       row({ 序号: 5, 产品名称: '浴帽', 用途: '客房', 采购数量: '200 个', 参考链接渠道: '朋友推荐的厂家' }),
       row({ 序号: 6 }),
     ];
     const file = (extra: unknown[][] = []) =>
-      buildWorkbook([{ name: '工作表1', widths: [], merges: ['A1:J1'], rows: [{ cells: [REQUEST_IMPORT_TITLE] }, { cells: header }, ...[...rows, ...extra].map((cells) => ({ cells: cells as never[] }))] }]).toString('base64');
+      buildWorkbook([
+        { name: '工作表1', widths: [], merges: ['A1:J1'], rows: [{ cells: [REQUEST_IMPORT_TITLE] }, { cells: header }, ...[...rows, ...extra].map((cells) => ({ cells: cells as never[] }))] },
+      ]).toString('base64');
     const preview = (b64: string, extra: Record<string, unknown> = {}) =>
       api(ctx.app, buyer, 'POST', '/api/erp/requests/import/preview', { fileName: '品牌新增寻款采购清单.xlsx', xlsxBase64: b64, departmentId: deptA, ...extra });
 
@@ -296,7 +360,17 @@ describe('集采模板最终版（01）', () => {
     expect(done.body.import).toMatchObject({ rowCount: 3, requestCount: 1, skippedCount: 2 });
     const req = (await api(ctx.app, buyer, 'GET', `/api/erp/requests/${done.body.requests[0].id}`)).body;
     expect(req).toMatchObject({ status: 'approved', source: 'import', department: { id: deptA } });
-    expect(req.lines.map((l: { name: string; purpose: string; unit: string; link: string; details: string; note: string; channel: string | null }) => [l.name, l.purpose, l.unit, l.link, l.details, l.note, l.channel])).toEqual([
+    expect(
+      req.lines.map((l: { name: string; purpose: string; unit: string; link: string; details: string; note: string; channel: string | null }) => [
+        l.name,
+        l.purpose,
+        l.unit,
+        l.link,
+        l.details,
+        l.note,
+        l.channel,
+      ]),
+    ).toEqual([
       ['垃圾桶（待定）', '淋浴间', '个', link3, '植物基·米白（ESG减塑）', '序号 3 · 样品采购', null],
       [mats[5]!.name, '其他', '箱', '', '', '序号 4', 'self'],
       ['浴帽', '客房', '个', '', '渠道：朋友推荐的厂家', '序号 5', null],

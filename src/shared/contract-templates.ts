@@ -169,11 +169,7 @@ export function builtinValues(content: ContractContent, head: DocHead): Record<s
  * 按模板渲染合同正文：{{字段}} 换成值（找不到的保留「【字段】」提醒人补）；单独一段的 {{付款节点}}、{{单价表}} 换成表；
  * 勾选的可选条款接在后面。没用模板的合同：标题 + 两张表 + 备注。
  */
-export function renderContractDoc(
-  content: ContractContent,
-  head: DocHead,
-  template: { body: string; clauses: TemplateClause[] } | null,
-): DocBlock[] {
+export function renderContractDoc(content: ContractContent, head: DocHead, template: { body: string; clauses: TemplateClause[] } | null): DocBlock[] {
   const tables = contractTables(content);
   const blocks: DocBlock[] = [{ kind: 'heading', text: content.title }];
   if (!template || !content.template) {

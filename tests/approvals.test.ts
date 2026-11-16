@@ -93,7 +93,8 @@ const deactivate = async (r: { id: number; version: number }) => {
   const res = await api(ctx.app, boss, 'POST', `/api/approvals/rules/${r.id}/active`, { version: r.version, active: false });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
 };
-const mine = async (cookie: string) => (await api(ctx.app, cookie, 'GET', '/api/approvals?tab=mine')).body as { id: number; docNo: string; canAct: boolean; actingFor: string[]; currentLevel: number }[];
+const mine = async (cookie: string) =>
+  (await api(ctx.app, cookie, 'GET', '/api/approvals?tab=mine')).body as { id: number; docNo: string; canAct: boolean; actingFor: string[]; currentLevel: number }[];
 const approve = (cookie: string, requestId: number, level: number, comment = '') => api(ctx.app, cookie, 'POST', `/api/approvals/${requestId}/approve`, { level, comment });
 
 beforeAll(async () => {
@@ -301,13 +302,39 @@ describe('审批规则与审批链', () => {
       // 负责人乙请假：设店总为代理人（本人给自己设）
       const bad = await api(ctx.app, mgrB, 'POST', '/api/approvals/delegations', { clientKey: randomUUID(), staffId: ids.mgr_b, delegateId: ids.mgr_b, startsOn: today, endsOn: today });
       expect(bad.status).toBe(400);
-      expect((await api(ctx.app, mgrA, 'POST', '/api/approvals/delegations', { clientKey: randomUUID(), staffId: ids.mgr_b, delegateId: ids.shop_boss, startsOn: today, endsOn: today })).status).toBe(403);
-      const tooLong = await api(ctx.app, mgrB, 'POST', '/api/approvals/delegations', { clientKey: randomUUID(), staffId: ids.mgr_b, delegateId: ids.shop_boss, startsOn: today, endsOn: shiftDate(today, 31) });
+      expect((await api(ctx.app, mgrA, 'POST', '/api/approvals/delegations', { clientKey: randomUUID(), staffId: ids.mgr_b, delegateId: ids.shop_boss, startsOn: today, endsOn: today })).status).toBe(
+        403,
+      );
+      const tooLong = await api(ctx.app, mgrB, 'POST', '/api/approvals/delegations', {
+        clientKey: randomUUID(),
+        staffId: ids.mgr_b,
+        delegateId: ids.shop_boss,
+        startsOn: today,
+        endsOn: shiftDate(today, 31),
+      });
       expect(tooLong.status).toBe(400);
       const key = randomUUID();
-      const set = await api(ctx.app, mgrB, 'POST', '/api/approvals/delegations', { clientKey: key, staffId: ids.mgr_b, delegateId: ids.shop_boss, startsOn: today, endsOn: shiftDate(today, 2), reason: '请假' });
+      const set = await api(ctx.app, mgrB, 'POST', '/api/approvals/delegations', {
+        clientKey: key,
+        staffId: ids.mgr_b,
+        delegateId: ids.shop_boss,
+        startsOn: today,
+        endsOn: shiftDate(today, 2),
+        reason: '请假',
+      });
       expect(set.status).toBe(201);
-      expect((await api(ctx.app, mgrB, 'POST', '/api/approvals/delegations', { clientKey: key, staffId: ids.mgr_b, delegateId: ids.shop_boss, startsOn: today, endsOn: shiftDate(today, 2), reason: '请假' })).body).toMatchObject({ id: set.body.id, replayed: true });
+      expect(
+        (
+          await api(ctx.app, mgrB, 'POST', '/api/approvals/delegations', {
+            clientKey: key,
+            staffId: ids.mgr_b,
+            delegateId: ids.shop_boss,
+            startsOn: today,
+            endsOn: shiftDate(today, 2),
+            reason: '请假',
+          })
+        ).body,
+      ).toMatchObject({ id: set.body.id, replayed: true });
 
       const d2 = await damage();
       const rid2 = d2.approval!.requestId;
@@ -350,7 +377,10 @@ describe('批量同意（A5）与规则维护', () => {
     expect((await api(ctx.app, payer, 'GET', `/api/payables/payments/${a.id}`)).body.approval.actions[0]).toMatchObject({ batch: true, comment: '月底统一付款' });
     expect((await api(ctx.app, payer, 'GET', `/api/payables/payments/${c.id}`)).body.status).toBe('submitted');
     const mixed = await api(ctx.app, mgrA, 'POST', '/api/approvals/batch-approve', {
-      items: [{ id: c.approval!.requestId, level: 1 }, { id: (await po(10, 300)).approval!.requestId, level: 1 }],
+      items: [
+        { id: c.approval!.requestId, level: 1 },
+        { id: (await po(10, 300)).approval!.requestId, level: 1 },
+      ],
     });
     expect(mixed.status).toBe(400);
   });
@@ -430,7 +460,10 @@ describe('Codex 自动审查 2cfd28b：新建规则与设代理人的「结果�
       // 审批中心：不列、不给看、不能审
       for (const tab of ['mine', 'all']) {
         const cards = (await api(ctx.app, boss, 'GET', `/api/approvals?tab=${tab}`)).body as { id: number }[];
-        expect(cards.some((c) => c.id === rid), tab).toBe(false);
+        expect(
+          cards.some((c) => c.id === rid),
+          tab,
+        ).toBe(false);
       }
       expect((await api(ctx.app, boss, 'GET', `/api/approvals/${rid}`)).body.error.code).toBe('ERP_MODULE_DISABLED');
       const one = await approve(mgrA, rid, 1);
@@ -453,7 +486,8 @@ describe('Codex 自动审查 c0acccf：没收到结果时按原级别重新提�
     try {
       const p = await payment(4_321);
       const rid = p.approval!.requestId;
-      const actions = async () => (await ctx.sql<{ level: number; action: string }[]>`SELECT level, action FROM approval_actions WHERE request_id = ${rid} ORDER BY id`).map((a) => `${a.level}:${a.action}`);
+      const actions = async () =>
+        (await ctx.sql<{ level: number; action: string }[]>`SELECT level, action FROM approval_actions WHERE request_id = ${rid} ORDER BY id`).map((a) => `${a.level}:${a.action}`);
       const state = async () => (await ctx.sql<{ status: string; currentLevel: number }[]>`SELECT status, current_level FROM approval_requests WHERE id = ${rid}`)[0];
       // 店主同意第 1 级（店主每一级都能审）：进第 2 级；页面没收到结果
       expect((await approve(boss, rid, 1)).body).toMatchObject({ status: 'pending', currentLevel: 2 });
@@ -483,7 +517,14 @@ describe('Codex 自动审查 c0acccf：没收到结果时按原级别重新提�
 
   it('店主请假设了代理人：会签这一级代理人能替店主同意（店主同意即这一级通过，记「代 店主」），待我审批里也有；收回后不能', async () => {
     const [owner] = await ctx.sql<{ id: number; displayName: string }[]>`SELECT id, display_name FROM staff WHERE username = 'linlan'`;
-    const set = await api(ctx.app, boss, 'POST', '/api/approvals/delegations', { clientKey: randomUUID(), staffId: owner!.id, delegateId: ids.shop_boss, startsOn: today, endsOn: today, reason: '店主请假' });
+    const set = await api(ctx.app, boss, 'POST', '/api/approvals/delegations', {
+      clientKey: randomUUID(),
+      staffId: owner!.id,
+      delegateId: ids.shop_boss,
+      startsOn: today,
+      endsOn: today,
+      reason: '店主请假',
+    });
     expect(set.status, JSON.stringify(set.body)).toBe(201);
     let revoked = false;
     const r = await rule({ docType: 'damage', minCents: 0, steps: [{ staffIds: [ids.mgr_a!, ids.mgr_b!], mode: 'all' }] });
@@ -555,7 +596,9 @@ describe('盘点差异审批（A8）、急采待补单（A10）、数据隔离�
   it('急采待验收算进负责人的数字、列出来，验收后消失；急采收货生效后超过 3 天没补采购单的进负责人待办，补单后消失', async () => {
     const roomsWh = (await ctx.sql<{ id: number }[]>`SELECT id FROM warehouses WHERE department_id = ${ids.rooms!}`)[0]!.id;
     // 8.0.1 起急采由采购登记（采购组整改 05，CG05），部门不能登记
-    expect((await api(ctx.app, reqA, 'POST', '/api/erp/dept-stock/docs', { clientKey: randomUUID(), docType: 'receipt', urgent: true, departmentId: ids.rooms, supplierId: s1.id, lines: [] })).status).toBe(400);
+    expect(
+      (await api(ctx.app, reqA, 'POST', '/api/erp/dept-stock/docs', { clientKey: randomUUID(), docType: 'receipt', urgent: true, departmentId: ids.rooms, supplierId: s1.id, lines: [] })).status,
+    ).toBe(400);
     const rc = await api(ctx.app, buyer, 'POST', '/api/inventory/docs', {
       clientKey: randomUUID(),
       docType: 'receipt',

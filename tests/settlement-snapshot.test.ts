@@ -43,10 +43,7 @@ describe('日结快照一致性', () => {
         for (const c of s.body.checks as { ok: boolean; label: string; detail: string }[]) {
           if (!c.ok) problems.push(`${c.label}：${c.detail}`);
         }
-        const byMethod = (s.body.recharge.byMethod as { amount: number; count: number }[]).reduce(
-          (acc, m) => ({ amount: acc.amount + m.amount, count: acc.count + m.count }),
-          { amount: 0, count: 0 },
-        );
+        const byMethod = (s.body.recharge.byMethod as { amount: number; count: number }[]).reduce((acc, m) => ({ amount: acc.amount + m.amount, count: acc.count + m.count }), { amount: 0, count: 0 });
         if (byMethod.amount !== s.body.recharge.paid || byMethod.count !== s.body.recharge.count) {
           problems.push(`渠道分项 ${byMethod.amount}/${byMethod.count} ≠ 实收 ${s.body.recharge.paid}/${s.body.recharge.count}`);
         }

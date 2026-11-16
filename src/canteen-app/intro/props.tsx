@@ -157,11 +157,7 @@ export function ScribbleCloud() {
     <Layer style={{ left: '50%', top: '0%', width: 'min(60vw, 260px)', marginLeft: 'min(-30vw, -130px)' }}>
       <svg viewBox="0 0 260 120" className="w-full">
         <g style={{ transformOrigin: '130px 60px', animation: 'yz-wiggle .5s ease-in-out infinite' }}>
-          <path
-            d="M70 70c-30 -6 -20 -46 14 -40c6 -26 54 -28 62 -4c24 -14 58 6 44 32c26 6 18 42 -14 38c-8 22 -52 22 -60 2c-22 12 -56 -6 -46 -28z"
-            {...line(3)}
-            style={draw(600, 0, 0.7)}
-          />
+          <path d="M70 70c-30 -6 -20 -46 14 -40c6 -26 54 -28 62 -4c24 -14 58 6 44 32c26 6 18 42 -14 38c-8 22 -52 22 -60 2c-22 12 -56 -6 -46 -28z" {...line(3)} style={draw(600, 0, 0.7)} />
           <path d="M96 64c10 -20 40 -20 44 0c6 -16 30 -14 30 4c-10 12 -30 10 -36 -2c-8 14 -32 14 -38 -2z" {...line(2.4)} style={draw(260, 0.5, 0.6)} />
         </g>
         <text x="30" y="40" fontSize="30" fontWeight="900" fill={ENERGY} style={{ animation: 'yz-pop-in .3s .8s both' }}>
@@ -189,11 +185,7 @@ export function Feast() {
   return (
     <Layer style={{ left: 0, right: 0, top: '4%', height: '62%' }}>
       {dishes.map((d, i) => (
-        <Dish
-          key={d}
-          emoji={d}
-          style={{ ['--r' as string]: 'min(38vw, 150px)', animation: `yz-orbit 9s linear infinite`, animationDelay: `${-i * 1.5}s` }}
-        />
+        <Dish key={d} emoji={d} style={{ ['--r' as string]: 'min(38vw, 150px)', animation: `yz-orbit 9s linear infinite`, animationDelay: `${-i * 1.5}s` }} />
       ))}
     </Layer>
   );

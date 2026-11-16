@@ -51,7 +51,8 @@ export function BenefitTiersView({ onEdit }: { onEdit: (benefitId: number) => vo
         </Notice>
       )}
       <p className="text-[12.5px] text-ink-3">
-        点开一档只出现这一档的三阶，点开一阶看这一阶的券与福利；券按面值从高到低排。券模板 {d.templates.total} 张都已归到档阶里（发券规则按发的那一阶，只用于手动、批量、领券中心的按限定的最低档，不限的在 L0）。
+        点开一档只出现这一档的三阶，点开一阶看这一阶的券与福利；券按面值从高到低排。券模板 {d.templates.total}{' '}
+        张都已归到档阶里（发券规则按发的那一阶，只用于手动、批量、领券中心的按限定的最低档，不限的在 L0）。
       </p>
       {d.grades.map((g) => {
         const open = openGrade === g.grade;
@@ -72,12 +73,21 @@ export function BenefitTiersView({ onEdit }: { onEdit: (benefitId: number) => vo
               <span className="text-[15px] font-bold text-ink">{g.label}</span>
               <span className="text-[12.5px] text-ink-3">{g.grade === 0 ? '免费注册' : `充值门槛 ${formatYuan(g.thresholdCents)}`}</span>
               <span className="flex-1" />
-              <span className="text-[12px] text-ink-3">{g.grade === 0 ? '' : '三阶 · '}这一档起享 {fresh} 项</span>
+              <span className="text-[12px] text-ink-3">
+                {g.grade === 0 ? '' : '三阶 · '}这一档起享 {fresh} 项
+              </span>
             </button>
             {open && (
               <div className="space-y-2 border-t border-line bg-paper/50 px-4 py-3" data-testid={`tier-stages-${g.grade}`}>
                 {g.stages.map((st) => (
-                  <StageRow key={st.rank} stage={st} open={g.grade === 0 || openStage === st.rank} single={g.grade === 0} onToggle={() => setOpenStage(openStage === st.rank ? null : st.rank)} onEdit={onEdit} />
+                  <StageRow
+                    key={st.rank}
+                    stage={st}
+                    open={g.grade === 0 || openStage === st.rank}
+                    single={g.grade === 0}
+                    onToggle={() => setOpenStage(openStage === st.rank ? null : st.rank)}
+                    onEdit={onEdit}
+                  />
                 ))}
               </div>
             )}
@@ -96,7 +106,13 @@ function StageRow({ stage, open, single, onToggle, onEdit }: { stage: TierStage;
   return (
     <div className="rounded-lg border border-line bg-card" data-testid={`tier-stage-${stage.rank}`}>
       {!single && (
-        <button type="button" className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left hover:bg-paper-2/60" aria-expanded={open} onClick={onToggle} data-testid={`tier-stage-toggle-${stage.rank}`}>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left hover:bg-paper-2/60"
+          aria-expanded={open}
+          onClick={onToggle}
+          data-testid={`tier-stage-toggle-${stage.rank}`}
+        >
           {open ? <ChevronDown className="size-4 text-ink-3" /> : <ChevronRight className="size-4 text-ink-3" />}
           <span className="text-[14px] font-bold text-ink">{stage.label}</span>
           <span className="text-[12px] text-ink-3">
@@ -127,7 +143,23 @@ function StageRow({ stage, open, single, onToggle, onEdit }: { stage: TierStage;
   );
 }
 
-function EntryList({ title, icon, entries, empty, onEdit, muted, testid }: { title: string; icon: React.ReactNode; entries: TierEntry[]; empty: string; onEdit: (benefitId: number) => void; muted?: boolean; testid?: string }) {
+function EntryList({
+  title,
+  icon,
+  entries,
+  empty,
+  onEdit,
+  muted,
+  testid,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  entries: TierEntry[];
+  empty: string;
+  onEdit: (benefitId: number) => void;
+  muted?: boolean;
+  testid?: string;
+}) {
   return (
     <div data-testid={testid}>
       <p className="flex items-center gap-1.5 text-[12.5px] font-bold text-ink-2">

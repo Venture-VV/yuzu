@@ -34,8 +34,7 @@ export const useTicketTypes = (all = false) =>
 export const useCheckoutPreview = (ids: number[], enabled: boolean, at?: string) =>
   useQuery({
     queryKey: fk.checkoutPreview(ids, at),
-    queryFn: () =>
-      api.get<CheckoutPreview>(`/api/frontdesk/checkout-preview?ids=${ids.join(',')}${at ? `&at=${encodeURIComponent(at)}` : ''}`),
+    queryFn: () => api.get<CheckoutPreview>(`/api/frontdesk/checkout-preview?ids=${ids.join(',')}${at ? `&at=${encodeURIComponent(at)}` : ''}`),
     enabled: enabled && ids.length > 0,
     placeholderData: keepPreviousData,
     refetchInterval: at ? false : 30_000,
@@ -59,8 +58,7 @@ export const useCheckoutDaySummary = (date: string, enabled = true, live = false
     refetchInterval: live ? REVENUE_REFRESH_MS : false,
   });
 
-export const useCheckout = (id: number | null) =>
-  useQuery({ queryKey: fk.checkout(id ?? 0), queryFn: () => api.get<CheckoutDetail>(`/api/frontdesk/checkouts/${id}`), enabled: !!id });
+export const useCheckout = (id: number | null) => useQuery({ queryKey: fk.checkout(id ?? 0), queryFn: () => api.get<CheckoutDetail>(`/api/frontdesk/checkouts/${id}`), enabled: !!id });
 
 /** 状态板每 10 秒刷新一次；多台前台终端同时使用时能看到彼此的发牌与挂账 */
 export const useBoard = () =>
@@ -95,8 +93,7 @@ export const useMemberGrade = (memberId: number | null) =>
     enabled: !!memberId,
   });
 
-export const useFrontdeskChecks = (enabled: boolean) =>
-  useQuery({ queryKey: fk.checks, queryFn: () => api.get<FrontdeskCheck[]>('/api/frontdesk/checks'), enabled });
+export const useFrontdeskChecks = (enabled: boolean) => useQuery({ queryKey: fk.checks, queryFn: () => api.get<FrontdeskCheck[]>('/api/frontdesk/checks'), enabled });
 
 /** 写操作后刷新状态板与相关手牌账单 */
 export function useRefreshFrontdesk() {

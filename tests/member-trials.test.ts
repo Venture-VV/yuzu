@@ -27,8 +27,7 @@ const catalog = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/benefits
 const byCode = async (code: string) => (await catalog()).items.find((b) => b.code === code)!;
 const edit = async (code: string, patch: Partial<Benefit>) => {
   const b = await byCode(code);
-  const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } =
-    b;
+  const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } = b;
   const r = await api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
     expectedVersion: version,
     ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions },

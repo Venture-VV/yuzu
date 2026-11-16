@@ -70,12 +70,7 @@ export const DEFAULT_REMINDERS: readonly MealReminder[] = [
     enabled: true,
     time: null,
     title: '柚子喊你吃晚饭啦 🍲',
-    lines: [
-      '晚饭时间到！辛苦一天啦，来饭堂补充能量吧～',
-      '叮咚～今晚有{菜单}，柚子给你留着热乎的！',
-      '{名字}，别光顾着忙，先来吃饭呀～柚子在饭堂等你',
-      '晚饭开饭啦 🌙 吃饱饱，晚上的班才不累！',
-    ],
+    lines: ['晚饭时间到！辛苦一天啦，来饭堂补充能量吧～', '叮咚～今晚有{菜单}，柚子给你留着热乎的！', '{名字}，别光顾着忙，先来吃饭呀～柚子在饭堂等你', '晚饭开饭啦 🌙 吃饱饱，晚上的班才不累！'],
     open: 'code',
   },
   {
@@ -139,7 +134,11 @@ export function pickReminderLine(lines: readonly string[], date: string, hasMenu
 
 /** 把 {名字}、{菜单} 换成真的（没发布菜单时 {菜单} 换成「好吃的」） */
 export function fillReminderLine(line: string, name: string, menu: string): string {
-  return line.split(NAME_TAG).join(name).split(MENU_TAG).join(menu || '好吃的');
+  return line
+    .split(NAME_TAG)
+    .join(name)
+    .split(MENU_TAG)
+    .join(menu || '好吃的');
 }
 
 // ── 推送的内容（服务端加密后发给手机，手机上的 sw.js 读） ──

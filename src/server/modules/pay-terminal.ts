@@ -13,7 +13,16 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AUTH_CODE_PATTERN, DEFAULT_INTEGRATION_SWITCHES, type IntegrationSwitches, type PayProvider, type PayPurpose, type PayRefundView, type PayTerminalStatus, type PayTxView } from '@shared/integrations';
+import {
+  AUTH_CODE_PATTERN,
+  DEFAULT_INTEGRATION_SWITCHES,
+  type IntegrationSwitches,
+  type PayProvider,
+  type PayPurpose,
+  type PayRefundView,
+  type PayTerminalStatus,
+  type PayTxView,
+} from '@shared/integrations';
 import { can } from '@shared/permissions';
 import { PAYMENT_METHOD_LABELS } from '@shared/labels';
 import { formatYuan } from '@shared/money';
@@ -51,7 +60,11 @@ export async function payTerminalStatus(deps: Deps): Promise<PayTerminalStatus> 
 /** 现在能用的付款码支付；没配置、门店关了的拒绝 */
 async function adapterOrThrow(deps: Deps): Promise<PayTerminal> {
   const a = payTerminalAdapter(deps.config.integrations);
-  if (!a) throw conflict('PAY_TERMINAL_OFF', modeOf(deps.config.integrations, 'pay_terminal') === 'live' ? '扫码收款已配置，等联调以后才能用；现在请手选微信 / 支付宝并核实到账' : '没有配置扫码收款；请手选微信 / 支付宝并核实到账');
+  if (!a)
+    throw conflict(
+      'PAY_TERMINAL_OFF',
+      modeOf(deps.config.integrations, 'pay_terminal') === 'live' ? '扫码收款已配置，等联调以后才能用；现在请手选微信 / 支付宝并核实到账' : '没有配置扫码收款；请手选微信 / 支付宝并核实到账',
+    );
   if (!(await loadIntegrationSwitches(deps.sql)).payTerminal) throw conflict('PAY_TERMINAL_OFF', '门店关了扫码收款（后台「对外接口」）；请手选微信 / 支付宝并核实到账');
   return a;
 }
@@ -78,7 +91,10 @@ async function views(db: Db, where: Fragment): Promise<PayTxView[]> {
     FROM pay_transactions t JOIN staff s ON s.id = t.staff_id
     WHERE ${where}
     ORDER BY t.id DESC LIMIT 200`;
-  const refunds = await refundsOf(db, rows.map((r) => Number(r.id)));
+  const refunds = await refundsOf(
+    db,
+    rows.map((r) => Number(r.id)),
+  );
   return rows.map(({ consumedKind, consumedId, consumedNo, ...r }) => ({
     ...r,
     id: Number(r.id),
@@ -129,7 +145,16 @@ async function callPay(deps: Deps, a: PayTerminal, t: { id: number; provider: Pa
   try {
     return await withCallLog(
       deps.sql,
-      { kind: 'pay_terminal', provider: t.provider, action: 'pay', mode: a.mode, refType: 'pay_transaction', refId: t.id, request: { outTradeNo: t.outTradeNo, amountCents: t.amountCents, authCode: maskTail(authCode) }, staffId },
+      {
+        kind: 'pay_terminal',
+        provider: t.provider,
+        action: 'pay',
+        mode: a.mode,
+        refType: 'pay_transaction',
+        refId: t.id,
+        request: { outTradeNo: t.outTradeNo, amountCents: t.amountCents, authCode: maskTail(authCode) },
+        staffId,
+      },
       () => a.pay({ provider: t.provider, outTradeNo: t.outTradeNo, amountCents: t.amountCents, authCode, subject: '浴场消费' }),
       (r) => ({ status: r.status, providerTradeNo: r.providerTradeNo ?? null, error: r.error ?? null }),
     );
@@ -173,7 +198,14 @@ export async function startPay(deps: Deps, raw: unknown, actor: Actor, ip?: stri
     await tx`
       INSERT INTO pay_transactions (id, out_trade_no, provider, adapter, purpose, amount_cents, client_key, request_hash, staff_id, shift_id)
       VALUES (${id}, ${outTradeNo}, ${input.provider}, ${a.mode}, ${input.purpose}, ${input.amountCents}, ${input.clientKey}, ${requestHash}, ${actor.id}, ${shiftId})`;
-    await writeAudit(tx, { staffId: actor.id, action: 'pay_terminal', targetType: 'pay_transaction', targetId: Number(id), detail: { op: 'start', outTradeNo, provider: input.provider, amountCents: input.amountCents, purpose: input.purpose }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'pay_terminal',
+      targetType: 'pay_transaction',
+      targetId: Number(id),
+      detail: { op: 'start', outTradeNo, provider: input.provider, amountCents: input.amountCents, purpose: input.purpose },
+      ip,
+    });
     return { id: Number(id), replayed: false };
   });
   if (!r.replayed) {
@@ -298,7 +330,11 @@ export async function queueCheckoutRefund(tx: Tx, a: { checkoutId: number; provi
     ids.push(await insertRefund(tx, { txId: Number(t.id), amountCents: take, reason: a.reason, refundId: a.refundId, clientKey: null, staffId: a.staffId }));
     left -= take;
   }
-  if (left > 0) throw unprocessable('PAY_REFUND_OVER', `这张结账单${PAYMENT_METHOD_LABELS[a.provider as 'wechat'] ?? a.provider}扫码收的钱只够原路退 ${formatYuan(a.amountCents - left)}；多出的请不勾「原路退回」，登记商户后台的退款单号`);
+  if (left > 0)
+    throw unprocessable(
+      'PAY_REFUND_OVER',
+      `这张结账单${PAYMENT_METHOD_LABELS[a.provider as 'wechat'] ?? a.provider}扫码收的钱只够原路退 ${formatYuan(a.amountCents - left)}；多出的请不勾「原路退回」，登记商户后台的退款单号`,
+    );
   return ids;
 }
 
@@ -315,7 +351,15 @@ export async function processRefunds(deps: Deps, ids: number[]): Promise<void> {
     else {
       result = await withCallLog(
         deps.sql,
-        { kind: 'pay_terminal', provider: r.provider, action: 'refund', mode: a.mode, refType: 'pay_refund', refId: id, request: { outTradeNo: r.outTradeNo, outRefundNo: r.outRefundNo, amountCents: Number(r.amountCents) } },
+        {
+          kind: 'pay_terminal',
+          provider: r.provider,
+          action: 'refund',
+          mode: a.mode,
+          refType: 'pay_refund',
+          refId: id,
+          request: { outTradeNo: r.outTradeNo, outRefundNo: r.outRefundNo, amountCents: Number(r.amountCents) },
+        },
         () => a.refund({ provider: r.provider, outTradeNo: r.outTradeNo, outRefundNo: r.outRefundNo, amountCents: Number(r.amountCents), totalCents: Number(r.totalCents), reason: r.reason }),
         (x) => ({ status: x.status, providerRefundNo: x.providerRefundNo ?? null, error: x.error ?? null }),
       ).catch((e: unknown) => ({ status: 'failed' as const, error: `支付方没有回应：${e instanceof Error ? e.message : String(e)}`.slice(0, 200) }));
@@ -352,7 +396,14 @@ export async function refundUnconsumed(deps: Deps, txId: number, raw: unknown, a
     if (t.consumedKind) throw conflict('PAY_TX_USED', '这笔已经入账了：要退请开退款单（原路退回）或反结账');
     if (Number(t.refundCents) > 0) throw conflict('PAY_TX_REFUNDED', '这笔已经申请过原路退回');
     const id = await insertRefund(tx, { txId, amountCents: Number(t.amountCents), reason: input.reason, refundId: null, clientKey: input.clientKey, staffId: actor.id });
-    await writeAudit(tx, { staffId: actor.id, action: 'pay_terminal', targetType: 'pay_transaction', targetId: txId, detail: { op: 'refund_unconsumed', outTradeNo: t.outTradeNo, amountCents: Number(t.amountCents), reason: input.reason }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'pay_terminal',
+      targetType: 'pay_transaction',
+      targetId: txId,
+      detail: { op: 'refund_unconsumed', outTradeNo: t.outTradeNo, amountCents: Number(t.amountCents), reason: input.reason },
+      ip,
+    });
     return [id];
   });
   await processRefunds(deps, ids);
@@ -371,7 +422,10 @@ export async function sweepRefunds(deps: Deps, now = new Date()): Promise<number
   const rows = await deps.sql<{ id: number }[]>`
     SELECT id FROM pay_refunds WHERE status = 'pending' AND updated_at < ${new Date(now.getTime() - REFUND_RESUME_AFTER_MS)} ORDER BY id LIMIT 50`;
   if (!rows.length) return 0;
-  await processRefunds(deps, rows.map((r) => Number(r.id)));
+  await processRefunds(
+    deps,
+    rows.map((r) => Number(r.id)),
+  );
   return rows.length;
 }
 
@@ -390,7 +444,14 @@ export async function resolveRefund(deps: Deps, refundId: number, raw: unknown, 
       if (r.status !== 'failed') throw conflict('INVALID_STATE', '只有退款失败的能改成线下已退');
       await tx`UPDATE pay_refunds SET status = 'offline', offline_note = ${input.note}, updated_at = now() WHERE id = ${refundId}`;
     }
-    await writeAudit(tx, { staffId: actor.id, action: 'pay_terminal', targetType: 'pay_refund', targetId: refundId, detail: { op: input.action, ...(input.action === 'offline' ? { note: input.note } : {}) }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'pay_terminal',
+      targetType: 'pay_refund',
+      targetId: refundId,
+      detail: { op: input.action, ...(input.action === 'offline' ? { note: input.note } : {}) },
+      ip,
+    });
     return Number(r.txId);
   });
   if (input.action === 'retry') await processRefunds(deps, [refundId]);
@@ -410,7 +471,10 @@ export function registerPayTerminalRoutes(app: FastifyInstance, deps: Deps) {
   });
   /** 没入账、退款失败的（前台顶上的提示与处理）：全店的，最多 200 笔 */
   app.get('/api/pay/terminal/open', { preHandler: payers }, async () =>
-    views(sql, sql`(t.status = 'paid' AND t.consumed_kind IS NULL AND t.refund_cents = 0) OR t.status = 'paying' OR EXISTS (SELECT 1 FROM pay_refunds r WHERE r.tx_id = t.id AND r.status IN ('pending', 'failed'))`),
+    views(
+      sql,
+      sql`(t.status = 'paid' AND t.consumed_kind IS NULL AND t.refund_cents = 0) OR t.status = 'paying' OR EXISTS (SELECT 1 FROM pay_refunds r WHERE r.tx_id = t.id AND r.status IN ('pending', 'failed'))`,
+    ),
   );
   app.get('/api/pay/terminal/:id', { preHandler: payers }, async (req) => refreshPay(deps, parse(idParam, req.params).id));
   // 结果待确认：按操作编号查回（交易在调支付方之前就提交了，查不到就是请求没到）；确认作废后原请求即使到达也不生效
@@ -433,4 +497,3 @@ export function registerPayTerminalRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/pay/terminal/:id/refund', { preHandler: guard('frontdesk.refund') }, async (req) => refundUnconsumed(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
   app.post('/api/pay/refunds/:id/resolve', { preHandler: guard('frontdesk.refund') }, async (req) => resolveRefund(deps, parse(idParam, req.params).id, req.body, req.actor, req.ip));
 }
-

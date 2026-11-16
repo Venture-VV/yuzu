@@ -243,7 +243,10 @@ function myStanding(req: RequestRow, v: Viewer, actions: ApprovalActionView[]): 
 
 async function toCards(db: Db, reqs: RequestRow[], v: Viewer): Promise<ApprovalCard[]> {
   if (reqs.length === 0) return [];
-  const actions = await actionsOf(db, reqs.map((r) => r.id));
+  const actions = await actionsOf(
+    db,
+    reqs.map((r) => r.id),
+  );
   const sums = await summaries(db, reqs);
   const names = await staffNames(db, [...reqs.flatMap((r) => r.steps.flatMap((s) => ('staffIds' in s ? s.staffIds : []))), ...v.delegators.map((d) => d.id)]);
   return reqs.map((r) => {
@@ -390,21 +393,23 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
         WHERE d.id = ${docId}`;
       if (!d) throw notFound('单据不存在');
       const settings = await loadInventorySettings(db);
-      const lines = await db<{
-        id: number;
-        name: string;
-        spec: string;
-        qtyMilli: number;
-        inventoryUnit: string;
-        amountCents: number | null;
-        priceCents: number | null;
-        refPriceCents: number | null;
-        factorMilli: number;
-        bookMilli: number | null;
-        countedMilli: number | null;
-        diffReason: CountReason | 'pending' | null;
-        diffNote: string;
-      }[]>`
+      const lines = await db<
+        {
+          id: number;
+          name: string;
+          spec: string;
+          qtyMilli: number;
+          inventoryUnit: string;
+          amountCents: number | null;
+          priceCents: number | null;
+          refPriceCents: number | null;
+          factorMilli: number;
+          bookMilli: number | null;
+          countedMilli: number | null;
+          diffReason: CountReason | 'pending' | null;
+          diffNote: string;
+        }[]
+      >`
         SELECT l.id, m.name, m.specification AS spec, l.qty_milli, l.inventory_unit, l.amount_cents, l.price_cents, m.ref_price_cents, l.factor_milli,
                l.book_milli, l.counted_milli, l.diff_reason, l.diff_note
         FROM inv_doc_lines l JOIN materials m ON m.id = l.material_id WHERE l.doc_id = ${docId} ORDER BY l.line_no`;
@@ -475,7 +480,21 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
       return { title: '期初未付', link: '/payables?view=openings', party: o.supplierName, docDate: o.asOfDate, note: o.note, facts: [{ label: '截至', value: o.asOfDate }], lines: [] };
     }
     case 'expense_claim': {
-      const [c] = await db<{ departmentName: string; expenseDate: string; note: string; purpose: string; paySource: PaySource; invoiceLabel: string; invoiceNo: string; handlerName: string; poNo: string | null; overBudget: boolean; budgetCheck: BudgetCheckItem[] | null }[]>`
+      const [c] = await db<
+        {
+          departmentName: string;
+          expenseDate: string;
+          note: string;
+          purpose: string;
+          paySource: PaySource;
+          invoiceLabel: string;
+          invoiceNo: string;
+          handlerName: string;
+          poNo: string | null;
+          overBudget: boolean;
+          budgetCheck: BudgetCheckItem[] | null;
+        }[]
+      >`
         SELECT d.name AS department_name, c.expense_date, c.note, c.purpose, c.pay_source, c.invoice_label, c.invoice_no, h.display_name AS handler_name, po.doc_no AS po_no,
                c.over_budget, c.budget_check
         FROM expense_claims c JOIN departments d ON d.id = c.department_id JOIN staff h ON h.id = c.handler_id
@@ -513,18 +532,20 @@ async function digestOf(db: Db, kind: ApprovalDocKind, docId: number, requestId:
     case 'contract_change':
       return contractDigest(db, kind, docId, requestId);
     case 'contract_seal': {
-      const [x] = await db<{
-        contractId: number;
-        contractNo: string;
-        title: string;
-        counterparty: string;
-        status: ContractStatus;
-        sealType: SealType;
-        copies: number;
-        operatorName: string;
-        sealDate: string;
-        purpose: string;
-      }[]>`
+      const [x] = await db<
+        {
+          contractId: number;
+          contractNo: string;
+          title: string;
+          counterparty: string;
+          status: ContractStatus;
+          sealType: SealType;
+          copies: number;
+          operatorName: string;
+          sealDate: string;
+          purpose: string;
+        }[]
+      >`
         SELECT c.id AS contract_id, c.contract_no, c.title, c.counterparty, c.status, s.seal_type, s.copies, o.display_name AS operator_name, s.seal_date, s.purpose
         FROM contract_seals s JOIN contracts c ON c.id = s.contract_id JOIN staff o ON o.id = s.operator_id WHERE s.id = ${docId}`;
       if (!x) throw notFound('用印申请不存在');
@@ -622,7 +643,13 @@ async function contractDigest(db: Db, kind: 'contract' | 'contract_change', docI
     { label: '运费 / 卸货', value: `${BEARER_LABELS[content.freightBearer]} / ${BEARER_LABELS[content.unloadingBearer]}` },
     { label: '付款节点', value: terms },
     { label: '质保', value: content.warranty.months ? `${WARRANTY_BASIS_LABELS[content.warranty.basis]}起 ${content.warranty.months} 个月` : '没有质保' },
-    { label: '验收标准', value: [content.acceptance.method, content.acceptance.signer && `签字：${content.acceptance.signer}`, content.acceptance.penalty && `不合格：${content.acceptance.penalty}`].filter(Boolean).join('；') || '—' },
+    {
+      label: '验收标准',
+      value:
+        [content.acceptance.method, content.acceptance.signer && `签字：${content.acceptance.signer}`, content.acceptance.penalty && `不合格：${content.acceptance.penalty}`]
+          .filter(Boolean)
+          .join('；') || '—',
+    },
     { label: '经办', value: h.handlerName },
   ];
   let change: NonNullable<ApprovalDocDigest['contract']>['change'];
@@ -677,7 +704,10 @@ export async function getApprovalDetail(db: Db, actor: Actor, timeZone: string, 
   // 能看：现在能审的、提交人、审过这张单的、负责人与店主
   const mine = card!.canAct || req.submittedBy === actor.id || actions.some((a) => a.actorId === actor.id) || canViewAll(actor);
   if (!mine) throw forbidden('这张审批单不在你的待办里');
-  const names = await staffNames(db, req.steps.flatMap((s) => ('staffIds' in s ? s.staffIds : [])));
+  const names = await staffNames(
+    db,
+    req.steps.flatMap((s) => ('staffIds' in s ? s.staffIds : [])),
+  );
   const levelsDetail = req.steps.map((step, i) => {
     const level = i + 1;
     const acts = actions.filter((a) => a.level === level);
@@ -744,7 +774,9 @@ export async function urgentBackfills(db: Db, timeZone: string): Promise<UrgentB
   const today = todayIn(timeZone);
   // 急采待补单升级的天数（A10，8.0.7 起可改）
   const { urgentEscalateDays } = await loadSettings(db);
-  const rows = await db<{ receiptId: number; docNo: string; departmentName: string | null; supplierName: string | null; amountCents: number; confirmedAt: string; daysOver: number; handlerName: string }[]>`
+  const rows = await db<
+    { receiptId: number; docNo: string; departmentName: string | null; supplierName: string | null; amountCents: number; confirmedAt: string; daysOver: number; handlerName: string }[]
+  >`
     SELECT d.id AS receipt_id, d.doc_no, wd.name AS department_name, s.name AS supplier_name, d.amount_cents, d.confirmed_at,
            (${today}::date - (d.confirmed_at AT TIME ZONE ${timeZone})::date) - ${urgentEscalateDays} AS days_over,
            cb.display_name AS handler_name

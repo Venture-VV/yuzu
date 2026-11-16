@@ -56,10 +56,14 @@ async function linesOf(page: Page, code: string) {
 
 /** 挂账请求真实到达服务器并入账，但浏览器收不到响应 */
 async function loseNextChargeResponse(page: Page) {
-  await page.route('**/api/frontdesk/visits/*/charges', async (route) => {
-    await route.fetch();
-    await route.abort('connectionreset');
-  }, { times: 1 });
+  await page.route(
+    '**/api/frontdesk/visits/*/charges',
+    async (route) => {
+      await route.fetch();
+      await route.abort('connectionreset');
+    },
+    { times: 1 },
+  );
 }
 
 async function addScrub(page: Page) {
@@ -134,10 +138,14 @@ test.describe('前台待确认操作与明确选牌', () => {
     await login(page);
     await page.goto('/frontdesk');
     const code = (await board(page)).filter((t) => freeNormal(t, 'female')).reverse()[0]!.code;
-    await page.route('**/api/frontdesk/checkins', async (route) => {
-      await route.fetch();
-      await route.abort('connectionreset');
-    }, { times: 1 });
+    await page.route(
+      '**/api/frontdesk/checkins',
+      async (route) => {
+        await route.fetch();
+        await route.abort('connectionreset');
+      },
+      { times: 1 },
+    );
     await page.route('**/api/frontdesk/ops/*', (route) => route.abort('connectionreset'));
     await pressF2(page);
     const dialog = page.getByRole('dialog', { name: '接待发牌' });
@@ -210,7 +218,9 @@ test.describe('前台待确认操作与明确选牌', () => {
       return hits.length >= 2 && !free.some((t) => Number(t.code.replace(/\D/g, '')) === Number(d));
     });
     test.skip(!digit, '演示库中没有合适的多候选尾号');
-    const hits = matchTags(free, digit!).slice(0, 8).map((t) => t.code);
+    const hits = matchTags(free, digit!)
+      .slice(0, 8)
+      .map((t) => t.code);
     await pressF2(page);
     const dialog = page.getByRole('dialog', { name: '接待发牌' });
     await dialog.getByLabel('第 1 位牌号').fill(digit!);

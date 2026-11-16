@@ -140,7 +140,10 @@ async function checkSteps(db: Db, steps: ApprovalStep[], docType: ApprovalDocTyp
     throw unprocessable('RULE_LEGAL_NOT_ALLOWED', '「法务」这一组只用于合同、合同变更');
   }
   for (const s of steps) if ('staffIds' in s && new Set(s.staffIds).size !== s.staffIds.length) throw badRequest('同一级里指定的人重复了');
-  await assertApprovers(db, steps.flatMap((s) => ('staffIds' in s ? s.staffIds : [])));
+  await assertApprovers(
+    db,
+    steps.flatMap((s) => ('staffIds' in s ? s.staffIds : [])),
+  );
 }
 
 async function checkDepartment(db: Db, departmentId: number | null) {
@@ -156,7 +159,10 @@ export async function listRules(db: Db): Promise<ApprovalRuleView[]> {
     FROM approval_rules r JOIN staff cb ON cb.id = r.created_by LEFT JOIN staff ub ON ub.id = r.updated_by
     LEFT JOIN departments d ON d.id = r.department_id
     ORDER BY r.active DESC, r.doc_type, (r.department_id IS NOT NULL) DESC, r.min_cents DESC, r.id DESC`;
-  const names = await staffNames(db, rows.flatMap((r) => r.steps.flatMap((s) => ('staffIds' in s ? s.staffIds : []))));
+  const names = await staffNames(
+    db,
+    rows.flatMap((r) => r.steps.flatMap((s) => ('staffIds' in s ? s.staffIds : []))),
+  );
   return rows.map((r) => ({
     ...r,
     id: Number(r.id),

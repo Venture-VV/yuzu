@@ -56,10 +56,7 @@ export const isFreeTicket = (t: Pick<TicketType, 'price12h' | 'price24h'>) => t.
  * 选这个票种是否需要值班经理及以上当场授权（R1.2，店主 2026-10-29 签认）：免票（接待时直接选也算），
  * 或比客人现在留存的票价便宜（任一档更低）。current 为 null 表示客人还没有票种（接待时）。
  */
-export function ticketChangeNeedsGrant(
-  type: Pick<TicketType, 'price12h' | 'price24h'>,
-  current: Pick<TicketType, 'price12h' | 'price24h'> | null,
-): boolean {
+export function ticketChangeNeedsGrant(type: Pick<TicketType, 'price12h' | 'price24h'>, current: Pick<TicketType, 'price12h' | 'price24h'> | null): boolean {
   if (isFreeTicket(type)) return true;
   return current !== null && (type.price12h < current.price12h || type.price24h < current.price24h);
 }
@@ -470,7 +467,16 @@ export interface ShiftSummary {
     count: number;
     total: number;
     byMethod: { method: PaymentMethod; count: number; amount: number }[];
-    list: { refundNo: string; memberName: string; amount: number; cash: number; reason: string; createdAt: string; refs: { method: PaymentMethod; amount: number; ref: string }[]; operatorName?: string }[];
+    list: {
+      refundNo: string;
+      memberName: string;
+      amount: number;
+      cash: number;
+      reason: string;
+      createdAt: string;
+      refs: { method: PaymentMethod; amount: number; ref: string }[];
+      operatorName?: string;
+    }[];
   };
   /**
    * 次卡（v0.7.28）：本班次卖的卡与退的卡，按方式；现金进出本班钱箱。本班次没有次卡往来、升级之前交班的快照都没有这一项

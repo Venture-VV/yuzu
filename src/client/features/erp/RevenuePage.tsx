@@ -129,7 +129,12 @@ export function RevenuePage() {
                     testId="erp-revenue-departments"
                     format={yuan}
                     empty="这段时间没有结账"
-                    rows={d.departments.map((x) => ({ key: x.category, label: x.category, value: x.amount, note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}${x.refund ? ` · 退款 ${yuan(x.refund)}` : ''}` }))}
+                    rows={d.departments.map((x) => ({
+                      key: x.category,
+                      label: x.category,
+                      value: x.amount,
+                      note: `${x.quantity} 项${x.discount ? ` · 优惠 ${yuan(x.discount)}` : ''}${x.refund ? ` · 退款 ${yuan(x.refund)}` : ''}`,
+                    }))}
                   />
                 </Card>
               </div>

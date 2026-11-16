@@ -185,9 +185,7 @@ function BalanceLedger() {
                         <td className="num px-4 py-3 text-ink-2">{formatTime(r.createdAt)}</td>
                         <td className="num truncate px-2 py-3 font-semibold">{r.docNo}</td>
                         <td className="px-2 py-3">
-                          <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-[12px] font-bold', meta.tone)}>
-                            {ENTRY_TYPE_LABELS[r.entryType]}
-                          </span>
+                          <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-[12px] font-bold', meta.tone)}>{ENTRY_TYPE_LABELS[r.entryType]}</span>
                         </td>
                         <td className="px-2 py-3">
                           <p className="truncate font-semibold">{r.memberName}</p>
@@ -195,19 +193,13 @@ function BalanceLedger() {
                         </td>
                         <td className="px-2 py-3">
                           <div className="flex items-center gap-1.5">
-                            <span className={cn('truncate', reversed && 'text-ink-3')}>
-                              {r.entryType === 'reversal' ? `原单 ${r.relatedDocNo} · ${r.summary}` : r.summary}
-                            </span>
+                            <span className={cn('truncate', reversed && 'text-ink-3')}>{r.entryType === 'reversal' ? `原单 ${r.relatedDocNo} · ${r.summary}` : r.summary}</span>
                             {reversed && <Badge tone="clay">已撤销</Badge>}
                             {crossDay && <Badge tone="ember">跨日</Badge>}
                           </div>
-                          {r.entryType === 'recharge' && r.paymentMethod && (
-                            <p className="text-[11.5px] text-ink-3">{PAYMENT_METHOD_LABELS[r.paymentMethod]}</p>
-                          )}
+                          {r.entryType === 'recharge' && r.paymentMethod && <p className="text-[11.5px] text-ink-3">{PAYMENT_METHOD_LABELS[r.paymentMethod]}</p>}
                         </td>
-                        <td className="px-2 py-3 text-right">
-                          {r.paidAmount != null ? <Money cents={r.paidAmount} className="font-bold text-lake" /> : <span className="text-ink-4">—</span>}
-                        </td>
+                        <td className="px-2 py-3 text-right">{r.paidAmount != null ? <Money cents={r.paidAmount} className="font-bold text-lake" /> : <span className="text-ink-4">—</span>}</td>
                         <td className="px-2 py-3 text-right">
                           <Money cents={r.principalDelta} signed className={cn('font-bold', reversed ? 'struck text-ink-4' : r.principalDelta < 0 ? 'text-ink' : 'text-pine')} />
                         </td>
@@ -248,30 +240,14 @@ function BalanceLedger() {
   );
 }
 
-function StatTile({
-  label,
-  cents,
-  count,
-  sub,
-  tone,
-}: {
-  label: string;
-  cents?: number;
-  count?: number;
-  sub: string;
-  tone: 'lake' | 'ink' | 'clay' | 'neutral';
-}) {
+function StatTile({ label, cents, count, sub, tone }: { label: string; cents?: number; count?: number; sub: string; tone: 'lake' | 'ink' | 'clay' | 'neutral' }) {
   const color = { lake: 'text-lake', ink: 'text-ink', clay: 'text-clay', neutral: 'text-ink' }[tone];
   const bar = { lake: 'bg-lake', ink: 'bg-yuzu', clay: 'bg-clay', neutral: 'bg-line-strong' }[tone];
   return (
     <div className="relative overflow-hidden rounded-lg border border-line bg-card px-4 py-3 shadow-card">
       <span className={cn('absolute top-0 left-0 h-full w-1', bar)} />
       <p className="text-[12px] font-semibold text-ink-3">{label}</p>
-      {cents !== undefined ? (
-        <Money cents={cents} className={cn('mt-0.5 text-[22px] leading-tight font-bold', color)} />
-      ) : (
-        <p className="num mt-0.5 text-[22px] leading-tight font-bold">{count}</p>
-      )}
+      {cents !== undefined ? <Money cents={cents} className={cn('mt-0.5 text-[22px] leading-tight font-bold', color)} /> : <p className="num mt-0.5 text-[22px] leading-tight font-bold">{count}</p>}
       <p className="text-[12px] text-ink-3">{sub}</p>
     </div>
   );

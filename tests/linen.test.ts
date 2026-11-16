@@ -53,12 +53,29 @@ describe('布草洗涤', () => {
   });
 
   it('新增 → 送洗 → 收回（破损、丢失）→ 报废：总数、在洗、在店跟着变；洗涤费只算洗过的；洗涤厂手里还有几件看得到', async () => {
-    expect((await doc({ kind: 'add', lines: [{ itemId: item['浴巾'], qty: 100 }, { itemId: item['浴衣'], qty: 40 }] })).status).toBe(201);
+    expect(
+      (
+        await doc({
+          kind: 'add',
+          lines: [
+            { itemId: item['浴巾'], qty: 100 },
+            { itemId: item['浴衣'], qty: 40 },
+          ],
+        })
+      ).status,
+    ).toBe(201);
     expect(await counts('浴巾')).toEqual([100, 0, 100]);
     // 送洗要选洗涤厂；在店不够送不了
     expect((await doc({ kind: 'send', lines: [{ itemId: item['浴巾'], qty: 10 }] })).status).toBe(400);
     expect((await doc({ kind: 'send', supplierId: laundry, lines: [{ itemId: item['浴巾'], qty: 101 }] })).body.error.code).toBe('LINEN_NOT_ENOUGH');
-    const sent = await doc({ kind: 'send', supplierId: laundry, lines: [{ itemId: item['浴巾'], qty: 60 }, { itemId: item['浴衣'], qty: 20 }] });
+    const sent = await doc({
+      kind: 'send',
+      supplierId: laundry,
+      lines: [
+        { itemId: item['浴巾'], qty: 60 },
+        { itemId: item['浴衣'], qty: 20 },
+      ],
+    });
     expect(sent.status, JSON.stringify(sent.body)).toBe(201);
     expect(sent.body.doc).toMatchObject({ kind: 'send', amountCents: 0, supplier: { name: '洁净洗涤厂' } });
     expect(sent.body.doc.docNo).toMatch(/^BS/);
@@ -82,7 +99,9 @@ describe('布草洗涤', () => {
     expect((await doc({ kind: 'add', lines: [{ itemId: item['浴巾'], qty: 1, damagedQty: 1 }] })).status).toBe(400);
     // 在洗着的品类不能停用
     const cur = (await overview()).items.find((x: { name: string }) => x.name === '浴巾');
-    expect((await api(ctx.app, keeper, 'PUT', `/api/erp/linen/items/${cur.id}`, { name: '浴巾', washPriceCents: 180, active: false, expectedVersion: cur.version })).body.error.code).toBe('LINEN_AT_LAUNDRY');
+    expect((await api(ctx.app, keeper, 'PUT', `/api/erp/linen/items/${cur.id}`, { name: '浴巾', washPriceCents: 180, active: false, expectedVersion: cur.version })).body.error.code).toBe(
+      'LINEN_AT_LAUNDRY',
+    );
   });
 
   it('同一个操作编号原样重提只记一次，内容不同拒绝；作废把数量冲回，之后的单挡着时不能作废', async () => {
@@ -112,7 +131,11 @@ describe('布草洗涤', () => {
 
   it('洗涤费对账表：按洗涤厂、按月，只算有效的收回单；能导出；模块关着时接口拒绝', async () => {
     const s = (await api(ctx.app, coster, 'GET', `/api/erp/linen/statement?month=${today.slice(0, 7)}`)).body;
-    expect(s).toEqual({ month: today.slice(0, 7), rows: [{ supplierId: laundry, supplierName: '洁净洗涤厂', docs: 1, washedQty: 50, damagedQty: 3, lostQty: 2, amountCents: 53 * 180 }], totalCents: 53 * 180 });
+    expect(s).toEqual({
+      month: today.slice(0, 7),
+      rows: [{ supplierId: laundry, supplierName: '洁净洗涤厂', docs: 1, washedQty: 50, damagedQty: 3, lostQty: 2, amountCents: 53 * 180 }],
+      totalCents: 53 * 180,
+    });
     expect((await api(ctx.app, coster, 'GET', '/api/erp/linen/statement?month=2026-13')).status).toBe(400);
     const csv = await ctx.app.inject({ method: 'GET', url: `/api/erp/linen/statement/export?month=${today.slice(0, 7)}`, headers: { cookie: coster } });
     expect(csv.statusCode).toBe(200);
@@ -172,7 +195,12 @@ describe('合并前 Codex 审查 b850838', () => {
     const back = await doc({ kind: 'return', supplierId: other, lines: [{ itemId: sheet, qty: 6 }] });
     expect(back.status, JSON.stringify(back.body)).toBe(201);
     const held = (await overview()).outstanding.filter((o: { itemId: number }) => o.itemId === sheet).map((o: { supplierName: string; qty: number }) => [o.supplierName, o.qty]);
-    expect(held.sort()).toEqual([['洁净洗涤厂', 10], ['白云洗涤厂', 4]].sort());
+    expect(held.sort()).toEqual(
+      [
+        ['洁净洗涤厂', 10],
+        ['白云洗涤厂', 4],
+      ].sort(),
+    );
     // 作废送给 B 的那张：加起来在洗 14 ≥ 10，但 B 已经收回 6、手里只有 4 → 不让作废；作废了收回单以后可以
     const blocked = await api(ctx.app, keeper, 'POST', `/api/erp/linen/docs/${toB.body.doc.id}/void`, { reason: '送错了' });
     expect(blocked.body.error.code).toBe('LINEN_VOID_BLOCKED');
@@ -187,7 +215,12 @@ describe('合并前 Codex 审查 b850838', () => {
     expect((await api(ctx.app, manager, 'GET', '/api/inventory/suppliers')).status).toBe(403);
     const o = await overview(manager);
     expect(o.canManage).toBe(true);
-    expect(o.suppliers).toEqual(expect.arrayContaining([{ id: laundry, name: '洁净洗涤厂' }, { id: other, name: '白云洗涤厂' }]));
+    expect(o.suppliers).toEqual(
+      expect.arrayContaining([
+        { id: laundry, name: '洁净洗涤厂' },
+        { id: other, name: '白云洗涤厂' },
+      ]),
+    );
     expect((await doc({ kind: 'send', supplierId: other, lines: [{ itemId: sheet, qty: 5 }] }, manager)).status).toBe(201);
   });
 

@@ -56,9 +56,7 @@ export function FlowFrame({
           </IconButton>
         </div>
         <div className={cn('mt-3 flex items-center gap-3 rounded-lg px-3 py-2.5', tone === 'pine' ? 'bg-white/10' : 'bg-white/45')}>
-          <span className={cn('flex size-9 shrink-0 items-center justify-center rounded-full text-[14px] font-bold', avatarTone(member.id))}>
-            {member.name.slice(0, 1)}
-          </span>
+          <span className={cn('flex size-9 shrink-0 items-center justify-center rounded-full text-[14px] font-bold', avatarTone(member.id))}>{member.name.slice(0, 1)}</span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-[14px] font-bold">{member.name}</p>
             <p className={cn('num text-[12px]', tone === 'pine' ? 'text-paper/65' : 'text-ink/60')}>
@@ -76,13 +74,7 @@ export function FlowFrame({
               <span
                 className={cn(
                   'flex items-center gap-1.5 rounded-full px-2 py-0.5',
-                  i === index
-                    ? tone === 'pine'
-                      ? 'bg-paper text-pine'
-                      : 'bg-ink text-yuzu'
-                    : i < index
-                      ? 'opacity-80'
-                      : 'opacity-45',
+                  i === index ? (tone === 'pine' ? 'bg-paper text-pine' : 'bg-ink text-yuzu') : i < index ? 'opacity-80' : 'opacity-45',
                 )}
               >
                 <span className="num">{i + 1}</span>
@@ -100,17 +92,7 @@ export function FlowFrame({
 }
 
 /** 余额变化：本金、赠金分行展示「之前 → 之后」，可选动画 */
-export function BalanceChange({
-  before,
-  after,
-  animate = false,
-  className,
-}: {
-  before: WalletBalance;
-  after: WalletBalance;
-  animate?: boolean;
-  className?: string;
-}) {
+export function BalanceChange({ before, after, animate = false, className }: { before: WalletBalance; after: WalletBalance; animate?: boolean; className?: string }) {
   const rows = [
     { label: '本金', key: 'principal' as const, color: 'text-pine', dot: 'bg-pine' },
     { label: '赠金', key: 'bonus' as const, color: 'text-yuzu-deep', dot: 'bg-yuzu' },
@@ -133,11 +115,7 @@ export function BalanceChange({
               <Money cents={after[r.key]} className={cn('text-[16px] font-bold', r.color)} />
             )}
             <span className="flex-1" />
-            <Money
-              cents={delta}
-              signed
-              className={cn('text-[13px] font-semibold', delta === 0 ? 'text-ink-4' : delta > 0 ? 'text-moss' : 'text-clay')}
-            />
+            <Money cents={delta} signed className={cn('text-[13px] font-semibold', delta === 0 ? 'text-ink-4' : delta > 0 ? 'text-moss' : 'text-clay')} />
           </div>
         );
       })}
@@ -146,11 +124,7 @@ export function BalanceChange({
         <span className="w-10 shrink-0 text-[13px] font-semibold whitespace-nowrap text-ink-2">合计</span>
         <Money cents={totalBefore} className="text-[13px] text-ink-3" />
         <ArrowRight className="size-3.5 text-ink-4" />
-        {animate ? (
-          <AnimatedMoney from={totalBefore} to={totalAfter} className="text-[14px] font-bold text-ink" />
-        ) : (
-          <Money cents={totalAfter} className="text-[14px] font-bold text-ink" />
-        )}
+        {animate ? <AnimatedMoney from={totalBefore} to={totalAfter} className="text-[14px] font-bold text-ink" /> : <Money cents={totalAfter} className="text-[14px] font-bold text-ink" />}
       </div>
     </div>
   );
@@ -211,9 +185,7 @@ export function OperationStatus({
           </Button>
         }
       >
-        {state.status === 'checking'
-          ? '正在按操作编号查询…'
-          : `${UNCERTAIN_REASON[state.reason]}，这笔操作可能已经入账。请先查询结果，不要重复收款或重复登记。关闭面板后也可以在页面顶部继续处理。`}
+        {state.status === 'checking' ? '正在按操作编号查询…' : `${UNCERTAIN_REASON[state.reason]}，这笔操作可能已经入账。请先查询结果，不要重复收款或重复登记。关闭面板后也可以在页面顶部继续处理。`}
       </Notice>
     );
   }
@@ -255,19 +227,7 @@ const RECOVERY_TEXT = {
  * 处理一笔之前留下的「结果待确认」操作：先按原编号查询；
  * 查不到时由员工选择「按原内容重新提交」（同一编号，安全）或「确认作废，重新填写」（服务端先作废原编号）。
  */
-export function PendingRecovery({
-  op,
-  state,
-  onCheck,
-  onRetry,
-  onDiscard,
-}: {
-  op: PendingOp;
-  state: OperationState;
-  onCheck: () => void;
-  onRetry: () => void;
-  onDiscard: () => void;
-}) {
+export function PendingRecovery({ op, state, onCheck, onRetry, onDiscard }: { op: PendingOp; state: OperationState; onCheck: () => void; onRetry: () => void; onDiscard: () => void }) {
   const text = RECOVERY_TEXT[op.type];
   return (
     <div className="space-y-4">
@@ -290,9 +250,7 @@ export function PendingRecovery({
         </div>
       </div>
 
-      {(state.status === 'checking' || state.status === 'idle') && (
-        <Notice tone="info" icon={<Spinner className="size-5 text-lake" />} title="正在按操作编号查询结果…" />
-      )}
+      {(state.status === 'checking' || state.status === 'idle') && <Notice tone="info" icon={<Spinner className="size-5 text-lake" />} title="正在按操作编号查询结果…" />}
       {state.status === 'submitting' && <Notice tone="info" icon={<Spinner className="size-5 text-lake" />} title="正在按原内容重新提交…" />}
       {state.status === 'abandoning' && <Notice tone="info" icon={<Spinner className="size-5 text-lake" />} title="正在作废这笔操作…" />}
       {state.status === 'uncertain' && (
@@ -378,10 +336,7 @@ export function OverLimitCard({
   const [open, setOpen] = useState(false);
   const label = kind === 'recharge' ? '充值' : '消费';
   return (
-    <div
-      className={cn('mt-4 rounded-lg border px-4 py-3', grant ? 'border-pine/30 bg-pine-tint' : 'border-yuzu-deep/30 bg-yuzu-tint')}
-      data-testid="over-limit-card"
-    >
+    <div className={cn('mt-4 rounded-lg border px-4 py-3', grant ? 'border-pine/30 bg-pine-tint' : 'border-yuzu-deep/30 bg-yuzu-tint')} data-testid="over-limit-card">
       <div className="flex items-start gap-3">
         {grant ? <ShieldCheck className="mt-0.5 size-5 shrink-0 text-pine" /> : <ShieldAlert className="mt-0.5 size-5 shrink-0 text-yuzu-deep" />}
         <div className="min-w-0 flex-1">
@@ -389,9 +344,7 @@ export function OverLimitCard({
             超过单笔{label}上限 <Money cents={limit} className="whitespace-nowrap" />
           </p>
           <p className={cn('mt-0.5 text-[12.5px]', grant ? 'font-semibold text-pine' : 'text-ink-2')}>
-            {grant
-              ? `已由 ${grant.approverName} 当场授权，${GRANT_TTL_MINUTES} 分钟内有效，只能用于这一笔`
-              : `需要店主或店总当场授权后才能确认${kind === 'recharge' ? '入账' : '扣款'}`}
+            {grant ? `已由 ${grant.approverName} 当场授权，${GRANT_TTL_MINUTES} 分钟内有效，只能用于这一笔` : `需要店主或店总当场授权后才能确认${kind === 'recharge' ? '入账' : '扣款'}`}
           </p>
           {!grant && (
             <Button size="sm" variant="secondary" className="mt-2.5" icon={<ShieldCheck className="size-4" />} disabled={disabled} onClick={() => setOpen(true)} data-testid="over-limit-authorize">

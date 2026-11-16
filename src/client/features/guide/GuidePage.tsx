@@ -27,8 +27,7 @@ export const GUIDE_ICONS: Record<GuideMarkerKind, ComponentType<{ x?: number; y?
 const MARKER_FILL = '#2f4b5c';
 
 /** 后台改过文字的图标（与这种图标默认的中英文不同）：图上在图标下写出来，图例按文字分开列（Codex 复审 0cf0505） */
-const customLabel = (m: Pick<GuideMarker, 'kind' | 'label' | 'labelEn'>) =>
-  m.label !== GUIDE_MARKER_LABELS[m.kind].zh || m.labelEn !== GUIDE_MARKER_LABELS[m.kind].en;
+const customLabel = (m: Pick<GuideMarker, 'kind' | 'label' | 'labelEn'>) => m.label !== GUIDE_MARKER_LABELS[m.kind].zh || m.labelEn !== GUIDE_MARKER_LABELS[m.kind].en;
 
 export const useGuide = () => useQuery({ queryKey: ['guide'], queryFn: () => api.get<GuideData>('/api/guide'), refetchInterval: 60_000 });
 
@@ -62,12 +61,7 @@ export function GuidePage() {
       ) : (
         <>
           {floors.length > 1 && (
-            <Segmented<string>
-              value={floor.code}
-              onChange={setFloorCode}
-              ariaLabel="楼层"
-              options={floors.map((f) => ({ value: f.code, label: f.title ? `${f.code} ${f.title}` : f.code }))}
-            />
+            <Segmented<string> value={floor.code} onChange={setFloorCode} ariaLabel="楼层" options={floors.map((f) => ({ value: f.code, label: f.title ? `${f.code} ${f.title}` : f.code }))} />
           )}
           <Card className="overflow-hidden p-3 sm:p-4">
             <div className="aspect-[16/10] w-full bg-white">
@@ -246,7 +240,14 @@ export function GuideScreenPage() {
         <button type="button" onClick={fullscreen} className="rounded-full p-2 text-ink-3 hover:bg-white/60" aria-label="全屏" title="全屏">
           <Maximize2 className="size-5" />
         </button>
-        <button type="button" onClick={() => navigate('/guide')} className="rounded-full p-2 text-ink-3 hover:bg-white/60" aria-label="退出大屏模式" title="退出（Esc）" data-testid="guide-screen-exit">
+        <button
+          type="button"
+          onClick={() => navigate('/guide')}
+          className="rounded-full p-2 text-ink-3 hover:bg-white/60"
+          aria-label="退出大屏模式"
+          title="退出（Esc）"
+          data-testid="guide-screen-exit"
+        >
           <X className="size-5" />
         </button>
       </header>

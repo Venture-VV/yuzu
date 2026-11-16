@@ -5,7 +5,18 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parseCsvRecords } from '../src/shared/csv-read';
-import { DEFAULT_EMENU_RULES, EMENU_ENGLISH_COLUMNS, emenuSheetCellIn, emenuSheetCellOut, emenuSheetGuard, parseEmenuEnglishCsv, readSheetCell, type EmenuAdmin, type EmenuEnglishResult, type EmenuMenu } from '../src/shared/emenu';
+import {
+  DEFAULT_EMENU_RULES,
+  EMENU_ENGLISH_COLUMNS,
+  emenuSheetCellIn,
+  emenuSheetCellOut,
+  emenuSheetGuard,
+  parseEmenuEnglishCsv,
+  readSheetCell,
+  type EmenuAdmin,
+  type EmenuEnglishResult,
+  type EmenuMenu,
+} from '../src/shared/emenu';
 import { toCsv } from '../src/server/lib/csv';
 import { createStaff } from '../src/server/modules/staff';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
@@ -57,7 +68,12 @@ afterAll(async () => {
 describe('菜品与规格的英文', () => {
   it('新建、修改都能带英文各项；不带就是空的；长度与行数有上限', async () => {
     // 不带英文：都是空的（与 8.0.12 建菜品的请求一样）
-    let r = await api<EmenuAdmin>(ctx.app, ctx.owner, 'POST', '/api/admin/emenu/dishes', { name: '龙虾班尼迪蛋', nameEn: 'Lobster Eggs Benedict', description: '现拆龙虾肉，荷兰汁。', specs: [{ itemId: item['龙虾班尼迪蛋'] }] });
+    let r = await api<EmenuAdmin>(ctx.app, ctx.owner, 'POST', '/api/admin/emenu/dishes', {
+      name: '龙虾班尼迪蛋',
+      nameEn: 'Lobster Eggs Benedict',
+      description: '现拆龙虾肉，荷兰汁。',
+      specs: [{ itemId: item['龙虾班尼迪蛋'] }],
+    });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const egg = r.body.dishes.find((d) => d.name === '龙虾班尼迪蛋')!;
     dish.egg = egg.id;
@@ -101,7 +117,14 @@ describe('菜品与规格的英文', () => {
     expect(wine.attrsEn).toEqual(['Origin: France', 'Vintage: NV']);
 
     // 修改：改英文介绍、版本号加一；只有一个规格时规格的英文不存
-    const body = { name: egg.name, nameEn: egg.nameEn, description: egg.description, descriptionEn: 'Fresh lobster with hollandaise.', specs: [{ itemId: item['龙虾班尼迪蛋'], label: '', labelEn: 'Single' }], version: egg.version };
+    const body = {
+      name: egg.name,
+      nameEn: egg.nameEn,
+      description: egg.description,
+      descriptionEn: 'Fresh lobster with hollandaise.',
+      specs: [{ itemId: item['龙虾班尼迪蛋'], label: '', labelEn: 'Single' }],
+      version: egg.version,
+    };
     r = await api<EmenuAdmin>(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/dishes/${egg.id}`, body);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const egg2 = r.body.dishes.find((d) => d.id === egg.id)!;
@@ -120,7 +143,10 @@ describe('菜品与规格的英文', () => {
   it('平板的菜单带出英文各项；没填的是空的（页面上显示中文）', async () => {
     let r = await api<EmenuAdmin>(ctx.app, ctx.owner, 'POST', '/api/admin/emenu/categories', { name: '午餐', nameEn: 'LUNCH' });
     const c = r.body.categories.find((x) => x.name === '午餐')!;
-    r = await api<EmenuAdmin>(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/categories/${c.id}/pages`, { version: c.version, pages: [{ layout: 'trio_row', dishIds: [dish.eel, dish.egg, dish.wine] }] });
+    r = await api<EmenuAdmin>(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/categories/${c.id}/pages`, {
+      version: c.version,
+      pages: [{ layout: 'trio_row', dishIds: [dish.eel, dish.egg, dish.wine] }],
+    });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect((await rules({ enabled: true })).status).toBe(200);
 
@@ -168,7 +194,19 @@ describe('设置：中英切换、选项的英文、动效', () => {
     const visitId = checkin.body.visits[0].id as number;
     const pin = (await api(ctx.app, ctx.owner, 'POST', `/api/staff/${ctx.clerkId}/order-pin`)).body.pin as string;
     const send = (avoid: string[]) =>
-      api(ctx.app, pad, 'POST', '/api/emenu/orders', { clientKey: randomUUID(), visitId, tagCode: 'A8001', tableName: 'A01', guests: 2, lines: [{ itemId: item['龙虾班尼迪蛋'], quantity: 1 }], avoid, serve: null, customNote: 'no ice please', expectedTotal: 4200, pin });
+      api(ctx.app, pad, 'POST', '/api/emenu/orders', {
+        clientKey: randomUUID(),
+        visitId,
+        tagCode: 'A8001',
+        tableName: 'A01',
+        guests: 2,
+        lines: [{ itemId: item['龙虾班尼迪蛋'], quantity: 1 }],
+        avoid,
+        serve: null,
+        customNote: 'no ice please',
+        expectedTotal: 4200,
+        pin,
+      });
     // 交英文的选项不认（页面不会这样交）
     expect((await send(['Mild'])).body.error.code).toBe('REMARK_OPTION_INVALID');
     const ok = await send(['不加香菜']);
@@ -213,7 +251,13 @@ describe('英文对照表', () => {
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.english).toEqual({ updated: 2, unchanged: 1, missing: [999_999] });
     const eel = r.body.dishes.find((d) => d.id === dish.eel)!;
-    expect([eel.nameEn, eel.taglineEn, eel.descriptionEn, eel.unitEn, eel.version]).toEqual(['Clay Pot Baked Stream Eel', 'Pan-fried', 'Stream eel slow-baked in a clay pot.', 'pot', eel0.version + 1]);
+    expect([eel.nameEn, eel.taglineEn, eel.descriptionEn, eel.unitEn, eel.version]).toEqual([
+      'Clay Pot Baked Stream Eel',
+      'Pan-fried',
+      'Stream eel slow-baked in a clay pot.',
+      'pot',
+      eel0.version + 1,
+    ]);
     // 中文各项、图片、规格都没有动
     expect([eel.name, eel.tagline, eel.description, eel.unit, eel.specs]).toEqual([eel0.name, eel0.tagline, eel0.description, eel0.unit, eel0.specs]);
     const egg = r.body.dishes.find((d) => d.id === dish.egg)!;
@@ -234,13 +278,24 @@ describe('英文对照表', () => {
     expect(await logs()).toBe(n);
 
     // 开着的「修改菜品」窗口拿的是旧版本号：保存被拒绝（要重新载入）
-    const stale = await api(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/dishes/${dish.eel}`, { name: eel0.name, specs: eel0.specs.map((s) => ({ itemId: s.itemId, label: s.label })), version: eel0.version });
+    const stale = await api(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/dishes/${dish.eel}`, {
+      name: eel0.name,
+      specs: eel0.specs.map((s) => ({ itemId: s.itemId, label: s.label })),
+      version: eel0.version,
+    });
     expect(stale.body.error.code).toBe('EMENU_CHANGED');
   });
 
   it('导入的格式：同一个编号两次、太长、空的都拒绝，一行都不写', async () => {
     const eel = (await admin()).dishes.find((d) => d.id === dish.eel)!;
-    expect((await importRows([{ id: dish.eel, nameEn: 'A' }, { id: dish.eel, nameEn: 'B' }])).body.error.code).toBe('ENGLISH_DUPLICATE_ID');
+    expect(
+      (
+        await importRows([
+          { id: dish.eel, nameEn: 'A' },
+          { id: dish.eel, nameEn: 'B' },
+        ])
+      ).body.error.code,
+    ).toBe('ENGLISH_DUPLICATE_ID');
     expect((await importRows([{ id: dish.eel, nameEn: 'x'.repeat(81) }])).status).toBe(400);
     expect((await importRows([{ id: dish.eel, attrsEn: ['a', 'b', 'c', 'd'] }])).status).toBe(400);
     expect((await importRows([])).status).toBe(400);

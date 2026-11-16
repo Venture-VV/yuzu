@@ -24,8 +24,7 @@ async function send<T = Record<string, unknown>>(page: Page, method: 'POST' | 'P
 }
 
 /** 选文件：CSV 文字直接塞给文件框 */
-const chooseCsv = (page: Page, name: string, csv: string) =>
-  page.getByTestId('space-import-file').setInputFiles({ name, mimeType: 'text/csv', buffer: Buffer.from(`﻿${csv}`, 'utf8') });
+const chooseCsv = (page: Page, name: string, csv: string) => page.getByTestId('space-import-file').setInputFiles({ name, mimeType: 'text/csv', buffer: Buffer.from(`﻿${csv}`, 'utf8') });
 
 /** 结束时收尾：这次的客房房间取消挂接并停用，「客房」空间停用（台账里没有在用的客房时，新建房间不要求选空间） */
 async function cleanup(page: Page, code: string) {

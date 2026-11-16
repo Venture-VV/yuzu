@@ -9,7 +9,17 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { can } from '@shared/permissions';
-import { buildPurchaseFlow, type FlowAnchorKind, type FlowFacts, type FlowPoFact, type FlowRequestFact, type FlowRules, type FlowSourcingFact, type PurchaseFlow, type PurchaseFlowList } from '@shared/purchase-flow';
+import {
+  buildPurchaseFlow,
+  type FlowAnchorKind,
+  type FlowFacts,
+  type FlowPoFact,
+  type FlowRequestFact,
+  type FlowRules,
+  type FlowSourcingFact,
+  type PurchaseFlow,
+  type PurchaseFlowList,
+} from '@shared/purchase-flow';
 import type { InvDocStatus } from '@shared/inventory';
 import type { PoStatus, ReceivingState, SourcingStatus } from '@shared/purchasing';
 import type { RequestStatus } from '@shared/requests';

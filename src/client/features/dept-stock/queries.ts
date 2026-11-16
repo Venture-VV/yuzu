@@ -18,8 +18,7 @@ export function useInvalidateDept() {
   return () => Promise.all([qc.invalidateQueries({ queryKey: dk.all }), qc.invalidateQueries({ queryKey: ['inv'] })]);
 }
 
-export const useDeptMeta = (enabled = true) =>
-  useQuery({ queryKey: dk.meta, queryFn: () => api.get<DeptStockMeta>('/api/erp/dept-stock/meta'), staleTime: 60_000, enabled });
+export const useDeptMeta = (enabled = true) => useQuery({ queryKey: dk.meta, queryFn: () => api.get<DeptStockMeta>('/api/erp/dept-stock/meta'), staleTime: 60_000, enabled });
 
 export const useDeptStock = (deptId: number | null) =>
   useQuery({ queryKey: dk.stock(deptId ?? 0), queryFn: () => api.get<WarehouseStockRow[]>(`/api/erp/dept-stock/${deptId}/stock`), enabled: !!deptId });
@@ -41,5 +40,4 @@ export const useDeptDocs = (deptId: number | null, params: DeptDocFilter) => {
   });
 };
 
-export const useDeptDoc = (id: number | null) =>
-  useQuery({ queryKey: dk.doc(id ?? 0), queryFn: () => api.get<InvDoc>(`/api/erp/dept-stock/docs/${id}`), enabled: !!id });
+export const useDeptDoc = (id: number | null) => useQuery({ queryKey: dk.doc(id ?? 0), queryFn: () => api.get<InvDoc>(`/api/erp/dept-stock/docs/${id}`), enabled: !!id });

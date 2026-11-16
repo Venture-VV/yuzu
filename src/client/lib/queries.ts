@@ -1,19 +1,10 @@
 import { useState } from 'react';
 import { REVENUE_REFRESH_MS } from './revenue';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import type {
-  AuditRecord,
-  Catalog,
-  LedgerRow,
-  MemberDetail,
-  MemberSummary,
-  SessionInfo,
-  SettlementSummary,
-  StaffRecord,
-} from '@shared/types';
+import type { AuditRecord, Catalog, LedgerRow, MemberDetail, MemberSummary, SessionInfo, SettlementSummary, StaffRecord } from '@shared/types';
 import type { StoreRules } from '@shared/types';
 import { MP_CODE, type MpCodeLookup } from '@shared/mp';
-import { api, ApiError } from './api';
+import { api, shouldRetryQuery } from './api';
 
 export const qk = {
   session: ['session'] as const,
@@ -33,7 +24,7 @@ export const useSessionQuery = () =>
   useQuery({
     queryKey: qk.session,
     queryFn: () => api.get<SessionInfo>('/api/auth/me'),
-    retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 2,
+    retry: shouldRetryQuery,
     staleTime: 60_000,
   });
 
@@ -113,11 +104,9 @@ export const useSettlement = (date: string, live = false) =>
     refetchInterval: live ? REVENUE_REFRESH_MS : false,
   });
 
-export const useStaff = (enabled = true) =>
-  useQuery({ queryKey: qk.staff, queryFn: () => api.get<StaffRecord[]>('/api/staff'), enabled });
+export const useStaff = (enabled = true) => useQuery({ queryKey: qk.staff, queryFn: () => api.get<StaffRecord[]>('/api/staff'), enabled });
 
-export const useSettings = () =>
-  useQuery({ queryKey: qk.settings, queryFn: () => api.get<StoreRules & { storeName: string }>('/api/settings') });
+export const useSettings = () => useQuery({ queryKey: qk.settings, queryFn: () => api.get<StoreRules & { storeName: string }>('/api/settings') });
 
 export const useAudit = (date?: string) =>
   useQuery({

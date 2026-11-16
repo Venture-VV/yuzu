@@ -16,7 +16,9 @@ const enter = async () => {
   return r.body.visits[0].id as number;
 };
 const charge = async (visitId: number, quantity: number) =>
-  expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${visitId}/charges`, { clientKey: randomUUID(), lines: [{ itemId: item, quantity }], expectedTotal: 5000 * quantity })).status).toBe(200);
+  expect(
+    (await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/visits/${visitId}/charges`, { clientKey: randomUUID(), lines: [{ itemId: item, quantity }], expectedTotal: 5000 * quantity })).status,
+  ).toBe(200);
 const pay = async (visitId: number) => {
   const preview = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkout-preview?ids=${visitId}`)).body;
   const r = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', {
@@ -115,25 +117,75 @@ describe('预约到店一键派钟、入住（A04）', () => {
     const tag = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${v}`)).body.tag.code as string;
     const id = await insertBooking({ kind: 'technician', itemId: foot808, technicianId: techId });
     // 没到店不能按预约派
-    const early = await api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), visitId: v, itemId: foot808, quantity: 1, technicianId: techId, callType: 'designated', startNow: true, bookingId: id, expectedTotal: 16800 });
+    const early = await api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', {
+      clientKey: randomUUID(),
+      visitId: v,
+      itemId: foot808,
+      quantity: 1,
+      technicianId: techId,
+      callType: 'designated',
+      startNow: true,
+      bookingId: id,
+      expectedTotal: 16800,
+    });
     expect(early.body.error.code).toBe('BOOKING_NOT_ARRIVED');
     expect((await arrive(id, tag)).service).toBeNull();
-    const d = await api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), visitId: v, itemId: foot808, quantity: 1, technicianId: techId, callType: 'designated', startNow: true, bookingId: id, expectedTotal: 16800 });
+    const d = await api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', {
+      clientKey: randomUUID(),
+      visitId: v,
+      itemId: foot808,
+      quantity: 1,
+      technicianId: techId,
+      callType: 'designated',
+      startNow: true,
+      bookingId: id,
+      expectedTotal: 16800,
+    });
     expect(d.status, JSON.stringify(d.body)).toBe(200);
     const linked = await booking(id);
     expect(linked.service).toMatchObject({ kind: 'session' });
     // 同一张预约再派：拒绝
-    const again = await api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), visitId: v, itemId: foot808, quantity: 1, technicianId: techId, callType: 'designated', startNow: false, bookingId: id, expectedTotal: 16800 });
+    const again = await api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', {
+      clientKey: randomUUID(),
+      visitId: v,
+      itemId: foot808,
+      quantity: 1,
+      technicianId: techId,
+      callType: 'designated',
+      startNow: false,
+      bookingId: id,
+      expectedTotal: 16800,
+    });
     expect(again.body.error.code).toBe('BOOKING_DISPATCHED');
     // 退钟以后能再派
     const sid = ((await api(ctx.app, ctx.clerk, 'GET', '/api/clockroom')).body.sessions as { id: number; visitId: number }[]).find((s) => s.visitId === v)!.id;
     expect((await api(ctx.app, ctx.owner, 'POST', `/api/clockroom/sessions/${sid}/void`, { reason: '客人要换项目' })).status).toBe(200);
     expect((await booking(id)).service).toBeNull();
-    const re = await api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), visitId: v, itemId: foot808, quantity: 1, technicianId: techId, callType: 'designated', startNow: true, bookingId: id, expectedTotal: 16800 });
+    const re = await api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', {
+      clientKey: randomUUID(),
+      visitId: v,
+      itemId: foot808,
+      quantity: 1,
+      technicianId: techId,
+      callType: 'designated',
+      startNow: true,
+      bookingId: id,
+      expectedTotal: 16800,
+    });
     expect(re.status).toBe(200);
     // 别的手牌不能用这张预约
     const v2 = await enter();
-    const wrong = await api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), visitId: v2, itemId: foot808, quantity: 1, technicianId: techId, callType: 'designated', startNow: false, bookingId: id, expectedTotal: 16800 });
+    const wrong = await api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', {
+      clientKey: randomUUID(),
+      visitId: v2,
+      itemId: foot808,
+      quantity: 1,
+      technicianId: techId,
+      callType: 'designated',
+      startNow: false,
+      bookingId: id,
+      expectedTotal: 16800,
+    });
     expect(wrong.body.error.code).toBe('BOOKING_VISIT_MISMATCH');
   });
 
@@ -159,8 +211,7 @@ describe('预约到店一键派钟、入住（A04）', () => {
     const typeId = Number((await ctx.sql<{ id: number }[]>`SELECT id FROM room_types WHERE name = '预约标准间'`)[0]!.id);
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/rooms', { roomNo: '802', floor: '8', roomTypeId: typeId })).status).toBeLessThan(300);
     const today = (await api(ctx.app, ctx.clerk, 'GET', '/api/business-day')).body.today as string;
-    const free = async () =>
-      ((await api(ctx.app, ctx.clerk, 'GET', `/api/bookings/slots?kind=room&date=${today}&roomTypeId=${typeId}`)).body as { free: number }[])[0]?.free ?? 0;
+    const free = async () => ((await api(ctx.app, ctx.clerk, 'GET', `/api/bookings/slots?kind=room&date=${today}&roomTypeId=${typeId}`)).body as { free: number }[])[0]?.free ?? 0;
     expect(await free()).toBe(1);
     const v = await enter();
     const tag = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${v}`)).body.tag.code as string;
@@ -262,13 +313,20 @@ describe('派对房、宠物轰趴房（A03）', () => {
     const tag = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${v}`)).body.tag.code as string;
     const open = await api(ctx.app, ctx.clerk, 'POST', '/api/usages', { clientKey: randomUUID(), spaceId: sid['P302'], tagCode: tag, guests: 5 });
     expect(open.status, JSON.stringify(open.body)).toBe(200);
-    expect(((await api(ctx.app, ctx.clerk, 'GET', '/api/usages/board')).body.spaces as { code: string; usage: { id: number } | null }[]).find((s) => s.code === 'P302')!.usage).toMatchObject({ id: open.body.id });
+    expect(((await api(ctx.app, ctx.clerk, 'GET', '/api/usages/board')).body.spaces as { code: string; usage: { id: number } | null }[]).find((s) => s.code === 'P302')!.usage).toMatchObject({
+      id: open.body.id,
+    });
     // 用了 70 分钟：起步 60 + 1 个 30 分钟 → 3 × ¥100
     const { endUsage } = await import('../src/server/modules/usages');
-    await endUsage({ sql: ctx.sql, config: ctx.config }, open.body.id, { clientKey: randomUUID() }, {
-      actor: { id: ctx.clerkId, username: 'clerk', displayName: '店员', role: 'clerk', duties: [], mustChangePassword: false },
-      at: new Date(new Date(open.body.openedAt).getTime() + 70 * 60_000),
-    });
+    await endUsage(
+      { sql: ctx.sql, config: ctx.config },
+      open.body.id,
+      { clientKey: randomUUID() },
+      {
+        actor: { id: ctx.clerkId, username: 'clerk', displayName: '店员', role: 'clerk', duties: [], mustChangePassword: false },
+        at: new Date(new Date(open.body.openedAt).getTime() + 70 * 60_000),
+      },
+    );
     const lines = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${v}`)).body.lines as { name: string; quantity: number; amount: number }[];
     expect(lines.map((l) => [l.name, l.quantity, l.amount])).toEqual([
       ['宠物轰趴房 P302 房费（每 30 分钟）', 3, 30000],

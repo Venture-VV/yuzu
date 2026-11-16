@@ -98,11 +98,28 @@ export function CouponUsageCard() {
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-[12.5px] font-semibold text-ink-3">
           发放从
-          <Input type="date" fullWidth={false} value={range.from} max={range.to || session.today} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="w-40" data-testid="coupon-usage-from" />
+          <Input
+            type="date"
+            fullWidth={false}
+            value={range.from}
+            max={range.to || session.today}
+            onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
+            className="w-40"
+            data-testid="coupon-usage-from"
+          />
         </label>
         <label className="flex flex-col gap-1 text-[12.5px] font-semibold text-ink-3">
           到
-          <Input type="date" fullWidth={false} value={range.to} min={range.from || undefined} max={session.today} onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))} className="w-40" data-testid="coupon-usage-to" />
+          <Input
+            type="date"
+            fullWidth={false}
+            value={range.to}
+            min={range.from || undefined}
+            max={session.today}
+            onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+            className="w-40"
+            data-testid="coupon-usage-to"
+          />
         </label>
         <div className="flex gap-1.5">
           {quick(monthStart, '本月', 'coupon-usage-month')}
@@ -253,9 +270,8 @@ export function CouponUsageCard() {
         </>
       )}
       <p className="text-[12px] leading-relaxed text-ink-3">
-        按发券的营业日圈一批券、算到今天：发放 = 发出的张数（含后来作废的）；领取 = 到了会员账户的张数，加上无记名券里已经用掉的；核销 = 其中已经用掉的（反结账退回的不算）；
-        领取率 = 领取 ÷ 发放，核销率 = 核销 ÷ 发放；核销金额 = 结账时的抵扣；过期 = 到今天没用、有效期已过的。按档级、标签圈时只看发给会员的券（档级按会员现在的档级）。
-        「统计」按事情发生的那一天算，两边口径不同。
+        按发券的营业日圈一批券、算到今天：发放 = 发出的张数（含后来作废的）；领取 = 到了会员账户的张数，加上无记名券里已经用掉的；核销 = 其中已经用掉的（反结账退回的不算）； 领取率 = 领取 ÷
+        发放，核销率 = 核销 ÷ 发放；核销金额 = 结账时的抵扣；过期 = 到今天没用、有效期已过的。按档级、标签圈时只看发给会员的券（档级按会员现在的档级）。 「统计」按事情发生的那一天算，两边口径不同。
       </p>
     </Card>
   );

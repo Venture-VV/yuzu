@@ -6,7 +6,10 @@ const YUAN_PATTERN = /^(\d{1,9})(?:\.(\d{1,2}))?$/;
 
 /** 把用户输入的元（如 "128"、"99.5"、"1,280.00"）转成分；格式不合法时返回 null。 */
 export function parseYuan(input: string): Cents | null {
-  const text = input.trim().replace(/[,，\s]/g, '').replace(/^¥/, '');
+  const text = input
+    .trim()
+    .replace(/[,，\s]/g, '')
+    .replace(/^¥/, '');
   if (!text) return null;
   const match = YUAN_PATTERN.exec(text);
   if (!match) return null;

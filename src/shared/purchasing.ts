@@ -72,7 +72,12 @@ export interface PoRevision {
   revision: number;
   changedByName: string;
   changedAt: string;
-  snapshot: { supplierName: string; channel?: string | null; totalCents: number; lines: { materialName: string; spec?: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number; imageIds?: number[] }[] };
+  snapshot: {
+    supplierName: string;
+    channel?: string | null;
+    totalCents: number;
+    lines: { materialName: string; spec?: string; purchaseQtyMilli: number; purchaseUnit: string; priceCents: number; amountCents: number; imageIds?: number[] }[];
+  };
 }
 
 export interface PurchaseOrder {
@@ -472,8 +477,7 @@ export const PURCHASE_CHANNELS: PurchaseChannelDef[] = [
  * supplier、online 照旧，其余都算自采。已经生效的单据只追加、不改历史，记的还是当时的名称；按三类统计、筛选，
  * 以及供应商档案里旧的默认途径都按这个对应（档案下次保存时存成三类之一）。
  */
-export const channelCategory = (key: string | null | undefined): PurchaseChannelKey | null =>
-  !key ? null : key === 'supplier' || key === 'online' ? key : 'self';
+export const channelCategory = (key: string | null | undefined): PurchaseChannelKey | null => (!key ? null : key === 'supplier' || key === 'online' ? key : 'self');
 
 /** 没选途径、供应商档案也没设默认途径时按「供应商」 */
 export const DEFAULT_CHANNEL_KEY: PurchaseChannelKey = 'supplier';

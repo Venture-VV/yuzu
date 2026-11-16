@@ -7,16 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  BENEFIT_CATALOG,
-  benefitEligible,
-  benefitQuantity,
-  periodEnd,
-  TICKET_EXTENSION_DEFAULT_ROWS,
-  type Benefit,
-  type BenefitCatalog,
-  type MemberBenefits,
-} from '../src/shared/benefits';
+import { BENEFIT_CATALOG, benefitEligible, benefitQuantity, periodEnd, TICKET_EXTENSION_DEFAULT_ROWS, type Benefit, type BenefitCatalog, type MemberBenefits } from '../src/shared/benefits';
 import { businessDateOf } from '../src/shared/business-date';
 import type { CouponTemplate, MemberCoupons } from '../src/shared/coupons';
 import { shiftDate } from '../src/shared/labels';
@@ -116,7 +107,10 @@ let gift: CouponTemplate;
 
 beforeAll(async () => {
   ctx = await setup();
-  for (const [username, role] of [['manager', 'store_manager'], ['duty', 'duty_manager']] as const) {
+  for (const [username, role] of [
+    ['manager', 'store_manager'],
+    ['duty', 'duty_manager'],
+  ] as const) {
     await createStaff(ctx.sql, { username, displayName: username, role, password: PASSWORD, mustChangePassword: false });
   }
   manager = await login(ctx.app, 'manager');
@@ -143,7 +137,12 @@ describe('权益清单', () => {
     expect(again.body).toEqual({ created: 0, skipped: 59 });
     const c = await catalog();
     expect(c.importable).toBe(0);
-    expect(c.items.filter((b) => b.status === 'paused').map((b) => b.code).sort()).toEqual(['QY-035', 'QY-048', 'QY-050', 'QY-057']);
+    expect(
+      c.items
+        .filter((b) => b.status === 'paused')
+        .map((b) => b.code)
+        .sort(),
+    ).toEqual(['QY-035', 'QY-048', 'QY-050', 'QY-057']);
     expect(c.items.filter((b) => b.status === 'published')).toHaveLength(0);
     const count = (cat: string) => c.items.filter((b) => b.category === cat).length;
     // QY-004 浴票延迟（v0.7.25 续，迁移 045）归「浴票延迟」类，不再是服务与资格；

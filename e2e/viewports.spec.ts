@@ -71,7 +71,11 @@ async function expectFits(page: Page) {
 
 /** 主导航最后一个入口「后台」与实例标识之间的余量：标识是一行时要放得下多一行（演示库、测试服是两行），已经是两行时只要不挨着 */
 async function expectNavRoomForTwoLineTag(nav: Locator, tag: { y: number }) {
-  const twoLines = await nav.getByTestId('instance-tag').locator('span').first().evaluate((el) => el.querySelector('br') !== null);
+  const twoLines = await nav
+    .getByTestId('instance-tag')
+    .locator('span')
+    .first()
+    .evaluate((el) => el.querySelector('br') !== null);
   const last = (await nav.getByRole('link', { name: '后台', exact: true }).boundingBox())!;
   const gap = tag.y - (last.y + last.height);
   expect(gap, twoLines ? '「后台」与两行的实例标识不挨着' : '「后台」与实例标识之间放得下多一行标识').toBeGreaterThanOrEqual(twoLines ? 4 : 16);

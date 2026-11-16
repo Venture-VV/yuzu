@@ -31,9 +31,7 @@ function RefundSlip({ d }: { d: RefundDetail }) {
       <SlipHeader title="退款单" />
       <Row left="单号" right={d.refundNo} />
       <Row left="原结账单" right={d.checkoutNo} />
-      {(d.tagCodes.length > 0 || d.tableNames.length > 0) && (
-        <Row left={d.tableNames.length ? '桌台' : '手牌'} right={[...d.tagCodes, ...d.tableNames].join('、')} />
-      )}
+      {(d.tagCodes.length > 0 || d.tableNames.length > 0) && <Row left={d.tableNames.length ? '桌台' : '手牌'} right={[...d.tagCodes, ...d.tableNames].join('、')} />}
       <Row left="营业日" right={d.businessDate} />
       <Row left="退款时间" right={stamp(d.createdAt, tz)} />
       <Row left="经办" right={d.operatorName} />
@@ -66,7 +64,11 @@ function RefundSlip({ d }: { d: RefundDetail }) {
           <div key={p.method}>
             <Row left={PAYMENT_METHOD_LABELS[p.method]} right={yuan(p.amount)} />
             {p.ref && <p className="pl-3 text-[11px] break-all">{p.method === 'other' ? p.ref : `退款单号 ${p.ref}`}</p>}
-            {p.method === 'cash' && d.shift && <p className="pl-3 text-[11px]">从 {d.shift.drawerName ?? `${d.shift.staffName} 的钱箱`}退（班次 {d.shift.shiftNo}）</p>}
+            {p.method === 'cash' && d.shift && (
+              <p className="pl-3 text-[11px]">
+                从 {d.shift.drawerName ?? `${d.shift.staffName} 的钱箱`}退（班次 {d.shift.shiftNo}）
+              </p>
+            )}
           </div>
         ))}
       </div>

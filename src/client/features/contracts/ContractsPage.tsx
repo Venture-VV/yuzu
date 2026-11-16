@@ -42,7 +42,10 @@ export function ContractsPage() {
   const entities = useEntities();
   const [q, setQ] = useState('');
   const list = useContracts(filter, category, q, entityId);
-  const custom = useCustomListValues('contract', (list.data ?? []).map((c) => c.id));
+  const custom = useCustomListValues(
+    'contract',
+    (list.data ?? []).map((c) => c.id),
+  );
   const expiring = useContractExpiring();
   const manage = can('contract.manage');
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -102,11 +105,7 @@ export function ContractsPage() {
                     </Link>
                   ) : (
                     manage && (
-                      <Link
-                        to={`/erp/contracts/new?renew=${x.id}`}
-                        className="inline-flex items-center gap-1 font-semibold text-lake hover:underline"
-                        data-testid={`contract-renew-${x.contractNo}`}
-                      >
+                      <Link to={`/erp/contracts/new?renew=${x.id}`} className="inline-flex items-center gap-1 font-semibold text-lake hover:underline" data-testid={`contract-renew-${x.contractNo}`}>
                         <RefreshCw className="size-3.5" />
                         续签
                       </Link>
@@ -144,7 +143,14 @@ export function ContractsPage() {
               ))}
             </Select>
           )}
-          <Select aria-label="合同类型" value={category} fullWidth={false} onChange={(e) => setCategory(e.target.value as ContractCategory | '')} className="h-9 w-32" data-testid="contract-category-filter">
+          <Select
+            aria-label="合同类型"
+            value={category}
+            fullWidth={false}
+            onChange={(e) => setCategory(e.target.value as ContractCategory | '')}
+            className="h-9 w-32"
+            data-testid="contract-category-filter"
+          >
             <option value="">全部类型</option>
             {CONTRACT_CATEGORIES.map((c) => (
               <option key={c} value={c}>
@@ -212,9 +218,7 @@ export function ContractsPage() {
                     </span>
                     <span className="flex flex-wrap items-center justify-end gap-1.5 md:self-center">
                       {c.openChangeNo && <Badge tone="yuzu">变更中</Badge>}
-                      {c.daysLeft !== null && c.daysLeft <= remindDays && !c.renewal && (
-                        <Badge tone={c.daysLeft < 0 ? 'clay' : 'ember'}>{daysLeftText(c.daysLeft)}</Badge>
-                      )}
+                      {c.daysLeft !== null && c.daysLeft <= remindDays && !c.renewal && <Badge tone={c.daysLeft < 0 ? 'clay' : 'ember'}>{daysLeftText(c.daysLeft)}</Badge>}
                       {c.renewal && <Badge tone="lake">已续签</Badge>}
                       <ContractStatusBadge status={c.status} />
                     </span>

@@ -19,10 +19,48 @@ const catalog = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/benefits
 const byCode = async (code: string) => (await catalog()).items.find((b) => b.code === code)!;
 const editRaw = async (code: string, patch: Partial<Benefit>) => {
   const b = await byCode(code);
-  const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, companionCount, companionCounts, weekdays, monthDays, content, conditions } = b;
+  const {
+    id,
+    version,
+    name,
+    category,
+    startGrade,
+    startTier,
+    period,
+    quantity,
+    tierQuantities,
+    templateId,
+    events,
+    festivalDates,
+    discountTarget,
+    companionCount,
+    companionCounts,
+    weekdays,
+    monthDays,
+    content,
+    conditions,
+  } = b;
   return api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
     expectedVersion: version,
-    ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, companionCount, companionCounts, weekdays, monthDays, content, conditions },
+    ...{
+      name,
+      category,
+      startGrade,
+      startTier,
+      period,
+      quantity,
+      tierQuantities,
+      templateId,
+      events,
+      festivalDates,
+      discountTarget,
+      companionCount,
+      companionCounts,
+      weekdays,
+      monthDays,
+      content,
+      conditions,
+    },
     ...patch,
   });
 };

@@ -19,20 +19,7 @@ import { checkDateRange, todayIn } from '../../lib/dates';
 import { loadSettings } from '../settings';
 import { idParam, parse } from '../../lib/validate';
 import { actorDepartmentId, deptBalances, docDateSchema, loadInventorySettings } from './common';
-import {
-  assertCanOperate,
-  cancelDoc,
-  createDoc,
-  getDoc,
-  listDocs,
-  refreshCountBook,
-  signIssue,
-  submitDoc,
-  updateDoc,
-  warehouseRef,
-  type CreateDocInput,
-  type DocBodyInput,
-} from './docs';
+import { assertCanOperate, cancelDoc, createDoc, getDoc, listDocs, refreshCountBook, signIssue, submitDoc, updateDoc, warehouseRef, type CreateDocInput, type DocBodyInput } from './docs';
 import { deptStocktakeReminder } from './cycles';
 import { warehouseStock } from './reports';
 
@@ -73,7 +60,13 @@ async function assertVisibleDoc(db: Db, actor: Actor, docId: number) {
  */
 async function deptSafeDoc(db: Db, doc: InvDoc): Promise<InvDoc> {
   const whId = doc.warehouse?.kind === 'department' ? doc.warehouse.id : null;
-  const balances = whId ? await deptBalances(db, whId, doc.lines.map((l) => l.materialId)) : new Map<number, { stockMilli: number }>();
+  const balances = whId
+    ? await deptBalances(
+        db,
+        whId,
+        doc.lines.map((l) => l.materialId),
+      )
+    : new Map<number, { stockMilli: number }>();
   return {
     ...doc,
     lines: doc.lines.map(({ compare: _compare, ...l }) => ({ ...l, stockMilli: balances.get(l.materialId)?.stockMilli ?? 0 })),
@@ -83,9 +76,7 @@ async function deptSafeDoc(db: Db, doc: InvDoc): Promise<InvDoc> {
 /** 部门能登记的单据：本部门小仓的期初、耗用、报损、盘点（按采购单收货、领料、退回由仓库办理；急采 8.0.1 起由采购登记） */
 const DEPT_DOC_TYPES = ['opening', 'direct_use', 'damage', 'count'] as const;
 const DeptBodyHead = z.looseObject({
-  docType: z
-    .enum(INV_DOC_TYPES)
-    .refine((t) => (DEPT_DOC_TYPES as readonly string[]).includes(t), '部门只能登记期初、耗用、报损、盘点；领料、退回由仓库登记，急采由采购在「采购 → 急采」登记'),
+  docType: z.enum(INV_DOC_TYPES).refine((t) => (DEPT_DOC_TYPES as readonly string[]).includes(t), '部门只能登记期初、耗用、报损、盘点；领料、退回由仓库登记，急采由采购在「采购 → 急采」登记'),
   warehouseId: z.number().int().positive().optional(),
   urgent: z.boolean().optional(),
   departmentId: z.number().int().positive().nullable().optional(),
@@ -189,9 +180,7 @@ export function registerDeptStockRoutes(app: FastifyInstance, deps: Deps) {
   // 本月盘点提醒（#23，v0.7.13）：这个部门小仓月初有结存的物料本月盘到了几种
   app.get('/api/erp/dept-stock/:id/stocktake', { preHandler: anyDept }, async (req) => {
     const d = await assertVisibleDept(sql, req.actor, parse(idParam, req.params).id);
-    return readSnapshot(sql, (tx) =>
-      deptStocktakeReminder(tx, { id: d.warehouseId, name: `${d.name}小仓`, kind: 'department', departmentId: d.id }, deps.config.timezone),
-    );
+    return readSnapshot(sql, (tx) => deptStocktakeReminder(tx, { id: d.warehouseId, name: `${d.name}小仓`, kind: 'department', departmentId: d.id }, deps.config.timezone));
   });
 
   // 耗用记录（8.0.7 2.3）：按日期、用途、经办人筛，能导出
@@ -241,9 +230,7 @@ export function registerDeptStockRoutes(app: FastifyInstance, deps: Deps) {
     await assertVisibleDoc(sql, req.actor, row.id);
     return { found: true, doc: await deptSafeDoc(sql, await getDoc(sql, row.id, deps.config.timezone)) };
   });
-  app.get('/api/erp/dept-stock/docs/:id', { preHandler: anyDept }, async (req): Promise<InvDoc> =>
-    deptSafeDoc(sql, await getDoc(sql, await visibleDoc(req), deps.config.timezone)),
-  );
+  app.get('/api/erp/dept-stock/docs/:id', { preHandler: anyDept }, async (req): Promise<InvDoc> => deptSafeDoc(sql, await getDoc(sql, await visibleDoc(req), deps.config.timezone)));
 
   app.post('/api/erp/dept-stock/docs', { preHandler: anyDept }, async (req, reply) => {
     await assertDeptBody(sql, req.actor, req.body);

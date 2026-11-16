@@ -145,9 +145,7 @@ describe('每周一推', () => {
   });
 
   it('只写开着的 ERP 模块：模块全开时写本周应付、待审批、快到期、逾期应收', async () => {
-    const all = Object.fromEntries(
-      (await api(ctx.app, ctx.owner, 'GET', '/api/erp/modules')).body.modules.map((m: { key: string }) => [m.key, true]),
-    );
+    const all = Object.fromEntries((await api(ctx.app, ctx.owner, 'GET', '/api/erp/modules')).body.modules.map((m: { key: string }) => [m.key, true]));
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/erp/modules', { modules: all })).status).toBe(200);
     received.length = 0;
     const r = await runWecomWeekly({ sql: ctx.sql, config: ctx.config }, at('2026-11-23', '09:30'));

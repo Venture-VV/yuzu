@@ -114,7 +114,14 @@ export function changesSinceLines(c: ChangesSince, sinceText: string): string[] 
     lines.push('· 数得到的表里没有新增、改过的行');
   }
   lines.push(`· 余额有变动的会员 ${c.members} 位`);
-  lines.push(c.audit.length ? `· 审计记录的业务动作 ${c.audit.reduce((s, r) => s + r.n, 0)} 条：${c.audit.slice(0, 20).map((r) => `${r.action} ${r.n}`).join('、')}${c.audit.length > 20 ? ' ……' : ''}` : '· 审计记录里没有业务动作');
+  lines.push(
+    c.audit.length
+      ? `· 审计记录的业务动作 ${c.audit.reduce((s, r) => s + r.n, 0)} 条：${c.audit
+          .slice(0, 20)
+          .map((r) => `${r.action} ${r.n}`)
+          .join('、')}${c.audit.length > 20 ? ' ……' : ''}`
+      : '· 审计记录里没有业务动作',
+  );
   if (c.sessions) lines.push(`· 另有登录、登出 ${c.sessions} 条（不算业务写入）`);
   if (c.unscanned) lines.push(`· 另有 ${c.unscanned} 张表没有时间列、数不到：数不到不等于没有写入`);
   lines.push(`CHANGES=${c.total}`);

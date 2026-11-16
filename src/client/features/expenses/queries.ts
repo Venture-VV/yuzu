@@ -40,8 +40,7 @@ export function useInvalidateExpenses() {
   return () => qc.invalidateQueries({ queryKey: ek.all });
 }
 
-export const search = (params: Record<string, string | undefined>) =>
-  new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
+export const search = (params: Record<string, string | undefined>) => new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
 
 export const useExpenseRules = () => useQuery({ queryKey: ek.rules, queryFn: () => api.get<ExpenseRules>('/api/erp/expenses/rules'), staleTime: 60_000 });
 
@@ -55,8 +54,7 @@ export const useClaims = (params: Record<string, string | undefined>, enabled = 
     enabled,
   });
 
-export const useClaim = (id: number | null) =>
-  useQuery({ queryKey: ek.claim(id ?? 0), queryFn: () => api.get<ExpenseClaim>(`/api/erp/expenses/${id}`), enabled: !!id });
+export const useClaim = (id: number | null) => useQuery({ queryKey: ek.claim(id ?? 0), queryFn: () => api.get<ExpenseClaim>(`/api/erp/expenses/${id}`), enabled: !!id });
 
 export const useAdvances = (params: Record<string, string | undefined>, enabled = true) =>
   useQuery({
@@ -66,8 +64,7 @@ export const useAdvances = (params: Record<string, string | undefined>, enabled 
     enabled,
   });
 
-export const useAdvance = (id: number | null) =>
-  useQuery({ queryKey: ek.advance(id ?? 0), queryFn: () => api.get<PettyAdvance>(`/api/erp/petty/advances/${id}`), enabled: !!id });
+export const useAdvance = (id: number | null) => useQuery({ queryKey: ek.advance(id ?? 0), queryFn: () => api.get<PettyAdvance>(`/api/erp/petty/advances/${id}`), enabled: !!id });
 
 export const usePettyDaily = (params: Record<string, string | undefined>, enabled = true) =>
   useQuery({
@@ -85,8 +82,7 @@ export const usePoCandidates = (q: string, enabled = true) =>
     enabled,
   });
 
-export const usePoForClaim = (id: number | null) =>
-  useQuery({ queryKey: ek.poForClaim(id ?? 0), queryFn: () => api.get<PoForClaim>(`/api/erp/expenses/po/${id}`), enabled: !!id });
+export const usePoForClaim = (id: number | null) => useQuery({ queryKey: ek.poForClaim(id ?? 0), queryFn: () => api.get<PoForClaim>(`/api/erp/expenses/po/${id}`), enabled: !!id });
 
 /** 本月 1 号到今天（按自然日） */
 export function monthRange(calendarToday: string) {
@@ -94,8 +90,7 @@ export function monthRange(calendarToday: string) {
 }
 
 /** 待报销的现付采购单（v0.7.29 ERP 采购五项②） */
-export const useToClaim = (enabled = true) =>
-  useQuery({ queryKey: ek.toClaim, queryFn: () => api.get<ToClaimPo[]>('/api/erp/expenses/to-claim'), enabled });
+export const useToClaim = (enabled = true) => useQuery({ queryKey: ek.toClaim, queryFn: () => api.get<ToClaimPo[]>('/api/erp/expenses/to-claim'), enabled });
 
 /** 转报销带出的默认值（E2）：每次选了采购单读一次，不缓存（打款、上一张报销随时会变） */
 export const useClaimPrefill = (poId: number | null) =>
@@ -108,8 +103,7 @@ export const useClaimPrefill = (poId: number | null) =>
   });
 
 /** 部门备用金看板（v0.7.29 ERP 采购五项③） */
-export const usePettyAccounts = (enabled = true) =>
-  useQuery({ queryKey: ek.pettyAccounts, queryFn: () => api.get<PettyAccountRow[]>('/api/erp/petty/accounts'), enabled });
+export const usePettyAccounts = (enabled = true) => useQuery({ queryKey: ek.pettyAccounts, queryFn: () => api.get<PettyAccountRow[]>('/api/erp/petty/accounts'), enabled });
 
 /** 一个部门的备用金台账（期初、逐笔、每笔之后的余额、期末） */
 export const usePettyJournal = (departmentId: number | null, from: string, to: string) =>

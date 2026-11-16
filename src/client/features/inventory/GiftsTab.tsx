@@ -77,11 +77,22 @@ export function GiftsTab() {
       ) : gifts.isPending ? (
         <Skeleton className="h-48" />
       ) : rows.length === 0 ? (
-        <EmptyState art="leaf" title="这段时间没有登记赠品" description={canWrite ? '供应商随货送的东西，点「登记赠品」记下来。' : undefined} className="rounded-lg border border-dashed border-line-strong" />
+        <EmptyState
+          art="leaf"
+          title="这段时间没有登记赠品"
+          description={canWrite ? '供应商随货送的东西，点「登记赠品」记下来。' : undefined}
+          className="rounded-lg border border-dashed border-line-strong"
+        />
       ) : (
         <ul className="overflow-hidden rounded-lg border border-line bg-card shadow-card" data-testid="gifts-list">
           {rows.map((g) => (
-            <li key={g.id} className={cn('grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-line/70 px-4 py-2.5 last:border-0 md:grid-cols-[150px_minmax(0,1fr)_120px_auto]', g.status === 'voided' && 'opacity-60')}>
+            <li
+              key={g.id}
+              className={cn(
+                'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-line/70 px-4 py-2.5 last:border-0 md:grid-cols-[150px_minmax(0,1fr)_120px_auto]',
+                g.status === 'voided' && 'opacity-60',
+              )}
+            >
               <span className="num text-[13.5px] font-bold">
                 {g.docNo}
                 <span className="block font-sans text-[12px] font-medium text-ink-3">{g.receivedOn}</span>

@@ -66,15 +66,7 @@ export function Mascot({ mood = 'happy', pose = 'rest', talking = false, still =
   const anim = !still && !reduceMotion();
   const id = (name: string) => `yz${uid}${name}`;
   return (
-    <svg
-      viewBox="0 0 240 320"
-      className={className}
-      role={title ? 'img' : undefined}
-      aria-hidden={title ? undefined : true}
-      aria-label={title}
-      data-mood={mood}
-      data-pose={pose}
-    >
+    <svg viewBox="0 0 240 320" className={className} role={title ? 'img' : undefined} aria-hidden={title ? undefined : true} aria-label={title} data-mood={mood} data-pose={pose}>
       <defs>
         {/* 手绘线的抖动：噪声把描线推开一点点；动画时每 0.14 秒换一次噪声，像一帧一帧重画 */}
         <filter id={id('boil')} x="-6%" y="-6%" width="112%" height="112%">
@@ -94,7 +86,9 @@ export function Mascot({ mood = 'happy', pose = 'rest', talking = false, still =
         <g transform="translate(0 16)">
           {/* 整个人轻轻上下（呼吸） */}
           <g>
-            {anim && <animateTransform attributeName="transform" type="translate" values="0 0;0 -3.5;0 0" dur="2.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />}
+            {anim && (
+              <animateTransform attributeName="transform" type="translate" values="0 0;0 -3.5;0 0" dur="2.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />
+            )}
             <Body pose={pose} anim={anim} />
             <Head mood={mood} pose={pose} talking={talking} anim={anim} id={id} />
             <FrontArms pose={pose} anim={anim} />
@@ -114,11 +108,7 @@ function Body({ pose, anim }: { pose: Pose; anim: boolean }) {
   return (
     <g>
       {/* 后发（在身体后面） */}
-      <path
-        d="M46 128C42 70 80 38 120 38S198 70 194 128C193 162 187 188 177 204C169 200 163 194 159 186H81C77 194 71 200 63 204C53 188 47 162 46 128Z"
-        fill={C.hair}
-        {...line()}
-      />
+      <path d="M46 128C42 70 80 38 120 38S198 70 194 128C193 162 187 188 177 204C169 200 163 194 159 186H81C77 194 71 200 63 204C53 188 47 162 46 128Z" fill={C.hair} {...line()} />
       <path d="M150 184C160 176 168 160 172 140" fill="none" {...line(2, C.hairShade)} />
       {/* 木屐与脚 */}
       <g>
@@ -145,15 +135,7 @@ function Body({ pose, anim }: { pose: Pose; anim: boolean }) {
         <path d="M0 0C-4 6 -6 12 -2 16M0 0C-8 4 -12 10 -10 14" fill="none" {...line(2.2, C.yuzuShade)} />
       </g>
       <circle cx="120" cy="261" r="13" fill={C.robe} {...line(2)} />
-      <text
-        x="120"
-        y="266.5"
-        textAnchor="middle"
-        fontSize="15"
-        fontWeight="900"
-        fill={C.apron}
-        fontFamily="'HarmonyOS Sans SC','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif"
-      >
+      <text x="120" y="266.5" textAnchor="middle" fontSize="15" fontWeight="900" fill={C.apron} fontFamily="'HarmonyOS Sans SC','PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif">
         柚
       </text>
       <Arms pose={pose} anim={anim} />
@@ -210,7 +192,9 @@ function Arms({ pose, anim }: { pose: Pose; anim: boolean }) {
           {leftDown}
           <Hand x={106} y={240} />
           <g>
-            {anim && <animateTransform attributeName="transform" type="translate" values="0 0;5 0;0 0" dur="1.1s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />}
+            {anim && (
+              <animateTransform attributeName="transform" type="translate" values="0 0;5 0;0 0" dur="1.1s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />
+            )}
             <Sleeve d="M148 194C164 192 182 190 198 190C200 198 200 206 198 214C180 216 164 216 152 216C148 208 146 200 148 194Z" cuff="M197 190Q201 202 198 214" />
             <PointingHand x={210} y={201} />
           </g>
@@ -237,7 +221,17 @@ function FrontArms({ pose, anim }: { pose: Pose; anim: boolean }) {
   if (pose === 'wave') {
     return (
       <g>
-        {anim && <animateTransform attributeName="transform" type="rotate" values="-6 150 200;10 150 200;-6 150 200" dur="0.9s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />}
+        {anim && (
+          <animateTransform
+            attributeName="transform"
+            type="rotate"
+            values="-6 150 200;10 150 200;-6 150 200"
+            dur="0.9s"
+            repeatCount="indefinite"
+            calcMode="spline"
+            keySplines="0.45 0 0.55 1;0.45 0 0.55 1"
+          />
+        )}
         <Sleeve d="M146 194C158 182 170 166 178 150C184 154 190 158 196 160C190 180 176 200 160 212C154 206 150 200 146 194Z" cuff="M176 152Q186 160 196 161" />
         <OpenHand x={188} y={142} />
         <path d="M204 126q6 6 4 14M210 120q9 9 6 22" fill="none" {...line(2)} opacity="0.55" />
@@ -268,11 +262,7 @@ function FrontArms({ pose, anim }: { pose: Pose; anim: boolean }) {
 function OpenHand({ x, y, flip }: { x: number; y: number; flip?: boolean }) {
   return (
     <g transform={`translate(${x} ${y})${flip ? ' scale(-1 1)' : ''}`}>
-      <path
-        d="M-8 4C-10 -2 -9 -8 -6 -11C-6 -15 -2 -16 0 -13C1 -17 5 -17 6 -13C8 -15 11 -13 10 -9C12 -9 13 -6 12 -3C12 3 8 9 1 10C-4 10 -7 8 -8 4Z"
-        fill={C.skin}
-        {...line(2.2)}
-      />
+      <path d="M-8 4C-10 -2 -9 -8 -6 -11C-6 -15 -2 -16 0 -13C1 -17 5 -17 6 -13C8 -15 11 -13 10 -9C12 -9 13 -6 12 -3C12 3 8 9 1 10C-4 10 -7 8 -8 4Z" fill={C.skin} {...line(2.2)} />
       <path d="M-11 0C-13 -3 -12 -6 -9 -6" fill="none" {...line(2)} />
       <path d="M0 -12V-6M6 -12V-5" fill="none" {...line(1.4, C.skinShade)} />
     </g>
@@ -362,7 +352,17 @@ function Head({ mood, pose, talking, anim, id }: { mood: Mood; pose: Pose; talki
       <path d="M188 118C193 150 189 178 176 198C173 186 172 174 173 162C169 170 165 174 161 176C169 160 173 140 173 122Z" fill={C.hair} {...line(2.6)} />
       {/* 呆毛：一片柚子叶的形状，跟着头晃 */}
       <g>
-        {anim && <animateTransform attributeName="transform" type="rotate" values="-10 108 46;12 108 46;-10 108 46" dur="1.7s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />}
+        {anim && (
+          <animateTransform
+            attributeName="transform"
+            type="rotate"
+            values="-10 108 46;12 108 46;-10 108 46"
+            dur="1.7s"
+            repeatCount="indefinite"
+            calcMode="spline"
+            keySplines="0.45 0 0.55 1;0.45 0 0.55 1"
+          />
+        )}
         <path d="M104 46C94 34 96 18 108 11C106 22 110 34 116 42Z" fill={C.hair} {...line(2.4)} />
       </g>
       {/* 柚子切片发夹 */}
@@ -387,7 +387,17 @@ function Yuyu({ mood, anim, id }: { mood: Mood; anim: boolean; id: (n: string) =
   const closed = mood === 'yum' || mood === 'sleepy' || mood === 'worried' || mood === 'love';
   return (
     <g>
-      {anim && <animateTransform attributeName="transform" type="rotate" values="-7 128 32;7 128 32;-7 128 32" dur="2.6s" repeatCount="indefinite" calcMode="spline" keySplines="0.45 0 0.55 1;0.45 0 0.55 1" />}
+      {anim && (
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          values="-7 128 32;7 128 32;-7 128 32"
+          dur="2.6s"
+          repeatCount="indefinite"
+          calcMode="spline"
+          keySplines="0.45 0 0.55 1;0.45 0 0.55 1"
+        />
+      )}
       <path d="M129 2c1 -5 5 -8 10 -7" fill="none" {...line(2.4, C.wood)} />
       <circle cx="128" cy="18" r="15" fill={`url(#${id('yz')})`} {...line(2.6)} />
       <path d="M130 4c4 -8 13 -10 20 -7c-3 7 -12 10 -20 7z" fill={C.leaf} {...line(1.8)} />
@@ -399,11 +409,7 @@ function Yuyu({ mood, anim, id }: { mood: Mood; anim: boolean; id: (n: string) =
           <circle cx="133.5" cy="17.5" r="2" />
         </g>
       )}
-      {mood === 'oops' || mood === 'worried' ? (
-        <path d="M124 24q2 -2 4 0t4 0" fill="none" {...line(1.5)} />
-      ) : (
-        <path d="M125 22q3 3 6 0" fill="none" {...line(1.6)} />
-      )}
+      {mood === 'oops' || mood === 'worried' ? <path d="M124 24q2 -2 4 0t4 0" fill="none" {...line(1.5)} /> : <path d="M125 22q3 3 6 0" fill="none" {...line(1.6)} />}
       <ellipse cx="118.5" cy="22" rx="2.6" ry="1.5" fill={C.blush} opacity="0.6" />
       <ellipse cx="137.5" cy="22" rx="2.6" ry="1.5" fill={C.blush} opacity="0.6" />
     </g>
@@ -462,11 +468,13 @@ const SleepyEye = ({ cx }: { cx: number }) => (
   </g>
 );
 /** 挤成 > < 的眼睛（抓耳挠腮、眨眼的那一只） */
-const SqueezeEye = ({ cx, dir }: { cx: number; dir: 1 | -1 }) => (
-  <path d={`M${cx - dir * 10} ${EYE_Y - 7}L${cx + dir * 9} ${EYE_Y}L${cx - dir * 10} ${EYE_Y + 7}`} fill="none" {...line(4.2)} />
-);
+const SqueezeEye = ({ cx, dir }: { cx: number; dir: 1 | -1 }) => <path d={`M${cx - dir * 10} ${EYE_Y - 7}L${cx + dir * 9} ${EYE_Y}L${cx - dir * 10} ${EYE_Y + 7}`} fill="none" {...line(4.2)} />;
 const HeartEye = ({ cx }: { cx: number }) => (
-  <path d={`M${cx} ${EYE_Y + 10}C${cx - 16} ${EYE_Y - 1} ${cx - 10} ${EYE_Y - 14} ${cx} ${EYE_Y - 5}C${cx + 10} ${EYE_Y - 14} ${cx + 16} ${EYE_Y - 1} ${cx} ${EYE_Y + 10}Z`} fill={C.heart} {...line(2.4)} />
+  <path
+    d={`M${cx} ${EYE_Y + 10}C${cx - 16} ${EYE_Y - 1} ${cx - 10} ${EYE_Y - 14} ${cx} ${EYE_Y - 5}C${cx + 10} ${EYE_Y - 14} ${cx + 16} ${EYE_Y - 1} ${cx} ${EYE_Y + 10}Z`}
+    fill={C.heart}
+    {...line(2.4)}
+  />
 );
 
 function mouthOf(mood: Mood): ReactNode {

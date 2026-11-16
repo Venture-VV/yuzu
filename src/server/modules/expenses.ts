@@ -132,10 +132,7 @@ export function pettyBalance(
 }
 
 /** 打款列表（含平账）：可按日期、部门、经办人、状态筛选 */
-export async function advanceRows(
-  db: Db,
-  f: { from?: string; to?: string; departmentId?: number; handlerId?: number; ids?: number[]; includeVoided?: boolean; unsettledOnly?: boolean },
-) {
+export async function advanceRows(db: Db, f: { from?: string; to?: string; departmentId?: number; handlerId?: number; ids?: number[]; includeVoided?: boolean; unsettledOnly?: boolean }) {
   return db<
     {
       id: number;
@@ -251,9 +248,7 @@ export async function pettyDaily(db: Db, timezone: string, f: { from: string; to
   const rows = [...byKey.values()].sort((x, y) => (x.date === y.date ? x.department.name.localeCompare(y.department.name, 'zh-CN') : x.date < y.date ? 1 : -1));
   const sum = (k: 'advanceCents' | 'spentCents' | 'pendingCents' | 'dueCents' | 'settledCents' | 'outstandingCents') => rows.reduce((t, r) => t + r[k], 0);
   // 目前没平的（不限日期）：每个部门经办人手里的钱、待补付
-  const open = (await advanceRows(db, { departmentId: f.departmentId, handlerId: f.handlerId }))
-    .map((r) => toAdvanceSummary(r, today, rules.overdueDays))
-    .filter((a) => a.state !== 'settled');
+  const open = (await advanceRows(db, { departmentId: f.departmentId, handlerId: f.handlerId })).map((r) => toAdvanceSummary(r, today, rules.overdueDays)).filter((a) => a.state !== 'settled');
   const openMap = new Map<number, PettyDaily['openByDepartment'][number]>();
   for (const a of open) {
     const o = openMap.get(a.department.id) ?? { department: a.department, outstandingCents: 0, owedCents: 0, overdue: 0, open: 0 };
@@ -342,15 +337,35 @@ async function claimSummaries(db: Db, f: ClaimFilter, limit: number | null = nul
     WHERE TRUE ${claimWhere(db, f)}
     ORDER BY c.expense_date DESC, c.id DESC
     ${limit ? db`LIMIT ${limit}` : db``}`;
-  return rows.map(({ departmentId, departmentName, handlerId, handlerName, advanceId, advanceNo, poId, poNo, supplierName, channelKey, channelLabel, channelNote, invoiceRefId, invoiceRefNo, invoiceRefIssuer, invoiceRefCert, ...r }) => ({
-    ...r,
-    invoice: invoiceRefId ? { id: Number(invoiceRefId), invoiceNo: invoiceRefNo!, issuerName: invoiceRefIssuer ?? '', certStatus: invoiceRefCert! } : null,
-    channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
-    department: { id: departmentId, name: departmentName },
-    handler: { id: handlerId, name: handlerName },
-    advance: advanceId ? { id: advanceId, docNo: advanceNo! } : null,
-    purchaseOrder: poId ? { id: poId, docNo: poNo!, supplierName: supplierName ?? '' } : null,
-  }));
+  return rows.map(
+    ({
+      departmentId,
+      departmentName,
+      handlerId,
+      handlerName,
+      advanceId,
+      advanceNo,
+      poId,
+      poNo,
+      supplierName,
+      channelKey,
+      channelLabel,
+      channelNote,
+      invoiceRefId,
+      invoiceRefNo,
+      invoiceRefIssuer,
+      invoiceRefCert,
+      ...r
+    }) => ({
+      ...r,
+      invoice: invoiceRefId ? { id: Number(invoiceRefId), invoiceNo: invoiceRefNo!, issuerName: invoiceRefIssuer ?? '', certStatus: invoiceRefCert! } : null,
+      channel: channelKey ? { key: channelKey, label: channelLabel ?? channelKey, note: channelNote } : null,
+      department: { id: departmentId, name: departmentName },
+      handler: { id: handlerId, name: handlerName },
+      advance: advanceId ? { id: advanceId, docNo: advanceNo! } : null,
+      purchaseOrder: poId ? { id: poId, docNo: poNo!, supplierName: supplierName ?? '' } : null,
+    }),
+  );
 }
 
 /** 筛选条件下的合计：按全部单据算（列表只显示最近的 CLAIM_LIST_LIMIT 张） */
@@ -381,7 +396,9 @@ export async function listClaims(db: Db, f: ClaimFilter): Promise<ExpenseClaimLi
 export async function getClaim(db: Db, claimId: number): Promise<ExpenseClaim> {
   const [summary] = await claimSummaries(db, { ids: [claimId] });
   if (!summary) throw notFound('报销单不存在');
-  const [extra] = await db<Pick<ExpenseClaim, 'note' | 'createdBy' | 'confirmedByName' | 'confirmedAt' | 'returnedReason' | 'voidedByName' | 'voidedAt' | 'voidReason' | 'isSynthetic' | 'budgetCheck'>[]>`
+  const [extra] = await db<
+    Pick<ExpenseClaim, 'note' | 'createdBy' | 'confirmedByName' | 'confirmedAt' | 'returnedReason' | 'voidedByName' | 'voidedAt' | 'voidReason' | 'isSynthetic' | 'budgetCheck'>[]
+  >`
     SELECT c.note, c.created_by, ob.display_name AS confirmed_by_name, c.confirmed_at, c.returned_reason, vb.display_name AS voided_by_name,
            c.voided_at, c.void_reason, c.is_synthetic, c.budget_check
     FROM expense_claims c LEFT JOIN staff ob ON ob.id = c.confirmed_by LEFT JOIN staff vb ON vb.id = c.voided_by WHERE c.id = ${claimId}`;
@@ -406,7 +423,10 @@ export async function poReceipts(db: Db, poId: number): Promise<PoReceiptRef[]> 
   const rows = await db<{ id: number; docNo: string; docDate: string }[]>`
     SELECT id, doc_no, doc_date FROM inv_docs
     WHERE purchase_order_id = ${poId} AND doc_type = 'receipt' AND status = 'confirmed' ORDER BY doc_date, id`;
-  const att = await receiptAttachments(db, rows.map((r) => Number(r.id)));
+  const att = await receiptAttachments(
+    db,
+    rows.map((r) => Number(r.id)),
+  );
   return rows.map((r) => ({ id: Number(r.id), docNo: r.docNo, docDate: r.docDate, attachments: att.get(Number(r.id)) ?? [] }));
 }
 
@@ -536,8 +556,7 @@ export async function toClaimList(db: Db, today: string): Promise<ToClaimPo[]> {
         WHERE d.purchase_order_id IN ${db(rows.map((r) => r.id))} AND d.doc_type = 'receipt' AND d.status = 'confirmed'
         ORDER BY d.doc_date, d.id`
     : [];
-  const receiptsOf = (poId: number) =>
-    receiptRows.filter((x) => Number(x.poId) === poId).map((x) => ({ id: Number(x.id), docNo: x.docNo, docDate: x.docDate, attachmentCount: x.attachmentCount }));
+  const receiptsOf = (poId: number) => receiptRows.filter((x) => Number(x.poId) === poId).map((x) => ({ id: Number(x.id), docNo: x.docNo, docDate: x.docDate, attachmentCount: x.attachmentCount }));
   return rows.map(({ channelKey, channelLabel, channelNote, createdById, createdByName, fullLines, receivedMilli, ...r }) => ({
     ...r,
     receipts: receiptsOf(Number(r.id)),
@@ -816,11 +835,17 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
       await logApproval(tx, 'expense_claim', newId, 'submit', actor.id);
       // 不超过确认门槛的登记即确认；v0.7.30 起命中审批规则的按规则的审批链（没有规则命中与以前一样）；
       // 超预算的（8.0.3）走「超预算报销」：有规则按规则，没有在原来的审批链后面加一级店主
-      const r = await submitForApproval(tx, 'expense_claim', newId, { actor, timeZone: deps.config.timezone }, {
-        fallback: needsApproval || budget.overBudget,
-        approveNow: input.approveNow,
-        defaultPlan: budget.overBudget ? await overBudgetPlan(tx, { amountCents: total, departmentId: input.departmentId, fallback: needsApproval }) : undefined,
-      });
+      const r = await submitForApproval(
+        tx,
+        'expense_claim',
+        newId,
+        { actor, timeZone: deps.config.timezone },
+        {
+          fallback: needsApproval || budget.overBudget,
+          approveNow: input.approveNow,
+          defaultPlan: budget.overBudget ? await overBudgetPlan(tx, { amountCents: total, departmentId: input.departmentId, fallback: needsApproval }) : undefined,
+        },
+      );
       const confirmNow = r.outcome === 'effective';
       if (confirmNow) {
         await tx`UPDATE expense_claims SET status = 'confirmed', confirmed_by = ${actor.id}, confirmed_at = now(), needs_approval = ${!r.skipped} WHERE id = ${newId}`;
@@ -1029,7 +1054,14 @@ export async function createSettlement(deps: Deps, raw: unknown, actor: Actor, i
               ${input.clientKey}, ${actor.id})
       RETURNING id`;
     await logApproval(tx, 'petty_settlement', s!.id, 'create', actor.id);
-    await writeAudit(tx, { staffId: actor.id, action: 'petty_doc', targetType: 'petty_settlement', targetId: s!.id, detail: { docNo, advance: a.docNo, kind: input.kind, amountCents: input.amountCents }, ip });
+    await writeAudit(tx, {
+      staffId: actor.id,
+      action: 'petty_doc',
+      targetType: 'petty_settlement',
+      targetId: s!.id,
+      detail: { docNo, advance: a.docNo, kind: input.kind, amountCents: input.amountCents },
+      ip,
+    });
     return s!.id;
   });
   const [s] = await deps.sql<{ advanceId: number }[]>`SELECT advance_id FROM petty_settlements WHERE id = ${r.id}`;
@@ -1103,9 +1135,7 @@ export async function expenseChecks(db: Db): Promise<ExpenseCheck[]> {
     key: 'expense_claims',
     label: '费用报销单与明细一致',
     ok: badClaims.length === 0,
-    detail: badClaims.length
-      ? badClaims.map((b) => `${b.docNo} ${b.why}`).join('；')
-      : `已确认的报销 ${claimCount[0]!.count} 张：金额 = 明细合计，用备用金的与打款同部门，同一采购单行只报一次`,
+    detail: badClaims.length ? badClaims.map((b) => `${b.docNo} ${b.why}`).join('；') : `已确认的报销 ${claimCount[0]!.count} 张：金额 = 明细合计，用备用金的与打款同部门，同一采购单行只报一次`,
   });
 
   const badPetty = await db<{ docNo: string; why: string }[]>`
@@ -1174,7 +1204,31 @@ async function claimsCsv(db: Db, f: ClaimFilter & { from: string; to: string }) 
   const confirmed = claims.filter((c) => c.status === 'confirmed').reduce((t, c) => t + c.amountCents, 0);
   return toCsv([
     [`费用报销明细 ${f.from} 至 ${f.to}（门店内部管理口径；已确认合计 ¥${yuan(confirmed)}）`],
-    ['单号', '日期', '状态', '部门', '经办人', '用途', '付款来源', '打款单', '发票类型', '税点', '发票号码', '采购单', '供应商', '采购途径', '途径说明', '行', '物品 / 内容', '费用科目', '单位', '购买数量', '到货数量', '差异原因', '金额（元）'],
+    [
+      '单号',
+      '日期',
+      '状态',
+      '部门',
+      '经办人',
+      '用途',
+      '付款来源',
+      '打款单',
+      '发票类型',
+      '税点',
+      '发票号码',
+      '采购单',
+      '供应商',
+      '采购途径',
+      '途径说明',
+      '行',
+      '物品 / 内容',
+      '费用科目',
+      '单位',
+      '购买数量',
+      '到货数量',
+      '差异原因',
+      '金额（元）',
+    ],
     ...claims.flatMap((c) =>
       (byClaim.get(c.id) ?? []).map((l) => [
         c.docNo,
@@ -1226,7 +1280,20 @@ function dailyCsv(d: PettyDaily) {
         STATE_LABELS[a.state],
         a.ageDays,
       ]),
-      [r.date, r.department.name, '当日合计', '', yuan(r.advanceCents), yuan(r.spentCents), yuan(r.pendingCents), yuan(r.dueCents), yuan(r.settledCents), yuan(r.outstandingCents), STATE_LABELS[r.state], ''],
+      [
+        r.date,
+        r.department.name,
+        '当日合计',
+        '',
+        yuan(r.advanceCents),
+        yuan(r.spentCents),
+        yuan(r.pendingCents),
+        yuan(r.dueCents),
+        yuan(r.settledCents),
+        yuan(r.outstandingCents),
+        STATE_LABELS[r.state],
+        '',
+      ],
     ]),
     [],
     ['合计', '', '', '', yuan(d.totals.advanceCents), yuan(d.totals.spentCents), yuan(d.totals.pendingCents), yuan(d.totals.dueCents), yuan(d.totals.settledCents), yuan(d.totals.outstandingCents)],
@@ -1264,18 +1331,24 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
   app.put('/api/erp/expenses/rules', { preHandler: guard('settings.manage') }, async (req) => {
     const rules = parse(RulesInput, req.body);
     // 「到货超期天数」8.0.1 挪到采购规则（CG01）：这里存过的原样留着（采购规则里没存过时沿用它），页面不再改
-    await saveRuleSetting(sql, 'expense_rules', loadExpenseRules, (before) => {
-      const legacy = (before as { arrivalOverdueDays?: unknown }).arrivalOverdueDays;
-      // 8.0.3 加的几项：没传的沿用存过的
-      const merged: ExpenseRules = {
-        ...rules,
-        budgetWarnPercent: rules.budgetWarnPercent ?? before.budgetWarnPercent,
-        invoiceCertifyDays: rules.invoiceCertifyDays ?? before.invoiceCertifyDays,
-        invoiceRemindDays: rules.invoiceRemindDays ?? before.invoiceRemindDays,
-        invoiceTaxToleranceCents: rules.invoiceTaxToleranceCents ?? before.invoiceTaxToleranceCents,
-      };
-      return typeof legacy === 'number' ? ({ ...merged, arrivalOverdueDays: legacy } as ExpenseRules) : merged;
-    }, ctxOf(req));
+    await saveRuleSetting(
+      sql,
+      'expense_rules',
+      loadExpenseRules,
+      (before) => {
+        const legacy = (before as { arrivalOverdueDays?: unknown }).arrivalOverdueDays;
+        // 8.0.3 加的几项：没传的沿用存过的
+        const merged: ExpenseRules = {
+          ...rules,
+          budgetWarnPercent: rules.budgetWarnPercent ?? before.budgetWarnPercent,
+          invoiceCertifyDays: rules.invoiceCertifyDays ?? before.invoiceCertifyDays,
+          invoiceRemindDays: rules.invoiceRemindDays ?? before.invoiceRemindDays,
+          invoiceTaxToleranceCents: rules.invoiceTaxToleranceCents ?? before.invoiceTaxToleranceCents,
+        };
+        return typeof legacy === 'number' ? ({ ...merged, arrivalOverdueDays: legacy } as ExpenseRules) : merged;
+      },
+      ctxOf(req),
+    );
     return loadExpenseRules(sql);
   });
 
@@ -1294,20 +1367,18 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
   });
   app.get('/api/erp/expenses/checks', { preHandler: guard('expense.read') }, async () => readSnapshot(sql, expenseChecks));
   // 经办人：在职的员工（只给名字，不给账号与岗位）
-  app.get('/api/erp/expenses/handlers', { preHandler: guard('expense.read') }, async () =>
-    sql<{ id: number; name: string }[]>`SELECT id, display_name AS name FROM staff WHERE active ORDER BY display_name`,
+  app.get(
+    '/api/erp/expenses/handlers',
+    { preHandler: guard('expense.read') },
+    async () => sql<{ id: number; name: string }[]>`SELECT id, display_name AS name FROM staff WHERE active ORDER BY display_name`,
   );
   app.get('/api/erp/expenses/po-candidates', { preHandler: guard('expense.manage') }, async (req) => {
     const { q } = parse(z.object({ q: z.string().max(40).default('') }), req.query);
     return poCandidates(sql, q);
   });
   app.get('/api/erp/expenses/to-claim/count', { preHandler: guard('expense.read') }, async () => ({ received: await toClaimReceivedCount(sql) }));
-  app.get('/api/erp/expenses/to-claim', { preHandler: guard('expense.read') }, async () =>
-    readSnapshot(sql, (tx) => toClaimList(tx, todayIn(config.timezone))),
-  );
-  app.get('/api/erp/expenses/po/:id/prefill', { preHandler: guard('expense.manage') }, async (req) =>
-    readSnapshot(sql, (tx) => claimPrefill(tx, config.timezone, docId(req))),
-  );
+  app.get('/api/erp/expenses/to-claim', { preHandler: guard('expense.read') }, async () => readSnapshot(sql, (tx) => toClaimList(tx, todayIn(config.timezone))));
+  app.get('/api/erp/expenses/po/:id/prefill', { preHandler: guard('expense.manage') }, async (req) => readSnapshot(sql, (tx) => claimPrefill(tx, config.timezone, docId(req))));
   app.get('/api/erp/expenses/po/:id', { preHandler: guard('expense.manage') }, async (req) => {
     const po = await poForClaim(sql, docId(req));
     if (po.settlement !== 'cash') throw unprocessable('CREDIT_SUPPLIER', CREDIT_PO_MESSAGE);
@@ -1342,9 +1413,7 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
   // 备用金
   app.get('/api/erp/petty/advances', { preHandler: guard('expense.read') }, async (req) => {
     const f = parse(AdvanceQuery, req.query);
-    return readSnapshot(sql, (tx) =>
-      listAdvances(tx, config.timezone, { ...f, unsettledOnly: f.unsettled === '1', includeVoided: f.all === '1' }),
-    );
+    return readSnapshot(sql, (tx) => listAdvances(tx, config.timezone, { ...f, unsettledOnly: f.unsettled === '1', includeVoided: f.all === '1' }));
   });
   app.get('/api/erp/petty/advances/by-key/:key', { preHandler: guard('expense.read') }, async (req) => {
     const { key } = parse(keyParam, req.params);
@@ -1384,4 +1453,3 @@ export function registerExpenseRoutes(app: FastifyInstance, deps: Deps) {
     return csvReply(reply, `备用金每日平账_${f.from}_${f.to}.csv`, dailyCsv(d));
   });
 }
-

@@ -89,7 +89,12 @@ function NodeShell({ node, className, children, onClick, pressed }: { node: Flow
       </button>
     );
   }
-  if (node.to) return <Link to={node.to} {...common}>{children}</Link>;
+  if (node.to)
+    return (
+      <Link to={node.to} {...common}>
+        {children}
+      </Link>
+    );
   return <div {...common}>{children}</div>;
 }
 
@@ -118,7 +123,14 @@ export function FlowTrack({ nodes, density = 'full', label, className }: { nodes
                     {n.glyph}
                   </FlowDot>
                 </span>
-                <span className={cn('mt-1 font-bold', compact ? 'text-[11.5px] leading-tight' : 'text-[13px]', n.state === 'pending' ? 'text-ink-3' : 'text-ink', compact && selected?.key === n.key && 'text-pine underline decoration-2 underline-offset-4')}>
+                <span
+                  className={cn(
+                    'mt-1 font-bold',
+                    compact ? 'text-[11.5px] leading-tight' : 'text-[13px]',
+                    n.state === 'pending' ? 'text-ink-3' : 'text-ink',
+                    compact && selected?.key === n.key && 'text-pine underline decoration-2 underline-offset-4',
+                  )}
+                >
                   {n.title}
                 </span>
                 {!compact && (
@@ -130,7 +142,11 @@ export function FlowTrack({ nodes, density = 'full', label, className }: { nodes
                         {n.at && <span className="num"> {flowTime(n.at)}</span>}
                       </span>
                     )}
-                    {n.alert ? <FlowAlert className="mt-1.5">{n.alert}</FlowAlert> : n.state === 'current' && n.waited ? <span className="mt-0.5 text-[12px] text-ink-3">已等待 {n.waited}</span> : null}
+                    {n.alert ? (
+                      <FlowAlert className="mt-1.5">{n.alert}</FlowAlert>
+                    ) : n.state === 'current' && n.waited ? (
+                      <span className="mt-0.5 text-[12px] text-ink-3">已等待 {n.waited}</span>
+                    ) : null}
                   </>
                 )}
               </NodeShell>

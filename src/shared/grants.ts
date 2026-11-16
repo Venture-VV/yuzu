@@ -77,14 +77,7 @@ export type TicketGrantRequest = { purpose: 'ticket_discount'; scope: TicketDisc
 export type MemberRefundGrantRequest = { purpose: 'member_refund'; scope: MemberRefundScope };
 export type MemberPhoneGrantRequest = { purpose: 'member_phone'; scope: MemberPhoneScope };
 export type LineVoidGrantRequest = { purpose: 'line_void'; scope: LineVoidScope };
-export type GrantRequest =
-  | VipGrantRequest
-  | OverLimitGrantRequest
-  | DiscountGrantRequest
-  | TicketGrantRequest
-  | MemberRefundGrantRequest
-  | MemberPhoneGrantRequest
-  | LineVoidGrantRequest;
+export type GrantRequest = VipGrantRequest | OverLimitGrantRequest | DiscountGrantRequest | TicketGrantRequest | MemberRefundGrantRequest | MemberPhoneGrantRequest | LineVoidGrantRequest;
 
 /** 签发的授权：授权编号、授权人与有效期，连同申请时的用途与对象 */
 export type Granted<R extends GrantRequest = GrantRequest> = R & {
@@ -105,13 +98,7 @@ export type LineVoidGrant = Granted<LineVoidGrantRequest>;
 export const sortedVisitIds = (ids: readonly number[]) => [...new Set(ids)].sort((a, b) => a - b);
 
 /** 优惠授权是否仍可用于这次结账（客人、金额一致且未过期；服务端核销时再核对一次） */
-export function discountGrantFits(
-  grant: DiscountGrant | null,
-  visitIds: readonly number[],
-  amount: number,
-  now = Date.now(),
-  tableSessionIds: readonly number[] = [],
-): grant is DiscountGrant {
+export function discountGrantFits(grant: DiscountGrant | null, visitIds: readonly number[], amount: number, now = Date.now(), tableSessionIds: readonly number[] = []): grant is DiscountGrant {
   if (!grant || grant.scope.amount !== amount || new Date(grant.expiresAt).getTime() <= now) return false;
   const same = (x: readonly number[], y: readonly number[]) => {
     const a = sortedVisitIds(x);
@@ -128,13 +115,7 @@ export function ticketGrantCovers(scope: TicketDiscountScope, needed: readonly T
 
 /** 超限授权是否仍可用于这笔业务（金额、会员、业务类型一致且未过期；服务端核销时再核对一次） */
 export function overLimitGrantFits(grant: OverLimitGrant | null, scope: OverLimitScope, now = Date.now()): grant is OverLimitGrant {
-  return (
-    !!grant &&
-    grant.scope.kind === scope.kind &&
-    grant.scope.memberId === scope.memberId &&
-    grant.scope.amount === scope.amount &&
-    new Date(grant.expiresAt).getTime() > now
-  );
+  return !!grant && grant.scope.kind === scope.kind && grant.scope.memberId === scope.memberId && grant.scope.amount === scope.amount && new Date(grant.expiresAt).getTime() > now;
 }
 
 /** 授权是否覆盖这些需要授权的柜（柜号与客人都要一致） */

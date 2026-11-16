@@ -22,7 +22,7 @@ async function c<T = any>(method: 'GET' | 'POST', url: string, withCookie = true
   return { status: res.statusCode, body: body as T, headers: res.headers };
 }
 const owner = <T = any>(method: 'GET' | 'POST' | 'PUT', url: string, payload?: unknown) => api<T>(ctx.app, ctx.owner, method, url, payload);
-const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const base = { name: '', rotate: 0, opacity: 1, hidden: false, locked: false };
 
 beforeAll(async () => {
@@ -84,7 +84,10 @@ describe('员工食堂的版面', () => {
     const doc = clone(s.draft.doc) as StudioDoc;
     // 「跟柚子说」挪到最前面；饭卡码按钮下面放一张海报（组件），柚黄换深一点
     const home = doc.screens.home!.nodes;
-    const talk = home.splice(home.findIndex((n) => n.type === 'block' && n.block === 'cn.talk'), 1)[0]!;
+    const talk = home.splice(
+      home.findIndex((n) => n.type === 'block' && n.block === 'cn.talk'),
+      1,
+    )[0]!;
     home.unshift(talk);
     doc.components = {
       'c-poster1': {
@@ -92,7 +95,17 @@ describe('员工食堂的版面', () => {
         node: { type: 'image', id: 'pic', ...base, x: 0, y: 0, w: 343, h: 120, asset: used, fit: 'cover', radius: 16, fill: null, sizing: { w: 'fill', h: 'fixed' } } as StudioNode,
       },
     };
-    home.splice(home.findIndex((n) => n.type === 'block' && n.block === 'cn.codeButton') + 1, 0, { type: 'instance', id: 'poster', ...base, x: 0, y: 0, w: 343, h: 120, component: 'c-poster1', sizing: { w: 'fill', h: 'fixed' } });
+    home.splice(home.findIndex((n) => n.type === 'block' && n.block === 'cn.codeButton') + 1, 0, {
+      type: 'instance',
+      id: 'poster',
+      ...base,
+      x: 0,
+      y: 0,
+      w: 343,
+      h: 120,
+      component: 'c-poster1',
+      sizing: { w: 'fill', h: 'fixed' },
+    });
     doc.theme.colors.yuzu = '#d9b23f';
     const saved = await owner('PUT', '/api/studio/canteen/draft', { rev: s.draft.rev, doc });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);

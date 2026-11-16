@@ -97,15 +97,31 @@ test.describe('8.0.1 采购组整改的新页面', () => {
 
   test('签约供应商在档案里上传合同 PDF（未签约的不能传由集成测试核对）', async ({ page }) => {
     await login(page, 'linlan', '会员工作台');
-    const sups = await getJson<{ id: number; code: string; name: string; contact: string; phone: string; note: string; settlement: string; reconcileCycle: string; defaultChannel: string | null; active: boolean }[]>(page, '/api/inventory/suppliers?all=1');
+    const sups = await getJson<
+      { id: number; code: string; name: string; contact: string; phone: string; note: string; settlement: string; reconcileCycle: string; defaultChannel: string | null; active: boolean }[]
+    >(page, '/api/inventory/suppliers?all=1');
     const s = sups.find((x) => x.code === 'S003') ?? sups[0]!;
     const save = await page.request.put(`/api/inventory/suppliers/${s.id}`, {
-      data: { code: s.code, name: s.name, contact: s.contact, phone: s.phone, note: s.note, settlement: s.settlement, reconcileCycle: s.reconcileCycle, defaultChannel: s.defaultChannel, active: s.active, contracted: true },
+      data: {
+        code: s.code,
+        name: s.name,
+        contact: s.contact,
+        phone: s.phone,
+        note: s.note,
+        settlement: s.settlement,
+        reconcileCycle: s.reconcileCycle,
+        defaultChannel: s.defaultChannel,
+        active: s.active,
+        contracted: true,
+      },
     });
     expect(save.status(), await save.text()).toBe(200);
     await page.goto('/inventory/master');
     await page.getByRole('radio', { name: '供应商' }).click();
-    await page.getByRole('button', { name: new RegExp(s.name) }).first().click();
+    await page
+      .getByRole('button', { name: new RegExp(s.name) })
+      .first()
+      .click();
     const box = page.getByTestId('supplier-contracts');
     const tag = Date.now().toString(36);
     await box.getByTestId('supplier-contract-file').setInputFiles({ name: `E2E 合同${tag}.pdf`, mimeType: 'application/pdf', buffer: Buffer.from(`%PDF-1.4\n% e2e ${tag}\n%%EOF\n`) });

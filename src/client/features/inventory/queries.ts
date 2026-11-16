@@ -40,8 +40,7 @@ export function useInvalidateInventory() {
   return () => qc.invalidateQueries({ queryKey: ik.all });
 }
 
-export const useMaterials = (all = false, enabled = true) =>
-  useQuery({ queryKey: ik.materials(all), queryFn: () => api.get<Material[]>(`/api/inventory/materials${all ? '?all=1' : ''}`), enabled });
+export const useMaterials = (all = false, enabled = true) => useQuery({ queryKey: ik.materials(all), queryFn: () => api.get<Material[]>(`/api/inventory/materials${all ? '?all=1' : ''}`), enabled });
 
 export const useSuppliers = (all = false, enabled = true) =>
   useQuery({
@@ -59,14 +58,12 @@ export const useDepartments = (all = false, enabled = true) =>
     enabled,
   });
 
-export const useInvSettings = (enabled = true) =>
-  useQuery({ queryKey: ik.settings, queryFn: () => api.get<InventorySettings>('/api/inventory/settings'), staleTime: 60_000, enabled });
+export const useInvSettings = (enabled = true) => useQuery({ queryKey: ik.settings, queryFn: () => api.get<InventorySettings>('/api/inventory/settings'), staleTime: 60_000, enabled });
 
 export const useOverview = () => useQuery({ queryKey: ik.overview, queryFn: () => api.get<InventoryOverview>('/api/inventory/overview') });
 
 /** 仓库列表（总仓 + 部门小仓，v0.7.11） */
-export const useWarehouses = (enabled = true) =>
-  useQuery({ queryKey: ik.warehouses, queryFn: () => api.get<Warehouse[]>('/api/inventory/warehouses'), staleTime: 60_000, enabled });
+export const useWarehouses = (enabled = true) => useQuery({ queryKey: ik.warehouses, queryFn: () => api.get<Warehouse[]>('/api/inventory/warehouses'), staleTime: 60_000, enabled });
 
 /** 部门小仓的结存 */
 export const useWarehouseStock = (warehouseId: number | null) =>
@@ -109,8 +106,7 @@ export const useInvDocs = (params: DocFilter, enabled = true) => {
   });
 };
 
-export const useInvDoc = (id: number | null) =>
-  useQuery({ queryKey: ik.doc(id ?? 0), queryFn: () => api.get<InvDoc>(`/api/inventory/docs/${id}`), enabled: !!id });
+export const useInvDoc = (id: number | null) => useQuery({ queryKey: ik.doc(id ?? 0), queryFn: () => api.get<InvDoc>(`/api/inventory/docs/${id}`), enabled: !!id });
 
 /** 库存卡按仓（v0.7.11）；不填是总仓 */
 export const useStockCard = (id: number | null, warehouseId = CENTRAL_WAREHOUSE_ID) =>
@@ -128,8 +124,7 @@ export const useStockSummary = (from: string, to: string, warehouse: WarehouseSe
     placeholderData: keepPreviousData,
   });
 
-export const useChecks = (enabled: boolean) =>
-  useQuery({ queryKey: ik.checks, queryFn: () => api.get<CheckItem[]>('/api/inventory/checks'), enabled });
+export const useChecks = (enabled: boolean) => useQuery({ queryKey: ik.checks, queryFn: () => api.get<CheckItem[]>('/api/inventory/checks'), enabled });
 
 export const useUsual = (departmentId: number | null) =>
   useQuery({

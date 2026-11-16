@@ -8,26 +8,39 @@ export type Db = Sql | Tx;
 /** 拼进查询里的一段条件（db`...` 不带 await） */
 export type Fragment = postgres.PendingQuery<postgres.Row[]>;
 
-export function createSql(databaseUrl: string, options: { max?: number } = {}): Sql {
-  return withStoreContext(postgres(databaseUrl, {
-    max: options.max ?? 10,
-    idle_timeout: 30,
-    connect_timeout: 10,
-    onnotice: () => {},
-    // 结果列名转为驼峰；金额（bigint / sum 结果）转为 number；
-    // 营业日 date 保持 "YYYY-MM-DD"；时间戳统一为 ISO 字符串，便于直接输出 JSON。
-    transform: { column: { from: postgres.toCamel } },
-    types: {
-      bigint: { to: 20, from: [20, 1700], serialize: (x: unknown) => String(x), parse: (x: string) => Number(x) },
-      dateOnly: { to: 1082, from: [1082], serialize: (x: unknown) => String(x), parse: (x: string) => x },
-      timestamptz: {
-        to: 1184,
-        from: [1184],
-        serialize: (x: unknown) => (x instanceof Date ? x.toISOString() : String(x)),
-        parse: (x: string) => new Date(x).toISOString(),
+export function createSql(
+  databaseUrl: string,
+  options: {
+    max?: number;
+    /**
+     * 事务开着不动超过这么多毫秒由数据库断开、放掉行锁（8.1.3 WL11，只给应用用：卡住的事务不再一直占着锁，
+     * 那一笔照旧是「结果待确认」）；命令行的导入等不设
+     */
+    idleInTransactionMs?: number;
+  } = {},
+): Sql {
+  return withStoreContext(
+    postgres(databaseUrl, {
+      max: options.max ?? 10,
+      idle_timeout: 30,
+      connect_timeout: 10,
+      onnotice: () => {},
+      ...(options.idleInTransactionMs ? { connection: { idle_in_transaction_session_timeout: options.idleInTransactionMs } } : {}),
+      // 结果列名转为驼峰；金额（bigint / sum 结果）转为 number；
+      // 营业日 date 保持 "YYYY-MM-DD"；时间戳统一为 ISO 字符串，便于直接输出 JSON。
+      transform: { column: { from: postgres.toCamel } },
+      types: {
+        bigint: { to: 20, from: [20, 1700], serialize: (x: unknown) => String(x), parse: (x: string) => Number(x) },
+        dateOnly: { to: 1082, from: [1082], serialize: (x: unknown) => String(x), parse: (x: string) => x },
+        timestamptz: {
+          to: 1184,
+          from: [1184],
+          serialize: (x: unknown) => (x instanceof Date ? x.toISOString() : String(x)),
+          parse: (x: string) => new Date(x).toISOString(),
+        },
       },
-    },
-  }) as unknown as Sql);
+    }) as unknown as Sql,
+  );
 }
 
 /**

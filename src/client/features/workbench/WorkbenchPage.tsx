@@ -156,23 +156,12 @@ export function WorkbenchPage() {
       <div
         className={cn(
           'grid min-h-0 flex-1',
-          extraWide
-            ? 'grid-cols-[320px_minmax(0,1fr)_400px]'
-            : wide
-              ? 'grid-cols-[288px_minmax(0,1fr)_380px]'
-              : mid
-                ? 'grid-cols-[300px_minmax(0,1fr)]'
-                : 'grid-cols-1',
+          extraWide ? 'grid-cols-[320px_minmax(0,1fr)_400px]' : wide ? 'grid-cols-[288px_minmax(0,1fr)_380px]' : mid ? 'grid-cols-[300px_minmax(0,1fr)]' : 'grid-cols-1',
         )}
       >
         {showList && (
           <aside className="min-h-0 border-r border-line bg-paper-2/45">
-            <MemberList
-              ref={searchRef}
-              selectedId={selectedId}
-              onSelect={(m: MemberSummary) => select(m.id)}
-              onCreate={(prefill) => setForm({ mode: 'create', prefill })}
-            />
+            <MemberList ref={searchRef} selectedId={selectedId} onSelect={(m: MemberSummary) => select(m.id)} onCreate={(prefill) => setForm({ mode: 'create', prefill })} />
           </aside>
         )}
 
@@ -180,11 +169,7 @@ export function WorkbenchPage() {
           <main className="scroll-thin min-h-0 overflow-y-auto">
             {!selectedId ? (
               <div className="flex h-full items-center justify-center">
-                <EmptyState
-                  art="pool"
-                  title="先找到会员"
-                  description="在左侧输入手机号、后四位或姓名；新顾客可直接新建会员。"
-                />
+                <EmptyState art="pool" title="先找到会员" description="在左侧输入手机号、后四位或姓名；新顾客可直接新建会员。" />
               </div>
             ) : member.isPending ? (
               <MemberDetailSkeleton />
@@ -199,9 +184,7 @@ export function WorkbenchPage() {
                 onRecharge={() => openFlow('recharge')}
                 onConsume={() => openFlow('consume')}
                 onEdit={() => setForm({ mode: 'edit' })}
-                onReverse={(consumptionId) =>
-                  setReverseTarget({ consumptionId, memberId: member.data!.id, memberName: member.data!.name })
-                }
+                onReverse={(consumptionId) => setReverseTarget({ consumptionId, memberId: member.data!.id, memberName: member.data!.name })}
                 onBack={mid ? undefined : () => select(null)}
               />
             ) : null}

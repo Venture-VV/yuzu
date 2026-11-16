@@ -98,11 +98,17 @@ function RedeemTab({ today }: { today: string }) {
         ) : (
           <ul className="mt-3 divide-y divide-line">
             {list.data!.map((r) => (
-              <li key={r.id} className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 text-[13.5px]', r.status === 'voided' && 'opacity-60')} data-testid={`platform-redemption-${r.redemptionNo}`}>
+              <li
+                key={r.id}
+                className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 text-[13.5px]', r.status === 'voided' && 'opacity-60')}
+                data-testid={`platform-redemption-${r.redemptionNo}`}
+              >
                 <Badge tone="lake">{COUPON_PLATFORM_LABELS[r.platform]}</Badge>
                 <span className="num font-semibold">{r.code}</span>
                 <span>{r.dealName || '（没写项目）'}</span>
-                <span className="num">面值 {formatYuan(Number(r.faceValue))} · 应结 {formatYuan(Number(r.settleAmount))}</span>
+                <span className="num">
+                  面值 {formatYuan(Number(r.faceValue))} · 应结 {formatYuan(Number(r.settleAmount))}
+                </span>
                 <span className="text-[12px] text-ink-3">
                   {r.redemptionNo} · 核销 {formatDateTime(r.redeemedAt)} · {r.registeredByName}
                   {r.status === 'voided' && ` · 已作废：${r.voidReason}`}
@@ -275,7 +281,9 @@ function SettleTab({ today }: { today: string }) {
           对账（按营业日）
         </SectionTitle>
         {!valid ? (
-          <Notice tone="warning" className="mt-3">开始日期不能晚于结束日期</Notice>
+          <Notice tone="warning" className="mt-3">
+            开始日期不能晚于结束日期
+          </Notice>
         ) : !rec.data ? (
           <Skeleton className="mt-3 h-24" />
         ) : rec.data.rows.length === 0 ? (

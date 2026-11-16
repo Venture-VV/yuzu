@@ -91,11 +91,7 @@ export interface SendResult {
 }
 
 /** 发一个打印任务：没开始发就连不上的重试 JOB_RETRIES 次；开始发了的（中途断开、发完没确认）不重试 */
-export async function sendToPrinter(
-  ep: Endpoint,
-  data: Buffer,
-  opts: { timeoutMs?: number; confirmTimeoutMs?: number; retries?: number; retryDelayMs?: number } = {},
-): Promise<SendResult> {
+export async function sendToPrinter(ep: Endpoint, data: Buffer, opts: { timeoutMs?: number; confirmTimeoutMs?: number; retries?: number; retryDelayMs?: number } = {}): Promise<SendResult> {
   const timeoutMs = opts.timeoutMs ?? JOB_ATTEMPT_TIMEOUT_MS;
   const confirmMs = opts.confirmTimeoutMs ?? JOB_CONFIRM_TIMEOUT_MS;
   const retries = opts.retries ?? JOB_RETRIES;

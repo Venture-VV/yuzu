@@ -13,7 +13,6 @@ import type { Actor, Deps } from '../../lib/context';
 import { conflict, notFound } from '../../lib/errors';
 import { idParam, parse } from '../../lib/validate';
 
-
 const Items = z
   .array(z.string().trim().min(1, '验收标准不能有空行').max(ACCEPTANCE_ITEM_MAX_CHARS, `每条验收标准最多 ${ACCEPTANCE_ITEM_MAX_CHARS} 个字`), '请填写验收标准')
   .min(1, '至少写一条验收标准')
@@ -40,7 +39,14 @@ export async function createTemplate(db: Db, raw: unknown, actor: Actor, ip?: st
     const [row] = await db<{ id: number }[]>`
       INSERT INTO acceptance_templates (name, items, created_by, updated_by)
       VALUES (${input.name}, ${db.json(input.items)}, ${actor.id}, ${actor.id}) RETURNING id`;
-    await writeAudit(db, { staffId: actor.id, action: 'acceptance_template', targetType: 'acceptance_template', targetId: row!.id, detail: { op: 'create', name: input.name, items: input.items.length }, ip });
+    await writeAudit(db, {
+      staffId: actor.id,
+      action: 'acceptance_template',
+      targetType: 'acceptance_template',
+      targetId: row!.id,
+      detail: { op: 'create', name: input.name, items: input.items.length },
+      ip,
+    });
     return Number(row!.id);
   } catch (error) {
     if (isUniqueViolation(error, 'acceptance_templates_name_key')) throw conflict('NAME_EXISTS', `已经有叫「${input.name}」的模板`);
@@ -59,7 +65,14 @@ export async function updateTemplate(db: Deps['sql'], id: number, raw: unknown, 
         UPDATE acceptance_templates SET name = ${input.name}, items = ${tx.json(input.items)}, active = ${input.active},
                version = version + 1, updated_by = ${actor.id}, updated_at = now()
         WHERE id = ${id}`;
-      await writeAudit(tx, { staffId: actor.id, action: 'acceptance_template', targetType: 'acceptance_template', targetId: id, detail: { op: 'update', name: input.name, items: input.items.length, active: input.active }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'acceptance_template',
+        targetType: 'acceptance_template',
+        targetId: id,
+        detail: { op: 'update', name: input.name, items: input.items.length, active: input.active },
+        ip,
+      });
     });
   } catch (error) {
     if (isUniqueViolation(error, 'acceptance_templates_name_key')) throw conflict('NAME_EXISTS', `已经有叫「${input.name}」的模板`);
@@ -68,9 +81,7 @@ export async function updateTemplate(db: Deps['sql'], id: number, raw: unknown, 
 }
 
 export function registerTemplateRoutes(app: FastifyInstance, { sql }: Deps) {
-  app.get('/api/erp/contracts/acceptance-templates', { preHandler: guard('contract.read') }, async (req) =>
-    listTemplates(sql, (req.query as { all?: string } | undefined)?.all === '1'),
-  );
+  app.get('/api/erp/contracts/acceptance-templates', { preHandler: guard('contract.read') }, async (req) => listTemplates(sql, (req.query as { all?: string } | undefined)?.all === '1'));
   app.post('/api/erp/contracts/acceptance-templates', { preHandler: guard('contract.manage') }, async (req, reply) => {
     await createTemplate(sql, req.body, req.actor, req.ip);
     reply.code(201);

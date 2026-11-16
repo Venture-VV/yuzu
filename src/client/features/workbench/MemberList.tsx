@@ -24,10 +24,10 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-export const MemberList = forwardRef<
-  HTMLInputElement,
-  { selectedId: number | null; onSelect: (m: MemberSummary) => void; onCreate: (prefill: string) => void }
->(function MemberList({ selectedId, onSelect, onCreate }, inputRef) {
+export const MemberList = forwardRef<HTMLInputElement, { selectedId: number | null; onSelect: (m: MemberSummary) => void; onCreate: (prefill: string) => void }>(function MemberList(
+  { selectedId, onSelect, onCreate },
+  inputRef,
+) {
   const can = useCan();
   const [q, setQ] = useState('');
   const debounced = useDebounced(q.trim(), 180);
@@ -41,7 +41,10 @@ export const MemberList = forwardRef<
   const members = useMembers(query, memberCodeOf(query) ? null : tagId);
   const [cursor, setCursor] = useState(0);
   const list = members.data ?? [];
-  const custom = useCustomListValues('member', list.map((m) => m.id));
+  const custom = useCustomListValues(
+    'member',
+    list.map((m) => m.id),
+  );
   // 扫到会员码（v0.7.25）：校验通过就直接打开这位会员，清空查找框（码 60 秒就换）
   const code = memberCodeOf(query);
   useEffect(() => {
@@ -100,13 +103,7 @@ export const MemberList = forwardRef<
           )}
         </div>
         {(tags.data ?? []).some((t) => t.active) && (
-          <Select
-            value={tagId ?? ''}
-            onChange={(e) => setTagId(e.target.value ? Number(e.target.value) : null)}
-            aria-label="按标签筛选"
-            className="h-9 text-[13px]"
-            data-testid="member-tag-filter"
-          >
+          <Select value={tagId ?? ''} onChange={(e) => setTagId(e.target.value ? Number(e.target.value) : null)} aria-label="按标签筛选" className="h-9 text-[13px]" data-testid="member-tag-filter">
             <option value="">全部会员（不按标签）</option>
             {groupTags((tags.data ?? []).filter((t) => t.active)).flatMap((g) =>
               g.tags.map((t) => (
@@ -148,19 +145,19 @@ export const MemberList = forwardRef<
           </div>
         ) : list.length === 0 ? (
           <>
-          {query && looksLikeCardNo(query) && <LostCardNotice cardNo={query} />}
-          <EmptyState
-            art="search"
-            title={query ? '没有找到这位会员' : '还没有会员'}
-            description={query ? '核对手机号，或为顾客新建会员档案。' : '新建第一位会员，开始接待。'}
-            action={
-              can('member.write') && (
-                <Button variant="primary" size="sm" icon={<UserPlus className="size-4" />} onClick={() => onCreate(q.trim())}>
-                  新建会员
-                </Button>
-              )
-            }
-          />
+            {query && looksLikeCardNo(query) && <LostCardNotice cardNo={query} />}
+            <EmptyState
+              art="search"
+              title={query ? '没有找到这位会员' : '还没有会员'}
+              description={query ? '核对手机号，或为顾客新建会员档案。' : '新建第一位会员，开始接待。'}
+              action={
+                can('member.write') && (
+                  <Button variant="primary" size="sm" icon={<UserPlus className="size-4" />} onClick={() => onCreate(q.trim())}>
+                    新建会员
+                  </Button>
+                )
+              }
+            />
           </>
         ) : (
           list.map((m, i) => {
@@ -179,9 +176,7 @@ export const MemberList = forwardRef<
                 )}
               >
                 {selected && <span className="absolute top-3 bottom-3 left-0 w-[3px] rounded-r-full bg-pine" />}
-                <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-full text-[15px] font-bold', avatarTone(m.id))}>
-                  {m.name.slice(0, 1)}
-                </span>
+                <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-full text-[15px] font-bold', avatarTone(m.id))}>{m.name.slice(0, 1)}</span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="truncate text-[14.5px] font-bold text-ink">{m.name}</span>
@@ -204,10 +199,7 @@ export const MemberList = forwardRef<
                   <CustomFieldInline data={custom.data} id={m.id} />
                 </span>
                 <span className="text-right">
-                  <Money
-                    cents={m.principalBalance + m.bonusBalance}
-                    className={cn('text-[14px] font-bold', m.principalBalance + m.bonusBalance === 0 ? 'text-ink-4' : 'text-ink')}
-                  />
+                  <Money cents={m.principalBalance + m.bonusBalance} className={cn('text-[14px] font-bold', m.principalBalance + m.bonusBalance === 0 ? 'text-ink-4' : 'text-ink')} />
                   {m.bonusBalance > 0 && (
                     <span className="block text-[11.5px] font-semibold text-yuzu-deep">
                       含赠 <Money cents={m.bonusBalance} />

@@ -130,20 +130,13 @@ export function ItemCard({
       >
         <span className="flex flex-col">{meta}</span>
         <Money cents={item.prices[0]!.price} className="mt-1 text-[14px] font-bold text-ink-2" />
-        {total > 0 && (
-          <span className={cn('num absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-[12px] font-bold', t.badge)}>
-            ×{total}
-          </span>
-        )}
+        {total > 0 && <span className={cn('num absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-[12px] font-bold', t.badge)}>×{total}</span>}
       </button>
     );
   }
 
   return (
-    <div
-      className={cn('relative flex flex-col rounded-lg border px-3 pt-2.5 pb-2', total ? t.on : 'border-line bg-card', off && 'opacity-50')}
-      data-testid={`item-${item.name}`}
-    >
+    <div className={cn('relative flex flex-col rounded-lg border px-3 pt-2.5 pb-2', total ? t.on : 'border-line bg-card', off && 'opacity-50')} data-testid={`item-${item.name}`}>
       {meta}
       <span className={cn('mt-2 grid gap-1', item.prices.length === 3 ? 'grid-cols-3' : 'grid-cols-2')}>
         {item.prices.map((p) => {
@@ -163,11 +156,7 @@ export function ItemCard({
             >
               <span className="text-[11.5px] font-semibold text-ink-3">{PRICE_TIER_LABELS[p.tier]}</span>
               <TierMoney cents={p.price} />
-              {q > 0 && (
-                <span className={cn('num absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-bold', t.badge)}>
-                  {q}
-                </span>
-              )}
+              {q > 0 && <span className={cn('num absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-bold', t.badge)}>{q}</span>}
             </button>
           );
         })}

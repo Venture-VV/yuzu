@@ -234,7 +234,14 @@ function FieldsBody() {
             <Card key={entity} className="p-4" data-testid={`fields-${entity}`}>
               <SectionTitle
                 aside={
-                  <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} disabled={activeCount >= MAX_CUSTOM_FIELDS} onClick={() => setEditing({ entity, def: null })} data-testid={`fields-${entity}-add`}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={<Plus className="size-4" />}
+                    disabled={activeCount >= MAX_CUSTOM_FIELDS}
+                    onClick={() => setEditing({ entity, def: null })}
+                    data-testid={`fields-${entity}-add`}
+                  >
                     新增字段
                   </Button>
                 }
@@ -421,8 +428,7 @@ function SearchBody() {
   });
   if (!entities.length) return <Notice tone="info" title="当前岗位看不了会员、供应商、物料、合同，没有可查的" />;
   // 字段定义取不回来：写明加载失败、可以重试，不显示成「没有字段可查」
-  if (defs.isError && !defs.data)
-    return <LoadFailed title="自定义字段取不回来，请检查网络" onRetry={() => void defs.refetch()} retrying={defs.isFetching} testId="dict-search-error" />;
+  if (defs.isError && !defs.data) return <LoadFailed title="自定义字段取不回来，请检查网络" onRetry={() => void defs.refetch()} retrying={defs.isFetching} testId="dict-search-error" />;
   return (
     <div className="max-w-[1024px] space-y-4">
       <Card className="p-4">
@@ -524,7 +530,11 @@ function SearchBody() {
                     <td className="num px-4 py-2">{r.code}</td>
                     <td className="px-4 py-2">
                       {r.name}
-                      {r.inactive && <Badge tone="neutral" className="ml-2">停用</Badge>}
+                      {r.inactive && (
+                        <Badge tone="neutral" className="ml-2">
+                          停用
+                        </Badge>
+                      )}
                     </td>
                     <td className="px-4 py-2">{r.value}</td>
                   </tr>
@@ -538,4 +548,3 @@ function SearchBody() {
     </div>
   );
 }
-

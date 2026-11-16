@@ -45,11 +45,7 @@ export function MemberHistoryImportCard() {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.post<MemberHistoryReport>(
-        '/api/member-history-imports',
-        { source: 'EBC', fileName: file.name, csv: file.csv, clientKey },
-        { timeoutMs: 180_000 },
-      );
+      const r = await api.post<MemberHistoryReport>('/api/member-history-imports', { source: 'EBC', fileName: file.name, csv: file.csv, clientKey }, { timeoutMs: 180_000 });
       toast({ tone: 'success', title: r.replayed ? `批次 ${r.importNo} 已导入（查回结果）` : `已导入旧系统流水 ${r.matchedRows} 笔`, body: `${r.memberCount} 位会员；会员详情「旧系统流水」里看` });
       setFile(null);
       setPreview(null);
@@ -116,14 +112,21 @@ export function MemberHistoryImportCard() {
           )}
           {preview.unmatched.lines.length > 0 && (
             <p className="text-[12px] text-ink-3">
-              认不出：{preview.unmatched.lines.slice(0, 10).map((u) => `第 ${u.line} 行（${u.name || u.phone || u.legacyNo}）`).join('、')}
+              认不出：
+              {preview.unmatched.lines
+                .slice(0, 10)
+                .map((u) => `第 ${u.line} 行（${u.name || u.phone || u.legacyNo}）`)
+                .join('、')}
               {preview.unmatched.count > 10 ? ' 等' : ''}
             </p>
           )}
           {preview.duplicateOf && <Notice tone="warning" title={`这份文件已经导入过（批次 ${preview.duplicateOf}）；要重新导入请先在下面作废那一批`} />}
           {preview.errors.length > 0 && (
             <Notice tone="error" title={`有 ${preview.errors.length} 行格式不对，改好后重新选择文件`}>
-              {preview.errors.slice(0, 8).map((e) => `第 ${e.line} 行：${e.message}`).join('；')}
+              {preview.errors
+                .slice(0, 8)
+                .map((e) => `第 ${e.line} 行：${e.message}`)
+                .join('；')}
             </Notice>
           )}
           <Button variant="primary" loading={busy} disabled={blocked} onClick={() => void submit()} data-testid="member-history-submit">

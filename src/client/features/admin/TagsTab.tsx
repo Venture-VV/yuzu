@@ -2,17 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileUp, Lock, Plus, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router';
-import {
-  MAX_VIP_LEVEL,
-  TAG_KIND_LABELS,
-  TAG_ZONES,
-  ZONE_LABELS,
-  ZONES,
-  type FrontdeskRules,
-  type HandTag,
-  type TagKind,
-  type Zone,
-} from '@shared/frontdesk';
+import { MAX_VIP_LEVEL, TAG_KIND_LABELS, TAG_ZONES, ZONE_LABELS, ZONES, type FrontdeskRules, type HandTag, type TagKind, type Zone } from '@shared/frontdesk';
 import { parseHandTagCsv, type HandTagCsvResult, type HandTagImportReport } from '@shared/hand-tag-import';
 import { formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
@@ -64,63 +54,61 @@ export function TagsTab() {
       </SubPane>
 
       <SubPane tab="pool">
-      <Card className="p-5">
-        <SectionTitle>手牌池</SectionTitle>
-        <p className="mt-1 text-[12.5px] text-ink-3">
-          点一张手牌可锁定 / 解锁、改分区与柜型或停用。在店手牌不能改分区、柜型、停用或锁定，请先在前台给客人换牌。
-        </p>
-        {tags.isPending ? (
-          <Skeleton className="mt-3 h-40" />
-        ) : tags.data?.length === 0 ? (
-          <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">还没有手牌，先在上方导入柜号清单</p>
-        ) : (
-          TAG_ZONES.map((z) => {
-            const list = tags.data?.filter((t) => t.zone === z) ?? [];
-            if (list.length === 0) return null;
-            return (
-              <div key={z} className="mt-5" data-testid={`admin-zone-${z}`}>
-                <p className="mb-2 flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink-3">
-                  <ZoneChip zone={z} size="md" /> 共 {list.length} 张 · 在店 {list.filter((t) => t.inUse).length} · 锁定 {list.filter((t) => t.locked).length} · 停用{' '}
-                  {list.filter((t) => !t.active).length}
-                  {z === 'child' && <span className="text-clay">儿童区已取消，请把这些牌改为男宾或女宾，或停用</span>}
-                </p>
-                {groupTags(list).map((g) => (
-                  <div key={g.key} className="mb-3">
-                    <p className="mb-1.5 flex items-center gap-2 text-[12.5px] font-semibold text-ink-3">
-                      {g.kind === 'vip' ? <VipChip level={g.vipLevel!} size="md" /> : <span className="font-bold text-ink-2">{g.area ? `${g.area} 区` : '普通柜'}</span>}
-                      <span className="num">{g.tags.length} 张</span>
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {g.tags.map((t) => (
-                        <button
-                          key={t.id}
-                          type="button"
-                          onClick={() => setEditing(t)}
-                          title={t.locked ? `锁定：${t.lockReason}` : t.inUse ? '在店' : t.active ? '空闲' : '已停用'}
-                          data-testid={`admin-tag-${t.code}`}
-                          className={cn(
-                            'num flex h-8 items-center gap-1 rounded-md border px-2.5 text-[13px] font-bold',
-                            !t.active
-                              ? 'border-line bg-paper-2 text-ink-4 line-through'
-                              : t.locked
-                                ? 'border-clay/40 bg-clay-soft/60 text-clay'
-                                : t.inUse
-                                  ? cn('border-transparent', ZONE_STYLE[t.zone].chip)
-                                  : 'border-line bg-card text-ink-2 hover:border-line-strong',
-                          )}
-                        >
-                          {t.locked && <Lock className="size-3" />}
-                          {t.code}
-                        </button>
-                      ))}
+        <Card className="p-5">
+          <SectionTitle>手牌池</SectionTitle>
+          <p className="mt-1 text-[12.5px] text-ink-3">点一张手牌可锁定 / 解锁、改分区与柜型或停用。在店手牌不能改分区、柜型、停用或锁定，请先在前台给客人换牌。</p>
+          {tags.isPending ? (
+            <Skeleton className="mt-3 h-40" />
+          ) : tags.data?.length === 0 ? (
+            <p className="mt-4 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">还没有手牌，先在上方导入柜号清单</p>
+          ) : (
+            TAG_ZONES.map((z) => {
+              const list = tags.data?.filter((t) => t.zone === z) ?? [];
+              if (list.length === 0) return null;
+              return (
+                <div key={z} className="mt-5" data-testid={`admin-zone-${z}`}>
+                  <p className="mb-2 flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink-3">
+                    <ZoneChip zone={z} size="md" /> 共 {list.length} 张 · 在店 {list.filter((t) => t.inUse).length} · 锁定 {list.filter((t) => t.locked).length} · 停用{' '}
+                    {list.filter((t) => !t.active).length}
+                    {z === 'child' && <span className="text-clay">儿童区已取消，请把这些牌改为男宾或女宾，或停用</span>}
+                  </p>
+                  {groupTags(list).map((g) => (
+                    <div key={g.key} className="mb-3">
+                      <p className="mb-1.5 flex items-center gap-2 text-[12.5px] font-semibold text-ink-3">
+                        {g.kind === 'vip' ? <VipChip level={g.vipLevel!} size="md" /> : <span className="font-bold text-ink-2">{g.area ? `${g.area} 区` : '普通柜'}</span>}
+                        <span className="num">{g.tags.length} 张</span>
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {g.tags.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => setEditing(t)}
+                            title={t.locked ? `锁定：${t.lockReason}` : t.inUse ? '在店' : t.active ? '空闲' : '已停用'}
+                            data-testid={`admin-tag-${t.code}`}
+                            className={cn(
+                              'num flex h-8 items-center gap-1 rounded-md border px-2.5 text-[13px] font-bold',
+                              !t.active
+                                ? 'border-line bg-paper-2 text-ink-4 line-through'
+                                : t.locked
+                                  ? 'border-clay/40 bg-clay-soft/60 text-clay'
+                                  : t.inUse
+                                    ? cn('border-transparent', ZONE_STYLE[t.zone].chip)
+                                    : 'border-line bg-card text-ink-2 hover:border-line-strong',
+                            )}
+                          >
+                            {t.locked && <Lock className="size-3" />}
+                            {t.code}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })
-        )}
-      </Card>
+                  ))}
+                </div>
+              );
+            })
+          )}
+        </Card>
       </SubPane>
 
       {editing && (
@@ -200,7 +188,8 @@ function ImportCard({ onImported }: { onImported: () => void }) {
         <span className="flex items-center gap-2">按清单导入柜号</span>
       </SectionTitle>
       <p className="mt-1 text-[12.5px] text-ink-3">
-        CSV 列为 <code className="num">code,gender,kind,area,vip_level</code>（与 docs/data/hand-tags-2026-10-27.csv 相同）。先预览再导入；已有牌号以清单为准更新分区、柜型与等级，锁定状态不变，在店的手牌不改。
+        CSV 列为 <code className="num">code,gender,kind,area,vip_level</code>（与 docs/data/hand-tags-2026-10-27.csv
+        相同）。先预览再导入；已有牌号以清单为准更新分区、柜型与等级，锁定状态不变，在店的手牌不改。
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => void onFile(e.target.files?.[0])} data-testid="tag-import-file" />
@@ -399,13 +388,8 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
   const n = Number(minutes);
   const g = Number(grace);
   const feeCents = parseYuan(fee);
-  const problem = !Number.isInteger(n) || n < 0 || n > 120
-    ? '更正时限应为 0–120 分钟'
-    : !Number.isInteger(g) || g < 0 || g > 120
-      ? '跳档宽限应为 0–120 分钟'
-    : feeCents === null
-      ? '丢牌赔偿金额不正确'
-      : null;
+  const problem =
+    !Number.isInteger(n) || n < 0 || n > 120 ? '更正时限应为 0–120 分钟' : !Number.isInteger(g) || g < 0 || g > 120 ? '跳档宽限应为 0–120 分钟' : feeCents === null ? '丢牌赔偿金额不正确' : null;
 
   const save = async () => {
     setBusy(true);
@@ -516,9 +500,7 @@ function TagDialog({ tag, onClose, onDone }: { tag: AdminTag; onClose: () => voi
           <Button
             variant="primary"
             disabled={busy || !changed}
-            onClick={() =>
-              run(() => api.put(`/api/frontdesk/tags/${tag.id}`, { zone, active, kind, vipLevel: kind === 'vip' ? vipLevel : null }), `${tag.code} 已更新`)
-            }
+            onClick={() => run(() => api.put(`/api/frontdesk/tags/${tag.id}`, { zone, active, kind, vipLevel: kind === 'vip' ? vipLevel : null }), `${tag.code} 已更新`)}
           >
             保存分区、柜型与启用
           </Button>
@@ -526,7 +508,11 @@ function TagDialog({ tag, onClose, onDone }: { tag: AdminTag; onClose: () => voi
       }
     >
       <div className="space-y-4">
-        {legacy && <Notice tone="warning" title="这是已取消的儿童区手牌">请改为男宾或女宾后保存，或选择停用。</Notice>}
+        {legacy && (
+          <Notice tone="warning" title="这是已取消的儿童区手牌">
+            请改为男宾或女宾后保存，或选择停用。
+          </Notice>
+        )}
         <Field label="分区">
           <Segmented value={zone} onChange={setZone} options={ZONES.map((z) => ({ value: z, label: ZONE_LABELS[z].title }))} />
         </Field>
@@ -552,7 +538,14 @@ function TagDialog({ tag, onClose, onDone }: { tag: AdminTag; onClose: () => voi
           </div>
         </Field>
         <Field label="启用">
-          <Segmented value={active ? 'on' : 'off'} onChange={(v) => setActive(v === 'on')} options={[{ value: 'on', label: '启用' }, { value: 'off', label: '停用' }]} />
+          <Segmented
+            value={active ? 'on' : 'off'}
+            onChange={(v) => setActive(v === 'on')}
+            options={[
+              { value: 'on', label: '启用' },
+              { value: 'off', label: '停用' },
+            ]}
+          />
         </Field>
         <div className="rounded-lg border border-line bg-paper/60 p-4">
           {tag.locked ? (

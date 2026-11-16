@@ -52,9 +52,11 @@ async function hold(statement: (tx: typeof ctx.sql) => Promise<unknown>) {
 const holdKey = (key: string) => hold((tx) => tx`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
 /** 占住当日充值单号：充值已拿到班次，卡在取号上 */
 const holdRechargeNo = () =>
-  hold((tx) => tx`
+  hold(
+    (tx) => tx`
     INSERT INTO doc_counters (doc_type, business_date, last_no) VALUES ('recharge', ${today}, 0)
-    ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`);
+    ON CONFLICT (doc_type, business_date) DO UPDATE SET last_no = doc_counters.last_no`,
+  );
 /** 卡住审计写入：交班已对班次加排他锁、算好快照、改了状态，写交班审计时停在提交之前 */
 const holdAudit = () => hold((tx) => tx`LOCK TABLE audit_logs IN SHARE MODE`);
 
@@ -68,10 +70,8 @@ const cashCheckout = (visitId: number, key = randomUUID(), cookie = ctx.clerk) =
 const open = async (cookie: string, openingCash = 0) => (await api(ctx.app, cookie, 'POST', '/api/shifts', { openingCash })).body as { id: number };
 const current = async (cookie: string) => (await api(ctx.app, cookie, 'GET', '/api/shifts/current')).body.shift;
 /** 交班：实点等于应有现金（应有现金为负时实点 0，例如备用金为 0 的值班经理反结账了别人的现金单） */
-const close = (cookie: string, id: number, expectedCash: number) =>
-  api(ctx.app, cookie, 'POST', `/api/shifts/${id}/close`, { countedCash: Math.max(0, expectedCash), expectedCash });
-const shiftOfRecharge = async (id: number) =>
-  (await ctx.sql<{ shiftId: number | null; createdAt: string }[]>`SELECT shift_id, created_at FROM recharges WHERE id = ${id}`)[0]!;
+const close = (cookie: string, id: number, expectedCash: number) => api(ctx.app, cookie, 'POST', `/api/shifts/${id}/close`, { countedCash: Math.max(0, expectedCash), expectedCash });
+const shiftOfRecharge = async (id: number) => (await ctx.sql<{ shiftId: number | null; createdAt: string }[]>`SELECT shift_id, created_at FROM recharges WHERE id = ${id}`)[0]!;
 /** ¥499 结账：现金 100 + 美团券 399 */
 const couponCheckout = (visitId: number, code: string) =>
   api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkouts', {
@@ -190,9 +190,11 @@ describe('交班与收款以班次为界', () => {
     const visitId = await enter('A004');
     const key = randomUUID();
     // 另一个事务先占用同一操作编号的结账单（未提交）：结账查到班次后，写结账单时卡在唯一约束上
-    const release = await hold((tx) => tx`
+    const release = await hold(
+      (tx) => tx`
       INSERT INTO checkouts (checkout_no, client_key, total_amount, paid_amount, business_date, operator_id, created_at)
-      VALUES ('JZ-HOLD', ${key}, 0, 0, ${today}, ${ctx.ownerId}, now())`);
+      VALUES ('JZ-HOLD', ${key}, 0, 0, ${today}, ${ctx.ownerId}, now())`,
+    );
     const paying = cashCheckout(visitId, key);
     await waitForLockWaiters(1);
     const closing = close(ctx.owner, shift.id, 0);
@@ -361,7 +363,14 @@ describe('交班与收款以班次为界', () => {
     // 退的 100 元现金扣减店主班次的应有现金，两张交班表合起来相抵
     const boss = await close(ctx.owner, ownerShift.id, -10000);
     expect(boss.status).toBe(200);
-    expect(boss.body.summary.refunds).toEqual({ count: 1, total: 49900, byMethod: [{ method: 'cash', amount: 10000 }, { method: 'coupon', amount: 39900 }] });
+    expect(boss.body.summary.refunds).toEqual({
+      count: 1,
+      total: 49900,
+      byMethod: [
+        { method: 'cash', amount: 10000 },
+        { method: 'coupon', amount: 39900 },
+      ],
+    });
     expectConsistent(boss.body.summary);
   });
 

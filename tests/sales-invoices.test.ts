@@ -18,12 +18,15 @@ let tagNo = 0;
 
 const enterAndPay = async (payments: CheckoutInputData['payments'], memberId?: number, actor: Actor = clerk) => {
   tagNo += 1;
-  const r = await checkin(deps, { clientKey: randomUUID(), guests: [{ tagCode: `K${String(tagNo).padStart(3, '0')}`, zone: 'male', ...(memberId ? { memberId } : {}) }] }, { actor: clerk, at: new Date(Date.now() - H) });
+  const r = await checkin(
+    deps,
+    { clientKey: randomUUID(), guests: [{ tagCode: `K${String(tagNo).padStart(3, '0')}`, zone: 'male', ...(memberId ? { memberId } : {}) }] },
+    { actor: clerk, at: new Date(Date.now() - H) },
+  );
   const total = (payments ?? []).reduce((s, p) => s + p.amount, 0);
   return checkout(deps, { clientKey: randomUUID(), visitIds: [r.visits[0]!.id], expectedTotal: total, payments }, { actor, at: new Date() });
 };
-const ask = (body: Record<string, unknown>, cookie = ctx.clerk) =>
-  api(ctx.app, cookie, 'POST', '/api/invoice-requests', { clientKey: randomUUID(), titleType: 'personal', title: '王先生', ...body });
+const ask = (body: Record<string, unknown>, cookie = ctx.clerk) => api(ctx.app, cookie, 'POST', '/api/invoice-requests', { clientKey: randomUUID(), titleType: 'personal', title: '王先生', ...body });
 const source = async (type: string, id: number, cookie = ctx.clerk) => (await api(ctx.app, cookie, 'GET', `/api/invoice-requests/source?type=${type}&id=${id}`)).body;
 
 beforeAll(async () => {
@@ -41,7 +44,13 @@ describe('开票申请', () => {
   it('结账单：只按现金类实收开（储值不算），减掉退款；同一笔只能开一次；作废后能重新申请；反结账以后标红', async () => {
     const m = await createMember(ctx, '开票会员');
     expect((await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(m.id, 100_000))).status).toBe(200);
-    const done = await enterAndPay([{ method: 'wallet', memberId: m.id, amount: 20_000, expectedSplit: { principal: 20_000, bonus: 0 } }, { method: 'wechat', amount: 29_900, ref: '尾号 8888' }], m.id);
+    const done = await enterAndPay(
+      [
+        { method: 'wallet', memberId: m.id, amount: 20_000, expectedSplit: { principal: 20_000, bonus: 0 } },
+        { method: 'wechat', amount: 29_900, ref: '尾号 8888' },
+      ],
+      m.id,
+    );
     const info = await source('checkout', done.id);
     expect(info).toMatchObject({ no: done.checkoutNo, invoiceableCents: 29_900, voided: false, active: null, partyName: '开票会员' });
     // 超过可开金额、个人开专票、专票没税号：拒绝
@@ -49,7 +58,16 @@ describe('开票申请', () => {
     expect((await ask({ sourceType: 'checkout', sourceId: done.id, amountCents: 100, invoiceKind: 'special' })).status).toBe(400);
     expect((await ask({ sourceType: 'checkout', sourceId: done.id, amountCents: 100, titleType: 'company', title: '某公司', invoiceKind: 'special' })).status).toBe(400);
     // 申请：操作编号重提返回同一张
-    const body = { clientKey: randomUUID(), sourceType: 'checkout', sourceId: done.id, amountCents: 29_900, titleType: 'company', title: '某某科技有限公司', taxNo: '91440300ma5xxxxx1a', email: 'fp@example.com' };
+    const body = {
+      clientKey: randomUUID(),
+      sourceType: 'checkout',
+      sourceId: done.id,
+      amountCents: 29_900,
+      titleType: 'company',
+      title: '某某科技有限公司',
+      taxNo: '91440300ma5xxxxx1a',
+      email: 'fp@example.com',
+    };
     const first = await api(ctx.app, ctx.clerk, 'POST', '/api/invoice-requests', body);
     expect(first.status, JSON.stringify(first.body)).toBe(201);
     expect(first.body.request).toMatchObject({ status: 'requested', taxNo: '91440300MA5XXXXX1A', sourceNo: done.checkoutNo, amountCents: 29_900 });
@@ -170,19 +188,32 @@ describe('开票申请', () => {
     const [owed] = await ctx.sql<{ n: string }[]>`SELECT coalesce(sum(amount_cents), 0)::text AS n FROM ar_charges WHERE account_id = ${accountId}`;
     const amount = Number(owed!.n);
     expect(amount).toBeGreaterThan(0);
-    const col = await api(ctx.app, payer, 'POST', '/api/erp/receivables/collections', { clientKey: randomUUID(), accountId, collectedOn: today, method: 'bank_transfer', amountCents: amount, evidence: '网银 001' });
+    const col = await api(ctx.app, payer, 'POST', '/api/erp/receivables/collections', {
+      clientKey: randomUUID(),
+      accountId,
+      collectedOn: today,
+      method: 'bank_transfer',
+      amountCents: amount,
+      evidence: '网银 001',
+    });
     expect(col.status, JSON.stringify(col.body)).toBe(201);
     const colId = col.body.collection?.id ?? col.body.id;
     // 店员看不了回款的开票
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/invoice-requests/source?type=ar_collection&id=${colId}`)).status).toBe(403);
     expect((await source('ar_collection', colId, payer)).partyName).toBe('开票协议单位');
-    const req = await ask({ sourceType: 'ar_collection', sourceId: colId, amountCents: amount, titleType: 'company', title: '开票协议单位', taxNo: '91110000100000000X', invoiceKind: 'special' }, payer);
+    const req = await ask(
+      { sourceType: 'ar_collection', sourceId: colId, amountCents: amount, titleType: 'company', title: '开票协议单位', taxNo: '91110000100000000X', invoiceKind: 'special' },
+      payer,
+    );
     expect(req.status, JSON.stringify(req.body)).toBe(201);
     // 确认作废以后同一个编号不再生效
     const key = randomUUID();
     const fence = await api(ctx.app, ctx.clerk, 'POST', `/api/erp/ops/${key}/abandon`, { type: 'invoice_request' });
     expect([200, 201]).toContain(fence.status);
     const done3 = await enterAndPay([{ method: 'cash', amount: 49_900 }]);
-    expect((await api(ctx.app, ctx.clerk, 'POST', '/api/invoice-requests', { clientKey: key, sourceType: 'checkout', sourceId: done3.id, amountCents: 100, titleType: 'personal', title: '某' })).body.error.code).toBe('OP_ABANDONED');
+    expect(
+      (await api(ctx.app, ctx.clerk, 'POST', '/api/invoice-requests', { clientKey: key, sourceType: 'checkout', sourceId: done3.id, amountCents: 100, titleType: 'personal', title: '某' })).body.error
+        .code,
+    ).toBe('OP_ABANDONED');
   });
 });

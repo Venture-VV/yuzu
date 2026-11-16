@@ -47,28 +47,30 @@ export async function replenishSuggestions(db: Db, timezone: string): Promise<Re
   const today = todayIn(timezone);
   const windowDays = settings.usageWindowDays;
   const used = await usageByMaterial(db, CENTRAL_WAREHOUSE_ID, usageSince(timezone, windowDays));
-  const materials = await db<{
-    id: number;
-    code: string;
-    name: string;
-    specification: string;
-    inventoryUnit: string;
-    purchaseUnit: string;
-    purchaseFactorMilli: number;
-    decimals: number;
-    stockMilli: number;
-    coverDays: number | null;
-    lowStockMilli: number | null;
-    replenishMode: ReplenishMode;
-    replenishRev: number;
-    consumable: boolean;
-    owedMilli: number;
-    assetNo: string | null;
-    assetCount: number;
-    refPriceCents: number | null;
-    supplierId: number | null;
-    supplierName: string | null;
-  }[]>`
+  const materials = await db<
+    {
+      id: number;
+      code: string;
+      name: string;
+      specification: string;
+      inventoryUnit: string;
+      purchaseUnit: string;
+      purchaseFactorMilli: number;
+      decimals: number;
+      stockMilli: number;
+      coverDays: number | null;
+      lowStockMilli: number | null;
+      replenishMode: ReplenishMode;
+      replenishRev: number;
+      consumable: boolean;
+      owedMilli: number;
+      assetNo: string | null;
+      assetCount: number;
+      refPriceCents: number | null;
+      supplierId: number | null;
+      supplierName: string | null;
+    }[]
+  >`
     SELECT m.id, m.code, m.name, m.specification, m.inventory_unit, m.purchase_unit, m.purchase_factor_milli, m.decimals, m.stock_milli,
            m.cover_days, m.low_stock_milli, m.replenish_mode, m.replenish_rev, m.ref_price_cents,
            -- 档案里已经标明是消耗品的（自动识别时算常备，头一次领用就提）：台面日耗品、管效期的、称重的。

@@ -47,8 +47,7 @@ export const usePaymentRequests = (filter: RequestFilter, q: string) =>
     placeholderData: keepPreviousData,
   });
 
-export const usePaymentRequest = (id: number | null) =>
-  useQuery({ queryKey: pk.one(id ?? 0), queryFn: () => api.get<PaymentRequestDetail>(`/api/erp/payments/requests/${id}`), enabled: !!id });
+export const usePaymentRequest = (id: number | null) => useQuery({ queryKey: pk.one(id ?? 0), queryFn: () => api.get<PaymentRequestDetail>(`/api/erp/payments/requests/${id}`), enabled: !!id });
 
 export const usePaymentMeta = () => useQuery({ queryKey: pk.meta, queryFn: () => api.get<PaymentRequestMeta>('/api/erp/payments/meta'), staleTime: 60_000 });
 

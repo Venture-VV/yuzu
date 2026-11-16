@@ -393,7 +393,11 @@ describe('巡场轮次（8.0.11，XC13–XC15）', () => {
       const a = await scan(guard, p1.token, { scannedAt: at(1, 10) });
       expect(a.body, JSON.stringify(a.body)).toMatchObject({ status: 'ok', round: { no: 1 } });
       // 同一轮小李再扫：已由老张打过
-      expect((await scan(guard2, p1.token, { scannedAt: at(1, 50) })).body).toMatchObject({ status: 'already', checkin: { id: a.body.checkin.id, employeeName: '保安老张', mine: false }, round: { no: 1 } });
+      expect((await scan(guard2, p1.token, { scannedAt: at(1, 50) })).body).toMatchObject({
+        status: 'already',
+        checkin: { id: a.body.checkin.id, employeeName: '保安老张', mine: false },
+        round: { no: 1 },
+      });
       // 下一轮：又能打
       expect((await scan(guard, p1.token, { scannedAt: at(2, 5) })).body).toMatchObject({ status: 'ok', round: { no: 2 }, pointCount: 2 });
       expect((await scan(guard2, p2.token, { scannedAt: at(2, 20) })).body).toMatchObject({ status: 'ok', round: { no: 2 } });

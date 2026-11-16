@@ -40,7 +40,10 @@ test('员工食堂首页改版发布以后，员工手机上照新的样子；�
   // 店主在工作台改：「跟柚子说」挪到最前面，饭卡码按钮下面加一行公告
   const doc = defaultStudioDoc('canteen');
   const home = doc.screens.home!.nodes;
-  const talk = home.splice(home.findIndex((n) => n.type === 'block' && n.block === 'cn.talk'), 1)[0]!;
+  const talk = home.splice(
+    home.findIndex((n) => n.type === 'block' && n.block === 'cn.talk'),
+    1,
+  )[0]!;
   home.unshift(talk);
   home.splice(home.findIndex((n) => n.type === 'block' && n.block === 'cn.codeButton') + 1, 0, {
     type: 'text',

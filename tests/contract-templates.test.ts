@@ -71,17 +71,28 @@ describe('渲染', () => {
   });
   it('占位换成值、表格单独成段、勾的条款接在后面；没填的显示【字段】', () => {
     const c = { ...(content() as unknown as ContractContent), template: { id: 1, code: 'HT-001', version: 1, name: '保洁', values: { 服务区域: '一楼大堂' }, clauses: ['k2'] } };
-    const blocks = renderContractDoc(c, { contractNo: 'HT2026-001', counterparty: '城南保洁', storeName: '汤崎', versionLabel: '草稿' }, {
-      body: '# 第一条 服务内容\n\n乙方 {{相对方}} 为甲方 {{我方}} 提供 {{服务区域}} 的保洁，总价 {{总价}}（{{总价大写}}），联系人 {{联系人}}。\n\n{{付款节点}}',
-      clauses: [
-        { key: 'k1', title: '保密', text: '不外传', default: true },
-        { key: 'k2', title: '违约', text: '按 {{不合格处理}}', default: false },
-      ],
-    });
+    const blocks = renderContractDoc(
+      c,
+      { contractNo: 'HT2026-001', counterparty: '城南保洁', storeName: '汤崎', versionLabel: '草稿' },
+      {
+        body: '# 第一条 服务内容\n\n乙方 {{相对方}} 为甲方 {{我方}} 提供 {{服务区域}} 的保洁，总价 {{总价}}（{{总价大写}}），联系人 {{联系人}}。\n\n{{付款节点}}',
+        clauses: [
+          { key: 'k1', title: '保密', text: '不外传', default: true },
+          { key: 'k2', title: '违约', text: '按 {{不合格处理}}', default: false },
+        ],
+      },
+    );
     expect(blocks[0]).toEqual({ kind: 'heading', text: '保洁服务合同' });
     expect(blocks[1]).toEqual({ kind: 'heading', text: '第一条 服务内容' });
     expect(blocks[2]).toEqual({ kind: 'para', text: '乙方 城南保洁 为甲方 汤崎 提供 一楼大堂 的保洁，总价 ¥12,345.00（壹万贰仟叁佰肆拾伍元整），联系人 【联系人】。' });
-    expect(blocks[3]).toMatchObject({ kind: 'table', header: ['付款节点', '比例', '金额', '条件'], rows: [['预付', '30%', '¥3,703.50', '签订后 7 天内'], ['验收', '70%', '¥8,641.50', '每月验收后']] });
+    expect(blocks[3]).toMatchObject({
+      kind: 'table',
+      header: ['付款节点', '比例', '金额', '条件'],
+      rows: [
+        ['预付', '30%', '¥3,703.50', '签订后 7 天内'],
+        ['验收', '70%', '¥8,641.50', '每月验收后'],
+      ],
+    });
     expect(blocks.slice(-2)).toEqual([
       { kind: 'heading', text: '补充条款' },
       { kind: 'para', text: '1. 违约：按 扣当月服务费 5%' },
@@ -117,7 +128,9 @@ describe('合同模板', () => {
     const clash = await api(ctx.app, legal, 'POST', '/api/erp/contracts/doc-templates', { ...body, fields: [{ key: '总价', label: '总价', type: 'text', required: false }] });
     expect(clash.status).toBe(400);
     expect(clash.body.error.message).toContain('内置字段');
-    expect((await api(ctx.app, legal, 'POST', `/api/erp/contracts/doc-templates/${t1.body.id}/revise`, { ...body, fields: [{ key: '相对方', label: '乙方', type: 'text', required: false }] })).status).toBe(400);
+    expect(
+      (await api(ctx.app, legal, 'POST', `/api/erp/contracts/doc-templates/${t1.body.id}/revise`, { ...body, fields: [{ key: '相对方', label: '乙方', type: 'text', required: false }] })).status,
+    ).toBe(400);
 
     // 没选模板的合同：原样重提（不带 template、带 template: null）都认作同一次
     const plainKey = randomUUID();
@@ -139,12 +152,28 @@ describe('合同模板', () => {
     const c = created.body.contract;
     expect(c.content.template).toMatchObject({ id: t1.body.id, code: 'HT-001', version: 1, clauses: ['secret'], values: {} });
     // 模板里没有的字段、条款拒绝
-    expect((await api(ctx.app, legal, 'PUT', `/api/erp/contracts/${c.id}`, { version: c.version, category: 'service', supplierId: null, counterparty: '城南保洁公司', content: content({ template: { id: t1.body.id, values: { 不存在: 'x' }, clauses: [] } }) })).status).toBe(400);
+    expect(
+      (
+        await api(ctx.app, legal, 'PUT', `/api/erp/contracts/${c.id}`, {
+          version: c.version,
+          category: 'service',
+          supplierId: null,
+          counterparty: '城南保洁公司',
+          content: content({ template: { id: t1.body.id, values: { 不存在: 'x' }, clauses: [] } }),
+        })
+      ).status,
+    ).toBe(400);
     // 必填字段没填：提交审查拦下
     const submit = await api(ctx.app, legal, 'POST', `/api/erp/contracts/${c.id}/submit`, { version: c.version });
     expect(submit.body.error?.code).toBe('CONTRACT_INCOMPLETE');
     expect(submit.body.error.message).toContain('服务区域');
-    const saved = await api(ctx.app, legal, 'PUT', `/api/erp/contracts/${c.id}`, { version: c.version, category: 'service', supplierId: null, counterparty: '城南保洁公司', content: content({ template: { id: t1.body.id, values: { 服务区域: '一楼大堂与更衣室' }, clauses: ['secret'] } }) });
+    const saved = await api(ctx.app, legal, 'PUT', `/api/erp/contracts/${c.id}`, {
+      version: c.version,
+      category: 'service',
+      supplierId: null,
+      counterparty: '城南保洁公司',
+      content: content({ template: { id: t1.body.id, values: { 服务区域: '一楼大堂与更衣室' }, clauses: ['secret'] } }),
+    });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
 
     // 改版：第 1 版停用、第 2 版在用；合同还记着第 1 版

@@ -20,7 +20,12 @@ import { parse } from '../../lib/validate';
 import { loadSettings } from '../settings';
 import { loadPurchaseRules } from './purchase-rules';
 
-const Query = z.object({ quarter: z.string().regex(/^\d{4}Q[1-4]$/, '季度要写成 2026Q4 这样').optional() });
+const Query = z.object({
+  quarter: z
+    .string()
+    .regex(/^\d{4}Q[1-4]$/, '季度要写成 2026Q4 这样')
+    .optional(),
+});
 
 export async function supplierScores(db: Db, quarter: string): Promise<SupplierScoreReport> {
   const range = quarterRange(quarter);
@@ -28,20 +33,22 @@ export async function supplierScores(db: Db, quarter: string): Promise<SupplierS
   const { from, to } = range;
   const { arrivalOverdueDays } = await loadPurchaseRules(db);
   const { supplierWatchScore } = await loadSettings(db);
-  const rows = await db<{
-    supplierId: number;
-    code: string;
-    name: string;
-    admission: SupplierScore['admission'];
-    receipts: number;
-    judged: number;
-    onTime: number;
-    acceptedCents: string | null;
-    rejectedCents: string | null;
-    returnedCents: string | null;
-    charged: string | null;
-    atAvg: string | null;
-  }[]>`
+  const rows = await db<
+    {
+      supplierId: number;
+      code: string;
+      name: string;
+      admission: SupplierScore['admission'];
+      receipts: number;
+      judged: number;
+      onTime: number;
+      acceptedCents: string | null;
+      rejectedCents: string | null;
+      returnedCents: string | null;
+      charged: string | null;
+      atAvg: string | null;
+    }[]
+  >`
     WITH rc AS (
       SELECT d.id, d.supplier_id, d.doc_date, p.id AS po_id, p.backfill, p.expected_date, p.order_date
       FROM inv_docs d LEFT JOIN purchase_orders p ON p.id = d.purchase_order_id

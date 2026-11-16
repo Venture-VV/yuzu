@@ -77,15 +77,19 @@ export function TechniciansTab() {
                 </Kpi>
               ) : (
                 <Kpi icon={<UsersRound className="size-4" />} label="上钟技师" tone="lake">
-                  {busy.length} 位
-                  <span className="block text-[12px] font-semibold text-ink-3">在职 {d.rows.filter((r) => r.active).length} 位</span>
+                  {busy.length} 位<span className="block text-[12px] font-semibold text-ink-3">在职 {d.rows.filter((r) => r.active).length} 位</span>
                 </Kpi>
               )}
             </div>
 
             {d.rows.length === 0 ? (
               <Card className="p-8 text-center text-[13.5px] text-ink-3">
-                还没有技师。{can('technician.manage') && <Link to="/admin/technicians" className="font-semibold text-pine hover:underline">去后台添加技师</Link>}
+                还没有技师。
+                {can('technician.manage') && (
+                  <Link to="/admin/technicians" className="font-semibold text-pine hover:underline">
+                    去后台添加技师
+                  </Link>
+                )}
               </Card>
             ) : (
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.7fr)]">

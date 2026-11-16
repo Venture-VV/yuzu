@@ -6,14 +6,7 @@ export function QrCode({ text, className, color = '#3B2F2A', eye = '#24493A', la
   const shape = useMemo(() => qrShape(text), [text]);
   const pad = 2;
   return (
-    <svg
-      viewBox={`${-pad} ${-pad} ${shape.size + pad * 2} ${shape.size + pad * 2}`}
-      className={className}
-      role="img"
-      aria-label={label ?? '二维码'}
-      data-qr={text}
-      shapeRendering="geometricPrecision"
-    >
+    <svg viewBox={`${-pad} ${-pad} ${shape.size + pad * 2} ${shape.size + pad * 2}`} className={className} role="img" aria-label={label ?? '二维码'} data-qr={text} shapeRendering="geometricPrecision">
       <rect x={-pad} y={-pad} width={shape.size + pad * 2} height={shape.size + pad * 2} fill="#fff" rx="2.5" />
       <path d={shape.modules} fill={color} />
       {shape.eyes.map((e) => (

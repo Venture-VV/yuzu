@@ -54,8 +54,7 @@ async function businessDay(db: Db, deps: Pick<Deps, 'config'>, at: Date) {
 }
 
 /** 到期日：营业日起算 N 天（含当天）；null 为长期 */
-const expiryOf = (date: string, validDays: number | null) =>
-  validDays === null ? null : new Date(Date.parse(`${date}T12:00:00Z`) + (validDays - 1) * 86_400_000).toISOString().slice(0, 10);
+const expiryOf = (date: string, validDays: number | null) => (validDays === null ? null : new Date(Date.parse(`${date}T12:00:00Z`) + (validDays - 1) * 86_400_000).toISOString().slice(0, 10));
 
 /** 能抵的项目、票种的名称（票种前面写「门票」） */
 async function targetNames(db: Db, itemIds: number[], ticketTypeIds: number[]): Promise<string[]> {
@@ -119,7 +118,14 @@ export async function saveCountCardType(deps: Deps, id: number | null, raw: unkn
           VALUES (${input.name}, ${itemIds}::bigint[], ${ticketTypeIds}::bigint[], ${input.uses}, ${input.price}, ${input.validDays}, ${input.active},
                   ${input.note}, ${ctx.actor.id})
           RETURNING id`;
-        await writeAudit(tx, { staffId: ctx.actor.id, action: 'count_card_type_saved', targetType: 'count_card_type', targetId: row!.id, detail: { ...input, itemIds, ticketTypeIds, created: true }, ip: ctx.ip });
+        await writeAudit(tx, {
+          staffId: ctx.actor.id,
+          action: 'count_card_type_saved',
+          targetType: 'count_card_type',
+          targetId: row!.id,
+          detail: { ...input, itemIds, ticketTypeIds, created: true },
+          ip: ctx.ip,
+        });
         return;
       }
       const [cur] = await tx<{ version: number }[]>`SELECT version FROM count_card_types WHERE id = ${id} FOR UPDATE`;
@@ -171,9 +177,7 @@ async function toCard(db: Db, r: CardRow): Promise<CountCard> {
     itemIds,
     ticketTypeIds,
     targetNames: await targetNames(db, itemIds, ticketTypeIds),
-    refund: refundNo
-      ? { refundNo, amount: Number(refundAmount), uses: Number(refundUses), method: refundMethod!, reason: refundReason!, createdAt: refundAt!, operatorName: refundOperator! }
-      : null,
+    refund: refundNo ? { refundNo, amount: Number(refundAmount), uses: Number(refundUses), method: refundMethod!, reason: refundReason!, createdAt: refundAt!, operatorName: refundOperator! } : null,
   };
 }
 
@@ -454,7 +458,10 @@ export async function redeemCountCards(
     }
     await tx`
       INSERT INTO count_card_moves (card_id, kind, delta, amount, checkout_id, note, staff_id, at, business_date)
-      VALUES (${a.cardId}, 'use', ${-p.uses}, ${a.amount}, ${o.checkoutId}, ${a.units.map((u) => u.name).join('、').slice(0, 200)}, ${o.staffId}, ${o.at}, ${o.date})`;
+      VALUES (${a.cardId}, 'use', ${-p.uses}, ${a.amount}, ${o.checkoutId}, ${a.units
+        .map((u) => u.name)
+        .join('、')
+        .slice(0, 200)}, ${o.staffId}, ${o.at}, ${o.date})`;
     await tx`
       UPDATE count_cards SET remaining = remaining - ${p.uses}, status = CASE WHEN remaining - ${p.uses} = 0 THEN 'used_up' ELSE status END, version = version + 1
       WHERE id = ${a.cardId}`;
@@ -587,7 +594,11 @@ export function parseOpeningCountCardsCsv(text: string): { rows: OpeningCountCar
 export async function importOpeningCountCards(deps: Deps, rows: OpeningCountCardRow[], o: { operatorId: number; apply: boolean; batch: string }): Promise<OpeningCountCardPreview> {
   const out: OpeningCountCardPreview['rows'] = [];
   const ready: { row: OpeningCountCardRow; memberId: number; itemIds: number[]; ticketTypeIds: number[] }[] = [];
-  const split = (s: string) => s.split(/[、,，;；|]/).map((x) => x.trim()).filter(Boolean);
+  const split = (s: string) =>
+    s
+      .split(/[、,，;；|]/)
+      .map((x) => x.trim())
+      .filter(Boolean);
   for (const row of rows) {
     const problems: string[] = [];
     const [m] = row.memberNo

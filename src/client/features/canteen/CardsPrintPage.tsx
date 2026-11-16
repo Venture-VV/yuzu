@@ -22,7 +22,8 @@ export function CanteenCardsPrintPage() {
   });
   const settings = useQuery({ queryKey: ['canteen', 'settings'], queryFn: () => api.get<CanteenSettings>('/api/erp/canteen/settings') });
   const ready = cards.isSuccess && settings.isSuccess;
-  const error = cards.error || settings.error ? errorMessage(cards.error ?? settings.error) : cards.data?.length === 0 ? '没有要打印的开通卡片（都开通了，或开通码过期了：在名单里点「重新开通」）' : null;
+  const error =
+    cards.error || settings.error ? errorMessage(cards.error ?? settings.error) : cards.data?.length === 0 ? '没有要打印的开通卡片（都开通了，或开通码过期了：在名单里点「重新开通」）' : null;
   const portal = settings.data?.portalUrl ?? '';
   return (
     <PrintFrame title="柚子饭堂 · 开通卡片" ready={ready} error={error} paper="a4">

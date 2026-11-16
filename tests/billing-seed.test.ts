@@ -35,8 +35,19 @@ describe('结账演示数据', () => {
       const d = details.find((x) => x.status === e.status && x.bills.map((b: { tagCode: string }) => b.tagCode).join() === e.tags.join());
       expect(d, e.scenario).toBeTruthy();
       expect(d.totalAmount, e.scenario).toBe(e.total);
-      expect(d.bills.map((b: { tagCode: string; ticketName: string; ticketSegments: number; ticketAmount: number }) => ({ tag: b.tagCode, ticket: b.ticketName, segments: b.ticketSegments, amount: b.ticketAmount })), e.scenario).toEqual(e.tickets);
-      expect(d.payments.map((p: { method: string; amount: number }) => ({ method: p.method, amount: p.amount })), e.scenario).toEqual(e.payments.map((p) => ({ method: p.method, amount: p.amount })));
+      expect(
+        d.bills.map((b: { tagCode: string; ticketName: string; ticketSegments: number; ticketAmount: number }) => ({
+          tag: b.tagCode,
+          ticket: b.ticketName,
+          segments: b.ticketSegments,
+          amount: b.ticketAmount,
+        })),
+        e.scenario,
+      ).toEqual(e.tickets);
+      expect(
+        d.payments.map((p: { method: string; amount: number }) => ({ method: p.method, amount: p.amount })),
+        e.scenario,
+      ).toEqual(e.payments.map((p) => ({ method: p.method, amount: p.amount })));
       for (const p of e.payments) {
         const got = d.payments.find((x: { method: string }) => x.method === p.method);
         if ('principal' in p) expect(got.consumption).toMatchObject({ principal: p.principal, bonus: p.bonus, status: e.status === 'voided' ? 'reversed' : 'completed' });
@@ -69,7 +80,11 @@ describe('结账演示数据', () => {
     expect(businessBreakdown(b)).toEqual(expected.business.breakdown);
     expect(s.checks.map((c: { key: string }) => c.key)).toEqual(expected.settlementChecks);
     for (const c of s.checks) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
-    for (const kind of expected.anomalies) expect(s.anomalies.some((a: { kind: string }) => a.kind === kind), kind).toBe(true);
+    for (const kind of expected.anomalies)
+      expect(
+        s.anomalies.some((a: { kind: string }) => a.kind === kind),
+        kind,
+      ).toBe(true);
     const fd = (await api(ctx.app, owner, 'GET', '/api/frontdesk/checks')).body;
     expect(fd.map((c: { key: string }) => c.key)).toEqual(expected.frontdeskChecks);
     for (const c of fd) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
@@ -80,7 +95,11 @@ describe('结账演示数据', () => {
 
   it('交班：陈茵已交班（短款 10 元）；张经理当班中，记有他做的反结账', async () => {
     const shifts = (await api(ctx.app, owner, 'GET', `/api/shifts?date=${date}`)).body as {
-      staffName: string; status: string; openingCash: number; expectedCash: number; countedCash: number;
+      staffName: string;
+      status: string;
+      openingCash: number;
+      expectedCash: number;
+      countedCash: number;
       summary: {
         checkouts: { count: number; total: number };
         checkoutByMethod: { method: string; amount: number }[];

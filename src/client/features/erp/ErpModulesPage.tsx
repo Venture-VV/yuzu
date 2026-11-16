@@ -53,7 +53,11 @@ export function ErpModulesPanel() {
         </Button>
       </div>
       {!d ? (
-        info.error ? <Notice tone="error" title={errorMessage(info.error)} /> : <Skeleton className="h-64" />
+        info.error ? (
+          <Notice tone="error" title={errorMessage(info.error)} />
+        ) : (
+          <Skeleton className="h-64" />
+        )
       ) : (
         <div className="space-y-3">
           <Notice tone="info" title={d.updatedBy ? `${d.updatedBy} 于 ${formatDateTime(d.updatedAt!)} 改过` : '现在全部按默认开启'}>

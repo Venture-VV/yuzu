@@ -177,7 +177,7 @@ async function spaceOf(sql: Sql, code: string): Promise<SpaceRow | null> {
   return s ? { ...s, id: Number(s.id), zoneId: s.zoneId === null ? null : Number(s.zoneId) } : null;
 }
 
-async function idOf(sql: Sql, query: Promise<{ id: number }[]>): Promise<number> {
+async function idOf(_sql: Sql, query: Promise<{ id: number }[]>): Promise<number> {
   const [row] = await query;
   if (!row) throw new Error('演示场景：刚建好的记录没找到，请再执行一次');
   return Number(row.id);
@@ -531,9 +531,25 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
       progress.tags = free.map((f) => f.code);
     }
     for (const name of [
-      'checkin0', 'checkin1', 'checkin2', 'checkin3', 'dispatchA', 'stay', 'dispatchB', 'dispatchC', 'table', 'tableOrder', 'dishC', 'swipeC', 'swipeD02', 'usageD',
-      'coupon0', 'coupon1', 'couponBatch',
-    ]) key(name);
+      'checkin0',
+      'checkin1',
+      'checkin2',
+      'checkin3',
+      'dispatchA',
+      'stay',
+      'dispatchB',
+      'dispatchC',
+      'table',
+      'tableOrder',
+      'dishC',
+      'swipeC',
+      'swipeD02',
+      'usageD',
+      'coupon0',
+      'coupon1',
+      'couponBatch',
+    ])
+      key(name);
     await saveProgress(sql, progress);
     const k = progress.keys as Record<string, string>;
     const [tagA, tagB, tagC, tagD] = progress.tags as [string, string, string, string];
@@ -544,8 +560,11 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
 
     // 三位客人入场（各自一张账单，在接待区）
     const visitOf = async (tag: string) =>
-      idOf(sql, sql<{ id: number }[]>`
-        SELECT v.id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${tag} AND v.status = 'open' ORDER BY v.id DESC LIMIT 1`);
+      idOf(
+        sql,
+        sql<{ id: number }[]>`
+        SELECT v.id FROM visits v JOIN hand_tags t ON t.id = v.tag_id WHERE t.code = ${tag} AND v.status = 'open' ORDER BY v.id DESC LIMIT 1`,
+      );
     for (const [i, tag] of progress.tags.entries()) {
       await clerk('POST', '/api/frontdesk/checkins', { clientKey: k[`checkin${i}`], guests: [{ tagCode: tag, zone: 'male', guestLabel: SHOWCASE_GUESTS[i] }] });
     }
@@ -693,9 +712,7 @@ export async function showcaseState(sql: Sql, timeZone: string): Promise<Showcas
   const { businessDayStartHour } = await loadSettings(sql);
   const today = businessDateOf(new Date(), timeZone, businessDayStartHour);
   const labels = [...SHOWCASE_GUESTS] as string[];
-  const guests = (await sql<{ label: string }[]>`SELECT guest_label AS label FROM visits WHERE status = 'open' AND guest_label IN ${sql(labels)}`)
-    .map((g) => g.label)
-    .sort(cmp);
+  const guests = (await sql<{ label: string }[]>`SELECT guest_label AS label FROM visits WHERE status = 'open' AND guest_label IN ${sql(labels)}`).map((g) => g.label).sort(cmp);
   // 按固定顺序列（数据库读出来的顺序不固定）
   const rooms: Record<string, string> = Object.fromEntries(ROOM_CODES.map((c) => [c, '没有这间房']));
   for (const r of await sql<{ code: string; housekeeping: string; occupied: boolean }[]>`
@@ -763,9 +780,7 @@ export async function showcaseState(sql: Sql, timeZone: string): Promise<Showcas
     WHERE v.guest_label IN ${sql(labels)} OR t.tech_no IN ${sql(TECHS.map((x) => x.techNo))}`) {
     locations[r.who] = placeOf(r);
   }
-  const readers = (await sql<{ code: string }[]>`SELECT code FROM location_readers WHERE active AND code IN ${sql(READERS.map((r) => r.code))}`)
-    .map((r) => r.code)
-    .sort(cmp);
+  const readers = (await sql<{ code: string }[]>`SELECT code FROM location_readers WHERE active AND code IN ${sql(READERS.map((r) => r.code))}`).map((r) => r.code).sort(cmp);
   const usages = (
     await sql<{ space: string; guest: string; guests: number }[]>`
       SELECT sp.code AS space, v.guest_label AS guest, u.guests
@@ -782,9 +797,7 @@ export async function showcaseState(sql: Sql, timeZone: string): Promise<Showcas
   }
   const markers = (await sql<{ m: string }[]>`SELECT floor_code || ':' || kind AS m FROM guide_markers WHERE NOT hidden`).map((r) => r.m).sort(cmp);
   const couponNames = COUPON_TEMPLATES.map((t) => t.name as string);
-  const couponTemplates = (await sql<{ name: string }[]>`SELECT name FROM coupon_templates WHERE active AND name IN ${sql(couponNames)}`)
-    .map((r) => r.name)
-    .sort(cmp);
+  const couponTemplates = (await sql<{ name: string }[]>`SELECT name FROM coupon_templates WHERE active AND name IN ${sql(couponNames)}`).map((r) => r.name).sort(cmp);
   const memberCoupons: Record<string, string> = {};
   for (const r of await sql<{ name: string; status: string }[]>`
     SELECT t.name, c.status FROM coupons c JOIN coupon_templates t ON t.id = c.template_id JOIN members m ON m.id = c.member_id

@@ -38,7 +38,10 @@ async function boardTags(page: Page) {
 
 /** 散客可用的空闲普通柜：从清单末尾挑，避开演示数据里的在店手牌 */
 async function freeTags(page: Page, zone: BoardTag['zone']): Promise<string[]> {
-  return (await boardTags(page)).filter((t) => t.zone === zone && t.kind === 'normal' && t.active && !t.locked && !t.visit).map((t) => t.code).reverse();
+  return (await boardTags(page))
+    .filter((t) => t.zone === zone && t.kind === 'normal' && t.active && !t.locked && !t.visit)
+    .map((t) => t.code)
+    .reverse();
 }
 
 /** 以店主身份调规则（另开会话，不影响页面上的前台登录） */

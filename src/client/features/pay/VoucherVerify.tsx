@@ -9,7 +9,17 @@ import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BadgeCheck } from 'lucide-react';
 import { COUPON_PLATFORM_LABELS } from '@shared/checkout';
-import { RECON_ISSUE_LABELS, VERIFICATION_STATUS_LABELS, VOUCHER_PLATFORMS, type PayTerminalStatus, type PlatformReconIssue, type PlatformReconRun, type VerificationView, type VoucherPlatform, type VoucherPreview } from '@shared/integrations';
+import {
+  RECON_ISSUE_LABELS,
+  VERIFICATION_STATUS_LABELS,
+  VOUCHER_PLATFORMS,
+  type PayTerminalStatus,
+  type PlatformReconIssue,
+  type PlatformReconRun,
+  type VerificationView,
+  type VoucherPlatform,
+  type VoucherPreview,
+} from '@shared/integrations';
 import { formatYuan } from '@shared/money';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { useCan } from '../../lib/session';
@@ -31,8 +41,7 @@ export function useVoucherStatus() {
     staleTime: 60_000,
   });
 }
-const useOpenVerifications = (enabled: boolean) =>
-  useQuery({ queryKey: vKeys.open, queryFn: () => api.get<VerificationView[]>('/api/platform/verifications/open'), enabled, refetchInterval: 30_000 });
+const useOpenVerifications = (enabled: boolean) => useQuery({ queryKey: vKeys.open, queryFn: () => api.get<VerificationView[]>('/api/platform/verifications/open'), enabled, refetchInterval: 30_000 });
 
 const isVoucherPlatform = (p: string): p is VoucherPlatform => (VOUCHER_PLATFORMS as readonly string[]).includes(p);
 
@@ -398,7 +407,8 @@ export function VoucherReconTab({ from, to }: { from: string; to: string }) {
           <ul className="space-y-1 text-[12.5px] text-ink-3">
             {data.data.runs.slice(0, 10).map((r) => (
               <li key={r.id}>
-                {r.businessDate} · {COUPON_PLATFORM_LABELS[r.platform]} · {r.ok ? `平台 ${r.platformLines} 张、系统 ${r.systemLines} 张、差异 ${r.issues} 处` : `失败：${r.error}`} · {r.staffName ?? '自动'} {formatDateTime(r.createdAt)}
+                {r.businessDate} · {COUPON_PLATFORM_LABELS[r.platform]} · {r.ok ? `平台 ${r.platformLines} 张、系统 ${r.systemLines} 张、差异 ${r.issues} 处` : `失败：${r.error}`} ·{' '}
+                {r.staffName ?? '自动'} {formatDateTime(r.createdAt)}
               </li>
             ))}
           </ul>

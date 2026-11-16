@@ -23,12 +23,7 @@ export function SettlementPrintPage() {
     refetchOnWindowFocus: false,
   });
   return (
-    <PrintFrame
-      paper="a4"
-      title={`日结单 ${date}`}
-      ready={!!q.data}
-      error={!valid ? '营业日格式不正确' : q.error ? errorMessage(q.error) : null}
-    >
+    <PrintFrame paper="a4" title={`日结单 ${date}`} ready={!!q.data} error={!valid ? '营业日格式不正确' : q.error ? errorMessage(q.error) : null}>
       {q.data && <SettlementSheet s={q.data} />}
     </PrintFrame>
   );
@@ -95,11 +90,7 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
           <p className="mt-1.5 font-bold">收款方式</p>
           {b.byMethod.length === 0 && <p>无</p>}
           {b.byMethod.map((m) => (
-            <Row
-              key={m.method}
-              left={`${CHECKOUT_METHOD_LABELS[m.method] ?? m.method} · ${m.count} 笔${m.voidCount ? `，反结账 ${m.voidCount}` : ''}`}
-              right={yuan(m.amount)}
-            />
+            <Row key={m.method} left={`${CHECKOUT_METHOD_LABELS[m.method] ?? m.method} · ${m.count} 笔${m.voidCount ? `，反结账 ${m.voidCount}` : ''}`} right={yuan(m.amount)} />
           ))}
           {b.coupons.map((c) => (
             <p key={c.platform} className="pl-3 text-[11px]">
@@ -159,13 +150,14 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
           {s.recharge.byMethod.map((m) => (
             <Row key={m.method} left={<span className="pl-3">{`${PAYMENT_METHOD_LABELS[m.method]} · ${m.count} 笔`}</span>} right={yuan(m.amount)} />
           ))}
-          {!!s.recharge.online?.count && (
-            <Row left={<span className="pl-3">{`其中线上（小程序）· ${s.recharge.online.count} 笔，不进交班`}</span>} right={yuan(s.recharge.online.paid)} />
-          )}
+          {!!s.recharge.online?.count && <Row left={<span className="pl-3">{`其中线上（小程序）· ${s.recharge.online.count} 笔，不进交班`}</span>} right={yuan(s.recharge.online.paid)} />}
           <Row left="赠送赠金（不是收款）" right={yuan(s.recharge.bonus)} />
           <Row left={`储值消费 · ${s.consume.count} 笔${s.consume.reversedCount ? `（已撤销 ${s.consume.reversedCount}）` : ''}`} right={yuan(s.consume.total)} strong />
           <Row left={<span className="pl-3">扣本金 / 扣赠金</span>} right={`${yuan(s.consume.principal)} / ${yuan(s.consume.bonus)}`} />
-          <Row left={`撤销恢复 · ${s.reversal.count} 笔${s.reversal.crossDayCount ? `（跨日 ${s.reversal.crossDayCount}）` : ''}`} right={`${yuan(s.reversal.principal)} / ${yuan(s.reversal.bonus)}`} />
+          <Row
+            left={`撤销恢复 · ${s.reversal.count} 笔${s.reversal.crossDayCount ? `（跨日 ${s.reversal.crossDayCount}）` : ''}`}
+            right={`${yuan(s.reversal.principal)} / ${yuan(s.reversal.bonus)}`}
+          />
           <Row left={`赠金过期作废${s.expiry.count ? ` · ${s.expiry.count} 笔` : ''}`} right={yuan(s.expiry.bonus)} />
           {(s.opening.count > 0 || s.opening.voidCount > 0) && (
             <Row

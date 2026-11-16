@@ -23,7 +23,9 @@ export function formatQty(milli: Milli): string {
   const sign = milli < 0 ? '-' : '';
   const abs = Math.abs(milli);
   const int = Math.floor(abs / MILLI);
-  const frac = String(abs % MILLI).padStart(3, '0').replace(/0+$/, '');
+  const frac = String(abs % MILLI)
+    .padStart(3, '0')
+    .replace(/0+$/, '');
   return `${sign}${int.toLocaleString('en-US')}${frac ? `.${frac}` : ''}`;
 }
 

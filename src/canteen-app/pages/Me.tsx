@@ -40,7 +40,10 @@ export function MePage({
   // 这台手机开着饭点提醒没有（面板关上时再看一遍）
   const [reminderOn, setReminderOn] = useState(false);
   useEffect(() => {
-    if (sheet === null) void pushEnabledHere().then(setReminderOn).catch(() => setReminderOn(false));
+    if (sheet === null)
+      void pushEnabledHere()
+        .then(setReminderOn)
+        .catch(() => setReminderOn(false));
   }, [sheet]);
   useEffect(() => {
     if (!online) return;
@@ -64,7 +67,12 @@ export function MePage({
   return (
     <div className="space-y-4">
       <Card sketch className="flex items-center gap-4">
-        <button type="button" onClick={() => setSheet('avatar')} className="relative flex size-20 shrink-0 items-center justify-center rounded-full bg-wood-6 text-[44px] ring-4 ring-wood-4 active:scale-95" aria-label="换头像">
+        <button
+          type="button"
+          onClick={() => setSheet('avatar')}
+          className="relative flex size-20 shrink-0 items-center justify-center rounded-full bg-wood-6 text-[44px] ring-4 ring-wood-4 active:scale-95"
+          aria-label="换头像"
+        >
           {me.employee.avatar}
           <span className="absolute -right-1 -bottom-1 rounded-full bg-wood-deep px-1.5 py-0.5 text-[10px] font-bold text-white">换</span>
         </button>
@@ -147,7 +155,10 @@ export function MePage({
               key={a}
               type="button"
               onClick={() => void pickAvatar(a)}
-              className={cn('flex aspect-square items-center justify-center rounded-2xl text-[30px] active:scale-90', a === me.employee.avatar ? 'bg-yuzu ring-2 ring-yuzu-deep' : 'bg-card ring-1 ring-line')}
+              className={cn(
+                'flex aspect-square items-center justify-center rounded-2xl text-[30px] active:scale-90',
+                a === me.employee.avatar ? 'bg-yuzu ring-2 ring-yuzu-deep' : 'bg-card ring-1 ring-line',
+              )}
               aria-label={`头像 ${a}`}
             >
               {a}

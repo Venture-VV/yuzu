@@ -98,7 +98,9 @@ export function DevicesPage() {
               <Badge tone="clay">故障 {o.counts.error}</Badge>
               <Badge tone="yuzu">未知 {o.counts.unknown}</Badge>
               {o.counts.disabled > 0 && <Badge tone="neutral">停用 {o.counts.disabled}</Badge>}
-              <span className="ml-auto text-[12px] text-ink-3">共 {o.counts.total} 台 · {relativeTime(o.checkedAt)}刷新</span>
+              <span className="ml-auto text-[12px] text-ink-3">
+                共 {o.counts.total} 台 · {relativeTime(o.checkedAt)}刷新
+              </span>
             </Card>
             <div className="flex flex-wrap items-center gap-2">
               <Segmented<KindFilter>
@@ -151,7 +153,11 @@ export function DevicesPage() {
 function DeviceRow({ device: d }: { device: Device }) {
   const can = useCan();
   return (
-    <li className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5', (!d.enabled || d.status === 'offline') && 'opacity-60')} data-testid={`device-${d.code}`} data-status={d.enabled ? d.status : 'disabled'}>
+    <li
+      className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5', (!d.enabled || d.status === 'offline') && 'opacity-60')}
+      data-testid={`device-${d.code}`}
+      data-status={d.enabled ? d.status : 'disabled'}
+    >
       <StatusBadge device={d} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[14px] font-semibold">
@@ -216,7 +222,8 @@ function TestPrintButton({ device }: { device: Device }) {
         }
       }
       if (job.status === 'done') toast({ tone: 'success', title: `${device.name}：已打出${kind === 'label_test' ? '测试标签' : '测试页'}` });
-      else if (job.status === 'failed') toast({ tone: 'error', title: `${device.name}：没打出来`, body: `${job.errorCode ? DEVICE_ERROR_LABELS[job.errorCode] : ''}${job.errorMessage ? `（${job.errorMessage}）` : ''}` });
+      else if (job.status === 'failed')
+        toast({ tone: 'error', title: `${device.name}：没打出来`, body: `${job.errorCode ? DEVICE_ERROR_LABELS[job.errorCode] : ''}${job.errorMessage ? `（${job.errorMessage}）` : ''}` });
       else if (lookupError)
         toast({ tone: 'info', title: `${device.name}：已提交，查不到结果`, body: `打印任务 #${job.id}（${errorMessage(lookupError)}）。稍后在后台「设备」的打印任务里看结果，先别重复提交` });
       else toast({ tone: 'info', title: `${device.name}：还在排队`, body: `打印任务 #${job.id}：稍后在后台「设备」的打印任务里看结果` });
@@ -292,7 +299,12 @@ function TerminalPanel({ terminals }: { terminals: Device[] }) {
     return () => clearTimeout(timer);
   }, [hash, key]);
   return (
-    <Card id="terminal" className={cn('h-fit scroll-mt-4 space-y-3 p-4 transition-shadow duration-500', focused && 'ring-2 ring-pine/45')} data-testid="terminal-panel" data-focused={focused || undefined}>
+    <Card
+      id="terminal"
+      className={cn('h-fit scroll-mt-4 space-y-3 p-4 transition-shadow duration-500', focused && 'ring-2 ring-pine/45')}
+      data-testid="terminal-panel"
+      data-focused={focused || undefined}
+    >
       <h2 className="text-[15px] font-bold">本机终端</h2>
       <Field label="这台终端是" hint="记在这台设备的浏览器里；选了之后开着门店页面就会每 2 秒上报读卡器、扫码的状态">
         <Select

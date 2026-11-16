@@ -27,7 +27,12 @@ const keyOf = (i: { category: string; name: string }) => `${i.category}\u0000${i
 /** 自动分配退款方式时的顺序：现金在前，其余按原单收的 */
 const METHOD_ORDER: RefundMethod[] = ['cash', 'wechat', 'alipay', 'bank_card', 'other'];
 
-export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
+export function RefundPanel({
+  checkoutId,
+  checkoutNo,
+  onClose,
+  DrawerPicker,
+}: {
   checkoutId: number;
   checkoutNo: string;
   onClose: () => void;
@@ -210,7 +215,10 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
                           const n = Number(q);
                           setPicked((cur) => ({
                             ...cur,
-                            [k]: { quantity: q, amount: Number.isInteger(n) && n >= 0 && n <= i.remainingQuantity ? centsToInput(defaultRefundAmount(i, n === 0 ? i.remainingQuantity : n)) : cur[k]!.amount },
+                            [k]: {
+                              quantity: q,
+                              amount: Number.isInteger(n) && n >= 0 && n <= i.remainingQuantity ? centsToInput(defaultRefundAmount(i, n === 0 ? i.remainingQuantity : n)) : cur[k]!.amount,
+                            },
                           }));
                         }}
                         className="h-9 w-[72px] text-[13px]"
@@ -289,13 +297,16 @@ export function RefundPanel({ checkoutId, checkoutNo, onClose, DrawerPicker }: {
               </div>
             ))}
           </div>
-          {cash > 0 ? (
-            <DrawerPicker options={o!.drawers} value={drawer} onChange={setDrawer} onRefetch={() => void options.refetch()} />
-          ) : (
-            total > 0 && <ShiftGate action="退款" />
-          )}
+          {cash > 0 ? <DrawerPicker options={o!.drawers} value={drawer} onChange={setDrawer} onRefetch={() => void options.refetch()} /> : total > 0 && <ShiftGate action="退款" />}
           <ReasonChips reasons={refundReasons} value={reason} onPick={setReason} disabled={op.locked} testId="refund-reason-chips" />
-          <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="退款原因（至少 2 个字），例如：按摩没做完、客人投诉" maxLength={200} disabled={op.locked} aria-label="退款原因" />
+          <Input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="退款原因（至少 2 个字），例如：按摩没做完、客人投诉"
+            maxLength={200}
+            disabled={op.locked}
+            aria-label="退款原因"
+          />
           {problems.length > 0 && total > 0 && (
             <ul className="space-y-0.5 text-[12.5px] font-semibold text-clay">
               {problems.slice(0, 4).map((p) => (

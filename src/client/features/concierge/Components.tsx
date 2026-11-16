@@ -1,28 +1,22 @@
-import { useState } from "react";
-import { money } from "./format";
-import { api } from "../../lib/api";
-import { loadReceipt } from "./api";
-import type { Receipt } from "./types";
-export function ReceiptArchive({
-  onSelect,
-}: {
-  onSelect: (r: Receipt) => void;
-}) {
+import { useState } from 'react';
+import { money } from './format';
+import { api } from '../../lib/api';
+import { loadReceipt } from './api';
+import type { Receipt } from './types';
+export function ReceiptArchive({ onSelect }: { onSelect: (r: Receipt) => void }) {
   const [open, setOpen] = useState(false),
-    [q, setQ] = useState(""),
+    [q, setQ] = useState(''),
     [offset, setOffset] = useState(0),
     [rows, setRows] = useState<Receipt[]>([]),
     [more, setMore] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState('');
   async function search(next = 0) {
     try {
-      const r = await api.get<{ receipts: Receipt[]; hasMore: boolean }>(
-        `/api/concierge/receipts?q=${encodeURIComponent(q)}&offset=${next}`,
-      );
+      const r = await api.get<{ receipts: Receipt[]; hasMore: boolean }>(`/api/concierge/receipts?q=${encodeURIComponent(q)}&offset=${next}`);
       setRows(r.receipts);
       setMore(r.hasMore);
       setOffset(next);
-      setError("");
+      setError('');
     } catch (e) {
       setError((e as Error).message);
     }
@@ -41,11 +35,7 @@ export function ReceiptArchive({
       {open && (
         <div className="panel">
           <div className="filter-bar">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="单号、门店、会员姓名或手机号"
-            />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="单号、门店、会员姓名或手机号" />
             <button className="btn btn-primary" onClick={() => void search()}>
               查询
             </button>
@@ -62,16 +52,10 @@ export function ReceiptArchive({
                   .catch((e) => setError(e.message))
               }
             >
-              {r.number || "待补单号"} · {r.status} · ¥
-              {r.amountCents == null
-                ? "待核"
-                : money(r.amountCents)}
+              {r.number || '待补单号'} · {r.status} · ¥{r.amountCents == null ? '待核' : money(r.amountCents)}
             </button>
           ))}
-          <button
-            disabled={offset === 0}
-            onClick={() => void search(Math.max(0, offset - 50))}
-          >
+          <button disabled={offset === 0} onClick={() => void search(Math.max(0, offset - 50))}>
             上一页
           </button>
           <button disabled={!more} onClick={() => void search(offset + 50)}>

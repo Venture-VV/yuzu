@@ -53,9 +53,7 @@ describe('门票 12 小时跳档（附录 B）', () => {
   it('段数与票价：不含餐 499 → 599 → 1098 → 1198 → 1697', () => {
     const t = { price12h: 49900, price24h: 59900 };
     const at = (h: number) => ticketPrice(t, ticketSegments(h * H, 0));
-    expect([at(0), at(11.99), at(12), at(12.01), at(24), at(24.5), at(36), at(36.1), at(48), at(48.1)]).toEqual([
-      49900, 49900, 49900, 59900, 59900, 109800, 109800, 119800, 119800, 169700,
-    ]);
+    expect([at(0), at(11.99), at(12), at(12.01), at(24), at(24.5), at(36), at(36.1), at(48), at(48.1)]).toEqual([49900, 49900, 49900, 59900, 59900, 109800, 109800, 119800, 119800, 169700]);
     expect(ticketTierLabel(3)).toBe('24 小时档 + 12 小时档');
     expect(ticketTierLabel(4)).toBe('24 小时档 × 2');
     // 宽限 15 分钟：12 小时 10 分仍是 12 小时档，12 小时 16 分跳档
@@ -127,7 +125,12 @@ describe('结账', () => {
   it('儿童免票：门票 0 元不挂明细，应收 0 也能结账', async () => {
     // 接待时选免票需要值班经理及以上当场授权（R1.2，见 r1-funds.test.ts）
     const childTicket = tickets['儿童免票（1 米以下）']!;
-    const grant = await insertGrant(ctx.sql, { purpose: 'ticket_discount', requestedBy: clerk.id, approvedBy: ctx.ownerId, scope: { items: [{ tagCode: 'A012', ticketTypeId: childTicket }], reason: '1 米以下儿童' } });
+    const grant = await insertGrant(ctx.sql, {
+      purpose: 'ticket_discount',
+      requestedBy: clerk.id,
+      approvedBy: ctx.ownerId,
+      scope: { items: [{ tagCode: 'A012', ticketTypeId: childTicket }], reason: '1 米以下儿童' },
+    });
     const r = await checkin(
       deps,
       { clientKey: randomUUID(), guests: [{ tagCode: 'A012', zone: 'male', ticketTypeId: childTicket }], ticketGrantId: grant.id },
@@ -144,7 +147,13 @@ describe('结账', () => {
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/recharges', rechargeBody(m.id, 100000, 10000))).status).toBe(200);
     const r = await checkin(
       deps,
-      { clientKey: randomUUID(), guests: [{ tagCode: 'A020', zone: 'male', memberId: m.id }, { tagCode: 'A021', zone: 'male' }] },
+      {
+        clientKey: randomUUID(),
+        guests: [
+          { tagCode: 'A020', zone: 'male', memberId: m.id },
+          { tagCode: 'A021', zone: 'male' },
+        ],
+      },
       { actor: clerk, at: new Date(Date.now() - 2 * H) },
     );
     const [a, b] = r.visits.map((v) => v.id) as [number, number];
@@ -241,15 +250,19 @@ describe('反结账', () => {
 
 describe('G3 复测：结账储值不能单独撤销、只能用本单客人里的会员', () => {
   const walletState = async (memberId: number) =>
-    (await ctx.sql<{ principal: number; bonus: number; ledger: number; reversals: number }[]>`
+    (
+      await ctx.sql<{ principal: number; bonus: number; ledger: number; reversals: number }[]>`
       SELECT m.principal_balance AS principal, m.bonus_balance AS bonus,
              (SELECT count(*)::int FROM ledger_entries WHERE member_id = m.id) AS ledger,
              (SELECT count(*)::int FROM reversals WHERE member_id = m.id) AS reversals
-      FROM members m WHERE m.id = ${memberId}`)[0]!;
+      FROM members m WHERE m.id = ${memberId}`
+    )[0]!;
   const statusOf = async (consumptionId: number, checkoutId: number) =>
-    (await ctx.sql<{ consumption: string; checkout: string }[]>`
+    (
+      await ctx.sql<{ consumption: string; checkout: string }[]>`
       SELECT (SELECT status FROM consumptions WHERE id = ${consumptionId}) AS consumption,
-             (SELECT status FROM checkouts WHERE id = ${checkoutId}) AS checkout`)[0]!;
+             (SELECT status FROM checkouts WHERE id = ${checkoutId}) AS checkout`
+    )[0]!;
   const wallet = (memberId: number, amount: number) => ({ method: 'wallet' as const, memberId, amount, expectedSplit: { principal: amount, bonus: 0 } });
 
   it('会员撤销接口拒绝单独撤销结账生成的储值消费，什么都不改；正式反结账照常并完整恢复', async () => {
@@ -314,7 +327,13 @@ describe('G3 复测：结账储值不能单独撤销、只能用本单客人里�
     await api(ctx.app, ctx.clerk, 'POST', '/api/recharges', rechargeBody(stranger.id, 200000, 0));
     const r = await checkin(
       deps,
-      { clientKey: randomUUID(), guests: [{ tagCode: 'A033', zone: 'male', memberId: payer.id }, { tagCode: 'A034', zone: 'male' }] },
+      {
+        clientKey: randomUUID(),
+        guests: [
+          { tagCode: 'A033', zone: 'male', memberId: payer.id },
+          { tagCode: 'A034', zone: 'male' },
+        ],
+      },
       { actor: clerk, at: new Date(Date.now() - H) },
     );
     const [mine, friend] = r.visits.map((v) => v.id) as [number, number];

@@ -174,14 +174,7 @@ describe('核心案例（库存部分）：拖鞋 箱入双出、拒收、领用
 
     // 库存卡逐笔可追溯
     const card = await api(ctx.app, ctx.owner, 'GET', `/api/inventory/materials/${slipper.id}/card`);
-    expect(card.body.moves.map((m: { moveType: string }) => m.moveType).reverse()).toEqual([
-      'opening',
-      'receipt',
-      'receipt',
-      'issue',
-      'count_adjust',
-      'supplier_return',
-    ]);
+    expect(card.body.moves.map((m: { moveType: string }) => m.moveType).reverse()).toEqual(['opening', 'receipt', 'receipt', 'issue', 'count_adjust', 'supplier_return']);
     expect(card.body.moves[0].qtyAfterMilli).toBe(q(967));
 
     // 期间汇总：期初 100 + 入库 1000 − 领用 120 − 3 − 退货 10 = 967
@@ -391,9 +384,7 @@ describe('重复提交与并发', () => {
   it('并发领用不会产生负库存', async () => {
     const m = await material('M061', { name: '一次性梳子', inventoryUnit: '把' });
     await opening(m.id, q(10));
-    const results = await Promise.all(
-      Array.from({ length: 6 }, () => doc(keeper, { docType: 'issue', departmentId: deptId, handler: '浴区', lines: [{ materialId: m.id, qtyMilli: q(3) }] })),
-    );
+    const results = await Promise.all(Array.from({ length: 6 }, () => doc(keeper, { docType: 'issue', departmentId: deptId, handler: '浴区', lines: [{ materialId: m.id, qtyMilli: q(3) }] })));
     const ok = results.filter((r) => r.status === 201);
     expect(ok).toHaveLength(3);
     expect(results.filter((r) => r.status === 422).every((r) => r.body.error.code === 'INSUFFICIENT_STOCK')).toBe(true);

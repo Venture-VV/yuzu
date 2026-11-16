@@ -15,10 +15,15 @@ const b64 = (s: string) => Buffer.from(s.replace(/\s+/g, ''), 'base64url');
 
 describe('内容加密（RFC 8291）', () => {
   it('与 RFC 8291 附录 A 的例子逐字节一致', () => {
-    const body = encryptPushPayload(Buffer.from('When I grow up, I want to be a watermelon'), 'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4', 'BTBZMqHH6r4Tts7J_aSIgg', {
-      salt: b64('DGv6ra1nlYgDCS1FRnbzlw'),
-      asPrivate: b64('yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw'),
-    });
+    const body = encryptPushPayload(
+      Buffer.from('When I grow up, I want to be a watermelon'),
+      'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4',
+      'BTBZMqHH6r4Tts7J_aSIgg',
+      {
+        salt: b64('DGv6ra1nlYgDCS1FRnbzlw'),
+        asPrivate: b64('yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw'),
+      },
+    );
     expect(body.toString('base64url')).toBe(
       b64(`DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27ml
            mlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPT

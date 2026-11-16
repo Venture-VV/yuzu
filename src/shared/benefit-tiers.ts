@@ -142,12 +142,7 @@ const byPerk = (a: TierEntry, b: TierEntry) =>
 
 const RULE_NAMES: Record<CouponRuleKind, string> = { open_card: '开卡礼', level_up: '升级礼', birthday: '生日礼', recharge: '充值赠券' };
 
-export function buildBenefitTiers(input: {
-  rules: Pick<MembershipRules, 'grades'>;
-  benefits: readonly Benefit[];
-  templates: readonly TierTemplate[];
-  couponRules: readonly TierRule[];
-}): BenefitTiers {
+export function buildBenefitTiers(input: { rules: Pick<MembershipRules, 'grades'>; benefits: readonly Benefit[]; templates: readonly TierTemplate[]; couponRules: readonly TierRule[] }): BenefitTiers {
   const templates = new Map(input.templates.map((t) => [t.id, t]));
   // 已经随权益、发券规则放进某一阶的券模板（第 3 步不再单放）。只在真的放进去时记：还没设起点的草稿权益、
   // 没放进任何一阶的规则挂着的模板，照样在第 3 步按限定的档级单放，不会哪一阶都看不到（Codex 自动审查 e726bc0）
@@ -269,9 +264,7 @@ export function buildBenefitTiers(input: {
 
   return {
     grades,
-    unplaced: input.benefits
-      .filter((b) => b.startGrade === null)
-      .map((b) => ({ benefitId: b.id, code: b.code, name: b.name, category: b.category, status: b.status })),
+    unplaced: input.benefits.filter((b) => b.startGrade === null).map((b) => ({ benefitId: b.id, code: b.code, name: b.name, category: b.category, status: b.status })),
     templates: { total: input.templates.length, placed },
   };
 }

@@ -176,7 +176,12 @@ export function UsageTab() {
         ) : recipes.isPending ? (
           <Skeleton className="h-48" />
         ) : rows.length === 0 ? (
-          <EmptyState art="leaf" title={onlySet ? '还没有项目设用料' : '没有符合的项目'} description="零售品设一行（一瓶水 = 物料 1 瓶），菜和饮品按配方设几行。" className="rounded-lg border border-dashed border-line-strong py-10" />
+          <EmptyState
+            art="leaf"
+            title={onlySet ? '还没有项目设用料' : '没有符合的项目'}
+            description="零售品设一行（一瓶水 = 物料 1 瓶），菜和饮品按配方设几行。"
+            className="rounded-lg border border-dashed border-line-strong py-10"
+          />
         ) : (
           <ul className="overflow-hidden rounded-lg border border-line" data-testid="usage-recipes">
             {rows.map((r) => (
@@ -335,7 +340,12 @@ function RecipeDialog({ recipe, onClose, onDone }: { recipe: ItemRecipe; onClose
             return (
               <li key={l.key} className="grid grid-cols-[minmax(0,1fr)_110px_90px_auto] items-end gap-2">
                 <Field label={index === 0 ? '物料' : ''} htmlFor={`recipe-m-${l.key}`}>
-                  <Select id={`recipe-m-${l.key}`} value={l.materialId} onChange={(e) => set(l.key, { materialId: e.target.value === '' ? '' : Number(e.target.value) })} data-testid={`recipe-material-${index}`}>
+                  <Select
+                    id={`recipe-m-${l.key}`}
+                    value={l.materialId}
+                    onChange={(e) => set(l.key, { materialId: e.target.value === '' ? '' : Number(e.target.value) })}
+                    data-testid={`recipe-material-${index}`}
+                  >
                     <option value="">请选择</option>
                     {usable.map((x) => (
                       <option key={x.id} value={x.id}>
@@ -348,25 +358,48 @@ function RecipeDialog({ recipe, onClose, onDone }: { recipe: ItemRecipe; onClose
                   <Input id={`recipe-q-${l.key}`} inputMode="decimal" value={l.qty} onChange={(e) => set(l.key, { qty: e.target.value })} data-testid={`recipe-qty-${index}`} />
                 </Field>
                 <Field label={index === 0 ? '损耗 %' : ''} htmlFor={`recipe-l-${l.key}`}>
-                  <Input id={`recipe-l-${l.key}`} inputMode="decimal" placeholder="0" value={l.lossPct} onChange={(e) => set(l.key, { lossPct: e.target.value })} data-testid={`recipe-loss-${index}`} />
+                  <Input
+                    id={`recipe-l-${l.key}`}
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={l.lossPct}
+                    onChange={(e) => set(l.key, { lossPct: e.target.value })}
+                    data-testid={`recipe-loss-${index}`}
+                  />
                 </Field>
-                <Button variant="ghost" size="sm" aria-label="去掉这一行" disabled={lines.length === 1} onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))} icon={<Trash2 className="size-4" />} />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="去掉这一行"
+                  disabled={lines.length === 1}
+                  onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
+                  icon={<Trash2 className="size-4" />}
+                />
               </li>
             );
           })}
         </ul>
-        <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setLines((ls) => [...ls, { key: Math.max(...ls.map((x) => x.key)) + 1, materialId: '', qty: '', lossPct: '' }])} disabled={lines.length >= 30} data-testid="recipe-add-line">
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<Plus className="size-4" />}
+          onClick={() => setLines((ls) => [...ls, { key: Math.max(...ls.map((x) => x.key)) + 1, materialId: '', qty: '', lossPct: '' }])}
+          disabled={lines.length >= 30}
+          data-testid="recipe-add-line"
+        >
           加一样物料
         </Button>
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="从哪个仓扣" htmlFor="recipe-wh" hint="不选就按上面的默认仓">
             <Select id="recipe-wh" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value === '' ? '' : Number(e.target.value))} data-testid="recipe-warehouse">
               <option value="">按默认</option>
-              {(warehouses.data ?? []).filter((w) => w.active).map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
+              {(warehouses.data ?? [])
+                .filter((w) => w.active)
+                .map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
             </Select>
           </Field>
           <Field label="备注" htmlFor="recipe-note">

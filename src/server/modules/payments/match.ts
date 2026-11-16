@@ -43,17 +43,19 @@ interface PoAmounts {
 
 async function poAmounts(db: Db, poIds: number[]): Promise<PoAmounts[]> {
   if (poIds.length === 0) return [];
-  const rows = await db<{
-    poId: number;
-    poNo: string;
-    supplierId: number;
-    supplierName: string;
-    contractNo: string | null;
-    poTotalCents: string;
-    receivedCents: string;
-    returnedCents: string;
-    invoicedCents: string;
-  }[]>`
+  const rows = await db<
+    {
+      poId: number;
+      poNo: string;
+      supplierId: number;
+      supplierName: string;
+      contractNo: string | null;
+      poTotalCents: string;
+      receivedCents: string;
+      returnedCents: string;
+      invoicedCents: string;
+    }[]
+  >`
     SELECT po.id AS po_id, po.doc_no AS po_no, po.supplier_id, s.name AS supplier_name, c.contract_no, po.total_cents::text AS po_total_cents,
            coalesce((SELECT sum(coalesce(d.amount_cents, 0)) FROM inv_docs d
                      WHERE d.purchase_order_id = po.id AND d.doc_type = 'receipt' AND d.status = 'confirmed'), 0)::text AS received_cents,
@@ -147,7 +149,10 @@ export async function threeWayList(db: Db, f: { pendingOnly?: boolean; supplierI
            OR EXISTS (SELECT 1 FROM supplier_invoice_lines l JOIN supplier_invoices i ON i.id = l.invoice_id WHERE l.purchase_order_id = po.id AND i.status = 'valid'))
     ORDER BY po.id DESC
     LIMIT 500`;
-  const rows = await poThreeWay(db, ids.map((r) => Number(r.id)));
+  const rows = await poThreeWay(
+    db,
+    ids.map((r) => Number(r.id)),
+  );
   const out = f.pendingOnly ? rows.filter((r) => r.status === 'held' || r.status === 'incomplete') : rows;
   return out.sort((a, b) => b.poId - a.poId);
 }
@@ -206,7 +211,10 @@ const InvoiceInput = z.object({
   taxCents: z.number('请填写税额').int('税额要精确到分').min(0, '税额不能为负').max(1_000_000_000),
   taxRateBp: z.number('请填写税率').int().min(0, '税率不能为负').max(10000, '税率不能超过 100%'),
   note: z.string().trim().max(200, '备注最多 200 个字').default(''),
-  lines: z.array(z.object({ poId: id, amountCents: positiveCents('分到采购单的金额') })).min(1, '请选择这张发票对应的采购单').max(50),
+  lines: z
+    .array(z.object({ poId: id, amountCents: positiveCents('分到采购单的金额') }))
+    .min(1, '请选择这张发票对应的采购单')
+    .max(50),
   // 8.0.21 发票识别：手填 / 读二维码 / 读文字（只为统计）
   entryMethod: z.enum(INVOICE_ENTRY_METHODS, '登记方式不对').default('manual'),
 });
@@ -254,9 +262,7 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
       // 在号码锁里核对台账里有没有同一张（Codex 自动审查 84f5fe5）：同一供应商的，或者开票方名称就是这家供应商的
       // （报销、台账登记时没挂供应商、只写了开票方）。不核对的话同一张发票既报销、又分到采购单走货款付款
       const issuer = sup.name.trim().toLowerCase();
-      const dup = (await findByNo(tx, input.invoiceNo)).find(
-        (c) => c.supplierId === input.supplierId || (c.supplierId === null && c.issuerName.trim().toLowerCase() === issuer),
-      );
+      const dup = (await findByNo(tx, input.invoiceNo)).find((c) => c.supplierId === input.supplierId || (c.supplierId === null && c.issuerName.trim().toLowerCase() === issuer));
       if (dup?.usedBy) {
         throw conflict('INVOICE_ALREADY_CLAIMED', `发票 ${input.invoiceNo} 已在报销单 ${dup.usedBy} 里报销，不能再分到采购单走货款`, { invoiceId: dup.id });
       }
@@ -272,7 +278,14 @@ export async function createInvoice(deps: Deps, raw: unknown, actor: Actor, ip?:
       for (const l of input.lines) {
         await tx`INSERT INTO supplier_invoice_lines (invoice_id, purchase_order_id, amount_cents) VALUES (${invoiceId}, ${l.poId}, ${l.amountCents})`;
       }
-      await writeAudit(tx, { staffId: actor.id, action: 'payment_doc', targetType: 'supplier_invoice', targetId: invoiceId, detail: { op: 'create', invoiceNo: input.invoiceNo, totalCents: input.totalCents }, ip });
+      await writeAudit(tx, {
+        staffId: actor.id,
+        action: 'payment_doc',
+        targetType: 'supplier_invoice',
+        targetId: invoiceId,
+        detail: { op: 'create', invoiceNo: input.invoiceNo, totalCents: input.totalCents },
+        ip,
+      });
       return { id: invoiceId, replayed: false };
     });
   } catch (error) {

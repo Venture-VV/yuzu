@@ -66,7 +66,9 @@ export function RegistrationCard({ registration, portalUrl }: { registration: Ca
             {registration.link ? (
               <QrCode text={registration.link} className="size-36 shrink-0 rounded-lg ring-1 ring-line" label="注册二维码" />
             ) : (
-              <div className="flex size-36 shrink-0 items-center justify-center rounded-lg border border-dashed border-line-strong p-3 text-center text-[12px] text-ink-3">先在左边填员工入口地址，才有二维码</div>
+              <div className="flex size-36 shrink-0 items-center justify-center rounded-lg border border-dashed border-line-strong p-3 text-center text-[12px] text-ink-3">
+                先在左边填员工入口地址，才有二维码
+              </div>
             )}
             {registration.link && (
               <div className="min-w-0 flex-1 space-y-2">

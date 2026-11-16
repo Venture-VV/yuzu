@@ -71,7 +71,10 @@ test('安保巡场：后台设部门与场所、打印二维码 → 保安直接
   if (canteenSettings.portalUrl !== CANTEEN) await ok(await api.put('/api/erp/canteen/settings', { data: { ...canteenSettings, portalUrl: CANTEEN } }));
   const deps = await ok<{ id: number; name: string }[]>(await api.get('/api/inventory/departments?all=true'));
   let security = deps.find((d) => d.name === 'E2E安保部');
-  if (!security) security = (await ok<{ id: number; name: string }[]>(await api.post('/api/inventory/departments', { data: { name: 'E2E安保部', active: true, sortOrder: 0 } }))).find((d) => d.name === 'E2E安保部');
+  if (!security)
+    security = (await ok<{ id: number; name: string }[]>(await api.post('/api/inventory/departments', { data: { name: 'E2E安保部', active: true, sortOrder: 0 } }))).find(
+      (d) => d.name === 'E2E安保部',
+    );
   const stamp = String(Date.now()).slice(-5);
   const guard = await hire(api, `XG${stamp}`, 'E2E 保安老张', security!.id);
   const viewer = await hire(api, `XV${stamp}`, 'E2E 店总', null);

@@ -880,9 +880,7 @@ export function convertDrawing(drawing: PlanDrawing, params: Partial<ConvertPara
     const codes = codesIn(t.text);
     if (codes.length) codeTexts.push({ text: t, center: textCenter(t), codes });
   }
-  const titles = drawing.texts
-    .map((t) => ({ t, n: floorTitleNumber(t.text), c: textCenter(t) }))
-    .filter((x): x is { t: PlanText; n: number; c: Pt } => x.n !== null);
+  const titles = drawing.texts.map((t) => ({ t, n: floorTitleNumber(t.text), c: textCenter(t) })).filter((x): x is { t: PlanText; n: number; c: Pt } => x.n !== null);
 
   // 每块图形是哪一层：先看图上的楼层标题（图框横向范围内、上下一个空隙之内；按距离从近到远分配，一个标题只给一块），
   // 没有标题再按房号楼层位的多数（v0.7.15 审查：个别房号换了楼层时不能让整层认错）
@@ -975,7 +973,10 @@ export function convertDrawing(drawing: PlanDrawing, params: Partial<ConvertPara
     let outcomes = new Map<string, RoomOutcome>();
     if (seeds.length) {
       const grid = rasterize(memberPaths, frame, p);
-      const corridors = labelTexts.filter((t) => CORRIDOR_RE.test(t.text.replace(/\s+/g, ''))).map(textCenter).filter((pt) => inBox(frame, pt));
+      const corridors = labelTexts
+        .filter((t) => CORRIDOR_RE.test(t.text.replace(/\s+/g, '')))
+        .map(textCenter)
+        .filter((pt) => inBox(frame, pt));
       outcomes = detectRooms(grid, seeds, corridors, p);
     } else {
       issues.push({ kind: 'floor_no_codes', floor: code, message: `${code} 的图上没有房号，只出底图` });
@@ -1004,8 +1005,7 @@ export function convertDrawing(drawing: PlanDrawing, params: Partial<ConvertPara
       built = buildSvg({ frame, width, height, paths: svgPaths, labels: svgLabels }, p, tol, round);
     }
     const svgBytes = Buffer.byteLength(built.svg);
-    if (svgBytes > p.svgBudgetBytes)
-      issues.push({ kind: 'svg_over_budget', floor: code, message: `${code} 的底图 ${(svgBytes / 1e6).toFixed(2)} MB，超过 ${(p.svgBudgetBytes / 1e6).toFixed(1)} MB` });
+    if (svgBytes > p.svgBudgetBytes) issues.push({ kind: 'svg_over_budget', floor: code, message: `${code} 的底图 ${(svgBytes / 1e6).toFixed(2)} MB，超过 ${(p.svgBudgetBytes / 1e6).toFixed(1)} MB` });
     floors.push({
       code,
       title: c.title,

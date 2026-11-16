@@ -138,7 +138,12 @@ export function parseMemberHistoryCsv(text: string): { rows: MemberHistoryCsvRow
     if (bonus === undefined) problems.push(`赠金「${cell('bonus')}」不对`);
     if (balance === undefined) problems.push(`余额「${cell('balance')}」不对`);
     if (bonusBalance === undefined) problems.push(`赠金余额「${cell('bonus_balance')}」不对`);
-    for (const [k, max] of [['doc_no', 64], ['store', 64], ['operator', 32], ['note', 200]] as const) {
+    for (const [k, max] of [
+      ['doc_no', 64],
+      ['store', 64],
+      ['operator', 32],
+      ['note', 200],
+    ] as const) {
       if (cell(k).length > max) problems.push(`${k === 'doc_no' ? '单号' : k === 'store' ? '门店' : k === 'operator' ? '经办人' : '备注'}太长（最多 ${max} 字）`);
     }
     if (problems.length) {

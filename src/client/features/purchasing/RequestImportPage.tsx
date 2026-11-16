@@ -198,10 +198,24 @@ export function RequestImportPage() {
               />
             </label>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="secondary" icon={<FileSearch className="size-4" />} disabled={!file || busy !== null} loading={busy === 'preview'} onClick={() => void runPreview()} data-testid="request-import-preview">
+              <Button
+                variant="secondary"
+                icon={<FileSearch className="size-4" />}
+                disabled={!file || busy !== null}
+                loading={busy === 'preview'}
+                onClick={() => void runPreview()}
+                data-testid="request-import-preview"
+              >
                 预览
               </Button>
-              <Button variant="primary" icon={<CircleCheck className="size-4" />} disabled={blocked || busy !== null} loading={busy === 'apply'} onClick={() => void apply()} data-testid="request-import-apply">
+              <Button
+                variant="primary"
+                icon={<CircleCheck className="size-4" />}
+                disabled={blocked || busy !== null}
+                loading={busy === 'apply'}
+                onClick={() => void apply()}
+                data-testid="request-import-apply"
+              >
                 {preview && !blocked ? `导入（合成 ${preview.groups.length} 张需求单）` : '导入'}
               </Button>
             </div>
@@ -211,11 +225,17 @@ export function RequestImportPage() {
           {preview && (
             <section className="space-y-3 rounded-lg border border-line bg-card p-5 shadow-card" data-testid="request-import-preview-result">
               {preview.duplicate ? (
-                <Notice tone="warning" title="这份文件已经导入过了">同一份文件只能导入一次；要补导请另做一份只含新需求的文件。</Notice>
+                <Notice tone="warning" title="这份文件已经导入过了">
+                  同一份文件只能导入一次；要补导请另做一份只含新需求的文件。
+                </Notice>
               ) : preview.issueCount > 0 ? (
-                <Notice tone="error" title={`有 ${preview.issueCount} 行要先改好才能导入`}>在 Excel 里改好（或在上面选好部门）后重新预览。</Notice>
+                <Notice tone="error" title={`有 ${preview.issueCount} 行要先改好才能导入`}>
+                  在 Excel 里改好（或在上面选好部门）后重新预览。
+                </Notice>
               ) : importing === 0 ? (
-                <Notice tone="warning" title="没有要导入的行">表里的行都标了线下已下单、到货或退货；要导入请勾「线下已下单的也导入」。</Notice>
+                <Notice tone="warning" title="没有要导入的行">
+                  表里的行都标了线下已下单、到货或退货；要导入请勾「线下已下单的也导入」。
+                </Notice>
               ) : (
                 <Notice tone="success" title={`${importing} 行都能导入，合成 ${preview.groups.length} 张需求单${preview.skippedCount ? `（线下已下单的 ${preview.skippedCount} 行不导入）` : ''}`}>
                   {preview.groups.map((g, i) => (
@@ -254,7 +274,15 @@ export function RequestImportPage() {
                         <td className="pr-2">{r.department?.name ?? (r.departmentText || '—')}</td>
                         <td className="pr-2">
                           {r.name}
-                          {r.material ? <span className="ml-1 text-[12px] text-ink-3">物料</span> : r.name && <Badge tone="yuzu" className="ml-1">新产品</Badge>}
+                          {r.material ? (
+                            <span className="ml-1 text-[12px] text-ink-3">物料</span>
+                          ) : (
+                            r.name && (
+                              <Badge tone="yuzu" className="ml-1">
+                                新产品
+                              </Badge>
+                            )
+                          )}
                           {r.skipped && <Badge className="ml-1">不导入 · 线下{r.offline.map((c) => c.replace('是否', '已')).join('、')}</Badge>}
                           {r.applicant && <span className="block text-[12px] text-ink-3">申请人 {r.applicant}</span>}
                           {r.details && <span className="block text-[12px] text-ink-3">{r.details}</span>}
@@ -297,7 +325,10 @@ export function RequestImportPage() {
               <ul className="flex flex-wrap gap-2">
                 {result.requests.map((r) => (
                   <li key={r.id}>
-                    <Link to={`/erp/requests?request=${r.id}`} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-card px-2.5 py-1 text-[13px] font-semibold hover:border-line-strong">
+                    <Link
+                      to={`/erp/requests?request=${r.id}`}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-line bg-card px-2.5 py-1 text-[13px] font-semibold hover:border-line-strong"
+                    >
                       <PriorityDot priority={r.priority} />
                       <span className="num">{r.docNo}</span> · {r.department} · {r.lineCount} 行
                     </Link>

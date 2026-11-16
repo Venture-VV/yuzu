@@ -33,7 +33,9 @@ export function parseLocalTime(text: string, timeZone: string): Date | null {
 }
 
 export async function balanceChanges(sql: Sql, since: Date, includeOpening = false): Promise<BalanceChangeRow[]> {
-  return sql.begin('isolation level repeatable read read only', (tx) => tx<BalanceChangeRow[]>`
+  return sql.begin(
+    'isolation level repeatable read read only',
+    (tx) => tx<BalanceChangeRow[]>`
     WITH changed AS (
       SELECT member_id, count(*)::int AS entries, max(created_at) AS last_at
       FROM ledger_entries
@@ -51,7 +53,8 @@ export async function balanceChanges(sql: Sql, since: Date, includeOpening = fal
       SELECT e.principal_after, e.bonus_after FROM ledger_entries e
       WHERE e.member_id = m.id AND e.created_at < ${since} ORDER BY e.created_at DESC, e.id DESC LIMIT 1
     ) prev ON true
-    ORDER BY m.member_no`) as Promise<BalanceChangeRow[]>;
+    ORDER BY m.member_no`,
+  ) as Promise<BalanceChangeRow[]>;
 }
 
 export function balanceChangesCsv(rows: BalanceChangeRow[], stampOf: (iso: string) => string): string {

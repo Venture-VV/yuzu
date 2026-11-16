@@ -37,6 +37,7 @@ TEST_DATABASE_URL=postgres://<用户>:<密码>@127.0.0.1:5432/<独立测试库> 
 - `TEST_DATABASE_URL` 只能指向自己新建的独立测试库（用例会清空它），本地可以用 `compose.dev.yaml` 起一个 PostgreSQL 16。
 - 小程序页面的自动化与真手机测试在门店 Mac mini 上由 Codex「小程序助手」做（`docs/MINIPROGRAM.md` 第 11 节）；Gemini 的环境里没有微信开发者工具时，写明「受阻未测」，不记通过。
 - 推送之前跑完上面三条；CI 失败先在本地复现，修好再推。不跳过、不关掉用例来变绿。
+- **排版与整洁检查（主线 8.1.3 起）**：CI 跑 `npm run format:check` 与 `npm run check:code`。小程序线自己的目录与用例不在里面（`.prettierignore`、`scripts/check-code.mjs` 跳过它们，什么时候接上由小程序线决定）；但登记处的文件（`src/server/app.ts`、`src/shared/permissions.ts` 等）在里面——改了登记处就在推送前跑一次 `npm run format` 与 `npm run check:code`。合 `main` 之前先在自己的分支上跑一次 `npm run format`，冲突大多会消失。
 
 ## 红线（摘自 AGENTS.md，违反任何一条都是阻断项）
 

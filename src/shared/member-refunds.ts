@@ -96,8 +96,7 @@ export type RefundRoute = (typeof REFUND_ROUTES)[number];
 export const REFUND_ROUTE_LABELS: Record<RefundRoute, string> = { manual: '员工退', mp_auto: '门店系统原路退回' };
 
 /** 这一行能不能交给门店系统原路退回：来源是线上充值（小程序）、原收款方式微信 */
-export const onlineRoutable = (l: { source: RefundSource; channel: 'counter' | 'mp' | null; method: PaymentMethod | null }) =>
-  l.source === 'recharge' && l.channel === 'mp' && l.method === 'wechat';
+export const onlineRoutable = (l: { source: RefundSource; channel: 'counter' | 'mp' | null; method: PaymentMethod | null }) => l.source === 'recharge' && l.channel === 'mp' && l.method === 'wechat';
 
 /** 退储值前的核对（只读）：能退多少、分到哪几笔、扣回多少赠金、会不会降档 */
 export interface MemberRefundPlan {

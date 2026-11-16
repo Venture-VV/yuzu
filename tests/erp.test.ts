@@ -113,7 +113,21 @@ describe('ERP 模块开关', () => {
         ['patrol', true, true],
       ]);
       expect(await modules(ctx.owner)).toEqual(['salesInvoices', 'receivables', 'revenue', 'canteen', 'patrol']);
-      for (const url of ['/api/inventory/materials', '/api/inventory/todo-count', '/api/purchase-orders', '/api/purchase-baseline?materialId=1', '/api/payables/overview', '/api/erp/expenses', '/api/erp/petty/daily', '/api/erp/requests', '/api/erp/images/1', '/api/erp/dept-stock/meta', '/api/erp/contracts', '/api/erp/payments/requests', '/api/erp/invoices']) {
+      for (const url of [
+        '/api/inventory/materials',
+        '/api/inventory/todo-count',
+        '/api/purchase-orders',
+        '/api/purchase-baseline?materialId=1',
+        '/api/payables/overview',
+        '/api/erp/expenses',
+        '/api/erp/petty/daily',
+        '/api/erp/requests',
+        '/api/erp/images/1',
+        '/api/erp/dept-stock/meta',
+        '/api/erp/contracts',
+        '/api/erp/payments/requests',
+        '/api/erp/invoices',
+      ]) {
         const r = await api(ctx.app, ctx.owner, 'GET', url);
         expect(r.status, url).toBe(403);
         expect(r.body.error.code, url).toBe('ERP_MODULE_DISABLED');
@@ -207,7 +221,10 @@ describe('按实际进入的接口判断（地址编码不改变结果）', () =
       const r = await ctx.app.inject({ method: 'POST', url, headers: { origin: 'https://evil.example' }, payload: { username: 'owner', password: PASSWORD } });
       expect(r.statusCode, url).toBe(403);
       expect(r.json().error.code, url).toBe('BAD_ORIGIN');
-      expect(r.cookies.find((c) => c.name === 'yuzu_sid'), url).toBeUndefined();
+      expect(
+        r.cookies.find((c) => c.name === 'yuzu_sid'),
+        url,
+      ).toBeUndefined();
     }
     const me = await api(ctx.app, ctx.owner, 'GET', '/%61pi/auth/me');
     expect(me.status).toBe(200);

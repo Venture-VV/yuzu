@@ -144,13 +144,7 @@ function BookingRulesCard() {
       ))}
       <div className="border-t border-line pt-4">
         <Field label="派对房等能约的时长（分钟，用顿号隔开）" htmlFor="booking-durations" hint="例如 120、180、240；最多 8 个">
-          <Input
-            id="booking-durations"
-            value={current.spaceDurations}
-            disabled={!editable || busy}
-            onChange={(e) => set({ spaceDurations: e.target.value })}
-            data-testid="booking-rule-durations"
-          />
+          <Input id="booking-durations" value={current.spaceDurations} disabled={!editable || busy} onChange={(e) => set({ spaceDurations: e.target.value })} data-testid="booking-rule-durations" />
         </Field>
       </div>
       {error && <Notice tone="error">{error}</Notice>}

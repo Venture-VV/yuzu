@@ -1,16 +1,7 @@
 // 员工食堂 · 柚子饭堂（docs/CANTEEN.md）：设置（settings 的 canteen 一项）——食堂部门、开饭时间、员工入口地址。
 
 import { z } from 'zod';
-import {
-  DEFAULT_CANTEEN_SETTINGS,
-  isLanHost,
-  MEAL_LABELS,
-  MEALS,
-  mealWindowsOverlap,
-  validMealWindow,
-  type CanteenSettings,
-  type MealWindow,
-} from '@shared/canteen';
+import { DEFAULT_CANTEEN_SETTINGS, isLanHost, MEAL_LABELS, MEALS, mealWindowsOverlap, validMealWindow, type CanteenSettings, type MealWindow } from '@shared/canteen';
 import { HHMM } from '@shared/business-date';
 import type { Db, Sql } from '../../db';
 import type { OpContext } from '../../lib/context';
@@ -26,9 +17,7 @@ export async function loadCanteenSettings(db: Db): Promise<CanteenSettings> {
   const meals: MealWindow[] = MEALS.map((meal) => {
     const saved = Array.isArray(v.meals) ? v.meals.find((m) => m?.meal === meal) : undefined;
     const dflt = DEFAULT_CANTEEN_SETTINGS.meals.find((m) => m.meal === meal)!;
-    return saved && typeof saved.enabled === 'boolean' && validMealWindow(saved as MealWindow)
-      ? { meal, enabled: saved.enabled, start: saved.start, end: saved.end }
-      : { ...dflt };
+    return saved && typeof saved.enabled === 'boolean' && validMealWindow(saved as MealWindow) ? { meal, enabled: saved.enabled, start: saved.start, end: saved.end } : { ...dflt };
   });
   return {
     departmentId: typeof v.departmentId === 'number' ? v.departmentId : null,

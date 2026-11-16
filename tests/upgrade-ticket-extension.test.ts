@@ -50,9 +50,9 @@ describe('迁移 045 · 浴票延迟', () => {
     // 分钟数 1–240（浴票延迟）；别的类别仍是 1–99
     await sql`UPDATE benefits SET quantity = 240 WHERE code = 'QY-004'`;
     await expect(sql`UPDATE benefits SET quantity = 241 WHERE code = 'QY-004'`).rejects.toThrow(/benefits_quantity_check/);
-    await expect(
-      sql`INSERT INTO benefits (code, name, category, start_grade, start_tier, period, quantity) VALUES ('X-1', '服务', 'service', 1, 0, 'month', 100)`,
-    ).rejects.toThrow(/benefits_quantity_check/);
+    await expect(sql`INSERT INTO benefits (code, name, category, start_grade, start_tier, period, quantity) VALUES ('X-1', '服务', 'service', 1, 0, 'month', 100)`).rejects.toThrow(
+      /benefits_quantity_check/,
+    );
     // 浴票延迟不计次
     await expect(sql`UPDATE benefits SET period = 'month' WHERE code = 'QY-004'`).rejects.toThrow(/benefits_extension_check/);
     // 发布要有起点的分钟数

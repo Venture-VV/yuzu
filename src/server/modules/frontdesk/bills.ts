@@ -36,8 +36,16 @@ export const PostInput = z
             /** 价格档；不带时按项目的默认档计价（升级前留下的待确认请求不带这一项） */
             tier: z.enum(PRICE_TIERS, '价格档不正确').optional(),
             /** 技师与点钟 / 轮钟（v0.7.0，需要技师的项目）；不带时与升级前的请求完全相同（幂等摘要不变） */
-            technicianId: z.number().int().positive().nullish().transform((v) => v ?? undefined),
-            callType: z.enum(CALL_TYPES, '上钟方式应为点钟或轮钟').nullish().transform((v) => v ?? undefined),
+            technicianId: z
+              .number()
+              .int()
+              .positive()
+              .nullish()
+              .transform((v) => v ?? undefined),
+            callType: z
+              .enum(CALL_TYPES, '上钟方式应为点钟或轮钟')
+              .nullish()
+              .transform((v) => v ?? undefined),
             /** 口味备注（v0.7.2 餐饮：少辣、不要香菜），只给进厨房的菜；不带时与升级前的请求完全相同（幂等摘要不变） */
             note: z
               .string()
@@ -128,9 +136,7 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
   });
   // 补录纸质单：明细按纸质单上的实际时间登记（营业日按实际时间归属）
   const backfill = resolveBackfill(input.backfill, ctx.actor);
-  await runIdempotent(deps, { key, opType: 'bill_post', requestHash }, async (tx) =>
-    (await postChargesTx(tx, deps, visitId, input, { key, requestHash, backfill }, ctx, options)).visitId,
-  );
+  await runIdempotent(deps, { key, opType: 'bill_post', requestHash }, async (tx) => (await postChargesTx(tx, deps, visitId, input, { key, requestHash, backfill }, ctx, options)).visitId);
   return getVisit(deps.sql, visitId, deps.config.timezone);
 }
 
@@ -139,15 +145,7 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
  * 平板点餐经 emenu/core.ts 调用（8.0.10：经办人是输点单密码的服务员））。
  * 锁：来访 → 账单 →（技师队列 → 钟单 → 技师状态）→ 估清 → 出品单
  */
-export async function postChargesTx(
-  tx: Tx,
-  deps: Deps,
-  visitId: number,
-  input: PostInputParsed,
-  meta: PostTxMeta,
-  ctx: OpContext,
-  options: PostOptions = {},
-): Promise<PostResult> {
+export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: PostInputParsed, meta: PostTxMeta, ctx: OpContext, options: PostOptions = {}): Promise<PostResult> {
   const { key, requestHash, backfill, channel } = meta;
   const at = backfill?.at ?? ctx.at ?? new Date();
   // ③ 来访 → 账单
@@ -163,13 +161,35 @@ export async function postChargesTx(
   // 送到客房：来访锁住以后才查住哪间（读入住单不加锁）；没在住的在这里拒绝
   const deliverTo = meta.deliverTo ?? (options.toRoom ? await options.toRoom(tx) : undefined);
   // 项目价格以服务端为准，按所选价格档计价；只限某一性别的项目（如私汤木桶浴仅女宾）按客人分区核对
-  const items = await loadPricedItems(tx, input.lines.map((l) => l.itemId));
+  const items = await loadPricedItems(
+    tx,
+    input.lines.map((l) => l.itemId),
+  );
   // 技师（v0.7.0）：功能开启时，需要技师的项目记下技师与点钟 / 轮钟；价格跟等级时按技师等级取价
   const techRules = await loadTechnicianRules(tx);
-  const techs = await loadTechnicians(tx, input.lines.flatMap((l) => (l.technicianId === undefined ? [] : [l.technicianId])));
+  const techs = await loadTechnicians(
+    tx,
+    input.lines.flatMap((l) => (l.technicianId === undefined ? [] : [l.technicianId])),
+  );
   // 餐饮（S5 第一步）：功能开启时，挂在出品档口上的菜记在「餐饮」，同时建出品单进厨房
-  const stations = await kitchenStationsOf(tx, input.lines.map((l) => l.itemId));
-  type Line = { itemId: number | null; name: string; tier: PriceTier | null; unitPrice: number; quantity: number; amount: number; source: BillSource; technicianId: number | null; callType: CallType | null; techText: string | null; stationId: number | null; note: string };
+  const stations = await kitchenStationsOf(
+    tx,
+    input.lines.map((l) => l.itemId),
+  );
+  type Line = {
+    itemId: number | null;
+    name: string;
+    tier: PriceTier | null;
+    unitPrice: number;
+    quantity: number;
+    amount: number;
+    source: BillSource;
+    technicianId: number | null;
+    callType: CallType | null;
+    techText: string | null;
+    stationId: number | null;
+    note: string;
+  };
   const lines: Line[] = [];
   for (const l of input.lines) {
     const item = items.get(l.itemId);
@@ -212,7 +232,20 @@ export async function postChargesTx(
     });
   }
   for (const l of input.customLines) {
-    lines.push({ itemId: null, name: l.name, tier: null, unitPrice: l.amount, quantity: 1, amount: l.amount, source: 'bath', technicianId: null, callType: null, techText: null, stationId: null, note: '' });
+    lines.push({
+      itemId: null,
+      name: l.name,
+      tier: null,
+      unitPrice: l.amount,
+      quantity: 1,
+      amount: l.amount,
+      source: 'bath',
+      technicianId: null,
+      callType: null,
+      techText: null,
+      stationId: null,
+      note: '',
+    });
   }
   const total = lines.reduce((s, l) => s + l.amount, 0);
   const expectedTotal = channel ? channel.expectedTotal : input.expectedTotal;
@@ -222,11 +255,7 @@ export async function postChargesTx(
   if (channel) {
     const quantity = lines.reduce((s, l) => s + l.quantity, 0);
     if (quantity > channel.maxQuantity || total > channel.maxTotal) {
-      throw unprocessable(
-        'MP_ORDER_LIMIT',
-        `一单最多 ${channel.maxQuantity} 份、¥${channel.maxTotal / 100}，这一单 ${quantity} 份、¥${total / 100}；多的请服务员点`,
-        { quantity, total },
-      );
+      throw unprocessable('MP_ORDER_LIMIT', `一单最多 ${channel.maxQuantity} 份、¥${channel.maxTotal / 100}，这一单 ${quantity} 份、¥${total / 100}；多的请服务员点`, { quantity, total });
     }
   }
 
@@ -251,9 +280,14 @@ export async function postChargesTx(
   }
   // 估清（技师队列之后、建出品单之前）：今天还剩的份数不够整笔拒绝；补录纸质单的菜早已上过，不扣估清
   const dishLines = lines.filter((l) => l.stationId !== null);
-  const limited = dishLines.length > 0 && !backfill
-    ? await takeDishLimits(tx, dishLines.map((l) => ({ itemId: l.itemId!, name: l.name, quantity: l.quantity })), date)
-    : new Set<number>();
+  const limited =
+    dishLines.length > 0 && !backfill
+      ? await takeDishLimits(
+          tx,
+          dishLines.map((l) => ({ itemId: l.itemId!, name: l.name, quantity: l.quantity })),
+          date,
+        )
+      : new Set<number>();
   const lineIds = new Map<Line, number>();
   for (const l of lines) {
     const [row] = await tx<{ id: number }[]>`
@@ -277,7 +311,12 @@ export async function postChargesTx(
   await tx`
     UPDATE bills SET amount_cents = amount_cents + ${total}, line_count = line_count + ${lines.length} WHERE id = ${bill!.id}`;
   // 实时位置（v0.7.17）：客人在项目配的区域（几个不同区域按项目多的；补录的不记）
-  await locateCharges(tx, visit.id, lines.map((l) => ({ lineId: lineIds.get(l)!, itemId: l.itemId })), { at, staffId: ctx.actor.id, backfill: !!backfill });
+  await locateCharges(
+    tx,
+    visit.id,
+    lines.map((l) => ({ lineId: lineIds.get(l)!, itemId: l.itemId })),
+    { at, staffId: ctx.actor.id, backfill: !!backfill },
+  );
   // 派钟马上上钟（或加钟）的钟单：技师与客人在钟单记的房间（记在消费之后，房间比项目的区域更准）
   for (const id of new Set(sessionIds.values())) await locateSession(tx, id, 'session_start', { at, staffId: ctx.actor.id, backfill: !!backfill });
   if (backfill) await recordBackfill(tx, backfill, { kind: 'charges', opKey: key, visitId: visit.id, businessDate: date, actor: ctx.actor });
@@ -317,7 +356,9 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
     const visit = (await lockVisits(tx, [peek.visitId])).get(peek.visitId)!;
     assertOpen(visit);
     await tx`SELECT id FROM bills WHERE id = ${visit.billId} FOR UPDATE`;
-    const [line] = await tx<{ id: number; name: string; source: string; quantity: number; amount: number; status: string; postedBy: number; postedAt: string; voidedByName: string | null; sessionId: number | null }[]>`
+    const [line] = await tx<
+      { id: number; name: string; source: string; quantity: number; amount: number; status: string; postedBy: number; postedAt: string; voidedByName: string | null; sessionId: number | null }[]
+    >`
       SELECT l.id, l.name, l.source, l.quantity, l.amount, l.status, l.posted_by, l.posted_at, s.display_name AS voided_by_name, l.session_id
       FROM bill_lines l LEFT JOIN staff s ON s.id = l.voided_by WHERE l.id = ${lineId} FOR UPDATE OF l`;
     if (line!.status === 'voided') {
@@ -351,10 +392,7 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
 
 export const MoveLinesInput = z.object({
   clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
-  lineIds: z
-    .array(z.number().int().positive(), '请选择要转的明细')
-    .min(1, '请选择要转的明细')
-    .max(MAX_MOVE_LINES, `一次最多转 ${MAX_MOVE_LINES} 条`),
+  lineIds: z.array(z.number().int().positive(), '请选择要转的明细').min(1, '请选择要转的明细').max(MAX_MOVE_LINES, `一次最多转 ${MAX_MOVE_LINES} 条`),
   toTagCode: z
     .string('请填写转到哪张手牌')
     .transform((v) => normalizeTagCode(v))

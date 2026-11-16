@@ -21,8 +21,7 @@ let dutyId: number;
 
 const clerkActor = (): Actor => ({ id: ctx.clerkId, username: 'clerk', displayName: '测试店员', role: 'clerk', duties: [], mustChangePassword: false });
 const dutyActor = (): Actor => ({ id: dutyId, username: 'duty', displayName: '值班经理', role: 'duty_manager', duties: [], mustChangePassword: false });
-const periodsCheck = async () =>
-  ((await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { key: string; ok: boolean; detail: string }[]).find((c) => c.key === 'visit_periods')!;
+const periodsCheck = async () => ((await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { key: string; ok: boolean; detail: string }[]).find((c) => c.key === 'visit_periods')!;
 const deps = () => ({ sql: ctx.sql, config: ctx.config });
 const ago = (hours: number) => new Date(Date.now() - hours * H);
 const slip = (at: Date, slipNo = 'P0001') => ({ slipNo, at: at.toISOString() });
@@ -297,9 +296,7 @@ describe('补录纸质单：接待、挂账、结账按实际时间', () => {
     await ctx.sql`ALTER TABLE backfill_entries DISABLE TRIGGER backfill_entries_append_only`;
     try {
       await ctx.sql`UPDATE backfill_entries SET actual_at = actual_at - interval '1 hour' WHERE slip_no = 'P-0040'`;
-      const bad = ((await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { key: string; ok: boolean; detail: string }[]).find(
-        (c) => c.key === 'backfill_entries',
-      )!;
+      const bad = ((await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { key: string; ok: boolean; detail: string }[]).find((c) => c.key === 'backfill_entries')!;
       expect(bad.ok).toBe(false);
       expect(bad.detail).toContain('P-0040');
       await ctx.sql`UPDATE backfill_entries SET actual_at = actual_at + interval '1 hour' WHERE slip_no = 'P-0040'`;
@@ -320,7 +317,14 @@ describe('R1.2-b 优惠 / 免单不能由收银的本人授权', () => {
     expect(self.body.error.code).toBe('AUTH_SELF_NOT_ALLOWED');
     const other = await authorize(duty, 'duty2', 'checkout_discount', { visitIds: [v], amount: 2100, reason: '抹零' });
     expect(other.status).toBe(200);
-    expect((await pay(duty, [v], 49900, [{ method: 'discount', amount: 2100, grantId: other.body.grantId }, { method: 'cash', amount: 47800 }])).status).toBe(200);
+    expect(
+      (
+        await pay(duty, [v], 49900, [
+          { method: 'discount', amount: 2100, grantId: other.body.grantId },
+          { method: 'cash', amount: 47800 },
+        ])
+      ).status,
+    ).toBe(200);
 
     const v2 = (await enter(ctx.owner, 'B051')).body.visits[0].id as number;
     const owner = await authorize(ctx.owner, 'owner', 'checkout_discount', { visitIds: [v2], amount: 49900, reason: '店主请客' });
@@ -338,7 +342,10 @@ describe('R1.2-b 优惠 / 免单不能由收银的本人授权', () => {
       INSERT INTO auth_grants (purpose, requested_by, approved_by, scope, expires_at)
       VALUES ('checkout_discount', ${dutyId}, ${dutyId}, ${ctx.sql.json({ visitIds: [v], amount: 2100, reason: '抹零' })}, now() + interval '5 minutes')
       RETURNING id`;
-    const r = await pay(duty, [v], 49900, [{ method: 'discount', amount: 2100, grantId: g!.id }, { method: 'cash', amount: 47800 }]);
+    const r = await pay(duty, [v], 49900, [
+      { method: 'discount', amount: 2100, grantId: g!.id },
+      { method: 'cash', amount: 47800 },
+    ]);
     expect(r.status).toBe(422);
     expect(r.body.error.code).toBe('GRANT_INVALID');
   });

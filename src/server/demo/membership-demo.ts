@@ -89,7 +89,17 @@ export async function seedMembershipDemo(sql: Sql, config: AppConfig, opts: { no
       const outcome = rechargeOutcome(rules, 0 as Grade, 0, m.paid);
       await recharge(
         deps,
-        { idempotencyKey: randomUUID(), memberId: created.id, planId: null, paidAmount: m.paid, bonusAmount: outcome.bonusCents, paymentMethod: 'wechat', paymentRef: '演示', note: '会员体系演示：往前推的充值', paymentConfirmed: true },
+        {
+          idempotencyKey: randomUUID(),
+          memberId: created.id,
+          planId: null,
+          paidAmount: m.paid,
+          bonusAmount: outcome.bonusCents,
+          paymentMethod: 'wechat',
+          paymentRef: '演示',
+          note: '会员体系演示：往前推的充值',
+          paymentConfirmed: true,
+        },
         { actor: clerk, at: at(m.rechargeDaysAgo) },
         { history: true },
       );

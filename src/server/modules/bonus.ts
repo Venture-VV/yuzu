@@ -142,9 +142,19 @@ export async function expireDueLots(tx: Tx, deps: Deps, member: LockedMember, at
     await tx`UPDATE bonus_lots SET remaining = 0 WHERE id = ${lot.id}`;
     await tx`INSERT INTO bonus_lot_moves (lot_id, kind, amount, expiry_id, created_at) VALUES (${lot.id}, 'expire', ${-lot.remaining}, ${doc!.id}, ${at})`;
   }
-  const after = await applyBalance(tx, member, { principal: 0, bonus: -total }, {
-    entryType: 'expire', docNo, expiryId: doc!.id, businessDate, operatorId: null, at,
-  });
+  const after = await applyBalance(
+    tx,
+    member,
+    { principal: 0, bonus: -total },
+    {
+      entryType: 'expire',
+      docNo,
+      expiryId: doc!.id,
+      businessDate,
+      operatorId: null,
+      at,
+    },
+  );
   await writeAudit(tx, {
     staffId: null,
     action: 'bonus_expired',

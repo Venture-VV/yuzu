@@ -128,15 +128,10 @@ export async function memberCouponOptions(db: Db, memberIds: number[], lines: Co
     ${COUPON_FOR_CHECKOUT(db)}
     WHERE c.member_id IN ${db(memberIds)} AND c.status = 'available' AND c.valid_to >= ${date}
     ORDER BY c.valid_to, c.id LIMIT 100`;
-  return rows
-    .map((r) => toOption(r, judge(r, { memberIds, lines, date })))
-    .sort((a, b) => Number(b.usable) - Number(a.usable) || b.amount - a.amount || a.validTo.localeCompare(b.validTo));
+  return rows.map((r) => toOption(r, judge(r, { memberIds, lines, date }))).sort((a, b) => Number(b.usable) - Number(a.usable) || b.amount - a.amount || a.validTo.localeCompare(b.validTo));
 }
 
-export const CouponCodeInput = z
-  .string('请填写券码')
-  .transform(normalizeStoreCouponCode)
-  .pipe(z.string().regex(STORE_COUPON_CODE_PATTERN, '券码是 12 位字母数字（没有 0、O、1、I），请核对'));
+export const CouponCodeInput = z.string('请填写券码').transform(normalizeStoreCouponCode).pipe(z.string().regex(STORE_COUPON_CODE_PATTERN, '券码是 12 位字母数字（没有 0、O、1、I），请核对'));
 
 /** 输入券码核对（结账前）：没有这张券时 found 为 false */
 export async function couponByCode(db: Db, rawCode: string, memberIds: number[], lines: CouponLine[], date: string): Promise<CheckoutCouponOption | null> {
@@ -173,13 +168,7 @@ export async function redeemCoupon(
   // 8.0.20：这张结账单里这个项目的明细都会（或已经）被用料扣掉时不记——赠的那一件也在账单上，再记一条赠品出库就扣了两次
   //（合并前 Codex 审查 342941e）；进厨房、已经出品的看出品时记没记过扣料，不看现在的开关（8.0.21，Codex 审查 7dbc313）。没设用料的项目照旧。
   const giftItemId = r.exchangeItemId ?? r.buyItemId;
-  if (
-    r.kind === 'bogo' &&
-    r.giftMaterialId !== null &&
-    r.giftQtyMilli !== null &&
-    r.giftWarehouseId !== null &&
-    !(giftItemId !== null && (await usageCoversItem(tx, giftItemId, o.billIds)))
-  ) {
+  if (r.kind === 'bogo' && r.giftMaterialId !== null && r.giftQtyMilli !== null && r.giftWarehouseId !== null && !(giftItemId !== null && (await usageCoversItem(tx, giftItemId, o.billIds)))) {
     await tx`
       INSERT INTO coupon_gift_outs (coupon_id, checkout_id, template_id, item_id, material_id, qty_milli, warehouse_id, business_date)
       SELECT ${r.id}, ${o.checkoutId}, c.template_id, ${r.exchangeItemId ?? r.buyItemId}, ${r.giftMaterialId}, ${r.giftQtyMilli}, ${r.giftWarehouseId}, ${o.date}
@@ -211,9 +200,7 @@ export async function returnCheckoutCoupons(tx: Tx, o: { checkoutId: number; rea
 export function withTicketLines(lines: CouponLine[], tickets: { visitId: number; typeId: number; name: string; amount: number }[]): CouponLine[] {
   return [
     ...lines,
-    ...tickets
-      .filter((t) => t.amount > 0)
-      .map((t) => ({ id: -t.visitId, category: '门票', itemId: null, ticketTypeId: t.typeId, name: t.name, unitPrice: t.amount, quantity: 1, amount: t.amount })),
+    ...tickets.filter((t) => t.amount > 0).map((t) => ({ id: -t.visitId, category: '门票', itemId: null, ticketTypeId: t.typeId, name: t.name, unitPrice: t.amount, quantity: 1, amount: t.amount })),
   ];
 }
 

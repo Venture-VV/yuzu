@@ -56,18 +56,12 @@ export function MemberDetail({
               <ArrowLeft className="size-5" />
             </IconButton>
           )}
-          <span className={cn('flex size-14 shrink-0 items-center justify-center rounded-full text-[22px] font-bold', avatarTone(member.id))}>
-            {member.name.slice(0, 1)}
-          </span>
+          <span className={cn('flex size-14 shrink-0 items-center justify-center rounded-full text-[22px] font-bold', avatarTone(member.id))}>{member.name.slice(0, 1)}</span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[22px] leading-tight font-bold tracking-tight break-all text-ink">{member.name}</h2>
               <GradeBadge member={member} withExpiry />
-              {member.mergedIntoId !== null ? (
-                <Badge tone="neutral">已合并</Badge>
-              ) : (
-                member.status === 'frozen' && <Badge tone="clay">已停用</Badge>
-              )}
+              {member.mergedIntoId !== null ? <Badge tone="neutral">已合并</Badge> : member.status === 'frozen' && <Badge tone="clay">已停用</Badge>}
               {member.isSynthetic && <Badge tone="ember">合成数据</Badge>}
             </div>
             <p className="num mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[13px] text-ink-2">
@@ -182,15 +176,11 @@ export function MemberDetail({
       </div>
 
       <div className="flex flex-wrap gap-2 text-[12.5px]">
-        <span className="rounded-full bg-paper-2 px-3 py-1 font-semibold text-ink-2">
-          充值 {member.stats.rechargeCount} 次
-        </span>
+        <span className="rounded-full bg-paper-2 px-3 py-1 font-semibold text-ink-2">充值 {member.stats.rechargeCount} 次</span>
         <span className="rounded-full bg-paper-2 px-3 py-1 font-semibold text-ink-2">
           消费 {member.stats.consumeCount} 次 · 累计 <Money cents={member.stats.totalConsumed} />
         </span>
-        {member.stats.reversedCount > 0 && (
-          <span className="rounded-full bg-clay-soft/70 px-3 py-1 font-semibold text-clay">已撤销 {member.stats.reversedCount} 笔</span>
-        )}
+        {member.stats.reversedCount > 0 && <span className="rounded-full bg-clay-soft/70 px-3 py-1 font-semibold text-clay">已撤销 {member.stats.reversedCount} 笔</span>}
         {member.opening && (
           <span className="rounded-full bg-pine-tint px-3 py-1 font-semibold text-pine" data-testid="member-opening" title={`期初 ${member.opening.docNo}`}>
             {member.opening.source} 期初{member.opening.legacyNo ? `（旧卡号 ${member.opening.legacyNo}）` : ''} · 本金 <Money cents={member.opening.principal} /> · 赠金{' '}

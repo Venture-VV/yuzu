@@ -86,9 +86,7 @@ export function StaffTab() {
           ? [0, 1, 2].map((i) => <Skeleton key={i} className="m-3 h-12" />)
           : staff.data?.map((s) => (
               <div key={s.id} className={cn('flex flex-wrap items-center gap-3 px-4 py-3', !s.active && 'opacity-55')}>
-                <span className={cn('flex size-10 items-center justify-center rounded-full text-[15px] font-bold', avatarTone(s.id))}>
-                  {s.displayName.slice(0, 1)}
-                </span>
+                <span className={cn('flex size-10 items-center justify-center rounded-full text-[15px] font-bold', avatarTone(s.id))}>{s.displayName.slice(0, 1)}</span>
                 <div className="min-w-[140px] flex-1">
                   <p className="flex items-center gap-2 text-[14.5px] font-bold">
                     {s.displayName}
@@ -138,11 +136,7 @@ export function StaffTab() {
             ))}
       </Card>
 
-      <StaffDialog
-        target={editing}
-        onClose={() => setEditing(null)}
-        onCreated={(name, password) => setSecret({ name, password, kind: 'password' })}
-      />
+      <StaffDialog target={editing} onClose={() => setEditing(null)} onCreated={(name, password) => setSecret({ name, password, kind: 'password' })} />
 
       <Dialog
         open={!!resetting}
@@ -219,15 +213,7 @@ export function StaffTab() {
   );
 }
 
-function StaffDialog({
-  target,
-  onClose,
-  onCreated,
-}: {
-  target: StaffRecord | 'new' | null;
-  onClose: () => void;
-  onCreated: (name: string, password: string) => void;
-}) {
+function StaffDialog({ target, onClose, onCreated }: { target: StaffRecord | 'new' | null; onClose: () => void; onCreated: (name: string, password: string) => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const isNew = target === 'new';
@@ -305,7 +291,9 @@ function StaffDialog({
       open={!!target}
       onClose={onClose}
       title={isNew ? '添加员工' : '编辑员工'}
-      description={isNew ? (role === 'tablet' ? '保存后会生成临时密码；在平板上用它登录、设好新密码，之后这台平板一直停在点餐页。' : '保存后会生成临时密码，员工首次登录时设置自己的密码。') : existing?.username}
+      description={
+        isNew ? (role === 'tablet' ? '保存后会生成临时密码；在平板上用它登录、设好新密码，之后这台平板一直停在点餐页。' : '保存后会生成临时密码，员工首次登录时设置自己的密码。') : existing?.username
+      }
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -408,10 +396,7 @@ function StaffDialog({
                 const current = storeIds ?? storesQ.data!.storeIds;
                 const on = current.includes(st.id);
                 return (
-                  <label
-                    key={st.id}
-                    className={cn('flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-[13.5px]', on ? 'border-pine bg-pine-tint' : 'border-line-strong bg-card')}
-                  >
+                  <label key={st.id} className={cn('flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-[13.5px]', on ? 'border-pine bg-pine-tint' : 'border-line-strong bg-card')}>
                     <input
                       type="checkbox"
                       checked={on}

@@ -194,7 +194,18 @@ describe('ERP 全流程试跑（8.0.7）', () => {
     expect(lotsAfterReceipt.filter((l) => l.materialId === mat.id)).toEqual([expect.objectContaining({ batchNo: 'FL-B01', remainingMilli: q(30), daysLeft: 20 })]);
 
     // ⑤ 领用与耗用：仓库领 10 瓶到浴区，浴区签收，耗用 4 瓶记用途「客用消耗」（经办人默认自己）
-    const issued = (await ok<{ doc: { id: number; status: string } }>(api(ctx.app, keeper, 'POST', '/api/inventory/docs', { clientKey: randomUUID(), docDate: today, docType: 'issue', departmentId: bathId, handler: '浴区阿兰', lines: [{ materialId: mat.id, qtyMilli: q(10) }] }))).doc;
+    const issued = (
+      await ok<{ doc: { id: number; status: string } }>(
+        api(ctx.app, keeper, 'POST', '/api/inventory/docs', {
+          clientKey: randomUUID(),
+          docDate: today,
+          docType: 'issue',
+          departmentId: bathId,
+          handler: '浴区阿兰',
+          lines: [{ materialId: mat.id, qtyMilli: q(10) }],
+        }),
+      )
+    ).doc;
     expect(issued.status).toBe('confirmed');
     await ok(api(ctx.app, bathUser, 'POST', `/api/erp/dept-stock/docs/${issued.id}/sign`, { note: '数量对' }), 200);
     const used = (
@@ -233,10 +244,17 @@ describe('ERP 全流程试跑（8.0.7）', () => {
         }),
       )
     ).advance;
-    const smallMat = await ok<{ id: number }>(api(ctx.app, boss, 'POST', '/api/inventory/materials', { code: 'FL-M2', name: '全流程一次性拖鞋', inventoryUnit: '双', purchaseUnit: '包', purchaseFactorMilli: q(50) }));
+    const smallMat = await ok<{ id: number }>(
+      api(ctx.app, boss, 'POST', '/api/inventory/materials', { code: 'FL-M2', name: '全流程一次性拖鞋', inventoryUnit: '双', purchaseUnit: '包', purchaseFactorMilli: q(50) }),
+    );
     const cashPo = (
       await ok<{ po: { id: number; docNo: string; lines: { id: number }[] } }>(
-        api(ctx.app, buyer, 'POST', '/api/purchase-orders', { clientKey: randomUUID(), supplierId: cashSup.id, orderDate: today, lines: [{ materialId: smallMat.id, purchaseQtyMilli: q(3), priceCents: 15_000 }] }),
+        api(ctx.app, buyer, 'POST', '/api/purchase-orders', {
+          clientKey: randomUUID(),
+          supplierId: cashSup.id,
+          orderDate: today,
+          lines: [{ materialId: smallMat.id, purchaseQtyMilli: q(3), priceCents: 15_000 }],
+        }),
       )
     ).po;
     const cashPoNow = (await api(ctx.app, buyer, 'GET', `/api/purchase-orders/${cashPo.id}`)).body as { status: string };
@@ -280,7 +298,15 @@ describe('ERP 全流程试跑（8.0.7）', () => {
     ).claim;
     expect(claim).toMatchObject({ status: 'confirmed', amountCents: 45_000 });
     const settled = await ok<{ advance: { state: string; outstandingCents: number } }>(
-      api(ctx.app, coster, 'POST', '/api/erp/petty/settlements', { clientKey: randomUUID(), advanceId: adv.id, kind: 'return', settleDate: today, amountCents: 5_000, method: 'cash', evidence: '现金当面点清' }),
+      api(ctx.app, coster, 'POST', '/api/erp/petty/settlements', {
+        clientKey: randomUUID(),
+        advanceId: adv.id,
+        kind: 'return',
+        settleDate: today,
+        amountCents: 5_000,
+        method: 'cash',
+        evidence: '现金当面点清',
+      }),
     );
     expect(settled.advance).toMatchObject({ state: 'settled', outstandingCents: 0 });
 
@@ -326,7 +352,9 @@ describe('ERP 全流程试跑（8.0.7）', () => {
     expect(paid.request.status).toBe('paid');
 
     // ⑧ 对账确认：按批次登记这张收货单，生成链接；供应商不用登录打开、确认无误；门店这边看到回复
-    const recon = (await ok<{ reconciliation: { id: number } }>(api(ctx.app, payer, 'POST', '/api/payables/reconciliations', { clientKey: randomUUID(), supplierId: sup.id, kind: 'batch', docIds: [receipt.id] }))).reconciliation;
+    const recon = (
+      await ok<{ reconciliation: { id: number } }>(api(ctx.app, payer, 'POST', '/api/payables/reconciliations', { clientKey: randomUUID(), supplierId: sup.id, kind: 'batch', docIds: [receipt.id] }))
+    ).reconciliation;
     const link = await ok<{ token: string }>(api(ctx.app, payer, 'POST', `/api/payables/reconciliations/${recon.id}/links`, {}));
     const pub = await ctx.app.inject({ method: 'GET', url: `/api/public/recon/${link.token}` });
     expect(pub.statusCode).toBe(200);

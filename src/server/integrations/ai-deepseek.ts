@@ -21,7 +21,10 @@ const MAX_RETRIES = 2;
 /** 非思考模式默认 8K；小结 2000 字、答案 4000 字、条款提示 10 条都够 */
 const MAX_TOKENS = 8000;
 
-type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{
+type FetchLike = (
+  url: string,
+  init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal },
+) => Promise<{
   ok: boolean;
   status: number;
   headers: { get(name: string): string | null };
@@ -33,10 +36,7 @@ interface ToolCallOut {
   type: 'function';
   function: { name: string; arguments: string };
 }
-type ChatMessage =
-  | { role: 'system' | 'user'; content: string }
-  | { role: 'assistant'; content: string; tool_calls?: ToolCallOut[] }
-  | { role: 'tool'; tool_call_id: string; content: string };
+type ChatMessage = { role: 'system' | 'user'; content: string } | { role: 'assistant'; content: string; tool_calls?: ToolCallOut[] } | { role: 'tool'; tool_call_id: string; content: string };
 interface ChatChoice {
   finish_reason?: string | null;
   message?: { content?: string | null; refusal?: string | null; tool_calls?: ToolCallOut[] | null } | null;
@@ -69,7 +69,13 @@ async function errorDetail(res: { json(): Promise<unknown> }): Promise<string> {
   try {
     const body = (await res.json()) as { error?: { message?: unknown } | string; message?: unknown };
     const raw = typeof body.error === 'string' ? body.error : (body.error?.message ?? body.message);
-    return typeof raw === 'string' ? raw.replace(/sk-[A-Za-z0-9_-]{6,}/g, 'sk-…').replace(/\s+/g, ' ').trim().slice(0, 120) : '';
+    return typeof raw === 'string'
+      ? raw
+          .replace(/sk-[A-Za-z0-9_-]{6,}/g, 'sk-…')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 120)
+      : '';
   } catch {
     return '';
   }
@@ -176,7 +182,12 @@ export function deepseekProvider(opts: DeepseekOptions): AiProvider {
     name: 'deepseek',
     model,
     async write({ system, prompt }) {
-      const r = await chat({ messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }] satisfies ChatMessage[] });
+      const r = await chat({
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: prompt },
+        ] satisfies ChatMessage[],
+      });
       return { text: textOf(r.choice), usage: addUsage(ZERO, r.usage) };
     },
     async ask({ system, question, tools, maxIterations }) {
@@ -231,7 +242,13 @@ export function deepseekProvider(opts: DeepseekOptions): AiProvider {
       const sys = `${system}\n\n只输出一个 JSON 对象（json），不要别的文字。格式（JSON Schema）：${format}`;
       let usage = ZERO;
       for (let attempt = 0; attempt < 2; attempt++) {
-        const r = await chat({ messages: [{ role: 'system', content: sys }, { role: 'user', content: prompt }] satisfies ChatMessage[], response_format: { type: 'json_object' } });
+        const r = await chat({
+          messages: [
+            { role: 'system', content: sys },
+            { role: 'user', content: prompt },
+          ] satisfies ChatMessage[],
+          response_format: { type: 'json_object' },
+        });
         usage = addUsage(usage, r.usage);
         try {
           const parsed = schema.safeParse(JSON.parse(textOf(r.choice)));

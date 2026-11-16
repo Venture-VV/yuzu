@@ -121,7 +121,10 @@ describe('线上收款入账', () => {
         { method: 'wechat', count: 2, amount: yuan(12000) },
       ]),
     );
-    expect(settle.checks.every((c: { ok: boolean }) => c.ok), JSON.stringify(settle.checks.filter((c: { ok: boolean }) => !c.ok))).toBe(true);
+    expect(
+      settle.checks.every((c: { ok: boolean }) => c.ok),
+      JSON.stringify(settle.checks.filter((c: { ok: boolean }) => !c.ok)),
+    ).toBe(true);
     // 按经办人：线上的记在「小程序」名下
     expect(settle.byStaff.find((x: { name: string }) => x.name === '小程序')).toMatchObject({ rechargeCount: 2, rechargePaid: yuan(12000) });
     const csv = await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${date}/export`);

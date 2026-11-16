@@ -51,33 +51,41 @@ const qy004 = async () =>
   )[0]!;
 
 describe('迁移 047 · 浴票延迟的默认分钟数', () => {
-  it('没动过的 QY-004 补上默认：L1·初 起 30 分钟，每一档初 30、享 60、尊 90；仍是草稿、版本 1', async () => {
-    await schemaBefore047();
-    await insertQy004(1);
-    expect(await migrate(sql)).toEqual(migrationsFrom('047_membership_finish.sql'));
+  it(
+    '没动过的 QY-004 补上默认：L1·初 起 30 分钟，每一档初 30、享 60、尊 90；仍是草稿、版本 1',
+    async () => {
+      await schemaBefore047();
+      await insertQy004(1);
+      expect(await migrate(sql)).toEqual(migrationsFrom('047_membership_finish.sql'));
 
-    const q = await qy004();
-    expect(q).toMatchObject({ status: 'draft', version: 1, startGrade: 1, startTier: 0, quantity: 30 });
-    // 与导入清单预填的一样（导入与升级两条路得到同一份配置）
-    expect(q.tierQuantities).toEqual([...TICKET_EXTENSION_DEFAULT_ROWS]);
-    for (let grade = 1; grade <= 6; grade += 1) {
-      for (const [tier, minutes] of [30, 60, 90].entries()) expect(benefitQuantity(q, grade, tier), `L${grade}·${tier}`).toBe(minutes);
-    }
-    // 补上以后就能发布（发布要有起点的分钟数）
-    await sql`UPDATE benefits SET status = 'published', published_at = now(), version = version + 1 WHERE code = 'QY-004'`;
-  }, HEAVY);
+      const q = await qy004();
+      expect(q).toMatchObject({ status: 'draft', version: 1, startGrade: 1, startTier: 0, quantity: 30 });
+      // 与导入清单预填的一样（导入与升级两条路得到同一份配置）
+      expect(q.tierQuantities).toEqual([...TICKET_EXTENSION_DEFAULT_ROWS]);
+      for (let grade = 1; grade <= 6; grade += 1) {
+        for (const [tier, minutes] of [30, 60, 90].entries()) expect(benefitQuantity(q, grade, tier), `L${grade}·${tier}`).toBe(minutes);
+      }
+      // 补上以后就能发布（发布要有起点的分钟数）
+      await sql`UPDATE benefits SET status = 'published', published_at = now(), version = version + 1 WHERE code = 'QY-004'`;
+    },
+    HEAVY,
+  );
 
-  it('改过的 QY-004（版本 2）不动；没导入清单的库不新建', async () => {
-    await schemaBefore047();
-    await insertQy004(2, 45);
-    await migrate(sql);
-    expect(await qy004()).toMatchObject({ status: 'draft', version: 2, startGrade: 1, startTier: 2, quantity: 45, tierQuantities: [] });
+  it(
+    '改过的 QY-004（版本 2）不动；没导入清单的库不新建',
+    async () => {
+      await schemaBefore047();
+      await insertQy004(2, 45);
+      await migrate(sql);
+      expect(await qy004()).toMatchObject({ status: 'draft', version: 2, startGrade: 1, startTier: 2, quantity: 45, tierQuantities: [] });
 
-    await schemaBefore047();
-    await migrate(sql);
-    const [n] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM benefits`;
-    expect(n!.n).toBe(0);
-  }, HEAVY);
+      await schemaBefore047();
+      await migrate(sql);
+      const [n] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM benefits`;
+      expect(n!.n).toBe(0);
+    },
+    HEAVY,
+  );
 });
 
 /** v0.7.24 导入的 QY-041：折扣类、草稿、起点 L3·初、没填适用明细与折扣 */
@@ -92,36 +100,44 @@ const qy041 = async () =>
   )[0]!;
 
 describe('迁移 047 · QY-041 同行优惠的预填', () => {
-  it('没动过的 QY-041 补上同行的门票、同行 1 位、L6·初 起 2 位，不填折扣：仍是草稿、版本 1，发布不了', async () => {
-    await schemaBefore047();
-    await insertQy041(1);
-    // 别的折扣类（本人的门票）不加同行几位
-    await sql`
+  it(
+    '没动过的 QY-041 补上同行的门票、同行 1 位、L6·初 起 2 位，不填折扣：仍是草稿、版本 1，发布不了',
+    async () => {
+      await schemaBefore047();
+      await insertQy041(1);
+      // 别的折扣类（本人的门票）不加同行几位
+      await sql`
       INSERT INTO benefits (code, name, category, start_grade, start_tier, quantity, discount_target, content)
       VALUES ('QY-011', '门票折扣', 'discount', 1, 0, 90, 'ticket', '门票折扣')`;
-    await migrate(sql);
-    expect(await qy041()).toEqual({ status: 'draft', version: 1, discountTarget: 'companion_ticket', quantity: null, companionCount: 1, companionCounts: [{ grade: 6, tier: 0, quantity: 2 }] });
-    const [other] = await sql<{ companionCount: number | null; companionCounts: TierQuantity[] }[]>`
+      await migrate(sql);
+      expect(await qy041()).toEqual({ status: 'draft', version: 1, discountTarget: 'companion_ticket', quantity: null, companionCount: 1, companionCounts: [{ grade: 6, tier: 0, quantity: 2 }] });
+      const [other] = await sql<{ companionCount: number | null; companionCounts: TierQuantity[] }[]>`
       SELECT companion_count, companion_counts FROM benefits WHERE code = 'QY-011'`;
-    expect(other).toEqual({ companionCount: null, companionCounts: [] });
-    // 没填折扣：数据库也不让发布「没填同行几位」的同行优惠；填了同行几位、折扣以后能发布
-    await expect(
-      sql`UPDATE benefits SET quantity = 80, companion_count = NULL, companion_counts = '[]', status = 'published', published_at = now() WHERE code = 'QY-041'`,
-    ).rejects.toThrow(/benefits_companion_publish_check/);
-    await sql`UPDATE benefits SET quantity = 80, status = 'published', published_at = now(), version = version + 1 WHERE code = 'QY-041'`;
-    // 「同行几位」只给同行的适用明细
-    await expect(sql`UPDATE benefits SET companion_count = 1 WHERE code = 'QY-011'`).rejects.toThrow(/benefits_companion_check/);
-  }, HEAVY);
+      expect(other).toEqual({ companionCount: null, companionCounts: [] });
+      // 没填折扣：数据库也不让发布「没填同行几位」的同行优惠；填了同行几位、折扣以后能发布
+      await expect(sql`UPDATE benefits SET quantity = 80, companion_count = NULL, companion_counts = '[]', status = 'published', published_at = now() WHERE code = 'QY-041'`).rejects.toThrow(
+        /benefits_companion_publish_check/,
+      );
+      await sql`UPDATE benefits SET quantity = 80, status = 'published', published_at = now(), version = version + 1 WHERE code = 'QY-041'`;
+      // 「同行几位」只给同行的适用明细
+      await expect(sql`UPDATE benefits SET companion_count = 1 WHERE code = 'QY-011'`).rejects.toThrow(/benefits_companion_check/);
+    },
+    HEAVY,
+  );
 
-  it('改过的 QY-041（版本 2，或已经填了适用明细）不动', async () => {
-    await schemaBefore047();
-    await insertQy041(2);
-    await migrate(sql);
-    expect(await qy041()).toMatchObject({ version: 2, discountTarget: null, companionCount: null, companionCounts: [] });
+  it(
+    '改过的 QY-041（版本 2，或已经填了适用明细）不动',
+    async () => {
+      await schemaBefore047();
+      await insertQy041(2);
+      await migrate(sql);
+      expect(await qy041()).toMatchObject({ version: 2, discountTarget: null, companionCount: null, companionCounts: [] });
 
-    await schemaBefore047();
-    await insertQy041(1, 'bill');
-    await migrate(sql);
-    expect(await qy041()).toMatchObject({ version: 1, discountTarget: 'bill', companionCount: null, companionCounts: [] });
-  }, HEAVY);
+      await schemaBefore047();
+      await insertQy041(1, 'bill');
+      await migrate(sql);
+      expect(await qy041()).toMatchObject({ version: 1, discountTarget: 'bill', companionCount: null, companionCounts: [] });
+    },
+    HEAVY,
+  );
 });

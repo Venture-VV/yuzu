@@ -5,7 +5,30 @@ import { useEffect, type ReactNode } from 'react';
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router';
 import { usePageEnter, useSlidingIndicator } from '../../lib/motion';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Banknote, Building2, Boxes, ClipboardCheck, ClipboardList, FileOutput, FileSignature, FileText, HandCoins, Landmark, LayoutGrid, LineChart, Monitor, Package, ReceiptText, ShieldCheck, Shirt, ShoppingCart, SlidersHorizontal, Soup, type LucideIcon } from 'lucide-react';
+import {
+  ArrowLeft,
+  Banknote,
+  Building2,
+  Boxes,
+  ClipboardCheck,
+  ClipboardList,
+  FileOutput,
+  FileSignature,
+  FileText,
+  HandCoins,
+  Landmark,
+  LayoutGrid,
+  LineChart,
+  Monitor,
+  Package,
+  ReceiptText,
+  ShieldCheck,
+  Shirt,
+  ShoppingCart,
+  SlidersHorizontal,
+  Soup,
+  type LucideIcon,
+} from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
 import type { ContractExpiryItem } from '@shared/contracts';
 import type { PaymentTodo } from '@shared/payments';
@@ -23,6 +46,7 @@ import { InstanceBadge } from '../../components/InstanceTag';
 import { Notice } from '../../components/ui';
 import { useErpAccess } from './access';
 import { erpSettingsTabs } from './settingsTabs';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 
 const ICONS: Record<ErpModuleKey, LucideIcon> = {
   inventory: Boxes,
@@ -243,12 +267,16 @@ export function ErpShell() {
       </header>
       {/* 窄屏：模块横排在顶部，可横向滑动 */}
       <nav ref={tabPill.ref} aria-label="ERP 分区" className="relative flex shrink-0 gap-1.5 overflow-x-auto border-b border-line bg-card px-3 py-2 lg:hidden">
-        {tabPill.style && <span key={tabPill.jump} aria-hidden className={cn('mo-indicator rounded-full bg-pine', tabPill.jump > 0 && 'mo-indicator-jump')} data-settled={tabPill.settled} style={tabPill.style} />}
+        {tabPill.style && (
+          <span key={tabPill.jump} aria-hidden className={cn('mo-indicator rounded-full bg-pine', tabPill.jump > 0 && 'mo-indicator-jump')} data-settled={tabPill.settled} style={tabPill.style} />
+        )}
         {groups.flatMap((g) => g.items).map((it) => link(it, true))}
       </nav>
       <div className="flex min-h-0 flex-1">
         <nav ref={sidePill.ref} aria-label="ERP 导航" className="scroll-thin relative hidden w-[212px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-line bg-card px-3 py-4 lg:flex">
-          {sidePill.style && <span key={sidePill.jump} aria-hidden className={cn('mo-indicator rounded-lg bg-pine', sidePill.jump > 0 && 'mo-indicator-jump')} data-settled={sidePill.settled} style={sidePill.style} />}
+          {sidePill.style && (
+            <span key={sidePill.jump} aria-hidden className={cn('mo-indicator rounded-lg bg-pine', sidePill.jump > 0 && 'mo-indicator-jump')} data-settled={sidePill.settled} style={sidePill.style} />
+          )}
           {groups.map((g) => (
             <div key={g.title} className="flex flex-col gap-0.5">
               <p className="px-3 pb-1 text-[11.5px] font-bold tracking-wide text-ink-4">{g.title}</p>
@@ -259,7 +287,9 @@ export function ErpShell() {
         {/* 不按地址重新挂载：库存的各个页签之间切换时，页面里的状态与原来在门店里一样保留 */}
         <main ref={content} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
           <ErpModuleGate module={erpModuleOfPage(pathname)}>
-            <Outlet />
+            <ErrorBoundary resetKey={pathname}>
+              <Outlet />
+            </ErrorBoundary>
           </ErpModuleGate>
         </main>
       </div>

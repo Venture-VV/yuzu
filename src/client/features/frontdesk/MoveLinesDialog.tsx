@@ -15,7 +15,6 @@ import { Button, Field, Input, Notice } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp } from './pending';
 import { useServerNow } from './queries';
 
-
 /** 这条明细能不能转：不能转的写明原因（与服务端一致） */
 export function moveBlock(line: BillLine): string | null {
   if (line.source === 'room') return '房费随入住单走';
@@ -62,8 +61,7 @@ export function MoveLinesDialog({
   const now = useServerNow(visit.serverTime);
   const selfMinutes = rules?.selfVoidMinutes ?? 10;
   // 权限与作废明细相同：有「前台更正」的岗位随时可以；其他人只能转自己在规定分钟内挂的（按服务器时间，以服务端为准）
-  const canFix = (l: BillLine) =>
-    can('frontdesk.correct') || (l.postedById === session.staff.id && (now - new Date(l.postedAt).getTime()) / 60_000 <= selfMinutes);
+  const canFix = (l: BillLine) => can('frontdesk.correct') || (l.postedById === session.staff.id && (now - new Date(l.postedAt).getTime()) / 60_000 <= selfMinutes);
   const active = visit.lines.filter((l) => l.status === 'active');
   const why = (l: BillLine) => moveBlock(l) ?? (canFix(l) ? null : `超过 ${selfMinutes} 分钟或不是你挂的，请店主或值班经理处理`);
   const chosen = active.filter((l) => picked.includes(l.id));
@@ -71,15 +69,7 @@ export function MoveLinesDialog({
 
   const c = normalizeTagCode(code);
   const target = c ? tags.find((t) => t.code === c) : undefined;
-  const problem = !c
-    ? null
-    : !target
-      ? `没有牌号 ${c}`
-      : target.code === visit.tag.code
-        ? '这就是这位客人的手牌'
-        : !target.visit
-          ? `手牌 ${c} 没有在店客人`
-          : null;
+  const problem = !c ? null : !target ? `没有牌号 ${c}` : target.code === visit.tag.code ? '这就是这位客人的手牌' : !target.visit ? `手牌 ${c} 没有在店客人` : null;
   const ready = chosen.length > 0 && chosen.length <= MAX_MOVE_LINES && !!target?.visit && !problem && reason.trim().length >= 2;
   const locked = op.locked;
   const edit = (fn: () => void) => {
@@ -129,10 +119,7 @@ export function MoveLinesDialog({
                 const on = picked.includes(l.id);
                 return (
                   <li key={l.id}>
-                    <label
-                      className={cn('flex items-center gap-3 px-3 py-2.5 text-[14px]', block ? 'cursor-not-allowed opacity-55' : 'cursor-pointer hover:bg-paper-2')}
-                      title={block ?? undefined}
-                    >
+                    <label className={cn('flex items-center gap-3 px-3 py-2.5 text-[14px]', block ? 'cursor-not-allowed opacity-55' : 'cursor-pointer hover:bg-paper-2')} title={block ?? undefined}>
                       <input
                         type="checkbox"
                         className="size-4 accent-pine"
@@ -186,10 +173,7 @@ export function MoveLinesDialog({
                 type="button"
                 disabled={locked}
                 onClick={() => edit(() => setReason(r))}
-                className={cn(
-                  'h-8 rounded-full border px-3 text-[13px] font-semibold',
-                  reason === r ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2 hover:bg-paper-2',
-                )}
+                className={cn('h-8 rounded-full border px-3 text-[13px] font-semibold', reason === r ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2 hover:bg-paper-2')}
               >
                 {r}
               </button>

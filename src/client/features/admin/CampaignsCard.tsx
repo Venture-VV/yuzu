@@ -5,14 +5,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, Eye, MessageSquareText, Plus, Send, Smartphone } from 'lucide-react';
-import {
-  CAMPAIGN_STATUS_LABELS,
-  DEFAULT_REMIND_DAYS,
-  MAX_REMIND_DAYS,
-  type CampaignPreview,
-  type CouponCampaign,
-  type CouponCampaignDetail,
-} from '@shared/coupon-campaigns';
+import { CAMPAIGN_STATUS_LABELS, DEFAULT_REMIND_DAYS, MAX_REMIND_DAYS, type CampaignPreview, type CouponCampaign, type CouponCampaignDetail } from '@shared/coupon-campaigns';
 import { MAX_MANUAL_COUPONS } from '@shared/coupons';
 import { groupTags } from '@shared/member-tags';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
@@ -29,7 +22,11 @@ import { useMemberTags } from '../membership/TagPicker';
 const campaignKeys = { list: ['coupons', 'campaigns'] as const, one: (id: number) => ['coupons', 'campaigns', id] as const };
 
 export function CampaignsCard() {
-  const list = useQuery({ queryKey: campaignKeys.list, queryFn: () => api.get<CouponCampaign[]>('/api/coupons/campaigns'), refetchInterval: (q) => (q.state.data?.some((c) => c.status === 'issuing') ? 5000 : false) });
+  const list = useQuery({
+    queryKey: campaignKeys.list,
+    queryFn: () => api.get<CouponCampaign[]>('/api/coupons/campaigns'),
+    refetchInterval: (q) => (q.state.data?.some((c) => c.status === 'issuing') ? 5000 : false),
+  });
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<number | null>(null);
   const pending = useErpPending(['coupon_campaign']).length > 0;
@@ -89,7 +86,9 @@ export function CampaignsCard() {
                     <b className="text-ink">{c.issued}</b> / {c.targeted}
                     {c.skipped > 0 && <span className="block text-[12px] text-ember">跳过 {c.skipped}</span>}
                   </td>
-                  <td className="py-2 pr-3 text-[12px] whitespace-nowrap text-ink-2">{c.notifySms ? `已发 ${c.sms.sent} · 待发 ${c.sms.pending}${c.sms.failed ? ` · 失败 ${c.sms.failed}` : ''}` : '—'}</td>
+                  <td className="py-2 pr-3 text-[12px] whitespace-nowrap text-ink-2">
+                    {c.notifySms ? `已发 ${c.sms.sent} · 待发 ${c.sms.pending}${c.sms.failed ? ` · 失败 ${c.sms.failed}` : ''}` : '—'}
+                  </td>
                   <td className="py-2 pr-3 text-[12px] whitespace-nowrap text-ink-2">{c.notifyPopup ? `已读 ${c.notices.read} / ${c.notices.total}` : '—'}</td>
                   <td className="py-2 pr-3">
                     <Badge tone={c.status === 'done' ? 'pine' : 'ember'}>{CAMPAIGN_STATUS_LABELS[c.status]}</Badge>
@@ -297,7 +296,10 @@ function CampaignDialog({ open, onClose, onDone }: { open: boolean; onClose: () 
                       setTagIds(tagIds.includes(t.id) ? tagIds.filter((x) => x !== t.id) : [...tagIds, t.id]);
                       resetPreview();
                     }}
-                    className={cn('h-7 rounded-full px-2.5 text-[12.5px] font-semibold ring-1', tagIds.includes(t.id) ? 'bg-pine text-paper ring-pine' : 'bg-card text-ink-2 ring-line hover:ring-ink-3')}
+                    className={cn(
+                      'h-7 rounded-full px-2.5 text-[12.5px] font-semibold ring-1',
+                      tagIds.includes(t.id) ? 'bg-pine text-paper ring-pine' : 'bg-card text-ink-2 ring-line hover:ring-ink-3',
+                    )}
                     data-testid={`campaign-tag-${t.id}`}
                   >
                     {t.name}
@@ -340,7 +342,15 @@ function CampaignDialog({ open, onClose, onDone }: { open: boolean; onClose: () 
           </ConfirmCheck>
           {popup && (
             <Field label="到期前几天再提醒" htmlFor="campaign-remind">
-              <Input id="campaign-remind" value={remind} inputMode="numeric" className="w-28" fullWidth={false} onChange={(e) => setRemind(e.target.value.replace(/\D/g, ''))} data-testid="campaign-remind" />
+              <Input
+                id="campaign-remind"
+                value={remind}
+                inputMode="numeric"
+                className="w-28"
+                fullWidth={false}
+                onChange={(e) => setRemind(e.target.value.replace(/\D/g, ''))}
+                data-testid="campaign-remind"
+              />
             </Field>
           )}
         </div>

@@ -164,12 +164,7 @@ export async function assertNotFenced(tx: Tx, key: string, opType: FencedOp, aba
  * 登记作废（在调用方的事务里，与原请求写编号串行）。
  * 编号已有结果时返回 { existingOpType }，由调用方查回；否则登记（重复登记不报错）。
  */
-export async function fenceKey(
-  tx: Tx,
-  key: string,
-  opType: FencedOp,
-  staffId: number,
-): Promise<{ existingOpType: string } | { inserted: boolean }> {
+export async function fenceKey(tx: Tx, key: string, opType: FencedOp, staffId: number): Promise<{ existingOpType: string } | { inserted: boolean }> {
   await lockKey(tx, key);
   const [existing] = await tx<{ opType: string }[]>`SELECT op_type FROM idempotency_keys WHERE key = ${key}`;
   if (existing) return { existingOpType: existing.opType };
@@ -270,9 +265,7 @@ export const isDeviceOp = (op: string): op is DeviceOp => (DEVICE_OPS as readonl
 /** 硬件连接（v0.7.21）的操作编号记在设备、打印任务上（v0.7.28 起打印单据也是打印任务）：查到时返回那一台设备、那个任务的编号 */
 export async function deviceOpRef(db: Db, key: string, opType: DeviceOp): Promise<number | null> {
   const rows =
-    opType === 'device_create'
-      ? await db<{ id: number }[]>`SELECT id FROM devices WHERE client_key = ${key}`
-      : await db<{ id: number }[]>`SELECT id FROM device_jobs WHERE client_key = ${key}`;
+    opType === 'device_create' ? await db<{ id: number }[]>`SELECT id FROM devices WHERE client_key = ${key}` : await db<{ id: number }[]>`SELECT id FROM device_jobs WHERE client_key = ${key}`;
   return rows[0] ? Number(rows[0].id) : null;
 }
 
@@ -360,16 +353,16 @@ export async function erpP2OpRef(db: Db, key: string, op: ErpP2Op): Promise<numb
         ? await db<{ id: number }[]>`SELECT id FROM asset_stocktakes WHERE client_key = ${key}`
         : op === 'patrol_point'
           ? await db<{ id: number }[]>`SELECT id FROM patrol_points WHERE client_key = ${key}`
-        : op === 'linen_doc'
-          ? await db<{ id: number }[]>`SELECT id FROM linen_docs WHERE client_key = ${key}`
-        : op === 'invoice_request'
-          ? await db<{ id: number }[]>`SELECT id FROM invoice_requests WHERE client_key = ${key}`
-        : op === 'bank_import'
-          ? await db<{ id: number }[]>`SELECT id FROM bank_imports WHERE client_key = ${key}`
-        : op === 'payment_batch'
-          ? await db<{ id: number }[]>`SELECT id FROM payment_batches WHERE client_key = ${key}`
-        : op === 'ota_import'
-          ? await db<{ id: number }[]>`SELECT id FROM ota_imports WHERE client_key = ${key}`
-        : await db<{ id: number }[]>`SELECT id FROM asset_cards WHERE client_key = ${key} ORDER BY id LIMIT 1`;
+          : op === 'linen_doc'
+            ? await db<{ id: number }[]>`SELECT id FROM linen_docs WHERE client_key = ${key}`
+            : op === 'invoice_request'
+              ? await db<{ id: number }[]>`SELECT id FROM invoice_requests WHERE client_key = ${key}`
+              : op === 'bank_import'
+                ? await db<{ id: number }[]>`SELECT id FROM bank_imports WHERE client_key = ${key}`
+                : op === 'payment_batch'
+                  ? await db<{ id: number }[]>`SELECT id FROM payment_batches WHERE client_key = ${key}`
+                  : op === 'ota_import'
+                    ? await db<{ id: number }[]>`SELECT id FROM ota_imports WHERE client_key = ${key}`
+                    : await db<{ id: number }[]>`SELECT id FROM asset_cards WHERE client_key = ${key} ORDER BY id LIMIT 1`;
   return row ? Number(row.id) : null;
 }

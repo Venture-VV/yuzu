@@ -94,7 +94,11 @@ export function SettlementPage() {
       </div>
       {(summary.data?.unshifted.count ?? 0) > 0 && (
         <div className="shrink-0 px-5 pt-3 md:px-7">
-          <Notice tone="warning" title={`有 ${summary.data!.unshifted.count} 笔结账（${formatYuan(summary.data!.unshifted.total)}）收款时没有开班，不在任何交班的合计里`} data-testid="settlement-unshifted">
+          <Notice
+            tone="warning"
+            title={`有 ${summary.data!.unshifted.count} 笔结账（${formatYuan(summary.data!.unshifted.total)}）收款时没有开班，不在任何交班的合计里`}
+            data-testid="settlement-unshifted"
+          >
             「先开班」关掉、没人开班时收的款会这样；日结照常算进营业额，交班对账时请把这几笔单独核对。
           </Notice>
         </div>
@@ -145,32 +149,22 @@ function CloseStatus({ s }: { s: SettlementSummary }) {
 
 function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
   const allOk = s.checks.every((c) => c.ok);
-  const empty =
-    s.recharge.count + s.consume.count + s.reversal.count + s.expiry.count + s.opening.count + s.opening.voidCount + s.business.checkouts.count + s.business.voids.count === 0;
+  const empty = s.recharge.count + s.consume.count + s.reversal.count + s.expiry.count + s.opening.count + s.opening.voidCount + s.business.checkouts.count + s.business.voids.count === 0;
 
   return (
     <div className="space-y-5">
       {/* 核对结论 */}
-      <div
-        className={cn(
-          'flex flex-wrap items-center gap-4 rounded-xl border px-5 py-4',
-          allOk ? 'border-pine/15 bg-pine text-paper' : 'border-clay/30 bg-clay-soft text-clay',
-        )}
-      >
+      <div className={cn('flex flex-wrap items-center gap-4 rounded-xl border px-5 py-4', allOk ? 'border-pine/15 bg-pine text-paper' : 'border-clay/30 bg-clay-soft text-clay')}>
         <span className={cn('flex size-11 items-center justify-center rounded-full', allOk ? 'bg-white/12' : 'bg-clay text-paper')}>
           {allOk ? <CircleCheck className="size-6" /> : <CircleX className="size-6" />}
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[17px] font-bold">{allOk ? `${dayLabel} · 余额与流水核对一致` : `${dayLabel} · 核对发现差异`}</p>
           <p className={cn('text-[13px]', allOk ? 'text-paper/70' : 'text-ink-2')}>
-            {allOk
-              ? `${s.checks.length} 项核对全部通过：单据、流水、期初期末与会员余额相互吻合。`
-              : '请先查看下方核对项与异常记录，必要时联系维护人员。'}
+            {allOk ? `${s.checks.length} 项核对全部通过：单据、流水、期初期末与会员余额相互吻合。` : '请先查看下方核对项与异常记录，必要时联系维护人员。'}
           </p>
         </div>
-        {s.closed?.note && (
-          <p className={cn('max-w-xs text-[12.5px]', allOk ? 'text-paper/80' : 'text-ink-2')}>日结备注：{s.closed.note}</p>
-        )}
+        {s.closed?.note && <p className={cn('max-w-xs text-[12.5px]', allOk ? 'text-paper/80' : 'text-ink-2')}>日结备注：{s.closed.note}</p>}
       </div>
 
       {s.closed?.changedSinceClose && (
@@ -433,10 +427,7 @@ function SplitBar({ principal, bonus }: { principal: number; bonus: number }) {
   );
 }
 
-const ANOMALY_META: Record<
-  SettlementAnomaly['kind'],
-  { label: string; tone: 'clay' | 'ember' | 'lake' | 'yuzu'; icon: typeof Undo2; iconClass: string }
-> = {
+const ANOMALY_META: Record<SettlementAnomaly['kind'], { label: string; tone: 'clay' | 'ember' | 'lake' | 'yuzu'; icon: typeof Undo2; iconClass: string }> = {
   reversal: { label: ANOMALY_LABELS.reversal, tone: 'clay', icon: Undo2, iconClass: 'bg-clay-soft text-clay' },
   cross_day_reversal: { label: ANOMALY_LABELS.cross_day_reversal, tone: 'ember', icon: Undo2, iconClass: 'bg-ember-soft text-ember' },
   duplicate_blocked: { label: ANOMALY_LABELS.duplicate_blocked, tone: 'lake', icon: Copy, iconClass: 'bg-lake-soft text-lake' },
@@ -712,7 +703,9 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
             <div key={m.method} className="flex items-center justify-between">
               <span className="text-ink-3">
                 {CHECKOUT_METHOD_LABELS[m.method]}
-                <span className="ml-1 text-[12px]">· {m.count} 笔{m.voidCount ? `，反结账 ${m.voidCount}` : ''}</span>
+                <span className="ml-1 text-[12px]">
+                  · {m.count} 笔{m.voidCount ? `，反结账 ${m.voidCount}` : ''}
+                </span>
                 {m.method === 'wallet' && <span className="ml-1 text-[11.5px] text-ink-4">（会员余额抵扣，同时计入储值消费）</span>}
                 {m.method === 'coupon' && <span className="ml-1 text-[11.5px] text-ink-4">（平台团购核销）</span>}
                 {(m.method === 'discount' || m.method === 'store_coupon' || m.method === 'member_discount') && <span className="ml-1 text-[11.5px] text-ink-4">（不是收款）</span>}

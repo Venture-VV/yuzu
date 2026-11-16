@@ -8,7 +8,21 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { DEFAULT_DINING_RULES, KITCHEN_STATUSES, MAX_STATION_NAME, MAX_VOID_FREE_CENTS, type DiningAdmin, type DiningGuest, type DiningMenu, type DiningRules, type KitchenBoard, type KitchenItem, type KitchenStation, type KitchenStatus, type MenuDish } from '@shared/dining';
+import {
+  DEFAULT_DINING_RULES,
+  KITCHEN_STATUSES,
+  MAX_STATION_NAME,
+  MAX_VOID_FREE_CENTS,
+  type DiningAdmin,
+  type DiningGuest,
+  type DiningMenu,
+  type DiningRules,
+  type KitchenBoard,
+  type KitchenItem,
+  type KitchenStation,
+  type KitchenStatus,
+  type MenuDish,
+} from '@shared/dining';
 import { defaultTier, type TierPrice } from '@shared/catalog';
 import { can } from '@shared/permissions';
 import type { Db, Tx } from '../db';
@@ -65,11 +79,10 @@ export async function takeDishLimits(tx: Tx, lines: DishLine[], date: string): P
   for (const r of rows) {
     const w = wanted.get(r.itemId)!;
     if (r.remaining < w.quantity) {
-      throw conflict(
-        'DISH_SOLD_OUT',
-        r.remaining === 0 ? `「${w.name}」今天已估清（卖完了），请换一道菜` : `「${w.name}」今天只剩 ${r.remaining} 份，请改份数或换一道菜`,
-        { itemId: r.itemId, remaining: r.remaining },
-      );
+      throw conflict('DISH_SOLD_OUT', r.remaining === 0 ? `「${w.name}」今天已估清（卖完了），请换一道菜` : `「${w.name}」今天只剩 ${r.remaining} 份，请改份数或换一道菜`, {
+        itemId: r.itemId,
+        remaining: r.remaining,
+      });
     }
     await tx`UPDATE dish_limits SET remaining = remaining - ${w.quantity} WHERE item_id = ${r.itemId}`;
   }
@@ -355,7 +368,11 @@ const RulesInput = z.object({
   warnMinutes: z.number('分钟数必须是整数').int('分钟数必须是整数').min(1, '至少 1 分钟').max(180, '最多 180 分钟'),
   // 8.0.8：桌台点单开关（A05）、小额退菜上限（B02）
   tablesEnabled: z.boolean(),
-  voidFreeCents: z.number('金额必须是整数（分）').int('金额必须是整数（分）').min(0, '不能小于 0').max(MAX_VOID_FREE_CENTS, `最多 ¥${MAX_VOID_FREE_CENTS / 100}`),
+  voidFreeCents: z
+    .number('金额必须是整数（分）')
+    .int('金额必须是整数（分）')
+    .min(0, '不能小于 0')
+    .max(MAX_VOID_FREE_CENTS, `最多 ¥${MAX_VOID_FREE_CENTS / 100}`),
 });
 const StationInput = z.object({
   name: z.string().trim().min(1, '请填写档口名称').max(MAX_STATION_NAME, `档口名称最多 ${MAX_STATION_NAME} 字`),
@@ -436,7 +453,12 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
           staffId: req.actor.id,
           action: 'items_station_updated',
           targetType: 'item',
-          detail: { summary: changed.map((r) => `${r.name} → ${name(want.get(r.id)!)}`).join('；').slice(0, 500) },
+          detail: {
+            summary: changed
+              .map((r) => `${r.name} → ${name(want.get(r.id)!)}`)
+              .join('；')
+              .slice(0, 500),
+          },
           ip: req.ip,
         });
       }
@@ -446,10 +468,8 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
 
   // 点单页：菜单与估清、按手牌找客人、下单（挂账）、催单
   // 8.0.8：前台「加项目」看余量（B03）、退菜看小额上限（B02）、收银与看日结的看桌台点单开没开（A05），都读这一份
-  app.get(
-    '/api/dining/menu',
-    { preHandler: guardAny('dining.order', 'dining.kitchen', 'frontdesk.operate', 'frontdesk.checkout', 'ledger.export', 'report.executive') },
-    async () => diningMenu(sql, deps),
+  app.get('/api/dining/menu', { preHandler: guardAny('dining.order', 'dining.kitchen', 'frontdesk.operate', 'frontdesk.checkout', 'ledger.export', 'report.executive') }, async () =>
+    diningMenu(sql, deps),
   );
 
   app.get('/api/dining/guest', { preHandler: guard('dining.order') }, async (req) => {

@@ -8,6 +8,7 @@ import { formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { FRONTDESK_OP_LABELS, isBookingOp, isRoomOp, isTableOp, isTechOp, isUsageOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
+import { onReconnect } from '../../lib/connection';
 
 /**
  * 页面顶部的前台「结果待确认」提醒（刷新、重新登录后仍在）。
@@ -46,7 +47,15 @@ export function FrontdeskPendingBanner() {
       checked.current.clear();
       run();
     }, 60_000);
-    return () => clearInterval(timer);
+    // 网络恢复（8.1.3）：马上按原编号再查一遍，不等下一分钟
+    const off = onReconnect(() => {
+      checked.current.clear();
+      run();
+    });
+    return () => {
+      clearInterval(timer);
+      off();
+    };
   }, [ops, qc, toast]);
 
   if (ops.length === 0) return null;
@@ -117,11 +126,7 @@ export function FrontdeskPendingBanner() {
             <span className="hidden text-[12px] text-ink-3 sm:inline">
               {formatDateTime(op.createdAt)} · {op.staffName}
             </span>
-            <button
-              type="button"
-              onClick={() => open(op)}
-              className="flex h-7 items-center gap-1 rounded-full bg-pine px-3 text-[12.5px] font-bold text-paper hover:bg-pine-hover"
-            >
+            <button type="button" onClick={() => open(op)} className="flex h-7 items-center gap-1 rounded-full bg-pine px-3 text-[12.5px] font-bold text-paper hover:bg-pine-hover">
               去处理 <ArrowRight className="size-3.5" />
             </button>
           </span>

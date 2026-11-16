@@ -104,9 +104,19 @@ export function CheckoutDialog({
   useEffect(() => {
     if (
       op.state.phase === 'error' &&
-      ['PRICE_CHANGED', 'SPLIT_CHANGED', 'INSUFFICIENT_BALANCE', 'TICKET_CHANGED', 'ROOM_OPEN', 'COUPON_AMOUNT_CHANGED', 'COUPON_USED', 'COUPON_NOT_USABLE', 'COUPON_VOIDED', 'COUNT_CARD_CHANGED', 'COUNT_CARD_NOT_USABLE'].includes(
-        op.state.code ?? '',
-      )
+      [
+        'PRICE_CHANGED',
+        'SPLIT_CHANGED',
+        'INSUFFICIENT_BALANCE',
+        'TICKET_CHANGED',
+        'ROOM_OPEN',
+        'COUPON_AMOUNT_CHANGED',
+        'COUPON_USED',
+        'COUPON_NOT_USABLE',
+        'COUPON_VOIDED',
+        'COUNT_CARD_CHANGED',
+        'COUNT_CARD_NOT_USABLE',
+      ].includes(op.state.code ?? '')
     ) {
       void preview.refetch();
     }
@@ -273,7 +283,8 @@ export function CheckoutDialog({
               </>
             ) : remaining < 0 ? (
               <>
-                多收 <Money cents={-remaining} className="font-bold text-clay" />（现金找零不用登记，按应收记）
+                多收 <Money cents={-remaining} className="font-bold text-clay" />
+                （现金找零不用登记，按应收记）
               </>
             ) : problems.some(Boolean) ? (
               // 金额对上了但还有收款没填好（例如客人实给少于现金），不写「已等于应收」，免得以为可以结清
@@ -715,9 +726,7 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
           </p>
         </div>
       </div>
-      {detail.remainingMates.length > 0 && detail.status === 'completed' && (
-        <p className="text-[12.5px] text-ink-3">同行组里还有 {detail.remainingMates.join('、')} 在店，离店时另行结账。</p>
-      )}
+      {detail.remainingMates.length > 0 && detail.status === 'completed' && <p className="text-[12.5px] text-ink-3">同行组里还有 {detail.remainingMates.join('、')} 在店，离店时另行结账。</p>}
     </div>
   );
 }
@@ -732,14 +741,10 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
   const list = useCheckouts(date, open, open && isToday);
   const summary = useCheckoutDaySummary(date, open, open && isToday);
   const [openId, setOpenId] = useState<number | null>(focusId ?? null);
-  useResetOnOpen(
-    open,
-    () => {
-      setOpenId(focusId ?? null);
-      setDate(today);
-    },
-    [focusId, today],
-  );
+  useResetOnOpen(open, () => {
+    setOpenId(focusId ?? null);
+    setDate(today);
+  }, [focusId, today]);
   const sum = summary.data;
   return (
     <Dialog open={open} onClose={onClose} width="max-w-2xl" title="结账记录" description={`营业日 ${date} 的结账单（含当天反结账的）${isToday ? ' · 每 15 秒自动刷新' : ''}`}>
@@ -765,7 +770,8 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
             退款单 {sum.refunds.count} 笔 <Money cents={-sum.refunds.total} className="font-bold" />
           </span>
           <span className="font-semibold">
-            营业额（与日结一致）<Money cents={sum.net} className="font-bold text-ink" data-testid="checkout-records-net" />
+            营业额（与日结一致）
+            <Money cents={sum.net} className="font-bold text-ink" data-testid="checkout-records-net" />
           </span>
           {sum.unshifted.count > 0 && (
             <span className="col-span-full text-clay" data-testid="checkout-records-unshifted">
@@ -882,9 +888,7 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
       toast({
         tone: 'success',
         title: `已反结账 ${d?.checkoutNo ?? ''}`,
-        body: cashRefund
-          ? `${restored}；退给客人的现金 ¥${(cashRefund / 100).toFixed(2)} 计入${chosen && !chosen.mine ? ` ${chosen.staffName} ` : '你'}当班的交班表`
-          : `${restored}，可更正后重新结账`,
+        body: cashRefund ? `${restored}；退给客人的现金 ¥${(cashRefund / 100).toFixed(2)} 计入${chosen && !chosen.mine ? ` ${chosen.staffName} ` : '你'}当班的交班表` : `${restored}，可更正后重新结账`,
       });
       setVoiding(false);
       void qc.invalidateQueries({ queryKey: ['frontdesk'] });
@@ -943,7 +947,9 @@ function CheckoutDetailView({ id, onBack }: { id: number; onBack: () => void }) 
             </Notice>
           )}
           {d.status === 'completed' && can('frontdesk.checkoutVoid') && hasRefund && (
-            <Notice tone="info" title="这张单已有退款单，不能再反结账">还要退请继续开退款单；登记错的退款单当天、钱箱还没交班时可以先作废。</Notice>
+            <Notice tone="info" title="这张单已有退款单，不能再反结账">
+              还要退请继续开退款单；登记错的退款单当天、钱箱还没交班时可以先作废。
+            </Notice>
           )}
           {d.status === 'completed' && can('frontdesk.checkoutVoid') && !blockedByWindow && !voiding && !showRefund && !hasRefund && (
             <Button variant="secondary" icon={<Undo2 className="size-4" />} onClick={() => setVoiding(true)} data-testid="checkout-void">
@@ -1048,16 +1054,12 @@ export function TicketDialog({ open, visit, onClose, onDone }: { open: boolean; 
   const [authorizing, setAuthorizing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useResetOnOpen(
-    open,
-    () => {
-      setPick(visit.ticket?.typeId ?? null);
-      setReason('');
-      setGrant(null);
-      setError(null);
-    },
-    [visit],
-  );
+  useResetOnOpen(open, () => {
+    setPick(visit.ticket?.typeId ?? null);
+    setReason('');
+    setGrant(null);
+    setError(null);
+  }, [visit]);
   const options = useMemo(() => types.data ?? [], [types.data]);
   const type = options.find((t) => t.id === pick) ?? null;
   const current = visit.ticket ? { price12h: visit.ticket.price12h, price24h: visit.ticket.price24h } : null;
@@ -1105,10 +1107,7 @@ export function TicketDialog({ open, visit, onClose, onDone }: { open: boolean; 
                 setPick(t.id);
                 setError(null);
               }}
-              className={cn(
-                'flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left',
-                pick === t.id ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-line-strong',
-              )}
+              className={cn('flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left', pick === t.id ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-line-strong')}
             >
               <Ticket className={cn('size-4', pick === t.id ? 'text-pine' : 'text-ink-3')} />
               <span className="min-w-0 flex-1">

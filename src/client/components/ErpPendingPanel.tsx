@@ -12,6 +12,7 @@ import { abandonErpOp, lookupErpOp, removeErpPending, sendErpOp, useErpPending, 
 import { formatDateTime } from '../lib/utils';
 import { useToast } from './Toast';
 import { Button, Notice } from './ui';
+import { useReconnectTick } from '../lib/connection';
 
 export interface ErpOpRef {
   refId: number;
@@ -185,6 +186,8 @@ export function ErpPendingPanel({
   // 断网时页面一刷新数据就再发一遍查回；网络一恢复，又会抢在员工点「按原内容重新提交」之前把这一行处理掉。
   // 没传 filter 的页面本来就只在列表变了时查。查不回的由员工点「查回」或重新提交、作废。
   const opKeys = ops.map((op) => op.key).join('\n');
+  // 网络恢复（8.1.3）：上次没查成的（查回失败时从 checked 里拿掉了）再查一次；查到「没有」的不重查，不抢员工正在处理的
+  const reconnects = useReconnectTick();
   useEffect(() => {
     for (const op of ops) {
       if (checked.current.has(op.key)) continue;
@@ -204,7 +207,7 @@ export function ErpPendingPanel({
     }
     // ops 只在 opKeys 变了时读：同一组编号的新数组不再触发
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opKeys, qc, toast]);
+  }, [opKeys, qc, toast, reconnects]);
 
   if (ops.length === 0) return null;
   return (
@@ -258,8 +261,7 @@ function PendingRow({ op, onFound }: { op: ErpPendingOp; onFound?: (op: ErpPendi
     } catch (e) {
       if (e instanceof UncertainError) {
         setMessage(e.reason === 'server' ? '服务器还是出错，结果待确认。稍后再查回或重新提交（同一编号只登记一次）。' : '仍然连不上服务器，结果待确认。稍后再查回或重新提交。');
-      }
-      else if (e instanceof ApiError && e.code === 'OP_ABANDONED') settle({ found: false, abandoned: true }, null);
+      } else if (e instanceof ApiError && e.code === 'OP_ABANDONED') settle({ found: false, abandoned: true }, null);
       else setMessage(`${errorMessage(e)}（之前那次提交可能仍会登记：请先查回，确认没有登记时再确认作废）`);
     } finally {
       setBusy(null);
@@ -294,7 +296,15 @@ function PendingRow({ op, onFound }: { op: ErpPendingOp; onFound?: (op: ErpPendi
             按原内容重新提交
           </Button>
           {confirming ? (
-            <Button size="sm" variant="danger" icon={<Trash2 className="size-4" />} loading={busy === 'abandon'} disabled={!!busy && busy !== 'abandon'} onClick={() => void abandon()} data-testid="erp-pending-abandon-confirm">
+            <Button
+              size="sm"
+              variant="danger"
+              icon={<Trash2 className="size-4" />}
+              loading={busy === 'abandon'}
+              disabled={!!busy && busy !== 'abandon'}
+              onClick={() => void abandon()}
+              data-testid="erp-pending-abandon-confirm"
+            >
               确认作废这笔
             </Button>
           ) : (
@@ -308,9 +318,7 @@ function PendingRow({ op, onFound }: { op: ErpPendingOp; onFound?: (op: ErpPendi
       <span className="block">
         {op.summary} · {op.staffName} · {formatDateTime(op.createdAt)}
       </span>
-      <span className="block text-[12.5px]">
-        上次提交时网络中断，可能已经登记，也可能没有。重新提交用同一操作编号，不会重复登记；作废后原请求即使晚到也不会登记。
-      </span>
+      <span className="block text-[12.5px]">上次提交时网络中断，可能已经登记，也可能没有。重新提交用同一操作编号，不会重复登记；作废后原请求即使晚到也不会登记。</span>
       {confirming && <span className="block text-[12.5px] font-semibold">确认作废：服务器先登记作废，如果这笔其实已经登记，会直接显示原单据，不会作废。</span>}
       {message && <span className="block text-[12.5px] font-semibold text-clay">{message}</span>}
     </Notice>

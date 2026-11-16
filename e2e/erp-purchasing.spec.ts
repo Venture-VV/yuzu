@@ -88,7 +88,15 @@ test.describe('ERP 采购五项（v0.7.29）', () => {
     // 接口建一张带途径的采购单，详情里看得到
     const po = (await (
       await page.request.post('/api/purchase-orders', {
-        data: { clientKey: randomUUID(), supplierId: sup.id, orderDate: today, approveNow: true, channel: 'self', channelNote: `E2E 门店${tag}`, lines: [{ materialId: mat.id, purchaseQtyMilli: 1000, priceCents: 3_000 }] },
+        data: {
+          clientKey: randomUUID(),
+          supplierId: sup.id,
+          orderDate: today,
+          approveNow: true,
+          channel: 'self',
+          channelNote: `E2E 门店${tag}`,
+          lines: [{ materialId: mat.id, purchaseQtyMilli: 1000, priceCents: 3_000 }],
+        },
       })
     ).json()) as { po: { id: number } };
     await page.goto(`/purchasing?po=${po.po.id}`);
@@ -101,7 +109,15 @@ test.describe('ERP 采购五项（v0.7.29）', () => {
     const mat = await newMaterial(page, tag);
     const po = (await (
       await page.request.post('/api/purchase-orders', {
-        data: { clientKey: randomUUID(), supplierId: sup.id, orderDate: today, approveNow: true, channel: 'online', channelNote: `E2E 网店${tag}`, lines: [{ materialId: mat.id, purchaseQtyMilli: 2000, priceCents: 3_000 }] },
+        data: {
+          clientKey: randomUUID(),
+          supplierId: sup.id,
+          orderDate: today,
+          approveNow: true,
+          channel: 'online',
+          channelNote: `E2E 网店${tag}`,
+          lines: [{ materialId: mat.id, purchaseQtyMilli: 2000, priceCents: 3_000 }],
+        },
       })
     ).json()) as { po: { id: number; docNo: string; status: string } };
     expect(po.po.status).toBe('approved');
@@ -169,7 +185,12 @@ test.describe('ERP 采购五项（v0.7.29）', () => {
     await group.getByTestId('suggest-create').click();
     await expect(page).toHaveURL(/\/purchasing\/\d+\/edit/);
     const poId = Number(/\/purchasing\/(\d+)\/edit/.exec(page.url())![1]);
-    const po = (await (await page.request.get(`/api/purchase-orders/${poId}`)).json()) as { status: string; note: string; supplier: { id: number }; lines: { materialId: number; purchaseQtyMilli: number }[] };
+    const po = (await (await page.request.get(`/api/purchase-orders/${poId}`)).json()) as {
+      status: string;
+      note: string;
+      supplier: { id: number };
+      lines: { materialId: number; purchaseQtyMilli: number }[];
+    };
     expect(po).toMatchObject({ status: 'draft', note: '补货建议生成', supplier: { id: sup.id } });
     expect(po.lines).toEqual([expect.objectContaining({ materialId: mat.id, purchaseQtyMilli: 3000 })]);
     // 草稿算在途：这个物料不再建议
@@ -276,8 +297,7 @@ test.describe('询价接上需求单与补货建议（v0.7.30）', () => {
 test.describe('补货方式（迁移 161）', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会改物料档案的流程只在门店电脑尺寸执行一次');
 
-  const materialOf = async (page: Page, id: number) =>
-    (await (await page.request.get(`/api/inventory/materials/${id}`)).json()) as { replenishMode: string; isLow: boolean };
+  const materialOf = async (page: Page, id: number) => (await (await page.request.get(`/api/inventory/materials/${id}`)).json()) as { replenishMode: string; isLow: boolean };
 
   test('建议行点「不用备货」→ 进「没提补货的」并写着原因；改回自动识别又回来；物料档案里能直接定', async ({ page }) => {
     const { tag } = await setup(page);
@@ -373,7 +393,17 @@ test.describe('补货方式（迁移 161）', () => {
     const { tag } = await setup(page);
     const sup = await newSupplier(page, tag);
     const mat = await newMaterial(page, tag, { defaultSupplierId: sup.id, lowStockMilli: 25_000 });
-    const full = { code: mat.code, name: mat.name, category: 'E2E', inventoryUnit: '包', purchaseUnit: '箱', purchaseFactorMilli: 10_000, refPriceCents: 3_000, defaultSupplierId: sup.id, lowStockMilli: 25_000 };
+    const full = {
+      code: mat.code,
+      name: mat.name,
+      category: 'E2E',
+      inventoryUnit: '包',
+      purchaseUnit: '箱',
+      purchaseFactorMilli: 10_000,
+      refPriceCents: 3_000,
+      defaultSupplierId: sup.id,
+      lowStockMilli: 25_000,
+    };
 
     await page.goto('/purchasing/suggestions');
     const group = page.getByTestId(`suggest-group-${sup.id}`);

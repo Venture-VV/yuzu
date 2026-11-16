@@ -145,9 +145,7 @@ export function DocsTab() {
                       {d.urgent && <Badge tone="yuzu">急采</Badge>}
                       {d.needsBackfill && <Badge tone="clay">待补采购单</Badge>}
                       {d.deptSigned === false && <Badge tone="yuzu">待签收</Badge>}
-                      {d.warehouseName && d.docType !== 'issue' && d.docType !== 'issue_return' && d.warehouseName !== centralName && (
-                        <Badge tone="lake">{d.warehouseName}</Badge>
-                      )}
+                      {d.warehouseName && d.docType !== 'issue' && d.docType !== 'issue_return' && d.warehouseName !== centralName && <Badge tone="lake">{d.warehouseName}</Badge>}
                     </span>
                     <span className="block truncate text-[12.5px] text-ink-3">
                       {d.summary}

@@ -1,14 +1,7 @@
 // 付款页面共用的小块（v0.7.32）：状态色、三单状态、质保金状态。
 
 import { PAYMENT_STAGE_LABELS, type PaymentStage } from '@shared/contracts';
-import {
-  PAYMENT_REQUEST_STATUS_LABELS,
-  THREE_WAY_STATUS_LABELS,
-  WARRANTY_ROW_STATUS_LABELS,
-  type PaymentRequestStatus,
-  type ThreeWayStatus,
-  type WarrantyRowStatus,
-} from '@shared/payments';
+import { PAYMENT_REQUEST_STATUS_LABELS, THREE_WAY_STATUS_LABELS, WARRANTY_ROW_STATUS_LABELS, type PaymentRequestStatus, type ThreeWayStatus, type WarrantyRowStatus } from '@shared/payments';
 import { Badge } from '../../components/ui';
 
 type Tone = 'neutral' | 'pine' | 'yuzu' | 'clay' | 'lake' | 'ember';

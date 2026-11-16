@@ -71,9 +71,7 @@ export function ChangePasswordPage({ forced = false }: { forced?: boolean }) {
         <div className="w-full max-w-[420px] animate-rise">
           <LogoMark className="size-11" />
           <h1 className="mt-6 text-[26px] font-bold tracking-tight">设置你的密码</h1>
-          <p className="mt-2 text-[14px] text-ink-2">
-            你好，{session.staff.displayName}。首次登录请把临时密码换成只有你知道的新密码，之后的每笔操作都会记录在你的名下。
-          </p>
+          <p className="mt-2 text-[14px] text-ink-2">你好，{session.staff.displayName}。首次登录请把临时密码换成只有你知道的新密码，之后的每笔操作都会记录在你的名下。</p>
           <Card className="mt-7 p-6">{form}</Card>
         </div>
       </div>
@@ -153,7 +151,13 @@ function OrderPinCard() {
       ) : (
         <>
           <p className="text-[13.5px] text-ink-2" data-testid="order-pin-status">
-            {status.isPending ? '正在查…' : status.isError ? '没查到，稍后再试。' : status.data.has ? `已有点单密码（${relativeTime(status.data.setAt)}生成）。忘了可以重新生成，旧的马上失效。` : '还没有点单密码。'}
+            {status.isPending
+              ? '正在查…'
+              : status.isError
+                ? '没查到，稍后再试。'
+                : status.data.has
+                  ? `已有点单密码（${relativeTime(status.data.setAt)}生成）。忘了可以重新生成，旧的马上失效。`
+                  : '还没有点单密码。'}
           </p>
           {confirming ? (
             <div className="mt-4 flex items-center gap-2">

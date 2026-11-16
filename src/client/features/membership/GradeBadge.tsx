@@ -20,16 +20,16 @@ export function GradeBadge({ member, withExpiry = false, className }: { member: 
       <Badge tone={member.grade === 0 ? 'neutral' : inGrace ? 'ember' : 'yuzu'} icon={<Award className="size-3.5" />}>
         {label}
       </Badge>
-      {withExpiry && member.grade > 0 && (
-        inGrace ? (
+      {withExpiry &&
+        member.grade > 0 &&
+        (inGrace ? (
           <Badge tone="ember">补充期至 {member.graceUntil}</Badge>
         ) : (
           <span className={cn('text-[12px] whitespace-nowrap', bucket !== null && bucket <= 30 ? 'font-semibold text-ember' : 'text-ink-3')}>
             会籍至 {member.cycleEnd}
             {bucket !== null && daysLeft !== null ? `（还有 ${daysLeft} 天）` : ''}
           </span>
-        )
-      )}
+        ))}
     </span>
   );
 }

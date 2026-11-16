@@ -106,7 +106,12 @@ export function UsageRulesCard() {
                 disabled={!editable || busy}
                 onChange={(e) => {
                   const id = Number(e.target.value);
-                  setPricing(t, id ? { feeItemId: id, minMinutes: p?.minMinutes ?? DEFAULT_USAGE_MIN_MINUTES, stepMinutes: p?.stepMinutes ?? DEFAULT_USAGE_STEP_MINUTES, openFeeItemId: p?.openFeeItemId ?? null } : null);
+                  setPricing(
+                    t,
+                    id
+                      ? { feeItemId: id, minMinutes: p?.minMinutes ?? DEFAULT_USAGE_MIN_MINUTES, stepMinutes: p?.stepMinutes ?? DEFAULT_USAGE_STEP_MINUTES, openFeeItemId: p?.openFeeItemId ?? null }
+                      : null,
+                  );
                 }}
                 aria-label={`${t} 房费项目`}
                 data-testid={`usage-pricing-item-${t}`}
@@ -137,7 +142,13 @@ export function UsageRulesCard() {
                   </label>
                   <label className="flex items-center gap-1">
                     每
-                    <Select value={String(p.stepMinutes)} disabled={!editable || busy} onChange={(e) => setPricing(t, { ...p, stepMinutes: Number(e.target.value) })} aria-label={`${t} 计费单位`} className="w-20">
+                    <Select
+                      value={String(p.stepMinutes)}
+                      disabled={!editable || busy}
+                      onChange={(e) => setPricing(t, { ...p, stepMinutes: Number(e.target.value) })}
+                      aria-label={`${t} 计费单位`}
+                      className="w-20"
+                    >
                       {USAGE_STEP_OPTIONS.map((m) => (
                         <option key={m} value={m}>
                           {m}

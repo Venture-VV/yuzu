@@ -199,7 +199,10 @@ export function areaText(centi: number | null): string {
 
 /** 容量：「2」「2人」→ 2；空着 → null；写错 → undefined */
 export function parseCapacity(text: string): number | null | undefined {
-  const t = text.trim().replace(/\s+/g, '').replace(/人(间)?$/, '');
+  const t = text
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/人(间)?$/, '');
   if (t === '') return null;
   if (!/^\d{1,3}$/.test(t)) return undefined;
   const n = Number(t);

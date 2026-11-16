@@ -93,42 +93,38 @@ function SpacesBody() {
   const invalidate = useInvalidateSpaces();
   const invalidateLocations = useInvalidateLocations();
   return (
-      <div className="space-y-4">
-        {/* 导入与模拟刷卡的「结果待确认」：关掉对话框、刷新后在这里查回、按原内容重新提交或作废 */}
-        <ErpPendingPanel
-          types={['space_import', 'location_report']}
-          className="space-y-2"
-          onFound={(op) => (op.type === 'location_report' ? invalidateLocations() : void invalidate())}
+    <div className="space-y-4">
+      {/* 导入与模拟刷卡的「结果待确认」：关掉对话框、刷新后在这里查回、按原内容重新提交或作废 */}
+      <ErpPendingPanel types={['space_import', 'location_report']} className="space-y-2" onFound={(op) => (op.type === 'location_report' ? invalidateLocations() : void invalidate())} />
+      {!ledger.data ? (
+        <Skeleton className="h-28" />
+      ) : (
+        <Summary
+          ledger={ledger.data}
+          onShowUnverified={() => {
+            setFilters({ ...NO_FILTER, verify: 'unverified' });
+            setTab('spaces');
+          }}
+          onShowRoomSpaces={() => {
+            setFilters({ ...NO_FILTER, type: '客房' });
+            setTab('spaces');
+          }}
         />
-        {!ledger.data ? (
-          <Skeleton className="h-28" />
-        ) : (
-          <Summary
-            ledger={ledger.data}
-            onShowUnverified={() => {
-              setFilters({ ...NO_FILTER, verify: 'unverified' });
-              setTab('spaces');
-            }}
-            onShowRoomSpaces={() => {
-              setFilters({ ...NO_FILTER, type: '客房' });
-              setTab('spaces');
-            }}
-          />
-        )}
-        {tab === 'locations' ? (
-          <LocationsCard />
-        ) : tab === 'plans' ? (
-          <FloorplanCard />
-        ) : tab === 'import' ? (
-          <SpaceImportCard />
-        ) : !ledger.data ? (
-          <Skeleton className="h-64" />
-        ) : tab === 'spaces' ? (
-          <SpacesCard ledger={ledger.data} filters={filters} setFilters={setFilters} />
-        ) : (
-          <FloorsZonesCard ledger={ledger.data} />
-        )}
-      </div>
+      )}
+      {tab === 'locations' ? (
+        <LocationsCard />
+      ) : tab === 'plans' ? (
+        <FloorplanCard />
+      ) : tab === 'import' ? (
+        <SpaceImportCard />
+      ) : !ledger.data ? (
+        <Skeleton className="h-64" />
+      ) : tab === 'spaces' ? (
+        <SpacesCard ledger={ledger.data} filters={filters} setFilters={setFilters} />
+      ) : (
+        <FloorsZonesCard ledger={ledger.data} />
+      )}
+    </div>
   );
 }
 
@@ -142,7 +138,9 @@ function Summary({ ledger, onShowUnverified, onShowRoomSpaces }: { ledger: Space
           <span className="text-[20px] font-bold">{c.active}</span> 个在用的空间
           {c.spaces > c.active && <span className="text-ink-3">（另有停用的 {c.spaces - c.active} 个）</span>}
         </p>
-        <p className="text-[13.5px] text-ink-2">区域 {zones} 个 · 楼层 {ledger.floors.filter((f) => f.active).length} 个</p>
+        <p className="text-[13.5px] text-ink-2">
+          区域 {zones} 个 · 楼层 {ledger.floors.filter((f) => f.active).length} 个
+        </p>
         <p className="text-[13.5px] text-ink-2">
           客房 {c.roomSpaces} 间 · 已挂接客房房间 {c.roomSpacesLinked} 间
         </p>
@@ -404,19 +402,20 @@ function SpaceDialog({ target, ledger, onClose }: { target: Space | 'new' | null
   const code = draft.code.trim().toUpperCase();
   const capacity = draft.capacity.trim() === '' ? null : Number(draft.capacity);
   const area = parseArea(draft.area);
-  const problem = isNew && !SPACE_CODE_RE.test(code)
-    ? '编码是大写字母开头、2 到 8 位的字母或数字，例如 S301'
-    : draft.floorId === null
-      ? '请选择楼层'
-      : !draft.businessType.trim()
-        ? '请填写业态'
-        : capacity !== null && (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_CAPACITY)
-          ? `容量要是 1 到 ${MAX_CAPACITY} 的整数（可以空着）`
-          : area === undefined
-            ? '面积要是大于 0 的数字，最多两位小数（可以空着）'
-            : !draft.displayName.trim()
-              ? '请填写显示名'
-              : null;
+  const problem =
+    isNew && !SPACE_CODE_RE.test(code)
+      ? '编码是大写字母开头、2 到 8 位的字母或数字，例如 S301'
+      : draft.floorId === null
+        ? '请选择楼层'
+        : !draft.businessType.trim()
+          ? '请填写业态'
+          : capacity !== null && (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_CAPACITY)
+            ? `容量要是 1 到 ${MAX_CAPACITY} 的整数（可以空着）`
+            : area === undefined
+              ? '面积要是大于 0 的数字，最多两位小数（可以空着）'
+              : !draft.displayName.trim()
+                ? '请填写显示名'
+                : null;
   const zones = ledger.zones.filter((z) => z.floorId === draft.floorId && (z.active || z.id === draft.zoneId));
 
   const save = async () => {
@@ -470,7 +469,15 @@ function SpaceDialog({ target, ledger, onClose }: { target: Space | 'new' | null
         <div className="grid gap-4 sm:grid-cols-3">
           {isNew && (
             <Field label="编码" htmlFor="space-code" hint="大写字母开头，如 S301">
-              <Input id="space-code" value={draft.code} maxLength={MAX_SPACE_CODE} onChange={(e) => set({ code: e.target.value.toUpperCase() })} className="num" data-autofocus data-testid="space-code" />
+              <Input
+                id="space-code"
+                value={draft.code}
+                maxLength={MAX_SPACE_CODE}
+                onChange={(e) => set({ code: e.target.value.toUpperCase() })}
+                className="num"
+                data-autofocus
+                data-testid="space-code"
+              />
             </Field>
           )}
           <Field label="楼层" htmlFor="space-floor">
@@ -559,11 +566,7 @@ function SpaceDialog({ target, ledger, onClose }: { target: Space | 'new' | null
             />
           )}
         </div>
-        {current?.room && (
-          <p className="text-[12.5px] text-ink-3">
-            挂着客房房间「{current.room.roomNo}」：不能停用、不能改业态（先在「客房 → 房间」里取消挂接）。
-          </p>
-        )}
+        {current?.room && <p className="text-[12.5px] text-ink-3">挂着客房房间「{current.room.roomNo}」：不能停用、不能改业态（先在「客房 → 房间」里取消挂接）。</p>}
         {problem && draft.code !== '' && <p className="text-[12.5px] text-clay">{problem}</p>}
         {error && <Notice tone="error" title={error} />}
         {current && (
@@ -730,7 +733,8 @@ function AliasPanel({ space }: { space: Space }) {
           loading={busy === 'add'}
           disabled={!alias.trim()}
           onClick={async () => {
-            if (await run('add', () => api.post<SpaceLedger>(`/api/admin/spaces/${space.id}/aliases`, { alias: alias.trim(), kind }), `已加${SPACE_ALIAS_LABELS[kind]}「${alias.trim()}」`)) setAlias('');
+            if (await run('add', () => api.post<SpaceLedger>(`/api/admin/spaces/${space.id}/aliases`, { alias: alias.trim(), kind }), `已加${SPACE_ALIAS_LABELS[kind]}「${alias.trim()}」`))
+              setAlias('');
           }}
           data-testid="space-alias-add"
         >

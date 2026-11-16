@@ -14,15 +14,18 @@ const FRONTDESK_KEY = 'yuzu.frontdeskPending.v1';
 
 /** 只让待确认记录的 setItem 抛出「存储已满」，读取照常；window.__failPendingWrites = false 可恢复 */
 async function failPendingWrites(page: Page) {
-  await page.addInitScript((keys) => {
-    const w = window as unknown as { __failPendingWrites: boolean };
-    w.__failPendingWrites = true;
-    const original = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (key: string, value: string) {
-      if (w.__failPendingWrites && keys.includes(key)) throw new DOMException('模拟存储已满', 'QuotaExceededError');
-      return original.call(this, key, value);
-    };
-  }, [WALLET_KEY, FRONTDESK_KEY]);
+  await page.addInitScript(
+    (keys) => {
+      const w = window as unknown as { __failPendingWrites: boolean };
+      w.__failPendingWrites = true;
+      const original = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key: string, value: string) {
+        if (w.__failPendingWrites && keys.includes(key)) throw new DOMException('模拟存储已满', 'QuotaExceededError');
+        return original.call(this, key, value);
+      };
+    },
+    [WALLET_KEY, FRONTDESK_KEY],
+  );
 }
 
 /** 请求若真发出，会在服务端生效后丢弃响应（复测时的故障）；这里只用来数有没有发出 */

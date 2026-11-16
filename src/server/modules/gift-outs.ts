@@ -20,7 +20,6 @@ import { idParam, parse } from '../lib/validate';
 import { createDoc, voidDoc } from './inventory/docs';
 import { systemGiftActor } from './system-staff';
 
-
 interface GiftOutRow {
   id: number;
   status: GiftOutStatus;
@@ -150,4 +149,3 @@ export function registerGiftOutRoutes(app: FastifyInstance, deps: Deps) {
     return { status };
   });
 }
-

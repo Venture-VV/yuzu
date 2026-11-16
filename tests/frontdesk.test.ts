@@ -11,7 +11,10 @@ let items: { bath: number; scrub: number; tea: number; old: number };
 
 beforeAll(async () => {
   ctx = await setup();
-  for (const [zone, prefix] of [['male', 'A'], ['female', 'B']] as const) {
+  for (const [zone, prefix] of [
+    ['male', 'A'],
+    ['female', 'B'],
+  ] as const) {
     const res = await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix, from: 1, to: 30, width: 3, zone });
     if (res.status !== 200) throw new Error(JSON.stringify(res.body));
   }
@@ -23,8 +26,7 @@ beforeAll(async () => {
 });
 afterAll(async () => ctx.close());
 
-const checkin = (cookie: string, guests: unknown[], extra: Record<string, unknown> = {}) =>
-  api(ctx.app, cookie, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests, ...extra });
+const checkin = (cookie: string, guests: unknown[], extra: Record<string, unknown> = {}) => api(ctx.app, cookie, 'POST', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests, ...extra });
 const post = (cookie: string, visitId: number, lines: { itemId: number; quantity: number }[], expectedTotal: number, extra: Record<string, unknown> = {}) =>
   api(ctx.app, cookie, 'POST', `/api/frontdesk/visits/${visitId}/charges`, { clientKey: randomUUID(), lines, expectedTotal, ...extra });
 const visit = async (id: number) => (await api(ctx.app, ctx.owner, 'GET', `/api/frontdesk/visits/${id}`)).body;
@@ -126,9 +128,23 @@ describe('接待发牌：一牌一人与幂等', () => {
   });
 
   it('同一请求里两位客人用同一张牌、或同一会员两张牌，直接拒绝', async () => {
-    expect((await checkin(ctx.clerk, [{ tagCode: 'A005', zone: 'male' }, { tagCode: 'A005', zone: 'male' }])).status).toBe(400);
+    expect(
+      (
+        await checkin(ctx.clerk, [
+          { tagCode: 'A005', zone: 'male' },
+          { tagCode: 'A005', zone: 'male' },
+        ])
+      ).status,
+    ).toBe(400);
     const m = await createMember(ctx, '双牌会员', '19900005001');
-    expect((await checkin(ctx.clerk, [{ tagCode: 'A005', zone: 'male', memberId: m.id }, { tagCode: 'A006', zone: 'male', memberId: m.id }])).status).toBe(400);
+    expect(
+      (
+        await checkin(ctx.clerk, [
+          { tagCode: 'A005', zone: 'male', memberId: m.id },
+          { tagCode: 'A006', zone: 'male', memberId: m.id },
+        ])
+      ).status,
+    ).toBe(400);
   });
 
   it('会员同时只能持一张在店手牌', async () => {
@@ -184,7 +200,15 @@ describe('共同账单：挂账、价格快照与更正', () => {
   });
 
   it('挂账只写手牌账单：价格随明细留存，后续改价不影响', async () => {
-    const r = await post(ctx.clerk, vid, [{ itemId: items.bath, quantity: 1 }, { itemId: items.tea, quantity: 2 }], 12800 + 3600);
+    const r = await post(
+      ctx.clerk,
+      vid,
+      [
+        { itemId: items.bath, quantity: 1 },
+        { itemId: items.tea, quantity: 2 },
+      ],
+      12800 + 3600,
+    );
     expect(r.status).toBe(200);
     expect(r.body.bill).toMatchObject({ amountCents: 16400, lineCount: 2, status: 'open' });
     await api(ctx.app, ctx.owner, 'PUT', `/api/items/${items.tea}`, { name: '菊花茶', category: '洗浴', price: 2200, active: true });
@@ -351,14 +375,28 @@ describe('换牌与释放', () => {
 
 describe('预结账、自检与会员钱包边界', () => {
   it('同行组预结账：按手牌和来源汇总，S2 不收款', async () => {
-    const r = await checkin(ctx.clerk, [{ tagCode: 'A030', zone: 'male' }, { tagCode: 'B030', zone: 'female' }]);
+    const r = await checkin(ctx.clerk, [
+      { tagCode: 'A030', zone: 'male' },
+      { tagCode: 'B030', zone: 'female' },
+    ]);
     const [a, b] = r.body.visits.map((v: { id: number }) => v.id);
-    await post(ctx.clerk, a, [{ itemId: items.bath, quantity: 1 }, { itemId: items.scrub, quantity: 1 }], 12800 + 6800);
+    await post(
+      ctx.clerk,
+      a,
+      [
+        { itemId: items.bath, quantity: 1 },
+        { itemId: items.scrub, quantity: 1 },
+      ],
+      12800 + 6800,
+    );
     await post(ctx.clerk, b, [{ itemId: items.bath, quantity: 1 }], 12800);
     const p = await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/preview?ids=${a},${b}`);
     expect(p.status).toBe(200);
     expect(p.body.totalCents).toBe(12800 * 2 + 6800);
-    expect(p.body.visits.map((v: { tagCode: string; amountCents: number }) => [v.tagCode, v.amountCents])).toEqual([['A030', 19600], ['B030', 12800]]);
+    expect(p.body.visits.map((v: { tagCode: string; amountCents: number }) => [v.tagCode, v.amountCents])).toEqual([
+      ['A030', 19600],
+      ['B030', 12800],
+    ]);
     expect(p.body.bySource).toEqual([{ source: 'bath', amountCents: 32400 }]);
     expect((await visit(a)).group.openAmountCents).toBe(32400);
   });
@@ -367,7 +405,10 @@ describe('预结账、自检与会员钱包边界', () => {
     const m = await createMember(ctx, '钱包边界', '19900005099');
     expect((await api(ctx.app, ctx.owner, 'POST', '/api/recharges', rechargeBody(m.id, 100000, 10000))).status).toBe(200);
     const before = await walletFingerprint();
-    const r = await checkin(ctx.clerk, [{ tagCode: 'A018', zone: 'male', memberId: m.id }, { tagCode: 'A019', zone: 'male' }]);
+    const r = await checkin(ctx.clerk, [
+      { tagCode: 'A018', zone: 'male', memberId: m.id },
+      { tagCode: 'A019', zone: 'male' },
+    ]);
     const [mine, friend] = r.body.visits.map((v: { id: number }) => v.id);
     const p = await post(ctx.clerk, mine, [{ itemId: items.bath, quantity: 2 }], 25600);
     await post(ctx.clerk, friend, [{ itemId: items.scrub, quantity: 1 }], 6800);

@@ -92,9 +92,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
     <>
       <header className="flex items-start gap-3 border-b border-line bg-card px-5 py-4">
         <div className="min-w-0 flex-1">
-          <p className="text-[12.5px] font-semibold text-ink-3">
-            采购单{po.revision > 1 && ` · 第 ${po.revision} 版`}
-          </p>
+          <p className="text-[12.5px] font-semibold text-ink-3">采购单{po.revision > 1 && ` · 第 ${po.revision} 版`}</p>
           <p className="num text-[18px] font-bold">{po.docNo}</p>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <PoStatusChip status={po.status} />
@@ -111,9 +109,17 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
       <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
         {/* 这张采购单在整条流程里走到哪了（8.0.17）：撤回的不画 */}
         {po.status !== 'cancelled' && (
-          <PurchaseFlowPanel kind="po" id={po.id} version={`${po.status}|${po.revision}|${po.receiving}|${po.receipts.map((r) => r.status).join(',')}|${po.paidCents}|${po.approval?.status ?? ''}|${po.approval?.currentLevel ?? ''}`} />
+          <PurchaseFlowPanel
+            kind="po"
+            id={po.id}
+            version={`${po.status}|${po.revision}|${po.receiving}|${po.receipts.map((r) => r.status).join(',')}|${po.paidCents}|${po.approval?.status ?? ''}|${po.approval?.currentLevel ?? ''}`}
+          />
         )}
-        {po.status === 'returned' && po.returnedReason && <Notice tone="warning" title="负责人退回修改">{po.returnedReason}</Notice>}
+        {po.status === 'returned' && po.returnedReason && (
+          <Notice tone="warning" title="负责人退回修改">
+            {po.returnedReason}
+          </Notice>
+        )}
         {po.status === 'submitted' && (
           <Notice tone="warning" title={po.revision > 1 ? '改版待确认：确认前不能继续收货' : '待负责人确认：确认前不能收货'}>
             采购审批安排为模拟规则 <SimRule className="align-middle" />
@@ -200,8 +206,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
                 const unit = line?.purchaseUnit ?? '';
                 return (
                   <span key={x.lineNo} className="block">
-                    {line?.materialName ?? `第 ${x.lineNo} 行`}：
-                    {x.priceOverCents > 0 && `合同价 ¥${formatAmount(x.contractPriceCents ?? 0)}，超价 ¥${formatAmount(x.priceOverCents)} / ${unit}`}
+                    {line?.materialName ?? `第 ${x.lineNo} 行`}：{x.priceOverCents > 0 && `合同价 ¥${formatAmount(x.contractPriceCents ?? 0)}，超价 ¥${formatAmount(x.priceOverCents)} / ${unit}`}
                     {x.priceOverCents > 0 && x.overQtyMilli > 0 && '；'}
                     {x.overQtyMilli > 0 && `超出合同剩余量 ${formatQty(x.overQtyMilli)} ${unit}`}
                   </span>
@@ -304,9 +309,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             <h3 className="mb-2 flex items-center gap-2 text-[13px] font-bold text-ink-2">
               报销
               <span className="font-normal text-ink-3">现付：货款在费用报销里报</span>
-              {po.reimbursement.unclaimedLines > 0 && (po.status === 'approved' || po.status === 'closed') && (
-                <Badge tone="yuzu">{po.reimbursement.unclaimedLines} 行未报销</Badge>
-              )}
+              {po.reimbursement.unclaimedLines > 0 && (po.status === 'approved' || po.status === 'closed') && <Badge tone="yuzu">{po.reimbursement.unclaimedLines} 行未报销</Badge>}
             </h3>
             {po.reimbursement.claims.length > 0 && (
               <ul className="mb-2 space-y-1.5">
@@ -323,14 +326,11 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
                 ))}
               </ul>
             )}
-            {po.reimbursement.unclaimedLines > 0 &&
-              (po.status === 'approved' || po.status === 'closed') &&
-              can('expense.manage') &&
-              session.erpModules.includes('expenses') && (
-                <Button variant="secondary" size="sm" icon={<ReceiptText className="size-4" />} onClick={() => navigate(`/erp/expenses/new?po=${po.id}`)} data-testid="po-to-claim">
-                  转报销（带好经办人、部门、用途与金额）
-                </Button>
-              )}
+            {po.reimbursement.unclaimedLines > 0 && (po.status === 'approved' || po.status === 'closed') && can('expense.manage') && session.erpModules.includes('expenses') && (
+              <Button variant="secondary" size="sm" icon={<ReceiptText className="size-4" />} onClick={() => navigate(`/erp/expenses/new?po=${po.id}`)} data-testid="po-to-claim">
+                转报销（带好经办人、部门、用途与金额）
+              </Button>
+            )}
           </section>
         )}
 
@@ -348,9 +348,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
                       · {r.changedByName} 于 {formatDateTime(r.changedAt)} 改版
                     </span>
                   </p>
-                  <p className="text-ink-3">
-                    {r.snapshot.lines.map((l) => `${l.materialName} ${formatQty(l.purchaseQtyMilli)}${l.purchaseUnit} × ¥${(l.priceCents / 100).toFixed(2)}`).join('；')}
-                  </p>
+                  <p className="text-ink-3">{r.snapshot.lines.map((l) => `${l.materialName} ${formatQty(l.purchaseQtyMilli)}${l.purchaseUnit} × ¥${(l.priceCents / 100).toFixed(2)}`).join('；')}</p>
                 </li>
               ))}
             </ul>
@@ -364,7 +362,12 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
           <ol className="space-y-2 border-l-2 border-line pl-4">
             {po.approvals.map((a) => (
               <li key={a.id} className="relative text-[12.5px]">
-                <span className={cn('absolute top-1.5 -left-[21px] size-2.5 rounded-full ring-2 ring-paper', a.action === 'approve' ? 'bg-pine' : a.action === 'return' || a.action === 'cancel' ? 'bg-clay' : 'bg-ink-4')} />
+                <span
+                  className={cn(
+                    'absolute top-1.5 -left-[21px] size-2.5 rounded-full ring-2 ring-paper',
+                    a.action === 'approve' ? 'bg-pine' : a.action === 'return' || a.action === 'cancel' ? 'bg-clay' : 'bg-ink-4',
+                  )}
+                />
                 <span className="font-bold">{ACTION_LABELS[a.action]}</span>
                 {a.revision && a.revision > 1 && <span className="text-ink-3"> · 第 {a.revision} 版</span>}
                 <span className="text-ink-2"> · {a.actorName}</span>
@@ -430,17 +433,13 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
         open={!!dialog}
         busy={!!busy}
         title={`${dialog === 'close' ? '关闭' : dialog === 'return' ? '退回修改' : '撤回'} ${po.docNo}`}
-        description={
-          dialog === 'close'
-            ? '关闭后剩余未到的数量不再收货（例如供应商缺货）；已收货与货款不受影响。'
-            : dialog === 'return'
-              ? '退回后采购经办可以修改再提交。'
-              : '撤回尚未确认的采购单。'
-        }
+        description={dialog === 'close' ? '关闭后剩余未到的数量不再收货（例如供应商缺货）；已收货与货款不受影响。' : dialog === 'return' ? '退回后采购经办可以修改再提交。' : '撤回尚未确认的采购单。'}
         label={dialog === 'return' ? '需要修改什么' : '原因'}
         confirmLabel={dialog === 'close' ? '确认关闭' : dialog === 'return' ? '退回修改' : '确认撤回'}
         onClose={() => setDialog(null)}
-        onConfirm={(reason) => void run(dialog!, dialog!, dialog === 'return' ? { reason, ...gate.fence } : { reason }, dialog === 'close' ? '采购单已关闭' : dialog === 'return' ? '已退回修改' : '已撤回')}
+        onConfirm={(reason) =>
+          void run(dialog!, dialog!, dialog === 'return' ? { reason, ...gate.fence } : { reason }, dialog === 'close' ? '采购单已关闭' : dialog === 'return' ? '已退回修改' : '已撤回')
+        }
       />
     </>
   );

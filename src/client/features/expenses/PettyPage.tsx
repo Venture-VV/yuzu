@@ -5,14 +5,8 @@
 import { ExpenseTabs } from './ExpenseTabs';
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { BookOpenCheck, CircleAlert, Download, HandCoins, Plus, ReceiptText, Undo2, X } from 'lucide-react';
-import {
-  CLAIM_STATUS_LABELS,
-  SETTLEMENT_KIND_LABELS,
-  type PettyAdvance,
-  type PettyBalance,
-  type SettlementKind,
-} from '@shared/expenses';
+import { CircleAlert, Download, HandCoins, Plus, Undo2, X } from 'lucide-react';
+import { CLAIM_STATUS_LABELS, SETTLEMENT_KIND_LABELS, type PettyAdvance, type PettyBalance, type SettlementKind } from '@shared/expenses';
 import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { PAY_METHOD_LABELS, PAYMENT_METHODS, type PayMethod } from '@shared/purchasing';
 import { api, errorMessage, UncertainError } from '../../lib/api';
@@ -311,7 +305,11 @@ function AdvanceSheet({ id, onClose }: { id: number | null; onClose: () => void 
       </div>
       <div className="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4" data-testid="advance-sheet">
         {!a ? (
-          adv.error ? <Notice tone="error" title={errorMessage(adv.error)} /> : <Skeleton className="h-64" />
+          adv.error ? (
+            <Notice tone="error" title={errorMessage(adv.error)} />
+          ) : (
+            <Skeleton className="h-64" />
+          )
         ) : (
           <>
             {a.status === 'voided' && <Notice tone="error" title={`已冲销：${a.voidReason}（${a.voidedByName}）`} />}
@@ -368,7 +366,13 @@ function AdvanceSheet({ id, onClose }: { id: number | null; onClose: () => void 
                       </span>
                       <Money cents={s.amountCents} className="font-bold" />
                       {s.status === 'active' && can('finance.void') && (
-                        <Button variant="ghost" size="sm" icon={<Undo2 className="size-3.5" />} onClick={() => setVoidTarget({ kind: 'settlement', id: s.id, docNo: s.docNo })} aria-label={`冲销 ${s.docNo}`} />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon={<Undo2 className="size-3.5" />}
+                          onClick={() => setVoidTarget({ kind: 'settlement', id: s.id, docNo: s.docNo })}
+                          aria-label={`冲销 ${s.docNo}`}
+                        />
                       )}
                     </li>
                   ))}
@@ -454,9 +458,18 @@ function AdvanceDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
   const cents = amount.trim() ? parseYuan(amount) : null;
   const account = accounts.data?.find((a) => a.department.id === Number(departmentId));
   const overLimit = account?.limitCents && cents && cents > 0 && account.balanceCents + cents > account.limitCents ? account : null;
-  const blocking = pending.length > 0
-    ? '上一笔打款结果待确认，请先在页面顶部查回、重新提交或作废'
-    : !departmentId ? '请选择部门' : !handlerId ? '请选择经办人' : !cents || cents <= 0 ? '请填写打款金额' : evidence.trim().length < 2 ? '请填写凭据说明' : null;
+  const blocking =
+    pending.length > 0
+      ? '上一笔打款结果待确认，请先在页面顶部查回、重新提交或作废'
+      : !departmentId
+        ? '请选择部门'
+        : !handlerId
+          ? '请选择经办人'
+          : !cents || cents <= 0
+            ? '请填写打款金额'
+            : evidence.trim().length < 2
+              ? '请填写凭据说明'
+              : null;
   const locked = busy;
 
   // 每次提交用新的操作编号；结果不明的那一笔存在本机，由页面顶部按原编号处理
@@ -501,13 +514,7 @@ function AdvanceDialog({ open, onClose, onDone }: { open: boolean; onClose: () =
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button
-            variant="primary"
-            disabled={!!blocking || locked}
-            loading={busy}
-            onClick={() => void send()}
-            data-testid="advance-submit"
-          >
+          <Button variant="primary" disabled={!!blocking || locked} loading={busy} onClick={() => void send()} data-testid="advance-submit">
             登记打款
           </Button>
         </>
@@ -591,9 +598,18 @@ function SettlementDialog({ advance, kind, onClose }: { advance: PettyAdvance; k
   });
   const cents = amount.trim() ? parseYuan(amount) : null;
   const label = kind ? SETTLEMENT_KIND_LABELS[kind] : '';
-  const blocking = pending.length > 0
-    ? '上一笔退回 / 补付结果待确认，请先在页面顶部查回、重新提交或作废'
-    : !cents || cents <= 0 ? '请填写金额' : cents > max ? `最多 ¥${formatAmount(max)}` : evidence.trim().length < 2 ? '请填写凭据说明' : date < advance.advanceDate ? `日期不能早于打款日期 ${advance.advanceDate}` : null;
+  const blocking =
+    pending.length > 0
+      ? '上一笔退回 / 补付结果待确认，请先在页面顶部查回、重新提交或作废'
+      : !cents || cents <= 0
+        ? '请填写金额'
+        : cents > max
+          ? `最多 ¥${formatAmount(max)}`
+          : evidence.trim().length < 2
+            ? '请填写凭据说明'
+            : date < advance.advanceDate
+              ? `日期不能早于打款日期 ${advance.advanceDate}`
+              : null;
   const locked = busy;
 
   // 每次提交用新的操作编号；结果不明的那一笔存在本机，由页面顶部按原编号处理
@@ -635,13 +651,7 @@ function SettlementDialog({ advance, kind, onClose }: { advance: PettyAdvance; k
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button
-            variant="primary"
-            disabled={!!blocking || locked}
-            loading={busy}
-            onClick={() => void send()}
-            data-testid="settle-submit"
-          >
+          <Button variant="primary" disabled={!!blocking || locked} loading={busy} onClick={() => void send()} data-testid="settle-submit">
             登记{label}
           </Button>
         </>

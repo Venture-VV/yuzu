@@ -124,7 +124,5 @@ export async function supplierCompare(db: Db, timezone: string, raw: unknown): P
 
 export function registerCompareRoutes(app: FastifyInstance, { sql, config }: Deps) {
   // 挂在采购的接口前缀下（采购模块关着时一起关，注册表里登记）；有查看库存或编采购单的人都能看
-  app.get('/api/purchase-compare', { preHandler: guardAny('inventory.read', 'purchase.manage') }, async (req) =>
-    readSnapshot(sql, (tx) => supplierCompare(tx, config.timezone, req.query)),
-  );
+  app.get('/api/purchase-compare', { preHandler: guardAny('inventory.read', 'purchase.manage') }, async (req) => readSnapshot(sql, (tx) => supplierCompare(tx, config.timezone, req.query)));
 }

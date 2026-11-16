@@ -24,8 +24,7 @@ let am: string;
 let printer: MockPrinter;
 let label: MockPrinter;
 
-const create = (body: Record<string, unknown>, cookie = ctx.owner) =>
-  api(ctx.app, cookie, 'POST', '/api/devices', { clientKey: randomUUID(), area: '收银', ...body });
+const create = (body: Record<string, unknown>, cookie = ctx.owner) => api(ctx.app, cookie, 'POST', '/api/devices', { clientKey: randomUUID(), area: '收银', ...body });
 const overview = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/devices/overview')).body as DeviceOverview;
 const device = async (code: string) => (await overview()).devices.find((d) => d.code === code)!;
 const job = (id: number, kind = 'test_page', cookie = duty, clientKey = randomUUID()) => api(ctx.app, cookie, 'POST', `/api/devices/${id}/jobs`, { clientKey, kind });
@@ -80,7 +79,18 @@ afterAll(async () => {
 describe('设备登记', () => {
   it('新建：编号转大写、按种类整理字段；接法、所属设备不对拒绝；同一编号重提返回同一台', async () => {
     const key = randomUUID();
-    const body = { clientKey: key, code: 'prn-sy-01', name: '收银小票机 1', kind: 'printer', brand: '爱普生', model: 'TM-T83III', area: '收银', connection: 'network', host: printer.host, port: printer.port };
+    const body = {
+      clientKey: key,
+      code: 'prn-sy-01',
+      name: '收银小票机 1',
+      kind: 'printer',
+      brand: '爱普生',
+      model: 'TM-T83III',
+      area: '收银',
+      connection: 'network',
+      host: printer.host,
+      port: printer.port,
+    };
     const r = await api(ctx.app, ctx.owner, 'POST', '/api/devices', body);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const d = r.body as Device;
@@ -188,7 +198,16 @@ describe('打印任务', () => {
   });
 
   it('标签机打测试标签（TSPL）；读卡器不接打印；没填 IP 的拒绝', async () => {
-    const l = await create({ code: 'LBL-HC-01', name: '后厨标签机', kind: 'label_printer', area: '后厨', connection: 'network', host: label.host, port: label.port, options: { labelLanguage: 'tspl', labelWidthMm: 40, labelHeightMm: 30 } });
+    const l = await create({
+      code: 'LBL-HC-01',
+      name: '后厨标签机',
+      kind: 'label_printer',
+      area: '后厨',
+      connection: 'network',
+      host: label.host,
+      port: label.port,
+      options: { labelLanguage: 'tspl', labelWidthMm: 40, labelHeightMm: 30 },
+    });
     expect(l.status, JSON.stringify(l.body)).toBe(200);
     expect((await job(l.body.id, 'test_page')).body.error.code).toBe('DEVICE_UNSUPPORTED');
     const r = await job(l.body.id, 'label_test');
@@ -354,7 +373,6 @@ describe('心跳与修改交错', () => {
     }
   });
 
-
   it('探测期间改了设置：旧地址的结果作废，不覆盖新设置的状态（Codex 预检 3efa3fe P3）', async () => {
     // 模拟打印机 1 秒后才回状态：探测还在等回复时，把地址清空
     const slow = await startMockPrinter({ delayMs: 1_000 });
@@ -420,7 +438,13 @@ describe('终端替桥上报', () => {
   it('终端与读卡器在线、读卡事件按编号去重；桥断开记离线；终端超时离线；没登记的终端 404', async () => {
     const rdr = await device('RDR-SY-01');
     const put = await api(ctx.app, ctx.owner, 'PUT', `/api/devices/${rdr.id}`, {
-      name: rdr.name, kind: rdr.kind, area: rdr.area, connection: 'bridge', hostDeviceCode: 'TRM-SY-01', bridgeKey: 'rc300', expectedVersion: rdr.version,
+      name: rdr.name,
+      kind: rdr.kind,
+      area: rdr.area,
+      connection: 'bridge',
+      hostDeviceCode: 'TRM-SY-01',
+      bridgeKey: 'rc300',
+      expectedVersion: rdr.version,
     });
     expect(put.status, JSON.stringify(put.body)).toBe(200);
     const eventId = randomUUID();
@@ -428,7 +452,10 @@ describe('终端替桥上报', () => {
     const r = await report({
       terminal: 'trm-sy-01',
       bridge: { connected: true, version: '0.1.0' },
-      devices: [{ key: 'rc300', status: 'online' }, { key: 'nfc', status: 'online' }],
+      devices: [
+        { key: 'rc300', status: 'online' },
+        { key: 'nfc', status: 'online' },
+      ],
       events: [
         { id: eventId, key: 'rc300', type: 'card', value: '0012345678', at: new Date().toISOString() },
         { id: randomUUID(), key: 'nfc', type: 'card', value: '04A1B2C3', at: new Date().toISOString() },
@@ -439,7 +466,16 @@ describe('终端替桥上报', () => {
     expect(await device('TRM-SY-01')).toMatchObject({ status: 'online' });
     expect(await device('RDR-SY-01')).toMatchObject({ status: 'online', statusCode: null });
     // 重发同一个事件：不记两次
-    expect((await report({ terminal: 'TRM-SY-01', bridge: { connected: true }, devices: [{ key: 'rc300', status: 'online' }], events: [{ id: eventId, key: 'rc300', type: 'card', value: '0012345678', at: new Date().toISOString() }] })).body.recorded).toBe(0);
+    expect(
+      (
+        await report({
+          terminal: 'TRM-SY-01',
+          bridge: { connected: true },
+          devices: [{ key: 'rc300', status: 'online' }],
+          events: [{ id: eventId, key: 'rc300', type: 'card', value: '0012345678', at: new Date().toISOString() }],
+        })
+      ).body.recorded,
+    ).toBe(0);
     const cards = (await api(ctx.app, ctx.owner, 'GET', '/api/devices/events?type=card')).body as { deviceCode: string; data: { value: string } }[];
     expect(cards.map((e) => `${e.deviceCode}:${e.data.value}`).sort()).toEqual(['RDR-SY-01:0012345678', 'TRM-SY-01:04A1B2C3']);
     // 读卡器拔掉（桥报离线）；桥没连上：挂在终端下的都记离线
@@ -472,7 +508,15 @@ describe('终端替桥上报', () => {
       await tx`SELECT id FROM staff WHERE id = ${target!.id} FOR UPDATE`;
       put = api(ctx.app, ctx.owner, 'PUT', `/api/staff/${target!.id}`, { displayName: '客户经理', role: 'account_manager', duties: [], active: true });
       await expect
-        .poll(async () => Number((await ctx.sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%UPDATE staff SET display_name%' AND query NOT ILIKE '%pg_stat_activity%'`)[0]!.n), { timeout: 5_000 })
+        .poll(
+          async () =>
+            Number(
+              (
+                await ctx.sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%UPDATE staff SET display_name%' AND query NOT ILIKE '%pg_stat_activity%'`
+              )[0]!.n,
+            ),
+          { timeout: 5_000 },
+        )
         .toBe(1);
       const started = Date.now();
       reported = await api(ctx.app, ctx.owner, 'POST', '/api/devices/bridge-report', {
@@ -494,7 +538,15 @@ describe('终端替桥上报', () => {
       await tx`SELECT id FROM staff WHERE id = ${owner!.id} FOR NO KEY UPDATE`;
       second = api(ctx.app, ctx.owner, 'PUT', `/api/staff/${target!.id}`, { displayName: '客户经理', role: 'account_manager', duties: [], active: true });
       await expect
-        .poll(async () => Number((await ctx.sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%FROM staff WHERE role = ''owner''%' AND query NOT ILIKE '%pg_stat_activity%'`)[0]!.n), { timeout: 5_000 })
+        .poll(
+          async () =>
+            Number(
+              (
+                await ctx.sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%FROM staff WHERE role = ''owner''%' AND query NOT ILIKE '%pg_stat_activity%'`
+              )[0]!.n,
+            ),
+          { timeout: 5_000 },
+        )
         .toBe(1);
     });
     expect((await second!).status).toBe(200);
