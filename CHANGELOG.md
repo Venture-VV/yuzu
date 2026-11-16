@@ -1,5 +1,9 @@
 # 变更记录
 
+## v8.1.5（开发中）
+
+内容等店主排。这个草稿 PR 先收 `main v8.1.4` 的验收报告，交接说明在 `docs/HANDOFF_V814.md`；先做用例隔离（`npm test` 不受终端里 `INTEGRATIONS_MOCK` 的影响）。
+
 ## v8.1.4 · 老浏览器上侧栏划不动、工作台开在哪一档
 
 主线的两处修复（[PR #119](https://github.com/Venture-VV/yuzu/pull/119)，交接 `docs/HANDOFF_V814.md`）与小程序线的 [PR #118](https://github.com/Venture-VV/yuzu/pull/118)；**主线没有迁移，不改业务规则与账**，新版浏览器上看到的页面与 8.1.3 一样。
