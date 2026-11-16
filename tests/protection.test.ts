@@ -216,6 +216,28 @@ describe('死锁、串行化冲突当「系统忙」（WL5）', () => {
   });
 });
 
+describe('卡住的事务（WL11）', () => {
+  it('应用的连接设了事务空闲时限：开着不动超过时限由数据库断开（放掉行锁），命令行的连接不设', async () => {
+    const plain = createSql(ctx.config.databaseUrl, { max: 1 });
+    const short = createSql(ctx.config.databaseUrl, { max: 1, idleInTransactionMs: 300 });
+    try {
+      const [off] = await plain<{ idleInTransactionSessionTimeout: string }[]>`SHOW idle_in_transaction_session_timeout`;
+      expect(off!.idleInTransactionSessionTimeout).toBe('0');
+      const [on] = await short<{ idleInTransactionSessionTimeout: string }[]>`SHOW idle_in_transaction_session_timeout`;
+      expect(on!.idleInTransactionSessionTimeout).toBe('300ms');
+      const stuck = short.begin(async (tx) => {
+        await tx`SELECT 1 FROM settings LIMIT 1 FOR UPDATE`;
+        await new Promise((r) => setTimeout(r, 1000)); // 开着不动
+        await tx`SELECT 2`;
+      });
+      await expect(stuck).rejects.toMatchObject({ code: 'CONNECTION_CLOSED' });
+    } finally {
+      await plain.end({ timeout: 1 });
+      await short.end({ timeout: 1 });
+    }
+  });
+});
+
 describe('页面报错（WL7）', () => {
   it('不用登录也能报；店主看得到（地址去掉查询参数、带上是谁），店员看不到；格式不对、太长的不收', async () => {
     const app = await appWith({});
