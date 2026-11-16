@@ -185,4 +185,14 @@ describe('设提醒的「结果待确认」', () => {
     expect(await r3.remindTap(OPTIONS, { kind: 'bonus', targetDate: '2026-11-20' })).toBe(false);
     expect(w3.sent).toEqual([]);
   });
+
+  it('门店暂时忙（409 BUSY）：不丢微信已同意的订阅配额，留在手机上下次打开补记', async () => {
+    const w = installWx({ 'POST /v1/reminders': { status: 409, data: { error: { code: 'BUSY', message: '门店系统正忙' } } } });
+    const api = await import('../src/utils/api');
+    api.setRetryDelayForTest(() => 0);
+    const r = await import('../src/utils/reminders');
+    const out = await r.sendConsent(KEY, { kind: 'coupon', couponCode: 'Q7K29XM4ABCD' }, TPL, 3);
+    expect(out.kind).toBe('pending');
+    expect((w.storage.tq_reminder_pending as unknown[]).length).toBe(1);
+  });
 });

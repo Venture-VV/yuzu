@@ -40,6 +40,8 @@ interface Raw {
   cache: string;
   /** 网关从门店取到这份内容的时刻（展示内容才有） */
   fetchedAt: string;
+  /** 门店或网关建议隔多久再试（毫秒） */
+  retryAfterMs?: number;
 }
 
 function send(method: 'GET' | 'POST', path: string, body: Record<string, unknown> | undefined, token: string | null): Promise<Raw> {
@@ -55,7 +57,14 @@ function send(method: 'GET' | 'POST', path: string, body: Record<string, unknown
       timeout: 10000,
       success: (res) => {
         const h = (res.header || {}) as Record<string, string>;
-        resolve({ status: res.statusCode, data: res.data, cache: h['x-cache'] || h['X-Cache'] || '', fetchedAt: h['x-fetched-at'] || h['X-Fetched-At'] || '' });
+        const ra = Number(h['retry-after'] || h['Retry-After'] || '');
+        resolve({
+          status: res.statusCode,
+          data: res.data,
+          cache: h['x-cache'] || h['X-Cache'] || '',
+          fetchedAt: h['x-fetched-at'] || h['X-Fetched-At'] || '',
+          retryAfterMs: isFinite(ra) && ra > 0 ? ra * 1000 : undefined,
+        });
       },
       fail: () => reject(apiError('NETWORK', '网络不太好，请稍后再试', 0)),
     });
@@ -66,11 +75,40 @@ function errorOf(r: Raw): ApiError {
   const body = r.data && typeof r.data === 'object' ? (r.data as { error?: { code?: unknown; message?: unknown } }) : {};
   const e = body.error;
   const code = e && typeof e.code === 'string' ? e.code : r.status >= 500 ? 'INTERNAL' : 'BAD_REQUEST';
-  const message = e && typeof e.message === 'string' && e.message ? e.message : '网络出了点问题，请稍后再试';
+  const rawMsg = e && typeof e.message === 'string' && e.message ? e.message : '网络出了点问题，请稍后再试';
+  // 过载保护在自动重发完仍忙时，交给顾客弹窗显示：不留主系统给网页写的「页面会自动稍后再试」
+  const message = code === 'OVERLOADED' && /自动稍后再试/.test(rawMsg) ? '门店系统正忙，这次没有处理，请稍后再试' : rawMsg;
   return apiError(code, message, r.status);
 }
 
 const ok = (r: Raw) => r.status >= 200 && r.status < 300;
+
+/**
+ * 门店明确没有处理的忙（8.1.3）：等锁/死锁回滚（409 BUSY）、过载保护（503 OVERLOADED）。
+ * 带一次性微信手机号 code（phoneCode）的请求在网关层重发，小程序不重发，保证整条链路只在一层重试。
+ */
+const MAX_BUSY_RESENDS = 2;
+let customRetryDelay: ((attempt: number, retryAfterMs?: number) => number) | null = null;
+export function setRetryDelayForTest(fn: ((attempt: number, retryAfterMs?: number) => number) | null): void {
+  customRetryDelay = fn;
+}
+function busyDelayMs(attempt: number, retryAfterMs?: number): number {
+  if (customRetryDelay) return customRetryDelay(attempt, retryAfterMs);
+  if (retryAfterMs !== undefined) return Math.round(Math.min(retryAfterMs, 1500) * (0.75 + Math.random() * 0.25));
+  return Math.round(300 * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5));
+}
+function canResendBusy(r: Raw, body?: Record<string, unknown>): boolean {
+  if (body && 'phoneCode' in body) return false;
+  const code = errorOf(r).code;
+  return code === 'BUSY' || code === 'OVERLOADED';
+}
+async function sendWithBusyRetry(method: 'GET' | 'POST', path: string, body: Record<string, unknown> | undefined, token: string | null): Promise<Raw> {
+  for (let attempt = 0; ; attempt++) {
+    const r = await send(method, path, body, token);
+    if (!canResendBusy(r, body) || attempt >= MAX_BUSY_RESENDS) return r;
+    await new Promise((res) => setTimeout(res, busyDelayMs(attempt, r.retryAfterMs)));
+  }
+}
 
 // ── 模拟微信（开发版、体验版连「模拟微信」的网关时）──
 
@@ -229,12 +267,12 @@ export function ensureSession(): Promise<string> {
   return logging;
 }
 
-/** 会员相关的接口：带网关会话；会话失效时重新登录、重发一次 */
+/** 会员相关的接口：带网关会话；会话失效时重新登录、重发一次；门店正忙（确定没处理）时带原编号短暂自动重发 */
 export async function member<T>(method: 'GET' | 'POST', path: string, body?: Record<string, unknown>): Promise<T> {
-  let r = await send(method, path, body, await ensureSession());
+  let r = await sendWithBusyRetry(method, path, body, await ensureSession());
   if (r.status === 401 && errorOf(r).code === 'SESSION_REQUIRED') {
     clearSession();
-    r = await send(method, path, body, await ensureSession());
+    r = await sendWithBusyRetry(method, path, body, await ensureSession());
   }
   if (ok(r)) {
     noteBindVersion(r.data);
@@ -264,10 +302,10 @@ function readCache<T>(path: string): T | null {
   return null;
 }
 
-/** 门店信息、价目、导览：不用登录 */
+/** 门店信息、价目、导览、工作台版面：不用登录；连不上或重发后仍正忙时先给本机 7 天内的旧内容 */
 export async function show<T>(path: string): Promise<Shown<T>> {
   try {
-    const r = await send('GET', path, undefined, null);
+    const r = await sendWithBusyRetry('GET', path, undefined, null);
     if (!ok(r)) throw errorOf(r);
     // 按网关从门店取到的时刻存：网关给的是旧内容时，本机不重新计时，前后加起来最多用 7 天
     const fetched = Date.parse(r.fetchedAt);
@@ -279,7 +317,7 @@ export async function show<T>(path: string): Promise<Shown<T>> {
     }
     return { data: r.data as T, stale: r.cache === 'stale' };
   } catch (e) {
-    if (isOffline(e)) {
+    if (isOffline(e) || (isApiError(e) && (e.code === 'OVERLOADED' || e.code === 'BUSY'))) {
       const cached = readCache<T>(path);
       if (cached) return { data: cached, stale: true };
     }

@@ -1,6 +1,6 @@
 // 我的：绑定会员（MP6：用微信验证过的手机号，对上门店的会员档案才绑；对不上不建会员，MP3）、会员卡（会员体系 v2 的档阶与进度）、
 // 余额（本金、赠金）、会员码、充值（线上充值开着时，第二期 2a）、流水、券、解绑与换号。会员相关的数字不存本机，门店连不上时显示「门店系统连接中」。
-import type { MpHome, MpMe, MpReminderOptions } from '../../../../src/shared/mp';
+import type { MpHome, MpMe, MpReminderOptions, MpStore, MpStudioAction } from '../../../../src/shared/mp';
 import { appVersion } from '../../config/env';
 import { isOffline, member, messageOf, mockUser, mockWechat, show, switchMockUser } from '../../utils/api';
 import { clearBindPending, dropUnreadableWhenBound, readBindPending, resolveBindPending, sendBind } from '../../utils/bind-pending';
@@ -9,6 +9,9 @@ import { cardView } from '../../utils/member-card';
 import type { CardView } from '../../utils/member-card';
 import { loadReminders, remindButton, remindHint, remindTap, retryPendingReminders } from '../../utils/reminders';
 import type { ReminderTarget } from '../../utils/reminders';
+import { currentStudio, currentThemeStyle, refreshStudio, studioAssetUrl, watchStudio } from '../../utils/studio';
+import { prepareScreenRender, runMpStudioAction } from '../../utils/studio-style';
+import type { RenderScreen } from '../../utils/studio-style';
 import { uuid } from '../../utils/uuid';
 import { readStored } from '../../utils/pending-store';
 
@@ -21,6 +24,8 @@ type State = 'loading' | 'unbound' | 'notmember' | 'pending' | 'unreadable' | 'b
 
 Page({
   data: {
+    themeStyle: '',
+    studioScreen: null as RenderScreen | null,
     state: 'loading' as State,
     message: '',
     card: null as CardView | null,
@@ -38,24 +43,46 @@ Page({
     remindHint: '',
   },
   reminders: null as MpReminderOptions | null,
+  homeStore: null as MpStore | null,
+  stopStudio: null as (() => void) | null,
 
   onLoad() {
     this.setData({ version: appVersion() });
+    this.syncStudio();
+    this.stopStudio = watchStudio(() => this.syncStudio());
+    refreshStudio().catch(() => undefined);
     show<MpHome>('/v1/home')
       .then(({ data }) => {
         const home = data.stores.filter((s) => s.isHome)[0];
+        this.homeStore = home || data.stores[0] || null;
         if (home) this.setData({ homeName: home.name });
+        this.syncStudio();
       })
       .catch(() => undefined);
   },
 
+  onUnload() {
+    if (this.stopStudio) this.stopStudio();
+    this.stopStudio = null;
+  },
+
   onShow() {
-    // 每次进来都读最新的余额与券；正在绑定（手机号验证的弹窗刚关掉）的等它回来
+    // 每次进来都重新问一次已发布版面（定时发布到点立即切换），并读最新的余额与券；正在绑定（手机号验证的弹窗刚关掉）的等它回来
+    refreshStudio().catch(() => undefined);
     if (!this.data.binding) this.load();
   },
 
   onPullDownRefresh() {
-    this.load().then(() => wx.stopPullDownRefresh());
+    Promise.all([refreshStudio().catch(() => null), this.load()]).then(() => wx.stopPullDownRefresh());
+  },
+
+  syncStudio() {
+    const active = currentStudio();
+    const themeStyle = currentThemeStyle();
+    const studioScreen = active
+      ? prepareScreenRender(active.doc, 'member', { store: this.homeStore, card: this.data.card }, studioAssetUrl)
+      : null;
+    this.setData({ themeStyle, studioScreen });
   },
 
   async load() {
@@ -67,6 +94,7 @@ Page({
       const outcome = await resolveBindPending();
       if (outcome && outcome.kind === 'pending') {
         this.setData({ state: 'pending', message: outcome.message, card: null });
+        this.syncStudio();
         return;
       }
       if (outcome && outcome.kind === 'abandoned') wx.showToast({ title: '上次的绑定没有成功，请重新绑定', icon: 'none' });
@@ -77,6 +105,7 @@ Page({
       if (me.bound && me.member) {
         dropUnreadableWhenBound();
         this.setData({ state: 'bound', card: cardView(me.member) });
+        this.syncStudio();
         this.loadReminders();
         return;
       }
@@ -85,8 +114,10 @@ Page({
       if (now.state === 'unreadable') this.setData({ state: 'unreadable', card: null });
       else if (now.state === 'pending') this.setData({ state: 'pending', message: '', card: null });
       else this.setData({ state: this.data.state === 'notmember' ? 'notmember' : 'unbound', card: null });
+      this.syncStudio();
     } catch (e) {
       this.setData({ state: isOffline(e) ? 'offline' : 'error', message: messageOf(e), card: null });
+      this.syncStudio();
     }
   },
 
@@ -155,8 +186,10 @@ Page({
       await this.load();
     } else if (outcome.kind === 'pending') {
       this.setData({ state: 'pending', message: outcome.message, card: null });
+      this.syncStudio();
     } else if (outcome.kind === 'unreadable') {
       this.setData({ state: 'unreadable', card: null });
+      this.syncStudio();
     } else if (outcome.kind === 'abandoned') {
       this.setData({ state: 'unbound' });
       wx.showModal({ title: '这次没有绑定', content: '刚才网络不好，门店系统确认这次没有绑上，请再点一次绑定。', showCancel: false });
@@ -211,11 +244,20 @@ Page({
     // 待确认的绑定属于原来那个模拟微信：换了就不再替它确认
     clearBindPending();
     this.setData({ mockUser: switchMockUser(), state: 'loading', card: null });
+    this.syncStudio();
     this.load();
   },
 
   onRetryBind() {
     this.setData({ state: 'unbound' });
+  },
+
+  onStudioAction(e: WechatMiniprogram.CustomEvent<MpStudioAction>) {
+    runMpStudioAction(e && e.detail, {
+      store: this.homeStore,
+      cardFrozen: !!(this.data.card && this.data.card.frozen),
+      currentRoute: 'pages/me/index',
+    });
   },
 
   // ── 菜单 ──

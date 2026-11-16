@@ -1279,3 +1279,165 @@ export interface MpBookingAdminData {
   /** 最近 50 次小程序的预约、取消 */
   recent: MpBookingAdminOp[];
 }
+
+// ── 工作台 · 小程序版面（8.1.2，docs/STUDIO_MP.md；不引 zod，miniprogram 单独装依赖也能做类型检查）──
+
+export type MpStudioShadow = 'none' | 'sm' | 'md' | 'lg';
+export type MpStudioSizingAxis = 'fixed' | 'fill' | 'hug';
+
+export interface MpStudioSizing {
+  w: MpStudioSizingAxis;
+  h: MpStudioSizingAxis;
+}
+
+export interface MpStudioAction {
+  action: string;
+  arg: string;
+}
+
+export interface MpStudioBilingual {
+  zh: string;
+  en: string;
+}
+
+export interface MpStudioLayout {
+  mode: 'free' | 'row' | 'column';
+  wrap: boolean;
+  gap: number;
+  padding: [number, number, number, number];
+  align: 'start' | 'center' | 'end' | 'stretch';
+  justify: 'start' | 'center' | 'end' | 'between';
+}
+
+export interface MpStudioNodeBase {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotate: number;
+  opacity: number;
+  hidden: boolean;
+  locked: boolean;
+  sizing?: MpStudioSizing;
+}
+
+export interface MpStudioBoxFields {
+  fill: string | null;
+  stroke: string | null;
+  strokeWidth: number;
+  radius: number;
+  shadow: MpStudioShadow;
+}
+
+export interface MpStudioTextFields {
+  font: 'zh' | 'en';
+  size: number;
+  weight: 300 | 400 | 500 | 600 | 700 | 900;
+  color: string;
+  align: 'left' | 'center' | 'right';
+  valign: 'top' | 'middle' | 'bottom';
+  lineHeight: number;
+  letterSpacing: number;
+  italic: boolean;
+  underline: boolean;
+}
+
+export interface MpStudioTextNode extends MpStudioNodeBase, MpStudioTextFields {
+  type: 'text';
+  text: MpStudioBilingual;
+  fill: string | null;
+}
+
+export interface MpStudioFieldNode extends MpStudioNodeBase, MpStudioTextFields {
+  type: 'field';
+  field: string;
+  prefix: MpStudioBilingual;
+  suffix: MpStudioBilingual;
+  fill: string | null;
+}
+
+export interface MpStudioButtonNode extends MpStudioNodeBase, MpStudioBoxFields, MpStudioTextFields {
+  type: 'button';
+  text: MpStudioBilingual;
+  action?: MpStudioAction;
+}
+
+export interface MpStudioRectNode extends MpStudioNodeBase, MpStudioBoxFields {
+  type: 'rect';
+}
+
+export interface MpStudioEllipseNode extends MpStudioNodeBase, MpStudioBoxFields {
+  type: 'ellipse';
+}
+
+export interface MpStudioImageNode extends MpStudioNodeBase {
+  type: 'image';
+  asset: string;
+  fit: 'cover' | 'contain' | 'fill';
+  radius: number;
+  fill: string | null;
+  action?: MpStudioAction;
+}
+
+export interface MpStudioBlockNode extends MpStudioNodeBase {
+  type: 'block';
+  block: string;
+  props: Record<string, string | number | boolean>;
+}
+
+export interface MpStudioFrameNode extends MpStudioNodeBase, MpStudioBoxFields {
+  type: 'frame';
+  clip: boolean;
+  layout?: MpStudioLayout;
+  action?: MpStudioAction;
+  children: MpStudioNode[];
+}
+
+export interface MpStudioInstanceNode extends MpStudioNodeBase {
+  type: 'instance';
+  component: string;
+}
+
+export type MpStudioNode =
+  | MpStudioTextNode
+  | MpStudioFieldNode
+  | MpStudioButtonNode
+  | MpStudioRectNode
+  | MpStudioEllipseNode
+  | MpStudioImageNode
+  | MpStudioBlockNode
+  | MpStudioFrameNode
+  | MpStudioInstanceNode;
+
+export interface MpStudioScreen {
+  background: string | null;
+  height?: number;
+  layout?: MpStudioLayout;
+  nodes: MpStudioNode[];
+}
+
+export interface MpStudioTheme {
+  colors: Record<string, string>;
+  fonts: { zh: string; en: string };
+}
+
+export interface MpStudioDoc {
+  schema: number;
+  surface: string;
+  theme: MpStudioTheme;
+  screens: Record<string, MpStudioScreen>;
+}
+
+export interface MpPublishedStudio {
+  id: number;
+  version: number;
+  publishedAt: string;
+  doc: MpStudioDoc;
+}
+
+export interface MpStudioResponse {
+  layout: MpPublishedStudio | null;
+}
+

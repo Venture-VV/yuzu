@@ -134,4 +134,18 @@ describe('绑定的结果待确认', () => {
       expect(storage.tq_bind_pending).toBeUndefined();
     }
   });
+
+  it('过载保护（503 OVERLOADED）与数据库忙（409 BUSY）确定没处理：删掉待确认记录、不再调作废接口', async () => {
+    for (const reply of [
+      { status: 503, data: { error: { code: 'OVERLOADED', message: '门店系统正忙，这次没有处理，请稍后再试' } } },
+      { status: 409, data: { error: { code: 'BUSY', message: '门店系统正忙，这次没有生效，请稍后再试' } } },
+    ]) {
+      const env = installWx({ '/v1/bind': reply });
+      const m = await load();
+      const r = await m.sendBind('code-busy', KEY, 3);
+      expect(r.kind).toBe('rejected');
+      expect(env.storage.tq_bind_pending).toBeUndefined();
+      expect(env.sent.map((s) => s.path)).toEqual(['/v1/bind']);
+    }
+  });
 });

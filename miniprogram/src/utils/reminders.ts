@@ -117,8 +117,9 @@ function dropPending(clientKey: string): void {
   if (r.ok) writeList(r.list.filter((p) => p.clientKey !== clientKey));
 }
 
-/** 结果不确定：连不上网关、超时、网关或门店出错（5xx）、门店连不上 */
-const uncertain = (e: unknown) => !isApiError(e) || e.status === 0 || e.status >= 500 || e.code === 'STORE_OFFLINE';
+/** 结果不确定或暂时忙（门店等锁忙、过载、限频）：微信的一次性同意已经弹过，留在手机上下次打开补记 */
+const uncertain = (e: unknown) =>
+  !isApiError(e) || e.status === 0 || e.status >= 500 || e.code === 'STORE_OFFLINE' || e.code === 'BUSY' || e.code === 'RATE_LIMITED' || e.code === 'TOO_MANY';
 
 export type ConsentOutcome =
   /** 门店系统记下了（或之前已经记下） */

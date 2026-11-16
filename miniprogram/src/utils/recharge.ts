@@ -12,6 +12,9 @@
 import type { MpRechargeAbandonResult, MpRechargeCreated, MpRechargeOptions, MpRechargeOrder } from '../../../src/shared/mp';
 import { isApiError, member, messageOf } from './api';
 import { yuan } from './format';
+import { uncertain } from './pending-store';
+
+export { uncertain };
 
 // ── 显示 ──
 
@@ -175,9 +178,6 @@ export function clearRechargePending(): void {
     // 删不掉：下次确认时门店系统照样回同一个结果
   }
 }
-
-/** 结果不确定：小程序连不上网关、超时、网关或门店出错（5xx）、门店连不上 */
-export const uncertain = (e: unknown) => !isApiError(e) || e.status === 0 || e.status >= 500 || e.code === 'STORE_OFFLINE';
 
 /** 有待确认的建单时，请门店系统确认作废这个编号；以门店系统的回答为准。读不出来时不确认、不删 */
 export async function resolveRechargePending(): Promise<CreateOutcome | null> {

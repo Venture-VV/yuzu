@@ -48,12 +48,6 @@ interface ClaimRow {
 /** 领取、确认作废都先取这个微信的这把咨询锁：同一个编号的领取与作废串行 */
 const lockCouponOpenid = (tx: Tx, openid: string) => tx`SELECT pg_advisory_xact_lock(hashtext(${`mp_coupon:${openid}`}))`;
 
-async function boundMember(db: Db, openid: string): Promise<{ bindingId: number; memberId: number }> {
-  const b = await activeBinding(db, openid);
-  if (!b) throw new AppError(403, 'MP_NOT_BOUND', '请先绑定会员');
-  return { bindingId: b.id, memberId: b.memberId };
-}
-
 /** 这位会员（连同合并进来的会员卡）每张券模板领了几张：限领按会员算，合并掉的会员卡领过的也算 */
 async function claimedCounts(db: Db, memberId: number): Promise<Map<number, number>> {
   const rows = await db<{ templateId: number; n: number }[]>`

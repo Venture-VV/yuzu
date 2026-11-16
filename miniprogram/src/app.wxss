@@ -34,6 +34,14 @@ page {
   line-height: 1.6;
 }
 
+.page-root {
+  min-height: 100vh;
+  box-sizing: border-box;
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-zh);
+}
+
 /* ── 按钮：去掉微信按钮的默认样式 ── */
 button {
   margin: 0;

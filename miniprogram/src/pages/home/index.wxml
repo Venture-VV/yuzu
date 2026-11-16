@@ -1,115 +1,183 @@
-<!-- 导航栏：版头上透明；滚过版头后米白底、黑字标志 -->
-<view class="nav {{solid ? 'solid' : ''}}" style="padding-top: {{statusBar}}px;">
-  <view class="nav-bar" style="height: {{bar}}px; padding-right: {{capsuleRight}}px;">
-    <view wx:if="{{solid}}" class="nav-mark" aria-label="汤崎 TOUCHILL">
-      <image class="nm-logo" src="/assets/brand/logo-horizontal-ink.png" mode="aspectFit" />
-      <image class="nm-en" src="/assets/brand/touchill-ink.png" mode="aspectFit" />
+<view class="page-root" style="{{themeStyle}}">
+  <!-- 导航栏：版头上透明；滚过版头后米白底、黑字标志 -->
+  <view class="nav {{solid ? 'solid' : ''}}" style="padding-top: {{statusBar}}px;">
+    <view class="nav-bar" style="height: {{bar}}px; padding-right: {{capsuleRight}}px;">
+      <view wx:if="{{solid}}" class="nav-mark" aria-label="汤崎 TOUCHILL">
+        <image class="nm-logo" src="/assets/brand/logo-horizontal-ink.png" mode="aspectFit" />
+        <image class="nm-en" src="/assets/brand/touchill-ink.png" mode="aspectFit" />
+      </view>
     </view>
   </view>
-</view>
 
-<!-- 版头：氛围大图加标志（VI） -->
-<view class="hero">
-  <swiper wx:if="{{banners.length}}" class="hero-media" autoplay="{{banners.length > 1}}" circular="{{banners.length > 1}}" interval="5000" duration="600" bindchange="onBannerChange">
-    <swiper-item wx:for="{{banners}}" wx:key="id" data-index="{{index}}" bindtap="onBanner">
-      <image class="hero-img" src="{{item.src}}" mode="aspectFill" aria-label="{{item.title}}" />
-    </swiper-item>
-  </swiper>
-  <image wx:elif="{{heroImage}}" class="hero-media hero-img" src="{{heroImage}}" mode="aspectFill" />
-  <view class="hero-shade" />
-  <view class="hero-body">
-    <view class="wordmark" aria-label="汤崎 TOUCHILL">
-      <image class="wm-logo" src="/assets/brand/logo-stacked-light.png" mode="aspectFit" />
-      <image class="wm-en" src="/assets/brand/touchill-light.png" mode="aspectFit" />
+  <!-- 已发布工作台版面且门店数据就绪时按版面画；未发布或格式不认识时原样回退下面的页面 -->
+  <studio-screen wx:if="{{studioScreen && status === 'ready'}}" screen="{{studioScreen}}" bindaction="onStudioAction">
+    <view slot="banner" class="hero studio-hero">
+      <swiper
+        wx:if="{{banners.length}}"
+        class="hero-media"
+        autoplay="{{studioScreen.bannerProps.autoplay && banners.length > 1}}"
+        circular="{{banners.length > 1}}"
+        interval="5000"
+        duration="600"
+        bindchange="onBannerChange"
+      >
+        <swiper-item wx:for="{{banners}}" wx:key="id" data-index="{{index}}" bindtap="onBanner">
+          <image class="hero-img" src="{{item.src}}" mode="aspectFill" aria-label="{{item.title}}" />
+        </swiper-item>
+      </swiper>
+      <image wx:elif="{{heroImage}}" class="hero-media hero-img" src="{{heroImage}}" mode="aspectFill" />
+      <view class="hero-shade" style="{{studioScreen.bannerProps.shadeStyle}}" />
+      <view wx:if="{{studioScreen.bannerProps.wordmark}}" class="hero-body">
+        <view class="wordmark" aria-label="汤崎 TOUCHILL">
+          <image class="wm-logo" src="/assets/brand/logo-stacked-light.png" mode="aspectFit" />
+          <image class="wm-en" src="/assets/brand/touchill-light.png" mode="aspectFit" />
+        </view>
+        <view class="hero-line" />
+        <text class="hero-tag">都市新旅生活目的地</text>
+        <text class="hero-en">YOUR NEXT URBAN PLEASURE</text>
+      </view>
+      <view wx:if="{{banners.length}}" class="hero-foot">
+        <text class="hero-cap">{{banners[current].title}}</text>
+        <view wx:if="{{banners.length > 1}}" class="dots">
+          <view wx:for="{{banners}}" wx:key="id" class="dot {{index === current ? 'on' : ''}}" />
+        </view>
+      </view>
     </view>
-    <view class="hero-line" />
-    <text class="hero-tag">都市新旅生活目的地</text>
-    <text class="hero-en">YOUR NEXT URBAN PLEASURE</text>
-  </view>
-  <view wx:if="{{banners.length}}" class="hero-foot">
-    <text class="hero-cap">{{banners[current].title}}</text>
-    <view wx:if="{{banners.length > 1}}" class="dots">
-      <view wx:for="{{banners}}" wx:key="id" class="dot {{index === current ? 'on' : ''}}" />
+
+    <view slot="store" id="store">
+      <view wx:if="{{stale}}" class="offline">门店系统连接中，显示的是之前的信息</view>
+      <view class="studio-store-wrap">
+        <view class="studio-store-card" style="{{studioScreen.storeProps.cardStyle}}">
+          <view wx:if="{{stores.length > 1}}" class="tabs">
+            <view wx:for="{{stores}}" wx:key="code" class="tab {{index === storeIndex ? 'on' : ''}}" data-index="{{index}}" bindtap="onStore">{{item.name}}</view>
+          </view>
+          <view wx:else class="sec-h"><view><text class="eyebrow">Store</text><text class="h3">{{store.name}}</text></view></view>
+          <view class="facts">
+            <view wx:if="{{store.hours}}" class="fact"><text class="fk">营业时间</text><text class="fv">{{store.hours}}</text></view>
+            <view wx:if="{{store.address}}" class="fact"><text class="fk">地址</text><text class="fv">{{store.address}}</text></view>
+            <view wx:if="{{store.phone}}" class="fact"><text class="fk">电话</text><text class="fv num">{{store.phone}}</text></view>
+            <view wx:if="{{!store.hours && !store.address && !store.phone}}" class="fact"><text class="fv sub">门店信息正在整理</text></view>
+          </view>
+          <view wx:if="{{studioScreen.storeProps.buttons && actCount}}" class="acts" style="grid-template-columns: repeat({{actCount}}, 1fr);">
+            <button wx:if="{{store.latitude !== null && store.longitude !== null}}" class="btn ghost" hover-class="btn-hover" bindtap="onNavigate">导航到店</button>
+            <button wx:if="{{store.phone}}" class="btn ghost" hover-class="btn-hover" bindtap="onCall">拨打电话</button>
+            <button wx:if="{{store.isHome}}" class="btn ghost" hover-class="btn-hover" bindtap="onGuide">楼层导览</button>
+          </view>
+          <view wx:if="{{store.notice}}" class="notice">
+            <text class="eyebrow">Notice</text>
+            <text class="notice-t">{{store.notice}}</text>
+          </view>
+          <text wx:if="{{!store.isHome}}" class="sub note">会员卡、余额和券目前只支持{{homeName}}的会员</text>
+        </view>
+      </view>
     </view>
-  </view>
-</view>
+  </studio-screen>
 
-<view wx:if="{{stale}}" class="offline">门店系统连接中，显示的是之前的信息</view>
-
-<view class="view">
-  <view wx:if="{{status === 'loading'}}" class="wait">正在打开…</view>
-  <view wx:elif="{{status === 'error'}}" class="wait">
-    <text class="h3">{{message}}</text>
-    <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
-  </view>
   <block wx:else>
-    <!-- 门店信息 -->
-    <view class="sec" id="store">
-      <view wx:if="{{stores.length > 1}}" class="tabs">
-        <view wx:for="{{stores}}" wx:key="code" class="tab {{index === storeIndex ? 'on' : ''}}" data-index="{{index}}" bindtap="onStore">{{item.name}}</view>
+    <!-- 版头：氛围大图加标志（VI） -->
+    <view class="hero">
+      <swiper wx:if="{{banners.length}}" class="hero-media" autoplay="{{banners.length > 1}}" circular="{{banners.length > 1}}" interval="5000" duration="600" bindchange="onBannerChange">
+        <swiper-item wx:for="{{banners}}" wx:key="id" data-index="{{index}}" bindtap="onBanner">
+          <image class="hero-img" src="{{item.src}}" mode="aspectFill" aria-label="{{item.title}}" />
+        </swiper-item>
+      </swiper>
+      <image wx:elif="{{heroImage}}" class="hero-media hero-img" src="{{heroImage}}" mode="aspectFill" />
+      <view class="hero-shade" />
+      <view class="hero-body">
+        <view class="wordmark" aria-label="汤崎 TOUCHILL">
+          <image class="wm-logo" src="/assets/brand/logo-stacked-light.png" mode="aspectFit" />
+          <image class="wm-en" src="/assets/brand/touchill-light.png" mode="aspectFit" />
+        </view>
+        <view class="hero-line" />
+        <text class="hero-tag">都市新旅生活目的地</text>
+        <text class="hero-en">YOUR NEXT URBAN PLEASURE</text>
       </view>
-      <view wx:else class="sec-h"><view><text class="eyebrow">Store</text><text class="h3">{{store.name}}</text></view></view>
-      <view class="facts">
-        <view wx:if="{{store.hours}}" class="fact"><text class="fk">营业时间</text><text class="fv">{{store.hours}}</text></view>
-        <view wx:if="{{store.address}}" class="fact"><text class="fk">地址</text><text class="fv">{{store.address}}</text></view>
-        <view wx:if="{{store.phone}}" class="fact"><text class="fk">电话</text><text class="fv num">{{store.phone}}</text></view>
-        <view wx:if="{{!store.hours && !store.address && !store.phone}}" class="fact"><text class="fv sub">门店信息正在整理</text></view>
-      </view>
-      <view wx:if="{{actCount}}" class="acts" style="grid-template-columns: repeat({{actCount}}, 1fr);">
-        <button wx:if="{{store.latitude !== null && store.longitude !== null}}" class="btn ghost" hover-class="btn-hover" bindtap="onNavigate">导航到店</button>
-        <button wx:if="{{store.phone}}" class="btn ghost" hover-class="btn-hover" bindtap="onCall">拨打电话</button>
-        <button wx:if="{{store.isHome}}" class="btn ghost" hover-class="btn-hover" bindtap="onGuide">楼层导览</button>
-      </view>
-      <view wx:if="{{store.notice}}" class="notice">
-        <text class="eyebrow">Notice</text>
-        <text class="notice-t">{{store.notice}}</text>
-      </view>
-      <text wx:if="{{!store.isHome}}" class="sub note">会员卡、余额和券目前只支持{{homeName}}的会员</text>
-    </view>
-
-    <!-- 三块业务（品牌书） -->
-    <view class="sec pillars">
-      <view class="pillar taste" hover-class="tap" data-p="taste" bindtap="onPillar">
-        <text class="pl-en">TASTE</text>
-        <text class="pl-zh">美食餐饮</text>
-      </view>
-      <view class="pillar wellness" hover-class="tap" data-p="wellness" bindtap="onPillar">
-        <text class="pl-en">WELLNESS</text>
-        <text class="pl-zh">按摩疗愈</text>
-      </view>
-      <view class="pillar experience" hover-class="tap" data-p="experience" bindtap="onPillar">
-        <text class="pl-en">EXPERIENCE</text>
-        <text class="pl-zh">日常娱乐</text>
+      <view wx:if="{{banners.length}}" class="hero-foot">
+        <text class="hero-cap">{{banners[current].title}}</text>
+        <view wx:if="{{banners.length > 1}}" class="dots">
+          <view wx:for="{{banners}}" wx:key="id" class="dot {{index === current ? 'on' : ''}}" />
+        </view>
       </view>
     </view>
 
-    <!-- 服务 -->
-    <view class="sec">
-      <view class="sec-h"><view><text class="eyebrow">Services</text><text class="h3">服务</text></view></view>
-      <view class="grid">
-        <view class="gi" hover-class="tap" bindtap="onCode"><view class="ic">码</view><text class="lb">会员码</text></view>
-        <view class="gi" hover-class="tap" bindtap="onPrices"><view class="ic">价</view><text class="lb">价目表</text></view>
-        <view class="gi" hover-class="tap" bindtap="onGuide"><view class="ic">导</view><text class="lb">楼层导览</text></view>
-        <view class="gi" hover-class="tap" bindtap="onContact"><view class="ic">店</view><text class="lb">联系门店</text></view>
+    <view wx:if="{{stale}}" class="offline">门店系统连接中，显示的是之前的信息</view>
+
+    <view class="view">
+      <view wx:if="{{status === 'loading'}}" class="wait">正在打开…</view>
+      <view wx:elif="{{status === 'error'}}" class="wait">
+        <text class="h3">{{message}}</text>
+        <button class="btn ghost" hover-class="btn-hover" bindtap="load">再试一次</button>
       </view>
+      <block wx:else>
+        <!-- 门店信息 -->
+        <view class="sec" id="store">
+          <view wx:if="{{stores.length > 1}}" class="tabs">
+            <view wx:for="{{stores}}" wx:key="code" class="tab {{index === storeIndex ? 'on' : ''}}" data-index="{{index}}" bindtap="onStore">{{item.name}}</view>
+          </view>
+          <view wx:else class="sec-h"><view><text class="eyebrow">Store</text><text class="h3">{{store.name}}</text></view></view>
+          <view class="facts">
+            <view wx:if="{{store.hours}}" class="fact"><text class="fk">营业时间</text><text class="fv">{{store.hours}}</text></view>
+            <view wx:if="{{store.address}}" class="fact"><text class="fk">地址</text><text class="fv">{{store.address}}</text></view>
+            <view wx:if="{{store.phone}}" class="fact"><text class="fk">电话</text><text class="fv num">{{store.phone}}</text></view>
+            <view wx:if="{{!store.hours && !store.address && !store.phone}}" class="fact"><text class="fv sub">门店信息正在整理</text></view>
+          </view>
+          <view wx:if="{{actCount}}" class="acts" style="grid-template-columns: repeat({{actCount}}, 1fr);">
+            <button wx:if="{{store.latitude !== null && store.longitude !== null}}" class="btn ghost" hover-class="btn-hover" bindtap="onNavigate">导航到店</button>
+            <button wx:if="{{store.phone}}" class="btn ghost" hover-class="btn-hover" bindtap="onCall">拨打电话</button>
+            <button wx:if="{{store.isHome}}" class="btn ghost" hover-class="btn-hover" bindtap="onGuide">楼层导览</button>
+          </view>
+          <view wx:if="{{store.notice}}" class="notice">
+            <text class="eyebrow">Notice</text>
+            <text class="notice-t">{{store.notice}}</text>
+          </view>
+          <text wx:if="{{!store.isHome}}" class="sub note">会员卡、余额和券目前只支持{{homeName}}的会员</text>
+        </view>
+
+        <!-- 三块业务（品牌书） -->
+        <view class="sec pillars">
+          <view class="pillar taste" hover-class="tap" data-p="taste" bindtap="onPillar">
+            <text class="pl-en">TASTE</text>
+            <text class="pl-zh">美食餐饮</text>
+          </view>
+          <view class="pillar wellness" hover-class="tap" data-p="wellness" bindtap="onPillar">
+            <text class="pl-en">WELLNESS</text>
+            <text class="pl-zh">按摩疗愈</text>
+          </view>
+          <view class="pillar experience" hover-class="tap" data-p="experience" bindtap="onPillar">
+            <text class="pl-en">EXPERIENCE</text>
+            <text class="pl-zh">日常娱乐</text>
+          </view>
+        </view>
+
+        <!-- 服务 -->
+        <view class="sec">
+          <view class="sec-h"><view><text class="eyebrow">Services</text><text class="h3">服务</text></view></view>
+          <view class="grid">
+            <view class="gi" hover-class="tap" bindtap="onCode"><view class="ic">码</view><text class="lb">会员码</text></view>
+            <view class="gi" hover-class="tap" bindtap="onPrices"><view class="ic">价</view><text class="lb">价目表</text></view>
+            <view class="gi" hover-class="tap" bindtap="onGuide"><view class="ic">导</view><text class="lb">楼层导览</text></view>
+            <view class="gi" hover-class="tap" bindtap="onContact"><view class="ic">店</view><text class="lb">联系门店</text></view>
+          </view>
+        </view>
+      </block>
     </view>
   </block>
-</view>
 
-<!-- 会员端提醒（RQ-014）：收到券、券快到期；点「知道了」或「看我的券」记已读，以后不再弹 -->
-<view wx:if="{{noticeOpen}}" class="ntc-mask" catchtouchmove="onNoticeHold">
-  <view class="ntc" role="dialog" aria-label="会员提醒">
-    <text class="eyebrow">Notice</text>
-    <text class="h3">给你的提醒</text>
-    <scroll-view scroll-y class="ntc-list">
-      <view wx:for="{{notices}}" wx:key="id" class="ntc-item">
-        <text class="ntc-t">{{item.title}}</text>
-        <text class="ntc-b">{{item.body}}</text>
+  <!-- 会员端提醒（RQ-014）：收到券、券快到期；点「知道了」或「看我的券」记已读，以后不再弹 -->
+  <view wx:if="{{noticeOpen}}" class="ntc-mask" catchtouchmove="onNoticeHold">
+    <view class="ntc" role="dialog" aria-label="会员提醒">
+      <text class="eyebrow">Notice</text>
+      <text class="h3">给你的提醒</text>
+      <scroll-view scroll-y class="ntc-list">
+        <view wx:for="{{notices}}" wx:key="id" class="ntc-item">
+          <text class="ntc-t">{{item.title}}</text>
+          <text class="ntc-b">{{item.body}}</text>
+        </view>
+      </scroll-view>
+      <view class="ntc-acts {{noticeCoupon ? 'two' : ''}}">
+        <button wx:if="{{noticeCoupon}}" class="btn ghost" hover-class="btn-hover" bindtap="onNoticeCoupons">看我的券</button>
+        <button class="btn primary" hover-class="btn-hover" bindtap="onNoticeOk">知道了</button>
       </view>
-    </scroll-view>
-    <view class="ntc-acts {{noticeCoupon ? 'two' : ''}}">
-      <button wx:if="{{noticeCoupon}}" class="btn ghost" hover-class="btn-hover" bindtap="onNoticeCoupons">看我的券</button>
-      <button class="btn primary" hover-class="btn-hover" bindtap="onNoticeOk">知道了</button>
     </view>
   </view>
 </view>

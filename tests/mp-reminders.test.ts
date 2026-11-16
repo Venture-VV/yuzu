@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { shiftDate } from '../src/shared/labels';
-import { MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpReminderAdminData, type MpReminderLeased, type MpReminderOptions, type MpReminderRules } from '../src/shared/mp';
+import { MP_GATEWAY_HEADER, MP_OPENID_HEADER, type MpReminderAdminData, type MpReminderOptions, type MpReminderRules } from '../src/shared/mp';
 import { buildMpApp } from '../src/server/modules/mp/app';
 import { mpToday } from '../src/server/modules/mp/public';
 import { formatField, leaseReminders, planReminders, reportReminders } from '../src/server/modules/mp/reminders';

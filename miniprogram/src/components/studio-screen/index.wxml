@@ -1,0 +1,22 @@
+<view wx:if="{{screen}}" class="ss-root" style="{{screen.style}}">
+  <view wx:if="{{screen.innerWrapStyle}}" style="{{screen.innerWrapStyle}}">
+    <block wx:for="{{screen.nodes}}" wx:key="id">
+      <view wx:if="{{item.type === 'block'}}" class="ss-block" style="{{item.style}}">
+        <slot wx:if="{{item.blockSlot === 'banner'}}" name="banner" />
+        <slot wx:elif="{{item.blockSlot === 'store'}}" name="store" />
+        <slot wx:elif="{{item.blockSlot === 'memberCard'}}" name="memberCard" />
+      </view>
+      <studio-node wx:else node="{{item}}" bindaction="onNodeAction" />
+    </block>
+  </view>
+  <block wx:else>
+    <block wx:for="{{screen.nodes}}" wx:key="id">
+      <view wx:if="{{item.type === 'block'}}" class="ss-block" style="{{item.style}}">
+        <slot wx:if="{{item.blockSlot === 'banner'}}" name="banner" />
+        <slot wx:elif="{{item.blockSlot === 'store'}}" name="store" />
+        <slot wx:elif="{{item.blockSlot === 'memberCard'}}" name="memberCard" />
+      </view>
+      <studio-node wx:else node="{{item}}" bindaction="onNodeAction" />
+    </block>
+  </block>
+</view>
