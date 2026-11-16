@@ -6,6 +6,7 @@
 // 舞台带 data-motion="off"，emenu.css 里所有动画、过渡都关掉。
 
 import { createContext, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useBrandFont } from './brandFont';
 import { nextStable, STAGE_H, STAGE_W, stageLayout, type StableSize, type StageLayout, type ViewportNow } from './viewport';
 import './emenu.css';
 
@@ -144,6 +145,7 @@ export function Stage({
   }, []);
 
   const animated = motion && !reduce;
+  const brandEn = useBrandFont();
   return (
     <StageContext.Provider value={{ scale: layout.scale, visible: layout.visible, keyboard: layout.keyboard, animated }}>
       <BigContext.Provider value={big}>
@@ -152,6 +154,7 @@ export function Stage({
           // 高度写成稳定的那个数（不用 inset: 0）：键盘把窗口压矮时这一层不跟着变矮，舞台不会被挤
           style={{ position: 'fixed', left: 0, top: 0, width: '100%', height: height ?? '100%', overflow: 'hidden', background: 'var(--em-bg)', ...vars }}
           data-motion={animated ? undefined : 'off'}
+          data-brand-en={brandEn ? '' : undefined}
           data-lang={lang}
           data-size={big ? 'large' : 'design'}
           data-keyboard={layout.keyboard || undefined}
@@ -202,6 +205,7 @@ export function EmbeddedStage({
   vars?: Record<string, string>;
   testId?: string;
 }) {
+  const brandEn = useBrandFont();
   return (
     <StageContext.Provider value={{ scale, visible: STAGE_H, keyboard: false, animated: false }}>
       <BigContext.Provider value={big}>
@@ -209,6 +213,7 @@ export function EmbeddedStage({
           className="emenu"
           style={{ position: 'relative', width: STAGE_W * scale, height: STAGE_H * scale, overflow: 'hidden', background: 'var(--em-bg)', ...vars }}
           data-motion="off"
+          data-brand-en={brandEn ? '' : undefined}
           data-lang={lang}
           data-size={big ? 'large' : 'design'}
           data-testid={testId}

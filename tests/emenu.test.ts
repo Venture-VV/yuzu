@@ -3,6 +3,10 @@
 // 全部是合成数据。
 
 import { randomUUID } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_EMENU_PERIODS, DEFAULT_EMENU_RULES, EMENU_PERIODS, minuteOfDay, periodAt, type EmenuAdmin, type EmenuMenu } from '../src/shared/emenu';
 import { resetLoginThrottle } from '../src/server/auth/lockout';
@@ -469,6 +473,40 @@ describe('平板上的菜单', () => {
     expect((await put(cat.west!, { periods: [] })).status).toBe(200);
     expect((await put(cat.lunch!, { periods: [] })).status).toBe(200);
     expect((await menu()).categories.map((x) => x.name)).toEqual(['西式午餐', '中式午餐']);
+  });
+});
+
+describe('授权的品牌英文字体（8.1.5，PP4）', () => {
+  it('门店服务器的 brand-fonts/en.woff2：没放、放的不是 WOFF2 都是 404；放了只发给能打开菜单的账号，按修改时间与大小给 ETag', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'yuzu-brand-fonts-'));
+    const before = ctx.config.brandFontPath;
+    ctx.config.brandFontPath = dir;
+    try {
+      const get = (cookie: string | null, headers: Record<string, string> = {}) =>
+        ctx.app.inject({ method: 'GET', url: '/api/emenu/fonts/en.woff2', headers: { ...(cookie ? { cookie } : {}), ...headers } });
+      expect((await get(pad)).statusCode).toBe(404);
+      writeFileSync(join(dir, 'en.woff2'), 'not a font');
+      expect((await get(pad)).statusCode).toBe(404);
+      // 用随应用打包的一个开源 WOFF2 当作授权文件
+      const woff2 = readFileSync(fileURLToPath(new URL('../node_modules/@fontsource/average-sans/files/average-sans-latin-400-normal.woff2', import.meta.url)));
+      writeFileSync(join(dir, 'en.woff2'), woff2);
+      const ok = await get(pad);
+      expect(ok.statusCode).toBe(200);
+      expect(ok.headers['content-type']).toBe('font/woff2');
+      expect(ok.rawPayload.equals(woff2)).toBe(true);
+      expect(ok.headers['cache-control']).toBe('private, no-cache');
+      const again = await get(pad, { 'if-none-match': String(ok.headers.etag) });
+      expect(again.statusCode).toBe(304);
+      // 维护电子菜单的人（后台的版面预览）也取得到；没登录、没有菜单权限的取不到
+      expect((await get(ctx.owner)).statusCode).toBe(200);
+      expect((await get(null)).statusCode).toBe(401);
+      expect((await get(cook)).statusCode).toBe(403);
+      // 只认 en.woff2 这一个名字
+      expect((await ctx.app.inject({ method: 'GET', url: '/api/emenu/fonts/..%2Fen.woff2', headers: { cookie: pad } })).statusCode).toBe(404);
+    } finally {
+      ctx.config.brandFontPath = before;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

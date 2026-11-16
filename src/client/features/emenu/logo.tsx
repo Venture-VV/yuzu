@@ -34,7 +34,10 @@ export function LogoStacked({ width = 78.64, className }: { width?: number; clas
   );
 }
 
-/** 顶栏左上角的横排字标（设计稿 79.8 × 15.4） */
+/** 横排字标的宽高比（viewBox 79.809 × 15.441） */
+export const LOGO_ROW_RATIO = 79.809 / 15.441;
+
+/** 顶栏左上角的横排字标（设计稿 79.8 × 15.4；8.1.5 起高按右上角切换图标的 0.7 倍算） */
 export function LogoRow({ width = 79.81, className }: { width?: number; className?: string }) {
   return (
     <svg viewBox="0 0 79.809 15.441" width={width} className={className} role="img" aria-label="汤崎">

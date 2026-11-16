@@ -12,10 +12,10 @@ import { colorValue, defaultStudioDoc, DocSchema, EMENU_SURFACE, themeVars, upgr
 import type { EmenuMenu } from '@shared/emenu';
 import { api } from '../../lib/api';
 import { blockScale } from '../../studio-render/StudioNodes';
-import { LangToggle } from './header';
+import { LANG_ICON, LangToggle } from './header';
 import type { Lang } from './i18n';
 import { LogoRow, LogoStacked } from './logo';
-import { BIG, box, useBig, ZoomAt } from './stage';
+import { BIG, box, useBig } from './stage';
 
 export const studioAssetUrl = (id: string) => `/api/studio/assets/${id}`;
 
@@ -190,27 +190,16 @@ export function StartFooterBlock({ node, tone, text, onExit }: { node: StudioBlo
   );
 }
 
-/** 「中 | EN」：等比缩放；放大的一档右边贴着块的右边、竖直居中 */
+/**
+ * 中英切换（8.1.5 换成品牌给的图标，PP6）：块还是原来「中 | EN」的 48 × 22.3（已经发布过的版面照常用），
+ * 图标是块的高那么大的正方形，靠右、竖直居中；放大的一档图标再大 BIG.ui 倍，右边仍贴着块的右边
+ */
 export function LangBlock({ node, lang, onToggle, autoLight }: { node: StudioBlockNode; lang: Lang; onToggle: () => void; autoLight: boolean }) {
   const large = useBig();
   const tone = node.props.tone;
   const light = tone === 'light' ? true : tone === 'dark' ? false : autoLight;
-  const k = blockScale(node, EMENU_SURFACE);
-  if (large) {
-    return (
-      <ZoomAt x={node.w - 24 * BIG.ui * k} y={node.h / 2} k={BIG.ui * k}>
-        <LangToggle lang={lang} onToggle={onToggle} x={-24} y={-11.15} light={light} />
-      </ZoomAt>
-    );
-  }
-  const toggle = <LangToggle lang={lang} onToggle={onToggle} x={0} y={0} light={light} />;
-  return Math.abs(k - 1) < 0.001 ? (
-    toggle
-  ) : (
-    <ZoomAt x={0} y={0} k={k}>
-      {toggle}
-    </ZoomAt>
-  );
+  const size = LANG_ICON * blockScale(node, EMENU_SURFACE) * (large ? BIG.ui : 1);
+  return <LangToggle lang={lang} onToggle={onToggle} x={node.w - size} y={(node.h - size) / 2} size={size} light={light} />;
 }
 
 /** 起始页右下角很小的版本标记（发布过的才有）：出问题时好对是哪一版 */

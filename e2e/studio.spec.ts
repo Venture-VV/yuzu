@@ -105,6 +105,16 @@ test.describe('8.1.1 UI 工作台', () => {
       await expect(textSize).toHaveText(tablet.rules.textSize === 'design' ? '原样' : '放大');
       if (tablet.rules.textSize !== 'design') await textSize.click();
       await expect(textSize).toHaveText('原样');
+      // 8.1.5：菜单页的工具栏可以按时段看（现在 / 早餐 / 午餐 / 晚餐 / 全部分类），只是预览；看完回到「现在」与起始页
+      await page.getByTestId('studio-screen-menu').click();
+      const period = page.getByTestId('studio-period');
+      await expect(period).toHaveValue('now');
+      await expect(period.locator('option')).toHaveText(['时段：现在', /^早餐 /, /^午餐 /, /^晚餐 /, '全部分类']);
+      const allMenu = page.waitForResponse((r) => r.url().includes('/api/studio/emenu/menu?period=all') && r.ok());
+      await period.selectOption('all');
+      await allMenu;
+      await period.selectOption('now');
+      await page.getByTestId('studio-screen-start').click();
       // 起始页的图层：默认版面的五块
       await expect(page.getByTestId('studio-layer-start-logo')).toBeVisible();
       await expect(page.getByTestId('studio-layer-start-footer')).toContainText('必需');

@@ -12,3 +12,5 @@ playwright-report
 *.dump
 miniprogram
 brand
+# 授权的品牌字体（8.1.5）：商业字体文件不进 Git、不进镜像，放在服务器上挂进容器
+brand-fonts

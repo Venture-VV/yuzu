@@ -82,6 +82,10 @@ services:
     # 已有实例两种写法都在用，这一行不要再拼别的变量（tests/compose-config.test.ts 核对两种写法都能展开）
     ports:
       - "${APP_PORT:-8080}:8080"
+    # 授权的品牌字体（8.1.5，docs/EMENU.md 第 14.2 节）：英文 ABC Arizona Flare 的网页授权文件改名 en.woff2 放在这个目录，
+    # 平板菜单刷新就换上；不进 Git、不进镜像，只读挂进容器。目录不在时 Docker 会建一个空的（没放文件照旧用顶替的字体）
+    volumes:
+      - ${BRAND_FONT_DIR:-./brand-fonts}:/app/brand-fonts:ro
     logging: *logging
 
   # 备份服务：与 app 同一个镜像（含 pg_dump / pg_restore），由 app 构建、不从网上拉。

@@ -9,6 +9,7 @@ import { blockLabel, dishAttrs, dishDescription, dishNames, dishTagline, dishUni
 import { PlusDot } from './icons';
 import { designPoint, FadeImg } from './motion';
 import { BIG, box, useBig, ZoomAt } from './stage';
+import { EMENU_PLUS_GAP, type EmenuPlusKind } from '@shared/studio';
 import { inkCss, shadeCss, useDishState, useSlotPos, useSlots, type ResolvedSlot } from './templates';
 
 export interface PageCtx {
@@ -50,14 +51,26 @@ export function Price({ cents, dish, scale = 1, style }: { cents: number; dish: 
   );
 }
 
-/** 加号：图标只有 12.6 大，点按区域放到 44 */
+/** 加号的大小：设计稿 12.6；放大的一档圆点本身再大一点（连同整块的放大，屏幕上约 21） */
+export const plusSize = (large: boolean) => (large ? 15 : 12.6);
+
+/**
+ * 加号与菜名的间距（8.1.5，PP5，EMENU_PLUS_GAP）：一段能缩的空，照理是加号大小的 4.5 倍（带图片）/ 2.5 倍（纯文字）；
+ * 菜名长、地方不够时这段空往下收，最少 1 倍——所以菜名最宽给到「能用的宽 − 加号 − 1 倍的空」
+ */
+function PlusGap({ kind, large }: { kind: EmenuPlusKind; large: boolean }) {
+  const size = plusSize(large);
+  return <span aria-hidden style={{ flex: `0 1 ${EMENU_PLUS_GAP[kind] * size}px`, minWidth: size }} />;
+}
+const nameRoom = (width: number, large: boolean) => width - 2 * plusSize(large);
+
+/** 加号：图标只有 12.6 大，点按区域放到 44。竖直方向比菜名的文字框高 0.9（设计稿） */
 export function PlusButton({ dish, ctx, block, style }: { dish: EmenuDishView; ctx: PageCtx; block: EmenuBlock | null; style?: CSSProperties }) {
   const lang = useLang();
   const m = useM();
   const disabled = !!block || ctx.preview;
-  // 放大的一档：圆点本身再大一点（连同整块的放大，屏幕上约 21），中心不动
   const large = useBig();
-  const size = large ? 15 : 12.6;
+  const size = plusSize(large);
   return (
     <button
       type="button"
@@ -68,7 +81,7 @@ export function PlusButton({ dish, ctx, block, style }: { dish: EmenuDishView; c
       }}
       aria-label={m.addAria(dishNames(dish, lang).main)}
       className="em-tap"
-      style={{ position: 'relative', width: size, height: size, margin: large ? -1.2 : undefined, padding: 0, border: 0, background: 'none', flex: 'none', ...style }}
+      style={{ position: 'relative', width: size, height: size, marginTop: large ? -2.1 : -0.9, padding: 0, border: 0, background: 'none', flex: 'none', ...style }}
       data-testid={`emenu-add-${dish.id}`}
     >
       <span style={{ position: 'absolute', inset: -15.7 }} />
@@ -217,8 +230,9 @@ function Tagline({ dish }: { dish: EmenuDishView }) {
 /**
  * 一道菜的文字：菜名（后面可以带小字）、加号、英文名、介绍、价格。
  * 设计稿每一版里这几行离菜名文字框上沿的距离都一样：英文名 16.7；介绍 51.4（tight 是 35.7，「两个菜」一大一小那一版），
- * 每行 13；价格（14 号的数字）在介绍最后一行下面 23.6，没有介绍时在 37.4；加号比菜名高 0.9、跟在菜名后面隔 44.2。
- * desc：normal / tight 见上；none 不要介绍。plusAt：加号放在离左边多远（列表里按列对齐）。
+ * 每行 13；价格（14 号的数字）在介绍最后一行下面 23.6，没有介绍时在 37.4；加号比菜名高 0.9、紧跟在菜名后面，
+ * 间距是加号大小的 4.5 倍（带图片）/ 2.5 倍（纯文字，plus = 'text'）（8.1.5，原来是 44.2，图文列表的按列对齐）。
+ * desc：normal / tight 见上；none 不要介绍。
  * 切到英文（8.0.13）：英文名为主（14 号、放不下折成两行），中文名在下面一行小字；介绍用英文介绍。
  *
  * 放大的一档（8.0.15）：里面的字号不变，整块放大 BIG.dish 倍（菜名 22、介绍 13、价格 20），行与行之间原来留得很宽的空收紧一些；
@@ -231,7 +245,6 @@ export interface BigSpot {
   bottom?: number;
   /** 介绍最多几行（默认 4） */
   lines?: number;
-  plusAt?: number;
 }
 
 export function DishText({
@@ -241,7 +254,7 @@ export function DishText({
   w,
   ctx,
   desc = 'none',
-  plusAt: plusAtDesign,
+  plus = 'photo',
   noteByPrice,
   big,
   slot,
@@ -252,7 +265,8 @@ export function DishText({
   w: number;
   ctx: PageCtx;
   desc?: 'normal' | 'tight' | 'none';
-  plusAt?: number;
+  /** 加号与菜名的间距按哪一种算（8.1.5）：photo 带图片的 4.5 倍、text 纯文字的 2.5 倍 */
+  plus?: EmenuPlusKind;
   big?: BigSpot;
   /** 这道菜在这一页没有图可以压暗：不能点的原因写在价格旁 */
   noteByPrice?: boolean;
@@ -270,10 +284,9 @@ export function DishText({
   const large = useBig();
   const k = large ? BIG.dish : 1;
   const at = large ? { x: big?.x ?? x, y: big?.y ?? y, w: big?.w ?? w, bottom: big?.bottom } : { x, y, w, bottom: undefined };
-  const plusAt = large ? (big?.plusAt ?? plusAtDesign) : plusAtDesign;
-  // 里面能用的宽（放大以前的像素）
+  // 里面能用的宽（放大以前的像素）；菜名最宽给到「能用的宽 − 加号 − 1 倍的空」
   const inner = at.w / k;
-  const nameWidth = plusAt !== undefined ? plusAt - 8 : large ? inner - 30 : w - 58;
+  const nameWidth = nameRoom(inner, large);
   const gapUnderName = name.sub ? 0 : 8.7;
   return (
     <div
@@ -297,6 +310,7 @@ export function DishText({
                     fontSize: 14,
                     lineHeight: '16px',
                     minWidth: 0,
+                    flex: 'none',
                     cursor: clickable ? 'pointer' : undefined,
                     maxWidth: nameWidth,
                     display: '-webkit-box',
@@ -304,14 +318,15 @@ export function DishText({
                     WebkitBoxOrient: 'vertical',
                     overflow: 'hidden',
                   }
-                : { fontSize: 16, lineHeight: '16px', minWidth: 0, cursor: clickable ? 'pointer' : undefined, maxWidth: nameWidth }
+                : { fontSize: 16, lineHeight: '16px', minWidth: 0, flex: 'none', cursor: clickable ? 'pointer' : undefined, maxWidth: nameWidth }
             }
             data-testid={`emenu-name-${dish.id}`}
           >
             {name.main}
             <Tagline dish={dish} />
           </span>
-          <PlusButton dish={dish} ctx={ctx} block={block} style={plusAt === undefined ? { marginLeft: large ? 15 : 44.2, marginTop: -0.9 } : { position: 'absolute', left: plusAt, top: -0.9 }} />
+          <PlusGap kind={plus} large={large} />
+          <PlusButton dish={dish} ctx={ctx} block={block} />
         </div>
         {name.sub &&
           (name.mainEn ? (
@@ -426,7 +441,7 @@ function SlotPhoto({ s, dish, ctx }: { s: ResolvedSlot; dish: Slot; ctx: PageCtx
 
 /** 卡片模板里一道菜的文字（菜名、介绍、价格、加号）：原样的位置 + 放大一档另给的（DishText 自己按档取） */
 function SlotText({ s, dish, ctx, noteByPrice }: { s: ResolvedSlot; dish: EmenuDishView; ctx: PageCtx; noteByPrice: boolean }) {
-  return <DishText dish={dish} x={s.x} y={s.y} w={s.w} ctx={ctx} desc={s.def.desc} plusAt={s.def.plusAt} noteByPrice={noteByPrice} big={s.big} slot={s.def.key} />;
+  return <DishText dish={dish} x={s.x} y={s.y} w={s.w} ctx={ctx} desc={s.def.desc} plus={s.def.plus} noteByPrice={noteByPrice} big={s.big} slot={s.def.key} />;
 }
 
 function Cover({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
@@ -641,8 +656,12 @@ function TrioMixed({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
   );
 }
 
+/** 文字陈列的一行里，菜名连同后面的加号最多排到哪（价格从 196.2 开始，留 8 的空） */
+const TEXT_ROW_NAME_W = 188;
+
 /**
- * 文字陈列的一行：名称、英文名、属性行在左，价格在右上，加号在价格下面（各处离名称文字框左上角的距离是设计稿量的）。
+ * 文字陈列的一行：名称、英文名、属性行在左，价格在右上（各处离名称文字框左上角的距离是设计稿量的）；加号紧跟在名称后面，
+ * 间距是加号大小的 2.5 倍（8.1.5 纯文字的菜，PP5；原来在价格下面）。
  * 切到英文（8.0.13）：英文名为主、放不下折成两行，下面依次是中文名、属性行（一行行往下排，不压在一起）。
  */
 function TextRow({ dish, x, y, ctx, slot }: { dish: EmenuDishView; x: number; y: number; ctx: PageCtx; slot?: string }) {
@@ -656,21 +675,42 @@ function TextRow({ dish, x, y, ctx, slot }: { dish: EmenuDishView; x: number; y:
   const clickable = !ctx.preview && !!ctx.onOpen;
   const open = clickable ? (e: { currentTarget: Element }) => ctx.onOpen!(dish, designPoint(e.currentTarget)) : undefined;
   // 放大的一档：这一行整块放大（x、y 由 ListText 另给）
-  const k = useBig() ? BIG.row : 1;
+  const large = useBig();
+  const k = large ? BIG.row : 1;
+  const plus = (
+    <>
+      <PlusGap kind="text" large={large} />
+      <PlusButton dish={dish} ctx={ctx} block={block} />
+    </>
+  );
   return (
     <div style={{ ...box(x, y, 232 * k, 74 * k), opacity: block ? textOpacity : 1 }} data-testid={`emenu-dish-${dish.id}`} data-block={block ?? undefined} data-studio-slot={slot}>
       <div className={ctx.flashId === dish.id ? 'em-flash' : undefined} style={{ ...box(0, 0, 232, 74), transform: k === 1 ? undefined : `scale(${k})`, transformOrigin: '0 0' }}>
         {name.mainEn ? (
           <div style={{ width: 186 }}>
-            <div
-              role={clickable ? 'button' : undefined}
-              onClick={open}
-              className={`em-en${clickable ? ' em-press' : ''}`}
-              style={{ fontSize: 13, lineHeight: '15px', cursor: clickable ? 'pointer' : undefined, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
-              data-testid={`emenu-name-${dish.id}`}
-            >
-              {name.main}
-              <Tagline dish={dish} />
+            <div style={{ display: 'flex', alignItems: 'flex-start', width: TEXT_ROW_NAME_W }}>
+              <div
+                role={clickable ? 'button' : undefined}
+                onClick={open}
+                className={`em-en${clickable ? ' em-press' : ''}`}
+                style={{
+                  fontSize: 13,
+                  lineHeight: '15px',
+                  minWidth: 0,
+                  maxWidth: nameRoom(TEXT_ROW_NAME_W, large),
+                  flex: 'none',
+                  cursor: clickable ? 'pointer' : undefined,
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                }}
+                data-testid={`emenu-name-${dish.id}`}
+              >
+                {name.main}
+                <Tagline dish={dish} />
+              </div>
+              {plus}
             </div>
             <div className="em-clip" style={{ fontSize: 9, lineHeight: '9px', marginTop: 2.6, color: MUTE }}>
               {name.sub}
@@ -686,15 +726,18 @@ function TextRow({ dish, x, y, ctx, slot }: { dish: EmenuDishView; x: number; y:
           </div>
         ) : (
           <>
-            <div
-              role={clickable ? 'button' : undefined}
-              onClick={open}
-              className={`em-clip${clickable ? ' em-press' : ''}`}
-              style={{ fontSize: 16, lineHeight: '16px', width: 186, cursor: clickable ? 'pointer' : undefined }}
-              data-testid={`emenu-name-${dish.id}`}
-            >
-              {name.main}
-              <Tagline dish={dish} />
+            <div style={{ display: 'flex', alignItems: 'flex-start', width: TEXT_ROW_NAME_W }}>
+              <div
+                role={clickable ? 'button' : undefined}
+                onClick={open}
+                className={`em-clip${clickable ? ' em-press' : ''}`}
+                style={{ fontSize: 16, lineHeight: '16px', minWidth: 0, maxWidth: nameRoom(TEXT_ROW_NAME_W, large), flex: 'none', cursor: clickable ? 'pointer' : undefined }}
+                data-testid={`emenu-name-${dish.id}`}
+              >
+                {name.main}
+                <Tagline dish={dish} />
+              </div>
+              {plus}
             </div>
             {name.sub && (
               <div className="em-en em-clip" style={{ ...box(1, 16.7, 186), fontSize: 8, lineHeight: '8px', color: MUTE }}>
@@ -713,7 +756,6 @@ function TextRow({ dish, x, y, ctx, slot }: { dish: EmenuDishView; x: number; y:
           </>
         )}
         {spec && <Price cents={spec.price} dish={dish} style={{ ...box(196.2, 0.6) }} />}
-        <PlusButton dish={dish} ctx={ctx} block={block} style={{ position: 'absolute', left: 206.3, top: 37.2 }} />
       </div>
     </div>
   );

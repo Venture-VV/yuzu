@@ -6,8 +6,9 @@
  * 字体（DC14）：
  *   · 中文：朱雀仿宋（设计稿用的，SIL OFL 开源，随应用打包；按字符区间分成小文件，用到哪些字才下载哪些）；
  *   · 英文与数字：设计稿用的是 ABC Arizona Flare 的试用版（商业字体，没有网页授权不能随应用发），用随应用打包的开源字体
- *     Average Sans 顶替（SIL OFL；字高、数字的宽窄与设计稿的最接近，数字 0 与字母 O 分得清）。字距是照 Average Sans 调的；
- *     买了授权换上原字体时，把 .em-en 的 letter-spacing 与各处全大写小标题的字距去掉。
+ *     Average Sans 顶替（SIL OFL；字高、数字的宽窄与设计稿的最接近，数字 0 与字母 O 分得清）。字距是照 Average Sans 调的。
+ *     8.1.5 起：门店买了网页授权、把 WOFF2 放在服务器的 brand-fonts/en.woff2，页面就用上原字体（Tangqi Brand En，brandFont.ts），
+ *     .em-en 补的字距自动去掉；各处全大写小标题另补的字距换上以后照设计稿再核对一遍。
  *
  * 行框（Em Box Zh / Em Box En）：两个只有 612 字节的小字体，里面没有任何常用字的字形（只映射了私用区的一个码位），只规定
  * 一行字的上沿、下沿——中文 0.707 / 0.293、英文 0.745 / 0.255（都是 1em 的比例，加起来正好 1），与设计稿 PDF 里两种字体的
@@ -49,7 +50,7 @@
   --em-light: #efefef;
   --em-error: #a2412b;
   --em-zh: 'Em Box Zh', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif;
-  --em-en: 'Em Box En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', 'STFangsong', sans-serif;
+  --em-en: 'Em Box En', 'Tangqi Brand En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', 'STFangsong', sans-serif;
   /*
    * 动效（8.0.13，docs/EMENU.md 第 11.3 节）：整体舒缓。要调快慢改这几个数：
    *   --em-in 进入（弹窗、抽屉、菜品详情）；--em-out 退出；--em-page 翻页与分类切换；--em-micro 按下、选中这类小反馈。
@@ -75,6 +76,10 @@
 .emenu .em-en {
   font-family: var(--em-en);
   letter-spacing: 0.027em;
+}
+/* 门店服务器上放了授权的原字体（8.1.5，brandFont.ts）：用的就是设计稿的字体，不用补字距 */
+.emenu[data-brand-en] .em-en {
+  letter-spacing: 0;
 }
 
 /* 切到英文（8.0.13）：整页的字默认用英文字体；中文（菜名的小字、没录英文的地方）照旧落到朱雀仿宋 */
@@ -476,9 +481,11 @@
   background: linear-gradient(90deg, transparent, var(--em-tan), transparent);
   opacity: 0.75;
 }
-/* 「中 | EN」开关里卡其色的那一块滑过去 */
-.emenu .em-lang-knob {
-  transition: transform var(--em-in) var(--em-ease);
+/* 中英切换的品牌图标（8.1.5）：两张图交叉淡入，换上来的那张从略小放到原大 */
+.emenu .em-lang-face {
+  transition:
+    opacity var(--em-in) var(--em-ease),
+    transform var(--em-in) var(--em-ease);
 }
 /* 菜品详情换上一道 / 下一道：图片与文字交叉淡入 */
 .emenu .em-swap {

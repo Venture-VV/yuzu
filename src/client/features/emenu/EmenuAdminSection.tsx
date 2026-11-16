@@ -64,6 +64,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
 import { AdminPage } from '../admin/AdminShell';
+import { useBrandFont } from './brandFont';
 import { Header } from './header';
 import { LangProvider } from './i18n';
 import { PageCanvas } from './pages';
@@ -267,6 +268,7 @@ function PagePreview({ page, category, data, scale }: { page: EmenuPageAdmin; ca
     const d = page.dishIds[i] != null ? dishOf.get(page.dishIds[i]!) : undefined;
     return d ? previewDish(d) : null;
   });
+  const brandEn = useBrandFont();
   const tabs: EmenuCategoryView[] = data.categories
     .filter((c) => c.active || c.id === category.id)
     .map((c) => ({ id: c.id, name: c.name, nameEn: c.nameEn, periods: c.periods, window: c.window, open: true, pages: [] }));
@@ -275,6 +277,7 @@ function PagePreview({ page, category, data, scale }: { page: EmenuPageAdmin; ca
       className="emenu shrink-0 overflow-hidden rounded-md border border-line"
       style={{ position: 'relative', width: 1024 * scale, height: 768 * scale, background: 'var(--em-bg)' }}
       aria-hidden
+      data-brand-en={brandEn ? '' : undefined}
       data-testid="emenu-admin-preview"
     >
       <div style={{ position: 'absolute', left: 0, top: 0, width: 1024, height: 768, transform: `scale(${scale})`, transformOrigin: '0 0', pointerEvents: 'none' }}>
@@ -1460,7 +1463,7 @@ function PeriodsEditor({ value, onChange }: { value: EmenuPeriod[]; onChange: (n
           <Input
             type="time"
             fullWidth={false}
-            className="w-[118px]"
+            className="w-[140px]"
             aria-label={`${EMENU_PERIOD_SHORT[p.key]}时段从几点开始`}
             value={formatMinute(p.start)}
             onChange={(e) => {
@@ -1632,7 +1635,7 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
         )}
         {row(
           '中英切换',
-          '开启后平板的起始页与顶栏有一个「中 | EN」开关，外宾点一下整套页面换成英文（英文在「菜品图文」里录，没录的显示中文）。关闭后页面只有中文。',
+          '开启后平板的起始页与顶栏有一个中英切换的图标（中文时显示 En、英文时显示中），外宾点一下整套页面换成英文（英文在「菜品图文」里录，没录的显示中文）。关闭后页面只有中文。',
           <Segmented
             ariaLabel="中英切换"
             value={draft.langSwitch ? 'on' : 'off'}

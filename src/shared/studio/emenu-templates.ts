@@ -22,8 +22,14 @@ export interface EmenuBigSpot {
   bottom?: number;
   /** 介绍最多几行（默认 4） */
   lines?: number;
-  plusAt?: number;
 }
+
+/**
+ * 加号与菜名的间距（8.1.5，PP5）：按加号自己的大小算几倍——带菜品图片的 4.5，纯文字的 2.5（文字陈列的十行、
+ * 图文列表右边的六格）。加号紧跟在菜名后面；地方不够时间距往下收（最少 1 倍），菜名不被挤断
+ */
+export const EMENU_PLUS_GAP = { photo: 4.5, text: 2.5 } as const;
+export type EmenuPlusKind = keyof typeof EMENU_PLUS_GAP;
 
 export interface EmenuSlotDef {
   key: string;
@@ -36,9 +42,9 @@ export interface EmenuSlotDef {
   h: number;
   /** 放大一档另给的（没写的沿用原样的） */
   big?: EmenuBigSpot;
-  /** 一道菜的文字：介绍怎么排（normal 正常、tight 紧、none 不要介绍）；加号放在离左边多远（列表里按列对齐） */
+  /** 一道菜的文字：介绍怎么排（normal 正常、tight 紧、none 不要介绍）；加号与菜名的间距按哪一种算（默认带图片的） */
   desc?: 'normal' | 'tight' | 'none';
-  plusAt?: number;
+  plus?: EmenuPlusKind;
   /** 照片位：用菜品的哪张图（image 餐品图、detail 特写图）；tint 第二张浅一点的底色 */
   source?: 'image' | 'detail';
   tint?: boolean;
@@ -78,10 +84,7 @@ const text = (key: string, label: string, dish: number, x: number, y: number, w:
 });
 
 /** 图文列表（list_image）六格的位置：两列三行 */
-const LIST_IMAGE_COLS = [
-  { x: 636.9, plus: 120 },
-  { x: 823.8, plus: 142 },
-] as const;
+const LIST_IMAGE_COLS = [636.9, 823.8] as const;
 const LIST_IMAGE_ROWS = [257.7, 350.9, 443] as const;
 const LIST_IMAGE_BIG_COLS = [566, 778] as const;
 const LIST_IMAGE_BIG_ROWS = [256, 392, 528] as const;
@@ -109,20 +112,20 @@ export const EMENU_TEMPLATES: Record<EmenuLayout, EmenuTemplateDef> = {
     slots: [
       photo('photo', '餐品图', 0, 40, 133.8, 428.5, 594.2),
       { key: 'title', label: '竖排小标题', kind: 'title', x: 577.4, y: 254, w: 40, h: 110, big: { x: 524, y: 252 } },
-      ...Array.from({ length: 6 }, (_, i) => {
-        const col = LIST_IMAGE_COLS[i % 2]!;
-        return text(
+      // 这六格没有自己的图：加号与菜名的间距按纯文字的算（8.1.5，PP5；原来加号按列对齐）
+      ...Array.from({ length: 6 }, (_, i) =>
+        text(
           `d${i}`,
           `第 ${i + 1} 道`,
           i,
-          col.x,
+          LIST_IMAGE_COLS[i % 2]!,
           LIST_IMAGE_ROWS[Math.floor(i / 2)]!,
           170,
           'none',
-          { x: LIST_IMAGE_BIG_COLS[i % 2]!, y: LIST_IMAGE_BIG_ROWS[Math.floor(i / 2)]!, w: 206, plusAt: 132 },
-          { plusAt: col.plus },
-        );
-      }),
+          { x: LIST_IMAGE_BIG_COLS[i % 2]!, y: LIST_IMAGE_BIG_ROWS[Math.floor(i / 2)]!, w: 206 },
+          { plus: 'text' },
+        ),
+      ),
     ],
   },
   single_wide: {

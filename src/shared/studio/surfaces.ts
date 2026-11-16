@@ -146,7 +146,12 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
       { key: 'heiti', label: '黑体（系统字体）', stack: "'Em Box Zh', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" },
     ],
     en: [
-      { key: 'average', label: 'Average Sans（默认）', stack: "'Em Box En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', 'STFangsong', sans-serif" },
+      // 8.1.5：门店服务器上放了授权的品牌英文字体（ABC Arizona Flare）就用它，没放用 Average Sans 顶替（docs/EMENU.md 第 14.2 节）
+      {
+        key: 'average',
+        label: 'ABC Arizona Flare（品牌字体，默认；服务器没放授权文件时用 Average Sans 顶替）',
+        stack: "'Em Box En', 'Tangqi Brand En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', 'STFangsong', sans-serif",
+      },
       { key: 'serif', label: '衬线（系统字体）', stack: "'Em Box En', Georgia, 'Times New Roman', 'Zhuque Fangsong', serif" },
       { key: 'sans', label: '无衬线（系统字体）', stack: "'Em Box En', 'Helvetica Neue', Arial, 'PingFang SC', sans-serif" },
     ],
@@ -220,8 +225,8 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
     },
     lang: {
       key: 'lang',
-      label: '中 | EN 切换',
-      hint: '后台关掉中英切换时不显示；输入信息的弹窗开着时也能点',
+      label: '中英切换',
+      hint: '品牌图标（8.1.5）：中文时显示 En、英文时显示中，靠右放在这一块里；后台关掉中英切换时不显示；输入信息的弹窗开着时也能点',
       screens: ['start'],
       size: { w: 48, h: 22.3 },
       resize: 'scale',
@@ -613,7 +618,7 @@ function defaultEmenuDoc(): StudioDoc {
     block('start-logo', 'brand.logo', '汤崎字标', 472.6, 342.8, 78.64, 76.633, { color: 'auto' }),
     block('start-pending', 'start.pending', '待确认提示', 0, 600, 1024, 16, { color: 'auto', size: 12 }),
     block('start-footer', 'start.footer', '版权行', 0, 715.2, 1024, 12, { color: 'auto', size: 12 }),
-    block('start-lang', 'lang', '中 | EN', 936, 44.3, 48, 22.3, { tone: 'auto' }),
+    block('start-lang', 'lang', '中英切换', 936, 44.3, 48, 22.3, { tone: 'auto' }),
   ];
   const menu: StudioNode[] = [
     block('menu-pages', 'menu.pages', '菜单页', 0, 0, 1024, 768),
