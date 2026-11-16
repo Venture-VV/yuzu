@@ -506,7 +506,7 @@
 
 - 迁移 `180`：`emenu_categories` 加 `periods`（`text[]`，`breakfast` / `lunch` / `dinner` 的组合，空 = 全天；约束只认这三个）。
 - 设置 `emenu_rules` 多一项 `periods`（三段的开始时间与名称）；没存过的用默认。保存时核对三段的开始时间是早 < 午 < 晚。
-- `GET /api/emenu/menu`：分类多 `periods`；多 `period`（现在这一段：键、名称、起止）与 `nextChangeAt`（下一次可能切换的时刻）；`later` 每一类多 `periods` 与这一类的价目项目编号（平板据此把「未下单」里的菜标成「当前时段不可售」，而不是「已不在菜单上」）。
+- `GET /api/emenu/menu`：分类多 `periods`；多 `period`（现在这一段：键、名称、起止）与 `nextChangeAt`（下一次可能切换的时刻）；`later` 每一类多 `periods` 与这一类里的菜（`dishes`：菜名、小字、各规格的名称、价格与状态；平板据此把「未下单」里的菜照旧显示菜名、标「当前时段不可售」，而不是「已不在菜单上」——页面刷新以后也一样，Codex 预检 `0f7c701` 的 P2）。
 - `GET /api/studio/emenu/menu?period=breakfast|lunch|dinner|all`：工作台按某一段看（不带是现在）。
 - `GET /api/emenu/fonts/en.woff2`：授权的英文字体（权限与菜单相同；没放文件 404）。
 - 加锁不变：读设置、分类都不加锁；下单的核对在原来的事务里多读一列。

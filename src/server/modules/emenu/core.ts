@@ -34,6 +34,7 @@ import {
   type EmenuCategoryView,
   type EmenuDishView,
   type EmenuGuest,
+  type EmenuLaterDish,
   type EmenuLayout,
   type EmenuMenu,
   type EmenuOpLookup,
@@ -246,9 +247,22 @@ export async function emenuMenu(db: Db, deps: Deps, view?: EmenuMenuView): Promi
     // 一页都没排的分类不显示（后台还在编）
     if (mine.length === 0) continue;
     if (!open && rules.offHours === 'hide') {
-      const itemIds = new Set<number>();
-      for (const p of mine) for (const sl of slots) if (Number(sl.pageId) === Number(p.id)) for (const sp of dishes.get(Number(sl.dishId))?.specs ?? []) itemIds.add(sp.itemId);
-      later.push({ name: c.name, nameEn: c.nameEn, periods, window, itemIds: [...itemIds] });
+      // 这一类里的菜：「未下单」里还有的照旧显示菜名、规格与价格（刷新页面以后也一样），标「当前时段不可售」
+      const laterDishes = new Map<number, EmenuLaterDish>();
+      for (const p of mine)
+        for (const sl of slots) {
+          const d = Number(sl.pageId) === Number(p.id) ? dishes.get(Number(sl.dishId)) : undefined;
+          if (!d || laterDishes.has(d.id)) continue;
+          laterDishes.set(d.id, {
+            id: d.id,
+            name: d.name,
+            nameEn: d.nameEn,
+            tagline: d.tagline,
+            taglineEn: d.taglineEn,
+            specs: d.specs.map((sp) => ({ itemId: sp.itemId, label: sp.label, labelEn: sp.labelEn, price: sp.price, state: sp.state })),
+          });
+        }
+      later.push({ name: c.name, nameEn: c.nameEn, periods, window, dishes: [...laterDishes.values()] });
       continue;
     }
     const views: EmenuPageView[] = mine.map((p) => {

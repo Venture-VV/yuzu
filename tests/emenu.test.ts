@@ -391,7 +391,16 @@ describe('平板上的菜单', () => {
     expect((await api(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/categories/${c.id}`, { ...c, window: closed })).status).toBe(200);
     let m = await menu();
     expect(m.categories.map((x) => x.name)).toEqual(['西式午餐', '中式午餐']);
-    expect(m.later).toEqual([{ name: '茶', nameEn: '', periods: [], window: closed, itemIds: [item['陈皮普洱']] }]);
+    expect(m.later).toEqual([
+      {
+        name: '茶',
+        nameEn: '',
+        periods: [],
+        window: closed,
+        // 8.1.5：带上这一类里的菜（「未下单」里还有的照旧显示菜名与规格，刷新页面以后也一样）
+        dishes: [expect.objectContaining({ id: dish.tea, name: '陈皮普洱', specs: [expect.objectContaining({ itemId: item['陈皮普洱'], label: '' })] })],
+      },
+    ]);
     expect((await rules({ offHours: 'show' })).status).toBe(200);
     m = await menu();
     expect(m.categories.find((x) => x.name === '茶')).toMatchObject({ open: false, window: closed });
@@ -433,7 +442,11 @@ describe('平板上的菜单', () => {
     expect(m.categories.map((x) => x.name)).toEqual(['中式午餐']);
     const westLater = m.later.find((x) => x.name === '西式午餐')!;
     expect(westLater).toMatchObject({ periods: [other], window: null });
-    expect(westLater.itemIds).toContain(item['华夫牛角']);
+    expect(westLater.dishes.flatMap((d) => d.specs.map((sp) => sp.itemId))).toContain(item['华夫牛角']);
+    expect(westLater.dishes.find((d) => d.specs.some((sp) => sp.itemId === item['华夫牛角']))).toMatchObject({
+      name: expect.any(String),
+      specs: [expect.objectContaining({ price: expect.any(Number), state: 'ok' })],
+    });
     // 下单时门店系统再核对：别的段的菜不能点
     const res = await order([{ itemId: item['华夫牛角']!, quantity: 1 }], 3800);
     expect(res.body.error?.code).toBe('DISH_NOT_AVAILABLE_NOW');

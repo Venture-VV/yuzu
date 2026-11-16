@@ -431,6 +431,16 @@ export interface EmenuCategoryView {
   pages: EmenuPageView[];
 }
 
+/** 收起来的分类里的一道菜（8.1.5）：「未下单」那一行要的几样——菜名、小字、各规格的名称、价格与状态 */
+export interface EmenuLaterDish {
+  id: number;
+  name: string;
+  nameEn: string;
+  tagline: string;
+  taglineEn: string;
+  specs: Pick<EmenuSpecView, 'itemId' | 'label' | 'labelEn' | 'price' | 'state'>[];
+}
+
 export interface EmenuMenu {
   serverTime: string;
   businessDate: string;
@@ -446,10 +456,10 @@ export interface EmenuMenu {
   /** 现在显示的分类（按排序；不在时段的只有设置成「显示」时才在） */
   categories: EmenuCategoryView[];
   /**
-   * 不在时段、没显示出来的分类（没有分类可点时告诉客人什么时候供应）。itemIds 是排在这一类里的价目项目（8.1.5）：
-   * 「未下单」里的菜在这里时标「当前时段不可售」，不当成已不在菜单上
+   * 不在时段、没显示出来的分类（没有分类可点时告诉客人什么时候供应）。dishes 是排在这一类里的菜（8.1.5）：
+   * 「未下单」里还有这些菜时照旧显示菜名、规格与价格，标「当前时段不可售」，不当成已不在菜单上（页面刷新以后也一样）
    */
-  later: { name: string; nameEn: string; periods: EmenuPeriodKey[]; window: EmenuWindow | null; itemIds: number[] }[];
+  later: { name: string; nameEn: string; periods: EmenuPeriodKey[]; window: EmenuWindow | null; dishes: EmenuLaterDish[] }[];
   /** 启用的桌台（空 = 店里没建桌台，桌号照输入的记） */
   tables: { name: string; area: string }[];
   /** UI 工作台（8.1.1）：这家店现在用哪一版版面（没发布过为空，用内置的默认版面）；inherited = 用的是本店的 */

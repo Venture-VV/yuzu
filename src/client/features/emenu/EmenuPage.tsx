@@ -58,6 +58,13 @@ import {
   type TableSession,
 } from './store';
 
+/** 「未下单」一行要知道的：哪道菜、哪个规格、现在能不能点（收起来的分类里的菜只给菜名与规格） */
+interface CartHit {
+  dish: Pick<EmenuDishView, 'name' | 'nameEn' | 'tagline' | 'taglineEn'>;
+  spec: Pick<EmenuSpecView, 'label' | 'labelEn' | 'price' | 'state' | 'remaining'>;
+  open: boolean;
+}
+
 const MENU_KEY = ['emenu', 'menu'] as const;
 const guestKey = (visitId: number | null) => ['emenu', 'guest', visitId] as const;
 /** 页面被系统刷新以后，这么久之内的那一次点餐接着用（之后再按设置的「多久没人动」核对） */
@@ -256,7 +263,7 @@ export function EmenuPage() {
 
   // 一个价目项目 → 它是哪道菜的哪个规格、有没有哪个现在能点的分类排着它
   const specIndex = useMemo(() => {
-    const map = new Map<number, { dish: EmenuDishView; spec: EmenuSpecView; open: boolean }>();
+    const map = new Map<number, CartHit>();
     for (const c of categories) {
       for (const p of c.pages) {
         for (const d of p.dishes) {
@@ -270,19 +277,19 @@ export function EmenuPage() {
     }
     return map;
   }, [categories]);
-  // 时段切换（8.1.5，PP3）：「未下单」里上一段的菜所在的分类不显示了，菜名照旧用之前看到的，标「当前时段不可售」
-  //（只在 later 里有的才这样认；真的从菜单上撤掉的仍是「已不在菜单上」）
-  const seenSpecs = useRef(new Map<number, { dish: EmenuDishView; spec: EmenuSpecView }>());
-  useEffect(() => {
-    for (const [itemId, hit] of specIndex) seenSpecs.current.set(itemId, { dish: hit.dish, spec: hit.spec });
-  }, [specIndex]);
-  const laterItems = useMemo(() => new Set((menu?.later ?? []).flatMap((c) => c.itemIds)), [menu]);
+  // 时段切换（8.1.5，PP3）：「未下单」里上一段的菜所在的分类收起来了（later），菜名、规格、价格照门店系统给的，
+  // 标「当前时段不可售」——页面刷新以后也一样（Codex 预检 0f7c701 的 P2：原来只记在页面里，刷新后成了「已不在菜单上」）；
+  // 真的从菜单上撤掉的仍是「已不在菜单上」
+  const laterIndex = useMemo(() => {
+    const map = new Map<number, CartHit>();
+    for (const c of menu?.later ?? []) for (const d of c.dishes) for (const s of d.specs) if (!map.has(s.itemId)) map.set(s.itemId, { dish: d, spec: { ...s, remaining: null }, open: false });
+    return map;
+  }, [menu]);
 
   const rows = useMemo<CartRow[]>(
     () =>
       cart.map((l) => {
-        const seen = laterItems.has(l.itemId) ? seenSpecs.current.get(l.itemId) : undefined;
-        const hit = specIndex.get(l.itemId) ?? (seen ? { ...seen, open: false } : undefined);
+        const hit = specIndex.get(l.itemId) ?? laterIndex.get(l.itemId);
         if (!hit) return { ...l, names: { main: m.goneDish, sub: '', mainEn: shown === 'en' }, tagline: { text: '', en: false }, label: '', price: 0, problem: m.goneProblem };
         const { dish, spec, open } = hit;
         const why = (block: 'off' | 'closed' | 'sold_out') => m.blockedProblem(blockLabel(block, shown).main);
@@ -298,7 +305,7 @@ export function EmenuPage() {
                   : null;
         return { ...l, names: dishNames(dish, shown), tagline: dishTagline(dish, shown), label: specLabel(spec, shown), price: spec.price, problem };
       }),
-    [cart, specIndex, laterItems, shown, m],
+    [cart, specIndex, laterIndex, shown, m],
   );
   const total = rows.reduce((s, r) => s + r.price * r.quantity, 0);
   const count = cart.reduce((s, l) => s + l.quantity, 0);

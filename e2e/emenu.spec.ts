@@ -912,19 +912,37 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await clearEmenuStorage(page);
   });
 
-  test('8.1.5 早中晚时段：门店系统说了下一次切换的时刻就到点再取菜单，换成新时段的菜单并提示；「未下单」里上一段的菜照旧显示菜名、标「当前时段不可售」（合成菜单，只读）', async ({ page }, info) => {
+  test('8.1.5 早中晚时段：门店系统说了下一次切换的时刻就到点再取菜单，换成新时段的菜单并提示；「未下单」里上一段的菜照旧显示菜名、标「当前时段不可售」，刷新页面以后也一样（合成菜单，只读）', async ({
+    page,
+  }, info) => {
     test.skip(info.project.name !== '门店电脑', '看的是切换的先后，与屏幕尺寸无关，只跑一次');
-    // 午餐：「西式午餐」只在午餐供应，「中式午餐」是全天的；晚餐：「西式午餐」收起来（列在 later 里，带它的价目项目）
+    // 午餐：「西式午餐」只在午餐供应，「中式午餐」是全天的；晚餐：「西式午餐」收起来（列在 later 里，带它的菜）
     const lunch = syntheticMenu({ requirePin: false });
     lunch.categories[0]!.periods = ['lunch'];
     lunch.period = { ...DEFAULT_EMENU_PERIODS[1]!, end: DEFAULT_EMENU_PERIODS[2]!.start };
     const [west, allDay] = lunch.categories as [EmenuMenu['categories'][0], EmenuMenu['categories'][0]];
-    const westItems = west.pages.flatMap((p) => p.dishes.flatMap((d) => d?.specs.map((s) => s.itemId) ?? []));
+    const westDishes = west.pages.flatMap((p) => p.dishes).filter((d): d is NonNullable<typeof d> => !!d);
+    const westItems = westDishes.flatMap((d) => d.specs.map((s) => s.itemId));
     const dinner: EmenuMenu = {
       ...lunch,
       period: { ...DEFAULT_EMENU_PERIODS[2]!, end: DEFAULT_EMENU_PERIODS[0]!.start },
       categories: [allDay],
-      later: [{ name: west.name, nameEn: west.nameEn, periods: ['lunch'], window: null, itemIds: westItems }],
+      later: [
+        {
+          name: west.name,
+          nameEn: west.nameEn,
+          periods: ['lunch'],
+          window: null,
+          dishes: westDishes.map((d) => ({
+            id: d.id,
+            name: d.name,
+            nameEn: d.nameEn,
+            tagline: d.tagline,
+            taglineEn: d.taglineEn,
+            specs: d.specs.map((s) => ({ itemId: s.itemId, label: s.label, labelEn: s.labelEn, price: s.price, state: s.state })),
+          })),
+        },
+      ],
     };
     // 准备好之前一直是午餐，每次都说「2 秒后可能切换」（平板到点再取）；准备好以后再取到的就是晚餐
     let ready = 0;
@@ -967,6 +985,14 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     const row = page.getByTestId(`emenu-cart-${westItems[0]}`);
     await expect(row).toContainText('温泉蛋黑松露奶油意粉');
     await expect(row).toContainText('当前时段不可售');
+    // 刷新页面（Codex 预检 0f7c701 的 P2）：这一次点餐从平板上恢复，那一行仍是菜名 +「当前时段不可售」，不是「已经不在菜单上」
+    await page.reload();
+    await expect(page.getByTestId('emenu-header')).toBeVisible();
+    await page.getByTestId('emenu-order-open').click();
+    const again = page.getByTestId(`emenu-cart-${westItems[0]}`);
+    await expect(again).toContainText('温泉蛋黑松露奶油意粉');
+    await expect(again).toContainText('当前时段不可售');
+    await expect(again).not.toContainText('已经不在菜单上');
     expect(writes).toEqual([]);
     await clearEmenuStorage(page);
   });
