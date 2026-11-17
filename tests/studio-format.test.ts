@@ -207,3 +207,25 @@ describe('8.1.2：员工食堂的版面', () => {
     expect(red.map((i) => i.message)).toEqual(expect.arrayContaining([expect.stringContaining('饭卡码'), expect.stringContaining('亮出饭卡码'), expect.stringContaining('按岗位的入口')]));
   });
 });
+
+describe('8.1.6：顶栏（docs/EMENU.md 第 15.8 节，QZ8、QZ9）', () => {
+  const withHeader = (header: NonNullable<StudioDoc['templates']>[string]): StudioDoc => ({ ...clone(defaultStudioDoc('emenu')), templates: { header } });
+  it('挪、等比改大小、改分类那一块的宽都合格；顶栏那一条外面、不等比、缩得太小拦下来', () => {
+    expect(validateStudioDoc(withHeader({ search: { design: { x: 780 } }, order: { design: { w: 26.3, h: 30 } }, cats: { design: { w: 480 } }, tag: { big: { x: 860 } } }))).toEqual([]);
+    expect(validateStudioDoc(withHeader({ search: { design: { y: 120 } } })).map((i) => i.message)).toEqual(['「搜索」要在顶栏那一条里（宽 1024、高 102）']);
+    expect(validateStudioDoc(withHeader({ order: { design: { w: 30, h: 20 } } })).map((i) => i.message)).toContain('「订单」只能等比缩放');
+    expect(validateStudioDoc(withHeader({ lang: { design: { w: 8, h: 8 } } })).map((i) => i.message)).toContain('「中英切换」最小缩到一半、最大放到两倍半');
+    expect(validateStudioDoc(withHeader({ cats: { design: { w: 100 } } })).map((i) => i.message)).toContain('「分类」至少要 120 宽（放得下分类页签）');
+    // 分类那一块只改宽；顶栏里的块不能藏
+    expect(validateStudioDoc(withHeader({ cats: { design: { h: 30 } } })).map((i) => i.message)).toContain('「分类」不能改高');
+    expect(validateStudioDoc(withHeader({ tag: { hidden: true } })).length).toBeGreaterThan(0);
+    expect(validateStudioDoc(withHeader({ bell: { design: { x: 10 } } })).map((i) => i.message)).toEqual(['版式「header」里没有「bell」这一块']);
+  });
+
+  it('发布前的检查：两块叠在一起提醒一下（黄的，不拦发布）；没改过顶栏不查', () => {
+    const issues = checkStudioDoc(withHeader({ search: { design: { x: 760 } } }), { assets: new Map(), langSwitch: true });
+    expect(issues.filter((i) => i.level === 'error')).toEqual([]);
+    expect(issues.filter((i) => i.level === 'warn').map((i) => i.message)).toContain('顶栏里「中英切换」与「搜索」叠在一起了：客人可能点错');
+    expect(checkStudioDoc(defaultStudioDoc('emenu'), { assets: new Map(), langSwitch: true }).filter((i) => i.message.startsWith('顶栏'))).toEqual([]);
+  });
+});

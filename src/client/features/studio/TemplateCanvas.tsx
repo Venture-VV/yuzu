@@ -5,12 +5,20 @@
 //
 // 改的是顶栏「原样 / 放大」选中的那一档：两档各有一套位置（平板用哪一档在后台「电子菜单 → 设置」里定）。
 // 文字块的位置按量出来的（放大一档整块放大 1.4 倍，量的是看到的大小）；没画出来的块（藏起来的）按登记的位置画框。
+//
+// 顶栏（8.1.6，QZ8、QZ9）：layout 为 header 时画的是顶栏的六块（字标、分类、中英切换、搜索、订单、手牌）——字标、图标、
+// 手牌拉角等比缩放，分类那一块只改宽；挪的时候往顶栏的中线、左右页边、别的块上吸；拖着或选中一块时，它与左右相邻两块
+// （没有就是屏幕边）之间画出间距线、标出设计稿像素（一位小数），随手指实时变。
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { EmenuLayout, EmenuPageView } from '@shared/emenu';
 import {
   colorValue,
-  EMENU_TEMPLATES,
+  EMENU_ALL_TEMPLATES,
+  EMENU_HEADER_H,
+  EMENU_HEADER_LAYOUT,
+  EMENU_HEADER_MID,
+  headerSlotRatio,
   resolveSlot,
   setSlotSpot,
   slotResizable,
@@ -30,6 +38,7 @@ import { StudioNodes } from '../../studio-render/StudioNodes';
 import { cn } from '../../lib/utils';
 import { frameBatcher, round1, screenOf, snapBox, type Box, type Guide } from './model';
 import { pageInState } from './templateModel';
+import { neighborGaps } from './headerGaps';
 
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 const CURSORS: Record<Handle, string> = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' };
@@ -39,6 +48,13 @@ const HANDLE_AT: Record<Handle, [number, number]> = { nw: [0, 0], n: [0.5, 0], n
 const PAGE_AREA: Box = { x: 40, y: 133.8, w: 944, h: 594.2 };
 /** 改宽、改高最小到多少（文字太窄菜名、价格排不下） */
 const MIN_W = { photo: 24, text: 80 } as const;
+/** 顶栏（8.1.6）：左右页边之间那一条、各块对齐的中线（挪的时候往上吸） */
+const HEAD_AREA: Box = { x: 40, y: 0, w: 944, h: EMENU_HEADER_H };
+const HEAD_MID: Box = { x: 0, y: EMENU_HEADER_MID, w: 1024, h: 0 };
+/** 顶栏里等比缩放的块最小、最大到默认的几倍；分类那一块最窄多少 */
+const HEAD_SCALE = { min: 0.5, max: 2.5 } as const;
+const HEAD_CATS_MIN = 120;
+const CORNERS: Handle[] = ['nw', 'ne', 'se', 'sw'];
 
 interface Drag {
   kind: 'move' | 'resize';
@@ -70,10 +86,13 @@ export function TemplateCanvas({
   onLive,
   onCommit,
   previewState,
+  langOn = true,
+  onHeadBoxes,
 }: {
   doc: StudioDoc;
   surface: StudioSurfaceDef;
-  layout: EmenuLayout;
+  /** 菜单页的一种版式，或顶栏（header，8.1.6） */
+  layout: EmenuLayout | typeof EMENU_HEADER_LAYOUT;
   page: EmenuPageView;
   categoryName: string;
   categoryNameEn: string;
@@ -88,6 +107,10 @@ export function TemplateCanvas({
   onCommit: (before: StudioDoc) => void;
   /** 在看菜的哪种状态（变体）：这一页的菜都按这种状态画 */
   previewState?: StudioDishState | null;
+  /** 后台开着中英切换（顶栏：关着时中英切换那一块画成虚线框，平板上没有它） */
+  langOn?: boolean;
+  /** 顶栏各块在画布上量到的框（右边「间距」用）；量到的变了才叫 */
+  onHeadBoxes?: (boxes: ReadonlyMap<string, Box>) => void;
 }) {
   const layer = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -102,7 +125,10 @@ export function TemplateCanvas({
   const H = surface.size.h;
   const mode = big ? 'big' : 'design';
   const menuScreen = screenOf(doc, 'menu');
-  const slots: ResolvedSlot[] = EMENU_TEMPLATES[layout].slots.map((def) => resolveSlot(def, doc.templates?.[layout]?.[def.key]));
+  const isHead = layout === EMENU_HEADER_LAYOUT;
+  const slots: ResolvedSlot[] = EMENU_ALL_TEMPLATES[layout]!.slots.map((def) => resolveSlot(def, doc.templates?.[layout]?.[def.key]));
+  /** 画成虚线框的：藏起来的块；顶栏里后台关了中英切换时的那一块（平板上没有它，位置照样能改） */
+  const ghost = (s: ResolvedSlot) => s.hidden || (isHead && !langOn && s.def.key === 'lang');
 
   // 菜单页换成这种版式的一页（照片没配图时写上「餐品展示」「特写图」，不能点）；其余的块（顶栏、圆点、装饰）照常画
   const pageBlocks = useMemo(
@@ -119,6 +145,8 @@ export function TemplateCanvas({
 
   // ── 量：每一块在画布上看到的框（每次画完量一遍；字体晚到时再量一遍） ──
   const [measured, setMeasured] = useState<Map<string, Box>>(new Map());
+  const headBoxesOut = useRef(onHeadBoxes);
+  headBoxesOut.current = onHeadBoxes;
   const [fontsTick, setFontsTick] = useState(0);
   useEffect(() => {
     let alive = true;
@@ -133,21 +161,22 @@ export function TemplateCanvas({
     const r0 = root.getBoundingClientRect();
     const k = r0.width > 0 ? r0.width / W : 1;
     const boxes = new Map<string, Box>();
-    root.querySelectorAll<HTMLElement>('[data-studio-slot]').forEach((el) => {
+    root.querySelectorAll<HTMLElement>(isHead ? '[data-studio-head]' : '[data-studio-slot]').forEach((el) => {
       const r = el.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) return;
       const b = { x: (r.left - r0.left) / k, y: (r.top - r0.top) / k, w: r.width / k, h: r.height / k };
-      const key = el.dataset.studioSlot!;
+      const key = (isHead ? el.dataset.studioHead : el.dataset.studioSlot)!;
       const u = boxes.get(key);
       boxes.set(key, u ? { x: Math.min(u.x, b.x), y: Math.min(u.y, b.y), w: Math.max(u.x + u.w, b.x + b.w) - Math.min(u.x, b.x), h: Math.max(u.y + u.h, b.y + b.h) - Math.min(u.y, b.y) } : b);
     });
     setMeasured((m) => (sameBoxes(m, boxes) ? m : boxes));
+    if (isHead) headBoxesOut.current?.(boxes);
     // fontsTick：字体到了以后重新量
-  }, [doc, page, layout, big, lang, scale, fontsTick, W, previewState]);
+  }, [doc, page, layout, big, lang, scale, fontsTick, W, previewState, isHead]);
 
   /** 一块在画布上的框：画出来的按量的；藏起来的按登记的位置（往上长的文字按下沿往上推一个登记的高） */
   const boxOf = (s: ResolvedSlot): Box => {
-    const m = s.hidden ? null : measured.get(s.def.key);
+    const m = ghost(s) ? null : measured.get(s.def.key);
     if (m) return m;
     const p = slotSpot(s, mode);
     return { x: p.x, y: p.bottom !== undefined ? p.bottom - p.h : p.y, w: p.w, h: p.h };
@@ -181,7 +210,7 @@ export function TemplateCanvas({
       return;
     }
     onSelect(s.def.key);
-    // 藏起来的只选中（在右边取消「藏起来」），不拖
+    // 藏起来的只选中（在右边取消「藏起来」），不拖（顶栏里关着的中英切换照样能挪）
     if (!s.hidden) {
       e.preventDefault();
       begin(e, 'move', s);
@@ -199,7 +228,7 @@ export function TemplateCanvas({
     const s = slots.find((x) => x.def.key === d.key);
     if (!s) return;
     if (d.kind === 'move') {
-      const others = [PAGE_AREA, ...slots.filter((x) => x.def.key !== d.key && !x.hidden).map(boxOf)];
+      const others = [...(isHead ? [HEAD_AREA, HEAD_MID] : [PAGE_AREA]), ...slots.filter((x) => x.def.key !== d.key && !ghost(x)).map(boxOf)];
       const snap = e.altKey ? { dx: 0, dy: 0, guides: [] } : snapBox({ ...d.box, x: d.box.x + dx, y: d.box.y + dy }, others, { w: W, h: H }, 5 / scale);
       dx += snap.dx;
       dy += snap.dy;
@@ -210,7 +239,23 @@ export function TemplateCanvas({
     }
     const can = slotResizable(s.def);
     const h = d.handle!;
-    const min = s.def.kind === 'photo' ? MIN_W.photo : MIN_W.text;
+    // 顶栏的字标、图标、手牌：拉角等比缩放（对角不动），最小一半、最大两倍半
+    const ratio = headerSlotRatio(s.def);
+    if (ratio !== null) {
+      const def0 = resolveSlot(s.def, undefined);
+      const base = slotSpot(def0, mode);
+      // 横着拉按宽换算成高，竖着拉按高；哪个方向拉得多按哪个
+      const byX = (h.includes('e') ? dx : -dx) / ratio;
+      const byY = h.includes('s') ? dy : -dy;
+      const grow = Math.abs(byX) > Math.abs(byY) ? byX : byY;
+      const nh = Math.max(base.h * HEAD_SCALE.min, Math.min(base.h * HEAD_SCALE.max, d.spot.h + grow));
+      const nw = nh * ratio;
+      const nx = h.includes('w') ? d.spot.x + d.spot.w - nw : d.spot.x;
+      const ny = h.includes('n') ? d.spot.y + d.spot.h - nh : d.spot.y;
+      live.push(setSlotSpot(d.before, layout, d.key, mode, { x: round1(nx), y: round1(ny), w: round1(nw), h: round1(nh) }));
+      return;
+    }
+    const min = s.def.kind === 'photo' ? MIN_W.photo : s.def.kind === 'cats' ? HEAD_CATS_MIN : MIN_W.text;
     let { x, y, w, h: hh } = d.spot;
     if (can.w && h.includes('e')) w = d.spot.w + dx;
     if (can.w && h.includes('w')) {
@@ -262,7 +307,10 @@ export function TemplateCanvas({
   const sel = selected ? slots.find((s) => s.def.key === selected) : undefined;
   const selBox = sel ? boxOf(sel) : null;
   const can = sel ? slotResizable(sel.def) : null;
-  const handles: Handle[] = !sel || sel.hidden || !can ? [] : can.h ? ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] : can.w ? ['w', 'e'] : [];
+  const handles: Handle[] = !sel || sel.hidden || !can ? [] : headerSlotRatio(sel.def) !== null ? CORNERS : can.h ? ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] : can.w ? ['w', 'e'] : [];
+  // 顶栏：选中（拖着）的那一块与左右相邻两块之间的间距（平板上看不到的中英切换不算）
+  const headBoxes = isHead ? new Map(slots.filter((x) => !ghost(x)).map((x) => [x.def.key, boxOf(x)] as const)) : null;
+  const gaps = headBoxes && sel && !ghost(sel) ? neighborGaps(headBoxes, sel.def.key) : null;
   const background = colorValue(menuScreen.background, surface.cssVar);
   const ctx = { surface, lang, assetUrl: (id: string) => `/api/studio/assets/${id}`, blocks: pageBlocks, editor: true, components: doc.components };
 
@@ -296,7 +344,7 @@ export function TemplateCanvas({
               data-slot={key}
               className={cn(
                 'absolute',
-                s.hidden
+                ghost(s)
                   ? 'border border-dashed border-ink-3/70 bg-[repeating-linear-gradient(45deg,rgb(0_0_0/0.05)_0_6px,transparent_6px_12px)]'
                   : on
                     ? 'border-2 border-[#2f7cf6]'
@@ -324,7 +372,7 @@ export function TemplateCanvas({
                 style={{ left: b.x * scale, top: Math.max(0, b.y * scale - 18) }}
               >
                 {s.def.label}
-                {s.hidden ? '（藏起来了）' : ''}
+                {s.hidden ? '（藏起来了）' : ghost(s) ? '（中英切换关着，平板上没有）' : ''}
               </div>
             );
           })}
@@ -348,6 +396,44 @@ export function TemplateCanvas({
             {can && !can.h && !sel.hidden ? '（高跟着内容）' : ''}
           </div>
         )}
+        {gaps &&
+          sel &&
+          selBox &&
+          (['left', 'right'] as const).map((side) => {
+            const g = gaps[side];
+            const len = g.to - g.from;
+            const y = (selBox.y + selBox.h / 2) * scale;
+            // 叠在一起了：在叠住的那一段上标「叠 N」
+            if (len <= -0.05)
+              return (
+                <div
+                  key={side}
+                  className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap rounded bg-[#d9822b] px-1 py-px text-[10.5px] leading-none text-white tabular-nums"
+                  style={{ left: ((g.from + g.to) / 2) * scale, top: y - 19 }}
+                  data-testid={`studio-gap-${side}`}
+                  data-gap={round1(len)}
+                >
+                  叠 {round1(-len).toFixed(1)}
+                </div>
+              );
+            if (len < 0.05) return null;
+            return (
+              <div
+                key={side}
+                className="pointer-events-none absolute"
+                style={{ left: g.from * scale, top: y, width: len * scale, height: 0 }}
+                data-testid={`studio-gap-${side}`}
+                data-gap={round1(len)}
+              >
+                <div className="absolute inset-x-0 top-0 h-px bg-[#f2545b]" />
+                <div className="absolute left-0 top-[-4px] h-[9px] w-px bg-[#f2545b]" />
+                <div className="absolute right-0 top-[-4px] h-[9px] w-px bg-[#f2545b]" />
+                <div className="absolute left-1/2 top-[-19px] -translate-x-1/2 whitespace-nowrap rounded bg-[#f2545b] px-1 py-px text-[10.5px] leading-none text-white tabular-nums">
+                  {round1(len).toFixed(1)}
+                </div>
+              </div>
+            );
+          })}
         {guides.map((g, i) => (
           <div
             key={i}

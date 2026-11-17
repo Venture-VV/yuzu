@@ -4,7 +4,7 @@
 //     黄的（warn）提醒一下：英文没填、字和底色对比不够、能点的块缩得太小、图片太大、整块在画布外面。
 
 import { isFlow, STUDIO_LIMITS, walkNodes, type StudioAction, type StudioBlockNode, type StudioColor, type StudioDoc, type StudioNode } from './format';
-import { slotHideable, slotResizable } from './emenu-templates';
+import { EMENU_HEADER_H, EMENU_HEADER_LAYOUT, headerSlotRatio, resolveSlot, slotHideable, slotResizable, slotSpot } from './emenu-templates';
 import { componentCycles, expandedCount } from './components';
 import { STUDIO_SURFACE_DEFS, type StudioBlockDef, type StudioPropDef, type StudioSurfaceDef } from './surfaces';
 
@@ -143,6 +143,21 @@ export function validateStudioDoc(doc: StudioDoc): StudioIssue[] {
         if (p.bottom !== undefined && (mode === 'design' || slot.big?.bottom === undefined)) err(`「${slot.label}」${mode === 'design' ? '原样一档' : ''}没有「下沿」这一项`);
         if (p.bottom !== undefined && p.y !== undefined) err(`「${slot.label}」的上沿、下沿只能定一个`);
       }
+      // 顶栏（8.1.6，QZ8）：每一块都在顶栏那一条里（左右在屏内、上下在 0–102）；字标、图标、手牌等比缩放，最小一半、最大两倍半
+      if (layout === EMENU_HEADER_LAYOUT) {
+        const s = resolveSlot(slot, o);
+        for (const mode of ['design', 'big'] as const) {
+          const p = slotSpot(s, mode);
+          const name = `「${slot.label}」${mode === 'big' ? '（放大一档）' : ''}`;
+          if (p.x < 0 || p.x + p.w > 1024 || p.y < 0 || p.y + p.h > EMENU_HEADER_H) err(`${name}要在顶栏那一条里（宽 1024、高 ${EMENU_HEADER_H}）`);
+          const ratio = headerSlotRatio(slot);
+          if (ratio !== null && p.h > 0 && Math.abs(p.w / p.h / ratio - 1) > 0.02) err(`${name}只能等比缩放`);
+          const base = slotSpot(resolveSlot(slot, undefined), mode);
+          const k = slot.kind === 'cats' ? p.w / base.w : p.h / base.h;
+          if (slot.kind !== 'cats' && (k < 0.5 || k > 2.5)) err(`${name}最小缩到一半、最大放到两倍半`);
+          if (slot.kind === 'cats' && p.w < 120) err(`${name}至少要 120 宽（放得下分类页签）`);
+        }
+      }
     }
   }
   return issues;
@@ -255,6 +270,22 @@ export function checkStudioDoc(doc: StudioDoc, ctx: StudioCheckContext = {}): St
         if (!n.action && def.actions.length) add('warn', `「${label}」还没设「点了做什么」，点了没反应`, screenDef.key, n.id);
       }
     });
+  }
+  // 顶栏（8.1.6，QZ8）：改过的顶栏里两块叠在一起（按登记的大小算；手牌里的字长了还会往外长）提醒一下
+  const head = def.templates?.[EMENU_HEADER_LAYOUT];
+  if (head && doc.templates?.[EMENU_HEADER_LAYOUT]) {
+    for (const mode of ['design', 'big'] as const) {
+      const boxes = head.slots.map((slot) => ({ slot, p: slotSpot(resolveSlot(slot, doc.templates?.[EMENU_HEADER_LAYOUT]?.[slot.key]), mode) }));
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i]!;
+          const b = boxes[j]!;
+          const ox = Math.min(a.p.x + a.p.w, b.p.x + b.p.w) - Math.max(a.p.x, b.p.x);
+          const oy = Math.min(a.p.y + a.p.h, b.p.y + b.p.h) - Math.max(a.p.y, b.p.y);
+          if (ox > 0.5 && oy > 0.5) add('warn', `顶栏里「${a.slot.label}」与「${b.slot.label}」${mode === 'big' ? '在放大一档里' : ''}叠在一起了：客人可能点错`, 'menu');
+        }
+      }
+    }
   }
   return issues;
 }

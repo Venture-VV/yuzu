@@ -6,7 +6,7 @@
 // 平板没有发布过版面时就用它，升级以后客人看不出变化（GZ12，浏览器用例逐屏截图比对）。
 
 import type { EmenuTemplateDef } from './emenu-templates';
-import { EMENU_TEMPLATES } from './emenu-templates';
+import { EMENU_ALL_TEMPLATES } from './emenu-templates';
 import { STUDIO_SCHEMA } from './core';
 import type { StudioBlockNode, StudioButtonNode, StudioDoc, StudioFrameNode, StudioLayout, StudioNode, StudioSurface, StudioTextNode } from './format';
 
@@ -292,7 +292,8 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
   cssVar: (token) => `var(--em-${token === 'key2' ? 'key-2' : token})`,
   fontVars: { zh: '--em-zh', en: '--em-en' },
   inlineAllVars: false,
-  templates: EMENU_TEMPLATES,
+  // 菜单页 11 种版式的卡片模板，加上顶栏（8.1.6）
+  templates: EMENU_ALL_TEMPLATES,
 };
 
 /** 小程序能打开的页（与 miniprogram/src/app.json 的页对应；activity 是工作台里排的活动页） */

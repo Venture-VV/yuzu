@@ -14,7 +14,8 @@ import { qrShape } from '@shared/qr-svg';
 import {
   checkStudioDoc,
   defaultStudioDoc,
-  EMENU_TEMPLATES,
+  EMENU_ALL_TEMPLATES,
+  EMENU_HEADER_LAYOUT,
   isFlow,
   resolveSlot,
   screenLabel,
@@ -68,6 +69,7 @@ import {
   screenOf,
   sizeForFlow,
   updateNodes,
+  type Box,
 } from './model';
 import { phoneEditorBlocks } from './phoneBlocks';
 import { AssetsPanel, ChecksPanel, InsertPanel, LayersPanel, PropsPanel, ThemePanel, type ComponentOps } from './panels';
@@ -75,7 +77,7 @@ import { TemplateCanvas } from './TemplateCanvas';
 import { CommentPins, CommentsPanel, CopyDialog, PackDialog, PresenceChip, useComments, usePresence } from './collab';
 import { SHOWN_ON } from './shownOn';
 import { DishStatePanel, SlotPanel, TemplatesPanel } from './templatePanels';
-import { pagesWithLayout, templatePage } from './templateModel';
+import { headerPage, pagesWithLayout, templatePage } from './templateModel';
 
 type SaveStatus = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
 const ZOOMS = [0.5, 0.75, 1, 1.25] as const;
@@ -213,11 +215,14 @@ export function StudioPage() {
   const [pageIndex, setPageIndex] = useState(0);
   const [dialog, setDialog] = useState<null | 'publish' | 'versions' | 'preview' | 'copy' | 'pack'>(null);
   // 卡片模板（8.1.2，平板菜单）：左栏「版式」打开时画布改成那种版式的一页，选中的是版式里的一块
-  const [tplLayout, setTplLayout] = useState<EmenuLayout>('cover');
+  // 顶栏（8.1.6，QZ8）也在这里：tplLayout 为 header
+  const [tplLayout, setTplLayout] = useState<EmenuLayout | typeof EMENU_HEADER_LAYOUT>('cover');
   const [tplSlot, setTplSlot] = useState<string | null>(null);
   // 菜的几种样子（变体，8.1.2）：选了一种时画布上的菜都按这种状态画，右栏改它的样子
   const [tplState, setTplState] = useState<StudioDishState | null>(null);
   const [tplPageNo, setTplPageNo] = useState(0);
+  // 顶栏各块在画布上量到的框（右边「间距」用，8.1.6）
+  const [headBoxes, setHeadBoxes] = useState<ReadonlyMap<string, Box> | null>(null);
   const tplMode = isEmenu && left === 'templates';
   const textRef = useRef<HTMLTextAreaElement>(null);
   const clipboard = useRef<StudioNode[]>([]);
@@ -300,8 +305,8 @@ export function StudioPage() {
     [isEmenu, def, menuQ.data, lang, pageIndex, doc.templates, doc.dishStates],
   );
   const flat = useMemo(() => flatPages(menuQ.data ?? null), [menuQ.data]);
-  const tplPages = useMemo(() => pagesWithLayout(menuQ.data ?? null, tplLayout), [menuQ.data, tplLayout]);
-  const tplPage = useMemo(() => templatePage(menuQ.data ?? null, tplLayout, tplPageNo), [menuQ.data, tplLayout, tplPageNo]);
+  const tplPages = useMemo(() => (tplLayout === EMENU_HEADER_LAYOUT ? [] : pagesWithLayout(menuQ.data ?? null, tplLayout)), [menuQ.data, tplLayout]);
+  const tplPage = useMemo(() => (tplLayout === EMENU_HEADER_LAYOUT ? headerPage(menuQ.data ?? null) : templatePage(menuQ.data ?? null, tplLayout, tplPageNo)), [menuQ.data, tplLayout, tplPageNo]);
 
   // ── 缩放：适应画布区域 ──
   const area = useRef<HTMLDivElement>(null);
@@ -384,7 +389,7 @@ export function StudioPage() {
   /** 卡片模板里选中的一块：方向键挪（放大一档里往上长的文字挪的是下沿） */
   const nudgeSlot = useCallback(
     (dx: number, dy: number) => {
-      const def = tplSlot ? EMENU_TEMPLATES[tplLayout].slots.find((x) => x.key === tplSlot) : undefined;
+      const def = tplSlot ? EMENU_ALL_TEMPLATES[tplLayout]?.slots.find((x) => x.key === tplSlot) : undefined;
       if (!def) return;
       const s = resolveSlot(def, latest.current.templates?.[tplLayout]?.[def.key]);
       if (s.hidden) return;
@@ -439,11 +444,16 @@ export function StudioPage() {
     }
   }, [doc, screen]);
 
-  const openTemplates = useCallback(() => {
+  const openTemplates = useCallback((layout?: typeof EMENU_HEADER_LAYOUT) => {
     setLeft('templates');
     setScreen('menu');
     setSelection([]);
     setRight('props');
+    if (layout) {
+      setTplLayout(layout);
+      setTplSlot(null);
+      setTplState(null);
+    }
   }, []);
 
   // ── 快捷键（照 Figma 的习惯） ──
@@ -827,6 +837,8 @@ export function StudioPage() {
                 }
               }}
               previewState={tplState}
+              langOn={menuQ.data?.rules.langSwitch !== false}
+              onHeadBoxes={(b) => setHeadBoxes((cur) => (cur && sameHeadBoxes(cur, b) ? cur : new Map(b)))}
               scale={scale}
               lang={lang}
               big={big}
@@ -904,7 +916,15 @@ export function StudioPage() {
                 tplState ? (
                   <DishStatePanel doc={doc} state={tplState} onChange={change} />
                 ) : (
-                  <SlotPanel doc={doc} layout={tplLayout} slot={tplSlot} big={big} onToggleBig={() => setBig((b) => !b)} onChange={change} />
+                  <SlotPanel
+                    doc={doc}
+                    layout={tplLayout}
+                    slot={tplSlot}
+                    big={big}
+                    onToggleBig={() => setBig((b) => !b)}
+                    onChange={change}
+                    headBoxes={tplLayout === EMENU_HEADER_LAYOUT ? headBoxes : null}
+                  />
                 )
               ) : (
                 <PropsPanel
@@ -1352,4 +1372,14 @@ function PreviewDialog({ surface, doc, onClose }: { surface: StudioSurface; doc:
       </div>
     </Dialog>
   );
+}
+
+/** 两份量到的顶栏框一样（差不到 0.05 像素）就不换，免得右边「间距」白白重画 */
+function sameHeadBoxes(a: ReadonlyMap<string, Box>, b: ReadonlyMap<string, Box>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) {
+    const w = b.get(k);
+    if (!w || Math.abs(w.x - v.x) > 0.05 || Math.abs(w.y - v.y) > 0.05 || Math.abs(w.w - v.w) > 0.05 || Math.abs(w.h - v.h) > 0.05) return false;
+  }
+  return true;
 }

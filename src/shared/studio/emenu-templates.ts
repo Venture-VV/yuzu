@@ -8,7 +8,7 @@
 import type { EmenuLayout } from '../emenu';
 import type { StudioDishState, StudioDishStateStyle, StudioDoc, StudioSlotOverride } from './format';
 
-export type EmenuSlotKind = 'photo' | 'text' | 'title' | 'coverTitle' | 'intro' | 'row';
+export type EmenuSlotKind = 'photo' | 'text' | 'title' | 'coverTitle' | 'intro' | 'row' | 'logo' | 'cats' | 'icon' | 'tag';
 
 /**
  * 放大一档的位置：没写的沿用原样的；文字块写了 bottom 是「下沿贴在这条线上、往上长」。
@@ -53,7 +53,7 @@ export interface EmenuSlotDef {
 }
 
 export interface EmenuTemplateDef {
-  layout: EmenuLayout;
+  layout: EmenuLayout | typeof EMENU_HEADER_LAYOUT;
   slots: readonly EmenuSlotDef[];
 }
 
@@ -216,6 +216,67 @@ export const EMENU_TEMPLATES: Record<EmenuLayout, EmenuTemplateDef> = {
   },
 };
 
+// ───────────────────────── 顶栏（8.1.6，docs/EMENU.md 第 15.8 节，QZ8、QZ9） ─────────────────────────
+// 平板每一屏最上面那一条：字标、分类、中英切换、搜索、订单、手牌各是一块，设计师在工作台里单独挪、改大小、调间距。
+// 数字照 features/emenu/header.tsx 原来写死的（8.1.5 的位置）：没改过顶栏的版面与以前逐像素一致。
+// 字标、图标、手牌只能等比缩放（存宽、高两个数）；分类那一块是分类页签排开的范围，只改宽（高跟着字）。
+
+/** 顶栏在 templates 里的名字（与 11 种版式并列） */
+export const EMENU_HEADER_LAYOUT = 'header';
+/** 顶栏那一条有多高（设计稿） */
+export const EMENU_HEADER_H = 102;
+/** 顶栏右边几样（切换图标、搜索、订单、手牌）与字标的中线 */
+export const EMENU_HEADER_MID = 55.45;
+/** 放大一档顶栏右边几样放大多少（= 平板 stage.tsx 的 BIG.ui，用例核对两边一致） */
+export const EMENU_HEADER_BIG = 1.3;
+/** 中英切换图标的边长（与手牌色块一样高） */
+export const EMENU_LANG_ICON = 22.3;
+/** 横排字标的宽高比（viewBox 79.809 × 15.441）、高是切换图标的几倍 */
+export const EMENU_LOGO_RATIO = 79.809 / 15.441;
+export const EMENU_LOGO_TO_ICON = 0.7;
+/** 手牌色块原来的最小宽（里面的字长了往外长） */
+export const EMENU_TAG_W = 85.8;
+/** 后台关了中英切换时分类排开的范围（原来的写法：右边让出切换图标的地方不要了） */
+export const EMENU_CATS_NO_LANG = { design: { x: 136, w: 610 }, big: { x: 136, w: 610 } } as const;
+
+const K = EMENU_HEADER_BIG;
+const MID = EMENU_HEADER_MID;
+const ICON = EMENU_LANG_ICON;
+const logoH = ICON * EMENU_LOGO_TO_ICON;
+/** 放大一档绕中心放大的一块：中心 (cx, cy)、原样的宽高 → 看到的左上角与大小 */
+const zoomed = (cx: number, cy: number, w: number, h: number): EmenuBigSpot => ({ x: cx - (w * K) / 2, y: cy - (h * K) / 2, w: w * K, h: h * K });
+
+export const EMENU_HEADER_TEMPLATE: EmenuTemplateDef = {
+  layout: EMENU_HEADER_LAYOUT,
+  slots: [
+    {
+      key: 'logo',
+      label: '字标',
+      kind: 'logo',
+      x: 40,
+      y: MID - logoH / 2,
+      w: logoH * EMENU_LOGO_RATIO,
+      h: logoH,
+      big: { x: 40, y: MID - (logoH * K) / 2, w: logoH * K * EMENU_LOGO_RATIO, h: logoH * K },
+    },
+    // 分类页签排开的范围：原来以 441 为中线、有中英切换时宽 528（放大一档 498）；按钮从 57 − 23 × 字的倍数开始、高 46 × 倍数
+    { key: 'cats', label: '分类', kind: 'cats', x: 441 - 264, y: 34, w: 528, h: 46, big: { x: 441 - 249, y: 57 - 23 * K, w: 498, h: 46 * K } },
+    // 中英切换：右边贴在 774（放大一档图标中心在 764.2 − 11.15 × 1.3）
+    { key: 'lang', label: '中英切换', kind: 'icon', x: 774 - ICON, y: MID - ICON / 2, w: ICON, h: ICON, big: zoomed(764.2 - (ICON / 2) * K, MID, ICON, ICON) },
+    // 搜索、订单：原样照设计稿的左上角；放大一档绕 (796, 中线) 与 (842, 中线) 放大
+    { key: 'search', label: '搜索', kind: 'icon', x: 795.4, y: 45.4, w: 20.5, h: 20.5, big: zoomed(796, 45.4 + 20.5 / 2, 20.5, 20.5) },
+    { key: 'order', label: '订单', kind: 'icon', x: 837.5, y: 45.2, w: 17.9, h: 20.4, big: zoomed(842, 45.2 + 20.4 / 2, 17.9, 20.4) },
+    // 手牌：原样左边贴在 898.2、往右长；放大一档右边贴在 984、往左长（色块原来最小宽 85.8，里面的字长了往外长）
+    { key: 'tag', label: '手牌', kind: 'tag', x: 898.2, y: 44.3, w: EMENU_TAG_W, h: ICON, big: { x: 984 - EMENU_TAG_W * K, y: MID - (ICON * K) / 2, w: EMENU_TAG_W * K, h: ICON * K } },
+  ],
+};
+
+/** 平板菜单的卡片模板与顶栏（工作台、服务端核对用这一份） */
+export const EMENU_ALL_TEMPLATES: Readonly<Record<string, EmenuTemplateDef>> = { ...EMENU_TEMPLATES, [EMENU_HEADER_LAYOUT]: EMENU_HEADER_TEMPLATE };
+
+/** 顶栏里只能等比缩放的块（字标、图标、手牌）：宽高比 */
+export const headerSlotRatio = (def: EmenuSlotDef): number | null => (def.kind === 'logo' || def.kind === 'icon' || def.kind === 'tag' ? def.w / def.h : null);
+
 export type EmenuSlotMode = 'design' | 'big';
 
 /** 一块在一档里的位置；bottom 是放大一档里「下沿贴线、往上长」的文字块（这时 y 不算数） */
@@ -273,7 +334,7 @@ export function slotDefault(def: EmenuSlotDef, mode: EmenuSlotMode): EmenuSlotSp
   return slotSpot(resolveSlot(def, undefined), mode);
 }
 
-export const findSlotDef = (layout: string, key: string): EmenuSlotDef | undefined => (EMENU_TEMPLATES as Record<string, EmenuTemplateDef | undefined>)[layout]?.slots.find((s) => s.key === key);
+export const findSlotDef = (layout: string, key: string): EmenuSlotDef | undefined => (EMENU_ALL_TEMPLATES as Record<string, EmenuTemplateDef | undefined>)[layout]?.slots.find((s) => s.key === key);
 
 type Templates = NonNullable<StudioDoc['templates']>;
 
@@ -352,7 +413,12 @@ export function resetLayoutTemplate(doc: StudioDoc, layout: string): StudioDoc {
 /** 能藏起来的块：照片、特写图、小标题、介绍（菜名、价格、加号所在的文字块不能藏：藏了客人点不了） */
 export const slotHideable = (def: EmenuSlotDef) => def.kind === 'photo' || def.kind === 'title' || def.kind === 'intro' || def.kind === 'coverTitle';
 /** 能改宽的块：照片、文字、介绍（竖排小标题、封面标题、文字陈列的一行只能挪） */
-export const slotResizable = (def: EmenuSlotDef): { w: boolean; h: boolean } => ({ w: def.kind === 'photo' || def.kind === 'text' || def.kind === 'intro', h: def.kind === 'photo' });
+export const slotResizable = (def: EmenuSlotDef): { w: boolean; h: boolean } => {
+  // 顶栏（8.1.6）：字标、图标、手牌等比缩放（宽高一起），分类那一块只改宽
+  if (def.kind === 'logo' || def.kind === 'icon' || def.kind === 'tag') return { w: true, h: true };
+  if (def.kind === 'cats') return { w: true, h: false };
+  return { w: def.kind === 'photo' || def.kind === 'text' || def.kind === 'intro', h: def.kind === 'photo' };
+};
 
 // ───────────────────────── 菜的几种状态（变体） ─────────────────────────
 

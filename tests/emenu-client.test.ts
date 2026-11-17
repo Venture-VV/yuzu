@@ -35,6 +35,10 @@ import {
   specLabel,
 } from '../src/client/features/emenu/i18n';
 import { dragPosition, nextStable, rubberBand, settlePage, STAGE_H, STAGE_W, stageLayout, type ViewportNow } from '../src/client/features/emenu/viewport';
+import { EMENU_HEADER_BIG, EMENU_HEADER_TEMPLATE, EMENU_LANG_ICON, EMENU_LOGO_TO_ICON, slotDefault } from '../src/shared/studio';
+import { BIG } from '../src/client/features/emenu/stage';
+import { LANG_ICON, LOGO_TO_ICON } from '../src/client/features/emenu/header';
+import { editHeaderGap, headerGaps, neighborGaps } from '../src/client/features/studio/headerGaps';
 
 const view = (patch: Partial<ViewportNow> = {}): ViewportNow => ({ width: 1280, height: 800, visibleTop: 0, visibleHeight: patch.height ?? 800, editing: false, ...patch });
 
@@ -333,5 +337,83 @@ describe('英文还缺哪些（8.1.6，docs/EMENU.md 第 15.6 节，QZ6）', () 
     ]);
     expect(gaps.find((g) => g.kind === 'pageTitle')).toMatchObject({ categoryId: 1, page: 0 });
     expect(gaps.find((g) => g.kind === 'option')).toMatchObject({ group: 'avoid' });
+  });
+});
+
+describe('顶栏的位置与间距（8.1.6，QZ8、QZ9）', () => {
+  const spot = (key: string, mode: 'design' | 'big') => slotDefault(EMENU_HEADER_TEMPLATE.slots.find((s) => s.key === key)!, mode);
+  it('登记的默认位置就是原来顶栏写死的数（没改过顶栏的版面与以前一样）；放大的倍数与平板的一样', () => {
+    expect(EMENU_HEADER_BIG).toBe(BIG.ui);
+    expect(EMENU_LANG_ICON).toBe(LANG_ICON);
+    expect(EMENU_LOGO_TO_ICON).toBe(LOGO_TO_ICON);
+    expect(spot('lang', 'design')).toMatchObject({ x: 774 - 22.3, y: 55.45 - 11.15, w: 22.3, h: 22.3 });
+    expect(spot('search', 'design')).toMatchObject({ x: 795.4, y: 45.4, w: 20.5 });
+    expect(spot('order', 'design')).toMatchObject({ x: 837.5, y: 45.2, w: 17.9, h: 20.4 });
+    expect(spot('tag', 'design')).toMatchObject({ x: 898.2, y: 44.3, h: 22.3 });
+    // 放大一档：中英切换绕 (764.2 − 14.495, 中线) 放大 1.3 倍；手牌右边贴在 984；分类以 441 为中线、宽 498
+    const lang = spot('lang', 'big');
+    expect(lang.x + lang.w / 2).toBeCloseTo(764.2 - 11.15 * 1.3, 6);
+    expect(lang.w).toBeCloseTo(22.3 * 1.3, 6);
+    const tag = spot('tag', 'big');
+    expect(tag.x + tag.w).toBeCloseTo(984, 6);
+    const cats = spot('cats', 'big');
+    expect(cats.x + cats.w / 2).toBe(441);
+    expect(cats.w).toBe(498);
+    expect(spot('logo', 'design').w).toBeCloseTo(22.3 * 0.7 * (79.809 / 15.441), 6);
+  });
+
+  // 原样一档默认的六块（手牌里的字比最小宽多出一点：量到 89.4）
+  const boxes = new Map([
+    ['logo', { x: 40, y: 47.6, w: 80.7, h: 15.6 }],
+    ['cats', { x: 177, y: 34, w: 528, h: 46 }],
+    ['lang', { x: 751.7, y: 44.3, w: 22.3, h: 22.3 }],
+    ['search', { x: 795.4, y: 45.4, w: 20.5, h: 20.5 }],
+    ['order', { x: 837.5, y: 45.2, w: 17.9, h: 20.4 }],
+    ['tag', { x: 898.2, y: 44.3, w: 89.4, h: 22.3 }],
+  ]);
+  const values = (b: typeof boxes) => headerGaps(b).map((g) => Math.round(g.value * 10) / 10);
+  const apply = (b: typeof boxes, edit: NonNullable<ReturnType<typeof editHeaderGap>>) => {
+    const next = new Map([...b].map(([k, v]) => [k, { ...v }]));
+    for (const m of edit.moves) next.get(m.key)!.x += m.dx;
+    if (edit.cats) {
+      next.get('cats')!.x += edit.cats.dx;
+      next.get('cats')!.w += edit.cats.dw;
+    }
+    return next;
+  };
+  it('间距：左页边、每两块之间、右页边；按框从左到右排', () => {
+    expect(headerGaps(boxes).map((g) => [g.left, g.right])).toEqual([
+      [null, 'logo'],
+      ['logo', 'cats'],
+      ['cats', 'lang'],
+      ['lang', 'search'],
+      ['search', 'order'],
+      ['order', 'tag'],
+      ['tag', null],
+    ]);
+    expect(values(boxes)).toEqual([40, 56.3, 46.7, 21.4, 21.6, 42.8, 36.4]);
+  });
+  it('改一条间距只动那一条：右边一组靠右贴住、它左边的几块一起挪，分类那一块收放；左边改了分类的左边收放', () => {
+    const right = editHeaderGap(boxes, 4, 30)!;
+    expect(right.moves).toEqual([
+      { key: 'lang', dx: expect.closeTo(-8.4, 6) },
+      { key: 'search', dx: expect.closeTo(-8.4, 6) },
+    ]);
+    expect(values(apply(boxes, right))).toEqual([40, 56.3, 46.7, 21.4, 30, 42.8, 36.4]);
+    const margin = editHeaderGap(boxes, 6, 40)!;
+    expect(values(apply(boxes, margin))).toEqual([40, 56.3, 46.7, 21.4, 21.6, 42.8, 40]);
+    const left = editHeaderGap(boxes, 0, 60)!;
+    expect(left.moves).toEqual([{ key: 'logo', dx: 20 }]);
+    expect(values(apply(boxes, left))).toEqual([60, 56.3, 46.7, 21.4, 21.6, 42.8, 36.4]);
+    expect(editHeaderGap(boxes, 1, 20)!.moves).toEqual([]);
+    expect(values(apply(boxes, editHeaderGap(boxes, 1, 20)!))).toEqual([40, 20, 46.7, 21.4, 21.6, 42.8, 36.4]);
+    // 分类那一块会窄过 120：改不了
+    expect(editHeaderGap(boxes, 2, 500)).toBeNull();
+    expect(editHeaderGap(boxes, 3, 21.4)).toEqual({ moves: [], cats: null });
+  });
+  it('拖着一块时它左右两边的间距：最近的那一块（没有就是屏幕边）', () => {
+    expect(neighborGaps(boxes, 'search')).toEqual({ left: { from: 774, to: 795.4, with: 'lang' }, right: { from: 815.9, to: 837.5, with: 'order' } });
+    expect(neighborGaps(boxes, 'logo')!.left).toEqual({ from: 0, to: 40, with: null });
+    expect(neighborGaps(boxes, 'tag')!.right.with).toBeNull();
   });
 });

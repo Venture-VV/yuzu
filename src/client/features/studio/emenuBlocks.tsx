@@ -55,20 +55,23 @@ export function emenuEditorBlocks(
       ) : (
         <Placeholder w={n.w} h={n.h} text="菜单页（后台「电子菜单」里还没有排菜）" />
       ),
+    // 顶栏（8.1.6）：设计师改过的位置照版面画（与平板同一个组件）
     'menu.header': () => (
-      <Header
-        categories={menu?.categories ?? []}
-        activeId={at?.category.id ?? null}
-        onCategory={noop}
-        tagCode="A8060"
-        count={2}
-        bump={0}
-        pending={false}
-        onSearch={noop}
-        onOrder={noop}
-        onTag={noop}
-        onLang={menu?.rules.langSwitch === false ? undefined : noop}
-      />
+      <EmenuTemplatesProvider templates={opts.templates}>
+        <Header
+          categories={menu?.categories ?? []}
+          activeId={at?.category.id ?? null}
+          onCategory={noop}
+          tagCode="A8060"
+          count={2}
+          bump={0}
+          pending={false}
+          onSearch={noop}
+          onOrder={noop}
+          onTag={noop}
+          onLang={menu?.rules.langSwitch === false ? undefined : noop}
+        />
+      </EmenuTemplatesProvider>
     ),
     'menu.dots': (n) => (
       <div style={{ ...box(0, 0, n.w, 14), display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 7 }}>
