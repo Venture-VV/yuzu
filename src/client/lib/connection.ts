@@ -113,9 +113,13 @@ function markUnreachable() {
   scheduleRetry();
 }
 
-/** 现在问一次服务器（同时只问一次，几处一起叫共用一个结果） */
-export function probe(): Promise<boolean> {
-  if (probing) return probing;
+/**
+ * 现在问一次服务器（同时只问一次，几处一起叫共用一个结果）。
+ * fresh：断网、恢复、请求发不出去这几个信号之后，要的是信号以后的答案。这时还在路上的那一次是信号以前发出去的，
+ * 等它回来再问一次。不然它在断网以后才回来、还是成功的话，会把断网吞掉，要等 60 秒的心跳才发现（8.1.5）。
+ */
+export function probe(opts: { fresh?: boolean } = {}): Promise<boolean> {
+  if (probing) return opts.fresh ? probing.then(() => probe()) : probing;
   probing = (async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
@@ -152,7 +156,7 @@ export const lastContactAt = (): number | null => lastContact;
 /** 请求发不出去、超时、网关说连不上后面：马上问一次服务器 */
 export function noteNetworkFailure(): void {
   if (snap.state === 'online') set({ state: 'checking' });
-  void probe();
+  void probe({ fresh: true });
 }
 
 /**
@@ -205,10 +209,10 @@ export function startConnectionWatch(): void {
       rqSetOnline = null;
     };
   });
-  window.addEventListener('online', () => void probe());
+  window.addEventListener('online', () => void probe({ fresh: true }));
   window.addEventListener('offline', () => {
     if (snap.state === 'online') set({ state: 'checking' });
-    void probe();
+    void probe({ fresh: true });
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && (snap.state !== 'online' || !lastContact || Date.now() - lastContact > 30_000)) void probe();

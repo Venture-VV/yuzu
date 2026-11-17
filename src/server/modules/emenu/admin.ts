@@ -25,6 +25,11 @@ import {
   EMENU_MAX_AVOID_OPTIONS,
   EMENU_MAX_FOOTER,
   EMENU_MAX_IDLE_MINUTES,
+  EMENU_MAX_PERIOD_NAME,
+  EMENU_MAX_PERIOD_NAME_EN,
+  EMENU_PERIODS,
+  periodsValid,
+  sortPeriods,
   EMENU_MAX_NOTE,
   EMENU_MAX_OPTION_EN,
   EMENU_MAX_OPTION_LENGTH,
@@ -72,8 +77,8 @@ const rulesRev = (rules: EmenuRules) =>
   );
 
 async function loadCategories(db: Db): Promise<EmenuCategoryAdmin[]> {
-  const cats = await db<{ id: number; name: string; nameEn: string; startMinute: number | null; endMinute: number | null; sortOrder: number; active: boolean; version: number }[]>`
-    SELECT id, name, name_en, start_minute, end_minute, sort_order, active, version FROM emenu_categories ORDER BY active DESC, sort_order, id`;
+  const cats = await db<{ id: number; name: string; nameEn: string; periods: string[]; startMinute: number | null; endMinute: number | null; sortOrder: number; active: boolean; version: number }[]>`
+    SELECT id, name, name_en, periods, start_minute, end_minute, sort_order, active, version FROM emenu_categories ORDER BY active DESC, sort_order, id`;
   const pages = await db<{ id: number; categoryId: number; layout: EmenuLayout; title: string; titleEn: string }[]>`
     SELECT id, category_id, layout, title, title_en FROM emenu_pages ORDER BY category_id, sort_no`;
   const slots = await db<{ pageId: number; slotNo: number; dishId: number }[]>`SELECT page_id, slot_no, dish_id FROM emenu_page_dishes ORDER BY page_id, slot_no`;
@@ -81,6 +86,7 @@ async function loadCategories(db: Db): Promise<EmenuCategoryAdmin[]> {
     id: Number(c.id),
     name: c.name,
     nameEn: c.nameEn,
+    periods: sortPeriods(c.periods),
     window: c.startMinute === null || c.endMinute === null ? null : { start: c.startMinute, end: c.endMinute },
     sortOrder: c.sortOrder,
     active: c.active,
@@ -187,6 +193,19 @@ const RulesInput = z.object({
   motion: z.boolean(),
   requirePin: z.boolean(),
   textSize: z.enum(['large', 'design'], '请选择平板上的字用哪一档'),
+  // 早中晚三个时段（8.1.5，PP1）：按早、中、晚排，开始时间早 < 午 < 晚（首尾相接、盖满一天）
+  periods: z
+    .array(
+      z.object({
+        key: z.enum(EMENU_PERIODS),
+        name: z.string('请填写时段的名称').trim().min(1, '请填写时段的名称').max(EMENU_MAX_PERIOD_NAME, `时段的名称最多 ${EMENU_MAX_PERIOD_NAME} 个字`),
+        nameEn: z.string().trim().max(EMENU_MAX_PERIOD_NAME_EN, `时段的英文名最多 ${EMENU_MAX_PERIOD_NAME_EN} 个字符`),
+        start: z.number('时段的开始时间不对').int('时段的开始时间不对').min(0, '时段的开始时间不对').max(1439, '时段的开始时间不对'),
+      }),
+    )
+    .length(EMENU_PERIODS.length, '早、中、晚三个时段都要有')
+    .refine((list) => list.every((p, i) => p.key === EMENU_PERIODS[i]), '时段要按早、中、晚排')
+    .refine(periodsValid, '三个时段的开始时间要按早、午、晚从早到晚排，不能相同'),
 });
 
 /** 保存设置：只交改过的项；带页面打开时的版本，别人先保存过拒绝 */
@@ -223,7 +242,13 @@ const minute = z.number('时间不对').int('时间不对').min(0, '时间不对
 const CategoryFields = z.object({
   name: z.string('请填写分类名称').trim().min(1, '请填写分类名称').max(16, '分类名称最多 16 个字'),
   nameEn: z.string().trim().max(32, '英文名最多 32 个字').default(''),
-  /** 供应时段（一天里的第几分钟）；null 为全天 */
+  /** 在哪几段供应（8.1.5）：早 breakfast、中 lunch、晚 dinner，可多选；空的是全天。存的时候按早中晚排、去掉重复 */
+  periods: z
+    .array(z.enum(EMENU_PERIODS, '时段不对'))
+    .max(EMENU_PERIODS.length)
+    .default([])
+    .transform((list) => sortPeriods(list)),
+  /** 另外限定的时间（一天里的第几分钟；8.0.10 的「指定时段」）；null 为不限 */
   window: z
     .object({ start: minute, end: minute })
     .refine((w) => w.start !== w.end, '供应时段的开始与结束不能相同')
@@ -241,8 +266,8 @@ export async function createEmenuCategory(deps: Deps, raw: unknown, ctx: OpConte
   try {
     await deps.sql.begin(async (tx) => {
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO emenu_categories (name, name_en, start_minute, end_minute, sort_order, active, created_by, updated_by)
-        VALUES (${c.name}, ${c.nameEn}, ${c.window?.start ?? null}, ${c.window?.end ?? null}, ${c.sortOrder}, ${c.active}, ${ctx.actor.id}, ${ctx.actor.id})
+        INSERT INTO emenu_categories (name, name_en, periods, start_minute, end_minute, sort_order, active, created_by, updated_by)
+        VALUES (${c.name}, ${c.nameEn}, ${c.periods}::text[], ${c.window?.start ?? null}, ${c.window?.end ?? null}, ${c.sortOrder}, ${c.active}, ${ctx.actor.id}, ${ctx.actor.id})
         RETURNING id`;
       await writeAudit(tx, { staffId: ctx.actor.id, action: 'emenu_saved', targetType: 'emenu_category', targetId: row!.id, detail: { summary: `新建电子菜单分类「${c.name}」` }, ip: ctx.ip });
     });
@@ -267,7 +292,7 @@ export async function updateEmenuCategory(deps: Deps, id: number, raw: unknown, 
       await setTxTimeouts(tx);
       const cur = await lockCategory(tx, id, c.version);
       await tx`
-        UPDATE emenu_categories SET name = ${c.name}, name_en = ${c.nameEn}, start_minute = ${c.window?.start ?? null}, end_minute = ${c.window?.end ?? null},
+        UPDATE emenu_categories SET name = ${c.name}, name_en = ${c.nameEn}, periods = ${c.periods}::text[], start_minute = ${c.window?.start ?? null}, end_minute = ${c.window?.end ?? null},
                sort_order = ${c.sortOrder}, active = ${c.active}, version = version + 1, updated_by = ${ctx.actor.id}, updated_at = now()
         WHERE id = ${id}`;
       await writeAudit(tx, {

@@ -29,12 +29,18 @@ import {
   EMENU_OPTION_EN,
   EMENU_SPEC_EN,
   EMENU_UNIT_EN,
+  describeCategoryHours,
+  EMENU_MAX_PERIOD_NAME,
+  EMENU_MAX_PERIOD_NAME_EN,
+  EMENU_PERIOD_SHORT,
   emenuImageUrl,
   emenuNoteWorstCase,
   formatMinute,
-  formatWindow,
+  formatPeriod,
   parseEmenuEnglishCsv,
   parseMinute,
+  periodsValid,
+  sortPeriods,
   type EmenuAdmin,
   type EmenuCategoryAdmin,
   type EmenuCategoryView,
@@ -45,6 +51,8 @@ import {
   type EmenuLang,
   type EmenuLayout,
   type EmenuPageAdmin,
+  type EmenuPeriod,
+  type EmenuPeriodKey,
   type EmenuRules,
 } from '@shared/emenu';
 import { formatYuan } from '@shared/money';
@@ -56,6 +64,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
 import { AdminPage } from '../admin/AdminShell';
+import { useBrandFont } from './brandFont';
 import { Header } from './header';
 import { LangProvider } from './i18n';
 import { PageCanvas } from './pages';
@@ -259,12 +268,16 @@ function PagePreview({ page, category, data, scale }: { page: EmenuPageAdmin; ca
     const d = page.dishIds[i] != null ? dishOf.get(page.dishIds[i]!) : undefined;
     return d ? previewDish(d) : null;
   });
-  const tabs: EmenuCategoryView[] = data.categories.filter((c) => c.active || c.id === category.id).map((c) => ({ id: c.id, name: c.name, nameEn: c.nameEn, window: c.window, open: true, pages: [] }));
+  const brandEn = useBrandFont();
+  const tabs: EmenuCategoryView[] = data.categories
+    .filter((c) => c.active || c.id === category.id)
+    .map((c) => ({ id: c.id, name: c.name, nameEn: c.nameEn, periods: c.periods, window: c.window, open: true, pages: [] }));
   return (
     <div
       className="emenu shrink-0 overflow-hidden rounded-md border border-line"
       style={{ position: 'relative', width: 1024 * scale, height: 768 * scale, background: 'var(--em-bg)' }}
       aria-hidden
+      data-brand-en={brandEn ? '' : undefined}
       data-testid="emenu-admin-preview"
     >
       <div style={{ position: 'absolute', left: 0, top: 0, width: 1024, height: 768, transform: `scale(${scale})`, transformOrigin: '0 0', pointerEvents: 'none' }}>
@@ -385,7 +398,7 @@ function PagesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
                     {!c.active && <Badge tone="clay">停用</Badge>}
                   </span>
                   <span className="block truncate text-[12px] text-ink-3">
-                    {formatWindow(c.window)} · {c.pages.length} 页{c.nameEn ? ` · ${c.nameEn}` : ''}
+                    {describeCategoryHours(c, data.rules.periods)} · {c.pages.length} 页{c.nameEn ? ` · ${c.nameEn}` : ''}
                   </span>
                 </button>
                 <button
@@ -401,7 +414,9 @@ function PagesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
             );
           })}
         </div>
-        <p className="mt-3 px-1 text-[12px] leading-relaxed text-ink-3">平板顶栏按「排序」从小到大排分类；不在供应时段的分类照「设置」里选的处理。</p>
+        <p className="mt-3 px-1 text-[12px] leading-relaxed text-ink-3">
+          平板顶栏按「排序」从小到大排分类；平板只显示现在这个时段（早、中、晚，在「设置」里改时间）的分类与全天的，别的时段的照「设置」里选的处理。
+        </p>
       </Card>
 
       <div className="min-w-0 space-y-4">
@@ -414,7 +429,7 @@ function PagesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
                 <p className="text-[16px] font-bold">
                   {cat.name}
                   <span className="ml-2 text-[13px] font-semibold text-ink-3">
-                    {pages.length} 页 · 供应时段 {formatWindow(cat.window)}
+                    {pages.length} 页 · {describeCategoryHours(cat, data.rules.periods)}
                   </span>
                 </p>
                 <p className="text-[12.5px] text-ink-3">客人在平板上从第 1 页往后翻；一页放不满的位置空着。</p>
@@ -616,6 +631,7 @@ function CategoryDialog({ target, data, onClose, onSaved }: { target: EmenuCateg
   const existing = target && target !== 'new' ? target : null;
   const [name, setName] = useState('');
   const [nameEn, setNameEn] = useState('');
+  const [periods, setPeriods] = useState<EmenuPeriodKey[]>([]);
   const [allDay, setAllDay] = useState(true);
   const [start, setStart] = useState('11:00');
   const [end, setEnd] = useState('14:00');
@@ -628,6 +644,7 @@ function CategoryDialog({ target, data, onClose, onSaved }: { target: EmenuCateg
     setLast(target);
     setName(existing?.name ?? '');
     setNameEn(existing?.nameEn ?? '');
+    setPeriods(existing?.periods ?? []);
     setAllDay(!existing?.window);
     setStart(existing?.window ? formatMinute(existing.window.start) : '11:00');
     setEnd(existing?.window ? formatMinute(existing.window.end) : '14:00');
@@ -639,14 +656,14 @@ function CategoryDialog({ target, data, onClose, onSaved }: { target: EmenuCateg
   const save = async () => {
     const s = parseMinute(start);
     const e = parseMinute(end);
-    if (!allDay && (s === null || e === null)) return setError('供应时段请按 11:00 这样填');
-    if (!allDay && s === e) return setError('供应时段的开始与结束不能相同');
+    if (!allDay && (s === null || e === null)) return setError('另外限定的时间请按 11:00 这样填');
+    if (!allDay && s === e) return setError('另外限定时间的开始与结束不能相同');
     const order = Number(sortOrder);
     if (!Number.isInteger(order)) return setError('排序请填整数（小的排在前面）');
     setBusy(true);
     setError(null);
     try {
-      const body = { name, nameEn, window: allDay ? null : { start: s!, end: e! }, sortOrder: order, active };
+      const body = { name, nameEn, periods, window: allDay ? null : { start: s!, end: e! }, sortOrder: order, active };
       const next = existing
         ? await api.put<EmenuAdmin>(`/api/admin/emenu/categories/${existing.id}`, { ...body, version: existing.version })
         : await api.post<EmenuAdmin>('/api/admin/emenu/categories', body);
@@ -687,15 +704,40 @@ function CategoryDialog({ target, data, onClose, onSaved }: { target: EmenuCateg
             <Input id="ec-en" value={nameEn} maxLength={32} onChange={(e) => setNameEn(e.target.value)} />
           </Field>
         </div>
-        <Field label="供应时段" hint={allDay ? '全天都能点。' : '只在这段时间能点；结束早于开始算跨零点（如 21:00–02:00）。'}>
+        <Field
+          label="在哪几段供应"
+          hint={periods.length === 0 ? '都不勾是全天（饮品、酒水这类每段都有的）。时段的时间在「设置」里改。' : '平板只在勾了的时段显示、能点这个分类。时段的时间在「设置」里改。'}
+        >
+          <div className="flex flex-wrap gap-1.5" data-testid="emenu-admin-category-periods">
+            {data.rules.periods.map((p) => {
+              const on = periods.includes(p.key);
+              return (
+                <button
+                  key={p.key}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setPeriods(on ? periods.filter((k) => k !== p.key) : sortPeriods([...periods, p.key]))}
+                  className={cn(
+                    'h-8 rounded-full border px-3 text-[12.5px] font-semibold tabular-nums',
+                    on ? 'border-pine bg-pine-tint text-pine' : 'border-line bg-card text-ink-2 hover:border-line-strong',
+                  )}
+                  data-testid={`emenu-admin-category-period-${p.key}`}
+                >
+                  {formatPeriod(data.rules.periods, p.key)}
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+        <Field label="另外限定时间" hint={allDay ? '不限：在上面的时段里都能点。' : '与上面的时段同时满足才能点，比如晚餐里的宵夜 22:00–02:00；结束早于开始算跨零点。'}>
           <div className="flex flex-wrap items-center gap-2">
             <Segmented
-              ariaLabel="供应时段"
+              ariaLabel="另外限定时间"
               value={allDay ? 'all' : 'window'}
               onChange={(v) => setAllDay(v === 'all')}
               options={[
-                { value: 'all', label: '全天' },
-                { value: 'window', label: '指定时段' },
+                { value: 'all', label: '不限' },
+                { value: 'window', label: '指定时间' },
               ]}
             />
             {!allDay && (
@@ -1392,6 +1434,54 @@ function OptionList({ label, value, max, onChange, testId }: { label: string; va
   );
 }
 
+/** 早中晚三段（8.1.5）：名称、英文名、开始时间；结束是下一段的开始 */
+function PeriodsEditor({ value, onChange }: { value: EmenuPeriod[]; onChange: (next: EmenuPeriod[]) => void }) {
+  const patch = (i: number, p: Partial<EmenuPeriod>) => onChange(value.map((x, j) => (j === i ? { ...x, ...p } : x)));
+  return (
+    <div className="grid w-full gap-2 sm:w-auto" data-testid="emenu-admin-periods">
+      {value.map((p, i) => (
+        <div key={p.key} className="flex flex-wrap items-center gap-2">
+          <span className="w-5 text-[13px] font-bold text-ink-2">{EMENU_PERIOD_SHORT[p.key]}</span>
+          <Input
+            fullWidth={false}
+            className="w-[104px]"
+            aria-label={`${EMENU_PERIOD_SHORT[p.key]}时段的名称`}
+            value={p.name}
+            maxLength={EMENU_MAX_PERIOD_NAME}
+            onChange={(e) => patch(i, { name: e.target.value })}
+            data-testid={`emenu-admin-period-name-${p.key}`}
+          />
+          <Input
+            fullWidth={false}
+            className="w-[128px]"
+            aria-label={`${EMENU_PERIOD_SHORT[p.key]}时段的英文名`}
+            placeholder="英文名"
+            value={p.nameEn}
+            maxLength={EMENU_MAX_PERIOD_NAME_EN}
+            onChange={(e) => patch(i, { nameEn: e.target.value })}
+          />
+          <Input
+            type="time"
+            fullWidth={false}
+            className="w-[140px]"
+            aria-label={`${EMENU_PERIOD_SHORT[p.key]}时段从几点开始`}
+            value={formatMinute(p.start)}
+            onChange={(e) => {
+              const m = parseMinute(e.target.value);
+              if (m !== null) patch(i, { start: m });
+            }}
+            data-testid={`emenu-admin-period-start-${p.key}`}
+          />
+          <span className="whitespace-nowrap text-[12.5px] text-ink-3">
+            到 {formatMinute(value[(i + 1) % value.length]!.start)}
+            {i === value.length - 1 ? '（第二天）' : ''}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -1426,6 +1516,8 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
   };
   const dirty = !same(next, data.rules);
   const stale = rev !== data.rulesRev;
+  // 早中晚时段（8.1.5）：开始时间早 < 午 < 晚，名称不能空
+  const periodsOk = periodsValid(draft.periods) && draft.periods.every((p) => p.name.trim());
 
   const save = async () => {
     setBusy(true);
@@ -1455,7 +1547,7 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
       <div className="min-w-[220px] flex-1">
         <p className="flex items-center gap-2 text-[14px] font-bold">
           {label}
-          {pending && <PendingBadge title="先按常见做法定的默认，待店主确认（PENDING_DECISIONS.md「8.0.10」「8.0.13」「8.0.15」）" />}
+          {pending && <PendingBadge title="先按常见做法定的默认，待店主确认（PENDING_DECISIONS.md「8.0.10」「8.0.13」「8.0.15」「8.1.5」）" />}
         </p>
         <p className="text-[12.5px] leading-relaxed text-ink-3">{hint}</p>
       </div>
@@ -1543,7 +1635,7 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
         )}
         {row(
           '中英切换',
-          '开启后平板的起始页与顶栏有一个「中 | EN」开关，外宾点一下整套页面换成英文（英文在「菜品图文」里录，没录的显示中文）。关闭后页面只有中文。',
+          '开启后平板的起始页与顶栏有一个中英切换的图标（中文时显示 En、英文时显示中），外宾点一下整套页面换成英文（英文在「菜品图文」里录，没录的显示中文）。关闭后页面只有中文。',
           <Segmented
             ariaLabel="中英切换"
             value={draft.langSwitch ? 'on' : 'off'}
@@ -1646,7 +1738,15 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
           />,
           true,
         )}
+        {row(
+          '早中晚时段',
+          '三段首尾相接、盖满一天：一段的结束就是下一段的开始，平板到点自动换成那一段的菜单。分类在「分类与版面」里勾在哪几段供应，没勾的是全天。',
+          <PeriodsEditor value={draft.periods} onChange={(periods) => set({ periods })} />,
+          true,
+          true,
+        )}
       </div>
+      {!periodsOk && <Notice tone="error" className="mt-3" title="早、中、晚三段的开始时间要从早到晚排、不能相同，名称不能空着" />}
       {!idleOk && <Notice tone="error" className="mt-3" title={`分钟数请填 0–${EMENU_MAX_IDLE_MINUTES} 的整数`} />}
       {!noteOk && (
         <Notice tone="error" className="mt-3" title="忌口与起菜方式的选项加起来太长了">
@@ -1673,7 +1773,7 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
             放弃改动
           </Button>
         )}
-        <Button variant="primary" loading={busy} disabled={!dirty || !idleOk || !noteOk} onClick={save} data-testid="emenu-admin-settings-save">
+        <Button variant="primary" loading={busy} disabled={!dirty || !idleOk || !noteOk || !periodsOk} onClick={save} data-testid="emenu-admin-settings-save">
           保存设置
         </Button>
       </div>

@@ -85,7 +85,7 @@ describe('版面格式', () => {
     expect(red).toContain('「海报」用的图片不在素材库里');
     expect(yellow.some((m) => m.includes('没填英文'))).toBe(true);
     expect(yellow.some((m) => m.includes('对比不够'))).toBe(true);
-    expect(yellow).toContain('「中 | EN 切换」比默认的小，客人可能点不准');
+    expect(yellow).toContain('「中英切换」比默认的小，客人可能点不准');
   });
 
   it('对比度、改了哪几屏、主题变量只给改过的', () => {

@@ -17,6 +17,7 @@ const hasCompose = spawnSync('docker', ['compose', 'version'], { stdio: 'ignore'
 type App = {
   ports: { host_ip?: string; published: string | number; target: number | string }[];
   environment: Record<string, string | null>;
+  volumes?: { type: string; source: string; target: string; read_only?: boolean }[];
 };
 
 describe.skipIf(!hasCompose && !process.env.CI)('compose.yaml：已有实例的 .env 写法照样能展开（docker compose config，只读）', () => {
@@ -89,5 +90,13 @@ describe.skipIf(!hasCompose && !process.env.CI)('compose.yaml：已有实例的 
     expect([off.COOKIE_SECURE, off.TRUST_PROXY ?? '']).toEqual(['false', '']);
     const on = app({ COOKIE_SECURE: 'true', TRUST_PROXY: '172.18.0.1,10.0.0.0/8' }).environment;
     expect([on.COOKIE_SECURE, on.TRUST_PROXY]).toEqual(['true', '172.18.0.1,10.0.0.0/8']);
+  });
+
+  it('授权的品牌字体（8.1.5）：compose.yaml 旁边的 brand-fonts 只读挂到容器的 /app/brand-fonts；BRAND_FONT_DIR 可以换目录', () => {
+    const mount = (vars: Record<string, string>) => app(vars).volumes?.find((v) => v.target === '/app/brand-fonts');
+    const byDefault = mount({})!;
+    expect(byDefault).toMatchObject({ type: 'bind', read_only: true });
+    expect(byDefault.source).toMatch(/[/\\]brand-fonts$/);
+    expect(mount({ BRAND_FONT_DIR: '/srv/yuzu-fonts' })).toMatchObject({ source: '/srv/yuzu-fonts', read_only: true });
   });
 });

@@ -17,7 +17,7 @@
 - 验收一律使用**新建的独立演示库**；`npm test` 使用独立测试库（会清空该库）。
 - **店主 2026-11-07 起：门店 Mac mini 跑内网测试服，阿里云服务器跑外网正式服**，独立测试与本地开发另算（见 `docs/RELEASE_V800.md` 与 `docs/ROADMAP.md` 第 6 节）。测试服不记真实业务：演练库用 `APP_ENV=production` 但**不是正式库**，不执行任何 seed 命令，不得导入真实会员余额，只在店主约定的窗口更新；演示库用 `APP_ENV=development`。两者只在员工局域网与 Tailscale 内访问，不对公网开放。正式服备案前只经 Tailscale，对公网开放前先做完 `docs/RELEASE_V800.md` 第 2.3 节的加固。
 - 每个实例在 `.env` 设置 `YUZU_INSTANCE`（`prod` 正式服 / `shadow` 影子运行 / `test` 测试服 / `demo` 演示库），登录页与导航栏常显实例标识与「版本 + SHA」；`APP_ENV=production` 没设置时显示「未设置实例标识」。标识或 SHA 显示错误是阻断项。
-- 密钥、`.env`、业务数据与备份文件不进入 Git。
+- 密钥、`.env`、业务数据与备份文件不进入 Git。授权的商业字体（8.1.5 起放在服务器的 `brand-fonts/`，`docs/EMENU.md` 第 14.2 节）也不进 Git、不进镜像：代码库是公开的，字体授权不许随软件发出去。
 
 ## 常用命令
 

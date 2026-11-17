@@ -1,5 +1,6 @@
 // 运行配置全部来自环境变量；本地开发可放在 .env（不进入 Git）。
 
+import { resolve as resolvePath } from 'node:path';
 import { SETTABLE_INSTANCES, type InstanceKind } from '@shared/instance';
 import { loadIntegrationsConfig, type IntegrationsConfig } from './integrations/config';
 import { loadProtectionConfig, type ProtectionConfig } from './lib/protect';
@@ -36,6 +37,11 @@ export interface AppConfig {
   integrations: IntegrationsConfig;
   /** 过载保护、频率限制、访问网段（8.1.3，docs/RESILIENCE_V813.md 第 3.5 节） */
   protection: ProtectionConfig;
+  /**
+   * 授权的品牌字体放在哪个目录（8.1.5，docs/EMENU.md 第 14.2 节，PP4）：英文 ABC Arizona Flare 的网页授权文件改名 en.woff2 放进去，
+   * 平板菜单就换上；没放照旧用 Average Sans。字体文件不进 Git、不进镜像（Docker 部署挂 compose.yaml 旁边的 ./brand-fonts，只读）
+   */
+  brandFontPath: string;
 }
 
 /**
@@ -207,7 +213,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       .filter(Boolean),
     logLevel: process.env.LOG_LEVEL ?? (env === 'test' ? 'silent' : 'info'),
     // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉
-    version: (process.env.APP_VERSION || '8.1.4').replace(/^v/, ''),
+    version: (process.env.APP_VERSION || '8.1.5').replace(/^v/, ''),
     commit: /^[0-9a-f]{7,40}$/.test(process.env.APP_COMMIT ?? '') ? process.env.APP_COMMIT! : '',
     instance,
     initOwner: ownerUser && ownerPass ? { username: ownerUser, password: ownerPass, displayName: process.env.INIT_OWNER_NAME?.trim() || '店主' } : null,
@@ -217,6 +223,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     wecom: overrides.wecom ?? loadWecomConfig(process.env, env),
     integrations: overrides.integrations ?? loadIntegrationsConfig(process.env, env, instance),
     protection: overrides.protection ?? loadProtectionConfig(process.env, env),
+    brandFontPath: resolvePath(process.env.BRAND_FONT_PATH?.trim() || 'brand-fonts'),
     ...overrides,
   };
 }

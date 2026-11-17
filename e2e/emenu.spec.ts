@@ -14,7 +14,9 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import type { DiningAdmin, KitchenBoard } from '../src/shared/dining';
-import type { EmenuAdmin, EmenuMenu } from '../src/shared/emenu';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { DEFAULT_EMENU_PERIODS, type EmenuAdmin, type EmenuMenu } from '../src/shared/emenu';
 import type { StaffRecord } from '../src/shared/types';
 
 const PASSWORD = 'yuzu2026';
@@ -178,14 +180,18 @@ function syntheticMenu(rules: Partial<EmenuMenu['rules']> = {}): EmenuMenu {
       motion: true,
       requirePin: true,
       textSize: 'design',
+      periods: [...DEFAULT_EMENU_PERIODS],
       coverUrl: null,
       ...rules,
     },
+    period: { ...DEFAULT_EMENU_PERIODS[1]!, end: DEFAULT_EMENU_PERIODS[2]!.start },
+    nextChangeAt: null,
     categories: [
       {
         id: 1,
         name: '西式午餐',
         nameEn: 'WESTERN LUNCH',
+        periods: [],
         window: null,
         open: true,
         pages: [
@@ -201,6 +207,7 @@ function syntheticMenu(rules: Partial<EmenuMenu['rules']> = {}): EmenuMenu {
         id: 2,
         name: '中式午餐',
         nameEn: 'CHINESE LUNCH',
+        periods: [],
         window: null,
         open: true,
         pages: [{ layout: 'cover', title: '', titleEn: '', dishes: [dish(3, '广式猪脚姜浸花胶', 'Cantonese Pork Trotter Ginger Vinegar Fish Maw', 4200)] }],
@@ -433,6 +440,10 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       const fishRow = pad.getByTestId(`emenu-dish-${fishId}`);
       await expect(fishRow).toBeInViewport();
       await expect(pad.locator('[data-layout=list_text]').filter({ has: fishRow }).getByTestId('emenu-vtitle')).toHaveText('招牌');
+      // 8.1.5：文字陈列（纯文字的菜）的加号紧跟在名称后面，间距是加号大小的 2.5 倍
+      const fishName = (await pad.getByTestId(`emenu-name-${fishId}`).boundingBox())!;
+      const fishAdd = (await pad.getByTestId(`emenu-add-${fishId}`).boundingBox())!;
+      expect((fishAdd.x - (fishName.x + fishName.width)) / fishAdd.width).toBeCloseTo(2.5, 1);
       // 多规格：点加号进详情，选「小份」再加
       await pad.getByTestId(`emenu-add-${fishId}`).click();
       const detail = pad.getByTestId('emenu-detail');
@@ -639,6 +650,20 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     const search = await at('emenu-search-open');
     near(search.x, 795.4);
     near(search.y, 45.4);
+    // 8.1.5：中英切换是品牌给的图标，22.3 见方、右边仍在 774；左上角字标的高是它的 0.7 倍，与右边几样中线对齐
+    const langIcon = await at('emenu-lang');
+    near(langIcon.x, 751.7);
+    near(langIcon.w, 22.3);
+    near(langIcon.h, 22.3);
+    const logo = await at('emenu-logo');
+    near(logo.x, 40);
+    near(logo.h, 22.3 * 0.7);
+    near(logo.y + logo.h / 2, langIcon.y + langIcon.h / 2);
+    // 8.1.5：带图片的菜，加号紧跟在菜名后面，间距是加号大小的 4.5 倍（12.6 × 4.5 = 56.7）
+    const name1 = await at('emenu-name-1');
+    const add1 = await at('emenu-add-1');
+    near(add1.w, 12.6);
+    near(add1.x - (name1.x + name1.w), 12.6 * 4.5);
     // 「两菜 · 并排」：两道菜的文字在 39.7 / 426.2、557.1（设计稿）
     const first = await at('emenu-dish-1');
     near(first.x, 39.7);
@@ -794,9 +819,12 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     const lang = page.getByTestId('emenu-lang');
     await expect(lang).toHaveAttribute('data-lang', 'zh');
     await expect(page.getByTestId('emenu')).toHaveAttribute('data-lang', 'zh');
-    near((await at('emenu-lang')).x, 936);
+    // 8.1.5：起始页右上角是品牌给的图标，中文时显示 En（要切去的那种语言），右边仍贴在 984
+    near((await at('emenu-lang')).x, 984 - 22.3);
+    await expect(lang).toHaveAttribute('data-shows', 'en');
     await lang.click();
     await expect(lang).toHaveAttribute('data-lang', 'en');
+    await expect(lang).toHaveAttribute('data-shows', 'zh');
     await page.getByTestId('emenu-start').click();
     const ask = page.getByTestId('emenu-ask');
     await expect(ask).toContainText('INPUT INFORMATION');
@@ -815,7 +843,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await expect(dish1).toContainText('/份');
     near((await at('emenu-dish-1')).x, 39.7);
     near((await at('emenu-dish-1')).y, 557.1);
-    near((await at('emenu-lang')).x, 726);
+    near((await at('emenu-lang')).x, 751.7);
     near((await at('emenu-search-open')).x, 795.4);
 
     // 切到英文：英文名为主、中文名还在（小字）；介绍、小字、单位、手牌、分类页签都是英文
@@ -882,6 +910,124 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await noScroll(page);
     expect(writes).toEqual([]);
     await clearEmenuStorage(page);
+  });
+
+  test('8.1.5 早中晚时段：门店系统说了下一次切换的时刻就到点再取菜单，换成新时段的菜单并提示；「未下单」里上一段的菜照旧显示菜名、标「当前时段不可售」，刷新页面以后也一样（合成菜单，只读）', async ({
+    page,
+  }, info) => {
+    test.skip(info.project.name !== '门店电脑', '看的是切换的先后，与屏幕尺寸无关，只跑一次');
+    // 午餐：「西式午餐」只在午餐供应，「中式午餐」是全天的；晚餐：「西式午餐」收起来（列在 later 里，带它的菜）
+    const lunch = syntheticMenu({ requirePin: false });
+    lunch.categories[0]!.periods = ['lunch'];
+    lunch.period = { ...DEFAULT_EMENU_PERIODS[1]!, end: DEFAULT_EMENU_PERIODS[2]!.start };
+    const [west, allDay] = lunch.categories as [EmenuMenu['categories'][0], EmenuMenu['categories'][0]];
+    const westDishes = west.pages.flatMap((p) => p.dishes).filter((d): d is NonNullable<typeof d> => !!d);
+    const westItems = westDishes.flatMap((d) => d.specs.map((s) => s.itemId));
+    const dinner: EmenuMenu = {
+      ...lunch,
+      period: { ...DEFAULT_EMENU_PERIODS[2]!, end: DEFAULT_EMENU_PERIODS[0]!.start },
+      categories: [allDay],
+      later: [
+        {
+          name: west.name,
+          nameEn: west.nameEn,
+          periods: ['lunch'],
+          window: null,
+          dishes: westDishes.map((d) => ({
+            id: d.id,
+            name: d.name,
+            nameEn: d.nameEn,
+            tagline: d.tagline,
+            taglineEn: d.taglineEn,
+            specs: d.specs.map((s) => ({ itemId: s.itemId, label: s.label, labelEn: s.labelEn, price: s.price, state: s.state })),
+          })),
+        },
+      ],
+    };
+    // 准备好之前一直是午餐，每次都说「2 秒后可能切换」（平板到点再取）；准备好以后再取到的就是晚餐
+    let ready = 0;
+    const served: { at: number; period: string }[] = [];
+    const writes: string[] = [];
+    await page.route('**/api/emenu/**', (route) => {
+      const url = new URL(route.request().url());
+      if (route.request().method() !== 'GET') {
+        writes.push(url.pathname);
+        return route.abort();
+      }
+      if (url.pathname === '/api/emenu/menu') {
+        const now = Date.now();
+        const m = ready ? dinner : lunch;
+        served.push({ at: now, period: m.period!.key });
+        return route.fulfill({ json: { ...m, serverTime: new Date(now).toISOString(), nextChangeAt: ready ? null : new Date(now + 2000).toISOString() } });
+      }
+      if (url.pathname === '/api/emenu/guest') return route.fulfill({ json: { visitId: 1, tagCode: 'A8060', ordered: [], orderedTotal: 0 } });
+      if (url.pathname === '/api/emenu/table') return route.fulfill({ json: { tableName: 'A01' } });
+      return route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: '没有' } } });
+    });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await loginStaff(page, 'linlan');
+    await clearEmenuStorage(page);
+    await page.goto('/emenu');
+    await enterMenu(page);
+    await page.getByTestId('emenu-cat-1').click();
+    await page.getByTestId('emenu-add-1').click();
+    await expect(page.getByTestId('emenu-order-count')).toHaveText('1');
+    // 到点：平板自己再取（不等 15 秒一次的刷新），换成晚餐的菜单、弹一句提示
+    ready = Date.now();
+    await expect(page.getByRole('status').filter({ hasText: '已到晚餐时段，菜单已换成晚餐' })).toBeVisible({ timeout: 8000 });
+    const firstDinner = served.find((x) => x.period === 'dinner')!;
+    expect(firstDinner.at - ready).toBeLessThan(5000);
+    await expect(page.getByTestId('emenu-cat-1')).toHaveCount(0);
+    await expect(page.getByTestId('emenu-cat-2')).toBeVisible();
+    await expect(page.getByTestId('emenu-cover-title')).toBeInViewport();
+    // 「未下单」里上一段的那道菜：菜名照旧，标「当前时段不可售」，要减掉才能下单
+    await page.getByTestId('emenu-order-open').click();
+    const row = page.getByTestId(`emenu-cart-${westItems[0]}`);
+    await expect(row).toContainText('温泉蛋黑松露奶油意粉');
+    await expect(row).toContainText('当前时段不可售');
+    // 刷新页面（Codex 预检 0f7c701 的 P2）：这一次点餐从平板上恢复，那一行仍是菜名 +「当前时段不可售」，不是「已经不在菜单上」
+    await page.reload();
+    await expect(page.getByTestId('emenu-header')).toBeVisible();
+    await page.getByTestId('emenu-order-open').click();
+    const again = page.getByTestId(`emenu-cart-${westItems[0]}`);
+    await expect(again).toContainText('温泉蛋黑松露奶油意粉');
+    await expect(again).toContainText('当前时段不可售');
+    await expect(again).not.toContainText('已经不在菜单上');
+    expect(writes).toEqual([]);
+    await clearEmenuStorage(page);
+  });
+
+  test('8.1.5 授权的英文字体：门店服务器放了 en.woff2 就换上（根节点带 data-brand-en、去掉补的字距）；没放照旧用顶替的字体（合成菜单，只读）', async ({ page }, info) => {
+    test.skip(info.project.name !== '门店电脑', '与屏幕尺寸无关，只跑一次');
+    const writes = await mockEmenu(page, () => syntheticMenu());
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await loginStaff(page, 'linlan');
+    await clearEmenuStorage(page);
+    // 没放：门店系统回 404（合成接口照样回 404）
+    await page.goto('/emenu');
+    await expect(page.getByTestId('emenu-start')).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('emenu')).not.toHaveAttribute('data-brand-en');
+    // 英文（.em-en）的字距：100 号字时顶替字体补 0.027em = 2.7px，换上授权字体后不补
+    const spacing = () =>
+      page.getByTestId('emenu').evaluate((root) => {
+        const probe = document.createElement('span');
+        probe.className = 'em-en';
+        probe.style.fontSize = '100px';
+        root.appendChild(probe);
+        const value = parseFloat(getComputedStyle(probe).letterSpacing) || 0;
+        probe.remove();
+        return value;
+      });
+    expect(await spacing()).toBeCloseTo(2.7, 1);
+    // 放了：用随应用打包的一个开源 WOFF2 当作授权文件
+    const woff2 = readFileSync(fileURLToPath(new URL('../node_modules/@fontsource/average-sans/files/average-sans-latin-400-normal.woff2', import.meta.url)));
+    await page.route('**/api/emenu/fonts/en.woff2', (route) => route.fulfill({ status: 200, contentType: 'font/woff2', body: woff2 }));
+    await page.reload();
+    await expect(page.getByTestId('emenu')).toHaveAttribute('data-brand-en', '');
+    expect(await page.evaluate(() => document.fonts.check('16px "Tangqi Brand En"'))).toBe(true);
+    expect(await spacing()).toBe(0);
+    expect(writes).toEqual([]);
   });
 
   test('8.0.13 键盘与动效：正在输入时窗口变矮页面不缩放、结果列表在键盘上面；拖动翻页与回弹；关掉详情留一个退场的影子（合成菜单，只读）', async ({ page }, info) => {
@@ -1078,6 +1224,15 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     expect(search.width).toBeCloseTo(20.5 * 1.3, 0);
     // 顶栏右边几样不叠在一起
     const lang = await box('emenu-lang');
+    // 8.1.5：切换图标 22.3 × 1.3 见方；左上角字标的高是它的 0.7 倍（原来放大一档字标没跟着放大）、中线对齐
+    expect(lang.width).toBeCloseTo(22.3 * 1.3, 0);
+    expect(lang.height).toBeCloseTo(22.3 * 1.3, 0);
+    const logo = await box('emenu-logo');
+    expect(logo.height).toBeCloseTo(22.3 * 1.3 * 0.7, 0);
+    expect(Math.abs(logo.y + logo.height / 2 - (lang.y + lang.height / 2))).toBeLessThan(1);
+    // 8.1.5：带图片的菜，加号与菜名的间距是加号大小的 4.5 倍（放大一档也一样：都按看到的大小算）
+    const name1 = await box('emenu-name-1');
+    expect((plus.x - (name1.x + name1.width)) / plus.width).toBeCloseTo(4.5, 1);
     expect(lang.x + lang.width).toBeLessThan(search.x - 8);
     expect(search.x + search.width).toBeLessThan(order.x - 8);
     expect(order.x + order.width).toBeLessThan(tagPill.x - 8);

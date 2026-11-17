@@ -1,19 +1,32 @@
-// 平板点餐页的顶栏（设计稿每一屏的最上面一条）：汤崎标志、分类页签、「中 | EN」、搜索、订单、手牌。
+// 平板点餐页的顶栏（设计稿每一屏的最上面一条）：汤崎标志、分类页签、中英切换、搜索、订单、手牌。
 // 后台「电子菜单」的预览也用这一条（按钮不接事件）。
 
 import type { ReactNode } from 'react';
 import type { EmenuCategoryView } from '@shared/emenu';
 import { namePair, useLang, useM, type Lang } from './i18n';
+import langEn from './assets/lang-en.png';
+import langZh from './assets/lang-zh.png';
 import { OrderIcon, SearchIcon } from './icons';
-import { LogoRow } from './logo';
-import { BIG, box, Hairline, useBig, ZoomAt } from './stage';
+import { LogoRow, LOGO_ROW_RATIO } from './logo';
+import { BIG, box, useBig, ZoomAt } from './stage';
+
+/** 中英切换图标的边长（8.1.5，PP6）：与手牌色块一样高 */
+export const LANG_ICON = 22.3;
+/** 横排字标的高是右上角切换图标的几倍（8.1.5，PP7） */
+export const LOGO_TO_ICON = 0.7;
+/** 顶栏右边几样（切换图标、搜索、订单、手牌）的中线：字标也对齐在这条线上（PP7） */
+const ROW_MID = 55.45;
 
 /**
- * 「中 | EN」开关（8.0.13，设计稿之外补的）：与手牌色块一样高（22.3），当前语言的那一半是卡其色底。点一下换另一种语言。
- * light：压在起始页的氛围图上时用浅色的边与字。
+ * 中英切换（8.1.5，PP6）：品牌给的两张图——深棕方块上浅色的「En」「中」——显示要切去的那种语言：中文时是「En」、英文时是「中」。
+ * 换的时候两张图交叉淡入。x、y 是图标的左上角，size 是边长；light：压在起始页的氛围图上时外加一圈很淡的浅色描边。
  */
-export function LangToggle({ lang, onToggle, x, y, light }: { lang: Lang; onToggle: () => void; x: number; y: number; light?: boolean }) {
-  const off = light ? 'rgb(244 243 242 / 0.92)' : 'var(--em-mute)';
+export function LangToggle({ lang, onToggle, x, y, size = LANG_ICON, light }: { lang: Lang; onToggle: () => void; x: number; y: number; size?: number; light?: boolean }) {
+  // 原图 191 见方、圆角约 10
+  const radius = size * 0.053;
+  const face = (src: string, shown: boolean) => (
+    <img src={src} alt="" draggable={false} className="em-lang-face" style={{ ...box(0, 0, size, size), opacity: shown ? 1 : 0, transform: shown ? 'none' : 'scale(0.8)' }} />
+  );
   return (
     <button
       type="button"
@@ -23,29 +36,16 @@ export function LangToggle({ lang, onToggle, x, y, light }: { lang: Lang; onTogg
       }}
       aria-label={lang === 'en' ? 'Switch to Chinese / 切换到中文' : '切换到英文 / Switch to English'}
       aria-pressed={lang === 'en'}
-      style={{ ...box(x, y, 48, 22.3), padding: 0, border: 0, borderRadius: 2, background: light ? 'rgb(0 0 0 / 0.16)' : 'transparent' }}
+      className="em-tap"
+      style={{ ...box(x, y, size, size), padding: 0, border: 0, borderRadius: radius, background: 'none' }}
       data-testid="emenu-lang"
       data-lang={lang}
+      data-shows={lang === 'zh' ? 'en' : 'zh'}
     >
-      <span style={{ position: 'absolute', inset: '-11px -6px' }} />
-      <Hairline color={off} radius={2} />
-      <span className="em-lang-knob" style={{ ...box(0, 0, 24, 22.3), borderRadius: 2, background: 'var(--em-tan)', transform: lang === 'en' ? 'translateX(24px)' : 'none' }} />
-      {/* 字的文字框在上沿往下 5.2：与手牌色块里的字同一条基线 */}
-      <span style={{ ...box(0, 5.2, 24), textAlign: 'center', fontSize: 13, lineHeight: '13px', color: lang === 'zh' ? 'var(--em-light)' : off, transition: 'color var(--em-in) ease' }}>中</span>
-      <span
-        className="em-en"
-        style={{
-          ...box(24, 6, 24),
-          textAlign: 'center',
-          fontSize: 11,
-          lineHeight: '11px',
-          letterSpacing: '0.04em',
-          color: lang === 'en' ? 'var(--em-light)' : off,
-          transition: 'color var(--em-in) ease',
-        }}
-      >
-        EN
-      </span>
+      <span style={{ position: 'absolute', inset: -11 }} />
+      {face(langEn, lang === 'zh')}
+      {face(langZh, lang === 'en')}
+      {light && <span style={{ position: 'absolute', inset: 0, borderRadius: radius, boxShadow: '0 0 0 1px rgb(244 243 242 / 0.55)', pointerEvents: 'none' }} />}
     </button>
   );
 }
@@ -73,15 +73,15 @@ export function Header({
   onSearch: () => void;
   onOrder: () => void;
   onTag: () => void;
-  /** 有「中 | EN」开关时给（后台关了中英切换就不给，顶栏与 8.0.12 一样） */
+  /** 有中英切换时给（后台关了中英切换就不给，顶栏与 8.0.12 一样） */
   onLang?: () => void;
 }) {
   const lang = useLang();
   const m = useM();
   const large = useBig();
   // 设计稿两个分类的中心在 367.6 与 514.5（相距 147）：分类多了往两边排开，放不下就挤一点。
-  // 有「中 | EN」开关时它占了搜索左边的 726–774，分类最多排到 705
-  // 放大的一档：右边几样大了、往左多占一点（中 | EN 的左边在 702），分类最多排到 690
+  // 有中英切换时图标占了搜索左边的 751.7–774（原来「中 | EN」开关占 726–774），分类照旧最多排到 705
+  // 放大的一档：右边几样大了、往左多占一点（切换图标的左边在 735），分类照旧最多排到 690
   const n = categories.length;
   const room = large ? (onLang ? 498 : 610) : onLang ? 528 : 610;
   const gap = Math.min(147, room / Math.max(n, 1));
@@ -113,10 +113,12 @@ export function Header({
       button(x, y)
     );
   };
+  // 左上角的横排字标（8.1.5，PP7）：高是右上角切换图标的 0.7 倍（放大的一档图标也放大，字标跟着），与右边几样中线对齐
+  const logoH = LANG_ICON * ku * LOGO_TO_ICON;
   return (
     <div style={{ ...box(0, 0, 1024, 102), background: 'var(--em-bg)' }} data-testid="emenu-header">
-      <div style={{ ...box(40, 48.6) }}>
-        <LogoRow />
+      <div style={{ ...box(40, ROW_MID - logoH / 2, logoH * LOGO_ROW_RATIO, logoH) }} data-testid="emenu-logo">
+        <LogoRow width={logoH * LOGO_ROW_RATIO} className="block" />
       </div>
       {/* 选中的分类下面的光晕：换分类时滑过去 */}
       {activeAt >= 0 && <span className="em-cat-glow" style={{ left: first + activeAt * gap - gap / 2 + 6, top: 57 - 27 * kc, width: gap - 12, height: 52 * kc }} />}
@@ -165,13 +167,14 @@ export function Header({
           </button>
         );
       })}
+      {/* 切换图标的右边仍在原来「中 | EN」开关的右边（原样 774、放大一档 764.2），离搜索的空不变 */}
       {onLang &&
         (large ? (
-          <ZoomAt x={733} y={55.45} k={ku}>
-            <LangToggle lang={lang} onToggle={onLang} x={-24} y={-11.15} />
+          <ZoomAt x={764.2 - (LANG_ICON / 2) * ku} y={ROW_MID} k={ku}>
+            <LangToggle lang={lang} onToggle={onLang} x={-LANG_ICON / 2} y={-LANG_ICON / 2} />
           </ZoomAt>
         ) : (
-          <LangToggle lang={lang} onToggle={onLang} x={726} y={44.3} />
+          <LangToggle lang={lang} onToggle={onLang} x={774 - LANG_ICON} y={ROW_MID - LANG_ICON / 2} />
         ))}
       {icon(onSearch, 795.4, 45.4, 20.5, 20.5, m.search, 'emenu-search-open', <SearchIcon />, 796)}
       {icon(
