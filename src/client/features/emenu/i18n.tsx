@@ -3,7 +3,8 @@
 // 规则（PENDING_DECISIONS「8.0.13」EN2–EN7）：
 //   · 切到英文：英文为主，中文菜名缩成下面一行小字；介绍、单位、规格、选项只显示英文；
 //   · 没录英文的地方显示中文，不留空白；单位、规格、常见的忌口内置了英文（@shared/emenu），后台填了的以后台的为准；
-//   · 给服务员看的几处（确认下单时门店系统的拒绝原因、「结果待确认」、退出登录）仍是中文，不在这份词表里；
+//   · 给服务员看的几处（确认下单时门店系统的拒绝原因、「结果待确认」、退出登录）8.1.6 起也有英文（QZ6）：切到英文时英文在上、
+//     中文小字在下一行（服务员也看得懂），用 bothText 拼；门店系统的拒绝按拒绝码给英文（errorEn）；
 //   · 进厨房的备注仍是中文选项：这里只管显示。
 // 后台的版面预览也用这一份（不包 LangProvider 时是中文）。
 
@@ -116,6 +117,44 @@ const ZH = {
   endNoCart: '已经下单的菜不受影响。',
   keepOrdering: '接着点',
   finish: '结束',
+  // 服务员那一步：确认下单、结果待确认、没有下成、退出登录（8.1.6，QZ6：切到英文时英文在上、这里的中文在下）
+  otherPending: '这台平板上还有一单结果待确认，请先处理完再下新的一单',
+  storeFailed: '这台平板存不了「结果待确认」的记录（存储空间满了或被禁用），为了不重复下单，这一单没有提交。请换一台平板，或请服务员在点单页下单。',
+  stillPending: (reason: string) => `${reason}（原来那一单仍待确认）`,
+  retryRefused: (reason: string) => `重新提交被拒绝（${reason}），但原来那一单会不会生效还不确定`,
+  serverTrouble: '门店系统出了点问题',
+  unsure: (reason: string) => `${reason}，这一单有没有下成暂时不确定`,
+  abandoned: '原来那一单已作废，没有下成；要点的话请重新开始点单',
+  checkMiss: (pin: boolean) => `暂时没有查到已经下单，原来的请求可能还在路上。可以${pin ? '输点单密码' : ''}重新提交（不会重复），或者作废后重填。`,
+  checkFailed: (reason: string) => `还是确认不了：${reason}`,
+  abandonUnfinished: '作废没有完成，原来那一单仍待确认',
+  abandonFailed: (reason: string) => `作废没有完成，原来那一单仍待确认：${reason}`,
+  notPlaced: (reason: string) => `这一单没有下成：${reason}。菜还在「未下单」里，可以改了再下单。`,
+  refused: '门店系统拒绝了',
+  gotIt: '知道了',
+  previewOnly: '这是工作台的预览：不能下单',
+  pinStep: `这一步要服务员输入 ${EMENU_PIN_LENGTH} 位点单密码`,
+  thisOrder: '这一单',
+  pendingAmount: (n: number, total: string) => `${n} 份 ¥${total}`,
+  checkResult: '查回结果',
+  resubmit: '重新提交',
+  abandon: '作废重填',
+  pendingHintPin: '刚才那一单没有收到门店系统的答复。请服务员处理：先查回；查不到就输密码重新提交（不会重复下单），或作废后重填。',
+  pendingHint: '请先点「查回结果」；查不到就点「重新提交」（不会重复下单），或「作废重填」后改了再下。',
+  notNow: '先不处理',
+  signOut: '退出',
+  exitBody: ['这一步是给员工用的：退出这台平板登录的账号。', '退出以后要重新登录才能点餐。'] as [string, string],
+  // 读屏的说明：翻页圆点、数字键
+  prevCategory: '上一个分类',
+  nextCategory: '下一个分类',
+  pageNo: (n: number) => `第 ${n} 页`,
+  keyDot: '点',
+  // 打开菜单、没有菜单、没有开启
+  opening: '正在打开菜单…',
+  cannotReach: '连不上门店系统',
+  tryAgain: '再试一次',
+  menuNotSet: '请店主在「后台 → 电子菜单」里排好分类与版面',
+  emenuOff: '平板点餐没有开启',
 };
 
 const EN: typeof ZH = {
@@ -195,6 +234,41 @@ const EN: typeof ZH = {
   endNoCart: 'Placed orders are not affected.',
   keepOrdering: 'Keep ordering',
   finish: 'Finish',
+  otherPending: 'Another order on this tablet is still unconfirmed — please resolve it first',
+  storeFailed: 'This tablet cannot keep a record of the order (storage full or blocked), so it was not sent to avoid a duplicate. Please use another tablet or ask our staff.',
+  stillPending: (reason) => `${reason} (the earlier order is still unconfirmed)`,
+  retryRefused: (reason) => `Resubmitting was refused (${reason}), but the earlier order may still go through`,
+  serverTrouble: 'The store system ran into a problem',
+  unsure: (reason) => `${reason} — not sure yet whether this order went through`,
+  abandoned: 'The earlier order was cancelled and not placed — start again to order',
+  checkMiss: (pin) => `No placed order found yet; the request may still be on its way. Resubmit${pin ? ' with the PIN' : ''} (no duplicate), or cancel and redo.`,
+  checkFailed: (reason) => `Still cannot confirm: ${reason}`,
+  abandonUnfinished: 'Cancelling did not finish — the earlier order is still unconfirmed',
+  abandonFailed: (reason) => `Cancelling did not finish — the earlier order is still unconfirmed: ${reason}`,
+  notPlaced: (reason) => `This order was not placed: ${reason}. Your dishes are still in the cart — adjust and order again.`,
+  refused: 'Refused by the store system',
+  gotIt: 'OK',
+  previewOnly: 'Workbench preview — ordering is off',
+  pinStep: `Staff: please enter the ${EMENU_PIN_LENGTH}-digit order PIN`,
+  thisOrder: 'Order',
+  pendingAmount: (n, total) => `${n} item${n === 1 ? '' : 's'} · ¥${total}`,
+  checkResult: 'Check result',
+  resubmit: 'Resubmit',
+  abandon: 'Cancel & redo',
+  pendingHintPin: 'No reply from the store system. Staff: check first; if not found, resubmit with the PIN (no duplicate) or cancel & redo.',
+  pendingHint: 'Tap “Check result” first; if not found, tap “Resubmit” (no duplicate) or “Cancel & redo” to change it.',
+  notNow: 'Not now',
+  signOut: 'Sign out',
+  exitBody: ['For staff: sign this tablet out of its account.', 'Ordering needs a new sign-in afterwards.'],
+  prevCategory: 'Previous category',
+  nextCategory: 'Next category',
+  pageNo: (n) => `Page ${n}`,
+  keyDot: 'Decimal point',
+  opening: 'Opening the menu…',
+  cannotReach: 'Cannot reach the store system',
+  tryAgain: 'Try again',
+  menuNotSet: 'The menu is not ready yet — please ask our staff',
+  emenuOff: 'Tablet ordering is off',
 };
 
 export type Messages = typeof ZH;
@@ -203,15 +277,69 @@ export const messages = (lang: Lang): Messages => (lang === 'en' ? EN : ZH);
 export const useM = (): Messages => messages(useLang());
 
 /**
- * 给客人看的出错提示按拒绝码换成英文（EN6：只有输入手牌、桌号这一步；服务员确认下单那一步的原因仍照门店系统给的中文）。
- * 没有对应英文的拒绝码返回 null：照门店系统给的显示。
+ * 门店系统的拒绝码 → 英文（8.1.6，QZ6；8.0.13 起只有输入手牌、桌号那一步的三种）。
+ * 输入手牌、桌号那一步给客人看（只显示英文）；服务员确认下单、结果待确认那一步英文在上、门店系统原来的中文在下（bothText）。
+ * 没有对应英文的拒绝码返回 null：客人那一步照门店系统给的中文显示，服务员那一步英文写「门店系统拒绝了」、下面是原来的中文。
  */
-const GUEST_ERRORS_EN: Record<string, string> = {
+const ERRORS_EN: Record<string, string> = {
   TAG_NOT_IN_STORE: 'No guest is checked in with this tag — please check the number',
+  TAG_AMBIGUOUS: 'More than one tag has these digits — please pick one',
+  TAG_CHANGED: 'This guest is now on a different tag — please start again from the first screen',
   TABLE_NOT_FOUND: 'Table not found — please check the number',
+  TABLE_AMBIGUOUS: 'More than one table has this number — please pick one',
   EMENU_DISABLED: 'Tablet ordering is not available right now — please ask our staff',
+  EMENU_CHANGED: 'The menu has just changed — please check and order again',
+  DISH_SOLD_OUT: 'A dish has just sold out — please change it',
+  DISH_NOT_AVAILABLE_NOW: 'A dish is not served at this time — please remove it',
+  DISH_NOT_ON_MENU: 'A dish is no longer on the menu — please remove it',
+  DISH_CHANGED: 'A dish has just changed — please check and order again',
+  DISH_NOT_KITCHEN: 'A dish cannot be ordered here — please ask our staff',
+  PRICE_CHANGED: 'Prices have just changed — please check the total and confirm again',
+  VISIT_CLOSED: 'This tag has already checked out',
+  VISIT_CHANGED: 'This tag has just been given to another guest — please order again',
+  VISIT_NOT_FOUND: 'This visit was not found — please start again',
+  BILL_CLOSED: 'The bill on this tag is already closed',
+  ITEM_GENDER: 'A dish is only for the other area — please ask our staff',
+  REMARK_TOO_LONG: 'The note is too long — please shorten it',
+  REMARK_OPTION_INVALID: 'The note options have just changed — please choose them again',
+  REMARK_OPTIONS_TOO_LONG: 'Too many note options — please choose fewer',
+  PIN_INVALID: 'Wrong order PIN',
+  PIN_LOCKED: 'Too many wrong PINs — please wait a while and try again',
+  PIN_NOT_FOR_TABLET: 'This PIN cannot be used on the tablet',
+  PIN_NO_PERMISSION: 'This staff member cannot place tablet orders',
+  STAFF_INACTIVE: 'This staff account is disabled',
+  IDEMPOTENCY_CONFLICT: 'This order number was used for something else — please order again',
+  OP_ABANDONED: 'This order was cancelled',
+  OFFLINE: 'Cannot reach the store system — nothing was sent; please try again',
+  BUSY: 'The store system is busy — please try again shortly',
+  RATE_LIMITED: 'Too many requests — please try again shortly',
+  OVERLOADED: 'The store system is busy — please try again shortly',
+  UNAUTHORIZED: 'This tablet is signed out — please ask our staff to sign in again',
+  FORBIDDEN: 'This tablet account cannot do this — please ask our staff',
+  BAD_REQUEST: 'Please check what was entered',
 };
-export const guestErrorEn = (code: string): string | null => GUEST_ERRORS_EN[code] ?? null;
+export const errorEn = (code: string): string | null => ERRORS_EN[code] ?? null;
+/** 请求没有明确的答复（断网、超时、服务器出错）时的英文：中文照 lib/api 的 UncertainError */
+export const uncertainEn = (reason: 'timeout' | 'network' | 'server' | 'offline'): string =>
+  reason === 'timeout'
+    ? 'The store system did not answer in time'
+    : reason === 'network'
+      ? 'The connection was interrupted'
+      : reason === 'offline'
+        ? 'Cannot reach the store system — nothing was sent'
+        : 'The store system ran into a problem';
+/** 输入手牌、桌号那一步（给客人看）：有英文的换成英文 */
+export const guestErrorEn = errorEn;
+
+/** 一段两种语言都备好的字（8.1.6）：服务员那一步切到英文时两行都显示 */
+export interface Both {
+  zh: string;
+  en: string;
+}
+/** 用两份词表各取一次（pick 里按语言取别的字，例如拒绝原因） */
+export const both = (pick: (m: Messages, lang: Lang) => string): Both => ({ zh: pick(ZH, 'zh'), en: pick(EN, 'en') });
+/** 显示用：中文时只有中文；英文时「英文\n中文」——显示的地方（BiText）把第二行排成小一号的一行 */
+export const bothText = (t: Both, lang: Lang): string => (lang === 'en' && t.en !== t.zh ? `${t.en}\n${t.zh}` : t.zh);
 
 // ───────────────────────── 菜品、分类的内容 ─────────────────────────
 

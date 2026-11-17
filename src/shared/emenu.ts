@@ -234,6 +234,52 @@ export function dishMissingEnglish(d: { nameEn: string; description: string; des
   return !d.nameEn.trim() || (!!d.description.trim() && !d.descriptionEn.trim());
 }
 
+/**
+ * 平板切到英文时还缺英文的地方（8.1.6，docs/EMENU.md 第 15.6 节，QZ6）：后台「电子菜单」顶上列出、点一处跳到那里补。
+ * 只算客人看得到的：启用的分类（英文名、填了小标题的页的英文小标题）、排进了启用的分类的启用的菜（英文名；有中文介绍的英文介绍）、
+ * 忌口与起菜方式的选项（后台填的或系统自带的英文都没有）、早中晚三段的英文名。门店没录英文的地方平板上照旧显示中文（不机翻）
+ */
+export type EmenuEnglishGap =
+  | { kind: 'category'; categoryId: number; label: string }
+  | { kind: 'pageTitle'; categoryId: number; page: number; label: string }
+  | { kind: 'dishName'; dishId: number; label: string }
+  | { kind: 'dishIntro'; dishId: number; label: string }
+  | { kind: 'option'; group: 'avoid' | 'serve'; label: string }
+  | { kind: 'period'; key: EmenuPeriodKey; label: string };
+
+export function emenuEnglishGaps(data: {
+  categories: readonly EmenuCategoryAdmin[];
+  dishes: readonly EmenuDishAdmin[];
+  rules: Pick<EmenuRules, 'avoidOptions' | 'serveOptions' | 'optionsEn' | 'periods'>;
+}): EmenuEnglishGap[] {
+  // 中文那一项本来就没有汉字（如「BBQ」）：切到英文时显示的就是它，不算缺
+  const zh = (text: string) => /[\u3400-\u9fff]/.test(text);
+  const out: EmenuEnglishGap[] = [];
+  const shown = new Set<number>();
+  for (const c of data.categories) {
+    if (!c.active) continue;
+    if (!c.nameEn.trim() && zh(c.name)) out.push({ kind: 'category', categoryId: c.id, label: c.name });
+    c.pages.forEach((p, i) => {
+      if (EMENU_LAYOUT_INFO[p.layout]?.titled && p.title.trim() && !p.titleEn.trim() && zh(p.title))
+        out.push({ kind: 'pageTitle', categoryId: c.id, page: i, label: `${c.name} · 第 ${i + 1} 页「${p.title}」` });
+      for (const id of p.dishIds) if (id !== null) shown.add(id);
+    });
+  }
+  for (const d of data.dishes) {
+    if (!d.active || !shown.has(d.id)) continue;
+    if (!d.nameEn.trim() && zh(d.name)) out.push({ kind: 'dishName', dishId: d.id, label: d.name });
+    if (d.description.trim() && !d.descriptionEn.trim() && zh(d.description)) out.push({ kind: 'dishIntro', dishId: d.id, label: d.name });
+  }
+  for (const [group, list] of [
+    ['avoid', data.rules.avoidOptions],
+    ['serve', data.rules.serveOptions],
+  ] as const) {
+    for (const o of list) if (emenuOptionEn(o, data.rules.optionsEn) === o && zh(o)) out.push({ kind: 'option', group, label: o });
+  }
+  for (const p of data.rules.periods) if (!p.nameEn.trim() && zh(p.name)) out.push({ kind: 'period', key: p.key, label: p.name });
+  return out;
+}
+
 /** 整单备注拼成一句：忌口、起菜方式、自定义，用「，」隔开（写到这一单每道菜的口味备注上） */
 export function composeEmenuNote(avoid: readonly string[], serve: string | null, custom: string): string {
   return [...avoid, ...(serve ? [serve] : []), ...(custom.trim() ? [custom.trim()] : [])].join('，');

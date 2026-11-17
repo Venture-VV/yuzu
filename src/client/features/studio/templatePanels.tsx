@@ -1,6 +1,9 @@
 // UI 工作台里改卡片模板的两栏（8.1.2，GZ13）：左边「版式」列出菜单页的 11 种版式与每种里面的各块，右边是选中那一块的
 // 位置、大小、藏起来、照片圆角与「恢复默认」。傻瓜：一块改了以后用这种版式的每一页都跟着变；改坏了点「恢复默认」。
+// 8.1.6（QZ8、QZ9）：最上面多了「顶栏」——字标、分类、中英切换、搜索、订单、手牌六块各自挪、等比改大小，右边多一栏「间距」：
+// 从左到右每两块之间、两头到屏幕边各多远，直接改数字（改哪一个只动那一条，分类那一块收放）。
 
+import { useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { EMENU_LAYOUT_INFO, EMENU_LAYOUTS, type EmenuLayout, type EmenuMenu } from '@shared/emenu';
 import {
@@ -8,8 +11,11 @@ import {
   DISH_STATE_LABELS,
   DISH_STATES,
   dishStateStyle,
+  EMENU_ALL_TEMPLATES,
+  EMENU_HEADER_LAYOUT,
+  EMENU_HEADER_TEMPLATE,
   EMENU_SURFACE,
-  EMENU_TEMPLATES,
+  headerSlotRatio,
   resetLayoutTemplate,
   resetSlot,
   resolveSlot,
@@ -27,12 +33,30 @@ import {
 import { cn } from '../../lib/utils';
 import { Button } from '../../components/ui';
 import { ColorField, NumberInput, PanelTitle, Row } from './panels';
-import { round1 } from './model';
+import { round1, type Box } from './model';
 import { pagesWithLayout } from './templateModel';
+import { CATS_MIN_W, editHeaderGap, headerGaps } from './headerGaps';
+
+type TplLayout = EmenuLayout | typeof EMENU_HEADER_LAYOUT;
+const HEAD_LABEL = '顶栏';
+const HEAD_HINT = '平板每一屏最上面那一条：字标、分类、中英切换、搜索、订单、手牌。客人随时要用，只能挪、改大小，不能删。';
+const layoutLabel = (l: TplLayout) => (l === EMENU_HEADER_LAYOUT ? HEAD_LABEL : EMENU_LAYOUT_INFO[l].label);
+const layoutHint = (l: TplLayout) => (l === EMENU_HEADER_LAYOUT ? HEAD_HINT : EMENU_LAYOUT_INFO[l].hint);
 
 type Change = (fn: (d: StudioDoc) => StudioDoc, coalesce?: string) => void;
 
-const KIND_LABELS: Record<EmenuSlotKind, string> = { photo: '图', text: '文字', title: '小标题', coverTitle: '大标题', intro: '介绍', row: '一行' };
+const KIND_LABELS: Record<EmenuSlotKind, string> = {
+  photo: '图',
+  text: '文字',
+  title: '小标题',
+  coverTitle: '大标题',
+  intro: '介绍',
+  row: '一行',
+  logo: '字标',
+  cats: '分类',
+  icon: '图标',
+  tag: '手牌',
+};
 
 /** 这种版式里改过几块 */
 export const changedSlots = (doc: StudioDoc, layout: string) => Object.keys(doc.templates?.[layout] ?? {}).length;
@@ -50,8 +74,8 @@ export function TemplatesPanel({
 }: {
   doc: StudioDoc;
   menu: EmenuMenu | null;
-  layout: EmenuLayout;
-  onLayout: (l: EmenuLayout) => void;
+  layout: TplLayout;
+  onLayout: (l: TplLayout) => void;
   slot: string | null;
   onSlot: (key: string | null) => void;
   /** 在改菜的哪种状态（变体）；选了就不选块 */
@@ -66,6 +90,21 @@ export function TemplatesPanel({
       <p className="text-[12px] leading-relaxed text-ink-3">
         菜单页的 11 种版式：每一种里面照片、菜名价格、小标题放在哪、多大。改了以后用这种版式的每一页都跟着变；哪一页用哪种版式在后台「电子菜单」里排。
       </p>
+      <div>
+        <PanelTitle>顶栏</PanelTitle>
+        <button
+          type="button"
+          className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px]', layout === EMENU_HEADER_LAYOUT ? 'bg-pine-tint text-pine' : 'text-ink-2 hover:bg-paper-2')}
+          onClick={() => {
+            onLayout(EMENU_HEADER_LAYOUT);
+            onSlot(null);
+          }}
+          data-testid="studio-layout-header"
+        >
+          <span className="min-w-0 flex-1 truncate">顶栏（字标、分类、右上角四样）</span>
+          {changedSlots(doc, EMENU_HEADER_LAYOUT) > 0 && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[10.5px] text-yuzu-deep">改过 {changedSlots(doc, EMENU_HEADER_LAYOUT)} 块</span>}
+        </button>
+      </div>
       <div>
         <PanelTitle>版式</PanelTitle>
         <div className="space-y-0.5">
@@ -101,20 +140,20 @@ export function TemplatesPanel({
                 type="button"
                 className="flex items-center gap-1 text-[11.5px] text-ink-3 hover:text-clay"
                 onClick={() => {
-                  if (window.confirm(`「${EMENU_LAYOUT_INFO[layout].label}」里改过的 ${changed} 块都恢复成设计稿的样子？（可以撤销）`)) onChange((d) => resetLayoutTemplate(d, layout));
+                  if (window.confirm(`「${layoutLabel(layout)}」里改过的 ${changed} 块都恢复成设计稿的样子？（可以撤销）`)) onChange((d) => resetLayoutTemplate(d, layout));
                 }}
                 data-testid="studio-layout-reset"
               >
-                <RotateCcw className="size-3" /> 整个版式恢复默认
+                <RotateCcw className="size-3" /> 整个{layout === EMENU_HEADER_LAYOUT ? '顶栏' : '版式'}恢复默认
               </button>
             )
           }
         >
-          这种版式里的各块
+          {layout === EMENU_HEADER_LAYOUT ? '顶栏里的各块' : '这种版式里的各块'}
         </PanelTitle>
-        <p className="mb-1.5 text-[11.5px] text-ink-3">{EMENU_LAYOUT_INFO[layout].hint}</p>
+        <p className="mb-1.5 text-[11.5px] text-ink-3">{layoutHint(layout)}</p>
         <div className="space-y-0.5">
-          {EMENU_TEMPLATES[layout].slots.map((def) => {
+          {EMENU_ALL_TEMPLATES[layout]!.slots.map((def) => {
             const o = overrides[def.key];
             return (
               <button
@@ -238,18 +277,92 @@ export function DishStatePanel({ doc, state, onChange }: { doc: StudioDoc; state
   );
 }
 
-export function SlotPanel({ doc, layout, slot, big, onToggleBig, onChange }: { doc: StudioDoc; layout: EmenuLayout; slot: string | null; big: boolean; onToggleBig: () => void; onChange: Change }) {
+/** 顶栏的「间距」（8.1.6，QZ9）：从左到右每两块之间、两头到屏幕边各多远；改一个数只动那一条（分类那一块收放） */
+function HeaderGapsPanel({ boxes, big, onChange }: { boxes: ReadonlyMap<string, Box>; big: boolean; onChange: Change }) {
+  const [error, setError] = useState<string | null>(null);
+  const mode = big ? 'big' : 'design';
+  const gaps = headerGaps(boxes);
+  const name = (k: string) => EMENU_HEADER_TEMPLATE.slots.find((x) => x.key === k)?.label ?? k;
+  const label = (g: (typeof gaps)[number]) => (g.left === null ? '左页边' : g.right === null ? '右页边' : `${name(g.left)} ↔ ${name(g.right)}`);
+  const apply = (index: number, value: number) => {
+    const edit = editHeaderGap(boxes, index, value);
+    if (!edit) {
+      setError(`分类那一块会窄过 ${CATS_MIN_W}（放不下分类页签），这条间距改不了这么多`);
+      return;
+    }
+    setError(null);
+    if (!edit.moves.length && !edit.cats) return;
+    onChange((d) => {
+      let next = d;
+      for (const mv of edit.moves) {
+        const def = EMENU_HEADER_TEMPLATE.slots.find((x) => x.key === mv.key);
+        if (!def) continue;
+        const p = slotSpot(resolveSlot(def, next.templates?.[EMENU_HEADER_LAYOUT]?.[mv.key]), mode);
+        next = setSlotSpot(next, EMENU_HEADER_LAYOUT, mv.key, mode, { x: round1(p.x + mv.dx) });
+      }
+      // 分类那一块按画布上量到的范围收放（后台关了中英切换时没改过的分类排得宽一些，以看到的为准）
+      const c = boxes.get('cats');
+      if (edit.cats && c) next = setSlotSpot(next, EMENU_HEADER_LAYOUT, 'cats', mode, { x: round1(c.x + edit.cats.dx), w: round1(c.w + edit.cats.dw) });
+      return next;
+    });
+  };
+  return (
+    <div className="space-y-1.5" data-testid="studio-head-gaps">
+      <PanelTitle>间距（「{big ? '放大' : '原样'}」一档）</PanelTitle>
+      <p className="text-[11.5px] leading-relaxed text-ink-3">从左到右每两块之间、两头到屏幕边各多远（设计稿像素）。改哪一个只动那一条：分类那一块跟着收放，别的间距不变。</p>
+      {gaps.map((g) => (
+        <label key={g.index} className="flex items-center gap-2 text-[12.5px]">
+          <span className="min-w-0 flex-1 truncate text-ink-3">{label(g)}</span>
+          <span className="w-20 shrink-0">
+            <NumberInput value={round1(g.value)} min={0} max={600} onChange={(v) => apply(g.index, round1(v))} testId={`studio-head-gap-${g.index}`} />
+          </span>
+        </label>
+      ))}
+      {error && (
+        <p className="text-[11.5px] text-clay" data-testid="studio-head-gap-error">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function SlotPanel({
+  doc,
+  layout,
+  slot,
+  big,
+  onToggleBig,
+  onChange,
+  headBoxes,
+}: {
+  doc: StudioDoc;
+  layout: TplLayout;
+  slot: string | null;
+  big: boolean;
+  onToggleBig: () => void;
+  onChange: Change;
+  /** 顶栏各块在画布上量到的框（算间距用，8.1.6） */
+  headBoxes?: ReadonlyMap<string, Box> | null;
+}) {
   const mode = big ? 'big' : 'design';
   const modeName = big ? '放大' : '原样';
-  const def = slot ? EMENU_TEMPLATES[layout].slots.find((s) => s.key === slot) : undefined;
+  const isHead = layout === EMENU_HEADER_LAYOUT;
+  const def = slot ? EMENU_ALL_TEMPLATES[layout]!.slots.find((s) => s.key === slot) : undefined;
+  const gapsPanel = isHead && headBoxes && headBoxes.size > 1 ? <HeaderGapsPanel boxes={headBoxes} big={big} onChange={onChange} /> : null;
   if (!def) {
     return (
       <div className="space-y-3 text-[12.5px] leading-relaxed text-ink-2" data-testid="studio-slot-panel-empty">
-        <PanelTitle>{EMENU_LAYOUT_INFO[layout].label}</PanelTitle>
-        <p>点画布上的一块（照片、菜名价格、小标题……）选中：拖着挪位置，拉边角改大小；方向键微调，Shift + 方向键挪 10。</p>
+        <PanelTitle>{layoutLabel(layout)}</PanelTitle>
+        <p>
+          {isHead
+            ? '点画布上的一块（字标、分类、中英切换、搜索、订单、手牌）选中：拖着挪位置，拉角等比改大小（分类那一块拉左右两边改宽）；拖着、选中时它与左右两块的间距实时标出来。方向键微调，Shift + 方向键挪 10。'
+            : '点画布上的一块（照片、菜名价格、小标题……）选中：拖着挪位置，拉边角改大小；方向键微调，Shift + 方向键挪 10。'}
+        </p>
         <p className="text-ink-3">
           两档各有一套位置：现在改的是 <b className="text-ink">「{modeName}」</b>一档（顶栏的「原样 / 放大」切换）。平板用哪一档在后台「电子菜单 → 设置 → 字与按钮的大小」里定。
         </p>
+        {gapsPanel}
       </div>
     );
   }
@@ -257,6 +370,8 @@ export function SlotPanel({ doc, layout, slot, big, onToggleBig, onChange }: { d
   const s = resolveSlot(def, o);
   const p = slotSpot(s, mode);
   const can = slotResizable(def);
+  const ratio = headerSlotRatio(def);
+  const base = slotSpot(resolveSlot(def, undefined), mode);
   const coalesce = `slot.${layout}.${def.key}.${mode}`;
   const set = (next: Parameters<typeof setSlotSpot>[4], field: string) => onChange((d) => setSlotSpot(d, layout, def.key, mode, next), `${coalesce}.${field}`);
   const kindHint: Partial<Record<EmenuSlotKind, string>> = {
@@ -266,13 +381,17 @@ export function SlotPanel({ doc, layout, slot, big, onToggleBig, onChange }: { d
     coverTitle: '分类大标题（分类的名字）：只能挪，中英文两行一起挪。',
     row: '文字陈列的一行（名称、英文名、属性、价格）：只能挪。',
     photo: '照片位：可以挪、改宽高（图按比例铺满、多出来的裁掉），可以加圆角、藏起来。',
+    logo: '汤崎横排字标：可以挪、等比改大小。',
+    cats: '分类页签排开的范围：可以挪、改宽。分类多时页签在这个范围里排开，放不下时整排缩小一点。',
+    icon: '可以挪、等比改大小（点按的范围跟着变）。客人随时要用，不能删、不能藏。',
+    tag: '手牌色块：可以挪、等比改大小。原样一档左边贴住、字长了往右长；放大一档右边贴住、往左长。',
   };
   return (
     <div className="space-y-4" data-testid="studio-slot-panel">
       <div>
         <PanelTitle>{def.label}</PanelTitle>
         <p className="text-[11.5px] leading-relaxed text-ink-3">
-          {EMENU_LAYOUT_INFO[layout].label} · {kindHint[def.kind]}
+          {layoutLabel(layout)} · {kindHint[def.kind]}
         </p>
       </div>
       <div className="rounded-md border border-line bg-paper-2/60 px-2.5 py-2 text-[12px] text-ink-2">
@@ -297,20 +416,38 @@ export function SlotPanel({ doc, layout, slot, big, onToggleBig, onChange }: { d
               <NumberInput value={p.y} onChange={(v) => set({ y: round1(v) }, 'y')} testId="studio-slot-y" />
             </Row>
           )}
-          {can.w && (
-            <Row label="宽" narrow>
-              <NumberInput value={p.w} min={def.kind === 'photo' ? 24 : 80} max={1024} onChange={(v) => set({ w: round1(v) }, 'w')} testId="studio-slot-w" />
+          {ratio !== null ? (
+            <Row label="大小" narrow>
+              <NumberInput
+                value={Math.round((p.h / base.h) * 100)}
+                min={50}
+                max={250}
+                onChange={(v) => {
+                  const h = (base.h * v) / 100;
+                  set({ w: round1(h * ratio), h: round1(h) }, 'size');
+                }}
+                testId="studio-slot-scale"
+              />
+              <span className="shrink-0 text-[11px] text-ink-3">%</span>
             </Row>
-          )}
-          {can.h && (
-            <Row label="高" narrow>
-              <NumberInput value={p.h} min={24} max={768} onChange={(v) => set({ h: round1(v) }, 'h')} testId="studio-slot-h" />
-            </Row>
+          ) : (
+            <>
+              {can.w && (
+                <Row label="宽" narrow>
+                  <NumberInput value={p.w} min={def.kind === 'photo' ? 24 : def.kind === 'cats' ? CATS_MIN_W : 80} max={1024} onChange={(v) => set({ w: round1(v) }, 'w')} testId="studio-slot-w" />
+                </Row>
+              )}
+              {can.h && (
+                <Row label="高" narrow>
+                  <NumberInput value={p.h} min={24} max={768} onChange={(v) => set({ h: round1(v) }, 'h')} testId="studio-slot-h" />
+                </Row>
+              )}
+            </>
           )}
         </div>
         {p.bottom !== undefined && <p className="text-[11px] leading-relaxed text-ink-3">这一块在放大一档里下沿贴线、往上长（介绍长了往上多出来，不压到下面的图）；挪的是下沿。</p>}
       </div>
-      {(slotHideable(def) || def.kind === 'photo') && (
+      {!isHead && (slotHideable(def) || def.kind === 'photo') && (
         <div className="space-y-2">
           <PanelTitle>样子</PanelTitle>
           {slotHideable(def) && (
@@ -332,6 +469,7 @@ export function SlotPanel({ doc, layout, slot, big, onToggleBig, onChange }: { d
           )}
         </div>
       )}
+      {gapsPanel}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="secondary" disabled={!o?.[mode]} onClick={() => onChange((d) => resetSlot(d, layout, def.key, mode))} data-testid="studio-slot-reset-mode">
           <RotateCcw className="size-3.5" /> 「{modeName}」一档恢复默认

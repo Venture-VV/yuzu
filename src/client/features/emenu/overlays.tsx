@@ -8,7 +8,7 @@ import { ArrowDot, CloseDot, MinusDot, PlusDot, SearchIcon } from './icons';
 import { Backdrop } from './modals';
 import { FadeImg, ScrollArea, useExitGhost } from './motion';
 import { displaySpec, wrapParen, yuan } from './pages';
-import { BIG, box, Hairline, HEADER_H, useBig, useStage, ZoomAt } from './stage';
+import { BIG, Bleed, box, Hairline, HEADER_H, useBig, useBleed, useStage, ZoomAt } from './stage';
 import type { CartLine, Remark } from './store';
 
 const MUTE = 'var(--em-mute)';
@@ -37,6 +37,7 @@ export function DishDetail({
 }) {
   const lang = useLang();
   const m = useM();
+  const bleed = useBleed();
   const root = useExitGhost<HTMLDivElement>('detail');
   const first = displaySpec(dish);
   const [picked, setPicked] = useState<number | null>(first?.itemId ?? null);
@@ -79,17 +80,20 @@ export function DishDetail({
       ref={root}
       className="em-zoom-in"
       data-em-out="zoom"
-      style={{ ...box(0, HEADER_H, 1024, 768 - HEADER_H), background: 'var(--em-photo)', overflow: 'hidden', transformOrigin: origin ? `${origin.x}px ${origin.y - HEADER_H}px` : '50% 50%' }}
+      style={{ ...box(0, HEADER_H, 1024, 768 - HEADER_H), transformOrigin: origin ? `${origin.x}px ${origin.y - HEADER_H}px` : '50% 50%' }}
       data-testid="emenu-detail"
     >
-      {/* 上一道 / 下一道：新的图淡入 */}
-      {image && <FadeImg key={image} src={image} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+      {/* 大图与压暗铺到屏幕左右、下边（8.1.6 出血，QZ2）；上面的按钮、卡片照旧按设计稿的坐标 */}
+      <div style={{ position: 'absolute', left: -bleed.x, right: -bleed.x, top: 0, bottom: -bleed.y, background: 'var(--em-photo)', overflow: 'hidden' }} data-testid="emenu-detail-photo">
+        {/* 上一道 / 下一道：新的图淡入 */}
+        {image && <FadeImg key={image} src={image} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+        {why && <div style={{ position: 'absolute', inset: 0, background: 'rgb(0 0 0 / 0.55)' }} />}
+      </div>
       {why && (
         <div
           style={{
             position: 'absolute',
             inset: 0,
-            background: 'rgb(0 0 0 / 0.55)',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -395,11 +399,13 @@ function Drawer({
         className={swap ? undefined : 'em-drawer'}
         data-em-out="drawer"
         role="dialog"
-        aria-label={title}
+        aria-label={t.main}
         onClick={(e) => e.stopPropagation()}
         style={{ ...box(1024 - 425.7 * k, 0, 425.7 * k, 768), background: 'var(--em-bg)' }}
         data-testid={testId}
       >
+        {/* 抽屉的底往右、往上下铺到屏幕边（8.1.6 出血）：里面的内容照旧 */}
+        <Bleed sides="right" style={{ background: 'var(--em-bg)' }} />
         <div style={{ ...box(0, 0, 425.7, 768 / k), transform: k === 1 ? undefined : `scale(${k})`, transformOrigin: '0 0' }}>
           <div className={swap ? 'em-swap' : undefined} style={{ position: 'absolute', inset: 0 }}>
             {t.mainEn ? (

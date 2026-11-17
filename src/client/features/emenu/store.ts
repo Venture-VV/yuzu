@@ -155,5 +155,3 @@ function subscribe(fn: () => void) {
 export function usePendingOrder(): PendingOrder | null {
   return useSyncExternalStore(subscribe, current, () => null);
 }
-
-export const PENDING_STORE_FAILED = '这台平板存不了「结果待确认」的记录（存储空间满了或被禁用），为了不重复下单，这一单没有提交。请换一台平板，或请服务员在点单页下单。';

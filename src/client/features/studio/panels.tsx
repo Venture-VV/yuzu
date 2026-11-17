@@ -854,7 +854,8 @@ export function PropsPanel({
   onLayer: (dir: 'up' | 'down' | 'top' | 'bottom') => void;
   textRef: React.RefObject<HTMLTextAreaElement | null>;
   /** 菜单页这一块：去左边「版式」改里面每一块的位置（8.1.2） */
-  onOpenTemplates?: () => void;
+  /** 打开左边「版式」：菜单页的版式，或 header 直接改顶栏（8.1.6） */
+  onOpenTemplates?: (layout?: 'header') => void;
   /** 组件的几个操作（8.1.2） */
   components?: ComponentOps;
 }) {
@@ -993,8 +994,13 @@ export function PropsPanel({
           </Button>
         )}
         {block && n.type === 'block' && n.block === 'menu.pages' && onOpenTemplates && (
-          <Button size="sm" variant="secondary" className="mb-2" onClick={onOpenTemplates} data-testid="studio-open-templates">
+          <Button size="sm" variant="secondary" className="mb-2" onClick={() => onOpenTemplates()} data-testid="studio-open-templates">
             改里面每一块的位置（版式）
+          </Button>
+        )}
+        {block && n.type === 'block' && n.block === 'menu.header' && onOpenTemplates && (
+          <Button size="sm" variant="secondary" className="mb-2" onClick={() => onOpenTemplates('header')} data-testid="studio-open-header">
+            编辑顶栏（每一块的位置、大小与间距）
           </Button>
         )}
         <Row label="名字">

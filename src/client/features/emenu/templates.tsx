@@ -4,7 +4,21 @@
 
 import { createContext, useContext, type ReactNode } from 'react';
 import type { EmenuBlock, EmenuLayout } from '@shared/emenu';
-import { colorValue, dishStateStyle, EMENU_SURFACE, EMENU_TEMPLATES, resolveSlot, slotSpot, type ResolvedSlot, type StudioColor, type StudioDishStateStyle, type StudioDoc } from '@shared/studio';
+import {
+  colorValue,
+  dishStateStyle,
+  EMENU_HEADER_LAYOUT,
+  EMENU_HEADER_TEMPLATE,
+  EMENU_SURFACE,
+  EMENU_TEMPLATES,
+  resolveSlot,
+  slotSpot,
+  type EmenuSlotSpot,
+  type ResolvedSlot,
+  type StudioColor,
+  type StudioDishStateStyle,
+  type StudioDoc,
+} from '@shared/studio';
 import { useBig } from './stage';
 
 interface Cards {
@@ -34,6 +48,27 @@ export function useSlots(layout: EmenuLayout): (key: string) => ResolvedSlot {
     const def = defs.find((s) => s.key === key);
     if (!def) throw new Error(`版式 ${layout} 没有 ${key}`);
     return resolveSlot(def, all?.[layout]?.[key]);
+  };
+}
+
+/** 顶栏改过的几块（8.1.6，QZ8）：spot(块) 是当前这一档（原样 / 放大）的位置，changed(块) 这一块改没改过 */
+export interface HeaderSpots {
+  spot: (key: string) => EmenuSlotSpot;
+  changed: (key: string) => boolean;
+}
+
+/** 顶栏：设计师在工作台里改过就给各块的位置；没改过给 null——顶栏照原来的写法画，与设计稿逐像素一致 */
+export function useHeaderSpots(): HeaderSpots | null {
+  const o = useContext(CardsCtx).templates?.[EMENU_HEADER_LAYOUT];
+  const large = useBig();
+  if (!o) return null;
+  return {
+    spot: (key) => {
+      const def = EMENU_HEADER_TEMPLATE.slots.find((x) => x.key === key);
+      if (!def) throw new Error(`顶栏没有 ${key}`);
+      return slotSpot(resolveSlot(def, o[key]), large ? 'big' : 'design');
+    },
+    changed: (key) => !!o[key],
   };
 }
 

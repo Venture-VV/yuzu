@@ -9,7 +9,7 @@
 // 价格、估清、上下架不在这里维护：价格读价目表，估清在厨房出品屏，价目项目停用、没挂出品档口的菜平板上自动标「已下架」。
 // 各页整批保存、带版本号：别人先改过会被拒绝（EMENU_CHANGED），重新载入再排。
 
-import { createContext, useContext, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Download, ExternalLink, ImagePlus, Languages, Pencil, Plus, Search, Trash2, Upload, Wand2, X } from 'lucide-react';
@@ -33,6 +33,7 @@ import {
   EMENU_MAX_PERIOD_NAME,
   EMENU_MAX_PERIOD_NAME_EN,
   EMENU_PERIOD_SHORT,
+  emenuEnglishGaps,
   emenuImageUrl,
   emenuNoteWorstCase,
   formatMinute,
@@ -46,6 +47,7 @@ import {
   type EmenuCategoryView,
   type EmenuDishAdmin,
   type EmenuDishView,
+  type EmenuEnglishGap,
   type EmenuEnglishParsed,
   type EmenuEnglishResult,
   type EmenuLang,
@@ -127,21 +129,102 @@ export function EmenuAdminSection() {
 /** 页签下面的内容：还差什么的清单，加上现在这个页签的那一块 */
 function EmenuAdminBody({ data, apply, tabs }: { data: EmenuAdmin; apply: Apply; tabs: { key: string }[] }) {
   const go = useGoSubTab(tabs as { key: string; label: string }[], EMENU_BASE);
+  // 英文还缺的地方（8.1.6，QZ6）：点「去补」切到那个页签、打开那一处（分类、菜品的弹窗，设置里的那一格）
+  const gaps = data.rules.langSwitch ? emenuEnglishGaps(data) : [];
+  const [focus, setFocus] = useState<EnFocus | null>(null);
+  const fix = (g: EmenuEnglishGap) => {
+    setFocus({ ...g, n: Date.now() });
+    go(g.kind === 'category' || g.kind === 'pageTitle' ? 'pages' : g.kind === 'dishName' || g.kind === 'dishIntro' ? 'dishes' : 'settings');
+  };
   // 换页签只藏不卸（8.0.17，Codex 2026-11-13 P2）：设置里改了没保存的、排到一半的版面，切到别的页签再切回来还在。
   // 第一次点到才挂上（版面预览比较重），挂上以后留着
   return (
     <div className="space-y-5" data-testid="emenu-admin">
       <Checklist data={data} onSettings={() => go('settings')} onDishes={() => go('dishes')} />
-      <SubPane tab="settings" lazy>
-        <SettingsTab data={data} apply={apply} />
-      </SubPane>
-      <SubPane tab="pages" lazy>
-        <PagesTab data={data} apply={apply} />
-      </SubPane>
-      <SubPane tab="dishes" lazy>
-        <DishesTab data={data} apply={apply} />
-      </SubPane>
+      <EnglishGaps gaps={gaps} onFix={fix} />
+      <EnFocusContext.Provider value={{ focus, clear: () => setFocus(null) }}>
+        <SubPane tab="settings" lazy>
+          <SettingsTab data={data} apply={apply} />
+        </SubPane>
+        <SubPane tab="pages" lazy>
+          <PagesTab data={data} apply={apply} />
+        </SubPane>
+        <SubPane tab="dishes" lazy>
+          <DishesTab data={data} apply={apply} />
+        </SubPane>
+      </EnFocusContext.Provider>
     </div>
+  );
+}
+
+// ───────────────────────── 英文还缺哪些（8.1.6，QZ6） ─────────────────────────
+
+type EnFocus = EmenuEnglishGap & { n: number };
+const EnFocusContext = createContext<{ focus: EnFocus | null; clear: () => void }>({ focus: null, clear: () => {} });
+/** 「去补」要打开的那一处：kinds 里的一种交给这个页签处理（处理完清掉） */
+function useEnFocus<K extends EmenuEnglishGap['kind']>(kinds: readonly K[], handle: (g: Extract<EnFocus, { kind: K }>) => void) {
+  const { focus, clear } = useContext(EnFocusContext);
+  const run = useRef(handle);
+  run.current = handle;
+  useEffect(() => {
+    if (!focus || !(kinds as readonly string[]).includes(focus.kind)) return;
+    clear();
+    run.current(focus as Extract<EnFocus, { kind: K }>);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus]);
+}
+/** 等弹窗、页签画出来以后把那一格滚到眼前、放上光标 */
+function focusLater(selector: string) {
+  window.setTimeout(() => {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.focus({ preventScroll: true });
+  }, 160);
+}
+
+const GAP_KINDS: { kinds: EmenuEnglishGap['kind'][]; label: string }[] = [
+  { kinds: ['category'], label: '分类名' },
+  { kinds: ['pageTitle'], label: '页的小标题' },
+  { kinds: ['dishName'], label: '菜名' },
+  { kinds: ['dishIntro'], label: '菜品介绍' },
+  { kinds: ['option'], label: '忌口与起菜方式' },
+  { kinds: ['period'], label: '时段名' },
+];
+
+function EnglishGaps({ gaps, onFix }: { gaps: EmenuEnglishGap[]; onFix: (g: EmenuEnglishGap) => void }) {
+  const [open, setOpen] = useState(false);
+  if (gaps.length === 0) return null;
+  const counts = GAP_KINDS.map((g) => ({ label: g.label, n: gaps.filter((x) => g.kinds.includes(x.kind)).length })).filter((g) => g.n > 0);
+  const kindLabel = (g: EmenuEnglishGap) => GAP_KINDS.find((k) => k.kinds.includes(g.kind))!.label;
+  const shown = gaps.slice(0, 40);
+  return (
+    <Notice
+      tone="info"
+      title={`英文还缺 ${gaps.length} 处`}
+      action={
+        <Button size="sm" onClick={() => setOpen((v) => !v)} data-testid="emenu-admin-english-gaps-toggle">
+          {open ? '收起' : '逐处看'}
+        </Button>
+      }
+      data-testid="emenu-admin-english-gaps"
+    >
+      外宾在平板上切到 EN 时，这些地方仍显示中文（不机翻）：{counts.map((c) => `${c.label} ${c.n}`).join('、')}。菜多的可以用「菜品图文」里的「英文对照表」一次补完。
+      {open && (
+        <ul className="mt-2 grid gap-1 sm:grid-cols-2" data-testid="emenu-admin-english-gap-list">
+          {shown.map((g, i) => (
+            <li key={i} className="flex min-w-0 items-center gap-2 text-[13px]">
+              <span className="shrink-0 text-ink-3">{kindLabel(g)}</span>
+              <span className="min-w-0 truncate font-semibold">{g.label}</span>
+              <button type="button" className="shrink-0 font-semibold text-pine underline underline-offset-2" onClick={() => onFix(g)} data-testid={`emenu-admin-english-fix-${i}`}>
+                去补
+              </button>
+            </li>
+          ))}
+          {gaps.length > shown.length && <li className="text-[13px] text-ink-3">还有 {gaps.length - shown.length} 处，补完上面的再看</li>}
+        </ul>
+      )}
+    </Notice>
   );
 }
 
@@ -337,6 +420,17 @@ function PagesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewLang, setPreviewLang] = useState<EmenuLang>('zh');
+
+  // 「英文还缺」里点了去补（8.1.6）：分类名打开这个分类的弹窗；页的小标题选中这个分类、光标放到那一页的英文小标题
+  useEnFocus(['category', 'pageTitle'], (g) => {
+    const c = data.categories.find((x) => x.id === g.categoryId);
+    if (!c) return;
+    setSelectedId(c.id);
+    if (g.kind === 'category') {
+      setEditing(c);
+      focusLater('#ec-en');
+    } else focusLater(`[data-testid="emenu-admin-page-title-en-${g.page}"]`);
+  });
 
   const cat = data.categories.find((c) => c.id === selectedId) ?? data.categories[0] ?? null;
   const dirty = !!draft && !!cat && draft.id === cat.id && !samePages(draft.pages, cat.pages);
@@ -592,7 +686,7 @@ function PageCard({
                 <Input value={page.title} maxLength={8} onChange={(e) => onChange({ title: e.target.value })} data-testid={`emenu-admin-page-title-${index}`} />
               </Field>
               <Field label="小标题的英文" hint="如 BEST SELLERS">
-                <Input value={page.titleEn} maxLength={24} onChange={(e) => onChange({ titleEn: e.target.value })} />
+                <Input value={page.titleEn} maxLength={24} onChange={(e) => onChange({ titleEn: e.target.value })} data-testid={`emenu-admin-page-title-en-${index}`} />
               </Field>
             </div>
           )}
@@ -700,7 +794,7 @@ function CategoryDialog({ target, data, onClose, onSaved }: { target: EmenuCateg
           <Field label="名称" htmlFor="ec-name" hint="最多 16 个字">
             <Input id="ec-name" value={name} maxLength={16} onChange={(e) => setName(e.target.value)} data-autofocus />
           </Field>
-          <Field label="英文名" htmlFor="ec-en" hint="如 CHINESE LUNCH">
+          <Field label="英文名" htmlFor="ec-en" hint="如 CHINESE LUNCH。平板顶栏一格大约放得下 16 个字母（分类多时更少），再长的整排缩小一点，还放不下的末尾显示「…」">
             <Input id="ec-en" value={nameEn} maxLength={32} onChange={(e) => setNameEn(e.target.value)} />
           </Field>
         </div>
@@ -831,6 +925,13 @@ function DishesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
   const [keyword, setKeyword] = useState('');
   const [filter, setFilter] = useState<DishFilter>('all');
   const [drafting, setDrafting] = useState(false);
+  // 「英文还缺」里点了去补（8.1.6）：打开这道菜，光标放到英文名或英文介绍
+  useEnFocus(['dishName', 'dishIntro'], (g) => {
+    const d = data.dishes.find((x) => x.id === g.dishId);
+    if (!d) return;
+    setEditing(d);
+    focusLater(g.kind === 'dishName' ? '#ed-en' : '#ed-desc-en');
+  });
   const [busy, setBusy] = useState(false);
   const [sheet, setSheet] = useState(false);
   const free = data.items.filter((i) => i.dishId === null);
@@ -1459,6 +1560,7 @@ function PeriodsEditor({ value, onChange }: { value: EmenuPeriod[]; onChange: (n
             value={p.nameEn}
             maxLength={EMENU_MAX_PERIOD_NAME_EN}
             onChange={(e) => patch(i, { nameEn: e.target.value })}
+            data-testid={`emenu-admin-period-en-${p.key}`}
           />
           <Input
             type="time"
@@ -1492,6 +1594,8 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
   const [error, setError] = useState<string | null>(null);
   const same = (a: EmenuRules, b: EmenuRules) => JSON.stringify(a) === JSON.stringify(b);
   const dirtyNow = !!draft && !same(draft, data.rules);
+  // 「英文还缺」里点了去补（8.1.6）：光标放到那个选项、那一段的英文
+  useEnFocus(['option', 'period'], (g) => focusLater(g.kind === 'option' ? `[data-testid="emenu-admin-option-en-${CSS.escape(g.label)}"]` : `[data-testid="emenu-admin-period-en-${g.key}"]`));
   // 门店系统里的设置变了、这边没有没保存的改动：照门店系统的来
   if (!draft || (rev !== data.rulesRev && !dirtyNow)) {
     setDraft(data.rules);
@@ -1658,6 +1762,7 @@ function SettingsTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
                   <Input
                     className="h-9"
                     aria-label={`「${o}」的英文`}
+                    data-testid={`emenu-admin-option-en-${o}`}
                     value={draft.optionsEn[o] ?? ''}
                     maxLength={EMENU_MAX_OPTION_EN}
                     placeholder={EMENU_OPTION_EN[o] ?? '（显示中文）'}

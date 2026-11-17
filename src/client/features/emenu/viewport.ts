@@ -39,6 +39,12 @@ export interface StageLayout {
   /** 键盘上面还看得见的高度，换算成设计稿的像素（从舞台上沿起；没有键盘时是 768） */
   visible: number;
   keyboard: boolean;
+  /**
+   * 出血（8.1.6，docs/EMENU.md 第 15.2 节）：屏幕比设计稿多出来的那一圈，换算成设计稿的像素——左右各 x、上下各 y。
+   * 4:3 的屏两个都是 0；3:2 的小米平板 6S Pro 12.4（1355 × 903）左右各约 64。底色、压暗层、大图铺到这一圈的外沿。
+   */
+  bleedX: number;
+  bleedY: number;
 }
 
 /** 键盘至少盖住这么多才算（浏览器地址栏收放、系统手势条的几十像素不算） */
@@ -58,7 +64,7 @@ export function stageLayout(stable: StableSize, now: ViewportNow, focusBottom: n
   let shift = 0;
   if (keyboard && focusBottom !== null) shift = Math.max(0, Math.min(covered, focusBottom + 12 * scale - visibleBottom));
   const visible = keyboard ? Math.max(0, Math.min(STAGE_H, (visibleBottom - (top - shift)) / scale)) : STAGE_H;
-  return { scale, left, top: top - shift, shift, visible, keyboard };
+  return { scale, left, top: top - shift, shift, visible, keyboard, bleedX: scale > 0 ? left / scale : 0, bleedY: scale > 0 ? top / scale : 0 };
 }
 
 // ───────────────────────── 翻页 ─────────────────────────

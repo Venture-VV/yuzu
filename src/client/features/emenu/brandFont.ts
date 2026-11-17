@@ -47,3 +47,15 @@ export function useBrandFont(): boolean {
   }, []);
   return ok;
 }
+
+/**
+ * 开机就把平板菜单的几款字体备好（8.1.6，QZ4、QZ5）：英文（Average Sans，顶替的那款）与两个行框字体。
+ * 原来第一次切到英文时浏览器才去下载英文字体，那一下字先用别的字体画、下载完再换一次（闪一下、跳一下）。
+ * 中文朱雀仿宋按用到的字分块下载，起始页、菜单一出来就用上了，不用另备；授权的品牌英文字体由 loadBrandFont 取。
+ */
+let warmed = false;
+export function warmEmenuFonts(): void {
+  if (warmed || typeof document === 'undefined' || !document.fonts?.load) return;
+  warmed = true;
+  for (const spec of ["16px 'Average Sans'", "16px 'Em Box En'", "16px 'Em Box Zh'"]) void document.fonts.load(spec, 'Ab0').catch(() => undefined);
+}

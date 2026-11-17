@@ -4,7 +4,7 @@
 // 店主、店长另看全店最近的页面报错（服务器内存里最近 200 条，重启清空）。
 // 不用登录也能打开（断网时、登录页出问题时也要看得到）；全店的报错要登录、要「查看操作审计」。
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react';
@@ -35,6 +35,44 @@ function storageWorks(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * 本机屏幕（8.1.6，docs/EMENU.md 第 15.1 节，QZ1）：网页看到的大小、像素密度，以及平板点餐页在这块屏上放大几倍、两边多出多少。
+ * 平板的「显示大小」设置会改变网页看到的大小，以这里在真机上显示的数为准
+ */
+function useScreenInfo() {
+  const read = () => ({ w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1, sw: window.screen?.width ?? 0, sh: window.screen?.height ?? 0 });
+  const [info, setInfo] = useState(read);
+  useEffect(() => {
+    const on = () => setInfo(read());
+    window.addEventListener('resize', on);
+    window.addEventListener('orientationchange', on);
+    return () => {
+      window.removeEventListener('resize', on);
+      window.removeEventListener('orientationchange', on);
+    };
+  }, []);
+  return info;
+}
+
+function ScreenRow() {
+  const { w, h, dpr, sw, sh } = useScreenInfo();
+  const scale = Math.min(w / 1024, h / 768);
+  const bx = scale > 0 ? (w - 1024 * scale) / 2 / scale : 0;
+  const by = scale > 0 ? (h - 768 * scale) / 2 / scale : 0;
+  const r = (n: number) => Math.round(n * 100) / 100;
+  return (
+    <>
+      <dt className="text-ink-3">本机屏幕</dt>
+      <dd data-testid="network-screen">
+        网页 {w} × {h}，{r(dpr)} 倍像素（约 {Math.round(sw * dpr)} × {Math.round(sh * dpr)} 实际像素）
+        <span className="block text-[12px] text-ink-3">
+          平板点餐页按 {r(scale)} 倍显示{bx >= 0.5 ? `，左右各多出 ${Math.round(bx)}` : by >= 0.5 ? `，上下各多出 ${Math.round(by)}` : ''}（设计稿 1024 × 768）
+        </span>
+      </dd>
+    </>
+  );
 }
 
 export function NetworkPage() {
@@ -105,6 +143,7 @@ export function NetworkPage() {
             </dd>
             <dt className="text-ink-3">本机存储</dt>
             <dd className={cn(!storageOk && 'font-bold text-clay')}>{storageOk ? '能用（「结果待确认」存得下）' : '不能用：记账类操作会拦着不让提交，请联系店主清理浏览器数据'}</dd>
+            <ScreenRow />
           </dl>
           {versionMismatch && (
             <Notice

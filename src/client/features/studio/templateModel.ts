@@ -81,3 +81,10 @@ export function pageInState(page: EmenuPageView, state: StudioDishState | null):
   const spec = state === 'sold_out' ? 'sold_out' : 'off';
   return { ...page, dishes: page.dishes.map((d) => (d ? { ...d, specs: d.specs.map((x) => ({ ...x, state: spec })) } : d)) };
 }
+
+/** 顶栏（8.1.6）画布下面垫的那一页：菜单里的第一页（看得到真的分类名排在顶栏里），菜单里还没有页时用示例页 */
+export function headerPage(menu: EmenuMenu | null): TemplatePage {
+  const first = flatPages(menu)[0];
+  if (!first) return templatePage(menu, 'duo_row', -1);
+  return { page: first.page, categoryName: first.category.name, categoryNameEn: first.category.nameEn, real: true, filled: 0 };
+}

@@ -5,7 +5,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { namePair, useLang, useM } from './i18n';
 import { BackspaceIcon, CheckMark } from './icons';
 import { useExitGhost } from './motion';
-import { BIG, box, Hairline, useBig } from './stage';
+import { BIG, Bleed, box, Hairline, useBig } from './stage';
 
 /** 弹窗的位置与大小（设计稿） */
 const M = { x: 297.5, y: 133.7, w: 429.1, h: 500.6 };
@@ -28,18 +28,16 @@ export function Backdrop({
   // 关掉时留一个影子播退场动画（motion.tsx）：背景淡出，里面的弹窗缩小、抽屉滑出
   const ref = useExitGhost<HTMLDivElement>(kind);
   return (
-    <div
-      ref={ref}
-      className={still ? undefined : 'em-fade'}
-      onClick={onClick}
-      data-em-kind={kind}
-      style={{
-        ...box(0, 0, 1024, 768),
-        background: blur ? 'rgb(211 211 211 / 0.55)' : 'rgb(0 0 0 / 0.4)',
-        backdropFilter: blur ? 'blur(14px)' : undefined,
-        WebkitBackdropFilter: blur ? 'blur(14px)' : undefined,
-      }}
-    >
+    <div ref={ref} className={still ? undefined : 'em-fade'} onClick={onClick} data-em-kind={kind} style={box(0, 0, 1024, 768)}>
+      {/* 压暗（或虚化）的那一层铺到屏幕边（8.1.6 出血，QZ2）：点两边空出来的地方与点压暗层一样（事件冒泡到这一块） */}
+      <Bleed
+        style={{
+          background: blur ? 'rgb(211 211 211 / 0.55)' : 'rgb(0 0 0 / 0.4)',
+          backdropFilter: blur ? 'blur(14px)' : undefined,
+          WebkitBackdropFilter: blur ? 'blur(14px)' : undefined,
+        }}
+        testId="emenu-backdrop-fill"
+      />
       {children}
     </div>
   );
@@ -75,16 +73,21 @@ function Centered({ children }: { children: ReactNode }) {
   return <div style={{ ...box(0, 0, 1024, 768), transform: `scale(${BIG.ui})`, transformOrigin: '512px 384px', pointerEvents: 'none' }}>{children}</div>;
 }
 
-export function Frame({ title, subtitle, children, testId }: { title: string; subtitle: string; children: ReactNode; testId?: string }) {
+/**
+ * extra：比设计稿的弹窗高出多少（8.1.6，QZ6）——服务员那一步切到英文时提示是两种语言、两三行，弹窗长高一点放得下
+ * （上下各长一半，仍在屏幕正中；不缩小字、不压到按钮）；中文时是 0（与设计稿一样）
+ */
+export function Frame({ title, subtitle, children, testId, extra = 0 }: { title: string; subtitle: string; children: ReactNode; testId?: string; extra?: number }) {
+  const en = useLang() === 'en';
   return (
     <Centered>
       <div
         className="em-pop"
         data-em-out="pop"
         role="dialog"
-        aria-label={title}
+        aria-label={en ? subtitle : title}
         onClick={(e) => e.stopPropagation()}
-        style={{ ...box(M.x, M.y, M.w, M.h), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden', pointerEvents: 'auto' }}
+        style={{ ...box(M.x, M.y - extra / 2, M.w, M.h + extra), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden', pointerEvents: 'auto' }}
         data-testid={testId}
       >
         <div style={{ ...box(0, 0, M.w, 84.5), background: 'var(--em-band)' }} />
@@ -144,6 +147,7 @@ export function InfoModal({
   footer,
   disabled,
   testId,
+  extra,
 }: {
   title: string;
   subtitle: string;
@@ -155,6 +159,8 @@ export function InfoModal({
   footer: ReactNode;
   disabled?: boolean;
   testId?: string;
+  /** 弹窗往下多长的一截（见 Frame） */
+  extra?: number;
 }) {
   const en = useLang() === 'en';
   const m = useM();
@@ -232,7 +238,7 @@ export function InfoModal({
   );
 
   return (
-    <Frame title={title} subtitle={subtitle} testId={testId}>
+    <Frame title={title} subtitle={subtitle} testId={testId} extra={extra}>
       {fields.map((f, i) => {
         const y = 151.6 + (f.row ?? i) * 65.8;
         const on = f.key === active && !f.readOnly;
@@ -242,7 +248,7 @@ export function InfoModal({
             type="button"
             disabled={disabled || f.readOnly}
             onClick={() => onActive(f.key)}
-            aria-label={`${f.label}${f.mask ? '' : ` ${f.value}`}`}
+            aria-label={`${en && f.labelEn ? f.labelEn : f.label}${f.mask ? '' : ` ${f.value}`}`}
             aria-pressed={on}
             style={{ ...box(21.4, y - 8, 120, 34), padding: 0, border: 0, background: 'none', textAlign: 'left' }}
             data-testid={`emenu-field-${f.key}`}
@@ -271,7 +277,7 @@ export function InfoModal({
 
       {KEY_ROWS.map((row, r) => row.map((d, c) => key(digit(d), KEY_X[c]!, KEY_Y[r]!, 59.5, 59.5, () => type(d), { aria: d, testId: `emenu-key-${d}` })))}
       {key(digit('0'), 150.7, 326, 125.3, 59.5, () => type('0'), { aria: '0', testId: 'emenu-key-0' })}
-      {key(digit('.'), 282.3, 326, 59.5, 59.5, () => type('.'), { aria: '点', testId: 'emenu-key-dot' })}
+      {key(digit('.'), 282.3, 326, 59.5, 59.5, () => type('.'), { aria: m.keyDot, testId: 'emenu-key-dot' })}
       {key(<BackspaceIcon />, 348.3, 128.9, 59.5, 125.3, erase, { alt: true, aria: m.keyBack, testId: 'emenu-key-back' })}
       {key(
         // 设计稿：「清」的文字框在键上沿往下 44.1、左边往右 20.7，「空」再往下 21.6。
@@ -344,18 +350,32 @@ export function ModalButton({
   );
 }
 
-/** 弹窗底部的一行提示（红字）与候选（手牌、桌号数字重了时点选）。y 相对弹窗左上角 */
-export function ModalNote({ y = 458, error, hint, candidates, onPick }: { y?: number; error?: string | null; hint?: string | null; candidates?: string[]; onPick?: (value: string) => void }) {
+/** 弹窗底部的一行提示（红字）与候选（手牌、桌号数字重了时点选）。y 相对弹窗左上角；h 是这一块的高（弹窗往下长了时跟着高） */
+export function ModalNote({
+  y = 458,
+  h = 34,
+  error,
+  hint,
+  candidates,
+  onPick,
+}: {
+  y?: number;
+  h?: number;
+  error?: string | null;
+  hint?: string | null;
+  candidates?: string[];
+  onPick?: (value: string) => void;
+}) {
   if (!error && !hint && !candidates?.length) return null;
   return (
-    <div style={{ ...box(21.4, y, 386.2, 34), display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
+    <div style={{ ...box(21.4, y, 386.2, h), display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }} data-testid="emenu-note">
       {(error || hint) && (
         <span
           role={error ? 'alert' : undefined}
           style={{ fontSize: 12, lineHeight: '15px', color: error ? 'var(--em-error)' : 'var(--em-mute)', textAlign: 'center' }}
           data-testid={error ? 'emenu-error' : 'emenu-hint'}
         >
-          {error ?? hint}
+          <BiText text={(error ?? hint)!} />
         </span>
       )}
       {candidates?.map((c) => (
@@ -371,6 +391,23 @@ export function ModalNote({ y = 458, error, hint, candidates, onPick }: { y?: nu
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * 一段可能是两种语言的字（8.1.6，QZ6）：服务员那一步切到英文时是「英文\n中文」（i18n 的 bothText）——
+ * 第一行照常，下面的中文小一号、淡一点；只有一行时与原来一样
+ */
+export function BiText({ text }: { text: string }) {
+  const nl = text.indexOf('\n');
+  if (nl < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, nl)}
+      <span lang="zh-CN" style={{ display: 'block', marginTop: 2, fontSize: '0.84em', lineHeight: 1.3, opacity: 0.82, letterSpacing: 0 }} data-testid="emenu-zh-line">
+        {text.slice(nl + 1)}
+      </span>
+    </>
   );
 }
 
@@ -399,6 +436,7 @@ export function SmallDialog({
   actions,
   onClose,
   testId,
+  extra = 0,
 }: {
   title: string;
   subtitle: string;
@@ -406,7 +444,10 @@ export function SmallDialog({
   actions: ReactNode;
   onClose?: () => void;
   testId?: string;
+  /** 比原来高出多少（8.1.6，QZ6，同 Frame）：上下各长一半，正文那一块跟着高、按钮跟着往下 */
+  extra?: number;
 }) {
+  const en = useLang() === 'en';
   return (
     <Backdrop onClick={onClose}>
       <Centered>
@@ -414,16 +455,16 @@ export function SmallDialog({
           className="em-pop"
           data-em-out="pop"
           role="dialog"
-          aria-label={title}
+          aria-label={en ? subtitle : title}
           onClick={(e) => e.stopPropagation()}
-          style={{ ...box(332, 259, 360, 250), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden', pointerEvents: 'auto' }}
+          style={{ ...box(332, 259 - extra / 2, 360, 250 + extra), background: 'var(--em-modal)', borderRadius: 10, overflow: 'hidden', pointerEvents: 'auto' }}
           data-testid={testId}
         >
           <div style={{ ...box(0, 0, 360, 72), background: 'var(--em-band)' }} />
           <div style={{ ...box(21.4, 71.7, 317.2, 0), borderTop: LINE }} />
           <Titles title={title} subtitle={subtitle} w={360} y={[19, 44]} size={[22, 11]} />
-          <div style={{ ...box(28, 96, 304, 88), fontSize: 13, lineHeight: '21px', color: 'var(--em-ink)', textAlign: 'center' }}>{children}</div>
-          {actions}
+          <div style={{ ...box(28, 96, 304, 88 + extra), fontSize: 13, lineHeight: '21px', color: 'var(--em-ink)', textAlign: 'center' }}>{children}</div>
+          {extra ? <div style={{ position: 'absolute', left: 0, right: 0, top: extra, bottom: 0 }}>{actions}</div> : actions}
         </div>
       </Centered>
     </Backdrop>
@@ -448,10 +489,12 @@ export function Toast({ text }: { text: string | null }) {
           padding: large ? '12px 22px' : '9px 16px',
           borderRadius: 2,
           letterSpacing: '0.5px',
+          display: 'inline-block',
+          textAlign: 'center',
         }}
         data-testid="emenu-toast"
       >
-        {text}
+        <BiText text={text} />
       </span>
     </div>
   );
