@@ -1,7 +1,7 @@
 // 平板点餐页的顶栏（设计稿每一屏的最上面一条）：汤崎标志、分类页签、中英切换、搜索、订单、手牌。
 // 后台「电子菜单」的预览也用这一条（按钮不接事件）。
 
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { EmenuCategoryView } from '@shared/emenu';
 import { namePair, useLang, useM, type Lang } from './i18n';
 import langEn from './assets/lang-en.png';
@@ -16,6 +16,59 @@ export const LANG_ICON = 22.3;
 export const LOGO_TO_ICON = 0.7;
 /** 顶栏右边几样（切换图标、搜索、订单、手牌）的中线：字标也对齐在这条线上（PP7） */
 const ROW_MID = 55.45;
+
+// ───────────── 分类名的字宽（8.1.6，QZ5） ─────────────
+// 原来按字数估（英文一个字 8.2、中文 14），长的英文名估少了会被裁掉一截。现在用页面上的字体在画布上量；
+// 字体下载完（document.fonts 的 loadingdone）重新量一次。量不了（没有画布）时照旧按字数估。
+
+const EN_FONTS = "'Tangqi Brand En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', sans-serif";
+const ZH_FONTS = "'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif";
+/** 分类名最多缩到设计稿的几成：再长的末尾显示「…」（一般是后台的英文名太长，后台填英文名的地方有提示） */
+export const CAT_MIN_SCALE = 0.8;
+
+let measurer: CanvasRenderingContext2D | null | undefined;
+const widths = new Map<string, number>();
+/** 一行字的宽（设计稿像素）：size 字号，spacing 字距（em） */
+function textWidth(text: string, en: boolean, size: number, spacing: number): number {
+  if (!text) return 0;
+  if (measurer === undefined) {
+    try {
+      measurer = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
+    } catch {
+      measurer = null;
+    }
+  }
+  const chars = [...text].length;
+  if (!measurer) return chars * size * (en ? 0.62 : 1) + chars * size * spacing;
+  const key = `${en ? 'e' : 'z'}${size}|${spacing}|${text}`;
+  let w = widths.get(key);
+  if (w === undefined) {
+    measurer.font = `${size}px ${en ? EN_FONTS : ZH_FONTS}`;
+    w = measurer.measureText(text).width + chars * size * spacing;
+    widths.set(key, w);
+  }
+  return w;
+}
+/** 字体下载完以后变一次：量过的字宽作废、顶栏重新排 */
+function useFontsLoaded(): number {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    const fonts = typeof document === 'undefined' ? undefined : document.fonts;
+    if (!fonts) return;
+    let live = true;
+    const again = () => {
+      widths.clear();
+      if (live) setN((x) => x + 1);
+    };
+    fonts.addEventListener?.('loadingdone', again);
+    void fonts.ready.then(again);
+    return () => {
+      live = false;
+      fonts.removeEventListener?.('loadingdone', again);
+    };
+  }, []);
+  return n;
+}
 
 /**
  * 中英切换（8.1.5，PP6）：品牌给的两张图——深棕方块上浅色的「En」「中」——显示要切去的那种语言：中文时是「En」、英文时是「中」。
@@ -79,6 +132,7 @@ export function Header({
   const lang = useLang();
   const m = useM();
   const large = useBig();
+  useFontsLoaded();
   // 设计稿两个分类的中心在 367.6 与 514.5（相距 147）：分类多了往两边排开，放不下就挤一点。
   // 有中英切换时图标占了搜索左边的 751.7–774（原来「中 | EN」开关占 726–774），分类照旧最多排到 705
   // 放大的一档：右边几样大了、往左多占一点（切换图标的左边在 735），分类照旧最多排到 690
@@ -87,15 +141,22 @@ export function Header({
   const gap = Math.min(147, room / Math.max(n, 1));
   const first = 441 - ((n - 1) * gap) / 2;
   const activeAt = categories.findIndex((c) => c.id === activeId);
-  // 放大的一档：分类的字最多放大 BIG.ui 倍；分类多、名字长时按最宽的那个名字收一点，不挤到旁边（不小于设计稿的大小）
+  // 分类的字（8.1.6，QZ5）：按最宽的那个名字实际量出来的宽排——放大的一档最多放大 BIG.ui 倍；
+  // 分类多、名字长放不下时整组一起缩小一点（最多缩到 CAT_MIN_SCALE），不挤到旁边；还放不下的末尾显示「…」。放得下时与原来一样
+  const spacingEn = 0.058;
   const widest = Math.max(
     1,
     ...categories.map((c) => {
       const name = namePair(c.name, c.nameEn, lang);
-      return name.mainEn ? Math.max(name.main.length * 8.2, name.sub.length * 9) : Math.max(name.main.length * 14, name.sub.length * 5.4);
+      return name.mainEn
+        ? Math.max(textWidth(name.main, true, 12, spacingEn), textWidth(name.sub, false, 9, lang === 'en' ? 0.027 : 0))
+        : Math.max(textWidth(name.main, false, 14, 0), textWidth(name.sub, true, 8, spacingEn));
     }),
   );
-  const kc = large ? Math.max(1, Math.min(BIG.ui, (gap - 8) / widest)) : 1;
+  const kc = Math.max(CAT_MIN_SCALE, Math.min(large ? BIG.ui : 1, (gap - 8) / widest));
+  // 排字的那一块：一格的宽减去两边各 4，换算回缩放以前（放得下时字照旧居中；放不下的在这一块里末尾显示「…」）
+  const textRoom = (gap - 8) / kc;
+  const fit = { overflow: 'hidden', textOverflow: 'ellipsis' } as const;
   const ku = large ? BIG.ui : 1;
   // 图标：设计稿的位置是左上角；放大的一档绕 (cx, 中线) 放大
   const icon = (onClick: () => void, x: number, y: number, w: number, h: number, label: string, testId: string, children: ReactNode, cx: number) => {
@@ -143,21 +204,21 @@ export function Header({
             }}
             data-testid={`emenu-cat-${c.id}`}
           >
-            {/* 里面照设计稿的像素写（46 高、gap 宽），放大的一档整块绕上沿的正中放大 */}
+            {/* 里面照设计稿的像素写（46 高、gap 宽），整块绕上沿的正中按 kc 放大、缩小 */}
             <span style={{ ...box(gap / 2, 0, 0, 0), transform: kc === 1 ? undefined : `scale(${kc})`, transformOrigin: '0 0' }}>
-              <span style={{ ...box(-gap / 2, 0, gap, 46) }}>
+              <span style={{ ...box(-textRoom / 2, 0, textRoom, 46) }}>
                 {/* 设计稿：中文文字框上沿 45.7、英文 60.3（按钮从 34 开始）。按钮里的内容浏览器会上下居中，所以两行都自己定位 */}
                 {name.mainEn ? (
                   <>
-                    <span className="em-en" style={{ ...box(0, 12.6, gap), textAlign: 'center', fontSize: 12, lineHeight: '12px', whiteSpace: 'nowrap', letterSpacing: '0.058em' }}>
+                    <span className="em-en" style={{ ...box(0, 12.6, textRoom), ...fit, textAlign: 'center', fontSize: 12, lineHeight: '12px', whiteSpace: 'nowrap', letterSpacing: `${spacingEn}em` }}>
                       {name.main}
                     </span>
-                    <span style={{ ...box(0, 27.2, gap), textAlign: 'center', fontSize: 9, lineHeight: '9px', whiteSpace: 'nowrap' }}>{name.sub}</span>
+                    <span style={{ ...box(0, 27.2, textRoom), ...fit, textAlign: 'center', fontSize: 9, lineHeight: '9px', whiteSpace: 'nowrap' }}>{name.sub}</span>
                   </>
                 ) : (
                   <>
-                    <span style={{ ...box(0, 11.7, gap), textAlign: 'center', fontSize: 14, lineHeight: '14px', whiteSpace: 'nowrap' }}>{name.main}</span>
-                    <span className="em-en" style={{ ...box(0, 26.3, gap), textAlign: 'center', fontSize: 8, lineHeight: '8px', whiteSpace: 'nowrap', letterSpacing: '0.058em' }}>
+                    <span style={{ ...box(0, 11.7, textRoom), ...fit, textAlign: 'center', fontSize: 14, lineHeight: '14px', whiteSpace: 'nowrap' }}>{name.main}</span>
+                    <span className="em-en" style={{ ...box(0, 26.3, textRoom), ...fit, textAlign: 'center', fontSize: 8, lineHeight: '8px', whiteSpace: 'nowrap', letterSpacing: `${spacingEn}em` }}>
                       {name.sub}
                     </span>
                   </>

@@ -7,6 +7,7 @@ import {
   DEFAULT_EMENU_PERIODS,
   describeCategoryHours,
   dishMissingEnglish,
+  emenuEnglishGaps,
   emenuOptionEn,
   emenuSpecLabelEn,
   emenuUnitEn,
@@ -14,8 +15,25 @@ import {
   normalizePeriods,
   periodAt,
   periodWindow,
+  type EmenuCategoryAdmin,
+  type EmenuDishAdmin,
 } from '../src/shared/emenu';
-import { blockLabel, dishAttrs, dishDescription, dishNames, dishTagline, dishUnit, guestErrorEn, messages, namePair, optionLabel, specLabel } from '../src/client/features/emenu/i18n';
+import {
+  blockLabel,
+  both,
+  bothText,
+  dishAttrs,
+  dishDescription,
+  dishNames,
+  dishTagline,
+  dishUnit,
+  errorEn,
+  guestErrorEn,
+  messages,
+  namePair,
+  optionLabel,
+  specLabel,
+} from '../src/client/features/emenu/i18n';
 import { dragPosition, nextStable, rubberBand, settlePage, STAGE_H, STAGE_W, stageLayout, type ViewportNow } from '../src/client/features/emenu/viewport';
 
 const view = (patch: Partial<ViewportNow> = {}): ViewportNow => ({ width: 1280, height: 800, visibleTop: 0, visibleHeight: patch.height ?? 800, editing: false, ...patch });
@@ -184,7 +202,7 @@ describe('中 / EN：每样内容取哪一份', () => {
     expect(dishMissingEnglish({ nameEn: 'Pork', description: '', descriptionEn: '' })).toBe(false);
   });
 
-  it('两种语言的词表一样全；给客人看的出错提示只有几种拒绝码有英文，别的照门店系统给的', () => {
+  it('两种语言的词表一样全；门店系统的拒绝码有英文（8.1.6 起服务员那一步也有），没有对应英文的照门店系统给的', () => {
     const zh = messages('zh');
     const en = messages('en');
     expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort());
@@ -199,9 +217,19 @@ describe('中 / EN：每样内容取哪一份', () => {
     expect(en.endCart(3)).toContain('3 items');
     expect(guestErrorEn('TAG_NOT_IN_STORE')).toMatch(/tag/i);
     expect(guestErrorEn('TABLE_NOT_FOUND')).toMatch(/table/i);
-    // 服务员那一步的原因（密码不对、估清）不翻
-    expect(guestErrorEn('PIN_INVALID')).toBeNull();
-    expect(guestErrorEn('DISH_SOLD_OUT')).toBeNull();
+    // 8.1.6（QZ6）：服务员那一步的原因（密码不对、估清、价格变了）也有英文；新加的拒绝码没有英文时返回 null
+    expect(errorEn('PIN_INVALID')).toMatch(/PIN/);
+    expect(errorEn('DISH_SOLD_OUT')).toMatch(/sold out/);
+    expect(errorEn('PRICE_CHANGED')).toMatch(/price/i);
+    expect(errorEn('SOMETHING_NEW')).toBeNull();
+    for (const code of ['PIN_INVALID', 'DISH_SOLD_OUT', 'TAG_CHANGED', 'OFFLINE']) expect(errorEn(code), code).not.toMatch(/[一-鿿]/);
+    // 服务员那一步的字两种语言各一份：中文时只有中文；英文时英文在上、中文在下一行（显示时第二行小一号）
+    const note = both((t, l) => t.stillPending(l === 'en' ? 'Wrong order PIN' : '点单密码不对'));
+    expect(bothText(note, 'zh')).toBe('点单密码不对（原来那一单仍待确认）');
+    expect(bothText(note, 'en')).toBe('Wrong order PIN (the earlier order is still unconfirmed)\n点单密码不对（原来那一单仍待确认）');
+    expect(zh.pendingAmount(2, '88.00')).toBe('2 份 ¥88.00');
+    expect(en.pendingAmount(1, '28.00')).toBe('1 item · ¥28.00');
+    expect(en.exitBody.join(' ')).not.toMatch(/[一-鿿]/);
   });
 });
 
@@ -257,5 +285,53 @@ describe('早中晚时段（8.1.5，docs/EMENU.md 第 14.1 节）', () => {
     expect(describeCategoryHours({ periods: [], window: null }, P)).toBe('全天');
     expect(describeCategoryHours({ periods: ['breakfast', 'lunch', 'dinner'], window: null }, P)).toBe('全天');
     expect(describeCategoryHours({ periods: ['dinner', 'breakfast'], window: { start: hm(22), end: hm(2) } }, P)).toBe('早餐、晚餐 · 限 22:00–02:00');
+  });
+});
+
+describe('英文还缺哪些（8.1.6，docs/EMENU.md 第 15.6 节，QZ6）', () => {
+  const page = (dishIds: (number | null)[], title = '', titleEn = '', layout: EmenuCategoryAdmin['pages'][number]['layout'] = 'list_image') => ({ layout, title, titleEn, dishIds });
+  const dish = (id: number, name: string, nameEn: string, description = '', descriptionEn = '', active = true) => ({ id, name, nameEn, description, descriptionEn, active }) as EmenuDishAdmin;
+  const cat = (id: number, name: string, nameEn: string, pages: EmenuCategoryAdmin['pages'], active = true) =>
+    ({ id, name, nameEn, periods: [], window: null, sortOrder: id, active, version: 1, pages }) as EmenuCategoryAdmin;
+  it('只算客人看得到的：启用的分类、排进了启用分类的启用的菜、有小标题的版式；原文没有汉字的不算缺', () => {
+    const gaps = emenuEnglishGaps({
+      categories: [
+        cat(1, '中式午餐', '', [page([1, 2, null], '精品推荐', ''), page([3], '', '', 'cover')]),
+        cat(2, 'BBQ', '', [page([4], '招牌', '')]),
+        cat(3, '停用的分类', '', [page([5], '小标题', '')], false),
+      ],
+      dishes: [
+        dish(1, '砂锅鱼', '', '慢火', ''),
+        dish(2, '小炒肉', 'Stir-fried Pork', '香辣', 'Spicy'),
+        dish(3, '广式猪脚姜', 'Pork Trotter', '猪脚姜。', ''),
+        dish(4, 'Steak', ''),
+        dish(5, '只在停用分类里的菜', ''),
+        dish(6, '没排进菜单的菜', ''),
+        dish(7, '停用的菜', '', '', '', false),
+      ],
+      rules: {
+        avoidOptions: ['不加香菜', '少辣', '自定义忌口'],
+        serveOptions: ['即起', 'Rare'],
+        optionsEn: { 少辣: 'Mild' },
+        periods: [
+          { key: 'breakfast', name: '早餐', nameEn: 'Breakfast', start: 360 },
+          { key: 'lunch', name: '午市', nameEn: '', start: 660 },
+          { key: 'dinner', name: '晚餐', nameEn: 'Dinner', start: 1020 },
+        ],
+      },
+    });
+    expect(gaps.map((g) => `${g.kind}:${g.label}`)).toEqual([
+      'category:中式午餐',
+      'pageTitle:中式午餐 · 第 1 页「精品推荐」',
+      'pageTitle:BBQ · 第 1 页「招牌」',
+      'dishName:砂锅鱼',
+      'dishIntro:砂锅鱼',
+      'dishIntro:广式猪脚姜',
+      // 「不加香菜」「即起」系统自带英文；「少辣」后台填了；Rare 本来就是英文
+      'option:自定义忌口',
+      'period:午市',
+    ]);
+    expect(gaps.find((g) => g.kind === 'pageTitle')).toMatchObject({ categoryId: 1, page: 0 });
+    expect(gaps.find((g) => g.kind === 'option')).toMatchObject({ group: 'avoid' });
   });
 });

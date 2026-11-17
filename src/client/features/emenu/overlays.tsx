@@ -399,7 +399,7 @@ function Drawer({
         className={swap ? undefined : 'em-drawer'}
         data-em-out="drawer"
         role="dialog"
-        aria-label={title}
+        aria-label={t.main}
         onClick={(e) => e.stopPropagation()}
         style={{ ...box(1024 - 425.7 * k, 0, 425.7 * k, 768), background: 'var(--em-bg)' }}
         data-testid={testId}

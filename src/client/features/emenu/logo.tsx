@@ -26,7 +26,7 @@ const ROW = [
 /** 起始页中间的竖排字标（设计稿 78.6 × 76.6） */
 export function LogoStacked({ width = 78.64, className }: { width?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 78.645 76.633" width={width} className={className} role="img" aria-label="汤崎">
+    <svg viewBox="0 0 78.645 76.633" width={width} className={className} role="img" aria-label="汤崎 TANGQI">
       {STACKED.map((d) => (
         <path key={d.slice(0, 24)} fill="currentColor" d={d} />
       ))}
@@ -40,7 +40,7 @@ export const LOGO_ROW_RATIO = 79.809 / 15.441;
 /** 顶栏左上角的横排字标（设计稿 79.8 × 15.4；8.1.5 起高按右上角切换图标的 0.7 倍算） */
 export function LogoRow({ width = 79.81, className }: { width?: number; className?: string }) {
   return (
-    <svg viewBox="0 0 79.809 15.441" width={width} className={className} role="img" aria-label="汤崎">
+    <svg viewBox="0 0 79.809 15.441" width={width} className={className} role="img" aria-label="汤崎 TANGQI">
       {ROW.map((d) => (
         <path key={d.slice(0, 24)} fill="currentColor" d={d} />
       ))}
