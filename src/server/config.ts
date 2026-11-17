@@ -213,7 +213,7 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       .filter(Boolean),
     logLevel: process.env.LOG_LEVEL ?? (env === 'test' ? 'silent' : 'info'),
     // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉
-    version: (process.env.APP_VERSION || '8.1.5').replace(/^v/, ''),
+    version: (process.env.APP_VERSION || '8.1.6').replace(/^v/, ''),
     commit: /^[0-9a-f]{7,40}$/.test(process.env.APP_COMMIT ?? '') ? process.env.APP_COMMIT! : '',
     instance,
     initOwner: ownerUser && ownerPass ? { username: ownerUser, password: ownerPass, displayName: process.env.INIT_OWNER_NAME?.trim() || '店主' } : null,

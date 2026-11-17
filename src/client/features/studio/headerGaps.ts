@@ -55,7 +55,8 @@ export function editHeaderGap(boxes: ReadonlyMap<string, Box>, index: number, va
   const order = headerOrder(boxes);
   const c = order.indexOf(cats);
   if (!g || c < 0) return null;
-  const delta = value - g.value;
+  // 挪的量取到 0.1（位置都存到 0.1）：挪动的几块与分类那一边一起挪同样的量，别的间距一点不变
+  const delta = Math.round((value - g.value) * 10) / 10;
   if (Math.abs(delta) < 1e-9) return { moves: [], cats: null };
   const catsBox = boxes.get(cats)!;
   if (index <= c) {

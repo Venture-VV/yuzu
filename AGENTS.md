@@ -89,6 +89,7 @@ E2E_BASE_URL=… npx playwright test e2e/admin-ia.spec.ts   # 后台的信息架
 E2E_BASE_URL=… npx playwright test e2e/purchase-flow.spec.ts --project=门店电脑   # ERP 采购流程图（8.0.17，docs/FLOW_V8017.md）：用接口造流程 A 到货超期、流程 B 询价缺报价，核对「采购 → 流程进度」与各详情里嵌的流程
 E2E_BASE_URL=… npx playwright test e2e/motion.spec.ts --project=门店电脑   # 动效套件（8.0.16，docs/UI_V8016.md）：弹窗关掉马上卸掉、影子认不到、减少动态效果时不留影子、滑块跟着当前项
 E2E_BASE_URL=… npx playwright test e2e/emenu.spec.ts   # 点餐系统 · 平板电子菜单（8.0.10，docs/EMENU.md）：整套流程只在门店电脑这一组跑（平板那一段另开 1024×768 的窗口）；地址 /emenu，用「点餐平板」岗位的账号登录；8.0.13 起含中英切换、键盘适配与动效的只读用例；8.0.15 起含「放大、不要点单密码」的只读用例（整套流程与设计稿位置核对走的是「要密码、设计稿原样」）
+E2E_BASE_URL=… npx playwright test e2e/emenu-v816.spec.ts --project=门店电脑   # 8.1.6 二次整改（docs/HANDOFF_V816.md）：小米平板 6S Pro 12.4 大小（1355 × 903）上底色、压暗层、大图铺到屏幕边与右上角四样、服务员那一步的英文、装饰压不到大图上、工作台改顶栏（会写工作台的草稿、用完放回默认，不发布）
 npm run dev:canteen                        # 柚子饭堂（员工手机端，docs/CANTEEN.md）热更新：接口转到 CANTEEN_PORT（默认 8090）
 E2E_BASE_URL=… E2E_CANTEEN_URL=… npx playwright test -c playwright.canteen.config.ts   # 员工食堂的手机端流程（应用要开着员工端口、带 CANTEEN_PUSH_LOCAL_ENDPOINTS=true，库里有 seed-demo 的店主）；8.1.2 起含 studio.spec：工作台发布的员工食堂版面在员工手机上看得到、用完发回默认版面
 node scripts/check-ocr-assets.mjs [目录]   # 管家部本机 OCR 的第三方文件（8.0.12，docs/CONCIERGE.md「构建资源」）：按清单核对大小与 SHA-256；默认核对仓库里的，npm run build 的最后自动核对 dist 里的

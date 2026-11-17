@@ -421,7 +421,7 @@ export function TemplateCanvas({
               <div
                 key={side}
                 className="pointer-events-none absolute"
-                style={{ left: g.from * scale, top: y, width: len * scale, height: 0 }}
+                style={{ left: g.from * scale, top: y, width: len * scale, height: 1 }}
                 data-testid={`studio-gap-${side}`}
                 data-gap={round1(len)}
               >
