@@ -54,6 +54,24 @@ export const MenuStrip = forwardRef<StripHandle, { count: number; index: number;
       page: () => Math.round(pos.current / STAGE_W),
     }));
 
+    // 点分类跳过去的那一页轻微放大缓入（8.1.6，QZ4）：在原来的元素上播（Web 动画），不再换 key 把整页重建——重建时图片要重新出现
+    useLayoutEffect(() => {
+      if (!zoom || !live.current.animated) return;
+      const el = track.current?.querySelector<HTMLElement>(`:scope > [data-page="${zoom.index}"] > [data-page-body]`);
+      if (!el || typeof el.animate !== 'function') return;
+      const dur = parseFloat(getComputedStyle(el).getPropertyValue('--em-page')) || 0.62;
+      const ease = getComputedStyle(el).getPropertyValue('--em-ease').trim() || 'ease-out';
+      el.style.transformOrigin = '50% 56%';
+      const a = el.animate(
+        [
+          { opacity: 0, transform: 'scale(0.965)' },
+          { opacity: 1, transform: 'none' },
+        ],
+        { duration: dur * 1000, easing: ease },
+      );
+      return () => a.cancel();
+    }, [zoom]);
+
     // 刚出现时（页面被系统刷新后接着上一次点餐）停在外面记的那一页
     useLayoutEffect(() => {
       apply(live.current.index * STAGE_W, false);
@@ -153,12 +171,13 @@ export const MenuStrip = forwardRef<StripHandle, { count: number; index: number;
     }, []);
 
     return (
-      <div ref={viewport} className="emenu-strip" style={{ ...box(0, 0, STAGE_W, STAGE_H) }} data-testid="emenu-strip">
+      // 只在设计稿那一块里露出来（8.1.6：舞台铺到屏幕边、不再在 1024 处裁，左右翻时两边不露出相邻的页）
+      <div ref={viewport} className="emenu-strip" style={{ ...box(0, 0, STAGE_W, STAGE_H), overflow: 'hidden' }} data-testid="emenu-strip">
         <div ref={track} style={{ display: 'flex', width: count * STAGE_W, height: STAGE_H, willChange: 'transform' }}>
           {Array.from({ length: count }, (_, i) => (
             <div key={pageKey(i)} style={{ width: STAGE_W, height: STAGE_H, flex: 'none' }} data-page={i}>
               {Math.abs(i - index) <= 2 && (
-                <div key={zoom?.index === i ? `z${zoom.n}` : 'p'} className={zoom?.index === i ? 'em-page-in' : undefined} style={{ width: STAGE_W, height: STAGE_H }}>
+                <div style={{ width: STAGE_W, height: STAGE_H }} data-page-body>
                   {renderPage(i)}
                 </div>
               )}

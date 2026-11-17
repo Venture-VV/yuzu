@@ -7,7 +7,7 @@
 // 8.0.13（docs/EMENU.md 第 11 节）：「中 | EN」一键切换（i18n.tsx）、键盘弹起时页面不缩放（stage.tsx）、
 // 跟手翻页（strip.tsx）与进入 / 退出的动效（motion.tsx、emenu.css）。
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   dishBlock,
@@ -37,7 +37,7 @@ import { DishDetail, OrderDrawer, RemarkDrawer, SearchOverlay, type CartRow, typ
 import { flyToOrder, overlayNav } from './motion';
 import { PageCanvas, yuan, type PageCtx } from './pages';
 import { EmenuTemplatesProvider } from './templates';
-import { BIG, box, Stage, useBig } from './stage';
+import { BIG, Bleed, box, Stage, useBig } from './stage';
 import { MenuStrip, type StripHandle } from './strip';
 import { LangBlock, LogoBlock, LogoRowBlock, StartCoverBlock, StartFooterBlock, StartPendingBlock, StudioPreviewBand, StudioVersionMark, studioAssetUrl, useEmenuLayout } from './studio';
 import { colorValue, EMENU_SURFACE, type StudioDoc } from '@shared/studio';
@@ -57,6 +57,9 @@ import {
   type Remark,
   type TableSession,
 } from './store';
+
+/** 一页菜单页：内容（这一页的菜、这个分类的上下文）没变就不重画（8.1.6，QZ4）；语言、版面这些从上下文来，变了照样重画 */
+const MemoPage = memo(PageCanvas);
 
 /** 「未下单」一行要知道的：哪道菜、哪个规格、现在能不能点（收起来的分类里的菜只给菜名与规格） */
 interface CartHit {
@@ -521,6 +524,31 @@ export function EmenuPage() {
   }, [pending, phase, checkPending]);
 
   // ───────────── 页面 ─────────────
+  // 每一页菜单页的上下文（8.1.6，QZ4）：按分类各一份、只在分类或「闪一下的那道菜」变了时换新的——菜单页用 memo 包着，
+  // 开大图、开抽屉、加菜、弹提示时不再整组重画。点开、加菜的处理照最新的状态做（放在 ref 里）
+  const pageActs = useRef({ addSpec, setOverlay });
+  pageActs.current = { addSpec, setOverlay };
+  const pageCtxs = useMemo(() => {
+    const out = new Map<number, PageCtx>();
+    for (const c of categories) {
+      out.set(c.id, {
+        categoryName: c.name,
+        categoryNameEn: c.nameEn,
+        open: c.open,
+        flashId,
+        onOpen: (dish, origin) => pageActs.current.setOverlay({ kind: 'detail', dishId: dish.id, categoryId: c.id, origin }),
+        onAdd: (dish, from) => {
+          const usable = dish.specs.filter((s) => s.state === 'ok');
+          // 有几个规格的进详情选；只有一个的直接加
+          if (dish.specs.length > 1) pageActs.current.setOverlay({ kind: 'detail', dishId: dish.id, categoryId: c.id });
+          else pageActs.current.addSpec(dish, usable[0] ?? dish.specs[0]!, c.open, from);
+        },
+      });
+    }
+    return out;
+  }, [categories, flashId]);
+  const pageCtx = (f: FlatPage): PageCtx => pageCtxs.get(f.category.id)!;
+
   if (!menu) {
     return (
       <Stage testId="emenu">
@@ -568,20 +596,6 @@ export function EmenuPage() {
       </Stage>
     );
   }
-
-  const pageCtx = (f: FlatPage): PageCtx => ({
-    categoryName: f.category.name,
-    categoryNameEn: f.category.nameEn,
-    open: f.category.open,
-    flashId,
-    onOpen: (dish, origin) => setOverlay({ kind: 'detail', dishId: dish.id, categoryId: f.category.id, origin }),
-    onAdd: (dish, from) => {
-      const usable = dish.specs.filter((s) => s.state === 'ok');
-      // 有几个规格的进详情选；只有一个的直接加
-      if (dish.specs.length > 1) setOverlay({ kind: 'detail', dishId: dish.id, categoryId: f.category.id });
-      else addSpec(dish, usable[0] ?? dish.specs[0]!, f.category.open, from);
-    },
-  });
 
   const detail = (() => {
     if (overlay?.kind !== 'detail') return null;
@@ -633,69 +647,75 @@ export function EmenuPage() {
         {/* 卡片模板（8.1.2）：菜单页 11 种版式里每一块的位置照版面里设计师改过的 */}
         <EmenuTemplatesProvider templates={layout.doc.templates} dishStates={layout.doc.dishStates}>
           {inMenu ? (
-            // 菜单页的几块（UI 工作台的版面，8.1.1）：菜单页、顶栏（菜品详情在顶栏下面打开）、翻页圆点，以及设计师加的装饰
-            <StudioNodes
-              nodes={layout.doc.screens.menu?.nodes ?? []}
-              ctx={{
-                surface: EMENU_SURFACE,
-                lang: shown,
-                assetUrl: studioAssetUrl,
-                components: layout.doc.components,
-                blocks: {
-                  'menu.pages': () =>
-                    flat.length === 0 ? (
-                      <NoMenu menu={menu} />
-                    ) : (
-                      <div key={session.visitId} className="em-page-in" style={{ ...box(0, 0, 1024, 768) }}>
-                        <MenuStrip
-                          ref={strip}
-                          count={flat.length}
-                          index={Math.min(index, flat.length - 1)}
-                          onIndex={setIndex}
-                          pageKey={(i) => `${flat[i]!.category.id}-${flat[i]!.pageNo}`}
-                          renderPage={(i) => <PageCanvas page={flat[i]!.page} ctx={pageCtx(flat[i]!)} />}
+            <>
+              {/* 菜单页的几块（UI 工作台的版面，8.1.1）：菜单页、顶栏、翻页圆点，以及设计师加的装饰 */}
+              <StudioNodes
+                nodes={layout.doc.screens.menu?.nodes ?? []}
+                ctx={{
+                  surface: EMENU_SURFACE,
+                  lang: shown,
+                  assetUrl: studioAssetUrl,
+                  components: layout.doc.components,
+                  blocks: {
+                    'menu.pages': () =>
+                      flat.length === 0 ? (
+                        <NoMenu menu={menu} />
+                      ) : (
+                        <div key={session.visitId} className="em-page-in" style={{ ...box(0, 0, 1024, 768) }}>
+                          <MenuStrip
+                            ref={strip}
+                            count={flat.length}
+                            index={Math.min(index, flat.length - 1)}
+                            onIndex={setIndex}
+                            pageKey={(i) => `${flat[i]!.category.id}-${flat[i]!.pageNo}`}
+                            renderPage={(i) => <MemoPage page={flat[i]!.page} ctx={pageCtx(flat[i]!)} />}
+                          />
+                        </div>
+                      ),
+                    'menu.header': () => (
+                      <>
+                        <Header
+                          categories={categories}
+                          activeId={detail?.category.id ?? at?.category.id ?? null}
+                          onCategory={(id) => {
+                            setOverlay(null);
+                            const i = flat.findIndex((f) => f.category.id === id);
+                            // 直接到那个分类的第一页（不横向滚过中间的页），那一页轻微放大缓入
+                            if (i >= 0) goTo(i, 'zoom');
+                          }}
+                          tagCode={session.tagCode}
+                          count={count}
+                          bump={bump}
+                          pending={!!pending}
+                          onSearch={() => setOverlay({ kind: 'search' })}
+                          onOrder={() => setOverlay(pending ? { kind: 'pending' } : { kind: 'drawer', tab: 'cart' })}
+                          onTag={() => setOverlay({ kind: 'end' })}
+                          onLang={langOn ? toggleLang : undefined}
                         />
-                      </div>
+                      </>
                     ),
-                  'menu.header': () => (
-                    <>
-                      {detail && (
-                        <DishDetail
-                          dish={detail.dish}
-                          open={detail.category.open}
-                          origin={detail.origin}
-                          onClose={() => setOverlay(null)}
-                          onPrev={detail.prev}
-                          onNext={detail.next}
-                          onAdd={(spec, from) => addSpec(detail.dish, spec, detail.category.open, from)}
-                        />
-                      )}
-                      <Header
-                        categories={categories}
-                        activeId={detail?.category.id ?? at?.category.id ?? null}
-                        onCategory={(id) => {
-                          setOverlay(null);
-                          const i = flat.findIndex((f) => f.category.id === id);
-                          // 直接到那个分类的第一页（不横向滚过中间的页），那一页轻微放大缓入
-                          if (i >= 0) goTo(i, 'zoom');
-                        }}
-                        tagCode={session.tagCode}
-                        count={count}
-                        bump={bump}
-                        pending={!!pending}
-                        onSearch={() => setOverlay({ kind: 'search' })}
-                        onOrder={() => setOverlay(pending ? { kind: 'pending' } : { kind: 'drawer', tab: 'cart' })}
-                        onTag={() => setOverlay({ kind: 'end' })}
-                        onLang={langOn ? toggleLang : undefined}
-                      />
-                    </>
-                  ),
-                  'menu.dots': (n) => (!detail && at ? <PageDots flat={flat} index={index} onGo={goTo} width={n.w} /> : null),
-                  'brand.logo': (n) => <LogoBlock node={n} tone="var(--em-ink)" />,
-                  'brand.logoRow': (n) => <LogoRowBlock node={n} tone="var(--em-ink)" />,
-                },
-              }}
-            />
+                    'menu.dots': (n) => (!detail && at ? <PageDots flat={flat} index={index} onGo={goTo} width={n.w} /> : null),
+                    'brand.logo': (n) => <LogoBlock node={n} tone="var(--em-ink)" />,
+                    'brand.logoRow': (n) => <LogoRowBlock node={n} tone="var(--em-ink)" />,
+                  },
+                }}
+              />
+              {/*
+              菜品大图（8.1.6，QZ3）：单独一层，盖住整个菜单页与设计师加的装饰、翻页圆点，只让出顶栏那一条（顶栏里的几样照常能点）；
+              原来开在顶栏那一块里，排在顶栏后面的装饰会画到大图上面
+            */}
+              {detail && (
+                <DishDetail
+                  dish={detail.dish}
+                  open={detail.category.open}
+                  origin={detail.origin}
+                  onClose={() => setOverlay(null)}
+                  onPrev={detail.prev}
+                  onNext={detail.next}
+                  onAdd={(spec, from) => addSpec(detail.dish, spec, detail.category.open, from)}
+                />
+              )}
+            </>
           ) : (
             <StartPage
               menu={menu}
@@ -919,7 +939,7 @@ export function EmenuPage() {
 function StartBackdrop({ coverUrl }: { coverUrl: string | null }) {
   return (
     <>
-      <div style={{ ...box(0, 0, 1024, 768), background: 'var(--em-photo)' }} />
+      <Bleed style={{ background: 'var(--em-photo)' }} />
       {coverUrl && <img src={coverUrl} alt="" draggable={false} style={{ ...box(0, 0, 1024, 768), objectFit: 'cover' }} />}
       <div style={{ ...box(472.6, 342.8) }}>
         <LogoStacked />
@@ -965,7 +985,7 @@ function StartPage({
     assetUrl: studioAssetUrl,
     components: doc.components,
     blocks: {
-      'start.cover': (n) => <StartCoverBlock node={n} coverUrl={cover} />,
+      'start.cover': (n) => <StartCoverBlock node={n} coverUrl={cover} still={asking} />,
       'brand.logo': (n) => <LogoBlock node={n} tone={tone} />,
       'brand.logoRow': (n) => <LogoRowBlock node={n} tone={tone} />,
       'start.pending': (n) => <StartPendingBlock node={n} tone={tone} show={!asking && pending} />,
@@ -982,9 +1002,11 @@ function StartPage({
         aria-label={m.startAria}
         onClick={() => !asking && onStart()}
         className="em-settle"
-        style={{ ...box(0, 0, 1024, 768), background: colorValue(screen.background, EMENU_SURFACE.cssVar), cursor: asking ? undefined : 'pointer', overflow: 'hidden' }}
+        style={{ ...box(0, 0, 1024, 768), cursor: asking ? undefined : 'pointer' }}
         data-testid="emenu-start"
       >
+        {/* 这一屏的底色铺到屏幕边（8.1.6 出血，QZ2）；点两边与点中间一样开始点餐 */}
+        <Bleed style={{ background: colorValue(screen.background, EMENU_SURFACE.cssVar) }} />
         <StudioNodes nodes={screen.nodes} ctx={ctx} layer="content" />
         <StudioVersionMark version={version} tone={tone} />
       </div>

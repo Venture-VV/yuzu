@@ -121,7 +121,7 @@ export function Header({
         <LogoRow width={logoH * LOGO_ROW_RATIO} className="block" />
       </div>
       {/* 选中的分类下面的光晕：换分类时滑过去 */}
-      {activeAt >= 0 && <span className="em-cat-glow" style={{ left: first + activeAt * gap - gap / 2 + 6, top: 57 - 27 * kc, width: gap - 12, height: 52 * kc }} />}
+      {activeAt >= 0 && <span className="em-cat-glow" style={{ left: 0, transform: `translateX(${first + activeAt * gap - gap / 2 + 6}px)`, top: 57 - 27 * kc, width: gap - 12, height: 52 * kc }} />}
       {categories.map((c, i) => {
         const on = c.id === activeId;
         const name = namePair(c.name, c.nameEn, lang);

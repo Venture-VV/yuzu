@@ -15,7 +15,7 @@ import { blockScale } from '../../studio-render/StudioNodes';
 import { LANG_ICON, LangToggle } from './header';
 import type { Lang } from './i18n';
 import { LogoRow, LogoStacked } from './logo';
-import { BIG, box, useBig } from './stage';
+import { BIG, box, STAGE_H, STAGE_W, useBig, useBleed } from './stage';
 
 export const studioAssetUrl = (id: string) => `/api/studio/assets/${id}`;
 
@@ -102,13 +102,30 @@ const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.i
 // ───────────────────────── 起始页的几块 ─────────────────────────
 
 /** 氛围大图：后台传的那张铺满这一块，极慢地放大缩小（24 秒一个来回），压一层暗 */
-export function StartCoverBlock({ node, coverUrl }: { node: StudioBlockNode; coverUrl: string | null }) {
+/**
+ * 起始页的氛围大图。铺满整个画布（默认的位置）时往外铺到屏幕边（8.1.6 出血，QZ2）；设计师挪小了就只画在那一块里。
+ * still：输入信息的弹窗开着时停住慢慢放大缩小——弹窗后面是一层虚化，图一动虚化就得每一帧重算，大屏的平板上会卡（QZ4）。
+ */
+export function StartCoverBlock({ node, coverUrl, still }: { node: StudioBlockNode; coverUrl: string | null; still?: boolean }) {
+  const bleed = useBleed();
   if (!coverUrl) return null;
   const dim = num(node.props.dim, 0.18);
+  const full = node.x <= 0.5 && node.y <= 0.5 && node.w >= STAGE_W - 0.5 && node.h >= STAGE_H - 0.5;
+  const bx = full ? bleed.x : 0;
+  const by = full ? bleed.y : 0;
+  const frame = { position: 'absolute' as const, left: -bx, top: -by, right: -bx, bottom: -by };
   return (
-    <div style={{ ...box(0, 0, node.w, node.h), overflow: 'hidden' }}>
-      <img src={coverUrl} alt="" draggable={false} className={node.props.kenburns === false ? undefined : 'em-kenburns'} style={{ ...box(0, 0, node.w, node.h), objectFit: 'cover' }} />
-      {dim > 0 && <div style={{ ...box(0, 0, node.w, node.h), background: `rgb(0 0 0 / ${dim})` }} />}
+    <div style={{ ...box(0, 0, node.w, node.h) }}>
+      <div style={{ ...frame, overflow: 'hidden' }}>
+        <img
+          src={coverUrl}
+          alt=""
+          draggable={false}
+          className={node.props.kenburns === false ? undefined : 'em-kenburns'}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', animationPlayState: still ? 'paused' : undefined }}
+        />
+        {dim > 0 && <div style={{ position: 'absolute', inset: 0, background: `rgb(0 0 0 / ${dim})` }} />}
+      </div>
     </div>
   );
 }

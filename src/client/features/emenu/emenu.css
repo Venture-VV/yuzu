@@ -152,7 +152,8 @@
 }
 @keyframes em-drawer {
   from {
-    transform: translateX(100%);
+    /* 8.1.6：多走出血那一段（抽屉的底铺到了屏幕边），开始时整块都在屏幕外面 */
+    transform: translateX(calc(100% + var(--em-bleed-x, 0px)));
   }
   to {
     transform: none;
@@ -288,7 +289,7 @@
 }
 @keyframes em-drawer-out {
   to {
-    transform: translateX(100%);
+    transform: translateX(calc(100% + var(--em-bleed-x, 0px)));
   }
 }
 @keyframes em-zoom-out {
@@ -467,8 +468,9 @@
   position: absolute;
   pointer-events: none;
   background: radial-gradient(ellipse 60% 85% at 50% 100%, rgb(166 148 122 / 0.2), rgb(166 148 122 / 0.06) 55%, transparent 75%);
+  /* 8.1.6（QZ4）：滑过去只动位移（原来动左边距，每一帧都要重新排版）；宽只在分类数变了时变 */
   transition:
-    left var(--em-page) var(--em-ease),
+    transform var(--em-page) var(--em-ease),
     width var(--em-page) var(--em-ease);
 }
 .emenu .em-cat-glow::after {

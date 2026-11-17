@@ -28,7 +28,7 @@ import { PageCanvas } from '../emenu/pages';
 import { EmenuTemplatesProvider } from '../emenu/templates';
 import { StudioNodes } from '../../studio-render/StudioNodes';
 import { cn } from '../../lib/utils';
-import { round1, screenOf, snapBox, type Box, type Guide } from './model';
+import { frameBatcher, round1, screenOf, snapBox, type Box, type Guide } from './model';
 import { pageInState } from './templateModel';
 
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
@@ -92,6 +92,10 @@ export function TemplateCanvas({
   const layer = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
+  // 拖动、拉大小时每一帧最多交一次改动（8.1.6，QZ4）；松手时先交完再记撤销
+  const onLiveRef = useRef(onLive);
+  onLiveRef.current = onLive;
+  const live = useMemo(() => frameBatcher<StudioDoc>((d) => onLiveRef.current(d)), []);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [hover, setHover] = useState<string | null>(null);
   const W = surface.size.w;
@@ -201,7 +205,7 @@ export function TemplateCanvas({
       dy += snap.dy;
       setGuides(snap.guides);
       const next: Partial<EmenuSlotSpot> = d.spot.bottom !== undefined ? { x: round1(d.spot.x + dx), bottom: round1(d.spot.bottom + dy) } : { x: round1(d.spot.x + dx), y: round1(d.spot.y + dy) };
-      onLive(setSlotSpot(d.before, layout, d.key, mode, next));
+      live.push(setSlotSpot(d.before, layout, d.key, mode, next));
       return;
     }
     const can = slotResizable(s.def);
@@ -236,7 +240,7 @@ export function TemplateCanvas({
     }
     const next: Partial<EmenuSlotSpot> = { x: round1(x), w: round1(w) };
     if (can.h) Object.assign(next, { y: round1(y), h: round1(hh) });
-    onLive(setSlotSpot(d.before, layout, d.key, mode, next));
+    live.push(setSlotSpot(d.before, layout, d.key, mode, next));
   };
 
   const end = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -244,6 +248,7 @@ export function TemplateCanvas({
     drag.current = null;
     setGuides([]);
     if (layer.current?.hasPointerCapture(e.pointerId)) layer.current.releasePointerCapture(e.pointerId);
+    live.flush();
     if (d?.moved) onCommit(d.before);
   };
 

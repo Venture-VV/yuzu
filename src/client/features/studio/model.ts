@@ -488,3 +488,31 @@ export function deleteComponent(doc: StudioDoc, cid: string): StudioDoc {
   if (!Object.keys(all).length) delete next.components;
   return next;
 }
+
+/**
+ * 拖动、拉大小时把改动合并到每一帧最多一次（8.1.6，QZ4）：144 Hz 的平板上手指一秒报一两百次位置，每次都整张画布重画会卡。
+ * push 记下最新的一份、下一帧交出去；松手时 flush 马上交出还没交的那一份（再记撤销）。
+ */
+export function frameBatcher<T>(deliver: (v: T) => void) {
+  let latest: { v: T } | null = null;
+  let raf = 0;
+  const run = () => {
+    raf = 0;
+    const got = latest;
+    latest = null;
+    if (got) deliver(got.v);
+  };
+  return {
+    push(v: T) {
+      latest = { v };
+      if (!raf) raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(run) : (setTimeout(run, 16) as unknown as number);
+    },
+    flush() {
+      if (raf) {
+        if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf);
+        else clearTimeout(raf);
+      }
+      run();
+    },
+  };
+}

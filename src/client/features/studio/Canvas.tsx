@@ -5,12 +5,12 @@
 // 8.1.2：手机界面（小程序、员工食堂）按 375 宽画，屏往下长；自动排列（横排、竖排）里的节点位置由渲染出来的页面量
 // （按 x / y 算不准），不能拖着挪（按先后排：方向键、图层里的上下），改大小可以（改了的那一边变成「固定」）。
 
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { colorValue, type StudioBlockNode, type StudioDoc, type StudioNode, type StudioSurfaceDef } from '@shared/studio';
 import { EmbeddedStage } from '../emenu/stage';
 import { LangProvider, type Lang } from '../emenu/i18n';
 import { StudioNodes, StudioPhoneScreen } from '../../studio-render/StudioNodes';
-import { absBox, findNode, geometryRules, hitTest, round1, screenOf, snapBox, updateNodes, type Box, type Guide } from './model';
+import { absBox, findNode, frameBatcher, geometryRules, hitTest, round1, screenOf, snapBox, updateNodes, type Box, type Guide } from './model';
 
 type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 const HANDLES: Handle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
@@ -67,6 +67,10 @@ export function StudioCanvas({
   const layer = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
+  // 拖动、拉大小时每一帧最多交一次改动（8.1.6，QZ4）；松手时先交完再记撤销
+  const onLiveRef = useRef(onLive);
+  onLiveRef.current = onLive;
+  const live = useMemo(() => frameBatcher<StudioDoc>((d) => onLiveRef.current(d)), []);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [hover, setHover] = useState<string | null>(null);
   const s = screenOf(doc, screen);
@@ -242,7 +246,7 @@ export function StudioCanvas({
         patches[id] = { ...patch, sizing };
       } else patches[id] = { x: round1(x), y: round1(y), w: round1(w), h: round1(hh) };
     }
-    onLive(updateNodes(d.before, screen, patches));
+    live.push(updateNodes(d.before, screen, patches));
   };
 
   const end = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -250,6 +254,7 @@ export function StudioCanvas({
     drag.current = null;
     setGuides([]);
     if (layer.current?.hasPointerCapture(e.pointerId)) layer.current.releasePointerCapture(e.pointerId);
+    live.flush();
     if (d?.moved) onCommit(d.before);
   };
 

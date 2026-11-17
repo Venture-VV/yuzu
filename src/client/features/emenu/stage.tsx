@@ -5,8 +5,8 @@
 // 键盘盖住输入框时整页往上挪到输入框露出来。动效的总开关也在这里：系统「减少动态效果」或后台设成「简洁」时
 // 舞台带 data-motion="off"，emenu.css 里所有动画、过渡都关掉。
 
-import { createContext, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { useBrandFont } from './brandFont';
+import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useBrandFont, warmEmenuFonts } from './brandFont';
 import { nextStable, STAGE_H, STAGE_W, stageLayout, type StableSize, type StageLayout, type ViewportNow } from './viewport';
 import './emenu.css';
 
@@ -21,7 +21,11 @@ interface StageInfo {
   keyboard: boolean;
   /** 动效开着（系统没有要求减少动态效果、后台也没设成简洁） */
   animated: boolean;
+  /** 出血（8.1.6）：屏幕比设计稿多出来的那一圈（设计稿的像素，左右各 x、上下各 y）；工作台的画布、4:3 的屏是 0 */
+  bleed: { x: number; y: number };
 }
+
+const NO_BLEED = { x: 0, y: 0 } as const;
 
 /**
  * 字与按钮放大的一档（8.0.15，docs/EMENU.md 第 12 节）：后台「电子菜单 → 设置 → 字与按钮的大小」是「放大」时为 true。
@@ -52,10 +56,25 @@ export function ZoomAt({ x, y, k, children, style }: { x: number; y: number; k: 
   return <div style={{ position: 'absolute', left: x, top: y, width: 0, height: 0, transform: k === 1 ? undefined : `scale(${k})`, transformOrigin: '0 0', ...style }}>{children}</div>;
 }
 
-const StageContext = createContext<StageInfo>({ scale: 1, visible: STAGE_H, keyboard: false, animated: false });
+const StageContext = createContext<StageInfo>({ scale: 1, visible: STAGE_H, keyboard: false, animated: false, bleed: NO_BLEED });
 export const useStage = () => useContext(StageContext);
 /** 现在缩放到多少倍（把屏幕上的距离换算回设计稿的像素用） */
 export const useStageScale = () => useContext(StageContext).scale;
+/** 出血（8.1.6）：屏幕比设计稿多出来的那一圈 */
+export const useBleed = () => useContext(StageContext).bleed;
+
+/**
+ * 铺到屏幕边的一层（8.1.6，docs/EMENU.md 第 15.2 节）：放在一个占满设计稿宽度的块里（左 0、宽 1024），往指定的几边伸出出血那么多。
+ * 只画底（底色、压暗、大图），点按照旧落到它所在的那一块；里面的东西照旧按设计稿的坐标写在它外面。
+ * sides：all 四边都伸；x 左右；xb 左右与下边（顶栏下面的大图）；right 右边与上下（右侧抽屉）。
+ */
+export function Bleed({ sides = 'all', style, className, testId }: { sides?: 'all' | 'x' | 'xb' | 'right'; style?: CSSProperties; className?: string; testId?: string }) {
+  const b = useBleed();
+  const top = sides === 'all' || sides === 'right' ? -b.y : 0;
+  const bottom = sides === 'x' ? 0 : -b.y;
+  const left = sides === 'right' ? 0 : -b.x;
+  return <div aria-hidden className={className} style={{ position: 'absolute', left, right: -b.x, top, bottom, ...style }} data-testid={testId} />;
+}
 
 const isEditable = (el: Element | null): el is HTMLElement =>
   !!el &&
@@ -72,7 +91,7 @@ function readViewport(lastEditAt: number): ViewportNow {
   return { width: window.innerWidth, height: window.innerHeight, visibleTop: vv?.offsetTop ?? 0, visibleHeight: vv?.height ?? window.innerHeight, editing };
 }
 
-const INITIAL: StageLayout = { scale: 1, left: 0, top: 0, shift: 0, visible: STAGE_H, keyboard: false };
+const INITIAL: StageLayout = { scale: 1, left: 0, top: 0, shift: 0, visible: STAGE_H, keyboard: false, bleedX: 0, bleedY: 0 };
 
 export function Stage({
   children,
@@ -99,6 +118,9 @@ export function Stage({
   const [height, setHeight] = useState<number | null>(null);
   const [reduce, setReduce] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
+  // 字体开机就备好（第一次切英文不等下载，8.1.6）
+  useLayoutEffect(() => warmEmenuFonts(), []);
+
   useLayoutEffect(() => {
     let timer = 0;
     const update = () => {
@@ -112,7 +134,9 @@ export function Stage({
       const focusBottom = isEditable(el) && stageEl.current?.contains(el) ? el.getBoundingClientRect().bottom - stageTop + base.top : null;
       const next = stageLayout(stable.current, now, focusBottom);
       setHeight(stable.current.h);
-      setLayout((cur) => (cur.scale === next.scale && cur.left === next.left && cur.top === next.top && cur.visible === next.visible && cur.keyboard === next.keyboard ? cur : next));
+      setLayout((cur) =>
+        cur.scale === next.scale && cur.left === next.left && cur.top === next.top && cur.visible === next.visible && cur.keyboard === next.keyboard && cur.bleedY === next.bleedY ? cur : next,
+      );
     };
     const onFocusOut = () => {
       lastEditAt.current = Date.now();
@@ -146,8 +170,12 @@ export function Stage({
 
   const animated = motion && !reduce;
   const brandEn = useBrandFont();
+  // 出血（8.1.6）：两边、上下多出来的那一圈。一次布局里同一个对象，免得下面的人白白重画
+  const bx = layout.bleedX;
+  const by = layout.bleedY;
+  const bleed = useMemo(() => ({ x: bx, y: by }), [bx, by]);
   return (
-    <StageContext.Provider value={{ scale: layout.scale, visible: layout.visible, keyboard: layout.keyboard, animated }}>
+    <StageContext.Provider value={{ scale: layout.scale, visible: layout.visible, keyboard: layout.keyboard, animated, bleed }}>
       <BigContext.Provider value={big}>
         <div
           className="emenu"
@@ -160,25 +188,37 @@ export function Stage({
           data-keyboard={layout.keyboard || undefined}
           data-testid={testId}
         >
+          {/*
+            舞台（8.1.6 起分两层）：外面一层铺满屏幕（设计稿外再加出血那一圈）、在屏幕边上裁；里面一层是 1024 × 768 的设计稿，
+            居中、不裁——底色、压暗层、大图可以从里面往外铺到屏幕边（Bleed），别的东西照旧按设计稿的坐标写。
+          */}
           <div
-            ref={stageEl}
             style={{
               position: 'absolute',
-              left: layout.left,
-              top: layout.top,
-              width: STAGE_W,
-              height: STAGE_H,
+              left: layout.left - bx * layout.scale,
+              top: layout.top - by * layout.scale,
+              width: STAGE_W + 2 * bx,
+              height: STAGE_H + 2 * by,
               transform: `scale(${layout.scale})`,
               transformOrigin: '0 0',
               overflow: 'hidden',
               background: 'var(--em-bg)',
               transition: layout.keyboard || layout.shift ? 'top 0.28s ease' : undefined,
             }}
-            data-emenu-stage
           >
-            {children}
-            {/* 退场的影子、飞向订单的小圆点画在这一层（motion.tsx 直接往里放节点，React 不管它的内容） */}
-            <div data-emenu-ghosts aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }} />
+            <div
+              ref={stageEl}
+              style={{ position: 'absolute', left: bx, top: by, width: STAGE_W, height: STAGE_H, ['--em-bleed-x' as string]: `${bx}px`, ['--em-bleed-y' as string]: `${by}px` }}
+              data-emenu-stage
+              data-bleed-x={bx > 0.5 ? Math.round(bx * 10) / 10 : undefined}
+            >
+              {children}
+              {/*
+                退场的影子、飞向订单的小圆点画在这一层（motion.tsx 直接往里放节点，React 不管它的内容）。原点与设计稿一致（影子照原来的
+                坐标放），不裁：影子里铺到出血那一圈的底照样看得见，屏幕边由外面一层裁
+              */}
+              <div data-emenu-ghosts aria-hidden style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
+            </div>
           </div>
         </div>
       </BigContext.Provider>
@@ -207,7 +247,7 @@ export function EmbeddedStage({
 }) {
   const brandEn = useBrandFont();
   return (
-    <StageContext.Provider value={{ scale, visible: STAGE_H, keyboard: false, animated: false }}>
+    <StageContext.Provider value={{ scale, visible: STAGE_H, keyboard: false, animated: false, bleed: NO_BLEED }}>
       <BigContext.Provider value={big}>
         <div
           className="emenu"

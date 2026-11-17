@@ -5,7 +5,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { namePair, useLang, useM } from './i18n';
 import { BackspaceIcon, CheckMark } from './icons';
 import { useExitGhost } from './motion';
-import { BIG, box, Hairline, useBig } from './stage';
+import { BIG, Bleed, box, Hairline, useBig } from './stage';
 
 /** 弹窗的位置与大小（设计稿） */
 const M = { x: 297.5, y: 133.7, w: 429.1, h: 500.6 };
@@ -28,18 +28,16 @@ export function Backdrop({
   // 关掉时留一个影子播退场动画（motion.tsx）：背景淡出，里面的弹窗缩小、抽屉滑出
   const ref = useExitGhost<HTMLDivElement>(kind);
   return (
-    <div
-      ref={ref}
-      className={still ? undefined : 'em-fade'}
-      onClick={onClick}
-      data-em-kind={kind}
-      style={{
-        ...box(0, 0, 1024, 768),
-        background: blur ? 'rgb(211 211 211 / 0.55)' : 'rgb(0 0 0 / 0.4)',
-        backdropFilter: blur ? 'blur(14px)' : undefined,
-        WebkitBackdropFilter: blur ? 'blur(14px)' : undefined,
-      }}
-    >
+    <div ref={ref} className={still ? undefined : 'em-fade'} onClick={onClick} data-em-kind={kind} style={box(0, 0, 1024, 768)}>
+      {/* 压暗（或虚化）的那一层铺到屏幕边（8.1.6 出血，QZ2）：点两边空出来的地方与点压暗层一样（事件冒泡到这一块） */}
+      <Bleed
+        style={{
+          background: blur ? 'rgb(211 211 211 / 0.55)' : 'rgb(0 0 0 / 0.4)',
+          backdropFilter: blur ? 'blur(14px)' : undefined,
+          WebkitBackdropFilter: blur ? 'blur(14px)' : undefined,
+        }}
+        testId="emenu-backdrop-fill"
+      />
       {children}
     </div>
   );
