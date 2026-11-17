@@ -311,6 +311,8 @@ export function TemplateCanvas({
   // 顶栏：选中（拖着）的那一块与左右相邻两块之间的间距（平板上看不到的中英切换不算）
   const headBoxes = isHead ? new Map(slots.filter((x) => !ghost(x)).map((x) => [x.def.key, boxOf(x)] as const)) : null;
   const gaps = headBoxes && sel && !ghost(sel) ? neighborGaps(headBoxes, sel.def.key) : null;
+  /** 正拖着（或拉着大小）：画的时候每一帧都会走到这里（改动一推版面就重画） */
+  const dragging = !!drag.current?.moved;
   const background = colorValue(menuScreen.background, surface.cssVar);
   const ctx = { surface, lang, assetUrl: (id: string) => `/api/studio/assets/${id}`, blocks: pageBlocks, editor: true, components: doc.components };
 
@@ -361,7 +363,8 @@ export function TemplateCanvas({
         })}
         {/* 名字：选中的与鼠标指着的 */}
         {slots
-          .filter((s) => s.def.key === selected || (s.def.key === hover && !drag.current))
+          // 拖着的时候只看间距（名字、大小的小牌子收起来，免得叠在小图标的间距数上）
+          .filter((s) => !dragging && (s.def.key === selected || (s.def.key === hover && !drag.current)))
           .map((s) => {
             const b = boxOf(s);
             const on = s.def.key === selected;
@@ -387,7 +390,7 @@ export function TemplateCanvas({
               data-testid={`studio-slot-handle-${h}`}
             />
           ))}
-        {sel && selBox && (
+        {sel && selBox && !dragging && (
           <div
             className="pointer-events-none absolute rounded bg-[#2f7cf6] px-1.5 py-0.5 text-[11px] leading-none text-white tabular-nums"
             style={{ left: selBox.x * scale, top: (selBox.y + selBox.h) * scale + 6 }}
@@ -403,13 +406,15 @@ export function TemplateCanvas({
             const g = gaps[side];
             const len = g.to - g.from;
             const y = (selBox.y + selBox.h / 2) * scale;
+            // 数写在哪：拖着时写在线上面；只是选中时写在下面那个「宽 × 高」的小牌子再下面（不压着块的名字）
+            const labelTop = dragging ? -19 : (selBox.y + selBox.h) * scale - y + 26;
             // 叠在一起了：在叠住的那一段上标「叠 N」
             if (len <= -0.05)
               return (
                 <div
                   key={side}
                   className="pointer-events-none absolute -translate-x-1/2 whitespace-nowrap rounded bg-[#d9822b] px-1 py-px text-[10.5px] leading-none text-white tabular-nums"
-                  style={{ left: ((g.from + g.to) / 2) * scale, top: y - 19 }}
+                  style={{ left: ((g.from + g.to) / 2) * scale, top: y + labelTop }}
                   data-testid={`studio-gap-${side}`}
                   data-gap={round1(len)}
                 >
@@ -428,7 +433,7 @@ export function TemplateCanvas({
                 <div className="absolute inset-x-0 top-0 h-px bg-[#f2545b]" />
                 <div className="absolute left-0 top-[-4px] h-[9px] w-px bg-[#f2545b]" />
                 <div className="absolute right-0 top-[-4px] h-[9px] w-px bg-[#f2545b]" />
-                <div className="absolute left-1/2 top-[-19px] -translate-x-1/2 whitespace-nowrap rounded bg-[#f2545b] px-1 py-px text-[10.5px] leading-none text-white tabular-nums">
+                <div className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-[#f2545b] px-1 py-px text-[10.5px] leading-none text-white tabular-nums" style={{ top: labelTop }}>
                   {round1(len).toFixed(1)}
                 </div>
               </div>
