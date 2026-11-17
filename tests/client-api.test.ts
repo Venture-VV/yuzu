@@ -170,4 +170,25 @@ describe('连不上服务器时不发（WL4）', () => {
     await expect(mod.request('POST', '/api/c', {})).resolves.toEqual({ ok: 4 });
     expect(posted).toEqual(['/api/c']);
   });
+
+  it('请求发不出去时还在路上的那次检查，后来成功回来也不算数：再问一次，断了照样判定断了（8.1.5）', async () => {
+    vi.useFakeTimers();
+    const conn = await import('../src/client/lib/connection');
+    let down = false;
+    const held: { release?: () => void } = {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url === '/api/ping' && !down && !held.release) return new Promise<Response>((resolve) => (held.release = () => resolve(json(200, PING))));
+        return Promise.reject(new TypeError('Failed to fetch'));
+      }),
+    );
+    const before = conn.probe(); // 断网以前发出去的那次检查
+    down = true; // 这时网断了
+    conn.noteNetworkFailure(); // 一个请求发不出去
+    held.release!(); // 那次检查这时才成功回来
+    await expect(before).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(conn.connectionSnapshot().state).toBe('offline');
+  });
 });

@@ -26,6 +26,8 @@
 4. **中英切换图标**（PP6）：`src/client/features/emenu/assets/lang-en.png`、`lang-zh.png`（品牌给的原图，191 × 191 四倍图，打包时内联进页面）。22.3 见方，放大一档 × 1.3；顶栏里右边仍在 774（原来开关的右边）、起始页仍贴在 984；换语言时两张图交叉淡入（动效关着时直接换）。按钮上 `data-shows` 写着现在显示的是哪一张。工作台起始页的「中英切换」块还是原来的 48 × 22.3（已发布的版面照常用），图标靠右放在框里；「深浅」是浅色时外加一圈很淡的描边。
 5. **左上角字标**（PP7）：高 = 切换图标的高 × 0.7（原样 15.6、放大一档 20.3），宽按字标比例（80.7 / 104.9），左边 40，中线对齐右边几样（55.45）。
 6. **用例隔离**（PR #117 的报告）：`vitest.config.ts` 开跑前去掉只给应用用的开关（模拟、正式接口密钥、`YUZU_AI_*`、访问网段与频率限制），`docs/TESTING.md` 记了一条。
+7. **断网提示的一处时序**（`src/client/lib/connection.ts`）：断网以前发出去的那次连接检查，断网以后才成功回来时，会把断网吞掉，提示条要等 60 秒的心跳。现在网卡断开、网卡恢复、请求发不出去这三种信号来时，有一次检查还在路上就等它回来再问一次（`probe({ fresh: true })`）。`docs/RESILIENCE_V813.md` 第 3.2 节补了一条。
+8. **8.1.4 验收报的 P2**（[报告](https://github.com/Venture-VV/yuzu/pull/122#issuecomment-6933542222)）：`e2e/resilience.spec.ts`「页面代码一直下载不下来」原来要求页面代码正好请求 2 次，测试会话的 Chromium 156 是 4 次——它 1 秒后再导入时会重新去取，Playwright 自带的 153 不会。页面行为一样（只自动重新加载一次，之后给「重新加载」按钮），用例改成核对整页只加载两次、给了按钮以后不再下载也不再刷新，下载 2–4 次都认。`lazyPage.tsx` 的注释与 `docs/RESILIENCE_V813.md` 第 3.4 节写明两种浏览器的差别。
 
 ## 2. 迁移、演示数据与固定预期
 
@@ -39,6 +41,7 @@
 - 浏览器：`e2e/emenu.spec.ts` 在设计稿位置那一条加字标、切换图标、带图片加号间距的核对，放大一档那一条加同样的比例核对，整套流程里加文字陈列的加号间距；新加「早中晚时段」（到点自动再取、提示、上一段的菜标当前时段不可售，并核对是到点取的、不是 15 秒的刷新）与「授权的英文字体」（没放时不换、放了换上并去掉补的字距）；`e2e/studio.spec.ts` 加「时段」下拉。本机在照 CI 准备的库上：`e2e/emenu.spec.ts`、`e2e/studio.spec.ts` 全部尺寸 15 条过、其余按尺寸跳过。
 - 截图逐屏看过（1024 × 768，原样 / 放大，中文 / EN）：顶栏、起始页、两菜并排、封面、图文列表、三菜错落、文字陈列；后台的时段设置与分类弹窗。量出来：原样字标 80.7 × 15.6、中线 55.4，切换图标 751.7 起 22.3 见方；放大一档字标 104.9 × 20.3、切换图标 29 见方，两者比 0.70。
 - 类型检查、`npm run check:code`、`npm run format:check`、构建都过；全量用例见 PR 上的 CI。
+- 第 1 节第 7、8 条：`tests/client-api.test.ts` 新加「请求发不出去时还在路上的那次检查」，`e2e/resilience.spec.ts` 新加「断网以前发出去的那次检查，断网以后才成功回来」（拦住一次 `/api/ping` 的回复，断网以后才放回去）。两条都先在改之前跑过、确实不过（提示条 10 秒内没出来），改了以后过。整份 `e2e/resilience.spec.ts` 在刚启动的应用上 8 条全过；断网的两条与「一直下载不下来」重复三次，9 次全过。
 
 ## 4. 验收要点
 
@@ -48,6 +51,7 @@
 4. **加号**：有图的版式加号离菜名约 4.5 个加号宽；文字陈列与图文列表六格约 2.5 个；名字很长时加号仍在这一块里、不压价格。中文、EN、原样、放大四种都看。
 5. **切换图标**：中文时是「En」、英文时是「中」；顶栏、起始页的位置；工作台起始页那一块照常能挪、能缩放。
 6. **字标**：放大一档时字标明显比 8.1.4 大，高是切换图标的 0.7、中线对齐；原样几乎不变。
+7. **网络波动防护**：跑 `e2e/resilience.spec.ts`（门店电脑）。用 Playwright 自带的 Chromium 与更新的 Chromium 都跑一次的话，「页面代码一直下载不下来」两种都应该过。
 
 ## 5. 已知的限度
 
@@ -61,4 +65,4 @@
 
 ## 7. 可复制给测试 AI 的指令
 
-> 【主线·测试】请在 PR #122 的最新提交上预检 8.1.5（合并后在 main `v8.1.5` 上验收）：新建独立演示库（`APP_ENV=development`、`YUZU_INSTANCE=demo`），照 CI 的五套演示数据准备后启动应用。跑 `npm run check:code`、`npm run format:check`、`tests/emenu.test.ts`、`tests/emenu-client.test.ts`、`tests/compose-config.test.ts`，浏览器 `E2E_BASE_URL=… npx playwright test e2e/emenu.spec.ts e2e/studio.spec.ts`（全部尺寸）。按 `docs/HANDOFF_V815.md` 第 4 节逐项走；第 3 项用一个开源的 WOFF2 代替授权文件，**不要用店主给的 ABC Arizona Flare 试用版**。不要在试用库、正式库上跑。报告第一行写「【主线·测试】→ 主线 · PR #122 · <完整 SHA>」。
+> 【主线·测试】请在 PR #122 的最新提交上预检 8.1.5（合并后在 main `v8.1.5` 上验收）：新建独立演示库（`APP_ENV=development`、`YUZU_INSTANCE=demo`），照 CI 的五套演示数据准备后启动应用。跑 `npm run check:code`、`npm run format:check`、`tests/emenu.test.ts`、`tests/emenu-client.test.ts`、`tests/compose-config.test.ts`，浏览器 `E2E_BASE_URL=… npx playwright test e2e/emenu.spec.ts e2e/studio.spec.ts`（全部尺寸），另跑 `e2e/resilience.spec.ts --project=门店电脑`。按 `docs/HANDOFF_V815.md` 第 4 节逐项走；第 3 项用一个开源的 WOFF2 代替授权文件，**不要用店主给的 ABC Arizona Flare 试用版**。不要在试用库、正式库上跑。报告第一行写「【主线·测试】→ 主线 · PR #122 · <完整 SHA>」。

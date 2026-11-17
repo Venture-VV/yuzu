@@ -57,6 +57,25 @@ test('断网：顶上提示数据截至几点、提交不会发出去；「网�
   await expect(page.getByTestId('network-banner')).toHaveCount(0, { timeout: 10_000 });
 });
 
+test('断网以前发出去的那次检查，断网以后才成功回来：照样很快提示断网（不等 60 秒的心跳）', async ({ page, context }) => {
+  await login(page);
+  const held: { release?: () => Promise<void> } = {};
+  await page.route('**/api/ping', async (route) => {
+    if (held.release) return route.continue();
+    const res = await route.fetch(); // 服务器回了，先扣在路上
+    const body = await res.text();
+    held.release = () => route.fulfill({ status: 200, contentType: 'application/json', body });
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('online'))); // 让页面现在检查一次
+  await expect.poll(() => held.release !== undefined).toBe(true);
+  await context.setOffline(true);
+  await held.release!(); // 断网以前发出去的那一次，这时才成功回来
+  await page.unroute('**/api/ping');
+  await expect(banner(page, 'offline')).toBeVisible({ timeout: 10_000 });
+  await context.setOffline(false);
+  await expect(banner(page, 'offline')).toHaveCount(0, { timeout: 20_000 });
+});
+
 test('断网时点「确认入账」：这笔没发出去、不进「结果待确认」，填的内容还在；恢复后同一笔照常入账、只入账一次', async ({ page, context }) => {
   await login(page);
   await ensureShift(page);
@@ -143,14 +162,24 @@ test('页面代码第一次没下载下来：再导入一次；浏览器记住�
 test('页面代码一直下载不下来：只自动重新加载一次，之后给「重新加载」按钮（不一直刷）', async ({ page }) => {
   await login(page);
   let tries = 0;
+  let loads = 0; // 钟房这一页的整页加载：打开那一次 + 自动重新加载
+  page.on('request', (r) => {
+    if (r.isNavigationRequest() && r.frame() === page.mainFrame() && new URL(r.url()).pathname === '/clockroom') loads += 1;
+  });
   await page.route('**/assets/ClockroomPage-*.js', async (route) => {
     tries += 1;
     await route.abort('connectionreset');
   });
   await page.goto('/clockroom');
   await expect(page.getByTestId('page-load-failed')).toBeVisible({ timeout: 20_000 });
-  await page.waitForTimeout(2_000);
-  expect(tries).toBe(2); // 第一次 + 自动重新加载以后那一次
+  const seen = { tries, loads };
+  await page.waitForTimeout(2_500);
+  expect(loads).toBe(2); // 打开 + 只自动重新加载一次
+  // 每次加载最多下载两次（第一次 + 1 秒后再导入）。浏览器记住失败的下载时，再导入不去取，一共 2 次（Chromium 153）；
+  // 不记住的再导入会重新去取，一共 4 次（8.1.4 验收用的 Chromium 156）。两种都对，这里不认死次数。
+  expect(tries).toBeGreaterThanOrEqual(2);
+  expect(tries).toBeLessThanOrEqual(4);
+  expect({ tries, loads }).toEqual(seen); // 给了按钮以后不再下载、不再刷新
   await expect(page.getByTestId('page-load-failed')).toBeVisible();
 });
 
