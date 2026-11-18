@@ -5,7 +5,6 @@ import type { PriceCompare } from './purchasing';
 
 // 调出、调入（8.0.22，门店间调拨）：由调拨单生成、一建就生效，不能单独新建或冲销（在「调拨」里撤回）
 export const INV_DOC_TYPES = ['opening', 'receipt', 'issue', 'issue_return', 'direct_use', 'damage', 'count', 'supplier_return', 'transfer_out', 'transfer_in'] as const;
-export const TRANSFER_DOC_TYPES = ['transfer_out', 'transfer_in'] as const;
 export type InvDocType = (typeof INV_DOC_TYPES)[number];
 
 export const INV_DOC_META: Record<InvDocType, { title: string; prefix: string; verb: string; direction: 'in' | 'out' | 'both' }> = {
