@@ -61,8 +61,8 @@
 ## 3. 已执行的验证
 
 - `npm run lint`、`npm run typecheck`、`npm run check:code`、`npm run check:docs`、`npm run check:gov`、`npm run format:check`：通过。
-- `npm test`（全量集成测试）与 `npm run build`、`npm run check:bundle`：结果见 PR 说明。
-- 浏览器用例（本机，门店电脑尺寸，独立演示库）：改到的页面对应的几组，结果见 PR 说明。
+- `npm test`（全量集成测试，本机 PostgreSQL 16 的独立测试库）：232 个文件、2,117 条全过。`npm run build`、`npm run check:bundle`：通过（首屏主包 793 KB）。不传 `APP_VERSION` 起应用，`/api/health` 报的版本号是 `package.json` 的。
+- 浏览器用例（本机，门店电脑尺寸，独立演示库）：改到的页面对应的十个文件 37 条全过——`erp-819`、`request-sheet`、`purchasing-v801`、`spaces`、`supplier-settlement`（五个导入页）、`invoice-scan`、`budget-invoices`、`payments`、`expenses`（发票识别带出的三处）、`customer`。
 - 反例：去掉 `postcss` 的声明，`check:gov` 报「用到了没声明」；用例里有超过上限时 `check:bundle` 报错的一条。
 
 ## 4. 验收要点
