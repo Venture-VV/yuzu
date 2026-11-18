@@ -5,7 +5,9 @@
 //   3. 页面代码里手写的字号 text-[Npx]（不许出现基线以外的新字号）；
 //   4. 超过 1,500 行的源文件（不许有新的）；
 //   5. 导出了却没有任何地方引用的函数、常量、类型（knip；不许有新的）；用到了没声明的依赖、声明了没用到的依赖（硬规则，一处都不许）；
-//   6. 重复代码的比例（jscpd；不许超过上限）。
+//   6. 重复代码的比例（jscpd；不许超过上限）；
+//   7. docs/CONVENTIONS.md 里能查的几条约定（三期）：不看 navigator.onLine、不手写 status < 500、新的轮询用 useLivePoll、
+//      行内样式里不写 dvh（各记一个数，不许变多）；用例里不许留 .only（硬规则）。
 // 数字变少了不用管，想把基线收紧跑 npm run check:gov -- --update（只会调低；调高要加 --allow-increase 并在 PR 里说明原因）。
 // 小程序线的目录与文件（scripts/check-line-scope.mjs 认作小程序线自己的）不查。退出码：0 通过，1 有问题。
 
@@ -45,9 +47,12 @@ const FONT_SIZE = /\btext-\[(\d+(?:\.\d+)?)px\]/g;
 export function scanPageCode(fileName, code) {
   const src = ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, false, fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   let hex = 0;
+  let inlineDvh = 0;
   const fontSizes = {};
   const look = (text) => {
     hex += (text.match(HEX_COLOR) ?? []).length;
+    // 行内样式里的 dvh（类名里的是 max-h-[88dvh] 这种带方括号的写法，打包时会补 vh；行内的补不到）
+    if (/\d(?:d|s|l)vh\b/.test(text) && !text.includes('[')) inlineDvh += 1;
     for (const m of text.matchAll(FONT_SIZE)) fontSizes[m[1]] = (fontSizes[m[1]] ?? 0) + 1;
   };
   const visit = (node) => {
@@ -55,7 +60,63 @@ export function scanPageCode(fileName, code) {
     ts.forEachChild(node, visit);
   };
   visit(src);
-  return { hex, fontSizes };
+  return { hex, fontSizes, inlineDvh };
+}
+
+/**
+ * 约定（docs/CONVENTIONS.md「公共小工具」「屏幕高度」里能查的几条，三期）：存量记数、不许变多。
+ * scope 是查哪些目录，allow 是这条约定自己的实现所在、不算。
+ */
+export const CONVENTION_RULES = [
+  {
+    key: 'navigator.onLine',
+    pattern: /\bnavigator\.onLine\b/g,
+    scope: ['src/client/', 'src/canteen-app/'],
+    allow: ['src/client/lib/connection.ts'],
+    hint: '判断断网用 lib/connection 的 useConnection / onReconnect，不看 navigator.onLine（它在连着路由器、连不上服务器时也是 true）',
+  },
+  {
+    key: 'status-500',
+    pattern: /\bstatus\s*(?:<|>=)\s*500\b/g,
+    scope: ['src/client/', 'src/canteen-app/'],
+    allow: ['src/client/lib/api.ts'],
+    hint: '判断「服务端明确没处理」用 lib/api 的 isRejected，不手写 status < 500',
+  },
+  {
+    key: 'polling',
+    pattern: /\bsetInterval\s*\(|\brefetchInterval\b/g,
+    scope: ['src/client/features/', 'src/client/components/'],
+    allow: [],
+    hint: '新的定时取数用 lib/livePoll 的 useLivePoll（后台不取、断网不取、回到页面与网络恢复时马上取）',
+  },
+];
+
+/** 去掉注释（约定检查只看代码；注释里提到这些写法不算） */
+export function stripComments(code) {
+  return code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+}
+
+/** 一份源码里各条约定的次数：{ 约定: 次数 }（不在这条约定范围里的不算） */
+export function conventionCounts(file, code) {
+  const counts = {};
+  const text = stripComments(code);
+  for (const rule of CONVENTION_RULES) {
+    if (!rule.scope.some((dir) => file.startsWith(dir)) || rule.allow.includes(file)) continue;
+    const n = (text.match(rule.pattern) ?? []).length;
+    if (n) counts[rule.key] = n;
+  }
+  return counts;
+}
+
+/** 用例里留着的 .only（跑的时候别的用例会被悄悄跳过）：返回行号 */
+export function focusedTests(code) {
+  const found = [];
+  stripComments(code)
+    .split('\n')
+    .forEach((line, i) => {
+      if (/\b(?:it|test|describe)\.only\s*\(/.test(line)) found.push(i + 1);
+    });
+  return found;
 }
 
 const LAYER_RULES = [
@@ -114,6 +175,16 @@ export function compareBaseline(baseline, current) {
   const goneDead = baseline.deadExports.filter((e) => !current.deadExports.includes(e)).length;
   if (goneDead) notes.push(`没人引用的导出少了 ${goneDead} 个`);
 
+  const worseConventions = Object.entries(current.conventions ?? {})
+    .filter(([key, n]) => n > (baseline.conventions?.[key] ?? 0))
+    .map(
+      ([key, n]) =>
+        `${key}：${baseline.conventions?.[key] ?? 0} → ${n}。${key === 'inline-dvh' ? '行内样式里不要写 dvh（打包时补不到 vh，老浏览器上整屏版面会没有高度），改用类名 h-dvh、max-h-[88dvh]' : (CONVENTION_RULES.find((r) => r.key === key)?.hint ?? '')}`,
+    );
+  if (worseConventions.length) problems.push(`没照约定写的地方变多了（docs/CONVENTIONS.md）：\n  ${worseConventions.join('\n  ')}`);
+  const fewerConventions = Object.entries(baseline.conventions ?? {}).filter(([key, n]) => (current.conventions?.[key] ?? 0) < n).length;
+  if (fewerConventions) notes.push(`没照约定写的地方有 ${fewerConventions} 条变少了`);
+
   if (current.duplicationPercent > baseline.duplicationMaxPercent)
     problems.push(
       `重复代码 ${current.duplicationPercent.toFixed(2)}%，超过上限 ${baseline.duplicationMaxPercent}%（把重复的部分抽成公共函数或部件；看是哪几处：npx jscpd src --min-tokens ${CPD_MIN_TOKENS} --min-lines ${CPD_MIN_LINES}）`,
@@ -125,6 +196,7 @@ export function compareBaseline(baseline, current) {
 export function loosened(oldBase, newBase) {
   const out = [];
   for (const [dir, n] of Object.entries(newBase.hexColors)) if (n > (oldBase.hexColors[dir] ?? 0)) out.push(`颜色 ${dir}：${oldBase.hexColors[dir] ?? 0} → ${n}`);
+  for (const [key, n] of Object.entries(newBase.conventions ?? {})) if (oldBase.conventions && n > (oldBase.conventions[key] ?? 0)) out.push(`约定 ${key}：${oldBase.conventions[key] ?? 0} → ${n}`);
   for (const key of ['fontSizes', 'largeFiles', 'deadExports']) {
     const known = new Set(oldBase[key]);
     for (const item of newBase[key]) if (!known.has(item)) out.push(`${key} 新增 ${item}`);
@@ -146,20 +218,40 @@ function scanSources() {
   const sizeCounts = {};
   const largeFiles = [];
   const layers = [];
+  const conventions = {};
+  const bump = (key, n) => {
+    if (n) conventions[key] = (conventions[key] ?? 0) + n;
+  };
   for (const abs of sourceFiles(join(ROOT, 'src'))) {
     const file = relative(ROOT, abs).split('\\').join('/');
     if (isMpLine(file)) continue;
     const code = readFileSync(abs, 'utf8');
     if (code.split('\n').length > LARGE_FILE_LINES) largeFiles.push(file);
     for (const v of layerViolations(file, code)) layers.push(`${file}  引了 ${v.specifier}（${v.why}）`);
+    for (const [key, n] of Object.entries(conventionCounts(file, code))) bump(key, n);
     if (PAGE_ROOTS.some((r) => file.startsWith(r))) {
-      const { hex, fontSizes } = scanPageCode(file, code);
+      const { hex, fontSizes, inlineDvh } = scanPageCode(file, code);
+      bump('inline-dvh', inlineDvh);
       if (hex) hexColors[colorBucket(file)] = (hexColors[colorBucket(file)] ?? 0) + hex;
       for (const [size, n] of Object.entries(fontSizes)) sizeCounts[size] = (sizeCounts[size] ?? 0) + n;
     }
   }
   const fontSizes = Object.keys(sizeCounts).sort((a, b) => Number(a) - Number(b));
-  return { hexColors, fontSizes, fontSizeUses: Object.values(sizeCounts).reduce((a, b) => a + b, 0), largeFiles: largeFiles.sort(), layers };
+  // 用例里的 .only
+  const focused = [];
+  for (const dir of ['tests', 'e2e', 'e2e-canteen']) {
+    let files = [];
+    try {
+      files = sourceFiles(join(ROOT, dir));
+    } catch {
+      continue;
+    }
+    for (const abs of files) {
+      const file = relative(ROOT, abs).split('\\').join('/');
+      for (const line of focusedTests(readFileSync(abs, 'utf8'))) focused.push(`${file}:${line}`);
+    }
+  }
+  return { hexColors, fontSizes, fontSizeUses: Object.values(sizeCounts).reduce((a, b) => a + b, 0), largeFiles: largeFiles.sort(), layers, conventions, focused };
 }
 
 /** 依赖包的命令行入口（读它 package.json 的 bin，不写死路径） */
@@ -237,7 +329,7 @@ function main() {
   const scanned = scanSources();
   const { dead: deadExports, deps } = runKnip();
   const cpd = runJscpd();
-  const current = { hexColors: scanned.hexColors, fontSizes: scanned.fontSizes, largeFiles: scanned.largeFiles, deadExports, duplicationPercent: cpd.percent };
+  const current = { hexColors: scanned.hexColors, fontSizes: scanned.fontSizes, largeFiles: scanned.largeFiles, deadExports, duplicationPercent: cpd.percent, conventions: scanned.conventions };
 
   let baseline = null;
   try {
@@ -256,6 +348,7 @@ function main() {
       fontSizes: current.fontSizes,
       largeFiles: current.largeFiles,
       deadExports: current.deadExports,
+      conventions: Object.fromEntries(Object.entries(current.conventions).sort(([a], [b]) => (a < b ? -1 : 1))),
       // 上限留一点余量：比现在的比例高 0.2 个百分点，最少 1%
       duplicationMaxPercent: baseline && !allowIncrease ? baseline.duplicationMaxPercent : Math.max(1, Math.ceil((cpd.percent + 0.2) * 10) / 10),
       // 首屏主包的上限（KB）：npm run check:bundle 在构建之后核对，这里原样带过去
@@ -272,6 +365,7 @@ function main() {
   }
 
   const { problems, notes } = compareBaseline(baseline, current);
+  if (scanned.focused.length) problems.unshift(`用例里留着 .only（别的用例会被悄悄跳过），去掉：\n  ${scanned.focused.join('\n  ')}`);
   if (deps.length) problems.unshift(`依赖的声明与用到的对不上 ${deps.length} 处：\n  ${deps.join('\n  ')}`);
   if (scanned.layers.length) problems.unshift(`分层被打破 ${scanned.layers.length} 处：\n  ${scanned.layers.join('\n  ')}`);
   if (problems.length) {
@@ -281,7 +375,10 @@ function main() {
   const colorTotal = Object.values(current.hexColors).reduce((a, b) => a + b, 0);
   console.log(
     `✓ 治理基线通过：分层 0 处违反、依赖声明与用到的一致；页面里十六进制颜色 ${colorTotal} 处、手写字号 ${current.fontSizes.length} 种（${scanned.fontSizeUses} 处）、` +
-      `超过 ${LARGE_FILE_LINES} 行的文件 ${current.largeFiles.length} 个、没人引用的导出 ${deadExports.length} 个、重复代码 ${cpd.percent.toFixed(2)}%（${cpd.lines} 行）`,
+      `超过 ${LARGE_FILE_LINES} 行的文件 ${current.largeFiles.length} 个、没人引用的导出 ${deadExports.length} 个、重复代码 ${cpd.percent.toFixed(2)}%（${cpd.lines} 行）、` +
+      `没照约定写的 ${Object.values(current.conventions).reduce((a, b) => a + b, 0)} 处（${Object.entries(current.conventions)
+        .map(([k, n]) => `${k} ${n}`)
+        .join('、')}）`,
   );
   if (notes.length && !update) console.log(`  比基线少了：${notes.join('；')}。可以跑 npm run check:gov -- --update 把基线收紧`);
 }

@@ -65,6 +65,12 @@
     "src/server/modules/payments/requests.ts:payoutRequestId",
     "src/shared/inventory.ts:TRANSFER_DOC_TYPES"
   ],
+  "conventions": {
+    "inline-dvh": 1,
+    "navigator.onLine": 1,
+    "polling": 76,
+    "status-500": 2
+  },
   "duplicationMaxPercent": 1,
   "entryChunkMaxKb": 900
 }
