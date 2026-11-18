@@ -61,10 +61,7 @@
     "src/server/modules/admin.ts",
     "src/server/modules/inventory/docs.ts"
   ],
-  "deadExports": [
-    "src/server/modules/payments/requests.ts:payoutRequestId",
-    "src/shared/inventory.ts:TRANSFER_DOC_TYPES"
-  ],
+  "deadExports": [],
   "conventions": {
     "inline-dvh": 1,
     "navigator.onLine": 1,

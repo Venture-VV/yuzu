@@ -953,9 +953,3 @@ export async function voidPayout(deps: Deps, payoutId: number, raw: unknown, act
     await writeAudit(tx, { staffId: actor.id, action: 'payment_doc', targetType: 'contract_payout', targetId: payoutId, detail: { op: 'void', docNo: o!.docNo, reason }, ip });
   });
 }
-
-/** 合同付款按编号查回（「结果待确认」查到时跳到那张申请） */
-export async function payoutRequestId(db: Db, payoutId: number): Promise<number | null> {
-  const [r] = await db<{ requestId: number }[]>`SELECT payment_request_id AS request_id FROM contract_payouts WHERE id = ${payoutId}`;
-  return r ? Number(r.requestId) : null;
-}
