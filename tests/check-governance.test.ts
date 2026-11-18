@@ -13,10 +13,13 @@ interface Numbers {
 }
 const { colorBucket, compareBaseline, layerViolations, loosened, scanPageCode } = gov as {
   colorBucket: (file: string) => string;
-  compareBaseline: (baseline: Numbers & { duplicationMaxPercent: number }, current: Numbers & { duplicationPercent: number }) => { problems: string[]; notes: string[] };
+  compareBaseline: (
+    baseline: Numbers & { duplicationMaxPercent: number; conventions?: Record<string, number> },
+    current: Numbers & { duplicationPercent: number; conventions?: Record<string, number> },
+  ) => { problems: string[]; notes: string[] };
   layerViolations: (file: string, code: string) => { specifier: string; target: string; why: string }[];
   loosened: (oldBase: Numbers, newBase: Numbers) => string[];
-  scanPageCode: (fileName: string, code: string) => { hex: number; fontSizes: Record<string, number> };
+  scanPageCode: (fileName: string, code: string) => { hex: number; fontSizes: Record<string, number>; inlineDvh: number };
 };
 
 const BASE = {
@@ -94,6 +97,68 @@ describe('与基线比', () => {
   it('收紧基线时发现会放宽的地方', () => {
     expect(loosened(BASE, { ...BASE, hexColors: { 'src/client/features/rooms': 1 }, deadExports: [] })).toEqual([]);
     expect(loosened(BASE, { ...BASE, hexColors: { 'src/client/features/rooms': 3 }, fontSizes: ['12', '13', '15'] })).toEqual(['颜色 src/client/features/rooms：2 → 3', 'fontSizes 新增 15']);
+  });
+});
+
+describe('约定检查（docs/CONVENTIONS.md 里能查的几条）', () => {
+  const { conventionCounts, focusedTests, stripComments } = gov as {
+    conventionCounts: (file: string, code: string) => Record<string, number>;
+    focusedTests: (code: string, fileName?: string) => number[];
+    stripComments: (code: string) => string;
+  };
+
+  it('注释里提到的不算；网址里的 // 不当成注释', () => {
+    const code = ['// 不看 navigator.onLine', "const url = 'https://example.com/a'; /* status < 500 */", 'const a = 1; // setInterval('].join('\n');
+    expect(stripComments(code)).toBe(['', "const url = 'https://example.com/a'; ", 'const a = 1; '].join('\n'));
+  });
+
+  it('看 navigator.onLine、手写 status < 500、用 refetchInterval 定时取数，各自记数；约定自己的实现所在不算', () => {
+    const code = ['if (!navigator.onLine) return;', 'if (res.status >= 500) retry();', 'if (e.status < 500) stop();', 'useQuery({ queryKey, queryFn, refetchInterval: 60_000 });'].join('\n');
+    expect(conventionCounts('src/client/features/x/Page.tsx', code)).toEqual({ 'navigator.onLine': 1, 'status-500': 2, polling: 1 });
+    expect(conventionCounts('src/client/lib/connection.ts', 'const online = navigator.onLine;')).toEqual({});
+    expect(conventionCounts('src/client/lib/api.ts', 'if (error.status < 500) return true;')).toEqual({});
+    // 公共小工具（lib/）与服务端不在「定时取数」这一条的范围里
+    expect(conventionCounts('src/client/lib/queries.ts', 'useQuery({ refetchInterval: 1000 });')).toEqual({});
+    expect(conventionCounts('src/server/jobs.ts', 'const refetchInterval = 60_000;')).toEqual({});
+  });
+
+  it('纯界面的计时器不算定时取数：倒计时、轮播、「现在几点」用 setInterval 不报（Codex 审查 ca1f116）', () => {
+    const timers = [
+      'const t = setInterval(() => setTick(Date.now()), 1000);',
+      'const c = setInterval(() => setIndex((i) => (i + 1) % n), seconds * 1000);',
+      'const now = window.setInterval(() => setNow(Date.now()), 60_000);',
+    ].join('\n');
+    expect(conventionCounts('src/client/features/clockroom/ClockroomPage.tsx', timers)).toEqual({});
+  });
+
+  it('行内样式里的 dvh 记数；类名里带方括号的写法（打包时会补 vh）不算', () => {
+    const code = "export const X = () => <div className=\"h-dvh max-h-[88dvh]\" style={{ height: '100dvh', minHeight: 'calc(100dvh - 2rem)' }} />;";
+    expect(scanPageCode('x.tsx', code).inlineDvh).toBe(2);
+  });
+
+  it('用例里的 .only 认出来（注释掉的、字符串里写着的不算）', () => {
+    const code = [
+      "it('a', () => {});",
+      "it.only('b', () => {});",
+      "// test.only('c', () => {});",
+      "describe.only('d', () => {});",
+      "test.skip(cond, '按尺寸跳过');",
+      'const sample = "it.only(\'字符串里的\', () => {});";',
+      "test.describe.only('e', () => {});",
+      'list.only(1);',
+    ].join('\n');
+    expect(focusedTests(code)).toEqual([2, 4, 7]);
+  });
+
+  it('变多了报出来并写明该怎么写；持平、变少通过', () => {
+    const base = { ...BASE, conventions: { polling: 2, 'inline-dvh': 1 } };
+    expect(compareBaseline(base, { ...same, conventions: { polling: 2, 'inline-dvh': 1 } }).problems).toEqual([]);
+    expect(compareBaseline(base, { ...same, conventions: { polling: 1 } })).toEqual({ problems: [], notes: ['没照约定写的地方有 2 条变少了'] });
+    const worse = compareBaseline(base, { ...same, conventions: { polling: 3, 'inline-dvh': 1, 'navigator.onLine': 1 } }).problems;
+    expect(worse).toHaveLength(1);
+    expect(worse[0]).toContain('polling：2 → 3');
+    expect(worse[0]).toContain('useLivePoll');
+    expect(worse[0]).toContain('navigator.onLine：0 → 1');
   });
 });
 

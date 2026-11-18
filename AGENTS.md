@@ -40,20 +40,21 @@
 
 ## 快测、门禁与高风险目录（oil-dev）
 
-- 快测：`npx vitest run tests/{target}.test.ts`
+- 快测：`npx vitest run tests/{target}.test.ts`（不要数据库的一档 `npm run test:unit`，8 秒；按改动自动挑 `npm run test:quick`）
 - 重测：`E2E_BASE_URL=http://127.0.0.1:<端口> npx playwright test e2e/{target}.spec.ts --project=门店电脑`
 - 门禁：`npm run lint && npm run typecheck && npm run check:code && npm run check:docs && npm run check:gov && npm run format:check && npm test && npm run build && npm run check:bundle`
 - 高风险：`src/server/migrations/`、`src/server/modules/wallet*.ts`、`src/server/modules/frontdesk/**`、`src/server/modules/shifts.ts`、`src/server/modules/settlement.ts`、`src/server/auth/**`、`src/server/lib/idempotency.ts`、`src/server/lib/fences.ts`、`src/shared/permissions.ts`、`src/shared/money.ts`、`src/shared/deduction.ts`、`scripts/*.sh`、`.github/workflows/**`
 - 禁改：`miniprogram/`、`src/gateway/`、`src/server/modules/mp/`、`src/client/features/mp/`、`src/shared/mp.ts`、`src/client/public/concierge/ocr/`
 
-写代码途中只跑类型检查这类秒级的；写完跑快测（和这次改动相关的那几个文件）；全量与浏览器验收留到交 PR 前与 CI。高风险目录的改动要独立审查（Codex）；禁改的是小程序线的目录（主线不改）与按清单核对摘要的第三方文件；已发布的迁移文件不改（见下「开发约定」）。
+写代码途中只跑秒级的（`npm run lint`、`npm run test:unit`）；写完一块跑快测；全量与浏览器验收留到交 PR 前与 CI（三档见 `docs/TESTING.md` 第 4 节）。高风险目录的改动要独立审查（Codex）；禁改的是小程序线的目录（主线不改）与按清单核对摘要的第三方文件；已发布的迁移文件不改（见下「开发约定」）。
 
 ## 常用命令
 
 ```bash
 npm run lint && npm run typecheck && npm run check:code && npm run format:check   # 写完先过这四样（lint 一秒内）；排版没过跑 npm run format
 npm run check:docs && npm run check:gov                           # 文档检查与治理基线（CI 跑；docs/GOVERNANCE.md）
-npx vitest run tests/<相关的>.test.ts                              # 快测：TEST_DATABASE_URL 指向独立测试库
+npm run test:unit                                                 # 秒级：不要数据库的用例（8 秒）；写代码途中随时跑
+npm run test:quick                                                # 快测：秒级 + 和这次改动沾边的集成测试（TEST_DATABASE_URL 指向独立测试库；也可以 npx vitest run tests/<相关的>.test.ts）
 npm test && npm run build                                         # 交 PR 前：全量集成测试（按文件并行，要建库权限；TEST_WORKERS=1 单库串行）与构建
 node dist/server/cli.js demo-prepare                              # 一条命令准备独立演示库，最后自带 check 与 demo-check
 node dist/server/cli.js check                                     # 会员（含营业口径）、库存、前台自检，全部 ✓ 才算一致

@@ -1,15 +1,15 @@
-# v8.1.12 交接说明 · 核库转领用、急采后补合同
+# v8.1.13 交接说明 · 核库转领用、急采后补合同
 
 主线 [PR #127](https://github.com/Venture-VV/yuzu/pull/127)。
 
-> **版本号**：原排 8.1.10。同一天工程治理一期（[PR #128](https://github.com/Venture-VV/yuzu/pull/128)）、二期（[PR #129](https://github.com/Venture-VV/yuzu/pull/129)）先后合进 `main`，用了 8.1.10、8.1.11，按「版本号按合并先后取下一个」（`docs/GOVERNANCE.md` 第 4 节），这一批发 **8.1.12**。文件名照旧（文档不改名）：设计 `docs/ERP_V8110.md`、本文件、浏览器用例 `e2e/erp-8110.spec.ts`；代码注释与默认做法的小节里仍写 8.1.10。
+> **版本号**：原排 8.1.10。同一天工程治理一期（[PR #128](https://github.com/Venture-VV/yuzu/pull/128)）、二期（[PR #129](https://github.com/Venture-VV/yuzu/pull/129)）、三期（[PR #130](https://github.com/Venture-VV/yuzu/pull/130)）先后合进 `main`，用了 8.1.10、8.1.11、8.1.12，按「版本号按合并先后取下一个」（`docs/GOVERNANCE.md` 第 4 节），这一批发 **8.1.13**。文件名照旧（文档不改名）：设计 `docs/ERP_V8110.md`、本文件、浏览器用例 `e2e/erp-8110.spec.ts`；代码注释与默认做法的小节里仍写 8.1.10。
 
 店主 2026-11-18 转来会议需求表（ERP 采购四条 P0），开发会话问了十二个问题，店主当天答复：
 
 - 「1-4不用管，5按照建议6安好建议7不管8按照建议9按照建议后面都按照建议」；
 - 「好，做完直接合并」。
 
-这一版做两块：核库转领用（C2）、急采后补合同（C4 的后半段）。合进了工程治理一期、二期（`main` 的 `eea99f5`）：加锁顺序写在 `docs/LOCKING.md`，命令在 `docs/COMMANDS.md`，版本号只改 `package.json` 与锁文件；二期加的 `npm run lint`（oxlint）与 `check:bundle`（首屏主包体积）也照着过。不做 2 万合同线、数量线、防拆单、合伙人特批与超限预警，现有的金额线与审批规则不动。
+这一版做两块：核库转领用（C2）、急采后补合同（C4 的后半段）。合进了工程治理一期、二期、三期（`main` 的 `f00631e`）：加锁顺序写在 `docs/LOCKING.md`，命令在 `docs/COMMANDS.md`，版本号只改 `package.json` 与锁文件；二期加的 `npm run lint`（oxlint）与 `check:bundle`（首屏主包体积）也照着过。不做 2 万合同线、数量线、防拆单、合伙人特批与超限预警，现有的金额线与审批规则不动。
 
 - 设计：`docs/ERP_V8110.md`。
 - 答复与默认做法：`docs/PENDING_DECISIONS.md`「8.1.10：ERP 采购四条」CK1–CK25（CK1–CK12 是店主的答复，CK13–CK25 是细项的默认做法，待确认）。

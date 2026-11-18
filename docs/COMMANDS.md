@@ -13,6 +13,8 @@ npm run check:code                         # 8.1.3 代码整洁检查（CI 跑�
 npm run check:docs                         # 工程治理一期（docs/GOVERNANCE.md，CI 跑）：AGENTS.md 的体积预算、指不到文件的相对链接、引用了不存在的文档、docs/README.md 的索引、开发约定小节；加了文档跑 npm run check:docs -- --fix 重新生成索引
 npm run check:gov                          # 工程治理一期（CI 跑，约 5 秒）：治理基线 scripts/governance-baseline.json，只许持平或下降——分层、页面里的十六进制颜色与手写字号、超过 1,500 行的文件、没人引用的导出（knip）、重复率（jscpd）；清掉一批后 -- --update 收紧
 npm run format                             # 8.1.3 排版（Prettier 固定版本，.prettierrc.json）；提交前跑一次，CI 跑 npm run format:check；小程序线的目录、迁移、静态资源不排（.prettierignore）
+npm run test:unit                          # 工程治理三期：秒级一档，只跑不要数据库的用例（按导入关系自动认，-- --list 看是哪些）；不用起数据库
+npm run test:quick                         # 工程治理三期：快测，秒级一档 + 和这次改动沾边的集成测试（按改到的模块名找，会漏，不能代替全量；-- --list 先看会跑哪些）
 npm test                                   # TEST_DATABASE_URL 指向独立测试库；按文件并行，另建 <库名>_w1…、<库名>_tpl（要建库权限；TEST_WORKERS=1 回到单库串行）
 E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟（CI 拆三组并行，见 docs/TESTING.md）
 ```
@@ -109,7 +111,7 @@ E2E_BASE_URL=… npx playwright test e2e/emenu.spec.ts   # 点餐系统 · 平�
 E2E_BASE_URL=… npx playwright test e2e/emenu-v816.spec.ts --project=门店电脑   # 8.1.6 二次整改（docs/HANDOFF_V816.md）：小米平板 6S Pro 12.4 大小（1355 × 903）上底色、压暗层、大图铺到屏幕边与右上角四样、服务员那一步的英文、装饰压不到大图上、工作台改顶栏（会写工作台的草稿、用完放回默认，不发布）
 E2E_BASE_URL=… npx playwright test e2e/erp-819.spec.ts --project=门店电脑   # 8.1.9 ERP 供应链（docs/HANDOFF_V819.md）：店主填零采备用金总额 → 采购申用、提交报销（未补单）→ 按申用登记报销、确认后面板回补；库管入库手填一张；下载台账模板、导入一份合成的台账（会登记单据，每次用新的说明与金额）
 E2E_BASE_URL=… npx playwright test e2e/gifts.spec.ts --project=门店电脑   # 8.1.9 签赠（docs/GIFTS_V819.md）：后台建签赠券类型 → 管家部发放（授权人张经理）→ 前台结账选这张签赠券 → 客户部签赠台账里是已使用、按授权人有张经理（要 seed-demo、seed-frontdesk-demo；会登记单据，每次用新的名称）
-E2E_BASE_URL=… npx playwright test e2e/erp-8110.spec.ts --project=门店电脑   # 8.1.12 ERP 采购（原排 8.1.10，docs/HANDOFF_V8110.md）：采购规则的四项新设置、急采「待补合同」；核库转领用——店主提需求单（两样新建、有期初的物料）→ 待核库里核库（第 1 行只领一部分、第 2 行提议替代）→ 同意替代 → 通过 → 待转采购单只买剩下的（会登记单据，物料编号带时间）
+E2E_BASE_URL=… npx playwright test e2e/erp-8110.spec.ts --project=门店电脑   # 8.1.13 ERP 采购（原排 8.1.10，docs/HANDOFF_V8110.md）：采购规则的四项新设置、急采「待补合同」；核库转领用——店主提需求单（两样新建、有期初的物料）→ 待核库里核库（第 1 行只领一部分、第 2 行提议替代）→ 同意替代 → 通过 → 待转采购单只买剩下的（会登记单据，物料编号带时间）
 E2E_BASE_URL=… npx playwright test e2e/emenu-818.spec.ts --project=门店电脑   # 8.1.8 品牌部的五条（docs/HANDOFF_V818.md）：小米平板大小上用预览码打开「主文字改过、照片加了圆角」的版面，逐页核对顶栏字完整、封面标题小圆圈、照片直角、字色 #4b392a、选中没有光晕；工作台主文字锁定、照片没有圆角（只读，预览码不发布）
 E2E_BASE_URL=… npx playwright test e2e/dining-817.spec.ts --project=门店电脑   # 8.1.7 餐饮分区与点菜单（docs/HANDOFF_V817.md）：后台选点单分类与分区 → 桌台分区详情 → 先选餐厅 / 水吧 / 果吧再点 → 点菜单五种状态 → 估清、台账、退菜记录按果吧筛；手牌客人的点菜单（菜品、档口、桌台以 E2E 817 开头，留着下次沿用；结束时退菜撤台、关闭餐饮）
 E2E_BASE_URL=… npx playwright test e2e/target-devices.spec.ts --project=门店电脑   # 三台目标设备（docs/DEVICES.md）：另开 1920×1080、1280×720、360×800、1355×903 的窗口核对主要页面不横向滚动、按钮在屏幕里（菜单里的菜、桌台与点菜单用合成数据，只读；临时打开餐饮，结束时恢复）
