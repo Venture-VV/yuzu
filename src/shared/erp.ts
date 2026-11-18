@@ -16,6 +16,7 @@ export const ERP_MODULE_KEYS = [
   'contracts',
   'payments',
   'expenses',
+  'pettyPool',
   'invoices',
   'salesInvoices',
   'receivables',
@@ -201,6 +202,19 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     // 部门、供应商档案在库存模块里；按采购单报销读采购单（采购模块关着时只能按次报销）
     requires: ['inventory'],
   },
+  // 零采备用金（8.1.9，docs/ERP_V819.md 第 2 节）：供应链零采专用的备用金面板；报销单仍在「费用与备用金」登记
+  pettyPool: {
+    label: '零采备用金',
+    group: '供应链',
+    description: '供应链零采专用：申用占用额度、提交报销（未补单 / 已补单 + 采购单）、报销单确认后自动回补；面板写总额、已占用、剩余可用、待报销笔数（8.1.9）',
+    path: '/erp/pool',
+    pages: ['/erp/pool'],
+    apis: ['/api/erp/pool'],
+    perms: ['pool.read'],
+    defaultEnabled: true,
+    // 选采购单读采购、库存的档案；报销单在费用模块里登记
+    requires: ['inventory', 'expenses'],
+  },
   // 进项发票台账（8.0.3，docs/BUDGET_INVOICES.md 第 3 节）：三单的供应商发票、报销的专票普票、直接登记的都在这里
   invoices: {
     label: '发票台账',
@@ -297,7 +311,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
  */
 export const ERP_NAV_GROUPS: readonly { key: string; title: string; modules: readonly ErpModuleKey[] }[] = [
   { key: 'approvals', title: '审批', modules: ['approvals'] },
-  { key: 'supply', title: '供应链', modules: ['inventory', 'purchasing', 'requests', 'deptStock', 'assets', 'linen'] },
+  { key: 'supply', title: '供应链', modules: ['inventory', 'purchasing', 'requests', 'deptStock', 'pettyPool', 'assets', 'linen'] },
   { key: 'finance', title: '财务', modules: ['payments', 'payables', 'expenses', 'invoices', 'salesInvoices', 'receivables', 'bank'] },
   { key: 'contracts', title: '合同', modules: ['contracts'] },
   // 已经挪到后台的：页面不在 ERP 里。8.0.18 在 ERP 导航里各留了一条跳转，8.0.19 去掉；这一组留着是为了「每个模块都有归属」，
@@ -448,6 +462,8 @@ export const ERP_OP_TYPES = [
   'stock_transfer',
   // 8.1.1 UI 工作台：发布、回滚（迁移 164；编号记在 studio_versions.client_key）
   'studio_publish',
+  // 8.1.9 零采备用金：申用（占额度，断网后刷新也要能查回、重提或作废）
+  'pool_use',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -513,6 +529,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   ota_import: '渠道订单导入',
   stock_transfer: '门店间调拨',
   studio_publish: '工作台发布 / 回滚',
+  pool_use: '零采备用金申用',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

@@ -61,6 +61,7 @@ import { receiptAttachments } from './inventory/attachments';
 import { checkClaimBudget } from './budgets';
 import { resolveClaimInvoice } from './invoices';
 import { INVOICE_ENTRY_METHODS } from '@shared/invoice-recognize';
+import { claimPoolUses, lockPoolUsesForClaim, poolCheck } from './petty-pool';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(Math.abs(cents)).replace(/,/g, '');
@@ -415,6 +416,7 @@ export async function getClaim(db: Db, claimId: number): Promise<ExpenseClaim> {
     approvals,
     approval: await approvalBrief(db, 'expense_claim', claimId),
     receipts: summary.purchaseOrder ? await poReceipts(db, summary.purchaseOrder.id) : [],
+    poolUses: summary.paySource === 'pool' ? await claimPoolUses(db, claimId) : [],
   };
 }
 
@@ -686,6 +688,8 @@ const ClaimInput = z.object({
   note: z.string().trim().max(200).default(''),
   lines: z.array(LineInput).min(1, '至少一行').max(50, '一张报销单最多 50 行'),
   approveNow: z.boolean().default(false),
+  /** 钱从零采备用金来的：报的是哪几笔申用（8.1.9，docs/ERP_V819.md 第 2.3 节） */
+  poolUseIds: z.array(id).max(50, '一张报销单最多报 50 笔申用').default([]),
 });
 
 async function lockAdvance(tx: Tx, advanceId: number) {
@@ -711,6 +715,10 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
   if (input.invoiceDate) assertNotFuture(input.invoiceDate, deps.config.timezone);
   if (input.paySource === 'petty' && !input.advanceId) throw badRequest('用备用金付的，请选择这笔钱出自哪一笔打款');
   if (input.paySource === 'company' && input.advanceId) throw badRequest('公司直付的报销不选打款');
+  if (input.paySource === 'pool' && input.advanceId) throw badRequest('零采备用金的报销不选打款，选报的是哪几笔申用');
+  if (input.paySource === 'pool' && input.poolUseIds.length === 0) throw badRequest('钱从零采备用金来的，请勾这张报销单报的是哪几笔申用');
+  if (input.paySource !== 'pool' && input.poolUseIds.length > 0) throw badRequest('只有钱从零采备用金来的报销才选申用');
+  if (new Set(input.poolUseIds).size !== input.poolUseIds.length) throw badRequest('同一笔申用只能勾一次');
   if (!input.purchaseOrderId && input.lines.some((l) => l.poLineId)) throw badRequest('按次报销的明细不能关联采购单行');
   const poLineIds = input.lines.map((l) => l.poLineId).filter((x): x is number => x !== null);
   if (new Set(poLineIds).size !== poLineIds.length) throw badRequest('同一采购单行在一张报销单里只能出现一次');
@@ -725,7 +733,13 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
   if (input.invoiceTaxCents !== null && input.invoiceTaxCents > total) throw badRequest('税额不能超过报销金额');
   const needsApproval = total > rules.approvalThresholdCents;
   // 手填的不放进摘要：升级前就在「结果待确认」里的原请求照样对得上
-  const requestHash = hashRequest({ ...input, clientKey: undefined, invoiceEntryMethod: input.invoiceEntryMethod === 'manual' ? undefined : input.invoiceEntryMethod });
+  const requestHash = hashRequest({
+    ...input,
+    clientKey: undefined,
+    invoiceEntryMethod: input.invoiceEntryMethod === 'manual' ? undefined : input.invoiceEntryMethod,
+    // 8.1.9：没勾申用的不放进摘要（升级前就在「结果待确认」里的原请求照样对得上）
+    poolUseIds: input.poolUseIds.length ? [...input.poolUseIds].sort((a, b) => a - b) : undefined,
+  });
 
   const findExisting = async (db: Db) => {
     const [row] = await db<{ opType: string; requestHash: string; refId: number }[]>`SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${input.clientKey}`;
@@ -748,7 +762,8 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
       const [handler] = await tx<{ active: boolean }[]>`SELECT active FROM staff WHERE id = ${input.handlerId}`;
       if (!handler?.active) throw unprocessable('HANDLER_INVALID', '经办人不存在或已停用');
 
-      // 锁：打款 → 采购单
+      // 锁：零采备用金的申用（8.1.9，id 升序）/ 打款 → 采购单
+      const pool = input.paySource === 'pool' ? await lockPoolUsesForClaim(tx, input.poolUseIds) : null;
       if (input.advanceId) {
         const a = await lockAdvance(tx, input.advanceId);
         if (a.status !== 'active') throw conflict('ADVANCE_VOIDED', `打款 ${a.docNo} 已冲销，不能再用`);
@@ -830,6 +845,7 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
           VALUES (${newId}, ${lineNo}, ${l.name}, ${l.category}, ${l.unit}, ${l.boughtMilli}, ${l.receivedMilli},
                   ${l.boughtMilli === l.receivedMilli ? '' : l.diffReason}, ${l.amountCents}, ${l.poLineId}, ${l.materialId})`;
       }
+      if (pool) for (const u of pool.uses) await tx`INSERT INTO expense_claim_pool_uses (claim_id, use_id) VALUES (${newId}, ${u.id})`;
       await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'expense_claim', ${requestHash}, ${newId}, ${actor.id})`;
       await logApproval(tx, 'expense_claim', newId, 'create', actor.id);
       await logApproval(tx, 'expense_claim', newId, 'submit', actor.id);
@@ -859,7 +875,7 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
         action: 'expense_doc',
         targetType: 'expense_claim',
         targetId: newId,
-        detail: { docNo, amountCents: total, status: confirmNow ? 'confirmed' : 'submitted', overBudget: budget.overBudget, invoiceId },
+        detail: { docNo, amountCents: total, status: confirmNow ? 'confirmed' : 'submitted', overBudget: budget.overBudget, invoiceId, ...(pool ? { poolUses: pool.uses.map((u) => u.docNo) } : {}) },
         ip,
       });
       return { id: newId, replayed: false };
@@ -1178,6 +1194,8 @@ export async function expenseChecks(db: Db): Promise<ExpenseCheck[]> {
       ? badAp.map((b) => `${b.docNo} ${b.why}`).join('；')
       : `挂账的收货各有一条应付；现付的收货 ${cash!.count} 张都没有应付；同一张采购单只有一种结算方式，报销的采购单没有挂账的收货`,
   });
+  // 8.1.9 零采备用金（docs/ERP_V819.md 第 2.9 节）
+  items.push(await poolCheck(db));
   return items;
 }
 

@@ -55,6 +55,7 @@ import { registerCompareRoutes } from './modules/inventory/compare';
 import { registerGiftRoutes } from './modules/inventory/gifts';
 import { registerTransferRoutes } from './modules/inventory/transfers';
 import { registerPettyAccountRoutes } from './modules/petty-accounts';
+import { registerPettyPoolRoutes } from './modules/petty-pool';
 import { registerReplenishRoutes } from './modules/inventory/replenish';
 import { registerSourcingRoutes } from './modules/inventory/sourcing';
 import { registerPurchaseFlowRoutes } from './modules/purchase-flow';
@@ -338,6 +339,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerCycleRoutes(app, deps);
   registerImportRoutes(app, deps);
   registerExpenseRoutes(app, deps);
+  // 8.1.9 零采备用金（docs/ERP_V819.md 第 2 节）
+  registerPettyPoolRoutes(app, deps);
   // 费用预算与进项发票台账（8.0.3）
   registerBudgetRoutes(app, deps);
   registerInvoiceRoutes(app, deps);

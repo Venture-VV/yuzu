@@ -130,6 +130,7 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   ota_import: ['booking.manage'],
   stock_transfer: ['inventory.operate'],
   studio_publish: ['studio.publish'],
+  pool_use: ['pool.manage'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -195,6 +196,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   ota_import: ['booking.manage'],
   stock_transfer: ['inventory.read'],
   studio_publish: ['studio.edit'],
+  pool_use: ['pool.read'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {

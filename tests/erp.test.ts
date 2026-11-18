@@ -99,6 +99,8 @@ describe('ERP 模块开关', () => {
         ['contracts', true, false],
         ['payments', true, false],
         ['expenses', true, false],
+        // 零采备用金（8.1.9）依赖库存与费用
+        ['pettyPool', true, false],
         // 发票台账（8.0.3）也依赖库存
         ['invoices', true, false],
         // 开票（8.0.21）不依赖库存

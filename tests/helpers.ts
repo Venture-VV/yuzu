@@ -332,6 +332,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '166_studio_schedule_comments.sql',
   '180_emenu_periods.sql',
   '181_dining_slots.sql',
+  '182_petty_pool.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

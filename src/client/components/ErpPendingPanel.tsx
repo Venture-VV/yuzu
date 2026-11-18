@@ -107,8 +107,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 手动调整会员档阶（v0.7.23）：返回那位会员的等级卡
     case 'grade_adjust':
       return typeof d.memberId === 'number' ? { refId: d.memberId } : null;
-    // 登记会员权益使用（v0.7.24）：返回那条登记
+    // 登记会员权益使用（v0.7.24）：返回那条登记；零采备用金的申用（8.1.9）：返回那笔申用
     case 'benefit_use':
+    case 'pool_use':
       return d.use && typeof d.use === 'object' ? { refId: d.use.id } : null;
     // 邀请体验、赠送会籍（v0.7.25）：返回那条临时身份
     case 'member_trial':
