@@ -136,6 +136,13 @@ export const FENCED_OPS = [
   'stock_transfer',
   // 8.1.1 UI 工作台：发布、回滚（迁移 164；编号记在 studio_versions.client_key）
   'studio_publish',
+  // 8.1.9 零采备用金的申用（迁移 182；编号记在 idempotency_keys，ref_id 是那笔申用，也记在 petty_pool_uses.client_key）
+  'pool_use',
+  // 8.1.9 库管入库台账导入（迁移 183；编号记在 idempotency_keys，ref_id 是那次导入，也记在 receipt_imports.client_key）
+  'receipt_import',
+  // 8.1.9 签赠（迁移 184）：新建签赠券类型（编号记在 coupon_templates.client_key）、签赠发放（编号记在 coupon_issues.client_key）
+  'gift_type',
+  'gift_issue',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -194,20 +201,22 @@ export async function fenceKey(tx: Tx, key: string, opType: FencedOp, staffId: n
   return { inserted: rows.length > 0 };
 }
 
-const COUPON_OPS = ['coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue', 'coupon_campaign'] as const;
+const COUPON_OPS = ['coupon_template', 'coupon_rule', 'coupon_batch', 'coupon_issue', 'coupon_campaign', 'gift_type', 'gift_issue'] as const;
 type CouponOp = (typeof COUPON_OPS)[number];
 export const isCouponOp = (op: string): op is CouponOp => (COUPON_OPS as readonly string[]).includes(op);
 
 /** 券与会员权益（v0.7.20）的操作编号记在各自的表上：查到时返回那条记录的编号（模板、规则、发券记录） */
 export async function couponOpRef(db: Db, key: string, opType: CouponOp): Promise<number | null> {
   const rows =
-    opType === 'coupon_template'
-      ? await db<{ id: number }[]>`SELECT id FROM coupon_templates WHERE client_key = ${key}`
+    opType === 'coupon_template' || opType === 'gift_type'
+      ? await db<{ id: number }[]>`SELECT id FROM coupon_templates WHERE client_key = ${key} AND gift = ${opType === 'gift_type'}`
       : opType === 'coupon_rule'
         ? await db<{ id: number }[]>`SELECT id FROM coupon_rules WHERE client_key = ${key}`
         : opType === 'coupon_campaign'
           ? await db<{ id: number }[]>`SELECT id FROM coupon_campaigns WHERE client_key = ${key}`
-          : await db<{ id: number }[]>`SELECT id FROM coupon_issues WHERE client_key = ${key} AND kind = ${opType === 'coupon_batch' ? 'batch' : 'manual'}`;
+          : opType === 'gift_issue'
+            ? await db<{ id: number }[]>`SELECT id FROM coupon_issues WHERE client_key = ${key} AND authorized_by IS NOT NULL`
+            : await db<{ id: number }[]>`SELECT id FROM coupon_issues WHERE client_key = ${key} AND kind = ${opType === 'coupon_batch' ? 'batch' : 'manual'} AND authorized_by IS NULL`;
   return rows[0] ? Number(rows[0].id) : null;
 }
 

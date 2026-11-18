@@ -170,7 +170,8 @@ const TEMPLATE_SELECT = (db: Db) => db`
          CASE WHEN gw.id IS NULL THEN NULL WHEN gw.kind = 'central'
               THEN coalesce((SELECT value #>> '{}' FROM settings WHERE key = 'inventory_scope_name'), '后勤总库')
               ELSE gd.name || '小仓' END AS gift_warehouse_name,
-         (SELECT count(*) FROM coupons c WHERE c.template_id = t.id)::int AS issued
+         (SELECT count(*) FROM coupons c WHERE c.template_id = t.id)::int AS issued,
+         t.gift, t.gift_segment, t.gift_content, t.gift_rules
   FROM coupon_templates t JOIN staff s ON s.id = t.created_by
   LEFT JOIN service_items xi ON xi.id = t.exchange_item_id LEFT JOIN ticket_types xt ON xt.id = t.exchange_ticket_type_id
   LEFT JOIN service_items bi ON bi.id = t.buy_item_id
@@ -227,8 +228,9 @@ function toTemplate(r: TemplateRow): CouponTemplate {
   };
 }
 
-export async function listTemplates(db: Db): Promise<CouponTemplate[]> {
-  const rows = await db<TemplateRow[]>`${TEMPLATE_SELECT(db)} ORDER BY t.active DESC, t.id DESC`;
+/** 券模板；签赠券类型（8.1.9）默认不列（普通发券、发券规则、会员权益、批量发券都不能用），gift: true 只列签赠券类型 */
+export async function listTemplates(db: Db, opts: { gift?: boolean } = {}): Promise<CouponTemplate[]> {
+  const rows = await db<TemplateRow[]>`${TEMPLATE_SELECT(db)} WHERE t.gift = ${opts.gift ?? false} ORDER BY t.active DESC, t.id DESC`;
   return rows.map(toTemplate);
 }
 
@@ -240,32 +242,50 @@ export async function getTemplate(db: Db, id: number): Promise<CouponTemplate> {
 
 const CreateKey = z.object({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试') });
 
-export async function createTemplate(deps: Deps, raw: unknown, ctx: OpContext): Promise<CouponTemplate> {
+/** 签赠券类型（8.1.9，docs/GIFTS_V819.md）：板块、权益内容、规则说明；新建签赠券类型时给 */
+export interface GiftInfo {
+  segment: string;
+  content: string;
+  rules: string;
+}
+
+export async function createTemplate(deps: Deps, raw: unknown, ctx: OpContext, gift: GiftInfo | null = null): Promise<CouponTemplate> {
   const { clientKey } = parse(CreateKey, raw);
   const t = normalizeTerms(parse(TemplateInput, raw));
+  // 签赠券类型只能送一个项目或票种（兑换券）、或一个金额以内的（代金券）
+  if (gift && t.kind !== 'exchange' && t.kind !== 'cash') throw badRequest('签赠券类型只能是兑换券（送一个项目或票种）或代金券（送一个金额以内的）', { field: 'kind' });
   // 同一操作编号已建过（没收到结果再提交）：同一个人、同一种券返回原来那个，否则拒绝（名称之后可能改过，不比）
   const replay = async () => {
-    const [p] = await deps.sql<{ id: number; kind: string; createdBy: number }[]>`SELECT id, kind, created_by FROM coupon_templates WHERE client_key = ${clientKey}`;
+    const [p] = await deps.sql<{ id: number; kind: string; createdBy: number; gift: boolean }[]>`SELECT id, kind, created_by, gift FROM coupon_templates WHERE client_key = ${clientKey}`;
     if (!p) return null;
-    if (p.kind !== t.kind || Number(p.createdBy) !== ctx.actor.id) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一个券模板，请刷新页面后重新填写');
+    if (p.kind !== t.kind || Number(p.createdBy) !== ctx.actor.id || p.gift !== !!gift) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一个券模板，请刷新页面后重新填写');
     return getTemplate(deps.sql, p.id);
   };
   const prior = await replay();
   if (prior) return prior;
   try {
     const id = await deps.sql.begin(async (tx) => {
-      // 与「确认作废」串行：已作废的编号整笔拒绝（结果待确认，Codex 复审 6c3765c）
-      await assertNotFenced(tx, clientKey, 'coupon_template', erpOpAbandoned);
+      // 与「确认作废」串行：已作废的编号整笔拒绝（结果待确认，Codex 复审 6c3765c）；签赠券类型（8.1.9）用自己的业务类型
+      await assertNotFenced(tx, clientKey, gift ? 'gift_type' : 'coupon_template', erpOpAbandoned);
       await assertRefs(tx, t);
       const [row] = await tx<{ id: number }[]>`
         INSERT INTO coupon_templates (name, kind, face_value, rate_percent, max_off, threshold, scope, scope_categories, scope_items,
                                       exchange_item_id, exchange_ticket_type_id, buy_item_id, gift_material_id, gift_qty_milli, gift_warehouse_id,
-                                      validity, valid_from, valid_to, valid_days, levels, note, active, created_by, client_key)
+                                      validity, valid_from, valid_to, valid_days, levels, note, active, created_by, client_key,
+                                      gift, gift_segment, gift_content, gift_rules)
         VALUES (${t.name}, ${t.kind}, ${t.faceValue}, ${t.ratePercent}, ${t.maxOff}, ${t.threshold}, ${t.scope}, ${t.scopeCategories}::text[],
                 ${t.scopeItems}::bigint[], ${t.exchangeItemId}, ${t.exchangeTicketTypeId}, ${t.buyItemId}, ${t.giftMaterialId}, ${t.giftQtyMilli}, ${t.giftWarehouseId},
-                ${t.validity}, ${t.validFrom}, ${t.validTo}, ${t.validDays}, ${t.levels}::smallint[], ${t.note}, ${t.active}, ${ctx.actor.id}, ${clientKey})
+                ${t.validity}, ${t.validFrom}, ${t.validTo}, ${t.validDays}, ${t.levels}::smallint[], ${t.note}, ${t.active}, ${ctx.actor.id}, ${clientKey},
+                ${!!gift}, ${gift?.segment ?? ''}, ${gift?.content ?? ''}, ${gift?.rules ?? ''})
         RETURNING id`;
-      await writeAudit(tx, { staffId: ctx.actor.id, action: 'coupon_template_saved', targetType: 'coupon_template', targetId: row!.id, detail: { created: t }, ip: ctx.ip });
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: gift ? 'gift_type' : 'coupon_template_saved',
+        targetType: 'coupon_template',
+        targetId: row!.id,
+        detail: { created: t, ...(gift ? { gift } : {}) },
+        ip: ctx.ip,
+      });
       return row!.id;
     });
     return getTemplate(deps.sql, id);
@@ -298,13 +318,20 @@ const TERM_KEYS = [
   'levels',
 ] as const;
 
-/** 改模板：带版本号（对不上拒绝）；发过券的只能改名称、备注、停用 */
-export async function updateTemplate(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<CouponTemplate> {
+/**
+ * 改模板：带版本号（对不上拒绝）；发过券的只能改名称、备注、停用。
+ * 签赠券类型（8.1.9）只经签赠模块改（gift 给板块、权益内容、规则说明），券模板的接口改不了它；反过来签赠模块也改不了普通券模板
+ */
+export async function updateTemplate(deps: Deps, id: number, raw: unknown, ctx: OpContext, gift: GiftInfo | null = null): Promise<CouponTemplate> {
   const input = parse(TemplateUpdate, raw);
   const t = normalizeTerms(parse(TemplateInput, input));
+  if (gift && t.kind !== 'exchange' && t.kind !== 'cash') throw badRequest('签赠券类型只能是兑换券（送一个项目或票种）或代金券（送一个金额以内的）', { field: 'kind' });
   await deps.sql.begin(async (tx) => {
     const [cur] = await tx<TemplateRow[]>`${TEMPLATE_SELECT(tx)} WHERE t.id = ${id} FOR UPDATE OF t`;
-    if (!cur) throw notFound('券模板不存在');
+    if (!cur || cur.gift !== !!gift) {
+      if (cur?.gift) throw unprocessable('GIFT_TEMPLATE', `「${cur.name}」是签赠券类型，请在后台「签赠 → 知识库」里改`);
+      throw notFound(gift ? '签赠券类型不存在' : '券模板不存在');
+    }
     if (cur.version !== input.expectedVersion) throw conflict('TEMPLATE_STALE', '这个券模板刚刚被别人改过，请刷新后重新填写');
     // 排他锁之后再数一次已发的券（发券对模板加共享锁，排在这之前的已经提交）
     const [counted] = await tx<{ issued: number }[]>`SELECT count(*)::int AS issued FROM coupons WHERE template_id = ${id}`;
@@ -324,13 +351,21 @@ export async function updateTemplate(deps: Deps, id: number, raw: unknown, ctx: 
              gift_material_id = ${t.giftMaterialId}, gift_qty_milli = ${t.giftQtyMilli}, gift_warehouse_id = ${t.giftWarehouseId}, validity = ${t.validity},
              valid_from = ${t.validFrom}, valid_to = ${t.validTo}, valid_days = ${t.validDays}, levels = ${t.levels}::smallint[], note = ${t.note},
              active = ${t.active}, version = version + 1, updated_at = now()
+             ${gift ? tx`, gift_segment = ${gift.segment}, gift_content = ${gift.content}, gift_rules = ${gift.rules}` : tx``}
       WHERE id = ${id}`;
     await writeAudit(tx, {
       staffId: ctx.actor.id,
-      action: 'coupon_template_saved',
+      action: gift ? 'gift_type' : 'coupon_template_saved',
       targetType: 'coupon_template',
       targetId: id,
-      detail: { name: t.name, active: t.active, changed: changed.length ? changed : undefined, nameBefore: cur.name, activeBefore: cur.active },
+      detail: {
+        name: t.name,
+        active: t.active,
+        changed: changed.length ? changed : undefined,
+        nameBefore: cur.name,
+        activeBefore: cur.active,
+        ...(gift ? { gift, giftBefore: { segment: cur.giftSegment, content: cur.giftContent, rules: cur.giftRules } } : {}),
+      },
       ip: ctx.ip,
     });
   });
@@ -348,13 +383,15 @@ export interface LockedTemplate extends CouponTerms {
   validDays: number | null;
   levels: number[];
   active: boolean;
+  /** 签赠券类型（8.1.9）：只能经「签赠发放」发 */
+  gift: boolean;
 }
 
 /** 读模板；lock 时加共享锁（发券前加，改模板加排他锁，两边串行），不加锁的只用于只读判断 */
 async function readTemplate(db: Db, id: number, lock: boolean): Promise<LockedTemplate | null> {
   const [t] = await db<LockedTemplate[]>`
     SELECT id, name, kind, face_value, rate_percent, max_off, threshold, scope, scope_categories, scope_items, exchange_item_id, exchange_ticket_type_id,
-           buy_item_id, validity, valid_from, valid_to, valid_days, levels, active
+           buy_item_id, validity, valid_from, valid_to, valid_days, levels, active, gift
     FROM coupon_templates WHERE id = ${id} ${lock ? db`FOR SHARE` : db``}`;
   return t ? { ...t, ...termsOf(t), levels: t.levels.map(Number) } : null;
 }
@@ -394,6 +431,9 @@ export interface IssueSpec {
   range?: { from: string; to: string };
   /** 批量发券（8.0.4）的发券单 */
   campaignId?: number | null;
+  /** 签赠发放（8.1.9）：授权人与发放渠道（两个一起给，只能是人工发券） */
+  authorizedBy?: number | null;
+  giftChannel?: string | null;
 }
 
 /**
@@ -409,9 +449,10 @@ export async function writeIssue(tx: Tx, o: IssueSpec): Promise<{ issueId: numbe
   const issueNo = await nextDocNo(tx, 'coupon_issue', 'FQ', o.date);
   const [row] = await tx<{ id: number }[]>`
     INSERT INTO coupon_issues (issue_no, kind, template_id, member_id, quantity, rule_id, recharge_id, level, reason, client_key, dedupe_key,
-                               issued_by, issued_at, business_date, campaign_id)
+                               issued_by, issued_at, business_date, campaign_id, authorized_by, gift_channel)
     VALUES (${issueNo}, ${o.kind}, ${o.template.id}, ${o.memberId}, ${o.quantity}, ${o.ruleId ?? null}, ${o.rechargeId ?? null}, ${o.level ?? null},
-            ${o.reason ?? ''}, ${o.clientKey ?? null}, ${o.dedupeKey ?? null}, ${o.staffId}, ${o.at}, ${o.date}, ${o.campaignId ?? null})
+            ${o.reason ?? ''}, ${o.clientKey ?? null}, ${o.dedupeKey ?? null}, ${o.staffId}, ${o.at}, ${o.date}, ${o.campaignId ?? null},
+            ${o.authorizedBy ?? null}, ${o.giftChannel ?? null})
     ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
     RETURNING id`;
   if (!row) return null;
@@ -438,7 +479,8 @@ const levelAllowed = (t: Pick<LockedTemplate, 'levels'>, level: number) => t.lev
 /** 「L0、L1、L2」 */
 const gradeList = (levels: number[]) => levels.map((l) => `L${l}`).join('、');
 
-async function issueDate(db: Db, deps: Pick<Deps, 'config'>, at: Date) {
+/** 发券那一刻的营业日（签赠发放也用） */
+export async function issueDate(db: Db, deps: Pick<Deps, 'config'>, at: Date) {
   const settings = await loadSettings(db);
   return businessDateOf(at, deps.config.timezone, settings.businessDayStartHour);
 }
@@ -550,7 +592,8 @@ export async function issueBenefitCoupons(
   o: { templateId: number; memberId: number; quantity: number; level: number; reason: string; dedupeKey: string; staffId: number | null; at: Date; date: string; periodEnd: string | null },
 ): Promise<{ issueId: number; issueNo: string; couponIds: number[] } | null> {
   const template = await lockTemplate(tx, o.templateId);
-  if (!template?.active) return null;
+  // 签赠券类型（8.1.9）只经「签赠发放」发；会员权益选不到它，这里再挡一次（不然数据库触发器拒绝、整个事务回滚）
+  if (!template?.active || template.gift) return null;
   let range = validRange(template, o.date);
   if (range && o.periodEnd) {
     const from = template.validity === 'fixed' && template.validFrom! > o.date ? template.validFrom! : o.date;
@@ -600,6 +643,8 @@ function mpClaimProblem(m: MpClaimMember, t: LockedTemplate | null, date: string
   if (m.status !== 'active') return { code: 'MEMBER_FROZEN', message: `会员「${m.name}」已停用，不能领券` };
   if (!t) return { code: 'NOT_FOUND', message: '券模板不存在' };
   if (!t.active) return { code: 'TEMPLATE_INACTIVE', message: `券「${t.name}」已停用，不能再领` };
+  // 签赠券类型（8.1.9）只经「签赠发放」发（要选授权人）；小程序那边按「不能领」处理，不另加拒绝码
+  if (t.gift) return { code: 'TEMPLATE_INACTIVE', message: `「${t.name}」是签赠券，不能在小程序领取` };
   if (!validRange(t, date)) return { code: 'TEMPLATE_EXPIRED', message: `券「${t.name}」的有效期到 ${t.validTo} 已经过了，不能再领` };
   if (!levelAllowed(t, m.grade)) {
     return { code: 'COUPON_LEVEL', message: `券「${t.name}」只发给 ${gradeList(t.levels)} 的会员，这位会员现在是 L${m.grade}` };
@@ -799,6 +844,7 @@ export async function issueToMember(deps: Deps, memberId: number, raw: unknown, 
       if (m.status !== 'active') throw unprocessable('MEMBER_FROZEN', `会员「${m.name}」已停用，不能发券`);
       const template = await lockTemplate(tx, input.templateId);
       if (!template) throw notFound('券模板不存在');
+      if (template.gift) throw unprocessable('GIFT_TEMPLATE', `「${template.name}」是签赠券类型，请在「签赠发放」里发（要选授权人）`);
       if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用，不能再发`);
       const [g] = await tx<{ grade: number }[]>`SELECT grade FROM members WHERE id = ${memberId}`;
       const level = g!.grade;
@@ -851,6 +897,7 @@ export async function createBatch(deps: Deps, raw: unknown, ctx: OpContext): Pro
       await assertNotFenced(tx, input.clientKey, 'coupon_batch', erpOpAbandoned);
       const template = await lockTemplate(tx, input.templateId);
       if (!template) throw notFound('券模板不存在');
+      if (template.gift) throw unprocessable('GIFT_TEMPLATE', `「${template.name}」是签赠券类型，不能做无记名券；请在「签赠发放」里发给会员`);
       if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用，不能再发`);
       if (template.levels.length) throw unprocessable('COUPON_LEVEL', `券「${template.name}」限定了会员等级，无记名券不能用；请另建不限等级的模板`);
       const at = ctx.at ?? new Date();
@@ -988,6 +1035,7 @@ export async function createRule(deps: Deps, raw: unknown, ctx: OpContext): Prom
       if (again !== null) return again;
       const template = await lockTemplate(tx, input.templateId);
       if (!template) throw notFound('券模板不存在');
+      if (template.gift) throw unprocessable('GIFT_TEMPLATE', `「${template.name}」是签赠券类型，不能用在发券规则里；签赠只经「签赠发放」发`);
       if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用`);
       if (needsLevel && !levelAllowed(template, input.level!)) {
         throw unprocessable('COUPON_LEVEL', `券「${template.name}」只发给 ${gradeList(template.levels)} 的会员，不能配给 L${input.level}`);

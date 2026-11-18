@@ -46,7 +46,10 @@ import {
   Pencil,
   KeyRound,
   ArrowUpRight,
+  Signature,
 } from 'lucide-react';
+import { GIFT_PANEL_CHANNELS } from '@shared/gifts';
+import { GiftLedger } from '../gifts/GiftLedger';
 import type { WorkspaceData, TeamUser, Member, Appointment, Balance, Visit, Task, Receipt, Audit, CatalogItem, NativeMemberSummary } from './types';
 import { ReceiptEditor, ReceiptDetail, BalanceDetail } from './ReceiptExperience';
 import { CatalogManager } from './CatalogManager';
@@ -56,7 +59,7 @@ import { Dialog, Field, Empty, Status, amount, csv, date, dayKey, download, iso,
 import { pretty, timelineFor } from './workspaceTimeline';
 import { CaptureReceipt } from './CaptureReceipt';
 
-type View = 'dashboard' | 'members' | 'appointments' | 'followup' | 'balances' | 'segments' | 'receipts' | 'receiptArchive' | 'tasks' | 'manager';
+type View = 'dashboard' | 'members' | 'appointments' | 'followup' | 'balances' | 'segments' | 'receipts' | 'receiptArchive' | 'tasks' | 'gifts' | 'manager';
 // 哪一页写进地址（8.0.18 整合，与后台的二级页签同一个规矩）：/concierge 是今日工作台，其余是 /concierge/<页>。
 // 刷新不回工作台，也可以把某一页的链接发给同事。地址里用的是看得懂的名字，不跟内部的旧名走
 // （receipts 现在是好评中心、balances 是会员情况、segments 是会员中心）。
@@ -70,6 +73,8 @@ const VIEW_SLUG: Record<View, string> = {
   balances: 'situation',
   segments: 'tiers',
   tasks: 'tasks',
+  // 8.1.9 签赠台账（docs/GIFTS_V819.md）
+  gifts: 'gifts',
   manager: 'manager',
 };
 const SLUG_VIEW = new Map((Object.entries(VIEW_SLUG) as [View, string][]).map(([view, slug]) => [slug, view]));
@@ -93,6 +98,7 @@ const NAV = [
   { id: 'balances', label: '会员情况', icon: Users },
   { id: 'tasks', label: '待办与交班', icon: ClipboardList },
   { id: 'segments', label: '会员中心', icon: Layers3 },
+  { id: 'gifts', label: '签赠台账', icon: Signature },
 ] as const;
 const TITLES: Record<View, [string, string]> = {
   dashboard: ['今日工作台', '把接待、拍单与后续安排，接续在同一份会员档案中。'],
@@ -104,6 +110,7 @@ const TITLES: Record<View, [string, string]> = {
   balances: ['会员情况', '从真实到访记录识别沉睡会员，安排有针对性的服务跟进。'],
   segments: ['会员中心', '按会员系统的档阶查看分布与会员名单。'],
   tasks: ['待办与交班', '让待回复、待处理和待接收的事项都有下一负责人。'],
+  gifts: ['签赠台账', '签赠券的发放、核销与授权统计；与客户部、后台的签赠台账是同一份。'],
   manager: ['经理监管', '从工作汇总追到明细、操作账号与原始凭证。'],
 };
 const APPT_STATUS = ['待确认', '已确认', '已到店', '已完成', '已取消', '未到店'];
@@ -1037,7 +1044,8 @@ export default function Workspace({ initialData }: { initialData: WorkspaceData 
       <div className="workspace-shell">
         <div className="workspace-main">
           <header className="concierge-toolbar">
-            <nav aria-label="管家业务模块">
+            {/* 手机上这一排横着滑（有意的）；电脑、平板上放得下 */}
+            <nav aria-label="管家业务模块" className="overflow-x-auto">
               {NAV.map((n) => (
                 <button key={n.id} className={view === n.id ? 'selected' : ''} onClick={() => navigate(n.id)}>
                   <n.icon size={15} />
@@ -1107,7 +1115,7 @@ export default function Workspace({ initialData }: { initialData: WorkspaceData 
                     <Camera size={17} />
                     拍摄消费单
                   </button>
-                ) : view === 'receipts' ? null : view === 'tasks' ? (
+                ) : view === 'receipts' || view === 'gifts' ? null : view === 'tasks' ? (
                   <button className="btn btn-primary" onClick={() => openModal({ kind: 'task' })}>
                     <Plus size={17} />
                     新增待办
@@ -1441,6 +1449,7 @@ export default function Workspace({ initialData }: { initialData: WorkspaceData 
             )}
             {view === 'balances' && <MemberInsightsView key={'situation-' + insightBucket} mode="situation" initialBucket={insightBucket} onOpen={openSystemMember} />}
             {view === 'segments' && <MemberInsightsView mode="tiers" onOpen={openSystemMember} />}
+            {view === 'gifts' && <GiftLedger channel={GIFT_PANEL_CHANNELS.concierge} testId="concierge-gift-ledger" />}
             {view === 'tasks' && (
               <section className="panel">
                 <div className="panel-header">

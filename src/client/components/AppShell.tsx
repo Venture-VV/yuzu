@@ -257,7 +257,8 @@ export function PageHeader({ title, subtitle, actions, dateMode = 'business' }: 
   const closed = !!hours && !isOpenAt(minuteOfDay(new Date(now), session.timezone), hours);
   return (
     <header className="flex min-h-[64px] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-paper/90 px-5 py-3 backdrop-blur md:px-7">
-      <div className="min-w-0 flex-1">
+      {/* 标题至少留 10rem：窄屏（商米 V3）上右边的按钮放不下时换到下一行，不把标题挤成一个字（8.1.9） */}
+      <div className="min-w-0 flex-1 basis-40">
         <h1 className="truncate text-[19px] font-bold tracking-tight text-ink">{title}</h1>
         {subtitle && <p className="truncate text-[12.5px] text-ink-3">{subtitle}</p>}
       </div>

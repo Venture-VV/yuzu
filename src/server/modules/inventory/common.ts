@@ -34,7 +34,7 @@ export async function loadInventorySettings(db: Db): Promise<InventorySettings> 
   const rows = await db<{ key: string; value: unknown }[]>`
     SELECT key, value FROM settings
     WHERE key IN ('inventory_scope_name', 'inventory_price_basis', 'inventory_urgent_cap_cents', 'inventory_approval_rules',
-                  'inventory_approval_threshold_cents', 'inventory_usage_window_days', 'inventory_cycle_rules')`;
+                  'inventory_approval_threshold_cents', 'inventory_usage_window_days', 'inventory_cycle_rules', 'inventory_direct_receipt')`;
   const map = new Map(rows.map((r) => [r.key, r.value]));
   return {
     scopeName: (map.get('inventory_scope_name') as string) ?? '后勤总库',
@@ -46,6 +46,8 @@ export async function loadInventorySettings(db: Db): Promise<InventorySettings> 
     ...DEFAULT_CYCLE_RULES,
     ...pickCycleRules(map.get('inventory_cycle_rules')),
     approvalRules: { ...DEFAULT_APPROVAL_RULES, ...((map.get('inventory_approval_rules') as Partial<ApprovalRules>) ?? {}) },
+    // 库管入库（8.1.9，KR6）：功能开关默认开
+    directReceipt: map.get('inventory_direct_receipt') !== false,
   };
 }
 

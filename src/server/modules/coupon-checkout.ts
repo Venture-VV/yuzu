@@ -60,17 +60,25 @@ interface CouponRowForCheckout extends CouponTerms {
   giftMaterialId: number | null;
   giftQtyMilli: number | null;
   giftWarehouseId: number | null;
+  /** 签赠券（8.1.9，docs/GIFTS_V819.md）：板块，发放时选的授权人、渠道、事由——结账选券时写在列表上 */
+  gift: boolean;
+  giftSegment: string;
+  giftAuthorizerName: string | null;
+  giftChannel: string | null;
+  giftReason: string | null;
 }
 
 const COUPON_FOR_CHECKOUT = (db: Db) => db`
   SELECT c.id, c.code, c.status, c.member_id, m.name AS member_name, c.valid_from, c.valid_to, t.name AS template_name,
          t.kind, t.face_value, t.rate_percent, t.max_off, t.threshold, t.scope, t.scope_categories, t.scope_items,
          t.exchange_item_id, t.exchange_ticket_type_id, xi.name AS exchange_item_name, xt.name AS exchange_ticket_name, ck.checkout_no,
-         t.buy_item_id, bi.name AS buy_item_name, t.gift_material_id, t.gift_qty_milli, t.gift_warehouse_id
+         t.buy_item_id, bi.name AS buy_item_name, t.gift_material_id, t.gift_qty_milli, t.gift_warehouse_id,
+         t.gift, t.gift_segment, au.display_name AS gift_authorizer_name, ci.gift_channel, CASE WHEN t.gift THEN ci.reason END AS gift_reason
   FROM coupons c JOIN coupon_templates t ON t.id = c.template_id LEFT JOIN members m ON m.id = c.member_id
   LEFT JOIN service_items xi ON xi.id = t.exchange_item_id LEFT JOIN ticket_types xt ON xt.id = t.exchange_ticket_type_id
   LEFT JOIN service_items bi ON bi.id = t.buy_item_id
-  LEFT JOIN checkouts ck ON ck.id = c.checkout_id`;
+  LEFT JOIN checkouts ck ON ck.id = c.checkout_id
+  LEFT JOIN coupon_issues ci ON ci.id = c.issue_id LEFT JOIN staff au ON au.id = ci.authorized_by`;
 
 const termsOf = (r: CouponRowForCheckout): CouponTerms => ({
   kind: r.kind,
@@ -119,6 +127,7 @@ const toOption = (r: CouponRowForCheckout, j: ReturnType<typeof judge>): Checkou
   usable: j.usable,
   amount: j.amount,
   reason: j.reason,
+  gift: r.gift ? { segment: r.giftSegment, authorizerName: r.giftAuthorizerName ?? '', channel: r.giftChannel ?? '', reason: r.giftReason ?? '' } : null,
 });
 
 /** 结账前核对：这几位会员没用过、没过期的券，能用的排前面（能抵多的在前） */
@@ -175,7 +184,9 @@ export async function redeemCoupon(
       FROM coupons c WHERE c.id = ${r.id}
       ON CONFLICT (coupon_id, checkout_id) DO NOTHING`;
   }
-  return { couponId: r.id, amount: j.amount, lineIds: j.lineIds, ref: `${r.templateName}（${formatStoreCouponCode(r.code)}）`.slice(0, 64) };
+  // 签赠券（8.1.9）在收款明细上写「签赠」与授权人，结账记录里一眼看得出是谁授权送的
+  const ref = r.gift ? `签赠·${r.templateName}（${formatStoreCouponCode(r.code)}，授权 ${r.giftAuthorizerName ?? ''}）` : `${r.templateName}（${formatStoreCouponCode(r.code)}）`;
+  return { couponId: r.id, amount: j.amount, lineIds: j.lineIds, ref: ref.slice(0, 64) };
 }
 
 /** 反结账：这张结账单用掉的券退回（只追加「退回」记录）；券已不在这张结账单上（不会发生）时跳过 */

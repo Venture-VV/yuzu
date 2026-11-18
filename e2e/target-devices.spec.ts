@@ -21,29 +21,60 @@ interface Device {
   pages: PageKey[];
 }
 
-type PageKey = 'frontdesk' | 'shift' | 'workbench' | 'dining-order' | 'dining-receipt' | 'dining-tables' | 'dining-kitchen' | 'dining-limits' | 'dining-ledger' | 'dining-voids' | 'admin-dining';
+type PageKey =
+  | 'frontdesk'
+  | 'shift'
+  | 'workbench'
+  | 'dining-order'
+  | 'dining-receipt'
+  | 'dining-tables'
+  | 'dining-kitchen'
+  | 'dining-limits'
+  | 'dining-ledger'
+  | 'dining-voids'
+  | 'admin-dining'
+  // 8.1.9：零采备用金、库管入库、签赠（后台知识库、管家部与客户部的签赠台账）
+  | 'pool'
+  | 'direct-receipt'
+  | 'admin-gifts'
+  | 'gift-ledger-concierge'
+  | 'gift-ledger-customer';
 
 const DEVICES: Device[] = [
   {
     name: '商米 D3 Pro',
     viewport: { width: 1920, height: 1080 },
-    pages: ['frontdesk', 'shift', 'workbench', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger', 'dining-voids', 'admin-dining'],
+    pages: [
+      'frontdesk',
+      'shift',
+      'workbench',
+      'dining-order',
+      'dining-receipt',
+      'dining-tables',
+      'dining-ledger',
+      'dining-voids',
+      'admin-dining',
+      'pool',
+      'direct-receipt',
+      'admin-gifts',
+      'gift-ledger-customer',
+    ],
   },
   {
     name: '商米 D3 Pro（系统缩放 1.5 倍）',
     viewport: { width: 1280, height: 720 },
-    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger'],
+    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger', 'pool', 'gift-ledger-concierge'],
   },
   {
     name: '商米 V3',
     viewport: { width: 360, height: 800 },
     mobile: true,
-    pages: ['dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'dining-limits'],
+    pages: ['dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'dining-limits', 'gift-ledger-concierge', 'gift-ledger-customer'],
   },
   {
     name: '小米平板 6S Pro 12.4',
     viewport: { width: 1355, height: 903 },
-    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen'],
+    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'direct-receipt', 'admin-gifts', 'gift-ledger-concierge'],
   },
 ];
 
@@ -288,6 +319,39 @@ async function expectReceiptNamesReadable(page: Page) {
 }
 
 const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
+  // 8.1.9 零采备用金（总额没配置时顶上有提示，照样不横向滚动）
+  pool: async (page) => {
+    await page.goto('/erp/pool');
+    await expect(page.getByTestId('pool-page')).toBeVisible();
+    await expectFits(page);
+  },
+  // 8.1.9 库管入库：不选采购单的收货表单
+  'direct-receipt': async (page) => {
+    await page.goto('/inventory/direct/new');
+    await expect(page.getByRole('heading', { name: /库管入库/ })).toBeVisible();
+    await expectFits(page);
+  },
+  // 8.1.9 签赠：后台知识库
+  'admin-gifts': async (page) => {
+    await page.goto('/admin/gifts/types');
+    await expect(page.getByTestId('gift-types')).toBeVisible();
+    await expectFits(page);
+  },
+  // 8.1.9 签赠台账：管家部、客户部（日期两格在手机上各占一行，「签赠发放」在屏幕里）
+  'gift-ledger-concierge': async (page) => {
+    await page.goto('/concierge/gifts');
+    await expect(page.getByTestId('concierge-gift-ledger')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('gift-totals').or(page.getByTestId('gift-ledger-failed'))).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['gift-issue', 'gift-from', 'gift-to']);
+  },
+  'gift-ledger-customer': async (page) => {
+    await page.goto('/customer?tab=gifts');
+    await expect(page.getByTestId('customer-gift-ledger')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('gift-totals').or(page.getByTestId('gift-ledger-failed'))).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['gift-issue', 'gift-from', 'gift-to']);
+  },
   frontdesk: async (page) => {
     await page.goto('/frontdesk');
     await expect(page.getByTestId('tag-board')).toBeVisible();

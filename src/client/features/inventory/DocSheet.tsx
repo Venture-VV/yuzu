@@ -141,7 +141,8 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
           <p className="num text-[18px] font-bold">{doc.docNo}</p>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <StatusChip status={doc.status} />
-            {doc.noPo && doc.docType === 'receipt' && !doc.urgent && <Badge tone="ember">缺少采购依据</Badge>}
+            {doc.direct && <Badge tone="lake">库管入库{doc.importId ? ' · 台账导入' : ''}</Badge>}
+            {doc.noPo && doc.docType === 'receipt' && !doc.urgent && !doc.direct && <Badge tone="ember">缺少采购依据</Badge>}
             {doc.urgent && (
               <Badge tone="yuzu">
                 急采 · 上限 <Money cents={doc.urgentCapCents ?? 0} />
@@ -508,7 +509,11 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
           </>
         )}
         {editable && (
-          <Button variant="secondary" icon={<Pencil className="size-4" />} onClick={() => navigate(doc.urgent ? `/purchasing/urgent/${doc.id}/edit` : `/inventory/docs/${doc.id}/edit`)}>
+          <Button
+            variant="secondary"
+            icon={<Pencil className="size-4" />}
+            onClick={() => navigate(doc.urgent ? `/purchasing/urgent/${doc.id}/edit` : doc.direct ? `/inventory/direct/${doc.id}/edit` : `/inventory/docs/${doc.id}/edit`)}
+          >
             修改
           </Button>
         )}

@@ -33,6 +33,11 @@ function Totals({ t, className }: { t: LedgerTotals; className?: string }) {
       <span>
         支出（公司直付） <Money cents={t.companySpentCents} className="font-bold" />
       </span>
+      {t.poolSpentCents > 0 && (
+        <span>
+          支出（零采备用金） <Money cents={t.poolSpentCents} className="font-bold" />
+        </span>
+      )}
       <span>
         退回 <Money cents={t.returnedCents} className="font-bold" />
       </span>

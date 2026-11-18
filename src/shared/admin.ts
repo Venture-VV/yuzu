@@ -44,6 +44,8 @@ export const ADMIN_SECTIONS = {
   membership: { path: '/admin/membership', label: '会员体系', perms: ['member.rules', 'benefit.publish', 'settings.manage'] },
   // 券与会员权益（v0.7.20，飞书 RQ-006 后半，见 docs/COUPONS.md）：券模板、发券规则、无记名券、统计；默认店主、店总
   coupons: { path: '/admin/coupons', label: '券', perms: ['coupon.manage'] },
+  // 签赠（8.1.9，docs/GIFTS_V819.md）：知识库、配置、台账三个页签；管家部、客户部的签赠台账在各自的面板里
+  gifts: { path: '/admin/gifts', label: '签赠', perms: ['gift.manage'] },
   catalog: { path: '/admin/catalog', label: '价目与套餐', perms: ['catalog.manage'] },
   tags: { path: '/admin/tags', label: '手牌与前台', perms: ['frontdesk.tags', 'settings.manage'] },
   technicians: { path: '/admin/technicians', label: '技师', perms: ['technician.manage', 'settings.manage', 'catalog.manage', 'audit.read'] },
@@ -88,7 +90,7 @@ export type AdminSection = keyof typeof ADMIN_SECTIONS;
 export const ADMIN_GROUPS: readonly { key: string; title: string; items: readonly AdminSection[] }[] = [
   { key: 'overview', title: '概览', items: ['home', 'dashboard'] },
   { key: 'rules', title: '规则中心', items: ['settings', 'rules', 'dictionaries'] },
-  { key: 'members', title: '会员与营销', items: ['membership', 'coupons'] },
+  { key: 'members', title: '会员与营销', items: ['membership', 'coupons', 'gifts'] },
   { key: 'business', title: '营业项目', items: ['catalog', 'tags', 'technicians', 'dining', 'emenu', 'studio', 'rooms', 'bookings'] },
   { key: 'venue', title: '场地、设备与线上', items: ['spaces', 'guide', 'devices', 'integrations', 'mp'] },
   { key: 'staff', title: '人员与行政', items: ['stores', 'staff', 'permissions', 'canteen', 'patrol'] },

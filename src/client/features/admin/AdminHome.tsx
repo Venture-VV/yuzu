@@ -26,6 +26,7 @@ const SECTION_HINTS: Partial<Record<AdminSection, string>> = {
   membership: '会员规则（档级、会籍、最低充值）、本店权益清单与 VIP 柜、渠道来源与会员标签',
   guide: '对客导览图的区域色块与设施图标、门店大屏轮播',
   coupons: '券模板、开卡 / 升级 / 生日 / 充值赠券规则、无记名券、统计',
+  gifts: '签赠知识库（签赠券类型）、开关与选项、签赠台账',
   catalog: '充值套餐、消费项目与价目表、票种票价',
   tags: '手牌池、柜号导入、前台规则',
   technicians: '技师名册、选技师规则、需要技师的项目',

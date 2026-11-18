@@ -805,8 +805,14 @@ function StoreCouponPicker({
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-yuzu-tint px-3 py-2 text-[12.5px]" data-testid="store-coupon-picked">
         <TicketCheck className="size-3.5 text-yuzu-deep" />
         <span className="font-bold text-ink">{c.templateName}</span>
+        {c.gift && <GiftTag gift={c.gift} />}
         <span className="num text-ink-3">{formatStoreCouponCode(c.code)}</span>
         <span className="text-ink-2">{c.summary}</span>
+        {c.gift && (
+          <span className="text-ink-2" data-testid="store-coupon-gift">
+            授权 {c.gift.authorizerName} · {c.gift.channel}
+          </span>
+        )}
         {c.memberName && <span className="text-ink-3">会员 {c.memberName}</span>}
         <span className="text-ink-3">有效期到 {c.validTo}</span>
         <span className="font-semibold text-pine">
@@ -836,9 +842,11 @@ function StoreCouponPicker({
                 data-testid={`store-coupon-${o.code}`}
               >
                 <span className="font-bold">{o.templateName}</span>
+                {o.gift && <GiftTag gift={o.gift} />}
                 <span className="min-w-0 flex-1 truncate text-ink-3">
                   {o.summary}
                   {o.memberName ? ` · ${o.memberName}` : ''} · 到 {o.validTo}
+                  {o.gift ? ` · 授权 ${o.gift.authorizerName} · ${o.gift.channel}${o.gift.reason ? ` · ${o.gift.reason}` : ''}` : ''}
                 </span>
                 {o.usable ? (
                   <span className="font-semibold text-pine">
@@ -876,4 +884,9 @@ function StoreCouponPicker({
       {note && <p className="text-[12.5px] font-semibold text-clay">{note}</p>}
     </div>
   );
+}
+
+/** 签赠券（8.1.9）：在券名旁标「签赠 · 板块」，列表上另写授权人、渠道、事由——选哪一张就是哪种券、谁授权的 */
+function GiftTag({ gift }: { gift: NonNullable<CheckoutCouponOption['gift']> }) {
+  return <span className="rounded bg-lake/10 px-1.5 py-px text-[11.5px] font-semibold whitespace-nowrap text-lake">签赠 · {gift.segment}</span>;
 }

@@ -1,5 +1,5 @@
 import type { CustomerBindingRequest, CustomerMember, CustomerRechargeRow, CustomerStaff } from '@shared/customer';
-export type CustomerTab = 'overview' | 'visits' | 'daily' | 'targets' | 'members' | 'lowBalances';
+export type CustomerTab = 'overview' | 'visits' | 'daily' | 'targets' | 'members' | 'lowBalances' | 'gifts';
 export type RecordKind = 'visit' | 'recharge' | 'settlement' | 'consumption' | 'member';
 export type OpenRecord = (kind: RecordKind, id: number) => void;
 export type CustomerForm =

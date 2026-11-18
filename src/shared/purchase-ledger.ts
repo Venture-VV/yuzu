@@ -38,6 +38,8 @@ export interface LedgerTotals {
   pettySpentCents: number;
   /** 公司直付的支出 */
   companySpentCents: number;
+  /** 零采备用金付的支出（8.1.9，已确认的报销；Codex 审查 785ca18：原来只算进了每天的小计、没进区间合计） */
+  poolSpentCents: number;
   returnedCents: number;
   toppedUpCents: number;
 }

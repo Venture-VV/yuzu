@@ -69,6 +69,7 @@ const PettyAccountsPage = lazyPage(() => import('./features/expenses/PettyAccoun
 const BudgetsPage = lazyPage(() => import('./features/expenses/BudgetsPage').then((m) => m.BudgetsPage));
 const AssetsPage = lazyPage(() => import('./features/assets/AssetsPage').then((m) => m.AssetsPage));
 const LinenPage = lazyPage(() => import('./features/linen/LinenPage').then((m) => m.LinenPage));
+const PettyPoolPage = lazyPage(() => import('./features/pool/PettyPoolPage').then((m) => m.PettyPoolPage));
 const AssetLabelsPrintPage = lazyPage(() => import('./features/assets/AssetLabelsPrintPage').then((m) => m.AssetLabelsPrintPage));
 const ReceivablesPage = lazyPage(() => import('./features/receivables/ReceivablesPage').then((m) => m.ReceivablesPage));
 const InvoicesPage = lazyPage(() => import('./features/invoices/InvoicesPage').then((m) => m.InvoicesPage));
@@ -104,6 +105,8 @@ const ComparePage = lazyPage(() => import('./features/purchasing/ComparePage').t
 const ScoresPage = lazyPage(() => import('./features/purchasing/ScoresPage').then((m) => m.ScoresPage));
 const FlowPage = lazyPage(() => import('./features/purchasing/FlowPage').then((m) => m.FlowPage));
 const UrgentDocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.UrgentDocFormPage));
+const DirectDocFormPage = lazyPage(() => import('./features/inventory/DocFormPage').then((m) => m.DirectDocFormPage));
+const DirectImportPage = lazyPage(() => import('./features/inventory/DirectImportPage').then((m) => m.DirectImportPage));
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
 const ImportPage = lazyPage(() => import('./features/payables/ImportPage').then((m) => m.ImportPage));
@@ -287,6 +290,8 @@ const router = createBrowserRouter([
       { path: 'assets', element: <AssetsPage /> },
       // 布草洗涤（8.0.20）
       { path: 'linen', element: <LinenPage /> },
+      // 零采备用金（8.1.9）
+      { path: 'pool', element: <PettyPoolPage /> },
       { path: 'petty', element: <PettyPage /> },
       { path: 'petty/accounts', element: <PettyAccountsPage /> },
       { path: 'requests', element: <RequestsPage /> },
@@ -319,6 +324,10 @@ const router = createBrowserRouter([
   {
     element: <AuthGate shell="erp" />,
     children: [
+      // 库管入库与台账导入（8.1.9）
+      { path: 'inventory/direct/new', element: <DirectDocFormPage /> },
+      { path: 'inventory/direct/import', element: <DirectImportPage /> },
+      { path: 'inventory/direct/:id/edit', element: <DirectDocFormPage /> },
       { path: 'inventory/new/:type', element: <DocFormPage /> },
       { path: 'inventory/docs/:id/edit', element: <DocFormPage /> },
       { path: 'inventory/:tab?', element: <InventoryPage /> },

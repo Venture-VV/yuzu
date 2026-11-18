@@ -9,9 +9,10 @@ export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 /** 费用科目：办公费、固定资产、低值易耗（飞书需求原话，不能自由填写）；v0.7.12 加「运费」（#15：运费单独记费用，不进物料成本） */
 export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = { office: '办公费', fixed_asset: '固定资产', low_value: '低值易耗', freight: '运费' };
 
-export const PAY_SOURCES = ['petty', 'company'] as const;
+/** 钱从哪来；8.1.9 加「零采备用金」（pool：供应链零采的备用金，勾报的是哪几笔申用，不选打款，docs/ERP_V819.md 第 2.3 节） */
+export const PAY_SOURCES = ['petty', 'company', 'pool'] as const;
 export type PaySource = (typeof PAY_SOURCES)[number];
-export const PAY_SOURCE_LABELS: Record<PaySource, string> = { petty: '备用金', company: '公司直付' };
+export const PAY_SOURCE_LABELS: Record<PaySource, string> = { petty: '备用金', company: '公司直付', pool: '零采备用金' };
 
 export type ClaimStatus = 'submitted' | 'returned' | 'confirmed' | 'cancelled' | 'voided';
 export const CLAIM_STATUS_LABELS: Record<ClaimStatus, string> = {
@@ -155,6 +156,8 @@ export interface ExpenseClaim extends ExpenseClaimSummary {
   receipts: PoReceiptRef[];
   /** 登记（或退回后再提交）时的预算核对（8.0.3）：只列有额度的科目；8.0.3 以前登记的为空 */
   budgetCheck: import('./budgets').BudgetCheckItem[] | null;
+  /** 钱从「零采备用金」来的：报的是哪几笔申用（8.1.9）；别的为空数组 */
+  poolUses: import('./petty-pool').PoolUseBrief[];
 }
 
 export interface ExpenseClaimList {

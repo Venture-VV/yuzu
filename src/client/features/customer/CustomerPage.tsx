@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router';
-import { ChartNoAxesCombined, HandCoins, LayoutDashboard, RefreshCw, Target, UsersRound, Wallet } from 'lucide-react';
+import { ChartNoAxesCombined, HandCoins, LayoutDashboard, RefreshCw, Signature, Target, UsersRound, Wallet } from 'lucide-react';
+import { GIFT_PANEL_CHANNELS } from '@shared/gifts';
 import type { CustomerMeta, CustomerOverview, CustomerStaff } from '@shared/customer';
 import { PageHeader } from '../../components/AppShell';
 import { DateNav } from '../../components/DateNav';
@@ -11,6 +12,7 @@ import { useBusinessToday } from '../../lib/revenue';
 import { useCan } from '../../lib/session';
 import { uuid } from '../../lib/utils';
 import { customerUrl, useCustomerRead, useCustomerRevision } from './api';
+import { GiftLedger } from '../gifts/GiftLedger';
 import { CustomerDetailDialog } from './Details';
 import type { DetailEntry } from './Details';
 import { CustomerFormDialog, CUSTOMER_OP_TYPES } from './Forms';
@@ -31,6 +33,8 @@ const TABS = [
   { id: 'targets', title: '部门目标', icon: Target },
   { id: 'lowBalances', title: '低余额关注', icon: Wallet },
   { id: 'members', title: '会员绑定', icon: UsersRound },
+  // 8.1.9 签赠台账（docs/GIFTS_V819.md）：与管家部、后台的台账同一份
+  { id: 'gifts', title: '签赠台账', icon: Signature },
 ] as const;
 type FilterTab = CustomerTab | 'settlements';
 export function CustomerPage() {
@@ -57,6 +61,7 @@ function CustomerWorkspace() {
     targets: { ...emptyFilters },
     members: { ...emptyFilters },
     lowBalances: { ...emptyFilters },
+    gifts: { ...emptyFilters },
   });
   const overview = useCustomerRead<CustomerOverview>(customerUrl('overview', { day }), revision);
   const [records, setRecords] = useState<DetailEntry[]>([]);
@@ -165,10 +170,10 @@ function CustomerWorkspace() {
         <SubNav tabs={tabs} base="/customer" active={tab} label="客户部模块" />
       </div>
       <main className="customer-content">
-        {/* 低余额、会员名单看的是此刻的会员余额与维护关系，不随营业日变：这两页不放日期 */}
-        {((tab !== 'lowBalances' && tab !== 'members') || data?.capabilities.scope === 'self') && (
+        {/* 低余额、会员名单看的是此刻的会员余额与维护关系，不随营业日变：这两页不放日期；签赠台账自己选日期段 */}
+        {((tab !== 'lowBalances' && tab !== 'members' && tab !== 'gifts') || data?.capabilities.scope === 'self') && (
           <div className="customer-section-head">
-            {tab !== 'lowBalances' && tab !== 'members' ? <DateNav value={day} today={today} onChange={(value) => selectDay(value)} /> : <span />}
+            {tab !== 'lowBalances' && tab !== 'members' && tab !== 'gifts' ? <DateNav value={day} today={today} onChange={(value) => selectDay(value)} /> : <span />}
             {data?.capabilities.scope === 'self' && <p className="customer-caption">经营总量大家都看得到；充值明细与目标只看本人的</p>}
           </div>
         )}
@@ -193,6 +198,7 @@ function CustomerWorkspace() {
             {data?.capabilities.manage && memberMode === 'bindings' ? <BindingQueue revision={revision} onRefresh={refresh} onRecord={openRecord} onForm={openForm} /> : <MemberList {...listProps} />}
           </div>
         )}
+        {tab === 'gifts' && <GiftLedger channel={GIFT_PANEL_CHANNELS.customer} testId="customer-gift-ledger" />}
         <p className="customer-caption">会员余额与消费直接取自会员系统与前台，这里不改；服务记录与成交归属分开记。赠金不算业绩，这里也不算提成。</p>
       </main>
       {records.map((entry, index) => (

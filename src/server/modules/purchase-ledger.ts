@@ -132,12 +132,13 @@ function toEntry(r: PurchaseLedgerRow): LedgerEntry {
   };
 }
 
-const emptyTotals = (): LedgerTotals => ({ advanceCents: 0, pettySpentCents: 0, companySpentCents: 0, returnedCents: 0, toppedUpCents: 0 });
+const emptyTotals = (): LedgerTotals => ({ advanceCents: 0, pettySpentCents: 0, companySpentCents: 0, poolSpentCents: 0, returnedCents: 0, toppedUpCents: 0 });
 function addTo(t: LedgerTotals, e: { kind: LedgerKind; paySource: PaySource | null; amountCents: number }) {
   if (e.kind === 'advance') t.advanceCents += e.amountCents;
   else if (e.kind === 'return') t.returnedCents += e.amountCents;
   else if (e.kind === 'topup') t.toppedUpCents += e.amountCents;
   else if (e.paySource === 'petty') t.pettySpentCents += e.amountCents;
+  else if (e.paySource === 'pool') t.poolSpentCents += e.amountCents;
   else t.companySpentCents += e.amountCents;
 }
 
@@ -151,6 +152,8 @@ async function ledgerTotals(db: Db, f: LedgerFilter): Promise<LedgerTotals> {
                 ${byClaim(db, f)}), 0)::bigint AS petty_spent_cents,
       coalesce((SELECT sum(c.amount_cents) FROM expense_claims c WHERE c.status = 'confirmed' AND c.pay_source = 'company' AND c.expense_date BETWEEN ${f.from} AND ${f.to}
                 ${byClaim(db, f)}), 0)::bigint AS company_spent_cents,
+      coalesce((SELECT sum(c.amount_cents) FROM expense_claims c WHERE c.status = 'confirmed' AND c.pay_source = 'pool' AND c.expense_date BETWEEN ${f.from} AND ${f.to}
+                ${byClaim(db, f)}), 0)::bigint AS pool_spent_cents,
       coalesce((SELECT sum(s.amount_cents) FROM petty_settlements s JOIN petty_advances a ON a.id = s.advance_id
                 WHERE s.status = 'active' AND s.kind = 'return' AND s.settle_date BETWEEN ${f.from} AND ${f.to}
                 ${byAdvance(db, f)}), 0)::bigint AS returned_cents,
@@ -161,6 +164,7 @@ async function ledgerTotals(db: Db, f: LedgerFilter): Promise<LedgerTotals> {
     advanceCents: Number(t!.advanceCents),
     pettySpentCents: Number(t!.pettySpentCents),
     companySpentCents: Number(t!.companySpentCents),
+    poolSpentCents: Number(t!.poolSpentCents),
     returnedCents: Number(t!.returnedCents),
     toppedUpCents: Number(t!.toppedUpCents),
   };
@@ -226,6 +230,7 @@ async function ledgerCsv(db: Db, f: LedgerFilter) {
   rows.push(['合计', '打款', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.advanceCents).replace(/,/g, '')]);
   rows.push(['合计', '支出（备用金）', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.pettySpentCents).replace(/,/g, '')]);
   rows.push(['合计', '支出（公司直付）', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.companySpentCents).replace(/,/g, '')]);
+  rows.push(['合计', '支出（零采备用金）', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.poolSpentCents).replace(/,/g, '')]);
   rows.push(['合计', '退回', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.returnedCents).replace(/,/g, '')]);
   rows.push(['合计', '补付', '', '', '', '', '', '', '', '', '', '', '', '', formatAmount(t.toppedUpCents).replace(/,/g, '')]);
   return toCsv(rows);

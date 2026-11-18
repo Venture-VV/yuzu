@@ -289,7 +289,9 @@ test.describe('8.1.8 品牌部：顶栏字完整、标题右下角小圆圈、�
     await expect(ink).toHaveAttribute('data-locked', '');
     await expect(ink).toContainText('#4b392a');
     await expect(ink.locator('input[type=color]')).toHaveCount(0);
-    await expect(page.getByTestId('studio-theme-dot').locator('input[type=color]')).toHaveCount(1);
+    // 小圆圈的颜色固定、不进主题色（退回 8.1.7 时版面照样读得了，PB2）
+    await expect(page.getByTestId('studio-theme-dot')).toHaveCount(0);
+    await expect(page.getByTestId('studio-theme-tan').locator('input[type=color]')).toHaveCount(1);
     await page.getByTestId('studio-tab-templates').click();
     await page.getByTestId('studio-layout-single_left').click();
     await expect(page.getByTestId('studio-template-canvas')).toBeVisible();

@@ -435,6 +435,19 @@ export function InventoryRules() {
           <MoneyInput id="i-count-big-cents" value={bigCentsText} onChange={(e) => setBigCentsText(e.target.value)} />
         </Field>
       </div>
+      <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">库管入库（8.1.9）</p>
+      <label
+        className={cn('flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5', draft.directReceipt ? 'border-pine bg-pine-tint' : 'border-line-strong bg-card')}
+        data-testid="inv-direct-receipt-switch"
+      >
+        <input type="checkbox" checked={draft.directReceipt} onChange={(e) => setDraft({ ...draft, directReceipt: e.target.checked })} className="mt-0.5 size-4 accent-[var(--color-pine)]" />
+        <span className="text-[13.5px]">
+          <span className="font-semibold">开着「库管入库」</span>
+          <span className="block text-[12.5px] text-ink-3">
+            没有采购单的到货由库管直接入库（与收货入库一样，只是不选采购单），另有台账模板导入。当前阶段用；关掉以后入口隐藏、不能再登记，已经入的照旧。
+          </span>
+        </span>
+      </label>
       <p className="mt-5 mb-2 text-[13px] font-bold text-ink-2">需要负责人确认的单据</p>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {(Object.keys(APPROVAL_RULE_LABELS) as (keyof ApprovalRules)[]).map((k) => (

@@ -238,6 +238,14 @@ export const PERMISSIONS = {
   // 8.0.20 布草洗涤（docs/ERP_V8020.md 第 4 节）
   'linen.read': { roles: ['owner', 'store_manager'], duties: ['stock', 'cost', 'payable', 'approve'] },
   'linen.manage': { roles: ['owner', 'store_manager'], duties: ['stock'] },
+  // 8.1.9 零采备用金（docs/ERP_V819.md 第 2.4 节，BJ1）：供应链（采购）专用；财务登记报销时只看得到已提交报销的申用，看不到面板
+  'pool.read': { roles: ['owner'], duties: ['purchase'] },
+  'pool.manage': { roles: ['owner'], duties: ['purchase'] },
+  // 8.1.9 签赠（docs/GIFTS_V819.md 第 2.5 节，SZ2–SZ4）：台账、发放、能被选作授权人、维护知识库与配置
+  'gift.read': { roles: ['owner', 'store_manager', 'account_manager'], duties: ['concierge', 'concierge_manager'] },
+  'gift.issue': { roles: ['owner', 'store_manager', 'duty_manager', 'account_manager'], duties: ['concierge', 'concierge_manager'] },
+  'gift.authorize': { roles: ['owner', 'store_manager', 'duty_manager'], duties: ['concierge_manager'] },
+  'gift.manage': { roles: ['owner', 'store_manager'] },
   /** 资产建卡、调拨、改状态、报废、扫码盘点（店主；仓库、成本核算） */
   'asset.manage': { roles: ['owner'], duties: ['stock', 'cost'] },
   // ── 管理 ──
@@ -489,6 +497,12 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'asset.read': '资产与易耗：看资产卡片与盘点',
   'linen.read': '布草洗涤：看布草数量、单据与洗涤费对账',
   'linen.manage': '布草洗涤：维护品类，开送洗、收回、新增、报废单',
+  'pool.read': '零采备用金：看面板与申用台账、导出',
+  'pool.manage': '零采备用金：申用、提交 / 撤回报销、更新补单、作废申用',
+  'gift.read': '签赠：看签赠台账（明细、按授权人、按个人、占比）',
+  'gift.issue': '签赠：给会员发放签赠券（要选授权人）',
+  'gift.authorize': '签赠：能被选作签赠的授权人',
+  'gift.manage': '签赠：维护签赠知识库（签赠券类型）与配置',
   'asset.manage': '资产与易耗：建卡、调拨、改状态、报废、扫码盘点',
   'auth.overLimit': '当场授权超过单笔上限的充值 / 消费',
   'auth.memberRefund': '当场授权退储值',
@@ -598,6 +612,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     ],
   },
   { title: '券与会员权益', items: ['coupon.manage', 'coupon.issue', 'coupon.void'] },
+  { title: '签赠', items: ['gift.read', 'gift.issue', 'gift.authorize', 'gift.manage'] },
   { title: '设备', items: ['device.view', 'device.test', 'device.manage', 'print.network'] },
   { title: '微信小程序', items: ['mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite', 'mp.food', 'mp.booking'] },
   {
@@ -641,6 +656,8 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
       'asset.manage',
       'linen.read',
       'linen.manage',
+      'pool.read',
+      'pool.manage',
     ],
   },
   { title: '员工工作台', items: ['canteen.manage', 'patrol.read', 'patrol.manage'] },

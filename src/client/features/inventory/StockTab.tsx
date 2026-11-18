@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { ArrowRight, Download, Hourglass, Search, TriangleAlert, X } from 'lucide-react';
+import { ArrowRight, Download, FileUp, Hourglass, PackageOpen, Search, TriangleAlert, X } from 'lucide-react';
 import {
   CENTRAL_WAREHOUSE_ID,
   INV_DOC_META,
@@ -21,7 +21,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { Sheet } from '../../components/Overlay';
 import { Badge, Button, IconButton, Notice, Skeleton, Spinner } from '../../components/ui';
 import { DOC_VISUAL, MoveIcon, PackHint, Qty, StockMeter } from './parts';
-import { useMaterials, useOverview, useStockCard, useWarehouseStock, useWarehouses } from './queries';
+import { useInvSettings, useMaterials, useOverview, useStockCard, useWarehouseStock, useWarehouses } from './queries';
 import { useMedia } from './useMedia';
 import type { StocktakeProgress } from '@shared/cycles';
 import { useStocktakeReminders } from '../cycles/queries';
@@ -89,6 +89,9 @@ export function StockTab() {
   }, [deptStock.data, q]);
 
   const canAct = (t: InvDocType) => (t === 'supplier_return' ? can('supplierReturn.create') : can('inventory.operate'));
+  // 库管入库（8.1.9，KR1、KR6）：库存设置里开着、有收货权限才显示
+  const invSettings = useInvSettings(can('inventory.operate'));
+  const directOn = can('inventory.operate') && invSettings.data?.directReceipt === true;
 
   const detail = selectedId ? <MaterialDetail key={`${selectedId}-${warehouseId}`} id={selectedId} warehouseId={warehouseId} onClose={() => select(null)} closable={!wide} /> : null;
   const todo = overview.data
@@ -157,6 +160,26 @@ export function StockTab() {
                   </Link>
                 );
               })}
+              {directOn && (
+                <>
+                  <Link
+                    to="/inventory/direct/new"
+                    className="flex h-10 items-center gap-2 rounded-md border border-pine/50 bg-pine-tint px-3.5 text-[13.5px] font-bold text-pine hover:border-pine"
+                    data-testid="inv-direct-new"
+                  >
+                    <PackageOpen className="size-4" />
+                    库管入库
+                  </Link>
+                  <Link
+                    to="/inventory/direct/import"
+                    className="flex h-10 items-center gap-2 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3 hover:text-ink"
+                    data-testid="inv-direct-import"
+                  >
+                    <FileUp className="size-4" />
+                    导入入库台账
+                  </Link>
+                </>
+              )}
             </div>
           )}
         </div>

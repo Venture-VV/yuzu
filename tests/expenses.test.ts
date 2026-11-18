@@ -528,7 +528,7 @@ describe('结果待确认：按编号查回与确认作废（v0.7.8）', () => {
 describe('自检', () => {
   it('费用报销单与明细一致、备用金台账一致、现付供应商的收货不记应付，全部通过；库存自检照旧', async () => {
     const checks = (await api(ctx.app, boss, 'GET', '/api/erp/expenses/checks')).body;
-    expect(checks.map((c: { key: string }) => c.key)).toEqual(['expense_claims', 'petty_ledger', 'cash_receipts']);
+    expect(checks.map((c: { key: string }) => c.key)).toEqual(['expense_claims', 'petty_ledger', 'cash_receipts', 'petty_pool']);
     for (const c of checks) expect(c, c.label).toMatchObject({ ok: true });
     for (const c of (await api(ctx.app, boss, 'GET', '/api/inventory/checks')).body) expect(c, c.label).toMatchObject({ ok: true });
   });

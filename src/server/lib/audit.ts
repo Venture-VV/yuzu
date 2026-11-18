@@ -277,7 +277,14 @@ export type AuditAction =
   | 'studio_publish'
   | 'studio_rollback'
   | 'studio_cancel'
-  | 'studio_pack_import';
+  | 'studio_pack_import'
+  // 8.1.9 零采备用金：申用、提交 / 撤回报销、更新补单、作废（detail.action 写是哪一样）
+  | 'pool_use'
+  // 8.1.9 库管入库台账导入
+  | 'receipt_import'
+  // 8.1.9 签赠：新建、修改签赠券类型（知识库），签赠发放；作废签赠券记 coupon_voided（与券一样）
+  | 'gift_type'
+  | 'gift_issue';
 
 export interface AuditEntry {
   staffId: number | null;

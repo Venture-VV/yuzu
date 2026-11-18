@@ -339,6 +339,8 @@ const SettingsInput = z.object({
   /** 盘点大差异（v0.7.30，A8）：差异超过账面的百分比（1–50）、差异金额（分，¥1 到 ¥10 万）；不传的保持原样 */
   countBigPct: z.number().int('大差异的比例要是整数').min(1, '大差异的比例至少 1%').max(50, '大差异的比例最多 50%').optional(),
   countBigCents: z.number().int().min(100, '大差异的金额至少 ¥1').max(10_000_000, '大差异的金额最多 ¥10 万').optional(),
+  /** 库管入库（8.1.9，KR6）：不传的保持原样 */
+  directReceipt: z.boolean().optional(),
   approvalRules: z.object({
     purchase_order: z.boolean(),
     damage: z.boolean(),
@@ -416,6 +418,7 @@ export function registerMasterRoutes(app: FastifyInstance, { sql, config }: Deps
         ['inventory_approval_threshold_cents', s.approvalThresholdCents],
         ['inventory_usage_window_days', s.usageWindowDays],
         ['inventory_approval_rules', s.approvalRules],
+        ['inventory_direct_receipt', s.directReceipt ?? before.directReceipt],
         [
           'inventory_cycle_rules',
           {

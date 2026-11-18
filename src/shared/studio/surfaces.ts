@@ -146,8 +146,8 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
     { key: 'photo', label: '图片占位、起始页底', default: '#d3d3d3' },
     { key: 'light', label: '浅色字（深底上）', default: '#efefef' },
     { key: 'error', label: '出错', default: '#a2412b' },
-    // 8.1.8（品牌部）：分类封面大标题右下角的小圆圈（点缀）
-    { key: 'dot', label: '标题右下角的小圆圈', default: '#bf1d25' },
+    // 这里加一项，版面里就多存一个主题色：退回上一版时，上一版的工作台不认、整份版面读不了也存不进（8.1.7 就是这样）。
+    // 所以 8.1.8 封面标题右下角小圆圈的颜色写死在样式表里（--em-dot），不加在这里（PB2；tests/studio-format.test.ts 核对这张表）
   ],
   fonts: {
     zh: [

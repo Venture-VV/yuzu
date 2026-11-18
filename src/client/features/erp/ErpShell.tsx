@@ -27,6 +27,7 @@ import {
   ShoppingCart,
   SlidersHorizontal,
   Soup,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 import type { ApprovalCounts } from '@shared/approvals';
@@ -60,6 +61,7 @@ const ICONS: Record<ErpModuleKey, LucideIcon> = {
   contracts: FileSignature,
   payments: Banknote,
   expenses: ReceiptText,
+  pettyPool: Wallet,
   invoices: FileText,
   salesInvoices: FileOutput,
   receivables: Landmark,
