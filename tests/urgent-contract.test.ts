@@ -2,7 +2,7 @@
 //   · 急采生效时合计达到「急采补合同金额」（默认 ¥20,000）的记下要补合同；没达到的、金额线设 0 的不要求；
 //   · 补上之前：付款申请、直接登记付款、预付款核销（带不带付款申请都拦）、现付供应商按补单采购单报销都拦（CONTRACT_REQUIRED）；
 //   · 补合同：只能挂这家供应商的、生效中、到期日不早于下单日的采购合同（开始日可以晚于下单日）；超出合同价要写说明；
-//     同一份重提照原样，挂上以后不能换；付过款或在付款申请里的不能补；挂上以后的货款照合同走；
+//     同一份重提照原样，挂上以后不能换；付过款（含预付款核销）或在付款申请里的不能补；挂上以后的货款照合同走；
 //   · 待补合同清单：期限从生效那天算，超期为负数；采购的待办数算上。
 
 import { randomUUID } from 'node:crypto';
@@ -308,6 +308,43 @@ describe('急采后补合同', () => {
     await ok(payablesRequest(rc.id, rc.amountCents));
     const c = await signedContract();
     expect((await attach(po.id, { contractId: c.id })).body.error.code).toBe('PO_ALREADY_PAID');
+  });
+
+  it('用预付款核销过（没冲销）的补单采购单不能补合同；那笔核销冲销了以后能补（Codex 审查 06f6d58）', async () => {
+    const rc = await urgentReceipt(2, 2_500); // ¥5,000：不要求补合同，照常能核销
+    expect(await needsContract(rc.id)).toBe(false);
+    const po = await backfill(rc.id);
+    const pre = await ok<{ payment: { id: number; status: string } }>(
+      api(ctx.app, payer, 'POST', '/api/payables/payments', {
+        clientKey: randomUUID(),
+        supplierId,
+        payDate: today,
+        amountCents: 3_000,
+        method: 'bank_transfer',
+        evidence: '流水尾号 0812',
+        note: '零星预付',
+        prepay: true,
+        approveNow: false,
+        allocations: [],
+      }),
+    );
+    if (pre.payment.status !== 'confirmed') await ok(api(ctx.app, mgr, 'POST', `/api/payables/payments/${pre.payment.id}/approve`, {}), 200);
+    const off = await ok<{ offset: { id: number; docNo: string } }>(
+      api(ctx.app, payer, 'POST', '/api/payables/offsets', {
+        clientKey: randomUUID(),
+        supplierId,
+        offsetDate: today,
+        credit: { kind: 'prepayment', id: pre.payment.id },
+        lines: [{ kind: 'receipt', targetId: rc.id, amountCents: 1_000 }],
+      }),
+    );
+    const c = await signedContract();
+    const blocked = await attach(po.id, { contractId: c.id });
+    expect(blocked.body.error?.code, JSON.stringify(blocked.body)).toBe('PO_ALREADY_PAID');
+    expect(blocked.body.error.message).toContain(off.offset.docNo);
+    // 冲销那笔核销以后能补
+    await ok(api(ctx.app, payer, 'POST', `/api/payables/offsets/${off.offset.id}/void`, { reason: '核销错了单' }), 200);
+    expect((await ok<PurchaseOrder>(attach(po.id, { contractId: c.id }), 200)).contract).toMatchObject({ id: c.id });
   });
 
   it('现付供应商的急采：要补合同、还没补上的不能按补单采购单报销；金额线设 0 以后不再要求', async () => {

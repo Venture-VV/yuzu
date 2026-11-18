@@ -1,6 +1,6 @@
 // 8.1.10 急采后补合同（docs/ERP_V8110.md 第 1 节，PENDING_DECISIONS CK18–CK22）：
 //   · 急采收货单生效时合计达到「急采补合同金额」的记下要补合同（inv_docs.needs_contract，在 confirmDoc 里写）；
-//   · 补单采购单事后挂合同：只改挂的合同，挂上以后不能换、不能取消；已经付过款、在付款申请里或报销过的不能补；
+//   · 补单采购单事后挂合同：只改挂的合同，挂上以后不能换、不能取消；已经付过款（含预付款、退货余额核销）、在付款申请里或报销过的不能补；
 //   · 补上之前付款申请、直接登记付款、预付款核销、现付报销都拦（CONTRACT_REQUIRED）；
 //   · 待补合同清单：期限从急采生效那天算「补合同期限」天，超期的标红，照样能补。
 // 加锁：供应商一行（FOR NO KEY UPDATE，与付款登记、付款申请同一把）→ 采购单一行（FOR UPDATE）；合同、付款与报销记录只读。
@@ -27,6 +27,12 @@ async function paidProblem(db: Db, poId: number): Promise<string | null> {
     SELECT p.doc_no FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id JOIN inv_docs d ON d.id = pa.receipt_doc_id
     WHERE d.purchase_order_id = ${poId} AND p.status IN ('submitted', 'returned', 'confirmed') ORDER BY p.id LIMIT 1`;
   if (paid) return `这张采购单的货款已经登记过付款（${paid.docNo}），不能再补合同`;
+  // 用预付款、退货余额核销过（没冲销）的也算付过：核销记在 ap_offset_lines，不在 payment_allocations 里，
+  // 补上合同以后合同的付款计划算不到这一笔，会多放出申请额度（Codex 审查 06f6d58）
+  const [offset] = await db<{ docNo: string }[]>`
+    SELECT o.doc_no FROM ap_offset_lines ol JOIN ap_offsets o ON o.id = ol.offset_id JOIN inv_docs d ON d.id = ol.receipt_doc_id
+    WHERE d.purchase_order_id = ${poId} AND o.status = 'confirmed' ORDER BY o.id LIMIT 1`;
+  if (offset) return `这张采购单的货款已经用预付款或退货余额核销过（${offset.docNo}），不能再补合同；要补的先冲销那笔核销`;
   const [req] = await db<{ docNo: string }[]>`
     SELECT r.request_no AS doc_no FROM payment_request_targets t JOIN payment_requests r ON r.id = t.request_id JOIN inv_docs d ON d.id = t.receipt_doc_id
     WHERE d.purchase_order_id = ${poId} AND r.status IN ('submitted', 'returned', 'approved', 'paid') ORDER BY r.id LIMIT 1`;
