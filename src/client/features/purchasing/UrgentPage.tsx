@@ -89,18 +89,21 @@ export function UrgentPage() {
       />
       <PurchasingTabs active="urgent" />
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-line px-5 py-3 md:px-7">
-        <Segmented<Filter>
-          ariaLabel="急采进度"
-          value={filter}
-          onChange={(v) => set({ view: v === 'all' ? null : v })}
-          options={[
-            { value: 'all', label: '全部' },
-            { value: 'approving', label: `审批中 ${count('approving') || ''}`.trim() },
-            { value: 'verifying', label: `待验收 ${count('verifying') || ''}`.trim() },
-            { value: 'backfill', label: `待补单 ${count('backfill') || ''}`.trim() },
-            { value: 'contract', label: `待补合同 ${due.data?.length || ''}`.trim() },
-          ]}
-        />
+        {/* 五个页签在手持机（360 宽）上放不下一排：这一条自己横着滑，页面不横向滚动 */}
+        <div className="max-w-full overflow-x-auto">
+          <Segmented<Filter>
+            ariaLabel="急采进度"
+            value={filter}
+            onChange={(v) => set({ view: v === 'all' ? null : v })}
+            options={[
+              { value: 'all', label: '全部' },
+              { value: 'approving', label: `审批中 ${count('approving') || ''}`.trim() },
+              { value: 'verifying', label: `待验收 ${count('verifying') || ''}`.trim() },
+              { value: 'backfill', label: `待补单 ${count('backfill') || ''}`.trim() },
+              { value: 'contract', label: `待补合同 ${due.data?.length || ''}`.trim() },
+            ]}
+          />
+        </div>
         {tiers.length > 0 && (
           <span className="text-[12.5px] text-ink-3" data-testid="urgent-tiers">
             分级审批：

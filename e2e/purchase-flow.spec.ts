@@ -40,6 +40,8 @@ function daysAgo(n: number): string {
 interface Req {
   id: number;
   docNo: string;
+  /** 8.1.10 核库：选了物料、总仓有货的先进待核库（演示库的提需核库默认开着） */
+  stockCheck?: string;
   lines: { id: number }[];
 }
 
@@ -68,6 +70,10 @@ test.describe('8.0.17 ERP 采购流程图', () => {
           lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: qty * 1000, unit: '箱', refPriceCents: 900 }],
         })
       ).request;
+      // 8.1.10：在待核库的先核库（这里都转采购），再审核
+      if (r.stockCheck === 'pending') {
+        await post(api, `/api/erp/requests/${r.id}/stock-check`, { clientKey: randomUUID(), lines: r.lines.map((l) => ({ lineId: l.id, decision: 'purchase' })) });
+      }
       await post(api, `/api/erp/requests/${r.id}/approve`, {});
       return r;
     };
@@ -207,7 +213,8 @@ test.describe('8.0.17 ERP 采购流程图', () => {
       expect((await asRequester.post('/api/auth/login', { data: { username: requester, password } })).ok()).toBe(true);
       expect((await asRequester.post('/api/auth/change-password', { data: { currentPassword: password, newPassword: `${password}9` } })).ok()).toBe(true);
       const made = await asRequester.post('/api/erp/requests', {
-        data: { clientKey: randomUUID(), lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: 1000, unit: '箱', refPriceCents: 900 }] },
+        // 标「急」：8.1.10 起急的不核库，主管确认以后直接待审核（核库另有 e2e/erp-8110.spec.ts）
+        data: { clientKey: randomUUID(), priority: 'urgent', lines: [{ materialId: mat.id, name: mat.name, purpose: '客用消耗', qtyMilli: 1000, unit: '箱', refPriceCents: 900 }] },
       });
       expect(made.status(), await made.text()).toBe(201);
       const r = ((await made.json()) as { request: { id: number; docNo: string; deptConfirm: { state: string } } }).request;
