@@ -6,7 +6,9 @@
 ## 1. 检查、构建与测试
 
 ```bash
-npm run typecheck && npm run build          # 仓库未配置 lint
+npm run typecheck && npm run build          # 类型检查与构建
+npm run lint                               # 工程治理二期（CI 跑，一秒内）：oxlint 查会出错的写法（缺 key、多余的非空断言、没用到的表达式……），配置 .oxlintrc.json；能自动改的 npx oxlint --fix；小程序线的目录不查
+npm run check:bundle                       # 工程治理二期（CI 跑，要先 npm run build）：首屏主包不超过上限（scripts/governance-baseline.json 的 entryChunkMaxKb）
 npm run check:code                         # 8.1.3 代码整洁检查（CI 跑）：没用到的导入与变量、事务里没等结果的查询、只用到类型的导入写成 import type；小程序线的目录不查
 npm run check:docs                         # 工程治理一期（docs/GOVERNANCE.md，CI 跑）：AGENTS.md 的体积预算、指不到文件的相对链接、引用了不存在的文档、docs/README.md 的索引、开发约定小节；加了文档跑 npm run check:docs -- --fix 重新生成索引
 npm run check:gov                          # 工程治理一期（CI 跑，约 5 秒）：治理基线 scripts/governance-baseline.json，只许持平或下降——分层、页面里的十六进制颜色与手写字号、超过 1,500 行的文件、没人引用的导出（knip）、重复率（jscpd）；清掉一批后 -- --update 收紧
