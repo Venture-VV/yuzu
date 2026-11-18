@@ -41,12 +41,13 @@ export function runNode(args) {
 /**
  * 编译器这一趟有没有跑完：跑完了返回 null，没跑完返回一句原因。
  * 跑完的两种样子：退出码 0；退出码不是 0 而且输出里有诊断（error TS…，下面照常分拣）。
- * 其余都算没跑完：被信号终止（哪怕已经吐出一部分诊断，剩下的没查）、退出码不是 0 却没有诊断、根本没起来。
+ * 其余都算没跑完：被信号终止（哪怕已经吐出一部分诊断，剩下的没查）、输出超出缓冲被截断、退出码不是 0 却没有诊断、根本没起来。
  */
 export function compilerIncomplete({ status, signal, code, output }) {
   const tail = (output ?? '').trim().split('\n').slice(-5).join('\n  ');
   const hint = tail ? `\n  ${tail}` : '';
-  if (signal) return `类型检查被信号 ${signal} 终止，没有跑完（多半是内存不够，编译器要 4 GB 左右）${hint}`;
+  if (code === 'ENOBUFS') return `类型检查的输出太多、超出缓冲被截断，没有跑完${hint}`;
+  if (signal) return `类型检查被信号 ${signal} 终止，没有跑完（多半是内存不够：编译器的堆上限设的是 4 GB）${hint}`;
   if (status === 0) return null;
   if (status === null || status === undefined) return `类型检查没跑起来${code ? `（${code}）` : ''}${hint}`;
   if (!/error TS\d+/.test(output ?? '')) return `类型检查以退出码 ${status} 结束，却没有任何诊断，没有跑完${hint}`;

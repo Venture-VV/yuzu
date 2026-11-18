@@ -73,7 +73,13 @@ describe('编译器没跑完不算通过', () => {
   it('被信号终止：没有输出、或者已经吐出一部分诊断，都算没跑完', () => {
     expect(incomplete({ status: null, signal: 'SIGKILL', code: null, output: '' })).toContain('SIGKILL');
     expect(incomplete({ status: null, signal: 'SIGABRT', code: null, output: 'FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory' })).toContain('SIGABRT');
-    expect(incomplete({ status: null, signal: 'SIGTERM', code: 'ENOBUFS', output: `${UNUSED}\n` })).toContain('SIGTERM');
+    expect(incomplete({ status: null, signal: 'SIGTERM', code: null, output: `${UNUSED}\n` })).toContain('SIGTERM');
+  });
+
+  it('输出超出缓冲被截断：说的是截断，不说成内存不够', () => {
+    const cut = incomplete({ status: null, signal: 'SIGTERM', code: 'ENOBUFS', output: `${UNUSED}\n` });
+    expect(cut).toContain('截断');
+    expect(cut).not.toContain('内存');
   });
 
   it('退出码不是 0 却没有诊断、根本没起来，都算没跑完', () => {
