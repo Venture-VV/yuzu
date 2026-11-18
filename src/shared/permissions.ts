@@ -205,6 +205,8 @@ export const PERMISSIONS = {
   'request.create': { roles: ['owner'], duties: ['request'] },
   /** 审核需求单、转采购单（看全部部门的需求单） */
   'request.review': { roles: ['owner'], duties: ['purchase', 'approve'] },
+  /** 核库（8.1.10，CK8–CK14）：看待核库的需求单与所需物品的总仓结存，有货的转领用、提议替代品、转采购 */
+  'request.stock': { roles: ['owner'], duties: ['stock'] },
   // ── 审批中心（v0.7.30，docs/APPROVALS.md，默认值待确认）──
   /**
    * 用审批中心审批：待我审批、批量同意、设自己的代理人。能不能审某一张单还要看审批规则（岗位组或指定的人）；
@@ -484,6 +486,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'expense.export': '导出报销明细与每日平账',
   'request.create': '提部门采购需求单（只限本部门）',
   'request.review': '审核需求单、转采购单',
+  'request.stock': '需求单核库（有货的转领用、提议替代品）',
   'approval.act': '审批中心：审批（按审批规则）、批量同意、设自己的代理人',
   'approval.rules': '审批中心：维护审批规则、给别人设代理人',
   'contract.read': '合同：查看台账、详情、审查意见与扫描件',
@@ -641,6 +644,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
       'expense.export',
       'request.create',
       'request.review',
+      'request.stock',
       'erp.revenue',
       'approval.act',
       'approval.rules',

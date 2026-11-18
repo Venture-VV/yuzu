@@ -134,6 +134,7 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   receipt_import: ['inventory.operate'],
   gift_type: ['gift.manage'],
   gift_issue: ['gift.issue'],
+  request_stock: ['request.stock', 'request.create'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -203,6 +204,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   receipt_import: ['inventory.read'],
   gift_type: ['gift.manage'],
   gift_issue: ['gift.issue', 'gift.read'],
+  request_stock: ['request.stock', 'request.create', 'request.review'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {

@@ -37,7 +37,10 @@ export async function legacySwitchesOff(sql: Sql): Promise<void> {
     ('erp_modules', ${sql.json({ canteen: false, patrol: false })}),
     ('wecom_weekly_push', 'false'::jsonb),
     -- 自动补货（8.0.20 新加的）到点会自己建采购单草稿，结果随钟点变；别的用例里关着，它自己的用例里打开
-    ('auto_replenish', ${sql.json({ enabled: false })})
+    ('auto_replenish', ${sql.json({ enabled: false })}),
+    -- 提需核库（8.1.10，CK12）：开着时选了物料、总仓有货的需求单先进「待核库」、核完才能审核；之前的用例按提交即待审核编写，
+    -- 这里关上，核库的行为由 tests/stock-check.test.ts 打开了验证
+    ('purchase_rules', ${sql.json({ stockCheckEnabled: false })})
     ON CONFLICT (key) DO NOTHING`;
 }
 
@@ -335,6 +338,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '182_petty_pool.sql',
   '183_direct_receipts.sql',
   '184_gifts.sql',
+  '185_stock_check.sql',
   '186_urgent_contract.sql',
 ];
 

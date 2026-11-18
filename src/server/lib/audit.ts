@@ -285,7 +285,9 @@ export type AuditAction =
   // 8.1.9 签赠：新建、修改签赠券类型（知识库），签赠发放；作废签赠券记 coupon_voided（与券一样）
   | 'gift_type'
   | 'gift_issue'
-  | 'po_contract_added';
+  // 8.1.10 急采后补合同；核库转领用（库管核库、部门答复替代，detail 写领用、替代、转采购）
+  | 'po_contract_added'
+  | 'request_stock';
 
 export interface AuditEntry {
   staffId: number | null;

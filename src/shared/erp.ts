@@ -97,7 +97,7 @@ export const ERP_MODULES: Record<ErpModuleKey, ErpModuleDef> = {
     path: '/erp/requests',
     pages: ['/erp/requests'],
     apis: ['/api/erp/requests'],
-    perms: ['request.create', 'request.review'],
+    perms: ['request.create', 'request.review', 'request.stock'],
     defaultEnabled: true,
     requires: ['inventory', 'purchasing'],
   },
@@ -469,6 +469,8 @@ export const ERP_OP_TYPES = [
   // 8.1.9 签赠：新建签赠券类型、签赠发放
   'gift_type',
   'gift_issue',
+  // 8.1.10 核库转领用：库管核库完成（开领料单）、部门答复替代提议
+  'request_stock',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -538,6 +540,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   receipt_import: '库管入库台账导入',
   gift_type: '新建签赠券类型',
   gift_issue: '签赠发放',
+  request_stock: '需求单核库 / 答复替代',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

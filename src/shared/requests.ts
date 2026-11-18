@@ -1,13 +1,80 @@
 // 部门采购需求单与图片（v0.7.8，飞书需求 RQ-005 第二步，见 docs/REQUISITIONS.md）。
 
-export type RequestStatus = 'submitted' | 'returned' | 'approved' | 'rejected' | 'cancelled';
+export type RequestStatus = 'submitted' | 'returned' | 'approved' | 'rejected' | 'cancelled' | 'issued';
 export const REQUEST_STATUS_LABELS: Record<RequestStatus, string> = {
   submitted: '待审核',
   returned: '已退回',
   approved: '已通过',
   rejected: '不采购',
   cancelled: '已撤回',
+  // 8.1.10 核库转领用（CK16）：每一行都从库存领用了，不再进采购
+  issued: '已转领用',
 };
+
+/**
+ * 核库（8.1.10，docs/ERP_V8110.md 第 2 节）：none 不用核 / 还没到（等主管确认）；pending 待核库；confirming 待部门确认替代；
+ * done 核完；skipped 不用核（标了急、集采导入、总仓都没有、开关关着）；timeout 超时转采购。
+ */
+export type StockCheckState = 'none' | 'pending' | 'confirming' | 'done' | 'skipped' | 'timeout';
+export const STOCK_CHECK_LABELS: Record<StockCheckState, string> = {
+  none: '',
+  pending: '待核库',
+  confirming: '待部门确认替代',
+  done: '已核库',
+  skipped: '不用核库',
+  timeout: '超时转采购',
+};
+/** 核库还没完：采购不能审核通过 */
+export const stockCheckOpen = (s: StockCheckState) => s === 'pending' || s === 'confirming';
+
+/** 一行的核库结果（8.1.10） */
+export interface RequestLineStock {
+  decision: 'issue' | 'substitute' | 'purchase';
+  /** 领用了多少（这一行的单位，千分之一） */
+  issuedQtyMilli: number;
+  substitute: { materialId: number; materialName: string; qtyMilli: number; unit: string; state: 'pending' | 'accepted' | 'declined' | 'expired' | 'failed' } | null;
+  /** 开的部门领料单；领料单冲销了的（voided）这一行不再算领用，照原来买 */
+  issueDoc: { id: number; docNo: string; voided: boolean } | null;
+  decidedByName: string;
+  decidedAt: string;
+  answeredByName: string | null;
+}
+
+/** 所需物品在总仓的结存（8.1.10，CK9、CK17）：只给选了物料的行；部门也看得到这几样 */
+export interface RequestLineCentralStock {
+  /** 总仓结存（库存单位，千分之一） */
+  stockMilli: number;
+  inventoryUnit: string;
+  purchaseUnit: string;
+  factorMilli: number;
+  /** 这一行的单位能换算成库存单位（是库存单位或采购单位）；能换算时 lineQtyMilli 是结存换成这一行单位的数量 */
+  convertible: boolean;
+  lineQtyMilli: number | null;
+}
+
+/** 库管核库时每一行的处理（8.1.10）：领用的数量按这一行的单位，这一行的单位不能换算时按库存单位、整行领用；替代按替代品的库存单位 */
+export type StockCheckLineInput =
+  | { lineId: number; decision: 'issue'; qtyMilli: number }
+  | { lineId: number; decision: 'substitute'; materialId: number; qtyMilli: number }
+  | { lineId: number; decision: 'purchase' };
+
+/** 替代品能选的物料（8.1.10）：受管、在用、总仓有结存的 */
+export interface StockMaterialOption {
+  id: number;
+  code: string;
+  name: string;
+  specification: string;
+  inventoryUnit: string;
+  decimals: number;
+  stockMilli: number;
+}
+
+/** 部门答复替代的结果（8.1.10）：同意时总仓不够了，这一行改成转采购（failed，message 写原因） */
+export interface SubstituteAnswerResult {
+  request: PurchaseRequest;
+  outcome: 'accepted' | 'declined' | 'failed';
+  message: string | null;
+}
 
 /** 采购优先级（8.0.1 采购组整改 02，CG02）：紧急标红点、普通标绿点 */
 export type RequestPriority = 'urgent' | 'normal';
@@ -60,8 +127,8 @@ export interface RequestLineProgress {
   mergedLines: number;
   /** 还没下单、在没撤销的询价单里（v0.7.30）：询价、定标之后转采购单 */
   sourcing: { id: number; docNo: string } | null;
-  /** none 未下单；sourcing 询价中（v0.7.30）；ordered 已下单；partial 部分到货；received 已到货；closed 采购单已关闭、没到齐的不再到（v0.7.11） */
-  state: 'none' | 'sourcing' | 'ordered' | 'partial' | 'received' | 'closed';
+  /** none 未下单；sourcing 询价中（v0.7.30）；ordered 已下单；partial 部分到货；received 已到货；closed 采购单已关闭、没到齐的不再到（v0.7.11）；issued 整行从库存领用（8.1.10） */
+  state: 'none' | 'sourcing' | 'ordered' | 'partial' | 'received' | 'closed' | 'issued';
 }
 
 export interface RequestLine {
@@ -83,6 +150,10 @@ export interface RequestLine {
   applicant: string;
   channel: string | null;
   supplier: { id: number; name: string } | null;
+  /** 核库结果（8.1.10）：没核过的为空 */
+  stock: RequestLineStock | null;
+  /** 所需物品的总仓结存（8.1.10）：手填的新品为空 */
+  centralStock: RequestLineCentralStock | null;
 }
 
 /**
@@ -97,8 +168,12 @@ export interface RequestDeptConfirm {
 }
 
 /** 列表、详情上显示的状态：待审核的需求单还在等主管确认时写「待主管确认」 */
-export const requestStatusLabel = (r: { status: RequestStatus; deptConfirm: Pick<RequestDeptConfirm, 'state'> }): string =>
-  r.status === 'submitted' && r.deptConfirm.state === 'pending' ? '待主管确认' : REQUEST_STATUS_LABELS[r.status];
+export const requestStatusLabel = (r: { status: RequestStatus; deptConfirm: Pick<RequestDeptConfirm, 'state'>; stockCheck?: StockCheckState }): string =>
+  r.status === 'submitted' && r.deptConfirm.state === 'pending'
+    ? '待主管确认'
+    : r.status === 'submitted' && r.stockCheck && stockCheckOpen(r.stockCheck)
+      ? STOCK_CHECK_LABELS[r.stockCheck]
+      : REQUEST_STATUS_LABELS[r.status];
 
 export interface PurchaseRequestSummary {
   id: number;
@@ -106,6 +181,10 @@ export interface PurchaseRequestSummary {
   status: RequestStatus;
   /** 部门主管确认（8.0.17） */
   deptConfirm: RequestDeptConfirm;
+  /** 核库（8.1.10） */
+  stockCheck: StockCheckState;
+  /** 进待核库的时刻（24 小时从这里算；不核库的为空） */
+  stockCheckSince: string | null;
   department: { id: number; name: string };
   requester: { id: number; name: string };
   needBy: string | null;
@@ -132,6 +211,13 @@ export interface PurchaseRequestSummary {
 export interface PurchaseRequest extends PurchaseRequestSummary {
   /** 看的人现在能不能做主管确认 / 主管退回（这张单在等主管确认，而且我是它的主管、这个部门现在的主管或店主） */
   canDeptConfirm: boolean;
+  /** 看的人现在能不能核库（8.1.10：有「核库」权限，这张单待核库） */
+  canStockCheck: boolean;
+  /** 看的人现在能不能答复替代提议（8.1.10：提单人、这个部门的主管或店主，这张单待部门确认替代） */
+  canAnswerSubstitute: boolean;
+  /** 核库的人与时刻（超时转采购的没有人） */
+  stockCheckedByName: string | null;
+  stockCheckedAt: string | null;
   note: string;
   reviewedByName: string | null;
   reviewedAt: string | null;
@@ -144,7 +230,7 @@ export interface PurchaseRequest extends PurchaseRequestSummary {
 export interface RequestsList {
   requests: PurchaseRequestSummary[];
   /** 当前账号：所属部门、能不能审核；headOf 是我当主管的部门（8.0.17） */
-  me: { departmentId: number | null; departmentName: string | null; canReview: boolean; canCreate: boolean; headOf: number[] };
+  me: { departmentId: number | null; departmentName: string | null; canReview: boolean; canCreate: boolean; headOf: number[]; canStock: boolean };
 }
 
 /** 已通过、还没下单的需求行（转采购单用） */
@@ -172,6 +258,8 @@ export interface OpenRequestLine {
   applicant: string;
   channel: string | null;
   supplier: { id: number; name: string } | null;
+  /** 已经从库存领用的数量（这一行的单位，8.1.10）：转采购单时默认买剩下的 */
+  issuedQtyMilli: number;
 }
 
 /** 提需求单要用的选项：用途、部门、可选的物料（部门申购没有库存查看权限，也能从这里选物料） */

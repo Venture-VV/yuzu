@@ -13,6 +13,7 @@ import { processGiftOuts } from './modules/gift-outs';
 import { processStockUsage } from './modules/stock-usage';
 import { runAutoReplenish } from './modules/inventory/auto-replenish';
 import { sweepDrafts } from './modules/request-drafts';
+import { sweepStockChecks } from './modules/request-stock';
 import { sendPendingSms } from './modules/sms';
 import { issueBirthdayCoupons } from './modules/coupons';
 import { runMembershipDaily } from './modules/membership';
@@ -98,6 +99,13 @@ export async function runMinuteJobs(deps: { sql: Sql; config: AppConfig }, log: 
     if (n > 0) log.info(`草稿箱：清理 ${n} 份过期或已关闭的草稿`);
   } catch (error) {
     log.error('草稿清理失败，下一分钟重试', error);
+  }
+  // 核库（8.1.10，CK10）：超过核库时限没核完的转采购；替代提议部门没答复的照原来买
+  try {
+    const r = await sweepStockChecks({ sql }, now);
+    if (r.timedOut + r.expired > 0) log.info(`核库：${r.timedOut} 张需求单超时转采购，${r.expired} 行替代没答复、照原来买`);
+  } catch (error) {
+    log.error('核库超时处理失败，下一分钟重试', error);
   }
   // 批量发券（8.0.4）：请求断了、进程重启时没发完的发券单接着发（同一个人不会发两次）
   try {

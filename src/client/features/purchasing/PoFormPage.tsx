@@ -212,7 +212,8 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
   };
   /** 把一行需求并进明细：已有这个物料的行就合并（数量能换算的加上去），没有就新加一行 */
   const mergeRequest = (ls: Line[], m: Material, o: OpenRequestLine): Line[] => {
-    const qty = requestQtyInPurchase(o, m);
+    // 核库时已经从库存领了一部分的（8.1.10）：默认只买剩下的
+    const qty = requestQtyInPurchase({ qtyMilli: o.qtyMilli - (o.issuedQtyMilli ?? 0), unit: o.unit }, m);
     const existingLine = ls.find((l) => l.materialId === m.id);
     if (existingLine) {
       if (existingLine.requests.some((r) => r.lineId === o.id)) return ls;

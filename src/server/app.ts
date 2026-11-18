@@ -33,6 +33,7 @@ import { registerErpOpsRoutes } from './modules/erp-ops';
 import { registerPurchaseLedgerRoutes } from './modules/purchase-ledger';
 import { registerLegacyRoutes } from './modules/legacy';
 import { registerRequestRoutes } from './modules/requests';
+import { registerRequestStockRoutes } from './modules/request-stock';
 import { registerRequestImportRoutes } from './modules/request-import';
 import { registerRequestDraftRoutes } from './modules/request-drafts';
 import { registerRequestSheetRoutes } from './modules/request-sheet';
@@ -359,6 +360,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   // 批量付款（8.0.21）
   registerPaymentBatchRoutes(app, deps);
   registerRequestRoutes(app, deps);
+  // 8.1.10 核库转领用：库管核库、部门答复替代
+  registerRequestStockRoutes(app, deps);
   registerRequestImportRoutes(app, deps);
   registerRequestDraftRoutes(app, deps);
   registerRequestSheetRoutes(app, deps);

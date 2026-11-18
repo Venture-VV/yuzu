@@ -148,7 +148,8 @@ afterAll(async () => ctx.close());
 
 describe('急采后补合同', () => {
   it('设置：默认要补合同的线 ¥20,000、期限 15 天，范围核对', async () => {
-    expect(await rules()).toMatchObject({ urgentContractMinCents: 2_000_000, contractDueDays: 15, stockCheckEnabled: true, stockCheckHours: 24 });
+    // 提需核库在用例基线里关着（tests/helpers.ts），默认开由 tests/switches-default.test.ts 核对
+    expect(await rules()).toMatchObject({ urgentContractMinCents: 2_000_000, contractDueDays: 15, stockCheckHours: 24 });
     expect((await saveRules({ contractDueDays: 0 })).status).toBe(400);
     expect((await saveRules({ urgentContractMinCents: -1 })).status).toBe(400);
     expect((await saveRules({ stockCheckHours: 200 })).status).toBe(400);

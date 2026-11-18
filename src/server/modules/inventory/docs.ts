@@ -1473,6 +1473,32 @@ export async function createImportedReceipt(tx: Tx, deps: Deps, raw: DocBodyInpu
   return { id: newId, docNo: o.docNo, amountCents: prepared.amountCents };
 }
 
+/**
+ * 核库转领用（8.1.10，docs/ERP_V8110.md 第 2 节）：在调用方的事务里开一张部门领料单并马上生效（总仓出、申请部门的小仓进），
+ * 与库管平时登记领料一样，部门之后签收。调用方已经取了操作编号的咨询锁、锁住需求单一行，核对过「核库」权限；
+ * 这里照库存单据原来的锁（单号 → 物料按 id 升序 → 部门小仓）。staff 是登记人：核库的库管（部门同意替代时也记提议的库管）。
+ */
+export async function createRequestIssue(
+  tx: Tx,
+  deps: Deps,
+  o: { departmentId: number; handler: string; note: string; lines: { materialId: number; qtyMilli: number; enteredQtyMilli: number | null; enteredUnit: string | null; note: string }[] },
+  staff: Actor,
+): Promise<{ id: number; docNo: string }> {
+  const docDate = todayIn(deps.config.timezone);
+  const body = parse(DocBody, { docType: 'issue', docDate, note: o.note, departmentId: o.departmentId, handler: o.handler.slice(0, 32) || '部门', lines: o.lines });
+  if (body.docType !== 'issue') throw badRequest('核库只开部门领料单');
+  const wh = await warehouseOfBody(tx, body);
+  const prepared = await prepare(tx, deps, body, null, wh, staff);
+  const docNo = await nextDocNo(tx, 'inv_issue', INV_DOC_META.issue.prefix, docDate);
+  const newId = await insertDocRow(tx, body, prepared, { docNo, clientKey: randomUUID(), staffId: staff.id, importId: null });
+  await insertLines(tx, newId, prepared.lines);
+  await logApproval(tx, 'inv_doc', newId, 'create', staff.id, o.note);
+  await submitLocked(tx, await lockDoc(tx, newId), staff, false, deps.config.timezone);
+  const [d] = await tx<{ status: string }[]>`SELECT status FROM inv_docs WHERE id = ${newId}`;
+  if (d?.status !== 'confirmed') throw conflict('ISSUE_NOT_CONFIRMED', `${docNo} 没能直接生效，核库没有记下，请刷新后重试`);
+  return { id: newId, docNo };
+}
+
 // ───────────────────────── 对外操作 ─────────────────────────
 
 export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, ip?: string): Promise<{ doc: InvDoc; replayed: boolean }> {

@@ -14,6 +14,7 @@ import { loadSettings } from '../settings';
 import { admissionCounts } from './admission';
 import { slowMovingCount } from './slow';
 import { contractDueCount } from './contract-due';
+import { stockCheckCount } from '../request-stock';
 
 /** 管效期的物料推算剩下的批次（只返回到期前 days 天以内与已过期的；days = Infinity 返回全部有到期日的） */
 export async function expiryLots(db: Db, today: string, days: number): Promise<ExpiryLot[]> {
@@ -66,6 +67,7 @@ export async function supplyTodo(db: Db, today: string): Promise<SupplyTodo> {
     expiringLots: lots.filter((l) => l.daysLeft >= 0).length,
     expiredLots: lots.filter((l) => l.daysLeft < 0).length,
     contractDue: await contractDueCount(db),
+    stockChecks: await stockCheckCount(db),
   };
 }
 

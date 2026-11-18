@@ -13,7 +13,7 @@ import { shiftDate } from './labels';
 import { formatYuan } from './money';
 import { nextPayDay, payDaysLabel } from './payments';
 import type { PoStatus, ReceivingState, SourcingStatus } from './purchasing';
-import type { RequestStatus } from './requests';
+import type { RequestStatus, StockCheckState } from './requests';
 
 export type FlowNodeKey = 'request' | 'confirm' | 'review' | 'sourcing' | 'award' | 'approval' | 'order' | 'receive' | 'stockin' | 'pay';
 /** done 做完（绿勾）；current 正在等（橙点）；pending 还没到（灰） */
@@ -98,6 +98,10 @@ export interface FlowRequestFact {
   summary: string;
   /** 还没有有效采购单的行数 */
   unorderedLines: number;
+  /** 核库（8.1.10）：待核库、待部门确认替代时「需求审核」写这个；没有的按不用核库 */
+  stockCheck?: StockCheckState;
+  stockCheckSince?: string | null;
+  stockCheckedAt?: string | null;
   /** 各行「参考价 × 数量」的合计，与填了参考价的行数 */
   estimateCents: number;
   pricedLines: number;
@@ -295,6 +299,8 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
 
   const one = reqs.length === 1 ? reqs[0]! : null;
   const rejected = reqs.length > 0 && pos.length === 0 && !sourcing && reqs.every((r) => r.status === 'rejected');
+  // 核库转领用（8.1.10）：需求全部从库存领用、不再采购
+  const issued = reqs.length > 0 && pos.length === 0 && !sourcing && reqs.every((r) => r.status === 'issued');
   const cancelled = reqs.length > 0 && pos.length === 0 && !sourcing && reqs.every((r) => r.status === 'cancelled');
   const approvedAll = reqs.every((r) => r.status === 'approved');
   /** 需求都通过的时间（下游从这时开始等） */
@@ -358,6 +364,17 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
       drafts.push({ key: 'review', title: '需求审核', role: '采购审核', state: 'pending', text: '待主管确认后', link: reqLink(waiting!) });
     } else if (!waiting) {
       drafts.push({ key: 'review', title: '需求审核', role: names(reqs.map((r) => r.reviewedByName ?? '')) || '采购', state: 'done', text: '已通过', at: reviewedAt, link: reqLink(reqs[0]!) });
+    } else if (waiting.status === 'submitted' && (waiting.stockCheck === 'pending' || waiting.stockCheck === 'confirming')) {
+      // 核库（8.1.10）：库管看总仓有没有货、替代等部门答复，核完才审核
+      drafts.push({
+        key: 'review',
+        title: '需求审核',
+        role: waiting.stockCheck === 'pending' ? '库管核库' : `${waiting.departmentName} · 确认替代`,
+        state: 'current',
+        text: waiting.stockCheck === 'pending' ? '待核库，核完再审核' : '待部门确认替代品',
+        since: waiting.stockCheckSince ?? waiting.submittedAt,
+        link: reqLink(waiting),
+      });
     } else if (waiting.status === 'submitted') {
       drafts.push({
         key: 'review',
@@ -368,6 +385,8 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
         since: waiting.submittedAt,
         link: reqLink(waiting),
       });
+    } else if (waiting.status === 'issued') {
+      drafts.push({ key: 'review', title: '需求审核', role: '库管核库', state: 'done', text: '已转领用，不再采购', at: waiting.stockCheckedAt ?? null, link: reqLink(waiting) });
     } else if (waiting.status === 'returned') {
       drafts.push({
         key: 'review',
@@ -631,6 +650,7 @@ export function buildPurchaseFlow(f: FlowFacts): PurchaseFlow {
   let end: PurchaseFlow['end'] = null;
   let endText: string | null = null;
   if (rejected) [end, endText] = ['rejected', '需求单定为不采购，流程结束'];
+  else if (issued) [end, endText] = ['done', '需求从库存领用（核库转领用），不再采购'];
   else if (cancelled) [end, endText] = ['cancelled', '需求单已撤回，流程结束'];
   const stopAt = end ? drafts.findIndex((d) => d.key === 'review') : -1;
 
