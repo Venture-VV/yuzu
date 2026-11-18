@@ -726,9 +726,10 @@ async function publishProblems(db: Db, b: Normalized, today: string): Promise<st
     if (b.category === 'event' && b.events.includes('festival') && b.festivalDates.length === 0) problems.push('节日关怀请填写节日的日期');
     if (b.templateId === null) problems.push('请选择发哪张券（券模板）');
     else {
-      const [t] = await db<{ name: string; active: boolean; validity: string; validTo: string | null }[]>`
-        SELECT name, active, validity, valid_to FROM coupon_templates WHERE id = ${b.templateId}`;
+      const [t] = await db<{ name: string; active: boolean; validity: string; validTo: string | null; gift: boolean }[]>`
+        SELECT name, active, validity, valid_to, gift FROM coupon_templates WHERE id = ${b.templateId}`;
       if (!t) problems.push('选的券模板不存在，请刷新后重选');
+      else if (t.gift) problems.push(`「${t.name}」是签赠券类型，不能做会员权益（签赠要选授权人，在「签赠发放」里发）`);
       else if (!t.active) problems.push(`券模板「${t.name}」已停用`);
       else if (t.validity === 'fixed' && t.validTo! < today) problems.push(`券模板「${t.name}」的有效期到 ${t.validTo} 已经过了`);
     }
@@ -894,8 +895,8 @@ export async function updateBenefit(deps: Deps, id: number, raw: unknown, ctx: O
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     const cur = await lockBenefit(tx, id, input.expectedVersion);
-    if (b.templateId !== null && !(await tx`SELECT 1 FROM coupon_templates WHERE id = ${b.templateId}`).length) {
-      throw badRequest('选的券模板不存在，请刷新后重选', { field: 'templateId' });
+    if (b.templateId !== null && !(await tx`SELECT 1 FROM coupon_templates WHERE id = ${b.templateId} AND NOT gift`).length) {
+      throw badRequest('选的券模板不存在（签赠券类型不能做会员权益），请刷新后重选', { field: 'templateId' });
     }
     if (cur.status === 'published') {
       const problems = await publishProblems(tx, b, date);

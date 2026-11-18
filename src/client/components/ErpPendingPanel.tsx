@@ -90,6 +90,8 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     case 'coupon_template':
     case 'coupon_batch':
     case 'coupon_campaign':
+    // 新建签赠券类型（8.1.9）：返回那个类型（券模板）
+    case 'gift_type':
       return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'coupon_rule':
       return typeof d.ruleId === 'number' ? { refId: d.ruleId } : null;
@@ -99,6 +101,8 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     case 'doc_print':
       return typeof d.id === 'number' ? { refId: d.id } : null;
     case 'coupon_issue':
+    // 签赠发放（8.1.9）：返回那条发券记录
+    case 'gift_issue':
       return typeof d.issueId === 'number' ? { refId: d.issueId } : null;
     // 供应商付款、期初未付登记（v0.7.22）
     case 'payment':

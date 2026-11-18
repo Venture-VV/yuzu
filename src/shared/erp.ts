@@ -466,6 +466,9 @@ export const ERP_OP_TYPES = [
   'pool_use',
   // 8.1.9 库管入库台账导入（一次进很多库存，断网后也要能查回、重提或作废）
   'receipt_import',
+  // 8.1.9 签赠：新建签赠券类型、签赠发放
+  'gift_type',
+  'gift_issue',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -533,6 +536,8 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   studio_publish: '工作台发布 / 回滚',
   pool_use: '零采备用金申用',
   receipt_import: '库管入库台账导入',
+  gift_type: '新建签赠券类型',
+  gift_issue: '签赠发放',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

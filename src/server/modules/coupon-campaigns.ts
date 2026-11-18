@@ -91,6 +91,7 @@ export async function previewCampaign(deps: Pick<Deps, 'sql' | 'config'>, raw: u
   const [t] = await sql<{ levels: number[] }[]>`SELECT levels FROM coupon_templates WHERE id = ${input.templateId}`;
   if (!t) throw notFound('券模板不存在');
   const template = (await lockTemplateReadOnly(sql, input.templateId))!;
+  if (template.gift) throw unprocessable('GIFT_TEMPLATE', `「${template.name}」是签赠券类型，不能批量发；请在「签赠发放」里一位一位发（要选授权人）`);
   const members = await audienceMembers(sql, normalizeAudience(input.audience));
   const date = await todayOf(sql, deps);
   const rules = await loadMembershipRules(sql);
@@ -112,7 +113,7 @@ export async function previewCampaign(deps: Pick<Deps, 'sql' | 'config'>, raw: u
 async function lockTemplateReadOnly(db: Db, id: number): Promise<LockedTemplate | null> {
   const [t] = await db<(LockedTemplate & { levels: number[] })[]>`
     SELECT id, name, kind, face_value, rate_percent, max_off, threshold, scope, scope_categories, scope_items, exchange_item_id, exchange_ticket_type_id,
-           buy_item_id, validity, valid_from, valid_to, valid_days, levels, active
+           buy_item_id, validity, valid_from, valid_to, valid_days, levels, active, gift
     FROM coupon_templates WHERE id = ${id}`;
   return t ? { ...t, levels: t.levels.map(Number) } : null;
 }
@@ -161,6 +162,7 @@ export async function createCampaign(deps: Deps, raw: unknown, ctx: OpContext): 
         if (again !== null) return { id: again, replayed: true };
         const template = await lockTemplate(tx, input.templateId);
         if (!template) throw notFound('券模板不存在');
+        if (template.gift) throw unprocessable('GIFT_TEMPLATE', `「${template.name}」是签赠券类型，不能批量发；请在「签赠发放」里一位一位发（要选授权人）`);
         if (!template.active) throw unprocessable('TEMPLATE_INACTIVE', `券「${template.name}」已停用，不能再发`);
         const at = ctx.at ?? new Date();
         const date = await todayOf(tx, deps, at);
@@ -245,7 +247,7 @@ export async function processCampaign(deps: Pick<Deps, 'sql' | 'config'>, id: nu
       const at = new Date();
       const date = await todayOf(tx, deps, at);
       const template = await lockTemplate(tx, Number(c.templateId));
-      const range = template?.active ? validRange(template, date) : null;
+      const range = template?.active && !template.gift ? validRange(template, date) : null;
       const settings = await loadSettings(tx);
       const ids = pending.map((p) => Number(p.memberId));
       const members = new Map(

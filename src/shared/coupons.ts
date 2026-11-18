@@ -217,6 +217,11 @@ export interface CouponTemplate extends CouponTerms {
   giftWarehouseId: number | null;
   /** 「出 苏打水 1 瓶（水吧小仓）」 */
   giftOutText: string | null;
+  /** 签赠券类型（8.1.9，docs/GIFTS_V819.md）：只能经「签赠发放」发；板块、权益内容、规则说明是签赠知识库里的内容 */
+  gift: boolean;
+  giftSegment: string;
+  giftContent: string;
+  giftRules: string;
 }
 
 export interface CouponRule {
@@ -330,4 +335,6 @@ export interface CheckoutCouponOption {
   usable: boolean;
   amount: number;
   reason: string | null;
+  /** 签赠券（8.1.9）：板块，发放时的授权人、渠道、事由；普通券为 null */
+  gift: { segment: string; authorizerName: string; channel: string; reason: string } | null;
 }

@@ -76,6 +76,7 @@ import { registerBankRoutes } from './modules/bank';
 import { registerPaymentBatchRoutes } from './modules/payment-batches';
 import { registerMemberRecordRoutes } from './modules/member-records';
 import { registerCouponRoutes } from './modules/coupons';
+import { registerSignGiftRoutes } from './modules/gifts';
 import { registerCampaignRoutes } from './modules/coupon-campaigns';
 import { registerGiftOutRoutes } from './modules/gift-outs';
 import { registerStockUsageRoutes } from './modules/stock-usage';
@@ -265,6 +266,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerCustomFieldRoutes(app, deps);
   registerMemberRecordRoutes(app, deps);
   registerCouponRoutes(app, deps);
+  // 8.1.9 签赠（docs/GIFTS_V819.md）
+  registerSignGiftRoutes(app, deps);
   registerCampaignRoutes(app, deps);
   registerGiftOutRoutes(app, deps);
   registerStockUsageRoutes(app, deps);
