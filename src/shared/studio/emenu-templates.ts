@@ -297,7 +297,6 @@ export interface ResolvedSlot {
   h: number;
   big?: EmenuBigSpot;
   hidden: boolean;
-  radius?: number;
 }
 
 /** 一块叠上版面里的改动（templates[版式][块]）以后在哪：放大一档改了 y 的不再往上长，改了下沿的照旧往上长 */
@@ -319,7 +318,8 @@ export function resolveSlot(def: EmenuSlotDef, o: StudioSlotOverride | undefined
     if (b.w !== undefined) big.w = b.w;
     if (b.h !== undefined) big.h = b.h;
   }
-  return { def, x: d?.x ?? def.x, y: d?.y ?? def.y, w: d?.w ?? def.w, h: d?.h ?? def.h, big, hidden: !!o?.hidden, radius: o?.radius };
+  // 照片的圆角（8.1.2 加的 radius）从 8.1.8 起不生效：品牌部要求图片一律直角（PENDING_DECISIONS.md PB3），这里不再带出
+  return { def, x: d?.x ?? def.x, y: d?.y ?? def.y, w: d?.w ?? def.w, h: d?.h ?? def.h, big, hidden: !!o?.hidden };
 }
 
 /** 一块在一档里的位置（放大一档没写的沿用原样一档的，原样一档改了也跟着） */
@@ -338,12 +338,14 @@ export const findSlotDef = (layout: string, key: string): EmenuSlotDef | undefin
 
 type Templates = NonNullable<StudioDoc['templates']>;
 
-/** 把一块的改动写回版面：空了的一档、一块、一种版式都去掉（全恢复默认时版面里没有 templates 这一项，与没改过一样） */
+/**
+ * 把一块的改动写回版面：空了的一档、一块、一种版式都去掉（全恢复默认时版面里没有 templates 这一项，与没改过一样）。
+ * 以前存的照片圆角（radius）写回时去掉（8.1.8 起照片一律直角）：改过的那一块存下来就干净了。
+ */
 function writeOverride(doc: StudioDoc, layout: string, key: string, o: StudioSlotOverride): StudioDoc {
   const clean: StudioSlotOverride = {};
   for (const mode of ['design', 'big'] as const) if (o[mode] && Object.keys(o[mode]!).length) clean[mode] = o[mode];
   if (o.hidden) clean.hidden = true;
-  if (o.radius) clean.radius = o.radius;
   const all: Templates = { ...(doc.templates ?? {}) };
   const slots = { ...(all[layout] ?? {}) };
   if (Object.keys(clean).length) slots[key] = clean;
@@ -384,16 +386,15 @@ export function setSlotSpot(doc: StudioDoc, layout: string, key: string, mode: E
   return writeOverride(doc, layout, key, { ...o, [mode]: patch });
 }
 
-/** 藏起来 / 显示、照片的圆角（两档一起） */
-export function setSlotFlags(doc: StudioDoc, layout: string, key: string, flags: { hidden?: boolean; radius?: number }): StudioDoc {
+/** 藏起来 / 显示（两档一起）。照片的圆角 8.1.8 起不再有（PB3） */
+export function setSlotFlags(doc: StudioDoc, layout: string, key: string, flags: { hidden?: boolean }): StudioDoc {
   if (!findSlotDef(layout, key)) return doc;
   const o = { ...(doc.templates?.[layout]?.[key] ?? {}) };
   if (flags.hidden !== undefined) o.hidden = flags.hidden;
-  if (flags.radius !== undefined) o.radius = flags.radius;
   return writeOverride(doc, layout, key, o);
 }
 
-/** 恢复默认：一块的一档（mode）或整块（不给 mode：两档、藏、圆角都去掉） */
+/** 恢复默认：一块的一档（mode）或整块（不给 mode：两档、藏都去掉） */
 export function resetSlot(doc: StudioDoc, layout: string, key: string, mode?: EmenuSlotMode): StudioDoc {
   const o = doc.templates?.[layout]?.[key];
   if (!o) return doc;

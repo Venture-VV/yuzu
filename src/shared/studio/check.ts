@@ -6,7 +6,7 @@
 import { isFlow, STUDIO_LIMITS, walkNodes, type StudioAction, type StudioBlockNode, type StudioColor, type StudioDoc, type StudioNode } from './format';
 import { EMENU_HEADER_H, EMENU_HEADER_LAYOUT, headerSlotRatio, resolveSlot, slotHideable, slotResizable, slotSpot } from './emenu-templates';
 import { componentCycles, expandedCount } from './components';
-import { STUDIO_SURFACE_DEFS, type StudioBlockDef, type StudioPropDef, type StudioSurfaceDef } from './surfaces';
+import { STUDIO_SURFACE_DEFS, themeColor, type StudioBlockDef, type StudioPropDef, type StudioSurfaceDef } from './surfaces';
 
 export interface StudioIssue {
   level: 'error' | 'warn';
@@ -192,8 +192,7 @@ export function contrastRatio(fg: string, bg: string): number | null {
 export function resolveColor(doc: StudioDoc, c: StudioColor | null | undefined): string | null {
   if (!c) return null;
   if (!c.startsWith('$')) return c;
-  const key = c.slice(1);
-  return doc.theme.colors[key] ?? STUDIO_SURFACE_DEFS[doc.surface].colors.find((x) => x.key === key)?.default ?? null;
+  return themeColor(doc, c.slice(1));
 }
 
 export interface StudioCheckContext {

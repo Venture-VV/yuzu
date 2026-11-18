@@ -1,7 +1,20 @@
 // UI 工作台的版面格式（8.1.1，docs/WORKBENCH_V811.md 第 3、5 节）：默认版面合格式、核对拦得住不合格的、发布前的检查。
 // 只测格式与检查（不连数据库）；接口与权限在 tests/studio.test.ts。
 import { describe, expect, it } from 'vitest';
-import { changedScreens, checkStudioDoc, contrastRatio, defaultStudioDoc, DocSchema, EMENU_SURFACE, themeVars, validateStudioDoc, type StudioDoc, type StudioNode } from '../src/shared/studio';
+import {
+  changedScreens,
+  checkStudioDoc,
+  contrastRatio,
+  defaultStudioDoc,
+  DocSchema,
+  EMENU_SURFACE,
+  resolveColor,
+  themeColor,
+  themeVars,
+  validateStudioDoc,
+  type StudioDoc,
+  type StudioNode,
+} from '../src/shared/studio';
 
 const clone = (d: StudioDoc): StudioDoc => JSON.parse(JSON.stringify(d));
 const text = (id: string, zh: string, more: Record<string, unknown> = {}): StudioNode =>
@@ -101,6 +114,31 @@ describe('版面格式', () => {
     expect(changedScreens(a, b)).toEqual(['theme', 'menu']);
     b.theme.colors.key2 = '#000000';
     expect(themeVars(b)['--em-key-2']).toBe('#000000');
+  });
+
+  it('8.1.8（品牌部，PB4）：平板菜单的主文字是品牌规定的 #4b392a，版面里存着别的值也不生效；标题右下角的小圆圈有自己的主题色', () => {
+    const doc = clone(defaultStudioDoc('emenu'));
+    expect(EMENU_SURFACE.colors.find((c) => c.key === 'ink')).toMatchObject({ default: '#4b392a', locked: true });
+    expect(EMENU_SURFACE.colors.find((c) => c.key === 'dot')).toMatchObject({ default: '#bf1d25' });
+    expect(EMENU_SURFACE.squareImages).toBe(true);
+    // 测试服上那一版：主文字改成了 #be9879——页面上照旧是 #4b392a，工作台读出来也是
+    doc.theme.colors.ink = '#be9879';
+    doc.theme.colors.dot = '#123456';
+    expect(validateStudioDoc(doc)).toEqual([]);
+    expect(themeColor(doc, 'ink')).toBe('#4b392a');
+    expect(themeColor(doc, 'dot')).toBe('#123456');
+    expect(themeColor(doc, 'nope')).toBeNull();
+    expect(themeVars(doc)).toEqual({ '--em-dot': '#123456' });
+    expect(themeVars(doc, true)['--em-ink']).toBe('#4b392a');
+    // 主题色引用 $ink 的块（设计师加的字）也是品牌色；数据不改（存着的照旧存着）
+    expect(resolveColor(doc, '$ink')).toBe('#4b392a');
+    expect(doc.theme.colors.ink).toBe('#be9879');
+    // 8.1.7 以前的版面没有「小圆圈」这一项：用默认的红
+    const before = clone(defaultStudioDoc('emenu'));
+    delete before.theme.colors.dot;
+    expect(validateStudioDoc(before)).toEqual([]);
+    expect(themeColor(before, 'dot')).toBe('#bf1d25');
+    expect(themeVars(before)).toEqual({});
   });
 });
 

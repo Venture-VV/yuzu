@@ -71,6 +71,11 @@ export interface StudioColorDef {
   key: string;
   label: string;
   default: string;
+  /**
+   * 品牌规定的颜色（8.1.8，平板菜单的主文字 #4b392a）：工作台里只显示、不能改；版面里存着的别的值不生效（数据不改，照默认值画）。
+   * 读主题色一律走 themeColor，不直接读 doc.theme.colors。
+   */
+  locked?: boolean;
 }
 export interface StudioFontDef {
   key: string;
@@ -112,6 +117,8 @@ export interface StudioSurfaceDef {
   inlineAllVars: boolean;
   /** 卡片模板（8.1.2，平板菜单的 11 种版式）：每种版式里有哪几块、各在哪 */
   templates?: Readonly<Record<string, EmenuTemplateDef>>;
+  /** 图片一律直角（8.1.8，品牌部：平板菜单的图片不要圆角）：图片块的圆角不生效、工作台里不给改 */
+  squareImages?: boolean;
 }
 
 const AUTO_COLOR = { kind: 'color', auto: true, default: 'auto' } as const;
@@ -127,7 +134,8 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
     { key: 'menu', label: '菜单页', hint: '翻菜单、加菜：菜单页的分类、版面、菜品在后台「电子菜单」里维护；这里可以加装饰、改主题', background: null },
   ],
   colors: [
-    { key: 'ink', label: '主文字（深棕）', default: '#4b392a' },
+    // 8.1.8（品牌部）：字标、顶栏分类、页面标题、菜名这些主文字一律是品牌的深棕 #4b392a，每一页都一样，工作台里不能改（PENDING_DECISIONS.md PB4）
+    { key: 'ink', label: '主文字（深棕 #4b392a，品牌规定）', default: '#4b392a', locked: true },
     { key: 'mute', label: '次要文字、细线', default: '#a59c95' },
     { key: 'tan', label: '强调（选中、按钮）', default: '#a6947a' },
     { key: 'bg', label: '页面底色', default: '#f4f3f2' },
@@ -138,6 +146,8 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
     { key: 'photo', label: '图片占位、起始页底', default: '#d3d3d3' },
     { key: 'light', label: '浅色字（深底上）', default: '#efefef' },
     { key: 'error', label: '出错', default: '#a2412b' },
+    // 8.1.8（品牌部）：分类封面大标题右下角的小圆圈（点缀）
+    { key: 'dot', label: '标题右下角的小圆圈', default: '#bf1d25' },
   ],
   fonts: {
     zh: [
@@ -290,6 +300,7 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
   fields: [],
   tokens: { text: '$ink', fill: '$tan', panel: '$modal', line: '$mute', button: '$ink' },
   cssVar: (token) => `var(--em-${token === 'key2' ? 'key-2' : token})`,
+  squareImages: true,
   fontVars: { zh: '--em-zh', en: '--em-en' },
   inlineAllVars: false,
   // 菜单页 11 种版式的卡片模板，加上顶栏（8.1.6）
@@ -839,6 +850,16 @@ function defaultMpDoc(): StudioDoc {
 }
 
 /**
+ * 版面里一个主题色现在是什么颜色（8.1.8）：品牌规定的（locked）一律是默认值，不看版面里存的；没存的用默认值；界面没登记的返回空。
+ * 画页面、工作台的色块、核对对比度都用它，不直接读 doc.theme.colors。
+ */
+export function themeColor(doc: StudioDoc, key: string): string | null {
+  const def = STUDIO_SURFACE_DEFS[doc.surface].colors.find((c) => c.key === key);
+  if (!def) return null;
+  return def.locked ? def.default : (doc.theme.colors[key] ?? def.default);
+}
+
+/**
  * 主题色、字体在页面上的 CSS 变量。平板菜单只给和默认不一样的（默认值在 emenu.css 里，默认版面在页面上一个变量都不多设）；
  * 手机界面全给（React 这边没有它们的样式表）。
  */
@@ -851,7 +872,7 @@ export function themeVars(doc: StudioDoc, all = false): Record<string, string> {
   const every = all || def.inlineAllVars;
   const out: Record<string, string> = {};
   for (const c of def.colors) {
-    const v = doc.theme.colors[c.key] ?? c.default;
+    const v = themeColor(doc, c.key) ?? c.default;
     if (every || v.toLowerCase() !== c.default.toLowerCase()) out[def.cssVar(c.key).slice(4, -1)] = v;
   }
   const zh = def.fonts.zh.find((f) => f.key === doc.theme.fonts.zh) ?? def.fonts.zh.find((f) => f.key === def.fonts.default.zh);
