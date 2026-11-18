@@ -3,10 +3,11 @@
 //   商米 V3（手持点单机，6.75 英寸 720 × 1600，网页约 360 × 800）、
 //   小米平板 6S Pro 12.4（网页 1355 × 903 横屏）。
 // 在门店电脑这一组里另开这几个窗口，逐页核对：不横向滚动、没有东西超出屏幕右边（有意左右滑的区域除外）、要点的按钮在屏幕里、
-// 菜名不被挤成一列。只读：桌台页、桌台详情与点菜单用合成数据代替接口；为了看到餐饮页面临时打开餐饮与桌台点单，结束时恢复原样。
+// 菜名不被挤成一列。只读：菜单里的菜、桌台页、桌台详情与点菜单用合成数据代替接口（CI 的浏览器验收各组用的是只灌了五套演示数据的新库，
+// 里面没有进厨房的菜）；为了看到餐饮页面临时打开餐饮与桌台点单，结束时恢复原样。
 // 依赖四套演示数据（仅独立演示库）；账号店主 linlan。新做的、改过的页面加到下面 PAGES 里。
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import type { DiningReceipt, PendingDish, TableSessionDetail, TablesBoard } from '../src/shared/dining';
+import type { DiningMenu, DiningReceipt, KitchenBoard, MenuDish, PendingDish, TableSessionDetail, TablesBoard } from '../src/shared/dining';
 import type { BillLine } from '../src/shared/frontdesk';
 import { expectFits } from './fits';
 
@@ -208,8 +209,45 @@ const RECEIPT: DiningReceipt = (() => {
   };
 })();
 
-/** 桌台看板、这一桌的详情、点菜单换成合成数据（只读，不碰库里的桌台） */
+/** 菜单里的菜：三处、每个小分类都有，菜名有长有短，一道估清、一道限量（规则、营业日照接口返回的） */
+const MENU_DISHES: MenuDish[] = (
+  [
+    ['宫保鸡丁', 4_800, '热菜', 'restaurant', '餐饮', null],
+    ['小炒黄牛肉', 6_800, '热菜', 'restaurant', '餐饮', 3],
+    ['招牌秘制酱香手撕鸡（半只）', 8_800, '热菜', 'restaurant', '餐饮', null],
+    ['青岛纯生', 1_800, '吧台', 'restaurant', '酒水', null],
+    ['张裕干红（杯）', 5_800, '吧台', 'restaurant', '酒水', 0],
+    ['招牌手打香水柠檬茶（大杯）', 2_600, '水吧', 'water', '手作饮料', null],
+    ['柚子气泡水', 2_200, '水吧', 'water', '手作饮料', null],
+    ['杨枝甘露', 3_200, '水吧', 'water', '糖水', null],
+    ['莫吉托', 6_800, '水吧', 'water', '调酒', null],
+    ['鲜切时令果盘', 5_800, '果吧', 'fruit', '', null],
+    ['鲜榨西瓜汁', 2_800, '果吧', 'fruit', '', null],
+  ] as const
+).map(([name, price, station, outlet, group, remaining], i) => ({
+  id: 995_001 + i,
+  name,
+  category: '餐饮',
+  price,
+  stationId: 996_000 + ['热菜', '吧台', '水吧', '果吧'].indexOf(station),
+  stationName: station,
+  remaining,
+  outlet,
+  group,
+}));
+
+/** 菜单、厨房看板里的菜，桌台看板、这一桌的详情、点菜单换成合成数据（只读，不碰库里的菜与桌台） */
 async function mockTables(ctx: BrowserContext) {
+  // 菜单与厨房看板：取真的（规则、营业日、档口、出品单照旧），只把菜换成合成的
+  await ctx.route('**/api/dining/menu', async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, json: { ...((await res.json()) as DiningMenu), dishes: MENU_DISHES } });
+  });
+  await ctx.route('**/api/kitchen', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const res = await route.fetch();
+    await route.fulfill({ response: res, json: { ...((await res.json()) as KitchenBoard), dishes: MENU_DISHES } });
+  });
   await ctx.route('**/api/dining/tables', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: BOARD }) : route.fallback()));
   await ctx.route(`**/api/dining/tables/sessions/${SID}`, (route) => route.fulfill({ json: DETAIL }));
   await ctx.route('**/api/dining/receipt?*', (route) => route.fulfill({ json: RECEIPT }));
@@ -319,7 +357,10 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
   },
   'dining-limits': async (page) => {
     await page.goto('/dining/limits');
-    await expect(page.getByTestId('limits')).toBeVisible();
+    await expect(page.getByTestId('limits-group-餐厅 · 餐饮')).toBeVisible();
+    await expectFits(page);
+    await page.getByTestId('limits-outlet-water').click();
+    await expect(page.getByTestId('limits-group-水吧 · 调酒')).toBeVisible();
     await expectFits(page);
   },
   'dining-ledger': async (page) => {
