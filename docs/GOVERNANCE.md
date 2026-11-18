@@ -141,6 +141,8 @@ yuzu 的代码本身不乱（重复率 0.78%，没用到的文件 0 个），问
 
 - 2026-11-18：**上面这一条已合并**（[PR #131](https://github.com/Venture-VV/yuzu/pull/131)，合并提交 `6f30821`，不改版本号）：最后一个提交 `ce5ac64` 上 CI 10 项全绿，Codex 代码审查在 `03e11ac`、`ce5ac64` 两个提交上都没有发现问题。`main` 的版本号仍是 8.1.13，这次的改动随下一个版本标签（8.1.14）发；Codex 的限内存复测按 `main` `6f30821fcdfa4ae2745ea4cb895d61413ad10b03` 做。
 
+- 2026-11-18：**升级用例的时限放宽到 2 分钟**（PR #133）。起因是 #131 合并后重开分支的第一次 CI 红了：五个升级用例文件（`upgrade-benefits`、`upgrade-member-discounts`、`upgrade-member-tags`、`upgrade-settlement`、`upgrade-warehouses`）一起超时，而同一份代码同一时间在 `main`（`6f30821`）上全过，20 分钟前在 `ce5ac64` 上也全过。查下来不是这次改动带来的：这类用例在一条用例里重放整条迁移链（现在 154 份），在 CI 上一条要 10–27 秒，离默认的 30 秒本来就只差几秒（通过的那次里 `upgrade-floormap` 用了 27.5 秒）；那一次分到的机器慢（`npm test` 用了 10 分 23 秒，`main` 上是 4 分 31 秒），几个升级用例又排在一起跑，就过线了。迁移每加一份这个余量就少一点，迟早会变成常态，所以不是重跑了事：`tests/setup-timeouts.ts` 按文件名把升级用例放宽到 2 分钟（自己写了时限的照自己的，别的用例还是 30 秒），`tests/upgrade-timeout.test.ts` 核对两份配置都接上了。
+
 ## 8. 治理基线怎么用
 
 `npm run check:gov`（约 5 秒）把现在的数字和 `scripts/governance-baseline.json` 比，**只在变多时不通过**：

@@ -95,3 +95,9 @@ describe('只给应用用的环境变量不带进用例（两档共用）', () =
     }
   });
 });
+
+describe('单条用例的时限', () => {
+  it('普通用例还是 30 秒（升级用例另放宽，见 tests/upgrade-timeout.test.ts）', ({ task }) => {
+    expect(task.timeout).toBe(30_000);
+  });
+});
