@@ -323,6 +323,7 @@
 - 方案、现状实测与进度：[`docs/GOVERNANCE.md`](GOVERNANCE.md)；学习记录与开源工具调研：[`docs/GOVERNANCE_NOTES.md`](GOVERNANCE_NOTES.md)；默认做法 ZL1–ZL5 在 `docs/PENDING_DECISIONS.md` 末尾「工程治理」。
 - 三期：一期文档收拢与护栏（`AGENTS.md` 收成入口、专题文档、文档索引与检查、治理基线、版本号只留一处）；二期代码瘦身与去硬编码；三期测试分层与界面规范。每期一个版本、一个 PR。
 - 由另一个主线开发会话在自己的分支与 PR 上做，与同时在做的功能开发并行；怎么不冲突见 `docs/GOVERNANCE.md` 第 4 节。三期都没有迁移。
+- **2026-11-18 三期都已合并、收口**：一期 v8.1.10（[PR #128](https://github.com/Venture-VV/yuzu/pull/128)，`8a9e41a`）、二期 v8.1.11（[PR #129](https://github.com/Venture-VV/yuzu/pull/129)，`eea99f5`）、三期 v8.1.12（[PR #130](https://github.com/Venture-VV/yuzu/pull/130)，`f00631e`），都是 CI 全绿、Codex 代码审查没有问题后由开发会话合并。留下的事（ZL2、ZL6–ZL8、基线里剩的 2 个导出）在 `docs/GOVERNANCE.md` 第 9 节。功能开发那条线的版本号从 8.1.13 起。
 
 ## 更新记录
 
