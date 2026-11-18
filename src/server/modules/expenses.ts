@@ -62,6 +62,7 @@ import { checkClaimBudget } from './budgets';
 import { resolveClaimInvoice } from './invoices';
 import { INVOICE_ENTRY_METHODS } from '@shared/invoice-recognize';
 import { claimPoolUses, lockPoolUsesForClaim, poolCheck } from './petty-pool';
+import { assertPoContractNotDue } from './inventory/contract-due';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => (cents < 0 ? '-' : '') + formatAmount(Math.abs(cents)).replace(/,/g, '');
@@ -580,6 +581,8 @@ export async function claimPrefill(db: Db, timezone: string, poId: number): Prom
   const full = await poForClaim(db, poId);
   if (full.settlement !== 'cash') throw unprocessable('CREDIT_SUPPLIER', CREDIT_PO_MESSAGE);
   if (full.status !== 'approved' && full.status !== 'closed') throw conflict('PO_NOT_APPROVED', '只能报销已确认或已关闭的采购单');
+  // 8.1.10 急采后补合同（CK22）：补单采购单的急采要补合同、还没补上的不能报销
+  await assertPoContractNotDue(db, poId);
   const { settlement: _s, status: _st, ...po } = full;
   const rules = await loadExpenseRules(db);
   const basis: string[] = [];
@@ -775,6 +778,8 @@ export async function createClaim(deps: Deps, raw: unknown, actor: Actor, ip?: s
         const po = await poForClaim(tx, input.purchaseOrderId);
         if (po.settlement !== 'cash') throw unprocessable('CREDIT_SUPPLIER', CREDIT_PO_MESSAGE);
         if (po.status !== 'approved' && po.status !== 'closed') throw conflict('PO_NOT_APPROVED', '只能报销已确认或已关闭的采购单');
+        // 8.1.10 急采后补合同（CK22）
+        await assertPoContractNotDue(tx, input.purchaseOrderId);
         for (const l of lines) {
           if (!l.poLineId) continue;
           const pl = po.lines.find((x) => x.poLineId === l.poLineId);

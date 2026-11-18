@@ -225,4 +225,6 @@ export interface SupplyTodo {
   /** 临期与过期的批次 */
   expiringLots: number;
   expiredLots: number;
+  /** 急采要补合同、还没补上的（8.1.10，CK19） */
+  contractDue: number;
 }

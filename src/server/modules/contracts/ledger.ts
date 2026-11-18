@@ -400,12 +400,15 @@ export async function orderedQty(db: Db, contractId: number, excludePoId: number
   return new Map(rows.map((r) => [`${r.materialId}|${r.unit}`, Number(r.qty)]));
 }
 
-/** 采购单选合同用（C9）：同一供应商、采购类型、生效中、今天在起止日内 */
-export async function contractOptions(db: Db, today: string, supplierId: number): Promise<ContractOption[]> {
+/**
+ * 采购单选合同用（C9）：同一供应商、采购类型、生效中、今天在起止日内。
+ * backfill（8.1.10 补合同，CK21）：today 传下单日，只要到期日不早于下单日（补签的合同开始日可以晚于下单日）。
+ */
+export async function contractOptions(db: Db, today: string, supplierId: number, opts: { backfill?: boolean } = {}): Promise<ContractOption[]> {
   const rows = await db<{ id: number; contractNo: string; title: string; endDate: string | null }[]>`
     SELECT id, contract_no, title, end_date FROM contracts
     WHERE supplier_id = ${supplierId} AND category = 'purchase' AND status IN ${db(CONTRACT_EFFECTIVE as string[])}
-      AND (start_date IS NULL OR start_date <= ${today}) AND (end_date IS NULL OR end_date >= ${today})
+      ${opts.backfill ? db`` : db`AND (start_date IS NULL OR start_date <= ${today})`} AND (end_date IS NULL OR end_date >= ${today})
     ORDER BY id DESC`;
   const out: ContractOption[] = [];
   for (const r of rows) {
@@ -534,14 +537,19 @@ export async function poContract(
   };
 }
 
-/** 采购单能挂这份合同吗（C9）：同一供应商、采购类型、已签署或已归档、下单日在起止日内 */
-export async function assertContractForPo(db: Db, contractId: number, supplierId: number, orderDate: string): Promise<void> {
+/**
+ * 采购单能挂这份合同吗（C9）：同一供应商、采购类型、已签署或已归档、下单日在起止日内。
+ * backfill（8.1.10 补合同，CK21）：补签的合同开始日可以晚于下单日，只要到期日不早于下单日。
+ */
+export async function assertContractForPo(db: Db, contractId: number, supplierId: number, orderDate: string, opts: { backfill?: boolean } = {}): Promise<void> {
   const [c] = await db<{ contractNo: string; supplierId: number | null; category: ContractCategory; status: ContractStatus; startDate: string | null; endDate: string | null }[]>`
     SELECT contract_no, supplier_id, category, status, start_date, end_date FROM contracts WHERE id = ${contractId}`;
   if (!c) throw unprocessable('CONTRACT_NOT_FOUND', '合同不存在，请刷新后重新选');
   if (c.category !== 'purchase' || Number(c.supplierId) !== supplierId) throw unprocessable('CONTRACT_MISMATCH', `合同 ${c.contractNo} 不是这家供应商的采购合同`);
   if (!CONTRACT_EFFECTIVE.includes(c.status)) throw unprocessable('CONTRACT_NOT_EFFECTIVE', `合同 ${c.contractNo} 不在生效中（已签署或已归档的才能挂）`);
-  if ((c.startDate && orderDate < c.startDate) || (c.endDate && orderDate > c.endDate)) {
+  if (opts.backfill) {
+    if (c.endDate && orderDate > c.endDate) throw unprocessable('CONTRACT_NOT_EFFECTIVE', `合同 ${c.contractNo} 在下单日（${orderDate}）以前就到期了（到 ${c.endDate}）`);
+  } else if ((c.startDate && orderDate < c.startDate) || (c.endDate && orderDate > c.endDate)) {
     throw unprocessable('CONTRACT_NOT_EFFECTIVE', `下单日不在合同 ${c.contractNo} 的起止日内（${c.startDate ?? '—'} 至 ${c.endDate ?? '长期'}）`);
   }
 }

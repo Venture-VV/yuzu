@@ -37,6 +37,7 @@ import { registerRequestImportRoutes } from './modules/request-import';
 import { registerRequestDraftRoutes } from './modules/request-drafts';
 import { registerRequestSheetRoutes } from './modules/request-sheet';
 import { registerPurchasingRoutes } from './modules/inventory/purchasing';
+import { registerUrgentContractRoutes } from './modules/inventory/urgent-contract';
 import { registerPurchaseRulesRoutes } from './modules/inventory/purchase-rules';
 import { registerFileRoutes } from './modules/inventory/files';
 import { registerAttachmentRoutes } from './modules/inventory/attachments';
@@ -310,6 +311,7 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerReportRoutes(app, deps);
   registerDeptStockRoutes(app, deps);
   registerPurchasingRoutes(app, deps);
+  registerUrgentContractRoutes(app, deps);
   registerPurchaseRulesRoutes(app, deps);
   registerFileRoutes(app, deps);
   registerAttachmentRoutes(app, deps);

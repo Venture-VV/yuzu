@@ -48,6 +48,7 @@ import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForA
 import { urgentPlan } from './urgent';
 import { receiptAttachments } from './attachments';
 import { loadSettings } from '../settings';
+import { loadPurchaseRules } from './purchase-rules';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -1235,6 +1236,9 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
         if (doc.amountCents > cap) {
           throw conflict('URGENT_OVER_CAP', `急采合计 ¥${(doc.amountCents / 100).toFixed(2)} 超过现在的上限 ¥${(cap / 100).toFixed(2)}，请退回部门改开采购单`);
         }
+        // 8.1.10 急采后补合同（CK18）：生效时合计达到「急采补合同金额」的记下要补合同；生效时定下，以后改金额线不影响
+        const minCents = (await loadPurchaseRules(tx)).urgentContractMinCents;
+        if (minCents > 0 && doc.amountCents >= minCents) await tx`UPDATE inv_docs SET needs_contract = true WHERE id = ${doc.id}`;
       }
       // 按采购单收货进总仓；急采进部门小仓
       // 成本（8.0.20）：按这一行的金额入库，重算平均成本

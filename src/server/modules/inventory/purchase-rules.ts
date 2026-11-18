@@ -54,6 +54,10 @@ const RulesInput = z
     requestPoDirect: z.boolean(),
     flowStallDays: z.number().int().min(0, '环节超期天数不能为负').max(30, '环节超期天数最多 30 天'),
     deptConfirm: z.enum(DEPT_CONFIRM_RULES, '部门主管确认只能选：不要、估价达到询价门槛的、全部'),
+    stockCheckEnabled: z.boolean(),
+    stockCheckHours: z.number().int().min(1, '核库时限至少 1 小时').max(168, '核库时限最多 168 小时（7 天）'),
+    urgentContractMinCents: z.number().int().min(0, '急采补合同金额不能为负').max(100_000_000, '急采补合同金额不能超过 100 万元'),
+    contractDueDays: z.number().int().min(1, '补合同期限至少 1 天').max(90, '补合同期限最多 90 天'),
     urgentTiers: z
       .array(
         z.object({

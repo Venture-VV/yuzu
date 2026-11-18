@@ -34,6 +34,7 @@ import { checkAllocations, confirmPayment, lockSupplier, openItems, reopenPaidRe
 import { contractReceivedPoIds, poThreeWay, threeWayProblems } from './match';
 import { assertNoAcceptanceHold } from './hold';
 import { contractPlan, requestPaidSql } from './plan';
+import { assertContractNotDue } from '../inventory/contract-due';
 
 const id = z.number().int().positive();
 const yuan = (cents: number) => `¥${formatAmount(cents)}`;
@@ -433,6 +434,8 @@ async function checkPayablesRequest(tx: Tx, supplierId: number, targets: TargetI
   if (underContract[0]) {
     throw unprocessable('RECEIPT_UNDER_CONTRACT', `收货单 ${underContract[0].docNo} 挂在合同 ${underContract[0].contractNo} 下，请从合同的付款计划里按付款节点申请`);
   }
+  // 8.1.10 急采后补合同（CK19）：要补合同、还没补上的急采不能申请付款
+  await assertContractNotDue(tx, receiptIds);
   // 别的没结束的申请占着的（审批中、退回待改、批了没付完的，减去已经付到那一笔上的）
   const reserved = await tx<{ receiptDocId: number | null; openingPayableId: number | null; cents: string }[]>`
     SELECT t.receipt_doc_id, t.opening_payable_id,
