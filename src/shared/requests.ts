@@ -80,24 +80,6 @@ export interface SubstituteAnswerResult {
 export type RequestPriority = 'urgent' | 'normal';
 export const PRIORITY_LABELS: Record<RequestPriority, string> = { urgent: '紧急', normal: '普通' };
 
-/**
- * 待审核的排序（CG02）：紧急在前 → 期望到货日期早的在前（没填的排后）→ 提交早的在前。
- * 需求单「待审核」、审批中心顶部的「需求单待审核」、待转采购单的行都用这个顺序。
- */
-export function reviewOrder(
-  a: { priority: RequestPriority; needBy: string | null; submittedAt: string; id: number },
-  b: { priority: RequestPriority; needBy: string | null; submittedAt: string; id: number },
-): number {
-  if (a.priority !== b.priority) return a.priority === 'urgent' ? -1 : 1;
-  if (a.needBy !== b.needBy) {
-    if (a.needBy === null) return 1;
-    if (b.needBy === null) return -1;
-    return a.needBy < b.needBy ? -1 : 1;
-  }
-  if (a.submittedAt !== b.submittedAt) return a.submittedAt < b.submittedAt ? -1 : 1;
-  return a.id - b.id;
-}
-
 /** 每一行最多挂几张图 */
 export const MAX_LINE_IMAGES = 9;
 /** 压缩后单张图片的上限（字节） */
@@ -281,8 +263,6 @@ export const REQUEST_IMPORT_TITLE = '品牌新增寻款采购清单';
 export const REQUEST_IMPORT_COLUMNS = ['序号', '是否下单', '是否到货', '是否退货', '产品名称', '用途', '采购数量', '备注', '产品详情', '参考链接渠道'] as const;
 /** 必填（表头橙色）；表头按名字认，这两列也认 8.0.1 旧模板的「物品名称」「数量」 */
 export const REQUEST_IMPORT_REQUIRED = ['产品名称', '采购数量'] as const;
-/** 8.0.1 旧模板的列：表里有的照旧认（旧模板填的文件照样能导入） */
-export const REQUEST_IMPORT_LEGACY_COLUMNS = ['申请部门', '申请人', '物品名称', '单位', '数量', '采购优先级', '期望到货日期', '采购途径', '供应商名称'] as const;
 /** 线下跟踪的三列：只能填是、否或空着；标了「是」的行默认不导入（GY15） */
 export const REQUEST_IMPORT_OFFLINE_COLUMNS = ['是否下单', '是否到货', '是否退货'] as const;
 /** 一份文件最多多少行 */

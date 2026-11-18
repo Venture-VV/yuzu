@@ -40,7 +40,7 @@ const CORE_DOCS = ['LOCKING.md', 'COMMANDS.md', 'CONVENTIONS.md', 'TESTING.md', 
 /** 一份文档（docs/ 下的相对路径）归到哪一组 */
 export function classifyDoc(rel) {
   if (rel.startsWith('changelog/')) return 'changelog';
-  if (/^HANDOFF_/.test(rel)) return 'handoff';
+  if (rel.startsWith('HANDOFF_')) return 'handoff';
   if (/^(MINIPROGRAM|MP_|DEPLOY_GATEWAY)/.test(rel)) return 'mp';
   if (/^(DEPLOY_|RELEASE_|TRIAL_RUN|EVALUATION|DEMO_DATA)/.test(rel)) return 'ops';
   if (/^(SCHEDULE_|ERP_FINANCE_LEGAL_PLAN|GOVERNANCE_NOTES)/.test(rel)) return 'plan';
@@ -104,7 +104,7 @@ export function resolveLink(fromFile, target) {
 
 /** 一段文字里写到的 docs 目录下的 .md 路径 */
 export function docRefs(text) {
-  return [...text.matchAll(/(?<![\w./-])docs\/[A-Za-z0-9_.\/-]+\.md\b/g)].map((m) => m[0]);
+  return [...text.matchAll(/(?<![\w./-])docs\/[A-Za-z0-9_./-]+\.md\b/g)].map((m) => m[0]);
 }
 
 /** 路径模式 → 正则：结尾的 / 是整个目录，** 跨目录，* 不跨目录 */

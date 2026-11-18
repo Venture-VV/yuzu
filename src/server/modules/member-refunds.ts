@@ -35,7 +35,7 @@ import type { RefundShiftOptions } from '@shared/checkout';
 import { formatYuan } from '@shared/money';
 import { guard } from '../auth/guard';
 import { consumeMemberRefundGrant } from '../auth/grants';
-import { isUniqueViolation, type Db, type Tx } from '../db';
+import { isUniqueViolation, type Db } from '../db';
 import { writeAudit } from '../lib/audit';
 import { ctxOf, type Deps, type OpContext } from '../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
@@ -548,5 +548,3 @@ export function registerMemberRefundRoutes(app: FastifyInstance, deps: Deps) {
     return getMemberRefund(sql, id);
   });
 }
-
-export type { Tx };

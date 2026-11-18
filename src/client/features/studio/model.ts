@@ -289,9 +289,6 @@ const base = (x: number, y: number, w: number, h: number) => ({ x: round1(x), y:
 type Tokens = StudioSurfaceDef['tokens'];
 const EMENU_TOKENS: Tokens = { text: '$ink', fill: '$tan', panel: '$modal', line: '$mute', button: '$ink' };
 
-/** 手机界面的新节点（屏或框在自动排列时）：大小跟着排 */
-export type FlowHint = 'phone' | null;
-
 export function makeText(x: number, y: number, zh = '双击右边改文字', t: Tokens = EMENU_TOKENS, size = 24): StudioNode {
   return {
     type: 'text',
@@ -436,7 +433,7 @@ export function makeComponentFrom(doc: StudioDoc, screen: string, id: string, su
     component: cid,
     ...(f.node.sizing ? { sizing: f.node.sizing } : {}),
   };
-  const withComp: StudioDoc = { ...doc, components: { ...(doc.components ?? {}), [cid]: { name, node: master } } };
+  const withComp: StudioDoc = { ...doc, components: { ...doc.components, [cid]: { name, node: master } } };
   return { doc: updateNode(withComp, screen, id, () => inst), cid };
 }
 

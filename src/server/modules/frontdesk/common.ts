@@ -21,7 +21,7 @@ export { nextDocNo, setTxTimeouts };
 
 export async function loadFrontdeskRules(db: Db): Promise<FrontdeskRules> {
   const row = await settingRow<Partial<FrontdeskRules>>(db, 'frontdesk_rules');
-  return { ...DEFAULT_FRONTDESK_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_FRONTDESK_RULES, ...row?.value };
 }
 
 /** 前台按会员业务同一套营业日（例如凌晨 6 点切换），跨夜在店的客人归入入场时的营业日 */

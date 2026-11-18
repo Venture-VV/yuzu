@@ -5,7 +5,7 @@ import type { FastifyReply } from 'fastify';
 function escapeCell(value: string | number): string {
   let text = String(value);
   // 防止表格软件把以 = + - @ 开头的文本当作公式执行（金额列除外）
-  if (/^[=+@]/.test(text) || (/^-/.test(text) && !/^-\d/.test(text))) text = `'${text}`;
+  if (/^[=+@]/.test(text) || (text.startsWith('-') && !/^-\d/.test(text))) text = `'${text}`;
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

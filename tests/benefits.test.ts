@@ -34,7 +34,18 @@ const edit = async (code: string, patch: Partial<Benefit>, cookie = ctx.owner) =
   const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, content, conditions } = b;
   return api(ctx.app, cookie, 'PUT', `/api/benefits/${id}`, {
     expectedVersion: version,
-    ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, content, conditions },
+    name,
+    category,
+    startGrade,
+    startTier,
+    period,
+    quantity,
+    tierQuantities,
+    templateId,
+    events,
+    festivalDates,
+    content,
+    conditions,
     ...patch,
   });
 };

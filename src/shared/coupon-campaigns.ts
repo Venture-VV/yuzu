@@ -35,7 +35,6 @@ export type CampaignStatus = 'issuing' | 'done';
 export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = { issuing: '发放中', done: '已发完' };
 
 export type SmsStatus = 'pending' | 'sent' | 'failed' | 'cancelled';
-export const SMS_STATUS_LABELS: Record<SmsStatus, string> = { pending: '待发', sent: '已发', failed: '发送失败', cancelled: '已取消' };
 
 export interface CouponCampaign {
   id: number;

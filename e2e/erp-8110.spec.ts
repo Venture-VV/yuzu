@@ -1,4 +1,4 @@
-// 8.1.11 ERP 采购（原排 8.1.10，docs/ERP_V8110.md）的浏览器验收：
+// 8.1.12 ERP 采购（原排 8.1.10，docs/ERP_V8110.md）的浏览器验收：
 //   ① 采购规则里有四项新设置（提需核库、核库时限、急采补合同金额、补合同期限）；
 //   ② 核库转领用：店主替一个部门提需求单（两样总仓有货的物料）→「需求单 → 待核库」里点开 →「核库」：第 1 行只领一部分，
 //      第 2 行提议替代品 → 等部门确认替代 → 同意替代 → 进采购审核、通过 → 待转采购单里第 1 行写着已领多少、还要买多少；
@@ -25,7 +25,7 @@ async function json<T>(page: Page, method: 'get' | 'post' | 'put', url: string, 
   return (await res.json()) as T;
 }
 
-test.describe('8.1.11 ERP 采购', () => {
+test.describe('8.1.12 ERP 采购', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会登记单据的流程只在门店电脑尺寸执行一次');
 
   test('采购规则有四项新设置；急采「待补合同」一栏打得开', async ({ page }) => {

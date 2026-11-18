@@ -73,48 +73,6 @@ function Summary({ member: m }: { member: NativeMemberSummary }) {
   );
 }
 
-export function SystemMemberResults({ query, onOpen, onCreate }: { query: string; onOpen: (id: string) => void; onCreate: (m: NativeMemberSummary) => void }) {
-  const lookup = useMembers(query);
-  return (
-    <section className="panel native-member-search" aria-label="系统会员查询">
-      <div className="panel-heading">
-        <div>
-          <h2>系统会员 · 前台统一建档</h2>
-          <p>{query ? '与会员工作台使用同一查找规则。' : '显示近期系统会员；输入姓名、手机号、会员号或刷实体卡可查找。'}</p>
-        </div>
-        <button type="button" className="btn btn-secondary small-btn" onClick={lookup.refresh}>
-          刷新系统会员
-        </button>
-      </div>
-      {lookup.error && (
-        <p role="alert" className="orange-text">
-          {lookup.error}
-        </p>
-      )}
-      {!lookup.error && lookup.loading && !lookup.data.length && <p role="status">正在查找系统会员…</p>}
-      {!lookup.loading && !lookup.error && !lookup.data.length && <p>没有匹配的系统会员，请先由前台核对或办理。</p>}
-      {lookup.data.map((m) => (
-        <div key={m.id} className="native-member-row">
-          <Summary member={m} />
-          <span className="native-member-actions">
-            {m.profiles.length ? (
-              m.profiles.map((p) => (
-                <button type="button" className="btn btn-secondary small-btn" key={p.id} onClick={() => onOpen(p.id)}>
-                  打开服务档案 {p.code}
-                </button>
-              ))
-            ) : (
-              <button type="button" className="btn btn-primary small-btn" disabled={m.status !== 'active'} onClick={() => onCreate(m)}>
-                建立服务档案
-              </button>
-            )}
-          </span>
-        </div>
-      ))}
-    </section>
-  );
-}
-
 export function MemberIdentityFields({ member, initialNative }: { member?: Member; initialNative?: NativeMemberSummary }) {
   const can = useCan();
   const [native, setNative] = useState<NativeMemberSummary | null>(initialNative || member?.nativeMember || null);

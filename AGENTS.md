@@ -42,7 +42,7 @@
 
 - 快测：`npx vitest run tests/{target}.test.ts`
 - 重测：`E2E_BASE_URL=http://127.0.0.1:<端口> npx playwright test e2e/{target}.spec.ts --project=门店电脑`
-- 门禁：`npm run typecheck && npm run check:code && npm run check:docs && npm run check:gov && npm run format:check && npm test && npm run build`
+- 门禁：`npm run lint && npm run typecheck && npm run check:code && npm run check:docs && npm run check:gov && npm run format:check && npm test && npm run build && npm run check:bundle`
 - 高风险：`src/server/migrations/`、`src/server/modules/wallet*.ts`、`src/server/modules/frontdesk/**`、`src/server/modules/shifts.ts`、`src/server/modules/settlement.ts`、`src/server/auth/**`、`src/server/lib/idempotency.ts`、`src/server/lib/fences.ts`、`src/shared/permissions.ts`、`src/shared/money.ts`、`src/shared/deduction.ts`、`scripts/*.sh`、`.github/workflows/**`
 - 禁改：`miniprogram/`、`src/gateway/`、`src/server/modules/mp/`、`src/client/features/mp/`、`src/shared/mp.ts`、`src/client/public/concierge/ocr/`
 
@@ -51,7 +51,7 @@
 ## 常用命令
 
 ```bash
-npm run typecheck && npm run check:code && npm run format:check   # 写完先过这三样；排版没过跑 npm run format
+npm run lint && npm run typecheck && npm run check:code && npm run format:check   # 写完先过这四样（lint 一秒内）；排版没过跑 npm run format
 npm run check:docs && npm run check:gov                           # 文档检查与治理基线（CI 跑；docs/GOVERNANCE.md）
 npx vitest run tests/<相关的>.test.ts                              # 快测：TEST_DATABASE_URL 指向独立测试库
 npm test && npm run build                                         # 交 PR 前：全量集成测试（按文件并行，要建库权限；TEST_WORKERS=1 单库串行）与构建

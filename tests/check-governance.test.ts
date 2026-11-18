@@ -2,6 +2,8 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error 脚本是 .mjs，没有类型声明
 import * as gov from '../scripts/check-governance.mjs';
+// @ts-expect-error 脚本是 .mjs，没有类型声明
+import * as bundle from '../scripts/check-bundle.mjs';
 
 interface Numbers {
   hexColors: Record<string, number>;
@@ -92,5 +94,19 @@ describe('与基线比', () => {
   it('收紧基线时发现会放宽的地方', () => {
     expect(loosened(BASE, { ...BASE, hexColors: { 'src/client/features/rooms': 1 }, deadExports: [] })).toEqual([]);
     expect(loosened(BASE, { ...BASE, hexColors: { 'src/client/features/rooms': 3 }, fontSizes: ['12', '13', '15'] })).toEqual(['颜色 src/client/features/rooms：2 → 3', 'fontSizes 新增 15']);
+  });
+});
+
+describe('打包体积', () => {
+  const { bundleProblem, entryScripts } = bundle as { bundleProblem: (entryKb: number, maxKb: number) => string | null; entryScripts: (html: string) => string[] };
+
+  it('认出 index.html 直接引的入口脚本（样式表、预加载的不算）', () => {
+    const html = '<link rel="stylesheet" href="/assets/index-a.css"><link rel="modulepreload" href="/assets/vendor-b.js"><script type="module" crossorigin src="/assets/index-c.js"></script>';
+    expect(entryScripts(html)).toEqual(['assets/index-c.js']);
+  });
+
+  it('刚好在上限里通过，超了报出来', () => {
+    expect(bundleProblem(900, 900)).toBeNull();
+    expect(bundleProblem(901, 900)).toContain('901 KB');
   });
 });

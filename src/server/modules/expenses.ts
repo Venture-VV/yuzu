@@ -115,7 +115,7 @@ const RulesInput = z.object({
 
 export async function loadExpenseRules(db: Db): Promise<ExpenseRules> {
   const [row] = await db<{ value: Partial<ExpenseRules> }[]>`SELECT value FROM settings WHERE key = 'expense_rules'`;
-  return { ...DEFAULT_EXPENSE_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_EXPENSE_RULES, ...row?.value };
 }
 
 // ───────────────────────── 平账 ─────────────────────────

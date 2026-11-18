@@ -88,7 +88,6 @@ export const BENEFIT_STATUS_LABELS: Record<BenefitStatus, string> = { draft: '�
 /** 发放记录的原因：每期发放、当场补发、事件礼 */
 export const BENEFIT_GRANT_REASONS = ['monthly', 'top_up', 'event'] as const;
 export type BenefitGrantReason = (typeof BENEFIT_GRANT_REASONS)[number];
-export const BENEFIT_GRANT_REASON_LABELS: Record<BenefitGrantReason, string> = { monthly: '每期发放', top_up: '当场补发', event: '事件礼' };
 
 /** 券类、事件礼每期（每次）最多几张（与手动发券一样）；服务类每期最多几次 */
 export const MAX_BENEFIT_COUPONS = 10;

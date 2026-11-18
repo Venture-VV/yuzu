@@ -115,6 +115,7 @@
 - [`HANDOFF_G2_BATCH2.md`](HANDOFF_G2_BATCH2.md)：G2 · Batch 2 收口提测交接（2.1 – 2.4d）
 - [`HANDOFF_G3.md`](HANDOFF_G3.md)：G3 提测交接 · S3 收银结账、门票跳档、团购防重、交班与双口径日结（G3A / G3B）
 - [`HANDOFF_GOV1.md`](HANDOFF_GOV1.md)：工程治理一期 交接说明 · 文档收拢与护栏
+- [`HANDOFF_GOV2.md`](HANDOFF_GOV2.md)：工程治理二期 交接说明 · 代码瘦身与代码规范
 - [`HANDOFF_GR1.md`](HANDOFF_GR1.md)：G-R1 提测交接 · R1.2 资金轨：先开班、优惠 / 免单与降档授权、反结账口径与时限（v0.4.0）
 - [`HANDOFF_MP1.md`](HANDOFF_MP1.md)：小程序第一期交接 · MP1：yuzu 小程序端口与接口、后台「微信小程序」、小程序网关、小程序页面
 - [`HANDOFF_MP2A.md`](HANDOFF_MP2A.md)：交接：小程序第二期 2a 线上充值、2b 对账（小程序线）
@@ -183,7 +184,7 @@
 - [`HANDOFF_V808.md`](HANDOFF_V808.md)：v8.0.8 交接说明 · 前台整改（钟房、收银、派对房、预约、餐饮、客房）
 - [`HANDOFF_V809.md`](HANDOFF_V809.md)：v8.0.9 交接说明 · 安保巡场与员工工作台
 - [`HANDOFF_V811.md`](HANDOFF_V811.md)：v8.1.1 交接说明 · AI 辅助换 DeepSeek、UI 工作台第一步（平板电子菜单）
-- [`HANDOFF_V8110.md`](HANDOFF_V8110.md)：v8.1.11 交接说明 · 核库转领用、急采后补合同
+- [`HANDOFF_V8110.md`](HANDOFF_V8110.md)：v8.1.12 交接说明 · 核库转领用、急采后补合同
 - [`HANDOFF_V812.md`](HANDOFF_V812.md)：v8.1.2 交接说明 · UI 工作台第二步（卡片模板、组件与变体、员工食堂、给小程序线的格式、定时发布与批注）
 - [`HANDOFF_V813.md`](HANDOFF_V813.md)：v8.1.3 交接说明 · 代码整洁与网络波动防护
 - [`HANDOFF_V814.md`](HANDOFF_V814.md)：v8.1.4 交接说明 · 老浏览器上侧栏划不动、工作台开在哪一档

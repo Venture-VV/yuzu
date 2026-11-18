@@ -32,4 +32,3 @@ export interface ClientErrorRecord {
  * BUSY：等锁超时、语句超时、死锁、串行化冲突；RATE_LIMITED：请求太频繁；OVERLOADED：系统正忙（过载保护）。
  */
 export const NOT_APPLIED_CODES = ['BUSY', 'RATE_LIMITED', 'OVERLOADED'] as const;
-export type NotAppliedCode = (typeof NOT_APPLIED_CODES)[number];

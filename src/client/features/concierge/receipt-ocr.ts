@@ -241,12 +241,12 @@ function parseItems(section: string[]): NonNullable<ReceiptOcrResult['items']> {
       if (!fullName || !/[\u3400-\u9fffA-Za-z]/.test(fullName)) continue;
       items.push({
         name: fullName,
-        quantity: quantity?.[1]! || '',
+        quantity: quantity?.[1] || '',
         ...(money ? { amount: money[1]!.replace(/,/g, '') } : {}),
         ...(price ? { unitPrice: price[1]!.replace(/,/g, '') } : {}),
         rawText,
       });
-    } else if (items.length && (/^(?:限|仅限|仅供|堂食|外带)/.test(line) || /仅$/.test(items[items.length - 1]!.name))) {
+    } else if (items.length && (/^(?:限|仅限|仅供|堂食|外带)/.test(line) || items[items.length - 1]!.name.endsWith('仅'))) {
       const previous = items[items.length - 1]!;
       previous.name += line;
       previous.rawText += `\n${source}`;
@@ -352,12 +352,12 @@ export function mergeReceiptPasses(passes: string[]): ReceiptOcrResult {
     if (new Set(values).size > 1) result.warnings!.push(`${{ number: '单号', store: '门店', occurredAt: '时间', amount: '结算金额' }[key]!}在不同识别轮次中不一致，请对照原图核对。`);
   }
   for (const key of ['subtotal', 'due', 'rounding', 'paid'] as const) {
-    const values = parsed.map((page) => page.totals?.[key]!).filter((value): value is string => !!value);
+    const values = parsed.map((page) => page.totals?.[key]).filter((value): value is string => !!value);
     result.totals![key] = values[0]!;
     if (new Set(values).size > 1) result.warnings!.push(`${{ subtotal: '小计', due: '应付金额', rounding: '抹零金额', paid: '实付金额' }[key]!}存在多个识别候选，请核对原图。`);
   }
   for (const key of ['cashier', 'shift', 'wristbands', 'partySize', 'printCount', 'printedAt', 'printedBy', 'coupons'] as const)
-    result.details![key] = parsed.map((page) => page.details?.[key]!).find(Boolean);
+    result.details![key] = parsed.map((page) => page.details?.[key]).find(Boolean);
   result.amount = result.totals?.paid || result.amount;
   result.payments = parsed.map((page) => page.payments).find((payments) => payments?.length);
   return result;
@@ -1041,8 +1041,8 @@ export async function runReceiptOcr(files: File[], onProgress: (progress: number
     const parsed = parseReceiptText(rawText);
     for (const key of ['number', 'store', 'occurredAt', 'amount'] as const) parsed[key] = unique(pageResults.flatMap((page) => (page[key]! ? [page[key]!] : [])));
     parsed.totals = {};
-    for (const key of ['subtotal', 'due', 'rounding', 'paid'] as const) parsed.totals[key] = unique(pageResults.flatMap((page) => (page.totals?.[key]! ? [page.totals[key]!] : [])));
-    parsed.details = pageResults[0]!?.details;
+    for (const key of ['subtotal', 'due', 'rounding', 'paid'] as const) parsed.totals[key] = unique(pageResults.flatMap((page) => (page.totals?.[key] ? [page.totals[key]!] : [])));
+    parsed.details = pageResults[0]?.details;
     parsed.payments = pageResults.map((page) => page.payments).find((payments) => payments?.length);
     parsed.warnings = pageResults.flatMap((page) => page.warnings || []);
     if (tableItems.length) {

@@ -32,7 +32,7 @@ async function versions(db: Db): Promise<VersionRow[]> {
     FROM commission_rule_versions v LEFT JOIN staff s ON s.id = v.created_by ORDER BY v.effective_at, v.id`;
 }
 
-const normalize = (r: Partial<CommissionRules> | null | undefined): CommissionRules => ({ ...DEFAULT_COMMISSION_RULES, ...(r ?? {}), items: { ...(r?.items ?? {}) } });
+const normalize = (r: Partial<CommissionRules> | null | undefined): CommissionRules => ({ ...DEFAULT_COMMISSION_RULES, ...r, items: { ...r?.items } });
 
 /** 某一时刻有效的规则：最后一个生效时间不晚于它的版本；还没有保存过任何版本时为默认规则 */
 export function rulesAt(list: VersionRow[], at: Date): { rules: CommissionRules; versionId: number | null } {

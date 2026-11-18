@@ -12,9 +12,6 @@ import { useId, type ReactNode } from 'react';
 export type Mood = 'happy' | 'yum' | 'sleepy' | 'oops' | 'wink' | 'worried' | 'love';
 export type Pose = 'rest' | 'wave' | 'bowl' | 'point' | 'scratch' | 'cheer';
 
-export const MOODS: readonly Mood[] = ['happy', 'yum', 'sleepy', 'oops', 'wink', 'worried', 'love'];
-export const POSES: readonly Pose[] = ['rest', 'wave', 'bowl', 'point', 'scratch', 'cheer'];
-
 // 颜色照汤崎品牌书（店主 11-06 给的飞书文件）：描线用深胡桃（不用纯黑），浴衣是麻的米白、木色的阴影；
 // 前掛け用 Organic 绿（「食」）、汤巾的条纹用 Relax 蓝（「疗」）、柚子用柔和的 Pure 黄（「清新的柑橘」）。
 const C = {

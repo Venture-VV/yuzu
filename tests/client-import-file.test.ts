@@ -2,7 +2,7 @@
 // 中文 Excel / WPS「另存为 CSV」默认 GBK，OTA 原来一律按 UTF-8 读，表头成了乱码、必须有的列一个都认不出来；
 // .xlsx 原样转 base64 交给服务端；识别不了、有乱码的报错，不照常导入。
 import { describe, expect, it } from 'vitest';
-import { readTablePayload } from '../src/client/lib/import-file';
+import { loadTableFile, readTablePayload } from '../src/client/lib/import-file';
 import { detectOtaColumns, otaColumnProblem } from '../src/shared/ota';
 import { FileEncodingError } from '../src/shared/text-decode';
 
@@ -34,5 +34,23 @@ describe('导入用的表格文件', () => {
 
   it('既不是 UTF-8 也不是 GBK：报错，不照常导入', async () => {
     await expect(readTablePayload(new File([Uint8Array.from([0x41, 0xff, 0xfe, 0x42])], 'a.csv'))).rejects.toThrow(FileEncodingError);
+  });
+});
+
+// 五个导入页（空间台账、货款期初、库管入库台账、部门表格、集采清单）共用的读法（工程治理二期：原来各写一份）
+describe('导入页选的表格文件', () => {
+  it('.xlsx 转 base64、标 Excel；CSV 读成文字并标出编码', async () => {
+    const xlsx = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x10]);
+    expect(await loadTableFile(new File([xlsx], '台账.XLSX'))).toEqual({ fileName: '台账.XLSX', xlsxBase64: Buffer.from(xlsx).toString('base64'), encoding: 'Excel' });
+    expect(await loadTableFile(new File([new TextEncoder().encode(TEXT)], 'a.csv'))).toEqual({ fileName: 'a.csv', csv: TEXT, encoding: 'UTF-8' });
+    expect(await loadTableFile(new File([GBK_ORDERS], '订单.CSV'))).toEqual({ fileName: '订单.CSV', csv: TEXT, encoding: 'GBK' });
+    // 没有 .csv 后缀、浏览器认出是 CSV 的也收
+    expect((await loadTableFile(new File([new TextEncoder().encode(TEXT)], '导出', { type: 'text/csv' }))).encoding).toBe('UTF-8');
+  });
+
+  it('别的格式（老版本的 .xls、图片）报错并写明该怎么办；乱码的 CSV 报错', async () => {
+    await expect(loadTableFile(new File([Uint8Array.from([1, 2, 3])], '台账.xls'))).rejects.toThrow('老版本的 .xls 请另存为 .xlsx 或 CSV');
+    await expect(loadTableFile(new File([Uint8Array.from([1, 2, 3])], '截图.png', { type: 'image/png' }))).rejects.toThrow('只能导入 Excel（.xlsx）或 CSV（.csv）文件');
+    await expect(loadTableFile(new File([Uint8Array.from([0x41, 0xff, 0xfe, 0x42])], 'a.csv'))).rejects.toThrow(FileEncodingError);
   });
 });

@@ -559,7 +559,7 @@ function ImportDialog({ open, accounts, onClose }: { open: boolean; accounts: Ba
                     className="h-8 text-[12.5px]"
                     disabled={busy}
                     onChange={(e) => {
-                      const next = { ...(map ?? {}), [f]: e.target.value || undefined };
+                      const next = { ...map, [f]: e.target.value || undefined };
                       setMap(next);
                       void runPreview(file, next);
                     }}

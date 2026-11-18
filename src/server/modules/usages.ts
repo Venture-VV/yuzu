@@ -53,7 +53,7 @@ import { currentStoreId } from '../lib/store-context';
 
 export async function loadUsageRules(db: Db): Promise<UsageRules> {
   const row = await settingRow<Partial<UsageRules>>(db, 'usage_rules');
-  const v = { ...DEFAULT_USAGE_RULES, ...(row?.value ?? {}) };
+  const v = { ...DEFAULT_USAGE_RULES, ...row?.value };
   return { businessTypes: v.businessTypes, pricing: v.pricing ?? {} };
 }
 

@@ -125,7 +125,6 @@ const VoidsQuery = z.object({
   outlet: z.enum(DINING_OUTLET_KEYS).optional(),
   groups: commaList,
 });
-export type DishVoidsQuery = z.output<typeof VoidsQuery>;
 
 /** 筛选条件写进导出的文件名：「-水吧」「-水吧（糖水、调酒）」 */
 const slotSuffix = (outlet: DiningOutlet | undefined, groups: string[]) => (outlet ? `-${DINING_OUTLET_LABELS[outlet]}${groups.length ? `（${groups.join('、')}）` : ''}` : '');

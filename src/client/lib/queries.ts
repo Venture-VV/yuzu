@@ -72,13 +72,6 @@ export const useMember = (id: number | null) =>
     enabled: !!id,
   });
 
-export const useActivity = (id: number | null) =>
-  useQuery({
-    queryKey: qk.activity(id ?? 0),
-    queryFn: () => api.get<LedgerRow[]>(`/api/members/${id}/activity`),
-    enabled: !!id,
-  });
-
 export const useCatalog = (all = false) =>
   useQuery({
     queryKey: qk.catalog(all),

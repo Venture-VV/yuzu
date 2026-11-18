@@ -30,7 +30,7 @@ const RulesInput = z.object({ enabled: z.boolean('请选择开还是关'), time:
 
 export async function loadAutoReplenish(db: Db): Promise<AutoReplenishRules> {
   const [row] = await db<{ value: Partial<AutoReplenishRules> }[]>`SELECT value FROM settings WHERE key = ${KEY}`;
-  return { ...DEFAULT_AUTO_REPLENISH, ...(row?.value ?? {}) };
+  return { ...DEFAULT_AUTO_REPLENISH, ...row?.value };
 }
 
 export interface AutoReplenishRun {

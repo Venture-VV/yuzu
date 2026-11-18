@@ -190,7 +190,7 @@ export function reviewReceipt(receipt: Partial<Receipt>, catalog: readonly Catal
     ['store', '门店'],
     ['number', '收银单号'],
   ] as const)
-    if (!receipt[key]!?.trim()) add('header', key, `请补齐${label}。`, receipt[key]! ?? null, undefined, true);
+    if (!receipt[key]?.trim()) add('header', key, `请补齐${label}。`, receipt[key]! ?? null, undefined, true);
   if (!receipt.occurredAt || !Number.isFinite(Date.parse(receipt.occurredAt))) add('header', 'occurredAt', '请补齐有效消费发生时间。', receipt.occurredAt ?? null, undefined, true);
   if (!receipt.uploadIds?.length) add('header', 'source-image', '请附原始小票图片。', receipt.uploadIds || [], undefined, true);
   if (receipt.kind && receipt.kind !== '结算单') add('header', 'unsettled-kind', '仅结算单可确认消费；其他凭证请保留待核状态。', receipt.kind, undefined, true);

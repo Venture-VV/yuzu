@@ -392,7 +392,7 @@ export async function loadMemberInsights(db: Db, timezone: string, rawQuery: unk
 export async function loadInsightMembersByIds(db: Db, timezone: string, ids: number[], at = new Date()): Promise<Map<number, InsightMember>> {
   const result = new Map<number, InsightMember>();
   const canonical = await canonicalMemberIds(db, ids);
-  const wanted = [...new Set([...canonical.values()])];
+  const wanted = [...new Set(canonical.values())];
   if (!wanted.length) return result;
   const rows = await nativeRows(db, timezone, at, wanted);
   const calendar = await readInsightCalendar(db, timezone, at);

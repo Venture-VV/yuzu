@@ -51,7 +51,7 @@ import { currentStoreId } from '../lib/store-context';
 
 export async function loadLocationRules(db: Db): Promise<LocationRules> {
   const row = await settingRow<Partial<LocationRules>>(db, 'location_rules');
-  return { ...DEFAULT_LOCATION_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_LOCATION_RULES, ...row?.value };
 }
 
 // ───────────────────────── 地方 ─────────────────────────

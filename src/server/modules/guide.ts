@@ -49,7 +49,7 @@ import { currentStoreId } from '../lib/store-context';
 
 export async function loadGuideRules(db: Db): Promise<GuideRules> {
   const row = await settingRow<Partial<GuideRules>>(db, 'guide_rules');
-  return { ...DEFAULT_GUIDE_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_GUIDE_RULES, ...row?.value };
 }
 
 const RulesInput = z.object({
