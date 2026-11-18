@@ -1798,7 +1798,7 @@ function CountFillMenu({ materials, taken, onAdd }: { materials: Material[]; tak
 
 function DoneView({ scope, type, doc, replayed, onAgain }: { scope: FormScope; type: InvDocType; doc: InvDoc; replayed: boolean; onAgain: () => void }) {
   const navigate = useNavigate();
-  const meta = doc.urgent ? { ...INV_DOC_META[type], title: '急采' } : INV_DOC_META[type];
+  const meta = doc.urgent ? { ...INV_DOC_META[type], title: '急采' } : doc.direct ? { ...INV_DOC_META[type], title: '库管入库' } : INV_DOC_META[type];
   const effective = doc.status === 'confirmed';
   return (
     <>
