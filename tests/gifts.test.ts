@@ -12,7 +12,7 @@ import type { CheckoutCouponOption, CouponTemplate } from '../src/shared/coupons
 import type { GiftAuthorizer, GiftIssueResult, GiftLedger, GiftRules, GiftType } from '../src/shared/gifts';
 import { shiftDate } from '../src/shared/labels';
 import type { Actor, Deps } from '../src/server/lib/context';
-import { issueGift } from '../src/server/modules/gifts';
+import { giftLedgerCsv, issueGift } from '../src/server/modules/gifts';
 import { createStaff } from '../src/server/modules/staff';
 import { api, createMember, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -178,6 +178,37 @@ describe('签赠发放', () => {
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/gifts/rules', { ...rules, enabled: true })).status).toBe(200);
   });
 
+  it('合并会员时同时签赠：发放等合并锁住的会员一行，合并提交后拒绝，券不会落到合并掉的会员名下（Codex 审查 cf81873）', async () => {
+    const source = await createMember(ctx, '签赠并发来源');
+    const target = await createMember(ctx, '签赠并发目标');
+    const other = await ctx.sql.reserve();
+    try {
+      const [me] = await other<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+      // 合并：先锁住两位会员一行，核对来源没有能用的券（这时还没有）……
+      await other`BEGIN`;
+      await other`SELECT id FROM members WHERE id IN ${other([source.id, target.id])} ORDER BY id FOR UPDATE`;
+      const pending = issue({ memberId: source.id, templateId: types.rub!.id });
+      let waiting = false;
+      for (let i = 0; i < 200 && !waiting; i++) {
+        const [w] = await ctx.sql<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> ${me!.pid}`;
+        waiting = w!.n > 0;
+        if (!waiting) await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(waiting, '发放应等合并锁住的会员一行').toBe(true);
+      // ……合并写完、提交（与 mergeMember 对来源会员写的一样）
+      await other`UPDATE members SET status = 'frozen', merged_into_id = ${target.id}, updated_at = now() WHERE id = ${source.id}`;
+      await other`COMMIT`;
+      const r = await pending;
+      expect(r.body.error?.code, JSON.stringify(r.body)).toBe('MEMBER_MERGED');
+      expect((await ctx.sql`SELECT 1 FROM coupons WHERE member_id = ${source.id}`).length).toBe(0);
+    } finally {
+      other.release();
+      // 这位是用例里直接改成合并的（没有合并记录），改回来，不影响后面的自检
+      await ctx.sql`UPDATE members SET status = 'active', merged_into_id = NULL WHERE id = ${source.id}`;
+    }
+  });
+
   it('普通发券、无记名、发券规则、批量发券都不能用签赠类型；数据库触发器兜底', async () => {
     const t = types.rub!.id;
     expect((await api(ctx.app, am, 'POST', `/api/members/${memberId}/coupons`, { clientKey: randomUUID(), templateId: t, quantity: 1, reason: '普通发' })).body.error.code).toBe('GIFT_TEMPLATE');
@@ -308,6 +339,18 @@ describe('签赠台账', () => {
     expect(csv.status).toBe(200);
     expect(String(csv.body)).toContain('签赠搓澡券');
     expect((await api(ctx.app, butler, 'GET', `/api/gifts/ledger/export?from=${today}&to=${today}`)).status).toBe(403);
+  });
+
+  it('导出一次有上限：超过整份拒绝（EXPORT_TOO_LARGE），不悄悄截掉早的（Codex 审查 cf81873）', async () => {
+    const actor = { id: ctx.ownerId, username: 'owner', displayName: '店主', role: 'owner', duties: [], mustChangePassword: false } as Actor;
+    const f = { from: shiftDate(today, -30), to: today };
+    const n = (await ledger()).totals.issued;
+    expect(n).toBeGreaterThan(1);
+    // 上限正好是张数：整份导出，一张不少（表头 + n 行）
+    const csv = await giftLedgerCsv(ctx.sql, f, today, actor, n);
+    expect(csv.trim().split('\r\n')).toHaveLength(n + 1);
+    // 上限比张数少一张：整份拒绝，请缩短日期范围
+    await expect(giftLedgerCsv(ctx.sql, f, today, actor, n - 1)).rejects.toMatchObject({ code: 'EXPORT_TOO_LARGE' });
   });
 
   it('新建类型的结果待确认：查回、确认作废后不会再建', async () => {

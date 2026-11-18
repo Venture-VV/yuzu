@@ -245,7 +245,10 @@ export async function issueGift(deps: Deps, raw: unknown, ctx: OpContext): Promi
       const rules = await loadGiftRules(tx);
       if (!rules.enabled) throw unprocessable('GIFT_OFF', '签赠已在后台「签赠 → 配置」里关掉，不能再发；已发的照常能用');
       if (!rules.channels.includes(input.channel)) throw badRequest(`发放渠道「${input.channel}」不在配置的选项里，请刷新后重选`, { field: 'channel' });
-      const [m] = await tx<{ name: string; status: string; mergedIntoId: number | null }[]>`SELECT name, status, merged_into_id FROM members WHERE id = ${input.memberId}`;
+      // 会员一行（FOR UPDATE，与停用、合并串行；锁住以后再核对）→ 模板（共享锁），与小程序领取同一个顺序。
+      // 不锁的话，合并可以在这里读完之后、写券之前核对「来源没有能用的券」并提交，券就发到了合并掉的会员名下（Codex 审查 cf81873）
+      const [m] = await tx<{ name: string; status: string; mergedIntoId: number | null }[]>`
+        SELECT name, status, merged_into_id FROM members WHERE id = ${input.memberId} FOR UPDATE`;
       if (!m) throw notFound('会员不存在');
       if (m.mergedIntoId !== null) throw unprocessable('MEMBER_MERGED', `会员「${m.name}」已合并到另一位会员，请发给合并后的那位`);
       if (m.status !== 'active') throw unprocessable('MEMBER_FROZEN', `会员「${m.name}」已停用，不能发签赠`);
@@ -317,7 +320,7 @@ const LedgerQuery = z.object({
   memberId: optId,
   status: z.preprocess((v) => (v === '' ? undefined : v), z.enum(['available', 'used', 'voided', 'expired']).optional()),
 });
-type LedgerFilter = z.infer<typeof LedgerQuery>;
+export type LedgerFilter = z.infer<typeof LedgerQuery>;
 
 function ledgerFilter(raw: unknown): LedgerFilter {
   const q = parse(LedgerQuery, raw);
@@ -490,8 +493,14 @@ export async function giftLedger(db: Db, f: LedgerFilter, today: string): Promis
   };
 }
 
-async function ledgerCsv(db: Db, f: LedgerFilter, today: string, actor: Actor): Promise<string> {
-  const rows = maskCustomerPhones(await ledgerRows(db, f, today, EXPORT_LIMIT), actor);
+/**
+ * 导出明细。一次最多 EXPORT_LIMIT 张：多取一张，超过就整份拒绝、请缩短日期范围（与零采备用金的导出一样），
+ * 不悄悄截掉早的那些——否则导出的少了、与台账上的合计对不上（Codex 审查 cf81873）。limit 只给用例换小。
+ */
+export async function giftLedgerCsv(db: Db, f: LedgerFilter, today: string, actor: Actor, limit = EXPORT_LIMIT): Promise<string> {
+  const all = await ledgerRows(db, f, today, limit + 1);
+  if (all.length > limit) throw unprocessable('EXPORT_TOO_LARGE', `一次最多导出 ${limit} 张，请缩短日期范围，或按授权人、渠道、券种筛选后再导`);
+  const rows = maskCustomerPhones(all, actor);
   return toCsv([
     ['券码', '券种', '板块', '会员', '手机号', '授权人', '经办', '渠道', '事由', '发放单号', '发放日期', '有效期到', '状态', '核销结账单', '核销时间', '核销经办', '抵扣（元）', '作废原因'],
     ...rows.map((r) => [
@@ -587,7 +596,7 @@ export function registerSignGiftRoutes(app: FastifyInstance, deps: Deps) {
     // 导出整份名单：维护签赠、管家部导出、客户部管理的人（只看台账的不能导）
     if (!can(req.actor, 'gift.manage') && !can(req.actor, 'concierge.export') && !can(req.actor, 'customer.manage')) throw forbidden('没有导出签赠台账的权限');
     const d = await today();
-    const csv = await readSnapshot(sql, (tx) => ledgerCsv(tx, f, d, req.actor));
+    const csv = await readSnapshot(sql, (tx) => giftLedgerCsv(tx, f, d, req.actor));
     return csvReply(reply, `签赠台账-${f.from}至${f.to}.csv`, csv);
   });
 }
