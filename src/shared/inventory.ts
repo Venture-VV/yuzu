@@ -472,6 +472,8 @@ export interface ApprovalLog {
 export interface InvDoc {
   id: number;
   docNo: string;
+  /** 急采要补合同、还没补上时的期限（8.1.10，CK19）：只在详情接口里有 */
+  contractDue?: { dueOn: string; daysLeft: number } | null;
   docType: InvDocType;
   status: InvDocStatus;
   docDate: string;

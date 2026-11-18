@@ -21,6 +21,7 @@ import { Qty, SimRule } from '../inventory/parts';
 import { CompareChip, PoStatusChip, ReceivingChip } from './parts';
 import { PurchaseFlowPanel } from './PurchaseFlow';
 import { PoSupplierCard } from './SupplierLinks';
+import { BackfillContract } from './BackfillContract';
 import { useInvalidateAll, usePo } from './queries';
 import { ThreeWayBadge } from '../payments/parts';
 import { usePoThreeWay } from '../payments/queries';
@@ -139,6 +140,8 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
             已入库并计入货款；本单确认后只建立关联，不再入库或形成应付。
           </Notice>
         )}
+        {/* 8.1.10 急采后补合同（CK19–CK21）：补单采购单还没挂合同时 */}
+        {po.backfill && !po.contract && (po.status === 'approved' || po.status === 'closed') && <BackfillContract po={po} canManage={canManage} />}
 
         {/* 8.0.21 供应商门户：订单确认（承诺到货日）与发货预告 */}
         {(po.status === 'approved' || po.status === 'closed') && <PoSupplierCard po={po} />}
@@ -177,6 +180,11 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
               ) : (
                 <span className="num" data-testid="po-sheet-contract">
                   {po.contract.contractNo}
+                </span>
+              )}
+              {po.contractAddedByName && (
+                <span className="block text-[12px] text-ink-3" data-testid="po-sheet-contract-added">
+                  {po.contractAddedByName} {po.contractAddedAt ? formatDateTime(po.contractAddedAt) : ''} 补的
                 </span>
               )}
             </Info>

@@ -67,7 +67,9 @@ afterAll(async () => ctx.close());
 
 describe('① 采购途径（E1）', () => {
   it('规则：途径固定三类（网购、自采、供应商），改不了、加不了；其余规则只改提交的字段；没有「维护采购规则」的不能改（8.0.1，CG01、CG08）', async () => {
-    expect(await rules()).toEqual(DEFAULT_PURCHASE_RULES);
+    // 提需核库（8.1.10）在用例基线里关着（tests/helpers.ts），别的都是默认
+    const baseline = { ...DEFAULT_PURCHASE_RULES, stockCheckEnabled: false };
+    expect(await rules()).toEqual(baseline);
     expect((await rules()).channels).toEqual(PURCHASE_CHANNELS);
     expect((await api(ctx.app, coster, 'GET', '/api/inventory/purchase-rules')).status).toBe(200);
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/inventory/purchase-rules')).status).toBe(403);
@@ -88,13 +90,13 @@ describe('① 采购途径（E1）', () => {
     // 传了途径也不认：仍是固定三类；只改提交的字段，别的保持原样
     const tried = await saveRules(boss, { channels: [...PURCHASE_CHANNELS, { key: 'custom_live', label: '直播间', needsNote: true }], minQuotes: 3 });
     expect(tried.status, JSON.stringify(tried.body)).toBe(200);
-    expect(tried.body).toMatchObject({ ...DEFAULT_PURCHASE_RULES, channels: PURCHASE_CHANNELS, minQuotes: 3 });
+    expect(tried.body).toMatchObject({ ...baseline, channels: PURCHASE_CHANNELS, minQuotes: 3 });
     expect(await rules()).toMatchObject({ minQuotes: 3, cutoffEnabled: false, cutoffTime: '17:00', requestPoDirect: true, arrivalOverdueDays: 7 });
     // 后台规则总表里也看得到
     const catalog = (await api(ctx.app, boss, 'GET', '/api/admin/rules')).body as { key: string; value: string }[];
     expect(catalog.find((r) => r.key === 'purchase_rules.channels')?.value).toContain('网购（写说明）');
-    expect((await saveRules(boss, DEFAULT_PURCHASE_RULES)).status).toBe(200);
-    expect(await rules()).toEqual(DEFAULT_PURCHASE_RULES);
+    expect((await saveRules(boss, baseline)).status).toBe(200);
+    expect(await rules()).toEqual(baseline);
   });
 
   it('供应商的默认途径带进新建的采购单；明确选了要写说明的途径必须写；修改不传保持原样', async () => {
@@ -514,9 +516,10 @@ describe('⑤ 询价比价与定标（E5–E8）', () => {
     expect((await newPo({ supplierId: s1.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(4), priceCents: 25_000 }] })).body.error.code).toBe('QUOTES_REQUIRED');
     expect((await newPo({ supplierId: s1.id, lines: [{ materialId: mat.id, purchaseQtyMilli: q(2), priceCents: 45_000 }] })).status).toBe(201);
     // 门槛设 0：不要求
-    expect((await saveRules(boss, { ...DEFAULT_PURCHASE_RULES, quoteThresholdCents: 0 })).status).toBe(200);
+    // 整份保存时带上基线里关着的提需核库（8.1.10），后面的用例照旧不核库
+    expect((await saveRules(boss, { ...DEFAULT_PURCHASE_RULES, stockCheckEnabled: false, quoteThresholdCents: 0 })).status).toBe(200);
     expect((await api(ctx.app, buyer, 'POST', `/api/purchase-orders/${draft.id}/submit`, {})).body.status).toBe('submitted');
-    expect((await saveRules(boss, DEFAULT_PURCHASE_RULES)).status).toBe(200);
+    expect((await saveRules(boss, { ...DEFAULT_PURCHASE_RULES, stockCheckEnabled: false })).status).toBe(200);
   });
 
   it('询价 → 两家报价比价 → 定标 → 转采购单 → 提交过门槛；单一来源要负责人；价格曲线带成交价与报价', async () => {

@@ -38,6 +38,7 @@ import { ChannelKey, ChannelNote, loadPurchaseRules, resolveChannel, type Channe
 import { formatAmount } from '@shared/money';
 import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForApproval } from '../approvals/engine';
 import { assertContractForPo, poContract } from '../contracts/ledger';
+import { poContractDue } from './contract-due';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -153,10 +154,11 @@ export async function getPo(db: Db, poId: number): Promise<PurchaseOrder> {
            se.id AS sourcing_id, se.doc_no AS sourcing_no, se.status AS sourcing_status,
            ab.display_name AS approved_by_name, po.approved_at, po.returned_reason,
            clb.display_name AS closed_by_name, po.closed_at, po.close_reason, po.is_synthetic, po.total_cents,
-           s.id AS supplier_id, s.name AS supplier_name
+           s.id AS supplier_id, s.name AS supplier_name, cab.display_name AS contract_added_by_name, po.contract_added_at
     FROM purchase_orders po
     JOIN suppliers s ON s.id = po.supplier_id
     JOIN staff cb ON cb.id = po.created_by
+    LEFT JOIN staff cab ON cab.id = po.contract_added_by
     LEFT JOIN staff ab ON ab.id = po.approved_by
     LEFT JOIN staff clb ON clb.id = po.closed_by
     LEFT JOIN sourcing_events se ON se.id = po.sourcing_event_id
@@ -399,8 +401,11 @@ async function checkRequestLinks(tx: Tx, poId: number | null, lines: PreparedLin
       WHERE r.id IN (SELECT request_id FROM purchase_request_lines WHERE id IN ${tx(added)})
       ORDER BY r.id FOR UPDATE`;
   }
-  const rows = await tx<{ id: number; name: string; materialId: number | null; status: string; docNo: string; takenBy: string | null; inSourcing: string | null }[]>`
+  const rows = await tx<{ id: number; name: string; materialId: number | null; status: string; docNo: string; takenBy: string | null; inSourcing: string | null; issued: boolean }[]>`
     SELECT l.id, l.name, l.material_id, r.status, r.doc_no,
+           -- 整行从库存领用了的（8.1.10 核库转领用）不再买
+           EXISTS (SELECT 1 FROM request_line_stock ls JOIN inv_docs ld ON ld.id = ls.inv_doc_id AND ld.status = 'confirmed'
+                   WHERE ls.request_line_id = l.id AND ls.issued_qty_milli >= l.qty_milli) AS issued,
            (SELECT po.doc_no FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id
               JOIN purchase_orders po ON po.id = pl.po_id
              WHERE x.request_line_id = l.id AND po.status <> 'cancelled' ${poId ? tx`AND po.id <> ${poId}` : tx``} LIMIT 1) AS taken_by,
@@ -417,6 +422,7 @@ async function checkRequestLinks(tx: Tx, poId: number | null, lines: PreparedLin
       if (r.materialId !== null && Number(r.materialId) !== l.materialId) throw unprocessable('REQUEST_MATERIAL_MISMATCH', `「${r.name}」的物料与需求单不一致`);
       if (before.has(rid)) continue;
       if (r.status !== 'approved') throw conflict('REQUEST_NOT_APPROVED', `需求单 ${r.docNo} 还没通过审核，不能转采购单`);
+      if (r.issued) throw conflict('REQUEST_LINE_ISSUED', `「${r.name}」已经从库存领用，不用再买`);
       if (r.takenBy) throw conflict('REQUEST_LINE_ORDERED', `「${r.name}」已经在采购单 ${r.takenBy} 里`, { docNo: r.takenBy });
       if (r.inSourcing) throw conflict('REQUEST_LINE_IN_SOURCING', `「${r.name}」在询价单 ${r.inSourcing} 里，请定标后从询价单转采购单`, { docNo: r.inSourcing });
     }
@@ -491,7 +497,7 @@ async function assertSupplier(db: Db, supplierId: number): Promise<{ defaultChan
 
 // ───────────────────────── 状态流转 ─────────────────────────
 
-interface PoRow {
+export interface PoRow {
   id: number;
   docNo: string;
   status: PoStatus;
@@ -503,7 +509,7 @@ interface PoRow {
   sourcingEventId: number | null;
 }
 
-async function lockPo(tx: Tx, poId: number): Promise<PoRow> {
+export async function lockPo(tx: Tx, poId: number): Promise<PoRow> {
   const [po] = await tx<PoRow[]>`
     SELECT id, doc_no, status, supplier_id, revision, backfill, backfill_receipt_id, created_by, sourcing_event_id
     FROM purchase_orders WHERE id = ${poId} FOR UPDATE`;
@@ -967,7 +973,11 @@ export function registerPurchasingRoutes(app: FastifyInstance, deps: Deps) {
     const [row] = await sql<{ id: number }[]>`SELECT id FROM purchase_orders WHERE client_key = ${key}`;
     return row ? { found: true, po: await getPo(sql, row.id) } : { found: false };
   });
-  app.get('/api/purchase-orders/:id', { preHandler: guard('inventory.read') }, async (req) => getPo(sql, poId(req)));
+  app.get('/api/purchase-orders/:id', { preHandler: guard('inventory.read') }, async (req) => {
+    const id = poId(req);
+    // 8.1.10：补单采购单的急采要补合同时写着期限（CK19）
+    return { ...(await getPo(sql, id)), contractDue: await poContractDue(sql, id, deps.config.timezone) };
+  });
   // 编制采购单时实时比价：按物料当前包装与当前价格口径
   app.get('/api/purchase-baseline', { preHandler: guard('inventory.read') }, async (req) => {
     const { materialId } = parse(z.object({ materialId: z.coerce.number().int().positive() }), req.query);

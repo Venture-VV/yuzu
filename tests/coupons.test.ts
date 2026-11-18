@@ -178,6 +178,37 @@ describe('发券', () => {
     expect((await issue(m.id, tpl.cash!.id, 1, ctx.clerk)).status).toBe(403);
   });
 
+  it('合并会员时同时发券：发券等合并锁住的会员一行，合并提交后拒绝，券不会落到合并掉的会员名下（8.1.10）', async () => {
+    const source = await createMember(ctx, '并发发券来源', '19900008030');
+    const target = await createMember(ctx, '并发发券目标', '19900008031');
+    const other = await ctx.sql.reserve();
+    try {
+      const [me] = await other<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+      // 合并：先锁住两位会员一行，核对来源没有能用的券（这时还没有）……
+      await other`BEGIN`;
+      await other`SELECT id FROM members WHERE id IN ${other([source.id, target.id])} ORDER BY id FOR UPDATE`;
+      const pending = issue(source.id, tpl.cash!.id);
+      let waiting = false;
+      for (let i = 0; i < 200 && !waiting; i++) {
+        const [w] = await ctx.sql<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> ${me!.pid}`;
+        waiting = w!.n > 0;
+        if (!waiting) await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(waiting, '发券应等合并锁住的会员一行').toBe(true);
+      // ……合并写完、提交（与 mergeMember 对来源会员写的一样）
+      await other`UPDATE members SET status = 'frozen', merged_into_id = ${target.id}, updated_at = now() WHERE id = ${source.id}`;
+      await other`COMMIT`;
+      const r = await pending;
+      expect(r.body.error?.code, JSON.stringify(r.body)).toBe('MEMBER_FROZEN');
+      expect((await ctx.sql`SELECT 1 FROM coupons WHERE member_id = ${source.id}`).length).toBe(0);
+    } finally {
+      other.release();
+      // 这位是用例里直接改成合并的（没有合并记录），改回来，不影响后面的自检
+      await ctx.sql`UPDATE members SET status = 'active', merged_into_id = NULL WHERE id = ${source.id}`;
+    }
+  });
+
   it('开卡礼：建档时按规则发；期初导入、演示数据不走这条路', async () => {
     await rule({ kind: 'open_card', templateId: tpl.discount!.id });
     const r = await api(ctx.app, ctx.clerk, 'POST', '/api/members', { name: '新会员', phone: '19900008003' });

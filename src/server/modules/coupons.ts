@@ -839,7 +839,9 @@ export async function issueToMember(deps: Deps, memberId: number, raw: unknown, 
   try {
     const issue = await deps.sql.begin(async (tx) => {
       await assertNotFenced(tx, input.clientKey, 'coupon_issue', erpOpAbandoned);
-      const [m] = await tx<{ id: number; name: string; status: string }[]>`SELECT id, name, status FROM members WHERE id = ${memberId}`;
+      // 会员一行（FOR UPDATE，与停用、合并串行；锁住以后再核对）→ 模板（共享锁），与签赠发放、小程序领取同一个顺序。
+      // 不锁的话，合并能在这里读完之后、写券之前核对「来源没有能用的券」并提交，券就发到了合并掉的会员名下（8.1.10，Codex 审查 cf81873 时顺带发现）
+      const [m] = await tx<{ id: number; name: string; status: string }[]>`SELECT id, name, status FROM members WHERE id = ${memberId} FOR UPDATE`;
       if (!m) throw notFound('会员不存在');
       if (m.status !== 'active') throw unprocessable('MEMBER_FROZEN', `会员「${m.name}」已停用，不能发券`);
       const template = await lockTemplate(tx, input.templateId);

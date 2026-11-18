@@ -415,7 +415,7 @@ export async function applyMove(
 }
 
 export type DocKind = 'inv_doc' | 'purchase_order' | 'payment' | 'opening_payable' | 'expense_claim' | 'petty_advance' | 'petty_settlement' | 'purchase_request' | 'ap_offset' | 'supplier_refund';
-export type ApprovalAction = 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise' | 'sign' | 'supplier_agree' | 'supplier_reject';
+export type ApprovalAction = 'create' | 'submit' | 'approve' | 'return' | 'cancel' | 'void' | 'close' | 'revise' | 'sign' | 'supplier_agree' | 'supplier_reject' | 'stock';
 
 export async function logApproval(tx: Db, kind: DocKind, docId: number, action: ApprovalAction, actorId: number, reason = '', revision: number | null = null) {
   await tx`

@@ -1,7 +1,7 @@
 // 部门采购需求单（v0.7.8）的查询：与库存、采购共用 'inv' 缓存前缀，采购单、收货单变化后需求单的进度一起刷新。
 
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { OpenRequestLine, PurchaseRequest, RequestMeta, RequestsList } from '@shared/requests';
+import type { OpenRequestLine, PurchaseRequest, RequestMeta, RequestsList, StockMaterialOption } from '@shared/requests';
 import { api } from '../../lib/api';
 
 export const rk = {
@@ -10,6 +10,7 @@ export const rk = {
   one: (id: number) => ['inv', 'request', id] as const,
   meta: ['inv', 'request-meta'] as const,
   open: (ids: string) => ['inv', 'request-open-lines', ids] as const,
+  stockMaterials: ['inv', 'request-stock-materials'] as const,
 };
 
 export function useInvalidateRequests() {
@@ -19,12 +20,16 @@ export function useInvalidateRequests() {
 
 const search = (params: Record<string, string | undefined>) => new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
 
-export const useRequests = (params: { status?: string; departmentId?: string; from?: string; to?: string }) =>
+export const useRequests = (params: { status?: string; stock?: string; departmentId?: string; from?: string; to?: string }) =>
   useQuery({ queryKey: rk.list(params), queryFn: () => api.get<RequestsList>(`/api/erp/requests?${search(params)}`), placeholderData: keepPreviousData });
 
 export const useRequest = (id: number | null) => useQuery({ queryKey: rk.one(id ?? 0), queryFn: () => api.get<PurchaseRequest>(`/api/erp/requests/${id}`), enabled: !!id });
 
 export const useRequestMeta = () => useQuery({ queryKey: rk.meta, queryFn: () => api.get<RequestMeta>('/api/erp/requests/meta'), staleTime: 60_000 });
+
+/** 替代品能选的物料（8.1.10 核库）：受管、在用、总仓有结存的 */
+export const useStockMaterials = (enabled: boolean) =>
+  useQuery({ queryKey: rk.stockMaterials, queryFn: () => api.get<StockMaterialOption[]>('/api/erp/requests/stock-materials'), enabled, staleTime: 30_000 });
 
 /** 已通过、还没下单的需求行；ids 给了就只取这些（转采购单） */
 export const useOpenLines = (ids: string | null, enabled = true) =>
