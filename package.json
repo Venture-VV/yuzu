@@ -25,6 +25,7 @@
     "check:code": "node scripts/check-code.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "check:gov": "node scripts/check-governance.mjs",
+    "check:bundle": "node scripts/check-bundle.mjs",
     "format": "prettier --write --log-level warn \"src/**/*.{ts,tsx,js,mjs,cjs}\" \"tests/**/*.ts\" \"e2e/**/*.ts\" \"e2e-canteen/**/*.ts\" \"scripts/**/*.{ts,js,mjs,cjs}\" \"*.ts\"",
     "format:check": "prettier --check --log-level warn \"src/**/*.{ts,tsx,js,mjs,cjs}\" \"tests/**/*.ts\" \"e2e/**/*.ts\" \"e2e-canteen/**/*.ts\" \"scripts/**/*.{ts,js,mjs,cjs}\" \"*.ts\"",
     "test": "vitest run",

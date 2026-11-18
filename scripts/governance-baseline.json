@@ -65,5 +65,6 @@
     "src/server/modules/payments/requests.ts:payoutRequestId",
     "src/shared/inventory.ts:TRANSFER_DOC_TYPES"
   ],
-  "duplicationMaxPercent": 1
+  "duplicationMaxPercent": 1,
+  "entryChunkMaxKb": 900
 }

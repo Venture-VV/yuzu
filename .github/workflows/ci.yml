@@ -69,6 +69,8 @@ jobs:
         run: npm run format:check
       - run: npm test
       - run: npm run build
+      - name: 打包体积（首屏主包不超过上限，重的库与不常用的页面按需加载；工程治理二期）
+        run: npm run check:bundle
 
   e2e:
     name: 浏览器验收（${{ matrix.name }}）

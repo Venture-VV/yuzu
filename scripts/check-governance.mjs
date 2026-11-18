@@ -258,6 +258,8 @@ function main() {
       deadExports: current.deadExports,
       // 上限留一点余量：比现在的比例高 0.2 个百分点，最少 1%
       duplicationMaxPercent: baseline && !allowIncrease ? baseline.duplicationMaxPercent : Math.max(1, Math.ceil((cpd.percent + 0.2) * 10) / 10),
+      // 首屏主包的上限（KB）：npm run check:bundle 在构建之后核对，这里原样带过去
+      entryChunkMaxKb: baseline?.entryChunkMaxKb ?? 900,
     };
     const wider = baseline ? loosened(baseline, next) : [];
     if (wider.length && !allowIncrease) {
