@@ -209,4 +209,42 @@ describe('库管入库台账：模板与一键导入', () => {
     expect(done.status, JSON.stringify(done.body)).toBe(201);
     expect(done.body.docs.map((d: { lineCount: number }) => d.lineCount)).toEqual([100, 1]);
   });
+
+  it('导入的这一刻物料的换算被改了：锁住物料以后再算一遍，与之前算的不一样整份不导（Codex 审查 785ca18）', async () => {
+    const [orig] = await ctx.sql<{ f: number }[]>`SELECT purchase_factor_milli AS f FROM materials WHERE id = ${mat.id}`;
+    const before = await stock(mat.id);
+    const fileName = `换算-${Date.now()}.csv`;
+    const csv = csvOf([HEAD, ['1', today, cash.name, mat.name, '', '2', '', mat.purchaseUnit, '30', '60', '', '李晓', '', fileName]]);
+    // 另一个连接先锁住这个物料：导入读完物料、停在物料锁上时，把换算改了再提交
+    const other = await ctx.sql.reserve();
+    try {
+      await other`BEGIN`;
+      await other`SELECT id FROM materials WHERE id = ${mat.id} FOR UPDATE`;
+      const pending = api(ctx.app, keeper, 'POST', '/api/inventory/direct-receipts/import', { fileName, csv, clientKey: randomUUID() });
+      let waiting = false;
+      for (let i = 0; i < 200 && !waiting; i++) {
+        const [w] = await ctx.sql<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%FROM materials%FOR UPDATE%'`;
+        waiting = w!.n > 0;
+        if (!waiting) await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(waiting, '导入应停在物料锁上').toBe(true);
+      await other`UPDATE materials SET purchase_factor_milli = purchase_factor_milli * 2 WHERE id = ${mat.id}`;
+      await other`COMMIT`;
+      const r = await pending;
+      expect(r.body.error?.code, JSON.stringify(r.body)).toBe('IMPORT_STALE');
+      // 整份没写：库存不变、没有导入记录
+      expect(await stock(mat.id)).toBe(before);
+      expect((await ctx.sql`SELECT 1 FROM receipt_imports WHERE file_name = ${fileName}`).length).toBe(0);
+      // 重新预览按新的换算算；导入照常
+      const prev = await api(ctx.app, keeper, 'POST', '/api/inventory/direct-receipts/import/preview', { fileName, csv });
+      expect(prev.body.issueCount).toBe(0);
+      const ok = await api(ctx.app, keeper, 'POST', '/api/inventory/direct-receipts/import', { fileName, csv, clientKey: randomUUID() });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+      expect(await stock(mat.id)).toBe(before + orig!.f * 2 * 2);
+    } finally {
+      await ctx.sql`UPDATE materials SET purchase_factor_milli = ${orig!.f} WHERE id = ${mat.id}`;
+      other.release();
+    }
+  });
 });

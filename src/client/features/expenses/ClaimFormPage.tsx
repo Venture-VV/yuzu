@@ -94,7 +94,13 @@ export function ClaimFormPage() {
   const pending = useErpPending(['expense_claim']);
 
   const advances = useAdvances({ departmentId: departmentId ? String(departmentId) : undefined, unsettled: '1' }, paySource === 'petty' && !!departmentId);
-  const poolUses = useQuery({ queryKey: ['inv', 'pool-uses-for-claim'], queryFn: () => api.get<PoolUsesForClaim>('/api/erp/expenses/pool-uses'), enabled: paySource === 'pool' });
+  // 模块关着时也取一次：关之前已经提交报销的申用，财务照样要能登记报销（接口不在模块的前缀下；Codex 审查 785ca18）
+  const poolUses = useQuery({
+    queryKey: ['inv', 'pool-uses-for-claim'],
+    queryFn: () => api.get<PoolUsesForClaim>('/api/erp/expenses/pool-uses'),
+    enabled: paySource === 'pool' || !poolOn,
+  });
+  const poolChoosable = poolOn || paySource === 'pool' || (poolUses.data?.uses.length ?? 0) > 0;
   const chosenUses = (poolUses.data?.uses ?? []).filter((u) => poolUseIds.includes(u.id));
   const poolSum = chosenUses.reduce((t, u) => t + u.amountCents, 0);
   /** 勾的申用都已补单、而且是同一张采购单：可以按那张采购单报销 */
@@ -451,7 +457,7 @@ export function ClaimFormPage() {
                   touch('paySource');
                   setPaySource(v);
                 }}
-                options={(poolOn || paySource === 'pool' ? (['petty', 'company', 'pool'] as const) : (['petty', 'company'] as const)).map((v) => ({ value: v, label: PAY_SOURCE_LABELS[v] }))}
+                options={(poolChoosable ? (['petty', 'company', 'pool'] as const) : (['petty', 'company'] as const)).map((v) => ({ value: v, label: PAY_SOURCE_LABELS[v] }))}
               />
             </Field>
             {paySource === 'pool' && (

@@ -343,6 +343,12 @@ export async function applyReceiptImport(deps: Deps, raw: unknown, actor: Actor,
     for (const { g, i } of order) docNos.set(i, await nextReceiptNo(tx, g[0]!.docDate!));
     const materialIds = [...new Set(p.rows.map((x) => x.material!.id))].sort((a, b) => a - b);
     await tx`SELECT id FROM materials WHERE id IN ${tx(materialIds)} ORDER BY id FOR UPDATE`;
+    // 锁住物料以后再算一遍（Codex 审查 785ca18）：上面那一遍读物料时还没上锁，期间有人改了换算、单位或效期设置，
+    // 数量与金额就是按旧档案算的，而开单（prepare）按新档案算——两边对不上。锁住以后的这一遍与上一遍逐行比，不一样就整份不导
+    const again = await plan(tx, f, deps.config.timezone);
+    if (JSON.stringify(again.rows) !== JSON.stringify(p.rows)) {
+      throw conflict('IMPORT_STALE', '导入的这一刻有物料的档案（单位换算、效期等）刚被改过，这份台账没有导入；请重新预览、核对后再导入');
+    }
     const note = `台账导入：${f.fileName}`.slice(0, 200);
     for (const [i, rows] of groups.entries()) {
       const head = rows[0]!;

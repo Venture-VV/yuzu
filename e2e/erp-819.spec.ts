@@ -65,8 +65,19 @@ test.describe('8.1.9 ERP 供应链', () => {
     await expect(row).toContainText('已提交报销');
     await expect(row).toContainText('等财务登记报销单');
 
-    // 店主（有登记报销的权限）：钱从「零采备用金」来，勾这笔申用
-    await boss.goto('/erp/expenses/new');
+    // 店主（有登记报销的权限）：钱从「零采备用金」来，勾这笔申用。
+    // 先把零采备用金模块关掉：关之前已经提交报销的申用，财务照样能选「零采备用金」登记报销（Codex 审查 785ca18）
+    const modules = async (on: boolean) => expect((await boss.request.put('/api/erp/modules', { data: { modules: { pettyPool: on } } })).ok()).toBe(true);
+    await modules(false);
+    try {
+      await boss.goto('/erp/expenses/new');
+      await expect(boss.getByTestId('claim-form')).toBeVisible();
+      await boss.getByRole('radio', { name: '零采备用金' }).click();
+      await expect(boss.getByTestId(`ex-pool-use-${useId}`)).toBeVisible();
+    } finally {
+      await modules(true);
+    }
+    await boss.reload();
     await expect(boss.getByTestId('claim-form')).toBeVisible();
     await boss.getByRole('radio', { name: '零采备用金' }).click();
     await boss.getByTestId(`ex-pool-use-${useId}`).check();

@@ -156,4 +156,50 @@ test.describe('8.1.9 签赠', () => {
     await expect(panel.getByTestId('gift-by-authorizer')).toContainText('张经理');
     await expect(panel.getByTestId('gift-share-segment')).toContainText(type.giftSegment);
   });
+
+  test('签赠发放没收到结果：「签赠发放」先挡住，在台账上方作废那一笔以后才能再发（Codex 审查 785ca18）', async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page, 'linlan');
+    const type = await postJson<{ id: number }>(page, '/api/gifts/types', {
+      clientKey: randomUUID(),
+      name: `E2E 待确认 ${String(Date.now()).slice(-6)}`,
+      kind: 'cash',
+      faceValue: 1000,
+      validity: 'days',
+      validDays: 30,
+      segment: '浴区',
+      content: '',
+      rules: '',
+    });
+    const members = await getJson<{ id: number; phone: string; status: string }[]>(page, '/api/members?q=19900001&limit=50');
+    const member = members.find((m) => m.status === 'active')!;
+    await page.goto('/customer?tab=gifts');
+    const ledger = page.getByTestId('customer-gift-ledger');
+    await expect(ledger).toBeVisible({ timeout: 30_000 });
+    // 服务器出错（5xx）：可能已经发出去了，这一笔记在本机「结果待确认」里
+    await page.route('**/api/gifts/issues', (route) =>
+      route.request().method() === 'POST'
+        ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'E2E', message: '模拟服务器出错' } }) })
+        : route.fallback(),
+    );
+    await ledger.getByTestId('gift-issue').click();
+    const dialog = page.getByTestId('gift-issue-dialog');
+    await dialog.getByTestId('gift-member-search').fill(member.phone);
+    await dialog.getByTestId(`gift-member-${member.id}`).click();
+    await dialog.getByTestId('gift-type').selectOption(String(type.id));
+    await dialog.getByTestId('gift-authorizer').selectOption({ label: '张经理' });
+    await dialog.getByTestId('gift-reason').fill('E2E：结果待确认');
+    await page.getByTestId('gift-issue-save').click();
+    await expect(dialog.getByText('结果待确认')).toBeVisible();
+    await page.getByRole('button', { name: /先关掉/ }).click();
+    await page.unroute('**/api/gifts/issues');
+    // 不能另起一笔：按钮挡住，上面列着那一笔
+    await expect(ledger.getByTestId('gift-issue')).toBeDisabled();
+    const pending = ledger.getByTestId('erp-pending');
+    await expect(pending).toContainText('E2E 待确认');
+    // 作废那一笔（请求其实没到服务器）以后又能发
+    await pending.getByTestId('erp-pending-abandon').click();
+    await pending.getByTestId('erp-pending-abandon-confirm').click();
+    await expect(ledger.getByTestId('gift-issue')).toBeEnabled();
+  });
 });

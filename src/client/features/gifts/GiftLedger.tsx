@@ -12,6 +12,7 @@ import { GIFT_STATUS_LABELS, type GiftLedger as Ledger, type GiftLedgerRow, type
 import { shiftDate } from '@shared/labels';
 import { formatYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
+import { useErpRecorded } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
@@ -49,6 +50,9 @@ export function GiftLedger({ channel, testId = 'gift-ledger' }: { channel?: stri
   for (const a of l?.byAuthorizer ?? []) seen.current.set(a.authorizer.id, a.authorizer.name);
   const authorizerOptions = [...seen.current.entries()].sort((a, b) => a[1].localeCompare(b[1], 'zh'));
   const canIssue = can('gift.issue');
+  // 上一次签赠发放还在路上、或结果待确认：先在上面查回、重提或作废，处理完才能再发——
+  // 发放弹窗每次打开用新的操作编号，不挡的话关掉弹窗再发一次，会员会多拿一批券（Codex 审查 785ca18）
+  const unresolved = useErpRecorded(['gift_issue']).length > 0;
   const canVoid = can('gift.manage') || can('coupon.void');
   const canExport = can('gift.manage') || can('concierge.export') || can('customer.manage');
   const setFilter = (k: keyof typeof filters, v: string) => setFilters((f) => ({ ...f, [k]: v }));
@@ -106,7 +110,15 @@ export function GiftLedger({ channel, testId = 'gift-ledger' }: { channel?: stri
             </a>
           )}
           {canIssue && (
-            <Button size="sm" variant="primary" icon={<Signature className="size-4" />} disabled={rules.data?.enabled === false} onClick={() => setIssuing(true)} data-testid="gift-issue">
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<Signature className="size-4" />}
+              disabled={rules.data?.enabled === false || unresolved}
+              title={unresolved ? '上一次签赠发放的结果待确认：先在上面查回、按原内容重提或确认作废' : undefined}
+              onClick={() => setIssuing(true)}
+              data-testid="gift-issue"
+            >
               签赠发放
             </Button>
           )}

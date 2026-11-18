@@ -151,6 +151,12 @@ describe('零采备用金', () => {
     expect((await api(ctx.app, approver, 'POST', `/api/erp/expenses/${b.body.claim.id}/approve`, {})).body.status).toBe('confirmed');
     expect((await refresh('u2')).state).toBe('reimbursed');
     expect((await board()).summary).toMatchObject({ occupiedCents: 10_000, remainingCents: 490_000, pendingCount: 1 });
+    // 采购台账：零采备用金付的报销进区间合计，也进当天的小计，两个数一致；导出的合计里也有这一行（Codex 审查 785ca18）
+    const ledger = (await api(ctx.app, ctx.owner, 'GET', `/api/erp/ledger?from=${today}&to=${today}`)).body;
+    expect(ledger.totals.poolSpentCents).toBe(28_000 + 249_900);
+    expect(ledger.days.find((d: { date: string }) => d.date === today).totals.poolSpentCents).toBe(28_000 + 249_900);
+    const ledgerCsv = await api(ctx.app, ctx.owner, 'GET', `/api/erp/ledger/export?from=${today}&to=${today}`);
+    expect(String(ledgerCsv.body)).toContain('支出（零采备用金）');
     // 财务冲销 u1 的报销单 → u1 回到「已提交报销」，又占用；可以重新登记
     expect((await api(ctx.app, coster, 'POST', `/api/erp/expenses/${a.body.claim.id}/void`, { reason: '发票有误重开' })).body.status).toBe('voided');
     const u1 = await refresh('u1');
