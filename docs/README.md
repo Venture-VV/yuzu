@@ -45,6 +45,7 @@
 - [`ERP_ROUND2.md`](ERP_ROUND2.md)：供应链二次整改：草稿箱、部门表格导入、集采模板最终版
 - [`ERP_V8020.md`](ERP_V8020.md)：8.0.20 设计 · 进销存做深 + 客房点餐、会员联动房价
 - [`ERP_V807.md`](ERP_V807.md)：8.0.7 · 剩下的开发一版做完（A1–A4）
+- [`ERP_V8110.md`](ERP_V8110.md)：8.1.10 ERP 采购：核库转领用、急采后补合同
 - [`ERP_V819.md`](ERP_V819.md)：8.1.9 · ERP 供应链：零采备用金面板与库管入库
 - [`EXPENSES.md`](EXPENSES.md)：费用报销与备用金（v0.7.7 起，飞书需求 RQ-005）
 - [`FINANCE_V8021.md`](FINANCE_V8021.md)：8.0.21 设计 · 财务与合同做深
@@ -185,6 +186,7 @@
 - [`HANDOFF_V808.md`](HANDOFF_V808.md)：v8.0.8 交接说明 · 前台整改（钟房、收银、派对房、预约、餐饮、客房）
 - [`HANDOFF_V809.md`](HANDOFF_V809.md)：v8.0.9 交接说明 · 安保巡场与员工工作台
 - [`HANDOFF_V811.md`](HANDOFF_V811.md)：v8.1.1 交接说明 · AI 辅助换 DeepSeek、UI 工作台第一步（平板电子菜单）
+- [`HANDOFF_V8110.md`](HANDOFF_V8110.md)：v8.1.13 交接说明 · 核库转领用、急采后补合同
 - [`HANDOFF_V812.md`](HANDOFF_V812.md)：v8.1.2 交接说明 · UI 工作台第二步（卡片模板、组件与变体、员工食堂、给小程序线的格式、定时发布与批注）
 - [`HANDOFF_V813.md`](HANDOFF_V813.md)：v8.1.3 交接说明 · 代码整洁与网络波动防护
 - [`HANDOFF_V814.md`](HANDOFF_V814.md)：v8.1.4 交接说明 · 老浏览器上侧栏划不动、工作台开在哪一档

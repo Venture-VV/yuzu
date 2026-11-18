@@ -39,6 +39,7 @@ import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForA
 import { contractPlan } from '../payments/plan';
 import { assertNoHoldOnReceipts } from '../payments/hold';
 import { loadPaymentRules } from '../payments/rules';
+import { assertContractNotDue } from './contract-due';
 
 const id = z.number().int().positive();
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
@@ -336,6 +337,8 @@ export async function contractReceiptAmong(db: Db, receiptIds: number[]): Promis
 async function assertNoContractReceipts(db: Db, allocations: { kind: 'receipt' | 'opening'; targetId: number }[]) {
   const receiptIds = allocations.filter((a) => a.kind === 'receipt').map((a) => a.targetId);
   if (receiptIds.length === 0) return;
+  // 8.1.10 急采后补合同（CK19）：要补合同、还没补上的急采不能直接登记付款、不能把预付款核销上去（与 P7 开关无关）
+  await assertContractNotDue(db, receiptIds);
   // 8.0.6 起是「付款 → 付款规则」里的开关（P7，默认开）；关掉时照以前直接登记，合同的付款计划里记在「不带付款申请的付款」，
   // 但最近一次验收不合格、付款挂起的合同照样不付（8.0.7 V9，Codex 审查 d8b314b）
   if (!(await loadPaymentRules(db)).requireRequestForContractGoods) return assertNoHoldOnReceipts(db, receiptIds);
@@ -862,10 +865,16 @@ export async function createOffset(deps: Deps, raw: unknown, actor: Actor, ip?: 
       await lockSupplier(tx, input.supplierId);
       const credit = await lockCredit(tx, input.supplierId, input.credit);
       if (!credit.canOffset) throw unprocessable('CREDIT_NOT_OFFSETTABLE', '现付供应商的退货没记应付，只能登记供应商退款，不能核销');
-      // 挂合同的货款要走付款申请（v0.7.32，P7）：没带申请的预付款不能核销到合同的收货单上（带申请的、退货余额照旧）
+      // 挂合同的货款要走付款申请（v0.7.32，P7）：没带申请的预付款不能核销到合同的收货单上（带申请的、退货余额照旧）。
+      // 要补合同、还没补上的急采（8.1.10，ERP_V8110 第 1.3 节）：预付款带不带申请都不能核销上去（Codex 审查 8f01337）
       if (input.credit.kind === 'prepayment') {
         const [cp] = await tx<{ paymentRequestId: number | null }[]>`SELECT payment_request_id FROM payments WHERE id = ${input.credit.id}`;
         if (cp && cp.paymentRequestId === null) await assertNoContractReceipts(tx, input.lines);
+        else
+          await assertContractNotDue(
+            tx,
+            input.lines.filter((l) => l.kind === 'receipt').map((l) => l.targetId),
+          );
       }
       if (total > credit.availableCents) {
         throw conflict('OVER_CREDIT', `${credit.docNo} 还可以抵扣 ¥${formatAmount(credit.availableCents)}，本次核销 ¥${formatAmount(total)} 超出`, {

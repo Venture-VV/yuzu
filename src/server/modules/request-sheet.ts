@@ -30,6 +30,7 @@ import { loadExpenseRules } from './expenses';
 import { logApproval } from './inventory/common';
 import { isoDate, PRIORITY_NAMES, qtyMilliOf } from './request-import';
 import { approvableOnFor, deptConfirmFor } from './requests';
+import { enterStockCheck } from './request-stock';
 
 const FileFields = z.object({
   fileName: z.string().trim().min(1, '缺少文件名').max(120, '文件名太长'),
@@ -306,6 +307,8 @@ export async function applyDeptSheet(deps: Deps, raw: unknown, actor: Actor, ip?
       }
       await logApproval(tx, 'purchase_request', requestId, 'create', actor.id, `表格导入：${f.fileName}`.slice(0, 200));
       await logApproval(tx, 'purchase_request', requestId, 'submit', actor.id);
+      // 核库（8.1.10，CK13）：与手填的一样
+      await enterStockCheck(tx, requestId);
     }
     await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${f.clientKey}, 'purchase_request', ${requestHash}, ${firstRequestId}, ${actor.id})`;
     await writeAudit(tx, {

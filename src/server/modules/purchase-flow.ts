@@ -22,7 +22,7 @@ import {
 } from '@shared/purchase-flow';
 import type { InvDocStatus } from '@shared/inventory';
 import type { PoStatus, ReceivingState, SourcingStatus } from '@shared/purchasing';
-import type { RequestStatus } from '@shared/requests';
+import type { RequestStatus, StockCheckState } from '@shared/requests';
 import { readSnapshot, type Db } from '../db';
 import { guardAny } from '../auth/guard';
 import type { Actor, Deps } from '../lib/context';
@@ -90,6 +90,7 @@ function requestFact(c: Ctx, id: number) {
         SELECT r.id, r.doc_no, r.status, r.department_id, d.name AS department_name, r.requester_id, s.display_name AS requester_name,
                r.submitted_at, r.reviewed_at, rb.display_name AS reviewed_by_name, r.reason, r.approvable_on,
                r.dept_confirm, r.dept_head_id, hd.display_name AS dept_head_name, cf.display_name AS dept_confirmed_by_name, r.dept_confirmed_at,
+               r.stock_check, r.stock_check_since, r.stock_checked_at,
                (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id) AS line_count,
                coalesce((SELECT string_agg(l.name, '、' ORDER BY l.line_no) FROM purchase_request_lines l WHERE l.request_id = r.id AND l.line_no <= 3), '') AS summary,
                (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id AND NOT ${ORDERED(db)}) AS unordered_lines,
@@ -129,6 +130,9 @@ function requestFact(c: Ctx, id: number) {
           confirmedAt: iso(r.deptConfirmedAt),
         },
         deptHeadId: r.deptHeadId == null ? null : Number(r.deptHeadId),
+        stockCheck: r.stockCheck as StockCheckState,
+        stockCheckSince: iso(r.stockCheckSince),
+        stockCheckedAt: iso(r.stockCheckedAt),
         lineCount,
         summary: lineCount > 3 ? `${String(r.summary)} 等 ${lineCount} 项` : String(r.summary),
         unorderedLines: Number(r.unorderedLines),

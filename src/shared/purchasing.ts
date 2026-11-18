@@ -100,6 +100,11 @@ export interface PurchaseOrder {
   revision: number;
   backfill: boolean;
   backfillReceipt: DocRef | null;
+  /** 补单采购单事后补合同的人与时刻（8.1.10，CK20） */
+  contractAddedByName: string | null;
+  contractAddedAt: string | null;
+  /** 急采要补合同、还没补上时的期限（8.1.10，CK19）：只在详情接口里有 */
+  contractDue?: { dueOn: string; daysLeft: number } | null;
   createdBy: number;
   createdByName: string;
   /** 系统建的（自动补货的草稿）：还是草稿时，能编制采购单的人都可以撤掉 */
@@ -527,6 +532,14 @@ export interface PurchaseRules {
   deptConfirm: DeptConfirmRule;
   /** 采购流程图（8.0.17，LC4）：一个环节等了几天标红；0 = 不标。到货另按预计到货日 / arrivalOverdueDays，审批另认审批中心的超时 */
   flowStallDays: number;
+  /** 提需核库（8.1.10，CK8–CK13）：开着时，选了物料、总仓有结存的需求单先由库管核库再进采购审核 */
+  stockCheckEnabled: boolean;
+  /** 核库时限（小时，CK10）：进「待核库」超过这么久没核完的自动转采购；部门没回替代提议的也按它 */
+  stockCheckHours: number;
+  /** 急采补合同金额（分，CK18）：急采生效时合计达到它的要补合同；0 = 不要求 */
+  urgentContractMinCents: number;
+  /** 补合同期限（天，CK19）：从急采生效那天算 */
+  contractDueDays: number;
 }
 
 /** 默认规则（待确认，E1、E4–E6、CG01、CG03–CG05）：在「采购 → 采购规则」里改 */
@@ -549,6 +562,11 @@ export const DEFAULT_PURCHASE_RULES: PurchaseRules = {
   ],
   flowStallDays: 2,
   deptConfirm: 'threshold',
+  // 8.1.10（店主 2026-11-18，CK10、CK12、CK18、CK19；功能开关默认开）
+  stockCheckEnabled: true,
+  stockCheckHours: 24,
+  urgentContractMinCents: 2_000_000,
+  contractDueDays: 15,
 };
 
 /** 急采上限：分级的最高一档 */
@@ -823,4 +841,20 @@ export interface SupplierCompare {
   consumption: { materialId: number; issuedMilli: number; directUsedMilli: number }[];
   /** 能选的品类 */
   categories: string[];
+}
+
+/** 待补合同清单的一行（8.1.10 急采后补合同，CK19）：要补合同、还没补上的急采；还没补采购单的 poId 为空 */
+export interface UrgentContractDueRow {
+  receiptId: number;
+  docNo: string;
+  docDate: string;
+  supplierName: string;
+  departmentName: string | null;
+  amountCents: number;
+  poId: number | null;
+  poNo: string | null;
+  /** 期限：急采生效那天 + 补合同期限 */
+  dueOn: string;
+  /** 还剩几天；负数是超期几天 */
+  daysLeft: number;
 }

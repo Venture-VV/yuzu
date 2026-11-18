@@ -143,6 +143,8 @@ export const FENCED_OPS = [
   // 8.1.9 签赠（迁移 184）：新建签赠券类型（编号记在 coupon_templates.client_key）、签赠发放（编号记在 coupon_issues.client_key）
   'gift_type',
   'gift_issue',
+  // 8.1.10 核库转领用（迁移 185；编号记在 idempotency_keys，ref_id 是那张需求单）
+  'request_stock',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

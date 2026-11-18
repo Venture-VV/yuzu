@@ -38,7 +38,10 @@ type PageKey =
   | 'direct-receipt'
   | 'admin-gifts'
   | 'gift-ledger-concierge'
-  | 'gift-ledger-customer';
+  | 'gift-ledger-customer'
+  // 8.1.10：需求单的待核库、核库对话框、替代确认（合成的需求单），急采的待补合同
+  | 'requests-stock'
+  | 'urgent-contract';
 
 const DEVICES: Device[] = [
   {
@@ -58,23 +61,25 @@ const DEVICES: Device[] = [
       'direct-receipt',
       'admin-gifts',
       'gift-ledger-customer',
+      'requests-stock',
+      'urgent-contract',
     ],
   },
   {
     name: '商米 D3 Pro（系统缩放 1.5 倍）',
     viewport: { width: 1280, height: 720 },
-    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger', 'pool', 'gift-ledger-concierge'],
+    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger', 'pool', 'gift-ledger-concierge', 'requests-stock'],
   },
   {
     name: '商米 V3',
     viewport: { width: 360, height: 800 },
     mobile: true,
-    pages: ['dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'dining-limits', 'gift-ledger-concierge', 'gift-ledger-customer'],
+    pages: ['dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'dining-limits', 'gift-ledger-concierge', 'gift-ledger-customer', 'requests-stock', 'urgent-contract'],
   },
   {
     name: '小米平板 6S Pro 12.4',
     viewport: { width: 1355, height: 903 },
-    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'direct-receipt', 'admin-gifts', 'gift-ledger-concierge'],
+    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'direct-receipt', 'admin-gifts', 'gift-ledger-concierge', 'requests-stock', 'urgent-contract'],
   },
 ];
 
@@ -284,9 +289,118 @@ async function mockTables(ctx: BrowserContext) {
   await ctx.route('**/api/dining/receipt?*', (route) => route.fulfill({ json: RECEIPT }));
 }
 
+// ───────────── 合成的需求单（8.1.10）：一张待核库（领用、能换算与换算不了的行、手填新品），一张等部门确认替代 ─────────────
+
+const STOCK_ID = 990_810;
+const SUB_ID = 990_811;
+const STOCK_NOW = new Date().toISOString();
+const reqLine = (id: number, lineNo: number, over: Record<string, unknown>) => ({
+  id,
+  lineNo,
+  materialId: 990_000 + lineNo,
+  materialName: '一次性护理床单（加厚加长款）',
+  name: '一次性护理床单（加厚加长款）',
+  purpose: '客用消耗',
+  qtyMilli: 3000,
+  unit: '箱',
+  link: '',
+  details: '',
+  refPriceCents: null,
+  note: '',
+  images: [],
+  progress: { po: null, orderedMilli: 0, receivedMilli: 0, returnedMilli: 0, inventoryUnit: null, mergedLines: 0, sourcing: null, state: 'none' },
+  applicant: '',
+  channel: null,
+  supplier: null,
+  stock: null,
+  centralStock: { stockMilli: 1_250_000, inventoryUnit: '张', purchaseUnit: '箱', factorMilli: 500_000, convertible: true, lineQtyMilli: 2500 },
+  ...over,
+});
+const stockRequest = (id: number, over: Record<string, unknown>) => ({
+  id,
+  docNo: `XQ20261118-${id}`,
+  status: 'submitted',
+  deptConfirm: { state: 'none', head: null, confirmedByName: null, confirmedAt: null },
+  stockCheck: 'pending',
+  stockCheckSince: STOCK_NOW,
+  department: { id: 1, name: '客房部（合成）' },
+  requester: { id: 1, name: '前厅阿美' },
+  needBy: null,
+  createdAt: STOCK_NOW,
+  priority: 'normal',
+  submittedAt: STOCK_NOW,
+  approvableOn: null,
+  lockedToday: false,
+  source: 'form',
+  lineCount: 3,
+  summary: '一次性护理床单、洗手液、香薰石',
+  orderedLines: 0,
+  receivedLines: 0,
+  canDeptConfirm: false,
+  canStockCheck: true,
+  canAnswerSubstitute: false,
+  stockCheckedByName: null,
+  stockCheckedAt: null,
+  note: '',
+  reviewedByName: null,
+  reviewedAt: null,
+  reason: null,
+  isSynthetic: true,
+  approvals: [],
+  ...over,
+});
+const STOCK_REQUEST = stockRequest(STOCK_ID, {
+  lines: [
+    reqLine(9_908_101, 1, {}),
+    reqLine(9_908_102, 2, {
+      materialName: '洗手液（大瓶）',
+      name: '洗手液（按盒）',
+      qtyMilli: 2000,
+      unit: '盒',
+      centralStock: { stockMilli: 40_000, inventoryUnit: '瓶', purchaseUnit: '瓶', factorMilli: 1000, convertible: false, lineQtyMilli: null },
+    }),
+    reqLine(9_908_103, 3, { materialId: null, materialName: null, name: '香薰石', qtyMilli: 10_000, unit: '个', link: 'https://example.com/x', centralStock: null }),
+  ],
+});
+const SUB_REQUEST = stockRequest(SUB_ID, {
+  stockCheck: 'confirming',
+  canStockCheck: false,
+  canAnswerSubstitute: true,
+  stockCheckedByName: '李晓（物资）',
+  stockCheckedAt: STOCK_NOW,
+  lineCount: 1,
+  lines: [
+    reqLine(9_908_111, 1, {
+      stock: {
+        decision: 'substitute',
+        issuedQtyMilli: 0,
+        substitute: { materialId: 990_101, materialName: '一次性护理床单（普通款）', qtyMilli: 1_500_000, unit: '张', state: 'pending' },
+        issueDoc: null,
+        decidedByName: '李晓（物资）',
+        decidedAt: STOCK_NOW,
+        answeredByName: null,
+      },
+    }),
+  ],
+});
+
+async function mockRequests(ctx: BrowserContext) {
+  await ctx.route(`**/api/erp/requests/${STOCK_ID}`, (route) => route.fulfill({ json: STOCK_REQUEST }));
+  await ctx.route(`**/api/erp/requests/${SUB_ID}`, (route) => route.fulfill({ json: SUB_REQUEST }));
+  await ctx.route('**/api/erp/requests/stock-materials', (route) =>
+    route.fulfill({
+      json: [
+        { id: 990_101, code: 'M990101', name: '一次性护理床单（普通款）', specification: '180 × 220 cm', inventoryUnit: '张', decimals: 0, stockMilli: 3_000_000 },
+        { id: 990_102, code: 'M990102', name: '洗手液（小瓶）', specification: '', inventoryUnit: '瓶', decimals: 0, stockMilli: 60_000 },
+      ],
+    }),
+  );
+}
+
 async function openDevice(browser: Browser, baseURL: string, d: Device) {
   const ctx = await browser.newContext({ baseURL, viewport: d.viewport, hasTouch: true, isMobile: !!d.mobile, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
   await mockTables(ctx);
+  await mockRequests(ctx);
   const page = await ctx.newPage();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/login');
@@ -319,6 +433,34 @@ async function expectReceiptNamesReadable(page: Page) {
 }
 
 const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
+  // 8.1.10 核库：待核库页签；合成的需求单详情与核库对话框（三种行都有，选替代的一行）；等部门确认替代的那张
+  'requests-stock': async (page) => {
+    await page.goto('/erp/requests?view=stock');
+    await expect(page.getByTestId('requests-page')).toBeVisible();
+    await expectFits(page);
+    await page.goto(`/erp/requests?request=${STOCK_ID}`);
+    await expect(page.getByTestId('request-stock-pending')).toBeVisible();
+    await expect(page.getByTestId('request-line-central-1')).toContainText('1,250 张');
+    await expectFits(page);
+    await page.getByTestId('request-stock-check').click();
+    const dialog = page.getByTestId('stock-check-dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId('stock-line-2').getByRole('radio', { name: '替代' }).click();
+    await expect(dialog.getByTestId('stock-sub-material-2')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['stock-check-submit', 'stock-qty-1', 'stock-sub-material-2', 'stock-sub-qty-2']);
+    await page.keyboard.press('Escape');
+    await page.goto(`/erp/requests?request=${SUB_ID}`);
+    await expect(page.getByTestId('request-substitute-1')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['request-substitute-yes-1', 'request-substitute-no-1']);
+  },
+  // 8.1.10 急采：「待补合同」一栏（五个页签在手持机上自己横着滑）
+  'urgent-contract': async (page) => {
+    await page.goto('/purchasing/urgent?view=contract');
+    await expect(page.getByTestId('urgent-contract-due').or(page.getByText('没有要补合同的急采'))).toBeVisible();
+    await expectFits(page);
+  },
   // 8.1.9 零采备用金（总额没配置时顶上有提示，照样不横向滚动）
   pool: async (page) => {
     await page.goto('/erp/pool');

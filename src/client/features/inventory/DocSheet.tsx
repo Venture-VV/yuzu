@@ -195,6 +195,19 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
             由采购在「采购 → 急采」里补采购单，急采已经审批过，补单提交即确认。
           </Notice>
         )}
+        {doc.contractDue && (
+          <Notice
+            tone={doc.contractDue.daysLeft < 0 ? 'error' : 'warning'}
+            title={
+              doc.contractDue.daysLeft < 0
+                ? `急采要补合同 · 已超期 ${-doc.contractDue.daysLeft} 天（期限 ${doc.contractDue.dueOn}）`
+                : `急采要补合同 · 还剩 ${doc.contractDue.daysLeft} 天（期限 ${doc.contractDue.dueOn}）`
+            }
+            data-testid="doc-contract-due"
+          >
+            {doc.purchaseOrder ? `在补单采购单 ${doc.purchaseOrder.docNo} 上补合同，补上之前不能付款。` : '先补采购单，再在补单采购单上补合同；补上之前不能付款。'}
+          </Notice>
+        )}
         {doc.deptSign && (
           <Notice tone="success" title={`${doc.deptSign.signedByName} 已签收 · ${formatDateTime(doc.deptSign.signedAt)}`}>
             {doc.deptSign.note || '部门签收时没有写差异。'}

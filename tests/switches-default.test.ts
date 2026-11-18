@@ -7,6 +7,7 @@ import { ERP_MODULE_KEYS } from '../src/shared/erp';
 import { loadGiftRules } from '../src/server/modules/gifts';
 import { loadInventorySettings } from '../src/server/modules/inventory/common';
 import { loadLocationRules } from '../src/server/modules/locations';
+import { loadPurchaseRules } from '../src/server/modules/inventory/purchase-rules';
 import { loadSettings } from '../src/server/modules/settings';
 import { api, setup, type TestContext } from './helpers';
 
@@ -31,6 +32,8 @@ describe('功能开关都默认开（8.0.20）', () => {
     // 库管入库（8.1.9，KR6）、签赠（8.1.9，SZ8）
     expect((await loadInventorySettings(ctx.sql)).directReceipt).toBe(true);
     expect((await loadGiftRules(ctx.sql)).enabled).toBe(true);
+    // 提需核库（8.1.10，CK12）
+    expect((await loadPurchaseRules(ctx.sql)).stockCheckEnabled).toBe(true);
     const dining = await api(ctx.app, ctx.owner, 'GET', '/api/admin/dining');
     expect(dining.body.rules).toMatchObject({ enabled: true, tablesEnabled: true });
   });

@@ -41,6 +41,8 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     case 'petty_settlement':
       return d.advance && typeof d.advance === 'object' && typeof d.settlementId === 'number' ? { refId: d.settlementId, advanceId: d.advance.id } : null;
     case 'purchase_request':
+    // 核库、答复替代（8.1.10）：返回那张需求单
+    case 'request_stock':
       return d.request && typeof d.request === 'object' ? { refId: d.request.id } : null;
     case 'ap_offset':
       return d.offset && typeof d.offset === 'object' ? { refId: d.offset.id } : null;

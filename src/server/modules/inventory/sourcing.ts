@@ -201,8 +201,11 @@ async function checkSourcingRequests(tx: Tx, lines: { materialId: number; reques
     SELECT r.id FROM purchase_requests r
     WHERE r.id IN (SELECT request_id FROM purchase_request_lines WHERE id IN ${tx(all)})
     ORDER BY r.id FOR UPDATE`;
-  const rows = await tx<{ id: number; name: string; materialId: number | null; status: string; docNo: string; takenBy: string | null; inSourcing: string | null }[]>`
+  const rows = await tx<{ id: number; name: string; materialId: number | null; status: string; docNo: string; takenBy: string | null; inSourcing: string | null; issued: boolean }[]>`
     SELECT l.id, l.name, l.material_id, r.status, r.doc_no,
+           -- 整行从库存领用了的（8.1.10 核库转领用）不再买
+           EXISTS (SELECT 1 FROM request_line_stock ls JOIN inv_docs ld ON ld.id = ls.inv_doc_id AND ld.status = 'confirmed'
+                   WHERE ls.request_line_id = l.id AND ls.issued_qty_milli >= l.qty_milli) AS issued,
            (SELECT po.doc_no FROM purchase_order_line_requests x JOIN purchase_order_lines pl ON pl.id = x.po_line_id
               JOIN purchase_orders po ON po.id = pl.po_id
              WHERE x.request_line_id = l.id AND po.status <> 'cancelled' LIMIT 1) AS taken_by,
@@ -218,6 +221,7 @@ async function checkSourcingRequests(tx: Tx, lines: { materialId: number; reques
       if (!r) throw unprocessable('REQUEST_LINE_NOT_FOUND', '需求单的行不存在，请刷新后重试');
       if (r.materialId !== null && Number(r.materialId) !== l.materialId) throw unprocessable('REQUEST_MATERIAL_MISMATCH', `「${r.name}」的物料与需求单不一致`);
       if (r.status !== 'approved') throw conflict('REQUEST_NOT_APPROVED', `需求单 ${r.docNo} 还没通过审核，不能发起询价`);
+      if (r.issued) throw conflict('REQUEST_LINE_ISSUED', `「${r.name}」已经从库存领用，不用再买`);
       if (r.takenBy) throw conflict('REQUEST_LINE_ORDERED', `「${r.name}」已经在采购单 ${r.takenBy} 里`, { docNo: r.takenBy });
       if (r.inSourcing) throw conflict('REQUEST_LINE_IN_SOURCING', `「${r.name}」已经在询价单 ${r.inSourcing} 里`, { docNo: r.inSourcing });
     }

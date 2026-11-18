@@ -32,6 +32,11 @@ interface Draft {
   cutoffTime: string;
   requestPoDirect: boolean;
   tiers: { max: string; approverIds: number[] }[];
+  /** 8.1.10：提需核库与时限、急采补合同金额与期限 */
+  stockCheckEnabled: boolean;
+  stockCheckHours: string;
+  urgentContractMin: string;
+  contractDueDays: string;
 }
 
 const toDraft = (r: PurchaseRules): Draft => ({
@@ -47,6 +52,10 @@ const toDraft = (r: PurchaseRules): Draft => ({
   cutoffTime: r.cutoffTime,
   requestPoDirect: r.requestPoDirect,
   tiers: r.urgentTiers.map((t) => ({ max: centsToInput(t.maxCents), approverIds: [...t.approverIds] })),
+  stockCheckEnabled: r.stockCheckEnabled,
+  stockCheckHours: String(r.stockCheckHours),
+  urgentContractMin: centsToInput(r.urgentContractMinCents),
+  contractDueDays: String(r.contractDueDays),
 });
 
 const TIER_NAMES = ['审批人 A', '审批人 B', '审批人 C'];
@@ -78,8 +87,12 @@ export function PurchaseRulesCard() {
       regularUseDays: Number(draft.regularUseDays),
       arrivalOverdueDays: Number(draft.arrivalOverdueDays),
       flowStallDays: Number(draft.flowStallDays),
+      stockCheckHours: Number(draft.stockCheckHours),
+      contractDueDays: Number(draft.contractDueDays),
     };
+    const urgentContractMinCents = draft.urgentContractMin.trim() === '' ? 0 : parseYuan(draft.urgentContractMin);
     if (quoteThresholdCents === null) return setError('询价门槛的金额格式不正确');
+    if (urgentContractMinCents === null) return setError('急采补合同金额的格式不正确');
     if (Object.values(ints).some((n) => !Number.isInteger(n))) return setError('报价家数与天数要填整数');
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(draft.cutoffTime)) return setError('截单时间要写成 17:00 这样（24 小时制）');
     const urgentTiers = draft.tiers.map((t) => ({ maxCents: parseYuan(t.max), approverIds: t.approverIds }));
@@ -95,6 +108,8 @@ export function PurchaseRulesCard() {
         requestPoDirect: draft.requestPoDirect,
         deptConfirm: draft.deptConfirm,
         urgentTiers,
+        stockCheckEnabled: draft.stockCheckEnabled,
+        urgentContractMinCents,
       });
       qc.setQueryData(pk.purchaseRules, next);
       setDraft(toDraft(next));
@@ -311,6 +326,54 @@ export function PurchaseRulesCard() {
           />
         </Field>
       </div>
+
+      <section className="space-y-3 border-t border-line pt-4" data-testid="pr-8110">
+        <h3 className="text-[13.5px] font-bold">提需核库与急采补合同（8.1.10）</h3>
+        {toggle(
+          '提需核库：选了物料、总仓有结存的需求单先由库管核库，有货的转领用，再进采购审核（标了「急」的、手填的新品不核库）',
+          draft.stockCheckEnabled,
+          (v) => setDraft({ ...draft, stockCheckEnabled: v }),
+          'pr-stock-check',
+        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="核库时限（小时）" htmlFor="pr-stock-hours" hint="进「待核库」超过这么久没核完的自动转采购；部门没回替代提议的也按它。默认 24 小时（1–168）">
+            <Input
+              id="pr-stock-hours"
+              inputMode="numeric"
+              value={draft.stockCheckHours}
+              disabled={!editable}
+              onChange={(e) => setDraft({ ...draft, stockCheckHours: e.target.value })}
+              className="h-10"
+              data-testid="pr-stock-hours"
+            />
+          </Field>
+          <Field
+            label="急采合计到多少要补合同"
+            htmlFor="pr-urgent-contract"
+            hint="急采生效时达到这个金额的，要在补单采购单上补合同，补上之前不能付款。默认 20000 元（会上暂定的 2 万），填 0 不要求；改了只管以后生效的急采"
+          >
+            <MoneyInput
+              id="pr-urgent-contract"
+              value={draft.urgentContractMin}
+              disabled={!editable}
+              onChange={(e) => setDraft({ ...draft, urgentContractMin: e.target.value })}
+              className="h-10"
+              data-testid="pr-urgent-contract"
+            />
+          </Field>
+          <Field label="补合同期限（天）" htmlFor="pr-contract-days" hint="从急采生效那天算，超期的在「急采 → 待补合同」里标红，照样能补。默认 15 天（1–90）">
+            <Input
+              id="pr-contract-days"
+              inputMode="numeric"
+              value={draft.contractDueDays}
+              disabled={!editable}
+              onChange={(e) => setDraft({ ...draft, contractDueDays: e.target.value })}
+              className="h-10"
+              data-testid="pr-contract-days"
+            />
+          </Field>
+        </div>
+      </section>
       {error && <Notice tone="error" title={error} />}
     </Card>
   );

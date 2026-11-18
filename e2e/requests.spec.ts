@@ -65,8 +65,18 @@ test.describe('部门采购需求单', () => {
     await expect(page).toHaveURL(/\/erp\/requests\?request=\d+/);
     const requestId = Number(new URL(page.url()).searchParams.get('request'));
     const sheet = page.getByTestId('request-sheet');
-    await expect(sheet).toContainText('待审核');
     await expect(sheet).toContainText(newName);
+    // 8.1.10 核库：床单这一行总仓有货时先进待核库（演示库的提需核库默认开着）——店主核库，这一行转采购，再审核
+    const created = (await (await page.request.get(`/api/erp/requests/${requestId}`)).json()) as { stockCheck: string };
+    if (created.stockCheck === 'pending') {
+      await expect(page.getByTestId('request-sheet-status')).toHaveText('待核库');
+      await page.getByTestId('request-stock-check').click();
+      const dialog = page.getByTestId('stock-check-dialog');
+      await dialog.getByTestId('stock-line-2').getByRole('radio', { name: '转采购' }).click();
+      await page.getByTestId('stock-check-submit').click();
+      await expect(dialog).toHaveCount(0);
+    }
+    await expect(sheet).toContainText('待审核');
     await page.getByTestId('request-approve').click();
     await expect(sheet).toContainText('已通过');
 

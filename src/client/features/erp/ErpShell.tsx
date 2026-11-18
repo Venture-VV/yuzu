@@ -176,12 +176,15 @@ export function ErpShell() {
                 : k === 'inventory' && supplyTodo.data
                   ? supplyTodo.data.slowMoving + supplyTodo.data.expiringLots + supplyTodo.data.expiredLots || undefined
                   : k === 'purchasing' && supplyTodo.data
-                    ? supplyTodo.data.pendingAdmission + supplyTodo.data.licensesDue || undefined
-                    : k === 'receivables' && arTodo.data
-                      ? arTodo.data.overdueCharges + (arTodo.data.platformOverdueCents > 0 ? 1 : 0) || undefined
-                      : k === 'bank' && bankTodo.data
-                        ? bankTodo.data.stale + bankTodo.data.unmatched || undefined
-                        : undefined,
+                    ? supplyTodo.data.pendingAdmission + supplyTodo.data.licensesDue + (supplyTodo.data.contractDue ?? 0) || undefined
+                    : // 待核库的需求单（8.1.10，给库管）
+                      k === 'requests' && supplyTodo.data && can('request.stock')
+                      ? supplyTodo.data.stockChecks || undefined
+                      : k === 'receivables' && arTodo.data
+                        ? arTodo.data.overdueCharges + (arTodo.data.platformOverdueCents > 0 ? 1 : 0) || undefined
+                        : k === 'bank' && bankTodo.data
+                          ? bankTodo.data.stale + bankTodo.data.unmatched || undefined
+                          : undefined,
     alert:
       (k === 'approvals' && !!todo.data?.overdue) ||
       (k === 'contracts' && contractsDue.some((x) => x.daysLeft < 0)) ||

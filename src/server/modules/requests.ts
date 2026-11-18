@@ -6,6 +6,8 @@
 //   下单 / 到货 / 退货按采购单与收货单算。
 // · 图片：浏览器压缩后上传，服务端核对文件头与大小，按内容摘要只存一份。
 // 加锁顺序：采购单 → 需求单（转采购单时锁需求单，见 purchasing.ts）。
+// 8.1.10 核库转领用（request-stock.ts）：提交、主管确认以后选了物料、总仓有结存的进「待核库」，核完才能审核通过；
+// 已经从库存领用的行不能再改、整单不能退回修改；全部领用的变成「已转领用」。
 
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
@@ -25,7 +27,10 @@ import {
   type RequestMeta,
   type RequestPriority,
   type RequestsList,
+  type RequestLineStock,
   type RequestStatus,
+  type StockCheckState,
+  stockCheckOpen,
 } from '@shared/requests';
 import { isUniqueViolation, readSnapshot, type Db } from '../db';
 import { guard, guardAny } from '../auth/guard';
@@ -44,6 +49,7 @@ import { shiftDate } from '@shared/labels';
 import { loadPurchaseRules } from './inventory/purchase-rules';
 import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { hashRequest } from '../lib/idempotency';
+import { CENTRAL_STOCK_SQL, centralStockOf, clearStockDecisions, closeOpenStockCheck, enterStockCheck, hasIssuedLines, LINE_STOCK_SQL, lineStockOf } from './request-stock';
 
 const id = z.number().int().positive();
 const ReasonInput = z.object({ reason: z.string().trim().min(2, '请填写原因（至少 2 个字）').max(200) });
@@ -61,13 +67,16 @@ async function myContext(db: Db, actor: Actor) {
     canReview: can(actor, 'request.review'),
     canCreate: can(actor, 'request.create'),
     headOf: heads.map((h) => Number(h.id)),
+    // 核库（8.1.10，CK14）：库管看全部需求单（只读），待核库的由他核
+    canStock: can(actor, 'request.stock'),
   };
 }
 
-/** 看得到这张需求单：审核的人看全部；部门申购看本部门的与自己提的 */
+/** 看得到这张需求单：审核的人、核库的库管看全部；部门申购看本部门的与自己提的 */
 function visible(me: Awaited<ReturnType<typeof myContext>>, actor: Actor, r: { departmentId: number; requesterId: number; deptHeadId?: number | null }) {
   return (
     me.canReview ||
+    me.canStock ||
     r.requesterId === actor.id ||
     (me.departmentId !== null && r.departmentId === me.departmentId) ||
     // 部门主管（8.0.17）：我当主管的部门的、提交时记着要我确认的
@@ -139,14 +148,29 @@ function progressOf(p: RawProgress | null, s: { id: number; docNo: string } | nu
   };
 }
 
+/** 待审核不含还在核库的（8.1.10：核完才能审核）；待核库是待审核里还在核库、等部门确认替代的。列表与导出共用（导出的筛选与列表一样，Codex 审查 b3ca67a） */
+const STOCK_FILTER = (db: Db, f: { status?: RequestStatus; stock?: boolean }) =>
+  f.stock ? db`AND r.status = 'submitted' AND r.stock_check IN ('pending', 'confirming')` : f.status === 'submitted' ? db`AND r.stock_check NOT IN ('pending', 'confirming')` : db``;
+
 async function summaries(
   db: Db,
-  f: { ids?: number[]; status?: RequestStatus; departmentId?: number; requesterOrDept?: { staffId: number; departmentId: number | null }; from?: string; to?: string; timezone?: string },
+  f: {
+    ids?: number[];
+    status?: RequestStatus;
+    /** 待核库（8.1.10）：待审核里还在核库、等部门确认替代的 */
+    stock?: boolean;
+    departmentId?: number;
+    requesterOrDept?: { staffId: number; departmentId: number | null };
+    from?: string;
+    to?: string;
+    timezone?: string;
+  },
 ) {
   // 截单（03）：今天还不能通过的（最早可通过日期在今天以后）；截单关了以后都能通过（按现在的规则）
   const today = f.timezone && (await loadPurchaseRules(db)).cutoffEnabled ? todayIn(f.timezone) : null;
   return db<
-    (Omit<PurchaseRequestSummary, 'department' | 'requester' | 'deptConfirm'> & {
+    (Omit<PurchaseRequestSummary, 'department' | 'requester' | 'deptConfirm' | 'stockCheck'> & {
+      stockCheck: StockCheckState;
       departmentId: number;
       departmentName: string;
       requesterId: number;
@@ -161,6 +185,7 @@ async function summaries(
     SELECT r.id, r.doc_no, r.status, r.need_by, r.created_at, r.department_id, d.name AS department_name, r.requester_id, s.display_name AS requester_name,
            r.priority, r.submitted_at, r.approvable_on, r.source,
            r.dept_confirm, r.dept_head_id, hd.display_name AS dept_head_name, cf.display_name AS dept_confirmed_by_name, r.dept_confirmed_at,
+           r.stock_check, r.stock_check_since,
            (r.status = 'submitted' AND r.approvable_on IS NOT NULL AND ${today}::date IS NOT NULL AND r.approvable_on > ${today}::date) AS locked_today,
            (SELECT count(*)::int FROM purchase_request_lines l WHERE l.request_id = r.id) AS line_count,
            coalesce((SELECT string_agg(l.name, '、' ORDER BY l.line_no) FROM purchase_request_lines l WHERE l.request_id = r.id AND l.line_no <= 3), '') AS summary,
@@ -177,6 +202,7 @@ async function summaries(
     WHERE TRUE
       ${f.ids ? db`AND r.id IN ${db(f.ids)}` : db``}
       ${f.status ? db`AND r.status = ${f.status}` : db``}
+      ${STOCK_FILTER(db, f)}
       ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
       ${f.from && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date >= ${f.from}` : db``}
       ${f.to && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date <= ${f.to}` : db``}
@@ -188,10 +214,13 @@ async function summaries(
           : db``
       }
     ${
-      f.status === 'submitted'
-        ? // 待审核（CG02）：紧急在前 → 期望到货日期早的在前（没填的排后）→ 提交早的在前（与 @shared/requests 的 reviewOrder 一样）
-          db`ORDER BY (r.priority = 'urgent') DESC, r.need_by ASC NULLS LAST, r.submitted_at, r.id`
-        : db`ORDER BY r.created_at DESC, r.id DESC`
+      f.stock
+        ? // 待核库：待核库的在前，进待核库早的在前
+          db`ORDER BY (r.stock_check = 'pending') DESC, r.stock_check_since, r.id`
+        : f.status === 'submitted'
+          ? // 待审核（CG02）：紧急在前 → 期望到货日期早的在前（没填的排后）→ 提交早的在前（与 @shared/requests 的 reviewOrder 一样）
+            db`ORDER BY (r.priority = 'urgent') DESC, r.need_by ASC NULLS LAST, r.submitted_at, r.id`
+          : db`ORDER BY r.created_at DESC, r.id DESC`
     }
     LIMIT 500`;
 }
@@ -215,9 +244,9 @@ const toSummary = (r: Awaited<ReturnType<typeof summaries>>[number]): PurchaseRe
 const isHeadOf = (me: Awaited<ReturnType<typeof myContext>>, actor: Actor, r: { departmentId: number; deptHeadId: number | null }) =>
   actor.role === 'owner' || (r.deptHeadId != null && Number(r.deptHeadId) === actor.id) || me.headOf.includes(r.departmentId);
 
-export async function listRequests(db: Db, actor: Actor, f: { status?: RequestStatus; departmentId?: number; from?: string; to?: string; timezone?: string }): Promise<RequestsList> {
+export async function listRequests(db: Db, actor: Actor, f: { status?: RequestStatus; stock?: boolean; departmentId?: number; from?: string; to?: string; timezone?: string }): Promise<RequestsList> {
   const me = await myContext(db, actor);
-  const rows = await summaries(db, { ...f, requesterOrDept: me.canReview ? undefined : { staffId: actor.id, departmentId: me.departmentId } });
+  const rows = await summaries(db, { ...f, requesterOrDept: me.canReview || me.canStock ? undefined : { staffId: actor.id, departmentId: me.departmentId } });
   return { requests: rows.map(toSummary), me };
 }
 
@@ -226,22 +255,51 @@ export async function getRequest(db: Db, actor: Actor, requestId: number, timezo
   const [row] = await summaries(db, { ids: [requestId], timezone });
   if (!row || !visible(me, actor, { departmentId: row.departmentId, requesterId: row.requesterId, deptHeadId: row.deptHeadId })) throw notFound('需求单不存在');
   const canDeptConfirm = row.status === 'submitted' && row.deptConfirm === 'pending' && isHeadOf(me, actor, row);
-  const [extra] = await db<{ note: string; reviewedByName: string | null; reviewedAt: string | null; reason: string | null; isSynthetic: boolean }[]>`
-    SELECT r.note, rb.display_name AS reviewed_by_name, r.reviewed_at, r.reason, r.is_synthetic
-    FROM purchase_requests r LEFT JOIN staff rb ON rb.id = r.reviewed_by WHERE r.id = ${requestId}`;
-  const lines = await db<(Omit<PurchaseRequest['lines'][number], 'progress'> & { progress: RawProgress | null; sourcing: { id: number; docNo: string } | null })[]>`
+  // 核库（8.1.10）：库管核待核库的；替代由提单人、这个部门的主管或店主答复
+  const canStockCheck = me.canStock && row.status === 'submitted' && row.stockCheck === 'pending';
+  const canAnswerSubstitute = row.status === 'submitted' && row.stockCheck === 'confirming' && (row.requesterId === actor.id || isHeadOf(me, actor, row));
+  const [extra] = await db<
+    { note: string; reviewedByName: string | null; reviewedAt: string | null; reason: string | null; isSynthetic: boolean; stockCheckedByName: string | null; stockCheckedAt: string | null }[]
+  >`
+    SELECT r.note, rb.display_name AS reviewed_by_name, r.reviewed_at, r.reason, r.is_synthetic, sc.display_name AS stock_checked_by_name, r.stock_checked_at
+    FROM purchase_requests r LEFT JOIN staff rb ON rb.id = r.reviewed_by LEFT JOIN staff sc ON sc.id = r.stock_checked_by WHERE r.id = ${requestId}`;
+  const lines = await db<
+    (Omit<PurchaseRequest['lines'][number], 'progress' | 'stock' | 'centralStock'> & {
+      progress: RawProgress | null;
+      sourcing: { id: number; docNo: string } | null;
+      stock: RequestLineStock | null;
+      centralRaw: { stockMilli: number; inventoryUnit: string; purchaseUnit: string; factorMilli: number } | null;
+    })[]
+  >`
     SELECT l.id, l.line_no, l.material_id, m.name AS material_name, l.name, l.purpose, l.qty_milli, l.unit, l.link, l.details,
            l.ref_price_cents, l.note, l.applicant, l.channel,
            CASE WHEN l.supplier_id IS NULL THEN NULL ELSE json_build_object('id', sp.id, 'name', sp.name) END AS supplier,
            coalesce((SELECT json_agg(json_build_object('id', i.image_id, 'url', '/api/erp/images/' || i.image_id) ORDER BY i.sort_no)
                      FROM purchase_request_line_images i WHERE i.request_line_id = l.id), '[]'::json) AS images,
-           ${PROGRESS_SQL(db)} AS progress, ${SOURCING_SQL(db)} AS sourcing
+           ${PROGRESS_SQL(db)} AS progress, ${SOURCING_SQL(db)} AS sourcing,
+           ${LINE_STOCK_SQL(db)} AS stock, ${CENTRAL_STOCK_SQL(db)} AS central_raw
     FROM purchase_request_lines l LEFT JOIN materials m ON m.id = l.material_id LEFT JOIN suppliers sp ON sp.id = l.supplier_id
     WHERE l.request_id = ${requestId} ORDER BY l.line_no`;
   const approvals = await db<PurchaseRequest['approvals']>`
     SELECT a.id, a.action, s.display_name AS actor_name, a.reason, a.created_at
     FROM approval_logs a JOIN staff s ON s.id = a.actor_id WHERE a.doc_kind = 'purchase_request' AND a.doc_id = ${requestId} ORDER BY a.id`;
-  return { ...toSummary(row), ...extra!, canDeptConfirm, lines: lines.map(({ sourcing, ...l }) => ({ ...l, progress: progressOf(l.progress, sourcing) })), approvals };
+  // 总仓结存只在还没结束的需求单上给（现在的结存，CK9、CK17）
+  const live = row.status === 'submitted' || row.status === 'returned';
+  return {
+    ...toSummary(row),
+    ...extra!,
+    canDeptConfirm,
+    canStockCheck,
+    canAnswerSubstitute,
+    lines: lines.map(({ sourcing, centralRaw, ...l }) => {
+      const stock = lineStockOf(l.stock);
+      const progress = progressOf(l.progress, sourcing);
+      // 整行从库存领用、没下采购单的：进度是「已领用」
+      const issuedAll = !!stock?.issueDoc && !stock.issueDoc.voided && stock.issuedQtyMilli >= Number(l.qtyMilli);
+      return { ...l, stock, centralStock: live ? centralStockOf(centralRaw, l.unit) : null, progress: issuedAll && !progress.po ? { ...progress, state: 'issued' as const } : progress };
+    }),
+    approvals,
+  };
 }
 
 /** 已通过、还没下单、也没被询价单占着的需求行（转采购单、发起询价用；ids 给了就只取这些） */
@@ -252,8 +310,12 @@ export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine
            r.priority, r.need_by, r.submitted_at, l.applicant, l.channel,
            CASE WHEN l.supplier_id IS NULL THEN NULL ELSE json_build_object('id', sp.id, 'name', sp.name) END AS supplier,
            coalesce((SELECT json_agg(json_build_object('id', i.image_id, 'url', '/api/erp/images/' || i.image_id) ORDER BY i.sort_no)
-                     FROM purchase_request_line_images i WHERE i.request_line_id = l.id), '[]'::json) AS images
+                     FROM purchase_request_line_images i WHERE i.request_line_id = l.id), '[]'::json) AS images,
+           coalesce(ls.issued_qty_milli, 0) AS issued_qty_milli
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
+    -- 从库存领用了的数量（8.1.10）：领料单冲销了的不算
+    LEFT JOIN request_line_stock ls ON ls.request_line_id = l.id AND ls.inv_doc_id IS NOT NULL
+         AND EXISTS (SELECT 1 FROM inv_docs ld WHERE ld.id = ls.inv_doc_id AND ld.status = 'confirmed')
     JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
     LEFT JOIN materials m ON m.id = l.material_id LEFT JOIN suppliers sp ON sp.id = l.supplier_id
     WHERE r.status = 'approved'
@@ -263,10 +325,12 @@ export async function openLines(db: Db, ids?: number[]): Promise<OpenRequestLine
       AND NOT EXISTS (SELECT 1 FROM sourcing_line_requests sr JOIN sourcing_lines sl ON sl.id = sr.sourcing_line_id
                       JOIN sourcing_events e ON e.id = sl.event_id
                       WHERE sr.request_line_id = l.id AND ${sourcingHolds(db)})
+      -- 整行从库存领用了的不再转采购（8.1.10）
+      AND coalesce(ls.issued_qty_milli, 0) < l.qty_milli
       ${ids ? db`AND l.id IN ${db(ids)}` : db``}
     ORDER BY (r.priority = 'urgent') DESC, r.need_by ASC NULLS LAST, r.submitted_at, r.id, l.line_no
     LIMIT 500`;
-  return rows.map(({ departmentId, departmentName, ...r }) => ({ ...r, department: { id: departmentId, name: departmentName } }));
+  return rows.map(({ departmentId, departmentName, ...r }) => ({ ...r, issuedQtyMilli: Number(r.issuedQtyMilli), department: { id: departmentId, name: departmentName } }));
 }
 
 /** 提需求单要用的选项。物料只列受管、在用的（采购单只能下这些） */
@@ -426,6 +490,8 @@ export async function createRequest(deps: Deps, raw: unknown, actor: Actor, ip?:
                 ${confirm.state}, ${confirm.headId}, ${confirm.state === 'confirmed' ? actor.id : null}, ${confirm.state === 'confirmed' ? tx`now()` : null})
         RETURNING id`;
       await writeLines(tx, row!.id, input.lines);
+      // 核库（8.1.10，CK13）：不用主管确认的提交就看要不要核库
+      await enterStockCheck(tx, row!.id);
       await tx`INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id) VALUES (${input.clientKey}, 'purchase_request', ${requestHash}, ${row!.id}, ${actor.id})`;
       await logApproval(tx, 'purchase_request', row!.id, 'create', actor.id);
       await logApproval(tx, 'purchase_request', row!.id, 'submit', actor.id);
@@ -458,9 +524,11 @@ async function lockRequest(tx: Db, requestId: number) {
       priority: RequestPriority;
       deptConfirm: 'none' | 'pending' | 'confirmed';
       deptHeadId: number | null;
+      stockCheck: StockCheckState;
     }[]
   >`
-    SELECT id, status, requester_id, department_id, doc_no, approvable_on, priority, dept_confirm, dept_head_id FROM purchase_requests WHERE id = ${requestId} FOR UPDATE`;
+    SELECT id, status, requester_id, department_id, doc_no, approvable_on, priority, dept_confirm, dept_head_id, stock_check
+    FROM purchase_requests WHERE id = ${requestId} FOR UPDATE`;
   if (!r) throw notFound('需求单不存在');
   return r;
 }
@@ -475,7 +543,10 @@ export async function updateRequest(deps: Deps, requestId: number, raw: unknown,
     if (r.requesterId !== actor.id && actor.role !== 'owner') throw forbidden('只能改自己提的需求单');
     if (r.status !== 'submitted' && r.status !== 'returned') throw conflict('INVALID_STATE', '需求单已结束审核，不能再改');
     if (input.departmentId !== null && input.departmentId !== r.departmentId) throw badRequest('需求单的部门不能改，请撤回后重新提');
+    // 核库（8.1.10）：已经有行从库存领用的不能再改（数据库守卫兜底）；没领用的核库结果随明细一起换掉，改完重新看要不要核库
+    if (await hasIssuedLines(tx, requestId)) throw conflict('STOCK_ISSUED_LOCKED', '这张需求单已经有行从库存领用，不能再改；剩下的不要了可以撤回');
     await validateLines(tx, input.lines);
+    await clearStockDecisions(tx, requestId);
     await tx`DELETE FROM purchase_request_line_images WHERE request_line_id IN (SELECT id FROM purchase_request_lines WHERE request_id = ${requestId})`;
     await tx`DELETE FROM purchase_request_lines WHERE request_id = ${requestId}`;
     await writeLines(tx, requestId, input.lines);
@@ -490,6 +561,7 @@ export async function updateRequest(deps: Deps, requestId: number, raw: unknown,
              dept_confirmed_by = ${confirm.state === 'confirmed' ? actor.id : null}, dept_confirmed_at = ${confirm.state === 'confirmed' ? tx`now()` : null}
       WHERE id = ${requestId}`;
     await logApproval(tx, 'purchase_request', requestId, r.status === 'returned' ? 'submit' : 'revise', actor.id);
+    await enterStockCheck(tx, requestId);
     // 改好提交了：这张需求单的修改草稿（自己的）关掉
     await closeDraftsOnSubmit(tx, actor.id, { draftKey, requestId });
   });
@@ -512,7 +584,10 @@ export async function actOnRequest(deps: Deps, requestId: number, action: 'appro
           if (r.deptConfirm === 'confirmed') return;
           if (r.status !== 'submitted' || r.deptConfirm !== 'pending') throw conflict('INVALID_STATE', '这张需求单现在不用主管确认');
           await tx`UPDATE purchase_requests SET dept_confirm = 'confirmed', dept_confirmed_by = ${actor.id}, dept_confirmed_at = now(), updated_at = now() WHERE id = ${requestId}`;
-          return logApproval(tx, 'purchase_request', requestId, 'approve', actor.id, '部门主管确认');
+          await logApproval(tx, 'purchase_request', requestId, 'approve', actor.id, '部门主管确认');
+          // 主管确认以后看要不要核库（8.1.10，CK13）
+          await enterStockCheck(tx, requestId);
+          return;
         }
         if (r.status === 'returned') return;
         if (r.status !== 'submitted' || r.deptConfirm !== 'pending') throw conflict('INVALID_STATE', '只有等主管确认的需求单可以由主管退回');
@@ -528,6 +603,15 @@ export async function actOnRequest(deps: Deps, requestId: number, action: 'appro
           const [h] = r.deptHeadId ? await tx<{ name: string }[]>`SELECT display_name AS name FROM staff WHERE id = ${r.deptHeadId}` : [];
           throw conflict('DEPT_CONFIRM_REQUIRED', `这张需求单要部门主管${h ? `（${h.name}）` : ''}先确认，确认以后才能审核通过（可以先退回或定为不采购）`, { headId: r.deptHeadId });
         }
+        // 核库（8.1.10，CK14）：库管核完（替代等部门答复完）才能通过
+        if (stockCheckOpen(r.stockCheck)) {
+          throw conflict(
+            'STOCK_CHECK_PENDING',
+            r.stockCheck === 'pending'
+              ? '这张需求单在等库管核库（看总仓有没有货），核完以后才能审核通过（可以先定为不采购）'
+              : '这张需求单在等部门确认库管提议的替代品，答复以后才能审核通过（可以先定为不采购）',
+          );
+        }
         // 每日截单（03，CG03）：截单后提交的当天不能通过（退回、不采购不受限）；截单关了以后不再拦（按现在的规则）
         if (r.approvableOn && r.approvableOn > todayIn(deps.config.timezone) && (await loadPurchaseRules(tx)).cutoffEnabled) {
           throw conflict('CUTOFF_LOCKED', `这张需求单是截单以后提交的，今天不能审核通过，${r.approvableOn} 起可以通过（可以先退回或定为不采购）`, { approvableOn: r.approvableOn });
@@ -539,12 +623,16 @@ export async function actOnRequest(deps: Deps, requestId: number, action: 'appro
         if (!can(actor, 'request.review')) throw forbidden('当前账号不能审核需求单');
         if (r.status === 'returned') return;
         if (r.status !== 'submitted') throw conflict('INVALID_STATE', '只有待审核的需求单可以退回');
+        // 核库（8.1.10）：核库没完的不退回；已经有行领用的不能退回修改（领用的行不能再改）
+        if (stockCheckOpen(r.stockCheck)) throw conflict('STOCK_CHECK_PENDING', '这张需求单还在核库，核完以后才能退回（可以先定为不采购）');
+        if (await hasIssuedLines(tx, requestId)) throw conflict('STOCK_ISSUED_LOCKED', '这张需求单已经有行从库存领用，不能退回修改；剩下的可以通过或定为不采购');
         await tx`UPDATE purchase_requests SET status = 'returned', reason = ${reason}, updated_at = now() WHERE id = ${requestId}`;
         return logApproval(tx, 'purchase_request', requestId, 'return', actor.id, reason);
       case 'reject':
         if (!can(actor, 'request.review')) throw forbidden('当前账号不能审核需求单');
         if (r.status === 'rejected') return;
         if (r.status !== 'submitted' && r.status !== 'returned') throw conflict('INVALID_STATE', '只有待审核或退回的需求单可以定为不采购');
+        await closeOpenStockCheck(tx, requestId);
         await tx`UPDATE purchase_requests SET status = 'rejected', reviewed_by = ${actor.id}, reviewed_at = now(), reason = ${reason}, updated_at = now() WHERE id = ${requestId}`;
         await closeDraftsOfRequest(tx, requestId);
         return logApproval(tx, 'purchase_request', requestId, 'cancel', actor.id, `不采购：${reason}`);
@@ -552,6 +640,7 @@ export async function actOnRequest(deps: Deps, requestId: number, action: 'appro
         if (r.requesterId !== actor.id && actor.role !== 'owner') throw forbidden('只能撤回自己提的需求单');
         if (r.status === 'cancelled') return;
         if (r.status !== 'submitted' && r.status !== 'returned') throw conflict('INVALID_STATE', '需求单已结束审核，不能撤回');
+        await closeOpenStockCheck(tx, requestId);
         await tx`UPDATE purchase_requests SET status = 'cancelled', reason = ${reason}, updated_at = now() WHERE id = ${requestId}`;
         await closeDraftsOfRequest(tx, requestId);
         return logApproval(tx, 'purchase_request', requestId, 'cancel', actor.id, reason);
@@ -632,14 +721,22 @@ export async function requestChecks(db: Db) {
 // ───────────────────────── 导出（v0.7.9） ─────────────────────────
 
 const EXPORT_LIMIT = 20_000;
-const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = { none: '未下单', sourcing: '询价中', ordered: '已下单', partial: '部分到货', received: '已到货', closed: '采购单已关闭' };
+const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = {
+  none: '未下单',
+  sourcing: '询价中',
+  ordered: '已下单',
+  partial: '部分到货',
+  received: '已到货',
+  closed: '采购单已关闭',
+  issued: '已领用',
+};
 
 /** 需求单导出：每一行需求一行，带下单 / 到货 / 退货与采购单号。能导出的是有「导出费用」权限的人（店主、对账付款、成本核算、负责人），导出全部部门 */
-async function requestsCsv(db: Db, timezone: string, f: { from: string; to: string; status?: RequestStatus; departmentId?: number }) {
+async function requestsCsv(db: Db, timezone: string, f: { from: string; to: string; status?: RequestStatus; stock?: boolean; departmentId?: number }) {
   const [n] = await db<{ count: number }[]>`
     SELECT count(*)::int AS count FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     WHERE (r.created_at AT TIME ZONE ${timezone})::date BETWEEN ${f.from} AND ${f.to}
-      ${f.status ? db`AND r.status = ${f.status}` : db``} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}`;
+      ${f.status ? db`AND r.status = ${f.status}` : db``} ${STOCK_FILTER(db, f)} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}`;
   if (n!.count > EXPORT_LIMIT) throw unprocessable('EXPORT_TOO_LARGE', `这段时间有 ${n!.count} 行需求，一次最多导出 ${EXPORT_LIMIT} 行，请缩短日期范围`);
   const rows = await db<
     {
@@ -663,18 +760,22 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
       imageCount: number;
       progress: RawProgress | null;
       sourcing: { id: number; docNo: string } | null;
+      /** 从库存领用的数量（这一行的单位，8.1.10） */
+      issuedMilli: number;
     }[]
   >`
     SELECT r.doc_no, to_char(r.created_at AT TIME ZONE ${timezone}, 'YYYY-MM-DD HH24:MI') AS created_local,
            d.name AS department_name, s.display_name AS requester_name, r.status, r.need_by,
            l.line_no, l.name, m.name AS material_name, l.purpose, l.qty_milli, l.unit, l.ref_price_cents, l.link, l.details, l.note,
            (SELECT count(*)::int FROM purchase_request_line_images i WHERE i.request_line_id = l.id) AS image_count,
-           ${PROGRESS_SQL(db)} AS progress, ${SOURCING_SQL(db)} AS sourcing
+           ${PROGRESS_SQL(db)} AS progress, ${SOURCING_SQL(db)} AS sourcing,
+           coalesce((SELECT ls.issued_qty_milli FROM request_line_stock ls JOIN inv_docs ld ON ld.id = ls.inv_doc_id AND ld.status = 'confirmed'
+                     WHERE ls.request_line_id = l.id), 0) AS issued_milli
     FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
     LEFT JOIN materials m ON m.id = l.material_id
     WHERE (r.created_at AT TIME ZONE ${timezone})::date BETWEEN ${f.from} AND ${f.to}
-      ${f.status ? db`AND r.status = ${f.status}` : db``} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
+      ${f.status ? db`AND r.status = ${f.status}` : db``} ${STOCK_FILTER(db, f)} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
     ORDER BY r.created_at, r.id, l.line_no`;
   const out: (string | number)[][] = [
     [
@@ -702,10 +803,13 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
       '到货数量',
       '退货数量',
       '库存单位',
+      '已领用数量',
     ],
   ];
   for (const r of rows) {
-    const p = progressOf(r.progress, r.sourcing);
+    const issued = Number(r.issuedMilli);
+    const p0 = progressOf(r.progress, r.sourcing);
+    const p = !p0.po && issued > 0 && issued >= Number(r.qtyMilli) ? { ...p0, state: 'issued' as const } : p0;
     out.push([
       r.docNo,
       r.createdLocal,
@@ -731,6 +835,7 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
       p.po ? formatQty(p.receivedMilli).replace(/,/g, '') : '',
       p.po ? formatQty(p.returnedMilli).replace(/,/g, '') : '',
       p.inventoryUnit ?? '',
+      issued > 0 ? formatQty(issued).replace(/,/g, '') : '',
     ]);
   }
   return toCsv(out);
@@ -739,7 +844,9 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
 // ───────────────────────── 路由 ─────────────────────────
 
 const ListQuery = z.object({
-  status: z.enum(['submitted', 'returned', 'approved', 'rejected', 'cancelled']).optional(),
+  status: z.enum(['submitted', 'returned', 'approved', 'rejected', 'cancelled', 'issued']).optional(),
+  /** 待核库（8.1.10） */
+  stock: z.enum(['open']).optional(),
   departmentId: z.coerce.number().int().positive().optional(),
   // 按提交日期筛选（v0.7.9）
   from: docDateSchema.optional(),
@@ -757,9 +864,13 @@ const keyParam = z.object({ key: z.uuid('操作编号格式不正确') });
 export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   const docId = (req: { params: unknown }) => parse(idParam, req.params).id;
-  const anyRequest = guardAny('request.create', 'request.review');
+  // 核库的库管（8.1.10）也能看需求单（只读）
+  const anyRequest = guardAny('request.create', 'request.review', 'request.stock');
 
-  app.get('/api/erp/requests', { preHandler: anyRequest }, async (req) => readSnapshot(sql, (tx) => listRequests(tx, req.actor, { ...parse(ListQuery, req.query), timezone: deps.config.timezone })));
+  app.get('/api/erp/requests', { preHandler: anyRequest }, async (req) => {
+    const { stock, ...q } = parse(ListQuery, req.query);
+    return readSnapshot(sql, (tx) => listRequests(tx, req.actor, { ...q, stock: stock === 'open', timezone: deps.config.timezone }));
+  });
   app.get('/api/erp/requests/open-lines', { preHandler: guardAny('request.review') }, async (req) => {
     const { ids } = parse(IdsQuery, req.query);
     return openLines(sql, ids ? ids.split(',').map(Number) : undefined);
@@ -776,7 +887,8 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/requests/export', { preHandler: guard('expense.export') }, async (req, reply) => {
     const f = parse(ExportQuery, req.query);
     if (f.from > f.to) throw badRequest('开始日期不能晚于结束日期');
-    const csv = await readSnapshot(sql, (tx) => requestsCsv(tx, deps.config.timezone, f));
+    const { stock, ...q } = f;
+    const csv = await readSnapshot(sql, (tx) => requestsCsv(tx, deps.config.timezone, { ...q, stock: stock === 'open' }));
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'purchase_requests', detail: f, ip: req.ip });
     attachment(reply, `采购需求单_${f.from}_${f.to}.csv`, CSV_TYPE);
     return csv;

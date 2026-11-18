@@ -48,6 +48,8 @@ import { approvalBrief, approveCurrent, closeApproval, returnCurrent, submitForA
 import { urgentPlan } from './urgent';
 import { receiptAttachments } from './attachments';
 import { loadSettings } from '../settings';
+import { loadPurchaseRules } from './purchase-rules';
+import { receiptContractDue } from './contract-due';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -1235,6 +1237,9 @@ async function confirmDoc(tx: Tx, doc: DocRow & { docNo: string; amountCents: nu
         if (doc.amountCents > cap) {
           throw conflict('URGENT_OVER_CAP', `急采合计 ¥${(doc.amountCents / 100).toFixed(2)} 超过现在的上限 ¥${(cap / 100).toFixed(2)}，请退回部门改开采购单`);
         }
+        // 8.1.10 急采后补合同（CK18）：生效时合计达到「急采补合同金额」的记下要补合同；生效时定下，以后改金额线不影响
+        const minCents = (await loadPurchaseRules(tx)).urgentContractMinCents;
+        if (minCents > 0 && doc.amountCents >= minCents) await tx`UPDATE inv_docs SET needs_contract = true WHERE id = ${doc.id}`;
       }
       // 按采购单收货进总仓；急采进部门小仓
       // 成本（8.0.20）：按这一行的金额入库，重算平均成本
@@ -1466,6 +1471,32 @@ export async function createImportedReceipt(tx: Tx, deps: Deps, raw: DocBodyInpu
   const [d] = await tx<{ status: string }[]>`SELECT status FROM inv_docs WHERE id = ${newId}`;
   if (d?.status !== 'confirmed') throw conflict('IMPORT_NOT_CONFIRMED', `${o.docNo} 没能直接入库（按审批规则要确认），台账导入整份没写`);
   return { id: newId, docNo: o.docNo, amountCents: prepared.amountCents };
+}
+
+/**
+ * 核库转领用（8.1.10，docs/ERP_V8110.md 第 2 节）：在调用方的事务里开一张部门领料单并马上生效（总仓出、申请部门的小仓进），
+ * 与库管平时登记领料一样，部门之后签收。调用方已经取了操作编号的咨询锁、锁住需求单一行，核对过「核库」权限；
+ * 这里照库存单据原来的锁（单号 → 物料按 id 升序 → 部门小仓）。staff 是登记人：核库的库管（部门同意替代时也记提议的库管）。
+ */
+export async function createRequestIssue(
+  tx: Tx,
+  deps: Deps,
+  o: { departmentId: number; handler: string; note: string; lines: { materialId: number; qtyMilli: number; enteredQtyMilli: number | null; enteredUnit: string | null; note: string }[] },
+  staff: Actor,
+): Promise<{ id: number; docNo: string }> {
+  const docDate = todayIn(deps.config.timezone);
+  const body = parse(DocBody, { docType: 'issue', docDate, note: o.note, departmentId: o.departmentId, handler: o.handler.slice(0, 32) || '部门', lines: o.lines });
+  if (body.docType !== 'issue') throw badRequest('核库只开部门领料单');
+  const wh = await warehouseOfBody(tx, body);
+  const prepared = await prepare(tx, deps, body, null, wh, staff);
+  const docNo = await nextDocNo(tx, 'inv_issue', INV_DOC_META.issue.prefix, docDate);
+  const newId = await insertDocRow(tx, body, prepared, { docNo, clientKey: randomUUID(), staffId: staff.id, importId: null });
+  await insertLines(tx, newId, prepared.lines);
+  await logApproval(tx, 'inv_doc', newId, 'create', staff.id, o.note);
+  await submitLocked(tx, await lockDoc(tx, newId), staff, false, deps.config.timezone);
+  const [d] = await tx<{ status: string }[]>`SELECT status FROM inv_docs WHERE id = ${newId}`;
+  if (d?.status !== 'confirmed') throw conflict('ISSUE_NOT_CONFIRMED', `${docNo} 没能直接生效，核库没有记下，请刷新后重试`);
+  return { id: newId, docNo };
 }
 
 // ───────────────────────── 对外操作 ─────────────────────────
@@ -1849,7 +1880,12 @@ export function registerDocRoutes(app: FastifyInstance, deps: Deps) {
     const doc = await findDocByKey(sql, key);
     return doc ? { found: true, doc } : { found: false };
   });
-  app.get('/api/inventory/docs/:id', { preHandler: guard('inventory.read') }, async (req) => getDoc(sql, docId(req), deps.config.timezone));
+  app.get('/api/inventory/docs/:id', { preHandler: guard('inventory.read') }, async (req) => {
+    const id = docId(req);
+    const doc = await getDoc(sql, id, deps.config.timezone);
+    // 8.1.10：急采要补合同、还没补上时写着期限（CK19）
+    return doc.urgent ? { ...doc, contractDue: await receiptContractDue(sql, id, deps.config.timezone) } : doc;
+  });
   app.get('/api/inventory/departments/:id/usual', { preHandler: guard('inventory.read') }, async (req) => usualIssues(sql, parse(idParam, req.params).id));
 
   app.post('/api/inventory/docs', { preHandler: guard('inventory.read') }, async (req, reply) => {
