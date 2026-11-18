@@ -9,6 +9,7 @@ import {
   DocSchema,
   EMENU_SURFACE,
   resolveColor,
+  STUDIO_SURFACE_DEFS,
   themeColor,
   themeVars,
   validateStudioDoc,
@@ -116,29 +117,38 @@ describe('版面格式', () => {
     expect(themeVars(b)['--em-key-2']).toBe('#000000');
   });
 
-  it('8.1.8（品牌部，PB4）：平板菜单的主文字是品牌规定的 #4b392a，版面里存着别的值也不生效；标题右下角的小圆圈有自己的主题色', () => {
+  it('8.1.8（品牌部，PB4）：平板菜单的主文字是品牌规定的 #4b392a，版面里存着别的值也不生效', () => {
     const doc = clone(defaultStudioDoc('emenu'));
     expect(EMENU_SURFACE.colors.find((c) => c.key === 'ink')).toMatchObject({ default: '#4b392a', locked: true });
-    expect(EMENU_SURFACE.colors.find((c) => c.key === 'dot')).toMatchObject({ default: '#bf1d25' });
     expect(EMENU_SURFACE.squareImages).toBe(true);
     // 测试服上那一版：主文字改成了 #be9879——页面上照旧是 #4b392a，工作台读出来也是
     doc.theme.colors.ink = '#be9879';
-    doc.theme.colors.dot = '#123456';
     expect(validateStudioDoc(doc)).toEqual([]);
     expect(themeColor(doc, 'ink')).toBe('#4b392a');
-    expect(themeColor(doc, 'dot')).toBe('#123456');
     expect(themeColor(doc, 'nope')).toBeNull();
-    expect(themeVars(doc)).toEqual({ '--em-dot': '#123456' });
+    expect(themeVars(doc)).toEqual({});
     expect(themeVars(doc, true)['--em-ink']).toBe('#4b392a');
     // 主题色引用 $ink 的块（设计师加的字）也是品牌色；数据不改（存着的照旧存着）
     expect(resolveColor(doc, '$ink')).toBe('#4b392a');
     expect(doc.theme.colors.ink).toBe('#be9879');
-    // 8.1.7 以前的版面没有「小圆圈」这一项：用默认的红
-    const before = clone(defaultStudioDoc('emenu'));
-    delete before.theme.colors.dot;
-    expect(validateStudioDoc(before)).toEqual([]);
-    expect(themeColor(before, 'dot')).toBe('#bf1d25');
-    expect(themeVars(before)).toEqual({});
+  });
+
+  it('退回上一版也读得了（8.1.8 测试会话 P1）：主题色一项不多，与 8.1.7 一样', () => {
+    // 版面里存着上一版不认识的主题色时，上一版的工作台报「没有「x」这个主题色」：发布的版面读不出来、草稿存不进（STUDIO_INVALID）。
+    // 8.1.8 起先加的「标题右下角的小圆圈」就是这样，测试会话照「留着数据库退回 8.1.7」复现过；现在小圆圈的颜色写死在样式表里。
+    // 以后真要加主题色，先想好退回的办法（例如上一版先学会不认识的主题色不报错、照存），再改这张表
+    const RELEASED: Record<string, string[]> = {
+      emenu: ['ink', 'mute', 'tan', 'bg', 'modal', 'band', 'key', 'key2', 'photo', 'light', 'error'],
+      mp: ['bg', 'surface', 'ink', 'muted', 'line', 'wood', 'wood2', 'wood3', 'wood4', 'wood5', 'wood6', 'organic', 'relax', 'energy', 'danger', 'cardA', 'cardB', 'cardInk', 'cardMuted'],
+      canteen: ['cream', 'card', 'line', 'ink', 'ink2', 'ink3', 'wood', 'wood4', 'woodDeep', 'yuzu', 'yuzuDeep', 'yuzuSoft', 'organic', 'relax', 'energy', 'danger'],
+    };
+    for (const surface of ['emenu', 'mp', 'canteen'] as const) {
+      expect(
+        STUDIO_SURFACE_DEFS[surface].colors.map((c) => c.key),
+        surface,
+      ).toEqual(RELEASED[surface]);
+      expect(Object.keys(defaultStudioDoc(surface).theme.colors), surface).toEqual(RELEASED[surface]);
+    }
   });
 });
 

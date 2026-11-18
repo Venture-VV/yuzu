@@ -443,7 +443,7 @@ function SlotText({ s, dish, ctx, noteByPrice }: { s: ResolvedSlot; dish: EmenuD
 /**
  * 分类封面大标题右下角的小圆圈（8.1.8，品牌部「点餐首页中“中式午餐”右下角需向图片内标明同款圆形」，PENDING_DECISIONS.md PB2）：
  * 照品牌部给的图量的——直径 0.35 个字、细红线；圆心落在最后一个字的右下角（中文：字形下缘往上 0.075 个字、右缘往里 0.02 个字；
- * 英文按大写字母的底线）。挂在标题那一行字上，跟着字号、位置走；标题藏起来时一起不显示。颜色是主题色「标题右下角的小圆圈」（--em-dot）。
+ * 英文按大写字母的底线）。挂在标题那一行字上，跟着字号、位置走；标题藏起来时一起不显示。颜色固定（样式表里的 --em-dot，不进工作台的主题色）。
  */
 function CoverDot({ en }: { en: boolean }) {
   return <span aria-hidden className="em-cover-dot" style={en ? { right: '-0.06em', bottom: '0.155em' } : { right: '-0.12em', bottom: '0.055em' }} data-testid="emenu-cover-dot" />;
