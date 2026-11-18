@@ -2,6 +2,7 @@
 // 看板、日结、管理后台在手机上也要能看（店主用手机查）；前台、交班、会员工作台只在电脑与平板上用。依赖四套演示数据，账号店主 linlan。
 // 核对：页面不横向滚动；除了有意横向滚动的区域（表格、标签栏，带 overflow-x-auto），没有横向滚动区，也没有内容超出屏幕右边。
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expectFits } from './fits';
 
 const PASSWORD = 'yuzu2026';
 
@@ -13,7 +14,7 @@ async function login(page: Page, username: string) {
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
 }
 
-/** 页面在当前视口内放得下：列出前几处横向滚动或超出屏幕右边的元素 */
+/** 前一个日期（YYYY-MM-DD） */
 const dayBefore = (date: string) => new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
 
 /**
@@ -31,42 +32,6 @@ async function businessDay(page: Page): Promise<{ date: string; today: boolean }
     if ((s.business?.checkouts.count ?? 0) + (s.business?.voids.count ?? 0) + (s.recharge?.count ?? 0) > 0) return { date, today: date === me.today };
   }
   return { date: me.today, today: true };
-}
-
-async function expectFits(page: Page) {
-  // 等弹出、滑入等动画结束再量（循环播放的加载动画除外），量到一半会差一两个像素
-  await page.evaluate(() =>
-    Promise.all(
-      document
-        .getAnimations()
-        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
-        .map((a) => a.finished.catch(() => undefined)),
-    ),
-  );
-  const problems = await page.evaluate(() => {
-    const vw = window.innerWidth;
-    const scrollsOnPurpose = (el: Element | null) => {
-      for (let e = el; e; e = e.parentElement) if (/\boverflow-x-(auto|scroll)\b/.test(e.getAttribute('class') ?? '')) return true;
-      return false;
-    };
-    const name = (el: Element) => {
-      const id = el.getAttribute('data-testid');
-      return `<${el.tagName.toLowerCase()}${id ? ` data-testid="${id}"` : ''}>「${(el.textContent ?? '').trim().slice(0, 24)}」`;
-    };
-    const out: string[] = [];
-    if (document.documentElement.scrollWidth > vw) out.push(`页面横向滚动：${document.documentElement.scrollWidth} > ${vw}`);
-    for (const el of document.querySelectorAll('body *')) {
-      const style = getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden') continue;
-      const r = el.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) continue;
-      const scrollX = (style.overflowX === 'auto' || style.overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 1;
-      if (scrollX && !scrollsOnPurpose(el)) out.push(`横向滚动区 ${name(el)}：${el.scrollWidth} > ${el.clientWidth}`);
-      else if (r.right > vw + 1 && !scrollsOnPurpose(el.parentElement)) out.push(`超出屏幕右边 ${name(el)}：right ${Math.round(r.right)} > ${vw}`);
-    }
-    return out.slice(0, 8);
-  });
-  expect(problems).toEqual([]);
 }
 
 /** 主导航最后一个入口「后台」与实例标识之间的余量：标识是一行时要放得下多一行（演示库、测试服是两行），已经是两行时只要不挨着 */

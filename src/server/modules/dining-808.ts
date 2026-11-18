@@ -2,6 +2,7 @@
 //   · 退菜分级（B02）：小额（单条 ≤ 上限，默认 ¥50）能下单的（前台挂账，桌台上的还要点单）就能直接退；超过的照旧（本人 15 分钟内、经理），
 //     或值班经理及以上当场授权（line_void）；怎么批的记在审计里，「退菜记录」按日期列出；
 //   · 餐饮台账（B06）：按营业日起止、菜品分类、状态筛选，页面与导出用同一个查询，合计一致。
+//   · 8.1.7（docs/DINING_V817.md 第 5 节）：台账、退菜记录都带点单分类（餐厅 / 水吧 / 果吧 与小分类），能按它筛（outlet、groups）。
 // 都只读，退菜的锁顺序照旧（来访 / 桌台 → 账单 → 明细 → 出品单 → 估清），授权在同一事务里核销。
 
 import { z } from 'zod';
@@ -9,7 +10,19 @@ import type { FastifyInstance } from 'fastify';
 import { can } from '@shared/permissions';
 import { businessDayStart, ISO_DATE } from '@shared/business-date';
 import { formatYuan } from '@shared/money';
-import { isSmallDishVoid, MAX_DINING_LEDGER_DAYS, type DiningLedger, type DiningLedgerRow, type DishVoidRow } from '@shared/dining';
+import {
+  DINING_OUTLET_KEYS,
+  DINING_OUTLET_LABELS,
+  diningSlotOf,
+  isSmallDishVoid,
+  MAX_DINING_LEDGER_DAYS,
+  slotLabel,
+  slotMatches,
+  type DiningLedger,
+  type DiningLedgerRow,
+  type DiningOutlet,
+  type DishVoidRow,
+} from '@shared/dining';
 import type { Db, Tx } from '../db';
 import type { Actor, Deps } from '../lib/context';
 import { AppError, badRequest } from '../lib/errors';
@@ -69,6 +82,19 @@ export const VOID_APPROVAL_LABELS: Record<VoidApproval['approval'], string> = {
 
 // ───────────────────────── 餐饮台账（B06） ─────────────────────────
 
+/** 英文逗号隔开的一串（去空白、去空的） */
+const commaList = z
+  .string()
+  .optional()
+  .transform((v) =>
+    v
+      ? v
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean)
+      : [],
+  );
+
 const LedgerQuery = z.object({
   from: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD'),
   to: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD'),
@@ -85,8 +111,24 @@ const LedgerQuery = z.object({
         : [],
     ),
   status: z.enum(['active', 'voided', 'all']).default('all'),
+  /** 点单分类（8.1.7）：哪一处（restaurant / water / fruit），不带为全部 */
+  outlet: z.enum(DINING_OUTLET_KEYS).optional(),
+  /** 这一处的小分类，多个用英文逗号隔开；不带为这一处全部 */
+  groups: commaList,
 });
 export type DiningLedgerQuery = z.output<typeof LedgerQuery>;
+
+/** 退菜记录（8.1.7 起也能按点单分类筛） */
+const VoidsQuery = z.object({
+  from: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD'),
+  to: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD'),
+  outlet: z.enum(DINING_OUTLET_KEYS).optional(),
+  groups: commaList,
+});
+export type DishVoidsQuery = z.output<typeof VoidsQuery>;
+
+/** 筛选条件写进导出的文件名：「-水吧」「-水吧（糖水、调酒）」 */
+const slotSuffix = (outlet: DiningOutlet | undefined, groups: string[]) => (outlet ? `-${DINING_OUTLET_LABELS[outlet]}${groups.length ? `（${groups.join('、')}）` : ''}` : '');
 
 /** 餐饮明细（手牌、桌台、小程序扫码点餐都在）：按挂账的营业日、分类、状态筛选；分类按价目表，没写的记「未分类」 */
 function checkLedgerRange(from: string, to: string) {
@@ -96,13 +138,14 @@ function checkLedgerRange(from: string, to: string) {
 
 export async function diningLedger(db: Db, q: DiningLedgerQuery): Promise<DiningLedger> {
   checkLedgerRange(q.from, q.to);
-  const rows = await db<(Omit<DiningLedgerRow, 'postedAt'> & { postedAt: string })[]>`
+  const rows = await db<(Omit<DiningLedgerRow, 'postedAt' | 'outlet' | 'group'> & { postedAt: string; diningOutlet: string | null; diningGroup: string | null; stationName: string | null })[]>`
     SELECT l.id, l.business_date::text AS business_date, l.posted_at, coalesce(h.code, '') AS tag_code, coalesce(dt.name, '') AS table_name,
            l.name, coalesce(nullif(si.category, ''), '未分类') AS category, l.quantity, l.unit_price, l.amount, l.status, l.void_reason,
-           ki.status AS kitchen_status, st.display_name AS posted_by_name
+           ki.status AS kitchen_status, st.display_name AS posted_by_name,
+           si.dining_outlet, si.dining_group, ks.name AS station_name
     FROM bill_lines l JOIN staff st ON st.id = l.posted_by
     JOIN bills bb ON bb.id = l.bill_id AND bb.store_id = ${currentStoreId()}
-    LEFT JOIN service_items si ON si.id = l.item_id
+    LEFT JOIN service_items si ON si.id = l.item_id LEFT JOIN kitchen_stations ks ON ks.id = si.station_id
     LEFT JOIN visits v ON v.bill_id = l.bill_id LEFT JOIN hand_tags h ON h.id = v.tag_id
     LEFT JOIN table_sessions ts ON ts.bill_id = l.bill_id LEFT JOIN dining_tables dt ON dt.id = ts.table_id
     LEFT JOIN kitchen_items ki ON ki.bill_line_id = l.id
@@ -114,7 +157,13 @@ export async function diningLedger(db: Db, q: DiningLedgerQuery): Promise<Dining
     SELECT DISTINCT coalesce(nullif(si.category, ''), '未分类') AS category
     FROM bill_lines l LEFT JOIN service_items si ON si.id = l.item_id JOIN bills bb ON bb.id = l.bill_id AND bb.store_id = ${currentStoreId()}
     WHERE l.source = 'dining' AND l.business_date BETWEEN ${q.from} AND ${q.to} ORDER BY 1`;
-  const list = rows.map((r) => ({ ...r, id: Number(r.id), postedAt: new Date(r.postedAt).toISOString() }));
+  // 点单分类（8.1.7）：按菜现在的分类算（后台没设的按默认归），再按入口、小分类筛
+  const list: DiningLedgerRow[] = rows
+    .map(({ diningOutlet, diningGroup, stationName, ...r }) => {
+      const slot = diningSlotOf({ outlet: diningOutlet, group: diningGroup, category: r.category === '未分类' ? '' : r.category, stationName });
+      return { ...r, id: Number(r.id), postedAt: new Date(r.postedAt).toISOString(), outlet: slot.outlet, group: slot.group };
+    })
+    .filter((r) => slotMatches(r, q.outlet ?? null, q.groups));
   const active = list.filter((r) => r.status === 'active');
   const voided = list.filter((r) => r.status === 'voided');
   return {
@@ -138,13 +187,14 @@ export function diningLedgerCsv(l: DiningLedger, timeZone: string): string {
   const time = (iso: string) => new Intl.DateTimeFormat('zh-CN', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
   const yuan = (c: number) => (c / 100).toFixed(2);
   return toCsv([
-    ['营业日', '时间', '手牌', '桌台', '菜名', '分类', '数量', '单价', '金额', '状态', '退菜原因', '出品', '点单人'],
+    ['营业日', '时间', '手牌', '桌台', '菜名', '分类', '价目分类', '数量', '单价', '金额', '状态', '退菜原因', '出品', '点单人'],
     ...l.rows.map((r) => [
       r.businessDate,
       time(r.postedAt),
       r.tagCode,
       r.tableName,
       r.name,
+      slotLabel(r),
       r.category,
       r.quantity,
       yuan(r.unitPrice),
@@ -161,6 +211,7 @@ export function diningLedgerCsv(l: DiningLedger, timeZone: string): string {
       '',
       `${l.totals.lines} 条（有效 ${l.totals.lines - l.totals.voidedLines}、已退 ${l.totals.voidedLines}）`,
       '',
+      '',
       l.totals.quantity,
       '',
       yuan(l.totals.amount),
@@ -175,17 +226,29 @@ export function diningLedgerCsv(l: DiningLedger, timeZone: string): string {
 // ───────────────────────── 退菜记录（B02） ─────────────────────────
 
 /** 按营业日起止列出退的菜（餐饮明细），带怎么批的（审计里记的；升级前退的没有，记「—」） */
-export async function dishVoids(db: Db, deps: Deps, q: { from: string; to: string }): Promise<DishVoidRow[]> {
+export async function dishVoids(db: Db, deps: Deps, q: { from: string; to: string; outlet?: DiningOutlet; groups?: string[] }): Promise<DishVoidRow[]> {
   checkLedgerRange(q.from, q.to);
   const settings = await loadSettings(db);
   const start = businessDayStart(q.from, deps.config.timezone, settings.businessDayStartHour);
   const end = new Date(businessDayStart(q.to, deps.config.timezone, settings.businessDayStartHour).getTime() + 86_400_000);
-  const rows = await db<(Omit<DishVoidRow, 'voidedAt' | 'approvalText'> & { voidedAt: string; approval: string | null; approverName: string | null })[]>`
+  const rows = await db<
+    (Omit<DishVoidRow, 'voidedAt' | 'approvalText' | 'outlet' | 'group'> & {
+      voidedAt: string;
+      approval: string | null;
+      approverName: string | null;
+      category: string | null;
+      diningOutlet: string | null;
+      diningGroup: string | null;
+      stationName: string | null;
+    })[]
+  >`
     SELECT l.id, l.name, l.quantity, l.amount, l.void_reason, l.voided_at, vs.display_name AS voided_by_name, ps.display_name AS posted_by_name,
            coalesce(h.code, '') AS tag_code, coalesce(dt.name, '') AS table_name,
-           a.detail->>'approval' AS approval, a.detail->>'approverName' AS approver_name
+           a.detail->>'approval' AS approval, a.detail->>'approverName' AS approver_name,
+           si.category, si.dining_outlet, si.dining_group, ks.name AS station_name
     FROM bill_lines l JOIN staff vs ON vs.id = l.voided_by JOIN staff ps ON ps.id = l.posted_by
     JOIN bills bb ON bb.id = l.bill_id AND bb.store_id = ${currentStoreId()}
+    LEFT JOIN service_items si ON si.id = l.item_id LEFT JOIN kitchen_stations ks ON ks.id = si.station_id
     LEFT JOIN visits v ON v.bill_id = l.bill_id LEFT JOIN hand_tags h ON h.id = v.tag_id
     LEFT JOIN table_sessions ts ON ts.bill_id = l.bill_id LEFT JOIN dining_tables dt ON dt.id = ts.table_id
     LEFT JOIN LATERAL (
@@ -193,21 +256,28 @@ export async function dishVoids(db: Db, deps: Deps, q: { from: string; to: strin
     ) a ON true
     WHERE l.source = 'dining' AND l.status = 'voided' AND l.voided_at >= ${start} AND l.voided_at < ${end}
     ORDER BY l.voided_at DESC, l.id DESC`;
-  return rows.map(({ approval, approverName, ...r }) => ({
-    ...r,
-    id: Number(r.id),
-    voidedAt: new Date(r.voidedAt).toISOString(),
-    approvalText: approval ? `${VOID_APPROVAL_LABELS[approval as VoidApproval['approval']] ?? approval}${approverName ? `（${approverName}）` : ''}` : '—',
-  }));
+  return rows
+    .map(({ approval, approverName, category, diningOutlet, diningGroup, stationName, ...r }) => {
+      const slot = diningSlotOf({ outlet: diningOutlet, group: diningGroup, category, stationName });
+      return {
+        ...r,
+        id: Number(r.id),
+        voidedAt: new Date(r.voidedAt).toISOString(),
+        approvalText: approval ? `${VOID_APPROVAL_LABELS[approval as VoidApproval['approval']] ?? approval}${approverName ? `（${approverName}）` : ''}` : '—',
+        outlet: slot.outlet,
+        group: slot.group,
+      };
+    })
+    .filter((r) => slotMatches(r, q.outlet ?? null, q.groups ?? []));
 }
 
 export function dishVoidsCsv(rows: DishVoidRow[], timeZone: string): string {
   const at = (iso: string) => new Intl.DateTimeFormat('zh-CN', { timeZone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso));
   const yuan = (c: number) => (c / 100).toFixed(2);
   return toCsv([
-    ['退菜时间', '手牌', '桌台', '菜名', '数量', '金额', '原因', '谁退的', '谁点的', '怎么批的'],
-    ...rows.map((r) => [at(r.voidedAt), r.tagCode, r.tableName, r.name, r.quantity, yuan(r.amount), r.voidReason ?? '', r.voidedByName, r.postedByName, r.approvalText]),
-    ['合计', '', '', `${rows.length} 条`, rows.reduce((n, r) => n + r.quantity, 0), yuan(rows.reduce((n, r) => n + Number(r.amount), 0)), '', '', '', ''],
+    ['退菜时间', '手牌', '桌台', '菜名', '分类', '数量', '金额', '原因', '谁退的', '谁点的', '怎么批的'],
+    ...rows.map((r) => [at(r.voidedAt), r.tagCode, r.tableName, r.name, slotLabel(r), r.quantity, yuan(r.amount), r.voidReason ?? '', r.voidedByName, r.postedByName, r.approvalText]),
+    ['合计', '', '', `${rows.length} 条`, '', rows.reduce((n, r) => n + r.quantity, 0), yuan(rows.reduce((n, r) => n + Number(r.amount), 0)), '', '', '', ''],
   ]);
 }
 
@@ -219,12 +289,11 @@ export function registerDining808Routes(app: FastifyInstance, deps: Deps) {
   app.get('/api/dining/ledger/export', { preHandler: read }, async (req, reply) => {
     const q = parse(LedgerQuery, req.query);
     const l = await diningLedger(sql, q);
-    return csvReply(reply, `餐饮台账-${q.from}至${q.to}${q.categories.length ? `-${q.categories.join('、')}` : ''}.csv`, diningLedgerCsv(l, deps.config.timezone));
+    return csvReply(reply, `餐饮台账-${q.from}至${q.to}${slotSuffix(q.outlet, q.groups)}${q.categories.length ? `-${q.categories.join('、')}` : ''}.csv`, diningLedgerCsv(l, deps.config.timezone));
   });
-  const VoidsQuery = z.object({ from: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD'), to: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD') });
   app.get('/api/dining/voids', { preHandler: read }, async (req) => dishVoids(sql, deps, parse(VoidsQuery, req.query)));
   app.get('/api/dining/voids/export', { preHandler: read }, async (req, reply) => {
     const q = parse(VoidsQuery, req.query);
-    return csvReply(reply, `退菜记录-${q.from}至${q.to}.csv`, dishVoidsCsv(await dishVoids(sql, deps, q), deps.config.timezone));
+    return csvReply(reply, `退菜记录-${q.from}至${q.to}${slotSuffix(q.outlet, q.groups)}.csv`, dishVoidsCsv(await dishVoids(sql, deps, q), deps.config.timezone));
   });
 }

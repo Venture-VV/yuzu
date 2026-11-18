@@ -13,6 +13,9 @@ import {
   KITCHEN_STATUSES,
   MAX_STATION_NAME,
   MAX_VOID_FREE_CENTS,
+  diningSlotOf,
+  parseSlotKey,
+  slotLabel,
   type DiningAdmin,
   type DiningGuest,
   type DiningMenu,
@@ -162,14 +165,30 @@ async function stationsWithCount(db: Db): Promise<KitchenStation[]> {
     FROM kitchen_stations s ORDER BY s.sort_order, s.id`;
 }
 
-/** 进厨房的在售菜品、默认价格档的单价与今天的估清 */
+/** 进厨房的在售菜品、默认价格档的单价、今天的估清与点单分类（8.1.7：后台没设的按默认归） */
 async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
-  const rows = await db<{ id: number; name: string; category: string; prices: TierPrice[]; stationId: number; stationName: string; remaining: number | null }[]>`
+  const rows = await db<
+    {
+      id: number;
+      name: string;
+      category: string;
+      prices: TierPrice[];
+      stationId: number;
+      stationName: string;
+      remaining: number | null;
+      diningOutlet: string | null;
+      diningGroup: string;
+    }[]
+  >`
     SELECT i.id, i.name, i.category, i.station_id, s.name AS station_name, ${pricesColumn(db)} AS prices,
-           (SELECT d.remaining FROM dish_limits d WHERE d.item_id = i.id AND d.business_date = ${today}) AS remaining
+           (SELECT d.remaining FROM dish_limits d WHERE d.item_id = i.id AND d.business_date = ${today}) AS remaining,
+           i.dining_outlet, i.dining_group
     FROM service_items i JOIN kitchen_stations s ON s.id = i.station_id AND s.active
     WHERE i.active AND NOT i.technician_required ORDER BY s.sort_order, s.id, i.sort_order, i.id`;
-  return rows.map(({ prices, ...r }) => ({ ...r, price: defaultPrice(prices) }));
+  return rows.map(({ prices, diningOutlet, diningGroup, ...r }) => {
+    const slot = diningSlotOf({ outlet: diningOutlet, group: diningGroup, category: r.category, stationName: r.stationName });
+    return { ...r, price: defaultPrice(prices), outlet: slot.outlet, group: slot.group };
+  });
 }
 
 // 手牌客人的菜显示牌号；桌台的菜（第二步）显示桌号
@@ -350,15 +369,32 @@ export async function setDishLimit(deps: Deps, itemId: number, raw: unknown, ctx
 export async function diningAdmin(db: Db): Promise<DiningAdmin> {
   const [meta] = await db<{ updatedAt: string; updatedBy: string | null }[]>`
     SELECT s.updated_at, st.display_name AS updated_by FROM settings s LEFT JOIN staff st ON st.id = s.updated_by WHERE s.key = 'dining_rules'`;
-  const items = await db<{ id: number; name: string; category: string; prices: TierPrice[]; stationId: number | null; technicianRequired: boolean }[]>`
-    SELECT i.id, i.name, i.category, i.station_id, i.technician_required, ${pricesColumn(db)} AS prices
-    FROM service_items i WHERE i.active ORDER BY i.sort_order, i.id`;
+  const items = await db<
+    {
+      id: number;
+      name: string;
+      category: string;
+      prices: TierPrice[];
+      stationId: number | null;
+      technicianRequired: boolean;
+      stationName: string | null;
+      diningOutlet: string | null;
+      diningGroup: string;
+    }[]
+  >`
+    SELECT i.id, i.name, i.category, i.station_id, i.technician_required, ${pricesColumn(db)} AS prices,
+           s.name AS station_name, i.dining_outlet, i.dining_group
+    FROM service_items i LEFT JOIN kitchen_stations s ON s.id = i.station_id
+    WHERE i.active ORDER BY i.sort_order, i.id`;
   return {
     rules: await loadDiningRules(db),
     rulesUpdatedAt: meta?.updatedAt ? new Date(meta.updatedAt).toISOString() : null,
     rulesUpdatedBy: meta?.updatedBy ?? null,
     stations: await stationsWithCount(db),
-    items: items.map(({ prices, ...r }) => ({ ...r, price: defaultPrice(prices) })),
+    items: items.map(({ prices, stationName, diningOutlet, diningGroup, ...r }) => {
+      const { assigned, ...slot } = diningSlotOf({ outlet: diningOutlet, group: diningGroup, category: r.category, stationName });
+      return { ...r, price: defaultPrice(prices), slot, slotAssigned: assigned };
+    }),
   };
 }
 
@@ -379,9 +415,26 @@ const StationInput = z.object({
   sortOrder: z.number().int().min(0).max(9999).default(0),
   active: z.boolean().default(true),
 });
+/**
+ * 菜品的出品档口与点单分类（8.1.7）：两样都可以不带（不带的不改），至少带一样。
+ * slot 是点单分类的编码（restaurant:餐饮、water:调酒、fruit……），null 为「按默认归」（清掉设过的）
+ */
 const ItemsInput = z.object({
   items: z
-    .array(z.object({ id: z.number().int().positive(), stationId: z.number().int().positive().nullable() }))
+    .array(
+      z
+        .object({
+          id: z.number().int().positive(),
+          stationId: z.number().int().positive().nullable().optional(),
+          slot: z
+            .string()
+            .max(40)
+            .nullable()
+            .optional()
+            .refine((v) => v === undefined || v === null || parseSlotKey(v) !== null, '点单分类不对，请刷新后重试'),
+        })
+        .refine((i) => i.stationId !== undefined || i.slot !== undefined, '没有要调整的内容'),
+    )
     .min(1, '没有要调整的菜品')
     .max(500),
 });
@@ -430,32 +483,67 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
     return diningAdmin(sql);
   });
 
-  // 菜品的出品档口：只提交要改的菜品（按项目 id 升序加锁）
+  // 菜品的出品档口与点单分类（8.1.7）：只提交要改的菜品（按项目 id 升序加锁）
   app.put('/api/admin/dining/items', { preHandler: guard('catalog.manage') }, async (req) => {
     const { items } = parse(ItemsInput, req.body);
     const ids = [...new Set(items.map((i) => i.id))];
     if (ids.length !== items.length) throw unprocessable('DUPLICATE_ITEM', '同一道菜提交了两次');
     await sql.begin(async (tx) => {
-      const rows = await tx<{ id: number; name: string; stationId: number | null; technicianRequired: boolean }[]>`
-        SELECT id, name, station_id, technician_required FROM service_items WHERE id IN ${tx(ids)} ORDER BY id FOR UPDATE`;
+      const rows = await tx<{ id: number; name: string; stationId: number | null; technicianRequired: boolean; diningOutlet: string | null; diningGroup: string }[]>`
+        SELECT id, name, station_id, technician_required, dining_outlet, dining_group FROM service_items WHERE id IN ${tx(ids)} ORDER BY id FOR UPDATE`;
       if (rows.length !== ids.length) throw notFound('有菜品不存在，请刷新后重试');
-      const tech = rows.find((r) => r.technicianRequired && items.some((i) => i.id === r.id && i.stationId !== null));
+      const tech = rows.find((r) => r.technicianRequired && items.some((i) => i.id === r.id && i.stationId !== undefined && i.stationId !== null));
       if (tech) throw unprocessable('ITEM_NEEDS_TECHNICIAN', `「${tech.name}」需要技师，不进厨房；要进厨房请先在「技师」里取消「需要技师」`);
-      const stationIds = [...new Set(items.flatMap((i) => (i.stationId === null ? [] : [i.stationId])))];
+      const stationIds = [...new Set(items.flatMap((i) => (i.stationId === undefined || i.stationId === null ? [] : [i.stationId])))];
       const stations = stationIds.length ? await tx<{ id: number; name: string }[]>`SELECT id, name FROM kitchen_stations WHERE id IN ${tx(stationIds)}` : [];
       if (stations.length !== stationIds.length) throw notFound('有档口不存在，请刷新后重试');
-      const want = new Map(items.map((i) => [i.id, i.stationId]));
-      const changed = rows.filter((r) => r.stationId !== want.get(r.id));
-      for (const r of changed) await tx`UPDATE service_items SET station_id = ${want.get(r.id)!}, updated_at = now() WHERE id = ${r.id}`;
-      if (changed.length) {
+      const byId = new Map(items.map((i) => [i.id, i]));
+
+      // 出品档口：带了而且变了的
+      const wantStation = (r: (typeof rows)[number]) => byId.get(r.id)!.stationId;
+      const stationChanged = rows.filter((r) => wantStation(r) !== undefined && r.stationId !== wantStation(r));
+      for (const r of stationChanged) await tx`UPDATE service_items SET station_id = ${wantStation(r)!}, updated_at = now() WHERE id = ${r.id}`;
+      if (stationChanged.length) {
         const name = (sid: number | null) => (sid === null ? '不进厨房' : stations.find((s) => s.id === sid)!.name);
         await writeAudit(tx, {
           staffId: req.actor.id,
           action: 'items_station_updated',
           targetType: 'item',
           detail: {
-            summary: changed
-              .map((r) => `${r.name} → ${name(want.get(r.id)!)}`)
+            summary: stationChanged
+              .map((r) => `${r.name} → ${name(wantStation(r)!)}`)
+              .join('；')
+              .slice(0, 500),
+          },
+          ip: req.ip,
+        });
+      }
+
+      // 点单分类（8.1.7）：带了而且变了的；null 为清掉、按默认归
+      const wantSlot = (r: (typeof rows)[number]) => {
+        const v = byId.get(r.id)!.slot;
+        return v === undefined ? undefined : v === null ? null : parseSlotKey(v)!;
+      };
+      const slotChanged = rows.filter((r) => {
+        const w = wantSlot(r);
+        if (w === undefined) return false;
+        return w === null ? r.diningOutlet !== null : r.diningOutlet !== w.outlet || r.diningGroup !== w.group;
+      });
+      for (const r of slotChanged) {
+        const w = wantSlot(r)!;
+        await tx`UPDATE service_items SET dining_outlet = ${w?.outlet ?? null}, dining_group = ${w?.group ?? ''}, updated_at = now() WHERE id = ${r.id}`;
+      }
+      if (slotChanged.length) {
+        await writeAudit(tx, {
+          staffId: req.actor.id,
+          action: 'items_slot_updated',
+          targetType: 'item',
+          detail: {
+            summary: slotChanged
+              .map((r) => {
+                const w = wantSlot(r);
+                return `${r.name} → ${w ? slotLabel(w) : '按默认'}`;
+              })
               .join('；')
               .slice(0, 500),
           },

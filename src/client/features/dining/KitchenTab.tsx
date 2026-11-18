@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { BellRing, ChefHat, CircleCheckBig, Flame, Undo2 } from 'lucide-react';
-import { KITCHEN_STATUS_LABELS, kitchenElapsed, type KitchenBoard, type KitchenItem, type MenuDish } from '@shared/dining';
+import { ALL_DINING_SLOTS, KITCHEN_STATUS_LABELS, kitchenElapsed, slotLabel, type DiningOutlet, type KitchenBoard, type KitchenItem, type MenuDish } from '@shared/dining';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
@@ -14,6 +14,7 @@ import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { kitchenKey, tablesKey, menuKey, useKitchenBoard, useServerNow } from './queries';
+import { OutletFilter } from './slots';
 
 type Action = 'start' | 'done' | 'serve' | 'undo';
 
@@ -268,6 +269,8 @@ export function LimitsTab() {
   const board = useKitchenBoard(30_000);
   const [editing, setEditing] = useState<{ id: number; value: string } | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
+  /** 沽清列表按点单分类（8.1.7，CF7）：全部 / 餐厅 / 水吧 / 果吧 */
+  const [outlet, setOutlet] = useState<DiningOutlet | null>(null);
   const d = board.data;
   if (board.error && !d) return <Notice tone="error" title={errorMessage(board.error)} className="m-6" />;
   if (!d) return <Skeleton className="m-6 h-64" />;
@@ -286,8 +289,12 @@ export function LimitsTab() {
     }
   };
 
-  const groups = new Map<string, MenuDish[]>();
-  for (const dish of d.dishes) groups.set(dish.stationName, [...(groups.get(dish.stationName) ?? []), dish]);
+  // 按点单分类分组（餐厅 → 餐饮、酒水；水吧 → 手作饮料、糖水、调酒；果吧），出品档口写在每道菜旁边（8.1.7，CF7）
+  const groups = ALL_DINING_SLOTS.filter((sl) => !outlet || sl.outlet === outlet)
+    .map((sl) => [slotLabel(sl), d.dishes.filter((x) => x.outlet === sl.outlet && x.group === sl.group)] as [string, MenuDish[]])
+    .filter(([, list]) => list.length > 0);
+  const counts: Partial<Record<DiningOutlet | 'all', number>> = { all: d.dishes.length };
+  for (const x of d.dishes) counts[x.outlet] = (counts[x.outlet] ?? 0) + 1;
   const soldOut = d.dishes.filter((x) => x.remaining === 0).length;
   const limited = d.dishes.filter((x) => x.remaining !== null && x.remaining > 0).length;
 
@@ -296,11 +303,16 @@ export function LimitsTab() {
       <p className="text-[13px] text-ink-3">
         营业日 {d.businessDate}：已估清 {soldOut} 道，限量 {limited} 道。估清只管今天，换了营业日自动恢复不限量。
       </p>
+      {d.dishes.length > 0 && <OutletFilter value={outlet} onChange={setOutlet} counts={counts} testPrefix="limits" />}
       {d.dishes.length === 0 ? (
         <Card className="px-4 py-8 text-center text-[13px] text-ink-3">还没有进厨房的菜</Card>
+      ) : groups.length === 0 ? (
+        <Card className="px-4 py-8 text-center text-[13px] text-ink-3" data-testid="limits-empty">
+          这里还没有菜。店主在「后台 → 餐饮 → 出品档口与菜品」里给菜选点单分类。
+        </Card>
       ) : (
-        [...groups].map(([name, list]) => (
-          <Card key={name} className="p-4">
+        groups.map(([name, list]) => (
+          <Card key={name} className="p-4" data-testid={`limits-group-${name}`}>
             <SectionTitle>{name}</SectionTitle>
             <ul className="mt-2 divide-y divide-line/70">
               {list.map((dish) => {
@@ -311,7 +323,7 @@ export function LimitsTab() {
                   <li key={dish.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5" data-testid={`limit-${dish.name}`}>
                     <span className="min-w-[120px] flex-1 text-[14px] font-semibold">
                       {dish.name}
-                      <span className="ml-2 text-[12px] font-normal text-ink-4">{dish.category}</span>
+                      <span className="ml-2 text-[12px] font-normal text-ink-4">{dish.stationName}</span>
                     </span>
                     <Money cents={dish.price} className="text-[13px] text-ink-3" />
                     {dish.remaining === null ? <Badge>不限量</Badge> : dish.remaining === 0 ? <Badge tone="clay">已估清</Badge> : <Badge tone="yuzu">剩 {dish.remaining} 份</Badge>}

@@ -1,12 +1,25 @@
 // 点单：按手牌找在店客人，或选一张用餐中的桌（第二步）→ 点菜（份数、口味备注）→ 下单。下单就是记到客人或这桌的账上
 // （与前台挂账同一套「结果待确认」：提交前本机保存原编号与原请求，断网后查回、原样重提或确认作废），同时送到厨房。
 // 右边列出这位客人（这桌）还没上的菜：可以催单、上菜（服务员送到后点）、退菜（作废这条明细，要写原因）。
+// 8.1.7（docs/DINING_V817.md）：菜单区先弹出餐厅 / 水吧 / 果吧三个入口，选了再按小分类点，下单成功后回到入口（CF4）；
+// 「还没上的菜」旁边能打开点菜单（小票可视化，CF8）。
 
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BellRing, Minus, PencilLine, Plus, Search, Trash2, Undo2, Users, UtensilsCrossed, X } from 'lucide-react';
-import { KITCHEN_STATUS_LABELS, MAX_DISH_NOTE, type DiningGuest, type KitchenStatus, type MenuDish, type PendingDish, type TableSessionDetail } from '@shared/dining';
+import { BellRing, Minus, PencilLine, Plus, ReceiptText, RotateCcw, Search, Trash2, Undo2, Users, UtensilsCrossed, X } from 'lucide-react';
+import {
+  DINING_OUTLET_LABELS,
+  KITCHEN_STATUS_LABELS,
+  MAX_DISH_NOTE,
+  outletDef,
+  type DiningGuest,
+  type DiningOutlet,
+  type KitchenStatus,
+  type MenuDish,
+  type PendingDish,
+  type TableSessionDetail,
+} from '@shared/dining';
 import { ZONE_LABELS } from '@shared/frontdesk';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -20,6 +33,8 @@ import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Ske
 import { PendingPanel, useFrontdeskOp, useFrontdeskPending } from '../frontdesk/pending';
 import { guestKey, menuKey, useDiningMenu, useTableSession, useTablesBoard } from './queries';
 import { DishVoidDialog } from './DishVoid';
+import { ReceiptDialog, type ReceiptTarget } from './ReceiptDialog';
+import { GroupChips, OutletEntry, OutletFilter } from './slots';
 
 interface CartLine {
   key: string;
@@ -79,7 +94,15 @@ export function OrderTab() {
   const [switching, setSwitching] = useState<{ from: string; apply: () => void } | null>(null);
   const [carriedFrom, setCarriedFrom] = useState<string | null>(null);
   const [qtyHint, setQtyHint] = useState<string | null>(null);
-  const [category, setCategory] = useState('all');
+  /** 点单分类（8.1.7，CF4）：先在菜单区弹出的三个入口里选一处（null 为还没选），再按小分类点；下单成功后回到入口 */
+  const [outlet, setOutlet] = useState<DiningOutlet | null>(null);
+  const [groups, setGroups] = useState<string[]>([]);
+  const pickOutlet = (o: DiningOutlet | null) => {
+    setOutlet(o);
+    setGroups([]);
+  };
+  /** 点菜单（小票可视化，CF8） */
+  const [receipt, setReceipt] = useState<ReceiptTarget | null>(null);
   const [voiding, setVoiding] = useState<{ dish: PendingDish; mode: 'void' | 'modify' } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const op = useFrontdeskOp<DiningGuest | TableSessionDetail | true>({
@@ -103,6 +126,8 @@ export function OrderTab() {
     if (tablesOn || tablePending(fromTable)) {
       setMode('table');
       setTableSession(fromTable);
+      // 从桌台点「点单」进来：先选这一单点哪里的（CF4）
+      pickOutlet(null);
       op.clearError();
       if (!tablesOn) toast({ tone: 'info', title: '桌台点单已下架', body: '这里只处理这一桌那笔待确认的点单（查回、原样重提或确认作废）；新的消费请挂手牌点单' });
     } else {
@@ -120,8 +145,19 @@ export function OrderTab() {
 
   const dishes = useMemo(() => menu.data?.dishes ?? [], [menu.data]);
   const byId = useMemo(() => new Map(dishes.map((d) => [d.id, d])), [dishes]);
-  const categories = useMemo(() => [...new Set(dishes.map((d) => d.category || '其他'))], [dishes]);
-  const shown = category === 'all' ? dishes : dishes.filter((d) => (d.category || '其他') === category);
+  // 这一处的菜，再按小分类筛（8.1.7）
+  const inOutlet = useMemo(() => (outlet ? dishes.filter((d) => d.outlet === outlet) : []), [dishes, outlet]);
+  const shown = groups.length ? inOutlet.filter((d) => groups.includes(d.group)) : inOutlet;
+  const outletCounts = useMemo(() => {
+    const c: Partial<Record<DiningOutlet, number>> = {};
+    for (const d of dishes) c[d.outlet] = (c[d.outlet] ?? 0) + 1;
+    return c;
+  }, [dishes]);
+  const groupCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const d of inOutlet) c[d.group] = (c[d.group] ?? 0) + 1;
+    return c;
+  }, [inOutlet]);
   const countOf = (id: number) => cart.reduce((s, l) => s + (l.dishId === id ? l.quantity : 0), 0);
   const lines = cart.map((l) => ({ ...l, dish: byId.get(l.dishId) ?? null }));
   const total = lines.reduce((s, l) => s + (l.dish ? l.dish.price * l.quantity : 0), 0);
@@ -228,10 +264,12 @@ export function OrderTab() {
     );
     if (ok) {
       emptyCart();
+      // 下单成功后回到餐厅 / 水吧 / 果吧三个入口，下一单再选（CF4）
+      pickOutlet(null);
       toast({
         tone: 'success',
         title: `${target.label} 已下单`,
-        body: `${named.reduce((s, n) => s + n.quantity, 0)} 份菜已送到厨房，${t ? '记在这桌的账上' : '挂在客人账上'}，结账时一起结。`,
+        body: `${named.reduce((s, n) => s + n.quantity, 0)} 份菜已送到厨房，${t ? '记在这桌的账上' : '挂在客人账上'}，结账时一起结。右边「点菜单」里看上菜进度。`,
       });
       refresh();
     } else {
@@ -308,7 +346,7 @@ export function OrderTab() {
               <Button type="submit" variant="secondary" icon={<Search className="size-4" />} disabled={!tagText.trim()} data-testid="dining-find">
                 找客人
               </Button>
-              <div className="min-w-0 flex-1 self-center">
+              <div className="min-w-0 flex-1 basis-full self-center sm:basis-auto">
                 {!tag ? (
                   <p className="text-[13px] text-ink-3">输入客人手牌上的号码；住店的客人也可以输房号</p>
                 ) : guest.isPending ? (
@@ -370,7 +408,7 @@ export function OrderTab() {
         </Card>
 
         <Card className="p-4" data-testid="dining-menu">
-          <SectionTitle aside={menu.data && <span className="text-[12px] text-ink-3">营业日 {menu.data.businessDate}</span>}>菜单</SectionTitle>
+          <SectionTitle aside={menu.data && <span className="text-[12px] text-ink-3">营业日 {menu.data.businessDate}</span>}>{outlet ? `菜单 · ${DINING_OUTLET_LABELS[outlet]}` : '菜单'}</SectionTitle>
           {menu.isPending ? (
             <Skeleton className="mt-3 h-48" />
           ) : menu.isError && !menu.data ? (
@@ -382,51 +420,52 @@ export function OrderTab() {
             <p className="mt-3 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">
               还没有进厨房的菜。请店主在「后台 → 餐饮」建出品档口，并把菜挂到档口上。
             </p>
+          ) : outlet === null ? (
+            // 二级菜单（8.1.7，CF4）：一进来、每次下单成功后都先弹出这三个入口
+            <OutletEntry dishes={dishes} onPick={pickOutlet} disabled={op.locked} />
           ) : (
-            <>
-              <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">
-                {['all', ...categories].map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setCategory(c)}
-                    className={cn('h-8 shrink-0 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap', category === c ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
-                  >
-                    {c === 'all' ? '全部' : c}
-                  </button>
-                ))}
+            <div className="animate-dialog-in" key={outlet}>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <OutletFilter value={outlet} onChange={(o) => o && pickOutlet(o)} withAll={false} counts={outletCounts} testPrefix="dining" size="sm" />
+                <button
+                  type="button"
+                  onClick={() => pickOutlet(null)}
+                  className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] font-semibold text-ink-3 hover:bg-paper-2 hover:text-ink"
+                  data-testid="dining-outlet-back"
+                >
+                  <RotateCcw className="size-3.5" /> 重新选
+                </button>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
-                {shown.map((d) => {
-                  const n = countOf(d.id);
-                  const out = d.remaining === 0;
-                  return (
-                    <button
-                      key={d.id}
-                      type="button"
-                      onClick={() => add(d)}
-                      disabled={out || op.locked}
-                      className={cn(
-                        'relative flex min-h-[76px] flex-col items-start rounded-lg border px-3 py-2.5 text-left transition-colors',
-                        out ? 'cursor-not-allowed border-line bg-paper-2/60 opacity-60' : n ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-pine',
-                      )}
-                      data-testid={`dining-dish-${d.name}`}
-                    >
-                      <span className="pr-8 text-[14.5px] leading-snug font-bold">{d.name}</span>
-                      <span className="mt-auto flex w-full items-center gap-1.5 pt-1">
-                        <Money cents={d.price} className="text-[13.5px] font-bold text-ink-2" />
-                        <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink-4">{d.stationName}</span>
-                        {out ? <Badge tone="clay">已估清</Badge> : d.remaining !== null && <Badge tone="yuzu">剩 {d.remaining}</Badge>}
-                      </span>
-                      {n > 0 && <span className="num absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-pine px-1.5 text-[12.5px] font-bold text-paper">{n}</span>}
-                    </button>
-                  );
-                })}
-              </div>
+              {outletDef(outlet).groups.length > 0 && (
+                <div className="mt-2.5">
+                  <GroupChips outlet={outlet} value={groups} onChange={setGroups} testPrefix="dining" counts={groupCounts} />
+                </div>
+              )}
+              {shown.length === 0 ? (
+                <p className="mt-3 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3" data-testid="dining-outlet-empty">
+                  {DINING_OUTLET_LABELS[outlet]}
+                  {groups.length ? `的「${groups.join('、')}」` : ''}还没有菜。店主在「后台 → 餐饮 → 出品档口与菜品」里给菜选点单分类。
+                </p>
+              ) : groups.length === 0 && outletDef(outlet).groups.length > 1 ? (
+                // 「全部」：按小分类分段排
+                outletDef(outlet)
+                  .groups.map((g) => ({ g, list: shown.filter((d) => d.group === g) }))
+                  .filter((x) => x.list.length > 0)
+                  .map(({ g, list }) => (
+                    <section key={g} className="mt-3" data-testid={`dining-menu-group-${g}`}>
+                      <h4 className="mb-1.5 text-[12.5px] font-bold text-ink-3">{g}</h4>
+                      <DishGrid list={list} countOf={countOf} add={add} locked={op.locked} />
+                    </section>
+                  ))
+              ) : (
+                <div className="mt-3">
+                  <DishGrid list={shown} countOf={countOf} add={add} locked={op.locked} />
+                </div>
+              )}
               <p className="mt-2 text-[12px] text-ink-4" data-testid="dining-remaining-hint">
                 「剩 N」是厨房在「估清」里设的今天还能卖几份，没写的不限量；别的终端点了菜，10 秒内跟上。
               </p>
-            </>
+            </div>
           )}
         </Card>
       </div>
@@ -573,7 +612,22 @@ export function OrderTab() {
 
         {target && (
           <Card className="p-4" data-testid="dining-pending">
-            <SectionTitle>还没上的菜 {target.pending.length ? target.pending.length : ''}</SectionTitle>
+            <SectionTitle
+              aside={
+                // 点菜单（8.1.7，CF8）：这桌（这位客人）点过的菜，每道标已上 / 未上
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<ReceiptText className="size-3.5" />}
+                  onClick={() => setReceipt(t ? { session: t.id } : { visit: g!.visitId })}
+                  data-testid="dining-receipt-open"
+                >
+                  点菜单
+                </Button>
+              }
+            >
+              还没上的菜 {target.pending.length ? target.pending.length : ''}
+            </SectionTitle>
             {!canVoid && target.pending.length > 0 && (
               <p className="mt-1 text-[11.5px] text-ink-4" data-testid="dining-void-no-permission">
                 退菜、改单与下单一样要有「前台挂账」权限，请找前台同事。
@@ -682,6 +736,8 @@ export function OrderTab() {
           );
         })()}
 
+      <ReceiptDialog target={receipt} onClose={() => setReceipt(null)} />
+
       <DishVoidDialog
         dish={
           voiding
@@ -716,6 +772,40 @@ export function OrderTab() {
 }
 
 /** 桌台点单：选一张用餐中的桌（开台在「桌台」页） */
+/** 一组菜（8.1.7 抽出来：「全部」时按小分类分段，每段一组） */
+function DishGrid({ list, countOf, add, locked }: { list: MenuDish[]; countOf: (id: number) => number; add: (d: MenuDish) => void; locked: boolean }) {
+  return (
+    // 手持点单机（商米 V3，窄屏）一行一道，菜名不被挤成一列；平板、收银机两到三列
+    <div className="grid grid-cols-1 gap-2 min-[480px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3">
+      {list.map((d) => {
+        const n = countOf(d.id);
+        const out = d.remaining === 0;
+        return (
+          <button
+            key={d.id}
+            type="button"
+            onClick={() => add(d)}
+            disabled={out || locked}
+            className={cn(
+              'relative flex min-h-[64px] flex-col items-start rounded-lg border px-3 py-2.5 text-left transition-colors min-[480px]:min-h-[76px]',
+              out ? 'cursor-not-allowed border-line bg-paper-2/60 opacity-60' : n ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-pine',
+            )}
+            data-testid={`dining-dish-${d.name}`}
+          >
+            <span className="pr-8 text-[14.5px] leading-snug font-bold">{d.name}</span>
+            <span className="mt-auto flex w-full items-center gap-1.5 pt-1">
+              <Money cents={d.price} className="text-[13.5px] font-bold text-ink-2" />
+              <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink-4">{d.stationName}</span>
+              {out ? <Badge tone="clay">已估清</Badge> : d.remaining !== null && <Badge tone="yuzu">剩 {d.remaining}</Badge>}
+            </span>
+            {n > 0 && <span className="num absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-pine px-1.5 text-[12.5px] font-bold text-paper">{n}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function TablePicker({
   loading,
   tables,

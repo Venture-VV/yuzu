@@ -1310,6 +1310,7 @@ const CHANGE_ACTIONS = [
   'items_technician_updated',
   'kitchen_station_saved',
   'items_station_updated',
+  'items_slot_updated',
   'room_type_saved',
   'room_saved',
   'space_saved',
@@ -1387,6 +1388,8 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       return typeof detail.summary === 'string' ? detail.summary : '保存了出品档口';
     case 'items_station_updated':
       return '调整了菜品的出品档口';
+    case 'items_slot_updated':
+      return '调整了菜品的点单分类';
     case 'room_type_saved':
       return typeof detail.summary === 'string' ? detail.summary : '保存了房型';
     case 'room_saved':
