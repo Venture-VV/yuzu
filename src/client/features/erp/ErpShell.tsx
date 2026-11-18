@@ -176,7 +176,7 @@ export function ErpShell() {
                 : k === 'inventory' && supplyTodo.data
                   ? supplyTodo.data.slowMoving + supplyTodo.data.expiringLots + supplyTodo.data.expiredLots || undefined
                   : k === 'purchasing' && supplyTodo.data
-                    ? supplyTodo.data.pendingAdmission + supplyTodo.data.licensesDue || undefined
+                    ? supplyTodo.data.pendingAdmission + supplyTodo.data.licensesDue + (supplyTodo.data.contractDue ?? 0) || undefined
                     : k === 'receivables' && arTodo.data
                       ? arTodo.data.overdueCharges + (arTodo.data.platformOverdueCents > 0 ? 1 : 0) || undefined
                       : k === 'bank' && bankTodo.data

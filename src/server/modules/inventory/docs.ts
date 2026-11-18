@@ -49,6 +49,7 @@ import { urgentPlan } from './urgent';
 import { receiptAttachments } from './attachments';
 import { loadSettings } from '../settings';
 import { loadPurchaseRules } from './purchase-rules';
+import { receiptContractDue } from './contract-due';
 
 // ───────────────────────── 输入 ─────────────────────────
 
@@ -1853,7 +1854,12 @@ export function registerDocRoutes(app: FastifyInstance, deps: Deps) {
     const doc = await findDocByKey(sql, key);
     return doc ? { found: true, doc } : { found: false };
   });
-  app.get('/api/inventory/docs/:id', { preHandler: guard('inventory.read') }, async (req) => getDoc(sql, docId(req), deps.config.timezone));
+  app.get('/api/inventory/docs/:id', { preHandler: guard('inventory.read') }, async (req) => {
+    const id = docId(req);
+    const doc = await getDoc(sql, id, deps.config.timezone);
+    // 8.1.10：急采要补合同、还没补上时写着期限（CK19）
+    return doc.urgent ? { ...doc, contractDue: await receiptContractDue(sql, id, deps.config.timezone) } : doc;
+  });
   app.get('/api/inventory/departments/:id/usual', { preHandler: guard('inventory.read') }, async (req) => usualIssues(sql, parse(idParam, req.params).id));
 
   app.post('/api/inventory/docs', { preHandler: guard('inventory.read') }, async (req, reply) => {
