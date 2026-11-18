@@ -2,7 +2,7 @@
 
 **城市度假 × 山野自然 × 年轻当代。** 一间开在城市里的年轻山野汤泉：米白纸感的底色、石材般的线条、松林绿的秩序，再用一点柚黄让界面有呼吸感。品牌表达集中在登录页、侧栏和少数氛围位置，工作区保持清楚、轻快、数字好读。
 
-令牌定义在 `src/client/styles.css` 的 `@theme` 中，组件在 `src/client/components/`。
+令牌定义在 `src/client/styles.css` 的 `@theme` 中，组件在 `src/client/components/`。动效见 [`UI_V8016.md`](UI_V8016.md)，三台目标设备见 [`DEVICES.md`](DEVICES.md)，二级页签与后台的信息架构见 [`IA_V8017.md`](IA_V8017.md)。字号、公共部件清单与「写成检查的约定」三节是工程治理三期（`GOVERNANCE.md`）按现状补的。
 
 ## 色彩
 
@@ -53,3 +53,72 @@
 ## 键盘
 
 `/` 搜索会员 · `↑ ↓ Enter` 选择 · `R` 充值 · `X` 消费 · `N` 新建会员 · `Esc` 关闭面板。按钮上以小键帽提示。
+
+## 字号
+
+页面里的字号是直接写的（`text-[13px]`），没有进令牌。2026-11-18 实测 4,198 处、32 种，九成集中在八种：
+
+| 字号 | 处数 | 用在哪 |
+| --- | --- | --- |
+| 13px | 1,081 | 正文、表格、表单 |
+| 12.5px | 1,033 | 次要文字、表格里的说明、密一点的列表 |
+| 12px | 806 | 标签、辅助说明、角标旁的字 |
+| 14px | 318 | 强调的正文、按钮、小标题 |
+| 13.5px | 243 | 介于正文与小标题之间（多在前台与会员工作台） |
+| 11.5px | 179 | 辅助说明、时间、单号 |
+| 15px | 165 | 卡片里的小标题、主要按钮 |
+| 11px | 111 | 角标、最弱的说明 |
+| 16 / 18px | 122 | 卡片标题、弹窗标题 |
+| 20 / 22 / 24 / 26px | 116 | 页面标题、要一眼看到的数字 |
+| 其余 18 种 | 约 120 | 9–10.5px 是打印页与图上的小字；28px 以上是金额大数字与展示位；14.5、17、19、21 各几十处以内 |
+
+**规矩**：
+
+- 新页面只用上表里已有的字号；治理基线（`npm run check:gov`）会拦下新出现的字号。
+- 优先用最常见的那几档：正文 13、次要 12.5 或 12、强调 14 或 15、标题 16 / 18 / 22。
+- 13.5、14.5、11.5、10.5、9.5 这些半号和 17、19、21 是历史形成的，不要再扩散；它们要不要并到相邻的整数档（会动 500 多处的外观）等店主定（`PENDING_DECISIONS.md` ZL2）。
+- 平板电子菜单、员工手机端、UI 工作台有各自的版面规格（`EMENU.md`、`CANTEEN.md`、`WORKBENCH_V811.md`），不照这张表。
+
+## 公共部件
+
+写页面之前先在这里找，有的直接用，不在模块里另写一份。都在 `src/client/components/`（表单与基础部件在 `ui.tsx`）。
+
+| 要做的事 | 用哪个 | 说明 |
+| --- | --- | --- |
+| 按钮、图标按钮 | `Button`、`IconButton` | 主要操作高 48–56px；图标按钮必须给 `label` |
+| 表单的一项、输入框、多行、下拉 | `Field`、`Input`、`Textarea`、`Select` | `Field` 管标签、说明、错误提示 |
+| 输入金额 | `MoneyInput` | 左侧 ¥、等宽数字、手机上弹小数键盘；填的是「元」，由页面换成整数「分」再提交 |
+| 输入数量 | `QtyInput` | 加减按钮中间可以直接输，1–99；不要自己写加减号 |
+| 几选一的开关 | `Segmented` | 只用来切换显示方式或选项；**页签不用它**，用 `SubNav` |
+| 二级页签 | `SubNav` 的 `SubTabPage` / `SubPane` | 页签写进地址，刷新、收藏都到同一个页签 |
+| 显示金额 | `Money`、`AnimatedMoney` | ¥ 缩小、分位弱化；余额变化用带过渡的那个 |
+| 状态标记 | `Badge`、`PendingBadge` | 「待确认」的规则一律用 `PendingBadge` |
+| 卡片、分区标题、键值对 | `Card`、`SectionTitle`、`InfoItem` | |
+| 提示条（页面里） | `Notice` | 成功、警告、错误、提示四种，图文同时表达 |
+| 一闪而过的提示 | `useToast` | |
+| 弹窗、右侧抽屉 | `Overlay` 的 `Dialog`、`Sheet` | 自带焦点管理、Esc 只关最上面一层 |
+| 要填原因的操作 | `ReasonDialog`、`ReasonChips` | 快捷原因在后台「数据字典与字段」维护 |
+| 当场授权 | `AuthorizeDialog` | 授权人输自己的账号密码，业务请求只带授权编号 |
+| 确认勾选 | `ConfirmCheck` | 核对页「我已核对」 |
+| 加载中 | `Skeleton`、`Spinner` | 列表用骨架屏 |
+| 没取回来 | `LoadFailed` | 写明加载失败 + 重试；不要显示成「还没有」 |
+| 真的一条都没有 | `EmptyState` | 线描小图 + 一句话 + 可选操作 |
+| 日期切换 | `DateNav` | 默认只到今天；预约页传 `max` |
+| 图片上传与缩略图 | `Images` 的 `ImagePicker`、`ImageThumbs` | 上传前在浏览器里压缩 |
+| 流程进度 | `FlowTrack`、`FlowDot`、`FlowAlert` | 做完绿勾、正在等橙点、没到灰、超期红条 |
+| 「结果待确认」的提醒 | `PendingOpsBanner`（门店）、`ErpPendingPanel`（ERP 与后台） | 配 `lib/pendingOps`、`sendErpOp` |
+| 断网提示、出错不白屏 | `NetworkBanner`、`ErrorBoundary` | 已经挂在外层，页面不用自己加 |
+| 键盘提示 | `Kbd` | |
+
+判断与取数的公共小工具（连接状态、定时取数、请求层、导入文件、动效）在 [`CONVENTIONS.md`](CONVENTIONS.md) 第 3 节。
+
+## 写成检查的约定
+
+下面这些不靠自觉，`npm run check:gov` 会查（`GOVERNANCE.md` 第 8 节）：
+
+- 页面代码里不新写十六进制颜色（颜色用上面的令牌：`text-pine`、`bg-paper-2`、`var(--color-clay)`）；插画、打印页、房态图、设计工具里已有的记了基线。
+- 不出现新的字号。
+- 判断断网用 `lib/connection`，不看 `navigator.onLine`；判断「服务端明确没处理」用 `lib/api` 的 `isRejected`，不手写 `status < 500`。
+- 新的定时取数用 `lib/livePoll` 的 `useLivePoll`，不在页面里写 `setInterval`、`refetchInterval`。
+- 行内样式（`style={{ … }}`）里不写 dvh，用类名（`h-dvh`、`max-h-[88dvh]`）。
+- 列表里的部件要有 `key`（`npm run lint`）。

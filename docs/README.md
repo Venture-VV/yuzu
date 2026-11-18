@@ -75,6 +75,7 @@
 - [`STOCK_CYCLES.md`](STOCK_CYCLES.md)：台面日耗品、称重与盘点 / 对账提醒（v0.7.13，Batch 4 收尾）
 - [`STUDIO_MP.md`](STUDIO_MP.md)：工作台 · 小程序的版面格式（8.1.2，给小程序线）
 - [`SUPPLIER_SETTLEMENT.md`](SUPPLIER_SETTLEMENT.md)：供应商结算与库存采购收尾（v0.7.12，RQ-002 第二步）
+- [`TEST_AUDIT.md`](TEST_AUDIT.md)：用例体检（2026-11-18，工程治理三期）
 - [`WAREHOUSES.md`](WAREHOUSES.md)：两级库存：总仓 + 部门小仓（v0.7.11，RQ-002 第一步）
 - [`WORKBENCH_V811.md`](WORKBENCH_V811.md)：UI 工作台（8.1.1–8.1.2）：设计师在系统里直接改版面
 
@@ -115,6 +116,7 @@
 - [`HANDOFF_G3.md`](HANDOFF_G3.md)：G3 提测交接 · S3 收银结账、门票跳档、团购防重、交班与双口径日结（G3A / G3B）
 - [`HANDOFF_GOV1.md`](HANDOFF_GOV1.md)：工程治理一期 交接说明 · 文档收拢与护栏
 - [`HANDOFF_GOV2.md`](HANDOFF_GOV2.md)：工程治理二期 交接说明 · 代码瘦身与代码规范
+- [`HANDOFF_GOV3.md`](HANDOFF_GOV3.md)：工程治理三期 交接说明 · 测试分层与界面规范
 - [`HANDOFF_GR1.md`](HANDOFF_GR1.md)：G-R1 提测交接 · R1.2 资金轨：先开班、优惠 / 免单与降档授权、反结账口径与时限（v0.4.0）
 - [`HANDOFF_MP1.md`](HANDOFF_MP1.md)：小程序第一期交接 · MP1：yuzu 小程序端口与接口、后台「微信小程序」、小程序网关、小程序页面
 - [`HANDOFF_MP2A.md`](HANDOFF_MP2A.md)：交接：小程序第二期 2a 线上充值、2b 对账（小程序线）

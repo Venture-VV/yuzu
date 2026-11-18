@@ -40,6 +40,18 @@
 
 日常改动先跑相关的集成测试与浏览器用例；交 PR 前跑全量的类型检查、集成测试、构建；浏览器的全量交给 CI。
 
+**三档（工程治理三期）**——写代码途中别动不动跑全量，按档来：
+
+| 档 | 命令 | 跑什么 | 要多久 | 什么时候跑 |
+| --- | --- | --- | --- | --- |
+| 秒级 | `npm run lint`、`npm run test:unit` | oxlint；不要数据库的用例（36 个文件、300 多条：共用的计算与规则、页面的请求层、各个检查脚本） | 1 秒、8 秒 | 写代码途中随时 |
+| 快测 | `npm run test:quick` | 秒级那一档 + 和这次改动沾边的集成测试（按改到的模块名在用例文件名里找） | 几十秒到两三分钟 | 写完一块 |
+| 门禁 | `npm run typecheck && npm run check:code && … && npm test && npm run build`（`AGENTS.md` 的「门禁」一行） | 全部静态检查、全量集成测试、构建 | 五分钟左右 | 交 PR 前；CI 每次都跑，另加浏览器验收 |
+
+- 哪些用例不要数据库是 `scripts/test-tiers.mjs` 顺着导入关系认出来的（引到数据库连接或用例的公共准备 `tests/helpers.ts` 就算要），不用改文件名、不用维护清单；`npm run test:unit -- --list` 看是哪些。新写纯计算、纯规则的用例时不要引 `tests/helpers.ts`，它就自动进秒级这一档。
+- 快测是按文件名找的、会漏（例如改钱包会影响前台的用例），**不能代替全量**；`npm run test:quick -- --list` 先看会跑哪些，不够的照下面的对照表补。
+- 用例体检（哪些用例 CI 里实际没跑、哪些靠固定等待）的结果与建议在 [`TEST_AUDIT.md`](TEST_AUDIT.md)。
+
 `npm test` 按文件并行（默认 4 个进程，或机器的核数，取小的）：每个进程用自己的测试库（`TEST_DATABASE_URL` 的库名加 `_w1`、`_w2`……），每个测试文件开始时从开跑前迁移好的模板库（库名加 `_tpl`）整库复制一份新的。这样不再整个删 public 模式：删一个迁移好的模式要拿约 3700 把锁，几个进程同时删会超出数据库默认的共享锁表。升级测试要从空库迁移，删模式时几个进程排队。所以测试库的账号要有建库权限；没有的话用 `TEST_WORKERS=1 npm test` 回到原来的单库串行。
 
 只给应用用的开关不带进用例（8.1.5，`vitest.config.ts`）：`INTEGRATIONS_MOCK`、正式接口的密钥（`LIVE_ENV` 里的那些）、`YUZU_AI_*`、访问网段与频率限制（`ACCESS_ALLOW_CIDRS`、`RATE_LIMIT_*`、`OVERLOAD_*`）设在终端里也不影响 `npm test`。它们只给启动应用的那一条命令带；用例要模拟、要哪样的防护，在自己的配置里写明（`tests/helpers.ts` 的 `integrations`、`tests/protection.test.ts` 的 `protection`）。

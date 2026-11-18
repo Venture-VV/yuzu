@@ -13,6 +13,8 @@ npm run check:code                         # 8.1.3 代码整洁检查（CI 跑�
 npm run check:docs                         # 工程治理一期（docs/GOVERNANCE.md，CI 跑）：AGENTS.md 的体积预算、指不到文件的相对链接、引用了不存在的文档、docs/README.md 的索引、开发约定小节；加了文档跑 npm run check:docs -- --fix 重新生成索引
 npm run check:gov                          # 工程治理一期（CI 跑，约 5 秒）：治理基线 scripts/governance-baseline.json，只许持平或下降——分层、页面里的十六进制颜色与手写字号、超过 1,500 行的文件、没人引用的导出（knip）、重复率（jscpd）；清掉一批后 -- --update 收紧
 npm run format                             # 8.1.3 排版（Prettier 固定版本，.prettierrc.json）；提交前跑一次，CI 跑 npm run format:check；小程序线的目录、迁移、静态资源不排（.prettierignore）
+npm run test:unit                          # 工程治理三期：秒级一档，只跑不要数据库的用例（按导入关系自动认，-- --list 看是哪些）；不用起数据库
+npm run test:quick                         # 工程治理三期：快测，秒级一档 + 和这次改动沾边的集成测试（按改到的模块名找，会漏，不能代替全量；-- --list 先看会跑哪些）
 npm test                                   # TEST_DATABASE_URL 指向独立测试库；按文件并行，另建 <库名>_w1…、<库名>_tpl（要建库权限；TEST_WORKERS=1 回到单库串行）
 E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟（CI 拆三组并行，见 docs/TESTING.md）
 ```
