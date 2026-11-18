@@ -128,9 +128,10 @@ function main() {
     return cache.get(path);
   };
   const exists = (path) => existsSync(resolve(ROOT, path)) && read(path) !== null;
-  const tests = readdirSync(resolve(ROOT, 'tests'))
+  // tests/ 下所有的用例文件（含子目录），与 vitest.config.ts 的 include 一致
+  const tests = readdirSync(resolve(ROOT, 'tests'), { recursive: true })
+    .map((f) => `tests/${String(f).split('\\').join('/')}`)
     .filter((f) => f.endsWith('.test.ts'))
-    .map((f) => `tests/${f}`)
     .sort();
   const unit = tests.filter((t) => !needsDatabase(t, read, exists));
 

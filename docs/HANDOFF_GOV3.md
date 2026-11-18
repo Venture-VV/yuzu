@@ -67,7 +67,8 @@
 
 - `npm run lint`、`npm run check:code`（含类型检查）、`npm run check:docs`、`npm run check:gov`、`npm run format:check`：通过。
 - `npm run test:unit`：36 个文件、307 条，8 秒，不起数据库。
-- `npm test`（全量）与 `npm run build`、`npm run check:bundle`：结果见 PR 说明。
+- `npm test`（全量，本机 PostgreSQL 16 的独立测试库）：233 个文件、2,127 条全过。`npm run build`、`npm run check:bundle`：通过。
+- 去掉 `TEST_DATABASE_URL`、`DATABASE_URL` 两个环境变量跑 `npm run test:unit`：全过（确认这一档真的不要数据库）。
 - 反例（用例里都有）：页面里加一处 `navigator.onLine`、多一处 `refetchInterval`、用例里留 `.only`，`check:gov` 各自报出来并写明该怎么写。
 
 ## 4. 验收要点
