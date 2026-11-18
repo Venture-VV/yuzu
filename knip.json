@@ -17,5 +17,9 @@
   "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts", "e2e/**/*.ts", "e2e-canteen/**/*.ts", "scripts/**/*.{mjs,ts}"],
   "ignore": ["miniprogram/**"],
   "ignoreExportsUsedInFile": true,
-  "paths": { "@shared/*": ["./src/shared/*"], "@client/*": ["./src/client/*"] }
+  "paths": {
+    "@shared/*": ["./src/shared/*"],
+    "@client/*": ["./src/client/*"]
+  },
+  "ignoreDependencies": ["tailwindcss", "@free-fonts/zhuque-fangsong", "jscpd"]
 }

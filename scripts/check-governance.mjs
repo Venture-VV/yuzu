@@ -4,7 +4,7 @@
 //   2. 页面代码里的十六进制颜色（按目录记数，不许变多；颜色该进样式表的变量）；
 //   3. 页面代码里手写的字号 text-[Npx]（不许出现基线以外的新字号）；
 //   4. 超过 1,500 行的源文件（不许有新的）；
-//   5. 导出了却没有任何地方引用的函数、常量、类型（knip；不许有新的）；
+//   5. 导出了却没有任何地方引用的函数、常量、类型（knip；不许有新的）；用到了没声明的依赖、声明了没用到的依赖（硬规则，一处都不许）；
 //   6. 重复代码的比例（jscpd；不许超过上限）。
 // 数字变少了不用管，想把基线收紧跑 npm run check:gov -- --update（只会调低；调高要加 --allow-increase 并在 PR 里说明原因）。
 // 小程序线的目录与文件（scripts/check-line-scope.mjs 认作小程序线自己的）不查。退出码：0 通过，1 有问题。
@@ -172,21 +172,29 @@ function binOf(pkg) {
 function runKnip() {
   let out = '';
   try {
-    out = execFileSync(process.execPath, ['--max-old-space-size=4096', binOf('knip'), '--no-exit-code', '--no-progress', '--include', 'exports,types', '--reporter', 'json'], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    out = execFileSync(
+      process.execPath,
+      ['--max-old-space-size=4096', binOf('knip'), '--no-exit-code', '--no-progress', '--include', 'exports,types,dependencies,devDependencies,unlisted', '--reporter', 'json'],
+      {
+        cwd: ROOT,
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
   } catch (e) {
     throw new Error(`knip 没跑起来：${e.stderr || e.message}`);
   }
   const dead = [];
+  const deps = [];
   for (const issue of JSON.parse(out).issues ?? []) {
     if (isMpLine(issue.file)) continue;
     for (const kind of ['exports', 'types']) for (const item of issue[kind] ?? []) dead.push(`${issue.file}:${item.name}`);
+    for (const item of issue.unlisted ?? []) deps.push(`${issue.file} 用到了 ${item.name}，package.json 里没声明（间接装上的不算数，哪天上游不带它就断了）`);
+    for (const kind of ['dependencies', 'devDependencies'])
+      for (const item of issue[kind] ?? []) deps.push(`package.json 声明了 ${item.name}，没有任何地方用到（不用就删；只在样式表或脚本里用的加进 knip.json 的 ignoreDependencies）`);
   }
-  return dead.sort();
+  return { dead: dead.sort(), deps };
 }
 
 function runJscpd() {
@@ -227,7 +235,7 @@ function main() {
   const update = process.argv.includes('--update');
   const allowIncrease = process.argv.includes('--allow-increase');
   const scanned = scanSources();
-  const deadExports = runKnip();
+  const { dead: deadExports, deps } = runKnip();
   const cpd = runJscpd();
   const current = { hexColors: scanned.hexColors, fontSizes: scanned.fontSizes, largeFiles: scanned.largeFiles, deadExports, duplicationPercent: cpd.percent };
 
@@ -262,6 +270,7 @@ function main() {
   }
 
   const { problems, notes } = compareBaseline(baseline, current);
+  if (deps.length) problems.unshift(`依赖的声明与用到的对不上 ${deps.length} 处：\n  ${deps.join('\n  ')}`);
   if (scanned.layers.length) problems.unshift(`分层被打破 ${scanned.layers.length} 处：\n  ${scanned.layers.join('\n  ')}`);
   if (problems.length) {
     console.error(`✗ 治理基线没过（docs/GOVERNANCE.md）：\n\n${problems.join('\n\n')}`);
@@ -269,7 +278,7 @@ function main() {
   }
   const colorTotal = Object.values(current.hexColors).reduce((a, b) => a + b, 0);
   console.log(
-    `✓ 治理基线通过：分层 0 处违反；页面里十六进制颜色 ${colorTotal} 处、手写字号 ${current.fontSizes.length} 种（${scanned.fontSizeUses} 处）、` +
+    `✓ 治理基线通过：分层 0 处违反、依赖声明与用到的一致；页面里十六进制颜色 ${colorTotal} 处、手写字号 ${current.fontSizes.length} 种（${scanned.fontSizeUses} 处）、` +
       `超过 ${LARGE_FILE_LINES} 行的文件 ${current.largeFiles.length} 个、没人引用的导出 ${deadExports.length} 个、重复代码 ${cpd.percent.toFixed(2)}%（${cpd.lines} 行）`,
   );
   if (notes.length && !update) console.log(`  比基线少了：${notes.join('；')}。可以跑 npm run check:gov -- --update 把基线收紧`);
