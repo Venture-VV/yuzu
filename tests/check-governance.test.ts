@@ -103,7 +103,7 @@ describe('与基线比', () => {
 describe('约定检查（docs/CONVENTIONS.md 里能查的几条）', () => {
   const { conventionCounts, focusedTests, stripComments } = gov as {
     conventionCounts: (file: string, code: string) => Record<string, number>;
-    focusedTests: (code: string) => number[];
+    focusedTests: (code: string, fileName?: string) => number[];
     stripComments: (code: string) => string;
   };
 
@@ -133,9 +133,18 @@ describe('约定检查（docs/CONVENTIONS.md 里能查的几条）', () => {
     expect(scanPageCode('x.tsx', code).inlineDvh).toBe(2);
   });
 
-  it('用例里的 .only 认出来（注释掉的不算）', () => {
-    const code = ["it('a', () => {});", "it.only('b', () => {});", "// test.only('c', () => {});", "describe.only('d', () => {});", "test.skip(cond, '按尺寸跳过');"].join('\n');
-    expect(focusedTests(code)).toEqual([2, 4]);
+  it('用例里的 .only 认出来（注释掉的、字符串里写着的不算）', () => {
+    const code = [
+      "it('a', () => {});",
+      "it.only('b', () => {});",
+      "// test.only('c', () => {});",
+      "describe.only('d', () => {});",
+      "test.skip(cond, '按尺寸跳过');",
+      'const sample = "it.only(\'字符串里的\', () => {});";',
+      "test.describe.only('e', () => {});",
+      'list.only(1);',
+    ].join('\n');
+    expect(focusedTests(code)).toEqual([2, 4, 7]);
   });
 
   it('变多了报出来并写明该怎么写；持平、变少通过', () => {

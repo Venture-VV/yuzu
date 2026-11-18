@@ -108,14 +108,20 @@ export function conventionCounts(file, code) {
   return counts;
 }
 
-/** 用例里留着的 .only（跑的时候别的用例会被悄悄跳过）：返回行号 */
-export function focusedTests(code) {
+/** 用例里留着的 .only（跑的时候别的用例会被悄悄跳过）：返回行号。按语法树认调用，字符串、注释里的字样不算 */
+export function focusedTests(code, fileName = 'x.test.ts') {
+  const src = ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, false);
   const found = [];
-  stripComments(code)
-    .split('\n')
-    .forEach((line, i) => {
-      if (/\b(?:it|test|describe)\.only\s*\(/.test(line)) found.push(i + 1);
-    });
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'only') {
+      // it.only(…)、test.only(…)、describe.only(…)，以及 test.describe.only(…) 这类多一层的
+      let root = node.expression.expression;
+      while (ts.isPropertyAccessExpression(root)) root = root.expression;
+      if (ts.isIdentifier(root) && ['it', 'test', 'describe'].includes(root.text)) found.push(src.getLineAndCharacterOfPosition(node.expression.name.getStart(src)).line + 1);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(src);
   return found;
 }
 
@@ -248,7 +254,7 @@ function scanSources() {
     }
     for (const abs of files) {
       const file = relative(ROOT, abs).split('\\').join('/');
-      for (const line of focusedTests(readFileSync(abs, 'utf8'))) focused.push(`${file}:${line}`);
+      for (const line of focusedTests(readFileSync(abs, 'utf8'), file)) focused.push(`${file}:${line}`);
     }
   }
   return { hexColors, fontSizes, fontSizeUses: Object.values(sizeCounts).reduce((a, b) => a + b, 0), largeFiles: largeFiles.sort(), layers, conventions, focused };
