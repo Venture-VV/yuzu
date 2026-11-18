@@ -8,6 +8,7 @@ import { Check, Clock3, Flame, RotateCcw, Soup } from 'lucide-react';
 import { RECEIPT_STATE_LABELS, slotLabel, type DiningReceipt, type DiningReceiptLine, type ReceiptLineState } from '@shared/dining';
 import { formatYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
+import { useLivePoll } from '../../lib/livePoll';
 import { useSession } from '../../lib/session';
 import { cn, formatDateTime, formatTime } from '../../lib/utils';
 import { LoadFailed } from '../../components/LoadFailed';
@@ -19,14 +20,30 @@ export type ReceiptTarget = { session: number } | { visit: number };
 
 export const receiptKey = (t: ReceiptTarget | null) => ['dining', 'receipt', t ? ('session' in t ? `s${t.session}` : `v${t.visit}`) : null] as const;
 
-/** 点菜单：开着时 10 秒刷新一次（出品状态跟得上） */
-export const useDiningReceipt = (t: ReceiptTarget | null) =>
-  useQuery({
-    queryKey: receiptKey(t),
+/** 点菜单开着时多久刷新一次（出品状态跟得上） */
+const RECEIPT_REFRESH_MS = 10_000;
+
+/**
+ * 点菜单：数据放在 React Query 里（加载、出错、重试照旧）；开着时的定时刷新走共用的 useLivePoll（AGENTS.md「定时取数」，8.1.3）——
+ * 页面在后台、连不上服务器时不取，回到页面、网络恢复时马上取。关着（没有对象）时不起定时器。
+ * 刷新不打断正在路上的那一次（cancelRefetch: false），与打开时的第一次取数不会重复
+ */
+export function useDiningReceipt(t: ReceiptTarget | null) {
+  const key = receiptKey(t);
+  const q = useQuery({
+    queryKey: key,
     queryFn: () => api.get<DiningReceipt>(`/api/dining/receipt?${t && 'session' in t ? `session=${t.session}` : `visit=${t && 'visit' in t ? t.visit : 0}`}`),
     enabled: t !== null,
-    refetchInterval: 10_000,
   });
+  useLivePoll(
+    async (isLive) => {
+      if (t && isLive()) await q.refetch({ cancelRefetch: false });
+    },
+    [key[2]],
+    { intervalMs: t ? RECEIPT_REFRESH_MS : undefined },
+  );
+  return q;
+}
 
 const STAMP: Record<ReceiptLineState, { cls: string; icon: React.ReactNode }> = {
   served: { cls: 'border-pine/50 text-pine bg-pine-tint', icon: <Check className="size-3.5" strokeWidth={3} /> },

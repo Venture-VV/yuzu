@@ -55,7 +55,7 @@
    - `features/dining/ReceiptDialog.tsx`：
      - 小票纸：上下锯齿边（`styles.css` 的 `.receipt-paper`）、进度条、状态章。
      - 「只看还没上的菜」。
-     - 开着时 10 秒刷新（React Query，断网由 8.1.3 的连接状态管着）。
+     - 开着时 10 秒刷新：数据在 React Query 里，定时刷新走共用的 `useLivePoll`（后台不取、断网不取、回到页面与网络恢复时马上取；Codex 审查 `156d9c6` 指出原来直接用了 `refetchInterval`）。
      - 窄屏上状态章在上、份数金额在下。
    - 样子参照常见的火锅店点餐小票，没有用任何品牌的名字、标志。
 7. **三台目标设备**（DV1–DV4）

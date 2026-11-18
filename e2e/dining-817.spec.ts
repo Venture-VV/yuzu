@@ -218,6 +218,11 @@ test.describe('8.1.7 餐饮分区与点菜单', () => {
       await expect(page.getByTestId('dining-receipt-waiting')).toHaveText('3');
       await expect(page.getByTestId('dining-receipt-progress')).toContainText('已上 1 / 共 4 份');
       await expect(page.getByTestId('dining-receipt-amount')).toContainText('166.00');
+      // 开着不动：厨房把甘露做好、服务员上了，10 秒内自己刷新成「已上」（定时刷新走 useLivePoll）
+      for (const action of ['done', 'serve']) await send(page, 'post', `/api/kitchen/items/${kid(SAGO.name)}/${action}`);
+      await expect(page.getByTestId(`dining-receipt-state-${lineId(SAGO.name)}`)).toHaveText('已上', { timeout: 25_000 });
+      await expect(page.getByTestId('dining-receipt-waiting')).toHaveText('2');
+      await expect(page.getByTestId('dining-receipt-progress')).toContainText('已上 2 / 共 4 份');
       // 只看还没上的：已上、已退的收起来
       await page.getByTestId('dining-receipt-only-waiting').check();
       await expect(page.getByTestId(`dining-receipt-line-${lineId(KUNGPAO.name)}`)).toHaveCount(0);
@@ -231,7 +236,7 @@ test.describe('8.1.7 餐饮分区与点菜单', () => {
       await page.getByTestId(`table-tile-${BOX}`).click();
       await expect(page.getByTestId('table-session')).toBeVisible();
       await page.getByTestId('table-receipt').click();
-      await expect(page.getByTestId(`dining-receipt-line-${lineId(SAGO.name)}`)).toHaveAttribute('data-state', 'cooking');
+      await expect(page.getByTestId(`dining-receipt-line-${lineId(SAGO.name)}`)).toHaveAttribute('data-state', 'served');
       await page.keyboard.press('Escape');
       await page.keyboard.press('Escape');
 
