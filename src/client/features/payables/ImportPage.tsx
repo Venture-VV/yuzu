@@ -5,7 +5,7 @@ import { formatAmount } from '@shared/money';
 import { ERP_IMPORT_LABELS, OPENING_IMPORT_COLUMNS, SUPPLIER_IMPORT_COLUMNS, type ErpImportKind, type ErpImportPreview, type ErpImportRecord } from '@shared/purchasing';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { ErpPendingStoreError, sendErpOp, useErpPending } from '../../lib/erpPending';
-import { bytesToBase64, readImportFile } from '../../lib/import-file';
+import { loadTableFile, type LoadedTable } from '../../lib/import-file';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, downloadCsvRows, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
@@ -31,8 +31,6 @@ const TEMPLATES: Record<ErpImportKind, { columns: readonly string[]; sample: str
   },
 };
 
-type Loaded = { fileName: string; csv?: string; xlsxBase64?: string; encoding: string };
-
 function downloadTemplate(kind: ErpImportKind) {
   const t = TEMPLATES[kind];
   downloadCsvRows([t.columns, ...t.sample], `${ERP_IMPORT_LABELS[kind]}导入模板.csv`);
@@ -45,7 +43,7 @@ export function ImportPage() {
   const invalidate = useInvalidateAll();
   const kinds = (['suppliers', 'opening_payables'] as const).filter((k) => (k === 'suppliers' ? can('inventory.master') : can('payable.manage')));
   const [kind, setKind] = useState<ErpImportKind>(kinds[0] ?? 'suppliers');
-  const [file, setFile] = useState<Loaded | null>(null);
+  const [file, setFile] = useState<LoadedTable | null>(null);
   const [preview, setPreview] = useState<ErpImportPreview | null>(null);
   // 每换一次文件或导入类型就加一：晚回来的预览、文件读取对不上现在选的文件，丢掉（不能让 A 的预览配着 B 写入）
   const selection = useRef(0);
@@ -73,13 +71,8 @@ export function ImportPage() {
     const current = () => selection.current === ticket;
     setBusy('read');
     try {
-      if (/\.xlsx$/i.test(f.name)) {
-        const xlsxBase64 = bytesToBase64(await f.arrayBuffer());
-        if (current()) setFile({ fileName: f.name, xlsxBase64, encoding: 'Excel' });
-      } else if (/\.csv$/i.test(f.name) || f.type === 'text/csv') {
-        const loaded = await readImportFile(f);
-        if (current()) setFile({ fileName: f.name, csv: loaded.text, encoding: loaded.label.includes('GBK') ? 'GBK' : 'UTF-8' });
-      } else setError('只能导入 CSV（.csv）或 Excel（.xlsx）文件；老版本的 .xls 请另存为 .xlsx 或 CSV');
+      const loaded = await loadTableFile(f);
+      if (current()) setFile(loaded);
     } catch (e) {
       if (current()) setError(errorMessage(e));
     } finally {
