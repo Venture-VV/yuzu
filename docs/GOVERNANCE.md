@@ -140,7 +140,7 @@ yuzu 的代码本身不乱（重复率 0.78%，没用到的文件 0 个），问
 | 没人引用的导出 | knip：导出了、整个仓库没有任何地方用到 | 68 个（二期后 2 个） | 没用就删；只在本文件用就去掉 `export` |
 | 依赖声明（二期起） | knip：用到了没声明、声明了没用到 | 0（硬规则） | 补进 `package.json`；只在样式表或脚本里用的记进 `knip.json` 的 `ignoreDependencies` |
 | 重复代码 | jscpd：70 个词、8 行起算 | 上限 1%（现在 0.78%） | 抽成公共函数或部件 |
-| 约定（三期起） | `docs/CONVENTIONS.md` 里能查的四条：看 `navigator.onLine`、手写 `status < 500`、页面里自己定时取数、行内样式写 dvh | 1、2、76、1 处 | 照提示换成公共小工具的写法 |
+| 约定（三期起） | `docs/CONVENTIONS.md` 里能查的四条：看 `navigator.onLine`、手写 `status < 500`、用 `refetchInterval` 定时取数、行内样式写 dvh | 1、2、64、1 处 | 照提示换成公共小工具的写法 |
 | 用例里的 `.only`（三期起） | `tests/`、`e2e/`、`e2e-canteen/` | 0（硬规则） | 去掉 |
 
 - 数字变少不用管；清掉一批以后跑 `npm run check:gov -- --update` 把基线收紧（只会调低）。

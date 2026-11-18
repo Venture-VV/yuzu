@@ -5,10 +5,10 @@
 工程治理（`docs/GOVERNANCE.md`）的第三期，交接 `docs/HANDOFF_GOV3.md`。没有迁移，`src/` 下一个文件都没改。三期做完，这条线收口，以后照 `docs/GOVERNANCE.md` 第 5 节的长期规则维护。
 
 - **测试分三档**（`docs/TESTING.md` 第 4 节）：
-  - 秒级 `npm run test:unit`：36 个文件、307 条用例不要数据库，8 秒跑完。哪些不要数据库是按导入关系自动认的，不用改文件名、不用维护清单。
+  - 秒级 `npm run test:unit`：36 个文件、310 条用例不要数据库，8 秒跑完。哪些不要数据库是按导入关系自动认的，不用改文件名、不用维护清单。
   - 快测 `npm run test:quick`：秒级那一档 + 和这次改动沾边的集成测试（按改到的模块名在用例文件名里找）。
   - 门禁：全量，照旧。
-- **约定写成检查**（`npm run check:gov`）：不看 `navigator.onLine`、不手写 `status < 500`、新的定时取数用 `useLivePoll`、行内样式里不写 dvh——存量记数、不许变多；用例里不许留 `.only`（硬规则）。都是 `docs/CONVENTIONS.md` 里已有的约定，原来只写在文档里。
+- **约定写成检查**（`npm run check:gov`）：不看 `navigator.onLine`、不手写 `status < 500`、新的定时取数用 `useLivePoll`（查 `refetchInterval`；纯界面的计时器不算）、行内样式里不写 dvh——存量记数、不许变多；用例里不许留 `.only`（硬规则）。都是 `docs/CONVENTIONS.md` 里已有的约定，原来只写在文档里。
 - **用例体检** `docs/TEST_AUDIT.md`：没有被悄悄跳过的、没有只靠 mock 的用例；有 9 条浏览器用例 CI 里从没执行过（8 条要模拟接口、1 条要小程序端口）；CI 整次从 7 分钟涨到 19 分钟，卡在浏览器验收「门店电脑 a–l」那一组。要改 CI 测试步骤的四条写成了给测试会话与 Codex 的建议（ZL8）。
 - **界面规范** `docs/DESIGN.md` 按现状补三节：字号（32 种的分布与规矩）、公共部件清单（要做什么用哪个）、写成检查的约定。
 - **CI**：主线 job 里单独的那一遍类型检查去掉了（`check:code` 带着同一次类型检查跑，类型错也在那里报），快 50 秒。

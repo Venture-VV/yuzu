@@ -119,6 +119,6 @@
 - 页面代码里不新写十六进制颜色（颜色用上面的令牌：`text-pine`、`bg-paper-2`、`var(--color-clay)`）；插画、打印页、房态图、设计工具里已有的记了基线。
 - 不出现新的字号。
 - 判断断网用 `lib/connection`，不看 `navigator.onLine`；判断「服务端明确没处理」用 `lib/api` 的 `isRejected`，不手写 `status < 500`。
-- 新的定时取数用 `lib/livePoll` 的 `useLivePoll`，不在页面里写 `setInterval`、`refetchInterval`。
+- 新的定时取数用 `lib/livePoll` 的 `useLivePoll`，不用 `refetchInterval`。纯界面的计时器（倒计时、轮播）照常用 `setInterval`，不在此列。
 - 行内样式（`style={{ … }}`）里不写 dvh，用类名（`h-dvh`、`max-h-[88dvh]`）。
 - 列表里的部件要有 `key`（`npm run lint`）。

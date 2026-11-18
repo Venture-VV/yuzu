@@ -6,7 +6,7 @@
 //   4. 超过 1,500 行的源文件（不许有新的）；
 //   5. 导出了却没有任何地方引用的函数、常量、类型（knip；不许有新的）；用到了没声明的依赖、声明了没用到的依赖（硬规则，一处都不许）；
 //   6. 重复代码的比例（jscpd；不许超过上限）；
-//   7. docs/CONVENTIONS.md 里能查的几条约定（三期）：不看 navigator.onLine、不手写 status < 500、新的轮询用 useLivePoll、
+//   7. docs/CONVENTIONS.md 里能查的几条约定（三期）：不看 navigator.onLine、不手写 status < 500、新的定时取数用 useLivePoll（查 refetchInterval）、
 //      行内样式里不写 dvh（各记一个数，不许变多）；用例里不许留 .only（硬规则）。
 // 数字变少了不用管，想把基线收紧跑 npm run check:gov -- --update（只会调低；调高要加 --allow-increase 并在 PR 里说明原因）。
 // 小程序线的目录与文件（scripts/check-line-scope.mjs 认作小程序线自己的）不查。退出码：0 通过，1 有问题。
@@ -82,12 +82,14 @@ export const CONVENTION_RULES = [
     allow: ['src/client/lib/api.ts'],
     hint: '判断「服务端明确没处理」用 lib/api 的 isRejected，不手写 status < 500',
   },
+  // 只认 refetchInterval（react-query 的定时取数，一定是在取数）。setInterval 不查：倒计时、轮播、「现在几点」这类纯界面的计时器
+  // 也用它，静态分不清回调里取没取数（Codex 审查 ca1f116：都算进来会把合法的界面计时器拦下，还提示换成语义不同的工具）
   {
     key: 'polling',
-    pattern: /\bsetInterval\s*\(|\brefetchInterval\b/g,
+    pattern: /\brefetchInterval\b/g,
     scope: ['src/client/features/', 'src/client/components/'],
     allow: [],
-    hint: '新的定时取数用 lib/livePoll 的 useLivePoll（后台不取、断网不取、回到页面与网络恢复时马上取）',
+    hint: '新的定时取数用 lib/livePoll 的 useLivePoll（后台不取、断网不取、回到页面与网络恢复时马上取），不用 refetchInterval；纯界面的计时器（倒计时、轮播）不在此列',
   },
 ];
 

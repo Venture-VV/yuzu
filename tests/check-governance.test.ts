@@ -112,20 +112,23 @@ describe('约定检查（docs/CONVENTIONS.md 里能查的几条）', () => {
     expect(stripComments(code)).toBe(['', "const url = 'https://example.com/a'; ", 'const a = 1; '].join('\n'));
   });
 
-  it('看 navigator.onLine、手写 status < 500、页面里自己定时取数，各自记数；约定自己的实现所在不算', () => {
-    const code = [
-      'if (!navigator.onLine) return;',
-      'if (res.status >= 500) retry();',
-      'if (e.status < 500) stop();',
-      'setInterval(load, 3000);',
-      'useQuery({ queryKey, queryFn, refetchInterval: 60_000 });',
-    ].join('\n');
-    expect(conventionCounts('src/client/features/x/Page.tsx', code)).toEqual({ 'navigator.onLine': 1, 'status-500': 2, polling: 2 });
+  it('看 navigator.onLine、手写 status < 500、用 refetchInterval 定时取数，各自记数；约定自己的实现所在不算', () => {
+    const code = ['if (!navigator.onLine) return;', 'if (res.status >= 500) retry();', 'if (e.status < 500) stop();', 'useQuery({ queryKey, queryFn, refetchInterval: 60_000 });'].join('\n');
+    expect(conventionCounts('src/client/features/x/Page.tsx', code)).toEqual({ 'navigator.onLine': 1, 'status-500': 2, polling: 1 });
     expect(conventionCounts('src/client/lib/connection.ts', 'const online = navigator.onLine;')).toEqual({});
     expect(conventionCounts('src/client/lib/api.ts', 'if (error.status < 500) return true;')).toEqual({});
-    // 公共小工具自己可以用 setInterval（useLivePoll 就是这么实现的）；服务端不在范围里
-    expect(conventionCounts('src/client/lib/livePoll.ts', 'setInterval(tick, 1000);')).toEqual({});
-    expect(conventionCounts('src/server/jobs.ts', 'setInterval(tick, 60_000);')).toEqual({});
+    // 公共小工具（lib/）与服务端不在「定时取数」这一条的范围里
+    expect(conventionCounts('src/client/lib/queries.ts', 'useQuery({ refetchInterval: 1000 });')).toEqual({});
+    expect(conventionCounts('src/server/jobs.ts', 'const refetchInterval = 60_000;')).toEqual({});
+  });
+
+  it('纯界面的计时器不算定时取数：倒计时、轮播、「现在几点」用 setInterval 不报（Codex 审查 ca1f116）', () => {
+    const timers = [
+      'const t = setInterval(() => setTick(Date.now()), 1000);',
+      'const c = setInterval(() => setIndex((i) => (i + 1) % n), seconds * 1000);',
+      'const now = window.setInterval(() => setNow(Date.now()), 60_000);',
+    ].join('\n');
+    expect(conventionCounts('src/client/features/clockroom/ClockroomPage.tsx', timers)).toEqual({});
   });
 
   it('行内样式里的 dvh 记数；类名里带方括号的写法（打包时会补 vh）不算', () => {

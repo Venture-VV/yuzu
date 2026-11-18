@@ -16,14 +16,14 @@
 
 | 做了什么 | 文件 |
 | --- | --- |
-| 测试分三档 | `scripts/test-tiers.mjs`、`vitest.unit.config.ts`、`package.json`（两条命令） |
+| 测试分三档 | `scripts/test-tiers.mjs`、`vitest.unit.config.ts`、`tests/app-only-env.ts`（两份配置共用的环境变量清理）、`package.json`（两条命令） |
 | 约定写成检查 | `scripts/check-governance.mjs`、`scripts/governance-baseline.json`（多一项 `conventions`） |
 | 用例体检 | `docs/TEST_AUDIT.md` |
 | 界面规范 | `docs/DESIGN.md`（补字号、公共部件清单、写成检查的约定三节，原有内容没动） |
 | CI | `.github/workflows/ci.yml`：去掉主线 job 里单独的 `npm run typecheck`（小程序 job 的没动） |
 | 巡检 | `.claude/skills/yuzu-govern/SKILL.md` |
 | 文档 | `AGENTS.md`（开发约定小节与常用命令各一行）、`docs/COMMANDS.md`、`docs/TESTING.md` 第 4 节、`docs/GOVERNANCE.md` |
-| 用例 | `tests/test-tiers.test.ts`（5 条）、`tests/check-governance.test.ts`（多 5 条） |
+| 用例 | `tests/test-tiers.test.ts`（7 条）、`tests/check-governance.test.ts`（多 6 条） |
 
 ## 2. 逐项说明
 
@@ -52,10 +52,10 @@
 | --- | --- | --- | --- |
 | 判断断网按 `lib/connection` | 页面代码里的 `navigator.onLine` | 1（员工手机端自己的断网提示） | `lib/connection.ts` 自己 |
 | 判断「服务端明确没处理」用 `isRejected` | 页面代码里的 `status < 500`、`status >= 500` | 2（供应商公开页、员工手机端各自的请求层） | `lib/api.ts` 自己 |
-| 新的定时取数用 `useLivePoll` | `src/client/features/`、`components/` 里的 `setInterval(`、`refetchInterval` | 76 | `lib/` 里的公共小工具 |
+| 新的定时取数用 `useLivePoll` | `src/client/features/`、`components/` 里的 `refetchInterval`（react-query 的定时取数） | 64 | `lib/` 里的公共小工具；`setInterval` 不查（见第 2.5 节） |
 | 行内样式里不写 dvh | 字符串里的 `100dvh` 这类（带方括号的类名写法不算） | 1（员工手机端的开场动画） | — |
 
-存量记数、不许变多；注释里提到这些写法不算。76 处定时取数是 `useLivePoll` 出来之前写的，不要求现在改。
+存量记数、不许变多；注释里提到这些写法不算。64 处定时取数是 `useLivePoll` 出来之前写的，不要求现在改。
 
 ### 2.4 用例体检的结论
 
@@ -63,11 +63,16 @@
 
 要改 CI 测试步骤的四条（带模拟接口起应用、接上原路退回那一条、重新分组、「看数据」的跳过在 CI 里改成断言）写成了给测试会话与 Codex 的建议，开发会话没有动（ZL8）。
 
+### 2.5 Codex 审查（`ca1f116`）后的两处修改
+
+1. **「定时取数」原来把所有 `setInterval` 都算了进去**，钟房的倒计时、导览的轮播这类纯界面的计时器也被记数；以后新写一个合法的界面计时器会被拦下，还被提示换成语义不同的 `useLivePoll`。改成只认 `refetchInterval`（它一定是在取数）；`setInterval` 的回调里取没取数静态分不清，不查。基线 76 → 64，加了界面计时器不报的用例。
+2. **秒级一档的配置漏了「清掉只给应用用的环境变量」**（`INTEGRATIONS_MOCK`、访问网段、频率限制等，全量配置里 8.1.5 加的）：终端里带着 `INTEGRATIONS_MOCK=true`、`YUZU_INSTANCE=test` 起过应用再跑 `npm run test:unit`，`version-source` 的用例会被「正式环境不许用模拟」拦下，同一条用例在两档里结果不一样。清单与清理搬到 `tests/app-only-env.ts`，两份配置加载时都调用；加了用例核对两份配置都调了。带着这两个变量实跑过：修之前失败 2 条，修之后全过。
+
 ## 3. 已执行的验证
 
 - `npm run lint`、`npm run check:code`（含类型检查）、`npm run check:docs`、`npm run check:gov`、`npm run format:check`：通过。
-- `npm run test:unit`：36 个文件、307 条，8 秒，不起数据库。
-- `npm test`（全量，本机 PostgreSQL 16 的独立测试库）：233 个文件、2,127 条全过。`npm run build`、`npm run check:bundle`：通过。
+- `npm run test:unit`：36 个文件、310 条，8 秒，不起数据库。
+- `npm test`（全量，本机 PostgreSQL 16 的独立测试库）：233 个文件、2,130 条全过（Codex 审查后的两处修改之后重跑的）。`npm run build`、`npm run check:bundle`：通过。
 - 去掉 `TEST_DATABASE_URL`、`DATABASE_URL` 两个环境变量跑 `npm run test:unit`：全过（确认这一档真的不要数据库）。
 - 反例（用例里都有）：页面里加一处 `navigator.onLine`、多一处 `refetchInterval`、用例里留 `.only`，`check:gov` 各自报出来并写明该怎么写。
 

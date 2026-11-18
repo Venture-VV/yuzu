@@ -1,5 +1,7 @@
 // 测试分档（工程治理三期，scripts/test-tiers.mjs）：不要数据库的用例认得准、沾边的用例找得到。不要数据库。
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { APP_ONLY_ENV, clearAppOnlyEnv } from './app-only-env';
 // @ts-expect-error 脚本是 .mjs，没有类型声明
 import * as tiers from '../scripts/test-tiers.mjs';
 
@@ -73,5 +75,23 @@ describe('快测：按改到的模块找沾边的用例', () => {
     expect(matchesKeyword('tests/inventory-seed.test.ts', 'inventory')).toBe(true);
     expect(matchesKeyword('tests/frontdesk.test.ts', 'coupons')).toBe(false);
     expect(matchesKeyword('tests/ai-mask.test.ts', 'ai')).toBe(false);
+  });
+});
+
+// Codex 审查 ca1f116：秒级一档的配置原来漏了这一步，终端里带着 INTEGRATIONS_MOCK=true 时同一条用例在两档里结果不一样
+describe('只给应用用的环境变量不带进用例（两档共用）', () => {
+  it('清掉清单里的，别的不动', () => {
+    const env: Record<string, string | undefined> = { INTEGRATIONS_MOCK: 'true', ACCESS_ALLOW_CIDRS: '10.0.0.0/8', YUZU_AI_MODEL: 'x', TEST_DATABASE_URL: 'postgres://keep', PATH: '/bin' };
+    clearAppOnlyEnv(env);
+    expect(env).toEqual({ TEST_DATABASE_URL: 'postgres://keep', PATH: '/bin' });
+    expect(APP_ONLY_ENV).toContain('RATE_LIMIT_IP_PER_MIN');
+  });
+
+  it('全量与秒级两份配置都在加载时清一遍', () => {
+    for (const file of ['vitest.config.ts', 'vitest.unit.config.ts']) {
+      const code = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+      expect(code, file).toContain("import { clearAppOnlyEnv } from './tests/app-only-env';");
+      expect(code, file).toMatch(/^clearAppOnlyEnv\(\);$/m);
+    }
   });
 });

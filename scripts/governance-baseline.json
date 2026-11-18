@@ -68,7 +68,7 @@
   "conventions": {
     "inline-dvh": 1,
     "navigator.onLine": 1,
-    "polling": 76,
+    "polling": 64,
     "status-500": 2
   },
   "duplicationMaxPercent": 1,
