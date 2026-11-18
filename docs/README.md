@@ -113,6 +113,7 @@
 - [`HANDOFF_G2.md`](HANDOFF_G2.md)：G2 提测交接 · S2 到店与未结手牌
 - [`HANDOFF_G2_BATCH2.md`](HANDOFF_G2_BATCH2.md)：G2 · Batch 2 收口提测交接（2.1 – 2.4d）
 - [`HANDOFF_G3.md`](HANDOFF_G3.md)：G3 提测交接 · S3 收银结账、门票跳档、团购防重、交班与双口径日结（G3A / G3B）
+- [`HANDOFF_GOV1.md`](HANDOFF_GOV1.md)：工程治理一期 交接说明 · 文档收拢与护栏
 - [`HANDOFF_GR1.md`](HANDOFF_GR1.md)：G-R1 提测交接 · R1.2 资金轨：先开班、优惠 / 免单与降档授权、反结账口径与时限（v0.4.0）
 - [`HANDOFF_MP1.md`](HANDOFF_MP1.md)：小程序第一期交接 · MP1：yuzu 小程序端口与接口、后台「微信小程序」、小程序网关、小程序页面
 - [`HANDOFF_MP2A.md`](HANDOFF_MP2A.md)：交接：小程序第二期 2a 线上充值、2b 对账（小程序线）

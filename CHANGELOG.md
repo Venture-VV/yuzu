@@ -1,5 +1,28 @@
 # 变更记录
 
+## v8.1.10 · 工程治理一期：文档收拢与护栏（不改业务行为）
+
+店主 2026-11-18 转来视频《如何用 AI 长期开发一个复杂项目》，让开发会话学完后给 yuzu 出一套改进方案并分三期做完：少硬编码、清冗余的历史代码、重构文档、完善测试、系统瘦身、统一代码与界面规范。学习记录 `docs/GOVERNANCE_NOTES.md`，方案与现状实测 `docs/GOVERNANCE.md`，交接 `docs/HANDOFF_GOV1.md`，默认做法 `docs/PENDING_DECISIONS.md` ZL1–ZL5（都待确认）。没有迁移，页面、数据、接口都没有变化。
+
+- **`AGENTS.md` 收成入口**（88 KB → 18 KB）：每个 AI 会话开工都整份读它，现在只留红线、核心规则和「按任务去哪看」。
+  - 加锁顺序那一行（46,783 字节）按模块分成八节，搬到 `docs/LOCKING.md`；全部命令搬到 `docs/COMMANDS.md`；功能开关、多门店、公共小工具、页面部件、登记处搬到 `docs/CONVENTIONS.md`。
+  - 用脚本拆、逐字核对：各节的条目拼起来与原文一字不差，没有改写。
+  - 新加「快测、门禁与高风险目录（oil-dev）」小节：写代码途中跑什么、写完跑什么、哪些目录的改动要独立审查、哪些不许改。
+- **文档索引** `docs/README.md`：163 份文档分成现行规范、模块设计、部署、小程序线、排期、交接说明（快照）、更新记录分卷；清单由脚本生成，加了文档跑 `npm run check:docs -- --fix`。
+- **`README.md` 按现状重写**：原文停在 0.x（「S2 等待 G2 验收」「后续清单：多门店、次卡」），原样留在 `docs/changelog/README-0.x.md`。
+- **`CHANGELOG.md` 分卷**（494 KB → 41 KB）：这里只留 8.1.x，8.0.x 与 0.x 原样分到 `docs/changelog/`。
+- **文档检查** `npm run check:docs`（CI 跑）：`AGENTS.md` 的体积预算（24 KB）、指不到文件的相对链接、引用了不存在的文档、索引不是最新的、开发约定小节里匹配不到文件的路径。
+- **治理基线** `npm run check:gov`（CI 跑，约 5 秒）：把容易越积越多的几样记成基线（`scripts/governance-baseline.json`），只许持平或下降——
+  - 分层：`shared` 不引 `server` / `client`，`client` 不引 `server`，`server` 不引 `client`（现在 0 处，一处都不许）；
+  - 页面代码里的十六进制颜色（207 处，按模块目录记数，不许变多）；
+  - 手写字号 `text-[Npx]`（32 种，不许出现新的字号）；
+  - 超过 1,500 行的源文件（8 个，不许有新的）；
+  - 导出了却没有任何地方引用的（68 个，knip；不许有新的）；
+  - 重复代码（0.78%，jscpd；上限 1%）。
+  - 开发依赖加 `knip` 6.44.1、`jscpd` 5.4.2（固定版本）。
+- **版本号只写在 `package.json` 一处**：原来发版要改五处（`package.json`、`package-lock.json`、`Dockerfile`、`compose.yaml`、`src/server/config.ts`），现在只改 `package.json` 与锁文件（`npm version <新版本号> --no-git-tag-version`）。`update.sh` 传进来的版本照旧优先；直接构建时显示打包进去的 `package.json` 版本号。
+- 用例：`tests/check-docs.test.ts`、`tests/check-governance.test.ts`、`tests/version-source.test.ts`（17 条，都不要数据库）。
+
 ## v8.1.9 · ERP 供应链：零采备用金、库管入库；全局签赠；8.1.8 退回 8.1.7 的修复
 
 店主 2026-11-18 转来《ERP 系统新增需求汇总》（「8.1.9主要更新这个内容」）和《管家部＋客户部初次需求更改》（「请帮我把这一个需求也加到8.1.9版本里面一起发布」）。设计 `docs/ERP_V819.md`、`docs/GIFTS_V819.md`，交接 `docs/HANDOFF_V819.md`，默认做法 `docs/PENDING_DECISIONS.md` BJ1–BJ8、KR1–KR6、SZ1–SZ8（都待确认）。迁移 `182`–`184`。
