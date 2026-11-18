@@ -124,7 +124,8 @@ const blankForm = (date: string): FormState => ({
  * 或急采（8.0.1 起由采购在「采购 → 急采」登记，CG05：数据按总仓，给哪个部门买的在表头选）
  */
 export interface FormScope {
-  kind: 'central' | 'dept' | 'urgent';
+  /** direct：库管入库（8.1.9，docs/ERP_V819.md 第 3 节）：与总仓收货一样，只是不选采购单、直接选物料填单价 */
+  kind: 'central' | 'dept' | 'urgent' | 'direct';
   dept: { id: number; name: string; warehouseId: number } | null;
   /** 单据接口 */
   api: string;
@@ -150,6 +151,16 @@ export const URGENT_SCOPE: FormScope = {
   home: '/purchasing/urgent',
   docLink: (id) => `/purchasing/urgent?doc=${id}`,
   newLink: () => '/purchasing/urgent/new',
+};
+
+/** 库管入库（8.1.9，KR1）：走库存单据接口（带 direct），回到库存 */
+export const DIRECT_SCOPE: FormScope = {
+  kind: 'direct',
+  dept: null,
+  api: '/api/inventory/docs',
+  home: '/inventory',
+  docLink: (id) => `/inventory/docs?doc=${id}`,
+  newLink: () => '/inventory/direct/new',
 };
 
 export function deptScope(dept: { id: number; name: string; warehouseId: number }): FormScope {
@@ -227,7 +238,8 @@ function useScopeData(scope: FormScope) {
   };
 }
 
-const DRAFT_KEY = (type: InvDocType, scope: FormScope) => (scope.dept ? `yuzu.invDraft.v1.dept${scope.dept.id}.${type}` : `yuzu.invDraft.v1.${type}`);
+const DRAFT_KEY = (type: InvDocType, scope: FormScope) =>
+  scope.dept ? `yuzu.invDraft.v1.dept${scope.dept.id}.${type}` : scope.kind === 'direct' ? 'yuzu.invDraft.v1.direct' : `yuzu.invDraft.v1.${type}`;
 function readDraft(type: InvDocType, scope: FormScope): FormState | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY(type, scope));
@@ -303,6 +315,7 @@ const INTRO: Record<InvDocType, string> = {
 };
 
 /** 本部门小仓的说明（v0.7.11） */
+const DIRECT_INTRO = '库管入库：没有采购单的到货直接入库（直接选物料、填单价），其余与收货入库一样：按合格数量入库、挂账供应商记应付、现付的货款走报销。之后可以在单据上「补采购单」。';
 const URGENT_INTRO = '急采：没有采购单、临时给部门买的东西，由采购登记。合计不超过急采上限；提交后按金额分级审批，批了以后仓库到部门验收、进部门小仓，之后补采购单（提交即确认）。';
 
 const DEPT_INTRO: Partial<Record<InvDocType, string>> = {
@@ -344,10 +357,15 @@ export function UrgentDocFormPage() {
   return <DocFormPage scope={URGENT_SCOPE} />;
 }
 
+/** 库管入库的登记与修改（8.1.9，库存页「库管入库」） */
+export function DirectDocFormPage() {
+  return <DocFormPage scope={DIRECT_SCOPE} />;
+}
+
 export function DocFormPage({ scope = CENTRAL_SCOPE }: { scope?: FormScope }) {
   const params = useParams();
   const editId = params.id ? Number(params.id) : null;
-  const type = scope.kind === 'urgent' ? 'receipt' : (params.type as InvDocType | undefined);
+  const type = scope.kind === 'urgent' || scope.kind === 'direct' ? 'receipt' : (params.type as InvDocType | undefined);
   const can = useCan();
   // 急采与总仓用库存单据接口
   const central = scope.kind !== 'dept';
@@ -366,6 +384,8 @@ export function DocFormPage({ scope = CENTRAL_SCOPE }: { scope?: FormScope }) {
   if (!type || !(type in INV_DOC_META)) return <Navigate to={scope.home} replace />;
   if (scope.kind === 'urgent') {
     if (!can('purchase.manage')) return <Navigate to="/purchasing" replace />;
+  } else if (scope.kind === 'direct') {
+    if (!can('inventory.operate')) return <Navigate to="/inventory" replace />;
   } else if (central) {
     const perm = type === 'supplier_return' ? 'supplierReturn.create' : 'inventory.operate';
     if (!can(perm)) return <Navigate to="/inventory" replace />;
@@ -453,11 +473,13 @@ function DocForm({
   const central = scope.kind === 'central';
   // 急采（8.0.1 起由采购登记）：总仓的数据，给哪个部门买的在表头选
   const urgent = scope.kind === 'urgent';
+  // 库管入库（8.1.9）：与总仓收货一样（一起验收的采购、收货人、单价），只是不选采购单
+  const direct = scope.kind === 'direct';
   const invalidate = () => (scope.kind === 'dept' ? invalidateDept() : invalidateInv());
   const data = useScopeData(scope);
   const departments = useDepartments(false, (central && type === 'issue') || urgent);
   // 按采购单收货：一起验收的采购经办（#17）
-  const coAcceptors = useCoAcceptors(central && type === 'receipt');
+  const coAcceptors = useCoAcceptors((central || direct) && type === 'receipt');
   const [form, setForm] = useState<FormState>(initial);
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
   const [error, setError] = useState<ApiError | null>(null);
@@ -790,9 +812,10 @@ function DocForm({
         return {
           ...base,
           supplierId: form.supplierId,
-          purchaseOrderId: urgent ? null : form.purchaseOrderId,
+          purchaseOrderId: urgent || direct ? null : form.purchaseOrderId,
           coAcceptorId: urgent ? null : form.coAcceptorId,
           ...(urgent ? { urgent: true, departmentId: form.departmentId } : {}),
+          ...(direct ? { direct: true } : {}),
           handler: form.handler.trim(),
           lines: lines.map((r) => ({
             materialId: r.line.materialId,
@@ -891,7 +914,7 @@ function DocForm({
             <Link
               to={scope.home}
               className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink"
-              aria-label={central ? '返回库存' : urgent ? '返回急采' : '返回本部门小仓'}
+              aria-label={central || direct ? '返回库存' : urgent ? '返回急采' : '返回本部门小仓'}
             >
               <ArrowLeft className="size-[18px]" />
             </Link>
@@ -899,10 +922,10 @@ function DocForm({
               <Icon className="size-4" />
             </span>
             {scope.dept && `${scope.dept.name}小仓 · `}
-            {editing ? `修改${urgent ? '急采' : meta.title} · ${editing.docNo}` : `新建${urgent ? '急采' : meta.title}`}
+            {editing ? `修改${urgent ? '急采' : direct ? '库管入库' : meta.title} · ${editing.docNo}` : urgent ? '新建急采' : direct ? '库管入库' : `新建${meta.title}`}
           </span>
         }
-        subtitle={urgent ? URGENT_INTRO : (scope.dept && DEPT_INTRO[type]) || INTRO[type]}
+        subtitle={urgent ? URGENT_INTRO : direct ? DIRECT_INTRO : (scope.dept && DEPT_INTRO[type]) || INTRO[type]}
       />
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
@@ -978,7 +1001,7 @@ function DocForm({
                     </Select>
                   </Field>
                 )}
-                {central && (
+                {(central || direct) && (
                   <Field label="一起验收的采购（选填）" htmlFor="coAcceptor" hint="采购不参与库管收货（店主 2026-11-10），仓库自己验收即可；要一起验收的照旧选上">
                     <Select id="coAcceptor" value={form.coAcceptorId ?? ''} disabled={locked} onChange={(e) => patch({ coAcceptorId: Number(e.target.value) || null })}>
                       <option value="">不选（仓库自己验收）</option>

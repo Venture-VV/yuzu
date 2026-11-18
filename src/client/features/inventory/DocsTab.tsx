@@ -141,7 +141,8 @@ export function DocsTab() {
                         <DocTypeChip type={d.docType as InvDocType} />
                       </span>
                       {d.partyName && <span className="truncate text-[13px] font-semibold">{d.partyName}</span>}
-                      {d.noPo && d.docType === 'receipt' && !d.urgent && <Badge tone="ember">缺少采购依据</Badge>}
+                      {d.direct && <Badge tone="lake">库管入库</Badge>}
+                      {d.noPo && d.docType === 'receipt' && !d.urgent && !d.direct && <Badge tone="ember">缺少采购依据</Badge>}
                       {d.urgent && <Badge tone="yuzu">急采</Badge>}
                       {d.needsBackfill && <Badge tone="clay">待补采购单</Badge>}
                       {d.deptSigned === false && <Badge tone="yuzu">待签收</Badge>}

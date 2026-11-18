@@ -268,6 +268,7 @@ export function TodoPage() {
                       <button type="button" onClick={() => open('doc', d.id)} className="flex w-full items-center gap-2 text-left text-[13px] hover:text-pine">
                         <span className="num font-semibold">{d.docNo}</span>
                         <span className="min-w-0 flex-1 truncate text-ink-3">{d.partyName}</span>
+                        {d.direct && <Badge tone="lake">库管入库 · 待补采购单</Badge>}
                         {overdueBackfill.has(d.id) && <Badge tone="clay">超 {overdueBackfill.get(d.id)} 天</Badge>}
                         <Money cents={d.amountCents} className="font-semibold" />
                       </button>
