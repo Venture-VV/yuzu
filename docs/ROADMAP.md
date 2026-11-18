@@ -204,6 +204,10 @@
   - `183`（`183_direct_receipts.sql`）：库管入库。`inv_docs` 加 `direct`、`import_id`；新表 `receipt_imports`（台账导入记录，文件摘要唯一）；操作编号与「确认作废」加 `receipt_import`。
   - `184`（`184_gifts.sql`，2026-11-18 追加登记，设计见 `docs/GIFTS_V819.md`）：全局签赠。`coupon_templates` 加签赠标记、板块、权益内容、规则说明；`coupon_issues` 加授权人、发放渠道；触发器（签赠券类型的发券记录必须有授权人与渠道、别的没有，发过券的不能改签赠标记）；操作编号与「确认作废」加 `gift_type`、`gift_issue`。约束都在当时的约束上追加。
   - 主线下一个迁移号从 `185` 起，小程序线照旧 `170`–`179`。
+- **8.1.10（2026-11-18 登记，设计见 `docs/ERP_V8110.md`）**：主线用两个：
+  - `185`（`185_stock_check.sql`）：核库转领用。`purchase_requests` 加核库状态与时刻、状态加 `issued`（已转领用）；新表 `request_line_stock`（每一行的核库结果）；已领用的行不能再改；操作编号与「确认作废」加 `request_stock`（在当时的约束上追加）。
+  - `186`（`186_urgent_contract.sql`）：急采补合同。`inv_docs` 加 `needs_contract`；`purchase_orders` 加补合同的人与时刻。
+  - 主线下一个迁移号从 `187` 起，小程序线照旧 `170`–`179`。
 
 ## 8. 店主决策（2026-10-29 已签认）
 
