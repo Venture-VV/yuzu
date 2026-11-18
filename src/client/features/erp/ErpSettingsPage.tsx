@@ -12,6 +12,7 @@ import { TunablesCard } from '../admin/TunablesCard';
 import { DelegationsPanel } from '../approvals/DelegationsPanel';
 import { RulesPanel } from '../approvals/RulesPanel';
 import { ExpenseRulesCard } from '../expenses/ExpenseRulesCard';
+import { PoolSettingsCard } from '../pool/PoolSettingsCard';
 import { PaymentRulesCard } from '../payments/PaymentRulesCard';
 import { PurchaseRulesCard } from '../purchasing/PurchaseRulesCard';
 import { AutoReplenishCard } from '../purchasing/AutoReplenishCard';
@@ -68,6 +69,8 @@ export function ErpSettingsPage() {
         {has('expenses') && (
           <SubPane tab="expenses" lazy className="space-y-4">
             <ExpenseRulesCard />
+            {/* 零采备用金（8.1.9）：总额与归属部门 */}
+            <PoolSettingsCard />
             <div className="grid gap-3 sm:grid-cols-2">
               <JumpCard to="/erp/petty/accounts" title="部门备用金定额" text="每个部门的定额、余额与建议补足；在部门那一行点「设定额」" testId="erp-settings-petty" />
               <JumpCard to="/erp/expenses/budgets" title="费用预算额度" text="按部门、科目、月份设预算；占用与预警在报销时核对" testId="erp-settings-budgets" />

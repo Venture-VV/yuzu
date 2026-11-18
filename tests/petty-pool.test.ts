@@ -122,7 +122,9 @@ describe('零采备用金', () => {
 
   it('财务登记报销：只看得到已提交的申用；钱从零采备用金来要勾申用；确认后自动回补、冲销后又占用', async () => {
     expect((await api(ctx.app, buyer, 'GET', '/api/erp/expenses/pool-uses')).status).toBe(403);
-    const list = (await api(ctx.app, coster, 'GET', '/api/erp/expenses/pool-uses')).body;
+    const forClaim = (await api(ctx.app, coster, 'GET', '/api/erp/expenses/pool-uses')).body;
+    expect(forClaim.departmentId).toBe(deptId);
+    const list = forClaim.uses;
     expect(list.map((u: { id: number }) => u.id).sort()).toEqual([use.u1!.id, use.u2!.id].sort());
     expect(list.find((u: { id: number }) => u.id === use.u2!.id)).toMatchObject({ backfill: 'done', purchaseOrderId: poId, poNo });
     // 互校
@@ -155,7 +157,7 @@ describe('零采备用金', () => {
     expect(u1).toMatchObject({ state: 'submitted', claim: null });
     expect(u1.claims.map((c: { status: string }) => c.status)).toEqual(['voided']);
     expect((await board()).summary.occupiedCents).toBe(40_000);
-    expect((await api(ctx.app, coster, 'GET', '/api/erp/expenses/pool-uses')).body.map((u: { id: number }) => u.id)).toEqual([use.u1!.id]);
+    expect((await api(ctx.app, coster, 'GET', '/api/erp/expenses/pool-uses')).body.uses.map((u: { id: number }) => u.id)).toEqual([use.u1!.id]);
     // 面板按状态筛
     expect((await board(buyer, '?state=reimbursed')).uses.map((u: { id: number }) => u.id)).toEqual([use.u2!.id]);
   });

@@ -25,7 +25,7 @@ const ALL: readonly (ErpSettingsTab & { perms: readonly Permission[]; module?: E
     module: 'approvals',
   },
   { key: 'payments', label: '付款规则', hint: '三单比对的容差、本周应付、固定付款日、质保金提醒、挂合同的货款先提申请', perms: ['payable.read', 'payment.request'], module: 'payments' },
-  { key: 'expenses', label: '报销与备用金', hint: '报销门槛、发票类型与税率、预算预警；部门备用金定额与预算额度的入口', perms: ['settings.manage'], module: 'expenses' },
+  { key: 'expenses', label: '报销与备用金', hint: '报销门槛、发票类型与税率、预算预警；零采备用金的总额；部门备用金定额与预算额度的入口', perms: ['settings.manage'], module: 'expenses' },
   { key: 'tunables', label: '其他数值', hint: '审批超时、合同提醒、附件大小、供应商证照与评分、呆滞与效期、应收提醒、企业微信推送', perms: ['settings.manage'] },
 ];
 

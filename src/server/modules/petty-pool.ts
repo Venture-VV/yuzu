@@ -599,6 +599,12 @@ export function registerPettyPoolRoutes(app: FastifyInstance, deps: Deps) {
   });
   app.get('/api/erp/pool/settings', { preHandler: guardAny('pool.read', 'settings.manage') }, async () => loadPoolSettings(sql));
   app.put('/api/erp/pool/settings', { preHandler: guard('settings.manage') }, async (req) => saveSettings(deps, req.body, req.actor, ctxOf(req).ip));
+  // 申用的申请人：在职员工（零采备用金的权限可能单独授给没有报销查看权限的岗位，不借用报销的员工接口）
+  app.get(
+    '/api/erp/pool/applicants',
+    { preHandler: guard('pool.manage') },
+    async () => sql<{ id: number; name: string }[]>`SELECT id, display_name AS name FROM staff WHERE active AND NOT system ORDER BY display_name`,
+  );
   app.get('/api/erp/pool/po-options', { preHandler: guard('pool.manage') }, async (req) => {
     const { q } = parse(z.object({ q: z.string().trim().max(40).default('') }), req.query);
     return poolPoOptions(sql, q);
@@ -620,5 +626,8 @@ export function registerPettyPoolRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/erp/pool/uses/:id/backfill', { preHandler: guard('pool.manage') }, async (req) => backfillPoolUse(deps, useId(req), req.body, req.actor));
   app.post('/api/erp/pool/uses/:id/void', { preHandler: guard('pool.manage') }, async (req) => voidPoolUse(deps, useId(req), req.body, req.actor));
   // 财务登记报销时可以勾的申用（不在 /api/erp/pool 下：零采备用金模块关着时照样能报已提交的）
-  app.get('/api/erp/expenses/pool-uses', { preHandler: guard('expense.manage') }, async () => poolUsesForClaim(sql));
+  app.get('/api/erp/expenses/pool-uses', { preHandler: guard('expense.manage') }, async () => {
+    const [settings, uses] = await Promise.all([loadPoolSettings(sql), poolUsesForClaim(sql)]);
+    return { departmentId: settings.departmentId, uses };
+  });
 }

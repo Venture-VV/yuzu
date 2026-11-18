@@ -69,6 +69,7 @@ const PettyAccountsPage = lazyPage(() => import('./features/expenses/PettyAccoun
 const BudgetsPage = lazyPage(() => import('./features/expenses/BudgetsPage').then((m) => m.BudgetsPage));
 const AssetsPage = lazyPage(() => import('./features/assets/AssetsPage').then((m) => m.AssetsPage));
 const LinenPage = lazyPage(() => import('./features/linen/LinenPage').then((m) => m.LinenPage));
+const PettyPoolPage = lazyPage(() => import('./features/pool/PettyPoolPage').then((m) => m.PettyPoolPage));
 const AssetLabelsPrintPage = lazyPage(() => import('./features/assets/AssetLabelsPrintPage').then((m) => m.AssetLabelsPrintPage));
 const ReceivablesPage = lazyPage(() => import('./features/receivables/ReceivablesPage').then((m) => m.ReceivablesPage));
 const InvoicesPage = lazyPage(() => import('./features/invoices/InvoicesPage').then((m) => m.InvoicesPage));
@@ -287,6 +288,8 @@ const router = createBrowserRouter([
       { path: 'assets', element: <AssetsPage /> },
       // 布草洗涤（8.0.20）
       { path: 'linen', element: <LinenPage /> },
+      // 零采备用金（8.1.9）
+      { path: 'pool', element: <PettyPoolPage /> },
       { path: 'petty', element: <PettyPage /> },
       { path: 'petty/accounts', element: <PettyAccountsPage /> },
       { path: 'requests', element: <RequestsPage /> },

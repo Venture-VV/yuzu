@@ -121,3 +121,9 @@ export interface PoolUseForClaim extends PoolUseBrief {
   purchaseOrderId: number | null;
   submitNote: string;
 }
+
+export interface PoolUsesForClaim {
+  /** 设置里的归属部门：登记这类报销时默认记到这个部门 */
+  departmentId: number | null;
+  uses: PoolUseForClaim[];
+}
