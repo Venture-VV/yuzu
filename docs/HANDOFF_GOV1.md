@@ -48,7 +48,7 @@
 ## 3. 已执行的验证
 
 - `npm run typecheck`、`npm run check:code`、`npm run format:check`、`npm run check:docs`、`npm run check:gov`：通过。
-- `npm test`（全量集成测试，本机 PostgreSQL 16 的独立测试库）：结果见 PR 说明。
+- `npm test`（全量集成测试，本机 PostgreSQL 16 的独立测试库）：232 个文件、2,113 条全过（180 秒）。
 - `npm run build`：通过；构建产物里的版本号见下。
 - 版本号的读法：`tests/version-source.test.ts`（没传 `APP_VERSION` 时显示 `package.json` 的版本号；传了照旧优先、去掉开头的 v；`Dockerfile`、各 `compose*.yaml`、`config.ts`、`.env.example` 里没有当前版本号的字样；锁文件两处与 `package.json` 一致）与原有的 `tests/instance.test.ts`。
 - 与 PR #127 的分支试合并：只有 `AGENTS.md` 的加锁顺序那一行冲突（它在那一行里加了一句、这边把那一行搬走了），其余自动合并。

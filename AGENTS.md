@@ -36,7 +36,7 @@
 | 三台目标设备、界面与动效 | [`docs/DEVICES.md`](docs/DEVICES.md)、[`docs/DESIGN.md`](docs/DESIGN.md)、[`docs/UI_V8016.md`](docs/UI_V8016.md) |
 | 工程治理：基线、巡检、三期方案 | [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md) |
 
-交接说明（`docs/HANDOFF_*.md`）是发版当时的快照，写完不再改；与专题文档不一致时以专题文档为准。
+交接说明（`docs/HANDOFF_*.md`）是发版当时的快照，写完不再改；与专题文档不一致时以专题文档为准。同一类问题在审查里第二次出现，就写成检查（`check:code` / `check:gov`），不再只写进文档；治理基线只降不升（`docs/GOVERNANCE.md` 第 5、8 节）。
 
 ## 快测、门禁与高风险目录（oil-dev）
 
