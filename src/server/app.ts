@@ -21,6 +21,7 @@ import { registerCatalogRoutes } from './modules/catalog';
 import { registerFrontdeskRoutes } from './modules/frontdesk/routes';
 import { registerDeptStockRoutes } from './modules/inventory/dept-stock';
 import { registerDocRoutes } from './modules/inventory/docs';
+import { registerReceiptImportRoutes } from './modules/inventory/direct-import';
 import { registerMasterRoutes } from './modules/inventory/master';
 import { registerPayableRoutes } from './modules/inventory/payables';
 import { registerCycleRoutes } from './modules/inventory/cycles';
@@ -301,6 +302,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerAdminRoutes(app, deps);
   registerMasterRoutes(app, deps);
   registerDocRoutes(app, deps);
+  // 8.1.9 库管入库的台账模板与一键导入（docs/ERP_V819.md 第 3.2 节）
+  registerReceiptImportRoutes(app, deps);
   registerReportRoutes(app, deps);
   registerDeptStockRoutes(app, deps);
   registerPurchasingRoutes(app, deps);

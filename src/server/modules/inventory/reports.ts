@@ -285,16 +285,16 @@ export async function inventoryChecks(db: Db): Promise<CheckItem[]> {
     detail: voidNet.length ? voidNet.map((o) => o.docNo).join('、') : '一致',
   });
 
-  // #19：迁移 029 以后生效的收货都按采购单，没有采购单的只能是急采（合计不超过登记时的上限）；急采后补单另在待办里提醒
+  // #19：迁移 029 以后生效的收货都按采购单，没有采购单的只能是急采（合计不超过登记时的上限）或库管入库（8.1.9）；急采、库管入库后补单另在待办里提醒
   const noPo = await db<{ docNo: string }[]>`
     SELECT d.doc_no FROM inv_docs d
-    WHERE d.doc_type = 'receipt' AND d.status = 'confirmed' AND d.purchase_order_id IS NULL AND NOT d.urgent
+    WHERE d.doc_type = 'receipt' AND d.status = 'confirmed' AND d.purchase_order_id IS NULL AND NOT d.urgent AND NOT d.direct
       AND d.created_at >= (SELECT applied_at FROM schema_migrations WHERE version = '029_warehouses.sql')
     UNION ALL
     SELECT d.doc_no FROM inv_docs d WHERE d.urgent AND (d.urgent_cap_cents IS NULL OR d.amount_cents > d.urgent_cap_cents)`;
   items.push({
     key: 'receipt_po',
-    label: '收货都有采购单，没有的是急采且不超过上限',
+    label: '收货都有采购单，没有的是急采（不超过上限）或库管入库',
     ok: noPo.length === 0,
     detail: noPo.length ? noPo.map((o) => o.docNo).join('、') : '一致',
   });

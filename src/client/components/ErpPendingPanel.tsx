@@ -48,8 +48,9 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
       return d.refund && typeof d.refund === 'object' ? { refId: d.refund.id } : null;
     case 'erp_import':
     case 'space_import':
-    // 集采导入（8.0.1）：返回那次导入
+    // 集采导入（8.0.1）：返回那次导入；库管入库台账导入（8.1.9）同样
     case 'request_import':
+    case 'receipt_import':
       return d.import && typeof d.import === 'object' ? { refId: d.import.id } : null;
     // 赠品登记（8.0.1）：返回那条登记
     case 'gift_receipt':

@@ -138,6 +138,8 @@ export const FENCED_OPS = [
   'studio_publish',
   // 8.1.9 零采备用金的申用（迁移 182；编号记在 idempotency_keys，ref_id 是那笔申用，也记在 petty_pool_uses.client_key）
   'pool_use',
+  // 8.1.9 库管入库台账导入（迁移 183；编号记在 idempotency_keys，ref_id 是那次导入，也记在 receipt_imports.client_key）
+  'receipt_import',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

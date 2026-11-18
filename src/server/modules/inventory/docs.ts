@@ -6,6 +6,7 @@
 // 只有「已生效」才写库存流水和应付流水；草稿、待确认、已退回都不影响库存或货款。
 // 新建单据带操作编号（幂等键），重复提交只得到同一张单；提交、确认、退回、冲销按状态幂等。
 
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { CENTRAL_WAREHOUSE_ID, COUNT_REASONS, INV_DOC_META, isBigVariance, type CountReason, type InvDoc, type InvDocSummary, type InvDocType } from '@shared/inventory';
@@ -109,6 +110,8 @@ const DocBody = z.discriminatedUnion('docType', [
     /** 急采（#19）：没有采购单，进这个部门的小仓，合计不超过急采上限 */
     urgent: z.boolean().default(false),
     departmentId: id.nullable().default(null),
+    /** 库管入库（8.1.9，docs/ERP_V819.md 第 3 节，KR1）：不选采购单，其余与按采购单收货一样 */
+    direct: z.boolean().default(false),
     lines: lines(ReceiptLine),
   }),
   z.object({ docType: z.literal('issue'), ...Header, departmentId: id, handler: z.string().trim().min(1, '请填写领料人').max(32), lines: lines(QtyLine) }),
@@ -275,7 +278,7 @@ export async function getDoc(db: Db, docId: number, timeZone?: string): Promise<
   const [d] = await db<(InvDoc & Record<string, unknown>)[]>`
     SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, d.handler, d.note, d.amount_cents, d.no_po, d.is_synthetic, d.created_by,
            d.created_at, d.submitted_at, d.confirmed_at, d.returned_reason, d.voided_at, d.void_reason,
-           d.warehouse_id, d.urgent, d.urgent_cap_cents, d.urgent_approved_at, d.use_purpose,
+           d.warehouse_id, d.urgent, d.urgent_cap_cents, d.urgent_approved_at, d.use_purpose, d.direct, d.import_id,
            CASE WHEN uh.id IS NULL THEN NULL ELSE json_build_object('id', uh.id, 'name', uh.display_name) END AS use_handler,
            CASE WHEN w.id IS NULL THEN NULL ELSE json_build_object('id', w.id, 'name', ${WAREHOUSE_NAME_SQL(db)}, 'kind', w.kind) END AS warehouse,
            CASE WHEN ca.id IS NULL THEN NULL ELSE json_build_object('id', ca.id, 'name', ca.display_name) END AS co_acceptor,
@@ -395,7 +398,7 @@ export async function listDocs(
 ): Promise<InvDocSummary[]> {
   const like = f.q ? `%${f.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
   return db<InvDocSummary[]>`
-    SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, d.amount_cents, d.no_po, d.created_at, d.urgent,
+    SELECT d.id, d.doc_no, d.doc_type, d.status, d.doc_date, d.amount_cents, d.no_po, d.created_at, d.urgent, d.direct,
            coalesce(s.name, dep.name) AS party_name, cb.display_name AS created_by_name,
            CASE WHEN w.id IS NULL THEN NULL ELSE ${WAREHOUSE_NAME_SQL(db)} END AS warehouse_name,
            CASE WHEN d.doc_type = 'issue' AND d.warehouse_id IS NOT NULL THEN d.dept_signed_at IS NOT NULL END AS dept_signed,
@@ -525,6 +528,8 @@ interface Prepared {
   warehouseId: number | null;
   urgent: boolean;
   urgentCapCents: number | null;
+  /** 库管入库（8.1.9） */
+  direct: boolean;
   coAcceptorId: number | null;
   /** 耗用的用途与经办人（8.0.7 2.3）；别的单据为空 */
   usePurpose: string | null;
@@ -722,6 +727,7 @@ async function prepare(
     warehouseId: wh?.id ?? null,
     urgent: false,
     urgentCapCents: null,
+    direct: false,
     coAcceptorId: null,
     usePurpose: null,
     useHandlerId: null,
@@ -900,8 +906,14 @@ async function prepare(
       const capText = `¥${(settings.urgentCapCents / 100).toFixed(2)}`;
       // #19：不允许没开采购单先收货；没有采购单只能由部门登记急采（进部门小仓，不超过上限）
       if (body.urgent && body.purchaseOrderId) throw badRequest('急采是没有采购单的收货；有采购单请按采购单收货');
-      if (!body.urgent && !body.purchaseOrderId) {
-        throw unprocessable('PO_REQUIRED', `收货必须对应已确认的采购单；没有采购单的只能由部门登记急采（合计不超过 ${capText}）`);
+      // 库管入库（8.1.9，KR1、KR6）：不选采购单，其余与按采购单收货一样；库存设置里关掉以后不能再用
+      if (body.direct) {
+        if (body.urgent) throw badRequest('库管入库不是急采；急采请在「采购 → 急采」登记');
+        if (body.purchaseOrderId) throw badRequest('库管入库不选采购单；有采购单请按采购单收货');
+        if (!settings.directReceipt) throw unprocessable('DIRECT_RECEIPT_OFF', '库管入库已在库存设置里关掉，请按采购单收货');
+      }
+      if (!body.urgent && !body.direct && !body.purchaseOrderId) {
+        throw unprocessable('PO_REQUIRED', `收货必须对应已确认的采购单；没有采购单的用「库管入库」，或由采购登记急采（合计不超过 ${capText}）`);
       }
       // #17：按采购单收货，采购和仓库一起第一次验收。店主 2026-11-10（CG10）：采购不参与库管收货——一起验收的采购改成选填，
       // 仓库自己验收即可；选了的照旧核对（在职的采购经办、不能选自己）
@@ -1007,6 +1019,7 @@ async function prepare(
         priceBasis,
         urgent: body.urgent,
         urgentCapCents: body.urgent ? settings.urgentCapCents : null,
+        direct: body.direct,
         coAcceptorId,
         lines: prepared,
       };
@@ -1419,6 +1432,42 @@ async function afterApproval(tx: Tx, doc: DocRow & { docNo: string; amountCents:
   await confirmDoc(tx, doc, actor, opts);
 }
 
+/** 新建单据的那一行（草稿）：新建单据与库管入库台账导入（8.1.9）共用 */
+async function insertDocRow(tx: Tx, body: z.infer<typeof DocBody>, prepared: Prepared, o: { docNo: string; clientKey: string; staffId: number; importId: number | null }) {
+  const [row] = await tx<{ id: number }[]>`
+    INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, supplier_id, purchase_order_id, department_id, handler,
+                          source_doc_id, note, amount_cents, no_po, price_basis, warehouse_id, urgent, urgent_cap_cents,
+                          co_acceptor_id, use_purpose, use_handler_id, client_key, created_by, direct, import_id)
+    VALUES (${o.docNo}, ${body.docType}, 'draft', ${body.docDate}, ${prepared.supplierId}, ${prepared.purchaseOrderId},
+            ${prepared.departmentId}, ${prepared.handler}, ${prepared.sourceDocId}, ${body.note}, ${prepared.amountCents},
+            ${prepared.noPo}, ${prepared.priceBasis}, ${prepared.warehouseId}, ${prepared.urgent}, ${prepared.urgentCapCents},
+            ${prepared.coAcceptorId}, ${prepared.usePurpose}, ${prepared.useHandlerId}, ${o.clientKey}, ${o.staffId}, ${prepared.direct}, ${o.importId})
+    RETURNING id`;
+  return Number(row!.id);
+}
+
+/** 收货单的单号（库管入库台账导入先按日期把单号取好，再锁物料，与新建单据的加锁顺序一致：单号计数 → 物料） */
+export const nextReceiptNo = (tx: Tx, docDate: string) => nextDocNo(tx, 'inv_receipt', INV_DOC_META.receipt.prefix, docDate);
+
+/**
+ * 库管入库台账导入（8.1.9，docs/ERP_V819.md 第 3.2 节）：在调用方的事务里建一张库管入库并确认入库。
+ * 调用方已经取了操作编号与文件的锁、按日期取好单号、按 id 升序锁住这次要动的全部物料（之后每张单再锁同一批物料不会等）。
+ */
+export async function createImportedReceipt(tx: Tx, deps: Deps, raw: DocBodyInput, actor: Actor, o: { docNo: string; importId: number; note: string }) {
+  const body = parse(DocBody, raw);
+  if (body.docType !== 'receipt' || !body.direct) throw badRequest('台账导入只生成库管入库');
+  const wh = await warehouseOfBody(tx, body);
+  await assertCanOperate(tx, actor, body.docType, wh);
+  const prepared = await prepare(tx, deps, body, null, wh, actor);
+  const newId = await insertDocRow(tx, body, prepared, { docNo: o.docNo, clientKey: randomUUID(), staffId: actor.id, importId: o.importId });
+  await insertLines(tx, newId, prepared.lines);
+  await logApproval(tx, 'inv_doc', newId, 'create', actor.id, o.note);
+  await submitLocked(tx, await lockDoc(tx, newId), actor, false, deps.config.timezone);
+  const [d] = await tx<{ status: string }[]>`SELECT status FROM inv_docs WHERE id = ${newId}`;
+  if (d?.status !== 'confirmed') throw conflict('IMPORT_NOT_CONFIRMED', `${o.docNo} 没能直接入库（按审批规则要确认），台账导入整份没写`);
+  return { id: newId, docNo: o.docNo, amountCents: prepared.amountCents };
+}
+
 // ───────────────────────── 对外操作 ─────────────────────────
 
 export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, ip?: string): Promise<{ doc: InvDoc; replayed: boolean }> {
@@ -1426,7 +1475,8 @@ export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, i
   const body = parse(DocBody, raw);
   await assertCanOperate(deps.sql, actor, body.docType, await warehouseOfBody(deps.sql, body));
   if (meta.approveNow && !can(actor, 'inventory.approve')) throw forbidden('当前账号不能确认这类单据，请提交给负责人');
-  const requestHash = hashRequest({ ...body, action: meta.action, approveNow: meta.approveNow });
+  // 8.1.9：不是库管入库的收货不把 direct 放进摘要（升级前就在「结果待确认」里的原请求照样对得上）
+  const requestHash = hashRequest({ ...body, ...(body.docType === 'receipt' && !body.direct ? { direct: undefined } : {}), action: meta.action, approveNow: meta.approveNow });
   const findExisting = async (db: Db) => {
     const [row] = await db<{ opType: string; requestHash: string; refId: number }[]>`
       SELECT op_type, request_hash, ref_id FROM idempotency_keys WHERE key = ${meta.clientKey}`;
@@ -1449,16 +1499,7 @@ export async function createDoc(deps: Deps, raw: CreateDocInput, actor: Actor, i
       const prepared = await prepare(tx, deps, body, null, wh, actor);
       const meta2 = INV_DOC_META[body.docType];
       const docNo = await nextDocNo(tx, `inv_${body.docType}`, meta2.prefix, body.docDate);
-      const [row] = await tx<{ id: number }[]>`
-        INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, supplier_id, purchase_order_id, department_id, handler,
-                              source_doc_id, note, amount_cents, no_po, price_basis, warehouse_id, urgent, urgent_cap_cents,
-                              co_acceptor_id, use_purpose, use_handler_id, client_key, created_by)
-        VALUES (${docNo}, ${body.docType}, 'draft', ${body.docDate}, ${prepared.supplierId}, ${prepared.purchaseOrderId},
-                ${prepared.departmentId}, ${prepared.handler}, ${prepared.sourceDocId}, ${body.note}, ${prepared.amountCents},
-                ${prepared.noPo}, ${prepared.priceBasis}, ${prepared.warehouseId}, ${prepared.urgent}, ${prepared.urgentCapCents},
-                ${prepared.coAcceptorId}, ${prepared.usePurpose}, ${prepared.useHandlerId}, ${meta.clientKey}, ${actor.id})
-        RETURNING id`;
-      const newId = row!.id;
+      const newId = await insertDocRow(tx, body, prepared, { docNo, clientKey: meta.clientKey, staffId: actor.id, importId: null });
       await insertLines(tx, newId, prepared.lines);
       await tx`
         INSERT INTO idempotency_keys (key, op_type, request_hash, ref_id, staff_id)
@@ -1497,6 +1538,10 @@ export async function updateDoc(deps: Deps, docId: number, raw: DocBodyInput & {
     const wh = await warehouseOfBody(tx, body);
     await assertCanOperate(tx, actor, body.docType, wh);
     if (doc.status !== 'draft' && doc.status !== 'returned') throw conflict('INVALID_STATE', '只有草稿或退回修改的单据可以编辑');
+    if (body.docType === 'receipt') {
+      const [cur] = await tx<{ direct: boolean }[]>`SELECT direct FROM inv_docs WHERE id = ${docId}`;
+      if (cur!.direct !== body.direct) throw badRequest('库管入库与按采购单收货不能互相改，请撤回后重新登记');
+    }
     const existingLines = await tx<{ materialId: number; bookMilli: number | null; bookMoveId: number | null }[]>`
       SELECT material_id, book_milli, book_move_id FROM inv_doc_lines WHERE doc_id = ${docId}`;
     // 盘点换了仓：原来记下的账面不能沿用
@@ -1507,7 +1552,8 @@ export async function updateDoc(deps: Deps, docId: number, raw: DocBodyInput & {
              department_id = ${prepared.departmentId}, handler = ${prepared.handler}, source_doc_id = ${prepared.sourceDocId},
              note = ${body.note}, amount_cents = ${prepared.amountCents}, no_po = ${prepared.noPo}, price_basis = ${prepared.priceBasis},
              warehouse_id = ${prepared.warehouseId}, urgent = ${prepared.urgent}, urgent_cap_cents = ${prepared.urgentCapCents},
-             co_acceptor_id = ${prepared.coAcceptorId}, use_purpose = ${prepared.usePurpose}, use_handler_id = ${prepared.useHandlerId}, updated_at = now()
+             co_acceptor_id = ${prepared.coAcceptorId}, use_purpose = ${prepared.usePurpose}, use_handler_id = ${prepared.useHandlerId},
+             direct = ${prepared.direct}, updated_at = now()
       WHERE id = ${docId}`;
     await insertLines(tx, docId, prepared.lines);
     if (meta.action === 'submit') await submitLocked(tx, await lockDoc(tx, docId), actor, meta.approveNow, deps.config.timezone);

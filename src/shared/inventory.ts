@@ -243,6 +243,8 @@ export interface InventorySettings {
   countBigPct: number;
   countBigCents: number;
   approvalRules: ApprovalRules;
+  /** 库管入库（8.1.9，KR6）：不选采购单的收货入口，默认开；关掉以后入口隐藏、接口拒绝，已经入的照旧 */
+  directReceipt: boolean;
 }
 
 /** 盘点大差异（v0.7.30，A8）的默认：差异超过账面的 2%，或差异金额超过 ¥500 */
@@ -491,6 +493,9 @@ export interface InvDoc {
   urgentCapCents: number | null;
   /** 急采按金额分级审批通过的时间（8.0.1，CG05）：为空且已提交 = 还在审批中；不为空且已提交 = 等仓库到部门验收 */
   urgentApprovedAt: string | null;
+  /** 库管入库（8.1.9）：不选采购单的收货；台账导入的记着是哪一次导入 */
+  direct: boolean;
+  importId: number | null;
   /** 一起验收的采购经办（#17 第一次验收） */
   coAcceptor: Ref | null;
   /** 领料：部门签收（#17 第二次验收）；没签收为空 */
@@ -536,6 +541,8 @@ export interface InvDocSummary {
   noPo: boolean;
   warehouseName: string | null;
   urgent: boolean;
+  /** 库管入库（8.1.9） */
+  direct: boolean;
   /** 急采已生效、还没补采购单 */
   needsBackfill: boolean;
   /** 急采已经按金额分级审批通过（8.0.1）：已提交的急采据此分「审批中」与「待验收」 */
