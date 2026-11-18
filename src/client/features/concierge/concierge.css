@@ -6365,6 +6365,15 @@
   background: var(--color-pine);
   color: var(--color-card);
 }
+/* 8.1.9 加了「签赠台账」：商米 D3 系统缩放 1.5 倍（1280 宽）、小米平板（1355 宽）上整排照样放得下，不用横着滑 */
+@media (max-width: 1440px) {
+  .concierge-workspace .concierge-toolbar nav {
+    gap: 4px;
+  }
+  .concierge-workspace .concierge-toolbar nav button {
+    padding: 9px 9px;
+  }
+}
 .concierge-workspace .integration-note {
   padding: 8px 24px;
   color: var(--color-ink-3);

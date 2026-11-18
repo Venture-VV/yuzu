@@ -10,6 +10,8 @@ const AdminPage = lazyPage(() => import('./AdminShell').then((m) => m.AdminPage)
 const AuditTab = lazyPage(() => import('./AuditTab').then((m) => m.AuditTab));
 const CatalogTab = lazyPage(() => import('./CatalogTab').then((m) => m.CatalogTab));
 const CouponsSection = lazyPage(() => import('./CouponsSection').then((m) => m.CouponsSection));
+// 签赠（8.1.9，docs/GIFTS_V819.md）
+const GiftsSection = lazyPage(() => import('../gifts/GiftsSection').then((m) => m.GiftsSection));
 // 数据看板（店主 2026-11-10：门店主导航的「看板」整合到后台）
 const DashboardPage = lazyPage(() => import('../dashboard/DashboardPage').then((m) => m.DashboardPage));
 const DevicesSection = lazyPage(() => import('./DevicesSection').then((m) => m.DevicesSection));
@@ -66,6 +68,7 @@ export const adminRoutes: RouteObject[] = [
   // VIP 柜 8.0.4 起归「会员权益」：旧入口（会员规则、手牌与前台）的「去设置」都跳到这里
   { path: 'vip-lockers', element: <Navigate to="/admin/membership/benefits?view=vip" replace /> },
   { path: 'coupons/:tab?', element: <CouponsSection /> },
+  { path: 'gifts/:tab?', element: <GiftsSection /> },
   { path: 'catalog/:tab?', element: <CatalogTab /> },
   { path: 'tags/:tab?', element: <TagsTab /> },
   { path: 'technicians/:tab?', element: <TechniciansSection /> },

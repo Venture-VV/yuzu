@@ -33,7 +33,8 @@ describe('后台的一级分组', () => {
     expect(ADMIN_SECTIONS.membership).toMatchObject({ path: '/admin/membership', label: '会员体系', perms: ['member.rules', 'benefit.publish', 'settings.manage'] });
     expect(Object.keys(ADMIN_SECTIONS)).not.toContain('members');
     expect(Object.keys(ADMIN_SECTIONS)).not.toContain('benefits');
-    expect(ADMIN_GROUPS.find((g) => g.key === 'members')!.items).toEqual(['membership', 'coupons']);
+    // 8.1.9：签赠（docs/GIFTS_V819.md）
+    expect(ADMIN_GROUPS.find((g) => g.key === 'members')!.items).toEqual(['membership', 'coupons', 'gifts']);
     expect(ADMIN_SECTIONS.guide).toMatchObject({ path: '/admin/guide', label: '对客导览', perms: ADMIN_SECTIONS.spaces.perms });
     expect(ADMIN_GROUPS.find((g) => g.key === 'venue')!.items).toEqual(['spaces', 'guide', 'devices', 'integrations', 'mp']);
     for (const path of ["path: 'membership/:tab?'", "path: 'benefits'", "path: 'members'", "path: 'guide'", "path: 'spaces/guide'", "path: 'vip-lockers'"]) expect(routes, path).toContain(path);
