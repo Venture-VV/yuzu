@@ -5,11 +5,12 @@
 //   ② 英文补齐：服务员那一步英文在上、中文在下；门店系统的拒绝按拒绝码给英文（合成接口，写请求不到门店系统）；
 //   ③ 菜品大图单独一层：设计师在菜单页上加的装饰压不到大图上（预览码打开草稿，只读）；
 //   ④ 工作台编辑顶栏：拖着一块时标出与左右两块的间距、在「间距」里改一条只动那一条；预览码打开平板，顶栏照改过的画；
-//      用完把草稿放回内置的默认版面（会写草稿，不发布）。
+//      用完把草稿放回内置的默认版面（会写草稿，不发布）。工作台与平板都按门店「字与按钮的大小」那一档（默认放大；
+//      别的用例改成设计稿原样时按原样），用例读出是哪一档再核对，不靠用例的先后。
 // 只要 seed-demo 的店主 linlan（密码 yuzu2026）。可重复执行。
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { DEFAULT_EMENU_PERIODS, type EmenuMenu } from '../src/shared/emenu';
-import { defaultStudioDoc, DocSchema, type StudioDoc, type StudioState } from '../src/shared/studio';
+import { defaultStudioDoc, DocSchema, EMENU_HEADER_LAYOUT, findSlotDef, resolveSlot, slotDefault, slotSpot, type EmenuSlotMode, type StudioDoc, type StudioState } from '../src/shared/studio';
 
 const PASSWORD = 'yuzu2026';
 /** 小米平板 6S Pro 12.4：屏幕 3048 × 2032，HyperOS 默认显示大小下网页看到 1355 × 903 */
@@ -37,8 +38,8 @@ async function send<T = unknown>(page: Page, method: 'post' | 'put', url: string
   return (await res.json()) as T;
 }
 
-/** 合成的菜单：两个分类（一页「两菜 · 并排」、一页「分类封面」），不要点单密码、字照设计稿原样 */
-function syntheticMenu(): EmenuMenu {
+/** 合成的菜单：两个分类（一页「两菜 · 并排」、一页「分类封面」），不要点单密码；字的大小默认照设计稿原样（textSize 可以另给） */
+function syntheticMenu(textSize: EmenuMenu['rules']['textSize'] = 'design'): EmenuMenu {
   const dish = (id: number, name: string, nameEn: string, description = '', descriptionEn = '') => ({
     id,
     name,
@@ -69,7 +70,7 @@ function syntheticMenu(): EmenuMenu {
       optionsEn: {},
       motion: false,
       requirePin: false,
-      textSize: 'design',
+      textSize,
       periods: [...DEFAULT_EMENU_PERIODS],
       coverUrl: null,
     },
@@ -108,7 +109,7 @@ function syntheticMenu(): EmenuMenu {
 }
 
 /** 小米平板大小的窗口，用店主登录（店主有「打开平板点餐」）；菜单、找客人、桌号用合成的，写请求交给 onWrite（不给就掐掉） */
-async function xiaomiPad(browser: Browser, baseURL: string | undefined, onWrite?: Parameters<Page['route']>[1]) {
+async function xiaomiPad(browser: Browser, baseURL: string | undefined, onWrite?: Parameters<Page['route']>[1], textSize?: EmenuMenu['rules']['textSize']) {
   const ctx = await browser.newContext({ baseURL, viewport: XIAOMI, hasTouch: true, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
   const page = await ctx.newPage();
   await login(page);
@@ -116,7 +117,7 @@ async function xiaomiPad(browser: Browser, baseURL: string | undefined, onWrite?
   await page.route('**/api/emenu/**', (route, request) => {
     const url = new URL(request.url());
     if (request.method() !== 'GET') return onWrite ? onWrite(route, request) : route.abort();
-    if (url.pathname === '/api/emenu/menu') return route.fulfill({ json: syntheticMenu() });
+    if (url.pathname === '/api/emenu/menu') return route.fulfill({ json: syntheticMenu(textSize) });
     if (url.pathname === '/api/emenu/guest') return route.fulfill({ json: { visitId: 1, tagCode: 'A8060', ordered: [], orderedTotal: 0 } });
     if (url.pathname === '/api/emenu/table') return route.fulfill({ json: { tableName: 'A01' } });
     if (url.pathname.startsWith('/api/emenu/orders/by-key/')) return route.fulfill({ json: { found: false, abandoned: false } });
@@ -305,6 +306,10 @@ test.describe('8.1.6 平板电子菜单与工作台的二次整改', () => {
     try {
       await page.goto('/studio/emenu');
       await expect(page.getByTestId('studio-canvas')).toBeVisible({ timeout: 30_000 });
+      // 工作台照门店「字与按钮的大小」打开（8.1.4）：拖动、改间距改的是这一档的位置；平板也按这一档画（下面合成的平板菜单照它给）
+      const rules = (await getJson<EmenuMenu>(page, '/api/studio/emenu/menu')).rules;
+      const mode: EmenuSlotMode = rules.textSize === 'design' ? 'design' : 'big';
+      await expect(page.getByTestId('studio-text-size')).toContainText(mode === 'big' ? '放大' : '原样');
       await page.getByTestId('studio-tab-templates').click();
       await page.getByTestId('studio-layout-header').click();
       await expect(page.getByTestId('studio-template-canvas')).toBeVisible();
@@ -338,18 +343,19 @@ test.describe('8.1.6 平板电子菜单与工作台的二次整改', () => {
       const after = await before();
       for (const i of [0, 1, 2, 3, 4, 6]) expect(Math.abs(Number(after[i]) - Number(moved[i])), `第 ${i} 条间距`).toBeLessThanOrEqual(0.1);
 
-      // 自动保存以后：预览码打开平板，顶栏的搜索照改过的位置画
-      await expect.poll(async () => (await getJson<StudioState>(page, '/api/studio/emenu')).draft.doc.templates?.header?.search ?? null, { timeout: 15_000 }).not.toBeNull();
+      // 自动保存以后：预览码打开平板，顶栏的搜索照改过的位置画（只改了工作台开着的那一档）
+      await expect.poll(async () => (await getJson<StudioState>(page, '/api/studio/emenu')).draft.doc.templates?.header?.search?.[mode] ?? null, { timeout: 15_000 }).not.toBeNull();
       const draft = (await getJson<StudioState>(page, '/api/studio/emenu')).draft.doc;
-      const searchX = draft.templates!.header!.search!.design!.x!;
+      const searchDef = findSlotDef(EMENU_HEADER_LAYOUT, 'search')!;
+      const searchX = slotSpot(resolveSlot(searchDef, draft.templates?.header?.search), mode).x;
+      expect(searchX).not.toBeCloseTo(slotDefault(searchDef, mode).x, 1);
       const { code } = await send<{ code: string }>(page, 'post', '/api/studio/emenu/preview-code', { doc: draft });
-      const pad = await xiaomiPad(browser, baseURL);
+      const pad = await xiaomiPad(browser, baseURL, undefined, rules.textSize);
       try {
         await pad.page.goto(`/emenu?studio=${code}`);
         await enterMenu(pad.page);
         const b = (await pad.page.getByTestId('emenu-search-open').boundingBox())!;
         expect(b.x).toBeCloseTo(LEFT + searchX * SCALE, 0);
-        expect(searchX).not.toBe(795.4);
       } finally {
         await pad.ctx.close();
       }

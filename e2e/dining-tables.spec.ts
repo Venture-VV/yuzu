@@ -12,12 +12,14 @@ import type { MemberSummary } from '../src/shared/types';
 import { ensureShift } from './shift';
 
 const PASSWORD = 'yuzu2026';
+// 8.1.7：点单页先选一处（餐厅 / 水吧 / 果吧）再点菜；两道菜的点单分类在准备时写明（不靠默认归类）
 const DISHES = [
-  { name: 'E2E 宫保鸡丁', category: 'E2E 餐饮', price: 4800, station: 'E2E 热菜' },
-  { name: 'E2E 柠檬茶', category: 'E2E 餐饮', price: 1500, station: 'E2E 水吧' },
+  { name: 'E2E 宫保鸡丁', category: 'E2E 餐饮', price: 4800, station: 'E2E 热菜', outlet: 'restaurant', slot: 'restaurant:餐饮' },
+  { name: 'E2E 柠檬茶', category: 'E2E 餐饮', price: 1500, station: 'E2E 水吧', outlet: 'water', slot: 'water:手作饮料' },
 ] as const;
 const [HOT, TEA] = DISHES;
-const AREA = 'E2E 大厅';
+/** 8.1.7：桌台分区从四个里选（散桌、景观包厢、休闲水吧区、休息果吧区） */
+const AREA = '散桌';
 const TABLES = ['E2E-A1', 'E2E-A2', 'E2E-B1', 'E2E-B2'] as const;
 const [A1, A2, B1, B2] = TABLES;
 /** 演示会员（seed-frontdesk-demo）：登记到桌上，结账时用储值付一部分 */
@@ -50,6 +52,9 @@ async function send<T = unknown>(page: Page, method: 'post' | 'put', url: string
   return (await res.json()) as T;
 }
 
+/** 点单页选到这道菜所在的那一处（三个入口与上面那排都是 dining-outlet-<入口>） */
+const openOutlet = (page: Page, dish: (typeof DISHES)[number]) => page.getByTestId(`dining-outlet-${dish.outlet}`).click();
+
 const sessionOf = async (page: Page, name: string) => (await getJson<TablesBoard>(page, '/api/dining/tables')).tables.find((t) => t.name === name)!.session;
 
 /** 店主：专用菜品、档口、菜品的档口、四张桌台（第一张在后台页面上建）都准备好，开启餐饮；收掉上次中断留下的开台 */
@@ -67,7 +72,7 @@ async function prepare(page: Page) {
     if (!old) admin = await send<DiningAdmin>(page, 'post', '/api/admin/dining/stations', { name });
     else if (!old.active) admin = await send<DiningAdmin>(page, 'put', `/api/admin/dining/stations/${old.id}`, { name, sortOrder: old.sortOrder, active: true });
   }
-  const items = DISHES.map((d) => ({ id: admin.items.find((i) => i.name === d.name)!.id, stationId: admin.stations.find((s) => s.name === d.station)!.id }));
+  const items = DISHES.map((d) => ({ id: admin.items.find((i) => i.name === d.name)!.id, stationId: admin.stations.find((s) => s.name === d.station)!.id, slot: d.slot }));
   await send(page, 'put', '/api/admin/dining/items', { items });
   // 8.0.8（A05）起桌台点单默认下架：这组用例测的是桌台，先打开
   await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15, tablesEnabled: true });
@@ -78,7 +83,7 @@ async function prepare(page: Page) {
     await page.goto('/admin/dining/tables');
     await page.getByTestId('dining-table-new').click();
     await page.getByTestId('dining-table-name').fill(A1);
-    await page.getByTestId('dining-table-area').fill(AREA);
+    await page.getByTestId('dining-table-area').selectOption(AREA);
     await page.getByTestId('dining-table-seats').fill('4');
     await page.getByTestId('dining-table-save').click();
     await expect(page.getByTestId(`dining-table-${A1}`)).toContainText(AREA);
@@ -142,8 +147,13 @@ test.describe('S5 餐饮第二步 · 桌台', () => {
       // ② 点单：从桌台详情进入点单页，已选好这一桌；宫保鸡丁 2 份、柠檬茶 1 杯
       await page.getByTestId('table-order').click();
       await expect(page.getByTestId('dining-table-selected')).toContainText(`桌 ${A1}`);
+      // 8.1.7：从桌台进来也先选一处；宫保鸡丁在餐厅、柠檬茶在水吧，来回换着点，菜篮都在
+      await expect(page.getByTestId('dining-outlets')).toBeVisible();
+      await openOutlet(page, HOT);
       await page.getByTestId(`dining-dish-${HOT.name}`).click();
+      await openOutlet(page, TEA);
       await page.getByTestId(`dining-dish-${TEA.name}`).click();
+      await openOutlet(page, HOT);
       await page.getByTestId(`dining-dish-${HOT.name}`).click();
       await expect(page.getByTestId('dining-line-0')).toContainText('2');
       await page.getByTestId('dining-submit').click();
@@ -324,6 +334,7 @@ test.describe('S5 餐饮第二步 · 桌台', () => {
       await page.route('**/api/dining/tables/sessions/*/orders', (route) => route.abort('connectionreset'));
       await page.goto(`/dining/order?table=${s.id}`);
       await expect(page.getByTestId('dining-table-selected')).toContainText(`桌 ${B1}`);
+      await openOutlet(page, TEA);
       await page.getByTestId(`dining-dish-${TEA.name}`).click();
       await page.getByTestId('dining-submit').click();
       await expect(page.getByTestId('pending-op')).toContainText(`桌 ${B1}`);

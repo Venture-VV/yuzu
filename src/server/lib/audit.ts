@@ -83,6 +83,8 @@ export type AuditAction =
   // 餐饮（S5 第一步）：出品档口、菜品的出品档口、估清
   | 'kitchen_station_saved'
   | 'items_station_updated'
+  // 8.1.7：菜品的点单分类（餐厅 / 水吧 / 果吧）
+  | 'items_slot_updated'
   | 'dish_limit_set'
   | 'dining_table_saved'
   | 'table_open'

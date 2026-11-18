@@ -178,10 +178,11 @@ test.describe('8.0.8 前台整改', () => {
       if (!st) admin = await send<DiningAdmin>(page, 'post', '/api/admin/dining/stations', { name: STATION });
       else if (!st.active) admin = await send<DiningAdmin>(page, 'put', `/api/admin/dining/stations/${st.id}`, { name: STATION, sortOrder: st.sortOrder, active: true });
       const stationId = admin.stations.find((s) => s.name === STATION)!.id;
+      // 8.1.7：台账按点单分类筛——果汁归果吧、海鲜归餐厅 · 餐饮
       await send(page, 'put', '/api/admin/dining/items', {
         items: [
-          { id: juiceId, stationId },
-          { id: seafoodId, stationId },
+          { id: juiceId, stationId, slot: 'fruit' },
+          { id: seafoodId, stationId, slot: 'restaurant:餐饮' },
         ],
       });
       await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15, tablesEnabled: false, voidFreeCents: 5000 });
@@ -259,19 +260,20 @@ test.describe('8.0.8 前台整改', () => {
       await expect(voids.locator('tr').filter({ hasText: SEAFOOD.name }).first()).toContainText('当场授权（');
       await expect(voids.locator('tr').filter({ hasText: SEAFOOD.name }).first()).toContainText('E2E 等太久不要了');
 
-      // ⑤ 台账：只看这一类，退了的标「已退」；导出与页面同样的条件、最后一行是合计
+      // ⑤ 台账：只看果吧（8.1.7 起按点单分类筛），退了的标「已退」；导出与页面同样的条件、最后一行是合计
       await page.getByTestId('dining-tab-ledger').click();
       const ledger = page.getByTestId('dining-ledger');
-      await ledger.getByTestId(`dining-ledger-cat-${JUICE.category}`).click();
-      await expect(ledger.locator('tbody tr').first()).toContainText(JUICE.name);
-      await expect(ledger.locator('tbody tr').filter({ hasText: SEAFOOD.name })).toHaveCount(0);
+      await ledger.getByTestId('dining-ledger-outlet-fruit').click();
       await expect(ledger.locator('tbody tr').filter({ hasText: JUICE.name }).first()).toContainText('已退');
+      await expect(ledger.locator('tbody tr').filter({ hasText: SEAFOOD.name })).toHaveCount(0);
       const today = (await getJson<{ today: string }>(page, '/api/business-day')).today;
-      const csv = await page.request.get(`/api/dining/ledger/export?from=${today}&to=${today}&status=all&categories=${encodeURIComponent(JUICE.category)}`);
+      const csv = await page.request.get(`/api/dining/ledger/export?from=${today}&to=${today}&status=all&outlet=fruit`);
       expect(csv.ok()).toBe(true);
       const rows = (await csv.text()).replace(/^﻿/, '').trim().split(/\r?\n/);
+      expect(rows[0]).toContain('价目分类');
       expect(rows.at(-1)!.startsWith('合计')).toBe(true);
-      expect(rows.slice(1, -1).every((r) => r.includes(JUICE.category))).toBe(true);
+      expect(rows.some((r) => r.includes(JUICE.name) && r.includes(JUICE.category))).toBe(true);
+      expect(rows.slice(1, -1).every((r) => r.includes('果吧') && !r.includes(SEAFOOD.name))).toBe(true);
 
       await relogin(page, 'linlan');
       await clearVisit(page, guest.visitId, 'E2E：收尾');

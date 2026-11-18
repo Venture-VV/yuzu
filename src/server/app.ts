@@ -105,6 +105,7 @@ import { registerClockroomRoutes } from './modules/clockroom';
 import { registerDiningRoutes } from './modules/dining';
 import { registerTableRoutes } from './modules/tables';
 import { registerDining808Routes } from './modules/dining-808';
+import { registerDiningReceiptRoutes } from './modules/dining-receipt';
 import { registerEmenuRoutes } from './modules/emenu/routes';
 import { registerStudioRoutes } from './modules/studio';
 import { registerRoomRoutes } from './modules/rooms';
@@ -359,6 +360,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDiningRoutes(app, deps);
   registerTableRoutes(app, deps);
   registerDining808Routes(app, deps);
+  // 8.1.7 点菜单（小票可视化）
+  registerDiningReceiptRoutes(app, deps);
   // 点餐系统 · 平板电子菜单（8.0.10）
   registerEmenuRoutes(app, deps);
   registerStudioRoutes(app, deps);

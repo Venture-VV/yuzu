@@ -403,6 +403,17 @@ tbody tr,
   }
 }
 
+/* 8.1.7 点菜单（小票可视化）：小票纸上下两道锯齿边（只是遮罩，不影响里面的排版） */
+.receipt-paper {
+  --tooth: 10px;
+  -webkit-mask:
+    conic-gradient(from 135deg at top, #0000, #000 1deg 89deg, #0000 90deg) top / var(--tooth) 51% repeat-x,
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / var(--tooth) 51% repeat-x;
+  mask:
+    conic-gradient(from 135deg at top, #0000, #000 1deg 89deg, #0000 90deg) top / var(--tooth) 51% repeat-x,
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) bottom / var(--tooth) 51% repeat-x;
+}
+
 /* 80mm 热敏打印（结账单、交班表）：页边距交给打印页自己排，打印对话框里选「边距：无」；纸长由打印机驱动按内容走纸 */
 @media print {
   @page {

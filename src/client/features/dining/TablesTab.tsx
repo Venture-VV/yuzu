@@ -2,14 +2,17 @@
 // 按区域的桌台格子：点空闲的桌开台（人数、称呼、可登记会员）；点用餐中的桌看这一桌：明细与出品状态（催单、上菜、退菜）、
 // 点单、改人数与会员、转台（写原因）、撤台（没有有效明细时）、结账（与手牌结账同一套收款）。
 // 开台、桌台点单、桌台结账与前台一样有「结果待确认」：断网后查回、原样重提或确认作废。
+// 8.1.7（docs/DINING_V817.md 第 3 节）：上面一排分区卡片（全部、散桌、景观包厢、休闲水吧区、休息果吧区），点一个只看这个区的桌与明细（CF5、CF6）；
+// 桌台详情里能打开点菜单（小票可视化，CF8）。
 
 import { DishVoidDialog } from './DishVoid';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowRightLeft, BellRing, Minus, Pencil, Plus, ReceiptText, Search, Undo2, UserRound, Users, UtensilsCrossed, X } from 'lucide-react';
+import { ArrowRightLeft, BellRing, ClipboardList, Minus, Pencil, Plus, ReceiptText, Search, Undo2, UserRound, Users, UtensilsCrossed, X } from 'lucide-react';
 import type { CheckoutDetail } from '@shared/checkout';
-import { KITCHEN_STATUS_LABELS, type KitchenStatus, type PendingDish, type TableSessionDetail, type TablesBoard } from '@shared/dining';
+import { KITCHEN_STATUS_LABELS, TABLE_ZONES, type KitchenStatus, type PendingDish, type TableSessionDetail, type TablesBoard } from '@shared/dining';
+import { formatYuan } from '@shared/money';
 import { maskPhone } from '@shared/labels';
 import type { MemberSummary } from '@shared/types';
 import { api, errorMessage } from '../../lib/api';
@@ -26,6 +29,7 @@ import { CheckoutRecordsDialog } from '../frontdesk/CheckoutDialog';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { stayText } from '../frontdesk/queries';
 import { TableCheckoutDialog } from './TableCheckoutDialog';
+import { ReceiptDialog } from './ReceiptDialog';
 import { tablesKey, useDiningMenu, useServerNow, useTableSession, useTablesBoard } from './queries';
 
 type Tile = TablesBoard['tables'][number];
@@ -39,6 +43,28 @@ const STATUS_TONE: Record<KitchenStatus, 'neutral' | 'yuzu' | 'pine' | 'lake' | 
 };
 
 const guestOf = (s: { memberName: string | null; guestLabel: string }) => s.memberName ?? (s.guestLabel || '散客');
+
+/** 不在四个分区里的桌（原来写了别的区域、或没分区的）归「其他区域」（CF5） */
+const OTHER_ZONE = '_other';
+const isZone = (area: string) => (TABLE_ZONES as readonly string[]).includes(area);
+
+interface ZoneStats {
+  tables: number;
+  busy: number;
+  guests: number;
+  pending: number;
+  amount: number;
+}
+const zoneStats = (list: Tile[]): ZoneStats => {
+  const busy = list.filter((t) => t.session);
+  return {
+    tables: list.length,
+    busy: busy.length,
+    guests: busy.reduce((n, t) => n + t.session!.guests, 0),
+    pending: busy.reduce((n, t) => n + t.session!.pendingDishes, 0),
+    amount: busy.reduce((n, t) => n + t.session!.amount, 0),
+  };
+};
 
 export function TablesTab() {
   const can = useCan();
@@ -74,11 +100,32 @@ export function TablesTab() {
   }, [resume, board.data, params, setParams]);
 
   const tables = useMemo(() => board.data?.tables ?? [], [board.data]);
-  const areas = useMemo(() => {
-    const map = new Map<string, Tile[]>();
-    for (const t of tables) map.set(t.area, [...(map.get(t.area) ?? []), t]);
-    return [...map.entries()];
+  // 分区（8.1.7，CF5）：四个分区总在；不在四个分区里的桌另有一张「其他区域」
+  const zones = useMemo(() => {
+    const list: { key: string; label: string; tables: Tile[] }[] = TABLE_ZONES.map((z) => ({ key: z, label: z, tables: tables.filter((t) => t.area === z) }));
+    const other = tables.filter((t) => !isZone(t.area));
+    if (other.length) list.push({ key: OTHER_ZONE, label: '其他区域', tables: other });
+    return list;
   }, [tables]);
+  const zoneParam = params.get('zone');
+  const selected = zones.find((z) => z.key === zoneParam) ?? null;
+  const setZone = (key: string | null) => {
+    const next = new URLSearchParams(params);
+    if (key) next.set('zone', key);
+    else next.delete('zone');
+    setParams(next, { replace: true });
+  };
+  /** 一组桌按原来的区域分段（「全部」与「其他区域」里用） */
+  const byArea = (list: Tile[]) => {
+    const map = new Map<string, Tile[]>();
+    for (const t of list) map.set(t.area, [...(map.get(t.area) ?? []), t]);
+    return [...map.entries()];
+  };
+  const sections = selected
+    ? selected.key === OTHER_ZONE
+      ? byArea(selected.tables)
+      : [[selected.label, selected.tables] as [string, Tile[]]]
+    : [...zones.filter((z) => z.key !== OTHER_ZONE && z.tables.length > 0).map((z) => [z.label, z.tables] as [string, Tile[]]), ...byArea(tables.filter((t) => !isZone(t.area)))];
   const busy = tables.filter((t) => t.session);
   const choices = busy.map((t) => ({ sessionId: t.session!.id, tableName: t.name, guests: t.session!.guests }));
 
@@ -123,16 +170,44 @@ export function TablesTab() {
       {tables.length === 0 ? (
         <EmptyState art="calm" title="还没有桌台" description="店主或能管理价目的岗位在「后台 → 餐饮 → 桌台」里建桌台（例如 A1、包间 1）后，这里开台、点单、结账。" />
       ) : (
-        areas.map(([area, list]) => (
-          <section key={area || '-'} aria-label={area || '未分区'}>
-            {areas.length > 1 && <h3 className="mb-2 text-[13px] font-bold text-ink-3">{area || '未分区'}</h3>}
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
-              {list.map((t) => (
-                <TableTile key={t.id} t={t} now={now} onClick={() => click(t)} />
-              ))}
-            </div>
-          </section>
-        ))
+        <>
+          {/* 分区卡片（8.1.7，CF6）：点一个只看这个区 */}
+          <div
+            className="scroll-thin -mx-1 flex snap-x gap-2.5 overflow-x-auto px-1 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-6"
+            role="tablist"
+            aria-label="桌台分区"
+            data-testid="table-zones"
+          >
+            <ZoneCard label="全部" stats={zoneStats(tables)} active={!selected} onClick={() => setZone(null)} testId="table-zone-all" />
+            {zones.map((z) => (
+              <ZoneCard key={z.key} label={z.label} stats={zoneStats(z.tables)} active={selected?.key === z.key} onClick={() => setZone(z.key)} testId={`table-zone-${z.label}`} />
+            ))}
+          </div>
+          {selected && <ZoneDetail label={selected.label} stats={zoneStats(selected.tables)} />}
+          {selected && selected.tables.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3" data-testid="table-zone-empty">
+              {selected.label}还没有桌台。店主在「后台 → 餐饮 → 桌台」建桌或改桌时把「区域」选成「{selected.label}」。
+            </p>
+          ) : (
+            sections.map(([area, list]) => (
+              <section key={area || '-'} aria-label={area || '未分区'} className="animate-dialog-in" data-testid={`table-section-${area || '未分区'}`}>
+                {(!selected || selected.key === OTHER_ZONE) && (
+                  <h3 className="mb-2 flex items-baseline gap-2 text-[13px] font-bold text-ink-3">
+                    {area || '未分区'}
+                    <span className="text-[12px] font-normal text-ink-4">
+                      {list.length} 桌 · 用餐中 {list.filter((t) => t.session).length}
+                    </span>
+                  </h3>
+                )}
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
+                  {list.map((t) => (
+                    <TableTile key={t.id} t={t} now={now} onClick={() => click(t)} />
+                  ))}
+                </div>
+              </section>
+            ))
+          )}
+        </>
       )}
 
       {opening && (
@@ -149,6 +224,57 @@ export function TablesTab() {
       {sessionId !== null && <SessionDialog id={sessionId} board={board.data!} onClose={() => setSessionId(null)} onCheckout={() => setCheckoutFor(sessionId)} />}
       {checkoutFor !== null && <TableCheckoutDialog open sessionId={checkoutFor} choices={choices} onClose={() => setCheckoutFor(null)} onDone={done} />}
       <CheckoutRecordsDialog open={records} onClose={() => setRecords(false)} />
+    </div>
+  );
+}
+
+/** 一张分区卡片：桌数、用餐中几桌几人、待上菜几份、消费合计 */
+function ZoneCard({ label, stats, active, onClick, testId }: { label: string; stats: ZoneStats; active: boolean; onClick: () => void; testId: string }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        // 手持点单机（商米 V3，窄屏）上分区卡片排成一行左右滑；平板、收银机上排成格子
+        'mo-lift flex min-h-[92px] w-[9.75rem] shrink-0 snap-start flex-col items-start rounded-xl border px-3.5 py-2.5 text-left transition-colors sm:w-auto',
+        active ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-pine',
+      )}
+      data-testid={testId}
+    >
+      <span className="flex w-full items-baseline gap-1.5">
+        <span className="min-w-0 flex-1 truncate text-[15px] font-bold">{label}</span>
+        <span className="num text-[12px] text-ink-3">{stats.tables} 桌</span>
+      </span>
+      <span className="mt-1 text-[12.5px] text-ink-2">
+        用餐中 <b className="num">{stats.busy}</b> 桌 · <b className="num">{stats.guests}</b> 人
+      </span>
+      <span className="mt-auto flex w-full items-center gap-1.5 pt-1">
+        <span className="num text-[13.5px] font-bold">{formatYuan(stats.amount)}</span>
+        {stats.pending > 0 && <Badge tone="yuzu">待上 {stats.pending}</Badge>}
+      </span>
+    </button>
+  );
+}
+
+/** 点开一个分区以后的明细（CF6）：空闲、用餐中、人数、待上菜、消费合计 */
+function ZoneDetail({ label, stats }: { label: string; stats: ZoneStats }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line bg-paper-2/50 px-4 py-2.5 text-[13px]" data-testid="table-zone-detail">
+      <span className="text-[14px] font-bold">{label}</span>
+      <span>
+        空闲 <b className="num">{stats.tables - stats.busy}</b> 桌
+      </span>
+      <span>
+        用餐中 <b className="num">{stats.busy}</b> 桌 · <b className="num">{stats.guests}</b> 人
+      </span>
+      <span>
+        待上菜 <b className="num">{stats.pending}</b> 份
+      </span>
+      <span>
+        消费合计 <b className="num">{formatYuan(stats.amount)}</b>
+      </span>
     </div>
   );
 }
@@ -370,6 +496,8 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
   const [moving, setMoving] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [showVoided, setShowVoided] = useState(false);
+  /** 点菜单（8.1.7，CF8） */
+  const [receipt, setReceipt] = useState(false);
   const d = detail.data;
   const canOrder = can('dining.order') && can('frontdesk.operate');
 
@@ -449,25 +577,31 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
     >
       <div className="space-y-4" data-testid="table-session">
         {d.status === 'cancelled' && <Notice tone="warning" title={`已撤台：${d.closeReason ?? ''}`} />}
-        {open && (
-          <div className="flex flex-wrap gap-2">
-            {canOrder && (
-              <Button size="sm" variant="secondary" icon={<Pencil className="size-3.5" />} onClick={() => setEditing(true)} data-testid="table-edit">
-                改人数、会员
-              </Button>
-            )}
-            {canOrder && (
-              <Button size="sm" variant="secondary" icon={<ArrowRightLeft className="size-3.5" />} onClick={() => setMoving(true)} disabled={freeTables.length === 0} data-testid="table-move">
-                转台
-              </Button>
-            )}
-            {canOrder && active.length === 0 && (
-              <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" />} onClick={() => setCancelling(true)} data-testid="table-cancel">
-                撤台
-              </Button>
-            )}
-          </div>
-        )}
+        <ReceiptDialog target={receipt ? { session: d.id } : null} onClose={() => setReceipt(false)} />
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" icon={<ClipboardList className="size-3.5" />} onClick={() => setReceipt(true)} data-testid="table-receipt">
+            点菜单
+          </Button>
+          {open && (
+            <>
+              {canOrder && (
+                <Button size="sm" variant="secondary" icon={<Pencil className="size-3.5" />} onClick={() => setEditing(true)} data-testid="table-edit">
+                  改人数、会员
+                </Button>
+              )}
+              {canOrder && (
+                <Button size="sm" variant="secondary" icon={<ArrowRightLeft className="size-3.5" />} onClick={() => setMoving(true)} disabled={freeTables.length === 0} data-testid="table-move">
+                  转台
+                </Button>
+              )}
+              {canOrder && active.length === 0 && (
+                <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" />} onClick={() => setCancelling(true)} data-testid="table-cancel">
+                  撤台
+                </Button>
+              )}
+            </>
+          )}
+        </div>
 
         <div>
           <SectionTitle

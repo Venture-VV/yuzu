@@ -8,11 +8,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
 import { ADMIN_SECTIONS } from '@shared/admin';
 import {
+  ALL_DINING_SLOTS,
   DEFAULT_DINING_RULES,
   MAX_STATION_NAME,
   MAX_VOID_FREE_CENTS,
   MAX_TABLE_AREA,
   MAX_TABLE_NAME,
+  TABLE_ZONES,
+  diningSlotOf,
+  slotKey,
+  slotLabel,
   type DiningAdmin,
   type DiningRules,
   type DiningTable,
@@ -366,6 +371,8 @@ function ItemsCard() {
   const toast = useToast();
   const admin = useDiningAdmin();
   const [draft, setDraft] = useState<Map<number, number | null>>(new Map());
+  /** 点单分类（8.1.7）：改了的菜 → 分类的编码，null 为「按默认」 */
+  const [slotDraft, setSlotDraft] = useState<Map<number, string | null>>(new Map());
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
@@ -395,18 +402,35 @@ function ItemsCard() {
   const rest = items.filter((i) => i.stationId === null && value(i) === null);
   const q = query.trim().toLowerCase();
   const found = q ? rest.filter((i) => i.name.toLowerCase().includes(q) || i.category.toLowerCase().includes(q)) : rest;
-  const changes = items.filter((i) => draft.has(i.id) && draft.get(i.id) !== i.stationId);
+  // 点单分类（8.1.7，CF2、CF3）：设过的是 slotKey，没设的是 null（按默认归，默认算法与服务端同一个）
+  const storedSlot = (i: Item) => (i.slotAssigned ? slotKey(i.slot) : null);
+  const slotValue = (i: Item) => (slotDraft.has(i.id) ? slotDraft.get(i.id)! : storedSlot(i));
+  const defaultSlot = (i: Item) => {
+    const sid = value(i);
+    return diningSlotOf({ outlet: null, group: '', category: i.category, stationName: stations.find((s) => s.id === sid)?.name ?? null });
+  };
+  const chooseSlot = (i: Item, v: string | null, into = new Map(slotDraft)) => {
+    if (v === storedSlot(i)) into.delete(i.id);
+    else into.set(i.id, v);
+    return into;
+  };
+  const stationChanged = (i: Item) => draft.has(i.id) && draft.get(i.id) !== i.stationId;
+  const slotChanged = (i: Item) => slotDraft.has(i.id) && slotDraft.get(i.id) !== storedSlot(i);
+  const changes = items.filter((i) => stationChanged(i) || slotChanged(i));
   const options = [{ value: '', label: '不进厨房' }, ...stations.map((s) => ({ value: String(s.id), label: s.active ? s.name : `${s.name}（已停用）` }))];
 
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      const next = await api.put<DiningAdmin>('/api/admin/dining/items', { items: changes.map((i) => ({ id: i.id, stationId: draft.get(i.id)! })) });
+      const next = await api.put<DiningAdmin>('/api/admin/dining/items', {
+        items: changes.map((i) => ({ id: i.id, ...(stationChanged(i) ? { stationId: draft.get(i.id)! } : {}), ...(slotChanged(i) ? { slot: slotDraft.get(i.id)! } : {}) })),
+      });
       qc.setQueryData(adminKey, next);
       setDraft(new Map());
+      setSlotDraft(new Map());
       void qc.invalidateQueries({ queryKey: ['dining'] });
-      toast({ tone: 'success', title: '菜品的出品档口已保存' });
+      toast({ tone: 'success', title: '菜品的出品档口与点单分类已保存' });
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -419,8 +443,8 @@ function ItemsCard() {
     <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
       {byCategory(list).map(([cat, group]) => (
         <div key={cat} className="rounded-lg border border-line" data-testid={`${prefix}-${cat}`}>
-          <div className="flex items-center justify-between gap-2 border-b border-line/70 bg-paper-2/60 px-3 py-2">
-            <span className="text-[13.5px] font-bold">{cat}</span>
+          <div className="flex flex-wrap items-center gap-2 border-b border-line/70 bg-paper-2/60 px-3 py-2">
+            <span className="min-w-0 flex-1 basis-full truncate text-[13.5px] font-bold sm:basis-auto">{cat}</span>
             {editable && stations.length > 0 && (
               <Select
                 value=""
@@ -444,30 +468,76 @@ function ItemsCard() {
                   ))}
               </Select>
             )}
+            {editable && prefix === 'dining-items' && (
+              <Select
+                value=""
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === '') return;
+                  let next = new Map(slotDraft);
+                  for (const i of group) next = chooseSlot(i, v === 'default' ? null : v, next);
+                  setSlotDraft(next);
+                }}
+                fullWidth={false}
+                className="text-[12.5px]"
+                aria-label={`${cat} 整类的点单分类设为`}
+                data-testid={`${prefix}-slot-all-${cat}`}
+              >
+                <option value="">点单分类设为…</option>
+                {ALL_DINING_SLOTS.map((sl) => (
+                  <option key={slotKey(sl)} value={slotKey(sl)}>
+                    {slotLabel(sl)}
+                  </option>
+                ))}
+                <option value="default">按默认</option>
+              </Select>
+            )}
           </div>
           <ul className="divide-y divide-line/60">
             {group.map((i) => {
               const v = value(i);
               return (
-                <li key={i.id} className="flex items-center gap-2 px-3 py-1.5" data-testid={`dining-item-${i.name}`}>
-                  <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{i.name}</span>
-                  {draft.has(i.id) && <Badge tone="lake">未保存</Badge>}
+                <li key={i.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5" data-testid={`dining-item-${i.name}`}>
+                  <span className="min-w-0 flex-1 basis-28 truncate text-[13.5px] font-semibold">{i.name}</span>
+                  {(stationChanged(i) || slotChanged(i)) && <Badge tone="lake">未保存</Badge>}
                   <Money cents={i.price} className="text-[12px] text-ink-3" />
-                  <Select
-                    value={v === null ? '' : String(v)}
-                    disabled={!editable || stations.length === 0}
-                    onChange={(e) => choose(i, e.target.value === '' ? null : Number(e.target.value))}
-                    fullWidth={false}
-                    className="w-32 text-[13px]"
-                    aria-label={`${i.name} 的出品档口`}
-                    data-testid={`dining-item-station-${i.name}`}
-                  >
-                    {options.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </Select>
+                  {/* 手持点单机、手机上两个下拉占满一行；平板、电脑上排在菜名后面 */}
+                  <div className="flex w-full gap-2 sm:w-auto">
+                    <Select
+                      value={v === null ? '' : String(v)}
+                      disabled={!editable || stations.length === 0}
+                      onChange={(e) => choose(i, e.target.value === '' ? null : Number(e.target.value))}
+                      fullWidth={false}
+                      className="min-w-0 flex-1 text-[13px] sm:w-32 sm:flex-none"
+                      aria-label={`${i.name} 的出品档口`}
+                      data-testid={`dining-item-station-${i.name}`}
+                    >
+                      {options.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                    {/* 点单分类（8.1.7）：进厨房的菜才有；没设的按默认归，写明默认归哪 */}
+                    {prefix === 'dining-items' && v !== null && (
+                      <Select
+                        value={slotValue(i) ?? ''}
+                        disabled={!editable}
+                        onChange={(e) => setSlotDraft(chooseSlot(i, e.target.value === '' ? null : e.target.value))}
+                        fullWidth={false}
+                        className="min-w-0 flex-1 text-[13px] sm:w-36 sm:flex-none"
+                        aria-label={`${i.name} 的点单分类`}
+                        data-testid={`dining-item-slot-${i.name}`}
+                      >
+                        <option value="">默认（{slotLabel(defaultSlot(i))}）</option>
+                        {ALL_DINING_SLOTS.map((sl) => (
+                          <option key={slotKey(sl)} value={slotKey(sl)}>
+                            {slotLabel(sl)}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </div>
                 </li>
               );
             })}
@@ -479,9 +549,10 @@ function ItemsCard() {
 
   return (
     <Card className="p-5" data-testid="dining-items">
-      <SectionTitle aside={!editable && <Badge>能管理价目的岗位可改</Badge>}>菜品送到哪个档口</SectionTitle>
+      <SectionTitle aside={!editable && <Badge>能管理价目的岗位可改</Badge>}>菜品送到哪个档口、在点单页的哪里</SectionTitle>
       <p className="mt-1 text-[12.5px] text-ink-3">
         挂了档口的项目就是菜：点单页能点，前台「加项目」点了也一样进厨房，账单上记在「餐饮」。价目里的其他项目（门票、洗浴用品、按摩等）不用挂，照常挂账、不进厨房，这里不列出。
+        每道菜另选「点单分类」：点单页先选餐厅、水吧、果吧再点，沽清列表、台账、退菜记录也按它分；没选的按默认归（价目分类、出品档口的名字），不改价目表的分类。
         {stations.length === 0 && ' 请先在上面建档口。'}
       </p>
       {dishes.length === 0 ? (
@@ -531,7 +602,14 @@ function ItemsCard() {
       {editable && (
         <div className="mt-3 flex flex-wrap items-center justify-end gap-3">
           {changes.length > 0 && (
-            <Button size="sm" variant="ghost" onClick={() => setDraft(new Map())}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setDraft(new Map());
+                setSlotDraft(new Map());
+              }}
+            >
               放弃修改
             </Button>
           )}
@@ -590,12 +668,12 @@ function TablesCard() {
           ))}
         </ul>
       )}
-      <TableDialog target={editing} areas={[...new Set(list.map((t) => t.area).filter(Boolean))]} onClose={() => setEditing(null)} />
+      <TableDialog target={editing} onClose={() => setEditing(null)} />
     </Card>
   );
 }
 
-function TableDialog({ target, areas, onClose }: { target: DiningTable | 'new' | null; areas: string[]; onClose: () => void }) {
+function TableDialog({ target, onClose }: { target: DiningTable | 'new' | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [name, setName] = useState('');
@@ -610,7 +688,8 @@ function TableDialog({ target, areas, onClose }: { target: DiningTable | 'new' |
     setOpened(target);
     const t = target && target !== 'new' ? target : null;
     setName(t?.name ?? '');
-    setArea(t?.area ?? '');
+    // 新桌默认「散桌」（8.1.7，CF5）
+    setArea(t ? t.area : TABLE_ZONES[0]);
     setSeats(String(t?.seats ?? 4));
     setSortOrder(String(t?.sortOrder ?? 0));
     setActive(t?.active ?? true);
@@ -666,13 +745,17 @@ function TableDialog({ target, areas, onClose }: { target: DiningTable | 'new' |
         <Field label="桌号" htmlFor="table-name" hint={`最多 ${MAX_TABLE_NAME} 字，例如 A1、包间 1`}>
           <Input id="table-name" value={name} maxLength={MAX_TABLE_NAME} onChange={(e) => setName(e.target.value)} data-autofocus data-testid="dining-table-name" />
         </Field>
-        <Field label="区域" htmlFor="table-area" hint="选填，例如 大厅、包间；同一区域的桌台在「桌台」页排在一起">
-          <Input id="table-area" value={area} maxLength={MAX_TABLE_AREA} onChange={(e) => setArea(e.target.value)} list="table-areas" data-testid="dining-table-area" />
-          <datalist id="table-areas">
-            {areas.map((a) => (
-              <option key={a} value={a} />
+        <Field label="分区" htmlFor="table-area" hint="桌台页上面一排分区卡片，点一个只看这个区的桌（8.1.7）">
+          <Select id="table-area" value={area} onChange={(e) => setArea(e.target.value)} data-testid="dining-table-area">
+            {TABLE_ZONES.map((z) => (
+              <option key={z} value={z}>
+                {z}
+              </option>
             ))}
-          </datalist>
+            {/* 原来写了别的区域的桌：照旧能留着，改了以后就不再出现（CF5） */}
+            {opened && opened !== 'new' && opened.area && !(TABLE_ZONES as readonly string[]).includes(opened.area) && <option value={opened.area}>{opened.area}（原区域）</option>}
+            <option value="">不分区</option>
+          </Select>
         </Field>
         <div className="flex flex-wrap gap-4">
           <Field label="座位" htmlFor="table-seats" hint="1–99，开台时人数默认按座位数">

@@ -7,11 +7,15 @@ import { expect, test, type Page } from '@playwright/test';
 import type { DiningAdmin, KitchenBoard } from '../src/shared/dining';
 
 const PASSWORD = 'yuzu2026';
+// 8.1.7：点单页先选一处（餐厅 / 水吧 / 果吧）再点菜；两道菜的点单分类在准备时写明（不靠默认归类）
 const DISHES = [
-  { name: 'E2E 宫保鸡丁', category: 'E2E 餐饮', price: 4800, station: 'E2E 热菜' },
-  { name: 'E2E 柠檬茶', category: 'E2E 餐饮', price: 1500, station: 'E2E 水吧' },
+  { name: 'E2E 宫保鸡丁', category: 'E2E 餐饮', price: 4800, station: 'E2E 热菜', outlet: 'restaurant', slot: 'restaurant:餐饮' },
+  { name: 'E2E 柠檬茶', category: 'E2E 餐饮', price: 1500, station: 'E2E 水吧', outlet: 'water', slot: 'water:手作饮料' },
 ] as const;
 const [HOT, TEA] = DISHES;
+
+/** 点单页选到这道菜所在的那一处：一进来、下单成功以后是三个入口，选了以后是上面一排，两种都是 dining-outlet-<入口> */
+const openOutlet = (page: Page, dish: (typeof DISHES)[number]) => page.getByTestId(`dining-outlet-${dish.outlet}`).click();
 
 async function login(page: Page, username: string) {
   await page.goto('/login');
@@ -61,7 +65,7 @@ async function prepareByApi(page: Page) {
     if (!old) admin = (await (await send(page, 'post', '/api/admin/dining/stations', { name })).json()) as DiningAdmin;
     else if (!old.active) admin = (await (await send(page, 'put', `/api/admin/dining/stations/${old.id}`, { name, sortOrder: old.sortOrder, active: true })).json()) as DiningAdmin;
   }
-  const items = DISHES.map((d) => ({ id: admin.items.find((i) => i.name === d.name)!.id, stationId: admin.stations.find((s) => s.name === d.station)!.id }));
+  const items = DISHES.map((d) => ({ id: admin.items.find((i) => i.name === d.name)!.id, stationId: admin.stations.find((s) => s.name === d.station)!.id, slot: d.slot }));
   await send(page, 'put', '/api/admin/dining/items', { items });
   await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15 });
 }
@@ -121,6 +125,9 @@ test.describe('S5 餐饮', () => {
         await page.getByTestId('dining-items-save').click();
         await expect(page.getByText('菜品的出品档口已保存')).toBeVisible();
       }
+      // 8.1.7：点单分类写明（宫保鸡丁在餐厅，柠檬茶在水吧）
+      admin = await getJson<DiningAdmin>(page, '/api/admin/dining');
+      await send(page, 'put', '/api/admin/dining/items', { items: DISHES.map((d) => ({ id: admin.items.find((i) => i.name === d.name)!.id, slot: d.slot })) });
       await page.getByTestId('subnav-rules').click();
       const rules = page.getByTestId('dining-rules-card');
       await rules.getByRole('radiogroup', { name: '餐饮功能' }).getByRole('radio', { name: '开启' }).click();
@@ -161,9 +168,14 @@ test.describe('S5 餐饮', () => {
       await page.getByTestId('dining-tag').fill(tag);
       await page.getByTestId('dining-find').click();
       await expect(page.getByTestId('dining-guest')).toContainText('E2E 点单客人');
+      // 8.1.7：先弹出餐厅、水吧、果吧三个入口；宫保鸡丁在餐厅，换到水吧点柠檬茶，菜篮里两样都在
+      await expect(page.getByTestId('dining-outlets')).toBeVisible();
+      await openOutlet(page, HOT);
       await page.getByTestId(`dining-dish-${HOT.name}`).click();
       await page.getByTestId('dining-line-0').getByRole('button', { name: '少辣' }).click();
       await expect(page.getByTestId('dining-note-0')).toHaveValue('少辣');
+      await openOutlet(page, TEA);
+      await expect(page.getByTestId(`dining-dish-${HOT.name}`)).toHaveCount(0);
       await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toContainText('剩 2');
       await page.getByTestId(`dining-dish-${TEA.name}`).click();
       await expect(page.getByTestId('dining-cart')).toContainText('63.00');
@@ -172,6 +184,9 @@ test.describe('S5 餐饮', () => {
       const pending = page.getByTestId('dining-pending');
       await expect(pending.getByTestId(`dining-pending-${HOT.name}`)).toContainText('少辣');
       await expect(pending.getByTestId(`dining-pending-${TEA.name}`)).toContainText('待做');
+      // 下单成功回到三个入口
+      await expect(page.getByTestId('dining-outlets')).toBeVisible();
+      await openOutlet(page, TEA);
       await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toContainText('剩 1');
       let lines = (await getJson<{ lines: Line[] }>(page, `/api/frontdesk/visits/${visitId}`)).lines;
       expect(lines.filter((l) => l.source === 'dining').map((l) => [l.name, l.kitchen?.status, l.kitchen?.note])).toEqual([
@@ -207,6 +222,7 @@ test.describe('S5 餐饮', () => {
       await page.getByRole('dialog').getByRole('button', { name: '确认退菜' }).click();
       await expect(page.getByText(`${TEA.name} 已退`)).toBeVisible();
       await expect(pending.getByTestId(`dining-pending-${TEA.name}`)).toHaveCount(0);
+      await openOutlet(page, TEA);
       await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toContainText('剩 2');
       const kb = await getJson<KitchenBoard>(page, '/api/kitchen');
       expect(
@@ -226,6 +242,7 @@ test.describe('S5 餐饮', () => {
       await teaLimit.getByTestId(`limit-soldout-${TEA.name}`).click();
       await expect(teaLimit).toContainText('已估清');
       await page.getByTestId('dining-tab-order').click();
+      await openOutlet(page, TEA);
       await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toBeDisabled();
       await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toContainText('已估清');
       await page.getByTestId('dining-tab-limits').click();
@@ -234,6 +251,7 @@ test.describe('S5 餐饮', () => {
 
       // ⑧ 再点一份柠檬茶（不上）；前台账单显示出品状态，结账核对列出还没上的菜
       await page.getByTestId('dining-tab-order').click();
+      await openOutlet(page, TEA);
       await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toBeEnabled();
       await page.getByTestId(`dining-dish-${TEA.name}`).click();
       await page.getByTestId('dining-submit').click();
@@ -293,9 +311,13 @@ test.describe('S5 餐饮', () => {
       await page.getByTestId('dining-tag').fill(tag);
       await page.getByTestId('dining-find').click();
       await expect(page.getByTestId('dining-guest')).toBeVisible();
+      await openOutlet(page, HOT);
       await page.getByTestId(`dining-dish-${HOT.name}`).click();
       await page.getByTestId('dining-submit').click();
       await expect(page.getByTestId('dining-cart').getByTestId('pending-op')).toContainText(HOT.name);
+      // 结果待确认时菜单点不了（换一处也一样）
+      await expect(page.getByTestId(`dining-dish-${HOT.name}`)).toBeDisabled();
+      await openOutlet(page, TEA);
       await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toBeDisabled();
       // 刷新后顶部提醒仍在 → 去前台处理 → 按原内容重新提交（同一编号，只生效一次）
       await page.reload();
@@ -351,6 +373,7 @@ test.describe('S5 餐饮', () => {
       await page.getByTestId('dining-tag').fill(a);
       await page.unroute('**/api/dining/menu');
       await page.getByTestId('dining-menu-error-retry').click();
+      await openOutlet(page, HOT);
       await expect(page.getByTestId(`dining-dish-${HOT.name}`)).toBeVisible();
       await expect(page.getByTestId('dining-tag')).toHaveValue(a);
 
