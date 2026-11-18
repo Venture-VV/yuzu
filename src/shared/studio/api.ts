@@ -1,7 +1,6 @@
 // UI 工作台的接口返回（8.1.1，docs/WORKBENCH_V811.md 第 5、9 节）。
 
 import type { StudioDoc, StudioSurface } from './format';
-import type { StudioIssue } from './check';
 
 /** 已发布的一版 */
 export interface StudioVersionView {
@@ -81,11 +80,6 @@ export interface StudioPublishedRef {
 export interface StudioPreviewCode {
   code: string;
   expiresAt: string;
-}
-
-/** 发布被检查拦下时，错误详情里带的问题 */
-export interface StudioCheckFailed {
-  issues: StudioIssue[];
 }
 
 /** 批注（8.1.2，GZ28）：画布上某一屏某个位置的留言；回复挂在第一条下面；解决了标一下 */

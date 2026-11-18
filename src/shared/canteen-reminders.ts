@@ -2,7 +2,7 @@
 // 桌面上的柚子图标出现小红点。后台「员工食堂 → 饭点提醒」设哪几顿提醒、几点、柚子说什么；员工在柚子饭堂「我的 → 饭点提醒」里打开、选哪几顿。
 // 服务端、后台的预览、员工手机共用这里的默认话术与规则。
 
-import { MEALS, type Meal, type MealWindow } from './canteen';
+import type { Meal, MealWindow } from './canteen';
 import { HHMM } from './business-date';
 
 // ── 提醒的设置（后台） ──
@@ -88,8 +88,6 @@ export const defaultReminder = (meal: Meal): MealReminder => {
   return { ...d, lines: [...d.lines] };
 };
 
-export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = { reminders: MEALS.map(defaultReminder), rev: 0 };
-
 /** 一条提醒的问题（没问题返回 null）：开着的要有标题、至少一句话；时间写成 HH:MM */
 export function reminderProblem(r: MealReminder): string | null {
   if (r.time !== null && !HHMM.test(r.time)) return '提醒时间写成 HH:MM';
@@ -169,13 +167,6 @@ export interface PushInfo {
   muted: Meal[];
   /** 开着提醒的手机有几台（这个人名下） */
   devices: number;
-}
-
-/** 员工交上来的订阅（浏览器 PushSubscription.toJSON() 加上是哪种手机） */
-export interface PushSubscriptionInput {
-  endpoint: string;
-  keys: { p256dh: string; auth: string };
-  platform?: 'ios' | 'android' | 'other';
 }
 
 /** 发一条试试的结果 */

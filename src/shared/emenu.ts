@@ -322,8 +322,6 @@ export const EMENU_LAYOUT_INFO: Record<EmenuLayout, EmenuLayoutInfo> = {
   list_text: { label: '文字陈列', design: '无图——文字陈列', slots: 10, titled: true, hint: '竖排小标题，两列各 5 行：名称、英文名、属性行、价格' },
 };
 
-export const EMENU_MAX_SLOTS = 10;
-
 // ───────────────────────── 供应时段 ─────────────────────────
 
 /** 一天里的第几分钟（0–1439）；start > end 为跨零点 */

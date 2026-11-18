@@ -236,8 +236,6 @@ export const EMENU_LOGO_RATIO = 79.809 / 15.441;
 export const EMENU_LOGO_TO_ICON = 0.7;
 /** 手牌色块原来的最小宽（里面的字长了往外长） */
 export const EMENU_TAG_W = 85.8;
-/** 后台关了中英切换时分类排开的范围（原来的写法：右边让出切换图标的地方不要了） */
-export const EMENU_CATS_NO_LANG = { design: { x: 136, w: 610 }, big: { x: 136, w: 610 } } as const;
 
 const K = EMENU_HEADER_BIG;
 const MID = EMENU_HEADER_MID;

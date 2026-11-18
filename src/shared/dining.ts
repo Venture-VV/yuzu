@@ -82,9 +82,6 @@ export const DINING_OUTLETS: readonly DiningOutletDef[] = [
 
 export const DINING_OUTLET_LABELS: Record<DiningOutlet, string> = { restaurant: '餐厅', water: '水吧', fruit: '果吧' };
 
-/** 小分类最多 8 个字（数据库也这样约束） */
-export const MAX_DINING_GROUP = 8;
-
 /** 一道菜在点单页的位置：哪一处、哪个小分类（果吧为空） */
 export interface DiningSlot {
   outlet: DiningOutlet;

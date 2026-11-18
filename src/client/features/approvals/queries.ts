@@ -1,7 +1,7 @@
 // 审批中心（v0.7.30）的读与刷新：同意、退回之后，单据的状态跟着变，库存、采购、货款、报销的缓存一起刷新。
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ApprovalCard, ApprovalCounts, ApprovalDetail, ApprovalDocType, ApprovalRuleView, ApproverOption, DelegationView, UrgentAcceptItem, UrgentBackfillItem } from '@shared/approvals';
+import type { ApprovalCard, ApprovalDetail, ApprovalDocType, ApprovalRuleView, ApproverOption, DelegationView, UrgentAcceptItem, UrgentBackfillItem } from '@shared/approvals';
 import { api } from '../../lib/api';
 
 export type ApprovalTab = 'mine' | 'all' | 'submitted';
@@ -25,8 +25,6 @@ export const useApprovals = (tab: ApprovalTab, docType?: ApprovalDocType, enable
     enabled,
     refetchInterval: 60_000,
   });
-
-export const useApprovalCount = (enabled = true) => useQuery({ queryKey: ak.count, queryFn: () => api.get<ApprovalCounts>('/api/approvals/count'), enabled, refetchInterval: 60_000 });
 
 export const useApprovalDetail = (id: number | null) => useQuery({ queryKey: ak.detail(id ?? 0), queryFn: () => api.get<ApprovalDetail>(`/api/approvals/${id}`), enabled: !!id });
 

@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { SHADOWS, STUDIO_LIMITS, STUDIO_SCHEMA, walkNodes } from './core';
 
 // 不依赖 zod 的常数与小工具（格式版本、上限、投影、遍历、颜色）在 core.ts：员工食堂等只画版面的地方不用带上 zod；这里照旧都能取到
-export { colorValue, isFlow, SHADOW_CSS, SHADOWS, STUDIO_LIMITS, STUDIO_SCHEMA, walkNodes } from './core';
+export { colorValue, isFlow, SHADOWS, STUDIO_LIMITS, walkNodes } from './core';
 
 /** 颜色：#rrggbb、#rrggbbaa，或者主题色（$ink） */
 export const ColorSchema = z.string().regex(/^(#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?|\$[a-z][a-zA-Z0-9]{0,23})$/, '颜色写成 #RRGGBB 或主题色');
@@ -144,7 +144,6 @@ export type StudioFieldNode = z.infer<typeof FieldSchema>;
 export type StudioFrameNode = z.infer<typeof BaseFrameSchema> & { children: StudioNode[] };
 export type StudioInstanceNode = z.infer<typeof InstanceSchema>;
 export type StudioNode = StudioTextNode | StudioRectNode | StudioEllipseNode | StudioImageNode | StudioBlockNode | StudioButtonNode | StudioFieldNode | StudioFrameNode | StudioInstanceNode;
-export type StudioNodeType = StudioNode['type'];
 
 /**
  * 自动排列（框、屏都可以有）：free 自由摆放（按 x / y，8.1.1 的样子）；row 横排、column 竖排——里面的节点按先后排，不看 x / y。
@@ -179,7 +178,6 @@ export const NodeSchema: z.ZodType<StudioNode> = z.lazy(() =>
 
 /** 组件（8.1.2）：设计师存下来的一块（框连着里面的也行），屏上放它的实例；里面不能有功能块 */
 export const ComponentSchema = z.object({ name: z.string().trim().min(1).max(40), node: NodeSchema });
-export type StudioComponent = z.infer<typeof ComponentSchema>;
 
 export const ScreenSchema = z.object({
   /** 这一屏的底色（null：用界面自己的底） */
@@ -198,7 +196,6 @@ export const ThemeSchema = z.object({
   /** 中文、英文字体：从界面登记的几种里选 */
   fonts: z.object({ zh: z.string().max(40), en: z.string().max(40) }),
 });
-export type StudioTheme = z.infer<typeof ThemeSchema>;
 
 export const STUDIO_SURFACES = ['emenu', 'mp', 'canteen'] as const;
 export type StudioSurface = (typeof STUDIO_SURFACES)[number];

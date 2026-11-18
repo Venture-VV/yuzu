@@ -55,19 +55,3 @@ export interface PraisePage {
   records: PraiseRecord[];
   nextCursor: string | null;
 }
-
-export interface SavePraiseInput {
-  staffId: string;
-  occurredOn: string;
-  source: string;
-  content: string;
-  guestName: string;
-  memberId?: string;
-  uploadIds: string[];
-}
-
-export interface VoidPraiseInput {
-  id: string;
-  version: number;
-  reason: string;
-}

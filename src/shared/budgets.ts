@@ -7,9 +7,6 @@ import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS, type ExpenseCategory } fro
 export type BudgetLevel = 'none' | 'ok' | 'warn' | 'over';
 export const BUDGET_LEVEL_LABELS: Record<BudgetLevel, string> = { none: '不控制', ok: '正常', warn: '快用完', over: '超预算' };
 
-/** 黄灯百分比的范围（费用报销规则） */
-export const BUDGET_WARN_MIN = 50;
-export const BUDGET_WARN_MAX = 100;
 /** 一格额度的上限：¥10 亿（只防填错） */
 export const BUDGET_MAX_CENTS = 100_000_000_000;
 

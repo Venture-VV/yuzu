@@ -215,8 +215,6 @@ export const DEVICE_JOB_STATUS_LABELS: Record<DeviceJobStatus, string> = {
   waiting: '等打印机恢复',
   canceled: '已取消',
 };
-/** 还没结束的打印任务（可以取消的是排队与等打印机恢复的） */
-export const OPEN_JOB_STATUSES: readonly DeviceJobStatus[] = ['queued', 'sending', 'waiting'];
 /** 断网打印队列（v0.7.28，N7 待确认）：业务单据等打印机恢复最多这么久，过了不再打（免得几个小时后突然打出一堆旧单） */
 export const PRINT_WAIT_MAX_MS = 30 * 60_000;
 /** 业务单据内容的上限（字节） */

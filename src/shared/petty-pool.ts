@@ -11,8 +11,6 @@ export const POOL_USE_STATE_LABELS: Record<PoolUseState, string> = {
   reimbursed: '已报销',
   voided: '已作废',
 };
-/** 还占着额度的状态 */
-export const POOL_OCCUPYING_STATES: readonly PoolUseState[] = ['open', 'submitted', 'reviewing'];
 
 export const POOL_BACKFILLS = ['pending', 'done'] as const;
 export type PoolBackfill = (typeof POOL_BACKFILLS)[number];

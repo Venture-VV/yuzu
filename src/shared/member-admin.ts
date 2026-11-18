@@ -1,7 +1,6 @@
 // 会员停用 / 启用、换手机号、合并（v0.7.26，docs/MEMBERSHIP_FINISH.md 第 3、4 节；PENDING_DECISIONS M76–M79）。前后端共用。
 
 export type MemberStatus = 'active' | 'frozen';
-export const MEMBER_STATUS_LABELS: Record<MemberStatus, string> = { active: '在用', frozen: '已停用' };
 
 /** 停用 / 启用记录（只追加）；合并时停用来源会员也记一条 */
 export interface MemberStatusEvent {

@@ -55,10 +55,6 @@ export const AFTER_DESIGNATED_LABELS: Record<ClockroomRules['afterDesignated'], 
 /** 技师当天的状态：在岗（上牌）/ 休息 / 未上牌 / 休假（8.0.8，只管当天）。停牌另记在技师上（跨天，见 Technician.suspendedAt） */
 export const TECH_STATES = ['on', 'rest', 'off', 'leave'] as const;
 export type TechState = (typeof TECH_STATES)[number];
-export const TECH_STATE_LABELS: Record<TechState, string> = { on: '在岗', rest: '休息', off: '未上牌', leave: '休假' };
-
-export const SESSION_STATUSES = ['waiting', 'serving', 'done', 'cancelled', 'rejected'] as const;
-export type SessionStatus = (typeof SESSION_STATUSES)[number];
 
 export const EVENT_KINDS = [
   'sign_in',

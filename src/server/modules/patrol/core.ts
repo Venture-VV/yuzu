@@ -79,8 +79,6 @@ async function roundsOn(db: Db, config: AppConfig, date: string, settings?: Patr
   return { minutes, rounds: patrolRoundsOf(date, config.timezone, businessDayStartHour, minutes) };
 }
 
-const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
-
 // ───────────────────────── 设置（XC1、XC2） ─────────────────────────
 
 const idList = (x: unknown) => (Array.isArray(x) ? [...new Set(x.filter((n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0))] : []);
@@ -558,7 +556,6 @@ export const RecordsQuery = z.object({
   /** 列不列作废的（默认列，作废的单独标出来） */
   voided: z.enum(['include', 'exclude']).default('include'),
 });
-export type PatrolRecordsQuery = z.output<typeof RecordsQuery>;
 
 export async function patrolRecords(db: Db, config: AppConfig, raw: unknown): Promise<PatrolRecords> {
   const q = parse(RecordsQuery, raw);
@@ -641,6 +638,3 @@ export async function voidPatrolCheckin(sql: Sql, id: number, raw: unknown, ctx:
     return { id, voidedAt: u!.voidedAt };
   });
 }
-
-/** 营业日的前一天、后一天（手机上翻日期用） */
-export const shiftPatrolDate = addDays;

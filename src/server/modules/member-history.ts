@@ -38,7 +38,6 @@ const FileInput = z.object({
   note: z.string().trim().max(200, '备注最多 200 字').default(''),
   csv: z.string().min(1, '请选择要导入的文件').max(20_000_000, '文件太大，请按时间分批导出'),
 });
-export type MemberHistoryInput = z.input<typeof FileInput>;
 const ApplyInput = FileInput.extend({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试') });
 const VoidInput = z.object({ reason: z.string().trim().min(2, '请填写作废原因（至少 2 个字）').max(200, '作废原因最多 200 字') });
 

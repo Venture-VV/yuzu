@@ -5,7 +5,6 @@ export const INSIGHT_BUCKETS = ['recent', 'oneToThree', 'threeToSix', 'sixToTwel
 export type InsightDormancyBucket = (typeof INSIGHT_BUCKETS)[number];
 /** A combined filter only; each member keeps its exclusive dormancy classification. */
 export const INSIGHT_FILTER_BUCKETS = [...INSIGHT_BUCKETS, 'dormant'] as const;
-export type InsightBucketFilter = (typeof INSIGHT_FILTER_BUCKETS)[number];
 
 export interface InsightMember extends NativeMemberSummary {
   /** Creation time of the final native account, not the service extension. */

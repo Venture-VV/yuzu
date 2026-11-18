@@ -8,7 +8,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { CONTRACT_CATEGORIES } from '@shared/contracts';
-import { BUILTIN_TEMPLATE_KEYS, renderContractDoc, TEMPLATE_FIELD_KEY, type ContractTemplate, type DocBlock, type TemplateClause, type TemplateField } from '@shared/contract-templates';
+import { BUILTIN_TEMPLATE_KEYS, renderContractDoc, TEMPLATE_FIELD_KEY, type ContractTemplate, type DocBlock, type TemplateClause } from '@shared/contract-templates';
 import { guard } from '../../auth/guard';
 import { readSnapshot, type Db } from '../../db';
 import { writeAudit } from '../../lib/audit';
@@ -69,13 +69,6 @@ const TemplateInput = z
     message: '可填字段不能和内置字段重名（合同编号、相对方、总价……这些按合同本身自动带出）',
   })
   .refine((v) => new Set(v.clauses.map((c) => c.key)).size === v.clauses.length, '可选条款的编号重复了');
-
-/** 正文、条款里引用了没有的字段：内置的和模板自己的都不是的，提示出来（不拦：渲染时会显示【字段】提醒补） */
-export function unknownPlaceholders(body: string, clauses: TemplateClause[], fields: TemplateField[], builtins: string[]): string[] {
-  const known = new Set([...builtins, ...fields.map((f) => f.key)]);
-  const used = [...`${body}\n${clauses.map((c) => c.text).join('\n')}`.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((m) => m[1]!);
-  return [...new Set(used.filter((k) => !known.has(k)))];
-}
 
 async function createTemplate(deps: Deps, raw: unknown, actor: Actor, ip?: string): Promise<ContractTemplate> {
   const input = parse(TemplateInput, raw);

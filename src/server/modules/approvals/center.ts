@@ -3,8 +3,6 @@
 
 import {
   APPROVAL_DOC_KINDS,
-  APPROVAL_DOC_TYPE_LABELS,
-  APPROVAL_MODE_LABELS,
   CONTRACT_REVIEW_DOC_TYPES,
   isLegalStep,
   stepLabel,
@@ -744,9 +742,6 @@ export async function getApprovalDetail(db: Db, actor: Actor, timeZone: string, 
   };
 }
 
-/** 卡片标题：单据类型（盘点差异、报损……） */
-export const cardTitle = (c: Pick<ApprovalCard, 'docType'>) => APPROVAL_DOC_TYPE_LABELS[c.docType];
-export const modeText = (mode: 'any' | 'all') => APPROVAL_MODE_LABELS[mode];
 export const yuan = (cents: number) => `¥${formatAmount(cents)}`;
 
 // ───────────────────────── 急采待补单（A10） ─────────────────────────

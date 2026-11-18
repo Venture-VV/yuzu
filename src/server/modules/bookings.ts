@@ -395,7 +395,6 @@ const CreateInput = z.object({
   durationMinutes: z.number().int().min(30).max(720).optional(),
   note: z.string().trim().max(MAX_BOOKING_NOTE, `备注最多 ${MAX_BOOKING_NOTE} 字`).default(''),
 });
-export type BookingCreateInput = z.input<typeof CreateInput>;
 
 interface CreateArgs {
   kind: BookingKind;
@@ -635,7 +634,6 @@ const ChangeInput = z.discriminatedUnion('action', [
       .pipe(z.string().min(1, '请填写客人的手牌号').regex(TAG_CODE_PATTERN, '牌号格式不正确（例如 A023、1088）')),
   }),
 ]);
-export type BookingChangeInput = z.input<typeof ChangeInput>;
 
 /** 改一张预约（前台）：确认、改时间、取消、记爽约、到店；同一编号重提返回原结果 */
 export async function changeBooking(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<BookingDetail> {

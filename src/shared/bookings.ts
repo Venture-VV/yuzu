@@ -4,8 +4,6 @@
 //   · 到店：先接待开手牌，再在预约看板点「到店」——派对房直接开使用单，技师的去派钟，客房的去开房；
 //   · 不收订金、不动钱（MP36）；爽约按规则记（MP37）。
 
-import { HHMM } from './business-date';
-
 export const BOOKING_KINDS = ['technician', 'space', 'room'] as const;
 export type BookingKind = (typeof BOOKING_KINDS)[number];
 export const BOOKING_KIND_LABELS: Record<BookingKind, string> = { technician: '技师', space: '派对房等', room: '客房' };
@@ -72,7 +70,6 @@ export const DEFAULT_BOOKING_RULES: BookingRules = {
   roomHoldMinutes: 60,
 };
 
-export const BOOKING_TIME = HHMM;
 export const MAX_BOOKING_NOTE = 100;
 export const MAX_BOOKING_GUESTS = 99;
 
