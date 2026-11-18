@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/server/index.ts",
+    "src/server/cli.ts",
+    "src/server/floorplan/worker.ts",
+    "src/gateway/index.ts",
+    "src/client/main.tsx",
+    "src/canteen-app/main.tsx",
+    "scripts/*.{mjs,ts}",
+    "scripts/ci/*.mjs",
+    "tests/**/*.test.ts",
+    "tests/global-setup.ts",
+    "e2e/**/*.ts",
+    "e2e-canteen/**/*.ts"
+  ],
+  "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts", "e2e/**/*.ts", "e2e-canteen/**/*.ts", "scripts/**/*.{mjs,ts}"],
+  "ignore": ["miniprogram/**"],
+  "ignoreExportsUsedInFile": true,
+  "paths": { "@shared/*": ["./src/shared/*"], "@client/*": ["./src/client/*"] }
+}

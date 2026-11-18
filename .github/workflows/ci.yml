@@ -59,6 +59,10 @@ jobs:
       - run: npm run typecheck
       - name: 代码整洁检查（没用到的导入与变量、事务里没等结果的查询、类型导入写法；8.1.3）
         run: npm run check:code
+      - name: 文档检查（AGENTS.md 的体积预算、死链、引用了不存在的文档、文档索引、开发约定小节；工程治理一期，docs/GOVERNANCE.md）
+        run: npm run check:docs
+      - name: 治理基线（分层、页面里的颜色与字号、大文件、没人引用的导出、重复率，只许持平或下降；工程治理一期）
+        run: npm run check:gov
       - name: 排版检查（Prettier；没过就本地跑 npm run format；8.1.3）
         run: npm run format:check
       - run: npm test

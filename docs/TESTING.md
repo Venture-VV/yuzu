@@ -46,7 +46,7 @@
 
 **测试数据库要给够内存**（main v8.1.1 独立回归的首轮报告）：几个进程同时复制模板库、跑用例，数据库容器限在 768 MiB 时首轮出现数据库「进入恢复状态」、随后连接被拒，用例一片 500 或连不上（多半是某个数据库进程到了内存上限被系统杀掉，数据库自己重启恢复；被杀的不是容器的主进程，所以容器不一定记 OOM）；同一份代码给到 1.5–2.25 GiB 全量都过。给测试数据库 2 GiB 以上；内存紧的机器用 `TEST_WORKERS=2`（或 1）少开几个进程。
 
-交 PR 前另跑 `npm run check:code`（没用到的导入与变量、事务里没等结果的查询、类型导入写法）与 `npm run format:check`（8.1.3 起 CI 都查；改了就 `npm run format`）。服务端的频率限制、过载保护在用例里照默认值开着（每个会话每分钟 600 次、同时 256 个请求）；测试环境不看事件循环卡顿（`OVERLOAD_MAX_LAG_MS` 默认 0，跑用例的机器忙起来会误判），要测它在用例里自己设。
+交 PR 前另跑 `npm run check:code`（没用到的导入与变量、事务里没等结果的查询、类型导入写法）与 `npm run format:check`（8.1.3 起 CI 都查；改了就 `npm run format`）。工程治理一期起 CI 还查 `npm run check:docs`（`AGENTS.md` 的体积预算、死链、文档索引；加了文档跑 `npm run check:docs -- --fix`）与 `npm run check:gov`（治理基线：分层、页面里的颜色与字号、大文件、没人引用的导出、重复率，只许持平或下降，见 `docs/GOVERNANCE.md` 第 8 节）。服务端的频率限制、过载保护在用例里照默认值开着（每个会话每分钟 600 次、同时 256 个请求）；测试环境不看事件循环卡顿（`OVERLOAD_MAX_LAG_MS` 默认 0，跑用例的机器忙起来会误判），要测它在用例里自己设。
 
 ```bash
 npx vitest run tests/locations.test.ts                          # 一个或几个集成测试文件
@@ -72,6 +72,7 @@ npm run typecheck && npm test && npm run build                  # 交 PR 前
 | 请求层、连接状态、页面不白屏、服务端防护（`lib/api`、`lib/connection`、`lib/livePoll`、`lib/lazyPage`、错误边界、`lib/protect`；8.1.3） | `client-api`、`protection`、`check-code` | `resilience`、`flows`、`frontdesk-recovery`、`storage-failure`、`concierge`、`customer` |
 | 迁移 | `upgrade*`；加了迁移一定跑全量 `npm test` | — |
 | 备份与运维脚本 | `backup`、`static-compression`、`import-encoding`；`shellcheck` | — |
+| 文档、检查脚本、版本号的读法（工程治理一期，`docs/GOVERNANCE.md`） | `check-docs`、`check-governance`、`check-code`、`version-source`、`instance`（这几个除 `instance` 外不要数据库） | — |
 
 退储值「门店系统原路退回」的浏览器用例（`e2e/member-refund-online.spec.ts`，v0.7.29）要应用开着小程序端口与模拟微信支付：应用用 `MP_PORT`、`MP_GATEWAY_KEY`（至少 32 个字符）、`MP_PAY_MOCK=true` 启动（只在 development、test，实例标识不是 prod / shadow / test），Playwright 设同一个端口与密钥的 `E2E_MP_PORT`、`E2E_MP_GATEWAY_KEY` 才收这个文件；平时的浏览器验收不收、用例总数不变。它会临时打开小程序与线上充值、开着原路退回，结束时（含失败）照原样改回。CI 里还没有跑它的步骤（CI 的测试步骤归测试会话与 Codex）。
 

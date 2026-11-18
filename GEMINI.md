@@ -6,7 +6,7 @@
 
 ## 先读
 
-1. `AGENTS.md`：环境隔离（红线）、开发约定、加锁顺序、「四个 AI 按线协作」。
+1. `AGENTS.md`：环境隔离（红线）、开发约定、「四个 AI 按线协作」。它是入口：加锁顺序在 `docs/LOCKING.md`（写事务前读总则，以及「会员、券与权益」一节里给小程序线的几条），其余约定在 `docs/CONVENTIONS.md`，命令在 `docs/COMMANDS.md`。
 2. `docs/MINIPROGRAM.md`：架构、目录（第 2 节）、两条线怎么协作（第 8 节）、测试（第 11 节）、视觉照汤崎品牌书（第 13 节，素材在 `brand/`）。
 3. `docs/HANDOFF_MP_GEMINI.md`，以及最近几份 `docs/HANDOFF_MP*.md`（每一期做了什么、怎么测）。
 
@@ -15,7 +15,7 @@
 - **只写**：`miniprogram/`、`src/gateway/`、`src/server/modules/mp/`、`src/client/features/mp/`、`src/shared/mp.ts`、`compose.mp.yaml`，以及小程序线自己的用例与文档（`tests/mp-*.test.ts`、`tests/gateway*.test.ts`、`e2e/mp-*`、`docs/MINIPROGRAM.md`、`docs/MP_*`、`docs/HANDOFF_MP*`、`docs/DEPLOY_GATEWAY.md`）。
 - **登记处只加挂接的几行**：`src/server/app.ts`、`src/shared/permissions.ts`、`src/client/App.tsx`、`src/server/lib/audit.ts`、`src/shared/admin.ts`、`src/server/config.ts`、`src/shared/types.ts`、`tests/helpers.ts`、`.env.example`、`docs/ROADMAP.md`、`docs/PENDING_DECISIONS.md`，以及两份部署手册（`docs/DEPLOY_MAC_MINI.md`、`docs/DEPLOY_TEST_SERVER.md`）里小程序端口、网关的几段。登记处的文件不删、不改名。
 - **迁移**：只新加 `src/server/migrations/NNN_mp_<用途>.sql`，用之前先在 `docs/ROADMAP.md` 第 7 节写用途；小程序线预留 `170`–`179`。只建小程序线自己的表，只用外键引用会员、绑定等；已有的迁移一律不改。
-- **不改**：会员、钱包、券、结账、前台等核心，yuzu 的版本号（`package.json` 等五处），CI，`AGENTS.md`。要核心加能力，在主线开着的 PR（标题【主线】开头）上留言写清需求，由主线做。
+- **不改**：会员、钱包、券、结账、前台等核心，yuzu 的版本号（`package.json` 与锁文件），CI，`AGENTS.md`。要核心加能力，在主线开着的 PR（标题【主线】开头）上留言写清需求，由主线做。
 - `tests/mp-entries.test.ts`、`tests/mp-claim-coupon.test.ts` 名字像小程序线，其实是主线写给小程序线的入口（`src/server/modules/mp-entries.ts` 等）的用例，不改。
 - CI 的「线范围」检查会核对以上几条：范围外的文件检查不通过；登记处与新迁移列出来，由主线开发会话复核。
 
