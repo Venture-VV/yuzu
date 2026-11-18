@@ -364,6 +364,10 @@ describe('操作编号', () => {
     expect((await check(r.id, [purchase(l)], key)).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
     const found = await ok<{ found: boolean; refId: number }>(api(ctx.app, keeper, 'GET', `/api/erp/ops/${key}?type=request_stock`));
     expect(found).toMatchObject({ found: true, refId: r.id });
+    // 只有「审核需求单」的部门主管（负责人岗位，没有申购、核库）：答复替代的结果待确认时，自己能确认作废（Codex 审查 d9b58a2）
+    await createStaff(ctx.sql, { username: 'sc_reviewer', displayName: '只审核的主管', role: 'backoffice', duties: ['approve'], password: PASSWORD, mustChangePassword: false });
+    const reviewer = await login(ctx.app, 'sc_reviewer');
+    await ok(api(ctx.app, reviewer, 'POST', `/api/erp/ops/${randomUUID()}/abandon`, { type: 'request_stock' }));
 
     const r2 = await submit([{ materialId: mats.B.id, name: mats.B.name, qtyMilli: q(1), unit: '瓶' }]);
     const both = await Promise.all([check(r2.id, [purchase(r2.lines[0]!)]), check(r2.id, [purchase(r2.lines[0]!)], randomUUID(), ctx.owner)]);
