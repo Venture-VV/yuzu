@@ -1,6 +1,6 @@
 {
   "name": "yuzu",
-  "version": "8.1.11",
+  "version": "8.1.12",
   "private": true,
   "description": "浴族 yuzu · 汤泉门店经营系统（会员充值、消费、撤销、流水与日结）",
   "type": "module",
@@ -29,6 +29,8 @@
     "format": "prettier --write --log-level warn \"src/**/*.{ts,tsx,js,mjs,cjs}\" \"tests/**/*.ts\" \"e2e/**/*.ts\" \"e2e-canteen/**/*.ts\" \"scripts/**/*.{ts,js,mjs,cjs}\" \"*.ts\"",
     "format:check": "prettier --check --log-level warn \"src/**/*.{ts,tsx,js,mjs,cjs}\" \"tests/**/*.ts\" \"e2e/**/*.ts\" \"e2e-canteen/**/*.ts\" \"scripts/**/*.{ts,js,mjs,cjs}\" \"*.ts\"",
     "test": "vitest run",
+    "test:unit": "node scripts/test-tiers.mjs unit",
+    "test:quick": "node scripts/test-tiers.mjs quick",
     "test:watch": "vitest",
     "e2e": "playwright test"
   },
