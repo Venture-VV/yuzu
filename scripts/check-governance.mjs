@@ -1,0 +1,278 @@
+// 治理基线（工程治理一期，docs/GOVERNANCE.md）：CI 跑，挂了不能合。npm run check:gov
+// 把「容易越积越多」的几样记成基线（scripts/governance-baseline.json），只许持平或下降：
+//   1. 分层：shared 不引 server / client，client 不引 server，server 不引 client（硬规则，一处都不许）；
+//   2. 页面代码里的十六进制颜色（按目录记数，不许变多；颜色该进样式表的变量）；
+//   3. 页面代码里手写的字号 text-[Npx]（不许出现基线以外的新字号）；
+//   4. 超过 1,500 行的源文件（不许有新的）；
+//   5. 导出了却没有任何地方引用的函数、常量、类型（knip；不许有新的）；
+//   6. 重复代码的比例（jscpd；不许超过上限）。
+// 数字变少了不用管，想把基线收紧跑 npm run check:gov -- --update（只会调低；调高要加 --allow-increase 并在 PR 里说明原因）。
+// 小程序线的目录与文件（scripts/check-line-scope.mjs 认作小程序线自己的）不查。退出码：0 通过，1 有问题。
+
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, posix, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
+import { classify } from './check-line-scope.mjs';
+
+const ROOT = resolve(fileURLToPath(import.meta.url), '../..');
+const BASELINE_FILE = 'scripts/governance-baseline.json';
+const isMpLine = (path) => classify({ status: 'M', path }).kind === 'free';
+
+/** 多少行以上算大文件 */
+export const LARGE_FILE_LINES = 1500;
+/** jscpd 的口径：70 个词、8 行起算一处重复 */
+const CPD_MIN_TOKENS = 70;
+const CPD_MIN_LINES = 8;
+
+/** 页面代码：这些目录里的十六进制颜色与手写字号要记数 */
+const PAGE_ROOTS = ['src/client/', 'src/canteen-app/'];
+
+/** 颜色记到哪一级目录：src/client/features/<模块>、src/client/<目录>、src/canteen-app */
+export function colorBucket(file) {
+  const parts = file.split('/');
+  if (file.startsWith('src/client/features/')) return parts.slice(0, 4).join('/');
+  if (file.startsWith('src/client/')) return parts.length > 3 ? parts.slice(0, 3).join('/') : 'src/client';
+  return parts.slice(0, 2).join('/');
+}
+
+const HEX_COLOR = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![0-9a-zA-Z_-])/g;
+const FONT_SIZE = /\btext-\[(\d+(?:\.\d+)?)px\]/g;
+
+/** 一份页面源码里（只看字符串、模板、JSX 文字，注释不算）：{ hex: 个数, fontSizes: { 字号: 次数 } } */
+export function scanPageCode(fileName, code) {
+  const src = ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, false, fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  let hex = 0;
+  const fontSizes = {};
+  const look = (text) => {
+    hex += (text.match(HEX_COLOR) ?? []).length;
+    for (const m of text.matchAll(FONT_SIZE)) fontSizes[m[1]] = (fontSizes[m[1]] ?? 0) + 1;
+  };
+  const visit = (node) => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node) || ts.isJsxText(node)) look(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(src);
+  return { hex, fontSizes };
+}
+
+const LAYER_RULES = [
+  { from: 'src/shared/', banned: ['src/server/', 'src/client/', 'src/canteen-app/', 'src/gateway/'], why: 'shared 是前后端共用的，不能引服务端或页面的代码' },
+  { from: 'src/client/', banned: ['src/server/', 'src/gateway/'], why: '页面不能引服务端的代码（共用的放 src/shared）' },
+  { from: 'src/canteen-app/', banned: ['src/server/', 'src/gateway/'], why: '页面不能引服务端的代码（共用的放 src/shared）' },
+  { from: 'src/server/', banned: ['src/client/', 'src/canteen-app/'], why: '服务端不能引页面的代码（共用的放 src/shared）' },
+];
+
+/** 一份源码里违反分层的引用：[{ specifier, target, why }] */
+export function layerViolations(file, code) {
+  const rule = LAYER_RULES.find((r) => file.startsWith(r.from));
+  if (!rule) return [];
+  const found = [];
+  for (const { fileName: specifier } of ts.preProcessFile(code, true, true).importedFiles) {
+    let target = null;
+    if (specifier.startsWith('.')) target = posix.normalize(posix.join(posix.dirname(file), specifier));
+    else if (specifier.startsWith('@shared/')) target = `src/shared/${specifier.slice('@shared/'.length)}`;
+    else if (specifier.startsWith('@client/')) target = `src/client/${specifier.slice('@client/'.length)}`;
+    if (target && rule.banned.some((b) => `${target}/`.startsWith(b))) found.push({ specifier, target, why: rule.why });
+  }
+  return found;
+}
+
+/**
+ * 现在的数字与基线比：{ problems: 变多了的（不通过）, notes: 变少了的（可以收紧基线） }。
+ * current / baseline：{ hexColors: {目录: 个数}, fontSizes: [字号], largeFiles: [文件], deadExports: ['文件:名字'], duplicationPercent / duplicationMaxPercent }
+ */
+export function compareBaseline(baseline, current) {
+  const problems = [];
+  const notes = [];
+
+  const moreColors = Object.entries(current.hexColors)
+    .filter(([dir, n]) => n > (baseline.hexColors[dir] ?? 0))
+    .map(([dir, n]) => `${dir}：${baseline.hexColors[dir] ?? 0} → ${n}`);
+  if (moreColors.length)
+    problems.push(`页面代码里的十六进制颜色变多了（颜色用样式表里的变量，如 var(--color-…) 或 Tailwind 的色名；设计工具里确实要新加的在 PR 里说明后调基线）：\n  ${moreColors.join('\n  ')}`);
+  const fewerColors = Object.entries(baseline.hexColors).filter(([dir, n]) => (current.hexColors[dir] ?? 0) < n).length;
+  if (fewerColors) notes.push(`十六进制颜色有 ${fewerColors} 个目录变少了`);
+
+  const knownSizes = new Set(baseline.fontSizes);
+  const newSizes = current.fontSizes.filter((s) => !knownSizes.has(s));
+  if (newSizes.length) problems.push(`页面里出现了基线以外的新字号（用已有的字号，不要再多一种）：${newSizes.map((s) => `text-[${s}px]`).join('、')}`);
+  const goneSizes = baseline.fontSizes.filter((s) => !current.fontSizes.includes(s)).length;
+  if (goneSizes) notes.push(`手写字号少了 ${goneSizes} 种`);
+
+  const knownLarge = new Set(baseline.largeFiles);
+  const newLarge = current.largeFiles.filter((f) => !knownLarge.has(f));
+  if (newLarge.length) problems.push(`新出现了超过 ${LARGE_FILE_LINES} 行的源文件（按职责拆开，或把整段独立的部分搬到新文件）：\n  ${newLarge.join('\n  ')}`);
+  const goneLarge = baseline.largeFiles.filter((f) => !current.largeFiles.includes(f)).length;
+  if (goneLarge) notes.push(`大文件少了 ${goneLarge} 个`);
+
+  const knownDead = new Set(baseline.deadExports);
+  const newDead = current.deadExports.filter((e) => !knownDead.has(e));
+  if (newDead.length) problems.push(`导出了却没有任何地方引用（没用就删掉；只在本文件用就去掉 export）：\n  ${newDead.join('\n  ')}`);
+  const goneDead = baseline.deadExports.filter((e) => !current.deadExports.includes(e)).length;
+  if (goneDead) notes.push(`没人引用的导出少了 ${goneDead} 个`);
+
+  if (current.duplicationPercent > baseline.duplicationMaxPercent)
+    problems.push(
+      `重复代码 ${current.duplicationPercent.toFixed(2)}%，超过上限 ${baseline.duplicationMaxPercent}%（把重复的部分抽成公共函数或部件；看是哪几处：npx jscpd src --min-tokens ${CPD_MIN_TOKENS} --min-lines ${CPD_MIN_LINES}）`,
+    );
+  return { problems, notes };
+}
+
+/** --update 时：新的基线里有没有比旧的宽的（返回说明；空数组 = 只收紧了） */
+export function loosened(oldBase, newBase) {
+  const out = [];
+  for (const [dir, n] of Object.entries(newBase.hexColors)) if (n > (oldBase.hexColors[dir] ?? 0)) out.push(`颜色 ${dir}：${oldBase.hexColors[dir] ?? 0} → ${n}`);
+  for (const key of ['fontSizes', 'largeFiles', 'deadExports']) {
+    const known = new Set(oldBase[key]);
+    for (const item of newBase[key]) if (!known.has(item)) out.push(`${key} 新增 ${item}`);
+  }
+  return out;
+}
+
+function sourceFiles(dir, out = []) {
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) sourceFiles(path, out);
+    else if (/\.(ts|tsx)$/.test(name)) out.push(path);
+  }
+  return out;
+}
+
+function scanSources() {
+  const hexColors = {};
+  const sizeCounts = {};
+  const largeFiles = [];
+  const layers = [];
+  for (const abs of sourceFiles(join(ROOT, 'src'))) {
+    const file = relative(ROOT, abs).split('\\').join('/');
+    if (isMpLine(file)) continue;
+    const code = readFileSync(abs, 'utf8');
+    if (code.split('\n').length > LARGE_FILE_LINES) largeFiles.push(file);
+    for (const v of layerViolations(file, code)) layers.push(`${file}  引了 ${v.specifier}（${v.why}）`);
+    if (PAGE_ROOTS.some((r) => file.startsWith(r))) {
+      const { hex, fontSizes } = scanPageCode(file, code);
+      if (hex) hexColors[colorBucket(file)] = (hexColors[colorBucket(file)] ?? 0) + hex;
+      for (const [size, n] of Object.entries(fontSizes)) sizeCounts[size] = (sizeCounts[size] ?? 0) + n;
+    }
+  }
+  const fontSizes = Object.keys(sizeCounts).sort((a, b) => Number(a) - Number(b));
+  return { hexColors, fontSizes, fontSizeUses: Object.values(sizeCounts).reduce((a, b) => a + b, 0), largeFiles: largeFiles.sort(), layers };
+}
+
+/** 依赖包的命令行入口（读它 package.json 的 bin，不写死路径） */
+function binOf(pkg) {
+  const meta = JSON.parse(readFileSync(join(ROOT, 'node_modules', pkg, 'package.json'), 'utf8'));
+  const bin = typeof meta.bin === 'string' ? meta.bin : meta.bin[pkg];
+  return join('node_modules', pkg, bin);
+}
+
+function runKnip() {
+  let out = '';
+  try {
+    out = execFileSync(process.execPath, ['--max-old-space-size=4096', binOf('knip'), '--no-exit-code', '--no-progress', '--include', 'exports,types', '--reporter', 'json'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    throw new Error(`knip 没跑起来：${e.stderr || e.message}`);
+  }
+  const dead = [];
+  for (const issue of JSON.parse(out).issues ?? []) {
+    if (isMpLine(issue.file)) continue;
+    for (const kind of ['exports', 'types']) for (const item of issue[kind] ?? []) dead.push(`${issue.file}:${item.name}`);
+  }
+  return dead.sort();
+}
+
+function runJscpd() {
+  const dir = mkdtempSync(join(tmpdir(), 'yuzu-cpd-'));
+  try {
+    const ignore = ['**/migrations/**', '**/gateway/**', '**/modules/mp/**', '**/features/mp/**', '**/shared/mp.ts', '**/public/**'].join(',');
+    execFileSync(
+      process.execPath,
+      [
+        binOf('jscpd'),
+        'src',
+        '--min-tokens',
+        String(CPD_MIN_TOKENS),
+        '--min-lines',
+        String(CPD_MIN_LINES),
+        '--format',
+        'typescript,tsx',
+        '--ignore',
+        ignore,
+        '--reporters',
+        'json',
+        '--output',
+        dir,
+        '--silent',
+      ],
+      { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const total = JSON.parse(readFileSync(join(dir, 'jscpd-report.json'), 'utf8')).statistics.total;
+    return { percent: Number(total.percentage), lines: total.duplicatedLines, clones: total.clones };
+  } catch (e) {
+    throw new Error(`jscpd 没跑起来：${e.stderr || e.message}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function main() {
+  const update = process.argv.includes('--update');
+  const allowIncrease = process.argv.includes('--allow-increase');
+  const scanned = scanSources();
+  const deadExports = runKnip();
+  const cpd = runJscpd();
+  const current = { hexColors: scanned.hexColors, fontSizes: scanned.fontSizes, largeFiles: scanned.largeFiles, deadExports, duplicationPercent: cpd.percent };
+
+  let baseline = null;
+  try {
+    baseline = JSON.parse(readFileSync(join(ROOT, BASELINE_FILE), 'utf8'));
+  } catch {
+    if (!update) {
+      console.error(`✗ 没有基线文件 ${BASELINE_FILE}：跑 npm run check:gov -- --update --allow-increase 生成`);
+      process.exit(1);
+    }
+  }
+
+  if (update) {
+    const next = {
+      说明: '治理基线（docs/GOVERNANCE.md）：npm run check:gov 拿现在的数字和这里比，只许持平或下降。清掉一批以后跑 npm run check:gov -- --update 收紧；不要为了让检查通过手改这个文件。',
+      hexColors: Object.fromEntries(Object.entries(current.hexColors).sort(([a], [b]) => (a < b ? -1 : 1))),
+      fontSizes: current.fontSizes,
+      largeFiles: current.largeFiles,
+      deadExports: current.deadExports,
+      // 上限留一点余量：比现在的比例高 0.2 个百分点，最少 1%
+      duplicationMaxPercent: baseline && !allowIncrease ? baseline.duplicationMaxPercent : Math.max(1, Math.ceil((cpd.percent + 0.2) * 10) / 10),
+    };
+    const wider = baseline ? loosened(baseline, next) : [];
+    if (wider.length && !allowIncrease) {
+      console.error(`✗ 基线只许收紧，这次会放宽 ${wider.length} 处（确实要放宽的加 --allow-increase，并在 PR 里说明原因）：\n  ${wider.join('\n  ')}`);
+      process.exit(1);
+    }
+    writeFileSync(join(ROOT, BASELINE_FILE), `${JSON.stringify(next, null, 2)}\n`);
+    console.log(`已写入 ${BASELINE_FILE}`);
+    baseline = next;
+  }
+
+  const { problems, notes } = compareBaseline(baseline, current);
+  if (scanned.layers.length) problems.unshift(`分层被打破 ${scanned.layers.length} 处：\n  ${scanned.layers.join('\n  ')}`);
+  if (problems.length) {
+    console.error(`✗ 治理基线没过（docs/GOVERNANCE.md）：\n\n${problems.join('\n\n')}`);
+    process.exit(1);
+  }
+  const colorTotal = Object.values(current.hexColors).reduce((a, b) => a + b, 0);
+  console.log(
+    `✓ 治理基线通过：分层 0 处违反；页面里十六进制颜色 ${colorTotal} 处、手写字号 ${current.fontSizes.length} 种（${scanned.fontSizeUses} 处）、` +
+      `超过 ${LARGE_FILE_LINES} 行的文件 ${current.largeFiles.length} 个、没人引用的导出 ${deadExports.length} 个、重复代码 ${cpd.percent.toFixed(2)}%（${cpd.lines} 行）`,
+  );
+  if (notes.length && !update) console.log(`  比基线少了：${notes.join('；')}。可以跑 npm run check:gov -- --update 把基线收紧`);
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

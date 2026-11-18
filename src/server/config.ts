@@ -1,6 +1,8 @@
 // 运行配置全部来自环境变量；本地开发可放在 .env（不进入 Git）。
 
 import { resolve as resolvePath } from 'node:path';
+// 版本号只写在 package.json 一处（工程治理一期，docs/GOVERNANCE.md）：打包时带进来，发版只改 package.json 与锁文件
+import { version as PACKAGE_VERSION } from '../../package.json';
 import { SETTABLE_INSTANCES, type InstanceKind } from '@shared/instance';
 import { loadIntegrationsConfig, type IntegrationsConfig } from './integrations/config';
 import { loadProtectionConfig, type ProtectionConfig } from './lib/protect';
@@ -212,8 +214,8 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       .map((s) => s.trim())
       .filter(Boolean),
     logLevel: process.env.LOG_LEVEL ?? (env === 'test' ? 'silent' : 'info'),
-    // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉
-    version: (process.env.APP_VERSION || '8.1.9').replace(/^v/, ''),
+    // update.sh 用 git describe 写入的版本带 v 前缀，页面统一加 v，这里去掉；没传（直接构建、本地开发）时用 package.json 的版本号
+    version: (process.env.APP_VERSION || PACKAGE_VERSION).replace(/^v/, ''),
     commit: /^[0-9a-f]{7,40}$/.test(process.env.APP_COMMIT ?? '') ? process.env.APP_COMMIT! : '',
     instance,
     initOwner: ownerUser && ownerPass ? { username: ownerUser, password: ownerPass, displayName: process.env.INIT_OWNER_NAME?.trim() || '店主' } : null,
