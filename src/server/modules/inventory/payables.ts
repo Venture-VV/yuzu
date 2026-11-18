@@ -865,10 +865,16 @@ export async function createOffset(deps: Deps, raw: unknown, actor: Actor, ip?: 
       await lockSupplier(tx, input.supplierId);
       const credit = await lockCredit(tx, input.supplierId, input.credit);
       if (!credit.canOffset) throw unprocessable('CREDIT_NOT_OFFSETTABLE', '现付供应商的退货没记应付，只能登记供应商退款，不能核销');
-      // 挂合同的货款要走付款申请（v0.7.32，P7）：没带申请的预付款不能核销到合同的收货单上（带申请的、退货余额照旧）
+      // 挂合同的货款要走付款申请（v0.7.32，P7）：没带申请的预付款不能核销到合同的收货单上（带申请的、退货余额照旧）。
+      // 要补合同、还没补上的急采（8.1.10，ERP_V8110 第 1.3 节）：预付款带不带申请都不能核销上去（Codex 审查 8f01337）
       if (input.credit.kind === 'prepayment') {
         const [cp] = await tx<{ paymentRequestId: number | null }[]>`SELECT payment_request_id FROM payments WHERE id = ${input.credit.id}`;
         if (cp && cp.paymentRequestId === null) await assertNoContractReceipts(tx, input.lines);
+        else
+          await assertContractNotDue(
+            tx,
+            input.lines.filter((l) => l.kind === 'receipt').map((l) => l.targetId),
+          );
       }
       if (total > credit.availableCents) {
         throw conflict('OVER_CREDIT', `${credit.docNo} 还可以抵扣 ¥${formatAmount(credit.availableCents)}，本次核销 ¥${formatAmount(total)} 超出`, {

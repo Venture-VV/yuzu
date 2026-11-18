@@ -1,6 +1,6 @@
 // 8.1.10 急采后补合同（docs/ERP_V8110.md 第 1 节，PENDING_DECISIONS CK18–CK22）：
 //   · 急采生效时合计达到「急采补合同金额」（默认 ¥20,000）的记下要补合同；没达到的、金额线设 0 的不要求；
-//   · 补上之前：付款申请、直接登记付款、现付供应商按补单采购单报销都拦（CONTRACT_REQUIRED）；
+//   · 补上之前：付款申请、直接登记付款、预付款核销（带不带付款申请都拦）、现付供应商按补单采购单报销都拦（CONTRACT_REQUIRED）；
 //   · 补合同：只能挂这家供应商的、生效中、到期日不早于下单日的采购合同（开始日可以晚于下单日）；超出合同价要写说明；
 //     同一份重提照原样，挂上以后不能换；付过款或在付款申请里的不能补；挂上以后的货款照合同走；
 //   · 待补合同清单：期限从生效那天算，超期为负数；采购的待办数算上。
@@ -36,8 +36,8 @@ async function ok<T = any>(res: Promise<{ status: number; body: any }>, status =
 }
 const approveAt = (cookie: string, requestId: number, level: number, extra: Record<string, unknown> = {}) => api(ctx.app, cookie, 'POST', `/api/approvals/${requestId}/approve`, { level, ...extra });
 
-/** 签好的采购合同：单价 ¥2,500 / 个、200 个 */
-async function signedContract(over: { supplierId?: number; startDate?: string; endDate?: string; priceCents?: number } = {}) {
+/** 签好的采购合同：单价 ¥2,500 / 个、200 个；预付段默认 0（prepayBp 给了按它，其余是到货段） */
+async function signedContract(over: { supplierId?: number; startDate?: string; endDate?: string; priceCents?: number; prepayBp?: number } = {}) {
   const created = await ok(
     api(ctx.app, buyer, 'POST', '/api/erp/contracts', {
       clientKey: randomUUID(),
@@ -53,8 +53,8 @@ async function signedContract(over: { supplierId?: number; startDate?: string; e
         freightBearer: 'supplier',
         unloadingBearer: 'supplier',
         paymentTerms: [
-          { stage: 'prepay', percentBp: 0 },
-          { stage: 'delivery', percentBp: 10000 },
+          { stage: 'prepay', percentBp: over.prepayBp ?? 0 },
+          { stage: 'delivery', percentBp: 10000 - (over.prepayBp ?? 0) },
           { stage: 'acceptance', percentBp: 0 },
           { stage: 'warranty', percentBp: 0 },
         ],
@@ -194,6 +194,68 @@ describe('急采后补合同', () => {
       await tx`ALTER TABLE inv_docs ENABLE TRIGGER inv_docs_guard`;
     });
     expect((await dueList()).find((r) => r.receiptId === big.id)!.daysLeft).toBe(-5);
+  });
+
+  it('预付款带不带付款申请都不能核销到要补合同、还没补上的急采；补上以后带申请的照常核销（Codex 审查 8f01337）', async () => {
+    const rc = await urgentReceipt(10, 2_500); // ¥25,000：要补合同
+    expect(await needsContract(rc.id)).toBe(true);
+    // 没带申请的预付款
+    const loose = await ok<{ payment: { id: number; status: string } }>(
+      api(ctx.app, payer, 'POST', '/api/payables/payments', {
+        clientKey: randomUUID(),
+        supplierId,
+        payDate: today,
+        amountCents: 2_000,
+        method: 'bank_transfer',
+        evidence: '流水尾号 0810',
+        note: '零星预付',
+        prepay: true,
+        approveNow: false,
+        allocations: [],
+      }),
+    );
+    if (loose.payment.status !== 'confirmed') await ok(api(ctx.app, mgr, 'POST', `/api/payables/payments/${loose.payment.id}/approve`, {}), 200);
+    // 带申请的预付款：合同预付段的付款申请批完、按申请登记付款，记为预付款
+    const c = await signedContract({ prepayBp: 1000 });
+    const req = await ok(
+      api(ctx.app, buyer, 'POST', '/api/erp/payments/requests', {
+        clientKey: randomUUID(),
+        expectedDate: today,
+        purpose: '预付款',
+        source: { kind: 'contract', contractId: c.id, stage: 'prepay', amountCents: 100_000 },
+      }),
+    );
+    const rid = req.request.approval.requestId;
+    await ok(approveAt(payer, rid, 1), 200);
+    await ok(approveAt(mgr, rid, 2), 200);
+    const paid = await ok(
+      api(ctx.app, payer, 'POST', `/api/erp/payments/requests/${req.request.id}/pay`, {
+        clientKey: randomUUID(),
+        payDate: today,
+        method: 'bank_transfer',
+        evidence: '流水尾号 0811',
+        amountCents: 100_000,
+        prepay: true,
+      }),
+    );
+    const fromReq = Number(paid.payment.id);
+    const offset = (creditId: number) =>
+      api(ctx.app, payer, 'POST', '/api/payables/offsets', {
+        clientKey: randomUUID(),
+        supplierId,
+        offsetDate: today,
+        credit: { kind: 'prepayment', id: creditId },
+        lines: [{ kind: 'receipt', targetId: rc.id, amountCents: 1_000 }],
+      });
+    expect((await offset(loose.payment.id)).body.error?.code).toBe('CONTRACT_REQUIRED');
+    expect((await offset(fromReq)).body.error?.code).toBe('CONTRACT_REQUIRED');
+
+    // 补上合同以后：带申请的预付款照常核销；没带申请的照 P7 先走付款申请
+    const po = await backfill(rc.id);
+    await ok(attach(po.id, { contractId: c.id }), 200);
+    const after = await offset(fromReq);
+    expect(after.status, JSON.stringify(after.body)).toBe(201);
+    expect((await offset(loose.payment.id)).body.error?.code).toBe('PAYMENT_REQUEST_REQUIRED');
   });
 
   it('补合同：这家供应商、生效中、到期日不早于下单日（开始日可以晚）；超出合同价要说明；同一份重提照原样，挂上以后不能换', async () => {
