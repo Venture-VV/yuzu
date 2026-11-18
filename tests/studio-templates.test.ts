@@ -87,20 +87,32 @@ describe('卡片模板：改动', () => {
     expect(d.templates).toBeUndefined();
   });
 
-  it('藏起来、圆角、恢复默认（一档 / 一块 / 整个版式）', () => {
+  it('藏起来、恢复默认（一档 / 一块 / 整个版式）', () => {
     let d = setSlotFlags(doc0(), 'single_left', 'detail', { hidden: true });
-    d = setSlotFlags(d, 'single_left', 'photo', { radius: 16 });
     d = setSlotSpot(d, 'single_left', 'photo', 'big', { w: 400 });
     d = setSlotSpot(d, 'single_left', 'photo', 'design', { y: 150 });
-    expect(d.templates?.single_left).toEqual({ detail: { hidden: true }, photo: { radius: 16, big: { w: 400 }, design: { y: 150 } } });
+    expect(d.templates?.single_left).toEqual({ detail: { hidden: true }, photo: { big: { w: 400 }, design: { y: 150 } } });
     d = resetSlot(d, 'single_left', 'photo', 'big');
-    expect(d.templates?.single_left?.photo).toEqual({ radius: 16, design: { y: 150 } });
+    expect(d.templates?.single_left?.photo).toEqual({ design: { y: 150 } });
     d = resetSlot(d, 'single_left', 'photo');
     expect(d.templates?.single_left).toEqual({ detail: { hidden: true } });
     d = setSlotFlags(d, 'single_left', 'detail', { hidden: false });
     expect(d.templates).toBeUndefined();
     d = setSlotFlags(d, 'trio_row', 'b.photo', { hidden: true });
     expect(resetLayoutTemplate(d, 'trio_row')).toEqual(doc0());
+  });
+
+  it('照片一律直角（8.1.8，品牌部，PB3）：以前存的圆角不再带出、改这一块时去掉，别的块不动', () => {
+    // 8.1.2–8.1.7 的版面里可能存着照片的圆角（测试服上发布过的那一版就有）
+    const old = { ...doc0(), templates: { single_left: { photo: { radius: 16, design: { y: 150 } } }, cover: { photo: { radius: 10 } } } } as StudioDoc;
+    expect(DocSchema.parse(old)).toEqual(old);
+    expect(errorsOf(old)).toEqual([]);
+    expect(resolveSlot(EMENU_TEMPLATES.single_left.slots.find((x) => x.key === 'photo')!, old.templates!.single_left!.photo)).not.toHaveProperty('radius');
+    // 改这一块（挪一下、藏起来）：存下来的没有圆角了；没碰的那一块照旧（发布的版面不会被悄悄改写）
+    const moved = setSlotSpot(old, 'single_left', 'photo', 'design', { x: 60 });
+    expect(moved.templates?.single_left?.photo).toEqual({ design: { x: 60, y: 150 } });
+    expect(moved.templates?.cover?.photo).toEqual({ radius: 10 });
+    expect(setSlotFlags(old, 'cover', 'photo', { hidden: false }).templates?.cover).toBeUndefined();
   });
 
   it('不认识的版式、块：什么都不改', () => {
@@ -112,7 +124,7 @@ describe('卡片模板：改动', () => {
 describe('卡片模板：格式与核对', () => {
   it('合格式的改动核对没有问题；格式不收乱写的键', () => {
     let d = setSlotSpot(doc0(), 'cover', 'photo', 'design', { x: 500, w: 480, h: 560 });
-    d = setSlotFlags(d, 'cover', 'detail', { hidden: true, radius: 12 });
+    d = setSlotFlags(d, 'cover', 'detail', { hidden: true });
     d = setSlotSpot(d, 'cover', 'text', 'big', { bottom: 470, w: 440 });
     expect(DocSchema.parse(d)).toEqual(d);
     expect(errorsOf(d)).toEqual([]);

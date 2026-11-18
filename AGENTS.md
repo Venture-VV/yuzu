@@ -90,6 +90,7 @@ E2E_BASE_URL=… npx playwright test e2e/purchase-flow.spec.ts --project=门店�
 E2E_BASE_URL=… npx playwright test e2e/motion.spec.ts --project=门店电脑   # 动效套件（8.0.16，docs/UI_V8016.md）：弹窗关掉马上卸掉、影子认不到、减少动态效果时不留影子、滑块跟着当前项
 E2E_BASE_URL=… npx playwright test e2e/emenu.spec.ts   # 点餐系统 · 平板电子菜单（8.0.10，docs/EMENU.md）：整套流程只在门店电脑这一组跑（平板那一段另开 1024×768 的窗口）；地址 /emenu，用「点餐平板」岗位的账号登录；8.0.13 起含中英切换、键盘适配与动效的只读用例；8.0.15 起含「放大、不要点单密码」的只读用例（整套流程与设计稿位置核对走的是「要密码、设计稿原样」）
 E2E_BASE_URL=… npx playwright test e2e/emenu-v816.spec.ts --project=门店电脑   # 8.1.6 二次整改（docs/HANDOFF_V816.md）：小米平板 6S Pro 12.4 大小（1355 × 903）上底色、压暗层、大图铺到屏幕边与右上角四样、服务员那一步的英文、装饰压不到大图上、工作台改顶栏（会写工作台的草稿、用完放回默认，不发布）
+E2E_BASE_URL=… npx playwright test e2e/emenu-818.spec.ts --project=门店电脑   # 8.1.8 品牌部的五条（docs/HANDOFF_V818.md）：小米平板大小上用预览码打开「主文字改过、照片加了圆角」的版面，逐页核对顶栏字完整、封面标题小圆圈、照片直角、字色 #4b392a、选中没有光晕；工作台主文字锁定、照片没有圆角（只读，预览码不发布）
 E2E_BASE_URL=… npx playwright test e2e/dining-817.spec.ts --project=门店电脑   # 8.1.7 餐饮分区与点菜单（docs/HANDOFF_V817.md）：后台选点单分类与分区 → 桌台分区详情 → 先选餐厅 / 水吧 / 果吧再点 → 点菜单五种状态 → 估清、台账、退菜记录按果吧筛；手牌客人的点菜单（菜品、档口、桌台以 E2E 817 开头，留着下次沿用；结束时退菜撤台、关闭餐饮）
 E2E_BASE_URL=… npx playwright test e2e/target-devices.spec.ts --project=门店电脑   # 三台目标设备（docs/DEVICES.md）：另开 1920×1080、1280×720、360×800、1355×903 的窗口核对主要页面不横向滚动、按钮在屏幕里（菜单里的菜、桌台与点菜单用合成数据，只读；临时打开餐饮，结束时恢复）
 npm run dev:canteen                        # 柚子饭堂（员工手机端，docs/CANTEEN.md）热更新：接口转到 CANTEEN_PORT（默认 8090）

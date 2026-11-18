@@ -456,16 +456,11 @@ export function SlotPanel({
               藏起来（用这种版式的每一页都不显示，两档一起）
             </label>
           )}
+          {/* 8.1.8（品牌部，PENDING_DECISIONS.md PB3）：照片一律直角、大小不变，不再给改圆角 */}
           {def.kind === 'photo' && (
-            <Row label="圆角">
-              <NumberInput
-                value={s.radius ?? 0}
-                min={0}
-                max={400}
-                onChange={(v) => onChange((d) => setSlotFlags(d, layout, def.key, { radius: round1(v) }), `${coalesce}.radius`)}
-                testId="studio-slot-radius"
-              />
-            </Row>
+            <p className="text-[11.5px] leading-snug text-ink-3" data-testid="studio-slot-square">
+              照片一律直角（品牌规定）：四个角都是直角，大小照上面的宽、高。
+            </p>
           )}
         </div>
       )}

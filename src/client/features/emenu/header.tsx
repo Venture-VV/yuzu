@@ -1,9 +1,10 @@
 // 平板点餐页的顶栏（设计稿每一屏的最上面一条）：汤崎标志、分类页签、中英切换、搜索、订单、手牌。
 // 后台「电子菜单」的预览也用这一条（按钮不接事件）。
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { EmenuCategoryView } from '@shared/emenu';
 import { EMENU_HEADER_TEMPLATE, EMENU_TAG_W, slotDefault } from '@shared/studio';
+import { loadBrandFont } from './brandFont';
 import { namePair, useLang, useM, type Lang } from './i18n';
 import langEn from './assets/lang-en.png';
 import langZh from './assets/lang-zh.png';
@@ -51,7 +52,10 @@ function textWidth(text: string, en: boolean, size: number, spacing: number): nu
   }
   return w;
 }
-/** 字体下载完以后变一次：量过的字宽作废、顶栏重新排 */
+/**
+ * 字体下载完以后变一次：量过的字宽作废、顶栏重新排。授权的品牌英文字体是页面自己加进去的（brandFont.ts），
+ * 加进去时浏览器不发 loadingdone，所以另外等它取完（8.1.8：原来测试服上分类的英文按顶替字体量、换成品牌字体后宽了，末尾被裁）
+ */
 function useFontsLoaded(): number {
   const [n, setN] = useState(0);
   useEffect(() => {
@@ -64,6 +68,7 @@ function useFontsLoaded(): number {
     };
     fonts.addEventListener?.('loadingdone', again);
     void fonts.ready.then(again);
+    void loadBrandFont().then(again);
     return () => {
       live = false;
       fonts.removeEventListener?.('loadingdone', again);
@@ -123,6 +128,38 @@ export function LangToggle({
   );
 }
 
+/**
+ * 顶栏分类的一行字（8.1.8，品牌部「菜单页顶栏标题不完整」，PENDING_DECISIONS.md PB1）：
+ *   · 不裁：外面没有裁剪的框，字的上下缘照样画出来（行框只有 1 个字高，品牌英文字体的大写字母比它高一点，原来上沿被切掉一丝）；
+ *   · 放得下照原样居中；比这一格宽的整行按比例缩小到放得下（量的是页面上实际排出来的宽：字体换了、下载完都重新量），不再显示「…」。
+ * room 是这一行能用的宽，top 是文字框上沿（都是设计稿像素，与原来的位置一样）。
+ */
+function FitLine({ room, top, size, en, spacing, children }: { room: number; top: number; size: number; en?: boolean; spacing?: number; children: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  // 每次重画都量一次（顶栏只有几个分类；字体下载完、换语言、换分类数顶栏都会重画）
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.transform = '';
+    const w = el.offsetWidth;
+    const k = w > room ? room / w : 1;
+    el.style.transform = k < 1 ? `scale(${k})` : '';
+    el.dataset.fit = k < 1 ? k.toFixed(3) : '1';
+  });
+  return (
+    <span style={{ ...box(0, top, room), display: 'flex', justifyContent: 'center' }}>
+      <span
+        ref={ref}
+        className={en ? 'em-en' : undefined}
+        style={{ flex: 'none', fontSize: size, lineHeight: `${size}px`, whiteSpace: 'nowrap', letterSpacing: spacing ? `${spacing}em` : undefined, transformOrigin: '50% 50%' }}
+        data-cat-line
+      >
+        {children}
+      </span>
+    </span>
+  );
+}
+
 const CATS_DEF = EMENU_HEADER_TEMPLATE.slots.find((s) => s.key === 'cats')!;
 
 export function Header({
@@ -169,7 +206,6 @@ export function Header({
   const n = categories.length;
   const gap = Math.min(147, room / Math.max(n, 1));
   const first = center - ((n - 1) * gap) / 2;
-  const activeAt = categories.findIndex((c) => c.id === activeId);
   // 分类的字（8.1.6，QZ5）：按最宽的那个名字实际量出来的宽排——放大的一档最多放大 BIG.ui 倍；
   // 分类多、名字长放不下时整组一起缩小一点（最多缩到 CAT_MIN_SCALE），不挤到旁边；还放不下的末尾显示「…」。放得下时与原来一样
   const spacingEn = 0.058;
@@ -183,9 +219,8 @@ export function Header({
     }),
   );
   const kc = Math.max(CAT_MIN_SCALE, Math.min(large ? BIG.ui : 1, (gap - 8) / widest));
-  // 排字的那一块：一格的宽减去两边各 4，换算回缩放以前（放得下时字照旧居中；放不下的在这一块里末尾显示「…」）
+  // 排字的那一块：一格的宽减去两边各 4，换算回缩放以前（放得下时字照旧居中；还放不下的那一行自己再缩小，见 FitLine）
   const textRoom = (gap - 8) / kc;
-  const fit = { overflow: 'hidden', textOverflow: 'ellipsis' } as const;
   const iconButton = (onClick: () => void, bx: number, by: number, w: number, h: number, label: string, testId: string, slot: string, children: ReactNode) => (
     <button
       type="button"
@@ -246,10 +281,7 @@ export function Header({
       </div>
       {/* 分类页签排开的那一块（工作台量位置用，不画东西） */}
       <span aria-hidden style={{ ...box(center - room / 2, 57 - 23 * ku + dy, room, 46 * ku), pointerEvents: 'none' }} data-studio-head="cats" />
-      {/* 选中的分类下面的光晕：换分类时滑过去 */}
-      {activeAt >= 0 && (
-        <span className="em-cat-glow" style={{ left: 0, transform: `translateX(${first + activeAt * gap - gap / 2 + 6}px)`, top: 57 - 27 * kc + dy, width: gap - 12, height: 52 * kc }} />
-      )}
+      {/* 8.1.8（品牌部，PB5）：选中的分类下面不再有光晕与细线，选中的只是字变成深棕 */}
       {categories.map((c, i) => {
         const on = c.id === activeId;
         const name = namePair(c.name, c.nameEn, lang);
@@ -267,7 +299,6 @@ export function Header({
               background: 'none',
               color: on ? 'var(--em-ink)' : 'var(--em-mute)',
               textAlign: 'center',
-              overflow: 'hidden',
             }}
             data-testid={`emenu-cat-${c.id}`}
           >
@@ -277,17 +308,25 @@ export function Header({
                 {/* 设计稿：中文文字框上沿 45.7、英文 60.3（按钮从 34 开始）。按钮里的内容浏览器会上下居中，所以两行都自己定位 */}
                 {name.mainEn ? (
                   <>
-                    <span className="em-en" style={{ ...box(0, 12.6, textRoom), ...fit, textAlign: 'center', fontSize: 12, lineHeight: '12px', whiteSpace: 'nowrap', letterSpacing: `${spacingEn}em` }}>
+                    <FitLine room={textRoom} top={12.6} size={12} en spacing={spacingEn}>
                       {name.main}
-                    </span>
-                    <span style={{ ...box(0, 27.2, textRoom), ...fit, textAlign: 'center', fontSize: 9, lineHeight: '9px', whiteSpace: 'nowrap' }}>{name.sub}</span>
+                    </FitLine>
+                    {name.sub && (
+                      <FitLine room={textRoom} top={27.2} size={9}>
+                        {name.sub}
+                      </FitLine>
+                    )}
                   </>
                 ) : (
                   <>
-                    <span style={{ ...box(0, 11.7, textRoom), ...fit, textAlign: 'center', fontSize: 14, lineHeight: '14px', whiteSpace: 'nowrap' }}>{name.main}</span>
-                    <span className="em-en" style={{ ...box(0, 26.3, textRoom), ...fit, textAlign: 'center', fontSize: 8, lineHeight: '8px', whiteSpace: 'nowrap', letterSpacing: `${spacingEn}em` }}>
-                      {name.sub}
-                    </span>
+                    <FitLine room={textRoom} top={11.7} size={14}>
+                      {name.main}
+                    </FitLine>
+                    {name.sub && (
+                      <FitLine room={textRoom} top={26.3} size={8} en spacing={spacingEn}>
+                        {name.sub}
+                      </FitLine>
+                    )}
                   </>
                 )}
               </span>

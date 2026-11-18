@@ -184,7 +184,8 @@ function NodeView({ node: n, ctx, flow }: { node: StudioNode; ctx: StudioRenderC
     case 'image': {
       const tap = tapProps(n.action, ctx, `studio-tap-${n.id}`);
       return (
-        <div style={{ ...place, background: color(n.fill), borderRadius: n.radius || undefined, overflow: 'hidden', ...tap.style }} {...tap.props} {...tag}>
+        // 平板菜单的图片一律直角（8.1.8，品牌部）：圆角不生效
+        <div style={{ ...place, background: color(n.fill), borderRadius: ctx.surface.squareImages ? undefined : n.radius || undefined, overflow: 'hidden', ...tap.style }} {...tap.props} {...tag}>
           <img src={ctx.assetUrl(n.asset)} alt="" draggable={false} style={{ display: 'block', width: '100%', height: '100%', objectFit: n.fit }} />
         </div>
       );

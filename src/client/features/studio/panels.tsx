@@ -28,6 +28,7 @@ import {
   componentUses,
   defaultStudioDoc,
   SHADOWS,
+  themeColor,
   type StudioAction,
   type StudioAssetView,
   type StudioBlockDef,
@@ -131,7 +132,7 @@ export function ColorField({
   allowAuto?: boolean;
   testId?: string;
 }) {
-  const resolved = value === 'auto' || !value ? null : value.startsWith('$') ? (doc.theme.colors[value.slice(1)] ?? surface.colors.find((c) => c.key === value.slice(1))?.default ?? null) : value;
+  const resolved = value === 'auto' || !value ? null : value.startsWith('$') ? themeColor(doc, value.slice(1)) : value;
   const [hex, setHex] = useState<string | null>(null);
   return (
     <div className="flex w-full flex-col gap-1.5" data-testid={testId}>
@@ -171,7 +172,7 @@ export function ColorField({
             type="button"
             title={`主题：${c.label}`}
             className={cn('size-5 rounded border', value === `$${c.key}` ? 'ring-2 ring-pine ring-offset-1' : 'border-line')}
-            style={{ background: doc.theme.colors[c.key] ?? c.default }}
+            style={{ background: themeColor(doc, c.key) ?? c.default }}
             onClick={() => onChange(`$${c.key}`)}
           />
         ))}
@@ -553,7 +554,19 @@ export function ThemePanel({ doc, surface, onChange }: { doc: StudioDoc; surface
         </PanelTitle>
         <div className="space-y-1.5">
           {surface.colors.map((c) => {
-            const v = doc.theme.colors[c.key] ?? c.default;
+            const v = themeColor(doc, c.key) ?? c.default;
+            // 品牌规定的颜色（8.1.8，平板菜单的主文字）：只显示、不能改
+            if (c.locked)
+              return (
+                <div key={c.key} className="flex items-center gap-2 text-[12.5px]" data-testid={`studio-theme-${c.key}`} data-locked="">
+                  <span className="h-7 w-8 shrink-0 rounded border border-line p-0.5">
+                    <span className="block size-full rounded-sm" style={{ background: v }} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-ink-2">{c.label}</span>
+                  <Lock className="size-3.5 shrink-0 text-ink-3" aria-label="不能改" />
+                  <span className="font-mono text-[11px] text-ink-3">{v}</span>
+                </div>
+              );
             return (
               <label key={c.key} className="flex items-center gap-2 text-[12.5px]" data-testid={`studio-theme-${c.key}`}>
                 <input type="color" className="h-7 w-8 shrink-0 cursor-pointer rounded border border-line bg-card p-0.5" value={v.slice(0, 7)} onChange={(e) => setColor(c.key, e.target.value)} />
@@ -1240,9 +1253,15 @@ export function PropsPanel({
               <option value="fill">拉伸</option>
             </select>
           </Row>
-          <Row label="圆角">
-            <NumberInput value={n.radius} min={0} max={4096} onChange={(v) => set({ radius: v }, 'radius')} />
-          </Row>
+          {surface.squareImages ? (
+            <p className="text-[11.5px] leading-snug text-ink-3" data-testid="studio-image-square">
+              图片一律直角（品牌规定）。
+            </p>
+          ) : (
+            <Row label="圆角">
+              <NumberInput value={n.radius} min={0} max={4096} onChange={(v) => set({ radius: v }, 'radius')} />
+            </Row>
+          )}
           <Row label="底色">
             <ColorField value={n.fill} onChange={(v) => set({ fill: v }, 'fill')} surface={surface} doc={doc} allowNone />
           </Row>

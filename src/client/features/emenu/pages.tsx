@@ -101,7 +101,6 @@ export function Photo({
   ctx,
   label,
   tint,
-  radius,
   slot,
 }: {
   url: string | null;
@@ -115,8 +114,6 @@ export function Photo({
   label: string;
   /** 两张图挨着时第二张的底色浅一点（设计稿「两个菜」并排的那一版） */
   tint?: boolean;
-  /** 圆角（卡片模板里设计师加的；没加就是直角，与设计稿一样） */
-  radius?: number;
   /** 卡片模板里的哪一块（工作台的画布按它量位置、画框） */
   slot?: string;
 }) {
@@ -133,7 +130,8 @@ export function Photo({
       role={clickable ? 'button' : undefined}
       onClick={clickable ? (e) => ctx.onOpen!(dish!, designPoint(e.currentTarget)) : undefined}
       className={clickable ? 'em-lift' : undefined}
-      style={{ ...box(x, y, w, h), background: tint ? '#e2e2e2' : 'var(--em-photo)', overflow: 'hidden', cursor: clickable ? 'pointer' : undefined, ...(radius ? { borderRadius: radius } : {}) }}
+      // 照片一律直角（8.1.8，品牌部，PENDING_DECISIONS.md PB3）：以前在工作台里加过的圆角不生效，大小不变
+      style={{ ...box(x, y, w, h), background: tint ? '#e2e2e2' : 'var(--em-photo)', overflow: 'hidden', cursor: clickable ? 'pointer' : undefined }}
       data-testid={dish ? `emenu-photo-${dish.id}` : undefined}
       data-studio-slot={slot}
     >
@@ -434,14 +432,21 @@ function SlotPhoto({ s, dish, ctx }: { s: ResolvedSlot; dish: Slot; ctx: PageCtx
   if (s.hidden) return null;
   const p = pos(s);
   const url = s.def.source === 'detail' ? (dish?.detailUrl ?? null) : (dish?.imageUrl ?? null);
-  return (
-    <Photo url={url} x={p.x} y={p.y} w={p.w} h={p.h} dish={dish ?? null} ctx={ctx} label={s.def.source === 'detail' ? '特写图' : '餐品展示'} tint={s.def.tint} radius={s.radius} slot={s.def.key} />
-  );
+  return <Photo url={url} x={p.x} y={p.y} w={p.w} h={p.h} dish={dish ?? null} ctx={ctx} label={s.def.source === 'detail' ? '特写图' : '餐品展示'} tint={s.def.tint} slot={s.def.key} />;
 }
 
 /** 卡片模板里一道菜的文字（菜名、介绍、价格、加号）：原样的位置 + 放大一档另给的（DishText 自己按档取） */
 function SlotText({ s, dish, ctx, noteByPrice }: { s: ResolvedSlot; dish: EmenuDishView; ctx: PageCtx; noteByPrice: boolean }) {
   return <DishText dish={dish} x={s.x} y={s.y} w={s.w} ctx={ctx} desc={s.def.desc} plus={s.def.plus} noteByPrice={noteByPrice} big={s.big} slot={s.def.key} />;
+}
+
+/**
+ * 分类封面大标题右下角的小圆圈（8.1.8，品牌部「点餐首页中“中式午餐”右下角需向图片内标明同款圆形」，PENDING_DECISIONS.md PB2）：
+ * 照品牌部给的图量的——直径 0.35 个字、细红线；圆心落在最后一个字的右下角（中文：字形下缘往上 0.075 个字、右缘往里 0.02 个字；
+ * 英文按大写字母的底线）。挂在标题那一行字上，跟着字号、位置走；标题藏起来时一起不显示。颜色是主题色「标题右下角的小圆圈」（--em-dot）。
+ */
+function CoverDot({ en }: { en: boolean }) {
+  return <span aria-hidden className="em-cover-dot" style={en ? { right: '-0.06em', bottom: '0.155em' } : { right: '-0.12em', bottom: '0.055em' }} data-testid="emenu-cover-dot" />;
 }
 
 function Cover({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
@@ -466,7 +471,10 @@ function Cover({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
             data-testid="emenu-cover-title"
             data-studio-slot="title"
           >
-            {title.main}
+            <span style={{ position: 'relative' }}>
+              {title.main}
+              <CoverDot en />
+            </span>
           </div>
           <div style={{ ...box(40 + dx, 274 + dy), fontSize: 15, lineHeight: '15px', color: MUTE, whiteSpace: 'nowrap' }} data-studio-slot="title">
             {title.sub}
@@ -474,7 +482,10 @@ function Cover({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
         </>
       ) : (
         <div style={{ ...box(37.4 + dx, 218.5 + dy), fontSize: 48, lineHeight: '48px', whiteSpace: 'nowrap' }} data-testid="emenu-cover-title" data-studio-slot="title">
-          {title.main}
+          <span style={{ position: 'relative' }}>
+            {title.main}
+            <CoverDot en={false} />
+          </span>
         </div>
       )}
       {/* 放大的一档：文字的下沿贴在特写图上面 24（往上长） */}
