@@ -12,6 +12,7 @@ import {
   STUDIO_SURFACE_DEFS,
   themeColor,
   themeVars,
+  upgradeStudioDoc,
   validateStudioDoc,
   type StudioDoc,
   type StudioNode,
@@ -131,6 +132,24 @@ describe('版面格式', () => {
     // 主题色引用 $ink 的块（设计师加的字）也是品牌色；数据不改（存着的照旧存着）
     expect(resolveColor(doc, '$ink')).toBe('#4b392a');
     expect(doc.theme.colors.ink).toBe('#be9879');
+  });
+
+  it('8.1.8 存的带着 dot 的版面（标题小圆圈的颜色，8.1.9 起不进主题色）：读到就去掉，照常用；再存就没有了', () => {
+    const saved = clone(defaultStudioDoc('emenu')) as StudioDoc;
+    saved.theme.colors.dot = '#bf1d25';
+    saved.theme.colors.tan = '#7a5c3a';
+    // 没升级的直接核对：不认（8.1.7 也是这样报的）
+    expect(validateStudioDoc(saved).map((i) => i.message)).toContain('没有「dot」这个主题色');
+    const up = DocSchema.parse(upgradeStudioDoc(saved));
+    expect(up.theme.colors).not.toHaveProperty('dot');
+    expect(up.theme.colors.tan).toBe('#7a5c3a');
+    expect(validateStudioDoc(up)).toEqual([]);
+    // 只动平板菜单；没有 dot 的原样返回（同一个对象）
+    const plain = defaultStudioDoc('emenu');
+    expect(upgradeStudioDoc(plain)).toBe(plain);
+    const mp = clone(defaultStudioDoc('mp')) as StudioDoc;
+    (mp.theme.colors as Record<string, string>).dot = '#000000';
+    expect((upgradeStudioDoc(mp) as StudioDoc).theme.colors).toHaveProperty('dot');
   });
 
   it('退回上一版也读得了（8.1.8 测试会话 P1）：主题色一项不多，与 8.1.7 一样', () => {

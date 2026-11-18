@@ -214,6 +214,11 @@ test.describe('8.1.1 UI 工作台', () => {
 
       // 批注：设计师在画布上点一下留言 → 店主回复 → 设计师标解决（画布上的圆点不见了）
       const note = `E2E 批注 ${stamp}：字标再往上一点`;
+      // 上一次没跑完留下的 E2E 批注先标解决：圆点停在画布上同一个地方，会挡住这次点下去的位置（可重复执行）
+      for (const c of await getJson<{ id: number; body: string; parentId: number | null; resolvedAt: string | null }[]>(page, '/api/studio/emenu/comments'))
+        if (c.parentId === null && !c.resolvedAt && c.body.startsWith('E2E 批注')) await send(page, 'post', `/api/studio/comments/${c.id}/resolve`, { resolved: true });
+      await page.reload();
+      await expect(page.getByTestId('studio-canvas')).toBeVisible({ timeout: 30_000 });
       await page.getByTestId('studio-open-comments').click();
       // 上面停在「版式」：点「加一条批注」自己回到普通的画布（停在菜单页）；回起始页再加
       await page.getByTestId('studio-comment-add').click();
@@ -223,7 +228,10 @@ test.describe('8.1.1 UI 工作台', () => {
       const area = (await page.getByTestId('studio-canvas-layer').boundingBox())!;
       await page.mouse.click(area.x + area.width * 0.3, area.y + area.height * 0.3);
       await page.getByTestId('studio-comment-text').fill(note);
+      // 等这一条真的存下了再去读（原来点完马上读，偶尔读在存之前）
+      const posted = page.waitForResponse((r) => r.url().endsWith('/api/studio/emenu/comments') && r.request().method() === 'POST');
       await page.getByTestId('studio-comment-send').click();
+      expect((await posted).ok()).toBe(true);
       const comments = await getJson<{ id: number; body: string; parentId: number | null }[]>(page, '/api/studio/emenu/comments');
       const mine = comments.find((c) => c.body === note)!;
       expect(mine).toBeTruthy();

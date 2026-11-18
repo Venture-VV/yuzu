@@ -243,11 +243,24 @@ export const DocSchema = z.object({
 });
 export type StudioDoc = z.infer<typeof DocSchema>;
 
-/** 旧格式的版面升到现在的格式（现在只有第 1 版：原样返回）；认不出的抛错 */
+/** 旧格式的版面升到现在的格式（现在只有第 1 版：原样返回，只去掉不用的项）；认不出的抛错 */
 export function upgradeStudioDoc(raw: unknown): unknown {
   const v = (raw as { schema?: unknown } | null)?.schema;
-  if (v === STUDIO_SCHEMA) return raw;
+  if (v === STUDIO_SCHEMA) return dropRetiredKeys(raw);
   throw new Error(`版面格式第 ${String(v)} 版认不出来`);
+}
+
+/**
+ * 去掉已经不用的项（读到就去掉，下次存的就没有了）：
+ *   · 8.1.8 发布时平板菜单的主题色里有一项 dot（封面标题右下角小圆圈的颜色），8.1.9 起写死在样式表里——
+ *     留着它，8.1.9 的核对不认（没有这个主题色），退回 8.1.7 时那边也不认（测试会话对 5fec3e3 的 P1，docs/EMENU.md 16.9）
+ */
+function dropRetiredKeys(raw: unknown): unknown {
+  const d = raw as { surface?: unknown; theme?: { colors?: Record<string, unknown> } } | null;
+  const colors = d?.surface === 'emenu' ? d.theme?.colors : undefined;
+  if (!colors || typeof colors !== 'object' || !('dot' in colors)) return raw;
+  const { dot: _retired, ...rest } = colors;
+  return { ...d, theme: { ...d!.theme, colors: rest } };
 }
 
 /** 一份版面里用到的素材（按出现的先后，不重复；组件里的也算） */

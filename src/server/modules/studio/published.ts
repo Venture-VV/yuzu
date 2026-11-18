@@ -3,7 +3,7 @@
 // 给小程序线（8.1.2，docs/STUDIO_MP.md 第 5 节）：readPublishedStudio 读已发布的版面、readStudioAssetFor 取版面里用到的图。
 // 小程序线在 /api/mp 里转出去（不另建表、不改这里）；这两个只读、不加锁。
 
-import { DocSchema, expandInstances, validateStudioDoc, type StudioDoc, type StudioPublishedRef, type StudioSurface } from '@shared/studio';
+import { DocSchema, expandInstances, upgradeStudioDoc, validateStudioDoc, type StudioDoc, type StudioPublishedRef, type StudioSurface } from '@shared/studio';
 import type { Db } from '../../db';
 import { currentStoreId, DEFAULT_STORE_ID } from '../../lib/store-context';
 
@@ -47,7 +47,13 @@ export async function readPublishedStudio(db: Db, surface: StudioSurface, storeI
   if (!ref) return null;
   const [r] = await db<{ doc: unknown; publishedAt: string }[]>`SELECT doc, published_at FROM studio_versions WHERE id = ${ref.id}`;
   if (!r) return null;
-  const parsed = DocSchema.safeParse(r.doc);
+  let upgraded: unknown;
+  try {
+    upgraded = upgradeStudioDoc(r.doc);
+  } catch {
+    return null;
+  }
+  const parsed = DocSchema.safeParse(upgraded);
   if (!parsed.success || parsed.data.surface !== surface) return null;
   if (validateStudioDoc(parsed.data).some((i) => i.level === 'error')) return null;
   // 组件（8.1.2）在这里展开成普通节点：小程序线照 docs/STUDIO_MP.md 画，不用认组件
