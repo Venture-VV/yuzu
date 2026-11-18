@@ -46,7 +46,7 @@
 
 **测试数据库要给够内存**（main v8.1.1 独立回归的首轮报告）：几个进程同时复制模板库、跑用例，数据库容器限在 768 MiB 时首轮出现数据库「进入恢复状态」、随后连接被拒，用例一片 500 或连不上（多半是某个数据库进程到了内存上限被系统杀掉，数据库自己重启恢复；被杀的不是容器的主进程，所以容器不一定记 OOM）；同一份代码给到 1.5–2.25 GiB 全量都过。给测试数据库 2 GiB 以上；内存紧的机器用 `TEST_WORKERS=2`（或 1）少开几个进程。
 
-交 PR 前另跑 `npm run check:code`（没用到的导入与变量、事务里没等结果的查询、类型导入写法）与 `npm run format:check`（8.1.3 起 CI 都查；改了就 `npm run format`）。工程治理一期起 CI 还查 `npm run check:docs`（`AGENTS.md` 的体积预算、死链、文档索引；加了文档跑 `npm run check:docs -- --fix`）与 `npm run check:gov`（治理基线：分层、页面里的颜色与字号、大文件、没人引用的导出、重复率，只许持平或下降，见 `docs/GOVERNANCE.md` 第 8 节）。服务端的频率限制、过载保护在用例里照默认值开着（每个会话每分钟 600 次、同时 256 个请求）；测试环境不看事件循环卡顿（`OVERLOAD_MAX_LAG_MS` 默认 0，跑用例的机器忙起来会误判），要测它在用例里自己设。
+交 PR 前另跑 `npm run check:code`（没用到的导入与变量、事务里没等结果的查询、类型导入写法）与 `npm run format:check`（8.1.3 起 CI 都查；改了就 `npm run format`）。工程治理一期起 CI 还查 `npm run check:docs`（`AGENTS.md` 的体积预算、死链、文档索引；加了文档跑 `npm run check:docs -- --fix`）与 `npm run check:gov`（治理基线：分层、依赖声明、页面里的颜色与字号、大文件、没人引用的导出、重复率，只许持平或下降，见 `docs/GOVERNANCE.md` 第 8 节）；二期起还有 `npm run lint`（oxlint，一秒内，写代码途中随时跑）与构建之后的 `npm run check:bundle`（首屏主包上限）。服务端的频率限制、过载保护在用例里照默认值开着（每个会话每分钟 600 次、同时 256 个请求）；测试环境不看事件循环卡顿（`OVERLOAD_MAX_LAG_MS` 默认 0，跑用例的机器忙起来会误判），要测它在用例里自己设。
 
 ```bash
 npx vitest run tests/locations.test.ts                          # 一个或几个集成测试文件

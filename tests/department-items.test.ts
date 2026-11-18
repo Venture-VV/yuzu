@@ -170,7 +170,7 @@ describe('经营总览的部门项目明细', () => {
     expect(ticket.quantity).toBe(2);
     // 排好序交给页面：部门按销售金额从大到小，部门内也是
     expect(r.items.map((i) => i.category).filter((c, i, all) => all.indexOf(c) === i)).toEqual(r.departments.map((d) => d.category));
-    for (const g of t.groups) expect(g.items.map((i) => i.amount)).toEqual([...g.items.map((i) => i.amount)].sort((x, y) => y - x));
+    for (const g of t.groups) expect(g.items.map((i) => i.amount)).toEqual(g.items.map((i) => i.amount).sort((x, y) => y - x));
   });
 
   it('退款单：冲减这个项目的数量与净额，销售金额不变；作废的退款单不算', async () => {

@@ -6,7 +6,7 @@
 // 只在独立演示库（或本地开发库）上跑：会往素材库传样例图、生成预览码（不发布、不改版面）。
 // 截图用的是这台机器上的字体（苹方、鸿蒙字体在 Linux 上没有，会换成别的黑体）：比的是位置、大小、颜色、排列，不比字形。
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { chromium } from 'playwright';
+import { chromium } from '@playwright/test';
 
 const DIR = 'tests/fixtures/studio/mp';
 const base = (process.env.STUDIO_URL ?? 'http://127.0.0.1:8080').replace(/\/$/, '');

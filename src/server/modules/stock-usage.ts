@@ -47,7 +47,7 @@ const KEY = 'stock_usage_rules';
 
 export async function loadStockUsageRules(db: Db): Promise<StockUsageRules> {
   const row = await settingRow<Partial<StockUsageRules>>(db, KEY);
-  return { ...DEFAULT_STOCK_USAGE_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_STOCK_USAGE_RULES, ...row?.value };
 }
 
 /**

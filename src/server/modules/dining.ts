@@ -44,7 +44,7 @@ import { currentStoreId } from '../lib/store-context';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
   const row = await settingRow<Partial<DiningRules>>(db, 'dining_rules');
-  return { ...DEFAULT_DINING_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_DINING_RULES, ...row?.value };
 }
 
 // ───────────────────────── 挂账时建出品单（frontdesk/bills.ts 调用） ─────────────────────────

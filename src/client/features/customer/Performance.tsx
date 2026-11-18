@@ -103,9 +103,9 @@ export function PerformanceDialog({
             <Facts
               values={[
                 ['统计期间', `${d.from} 至 ${d.to}`],
-                ['核定充值', <Amount value={d.totals.rechargeCents} />],
-                ['退储值冲减', <Amount value={d.totals.refundCents} />],
-                ['净已核业绩', <Amount value={d.totals.netCents} />],
+                ['核定充值', <Amount key="v" value={d.totals.rechargeCents} />],
+                ['退储值冲减', <Amount key="v" value={d.totals.refundCents} />],
+                ['净已核业绩', <Amount key="v" value={d.totals.netCents} />],
               ]}
             />
             <SectionTitle>业绩原单与退款冲减</SectionTitle>

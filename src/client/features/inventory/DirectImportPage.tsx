@@ -11,7 +11,7 @@ import { formatAmount } from '@shared/money';
 import { formatQty } from '@shared/quantity';
 import { ApiError, api, errorMessage, UncertainError } from '../../lib/api';
 import { ErpPendingStoreError, sendErpOp, useErpPending } from '../../lib/erpPending';
-import { bytesToBase64, readImportFile } from '../../lib/import-file';
+import { loadTableFile, type LoadedTable } from '../../lib/import-file';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
@@ -19,8 +19,6 @@ import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useToast } from '../../components/Toast';
 import { Button, Notice } from '../../components/ui';
 import { useInvalidateInventory, useInvSettings } from './queries';
-
-type Loaded = { fileName: string; csv?: string; xlsxBase64?: string; encoding: string };
 
 export function DirectImportPage() {
   const can = useCan();
@@ -30,7 +28,7 @@ export function DirectImportPage() {
   const invalidate = useInvalidateInventory();
   const settings = useInvSettings(can('inventory.operate'));
   const pending = useErpPending(['receipt_import']);
-  const [file, setFile] = useState<Loaded | null>(null);
+  const [file, setFile] = useState<LoadedTable | null>(null);
   const [preview, setPreview] = useState<ReceiptImportPreview | null>(null);
   const [result, setResult] = useState<ReceiptImportResult | null>(null);
   const selection = useRef(0);
@@ -54,13 +52,8 @@ export function DirectImportPage() {
     const current = () => selection.current === ticket;
     setBusy('read');
     try {
-      if (/\.xlsx$/i.test(f.name)) {
-        const xlsxBase64 = bytesToBase64(await f.arrayBuffer());
-        if (current()) setFile({ fileName: f.name, xlsxBase64, encoding: 'Excel' });
-      } else if (/\.csv$/i.test(f.name) || f.type === 'text/csv') {
-        const loaded = await readImportFile(f);
-        if (current()) setFile({ fileName: f.name, csv: loaded.text, encoding: loaded.label.includes('GBK') ? 'GBK' : 'UTF-8' });
-      } else setError('只能导入 Excel（.xlsx）或 CSV（.csv）文件；老版本的 .xls 请另存为 .xlsx');
+      const loaded = await loadTableFile(f);
+      if (current()) setFile(loaded);
     } catch (e) {
       if (current()) setError(errorMessage(e));
     } finally {

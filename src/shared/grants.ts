@@ -90,9 +90,6 @@ export type VipGrant = Granted<VipGrantRequest>;
 export type OverLimitGrant = Granted<OverLimitGrantRequest>;
 export type DiscountGrant = Granted<DiscountGrantRequest>;
 export type TicketGrant = Granted<TicketGrantRequest>;
-export type MemberRefundGrant = Granted<MemberRefundGrantRequest>;
-export type MemberPhoneGrant = Granted<MemberPhoneGrantRequest>;
-export type LineVoidGrant = Granted<LineVoidGrantRequest>;
 
 /** 来访编号按升序去重，授权与结账按同一顺序比较 */
 export const sortedVisitIds = (ids: readonly number[]) => [...new Set(ids)].sort((a, b) => a - b);

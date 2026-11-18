@@ -29,6 +29,7 @@ export class ErrorBoundary extends Component<Props, { error: unknown }> {
   }
 
   override componentDidUpdate(prev: Props) {
+    // oxlint-disable-next-line react/no-did-update-set-state -- 换了页面（resetKey 变了）才清一次错误，有条件、不会循环
     if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null });
   }
 

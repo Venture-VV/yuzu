@@ -322,8 +322,6 @@ export const EMENU_LAYOUT_INFO: Record<EmenuLayout, EmenuLayoutInfo> = {
   list_text: { label: '文字陈列', design: '无图——文字陈列', slots: 10, titled: true, hint: '竖排小标题，两列各 5 行：名称、英文名、属性行、价格' },
 };
 
-export const EMENU_MAX_SLOTS = 10;
-
 // ───────────────────────── 供应时段 ─────────────────────────
 
 /** 一天里的第几分钟（0–1439）；start > end 为跨零点 */
@@ -767,7 +765,7 @@ export interface EmenuEnglishGuarded {
  */
 const FORMULA_GUARDED = /^'+(?:[=+@]|-(?!\d))/;
 /** lib/csv 的 escapeCell 给哪些格子加单引号（两边要一致，tests/emenu-english.test.ts 里对过） */
-const FORMULA_START = (value: string) => /^[=+@]/.test(value) || (/^-/.test(value) && !/^-\d/.test(value));
+const FORMULA_START = (value: string) => /^[=+@]/.test(value) || (value.startsWith('-') && !/^-\d/.test(value));
 /** 导出：本来就是「单引号 + 公式开头」的格子多加一个单引号（单纯公式开头的由 lib/csv 加） */
 export const emenuSheetCellOut = (value: string): string => (FORMULA_GUARDED.test(value) ? `'${value}` : value);
 /** 读回：去掉导出时加的那一个单引号 */

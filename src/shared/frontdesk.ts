@@ -50,11 +50,6 @@ export const VISIT_STATUS_LABELS: Record<VisitStatus, string> = {
   cancelled: '已撤销',
 };
 
-export const VOID_REASONS = ['项目选错', '数量录错', '挂错手牌', '顾客取消', '重复登记'] as const;
-export const SWAP_REASONS = ['手牌丢失', '手牌损坏', '柜锁故障', '顾客要求换柜'] as const;
-export const CANCEL_REASONS = ['开错手牌', '顾客未入场', '重复开牌'] as const;
-export const LOCK_REASONS = ['手牌丢失', '手牌损坏', '柜锁故障', '暂停使用'] as const;
-
 /**
  * 前台规则（店主 2026-10-27 已确认 15 分钟与丢牌 200 元；当场授权开关为默认值，待确认）。
  * 会员等级（原来的等级口径、各级门槛与名称）v0.7.23 起改由会员体系 v2 的「会员规则」管（档级 L0–L6，VIP 柜按档级对应，见 membership.ts）

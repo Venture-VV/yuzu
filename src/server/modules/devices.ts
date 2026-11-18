@@ -579,7 +579,7 @@ export function enqueueJob(deps: Deps, jobId: number, deviceId: number, log?: (m
 
 /** 等进程里排着的打印任务都处理完（测试与关闭应用时用） */
 export async function waitForDeviceJobs(): Promise<void> {
-  while (chains.size > 0) await Promise.all([...chains.values()]);
+  while (chains.size > 0) await Promise.all(chains.values());
 }
 
 const formatTime = (at: Date, timeZone: string) =>

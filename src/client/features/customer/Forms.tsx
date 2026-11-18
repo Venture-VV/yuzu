@@ -187,7 +187,7 @@ export function CustomerFormDialog({ form, meta, managers, onClose, onSaved }: {
             values={[
               ['原充值单', snapshot.docNo],
               ['会员', `${snapshot.member.name} · ${snapshot.member.memberNo}`],
-              ['实收本金（只读）', <Amount value={snapshot.paidCents} />],
+              ['实收本金（只读）', <Amount key="v" value={snapshot.paidCents} />],
               ['收银经办', snapshot.operator.name],
             ]}
           />
@@ -223,7 +223,7 @@ export function CustomerFormDialog({ form, meta, managers, onClose, onSaved }: {
             values={[
               ['目标月份', form.month],
               ['目标范围', form.label],
-              ['当前目标', <Amount value={form.amountCents} />],
+              ['当前目标', <Amount key="v" value={form.amountCents} />],
             ]}
           />
         )}

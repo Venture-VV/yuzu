@@ -67,7 +67,7 @@ import { currentStoreId } from '../lib/store-context';
 
 export async function loadRoomRules(db: Db): Promise<RoomRules> {
   const row = await settingRow<Partial<RoomRules>>(db, 'room_rules');
-  return { ...DEFAULT_ROOM_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_ROOM_RULES, ...row?.value };
 }
 
 async function assertRoomsEnabled(db: Db) {

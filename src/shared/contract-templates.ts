@@ -35,8 +35,6 @@ export interface ContractTemplate {
   usedBy: number;
 }
 
-export type { ContractTemplateRef } from './contracts';
-
 /** 内置字段：名称 → 说明（正文里写 {{名称}}） */
 export const BUILTIN_TEMPLATE_FIELDS: { key: string; hint: string }[] = [
   { key: '合同编号', hint: '合同号' },

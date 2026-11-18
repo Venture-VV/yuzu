@@ -93,7 +93,7 @@ const providerName = (p: AiProvider) => p.name;
 
 export async function loadAiRules(db: Db): Promise<AiRules> {
   const row = await settingRow<Partial<AiRules>>(db, AI_RULES_KEY);
-  return { ...DEFAULT_AI_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_AI_RULES, ...row?.value };
 }
 
 const RulesInput = z

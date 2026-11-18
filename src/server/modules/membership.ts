@@ -75,7 +75,7 @@ const LIVE_KEY = 'membership_live';
 
 export async function loadMembershipRules(db: Db): Promise<MembershipRules> {
   const [row] = await db<{ value: Partial<MembershipRules> }[]>`SELECT value FROM settings WHERE key = ${RULES_KEY}`;
-  return { ...DEFAULT_MEMBERSHIP_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_MEMBERSHIP_RULES, ...row?.value };
 }
 
 const centsField = (label: string, max: number) => z.number(`请填写${label}`).int(`${label}要精确到分`).min(0, `${label}不能为负`).max(max, `${label}过大`);

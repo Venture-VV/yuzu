@@ -58,8 +58,6 @@ export function ZoomAt({ x, y, k, children, style }: { x: number; y: number; k: 
 
 const StageContext = createContext<StageInfo>({ scale: 1, visible: STAGE_H, keyboard: false, animated: false, bleed: NO_BLEED });
 export const useStage = () => useContext(StageContext);
-/** 现在缩放到多少倍（把屏幕上的距离换算回设计稿的像素用） */
-export const useStageScale = () => useContext(StageContext).scale;
 /** 出血（8.1.6）：屏幕比设计稿多出来的那一圈 */
 export const useBleed = () => useContext(StageContext).bleed;
 

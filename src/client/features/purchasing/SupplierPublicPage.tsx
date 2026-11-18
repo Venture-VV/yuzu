@@ -44,7 +44,7 @@ async function call<T>(url: string, init?: RequestInit, timeoutMs = 20_000): Pro
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   let res: Response;
   try {
-    res = await fetch(url, { ...init, signal: ctrl.signal, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
+    res = await fetch(url, { ...init, signal: ctrl.signal, headers: { 'content-type': 'application/json', ...init?.headers } });
   } catch {
     throw new UncertainReply('网络断了或太慢，没收到结果');
   } finally {

@@ -42,7 +42,6 @@ async function businessDate(db: Db, deps: Deps, at: Date) {
 // ───────────────────────── 停用 / 启用 ─────────────────────────
 
 const StatusInput = z.object({ clientKey: clientKeyField, status: z.enum(['active', 'frozen']), reason: reasonField });
-export type MemberStatusInputData = z.input<typeof StatusInput>;
 
 const STATUS_EVENT_SQL = (db: Db) => db`
   SELECT e.id, e.member_id, e.from_status, e.to_status, e.reason, s.display_name AS staff_name, e.business_date, e.created_at, g.merge_no
@@ -137,7 +136,6 @@ const MergeInput = z.object({
   expectedPrincipal: cents('本金'),
   expectedBonus: cents('赠金'),
 });
-export type MemberMergeInputData = z.input<typeof MergeInput>;
 
 interface MergeMemberRow extends MergeParty {
   status: MemberStatus;

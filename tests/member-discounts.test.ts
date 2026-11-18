@@ -31,7 +31,21 @@ const edit = async (code: string, patch: Partial<Benefit>) => {
   const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } = b;
   const r = await api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
     expectedVersion: version,
-    ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions },
+    name,
+    category,
+    startGrade,
+    startTier,
+    period,
+    quantity,
+    tierQuantities,
+    templateId,
+    events,
+    festivalDates,
+    discountTarget,
+    weekdays,
+    monthDays,
+    content,
+    conditions,
     ...patch,
   });
   expect(r.status, JSON.stringify(r.body)).toBe(200);
@@ -363,7 +377,21 @@ describe('用过的会员折扣不能再改类别', () => {
       const { id, version, name, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } = b;
       return api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
         expectedVersion: version,
-        ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions },
+        name,
+        category,
+        startGrade,
+        startTier,
+        period,
+        quantity,
+        tierQuantities,
+        templateId,
+        events,
+        festivalDates,
+        discountTarget,
+        weekdays,
+        monthDays,
+        content,
+        conditions,
       });
     };
     const published = (await byCode('QY-011')).status;

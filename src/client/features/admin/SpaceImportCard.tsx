@@ -8,7 +8,7 @@ import { CircleCheck, Download, FileSearch, FileUp } from 'lucide-react';
 import { SPACE_IMPORT_COLUMNS, SPACE_IMPORT_LABELS, ZONE_IMPORT_COLUMNS, type SpaceImportKind, type SpaceImportPreview, type SpaceImportRecord } from '@shared/spaces';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { ErpPendingStoreError, sendErpOp, useErpPending } from '../../lib/erpPending';
-import { bytesToBase64, readImportFile } from '../../lib/import-file';
+import { loadTableFile, type LoadedTable } from '../../lib/import-file';
 import { useSession } from '../../lib/session';
 import { formatDateTime, downloadCsvRows, uuid } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
@@ -28,8 +28,6 @@ const TEMPLATES: Record<SpaceImportKind, { columns: readonly string[]; sample: s
   },
 };
 
-type Loaded = { fileName: string; csv?: string; xlsxBase64?: string; encoding: string };
-
 function downloadTemplate(kind: SpaceImportKind) {
   const t = TEMPLATES[kind];
   downloadCsvRows([t.columns, ...t.sample], `${SPACE_IMPORT_LABELS[kind]}导入模板.csv`);
@@ -42,7 +40,7 @@ export function SpaceImportCard() {
   const history = useSpaceImports();
   const pending = useErpPending(['space_import']);
   const [kind, setKind] = useState<SpaceImportKind>('zones');
-  const [file, setFile] = useState<Loaded | null>(null);
+  const [file, setFile] = useState<LoadedTable | null>(null);
   const [preview, setPreview] = useState<SpaceImportPreview | null>(null);
   // 每换一次文件或导入类型就加一：晚回来的预览、文件读取对不上现在选的文件，丢掉
   const selection = useRef(0);
@@ -64,13 +62,8 @@ export function SpaceImportCard() {
     const current = () => selection.current === ticket;
     setBusy('read');
     try {
-      if (/\.xlsx$/i.test(f.name)) {
-        const xlsxBase64 = bytesToBase64(await f.arrayBuffer());
-        if (current()) setFile({ fileName: f.name, xlsxBase64, encoding: 'Excel' });
-      } else if (/\.csv$/i.test(f.name) || f.type === 'text/csv') {
-        const loaded = await readImportFile(f);
-        if (current()) setFile({ fileName: f.name, csv: loaded.text, encoding: loaded.label.includes('GBK') ? 'GBK' : 'UTF-8' });
-      } else setError('只能导入 CSV（.csv）或 Excel（.xlsx）文件；老版本的 .xls 请另存为 .xlsx 或 CSV');
+      const loaded = await loadTableFile(f);
+      if (current()) setFile(loaded);
     } catch (e) {
       if (current()) setError(errorMessage(e));
     } finally {

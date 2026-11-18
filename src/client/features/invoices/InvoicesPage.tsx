@@ -525,24 +525,48 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
   };
   const applyScan = (r: RecognizedInvoice) => {
     const filled: string[] = [];
-    if (r.invoiceNo) (setInvoiceNo(r.invoiceNo), filled.push('no'));
-    if (r.invoiceDate) (setInvoiceDate(r.invoiceDate), filled.push('date'));
+    if (r.invoiceNo) {
+      setInvoiceNo(r.invoiceNo);
+      filled.push('no');
+    }
+    if (r.invoiceDate) {
+      setInvoiceDate(r.invoiceDate);
+      filled.push('date');
+    }
     const k = kindFromHint(kinds, r.kindHint);
     const kindDef = kinds.find((x) => x.key === (k ?? kind));
-    if (k) (setKind(k), filled.push('kind'));
+    if (k) {
+      setKind(k);
+      filled.push('kind');
+    }
     if (r.issuerName) {
       const s = meta.data?.suppliers.find((x) => x.name === r.issuerName);
-      if (s) (setSupplierId(s.id), filled.push('supplier'));
-      else (setSupplierId(null), setIssuer(r.issuerName), filled.push('issuer'));
+      if (s) {
+        setSupplierId(s.id);
+        filled.push('supplier');
+      } else {
+        setSupplierId(null);
+        setIssuer(r.issuerName);
+        filled.push('issuer');
+      }
     }
-    if (r.totalCents !== undefined) (setTotal(centsToInput(r.totalCents)), filled.push('total'));
-    if (r.taxCents !== undefined) (setTax(centsToInput(r.taxCents)), filled.push('tax'));
+    if (r.totalCents !== undefined) {
+      setTotal(centsToInput(r.totalCents));
+      filled.push('total');
+    }
+    if (r.taxCents !== undefined) {
+      setTax(centsToInput(r.taxCents));
+      filled.push('tax');
+    }
     // 有不含税金额与税额：反推税率；只有一档税率的直接用
     let bp: number | null = kindDef && kindDef.taxRatesBp.length === 1 ? kindDef.taxRatesBp[0]! : null;
     if (r.amountExTaxCents !== undefined && r.taxCents !== undefined && kindDef) {
       bp = kindDef.taxRatesBp.find((b) => totalFromExTax(r.amountExTaxCents!, b).taxCents === r.taxCents) ?? bp;
     }
-    if (bp !== null) (setRateBp(bp), filled.push('rate'));
+    if (bp !== null) {
+      setRateBp(bp);
+      filled.push('rate');
+    }
     setExTax(r.amountExTaxCents ?? null);
     if (r.totalCents === undefined && r.amountExTaxCents !== undefined && bp !== null) {
       const t = totalFromExTax(r.amountExTaxCents, bp);

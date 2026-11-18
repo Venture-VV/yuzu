@@ -62,7 +62,7 @@ npm run dev                   # 后端 :8080 + 前端 :5173（热更新），浏
 写完代码先过检查，再跑和改动相关的用例，交 PR 前跑全量：
 
 ```bash
-npm run typecheck && npm run check:code && npm run format:check   # 类型、代码整洁、排版
+npm run lint && npm run typecheck && npm run check:code && npm run format:check   # 代码规范、类型、代码整洁、排版
 npm run check:docs && npm run check:gov                           # 文档检查、治理基线
 npx vitest run tests/<相关的>.test.ts                              # 用 yuzu_test 库（会清空该库）
 npm test && npm run build                                         # 全量集成测试与构建
@@ -133,7 +133,7 @@ docker compose exec app node dist/server/cli.js reset-password boss
 
 ## 测试
 
-推送到 GitHub 后，`.github/workflows/ci.yml` 自动执行：类型检查、代码整洁与排版检查、文档检查与治理基线、全部集成测试（每个进程一个独立测试库）、构建、从上一发布版本的演示库升级后自检、演示数据准备与核对，并在合成演示库上跑真实浏览器验收（五种视口）。只使用合成数据与一次性的 CI 数据库，不连接任何门店环境。分层、对照表与实测用时见 [`docs/TESTING.md`](docs/TESTING.md)。
+推送到 GitHub 后，`.github/workflows/ci.yml` 自动执行：代码规范（oxlint）、类型检查、代码整洁与排版检查、文档检查与治理基线、全部集成测试（每个进程一个独立测试库）、构建、从上一发布版本的演示库升级后自检、演示数据准备与核对，并在合成演示库上跑真实浏览器验收（五种视口）。只使用合成数据与一次性的 CI 数据库，不连接任何门店环境。分层、对照表与实测用时见 [`docs/TESTING.md`](docs/TESTING.md)。
 
 ## 目录结构
 
@@ -157,7 +157,7 @@ src/
 miniprogram/       微信小程序（小程序线）
 tests/             集成测试（Vitest，真实 PostgreSQL）
 e2e/               浏览器验收（Playwright）
-scripts/           运维脚本（备份、更新、回滚、看门狗）与检查脚本（check-code、check-docs、check-governance）
+scripts/           运维脚本（备份、更新、回滚、看门狗）与检查脚本（check-code、check-docs、check-governance、check-bundle）
 docs/              文档（索引在 docs/README.md）
 brand/             品牌资料（不进镜像）
 ```

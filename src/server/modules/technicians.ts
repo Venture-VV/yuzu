@@ -35,7 +35,7 @@ import { currentStoreId, storeIn } from '../lib/store-context';
 
 export async function loadTechnicianRules(db: Db): Promise<TechnicianRules> {
   const row = await settingRow<Partial<TechnicianRules>>(db, 'technician_rules');
-  return { ...DEFAULT_TECHNICIAN_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_TECHNICIAN_RULES, ...row?.value };
 }
 
 const TECH_COLUMNS = (db: Db) => db`

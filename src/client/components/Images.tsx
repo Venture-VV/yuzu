@@ -58,10 +58,6 @@ export async function imagePayload(file: File): Promise<{ mime: string; data: st
   return { mime, data };
 }
 
-export async function uploadImage(file: File): Promise<ImageRef> {
-  return (await uploadCompressed(file)).ref;
-}
-
 /** 只读缩略图；点开看大图 */
 export function ImageThumbs({ images, size = 44, className }: { images: ImageRef[]; size?: number; className?: string }) {
   const [open, setOpen] = useState<ImageRef | null>(null);

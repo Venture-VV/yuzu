@@ -246,12 +246,3 @@ export const IconShield = (p: IconProps) => (
     )}
   </Doodle>
 );
-
-/** 标题下的一道手绘波浪线 */
-export function Squiggle({ className, color = 'var(--color-yuzu)' }: { className?: string; color?: string }) {
-  return (
-    <svg viewBox="0 0 120 10" className={className} preserveAspectRatio="none" aria-hidden focusable="false">
-      <path d="M2 6.5C12 2.5 20 9.5 30 5.5S48 2 58 6s18 2.5 28-1 18 3.5 32 0" fill="none" stroke={color} strokeWidth="3.4" strokeLinecap="round" />
-    </svg>
-  );
-}

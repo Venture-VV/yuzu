@@ -30,7 +30,21 @@ const edit = async (code: string, patch: Partial<Benefit>) => {
   const { id, version, name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions } = b;
   const r = await api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${id}`, {
     expectedVersion: version,
-    ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, discountTarget, weekdays, monthDays, content, conditions },
+    name,
+    category,
+    startGrade,
+    startTier,
+    period,
+    quantity,
+    tierQuantities,
+    templateId,
+    events,
+    festivalDates,
+    discountTarget,
+    weekdays,
+    monthDays,
+    content,
+    conditions,
     ...patch,
   });
   expect(r.status, JSON.stringify(r.body)).toBe(200);

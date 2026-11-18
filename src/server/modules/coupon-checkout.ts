@@ -18,7 +18,6 @@ import {
 } from '@shared/coupons';
 import { formatYuan } from '@shared/money';
 import type { Db, Tx } from '../db';
-import type { Deps } from '../lib/context';
 import { conflict, unprocessable } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { usageCoversItem } from './stock-usage';
@@ -214,5 +213,3 @@ export function withTicketLines(lines: CouponLine[], tickets: { visitId: number;
     ...tickets.filter((t) => t.amount > 0).map((t) => ({ id: -t.visitId, category: '门票', itemId: null, ticketTypeId: t.typeId, name: t.name, unitPrice: t.amount, quantity: 1, amount: t.amount })),
   ];
 }
-
-export type { Deps };

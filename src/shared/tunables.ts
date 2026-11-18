@@ -135,7 +135,6 @@ export const TUNABLE_LIMITS = {
   expiryRemindDays: { min: 1, max: 365, label: '批次到期前几天提醒' },
 } as const satisfies Partial<Record<keyof Tunables, { min: number; max: number; label: string }>>;
 export type IntTunable = keyof typeof TUNABLE_LIMITS;
-export const INT_TUNABLES = Object.keys(TUNABLE_LIMITS) as IntTunable[];
 
 export const pdfMaxBytes = (t: Pick<Tunables, 'pdfMaxMb'>) => t.pdfMaxMb * 1024 * 1024;
 

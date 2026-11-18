@@ -2,7 +2,7 @@
 // 变更单生效（合同升版）以后自然按新的一版算。每一段：计划金额、按条件放开的可付金额、已申请、已付、还能申请多少、为什么现在能付 / 还不能付。
 // 验收登记、质量问题登记、收货（减退货）决定到货、验收、质保三段放不放开。只读，不加锁（新建付款申请时在锁住合同一行以后再算一次）。
 
-import { PAYMENT_STAGES, PAYMENT_STAGE_LABELS, WARRANTY_BASIS_LABELS, type ContractCategory, type ContractStatus, type PaymentStage } from '@shared/contracts';
+import { PAYMENT_STAGES, WARRANTY_BASIS_LABELS, type ContractCategory, type ContractStatus, type PaymentStage } from '@shared/contracts';
 import { formatAmount } from '@shared/money';
 import {
   REQUEST_OPEN_STATUSES,
@@ -290,6 +290,3 @@ export async function contractPlan(db: Db, contractId: number, today: string): P
     qualityIssues: issues,
   };
 }
-
-/** 一段的标签：预付 30% */
-export const stageTitle = (stage: PaymentStage) => PAYMENT_STAGE_LABELS[stage];

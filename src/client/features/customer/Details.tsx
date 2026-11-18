@@ -85,7 +85,7 @@ function VisitDetail(props: Props) {
               ['客人', d.visit.guestLabel],
               ['入场时间', localTime(d.visit.checkedInAt, d.timezone)],
               ['在场状态', d.visit.status === 'open' ? '在店' : d.visit.status === 'settled' ? '已离店' : '已撤销'],
-              ['累计消费', <Amount value={d.visit.amountCents} />],
+              ['累计消费', <Amount key="v" value={d.visit.amountCents} />],
               ['长期维护人', staffName(d.visit.maintainer)],
             ]}
           />
@@ -162,10 +162,10 @@ function RechargeDetail(props: Props) {
             values={[
               ['原充值单', row.docNo],
               ['原单营业日', row.businessDate],
-              ['充值实收本金', <Amount value={row.paidCents} />],
-              ['独立赠额', <Amount value={row.bonusCents} />],
-              ['已退储值', <Amount value={row.refundedCents} />],
-              ['充值净实收', <Amount value={row.netPaidCents} />],
+              ['充值实收本金', <Amount key="v" value={row.paidCents} />],
+              ['独立赠额', <Amount key="v" value={row.bonusCents} />],
+              ['已退储值', <Amount key="v" value={row.refundedCents} />],
+              ['充值净实收', <Amount key="v" value={row.netPaidCents} />],
               ['收银经办人', row.operator.name],
               ['支付方式 / 渠道', `${paymentLabel(row.paymentMethod)} · ${row.channel === 'mp' ? '小程序线上' : '前台'}`],
               ['实际申报成交人', staffName(row.credit.claimedSeller)],
@@ -231,9 +231,9 @@ function SettlementDetail(props: Props) {
             values={[
               ['消费原单', d.settlement.docNo],
               ['来源', d.settlement.sourceKind === 'consumption' ? '会员工作台扣卡' : '前台结账整单'],
-              ['原单金额', <Amount value={d.settlement.amountCents} />],
-              ['退款 / 冲回', <Amount value={d.settlement.refundedCents} />],
-              ['净已结消费', <Amount value={d.settlement.netCents} />],
+              ['原单金额', <Amount key="v" value={d.settlement.amountCents} />],
+              ['退款 / 冲回', <Amount key="v" value={d.settlement.refundedCents} />],
+              ['净已结消费', <Amount key="v" value={d.settlement.netCents} />],
               ['经办人', d.settlement.operator.name],
               ['覆盖手牌', d.settlement.tagCodes.join('、') || '无手牌关联'],
               ['状态', d.settlement.status === 'completed' ? '已完成' : '已撤销'],
@@ -361,7 +361,7 @@ function MemberDetail(props: Props) {
               ['会员', `${d.member.name} · ${d.member.memberNo}`],
               ['手机号', formatPhone(d.member.phone)],
               ['实时档阶', d.member.gradeLabel],
-              ['系统实时可用余额', <Amount value={d.member.totalCents} />],
+              ['系统实时可用余额', <Amount key="v" value={d.member.totalCents} />],
               [
                 '本金 / 可用赠金',
                 <>

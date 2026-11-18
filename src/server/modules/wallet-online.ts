@@ -33,8 +33,6 @@ import { getRecharge } from './wallet';
 import { systemStaffId } from './system-staff';
 import { applyBalance, lockMember, nextDocNo, type LockedMember } from './wallet-core';
 
-export { SYSTEM_MP_USERNAME, systemStaffId } from './system-staff';
-
 const OnlineRechargeInput = z.object({
   memberId: z.number().int().positive('会员编号不对'),
   paidAmount: positiveCents('实付金额'),

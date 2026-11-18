@@ -67,7 +67,7 @@ import { studioPublishedRef } from '../studio/published';
 
 export async function loadEmenuRules(db: Db): Promise<EmenuRules> {
   const row = await settingRow<Partial<EmenuRules>>(db, 'emenu_rules');
-  const rules = { ...DEFAULT_EMENU_RULES, ...(row?.value ?? {}) };
+  const rules = { ...DEFAULT_EMENU_RULES, ...row?.value };
   // 早中晚时段（8.1.5）：8.1.5 以前存的设置里没有这一项，用默认；按早中晚排好
   return { ...rules, periods: normalizePeriods(rules.periods) };
 }

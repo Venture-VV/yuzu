@@ -142,8 +142,13 @@ export function parseStatementRows(header: string[], rows: { row: number; cells:
     if (map.in || map.out) {
       const i = parseMoney(cell(r, 'in'));
       const o = parseMoney(cell(r, 'out'));
-      if (i && i !== 0) ((direction = i > 0 ? 'in' : 'out'), (cents = Math.abs(i)));
-      else if (o && o !== 0) ((direction = o > 0 ? 'out' : 'in'), (cents = Math.abs(o)));
+      if (i && i !== 0) {
+        direction = i > 0 ? 'in' : 'out';
+        cents = Math.abs(i);
+      } else if (o && o !== 0) {
+        direction = o > 0 ? 'out' : 'in';
+        cents = Math.abs(o);
+      }
     }
     if (direction === null && map.amount) {
       const a = parseMoney(cell(r, 'amount'));

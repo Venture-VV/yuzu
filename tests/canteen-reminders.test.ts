@@ -80,7 +80,7 @@ async function publishMenu(date: string, meal: string, dishes: string[], by: Per
 /** 后台整份保存提醒设置（patch 改其中几顿） */
 async function saveReminders(patch: Record<string, Record<string, unknown>>) {
   const cur = (await admin('GET', '/api/erp/canteen/reminders')).body.settings;
-  const next = { rev: cur.rev, reminders: cur.reminders.map((r: { meal: string }) => ({ ...r, ...(patch[r.meal] ?? {}) })) };
+  const next = { rev: cur.rev, reminders: cur.reminders.map((r: { meal: string }) => ({ ...r, ...patch[r.meal] })) };
   const r = await admin('PUT', '/api/erp/canteen/reminders', next);
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return r.body;

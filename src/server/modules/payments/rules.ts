@@ -17,7 +17,7 @@ export const PAYMENT_RULES_KEY = 'payment_rules';
 
 export async function loadPaymentRules(db: Db): Promise<PaymentRules> {
   const [row] = await db<{ value: Partial<PaymentRules> }[]>`SELECT value FROM settings WHERE key = ${PAYMENT_RULES_KEY}`;
-  return { ...DEFAULT_PAYMENT_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_PAYMENT_RULES, ...row?.value };
 }
 
 const int = (limits: { min: number; max: number }, label: string) =>

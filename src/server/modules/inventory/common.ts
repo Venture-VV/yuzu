@@ -45,7 +45,7 @@ export async function loadInventorySettings(db: Db): Promise<InventorySettings> 
     usageWindowDays: Number(map.get('inventory_usage_window_days') ?? DEFAULT_USAGE_WINDOW_DAYS),
     ...DEFAULT_CYCLE_RULES,
     ...pickCycleRules(map.get('inventory_cycle_rules')),
-    approvalRules: { ...DEFAULT_APPROVAL_RULES, ...((map.get('inventory_approval_rules') as Partial<ApprovalRules>) ?? {}) },
+    approvalRules: { ...DEFAULT_APPROVAL_RULES, ...(map.get('inventory_approval_rules') as Partial<ApprovalRules> | undefined) },
     // 库管入库（8.1.9，KR6）：功能开关默认开
     directReceipt: map.get('inventory_direct_receipt') !== false,
   };
