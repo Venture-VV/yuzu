@@ -148,6 +148,26 @@ describe('什么时候核库（CK13）', () => {
     expect((await api(ctx.app, other, 'GET', `/api/erp/requests/${r.id}`)).status).toBe(404);
     expect((await ok<{ stockChecks: number }>(api(ctx.app, keeper, 'GET', '/api/inventory/supply-todo'))).stockChecks).toBeGreaterThanOrEqual(1);
   });
+
+  it('导出与列表同一个筛选：stock=open 只导核库没完的，status=submitted 不含核库没完的（Codex 审查 b3ca67a）', async () => {
+    const open = await submit([{ materialId: mats.A.id, name: mats.A.name, qtyMilli: q(1), unit: '箱' }]);
+    const skipped = await submit([{ materialId: mats.A.id, name: mats.A.name, qtyMilli: q(1), unit: '箱' }], { priority: 'urgent' });
+    expect([open.stockCheck, skipped.stockCheck]).toEqual(['pending', 'skipped']);
+    const docNos = async (qs: string) => {
+      const res = await api(ctx.app, ctx.owner, 'GET', `/api/erp/requests/export?from=${today}&to=${today}${qs}`);
+      expect(res.status, String(res.body)).toBe(200);
+      return String(res.body)
+        .split('\n')
+        .slice(1)
+        .map((line) => line.split(',')[0]);
+    };
+    const stock = await docNos('&stock=open');
+    expect(stock).toContain(open.docNo);
+    expect(stock).not.toContain(skipped.docNo);
+    const review = await docNos('&status=submitted');
+    expect(review).not.toContain(open.docNo);
+    expect(review).toContain(skipped.docNo);
+  });
 });
 
 describe('库管核库（CK14）', () => {
@@ -417,5 +437,32 @@ describe('超时、修改、退回、撤回、冲销', () => {
     expect(open).toEqual([expect.objectContaining({ id: r.lines[0]!.id, issuedQtyMilli: 0 })]);
     await expect(ctx.sql`UPDATE request_line_stock SET issued_qty_milli = 0 WHERE request_line_id = ${r.lines[0]!.id}`).rejects.toThrow(/已经从库存领用/);
     await expect(ctx.sql`DELETE FROM purchase_request_lines WHERE id = ${r.lines[0]!.id}`).rejects.toThrow();
+  });
+
+  it('等部门确认替代时先领用的那张领料单冲销了：同意最后一个替代以后不算全部领用，照常进采购审核（Codex 审查 b3ca67a）', async () => {
+    const r = await submit([
+      { materialId: mats.B.id, name: mats.B.name, qtyMilli: q(1), unit: '瓶' },
+      { materialId: mats.A.id, name: mats.A.name, qtyMilli: q(1), unit: '箱' },
+    ]);
+    const [lb, la] = r.lines;
+    const proposed = (
+      await ok<{ request: PurchaseRequest }>(
+        check(r.id, [
+          { lineId: lb!.id, decision: 'issue', qtyMilli: q(1) },
+          { lineId: la!.id, decision: 'substitute', materialId: mats.S.id, qtyMilli: q(2) },
+        ]),
+      )
+    ).request;
+    expect(proposed.stockCheck).toBe('confirming');
+    const docId = proposed.lines[0]!.stock!.issueDoc!.id;
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/inventory/docs/${docId}/void`, { reason: '领错了' })).status).toBe(200);
+    const yes = await ok<{ outcome: string; request: PurchaseRequest }>(answer(r.id, la!.id, true));
+    expect(yes.outcome).toBe('accepted');
+    expect(yes.request).toMatchObject({ status: 'submitted', stockCheck: 'done' });
+    expect(requestStatusLabel(yes.request)).toBe('待审核');
+    await ok(act(buyer, r.id, 'approve'));
+    // 冲销了的那一行照原来买，替代领用了的那一行不再列
+    const open = await ok<{ id: number; issuedQtyMilli: number }[]>(api(ctx.app, buyer, 'GET', `/api/erp/requests/open-lines?ids=${lb!.id},${la!.id}`));
+    expect(open).toEqual([expect.objectContaining({ id: lb!.id, issuedQtyMilli: 0 })]);
   });
 });

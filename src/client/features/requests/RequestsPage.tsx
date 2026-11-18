@@ -90,11 +90,13 @@ export function RequestsPage() {
           to: to || undefined,
         },
   );
+  // 导出与列表同一个筛选：状态里的「待核库」按 stock=open 导（Codex 审查 b3ca67a）
   const exportQs = new URLSearchParams(
     Object.entries({
       from: from || `${session.calendarToday.slice(0, 8)}01`,
       to: to || session.calendarToday,
-      status,
+      status: status === 'stock' ? '' : status,
+      stock: status === 'stock' ? 'open' : '',
       departmentId,
     }).filter(([, v]) => v) as [string, string][],
   ).toString();

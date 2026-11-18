@@ -148,6 +148,10 @@ function progressOf(p: RawProgress | null, s: { id: number; docNo: string } | nu
   };
 }
 
+/** 待审核不含还在核库的（8.1.10：核完才能审核）；待核库是待审核里还在核库、等部门确认替代的。列表与导出共用（导出的筛选与列表一样，Codex 审查 b3ca67a） */
+const STOCK_FILTER = (db: Db, f: { status?: RequestStatus; stock?: boolean }) =>
+  f.stock ? db`AND r.status = 'submitted' AND r.stock_check IN ('pending', 'confirming')` : f.status === 'submitted' ? db`AND r.stock_check NOT IN ('pending', 'confirming')` : db``;
+
 async function summaries(
   db: Db,
   f: {
@@ -198,10 +202,7 @@ async function summaries(
     WHERE TRUE
       ${f.ids ? db`AND r.id IN ${db(f.ids)}` : db``}
       ${f.status ? db`AND r.status = ${f.status}` : db``}
-      ${
-        // 待审核不含还在核库的（8.1.10：核完才能审核）；待核库是待审核里还在核库、等部门确认替代的
-        f.stock ? db`AND r.status = 'submitted' AND r.stock_check IN ('pending', 'confirming')` : f.status === 'submitted' ? db`AND r.stock_check NOT IN ('pending', 'confirming')` : db``
-      }
+      ${STOCK_FILTER(db, f)}
       ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
       ${f.from && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date >= ${f.from}` : db``}
       ${f.to && f.timezone ? db`AND (r.created_at AT TIME ZONE ${f.timezone})::date <= ${f.to}` : db``}
@@ -731,11 +732,11 @@ const PROGRESS_LABELS: Record<RequestLineProgress['state'], string> = {
 };
 
 /** 需求单导出：每一行需求一行，带下单 / 到货 / 退货与采购单号。能导出的是有「导出费用」权限的人（店主、对账付款、成本核算、负责人），导出全部部门 */
-async function requestsCsv(db: Db, timezone: string, f: { from: string; to: string; status?: RequestStatus; departmentId?: number }) {
+async function requestsCsv(db: Db, timezone: string, f: { from: string; to: string; status?: RequestStatus; stock?: boolean; departmentId?: number }) {
   const [n] = await db<{ count: number }[]>`
     SELECT count(*)::int AS count FROM purchase_request_lines l JOIN purchase_requests r ON r.id = l.request_id
     WHERE (r.created_at AT TIME ZONE ${timezone})::date BETWEEN ${f.from} AND ${f.to}
-      ${f.status ? db`AND r.status = ${f.status}` : db``} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}`;
+      ${f.status ? db`AND r.status = ${f.status}` : db``} ${STOCK_FILTER(db, f)} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}`;
   if (n!.count > EXPORT_LIMIT) throw unprocessable('EXPORT_TOO_LARGE', `这段时间有 ${n!.count} 行需求，一次最多导出 ${EXPORT_LIMIT} 行，请缩短日期范围`);
   const rows = await db<
     {
@@ -774,7 +775,7 @@ async function requestsCsv(db: Db, timezone: string, f: { from: string; to: stri
     JOIN departments d ON d.id = r.department_id JOIN staff s ON s.id = r.requester_id
     LEFT JOIN materials m ON m.id = l.material_id
     WHERE (r.created_at AT TIME ZONE ${timezone})::date BETWEEN ${f.from} AND ${f.to}
-      ${f.status ? db`AND r.status = ${f.status}` : db``} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
+      ${f.status ? db`AND r.status = ${f.status}` : db``} ${STOCK_FILTER(db, f)} ${f.departmentId ? db`AND r.department_id = ${f.departmentId}` : db``}
     ORDER BY r.created_at, r.id, l.line_no`;
   const out: (string | number)[][] = [
     [
@@ -886,7 +887,8 @@ export function registerRequestRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/erp/requests/export', { preHandler: guard('expense.export') }, async (req, reply) => {
     const f = parse(ExportQuery, req.query);
     if (f.from > f.to) throw badRequest('开始日期不能晚于结束日期');
-    const csv = await readSnapshot(sql, (tx) => requestsCsv(tx, deps.config.timezone, f));
+    const { stock, ...q } = f;
+    const csv = await readSnapshot(sql, (tx) => requestsCsv(tx, deps.config.timezone, { ...q, stock: stock === 'open' }));
     await writeAudit(sql, { staffId: req.actor.id, action: 'export', targetType: 'purchase_requests', detail: f, ip: req.ip });
     attachment(reply, `采购需求单_${f.from}_${f.to}.csv`, CSV_TYPE);
     return csv;

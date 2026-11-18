@@ -87,11 +87,15 @@ export async function closeOpenStockCheck(tx: Tx, requestId: number) {
     WHERE id = ${requestId} AND stock_check IN ('pending', 'confirming')`;
 }
 
-/** 每一行都整行领用了：需求单变成「已转领用」（CK16），不再进采购 */
+/**
+ * 每一行都整行领用了：需求单变成「已转领用」（CK16），不再进采购。
+ * 领料单冲销了的行不算领用（CK24）：先领用的行冲销了、再答复完最后一行替代时，这张单照常进采购审核（Codex 审查 b3ca67a）。
+ */
 async function settleIssued(tx: Tx, requestId: number): Promise<boolean> {
   const [x] = await tx<{ lines: number; issued: number }[]>`
     SELECT count(*)::int AS lines,
-           count(*) FILTER (WHERE s.inv_doc_id IS NOT NULL AND s.issued_qty_milli >= l.qty_milli)::int AS issued
+           count(*) FILTER (WHERE s.inv_doc_id IS NOT NULL AND s.issued_qty_milli >= l.qty_milli
+                            AND EXISTS (SELECT 1 FROM inv_docs d WHERE d.id = s.inv_doc_id AND d.status = 'confirmed'))::int AS issued
     FROM purchase_request_lines l LEFT JOIN request_line_stock s ON s.request_line_id = l.id
     WHERE l.request_id = ${requestId}`;
   if (!x || x.lines === 0 || x.issued < x.lines) return false;
