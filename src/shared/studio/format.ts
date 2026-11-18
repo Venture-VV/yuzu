@@ -250,17 +250,56 @@ export function upgradeStudioDoc(raw: unknown): unknown {
   throw new Error(`版面格式第 ${String(v)} 版认不出来`);
 }
 
+/** 版面里存颜色的字段（ColorSchema 的几处）：主题色引用「$名字」只会出现在这些字段上 */
+const COLOR_FIELDS = new Set(['fill', 'stroke', 'color', 'background', 'shade', 'textColor']);
+const HEX_COLOR = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+/** 8.1.8 主题色 dot 的默认值，也是 8.1.9 起样式表里写死的小圆圈颜色（--em-dot） */
+const RETIRED_DOT_DEFAULT = '#bf1d25';
+
+/** 把颜色字段上的主题色引用 ref 换成颜色 to；没换到的原样返回（同一个对象） */
+function swapColorRef(node: unknown, ref: string, to: string): unknown {
+  if (Array.isArray(node)) {
+    let out: unknown[] | null = null;
+    for (let i = 0; i < node.length; i++) {
+      const next = swapColorRef(node[i], ref, to);
+      if (next !== node[i]) (out ??= node.slice())[i] = next;
+    }
+    return out ?? node;
+  }
+  if (!node || typeof node !== 'object') return node;
+  let out: Record<string, unknown> | null = null;
+  for (const [k, v] of Object.entries(node)) {
+    const next = COLOR_FIELDS.has(k) && v === ref ? to : swapColorRef(v, ref, to);
+    if (next !== v) (out ??= { ...(node as Record<string, unknown>) })[k] = next;
+  }
+  return out ?? node;
+}
+
 /**
  * 去掉已经不用的项（读到就去掉，下次存的就没有了）：
  *   · 8.1.8 发布时平板菜单的主题色里有一项 dot（封面标题右下角小圆圈的颜色），8.1.9 起写死在样式表里——
- *     留着它，8.1.9 的核对不认（没有这个主题色），退回 8.1.7 时那边也不认（测试会话对 5fec3e3 的 P1，docs/EMENU.md 16.9）
+ *     留着它，8.1.9 的核对不认（没有这个主题色），退回 8.1.7 时那边也不认（测试会话对 5fec3e3 的 P1，docs/EMENU.md 16.9）。
+ *     8.1.8 的颜色选择器里也能选 dot（例如屏背景选了它）：去掉之前先把引用「$dot」的颜色字段换成当时存的颜色，
+ *     不然 8.1.9 显示成样式表里的固定色、8.1.7 显示成透明（测试会话对 e2381e3 的 P2）。没有 dot 却还引用着的（8.1.9 候选读过又存的），
+ *     换成 8.1.8 的默认色——与候选显示的一样。
  */
 function dropRetiredKeys(raw: unknown): unknown {
   const d = raw as { surface?: unknown; theme?: { colors?: Record<string, unknown> } } | null;
-  const colors = d?.surface === 'emenu' ? d.theme?.colors : undefined;
-  if (!colors || typeof colors !== 'object' || !('dot' in colors)) return raw;
-  const { dot: _retired, ...rest } = colors;
-  return { ...d, theme: { ...d!.theme, colors: rest } };
+  if (d?.surface !== 'emenu' || !d.theme || typeof d.theme !== 'object') return raw;
+  const colors = d.theme.colors && typeof d.theme.colors === 'object' ? d.theme.colors : undefined;
+  const hasDot = !!colors && 'dot' in colors;
+  const saved = hasDot ? colors!.dot : undefined;
+  const to = typeof saved === 'string' && HEX_COLOR.test(saved) ? saved : RETIRED_DOT_DEFAULT;
+  const { theme, ...body } = d;
+  const swapped = swapColorRef(body, '$dot', to);
+  if (swapped === body && !hasDot) return raw;
+  let nextTheme = theme;
+  if (hasDot) {
+    const { dot: _retired, ...rest } = colors!;
+    nextTheme = { ...theme, colors: rest };
+  }
+  // 先摊开原来的，键的先后不变
+  return { ...d, ...(swapped as object), theme: nextTheme };
 }
 
 /** 一份版面里用到的素材（按出现的先后，不重复；组件里的也算） */

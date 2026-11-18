@@ -152,6 +152,38 @@ describe('版面格式', () => {
     expect((upgradeStudioDoc(mp) as StudioDoc).theme.colors).toHaveProperty('dot');
   });
 
+  it('8.1.8 的颜色选择器选了 dot 的地方（屏背景、块、组件、菜的状态）：去掉主题色前换成当时存的颜色（测试会话对 e2381e3 的 P2）', () => {
+    const saved = clone(defaultStudioDoc('emenu')) as StudioDoc;
+    saved.theme.colors.dot = '#2078ae';
+    saved.screens.menu!.background = '$dot';
+    // 设计师加的块：底色选了 dot、描边选了 ink；文字的颜色选了 dot，字本身写着「$dot」（不是颜色，不动）
+    const raw = JSON.parse(JSON.stringify(saved)) as { screens: Record<string, { background: string | null; nodes: unknown[] }>; dishStates?: unknown };
+    raw.screens.menu!.nodes.push(
+      { type: 'rect', id: 'p2-rect', x: 10, y: 10, w: 40, h: 40, fill: '$dot', stroke: '$ink', strokeWidth: 1 },
+      { type: 'text', id: 'p2-text', x: 10, y: 60, w: 200, h: 30, text: { zh: '$dot', en: '' }, color: '$dot' },
+    );
+    raw.dishStates = { sold_out: { textColor: '$dot', shade: '$dot' } };
+
+    const up = DocSchema.parse(upgradeStudioDoc(raw));
+    expect(up.theme.colors).not.toHaveProperty('dot');
+    expect(up.screens.menu!.background).toBe('#2078ae');
+    const nodes = up.screens.menu!.nodes;
+    const rect = nodes.find((n) => n.id === 'p2-rect') as { fill: string | null; stroke: string | null };
+    expect(rect).toMatchObject({ fill: '#2078ae', stroke: '$ink' }); // 别的主题色引用照旧
+    const text = nodes.find((n) => n.id === 'p2-text') as { color: string; text: { zh: string } };
+    expect(text).toMatchObject({ color: '#2078ae', text: { zh: '$dot' } });
+    expect(up.dishStates?.sold_out).toEqual({ textColor: '#2078ae', shade: '#2078ae' });
+    expect(validateStudioDoc(up)).toEqual([]);
+    // 读到的原件不改
+    expect(raw.screens.menu!.background).toBe('$dot');
+
+    // 没有 dot 却还引用着的（8.1.9 候选读过又存的）：换成 8.1.8 的默认色，与候选显示的一样
+    const dangling = clone(defaultStudioDoc('emenu')) as StudioDoc;
+    dangling.screens.menu!.background = '$dot';
+    expect(DocSchema.parse(upgradeStudioDoc(dangling)).screens.menu!.background).toBe('#bf1d25');
+    expect(dangling.screens.menu!.background).toBe('$dot');
+  });
+
   it('退回上一版也读得了（8.1.8 测试会话 P1）：主题色一项不多，与 8.1.7 一样', () => {
     // 版面里存着上一版不认识的主题色时，上一版的工作台报「没有「x」这个主题色」：发布的版面读不出来、草稿存不进（STUDIO_INVALID）。
     // 8.1.8 起先加的「标题右下角的小圆圈」就是这样，测试会话照「留着数据库退回 8.1.7」复现过；现在小圆圈的颜色写死在样式表里。
