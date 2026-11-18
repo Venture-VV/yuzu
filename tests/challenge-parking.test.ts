@@ -43,7 +43,22 @@ const edit = async (code: string, patch: Partial<Benefit>) => {
   } = b;
   return api(ctx.app, ctx.owner, 'PUT', `/api/benefits/${b.id}`, {
     expectedVersion: version,
-    ...{ name, category, startGrade, startTier, period, quantity, tierQuantities, templateId, events, festivalDates, visitTarget, parking, parkingHours, parkingHoursByTier, content, conditions },
+    name,
+    category,
+    startGrade,
+    startTier,
+    period,
+    quantity,
+    tierQuantities,
+    templateId,
+    events,
+    festivalDates,
+    visitTarget,
+    parking,
+    parkingHours,
+    parkingHoursByTier,
+    content,
+    conditions,
     ...patch,
   });
 };

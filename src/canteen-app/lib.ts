@@ -32,6 +32,7 @@ export async function call<T>(method: 'GET' | 'POST' | 'PUT', path: string, body
       method,
       credentials: 'same-origin',
       headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      // oxlint-disable-next-line unicorn/no-invalid-fetch-options -- method 是参数，GET 时调用方不传 body（这里是 undefined）
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: ctrl.signal,
     });

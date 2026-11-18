@@ -454,7 +454,7 @@ export class FloorplanJobs {
 
   /** 等正在跑的转换结束（测试用） */
   async idle() {
-    while (this.pending.size) await Promise.allSettled([...this.pending]);
+    while (this.pending.size) await Promise.allSettled(this.pending);
   }
 
   stopAll() {

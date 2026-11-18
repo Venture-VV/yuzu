@@ -499,7 +499,7 @@ export function ReceiptEditor({
   const canReRecognize = uploadIds.length > 0 && ['待核对', '待补全', '待复核'].includes(receipt?.status || '待核对') && ['待核对', '待补全', '待复核'].includes(status);
   const currentOccurredAt = !occurredEdited && (receipt?.occurredAt || seed?.occurredAt) ? receipt?.occurredAt || seed?.occurredAt : occurredAt ? iso(occurredAt) : '';
   const snapshot: Partial<Receipt> = {
-    ...(receipt || {}),
+    ...receipt,
     memberId,
     number,
     store,

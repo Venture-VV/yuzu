@@ -45,7 +45,7 @@ import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
 
 export async function loadClockroomRules(db: Db): Promise<ClockroomRules> {
   const row = await settingRow<Partial<ClockroomRules>>(db, 'clockroom_rules');
-  return { ...DEFAULT_CLOCKROOM_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_CLOCKROOM_RULES, ...row?.value };
 }
 
 /** 改排位、派钟、上下钟都先拿这把锁：轮钟队列是全店共用的，按先后串行 */

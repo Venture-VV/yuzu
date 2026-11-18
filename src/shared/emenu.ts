@@ -765,7 +765,7 @@ export interface EmenuEnglishGuarded {
  */
 const FORMULA_GUARDED = /^'+(?:[=+@]|-(?!\d))/;
 /** lib/csv 的 escapeCell 给哪些格子加单引号（两边要一致，tests/emenu-english.test.ts 里对过） */
-const FORMULA_START = (value: string) => /^[=+@]/.test(value) || (/^-/.test(value) && !/^-\d/.test(value));
+const FORMULA_START = (value: string) => /^[=+@]/.test(value) || (value.startsWith('-') && !/^-\d/.test(value));
 /** 导出：本来就是「单引号 + 公式开头」的格子多加一个单引号（单纯公式开头的由 lib/csv 加） */
 export const emenuSheetCellOut = (value: string): string => (FORMULA_GUARDED.test(value) ? `'${value}` : value);
 /** 读回：去掉导出时加的那一个单引号 */

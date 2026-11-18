@@ -66,22 +66,45 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
   const splitSum = lines.reduce((s, l) => s + (l.cents ?? 0), 0);
   const applyScan = (r: RecognizedInvoice) => {
     const filled: string[] = [];
-    if (r.invoiceNo) (setInvoiceNo(r.invoiceNo), filled.push('no'));
-    if (r.invoiceDate) (setInvoiceDate(r.invoiceDate), filled.push('date'));
+    if (r.invoiceNo) {
+      setInvoiceNo(r.invoiceNo);
+      filled.push('no');
+    }
+    if (r.invoiceDate) {
+      setInvoiceDate(r.invoiceDate);
+      filled.push('date');
+    }
     const k = kindFromHint(kinds, r.kindHint);
-    if (k) (setKind(k), filled.push('kind'));
+    if (k) {
+      setKind(k);
+      filled.push('kind');
+    }
     if (r.issuerName && !supplierId) {
       const s = meta.data?.suppliers.find((x) => x.name === r.issuerName);
-      if (s) (setSupplierId(s.id), setSplit({}), filled.push('supplier'));
+      if (s) {
+        setSupplierId(s.id);
+        setSplit({});
+        filled.push('supplier');
+      }
     }
     let bpNow = rateBp;
     if (r.amountExTaxCents !== undefined && r.taxCents !== undefined && r.amountExTaxCents > 0) {
       // 反推税率（取整到 0.01%）
       const guess = [100, 300, 500, 600, 900, 1000, 1300].find((b) => totalFromExTax(r.amountExTaxCents!, b).taxCents === r.taxCents);
-      if (guess !== undefined) (setRate(String(guess / 100)), (bpNow = guess), filled.push('rate'));
+      if (guess !== undefined) {
+        setRate(String(guess / 100));
+        bpNow = guess;
+        filled.push('rate');
+      }
     }
-    if (r.totalCents !== undefined) (setTotal(centsToInput(r.totalCents)), filled.push('total'));
-    if (r.taxCents !== undefined) (setTax(centsToInput(r.taxCents)), filled.push('tax'));
+    if (r.totalCents !== undefined) {
+      setTotal(centsToInput(r.totalCents));
+      filled.push('total');
+    }
+    if (r.taxCents !== undefined) {
+      setTax(centsToInput(r.taxCents));
+      filled.push('tax');
+    }
     if (r.totalCents === undefined && r.amountExTaxCents !== undefined && bpNow !== null) {
       const t = totalFromExTax(r.amountExTaxCents, bpNow);
       setTotal(centsToInput(t.totalCents));

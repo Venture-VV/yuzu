@@ -76,7 +76,7 @@ export function nextPayDay(from: string, days: readonly number[], strictlyAfter 
   for (let k = 0; k < 3; k++) {
     const first = new Date(Date.UTC(y, m - 1 + k, 1));
     const last = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
-    for (const d of [...new Set(list.map((x) => Math.min(x, last)))]) {
+    for (const d of new Set(list.map((x) => Math.min(x, last)))) {
       const date = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), d)).toISOString().slice(0, 10);
       if (strictlyAfter ? date > from : date >= from) return date;
     }

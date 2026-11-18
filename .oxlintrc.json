@@ -1,0 +1,63 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error"
+  },
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "react",
+    "oxc"
+  ],
+  "rules": {
+    "react/set-state-in-effect": "off",
+    "react/refs": "off",
+    "react/purity": "off",
+    "react/immutability": "off",
+    "react/preserve-manual-memoization": "off",
+    "react/use-memo": "off",
+    "react/static-components": "off",
+    "react-hooks/exhaustive-deps": "off",
+    "no-unused-expressions": [
+      "error",
+      {
+        "allowShortCircuit": true,
+        "allowTernary": true
+      }
+    ],
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "ignoreRestSiblings": true,
+        "caughtErrors": "none"
+      }
+    ],
+    "no-control-regex": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "e2e/**",
+        "e2e-canteen/**"
+      ],
+      "rules": {
+        "no-empty-pattern": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "miniprogram/**",
+    "src/gateway/**",
+    "src/server/modules/mp/**",
+    "src/client/features/mp/**",
+    "src/shared/mp.ts",
+    "tests/mp-*.test.ts",
+    "tests/gateway*.test.ts",
+    "e2e/mp-*.ts",
+    "src/client/public/**",
+    "dist/**",
+    "brand/**"
+  ]
+}

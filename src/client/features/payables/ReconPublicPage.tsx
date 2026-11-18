@@ -10,7 +10,7 @@ import { Button, Field, Input, Notice, Skeleton, Textarea } from '../../componen
 const yuan = (cents: number) => `¥${formatAmount(cents)}`;
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } });
+  const res = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...init?.headers } });
   const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
   if (!res.ok) throw new Error(body?.error?.message ?? `出错了（${res.status}），请稍后再试`);
   return body as T;

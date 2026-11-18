@@ -140,7 +140,7 @@ export async function recognizeInvoiceFile(file: File, onProgress: (message: str
   if (qr) {
     // 二维码给号码、日期、不含税金额；PDF 文字补上价税合计、税额、开票方
     return {
-      ...(fromText ?? {}),
+      ...fromText,
       ...qr,
       method: 'qr',
       ...(fromText?.totalCents !== undefined ? { totalCents: fromText.totalCents } : {}),

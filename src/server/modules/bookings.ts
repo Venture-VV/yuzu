@@ -58,7 +58,7 @@ import { currentStoreId, forEachStore } from '../lib/store-context';
 
 export async function loadBookingRules(db: Db): Promise<BookingRules> {
   const row = await settingRow<Partial<BookingRules>>(db, 'booking_rules');
-  return { ...DEFAULT_BOOKING_RULES, ...(row?.value ?? {}) };
+  return { ...DEFAULT_BOOKING_RULES, ...row?.value };
 }
 
 const minutesField = (label: string, min: number, max: number) => z.number(`请填写${label}`).int(`${label}要是整数`).min(min, `${label}最少 ${min}`).max(max, `${label}最多 ${max}`);

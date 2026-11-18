@@ -361,7 +361,7 @@ describe('英文对照表', () => {
     ] as const) {
       // 文件里的样子 = 这里多加的那一个 + lib/csv 给公式开头加的那一个
       const out = emenuSheetCellOut(text);
-      const guarded = /^[=+@]/.test(out) || (/^-/.test(out) && !/^-\d/.test(out)) ? `'${out}` : out;
+      const guarded = /^[=+@]/.test(out) || (out.startsWith('-') && !/^-\d/.test(out)) ? `'${out}` : out;
       expect(guarded, text).toBe(inFile);
       expect(emenuSheetCellIn(inFile), text).toBe(text);
     }

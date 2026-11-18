@@ -303,7 +303,7 @@ export function resolveSlot(def: EmenuSlotDef, o: StudioSlotOverride | undefined
   let big = def.big;
   if (o?.big) {
     const b = o.big;
-    big = { ...(def.big ?? {}) };
+    big = { ...def.big };
     if (b.x !== undefined) big.x = b.x;
     if (b.y !== undefined) {
       big.y = b.y;
@@ -344,8 +344,8 @@ function writeOverride(doc: StudioDoc, layout: string, key: string, o: StudioSlo
   const clean: StudioSlotOverride = {};
   for (const mode of ['design', 'big'] as const) if (o[mode] && Object.keys(o[mode]!).length) clean[mode] = o[mode];
   if (o.hidden) clean.hidden = true;
-  const all: Templates = { ...(doc.templates ?? {}) };
-  const slots = { ...(all[layout] ?? {}) };
+  const all: Templates = { ...doc.templates };
+  const slots = { ...all[layout] };
   if (Object.keys(clean).length) slots[key] = clean;
   else delete slots[key];
   if (Object.keys(slots).length) all[layout] = slots;
@@ -364,7 +364,7 @@ export function setSlotSpot(doc: StudioDoc, layout: string, key: string, mode: E
   if (!def) return doc;
   const o = doc.templates?.[layout]?.[key] ?? {};
   const base = slotSpot(resolveSlot(def, { ...o, [mode]: undefined }), mode);
-  const patch: NonNullable<StudioSlotOverride['design']> = { ...(o[mode] ?? {}) };
+  const patch: NonNullable<StudioSlotOverride['design']> = { ...o[mode] };
   for (const f of ['x', 'w', 'h'] as const) {
     const v = next[f];
     if (v === undefined) continue;
@@ -387,7 +387,7 @@ export function setSlotSpot(doc: StudioDoc, layout: string, key: string, mode: E
 /** 藏起来 / 显示（两档一起）。照片的圆角 8.1.8 起不再有（PB3） */
 export function setSlotFlags(doc: StudioDoc, layout: string, key: string, flags: { hidden?: boolean }): StudioDoc {
   if (!findSlotDef(layout, key)) return doc;
-  const o = { ...(doc.templates?.[layout]?.[key] ?? {}) };
+  const o = { ...doc.templates?.[layout]?.[key] };
   if (flags.hidden !== undefined) o.hidden = flags.hidden;
   return writeOverride(doc, layout, key, o);
 }
@@ -428,14 +428,14 @@ export const DISH_STATE_LABELS: Record<StudioDishState, string> = { sold_out: '�
 
 /** 一种状态叠上改动以后的样子 */
 export function dishStateStyle(states: StudioDoc['dishStates'] | null | undefined, state: StudioDishState): Required<StudioDishStateStyle> {
-  return { ...DISH_STATE_DEFAULT, ...(states?.[state] ?? {}) };
+  return { ...DISH_STATE_DEFAULT, ...states?.[state] };
 }
 
 /** 改一种状态的样子：与设计稿一样的项去掉，全去掉时版面里没有 dishStates */
 export function setDishState(doc: StudioDoc, state: StudioDishState, patch: StudioDishStateStyle): StudioDoc {
-  const cur: StudioDishStateStyle = { ...(doc.dishStates?.[state] ?? {}), ...patch };
+  const cur: StudioDishStateStyle = { ...doc.dishStates?.[state], ...patch };
   for (const k of Object.keys(cur) as (keyof StudioDishStateStyle)[]) if (cur[k] === undefined || cur[k] === DISH_STATE_DEFAULT[k]) delete cur[k];
-  const all = { ...(doc.dishStates ?? {}) };
+  const all = { ...doc.dishStates };
   if (Object.keys(cur).length) all[state] = cur;
   else delete all[state];
   const next: StudioDoc = { ...doc, dishStates: all };

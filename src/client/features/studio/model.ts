@@ -433,7 +433,7 @@ export function makeComponentFrom(doc: StudioDoc, screen: string, id: string, su
     component: cid,
     ...(f.node.sizing ? { sizing: f.node.sizing } : {}),
   };
-  const withComp: StudioDoc = { ...doc, components: { ...(doc.components ?? {}), [cid]: { name, node: master } } };
+  const withComp: StudioDoc = { ...doc, components: { ...doc.components, [cid]: { name, node: master } } };
   return { doc: updateNode(withComp, screen, id, () => inst), cid };
 }
 

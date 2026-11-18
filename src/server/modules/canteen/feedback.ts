@@ -243,7 +243,7 @@ export function feedbackCsvRows(rows: CanteenFeedbackRow[], timeZone: string): s
   const fmt = new Intl.DateTimeFormat('zh-CN', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const at = (iso: string | null) => (iso ? fmt.format(new Date(iso)) : '');
   // 员工随手写的话：以 - 开头的也加一个单引号（toCsv 只挡 = + @ 和不是负数的 -），免得表格软件当成公式
-  const text = (v: string) => (/^-/.test(v) ? `'${v}` : v);
+  const text = (v: string) => (v.startsWith('-') ? `'${v}` : v);
   return [
     ['时间', '工号', '名字', '种类', '内容', '看过', '回信', '回信时间', '回信人'],
     ...rows.map((r) => [

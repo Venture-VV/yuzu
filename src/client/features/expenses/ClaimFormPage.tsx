@@ -544,13 +544,22 @@ export function ClaimFormPage() {
                     const k = kindFromHint(types, r.kindHint);
                     const t = types.find((x) => x.key === (k ?? invoiceType));
                     touch('invoice');
-                    if (k) (setInvoiceType(k), filled.push('kind'));
+                    if (k) {
+                      setInvoiceType(k);
+                      filled.push('kind');
+                    }
                     let bp: number | null = t && t.taxRatesBp.length === 1 ? t.taxRatesBp[0]! : k ? null : taxRateBp;
                     if (t && r.amountExTaxCents !== undefined && r.taxCents !== undefined) {
                       bp = t.taxRatesBp.find((b) => totalFromExTax(r.amountExTaxCents!, b).taxCents === r.taxCents) ?? bp;
                     }
-                    if (bp !== null && t) (setTaxRateBp(bp), filled.push('rate'));
-                    if (r.invoiceNo) (setInvoiceNo(r.invoiceNo), filled.push('no'));
+                    if (bp !== null && t) {
+                      setTaxRateBp(bp);
+                      filled.push('rate');
+                    }
+                    if (r.invoiceNo) {
+                      setInvoiceNo(r.invoiceNo);
+                      filled.push('no');
+                    }
                     setInvExtras((x) => ({
                       invoiceId: null,
                       issuer: r.issuerName ?? x.issuer,
