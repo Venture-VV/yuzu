@@ -144,7 +144,7 @@ export function StayDialog({
             </button>
           )}
           {can('frontdesk.read') && (
-            <Link to={`/frontdesk?v=${d.visitId}`} className="inline-flex items-center gap-1 font-semibold text-pine hover:underline" data-testid="stay-open-bill">
+            <Link to={`/cashier?v=${d.visitId}`} className="inline-flex items-center gap-1 font-semibold text-pine hover:underline" data-testid="stay-open-bill">
               <ReceiptText className="size-3.5" /> 打开手牌账单
             </Link>
           )}

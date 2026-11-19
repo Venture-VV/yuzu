@@ -1014,7 +1014,7 @@ function UsagePart({
           </Button>
           {canPost && (
             <Link to={`/frontdesk?v=${u.visitId}`} className="inline-flex h-8 items-center px-2 text-[13px] font-semibold text-pine hover:underline" data-testid="floormap-usage-post">
-              去前台挂账 →
+              去发卡台挂账 →
             </Link>
           )}
         </div>

@@ -545,6 +545,32 @@ export async function cancelVisit(deps: Deps, visitId: number, raw: unknown, ctx
 
 // ───────────────────────── 读取 ─────────────────────────
 
+/**
+ * 手牌板上会员的档阶与手上能用的券（8.1.14，只读）：在店会员一次查完，发卡台认身份、收银台提醒有券 / 有签赠没用。
+ * 档阶与 VIP 柜核对用同一个来源（memberGradeBadges）；券只数此刻能用的（没用过、没作废、在有效期里）。
+ */
+export async function withMemberMarks(db: Db, board: FrontdeskBoard, date: string): Promise<FrontdeskBoard> {
+  const memberIds = [...new Set(board.tags.flatMap((t) => (t.visit?.memberId ? [t.visit.memberId] : [])))];
+  if (memberIds.length === 0) return board;
+  const grades = await memberLockerGrades(db, memberIds, date);
+  const counts = await db<{ memberId: number; coupons: number; gifts: number }[]>`
+    SELECT c.member_id, count(*)::int AS coupons, (count(*) FILTER (WHERE t.gift))::int AS gifts
+    FROM coupons c JOIN coupon_templates t ON t.id = c.template_id
+    WHERE c.member_id IN ${db(memberIds)} AND c.status = 'available' AND c.valid_from <= ${date} AND c.valid_to >= ${date}
+    GROUP BY c.member_id`;
+  const byMember = new Map(counts.map((r) => [Number(r.memberId), r]));
+  return {
+    ...board,
+    tags: board.tags.map((t) => {
+      const v = t.visit;
+      if (!v?.memberId) return t;
+      const g = grades.get(v.memberId);
+      const c = byMember.get(v.memberId);
+      return { ...t, visit: { ...v, memberGradeLabel: g && g.grade > 0 ? g.label : null, coupons: c?.coupons ?? 0, gifts: c?.gifts ?? 0 } };
+    }),
+  };
+}
+
 export async function getBoard(db: Db): Promise<FrontdeskBoard> {
   const rows = await db<
     (Omit<FrontdeskBoard['tags'][number], 'visit'> & {
@@ -602,6 +628,10 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
           groupOpenCount: r.groupOpenCount,
           amountCents: r.amountCents ?? 0,
           lineCount: r.lineCount ?? 0,
+          // 档阶与手上的券由 withMemberMarks 按当天补上（8.1.14）；这里先给空的
+          memberGradeLabel: null,
+          coupons: 0,
+          gifts: 0,
         }
       : null,
   }));

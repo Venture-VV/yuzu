@@ -3,7 +3,21 @@
 // 末尾的走纸与切纸在发送时补上（finishSlip：等过打印机恢复的注明补打）。完整的 A4 日结单照旧用浏览器打印。
 
 import { minutesText } from '@shared/benefits';
-import { businessBreakdown, CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS, ticketTierLabel, type CheckoutMethod, type RefundDetail, type ShiftRecord, type ShiftSummary } from '@shared/checkout';
+import {
+  businessBreakdown,
+  CHECKOUT_METHOD_LABELS,
+  COUPON_PLATFORM_LABELS,
+  PERK_MARKS,
+  perkOperatorsText,
+  perksTotal,
+  perkTitle,
+  ticketTierLabel,
+  type CheckoutMethod,
+  type PerkKind,
+  type RefundDetail,
+  type ShiftRecord,
+  type ShiftSummary,
+} from '@shared/checkout';
 import { describeDate, PAYMENT_METHOD_LABELS, PAYMENT_METHODS } from '@shared/labels';
 import { formatYuan } from '@shared/money';
 import type { CheckoutPrint } from '@shared/print';
@@ -139,6 +153,9 @@ export function finishSlip(body: Buffer, opts: { waitedSince: Date | null; now: 
 
 // ───────────────────────── 结账单 ─────────────────────────
 
+/** 明细行上的权益标记：「 [赠]」「 [券折]」；没有为空 */
+const perkMarks = (kinds: readonly PerkKind[]) => (kinds.length ? ` [${kinds.map((k) => PERK_MARKS[k]).join('')}]` : '');
+
 export function buildCheckoutSlip(d: CheckoutPrint, meta: SlipMeta): Buffer {
   const s = new Slip(meta).header('结 账 单');
   const tz = meta.timeZone;
@@ -160,7 +177,8 @@ export function buildCheckoutSlip(d: CheckoutPrint, meta: SlipMeta): Buffer {
     if (b.ticketExtensionMinutes > 0) stay += ` · 会员浴票延迟 ${minutesText(b.ticketExtensionMinutes)}`;
     s.text(stay);
     for (const l of b.lines) {
-      s.pair(l.name, yuan(l.amount));
+      // 被签赠、券、会员折扣抵到的行标出来（8.1.14）：「足疗 [赠]」
+      s.pair(`${l.name}${perkMarks(l.perks)}`, yuan(l.amount));
       if (l.technician) s.text(`技师 ${l.technician}`, 2);
       if (l.quantity > 1) s.text(`${l.quantity} × ${yuan(l.unitPrice)}`, 2);
     }
@@ -168,9 +186,23 @@ export function buildCheckoutSlip(d: CheckoutPrint, meta: SlipMeta): Buffer {
     if (b.linesTotal !== b.amount) s.strong(`明细合计 ${yuan(b.linesTotal)} 与结账金额不同，以结账金额为准`);
     s.pair('小计', yuan(b.amount), { strong: true });
   });
-  s.rule(true).pair('应收合计', yuan(d.totalAmount), { big: true }).strong('收款');
-  if (d.payments.length === 0) s.text('应收为 0，未收款');
-  for (const p of d.payments) {
+  s.rule(true).pair('应收合计', yuan(d.totalAmount), { big: true });
+  // 优惠与赠送（8.1.14）：签赠、券、会员折扣、优惠 / 免单各一笔，写明经办人；下面的「收款」只列真收的钱与预付抵扣
+  const perkPayments = new Set(d.perks.map((p) => p.paymentId));
+  if (d.perks.length > 0) {
+    s.strong('优惠与赠送');
+    for (const k of d.perks) {
+      s.pair(perkTitle(k), `-${yuan(k.amount)}`);
+      const who = perkOperatorsText(k);
+      if (who) s.text(who, 2);
+      if (k.detail) s.text(k.detail, 2);
+    }
+    s.pair('共优惠', yuan(perksTotal(d.perks)), { strong: true }).pair('优惠后应付', yuan(d.totalAmount - perksTotal(d.perks)), { strong: true });
+  }
+  s.strong('收款');
+  const tenders = d.payments.filter((p) => !perkPayments.has(p.id));
+  if (tenders.length === 0) s.text(d.perks.length > 0 ? '优惠后应付为 0，未收款' : '应收为 0，未收款');
+  for (const p of tenders) {
     s.pair(`${methodLabel(p.method)}${p.method === 'wallet' && p.memberName ? ` · ${p.memberName}` : ''}`, yuan(p.amount));
     if (p.method === 'wallet' && p.consumption) {
       s.text(`扣本金 ${yuan(p.consumption.principal)} · 扣赠金 ${yuan(p.consumption.bonus)}`, 2);

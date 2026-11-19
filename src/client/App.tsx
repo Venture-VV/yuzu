@@ -17,6 +17,7 @@ import { NetworkPage } from './features/network/NetworkPage';
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
+import { DeskLayout } from './features/frontdesk/desk';
 import { ADMIN_SECTIONS } from '@shared/admin';
 import { adminRoutes } from './features/admin/AdminPage';
 import { useCan, useOptionalSession } from './lib/session';
@@ -24,6 +25,7 @@ import { useErpAccess } from './features/erp/access';
 import { lazyPage } from './lib/lazyPage';
 
 // 会员工作台与前台随首屏加载；其余页面第一次打开时再下载（v0.7.22：收银台首屏更轻）
+const CashierPage = lazyPage(() => import('./features/frontdesk/CashierPage').then((m) => m.CashierPage));
 const ClockroomPage = lazyPage(() => import('./features/clockroom/ClockroomPage').then((m) => m.ClockroomPage));
 const DiningPage = lazyPage(() => import('./features/dining/DiningPage').then((m) => m.DiningPage));
 const RoomsPage = lazyPage(() => import('./features/rooms/RoomsPage').then((m) => m.RoomsPage));
@@ -362,7 +364,14 @@ const router = createBrowserRouter([
     element: <AuthGate />,
     children: [
       { index: true, element: <Home /> },
-      { path: 'frontdesk', element: <FrontdeskPage /> },
+      // 8.1.14：原「前台」拆成发卡台（/frontdesk，地址沿用）与收银台（/cashier）；两个台共用一个补录纸质单的状态
+      {
+        element: <DeskLayout />,
+        children: [
+          { path: 'frontdesk', element: <FrontdeskPage /> },
+          { path: 'cashier', element: <CashierPage /> },
+        ],
+      },
       { path: 'clockroom', element: <ClockroomPage /> },
       { path: 'dining/:tab?', element: <DiningPage /> },
       { path: 'rooms', element: <RoomsPage /> },

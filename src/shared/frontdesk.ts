@@ -181,6 +181,13 @@ export interface BoardVisit {
   groupOpenCount: number;
   amountCents: number;
   lineCount: number;
+  /**
+   * 会员等级识别（8.1.14，docs/DESKS_V8114.md 第 3 节）：会员的档阶（「L3 观澜」；体验身份另见客人卡），散客、没定档的为 null；
+   * 手上此刻能用的券几张、其中签赠几张——发卡台的手牌板与收银台的待结账清单都按它标出来
+   */
+  memberGradeLabel: string | null;
+  coupons: number;
+  gifts: number;
 }
 
 export interface FrontdeskBoard {

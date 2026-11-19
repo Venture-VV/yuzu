@@ -1,41 +1,33 @@
+// 发卡台（8.1.14，docs/DESKS_V8114.md 第 3.2 节；原「前台」）：客人入场——接待发牌、会员等级识别、换牌、同行、挂账，
+// 以及找客人、锁牌、补录纸质单。不参与结账：看账单、预结账、结账、结账记录都在收银台（CashierPage）。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { FilePenLine, Hash, Keyboard, Lock, ReceiptText, Search, ShieldCheck, Store, UserPlus, X } from 'lucide-react';
+import { FilePenLine, Hash, Keyboard, Lock, Search, ShieldCheck, UserPlus, X } from 'lucide-react';
 import { matchTags, normalizeTagCode, TAG_ZONES, uniqueTagMatch, ZONE_LABELS, type BoardTag, type CheckinResult, type TagZone, type VisitDetail } from '@shared/frontdesk';
 import { useCan, useSession } from '../../lib/session';
-import { CrossDayShiftNotice } from '../shift/ShiftGate';
 import { cn, isTypingTarget } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
-import { Money } from '../../components/Money';
 import { Dialog, Sheet } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Button, Kbd, Notice, Segmented, Skeleton } from '../../components/ui';
 import { useMedia } from '../inventory/useMedia';
 import { AddItemsDialog } from './AddItemsDialog';
-import { BackfillBar, BackfillProvider, useBackfill } from './backfill';
+import { BackfillBar, useBackfill } from './backfill';
 import { BillPanel, type PanelAction } from './BillPanel';
 import { CheckinDialog, type CheckinPrefill } from './CheckinDialog';
-import { CheckoutDialog, CheckoutRecordsDialog, TicketDialog } from './CheckoutDialog';
+import { TicketDialog } from './CheckoutDialog';
+import { MemberEntitlements } from './desk';
 import { groupTags, Stat, TagCard, TagChip, VipChip, ZoneChip } from './parts';
 import { useBoard, useFrontdeskChecks, useRefreshFrontdesk, useServerNow, useVisit } from './queries';
 import { FindGuestDialog, TagLockDialog } from './ToolDialogs';
-import { JoinGroupDialog, PreviewDialog, SwapDialog } from './VisitDialogs';
+import { JoinGroupDialog, SwapDialog } from './VisitDialogs';
 import { MoveLinesDialog } from './MoveLinesDialog';
-import { UnsettledPayBanner } from '../pay/ScanPay';
-import { UnusedVerificationsBanner } from '../pay/VoucherVerify';
 
 type StatusFilter = 'all' | 'in' | 'free' | 'locked';
 
+/** 发卡台；补录纸质单的状态在两个台共用的外层（desk.tsx 的 DeskLayout） */
 export function FrontdeskPage() {
-  return (
-    <BackfillProvider>
-      <FrontdeskBoard />
-    </BackfillProvider>
-  );
-}
-
-function FrontdeskBoard() {
   const session = useSession();
   const can = useCan();
   const navigate = useNavigate();
@@ -55,7 +47,7 @@ function FrontdeskBoard() {
   const [ambiguous, setAmbiguous] = useState(false);
   const [zone, setZone] = useState<'all' | TagZone>('all');
   const [status, setStatus] = useState<StatusFilter>('all');
-  const [dialog, setDialog] = useState<null | { kind: 'checkin'; prefill: CheckinPrefill } | { kind: PanelAction; ids?: number[]; checkoutId?: number }>(null);
+  const [dialog, setDialog] = useState<null | { kind: 'checkin'; prefill: CheckinPrefill } | { kind: PanelAction }>(null);
   const [checksOpen, setChecksOpen] = useState(false);
   /** 找在店客人、锁牌 / 解锁 */
   const [tool, setTool] = useState<null | { kind: 'find' } | { kind: 'lock'; code?: string }>(null);
@@ -100,33 +92,36 @@ function FrontdeskBoard() {
   // 从顶部「结果待确认」进入：打开对应对话框，由对话框显示原操作并处理
   const resume = params.get('resume');
   useEffect(() => {
-    if (!resume || !board.data) return;
-    // 退款单（v0.7.20）：打开结账记录里的原结账单，不需要选中手牌
-    if (resume !== 'checkin' && resume !== 'checkout_refund' && (!visit.data || visit.data.id !== selectedId)) return;
+    if (!resume) return;
+    // 结账、退款单在收银台处理（8.1.14）：旧链接、书签带着这两种来的转过去
+    if (resume === 'checkout' || resume === 'checkout_refund') {
+      navigate(`/cashier?${params}`, { replace: true });
+      return;
+    }
+    if (!board.data) return;
+    if (resume !== 'checkin' && (!visit.data || visit.data.id !== selectedId)) return;
     if (resume === 'checkin') setDialog({ kind: 'checkin', prefill: {} });
-    else if (resume === 'checkout_refund') setDialog({ kind: 'records', checkoutId: Number(params.get('c')) || undefined });
     else if (resume === 'bill_post') setDialog({ kind: 'add' });
     else if (resume === 'tag_swap') setDialog({ kind: 'swap' });
-    else if (resume === 'checkout') setDialog({ kind: 'checkout' });
     else if (resume === 'line_move') setDialog({ kind: 'move' });
     const next = new URLSearchParams(params);
     next.delete('resume');
     next.delete('c');
     setParams(next, { replace: true });
-  }, [resume, board.data, visit.data, selectedId, params, setParams]);
+  }, [resume, board.data, visit.data, selectedId, params, setParams, navigate]);
 
   const companions = useMemo(() => {
     const g = visit.data?.group;
     return new Set(g ? g.mates.filter((m) => m.status === 'open').map((m) => m.visitId) : []);
   }, [visit.data]);
 
-  // 盲打牌号：在页面任意位置直接敲数字或字母，自动进入牌号框；F2 发牌、F4 加项目、F8 预结账
+  // 盲打牌号：在页面任意位置直接敲数字或字母，自动进入牌号框；F2 发牌、F4 加项目（预结账、结账在收银台）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      // 平板竖屏时账单是侧滑抽屉（也是 dialog），不挡快捷键；其他弹窗打开时不响应
-      if (document.querySelector('[role="dialog"]:not([aria-label="手牌账单"])')) return;
-      const sheetOpen = !!document.querySelector('[role="dialog"][aria-label="手牌账单"]');
+      // 平板竖屏时客人卡是侧滑抽屉（也是 dialog），不挡快捷键；其他弹窗打开时不响应
+      if (document.querySelector('[role="dialog"]:not([aria-label="客人卡"])')) return;
+      const sheetOpen = !!document.querySelector('[role="dialog"][aria-label="客人卡"]');
       if (e.key === 'F2' && can('frontdesk.operate')) {
         e.preventDefault();
         setDialog({ kind: 'checkin', prefill: {} });
@@ -135,16 +130,6 @@ function FrontdeskBoard() {
       if (e.key === 'F4' && visit.data?.status === 'open' && can('frontdesk.operate')) {
         e.preventDefault();
         setDialog({ kind: 'add' });
-        return;
-      }
-      if (e.key === 'F8' && visit.data?.status === 'open') {
-        e.preventDefault();
-        setDialog({ kind: 'preview' });
-        return;
-      }
-      if (e.key === 'F9' && visit.data?.status === 'open' && can('frontdesk.checkout')) {
-        e.preventDefault();
-        setDialog({ kind: 'checkout' });
         return;
       }
       if (isTypingTarget(e.target)) return;
@@ -184,8 +169,16 @@ function FrontdeskBoard() {
   };
 
   const stats = board.data?.stats;
+  // 会员等级识别（FS6）：客人卡上写档阶能享什么；手上的券几张在手牌板的数据里
+  const selectedTag = selectedId ? tags.find((t) => t.visit?.id === selectedId) : undefined;
   const panel = (
     <BillPanel
+      desk="issue"
+      identityExtra={
+        visit.data?.member && visit.data.status === 'open' ? (
+          <MemberEntitlements memberId={visit.data.member.id} grade={visit.data.memberGrade} coupons={selectedTag?.visit?.coupons ?? 0} gifts={selectedTag?.visit?.gifts ?? 0} />
+        ) : undefined
+      }
       visit={visit.data}
       loading={visit.isPending}
       error={visit.error}
@@ -207,7 +200,7 @@ function FrontdeskBoard() {
   return (
     <>
       <PageHeader
-        title="前台 · 在店手牌"
+        title="发卡台 · 在店手牌"
         subtitle={
           stats ? (
             <span className="flex flex-wrap gap-x-4">
@@ -249,14 +242,6 @@ function FrontdeskBoard() {
                   补录纸质单
                 </Button>
               )}
-              <Button size="sm" variant="ghost" icon={<ReceiptText className="size-4" />} onClick={() => setDialog({ kind: 'records' })} data-testid="open-checkouts">
-                结账记录
-              </Button>
-              {(can('platform.redeem') || can('platform.settle')) && (
-                <Button size="sm" variant="ghost" icon={<Store className="size-4" />} onClick={() => navigate('/platform')} data-testid="open-platform">
-                  平台核销
-                </Button>
-              )}
               <Button size="sm" variant="ghost" icon={<ShieldCheck className="size-4" />} onClick={() => setChecksOpen(true)}>
                 自检
               </Button>
@@ -268,11 +253,6 @@ function FrontdeskBoard() {
         <div className="flex min-h-0 flex-col">
           {/* 牌号快检 */}
           <div className="shrink-0 space-y-3 border-b border-line px-5 pt-4 pb-3 md:px-6">
-            <CrossDayShiftNotice />
-            {/* 8.0.21 扫码收款：收了钱没入账、还在支付中、原路退款没完成的 */}
-            <UnsettledPayBanner />
-            {/* 8.0.21 平台验券：验过券没结账的 */}
-            <UnusedVerificationsBanner />
             <div className="flex flex-wrap items-stretch gap-3">
               <div className="relative min-w-[240px] flex-1">
                 <Hash className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-ink-3" />
@@ -385,9 +365,6 @@ function FrontdeskBoard() {
                     { value: 'locked', label: '锁定' },
                   ]}
                 />
-                <span className="ml-auto flex items-center gap-1.5 text-[12.5px] text-ink-3">
-                  未结合计 <Money cents={stats?.unsettledCents ?? 0} className="text-[15px] font-bold text-ink" />
-                </span>
               </div>
             )}
           </div>
@@ -465,24 +442,25 @@ function FrontdeskBoard() {
           </div>
         </div>
 
-        {/* 右侧小票抽屉（平板竖屏改为侧滑） */}
+        {/* 右侧客人卡（平板竖屏改为侧滑） */}
         {wide ? (
           <aside className="min-h-0 border-l border-line bg-paper">
             {selectedId ? (
               panel
             ) : (
-              <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-                <EmptyState art="calm" title="选一张手牌看账单" description="直接敲牌号（如 23）回车，或点左侧手牌。空闲手牌点一下即可发牌。" />
+              <div className="flex h-full flex-col items-center justify-center px-8 text-center" data-testid="issue-empty">
+                <EmptyState art="calm" title="选一张手牌看客人卡" description="直接敲牌号（如 23）回车，或点左侧手牌。空闲手牌点一下即可发牌；在店的手牌在这里换牌、加项目、绑同行。" />
                 <div className="mt-2 space-y-1.5 text-[12.5px] text-ink-3">
                   <p className="flex items-center justify-center gap-1.5">
-                    <Keyboard className="size-4" /> <Kbd>F2</Kbd> 接待发牌 · <Kbd>F4</Kbd> 加项目 · <Kbd>F8</Kbd> 预结账 · <Kbd>F9</Kbd> 结账
+                    <Keyboard className="size-4" /> <Kbd>F2</Kbd> 接待发牌 · <Kbd>F4</Kbd> 加项目
                   </p>
+                  <p>看账单、预结账与结账在「收银台」。</p>
                 </div>
               </div>
             )}
           </aside>
         ) : (
-          <Sheet open={!!selectedId} onClose={() => select(null)} label="手牌账单" width="w-[min(440px,100vw)]">
+          <Sheet open={!!selectedId} onClose={() => select(null)} label="客人卡" width="w-[min(440px,100vw)]">
             {panel}
           </Sheet>
         )}
@@ -509,32 +487,9 @@ function FrontdeskBoard() {
       {visit.data && dialog?.kind === 'join' && (
         <JoinGroupDialog open visit={visit.data} tags={tags} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `${v.tag.code} 已加入同行组 ${v.group?.groupNo ?? ''}`)} />
       )}
-      {visit.data && dialog?.kind === 'preview' && (
-        <PreviewDialog open visit={visit.data} tags={tags} onClose={() => setDialog(null)} onCheckout={can('frontdesk.checkout') ? (ids) => setDialog({ kind: 'checkout', ids }) : undefined} />
-      )}
-      {visit.data && dialog?.kind === 'checkout' && (
-        <CheckoutDialog
-          open
-          visit={visit.data}
-          tags={tags}
-          initialIds={dialog.ids}
-          onClose={() => setDialog(null)}
-          onDone={(d) => {
-            setDialog(null);
-            refresh(d.bills.flatMap((b) => (b.visitId === null ? [] : [b.visitId])));
-            toast({ tone: 'success', title: `已结清 ${d.bills.map((b) => b.tagCode ?? `桌 ${b.tableName}`).join('、')}`, body: `结账单 ${d.checkoutNo}，手牌已释放` });
-            select(null);
-          }}
-        />
-      )}
       {visit.data && dialog?.kind === 'ticket' && (
         <TicketDialog open visit={visit.data} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `${v.tag.code} 票种改为 ${v.ticket?.name ?? ''}`)} />
       )}
-      <CheckoutRecordsDialog
-        open={dialog?.kind === 'records'}
-        focusId={dialog?.kind === 'records' ? ((dialog as { checkoutId?: number }).checkoutId ?? visit.data?.checkout?.id ?? null) : null}
-        onClose={() => setDialog(null)}
-      />
       <ChecksDialog open={checksOpen} onClose={() => setChecksOpen(false)} />
       <FindGuestDialog open={tool?.kind === 'find'} tags={tags} onClose={() => setTool(null)} onPick={select} />
       <TagLockDialog
@@ -552,7 +507,7 @@ function FrontdeskBoard() {
   );
 }
 
-function ChecksDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ChecksDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const checks = useFrontdeskChecks(open);
   return (
     <Dialog open={open} onClose={onClose} title="前台账务自检" description="手牌、来访、账单与明细之间的一致性；会员钱包与日结另有自检">

@@ -2,6 +2,7 @@
 // 库存、采购、货款、待办在 ERP 工作区（v0.7.3，用户菜单「进入 ERP」），不在这里。
 
 import {
+  Banknote,
   BedDouble,
   CalendarCheck2,
   CalendarClock,
@@ -41,7 +42,10 @@ export interface StoreNavItem {
 // 前台与会员储值、管理后台是独立的业务组，导航中用分隔线区分
 const STORE_NAV: StoreNavItem[][] = [
   [
-    { to: '/frontdesk', label: '前台', icon: ConciergeBell, perm: 'frontdesk.read' },
+    // 8.1.14（docs/DESKS_V8114.md）：原「前台」按业务环节拆成两个台——发卡台管入场（接待发牌、会员等级识别、换牌），
+    // 收银台管离店结账（只读账单、预结账、结账、结账记录）。两个都按「查看在店手牌」显示，台里的操作照各自的权限
+    { to: '/frontdesk', label: '发卡台', icon: ConciergeBell, perm: 'frontdesk.read' },
+    { to: '/cashier', label: '收银台', icon: Banknote, perm: 'frontdesk.read' },
     { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
     // 8.0.8：看日结的（导出流水、经营总览）也能进来看「台账」「退菜记录」
     { to: '/dining', label: '餐饮', icon: UtensilsCrossed, perm: ['dining.order', 'dining.kitchen', 'frontdesk.checkout', 'ledger.export', 'report.executive'], when: (s) => s.dining },

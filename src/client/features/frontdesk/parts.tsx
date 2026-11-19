@@ -109,7 +109,7 @@ export function TagCard({
       onClick={onClick}
       data-testid={`tag-${tag.code}`}
       data-state={v ? 'in_use' : tag.locked ? 'locked' : 'free'}
-      aria-label={`手牌 ${tag.code}，${ZONE_LABELS[tag.zone].title}${tag.kind === 'vip' ? `，VIP ${tag.vipLevel} 级` : ''}，${state}${v ? `，未结 ${(v.amountCents / 100).toFixed(2)} 元` : ''}`}
+      aria-label={`手牌 ${tag.code}，${ZONE_LABELS[tag.zone].title}${tag.kind === 'vip' ? `，VIP ${tag.vipLevel} 级` : ''}，${state}${v?.memberGradeLabel ? `，会员 ${v.memberGradeLabel}` : ''}${v ? `，未结 ${(v.amountCents / 100).toFixed(2)} 元` : ''}`}
       aria-pressed={selected}
       className={cn(
         'group relative flex h-[92px] min-w-0 flex-col overflow-hidden rounded-[14px] border text-left transition-[box-shadow,border-color,transform,background-color] duration-150 active:scale-[0.98]',
@@ -138,6 +138,12 @@ export function TagCard({
               <>
                 <UserRound className="size-3 shrink-0 text-pine" />
                 <span className="min-w-0 truncate font-semibold">{v.memberName}</span>
+                {/* 会员等级识别（8.1.14）：档阶的短写，全称在客人卡上 */}
+                {v.memberGradeLabel && (
+                  <span className="shrink-0 rounded-sm bg-yuzu-soft px-1 text-[10.5px] leading-[15px] font-bold text-yuzu-deep" title={v.memberGradeLabel} data-testid={`tag-${tag.code}-grade`}>
+                    {v.memberGradeLabel.split(/[\s·]/)[0]}
+                  </span>
+                )}
               </>
             ) : (
               <span className="min-w-0 truncate text-ink-3">{v.guestLabel || '散客'}</span>
