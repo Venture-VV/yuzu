@@ -41,6 +41,7 @@
 - [`DESKS_V8115.md`](DESKS_V8115.md)：8.1.15 · 前台拆成发卡台与收银台
 - [`DINING_V8115.md`](DINING_V8115.md)：8.1.15 餐饮：桌台动作、台账合并退菜、出品口下单权限与房号备注（《浴族系统需求汇总》块 B）
 - [`DINING_V817.md`](DINING_V817.md)：8.1.7 餐饮分区与点菜单（店主 2026-11-18）
+- [`DISHES_V8115.md`](DISHES_V8115.md)：8.1.15 菜品管理（《浴族系统需求汇总》餐饮第 4 条）
 - [`EMENU.md`](EMENU.md)：点餐系统 · 平板电子菜单（8.0.10）
 - [`ERP.md`](ERP.md)：ERP 独立工作区（含 SCM）
 - [`ERP_PURCHASING.md`](ERP_PURCHASING.md)：ERP 采购五项（v0.7.29）· 设计稿
@@ -54,6 +55,7 @@
 - [`FLOORPLAN.md`](FLOORPLAN.md)：底图转换（RQ-004 第二段，v0.7.15）
 - [`FLOORPLAN_FINISH.md`](FLOORPLAN_FINISH.md)：平面图收尾（v0.7.19，定稿）：开单即占用、对客导览、PDF 底图、图纸治理
 - [`FLOW_V8017.md`](FLOW_V8017.md)：ERP 流程图 · 采购从提需求到付款（8.0.17）
+- [`FRONTDESK_RISK_V8115.md`](FRONTDESK_RISK_V8115.md)：8.1.15 追加 · 前台：NFC 发牌、发牌前风控、发牌后异常处置（块 A）
 - [`FRONTDESK_V808.md`](FRONTDESK_V808.md)：8.0.8 前台整改（钟房、收银、派对房、预约、餐饮、客房）
 - [`GIFTS_V819.md`](GIFTS_V819.md)：8.1.9 · 全局签赠（签赠券、授权人、签赠台账）
 - [`HARDWARE.md`](HARDWARE.md)：硬件连接（飞书需求 RQ-001，v0.7.21，迁移 `038`）

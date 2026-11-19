@@ -59,6 +59,8 @@ export const FRONTDESK_OPS = [
   'booking_change',
   // 技师停牌、复牌、休假（8.0.8 合并前 Codex 审查 e2cb70d）：对象是技师，在钟房处理
   'technician_state',
+  // 发牌后的异常处置（8.1.15，docs/FRONTDESK_RISK_V8115.md）：提醒、加收、上报、外出、返回、未结离店；对象是来访，在发卡台处理
+  'visit_incident',
 ] as const;
 export type FrontdeskOp = (typeof FRONTDESK_OPS)[number];
 
@@ -88,6 +90,7 @@ export const FRONTDESK_OP_PERMISSIONS: Record<FrontdeskOp, readonly Permission[]
   booking_create: ['booking.manage'],
   booking_change: ['booking.manage'],
   technician_state: ['technician.dispatch'],
+  visit_incident: ['frontdesk.operate'],
 };
 
 export const abandonedError = () => conflict('OP_ABANDONED', '这笔操作已在「结果待确认」时由员工作废，不会再生效；如仍需要，请重新填写一笔');

@@ -50,6 +50,8 @@ import { badRequest } from '../lib/errors';
 import { sameJson } from '../lib/rule-settings';
 import { parse } from '../lib/validate';
 import { loadFrontdeskRules } from './frontdesk/common';
+import { loadRiskRules, RISK_RULES_KEY } from './frontdesk/risk';
+import { DEFAULT_FRONTDESK_RISK_RULES } from '@shared/frontdesk-risk';
 import { loadMembershipRules } from './membership';
 import { DEFAULT_APPROVAL_RULES, DEFAULT_APPROVAL_THRESHOLD_CENTS, DEFAULT_URGENT_CAP_CENTS, DEFAULT_USAGE_WINDOW_DAYS, DEFAULT_CYCLE_RULES, loadInventorySettings } from './inventory/common';
 import { DEFAULT_SETTINGS, loadSettings, SETTINGS_KEYS } from './settings';
@@ -1290,6 +1292,22 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     dflt: 0,
     metaKey: 'role_permissions',
   });
+  // ── 前台风控（8.1.15，docs/FRONTDESK_RISK_V8115.md；FK2 待确认）──
+  const risk = await loadRiskRules(db);
+  add({
+    key: 'frontdesk_risk_rules.enabled',
+    group: 'frontdesk',
+    label: '发牌前风控',
+    value: risk.enabled ? '开启' : '关闭',
+    defaultValue: DEFAULT_FRONTDESK_RISK_RULES.enabled ? '开启' : '关闭',
+    pending: true,
+    section: 'tags',
+    tab: 'rules',
+    hint: '黑名单拒绝、未结离店要当场授权、当日重复到店提示、预约带出并核销；关了发牌与以前一样',
+    current: risk.enabled,
+    dflt: DEFAULT_FRONTDESK_RISK_RULES.enabled,
+    metaKey: RISK_RULES_KEY,
+  });
   return entries;
 }
 
@@ -1318,6 +1336,11 @@ const CHANGE_ACTIONS = [
   'space_import',
   'location_reader_saved',
   'items_zone_updated',
+  // 8.1.15 菜品管理
+  'dish_saved',
+  'dish_active_set',
+  'dish_price_changed',
+  'dishes_imported',
 ];
 
 const SETTING_LABELS: Record<string, string> = {
@@ -1343,6 +1366,7 @@ function describeChange(action: string, detail: Record<string, unknown>): string
   switch (action) {
     case 'settings_updated': {
       if (detail.key === 'frontdesk_rules') return '修改了前台规则';
+      if (detail.key === 'frontdesk_risk_rules') return '修改了发牌前风控的开关';
       if (detail.key === 'vip_locker_rules') return '修改了 VIP 柜设置（会员权益）';
       if (detail.key === 'role_permissions') return '调整了岗位权限';
       if (detail.key === 'technician_rules') return '修改了技师规则';
@@ -1404,6 +1428,15 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       return typeof detail.summary === 'string' ? detail.summary : '保存了刷卡点';
     case 'items_zone_updated':
       return '调整了项目所在区域（实时位置）';
+    // 8.1.15 菜品管理
+    case 'dish_saved':
+      return typeof detail.summary === 'string' ? detail.summary : `保存了菜品${name ? `「${name}」` : ''}`;
+    case 'dish_active_set':
+      return typeof detail.summary === 'string' ? detail.summary : '菜品上架 / 下架';
+    case 'dish_price_changed':
+      return typeof detail.summary === 'string' ? detail.summary : `菜品${name ? `「${name}」` : ''}改价`;
+    case 'dishes_imported':
+      return typeof detail.summary === 'string' ? detail.summary : '导入了菜品';
     default:
       return action;
   }

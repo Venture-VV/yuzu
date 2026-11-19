@@ -10,6 +10,7 @@
 
 import type { CheckoutMember } from './checkout';
 import type { LedgerKind, LedgerVoidRate, TableStateInfo, VoidBlame } from './dining-v8115';
+import type { DishAddonOption, DishPart } from './dishes';
 
 export interface DiningRules {
   /** 餐饮功能：关闭时前台挂账与升级前完全一样，主导航没有「餐饮」（默认关闭） */
@@ -182,6 +183,8 @@ export interface KitchenItem {
   note: string;
   /** 小程序扫了桌上的码点的菜送到哪张桌（v0.7.28；空为送到客人手里） */
   deliverTo: string;
+  /** 套餐下单当时含哪几样（8.1.15 菜品管理，每份套餐的份数）；不是套餐为空 */
+  parts: DishPart[];
   status: KitchenStatus;
   stationId: number;
   stationName: string;
@@ -224,6 +227,13 @@ export interface MenuDish {
   /** 点单分类（8.1.7）：在哪一处、哪个小分类（后台没设的按默认归） */
   outlet: DiningOutlet;
   group: string;
+  /**
+   * 菜品管理（8.1.15，docs/DISHES_V8115.md）：可选的做法（不加钱，选了写进出品备注）、能点的加料（另起一行、备注写「配 某菜」）、
+   * 套餐含哪几样（下单一行，出品单上列出来）。点单页的菜单才带，都没有的菜不带；厨房屏的沽清列表不带
+   */
+  methods?: string[];
+  addons?: DishAddonOption[];
+  combo?: DishPart[];
 }
 
 export interface DiningMenu {
@@ -500,6 +510,8 @@ export interface DiningReceiptLine {
   unitPrice: number;
   amount: number;
   note: string;
+  /** 套餐下单当时含哪几样（8.1.15；不是套餐、没进厨房的为空） */
+  parts: DishPart[];
   kitchenStatus: KitchenStatus | null;
   state: ReceiptLineState;
 }

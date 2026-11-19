@@ -74,12 +74,25 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_status_changed: { label: '停用 / 启用会员', tone: 'ember' },
   member_phone_changed: { label: '改会员手机号', tone: 'ember' },
   member_merged: { label: '合并会员', tone: 'ember' },
+  // 8.1.15 前台（块 A）：芯片号、黑名单、发牌前风控、发牌后的异常处置
+  hand_tag_card: { label: '手牌绑 / 解绑芯片号', tone: 'neutral' },
+  blacklist_added: { label: '加入黑名单', tone: 'clay' },
+  blacklist_lifted: { label: '解除黑名单', tone: 'lake' },
+  checkin_blocked: { label: '发牌被黑名单拦下', tone: 'clay' },
+  visit_incident: { label: '异常处置', tone: 'yuzu' },
+  incident_assigned: { label: '异常待办指派', tone: 'lake' },
+  incident_resolved: { label: '异常待办处理结果', tone: 'pine' },
   // 8.1.15 块 B（docs/DINING_V8115.md）：桌台动作
   table_clear: { label: '清台', tone: 'neutral' },
   table_maintenance: { label: '桌台维修', tone: 'clay' },
   table_restore: { label: '桌台恢复', tone: 'pine' },
   table_merge: { label: '并台', tone: 'lake' },
   table_split: { label: '拆台', tone: 'lake' },
+  // 菜品管理（8.1.15，docs/DISHES_V8115.md）
+  dish_saved: { label: '保存菜品', tone: 'neutral' },
+  dish_active_set: { label: '菜品上下架', tone: 'neutral' },
+  dish_price_changed: { label: '菜品改价', tone: 'ember' },
+  dishes_imported: { label: '导入菜品', tone: 'ember' },
 };
 
 function describe(detail: Record<string, unknown>): string {

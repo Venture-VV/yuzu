@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { Crown, Link2, Lock, UserRound } from 'lucide-react';
+import { AlarmClock, Crown, DoorOpen, Link2, Lock, TriangleAlert, UserRound } from 'lucide-react';
 import { tagArea, ZONE_LABELS, type BoardTag, type HandTag, type TagKind, type TagZone } from '@shared/frontdesk';
+import { overstayOf } from '@shared/frontdesk-risk';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { stayMinutes, stayText } from './queries';
@@ -79,8 +80,81 @@ export function GroupMark({ groupNo, count, className }: { groupNo: string; coun
   );
 }
 
-/** 在店超过 6 小时用柚黄提示（接近夜场 / 过夜计费，S3 起按规则计算） */
-export const LONG_STAY_MINUTES = 360;
+/**
+ * 状态小标（8.1.15 起新页面的规矩）：状态用颜色 + 文字 + 图标，字不小于 16 像素；颜色只用样式变量（深浅两套主题都看得清，
+ * 这几对字 / 底都在 tests/theme-contrast.test.ts 里）。橙色的字用 ember-deep。
+ */
+const STATUS_TONES = {
+  yuzu: 'bg-yuzu-soft text-yuzu-deep',
+  ember: 'bg-ember-soft text-ember-deep',
+  clay: 'bg-clay-soft text-clay',
+  lake: 'bg-lake-soft text-lake',
+  pine: 'bg-pine-soft text-pine',
+  neutral: 'bg-paper-2 text-ink-2',
+} as const;
+export type StatusTone = keyof typeof STATUS_TONES;
+
+export function StatusChip({ tone, icon, children, className, title, testId }: { tone: StatusTone; icon?: ReactNode; children: ReactNode; className?: string; title?: string; testId?: string }) {
+  return (
+    <span
+      className={cn('inline-flex min-h-[26px] shrink-0 items-center gap-1 rounded-md px-2 text-[16px] leading-none font-bold whitespace-nowrap', STATUS_TONES[tone], className)}
+      title={title}
+      data-testid={testId}
+      data-tone={tone}
+    >
+      {icon}
+      {children}
+    </span>
+  );
+}
+
+/**
+ * 超时在店的三级（8.1.15，docs/FRONTDESK_RISK_V8115.md 第 4.1 节）：超 12 小时黄、超 24 小时橙、超 72 小时红，
+ * 都配文字与图标，不单靠颜色区分。原来的「超 6 小时」柚黄提示并进这三级，不到 12 小时不标。
+ */
+const OVERSTAY_TONE: Record<1 | 2 | 3, StatusTone> = { 1: 'yuzu', 2: 'ember', 3: 'clay' };
+
+/** 一位在店客人现在的几样状态：超时在店、临时外出、有没处理完的异常待办；都没有时什么也不出 */
+export function VisitStatusChips({
+  visit,
+  now,
+  chipClass,
+  testId,
+}: {
+  visit: { checkedInAt: string; awaySince: string | null; openTodos: number };
+  now: number;
+  /** 每个小标另加的样式（手牌卡片底下排成整行的色带） */
+  chipClass?: string;
+  /** 浏览器用例用：三样分别是 `${testId}-overstay`、`-away`、`-todo` */
+  testId?: string;
+}) {
+  const over = overstayOf(stayMinutes(visit.checkedInAt, now));
+  return (
+    <>
+      {over && (
+        <StatusChip
+          tone={OVERSTAY_TONE[over.level]}
+          icon={<AlarmClock className="size-4 shrink-0" />}
+          className={chipClass}
+          title={`在店 ${stayText(visit.checkedInAt, now)}`}
+          testId={testId && `${testId}-overstay`}
+        >
+          {over.label}
+        </StatusChip>
+      )}
+      {visit.awaySince && (
+        <StatusChip tone="lake" icon={<DoorOpen className="size-4 shrink-0" />} className={chipClass} title="临时外出，手牌仍占用，不能发给别人" testId={testId && `${testId}-away`}>
+          外出
+        </StatusChip>
+      )}
+      {visit.openTodos > 0 && (
+        <StatusChip tone="clay" icon={<TriangleAlert className="size-4 shrink-0" />} className={chipClass} title={`${visit.openTodos} 条异常待办没处理完`} testId={testId && `${testId}-todo`}>
+          待办{visit.openTodos > 1 ? ` ${visit.openTodos}` : ''}
+        </StatusChip>
+      )}
+    </>
+  );
+}
 
 export function TagCard({
   tag,
@@ -101,18 +175,20 @@ export function TagCard({
 }) {
   const v = tag.visit;
   const style = ZONE_STYLE[tag.zone];
-  const long = v ? stayMinutes(v.checkedInAt, now) >= LONG_STAY_MINUTES : false;
-  const state = v ? '在店' : tag.locked ? '锁定' : '空闲';
+  const over = v ? overstayOf(stayMinutes(v.checkedInAt, now)) : null;
+  const state = v ? (v.awaySince ? '在店（临时外出）' : '在店') : tag.locked ? '锁定' : '空闲';
   return (
     <button
       type="button"
       onClick={onClick}
       data-testid={`tag-${tag.code}`}
       data-state={v ? 'in_use' : tag.locked ? 'locked' : 'free'}
-      aria-label={`手牌 ${tag.code}，${ZONE_LABELS[tag.zone].title}${tag.kind === 'vip' ? `，VIP ${tag.vipLevel} 级` : ''}，${state}${v?.memberGradeLabel ? `，会员 ${v.memberGradeLabel}` : ''}${v ? `，未结 ${(v.amountCents / 100).toFixed(2)} 元` : ''}`}
+      aria-label={`手牌 ${tag.code}，${ZONE_LABELS[tag.zone].title}${tag.kind === 'vip' ? `，VIP ${tag.vipLevel} 级` : ''}，${state}${over ? `，${over.label}` : ''}${v?.memberGradeLabel ? `，会员 ${v.memberGradeLabel}` : ''}${v ? `，未结 ${(v.amountCents / 100).toFixed(2)} 元` : ''}`}
+      data-away={v?.awaySince ? 'true' : undefined}
       aria-pressed={selected}
       className={cn(
-        'group relative flex h-[92px] min-w-0 flex-col overflow-hidden rounded-[14px] border text-left transition-[box-shadow,border-color,transform,background-color] duration-150 active:scale-[0.98]',
+        // 8.1.15：有状态色带的卡片更高，同一排的卡片跟着拉齐（原来固定 92 高）
+        'group relative flex min-h-[92px] min-w-0 flex-col overflow-hidden rounded-[14px] border text-left transition-[box-shadow,border-color,transform,background-color] duration-150 active:scale-[0.98]',
         v
           ? 'border-line bg-card shadow-card hover:border-line-strong hover:shadow-lift'
           : tag.locked
@@ -152,9 +228,11 @@ export function TagCard({
             {v.groupNo && <GroupMark groupNo={v.groupNo} />}
           </span>
           <span className="mt-auto flex items-end justify-between gap-1 pr-2.5 pb-2 pl-3.5">
-            <span className={cn('num whitespace-nowrap text-[12px] font-semibold', long ? 'rounded-sm bg-yuzu-soft px-1 text-yuzu-deep' : 'text-ink-3')}>{stayText(v.checkedInAt, now)}</span>
+            <span className="num text-[12px] font-semibold whitespace-nowrap text-ink-3">{stayText(v.checkedInAt, now)}</span>
             {v.amountCents > 0 ? <CardMoney cents={v.amountCents} /> : <span className="text-[11.5px] text-ink-4">未挂账</span>}
           </span>
+          {/* 超时在店、临时外出、异常待办（8.1.15）：卡片底下各一条带字、带图标的色带（卡片窄，放不下并排的标记） */}
+          <VisitStatusChips visit={v} now={now} chipClass="w-full justify-center rounded-none" testId={`tag-${tag.code}`} />
         </>
       ) : (
         <span className="mt-auto flex items-center gap-1 px-3 pb-2 text-[12px] font-semibold">

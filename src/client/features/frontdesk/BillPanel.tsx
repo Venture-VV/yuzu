@@ -23,6 +23,7 @@ import {
   Ticket,
   UtensilsCrossed,
   Shuffle,
+  TriangleAlert,
 } from 'lucide-react';
 import { BILL_SOURCE_LABELS, BILL_SOURCES, VISIT_STATUS_LABELS, ZONE_LABELS, type BillLine, type FrontdeskBoardRules, type VisitDetail } from '@shared/frontdesk';
 import { minutesText } from '@shared/benefits';
@@ -39,11 +40,13 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, PendingBadge, Skeleton, Textarea } from '../../components/ui';
 import { DishVoidDialog } from '../dining/DishVoid';
-import { GroupMark, LONG_STAY_MINUTES, VipChip, ZONE_STYLE } from './parts';
+import { TODO_KINDS } from '@shared/frontdesk-risk';
+import { GroupMark, VipChip, VisitStatusChips, ZONE_STYLE } from './parts';
 import { FRONTDESK_OP_LABELS, useFrontdeskPending } from './pending';
-import { stayMinutes, stayText, useServerNow } from './queries';
+import { stayText, useServerNow } from './queries';
 
-export type PanelAction = 'add' | 'swap' | 'join' | 'companion' | 'preview' | 'checkout' | 'ticket' | 'records' | 'move';
+/** incident：异常处置（8.1.15）；lost：手牌丢失（换牌对话框预先选好丢失） */
+export type PanelAction = 'add' | 'swap' | 'join' | 'companion' | 'preview' | 'checkout' | 'ticket' | 'records' | 'move' | 'incident' | 'lost';
 
 /**
  * 两个台（8.1.15，docs/DESKS_V8115.md）：
@@ -113,7 +116,8 @@ export function BillPanel({
   const open = visit.status === 'open';
   const active = visit.lines.filter((l) => l.status === 'active');
   const voided = visit.lines.filter((l) => l.status === 'voided');
-  const long = open && stayMinutes(visit.checkedInAt, now) >= LONG_STAY_MINUTES;
+  // 异常（8.1.15）：这次来访记过几条、其中没处理完的待办几条
+  const openTodos = visit.incidents.filter((i) => TODO_KINDS.includes(i.kind) && !i.resolved).length;
   const selfMinutes = rules?.selfVoidMinutes ?? 10;
   const canFix = (ownerId: number, at: string) => can('frontdesk.correct') || (ownerId === session.staff.id && (now - new Date(at).getTime()) / 60_000 <= selfMinutes);
 
@@ -151,12 +155,18 @@ export function BillPanel({
                 入场 {formatTime(visit.checkedInAt)}
               </span>
               {open && (
-                <span className={cn('font-semibold', long ? 'rounded-sm bg-yuzu-soft px-1 text-yuzu-deep' : 'text-ink-2')} data-testid="bill-stay">
+                <span className="font-semibold text-ink-2" data-testid="bill-stay">
                   在店 {stayText(visit.checkedInAt, now)}
-                  {long && ' · 超 6 小时'}
                 </span>
               )}
             </p>
+            {/* 超时在店（超 12 / 24 / 72 小时）、临时外出、异常待办（8.1.15）：颜色都配文字与图标 */}
+            {open && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 empty:hidden" data-testid="bill-status">
+                <VisitStatusChips visit={{ checkedInAt: visit.checkedInAt, awaySince: visit.awaySince, openTodos }} now={now} testId="bill" />
+                {visit.awaySince && <span className="num text-[12px] text-ink-3">{formatTime(visit.awaySince)} 起外出</span>}
+              </div>
+            )}
           </div>
           {onClose && (
             <IconButton label={issue ? '关闭客人卡' : '关闭账单'} onClick={onClose} className="-mt-1 -mr-2">
@@ -199,6 +209,24 @@ export function BillPanel({
           <p className="mt-1.5 flex items-center gap-1 px-1 text-[12px] font-semibold text-yuzu-deep" data-testid="bill-vip-override">
             <ShieldCheck className="size-3.5" /> VIP 柜由{visit.vipOverrideByName}当场授权
           </p>
+        )}
+        {visit.riskApproval && (
+          <p className="mt-1.5 flex items-start gap-1 px-1 text-[12px] font-semibold text-yuzu-deep" data-testid="bill-risk-approval">
+            <ShieldCheck className="mt-px size-3.5 shrink-0" /> 上次未结离店，发牌由{visit.riskApproval.byName}当场授权（{formatTime(visit.riskApproval.at)}）：{visit.riskApproval.reason}
+          </p>
+        )}
+        {/* 异常处置（8.1.15）：发卡台能登记；收银台只看有几条 */}
+        {((issue && open && can('frontdesk.operate')) || visit.incidents.length > 0) && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-[13px]" data-testid="bill-incidents">
+            <span className="font-semibold text-ink-3">
+              {visit.incidents.length === 0 ? '没有异常记录' : `异常记录 ${visit.incidents.length} 条${openTodos > 0 ? `，其中 ${openTodos} 条待办没处理完` : ''}`}
+            </span>
+            {issue && open && can('frontdesk.operate') && (
+              <Button size="lg" variant="secondary" className="ml-auto" icon={<TriangleAlert className="size-4" />} onClick={() => onAction('incident')} data-testid="action-incident">
+                异常处置
+              </Button>
+            )}
+          </div>
         )}
         {visit.backfill && (
           <p className="mt-1.5 flex items-center gap-1 px-1 text-[12px] font-semibold text-lake" data-testid="bill-backfill">
@@ -252,7 +280,7 @@ export function BillPanel({
               <Button
                 size="sm"
                 variant="primary"
-                onClick={() => onAction(p.type === 'bill_post' ? 'add' : p.type === 'checkout' ? 'checkout' : p.type === 'line_move' ? 'move' : 'swap')}
+                onClick={() => onAction(p.type === 'bill_post' ? 'add' : p.type === 'checkout' ? 'checkout' : p.type === 'line_move' ? 'move' : p.type === 'visit_incident' ? 'incident' : 'swap')}
                 data-testid="bill-pending-resolve"
               >
                 去处理

@@ -12,6 +12,8 @@ import { Dialog } from '../../components/Overlay';
 import { Button, ConfirmCheck, Field, Input, Notice, Skeleton } from '../../components/ui';
 import { useCheckoutPreview, usePreview, useServerNow, stayText } from './queries';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
+import { cardProblem } from '@shared/frontdesk-risk';
+import { ReaderStatusLine, TagCardInput, type CardMessage } from './TagCardInput';
 import { GroupMark, VipChip, ZoneChip } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
 
@@ -25,6 +27,7 @@ export function SwapDialog({
   visit,
   tags,
   rules,
+  lost,
   onClose,
   onDone,
 }: {
@@ -32,6 +35,8 @@ export function SwapDialog({
   visit: VisitDetail;
   tags: BoardTag[];
   rules: FrontdeskBoardRules | undefined;
+  /** 手牌丢失（8.1.15，从「异常处置」进来）：原因、锁定原手牌、丢牌赔偿都预先选好，一步走完「锁旧牌、收赔付、换新牌」 */
+  lost?: boolean;
   onClose: () => void;
   onDone: (v: VisitDetail) => void;
 }) {
@@ -52,12 +57,15 @@ export function SwapDialog({
     staffName: session.staff.displayName,
     pick: (found) => ('visit' in found ? found.visit : null),
   });
+  /** 刷新牌带出牌号（8.1.15）：最近一次读卡的结果 */
+  const [cardNote, setCardNote] = useState<CardMessage | null>(null);
   useResetOnOpen(open, () => {
     setCode('');
-    setReason('');
-    setLockOld(false);
-    setChargeFee(false);
+    setReason(lost ? LOST_REASON : '');
+    setLockOld(!!lost);
+    setChargeFee(!!lost && fee > 0);
     setGrant(null);
+    setCardNote(null);
     op.clearError();
   });
   useEffect(() => {
@@ -121,8 +129,8 @@ export function SwapDialog({
     <Dialog
       open={open}
       onClose={op.busy ? () => {} : onClose}
-      title={`换牌 · ${visit.tag.code}`}
-      description="账单跟着客人走：换牌后原有消费明细全部保留在新手牌上"
+      title={`${lost ? '手牌丢失 · 换牌' : '换牌'} · ${visit.tag.code}`}
+      description={lost ? '锁旧牌、收赔付、换新牌一步走完：账单跟着客人走，原手牌锁定后不会再发出' : '账单跟着客人走：换牌后原有消费明细全部保留在新手牌上'}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -156,21 +164,30 @@ export function SwapDialog({
                   : undefined
               }
             >
-              <Input
+              {/* 新牌可以刷卡带出（8.1.15）：要同分区的空闲牌；读不出来的原因写在上面那一行 */}
+              <TagCardInput
                 id="swap-code"
-                data-autofocus
+                autoFocus
                 value={code}
                 disabled={locked}
-                onChange={(e) => edit(() => setCode(e.target.value.toUpperCase()))}
+                onChange={(v) => edit(() => setCode(v))}
                 onBlur={() => {
                   if (c && !target) {
                     const m = uniqueTagMatch(free, c);
                     if (m) setCode(m.code);
                   }
                 }}
+                isTagCode={(v) => matchTags(tags, v).length > 0}
+                listening={open && !locked}
+                showStatus={false}
+                showMessage={false}
+                onMessage={setCardNote}
+                check={(found) => cardProblem(found, visit.zone, (z) => ZONE_LABELS[z].title)}
+                okText={(found) => `已读到 ${found.tag.code}，核对后点「确认换牌」`}
                 invalid={!!problem}
                 placeholder={`${ZONE_LABELS[visit.zone].title}牌号`}
-                className="num text-[18px] font-bold"
+                ariaLabel="新手牌"
+                inputClassName="num text-[18px] font-bold"
               />
               {candidates.length > 1 && (
                 <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]" data-testid="swap-candidates">
@@ -190,6 +207,7 @@ export function SwapDialog({
             </Field>
           </div>
         </div>
+        <ReaderStatusLine message={cardNote} />
         <Field label="换牌原因">
           <div className="flex flex-wrap gap-1.5">
             {swapReasons.map((r) => (

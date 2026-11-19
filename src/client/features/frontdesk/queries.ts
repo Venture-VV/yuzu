@@ -3,6 +3,7 @@ import { REVENUE_REFRESH_MS } from '../../lib/revenue';
 import type { CheckoutDaySummary } from '@shared/types';
 import type { CheckoutDetail, CheckoutPreview, CheckoutSummary, TicketType } from '@shared/checkout';
 import type { FrontdeskBoard, FrontdeskCheck, PreviewBill, VisitDetail } from '@shared/frontdesk';
+import type { IncidentTodoList, MemberRisk } from '@shared/frontdesk-risk';
 import type { MemberGradeBadge } from '@shared/membership';
 import type { FrontdeskTechnicians } from '@shared/technicians';
 import { api } from '../../lib/api';
@@ -19,6 +20,8 @@ export const fk = {
   checkouts: (date: string) => ['frontdesk', 'checkouts', date] as const,
   checkout: (id: number) => ['frontdesk', 'checkout', id] as const,
   technicians: ['frontdesk', 'technicians'] as const,
+  todos: ['frontdesk', 'incident-todos'] as const,
+  memberRisk: (id: number) => ['frontdesk', 'member-risk', id] as const,
 };
 
 /** 技师规则与在职技师（加项目时选技师；含今日已上的钟数） */
@@ -93,6 +96,13 @@ export const useMemberGrade = (memberId: number | null) =>
     enabled: !!memberId,
   });
 
+/** 异常待办（8.1.15）：没处理完的上报、未结离店，与能指派给谁；打开「异常待办」或要选责任人时才取，改动后由写操作刷新 */
+export const useIncidentTodos = (enabled: boolean) => useQuery({ queryKey: fk.todos, queryFn: () => api.get<IncidentTodoList>('/api/frontdesk/incidents/todos'), enabled, staleTime: 5_000 });
+
+/** 发牌前风控（8.1.15）：选了会员就预先看黑名单、未结离店、今天第几次到店、待到店的预约；发牌接口里还会再核对一遍 */
+export const useMemberRisk = (memberId: number | null, enabled = true) =>
+  useQuery({ queryKey: fk.memberRisk(memberId ?? 0), queryFn: () => api.get<MemberRisk>(`/api/frontdesk/members/${memberId}/risk`), enabled: enabled && !!memberId, staleTime: 0 });
+
 export const useFrontdeskChecks = (enabled: boolean) => useQuery({ queryKey: fk.checks, queryFn: () => api.get<FrontdeskCheck[]>('/api/frontdesk/checks'), enabled });
 
 /** 写操作后刷新状态板与相关手牌账单 */
@@ -102,6 +112,7 @@ export function useRefreshFrontdesk() {
     void qc.invalidateQueries({ queryKey: fk.board });
     void qc.invalidateQueries({ queryKey: ['frontdesk', 'preview'] });
     void qc.invalidateQueries({ queryKey: fk.checks });
+    void qc.invalidateQueries({ queryKey: fk.todos });
     for (const id of visitIds) void qc.invalidateQueries({ queryKey: fk.visit(id) });
     if (visitIds.length === 0) void qc.invalidateQueries({ queryKey: ['frontdesk', 'visit'] });
   };

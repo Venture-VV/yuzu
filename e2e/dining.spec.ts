@@ -123,7 +123,7 @@ test.describe('S5 餐饮', () => {
       }
       if (changed) {
         await page.getByTestId('dining-items-save').click();
-        await expect(page.getByText('菜品的出品档口已保存')).toBeVisible();
+        await expect(page.getByText('菜品的出品档口与点单分类已保存')).toBeVisible();
       }
       // 8.1.7：点单分类写明（宫保鸡丁在餐厅，柠檬茶在水吧）
       admin = await getJson<DiningAdmin>(page, '/api/admin/dining');

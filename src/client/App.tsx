@@ -114,6 +114,8 @@ const DirectImportPage = lazyPage(() => import('./features/inventory/DirectImpor
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
 const ImportPage = lazyPage(() => import('./features/payables/ImportPage').then((m) => m.ImportPage));
+// 菜品管理的单独入口（8.1.15）：只有菜品权限、进不了餐饮的岗位用；别的人在餐饮的「菜品管理」页签里
+const DishesPage = lazyPage(() => import('./features/dining/DishesPage').then((m) => m.DishesPage));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -396,6 +398,7 @@ const router = createBrowserRouter([
       { path: 'dashboard/:tab?', element: <DashboardMoved /> },
       { path: 'lookup', element: <LookupPage /> },
       { path: 'password', element: <ChangePasswordPage /> },
+      { path: 'dishes', element: <DishesPage /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
