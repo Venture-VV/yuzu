@@ -388,7 +388,9 @@ export function MemberFormDialog({
               <TypeIcon className="size-4" />
               {MEMBER_CARD_TYPE_LABELS[type]}
             </span>
-            <span className="min-w-0 flex-1 text-[12.5px] text-ink-3">{creating ? MEMBER_CARD_TYPE_HINTS[type] : '卡类型跟着卡走：发了实体卡是实体卡，退了卡记回电子卡'}</span>
+            {/* 说明只在够宽时显示：窄屏上挤在一行里会被压成一列一两个字 */}
+            <span className="hidden min-w-0 flex-1 text-[12.5px] text-ink-3 sm:block">{creating ? MEMBER_CARD_TYPE_HINTS[type] : '卡类型跟着卡走：发了实体卡是实体卡，退了卡记回电子卡'}</span>
+            <span className="flex-1 sm:hidden" />
             {creating && (
               <Button size="sm" variant="ghost" icon={<ChevronLeft className="size-3.5" />} onClick={() => setStep('type')} data-testid="member-card-type-change">
                 上一步

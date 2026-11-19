@@ -15,6 +15,7 @@ import { DEFAULT_MEMBER_FORM_RULES, type MemberCardDeposits, type MemberFormRule
 import type { MemberDetail, MemberSummary, SettlementSummary } from '../src/shared/types';
 import { cardDepositChecks } from '../src/server/modules/member-card-deposits';
 import { consistencyChecks } from '../src/server/ops/consistency';
+import { buildDailyRecon } from '../src/server/ops/recon';
 import { api, createMember, rechargeBody, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -54,7 +55,7 @@ const countMembers = async (phone: string) => (await ctx.sql<{ n: number }[]>`SE
 beforeAll(async () => {
   ctx = await setup();
   // 用例基线里押金是 0（之前的用例发卡不收押金）；这里按默认的 20 元
-  await ctx.sql`UPDATE settings SET value = ${ctx.sql.json(DEFAULT_MEMBER_FORM_RULES)} WHERE key = 'member_form_rules'`;
+  await ctx.sql`UPDATE settings SET value = ${ctx.sql.json(DEFAULT_MEMBER_FORM_RULES as never)} WHERE key = 'member_form_rules'`;
   // 店员开班：押金记到这个班次
   expect((await api(ctx.app, ctx.clerk, 'POST', '/api/shifts', { openingCash: 10000 })).status).toBe(200);
 });
@@ -519,6 +520,11 @@ describe('交班与自检', () => {
     const [row] = await ctx.sql<{ net: number }[]>`
       SELECT coalesce(sum(CASE WHEN kind = 'receive' THEN amount ELSE -amount END), 0)::int AS net FROM member_card_deposits WHERE shift_id = ${shift.id} AND method = 'cash'`;
     expect(row!.net).toBe(sum.cash.cardDeposit);
+    // 日结导出：会员卡押金单列一段（负债），与日结页同一组数
+    const day = await settlement();
+    const csv = (await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${day.businessDate}/export`)).body as string;
+    expect(csv).toContain('会员卡押金（负债，不算营业额、不进储值）');
+    expect(csv).toContain('当天结束时押着的会员卡押金');
     const closed = await api(ctx.app, ctx.clerk, 'POST', `/api/shifts/${shift.id}/close`, { countedCash: sum.cash.expected, expectedCash: sum.cash.expected });
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
     expect(closed.body.summary.cardDeposits).toEqual(sum.cardDeposits);
@@ -530,5 +536,15 @@ describe('交班与自检', () => {
     expect(late!.shiftId).toBeNull();
     for (const c of await cardDepositChecks(ctx.sql)) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
     for (const c of await consistencyChecks(ctx.sql, ctx.config.timezone)) expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
+    // 每日对账包：会员卡押金逐笔列出（收、退各有），汇总与日结一致；交班表的押金现金一列里有它
+    const recon = await buildDailyRecon(ctx.sql, ctx.config, day.businessDate);
+    expect(recon.ok).toBe(true);
+    const file = recon.files.find((f) => f.name === '14-会员卡押金.csv')!.content;
+    const lines = file.split('\n');
+    const paid = await ctx.sql<{ kind: string; n: number }[]>`SELECT kind, count(*)::int AS n FROM member_card_deposits GROUP BY kind`;
+    expect(lines.filter((l) => /,收押金,/.test(l)).length).toBe(paid.find((p) => p.kind === 'receive')!.n);
+    expect(lines.filter((l) => /,退押金,/.test(l)).length).toBe(paid.find((p) => p.kind === 'refund')!.n);
+    expect(file).toContain('当天结束时押着的押金');
+    expect(recon.files.find((f) => f.name === '00-说明.txt')!.content).toContain('会员卡押金：收 ');
   });
 });

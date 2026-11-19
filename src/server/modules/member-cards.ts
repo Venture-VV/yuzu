@@ -239,7 +239,6 @@ const ReturnInput = z.object({
   method: z.enum(PAYMENT_METHODS, '请选择退押金的方式').nullish(),
   ref: z.string().trim().max(64, '退款单号最多 64 字').default(''),
 });
-export type ReturnCardInput = z.input<typeof ReturnInput>;
 
 /**
  * 退卡（8.1.15）：在用的卡记「已退卡」（卡号可以再发），押着的押金全额退掉——现金从经办人当班的钱箱退，扫码、银行卡登记退款单号。
@@ -289,7 +288,8 @@ export async function returnMemberCard(deps: Deps, memberId: number, raw: unknow
           WHERE id = ${current.id}`;
       }
       let depositId: number | null = null;
-      if (held > 0) {
+      // 有押金可退：退款方式在取锁之前已经核对过（页面带的金额与押着的一致，大于 0 时必带方式）
+      if (held > 0 && method) {
         const d = await insertCardDeposit(
           tx,
           {
@@ -298,7 +298,7 @@ export async function returnMemberCard(deps: Deps, memberId: number, raw: unknow
             memberName: m.name,
             cardId: current ? Number(current.id) : null,
             cardNo: current?.cardNo ?? null,
-            method: method!,
+            method,
             amount: held,
             ref: input.ref,
             reason: input.reason,
@@ -325,7 +325,7 @@ export async function returnMemberCard(deps: Deps, memberId: number, raw: unknow
         action: 'member_card_returned',
         targetType: 'member',
         targetId: memberId,
-        detail: { memberName: m.name, cardNo: current?.cardNo, refunded: held || undefined, method: held > 0 ? method : undefined, reason: input.reason },
+        detail: { memberName: m.name, cardNo: current?.cardNo, refunded: held || undefined, method: held > 0 && method ? method : undefined, reason: input.reason },
         ip: ctx.ip,
         businessDate: date,
       });

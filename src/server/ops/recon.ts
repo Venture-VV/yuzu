@@ -361,6 +361,28 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     WHERE mv.business_date = ${date} ORDER BY mv.id`;
   // 平台核销补录（v0.7.28）：当天（按核销营业日）的补登记，含作废的
   const platformRedemptions = await listRedemptions(tx, date, date);
+  // 会员卡押金（8.1.15）：当天收、退的每一笔（押金是负债，不算营业额；现金进出钱箱）
+  const cardDeposits = await tx<
+    {
+      at: string;
+      docNo: string;
+      kind: 'receive' | 'refund';
+      member: string;
+      memberNo: string;
+      cardNo: string | null;
+      method: keyof typeof PAYMENT_METHOD_LABELS;
+      amount: number;
+      ref: string;
+      reason: string | null;
+      staff: string;
+      shiftNo: string | null;
+    }[]
+  >`
+    SELECT d.created_at AS at, d.doc_no, d.kind, m.name AS member, m.member_no, c.card_no, d.method, d.amount, d.ref, d.reason,
+           st.display_name AS staff, sh.shift_no
+    FROM member_card_deposits d JOIN members m ON m.id = d.member_id JOIN staff st ON st.id = d.operator_id
+    LEFT JOIN member_cards c ON c.id = d.card_id LEFT JOIN shifts sh ON sh.id = d.shift_id
+    WHERE d.business_date = ${date} AND ${storeIn(tx, 'd.store_id')} ORDER BY d.id`;
   return {
     summary,
     checkouts,
@@ -379,6 +401,7 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     memberRefunds,
     countCardMoves,
     platformRedemptions,
+    cardDeposits,
   };
 }
 
@@ -908,6 +931,32 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
         r.status === 'active' ? '有效' : '已作废',
         r.voidReason ?? '',
       ]),
+    ]),
+  });
+
+  // 14 会员卡押金（8.1.15）：当天收、退的每一笔与按方式的汇总；押金是负债，不算营业额、不进会员储值，现金进出钱箱
+  files.push({
+    name: '14-会员卡押金.csv',
+    content: toCsv([
+      ['时间', '单号', '收 / 退', '会员', '会员号', '卡号', '方式', '金额（元）', '班次', '经办人', '备注 / 原因'],
+      ...day.cardDeposits.map((d) => [
+        stampOf(d.at),
+        d.docNo,
+        d.kind === 'receive' ? '收押金' : '退押金',
+        d.member,
+        d.memberNo,
+        d.cardNo ?? '',
+        PAYMENT_METHOD_LABELS[d.method],
+        (d.kind === 'refund' ? '-' : '') + yuan(d.amount),
+        d.shiftNo ?? '',
+        d.staff,
+        [d.ref, d.reason].filter(Boolean).join('；'),
+      ]),
+      [],
+      ['押金汇总', '', '', '', '', '', '方式', '金额（元）'],
+      ...s.cardDeposits.received.map((m) => ['收押金', '', '', '', '', '', PAYMENT_METHOD_LABELS[m.method], yuan(m.amount)]),
+      ...s.cardDeposits.refunded.map((m) => ['退押金', '', '', '', '', '', PAYMENT_METHOD_LABELS[m.method], '-' + yuan(m.amount)]),
+      ['当天结束时押着的押金', '', '', '', '', '', '', yuan(s.cardDeposits.held)],
     ]),
   });
 

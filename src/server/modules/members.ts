@@ -288,11 +288,11 @@ const FIELD_PATHS: Record<MemberFormField, string> = {
  * 标签、偏好项目「不带」表示不改：编辑时拿原来的算有没有填。
  */
 function applyFormRules(
-  rules: MemberFormRules,
+  settings: { memberForm: MemberFormRules; memberChannels: readonly { active: boolean }[] },
   input: OptionalFields,
   previous: { gender: 'female' | 'male' | null; birthday: string | null; note: string; channel: string | null; referrerMemberId: number | null; preferredItems: string[]; tagCount: number } | null,
 ): OptionalFields {
-  const f = rules.fields;
+  const f = settings.memberForm.fields;
   const out: OptionalFields = {
     gender: f.gender.show ? input.gender : (previous?.gender ?? null),
     birthday: f.birthday.show ? input.birthday : (previous?.birthday ?? null),
@@ -312,6 +312,8 @@ function applyFormRules(
     preferredItems: (out.preferredItems === undefined ? (previous?.preferredItems ?? []) : out.preferredItems).length > 0,
     tags: (out.tagIds === undefined ? (previous?.tagCount ?? 0) : out.tagIds.length) > 0,
   };
+  // 渠道一个都没启用时页面上没有这一项，必填也就不拦
+  if (!settings.memberChannels.some((c) => c.active)) filled.channel = true;
   for (const key of Object.keys(filled) as MemberFormField[]) {
     if (f[key].show && f[key].required && !filled[key]) {
       throw badRequest(`${FIELD_PROMPTS[key]}（后台把「${MEMBER_FORM_FIELD_LABELS[key]}」设成了必填）`, { field: FIELD_PATHS[key] });
@@ -340,7 +342,7 @@ async function insertMemberRow(tx: Tx, input: ParsedCreate, ctx: OpContext, opti
   if (input.cardType !== 'anonymous' && !input.phone) throw badRequest('请输入 11 位手机号', { field: 'phone' });
   const fields: OptionalFields =
     (options.enforceRequired ?? true)
-      ? applyFormRules((await loadSettings(tx)).memberForm, input, null)
+      ? applyFormRules(await loadSettings(tx), input, null)
       : {
           gender: input.gender,
           birthday: input.birthday,
@@ -535,7 +537,7 @@ export function registerMemberRoutes(app: FastifyInstance, deps: Deps) {
         // 已合并的会员（v0.7.26）：档案停用、历史单据留在这里，资料不再改
         if (locked.mergedIntoId !== null) throw unprocessable('MEMBER_MERGED', '这位会员已合并到另一位会员，资料不能再改；请到那位会员那里改');
         // 后台设的建档表单（8.1.15）：不显示的字段保持原样，必填的没填就拒绝
-        const input = { ...raw, ...applyFormRules((await loadSettings(tx)).memberForm, raw, locked) };
+        const input = { ...raw, ...applyFormRules(await loadSettings(tx), raw, locked) };
         // 手机号（8.1.15）：只有匿名卡可以不留；留过的不能清空，只能改
         if (input.phone === null && locked.cardType !== 'anonymous') throw badRequest('请输入 11 位手机号', { field: 'phone' });
         if (input.phone === null && locked.phone !== null) throw badRequest('手机号登记以后不能清空，只能改成别的号', { field: 'phone' });

@@ -138,6 +138,10 @@ function tunableInputs() {
   return out as { [K in keyof typeof TUNABLE_LIMITS]: z.ZodNumber };
 }
 
+/** 建档表单里一个选填项的设置（8.1.15）；缺了哪一项整份拒绝 */
+const FORM_INCOMPLETE = '建档表单的字段设置不完整，请刷新页面后重试';
+const MemberFormFieldInput = z.object({ show: z.boolean('请选择显示不显示'), required: z.boolean('请选择必填不必填') }, FORM_INCOMPLETE);
+
 const SettingsInput = z
   .object({
     storeName: z.string().trim().min(1, '请填写门店名称').max(32, '门店名称最多 32 个字'),
@@ -198,13 +202,7 @@ const SettingsInput = z
           .int('实体卡押金要精确到分')
           .min(0, '实体卡押金不能为负')
           .max(MAX_CARD_DEPOSIT, `实体卡押金最多 ${MAX_CARD_DEPOSIT / 100} 元`),
-        fields: z.object(
-          Object.fromEntries(MEMBER_FORM_FIELDS.map((k) => [k, z.object({ show: z.boolean('请选择显示不显示'), required: z.boolean('请选择必填不必填') })])) as Record<
-            (typeof MEMBER_FORM_FIELDS)[number],
-            z.ZodObject<{ show: z.ZodBoolean; required: z.ZodBoolean }>
-          >,
-          '建档表单的字段设置不完整，请刷新页面后重试',
-        ),
+        fields: z.object(Object.fromEntries(MEMBER_FORM_FIELDS.map((k) => [k, MemberFormFieldInput])) as Record<(typeof MEMBER_FORM_FIELDS)[number], typeof MemberFormFieldInput>, FORM_INCOMPLETE),
       })
       .transform(normalizeMemberFormRules),
     cashDrawers: z
