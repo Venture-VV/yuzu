@@ -123,7 +123,7 @@ test.describe('G-R1 页面回归', () => {
       const manager = await managerContext.newPage();
       await login(manager, 'zhangjl');
       await closeOpenShift(manager);
-      await nav(manager, '前台').click();
+      await nav(manager, '收银台').click();
       await manager.getByTestId('open-checkouts').click();
       const records = manager.getByRole('dialog', { name: '结账记录' });
 
@@ -166,7 +166,10 @@ test.describe('G-R1 页面回归', () => {
     await expect(page.getByTestId('shift-cash-formula')).toContainText('反结账退现金');
 
     // 客人恢复在店；重结时门票按第一次结账的时刻
+    // （8.1.14：门票多少钱在收银台的账单上看，发卡台的客人卡只写票种）
     await openBill(page, cash.guest.code);
+    await page.getByTestId('bill-panel').getByTestId('go-cashier').click();
+    await expect(page.getByTestId('bill-panel')).toHaveAttribute('data-desk', 'cashier');
     await expect(page.getByTestId('bill-panel')).toContainText('按第一次结账');
     await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
     await expect(page.getByTestId('ticket-frozen')).toContainText('按第一次结账');
@@ -175,7 +178,7 @@ test.describe('G-R1 页面回归', () => {
   test('R7 结账记录：值班经理可以切到前一晚，店员只看本营业日', async ({ page }) => {
     await login(page, 'zhangjl');
     const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string };
-    await nav(page, '前台').click();
+    await nav(page, '收银台').click();
     await page.getByTestId('open-checkouts').click();
     const records = page.getByRole('dialog', { name: '结账记录' });
     await expect(records).toContainText(`营业日 ${me.today}`);
@@ -185,7 +188,7 @@ test.describe('G-R1 页面回归', () => {
 
     await page.request.post('/api/auth/logout');
     await login(page, 'xiaozhou');
-    await nav(page, '前台').click();
+    await nav(page, '收银台').click();
     await page.getByTestId('open-checkouts').click();
     const clerkRecords = page.getByRole('dialog', { name: '结账记录' });
     await expect(clerkRecords).toContainText(`营业日 ${me.today}`);
@@ -198,6 +201,7 @@ test.describe('G-R1 页面回归', () => {
     await ensureShift(page);
     const guest = await newGuest(page);
     await openBill(page, guest.code);
+    await page.getByTestId('bill-panel').getByTestId('go-cashier').click();
     await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
     await expect(page.getByTestId('checkout-review')).toBeVisible();
     await page.getByTestId('pay-add-other').click();

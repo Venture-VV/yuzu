@@ -145,7 +145,7 @@ test.describe('视口冒烟', () => {
         const nav = page.getByRole('navigation', { name: '主导航' });
         const viewport = page.viewportSize()!;
         const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['前台', '钟房', '会员', '流水', '日结', '交班', '后台']) {
+        for (const name of ['发卡台', '收银台', '钟房', '会员', '流水', '日结', '交班', '后台']) {
           const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
@@ -181,7 +181,7 @@ test.describe('视口冒烟', () => {
         const nav = page.getByRole('navigation', { name: '主导航' });
         const viewport = page.viewportSize()!;
         const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['前台', '钟房', '餐饮', '会员', '流水', '日结', '交班', '后台']) {
+        for (const name of ['发卡台', '收银台', '钟房', '餐饮', '会员', '流水', '日结', '交班', '后台']) {
           const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
@@ -230,7 +230,7 @@ test.describe('视口冒烟', () => {
         const nav = page.getByRole('navigation', { name: '主导航' });
         const viewport = page.viewportSize()!;
         const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['前台', '钟房', '餐饮', '客房', '会员', '流水', '日结', '交班', '后台']) {
+        for (const name of ['发卡台', '收银台', '钟房', '餐饮', '客房', '会员', '流水', '日结', '交班', '后台']) {
           const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
           expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
           expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
@@ -270,7 +270,7 @@ test.describe('视口冒烟', () => {
     const nav = page.getByRole('navigation', { name: '主导航' });
     const viewport = page.viewportSize()!;
     const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-    for (const name of ['前台', '会员', '流水', '日结', '交班', '后台']) {
+    for (const name of ['发卡台', '收银台', '会员', '流水', '日结', '交班', '后台']) {
       const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
       expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
       expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
@@ -355,13 +355,23 @@ test.describe('视口冒烟', () => {
     await page.getByTestId('tag-A8075').click();
     const panel = page.getByTestId('bill-panel');
     await expect(panel.getByTestId('bill-tag')).toHaveText('A8075');
-    // 小票的合计与结账按钮在一屏之内，不用滚动
     const viewport = page.viewportSize()!;
-    for (const id of ['bill-total', 'action-checkout']) {
-      const box = (await panel.getByTestId(id).boundingBox())!;
-      expect(box.x + box.width, id).toBeLessThanOrEqual(viewport.width);
-      expect(box.y + box.height, id).toBeLessThanOrEqual(viewport.height);
-    }
+    const inScreen = async (ids: string[]) => {
+      for (const id of ids) {
+        const box = (await panel.getByTestId(id).boundingBox())!;
+        expect(box.x + box.width, id).toBeLessThanOrEqual(viewport.width);
+        expect(box.y + box.height, id).toBeLessThanOrEqual(viewport.height);
+      }
+    };
+    // 发卡台（8.1.14）：已挂合计、加项目、换牌、去收银台都在一屏之内，不用滚动
+    await inScreen(['bill-total', 'action-add', 'action-swap', 'go-cashier']);
+    await expectFits(page);
+
+    // 收银台：带着这张手牌过去；应收与结账按钮在一屏之内
+    await panel.getByTestId('go-cashier').click();
+    await expect(page.getByTestId('cashier-queue')).toBeVisible();
+    await expect(panel.getByTestId('bill-tag')).toHaveText('A8075');
+    await inScreen(['bill-total', 'action-preview', 'action-checkout']);
     await expectFits(page);
 
     await page.goto('/shift');

@@ -316,7 +316,7 @@ export function CashierPage() {
           </div>
 
           {/* 待结账清单 */}
-          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 pt-3 pb-8 md:px-6" data-testid="cashier-queue">
+          <div className="@container scroll-thin min-h-0 flex-1 overflow-y-auto px-5 pt-3 pb-8 md:px-6" data-testid="cashier-queue">
             {board.isPending ? (
               <div className="space-y-2">
                 {Array.from({ length: 8 }, (_, i) => (
@@ -332,7 +332,8 @@ export function CashierPage() {
             ) : shown.length === 0 ? (
               <p className="py-10 text-center text-[13.5px] text-ink-3">{q ? '没有对上的在店手牌' : '这个筛选下没有手牌'}</p>
             ) : (
-              <ul className="space-y-2">
+              // 清单够宽时排两列（台式收银机的大屏一屏看得到更多手牌），窄了一列
+              <ul className="grid grid-cols-1 gap-2 @min-[56rem]:grid-cols-2">
                 {shown.map((t) => (
                   <QueueRow key={t.id} tag={t} now={now} selected={t.visit!.id === selectedId} primary={t === primary} onClick={() => openTag(t)} />
                 ))}

@@ -1,7 +1,7 @@
 // v0.7.10 浏览器验收（8–10 月旧账只读对照，见 docs/LEGACY_LEDGER.md）：
 //   旧账合成样例（seed-legacy-demo）导入后，ERP「费用与备用金 → 旧账对照」常显「不进正式账」；核验的数与
 //   src/server/demo/legacy-expected.json 一致；点开第 3 条里不平的日子跳到付款台账并高亮那一行；已下单物料显示原图；
-//   品牌清单的链接只放行 http(s)（超链接或格里写的网址；只写了名称的算没有链接）。另：班次从前一个营业日开到现在时，交班页与前台提醒先交班（接口返回模拟的跨日班次）。
+//   品牌清单的链接只放行 http(s)（超链接或格里写的网址；只写了名称的算没有链接）。另：班次从前一个营业日开到现在时，交班页与收银台提醒先交班（接口返回模拟的跨日班次）。
 // 依赖五套演示数据（仅独立演示库）；账号：店主 linlan，密码 yuzu2026。数据流程只在门店电脑尺寸执行。
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
@@ -115,7 +115,7 @@ test.describe('旧账对照（8–10 月）', () => {
     await expect(ordered).toBeInViewport();
   });
 
-  test('班次从前一个营业日开到现在：交班页与前台提醒先交班（只提醒、不拦截）', async ({ page }) => {
+  test('班次从前一个营业日开到现在：交班页与收银台提醒先交班（只提醒、不拦截）', async ({ page }) => {
     await login(page, 'linlan');
     const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string; staff: { id: number; displayName: string } };
     const yesterday = new Date(Date.parse(`${me.today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
@@ -139,14 +139,15 @@ test.describe('旧账对照（8–10 月）', () => {
     await page.route('**/api/shifts/current', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ shift }) }));
     const [, m, d] = yesterday.split('-');
     const title = `这个班次从 ${Number(m)} 月 ${Number(d)} 日开到现在，请先交班`;
-    await page.goto('/frontdesk');
+    // 8.1.14：班次是收款的事，提醒在收银台顶上（发卡台不收款，不显示）
+    await page.goto('/cashier');
     await expect(page.getByTestId('shift-cross-day')).toContainText(title);
     await page.unroute('**/api/shifts/current');
 
     // 当天开的班不提醒
     await page.route('**/api/shifts/current', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ shift: { ...shift, businessDate: me.today } }) }));
-    await page.goto('/frontdesk');
-    await expect(page.getByRole('heading', { name: /前台/ })).toBeVisible();
+    await page.goto('/cashier');
+    await expect(page.getByRole('heading', { name: /收银台/ })).toBeVisible();
     await expect(page.getByTestId('shift-cross-day')).toHaveCount(0);
     await page.unroute('**/api/shifts/current');
 
@@ -156,7 +157,7 @@ test.describe('旧账对照（8–10 月）', () => {
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ shift: { ...shift, businessDate: me.today }, today: tomorrow }) }),
     );
     const [, tm, td] = me.today.split('-');
-    await page.goto('/frontdesk');
+    await page.goto('/cashier');
     await expect(page.getByTestId('shift-cross-day')).toContainText(`这个班次从 ${Number(tm)} 月 ${Number(td)} 日开到现在，请先交班`);
     await expect(page.getByTestId('shift-cross-day')).toContainText(`今天是 ${tomorrow}`);
     await page.unroute('**/api/shifts/current');

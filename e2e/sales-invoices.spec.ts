@@ -45,7 +45,7 @@ test.describe('8.0.21 开票申请', () => {
       payments: [{ method: 'cash', amount: preview.totalAmount }],
     });
 
-    await page.goto('/frontdesk');
+    await page.goto('/cashier');
     await page.getByTestId('open-checkouts').click();
     const records = page.getByRole('dialog', { name: '结账记录' });
     await records.getByTestId('checkout-records').getByRole('button').filter({ hasText: paid.checkoutNo }).click();

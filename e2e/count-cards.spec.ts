@@ -91,6 +91,7 @@ test.describe('v0.7.28 次卡', () => {
     const visitId = checkin.visits[0]!.id;
     await postJson(page, `/api/frontdesk/visits/${visitId}/charges`, { clientKey: randomUUID(), lines: [{ itemId: item.id, quantity: 1 }], expectedTotal: 19800 });
     await page.goto(`/frontdesk?v=${visitId}`);
+    await page.getByTestId('bill-panel').getByTestId('go-cashier').click();
     await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
     await expect(page.getByTestId('checkout-total')).toBeVisible();
     const panel = page.getByTestId('checkout-count-cards');

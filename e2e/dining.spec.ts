@@ -263,6 +263,7 @@ test.describe('S5 餐饮', () => {
       await expect(panel).toContainText('餐饮');
       await expect(panel.getByTestId(/^line-\d+-kitchen$/).filter({ hasText: '少辣' })).toContainText('已上菜');
       await expect(panel.getByTestId(/^line-\d+-kitchen$/).filter({ hasText: '待做' })).toHaveCount(1);
+      await panel.getByTestId('go-cashier').click();
       await panel.getByTestId('action-checkout').click();
       await expect(page.getByTestId('checkout-dishes')).toContainText(`${TEA.name} × 1 · 待做`);
       await page.keyboard.press('Escape');

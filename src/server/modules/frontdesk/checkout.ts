@@ -926,7 +926,8 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
     FROM checkout_payments p LEFT JOIN members m ON m.id = coalesce(p.member_id, p.discount_member_id) LEFT JOIN consumptions k ON k.id = p.consumption_id
     LEFT JOIN group_buy_coupons g ON g.id = p.coupon_id LEFT JOIN staff ap ON ap.id = p.approved_by
     WHERE p.checkout_id = ${id} ORDER BY p.id`;
-  const perks = await checkoutPerks(db, id);
+  // 用了券、会员折扣、优惠 / 免单的单才有「优惠与赠送」；别的单（多数）不用再查一次
+  const perks = payments.some((p) => PERK_PAYMENT_METHODS.includes(p.method)) ? await checkoutPerks(db, id) : [];
   const mates = await db<{ code: string }[]>`
     SELECT DISTINCT t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id
     WHERE v.status = 'open' AND v.group_id IN (
@@ -942,6 +943,8 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
  * 优惠 / 免单写当场授权的人（原因在收款备注里）；会员折扣是按档阶自动打的，写几折。
  * 以前结的单一样读得出：这些都是结账时就记下的。
  */
+const PERK_PAYMENT_METHODS: readonly string[] = ['store_coupon', 'member_discount', 'discount'];
+
 async function checkoutPerks(db: Db, id: number): Promise<CheckoutPerk[]> {
   const rows = await db<
     {
@@ -974,7 +977,7 @@ async function checkoutPerks(db: Db, id: number): Promise<CheckoutPerk[]> {
     LEFT JOIN staff au ON au.id = ci.authorized_by
     LEFT JOIN benefits b ON b.id = p.benefit_id
     LEFT JOIN staff ap ON ap.id = p.approved_by
-    WHERE p.checkout_id = ${id} AND p.method IN ('store_coupon', 'member_discount', 'discount')
+    WHERE p.checkout_id = ${id} AND p.method IN ${db(PERK_PAYMENT_METHODS)}
     ORDER BY p.id`;
   return rows.map((r): CheckoutPerk => {
     const base = { paymentId: Number(r.paymentId), amount: Number(r.amount), lineIds: (r.lineIds ?? []).map(Number) };

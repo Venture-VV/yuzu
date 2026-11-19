@@ -23,6 +23,8 @@ interface Device {
 
 type PageKey =
   | 'frontdesk'
+  // 8.1.14：前台拆成发卡台（frontdesk）与收银台
+  | 'cashier'
   | 'shift'
   | 'workbench'
   | 'dining-order'
@@ -49,6 +51,7 @@ const DEVICES: Device[] = [
     viewport: { width: 1920, height: 1080 },
     pages: [
       'frontdesk',
+      'cashier',
       'shift',
       'workbench',
       'dining-order',
@@ -68,18 +71,30 @@ const DEVICES: Device[] = [
   {
     name: '商米 D3 Pro（系统缩放 1.5 倍）',
     viewport: { width: 1280, height: 720 },
-    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger', 'pool', 'gift-ledger-concierge', 'requests-stock'],
+    pages: ['frontdesk', 'cashier', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger', 'pool', 'gift-ledger-concierge', 'requests-stock'],
   },
   {
     name: '商米 V3',
     viewport: { width: 360, height: 800 },
     mobile: true,
-    pages: ['dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'dining-limits', 'gift-ledger-concierge', 'gift-ledger-customer', 'requests-stock', 'urgent-contract'],
+    pages: [
+      'frontdesk',
+      'cashier',
+      'dining-order',
+      'dining-receipt',
+      'dining-tables',
+      'dining-kitchen',
+      'dining-limits',
+      'gift-ledger-concierge',
+      'gift-ledger-customer',
+      'requests-stock',
+      'urgent-contract',
+    ],
   },
   {
     name: '小米平板 6S Pro 12.4',
     viewport: { width: 1355, height: 903 },
-    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'direct-receipt', 'admin-gifts', 'gift-ledger-concierge', 'requests-stock', 'urgent-contract'],
+    pages: ['frontdesk', 'cashier', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'direct-receipt', 'admin-gifts', 'gift-ledger-concierge', 'requests-stock', 'urgent-contract'],
   },
 ];
 
@@ -494,10 +509,26 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await expectFits(page);
     await expectOnScreen(page, ['gift-issue', 'gift-from', 'gift-to']);
   },
+  // 发卡台（8.1.14，原「前台」）：手牌板；点一张在店的手牌，客人卡上的加项目、换牌、去收银台都在屏幕里
   frontdesk: async (page) => {
     await page.goto('/frontdesk');
     await expect(page.getByTestId('tag-board')).toBeVisible();
     await expectFits(page);
+    await page.locator('[data-testid^="tag-"][data-state="in_use"]').first().click();
+    await expect(page.getByTestId('bill-panel')).toHaveAttribute('data-desk', 'issue');
+    await expectFits(page);
+    await expectOnScreen(page, ['action-add', 'action-swap', 'go-cashier']);
+  },
+  // 收银台（8.1.14）：查找框、排序、待结账清单；点第一张手牌，账单上的预结账、结账在屏幕里
+  cashier: async (page) => {
+    await page.goto('/cashier');
+    await expect(page.getByTestId('cashier-queue')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['tag-search', 'queue-sort']);
+    await page.getByTestId('cashier-queue').locator('button[data-testid^="queue-"]').first().click();
+    await expect(page.getByTestId('bill-panel')).toHaveAttribute('data-desk', 'cashier');
+    await expectFits(page);
+    await expectOnScreen(page, ['action-preview', 'action-checkout']);
   },
   shift: async (page) => {
     await page.goto('/shift');

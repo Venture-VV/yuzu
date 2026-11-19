@@ -94,6 +94,7 @@ test.describe('v0.5.0 前台', () => {
 
     // ③ 结账：按实际离店时间计价（在店 2 小时，12 小时档 499 + 搓背 58），没有储值
     await bar.getByTestId('backfill-at').fill(local(new Date(base - H)));
+    await panel.getByTestId('go-cashier').click();
     await panel.getByTestId('action-checkout').click();
     const dialog = page.getByTestId('checkout');
     await expect(dialog).toContainText(`补录纸质单 ${slip}`);

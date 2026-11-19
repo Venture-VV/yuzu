@@ -31,6 +31,7 @@ test.describe('测试服 E2E 报告的回归', () => {
     await page.getByTestId(`tag-${tag.code}`).click();
     const panel = page.getByTestId('bill-panel');
     await expect(panel.getByTestId('bill-tag')).toHaveText(tag.code);
+    await panel.getByTestId('go-cashier').click();
     await panel.getByTestId('action-checkout').click();
     await page.getByTestId('pay-add-cash').click();
     const submit = page.getByTestId('checkout-submit');

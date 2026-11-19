@@ -418,7 +418,7 @@ export function BillPanel({
             )
           ) : open ? (
             <div className="flex gap-2 @min-[22rem]:ml-auto">
-              <Button variant="secondary" className="flex-1 @min-[22rem]:flex-none" icon={<ReceiptText className="size-4" />} onClick={() => onAction('preview')} kbd="F8">
+              <Button variant="secondary" className="flex-1 @min-[22rem]:flex-none" icon={<ReceiptText className="size-4" />} onClick={() => onAction('preview')} kbd="F8" data-testid="action-preview">
                 预结账
               </Button>
               {can('frontdesk.checkout') && (

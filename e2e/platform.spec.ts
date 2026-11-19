@@ -19,7 +19,7 @@ test.describe('v0.7.28 平台核销补录', () => {
   test('前台补登记一张美团券；店主登记打款，对账表有应结、到账与差额', async ({ page }) => {
     const code = `MT${Date.now()}`;
     await login(page, 'xiaozhou');
-    await page.goto('/frontdesk');
+    await page.goto('/cashier');
     await page.getByTestId('open-platform').click();
     await expect(page.getByTestId('platform-page')).toBeVisible();
     await page.getByTestId('platform-redeem-new').click();

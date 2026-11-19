@@ -80,6 +80,7 @@ test.describe('对话框打开后马上输入', () => {
       await route.continue();
     });
     try {
+      await panel.getByTestId('go-cashier').click();
       await panel.getByTestId('action-checkout').click();
       const dialog = page.getByRole('dialog');
       await expect(dialog.getByTestId('pay-hint')).toContainText('正在取应收合计');

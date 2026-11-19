@@ -35,7 +35,7 @@ export function DeskLayout() {
 export const gradeShort = (label: string) => label.split(/[\s·]/)[0] ?? label;
 
 /**
- * 发卡台 · 会员等级识别（FS6）：档阶能用几级 VIP 柜、结账打几折、浴票延迟、本月可享的服务几项、手上能用的券。
+ * 发卡台 · 会员等级识别（FS6）：档阶能用几级 VIP 柜、哪几项打几折、浴票延迟、本月可享的服务几项、手上能用的券。
  * 权益清单要「查找与查看会员」；没有这项权限的账号只显示档阶与券（都在手牌板的数据里）。
  */
 export function MemberEntitlements({ memberId, grade, coupons, gifts }: { memberId: number; grade: MemberGradeBadge | null; coupons: number; gifts: number }) {
@@ -47,13 +47,15 @@ export function MemberEntitlements({ memberId, grade, coupons, gifts }: { member
     staleTime: 60_000,
   });
   const items = benefits.data?.items ?? [];
-  const best = items.flatMap((i) => (i.discount ? [i.discount.rate] : [])).sort((a, b) => a - b)[0];
+  // 折扣写清是哪一项的（「派对房及包房折扣 5.5 折」）：折扣各有适用的范围，不能只写一个「结账几折」
+  const discounts = items.flatMap((i) => (i.discount ? [{ id: i.benefitId, text: `${i.name} ${rateText(i.discount.rate)}`, title: i.discount.text }] : []));
   const extension = Math.max(0, ...items.map((i) => i.extension?.minutes ?? 0));
   const services = items.filter((i) => i.category === 'service').length;
-  const chips: { key: string; text: string; tone: 'yuzu' | 'pine' | 'lake' | 'neutral' | 'ember' }[] = [];
+  const chips: { key: string; text: string; title?: string; tone: 'yuzu' | 'pine' | 'lake' | 'neutral' | 'ember' }[] = [];
   if (grade && grade.lockerLevel > 0) chips.push({ key: 'locker', text: `VIP 柜 ${grade.lockerLevel} 级及以下`, tone: 'yuzu' });
   if (grade?.graceUntil) chips.push({ key: 'grace', text: `补充期至 ${grade.graceUntil}`, tone: 'ember' });
-  if (best !== undefined) chips.push({ key: 'discount', text: `结账 ${rateText(best)}`, tone: 'pine' });
+  for (const d of discounts.slice(0, 2)) chips.push({ key: `discount-${d.id}`, text: d.text, title: d.title, tone: 'pine' });
+  if (discounts.length > 2) chips.push({ key: 'discount-more', text: `另有 ${discounts.length - 2} 项折扣`, tone: 'pine' });
   if (extension > 0) chips.push({ key: 'extension', text: `浴票延迟 ${minutesText(extension)}`, tone: 'lake' });
   if (services > 0) chips.push({ key: 'service', text: `本月可享服务 ${services} 项`, tone: 'neutral' });
   if (coupons > 0) chips.push({ key: 'coupons', text: gifts > 0 ? `券 ${coupons} 张（签赠 ${gifts}）` : `券 ${coupons} 张`, tone: 'pine' });
@@ -63,9 +65,9 @@ export function MemberEntitlements({ memberId, grade, coupons, gifts }: { member
     <div className="mt-2 flex flex-wrap items-center gap-1.5 px-1" data-testid="member-entitlements" aria-label="会员基础权益">
       <Crown className="size-3.5 shrink-0 text-yuzu-deep" />
       {chips.map((c) => (
-        <Badge key={c.key} tone={c.tone}>
-          {c.text}
-        </Badge>
+        <span key={c.key} title={c.title}>
+          <Badge tone={c.tone}>{c.text}</Badge>
+        </span>
       ))}
     </div>
   );

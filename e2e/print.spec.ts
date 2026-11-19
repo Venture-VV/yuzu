@@ -179,7 +179,7 @@ test.describe('打印', () => {
     const { list } = found!;
     const wallet = demoCheckout(list, 'A8066', 'completed');
 
-    await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '前台', exact: true }).click();
+    await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '收银台', exact: true }).click();
     await page.getByTestId('open-checkouts').click();
     const records = page.getByRole('dialog', { name: '结账记录' });
     await records.getByText(wallet.checkoutNo).click();

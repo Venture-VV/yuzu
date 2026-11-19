@@ -61,8 +61,8 @@ test.describe('前台流程', () => {
 
   test('接待同行、男女牌防呆、挂账、作废、换牌、预结账，全程不扣会员余额', async ({ page }) => {
     await login(page, 'xiaozhou');
-    await nav(page, '前台').click();
-    await expect(page.getByRole('heading', { name: '前台 · 在店手牌' })).toBeVisible();
+    await nav(page, '发卡台').click();
+    await expect(page.getByRole('heading', { name: '发卡台 · 在店手牌' })).toBeVisible();
     const balanceBefore = await memberBalance(page, '韩松');
     const [maleTag, maleTag2] = await freeTags(page, 'male');
     const [femaleTag] = await freeTags(page, 'female');
@@ -122,7 +122,10 @@ test.describe('前台流程', () => {
     await expect(panel.getByTestId('bill-total')).toContainText('58.00');
     await expect(page.getByTestId(`tag-${maleTag}`)).toHaveAttribute('data-state', 'locked');
 
-    // 预结账：同行两张手牌合并汇总，含门票（R1.2），不收款
+    // 预结账在收银台（8.1.14）：从客人卡带着这张手牌过去；同行两张手牌合并汇总，含门票（R1.2），不收款
+    await panel.getByTestId('go-cashier').click();
+    await expect(page.getByTestId('cashier-queue')).toBeVisible();
+    await expect(panel).toHaveAttribute('data-desk', 'cashier');
     await page.keyboard.press('F8');
     const preview = page.getByTestId('preview');
     await expect(preview).toContainText(femaleTag!);
@@ -292,6 +295,7 @@ test.describe('前台布局', () => {
     await expect(page.getByTestId('tag-board')).toBeVisible();
     // A8062 是散客：没有可用的会员储值，提示把同行朋友合并到同一张结账单（只看不提交）
     await page.getByTestId('tag-A8062').click();
+    await page.getByTestId('bill-panel').getByTestId('go-cashier').click();
     await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
     await expect(page.getByTestId('checkout-review')).toBeVisible();
     await page.getByTestId('pay-add-wallet').click();
