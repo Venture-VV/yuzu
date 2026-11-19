@@ -40,7 +40,7 @@ import { DishVoidDialog } from './DishVoid';
 import { ReceiptDialog, type ReceiptTarget } from './ReceiptDialog';
 import { GroupChips, OutletEntry, OutletFilter } from './slots';
 import { guestParams, OrderNoteInput, orderExtras, outletProblem, useOrderOutlets } from './OrderExtras';
-import { MAX_DELIVER_ROOM } from '@shared/dining-v8115';
+import { MAX_DELIVER_ROOM, outletBlockedText } from '@shared/dining-v8115';
 import { EmptyState } from '../../components/EmptyState';
 
 interface CartLine {
@@ -818,6 +818,7 @@ export function OrderTab() {
         }}
         onClose={() => setPicking(null)}
         onAdd={addPicked}
+        blockedOf={(id) => outletBlockedText(byId.get(id)?.outlet, outlets)}
       />
 
       <DishVoidDialog

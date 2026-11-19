@@ -2,12 +2,15 @@
 //   桌台：并台 → 附台不显示结账、核对时一组都勾上 → 主台一起结 → 两桌待清台 → 清台；维修（原因、预计时间）→ 历史 → 恢复；
 //   台账：点单页退菜选责任岗位 → 旧地址 /dining/voids 跳到台账的「退菜」，写原因、怎么批的、责任岗位、退菜率；
 //   康美部（后勤 + 康美部）：点单页只有水吧、果吧；只填房号找到在住的客人，下单后厨房屏写「送到房」与整单备注；没人住的房号写明找不到。
-// 依赖演示数据（仅独立演示库，W301 有在住的客人）；账号：店主 linlan、前台 xiaozhou，密码 yuzu2026。
+// 只在独立演示库跑（CI 的几套 seed 或 demo-prepare 都行）；账号：店主 linlan、前台 xiaozhou，密码 yuzu2026。
+// 只填房号要有在住的客人：自己备一间（没有专用房就建；台账里有客房空间、新建要选空间的库借一间空着的全天房），结束时撤销入住与来访。
 // 专用菜品、档口、桌台（E2E 8115 开头）留着下次沿用；开始时把这两张桌收拾成空闲，结束时退菜、撤销来访，可重复执行。
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
-import type { DiningAdmin, DiningGuest, TableSessionDetail, TablesAdmin, TablesBoard } from '../src/shared/dining';
+import type { DiningAdmin, TableSessionDetail, TablesAdmin, TablesBoard } from '../src/shared/dining';
+import type { DishesBoard } from '../src/shared/dishes';
 import type { BoardTag } from '../src/shared/frontdesk';
+import type { RoomBoard, RoomsAdmin, StayDetail } from '../src/shared/rooms';
 import { ensureShift } from './shift';
 
 const PASSWORD = 'yuzu2026';
@@ -17,6 +20,8 @@ const DISHES = [
   { name: 'E2E 8115 果盘', category: 'E2E 8115 果吧', price: 3800, station: 'E2E 8115 果吧', slot: 'fruit' },
 ] as const;
 const [RICE, TEA, FRUIT] = DISHES;
+/** 带做法、加料的水吧菜（8.1.15 菜品管理）：加料一道在果吧、一道在餐厅——康美部只能加果吧那道（ZT26） */
+const FIZZ = 'E2E 8115 气泡水';
 const MAIN = 'E2E 8115 甲';
 const SUB = 'E2E 8115 乙';
 
@@ -86,6 +91,73 @@ async function prepare(page: Page) {
     else if (!old.active || old.area !== '散桌') tables = await send<TablesAdmin>(page, 'put', `/api/admin/dining/tables/${old.id}`, body);
   }
   await resetTables(page);
+}
+
+/** 店主：没有就用菜品管理新建「气泡水」（留着下次沿用；下架了的重新上架） */
+async function ensureFizz(page: Page) {
+  const old = (await getJson<DishesBoard>(page, '/api/dining/dishes')).dishes.find((d) => d.name === FIZZ);
+  if (old) {
+    if (!old.active) await send(page, 'post', `/api/dining/dishes/${old.id}/active`, { clientKey: randomUUID(), active: true });
+    return;
+  }
+  const admin = await getJson<DiningAdmin>(page, '/api/admin/dining');
+  const id = (name: string) => admin.items.find((i) => i.name === name)!.id;
+  await send(page, 'post', '/api/dining/dishes', {
+    clientKey: randomUUID(),
+    name: FIZZ,
+    category: TEA.category,
+    slot: TEA.slot,
+    stationId: admin.stations.find((s) => s.name === TEA.station)!.id,
+    prices: { standard: 1200 },
+    methods: ['少冰'],
+    addons: [id(FRUIT.name), id(RICE.name)],
+  });
+}
+
+/** 只填房号用的专用客房（8.0.20 客房）：房型与房间都以「E2E 8115」开头 */
+const ROOM_TYPE = { name: 'E2E 8115 大床房', kind: 'daily', price: 18800, blockMinutes: null, sortOrder: 9800, active: true } as const;
+const ROOM_NO = 'E8115';
+
+/**
+ * 店主：备一间在住的客房——前台接待一位客人，入住一间空着、打扫好的全天房。专用房没有就建；台账里有客房空间的库新建要选空间，
+ * 这时借一间空着的全天房。客房功能关着的先打开，收尾时关回去
+ */
+async function stayGuest(page: Page) {
+  const admin = await getJson<RoomsAdmin>(page, '/api/admin/rooms');
+  const rules = admin.rules.enabled ? null : admin.rules;
+  if (rules) await send(page, 'put', '/api/admin/rooms/rules', { ...rules, enabled: true });
+  const vacant = async () => (await getJson<RoomBoard>(page, '/api/rooms')).rooms.filter((r) => r.status === 'vacant' && r.kind === 'daily' && !r.stay);
+  let room = (await vacant()).find((r) => r.roomNo === ROOM_NO) ?? null;
+  if (!room && !admin.rooms.some((r) => r.roomNo === ROOM_NO) && !admin.spaceRequired) {
+    let typeId = admin.types.find((t) => t.name === ROOM_TYPE.name)?.id;
+    if (!typeId) typeId = (await send<RoomsAdmin>(page, 'post', '/api/admin/rooms/types', ROOM_TYPE)).types.find((t) => t.name === ROOM_TYPE.name)!.id;
+    await send(page, 'post', '/api/admin/rooms/rooms', { roomNo: ROOM_NO, floor: 'E2E', roomTypeId: typeId, sortOrder: 9800, active: true });
+    room = (await vacant()).find((r) => r.roomNo === ROOM_NO) ?? null;
+  }
+  room ??= (await vacant())[0] ?? null;
+  expect(room, '要一间空着、打扫好的全天房').not.toBeNull();
+  const tags = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags;
+  const tag = tags.filter((t) => t.zone === 'male' && t.kind === 'normal' && t.active && !t.locked && !t.visit).at(-1)!.code;
+  await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 8115 住客' }] });
+  await send(page, 'post', '/api/rooms/checkin', { clientKey: randomUUID(), roomId: room!.id, tagCode: tag, guests: 1, expectedRate: room!.price });
+  const stay = (await getJson<RoomBoard>(page, '/api/rooms')).rooms.find((r) => r.id === room!.id)!.stay!;
+  return { roomId: room!.id, roomNo: room!.roomNo, stayId: stay.id, rules };
+}
+
+/** 收尾（店主）：作废这次入住的房费与来访上的明细，撤销入住与来访，房间打扫好；客房功能原来关着的关回去 */
+async function clearStay(page: Page, stay: Awaited<ReturnType<typeof stayGuest>>) {
+  const reason = 'E2E：收尾';
+  const s = await getJson<StayDetail>(page, `/api/rooms/stays/${stay.stayId}`);
+  for (const c of s.charges.filter((x) => x.lineStatus === 'active')) await send(page, 'post', `/api/frontdesk/lines/${c.lineId}/void`, { reason });
+  await send(page, 'post', `/api/rooms/stays/${s.id}/cancel`, { reason });
+  const v = await getJson<{ status: string; lines: { id: number; status: string }[] }>(page, `/api/frontdesk/visits/${s.visitId}`);
+  if (v.status === 'open') {
+    for (const l of v.lines.filter((x) => x.status === 'active')) await send(page, 'post', `/api/frontdesk/lines/${l.id}/void`, { reason, blame: 'other' });
+    await send(page, 'post', `/api/frontdesk/visits/${s.visitId}/cancel`, { reason });
+  }
+  const t = (await getJson<RoomBoard>(page, '/api/rooms')).rooms.find((r) => r.id === stay.roomId);
+  if (t && t.status !== 'vacant') await send(page, 'put', `/api/rooms/${t.id}/housekeeping`, { status: 'clean' });
+  if (stay.rules) await send(page, 'put', '/api/admin/rooms/rules', stay.rules);
 }
 
 const itemId = async (page: Page, name: string) => (await getJson<DiningAdmin>(page, '/api/admin/dining')).items.find((i) => i.name === name)!.id;
@@ -210,16 +282,18 @@ test.describe('8.1.15 餐饮：桌台动作、台账退菜、出品口与房号'
     }
   });
 
-  test('康美部只看得到水吧、果吧；只填房号找到在住的客人，下单后厨房屏写送到房与整单备注', async ({ page }) => {
+  test('康美部只看得到水吧、果吧，加料在餐厅的标出来、不能选；只填房号找到在住的客人，下单后厨房屏写送到房，整单备注与这一行的备注分开写', async ({ page }) => {
     await login(page, 'linlan');
     await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 });
     await prepare(page);
+    await ensureFizz(page);
     const stamp = String(Date.now()).slice(-8);
     const username = `e2ekm${stamp}`;
     const made = await page.request.post('/api/staff', { data: { username, displayName: 'E2E 康美', role: 'backoffice', duties: ['kangmei'], password: 'E2e-kangmei-2026' } });
     expect(made.status(), await made.text()).toBe(201);
     const staff = (await made.json()) as { temporaryPassword: string };
-    let ordered: number | null = null;
+    const stay = await stayGuest(page);
+    const roomNo = stay.roomNo;
     try {
       await page.request.post('/api/auth/logout');
       await login(page, username, staff.temporaryPassword);
@@ -242,34 +316,55 @@ test.describe('8.1.15 餐饮：桌台动作、台账退菜、出品口与房号'
       await page.getByTestId('dining-find').click();
       await expect(page.getByTestId('dining-guest-error')).toContainText('房号 ZZ99 现在没有登记的客人');
 
-      // 只填房号：W301 的在住客人（演示数据）
-      await page.getByTestId('dining-room').fill('W301');
+      // 只填房号：刚入住的客人
+      await page.getByTestId('dining-room').fill(roomNo);
       await page.getByTestId('dining-find').click();
-      await expect(page.getByTestId('dining-guest')).toContainText('按房号 W301 找到');
+      await expect(page.getByTestId('dining-guest')).toContainText(`按房号 ${roomNo} 找到`);
       await page.getByTestId('dining-outlet-water').click();
+      // 带加料的菜：加料在餐厅的写明「不能在餐厅下单」、没有「加」；果吧的照常能加（ZT26）
+      await page.getByTestId(`dining-dish-${FIZZ}`).click();
+      await expect(page.getByTestId('dish-options')).toBeVisible();
+      const blocked = page.getByTestId(`dish-options-addon-${RICE.name}`);
+      await expect(blocked).toHaveAttribute('data-blocked', 'true');
+      await expect(blocked).toContainText('不能在餐厅下单');
+      await expect(page.getByTestId(`dish-options-addon-add-${RICE.name}`)).toHaveCount(0);
+      await page.getByTestId('dish-options-method-少冰').click();
+      await page.getByTestId(`dish-options-addon-add-${FRUIT.name}`).click();
+      await page.getByTestId('dish-options-add').click();
+      await expect(page.getByTestId('dish-options')).toHaveCount(0);
       await page.getByTestId(`dining-dish-${TEA.name}`).click();
       await page.getByTestId('dining-order-note').fill('E2E 送到房间请敲门');
-      await expect(page.getByTestId('dining-target-room')).toContainText('W301');
+      await expect(page.getByTestId('dining-target-room')).toContainText(roomNo);
       await page.getByTestId('dining-submit').click();
       await expect(page.getByText(/已下单/)).toBeVisible();
-      ordered = (await getJson<DiningGuest>(page, '/api/dining/guest?room=W301')).visitId;
 
       // 厨房屏：送到房、整单备注
       await page.goto('/dining/kitchen');
-      const ticket = page.locator(`[data-dish="${TEA.name}"]`).filter({ hasText: 'W301' }).first();
-      await expect(ticket).toContainText('送到房 W301');
+      const ticket = page
+        .locator(`[data-dish="${TEA.name}"]`)
+        .filter({ hasText: `送到房 ${roomNo}` })
+        .first();
+      await expect(ticket).toContainText(`送到房 ${roomNo}`);
       await expect(ticket).toContainText('整单：E2E 送到房间请敲门');
+      // 这一行的备注（做法、「配 某菜」）与整单备注各占一条（ZT28）
+      const fizz = page
+        .locator(`[data-dish="${FIZZ}"]`)
+        .filter({ hasText: `送到房 ${roomNo}` })
+        .first();
+      await expect(fizz.locator('[data-testid^="kds-note-"]')).toHaveText('少冰');
+      await expect(fizz.locator('[data-testid^="kds-order-note-"]')).toHaveText('整单：E2E 送到房间请敲门');
+      const addon = page
+        .locator(`[data-dish="${FRUIT.name}"]`)
+        .filter({ hasText: `送到房 ${roomNo}` })
+        .first();
+      await expect(addon.locator('[data-testid^="kds-note-"]')).toHaveText(`配 ${FIZZ}`);
+      await expect(addon.locator('[data-testid^="kds-order-note-"]')).toHaveText('整单：E2E 送到房间请敲门');
     } finally {
       await page.request.post('/api/auth/logout');
       await login(page, 'linlan');
       await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 });
-      // 收尾：退掉这一单（演示客人的账照旧）
-      if (ordered !== null) {
-        const v = await getJson<{ lines: { id: number; name: string; status: string }[] }>(page, `/api/frontdesk/visits/${ordered}`);
-        for (const l of v.lines.filter((x) => x.name === TEA.name && x.status === 'active')) {
-          await send(page, 'post', `/api/frontdesk/lines/${l.id}/void`, { reason: 'E2E：收尾', blame: 'other' });
-        }
-      }
+      // 收尾：退掉这一单与房费，撤销入住与来访
+      await clearStay(page, stay);
     }
   });
 });

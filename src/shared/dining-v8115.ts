@@ -3,7 +3,7 @@
 //   · B2 台账合并退菜：台账按类型筛（全部 / 正常 / 退菜 / 赠送 / 折扣），退菜的行带原因、审批与责任岗位，汇总有退菜率；
 //   · B3 出品口下单权限与房号：在餐厅 / 水吧 / 果吧下单各一项权限，点单时手牌号、房号至少填一项，整单备注写进这一单每道菜的出品单。
 
-import type { DiningOutlet } from './dining';
+import { DINING_OUTLET_LABELS, type DiningOutlet } from './dining';
 import type { Permission } from './permissions';
 
 // ───────────── B1 桌台状态与动作 ─────────────
@@ -100,6 +100,14 @@ export const OUTLET_ORDER_PERMISSIONS: Record<DiningOutlet, Permission> = {
   water: 'dining.orderWater',
   fruit: 'dining.orderFruit',
 };
+
+/**
+ * 一道菜（点单页做法 / 加料弹窗里的加料）在不能下单的出品口：写明「不能在水吧下单」，能下单（或不知道在哪个出品口）为 null。
+ * 加料是另外的菜、单独一行下单，服务端逐行核对（ZT26）：弹窗里先标出来、不能选，别等点了下单才被拒
+ */
+export function outletBlockedText(outlet: DiningOutlet | null | undefined, allowed: readonly DiningOutlet[]): string | null {
+  return outlet && !allowed.includes(outlet) ? `不能在${DINING_OUTLET_LABELS[outlet]}下单` : null;
+}
 
 /** 整单备注最多几个字（写进这一单每道菜的出品单） */
 export const MAX_ORDER_NOTE = 60;

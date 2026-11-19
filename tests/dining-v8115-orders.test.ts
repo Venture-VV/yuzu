@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CheckoutPreview } from '../src/shared/checkout';
 import type { DiningGuest, DiningLedger, DiningReceipt, KitchenBoard } from '../src/shared/dining';
+import { addonNote } from '../src/shared/dishes';
 import type { GiftIssueResult, GiftType } from '../src/shared/gifts';
 import { permissionsOf } from '../src/shared/permissions';
 import { findGuestByRoom } from '../src/server/modules/dining-order-v8115';
@@ -21,6 +22,7 @@ let tagNo = 0;
 const item: Record<string, number> = {};
 const price: Record<string, number> = { 宫保鸡丁: 4800, 柠檬茶: 1800, 果盘: 3800 };
 const room: Record<string, number> = {};
+const station: Record<string, number> = {};
 let tableId = 0;
 
 const enter = async (memberId: number | null = null) => {
@@ -55,7 +57,6 @@ beforeAll(async () => {
   butler = await login(ctx.app, 'gbutler');
   today = (await api(ctx.app, ctx.clerk, 'GET', '/api/business-day')).body.today;
   expect((await api(ctx.app, ctx.owner, 'POST', '/api/frontdesk/tags/batch', { prefix: 'G', from: 1, to: 60, width: 3, zone: 'male' })).status).toBe(200);
-  const station: Record<string, number> = {};
   for (const name of ['热菜', '水吧', '果吧']) {
     const r = await api(ctx.app, ctx.owner, 'POST', '/api/admin/dining/stations', { name });
     station[name] = r.body.stations.find((s: { name: string }) => s.name === name).id;
@@ -329,5 +330,93 @@ describe('台账合并退菜（B2）', () => {
     expect(v.status, JSON.stringify(v.body)).toBe(200);
     const after = await ledger('&type=discount');
     expect(after.rows.length).toBe(before.rows.length - 1);
+  });
+});
+
+describe('加料、套餐与出品口（块 B 与菜品管理的接头，ZT26–ZT28）', () => {
+  it('加料单独一行、按它自己的出品口核对：只能在餐厅下单的人配水吧的加料整单拒绝、写明是那道加料；两处都能下的照常。套餐按套餐自己的出品口核对，不看含的几样', async () => {
+    const make = async (body: Record<string, unknown>) => {
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/dining/dishes', { clientKey: randomUUID(), category: '餐饮', ...body });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      return r.body.dish.id as number;
+    };
+    const noodle = await make({ name: '牛肉面', slot: 'restaurant:餐饮', stationId: station['热菜'], prices: { standard: 3800 }, methods: ['微辣'], addons: [item['柠檬茶']] });
+    const combo = await make({
+      name: '双人套餐',
+      slot: 'restaurant:餐饮',
+      stationId: station['热菜'],
+      prices: { standard: 8800 },
+      combo: [
+        { itemId: item['柠檬茶'], quantity: 2 },
+        { itemId: item['果盘'], quantity: 1 },
+      ],
+    });
+    const drinks = await make({
+      name: '饮品套餐',
+      category: '饮品',
+      slot: 'water:手作饮料',
+      stationId: station['水吧'],
+      prices: { standard: 5800 },
+      combo: [{ itemId: item['宫保鸡丁'], quantity: 1 }],
+    });
+    // 点单页的菜单：加料带上自己的 id，点单页按菜单里这道菜的出品口标「不能在水吧下单」（ZT26）
+    const menu = (await api(ctx.app, ctx.clerk, 'GET', '/api/dining/menu')).body as { dishes: { id: number; outlet: string; addons?: { id: number }[] }[] };
+    expect(menu.dishes.find((d) => d.id === noodle)!.addons).toEqual([expect.objectContaining({ id: item['柠檬茶'] })]);
+    expect(menu.dishes.find((d) => d.id === item['柠檬茶'])!.outlet).toBe('water');
+
+    const g = await enter();
+    const withAddon = [
+      { itemId: noodle, quantity: 1, note: '微辣' },
+      { itemId: item['柠檬茶']!, quantity: 1, note: addonNote('牛肉面') },
+    ];
+    const post = (cookie: string, body: { lines: { itemId: number; quantity: number; note?: string }[]; expectedTotal: number; orderNote?: string }) =>
+      api(ctx.app, cookie, 'POST', '/api/dining/orders', { clientKey: randomUUID(), visitId: g.visitId, ...body });
+    expect((await setClerkPermissions(['dining.orderWater', 'dining.orderFruit'])).status).toBe(200);
+    try {
+      const denied = await post(ctx.clerk, { lines: withAddon, expectedTotal: 3800 + 1800 });
+      expect(denied.status).toBe(403);
+      expect(denied.body.error).toMatchObject({ code: 'OUTLET_FORBIDDEN', details: { items: ['柠檬茶'] } });
+      expect(denied.body.error.message).toContain('水吧');
+      // 套餐按套餐自己的出品口：餐厅的套餐含水吧、果吧的几样，只能在餐厅下单的照样能点；水吧的套餐含餐厅的菜，照样拒绝
+      expect((await post(ctx.clerk, { lines: [{ itemId: combo, quantity: 1 }], expectedTotal: 8800 })).status).toBe(200);
+      const drinksDenied = await post(ctx.clerk, { lines: [{ itemId: drinks, quantity: 1 }], expectedTotal: 5800 });
+      expect(drinksDenied.body.error).toMatchObject({ code: 'OUTLET_FORBIDDEN', details: { items: ['饮品套餐'] } });
+    } finally {
+      expect((await setClerkPermissions([])).status).toBe(200);
+    }
+    // 康美部（水吧、果吧）：水吧的套餐能点（含的宫保鸡丁不另核对），餐厅的套餐拒绝
+    expect((await post(km, { lines: [{ itemId: drinks, quantity: 1 }], expectedTotal: 5800 })).status).toBe(200);
+    expect((await post(km, { lines: [{ itemId: combo, quantity: 1 }], expectedTotal: 8800 })).body.error).toMatchObject({ code: 'OUTLET_FORBIDDEN', details: { items: ['双人套餐'] } });
+    // 两处都能下：照常，整单备注与这一行的备注分开存（ZT28）
+    expect((await post(ctx.clerk, { lines: withAddon, expectedTotal: 3800 + 1800, orderNote: '一起上' })).status).toBe(200);
+
+    const mine = (await kitchen()).items.filter((i) => i.visitId === g.visitId);
+    expect(mine.map((i) => [i.name, i.note, i.orderNote, i.parts])).toEqual([
+      [
+        '双人套餐',
+        '',
+        '',
+        [
+          { name: '柠檬茶', quantity: 2 },
+          { name: '果盘', quantity: 1 },
+        ],
+      ],
+      ['饮品套餐', '', '', [{ name: '宫保鸡丁', quantity: 1 }]],
+      ['牛肉面', '微辣', '一起上', []],
+      ['柠檬茶', '配 牛肉面', '一起上', []],
+    ]);
+    // 点菜单：整单备注写在那一次下单上，这一行的备注、套餐含的几样写在各自的行上
+    const receipt = (await api(ctx.app, ctx.clerk, 'GET', `/api/dining/receipt?visit=${g.visitId}`)).body as DiningReceipt;
+    expect(receipt.orders.map((o) => [o.orderNote, o.lines.map((l) => [l.name, l.note, l.parts.length])])).toEqual([
+      ['', [['双人套餐', '', 2]]],
+      ['', [['饮品套餐', '', 1]]],
+      [
+        '一起上',
+        [
+          ['牛肉面', '微辣', 0],
+          ['柠檬茶', '配 牛肉面', 0],
+        ],
+      ],
+    ]);
   });
 });

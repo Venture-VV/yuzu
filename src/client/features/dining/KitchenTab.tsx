@@ -244,9 +244,15 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
           {partsText(k.parts)}
         </p>
       )}
-      {k.note && <p className="mt-1 rounded-md bg-yuzu-tint px-2 py-1 text-[13.5px] font-bold text-yuzu-deep">{k.note}</p>}
+      {/* 这一行的备注：做法、手写的口味、加料的「配 某菜」（最多 40 字） */}
+      {k.note && (
+        <p className="mt-1 rounded-md bg-yuzu-tint px-2 py-1 text-[13.5px] font-bold text-yuzu-deep" data-testid={`kds-note-${k.id}`}>
+          {k.note}
+        </p>
+      )}
+      {/* 整单备注（8.1.15 块 B，最多 60 字）：这一单每道菜都带，另起一条、换一种底色，与套餐含的几样、这一行的备注分得开 */}
       {k.orderNote && (
-        <p className="mt-1 rounded-md bg-lake-soft px-2 py-1 text-[13.5px] font-bold text-lake" data-testid={`kds-order-note-${k.id}`}>
+        <p className="mt-1 rounded-md border border-dashed border-line-strong bg-paper-2 px-2 py-1 text-[13.5px] font-semibold text-ink-2" data-testid={`kds-order-note-${k.id}`}>
           整单：{k.orderNote}
         </p>
       )}
