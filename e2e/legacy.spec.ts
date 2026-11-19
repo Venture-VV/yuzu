@@ -139,7 +139,7 @@ test.describe('旧账对照（8–10 月）', () => {
     await page.route('**/api/shifts/current', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ shift }) }));
     const [, m, d] = yesterday.split('-');
     const title = `这个班次从 ${Number(m)} 月 ${Number(d)} 日开到现在，请先交班`;
-    // 8.1.14：班次是收款的事，提醒在收银台顶上（发卡台不收款，不显示）
+    // 8.1.15：班次是收款的事，提醒在收银台顶上（发卡台不收款，不显示）
     await page.goto('/cashier');
     await expect(page.getByTestId('shift-cross-day')).toContainText(title);
     await page.unroute('**/api/shifts/current');

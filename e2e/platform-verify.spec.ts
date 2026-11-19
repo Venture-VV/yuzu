@@ -88,7 +88,7 @@ test.describe('8.0.21 平台验券', () => {
     const checkin = await page.request.post('/api/frontdesk/checkins', { data: { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: tag.startsWith('B') ? 'female' : 'male' }] } });
     expect(checkin.status(), await checkin.text()).toBe(201);
     const code = `E2EV${stamp}3003`;
-    // 8.1.14：结账在收银台，从待结账清单点这张手牌
+    // 8.1.15：结账在收银台，从待结账清单点这张手牌
     const openVerify = async () => {
       await page.goto('/cashier');
       await page.getByTestId(`queue-${tag}`).click();

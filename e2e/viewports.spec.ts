@@ -363,7 +363,7 @@ test.describe('视口冒烟', () => {
         expect(box.y + box.height, id).toBeLessThanOrEqual(viewport.height);
       }
     };
-    // 发卡台（8.1.14）：已挂合计、加项目、换牌、去收银台都在一屏之内，不用滚动
+    // 发卡台（8.1.15）：已挂合计、加项目、换牌、去收银台都在一屏之内，不用滚动
     await inScreen(['bill-total', 'action-add', 'action-swap', 'go-cashier']);
     await expectFits(page);
 

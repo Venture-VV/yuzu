@@ -242,7 +242,7 @@ test.describe('完整收银', () => {
       await expect(slip.getByTestId('print-payment-coupon')).toContainText('（已作废）');
       await slip.close();
 
-      // ⑦ 收银台改收现金重新结账（8.1.14）：反结账以后这张牌回到待结账清单；同样 1,056（门票仍是 12 小时档、搓背还在），客人给 1,100 找零 44
+      // ⑦ 收银台改收现金重新结账（8.1.15）：反结账以后这张牌回到待结账清单；同样 1,056（门票仍是 12 小时档、搓背还在），客人给 1,100 找零 44
       await page.reload();
       await expect(page.getByTestId('cashier-queue')).toBeVisible();
       await page.getByTestId(`queue-${memberTag}`).click();

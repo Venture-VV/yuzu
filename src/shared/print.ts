@@ -4,7 +4,7 @@ import type { CheckoutDetail, CheckoutPayment } from './checkout';
 
 /** 结账单上的一行明细（结账那一刻账单上的有效明细，含门票） */
 export interface CheckoutPrintLine {
-  /** 明细编号（8.1.14）：与结账单的「优惠与赠送」对得上是哪几行 */
+  /** 明细编号（8.1.15）：与结账单的「优惠与赠送」对得上是哪几行 */
   id: number;
   /** 这一行被哪几类权益抵到了（签赠、券、会员折扣）；没有为空 */
   perks: import('./checkout').PerkKind[];

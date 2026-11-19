@@ -95,7 +95,7 @@ test.describe('R1.2 收银', () => {
     await page.getByTestId('checkout-submit').click();
     const receipt = page.getByTestId('checkout-receipt');
     await expect(receipt).toContainText('优惠 / 免单');
-    // 8.1.14：优惠 / 免单写在「优惠与赠送」一栏，带原因与授权人
+    // 8.1.15：优惠 / 免单写在「优惠与赠送」一栏，带原因与授权人
     await expect(receipt.getByTestId('checkout-perk-discount')).toContainText('抹零');
     await expect(receipt.getByTestId('checkout-perk-discount')).toContainText('授权 张经理');
     await page.getByTestId('checkout-finish').click();

@@ -726,7 +726,7 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
             ))}
           </tbody>
         </table>
-        {/* 优惠与赠送（8.1.14）：签赠、券、会员折扣、优惠 / 免单各一笔，写明经办人；下面只列真收的钱与预付抵扣 */}
+        {/* 优惠与赠送（8.1.15）：签赠、券、会员折扣、优惠 / 免单各一笔，写明经办人；下面只列真收的钱与预付抵扣 */}
         {detail.perks.length > 0 && (
           <div className="space-y-1.5 border-t border-line bg-yuzu-soft/40 px-3 py-2.5 text-[13px]" data-testid="checkout-perks">
             <p className="flex items-center gap-1 text-[12px] font-bold text-ink-3">

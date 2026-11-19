@@ -24,6 +24,8 @@ export default defineConfig({
     fileParallelism: workers > 1,
     maxWorkers: workers,
     globalSetup: ['tests/global-setup.ts'],
+    // 升级用例（tests/upgrade-*.test.ts）的时限另放宽到 2 分钟，见 tests/setup-timeouts.ts
+    setupFiles: ['tests/setup-timeouts.ts'],
     testTimeout: 30_000,
     hookTimeout: 60_000,
   },

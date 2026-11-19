@@ -25,10 +25,11 @@ export interface EmenuBigSpot {
 }
 
 /**
- * 加号与菜名的间距（8.1.5，PP5）：按加号自己的大小算几倍——带菜品图片的 4.5，纯文字的 2.5（文字陈列的十行、
- * 图文列表右边的六格）。加号紧跟在菜名后面；地方不够时间距往下收（最少 1 倍），菜名不被挤断
+ * 加号与菜名的间距（8.1.5，PP5）：按加号自己的大小算几倍。加号紧跟在菜名后面；地方不够时间距往下收（最少 1 倍），菜名不被挤断。
+ * 8.1.14（品牌部《工作台需求汇总 1.2》第 2 条，PENDING_DECISIONS.md PC2）：「大图 + 文字」右边的六格与「文字陈列」的十行（text）
+ * 2 倍，其余版式（photo：封面、单菜、两菜、三菜）3.5 倍——3.5 就是设计稿原来的间距（44.2 ÷ 12.6）。8.1.5 到 8.1.13 是 4.5 / 2.5
  */
-export const EMENU_PLUS_GAP = { photo: 4.5, text: 2.5 } as const;
+export const EMENU_PLUS_GAP = { photo: 3.5, text: 2 } as const;
 export type EmenuPlusKind = keyof typeof EMENU_PLUS_GAP;
 
 export interface EmenuSlotDef {

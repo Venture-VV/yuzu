@@ -23,7 +23,7 @@ interface Device {
 
 type PageKey =
   | 'frontdesk'
-  // 8.1.14：前台拆成发卡台（frontdesk）与收银台
+  // 8.1.15：前台拆成发卡台（frontdesk）与收银台
   | 'cashier'
   | 'shift'
   | 'workbench'
@@ -509,7 +509,7 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await expectFits(page);
     await expectOnScreen(page, ['gift-issue', 'gift-from', 'gift-to']);
   },
-  // 发卡台（8.1.14，原「前台」）：手牌板；点一张在店的手牌，客人卡上的加项目、换牌、去收银台都在屏幕里
+  // 发卡台（8.1.15，原「前台」）：手牌板；点一张在店的手牌，客人卡上的加项目、换牌、去收银台都在屏幕里
   frontdesk: async (page) => {
     await page.goto('/frontdesk');
     await expect(page.getByTestId('tag-board')).toBeVisible();
@@ -519,7 +519,7 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await expectFits(page);
     await expectOnScreen(page, ['action-add', 'action-swap', 'go-cashier']);
   },
-  // 收银台（8.1.14）：查找框、排序、待结账清单；点第一张手牌，账单上的预结账、结账在屏幕里
+  // 收银台（8.1.15）：查找框、排序、待结账清单；点第一张手牌，账单上的预结账、结账在屏幕里
   cashier: async (page) => {
     await page.goto('/cashier');
     await expect(page.getByTestId('cashier-queue')).toBeVisible();

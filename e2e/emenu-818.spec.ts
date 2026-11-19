@@ -203,7 +203,8 @@ const pageFacts = (page: Page, i: number) =>
       names,
       photos,
       title: title ? { text: title.textContent, color: getComputedStyle(title).color, font: parseFloat(getComputedStyle(title).fontSize), rect: rect(title.firstElementChild ?? title) } : null,
-      dot: dot ? { rect: rect(dot), color: getComputedStyle(dot).borderTopColor, radius: getComputedStyle(dot).borderTopLeftRadius } : null,
+      // 8.1.14 起小圆圈是一张矢量图（手绘的不规则圆环，品牌部《工作台需求汇总 1.2》第 3 条）：颜色看里面那一笔的填色
+      dot: dot ? { rect: rect(dot), color: getComputedStyle(dot.querySelector('path') ?? dot).fill, tag: dot.tagName.toLowerCase() } : null,
     };
   }, i);
 
@@ -243,7 +244,7 @@ test.describe('8.1.8 品牌部：顶栏字完整、标题右下角小圆圈、�
         for (const c of p.names) expect(c, `第 ${i + 1} 页（${p.layout}）菜名`).toBe(BRAND);
         expect(p.photos.length, `第 ${i + 1} 页（${p.layout}）有照片`).toBeGreaterThan(0);
         for (const r of p.photos) expect(r, `第 ${i + 1} 页（${p.layout}）照片四个角`).toBe('0px 0px 0px 0px');
-        // ② 封面：标题深棕，右下角一个红色细线小圆圈（直径 0.35 个字，圆心在最后一个字的右下角）
+        // ② 封面：标题深棕，右下角一个红色小圆圈（直径 0.35 个字，圆心在最后一个字的右下角；8.1.14 起是手绘的圆环，大小、位置、颜色没变）
         if (p.layout === 'cover') {
           covers++;
           expect(p.title!.color).toBe(BRAND);
@@ -252,7 +253,7 @@ test.describe('8.1.8 品牌部：顶栏字完整、标题右下角小圆圈、�
           const em = t.height; // 中文标题的行框正好一个字高
           const d = p.dot!.rect;
           expect(p.dot!.color).toBe(DOT);
-          expect(p.dot!.radius).toBe('50%');
+          expect(p.dot!.tag).toBe('svg');
           expect(d.width).toBeCloseTo(0.35 * em, 0);
           expect(d.height).toBeCloseTo(0.35 * em, 0);
           expect(d.right - t.right).toBeCloseTo(0.12 * em, 0);
@@ -270,6 +271,8 @@ test.describe('8.1.8 品牌部：顶栏字完整、标题右下角小圆圈、�
       expect(en.title!.color).toBe(BRAND);
       expect(en.dot).not.toBeNull();
       expect(en.dot!.rect.left).toBeGreaterThan(en.title!.rect.right - 0.35 * en.title!.font);
+      // 8.1.14：英文时圆环在最后一个字母的外面，不压在字母上（左沿离这一行的右边 0.02 个字）
+      expect(en.dot!.rect.left).toBeGreaterThanOrEqual(en.title!.rect.right - 0.03 * en.title!.font);
       expect(en.dot!.rect.bottom).toBeLessThanOrEqual(en.title!.rect.bottom + 0.5);
       const h = await headerFacts(page);
       expect(h.selected).toBe(BRAND);

@@ -1,4 +1,4 @@
-// 发卡台（8.1.14，docs/DESKS_V8114.md 第 3.2 节；原「前台」）：客人入场——接待发牌、会员等级识别、换牌、同行、挂账，
+// 发卡台（8.1.15，docs/DESKS_V8115.md 第 3.2 节；原「前台」）：客人入场——接待发牌、会员等级识别、换牌、同行、挂账，
 // 以及找客人、锁牌、补录纸质单。不参与结账：看账单、预结账、结账、结账记录都在收银台（CashierPage）。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -93,7 +93,7 @@ export function FrontdeskPage() {
   const resume = params.get('resume');
   useEffect(() => {
     if (!resume) return;
-    // 结账、退款单在收银台处理（8.1.14）：旧链接、书签带着这两种来的转过去
+    // 结账、退款单在收银台处理（8.1.15）：旧链接、书签带着这两种来的转过去
     if (resume === 'checkout' || resume === 'checkout_refund') {
       navigate(`/cashier?${params}`, { replace: true });
       return;

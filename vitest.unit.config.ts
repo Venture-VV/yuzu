@@ -18,6 +18,8 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     pool: 'forks',
+    // 升级用例（tests/upgrade-*.test.ts）的时限另放宽到 2 分钟，见 tests/setup-timeouts.ts
+    setupFiles: ['tests/setup-timeouts.ts'],
     testTimeout: 30_000,
   },
 });

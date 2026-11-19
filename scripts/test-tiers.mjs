@@ -87,7 +87,7 @@ export function keywordsOf(changedFile) {
   return [];
 }
 
-/** 用例文件名和关键词沾不沾边：整个词或它的单数形式出现在文件名里（wallet 对上 wallet-limits，coupons 对上 coupon-campaigns） */
+/** 用例文件名和关键词沾不沾边：整个词或它的单数形式出现在文件名里（wallet 对上 wallet-limits，coupons 对上 mp-claim-coupon） */
 export function matchesKeyword(testFile, keyword) {
   const name = posix
     .basename(testFile)

@@ -24,7 +24,8 @@ const ROW_MID = 55.45;
 // 原来按字数估（英文一个字 8.2、中文 14），长的英文名估少了会被裁掉一截。现在用页面上的字体在画布上量；
 // 字体下载完（document.fonts 的 loadingdone）重新量一次。量不了（没有画布）时照旧按字数估。
 
-const EN_FONTS = "'Tangqi Brand En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', sans-serif";
+// 分类的英文是衬线展示体（8.1.14，品牌部，PC1；样式表的 --em-en-display）：量宽用同一串字体
+const EN_FONTS = "'Playfair Display', 'Tangqi Brand En', 'Average Sans', 'Zhuque Fangsong', 'FangSong', serif";
 const ZH_FONTS = "'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif";
 /** 分类名最多缩到设计稿的几成：再长的末尾显示「…」（一般是后台的英文名太长，后台填英文名的地方有提示） */
 export const CAT_MIN_SCALE = 0.8;
@@ -150,7 +151,7 @@ function FitLine({ room, top, size, en, spacing, children }: { room: number; top
     <span style={{ ...box(0, top, room), display: 'flex', justifyContent: 'center' }}>
       <span
         ref={ref}
-        className={en ? 'em-en' : undefined}
+        className={en ? 'em-en-display' : undefined}
         style={{ flex: 'none', fontSize: size, lineHeight: `${size}px`, whiteSpace: 'nowrap', letterSpacing: spacing ? `${spacing}em` : undefined, transformOrigin: '50% 50%' }}
         data-cat-line
       >
@@ -208,7 +209,9 @@ export function Header({
   const first = center - ((n - 1) * gap) / 2;
   // 分类的字（8.1.6，QZ5）：按最宽的那个名字实际量出来的宽排——放大的一档最多放大 BIG.ui 倍；
   // 分类多、名字长放不下时整组一起缩小一点（最多缩到 CAT_MIN_SCALE），不挤到旁边；还放不下的末尾显示「…」。放得下时与原来一样
-  const spacingEn = 0.058;
+  // 全大写的英文补的字距：衬线展示体（8.1.14）本身比原来的字体宽，补 0.03em（原来给顶替字体 Average Sans 补 0.058em）——
+  // 这样一行的宽与门店服务器上用授权品牌字体时差不多，分类整组不会因此多缩一截
+  const spacingEn = 0.03;
   const widest = Math.max(
     1,
     ...categories.map((c) => {

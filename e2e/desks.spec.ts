@@ -1,4 +1,4 @@
-// 8.1.14 发卡台与收银台（docs/DESKS_V8114.md）的浏览器验收：
+// 8.1.15 发卡台与收银台（docs/DESKS_V8115.md）的浏览器验收：
 //   ① 主导航里「前台」分成「发卡台」「收银台」两个；
 //   ② 发卡台：手牌卡片与客人卡上认得出会员档阶与基础权益（VIP 柜、手上的券）；加项目、作废、换牌都在；没有预结账、结账、结账记录，F9 不开结账；
 //   ③ 从客人卡「去收银台结账」：待结账清单上这张牌标着「签赠」；账单只读（没有加项目、作废、换牌，F4 不开加项目）；
@@ -75,7 +75,7 @@ async function closeMyShift(page: Page, note: string) {
   expect(res.ok(), await res.text()).toBe(true);
 }
 
-test.describe('8.1.14 发卡台与收银台', () => {
+test.describe('8.1.15 发卡台与收银台', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会登记单据的流程只在门店电脑尺寸执行一次');
 
   test('发卡台认会员等级、加项目、换牌，不结账 → 收银台只读、看得到签赠与经办人 → 结账单与小票写明赠送与经办人', async ({ page }) => {
@@ -85,37 +85,38 @@ test.describe('8.1.14 发卡台与收银台', () => {
     const giftName = `E2E 发卡签赠 ${stamp}`;
     await login(page, 'linlan');
 
-    // 准备（接口）：一位 L4 会员（充 5 万）、一个签赠券类型（代金券 ¥20）、发给他一张（授权人张经理、渠道管家部）
-    const memberId = await memberWith(page, memberName, `193${String(Date.now()).slice(-8)}`, 50_000_00);
-    const type = await postJson<{ id: number }>(page, '/api/gifts/types', {
-      clientKey: randomUUID(),
-      name: giftName,
-      kind: 'cash',
-      faceValue: 2000,
-      validity: 'days',
-      validDays: 30,
-      segment: '浴区',
-      content: '抵 20 元消费（E2E）',
-      rules: '',
-    });
-    const authorizers = await getJson<{ id: number; name: string }[]>(page, '/api/gifts/authorizers');
-    const zhang = authorizers.find((a) => a.name === '张经理')!;
-    expect(zhang, '演示数据里的值班经理张经理').toBeTruthy();
-    const issued = await postJson<{ coupons: { id: number; code: string }[] }>(page, '/api/gifts/issues', {
-      clientKey: randomUUID(),
-      memberId,
-      templateId: type.id,
-      quantity: 1,
-      channel: '管家部',
-      reason: 'E2E：老客户回馈',
-      authorizedBy: zhang.id,
-    });
-    const coupon = issued.coupons[0]!;
-    const me = (await getJson<{ staff: { displayName: string } }>(page, '/api/auth/me')).staff;
-
+    // 先开班（充值、结账都是收款，要在班次里）；用例自己开的班，结束时交掉
     const opened = await openShiftIfNeeded(page);
     let visitId: number | null = null;
     try {
+      // 准备（接口）：一位 L4 会员（充 5 万）、一个签赠券类型（代金券 ¥20）、发给他一张（授权人张经理、渠道管家部）
+      const memberId = await memberWith(page, memberName, `193${String(Date.now()).slice(-8)}`, 50_000_00);
+      const type = await postJson<{ id: number }>(page, '/api/gifts/types', {
+        clientKey: randomUUID(),
+        name: giftName,
+        kind: 'cash',
+        faceValue: 2000,
+        validity: 'days',
+        validDays: 30,
+        segment: '浴区',
+        content: '抵 20 元消费（E2E）',
+        rules: '',
+      });
+      const authorizers = await getJson<{ id: number; name: string }[]>(page, '/api/gifts/authorizers');
+      const zhang = authorizers.find((a) => a.name === '张经理')!;
+      expect(zhang, '演示数据里的值班经理张经理').toBeTruthy();
+      const issued = await postJson<{ coupons: { id: number; code: string }[] }>(page, '/api/gifts/issues', {
+        clientKey: randomUUID(),
+        memberId,
+        templateId: type.id,
+        quantity: 1,
+        channel: '管家部',
+        reason: 'E2E：老客户回馈',
+        authorizedBy: zhang.id,
+      });
+      const coupon = issued.coupons[0]!;
+      const me = (await getJson<{ staff: { displayName: string } }>(page, '/api/auth/me')).staff;
+
       // ① 主导航：发卡台、收银台两个入口，没有「前台」
       const nav = page.getByRole('navigation', { name: '主导航' });
       await expect(nav.getByRole('link', { name: '发卡台', exact: true })).toBeVisible();

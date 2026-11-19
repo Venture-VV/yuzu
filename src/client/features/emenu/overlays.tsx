@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { dishBlock, EMENU_MAX_CUSTOM_NOTE, type EmenuDishView, type EmenuGuest, type EmenuSpecView } from '@shared/emenu';
-import { blockLabel, dishAttrs, dishDescription, dishNames, dishTagline, dishUnit, namePair, optionLabel, specLabel, useLang, useM, type NamePair } from './i18n';
+import { blockLabel, dishAttrs, dishDescription, dishNames, dishTagline, dishUnit, EnName, namePair, optionLabel, specLabel, useLang, useM, type NamePair } from './i18n';
 import { ArrowDot, CloseDot, MinusDot, PlusDot, SearchIcon } from './icons';
 import { Backdrop } from './modals';
 import { FadeImg, ScrollArea, useExitGhost } from './motion';
@@ -120,7 +120,7 @@ export function DishDetail({
             {name.mainEn ? (
               <>
                 <div className="em-en em-clip" style={{ ...box(23.3, 21.6, cardW - 184), fontSize: 17, lineHeight: '17px' }} data-testid="emenu-detail-name">
-                  {name.main}
+                  <EnName>{name.main}</EnName>
                   {tag.text && (
                     <span className={tag.en ? undefined : undefined} style={{ fontSize: 10, lineHeight: 0, color: MUTE, marginLeft: 4, fontFamily: tag.en ? undefined : 'var(--em-zh)' }}>
                       {wrapParen(tag.text)}
@@ -138,7 +138,7 @@ export function DishDetail({
                   {tag.text && <span style={{ fontSize: 10, lineHeight: 0, color: MUTE, marginLeft: 2.6 }}>{wrapParen(tag.text)}</span>}
                 </div>
                 {name.sub && (
-                  <div className="em-en em-clip" style={{ ...box(23.3, 38.1, cardW - 184), fontSize: 9, lineHeight: '9px', color: MUTE }}>
+                  <div className="em-en-display em-clip" style={{ ...box(23.3, 38.1, cardW - 184), fontSize: 9, lineHeight: '9px', color: MUTE }}>
                     {name.sub}
                   </div>
                 )}
@@ -337,13 +337,13 @@ export function SearchOverlay({ hits, onPick, onClose }: { hits: (q: string) => 
                       {i > 0 && <span style={{ ...box(17.9, 0, 654.7, 0), borderTop: LINE }} />}
                       {name.mainEn ? (
                         <span className="em-en em-clip" style={{ ...box(16.2, 12.2, 656), fontSize: 14, lineHeight: '14px' }}>
-                          {name.main}
+                          <EnName>{name.main}</EnName>
                           <span style={{ fontFamily: 'var(--em-zh)', fontSize: 11, lineHeight: 0, color: MUTE, marginLeft: 6 }}>{name.sub}</span>
                         </span>
                       ) : (
                         <span className="em-clip" style={{ ...box(16.2, 11.2, 656), fontSize: 16, lineHeight: '16px' }}>
                           {name.main}
-                          <span className="em-en" style={{ fontSize: 10, lineHeight: 0, color: MUTE, marginLeft: 3.2 }}>
+                          <span className="em-en-display" style={{ fontSize: 10, lineHeight: 0, color: MUTE, marginLeft: 3.2 }}>
                             {name.sub}
                           </span>
                         </span>
@@ -614,7 +614,7 @@ export function OrderDrawer({
                     className={`em-clip${r.names.mainEn ? ' em-en' : ''}`}
                     style={{ ...box(0.5, r.names.mainEn ? 16.9 : 15.9, large ? 252 : 270), fontSize: r.names.mainEn ? 13 : 14, lineHeight: '14px' }}
                   >
-                    {r.names.main}
+                    {r.names.mainEn ? <EnName>{r.names.main}</EnName> : r.names.main}
                     {r.label && <span style={{ fontSize: 10, lineHeight: 0, color: MUTE }}>{r.names.mainEn ? ` (${r.label})` : `（${r.label}）`}</span>}
                     {r.tagline.text && <span style={{ fontSize: 10, lineHeight: 0, color: MUTE, fontFamily: r.tagline.en ? undefined : 'var(--em-zh)' }}>{wrapParen(r.tagline.text)}</span>}
                   </div>
@@ -627,7 +627,7 @@ export function OrderDrawer({
                       {r.names.sub}
                     </div>
                   ) : (
-                    <div className="em-en em-clip" style={{ ...box(0.5, 30.6, 270), fontSize: 8, lineHeight: '8px', color: MUTE }}>
+                    <div className="em-en-display em-clip" style={{ ...box(0.5, 30.6, 270), fontSize: 8, lineHeight: '8px', color: MUTE }}>
                       {r.names.sub}
                     </div>
                   )}
@@ -714,7 +714,7 @@ export function OrderDrawer({
                 return (
                   <div key={l.lineId} style={{ position: 'relative', height: 46 }} data-testid={`emenu-ordered-${l.lineId}`}>
                     <div className={`em-clip${name.mainEn ? ' em-en' : ''}`} style={{ ...box(0.5, name.mainEn ? 16.9 : 15.9, 270), fontSize: name.mainEn ? 13 : 14, lineHeight: '14px' }}>
-                      {name.main}
+                      {name.mainEn ? <EnName>{name.main}</EnName> : name.main}
                       {l.quantity > 1 && (
                         <span className="em-en" style={{ fontSize: 11, lineHeight: 0, color: MUTE, marginLeft: 4 }}>
                           × {l.quantity}
@@ -726,7 +726,7 @@ export function OrderDrawer({
                         {name.sub}
                       </div>
                     ) : (
-                      <div className="em-en em-clip" style={{ ...box(0.5, 30.6, 270), fontSize: 8, lineHeight: '8px', color: MUTE }}>
+                      <div className="em-en-display em-clip" style={{ ...box(0.5, 30.6, 270), fontSize: 8, lineHeight: '8px', color: MUTE }}>
                         {name.sub}
                       </div>
                     )}

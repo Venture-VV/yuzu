@@ -364,7 +364,7 @@ const router = createBrowserRouter([
     element: <AuthGate />,
     children: [
       { index: true, element: <Home /> },
-      // 8.1.14：原「前台」拆成发卡台（/frontdesk，地址沿用）与收银台（/cashier）；两个台共用一个补录纸质单的状态
+      // 8.1.15：原「前台」拆成发卡台（/frontdesk，地址沿用）与收银台（/cashier）；两个台共用一个补录纸质单的状态
       {
         element: <DeskLayout />,
         children: [

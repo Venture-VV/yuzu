@@ -546,7 +546,7 @@ export async function cancelVisit(deps: Deps, visitId: number, raw: unknown, ctx
 // ───────────────────────── 读取 ─────────────────────────
 
 /**
- * 手牌板上会员的档阶与手上能用的券（8.1.14，只读）：在店会员一次查完，发卡台认身份、收银台提醒有券 / 有签赠没用。
+ * 手牌板上会员的档阶与手上能用的券（8.1.15，只读）：在店会员一次查完，发卡台认身份、收银台提醒有券 / 有签赠没用。
  * 档阶与 VIP 柜核对用同一个来源（memberGradeBadges）；券只数此刻能用的（没用过、没作废、在有效期里）。
  */
 export async function withMemberMarks(db: Db, board: FrontdeskBoard, date: string): Promise<FrontdeskBoard> {
@@ -628,7 +628,7 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
           groupOpenCount: r.groupOpenCount,
           amountCents: r.amountCents ?? 0,
           lineCount: r.lineCount ?? 0,
-          // 档阶与手上的券由 withMemberMarks 按当天补上（8.1.14）；这里先给空的
+          // 档阶与手上的券由 withMemberMarks 按当天补上（8.1.15）；这里先给空的
           memberGradeLabel: null,
           coupons: 0,
           gifts: 0,

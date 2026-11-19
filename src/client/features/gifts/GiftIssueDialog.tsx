@@ -25,7 +25,7 @@ export function GiftIssueDialog({
   onDone,
 }: {
   defaultChannel?: string;
-  /** 已经知道发给谁（8.1.14：收银台对着这位客人的账单发）：不用再找，也不能换成别人 */
+  /** 已经知道发给谁（8.1.15：收银台对着这位客人的账单发）：不用再找，也不能换成别人 */
   presetMember?: GiftMemberOption;
   onClose: () => void;
   onDone: () => Promise<unknown> | void;

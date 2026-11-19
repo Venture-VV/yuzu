@@ -232,7 +232,7 @@ describe('包房房费折扣（QY-011）', () => {
     firstCheckout = c.id;
     const md = c.payments.find((x) => x.method === 'member_discount')!;
     expect([md.amount, md.memberName, md.ref]).toEqual([off(base, 75), '观澜会员', expect.stringContaining('7.5 折')]);
-    // 8.1.14：结账单的「优惠与赠送」里有这一笔，写明哪一项权益、几折、抵到哪几行；按档阶自动打的，不写经办人
+    // 8.1.15：结账单的「优惠与赠送」里有这一笔，写明哪一项权益、几折、抵到哪几行；按档阶自动打的，不写经办人
     const perks = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkouts/${c.id}`)).body.perks as {
       kind: string;
       name: string;

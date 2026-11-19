@@ -166,7 +166,7 @@ test.describe('G-R1 页面回归', () => {
     await expect(page.getByTestId('shift-cash-formula')).toContainText('反结账退现金');
 
     // 客人恢复在店；重结时门票按第一次结账的时刻
-    // （8.1.14：门票多少钱在收银台的账单上看，发卡台的客人卡只写票种）
+    // （8.1.15：门票多少钱在收银台的账单上看，发卡台的客人卡只写票种）
     await openBill(page, cash.guest.code);
     await page.getByTestId('bill-panel').getByTestId('go-cashier').click();
     await expect(page.getByTestId('bill-panel')).toHaveAttribute('data-desk', 'cashier');

@@ -48,7 +48,7 @@ export async function checkoutForPrint(db: Db, id: number): Promise<CheckoutPrin
   return {
     ...detail,
     bills: detail.bills.map((b) => {
-      // 这一行被哪几类权益抵到了（8.1.14）：结账单的「优惠与赠送」里记了适用明细的（签赠、券、会员折扣）
+      // 这一行被哪几类权益抵到了（8.1.15）：结账单的「优惠与赠送」里记了适用明细的（签赠、券、会员折扣）
       const own = lines
         .filter((l) => l.billId === b.billId)
         .map(

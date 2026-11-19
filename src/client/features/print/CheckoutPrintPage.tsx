@@ -30,7 +30,7 @@ export function CheckoutPrintPage() {
 function CheckoutSlip({ d }: { d: CheckoutPrint }) {
   const session = useSession();
   const tz = session.timezone;
-  // 优惠与赠送（8.1.14）单独一栏、写明经办人；「收款」只列真收的钱与预付抵扣
+  // 优惠与赠送（8.1.15）单独一栏、写明经办人；「收款」只列真收的钱与预付抵扣
   const perkPayments = new Set(d.perks.map((k) => k.paymentId));
   const tenders = d.payments.filter((p) => !perkPayments.has(p.id));
   const saved = perksTotal(d.perks);

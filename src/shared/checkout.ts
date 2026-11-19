@@ -343,7 +343,7 @@ export interface CheckoutPayment {
 }
 
 /**
- * 优惠与赠送（8.1.14，docs/DESKS_V8114.md 第 4 节）：结账单上每一笔减掉钱的权益——是什么、减了多少、谁经办的、
+ * 优惠与赠送（8.1.15，docs/DESKS_V8115.md 第 4 节）：结账单上每一笔减掉钱的权益——是什么、减了多少、谁经办的、
  * 用在哪几条明细上。签赠是标了签赠的券（8.1.9），与普通券分开写；次卡、会员储值、团购券是预付或平台结算，不算优惠。
  */
 export const PERK_KINDS = ['gift', 'coupon', 'member_discount', 'discount'] as const;
@@ -418,7 +418,7 @@ export interface CheckoutDetail {
     ticketExtensionMinutes: number;
   }[];
   payments: CheckoutPayment[];
-  /** 优惠与赠送（8.1.14）：签赠、券、会员折扣、优惠 / 免单，各带经办人；没有为空 */
+  /** 优惠与赠送（8.1.15）：签赠、券、会员折扣、优惠 / 免单，各带经办人；没有为空 */
   perks: CheckoutPerk[];
   /** 本次结账后同行组里仍在店的手牌 */
   remainingMates: string[];

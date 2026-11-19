@@ -9,6 +9,9 @@
  *     Average Sans 顶替（SIL OFL；字高、数字的宽窄与设计稿的最接近，数字 0 与字母 O 分得清）。字距是照 Average Sans 调的。
  *     8.1.5 起：门店买了网页授权、把 WOFF2 放在服务器的 brand-fonts/en.woff2，页面就用上原字体（Tangqi Brand En，brandFont.ts），
  *     .em-en 补的字距自动去掉；各处全大写小标题另补的字距换上以后照设计稿再核对一遍。
+ *   · 衬线展示体（8.1.14，品牌部《工作台需求汇总 1.2》第 1 条，PENDING_DECISIONS.md PC1）：顶栏分类的英文、菜品的英文名用
+ *     Playfair Display（SIL OFL 开源，随应用打包，只带拉丁字母 400 这一个文件）——衬脚明显、收笔尖、竖粗横细。用 .em-en-display；
+ *     别处的英文（介绍、价格、按钮、弹窗、封面大标题）照旧是上面那一款。服务器上放没放授权的 en.woff2 都不影响这两处。
  *
  * 行框（Em Box Zh / Em Box En）：两个只有 612 字节的小字体，里面没有任何常用字的字形（只映射了私用区的一个码位），只规定
  * 一行字的上沿、下沿——中文 0.707 / 0.293、英文 0.745 / 0.255（都是 1em 的比例，加起来正好 1），与设计稿 PDF 里两种字体的
@@ -25,6 +28,7 @@
  */
 @import '@free-fonts/zhuque-fangsong/zhuque-fangsong.css';
 @import '@fontsource/average-sans/latin-400.css';
+@import '@fontsource/playfair-display/latin-400.css';
 
 @font-face {
   font-family: 'Em Box Zh';
@@ -59,6 +63,12 @@
   --em-zh: 'Em Box Zh', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif;
   --em-en: 'Em Box En', 'Tangqi Brand En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', 'STFangsong', sans-serif;
   /*
+   * 衬线展示体（8.1.14，品牌部，PC1）：顶栏分类的英文、菜品的英文名。行框照旧用 Em Box En（文字框的位置与原来一样）；
+   * Playfair Display 里没有的字（英文名里夹的中文）落到后面几款。写在样式表里，不进工作台主题的字体（与 --em-dot 一样：
+   * 版面里多存一项，退回上一版时那边的工作台不认）
+   */
+  --em-en-display: 'Em Box En', 'Playfair Display', 'Tangqi Brand En', 'Average Sans', 'Zhuque Fangsong', 'FangSong', 'STFangsong', serif;
+  /*
    * 动效（8.0.13，docs/EMENU.md 第 11.3 节）：整体舒缓。要调快慢改这几个数：
    *   --em-in 进入（弹窗、抽屉、菜品详情）；--em-out 退出；--em-page 翻页与分类切换；--em-micro 按下、选中这类小反馈。
    * 曲线是缓出：开始快一点、慢慢停下来。
@@ -87,6 +97,17 @@
 /* 门店服务器上放了授权的原字体（8.1.5，brandFont.ts）：用的就是设计稿的字体，不用补字距 */
 .emenu[data-brand-en] .em-en {
   letter-spacing: 0;
+}
+/*
+ * 衬线展示体（8.1.14，品牌部，PC1）：顶栏分类的英文、菜品的英文名。Playfair Display 本身比顶替字体宽，不用补字距
+ * （顶栏全大写的那一行另给一点，见 header.tsx）；数字用等高的（它默认是高低错落的旧式数字，菜名里的年份、编号看着不齐）。
+ * 写在 .em-en 两条后面：同一个元素两个类都带时以这一条为准
+ */
+.emenu .em-en-display,
+.emenu[data-brand-en] .em-en-display {
+  font-family: var(--em-en-display);
+  letter-spacing: 0;
+  font-variant-numeric: lining-nums;
 }
 
 /* 切到英文（8.0.13）：整页的字默认用英文字体；中文（菜名的小字、没录英文的地方）照旧落到朱雀仿宋 */
@@ -474,14 +495,18 @@
 .emenu .em-cat {
   transition: color 0.45s ease;
 }
-/* 分类封面大标题右下角的小圆圈（8.1.8，品牌部，PB2）：大小跟着标题的字号，位置在 pages.tsx 的 CoverDot */
+/*
+ * 分类封面大标题右下角的小圆圈（8.1.8，品牌部，PB2）：大小跟着标题的字号，位置在 pages.tsx 的 CoverDot。
+ * 8.1.14（品牌部，PC3）：细线正圆换成手绘的不规则圆环，是一张矢量图（coverRing.ts），铺满原来那一格、填品牌红；
+ * 笔触平均的粗细约是直径的 6%，与原来的细线（7%）差不多。不裁（overflow: visible）：笔触贴着格子的边
+ */
 .emenu .em-cover-dot {
   position: absolute;
+  display: block;
   width: 0.35em;
   height: 0.35em;
-  box-sizing: border-box;
-  border: max(1px, 0.025em) solid var(--em-dot);
-  border-radius: 50%;
+  overflow: visible;
+  fill: var(--em-dot);
   pointer-events: none;
 }
 /* 中英切换的品牌图标（8.1.5）：两张图交叉淡入，换上来的那张从略小放到原大 */

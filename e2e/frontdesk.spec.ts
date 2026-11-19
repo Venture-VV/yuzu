@@ -122,7 +122,7 @@ test.describe('前台流程', () => {
     await expect(panel.getByTestId('bill-total')).toContainText('58.00');
     await expect(page.getByTestId(`tag-${maleTag}`)).toHaveAttribute('data-state', 'locked');
 
-    // 预结账在收银台（8.1.14）：从客人卡带着这张手牌过去；同行两张手牌合并汇总，含门票（R1.2），不收款
+    // 预结账在收银台（8.1.15）：从客人卡带着这张手牌过去；同行两张手牌合并汇总，含门票（R1.2），不收款
     await panel.getByTestId('go-cashier').click();
     await expect(page.getByTestId('cashier-queue')).toBeVisible();
     await expect(panel).toHaveAttribute('data-desk', 'cashier');

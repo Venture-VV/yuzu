@@ -177,7 +177,7 @@ export function buildCheckoutSlip(d: CheckoutPrint, meta: SlipMeta): Buffer {
     if (b.ticketExtensionMinutes > 0) stay += ` · 会员浴票延迟 ${minutesText(b.ticketExtensionMinutes)}`;
     s.text(stay);
     for (const l of b.lines) {
-      // 被签赠、券、会员折扣抵到的行标出来（8.1.14）：「足疗 [赠]」
+      // 被签赠、券、会员折扣抵到的行标出来（8.1.15）：「足疗 [赠]」
       s.pair(`${l.name}${perkMarks(l.perks)}`, yuan(l.amount));
       if (l.technician) s.text(`技师 ${l.technician}`, 2);
       if (l.quantity > 1) s.text(`${l.quantity} × ${yuan(l.unitPrice)}`, 2);
@@ -187,7 +187,7 @@ export function buildCheckoutSlip(d: CheckoutPrint, meta: SlipMeta): Buffer {
     s.pair('小计', yuan(b.amount), { strong: true });
   });
   s.rule(true).pair('应收合计', yuan(d.totalAmount), { big: true });
-  // 优惠与赠送（8.1.14）：签赠、券、会员折扣、优惠 / 免单各一笔，写明经办人；下面的「收款」只列真收的钱与预付抵扣
+  // 优惠与赠送（8.1.15）：签赠、券、会员折扣、优惠 / 免单各一笔，写明经办人；下面的「收款」只列真收的钱与预付抵扣
   const perkPayments = new Set(d.perks.map((p) => p.paymentId));
   if (d.perks.length > 0) {
     s.strong('优惠与赠送');

@@ -52,7 +52,7 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
 
   // ── 状态板与手牌账单 ──
-  // 8.1.14：手牌板带会员的档阶与手上能用的券（发卡台认身份、收银台提醒），同一个只读快照里补
+  // 8.1.15：手牌板带会员的档阶与手上能用的券（发卡台认身份、收银台提醒），同一个只读快照里补
   app.get('/api/frontdesk/board', { preHandler: guard('frontdesk.read') }, async () =>
     readSnapshot(sql, async (tx) => withMemberMarks(tx, await getBoard(tx), await businessDate(tx, deps, new Date()))),
   );

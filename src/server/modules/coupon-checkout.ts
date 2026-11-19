@@ -65,7 +65,7 @@ interface CouponRowForCheckout extends CouponTerms {
   giftAuthorizerName: string | null;
   giftChannel: string | null;
   giftReason: string | null;
-  /** 发放人（8.1.14）：发券记录的经办人 */
+  /** 发放人（8.1.15）：发券记录的经办人 */
   giftIssuerName: string | null;
 }
 

@@ -1,4 +1,4 @@
-// 收银台（8.1.14，docs/DESKS_V8114.md 第 3.3 节）：客人离店结账。左边是待结账清单（在店的手牌），直接敲牌号回车就打开；
+// 收银台（8.1.15，docs/DESKS_V8115.md 第 3.3 节）：客人离店结账。左边是待结账清单（在店的手牌），直接敲牌号回车就打开；
 // 右边是只读账单（不能加项目、作废、换牌），带这位客人能用的权益与优惠；预结账、结账、结账记录都在这里。
 // 接待发牌、换牌、挂账在发卡台（FrontdeskPage）。两个台共用一个「补录纸质单」状态（desk.tsx 的 DeskLayout）。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';

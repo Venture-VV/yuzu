@@ -46,7 +46,7 @@ import { stayMinutes, stayText, useServerNow } from './queries';
 export type PanelAction = 'add' | 'swap' | 'join' | 'companion' | 'preview' | 'checkout' | 'ticket' | 'records' | 'move';
 
 /**
- * 两个台（8.1.14，docs/DESKS_V8114.md）：
+ * 两个台（8.1.15，docs/DESKS_V8115.md）：
  *   · issue 发卡台的「客人卡」——身份、票种、同行、已挂的项目，挂账、换牌、同行都从这里发起；没有预结账与结账；
  *   · cashier 收银台的「账单」——只读，不能加项目、不能作废、不能换牌；预结账与结账在这里。
  */
@@ -436,7 +436,7 @@ export function BillPanel({
           )}
         </div>
         {!issue && open && (
-          // 收银台不改单（8.1.14）：明细有误回发卡台，由有权限的人作废、转明细，照旧留原因
+          // 收银台不改单（8.1.15）：明细有误回发卡台，由有权限的人作废、转明细，照旧留原因
           <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-3" data-testid="cashier-readonly-hint">
             <Lock className="size-3.5 shrink-0" />
             收银台只看不改：加项目、作废、换牌请到发卡台。

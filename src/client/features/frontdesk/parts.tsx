@@ -138,7 +138,7 @@ export function TagCard({
               <>
                 <UserRound className="size-3 shrink-0 text-pine" />
                 <span className="min-w-0 truncate font-semibold">{v.memberName}</span>
-                {/* 会员等级识别（8.1.14）：档阶的短写，全称在客人卡上 */}
+                {/* 会员等级识别（8.1.15）：档阶的短写，全称在客人卡上 */}
                 {v.memberGradeLabel && (
                   <span className="shrink-0 rounded-sm bg-yuzu-soft px-1 text-[10.5px] leading-[15px] font-bold text-yuzu-deep" title={v.memberGradeLabel} data-testid={`tag-${tag.code}-grade`}>
                     {v.memberGradeLabel.split(/[\s·]/)[0]}

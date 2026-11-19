@@ -3,6 +3,8 @@
 //   2. 事务里没等结果的查询：tx`…`、tx.unsafe(…) 写成一句单独的语句（没有 await / return / 赋值）。postgres.js 3.x
 //      在事务结束以后才发出的语句会落到别的连接上、不在事务里（4.0 的更新日志），这种写法一律不许；
 //   3. 只用到类型的导入写成 import type（import { type A, type B } 改成 import type { A, B }）。
+// 第 1 条顺带就是类型检查（CI 里不再单独跑一遍 npm run typecheck）：编译器没跑完——被信号终止（内存不够被系统杀掉）、
+// 退出码不是 0 却一条诊断也没有——算检查没做完，照样不过，不当成「没查出问题」。
 // 小程序线的目录与文件（scripts/check-line-scope.mjs 的 classify 认作小程序线自己的）不查，由小程序线决定什么时候接上。
 // 退出码：0 通过，1 有问题。
 
@@ -22,6 +24,47 @@ export function unusedFindings(tscOutput) {
     .split('\n')
     .filter((line) => /error TS6(133|138|192|196|198|199|205)/.test(line))
     .filter((line) => !isMpLine(line.split('(')[0].trim()));
+}
+
+const TSC_ARGS = ['--max-old-space-size=4096', 'node_modules/typescript/bin/tsc', '-p', 'tsconfig.json', '--noEmit', '--noUnusedLocals', '--noUnusedParameters'];
+
+/** 用 node 跑一条命令，把结果收成 { status, signal, code, output }：正常结束 status 是 0；出错时从异常里取退出码、信号、错误码与输出 */
+export function runNode(args) {
+  try {
+    const output = execFileSync(process.execPath, args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    return { status: 0, signal: null, code: null, output };
+  } catch (e) {
+    return { status: e.status ?? null, signal: e.signal ?? null, code: e.code ?? null, output: `${e.stdout ?? ''}${e.stderr ?? ''}` };
+  }
+}
+
+/**
+ * 编译器这一趟有没有跑完：跑完了返回 null，没跑完返回一句原因。
+ * 跑完的两种样子：退出码 0；退出码不是 0 而且输出里有诊断（error TS…，下面照常分拣）。
+ * 其余都算没跑完：被信号终止（哪怕已经吐出一部分诊断，剩下的没查）、输出超出缓冲被截断、退出码不是 0 却没有诊断、根本没起来。
+ */
+export function compilerIncomplete({ status, signal, code, output }) {
+  const tail = (output ?? '').trim().split('\n').slice(-5).join('\n  ');
+  const hint = tail ? `\n  ${tail}` : '';
+  if (code === 'ENOBUFS') return `类型检查的输出太多、超出缓冲被截断，没有跑完${hint}`;
+  if (signal) return `类型检查被信号 ${signal} 终止，没有跑完（多半是内存不够：编译器的堆上限设的是 4 GB）${hint}`;
+  if (status === 0) return null;
+  if (status === null || status === undefined) return `类型检查没跑起来${code ? `（${code}）` : ''}${hint}`;
+  if (!/error TS\d+/.test(output ?? '')) return `类型检查以退出码 ${status} 结束，却没有任何诊断，没有跑完${hint}`;
+  return null;
+}
+
+/** 编译器这一趟查出来的问题：没跑完只报这一条（输出不全，分拣出来的不可信），跑完了分成「类型本身的错」与「没用到的」 */
+export function compilerProblems(result) {
+  const incomplete = compilerIncomplete(result);
+  if (incomplete) return [`${incomplete}\n  （本机先单独跑 npm run typecheck 看原因）`];
+  const problems = [];
+  const output = result.output ?? '';
+  const unused = unusedFindings(output);
+  const otherTscErrors = output.split('\n').filter((l) => /error TS/.test(l) && !/error TS6(133|138|192|196|198|199|205)/.test(l));
+  if (otherTscErrors.length) problems.push(`类型检查本身有错（先跑 npm run typecheck）：\n  ${otherTscErrors.slice(0, 20).join('\n  ')}`);
+  if (unused.length) problems.push(`没用到的导入、变量、参数 ${unused.length} 处（删掉；用不到的参数写成下划线开头）：\n  ${unused.join('\n  ')}`);
+  return problems;
 }
 
 const QUERY_NAMES = new Set(['tx', 'db', 'sql', 'trx', 'conn', 'lockConn']);
@@ -77,21 +120,7 @@ function sourceFiles(dir, out = []) {
 }
 
 function main() {
-  const problems = [];
-  let tscOutput = '';
-  try {
-    execFileSync(process.execPath, ['--max-old-space-size=4096', 'node_modules/typescript/bin/tsc', '-p', 'tsconfig.json', '--noEmit', '--noUnusedLocals', '--noUnusedParameters'], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-    });
-  } catch (e) {
-    tscOutput = `${e.stdout ?? ''}${e.stderr ?? ''}`;
-  }
-  const unused = unusedFindings(tscOutput);
-  const otherTscErrors = tscOutput.split('\n').filter((l) => /error TS/.test(l) && !/error TS6(133|138|192|196|198|199|205)/.test(l));
-  if (otherTscErrors.length) problems.push(`类型检查本身有错（先跑 npm run typecheck）：\n  ${otherTscErrors.slice(0, 20).join('\n  ')}`);
-  if (unused.length) problems.push(`没用到的导入、变量、参数 ${unused.length} 处（删掉；用不到的参数写成下划线开头）：\n  ${unused.join('\n  ')}`);
+  const problems = compilerProblems(runNode(TSC_ARGS));
 
   const floating = [];
   const typeImports = [];
