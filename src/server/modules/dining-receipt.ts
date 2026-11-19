@@ -1,6 +1,7 @@
 // 8.1.7 点菜单（小票可视化，docs/DINING_V817.md 第 6 节，PENDING_DECISIONS.md CF8、CF9）：
 // 一桌（开台）或一位手牌客人（来访）点过的餐饮明细，按每次下单分段（同一张出品单号；不进厨房的按同一次挂账），
 // 每道菜标已上 / 未上 / 制作中 / 已出餐 / 已退。只读，不加锁；已经结账、撤台、离店的也能看。
+// 8.1.15（块 B3）：每次下单一段的整单备注、送达房号（出品单上记的）。
 
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
@@ -50,6 +51,8 @@ interface LineRow {
   note: string | null;
   parts: DishPart[] | null;
   orderNo: string | null;
+  orderNote: string | null;
+  deliverRoom: string | null;
 }
 
 export async function diningReceipt(db: Db, q: { session?: number; visit?: number }): Promise<DiningReceipt> {
@@ -75,7 +78,7 @@ export async function diningReceipt(db: Db, q: { session?: number; visit?: numbe
   const rows = await db<LineRow[]>`
     SELECT l.id AS bill_line_id, l.name, l.quantity, l.unit_price, l.amount, l.status, l.posted_at, l.post_key, p.display_name AS posted_by_name,
            si.category, si.dining_outlet, si.dining_group, ks.name AS station_name,
-           k.status AS kitchen_status, k.note, k.parts, k.order_no
+           k.status AS kitchen_status, k.note, k.parts, k.order_no, k.order_note, k.deliver_room
     FROM bill_lines l JOIN staff p ON p.id = l.posted_by
     LEFT JOIN service_items si ON si.id = l.item_id LEFT JOIN kitchen_stations ks ON ks.id = si.station_id
     LEFT JOIN kitchen_items k ON k.bill_line_id = l.id
@@ -83,7 +86,7 @@ export async function diningReceipt(db: Db, q: { session?: number; visit?: numbe
     ORDER BY l.posted_at, l.id`;
 
   // 每次下单一段：同一张出品单号；没有出品单的按同一次挂账（操作编号），再没有就一条一段
-  const groups = new Map<string, { orderNo: string | null; postedAt: string; postedByName: string; lines: DiningReceiptLine[] }>();
+  const groups = new Map<string, { orderNo: string | null; postedAt: string; postedByName: string; lines: DiningReceiptLine[]; orderNote: string; deliverRoom: string }>();
   for (const r of rows) {
     const key = r.orderNo ? `o:${r.orderNo}` : r.postKey ? `k:${r.postKey}` : `l:${r.billLineId}`;
     const slot = diningSlotOf({ outlet: r.diningOutlet, group: r.diningGroup, category: r.category, stationName: r.stationName });
@@ -102,7 +105,15 @@ export async function diningReceipt(db: Db, q: { session?: number; visit?: numbe
     };
     const g = groups.get(key);
     if (g) g.lines.push(line);
-    else groups.set(key, { orderNo: r.orderNo, postedAt: new Date(r.postedAt).toISOString(), postedByName: r.postedByName, lines: [line] });
+    else
+      groups.set(key, {
+        orderNo: r.orderNo,
+        postedAt: new Date(r.postedAt).toISOString(),
+        postedByName: r.postedByName,
+        lines: [line],
+        orderNote: r.orderNote ?? '',
+        deliverRoom: r.deliverRoom ?? '',
+      });
   }
   const orders: DiningReceiptOrder[] = [...groups.values()].sort((a, b) => a.postedAt.localeCompare(b.postedAt)).map((g, i) => ({ seq: i + 1, ...g }));
 

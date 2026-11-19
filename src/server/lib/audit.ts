@@ -297,6 +297,12 @@ export type AuditAction =
   | 'visit_incident'
   | 'incident_assigned'
   | 'incident_resolved'
+  // 8.1.15 块 B1（docs/DINING_V8115.md）：桌台动作——清台、维修、恢复、并台、拆台
+  | 'table_clear'
+  | 'table_maintenance'
+  | 'table_restore'
+  | 'table_merge'
+  | 'table_split'
   // 8.1.15 菜品管理（docs/DISHES_V8115.md）：新增 / 编辑、上下架、改价、导入
   | 'dish_saved'
   | 'dish_active_set'

@@ -4,6 +4,7 @@
 // 结账走与手牌结账同一套收款处理（frontdesk/checkout.ts 的 recordCheckoutPayments），结账单、交班、日结、对账包同一口径；
 // 反结账在 frontdesk/checkout.ts 的 voidCheckout 里一起处理（恢复开台与账单）。
 // 加锁顺序：经办人的班次（结账，共享锁）→ 桌台（开台、转台，id 升序）→ 开台（id 升序）→ 账单 → 明细 → 沽清 → 出品单 → 会员。
+// 8.1.15（块 B1，tables-v8115.ts）：桌台结账也先锁桌台（结账以后待清台），并台、拆台、清台、维修、恢复同一个顺序（桌台 → 开台）。
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -42,6 +43,9 @@ import { lockPaymentShift, openShiftOf } from './shifts';
 import { ctxOf } from '../lib/context';
 import { recordSaleUsage } from './stock-usage';
 import { currentStoreId } from '../lib/store-context';
+import { assertMergeGroupsComplete, assertNotMerged, assertSessionsStayed, assertTableUsable, lockTablesOfSessions, markTablesDirty, mergeInfoOf, withMergeGroups } from './tables-v8115';
+import { assertOrderOutlets, OrderNoteField, VoidBlameField } from './dining-order-v8115';
+import type { TableState } from '@shared/dining-v8115';
 
 // ───────────────────────── 后台：桌台 ─────────────────────────
 
@@ -100,7 +104,8 @@ export async function tablesBoard(db: Db, deps: Deps): Promise<TablesBoard> {
   const now = new Date();
   // 停用的桌台还有没结的开台时照样显示，结完为止
   const rows = await db<(TablesBoard['tables'][number] & { sessionId: number | null })[]>`
-    SELECT t.id, t.name, t.area, t.seats, t.sort_order, t.active, s.id AS session_id
+    SELECT t.id, t.name, t.area, t.seats, t.sort_order, t.active, s.id AS session_id,
+           t.state, t.maintenance_reason, t.maintenance_until, t.state_since
     FROM dining_tables t LEFT JOIN table_sessions s ON s.table_id = t.id AND s.status = 'open'
     WHERE (t.active OR s.id IS NOT NULL) AND t.store_id = ${currentStoreId()}
     ORDER BY t.sort_order, t.id`;
@@ -110,22 +115,29 @@ export async function tablesBoard(db: Db, deps: Deps): Promise<TablesBoard> {
         SELECT s.id, s.session_no, s.table_id, s.guests, s.guest_label, s.member_id, m.name AS member_name, s.opened_at,
                st.display_name AS opened_by_name, b.amount_cents AS amount, b.line_count,
                (SELECT coalesce(sum(k.quantity), 0) FROM kitchen_items k
-                WHERE k.table_session_id = s.id AND k.status IN ('queued', 'cooking', 'done'))::int AS pending_dishes
+                WHERE k.table_session_id = s.id AND k.status IN ('queued', 'cooking', 'done'))::int AS pending_dishes, s.merged_into
         FROM table_sessions s JOIN bills b ON b.id = s.bill_id JOIN staff st ON st.id = s.opened_by LEFT JOIN members m ON m.id = s.member_id
         WHERE s.id IN ${db(ids)}`
     : [];
   return {
     serverTime: now.toISOString(),
     businessDate: await businessDate(db as Tx, deps, now),
-    tables: rows.map(({ sessionId, ...t }) => ({ ...t, session: sessions.find((s) => s.id === sessionId) ?? null })),
+    tables: rows.map(({ sessionId, ...t }) => ({
+      ...t,
+      maintenanceUntil: t.maintenanceUntil ? new Date(t.maintenanceUntil).toISOString() : null,
+      stateSince: t.stateSince ? new Date(t.stateSince).toISOString() : null,
+      session: sessions.find((s) => s.id === sessionId) ?? null,
+    })),
   };
 }
 
 export async function getTableSession(db: Db, id: number): Promise<TableSessionDetail> {
-  const [s] = await db<(Omit<TableSessionDetail, 'lines' | 'moves' | 'member'> & { memberId: number | null; memberNo: string | null; memberName: string | null })[]>`
+  const [s] = await db<
+    (Omit<TableSessionDetail, 'lines' | 'moves' | 'member' | 'mergedInto' | 'merged'> & { memberId: number | null; memberNo: string | null; memberName: string | null; mergedInto: number | null })[]
+  >`
     SELECT s.id, s.session_no, s.status, s.table_id, t.name AS table_name, t.area, s.guests, s.guest_label, s.member_id, m.member_no,
            m.name AS member_name, s.opened_at, st.display_name AS opened_by_name, s.closed_at, s.close_reason, s.bill_id, b.bill_no,
-           b.amount_cents AS amount
+           b.amount_cents AS amount, s.merged_into
     FROM table_sessions s JOIN dining_tables t ON t.id = s.table_id JOIN bills b ON b.id = s.bill_id JOIN staff st ON st.id = s.opened_by
     LEFT JOIN members m ON m.id = s.member_id
     WHERE s.id = ${id} AND s.store_id = ${currentStoreId()}`;
@@ -145,8 +157,8 @@ export async function getTableSession(db: Db, id: number): Promise<TableSessionD
     SELECT ft.name AS from_table, tt.name AS to_table, mv.reason, st.display_name AS operator_name, mv.created_at AS at
     FROM table_session_moves mv JOIN dining_tables ft ON ft.id = mv.from_table_id JOIN dining_tables tt ON tt.id = mv.to_table_id
     JOIN staff st ON st.id = mv.operator_id WHERE mv.session_id = ${id} ORDER BY mv.id`;
-  const { memberId, memberNo, memberName, ...rest } = s;
-  return { ...rest, member: memberId ? { id: memberId, memberNo: memberNo!, name: memberName! } : null, lines, pending, moves };
+  const { memberId, memberNo, memberName, mergedInto, ...rest } = s;
+  return { ...rest, member: memberId ? { id: memberId, memberNo: memberNo!, name: memberName! } : null, lines, pending, moves, ...(await mergeInfoOf(db, s.id, mergedInto)) };
 }
 
 // ───────────────────────── 开台、改人数、转台、撤台 ─────────────────────────
@@ -161,6 +173,8 @@ interface LockedSession {
   status: string;
   openedBy: number;
   openedAt: string;
+  /** 并台（8.1.15 块 B1）：并入的主台开台 */
+  mergedInto: number | null;
 }
 
 /** 开台按 id 升序加锁 */
@@ -168,7 +182,7 @@ async function lockSessions(tx: Tx, ids: number[]): Promise<Map<number, LockedSe
   const unique = [...new Set(ids)].sort((a, b) => a - b);
   if (unique.length === 0) return new Map();
   const rows = await tx<LockedSession[]>`
-    SELECT id, session_no, bill_id, table_id, guests, member_id, status, opened_by, opened_at
+    SELECT id, session_no, bill_id, table_id, guests, member_id, status, opened_by, opened_at, merged_into
     FROM table_sessions WHERE id IN ${tx(unique)} AND store_id = ${currentStoreId()} ORDER BY id FOR UPDATE`;
   // 别家店的开台（8.0.22）：与不存在一样
   if (rows.length !== unique.length) throw notFound('开台记录不存在，请刷新后重试');
@@ -222,9 +236,11 @@ export async function openTable(deps: Deps, raw: unknown, ctx: OpContext): Promi
     await assertDiningEnabled(tx);
     await assertTablesEnabled(tx);
     // ① 桌台：启用、空闲（部分唯一索引兜底）
-    const [t] = await tx<{ id: number; name: string; active: boolean }[]>`SELECT id, name, active FROM dining_tables WHERE id = ${input.tableId} AND store_id = ${currentStoreId()} FOR UPDATE`;
+    const [t] = await tx<{ id: number; name: string; active: boolean; state: TableState; maintenanceReason: string | null }[]>`
+      SELECT id, name, active, state, maintenance_reason FROM dining_tables WHERE id = ${input.tableId} AND store_id = ${currentStoreId()} FOR UPDATE`;
     if (!t) throw notFound('桌台不存在，请刷新后重试');
     if (!t.active) throw conflict('TABLE_INACTIVE', `桌台「${t.name}」已停用，请换一张桌`);
+    assertTableUsable(t, '开台');
     const [busy] = await tx<{ sessionNo: string }[]>`SELECT session_no FROM table_sessions WHERE table_id = ${t.id} AND status = 'open'`;
     if (busy) throw conflict('TABLE_TAKEN', `桌台「${t.name}」正在用餐（${busy.sessionNo}），请换一张空桌`);
     await assertMember(tx, input.memberId);
@@ -291,14 +307,15 @@ export async function moveTable(deps: Deps, id: number, raw: unknown, ctx: OpCon
     if (!peek) throw notFound('开台记录不存在');
     if (peek.tableId === input.toTableId) throw badRequest('已经在这张桌台上了');
     // ① 两张桌台按 id 升序加锁 → ② 开台；加锁后核对没有被其他终端转走
-    const tables = await tx<{ id: number; name: string; active: boolean }[]>`
-      SELECT id, name, active FROM dining_tables WHERE id IN ${tx([peek.tableId, input.toTableId])} AND store_id = ${currentStoreId()} ORDER BY id FOR UPDATE`;
+    const tables = await tx<{ id: number; name: string; active: boolean; state: TableState; maintenanceReason: string | null }[]>`
+      SELECT id, name, active, state, maintenance_reason FROM dining_tables WHERE id IN ${tx([peek.tableId, input.toTableId])} AND store_id = ${currentStoreId()} ORDER BY id FOR UPDATE`;
     const to = tables.find((t) => t.id === input.toTableId);
     if (!to) throw notFound('要转去的桌台不存在');
     const s = (await lockSessions(tx, [id])).get(id)!;
     assertSessionOpen(s);
     if (s.tableId !== peek.tableId) throw conflict('SESSION_CHANGED', '这桌刚刚被其他终端转台了，请刷新后重试');
     if (!to.active) throw conflict('TABLE_INACTIVE', `桌台「${to.name}」已停用，请换一张桌`);
+    assertTableUsable(to, '换台');
     const [busy] = await tx<{ sessionNo: string }[]>`SELECT session_no FROM table_sessions WHERE table_id = ${to.id} AND status = 'open'`;
     if (busy) throw conflict('TABLE_TAKEN', `桌台「${to.name}」正在用餐（${busy.sessionNo}），请换一张空桌`);
     await tx`UPDATE table_sessions SET table_id = ${to.id} WHERE id = ${id}`;
@@ -331,6 +348,7 @@ export async function cancelTable(deps: Deps, id: number, raw: unknown, ctx: OpC
     const at = ctx.at ?? new Date();
     const s = (await lockSessions(tx, [id])).get(id)!;
     assertSessionOpen(s);
+    await assertNotMerged(tx, s);
     const [bill] = await tx<{ lineCount: number; amountCents: number }[]>`SELECT line_count, amount_cents FROM bills WHERE id = ${s.billId} FOR UPDATE`;
     if (bill!.lineCount > 0) {
       throw conflict('BILL_UNSETTLED', `这桌还有 ${bill!.lineCount} 项没结的消费（${formatYuan(bill!.amountCents)}），不能撤台；请结账，或先退掉点错的菜`, {
@@ -375,6 +393,8 @@ export const TablePostInput = z.object({
     .max(30, '一次最多点 30 项'),
   /** 员工确认时看到的本次合计；与服务端按当前价格计算的不一致时拒绝 */
   expectedTotal: positiveCents('本次合计'),
+  /** 整单备注（8.1.15 块 B3）：写进这一单每道菜的出品单；不带时摘要与升级前一样 */
+  orderNote: OrderNoteField,
 });
 
 /** 给一桌点菜（挂到这桌的账单上）：只能点进厨房的菜；同一个事务里扣沽清、建出品单 */
@@ -392,6 +412,12 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
     if (bill!.status !== 'open') throw conflict('BILL_CLOSED', '账单已结束，不能再点单');
     const items = await loadPricedItems(
       tx,
+      input.lines.map((l) => l.itemId),
+    );
+    // 8.1.15（块 B3）：按出品口逐行核对下单权限（重提时这里不再走：编号已有结果，照原样返回）
+    await assertOrderOutlets(
+      tx,
+      ctx.actor,
       input.lines.map((l) => l.itemId),
     );
     const stations = await kitchenStationsOf(
@@ -425,7 +451,7 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
         RETURNING id`;
       kitchen.push({ billLineId: row!.id, itemId: l.itemId!, stationId: l.stationId, quantity: l.quantity, note: l.note, limitTaken: limited.has(l.itemId!) });
     }
-    await createKitchenItems(tx, { visitId: null, tableSessionId: s.id, lines: kitchen, date, at, actor: ctx.actor, backfill: false });
+    await createKitchenItems(tx, { visitId: null, tableSessionId: s.id, lines: kitchen, date, at, actor: ctx.actor, backfill: false, orderNote: input.orderNote });
     await tx`UPDATE bills SET amount_cents = amount_cents + ${total}, line_count = line_count + ${lines.length} WHERE id = ${s.billId}`;
     await saveKey(tx, key, 'table_post', requestHash, s.id, ctx.actor.id);
     await writeAudit(tx, {
@@ -446,6 +472,8 @@ const VoidInput = z.object({
   reason: z.string().trim().min(2, '请填写退菜原因（至少 2 个字）').max(200, '原因最多 200 字'),
   /** 退超过小额上限的菜时值班经理及以上的当场授权（8.0.8，B02） */
   grantId: z.uuid('授权编号不正确').optional(),
+  /** 退菜的责任岗位（8.1.15 块 B2：退菜时选，记在审计里，不改明细表） */
+  blame: VoidBlameField,
 });
 
 /** 退菜：作废桌台账单的一条明细（规则与前台作废相同）；出品单改为已退，扣过沽清的按原份数加回 */
@@ -475,7 +503,7 @@ export async function voidTableLine(deps: Deps, lineId: number, raw: unknown, ct
       action: 'table_void',
       targetType: 'table_session',
       targetId: s.id,
-      detail: { sessionNo: s.sessionNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, ...approval },
+      detail: { sessionNo: s.sessionNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, blame: input.blame, ...approval },
       ip: ctx.ip,
       businessDate: await businessDate(tx, deps, at),
     });
@@ -489,8 +517,10 @@ const minutesBetween = (from: string | Date, to: Date) => Math.max(0, Math.floor
 
 /** 结账前核对（只读）：这几桌的明细、合计、登记的会员与还没上的菜 */
 export async function previewTableCheckout(deps: Deps, sessionIds: number[], at = new Date()): Promise<TableCheckoutPreview> {
-  const ids = [...new Set(sessionIds)];
+  // 并台（8.1.15 块 B1）：选了主台带上附台，选了附台带上主台，一组一起结
+  const ids = await withMergeGroups(deps.sql, sessionIds);
   if (ids.length === 0) throw badRequest('请选择要结账的桌');
+  if (ids.length > MAX_TABLES_PER_CHECKOUT) throw badRequest(`连同并台的桌一共 ${ids.length} 桌，一次最多合并结 ${MAX_TABLES_PER_CHECKOUT} 桌`);
   // 会员到期的赠金先作废，员工核对的余额与入账时一致
   const memberIds = await deps.sql<{ memberId: number }[]>`SELECT DISTINCT member_id FROM table_sessions WHERE id IN ${deps.sql(ids)} AND member_id IS NOT NULL`;
   for (const m of memberIds) await expireMemberBonus(deps, m.memberId, at);
@@ -508,10 +538,11 @@ export async function previewTableCheckout(deps: Deps, sessionIds: number[], at 
         memberName: string | null;
         openedAt: string;
         amount: number;
+        mergedInto: number | null;
       }[]
     >`
       SELECT s.id, s.session_no, s.bill_id, s.status, t.name AS table_name, s.guests, s.guest_label, s.member_id, m.name AS member_name,
-             s.opened_at, b.amount_cents AS amount
+             s.opened_at, b.amount_cents AS amount, s.merged_into
       FROM table_sessions s JOIN dining_tables t ON t.id = s.table_id JOIN bills b ON b.id = s.bill_id LEFT JOIN members m ON m.id = s.member_id
       WHERE s.id IN ${tx(ids)} AND s.store_id = ${currentStoreId()} ORDER BY t.sort_order, t.id`;
     if (rows.length !== ids.length) throw notFound('有开台记录不存在，请刷新后重试');
@@ -542,6 +573,7 @@ export async function previewTableCheckout(deps: Deps, sessionIds: number[], at 
       openedAt: new Date(r.openedAt).toISOString(),
       lines: lines.filter((l) => l.billId === r.billId).map(({ billId: _b, ...l }) => l),
       amount: r.amount,
+      mergedInto: r.mergedInto,
     }));
     // 这几桌登记的会员的券（v0.7.20）
     const storeCoupons = await memberCouponOptions(
@@ -586,11 +618,15 @@ export async function checkoutTables(deps: Deps, raw: unknown, ctx: OpContext): 
   for (const w of wallets) await expireMemberBonus(deps, w.memberId, ctx.at ?? new Date());
 
   const run = await runIdempotent(deps, { key, opType: 'table_checkout', requestHash }, async (tx) => {
-    // ① 班次（共享锁）→ ② 开台 → 账单
+    // ① 班次（共享锁）→ ② 桌台（8.1.15：结账以后待清台）→ ③ 开台 → 账单
     const shiftId = await lockPaymentShift(tx, ctx.actor.id, seenShift);
     const at = ctx.at ?? new Date();
+    const seenTables = await lockTablesOfSessions(tx, ids);
     const locked = await lockSessions(tx, ids);
     for (const s of locked.values()) assertSessionOpen(s);
+    assertSessionsStayed(seenTables, locked.values());
+    // 并台（8.1.15 块 B1）：附台不能单独结，主台带着附台一起结
+    await assertMergeGroupsComplete(tx, [...locked.values()]);
     // 储值只能由这几桌登记的会员支付，不能扣不在这张结账单上的会员（串单）
     const guests = new Set([...locked.values()].map((s) => s.memberId));
     const outsider = wallets.find((w) => !guests.has(w.memberId));
@@ -633,6 +669,8 @@ export async function checkoutTables(deps: Deps, raw: unknown, ctx: OpContext): 
     // 结清：账单与开台结束，桌台空出来
     await tx`UPDATE bills SET status = 'settled', closed_at = ${at} WHERE id IN ${tx(billIds)}`;
     await tx`UPDATE table_sessions SET status = 'settled', closed_at = ${at}, closed_by = ${ctx.actor.id} WHERE id IN ${tx(ids)}`;
+    // 8.1.15（块 B1）：桌台先待清台（餐饮规则可以关：关了结账后直接可用，与原来一样）
+    await markTablesDirty(tx, [...new Set([...locked.values()].map((s) => s.tableId))], at);
     await saveKey(tx, key, 'table_checkout', requestHash, checkoutId, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,

@@ -2,6 +2,7 @@
 //   · 做法：不加钱，选了的写进这道菜的出品备注（「微辣，免葱」），后面还能接手写的备注；
 //   · 加料：另外的菜，各算各的钱；加进已点时另起一行，备注写「配 这道菜」；
 //   · 套餐：这里只把含的几样写出来（出品单上会列出来），下单还是一行。
+//   · 8.1.15 块 B（ZT26）：加料在这个岗位不能下单的出品口（按出品口的三项下单权限）的，标「不能在水吧下单」、不能选。
 // 这里只是把这几样拼成点单页原有的「一行一道菜 + 口味备注」，下单的请求与以前一样。
 
 import { useState } from 'react';
@@ -27,12 +28,15 @@ export function DishOptionsDialog({
   remainingOf,
   onClose,
   onAdd,
+  blockedOf,
 }: {
   dish: MenuDish | null;
   /** 一道菜今天还能点几份（null 不限量）：已经在菜篮里的要扣掉 */
   remainingOf: (id: number) => number | null;
   onClose: () => void;
   onAdd: (lines: PickedLine[]) => void;
+  /** 这道加料能不能在这里下单（8.1.15 块 B）：不能的给出原因（「不能在水吧下单」），标出来、不能选；不传当都能点 */
+  blockedOf?: (id: number) => string | null;
 }) {
   const [methods, setMethods] = useState<string[]>([]);
   const [addons, setAddons] = useState<Record<number, number>>({});
@@ -55,7 +59,7 @@ export function DishOptionsDialog({
   const left = remainingOf(dish.id);
   const max = Math.min(99, left ?? 99);
   const options = dish.addons ?? [];
-  const picked = options.filter((a) => (addons[a.id] ?? 0) > 0);
+  const picked = options.filter((a) => (addons[a.id] ?? 0) > 0 && !blockedOf?.(a.id));
   const total = dish.price * quantity + picked.reduce((s, a) => s + a.price * addons[a.id]!, 0);
   const fits = dishNoteFits(methods, note);
   const setAddon = (id: number, n: number) => setAddons((cur) => ({ ...cur, [id]: Math.max(0, n) }));
@@ -131,17 +135,23 @@ export function DishOptionsDialog({
                 const n = addons[a.id] ?? 0;
                 const cap = remainingOf(a.id);
                 const out = cap !== null && cap <= 0;
+                const blocked = blockedOf?.(a.id) ?? null;
                 return (
                   <li
                     key={a.id}
-                    className={cn('flex min-h-12 items-center gap-2 rounded-lg border px-3', n > 0 ? 'border-pine bg-pine-tint' : 'border-line')}
+                    className={cn('flex min-h-12 items-center gap-2 rounded-lg border px-3', n > 0 && !blocked ? 'border-pine bg-pine-tint' : 'border-line')}
                     data-testid={`dish-options-addon-${a.name}`}
+                    data-blocked={blocked ? 'true' : undefined}
                   >
                     <span className="min-w-0 flex-1 truncate text-[14.5px] font-bold">{a.name}</span>
                     <span className="num text-[16px] font-semibold text-ink-2">
                       +<Money cents={a.price} />
                     </span>
-                    {out ? (
+                    {blocked ? (
+                      <StatusChip tone="clay" icon={<Ban />}>
+                        {blocked}
+                      </StatusChip>
+                    ) : out ? (
                       <StatusChip tone="clay" icon={<Ban />}>
                         已沽清
                       </StatusChip>

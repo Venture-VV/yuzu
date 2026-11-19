@@ -82,6 +82,12 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   visit_incident: { label: '异常处置', tone: 'yuzu' },
   incident_assigned: { label: '异常待办指派', tone: 'lake' },
   incident_resolved: { label: '异常待办处理结果', tone: 'pine' },
+  // 8.1.15 块 B（docs/DINING_V8115.md）：桌台动作
+  table_clear: { label: '清台', tone: 'neutral' },
+  table_maintenance: { label: '桌台维修', tone: 'clay' },
+  table_restore: { label: '桌台恢复', tone: 'pine' },
+  table_merge: { label: '并台', tone: 'lake' },
+  table_split: { label: '拆台', tone: 'lake' },
   // 菜品管理（8.1.15，docs/DISHES_V8115.md）
   dish_saved: { label: '保存菜品', tone: 'neutral' },
   dish_active_set: { label: '菜品上下架', tone: 'neutral' },

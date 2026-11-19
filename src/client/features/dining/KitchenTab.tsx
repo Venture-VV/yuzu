@@ -2,6 +2,7 @@
 // 出品屏：待做 → 制作中 → 已出餐（待上菜）三列，按下单先后；下单超过规定分钟还没出餐标红，催过的标出次数。
 // 每个操作都带上页面看到的状态，连点两下或别人刚改过时服务端拒绝（DISH_CHANGED），不会多走一步。
 // 只有点单权限的服务员只能「上菜」与撤回上菜；开始做、出餐、沽清要厨房的岗位。
+// 8.1.15（块 B3）：出品单上写整单备注、送到哪间房。
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -243,7 +244,18 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
           {partsText(k.parts)}
         </p>
       )}
-      {k.note && <p className="mt-1 rounded-md bg-yuzu-tint px-2 py-1 text-[13.5px] font-bold text-yuzu-deep">{k.note}</p>}
+      {/* 这一行的备注：做法、手写的口味、加料的「配 某菜」（最多 40 字） */}
+      {k.note && (
+        <p className="mt-1 rounded-md bg-yuzu-tint px-2 py-1 text-[13.5px] font-bold text-yuzu-deep" data-testid={`kds-note-${k.id}`}>
+          {k.note}
+        </p>
+      )}
+      {/* 整单备注（8.1.15 块 B，最多 60 字）：这一单每道菜都带，另起一条、换一种底色，与套餐含的几样、这一行的备注分得开 */}
+      {k.orderNote && (
+        <p className="mt-1 rounded-md border border-dashed border-line-strong bg-paper-2 px-2 py-1 text-[13.5px] font-semibold text-ink-2" data-testid={`kds-order-note-${k.id}`}>
+          整单：{k.orderNote}
+        </p>
+      )}
       <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-ink-3">
         {/* 手牌客人按男宾 / 女宾着色；桌台的菜显示桌号 */}
         <span className={cn('num text-[14px] font-bold', k.tableName !== null ? 'text-pine' : k.zone === 'female' ? 'text-clay' : 'text-lake')}>{whereOf(k)}</span>
@@ -251,7 +263,11 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
         {showStation && <span>· {k.stationName}</span>}
         <span className="num text-ink-4">· {k.orderNo}</span>
         {/* 小程序扫了桌上的码点的菜（v0.7.28）：送到这张桌 */}
-        {k.deliverTo && <span className="font-bold text-pine">· 送 {k.deliverTo} 桌</span>}
+        {k.deliverRoom ? (
+          <span className="font-bold text-pine">· 送到房 {k.deliverRoom}</span>
+        ) : (
+          k.deliverTo && <span className="font-bold text-pine">· 送 {k.deliverTo.startsWith('客房') ? k.deliverTo : `${k.deliverTo} 桌`}</span>
+        )}
         {k.postedByName === '小程序' && <span className="text-ink-4">· 小程序点单</span>}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">

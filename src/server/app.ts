@@ -134,6 +134,7 @@ import { registerCanteenAdminRoutes } from './modules/canteen/admin-routes';
 import { registerConciergeRoutes } from './modules/concierge/routes';
 import { registerCustomerRoutes } from './modules/customer/routes';
 import { registerPatrolAdminRoutes } from './modules/patrol/routes';
+import { registerTablesV8115Routes } from './modules/tables-v8115';
 import { registerDishRoutes } from './modules/dishes';
 import { registerDishImportRoutes } from './modules/dishes-import';
 
@@ -402,6 +403,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerCanteenAdminRoutes(app, deps);
   // 安保巡场（8.0.9，docs/PATROL_V809.md）：管理后台的 /api/erp/patrol；员工用的 /api/canteen/patrol/* 在员工端口上
   registerPatrolAdminRoutes(app, deps);
+  // 8.1.15 块 B（docs/DINING_V8115.md）：桌台动作——清台、维修、恢复、并台、拆台、桌台历史
+  registerTablesV8115Routes(app, deps);
   // 菜品管理（8.1.15，docs/DISHES_V8115.md）：菜品表、新增 / 编辑、上下架、改价与改价记录、Excel 导出与导入
   registerDishRoutes(app, deps);
   registerDishImportRoutes(app, deps);

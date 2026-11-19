@@ -3,6 +3,8 @@
 // 右边列出这位客人（这桌）还没上的菜：可以催单、上菜（服务员送到后点）、退菜（作废这条明细，要写原因）。
 // 8.1.7（docs/DINING_V817.md）：菜单区先弹出餐厅 / 水吧 / 果吧三个入口，选了再按小分类点，下单成功后回到入口（CF4）；
 // 「还没上的菜」旁边能打开点菜单（小票可视化，CF8）。
+// 8.1.15（docs/DINING_V8115.md 第 4 节，块 B3）：只列有下单权限的出品口；找客人填手牌号、房号至少一样（只填房号按这间房现在的客人找，
+// 都填时记在手牌上、房号写在送达位置）；整单备注写进这一单每道菜的出品单（OrderExtras.tsx）。
 
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useSearchParams } from 'react-router';
@@ -37,6 +39,9 @@ import { DishOptionsDialog, type PickedLine } from './DishOptionsDialog';
 import { DishVoidDialog } from './DishVoid';
 import { ReceiptDialog, type ReceiptTarget } from './ReceiptDialog';
 import { GroupChips, OutletEntry, OutletFilter } from './slots';
+import { guestParams, OrderNoteInput, orderExtras, outletProblem, useOrderOutlets } from './OrderExtras';
+import { MAX_DELIVER_ROOM, outletBlockedText } from '@shared/dining-v8115';
+import { EmptyState } from '../../components/EmptyState';
 
 interface CartLine {
   key: string;
@@ -70,20 +75,27 @@ export function OrderTab() {
   const [mode, setMode] = useState<'tag' | 'table'>('tag');
   const [tagText, setTagText] = useState('');
   const [tag, setTag] = useState<string | null>(null);
+  /** 8.1.15（块 B3）：房号——只填房号按这间房现在的客人找；都填时是送到哪 */
+  const [roomText, setRoomText] = useState('');
+  const [room, setRoom] = useState<string | null>(null);
+  const lookup = tag || room ? `${tag ?? ''}|${room ?? ''}` : null;
+  /** 整单备注（8.1.15）：写进这一单每道菜的出品单 */
+  const [orderNote, setOrderNote] = useState('');
+  const outlets = useOrderOutlets();
   const [tableSession, setTableSession] = useState<number | null>(null);
-  /** 客房点餐（8.0.20）：住店的客人可以选「送到客房」；没动过这个勾时，按房号找到的默认送、按手牌找到的默认不送 */
+  /** 客房点餐（8.0.20）：按手牌找到的住店客人可以勾「送到客房」（默认不送；按房号找到的直接送到那间房） */
   const [toRoomChoice, setToRoomChoice] = useState<boolean | null>(null);
   const guest = useQuery({
-    queryKey: guestKey(tag),
-    queryFn: () => api.get<DiningGuest>(`/api/dining/guest?tag=${encodeURIComponent(tag!)}`),
-    enabled: !!tag,
+    queryKey: guestKey(lookup),
+    queryFn: () => api.get<DiningGuest>(`/api/dining/guest?${guestParams(tag, room)}`),
+    enabled: !!lookup,
     retry: false,
     refetchInterval: 15_000,
   });
   const board = useTablesBoard(mode === 'table');
   const table = useTableSession(mode === 'table' ? tableSession : null);
-  const g = mode === 'tag' && tag ? (guest.data ?? null) : null;
-  const toRoom = !!g?.roomNo && (toRoomChoice ?? g.via === 'room');
+  const g = mode === 'tag' && lookup ? (guest.data ?? null) : null;
+  const toRoom = !!g?.roomNo && !g.deliverRoom && (toRoomChoice ?? false);
   const t: TableSessionDetail | null = mode === 'table' && tableSession !== null ? (table.data ?? null) : null;
   const target: { label: string; who: string; pending: PendingDish[]; open: boolean } | null = g
     ? { label: g.tagCode, who: g.guest, pending: g.pending, open: true }
@@ -166,9 +178,13 @@ export function OrderTab() {
   const lines = cart.map((l) => ({ ...l, dish: byId.get(l.dishId) ?? null }));
   const total = lines.reduce((s, l) => s + (l.dish ? l.dish.price * l.quantity : 0), 0);
   const short = dishes.find((d) => d.remaining !== null && countOf(d.id) > d.remaining) ?? null;
+  const notAllowed = outletProblem(
+    lines.map((l) => l.dish),
+    outlets,
+  );
   const problem = !target
     ? mode === 'tag'
-      ? '先输入手牌号找到客人'
+      ? '先输入手牌号或房号找到客人'
       : '先选一张用餐中的桌'
     : !target.open
       ? '这桌已经结账或撤台，不能再点单'
@@ -180,7 +196,7 @@ export function OrderTab() {
             ? short.remaining === 0
               ? `「${short.name}」今天已沽清，请删掉或换一道`
               : `「${short.name}」今天只剩 ${short.remaining} 份`
-            : null;
+            : notAllowed;
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['dining'] });
@@ -195,14 +211,17 @@ export function OrderTab() {
   };
   const find = () => {
     const code = tagText.trim();
-    if (!code) return;
+    const roomNo = roomText.trim().toUpperCase();
+    if (!code && !roomNo) return;
     const go = () => {
       setToRoomChoice(null);
-      setTag(code);
+      setTag(code || null);
+      setRoom(roomNo || null);
       op.clearError();
     };
     // 已经找到一位客人、又输了另一个手牌号（或房号）：也是换人。按房号找到的客人，再按同一个房号找不算
-    if (g && code.toUpperCase() !== g.tagCode.toUpperCase() && code !== tag) askSwitch(go);
+    const same = g && (code ? code.toUpperCase() === g.tagCode.toUpperCase() || code === tag : roomNo === (room ?? ''));
+    if (g && !same) askSwitch(go);
     else go();
   };
 
@@ -268,21 +287,22 @@ export function OrderTab() {
       t
         ? {
             url: `/api/dining/tables/sessions/${t.id}/orders`,
-            body: { clientKey: key, lines: orderLines, expectedTotal: total },
+            body: { clientKey: key, lines: orderLines, expectedTotal: total, ...(orderNote.trim() ? { orderNote: orderNote.trim() } : {}) },
             tagCodes: [`桌 ${t.tableName}`],
             summary,
             amount: total,
           }
         : {
             url: '/api/dining/orders',
-            body: { clientKey: key, visitId: g!.visitId, lines: orderLines, expectedTotal: total, ...(toRoom ? { toRoom: true } : {}) },
-            tagCodes: [toRoom ? `${g!.tagCode} · 客房 ${g!.roomNo}` : g!.tagCode],
+            body: { clientKey: key, visitId: g!.visitId, lines: orderLines, expectedTotal: total, ...(toRoom ? { toRoom: true } : {}), ...orderExtras(g, orderNote) },
+            tagCodes: [toRoom ? `${g!.tagCode} · 客房 ${g!.roomNo}` : g!.deliverRoom ? `${g!.tagCode} · 房 ${g!.deliverRoom}` : g!.tagCode],
             summary,
             amount: total,
           },
     );
     if (ok) {
       emptyCart();
+      setOrderNote('');
       // 下单成功后回到餐厅 / 水吧 / 果吧三个入口，下一单再选（CF4）
       pickOutlet(null);
       toast({
@@ -350,7 +370,7 @@ export function OrderTab() {
                 find();
               }}
             >
-              <Field label="手牌号或房号" htmlFor="dining-tag">
+              <Field label="手牌号" htmlFor="dining-tag">
                 <Input
                   id="dining-tag"
                   value={tagText}
@@ -358,16 +378,28 @@ export function OrderTab() {
                   placeholder="例如 A008"
                   autoComplete="off"
                   maxLength={16}
-                  className="num w-40 text-[18px] font-bold"
+                  className="num w-36 text-[18px] font-bold"
                   data-testid="dining-tag"
                 />
               </Field>
-              <Button type="submit" variant="secondary" icon={<Search className="size-4" />} disabled={!tagText.trim()} data-testid="dining-find">
+              <Field label="房号" htmlFor="dining-room">
+                <Input
+                  id="dining-room"
+                  value={roomText}
+                  onChange={(e) => setRoomText(e.target.value.toUpperCase())}
+                  placeholder="例如 W301"
+                  autoComplete="off"
+                  maxLength={MAX_DELIVER_ROOM}
+                  className="num w-32 text-[18px] font-bold"
+                  data-testid="dining-room"
+                />
+              </Field>
+              <Button type="submit" variant="secondary" icon={<Search className="size-4" />} disabled={!tagText.trim() && !roomText.trim()} data-testid="dining-find">
                 找客人
               </Button>
               <div className="min-w-0 flex-1 basis-full self-center sm:basis-auto">
-                {!tag ? (
-                  <p className="text-[13px] text-ink-3">输入客人手牌上的号码；住店的客人也可以输房号</p>
+                {!lookup ? (
+                  <p className="text-[13px] text-ink-3">手牌号、房号至少填一样：只填房号按这间房现在的客人找；都填时记在手牌上、送到这间房</p>
                 ) : guest.isPending ? (
                   <Spinner />
                 ) : guest.error ? (
@@ -380,7 +412,8 @@ export function OrderTab() {
                       <Badge tone={g.zone === 'female' ? 'clay' : 'lake'}>{ZONE_LABELS[g.zone].title}</Badge>
                       <span className="num text-[18px] font-bold">{g.tagCode}</span>
                       <span className="text-[15px] font-semibold">{g.guest}</span>
-                      {g.roomNo && (
+                      {g.deliverRoom && <Badge tone="lake">{g.via === 'room' ? `按房号 ${g.deliverRoom} 找到` : `送到房 ${g.deliverRoom}`}</Badge>}
+                      {g.roomNo && !g.deliverRoom && (
                         <label className="ml-1 inline-flex items-center gap-1.5 rounded-md bg-paper-2 px-2 py-1 text-[13px] font-semibold" data-testid="dining-to-room">
                           <input type="checkbox" checked={toRoom} onChange={(e) => setToRoomChoice(e.target.checked)} />
                           送到客房 {g.roomNo}
@@ -393,6 +426,8 @@ export function OrderTab() {
                           askSwitch(() => {
                             setTag(null);
                             setTagText('');
+                            setRoom(null);
+                            setRoomText('');
                             setToRoomChoice(null);
                           })
                         }
@@ -439,13 +474,15 @@ export function OrderTab() {
             <p className="mt-3 rounded-lg border border-dashed border-line-strong px-4 py-8 text-center text-[13px] text-ink-3">
               还没有进厨房的菜。请店主在「后台 → 餐饮」建出品档口，并把菜挂到档口上。
             </p>
-          ) : outlet === null ? (
-            // 二级菜单（8.1.7，CF4）：一进来、每次下单成功后都先弹出这三个入口
-            <OutletEntry dishes={dishes} onPick={pickOutlet} disabled={op.locked} />
+          ) : outlets.length === 0 ? (
+            <EmptyState art="calm" title="你的岗位不能在任何出品口下单" description="在餐厅、水吧、果吧下单各是一项权限，请店主在后台「岗位权限」里加上。" />
+          ) : outlet === null || !outlets.includes(outlet) ? (
+            // 二级菜单（8.1.7，CF4）：一进来、每次下单成功后都先弹出这三个入口（8.1.15：只列有下单权限的）
+            <OutletEntry dishes={dishes} onPick={pickOutlet} disabled={op.locked} allowed={outlets} />
           ) : (
             <div className="animate-dialog-in" key={outlet}>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <OutletFilter value={outlet} onChange={(o) => o && pickOutlet(o)} withAll={false} counts={outletCounts} testPrefix="dining" size="sm" />
+                <OutletFilter value={outlet} onChange={(o) => o && pickOutlet(o)} withAll={false} counts={outletCounts} testPrefix="dining" size="sm" allowed={outlets} />
                 <button
                   type="button"
                   onClick={() => pickOutlet(null)}
@@ -523,10 +560,15 @@ export function OrderTab() {
                 <span className="text-[14.5px] font-bold">{target.who}</span>
                 <span className="num ml-auto text-[13.5px] font-bold text-ink-2">{cart.reduce((s, l) => s + l.quantity, 0)} 份</span>
               </p>
-              {/* 客房点餐（8.0.20）：勾了「送到客房」时在这里也写明送到哪一间 */}
+              {/* 客房点餐（8.0.20）：勾了「送到客房」时在这里也写明送到哪一间；8.1.15 按房号找到的、填了房号的写送到哪间房 */}
               {toRoom && g?.roomNo && (
                 <p className="text-[12.5px] font-semibold text-ink-2" data-testid="dining-target-room">
                   送到客房 <span className="num">{g.roomNo}</span>
+                </p>
+              )}
+              {g?.deliverRoom && (
+                <p className="text-[12.5px] font-semibold text-ink-2" data-testid="dining-target-room">
+                  送到房 <span className="num">{g.deliverRoom}</span>
                 </p>
               )}
             </div>
@@ -617,6 +659,11 @@ export function OrderTab() {
               {qtyHint}
             </p>
           )}
+          {cart.length > 0 && (
+            <div className="mt-3">
+              <OrderNoteInput value={orderNote} onChange={setOrderNote} disabled={op.locked} />
+            </div>
+          )}
           {op.state.phase === 'error' && <Notice tone="error" title={op.state.message} className="mt-3" />}
           <div className="mt-3 flex items-center gap-3 border-t border-line pt-3">
             <span className="min-w-0 flex-1 text-[13px] text-ink-3">
@@ -655,7 +702,7 @@ export function OrderTab() {
             </SectionTitle>
             {!canVoid && target.pending.length > 0 && (
               <p className="mt-1 text-[11.5px] text-ink-4" data-testid="dining-void-no-permission">
-                退菜、改单与下单一样要有「前台挂账」权限，请找前台同事。
+                退菜、改单要有「前台挂账」权限，请找前台同事。
               </p>
             )}
             {target.pending.length === 0 ? (
@@ -771,6 +818,7 @@ export function OrderTab() {
         }}
         onClose={() => setPicking(null)}
         onAdd={addPicked}
+        blockedOf={(id) => outletBlockedText(byId.get(id)?.outlet, outlets)}
       />
 
       <DishVoidDialog

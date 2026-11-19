@@ -19,6 +19,7 @@ import { loadTechnicianRules, loadTechnicians } from '../technicians';
 import { attachSessions, lockQueue, syncSessionAfterVoid, type SessionPostOptions } from '../clockroom';
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, takeDishLimits } from '../dining';
 import { authorizeLineVoid } from '../dining-808';
+import { DeliverRoomField, OrderNoteField, VoidBlameField } from '../dining-order-v8115';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill, type Backfill } from './backfill';
 import { getVisit } from './visits';
 import { locateCharges, locateSession } from '../locations';
@@ -66,6 +67,9 @@ export const PostInput = z
     expectedTotal: positiveCents('本次合计'),
     /** 按实际时间补录纸质单（R1.9）：纸质单号与实际时间；平时不带 */
     backfill: BackfillInput,
+    /** 8.1.15（块 B3）：整单备注、送达房号，写进这一单每道菜的出品单；不带时与升级前的请求完全相同（幂等摘要不变） */
+    orderNote: OrderNoteField,
+    deliverRoom: DeliverRoomField,
   })
   .refine((v) => v.lines.length + v.customLines.length > 0, '请至少选择一个项目');
 export type PostInputData = z.input<typeof PostInput>;
@@ -312,6 +316,8 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
     at,
     actor: ctx.actor,
     backfill: !!backfill,
+    orderNote: input.orderNote,
+    deliverRoom: input.deliverRoom,
   });
   await tx`
     UPDATE bills SET amount_cents = amount_cents + ${total}, line_count = line_count + ${lines.length} WHERE id = ${bill!.id}`;
@@ -347,6 +353,8 @@ export const VoidInput = z.object({
   reason: z.string().trim().min(2, '请填写作废原因（至少 2 个字）').max(200, '原因最多 200 字'),
   /** 退超过小额上限的菜时值班经理及以上的当场授权（8.0.8，B02） */
   grantId: z.uuid('授权编号不正确').optional(),
+  /** 退菜的责任岗位（8.1.15 块 B2：点单页退菜时选，记在审计里，不改明细表） */
+  blame: VoidBlameField,
 });
 
 export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: OpContext) {
@@ -387,7 +395,7 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
       action: 'frontdesk_void',
       targetType: 'visit',
       targetId: visit.id,
-      detail: { visitNo: visit.visitNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, ...approval },
+      detail: { visitNo: visit.visitNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, blame: input.blame, ...approval },
       ip: ctx.ip,
       businessDate: await businessDate(tx, deps, at),
     });

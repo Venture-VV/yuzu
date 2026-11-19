@@ -219,6 +219,8 @@ test.describe('S5 餐饮', () => {
       await expect(pending.getByTestId(`dining-pending-${HOT.name}`)).toHaveCount(0);
       await pending.getByTestId(`dining-pending-${TEA.name}`).getByRole('button', { name: '退菜' }).click();
       await page.getByRole('dialog').locator('#reason-text').fill('E2E：客人不要了');
+      // 8.1.15（块 B2）：退菜时选责任岗位
+      await page.getByRole('dialog').getByTestId('dish-void-blame-water').click();
       await page.getByRole('dialog').getByRole('button', { name: '确认退菜' }).click();
       await expect(page.getByText(`${TEA.name} 已退`)).toBeVisible();
       await expect(pending.getByTestId(`dining-pending-${TEA.name}`)).toHaveCount(0);
