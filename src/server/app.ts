@@ -110,6 +110,8 @@ import { registerClockroomRoutes } from './modules/clockroom';
 import { registerDiningRoutes } from './modules/dining';
 import { registerTableRoutes } from './modules/tables';
 import { registerDining808Routes } from './modules/dining-808';
+import { registerDishRoutes } from './modules/dishes';
+import { registerDishImportRoutes } from './modules/dishes-import';
 import { registerDiningReceiptRoutes } from './modules/dining-receipt';
 import { registerEmenuRoutes } from './modules/emenu/routes';
 import { registerStudioRoutes } from './modules/studio';
@@ -374,6 +376,9 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDiningRoutes(app, deps);
   registerTableRoutes(app, deps);
   registerDining808Routes(app, deps);
+  // 菜品管理（8.1.15，docs/DISHES_V8115.md）：菜品表、新增 / 编辑、上下架、改价与改价记录、Excel 导出与导入
+  registerDishRoutes(app, deps);
+  registerDishImportRoutes(app, deps);
   // 8.1.7 点菜单（小票可视化）
   registerDiningReceiptRoutes(app, deps);
   // 点餐系统 · 平板电子菜单（8.0.10）

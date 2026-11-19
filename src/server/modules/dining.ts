@@ -41,6 +41,7 @@ import { saveRuleSetting } from '../lib/rule-settings';
 import { recordRecipeUsage, reverseRecipeUsage } from './stock-usage';
 import { settingRow } from '../lib/store-settings';
 import { currentStoreId } from '../lib/store-context';
+import { comboPartsOf, dishOptionsOf } from './dish-options';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
   const row = await settingRow<Partial<DiningRules>>(db, 'dining_rules');
@@ -113,13 +114,19 @@ export async function createKitchenItems(
   const orderNo = await nextDocNo(tx, 'kitchen_order', 'CD', args.date);
   const done = args.backfill ? args.at : null;
   const made: number[] = [];
+  // 套餐（8.1.15 菜品管理）：下单当时含哪几样记在出品单上（只读、不加锁；以后改了套餐，已经下的单还是当时的）
+  const combos = await comboPartsOf(
+    tx,
+    args.lines.map((l) => l.itemId),
+  );
   for (const l of args.lines) {
     const [row] = await tx<{ id: number }[]>`
       INSERT INTO kitchen_items (order_no, bill_line_id, visit_id, table_session_id, item_id, station_id, quantity, note, status, business_date,
-                                 limit_taken, created_by, created_at, done_by, done_at, served_by, served_at, deliver_to)
+                                 limit_taken, created_by, created_at, done_by, done_at, served_by, served_at, deliver_to, parts)
       VALUES (${orderNo}, ${l.billLineId}, ${args.visitId}, ${args.tableSessionId ?? null}, ${l.itemId}, ${l.stationId}, ${l.quantity}, ${l.note},
               ${args.backfill ? 'served' : 'queued'}, ${args.date}, ${l.limitTaken}, ${args.actor.id}, ${args.at},
-              ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done}, ${args.deliverTo ?? ''})
+              ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done}, ${args.deliverTo ?? ''},
+              ${tx.json((combos.get(l.itemId) ?? []) as never)})
       RETURNING id`;
     made.push(Number(row!.id));
   }
@@ -165,8 +172,11 @@ async function stationsWithCount(db: Db): Promise<KitchenStation[]> {
     FROM kitchen_stations s ORDER BY s.sort_order, s.id`;
 }
 
-/** 进厨房的在售菜品、默认价格档的单价、今天的沽清与点单分类（8.1.7：后台没设的按默认归） */
-async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
+/**
+ * 进厨房的在售菜品、默认价格档的单价、今天的沽清与点单分类（8.1.7：后台没设的按默认归）。
+ * withOptions（8.1.15 菜品管理）：点单页的菜单再带上做法、加料、套餐内容；厨房屏 5 秒取一次的沽清列表不带
+ */
+async function kitchenDishes(db: Db, today: string, withOptions = false): Promise<MenuDish[]> {
   const rows = await db<
     {
       id: number;
@@ -185,9 +195,24 @@ async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
            i.dining_outlet, i.dining_group
     FROM service_items i JOIN kitchen_stations s ON s.id = i.station_id AND s.active
     WHERE i.active AND NOT i.technician_required ORDER BY s.sort_order, s.id, i.sort_order, i.id`;
+  const options = withOptions
+    ? await dishOptionsOf(
+        db,
+        rows.map((r) => r.id),
+      )
+    : null;
   return rows.map(({ prices, diningOutlet, diningGroup, ...r }) => {
     const slot = diningSlotOf({ outlet: diningOutlet, group: diningGroup, category: r.category, stationName: r.stationName });
-    return { ...r, price: defaultPrice(prices), outlet: slot.outlet, group: slot.group };
+    const o = options?.get(r.id);
+    return {
+      ...r,
+      price: defaultPrice(prices),
+      outlet: slot.outlet,
+      group: slot.group,
+      ...(o?.methods.length ? { methods: o.methods } : {}),
+      ...(o?.addons.length ? { addons: o.addons } : {}),
+      ...(o?.combo.length ? { combo: o.combo } : {}),
+    };
   });
 }
 
@@ -195,7 +220,7 @@ async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
 const ITEM_COLUMNS = (db: Db) => db`
   k.id, k.order_no, k.visit_id, h.code AS tag_code, v.zone, k.table_session_id, dt.name AS table_name,
   coalesce(m.name, nullif(v.guest_label, ''), tm.name, nullif(ts.guest_label, ''), '散客') AS guest, k.item_id, i.name,
-  k.quantity, k.note, k.deliver_to, k.status, k.station_id, s.name AS station_name, k.rush_count, k.created_at, k.started_at, k.done_at, k.served_at,
+  k.quantity, k.note, k.deliver_to, k.parts, k.status, k.station_id, s.name AS station_name, k.rush_count, k.created_at, k.started_at, k.done_at, k.served_at,
   p.display_name AS posted_by_name, coalesce(v.status, ts.status) <> 'open' AS visit_closed`;
 const ITEM_FROM = (db: Db) => db`
   kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN kitchen_stations s ON s.id = k.station_id
@@ -228,7 +253,7 @@ export async function kitchenBoard(db: Db, deps: Deps): Promise<KitchenBoard> {
 export async function diningMenu(db: Db, deps: Deps): Promise<DiningMenu> {
   const today = await businessDate(db as Tx, deps, new Date());
   const { selfVoidMinutes } = await loadFrontdeskRules(db);
-  return { rules: await loadDiningRules(db), businessDate: today, dishes: await kitchenDishes(db, today), selfVoidMinutes };
+  return { rules: await loadDiningRules(db), businessDate: today, dishes: await kitchenDishes(db, today, true), selfVoidMinutes };
 }
 
 /** 点单页按手牌找在店客人：只给点单需要的信息（不含会员手机号、余额与账单） */

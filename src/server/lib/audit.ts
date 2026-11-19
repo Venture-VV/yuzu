@@ -86,6 +86,11 @@ export type AuditAction =
   // 8.1.7：菜品的点单分类（餐厅 / 水吧 / 果吧）
   | 'items_slot_updated'
   | 'dish_limit_set'
+  // 8.1.15 菜品管理（docs/DISHES_V8115.md）：新增 / 编辑、上下架、改价、导入
+  | 'dish_saved'
+  | 'dish_active_set'
+  | 'dish_price_changed'
+  | 'dishes_imported'
   | 'dining_table_saved'
   | 'table_open'
   | 'table_update'

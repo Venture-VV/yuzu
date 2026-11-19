@@ -1311,6 +1311,10 @@ const CHANGE_ACTIONS = [
   'kitchen_station_saved',
   'items_station_updated',
   'items_slot_updated',
+  'dish_saved',
+  'dish_active_set',
+  'dish_price_changed',
+  'dishes_imported',
   'room_type_saved',
   'room_saved',
   'space_saved',
@@ -1390,6 +1394,14 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       return '调整了菜品的出品档口';
     case 'items_slot_updated':
       return '调整了菜品的点单分类';
+    case 'dish_saved':
+      return typeof detail.summary === 'string' ? detail.summary : `保存了菜品${name ? `「${name}」` : ''}`;
+    case 'dish_active_set':
+      return typeof detail.summary === 'string' ? detail.summary : '菜品上架 / 下架';
+    case 'dish_price_changed':
+      return typeof detail.summary === 'string' ? detail.summary : `菜品${name ? `「${name}」` : ''}改价`;
+    case 'dishes_imported':
+      return typeof detail.summary === 'string' ? detail.summary : '导入了菜品';
     case 'room_type_saved':
       return typeof detail.summary === 'string' ? detail.summary : '保存了房型';
     case 'room_saved':

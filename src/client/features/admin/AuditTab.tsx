@@ -69,6 +69,11 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   hand_tag_updated: { label: '修改手牌', tone: 'neutral' },
   technician_saved: { label: '保存技师', tone: 'neutral' },
   items_technician_updated: { label: '调整需要技师的项目', tone: 'neutral' },
+  // 菜品管理（8.1.15）
+  dish_saved: { label: '保存菜品', tone: 'neutral' },
+  dish_active_set: { label: '菜品上下架', tone: 'neutral' },
+  dish_price_changed: { label: '菜品改价', tone: 'ember' },
+  dishes_imported: { label: '导入菜品', tone: 'ember' },
   member_refund: { label: '退储值', tone: 'clay' },
   recharge_online: { label: '线上充值', tone: 'lake' },
   member_status_changed: { label: '停用 / 启用会员', tone: 'ember' },
