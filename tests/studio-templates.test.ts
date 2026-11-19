@@ -8,6 +8,7 @@ import {
   dishStateStyle,
   defaultStudioDoc,
   DocSchema,
+  EMENU_PLUS_GAP,
   EMENU_TEMPLATES,
   resetLayoutTemplate,
   resetSlot,
@@ -47,6 +48,21 @@ describe('卡片模板：登记的位置', () => {
     expect(at('list_text', 'r9', 'big')).toMatchObject({ x: 660, y: 150 + 4 * 112 });
     // 介绍的放大一档：宽是看到的宽（337 × 1.4）
     expect(at('single_wide', 'intro', 'big')).toMatchObject({ x: 512, y: 520, w: 471.8 });
+  });
+
+  it('加号与菜名的间距（8.1.14，品牌部第 2 条，PC2）：「大图 + 文字」的六格与「文字陈列」按 2 倍，其余版式 3.5 倍', () => {
+    expect(EMENU_PLUS_GAP).toEqual({ photo: 3.5, text: 2 });
+    // 模板里记着按哪一种算的只有「大图 + 文字」右边的六格（文字陈列的十行在页面里直接按 text 画）；别的版式都是默认的 photo
+    for (const layout of EMENU_LAYOUTS) {
+      const texts = EMENU_TEMPLATES[layout].slots.filter((s) => s.kind === 'text');
+      const kinds = [...new Set(texts.map((s) => s.plus ?? 'photo'))];
+      if (layout === 'list_image') {
+        expect(texts).toHaveLength(6);
+        expect(kinds).toEqual(['text']);
+      } else if (layout !== 'list_text') {
+        expect(kinds, layout).toEqual(['photo']);
+      }
+    }
   });
 });
 

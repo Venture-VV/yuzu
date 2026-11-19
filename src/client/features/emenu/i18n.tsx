@@ -355,6 +355,14 @@ export function namePair(zh: string, en: string, lang: Lang): NamePair {
   return lang === 'en' && en.trim() ? { main: en, sub: zh, mainEn: true } : { main: zh, sub: en, mainEn: false };
 }
 
+/**
+ * 菜品的英文名用衬线展示体（8.1.14，品牌部《工作台需求汇总 1.2》第 1 条，PENDING_DECISIONS.md PC1；样式表的 .em-en-display）：
+ * 只包住名字那几个字——名字后面的小字、份数、规格照旧用原来的字体
+ */
+export function EnName({ children }: { children: string }) {
+  return <span className="em-en-display">{children}</span>;
+}
+
 type DishText = Pick<EmenuDishView, 'name' | 'nameEn' | 'tagline' | 'taglineEn' | 'description' | 'descriptionEn' | 'attrs' | 'attrsEn' | 'unit' | 'unitEn'>;
 
 export const dishNames = (d: Pick<DishText, 'name' | 'nameEn'>, lang: Lang): NamePair => namePair(d.name, d.nameEn, lang);
