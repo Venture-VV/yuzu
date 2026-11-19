@@ -257,14 +257,15 @@ test.describe('8.1.7 餐饮分区与点菜单', () => {
       await expect(ledger.locator('tbody tr').filter({ hasText: MOJITO.name })).toHaveCount(0);
       await expect(ledger.locator('tbody tr').filter({ hasText: KUNGPAO.name })).toHaveCount(0);
 
-      // ⑧ 退菜记录：果吧里有退掉的果盘
+      // ⑧ 退菜（8.1.15 起并进台账，旧地址跳到台账的「退菜」）：果吧里有退掉的果盘
       await page.goto('/dining/voids');
-      await page.getByTestId('dining-voids-outlet-fruit').click();
-      const voidRow = page.getByTestId('dining-voids').locator('tr').filter({ hasText: FRUIT.name }).first();
+      await expect(page).toHaveURL(/\/dining\/ledger\?type=voided/);
+      await page.getByTestId('dining-ledger-outlet-fruit').click();
+      const voidRow = page.getByTestId('dining-ledger').locator('tbody tr').filter({ hasText: FRUIT.name }).first();
       await expect(voidRow).toContainText('果吧');
       await expect(voidRow).toContainText('E2E 客人不要了');
-      await page.getByTestId('dining-voids-outlet-restaurant').click();
-      await expect(page.getByTestId('dining-voids').locator('tr').filter({ hasText: FRUIT.name })).toHaveCount(0);
+      await page.getByTestId('dining-ledger-outlet-restaurant').click();
+      await expect(page.getByTestId('dining-ledger').locator('tbody tr').filter({ hasText: FRUIT.name })).toHaveCount(0);
     } finally {
       await relogin(page, 'linlan');
       await clearTables(page, 'E2E：收尾');

@@ -39,6 +39,7 @@
 - [`CONTRACTS.md`](CONTRACTS.md)：合同与法务审查（v0.7.31）
 - [`COUPONS.md`](COUPONS.md)：券与会员权益（v0.7.20，飞书需求 RQ-006 后半；定稿）
 - [`DESKS_V8115.md`](DESKS_V8115.md)：8.1.15 · 前台拆成发卡台与收银台
+- [`DINING_V8115.md`](DINING_V8115.md)：8.1.15 餐饮：桌台动作、台账合并退菜、出品口下单权限与房号备注（《浴族系统需求汇总》块 B）
 - [`DINING_V817.md`](DINING_V817.md)：8.1.7 餐饮分区与点菜单（店主 2026-11-18）
 - [`EMENU.md`](EMENU.md)：点餐系统 · 平板电子菜单（8.0.10）
 - [`ERP.md`](ERP.md)：ERP 独立工作区（含 SCM）

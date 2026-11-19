@@ -4,25 +4,30 @@
 //   · 退菜记录（B02）：按营业日列出退的菜、谁退的、怎么批的（小额直接退 / 本人 15 分钟内 / 经理 / 当场授权 + 授权人），可导出。
 //   · 8.1.7（docs/DINING_V817.md 第 5 节，CF7）：两页的「分类」都按点单分类（餐厅 / 水吧 / 果吧 与小分类），按它筛；
 //     台账原来按价目分类筛（价目分类照旧在导出的「价目分类」一列，接口的 categories 参数照旧能用）。
+//   · 8.1.15（docs/DINING_V8115.md 第 3 节，块 B2）：「退菜记录」并进台账——按类型筛（全部 / 正常 / 退菜 / 赠送 / 折扣，地址里的 type），
+//     退菜的行写原因、怎么批的（审批人）、责任岗位，汇总写退菜率（份数比，另写金额占比）；导出跟着筛选。旧地址 /dining/voids 跳到这里的「退菜」。
 
 import { useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
-import { KITCHEN_STATUS_LABELS, MAX_DINING_LEDGER_DAYS, type DiningLedger, type DiningOutlet, type DishVoidRow } from '@shared/dining';
+import { KITCHEN_STATUS_LABELS, MAX_DINING_LEDGER_DAYS, type DiningLedger, type DiningOutlet } from '@shared/dining';
+import { LEDGER_KIND_LABELS, LEDGER_KINDS, percentText, VOID_BLAME_LABELS, type LedgerKind } from '@shared/dining-v8115';
 import { shiftDate } from '@shared/labels';
 import { formatYuan } from '@shared/money';
 import { api } from '../../lib/api';
 import { useBusinessToday } from '../../lib/revenue';
-import { cn, downloadUrl, formatDateTime, formatTime } from '../../lib/utils';
+import { cn, downloadUrl, formatTime } from '../../lib/utils';
+import { EmptyState } from '../../components/EmptyState';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Badge, Button, Card, Input, Notice, Segmented, Skeleton } from '../../components/ui';
 import { GroupChips, OutletFilter, SlotBadge } from './slots';
 
-type Status = 'all' | 'active' | 'voided';
-const STATUS_OPTIONS: { value: Status; label: string }[] = [
-  { value: 'all', label: '全部' },
-  { value: 'active', label: '有效' },
-  { value: 'voided', label: '已退' },
-];
+/** 类型（8.1.15）：全部 / 正常 / 退菜 / 赠送 / 折扣 */
+type Kind = 'all' | LedgerKind;
+const KIND_OPTIONS: { value: Kind; label: string }[] = [{ value: 'all', label: '全部' }, ...LEDGER_KINDS.map((k) => ({ value: k, label: LEDGER_KIND_LABELS[k] }))];
+const isKind = (v: string | null): v is Kind => v === 'all' || (LEDGER_KINDS as readonly string[]).includes(v ?? '');
+const KIND_TONE: Record<LedgerKind, 'pine' | 'clay' | 'yuzu' | 'lake'> = { normal: 'pine', voided: 'clay', gift: 'yuzu', discount: 'lake' };
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const dayCount = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1;
@@ -92,16 +97,25 @@ function SlotFilterBar({ f, testPrefix }: { f: ReturnType<typeof useSlotFilter>;
 export function LedgerTab() {
   const today = useBusinessToday();
   const range = useRange(today);
-  const [status, setStatus] = useState<Status>('all');
+  const [params, setParams] = useSearchParams();
+  const typeParam = params.get('type');
+  const type: Kind = isKind(typeParam) ? typeParam : 'all';
+  const setType = (k: Kind) => {
+    const next = new URLSearchParams(params);
+    if (k === 'all') next.delete('type');
+    else next.set('type', k);
+    setParams(next, { replace: true });
+  };
   const slot = useSlotFilter();
-  const params = { from: range.from, to: range.to, status, ...slot.params };
+  const filters = { from: range.from, to: range.to, ...(type === 'all' ? {} : { type }), ...slot.params };
   const q = useQuery({
-    queryKey: ['dining', 'ledger', params],
-    queryFn: () => api.get<DiningLedger>(`/api/dining/ledger?${query(params)}`),
+    queryKey: ['dining', 'ledger', filters],
+    queryFn: () => api.get<DiningLedger>(`/api/dining/ledger?${query(filters)}`),
     enabled: !range.problem,
     placeholderData: keepPreviousData,
   });
   const data = q.data;
+  const rate = data?.voidRate;
 
   return (
     <div className="space-y-4 p-5 md:p-7" data-testid="dining-ledger">
@@ -113,35 +127,49 @@ export function LedgerTab() {
             variant="secondary"
             icon={<Download className="size-4" />}
             disabled={!!range.problem}
-            onClick={() => downloadUrl(`/api/dining/ledger/export?${query(params)}`)}
+            onClick={() => downloadUrl(`/api/dining/ledger/export?${query(filters)}`)}
             data-testid="dining-ledger-export"
           >
             导出
           </Button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Segmented size="sm" value={status} onChange={setStatus} options={STATUS_OPTIONS} ariaLabel="状态" />
-          <span className="mx-1 h-5 w-px bg-line" />
+          <span data-testid="dining-ledger-type">
+            <Segmented size="sm" value={type} onChange={setType} options={KIND_OPTIONS} ariaLabel="类型" />
+          </span>
+          <span className="mx-1 hidden h-5 w-px bg-line sm:block" />
           <SlotFilterBar f={slot} testPrefix="dining-ledger" />
         </div>
         {range.problem && <Notice tone="warning" title={range.problem} />}
       </Card>
 
-      {!range.problem && !data ? (
+      {range.problem ? null : q.isPending ? (
         <Skeleton className="h-40" />
+      ) : q.isError && !data ? (
+        <LoadFailed title="台账加载失败，请检查网络" onRetry={() => void q.refetch()} retrying={q.isFetching} testId="dining-ledger-error">
+          台账没有取回来，不是没有记录。点「重试」再取一次。
+        </LoadFailed>
       ) : data ? (
         <>
           <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 px-1 text-[13.5px]" data-testid="dining-ledger-total">
             <span>
-              有效 <b className="num">{data.totals.quantity}</b> 份 · <b className="num">{formatYuan(data.totals.amount)}</b>
+              有效 <b className="num text-[16px]">{data.totals.quantity}</b> 份 · <b className="num text-[16px]">{formatYuan(data.totals.amount)}</b>
             </span>
             <span className="text-ink-3">
               共 {data.totals.lines} 条{data.totals.voidedLines > 0 && `，已退 ${data.totals.voidedLines} 条 ${formatYuan(data.totals.voidedAmount)}`}
             </span>
+            {rate && (
+              <span data-testid="dining-ledger-void-rate">
+                退菜率 <b className="num text-[16px] text-clay">{percentText(rate.voidedQuantity, rate.quantity)}</b>
+                <span className="text-ink-3">
+                  （{rate.voidedQuantity} / {rate.quantity} 份；金额占比 {percentText(rate.voidedAmount, rate.amount)}）
+                </span>
+              </span>
+            )}
             {q.isFetching && <span className="text-[12px] text-ink-4">刷新中…</span>}
           </div>
           {data.rows.length === 0 ? (
-            <p className="px-1 text-[13px] text-ink-3">这段时间没有符合条件的餐饮明细。</p>
+            <EmptyState art="search" title="没有符合条件的餐饮明细" description="换个日期、类型或分类再看看。" />
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line bg-card">
               <table className="w-full min-w-max text-[13px]">
@@ -155,14 +183,15 @@ export function LedgerTab() {
                     <th className="px-3 py-2 text-right">数量</th>
                     <th className="px-3 py-2 text-right">单价</th>
                     <th className="px-3 py-2 text-right">金额</th>
-                    <th className="px-3 py-2 text-left">状态</th>
+                    <th className="px-3 py-2 text-left">类型</th>
+                    <th className="px-3 py-2 text-left">退菜原因 · 怎么批的 · 责任岗位</th>
                     <th className="px-3 py-2 text-left">出品</th>
                     <th className="px-3 py-2 text-left">点单人</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
                   {data.rows.map((r) => (
-                    <tr key={r.id} className={cn(r.status === 'voided' && 'text-ink-3')} data-testid={`dining-ledger-row-${r.id}`}>
+                    <tr key={r.id} className={cn(r.status === 'voided' && 'text-ink-3')} data-testid={`dining-ledger-row-${r.id}`} data-kind={r.kind}>
                       <td className="num px-3 py-2">{r.businessDate.slice(5)}</td>
                       <td className="num px-3 py-2">{formatTime(r.postedAt)}</td>
                       <td className="px-3 py-2">{r.tagCode ? `手牌 ${r.tagCode}` : r.tableName ? `桌台 ${r.tableName}` : '—'}</td>
@@ -174,17 +203,19 @@ export function LedgerTab() {
                       <td className="num px-3 py-2 text-right">{formatYuan(r.unitPrice)}</td>
                       <td className="num px-3 py-2 text-right font-semibold">{formatYuan(r.amount)}</td>
                       <td className="px-3 py-2">
-                        {r.status === 'active' ? (
-                          <Badge tone="pine">有效</Badge>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5">
-                            <Badge tone="clay">已退</Badge>
-                            {r.voidReason && (
-                              <span className="max-w-[16em] truncate text-[12px]" title={r.voidReason}>
-                                {r.voidReason}
-                              </span>
-                            )}
+                        <Badge tone={KIND_TONE[r.kind]}>{LEDGER_KIND_LABELS[r.kind]}</Badge>
+                      </td>
+                      <td className="px-3 py-2">
+                        {r.kind === 'voided' ? (
+                          <span className="flex max-w-[24em] flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12.5px]">
+                            <span className="max-w-[12em] truncate" title={r.voidReason ?? ''}>
+                              {r.voidReason ?? '—'}
+                            </span>
+                            <span>· {r.approvalText ?? '—'}</span>
+                            <span className="font-semibold text-ink-2">· {r.blame ? VOID_BLAME_LABELS[r.blame] : '未选责任岗位'}</span>
                           </span>
+                        ) : (
+                          '—'
                         )}
                       </td>
                       <td className="px-3 py-2">{r.kitchenStatus ? KITCHEN_STATUS_LABELS[r.kitchenStatus] : '—'}</td>
@@ -196,101 +227,9 @@ export function LedgerTab() {
             </div>
           )}
           <p className="px-1 text-[12px] text-ink-3">
-            按挂账的营业日；手牌、桌台与小程序扫码点餐点的菜都在。分类按点单分类（餐厅、水吧、果吧，后台「餐饮 →
-            出品档口与菜品」里设，没设的按默认归）；导出的文件与这里的条件、合计一样，另有一列「价目分类」便于和日结对账。
-          </p>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-export function VoidsTab() {
-  const today = useBusinessToday();
-  const range = useRange(today);
-  const slot = useSlotFilter();
-  const params = { from: range.from, to: range.to, ...slot.params };
-  const q = useQuery({
-    queryKey: ['dining', 'voids', params],
-    queryFn: () => api.get<DishVoidRow[]>(`/api/dining/voids?${query(params)}`),
-    enabled: !range.problem,
-    placeholderData: keepPreviousData,
-  });
-  const rows = q.data ?? [];
-  const total = rows.reduce((n, r) => n + r.amount, 0);
-  return (
-    <div className="space-y-4 p-5 md:p-7" data-testid="dining-voids">
-      <Card className="space-y-3 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <RangeInputs range={range} today={today} />
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<Download className="size-4" />}
-            disabled={!!range.problem}
-            onClick={() => downloadUrl(`/api/dining/voids/export?${query(params)}`)}
-            data-testid="dining-voids-export"
-          >
-            导出
-          </Button>
-        </div>
-        <SlotFilterBar f={slot} testPrefix="dining-voids" />
-        {range.problem && <Notice tone="warning" title={range.problem} />}
-      </Card>
-      {!range.problem && !q.data ? (
-        <Skeleton className="h-32" />
-      ) : q.data ? (
-        <>
-          <p className="px-1 text-[13.5px]" data-testid="dining-voids-total">
-            退了 <b className="num">{rows.length}</b> 条 · <b className="num">{formatYuan(total)}</b>
-          </p>
-          {rows.length === 0 ? (
-            <p className="px-1 text-[13px] text-ink-3">这段时间没有退菜。</p>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-line bg-card">
-              <table className="w-full min-w-max text-[13px]">
-                <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                  <tr>
-                    <th className="px-3 py-2 text-left">退菜时间</th>
-                    <th className="px-3 py-2 text-left">手牌 / 桌台</th>
-                    <th className="px-3 py-2 text-left">菜名</th>
-                    <th className="px-3 py-2 text-left">分类</th>
-                    <th className="px-3 py-2 text-right">数量</th>
-                    <th className="px-3 py-2 text-right">金额</th>
-                    <th className="px-3 py-2 text-left">原因</th>
-                    <th className="px-3 py-2 text-left">谁退的</th>
-                    <th className="px-3 py-2 text-left">怎么批的</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line">
-                  {rows.map((r) => (
-                    <tr key={r.id} data-testid={`dining-void-row-${r.id}`}>
-                      <td className="num px-3 py-2">{formatDateTime(r.voidedAt)}</td>
-                      <td className="px-3 py-2">{r.tagCode ? `手牌 ${r.tagCode}` : r.tableName ? `桌台 ${r.tableName}` : '—'}</td>
-                      <td className="px-3 py-2 font-semibold">{r.name}</td>
-                      <td className="px-3 py-2">
-                        <SlotBadge slot={r} />
-                      </td>
-                      <td className="num px-3 py-2 text-right">{r.quantity}</td>
-                      <td className="num px-3 py-2 text-right font-semibold">{formatYuan(r.amount)}</td>
-                      <td className="max-w-[18em] truncate px-3 py-2" title={r.voidReason ?? ''}>
-                        {r.voidReason ?? '—'}
-                      </td>
-                      <td className="px-3 py-2">
-                        {r.voidedByName}
-                        {r.postedByName !== r.voidedByName && <span className="text-[12px] text-ink-3">（{r.postedByName} 点的）</span>}
-                      </td>
-                      <td className="px-3 py-2">
-                        <Badge tone={r.approvalText.startsWith('当场授权') ? 'yuzu' : r.approvalText.startsWith('小额') ? 'neutral' : 'lake'}>{r.approvalText}</Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <p className="px-1 text-[12px] text-ink-3">
-            按退菜的时间落在哪个营业日。「怎么批的」：小额直接退、本人 15 分钟内、经理（有更正权限的自己退）、当场授权（括号里是授权人）；升级到 8.0.8 以前退的记「—」。
+            按挂账的营业日；手牌、桌台与小程序扫码点餐点的菜都在。分类按点单分类（餐厅、水吧、果吧，后台「餐饮 → 出品档口与菜品」里设，没设的按默认归）。
+            赠送是被签赠券抵掉的菜，折扣是被券或会员折扣抵到的菜（反结账了的不算）；退菜写原因、怎么批的（小额直接退、本人 15 分钟内、经理、当场授权）与责任岗位，
+            升级前退的没有记录写「—」。退菜率按日期与分类筛完的全部份数算，不跟着类型变。导出的文件与这里的条件一样，另有一列「价目分类」便于和日结对账。
           </p>
         </>
       ) : null}

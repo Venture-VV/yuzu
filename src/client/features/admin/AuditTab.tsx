@@ -74,6 +74,12 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_status_changed: { label: '停用 / 启用会员', tone: 'ember' },
   member_phone_changed: { label: '改会员手机号', tone: 'ember' },
   member_merged: { label: '合并会员', tone: 'ember' },
+  // 8.1.15 块 B（docs/DINING_V8115.md）：桌台动作
+  table_clear: { label: '清台', tone: 'neutral' },
+  table_maintenance: { label: '桌台维修', tone: 'clay' },
+  table_restore: { label: '桌台恢复', tone: 'pine' },
+  table_merge: { label: '并台', tone: 'lake' },
+  table_split: { label: '拆台', tone: 'lake' },
 };
 
 function describe(detail: Record<string, unknown>): string {

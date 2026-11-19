@@ -3,6 +3,7 @@
 //   · OutletFilter：全部 / 餐厅 / 水吧 / 果吧（点单页换一处、沽清列表、台账、退菜记录）；
 //   · GroupChips：这一处的小分类（果吧不分小类，不显示）；
 //   · SlotBadge：「餐厅 · 酒水」「果吧」。
+// 8.1.15（块 B3）：点单页只列有下单权限的出品口（allowed，不带为三处都列）。
 
 import type { ReactNode } from 'react';
 import { ChefHat, Citrus, CupSoda } from 'lucide-react';
@@ -27,12 +28,13 @@ export const OUTLET_TONE: Record<DiningOutlet, { tile: string; icon: string; bad
  * 点单页的二级菜单（CF4）：餐厅、水吧、果吧三个大入口，各写着小分类与有几道菜（沽清的另标）；
  * 菜单区一进来、每次下单成功以后都先弹出这里，选了进对应的点单页
  */
-export function OutletEntry({ dishes, onPick, disabled }: { dishes: MenuDish[]; onPick: (o: DiningOutlet) => void; disabled?: boolean }) {
+export function OutletEntry({ dishes, onPick, disabled, allowed }: { dishes: MenuDish[]; onPick: (o: DiningOutlet) => void; disabled?: boolean; allowed?: readonly DiningOutlet[] }) {
+  const outlets = DINING_OUTLETS.filter((o) => !allowed || allowed.includes(o.key));
   return (
     <div className="mt-3 animate-dialog-in" data-testid="dining-outlets">
       <p className="text-[13px] font-semibold text-ink-2">这一单点哪里的？</p>
-      <Stagger className="mt-2.5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {DINING_OUTLETS.map((o) => {
+      <Stagger className={cn('mt-2.5 grid grid-cols-1 gap-3', outlets.length === 3 ? 'sm:grid-cols-3' : outlets.length === 2 ? 'sm:grid-cols-2' : '')}>
+        {outlets.map((o) => {
           const list = dishes.filter((d) => d.outlet === o.key);
           const out = list.filter((d) => d.remaining === 0).length;
           return (
@@ -74,6 +76,7 @@ export function OutletFilter({
   testPrefix,
   withAll = true,
   size = 'md',
+  allowed,
 }: {
   value: DiningOutlet | null;
   onChange: (v: DiningOutlet | null) => void;
@@ -81,8 +84,13 @@ export function OutletFilter({
   testPrefix: string;
   withAll?: boolean;
   size?: 'sm' | 'md';
+  /** 只列这几处（8.1.15 点单页：有下单权限的出品口） */
+  allowed?: readonly DiningOutlet[];
 }) {
-  const options: { key: DiningOutlet | null; label: string }[] = [...(withAll ? [{ key: null, label: '全部' }] : []), ...DINING_OUTLETS.map((o) => ({ key: o.key, label: o.label }))];
+  const options: { key: DiningOutlet | null; label: string }[] = [
+    ...(withAll ? [{ key: null, label: '全部' }] : []),
+    ...DINING_OUTLETS.filter((o) => !allowed || allowed.includes(o.key)).map((o) => ({ key: o.key, label: o.label })),
+  ];
   return (
     <div className="grid w-full auto-cols-fr grid-flow-col items-center gap-1 rounded-lg bg-paper-2 p-1 sm:inline-flex sm:w-auto sm:flex-nowrap" role="tablist" aria-label="点单分类">
       {options.map((o) => {

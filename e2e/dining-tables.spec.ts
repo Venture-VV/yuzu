@@ -75,7 +75,8 @@ async function prepare(page: Page) {
   const items = DISHES.map((d) => ({ id: admin.items.find((i) => i.name === d.name)!.id, stationId: admin.stations.find((s) => s.name === d.station)!.id, slot: d.slot }));
   await send(page, 'put', '/api/admin/dining/items', { items });
   // 8.0.8（A05）起桌台点单默认下架：这组用例测的是桌台，先打开
-  await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15, tablesEnabled: true });
+  // 8.1.15：「结账后先待清台」默认开；这组用例照原来的结账后直接空出来编写，这里关上（新行为在 e2e/dining-v8115.spec.ts）
+  await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15, tablesEnabled: true, clearAfterCheckout: false });
 
   // 桌台：第一张在后台页面上建（还没有时），其余用接口；停用的重新启用
   let tables = await getJson<TablesAdmin>(page, '/api/admin/dining/tables');
@@ -114,7 +115,7 @@ async function cleanup(page: Page) {
     for (const l of d.lines.filter((x) => x.status === 'active')) await send(page, 'post', `/api/dining/tables/lines/${l.id}/void`, { reason: 'E2E：收尾' });
     await send(page, 'post', `/api/dining/tables/sessions/${s.id}/cancel`, { reason: 'E2E：收尾' });
   }
-  const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: false, tablesEnabled: false } });
+  const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: false, tablesEnabled: false, clearAfterCheckout: true } });
   expect(res.ok(), await res.text()).toBe(true);
 }
 

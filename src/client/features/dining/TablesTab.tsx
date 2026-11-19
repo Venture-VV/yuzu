@@ -4,12 +4,14 @@
 // 开台、桌台点单、桌台结账与前台一样有「结果待确认」：断网后查回、原样重提或确认作废。
 // 8.1.7（docs/DINING_V817.md 第 3 节）：上面一排分区卡片（全部、散桌、景观包厢、休闲水吧区、休息果吧区），点一个只看这个区的桌与明细（CF5、CF6）；
 // 桌台详情里能打开点菜单（小票可视化，CF8）。
+// 8.1.15（docs/DINING_V8115.md 第 2 节，块 B1）：桌台多了待清台、维修中（格子上颜色加文字加图标），点没在用餐的桌可以清台、维修、恢复、看历史；
+// 桌台详情里能并台、拆台、看历史，附台写明并入哪桌、在主台结账（TableActions.tsx）。
 
 import { DishVoidDialog } from './DishVoid';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowRightLeft, BellRing, ClipboardList, Minus, Pencil, Plus, ReceiptText, Search, Undo2, UserRound, Users, UtensilsCrossed, X } from 'lucide-react';
+import { ArrowRightLeft, BellRing, ClipboardList, History, Link2, Minus, Pencil, Plus, ReceiptText, Search, Undo2, Unlink, UserRound, Users, UtensilsCrossed, X } from 'lucide-react';
 import type { CheckoutDetail } from '@shared/checkout';
 import { KITCHEN_STATUS_LABELS, TABLE_ZONES, type KitchenStatus, type PendingDish, type TableSessionDetail, type TablesBoard } from '@shared/dining';
 import { formatYuan } from '@shared/money';
@@ -31,6 +33,7 @@ import { stayText } from '../frontdesk/queries';
 import { TableCheckoutDialog } from './TableCheckoutDialog';
 import { ReceiptDialog } from './ReceiptDialog';
 import { tablesKey, useDiningMenu, useServerNow, useTableSession, useTablesBoard } from './queries';
+import { MergeDialog, TableHistoryDialog, TableStateDialog, TableStateLine, useTableAction } from './TableActions';
 
 type Tile = TablesBoard['tables'][number];
 
@@ -54,6 +57,9 @@ interface ZoneStats {
   guests: number;
   pending: number;
   amount: number;
+  /** 8.1.15：没在用餐的桌里待清台、维修中的 */
+  dirty: number;
+  maintenance: number;
 }
 const zoneStats = (list: Tile[]): ZoneStats => {
   const busy = list.filter((t) => t.session);
@@ -63,6 +69,8 @@ const zoneStats = (list: Tile[]): ZoneStats => {
     guests: busy.reduce((n, t) => n + t.session!.guests, 0),
     pending: busy.reduce((n, t) => n + t.session!.pendingDishes, 0),
     amount: busy.reduce((n, t) => n + t.session!.amount, 0),
+    dirty: list.filter((t) => !t.session && t.state === 'dirty').length,
+    maintenance: list.filter((t) => !t.session && t.state === 'maintenance').length,
   };
 };
 
@@ -80,6 +88,8 @@ export function TablesTab() {
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [checkoutFor, setCheckoutFor] = useState<number | null>(null);
   const [records, setRecords] = useState(false);
+  /** 8.1.15：点了没在用餐的桌（待清台、维修中，或不能开台时）看状态、清台、维修、恢复、历史 */
+  const [stateFor, setStateFor] = useState<Tile | null>(null);
   const canOpen = can('dining.order') && can('frontdesk.operate');
 
   // 顶部「结果待确认」的「去处理」：开台回到那张桌台的开台对话框，桌台结账回到那一桌的结账
@@ -132,9 +142,8 @@ export function TablesTab() {
   const click = (t: Tile) => {
     if (t.session) setSessionId(t.session.id);
     else if (!menuRules) return;
-    else if (tablesOff) toast({ tone: 'info', title: `桌 ${t.name} 空闲`, body: '桌台点单已下架：所有消费请挂手牌点单（店主可在后台「餐饮」里重新打开）' });
-    else if (canOpen) setOpening(t);
-    else toast({ tone: 'info', title: `桌 ${t.name} 空闲`, body: '开台要有「餐饮点单」与「前台挂账」权限' });
+    else if (t.state === 'available' && !tablesOff && canOpen) setOpening(t);
+    else setStateFor(t);
   };
 
   const done = (detail: CheckoutDetail) => {
@@ -157,7 +166,13 @@ export function TablesTab() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="text-[13.5px] text-ink-2">
           用餐中 <b className="num text-ink">{busy.length}</b> 桌 · <b className="num text-ink">{busy.reduce((n, t) => n + t.session!.guests, 0)}</b> 人 · 空闲{' '}
-          <b className="num text-ink">{tables.length - busy.length}</b> 桌
+          <b className="num text-ink">{tables.filter((t) => !t.session && t.state === 'available').length}</b> 桌
+          {tables.some((t) => !t.session && t.state !== 'available') && (
+            <span className="text-ink-3">
+              {' '}
+              · 待清台 {tables.filter((t) => !t.session && t.state === 'dirty').length} · 维修 {tables.filter((t) => !t.session && t.state === 'maintenance').length}
+            </span>
+          )}
         </span>
         <span className="flex-1" />
         {can('frontdesk.read') && (
@@ -201,7 +216,7 @@ export function TablesTab() {
                 )}
                 <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
                   {list.map((t) => (
-                    <TableTile key={t.id} t={t} now={now} onClick={() => click(t)} />
+                    <TableTile key={t.id} t={t} now={now} onClick={() => click(t)} tables={tables} />
                   ))}
                 </div>
               </section>
@@ -210,9 +225,27 @@ export function TablesTab() {
         </>
       )}
 
+      {stateFor && (
+        <TableStateDialog
+          table={tables.find((x) => x.id === stateFor.id) ?? stateFor}
+          onClose={() => setStateFor(null)}
+          onOpen={
+            canOpen && !tablesOff
+              ? () => {
+                  setOpening(stateFor);
+                  setStateFor(null);
+                }
+              : null
+          }
+        />
+      )}
       {opening && (
         <OpenTableDialog
           table={opening}
+          onMore={() => {
+            setStateFor(opening);
+            setOpening(null);
+          }}
           onClose={() => setOpening(null)}
           onOpened={(d) => {
             setOpening(null);
@@ -264,7 +297,7 @@ function ZoneDetail({ label, stats }: { label: string; stats: ZoneStats }) {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line bg-paper-2/50 px-4 py-2.5 text-[13px]" data-testid="table-zone-detail">
       <span className="text-[14px] font-bold">{label}</span>
       <span>
-        空闲 <b className="num">{stats.tables - stats.busy}</b> 桌
+        空闲 <b className="num">{stats.tables - stats.busy - stats.dirty - stats.maintenance}</b> 桌{stats.dirty + stats.maintenance > 0 && ` · 待清台 ${stats.dirty} · 维修 ${stats.maintenance}`}
       </span>
       <span>
         用餐中 <b className="num">{stats.busy}</b> 桌 · <b className="num">{stats.guests}</b> 人
@@ -279,18 +312,27 @@ function ZoneDetail({ label, stats }: { label: string; stats: ZoneStats }) {
   );
 }
 
-function TableTile({ t, now, onClick }: { t: Tile; now: number; onClick: () => void }) {
+function TableTile({ t, now, onClick, tables }: { t: Tile; now: number; onClick: () => void; tables: Tile[] }) {
   const s = t.session;
+  // 并台（8.1.15）：附台写并入哪桌，主台写并着几桌
+  const mainName = s?.mergedInto ? (tables.find((x) => x.session?.id === s.mergedInto)?.name ?? null) : null;
+  const subCount = s ? tables.filter((x) => x.session?.mergedInto === s.id).length : 0;
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
         'flex min-h-[104px] flex-col items-start rounded-lg border px-3 py-2.5 text-left transition-colors',
-        s ? 'border-yuzu-deep/40 bg-yuzu-tint hover:border-yuzu-deep' : 'border-dashed border-line-strong bg-card hover:border-pine',
+        s
+          ? 'border-yuzu-deep/40 bg-yuzu-tint hover:border-yuzu-deep'
+          : t.state === 'dirty'
+            ? 'border-yuzu-deep/60 bg-card hover:border-yuzu-deep'
+            : t.state === 'maintenance'
+              ? 'border-clay/50 bg-clay-soft/40 hover:border-clay'
+              : 'border-dashed border-line-strong bg-card hover:border-pine',
       )}
       data-testid={`table-tile-${t.name}`}
-      data-state={s ? 'busy' : 'free'}
+      data-state={s ? 'busy' : t.state === 'available' ? 'free' : t.state}
     >
       <span className="flex w-full items-baseline gap-2">
         <span className="num min-w-0 flex-1 truncate text-[18px] font-bold">{t.name}</span>
@@ -312,16 +354,22 @@ function TableTile({ t, now, onClick }: { t: Tile; now: number; onClick: () => v
             {s.pendingDishes > 0 && <Badge tone="yuzu">待上 {s.pendingDishes}</Badge>}
             {!t.active && <Badge tone="clay">已停用</Badge>}
           </span>
+          <TableStateLine t={t} mainName={mainName} subCount={subCount} />
         </>
+      ) : t.state === 'available' ? (
+        <span className="mt-auto pt-1.5">
+          <span className="block text-[16px] font-bold text-pine">空闲</span>
+          <span className="block text-[12px] text-ink-3">点这里开台</span>
+        </span>
       ) : (
-        <span className="mt-auto pt-1.5 text-[12.5px] font-semibold text-pine">空闲 · 点这里开台</span>
+        <TableStateLine t={t} />
       )}
     </button>
   );
 }
 
 /** 开台：人数（默认按座位数）、称呼、可登记会员（结账时可以用这位会员的储值） */
-function OpenTableDialog({ table, onClose, onOpened }: { table: Tile; onClose: () => void; onOpened: (d: TableSessionDetail) => void }) {
+function OpenTableDialog({ table, onClose, onOpened, onMore }: { table: Tile; onClose: () => void; onOpened: (d: TableSessionDetail) => void; onMore: () => void }) {
   const session = useSession();
   const can = useCan();
   const toast = useToast();
@@ -361,6 +409,10 @@ function OpenTableDialog({ table, onClose, onOpened }: { table: Tile; onClose: (
       description={`${table.area ? `${table.area} · ` : ''}${table.seats} 座。开台后这桌的菜记在这桌的账上，吃完在这里结账。`}
       footer={
         <>
+          {/* 8.1.15：这张桌的维修、历史 */}
+          <Button variant="ghost" className="mr-auto" onClick={onMore} disabled={op.busy || op.locked} data-testid="table-open-more">
+            维修 / 历史
+          </Button>
           <Button variant="ghost" onClick={onClose} disabled={op.busy}>
             取消
           </Button>
@@ -498,6 +550,10 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
   const [showVoided, setShowVoided] = useState(false);
   /** 点菜单（8.1.7，CF8） */
   const [receipt, setReceipt] = useState(false);
+  /** 并台、桌台历史（8.1.15） */
+  const [merging, setMerging] = useState(false);
+  const [history, setHistory] = useState(false);
+  const splitAction = useTableAction();
   const d = detail.data;
   const canOrder = can('dining.order') && can('frontdesk.operate');
 
@@ -532,7 +588,7 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
   const active = d.lines.filter((l) => l.status === 'active');
   const voided = d.lines.filter((l) => l.status === 'voided');
   const pendingOf = (lineId: number): PendingDish | undefined => d.pending.find((p) => p.billLineId === lineId);
-  const freeTables = board.tables.filter((t) => t.active && !t.session && t.id !== d.tableId);
+  const freeTables = board.tables.filter((t) => t.active && !t.session && t.state === 'available' && t.id !== d.tableId);
   const guestName = d.member?.name ?? (d.guestLabel || '散客');
 
   return (
@@ -562,9 +618,9 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
                 点单
               </Button>
             )}
-            {can('frontdesk.checkout') && (
+            {can('frontdesk.checkout') && !d.mergedInto && (
               <Button variant="primary" size="lg" onClick={onCheckout} data-testid="table-checkout">
-                结账 ¥{(d.amount / 100).toFixed(2)}
+                结账 ¥{((d.amount + d.merged.reduce((n, m) => n + m.amount, 0)) / 100).toFixed(2)}
               </Button>
             )}
           </>
@@ -577,10 +633,26 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
     >
       <div className="space-y-4" data-testid="table-session">
         {d.status === 'cancelled' && <Notice tone="warning" title={`已撤台：${d.closeReason ?? ''}`} />}
+        {/* 并台（8.1.15）：附台在主台结账；主台结账时带着附台一起结 */}
+        {open && d.mergedInto && (
+          <Notice tone="info" title={`这桌并入了桌 ${d.mergedInto.tableName}`} data-testid="table-merged-into">
+            账还在这桌上，结账时在桌 {d.mergedInto.tableName} 一起结；要单独结先「拆台」。
+          </Notice>
+        )}
+        {open && d.merged.length > 0 && (
+          <Notice tone="info" title={`并着 ${d.merged.map((m) => `桌 ${m.tableName}`).join('、')}`} data-testid="table-merged-subs">
+            结账时一起结（合计含附台 <Money cents={d.merged.reduce((n, m) => n + m.amount, 0)} className="font-bold" />
+            ）；附台要单独结先在附台「拆台」。
+          </Notice>
+        )}
+        {splitAction.uncertain && <Notice tone="warning" title={splitAction.uncertain} />}
         <ReceiptDialog target={receipt ? { session: d.id } : null} onClose={() => setReceipt(false)} />
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" icon={<ClipboardList className="size-3.5" />} onClick={() => setReceipt(true)} data-testid="table-receipt">
             点菜单
+          </Button>
+          <Button size="sm" variant="ghost" icon={<History className="size-3.5" />} onClick={() => setHistory(true)} data-testid="table-history">
+            历史
           </Button>
           {open && (
             <>
@@ -597,6 +669,23 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
               {canOrder && active.length === 0 && (
                 <Button size="sm" variant="ghost" icon={<Undo2 className="size-3.5" />} onClick={() => setCancelling(true)} data-testid="table-cancel">
                   撤台
+                </Button>
+              )}
+              {canOrder && !d.mergedInto && (
+                <Button size="sm" variant="secondary" icon={<Link2 className="size-3.5" />} onClick={() => setMerging(true)} data-testid="table-merge">
+                  并台
+                </Button>
+              )}
+              {canOrder && d.mergedInto && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<Unlink className="size-3.5" />}
+                  loading={splitAction.busy}
+                  onClick={() => void splitAction.run(`/api/dining/tables/sessions/${d.id}/split`, {}, `桌 ${d.tableName} 已拆台，各结各的`)}
+                  data-testid="table-split"
+                >
+                  拆台
                 </Button>
               )}
             </>
@@ -739,6 +828,8 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
         }}
       />
       {editing && <EditSessionDialog detail={d} onClose={() => setEditing(false)} onSaved={refresh} />}
+      {merging && <MergeDialog mainId={d.id} mainName={d.tableName} board={board} onClose={() => setMerging(false)} />}
+      <TableHistoryDialog tableId={history ? d.tableId : null} onClose={() => setHistory(false)} />
       {moving && <MoveDialog detail={d} free={freeTables} onClose={() => setMoving(false)} onMoved={refresh} />}
     </Dialog>
   );

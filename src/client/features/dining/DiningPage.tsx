@@ -3,6 +3,7 @@
 // 店员默认四页都有；后勤（厨房）只有厨房出品与沽清；只有点单权限的服务员在出品屏上只能「上菜」；
 // 收银（结账收款）能看桌台并结账。
 // 8.0.8：桌台点单下架时（餐饮设置，默认关）「桌台」叫「桌台账单」，只结账、退菜；加「台账」「退菜记录」（点单的与看日结的都能看、能导出）。
+// 8.1.15（块 B2）：「退菜记录」并进「台账」（按类型筛「退菜」），旧地址 /dining/voids 跳到台账的「退菜」。
 
 import { Navigate, NavLink, useParams } from 'react-router';
 import type { Permission } from '@shared/permissions';
@@ -11,7 +12,7 @@ import { cn } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { Notice } from '../../components/ui';
 import { KitchenTab, LimitsTab } from './KitchenTab';
-import { LedgerTab, VoidsTab } from './LedgerTab';
+import { LedgerTab } from './LedgerTab';
 import { OrderTab } from './OrderTab';
 import { useDiningMenu } from './queries';
 import { TablesTab } from './TablesTab';
@@ -22,7 +23,6 @@ const TABS = [
   { key: 'kitchen', label: '厨房出品', perms: ['dining.kitchen', 'dining.order'], subtitle: '待做 → 制作中 → 已出餐 → 上菜，5 秒刷新；点错了可以撤回一步' },
   { key: 'limits', label: '沽清', perms: ['dining.kitchen'], subtitle: '今天某道菜还剩几份；沽清（卖完）后点单页不能再点，退菜按原份数加回' },
   { key: 'ledger', label: '台账', perms: ['dining.order', 'ledger.export', 'report.executive'], subtitle: '按营业日、分类、状态列出每道菜（手牌、桌台、小程序扫码点餐），合计只算有效的，可导出' },
-  { key: 'voids', label: '退菜记录', perms: ['dining.order', 'ledger.export', 'report.executive'], subtitle: '谁退的、怎么批的（小额直接退、本人 15 分钟内、经理、当场授权），经理每天看一眼' },
 ] as const satisfies readonly { key: string; label: string; perms: readonly Permission[]; subtitle: string }[];
 
 /** 桌台点单下架时（8.0.8，A05）「桌台」只结账、退菜 */
@@ -33,6 +33,8 @@ export function DiningPage() {
   const can = useCan();
   const { tab } = useParams();
   const menu = useDiningMenu();
+  // 8.1.15：退菜记录并进台账，旧地址（书签、交接说明里的链接）跳到台账的「退菜」
+  if (tab === 'voids') return <Navigate to="/dining/ledger?type=voided" replace />;
   const tablesOff = menu.data ? !menu.data.rules.tablesEnabled : false;
   const tabs = TABS.filter((t) => t.perms.some((p) => can(p))).map((t) => (t.key === 'tables' && tablesOff ? { ...t, ...TABLES_OFF } : t));
   const current = tabs.find((t) => t.key === tab) ?? (tab ? undefined : tabs[0]);
@@ -78,17 +80,7 @@ export function DiningPage() {
             <OrderTab />
           </div>
         )}
-        {current.key === 'tables' ? (
-          <TablesTab />
-        ) : current.key === 'kitchen' ? (
-          <KitchenTab />
-        ) : current.key === 'limits' ? (
-          <LimitsTab />
-        ) : current.key === 'ledger' ? (
-          <LedgerTab />
-        ) : current.key === 'voids' ? (
-          <VoidsTab />
-        ) : null}
+        {current.key === 'tables' ? <TablesTab /> : current.key === 'kitchen' ? <KitchenTab /> : current.key === 'limits' ? <LimitsTab /> : current.key === 'ledger' ? <LedgerTab /> : null}
       </div>
     </>
   );

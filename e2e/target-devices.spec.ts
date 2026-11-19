@@ -137,8 +137,9 @@ const BOARD: TablesBoard = {
       },
     },
     free(990_104, '听松阁', '景观包厢', 8),
-    free(990_105, 'W1', '休闲水吧区', 2),
-    free(990_106, 'F1', '休息果吧区', 4),
+    // 8.1.15：一张待清台、一张维修中（格子上颜色加文字加图标，维修写原因与预计时间）
+    { ...free(990_105, 'W1', '休闲水吧区', 2), state: 'dirty', stateSince: ago(6) },
+    { ...free(990_106, 'F1', '休息果吧区', 4), state: 'maintenance', maintenanceReason: '桌腿松了，等师傅来修', maintenanceUntil: ago(-120), stateSince: ago(30) },
   ],
 };
 
@@ -582,6 +583,14 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await page.goto('/dining/tables');
     await expect(page.getByTestId('table-zones')).toBeVisible();
     await expectFits(page);
+    // 8.1.15：维修中的桌——格子上写维修中，点开看得到「恢复」「历史」
+    await expect(page.getByTestId('table-tile-F1')).toContainText('维修中');
+    await page.getByTestId('table-tile-F1').click();
+    await expect(page.getByTestId('table-state')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['table-restore', 'table-history-open']);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('table-state')).toHaveCount(0);
     await page.getByTestId('table-zone-景观包厢').click();
     await expect(page.getByTestId('table-zone-detail')).toContainText('景观包厢');
     await expectFits(page);
@@ -615,10 +624,12 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await expect(page.getByTestId('dining-ledger-group-all')).toBeVisible();
     await expectFits(page);
   },
+  // 8.1.15：退菜记录并进台账，旧地址跳到台账的「退菜」
   'dining-voids': async (page) => {
     await page.goto('/dining/voids');
-    await expect(page.getByTestId('dining-voids-outlet-all')).toBeVisible();
-    await page.getByTestId('dining-voids-outlet-fruit').click();
+    await expect(page.getByTestId('dining-ledger-outlet-all')).toBeVisible();
+    await expect(page.getByTestId('dining-ledger-type')).toBeVisible();
+    await page.getByTestId('dining-ledger-outlet-fruit').click();
     await expectFits(page);
   },
   'admin-dining': async (page) => {

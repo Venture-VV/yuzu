@@ -97,8 +97,8 @@ describe('按出品口下单（B3）', () => {
     expect(denied.status).toBe(403);
     expect(denied.body.error).toMatchObject({ code: 'OUTLET_FORBIDDEN', details: { items: ['宫保鸡丁'] } });
     expect(denied.body.error.message).toContain('餐厅');
-    const [{ n }] = (await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id WHERE v.id = ${g.visitId}`) as [{ n: number }];
-    expect(n).toBe(2);
+    const [count] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id WHERE v.id = ${g.visitId}`;
+    expect(count!.n).toBe(2);
     expect((await order(g.visitId, ['宫保鸡丁', '柠檬茶', '果盘'])).status).toBe(200);
     // 康美部不能开台、不能给桌台点单（桌台照旧要「前台挂账」）
     expect((await api(ctx.app, km, 'POST', '/api/dining/tables/open', { clientKey: randomUUID(), tableId, guests: 1 })).status).toBe(403);

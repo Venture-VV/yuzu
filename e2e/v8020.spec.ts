@@ -264,6 +264,8 @@ test.describe('8.0.20 进销存做深与客房', () => {
     await send(page.request, 'put', `/api/admin/rooms/types/${typeId}`, { name: typeName, kind: 'daily', price: 30000, active: false });
     // 点餐页
     await page.goto('/dining');
-    await expect(page.getByLabel('手牌号或房号')).toBeVisible();
+    // 8.1.15（块 B3）：手牌号、房号两个框，至少填一样
+    await expect(page.getByLabel('手牌号', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('房号', { exact: true })).toBeVisible();
   });
 });
