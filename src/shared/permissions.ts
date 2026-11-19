@@ -269,7 +269,7 @@ export const PERMISSIONS = {
   'technician.dispatch': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 餐饮点单：按手牌给在店客人点菜（挂账）、催单、上菜（S5 第一步，待确认：前台岗位都能做；下单还要能挂账） */
   'dining.order': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
-  /** 厨房出品屏：开始做、出餐、估清（S5 第一步，待确认：前台岗位与后勤人员；厨房可以用后勤账号） */
+  /** 厨房出品屏：开始做、出餐、沽清（S5 第一步，待确认：前台岗位与后勤人员；厨房可以用后勤账号） */
   'dining.kitchen': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
   /**
    * 打开平板点餐（8.0.10，DC16 待确认：能点单的前台岗位与「点餐平板」）：看电子菜单、按手牌找在店客人、看这张手牌点过的菜；
@@ -517,7 +517,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'technician.manage': '维护技师名册',
   'technician.dispatch': '钟房派钟、上下钟、加钟、退钟、上牌',
   'dining.order': '餐饮点单、催单、上菜',
-  'dining.kitchen': '厨房出品屏：开始做、出餐、估清',
+  'dining.kitchen': '厨房出品屏：开始做、出餐、沽清',
   'emenu.view': '打开平板点餐（电子菜单；下单要服务员输点单密码）',
   'emenu.manage': '维护电子菜单（分类、版面、菜品图文、设置）',
   'room.operate': '客房入住、续住、换房、退房、押金、夜审',

@@ -598,7 +598,7 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     key: 'dining_rules.enabled',
     group: 'dining',
     label: '餐饮功能',
-    value: onOff(dn.enabled, '开启（点单、厨房出品屏、估清）', '关闭（与升级前一样）'),
+    value: onOff(dn.enabled, '开启（点单、厨房出品屏、沽清）', '关闭（与升级前一样）'),
     defaultValue: '关闭（与升级前一样）',
     pending: false,
     section: 'dining',

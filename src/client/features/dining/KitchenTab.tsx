@@ -1,7 +1,7 @@
-// 厨房出品屏（KDS）与估清。
+// 厨房出品屏（KDS）与沽清。
 // 出品屏：待做 → 制作中 → 已出餐（待上菜）三列，按下单先后；下单超过规定分钟还没出餐标红，催过的标出次数。
 // 每个操作都带上页面看到的状态，连点两下或别人刚改过时服务端拒绝（DISH_CHANGED），不会多走一步。
-// 只有点单权限的服务员只能「上菜」与撤回上菜；开始做、出餐、估清要厨房的岗位。
+// 只有点单权限的服务员只能「上菜」与撤回上菜；开始做、出餐、沽清要厨房的岗位。
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -262,7 +262,7 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
   );
 }
 
-/** 估清：今天某道菜还剩几份（0 为估清）；不限量就是没有限制 */
+/** 沽清：今天某道菜还剩几份（0 为沽清）；不限量就是没有限制 */
 export function LimitsTab() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -281,7 +281,7 @@ export function LimitsTab() {
       qc.setQueryData(kitchenKey, await api.put<KitchenBoard>(`/api/kitchen/limits/${dish.id}`, { remaining }));
       void qc.invalidateQueries({ queryKey: menuKey });
       setEditing(null);
-      toast({ tone: 'success', title: remaining === null ? `「${dish.name}」不限量` : remaining === 0 ? `「${dish.name}」已估清` : `「${dish.name}」今天限量 ${remaining} 份` });
+      toast({ tone: 'success', title: remaining === null ? `「${dish.name}」不限量` : remaining === 0 ? `「${dish.name}」已沽清` : `「${dish.name}」今天限量 ${remaining} 份` });
     } catch (e) {
       toast({ tone: 'error', title: errorMessage(e) });
     } finally {
@@ -301,7 +301,7 @@ export function LimitsTab() {
   return (
     <div className="mx-auto max-w-[1080px] space-y-4 px-5 py-5 md:px-7" data-testid="limits">
       <p className="text-[13px] text-ink-3">
-        营业日 {d.businessDate}：已估清 {soldOut} 道，限量 {limited} 道。估清只管今天，换了营业日自动恢复不限量。
+        营业日 {d.businessDate}：已沽清 {soldOut} 道，限量 {limited} 道。沽清 = 这道菜今天卖完、不再接单；只管今天，换了营业日自动恢复不限量。
       </p>
       {d.dishes.length > 0 && <OutletFilter value={outlet} onChange={setOutlet} counts={counts} testPrefix="limits" />}
       {d.dishes.length === 0 ? (
@@ -326,7 +326,7 @@ export function LimitsTab() {
                       <span className="ml-2 text-[12px] font-normal text-ink-4">{dish.stationName}</span>
                     </span>
                     <Money cents={dish.price} className="text-[13px] text-ink-3" />
-                    {dish.remaining === null ? <Badge>不限量</Badge> : dish.remaining === 0 ? <Badge tone="clay">已估清</Badge> : <Badge tone="yuzu">剩 {dish.remaining} 份</Badge>}
+                    {dish.remaining === null ? <Badge>不限量</Badge> : dish.remaining === 0 ? <Badge tone="clay">已沽清</Badge> : <Badge tone="yuzu">剩 {dish.remaining} 份</Badge>}
                     {edit ? (
                       <span className="flex items-center gap-1.5">
                         <Input
@@ -362,7 +362,7 @@ export function LimitsTab() {
                         </Button>
                         {dish.remaining !== 0 && (
                           <Button size="sm" variant="danger" loading={busy === dish.id} disabled={busy !== null} onClick={() => void save(dish, 0)} data-testid={`limit-soldout-${dish.name}`}>
-                            估清
+                            沽清
                           </Button>
                         )}
                         {dish.remaining !== null && (

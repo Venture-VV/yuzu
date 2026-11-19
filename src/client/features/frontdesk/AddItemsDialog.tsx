@@ -44,8 +44,8 @@ export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean
   const [qtyHint, setQtyHint] = useState<string | null>(null);
   const [custom, setCustom] = useState<{ name: string; amount: string }[]>([]);
   const techs = useFrontdeskTechnicians(open);
-  // 进厨房的菜的余量（8.0.8，B03）：厨房估清设的今天还能卖几份（null 不限量，0 估清）；余量不够时服务端照旧整单拒绝。
-  // 补录纸质单时不看今天的余量：那些菜之前已经上过了，服务端补录也不扣估清（Codex 审查 fb67dca）
+  // 进厨房的菜的余量（8.0.8，B03）：厨房沽清设的今天还能卖几份（null 不限量，0 沽清）；余量不够时服务端照旧整单拒绝。
+  // 补录纸质单时不看今天的余量：那些菜之前已经上过了，服务端补录也不扣沽清（Codex 审查 fb67dca）
   const backfill = useBackfill();
   const dining = useDiningMenu(open && session.dining);
   const remainingOf = useMemo(() => new Map(backfill.state.active ? [] : (dining.data?.dishes ?? []).map((d) => [d.id, d.remaining])), [dining.data, backfill.state.active]);
@@ -148,7 +148,7 @@ export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean
     i.gender && i.gender !== visit.zone
       ? `仅限${ZONE_LABELS[i.gender].title}`
       : remainingOf.get(i.id) === 0
-        ? '已估清'
+        ? '已沽清'
         : i.technicianRequired && techs.isPending
           ? '正在加载技师…'
           : i.technicianRequired && !techs.data

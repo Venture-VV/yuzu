@@ -143,7 +143,7 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
 /**
  * 挂账（调用方的事务里；前台、点单页、钟房经 postCharges 的幂等外壳调用，小程序扫码点餐经 mp-entries.ts 调用，
  * 平板点餐经 emenu/core.ts 调用（8.0.10：经办人是输点单密码的服务员））。
- * 锁：来访 → 账单 →（技师队列 → 钟单 → 技师状态）→ 估清 → 出品单
+ * 锁：来访 → 账单 →（技师队列 → 钟单 → 技师状态）→ 沽清 → 出品单
  */
 export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: PostInputParsed, meta: PostTxMeta, ctx: OpContext, options: PostOptions = {}): Promise<PostResult> {
   const { key, requestHash, backfill, channel } = meta;
@@ -278,7 +278,7 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
   } else if (options.session?.extendId !== undefined || options.session?.dispatch) {
     throw unprocessable('TECHNICIAN_REQUIRED', '派钟、加钟要选技师');
   }
-  // 估清（技师队列之后、建出品单之前）：今天还剩的份数不够整笔拒绝；补录纸质单的菜早已上过，不扣估清
+  // 沽清（技师队列之后、建出品单之前）：今天还剩的份数不够整笔拒绝；补录纸质单的菜早已上过，不扣沽清
   const dishLines = lines.filter((l) => l.stationId !== null);
   const limited =
     dishLines.length > 0 && !backfill
@@ -375,7 +375,7 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
       await lockQueue(tx);
       await syncSessionAfterVoid(tx, deps, line!.sessionId, input.reason, ctx.actor, at);
     }
-    // 餐饮明细（退菜）：出品单改为已退，扣过估清的按原份数加回
+    // 餐饮明细（退菜）：出品单改为已退，扣过沽清的按原份数加回
     await cancelKitchenItem(tx, line!.id, `退菜：${input.reason}`, ctx.actor, at);
     await writeAudit(tx, {
       staffId: ctx.actor.id,

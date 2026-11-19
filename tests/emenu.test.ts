@@ -339,7 +339,7 @@ describe('后台「电子菜单」', () => {
 });
 
 describe('平板上的菜单', () => {
-  it('按排序列出分类与各页；规格的价格读价目表；估清、下架、停用都跟着变', async () => {
+  it('按排序列出分类与各页；规格的价格读价目表；沽清、下架、停用都跟着变', async () => {
     const m = await menu();
     expect(m.enabled).toBe(true);
     expect(m.categories.map((c) => c.name)).toEqual(['西式午餐', '中式午餐', '茶']);
@@ -363,7 +363,7 @@ describe('平板上的菜单', () => {
         .flatMap((p) => p.dishes)
         .flatMap((d) => d?.specs ?? [])
         .find((s) => s.itemId === itemId)!;
-    // 估清
+    // 沽清
     expect((await api(ctx.app, ctx.owner, 'PUT', `/api/kitchen/limits/${item['砂锅焗溪鳗（小份）']}`, { remaining: 0 })).status).toBe(200);
     expect(await specOf(item['砂锅焗溪鳗（小份）']!)).toMatchObject({ state: 'sold_out', remaining: 0 });
     expect((await specOf(item['砂锅焗溪鳗（大份）']!)).state).toBe('ok');
@@ -780,11 +780,11 @@ describe('下单', () => {
     expect(g.orderedTotal).toBe(20600);
   });
 
-  it('各种拒绝：价格变了、估清、不在电子菜单、不在时段、桌号、手牌换了人、备注选项、格式', async () => {
+  it('各种拒绝：价格变了、沽清、不在电子菜单、不在时段、桌号、手牌换了人、备注选项、格式', async () => {
     const waffle = [{ itemId: item['华夫牛角']!, quantity: 1 }];
     const code = async (p: Promise<{ status: number; body: { error?: { code: string } } }>) => (await p).body.error?.code;
     expect(await code(order(waffle, 3900))).toBe('PRICE_CHANGED');
-    // 估清
+    // 沽清
     await api(ctx.app, ctx.owner, 'PUT', `/api/kitchen/limits/${item['华夫牛角']}`, { remaining: 1 });
     expect(await code(order([{ itemId: item['华夫牛角']!, quantity: 2 }], 7600))).toBe('DISH_SOLD_OUT');
     await api(ctx.app, ctx.owner, 'PUT', `/api/kitchen/limits/${item['华夫牛角']}`, { remaining: null });

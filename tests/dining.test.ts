@@ -1,4 +1,4 @@
-// S5 餐饮第一步：出品档口、点单（挂在手牌账单上）、厨房出品屏（KDS）与估清。
+// S5 餐饮第一步：出品档口、点单（挂在手牌账单上）、厨房出品屏（KDS）与沽清。
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -232,8 +232,8 @@ describe('点单与厨房出品', () => {
   });
 });
 
-describe('估清与退菜', () => {
-  it('限量份数下单时扣减，不够整笔拒绝；退菜按原份数加回；估清后不能点；取消估清不限量；只有厨房的岗位能设', async () => {
+describe('沽清与退菜', () => {
+  it('限量份数下单时扣减，不够整笔拒绝；退菜按原份数加回；沽清后不能点；取消沽清不限量；只有厨房的岗位能设', async () => {
     const dish = item['宫保鸡丁']!;
     expect((await limit(dish, 3, ctx.clerk)).status).toBe(200); // 店员默认也能在厨房屏上设
     expect((await limit(dish, 3, am)).status).toBe(403);
@@ -250,9 +250,9 @@ describe('估清与退菜', () => {
     expect(await remainingOf(dish)).toBe(3);
     const cancelled = ((await board()).items as KItem[]).find((k) => k.visitId === v.id && k.name === '宫保鸡丁');
     expect(cancelled!.status).toBe('cancelled');
-    // 估清：0 份不能点；取消估清后不限量
+    // 沽清：0 份不能点；取消沽清后不限量
     expect((await limit(dish, 0)).status).toBe(200);
-    expect((await order(v.id, [{ itemId: dish, quantity: 1 }], 4800)).body.error.message).toContain('已估清');
+    expect((await order(v.id, [{ itemId: dish, quantity: 1 }], 4800)).body.error.message).toContain('已沽清');
     expect((await limit(dish, null)).status).toBe(200);
     expect(await remainingOf(dish)).toBeNull();
     expect((await order(v.id, [{ itemId: dish, quantity: 5 }], 24000)).status).toBe(200);
@@ -288,7 +288,7 @@ describe('结账与补录', () => {
     await expect(diningGuest(ctx.sql, v.code)).rejects.toMatchObject({ status: 404 });
   });
 
-  it('按纸质单补录的菜早已上过：出品单直接记为已上菜，不扣估清', async () => {
+  it('按纸质单补录的菜早已上过：出品单直接记为已上菜，不扣沽清', async () => {
     const dish = item['柠檬茶']!;
     expect((await limit(dish, 5)).status).toBe(200);
     // 纸质单：2 小时前接待、半小时前点了两杯柠檬茶

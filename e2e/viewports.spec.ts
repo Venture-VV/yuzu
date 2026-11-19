@@ -165,7 +165,7 @@ test.describe('视口冒烟', () => {
     }
   });
 
-  test('餐饮：点单、桌台、厨房出品、估清与后台「餐饮」，开启技师与餐饮后主导航 9 个入口都看得到（S5）', async ({ page, isMobile }) => {
+  test('餐饮：点单、桌台、厨房出品、沽清与后台「餐饮」，开启技师与餐饮后主导航 9 个入口都看得到（S5）', async ({ page, isMobile }) => {
     await login(page, 'linlan');
     // 只临时打开两个功能开关看页面（不点单、不写业务数据），结束时恢复原样
     const tech = (await (await page.request.get('/api/admin/technicians')).json()) as { rules: { enabled: boolean } };

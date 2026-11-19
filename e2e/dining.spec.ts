@@ -1,7 +1,7 @@
-// S5 餐饮第一步浏览器验收：后台建出品档口、把菜挂到档口、开启餐饮 → 估清页限量 → 点单页按手牌点菜（口味备注）
-// → 厨房屏开始做、出餐 → 点单页上菜 → 退菜（限量份数加回）→ 估清后点单页不能点 → 前台账单显示出品状态 → 结账核对列出没上的菜。
+// S5 餐饮第一步浏览器验收：后台建出品档口、把菜挂到档口、开启餐饮 → 沽清页限量 → 点单页按手牌点菜（口味备注）
+// → 厨房屏开始做、出餐 → 点单页上菜 → 退菜（限量份数加回）→ 沽清后点单页不能点 → 前台账单显示出品状态 → 结账核对列出没上的菜。
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan、前台 xiaozhou，密码 yuzu2026。
-// 专用菜品与档口（E2E 开头）留着下次沿用；结束时关闭餐饮功能、取消估清，可重复执行。
+// 专用菜品与档口（E2E 开头）留着下次沿用；结束时关闭餐饮功能、取消沽清，可重复执行。
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import type { DiningAdmin, KitchenBoard } from '../src/shared/dining';
@@ -74,7 +74,7 @@ test.describe('S5 餐饮', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会改规则的流程只在门店电脑尺寸执行一次');
   test.setTimeout(180_000);
 
-  test('后台建档口、挂菜、开启 → 限量 → 点单 → 厨房出餐 → 上菜 → 退菜 → 估清 → 账单与结账核对', async ({ page }) => {
+  test('后台建档口、挂菜、开启 → 限量 → 点单 → 厨房出餐 → 上菜 → 退菜 → 沽清 → 账单与结账核对', async ({ page }) => {
     await login(page, 'linlan');
     try {
       // ① 店主：专用菜品（没有就建）；后台「餐饮」里建档口、把菜挂到档口、开启餐饮（规则先恢复默认）
@@ -151,7 +151,7 @@ test.describe('S5 餐饮', () => {
       await page.goto('/');
       await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '餐饮' }).click();
 
-      // ③ 估清页：柠檬茶今天限量 2 份（上一轮留下的先取消）
+      // ③ 沽清页：柠檬茶今天限量 2 份（上一轮留下的先取消）
       await page.getByTestId('dining-tab-limits').click();
       const teaLimit = page.getByTestId(`limit-${TEA.name}`);
       if (await teaLimit.getByTestId(`limit-clear-${TEA.name}`).isVisible()) {
@@ -237,14 +237,14 @@ test.describe('S5 餐饮', () => {
         ].sort(),
       );
 
-      // ⑦ 估清：柠檬茶卖完了，点单页不能点；取消后恢复
+      // ⑦ 沽清：柠檬茶卖完了，点单页不能点；取消后恢复
       await page.getByTestId('dining-tab-limits').click();
       await teaLimit.getByTestId(`limit-soldout-${TEA.name}`).click();
-      await expect(teaLimit).toContainText('已估清');
+      await expect(teaLimit).toContainText('已沽清');
       await page.getByTestId('dining-tab-order').click();
       await openOutlet(page, TEA);
       await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toBeDisabled();
-      await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toContainText('已估清');
+      await expect(page.getByTestId(`dining-dish-${TEA.name}`)).toContainText('已沽清');
       await page.getByTestId('dining-tab-limits').click();
       await teaLimit.getByTestId(`limit-clear-${TEA.name}`).click();
       await expect(teaLimit).toContainText('不限量');

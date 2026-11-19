@@ -1,10 +1,10 @@
-// 餐饮（S5 第一步）：出品档口、点单、厨房出品屏（KDS）与估清。
+// 餐饮（S5 第一步）：出品档口、点单、厨房出品屏（KDS）与沽清。
 //
 // 钱只在账单明细里：点单就是给客人挂账（与前台挂账同一条路径 frontdesk/bills.ts 的 postCharges，同一个事务里建出品单），
-// 退菜就是作废明细（voidLine，同一个事务里把出品单改为已退、按原份数加回估清）。出品单只记出品状态与时间。
+// 退菜就是作废明细（voidLine，同一个事务里把出品单改为已退、按原份数加回沽清）。出品单只记出品状态与时间。
 //
-// 并发：挂账、作废的加锁顺序是「来访 → 账单 → 明细 → （技师队列 → 钟单 → 技师状态）→ 估清 → 出品单」；
-// 厨房屏的开始 / 出餐 / 上菜只锁出品单一行，设估清只锁估清一行，都不反向加锁。
+// 并发：挂账、作废的加锁顺序是「来访 → 账单 → 明细 → （技师队列 → 钟单 → 技师状态）→ 沽清 → 出品单」；
+// 厨房屏的开始 / 出餐 / 上菜只锁出品单一行，设沽清只锁沽清一行，都不反向加锁。
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -66,8 +66,8 @@ export interface DishLine {
 }
 
 /**
- * 估清：这几道菜今天还剩的份数够不够，够就扣掉（按项目 id 升序锁估清行）。没有当天记录的不限量。
- * 返回扣过估清的项目（退菜时按原份数加回）。
+ * 沽清：这几道菜今天还剩的份数够不够，够就扣掉（按项目 id 升序锁沽清行）。没有当天记录的不限量。
+ * 返回扣过沽清的项目（退菜时按原份数加回）。
  */
 export async function takeDishLimits(tx: Tx, lines: DishLine[], date: string): Promise<Set<number>> {
   const wanted = new Map<number, { name: string; quantity: number }>();
@@ -82,7 +82,7 @@ export async function takeDishLimits(tx: Tx, lines: DishLine[], date: string): P
   for (const r of rows) {
     const w = wanted.get(r.itemId)!;
     if (r.remaining < w.quantity) {
-      throw conflict('DISH_SOLD_OUT', r.remaining === 0 ? `「${w.name}」今天已估清（卖完了），请换一道菜` : `「${w.name}」今天只剩 ${r.remaining} 份，请改份数或换一道菜`, {
+      throw conflict('DISH_SOLD_OUT', r.remaining === 0 ? `「${w.name}」今天已沽清（卖完了），请换一道菜` : `「${w.name}」今天只剩 ${r.remaining} 份，请改份数或换一道菜`, {
         itemId: r.itemId,
         remaining: r.remaining,
       });
@@ -128,7 +128,7 @@ export async function createKitchenItems(
   return orderNo;
 }
 
-/** 退菜（作废餐饮明细之后，来访、账单、明细已锁）：出品单改为已退；扣过估清的按原份数加回（同一营业日的估清） */
+/** 退菜（作废餐饮明细之后，来访、账单、明细已锁）：出品单改为已退；扣过沽清的按原份数加回（同一营业日的沽清） */
 export async function cancelKitchenItem(tx: Tx, billLineId: number, reason: string, actor: Actor, at: Date) {
   const [k] = await tx<{ id: number; itemId: number; quantity: number; status: KitchenStatus; businessDate: string; limitTaken: boolean }[]>`
     SELECT id, item_id, quantity, status, business_date::text AS business_date, limit_taken FROM kitchen_items WHERE bill_line_id = ${billLineId}`;
@@ -165,7 +165,7 @@ async function stationsWithCount(db: Db): Promise<KitchenStation[]> {
     FROM kitchen_stations s ORDER BY s.sort_order, s.id`;
 }
 
-/** 进厨房的在售菜品、默认价格档的单价、今天的估清与点单分类（8.1.7：后台没设的按默认归） */
+/** 进厨房的在售菜品、默认价格档的单价、今天的沽清与点单分类（8.1.7：后台没设的按默认归） */
 async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
   const rows = await db<
     {
@@ -331,11 +331,11 @@ export async function rushDish(deps: Deps, id: number, ctx: OpContext) {
 }
 
 const LimitInput = z.object({
-  /** 今天还剩几份；0 为估清，null 为不限量（取消估清） */
+  /** 今天还剩几份；0 为沽清，null 为不限量（取消沽清） */
   remaining: z.number('份数必须是整数').int('份数必须是整数').min(0, '份数不能为负').max(9999, '份数最多 9999').nullable(),
 });
 
-/** 设估清：今天还剩几份（0 为估清）；取消后不限量。记审计 */
+/** 设沽清：今天还剩几份（0 为沽清）；取消后不限量。记审计 */
 export async function setDishLimit(deps: Deps, itemId: number, raw: unknown, ctx: OpContext) {
   const { remaining } = parse(LimitInput, raw);
   await deps.sql.begin(async (tx) => {
@@ -343,7 +343,7 @@ export async function setDishLimit(deps: Deps, itemId: number, raw: unknown, ctx
     const today = await businessDate(tx, deps, at);
     const [item] = await tx<{ name: string; stationId: number | null }[]>`SELECT name, station_id FROM service_items WHERE id = ${itemId}`;
     if (!item) throw notFound('菜品不存在');
-    if (item.stationId === null) throw unprocessable('DISH_NOT_KITCHEN', `「${item.name}」不进厨房，不用估清`);
+    if (item.stationId === null) throw unprocessable('DISH_NOT_KITCHEN', `「${item.name}」不进厨房，不用沽清`);
     if (remaining === null) {
       await tx`DELETE FROM dish_limits WHERE item_id = ${itemId}`;
     } else {
@@ -357,7 +357,7 @@ export async function setDishLimit(deps: Deps, itemId: number, raw: unknown, ctx
       action: 'dish_limit_set',
       targetType: 'item',
       targetId: itemId,
-      detail: { name: item.name, remaining, summary: remaining === null ? `取消「${item.name}」的估清` : remaining === 0 ? `「${item.name}」估清` : `「${item.name}」限量 ${remaining} 份` },
+      detail: { name: item.name, remaining, summary: remaining === null ? `取消「${item.name}」的沽清` : remaining === 0 ? `「${item.name}」沽清` : `「${item.name}」限量 ${remaining} 份` },
       ip: ctx.ip,
       businessDate: today,
     });
@@ -554,7 +554,7 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
     return diningAdmin(sql);
   });
 
-  // 点单页：菜单与估清、按手牌找客人、下单（挂账）、催单
+  // 点单页：菜单与沽清、按手牌找客人、下单（挂账）、催单
   // 8.0.8：前台「加项目」看余量（B03）、退菜看小额上限（B02）、收银与看日结的看桌台点单开没开（A05），都读这一份
   app.get('/api/dining/menu', { preHandler: guardAny('dining.order', 'dining.kitchen', 'frontdesk.operate', 'frontdesk.checkout', 'ledger.export', 'report.executive') }, async () =>
     diningMenu(sql, deps),
@@ -589,7 +589,7 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
     return { ok: true };
   });
 
-  // 厨房屏：出品状态、估清
+  // 厨房屏：出品状态、沽清
   app.get('/api/kitchen', { preHandler: guardAny('dining.kitchen', 'dining.order') }, async () => kitchenBoard(sql, deps));
 
   app.post('/api/kitchen/items/:id/:action', { preHandler: guardAny('dining.kitchen', 'dining.order') }, async (req) => {

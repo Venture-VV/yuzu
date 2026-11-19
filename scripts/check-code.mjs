@@ -2,7 +2,8 @@
 //   1. 没用到的导入、变量、参数（tsc --noUnusedLocals --noUnusedParameters；用不到的参数写成下划线开头）；
 //   2. 事务里没等结果的查询：tx`…`、tx.unsafe(…) 写成一句单独的语句（没有 await / return / 赋值）。postgres.js 3.x
 //      在事务结束以后才发出的语句会落到别的连接上、不在事务里（4.0 的更新日志），这种写法一律不许；
-//   3. 只用到类型的导入写成 import type（import { type A, type B } 改成 import type { A, B }）。
+//   3. 只用到类型的导入写成 import type（import { type A, type B } 改成 import type { A, B }）；
+//   4. 名词统一（8.1.15，docs/CONVENTIONS.md「名词」）：菜卖完写「沽清」，不写「估清」（页面、提示、导出、用例、注释都一样）。
 // 第 1 条顺带就是类型检查（CI 里不再单独跑一遍 npm run typecheck）：编译器没跑完——被信号终止（内存不够被系统杀掉）、
 // 退出码不是 0 却一条诊断也没有——算检查没做完，照样不过，不当成「没查出问题」。
 // 小程序线的目录与文件（scripts/check-line-scope.mjs 的 classify 认作小程序线自己的）不查，由小程序线决定什么时候接上。
@@ -110,6 +111,16 @@ export function inlineTypeImports(code, fileName = 'x.ts') {
   return found;
 }
 
+/** 4. 名词统一：一份源码里不该出现的写法，返回 [{ line, text }]；要加别的词在 TERMS 里加一行 */
+const TERMS = [{ wrong: '\u4f30\u6e05', right: '\u6cbd\u6e05' }];
+export function wrongTerms(code) {
+  const found = [];
+  code.split('\n').forEach((text, i) => {
+    for (const t of TERMS) if (text.includes(t.wrong)) found.push({ line: i + 1, text: `「${t.wrong}」应写成「${t.right}」` });
+  });
+  return found;
+}
+
 function sourceFiles(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
@@ -124,6 +135,7 @@ function main() {
 
   const floating = [];
   const typeImports = [];
+  const terms = [];
   for (const dir of ['src', 'tests', 'e2e', 'e2e-canteen', 'scripts']) {
     let files = [];
     try {
@@ -137,16 +149,18 @@ function main() {
       const code = readFileSync(file, 'utf8');
       if (rel.startsWith('src/server/')) for (const f of floatingQueries(rel, code)) floating.push(`${rel}:${f.line}  ${f.text}`);
       for (const f of inlineTypeImports(code, rel)) typeImports.push(`${rel}:${f.line}  ${f.text}`);
+      for (const f of wrongTerms(code)) terms.push(`${rel}:${f.line}  ${f.text}`);
     }
   }
   if (floating.length) problems.push(`事务里没等结果的查询 ${floating.length} 处（前面加 await，或 return / 交给 Promise.all）：\n  ${floating.join('\n  ')}`);
   if (typeImports.length) problems.push(`只用到类型的导入 ${typeImports.length} 处（改成 import type { … }）：\n  ${typeImports.join('\n  ')}`);
+  if (terms.length) problems.push(`名词没统一 ${terms.length} 处（docs/CONVENTIONS.md「名词」）：\n  ${terms.join('\n  ')}`);
 
   if (problems.length) {
     console.error(`✗ 代码整洁检查没过：\n\n${problems.join('\n\n')}`);
     process.exit(1);
   }
-  console.log('✓ 代码整洁检查通过：没有没用到的导入与变量、没有不等结果的查询、类型导入写法统一（小程序线的目录不查）');
+  console.log('✓ 代码整洁检查通过：没有没用到的导入与变量、没有不等结果的查询、类型导入写法统一、名词统一（小程序线的目录不查）');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

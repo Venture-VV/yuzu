@@ -24,7 +24,7 @@ export const OUTLET_TONE: Record<DiningOutlet, { tile: string; icon: string; bad
 };
 
 /**
- * 点单页的二级菜单（CF4）：餐厅、水吧、果吧三个大入口，各写着小分类与有几道菜（估清的另标）；
+ * 点单页的二级菜单（CF4）：餐厅、水吧、果吧三个大入口，各写着小分类与有几道菜（沽清的另标）；
  * 菜单区一进来、每次下单成功以后都先弹出这里，选了进对应的点单页
  */
 export function OutletEntry({ dishes, onPick, disabled }: { dishes: MenuDish[]; onPick: (o: DiningOutlet) => void; disabled?: boolean }) {
@@ -56,7 +56,7 @@ export function OutletEntry({ dishes, onPick, disabled }: { dishes: MenuDish[]; 
               </span>
               <span className="text-right text-[12.5px] font-semibold text-ink-2 sm:mt-auto sm:pt-2 sm:text-left">
                 <span className="num">{list.length}</span> 道菜
-                {out > 0 && <span className="block text-clay sm:ml-1.5 sm:inline">估清 {out}</span>}
+                {out > 0 && <span className="block text-clay sm:ml-1.5 sm:inline">沽清 {out}</span>}
               </span>
             </button>
           );

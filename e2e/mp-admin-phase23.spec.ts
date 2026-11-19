@@ -914,10 +914,10 @@ test.describe('后台「微信小程序」第二、三期的几页（小程序�
       await expect(page.getByText('一道菜最多 99 份、最多 20 道菜')).toBeVisible();
       await expect(page.getByText('餐饮功能还关着')).toHaveCount(0);
       await expect(page.getByText('门店系统还没配签名密钥')).toHaveCount(0);
-      // 一组都勾上、再单个勾、单个去掉；估清的菜写「今天估清」
+      // 一组都勾上、再单个勾、单个去掉；沽清的菜写「今天沽清」
       await groupToggle('E2E 热菜').click();
       await expect(dish('E2E 宫保鸡丁')).toBeChecked();
-      await expect(dish('E2E 水煮鱼 ¥68.00 · 今天估清')).toBeChecked();
+      await expect(dish('E2E 水煮鱼 ¥68.00 · 今天沽清')).toBeChecked();
       await expect(groupToggle('E2E 热菜')).toHaveText('这一组都不勾');
       await expect(page.getByText('勾了 2 道')).toBeVisible();
       await tick(dish('E2E 柠檬茶'), true);
