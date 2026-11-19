@@ -32,6 +32,15 @@ export interface Technician {
   /** 停牌（8.0.8）：停牌的时刻与原因，没停牌为 null。停牌的不能上牌、不能派钟，一直停到复牌 */
   suspendedAt: string | null;
   suspendedReason: string | null;
+  /** 花名（8.1.15）：没有为空，叫号、钟房里有花名的显示花名 */
+  nickname: string;
+  /** 技师类型（8.1.15：足浴 / 按摩 / SPA……清单在技师管理里维护）；没设为空 */
+  kind: string;
+  /** 入职、离职日期（8.1.15，YYYY-MM-DD）；没填为 null */
+  hiredOn: string | null;
+  leftOn: string | null;
+  /** 组别（8.1.15，一位技师一个组）；没分组为 null */
+  groupId: number | null;
 }
 
 export interface TechnicianRules {

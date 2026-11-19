@@ -8,6 +8,7 @@
 
 import { PRICE_TIERS, type PriceTier } from './catalog';
 import type { CallType, Technician, TechnicianRules } from './technicians';
+import type { AnnouncerClaim, ClockCall, LeaveType, TechShift } from './technician-admin';
 
 export interface ClockroomRules {
   /** 轮钟什么时候排到队尾：派钟时（默认）/ 下钟后 */
@@ -109,6 +110,14 @@ export interface BoardTechnician extends Technician {
   waiting: number;
   todayClocks: number;
   rejectStreak: number;
+  /** 组别的名字（8.1.15）；没分组为 null */
+  groupName: string | null;
+  /** 今天排的班（8.1.15，技师管理的排班表）；没排、排休为 null */
+  shiftToday: Pick<TechShift, 'id' | 'name' | 'startMinute' | 'endMinute'> | null;
+  /** 今天排休：「全部上牌」跳过，要上可以单独点 */
+  restToday: boolean;
+  /** 今天在已批准的休假里（8.1.15）：state 一定是 leave，上牌、取消休假都要先在技师管理里销假 */
+  approvedLeave: { id: number; fromDate: string; toDate: string; leaveType: LeaveType } | null;
 }
 
 export interface BoardSession {
@@ -166,6 +175,12 @@ export interface ClockroomBoard {
   /** 待派钟（8.0.8）：按点单先后 */
   pending: PendingLine[];
   today: { clocks: number; designated: number; rotation: number };
+  /** 技师类型的清单与需要技师的项目分类（8.1.15，钟房按它们筛选） */
+  kinds: string[];
+  categories: string[];
+  /** 最近的叫号（8.1.15，旧的在前）与主播报终端 */
+  calls: ClockCall[];
+  announcer: AnnouncerClaim | null;
 }
 
 /** 钟房按状态筛选技师（8.0.8，B01） */
@@ -192,6 +207,9 @@ export function techFilterOf(t: { suspendedAt: string | null; busy: { status: 'w
   if (t.state === 'leave') return 'leave';
   return 'off';
 }
+
+/** 钟房「按状态排」的先后（8.1.15）：空闲、上钟、已派待上（排位）、休息、休假、停牌、未上牌 */
+export const TECH_STATUS_ORDER: readonly Exclude<TechFilter, 'all'>[] = ['idle', 'serving', 'waiting', 'rest', 'leave', 'suspended', 'off'];
 
 export interface ClockEvent {
   id: number;

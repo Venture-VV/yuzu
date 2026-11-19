@@ -74,6 +74,12 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_status_changed: { label: '停用 / 启用会员', tone: 'ember' },
   member_phone_changed: { label: '改会员手机号', tone: 'ember' },
   member_merged: { label: '合并会员', tone: 'ember' },
+  // 8.1.15 技师管理
+  technician_group: { label: '技师组别', tone: 'neutral' },
+  technician_shift: { label: '技师班次', tone: 'neutral' },
+  technician_schedule: { label: '技师排班', tone: 'neutral' },
+  technician_leave: { label: '技师休假', tone: 'ember' },
+  clock_announcer: { label: '叫号播报终端', tone: 'neutral' },
 };
 
 function describe(detail: Record<string, unknown>): string {
