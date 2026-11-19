@@ -17,3 +17,5 @@ coverage/
 recon/
 # 授权的品牌字体（8.1.5）：商业字体文件不进 Git、不进镜像，放在服务器上挂进容器
 brand-fonts/
+# 开发 AI 的并行工作区（git worktree，每个都是一份完整的检出）：不进 Git，检查脚本（check:docs 按 git 认得的文件扫）也不该扫到
+.claude/worktrees/

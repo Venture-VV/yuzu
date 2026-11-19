@@ -3,7 +3,7 @@
 // 钱只在账单明细里：桌台账单与手牌账单是同一张 bills 表（kind = 'table'），明细同样只追加、作废留痕；
 // 结账走与手牌结账同一套收款处理（frontdesk/checkout.ts 的 recordCheckoutPayments），结账单、交班、日结、对账包同一口径；
 // 反结账在 frontdesk/checkout.ts 的 voidCheckout 里一起处理（恢复开台与账单）。
-// 加锁顺序：经办人的班次（结账，共享锁）→ 桌台（开台、转台，id 升序）→ 开台（id 升序）→ 账单 → 明细 → 估清 → 出品单 → 会员。
+// 加锁顺序：经办人的班次（结账，共享锁）→ 桌台（开台、转台，id 升序）→ 开台（id 升序）→ 账单 → 明细 → 沽清 → 出品单 → 会员。
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -377,7 +377,7 @@ export const TablePostInput = z.object({
   expectedTotal: positiveCents('本次合计'),
 });
 
-/** 给一桌点菜（挂到这桌的账单上）：只能点进厨房的菜；同一个事务里扣估清、建出品单 */
+/** 给一桌点菜（挂到这桌的账单上）：只能点进厨房的菜；同一个事务里扣沽清、建出品单 */
 export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<TableSessionDetail> {
   const input = parse(TablePostInput, raw);
   const { clientKey: key, ...payload } = input;
@@ -410,7 +410,7 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
       throw conflict('PRICE_CHANGED', '菜价刚刚有调整，本次合计与确认时不同，请核对后重新确认', { total });
     }
     const date = await businessDate(tx, deps, at);
-    // 估清（明细之前）：今天还剩的份数不够整笔拒绝
+    // 沽清（明细之前）：今天还剩的份数不够整笔拒绝
     const limited = await takeDishLimits(
       tx,
       lines.map((l) => ({ itemId: l.itemId!, name: l.name, quantity: l.quantity })),
@@ -448,7 +448,7 @@ const VoidInput = z.object({
   grantId: z.uuid('授权编号不正确').optional(),
 });
 
-/** 退菜：作废桌台账单的一条明细（规则与前台作废相同）；出品单改为已退，扣过估清的按原份数加回 */
+/** 退菜：作废桌台账单的一条明细（规则与前台作废相同）；出品单改为已退，扣过沽清的按原份数加回 */
 export async function voidTableLine(deps: Deps, lineId: number, raw: unknown, ctx: OpContext): Promise<TableSessionDetail> {
   const input = parse(VoidInput, raw);
   const [peek] = await deps.sql<{ sessionId: number }[]>`

@@ -2,7 +2,7 @@
 // 编译器没跑完（被信号终止、没有诊断却失败）不当成通过（Codex 验收 v8.1.12 报的那一条）
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error 脚本是 .mjs，没有类型声明
-import { compilerIncomplete, compilerProblems, floatingQueries, inlineTypeImports, runNode, unusedFindings } from '../scripts/check-code.mjs';
+import { compilerIncomplete, compilerProblems, floatingQueries, inlineTypeImports, runNode, unusedFindings, wrongTerms } from '../scripts/check-code.mjs';
 
 describe('事务里没等结果的查询', () => {
   it('单独一句 tx`…`、tx.unsafe(…)、void tx`…` 都认出来；await、return、赋值、交给 Promise.all 的放过', () => {
@@ -37,6 +37,17 @@ describe('只用到类型的导入', () => {
       "} from './g';",
     ].join('\n');
     expect((inlineTypeImports(code) as { line: number }[]).map((f) => f.line)).toEqual([1, 4, 5]);
+  });
+});
+
+describe('名词统一（8.1.15）', () => {
+  it('菜卖完写「沽清」：旧写法逐行报出来，新写法不报', () => {
+    // 旧写法用转义拼出来，这份用例自己不被查到
+    const old = '\u4f30\u6e05';
+    const code = [`const a = '已${old}';`, "const b = '已沽清';", `// ${old}只管今天`].join('\n');
+    const found = wrongTerms(code) as { line: number; text: string }[];
+    expect(found.map((f) => f.line)).toEqual([1, 3]);
+    expect(found[0]!.text).toContain('沽清');
   });
 });
 

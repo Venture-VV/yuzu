@@ -80,7 +80,7 @@ export type AuditAction =
   | 'hand_tag_updated'
   | 'technician_saved'
   | 'items_technician_updated'
-  // 餐饮（S5 第一步）：出品档口、菜品的出品档口、估清
+  // 餐饮（S5 第一步）：出品档口、菜品的出品档口、沽清
   | 'kitchen_station_saved'
   | 'items_station_updated'
   // 8.1.7：菜品的点单分类（餐厅 / 水吧 / 果吧）

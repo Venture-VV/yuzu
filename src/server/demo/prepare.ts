@@ -199,7 +199,7 @@ const SHOWCASE_FIELDS: [keyof ShowcaseState, string][] = [
   ['sessions', '钟单'],
   ['technicians', '技师在岗'],
   ['kitchen', '厨房出品'],
-  ['soldOut', '估清'],
+  ['soldOut', '沽清'],
   ['table', '桌台'],
   ['floorplan', '在用底图与样例房间轮廓'],
   ['locations', '平面图上的人员位置'],
@@ -258,7 +258,7 @@ export async function demoCheck(sql: Sql, config: AppConfig): Promise<DemoCheckR
   const { businessDayStartHour } = await loadSettings(sql);
   const today = businessDateOf(new Date(), config.timezone, businessDayStartHour);
   const sameDay = marker.value.businessDate === today;
-  if (!sameDay) notes.push(`场景块是 ${marker.value.businessDate} 营业日准备的：技师在岗、估清按天清零，今天不核对这两项（要当天的新场景用 demo-reset 重建）`);
+  if (!sameDay) notes.push(`场景块是 ${marker.value.businessDate} 营业日准备的：技师在岗、沽清按天清零，今天不核对这两项（要当天的新场景用 demo-reset 重建）`);
   const want = expected as unknown as ShowcaseState;
   for (const [field, label] of SHOWCASE_FIELDS) {
     if (!sameDay && (SHOWCASE_DAILY_FIELDS as readonly string[]).includes(field)) continue;

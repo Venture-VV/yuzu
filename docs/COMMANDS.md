@@ -116,7 +116,7 @@ E2E_BASE_URL=… npx playwright test e2e/desks.spec.ts --project=门店电脑   
 E2E_BASE_URL=… npx playwright test e2e/exit.spec.ts --project=门店电脑   # 8.1.15 平板电子菜单与工作台的退出（docs/EMENU.md 第 18 节）：左下角的退出键、退出界面、按住才离开；工作台带字的「退出」、草稿没存上时先存
 E2E_BASE_URL=… npx playwright test e2e/emenu-818.spec.ts --project=门店电脑   # 8.1.8 品牌部的五条（docs/HANDOFF_V818.md）：小米平板大小上用预览码打开「主文字改过、照片加了圆角」的版面，逐页核对顶栏字完整、封面标题小圆圈、照片直角、字色 #4b392a、选中没有光晕；工作台主文字锁定、照片没有圆角（只读，预览码不发布）
 E2E_BASE_URL=… npx playwright test e2e/emenu-8114.spec.ts --project=门店电脑   # 8.1.14 品牌部《工作台需求汇总 1.2》的三条（docs/HANDOFF_V8114.md）：小米平板大小上 11 种版式逐页核对顶栏分类与菜品的英文是衬线展示体（Playfair Display）、加号离菜名 2 / 3.5 个加号宽（放大一档、原样两种大小）、封面标题右下角的手绘圆环（中文位置不变、英文不压字）；合成菜单，只读
-E2E_BASE_URL=… npx playwright test e2e/dining-817.spec.ts --project=门店电脑   # 8.1.7 餐饮分区与点菜单（docs/HANDOFF_V817.md）：后台选点单分类与分区 → 桌台分区详情 → 先选餐厅 / 水吧 / 果吧再点 → 点菜单五种状态 → 估清、台账、退菜记录按果吧筛；手牌客人的点菜单（菜品、档口、桌台以 E2E 817 开头，留着下次沿用；结束时退菜撤台、关闭餐饮）
+E2E_BASE_URL=… npx playwright test e2e/dining-817.spec.ts --project=门店电脑   # 8.1.7 餐饮分区与点菜单（docs/HANDOFF_V817.md）：后台选点单分类与分区 → 桌台分区详情 → 先选餐厅 / 水吧 / 果吧再点 → 点菜单五种状态 → 沽清、台账、退菜记录按果吧筛；手牌客人的点菜单（菜品、档口、桌台以 E2E 817 开头，留着下次沿用；结束时退菜撤台、关闭餐饮）
 E2E_BASE_URL=… npx playwright test e2e/target-devices.spec.ts --project=门店电脑   # 三台目标设备（docs/DEVICES.md）：另开 1920×1080、1280×720、360×800、1355×903 的窗口核对主要页面不横向滚动、按钮在屏幕里（菜单里的菜、桌台与点菜单用合成数据，只读；临时打开餐饮，结束时恢复）
 E2E_BASE_URL=… E2E_CANTEEN_URL=… npx playwright test -c playwright.canteen.config.ts   # 员工食堂的手机端流程（应用要开着员工端口、带 CANTEEN_PUSH_LOCAL_ENDPOINTS=true，库里有 seed-demo 的店主）；8.1.2 起含 studio.spec：工作台发布的员工食堂版面在员工手机上看得到、用完发回默认版面
 E2E_BASE_URL=… npx playwright test e2e/concierge.spec.ts --project=门店电脑   # 管家部（8.0.12）：建档与余额、管家账号落地、拍一张合成小票在浏览器本机识别（要在构建产物上跑，开发模式测不出识别资源缺不缺）

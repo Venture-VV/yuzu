@@ -522,7 +522,7 @@ export interface CartRow extends CartLine {
   /** 规格名（大份 / Large）；只有一个规格的为空 */
   label: string;
   price: number;
-  /** 现在不能点的原因（估清了、下架了、过了供应时段）；能点为 null */
+  /** 现在不能点的原因（沽清了、下架了、过了供应时段）；能点为 null */
   problem: string | null;
 }
 
@@ -558,7 +558,7 @@ export function OrderDrawer({
   tableName: string;
   remarkText: string;
   locked: boolean;
-  /** 现在不能下单的原因（没点菜、有菜估清了……） */
+  /** 现在不能下单的原因（没点菜、有菜沽清了……） */
   problem: string | null;
   /** 下单要服务员输点单密码（后台开着「点单密码」）：按钮上写「请呼叫服务员」 */
   callStaff: boolean;

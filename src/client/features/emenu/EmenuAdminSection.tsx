@@ -6,7 +6,7 @@
 // 8.0.13（docs/EMENU.md 第 11 节）：菜品多了英文各项（外宾在平板上切到 EN 时显示）、「英文对照表」导出 / 导入、
 // 缺英文的标记；设置里多了中英切换、各选项的英文、动效；版面预览可以切中文 / EN。
 //
-// 价格、估清、上下架不在这里维护：价格读价目表，估清在厨房出品屏，价目项目停用、没挂出品档口的菜平板上自动标「已下架」。
+// 价格、沽清、上下架不在这里维护：价格读价目表，沽清在厨房出品屏，价目项目停用、没挂出品档口的菜平板上自动标「已下架」。
 // 各页整批保存、带版本号：别人先改过会被拒绝（EMENU_CHANGED），重新载入再排。
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -99,7 +99,7 @@ export function EmenuAdminSection() {
       section="emenu"
       wide
       tabs={tabs}
-      description="餐桌平板上的电子菜单：分类与供应时段、每一页的版面与菜品、菜品的图片与介绍、忌口与起菜方式。价格读价目表，估清、上下架跟着厨房与价目表走。"
+      description="餐桌平板上的电子菜单：分类与供应时段、每一页的版面与菜品、菜品的图片与介绍、忌口与起菜方式。价格读价目表，沽清、上下架跟着厨房与价目表走。"
       actions={
         <a
           href="/emenu"

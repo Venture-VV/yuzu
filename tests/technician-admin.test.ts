@@ -25,6 +25,9 @@ const tech: Record<string, number> = {};
 const ZONES_CSV = ['楼层,区域名(中文),区域名(英文),备注', 'L3,合成足浴区,Sample Foot,合成样例'].join('\r\n');
 const SPACES_CSV = ['楼层,区域字母,编码,业态,容量(人),建议显示名,面积,编码图原始标注,备注', 'L3,F,F312,足浴,4,合成足浴间,,合成 F312,'].join('\r\n');
 
+/** 被拒绝时响应里是 error（用例里两样都会读） */
+type Fail = { error: { code: string; message: string } };
+
 const view = async (cookie = ctx.owner) => (await api(ctx.app, cookie, 'GET', '/api/technician-admin')).body as TechnicianAdminView;
 const board = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/clockroom')).body as ClockroomBoard;
 const boardTech = async (no: string) => (await board()).technicians.find((t) => t.techNo === no)!;
@@ -45,9 +48,10 @@ const enter = async () => {
 const dispatch = (body: Record<string, unknown>) =>
   api(ctx.app, ctx.clerk, 'POST', '/api/clockroom/dispatch', { clientKey: randomUUID(), quantity: 1, startNow: true, itemId: foot, expectedTotal: 12800, callType: 'rotation', ...body });
 const apply = (body: Record<string, unknown>, cookie = ctx.clerk, clientKey = randomUUID()) =>
-  api<TechLeave>(ctx.app, cookie, 'POST', '/api/technician-admin/leaves', { clientKey, leaveType: 'personal', reason: '家里有事', ...body });
-const decide = (id: number, action: 'approve' | 'reject', note = '', cookie = ctx.owner) => api<TechLeave>(ctx.app, cookie, 'POST', `/api/technician-admin/leaves/${id}/decide`, { action, note });
-const cancel = (id: number, reason = '', cookie = ctx.owner) => api<TechLeave>(ctx.app, cookie, 'POST', `/api/technician-admin/leaves/${id}/cancel`, { reason });
+  api<TechLeave & Fail>(ctx.app, cookie, 'POST', '/api/technician-admin/leaves', { clientKey, leaveType: 'personal', reason: '家里有事', ...body });
+const decide = (id: number, action: 'approve' | 'reject', note = '', cookie = ctx.owner) =>
+  api<TechLeave & Fail>(ctx.app, cookie, 'POST', `/api/technician-admin/leaves/${id}/decide`, { action, note });
+const cancel = (id: number, reason = '', cookie = ctx.owner) => api<TechLeave & Fail>(ctx.app, cookie, 'POST', `/api/technician-admin/leaves/${id}/cancel`, { reason });
 const audits = async (action: string) =>
   ctx.sql<{ detail: { summary?: string; action?: string } }[]>`SELECT detail FROM audit_logs WHERE action = ${action} ORDER BY id`.then((rows) => rows.map((r) => r.detail));
 
@@ -182,8 +186,8 @@ describe('班次、排班表、临时调班', () => {
   let early = 0;
   let late = 0;
   const schedule = async (from = today, days = 7) => (await api(ctx.app, ctx.clerk, 'GET', `/api/technician-admin/schedule?from=${from}&days=${days}`)).body as ScheduleView;
-  const plan = (cells: Record<string, unknown>[], cookie = ctx.owner) => api<ScheduleView>(ctx.app, cookie, 'PUT', `/api/technician-admin/schedule?from=${today}&days=7`, { cells });
-  const adjust = (body: Record<string, unknown>) => api<ScheduleView>(ctx.app, ctx.owner, 'POST', `/api/technician-admin/schedule/adjust?from=${today}&days=7`, body);
+  const plan = (cells: Record<string, unknown>[], cookie = ctx.owner) => api<ScheduleView & Fail>(ctx.app, cookie, 'PUT', `/api/technician-admin/schedule?from=${today}&days=7`, { cells });
+  const adjust = (body: Record<string, unknown>) => api<ScheduleView & Fail>(ctx.app, ctx.owner, 'POST', `/api/technician-admin/schedule/adjust?from=${today}&days=7`, body);
   const cellOf = (v: ScheduleView, no: string, date: string) => v.cells.find((c) => c.technicianId === tech[no] && c.date === date) ?? null;
 
   it('班次：名字、起止时间；重名、起止相同的拒绝', async () => {

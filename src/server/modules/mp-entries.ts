@@ -4,10 +4,10 @@
 //     好友还不是会员的当场建档，渠道「老带新」（店里设了这一项、启用中时）；
 //   · orderFoodFromMp（3c 扫码点餐）：与点单页下单同一条路径（frontdesk/bills.ts 的 postChargesTx），只能点进厨房的菜，
 //     挂在这位会员在店手牌的账单上；一单的份数、金额有上限（N1）；扫了桌上的码的，出品单写送到哪张桌；
-//   · 只读：diningMenu（dining.ts，菜品、价格、今天的估清）、mpDiningTables（桌码用）、mpOpenBill（「我的账单」）。
+//   · 只读：diningMenu（dining.ts，菜品、价格、今天的沽清）、mpDiningTables（桌码用）、mpOpenBill（「我的账单」）。
 // 同一个 claimKey 只生效一次（entry_claims，只追加），再调用返回第一次的结果；内容不同的回 MP_CLAIM_CONFLICT。
 // 经办人：系统账号「小程序」。
-// 加锁顺序：claimKey 的咨询锁 → 之后与前台同一套（邀请：两位会员一行，id 升序；点餐：来访 → 账单 → 估清 → 出品单）。
+// 加锁顺序：claimKey 的咨询锁 → 之后与前台同一套（邀请：两位会员一行，id 升序；点餐：来访 → 账单 → 沽清 → 出品单）。
 
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -191,9 +191,9 @@ async function foodOrderOf(db: Db, visitId: number, postKey: string): Promise<Om
 }
 
 /**
- * 小程序扫码点餐（3c）：挂在这位会员在店手牌的账单上、进厨房出品单，与服务员在点单页下单一样（扣估清、出品单号、实时位置）。
+ * 小程序扫码点餐（3c）：挂在这位会员在店手牌的账单上、进厨房出品单，与服务员在点单页下单一样（扣沽清、出品单号、实时位置）。
  * 拒绝码：NO_OPEN_VISIT（没有在店手牌）、DINING_DISABLED（餐饮功能没开）、DISH_NOT_KITCHEN（不是进厨房的菜）、
- * DISH_SOLD_OUT（估清不够）、ITEM_GENDER、PRICE_CHANGED（带了预期合计、对不上）、MP_ORDER_LIMIT（超过一单的上限）、
+ * DISH_SOLD_OUT（沽清不够）、ITEM_GENDER、PRICE_CHANGED（带了预期合计、对不上）、MP_ORDER_LIMIT（超过一单的上限）、
  * TABLE_NOT_FOUND（桌号对不上启用的桌台）、VISIT_CHANGED。
  * 结账照旧在前台；顾客自己不能退菜（退菜请服务员，照现有的作废明细）。
  */

@@ -95,7 +95,7 @@ function RulesCard() {
       setFreeText(null);
       await qc.invalidateQueries({ queryKey: qk.session });
       await qc.invalidateQueries({ queryKey: ['dining'] });
-      toast({ tone: 'success', title: '餐饮规则已保存', body: next.rules.enabled ? '主导航有「餐饮」：点单、厨房出品与估清。' : '餐饮功能已关闭，前台挂账与升级前一样。' });
+      toast({ tone: 'success', title: '餐饮规则已保存', body: next.rules.enabled ? '主导航有「餐饮」：点单、厨房出品与沽清。' : '餐饮功能已关闭，前台挂账与升级前一样。' });
     } catch (e) {
       setError(errorMessage(e));
     } finally {
