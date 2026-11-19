@@ -63,6 +63,9 @@ export async function setup(options: { keepDefaultSwitches?: boolean } = {}): Pr
   // 8.0.4 的充值当日储值消费比例默认 70%（HY01）：之前的用例常在同一天先充值再消费，这里设成不限，
   // 比例的行为由 tests/membership-v804.test.ts 单独验证（那里按需改回 70）
   await sql`INSERT INTO settings (key, value) VALUES ('recharge_spend_pct', 'null'::jsonb)`;
+  // 8.1.15 的实体卡押金默认 20 元：之前的用例发卡不收押金（也不开班），这里设成不收，
+  // 押金的行为由 tests/member-card-types.test.ts 单独验证（那里改回 20 元）
+  await sql`INSERT INTO settings (key, value) VALUES ('member_form_rules', ${sql.json({ cardDeposit: 0 })})`;
   // 8.0.20 起功能开关都默认开（店主 2026-11-14，迁移 126）；之前的用例按「默认关、用到时自己打开」的口径编写，这里都关上，
   // 默认开与迁移 126 的行为由 tests/switches-default.test.ts 单独验证（那里不经这一段）
   if (!options.keepDefaultSwitches) await legacySwitchesOff(sql);
@@ -340,6 +343,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '184_gifts.sql',
   '185_stock_check.sql',
   '186_urgent_contract.sql',
+  '192_member_cards_v8115.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

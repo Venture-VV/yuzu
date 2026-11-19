@@ -7,6 +7,7 @@ import type { Db } from '../../db';
 import { usageCheck } from '../usages';
 import { bookingChecks } from '../bookings';
 import { countCardChecks } from '../count-cards';
+import { cardDepositChecks } from '../member-card-deposits';
 import { platformChecks } from '../platform-redemptions';
 import { conciergeCheck } from '../concierge/checks';
 import { emenuCheck } from '../emenu/checks';
@@ -335,6 +336,8 @@ export async function frontdeskChecks(db: Db): Promise<FrontdeskCheck[]> {
     // ㉓ 平板点餐单（8.0.10）
     await emenuCheck(db),
     await conciergeCheck(db),
+    // ㉔ 会员卡押金（8.1.15）
+    ...(await cardDepositChecks(db)),
   ];
 }
 

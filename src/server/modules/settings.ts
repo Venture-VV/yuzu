@@ -4,6 +4,7 @@ import { HHMM } from '@shared/business-date';
 import { CASH_DRAWER_KEY, DEFAULT_CASH_DRAWERS, MAX_CASH_DRAWERS, SHIFT_MODES, type CashDrawer } from '@shared/checkout';
 import { DEDUCTION_RULES } from '@shared/deduction';
 import { DEFAULT_MEMBER_CHANNELS, MAX_MEMBER_CHANNELS, MEMBER_CHANNEL_KEY, type MemberChannel } from '@shared/members';
+import { DEFAULT_MEMBER_FORM_RULES, MAX_CARD_DEPOSIT, MEMBER_FORM_FIELDS, normalizeMemberFormRules } from '@shared/member-form';
 import { DEFAULT_TUNABLES, PRINT_MODES, TUNABLE_LIMITS } from '@shared/tunables';
 import { MAX_CONSUMPTION_PURPOSES } from '@shared/supply';
 import { DEFAULT_DICTIONARIES, DICTIONARY_KEYS, MAX_DICTIONARY_ITEM_LENGTH, MAX_DICTIONARY_ITEMS, mergeDictionaries } from '@shared/custom-fields';
@@ -69,6 +70,8 @@ const KEY_MAP = {
   wecom_weekly_push: 'wecomWeeklyPush',
   // 8.0.21 数据字典（快捷原因，docs/FINANCE_V8021.md 第 1 节）
   dictionaries: 'dictionaries',
+  // 8.1.15 建档表单的字段显隐、必填与实体卡押金（按门店，docs/MEMBERS_V8115.md）
+  member_form_rules: 'memberForm',
 } as const satisfies Record<string, keyof StoreSettings>;
 
 /** 设置项在库里的键（规则总表按它找最近修改的时间与人） */
@@ -97,6 +100,8 @@ const DEFAULTS: StoreSettings = {
   countCardSales: false,
   // 8.0.7 A1：与原来写死的一样（打印方式按店主 2026-11-10：默认本机打印）
   ...DEFAULT_TUNABLES,
+  // 8.1.15：建档表单的选填项都显示、都不必填，实体卡押金 20 元（待确认）
+  memberForm: DEFAULT_MEMBER_FORM_RULES,
 };
 
 export const DEFAULT_SETTINGS: Readonly<StoreSettings> = DEFAULTS;
@@ -106,13 +111,13 @@ export async function loadSettings(db: Db): Promise<StoreSettings> {
   const settings: Record<string, unknown> = { ...DEFAULTS };
   for (const row of rows) {
     const prop = KEY_MAP[row.key as keyof typeof KEY_MAP];
-    if (prop) settings[prop] = prop === 'dictionaries' ? mergeDictionaries(row.value) : row.value;
+    if (prop) settings[prop] = prop === 'dictionaries' ? mergeDictionaries(row.value) : prop === 'memberForm' ? normalizeMemberFormRules(row.value) : row.value;
   }
   // 第二家店（8.0.22，docs/MULTISTORE_V8022.md 第 4 节）：按店的那几项用它单独设的，门店名取门店档案
   if (currentStoreId() !== DEFAULT_STORE_ID) {
     for (const [key, value] of await storeOverrides(db)) {
       const prop = KEY_MAP[key as keyof typeof KEY_MAP];
-      if (prop) settings[prop] = value;
+      if (prop) settings[prop] = prop === 'memberForm' ? normalizeMemberFormRules(value) : value;
     }
     const [store] = await db<{ name: string }[]>`SELECT name FROM stores WHERE id = ${currentStoreId()}`;
     if (store) settings.storeName = store.name;
@@ -185,6 +190,19 @@ const SettingsInput = z
         .max(MAX_DICTIONARY_ITEMS, `每份最多 ${MAX_DICTIONARY_ITEMS} 条`)
         .refine((l) => new Set(l).size === l.length, '原因重复了'),
     ),
+    // 建档表单与实体卡押金（8.1.15）：整份提交；不显示的字段不会是必填
+    memberForm: z
+      .object({
+        cardDeposit: z.number('实体卡押金要填数字').int('实体卡押金要精确到分').min(0, '实体卡押金不能为负').max(MAX_CARD_DEPOSIT, `实体卡押金最多 ${MAX_CARD_DEPOSIT / 100} 元`),
+        fields: z.object(
+          Object.fromEntries(MEMBER_FORM_FIELDS.map((k) => [k, z.object({ show: z.boolean('请选择显示不显示'), required: z.boolean('请选择必填不必填') })])) as Record<
+            (typeof MEMBER_FORM_FIELDS)[number],
+            z.ZodObject<{ show: z.ZodBoolean; required: z.ZodBoolean }>
+          >,
+          '建档表单的字段设置不完整，请刷新页面后重试',
+        ),
+      })
+      .transform(normalizeMemberFormRules),
     cashDrawers: z
       .array(
         z.object({

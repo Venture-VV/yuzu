@@ -126,7 +126,7 @@ async function nativeRows(db: Db, timezone: string, at: Date, onlyIds: number[] 
     SELECT member_id,sum(remaining) AS expired_bonus FROM bonus_lots
     WHERE remaining>0 AND expires_at IS NOT NULL AND expires_at<=${asOf}::timestamptz
     GROUP BY member_id
-  ) SELECT m.id,m.member_no,m.name,m.phone,m.status,m.created_at,
+  ) SELECT m.id,m.member_no,m.name,coalesce(m.phone,'') AS phone,m.status,m.created_at,
       to_char(m.created_at AT TIME ZONE ${timezone},'YYYY-MM') AS created_month,m.principal_balance,m.bonus_balance,
       m.grade,m.tier,m.cycle_start,m.cycle_end,m.grace_until,f.family_ids,
       coalesce(p.profiles,'[]'::jsonb) AS profiles,v.last_visit_at,

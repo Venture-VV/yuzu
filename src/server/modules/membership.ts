@@ -875,14 +875,49 @@ export async function adjustMemberGrade(deps: Deps, memberId: number, raw: unkno
   return memberGradeInfo(deps.sql, memberId, await today(deps.sql, deps.config.timezone));
 }
 
-const LookupQuery = z.object({ q: z.string('请输入手机号或会员号').trim().min(1, '请输入手机号或会员号').max(32, '最多 32 个字') });
+/** 建档时手动指定的档阶（8.1.15）：与手动调整同一套取值（只有 L0 没有阶位），要写原因；校验在建档接口（members.ts） */
+export interface InitialGrade {
+  grade: number;
+  tier: number | null;
+  reason: string;
+}
+
+/**
+ * 建档时手动指定档阶（8.1.15，docs/MEMBERS_V8115.md 第 4 节）：在建档的事务里、会员一行刚写好以后调用，与「手动调整」走同一条路——
+ * 记一条 manual 的状态变化（等级卡的记录里看得到谁、为什么）、新状态的会籍周期从今天起算、按新档阶发权益。
+ * 操作编号是建档那一次的（记在会员一行上），这里不另记；指定 L0 等于按规则自动，什么都不做。
+ */
+export async function assignInitialGrade(tx: Tx, memberId: number, input: InitialGrade, ctx: OpContext, date: string): Promise<void> {
+  if (input.grade === 0) return;
+  const rules = await loadMembershipRules(tx);
+  const current = (await readGrade(tx, memberId))!;
+  const to: GradeState = { grade: asGrade(input.grade), tier: input.tier as Tier, ...cycleFrom(rules, date), graceUntil: null };
+  await changeState(tx, memberId, 'manual', date, current.state, to, { cycleSpend: 0, staffId: ctx.actor.id, reason: input.reason });
+  await writeAudit(tx, {
+    staffId: ctx.actor.id,
+    action: 'member_grade_adjusted',
+    targetType: 'member',
+    targetId: memberId,
+    detail: {
+      from: gradeLabel(rules, current.state.grade, current.state.tier),
+      to: gradeLabel(rules, to.grade, to.tier),
+      cycle: `${to.cycleStart} 至 ${to.cycleEnd}`,
+      reason: input.reason,
+      atCreate: true,
+    },
+    ip: ctx.ip,
+    businessDate: date,
+  });
+}
+
+const LookupQuery =z.object({ q: z.string('请输入手机号或会员号').trim().min(1, '请输入手机号或会员号').max(32, '最多 32 个字') });
 
 /** 另一家店的只读查询：按完整手机号或会员号查一位会员的档阶与会籍；不含余额与流水；每次查询记审计 */
 export async function lookupMember(deps: Deps, raw: unknown, ctx: OpContext): Promise<{ found: boolean; member: MemberLookupResult | null }> {
   const { q } = parse(LookupQuery, raw);
   const phone = q.replace(/[\s-]/g, '');
   const byPhone = /^1\d{10}$/.test(phone);
-  const [m] = await deps.sql<(GradeRow & { id: number; memberNo: string; name: string; phone: string; status: 'active' | 'frozen' })[]>`
+  const [m] = await deps.sql<(GradeRow & { id: number; memberNo: string; name: string; phone: string | null; status: 'active' | 'frozen' })[]>`
     SELECT id, member_no, name, phone, status, grade, tier, cycle_start, cycle_end, grace_until, grade_version FROM members
     WHERE ${byPhone ? deps.sql`phone = ${phone}` : deps.sql`upper(member_no) = upper(${q})`}`;
   const date = await today(deps.sql, deps.config.timezone, ctx.at);
@@ -1029,7 +1064,7 @@ export function registerMembershipRoutes(app: FastifyInstance, deps: Deps) {
         ...rows.map((r) => [
           r.memberNo,
           r.name,
-          r.phone,
+          r.phone ?? '',
           gradeLabel(rules, r.grade, r.tier),
           r.cycleStart,
           r.cycleEnd,

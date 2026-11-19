@@ -238,7 +238,8 @@ export interface VisitMember {
   id: number;
   memberNo: string;
   name: string;
-  phone: string;
+  /** 没留手机号的（匿名卡，8.1.15）为 null */
+  phone: string | null;
   gender: 'female' | 'male' | null;
   status: 'active' | 'frozen';
   /** 仅供前台查看；S2 挂账不会扣减 */

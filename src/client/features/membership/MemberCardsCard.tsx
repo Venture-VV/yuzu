@@ -21,7 +21,7 @@ import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, 
 import { useTerminalState } from '../devices/terminal';
 
 const cardsKey = (memberId: number) => ['member', memberId, 'cards'] as const;
-const STATUS_TONES = { active: 'moss', lost: 'clay', canceled: 'neutral' } as const;
+const STATUS_TONES = { active: 'moss', lost: 'clay', canceled: 'neutral', returned: 'neutral' } as const;
 
 export function MemberCardsCard({ member }: { member: MemberDetail }) {
   const can = useCan();

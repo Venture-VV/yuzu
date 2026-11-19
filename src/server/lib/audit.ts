@@ -287,7 +287,10 @@ export type AuditAction =
   | 'gift_issue'
   // 8.1.10 急采后补合同；核库转领用（库管核库、部门答复替代，detail 写领用、替代、转采购）
   | 'po_contract_added'
-  | 'request_stock';
+  | 'request_stock'
+  // 8.1.15 会员卡押金（收、退，detail.kind 写是哪一样）、退卡
+  | 'member_card_deposit'
+  | 'member_card_returned';
 
 export interface AuditEntry {
   staffId: number | null;

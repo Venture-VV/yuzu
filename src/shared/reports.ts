@@ -76,7 +76,8 @@ export interface MemberBrief {
   id: number;
   memberNo: string;
   name: string;
-  phoneTail: string;
+  /** 手机号后四位；没留手机号的（匿名卡，8.1.15）为 null */
+  phoneTail: string | null;
   balance: number;
   /** 档阶，例如「L3 观澜 · 享」 */
   levelName: string;

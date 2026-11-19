@@ -254,7 +254,7 @@ export function registerMemberTagRoutes(app: FastifyInstance, deps: Deps) {
       ...rows.map((r) => [
         r.memberNo,
         r.name,
-        r.phone,
+        r.phone ?? '',
         r.gradeLabel,
         r.status === 'active' ? '正常' : '已停用',
         yuanText(r.principalBalance),

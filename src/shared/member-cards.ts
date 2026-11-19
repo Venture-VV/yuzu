@@ -13,9 +13,10 @@ export const looksLikeCardNo = (raw: string): boolean => {
   return MEMBER_CARD_RE.test(s) && !MP_CODE.test(s);
 };
 
-export const MEMBER_CARD_STATUSES = ['active', 'lost', 'canceled'] as const;
+/** returned（8.1.15）：客人把卡退回来、押金退掉；卡号可以再发 */
+export const MEMBER_CARD_STATUSES = ['active', 'lost', 'canceled', 'returned'] as const;
 export type MemberCardStatus = (typeof MEMBER_CARD_STATUSES)[number];
-export const MEMBER_CARD_STATUS_LABELS: Record<MemberCardStatus, string> = { active: '在用', lost: '已挂失', canceled: '已换下' };
+export const MEMBER_CARD_STATUS_LABELS: Record<MemberCardStatus, string> = { active: '在用', lost: '已挂失', canceled: '已换下', returned: '已退卡' };
 
 export interface MemberCard {
   id: number;

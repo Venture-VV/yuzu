@@ -196,7 +196,8 @@ async function execute(tx: Tx, actor: Actor, action: string, p: Record<string, a
       if (existing && (!before || !sameLink)) throw new WorkspaceError(`这位系统会员已有管家服务档案 ${String(existing.code).padStart(6, '0')}，请打开原档案`, 409);
       const [identity] = await tx`SELECT name,phone FROM members WHERE id=${canonical}`;
       name = before && sameLink ? before.data.name : identity!.name;
-      phone = before && sameLink ? before.data.phone : identity!.phone;
+      // 系统会员没留手机号的（匿名卡，8.1.15）按空着算：下面照旧要「手机号和收银卡号至少填一项」
+      phone = before && sameLink ? before.data.phone : (identity!.phone ?? '');
     }
     // 手机号的格式只核对手工填的（没关联系统会员的旧档案）。关联了系统会员的，上面已经换成会员系统里的手机号，
     // 页面交上来的那一个只是显示用的、不采用——没有会员查看权限的管家看到的是打码的（199 **** 8001），

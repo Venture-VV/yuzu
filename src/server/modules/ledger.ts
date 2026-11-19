@@ -109,7 +109,8 @@ export function ledgerCsv(rows: LedgerRow[], timeZone: string): string {
       ENTRY_TYPE_LABELS[r.entryType],
       r.memberNo,
       r.memberName,
-      r.memberPhone,
+      // 没留手机号的（匿名卡，8.1.15）导出里留空
+      r.memberPhone ?? '',
       r.paidAmount == null ? '' : formatAmount(r.paidAmount),
       r.paymentMethod ? PAYMENT_METHOD_LABELS[r.paymentMethod] : '',
       (r.principalDelta < 0 ? '-' : '') + formatAmount(r.principalDelta),
