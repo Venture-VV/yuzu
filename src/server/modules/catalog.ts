@@ -18,6 +18,7 @@ import { badRequest, conflict, notFound } from '../lib/errors';
 import { cents, idParam, parse, positiveCents } from '../lib/validate';
 import { pricesColumn } from './pricing';
 import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
+import { dishIdsAmong, dishPriceState, recordPriceChanges } from './dish-prices';
 
 const PlanInput = z.object({
   name: z.string().trim().min(1, '请填写套餐名称').max(32, '名称最多 32 个字'),
@@ -193,6 +194,15 @@ export async function importPriceList(sql: Sql, raw: PriceListImportData, audit:
     const deactivate = input.deactivateMissing ? items.filter((i) => i.active && !listed.has(i.name)) : [];
 
     if (!input.dryRun) {
+      // 菜品的改价进改价记录（8.1.15 菜品管理，docs/DISHES_V8115.md 第 4 节）：按清单改到菜品价格的，每一档记一条
+      const dishes = await dishIdsAmong(
+        tx,
+        update.map((u) => u.item.id),
+      );
+      for (const { item, row } of update) {
+        if (!dishes.has(item.id)) continue;
+        await recordPriceChanges(tx, { itemId: item.id, itemName: item.name, before: item.prices, after: row.prices, reason: '按价目表导入', source: 'price_list', staffId: audit.staffId });
+      }
       for (const { row, sortOrder } of create) {
         await writeItem(tx, null, {
           name: row.name,
@@ -311,7 +321,10 @@ export function registerCatalogRoutes(app: FastifyInstance, { sql }: Deps) {
     const i = parse(ItemInput, req.body);
     await sql.begin(async (tx) => {
       await tx`SELECT id FROM service_items WHERE id = ${id} FOR UPDATE`;
+      // 菜品的改价进改价记录（8.1.15 菜品管理）：这道是菜品、价格有变化的，每一档记一条
+      const before = await dishPriceState(tx, id);
       await writeItem(tx, id, i);
+      if (before) await recordPriceChanges(tx, { itemId: id, itemName: before.name, before: before.prices, after: i.tiers, reason: '在后台价目里修改', source: 'catalog', staffId: req.actor.id });
       await writeAudit(tx, { staffId: req.actor.id, action: 'item_saved', targetType: 'item', targetId: id, detail: i, ip: req.ip });
     });
     return loadCatalog(sql, true);

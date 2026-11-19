@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { diningSlotOf, receiptLineState, type DiningReceipt, type DiningReceiptLine, type DiningReceiptOrder, type KitchenStatus } from '@shared/dining';
+import type { DishPart } from '@shared/dishes';
 import type { Db } from '../db';
 import type { Deps } from '../lib/context';
 import { notFound } from '../lib/errors';
@@ -47,6 +48,7 @@ interface LineRow {
   stationName: string | null;
   kitchenStatus: KitchenStatus | null;
   note: string | null;
+  parts: DishPart[] | null;
   orderNo: string | null;
 }
 
@@ -73,7 +75,7 @@ export async function diningReceipt(db: Db, q: { session?: number; visit?: numbe
   const rows = await db<LineRow[]>`
     SELECT l.id AS bill_line_id, l.name, l.quantity, l.unit_price, l.amount, l.status, l.posted_at, l.post_key, p.display_name AS posted_by_name,
            si.category, si.dining_outlet, si.dining_group, ks.name AS station_name,
-           k.status AS kitchen_status, k.note, k.order_no
+           k.status AS kitchen_status, k.note, k.parts, k.order_no
     FROM bill_lines l JOIN staff p ON p.id = l.posted_by
     LEFT JOIN service_items si ON si.id = l.item_id LEFT JOIN kitchen_stations ks ON ks.id = si.station_id
     LEFT JOIN kitchen_items k ON k.bill_line_id = l.id
@@ -94,6 +96,7 @@ export async function diningReceipt(db: Db, q: { session?: number; visit?: numbe
       unitPrice: Number(r.unitPrice),
       amount: Number(r.amount),
       note: r.note ?? '',
+      parts: r.parts ?? [],
       kitchenStatus: r.kitchenStatus,
       state: receiptLineState(r.status, r.kitchenStatus, rules.trackServed),
     };

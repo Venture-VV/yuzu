@@ -1318,6 +1318,11 @@ const CHANGE_ACTIONS = [
   'space_import',
   'location_reader_saved',
   'items_zone_updated',
+  // 8.1.15 菜品管理
+  'dish_saved',
+  'dish_active_set',
+  'dish_price_changed',
+  'dishes_imported',
 ];
 
 const SETTING_LABELS: Record<string, string> = {
@@ -1404,6 +1409,15 @@ function describeChange(action: string, detail: Record<string, unknown>): string
       return typeof detail.summary === 'string' ? detail.summary : '保存了刷卡点';
     case 'items_zone_updated':
       return '调整了项目所在区域（实时位置）';
+    // 8.1.15 菜品管理
+    case 'dish_saved':
+      return typeof detail.summary === 'string' ? detail.summary : `保存了菜品${name ? `「${name}」` : ''}`;
+    case 'dish_active_set':
+      return typeof detail.summary === 'string' ? detail.summary : '菜品上架 / 下架';
+    case 'dish_price_changed':
+      return typeof detail.summary === 'string' ? detail.summary : `菜品${name ? `「${name}」` : ''}改价`;
+    case 'dishes_imported':
+      return typeof detail.summary === 'string' ? detail.summary : '导入了菜品';
     default:
       return action;
   }

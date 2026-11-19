@@ -20,6 +20,7 @@ import {
   type PendingDish,
   type TableSessionDetail,
 } from '@shared/dining';
+import { partsText } from '@shared/dishes';
 import { ZONE_LABELS } from '@shared/frontdesk';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -32,6 +33,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Skeleton, Spinner } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp, useFrontdeskPending } from '../frontdesk/pending';
 import { guestKey, menuKey, useDiningMenu, useTableSession, useTablesBoard } from './queries';
+import { DishOptionsDialog, type PickedLine } from './DishOptionsDialog';
 import { DishVoidDialog } from './DishVoid';
 import { ReceiptDialog, type ReceiptTarget } from './ReceiptDialog';
 import { GroupChips, OutletEntry, OutletFilter } from './slots';
@@ -104,6 +106,8 @@ export function OrderTab() {
   /** 点菜单（小票可视化，CF8） */
   const [receipt, setReceipt] = useState<ReceiptTarget | null>(null);
   const [voiding, setVoiding] = useState<{ dish: PendingDish; mode: 'void' | 'modify' } | null>(null);
+  /** 正在选做法、加料的那道菜（8.1.15 菜品管理：有做法或加料的菜点了先弹出来选） */
+  const [picking, setPicking] = useState<MenuDish | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const op = useFrontdeskOp<DiningGuest | TableSessionDetail | true>({
     type: mode === 'table' ? 'table_post' : 'bill_post',
@@ -204,12 +208,27 @@ export function OrderTab() {
 
   const add = (d: MenuDish) => {
     if (d.remaining === 0) return;
+    // 有做法或加料的菜：先选（DishOptionsDialog），选好了再加进已点
+    if (d.methods?.length || d.addons?.length) return setPicking(d);
     setCart((c) => {
       // 同一道菜没写备注的合成一行；写了备注的另起一行（同一桌两份，一份少辣一份正常）
       const i = c.findIndex((l) => l.dishId === d.id && !l.note.trim());
       if (i >= 0) return c.map((l, j) => (j === i ? { ...l, quantity: Math.min(99, l.quantity + 1) } : l));
       return [...c, { key: uuid(), dishId: d.id, quantity: 1, note: '' }];
     });
+    op.clearError();
+  };
+  /** 选好做法、加料的那几行加进已点：带了做法、备注的另起一行，加料各一行（备注「配 某菜」）；什么都没带的照旧合进没备注的那一行 */
+  const addPicked = (picked: PickedLine[]) => {
+    setCart((c) => {
+      let next = c;
+      for (const p of picked) {
+        const i = p.note ? -1 : next.findIndex((l) => l.dishId === p.dishId && !l.note.trim());
+        next = i >= 0 ? next.map((l, j) => (j === i ? { ...l, quantity: Math.min(99, l.quantity + p.quantity) } : l)) : [...next, { key: uuid(), ...p }];
+      }
+      return next;
+    });
+    setPicking(null);
     op.clearError();
   };
   const update = (key: string, patch: Partial<CartLine>) => {
@@ -561,6 +580,12 @@ export function OrderTab() {
                       {l.dish && <Money cents={l.dish.price * l.quantity} className="w-16 justify-end text-[13.5px] font-bold" />}
                     </span>
                   </div>
+                  {/* 套餐（8.1.15）：含的几样写出来，出品单上也会列 */}
+                  {l.dish?.combo && (
+                    <p className="mt-0.5 text-[12px] text-ink-3" data-testid={`dining-line-combo-${i}`}>
+                      套餐含 {partsText(l.dish.combo)}
+                    </p>
+                  )}
                   <Input
                     value={l.note}
                     onChange={(e) => update(l.key, { note: e.target.value })}
@@ -738,6 +763,16 @@ export function OrderTab() {
 
       <ReceiptDialog target={receipt} onClose={() => setReceipt(null)} />
 
+      <DishOptionsDialog
+        dish={picking}
+        remainingOf={(id) => {
+          const left = byId.get(id)?.remaining ?? null;
+          return left === null ? null : left - countOf(id);
+        }}
+        onClose={() => setPicking(null)}
+        onAdd={addPicked}
+      />
+
       <DishVoidDialog
         dish={
           voiding
@@ -793,6 +828,9 @@ function DishGrid({ list, countOf, add, locked }: { list: MenuDish[]; countOf: (
             data-testid={`dining-dish-${d.name}`}
           >
             <span className="pr-8 text-[14.5px] leading-snug font-bold">{d.name}</span>
+            {/* 菜品管理（8.1.15）：套餐写出含哪几样；有做法、加料的点了先选 */}
+            {d.combo && <span className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-ink-3">含 {partsText(d.combo)}</span>}
+            {(d.methods || d.addons) && <span className="mt-0.5 text-[12px] font-semibold text-pine">可选{[d.methods && '做法', d.addons && '加料'].filter(Boolean).join('、')}</span>}
             <span className="mt-auto flex w-full items-center gap-1.5 pt-1">
               <Money cents={d.price} className="text-[13.5px] font-bold text-ink-2" />
               <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink-4">{d.stationName}</span>

@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { BellRing, ChefHat, CircleCheckBig, Flame, Undo2 } from 'lucide-react';
 import { ALL_DINING_SLOTS, KITCHEN_STATUS_LABELS, kitchenElapsed, slotLabel, type DiningOutlet, type KitchenBoard, type KitchenItem, type MenuDish } from '@shared/dining';
+import { partsText } from '@shared/dishes';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
@@ -235,6 +236,13 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
         <span className="min-w-0 flex-1 text-[17px] leading-snug font-bold">{k.name}</span>
         <span className="num text-[20px] font-bold">×{k.quantity}</span>
       </div>
+      {/* 套餐（8.1.15 菜品管理）：下单当时含的几样，每份套餐的份数 */}
+      {k.parts.length > 0 && (
+        <p className="mt-1 rounded-md bg-lake-soft px-2 py-1 text-[13.5px] font-bold text-lake" data-testid={`kds-parts-${k.id}`}>
+          {k.quantity > 1 ? '每份含 ' : '含 '}
+          {partsText(k.parts)}
+        </p>
+      )}
       {k.note && <p className="mt-1 rounded-md bg-yuzu-tint px-2 py-1 text-[13.5px] font-bold text-yuzu-deep">{k.note}</p>}
       <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-ink-3">
         {/* 手牌客人按男宾 / 女宾着色；桌台的菜显示桌号 */}

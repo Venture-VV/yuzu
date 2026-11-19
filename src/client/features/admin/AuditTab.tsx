@@ -74,6 +74,11 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_status_changed: { label: '停用 / 启用会员', tone: 'ember' },
   member_phone_changed: { label: '改会员手机号', tone: 'ember' },
   member_merged: { label: '合并会员', tone: 'ember' },
+  // 菜品管理（8.1.15，docs/DISHES_V8115.md）
+  dish_saved: { label: '保存菜品', tone: 'neutral' },
+  dish_active_set: { label: '菜品上下架', tone: 'neutral' },
+  dish_price_changed: { label: '菜品改价', tone: 'ember' },
+  dishes_imported: { label: '导入菜品', tone: 'ember' },
 };
 
 function describe(detail: Record<string, unknown>): string {
