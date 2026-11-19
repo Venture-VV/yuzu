@@ -74,6 +74,14 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_status_changed: { label: '停用 / 启用会员', tone: 'ember' },
   member_phone_changed: { label: '改会员手机号', tone: 'ember' },
   member_merged: { label: '合并会员', tone: 'ember' },
+  // 8.1.15 房态中心
+  room_center_register: { label: '房态中心 · 登记', tone: 'lake' },
+  room_center_extend: { label: '房态中心 · 续钟', tone: 'lake' },
+  room_center_move: { label: '房态中心 · 换房', tone: 'yuzu' },
+  room_center_checkout: { label: '房态中心 · 退房', tone: 'pine' },
+  room_center_merge: { label: '房态中心 · 并房 / 拆并', tone: 'yuzu' },
+  room_center_state: { label: '房态中心 · 改房态', tone: 'ember' },
+  room_category: { label: '房态中心 · 房型', tone: 'pine' },
 };
 
 function describe(detail: Record<string, unknown>): string {

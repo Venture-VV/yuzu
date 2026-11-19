@@ -42,6 +42,7 @@ import { locateSession, locateSessionEnd, locateSignIn, locateSignOut } from './
 import { ctxOf } from '../lib/context';
 import { settingRow } from '../lib/store-settings';
 import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
+import { assertSpaceNotInMaintenance } from './room-state';
 
 export async function loadClockroomRules(db: Db): Promise<ClockroomRules> {
   const row = await settingRow<Partial<ClockroomRules>>(db, 'clockroom_rules');
@@ -149,6 +150,8 @@ export async function lockServiceSpace(tx: Tx, spaceId: number): Promise<Service
     throw unprocessable('SPACE_NOT_SERVICE', `${name} 是「${sp.businessType}」，不是技师服务的房间（${TECHNICIAN_BUSINESS_TYPES.join('、')}），请换一间`);
   }
   if (!sp.sellable) throw conflict('SPACE_NOT_SELLABLE', `房间 ${name} 在空间台账里不可售，请换一间`);
+  // 房态中心（8.1.15）：维修中的房间不能派钟、不能换进来（设维修时锁空间一行，与这里的共享锁排队）
+  await assertSpaceNotInMaintenance(tx, sp.id, `房间 ${name}`);
   return { id: sp.id, code: sp.code, displayName: sp.displayName };
 }
 
@@ -625,35 +628,44 @@ export const SessionSpaceInput = z.object({
 
 /** 派钟后改服务的房间、补选房间（前台挂账建的钟单没有房间）、清掉房间：只锁钟单一行，再给新房间加共享锁 */
 export async function setSessionSpace(deps: Deps, id: number, raw: unknown, ctx: OpContext) {
-  const { spaceId, expectedVersion } = parse(SessionSpaceInput, raw);
+  const input = parse(SessionSpaceInput, raw);
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
-    const at = ctx.at ?? new Date();
-    const [s] = await tx<{ id: number; sessionNo: string; technicianId: number; status: string; spaceId: number | null; spaceVersion: number; visitStatus: string }[]>`
-      SELECT s.id, s.session_no, s.technician_id, s.status, s.space_id, s.space_version, v.status AS visit_status
-      FROM technician_sessions s JOIN visits v ON v.id = s.visit_id WHERE s.id = ${id} AND s.store_id = ${currentStoreId()} FOR UPDATE OF s`;
-    if (!s) throw notFound('钟单不存在');
-    if (s.status !== 'waiting' && s.status !== 'serving') throw conflict('SESSION_CLOSED', `钟单 ${s.sessionNo} 已结束，不能再换房间`);
-    if (s.visitStatus !== 'open') throw conflict('VISIT_CLOSED', `钟单 ${s.sessionNo} 的客人已离店，不能再换房间`);
-    // 已经是这间：重发、两个人同时选了同一间都照常返回（不改、不记日志）
-    if (s.spaceId === spaceId) return;
-    if (s.spaceVersion !== expectedVersion) throw conflict('SESSION_SPACE_STALE', `钟单 ${s.sessionNo} 的房间刚被改过，请刷新后再选`);
-    const to = spaceId === null ? null : await lockServiceSpace(tx, spaceId);
-    const [from] = s.spaceId === null ? [] : await tx<{ code: string; displayName: string }[]>`SELECT code, display_name FROM spaces WHERE id = ${s.spaceId}`;
-    await tx`UPDATE technician_sessions SET space_id = ${spaceId}, space_version = space_version + 1 WHERE id = ${s.id}`;
-    await logEvent(tx, {
-      technicianId: s.technicianId,
-      sessionId: s.id,
-      kind: 'room',
-      detail: { from: from ? spaceLabel(from.code, from.displayName) : null, to: to ? spaceLabel(to.code, to.displayName) : null },
-      staffId: ctx.actor.id,
-      businessDate: await businessDate(tx, deps, at),
-      at,
-    });
-    // 实时位置（v0.7.17）：在钟上换房间，技师与客人到新房间；还没上钟的、清掉房间的不动（业务都写好之后最后记）
-    if (s.status === 'serving' && spaceId !== null) await locateSession(tx, s.id, 'session_room', { at, staffId: ctx.actor.id });
+    await setSessionSpaceTx(tx, deps, id, input, ctx);
   });
   return clockroomBoard(deps.sql, deps);
+}
+
+/**
+ * 换房间（调用方的事务里；钟房经 setSessionSpace，房态中心的「换房」经 room-center-ops.ts——它先锁好两间房的房态行）。
+ * 锁：钟单一行 → 新房间（共享锁）→ 当前位置
+ */
+export async function setSessionSpaceTx(tx: Tx, deps: Deps, id: number, input: { spaceId: number | null; expectedVersion: number }, ctx: OpContext) {
+  const { spaceId, expectedVersion } = input;
+  const at = ctx.at ?? new Date();
+  const [s] = await tx<{ id: number; sessionNo: string; technicianId: number; status: string; spaceId: number | null; spaceVersion: number; visitStatus: string }[]>`
+    SELECT s.id, s.session_no, s.technician_id, s.status, s.space_id, s.space_version, v.status AS visit_status
+    FROM technician_sessions s JOIN visits v ON v.id = s.visit_id WHERE s.id = ${id} AND s.store_id = ${currentStoreId()} FOR UPDATE OF s`;
+  if (!s) throw notFound('钟单不存在');
+  if (s.status !== 'waiting' && s.status !== 'serving') throw conflict('SESSION_CLOSED', `钟单 ${s.sessionNo} 已结束，不能再换房间`);
+  if (s.visitStatus !== 'open') throw conflict('VISIT_CLOSED', `钟单 ${s.sessionNo} 的客人已离店，不能再换房间`);
+  // 已经是这间：重发、两个人同时选了同一间都照常返回（不改、不记日志）
+  if (s.spaceId === spaceId) return;
+  if (s.spaceVersion !== expectedVersion) throw conflict('SESSION_SPACE_STALE', `钟单 ${s.sessionNo} 的房间刚被改过，请刷新后再选`);
+  const to = spaceId === null ? null : await lockServiceSpace(tx, spaceId);
+  const [from] = s.spaceId === null ? [] : await tx<{ code: string; displayName: string }[]>`SELECT code, display_name FROM spaces WHERE id = ${s.spaceId}`;
+  await tx`UPDATE technician_sessions SET space_id = ${spaceId}, space_version = space_version + 1 WHERE id = ${s.id}`;
+  await logEvent(tx, {
+    technicianId: s.technicianId,
+    sessionId: s.id,
+    kind: 'room',
+    detail: { from: from ? spaceLabel(from.code, from.displayName) : null, to: to ? spaceLabel(to.code, to.displayName) : null },
+    staffId: ctx.actor.id,
+    businessDate: await businessDate(tx, deps, at),
+    at,
+  });
+  // 实时位置（v0.7.17）：在钟上换房间，技师与客人到新房间；还没上钟的、清掉房间的不动（业务都写好之后最后记）
+  if (s.status === 'serving' && spaceId !== null) await locateSession(tx, s.id, 'session_room', { at, staffId: ctx.actor.id });
 }
 
 // ───────────────────────── 待派钟、转钟（8.0.8） ─────────────────────────
@@ -1207,6 +1219,22 @@ export const ExtendInput = z.object({
   expectedTotal: positiveCents('本次合计'),
 });
 
+/**
+ * 加钟要挂的那一条明细：同一位客人、同一个项目、同一个价格档（按钟单第一条明细）、原技师；上钟方式按规则（加钟记为点钟，或照原来的）。
+ * 只读地核对钟单在上钟中——挂账的事务里锁住钟单以后还会再核对一次。钟房的加钟与房态中心的续钟共用
+ */
+export async function extensionLine(db: Db, sessionId: number, quantity: number) {
+  const [s] = await db<{ visitId: number; itemId: number; technicianId: number; callType: CallType; status: string; tier: PriceTier | null }[]>`
+    SELECT s.visit_id, s.item_id, s.technician_id, s.call_type, s.status,
+           (SELECT l.tier FROM bill_lines l WHERE l.session_id = s.id ORDER BY l.id LIMIT 1) AS tier
+    FROM technician_sessions s WHERE s.id = ${sessionId} AND s.store_id = ${currentStoreId()}`;
+  if (!s) throw notFound('钟单不存在');
+  if (s.status !== 'serving') throw conflict('SESSION_NOT_SERVING', '只有上钟中的钟单可以加钟');
+  const rules = await loadClockroomRules(db);
+  const callType: CallType = rules.extensionAsDesignated ? 'designated' : s.callType;
+  return { visitId: Number(s.visitId), line: { itemId: Number(s.itemId), quantity, tier: s.tier ?? undefined, technicianId: Number(s.technicianId), callType } };
+}
+
 export function registerClockroomRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   // 派钟、加钟要挂账：与前台挂账同一个入口（价格、技师、幂等的核对都在那里）
@@ -1244,25 +1272,9 @@ export function registerClockroomRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/clockroom/sessions/:id/extend', { preHandler: guard('technician.dispatch', 'frontdesk.operate') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const e = parse(ExtendInput, req.body);
-    const [s] = await sql<{ visitId: number; itemId: number; technicianId: number; callType: CallType; status: string; tier: 'standard' | 'professional' | 'premium' | null }[]>`
-      SELECT s.visit_id, s.item_id, s.technician_id, s.call_type, s.status,
-             (SELECT l.tier FROM bill_lines l WHERE l.session_id = s.id ORDER BY l.id LIMIT 1) AS tier
-      FROM technician_sessions s WHERE s.id = ${id} AND s.store_id = ${currentStoreId()}`;
-    if (!s) throw notFound('钟单不存在');
-    if (s.status !== 'serving') throw conflict('SESSION_NOT_SERVING', '只有上钟中的钟单可以加钟');
-    const rules = await loadClockroomRules(sql);
+    const x = await extensionLine(sql, id, e.quantity);
     const postCharges = await post();
-    await postCharges(
-      deps,
-      s.visitId,
-      {
-        clientKey: e.clientKey,
-        lines: [{ itemId: s.itemId, quantity: e.quantity, tier: s.tier ?? undefined, technicianId: s.technicianId, callType: rules.extensionAsDesignated ? 'designated' : s.callType }],
-        expectedTotal: e.expectedTotal,
-      },
-      ctxOf(req),
-      { session: { extendId: id } },
-    );
+    await postCharges(deps, x.visitId, { clientKey: e.clientKey, lines: [x.line], expectedTotal: e.expectedTotal }, ctxOf(req), { session: { extendId: id } });
     return clockroomBoard(sql, deps);
   });
 

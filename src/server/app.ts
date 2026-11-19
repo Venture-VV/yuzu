@@ -134,6 +134,7 @@ import { registerCanteenAdminRoutes } from './modules/canteen/admin-routes';
 import { registerConciergeRoutes } from './modules/concierge/routes';
 import { registerCustomerRoutes } from './modules/customer/routes';
 import { registerPatrolAdminRoutes } from './modules/patrol/routes';
+import { registerRoomCenterRoutes } from './modules/room-center';
 
 function originHost(origin: string): string | null {
   try {
@@ -400,6 +401,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerCanteenAdminRoutes(app, deps);
   // 安保巡场（8.0.9，docs/PATROL_V809.md）：管理后台的 /api/erp/patrol；员工用的 /api/canteen/patrol/* 在员工端口上
   registerPatrolAdminRoutes(app, deps);
+  // 房态中心（8.1.15，docs/ROOM_CENTER_V8115.md）：按房型看全店房间的五种状态，服务房间的登记、换房、续钟、并房、退房
+  registerRoomCenterRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');

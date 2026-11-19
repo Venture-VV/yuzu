@@ -287,7 +287,15 @@ export type AuditAction =
   | 'gift_issue'
   // 8.1.10 急采后补合同；核库转领用（库管核库、部门答复替代，detail 写领用、替代、转采购）
   | 'po_contract_added'
-  | 'request_stock';
+  | 'request_stock'
+  // 8.1.15 房态中心：服务房间的登记、续钟、换房、退房、并房 / 拆并，改房态（待清、清洁完成、维修、恢复），后台的房型
+  | 'room_center_register'
+  | 'room_center_extend'
+  | 'room_center_move'
+  | 'room_center_checkout'
+  | 'room_center_merge'
+  | 'room_center_state'
+  | 'room_category';
 
 export interface AuditEntry {
   staffId: number | null;
