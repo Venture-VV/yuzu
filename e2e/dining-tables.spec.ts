@@ -186,6 +186,8 @@ test.describe('S5 餐饮第二步 · 桌台', () => {
       await panel.getByTestId(`table-void-${hotLine.id}`).click();
       const reason = page.getByRole('dialog').filter({ hasText: `退菜 · ${HOT.name}` });
       await reason.getByRole('textbox').fill('客人不要了');
+      // 8.1.15（块 B2）：退菜时选责任岗位
+      await reason.getByTestId('dish-void-blame-guest').click();
       await reason.getByRole('button', { name: '确认退菜' }).click();
       await expect(page.getByText(`${HOT.name} 已退`)).toBeVisible();
       detail = await getJson<TableSessionDetail>(page, `/api/dining/tables/sessions/${a1.id}`);
