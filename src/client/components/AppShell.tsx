@@ -12,6 +12,7 @@ import { cn } from '../lib/utils';
 import { LogoMark } from './Brand';
 import { InstanceTag } from './InstanceTag';
 import { StoreSwitcher } from './StoreSwitcher';
+import { ThemeMenuRow } from './ThemeSwitch';
 import { storePageOf, useStoreNav } from './storeNav';
 import { PendingOpsBanner } from './PendingOpsBanner';
 import { useLocalPendingCount } from './LocalPendingNotice';
@@ -38,7 +39,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex h-dvh min-h-0 bg-paper">
       {/* 设备（v0.7.21）：选了「这台终端」的设备常连本机的设备服务、替它上报（不在设备页也照常） */}
       <TerminalBridgeRunner />
-      <nav aria-label="主导航" className="flex w-[76px] shrink-0 flex-col items-center gap-1 bg-[#1d3f31] pt-4 pb-4 text-paper short:gap-0.5 short:pt-2.5 short:pb-2.5 md:w-[84px]">
+      <nav aria-label="主导航" data-surface="rail" className="flex w-[76px] shrink-0 flex-col items-center gap-1 bg-rail pt-4 pb-4 text-paper short:gap-0.5 short:pt-2.5 short:pb-2.5 md:w-[84px]">
         <NavLink to="/" aria-label="浴族 yuzu 首页" className="mb-5 rounded-[14px] ring-1 ring-white/10 short:mb-2">
           <LogoMark className="size-10 short:size-8" />
         </NavLink>
@@ -196,6 +197,10 @@ function UserMenu() {
               <span className={cn('size-2 rounded-full', link.state === 'offline' ? 'bg-clay' : link.updated ? 'bg-lake' : 'bg-pine')} />
             </span>
           </MenuItem>
+          {/* 外观（8.1.15）：浅色 / 深色 / 跟随系统，记在这台设备上 */}
+          <div className="my-1 h-px bg-line" />
+          <ThemeMenuRow />
+          <div className="my-1 h-px bg-line" />
           <MenuItem
             icon={<KeyRound className="size-4" />}
             onClick={() => {

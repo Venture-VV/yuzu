@@ -45,6 +45,7 @@ import { versionText } from '@shared/instance';
 import { ROLE_LABELS } from '@shared/labels';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
+import { ThemeToggleButton } from '../../components/ThemeSwitch';
 import { LogoMark } from '../../components/Brand';
 import { InstanceBadge } from '../../components/InstanceTag';
 import { Notice } from '../../components/ui';
@@ -139,7 +140,7 @@ export function AdminShell() {
 
   return (
     <div className="flex h-dvh min-h-0 flex-col bg-paper" data-testid="admin-shell">
-      <header className="flex h-14 shrink-0 items-center gap-3 bg-[#1d3f31] px-4 text-paper md:px-5">
+      <header data-surface="rail" className="flex h-14 shrink-0 items-center gap-3 bg-rail px-4 text-paper md:px-5">
         <LogoMark className="size-8 rounded-[10px] ring-1 ring-white/10" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] leading-tight font-bold">
@@ -154,6 +155,7 @@ export function AdminShell() {
         <span className="hidden text-[12.5px] text-paper/75 md:inline">
           {session.staff.displayName} · {ROLE_LABELS[session.staff.role]}
         </span>
+        <ThemeToggleButton className="size-9" />
         <NavLink to="/" className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18" data-testid="admin-exit">
           <ArrowLeft className="size-4" />
           返回前台
