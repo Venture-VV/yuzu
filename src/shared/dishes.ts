@@ -5,16 +5,16 @@
 //   · 加料：这道菜可以加的料，是另外的价目项目；点单时另起一行、备注写「配 某菜」，各算各的钱；
 //   · 套餐：一个价目项目带「含哪几样」；下单时一行（按套餐自己的价格），出品单上列出含的几样；
 //   · 改价记录：改前、改后、谁、几点、原因，只追加；以前的订单照下单时的价（明细上本来就留着当时的单价）。
-// 没写细的地方按默认做（YB30–YB39，待确认）。
+// 没写细的地方按默认做（docs/PENDING_DECISIONS.md「块 C：菜品管理」CP1–CP12，待确认）。
 
 import { PRICE_TIER_LABELS, PRICE_TIERS, type PriceTier, type TierPrice } from './catalog';
 import { DINING_OUTLET_LABELS, isDiningOutlet, MAX_DISH_NOTE, outletDef, type DiningOutlet } from './dining';
 import { formatYuan } from './money';
-import { can, type Permission, type PermissionSubject } from './permissions';
+import type { Permission } from './permissions';
 
 // ───────────────────────── 上限 ─────────────────────────
 
-/** 一道菜最多 12 种做法，每种最多 8 个字（YB31） */
+/** 一道菜最多 12 种做法，每种最多 8 个字（CP2） */
 export const MAX_DISH_METHODS = 12;
 export const MAX_DISH_METHOD_LENGTH = 8;
 /** 一道菜最多 12 种加料；一个套餐最多含 12 样 */
@@ -29,16 +29,12 @@ export const DISH_IMPORT_MAX_ROWS = 1000;
 
 // ───────────────────────── 权限 ─────────────────────────
 
-/** 维护权限按出品口分三项（YB36）：没有某个出品口权限的看得到、改不了 */
+/** 维护权限按出品口分三项（CP7）：没有某个出品口权限的看得到、改不了 */
 export const DISH_OUTLET_PERMISSIONS = { restaurant: 'dish.restaurant', water: 'dish.water', fruit: 'dish.fruit' } as const satisfies Record<DiningOutlet, Permission>;
-/** 改价是单独一项：定价（新建）、改价都要它，并且要有这道菜所在出品口的维护权限（YB35） */
+/** 改价是单独一项：定价（新建）、改价都要它，并且要有这道菜所在出品口的维护权限（CP6） */
 export const DISH_PRICE_PERMISSION = 'dish.price' as const satisfies Permission;
 /** 有其中任一项就看得到「菜品管理」 */
 export const DISH_PERMISSIONS: readonly Permission[] = [...Object.values(DISH_OUTLET_PERMISSIONS), DISH_PRICE_PERMISSION];
-
-export const canSeeDishes = (subject: PermissionSubject) => DISH_PERMISSIONS.some((p) => can(subject, p));
-export const canManageOutlet = (subject: PermissionSubject, outlet: DiningOutlet) => can(subject, DISH_OUTLET_PERMISSIONS[outlet]);
-export const canPriceDish = (subject: PermissionSubject, outlet: DiningOutlet) => can(subject, DISH_PRICE_PERMISSION) && canManageOutlet(subject, outlet);
 
 // ───────────────────────── 点单：做法、加料、套餐 ─────────────────────────
 
@@ -81,7 +77,7 @@ export interface DishComboRef {
   itemId: number;
   name: string;
   quantity: number;
-  /** 这一样现在在不在售（不在售的套餐照卖，菜品表上提醒，YB33） */
+  /** 这一样现在在不在售（不在售的套餐照卖，菜品表上提醒，CP4） */
   available: boolean;
 }
 
@@ -97,7 +93,7 @@ export interface DishRow {
   stationId: number;
   stationName: string;
   stationActive: boolean;
-  /** 规格 = 价目里的档；price 是默认档的价（点单页卖的就是它，YB30） */
+  /** 规格 = 价目里的档；price 是默认档的价（点单页卖的就是它，CP1） */
   prices: TierPrice[];
   price: number;
   /** 上架 / 下架 */
@@ -129,7 +125,7 @@ export interface DishesBoard {
 }
 
 export type DishStatusFilter = 'all' | 'on' | 'off' | 'soldout';
-export const DISH_STATUS_LABELS: Record<DishStatusFilter, string> = { all: '全部', on: '上架', off: '下架', soldout: '今日沽清' };
+export const DISH_STATUS_LABELS: Record<DishStatusFilter, string> = { all: '全部', on: '上架', off: '下架', soldout: '沽清' };
 export const isDishStatusFilter = (v: unknown): v is DishStatusFilter => typeof v === 'string' && v in DISH_STATUS_LABELS;
 
 export interface DishFilter {
@@ -196,9 +192,6 @@ export function priceChangeText(c: { tier: PriceTier; oldPrice: number | null; n
 }
 
 // ───────────────────────── 保存 ─────────────────────────
-
-/** 各档的价（分）；某一档不提供为 null 或不带 */
-export type DishPricesInput = Partial<Record<PriceTier, number | null>>;
 
 /** 新增、编辑一道菜时交的内容（改价、上下架另有接口） */
 export interface DishBody {

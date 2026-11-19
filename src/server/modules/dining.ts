@@ -41,7 +41,7 @@ import { saveRuleSetting } from '../lib/rule-settings';
 import { recordRecipeUsage, reverseRecipeUsage } from './stock-usage';
 import { settingRow } from '../lib/store-settings';
 import { currentStoreId } from '../lib/store-context';
-import { comboPartsOf, dishOptionsOf } from './dish-options';
+import { comboPartsOf, withDishOptions } from './dish-options';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
   const row = await settingRow<Partial<DiningRules>>(db, 'dining_rules');
@@ -172,11 +172,8 @@ async function stationsWithCount(db: Db): Promise<KitchenStation[]> {
     FROM kitchen_stations s ORDER BY s.sort_order, s.id`;
 }
 
-/**
- * 进厨房的在售菜品、默认价格档的单价、今天的沽清与点单分类（8.1.7：后台没设的按默认归）。
- * withOptions（8.1.15 菜品管理）：点单页的菜单再带上做法、加料、套餐内容；厨房屏 5 秒取一次的沽清列表不带
- */
-async function kitchenDishes(db: Db, today: string, withOptions = false): Promise<MenuDish[]> {
+/** 进厨房的在售菜品、默认价格档的单价、今天的沽清与点单分类（8.1.7：后台没设的按默认归） */
+async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
   const rows = await db<
     {
       id: number;
@@ -195,24 +192,9 @@ async function kitchenDishes(db: Db, today: string, withOptions = false): Promis
            i.dining_outlet, i.dining_group
     FROM service_items i JOIN kitchen_stations s ON s.id = i.station_id AND s.active
     WHERE i.active AND NOT i.technician_required ORDER BY s.sort_order, s.id, i.sort_order, i.id`;
-  const options = withOptions
-    ? await dishOptionsOf(
-        db,
-        rows.map((r) => r.id),
-      )
-    : null;
   return rows.map(({ prices, diningOutlet, diningGroup, ...r }) => {
     const slot = diningSlotOf({ outlet: diningOutlet, group: diningGroup, category: r.category, stationName: r.stationName });
-    const o = options?.get(r.id);
-    return {
-      ...r,
-      price: defaultPrice(prices),
-      outlet: slot.outlet,
-      group: slot.group,
-      ...(o?.methods.length ? { methods: o.methods } : {}),
-      ...(o?.addons.length ? { addons: o.addons } : {}),
-      ...(o?.combo.length ? { combo: o.combo } : {}),
-    };
+    return { ...r, price: defaultPrice(prices), outlet: slot.outlet, group: slot.group };
   });
 }
 
@@ -253,7 +235,8 @@ export async function kitchenBoard(db: Db, deps: Deps): Promise<KitchenBoard> {
 export async function diningMenu(db: Db, deps: Deps): Promise<DiningMenu> {
   const today = await businessDate(db as Tx, deps, new Date());
   const { selfVoidMinutes } = await loadFrontdeskRules(db);
-  return { rules: await loadDiningRules(db), businessDate: today, dishes: await kitchenDishes(db, today, true), selfVoidMinutes };
+  // 点单页的菜单带上做法、加料、套餐内容（8.1.15 菜品管理；厨房屏 5 秒取一次的沽清列表不带）
+  return { rules: await loadDiningRules(db), businessDate: today, dishes: await withDishOptions(db, await kitchenDishes(db, today)), selfVoidMinutes };
 }
 
 /** 点单页按手牌找在店客人：只给点单需要的信息（不含会员手机号、余额与账单） */

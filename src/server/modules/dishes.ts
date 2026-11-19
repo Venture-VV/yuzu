@@ -63,7 +63,7 @@ import { businessDate } from './frontdesk/common';
 import { pricesColumn } from './pricing';
 
 /** 菜品的图片地址（图存在电子菜单的图片表里；这个地址给有菜品权限的人看） */
-export const dishImageUrl = (id: number | null | undefined) => (id ? `/api/dining/dishes/images/${id}` : null);
+const dishImageUrl = (id: number | null | undefined) => (id ? `/api/dining/dishes/images/${id}` : null);
 
 /** 版本：这一行最后一次修改的时刻（微秒）。后台价目、出品档口那几处改这一行时也会动它 */
 const REV = (db: Db) => db`(extract(epoch FROM i.updated_at) * 1000000)::bigint::text`;
@@ -92,7 +92,7 @@ interface DishBase {
 }
 
 /** 全部菜品（或给定的几道）：挂了出品档口、不需要技师的价目项目，含下架的、档口停用的 */
-export async function loadDishRows(db: Db, today: string, onlyIds?: number[]): Promise<DishRow[]> {
+async function loadDishRows(db: Db, today: string, onlyIds?: number[]): Promise<DishRow[]> {
   if (onlyIds && onlyIds.length === 0) return [];
   const rows = await db<DishBase[]>`
     SELECT i.id, i.name, i.category, i.active, i.station_id, s.name AS station_name, s.active AS station_active, i.dining_outlet, i.dining_group,
@@ -148,7 +148,7 @@ export async function loadDishRows(db: Db, today: string, onlyIds?: number[]): P
   });
 }
 
-export async function dishesBoard(db: Db, deps: Deps, filter?: DishFilter): Promise<DishesBoard> {
+async function dishesBoard(db: Db, deps: Deps, filter?: DishFilter): Promise<DishesBoard> {
   const today = await businessDate(db, deps, new Date());
   const all = await loadDishRows(db, today);
   const stations = await db<{ id: number; name: string; active: boolean }[]>`SELECT id, name, active FROM kitchen_stations ORDER BY sort_order, id`;
@@ -193,7 +193,7 @@ export const slotOfState = (s: ItemState): DiningSlot => {
  * 用 FOR NO KEY UPDATE：与后台价目、后台「出品档口与菜品」锁这一行的 FOR UPDATE 互相排队，但不挡点单写明细时对这一行的外键检查
  * （这里只改名称、档口、价格这些，不动主键）——营业中维护菜品、预览导入不会让下单等着
  */
-export async function lockItems(tx: Tx, itemIds: number[]): Promise<Map<number, ItemState>> {
+async function lockItems(tx: Tx, itemIds: number[]): Promise<Map<number, ItemState>> {
   const ids = [...new Set(itemIds)].sort((a, b) => a - b);
   if (ids.length === 0) return new Map();
   await tx`SELECT id FROM service_items WHERE id IN ${tx(ids)} ORDER BY id FOR NO KEY UPDATE`;
@@ -222,14 +222,14 @@ const unique = <T>(list: T[]) => new Set(list).size === list.length;
 
 const tierInput = positiveCents('价格').nullish();
 /** 各档的价（分）；某一档不提供为 null 或不带。换成按「标准、专业、优选」排好的清单 */
-export const PricesInput = z.object({ standard: tierInput, professional: tierInput, premium: tierInput }).transform((p) =>
+const PricesInput = z.object({ standard: tierInput, professional: tierInput, premium: tierInput }).transform((p) =>
   PRICE_TIERS.flatMap((tier): TierPrice[] => {
     const price = p[tier];
     return price ? [{ tier, price }] : [];
   }),
 );
 
-export const DishFields = z.object({
+const DishFields = z.object({
   name: z.string('请填写菜名').trim().min(1, '请填写菜名').max(MAX_DISH_NAME, `菜名最多 ${MAX_DISH_NAME} 个字`),
   category: z.string().trim().max(MAX_DISH_CATEGORY, `分类最多 ${MAX_DISH_CATEGORY} 个字`).default(''),
   slot: z
@@ -286,7 +286,7 @@ const PriceInput = z.object({
 
 // ───────────────────────── 写：事务里的几步（单道保存与导入共用） ─────────────────────────
 
-export interface FieldChange {
+interface FieldChange {
   label: string;
   before: string;
   after: string;
@@ -333,22 +333,22 @@ async function checkFields(tx: Tx, cur: ItemState | null, f: DishFieldsData, ref
   return station;
 }
 
-async function writeMethods(tx: Tx, id: number, methods: string[]) {
-  await tx`DELETE FROM dish_methods WHERE item_id = ${id}`;
+async function writeMethods(tx: Tx, id: number, methods: string[], fresh = false) {
+  if (!fresh) await tx`DELETE FROM dish_methods WHERE item_id = ${id}`;
   if (methods.length) {
     await tx`INSERT INTO dish_methods (item_id, name, sort_no) SELECT ${id}, m, (ord - 1)::int FROM unnest(${methods}::text[]) WITH ORDINALITY AS t(m, ord)`;
   }
 }
 
-async function writeAddons(tx: Tx, id: number, addons: number[]) {
-  await tx`DELETE FROM dish_addons WHERE item_id = ${id}`;
+async function writeAddons(tx: Tx, id: number, addons: number[], fresh = false) {
+  if (!fresh) await tx`DELETE FROM dish_addons WHERE item_id = ${id}`;
   if (addons.length) {
     await tx`INSERT INTO dish_addons (item_id, addon_item_id, sort_no) SELECT ${id}, a, (ord - 1)::int FROM unnest(${addons}::bigint[]) WITH ORDINALITY AS t(a, ord)`;
   }
 }
 
-async function writeCombo(tx: Tx, id: number, combo: { itemId: number; quantity: number }[]) {
-  await tx`DELETE FROM dish_combo_items WHERE combo_item_id = ${id}`;
+async function writeCombo(tx: Tx, id: number, combo: { itemId: number; quantity: number }[], fresh = false) {
+  if (!fresh) await tx`DELETE FROM dish_combo_items WHERE combo_item_id = ${id}`;
   if (combo.length) {
     await tx`
       INSERT INTO dish_combo_items (combo_item_id, item_id, quantity, sort_no)
@@ -357,7 +357,7 @@ async function writeCombo(tx: Tx, id: number, combo: { itemId: number; quantity:
 }
 
 /** 这道菜现在的做法、加料、套餐内容（比较有没有变、写审计用） */
-export async function childrenOf(db: Db, id: number) {
+async function childrenOf(db: Db, id: number) {
   const methods = await db<{ name: string }[]>`SELECT name FROM dish_methods WHERE item_id = ${id} ORDER BY sort_no, name`;
   const addons = await db<{ id: number; name: string }[]>`
     SELECT i.id, i.name FROM dish_addons a JOIN service_items i ON i.id = a.addon_item_id WHERE a.item_id = ${id} ORDER BY a.sort_no, i.id`;
@@ -387,9 +387,10 @@ export async function createDishTx(tx: Tx, ctx: OpContext, f: DishFieldsData & {
   await tx`
     INSERT INTO service_item_prices (item_id, tier, price)
     SELECT ${id}, unnest(${f.prices.map((p) => p.tier)}::text[]), unnest(${f.prices.map((p) => p.price)}::bigint[])`;
-  await writeMethods(tx, id, f.methods);
-  await writeAddons(tx, id, f.addons);
-  await writeCombo(tx, id, f.combo);
+  // 新建的菜：做法、加料、套餐内容直接写（没有旧的要先删）
+  await writeMethods(tx, id, f.methods, true);
+  await writeAddons(tx, id, f.addons, true);
+  await writeCombo(tx, id, f.combo, true);
   await recordPriceChanges(tx, { itemId: id, itemName: f.name, before: [], after: f.prices, reason: opts.reason, source: opts.source, staffId: ctx.actor.id });
   return id;
 }
@@ -530,7 +531,7 @@ export async function runDishOp<R extends Record<string, unknown>>(
 
 // ───────────────────────── 新增、编辑、上下架、改价 ─────────────────────────
 
-export async function createDish(deps: Deps, raw: unknown, ctx: OpContext): Promise<DishSaveResult> {
+async function createDish(deps: Deps, raw: unknown, ctx: OpContext): Promise<DishSaveResult> {
   const { clientKey: key, ...input } = parse(CreateInput, raw);
   const run = await runDishOp(deps, { key, opType: 'create', requestHash: hashRequest(input), staffId: ctx.actor.id }, async (tx) => {
     const id = await createDishTx(tx, ctx, input, { reason: '新建菜品', source: 'dishes' });
@@ -547,7 +548,7 @@ export async function createDish(deps: Deps, raw: unknown, ctx: OpContext): Prom
   return { dish: await getDish(deps.sql, deps, run.itemId!), replayed: run.replayed };
 }
 
-export async function updateDish(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<DishSaveResult> {
+async function updateDish(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<DishSaveResult> {
   const { clientKey: key, rev, ...input } = parse(UpdateInput, raw);
   const run = await runDishOp(deps, { key, opType: 'update', requestHash: hashRequest({ id, rev, ...input }), staffId: ctx.actor.id }, async (tx) => {
     const changes = await updateDishTx(tx, ctx, id, input, { rev });
@@ -570,7 +571,7 @@ export async function updateDish(deps: Deps, id: number, raw: unknown, ctx: OpCo
   return { dish: await getDish(deps.sql, deps, run.itemId!), replayed: run.replayed };
 }
 
-export async function setDishActive(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<DishSaveResult> {
+async function setDishActive(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<DishSaveResult> {
   const { clientKey: key, active } = parse(ActiveInput, raw);
   const run = await runDishOp(deps, { key, opType: 'active', requestHash: hashRequest({ id, active }), staffId: ctx.actor.id }, async (tx) => {
     const r = await setDishActiveTx(tx, ctx, id, active);
@@ -589,7 +590,7 @@ export async function setDishActive(deps: Deps, id: number, raw: unknown, ctx: O
   return { dish: await getDish(deps.sql, deps, run.itemId!), replayed: run.replayed };
 }
 
-export async function changeDishPrice(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<DishSaveResult> {
+async function changeDishPrice(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<DishSaveResult> {
   const { clientKey: key, ...input } = parse(PriceInput, raw);
   const run = await runDishOp(deps, { key, opType: 'price', requestHash: hashRequest({ id, ...input }), staffId: ctx.actor.id }, async (tx) => {
     const r = await changeDishPriceTx(tx, ctx, id, input.prices, { reason: input.reason, source: 'dishes', expected: input.expected });
@@ -615,7 +616,7 @@ const HistoryQuery = z.object({
 });
 
 /** 改价记录：新的在前；给了菜品只看这一道 */
-export async function dishPriceChanges(db: Db, raw: unknown): Promise<DishPriceChange[]> {
+async function dishPriceChanges(db: Db, raw: unknown): Promise<DishPriceChange[]> {
   const q = parse(HistoryQuery, raw ?? {});
   return db<DishPriceChange[]>`
     SELECT c.id, c.item_id, c.item_name, c.tier, c.old_price, c.new_price, c.reason, c.source, s.display_name AS staff_name, c.created_at
@@ -626,7 +627,7 @@ export async function dishPriceChanges(db: Db, raw: unknown): Promise<DishPriceC
 const yuan = (cents: number | null) => (cents === null ? null : cents / 100);
 
 /** 导出全部菜品（Excel）：列与导入认的一样，改完可以原样导回来；后面三列只读 */
-export async function dishesXlsx(db: Db, deps: Deps): Promise<{ buffer: Buffer; fileName: string; count: number }> {
+async function dishesXlsx(db: Db, deps: Deps): Promise<{ buffer: Buffer; fileName: string; count: number }> {
   const board = await dishesBoard(db, deps);
   const rows = board.dishes.map((d) => [
     d.id,

@@ -22,6 +22,7 @@ import {
 import { ADMIN_ENTRY_PERMISSIONS } from '@shared/admin';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../lib/session';
+import { DISH_PERMISSIONS } from '@shared/dishes';
 
 export interface StoreNavItem {
   to: string;
@@ -68,6 +69,8 @@ const STORE_NAV: StoreNavItem[][] = [
     { to: '/guide', label: '导览', icon: MapPinned, perm: 'guide.view', guestFacing: true },
     // 设备（v0.7.21，RQ-001）：一屏看全部设备、本机终端
     { to: '/devices', label: '设备', icon: Printer, perm: 'device.view' },
+    // 菜品管理（8.1.15，docs/DISHES_V8115.md，CP7）：平时是「餐饮」里的一个页签；只有菜品权限、进不了餐饮的岗位（少见）才显示这个入口
+    { to: '/dishes', label: '菜品', icon: UtensilsCrossed, perm: [...DISH_PERMISSIONS], when: (s) => s.dining && !canEnter('/dining', s.permissions) },
   ],
   // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限、数据看板）；只有看板权限的岗位进去只看得到数据看板
   [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_ENTRY_PERMISSIONS] }],
@@ -86,4 +89,10 @@ export function useStoreNav(): StoreNavItem[][] {
   const can = useCan();
   const session = useSession();
   return STORE_NAV.map((group) => group.filter((n) => (Array.isArray(n.perm) ? n.perm : [n.perm]).some((p) => can(p)) && (!n.when || n.when(session)))).filter((group) => group.length > 0);
+}
+
+/** 这位账号的权限进不进得了主导航里的某个页面（只看权限，不看功能开没开） */
+function canEnter(to: string, permissions: readonly Permission[]): boolean {
+  const item = STORE_NAV.flat().find((n) => n.to === to);
+  return !!item && (Array.isArray(item.perm) ? item.perm : [item.perm]).some((p) => permissions.includes(p));
 }

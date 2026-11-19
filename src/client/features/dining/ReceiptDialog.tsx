@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Clock3, Flame, RotateCcw, Soup } from 'lucide-react';
 import { RECEIPT_STATE_LABELS, slotLabel, type DiningReceipt, type DiningReceiptLine, type ReceiptLineState } from '@shared/dining';
+import { partsText } from '@shared/dishes';
 import { formatYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { useLivePoll } from '../../lib/livePoll';
@@ -150,6 +151,8 @@ function ReceiptPaper({ r, onlyWaiting, onToggle, refreshing }: { r: DiningRecei
                         {slotLabel(l)}
                         {l.note && <span className="ml-1.5 font-semibold text-yuzu-deep">{l.note}</span>}
                       </p>
+                      {/* 套餐（8.1.15 菜品管理）：下单当时含的几样 */}
+                      {l.parts.length > 0 && <p className="mt-0.5 text-[12px] text-ink-3">含 {partsText(l.parts)}</p>}
                     </div>
                     {/* 手持点单机（商米 V3，窄屏）上状态章在上、份数与金额在下，菜名留得宽；平板、收银机上一行排开 */}
                     <div className="flex shrink-0 flex-col items-end gap-1 min-[420px]:flex-row min-[420px]:items-start min-[420px]:gap-2.5">

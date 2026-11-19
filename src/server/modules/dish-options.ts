@@ -4,14 +4,28 @@
 // 都只读、不加锁。维护在 dishes.ts。单独放一个文件：点单（dining.ts）与菜品管理（dishes.ts）都要用，不互相引。
 
 import { defaultTier, type TierPrice } from '@shared/catalog';
+import type { MenuDish } from '@shared/dining';
 import type { DishAddonOption, DishPart } from '@shared/dishes';
 import type { Db } from '../db';
 import { pricesColumn } from './pricing';
 
-export interface DishOptionSet {
+interface DishOptionSet {
   methods: string[];
   addons: DishAddonOption[];
   combo: DishPart[];
+}
+
+/** 点单页的菜单：每道菜带上可选的做法、能点的加料、套餐含哪几样（有的才带，都没有的菜与以前一样） */
+export async function withDishOptions(db: Db, dishes: MenuDish[]): Promise<MenuDish[]> {
+  const options = await dishOptionsOf(
+    db,
+    dishes.map((d) => d.id),
+  );
+  return dishes.map((d) => {
+    const o = options.get(d.id);
+    if (!o) return d;
+    return { ...d, ...(o.methods.length ? { methods: o.methods } : {}), ...(o.addons.length ? { addons: o.addons } : {}), ...(o.combo.length ? { combo: o.combo } : {}) };
+  });
 }
 
 const defaultPrice = (prices: TierPrice[]) => {
@@ -23,7 +37,7 @@ const defaultPrice = (prices: TierPrice[]) => {
  * 这几道菜的做法、加料、套餐内容（都没有的菜不在返回里）。
  * 加料只列现在能点的：在售、挂在启用的档口上、不需要技师（与点单页的菜单同一个口径）；价格是加料自己的默认价
  */
-export async function dishOptionsOf(db: Db, itemIds: number[]): Promise<Map<number, DishOptionSet>> {
+async function dishOptionsOf(db: Db, itemIds: number[]): Promise<Map<number, DishOptionSet>> {
   const ids = [...new Set(itemIds)];
   const out = new Map<number, DishOptionSet>();
   if (ids.length === 0) return out;

@@ -86,11 +86,6 @@ export type AuditAction =
   // 8.1.7：菜品的点单分类（餐厅 / 水吧 / 果吧）
   | 'items_slot_updated'
   | 'dish_limit_set'
-  // 8.1.15 菜品管理（docs/DISHES_V8115.md）：新增 / 编辑、上下架、改价、导入
-  | 'dish_saved'
-  | 'dish_active_set'
-  | 'dish_price_changed'
-  | 'dishes_imported'
   | 'dining_table_saved'
   | 'table_open'
   | 'table_update'
@@ -292,7 +287,12 @@ export type AuditAction =
   | 'gift_issue'
   // 8.1.10 急采后补合同；核库转领用（库管核库、部门答复替代，detail 写领用、替代、转采购）
   | 'po_contract_added'
-  | 'request_stock';
+  | 'request_stock'
+  // 8.1.15 菜品管理（docs/DISHES_V8115.md）：新增 / 编辑、上下架、改价、导入
+  | 'dish_saved'
+  | 'dish_active_set'
+  | 'dish_price_changed'
+  | 'dishes_imported';
 
 export interface AuditEntry {
   staffId: number | null;

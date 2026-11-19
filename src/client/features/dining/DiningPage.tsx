@@ -3,13 +3,16 @@
 // 店员默认四页都有；后勤（厨房）只有厨房出品与沽清；只有点单权限的服务员在出品屏上只能「上菜」；
 // 收银（结账收款）能看桌台并结账。
 // 8.0.8：桌台点单下架时（餐饮设置，默认关）「桌台」叫「桌台账单」，只结账、退菜；加「台账」「退菜记录」（点单的与看日结的都能看、能导出）。
+// 8.1.15：加「菜品管理」（docs/DISHES_V8115.md）——有任一项菜品权限（维护餐厅 / 水吧 / 果吧的菜品、定价与改价）的才看得到。
 
 import { Navigate, NavLink, useParams } from 'react-router';
+import { DISH_PERMISSIONS } from '@shared/dishes';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { Notice } from '../../components/ui';
+import { DishesTab } from './DishesTab';
 import { KitchenTab, LimitsTab } from './KitchenTab';
 import { LedgerTab, VoidsTab } from './LedgerTab';
 import { OrderTab } from './OrderTab';
@@ -23,6 +26,7 @@ const TABS = [
   { key: 'limits', label: '沽清', perms: ['dining.kitchen'], subtitle: '今天某道菜还剩几份；沽清（卖完）后点单页不能再点，退菜按原份数加回' },
   { key: 'ledger', label: '台账', perms: ['dining.order', 'ledger.export', 'report.executive'], subtitle: '按营业日、分类、状态列出每道菜（手牌、桌台、小程序扫码点餐），合计只算有效的，可导出' },
   { key: 'voids', label: '退菜记录', perms: ['dining.order', 'ledger.export', 'report.executive'], subtitle: '谁退的、怎么批的（小额直接退、本人 15 分钟内、经理、当场授权），经理每天看一眼' },
+  { key: 'dishes', label: '菜品管理', perms: DISH_PERMISSIONS, subtitle: '全部菜品在一张表里：新增、编辑、上下架、做法、加料、套餐、改价（留改价记录），Excel 导出与导入' },
 ] as const satisfies readonly { key: string; label: string; perms: readonly Permission[]; subtitle: string }[];
 
 /** 桌台点单下架时（8.0.8，A05）「桌台」只结账、退菜 */
@@ -88,6 +92,8 @@ export function DiningPage() {
           <LedgerTab />
         ) : current.key === 'voids' ? (
           <VoidsTab />
+        ) : current.key === 'dishes' ? (
+          <DishesTab />
         ) : null}
       </div>
     </>
