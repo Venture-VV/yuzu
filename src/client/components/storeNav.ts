@@ -20,6 +20,7 @@ import {
   BriefcaseBusiness,
 } from 'lucide-react';
 import { ADMIN_ENTRY_PERMISSIONS } from '@shared/admin';
+import { deskEntries } from '@shared/frontdesk';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../lib/session';
 import { DISH_PERMISSIONS } from '@shared/dishes';
@@ -45,8 +46,10 @@ const STORE_NAV: StoreNavItem[][] = [
   [
     // 8.1.15（docs/DESKS_V8115.md）：原「前台」按业务环节拆成两个台——发卡台管入场（接待发牌、会员等级识别、换牌），
     // 收银台管离店结账（只读账单、预结账、结账、结账记录）。两个都按「查看在店手牌」显示，台里的操作照各自的权限
-    { to: '/frontdesk', label: '发卡台', icon: ConciergeBell, perm: 'frontdesk.read' },
-    { to: '/cashier', label: '收银台', icon: Banknote, perm: 'frontdesk.read' },
+    // 8.1.15 前台 1 细化（YB2）：入口再按各自的权限分——有「接待发牌、挂账、换牌」的看得到发卡台，有「结账收款」的看得到收银台；
+    // 两项都没有、只有查看的两个都看得到（进去只能看）。规则在 @shared/frontdesk 的 deskEntries
+    { to: '/frontdesk', label: '发卡台', icon: ConciergeBell, perm: 'frontdesk.read', when: (s) => deskEntries(s.permissions).issue },
+    { to: '/cashier', label: '收银台', icon: Banknote, perm: 'frontdesk.read', when: (s) => deskEntries(s.permissions).cashier },
     { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
     // 8.0.8：看日结的（导出流水、经营总览）也能进来看「台账」「退菜记录」
     { to: '/dining', label: '餐饮', icon: UtensilsCrossed, perm: ['dining.order', 'dining.kitchen', 'frontdesk.checkout', 'ledger.export', 'report.executive'], when: (s) => s.dining },
