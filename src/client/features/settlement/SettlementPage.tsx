@@ -293,6 +293,7 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
 
       <BusinessCard s={s} />
       <DepositsCard s={s} />
+      <DepositsCard s={s} card />
       <CountCardsDayCard s={s} />
       <PlatformDayCard s={s} />
 
@@ -547,21 +548,22 @@ function CloseDialog({ open, onClose, s }: { open: boolean; onClose: () => void;
 /**
  * 客房押金（S7，v0.7.4）：押金是负债，不算营业额。收、退按收款方式（现金进出钱箱，交班按此核对）；
  * 房费挂在住客的手牌账单上、随手牌结账。没有押金往来、也没有在住押金时不显示。
+ * 会员卡押金（8.1.15，card）同样是负债：不算营业额、不进会员储值，另列一块。
  */
-function DepositsCard({ s }: { s: SettlementSummary }) {
-  const d = s.deposits;
+function DepositsCard({ s, card }: { s: SettlementSummary; card?: boolean }) {
+  const d = card ? s.cardDeposits : s.deposits;
   if (!d || (d.received.length === 0 && d.refunded.length === 0 && d.held === 0)) return null;
   const sum = (list: typeof d.received) => list.reduce((t, m) => t + m.amount, 0);
   const line = (list: typeof d.received) => (list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 笔 ¥${(m.amount / 100).toFixed(2)}`).join('、') : '无');
   return (
-    <Card className="overflow-hidden" data-testid="settlement-deposits">
+    <Card className="overflow-hidden" data-testid={card ? 'settlement-card-deposits' : 'settlement-deposits'}>
       <div className="border-b border-line px-5 pt-4 pb-3">
         <p className="flex items-center gap-2 text-[13px] font-bold text-ink-2">
           <span className="size-2 rounded-full bg-lake" />
-          客房押金 · 负债，不算营业额
+          {card ? '会员卡押金 · 负债，不算营业额、不进储值' : '客房押金 · 负债，不算营业额'}
         </p>
         <p className="mt-1.5 text-[12.5px] text-ink-3">
-          当天结束时在住押金 <Money cents={d.held} className="font-bold text-ink" />
+          {card ? '当天结束时押着的押金' : '当天结束时在住押金'} <Money cents={d.held} className="font-bold text-ink" />
         </p>
       </div>
       <div className="space-y-2 px-5 py-4 text-[13px]">
@@ -569,7 +571,7 @@ function DepositsCard({ s }: { s: SettlementSummary }) {
         <p className="pl-3 text-[12px] text-ink-3">{line(d.received)}</p>
         <Row label="退押金（原路退回）" cents={-sum(d.refunded)} className="text-clay" />
         <p className="pl-3 text-[12px] text-ink-3">{line(d.refunded)}</p>
-        <p className="text-[12px] text-ink-4">现金押金进出钱箱，交班按此核对应有现金；扫码、银行卡收的押金退房时在商户后台原路退。</p>
+        <p className="text-[12px] text-ink-4">现金押金进出钱箱，交班按此核对应有现金；扫码、银行卡收的押金{card ? '退卡' : '退房'}时在商户后台原路退。</p>
       </div>
     </Card>
   );

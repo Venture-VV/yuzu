@@ -74,6 +74,11 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_status_changed: { label: '停用 / 启用会员', tone: 'ember' },
   member_phone_changed: { label: '改会员手机号', tone: 'ember' },
   member_merged: { label: '合并会员', tone: 'ember' },
+  // 会员实体卡（v0.7.28）与押金、退卡（8.1.15）
+  member_card_issued: { label: '发卡 / 补卡', tone: 'lake' },
+  member_card_lost: { label: '挂失会员卡', tone: 'ember' },
+  member_card_deposit: { label: '会员卡押金', tone: 'pine' },
+  member_card_returned: { label: '退卡', tone: 'clay' },
 };
 
 function describe(detail: Record<string, unknown>): string {

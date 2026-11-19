@@ -9,15 +9,18 @@ import { qk, useSettings } from '../../lib/queries';
 import { cn } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, IconButton, Input, Notice, PendingBadge, SectionTitle, Segmented, Skeleton } from '../../components/ui';
+import { MemberFormCard } from './MemberFormCard';
 import { MemberTagsCard } from './MemberTagsCard';
 
 /** 「会员体系 → 渠道与标签」页签的内容（8.0.19 起三个分区合成一个，外框在 MembershipSection） */
 export function MembersBody() {
   return (
     <div className="max-w-[1024px] space-y-5">
-      <p className="text-[13px] text-ink-3">会员标签（客群分层）与渠道来源。改动只影响之后的建档与显示；档级、赠送比例与会籍在「会员规则」页签。</p>
+      <p className="text-[13px] text-ink-3">会员标签（客群分层）、渠道来源与建档表单。改动只影响之后的建档与显示；档级、赠送比例与会籍在「会员规则」页签。</p>
       <ChannelsCard />
       <MemberTagsCard />
+      {/* 建档表单与实体卡押金（8.1.15） */}
+      <MemberFormCard />
     </div>
   );
 }

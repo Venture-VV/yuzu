@@ -17,6 +17,7 @@ import { BenefitsCard } from '../membership/BenefitsCard';
 import { TrialsCard } from '../membership/TrialsCard';
 import { CountCardsCard } from '../membership/CountCardsCard';
 import { MemberCardsCard } from '../membership/MemberCardsCard';
+import { MemberProfileExtras } from '../membership/MemberProfileExtras';
 import { MemberHistoryCard } from '../membership/MemberHistoryCard';
 import { MemberTagChips } from '../membership/TagPicker';
 import { AccountCard } from '../membership/AccountCard';
@@ -77,6 +78,8 @@ export function MemberDetail({
               {member.createdByName ? `（${member.createdByName}）` : ''}
               {channel && ` · 渠道 ${channel}`}
             </p>
+            {/* 卡类型、推荐人、偏好项目（8.1.15） */}
+            <MemberProfileExtras member={member} />
           </div>
           {can('member.write') && member.mergedIntoId === null && (
             <Button size="sm" variant="secondary" icon={<PencilLine className="size-3.5" />} onClick={onEdit}>
@@ -215,7 +218,7 @@ export function MemberDetail({
       {/* 次卡（v0.7.28）：换会员时整块重来（售卡、退卡的操作编号不带到下一位会员） */}
       <CountCardsCard key={`count-cards-${member.id}`} member={member} />
 
-      {/* 会员实体卡（v0.7.28）：发卡、挂失、补卡；换会员时整块重来 */}
+      {/* 会员实体卡（v0.7.28）：发卡、挂失、补卡；8.1.15 起还有押金与退卡；换会员时整块重来 */}
       <MemberCardsCard key={`member-cards-${member.id}`} member={member} />
 
       {/* 其他信息（8.0.21 自定义字段）：后台建了字段才显示；单独保存，不动会员档案 */}

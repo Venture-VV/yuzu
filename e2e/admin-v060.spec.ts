@@ -61,6 +61,8 @@ test.describe('v0.6.0 管理后台', () => {
       const phone = `198${String(Date.now()).slice(-8)}`;
       await page.getByRole('button', { name: '新建会员' }).click();
       const form = page.getByRole('dialog').filter({ hasText: '新建会员' });
+      // 8.1.15 起先选卡类型（这里是电子卡），再填表
+      await form.getByTestId('card-type-ecard').click();
       await form.getByLabel('姓名').fill('渠道演示会员');
       await form.getByLabel('手机号').fill(phone);
       await form.getByTestId('member-channel').selectOption({ label });

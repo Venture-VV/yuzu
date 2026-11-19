@@ -193,7 +193,11 @@ const SettingsInput = z
     // 建档表单与实体卡押金（8.1.15）：整份提交；不显示的字段不会是必填
     memberForm: z
       .object({
-        cardDeposit: z.number('实体卡押金要填数字').int('实体卡押金要精确到分').min(0, '实体卡押金不能为负').max(MAX_CARD_DEPOSIT, `实体卡押金最多 ${MAX_CARD_DEPOSIT / 100} 元`),
+        cardDeposit: z
+          .number('实体卡押金要填数字')
+          .int('实体卡押金要精确到分')
+          .min(0, '实体卡押金不能为负')
+          .max(MAX_CARD_DEPOSIT, `实体卡押金最多 ${MAX_CARD_DEPOSIT / 100} 元`),
         fields: z.object(
           Object.fromEntries(MEMBER_FORM_FIELDS.map((k) => [k, z.object({ show: z.boolean('请选择显示不显示'), required: z.boolean('请选择必填不必填') })])) as Record<
             (typeof MEMBER_FORM_FIELDS)[number],

@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Minus, Plus, Search, Signature, UserRound, X } from 'lucide-react';
 import { formatStoreCouponCode } from '@shared/coupons';
 import { MAX_GIFT_QUANTITY, type GiftIssueResult, type GiftMemberOption } from '@shared/gifts';
+import { NO_PHONE_LABEL } from '@shared/labels';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp } from '../../lib/erpPending';
 import { useSession } from '../../lib/session';
@@ -149,7 +150,7 @@ export function GiftIssueDialog({
                   <UserRound className="size-4 text-ink-3" />
                   <span className="font-bold">{member.name}</span>
                   <span className="num text-ink-3">{member.memberNo}</span>
-                  <span className="num text-ink-3">{member.phone}</span>
+                  <span className="num text-ink-3">{member.phone ?? NO_PHONE_LABEL}</span>
                   <Badge tone="lake">L{member.grade}</Badge>
                   <span className="flex-1" />
                   {!presetMember && (
@@ -189,7 +190,7 @@ export function GiftIssueDialog({
                             >
                               <span className="font-bold">{m.name}</span>
                               <span className="num text-ink-3">{m.memberNo}</span>
-                              <span className="num text-ink-3">{m.phone}</span>
+                              <span className="num text-ink-3">{m.phone ?? NO_PHONE_LABEL}</span>
                               <span className="text-ink-3">L{m.grade}</span>
                               {!m.usable && <span className="text-[12px]">已停用或已合并，不能发</span>}
                             </button>

@@ -68,7 +68,8 @@ export const DEFAULT_MEMBER_FORM_RULES: MemberFormRules = {
 /** 库里存的值（可能缺项、是旧版本）补齐成完整的规则；不显示的字段不会是必填 */
 export function normalizeMemberFormRules(value: unknown): MemberFormRules {
   const v = (value && typeof value === 'object' ? value : {}) as { cardDeposit?: unknown; fields?: Record<string, { show?: unknown; required?: unknown } | undefined> };
-  const deposit = typeof v.cardDeposit === 'number' && Number.isInteger(v.cardDeposit) && v.cardDeposit >= 0 && v.cardDeposit <= MAX_CARD_DEPOSIT ? v.cardDeposit : DEFAULT_MEMBER_FORM_RULES.cardDeposit;
+  const deposit =
+    typeof v.cardDeposit === 'number' && Number.isInteger(v.cardDeposit) && v.cardDeposit >= 0 && v.cardDeposit <= MAX_CARD_DEPOSIT ? v.cardDeposit : DEFAULT_MEMBER_FORM_RULES.cardDeposit;
   const fields = {} as Record<MemberFormField, MemberFormFieldRule>;
   for (const key of MEMBER_FORM_FIELDS) {
     const d = DEFAULT_MEMBER_FORM_RULES.fields[key];

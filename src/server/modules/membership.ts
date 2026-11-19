@@ -910,7 +910,7 @@ export async function assignInitialGrade(tx: Tx, memberId: number, input: Initia
   });
 }
 
-const LookupQuery =z.object({ q: z.string('请输入手机号或会员号').trim().min(1, '请输入手机号或会员号').max(32, '最多 32 个字') });
+const LookupQuery = z.object({ q: z.string('请输入手机号或会员号').trim().min(1, '请输入手机号或会员号').max(32, '最多 32 个字') });
 
 /** 另一家店的只读查询：按完整手机号或会员号查一位会员的档阶与会籍；不含余额与流水；每次查询记审计 */
 export async function lookupMember(deps: Deps, raw: unknown, ctx: OpContext): Promise<{ found: boolean; member: MemberLookupResult | null }> {

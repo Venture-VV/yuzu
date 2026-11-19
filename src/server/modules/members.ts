@@ -341,7 +341,15 @@ async function insertMemberRow(tx: Tx, input: ParsedCreate, ctx: OpContext, opti
   const fields: OptionalFields =
     (options.enforceRequired ?? true)
       ? applyFormRules((await loadSettings(tx)).memberForm, input, null)
-      : { gender: input.gender, birthday: input.birthday, note: input.note, channel: input.channel, referrerMemberId: input.referrerMemberId, preferredItems: input.preferredItems, tagIds: input.tagIds };
+      : {
+          gender: input.gender,
+          birthday: input.birthday,
+          note: input.note,
+          channel: input.channel,
+          referrerMemberId: input.referrerMemberId,
+          preferredItems: input.preferredItems,
+          tagIds: input.tagIds,
+        };
   const channel = await channelFor(tx, fields.channel, null);
   const referrerId = await referrerFor(tx, fields.referrerMemberId ?? null, null, null);
   const preferred = fields.preferredItems ?? [];
