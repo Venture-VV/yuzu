@@ -287,7 +287,13 @@ export type AuditAction =
   | 'gift_issue'
   // 8.1.10 急采后补合同；核库转领用（库管核库、部门答复替代，detail 写领用、替代、转采购）
   | 'po_contract_added'
-  | 'request_stock';
+  | 'request_stock'
+  // 8.1.15 块 B1（docs/DINING_V8115.md）：桌台动作——清台、维修、恢复、并台、拆台
+  | 'table_clear'
+  | 'table_maintenance'
+  | 'table_restore'
+  | 'table_merge'
+  | 'table_split';
 
 export interface AuditEntry {
   staffId: number | null;

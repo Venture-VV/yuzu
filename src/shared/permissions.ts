@@ -27,11 +27,13 @@
 // 新增「打开平板点餐」「维护电子菜单」。平板上确认下单的服务员照旧要「餐饮点单」+「前台挂账」（凭点单密码认人）。
 // 8.1.1 UI 工作台（docs/WORKBENCH_V811.md 第 6 节）：新岗位「设计师」（只进工作台），新增「工作台：编辑」「工作台：发布」；
 // 店主 2026-11-15 定设计师可以发布（GZ3）：两项默认给店主与设计师，别的岗位要的在后台「岗位权限」里加。
+// 8.1.15《浴族系统需求汇总》块 B（docs/DINING_V8115.md，ZT 待确认）：新增「在餐厅 / 水吧 / 果吧下单」三项（原来有「餐饮点单」的岗位三项都有）、
+// 新职责「康美部」（默认有「餐饮点单」与水吧、果吧两项，没有餐厅；不和别的职责分组互斥）。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store', 'tablet', 'designer'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request', 'legal', 'concierge', 'concierge_manager'] as const;
+export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request', 'legal', 'concierge', 'concierge_manager', 'kangmei'] as const;
 export type Duty = (typeof DUTIES)[number];
 
 /**
@@ -268,7 +270,7 @@ export const PERMISSIONS = {
   /** 钟房：上牌、派钟、上钟、下钟、加钟、退钟（v0.7.1，待确认：前台岗位都能做；派钟、加钟、退钟还要能挂账） */
   'technician.dispatch': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 餐饮点单：按手牌给在店客人点菜（挂账）、催单、上菜（S5 第一步，待确认：前台岗位都能做；下单还要能挂账） */
-  'dining.order': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  'dining.order': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'], duties: ['kangmei'] },
   /** 厨房出品屏：开始做、出餐、沽清（S5 第一步，待确认：前台岗位与后勤人员；厨房可以用后勤账号） */
   'dining.kitchen': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
   /**
@@ -338,6 +340,10 @@ export const PERMISSIONS = {
   'report.commission': { roles: ['owner', 'store_manager'] },
   /** 营销成本测算（8.0.4，HY14）：券、赠金、会员折扣、服务类权益的实核成本；有财务职责的账号一律没有（见 FINANCE_EXCLUDED） */
   'marketing.cost': { roles: ['owner', 'store_manager'] },
+  // 8.1.15 块 B（docs/DINING_V8115.md 第 4 节）：按出品口下单，点单页只显示有权限的出品口，服务端逐行核对；默认与「餐饮点单」同一批岗位，康美部没有餐厅
+  'dining.orderRestaurant': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  'dining.orderWater': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'], duties: ['kangmei'] },
+  'dining.orderFruit': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'], duties: ['kangmei'] },
 } as const satisfies Record<string, Rule>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -547,6 +553,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'marketing.cost': '营销成本测算（券、赠金、会员折扣的实核成本；有财务职责的账号不生效）',
   'studio.edit': 'UI 工作台：改版面草稿、传素材、预览',
   'studio.publish': 'UI 工作台：发布、回滚版面（平板马上换成新样子）',
+  'dining.orderRestaurant': '点单：在餐厅下单',
+  'dining.orderWater': '点单：在水吧下单',
+  'dining.orderFruit': '点单：在果吧下单',
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
@@ -669,4 +678,5 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission', 'marketing.cost'] },
   { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'emenu.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
   { title: 'UI 工作台', items: ['studio.edit', 'studio.publish'] },
+  { title: '餐饮：按出品口下单', items: ['dining.orderRestaurant', 'dining.orderWater', 'dining.orderFruit'] },
 ];

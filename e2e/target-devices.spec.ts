@@ -103,7 +103,9 @@ const DEVICES: Device[] = [
 const SID = 990_001;
 const NOW = new Date().toISOString();
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
-const free = (id: number, name: string, area: string, seats: number) => ({ id, name, area, seats, sortOrder: id, active: true, session: null });
+// 8.1.15 块 B1：桌台多了状态（可用 / 待清台 / 维修中）
+const STATE = { state: 'available', maintenanceReason: null, maintenanceUntil: null, stateSince: null } as const;
+const free = (id: number, name: string, area: string, seats: number) => ({ id, name, area, seats, sortOrder: id, active: true, ...STATE, session: null });
 const BOARD: TablesBoard = {
   serverTime: NOW,
   businessDate: NOW.slice(0, 10),
@@ -117,6 +119,7 @@ const BOARD: TablesBoard = {
       seats: 10,
       sortOrder: 990_103,
       active: true,
+      ...STATE,
       session: {
         id: SID,
         sessionNo: 'T99000001',
@@ -130,6 +133,7 @@ const BOARD: TablesBoard = {
         amount: 30_200,
         lineCount: 6,
         pendingDishes: 4,
+        mergedInto: null,
       },
     },
     free(990_104, '听松阁', '景观包厢', 8),
@@ -206,6 +210,8 @@ const DETAIL: TableSessionDetail = {
   lines: LINES,
   pending: PENDING,
   moves: [],
+  mergedInto: null,
+  merged: [],
 };
 
 const RECEIPT: DiningReceipt = (() => {
@@ -216,6 +222,8 @@ const RECEIPT: DiningReceipt = (() => {
     orderNo: `K${seq}`,
     postedAt: ago(48 - seq * 10),
     postedByName: '前台小周',
+    orderNote: seq === 1 ? '先上凉菜，孩子的不要辣' : '',
+    deliverRoom: '',
     lines: DISHES.flatMap((d, i) =>
       d.order === seq
         ? [

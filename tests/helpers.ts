@@ -33,7 +33,8 @@ export async function legacySwitchesOff(sql: Sql): Promise<void> {
   const off = { enabled: false };
   await sql`INSERT INTO settings (key, value) VALUES
     ('technician_rules', ${sql.json(off)}), ('room_rules', ${sql.json(off)}), ('emenu_rules', ${sql.json(off)}), ('location_rules', ${sql.json(off)}),
-    ('dining_rules', ${sql.json({ enabled: false, tablesEnabled: false })}),
+    -- 8.1.15 块 B1：结账以后先待清台（默认开）；之前的用例按结账后桌台直接可用编写，这里关上，新行为由 tests/dining-v8115*.test.ts 打开了验证
+    ('dining_rules', ${sql.json({ enabled: false, tablesEnabled: false, clearAfterCheckout: false })}),
     ('erp_modules', ${sql.json({ canteen: false, patrol: false })}),
     ('wecom_weekly_push', 'false'::jsonb),
     -- 自动补货（8.0.20 新加的）到点会自己建采购单草稿，结果随钟点变；别的用例里关着，它自己的用例里打开
