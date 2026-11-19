@@ -44,7 +44,7 @@ export function Backdrop({
 }
 
 /** 弹窗的标题两行：中文大、英文小；切到英文时对调（英文大、中文小）。w 是弹窗的宽，y 是两行文字框的上沿 */
-function Titles({ title, subtitle, w, y, size }: { title: string; subtitle: string; w: number; y: [number, number]; size: [number, number] }) {
+export function Titles({ title, subtitle, w, y, size }: { title: string; subtitle: string; w: number; y: [number, number]; size: [number, number] }) {
   const t = namePair(title, subtitle, useLang());
   return t.mainEn ? (
     <>
@@ -67,7 +67,7 @@ function Titles({ title, subtitle, w, y, size }: { title: string; subtitle: stri
  * 放大的一档（8.0.15）：弹窗绕屏幕正中放大 BIG.ui 倍（429 × 501 → 558 × 651），里面照设计稿的像素写。
  * 这一层自己不挡点按（点弹窗外面仍落在后面的半透明层上）。
  */
-function Centered({ children }: { children: ReactNode }) {
+export function Centered({ children }: { children: ReactNode }) {
   const large = useBig();
   if (!large) return <>{children}</>;
   return <div style={{ ...box(0, 0, 1024, 768), transform: `scale(${BIG.ui})`, transformOrigin: '512px 384px', pointerEvents: 'none' }}>{children}</div>;

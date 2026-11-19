@@ -596,6 +596,20 @@ describe('点单密码', () => {
     expect(JSON.stringify(logs)).not.toContain(clerkPin);
   });
 
+  it('离开菜单前的员工确认（8.1.15，TC5）：点单密码对了回这位同事的名字；不对拒绝、记进同一份限次；没有平板点餐权限的账号用不了', async () => {
+    const ok = await api(ctx.app, pad, 'POST', '/api/emenu/staff-check', { pin: clerkPin });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body).toEqual({ ok: true, displayName: expect.any(String) });
+    const bad = await api(ctx.app, pad, 'POST', '/api/emenu/staff-check', { pin: wrongPin(clerkPin) });
+    expect(bad.status).toBe(403);
+    expect(bad.body.error.code).toBe('PIN_INVALID');
+    expect((await api(ctx.app, pad, 'POST', '/api/emenu/staff-check', {})).status).toBe(400);
+    // 后厨没有「打开平板点餐」：这个接口也不让用
+    expect((await api(ctx.app, cook, 'POST', '/api/emenu/staff-check', { pin: clerkPin })).status).toBe(403);
+    // 对的一次把这台平板的失败次数清掉（下面那条用例从 0 次数起）
+    expect((await api(ctx.app, pad, 'POST', '/api/emenu/staff-check', { pin: clerkPin })).status).toBe(200);
+  });
+
   it('输错 5 次这台平板锁 5 分钟，别的平板不受影响；没有点单权限的密码被拒（不算输错）；收回、停用以后不能用', async () => {
     const line = [{ itemId: item['华夫牛角']!, quantity: 1 }];
     const bad = wrongPin(clerkPin);

@@ -6,9 +6,9 @@
 // 发布、回滚带操作编号，接进「结果待确认」（断网时查回、重提或作废）；发布前跑检查，红的拦下。
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router';
+import { useBlocker, useNavigate, useParams } from 'react-router';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle2, Clock, Ellipsis, Eye, History, Languages, Maximize2, MessageSquare, Minus, Package, Plus, Redo2, Send, TriangleAlert, Undo2 } from 'lucide-react';
+import { CheckCircle2, Clock, Ellipsis, Eye, History, Languages, LogOut, Maximize2, MessageSquare, Minus, Package, Plus, Redo2, Send, TriangleAlert, Undo2 } from 'lucide-react';
 import { formatWindow, periodWindow, type EmenuLayout, type EmenuMenu, type EmenuPeriodKey } from '@shared/emenu';
 import { qrShape } from '@shared/qr-svg';
 import {
@@ -289,6 +289,44 @@ export function StudioPage() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [status]);
 
+  // ── 退出（8.1.15，TC8、TC9）：回后台的「工作台」。还有没存上的改动时先存，存好马上走；存不上停下来问 ──
+  // 点顶栏的「退出」、按浏览器的后退键走的是同一条路（都被下面这个拦一下）；关页面、刷新照旧由上面的 beforeunload 提醒
+  const navigate = useNavigate();
+  const statusNow = useRef(status);
+  statusNow.current = status;
+  /** 点过「不保存，直接退出」：这一次不再拦 */
+  const letGo = useRef(false);
+  const blocker = useBlocker(
+    useCallback(
+      ({ currentLocation, nextLocation }: { currentLocation: { pathname: string }; nextLocation: { pathname: string } }) =>
+        !letGo.current && statusNow.current !== 'saved' && currentLocation.pathname !== nextLocation.pathname,
+      [],
+    ),
+  );
+  const [leaveStep, setLeaveStep] = useState<'saving' | 'failed' | null>(null);
+  const saveThenLeave = useCallback(async () => {
+    setLeaveStep('saving');
+    // 别处改过这份版面（版本号对不上）：再存也存不进去，直接问
+    const ok = statusNow.current === 'conflict' ? false : await save();
+    if (ok && blocker.state === 'blocked') {
+      letGo.current = true;
+      blocker.proceed();
+    } else if (!ok) setLeaveStep('failed');
+  }, [blocker, save]);
+  useEffect(() => {
+    if (blocker.state === 'blocked' && leaveStep === null) void saveThenLeave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocker.state]);
+  const stayHere = () => {
+    setLeaveStep(null);
+    if (blocker.state === 'blocked') blocker.reset();
+  };
+  const leaveAnyway = () => {
+    letGo.current = true;
+    if (blocker.state === 'blocked') blocker.proceed();
+    else void navigate('/admin/studio');
+  };
+
   const change = useCallback((fn: (d: StudioDoc) => StudioDoc, coalesce?: string) => history.set(fn(latest.current), coalesce), [history]);
 
   // ── 选中的那一屏、检查 ──
@@ -557,11 +595,64 @@ export function StudioPage() {
 
   return (
     <div className="flex h-dvh flex-col bg-paper-2 text-ink" data-testid="studio">
+      {leaveStep && (
+        <Dialog
+          open
+          dismissible={leaveStep === 'failed'}
+          onClose={stayHere}
+          title={leaveStep === 'saving' ? '正在保存草稿…' : '最近的改动没存上'}
+          description={
+            leaveStep === 'saving'
+              ? '存好就退出，不用再点'
+              : status === 'conflict'
+                ? '别处（另一个窗口或另一位同事）改过这份版面，你这边最近的几步存不进去。'
+                : '可能是网络不通。现在退出，最近这几步改动会丢；之前存好的草稿不受影响。'
+          }
+          width="max-w-md"
+          footer={
+            leaveStep === 'failed' ? (
+              <>
+                <Button variant="ghost" onClick={leaveAnyway} data-testid="studio-exit-discard">
+                  不保存，直接退出
+                </Button>
+                {status !== 'conflict' && (
+                  <Button variant="secondary" onClick={() => void saveThenLeave()} data-testid="studio-exit-retry">
+                    再存一次
+                  </Button>
+                )}
+                <Button variant="primary" onClick={stayHere} data-testid="studio-exit-stay">
+                  继续编辑
+                </Button>
+              </>
+            ) : undefined
+          }
+        >
+          <div className="text-[13px] text-ink-2" data-testid="studio-exit-dialog" data-step={leaveStep}>
+            {leaveStep === 'saving' ? (
+              <div className="flex items-center gap-2.5">
+                <span className="size-4 animate-spin rounded-full border-2 border-pine border-t-transparent" aria-hidden />
+                工作台每改一步都会自动存草稿，这是最后一次。
+              </div>
+            ) : (
+              <p>选「继续编辑」留在这里：可以等网络好了再点「退出」，或者把要紧的改动记下来。</p>
+            )}
+          </div>
+        </Dialog>
+      )}
       {/* 顶栏 */}
       <header className="flex h-12 shrink-0 items-center gap-1 border-b border-line bg-card px-2">
-        <Link to="/admin/studio" className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-ink-2 hover:bg-paper-2" title="回后台的「工作台」">
-          <ArrowLeft className="size-4" />
-        </Link>
+        {/* 退出（8.1.15，TC8）：最左边固定一个带字、有边框的键，与右边的工具按钮分开；原来只有一个没有字的小箭头 */}
+        <button
+          type="button"
+          onClick={() => void navigate('/admin/studio')}
+          className="group mr-1 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line-strong bg-paper px-3 text-[12.5px] font-semibold text-ink-2 transition-colors hover:border-clay hover:bg-clay-soft hover:text-clay"
+          title="退出工作台，回后台的「工作台」（草稿会先存好）"
+          data-testid="studio-exit"
+        >
+          <LogOut className="size-4 -scale-x-100 transition-transform group-hover:-translate-x-0.5" />
+          退出
+        </button>
+        <span className="mr-1 h-5 w-px shrink-0 bg-line" aria-hidden />
         {/* 顶栏在窄一点的屏幕上（不到 1400 宽）只留图标与要紧的字，鼠标停上去有说明 */}
         <div className="mr-2 shrink-0 whitespace-nowrap text-[13.5px] font-bold">
           <span className="hidden min-[1400px]:inline">工作台 </span>

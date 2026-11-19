@@ -23,7 +23,7 @@ import {
   updateEmenuDish,
 } from './admin';
 import { abandonEmenuOrder, checkEmenuTable, emenuGuest, emenuImage, emenuMenu, emenuOpLookup, placeEmenuOrder, saveEmenuImage } from './core';
-import { clearOrderPin, orderPinStatus, setOrderPin } from './pins';
+import { clearOrderPin, orderPinStatus, resolveWaiter, setOrderPin } from './pins';
 import { readBrandFont } from './fonts';
 
 export function registerEmenuRoutes(app: FastifyInstance, deps: Deps) {
@@ -38,6 +38,12 @@ export function registerEmenuRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/api/emenu/guest', { preHandler: tablet }, async (req) => emenuGuest(sql, req.query ?? {}));
   app.get('/api/emenu/table', { preHandler: tablet }, async (req) => checkEmenuTable(sql, req.query ?? {}));
   app.post('/api/emenu/orders', { preHandler: tablet }, async (req) => placeEmenuOrder(deps, req.body, req.actor, req.ip));
+  // 离开电子菜单前核对一位点单的同事（8.1.15，TC5）：后台开了「点单密码」时，平板上的「返回工作台」「退出登录」先过这一步。
+  // 与下单同一套密码、同一份限次（错多了锁，按这台平板登录的账号记）；只核对、不写业务数据
+  app.post('/api/emenu/staff-check', { preHandler: tablet }, async (req) => {
+    const waiter = await resolveWaiter(deps, (req.body as { pin?: unknown } | null)?.pin, req.actor, req.ip);
+    return { ok: true, displayName: waiter.displayName };
+  });
   app.get('/api/emenu/orders/by-key/:key', { preHandler: tablet }, async (req) => emenuOpLookup(sql, req.params));
   app.post('/api/emenu/orders/by-key/:key/abandon', { preHandler: tablet }, async (req) => abandonEmenuOrder(deps, req.params, req.body, req.actor, req.ip));
   // 图片的内容不会变（按内容去重、只追加）：浏览器长期缓存

@@ -20,6 +20,7 @@ import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
 import { DeskLayout } from './features/frontdesk/desk';
 import { ADMIN_SECTIONS } from '@shared/admin';
 import { adminRoutes } from './features/admin/AdminPage';
+import { homeIsEmenu } from './lib/landing';
 import { useCan, useOptionalSession } from './lib/session';
 import { useErpAccess } from './features/erp/access';
 import { lazyPage } from './lib/lazyPage';
@@ -213,7 +214,7 @@ function Home() {
   // 设计师（8.1.1）：只进工作台
   if (can('studio.edit') && !can('frontdesk.read')) return <Navigate to="/admin/studio" replace />;
   // 「点餐平板」账号（8.0.10）：只能打开点餐页，登录后直接进去
-  if (can('emenu.view') && !can('frontdesk.read')) return <Navigate to="/emenu" replace />;
+  if (homeIsEmenu(can)) return <Navigate to="/emenu" replace />;
   // 他店查询（v0.7.23）：另一家店的同事只能查会员档阶
   if (can('member.lookup')) return <Navigate to="/lookup" replace />;
   if (erp.landing) return <Navigate to={erp.landing} replace />;
