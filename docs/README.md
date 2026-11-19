@@ -80,6 +80,7 @@
 - [`TEST_AUDIT.md`](TEST_AUDIT.md)：用例体检（2026-11-18，工程治理三期）
 - [`WAREHOUSES.md`](WAREHOUSES.md)：两级库存：总仓 + 部门小仓（v0.7.11，RQ-002 第一步）
 - [`WORKBENCH_V811.md`](WORKBENCH_V811.md)：UI 工作台（8.1.1–8.1.2）：设计师在系统里直接改版面
+- [`YUBA_V8115.md`](YUBA_V8115.md)：8.1.15 追加 ·《浴霸系统需求汇总》：对照现状与做法
 
 ## 部署、发版与环境
 
