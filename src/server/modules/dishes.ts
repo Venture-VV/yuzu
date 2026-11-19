@@ -417,6 +417,10 @@ export async function updateDishTx(tx: Tx, ctx: OpContext, id: number, f: DishFi
   // 出品口与小类：原来按默认归的、现在选的与默认一样，不算改（不把「按默认」写成设过）
   const slotChanged = from.outlet !== to.outlet || from.group !== to.group;
   if (slotChanged) changes.push({ label: '出品口与小类', before: slotLabel(from), after: slotLabel(to) });
+  // 但按默认归的菜，默认归到哪是看分类与档口的：这次改了分类或档口，不写明的话保存以后会跟着跑到另一处——
+  // 页面上选的是哪一处就写明哪一处（也免得没有另一处权限的人借换档口把菜挪过去）
+  const kept = diningSlotOf({ outlet: cur.diningOutlet, group: cur.diningGroup, category: f.category, stationName: station.name });
+  const writeSlot = kept.outlet !== to.outlet || kept.group !== to.group;
   if (cur.stationId !== f.stationId) changes.push({ label: '档口', before: cur.stationName ?? '', after: station.name });
   if (cur.dishImageId !== f.imageId) changes.push({ label: '图片', before: cur.dishImageId ? '有' : '没有', after: f.imageId ? (cur.dishImageId ? '换了一张' : '有') : '没有' });
   const methodsChanged = !sameList(kids.methods, f.methods);
@@ -443,7 +447,7 @@ export async function updateDishTx(tx: Tx, ctx: OpContext, id: number, f: DishFi
 
   await tx`
     UPDATE service_items SET name = ${f.name}, category = ${f.category}, station_id = ${f.stationId}, dish_image_id = ${f.imageId},
-           ${slotChanged ? tx`dining_outlet = ${to.outlet}, dining_group = ${to.group},` : tx``} updated_at = clock_timestamp()
+           ${writeSlot ? tx`dining_outlet = ${to.outlet}, dining_group = ${to.group},` : tx``} updated_at = clock_timestamp()
     WHERE id = ${id}`;
   if (methodsChanged) await writeMethods(tx, id, f.methods);
   if (addonsChanged) await writeAddons(tx, id, f.addons);

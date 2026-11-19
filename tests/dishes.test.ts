@@ -581,6 +581,37 @@ describe('维护权限按出品口分三项，改价另一项', () => {
     expect((await update(fruit, { methods: ['去皮'] })).status).toBe(200);
   });
 
+  it('按默认归的菜换了档口、分类：出品口照页面上选的那一处写明，不跟着跑；没有另一处权限的不能借换档口把菜挪过去', async () => {
+    // 价目里建的两道老菜，都没设过点单分类：冰红茶（分类「饮品」、水吧出）按默认归水吧 · 手作饮料；花雕酒（分类「酒水」、热菜档出）归餐厅 · 酒水
+    const legacyDish = async (name: string, category: string, at: string) => {
+      const made = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name, category, price: 1200 });
+      const id = made.body.items.find((i: { name: string }) => i.name === name).id as number;
+      expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/items', { items: [{ id, stationId: station[at] }] })).status).toBe(200);
+      return dishOf(name);
+    };
+    const tea = await legacyDish('冰红茶', '饮品', '水吧');
+    expect(tea).toMatchObject({ outlet: 'water', group: '手作饮料', slotAssigned: false, stationName: '水吧' });
+    // 水吧主管把它挪到热菜档口出，出品口没动（页面上还是水吧 · 手作饮料）：保存以后还在水吧，并且写明了
+    //（不写明的话，「饮品」又不在水吧做，会按默认归到餐厅 · 酒水——他没有餐厅的权限）
+    const moved = await update(tea, { stationId: station['热菜'] }, water);
+    expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+    expect(moved.body.dish).toMatchObject({ outlet: 'water', group: '手作饮料', slotAssigned: true, stationName: '热菜' });
+    expect((await menuDish('冰红茶'))!).toMatchObject({ outlet: 'water', group: '手作饮料' });
+    // 餐厅的人照旧改不了它；水吧的人想连出品口一起挪到餐厅被拒绝
+    expect((await update(moved.body.dish, { methods: ['去冰'] }, chef)).status).toBe(403);
+    expect((await update(moved.body.dish, { slot: 'restaurant:酒水' }, water)).status).toBe(403);
+    // 只改分类（默认归类也看分类）：花雕酒的分类从「酒水」改成「餐饮」，页面上选的还是餐厅 · 酒水，保存以后也是
+    const wine = await legacyDish('花雕酒', '酒水', '热菜');
+    expect(wine).toMatchObject({ outlet: 'restaurant', group: '酒水', slotAssigned: false });
+    const recat = await update(wine, { category: '餐饮' });
+    expect(recat.status, JSON.stringify(recat.body)).toBe(200);
+    expect(recat.body.dish).toMatchObject({ outlet: 'restaurant', group: '酒水', slotAssigned: true, category: '餐饮' });
+    // 没动分类、档口的保存：按默认归的还是按默认（不把「按默认」写成设过）
+    const fruit = await dishOf('鲜切果盘');
+    expect(fruit.slotAssigned).toBe(false);
+    expect((await update(fruit, { methods: ['去皮', '切块'] })).body.dish).toMatchObject({ outlet: 'fruit', slotAssigned: false });
+  });
+
   it('没有任何菜品权限的（店员）：维护、改价、传图都进不来', async () => {
     const tea = await dishOf('柠檬茶');
     expect((await update(tea, { methods: [] }, ctx.clerk)).status).toBe(403);
