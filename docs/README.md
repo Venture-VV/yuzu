@@ -187,6 +187,7 @@
 - [`HANDOFF_V809.md`](HANDOFF_V809.md)：v8.0.9 交接说明 · 安保巡场与员工工作台
 - [`HANDOFF_V811.md`](HANDOFF_V811.md)：v8.1.1 交接说明 · AI 辅助换 DeepSeek、UI 工作台第一步（平板电子菜单）
 - [`HANDOFF_V8110.md`](HANDOFF_V8110.md)：v8.1.13 交接说明 · 核库转领用、急采后补合同
+- [`HANDOFF_V8114.md`](HANDOFF_V8114.md)：v8.1.14 交接说明 · 品牌部的三条（电子菜单）
 - [`HANDOFF_V812.md`](HANDOFF_V812.md)：v8.1.2 交接说明 · UI 工作台第二步（卡片模板、组件与变体、员工食堂、给小程序线的格式、定时发布与批注）
 - [`HANDOFF_V813.md`](HANDOFF_V813.md)：v8.1.3 交接说明 · 代码整洁与网络波动防护
 - [`HANDOFF_V814.md`](HANDOFF_V814.md)：v8.1.4 交接说明 · 老浏览器上侧栏划不动、工作台开在哪一档

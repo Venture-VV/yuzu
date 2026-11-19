@@ -417,3 +417,52 @@ describe('顶栏的位置与间距（8.1.6，QZ8、QZ9）', () => {
     expect(neighborGaps(boxes, 'tag')!.right.with).toBeNull();
   });
 });
+
+// 8.1.14（品牌部《工作台需求汇总 1.2》第 3 条，PC3）：封面标题右下角的手绘圆环是一份矢量路径（coverRing.ts）
+describe('封面标题右下角的手绘圆环', async () => {
+  const { COVER_RING_PATH, COVER_RING_VIEWBOX } = await import('../src/client/features/emenu/coverRing');
+  const subpaths = COVER_RING_PATH.split('M').filter(Boolean);
+  const points = (d: string) => {
+    const n = (d.match(/-?\d*\.?\d+/g) ?? []).map(Number);
+    return n.flatMap((x, i) => (i % 2 === 0 ? [[x, n[i + 1]!] as const] : []));
+  };
+
+  it('两笔：一个留着缺口的环（不闭合成同心的两圈）加缺口处的一个墨点；每一笔都收口', () => {
+    expect(subpaths).toHaveLength(2);
+    for (const sub of subpaths) expect(sub.endsWith('Z')).toBe(true);
+    // 环是几百段曲线，墨点只有几段
+    const curves = subpaths.map((sub) => (sub.match(/C/g) ?? []).length);
+    expect(curves[0]).toBeGreaterThan(100);
+    expect(curves[1]).toBeLessThan(10);
+    // 只有 M、C、L、Z 四种命令（脚本生成的，没有相对坐标、弧线）
+    expect(COVER_RING_PATH.replace(/[-\d. ]/g, '').replace(/[MCLZ]/g, '')).toBe('');
+  });
+
+  it('画满那一格、不出格：路径上的点都在外框里，上下左右都贴到边（差不到 1%）', () => {
+    const [x, y, w, h] = COVER_RING_VIEWBOX.split(' ').map(Number) as [number, number, number, number];
+    expect(w).toBeCloseTo(h, 5);
+    const pts = points(COVER_RING_PATH);
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    // 控制点可以比曲线本身略出去一点（最多 0.5%）
+    for (const v of xs) expect(v >= x - w * 0.005 && v <= x + w * 1.005).toBe(true);
+    for (const v of ys) expect(v >= y - h * 0.005 && v <= y + h * 1.005).toBe(true);
+    expect(Math.min(...xs) - x).toBeLessThan(w * 0.01);
+    expect(x + w - Math.max(...xs)).toBeLessThan(w * 0.01);
+    expect(Math.min(...ys) - y).toBeLessThan(h * 0.01);
+    expect(y + h - Math.max(...ys)).toBeLessThan(h * 0.01);
+  });
+
+  it('不是正圆、有粗有细：环上的点离中心最近与最远差一成以上；墨点在右上角', () => {
+    const [x, y, w, h] = COVER_RING_VIEWBOX.split(' ').map(Number) as [number, number, number, number];
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const r = points(subpaths[0]!).map((p) => Math.hypot(p[0] - cx, p[1] - cy));
+    expect(Math.max(...r) / Math.min(...r)).toBeGreaterThan(1.1);
+    const dot = points(subpaths[1]!);
+    for (const p of dot) {
+      expect(p[0]).toBeGreaterThan(cx);
+      expect(p[1]).toBeLessThan(cy);
+    }
+  });
+});

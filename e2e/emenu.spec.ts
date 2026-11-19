@@ -440,10 +440,10 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       const fishRow = pad.getByTestId(`emenu-dish-${fishId}`);
       await expect(fishRow).toBeInViewport();
       await expect(pad.locator('[data-layout=list_text]').filter({ has: fishRow }).getByTestId('emenu-vtitle')).toHaveText('招牌');
-      // 8.1.5：文字陈列（纯文字的菜）的加号紧跟在名称后面，间距是加号大小的 2.5 倍
+      // 文字陈列的加号紧跟在名称后面（8.1.5），间距是加号大小的 2 倍（8.1.14 品牌部：大图 + 文字、文字陈列 2 倍）
       const fishName = (await pad.getByTestId(`emenu-name-${fishId}`).boundingBox())!;
       const fishAdd = (await pad.getByTestId(`emenu-add-${fishId}`).boundingBox())!;
-      expect((fishAdd.x - (fishName.x + fishName.width)) / fishAdd.width).toBeCloseTo(2.5, 1);
+      expect((fishAdd.x - (fishName.x + fishName.width)) / fishAdd.width).toBeCloseTo(2, 1);
       // 多规格：点加号进详情，选「小份」再加
       await pad.getByTestId(`emenu-add-${fishId}`).click();
       const detail = pad.getByTestId('emenu-detail');
@@ -659,11 +659,11 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     near(logo.x, 40);
     near(logo.h, 22.3 * 0.7);
     near(logo.y + logo.h / 2, langIcon.y + langIcon.h / 2);
-    // 8.1.5：带图片的菜，加号紧跟在菜名后面，间距是加号大小的 4.5 倍（12.6 × 4.5 = 56.7）
+    // 带图片的版式，加号紧跟在菜名后面（8.1.5），间距是加号大小的 3.5 倍（8.1.14 品牌部；12.6 × 3.5 = 44.1，设计稿原来的 44.2）
     const name1 = await at('emenu-name-1');
     const add1 = await at('emenu-add-1');
     near(add1.w, 12.6);
-    near(add1.x - (name1.x + name1.w), 12.6 * 4.5);
+    near(add1.x - (name1.x + name1.w), 12.6 * 3.5);
     // 「两菜 · 并排」：两道菜的文字在 39.7 / 426.2、557.1（设计稿）
     const first = await at('emenu-dish-1');
     near(first.x, 39.7);
@@ -1230,9 +1230,9 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     const logo = await box('emenu-logo');
     expect(logo.height).toBeCloseTo(22.3 * 1.3 * 0.7, 0);
     expect(Math.abs(logo.y + logo.height / 2 - (lang.y + lang.height / 2))).toBeLessThan(1);
-    // 8.1.5：带图片的菜，加号与菜名的间距是加号大小的 4.5 倍（放大一档也一样：都按看到的大小算）
+    // 带图片的版式，加号与菜名的间距是加号大小的 3.5 倍（8.1.14 品牌部；放大一档也一样：都按看到的大小算）
     const name1 = await box('emenu-name-1');
-    expect((plus.x - (name1.x + name1.width)) / plus.width).toBeCloseTo(4.5, 1);
+    expect((plus.x - (name1.x + name1.width)) / plus.width).toBeCloseTo(3.5, 1);
     expect(lang.x + lang.width).toBeLessThan(search.x - 8);
     expect(search.x + search.width).toBeLessThan(order.x - 8);
     expect(order.x + order.width).toBeLessThan(tagPill.x - 8);

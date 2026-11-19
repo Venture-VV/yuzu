@@ -21,5 +21,5 @@
     "@shared/*": ["./src/shared/*"],
     "@client/*": ["./src/client/*"]
   },
-  "ignoreDependencies": ["tailwindcss", "@free-fonts/zhuque-fangsong", "jscpd"]
+  "ignoreDependencies": ["tailwindcss", "@free-fonts/zhuque-fangsong", "@fontsource/playfair-display", "jscpd"]
 }

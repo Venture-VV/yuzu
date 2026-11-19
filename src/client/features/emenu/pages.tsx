@@ -5,7 +5,8 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { dishBlock, type EmenuBlock, type EmenuDishView, type EmenuPageView, type EmenuSpecView } from '@shared/emenu';
-import { blockLabel, dishAttrs, dishDescription, dishNames, dishTagline, dishUnit, namePair, useLang, useM } from './i18n';
+import { blockLabel, dishAttrs, dishDescription, dishNames, dishTagline, dishUnit, EnName, namePair, useLang, useM } from './i18n';
+import { COVER_RING_PATH, COVER_RING_VIEWBOX } from './coverRing';
 import { PlusDot } from './icons';
 import { designPoint, FadeImg } from './motion';
 import { BIG, box, useBig, ZoomAt } from './stage';
@@ -55,7 +56,7 @@ export function Price({ cents, dish, scale = 1, style }: { cents: number; dish: 
 export const plusSize = (large: boolean) => (large ? 15 : 12.6);
 
 /**
- * 加号与菜名的间距（8.1.5，PP5，EMENU_PLUS_GAP）：一段能缩的空，照理是加号大小的 4.5 倍（带图片）/ 2.5 倍（纯文字）；
+ * 加号与菜名的间距（8.1.5，PP5，EMENU_PLUS_GAP）：一段能缩的空，照理是加号大小的 3.5 倍（带图片的版式）/ 2 倍（大图 + 文字、文字陈列；8.1.14 品牌部改的数）；
  * 菜名长、地方不够时这段空往下收，最少 1 倍——所以菜名最宽给到「能用的宽 − 加号 − 1 倍的空」
  */
 function PlusGap({ kind, large }: { kind: EmenuPlusKind; large: boolean }) {
@@ -229,7 +230,7 @@ function Tagline({ dish }: { dish: EmenuDishView }) {
  * 一道菜的文字：菜名（后面可以带小字）、加号、英文名、介绍、价格。
  * 设计稿每一版里这几行离菜名文字框上沿的距离都一样：英文名 16.7；介绍 51.4（tight 是 35.7，「两个菜」一大一小那一版），
  * 每行 13；价格（14 号的数字）在介绍最后一行下面 23.6，没有介绍时在 37.4；加号比菜名高 0.9、紧跟在菜名后面，
- * 间距是加号大小的 4.5 倍（带图片）/ 2.5 倍（纯文字，plus = 'text'）（8.1.5，原来是 44.2，图文列表的按列对齐）。
+ * 间距是加号大小的 3.5 倍（带图片）/ 2 倍（大图 + 文字、文字陈列，plus = 'text'）（EMENU_PLUS_GAP；图文列表原来按列对齐）。
  * desc：normal / tight 见上；none 不要介绍。
  * 切到英文（8.0.13）：英文名为主（14 号、放不下折成两行），中文名在下面一行小字；介绍用英文介绍。
  *
@@ -263,7 +264,7 @@ export function DishText({
   w: number;
   ctx: PageCtx;
   desc?: 'normal' | 'tight' | 'none';
-  /** 加号与菜名的间距按哪一种算（8.1.5）：photo 带图片的 4.5 倍、text 纯文字的 2.5 倍 */
+  /** 加号与菜名的间距按哪一种算（EMENU_PLUS_GAP）：photo 带图片的版式 3.5 倍、text 大图 + 文字与文字陈列 2 倍 */
   plus?: EmenuPlusKind;
   big?: BigSpot;
   /** 这道菜在这一页没有图可以压暗：不能点的原因写在价格旁 */
@@ -320,7 +321,7 @@ export function DishText({
             }
             data-testid={`emenu-name-${dish.id}`}
           >
-            {name.main}
+            {name.mainEn ? <EnName>{name.main}</EnName> : name.main}
             <Tagline dish={dish} />
           </span>
           <PlusGap kind={plus} large={large} />
@@ -332,7 +333,7 @@ export function DishText({
               {name.sub}
             </div>
           ) : (
-            <div className="em-en em-clip" style={{ fontSize: 8, lineHeight: '8px', marginTop: 0.7, color: MUTE }}>
+            <div className="em-en-display em-clip" style={{ fontSize: 8, lineHeight: '8px', marginTop: 0.7, color: MUTE }}>
               {name.sub}
             </div>
           ))}
@@ -442,11 +443,19 @@ function SlotText({ s, dish, ctx, noteByPrice }: { s: ResolvedSlot; dish: EmenuD
 
 /**
  * 分类封面大标题右下角的小圆圈（8.1.8，品牌部「点餐首页中“中式午餐”右下角需向图片内标明同款圆形」，PENDING_DECISIONS.md PB2）：
- * 照品牌部给的图量的——直径 0.35 个字、细红线；圆心落在最后一个字的右下角（中文：字形下缘往上 0.075 个字、右缘往里 0.02 个字；
+ * 照品牌部给的图量的——直径 0.35 个字；圆心落在最后一个字的右下角（中文：字形下缘往上 0.075 个字、右缘往里 0.02 个字；
  * 英文按大写字母的底线）。挂在标题那一行字上，跟着字号、位置走；标题藏起来时一起不显示。颜色固定（样式表里的 --em-dot，不进工作台的主题色）。
+ * 8.1.14（品牌部《工作台需求汇总 1.2》第 3 条，PC3）：细线正圆换成手绘的不规则圆环（coverRing.ts 的矢量路径），大小、颜色不变。
+ * 中文的位置不变（与品牌部的图一样，圆环贴着最后一笔的收尾）。英文原来圆心压在最后一个字母的右下角——细线时不显眼，换成有粗细的
+ * 笔触就压在字母的竖笔上了（「不压字」）：整个往右挪到最后一个字母的外面（左沿离标题那一行的右边 0.02 个字；标题自带 0.04 的字距，
+ * 所以圆环在最后一个字母的字框外面 0.02 个字，什么字母收尾都碰不到），上下不动。
  */
 function CoverDot({ en }: { en: boolean }) {
-  return <span aria-hidden className="em-cover-dot" style={en ? { right: '-0.06em', bottom: '0.155em' } : { right: '-0.12em', bottom: '0.055em' }} data-testid="emenu-cover-dot" />;
+  return (
+    <svg aria-hidden className="em-cover-dot" viewBox={COVER_RING_VIEWBOX} style={en ? { right: '-0.33em', bottom: '0.155em' } : { right: '-0.12em', bottom: '0.055em' }} data-testid="emenu-cover-dot">
+      <path d={COVER_RING_PATH} />
+    </svg>
+  );
 }
 
 function Cover({ page, ctx }: { page: EmenuPageView; ctx: PageCtx }) {
@@ -672,7 +681,7 @@ const TEXT_ROW_NAME_W = 188;
 
 /**
  * 文字陈列的一行：名称、英文名、属性行在左，价格在右上（各处离名称文字框左上角的距离是设计稿量的）；加号紧跟在名称后面，
- * 间距是加号大小的 2.5 倍（8.1.5 纯文字的菜，PP5；原来在价格下面）。
+ * 间距是加号大小的 2 倍（EMENU_PLUS_GAP 的 text；8.1.5 起跟在名称后面，原来在价格下面）。
  * 切到英文（8.0.13）：英文名为主、放不下折成两行，下面依次是中文名、属性行（一行行往下排，不压在一起）。
  */
 function TextRow({ dish, x, y, ctx, slot }: { dish: EmenuDishView; x: number; y: number; ctx: PageCtx; slot?: string }) {
@@ -718,7 +727,7 @@ function TextRow({ dish, x, y, ctx, slot }: { dish: EmenuDishView; x: number; y:
                 }}
                 data-testid={`emenu-name-${dish.id}`}
               >
-                {name.main}
+                <EnName>{name.main}</EnName>
                 <Tagline dish={dish} />
               </div>
               {plus}
@@ -751,7 +760,7 @@ function TextRow({ dish, x, y, ctx, slot }: { dish: EmenuDishView; x: number; y:
               {plus}
             </div>
             {name.sub && (
-              <div className="em-en em-clip" style={{ ...box(1, 16.7, 186), fontSize: 8, lineHeight: '8px', color: MUTE }}>
+              <div className="em-en-display em-clip" style={{ ...box(1, 16.7, 186), fontSize: 8, lineHeight: '8px', color: MUTE }}>
                 {name.sub}
               </div>
             )}
