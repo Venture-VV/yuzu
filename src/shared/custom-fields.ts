@@ -94,6 +94,10 @@ export const DICTIONARY_KEYS = [
   'damageReasons',
   'bookingCancelReasons',
   'assetScrapReasons',
+  // 8.1.15 前台风控（docs/FRONTDESK_RISK_V8115.md）
+  'surchargeReasons',
+  'blacklistReasons',
+  'riskPassReasons',
 ] as const;
 export type DictionaryKey = (typeof DICTIONARY_KEYS)[number];
 export type Dictionaries = Record<DictionaryKey, string[]>;
@@ -109,6 +113,9 @@ export const DICTIONARY_LABELS: Record<DictionaryKey, { title: string; where: st
   damageReasons: { title: '报损的原因', where: 'ERP 库存的报损单' },
   bookingCancelReasons: { title: '取消预约的原因', where: '预约页取消一张预约' },
   assetScrapReasons: { title: '资产报废的原因', where: 'ERP 资产卡片报废' },
+  surchargeReasons: { title: '超时加收的原因', where: '发卡台客人卡「异常处置 → 加收」' },
+  blacklistReasons: { title: '加入黑名单的原因', where: '会员详情、后台「手牌与前台 → 黑名单」' },
+  riskPassReasons: { title: '未结离店放行的原因', where: '接待发牌时请值班经理授权' },
 };
 
 /** 默认值：原来写死的照搬；原来是纯手填的给几条常见的（仍然可以手填） */
@@ -123,6 +130,9 @@ export const DEFAULT_DICTIONARIES: Dictionaries = {
   damageReasons: ['过期', '破损', '变质', '丢失'],
   bookingCancelReasons: ['客人取消', '客人改期', '重复预约', '联系不上'],
   assetScrapReasons: ['损坏无法修复', '老旧淘汰', '丢失'],
+  surchargeReasons: ['超 12 小时加收', '超 24 小时加收', '超 72 小时加收'],
+  blacklistReasons: ['多次逃单', '醉酒闹事', '骚扰其他客人或员工', '损坏物品拒不赔偿'],
+  riskPassReasons: ['客人答应当场补交', '已补交，待办还没销', '经理同意先接待'],
 };
 
 export const MAX_DICTIONARY_ITEMS = 30;

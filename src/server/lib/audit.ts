@@ -78,14 +78,6 @@ export type AuditAction =
   | 'hand_tag_locked'
   | 'hand_tag_unlocked'
   | 'hand_tag_updated'
-  // 8.1.15 前台：芯片号、黑名单、发牌被黑名单拦下、发牌后的异常处置（docs/FRONTDESK_RISK_V8115.md）
-  | 'hand_tag_card'
-  | 'blacklist_added'
-  | 'blacklist_lifted'
-  | 'checkin_blocked'
-  | 'visit_incident'
-  | 'incident_assigned'
-  | 'incident_resolved'
   | 'technician_saved'
   | 'items_technician_updated'
   // 餐饮（S5 第一步）：出品档口、菜品的出品档口、沽清
@@ -295,7 +287,16 @@ export type AuditAction =
   | 'gift_issue'
   // 8.1.10 急采后补合同；核库转领用（库管核库、部门答复替代，detail 写领用、替代、转采购）
   | 'po_contract_added'
-  | 'request_stock';
+  | 'request_stock'
+  // 8.1.15 前台（块 A，docs/FRONTDESK_RISK_V8115.md）：手牌绑 / 解绑芯片号、黑名单的登记与解除、发牌被黑名单拦下、
+  // 发牌后的异常处置（提醒、加收、上报、外出、返回、未结离店）与待办的指派、处理结果
+  | 'hand_tag_card'
+  | 'blacklist_added'
+  | 'blacklist_lifted'
+  | 'checkin_blocked'
+  | 'visit_incident'
+  | 'incident_assigned'
+  | 'incident_resolved';
 
 export interface AuditEntry {
   staffId: number | null;

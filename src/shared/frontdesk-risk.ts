@@ -31,8 +31,11 @@ export type TagByCard =
       visit: { id: number; visitNo: string } | null;
     };
 
+/** 按芯片号查到了的那一种（刷卡带出牌号的部件把它交给调用方判断能不能用） */
+export type TagCardFound = Extract<TagByCard, { found: true }>;
+
 /** 刷到的这张牌为什么不能发；能发返回 null。zone 为这位客人选的分区（没选过的不核对分区） */
-export function cardProblem(found: Extract<TagByCard, { found: true }>, zone: TagZone | null, zoneTitle: (z: TagZone) => string): string | null {
+export function cardProblem(found: TagCardFound, zone: TagZone | null, zoneTitle: (z: TagZone) => string): string | null {
   const code = found.tag.code;
   if (found.state === 'inactive') return `手牌 ${code} 已停用，请换一张`;
   if (found.state === 'locked') return `手牌 ${code} 已锁定（${found.tag.lockReason ?? '原因未填'}），请换一张`;
@@ -112,7 +115,6 @@ export const OVERSTAY_TIERS = [
   { hours: 24, level: 2, label: '超 24 小时' },
   { hours: 12, level: 1, label: '超 12 小时' },
 ] as const;
-export type OverstayLevel = 0 | 1 | 2 | 3;
 
 /** 在店多少分钟 → 超时等级与文字；不到 12 小时返回 null */
 export function overstayOf(minutes: number): { level: 1 | 2 | 3; label: string; hours: number } | null {
@@ -132,7 +134,6 @@ export const INCIDENT_KIND_LABELS: Record<IncidentKind, string> = {
 };
 /** 要有人跟进、写处理结果的两种（进「异常待办」） */
 export const TODO_KINDS: readonly IncidentKind[] = ['report', 'unsettled'];
-export const isTodoKind = (kind: IncidentKind) => TODO_KINDS.includes(kind);
 
 /** 加收挂到账单上的明细名称 */
 export const SURCHARGE_LINE_NAME = '超时加收';
