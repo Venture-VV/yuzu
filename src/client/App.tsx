@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import { ApiError, onAuthError, queryRetryDelay, shouldRetryQuery } from './lib/api';
 import { qk, useSessionQuery } from './lib/queries';
 import { SessionProvider } from './lib/session';
+import { useApplyTheme } from './lib/theme';
 import { setDisplayTimeZone } from './lib/utils';
 import { AppShell } from './components/AppShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -407,6 +408,12 @@ const useRouterPath = () =>
     () => router.state.location.pathname,
   );
 
+/** 深浅主题落到 <html> 上（8.1.15）：对客与出纸的页面一律浅色 */
+function ThemeHost() {
+  useApplyTheme(useRouterPath());
+  return null;
+}
+
 function NetworkBannerHost() {
   const path = useRouterPath();
   return <NetworkBanner path={path} openNetwork={() => void router.navigate('/network')} />;
@@ -418,6 +425,7 @@ export function App() {
       <ToastProvider>
         <RouterProvider router={router} />
         <NetworkBannerHost />
+        <ThemeHost />
       </ToastProvider>
     </QueryClientProvider>
   );

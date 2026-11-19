@@ -3,7 +3,7 @@
 // 起始页 → 输入手牌、桌号、人数 → 翻菜单、加菜 → 订单抽屉（未下单 / 已下单）、备注 → 服务员输点单密码确认 → 下单成功。
 // 下单与门店系统所有写操作一样带操作编号：提交前把编号与原请求（不含密码）存在这台平板上，断网、超时、服务器出错时进入
 // 「结果待确认」——查回、原样重新提交（再输密码）或确认作废（再输密码）之后才能下新的一单。
-// 菜单每 15 秒向门店系统取一次：价格、估清、上下架、供应时段、后台改的版面都跟得上。
+// 菜单每 15 秒向门店系统取一次：价格、沽清、上下架、供应时段、后台改的版面都跟得上。
 // 8.0.13（docs/EMENU.md 第 11 节）：「中 | EN」一键切换（i18n.tsx）、键盘弹起时页面不缩放（stage.tsx）、
 // 跟手翻页（strip.tsx）与进入 / 退出的动效（motion.tsx、emenu.css）。
 
@@ -932,7 +932,7 @@ export function EmenuPage() {
                 };
                 const result = await send({ key: body.clientKey, body, quantity: count, createdAt: new Date().toISOString() }, pin, false);
                 if (result.outcome === 'uncertain') setOverlay({ kind: 'pending' });
-                // 价格、估清、时段刚变过的：马上取一次最新的菜单
+                // 价格、沽清、时段刚变过的：马上取一次最新的菜单
                 if (result.outcome === 'rejected') void qc.invalidateQueries({ queryKey: MENU_KEY });
               }}
             />

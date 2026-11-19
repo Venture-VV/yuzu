@@ -174,7 +174,7 @@ export function OrderTab() {
           ? '有菜刚下架了，请从已点的菜里删掉'
           : short
             ? short.remaining === 0
-              ? `「${short.name}」今天已估清，请删掉或换一道`
+              ? `「${short.name}」今天已沽清，请删掉或换一道`
               : `「${short.name}」今天只剩 ${short.remaining} 份`
             : null;
 
@@ -273,7 +273,7 @@ export function OrderTab() {
       });
       refresh();
     } else {
-      // 下单没成功（例如余量不够、估清了）：马上刷新菜单与余量（8.0.8，B03）
+      // 下单没成功（例如余量不够、沽清了）：马上刷新菜单与余量（8.0.8，B03）
       void qc.invalidateQueries({ queryKey: menuKey });
     }
   };
@@ -463,7 +463,7 @@ export function OrderTab() {
                 </div>
               )}
               <p className="mt-2 text-[12px] text-ink-4" data-testid="dining-remaining-hint">
-                「剩 N」是厨房在「估清」里设的今天还能卖几份，没写的不限量；别的终端点了菜，10 秒内跟上。
+                「剩 N」是厨房在「沽清」里设的今天还能卖几份，没写的不限量；别的终端点了菜，10 秒内跟上。
               </p>
             </div>
           )}
@@ -796,7 +796,7 @@ function DishGrid({ list, countOf, add, locked }: { list: MenuDish[]; countOf: (
             <span className="mt-auto flex w-full items-center gap-1.5 pt-1">
               <Money cents={d.price} className="text-[13.5px] font-bold text-ink-2" />
               <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink-4">{d.stationName}</span>
-              {out ? <Badge tone="clay">已估清</Badge> : d.remaining !== null && <Badge tone="yuzu">剩 {d.remaining}</Badge>}
+              {out ? <Badge tone="clay">已沽清</Badge> : d.remaining !== null && <Badge tone="yuzu">剩 {d.remaining}</Badge>}
             </span>
             {n > 0 && <span className="num absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-pine px-1.5 text-[12.5px] font-bold text-paper">{n}</span>}
           </button>

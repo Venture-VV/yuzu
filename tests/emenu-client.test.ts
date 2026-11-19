@@ -223,7 +223,7 @@ describe('中 / EN：每样内容取哪一份', () => {
     expect(en.endCart(3)).toContain('3 items');
     expect(guestErrorEn('TAG_NOT_IN_STORE')).toMatch(/tag/i);
     expect(guestErrorEn('TABLE_NOT_FOUND')).toMatch(/table/i);
-    // 8.1.6（QZ6）：服务员那一步的原因（密码不对、估清、价格变了）也有英文；新加的拒绝码没有英文时返回 null
+    // 8.1.6（QZ6）：服务员那一步的原因（密码不对、沽清、价格变了）也有英文；新加的拒绝码没有英文时返回 null
     expect(errorEn('PIN_INVALID')).toMatch(/PIN/);
     expect(errorEn('DISH_SOLD_OUT')).toMatch(/sold out/);
     expect(errorEn('PRICE_CHANGED')).toMatch(/price/i);

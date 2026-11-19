@@ -214,7 +214,7 @@ export function DishStatePanel({ doc, state, onChange }: { doc: StudioDoc; state
       <div>
         <PanelTitle>{DISH_STATE_LABELS[state]}</PanelTitle>
         <p className="text-[11.5px] leading-relaxed text-ink-3">
-          {state === 'sold_out' ? '厨房估清、今天卖完了的菜。' : state === 'closed' ? '分类不在供应时段时，这一页的菜都是这个样子。' : '后台下架了、还排在页上的菜。'}
+          {state === 'sold_out' ? '厨房沽清、今天卖完了的菜。' : state === 'closed' ? '分类不在供应时段时，这一页的菜都是这个样子。' : '后台下架了、还排在页上的菜。'}
           所有版式通用；客人点不了，点了会说明原因。
         </p>
       </div>

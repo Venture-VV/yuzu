@@ -1,10 +1,10 @@
 // 点餐系统 · 平板电子菜单（8.0.10，docs/EMENU.md）：设置、图片、平板上看到的菜单、按手牌找客人、下单、结果待确认的查回与作废。
 //
 // 钱只在账单明细里：平板下单就是给客人挂账，与点单页、小程序扫码点餐同一条路径（frontdesk/bills.ts 的 postChargesTx，
-// 同一个事务里扣估清、建出品单、写操作编号），这里另写一行点餐单（emenu_orders：桌号、人数、备注、确认的服务员、哪台平板）。
+// 同一个事务里扣沽清、建出品单、写操作编号），这里另写一行点餐单（emenu_orders：桌号、人数、备注、确认的服务员、哪台平板）。
 // 经办人是输点单密码的那位服务员（emenu/pins.ts），不是平板登录的账号。
 //
-// 加锁：点单密码在事务外核对（不加锁）；事务里与点单页下单同一套——来访 → 账单 → 估清 → 出品单，之后写点餐单一行；
+// 加锁：点单密码在事务外核对（不加锁）；事务里与点单页下单同一套——来访 → 账单 → 沽清 → 出品单，之后写点餐单一行；
 // 写操作编号前照旧与「确认作废」串行（业务类型 bill_post）。读电子菜单的分类、版面、菜品都不加锁。
 
 import { createHash } from 'node:crypto';
@@ -156,7 +156,7 @@ const defaultPrice = (prices: TierPrice[]) => {
 
 /**
  * 这几道菜在平板上的样子：图文、每个规格的价格（默认价格档）与现在能不能点。
- * 已下架：菜品图文停用、价目项目停用、不挂在启用的出品档口上、改成了需要技师，或餐饮功能关着；已售罄：今天的估清为 0。
+ * 已下架：菜品图文停用、价目项目停用、不挂在启用的出品档口上、改成了需要技师，或餐饮功能关着；已售罄：今天的沽清为 0。
  */
 export async function dishViews(db: Db, dishIds: number[], today: string, diningOn: boolean): Promise<Map<number, EmenuDishView>> {
   const ids = [...new Set(dishIds)];
@@ -208,7 +208,7 @@ export async function emenuTables(db: Db): Promise<{ name: string; area: string 
 export type EmenuMenuView = EmenuPeriodKey | 'all';
 
 /**
- * 平板上的菜单：设置、现在显示的分类与各页、每道菜的状态、桌台。每 15 秒取一次，价格、估清、上下架、版面都跟得上；
+ * 平板上的菜单：设置、现在显示的分类与各页、每道菜的状态、桌台。每 15 秒取一次，价格、沽清、上下架、版面都跟得上；
  * 时段交界（8.1.5）与分类另外限定时间的起止由 nextChangeAt 告诉平板，到点马上再取。
  */
 export async function emenuMenu(db: Db, deps: Deps, view?: EmenuMenuView): Promise<EmenuMenu> {
