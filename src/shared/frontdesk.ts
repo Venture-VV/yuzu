@@ -5,6 +5,7 @@
 import type { BackfillMark } from './backfill';
 import type { PriceTier } from './catalog';
 import type { CheckoutDetail } from './checkout';
+import type { VisitIncident } from './frontdesk-risk';
 import type { MemberGradeBadge } from './membership';
 import type { LineTechnician } from './technicians';
 
@@ -188,6 +189,10 @@ export interface BoardVisit {
   memberGradeLabel: string | null;
   coupons: number;
   gifts: number;
+  /** 临时外出（8.1.15，docs/FRONTDESK_RISK_V8115.md）：从几点起；牌照旧占着，不能发给别人。没外出为 null */
+  awaySince: string | null;
+  /** 这次来访上没处理完的异常待办（上报、未结离店）几条 */
+  openTodos: number;
 }
 
 export interface FrontdeskBoard {
@@ -201,6 +206,8 @@ export interface FrontdeskBoard {
     groups: number;
   };
   rules: FrontdeskBoardRules;
+  /** 发牌前风控开没开（8.1.15；关着时发牌与以前一样）、全店没处理完的异常待办几条（发卡台顶上的「异常待办」） */
+  risk: { enabled: boolean; openTodos: number };
   /** 服务器当前时间，页面据此计算在店时长，避免终端时钟不准 */
   serverTime: string;
 }
@@ -261,7 +268,7 @@ export interface GroupMate {
 
 export interface VisitHistoryEvent {
   at: string;
-  kind: 'checkin' | 'swap' | 'join' | 'leave' | 'post' | 'void' | 'close' | 'ticket' | 'reopen';
+  kind: 'checkin' | 'swap' | 'join' | 'leave' | 'post' | 'void' | 'close' | 'ticket' | 'reopen' | 'incident';
   text: string;
   operatorName: string;
 }
@@ -286,6 +293,12 @@ export interface VisitDetail {
   vipOverrideByName: string | null;
   /** 按实际时间补录的接待（R1.9）：纸质单号、实际时间与补录人；平时为 null */
   backfill: BackfillMark | null;
+  /** 临时外出（8.1.15）：从几点起；没外出为 null */
+  awaySince: string | null;
+  /** 发牌时这位会员名下有没处理完的「未结离店」、经当场授权才发的：授权人、时间、原因；平时为 null */
+  riskApproval: { byName: string; at: string; reason: string } | null;
+  /** 这次来访上登记的异常（提醒、加收、上报、外出、返回、未结离店），按时间先后 */
+  incidents: VisitIncident[];
   /** 票种与按当前时刻计算的门票（Batch 3 之前开的牌没有票种，结账时补选） */
   ticket: {
     typeId: number;
@@ -315,7 +328,7 @@ export interface VisitDetail {
 export type FrontdeskOpLookup =
   | { found: false; abandoned: boolean }
   | { found: true; type: 'checkin'; checkin: CheckinResult }
-  | { found: true; type: 'bill_post' | 'tag_swap' | 'line_move'; visit: VisitDetail }
+  | { found: true; type: 'bill_post' | 'tag_swap' | 'line_move' | 'visit_incident'; visit: VisitDetail }
   | { found: true; type: 'checkout' | 'table_checkout'; checkout: CheckoutDetail }
   | { found: true; type: 'table_open' | 'table_post'; session: import('./dining').TableSessionDetail }
   | { found: true; type: 'room_checkin' | 'room_extend' | 'room_deposit' | 'room_refund' | 'room_close'; stay: import('./rooms').StayDetail }
@@ -329,6 +342,8 @@ export interface CheckinResult {
   replayed: boolean;
   visits: { id: number; visitNo: string; tagCode: string; zone: TagZone }[];
   groupNo: string | null;
+  /** 这次发牌顺带标成「已到店」的预约（8.1.15 发牌前风控；没有为空） */
+  arrivedBookings: { bookingNo: string; tagCode: string }[];
 }
 
 /** 预结账（S2 只汇总已挂明细，不收款） */

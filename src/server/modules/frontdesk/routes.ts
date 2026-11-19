@@ -20,7 +20,9 @@ import { previewTableCheckout } from '../tables';
 import { listTicketTypes, saveTicketType, setVisitTicket, type TicketTypeInputData } from './tickets';
 import { frontdeskChecks } from './checks';
 import { businessDate, FRONTDESK_OP_PERMISSIONS, FRONTDESK_OPS, loadFrontdeskRules } from './common';
-import { batchCreate, importHandTags, listTags, lockHandTag, unlockHandTag, updateHandTag, type ImportInputData } from './tags';
+import { batchCreate, importHandTags, listTags, lockHandTag, setTagCard, tagByCard, unlockHandTag, updateHandTag, type ImportInputData } from './tags';
+import { registerIncidentRoutes } from './incidents';
+import { registerRiskRoutes } from './risk';
 import { memberLockerGrades } from './vip';
 import {
   abandonFrontdeskOp,
@@ -271,6 +273,18 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   // ── 手牌池 ──
   app.get('/api/frontdesk/tags', { preHandler: guard('frontdesk.read') }, async () => listTags(sql));
 
+  // 芯片号 → 牌号与现在的状态（8.1.15）：发牌时刷卡带出牌号；这张卡没绑手牌时 found 为 false
+  app.get('/api/frontdesk/tags/by-card', { preHandler: guard('frontdesk.read') }, async (req) => {
+    const { uid } = parse(z.object({ uid: z.string('请刷卡或填写芯片号').max(64, '芯片号不正确') }), req.query ?? {});
+    return tagByCard(sql, uid);
+  });
+
+  // 给手牌绑芯片号 / 解绑（cardUid 为 null）
+  app.put('/api/frontdesk/tags/:id/card', { preHandler: guard('frontdesk.tags') }, async (req) => {
+    const { id } = parse(idParam, req.params);
+    return setTagCard(deps, id, req.body, ctxOf(req));
+  });
+
   app.post('/api/frontdesk/tags/import', { preHandler: guard('frontdesk.tags') }, async (req) => importHandTags(sql, req.body as ImportInputData, { staffId: req.actor.id, ip: req.ip, via: 'web' }));
 
   app.post('/api/frontdesk/tags/batch', { preHandler: guard('frontdesk.tags') }, async (req) => batchCreate(deps, req.body, ctxOf(req)));
@@ -303,4 +317,8 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get('/api/frontdesk/checks', { preHandler: guard('frontdesk.read') }, async () => readSnapshot(sql, frontdeskChecks));
+
+  // ── 8.1.15：发牌前风控（黑名单、未结离店、重复到店、预约）与发牌后的异常处置 ──
+  registerRiskRoutes(app, deps);
+  registerIncidentRoutes(app, deps);
 }

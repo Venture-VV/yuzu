@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { Hourglass } from 'lucide-react';
 import type { FrontdeskOpLookup } from '@shared/frontdesk';
 import { api, errorMessage, isRejected, notSentAsRejection, UncertainError } from '../../lib/api';
+import { onReconnect } from '../../lib/connection';
 import { formatDateTime, uuid } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Button, Notice } from '../../components/ui';
@@ -15,6 +16,8 @@ import { Button, Notice } from '../../components/ui';
 //   · 查回：只读查询，查不到只代表此刻还没有已提交的结果，不能据此断定没有生效；
 //   · 按原内容重新提交：沿用原编号与原请求，服务端保证只生效一次；重提被明确拒绝时，先在服务端作废编号再下结论；
 //   · 确认作废：服务端先把编号登记为作废，原请求之后即使到达也整笔回滚，然后才允许重新填写。
+// 断网后自动核对（8.1.15，docs/FRONTDESK_RISK_V8115.md 第 2.4 节）：网络恢复时按原编号查一遍——已经生效的清掉；
+// 发牌没生效的原样重提一次（同一个编号，不会重复发牌）；重提被明确拒绝的不下结论、留在这里等人处理（reconcilePending）。
 
 export type FrontdeskOpType =
   | 'checkin'
@@ -36,7 +39,8 @@ export type FrontdeskOpType =
   | 'checkout_refund'
   | 'booking_create'
   | 'booking_change'
-  | 'technician_state';
+  | 'technician_state'
+  | 'visit_incident';
 
 export interface FrontdeskPendingOp {
   key: string;
@@ -71,6 +75,8 @@ export interface FrontdeskPendingOp {
   amount: number | null;
   staffName: string;
   createdAt: string;
+  /** 网络恢复后自动重提被明确拒绝（8.1.15）：记下时间与原因，不再自动重提，等人处理 */
+  autoRejected?: { at: string; message: string };
 }
 
 export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = {
@@ -94,6 +100,7 @@ export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = {
   booking_create: '新建预约',
   booking_change: '改预约',
   technician_state: '停牌 / 复牌 / 休假',
+  visit_incident: '异常处置',
 };
 
 /** 餐饮桌台的操作：对象是桌台或开台，不是手牌 */
@@ -164,6 +171,13 @@ function save(op: FrontdeskPendingOp): boolean {
   if (!persist([...list, op])) return false;
   notify();
   return true;
+}
+
+/** 改一条记录（存不进去就算了：只是少一句提示，记录本身还在） */
+function patchPending(key: string, patch: Partial<FrontdeskPendingOp>) {
+  const list = readAll();
+  if (!list.some((p) => p.key === key)) return;
+  if (persist(list.map((p) => (p.key === key ? { ...p, ...patch } : p)))) notify();
 }
 
 export function removeFrontdeskPending(key: string) {
@@ -263,6 +277,70 @@ export function pendingFor(
     if (isRoomOp(type)) return table.stayId != null && !!p.stayIds?.includes(table.stayId);
     return p.visitId === visitId || (visitId !== null && !!p.visitIds?.includes(visitId));
   });
+}
+
+/** 发牌的待确认记录多久以内才自动重提（毫秒）：断得太久客人多半已经另外处理了，留给人看 */
+export const AUTO_RESEND_MAX_AGE_MS = 30 * 60_000;
+
+export type ReconcileOutcome =
+  /** 查回：原请求已经生效 */
+  | { kind: 'found'; lookup: Extract<FrontdeskOpLookup, { found: true }> }
+  /** 没生效，按原编号重提成功（只有发牌会自动重提） */
+  | { kind: 'resent'; result: unknown }
+  /** 服务端确认这个编号已作废 */
+  | { kind: 'abandoned' }
+  /** 自动重提被明确拒绝：记录留着，等人处理 */
+  | { kind: 'rejected'; message: string }
+  /** 还是不确定（查不到、又不该自动重提，或网络又断了）：记录留着 */
+  | { kind: 'pending' };
+
+const reconciling = new Set<string>();
+
+/**
+ * 自动核对一笔待确认的操作（8.1.15）：
+ *   ① 按原编号只读查回——已生效或已作废的删掉本机记录；
+ *   ② resend（只在网络刚恢复时给）且查不到、是发牌、记录不超过 30 分钟、之前没有自动重提被拒绝过：
+ *      按原编号、原内容重提一次（服务端保证只生效一次）；
+ *   ③ 重提被明确拒绝：不代表之前那次不会生效，这里不作废、不下结论，记下原因留给人处理。
+ */
+export async function reconcilePending(op: FrontdeskPendingOp, resend = false): Promise<ReconcileOutcome> {
+  if (reconciling.has(op.key)) return { kind: 'pending' };
+  reconciling.add(op.key);
+  try {
+    let found: FrontdeskOpLookup;
+    try {
+      found = await api.get<FrontdeskOpLookup>(`/api/frontdesk/ops/${op.key}?type=${op.type}`);
+    } catch {
+      return { kind: 'pending' };
+    }
+    if (found.found) {
+      removeFrontdeskPending(op.key);
+      return { kind: 'found', lookup: found };
+    }
+    if (found.abandoned) {
+      removeFrontdeskPending(op.key);
+      return { kind: 'abandoned' };
+    }
+    if (!resend || op.type !== 'checkin' || op.autoRejected || Date.now() - new Date(op.createdAt).getTime() > AUTO_RESEND_MAX_AGE_MS) return { kind: 'pending' };
+    setInFlight(op.key, true);
+    try {
+      const result = await api.post<unknown>(op.url, op.body);
+      removeFrontdeskPending(op.key);
+      return { kind: 'resent', result };
+    } catch (error) {
+      if (!isRejected(error)) return { kind: 'pending' };
+      if (error.code === 'OP_ABANDONED') {
+        removeFrontdeskPending(op.key);
+        return { kind: 'abandoned' };
+      }
+      patchPending(op.key, { autoRejected: { at: new Date().toISOString(), message: error.message } });
+      return { kind: 'rejected', message: error.message };
+    } finally {
+      setInFlight(op.key, false);
+    }
+  } finally {
+    reconciling.delete(op.key);
+  }
 }
 
 export type OpState = { phase: 'idle' } | { phase: 'busy' } | { phase: 'error'; message: string; code?: string } | { phase: 'uncertain'; message: string } | { phase: 'not_found' };
@@ -446,9 +524,30 @@ export function useFrontdeskOp<T>(opts: {
     }
   }, [pending, settle]);
 
+  /** 网络恢复后自动核对（8.1.15）：查回；发牌没生效的原样重提一次；被拒绝的留着等人处理 */
+  const reconcile = useCallback(async (): Promise<T | null> => {
+    if (!pending) return null;
+    setState({ phase: 'busy' });
+    const out = await reconcilePending(pending, true);
+    if (out.kind === 'found') {
+      setState({ phase: 'idle' });
+      return pick(out.lookup);
+    }
+    if (out.kind === 'resent') {
+      setState({ phase: 'idle' });
+      return out.result as T;
+    }
+    if (out.kind === 'abandoned') {
+      setState({ phase: 'idle' });
+      return null;
+    }
+    setState(out.kind === 'rejected' ? { phase: 'uncertain', message: `网络恢复后按原内容自动重提被拒绝（${out.message}），但原请求是否会生效仍不确定` } : { phase: 'not_found' });
+    return null;
+  }, [pending, pick]);
+
   const clearError = useCallback(() => setState((s) => (s.phase === 'error' ? { phase: 'idle' } : s)), []);
 
-  return { pending, state, submit, retry, check, abandon, clearError, busy: state.phase === 'busy', locked: !!pending || state.phase === 'busy' };
+  return { pending, state, submit, retry, check, abandon, reconcile, clearError, busy: state.phase === 'busy', locked: !!pending || state.phase === 'busy' };
 }
 
 /** 对话框里的待确认处理区：查回 / 按原内容重新提交 / 确认作废 */
@@ -464,6 +563,16 @@ export function PendingPanel<T>({ op, onResolved }: { op: ReturnType<typeof useF
     if (!p || autoChecked.current === p.key) return;
     autoChecked.current = p.key;
     void run(op.check);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p?.key]);
+  // 网络恢复时自动核对一遍（8.1.15）：已生效的直接完成；发牌没生效的按原编号重提一次；被拒绝的留在这里等人处理
+  const latest = useRef(op);
+  latest.current = op;
+  useEffect(() => {
+    if (!p) return;
+    return onReconnect(() => {
+      if (!latest.current.busy) void run(latest.current.reconcile);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p?.key]);
   if (!p) return null;
@@ -500,6 +609,11 @@ export function PendingPanel<T>({ op, onResolved }: { op: ReturnType<typeof useF
           · {formatDateTime(p.createdAt)} {p.staffName}
         </span>
       </span>
+      {p.autoRejected && (
+        <span className="mt-1 block font-semibold text-clay" data-testid="pending-auto-rejected">
+          网络恢复后已按原内容自动重提过一次，被拒绝：{p.autoRejected.message}。请核对后选择下面的处理方式。
+        </span>
+      )}
       <span className="mt-1 block">
         {op.state.phase === 'uncertain'
           ? `${op.state.message}。`

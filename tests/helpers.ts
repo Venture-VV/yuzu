@@ -40,7 +40,10 @@ export async function legacySwitchesOff(sql: Sql): Promise<void> {
     ('auto_replenish', ${sql.json({ enabled: false })}),
     -- 提需核库（8.1.10，CK12）：开着时选了物料、总仓有货的需求单先进「待核库」、核完才能审核；之前的用例按提交即待审核编写，
     -- 这里关上，核库的行为由 tests/stock-check.test.ts 打开了验证
-    ('purchase_rules', ${sql.json({ stockCheckEnabled: false })})
+    ('purchase_rules', ${sql.json({ stockCheckEnabled: false })}),
+    -- 发牌前风控（8.1.15，docs/FRONTDESK_RISK_V8115.md）：开着时发牌会把会员当天待到店的预约顺带标成「已到店」，
+    -- 之前的预约用例是发牌以后再点到店；这里关上，风控的行为由 tests/frontdesk-risk.test.ts 打开了验证
+    ('frontdesk_risk_rules', ${sql.json(off)})
     ON CONFLICT (key) DO NOTHING`;
 }
 
@@ -340,6 +343,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '184_gifts.sql',
   '185_stock_check.sql',
   '186_urgent_contract.sql',
+  '187_frontdesk_risk.sql',
   '189_dishes.sql',
 ];
 

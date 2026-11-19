@@ -97,6 +97,11 @@ export interface PostTxMeta {
   channel?: { expectedTotal: number | null; maxQuantity: number; maxTotal: number; deliverTo: string; memberId: number };
   /** 平板点餐（8.0.10）：出品单写送到哪张桌（服务员输点单密码确认的，不走渠道入口的限制） */
   deliverTo?: string;
+  /**
+   * 这个编号记成哪种业务（8.1.15）：平时是挂账 bill_post；发牌后的「超时加收」也走这里挂一条手动金额的明细，
+   * 编号记成 visit_incident（查回、作废都按那一类），不带时与以前完全一样
+   */
+  opType?: 'bill_post' | 'visit_incident';
 }
 
 export interface PostedLine {
@@ -320,7 +325,7 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
   // 派钟马上上钟（或加钟）的钟单：技师与客人在钟单记的房间（记在消费之后，房间比项目的区域更准）
   for (const id of new Set(sessionIds.values())) await locateSession(tx, id, 'session_start', { at, staffId: ctx.actor.id, backfill: !!backfill });
   if (backfill) await recordBackfill(tx, backfill, { kind: 'charges', opKey: key, visitId: visit.id, businessDate: date, actor: ctx.actor });
-  await saveKey(tx, key, 'bill_post', requestHash, visit.id, ctx.actor.id);
+  await saveKey(tx, key, meta.opType ?? 'bill_post', requestHash, visit.id, ctx.actor.id);
   await writeAudit(tx, {
     staffId: ctx.actor.id,
     action: 'frontdesk_post',
