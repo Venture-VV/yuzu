@@ -358,10 +358,56 @@ export interface PreviewBill {
     checkedInAt: string;
     amountCents: number;
     bySource: { source: BillSource; amountCents: number; lineCount: number }[];
+    /** 押金（8.1.15 前台 1 细化，YB3）：这位客人在住的客房还押着多少（收 − 退）、哪几间房；退房时退，不在手牌结账里抵 */
+    deposit: { amountCents: number; rooms: string[] };
   }[];
   totalCents: number;
   bySource: { source: BillSource; amountCents: number }[];
+  /** 这几位客人在住客房的押金合计 */
+  depositCents: number;
   serverTime: string;
+}
+
+/**
+ * 结账预览分列（8.1.15 前台 1 细化，《浴族系统需求汇总》前台 1；YB3、YB5）：门票、餐饮、客房、服务、优惠、押金。
+ * 已挂的明细按来源归列：餐饮、客房各一列，其余（技师服务、洗浴等项目、其他）都算「服务」；
+ * 门票是此刻算出来的、优惠是会自动带上的会员折扣、押金是在住客房押着的，这三列不在明细里。
+ */
+export const PREVIEW_COLUMNS = ['ticket', 'dining', 'room', 'service', 'discount', 'deposit'] as const;
+export type PreviewColumn = (typeof PREVIEW_COLUMNS)[number];
+export const PREVIEW_COLUMN_LABELS: Record<PreviewColumn, string> = { ticket: '门票', dining: '餐饮', room: '客房', service: '服务', discount: '优惠', deposit: '押金' };
+
+/** 已挂明细按来源归到哪一列：三列的金额（分）与各有几条明细（几位客人的可以一起传进来，同一来源的加在一起） */
+export function previewBuckets(bySource: readonly { source: BillSource; amountCents: number; lineCount?: number }[]): {
+  dining: number;
+  room: number;
+  service: number;
+  /** 「服务」里归不进技师服务、洗浴项目的「其他」（丢牌赔偿等）有多少，页面上小字写出来 */
+  other: number;
+  /** 各列有几条明细：一份套餐是一条餐饮（套餐里含哪几样只在出品单上拆开），加料是单独的一条 */
+  lines: { dining: number; room: number; service: number };
+} {
+  const sum = (sources: readonly BillSource[], pick: (s: { amountCents: number; lineCount?: number }) => number) => bySource.filter((s) => sources.includes(s.source)).reduce((n, s) => n + pick(s), 0);
+  const cents = (...sources: BillSource[]) => sum(sources, (s) => s.amountCents);
+  const count = (...sources: BillSource[]) => sum(sources, (s) => s.lineCount ?? 0);
+  return {
+    dining: cents('dining'),
+    room: cents('room'),
+    service: cents('therapist', 'bath', 'other'),
+    other: cents('other'),
+    lines: { dining: count('dining'), room: count('room'), service: count('therapist', 'bath', 'other') },
+  };
+}
+
+/**
+ * 两个台的入口谁看得到（8.1.15 前台 1 细化，YB2）：有「接待发牌、挂账、换牌」的看得到发卡台，有「结账收款」的看得到收银台，
+ * 两项都有的两个都看得到；两项都没有、只有查看的两个都能进去看（不能操作）。连查看都没有的都看不到。
+ */
+export function deskEntries(permissions: readonly string[]): { issue: boolean; cashier: boolean } {
+  const read = permissions.includes('frontdesk.read');
+  const operate = permissions.includes('frontdesk.operate');
+  const checkout = permissions.includes('frontdesk.checkout');
+  return { issue: read && (operate || !checkout), cashier: read && (checkout || !operate) };
 }
 
 export interface FrontdeskCheck {

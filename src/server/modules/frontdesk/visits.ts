@@ -1011,14 +1011,26 @@ export async function previewBills(db: Db, visitIds: number[]): Promise<PreviewB
     GROUP BY bill_id, source ORDER BY bill_id, source`;
   const totalBySource = new Map<BillSource, number>();
   for (const s of sums) totalBySource.set(s.source, (totalBySource.get(s.source) ?? 0) + s.amountCents);
+  // 押金（8.1.15 前台 1 细化，YB3）：这几位客人在住的客房还押着多少（收 − 退）；只读，退房时退，不在手牌结账里抵
+  const deposits = await db<{ visitId: number; roomNo: string; balance: number }[]>`
+    SELECT s.visit_id, r.room_no,
+           coalesce((SELECT sum(CASE WHEN d.kind = 'receive' THEN d.amount ELSE -d.amount END) FROM room_deposits d WHERE d.stay_id = s.id), 0)::int AS balance
+    FROM room_stays s JOIN rooms r ON r.id = s.room_id
+    WHERE s.visit_id IN ${db(ids)} AND s.status = 'open' ORDER BY s.id`;
+  const depositOf = (visitId: number) => {
+    const mine = deposits.filter((d) => Number(d.visitId) === visitId);
+    return { amountCents: mine.reduce((sum, d) => sum + d.balance, 0), rooms: mine.map((d) => d.roomNo) };
+  };
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
   return {
     visits: visits.map(({ status: _s, billId, ...v }) => ({
       ...v,
       bySource: sums.filter((s) => s.billId === billId).map(({ billId: _b, ...s }) => s),
+      deposit: depositOf(v.visitId),
     })),
     totalCents: visits.reduce((s, v) => s + v.amountCents, 0),
     bySource: [...totalBySource].map(([source, amountCents]) => ({ source, amountCents })),
+    depositCents: deposits.reduce((sum, d) => sum + d.balance, 0),
     serverTime: now!.now,
   };
 }
