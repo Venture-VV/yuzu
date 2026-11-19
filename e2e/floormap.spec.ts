@@ -16,6 +16,7 @@ import type { RoomBoard, RoomBoardRoom, RoomsAdmin, StayDetail } from '../src/sh
 import type { SpaceLedger } from '../src/shared/spaces';
 import { floorplanSampleDxf } from '../src/server/demo/floorplan-sample';
 import { ensureShift } from './shift';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 const ITEM = 'E2E 平面图足疗';
@@ -272,7 +273,7 @@ test.describe('v0.7.16 房态图', () => {
       await expect(serving.getByTestId(/^clock-room-/)).toHaveText('T301 · 样例 SPA 1人间');
 
       // ② 客房 → 平面图：默认编码最多的 L3；状态色与图例一致
-      await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '客房' }).click();
+      await clickNav(page, '客房');
       await page.getByRole('radiogroup', { name: '视图' }).getByRole('radio', { name: '平面图' }).click();
       await expect(page).toHaveURL(/view=map/);
       const map = page.getByTestId('floormap');

@@ -8,6 +8,7 @@
 // 每次新建一位会员与一个签赠券类型，不改演示数据里已有的档案。三台目标设备上的版面在 e2e/target-devices.spec.ts。
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
+import { clickNav, navItem } from './nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -117,18 +118,21 @@ test.describe('8.1.15 发卡台与收银台', () => {
       const coupon = issued.coupons[0]!;
       const me = (await getJson<{ staff: { displayName: string } }>(page, '/api/auth/me')).staff;
 
-      // ① 主导航：发卡台、收银台两个入口，没有「前台」
-      const nav = page.getByRole('navigation', { name: '主导航' });
-      await expect(nav.getByRole('link', { name: '发卡台', exact: true })).toBeVisible();
-      await expect(nav.getByRole('link', { name: '收银台', exact: true })).toBeVisible();
-      await expect(nav.getByRole('link', { name: '前台', exact: true })).toHaveCount(0);
+      // ① 主导航：「前台」这一组下面是发卡台、收银台两个入口（8.1.15 起按业务域分组，「前台」是组名不是页面）
+      await expect(navItem(page, '发卡台')).toHaveCount(1);
+      await expect(navItem(page, '收银台')).toHaveCount(1);
+      await expect(navItem(page, '前台')).toHaveCount(0);
+      await expect(page.getByTestId('nav-domain-frontdesk')).toContainText('前台');
 
       // ② 发卡台：接待这位会员（接口），手牌卡片上有档阶
       const [tag, tag2] = await freeTags(page);
       const checkin = await postJson<{ visits: { id: number }[] }>(page, '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', memberId }] });
       visitId = checkin.visits[0]!.id;
-      expect((await boardTags(page)).find((t) => t.code === tag)!.visit).toMatchObject({ memberGradeLabel: 'L4 望岳 · 初', coupons: 1, gifts: 1 });
-      await nav.getByRole('link', { name: '发卡台', exact: true }).click();
+      const onBoard = (await boardTags(page)).find((t) => t.code === tag)!.visit!;
+      // 签赠正好一张；券至少一张——演示库（demo-prepare）开着按档自动发的会员权益券，L4 会员建档当场还会多几张
+      expect(onBoard).toMatchObject({ memberGradeLabel: 'L4 望岳 · 初', gifts: 1 });
+      expect(onBoard.coupons).toBeGreaterThanOrEqual(1);
+      await clickNav(page, '发卡台');
       await expect(page.getByRole('heading', { name: '发卡台 · 在店手牌' })).toBeVisible();
       await expect(page.getByTestId(`tag-${tag}-grade`)).toHaveText('L4');
       await page.getByTestId(`tag-${tag}`).click();

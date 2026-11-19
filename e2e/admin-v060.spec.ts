@@ -2,6 +2,7 @@
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan、值班经理 zhangjl、前台 xiaozhou，密码 yuzu2026。
 // 会改规则的流程只在门店电脑尺寸执行，结束时恢复（渠道停用、岗位权限恢复默认），可重复执行。
 import { expect, test, type Page } from '@playwright/test';
+import { clickNav, navItem } from './nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -13,14 +14,12 @@ async function login(page: Page, username: string) {
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 });
 }
 
-const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });
-
 test.describe('v0.6.0 管理后台', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 1280, '会改规则的流程只在门店电脑尺寸执行一次');
 
   test('店主从「后台」进入：后台首页、规则总表、返回前台；实例标识与版本常显', async ({ page }) => {
     await login(page, 'linlan');
-    await nav(page, '后台').click();
+    await clickNav(page, '后台');
     await expect(page.getByTestId('admin-shell')).toBeVisible();
     await expect(page.getByTestId('admin-instance')).toContainText('v');
     await expect(page.getByTestId('admin-home')).toBeVisible();
@@ -111,8 +110,8 @@ test.describe('v0.6.0 管理后台', () => {
 
   test('看板按岗位（2026-11-10 起在后台「数据看板」）：店主有今日、经营总览、会员总览；店员只有今日，进后台只看得到数据看板', async ({ page }) => {
     await login(page, 'linlan');
-    await expect(nav(page, '看板')).toHaveCount(0);
-    await nav(page, '后台').click();
+    await expect(navItem(page, '看板')).toHaveCount(0);
+    await clickNav(page, '后台');
     await page.getByTestId('admin-nav-dashboard').click();
     await expect(page).toHaveURL(/\/admin\/dashboard$/);
     await page.getByTestId('dashboard-tab-today').click();
@@ -128,7 +127,7 @@ test.describe('v0.6.0 管理后台', () => {
     await page.request.post('/api/auth/logout');
 
     await login(page, 'xiaozhou');
-    await nav(page, '后台').click();
+    await clickNav(page, '后台');
     // 店员没有后台首页：进来直接到数据看板，后台里只有这一个分区
     await expect(page).toHaveURL(/\/admin\/dashboard$/);
     await expect(page.getByTestId('dashboard')).toContainText('今日净营业额');

@@ -1,6 +1,6 @@
 import { ERP_MODULE_KEYS, ERP_MODULES } from '@shared/erp';
 import { useCan, useSession } from '../../lib/session';
-import { useStoreNav } from '../../components/storeNav';
+import { useStoreNavItems } from '../../components/storeNav';
 
 /**
  * 当前账号在 ERP 里能用的模块（店主开着、依赖满足、有权限），能不能进 ERP、登录后落在哪一页，
@@ -10,9 +10,7 @@ export function useErpAccess() {
   const session = useSession();
   const can = useCan();
   // 对客导览不算门店的工作页面（所有岗位都能看，只用 ERP 的人不因此多出「返回门店」）
-  const storeNav = useStoreNav()
-    .flat()
-    .filter((n) => !n.guestFacing);
+  const storeNav = useStoreNavItems().filter((n) => !n.guestFacing);
   const modules = ERP_MODULE_KEYS.filter((k) => session.erpModules.includes(k) && ERP_MODULES[k].perms.some((p) => can(p)));
   const canSettings = can('settings.manage');
   return {

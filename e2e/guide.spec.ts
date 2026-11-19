@@ -10,6 +10,7 @@ import type { FloorplanDetail } from '../src/shared/floorplans';
 import type { GuideAdmin, GuideData } from '../src/shared/guide';
 import type { SpaceLedger } from '../src/shared/spaces';
 import { floorplanSampleDxf } from '../src/server/demo/floorplan-sample';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -94,7 +95,7 @@ test.describe('v0.7.19 对客导览', () => {
       // ② 前台看导览页：二层先显示（楼层按编码排），派对区是动区色块；有前台、出入口、电梯图标；不显示房号
       await page.request.post('/api/auth/logout');
       await login(page, 'xiaozhou');
-      await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '导览' }).click();
+      await clickNav(page, '导览');
       await expect(page).toHaveURL(/\/guide$/);
       await expect(page.getByRole('radiogroup', { name: '楼层' }).getByRole('radio', { name: 'L2 二层平面图' })).toHaveAttribute('aria-checked', 'true');
       const map = page.getByTestId('guide-map-L2');

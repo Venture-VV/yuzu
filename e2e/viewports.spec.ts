@@ -3,6 +3,7 @@
 // 核对：页面不横向滚动；除了有意横向滚动的区域（表格、标签栏，带 overflow-x-auto），没有横向滚动区，也没有内容超出屏幕右边。
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { expectFits } from './fits';
+import { navItem, navLink } from './nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -34,16 +35,43 @@ async function businessDay(page: Page): Promise<{ date: string; today: boolean }
   return { date: me.today, today: true };
 }
 
-/** 主导航最后一个入口「后台」与实例标识之间的余量：标识是一行时要放得下多一行（演示库、测试服是两行），已经是两行时只要不挨着 */
-async function expectNavRoomForTwoLineTag(nav: Locator, tag: { y: number }) {
+/**
+ * 主导航（8.1.15 起按业务域分组，src/client/components/StoreRail.tsx）：要求的入口都在（所在的组折着也算）；
+ * 每个业务域都在屏幕内、在实例标识之上，导航那一列不用滚动（测试服 E2E 报告 BUG-1）
+ */
+async function expectNavFits(page: Page, names: string[]) {
+  const nav = page.getByRole('navigation', { name: '主导航' });
+  const viewport = page.viewportSize()!;
+  for (const name of names) await expect(navItem(page, name), `主导航里有「${name}」`).toHaveCount(1);
+  const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
+  const domains = nav.locator('[data-nav-domain]');
+  const count = await domains.count();
+  expect(count, '至少有一个业务域').toBeGreaterThan(0);
+  for (let i = 0; i < count; i++) {
+    const head = domains.nth(i).locator('[data-nav-toggle], [data-nav-item]').first();
+    const box = (await head.boundingBox())!;
+    const label = (await head.innerText()).trim();
+    expect(box.y + box.height, `「${label}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
+    expect(box.y + box.height, `「${label}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
+  }
+  const list = nav.getByTestId('nav-list');
+  const { scroll, client } = await list.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+  expect(scroll, '主导航那一列不用滚动就看得到全部业务域').toBeLessThanOrEqual(client + 1);
+}
+
+/** 主导航那一列的余量：实例标识是一行时（开发环境）还要放得下多一行（演示库、测试服的标识是两行，Codex 复测 PR #18 P2），已经是两行时不用滚动就行 */
+async function expectNavRoomForTwoLineTag(nav: Locator) {
   const twoLines = await nav
     .getByTestId('instance-tag')
     .locator('span')
     .first()
     .evaluate((el) => el.querySelector('br') !== null);
-  const last = (await nav.getByRole('link', { name: '后台', exact: true }).boundingBox())!;
-  const gap = tag.y - (last.y + last.height);
-  expect(gap, twoLines ? '「后台」与两行的实例标识不挨着' : '「后台」与实例标识之间放得下多一行标识').toBeGreaterThanOrEqual(twoLines ? 4 : 16);
+  const free = await nav.getByTestId('nav-list').evaluate((list) => {
+    const kids = [...list.children].filter((c) => !c.classList.contains('mo-indicator')) as HTMLElement[];
+    const bottom = Math.max(0, ...kids.map((c) => c.offsetTop + c.offsetHeight));
+    return list.clientHeight - bottom;
+  });
+  expect(free, twoLines ? '主导航那一列不用滚动' : '主导航那一列还放得下实例标识多出来的一行').toBeGreaterThanOrEqual(twoLines ? 0 : 16);
 }
 
 test.describe('视口冒烟', () => {
@@ -143,13 +171,8 @@ test.describe('视口冒烟', () => {
       await expectFits(page);
       if (!isMobile) {
         const nav = page.getByRole('navigation', { name: '主导航' });
-        const viewport = page.viewportSize()!;
-        const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['发卡台', '收银台', '钟房', '会员', '流水', '日结', '交班', '后台']) {
-          const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
-          expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
-          expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
-        }
+        await expectNavFits(page, ['发卡台', '收银台', '钟房', '会员', '流水', '日结', '交班', '后台']);
+        await expectNavRoomForTwoLineTag(nav);
       }
       await page.getByTestId('clock-dispatch').click();
       await expect(page.getByRole('dialog', { name: '派钟' })).toBeVisible();
@@ -179,16 +202,8 @@ test.describe('视口冒烟', () => {
       await expectFits(page);
       if (!isMobile) {
         const nav = page.getByRole('navigation', { name: '主导航' });
-        const viewport = page.viewportSize()!;
-        const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['发卡台', '收银台', '钟房', '餐饮', '会员', '流水', '日结', '交班', '后台']) {
-          const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
-          expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
-          expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
-        }
-        // 演示库、测试服的实例标识是两行（例如「演示」「不作数」），开发环境是一行：一行时最后一个入口与标识之间要留出多一行（16 像素，Codex 复测 PR #18 P2）；
-        // 已经是两行时那一行已经算在标识里，只要求不挨着（4 像素）——原来一律按 16 算，在演示库上量到 12.5 像素就报错，其实没有遮挡（测试会话 YUZU-MAIN-68391-FULL-20261114）
-        await expectNavRoomForTwoLineTag(nav, tag);
+        await expectNavFits(page, ['发卡台', '收银台', '钟房', '餐饮', '会员', '流水', '日结', '交班', '后台']);
+        await expectNavRoomForTwoLineTag(nav);
       }
       await page.getByTestId('dining-tab-kitchen').click();
       await expect(page.getByTestId('kitchen')).toBeVisible();
@@ -228,16 +243,8 @@ test.describe('视口冒烟', () => {
       await expectFits(page);
       if (!isMobile) {
         const nav = page.getByRole('navigation', { name: '主导航' });
-        const viewport = page.viewportSize()!;
-        const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-        for (const name of ['发卡台', '收银台', '钟房', '餐饮', '客房', '会员', '流水', '日结', '交班', '后台']) {
-          const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
-          expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
-          expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
-        }
-        // 演示库、测试服的实例标识是两行（例如「演示」「不作数」），开发环境是一行：一行时最后一个入口与标识之间要留出多一行（16 像素，Codex 复测 PR #18 P2）；
-        // 已经是两行时那一行已经算在标识里，只要求不挨着（4 像素）——原来一律按 16 算，在演示库上量到 12.5 像素就报错，其实没有遮挡（测试会话 YUZU-MAIN-68391-FULL-20261114）
-        await expectNavRoomForTwoLineTag(nav, tag);
+        await expectNavFits(page, ['发卡台', '收银台', '钟房', '餐饮', '客房', '会员', '流水', '日结', '交班', '后台']);
+        await expectNavRoomForTwoLineTag(nav);
       }
       await page.goto('/admin/rooms');
       await expect(page.getByTestId('rooms-rules-card')).toBeVisible();
@@ -264,19 +271,24 @@ test.describe('视口冒烟', () => {
     await expectFits(page);
   });
 
-  test('主导航：小屏电脑上所有入口不用滚动就能看到（测试服 E2E 报告 BUG-1）', async ({ page, isMobile }) => {
+  test('主导航：七个业务域不用滚动就能看到，每个入口点开所在的组就能点到（测试服 E2E 报告 BUG-1；8.1.15 按业务域分组）', async ({ page, isMobile }) => {
     test.skip(!!isMobile, '手机上用不到左侧导航');
     await login(page, 'linlan');
     const nav = page.getByRole('navigation', { name: '主导航' });
     const viewport = page.viewportSize()!;
-    const tag = (await nav.getByTestId('instance-tag').boundingBox())!;
-    for (const name of ['发卡台', '收银台', '会员', '流水', '日结', '交班', '后台']) {
-      const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
-      expect(box.y + box.height, `「${name}」在实例标识之上`).toBeLessThanOrEqual(tag.y + 1);
+    await expectNavFits(page, ['发卡台', '收银台', '会员', '流水', '日结', '交班', '后台']);
+    await expect(nav.locator('[data-nav-domain]').first()).toContainText('前台');
+    // 每个入口：所在的组折着的先点开，点得到、在屏幕里
+    for (const name of ['发卡台', '收银台', '流水', '日结', '交班', '后台']) {
+      const link = await navLink(page, name);
+      await link.scrollIntoViewIfNeeded();
+      const box = (await link.boundingBox())!;
       expect(box.y + box.height, `「${name}」在屏幕内`).toBeLessThanOrEqual(viewport.height);
+      expect(box.x + box.width, `「${name}」没出屏幕右边`).toBeLessThanOrEqual(viewport.width);
+      await page.keyboard.press('Escape');
     }
     // v0.7.3：库存、采购、货款、待办在 ERP 工作区，不在主导航；看板 2026-11-10 起在后台「数据看板」
-    for (const name of ['库存', '采购', '货款', '待办', '看板']) await expect(nav.getByRole('link', { name, exact: true })).toHaveCount(0);
+    for (const name of ['库存', '采购', '货款', '待办', '看板']) await expect(navItem(page, name)).toHaveCount(0);
   });
 
   test('ERP 工作区：首页、库存、采购、应付货款、审批中心、营业数据、模块设置都不横向滚动，实例标识常显（v0.7.3）', async ({ page, isMobile }) => {

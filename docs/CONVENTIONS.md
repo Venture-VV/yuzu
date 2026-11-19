@@ -36,6 +36,8 @@
   - 不进后台首页也看得到的分区登记在 `ADMIN_STANDALONE_SECTIONS`（数据看板、员工食堂、安保巡场；8.1.1 起还有工作台，设计师只进这一个分区）。 8.0.19（IA4）：当班会做的事不放后台——批量发券、无记名券在门店「会员工作台 → 发券」（`features/coupons/CouponIssuePage`），停车登记在「会员工作台 → 停车登记」，会员详情有「微信小程序」一行（`features/workbench/MemberWechatCard`：只引用小程序线的接口与 `sendUnbind` / `useMpPending`，不改它的文件）；
   - 后台只留规则、清单的维护与统计。 8.0.19 收尾：会员规则、会员权益、渠道与标签是「会员体系」一个分区里的三个页签（`features/membership/MembershipSection.tsx` 的 `MEMBERSHIP_TABS`，各自原权限；新的会员类规则加成那里的页签或放进已有的页签），规则总表的条目用 `tab` 指到页签；
   - 会话里有 `miniProgram`（小程序开没开），主线的页面要按它显示隐藏时读这一项，不改小程序线的文件。
+- 门店主导航（8.1.15，《浴族系统需求汇总》系统整体）按业务域分七组——前台、餐饮、房态、技师、会员、财务、设置，在 `src/client/components/storeNav.ts` 的 `STORE_NAV` 登记：新页面加在对应组 `items` 的末尾，不另开组（`tests/store-nav.test.ts` 核对七组的顺序与每页在哪一组）；展开的侧栏、收起时的一列图标与弹出的二级入口在 `StoreRail.tsx`。
+  - 浏览器用例点主导航用 `e2e/nav.ts` 的 `clickNav` / `navLink`（入口所在的组折着、或收起时在弹出层里，先打开那一组），查有没有某个入口用 `navItem`（折着也算）；不直接写 `getByRole('navigation', { name: '主导航' }).getByRole('link', …)`。
 - ERP（库存、采购、应付货款、审批待办、营业数据……）是单独的工作区（v0.7.3）：模块在 `src/shared/erp.ts` 的注册表里登记（页面、接口前缀、权限、默认开关、依赖），导航、页面拦截与接口拦截都按它来；
   - 新模块按注册表加，不在门店主导航里加入口，见 `docs/ERP.md`。 8.0.18（`docs/IA_V8017.md` 第 3.3 节）：导航的分组与顺序在 `ERP_NAV_GROUPS`（每个模块在且只在一个分组里，`tests/erp-ia.test.ts` 核对；注册表里的先后是按依赖排的，不是导航的顺序）；
   - ERP 的规则都收在「ERP 设置」（`/erp/settings/<页签>`，页签与谁看得到在 `features/erp/settingsTabs.ts`）——新的 ERP 规则卡片加成那里的一个页签或放进已有的页签，不再在各模块页里另开「规则」页；

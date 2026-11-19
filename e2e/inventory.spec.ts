@@ -3,6 +3,7 @@
 // 账号：店主 linlan / 物资经办 lixiao / 采购 zhouyi / 对账付款 qianfen（v0.7.12 分岗不兼任），密码 yuzu2026。
 // 业务流程只在门店电脑尺寸跑一遍（会改变演示数据，断言都用相对变化）；平板尺寸检查主要页面布局。
 import { expect, request, test, type Page } from '@playwright/test';
+import { navItem } from './nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -162,7 +163,7 @@ test.describe('库存与采购流程', () => {
 
     await login(page, 'linlan', '会员工作台');
     // 门店主导航里没有库存、待办；从用户菜单进 ERP，再点「审批中心」（v0.7.30 起导航是审批中心，旧的审批待办页照常在）
-    await expect(page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '待办', exact: true })).toHaveCount(0);
+    await expect(navItem(page, '待办')).toHaveCount(0);
     await enterErp(page);
     await nav(page, '审批中心').click();
     await expect(page).toHaveURL(/\/approvals/);

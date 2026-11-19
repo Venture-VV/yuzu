@@ -9,6 +9,7 @@
 // 依赖四套演示数据（仅独立演示库）；会改数据，只在门店电脑尺寸执行；每次自动挑空闲手牌、先交掉上次留下的班次，可重复执行。
 import { expect, test, type Page } from '@playwright/test';
 import { relaxRechargeMinimum } from '../membership';
+import { clickNav } from '../nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -22,8 +23,6 @@ async function login(page: Page, username: string) {
   await page.getByRole('button', { name: '登录' }).click();
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 });
 }
-
-const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });
 
 interface Shift {
   id: number;
@@ -123,7 +122,7 @@ test.describe('G-R1 页面回归', () => {
       const manager = await managerContext.newPage();
       await login(manager, 'zhangjl');
       await closeOpenShift(manager);
-      await nav(manager, '收银台').click();
+      await clickNav(manager, '收银台');
       await manager.getByTestId('open-checkouts').click();
       const records = manager.getByRole('dialog', { name: '结账记录' });
 
@@ -151,7 +150,7 @@ test.describe('G-R1 页面回归', () => {
       await expect(records).toHaveCount(0);
 
       // 值班经理的交班表：扫码单按原收款方式列出退款提醒，不扣现金
-      await nav(manager, '交班').click();
+      await clickNav(manager, '交班');
       await expect(manager.getByTestId('shift-refunds')).toContainText(wechat.checkout.checkoutNo);
       await expect(manager.getByTestId('shift-refunds')).toContainText('退款按原收款方式');
       await expect(manager.getByTestId('shift-refunds')).not.toContainText(cash.checkout.checkoutNo);
@@ -160,7 +159,7 @@ test.describe('G-R1 页面回归', () => {
     }
 
     // 收银员的交班表：现金单的退款记在这里，写明是值班经理反结账的，现金从应有现金里扣掉
-    await nav(page, '交班').click();
+    await clickNav(page, '交班');
     await expect(page.getByTestId('shift-refunds')).toContainText(cash.checkout.checkoutNo);
     await expect(page.getByTestId('shift-refunds')).toContainText('反结账、从本班钱箱退');
     await expect(page.getByTestId('shift-cash-formula')).toContainText('反结账退现金');
@@ -178,7 +177,7 @@ test.describe('G-R1 页面回归', () => {
   test('R7 结账记录：值班经理可以切到前一晚，店员只看本营业日', async ({ page }) => {
     await login(page, 'zhangjl');
     const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string };
-    await nav(page, '收银台').click();
+    await clickNav(page, '收银台');
     await page.getByTestId('open-checkouts').click();
     const records = page.getByRole('dialog', { name: '结账记录' });
     await expect(records).toContainText(`营业日 ${me.today}`);
@@ -188,7 +187,7 @@ test.describe('G-R1 页面回归', () => {
 
     await page.request.post('/api/auth/logout');
     await login(page, 'xiaozhou');
-    await nav(page, '收银台').click();
+    await clickNav(page, '收银台');
     await page.getByTestId('open-checkouts').click();
     const clerkRecords = page.getByRole('dialog', { name: '结账记录' });
     await expect(clerkRecords).toContainText(`营业日 ${me.today}`);
@@ -233,7 +232,7 @@ test.describe('G-R1 页面回归', () => {
       },
     });
     expect(paid.status(), await paid.text()).toBe(200);
-    await nav(page, '日结').click();
+    await clickNav(page, '日结');
     const breakdown = page.getByTestId('settlement-breakdown');
     // v0.7.20 起净营业额还减券抵扣与退款，实收减去退款；v0.7.25 起还减会员折扣
     for (const label of ['应收（结账 − 反结账）', '优惠 / 免单（当场授权）', '净营业额（应收 − 优惠 − 券抵扣 − 会员折扣 − 退款）', '实收（现金、扫码、银行卡、其他，减去退款）']) {

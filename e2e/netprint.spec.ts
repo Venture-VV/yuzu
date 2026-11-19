@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { startMockPrinter } from '../src/server/devices/mock-printer';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 const run = Date.now().toString(36).toUpperCase().slice(-5);
@@ -51,7 +52,7 @@ test('日结单打到小票机；拔线时排队，插回后自动补打', async
     const status = async () => ((await (await page.request.get('/api/print/printers')).json()) as { code: string; status: string }[]).find((p) => p.code === code)?.status;
     await expect.poll(status, { timeout: 10_000 }).toBe('online');
 
-    await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '日结', exact: true }).click();
+    await clickNav(page, '日结');
     await page.getByTestId('settlement-netprint').click();
     await expect(page.getByTestId('netprint-dialog')).toBeVisible();
     await page.getByTestId(`netprint-printer-${code}`).click();
@@ -70,7 +71,7 @@ test('日结单打到小票机；拔线时排队，插回后自动补打', async
     await expect(page.getByText(/日结单（80mm 汇总）已排队/)).toBeVisible({ timeout: 15_000 });
 
     // 设备页的打印队列；插回后自动补打、队列清空
-    await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '设备', exact: true }).click();
+    await clickNav(page, '设备');
     const queue = page.getByTestId('print-queue');
     await expect(queue).toContainText('日结单');
     await expect(queue).toContainText('等打印机恢复');

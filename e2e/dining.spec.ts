@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import type { DiningAdmin, KitchenBoard } from '../src/shared/dining';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 // 8.1.7：点单页先选一处（餐厅 / 水吧 / 果吧）再点菜；两道菜的点单分类在准备时写明（不靠默认归类）
@@ -149,7 +150,7 @@ test.describe('S5 餐饮', () => {
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 点单客人' }] });
       const visitId = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
       await page.goto('/');
-      await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '餐饮' }).click();
+      await clickNav(page, '餐饮');
 
       // ③ 沽清页：柠檬茶今天限量 2 份（上一轮留下的先取消）
       await page.getByTestId('dining-tab-limits').click();

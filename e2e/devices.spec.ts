@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { startMockBridge } from '../src/server/devices/mock-bridge';
 import { startMockPrinter } from '../src/server/devices/mock-printer';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 const run = Date.now().toString(36).toUpperCase().slice(-5);
@@ -58,7 +59,7 @@ test.describe('设备', () => {
         host: printer.host,
         port: printer.port,
       });
-      await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '设备', exact: true }).click();
+      await clickNav(page, '设备');
       const row = page.getByTestId(`device-${code}`);
       await expect(row).toHaveAttribute('data-status', 'online', { timeout: 10_000 });
 
