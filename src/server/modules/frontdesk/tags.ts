@@ -1,9 +1,11 @@
 // 手牌池：按清单导入、批量建牌、锁定 / 解锁、改分区与柜型、停用。在店手牌不能改分区、柜型、停用或锁定（先换牌）。
+// 8.1.15：手牌绑芯片号（card_uid），发牌时刷卡带出牌号（docs/FRONTDESK_RISK_V8115.md 第 2 节）。
 
 import { z } from 'zod';
 import { MAX_VIP_LEVEL, normalizeTagCode, tagArea, TAG_CODE_PATTERN, TAG_KINDS, ZONES, type HandTag } from '@shared/frontdesk';
 import { HAND_TAG_IMPORT_MAX_ROWS, type HandTagImportReport } from '@shared/hand-tag-import';
-import type { Db, Sql } from '../../db';
+import { CARD_UID_PATTERN, normalizeCardUid, type TagByCard } from '@shared/frontdesk-risk';
+import { isUniqueViolation, type Db, type Sql } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { OpContext } from '../../lib/context';
 import { badRequest, conflict, notFound } from '../../lib/errors';
@@ -12,9 +14,9 @@ import type { Deps } from '../../lib/context';
 import { setTxTimeouts } from './common';
 import { currentStoreId } from '../../lib/store-context';
 
-export async function listTags(db: Db): Promise<(HandTag & { inUse: boolean; lockedByName: string | null; lockedAt: string | null })[]> {
+export async function listTags(db: Db): Promise<(HandTag & { inUse: boolean; lockedByName: string | null; lockedAt: string | null; cardUid: string | null })[]> {
   return db`
-    SELECT t.id, t.code, t.zone, t.kind, t.vip_level, t.locked, t.lock_reason, t.active, t.is_synthetic, t.locked_at,
+    SELECT t.id, t.code, t.zone, t.kind, t.vip_level, t.locked, t.lock_reason, t.active, t.is_synthetic, t.locked_at, t.card_uid,
            s.display_name AS locked_by_name,
            EXISTS (SELECT 1 FROM visits v WHERE v.tag_id = t.id AND v.status = 'open') AS in_use
     FROM hand_tags t LEFT JOIN staff s ON s.id = t.locked_by
@@ -286,4 +288,80 @@ export async function importHandTags(
     }
     return report;
   });
+}
+
+// ───────────────────────── 芯片号（8.1.15） ─────────────────────────
+
+const cardUid = z.string('请刷卡或填写芯片号').transform(normalizeCardUid).pipe(z.string().regex(CARD_UID_PATTERN, '芯片号应为 4–32 位数字或字母（刷卡带出来的原样填）'));
+
+/** 芯片号 → 牌号与现在的状态（只读）。这张卡没绑手牌时 found 为 false，由页面写明原因 */
+export async function tagByCard(db: Db, raw: unknown): Promise<TagByCard> {
+  const uid = parse(cardUid, raw);
+  const [t] = await db<
+    {
+      id: number;
+      code: string;
+      zone: HandTag['zone'];
+      kind: HandTag['kind'];
+      vipLevel: number | null;
+      locked: boolean;
+      lockReason: string | null;
+      active: boolean;
+      visitId: number | null;
+      visitNo: string | null;
+    }[]
+  >`
+    SELECT t.id, t.code, t.zone, t.kind, t.vip_level, t.locked, t.lock_reason, t.active, v.id AS visit_id, v.visit_no
+    FROM hand_tags t LEFT JOIN visits v ON v.tag_id = t.id AND v.status = 'open'
+    WHERE t.store_id = ${currentStoreId()} AND t.card_uid = ${uid}`;
+  if (!t) return { found: false, cardUid: uid };
+  const { visitId, visitNo, ...tag } = t;
+  return {
+    found: true,
+    cardUid: uid,
+    tag,
+    state: visitId ? 'in_use' : tag.locked ? 'locked' : !tag.active ? 'inactive' : 'free',
+    visit: visitId ? { id: visitId, visitNo: visitNo! } : null,
+  };
+}
+
+export const CardInput = z.object({ cardUid: cardUid.nullable() });
+
+/**
+ * 给一张手牌绑芯片号，或解绑（cardUid 为 null）。在店的手牌也能绑、能解：芯片号只是「刷卡带出牌号」用的，不动来访与账单。
+ * 只锁这一张手牌；同一门店里一个芯片号只绑一张牌，已经绑在别的牌上的拒绝并写明是哪张（唯一索引兜底）。
+ */
+export async function setTagCard(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<{ id: number; code: string; cardUid: string | null }> {
+  const input = parse(CardInput, raw);
+  const boundError = (code: string) => conflict('CARD_BOUND', `这张卡已经绑在手牌 ${code} 上，请先在那张牌上解绑`, { code });
+  try {
+    return await deps.sql.begin(async (tx) => {
+      await setTxTimeouts(tx);
+      const [tag] = await tx<{ id: number; code: string; cardUid: string | null }[]>`
+        SELECT id, code, card_uid FROM hand_tags WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
+      if (!tag) throw notFound('手牌不存在');
+      if (tag.cardUid === input.cardUid) return tag;
+      if (input.cardUid !== null) {
+        const [other] = await tx<{ code: string }[]>`
+          SELECT code FROM hand_tags WHERE store_id = ${currentStoreId()} AND card_uid = ${input.cardUid} AND id <> ${id}`;
+        if (other) throw boundError(other.code);
+      }
+      await tx`UPDATE hand_tags SET card_uid = ${input.cardUid}, updated_at = now() WHERE id = ${id}`;
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'hand_tag_card',
+        targetType: 'hand_tag',
+        targetId: id,
+        detail: { code: tag.code, before: tag.cardUid, after: input.cardUid },
+        ip: ctx.ip,
+      });
+      return { id: tag.id, code: tag.code, cardUid: input.cardUid };
+    });
+  } catch (error) {
+    if (isUniqueViolation(error, 'hand_tags_card_uid_uq')) {
+      const [other] = await deps.sql<{ code: string }[]>`SELECT code FROM hand_tags WHERE store_id = ${currentStoreId()} AND card_uid = ${input.cardUid}`;
+      throw boundError(other?.code ?? '');
+    }
+    throw error;
+  }
 }

@@ -27,6 +27,7 @@
 // 新增「打开平板点餐」「维护电子菜单」。平板上确认下单的服务员照旧要「餐饮点单」+「前台挂账」（凭点单密码认人）。
 // 8.1.1 UI 工作台（docs/WORKBENCH_V811.md 第 6 节）：新岗位「设计师」（只进工作台），新增「工作台：编辑」「工作台：发布」；
 // 店主 2026-11-15 定设计师可以发布（GZ3）：两项默认给店主与设计师，别的岗位要的在后台「岗位权限」里加。
+// 8.1.15《浴族系统需求汇总》块 A（docs/FRONTDESK_RISK_V8115.md，YB10 待确认）：新增「维护黑名单」与「前台风控的当场授权」，默认值班经理及以上。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store', 'tablet', 'designer'] as const;
 export type Role = (typeof ROLES)[number];
@@ -141,6 +142,8 @@ export const PERMISSIONS = {
   'frontdesk.refund': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 结账时挂账到协议单位（8.0.7 A3，V12 待确认：店主、店总、值班经理） */
   'frontdesk.onAccount': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /** 黑名单（8.1.15，docs/FRONTDESK_RISK_V8115.md，YB10 待确认：值班经理及以上）：把会员或手机号加入黑名单、解除，看黑名单清单 */
+  'frontdesk.blacklist': { roles: ['owner', 'store_manager', 'duty_manager'] },
   // ── 券与会员权益（v0.7.20，飞书 RQ-006；docs/COUPONS.md，默认值待确认）──
   /** 维护券模板、发券规则（开卡礼、升级礼、生日礼、充值赠券），生成与导出无记名纸质券、按批次作废没用的 */
   'coupon.manage': { roles: ['owner', 'store_manager'] },
@@ -261,6 +264,11 @@ export const PERMISSIONS = {
   'auth.vipOverride': { roles: ['owner', 'store_manager', 'duty_manager'] },
   /** 授权结账的「优惠 / 免单」、降低票种与免票（R1.2，店主 2026-10-29 签认） */
   'auth.discount': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /**
+   * 前台风控的当场授权（8.1.15，YB10 待确认：值班经理及以上）：名下有没处理完的「未结离店」的会员发牌、超时加收；
+   * 有这一项的人自己加收不用另请授权，「未结离店」的待办也由有这一项的人写处理结果
+   */
+  'auth.checkinRisk': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'staff.manage': { roles: ['owner'] },
   'catalog.manage': { roles: ['owner', 'store_manager'] },
   /** 技师名册：新建、编辑、停用技师（v0.7.0，待确认：默认店主与店总） */
@@ -456,6 +464,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'frontdesk.backfill': '按实际时间补录纸质单',
   'frontdesk.refund': '开退款单（离店后部分退款）与作废当班的退款单',
   'frontdesk.onAccount': '结账时挂账到协议单位',
+  'frontdesk.blacklist': '维护黑名单（加入、解除、看清单）',
   'coupon.manage': '维护券模板、发券规则与无记名券',
   'coupon.issue': '发券给会员',
   'coupon.void': '作废会员没用过的券',
@@ -512,6 +521,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'auth.memberPhone': '当场授权改会员手机号',
   'auth.vipOverride': '当场授权散客或低等级会员使用 VIP 柜',
   'auth.discount': '当场授权优惠 / 免单、降低票种与免票',
+  'auth.checkinRisk': '当场授权未结离店的会员发牌、超时加收；处理未结离店的待办',
   'staff.manage': '管理员工账号',
   'catalog.manage': '管理充值套餐与消费项目',
   'technician.manage': '维护技师名册',
@@ -581,6 +591,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
       'frontdesk.refund',
       'frontdesk.onAccount',
       'frontdesk.backfill',
+      'frontdesk.blacklist',
       'technician.dispatch',
       'dining.order',
       'dining.kitchen',
@@ -665,7 +676,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
     ],
   },
   { title: '员工工作台', items: ['canteen.manage', 'patrol.read', 'patrol.manage'] },
-  { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },
+  { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone', 'auth.checkinRisk'] },
   { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission', 'marketing.cost'] },
   { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'emenu.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
   { title: 'UI 工作台', items: ['studio.edit', 'studio.publish'] },

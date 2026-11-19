@@ -14,6 +14,7 @@ const TEXT: Record<GrantPurpose, { title: string; who: string }> = {
   member_refund: { title: '退储值', who: '请店总或店主输入自己的账号密码' },
   member_phone: { title: '改会员手机号', who: '请值班经理、店总或店主输入自己的账号密码' },
   line_void: { title: '退菜（超过小额上限）', who: '请值班经理、店总或店主看过菜名、金额与原因后输入自己的账号密码' },
+  checkin_risk: { title: '前台风控（未结离店发牌 / 超时加收）', who: '请值班经理、店总或店主看过下面的内容后输入自己的账号密码' },
 };
 
 /**

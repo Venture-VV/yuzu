@@ -7,6 +7,8 @@
 //     优惠与降档的原因由申请的员工在弹窗里填写，随授权签发，核销后记到单据上；
 //     用途 member_refund：退储值（店总、店主，v0.7.26，M69），绑定会员与退的本金；
 //     用途 member_phone：店员、客户经理改会员手机号（值班经理及以上，v0.7.26，M77），绑定会员与新号码；
+//     用途 checkin_risk：前台风控（值班经理及以上，8.1.15，docs/FRONTDESK_RISK_V8115.md）——名下有没处理完的「未结离店」的会员发牌
+//     （绑定这几位会员与原因），或一笔超时加收（绑定来访、金额与原因）；
 //   · 授权绑定用途、申请的员工和授权对象（哪位客人用哪张柜 / 哪位会员的哪类业务、多少金额），5 分钟内有效，只能用一次；
 //   · 业务请求只带授权编号，在同一事务里核销：业务回滚时核销一起回滚，授权仍可在有效期内再用；
 //   · 授权人的密码错误与登录共用限流计数；失败返回 403 而不是 401，不会把前台员工自己登出；
@@ -34,6 +36,7 @@ import {
   type VipTagScope,
   type LineVoidScope,
 } from '@shared/grants';
+import { MAX_SURCHARGE_CENTS, riskGrantCovers, type CheckinRiskScope } from '@shared/frontdesk-risk';
 import { formatYuan } from '@shared/money';
 import { can, type Duty, type Permission, type Role } from '@shared/permissions';
 import type { Db, Tx } from '../db';
@@ -44,6 +47,8 @@ import { parse, positiveCents } from '../lib/validate';
 import { loadVipLockerRules } from '../modules/vip-lockers';
 import { loadSettings } from '../modules/settings';
 import { loadDiningRules } from '../modules/dining';
+import { loadRiskRules, unsettledDebts } from '../modules/frontdesk/risk';
+import { currentStoreId } from '../lib/store-context';
 import { guard } from './guard';
 import { checkLock, clearFailures, recordFailure } from './lockout';
 import { verifyPassword } from './password';
@@ -106,6 +111,24 @@ const TicketScopeInput = z.object({
   reason: z.string('请填写原因').trim().min(2, '请填写原因（至少 2 个字）').max(100, '原因最多 100 字'),
 });
 
+const CheckinRiskScopeInput = z.discriminatedUnion(
+  'kind',
+  [
+    z.object({
+      kind: z.literal('checkin'),
+      memberIds: z.array(z.number().int().positive('请说明授权哪位会员'), '请说明授权哪位会员').min(1, '请说明授权哪位会员').max(12, '一次最多授权 12 位'),
+      reason: z.string('请填写放行的原因').trim().min(2, '请填写放行的原因（至少 2 个字）').max(100, '原因最多 100 字'),
+    }),
+    z.object({
+      kind: z.literal('surcharge'),
+      visitId: z.number().int().positive('请说明授权哪张手牌'),
+      amount: positiveCents('加收金额').max(MAX_SURCHARGE_CENTS, `加收一笔最多 ${formatYuan(MAX_SURCHARGE_CENTS)}`),
+      reason: z.string('请填写加收的原因').trim().min(2, '请填写加收的原因（至少 2 个字）').max(100, '原因最多 100 字'),
+    }),
+  ],
+  '请说明授权的是发牌还是加收',
+);
+
 /** 各用途：申请人需要的权限、授权人需要的权限，以及授权人岗位不够时的提示 */
 const PURPOSE_RULES: Record<GrantPurpose, { approver: Permission; approverText: string }> = {
   vip_tag: { approver: 'auth.vipOverride', approverText: '使用 VIP 柜，请值班经理、店总或店主授权' },
@@ -115,6 +138,7 @@ const PURPOSE_RULES: Record<GrantPurpose, { approver: Permission; approverText: 
   member_refund: { approver: 'auth.memberRefund', approverText: '退储值，请店总或店主授权' },
   member_phone: { approver: 'auth.memberPhone', approverText: '改会员手机号，请值班经理、店总或店主授权' },
   line_void: { approver: 'frontdesk.correct', approverText: '退超过小额上限的菜，请值班经理、店总或店主授权' },
+  checkin_risk: { approver: 'auth.checkinRisk', approverText: '未结离店的会员发牌、超时加收，请值班经理、店总或店主授权' },
 };
 const KIND_PERMISSION: Record<OverLimitScope['kind'], Permission> = { recharge: 'recharge.create', consume: 'consume.create' };
 const KIND_LABEL: Record<OverLimitScope['kind'], string> = { recharge: '充值', consume: '消费' };
@@ -127,7 +151,7 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/auth/authorize', { preHandler: guard() }, async (req): Promise<IssuedGrant> => {
     const input = parse(Credentials, req.body);
     // 先核对申请人能不能办这项业务、这项授权现在需不需要，再核对授权人的密码
-    let scope: VipTagScope | OverLimitScope | DiscountScope | TicketDiscountScope | MemberRefundScope | MemberPhoneScope | LineVoidScope;
+    let scope: VipTagScope | OverLimitScope | DiscountScope | TicketDiscountScope | MemberRefundScope | MemberPhoneScope | LineVoidScope | CheckinRiskScope;
     const rawScope = (req.body as { scope?: unknown }).scope;
     if (input.purpose === 'vip_tag') {
       if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
@@ -164,6 +188,25 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
         throw conflict('GRANT_NOT_NEEDED', `「${line.name}」${formatYuan(Number(line.amount))} 没有超过小额退菜上限 ${formatYuan(dining.voidFreeCents)}，可以直接退`);
       }
       scope = { lineId: v.lineId, amount: Number(line.amount), name: line.name, reason: v.reason };
+    } else if (input.purpose === 'checkin_risk') {
+      // 前台风控（8.1.15）：申请与发牌、挂账同一套权限；先核对这项授权现在需不需要
+      if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
+      const v = parse(CheckinRiskScopeInput, rawScope);
+      if (v.kind === 'checkin') {
+        const memberIds = sortedVisitIds(v.memberIds);
+        if (!(await loadRiskRules(sql)).enabled) throw conflict('GRANT_NOT_NEEDED', '发牌前风控没有开启，发牌不需要授权');
+        const owing = new Set((await unsettledDebts(sql, memberIds)).map((d) => d.memberId));
+        const clean = memberIds.filter((id) => !owing.has(id));
+        if (clean.length) throw conflict('GRANT_NOT_NEEDED', '这位会员名下没有没处理完的「未结离店」，发牌不需要授权；请刷新后重试', { memberIds: clean });
+        scope = { kind: 'checkin', memberIds, reason: v.reason };
+      } else {
+        // 自己能加收的不用授权
+        if (can(req.actor, 'auth.checkinRisk')) throw conflict('GRANT_NOT_NEEDED', '你的岗位可以直接加收，不需要授权');
+        const [visit] = await sql<{ status: string }[]>`SELECT status FROM visits WHERE id = ${v.visitId} AND store_id = ${currentStoreId()}`;
+        if (!visit) throw notFound('来访记录不存在');
+        if (visit.status !== 'open') throw conflict('VISIT_CLOSED', '这位客人已经离店，不能再加收');
+        scope = { kind: 'surcharge', visitId: v.visitId, amount: v.amount, reason: v.reason };
+      }
     } else if (input.purpose === 'member_phone') {
       if (!can(req.actor, 'member.write')) throw forbidden();
       // 自己能改手机号的不用授权
@@ -371,4 +414,37 @@ export async function consumeMemberPhoneGrant(tx: Tx, opts: { grantId: string; a
   }
   await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
   return { approverId: g.approvedBy, approverName: g.approverName };
+}
+
+/**
+ * 在发牌的事务里核销一次前台风控授权（8.1.15；会员一行的共享锁之后加锁）：授权必须是「发牌」那一种，
+ * 并且覆盖所有名下有没处理完的未结离店的会员；返回授权人与授权时填的原因，记到来访上
+ */
+export async function consumeCheckinRiskGrant(
+  tx: Tx,
+  opts: { grantId: string; actor: Actor; memberIds: number[]; usedRef: string },
+): Promise<{ approverId: number; approverName: string; reason: string }> {
+  const g = await lockGrant(tx, opts.grantId, 'checkin_risk', opts.actor);
+  const s = g.scope as CheckinRiskScope;
+  if (!riskGrantCovers(s, opts.memberIds)) {
+    throw unprocessable('GRANT_SCOPE', '授权不包含这次要放行的会员（或客人已变更），请按当前内容重新授权');
+  }
+  await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
+  return { approverId: g.approvedBy, approverName: g.approverName, reason: s.reason };
+}
+
+/**
+ * 在加收的事务里核销一次授权（8.1.15；来访、账单锁之后加锁）：授权必须是「加收」那一种、这次来访、这个金额（改了要重新授权）
+ */
+export async function consumeSurchargeGrant(
+  tx: Tx,
+  opts: { grantId: string; actor: Actor; visitId: number; amount: number; usedRef: string },
+): Promise<{ approverId: number; approverName: string; reason: string }> {
+  const g = await lockGrant(tx, opts.grantId, 'checkin_risk', opts.actor);
+  const s = g.scope as CheckinRiskScope;
+  if (s.kind !== 'surcharge' || s.visitId !== opts.visitId || s.amount !== opts.amount) {
+    throw unprocessable('GRANT_SCOPE', `授权的不是这张手牌的这笔加收 ${formatYuan(opts.amount)}，请按当前内容重新授权`);
+  }
+  await tx`UPDATE auth_grants SET used_at = now(), used_ref = ${opts.usedRef} WHERE id = ${opts.grantId}`;
+  return { approverId: g.approvedBy, approverName: g.approverName, reason: s.reason };
 }

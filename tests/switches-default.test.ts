@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ERP_MODULE_KEYS } from '../src/shared/erp';
 import { loadGiftRules } from '../src/server/modules/gifts';
+import { loadRiskRules } from '../src/server/modules/frontdesk/risk';
 import { loadInventorySettings } from '../src/server/modules/inventory/common';
 import { loadLocationRules } from '../src/server/modules/locations';
 import { loadPurchaseRules } from '../src/server/modules/inventory/purchase-rules';
@@ -34,6 +35,8 @@ describe('功能开关都默认开（8.0.20）', () => {
     expect((await loadGiftRules(ctx.sql)).enabled).toBe(true);
     // 提需核库（8.1.10，CK12）
     expect((await loadPurchaseRules(ctx.sql)).stockCheckEnabled).toBe(true);
+    // 发牌前风控（8.1.15，docs/FRONTDESK_RISK_V8115.md）
+    expect((await loadRiskRules(ctx.sql)).enabled).toBe(true);
     const dining = await api(ctx.app, ctx.owner, 'GET', '/api/admin/dining');
     expect(dining.body.rules).toMatchObject({ enabled: true, tablesEnabled: true });
   });

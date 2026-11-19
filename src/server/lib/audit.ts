@@ -78,6 +78,14 @@ export type AuditAction =
   | 'hand_tag_locked'
   | 'hand_tag_unlocked'
   | 'hand_tag_updated'
+  // 8.1.15 前台：芯片号、黑名单、发牌被黑名单拦下、发牌后的异常处置（docs/FRONTDESK_RISK_V8115.md）
+  | 'hand_tag_card'
+  | 'blacklist_added'
+  | 'blacklist_lifted'
+  | 'checkin_blocked'
+  | 'visit_incident'
+  | 'incident_assigned'
+  | 'incident_resolved'
   | 'technician_saved'
   | 'items_technician_updated'
   // 餐饮（S5 第一步）：出品档口、菜品的出品档口、沽清

@@ -16,6 +16,8 @@ export const STORE_SCOPED_SETTING_KEYS = [
   'print_mode',
   'print_wait_minutes',
   'frontdesk_rules',
+  // 发牌前风控的开关（8.1.15，docs/FRONTDESK_RISK_V8115.md）
+  'frontdesk_risk_rules',
   'dining_rules',
   'emenu_rules',
   'room_rules',

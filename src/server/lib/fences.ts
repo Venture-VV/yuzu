@@ -145,6 +145,8 @@ export const FENCED_OPS = [
   'gift_issue',
   // 8.1.10 核库转领用（迁移 185；编号记在 idempotency_keys，ref_id 是那张需求单）
   'request_stock',
+  // 8.1.15 发牌后的异常处置（迁移 187）：提醒、加收、上报、外出、返回、未结离店；编号记在 idempotency_keys（ref_id 是那次来访），也记在 visit_incidents.op_key
+  'visit_incident',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
