@@ -3,8 +3,10 @@
 //      店主的账号回门店系统的首页；
 //   ② 设计师工作台：顶栏最左边有带字的「退出」，点了回后台的「工作台」；草稿没存上时先存，存不上停下来问
 //      （继续编辑 / 再存一次 / 不保存直接退出）。
+// 平板的两条自己定后台的「点单密码」（关着走一遍、开着走一遍），用完放回原样：同一组里排在前面的 e2e/emenu.spec.ts 会把它打开、不关。
 // 依赖演示数据（seed-demo：店主 linlan，密码 yuzu2026）。会改工作台的草稿（用完放回默认版面），只在门店电脑尺寸执行。
 import { expect, test, type Page } from '@playwright/test';
+import type { EmenuAdmin } from '../src/shared/emenu';
 import { defaultStudioDoc, type StudioState } from '../src/shared/studio';
 
 const PASSWORD = 'yuzu2026';
@@ -15,6 +17,22 @@ async function login(page: Page, username: string) {
   await page.fill('#password', PASSWORD);
   await page.getByRole('button', { name: '登录' }).click();
   await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30_000 });
+}
+
+/**
+ * 平板点餐的「点单密码」设成 on，返回原来的值（用完放回）。按住走满以后：开着的要一位点单的同事先输密码（TC5），关着的直接走。
+ * 同一组里排在前面的 e2e/emenu.spec.ts 会把它打开、不关（那一条走的是要密码的一套），所以这里自己定，不靠演示库的默认。
+ */
+async function setRequirePin(page: Page, on: boolean): Promise<boolean> {
+  const res = await page.request.get('/api/admin/emenu');
+  expect(res.ok(), `GET /api/admin/emenu → ${res.status()}`).toBe(true);
+  const admin = (await res.json()) as EmenuAdmin;
+  const before = admin.rules.requirePin;
+  if (before !== on) {
+    const put = await page.request.put('/api/admin/emenu/rules', { data: { rev: admin.rulesRev, requirePin: on } });
+    expect(put.ok(), `PUT /api/admin/emenu/rules → ${put.status()} ${await put.text()}`).toBe(true);
+  }
+  return before;
 }
 
 async function resetDraft(page: Page) {
@@ -29,6 +47,8 @@ test.describe('8.1.15 平板电子菜单与工作台的退出', () => {
 
   test('平板电子菜单：左下角的退出键 → 退出界面 → 点一下只提示、按住才离开，回门店系统的首页', async ({ page }) => {
     await login(page, 'linlan');
+    // 这一条走「不要点单密码」的一套（8.0.15 起的默认）；开着密码的那一套在下一条
+    const pinBefore = await setRequirePin(page, false);
     await page.goto('/emenu');
     // 起始页、「平板点餐没有开启」「菜单取不回来」这几屏都有这个键
     const key = page.getByTestId('emenu-leave-key');
@@ -63,6 +83,29 @@ test.describe('8.1.15 平板电子菜单与工作台的退出', () => {
     await page.waitForURL((u) => u.pathname === '/', { timeout: 15_000 });
     await page.mouse.up();
     await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 });
+    await setRequirePin(page, pinBefore);
+  });
+
+  test('平板电子菜单：后台开着「点单密码」时，按住走满先要一位点单的同事输密码；取消就留在菜单', async ({ page }) => {
+    await login(page, 'linlan');
+    const pinBefore = await setRequirePin(page, true);
+    await page.goto('/emenu');
+    const key = page.getByTestId('emenu-leave-key');
+    await expect(key).toBeVisible({ timeout: 30_000 });
+    await key.click();
+    const home = page.getByTestId('emenu-leave').getByTestId('emenu-leave-home');
+    await expect(home).toBeVisible();
+    await home.hover();
+    await page.mouse.down();
+    const check = page.getByRole('dialog', { name: '员工确认' });
+    await expect(check).toBeVisible({ timeout: 10_000 });
+    await page.mouse.up();
+    await expect(check).toContainText('点单密码');
+    await expect(page).toHaveURL(/\/emenu/);
+    await check.getByRole('button', { name: '取消' }).click();
+    await expect(check).toHaveCount(0);
+    await expect(page).toHaveURL(/\/emenu/);
+    await setRequirePin(page, pinBefore);
   });
 
   test('设计师工作台：带字的「退出」回后台的工作台；草稿没存上时先存，存不上停下来问', async ({ page }) => {
