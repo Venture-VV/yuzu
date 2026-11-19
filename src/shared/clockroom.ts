@@ -8,7 +8,8 @@
 
 import { PRICE_TIERS, type PriceTier } from './catalog';
 import type { CallType, Technician, TechnicianRules } from './technicians';
-import type { AnnouncerClaim, ClockCall, LeaveType, TechShift } from './technician-admin';
+import { normalizeQuery } from './pinyin-initials';
+import { matchesTechnician, servesCategory, type AnnouncerClaim, type ClockCall, type LeaveType, type TechShift } from './technician-admin';
 
 export interface ClockroomRules {
   /** 轮钟什么时候排到队尾：派钟时（默认）/ 下钟后 */
@@ -210,6 +211,57 @@ export function techFilterOf(t: { suspendedAt: string | null; busy: { status: 'w
 
 /** 钟房「按状态排」的先后（8.1.15）：空闲、上钟、已派待上（排位）、休息、休假、停牌、未上牌 */
 export const TECH_STATUS_ORDER: readonly Exclude<TechFilter, 'all'>[] = ['idle', 'serving', 'waiting', 'rest', 'leave', 'suspended', 'off'];
+
+/** 钟房的搜索与筛选（8.1.15）：几样条件叠加（都要满足）；类型、项目各自可以多选（选中的任一样就算） */
+export interface TechQuery {
+  /** 搜索词：姓名、工号、花名，或姓名、花名的拼音首字母 */
+  text: string;
+  /** 技师类型；空字符串是「没设类型」的 */
+  kinds: string[];
+  /** 可做的项目分类（技师没设可做分类的算全部都做） */
+  categories: string[];
+  status: TechFilter;
+}
+
+export const EMPTY_TECH_QUERY: TechQuery = { text: '', kinds: [], categories: [], status: 'all' };
+
+/** 现在有没有生效的条件 */
+export const techQueryActive = (q: TechQuery) => normalizeQuery(q.text) !== '' || q.kinds.length > 0 || q.categories.length > 0 || q.status !== 'all';
+
+type QueryTech = Pick<BoardTechnician, 'active' | 'name' | 'nickname' | 'techNo' | 'kind' | 'skills' | 'suspendedAt' | 'busy' | 'state' | 'position'>;
+
+/** 按条件筛出在职的技师 */
+export function filterBoardTechnicians<T extends QueryTech>(list: readonly T[], q: TechQuery): T[] {
+  const text = normalizeQuery(q.text);
+  return list.filter(
+    (t) =>
+      t.active &&
+      (q.status === 'all' || techFilterOf(t) === q.status) &&
+      (q.kinds.length === 0 || q.kinds.includes(t.kind)) &&
+      (q.categories.length === 0 || q.categories.some((c) => servesCategory(t, c))) &&
+      matchesTechnician(text, t),
+  );
+}
+
+export const TECH_SORTS = ['queue', 'status'] as const;
+export type TechSort = (typeof TECH_SORTS)[number];
+export const TECH_SORT_LABELS: Record<TechSort, string> = { queue: '按排位', status: '按状态' };
+
+/** 工号的先后：数字工号按数值（2 号在 10 号前面），其余按字母 */
+const byTechNo = (a: string, b: string) => {
+  const [x, y] = [Number(a), Number(b)];
+  const [nx, ny] = [/^\d+$/.test(a), /^\d+$/.test(b)];
+  if (nx && ny) return x - y || a.localeCompare(b);
+  if (nx !== ny) return nx ? -1 : 1;
+  return a.localeCompare(b);
+};
+
+/** 排序：按排位（在队列里的按位置，其余按工号），或先按状态（TECH_STATUS_ORDER）再按排位 */
+export function sortBoardTechnicians<T extends QueryTech>(list: readonly T[], sort: TechSort): T[] {
+  const byQueue = (a: T, b: T) => (a.position ?? 9999) - (b.position ?? 9999) || byTechNo(a.techNo, b.techNo);
+  if (sort === 'queue') return [...list].sort(byQueue);
+  return [...list].sort((a, b) => TECH_STATUS_ORDER.indexOf(techFilterOf(a)) - TECH_STATUS_ORDER.indexOf(techFilterOf(b)) || byQueue(a, b));
+}
 
 export interface ClockEvent {
   id: number;

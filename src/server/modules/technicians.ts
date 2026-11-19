@@ -98,6 +98,7 @@ export async function technicianAdmin(db: Db): Promise<TechnicianAdmin> {
     clockroomUpdatedBy: crMeta?.updatedBy ?? null,
     technicians: technicians.map((t) => ({ ...t, createdAt: new Date(t.createdAt).toISOString(), updatedAt: new Date(t.updatedAt).toISOString() })),
     categories: categories.map((c) => c.category),
+    kinds: await loadTechnicianKinds(db),
   };
 }
 

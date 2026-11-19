@@ -2,8 +2,9 @@
 // 钟房打「zxm」找到「张小明」；姓名、花名、工号都能找；叫号念的那一句。
 
 import { describe, expect, it } from 'vitest';
+import { EMPTY_TECH_QUERY, filterBoardTechnicians, sortBoardTechnicians, techQueryActive, type BoardTechnician, type TechQuery } from '../src/shared/clockroom';
 import { matchesQuery, normalizeQuery, pinyinInitials } from '../src/shared/pinyin-initials';
-import { announceText, matchesTechnician, parseClock, servesCategory, shiftTimeText } from '../src/shared/technician-admin';
+import { announceText, matchesTechnician, parseClock, servesCategory, shiftTimeText, spokenText } from '../src/shared/technician-admin';
 
 describe('拼音首字母', () => {
   it('常见的名字：每个字取声母', () => {
@@ -85,6 +86,11 @@ describe('叫号念的那一句、班次的时间', () => {
     expect(announceText({ position: 1, techNo: '08', name: '小李', nickname: '', room: null })).toBe('请 1 号排位，08 号 小李，准备上钟');
   });
 
+  it('交给朗读引擎的写法：三位以上的数字一位一位念，排位号、工号照常', () => {
+    expect(spokenText('请 3 号排位，18 号 小雅，到 201 房')).toBe('请 3 号排位，18 号 小雅，到 二零一 房');
+    expect(spokenText('请 12 号排位，08 号 小李，到 S3105 SPA 一号')).toBe('请 12 号排位，08 号 小李，到 S三一零五 SPA 一号');
+  });
+
   it('班次：起止时间的写法，结束不晚于开始是到次日', () => {
     expect(shiftTimeText({ startMinute: 600, endMinute: 1080 })).toBe('10:00–18:00');
     expect(shiftTimeText({ startMinute: 1080, endMinute: 120 })).toBe('18:00–次日 02:00');
@@ -92,5 +98,63 @@ describe('叫号念的那一句、班次的时间', () => {
     expect(parseClock('23:59')).toBe(1439);
     expect(parseClock('24:00')).toBeNull();
     expect(parseClock('abc')).toBeNull();
+  });
+});
+
+describe('钟房的筛选与排序', () => {
+  type T = Pick<BoardTechnician, 'active' | 'name' | 'nickname' | 'techNo' | 'kind' | 'skills' | 'suspendedAt' | 'busy' | 'state' | 'position'>;
+  const tech = (techNo: string, name: string, patch: Partial<T> = {}): T => ({
+    active: true,
+    name,
+    nickname: '',
+    techNo,
+    kind: '',
+    skills: [],
+    suspendedAt: null,
+    busy: null,
+    state: 'off',
+    position: null,
+    ...patch,
+  });
+  const list: T[] = [
+    tech('11', '张小明', { nickname: '小雅', kind: '足浴', skills: ['足疗'], state: 'on', position: 2 }),
+    tech('12', '李婷', { kind: '按摩', skills: ['身体护理'], state: 'on', position: 1, busy: { sessionId: 1, status: 'serving' } }),
+    tech('13', '王芳', { kind: '足浴', state: 'leave' }),
+    tech('14', '赵敏', { state: 'on', position: 3, busy: { sessionId: 2, status: 'waiting' } }),
+    tech('2', '周琪', { kind: 'SPA', state: 'rest' }),
+    tech('A5', '郑爽', { kind: '足浴', suspendedAt: '2026-11-19T02:00:00.000Z' }),
+    tech('15', '钱多', { active: false, kind: '足浴' }),
+  ];
+  const nos = (q: Partial<TechQuery>) => filterBoardTechnicians(list, { ...EMPTY_TECH_QUERY, ...q }).map((t) => t.techNo);
+
+  it('没有条件：在职的都在；停用的不在', () => {
+    expect(techQueryActive(EMPTY_TECH_QUERY)).toBe(false);
+    expect(techQueryActive({ ...EMPTY_TECH_QUERY, text: '  ' })).toBe(false);
+    expect(nos({})).toEqual(['11', '12', '13', '14', '2', 'A5']);
+  });
+
+  it('搜索：姓名、花名、工号、拼音首字母', () => {
+    expect(nos({ text: 'zxm' })).toEqual(['11']);
+    expect(nos({ text: 'XY' })).toEqual(['11']);
+    expect(nos({ text: '婷' })).toEqual(['12']);
+    expect(nos({ text: 'a5' })).toEqual(['A5']);
+    expect(nos({ text: 'z' })).toEqual(['11', '14', '2', 'A5']);
+    expect(techQueryActive({ ...EMPTY_TECH_QUERY, text: 'z' })).toBe(true);
+  });
+
+  it('类型、项目、状态可以叠加；同一样里多选是「任一样」；没设可做分类的什么项目都算', () => {
+    expect(nos({ kinds: ['足浴'] })).toEqual(['11', '13', 'A5']);
+    expect(nos({ kinds: ['足浴', 'SPA'] })).toEqual(['11', '13', '2', 'A5']);
+    expect(nos({ kinds: [''] })).toEqual(['14']);
+    expect(nos({ categories: ['身体护理'] })).toEqual(['12', '13', '14', '2', 'A5']);
+    expect(nos({ categories: ['足疗'], kinds: ['足浴'] })).toEqual(['11', '13', 'A5']);
+    expect(nos({ categories: ['足疗'], kinds: ['足浴'], status: 'idle' })).toEqual(['11']);
+    expect(nos({ kinds: ['足浴'], status: 'leave', text: 'wf' })).toEqual(['13']);
+    expect(nos({ kinds: ['足浴'], status: 'serving' })).toEqual([]);
+  });
+
+  it('排序：按排位（队列里的按位置，其余按工号——数字工号按数值）；按状态是空闲、上钟、已派待上、休息、休假、停牌', () => {
+    expect(sortBoardTechnicians(list.slice(0, 6), 'queue').map((t) => t.techNo)).toEqual(['12', '11', '14', '2', '13', 'A5']);
+    expect(sortBoardTechnicians(list.slice(0, 6), 'status').map((t) => t.techNo)).toEqual(['11', '12', '14', '2', '13', 'A5']);
   });
 });

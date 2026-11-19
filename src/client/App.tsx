@@ -29,6 +29,7 @@ import { lazyPage } from './lib/lazyPage';
 // 会员工作台与前台随首屏加载；其余页面第一次打开时再下载（v0.7.22：收银台首屏更轻）
 const CashierPage = lazyPage(() => import('./features/frontdesk/CashierPage').then((m) => m.CashierPage));
 const ClockroomPage = lazyPage(() => import('./features/clockroom/ClockroomPage').then((m) => m.ClockroomPage));
+const TechnicianAdminPage = lazyPage(() => import('./features/technicians/TechnicianAdminPage').then((m) => m.TechnicianAdminPage));
 const DiningPage = lazyPage(() => import('./features/dining/DiningPage').then((m) => m.DiningPage));
 const RoomsPage = lazyPage(() => import('./features/rooms/RoomsPage').then((m) => m.RoomsPage));
 const BookingsPage = lazyPage(() => import('./features/bookings/BookingsPage').then((m) => m.BookingsPage));
@@ -395,6 +396,8 @@ const router = createBrowserRouter([
       // 看板 2026-11-10 起在后台（「数据看板」）：门店的旧地址跳过去，页签与查询参数照带
       { path: 'dashboard/:tab?', element: <DashboardMoved /> },
       { path: 'lookup', element: <LookupPage /> },
+      // 技师管理（8.1.15）：技师名册、组别、班次、休假四个页签
+      { path: 'technicians/:tab?', element: <TechnicianAdminPage /> },
       { path: 'password', element: <ChangePasswordPage /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],

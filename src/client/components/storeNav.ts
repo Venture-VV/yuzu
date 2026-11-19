@@ -18,6 +18,7 @@ import {
   UtensilsCrossed,
   HandHeart,
   BriefcaseBusiness,
+  IdCard,
 } from 'lucide-react';
 import { ADMIN_ENTRY_PERMISSIONS } from '@shared/admin';
 import type { Permission } from '@shared/permissions';
@@ -68,6 +69,8 @@ const STORE_NAV: StoreNavItem[][] = [
     { to: '/guide', label: '导览', icon: MapPinned, perm: 'guide.view', guestFacing: true },
     // 设备（v0.7.21，RQ-001）：一屏看全部设备、本机终端
     { to: '/devices', label: '设备', icon: Printer, perm: 'device.view' },
+    // 技师管理（8.1.15）：技师名册、组别、班次与排班、休假；钟房的岗位能看、能替技师申请休假
+    { to: '/technicians', label: '技师管理', icon: IdCard, perm: ['technician.manage', 'technician.dispatch'], when: (s) => s.technicians },
   ],
   // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限、数据看板）；只有看板权限的岗位进去只看得到数据看板
   [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_ENTRY_PERMISSIONS] }],

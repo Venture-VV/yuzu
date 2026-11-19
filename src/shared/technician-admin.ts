@@ -212,3 +212,11 @@ export const CALL_SPEAK_WITHIN_MS = 90_000;
 export function announceText(c: { position: number | null; techNo: string; name: string; nickname: string; room: string | null }): string {
   return `请${c.position ? ` ${c.position} 号排位，` : ' '}${c.techNo} 号 ${techCallName(c)}，${c.room ? `到 ${c.room}` : '准备上钟'}`;
 }
+
+const DIGITS = '零一二三四五六七八九';
+
+/**
+ * 交给朗读引擎的写法：三位以上的数字一位一位念（房号「201」念「二零一」，不念「二百零一」）；两位以内的（排位号、工号）照常念。
+ * 页面上显示的还是原来那一句。
+ */
+export const spokenText = (text: string) => text.replace(/\d{3,}/g, (run) => [...run].map((d) => DIGITS[Number(d)]).join(''));

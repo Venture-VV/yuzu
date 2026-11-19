@@ -104,6 +104,8 @@ export interface TechnicianAdmin {
   technicians: (Technician & { createdAt: string; updatedAt: string; lineCount: number })[];
   /** 项目分类（技师可做的分类从这里选） */
   categories: string[];
+  /** 技师类型的清单（8.1.15，技师管理里维护） */
+  kinds: string[];
 }
 
 /** 技师业绩：时段内结账的技师明细（结账那一刻的明细，时段内反结账的冲回，与部门构成同一口径） */
