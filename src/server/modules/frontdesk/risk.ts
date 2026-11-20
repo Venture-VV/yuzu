@@ -210,15 +210,24 @@ export async function liftBlacklist(deps: Deps, id: number, raw: unknown, ctx: O
 /** 这几位会员名下没处理完的「未结离店」（哪家店登记的都算：会员全公司一套） */
 export async function unsettledDebts(db: Db, memberIds: number[]): Promise<(UnsettledDebt & { memberId: number })[]> {
   if (memberIds.length === 0) return [];
+  // 待办跟着人走：合并到这几位身上的会员（沿合并关系往回找，合并过几次都算）名下没处理完的也算——合并不转移待办，
+  // 只按本人的编号找会漏掉，合并以后发牌就不用授权了（Codex 审查 9ef9424）。memberId 是传进来的那位：发牌与授权申请都按他核对
   const rows = await db<(UnsettledDebt & { memberId: number })[]>`
-    SELECT i.id AS incident_id, i.member_id, i.visit_id, v.visit_no, t.code AS tag_code, i.amount_cents, i.note,
+    WITH RECURSIVE fam(root, id) AS (
+      SELECT id, id FROM members WHERE id IN ${db(memberIds)}
+      UNION
+      SELECT f.root, x.id FROM fam f JOIN members x ON x.merged_into_id = f.id
+    )
+    SELECT i.id AS incident_id, f.root AS member_id, CASE WHEN f.id <> f.root THEN src.name END AS via_name,
+           i.visit_id, v.visit_no, t.code AS tag_code, i.amount_cents, i.note,
            cs.display_name AS created_by_name, i.created_at,
            (SELECT s.display_name FROM staff s
             WHERE s.id = coalesce((SELECT e.assignee_id FROM visit_incident_events e WHERE e.incident_id = i.id AND e.action = 'assign' ORDER BY e.id DESC LIMIT 1), i.assignee_id)
            ) AS assignee_name
-    FROM visit_incidents i JOIN visits v ON v.id = i.visit_id JOIN hand_tags t ON t.id = v.tag_id JOIN staff cs ON cs.id = i.created_by
-    WHERE i.kind = 'unsettled' AND i.member_id IN ${db(memberIds)}
-      AND NOT EXISTS (SELECT 1 FROM visit_incident_events e WHERE e.incident_id = i.id AND e.action = 'resolve')
+    FROM fam f JOIN members src ON src.id = f.id
+    JOIN visit_incidents i ON i.member_id = f.id AND i.kind = 'unsettled'
+    JOIN visits v ON v.id = i.visit_id JOIN hand_tags t ON t.id = v.tag_id JOIN staff cs ON cs.id = i.created_by
+    WHERE NOT EXISTS (SELECT 1 FROM visit_incident_events e WHERE e.incident_id = i.id AND e.action = 'resolve')
     ORDER BY i.id`;
   return rows.map((r) => ({ ...r, incidentId: Number(r.incidentId), memberId: Number(r.memberId), visitId: Number(r.visitId), amountCents: Number(r.amountCents) }));
 }

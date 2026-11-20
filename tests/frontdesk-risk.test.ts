@@ -315,6 +315,35 @@ describe('发牌前风控 · 未结离店、重复到店、预约', () => {
     expect(old.history.some((h) => h.kind === 'incident' && h.text.includes('处理结果：客人已补交 88 元'))).toBe(true);
   });
 
+  it('未结离店跟着人走：名下有没处理完的未结离店的会员合并到另一位以后，那一位发牌要当场授权、授权申请也认（Codex 审查 9ef9424）', async () => {
+    const a = await createMember(ctx, '欠账甲');
+    const b = await createMember(ctx, '欠账乙');
+    const first = await enter(a.id);
+    expect((await incident(ctx.clerk, first.id, { kind: 'unsettled', amount: 6600, note: '没结账就走了', assigneeId: dutyId })).status).toBe(200);
+    await settle(first.id);
+    // 店主把甲合并到乙；合并不转移待办
+    const check = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${a.id}/merge-check?targetId=${b.id}`)).body as { principal: number; bonus: number };
+    const merged = await api(ctx.app, ctx.owner, 'POST', `/api/members/${a.id}/merge`, {
+      clientKey: randomUUID(),
+      targetId: b.id,
+      reason: '同一个人建了两份档案',
+      expectedPrincipal: check.principal,
+      expectedBonus: check.bonus,
+    });
+    expect(merged.status, JSON.stringify(merged.body)).toBe(200);
+    // 乙：页面预先看得到这一条（写明记在合并前的甲名下），发牌要当场授权
+    expect((await risk(b.id)).unsettled).toMatchObject([{ visitId: first.id, amountCents: 6600, viaName: '欠账甲' }]);
+    const body = { guests: [{ tagCode: nextTag(), zone: 'male', memberId: b.id }] };
+    const refused = await checkinRaw(ctx.clerk, body);
+    expect([refused.status, err(refused)]).toEqual([422, 'CHECKIN_RISK_AUTH_REQUIRED']);
+    expect(refused.body.error.message).toContain('合并前的「欠账甲」');
+    expect(refused.body.error.details.members).toMatchObject([{ memberId: b.id, memberName: '欠账乙', debts: [{ tagCode: first.code, amountCents: 6600 }] }]);
+    // 授权申请与发牌用同一套核对：乙这一单要授权（不是「不需要」），授权以后能发
+    const ok = await grant({ kind: 'checkin', memberIds: [b.id], reason: '客人答应今天补交' });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect((await checkinRaw(ctx.clerk, { ...body, riskGrantId: ok.body.grantId })).status).toBe(201);
+  });
+
   it('当日重复到店：只提示（今天第几次、上一次的牌号与离店时间），不拦；审计里留痕', async () => {
     const m = await createMember(ctx, '常客甲');
     expect((await risk(m.id)).visitsToday).toEqual({ count: 0, last: null });

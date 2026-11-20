@@ -217,7 +217,7 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       const first = owing[0]!;
       throw unprocessable(
         'CHECKIN_RISK_AUTH_REQUIRED',
-        `会员「${names.get(first.memberId) ?? ''}」上次（手牌 ${first.tagCode}，${first.visitNo}）未结离店，应收 ${formatYuan(first.amountCents)} 还没处理完。要发牌请值班经理、店总或店主当场授权`,
+        `会员「${names.get(first.memberId) ?? ''}」${first.viaName ? `（合并前的「${first.viaName}」）` : ''}上次（手牌 ${first.tagCode}，${first.visitNo}）未结离店，应收 ${formatYuan(first.amountCents)} 还没处理完。要发牌请值班经理、店总或店主当场授权`,
         {
           members: owingIds.map((id) => ({
             memberId: id,

@@ -77,6 +77,8 @@ export interface UnsettledDebt {
   createdByName: string;
   createdAt: string;
   assigneeName: string | null;
+  /** 记在合并到这位会员身上的那位会员名下时，那位的姓名（合并前记的）；记在本人名下的为 null */
+  viaName: string | null;
 }
 
 /** 今天待到店的预约（发牌成功后自动标「已到店」；派对房要开使用单，仍在「预约」页点到店） */

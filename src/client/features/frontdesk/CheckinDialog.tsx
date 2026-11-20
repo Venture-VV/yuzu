@@ -787,6 +787,7 @@ function RiskNotices({
                 手牌 <b className="num">{d.tagCode}</b>（{d.visitNo}）应收 <Money cents={d.amountCents} className="text-[16px] font-bold" /> · {d.note} · {d.createdByName} {formatTime(d.createdAt)}{' '}
                 登记
                 {d.assigneeName && ` · 责任人 ${d.assigneeName}`}
+                {d.viaName && ` · 记在合并前的「${d.viaName}」名下`}
               </li>
             ))}
           </ul>
