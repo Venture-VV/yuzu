@@ -187,7 +187,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
     return { today: businessDateOf(now, deps.config.timezone, settings.businessDayStartHour), calendarToday: businessDateOf(now, deps.config.timezone, 0) };
   });
 
-  // 老账号第一次登录选新岗位（8.1.18，GW7）：能选的范围按原来的岗位封顶（selfSelectablePositions），选完不再提示；
+  // 老账号第一次登录选新岗位（8.1.18，GW7）：能选的部门与岗位按原来的岗位与职责限定（selfSelectablePositions，店主定方案 B），选完不再提示；
   // 后台员工名单标「自选岗位」，超级管理员核对、可以再改
   app.get('/api/auth/position-options', { preHandler: sessionOnly }, async (req) => {
     const options = selfSelectablePositions(req.actor.role, req.actor.duties).map((p) => ({

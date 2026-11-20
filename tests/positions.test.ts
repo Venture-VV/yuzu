@@ -195,16 +195,36 @@ describe('算权限', () => {
   });
 });
 
-describe('老账号自己选岗（GW7）', () => {
-  it('不能选比原来高的级别；总裁不让选；总经办只有原来的店总能选', () => {
-    const clerk = selfSelectablePositions('clerk', []);
-    expect(clerk.every((p) => p.level === 'admin')).toBe(true);
-    expect(clerk).toHaveLength(LINED_DEPARTMENTS.length);
-    const duty = selfSelectablePositions('duty_manager', []);
-    expect(duty.some((p) => p.key === 'front.lead')).toBe(true);
-    expect(duty.some((p) => p.key === 'gmo')).toBe(false);
-    expect(selfSelectablePositions('store_manager', []).some((p) => p.key === 'gmo')).toBe(true);
-    expect(selfSelectablePositions('backoffice', ['approve']).some((p) => p.key === 'outreach.lead')).toBe(true);
-    for (const r of ['clerk', 'store_manager', 'owner'] as const) expect(selfSelectablePositions(r, []).some((p) => p.key === 'president')).toBe(false);
+describe('老账号自己选岗（GW7，店主定方案 B：按原来的岗位与职责限定部门）', () => {
+  const keys = (role: Parameters<typeof selfSelectablePositions>[0], duties: Parameters<typeof selfSelectablePositions>[1] = []) => selfSelectablePositions(role, duties).map((p) => p.key);
+
+  it('前台店员只能选一线部门的员工；选不了财务部、外联部、大客户部，也选不了负责人（Codex 安全审查 02d66df）', () => {
+    const clerk = keys('clerk');
+    expect(clerk).toContain('front.staff');
+    expect(clerk).toContain('wellness.staff');
+    for (const k of ['finance.staff', 'outreach.staff', 'vip.staff', 'hr.staff', 'front.lead', 'gmo', 'president']) expect(clerk, k).not.toContain(k);
+  });
+
+  it('财务、外联、大客户部要有对应的旧职责或岗位；财务部负责人谁也选不了', () => {
+    expect(keys('backoffice', ['payable'])).toContain('finance.staff');
+    expect(keys('backoffice', ['stock'])).toEqual(expect.arrayContaining(['outreach.staff']));
+    expect(keys('backoffice', ['stock'])).not.toContain('finance.staff');
+    expect(keys('backoffice', ['approve'])).toContain('outreach.lead');
+    expect(keys('account_manager')).toEqual(['vip.staff']);
+    expect(keys('backoffice', ['concierge_manager'])).toContain('vip.lead');
+    for (const r of ['clerk', 'duty_manager', 'store_manager', 'backoffice', 'account_manager'] as const) {
+      expect(keys(r), r).not.toContain('finance.staff');
+      expect(keys(r, ['payable', 'cost']), r).not.toContain('finance.lead');
+    }
+  });
+
+  it('值班经理选一线部门的负责人或员工；店总还能选总经办，不能选财务部、外联部；店主不用选', () => {
+    expect(keys('duty_manager')).toContain('front.lead');
+    expect(keys('duty_manager')).not.toContain('gmo');
+    expect(keys('duty_manager')).not.toContain('hr.lead');
+    expect(keys('store_manager')).toContain('gmo');
+    expect(keys('store_manager')).not.toContain('outreach.staff');
+    expect(keys('owner')).toEqual([]);
+    for (const r of ['clerk', 'duty_manager', 'store_manager', 'backoffice'] as const) expect(keys(r, ['approve', 'payable']), r).not.toContain('president');
   });
 });

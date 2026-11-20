@@ -38,8 +38,6 @@ export const LINED_DEPARTMENTS = ORG_DEPARTMENTS.map((d) => d.key).filter((k): k
 export const ADMIN_LEVELS = ['super', 'senior', 'admin'] as const;
 export type AdminLevel = (typeof ADMIN_LEVELS)[number];
 export const ADMIN_LEVEL_LABELS: Record<AdminLevel, string> = { super: '超级管理员', senior: '高级管理员', admin: '管理员' };
-/** 级别高低（数字大的高） */
-export const ADMIN_LEVEL_RANK: Record<AdminLevel, number> = { super: 3, senior: 2, admin: 1 };
 
 export type PositionKey = 'president' | 'gmo' | `${LinedDepartment}.${'lead' | 'staff'}`;
 
@@ -657,16 +655,44 @@ export function applyAdjust(base: Iterable<Permission>, adjust: PermissionAdjust
 }
 
 /**
- * 老账号第一次登录自己选新岗位（GW7）时能选的范围：不能选比原来高的级别，免得前台员工给自己选成负责人、总经办。
- * 原来是店总的可以选总经办与各部门负责人、员工；值班经理与「库存采购负责人」职责的可以选各部门负责人、员工；其余只能选员工。
- * 总裁只由店主账号承接（迁移时店主账号直接定成总裁，不用选）。
+ * 老账号第一次登录自己选新岗位（GW7；店主 2026-11-20 定方案 B）时能选的范围：按原来的岗位与职责限定部门，选完立即生效。
+ * 不按部门限定的话，前台店员能给自己选「财务部员工」，马上就有付款、回款登记（Codex 安全审查 02d66df）。
+ * - 一线部门（前厅、男宾、女宾、娱乐、餐饮、康美、保健）：前台店员选员工，值班经理选负责人或员工；
+ * - 后勤部门（人力行政、出品、工程）与浴区（男宾、女宾）的员工：后勤人员；
+ * - 外联部（库存采购）：物资经办、采购经办选员工，库存采购负责人选负责人或员工；
+ * - 财务部：对账付款、成本核算选员工（负责人只由总裁在后台定）；
+ * - 大客户部：客户经理、管家员工选员工，管家经理选负责人或员工；
+ * - 店总：总经办与一线、后勤、大客户部的负责人或员工（财务部、外联部要有对应职责）；
+ * - 康美部职责选康美部员工，部门申购选一线与后勤部门的员工，法务选人力行政部员工。
+ * 总裁只由店主账号承接（迁移时店主账号直接定成总裁，不用选）；选不到自己岗位的找总裁在后台改。
  */
-export function selfSelectableLevel(role: Role, duties: readonly Duty[]): AdminLevel {
-  if (role === 'owner') return 'super';
-  if (role === 'store_manager' || role === 'duty_manager' || duties.includes('approve') || duties.includes('concierge_manager')) return 'senior';
-  return 'admin';
-}
+const FRONT_LINE: readonly LinedDepartment[] = ['front', 'male', 'female', 'ent', 'dining', 'kangmei', 'wellness'];
+const BACK_OFFICE: readonly LinedDepartment[] = ['hr', 'kitchen', 'eng'];
+const staffOf = (ds: readonly LinedDepartment[]): PositionKey[] => ds.map((d) => `${d}.staff` as PositionKey);
+const leadOf = (ds: readonly LinedDepartment[]): PositionKey[] => ds.map((d) => `${d}.lead` as PositionKey);
+
+const BY_ROLE: Partial<Record<Role, readonly PositionKey[]>> = {
+  clerk: staffOf(FRONT_LINE),
+  duty_manager: [...leadOf(FRONT_LINE), ...staffOf(FRONT_LINE)],
+  account_manager: ['vip.staff'],
+  backoffice: staffOf([...BACK_OFFICE, 'male', 'female']),
+  store_manager: ['gmo', ...leadOf([...FRONT_LINE, ...BACK_OFFICE, 'vip']), ...staffOf([...FRONT_LINE, ...BACK_OFFICE, 'vip'])],
+};
+const BY_DUTY: Partial<Record<Duty, readonly PositionKey[]>> = {
+  stock: ['outreach.staff'],
+  purchase: ['outreach.staff'],
+  approve: ['outreach.lead', 'outreach.staff'],
+  payable: ['finance.staff'],
+  cost: ['finance.staff'],
+  request: staffOf([...FRONT_LINE, ...BACK_OFFICE]),
+  kangmei: ['kangmei.staff'],
+  concierge: ['vip.staff'],
+  concierge_manager: ['vip.lead', 'vip.staff'],
+  legal: ['hr.staff'],
+};
+
 export function selfSelectablePositions(role: Role, duties: readonly Duty[]): PositionDef[] {
-  const cap = ADMIN_LEVEL_RANK[selfSelectableLevel(role, duties)];
-  return POSITIONS.filter((p) => p.key !== 'president' && ADMIN_LEVEL_RANK[p.level] <= cap && (p.key !== 'gmo' || role === 'store_manager'));
+  if (role === 'owner') return [];
+  const allowed = new Set<PositionKey>([...(BY_ROLE[role] ?? []), ...duties.flatMap((d) => BY_DUTY[d] ?? [])]);
+  return POSITIONS.filter((p) => allowed.has(p.key));
 }

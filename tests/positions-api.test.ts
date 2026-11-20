@@ -138,6 +138,9 @@ describe('老账号第一次登录选新岗位（GW7）', () => {
     expect(options.every((o) => o.level === 'admin')).toBe(true);
     expect((await api(ctx.app, cookie, 'POST', '/api/auth/position', { position: 'front.lead' })).status).toBe(400);
     expect((await api(ctx.app, cookie, 'POST', '/api/auth/position', { position: 'president' })).status).toBe(400);
+    // 同级也不行：前台店员选不了财务部员工（Codex 安全审查 02d66df，店主定方案 B）
+    expect((await api(ctx.app, cookie, 'POST', '/api/auth/position', { position: 'finance.staff' })).status).toBe(400);
+    expect(options.some((o) => o.key === 'finance.staff' || o.key === 'outreach.staff')).toBe(false);
     const ok = await api(ctx.app, cookie, 'POST', '/api/auth/position', { position: 'male.staff' });
     expect(ok.status).toBe(200);
     expect(ok.body.staff).toMatchObject({ position: 'male.staff', needsPosition: false });

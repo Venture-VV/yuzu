@@ -1,5 +1,5 @@
 // 老账号第一次登录选新岗位（8.1.18，docs/POSITIONS_V8118.md GW7）：系统岗位改成「部门 → 负责人 / 员工」以后，
-// 原来的账号自己选一次现在的岗位，确认后不再提示。能选的范围按原来的岗位封顶（服务端 selfSelectablePositions）；
+// 原来的账号自己选一次现在的岗位，确认后不再提示。能选的部门与岗位按原来的岗位与职责限定（服务端 selfSelectablePositions，店主定方案 B）；
 // 选的结果后台员工名单标「自选岗位」，总裁核对、可以再改。
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -104,7 +104,7 @@ export function ChoosePositionPage() {
                   <Badge tone="lake">{ADMIN_LEVEL_LABELS[positionOf(position).level]}</Badge>
                 </p>
               )}
-              <p className="text-[12.5px] text-ink-3">只能选和原来岗位同级或更低的岗位；找不到自己的岗位、或选错了，请联系总裁在后台「员工账号」里改。</p>
+              <p className="text-[12.5px] text-ink-3">按原来的岗位与职责列出能选的部门与岗位；找不到自己的岗位、或选错了，请联系总裁在后台「员工账号」里改。</p>
               {error && <Notice tone="error" title={error} />}
               {confirming && position ? (
                 <Notice tone="warning" title={`确认选「${positionOf(position).title}」？`}>
