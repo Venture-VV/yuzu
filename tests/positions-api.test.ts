@@ -106,6 +106,22 @@ describe('负责人管本部门员工（GW6）', () => {
     expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${ok.body.id}`, { displayName: 'y', active: true, departmentId: null })).status).toBe(200);
   });
 
+  it('总裁单独加过权限或配了别的小仓的员工，负责人看不到、改不了、重置不了（Codex 安全审查 6dfff92）', async () => {
+    const lead = await hire('w_lead', { position: 'wellness.lead' });
+    const plain = await hire('w_plain', { position: 'wellness.staff' });
+    const extra = await hire('w_extra', { position: 'wellness.staff', permissionAdjust: { add: ['ar.manage'], remove: [] } });
+    const [other] = await ctx.sql<{ id: number }[]>`INSERT INTO departments (name) VALUES ('保健外小仓') RETURNING id`;
+    const stock = await hire('w_stock', { position: 'wellness.staff', departmentId: other!.id });
+    const ids = ((await api(ctx.app, lead.cookie, 'GET', '/api/staff')).body as { id: number }[]).map((x) => Number(x.id));
+    expect(ids).toContain(plain.id);
+    expect(ids).not.toContain(extra.id);
+    expect(ids).not.toContain(stock.id);
+    for (const t of [extra, stock]) {
+      expect((await api(ctx.app, lead.cookie, 'POST', `/api/staff/${t.id}/reset-password`)).status).toBe(403);
+      expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${t.id}`, { displayName: '改名', active: false })).status).toBe(403);
+    }
+  });
+
   it('财务部负责人没有账号与权限配置（表上 ✘）', async () => {
     const fin = await hire('fin_lead', { position: 'finance.lead' });
     expect((await api(ctx.app, fin.cookie, 'GET', '/api/staff')).status).toBe(403);

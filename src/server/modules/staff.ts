@@ -102,10 +102,13 @@ function assertDeptStock(scope: StaffScope, departmentId: number | null | undefi
   if (departmentId !== scope.departmentId) throw forbidden('负责人只能给员工配本部门的领料小仓；别的部门的小仓请总裁配');
 }
 
-/** 负责人范围内的员工（本部门员工岗位、挂的门店都在负责人能进的门店里）的条件；s 是 staff 表 */
+/** 负责人范围内的员工（本部门员工岗位、挂的门店都在负责人能进的门店里、没有总裁给的个人加权与别的部门小仓）的条件；s 是 staff 表 */
 function scopeCond(db: Db, scope: StaffScope) {
   if (scope.all) return db`true`;
+  // 总裁单独加过权限、或配了别的部门小仓的员工也不归负责人管：不然负责人重置密码就能用上总裁给的例外（Codex 安全审查 6dfff92）
   return db`(s.position = ${scope.position}
+    AND coalesce(jsonb_array_length(s.permission_adjust->'add'), 0) = 0
+    AND (s.department_id IS NULL OR s.department_id = ${scope.departmentId}::bigint)
     AND NOT EXISTS (SELECT 1 FROM staff_stores x WHERE x.staff_id = s.id AND NOT (x.store_id = ANY(${scope.stores}::bigint[])))
     AND (EXISTS (SELECT 1 FROM staff_stores x WHERE x.staff_id = s.id) OR ${DEFAULT_STORE_ID}::bigint = ANY(${scope.stores}::bigint[])))`;
 }
