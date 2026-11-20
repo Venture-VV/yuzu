@@ -238,7 +238,9 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
         ip: req.ip,
       });
     });
-    return listStaff(sql);
+    // 负责人只拿得到本部门员工的名单（与 GET 同一个范围）
+    const list = await listStaff(sql);
+    return scope.all ? list : list.filter((s) => s.position === scope.position);
   });
 
   app.post('/api/staff/:id/reset-password', { preHandler: guardAny('staff.manage', 'staff.dept') }, async (req) => {
@@ -252,9 +254,11 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
     const password = generateTempPassword();
     const hash = await hashPassword(password);
     await sql.begin(async (tx) => {
+      // 范围写进 UPDATE（上面的核对在事务外、又隔着算密码摘要）：这期间总裁改了这位员工的岗位，负责人这一次就不生效
       const rows = await tx`
-        UPDATE staff SET password_hash = ${hash}, must_change_password = true, updated_at = now() WHERE id = ${id} AND NOT system RETURNING id`;
-      if (rows.length === 0) throw notFound('员工不存在');
+        UPDATE staff SET password_hash = ${hash}, must_change_password = true, updated_at = now()
+        WHERE id = ${id} AND NOT system AND ${scope.all ? tx`true` : tx`position = ${scope.position}`} RETURNING id`;
+      if (rows.length === 0) throw scope.all ? notFound('员工不存在') : forbidden('负责人只能管理本部门「员工」岗位的账号');
       await destroyStaffSessions(tx, id);
       await writeAudit(tx, { staffId: req.actor.id, action: 'staff_password_reset', targetType: 'staff', targetId: id, ip: req.ip });
     });

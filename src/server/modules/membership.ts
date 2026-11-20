@@ -51,7 +51,7 @@ import {
   type Tier,
 } from '@shared/membership';
 import { formatYuan } from '@shared/money';
-import { guard, sessionOnly } from '../auth/guard';
+import { guard, sessionReady } from '../auth/guard';
 import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../db';
 import { writeAudit } from '../lib/audit';
 import { ctxOf, type Deps, type OpContext } from '../lib/context';
@@ -1013,7 +1013,7 @@ export function registerMembershipRoutes(app: FastifyInstance, deps: Deps) {
   const todayNow = () => today(sql, deps.config.timezone);
 
   // 会员规则：前台、充值页、会员详情都要（档名、门槛、比例），登录即可读；改要「修改会员规则」
-  app.get('/api/membership/rules', { preHandler: sessionOnly }, async () => loadMembershipRules(sql));
+  app.get('/api/membership/rules', { preHandler: sessionReady }, async () => loadMembershipRules(sql));
   // 整页保存：页面带上打开时读到的规则（based），这期间别人保存过就整页拒绝、让页面换成最新的再改，不悄悄改回别人的修改
   app.put('/api/membership/rules', { preHandler: guard('member.rules') }, async (req) => {
     const based = (req.body as { based?: unknown } | null)?.based;

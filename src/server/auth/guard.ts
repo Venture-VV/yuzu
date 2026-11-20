@@ -40,6 +40,15 @@ export const sessionOnly: preHandlerAsyncHookHandler = async (req) => {
   if (!req.hasSession) throw unauthorized();
 };
 
+/**
+ * 只要求已登录、不看权限的业务接口（开票申请、自定义字段、会员规则）：老账号没选新岗位之前照样拦下（8.1.18，GW7）。
+ * 首次改密照旧由各接口自己看（原来就允许读的不变）；会话本身的接口（/api/auth/*、营业日）用 sessionOnly。
+ */
+export const sessionReady: preHandlerAsyncHookHandler = async (req) => {
+  if (!req.hasSession) throw unauthorized();
+  if (req.actor.needsPosition) throw new AppError(403, 'POSITION_REQUIRED', '系统岗位已更新，请先选择您现在的岗位');
+};
+
 /** 有其中任一权限即可（后台各分区、看板各页按岗位开放） */
 export function guardAny(...permissions: Permission[]): preHandlerAsyncHookHandler {
   return async (req: FastifyRequest, _reply: FastifyReply) => {

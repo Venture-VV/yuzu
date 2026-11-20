@@ -67,7 +67,10 @@ describe('负责人管本部门员工（GW6）', () => {
     const target = list.find((s) => s.username === 'fd_staff')!;
     const id = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = ${target.username}`)[0]!.id;
     expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${id}`, { displayName: '改名', active: true, permissionAdjust: { add: ['ledger.export'], remove: [] } })).status).toBe(403);
-    expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${id}`, { displayName: '改名', active: true })).status).toBe(200);
+    const edited = await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${id}`, { displayName: '改名', active: true });
+    expect(edited.status).toBe(200);
+    // 改完返回的名单也只有本部门员工（Codex 审查 766d557 P2）
+    expect((edited.body as { position: string | null }[]).every((s) => s.position === 'front.staff')).toBe(true);
     expect((await api(ctx.app, lead.cookie, 'POST', `/api/staff/${id}/reset-password`)).status).toBe(200);
     // 店主的账号碰不到
     expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${ctx.ownerId}`, { displayName: '改名', active: false })).status).toBe(403);
@@ -100,6 +103,29 @@ describe('超级管理员按岗位开关权限（GW8）', () => {
 });
 
 describe('老账号第一次登录选新岗位（GW7）', () => {
+  it('只要求登录的业务接口（开票申请、自定义字段、会员规则）没选岗之前也拒绝（Codex 审查 766d557 P2）', async () => {
+    await createStaff(ctx.sql, { username: 'old_inv', displayName: '老店员二', role: 'clerk', password: PASSWORD, mustChangePassword: false });
+    await ctx.sql`UPDATE staff SET needs_position = true WHERE username = 'old_inv'`;
+    const cookie = await login(ctx.app, 'old_inv');
+    for (const url of ['/api/membership/rules', '/api/custom-fields/defs', '/api/invoice-requests/source?visitId=1']) {
+      const r = await api(ctx.app, cookie, 'GET', url);
+      expect(r.status, url).toBe(403);
+      expect(r.body.error.code, url).toBe('POSITION_REQUIRED');
+    }
+    expect((await api(ctx.app, cookie, 'POST', '/api/invoice-requests', {})).body.error.code).toBe('POSITION_REQUIRED');
+    expect((await api(ctx.app, cookie, 'PUT', '/api/custom-fields/member/1', {})).body.error.code).toBe('POSITION_REQUIRED');
+  });
+
+  it('负责人重置密码时目标已被调出本部门：不生效（Codex 审查 766d557 P1）', async () => {
+    const lead = await hire('fd_lead2', { position: 'front.lead' });
+    const target = await hire('fd_moved', { position: 'front.staff' });
+    // 总裁把人调成负责人以后负责人再重置：拒绝、密码不变（核对与写入之间的竞态由 UPDATE 里带的范围兜底，用例不好造时序）
+    await ctx.sql`UPDATE staff SET position = 'front.lead' WHERE id = ${target.id}`;
+    const r = await api(ctx.app, lead.cookie, 'POST', `/api/staff/${target.id}/reset-password`);
+    expect(r.status).toBe(403);
+    expect((await ctx.sql<{ mustChangePassword: boolean }[]>`SELECT must_change_password FROM staff WHERE id = ${target.id}`)[0]!.mustChangePassword).toBe(false);
+  });
+
   it('没选之前除了会话接口都拒绝；只能选同级或更低的岗位；选完不再提示；后台标「自选岗位」', async () => {
     await createStaff(ctx.sql, { username: 'old_clerk', displayName: '老店员', role: 'clerk', password: PASSWORD, mustChangePassword: false });
     await ctx.sql`UPDATE staff SET needs_position = true WHERE username = 'old_clerk'`;
