@@ -83,7 +83,7 @@ export function PhonePreviewPage() {
   return (
     <div className="min-h-dvh bg-paper-2" data-testid="studio-phone-preview">
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-line bg-card px-3 py-2">
-        <Link to={`/studio/${surface}`} className="flex h-8 items-center rounded-md px-1.5 text-ink-2 hover:bg-paper-2" title="回工作台">
+        <Link to={`/studio/${surface}`} className="tap relative flex h-8 items-center rounded-md px-1.5 text-ink-2 hover:bg-paper-2" title="回工作台">
           <ArrowLeft className="size-4" />
         </Link>
         <span className="text-[12.5px] font-bold">预览 · {def.label}</span>
@@ -92,7 +92,7 @@ export function PhonePreviewPage() {
             <button
               key={x.key}
               type="button"
-              className={cn('h-7 rounded px-2 text-[12px]', current === x.key ? 'bg-pine text-white' : 'text-ink-2')}
+              className={cn('tap relative h-7 rounded px-2 text-[12px]', current === x.key ? 'bg-pine text-white' : 'text-ink-2')}
               onClick={() => setScreen(x.key)}
               data-testid={`studio-phone-screen-${x.key}`}
             >
@@ -100,7 +100,7 @@ export function PhonePreviewPage() {
             </button>
           ))}
         </div>
-        <button type="button" className="h-8 rounded-md border border-line px-2 text-[12px]" onClick={() => setLang((l) => (l === 'zh' ? 'en' : 'zh'))}>
+        <button type="button" className="tap relative h-8 rounded-md border border-line px-2 text-[12px]" onClick={() => setLang((l) => (l === 'zh' ? 'en' : 'zh'))}>
           {lang === 'zh' ? '中' : 'EN'}
         </button>
         <span className="text-[12px] text-ink-3">草稿的样子，不是真的小程序；按钮点了只写出会去哪</span>

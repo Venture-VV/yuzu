@@ -216,7 +216,7 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
               aria-checked={source === v}
               disabled={v === 'contract' && !contractsOn}
               onClick={() => setSource(v)}
-              className={cn('h-9 rounded-full px-4 text-[13.5px] font-semibold disabled:opacity-40', source === v ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
+              className={cn('tap relative h-9 rounded-full px-4 text-[13.5px] font-semibold disabled:opacity-40', source === v ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
               data-testid={`request-source-${v}`}
             >
               {label}

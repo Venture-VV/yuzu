@@ -94,7 +94,7 @@ export function BankPage() {
                 <button
                   type="button"
                   onClick={() => setAccountId(null)}
-                  className={cn('h-9 rounded-full px-3.5 text-[13px] font-semibold', accountId === null ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2')}
+                  className={cn('tap relative h-9 rounded-full px-3.5 text-[13px] font-semibold', accountId === null ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2')}
                 >
                   全部账户
                 </button>
@@ -134,7 +134,7 @@ export function BankPage() {
                   role="tab"
                   aria-selected={view === v.key}
                   onClick={() => setView(v.key)}
-                  className={cn('h-9 rounded-full px-3.5 text-[13px] font-semibold', view === v.key ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
+                  className={cn('tap relative h-9 rounded-full px-3.5 text-[13px] font-semibold', view === v.key ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
                   data-testid={`bank-view-${v.key}`}
                 >
                   {v.label}

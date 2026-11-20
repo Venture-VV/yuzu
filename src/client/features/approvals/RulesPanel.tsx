@@ -285,7 +285,7 @@ function RuleDialog({ rule, open, onClose }: { rule: ApprovalRuleView | null; op
                           disabled={!on && s.staffIds.length >= APPROVAL_MAX_STAFF}
                           onClick={() => update(i, { ...s, staffIds: on ? s.staffIds.filter((x) => x !== a.id) : [...s.staffIds, a.id] })}
                           className={cn(
-                            'h-8 rounded-full border px-3 text-[12.5px] font-semibold disabled:opacity-40',
+                            'tap relative h-8 rounded-full border px-3 text-[12.5px] font-semibold disabled:opacity-40',
                             on ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2',
                           )}
                         >

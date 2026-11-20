@@ -80,7 +80,7 @@ export function DocsTab() {
           <button
             type="button"
             onClick={() => update({ urgent: null, unsigned: null })}
-            className="flex h-9 items-center gap-1 rounded-full bg-yuzu-soft px-3 text-[12.5px] font-bold text-yuzu-deep"
+            className="tap relative flex h-9 items-center gap-1 rounded-full bg-yuzu-soft px-3 text-[12.5px] font-bold text-yuzu-deep"
             aria-label="清除筛选"
           >
             {filter.urgent ? '只看急采' : '只看部门没签收的领料'} ×

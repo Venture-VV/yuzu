@@ -157,12 +157,16 @@ export function ColorField({
       </div>
       <div className="flex flex-wrap gap-1">
         {allowAuto && (
-          <button type="button" className={cn('h-5 rounded border px-1 text-[12px]', value === 'auto' ? 'border-pine text-pine' : 'border-line text-ink-3')} onClick={() => onChange('auto')}>
+          <button
+            type="button"
+            className={cn('tap relative h-5 rounded border px-1 text-[12px]', value === 'auto' ? 'border-pine text-pine' : 'border-line text-ink-3')}
+            onClick={() => onChange('auto')}
+          >
             自动
           </button>
         )}
         {allowNone && (
-          <button type="button" className={cn('h-5 rounded border px-1 text-[12px]', value === null ? 'border-pine text-pine' : 'border-line text-ink-3')} onClick={() => onChange(null)}>
+          <button type="button" className={cn('tap relative h-5 rounded border px-1 text-[12px]', value === null ? 'border-pine text-pine' : 'border-line text-ink-3')} onClick={() => onChange(null)}>
             无
           </button>
         )}
@@ -171,7 +175,7 @@ export function ColorField({
             key={c.key}
             type="button"
             title={`主题：${c.label}`}
-            className={cn('size-5 rounded border', value === `$${c.key}` ? 'ring-2 ring-pine ring-offset-1' : 'border-line')}
+            className={cn('tap relative size-5 rounded border', value === `$${c.key}` ? 'ring-2 ring-pine ring-offset-1' : 'border-line')}
             style={{ background: themeColor(doc, c.key) ?? c.default }}
             onClick={() => onChange(`$${c.key}`)}
           />
@@ -506,7 +510,7 @@ export function AssetsPanel({
       <button
         type="button"
         disabled={busy || disabled}
-        className="mb-3 flex h-10 w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-line-strong text-[12.5px] text-ink-2 hover:border-pine hover:text-pine disabled:opacity-50"
+        className="tap relative mb-3 flex h-10 w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-line-strong text-[12.5px] text-ink-2 hover:border-pine hover:text-pine disabled:opacity-50"
         onClick={() => input.current?.click()}
       >
         <ImagePlus className="size-4" />
@@ -954,7 +958,7 @@ export function PropsPanel({
       <div className="space-y-3">
         <PanelTitle>选了 {selection.length} 块</PanelTitle>
         <p className="text-[12px] text-ink-3">可以一起拖动、一起删掉、一起复制。改样式请一块一块选。</p>
-        <button type="button" className="flex h-8 items-center gap-1.5 rounded-md border border-line px-2.5 text-[12.5px] text-clay hover:border-clay" onClick={onDelete}>
+        <button type="button" className="tap relative flex h-8 items-center gap-1.5 rounded-md border border-line px-2.5 text-[12.5px] text-clay hover:border-clay" onClick={onDelete}>
           <Trash2 className="size-3.5" /> 删掉这几块
         </button>
       </div>
@@ -1183,7 +1187,7 @@ export function PropsPanel({
               <button
                 key={sh}
                 type="button"
-                className={cn('h-7 flex-1 rounded border text-[12px]', n.shadow === sh ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2')}
+                className={cn('tap relative h-7 flex-1 rounded border text-[12px]', n.shadow === sh ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2')}
                 onClick={() => set({ shadow: sh }, 'shadow')}
               >
                 {SHADOW_LABELS[sh]}
@@ -1294,7 +1298,7 @@ export function PropsPanel({
               key={dir}
               type="button"
               title={label}
-              className="flex h-8 flex-1 items-center justify-center rounded-md border border-line text-ink-2 hover:border-pine hover:text-pine"
+              className="tap relative flex h-8 flex-1 items-center justify-center rounded-md border border-line text-ink-2 hover:border-pine hover:text-pine"
               onClick={() => onLayer(dir)}
             >
               {icon}
@@ -1304,7 +1308,7 @@ export function PropsPanel({
         {f.parent && (
           <button
             type="button"
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-line text-[12.5px] text-ink-2 hover:border-pine hover:text-pine"
+            className="tap relative flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-line text-[12.5px] text-ink-2 hover:border-pine hover:text-pine"
             onClick={() => onChange((d) => moveOutOfFrame(d, screen, n.id))}
             data-testid="studio-move-out"
           >
@@ -1315,7 +1319,7 @@ export function PropsPanel({
           type="button"
           disabled={!!block?.required}
           title={block?.required ? '必需的块不能删，可以挪' : undefined}
-          className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-line text-[12.5px] text-clay hover:border-clay disabled:opacity-40"
+          className="tap relative flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-line text-[12.5px] text-clay hover:border-clay disabled:opacity-40"
           onClick={onDelete}
           data-testid="studio-delete"
         >

@@ -100,7 +100,7 @@ export function DashboardPage() {
   const defaultButton = tabs.length > 1 && (
     <button
       type="button"
-      className={cn('flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-semibold', pref === current.key ? 'text-yuzu-deep' : 'text-ink-3 hover:text-ink')}
+      className={cn('tap relative flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-semibold', pref === current.key ? 'text-yuzu-deep' : 'text-ink-3 hover:text-ink')}
       onClick={() => {
         writePref(current.key);
         setPref(current.key);

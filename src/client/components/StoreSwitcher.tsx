@@ -72,7 +72,10 @@ export function StoreSwitcher() {
               disabled={busy !== null}
               onClick={() => void pick(s.id)}
               data-testid={`store-pick-${s.code}`}
-              className={cn('flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium hover:bg-paper-2', s.id === session.store.id ? 'text-ink' : 'text-ink-2')}
+              className={cn(
+                'tap relative flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium hover:bg-paper-2',
+                s.id === session.store.id ? 'text-ink' : 'text-ink-2',
+              )}
             >
               <span className="num w-10 shrink-0 text-[12.5px] text-ink-3">{s.code}</span>
               <span className="min-w-0 flex-1 truncate">{s.name}</span>

@@ -98,7 +98,7 @@ function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         data-testid="user-menu"
-        className="flex size-11 items-center justify-center rounded-full bg-yuzu text-[15px] font-bold text-ink ring-2 ring-white/15 transition hover:ring-white/35 short:size-9 short:text-[14px]"
+        className="tap relative flex size-11 items-center justify-center rounded-full bg-yuzu text-[15px] font-bold text-ink ring-2 ring-white/15 transition hover:ring-white/35 short:size-9 short:text-[14px]"
         title={`${session.staff.displayName} · ${roleText(session.staff)}`}
       >
         {session.staff.displayName.slice(0, 1)}
@@ -204,7 +204,7 @@ function MenuItem({ icon, children, onClick, testId }: { icon: ReactNode; childr
       role="menuitem"
       onClick={onClick}
       data-testid={testId}
-      className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium text-ink-2 hover:bg-paper-2 hover:text-ink"
+      className="tap relative flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium text-ink-2 hover:bg-paper-2 hover:text-ink"
     >
       {icon}
       {children}

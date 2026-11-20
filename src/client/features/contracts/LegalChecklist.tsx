@@ -79,7 +79,7 @@ export function LegalChecklistEditor({ value, onChange, disabled }: { value: Che
                       aria-checked={cur?.verdict === v}
                       disabled={disabled}
                       onClick={() => set(item.key, { verdict: v })}
-                      className={cn('h-7 rounded-full px-2.5 text-[12px] font-semibold disabled:opacity-50', cur?.verdict === v ? TONE[v] : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
+                      className={cn('tap relative h-7 rounded-full px-2.5 text-[12px] font-semibold disabled:opacity-50', cur?.verdict === v ? TONE[v] : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
                       data-testid={`legal-${item.key}-${v}`}
                     >
                       {REVIEW_VERDICT_LABELS[v]}

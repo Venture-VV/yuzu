@@ -318,7 +318,7 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
                     <button
                       type="button"
                       onClick={() => edit((x) => ({ ...x, dishes: x.dishes.filter((y) => y.id !== d.id) }))}
-                      className="size-9 shrink-0 rounded-full text-[18px] text-ink-3 active:bg-white"
+                      className="tap relative size-9 shrink-0 rounded-full text-[18px] text-ink-3 active:bg-white"
                       aria-label={`删掉第 ${i + 1} 道菜`}
                     >
                       ✕

@@ -147,6 +147,8 @@ describe('约定检查（docs/CONVENTIONS.md 里能查的几条）', () => {
     expect(conventionCounts('src/client/features/studio/panels.tsx', page)).toEqual({ 'small-text': 3, 'raw-table': 1, 'raw-dialog': 1 });
     expect(conventionCounts('src/client/components/DataTable.tsx', '<table className="w-full" />')).toEqual({});
     expect(conventionCounts('src/client/components/Overlay.tsx', '<div role="dialog" />')).toEqual({});
+    // 小于 1em 的相对字号也算；用 max(12px, …) 兜底的不算
+    expect(conventionCounts('src/client/features/x/Unit.tsx', '<span className="text-[0.78em]">瓶</span><span className="text-[length:max(12px,0.72em)]">¥</span>')).toEqual({ 'small-text': 1 });
     // 服务端不是页面
     expect(conventionCounts('src/server/modules/x.ts', page)).toEqual({});
   });

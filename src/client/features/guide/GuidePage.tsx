@@ -229,7 +229,7 @@ export function GuideScreenPage() {
                 key={f.code}
                 type="button"
                 onClick={() => setIndex(i)}
-                className={cn('h-9 min-w-12 rounded-full px-3 text-[15px] font-bold sm:h-11 sm:text-[18px]', i === index % n ? 'bg-pine text-paper' : 'bg-white/70 text-ink-2')}
+                className={cn('tap relative h-9 min-w-12 rounded-full px-3 text-[15px] font-bold sm:h-11 sm:text-[18px]', i === index % n ? 'bg-pine text-paper' : 'bg-white/70 text-ink-2')}
                 aria-pressed={i === index % n}
               >
                 {f.code}

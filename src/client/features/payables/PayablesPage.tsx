@@ -47,7 +47,7 @@ export function PayablesPage() {
         actions={
           (can('payable.manage') || can('inventory.master') || can('inventory.approve')) && (
             <div className="flex gap-2">
-              <Link to="/payables/import" className="flex h-8 items-center gap-1.5 rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold hover:border-ink-3">
+              <Link to="/payables/import" className="tap relative flex h-8 items-center gap-1.5 rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold hover:border-ink-3">
                 <FileUp className="size-4" />
                 导入
               </Link>
@@ -56,7 +56,7 @@ export function PayablesPage() {
                   <Button size="sm" variant="secondary" icon={<Plus className="size-4" />} onClick={() => setOpeningDialog(true)}>
                     期初未付
                   </Button>
-                  <Link to="/payables/pay" className="flex h-8 items-center gap-1.5 rounded-sm bg-pine px-3 text-[13px] font-bold text-paper hover:bg-pine-hover">
+                  <Link to="/payables/pay" className="tap relative flex h-8 items-center gap-1.5 rounded-sm bg-pine px-3 text-[13px] font-bold text-paper hover:bg-pine-hover">
                     <Wallet className="size-4" />
                     登记付款
                   </Link>
@@ -211,7 +211,7 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
                       {can('payable.manage') && s.balanceCents > 0 && (
                         <Link
                           to={`/payables/pay?supplier=${s.supplierId}`}
-                          className="flex h-8 items-center rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold whitespace-nowrap hover:border-ink-3"
+                          className="tap relative flex h-8 items-center rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold whitespace-nowrap hover:border-ink-3"
                         >
                           付款
                         </Link>

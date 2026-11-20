@@ -63,14 +63,14 @@ export function PurchasingPage() {
           <span className="flex flex-wrap items-center gap-2">
             <Link
               to="/erp/settings/purchase"
-              className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+              className="tap relative flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
               data-testid="purchase-rules-page-link"
             >
               <Settings2 className="size-4" />
               采购规则
             </Link>
             {can('purchase.manage') && (
-              <Link to="/purchasing/new" className="flex h-9 items-center gap-1.5 rounded-md bg-pine px-3.5 text-[13.5px] font-bold text-paper hover:bg-pine-hover">
+              <Link to="/purchasing/new" className="tap relative flex h-9 items-center gap-1.5 rounded-md bg-pine px-3.5 text-[13.5px] font-bold text-paper hover:bg-pine-hover">
                 <Plus className="size-4" />
                 新建采购单
               </Link>
@@ -89,7 +89,7 @@ export function PurchasingPage() {
               aria-checked={status === f.value}
               onClick={() => update({ status: f.value || null })}
               className={cn(
-                'h-8 rounded-full px-3 text-[12.5px] font-semibold transition-colors',
+                'tap relative h-8 rounded-full px-3 text-[12.5px] font-semibold transition-colors',
                 status === f.value ? 'bg-ink text-paper' : 'border border-line-strong bg-card text-ink-2 hover:border-ink-3',
               )}
             >

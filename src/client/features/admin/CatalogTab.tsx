@@ -477,7 +477,7 @@ function ItemDialog({ editing, onClose }: { editing: Extract<Editing, { kind: 'i
                   role="switch"
                   aria-checked={on}
                   onClick={() => set(!on)}
-                  className={cn('h-9 rounded-full border px-3.5 text-[13px] font-semibold', on ? 'border-pine bg-pine-tint text-pine' : 'border-line bg-card text-ink-2')}
+                  className={cn('tap relative h-9 rounded-full border px-3.5 text-[13px] font-semibold', on ? 'border-pine bg-pine-tint text-pine' : 'border-line bg-card text-ink-2')}
                 >
                   {on ? '✓ ' : ''}
                   {label}

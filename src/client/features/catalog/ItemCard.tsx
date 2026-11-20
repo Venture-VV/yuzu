@@ -46,7 +46,7 @@ function TierMoney({ cents }: { cents: number }) {
   if (cents % 100 !== 0) return <Money cents={cents} className="text-[13px] font-bold text-ink" />;
   return (
     <span className="num inline-flex items-baseline text-[13px] font-bold whitespace-nowrap text-ink">
-      <span className="mr-[0.1em] text-[0.75em] font-semibold opacity-70">¥</span>
+      <span className="mr-[0.1em] text-[length:max(12px,0.75em)] font-semibold opacity-70">¥</span>
       {(cents / 100).toLocaleString('en-US')}
     </span>
   );

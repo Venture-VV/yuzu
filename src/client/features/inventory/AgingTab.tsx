@@ -46,7 +46,7 @@ export function AgingTab() {
           </label>
           <a
             href={`/api/inventory/slow-moving/export?${qs}`}
-            className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+            className="tap relative flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
           >
             <Download className="size-4" />
             导出
@@ -106,7 +106,7 @@ export function AgingTab() {
           <span className="text-[12.5px] text-ink-3">管效期的物料按先进先出推算总仓剩下的批次；到期前 {session.rules.expiryRemindDays} 天以内与已过期的</span>
           <a
             href="/api/inventory/expiry-lots/export"
-            className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+            className="tap relative ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
           >
             <Download className="size-4" />
             导出

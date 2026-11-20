@@ -529,7 +529,7 @@ function ConsumptionView({ deptId, meta, onOpen }: { deptId: number; meta: DeptS
         </Select>
         <a
           href={`/api/erp/dept-stock/${deptId}/consumption/export?${qs}`}
-          className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+          className="tap relative ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
         >
           <Download className="size-4" />
           导出

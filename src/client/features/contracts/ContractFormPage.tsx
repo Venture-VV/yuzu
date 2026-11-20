@@ -479,7 +479,7 @@ function ContractForm({ mode, meta, contract, change, renew }: { mode: ContractF
                       aria-pressed={on}
                       disabled={fieldsDisabled}
                       onClick={() => setKinds((ks) => (on ? ks.filter((x) => x !== k) : [...ks, k]))}
-                      className={cn('h-8 rounded-full px-3 text-[13px] font-semibold', on ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
+                      className={cn('tap relative h-8 rounded-full px-3 text-[13px] font-semibold', on ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
                       data-testid={`change-kind-${k}`}
                     >
                       {CHANGE_KIND_LABELS[k]}

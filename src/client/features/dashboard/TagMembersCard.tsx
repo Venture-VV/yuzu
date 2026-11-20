@@ -42,7 +42,7 @@ export function TagMembersCard() {
                   aria-pressed={picked.includes(t.id)}
                   onClick={() => toggle(t.id)}
                   className={cn(
-                    'inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-semibold ring-1',
+                    'tap relative inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12.5px] font-semibold ring-1',
                     picked.includes(t.id) ? 'bg-pine text-paper ring-pine' : 'bg-card text-ink-2 ring-line hover:ring-ink-3',
                     !t.active && 'opacity-60',
                   )}

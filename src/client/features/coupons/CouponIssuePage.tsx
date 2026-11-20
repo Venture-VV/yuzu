@@ -34,7 +34,7 @@ export function CouponIssuePage() {
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to="/" className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回会员工作台">
+            <Link to="/" className="tap relative -ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回会员工作台">
               <ArrowLeft className="size-[18px]" />
             </Link>
             发券
@@ -44,7 +44,7 @@ export function CouponIssuePage() {
         actions={
           <Link
             to={ADMIN_SECTIONS.coupons.path}
-            className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+            className="tap relative flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
             data-testid="coupon-issue-admin-link"
           >
             <Settings2 className="size-4" />

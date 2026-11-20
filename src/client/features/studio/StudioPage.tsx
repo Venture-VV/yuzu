@@ -105,7 +105,10 @@ function ToolButton({ title, onClick, disabled, children, active, testId }: { ti
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={cn('flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 text-[12.5px] text-ink-2 hover:bg-paper-2 disabled:opacity-35', active && 'bg-pine-tint text-pine')}
+      className={cn(
+        'tap relative flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 text-[12.5px] text-ink-2 hover:bg-paper-2 disabled:opacity-35',
+        active && 'bg-pine-tint text-pine',
+      )}
       data-testid={testId}
     >
       {children}
@@ -645,7 +648,7 @@ export function StudioPage() {
         <button
           type="button"
           onClick={() => void navigate('/admin/studio')}
-          className="group mr-1 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line-strong bg-paper px-3 text-[12.5px] font-semibold text-ink-2 transition-colors hover:border-clay hover:bg-clay-soft hover:text-clay"
+          className="tap relative group mr-1 flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-line-strong bg-paper px-3 text-[12.5px] font-semibold text-ink-2 transition-colors hover:border-clay hover:bg-clay-soft hover:text-clay"
           title="退出工作台，回后台的「工作台」（草稿会先存好）"
           data-testid="studio-exit"
         >
@@ -666,7 +669,7 @@ export function StudioPage() {
             <button
               key={s.key}
               type="button"
-              className={cn('h-7 whitespace-nowrap rounded px-2.5 text-[12.5px]', screen === s.key ? 'bg-pine text-white' : 'text-ink-2 hover:bg-paper-2')}
+              className={cn('tap relative h-7 whitespace-nowrap rounded px-2.5 text-[12.5px]', screen === s.key ? 'bg-pine text-white' : 'text-ink-2 hover:bg-paper-2')}
               onClick={() => {
                 setScreen(s.key);
                 setSelection([]);
@@ -855,7 +858,7 @@ export function StudioPage() {
               <button
                 key={k}
                 type="button"
-                className={cn('h-9 border-b-2', left === k ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3 hover:text-ink')}
+                className={cn('tap relative h-9 border-b-2', left === k ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3 hover:text-ink')}
                 onClick={() => (k === 'templates' ? openTemplates() : setLeft(k))}
                 data-testid={`studio-tab-${k}`}
               >
@@ -986,15 +989,23 @@ export function StudioPage() {
         {/* 右栏 */}
         <aside className="flex w-72 shrink-0 flex-col border-l border-line bg-card">
           <div className="grid grid-cols-3 border-b border-line text-[12.5px]">
-            <button type="button" className={cn('h-9 border-b-2', right === 'props' ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3')} onClick={() => setRight('props')}>
+            <button
+              type="button"
+              className={cn('tap relative h-9 border-b-2', right === 'props' ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3')}
+              onClick={() => setRight('props')}
+            >
               属性
             </button>
-            <button type="button" className={cn('h-9 border-b-2', right === 'checks' ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3')} onClick={() => setRight('checks')}>
+            <button
+              type="button"
+              className={cn('tap relative h-9 border-b-2', right === 'checks' ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3')}
+              onClick={() => setRight('checks')}
+            >
               检查{red ? <span className="ml-1 rounded-full bg-clay px-1.5 text-[12px] text-white">{red}</span> : null}
             </button>
             <button
               type="button"
-              className={cn('h-9 border-b-2', right === 'comments' ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3')}
+              className={cn('tap relative h-9 border-b-2', right === 'comments' ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3')}
               onClick={() => setRight('comments')}
               data-testid="studio-tab-comments"
             >

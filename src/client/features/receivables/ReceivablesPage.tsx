@@ -433,7 +433,7 @@ function AgingView() {
           {aging.data && <span className="text-[12.5px] text-ink-3">超过 {aging.data.overdueDays} 天没回的标出、进 ERP 待办（经营规则「可调的数值」里改）</span>}
           <a
             href="/api/erp/receivables/aging/export"
-            className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+            className="tap relative ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
           >
             <Download className="size-4" />
             导出

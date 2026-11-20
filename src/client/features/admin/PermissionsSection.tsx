@@ -164,7 +164,7 @@ export function PermissionsSection() {
                                 onClick={() => toggle(role, p)}
                                 data-testid={`perm-${role}-${p}`}
                                 className={cn(
-                                  'relative mx-auto flex size-8 items-center justify-center rounded-md transition-colors',
+                                  'tap relative mx-auto flex size-8 items-center justify-center rounded-md transition-colors',
                                   editable && !locked ? 'hover:bg-paper-2' : 'cursor-default',
                                   has && 'bg-pine-tint',
                                 )}

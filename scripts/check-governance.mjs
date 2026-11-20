@@ -96,7 +96,8 @@ export const CONVENTION_RULES = [
   // 工作台画布上的量距标注、图表的坐标刻度不算小字；公共部件自己的实现不算手写
   {
     key: 'small-text',
-    pattern: /\btext-\[(?:\d|1[01])(?:\.\d+)?px\]/g,
+    // 写死的小于 12 像素，或小于 1em 的相对字号（没有用 text-[length:max(12px,0.8em)] 兜底的）
+    pattern: /\btext-\[(?:(?:\d|1[01])(?:\.\d+)?px|0?\.\d+em)\]/g,
     scope: ['src/client/', 'src/canteen-app/'],
     allow: [
       'src/client/features/print/',

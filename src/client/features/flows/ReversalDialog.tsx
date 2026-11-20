@@ -195,7 +195,7 @@ export function ReversalDialog({ target, onClose }: { target: ReversalTarget | n
                       onClick={() => setPreset(preset === r ? null : r)}
                       aria-pressed={preset === r}
                       className={cn(
-                        'h-9 rounded-full border px-3.5 text-[13px] font-semibold transition-colors',
+                        'tap relative h-9 rounded-full border px-3.5 text-[13px] font-semibold transition-colors',
                         preset === r ? 'border-clay bg-clay-soft text-clay' : 'border-line-strong bg-card text-ink-2 hover:border-ink-4',
                       )}
                     >

@@ -33,7 +33,7 @@ const STATUS_TONE: Record<SourcingStatus, 'yuzu' | 'pine' | 'neutral'> = { open:
 
 function Back({ to }: { to: string }) {
   return (
-    <Link to={to} className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回">
+    <Link to={to} className="tap relative -ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回">
       <ArrowLeft className="size-[18px]" />
     </Link>
   );
@@ -85,7 +85,7 @@ export function SourcingPage() {
             role="radio"
             aria-checked={status === f.value}
             onClick={() => setParams(f.value ? { status: f.value } : {}, { replace: true })}
-            className={cn('h-8 rounded-full px-3 text-[13px] font-semibold', status === f.value ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
+            className={cn('tap relative h-8 rounded-full px-3 text-[13px] font-semibold', status === f.value ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
           >
             {f.label}
           </button>

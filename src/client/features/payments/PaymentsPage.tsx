@@ -55,7 +55,7 @@ function Chips<T extends string>({ value, options, onChange, testId }: { value: 
           role="radio"
           aria-checked={value === o.value}
           onClick={() => onChange(o.value)}
-          className={cn('h-8 rounded-full px-3 text-[13px] font-semibold', value === o.value ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
+          className={cn('tap relative h-8 rounded-full px-3 text-[13px] font-semibold', value === o.value ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
           data-testid={`${testId}-${o.value}`}
         >
           {o.label}
@@ -102,7 +102,7 @@ export function PaymentsPage() {
               role="tab"
               aria-selected={tab === t.value}
               onClick={() => setParams(t.value === 'requests' ? {} : { tab: t.value }, { replace: true })}
-              className={cn('h-9 rounded-lg px-3.5 text-[13.5px] font-semibold', tab === t.value ? 'bg-pine text-paper' : 'text-ink-2 hover:bg-paper-2')}
+              className={cn('tap relative h-9 rounded-lg px-3.5 text-[13.5px] font-semibold', tab === t.value ? 'bg-pine text-paper' : 'text-ink-2 hover:bg-paper-2')}
               data-testid={`payments-tab-${t.value}`}
             >
               {t.label}
@@ -499,7 +499,7 @@ function WeeklyTab() {
         )}
         <a
           href="/api/erp/payments/weekly/export"
-          className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[13px] font-semibold text-ink-2 hover:bg-paper-2"
+          className="tap relative ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-line px-3 text-[13px] font-semibold text-ink-2 hover:bg-paper-2"
           data-testid="weekly-export"
         >
           <Download className="size-4" />

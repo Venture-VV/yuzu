@@ -228,7 +228,7 @@ export function GiftIssueDialog({
                     aria-label="少一张"
                     disabled={locked || quantity <= 1}
                     onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                    className="flex size-10 items-center justify-center text-ink-2 hover:bg-paper-2 disabled:opacity-40"
+                    className="tap relative flex size-10 items-center justify-center text-ink-2 hover:bg-paper-2 disabled:opacity-40"
                   >
                     <Minus className="size-3.5" />
                   </button>
@@ -247,7 +247,7 @@ export function GiftIssueDialog({
                     aria-label="多一张"
                     disabled={locked || quantity >= MAX_GIFT_QUANTITY}
                     onClick={() => setQuantity((q) => Math.min(MAX_GIFT_QUANTITY, q + 1))}
-                    className="flex size-10 items-center justify-center text-ink-2 hover:bg-paper-2 disabled:opacity-40"
+                    className="tap relative flex size-10 items-center justify-center text-ink-2 hover:bg-paper-2 disabled:opacity-40"
                   >
                     <Plus className="size-3.5" />
                   </button>

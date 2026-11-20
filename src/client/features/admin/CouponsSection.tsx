@@ -106,7 +106,7 @@ export function CouponsSection() {
       actions={
         <Link
           to={COUPON_ISSUE_PATH}
-          className="flex h-9 items-center rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
+          className="tap relative flex h-9 items-center rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3"
           data-testid="coupon-issue-link"
         >
           去发券（批量发券、无记名券）

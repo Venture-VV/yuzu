@@ -438,7 +438,7 @@ function Filters({ filters, setFilter, applicants }: { filters: Record<string, s
             aria-checked={filters.state === o.value}
             onClick={() => setFilter('state', o.value)}
             className={cn(
-              'h-8 shrink-0 rounded-full border px-3 text-[12.5px] font-semibold whitespace-nowrap transition-colors',
+              'tap relative h-8 shrink-0 rounded-full border px-3 text-[12.5px] font-semibold whitespace-nowrap transition-colors',
               filters.state === o.value ? 'border-pine bg-pine text-white' : 'border-line bg-card text-ink-2 hover:border-pine/40',
             )}
             data-testid={`pool-filter-${o.value || 'all'}`}
