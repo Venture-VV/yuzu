@@ -97,7 +97,8 @@ export function TrialsCard({ member }: { member: MemberDetail }) {
     <Card className="p-5" data-testid="member-trials">
       <SectionTitle
         aside={
-          <span className="flex items-center gap-2">
+          // 手持机上放不下两个按钮就换行（8.1.16 四种尺寸核对时发现会员详情在 360 宽上横着滚）
+          <span className="flex flex-wrap items-center justify-end gap-2">
             <PendingBadge title="M51–M56：L2 起每月邀请 1 位体验低一档 7 天；QY-042 赠送低一档 1 个月；只享服务、折扣与 VIP 柜（待店主确认）" />
             {canStart && startButton('invite')}
             {canStart && startButton('gift')}

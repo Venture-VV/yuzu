@@ -97,7 +97,7 @@ const STORE_NAV: StoreNavDomain[] = [
     icon: Hourglass,
     items: [
       { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
-      // 技师管理（8.1.15 块 E，草稿）：技师名册、组别、班次与排班、休假；钟房的岗位能看、能替技师申请休假
+      // 技师管理（8.1.16 块 E，docs/TECHNICIANS_V8115.md）：技师名册、组别、班次与排班、休假；钟房的岗位能看、能替技师申请休假
       { to: '/technicians', label: '技师管理', icon: IdCard, perm: ['technician.manage', 'technician.dispatch'], when: (s) => s.technicians },
     ],
   },
