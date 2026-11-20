@@ -1,27 +1,43 @@
-// 点单时选做法、加料（8.1.15 菜品管理，docs/DISHES_V8115.md 第 5 节）：点一道有做法或加料的菜时弹出来。
-//   · 做法：不加钱，选了的写进这道菜的出品备注（「微辣，免葱」），后面还能接手写的备注；
-//   · 加料：另外的菜，各算各的钱；加进已点时另起一行，备注写「配 这道菜」；
-//   · 套餐：这里只把含的几样写出来（出品单上会列出来），下单还是一行。
+// 点单时选规格、做法、加料（8.1.15 菜品管理，docs/DISHES_V8115.md 第 5 节；8.1.17 docs/DISHES_V8117.md 第 2、3 节）：
+// 点一道多档、或有做法 / 加料的菜时弹出来。
+//   · 规格（档，8.1.17 BW5）：多档的菜选一档（各档的价）；只有一档的不显示这一段；
+//   · 做法：分了组的同一组只能选一个（再点别的就换过去），必选的组不选不能加进已点；不分组的可以多选；
+//     加价的写「+¥2」，按份加在这一行的单价上（服务端按同一套规矩核对、按自己的价算，@shared/dishes 的 methodChoiceProblem）；
+//   · 加料：另外的菜，各算各的钱；加进已点时另起一行，挂在这一行主菜上（出品单上写「配 这道菜」，退主菜时问要不要一起退）；
+//   · 套餐：这里把含的几样写出来（出品单上会列出来），下单还是一行。
 //   · 8.1.15 块 B（ZT26）：加料在这个岗位不能下单的出品口（按出品口的三项下单权限）的，标「不能在水吧下单」、不能选。
-// 这里只是把这几样拼成点单页原有的「一行一道菜 + 口味备注」，下单的请求与以前一样。
 
 import { useState } from 'react';
 import { Ban, Hourglass, Minus, Plus } from 'lucide-react';
+import { PRICE_TIER_LABELS, defaultTier, tierPrice, type PriceTier } from '@shared/catalog';
 import { MAX_DISH_NOTE, type MenuDish } from '@shared/dining';
-import { addonNote, composeDishNote, dishNoteFits, partsText } from '@shared/dishes';
+import { composeLineNote, methodChoiceProblem, methodsExtra, partsText, pickedMethods, plusYuan, type DishMethodOption } from '@shared/dishes';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { QtyInput } from '../../components/QtyInput';
-import { Button, Field, Input } from '../../components/ui';
+import { Badge, Button, Field, Input } from '../../components/ui';
 import { StatusChip } from './DishChips';
 
+/** 选好的一行（加进已点）：主菜带档、做法、手写的备注；加料的 addon 为真（挂在这一次选的主菜上） */
 export interface PickedLine {
   dishId: number;
   quantity: number;
+  tier?: PriceTier;
+  methods?: string[];
   note: string;
+  addon?: boolean;
 }
+
+/** 这道菜要不要先弹出来选：多档、有做法、有加料 */
+export const needsOptions = (d: MenuDish) => !!(d.prices && d.prices.length > 1) || !!d.methods?.length || !!d.addons?.length;
+
+/** 一道菜的做法（带分组、加价）；8.1.15 的菜单只有名字时当不分组、不加钱 */
+export const methodOptionsOf = (d: MenuDish): DishMethodOption[] => d.methodOptions ?? (d.methods ?? []).map((name) => ({ name, group: '', price: 0 }));
+
+/** 这一档的价（没有这一档、不是多档的菜用菜单上的默认价） */
+export const tierPriceOf = (d: MenuDish, tier: PriceTier | undefined) => (tier && d.prices ? (tierPrice(d.prices, tier) ?? d.price) : d.price);
 
 export function DishOptionsDialog({
   dish,
@@ -38,6 +54,7 @@ export function DishOptionsDialog({
   /** 这道加料能不能在这里下单（8.1.15 块 B）：不能的给出原因（「不能在水吧下单」），标出来、不能选；不传当都能点 */
   blockedOf?: (id: number) => string | null;
 }) {
+  const [tier, setTier] = useState<PriceTier | undefined>(undefined);
   const [methods, setMethods] = useState<string[]>([]);
   const [addons, setAddons] = useState<Record<number, number>>({});
   const [quantity, setQuantity] = useState(1);
@@ -46,6 +63,7 @@ export function DishOptionsDialog({
   useResetOnOpen(
     dish !== null,
     () => {
+      setTier(dish?.prices && dish.prices.length > 1 ? (defaultTier(dish.prices) ?? undefined) : undefined);
       setMethods([]);
       setAddons({});
       setQuantity(1);
@@ -58,15 +76,50 @@ export function DishOptionsDialog({
 
   const left = remainingOf(dish.id);
   const max = Math.min(99, left ?? 99);
-  const options = dish.addons ?? [];
-  const picked = options.filter((a) => (addons[a.id] ?? 0) > 0 && !blockedOf?.(a.id));
-  const total = dish.price * quantity + picked.reduce((s, a) => s + a.price * addons[a.id]!, 0);
-  const fits = dishNoteFits(methods, note);
+  const options = methodOptionsOf(dish);
+  const groups = dish.methodGroups ?? [];
+  const loose = options.filter((o) => !o.group || !groups.some((g) => g.name === o.group));
+  const addonList = dish.addons ?? [];
+  const picked = addonList.filter((a) => (addons[a.id] ?? 0) > 0 && !blockedOf?.(a.id));
+  const unit = tierPriceOf(dish, tier) + methodsExtra(options, methods);
+  const total = unit * quantity + picked.reduce((s, a) => s + a.price * addons[a.id]!, 0);
+  // 必选的组没选、同一组两个……与服务端同一个核对
+  const problem = methodChoiceProblem(dish.name, options, groups, methods, { requireAll: true });
+  const preview = composeLineNote({ methods: pickedMethods(options, methods), note });
   const setAddon = (id: number, n: number) => setAddons((cur) => ({ ...cur, [id]: Math.max(0, n) }));
+  /** 点一种做法：分了组的换成这一个（再点一次是不选），不分组的选上 / 去掉 */
+  const toggle = (m: DishMethodOption) =>
+    setMethods((cur) => {
+      if (cur.includes(m.name)) return cur.filter((x) => x !== m.name);
+      const sameGroup = m.group ? options.filter((o) => o.group === m.group).map((o) => o.name) : [];
+      return [...cur.filter((x) => !sameGroup.includes(x)), m.name];
+    });
 
   const confirm = () => {
-    if (!fits || max < 1) return;
-    onAdd([{ dishId: dish.id, quantity, note: composeDishNote(methods, note) }, ...picked.map((a) => ({ dishId: a.id, quantity: addons[a.id]!, note: addonNote(dish.name) }))]);
+    if (problem || max < 1) return;
+    onAdd([
+      { dishId: dish.id, quantity, ...(tier ? { tier } : {}), ...(methods.length ? { methods: pickedMethods(options, methods).map((m) => m.name) } : {}), note: note.trim() },
+      ...picked.map((a) => ({ dishId: a.id, quantity: addons[a.id]!, note: '', addon: true })),
+    ]);
+  };
+
+  const chip = (m: DishMethodOption, radio: boolean) => {
+    const on = methods.includes(m.name);
+    return (
+      <button
+        key={m.name}
+        type="button"
+        role={radio ? 'radio' : undefined}
+        aria-checked={radio ? on : undefined}
+        aria-pressed={radio ? undefined : on}
+        onClick={() => toggle(m)}
+        className={cn('h-11 min-w-11 rounded-full border px-4 text-[14px] font-semibold transition-colors', on ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-pine')}
+        data-testid={`dish-options-method-${m.name}`}
+      >
+        {m.name}
+        {m.price > 0 && <span className={cn('num ml-1', on ? 'text-paper' : 'text-ember-deep')}>{plusYuan(m.price)}</span>}
+      </button>
+    );
   };
 
   return (
@@ -76,19 +129,28 @@ export function DishOptionsDialog({
       title={dish.name}
       description={
         <>
-          <Money cents={dish.price} className="text-[16px] font-bold text-ink-2" />
+          <Money cents={tierPriceOf(dish, tier)} className="text-[16px] font-bold text-ink-2" />
+          {tier && <span className="ml-1.5 text-[13px]">{PRICE_TIER_LABELS[tier]}</span>}
           <span className="ml-2">{dish.stationName}</span>
         </>
       }
       footer={
         <div className="flex w-full flex-wrap items-center gap-3">
           <span className="min-w-0 flex-1 text-[13px] text-ink-3">
-            这次合计 <Money cents={total} className="text-[18px] font-bold text-ink" />
+            {problem ? (
+              <span className="text-[14px] font-semibold text-clay" data-testid="dish-options-problem">
+                {problem.code === 'DISH_METHOD_REQUIRED' ? `请先选「${problem.group}」` : problem.message}
+              </span>
+            ) : (
+              <>
+                这次合计 <Money cents={total} className="text-[18px] font-bold text-ink" />
+              </>
+            )}
           </span>
           <Button variant="ghost" className="min-h-11" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" className="min-h-11 min-w-[112px]" disabled={!fits || max < 1} onClick={confirm} data-autofocus data-testid="dish-options-add">
+          <Button variant="primary" className="min-h-11 min-w-[112px]" disabled={!!problem || max < 1} onClick={confirm} data-autofocus data-testid="dish-options-add">
             加入已点
           </Button>
         </div>
@@ -101,25 +163,27 @@ export function DishOptionsDialog({
           </p>
         )}
 
-        {dish.methods && dish.methods.length > 0 && (
+        {dish.prices && dish.prices.length > 1 && (
           <section>
-            <h3 className="mb-2 text-[13px] font-semibold text-ink-2">做法（不加钱，可多选）</h3>
-            <div className="flex flex-wrap gap-2">
-              {dish.methods.map((m) => {
-                const on = methods.includes(m);
+            <h3 className="mb-2 text-[13px] font-semibold text-ink-2">规格</h3>
+            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="规格">
+              {dish.prices.map((p) => {
+                const on = tier === p.tier;
                 return (
                   <button
-                    key={m}
+                    key={p.tier}
                     type="button"
-                    aria-pressed={on}
-                    onClick={() => setMethods((cur) => (on ? cur.filter((x) => x !== m) : [...cur, m]))}
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => setTier(p.tier)}
                     className={cn(
-                      'h-11 min-w-11 rounded-full border px-4 text-[14px] font-semibold transition-colors',
+                      'flex h-11 items-center gap-1.5 rounded-full border px-4 text-[14px] font-semibold transition-colors',
                       on ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-pine',
                     )}
-                    data-testid={`dish-options-method-${m}`}
+                    data-testid={`dish-options-tier-${p.tier}`}
                   >
-                    {m}
+                    {PRICE_TIER_LABELS[p.tier]}
+                    <Money cents={p.price} className="text-[14px]" />
                   </button>
                 );
               })}
@@ -127,11 +191,33 @@ export function DishOptionsDialog({
           </section>
         )}
 
-        {options.length > 0 && (
+        {groups
+          .filter((g) => options.some((o) => o.group === g.name))
+          .map((g) => (
+            <section key={g.name} data-testid={`dish-options-group-${g.name}`}>
+              <h3 className="mb-2 flex items-center gap-2 text-[13px] font-semibold text-ink-2">
+                {g.name}
+                <span className="font-normal text-ink-3">（选一种）</span>
+                {g.required && <Badge tone={methods.some((m) => options.find((o) => o.name === m)?.group === g.name) ? 'pine' : 'ember'}>必选</Badge>}
+              </h3>
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={g.name}>
+                {options.filter((o) => o.group === g.name).map((m) => chip(m, true))}
+              </div>
+            </section>
+          ))}
+
+        {loose.length > 0 && (
+          <section>
+            <h3 className="mb-2 text-[13px] font-semibold text-ink-2">{groups.length ? '其他做法（可多选）' : '做法（可多选）'}</h3>
+            <div className="flex flex-wrap gap-2">{loose.map((m) => chip(m, false))}</div>
+          </section>
+        )}
+
+        {addonList.length > 0 && (
           <section>
             <h3 className="mb-2 text-[13px] font-semibold text-ink-2">加料（另算钱，出品单上写「配 {dish.name}」）</h3>
             <ul className="space-y-1.5">
-              {options.map((a) => {
+              {addonList.map((a) => {
                 const n = addons[a.id] ?? 0;
                 const cap = remainingOf(a.id);
                 const out = cap !== null && cap <= 0;
@@ -208,16 +294,12 @@ export function DishOptionsDialog({
           </p>
         )}
 
-        <Field
-          label="口味备注（选填）"
-          htmlFor="dish-options-note"
-          error={fits ? null : `做法与备注合起来最多 ${MAX_DISH_NOTE} 个字，现在 ${composeDishNote(methods, note).length} 个：少选一种做法或写短一点`}
-        >
+        <Field label="口味备注（选填）" htmlFor="dish-options-note">
           <Input id="dish-options-note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={MAX_DISH_NOTE} placeholder="例如 面硬一点" data-testid="dish-options-note" />
         </Field>
-        {(methods.length > 0 || note.trim()) && fits && (
+        {preview && (
           <p className="text-[12.5px] text-ink-3" data-testid="dish-options-preview">
-            出品单上写：<b className="text-yuzu-deep">{composeDishNote(methods, note)}</b>
+            出品单上写：<b className="text-yuzu-deep">{preview}</b>
           </p>
         )}
       </div>

@@ -226,9 +226,12 @@ test.describe('8.1.15 菜品管理', () => {
       await expectFits(page);
       await page.getByTestId('dish-options-add').click();
       await expect(options).toHaveCount(0);
-      await expect(page.getByTestId('dining-note-0')).toHaveValue('微辣，多放葱');
+      // 8.1.17：做法与「配 某菜」写在这一行下面（出品单上就是这样写），备注框里是手写的
+      await expect(page.getByTestId('dining-line-options-0')).toHaveText('微辣');
+      await expect(page.getByTestId('dining-note-0')).toHaveValue('多放葱');
       await expect(page.getByTestId('dining-line-1')).toContainText(EGG);
-      await expect(page.getByTestId('dining-note-1')).toHaveValue(`配 ${NOODLE}`);
+      await expect(page.getByTestId('dining-line-options-1')).toHaveText(`配 ${NOODLE}`);
+      await expect(page.getByTestId('dining-note-1')).toHaveValue('');
       await page.getByTestId(`dining-dish-${COMBO}`).click();
       await expect(page.getByTestId('dining-line-combo-2')).toContainText(`套餐含 ${NOODLE}×1、${TEA}×2`);
       // 合计：牛肉面 42 + 加蛋 3×2 + 套餐 48 = 96
