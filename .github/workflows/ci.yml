@@ -6,8 +6,8 @@
 # 运行机：GitHub 托管（ubuntu-latest）。2026-11-03 曾改到门店 Mac mini 的自托管运行机，店主 2026-11-05 嫌太慢改回；
 # 浏览器缓存的键带运行机架构、先查预装的 Chromium 这两处在托管运行机上照常可用，保留。
 #
-# 提速（v0.7.18，RQ-008，见 docs/TESTING.md）：各 job 同时开始，浏览器验收不再等测试 job；浏览器验收按文件名拆成三组
-# 并行（门店电脑 a–l、门店电脑 m–z、其余四个尺寸），每组用自己的临时库与应用；「浏览器验收汇总」核对三组都跑完、
+# 提速（v0.7.18，RQ-008，见 docs/TESTING.md）：各 job 同时开始，浏览器验收不再等测试 job；浏览器验收按文件名拆组
+# 并行（8.1.18 起四组：门店电脑 a–d、e–l、m–z、其余四个尺寸；汇总 job 的名字照旧叫「三组」，不改检查名），每组用自己的临时库与应用；「浏览器验收汇总」核对三组都跑完、
 # 合计跑过的用例 = 不拆分时的总数、没有失败。集成测试按文件并行，每个进程用自己的测试库。任何一个 job 失败整次 CI 失败。
 name: CI
 
@@ -81,9 +81,13 @@ jobs:
       matrix:
         include:
           # 按文件名首字母分组：新加的用例文件一定落在某一组里，不会漏跑（汇总 job 再核对总数）
+          # 8.1.18：a–l 一组在 CI 机器慢的时候跑到 25 分钟上限（门店电脑 a–l 约 1100 秒、m–z 约 830 秒），拆成 a–d、e–l 两组
           - group: store-a
-            name: 门店电脑 · a–l
-            args: "--project=门店电脑 'e2e/[a-l]'"
+            name: 门店电脑 · a–d
+            args: "--project=门店电脑 'e2e/[a-d]'"
+          - group: store-c
+            name: 门店电脑 · e–l
+            args: "--project=门店电脑 'e2e/[e-l]'"
           - group: store-b
             name: 门店电脑 · m–z
             args: "--project=门店电脑 'e2e/[m-z]'"
@@ -181,7 +185,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: 取回三组的结果
+      - name: 取回各组的结果
         uses: actions/download-artifact@v7
         with:
           pattern: e2e-results-*
@@ -191,7 +195,7 @@ jobs:
         run: |
           total=$(npx playwright test --list | tail -n 1 | sed -E 's/^Total: ([0-9]+) tests?.*/\1/')
           echo "不拆分时的用例总数：$total"
-          node scripts/ci/e2e-summary.mjs e2e-results 3 "$total"
+          node scripts/ci/e2e-summary.mjs e2e-results 4 "$total"
 
   demo:
     name: 演示数据：准备、重复执行与核对
