@@ -28,6 +28,8 @@
 
 **顺手修的**：会员详情在 1280×720 上不再横着滚（档阶阶梯撑宽了那一栏）；手持机上「邀请体验 / 赠送会籍」的按钮、充值与消费记录的金额、钟房「最近叫号」一行改成换行，不伸出屏幕。
 
+**合并后补的（PR #138，版本号不变）**：库存、采购、财务这些后勤账号都有「客房打扫、维修」，房态中心不看客房功能开没开以后，它们在客房功能没开时也多出了门店主导航与 ERP 顶栏的「返回门店」（main 上 CI 的 `e2e/inventory.spec.ts`）。改成只有「客房打扫、维修」的岗位照 8.1.15 以前的「客房」入口，客房功能开着才有；有客房、钟房、收银操作权限的照旧不看开关（FT11 补充）。
+
 **用例**：新 `tests/room-center.test.ts`（26 条）、`upgrade-room-center`、`tag-scan`（不要数据库）、`technician-admin`（19 条）、`pinyin-initials`（不要数据库）、`member-card-types`（21 条）；`dishes`、`dishes-import` 加晚到请求与结果待确认；浏览器 `e2e/room-center.spec.ts`、`e2e/technician-admin.spec.ts`、`e2e/member-card-types.spec.ts`，`e2e/dishes.spec.ts` 加断网待确认；三台目标设备加房态中心、钟房、技师管理、新建会员、会员详情。浏览器用例点主导航改用 `e2e/nav.ts` 的 `clickNav` / `navLink` / `navItem`（组折着时入口看不见）。
 
 ## v8.1.15 · 发卡台与收银台、前台风控、餐饮桌台与菜品管理、深浅主题、平板与工作台的退出

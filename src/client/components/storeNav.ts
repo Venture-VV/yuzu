@@ -58,6 +58,9 @@ export interface StoreNavDomain {
   items: StoreNavItem[];
 }
 
+/** 房态中心里前台、钟房、收银那几样岗位的权限：有其中一样的不看客房功能开没开都有入口 */
+const ROOM_CENTER_DESK_PERMISSIONS: readonly Permission[] = ['room.operate', 'technician.dispatch', 'frontdesk.checkout'];
+
 const STORE_NAV: StoreNavDomain[] = [
   {
     key: 'frontdesk',
@@ -91,8 +94,16 @@ const STORE_NAV: StoreNavDomain[] = [
     icon: BedDouble,
     items: [
       // 房态中心（8.1.16，docs/ROOM_CENTER_V8115.md）：按房型看全部房间的状态，原来的「客房」页（房态看板、平面图、派对房）并进来（/rooms 跳过去）。
-      // 不看客房功能开没开：技师服务的房间、派对房、大厅都在这里；能看房态中心的岗位（客房、钟房、收银）都有入口
-      { to: '/room-center', label: '房态中心', icon: BedDouble, perm: ['room.operate', 'room.housekeep', 'technician.dispatch', 'frontdesk.checkout'] },
+      // 不看客房功能开没开：技师服务的房间、派对房、大厅都在这里；能看房态中心的岗位（客房、钟房、收银）都有入口。
+      // 只有「客房打扫、维修」的（后勤账号，库存、采购、财务也是后勤）照 8.1.15 以前的「客房」入口，客房功能开着才有：
+      // 不然只用 ERP 的人都多出门店主导航与「返回门店」（FT11 补充，待确认）
+      {
+        to: '/room-center',
+        label: '房态中心',
+        icon: BedDouble,
+        perm: ['room.operate', 'room.housekeep', 'technician.dispatch', 'frontdesk.checkout'],
+        when: (s) => s.rooms || ROOM_CENTER_DESK_PERMISSIONS.some((p) => s.permissions.includes(p)),
+      },
     ],
   },
   {
