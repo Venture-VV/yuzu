@@ -117,6 +117,8 @@ beforeAll(async () => {
   // 写入期间临时加列、建空表，迁移前删掉
   await sql`ALTER TABLE visits ADD COLUMN risk_approved_by bigint, ADD COLUMN risk_approved_at timestamptz, ADD COLUMN risk_reason text`;
   await sql`CREATE TABLE bookings (id bigint, booking_no text, status text, arrival_visit_id bigint, arrived_at timestamptz)`;
+  // 现版本结账时一起结束这几位客人在房态中心的登记单（190 才有）：写入期间临时建空表，迁移前删掉
+  await sql`CREATE TABLE room_registrations (id bigint, space_id bigint, visit_id bigint, status text)`;
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
   const cash = (amount: number) => ({ idempotencyKey: randomUUID(), memberId, planId: null, paidAmount: amount, bonusAmount: 0, paymentMethod: 'cash' as const, paymentConfirmed: true as const });
@@ -144,6 +146,7 @@ beforeAll(async () => {
   await sql`DROP TABLE rooms`;
   await sql`DROP FUNCTION yuzu_snapshot_checkout_items(bigint, boolean)`;
   await sql`DROP TABLE space_usages`;
+  await sql`DROP TABLE room_registrations`;
   await sql`DROP TABLE coupon_rules`;
   await sql`DROP TABLE refunds`;
   await sql`DROP TABLE refund_payments`;
