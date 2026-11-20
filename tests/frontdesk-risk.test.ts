@@ -171,6 +171,35 @@ describe('发牌前风控 · 黑名单', () => {
     expect((await audits('blacklist_lifted')).at(-1)!.detail).toMatchObject({ reason: '已和客人谈妥' });
   });
 
+  it('黑名单跟着人走：在黑名单上的会员合并到另一位以后，那一位发牌照样被拒、看得到这一条；解除以后照常发牌（Codex 审查 35c4338）', async () => {
+    const a = await createMember(ctx, '合并甲');
+    const b = await createMember(ctx, '合并乙');
+    const added = await blacklist(duty, { memberId: a.id, reason: '多次逃单' });
+    expect(added.status, JSON.stringify(added.body)).toBe(201);
+    // 店主把甲合并到乙（同一个人的两份档案）；合并不转移黑名单（登记只追加、不能改）
+    const check = (await api(ctx.app, ctx.owner, 'GET', `/api/members/${a.id}/merge-check?targetId=${b.id}`)).body as { principal: number; bonus: number };
+    const merged = await api(ctx.app, ctx.owner, 'POST', `/api/members/${a.id}/merge`, {
+      clientKey: randomUUID(),
+      targetId: b.id,
+      reason: '同一个人建了两份档案',
+      expectedPrincipal: check.principal,
+      expectedBonus: check.bonus,
+    });
+    expect(merged.status, JSON.stringify(merged.body)).toBe(200);
+    // 合并到的乙：发牌被拒，写明是合并前的甲登记的；页面预先看、会员详情里都看得到这一条
+    const refused = await checkinRaw(ctx.clerk, { guests: [{ tagCode: nextTag(), zone: 'male', memberId: b.id }] });
+    expect([refused.status, err(refused)]).toEqual([422, 'GUEST_BLACKLISTED']);
+    expect(refused.body.error.message).toContain('合并前的「合并甲」');
+    expect((await risk(b.id)).blacklist).toMatchObject({ id: added.body.id, name: '合并乙（合并前的「合并甲」）', reason: '多次逃单' });
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/blacklist/member/${b.id}`)).body.entry).toMatchObject({ id: added.body.id, memberId: a.id });
+    // 甲已合并：新的登记要记在乙身上
+    expect(err(await blacklist(duty, { memberId: a.id, reason: '又一次逃单' }))).toBe('MEMBER_MERGED');
+    // 解除那一条以后乙照常发牌
+    expect((await lift(duty, added.body.id, '已和客人谈妥')).status).toBe(200);
+    expect((await risk(b.id)).blacklist).toBeNull();
+    await enter(b.id);
+  });
+
   it('按手机号登记：号码是会员的记成那位会员；不是会员的要写称呼，这个号码以后办了会员照样拦', async () => {
     const m = await createMember(ctx, '黑名单乙', '13811110001');
     const byPhone = await blacklist(duty, { phone: '13811110001', reason: '醉酒闹事' });

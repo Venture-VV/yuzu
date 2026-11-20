@@ -53,38 +53,64 @@ export async function listBlacklist(db: Db, all: boolean): Promise<BlacklistEntr
   return rows.map(toEntry);
 }
 
-/** 这位会员现在命中的黑名单（按会员登记的，或按他现在的手机号登记的）；没有返回 null */
+/**
+ * 这位会员现在命中的黑名单（按会员登记的，或按他现在的手机号登记的）；没有返回 null。
+ * 黑名单跟着人走：合并到这位会员身上的会员（沿合并关系往回找，合并过几次都算）在合并前登记的也算——
+ * 合并不转移黑名单（登记只追加、不能改），这里不往回找就会漏掉（Codex 审查 35c4338）
+ */
 export async function memberBlacklist(db: Db, memberId: number): Promise<BlacklistEntry | null> {
   const [row] = await db<BlacklistEntry[]>`
+    WITH RECURSIVE fam(id) AS (
+      SELECT id FROM members WHERE id = ${memberId}
+      UNION
+      SELECT x.id FROM fam f JOIN members x ON x.merged_into_id = f.id
+    )
     SELECT ${ENTRY_COLUMNS(db)} FROM ${ENTRY_FROM(db)}
     WHERE b.lifted_at IS NULL
-      AND (b.member_id = ${memberId} OR b.phone = (SELECT phone FROM members WHERE id = ${memberId}))
+      AND (b.member_id IN (SELECT id FROM fam) OR b.phone IN (SELECT x.phone FROM members x JOIN fam f ON f.id = x.id))
     ORDER BY b.id LIMIT 1`;
   return row ? toEntry(row) : null;
 }
 
 export interface BlacklistHit {
   id: number;
+  /** 来发牌的这位会员 */
   memberId: number;
   memberName: string;
+  /** 黑名单登记在合并到他身上的那位会员上时，那位的姓名（合并前登记的）；登记在他本人上的为 null */
+  viaName: string | null;
   reason: string;
   createdByName: string;
   createdAt: string;
 }
 
-/** 这几位会员里命中黑名单的（发牌的事务里用；只读） */
+/**
+ * 这几位会员里命中黑名单的（发牌的事务里用；只读）。合并到他们身上的会员（沿合并关系往回找）在合并前登记的也算：
+ * 合并不转移黑名单，只看本人的编号与手机号会漏掉（Codex 审查 35c4338）。新的登记只能记在没合并的会员上（MEMBER_MERGED），
+ * 与发牌对那位会员一行的共享锁串行；合并前的登记不会再变，只会被解除
+ */
 export async function blacklistHits(db: Db, memberIds: number[]): Promise<BlacklistHit[]> {
   if (memberIds.length === 0) return [];
   const rows = await db<BlacklistHit[]>`
-    SELECT b.id, m.id AS member_id, m.name AS member_name, b.reason, s.display_name AS created_by_name, b.created_at
-    FROM members m JOIN guest_blacklist b ON b.lifted_at IS NULL AND (b.member_id = m.id OR b.phone = m.phone)
+    WITH RECURSIVE fam(root, id) AS (
+      SELECT id, id FROM members WHERE id IN ${db(memberIds)}
+      UNION
+      SELECT f.root, x.id FROM fam f JOIN members x ON x.merged_into_id = f.id
+    )
+    SELECT b.id, r.id AS member_id, r.name AS member_name, CASE WHEN m.id <> r.id THEN m.name END AS via_name,
+           b.reason, s.display_name AS created_by_name, b.created_at
+    FROM fam f JOIN members r ON r.id = f.root JOIN members m ON m.id = f.id
+    JOIN guest_blacklist b ON b.lifted_at IS NULL AND (b.member_id = m.id OR b.phone = m.phone)
     JOIN staff s ON s.id = b.created_by
-    WHERE m.id IN ${db(memberIds)} ORDER BY m.id, b.id`;
+    ORDER BY r.id, b.id`;
   return rows.map((r) => ({ ...r, id: Number(r.id), memberId: Number(r.memberId) }));
 }
 
+/** 黑名单的称呼：登记在合并前的会员上的，写明是合并前的哪一位 */
+const hitName = (hit: BlacklistHit) => (hit.viaName ? `${hit.memberName}（合并前的「${hit.viaName}」）` : hit.memberName);
+
 export const blacklistedError = (hit: BlacklistHit) =>
-  unprocessable('GUEST_BLACKLISTED', `会员「${hit.memberName}」在黑名单里（${hit.reason}；${hit.createdByName}登记），不能发牌。确有需要请值班经理及以上先在会员详情里解除`, {
+  unprocessable('GUEST_BLACKLISTED', `会员「${hitName(hit)}」在黑名单里（${hit.reason}；${hit.createdByName}登记），不能发牌。确有需要请值班经理及以上先在会员详情里解除`, {
     memberId: hit.memberId,
     blacklistId: hit.id,
     reason: hit.reason,
@@ -232,7 +258,7 @@ export async function memberRisk(db: Db, deps: Deps, memberId: number): Promise<
   return {
     enabled: true,
     memberId,
-    blacklist: hit ? { id: hit.id, name: hit.memberName, reason: hit.reason, createdByName: hit.createdByName, createdAt: hit.createdAt } : null,
+    blacklist: hit ? { id: hit.id, name: hitName(hit), reason: hit.reason, createdByName: hit.createdByName, createdAt: hit.createdAt } : null,
     unsettled: (await unsettledDebts(db, [memberId])).map(({ memberId: _m, ...d }) => d),
     visitsToday: await visitsToday(db, memberId, date),
     bookings: (await openBookings(db, [memberId], date)).map(({ memberId: _m, ...b }) => b),
