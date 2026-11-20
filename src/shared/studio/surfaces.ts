@@ -151,9 +151,9 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
   ],
   fonts: {
     zh: [
-      { key: 'fangsong', label: '朱雀仿宋（品牌字体，默认）', stack: "'Em Box Zh', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif" },
-      { key: 'songti', label: '宋体（系统字体）', stack: "'Em Box Zh', 'Songti SC', 'STSong', 'Noto Serif CJK SC', 'Source Han Serif SC', serif" },
-      { key: 'heiti', label: '黑体（系统字体）', stack: "'Em Box Zh', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" },
+      { key: 'fangsong', label: '朱雀仿宋（品牌字体，默认）', stack: "'Em Box Zh', 'Tangqi Brand Latin', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif" },
+      { key: 'songti', label: '宋体（系统字体）', stack: "'Em Box Zh', 'Tangqi Brand Latin', 'Songti SC', 'STSong', 'Noto Serif CJK SC', 'Source Han Serif SC', serif" },
+      { key: 'heiti', label: '黑体（系统字体）', stack: "'Em Box Zh', 'Tangqi Brand Latin', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" },
     ],
     en: [
       // 8.1.5：门店服务器上放了授权的品牌英文字体（ABC Arizona Flare）就用它，没放用 Average Sans 顶替（docs/EMENU.md 第 14.2 节）
@@ -162,8 +162,18 @@ export const EMENU_SURFACE: StudioSurfaceDef = {
         label: 'ABC Arizona Flare（品牌字体，默认；服务器没放授权文件时用 Average Sans 顶替）',
         stack: "'Em Box En', 'Tangqi Brand En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', 'STFangsong', sans-serif",
       },
-      { key: 'serif', label: '衬线（系统字体）', stack: "'Em Box En', Georgia, 'Times New Roman', 'Zhuque Fangsong', serif" },
-      { key: 'sans', label: '无衬线（系统字体）', stack: "'Em Box En', 'Helvetica Neue', Arial, 'PingFang SC', sans-serif" },
+      // 8.1.19（店主 2026-11-20「所有的英文字体都要替换为数据包提供的示例字体」，PD5）：电子菜单里的英文一律用品牌字体
+      // ABC Arizona Flare。这两项留着（存过它们的版面照常读、照常发布），授权字体排在最前；只在服务器没放授权文件时才用到后面的系统字体
+      {
+        key: 'serif',
+        label: '衬线（系统字体；8.1.19 起英文统一用品牌字体，这一项只在服务器没放授权文件时顶替）',
+        stack: "'Em Box En', 'Tangqi Brand En', Georgia, 'Times New Roman', 'Zhuque Fangsong', serif",
+      },
+      {
+        key: 'sans',
+        label: '无衬线（系统字体；8.1.19 起英文统一用品牌字体，这一项只在服务器没放授权文件时顶替）',
+        stack: "'Em Box En', 'Tangqi Brand En', 'Helvetica Neue', Arial, 'PingFang SC', sans-serif",
+      },
     ],
     default: { zh: 'fangsong', en: 'average' },
   },

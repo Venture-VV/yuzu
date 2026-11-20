@@ -230,7 +230,7 @@
   - `194`（`194_positions.sql`）：员工档案加岗位（`position`）、个人微调（`permission_adjust`）、老账号要不要选岗（`needs_position`）与自己选岗的时间；店主账号定成总裁，其余老账号标要选岗。
   - `195` 没用（留空）；8.1.17（[PR #132](https://github.com/Venture-VV/yuzu/pull/132)）用了 `196`–`199`，比 `194` 先合进 `main`；迁移按文件名顺序补跑没跑过的，`194` 后到也照常执行（`tests/upgrade-positions.test.ts`）。主线下一个迁移号从 `200` 起。
 
-- **8.1.19（2026-11-20 登记）**：品牌部《工作台需求汇总 1.3》：菜品与顶栏的英文换成数据包的示例字体（ABC Arizona Flare，用门店授权的 `brand-fonts/en.woff2`，`docs/EMENU.md` 第 19 节，PD1–PD4）。**没有迁移**。
+- **8.1.19（2026-11-20 登记）**：品牌部《工作台需求汇总 1.3》：菜品与顶栏的英文换成数据包的示例字体（ABC Arizona Flare，用门店授权的 `brand-fonts/en.woff2`，`docs/EMENU.md` 第 19 节，PD1–PD5）。**没有迁移**。
 
 ## 8. 店主决策（2026-10-29 已签认）
 

@@ -62,7 +62,8 @@
    * 版面里多存一个主题色，退回 8.1.7 时那边的工作台不认、版面读不了（PENDING_DECISIONS.md PB2）
    */
   --em-dot: #bf1d25;
-  --em-zh: 'Em Box Zh', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif;
+  /* 8.1.19（PD5）：中文里夹的字母、数字也用授权的品牌英文字体（Tangqi Brand Latin 只含拉丁字母，见 brandFont.ts）；没放授权文件时跳过它 */
+  --em-zh: 'Em Box Zh', 'Tangqi Brand Latin', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif;
   --em-en: 'Em Box En', 'Tangqi Brand En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', 'STFangsong', sans-serif;
   /*
    * 衬线展示体（8.1.14，品牌部，PC1）：顶栏分类的英文、菜品的英文名。行框照旧用 Em Box En（文字框的位置与原来一样）；
