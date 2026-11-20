@@ -22,6 +22,9 @@ const username = z
   .toLowerCase()
   .regex(/^[a-z0-9_.-]{2,32}$/, '账号需为 2–32 位小写字母、数字或 _ . -');
 
+/** 专用账号：后台把老账号改成专用账号时也不用再选岗（Codex 审查 4e118c1） */
+const isSpecialRole = (role: Role) => role === 'tablet' || role === 'other_store' || role === 'designer';
+
 // 专用账号（8.1.18，GW3）：点餐平板、他店查询、设计师不是组织里的岗位，照旧按旧岗位建。
 // 组织里的账号一律「部门 → 岗位」（position）；旧岗位（role + duties）只留给脚本与测试用（后台页面不再提供）。
 const permissionList = z.array(z.enum(ALL_PERMISSIONS as [Permission, ...Permission[]], '有不认识的权限，请刷新页面后重试')).max(ALL_PERMISSIONS.length);
@@ -217,7 +220,7 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
       // 审计、设备事件等记经办人的外键检查要对店主行加 KEY SHARE，FOR UPDATE 会让全店所有店主经手的写入等这个事务提交
       await tx`SELECT id FROM staff WHERE role = 'owner' FOR NO KEY UPDATE`;
       const [before] = await tx<{ role: Role; duties: Duty[]; active: boolean; displayName: string; system: boolean; position: string | null; permissionAdjust: unknown }[]>`
-        SELECT role, duties, active, display_name, system, position, permission_adjust FROM staff WHERE id = ${id}`;
+        SELECT role, duties, active, display_name, system, position, permission_adjust FROM staff WHERE id = ${id} FOR NO KEY UPDATE`;
       if (!before || before.system) throw notFound('员工不存在');
       const beforePosition = positionFrom(before.position);
       // 不传岗位与旧岗位：岗位不变（负责人改本部门员工的姓名、停用时）
@@ -244,7 +247,7 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
                position = ${resolved.position},
                permission_adjust = ${permissionAdjust ? tx.json(permissionAdjust as never) : tx`permission_adjust`},
                -- 后台给了岗位就不用自己再选（GW7）；改过岗位的不再标「自选岗位」
-               needs_position = ${resolved.position ? false : tx`needs_position`},
+               needs_position = ${resolved.position || isSpecialRole(resolved.role) ? false : tx`needs_position`},
                position_chosen_at = ${positionChanged ? null : tx`position_chosen_at`},
                active = ${input.active}, updated_at = now()
         WHERE id = ${id}`;
@@ -275,7 +278,9 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
     const password = generateTempPassword();
     const hash = await hashPassword(password);
     await sql.begin(async (tx) => {
-      // 范围写进 UPDATE（上面的核对在事务外、又隔着算密码摘要）：这期间总裁改了这位员工的岗位，负责人这一次就不生效
+      // 先锁住这位员工（与调店 PUT /api/staff/:id/stores、改员工串行），再用新的语句核对范围并写入：
+      // 范围写进 UPDATE（上面的核对在事务外、又隔着算密码摘要），这期间总裁改了岗位或调了店，负责人这一次就不生效（Codex 审查 4e118c1）
+      await tx`SELECT id FROM staff WHERE id = ${id} FOR NO KEY UPDATE`;
       const rows = await tx`
         UPDATE staff s SET password_hash = ${hash}, must_change_password = true, updated_at = now()
         WHERE s.id = ${id} AND NOT s.system AND ${scopeCond(tx, scope)} RETURNING s.id`;

@@ -343,6 +343,7 @@
 - 没有「查找与查看会员」权限的账号，客户部接口返回的手机号打码（`maskCustomerPhones`，与管家部同一条规则）。
 - 员工账号（8.0.19）：修改员工先对所有店主行加 `FOR NO KEY UPDATE`（改员工的事务互相串行，保证至少留一位在职店主）、再改那位员工一行；
   - 不用 `FOR UPDATE`——各处记经办人的外键检查要对员工行加 `KEY SHARE`，`FOR UPDATE` 会让那位员工经手的写入全都等它（新代码要锁员工行而又不改主键时一律用 `FOR NO KEY UPDATE` 或共享锁）。
+  - 部门负责人改、停用、重置本部门员工的密码（8.1.18，GW6）：先对那位员工一行加 `FOR NO KEY UPDATE`（与调店 `PUT /api/staff/:id/stores` 串行），再用新的语句核对岗位与门店范围后写入。
   - 老账号自己选新岗位（8.1.18，`POST /api/auth/position`，docs/POSITIONS_V8118.md GW7）只锁自己一行（`FOR NO KEY UPDATE`），核对还要选（`needs_position`）再改：两个页面同时提交时第二次不再改。不碰店主行——自己选不出总裁，也改不掉店主。
 
 ## 8. 多门店与 AI 辅助

@@ -332,6 +332,7 @@ export const POSITION_DEFAULTS: Record<Exclude<PositionKey, 'president'>, readon
     ...LEAD_COMMON,
     ...DEPT_STOCK,
     'frontdesk.read',
+    'frontdesk.operate',
     'dining.order',
     'dining.orderRestaurant',
     'dining.orderWater',
@@ -348,6 +349,8 @@ export const POSITION_DEFAULTS: Record<Exclude<PositionKey, 'president'>, readon
   'dining.staff': [
     ...BASE_OWN,
     'frontdesk.read',
+    // 平板点单确认要「餐饮点单」+「前台挂账」（emenu/pins.ts），菜挂在手牌上（Codex 审查 4e118c1）
+    'frontdesk.operate',
     'dining.order',
     'dining.orderRestaurant',
     'dining.orderWater',

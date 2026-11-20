@@ -180,6 +180,13 @@ describe('老账号第一次登录选新岗位（GW7）', () => {
     expect(after.positionChosenAt).toBeNull();
   });
 
+  it('总裁把还没选岗的老账号改成专用账号：不用再选岗（Codex 审查 4e118c1）', async () => {
+    const id = await createStaff(ctx.sql, { username: 'old_pad', displayName: '老平板', role: 'clerk', password: PASSWORD, mustChangePassword: false });
+    await ctx.sql`UPDATE staff SET needs_position = true WHERE id = ${id}`;
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/staff/${id}`, { displayName: '老平板', role: 'tablet', duties: [], active: true })).status).toBe(200);
+    expect((await ctx.sql<{ needsPosition: boolean }[]>`SELECT needs_position FROM staff WHERE id = ${id}`)[0]!.needsPosition).toBe(false);
+  });
+
   it('原来是值班经理的可以选负责人，不能选总经办', async () => {
     await createStaff(ctx.sql, { username: 'old_duty', displayName: '老值班经理', role: 'duty_manager', password: PASSWORD, mustChangePassword: false });
     await ctx.sql`UPDATE staff SET needs_position = true WHERE username = 'old_duty'`;

@@ -156,6 +156,13 @@ describe('权限模板（表 3 逐列）', () => {
     expect(positionDefaults('kangmei.staff', ALL_PERMISSIONS)).not.toContain('dining.voidRestaurant');
   });
 
+  it('能点单的岗位都能在平板上确认下单（要「餐饮点单」+「前台挂账」，Codex 审查 4e118c1）', () => {
+    for (const pos of POSITIONS) {
+      const perms = positionDefaults(pos.key, ALL_PERMISSIONS);
+      if (perms.includes('dining.order')) expect(perms, pos.title).toContain('frontdesk.operate');
+    }
+  });
+
   it('总经办成员：跨部门，除账号与基础数据外都开', () => {
     const perms = positionDefaults('gmo', ALL_PERMISSIONS);
     expect(perms).toContain('report.executive');
