@@ -18,7 +18,9 @@ import { badRequest, conflict, notFound } from '../lib/errors';
 import { cents, idParam, parse, positiveCents } from '../lib/validate';
 import { pricesColumn } from './pricing';
 import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
-import { dishIdsAmong, dishPriceState, recordPriceChanges } from './dish-prices';
+import { dishIdsAmong, dishPriceState, recordPriceChanges, recordStorePriceChange } from './dish-prices';
+import { MAX_STORE_PRICE_REASON } from '@shared/frontdesk-v8117';
+import { formatYuan } from '@shared/money';
 
 const PlanInput = z.object({
   name: z.string().trim().min(1, '请填写套餐名称').max(32, '名称最多 32 个字'),
@@ -343,6 +345,9 @@ export function registerCatalogRoutes(app: FastifyInstance, { sql }: Deps) {
     );
   });
 
+  // 改本店价（8.1.17 BW-11，docs/FRONTDESK_V8117.md 第 6 节）：权限照旧，另要写原因（与菜品改价一样）；菜品的改价写进改价记录（门店、改前改后、谁、原因）。
+  // 锁：这个价目项目一行（FOR NO KEY UPDATE，与菜品维护、后台价目同一批行）→ 本店价一行 → 改价记录，在锁里读改前的本店价与全公司价。
+  // 改成的价与现在一样的什么都不做（照样回 ok：上一次的回复丢了再点一次不会多记一条）；带了打开时看到的价（expected）而别人刚改过的拒绝
   app.put('/api/admin/catalog/store-prices', { preHandler: guard('catalog.manage') }, async (req) => {
     const storeId = currentStoreId();
     if (storeId === DEFAULT_STORE_ID) throw badRequest('本店用全公司的价目表；本店价在第二家店里设');
@@ -352,20 +357,49 @@ export function registerCatalogRoutes(app: FastifyInstance, { sql }: Deps) {
         tier: z.enum(['standard', 'professional', 'premium']),
         // null：取消本店价，按全公司的
         price: z.number().int().positive().max(100_000_000).nullable(),
+        // 打开时看到的本店价（null = 同全公司）；不带不核对
+        expected: z.number().int().positive().nullable().optional(),
+        reason: z.string('请填写改价的原因').trim().min(2, '请填写改价的原因（至少 2 个字）').max(MAX_STORE_PRICE_REASON, `原因最多 ${MAX_STORE_PRICE_REASON} 字`),
       }),
       req.body,
     );
-    await sql.begin(async (tx) => {
-      const [p] = await tx`SELECT 1 FROM service_item_prices WHERE item_id = ${input.itemId} AND tier = ${input.tier}`;
-      if (!p) throw notFound('这个项目没有这一档价格');
+    return sql.begin(async (tx) => {
+      const [item] = await tx<{ name: string }[]>`SELECT name FROM service_items WHERE id = ${input.itemId} FOR NO KEY UPDATE`;
+      const [p] = await tx<{ price: number }[]>`SELECT price FROM service_item_prices WHERE item_id = ${input.itemId} AND tier = ${input.tier}`;
+      if (!item || !p) throw notFound('这个项目没有这一档价格');
+      const [cur] = await tx<{ price: number }[]>`
+        SELECT price FROM service_item_store_prices WHERE store_id = ${storeId} AND item_id = ${input.itemId} AND tier = ${input.tier} FOR UPDATE`;
+      const before = cur ? Number(cur.price) : null;
+      if (before === input.price) return { ok: true, changed: false };
+      if (input.expected !== undefined && input.expected !== before) {
+        throw conflict('STORE_PRICE_STALE', `「${item.name}」的本店价刚刚被改过（现在是${before === null ? '同全公司' : ` ${formatYuan(before)}`}），请刷新后再改`);
+      }
       if (input.price === null) await tx`DELETE FROM service_item_store_prices WHERE store_id = ${storeId} AND item_id = ${input.itemId} AND tier = ${input.tier}`;
       else
         await tx`
           INSERT INTO service_item_store_prices (store_id, item_id, tier, price, updated_by) VALUES (${storeId}, ${input.itemId}, ${input.tier}, ${input.price}, ${req.actor.id})
           ON CONFLICT (store_id, item_id, tier) DO UPDATE SET price = EXCLUDED.price, updated_by = EXCLUDED.updated_by, updated_at = now()`;
-      await writeAudit(tx, { staffId: req.actor.id, action: 'item_saved', targetType: 'item', targetId: input.itemId, detail: { storePrice: input }, ip: req.ip });
+      const recorded = await recordStorePriceChange(tx, {
+        storeId,
+        itemId: input.itemId,
+        itemName: item.name,
+        tier: input.tier,
+        oldPrice: before,
+        newPrice: input.price,
+        basePrice: Number(p.price),
+        reason: input.reason,
+        staffId: req.actor.id,
+      });
+      await writeAudit(tx, {
+        staffId: req.actor.id,
+        action: 'store_price_changed',
+        targetType: 'item',
+        targetId: input.itemId,
+        detail: { name: item.name, tier: input.tier, before, after: input.price, basePrice: Number(p.price), reason: input.reason, dish: recorded },
+        ip: req.ip,
+      });
+      return { ok: true, changed: true };
     });
-    return { ok: true };
   });
 
   // 价目表：内置清单（店主提供）与按清单导入（默认只预览）

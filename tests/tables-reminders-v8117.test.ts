@@ -20,7 +20,7 @@ const board = async () => (await api<TablesBoard>(ctx.app, ctx.clerk, 'GET', '/a
 const tile = async (name: string) => (await board()).tables.find((t) => t.name === name)!;
 const rules = (patch: Record<string, unknown>) => api(ctx.app, ctx.owner, 'PUT', '/api/admin/dining/rules', patch);
 const maintain = (name: string, minutes: number) =>
-  api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/${table[name]}/maintenance`, { clientKey: randomUUID(), reason: '桌腿松了', expectedBackAt: later(minutes).toISOString() });
+  api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/${table[name]!}/maintenance`, { clientKey: randomUUID(), reason: '桌腿松了', expectedBackAt: later(minutes).toISOString() });
 const sweep = (minutes: number) => sweepTableRestores({ sql: ctx.sql, config: ctx.config }, later(minutes));
 
 beforeAll(async () => {
@@ -64,14 +64,14 @@ describe('BW-2 维修过了预计恢复时间', () => {
     expect(await sweep(75)).toBe(1);
     expect((await tile('R1')).state).toBe('available');
     expect((await tile('R2')).state).toBe('maintenance');
-    const h = (await api<TableHistory>(ctx.app, ctx.clerk, 'GET', `/api/dining/tables/${table.R1}/history`)).body;
+    const h = (await api<TableHistory>(ctx.app, ctx.clerk, 'GET', `/api/dining/tables/${table.R1!}/history`)).body;
     expect(h.entries[0]).toMatchObject({ kind: 'restore', operatorName: '系统' });
     const [audit] = await ctx.sql<{ name: string }[]>`
       SELECT s.display_name AS name FROM audit_logs a JOIN staff s ON s.id = a.staff_id WHERE a.action = 'table_restore' AND a.target_id = ${String(table.R1)}`;
     expect(audit!.name).toBe('系统');
     // 再跑一次：已经恢复了，不再记
     expect(await sweep(80)).toBe(0);
-    const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM table_events WHERE table_id = ${table.R1} AND kind = 'restore'`;
+    const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM table_events WHERE table_id = ${table.R1!} AND kind = 'restore'`;
     expect(n!.n).toBe(1);
   });
 
@@ -83,7 +83,7 @@ describe('BW-2 维修过了预计恢复时间', () => {
     expect(runs.reduce((a, b) => a + b, 0)).toBe(3);
     for (const name of ['R2', 'R3', 'R4']) {
       expect((await tile(name)).state).toBe('available');
-      const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM table_events WHERE table_id = ${table[name]} AND kind = 'restore'`;
+      const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM table_events WHERE table_id = ${table[name]!} AND kind = 'restore'`;
       expect(n!.n, name).toBe(1);
     }
   });
@@ -98,14 +98,14 @@ describe('BW-2 维修过了预计恢复时间', () => {
       code: 'MAINTENANCE_NOT_DUE',
     });
     expect((await tile('R3')).state).toBe('maintenance');
-    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/${table.R3}/restore`, { clientKey: randomUUID() })).status).toBe(200);
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/${table.R3!}/restore`, { clientKey: randomUUID() })).status).toBe(200);
     expect((await rules({ autoRestore: false })).status).toBe(200);
   });
 });
 
 describe('BW-2 待清台太久', () => {
   it('结账后待清台：超过规则里的分钟数才提醒（改了分钟数跟着变）；清台以后不再提醒', async () => {
-    await ctx.sql`UPDATE dining_tables SET state = 'dirty', state_since = now() WHERE id = ${table.R4}`;
+    await ctx.sql`UPDATE dining_tables SET state = 'dirty', state_since = now() WHERE id = ${table.R4!}`;
     const t = await tile('R4');
     expect(t.state).toBe('dirty');
     expect(tableReminderOf(t, later(10).getTime(), 15)).toBeNull();
@@ -114,7 +114,7 @@ describe('BW-2 待清台太久', () => {
     expect(tableTodos((await board()).tables, later(16).getTime(), 15)).toMatchObject({ dirtyLong: 1 });
     // 升级前就待清台、没有时刻的不提醒
     expect(tableReminderOf({ ...t, stateSince: null }, later(600).getTime(), 15)).toBeNull();
-    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/${table.R4}/clear`, { clientKey: randomUUID() })).status).toBe(200);
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/${table.R4!}/clear`, { clientKey: randomUUID() })).status).toBe(200);
     expect(tableReminderOf(await tile('R4'), later(600).getTime(), 15)).toBeNull();
   });
 });

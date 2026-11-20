@@ -5,7 +5,9 @@
 //   · BW-11 本店价改价留痕。
 // 金额为分。
 
+import { PRICE_TIER_LABELS, type PriceTier } from './catalog';
 import { DINING_OUTLET_KEYS, DINING_OUTLET_LABELS, type DiningOutlet } from './dining';
+import { formatYuan } from './money';
 import { MAX_SURCHARGE_CENTS, OVERSTAY_TIERS } from './frontdesk-risk';
 import type { Permission } from './permissions';
 
@@ -99,3 +101,17 @@ export function tableTodos(
   }
   return { overdue, dirtyLong, total: overdue + dirtyLong };
 }
+
+// ───────────── BW-11 本店价改价留痕 ─────────────
+
+/** 本店价改价的原因最多几个字（与菜品改价记录一样，2–100） */
+export const MAX_STORE_PRICE_REASON = 100;
+
+/** 本店价改价的一句话：「标准 同全公司（¥38.00）→ ¥35.00」「标准 ¥35.00 → 同全公司（¥38.00）」 */
+export function storePriceChangeText(c: { tier: PriceTier; oldPrice: number | null; newPrice: number | null; basePrice: number | null }): string {
+  const side = (p: number | null) => (p === null ? `同全公司${c.basePrice ? `（${formatYuan(c.basePrice)}）` : ''}` : formatYuan(p));
+  return `${PRICE_TIER_LABELS[c.tier]} ${side(c.oldPrice)} → ${side(c.newPrice)}`;
+}
+
+/** 改价记录按门店筛：all 全部、hq 全公司的价目、数字是那家店的本店价 */
+export type PriceChangeStoreFilter = 'all' | 'hq' | number;

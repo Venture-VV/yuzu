@@ -159,9 +159,10 @@ export const pricesText = (prices: readonly TierPrice[]): string =>
 
 // ───────────────────────── 改价记录 ─────────────────────────
 
-export const DISH_PRICE_SOURCES = ['dishes', 'import', 'catalog', 'price_list'] as const;
+/** store_price：第二家店改本店价（8.1.17 BW-11，后台价目的「本店价」） */
+export const DISH_PRICE_SOURCES = ['dishes', 'import', 'catalog', 'price_list', 'store_price'] as const;
 export type DishPriceSource = (typeof DISH_PRICE_SOURCES)[number];
-export const DISH_PRICE_SOURCE_LABELS: Record<DishPriceSource, string> = { dishes: '菜品管理', import: '菜品导入', catalog: '后台价目', price_list: '价目表导入' };
+export const DISH_PRICE_SOURCE_LABELS: Record<DishPriceSource, string> = { dishes: '菜品管理', import: '菜品导入', catalog: '后台价目', price_list: '价目表导入', store_price: '本店价' };
 
 export interface DishPriceChange {
   id: number;
@@ -175,6 +176,13 @@ export interface DishPriceChange {
   source: DishPriceSource;
   staffName: string | null;
   createdAt: string;
+  /**
+   * 本店价的改价（8.1.17 BW-11）：哪家店、那时这一档全公司的价；改前 / 改后为 null 是「同全公司」（没有单独定价）。
+   * 全公司价目的改价这三项为 null（接口总带着；可选只为老的合成数据）
+   */
+  storeId?: number | null;
+  storeName?: string | null;
+  basePrice?: number | null;
 }
 
 /** 两份规格价之间改了哪几档（按标准、专业、优选的顺序）；没改的不出 */

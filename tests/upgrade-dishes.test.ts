@@ -20,7 +20,8 @@ import { api, login, PASSWORD, TEST_DB } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
-const NEW = ['189_dishes.sql'];
+// 198（8.1.17 本店价改价留痕）改的是 189 建的改价记录表：189 之前的库上它也要排在 189 之后跑
+const NEW = ['189_dishes.sql', '198_store_price_changes.sql'];
 let sql: Sql;
 let app: FastifyInstance | undefined;
 
