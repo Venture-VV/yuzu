@@ -70,8 +70,9 @@ npm run typecheck && npm test && npm run build                  # 交 PR 前
 | --- | --- | --- |
 | 会员与储值（钱包、扣款规则、赠金、上限、期初） | `wallet-*`、`deduction`、`bonus-expiry`、`concurrency`、`acceptance`、`opening-*`、`member-fields` | `flows`、`review-fixes`、`wallet-limits`、`member-fields`、`storage-failure` |
 | 前台与收银（接待、挂账、结账、反结账、交班、补录、转单、打印） | `frontdesk*`、`checkout`、`cashier`、`r1-funds`、`backfill`、`refund-drawer`、`shift-boundary`、`settlement-snapshot`、`auth-settlement`、`recon`、`print` | `frontdesk*`、`cashier`、`r1-funds`、`backfill`、`line-move`、`print`、`regression/` |
+| 发卡台与收银台、前台风控（芯片号、黑名单、异常处置、结账预览分列；8.1.15） | `desks`、`desks-columns`（不要数据库）、`frontdesk-risk`、`upgrade-frontdesk-risk`、`upgrade-shift`、`op-fences-constraint` | `desks`、`frontdesk-risk`、`frontdesk`、`cashier`、`admin-ia` |
 | 技师与钟房 | `technicians`、`clockroom`、`catalog-tiers`、`review-v071` | `technicians`、`clockroom` |
-| 餐饮与桌台 | `dining*` | `dining*` |
+| 餐饮与桌台（8.1.15 起含桌台动作、台账并退菜、按出品口下单、菜品管理；出品单与平板下单经过同一处） | `dining*`、`dishes*`、`upgrade-dining-v8115`、`upgrade-dishes` | `dining*`、`dishes`、`emenu` |
 | 客房 | `rooms*` | `rooms` |
 | 客户部（经营总览、手牌跟进、成交归属、月目标、低余额、同步指纹；只读前台与会员数据） | `customer-*` | `customer` |
 | 登记消费的项目与数量、预约页的日期与新建弹窗（店主 2026-11-14 的七条需求；点单换人在 `dining`，平板下单后回起始页在 `emenu`） | `bookings` | `requests-1114`、`bookings`、`dining`、`emenu` |
