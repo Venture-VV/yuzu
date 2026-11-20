@@ -10,7 +10,8 @@
 
 import type { CheckoutMember } from './checkout';
 import type { LedgerKind, LedgerVoidRate, TableStateInfo, VoidBlame } from './dining-v8115';
-import type { DishAddonOption, DishPart } from './dishes';
+import type { TierPrice } from './catalog';
+import type { ComboPartOption, DishAddonOption, DishMethodGroup, DishMethodOption, DishPart } from './dishes';
 
 export interface DiningRules {
   /** 餐饮功能：关闭时前台挂账与升级前完全一样，主导航没有「餐饮」（默认关闭） */
@@ -31,6 +32,10 @@ export interface DiningRules {
   voidFreeCents: number;
   /** 结账以后桌台先「待清台」，点「清台」才回到可用（8.1.15 块 B1，默认开）；关了结账后直接可用，与原来一样 */
   clearAfterCheckout: boolean;
+  /** 维修到了预计恢复时间自动恢复（8.1.17 BW-2，默认关）：开了每分钟的任务替人点「恢复」，桌台记录的经办人写「系统」 */
+  autoRestore: boolean;
+  /** 待清台超过多少分钟算久了（8.1.17 BW-2，默认 15）：格子上标出、进餐饮的待办数 */
+  dirtyAlertMinutes: number;
 }
 
 export const DEFAULT_DINING_RULES: DiningRules = {
@@ -41,6 +46,8 @@ export const DEFAULT_DINING_RULES: DiningRules = {
   tablesEnabled: true,
   voidFreeCents: 5000,
   clearAfterCheckout: true,
+  autoRestore: false,
+  dirtyAlertMinutes: 15,
 };
 
 /** 小额退菜上限最多 ¥1,000 */
@@ -199,6 +206,42 @@ export interface KitchenItem {
   /** 整单备注、送达房号（8.1.15 块 B3；没有的为空） */
   orderNote: string;
   deliverRoom: string;
+  /** 套餐在别的档口做的子项单（8.1.17 BW7）：主档口看得到各自做到哪了；不是套餐、老的出品单没有 */
+  partTickets?: KitchenPartTicket[];
+}
+
+/** 子项单的状态（8.1.17）：待做 → 制作中 → 已出餐；退菜时已退 */
+export type KitchenPartStatus = 'queued' | 'cooking' | 'done' | 'cancelled';
+export const KITCHEN_PART_STATUS_LABELS: Record<KitchenPartStatus, string> = { queued: '待做', cooking: '制作中', done: '已出餐', cancelled: '已退' };
+
+/** 套餐的一样在别的档口单独出的子项单（8.1.17 BW7） */
+export interface KitchenPartTicket {
+  id: number;
+  name: string;
+  /** 这一张一共几份（套餐份数 × 每份几份） */
+  quantity: number;
+  stationId: number;
+  stationName: string;
+  status: KitchenPartStatus;
+}
+
+/** 厨房屏上子项单的一张：哪一单的哪个套餐、给谁 */
+export interface KitchenPartItem extends KitchenPartTicket {
+  kitchenItemId: number;
+  orderNo: string;
+  comboName: string;
+  /** 换过的：原来是哪一样 */
+  swappedFrom: string | null;
+  tagCode: string | null;
+  tableName: string | null;
+  guest: string;
+  /** 套餐那一行的口味备注、整单备注 */
+  note: string;
+  orderNote: string;
+  createdAt: string;
+  startedAt: string | null;
+  doneAt: string | null;
+  visitClosed: boolean;
 }
 
 export interface KitchenBoard {
@@ -210,6 +253,8 @@ export interface KitchenBoard {
   items: KitchenItem[];
   /** 进厨房的菜品（含沽清状态），厨房屏的「沽清」页用 */
   dishes: MenuDish[];
+  /** 套餐在别的档口做的子项单（8.1.17）：没做完的与今天最近做完、退了的 */
+  parts?: KitchenPartItem[];
   today: { orders: number; dishes: number; served: number; cancelled: number; avgMinutes: number | null };
 }
 
@@ -233,7 +278,15 @@ export interface MenuDish {
    */
   methods?: string[];
   addons?: DishAddonOption[];
-  combo?: DishPart[];
+  /** 套餐含哪几样；8.1.17 起带价目项目与可换成的几样（BW7） */
+  combo?: ComboPartOption[];
+  /**
+   * 8.1.17（docs/DISHES_V8117.md）：做法的分组与加价（有做法的菜带，名字与 methods 一样、同样的顺序）、做法的组（分了组的才带）；
+   * 多档的菜各档的价（BW5：只有一档的不带，点单页不弹选档）
+   */
+  methodOptions?: DishMethodOption[];
+  methodGroups?: DishMethodGroup[];
+  prices?: TierPrice[];
 }
 
 export interface DiningMenu {
@@ -276,6 +329,9 @@ export interface PendingDish {
   amount: number;
   postedBy: number;
   postedAt: string;
+  /** 8.1.17（BW8）：这道是加料时挂在哪一行主菜上；挂在这道菜上、还没退的加料（不管上没上），退菜时问要不要一起退 */
+  addonOf?: number | null;
+  addons?: { billLineId: number; name: string; quantity: number; amount: number }[];
 }
 
 export interface DiningAdmin {

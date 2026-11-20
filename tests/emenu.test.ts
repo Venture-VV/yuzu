@@ -121,7 +121,8 @@ describe('岗位「点餐平板」与开关', () => {
   it('平板账号只有「打开平板点餐」：门店系统别的接口都拒绝；不能带职责', async () => {
     const me = await api(ctx.app, pad, 'GET', '/api/auth/me');
     expect(me.body.staff.role).toBe('tablet');
-    expect(me.body.permissions).toEqual(['emenu.view']);
+    // 8.1.17（BW3）：「点餐平板」另有三个出品口的下单权限（平板下单按出品口核对），没有门店系统别的入口
+    expect(me.body.permissions).toEqual(['emenu.view', 'dining.orderRestaurant', 'dining.orderWater', 'dining.orderFruit']);
     expect(me.body.emenu).toBe(false);
     for (const url of ['/api/frontdesk/board', '/api/members?q=1', '/api/dining/menu', '/api/kitchen', '/api/admin/emenu', '/api/catalog', '/api/staff']) {
       expect((await api(ctx.app, pad, 'GET', url)).status, url).toBe(403);

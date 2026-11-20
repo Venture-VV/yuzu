@@ -78,10 +78,13 @@ export function useSlotPos(): (s: ResolvedSlot) => { x: number; y: number; w: nu
   return (s) => slotSpot(s, large ? 'big' : 'design');
 }
 
-/** 一道菜这种状态（售罄……）的样子；能点的菜（block 为空）给设计稿的样子，不用 */
+/**
+ * 一道菜这种状态（售罄……）的样子；能点的菜（block 为空）给设计稿的样子，不用。
+ * 这台平板点不了的（8.1.17，unavailable）照「已下架」的样子画（工作台里没有单独的一种），字是「请找服务员点」
+ */
 export function useDishState(block: EmenuBlock | null): Required<StudioDishStateStyle> {
   const states = useContext(CardsCtx).dishStates;
-  return dishStateStyle(states, block ?? 'sold_out');
+  return dishStateStyle(states, block === 'unavailable' ? 'off' : (block ?? 'sold_out'));
 }
 
 /** 压暗的那一层：#RRGGBB 换成 rgb(r g b / 透明度)（设计稿的样子正好是 rgb(0 0 0 / 0.55)），主题色用 color-mix */

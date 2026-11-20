@@ -8,6 +8,8 @@
 // 桌台详情里能并台、拆台、看历史，附台写明并入哪桌、在主台结账（TableActions.tsx）。
 
 import { DishVoidDialog } from './DishVoid';
+import { tableReminderOf, tableTodos, voidBlockedText, voidOutletsOf } from '@shared/frontdesk-v8117';
+import { TableReminderMark, TablesTodoLine, useDirtyAlertMinutes } from './TableReminders';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -116,6 +118,9 @@ export function TablesTab() {
   }, [resume, board.data, params, setParams]);
 
   const tables = useMemo(() => board.data?.tables ?? [], [board.data]);
+  // 桌台提醒（8.1.17 BW-2）：维修过了预计恢复时间、待清台太久，格子上标出、顶上写待办几桌
+  const alertMinutes = useDirtyAlertMinutes();
+  const todo = tableTodos(tables, now, alertMinutes);
   // 分区（8.1.7，CF5）：四个分区总在；不在四个分区里的桌另有一张「其他区域」
   const zones = useMemo(() => {
     const list: { key: string; label: string; tables: Tile[] }[] = TABLE_ZONES.map((z) => ({ key: z, label: z, tables: tables.filter((t) => t.area === z) }));
@@ -180,6 +185,7 @@ export function TablesTab() {
             </span>
           )}
         </span>
+        <TablesTodoLine todo={todo} minutes={alertMinutes} />
         <span className="flex-1" />
         {can('frontdesk.read') && (
           <Button size="sm" variant="secondary" icon={<ReceiptText className="size-4" />} onClick={() => setRecords(true)} data-testid="tables-records">
@@ -222,7 +228,7 @@ export function TablesTab() {
                 )}
                 <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
                   {list.map((t) => (
-                    <TableTile key={t.id} t={t} now={now} onClick={() => click(t)} tables={tables} />
+                    <TableTile key={t.id} t={t} now={now} onClick={() => click(t)} tables={tables} alertMinutes={alertMinutes} />
                   ))}
                 </div>
               </section>
@@ -318,8 +324,9 @@ function ZoneDetail({ label, stats }: { label: string; stats: ZoneStats }) {
   );
 }
 
-function TableTile({ t, now, onClick, tables }: { t: Tile; now: number; onClick: () => void; tables: Tile[] }) {
+function TableTile({ t, now, onClick, tables, alertMinutes }: { t: Tile; now: number; onClick: () => void; tables: Tile[]; alertMinutes: number }) {
   const s = t.session;
+  const reminder = s ? null : tableReminderOf(t, now, alertMinutes);
   // 并台（8.1.15）：附台写并入哪桌，主台写并着几桌
   const mainName = s?.mergedInto ? (tables.find((x) => x.session?.id === s.mergedInto)?.name ?? null) : null;
   const subCount = s ? tables.filter((x) => x.session?.mergedInto === s.id).length : 0;
@@ -332,13 +339,18 @@ function TableTile({ t, now, onClick, tables }: { t: Tile; now: number; onClick:
         s
           ? 'border-yuzu-deep/40 bg-yuzu-tint hover:border-yuzu-deep'
           : t.state === 'dirty'
-            ? 'border-yuzu-deep/60 bg-card hover:border-yuzu-deep'
+            ? reminder
+              ? 'border-2 border-ember bg-card hover:border-ember-deep'
+              : 'border-yuzu-deep/60 bg-card hover:border-yuzu-deep'
             : t.state === 'maintenance'
-              ? 'border-clay/50 bg-clay-soft/40 hover:border-clay'
+              ? reminder
+                ? 'border-2 border-clay bg-clay-soft/40 hover:border-clay'
+                : 'border-clay/50 bg-clay-soft/40 hover:border-clay'
               : 'border-dashed border-line-strong bg-card hover:border-pine',
       )}
       data-testid={`table-tile-${t.name}`}
       data-state={s ? 'busy' : t.state === 'available' ? 'free' : t.state}
+      data-reminder={reminder?.kind ?? ''}
     >
       <span className="flex w-full items-baseline gap-2">
         <span className="num min-w-0 flex-1 truncate text-[18px] font-bold">{t.name}</span>
@@ -356,7 +368,7 @@ function TableTile({ t, now, onClick, tables }: { t: Tile; now: number; onClick:
           <span className="mt-0.5 w-full truncate text-[12.5px] font-semibold text-ink-2">{guestOf(s)}</span>
           <span className="mt-auto flex w-full flex-wrap items-center gap-x-2 gap-y-1 pt-1.5">
             <Money cents={s.amount} className="text-[14px] font-bold" />
-            <span className="num text-[11.5px] text-ink-3">{stayText(s.openedAt, now)}</span>
+            <span className="num text-[12px] text-ink-3">{stayText(s.openedAt, now)}</span>
             {s.pendingDishes > 0 && <Badge tone="yuzu">待上 {s.pendingDishes}</Badge>}
             {!t.active && <Badge tone="clay">已停用</Badge>}
           </span>
@@ -368,7 +380,10 @@ function TableTile({ t, now, onClick, tables }: { t: Tile; now: number; onClick:
           <span className="block text-[12px] text-ink-3">点这里开台</span>
         </span>
       ) : (
-        <TableStateLine t={t} />
+        <>
+          <TableStateLine t={t} />
+          {reminder && <TableReminderMark reminder={reminder} name={t.name} />}
+        </>
       )}
     </button>
   );
@@ -562,6 +577,10 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
   const d = detail.data;
   const splitAction = useTableAction({ type: 'table_merge', sessionId: id, tableName: d?.tableName ?? '' });
   const canOrder = can('dining.order') && can('frontdesk.operate');
+  /** 退菜按这道菜所在的出品口（8.1.17 BW-4）：没有那一处「退菜」权限的不显示退菜（菜单里没有的菜照样显示，服务端核对） */
+  const voidOutlets = voidOutletsOf(can);
+  const menuDishes = useDiningMenu().data?.dishes;
+  const canVoidLine = (itemId: number | null) => !voidBlockedText(menuDishes?.find((m) => m.id === itemId)?.outlet, voidOutlets);
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['dining'] });
@@ -725,7 +744,7 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
                     <span className={cn('min-w-0 flex-1 basis-40 text-[13.5px] font-semibold', isVoided && 'line-through')}>
                       {l.name} × {l.quantity}
                       {l.kitchen?.note && <span className="ml-1 text-[12px] font-bold text-yuzu-deep">{l.kitchen.note}</span>}
-                      <span className="block text-[11.5px] font-normal text-ink-4">
+                      <span className="block text-[12px] font-normal text-ink-4">
                         {formatTime(l.postedAt)} {l.postedByName}
                         {isVoided && ` · ${l.voidedByName ?? ''}退：${l.voidReason ?? ''}`}
                       </span>
@@ -757,7 +776,7 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
                             催单
                           </Button>
                         ) : null}
-                        {canOrder && (
+                        {canOrder && canVoidLine(l.itemId) && (
                           <Button
                             size="sm"
                             variant="ghost"
@@ -806,6 +825,8 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
                 postedBy: voiding.postedBy,
                 postedAt: voiding.postedAt,
                 served: voiding.status === 'done' || voiding.status === 'served',
+                // 8.1.17（BW8）：挂在这道菜上、还没退的加料，问要不要一起退
+                addons: d.lines.filter((x) => x.addonOf === voiding.lineId && x.status === 'active'),
               }
             : null
         }
@@ -955,10 +976,13 @@ function MoveDialog({ detail, free, onClose, onMoved }: { detail: TableSessionDe
               role="radio"
               aria-checked={to === t.id}
               onClick={() => setTo(t.id)}
-              className={cn('h-10 rounded-full border px-3.5 text-[14px] font-bold', to === t.id ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong')}
+              className={cn(
+                'tap relative h-10 rounded-full border px-3.5 text-[14px] font-bold',
+                to === t.id ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong',
+              )}
               data-testid={`table-move-to-${t.name}`}
             >
-              <span className="num">{t.name}</span> <span className="text-[11.5px] font-semibold opacity-70">{t.seats} 座</span>
+              <span className="num">{t.name}</span> <span className="text-[12px] font-semibold opacity-70">{t.seats} 座</span>
             </button>
           ))}
         </div>

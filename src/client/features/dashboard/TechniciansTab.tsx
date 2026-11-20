@@ -35,7 +35,7 @@ export function TechniciansTab() {
         {can('report.commission') && (
           <a
             href={`/api/reports/technicians/commission.csv?from=${period.from}&to=${period.to}${scope.q}`}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line-strong px-3 text-[13px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
+            className="tap relative inline-flex h-9 items-center gap-1.5 rounded-md border border-line-strong px-3 text-[13px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
             data-testid="commission-export"
           >
             <Download className="size-4" /> 导出提成明细

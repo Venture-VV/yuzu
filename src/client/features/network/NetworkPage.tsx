@@ -105,7 +105,7 @@ export function NetworkPage() {
     <div className="min-h-dvh bg-paper px-4 py-6 md:px-8" data-testid="network-page">
       <div className="mx-auto max-w-3xl space-y-4">
         <div className="flex items-center gap-3">
-          <Link to="/" className="flex size-9 items-center justify-center rounded-full text-ink-2 hover:bg-paper-2" aria-label="回首页">
+          <Link to="/" className="tap relative flex size-9 items-center justify-center rounded-full text-ink-2 hover:bg-paper-2" aria-label="回首页">
             <ArrowLeft className="size-5" />
           </Link>
           <h1 className="text-[20px] font-bold">网络与同步</h1>

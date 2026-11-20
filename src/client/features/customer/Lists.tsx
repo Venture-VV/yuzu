@@ -2,9 +2,10 @@ import { useEffect } from 'react';
 import type { CustomerMeta, CustomerPage, CustomerMember, CustomerRechargePage, CustomerStaff, CustomerVisitPage } from '@shared/customer';
 import { ArrowRight } from 'lucide-react';
 import { maskPhone } from '@shared/labels';
+import { DataTable } from '../../components/DataTable';
 import { Badge, Button, Card, Input, SectionTitle, Select } from '../../components/ui';
 import { customerUrl, useCustomerRead } from './api';
-import { Amount, Empty, localTime, PageControls, ReadStatus } from './ui';
+import { Amount, localTime, PageControls, ReadStatus } from './ui';
 import { creditStatus, kindLabel, staffName } from './types';
 import type { Filters, OpenForm, OpenRecord } from './types';
 export type ListProps = {
@@ -143,73 +144,88 @@ export function RechargeList(props: ListProps) {
           </div>
           <Card className="customer-section">
             <SectionTitle>充值原单与客户部归属</SectionTitle>
-            {!d.rows.length ? (
-              <Empty />
-            ) : (
-              <div className="customer-table-scroll">
-                <table className="customer-table">
-                  <thead>
-                    <tr>
-                      <th>原充值单 / 会员</th>
-                      <th>实收 / 赠额</th>
-                      <th>当次成交 / 当前维护</th>
-                      <th>首续 / 归属</th>
-                      <th>收银经办</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.rows.map((row) => (
-                      <tr key={row.id}>
-                        <td>
-                          <button type="button" className="customer-text-button" onClick={() => props.onRecord('recharge', row.id)}>
-                            {row.docNo}
-                          </button>
-                          <small>
-                            <button type="button" className="customer-text-button" onClick={() => props.onRecord('member', row.member.id)}>
-                              {row.member.name} · {row.member.memberNo}
-                            </button>
-                          </small>
-                          <small>{localTime(row.occurredAt, d.timezone)}</small>
-                        </td>
-                        <td>
-                          <Amount value={row.paidCents} />
-                          <small>
-                            赠额 <Amount value={row.bonusCents} />
-                          </small>
-                          {row.refundedCents > 0 && (
-                            <small>
-                              退回 <Amount value={row.refundedCents} />
-                            </small>
-                          )}
-                        </td>
-                        <td>
-                          {staffName(row.credit.verifiedSeller || row.credit.claimedSeller)}
-                          <small>当前维护：{staffName(row.maintainer)}</small>
-                          <small>发生时维护：{staffName(row.credit.ownerAtTrade)}</small>
-                        </td>
-                        <td>
-                          <Badge tone={row.credit.status === 'verified' ? 'pine' : 'yuzu'}>{creditStatus[row.credit.status]}</Badge>
-                          <small>{kindLabel[row.credit.rechargeKind]}</small>
-                        </td>
-                        <td>{row.operator.name}</td>
-                        <td>
-                          <Button size="sm" variant="ghost" onClick={() => props.onRecord('recharge', row.id)}>
-                            原单详情
-                            <ArrowRight size={13} />
-                          </Button>
-                          {d.capabilities.operate && ['unclaimed', 'rejected', 'voided'].includes(row.credit.status) && (
-                            <Button size="sm" variant="secondary" onClick={() => props.onForm({ kind: 'credit', recharge: row })}>
-                              补充归属
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <DataTable
+              tableClassName="customer-table"
+              rows={d.rows}
+              rowKey={(row) => row.id}
+              empty="当前条件下暂无记录"
+              columns={[
+                {
+                  key: 'doc',
+                  header: '原充值单 / 会员',
+                  cell: (row) => (
+                    <>
+                      <button type="button" className="customer-text-button" onClick={() => props.onRecord('recharge', row.id)}>
+                        {row.docNo}
+                      </button>
+                      <small>
+                        <button type="button" className="customer-text-button" onClick={() => props.onRecord('member', row.member.id)}>
+                          {row.member.name} · {row.member.memberNo}
+                        </button>
+                      </small>
+                      <small>{localTime(row.occurredAt, d.timezone)}</small>
+                    </>
+                  ),
+                },
+                {
+                  key: 'paid',
+                  header: '实收 / 赠额',
+                  numeric: true,
+                  cell: (row) => (
+                    <>
+                      <Amount value={row.paidCents} />
+                      <small>
+                        赠额 <Amount value={row.bonusCents} />
+                      </small>
+                      {row.refundedCents > 0 && (
+                        <small>
+                          退回 <Amount value={row.refundedCents} />
+                        </small>
+                      )}
+                    </>
+                  ),
+                },
+                {
+                  key: 'seller',
+                  header: '当次成交 / 当前维护',
+                  cell: (row) => (
+                    <>
+                      {staffName(row.credit.verifiedSeller || row.credit.claimedSeller)}
+                      <small>当前维护：{staffName(row.maintainer)}</small>
+                      <small>发生时维护：{staffName(row.credit.ownerAtTrade)}</small>
+                    </>
+                  ),
+                },
+                {
+                  key: 'credit',
+                  header: '首续 / 归属',
+                  cell: (row) => (
+                    <>
+                      <Badge tone={row.credit.status === 'verified' ? 'pine' : 'yuzu'}>{creditStatus[row.credit.status]}</Badge>
+                      <small>{kindLabel[row.credit.rechargeKind]}</small>
+                    </>
+                  ),
+                },
+                { key: 'operator', header: '收银经办', cell: (row) => row.operator.name },
+                {
+                  key: 'actions',
+                  header: '操作',
+                  cell: (row) => (
+                    <>
+                      <Button size="sm" variant="ghost" onClick={() => props.onRecord('recharge', row.id)}>
+                        原单详情
+                        <ArrowRight size={13} />
+                      </Button>
+                      {d.capabilities.operate && ['unclaimed', 'rejected', 'voided'].includes(row.credit.status) && (
+                        <Button size="sm" variant="secondary" onClick={() => props.onForm({ kind: 'credit', recharge: row })}>
+                          补充归属
+                        </Button>
+                      )}
+                    </>
+                  ),
+                },
+              ]}
+            />
             <PageControls {...d} total={d.filteredTotal} onOffset={(offset) => props.onFilters({ ...f, offset })} />
           </Card>
         </>
@@ -274,70 +290,83 @@ export function VisitList(props: ListProps) {
               {arrivals ? `当前明细按所选入场营业日${f.hour !== '' ? '及入场小时' : ''}筛选，不含已撤销入场；与总览的入场人数是同一个算法。` : '当前在店包含全部跨日未离店手牌；离店记录按所选营业日。'}
               消费项目及入离场状态来自前台，客户部只能查看原单并记录服务跟进。
             </p>
-            {!d.rows.length ? (
-              <Empty />
-            ) : (
-              <div className="customer-table-scroll">
-                <table className="customer-table customer-visit-table">
-                  <thead>
-                    <tr>
-                      <th>手牌 / 客人</th>
-                      <th>入场时间</th>
-                      <th>实时消费</th>
-                      <th>长期维护人</th>
-                      <th>在场 / 跟进</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.rows.map((row) => (
-                      <tr key={row.id}>
-                        <td data-label="手牌 / 客人">
-                          <button type="button" className="customer-text-button" onClick={() => props.onRecord('visit', row.id)}>
-                            {row.tagCode} · {row.guestLabel}
+            {/* 手机上按 data-label 排成一张张卡片（customer.css 的 .customer-visit-table），卡片外面不再套一层边框 */}
+            <DataTable
+              className="max-sm:rounded-none max-sm:border-0"
+              tableClassName="customer-table customer-visit-table"
+              rows={d.rows}
+              rowKey={(row) => row.id}
+              empty="当前条件下暂无记录"
+              columns={[
+                {
+                  key: 'tag',
+                  header: '手牌 / 客人',
+                  dataLabel: '手牌 / 客人',
+                  cell: (row) => (
+                    <>
+                      <button type="button" className="customer-text-button" onClick={() => props.onRecord('visit', row.id)}>
+                        {row.tagCode} · {row.guestLabel}
+                      </button>
+                      <small>{row.visitNo}</small>
+                      {row.member && (
+                        <small>
+                          <button type="button" className="customer-text-button" onClick={() => props.onRecord('member', row.member!.id)}>
+                            {row.member.name} · {row.member.memberNo}
                           </button>
-                          <small>{row.visitNo}</small>
-                          {row.member && (
-                            <small>
-                              <button type="button" className="customer-text-button" onClick={() => props.onRecord('member', row.member!.id)}>
-                                {row.member.name} · {row.member.memberNo}
-                              </button>
-                              <span className="customer-member-tier">{row.member.gradeLabel}</span>
-                            </small>
-                          )}
-                        </td>
-                        <td data-label="入场时间">{localTime(row.checkedInAt, d.timezone)}</td>
-                        <td data-label="实时消费">
-                          <Amount value={row.amountCents} />
-                          <small>{row.lineCount}项前台明细</small>
-                        </td>
-                        <td data-label="长期维护人">{staffName(row.maintainer)}</td>
-                        <td data-label="在场 / 跟进">
-                          {row.status === 'open' ? '在店' : row.status === 'settled' ? '已离店' : '已撤销'}
-                          <small>{row.lastServiceAt ? `最近跟进 ${localTime(row.lastServiceAt, d.timezone)}` : '暂无跟进记录'}</small>
-                        </td>
-                        <td data-label="操作">
-                          <div className="customer-actions">
-                            <Button size="sm" variant="ghost" onClick={() => props.onRecord('visit', row.id)}>
-                              明细 / 跟进
-                            </Button>
-                            {d.capabilities.operate && (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => props.onForm({ kind: 'note', memberId: row.member?.id, visitId: row.id, noteKind: 'reception', label: `手牌${row.tagCode}` })}
-                              >
-                                记录服务
-                              </Button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                          <span className="customer-member-tier">{row.member.gradeLabel}</span>
+                        </small>
+                      )}
+                    </>
+                  ),
+                },
+                { key: 'checkedIn', header: '入场时间', dataLabel: '入场时间', cell: (row) => localTime(row.checkedInAt, d.timezone) },
+                {
+                  key: 'amount',
+                  header: '实时消费',
+                  dataLabel: '实时消费',
+                  numeric: true,
+                  cell: (row) => (
+                    <>
+                      <Amount value={row.amountCents} />
+                      <small>{row.lineCount}项前台明细</small>
+                    </>
+                  ),
+                },
+                { key: 'maintainer', header: '长期维护人', dataLabel: '长期维护人', cell: (row) => staffName(row.maintainer) },
+                {
+                  key: 'status',
+                  header: '在场 / 跟进',
+                  dataLabel: '在场 / 跟进',
+                  cell: (row) => (
+                    <>
+                      {row.status === 'open' ? '在店' : row.status === 'settled' ? '已离店' : '已撤销'}
+                      <small>{row.lastServiceAt ? `最近跟进 ${localTime(row.lastServiceAt, d.timezone)}` : '暂无跟进记录'}</small>
+                    </>
+                  ),
+                },
+                {
+                  key: 'actions',
+                  header: '操作',
+                  dataLabel: '操作',
+                  cell: (row) => (
+                    <div className="customer-actions">
+                      <Button size="sm" variant="ghost" onClick={() => props.onRecord('visit', row.id)}>
+                        明细 / 跟进
+                      </Button>
+                      {d.capabilities.operate && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => props.onForm({ kind: 'note', memberId: row.member?.id, visitId: row.id, noteKind: 'reception', label: `手牌${row.tagCode}` })}
+                        >
+                          记录服务
+                        </Button>
+                      )}
+                    </div>
+                  ),
+                },
+              ]}
+            />
             <PageControls {...d} total={d.filteredTotal} onOffset={(offset) => props.onFilters({ ...f, offset })} />
           </Card>
         </>
@@ -369,62 +398,78 @@ export function MemberList(props: ListProps) {
         <Card className="customer-section">
           <SectionTitle>会员档案与维护关系</SectionTitle>
           <p className="customer-caption">全店会员都能看；换维护人不改已经成交的归属。余额与档阶取自会员系统。</p>
-          {!d.rows.length ? (
-            <Empty />
-          ) : (
-            <div className="customer-table-scroll">
-              <table className="customer-table">
-                <thead>
-                  <tr>
-                    <th>会员</th>
-                    <th>实时档阶</th>
-                    <th>系统余额</th>
-                    <th>长期维护人</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.rows.map((row) => (
-                    <tr key={row.id}>
-                      <td>
-                        <button type="button" className="customer-text-button" onClick={() => props.onRecord('member', row.id)}>
-                          {row.name}
-                        </button>
-                        <small>
-                          {row.memberNo} · {maskPhone(row.phone)}
-                        </small>
-                      </td>
-                      <td>
-                        {row.gradeLabel}
-                        {row.status !== 'active' && <small>已停用</small>}
-                      </td>
-                      <td>
-                        <Amount value={row.totalCents} />
-                        <small>
-                          本金 <Amount value={row.principalCents} /> ＋ 赠金 <Amount value={row.bonusCents} />
-                        </small>
-                      </td>
-                      <td>
-                        {staffName(row.binding.maintainer)}
-                        <small>{row.binding.updatedAt ? localTime(row.binding.updatedAt, d.timezone) : '未绑定'}</small>
-                      </td>
-                      <td>
-                        <Button size="sm" variant="ghost" onClick={() => props.onRecord('member', row.id)}>
-                          查看档案
-                          <ArrowRight size={13} />
-                        </Button>
-                        {d.capabilities.operate && row.status === 'active' && (
-                          <Button size="sm" variant="secondary" onClick={() => props.onForm({ kind: 'binding', member: row })}>
-                            申请绑定
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <DataTable
+            tableClassName="customer-table"
+            rows={d.rows}
+            rowKey={(row) => row.id}
+            empty="当前条件下暂无记录"
+            columns={[
+              {
+                key: 'member',
+                header: '会员',
+                cell: (row) => (
+                  <>
+                    <button type="button" className="customer-text-button" onClick={() => props.onRecord('member', row.id)}>
+                      {row.name}
+                    </button>
+                    <small>
+                      {row.memberNo} · {maskPhone(row.phone)}
+                    </small>
+                  </>
+                ),
+              },
+              {
+                key: 'grade',
+                header: '实时档阶',
+                cell: (row) => (
+                  <>
+                    {row.gradeLabel}
+                    {row.status !== 'active' && <small>已停用</small>}
+                  </>
+                ),
+              },
+              {
+                key: 'balance',
+                header: '系统余额',
+                numeric: true,
+                cell: (row) => (
+                  <>
+                    <Amount value={row.totalCents} />
+                    <small>
+                      本金 <Amount value={row.principalCents} /> ＋ 赠金 <Amount value={row.bonusCents} />
+                    </small>
+                  </>
+                ),
+              },
+              {
+                key: 'maintainer',
+                header: '长期维护人',
+                cell: (row) => (
+                  <>
+                    {staffName(row.binding.maintainer)}
+                    <small>{row.binding.updatedAt ? localTime(row.binding.updatedAt, d.timezone) : '未绑定'}</small>
+                  </>
+                ),
+              },
+              {
+                key: 'actions',
+                header: '操作',
+                cell: (row) => (
+                  <>
+                    <Button size="sm" variant="ghost" onClick={() => props.onRecord('member', row.id)}>
+                      查看档案
+                      <ArrowRight size={13} />
+                    </Button>
+                    {d.capabilities.operate && row.status === 'active' && (
+                      <Button size="sm" variant="secondary" onClick={() => props.onForm({ kind: 'binding', member: row })}>
+                        申请绑定
+                      </Button>
+                    )}
+                  </>
+                ),
+              },
+            ]}
+          />
           <PageControls {...d} total={d.filteredTotal} onOffset={(offset) => props.onFilters({ ...f, offset })} />
         </Card>
       )}

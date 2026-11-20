@@ -36,9 +36,14 @@ export default defineConfig({
     // 管家部（8.0.12）在五个尺寸检查布局，建档与余额写入只在门店电脑组执行；房态中心（8.1.16）同样，登记、换房、退房的流程只在门店电脑组执行。
     {
       name: '小屏电脑',
-      testMatch: ['viewports.spec.ts', 'floormap.spec.ts', 'locations.spec.ts', 'guide.spec.ts', 'concierge.spec.ts', 'room-center.spec.ts'],
+      testMatch: ['viewports.spec.ts', 'floormap.spec.ts', 'locations.spec.ts', 'guide.spec.ts', 'concierge.spec.ts', 'room-center.spec.ts', 'dishes-v8117.spec.ts'],
       use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 720 } },
     },
-    { name: '手机', testMatch: ['viewports.spec.ts', 'floormap.spec.ts', 'locations.spec.ts', 'guide.spec.ts', 'concierge.spec.ts', 'room-center.spec.ts'], use: { ...devices['Pixel 5'] } },
+    // 8.1.17 菜品补完：点单弹窗、厨房屏子项单的各尺寸用例用合成数据、只读（写数据的那一条只在门店电脑跑）
+    {
+      name: '手机',
+      testMatch: ['viewports.spec.ts', 'floormap.spec.ts', 'locations.spec.ts', 'guide.spec.ts', 'concierge.spec.ts', 'room-center.spec.ts', 'dishes-v8117.spec.ts'],
+      use: { ...devices['Pixel 5'] },
+    },
   ],
 });

@@ -16,8 +16,12 @@ export interface DishPendingOp {
   /** 操作编号（请求里的 clientKey） */
   key: string;
   type: DishOpType;
-  /** 哪道菜；新增、导入为空 */
+  /** 哪道菜；新增、导入、批量上下架、排序为空 */
   itemId: number | null;
+  /** 批量上下架（8.1.17）：这一笔动到的几道菜——有结论之前这几道都不能再上下架、删除、恢复 */
+  itemIds?: number[];
+  /** 排序（8.1.17）：哪一个点单小类（slotKey）——有结论之前这一类不能再排 */
+  scope?: string;
   method: 'post' | 'put';
   url: string;
   /** 原请求：重新提交时原样再发 */
@@ -101,6 +105,15 @@ export const useDishPending = (): DishPendingOp[] => useSyncExternalStore(watch,
 
 /** 这道菜（新增、导入不看菜）上同一类、结果待确认的那一笔 */
 export const pendingOf = (list: readonly DishPendingOp[], type: DishOpType, itemId: number | null = null) => list.find((op) => op.type === type && op.itemId === itemId);
+
+/** 改上架状态的几种（8.1.17）：上下架、批量上下架、删除（会下架）、恢复——一道菜上有一笔待确认，这几样都先不能做 */
+const STATE_OPS: readonly DishOpType[] = ['active', 'bulk_active', 'delete', 'restore'];
+
+/** 这道菜上改上架状态、结果待确认的那一笔（单道的看 itemId，批量的看 itemIds） */
+export const stateBlockerOf = (list: readonly DishPendingOp[], itemId: number) => list.find((op) => STATE_OPS.includes(op.type) && (op.itemId === itemId || (op.itemIds ?? []).includes(itemId)));
+
+/** 这一个点单小类上结果待确认的排序 */
+export const sortPendingOf = (list: readonly DishPendingOp[], slot: string) => list.find((op) => op.type === 'sort' && op.scope === slot);
 
 /** 记录存不进本机：一旦没收到结果就查不回原编号，所以这一笔不发 */
 export class DishPendingStoreError extends Error {

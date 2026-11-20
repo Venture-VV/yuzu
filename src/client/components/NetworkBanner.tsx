@@ -71,7 +71,7 @@ export function NetworkBanner({ path, openNetwork }: { path: string; openNetwork
             onClick={() => void retry()}
             disabled={checking}
             data-testid="network-retry"
-            className="flex h-7 items-center gap-1 rounded-full bg-paper/15 px-3 text-[12.5px] font-bold hover:bg-paper/25 disabled:opacity-60"
+            className="tap relative flex h-7 items-center gap-1 rounded-full bg-paper/15 px-3 text-[12.5px] font-bold hover:bg-paper/25 disabled:opacity-60"
           >
             <RefreshCw className={cn('size-3.5', checking && 'animate-spin')} />
             立即重试
@@ -116,11 +116,11 @@ export function NetworkBanner({ path, openNetwork }: { path: string; openNetwork
           type="button"
           onClick={() => window.location.reload()}
           data-testid="network-reload"
-          className="flex h-7 items-center rounded-full bg-yuzu px-3 text-[12.5px] font-bold text-ink hover:bg-yuzu-hover"
+          className="tap relative flex h-7 items-center rounded-full bg-yuzu px-3 text-[12.5px] font-bold text-ink hover:bg-yuzu-hover"
         >
           刷新
         </button>
-        <button type="button" onClick={() => setSnoozedUpdate(true)} className="h-7 rounded-full px-2 text-[12.5px] font-semibold text-paper/75 hover:text-paper">
+        <button type="button" onClick={() => setSnoozedUpdate(true)} className="tap relative h-7 rounded-full px-2 text-[12.5px] font-semibold text-paper/75 hover:text-paper">
           稍后
         </button>
       </div>

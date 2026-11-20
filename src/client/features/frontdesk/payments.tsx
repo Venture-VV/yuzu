@@ -571,7 +571,7 @@ export function PayRowEditor({
           aria-label="移除这笔收款"
           onClick={onRemove}
           disabled={locked}
-          className="flex size-9 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay disabled:opacity-40"
+          className="tap relative flex size-9 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay disabled:opacity-40"
         >
           <Trash2 className="size-4" />
         </button>
@@ -683,7 +683,7 @@ export function PayRowEditor({
           </div>
           {tendered !== null && cents !== null && tendered >= cents && (
             <span className="font-semibold text-ink-2">
-              找零 <Money cents={tendered - cents} className="font-bold text-pine" />
+              找零 <Money cents={tendered - cents} size="key" className="text-pine" />
               （找零不用登记）
             </span>
           )}
@@ -888,5 +888,5 @@ function StoreCouponPicker({
 
 /** 签赠券（8.1.9）：在券名旁标「签赠 · 板块」，列表上另写授权人、渠道、事由——选哪一张就是哪种券、谁授权的 */
 function GiftTag({ gift }: { gift: NonNullable<CheckoutCouponOption['gift']> }) {
-  return <span className="rounded bg-lake/10 px-1.5 py-px text-[11.5px] font-semibold whitespace-nowrap text-lake">签赠 · {gift.segment}</span>;
+  return <span className="rounded bg-lake/10 px-1.5 py-px text-[12px] font-semibold whitespace-nowrap text-lake">签赠 · {gift.segment}</span>;
 }

@@ -82,7 +82,7 @@ export function TodayPanel() {
                     <span className="block truncate text-[13px] font-semibold">
                       {r.memberName} · {meta.label}
                     </span>
-                    <span className="num block text-[11.5px] text-ink-3">
+                    <span className="num block text-[12px] text-ink-3">
                       {formatTime(r.createdAt)} · {r.operatorName}
                     </span>
                   </span>

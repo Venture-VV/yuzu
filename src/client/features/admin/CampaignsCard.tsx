@@ -274,7 +274,10 @@ function CampaignDialog({ open, onClose, onDone }: { open: boolean; onClose: () 
                   setGrades(grades.includes(l.level) ? grades.filter((g) => g !== l.level) : [...grades, l.level]);
                   resetPreview();
                 }}
-                className={cn('h-8 rounded-full px-3 text-[12.5px] font-semibold ring-1', grades.includes(l.level) ? 'bg-pine text-paper ring-pine' : 'bg-card text-ink-2 ring-line hover:ring-ink-3')}
+                className={cn(
+                  'tap relative h-8 rounded-full px-3 text-[12.5px] font-semibold ring-1',
+                  grades.includes(l.level) ? 'bg-pine text-paper ring-pine' : 'bg-card text-ink-2 ring-line hover:ring-ink-3',
+                )}
                 data-testid={`campaign-grade-${l.level}`}
               >
                 {l.name}
@@ -297,7 +300,7 @@ function CampaignDialog({ open, onClose, onDone }: { open: boolean; onClose: () 
                       resetPreview();
                     }}
                     className={cn(
-                      'h-7 rounded-full px-2.5 text-[12.5px] font-semibold ring-1',
+                      'tap relative h-7 rounded-full px-2.5 text-[12.5px] font-semibold ring-1',
                       tagIds.includes(t.id) ? 'bg-pine text-paper ring-pine' : 'bg-card text-ink-2 ring-line hover:ring-ink-3',
                     )}
                     data-testid={`campaign-tag-${t.id}`}

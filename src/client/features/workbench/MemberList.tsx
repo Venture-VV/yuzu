@@ -181,16 +181,16 @@ export const MemberList = forwardRef<HTMLInputElement, { selectedId: number | nu
                   <span className="flex items-center gap-1.5">
                     <span className="truncate text-[14.5px] font-bold text-ink">{m.name}</span>
                     {m.grade > 0 && (
-                      <span className={cn('shrink-0 rounded px-1 text-[11px] font-bold', m.graceUntil ? 'bg-ember-soft text-ember' : 'bg-yuzu-soft text-yuzu-deep')} title="会员档级">
+                      <span className={cn('shrink-0 rounded px-1 text-[12px] font-bold', m.graceUntil ? 'bg-ember-soft text-ember' : 'bg-yuzu-soft text-yuzu-deep')} title="会员档级">
                         L{m.grade}
                       </span>
                     )}
                     {m.mergedIntoId !== null ? (
-                      <span className="shrink-0 rounded bg-paper-2 px-1 text-[11px] font-bold text-ink-3" title="这份档案已合并到另一位会员">
+                      <span className="shrink-0 rounded bg-paper-2 px-1 text-[12px] font-bold text-ink-3" title="这份档案已合并到另一位会员">
                         已合并
                       </span>
                     ) : (
-                      m.status === 'frozen' && <span className="shrink-0 rounded bg-clay-soft px-1 text-[11px] font-bold text-clay">已停用</span>
+                      m.status === 'frozen' && <span className="shrink-0 rounded bg-clay-soft px-1 text-[12px] font-bold text-clay">已停用</span>
                     )}
                   </span>
                   <span className="num block truncate text-[12.5px] text-ink-3">
@@ -201,7 +201,7 @@ export const MemberList = forwardRef<HTMLInputElement, { selectedId: number | nu
                 <span className="text-right">
                   <Money cents={m.principalBalance + m.bonusBalance} className={cn('text-[14px] font-bold', m.principalBalance + m.bonusBalance === 0 ? 'text-ink-4' : 'text-ink')} />
                   {m.bonusBalance > 0 && (
-                    <span className="block text-[11.5px] font-semibold text-yuzu-deep">
+                    <span className="block text-[12px] font-semibold text-yuzu-deep">
                       含赠 <Money cents={m.bonusBalance} />
                     </span>
                   )}

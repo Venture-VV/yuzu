@@ -19,7 +19,9 @@ import { loadTechnicianRules, loadTechnicians } from '../technicians';
 import { attachSessions, lockQueue, syncSessionAfterVoid, type SessionPostOptions } from '../clockroom';
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, takeDishLimits } from '../dining';
 import { authorizeLineVoid } from '../dining-808';
-import { DeliverRoomField, OrderNoteField, VoidBlameField } from '../dining-order-v8115';
+import { assertOrderOutlets, DeliverRoomField, OrderNoteField, VoidBlameField } from '../dining-order-v8115';
+import { DishLineFields, kitchenPartsOf, limitLinesOf, planDishLines, type ComboPartPlan } from '../dish-lines';
+import { lockAddonLines, voidAddonLines, WithAddonsField } from '../dish-addon-void';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill, type Backfill } from './backfill';
 import { getVisit } from './visits';
 import { locateCharges, locateSession } from '../locations';
@@ -54,6 +56,8 @@ export const PostInput = z
               .max(MAX_DISH_NOTE, `口味备注最多 ${MAX_DISH_NOTE} 字`)
               .nullish()
               .transform((v) => v || undefined),
+            /** 8.1.17（docs/DISHES_V8117.md）：选的做法、加料挂在哪一行主菜上；不带时与升级前的请求完全相同（幂等摘要不变） */
+            ...DishLineFields,
           })
           .refine((l) => (l.technicianId === undefined) === (l.callType === undefined), '选了技师时请同时选择点钟或轮钟'),
       )
@@ -85,6 +89,11 @@ export interface PostOptions {
    * 按原样重提照样认得出是同一笔、返回第一次的结果，不会被说成另一笔或「没有在住的客房」（合并前 Codex 审查 b850838）。
    */
   toRoom?: (tx: Tx) => Promise<string>;
+  /**
+   * 发卡台「加项目」（8.1.17 BW-3，docs/FRONTDESK_V8117.md 第 3 节）：进厨房的菜按出品口的下单权限逐行核对（与点单页同一个函数 assertOrderOutlets），
+   * 不进厨房的项目不受影响。点单页在事务外已经核对过；钟房、渠道入口、平板点餐不带
+   */
+  outlets?: boolean;
 }
 
 export type PostInputParsed = z.output<typeof PostInput>;
@@ -185,6 +194,8 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
     tx,
     input.lines.map((l) => l.itemId),
   );
+  // 发卡台「加项目」（8.1.17 BW-3）：这一单进厨房的菜按出品口的下单权限核对，有一道不行整单拒绝（403 OUTLET_FORBIDDEN）；只读、不加锁
+  if (options.outlets) await assertOrderOutlets(tx, ctx.actor, [...stations.keys()]);
   type Line = {
     itemId: number | null;
     name: string;
@@ -198,6 +209,10 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
     techText: string | null;
     stationId: number | null;
     note: string;
+    /** 加料（8.1.17）：同一次挂账里主菜那一行的下标 */
+    addonOf: number | null;
+    /** 套餐（8.1.17 BW7）：这一份含的几样（拆子项单、扣子项的沽清） */
+    parts: ComboPartPlan[] | null;
   };
   const lines: Line[] = [];
   for (const l of input.lines) {
@@ -238,6 +253,8 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
       techText: tech ? technicianText({ ...tech, callType: l.callType }) : null,
       stationId,
       note: l.note ?? '',
+      addonOf: null,
+      parts: null,
     });
   }
   for (const l of input.customLines) {
@@ -254,8 +271,25 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
       techText: null,
       stationId: null,
       note: '',
+      addonOf: null,
+      parts: null,
     });
   }
+  // 8.1.17（docs/DISHES_V8117.md）：做法（分组、加价、必选）与加料（挂在主菜那一行上），点单页、桌台、平板与这里同一个核对；
+  // 加价按份加进单价（明细上的单价、金额就是收的钱），做法与「配 主菜」写进出品单的备注。点单页、平板查必选，前台加项目、小程序扫码点餐不查
+  const plans = await planDishLines(tx, input.lines, {
+    strict: !!options.dining && !channel,
+    isDish: (i) => lines[i]!.stationId !== null,
+    nameOf: (id) => items.get(id)?.name ?? '这道菜',
+  });
+  plans.forEach((p, i) => {
+    const line = lines[i]!;
+    line.unitPrice += p.extra;
+    line.amount = line.unitPrice * line.quantity;
+    line.note = p.note;
+    line.addonOf = p.addonOf;
+    line.parts = p.parts;
+  });
   const total = lines.reduce((s, l) => s + l.amount, 0);
   const expectedTotal = channel ? channel.expectedTotal : input.expectedTotal;
   if (expectedTotal !== null && total !== expectedTotal) {
@@ -287,23 +321,18 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
   } else if (options.session?.extendId !== undefined || options.session?.dispatch) {
     throw unprocessable('TECHNICIAN_REQUIRED', '派钟、加钟要选技师');
   }
-  // 沽清（技师队列之后、建出品单之前）：今天还剩的份数不够整笔拒绝；补录纸质单的菜早已上过，不扣沽清
+  // 沽清（技师队列之后、建出品单之前）：今天还剩的份数不够整笔拒绝；补录纸质单的菜早已上过，不扣沽清。
+  // 套餐的子项各扣各的（8.1.17 BW7，与单点的同一道菜合起来按项目 id 升序锁）
   const dishLines = lines.filter((l) => l.stationId !== null);
-  const limited =
-    dishLines.length > 0 && !backfill
-      ? await takeDishLimits(
-          tx,
-          dishLines.map((l) => ({ itemId: l.itemId!, name: l.name, quantity: l.quantity })),
-          date,
-        )
-      : new Set<number>();
+  const limited = dishLines.length > 0 && !backfill ? await takeDishLimits(tx, limitLinesOf(dishLines.map((l) => ({ ...l, itemId: l.itemId! }))), date) : new Set<number>();
   const lineIds = new Map<Line, number>();
   for (const l of lines) {
     const [row] = await tx<{ id: number }[]>`
       INSERT INTO bill_lines (bill_id, source, item_id, tier, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at,
-                              technician_id, call_type, session_id)
+                              technician_id, call_type, session_id, addon_of)
       VALUES (${bill!.id}, ${l.source}, ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${date},
-              ${ctx.actor.id}, ${at}, ${l.technicianId}, ${l.callType}, ${sessionIds.get(l) ?? null})
+              ${ctx.actor.id}, ${at}, ${l.technicianId}, ${l.callType}, ${sessionIds.get(l) ?? null},
+              ${l.addonOf === null ? null : lineIds.get(lines[l.addonOf]!)!})
       RETURNING id`;
     lineIds.set(l, row!.id);
   }
@@ -311,7 +340,15 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
     visitId: visit.id,
     tableSessionId: null,
     deliverTo: channel?.deliverTo ?? deliverTo ?? '',
-    lines: dishLines.map((l) => ({ billLineId: lineIds.get(l)!, itemId: l.itemId!, stationId: l.stationId!, quantity: l.quantity, note: l.note, limitTaken: limited.has(l.itemId!) })),
+    lines: dishLines.map((l) => ({
+      billLineId: lineIds.get(l)!,
+      itemId: l.itemId!,
+      stationId: l.stationId!,
+      quantity: l.quantity,
+      note: l.note,
+      limitTaken: limited.has(l.itemId!),
+      ...kitchenPartsOf(l.parts, limited),
+    })),
     date,
     at,
     actor: ctx.actor,
@@ -355,6 +392,8 @@ export const VoidInput = z.object({
   grantId: z.uuid('授权编号不正确').optional(),
   /** 退菜的责任岗位（8.1.15 块 B2：点单页退菜时选，记在审计里，不改明细表） */
   blame: VoidBlameField,
+  /** 退主菜时连同它的加料一起退（8.1.17 BW8） */
+  withAddons: WithAddonsField,
 });
 
 export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: OpContext) {
@@ -377,6 +416,8 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
     if (line!.status === 'voided') {
       throw conflict('ALREADY_VOIDED', `这项明细已由${line!.voidedByName ?? '其他人'}作废，不会重复冲减`);
     }
+    // 8.1.17（BW8）：退主菜带加料——主菜那一行之后按 id 升序锁它没退的加料行
+    const addons = input.withAddons ? await lockAddonLines(tx, line!.id) : [];
     // 8.0.8（B02）：餐饮的菜小额直接退；超过的经理、当场授权或本人 15 分钟内（其他明细照旧）
     const approval = await authorizeLineVoid(tx, { line: line!, actor: ctx.actor, at, grantId: input.grantId, what: '这项明细' });
     await tx`
@@ -398,6 +439,17 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
       detail: { visitNo: visit.visitNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, blame: input.blame, ...approval },
       ip: ctx.ip,
       businessDate: await businessDate(tx, deps, at),
+    });
+    await voidAddonLines(tx, addons, {
+      billId: visit.billId,
+      main: line!,
+      mainApproval: approval,
+      reason: input.reason,
+      actor: ctx.actor,
+      at,
+      businessDate: await businessDate(tx, deps, at),
+      ip: ctx.ip,
+      audit: { action: 'frontdesk_void', targetType: 'visit', targetId: visit.id, detail: { visitNo: visit.visitNo, blame: input.blame } },
     });
   });
   return getVisit(deps.sql, peek.visitId, deps.config.timezone);

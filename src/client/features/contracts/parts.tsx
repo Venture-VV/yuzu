@@ -18,6 +18,7 @@ import {
 } from '@shared/contracts';
 import { formatQty } from '@shared/quantity';
 import { cn, formatDateTime } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { Money } from '../../components/Money';
 import { Badge } from '../../components/ui';
 
@@ -65,19 +66,21 @@ export function TermsView({ content }: { content: Omit<ContractContent, 'lines'>
   const warrantyPct = warrantyPercentBp(content);
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-      <div>
+      <div className="min-w-0">
         <h4 className="mb-1.5 text-[12.5px] font-bold text-ink-2">付款节点</h4>
-        <table className="w-full text-[13px]" data-testid="contract-terms">
-          <tbody className="divide-y divide-line/70">
-            {content.paymentTerms.map((t) => (
-              <tr key={t.stage}>
-                <td className="w-14 py-1.5 font-semibold">{PAYMENT_STAGE_LABELS[t.stage]}</td>
-                <td className="num w-16 py-1.5 text-right font-bold">{formatPercentBp(t.percentBp)}</td>
-                <td className="py-1.5 pl-3 text-ink-2">{t.condition || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable
+          variant="plain"
+          hideHeader
+          testId="contract-terms"
+          rows={content.paymentTerms}
+          rowKey={(t) => t.stage}
+          empty="没有付款节点"
+          columns={[
+            { key: 'stage', header: '节点', className: 'w-14', cellClassName: 'font-semibold', cell: (t) => PAYMENT_STAGE_LABELS[t.stage] },
+            { key: 'percent', header: '比例', numeric: true, className: 'w-16', cellClassName: 'font-bold', cell: (t) => formatPercentBp(t.percentBp) },
+            { key: 'condition', header: '条件', cellClassName: 'text-ink-2', cell: (t) => t.condition || '—' },
+          ]}
+        />
       </div>
       <dl className="space-y-1.5 text-[13px]">
         <div>
@@ -108,39 +111,42 @@ export function TermsView({ content }: { content: Omit<ContractContent, 'lines'>
 
 /** 单价表（含税单价、税率、合同数量） */
 export function LinesView({ lines, ordered }: { lines: ContractLineView[]; ordered?: Record<number, number> }) {
-  if (lines.length === 0) return <p className="text-[13px] text-ink-3">没有单价表（服务、租赁类可以不填）</p>;
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] text-[13px]" data-testid="contract-lines">
-        <thead>
-          <tr className="border-b border-line text-left text-[12px] text-ink-3">
-            <th className="py-1.5 pr-2 font-semibold">品名</th>
-            <th className="py-1.5 pr-2 font-semibold">规格</th>
-            <th className="py-1.5 pr-2 text-right font-semibold">含税单价</th>
-            <th className="py-1.5 pr-2 text-right font-semibold">税率</th>
-            <th className="py-1.5 pr-2 text-right font-semibold">合同数量</th>
-            {ordered && <th className="py-1.5 text-right font-semibold">已下单</th>}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-line/70">
-          {lines.map((l) => (
-            <tr key={l.lineNo}>
-              <td className="py-1.5 pr-2 font-semibold">
-                {l.itemName}
-                {l.materialId === null && <span className="ml-1 text-[12px] font-normal text-ink-3">（不在物料档案）</span>}
-              </td>
-              <td className="py-1.5 pr-2 text-ink-2">{l.spec || '—'}</td>
-              <td className="num py-1.5 pr-2 text-right">
-                <Money cents={l.priceCents} className="font-semibold" /> / {l.unit}
-              </td>
-              <td className="num py-1.5 pr-2 text-right">{formatPercentBp(l.taxRateBp)}</td>
-              <td className="num py-1.5 pr-2 text-right">{l.qtyMilli === null ? '不限量' : `${formatQty(l.qtyMilli)} ${l.unit}`}</td>
-              {ordered && <td className="num py-1.5 text-right">{formatQty(ordered[l.lineNo] ?? 0)}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      variant="plain"
+      testId="contract-lines"
+      tableClassName="min-w-[560px]"
+      rows={lines}
+      rowKey={(l) => l.lineNo}
+      empty="没有单价表（服务、租赁类可以不填）"
+      columns={[
+        {
+          key: 'name',
+          header: '品名',
+          cellClassName: 'font-semibold',
+          cell: (l) => (
+            <>
+              {l.itemName}
+              {l.materialId === null && <span className="ml-1 text-[12px] font-normal text-ink-3">（不在物料档案）</span>}
+            </>
+          ),
+        },
+        { key: 'spec', header: '规格', cellClassName: 'text-ink-2', cell: (l) => l.spec || '—' },
+        {
+          key: 'price',
+          header: '含税单价',
+          numeric: true,
+          cell: (l) => (
+            <>
+              <Money cents={l.priceCents} className="font-semibold" /> / {l.unit}
+            </>
+          ),
+        },
+        { key: 'taxRate', header: '税率', numeric: true, cell: (l) => formatPercentBp(l.taxRateBp) },
+        { key: 'qty', header: '合同数量', numeric: true, cell: (l) => (l.qtyMilli === null ? '不限量' : `${formatQty(l.qtyMilli)} ${l.unit}`) },
+        ...(ordered ? [{ key: 'ordered', header: '已下单', numeric: true, cell: (l: ContractLineView) => formatQty(ordered[l.lineNo] ?? 0) }] : []),
+      ]}
+    />
   );
 }
 

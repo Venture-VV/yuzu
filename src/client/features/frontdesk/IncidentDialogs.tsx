@@ -6,9 +6,10 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { BellRing, CircleCheck, CircleDot, DoorOpen, KeyRound, LogIn, LogOut, Megaphone, ReceiptText, ShieldCheck, Store, Timer } from 'lucide-react';
+import { AlarmClock, BellRing, CircleCheck, CircleDot, CircleMinus, DoorOpen, KeyRound, LogIn, LogOut, Megaphone, ReceiptText, ShieldCheck, Store, Timer } from 'lucide-react';
 import type { VisitDetail } from '@shared/frontdesk';
-import { INCIDENT_KIND_LABELS, MAX_SURCHARGE_CENTS, overstayOf, TODO_KINDS, type IncidentKind, type IncidentTodo, type IncidentTodoList, type VisitIncident } from '@shared/frontdesk-risk';
+import { INCIDENT_KIND_LABELS, isOpenTodo, MAX_SURCHARGE_CENTS, overstayOf, TODO_KINDS, type IncidentKind, type IncidentTodo, type IncidentTodoList, type VisitIncident } from '@shared/frontdesk-risk';
+import { overtimeSurchargeOf } from '@shared/frontdesk-v8117';
 import type { CheckinRiskGrant, CheckinRiskGrantRequest } from '@shared/grants';
 import { formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
@@ -25,7 +26,7 @@ import { useToast } from '../../components/Toast';
 import { Button, Field, Input, MoneyInput, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { StatusChip, VisitStatusChips, ZoneChip, type StatusTone } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
-import { fk, stayMinutes, stayText, useIncidentTodos, useRefreshFrontdesk, useServerNow } from './queries';
+import { fk, stayMinutes, stayText, useBoard, useIncidentTodos, useRefreshFrontdesk, useServerNow } from './queries';
 
 type Action = 'remind' | 'surcharge' | 'report' | 'away' | 'lost' | 'unsettled';
 
@@ -40,6 +41,8 @@ const KIND_STYLE: Record<IncidentKind, { tone: StatusTone; icon: ReactNode }> = 
   away: { tone: 'lake', icon: <DoorOpen className="size-4 shrink-0" /> },
   return: { tone: 'pine', icon: <LogIn className="size-4 shrink-0" /> },
   unsettled: { tone: 'clay', icon: <ReceiptText className="size-4 shrink-0" /> },
+  // 8.1.17（BW-1）：系统记的超时提醒
+  overtime: { tone: 'ember', icon: <AlarmClock className="size-4 shrink-0" /> },
 };
 
 function KindChip({ kind }: { kind: IncidentKind }) {
@@ -50,27 +53,31 @@ function KindChip({ kind }: { kind: IncidentKind }) {
   );
 }
 
-/** 待办处理了没有 */
-function TodoStateChip({ resolved }: { resolved: boolean }) {
+/** 待办处理了没有；超时提醒在客人离店、有了更高一级以后不再算待办（8.1.17） */
+function TodoStateChip({ resolved, open }: { resolved: boolean; open: boolean }) {
   return resolved ? (
     <StatusChip tone="pine" icon={<CircleCheck className="size-4 shrink-0" />}>
       已处理
     </StatusChip>
-  ) : (
+  ) : open ? (
     <StatusChip tone="clay" icon={<CircleDot className="size-4 shrink-0" />}>
       待处理
+    </StatusChip>
+  ) : (
+    <StatusChip tone="neutral" icon={<CircleMinus className="size-4 shrink-0" />}>
+      不再跟进
     </StatusChip>
   );
 }
 
-/** 一条异常：种类、备注、金额、谁、几点；待办再写责任人与处理结果 */
-function IncidentRow({ incident }: { incident: VisitIncident }) {
+/** 一条异常：种类、备注、金额、谁、几点；待办再写责任人与处理结果。open：现在还算不算待办（isOpenTodo） */
+function IncidentRow({ incident, open }: { incident: VisitIncident; open: boolean }) {
   const todo = TODO_KINDS.includes(incident.kind);
   return (
     <li className="rounded-lg border border-line bg-card px-3 py-2.5 text-[13px]" data-testid={`incident-${incident.id}`} data-kind={incident.kind}>
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
         <KindChip kind={incident.kind} />
-        {todo && <TodoStateChip resolved={!!incident.resolved} />}
+        {todo && <TodoStateChip resolved={!!incident.resolved} open={open} />}
         {incident.amountCents !== null && <Money cents={incident.amountCents} className="text-[16px] font-bold" />}
         <span className="num ml-auto text-[12px] text-ink-3">
           {formatTime(incident.createdAt)} · {incident.createdByName}
@@ -86,9 +93,11 @@ function IncidentRow({ incident }: { incident: VisitIncident }) {
         <p className="mt-0.5 text-[12px] text-ink-3">
           {incident.resolved
             ? `处理结果：${incident.resolved.note}（${incident.resolved.byName} ${formatDateTime(incident.resolved.at)}）`
-            : incident.assigneeName
-              ? `责任人 ${incident.assigneeName}`
-              : '还没指派责任人'}
+            : !open
+              ? '客人已离店或已有更高一级的超时提醒，不再算待办'
+              : incident.assigneeName
+                ? `责任人 ${incident.assigneeName}`
+                : '还没指派责任人'}
         </p>
       )}
     </li>
@@ -128,7 +137,11 @@ export function IncidentDialog({
   // 这位客人上一笔异常处置结果待确认时，先处理那一笔
   const op = useFrontdeskOp<VisitDetail>({ type: 'visit_incident', visitId: visit.id, staffName: session.staff.displayName, pick: (found) => ('visit' in found ? found.visit : null) });
   const due = visit.bill.amountCents + (visit.ticket?.amount ?? 0);
-  const openTodos = visit.incidents.filter((i) => TODO_KINDS.includes(i.kind) && !i.resolved).length;
+  const visitOpen = visit.status === 'open';
+  const openTodos = visit.incidents.filter((i) => isOpenTodo(i, visit.incidents, visitOpen)).length;
+  // 超时加收按小时先填好（8.1.17 BW-1）：后台「前台规则」设了每小时的价、客人已经超过 12 小时时；照旧要人确认
+  const hourly = useBoard().data?.rules.overtimeSurchargeHourlyCents ?? 0;
+  const prefill = overtimeSurchargeOf(stayMinutes(visit.checkedInAt, now), hourly);
 
   const choose = (a: Action) => {
     if (op.locked) return;
@@ -137,7 +150,8 @@ export function IncidentDialog({
     setNote('');
     setGrant(null);
     setAssigneeId('');
-    setAmount(a === 'unsettled' && due > 0 ? (due / 100).toFixed(2) : '');
+    setAmount(a === 'unsettled' && due > 0 ? (due / 100).toFixed(2) : a === 'surcharge' && prefill ? (prefill.amount / 100).toFixed(2) : '');
+    if (a === 'surcharge' && prefill) setNote(`超时 ${prefill.hours} 小时`);
   };
   useResetOnOpen(open, () => {
     setAction('remind');
@@ -291,6 +305,12 @@ export function IncidentDialog({
             <Notice tone="info" title="加收就是在账单上挂一条「超时加收」">
               结账时一起收，不另记余额；挂错了在客人卡上作废（留原因）。{over ? `这位客人已经${over.label}。` : '这位客人还没超过 12 小时。'}
             </Notice>
+            {prefill && (
+              <p className="rounded-lg bg-paper-2 px-3 py-2 text-[13px] text-ink-2" data-testid="incident-surcharge-prefill">
+                按前台规则先填好：超过 12 小时以后 <b className="num">{prefill.hours}</b> 小时（不足 1 小时按 1 小时）× {formatYuan(hourly)} = <b className="num">{formatYuan(prefill.amount)}</b>
+                {prefill.capped && `（一笔最多 ${formatYuan(MAX_SURCHARGE_CENTS)}）`}。金额、原因都可以改，点「确认加收」才挂到账单。
+              </p>
+            )}
             <div className="grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)]">
               <Field label="加收金额" error={amount && !amountOk ? `金额不正确（一笔最多 ${formatYuan(MAX_SURCHARGE_CENTS)}）` : null}>
                 <MoneyInput
@@ -423,7 +443,7 @@ export function IncidentDialog({
           ) : (
             <ul className="mt-1.5 space-y-1.5" data-testid="incident-list">
               {visit.incidents.map((i) => (
-                <IncidentRow key={i.id} incident={i} />
+                <IncidentRow key={i.id} incident={i} open={isOpenTodo(i, visit.incidents, visitOpen)} />
               ))}
             </ul>
           )}

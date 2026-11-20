@@ -61,7 +61,7 @@ import { lineTechnicianSql } from '../technicians';
 import { loadVipLockerRules } from '../vip-lockers';
 import { assertVipAllowed, consumeVipShortfalls, memberLockerGrades, vipShortfalls } from './vip';
 import { currentStoreId } from '../../lib/store-context';
-import { incidentText, openTodoCount, visitIncidentEvents, visitIncidents } from './incident-read';
+import { incidentText, openTodoCount, openTodoWhere, visitIncidentEvents, visitIncidents } from './incident-read';
 import { arriveBookingsTx, blacklistedError, blacklistHits, loadRiskRules, lockArrivableBookings, unsettledDebts, visitsToday, type LockedRiskBooking } from './risk';
 
 const clientKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
@@ -705,10 +705,8 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
            v.group_id, g.group_no,
            CASE WHEN v.group_id IS NULL THEN 0 ELSE count(v.id) OVER (PARTITION BY v.group_id) END AS group_open_count,
            b.amount_cents, b.line_count, v.away_since,
-           -- 这次来访上没处理完的异常待办（上报、未结离店）几条（8.1.15）
-           (SELECT count(*)::int FROM visit_incidents i
-            WHERE i.visit_id = v.id AND i.kind IN ('report', 'unsettled')
-              AND NOT EXISTS (SELECT 1 FROM visit_incident_events e WHERE e.incident_id = i.id AND e.action = 'resolve')) AS open_todos
+           -- 这次来访上没处理完的异常待办（上报、未结离店；8.1.17 起还有超时提醒）几条（8.1.15）
+           (SELECT count(*)::int FROM visit_incidents i WHERE i.visit_id = v.id AND ${openTodoWhere(db)}) AS open_todos
     FROM hand_tags t
     LEFT JOIN visits v ON v.tag_id = t.id AND v.status = 'open'
     LEFT JOIN members m ON m.id = v.member_id
@@ -837,7 +835,7 @@ export async function getVisit(db: Db, id: number, timezone: string): Promise<Vi
       SELECT l.id, l.source, l.item_id, l.tier, l.name, l.unit_price, l.quantity, l.amount, l.status, l.post_key, l.business_date,
              l.posted_by AS posted_by_id, p.display_name AS posted_by_name, l.posted_at, l.void_reason,
              vs.display_name AS voided_by_name, l.voided_at, ${backfillMarkSql(db, 'l.post_key')} AS backfill,
-             ${lineTechnicianSql(db, 'l')} AS technician, l.session_id,
+             ${lineTechnicianSql(db, 'l')} AS technician, l.session_id, l.addon_of,
              (SELECT json_build_object('status', k.status, 'note', k.note, 'orderNo', k.order_no) FROM kitchen_items k WHERE k.bill_line_id = l.id) AS kitchen
       FROM bill_lines l JOIN staff p ON p.id = l.posted_by LEFT JOIN staff vs ON vs.id = l.voided_by
       WHERE l.bill_id = ${v.billId} ORDER BY l.id`

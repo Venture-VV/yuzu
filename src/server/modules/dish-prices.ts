@@ -40,3 +40,19 @@ export async function recordPriceChanges(
   }
   return diff.length;
 }
+
+/**
+ * 本店价的改价记录（8.1.17 BW-11，docs/FRONTDESK_V8117.md 第 6 节）：第二家店改菜品的本店价，记哪家店、改前改后（为空 = 同全公司）、
+ * 那时这一档全公司的价、原因、经办人。调用方的事务里，这道菜（service_items 一行）已经锁住；不是菜品的不记（与全公司价目同一个口径）
+ */
+export async function recordStorePriceChange(
+  tx: Tx,
+  args: { storeId: number; itemId: number; itemName: string; tier: TierPrice['tier']; oldPrice: number | null; newPrice: number | null; basePrice: number; reason: string; staffId: number },
+): Promise<boolean> {
+  if (args.oldPrice === args.newPrice) return false;
+  if (!(await dishIdsAmong(tx, [args.itemId])).has(args.itemId)) return false;
+  await tx`
+    INSERT INTO dish_price_changes (item_id, item_name, tier, old_price, new_price, reason, source, staff_id, store_id, base_price)
+    VALUES (${args.itemId}, ${args.itemName}, ${args.tier}, ${args.oldPrice}, ${args.newPrice}, ${args.reason}, 'store_price', ${args.staffId}, ${args.storeId}, ${args.basePrice})`;
+  return true;
+}

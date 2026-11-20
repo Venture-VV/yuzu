@@ -20,11 +20,16 @@ import {
   MAX_COMBO_ITEMS,
   MAX_DISH_ADDONS,
   MAX_DISH_CATEGORY,
+  MAX_DISH_METHOD_GROUP_LENGTH,
+  MAX_DISH_METHOD_GROUPS,
   MAX_DISH_METHOD_LENGTH,
+  MAX_DISH_METHOD_PRICE,
   MAX_DISH_METHODS,
   MAX_DISH_NAME,
   MAX_PRICE_REASON,
+  methodsCellText,
   outletNeedsGroup,
+  parseMethodsCell,
   parseComboPart,
   parseSheetOutlet,
   parseSheetPrice,
@@ -38,6 +43,8 @@ import {
   type DishImportIssue,
   type DishImportPreview,
   type DishImportResult,
+  type DishMethodGroup,
+  type DishMethodOption,
 } from '@shared/dishes';
 import type { Tx } from '../db';
 import { guardAny } from '../auth/guard';
@@ -77,7 +84,8 @@ interface RowPlan {
   stationId?: number;
   prices?: TierPrice[];
   active?: boolean;
-  methods?: string[];
+  /** 做法（8.1.17 带分组、加价、必选；「做法」一格的写法见 methodsCellText） */
+  methods?: MethodSet;
   addonNames?: string[];
   comboParts?: { name: string; quantity: number }[];
   /** 这一行新建 / 修改以后是哪道菜 */
@@ -89,8 +97,20 @@ interface RowPlan {
   priceChanged: boolean;
 }
 
+interface MethodSet {
+  options: DishMethodOption[];
+  groups: DishMethodGroup[];
+}
+
+/** 一道菜的做法按「做法」一格的写法（比较有没有变、写预览） */
+const methodsTextOf = (f: Pick<DishFieldsData, 'methods' | 'methodGroups'>) =>
+  methodsCellText(
+    f.methods.map((m) => (typeof m === 'string' ? { name: m, group: '', price: 0 } : m)),
+    f.methodGroups ?? [],
+  );
+
 interface Kids {
-  methods: string[];
+  methods: MethodSet;
   addons: number[];
   combo: { itemId: number; quantity: number }[];
 }
@@ -112,10 +132,14 @@ async function runImport(tx: Tx, ctx: OpContext, sheet: Sheet, reason: string): 
   const kids = new Map<number, Kids>();
   const kidsOf = (id: number) => {
     let k = kids.get(id);
-    if (!k) kids.set(id, (k = { methods: [], addons: [], combo: [] }));
+    if (!k) kids.set(id, (k = { methods: { options: [], groups: [] }, addons: [], combo: [] }));
     return k;
   };
-  for (const m of await tx<{ itemId: number; name: string }[]>`SELECT item_id, name FROM dish_methods ORDER BY item_id, sort_no, name`) kidsOf(m.itemId).methods.push(m.name);
+  for (const m of await tx<{ itemId: number; name: string; groupName: string | null; price: number }[]>`
+    SELECT item_id, name, group_name, price FROM dish_methods ORDER BY item_id, sort_no, name`)
+    kidsOf(m.itemId).methods.options.push({ name: m.name, group: m.groupName ?? '', price: m.price });
+  for (const g of await tx<{ itemId: number; name: string; required: boolean }[]>`SELECT item_id, name, required FROM dish_method_groups ORDER BY item_id, sort_no, name`)
+    kidsOf(g.itemId).methods.groups.push({ name: g.name, required: g.required });
   for (const a of await tx<{ itemId: number; addonItemId: number }[]>`SELECT item_id, addon_item_id FROM dish_addons ORDER BY item_id, sort_no, addon_item_id`)
     kidsOf(a.itemId).addons.push(a.addonItemId);
   for (const c of await tx<{ comboItemId: number; itemId: number; quantity: number }[]>`
@@ -224,11 +248,20 @@ async function runImport(tx: Tx, ctx: OpContext, sheet: Sheet, reason: string): 
 
     const methodsText = cell(r, '做法');
     if (methodsText) {
-      const list = methodsText === DISH_SHEET_CLEAR ? [] : splitSheetList(methodsText);
-      const long = list.find((m) => m.length > MAX_DISH_METHOD_LENGTH || /\s/.test(m));
-      if (long) bad(`做法「${long}」太长或带了空格（一种做法最多 ${MAX_DISH_METHOD_LENGTH} 个字）`);
-      else if (list.length > MAX_DISH_METHODS) bad(`做法最多 ${MAX_DISH_METHODS} 种`);
-      else p.methods = list;
+      // 8.1.17：分组的写「辣度（必选）：微辣、中辣+2」，几段用「；」隔开；只写名字的（8.1.15 的导出）照样认
+      const parsed = methodsText === DISH_SHEET_CLEAR ? { options: [], groups: [] } : parseMethodsCell(methodsText);
+      if ('error' in parsed) bad(`做法：${parsed.error}`);
+      else {
+        const long = parsed.options.find((m) => m.name.length > MAX_DISH_METHOD_LENGTH || /[\s+＋:：]/.test(m.name));
+        const longGroup = parsed.groups.find((g) => g.name.length > MAX_DISH_METHOD_GROUP_LENGTH || /\s/.test(g.name));
+        const pricey = parsed.options.find((m) => m.price > MAX_DISH_METHOD_PRICE);
+        if (long) bad(`做法「${long.name}」太长或带了空格（一种做法最多 ${MAX_DISH_METHOD_LENGTH} 个字）`);
+        else if (longGroup) bad(`做法的组「${longGroup.name}」太长或带了空格（组名最多 ${MAX_DISH_METHOD_GROUP_LENGTH} 个字）`);
+        else if (pricey) bad(`做法「${pricey.name}」最多加价 ¥${MAX_DISH_METHOD_PRICE / 100}`);
+        else if (parsed.options.length > MAX_DISH_METHODS) bad(`做法最多 ${MAX_DISH_METHODS} 种`);
+        else if (parsed.groups.length > MAX_DISH_METHOD_GROUPS) bad(`做法最多分 ${MAX_DISH_METHOD_GROUPS} 组`);
+        else p.methods = parsed;
+      }
     }
     const addonsText = cell(r, '加料');
     if (addonsText) {
@@ -269,7 +302,8 @@ async function runImport(tx: Tx, ctx: OpContext, sheet: Sheet, reason: string): 
       slot: slotKey(slotOfState(it)),
       stationId: it.stationId!,
       imageId: it.dishImageId,
-      methods: [...k.methods],
+      methods: k.methods.options.map((m) => ({ ...m })),
+      methodGroups: k.methods.groups.map((g) => ({ ...g })),
       addons: [...k.addons],
       combo: k.combo.map((c) => ({ ...c })),
     };
@@ -279,14 +313,24 @@ async function runImport(tx: Tx, ctx: OpContext, sheet: Sheet, reason: string): 
   for (const p of plans) {
     if (p.problems.length) continue;
     if (!p.target) {
-      const f = { name: p.name, category: p.category ?? '', slot: slotKey(p.slot!), stationId: p.stationId!, imageId: null, methods: p.methods ?? [], addons: [], combo: [] };
+      const f: DishFieldsData = {
+        name: p.name,
+        category: p.category ?? '',
+        slot: slotKey(p.slot!),
+        stationId: p.stationId!,
+        imageId: null,
+        methods: p.methods?.options ?? [],
+        methodGroups: p.methods?.groups ?? [],
+        addons: [],
+        combo: [],
+      };
       const active = p.active ?? true;
       const ok = await attempt(p, async (sp) => {
         p.itemId = await createDishTx(sp, ctx, { ...f, prices: p.prices!, active }, { reason: '导入新建', source: 'import' });
       });
       if (!ok) continue;
       p.created = true;
-      p.fields.push(`${slotLabel(p.slot!)} · ${stationName(p.stationId!)} · ${pricesText(p.prices!)}${active ? '' : ' · 下架'}${f.methods.length ? ` · 做法 ${f.methods.join('、')}` : ''}`);
+      p.fields.push(`${slotLabel(p.slot!)} · ${stationName(p.stationId!)} · ${pricesText(p.prices!)}${active ? '' : ' · 下架'}${f.methods.length ? ` · 做法 ${methodsTextOf(f)}` : ''}`);
       fieldsNow.set(p.itemId!, f);
       indexAdd(p.name, p.itemId!);
       nameNow.set(p.itemId!, p.name);
@@ -301,10 +345,10 @@ async function runImport(tx: Tx, ctx: OpContext, sheet: Sheet, reason: string): 
       category: p.category ?? base.category,
       slot: p.slot ? slotKey(p.slot) : base.slot,
       stationId: p.stationId ?? base.stationId,
-      methods: p.methods ?? base.methods,
+      methods: p.methods?.options ?? base.methods,
+      methodGroups: p.methods?.groups ?? base.methodGroups,
     };
-    const basicChanged =
-      next.name !== base.name || next.category !== base.category || next.slot !== base.slot || next.stationId !== base.stationId || next.methods.join('\n') !== base.methods.join('\n');
+    const basicChanged = next.name !== base.name || next.category !== base.category || next.slot !== base.slot || next.stationId !== base.stationId || methodsTextOf(next) !== methodsTextOf(base);
     const diff = p.prices ? priceDiff(cur.prices, p.prices) : [];
     const activeChanged = p.active !== undefined && p.active !== cur.active;
     if (!basicChanged && diff.length === 0 && !activeChanged) {

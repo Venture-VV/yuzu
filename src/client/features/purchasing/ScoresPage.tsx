@@ -11,6 +11,7 @@ import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Badge, Notice, Select, Skeleton } from '../../components/ui';
@@ -32,7 +33,7 @@ export function ScoresPage() {
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to="/purchasing" className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回采购">
+            <Link to="/purchasing" className="tap relative -ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回采购">
               <ArrowLeft className="size-[18px]" />
             </Link>
             供应商评分
@@ -56,7 +57,7 @@ export function ScoresPage() {
         )}
         <a
           href={`/api/purchase-compare/scores/export?quarter=${quarter}`}
-          className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+          className="tap relative ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
         >
           <Download className="size-4" />
           导出
@@ -76,62 +77,66 @@ export function ScoresPage() {
                 {watch.map((w) => w.name).join('、')}：分数低于 {data.data!.watchBelow} 分，下采购单时会提示（不拦）。
               </Notice>
             )}
-            <div className="overflow-x-auto rounded-lg border border-line bg-card">
-              <table className="w-full min-w-[860px] text-[13px]">
-                <thead className="bg-paper-2 text-left text-[12px] text-ink-3">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold">供应商</th>
-                    <th className="px-3 py-2 text-right font-semibold">收货单</th>
-                    <th className="px-3 py-2 text-right font-semibold">准时率</th>
-                    <th className="px-3 py-2 text-right font-semibold">送货金额</th>
-                    <th className="px-3 py-2 text-right font-semibold">拒收 / 退货</th>
-                    <th className="px-3 py-2 text-right font-semibold">合格率</th>
-                    <th className="px-3 py-2 text-right font-semibold">价格指数</th>
-                    <th className="px-3 py-2 text-right font-semibold">分数</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.supplierId} className={cn('border-t border-line', r.watch && 'bg-clay/5')} data-testid={`score-${r.code}`}>
-                      <td className="px-3 py-1.5">
-                        <span className="num mr-1.5 text-[12px] text-ink-3">{r.code}</span>
-                        <span className="font-semibold">{r.name}</span>
-                        {r.admission !== 'approved' && (
-                          <Badge tone={r.admission === 'suspended' ? 'clay' : 'yuzu'} className="ml-1.5">
-                            {SUPPLIER_ADMISSION_LABELS[r.admission]}
-                          </Badge>
-                        )}
-                        {r.watch && (
-                          <Badge tone="clay" className="ml-1.5">
-                            观察
-                          </Badge>
-                        )}
-                      </td>
-                      <td className="num px-3 py-1.5 text-right">{r.receipts}</td>
-                      <td className="num px-3 py-1.5 text-right">{pct(r.onTimeBp)}</td>
-                      <td className="px-3 py-1.5 text-right">
-                        <Money cents={r.deliveredCents} />
-                      </td>
-                      <td className="px-3 py-1.5 text-right text-ink-2">
-                        <Money cents={r.rejectedCents} /> / <Money cents={r.returnedCents} />
-                      </td>
-                      <td className="num px-3 py-1.5 text-right">{pct(r.qualityBp)}</td>
-                      <td
-                        className={cn(
-                          'num px-3 py-1.5 text-right',
-                          r.priceIndexBp !== null && r.priceIndexBp > 10_000 ? 'text-clay' : r.priceIndexBp !== null && r.priceIndexBp < 10_000 ? 'text-pine' : '',
-                        )}
-                      >
-                        {r.priceIndexBp === null ? '—' : (r.priceIndexBp / 10_000).toFixed(3)}
-                      </td>
-                      <td className={cn('num px-3 py-1.5 text-right font-bold', r.watch && 'text-clay')}>
-                        {r.scoreX10 === null ? <span className="font-normal text-ink-3">样本不足</span> : (r.scoreX10 / 10).toFixed(1)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              onPage
+              tableClassName="min-w-[860px]"
+              rows={rows}
+              rowKey={(r) => r.supplierId}
+              rowClassName={(r) => (r.watch ? 'bg-clay/5' : undefined)}
+              rowTestId={(r) => `score-${r.code}`}
+              empty="没有供应商"
+              columns={[
+                {
+                  key: 'supplier',
+                  header: '供应商',
+                  cell: (r) => (
+                    <>
+                      <span className="num mr-1.5 text-[12px] text-ink-3">{r.code}</span>
+                      <span className="font-semibold">{r.name}</span>
+                      {r.admission !== 'approved' && (
+                        <Badge tone={r.admission === 'suspended' ? 'clay' : 'yuzu'} className="ml-1.5">
+                          {SUPPLIER_ADMISSION_LABELS[r.admission]}
+                        </Badge>
+                      )}
+                      {r.watch && (
+                        <Badge tone="clay" className="ml-1.5">
+                          观察
+                        </Badge>
+                      )}
+                    </>
+                  ),
+                },
+                { key: 'receipts', header: '收货单', numeric: true, cell: (r) => r.receipts },
+                { key: 'onTime', header: '准时率', numeric: true, cell: (r) => pct(r.onTimeBp) },
+                { key: 'delivered', header: '送货金额', numeric: true, cell: (r) => <Money cents={r.deliveredCents} /> },
+                {
+                  key: 'rejected',
+                  header: '拒收 / 退货',
+                  numeric: true,
+                  cellClassName: 'text-ink-2',
+                  cell: (r) => (
+                    <>
+                      <Money cents={r.rejectedCents} /> / <Money cents={r.returnedCents} />
+                    </>
+                  ),
+                },
+                { key: 'quality', header: '合格率', numeric: true, cell: (r) => pct(r.qualityBp) },
+                {
+                  key: 'priceIndex',
+                  header: '价格指数',
+                  numeric: true,
+                  cellClassName: (r) => (r.priceIndexBp !== null && r.priceIndexBp > 10_000 ? 'text-clay' : r.priceIndexBp !== null && r.priceIndexBp < 10_000 ? 'text-pine' : undefined),
+                  cell: (r) => (r.priceIndexBp === null ? '—' : (r.priceIndexBp / 10_000).toFixed(3)),
+                },
+                {
+                  key: 'score',
+                  header: '分数',
+                  numeric: true,
+                  cellClassName: (r) => cn('font-bold', r.watch && 'text-clay'),
+                  cell: (r) => (r.scoreX10 === null ? <span className="font-normal text-ink-3">样本不足</span> : (r.scoreX10 / 10).toFixed(1)),
+                },
+              ]}
+            />
             <p className="text-[12px] text-ink-3">
               准时：收货日不晚于采购单的预计到货日（没填的按下单日 + 采购规则的「到货超期天数」），急采、补单不算；合格：1 −（拒收 + 退货）÷ 送货；价格指数：这家的进价 ÷
               同一物料这个季度所有供应商的加权均价（只有一家供货的物料不计）。

@@ -138,7 +138,8 @@ describe('多门店的各块', () => {
     const base = item.prices[0]!.price;
     // 本店里设本店价：拒绝
     expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/catalog/store-prices', { itemId: item.id, tier, price: base + 100 })).status).toBe(400);
-    const set = await api(ctx.app, ftDesk, 'PUT', '/api/admin/catalog/store-prices', { itemId: item.id, tier, price: base + 1000 });
+    // 8.1.17（BW-11）起改本店价要写原因
+    const set = await api(ctx.app, ftDesk, 'PUT', '/api/admin/catalog/store-prices', { itemId: item.id, tier, price: base + 1000, reason: '福田店单独定价' });
     expect(set.status, JSON.stringify(set.body)).toBe(200);
     const ftItem = ((await api(ctx.app, ftDesk, 'GET', '/api/catalog')).body.items as typeof catalog.items).find((i) => i.id === item.id)!;
     expect(ftItem.prices.find((p) => p.tier === tier)!.price).toBe(base + 1000);
@@ -157,7 +158,7 @@ describe('多门店的各块', () => {
     });
     expect(post.status, JSON.stringify(post.body)).toBeLessThan(300);
     // 取消本店价：按全公司的
-    expect((await api(ctx.app, ftDesk, 'PUT', '/api/admin/catalog/store-prices', { itemId: item.id, tier, price: null })).status).toBe(200);
+    expect((await api(ctx.app, ftDesk, 'PUT', '/api/admin/catalog/store-prices', { itemId: item.id, tier, price: null, reason: '回到全公司的价' })).status).toBe(200);
     const back = ((await api(ctx.app, ftDesk, 'GET', '/api/catalog')).body.items as typeof catalog.items).find((i) => i.id === item.id)!;
     expect(back.prices.find((p) => p.tier === tier)!.price).toBe(base);
   });

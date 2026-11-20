@@ -294,6 +294,25 @@
   .text-balance {
     text-wrap: balance;
   }
+  /*
+   * 点按热区不小于 44 × 44（8.1.17 YS-3，docs/YUZU_REQ_V8117.md 3.1）：样子不变，用看不见的外扩把能点的范围补足，
+   * 只补不够的方向（高 32 的按钮上下各补 6；宽不够 44 的左右再补）。挨着的两个 .tap 相邻的那一边不外扩，免得盖住对方。
+   * 只在触屏上（商米收银机、手持机、平板）外扩；用鼠标的电脑上不外扩，免得在密的表格、工作台面板里点偏。
+   * 元素自己要是定位元素（relative / sticky）；公共的 Button、IconButton、Segmented、导航与页签已经带上
+   */
+  @media (pointer: coarse) {
+    .tap::after {
+      content: '';
+      position: absolute;
+      inset: min(0px, calc(50% - 22px)) min(0px, calc(50% - 22px));
+    }
+    .tap + .tap::after {
+      left: 0;
+    }
+    .tap:has(+ .tap)::after {
+      right: 0;
+    }
+  }
 }
 
 /* 撤销后的消费单金额划线 */

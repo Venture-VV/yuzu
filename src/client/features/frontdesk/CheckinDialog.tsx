@@ -499,7 +499,7 @@ export function CheckinDialog({
                           aria-checked={r.zone === z}
                           onClick={() => update(r.id, { zone: z, zoneTouched: true })}
                           className={cn(
-                            'h-10 min-w-[56px] rounded-md border px-3 text-[14px] font-bold transition-colors',
+                            'tap relative h-10 min-w-[56px] rounded-md border px-3 text-[14px] font-bold transition-colors',
                             r.zone === z ? cn(ZONE_STYLE[z].chip, 'border-transparent ring-2 ring-current/25') : 'border-line bg-card text-ink-3 hover:text-ink',
                           )}
                         >
@@ -568,7 +568,7 @@ export function CheckinDialog({
                       type="button"
                       aria-label={`移除第 ${i + 1} 位`}
                       onClick={() => edit(() => setRows((list) => list.filter((x) => x.id !== r.id)))}
-                      className="flex size-10 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay"
+                      className="tap relative flex size-10 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay"
                     >
                       <Trash2 className="size-4" />
                     </button>

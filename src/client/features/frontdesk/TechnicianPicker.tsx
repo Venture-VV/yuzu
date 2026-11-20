@@ -104,13 +104,13 @@ export function TechnicianPicker({
                 <span className="flex items-baseline gap-1.5">
                   <span className="num text-[17px] font-bold text-ink">{t.techNo}</span>
                   <span className="min-w-0 truncate text-[14px] font-bold">{t.name}</span>
-                  <span className={cn('ml-auto text-[11.5px] font-semibold', t.gender === 'female' ? 'text-clay' : 'text-lake')}>{t.gender === 'female' ? '女' : '男'}</span>
+                  <span className={cn('ml-auto text-[12px] font-semibold', t.gender === 'female' ? 'text-clay' : 'text-lake')}>{t.gender === 'female' ? '女' : '男'}</span>
                 </span>
                 <span className="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 text-[12px] font-semibold text-ink-3">
                   <span>{gradeLabel(t.grade)}</span>
                   {!why && price !== null && <Money cents={price} className="text-[12.5px] font-bold text-ink-2" />}
                 </span>
-                <span className={cn('mt-auto pt-0.5 text-[11.5px] font-semibold', why ? 'text-clay' : t.todayClocks === fewest ? 'text-pine' : 'text-ink-4')}>
+                <span className={cn('mt-auto pt-0.5 text-[12px] font-semibold', why ? 'text-clay' : t.todayClocks === fewest ? 'text-pine' : 'text-ink-4')}>
                   {why ?? `今日 ${t.todayClocks} 钟${t.todayClocks === fewest ? ' · 钟最少' : ''}`}
                 </span>
               </button>

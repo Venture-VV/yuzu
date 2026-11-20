@@ -7,7 +7,7 @@ import { formatQty } from '@shared/quantity';
 import { errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { cn, downloadUrl } from '../../lib/utils';
-import { EmptyState } from '../../components/EmptyState';
+import { DataTable, type DataColumn } from '../../components/DataTable';
 import { Button, Input, Notice, Segmented, Skeleton } from '../../components/ui';
 import { useChecks, useStockSummary, useWarehouses } from './queries';
 
@@ -164,62 +164,61 @@ export function SummaryTab() {
               : '部门小仓的领料是从总仓领进、退回是退回总仓；盘点差异默认「耗用」。'}
         </p>
 
-        {summary.error ? (
-          <Notice tone="error" title={errorMessage(summary.error)} />
-        ) : summary.isPending ? (
-          <Skeleton className="h-64" />
-        ) : rows.length === 0 ? (
-          <EmptyState art="calm" title="还没有受管物料" className="rounded-lg border border-dashed border-line-strong" />
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card">
-            <table className="w-full min-w-[1080px] text-left text-[13px]">
-              <thead className="sticky top-0 bg-paper-2 text-[12px] font-bold text-ink-3">
-                <tr>
-                  <th className="w-[220px] px-4 py-2.5">物料</th>
-                  {columns.map((c) => (
-                    <th key={c.key} className={cn('px-2 py-2.5 text-right whitespace-nowrap', (c.key === 'begin' || c.key === 'closing') && 'bg-paper-3/50 text-ink-2')}>
-                      {c.sign && <span className="mr-0.5 text-ink-4">{c.sign}</span>}
-                      {c.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line/70">
-                {rows.map((r) => (
-                  <tr key={r.materialId} className="hover:bg-pine-tint/40">
-                    <td className="px-4 py-2.5">
-                      <Link to={`/inventory?m=${r.materialId}`} className="block min-w-0 hover:text-pine">
-                        <span className="block truncate font-bold">{r.name}</span>
-                        <span className="num block truncate text-[12px] text-ink-3">
-                          {r.code} · {r.inventoryUnit}
-                          {r.specification && ` · ${r.specification}`}
-                        </span>
-                      </Link>
-                    </td>
-                    {columns.map((c) => {
-                      const v = r[c.key] as number;
-                      const edge = c.key === 'begin' || c.key === 'closing';
-                      return (
-                        <td
-                          key={c.key}
-                          className={cn(
-                            'num px-2 py-2.5 text-right',
-                            edge && 'bg-paper-2/50 font-bold',
-                            !edge && v === 0 && 'text-ink-4',
-                            c.key === 'countAdjusted' && v < 0 && 'font-semibold text-clay',
-                            c.key === 'countAdjusted' && v > 0 && 'font-semibold text-lake',
-                          )}
-                        >
-                          {v === 0 && !edge ? '·' : `${c.sign === '±' && v > 0 ? '+' : ''}${formatQty(v)}`}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable
+          onPage
+          tableClassName="min-w-[1080px]"
+          rows={summary.data && rows}
+          failed={!!summary.error}
+          failedTitle={summary.error ? errorMessage(summary.error) : undefined}
+          onRetry={() => void summary.refetch()}
+          retrying={summary.isFetching}
+          rowKey={(r) => r.materialId}
+          rowClassName={() => 'hover:bg-pine-tint/40'}
+          empty="还没有受管物料"
+          columns={[
+            {
+              key: 'material',
+              header: '物料',
+              headerClassName: 'w-[220px]',
+              cell: (r) => (
+                <Link to={`/inventory?m=${r.materialId}`} className="block min-w-0 hover:text-pine">
+                  <span className="block truncate font-bold">{r.name}</span>
+                  <span className="num block truncate text-[12px] text-ink-3">
+                    {r.code} · {r.inventoryUnit}
+                    {r.specification && ` · ${r.specification}`}
+                  </span>
+                </Link>
+              ),
+            },
+            ...columns.map((c): DataColumn<StockSummaryRow> => {
+              const edge = c.key === 'begin' || c.key === 'closing';
+              return {
+                key: c.key,
+                header: (
+                  <>
+                    {c.sign && <span className="mr-0.5 text-ink-4">{c.sign}</span>}
+                    {c.label}
+                  </>
+                ),
+                numeric: true,
+                headerClassName: edge ? 'bg-paper-3/50 text-ink-2' : undefined,
+                cellClassName: (r) => {
+                  const v = r[c.key] as number;
+                  return cn(
+                    edge && 'bg-paper-2/50 font-bold',
+                    !edge && v === 0 && 'text-ink-4',
+                    c.key === 'countAdjusted' && v < 0 && 'font-semibold text-clay',
+                    c.key === 'countAdjusted' && v > 0 && 'font-semibold text-lake',
+                  );
+                },
+                cell: (r) => {
+                  const v = r[c.key] as number;
+                  return v === 0 && !edge ? '·' : `${c.sign === '±' && v > 0 ? '+' : ''}${formatQty(v)}`;
+                },
+              };
+            }),
+          ]}
+        />
       </div>
     </>
   );

@@ -11,6 +11,7 @@ import { ErpPendingStoreError, sendErpOp, useErpPending } from '../../lib/erpPen
 import { loadTableFile, type LoadedTable } from '../../lib/import-file';
 import { useSession } from '../../lib/session';
 import { formatDateTime, downloadCsvRows, uuid } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Notice, SectionTitle, Segmented, Skeleton } from '../../components/ui';
 import { useInvalidateSpaces, useSpaceImports } from '../spaces/queries';
@@ -205,59 +206,33 @@ export function SpaceImportCard() {
             </ul>
           )}
           {preview.diffs.length > 0 && (
-            <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card" data-testid="space-import-diffs">
-              <p className="px-3 pt-2.5 text-[13px] font-bold">与台账不同的地方（导入不覆盖；要改请在空间详情里改）</p>
-              <table className="mt-1 w-full min-w-[560px] text-left text-[13px]">
-                <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                  <tr>
-                    <th className="px-3 py-2">行</th>
-                    <th className="px-3 py-2">{kind === 'zones' ? '区域' : '编码'}</th>
-                    <th className="px-3 py-2">字段</th>
-                    <th className="px-3 py-2">台账</th>
-                    <th className="px-3 py-2">文件</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line/70">
-                  {preview.diffs.flatMap((d) =>
-                    d.fields.map((f, i) => (
-                      <tr key={`${d.row}-${f.field}`}>
-                        <td className="num px-3 py-1.5">{i === 0 ? d.row : ''}</td>
-                        <td className="num px-3 py-1.5 font-semibold">{i === 0 ? d.key : ''}</td>
-                        <td className="px-3 py-1.5">{f.field}</td>
-                        <td className="px-3 py-1.5 text-ink-3">{f.ledger || '（空）'}</td>
-                        <td className="px-3 py-1.5">{f.file || '（空）'}</td>
-                      </tr>
-                    )),
-                  )}
-                </tbody>
-              </table>
+            <div data-testid="space-import-diffs">
+              <p className="mb-1.5 text-[13px] font-bold">与台账不同的地方（导入不覆盖；要改请在空间详情里改）</p>
+              <DataTable
+                onPage
+                tableClassName="min-w-[560px]"
+                rows={preview.diffs.flatMap((d) => d.fields.map((f, i) => ({ d, f, first: i === 0 })))}
+                rowKey={({ d, f }) => `${d.row}-${f.field}`}
+                columns={[
+                  { key: 'row', header: '行', cellClassName: 'num', cell: ({ d, first }) => (first ? d.row : '') },
+                  { key: 'key', header: kind === 'zones' ? '区域' : '编码', cellClassName: 'num font-semibold', cell: ({ d, first }) => (first ? d.key : '') },
+                  { key: 'field', header: '字段', cell: ({ f }) => f.field },
+                  { key: 'ledger', header: '台账', cellClassName: 'text-ink-3', cell: ({ f }) => f.ledger || '（空）' },
+                  { key: 'file', header: '文件', cell: ({ f }) => f.file || '（空）' },
+                ]}
+              />
             </div>
           )}
           {preview.sample.length > 0 && (
-            <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card">
-              <table className="w-full min-w-[640px] text-left text-[13px]">
-                <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                  <tr>
-                    {sampleColumns.map((c) => (
-                      <th key={c} className="px-3 py-2">
-                        {c}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line/70">
-                  {preview.sample.map((r, i) => (
-                    <tr key={i}>
-                      {sampleColumns.map((c) => (
-                        <td key={c} className="px-3 py-1.5">
-                          {r[c]}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {preview.rowCount > preview.sample.length && <p className="px-3 py-2 text-[12px] text-ink-3">只显示前 {preview.sample.length} 行。</p>}
+            <div>
+              <DataTable
+                onPage
+                tableClassName="min-w-[640px]"
+                rows={preview.sample}
+                rowKey={(_r, i) => i}
+                columns={sampleColumns.map((c) => ({ key: c, header: c, cell: (r: Record<string, string>) => r[c] }))}
+              />
+              {preview.rowCount > preview.sample.length && <p className="mt-1.5 px-3 text-[12px] text-ink-3">只显示前 {preview.sample.length} 行。</p>}
             </div>
           )}
         </section>

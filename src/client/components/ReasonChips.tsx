@@ -13,7 +13,7 @@ export function ReasonChips({ reasons, value, onPick, disabled, testId }: { reas
           aria-pressed={value.trim() === r}
           onClick={() => onPick(r)}
           className={cn(
-            'h-8 rounded-full border px-3 text-[12.5px] font-semibold disabled:opacity-50',
+            'tap relative h-8 rounded-full border px-3 text-[12.5px] font-semibold disabled:opacity-50',
             value.trim() === r ? 'border-clay bg-clay-soft text-clay' : 'border-line bg-card text-ink-2 hover:border-line-strong',
           )}
         >

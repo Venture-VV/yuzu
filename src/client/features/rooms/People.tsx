@@ -234,7 +234,7 @@ export function PeoplePanel({
                   >
                     <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onLocate(p)}>
                       <span className={cn('font-bold', p.kind === 'technician' && 'text-lake')}>{personText(p)}</span>
-                      <span className="block text-[11.5px] text-ink-3">
+                      <span className="block text-[12px] text-ink-3">
                         {formatTime(p.since)} 起 · {LOCATION_SOURCE_LABELS[p.lastSource]} {formatTime(p.lastAt)}
                       </span>
                     </button>
@@ -248,7 +248,7 @@ export function PeoplePanel({
           ))}
         </div>
       )}
-      <p className="text-[11.5px] text-ink-4">位置停在上一次动作（刷卡、发牌、挂账、开房、上下钟），精度到区域与房间。</p>
+      <p className="text-[12px] text-ink-4">位置停在上一次动作（刷卡、发牌、挂账、开房、上下钟），精度到区域与房间。</p>
     </section>
   );
 }

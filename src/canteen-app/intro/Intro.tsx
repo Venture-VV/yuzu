@@ -155,7 +155,7 @@ export function Intro({ cta, onDone }: { cta: string; onDone: (skipped: boolean)
             onClick={() => voice.toggle(index)}
             aria-pressed={voice.on}
             aria-label={voice.on ? '关掉柚子的声音' : '打开柚子的声音'}
-            className={cn('flex size-9 shrink-0 items-center justify-center rounded-full active:bg-cream-2', voice.on ? 'text-wood-deep' : 'text-ink-3')}
+            className={cn('tap relative flex size-9 shrink-0 items-center justify-center rounded-full active:bg-cream-2', voice.on ? 'text-wood-deep' : 'text-ink-3')}
             data-testid="intro-voice"
           >
             <IconSound size={24} on={voice.on} fill={voice.on ? 'var(--color-yuzu)' : 'none'} />

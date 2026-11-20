@@ -112,7 +112,7 @@ export function OutletFilter({
           >
             {o.key && <span className={cn('hidden size-5 shrink-0 items-center justify-center rounded-full min-[400px]:flex [&>svg]:size-3', OUTLET_TONE[o.key].icon)}>{OUTLET_ICONS[o.key]}</span>}
             {o.label}
-            {n !== undefined && <span className="num text-[11.5px] font-normal text-ink-4">{n}</span>}
+            {n !== undefined && <span className="num text-[12px] font-normal text-ink-4">{n}</span>}
           </button>
         );
       })}
@@ -163,7 +163,7 @@ export function GroupChips({
             data-testid={`${testPrefix}-group-${g}`}
           >
             {g}
-            {counts?.[g] !== undefined && <span className="num ml-1 text-[11.5px] opacity-70">{counts[g]}</span>}
+            {counts?.[g] !== undefined && <span className="num ml-1 text-[12px] opacity-70">{counts[g]}</span>}
           </button>
         );
       })}
@@ -173,5 +173,5 @@ export function GroupChips({
 
 /** 「餐厅 · 酒水」「果吧」 */
 export function SlotBadge({ slot, className }: { slot: DiningSlot; className?: string }) {
-  return <span className={cn('inline-flex h-5 items-center rounded px-1.5 text-[11.5px] font-semibold whitespace-nowrap', OUTLET_TONE[slot.outlet].badge, className)}>{slotLabel(slot)}</span>;
+  return <span className={cn('inline-flex h-5 items-center rounded px-1.5 text-[12px] font-semibold whitespace-nowrap', OUTLET_TONE[slot.outlet].badge, className)}>{slotLabel(slot)}</span>;
 }

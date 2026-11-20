@@ -10,10 +10,9 @@ import type { ExpiryLot, SlowMovingReport } from '@shared/supply';
 import { formatQty } from '@shared/quantity';
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import { cn } from '../../lib/utils';
-import { EmptyState } from '../../components/EmptyState';
+import { DataTable } from '../../components/DataTable';
 import { Money } from '../../components/Money';
-import { Badge, Notice, Select, Skeleton } from '../../components/ui';
+import { Badge, Select } from '../../components/ui';
 import { useWarehouses } from './queries';
 
 const qty = (milli: number, unit: string) => `${formatQty(milli)} ${unit}`;
@@ -46,58 +45,49 @@ export function AgingTab() {
           </label>
           <a
             href={`/api/inventory/slow-moving/export?${qs}`}
-            className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+            className="tap relative flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
           >
             <Download className="size-4" />
             导出
           </a>
         </div>
-        {slow.error ? (
-          <Notice tone="error" title={errorMessage(slow.error)} />
-        ) : slow.isPending ? (
-          <Skeleton className="h-40" />
-        ) : slow.data.rows.length === 0 ? (
-          <EmptyState art="leaf" title={slowOnly ? '没有呆滞的物料' : '没有结存'} className="rounded-lg border border-dashed border-line-strong" />
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-line bg-card">
-            <table className="w-full min-w-[820px] text-[13px]" data-testid="slow-table">
-              <thead className="bg-paper-2 text-left text-[12px] text-ink-3">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">仓</th>
-                  <th className="px-3 py-2 font-semibold">物料</th>
-                  <th className="px-3 py-2 text-right font-semibold">结存</th>
-                  <th className="px-3 py-2 text-right font-semibold">结存金额</th>
-                  <th className="px-3 py-2 font-semibold">最近出库</th>
-                  <th className="px-3 py-2 text-right font-semibold">没出库</th>
-                  <th className="px-3 py-2 text-right font-semibold">日均用量</th>
-                  <th className="px-3 py-2 text-right font-semibold">周转天数</th>
-                </tr>
-              </thead>
-              <tbody>
-                {slow.data.rows.map((r) => (
-                  <tr key={`${r.departmentId ?? 0}-${r.materialId}`} className={cn('border-t border-line', r.slow && 'bg-clay/5')}>
-                    <td className="px-3 py-1.5 text-ink-2">{r.warehouseName}</td>
-                    <td className="px-3 py-1.5">
-                      <span className="num mr-1.5 text-[12px] text-ink-3">{r.code}</span>
-                      <span className="font-semibold">{r.name}</span>
-                      {r.slow && (
-                        <Badge tone="clay" className="ml-1.5">
-                          呆滞
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="num px-3 py-1.5 text-right">{qty(r.stockMilli, r.inventoryUnit)}</td>
-                    <td className="px-3 py-1.5 text-right">{r.amountCents === null ? '—' : <Money cents={r.amountCents} />}</td>
-                    <td className="num px-3 py-1.5">{r.lastOutDate ?? <span className="text-ink-3">没出过库</span>}</td>
-                    <td className="num px-3 py-1.5 text-right">{r.idleDays === null ? '—' : `${r.idleDays} 天`}</td>
-                    <td className="num px-3 py-1.5 text-right">{r.dailyUsageMilli > 0 ? qty(r.dailyUsageMilli, r.inventoryUnit) : '—'}</td>
-                    <td className="num px-3 py-1.5 text-right">{r.turnoverDays === null ? '—' : `${r.turnoverDays} 天`}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable
+          onPage
+          testId="slow-table"
+          tableClassName="min-w-[820px]"
+          rows={slow.data?.rows}
+          failed={!!slow.error}
+          failedTitle={slow.error ? errorMessage(slow.error) : undefined}
+          onRetry={() => void slow.refetch()}
+          retrying={slow.isFetching}
+          rowKey={(r) => `${r.departmentId ?? 0}-${r.materialId}`}
+          rowClassName={(r) => (r.slow ? 'bg-clay/5' : undefined)}
+          empty={slowOnly ? '没有呆滞的物料' : '没有结存'}
+          columns={[
+            { key: 'warehouse', header: '仓', cellClassName: 'text-ink-2', cell: (r) => r.warehouseName },
+            {
+              key: 'material',
+              header: '物料',
+              cell: (r) => (
+                <>
+                  <span className="num mr-1.5 text-[12px] text-ink-3">{r.code}</span>
+                  <span className="font-semibold">{r.name}</span>
+                  {r.slow && (
+                    <Badge tone="clay" className="ml-1.5">
+                      呆滞
+                    </Badge>
+                  )}
+                </>
+              ),
+            },
+            { key: 'stock', header: '结存', numeric: true, cell: (r) => qty(r.stockMilli, r.inventoryUnit) },
+            { key: 'amount', header: '结存金额', numeric: true, cell: (r) => (r.amountCents === null ? '—' : <Money cents={r.amountCents} />) },
+            { key: 'lastOut', header: '最近出库', cellClassName: 'num', cell: (r) => r.lastOutDate ?? <span className="text-ink-3">没出过库</span> },
+            { key: 'idle', header: '没出库', numeric: true, cell: (r) => (r.idleDays === null ? '—' : `${r.idleDays} 天`) },
+            { key: 'daily', header: '日均用量', numeric: true, cell: (r) => (r.dailyUsageMilli > 0 ? qty(r.dailyUsageMilli, r.inventoryUnit) : '—') },
+            { key: 'turnover', header: '周转天数', numeric: true, cell: (r) => (r.turnoverDays === null ? '—' : `${r.turnoverDays} 天`) },
+          ]}
+        />
       </section>
 
       <section className="space-y-2">
@@ -106,54 +96,63 @@ export function AgingTab() {
           <span className="text-[12.5px] text-ink-3">管效期的物料按先进先出推算总仓剩下的批次；到期前 {session.rules.expiryRemindDays} 天以内与已过期的</span>
           <a
             href="/api/inventory/expiry-lots/export"
-            className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+            className="tap relative ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
           >
             <Download className="size-4" />
             导出
           </a>
         </div>
-        {lots.error ? (
-          <Notice tone="error" title={errorMessage(lots.error)} />
-        ) : lots.isPending ? (
-          <Skeleton className="h-24" />
-        ) : lots.data.length === 0 ? (
-          <p className="text-[13px] text-ink-3">没有临期或过期的批次（物料档案里打开「效期管理」的才算）。</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-line bg-card">
-            <table className="w-full min-w-[720px] text-[13px]" data-testid="expiry-table">
-              <thead className="bg-paper-2 text-left text-[12px] text-ink-3">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">物料</th>
-                  <th className="px-3 py-2 font-semibold">批号</th>
-                  <th className="px-3 py-2 font-semibold">收货</th>
-                  <th className="px-3 py-2 font-semibold">到期日</th>
-                  <th className="px-3 py-2 text-right font-semibold">推算剩余</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lots.data.map((l) => (
-                  <tr key={`${l.docId}-${l.materialId}-${l.batchNo}-${l.expiresOn}`} className={cn('border-t border-line', l.daysLeft < 0 && 'bg-clay/5')}>
-                    <td className="px-3 py-1.5">
-                      <span className="num mr-1.5 text-[12px] text-ink-3">{l.code}</span>
-                      <span className="font-semibold">{l.name}</span>
-                    </td>
-                    <td className="num px-3 py-1.5">{l.batchNo || '—'}</td>
-                    <td className="num px-3 py-1.5 text-ink-2">
-                      {l.receivedDate} · {l.docNo}
-                    </td>
-                    <td className="num px-3 py-1.5">
-                      {l.expiresOn}
-                      <Badge tone={l.daysLeft < 0 ? 'clay' : 'yuzu'} className="ml-1.5">
-                        {l.daysLeft < 0 ? `过期 ${-l.daysLeft} 天` : l.daysLeft === 0 ? '今天到期' : `${l.daysLeft} 天后到期`}
-                      </Badge>
-                    </td>
-                    <td className="num px-3 py-1.5 text-right">{qty(l.remainingMilli, l.inventoryUnit)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable
+          onPage
+          testId="expiry-table"
+          tableClassName="min-w-[720px]"
+          rows={lots.data}
+          failed={!!lots.error}
+          failedTitle={lots.error ? errorMessage(lots.error) : undefined}
+          onRetry={() => void lots.refetch()}
+          retrying={lots.isFetching}
+          rowKey={(l) => `${l.docId}-${l.materialId}-${l.batchNo}-${l.expiresOn}`}
+          rowClassName={(l) => (l.daysLeft < 0 ? 'bg-clay/5' : undefined)}
+          empty="没有临期或过期的批次"
+          emptyDescription="物料档案里打开「效期管理」的才算。"
+          columns={[
+            {
+              key: 'material',
+              header: '物料',
+              cell: (l) => (
+                <>
+                  <span className="num mr-1.5 text-[12px] text-ink-3">{l.code}</span>
+                  <span className="font-semibold">{l.name}</span>
+                </>
+              ),
+            },
+            { key: 'batch', header: '批号', cellClassName: 'num', cell: (l) => l.batchNo || '—' },
+            {
+              key: 'received',
+              header: '收货',
+              cellClassName: 'num text-ink-2',
+              cell: (l) => (
+                <>
+                  {l.receivedDate} · {l.docNo}
+                </>
+              ),
+            },
+            {
+              key: 'expires',
+              header: '到期日',
+              cellClassName: 'num',
+              cell: (l) => (
+                <>
+                  {l.expiresOn}
+                  <Badge tone={l.daysLeft < 0 ? 'clay' : 'yuzu'} className="ml-1.5">
+                    {l.daysLeft < 0 ? `过期 ${-l.daysLeft} 天` : l.daysLeft === 0 ? '今天到期' : `${l.daysLeft} 天后到期`}
+                  </Badge>
+                </>
+              ),
+            },
+            { key: 'remaining', header: '推算剩余', numeric: true, cell: (l) => qty(l.remainingMilli, l.inventoryUnit) },
+          ]}
+        />
       </section>
     </div>
   );

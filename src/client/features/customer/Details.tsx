@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CustomerMemberDetail, CustomerNote, CustomerRechargeDetail, CustomerSettlementDetail, CustomerVisitDetail } from '@shared/customer';
 import { ENTRY_TYPE_LABELS, formatPhone } from '@shared/labels';
+import { DataTable } from '../../components/DataTable';
 import { Dialog } from '../../components/Overlay';
 import { Badge, Button, Input, Notice, SectionTitle, Select } from '../../components/ui';
 import { customerUrl, useCustomerRead } from './api';
@@ -97,34 +98,20 @@ function VisitDetail(props: Props) {
           {d.linesReadable ? (
             <>
               <SectionTitle>消费项目（来自前台，只读）</SectionTitle>
-              <div className="customer-table-scroll">
-                <table className="customer-table">
-                  <thead>
-                    <tr>
-                      <th>项目</th>
-                      <th>数量</th>
-                      <th>单价</th>
-                      <th>金额</th>
-                      <th>状态</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.lines.map((line) => (
-                      <tr key={line.id}>
-                        <td>{line.name}</td>
-                        <td>{line.quantity}</td>
-                        <td>
-                          <Amount value={line.unitPriceCents} />
-                        </td>
-                        <td>
-                          <Amount value={line.amountCents} />
-                        </td>
-                        <td>{line.status === 'voided' ? '已作废' : line.status === 'active' ? '有效' : line.status}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                variant="plain"
+                tableClassName="customer-table"
+                rows={d.lines}
+                rowKey={(line) => line.id}
+                empty="没有消费项目"
+                columns={[
+                  { key: 'name', header: '项目', cell: (line) => line.name },
+                  { key: 'quantity', header: '数量', numeric: true, cell: (line) => line.quantity },
+                  { key: 'unitPrice', header: '单价', numeric: true, cell: (line) => <Amount value={line.unitPriceCents} /> },
+                  { key: 'amount', header: '金额', numeric: true, cell: (line) => <Amount value={line.amountCents} /> },
+                  { key: 'status', header: '状态', cell: (line) => (line.status === 'voided' ? '已作废' : line.status === 'active' ? '有效' : line.status) },
+                ]}
+              />
             </>
           ) : (
             <Notice tone="info" title="历史消费项目按账号权限查看">
@@ -270,67 +257,44 @@ function SettlementDetail(props: Props) {
           <Notice tone="info">整单项目可能包括同行消费与多种支付。每位会员的时间轴只计其实际扣卡分录，不能将整单金额再重复算入会员扣费。</Notice>
           <SectionTitle>{d.detail ? '结账时保存的整单消费项目' : '会员工作台扣卡项目'}</SectionTitle>
           {d.detail ? (
-            <div className="customer-table-scroll">
-              <table className="customer-table">
-                <thead>
-                  <tr>
-                    <th>手牌 / 原项目</th>
-                    <th>数量</th>
-                    <th>单价</th>
-                    <th>金额</th>
-                    <th>优惠分摊</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.detail.lines.map((line, index) => (
-                    <tr key={index}>
-                      <td>
-                        {line.name}
-                        <small>{line.holder || (d.detail!.source === 'items' ? '结账时记下的项目，没有手牌明细' : '未记录手牌')}</small>
-                      </td>
-                      <td>{line.quantity}</td>
-                      <td>
-                        <Amount value={line.unitPrice} />
-                      </td>
-                      <td>
-                        <Amount value={line.amount} />
-                      </td>
-                      <td>
-                        <Amount value={line.discount} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              variant="plain"
+              tableClassName="customer-table"
+              rows={d.detail.lines}
+              rowKey={(_line, index) => index}
+              empty="没有消费项目"
+              columns={[
+                {
+                  key: 'name',
+                  header: '手牌 / 原项目',
+                  cell: (line) => (
+                    <>
+                      {line.name}
+                      <small>{line.holder || (d.detail!.source === 'items' ? '结账时记下的项目，没有手牌明细' : '未记录手牌')}</small>
+                    </>
+                  ),
+                },
+                { key: 'quantity', header: '数量', numeric: true, cell: (line) => line.quantity },
+                { key: 'unitPrice', header: '单价', numeric: true, cell: (line) => <Amount value={line.unitPrice} /> },
+                { key: 'amount', header: '金额', numeric: true, cell: (line) => <Amount value={line.amount} /> },
+                { key: 'discount', header: '优惠分摊', numeric: true, cell: (line) => <Amount value={line.discount} /> },
+              ]}
+            />
           ) : d.consumption ? (
             <>
-              <div className="customer-table-scroll">
-                <table className="customer-table">
-                  <thead>
-                    <tr>
-                      <th>项目</th>
-                      <th>数量</th>
-                      <th>单价</th>
-                      <th>金额</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.consumption.lines.map((line) => (
-                      <tr key={line.id}>
-                        <td>{line.name}</td>
-                        <td>{line.quantity}</td>
-                        <td>
-                          <Amount value={line.unitPrice} />
-                        </td>
-                        <td>
-                          <Amount value={line.amount} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                variant="plain"
+                tableClassName="customer-table"
+                rows={d.consumption.lines}
+                rowKey={(line) => line.id}
+                empty="没有消费项目"
+                columns={[
+                  { key: 'name', header: '项目', cell: (line) => line.name },
+                  { key: 'quantity', header: '数量', numeric: true, cell: (line) => line.quantity },
+                  { key: 'unitPrice', header: '单价', numeric: true, cell: (line) => <Amount value={line.unitPrice} /> },
+                  { key: 'amount', header: '金额', numeric: true, cell: (line) => <Amount value={line.amount} /> },
+                ]}
+              />
               {d.consumption.reversal && (
                 <Notice tone="warning" title={`已撤销：${d.consumption.reversal.docNo}`}>
                   {d.consumption.reversal.reason} · {localTime(d.consumption.reversal.createdAt, d.timezone)}

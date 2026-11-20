@@ -2694,7 +2694,7 @@
 }
 .concierge-workspace .audit-diff pre {
   font:
-    10px/1.9 ui-monospace,
+    12px/1.9 ui-monospace,
     SFMono-Regular,
     Menlo,
     monospace;
@@ -3082,7 +3082,7 @@
   cursor: pointer;
 }
 .concierge-workspace .ocr-text-details pre {
-  font: 10px/1.9 var(--font-sans);
+  font: 12px/1.9 var(--font-sans);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--color-moss);
@@ -3976,7 +3976,7 @@
   }
   .concierge-workspace .modal-footer > span {
     max-width: 120px;
-    font-size: 8px;
+    font-size: 12px;
   }
   .concierge-workspace .capture-previews img {
     height: 140px;
@@ -3985,7 +3985,7 @@
     font-size: 12px;
   }
   .concierge-workspace .audit-stream-row time {
-    font-size: 8px;
+    font-size: 12px;
   }
   .concierge-workspace .topbar-right .live-status {
     display: none;
@@ -4286,7 +4286,7 @@
   margin-top: 9px;
 }
 .concierge-workspace .legacy-items-empty pre {
-  font: 11px/1.9 var(--font-sans);
+  font: 12px/1.9 var(--font-sans);
   text-align: left;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

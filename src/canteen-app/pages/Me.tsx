@@ -74,7 +74,7 @@ export function MePage({
           aria-label="换头像"
         >
           {me.employee.avatar}
-          <span className="absolute -right-1 -bottom-1 rounded-full bg-wood-deep px-1.5 py-0.5 text-[10px] font-bold text-white">换</span>
+          <span className="absolute -right-1 -bottom-1 rounded-full bg-wood-deep px-1.5 py-0.5 text-[12px] font-bold text-white">换</span>
         </button>
         <div className="min-w-0">
           <p className="eyebrow">My page</p>

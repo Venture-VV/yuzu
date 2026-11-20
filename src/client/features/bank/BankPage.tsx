@@ -26,6 +26,7 @@ import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { readTablePayload } from '../../lib/import-file';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { LoadFailed } from '../../components/LoadFailed';
@@ -94,7 +95,7 @@ export function BankPage() {
                 <button
                   type="button"
                   onClick={() => setAccountId(null)}
-                  className={cn('h-9 rounded-full px-3.5 text-[13px] font-semibold', accountId === null ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2')}
+                  className={cn('tap relative h-9 rounded-full px-3.5 text-[13px] font-semibold', accountId === null ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2')}
                 >
                   全部账户
                 </button>
@@ -134,7 +135,7 @@ export function BankPage() {
                   role="tab"
                   aria-selected={view === v.key}
                   onClick={() => setView(v.key)}
-                  className={cn('h-9 rounded-full px-3.5 text-[13px] font-semibold', view === v.key ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
+                  className={cn('tap relative h-9 rounded-full px-3.5 text-[13px] font-semibold', view === v.key ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
                   data-testid={`bank-view-${v.key}`}
                 >
                   {v.label}
@@ -584,23 +585,29 @@ function ImportDialog({ open, accounts, onClose }: { open: boolean; accounts: Ba
                   .join('，')}）`}
             </p>
             {preview.lines.length > 0 && (
-              <div className="max-h-56 overflow-y-auto rounded-lg border border-line">
-                <table className="w-full text-[12.5px]">
-                  <tbody className="divide-y divide-line/60">
-                    {preview.lines.slice(0, 30).map((l) => (
-                      <tr key={l.row}>
-                        <td className="num px-2 py-1 text-ink-3">{l.txnDate}</td>
-                        <td className="px-2 py-1">{l.counterparty}</td>
-                        <td className="px-2 py-1 text-ink-3">{l.summary}</td>
-                        <td className={cn('num px-2 py-1 text-right font-semibold', l.direction === 'in' && 'text-pine')}>
-                          {l.direction === 'in' ? '+' : '−'}
-                          {yuan(l.amountCents)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                hideHeader
+                className="max-h-56 overflow-y-auto"
+                rows={preview.lines.slice(0, 30)}
+                rowKey={(l) => l.row}
+                columns={[
+                  { key: 'date', header: '日期', cellClassName: 'num text-ink-3', cell: (l) => l.txnDate },
+                  { key: 'counterparty', header: '对方', cell: (l) => l.counterparty },
+                  { key: 'summary', header: '摘要', cellClassName: 'text-ink-3', cell: (l) => l.summary },
+                  {
+                    key: 'amount',
+                    header: '金额',
+                    numeric: true,
+                    cellClassName: (l) => cn('font-semibold', l.direction === 'in' && 'text-pine'),
+                    cell: (l) => (
+                      <>
+                        {l.direction === 'in' ? '+' : '−'}
+                        {yuan(l.amountCents)}
+                      </>
+                    ),
+                  },
+                ]}
+              />
             )}
           </>
         )}

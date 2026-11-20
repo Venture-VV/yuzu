@@ -256,7 +256,7 @@ export function FloorMapView({
         >
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-4" />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜编码、显示名、品牌名" className="h-9 pl-8 text-[13px]" aria-label="搜索房间" data-testid="floormap-search" />
-          {q && <span className="absolute top-1/2 right-2.5 -translate-y-1/2 text-[11.5px] text-ink-3">{searchHits ? `${searchHits} 个，回车定位` : '没找到'}</span>}
+          {q && <span className="absolute top-1/2 right-2.5 -translate-y-1/2 text-[12px] text-ink-3">{searchHits ? `${searchHits} 个，回车定位` : '没找到'}</span>}
         </form>
         <label className="flex h-9 items-center gap-1.5 rounded-md px-1 text-[13px] font-semibold text-ink-2">
           <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={vacantOnly} onChange={(e) => setVacantOnly(e.target.checked)} data-testid="floormap-vacant-only" />

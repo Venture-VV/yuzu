@@ -215,13 +215,13 @@ function StatesCard({ rules, states }: { rules: MembershipRules; states: { grade
                 {i > 0 && (
                   <div className="mt-1 grid grid-cols-3 gap-0.5 text-center">
                     {TIER_LABELS.map((t, k) => (
-                      <span key={t} className="rounded bg-paper-2 px-0.5 py-0.5 text-[11px] text-ink-3">
+                      <span key={t} className="rounded bg-paper-2 px-0.5 py-0.5 text-[12px] text-ink-3">
                         {t} <b className="num text-ink-2">{rows.find((r) => r.tier === k)?.count ?? 0}</b>
                       </span>
                     ))}
                   </div>
                 )}
-                <p className="mt-1 text-[11px] text-ink-3">
+                <p className="mt-1 text-[12px] text-ink-3">
                   余额 <Money cents={rows.reduce((n, s) => n + s.balance, 0)} />
                 </p>
               </div>

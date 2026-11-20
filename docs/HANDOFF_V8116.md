@@ -42,7 +42,7 @@
 
 ## 4. 已执行的验证
 
-- 各块在自己的工作区：块 D `room-center` 26 条、`upgrade-room-center`、`op-fences-constraint`、`tag-scan`，浏览器门店电脑组 room-center、rooms、target-devices、viewports、clockroom、frontdesk、desks、frontdesk-risk、dining-v8115、frontdesk-808、admin-ia、floormap、locations，room-center 在另外四组也过；块 E、F 与菜品 P1：浏览器门店电脑组 technician-admin、clockroom、technicians、member-* 七个、flows、dishes、dining、dining-v8115、shift-drawers、target-devices、viewports 53 条，另外四组 technician-admin 与 viewports 52 条过（8 条按尺寸跳过）。
+- 各块在自己的工作区：块 D `room-center` 26 条、`upgrade-room-center`、`op-fences-constraint`、`tag-scan`，浏览器门店电脑组 room-center、rooms、target-devices、viewports、clockroom、frontdesk、desks、frontdesk-risk、dining-v8115、frontdesk-808、admin-ia、floormap、locations，room-center 在另外四组也过；块 E、F 与菜品 P1：浏览器门店电脑组 technician-admin、clockroom、technicians、member-\* 七个、flows、dishes、dining、dining-v8115、shift-drawers、target-devices、viewports 53 条，另外四组 technician-admin 与 viewports 52 条过（8 条按尺寸跳过）。
 - 合在一起的分支：见 PR #137 说明里的「验证」一节（完整 SHA、全量 `npm test`、CI）。
 
 ## 5. 没做完的与风险

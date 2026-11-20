@@ -111,7 +111,7 @@ export function InvoicesPage() {
                 role="tab"
                 aria-selected={view === v}
                 onClick={() => setView(v)}
-                className={cn('h-9 rounded-full px-3.5 text-[13px] font-semibold', view === v ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
+                className={cn('tap relative h-9 rounded-full px-3.5 text-[13px] font-semibold', view === v ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
                 data-testid={`invoice-view-${v}`}
               >
                 {INVOICE_VIEW_LABELS[v]}

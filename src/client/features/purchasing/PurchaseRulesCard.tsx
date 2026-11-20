@@ -221,7 +221,7 @@ export function PurchaseRulesCard() {
                           disabled={!on && t.approverIds.length >= APPROVAL_MAX_STAFF}
                           onClick={() => setTier(i, { approverIds: on ? t.approverIds.filter((x) => x !== a.id) : [...t.approverIds, a.id] })}
                           className={cn(
-                            'h-8 rounded-full border px-3 text-[12.5px] font-semibold disabled:opacity-40',
+                            'tap relative h-8 rounded-full border px-3 text-[12.5px] font-semibold disabled:opacity-40',
                             on ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2',
                           )}
                           aria-pressed={on}

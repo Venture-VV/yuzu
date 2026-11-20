@@ -14,6 +14,8 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { businessDateOf } from '@shared/business-date';
+import { sortTiers, type TierPrice } from '@shared/catalog';
+import { methodsCellText, plusYuan, pricesText } from '@shared/dishes';
 import { DEFAULT_ROOM_RULES } from '@shared/rooms';
 import { buildApp } from '../app';
 import { createSession, destroySession, SESSION_COOKIE } from '../auth/session';
@@ -69,6 +71,38 @@ const DISHES = [
   { name: '演示果汁', category: '餐饮', price: 2200, station: '演示水吧' },
 ];
 const TABLE = { name: '演示1号桌', area: '样例派对区', seats: 4 };
+/**
+ * 菜品补完（8.1.17，docs/DISHES_V8117.md）：演示奶茶；两档、辣度必选（特辣加 ¥2）的演示牛肉面；演示简餐 + 演示果汁的演示午餐套餐，
+ * 果汁可以换成奶茶（每份补 ¥6）——场景最后演示果汁沽清，套餐照卖（换奶茶）。走菜品管理的接口建，只建一次（按名称认已有的）
+ */
+const MENU_V8117 = [
+  { name: '演示奶茶', category: '餐饮', slot: 'water:手作饮料', station: '演示水吧', prices: { standard: 2800 } },
+  {
+    name: '演示牛肉面',
+    category: '餐饮',
+    slot: 'restaurant:餐饮',
+    station: '演示厨房',
+    prices: { standard: 3800, premium: 4800 },
+    methods: [
+      { name: '不辣', group: '辣度', price: 0 },
+      { name: '微辣', group: '辣度', price: 0 },
+      { name: '特辣', group: '辣度', price: 200 },
+      { name: '免葱', group: '', price: 0 },
+    ],
+    methodGroups: [{ name: '辣度', required: true }],
+  },
+  {
+    name: '演示午餐套餐',
+    category: '餐饮',
+    slot: 'restaurant:餐饮',
+    station: '演示厨房',
+    prices: { standard: 6800 },
+    combo: [
+      { part: '演示简餐', quantity: 1 },
+      { part: '演示果汁', quantity: 1, swaps: [{ to: '演示奶茶', priceDiff: 600 }] },
+    ],
+  },
+] as const;
 /**
  * 券与会员权益（v0.7.20）：三个券模板（代金、兑换、折扣）；发给演示会员沈先生（seed-billing-demo 建的，手机号 19900008811）
  * 满 200 减 30、足疗兑换券各一张；印一批 5 张满 200 减 30 的无记名券。只发券、不结账，不影响结账块的日结固定预期
@@ -227,7 +261,7 @@ export async function findConflicts(sql: Sql, ownerId: number): Promise<string[]
     else if (!cur.active) out.push(`演示技师 ${t.techNo} 已停用`);
   }
   const items = await sql<{ name: string; active: boolean; technicianRequired: boolean }[]>`
-    SELECT name, active, technician_required FROM service_items WHERE name IN ${sql([TECH_ITEM.name, ...DISHES.map((d) => d.name)])}`;
+    SELECT name, active, technician_required FROM service_items WHERE name IN ${sql([TECH_ITEM.name, ...DISHES.map((d) => d.name), ...MENU_V8117.map((d) => d.name)])}`;
   for (const i of items) {
     if (!i.active) out.push(`项目「${i.name}」已停用`);
     else if (i.name === TECH_ITEM.name && !i.technicianRequired) out.push(`项目「${i.name}」没有设成「需要技师」`);
@@ -465,6 +499,33 @@ export async function seedShowcaseDemo(sql: Sql, config: AppConfig): Promise<Sho
       done.push(`桌台「${TABLE.name}」`);
     }
     const tableId = await idOf(sql, tableQuery());
+
+    // ── 菜品补完（8.1.17）：两档、辣度必选的面，果汁可换奶茶的套餐（菜品管理的接口；已有同名的直接用） ──
+    for (const d of MENU_V8117) {
+      if ((await itemQuery(d.name))[0]) continue;
+      const idByName = async (name: string) => Number((await itemQuery(name))[0]!.id);
+      const combo =
+        'combo' in d
+          ? await Promise.all(
+              d.combo.map(async (c) => ({
+                itemId: await idByName(c.part),
+                quantity: c.quantity,
+                ...('swaps' in c ? { swappable: true, swaps: await Promise.all(c.swaps.map(async (w) => ({ itemId: await idByName(w.to), priceDiff: w.priceDiff }))) } : {}),
+              })),
+            )
+          : [];
+      await owner('POST', '/api/dining/dishes', {
+        clientKey: randomUUID(),
+        name: d.name,
+        category: d.category,
+        slot: d.slot,
+        stationId: stations[d.station],
+        prices: d.prices,
+        ...('methods' in d ? { methods: d.methods, methodGroups: d.methodGroups } : {}),
+        combo,
+      });
+      done.push(`菜品「${d.name}」`);
+    }
 
     // ── 实时位置：刷卡点、项目所在区域 ──
     for (const r of READERS) {
@@ -705,6 +766,8 @@ export interface ShowcaseState {
    * 演示无记名券的批次（张数、可用张数）
    */
   coupons: { templates: string[]; member: Record<string, string>; batches: { template: string; quantity: number; available: number }[] };
+  /** 菜品补完（8.1.17）：菜名 → 价格、做法（Excel 一格的写法）、套餐内容（可换的写能换成的与差价） */
+  menu: Record<string, string>;
 }
 
 /** 场景块现在的样子（与 showcase-expected.json 同一个形状）；按天的状态（在岗、沽清）按今天的营业日取 */
@@ -810,6 +873,33 @@ export async function showcaseState(sql: Sql, timeZone: string): Promise<Showcas
       FROM coupon_issues i JOIN coupon_templates t ON t.id = i.template_id
       WHERE i.kind = 'batch' AND i.reason = ${COUPON_BATCH.note} AND t.name IN ${sql(couponNames)} ORDER BY i.id`
   ).map((b) => ({ template: b.template, quantity: Number(b.quantity), available: Number(b.available) }));
+  const menu: Record<string, string> = {};
+  for (const d of MENU_V8117) menu[d.name] = '没有这道菜';
+  for (const r of await sql<{ id: number; name: string }[]>`SELECT id, name FROM service_items WHERE active AND name IN ${sql(MENU_V8117.map((d) => d.name))}`) {
+    const prices = sortTiers(await sql<TierPrice[]>`SELECT tier, price FROM service_item_prices WHERE item_id = ${r.id}`).map((p) => ({ tier: p.tier, price: Number(p.price) }));
+    const methods = await sql<{ name: string; groupName: string | null; price: number }[]>`SELECT name, group_name, price FROM dish_methods WHERE item_id = ${r.id} ORDER BY sort_no, name`;
+    const groups = await sql<{ name: string; required: boolean }[]>`SELECT name, required FROM dish_method_groups WHERE item_id = ${r.id} ORDER BY sort_no, name`;
+    const parts = await sql<{ itemId: number; name: string; quantity: number }[]>`
+      SELECT c.item_id, i.name, c.quantity FROM dish_combo_items c JOIN service_items i ON i.id = c.item_id WHERE c.combo_item_id = ${r.id} ORDER BY c.sort_no, c.item_id`;
+    const swaps = await sql<{ itemId: number; name: string; priceDiff: number }[]>`
+      SELECT w.item_id, t.name, w.price_diff FROM dish_combo_swaps w JOIN service_items t ON t.id = w.to_item_id
+      WHERE w.combo_item_id = ${r.id} ORDER BY w.item_id, w.sort_no, w.to_item_id`;
+    const swapsOf = (itemId: number) =>
+      swaps
+        .filter((w) => Number(w.itemId) === Number(itemId))
+        .map((w) => `${w.name}${Number(w.priceDiff) > 0 ? ` ${plusYuan(Number(w.priceDiff))}` : ''}`)
+        .join('、');
+    menu[r.name] = [
+      pricesText(prices),
+      methodsCellText(
+        methods.map((m) => ({ name: m.name, group: m.groupName ?? '', price: Number(m.price) })),
+        groups,
+      ),
+      parts.map((p) => `${p.name}×${p.quantity}${swapsOf(p.itemId) ? `（可换：${swapsOf(p.itemId)}）` : ''}`).join('、'),
+    ]
+      .filter(Boolean)
+      .join(' | ');
+  }
   return {
     guests,
     rooms,
@@ -824,6 +914,7 @@ export async function showcaseState(sql: Sql, timeZone: string): Promise<Showcas
     usages,
     guide: { kinds, markers },
     coupons: { templates: couponTemplates, member: memberCoupons, batches },
+    menu,
   };
 }
 

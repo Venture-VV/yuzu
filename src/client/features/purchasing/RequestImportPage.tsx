@@ -18,6 +18,7 @@ import { loadTableFile, type LoadedTable } from '../../lib/import-file';
 import { useCan, useSession } from '../../lib/session';
 import { cn, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable } from '../../components/DataTable';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, ConfirmCheck, Field, Notice, Select } from '../../components/ui';
@@ -138,7 +139,7 @@ export function RequestImportPage() {
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to="/purchasing" className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回采购">
+            <Link to="/purchasing" className="tap relative -ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回采购">
               <ArrowLeft className="size-[18px]" />
             </Link>
             集采导入
@@ -240,72 +241,78 @@ export function RequestImportPage() {
                   ))}
                 </Notice>
               )}
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[920px] text-[13px]">
-                  <thead>
-                    <tr className="border-b border-line text-left text-[12px] font-semibold text-ink-3">
-                      <th className="py-2 pr-2">行</th>
-                      <th className="pr-2">部门</th>
-                      <th className="pr-2">产品</th>
-                      <th className="pr-2">用途</th>
-                      <th className="pr-2 text-right">数量</th>
-                      <th className="pr-2">优先级</th>
-                      <th className="pr-2">期望到货</th>
-                      <th className="pr-2">链接 · 途径</th>
-                      <th>问题</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.rows.map((r) => (
-                      <tr
-                        key={r.row}
-                        className={cn('border-b border-line/60 align-top', r.skipped ? 'text-ink-4' : r.issues.length > 0 && 'bg-clay-soft/40')}
-                        data-testid={`request-import-row-${r.row}`}
-                        data-skipped={r.skipped || undefined}
-                      >
-                        <td className="num py-2 pr-2 text-ink-3">{r.row}</td>
-                        <td className="pr-2">{r.department?.name ?? (r.departmentText || '—')}</td>
-                        <td className="pr-2">
-                          {r.name}
-                          {r.material ? (
-                            <span className="ml-1 text-[12px] text-ink-3">物料</span>
-                          ) : (
-                            r.name && (
-                              <Badge tone="yuzu" className="ml-1">
-                                新产品
-                              </Badge>
-                            )
-                          )}
-                          {r.skipped && <Badge className="ml-1">不导入 · 线下{r.offline.map((c) => c.replace('是否', '已')).join('、')}</Badge>}
-                          {r.applicant && <span className="block text-[12px] text-ink-3">申请人 {r.applicant}</span>}
-                          {r.details && <span className="block text-[12px] text-ink-3">{r.details}</span>}
-                        </td>
-                        <td className="pr-2">{r.purpose}</td>
-                        <td className="num pr-2 text-right">
-                          {r.qtyMilli !== null ? formatQty(r.qtyMilli) : '—'} {r.unit}
-                        </td>
-                        <td className="pr-2">
-                          <span className="inline-flex items-center gap-1">
-                            <PriorityDot priority={r.priority} />
-                            {PRIORITY_LABELS[r.priority]}
-                          </span>
-                        </td>
-                        <td className="num pr-2">{r.needBy ?? '—'}</td>
-                        <td className="max-w-[220px] pr-2">
-                          {r.link ? (
-                            <a href={r.link} target="_blank" rel="noreferrer" className="block truncate text-lake hover:underline" title={r.link}>
-                              {r.link.replace(/^https?:\/\//, '')}
-                            </a>
-                          ) : null}
-                          {r.channel ? channelLabel(r.channel) : !r.link && '—'}
-                          {r.supplier && ` · ${r.supplier.name}`}
-                        </td>
-                        <td className="text-[12.5px] font-semibold text-clay">{r.issues.join('；')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                variant="plain"
+                tableClassName="min-w-[920px]"
+                rows={preview.rows}
+                rowKey={(r) => r.row}
+                rowClassName={(r) => cn('align-top', r.skipped ? 'text-ink-4' : r.issues.length > 0 && 'bg-clay-soft/40')}
+                rowTestId={(r) => `request-import-row-${r.row}`}
+                columns={[
+                  { key: 'row', header: '行', cellClassName: 'num text-ink-3', cell: (r) => r.row },
+                  { key: 'department', header: '部门', cell: (r) => r.department?.name ?? (r.departmentText || '—') },
+                  {
+                    key: 'name',
+                    header: '产品',
+                    cell: (r) => (
+                      <>
+                        {r.name}
+                        {r.material ? (
+                          <span className="ml-1 text-[12px] text-ink-3">物料</span>
+                        ) : (
+                          r.name && (
+                            <Badge tone="yuzu" className="ml-1">
+                              新产品
+                            </Badge>
+                          )
+                        )}
+                        {r.skipped && <Badge className="ml-1">不导入 · 线下{r.offline.map((c) => c.replace('是否', '已')).join('、')}</Badge>}
+                        {r.applicant && <span className="block text-[12px] text-ink-3">申请人 {r.applicant}</span>}
+                        {r.details && <span className="block text-[12px] text-ink-3">{r.details}</span>}
+                      </>
+                    ),
+                  },
+                  { key: 'purpose', header: '用途', cell: (r) => r.purpose },
+                  {
+                    key: 'qty',
+                    header: '数量',
+                    numeric: true,
+                    cell: (r) => (
+                      <>
+                        {r.qtyMilli !== null ? formatQty(r.qtyMilli) : '—'} {r.unit}
+                      </>
+                    ),
+                  },
+                  {
+                    key: 'priority',
+                    header: '优先级',
+                    cell: (r) => (
+                      <span className="inline-flex items-center gap-1">
+                        <PriorityDot priority={r.priority} />
+                        {PRIORITY_LABELS[r.priority]}
+                      </span>
+                    ),
+                  },
+                  { key: 'needBy', header: '期望到货', cellClassName: 'num', cell: (r) => r.needBy ?? '—' },
+                  {
+                    key: 'link',
+                    header: '链接 · 途径',
+                    cellClassName: 'max-w-[220px]',
+                    cell: (r) => (
+                      <>
+                        {r.link ? (
+                          <a href={r.link} target="_blank" rel="noreferrer" className="block truncate text-lake hover:underline" title={r.link}>
+                            {r.link.replace(/^https?:\/\//, '')}
+                          </a>
+                        ) : null}
+                        {r.channel ? channelLabel(r.channel) : !r.link && '—'}
+                        {r.supplier && ` · ${r.supplier.name}`}
+                      </>
+                    ),
+                  },
+                  { key: 'issues', header: '问题', cellClassName: 'text-[12.5px] font-semibold text-clay', cell: (r) => r.issues.join('；') },
+                ]}
+              />
             </section>
           )}
 

@@ -105,7 +105,7 @@ export function AdminHome() {
                     .filter((g) => g.items.length > 0)
                     .map((g) => (
                       <div key={g.key}>
-                        <p className="mb-1.5 text-[11.5px] font-bold tracking-wide text-ink-4">{g.title}</p>
+                        <p className="mb-1.5 text-[12px] font-bold tracking-wide text-ink-4">{g.title}</p>
                         <ul className="grid gap-2 sm:grid-cols-2">
                           {g.items.map((k) => (
                             <li key={k}>

@@ -343,12 +343,12 @@ export function FrontdeskPage() {
                         type="button"
                         onClick={() => openTag(t)}
                         className={cn(
-                          'flex h-8 items-center gap-1.5 rounded-full border px-3 font-bold',
+                          'tap relative flex h-8 items-center gap-1.5 rounded-full border px-3 font-bold',
                           t === primary ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong',
                         )}
                       >
                         <span className="num">{t.code}</span>
-                        <span className="text-[11.5px] font-semibold opacity-75">
+                        <span className="text-[12px] font-semibold opacity-75">
                           {ZONE_LABELS[t.zone].short}
                           {t.kind === 'vip' ? ` · VIP${t.vipLevel}` : ''} · {t.visit ? '在店' : t.locked ? '锁定' : '空闲'}
                         </span>

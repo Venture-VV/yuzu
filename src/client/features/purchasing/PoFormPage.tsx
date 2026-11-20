@@ -420,7 +420,7 @@ function PoForm({ mode, existing }: { mode: Mode; existing?: PurchaseOrder }) {
           <span className="flex items-center gap-2.5">
             <Link
               to={existing ? `/purchasing?po=${existing.id}` : '/purchasing'}
-              className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink"
+              className="tap relative -ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink"
               aria-label="返回采购"
             >
               <ArrowLeft className="size-[18px]" />

@@ -132,7 +132,7 @@ export function StockTab() {
           {todo.length > 0 && (
             <div className="flex flex-wrap gap-2" data-testid="inv-todo-chips">
               {todo.map((t) => (
-                <Link key={t.label} to={t.to} className="flex h-8 items-center gap-1.5 rounded-full bg-yuzu-soft px-3 text-[12.5px] font-bold text-yuzu-deep hover:bg-yuzu-tint">
+                <Link key={t.label} to={t.to} className="tap relative flex h-8 items-center gap-1.5 rounded-full bg-yuzu-soft px-3 text-[12.5px] font-bold text-yuzu-deep hover:bg-yuzu-tint">
                   {t.label} <span className="num">{t.n}</span>
                   <ArrowRight className="size-3.5" />
                 </Link>
@@ -151,7 +151,7 @@ export function StockTab() {
                     key={t}
                     to={`/inventory/new/${t}`}
                     className={cn(
-                      'flex h-10 items-center gap-2 rounded-md px-3.5 text-[13.5px] font-bold transition-colors',
+                      'tap relative flex h-10 items-center gap-2 rounded-md px-3.5 text-[13.5px] font-bold transition-colors',
                       primary ? 'bg-pine text-paper hover:bg-pine-hover' : 'border border-line-strong bg-card text-ink-2 hover:border-ink-3 hover:text-ink',
                     )}
                   >
@@ -164,7 +164,7 @@ export function StockTab() {
                 <>
                   <Link
                     to="/inventory/direct/new"
-                    className="flex h-10 items-center gap-2 rounded-md border border-pine/50 bg-pine-tint px-3.5 text-[13.5px] font-bold text-pine hover:border-pine"
+                    className="tap relative flex h-10 items-center gap-2 rounded-md border border-pine/50 bg-pine-tint px-3.5 text-[13.5px] font-bold text-pine hover:border-pine"
                     data-testid="inv-direct-new"
                   >
                     <PackageOpen className="size-4" />
@@ -172,7 +172,7 @@ export function StockTab() {
                   </Link>
                   <Link
                     to="/inventory/direct/import"
-                    className="flex h-10 items-center gap-2 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3 hover:text-ink"
+                    className="tap relative flex h-10 items-center gap-2 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3 hover:text-ink"
                     data-testid="inv-direct-import"
                   >
                     <FileUp className="size-4" />
@@ -321,7 +321,7 @@ function FilterChip({ active, onClick, children, tone }: { active: boolean; onCl
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'h-8 rounded-full px-3 text-[12.5px] font-semibold whitespace-nowrap transition-colors',
+        'tap relative h-8 rounded-full px-3 text-[12.5px] font-semibold whitespace-nowrap transition-colors',
         active ? (tone === 'clay' ? 'bg-clay text-paper' : 'bg-ink text-paper') : 'border border-line-strong bg-card text-ink-2 hover:border-ink-3',
       )}
     >
@@ -456,7 +456,7 @@ function MaterialDetail({ id, warehouseId: initialWarehouse, onClose, closable }
                 aria-checked={b.warehouseId === card.data.warehouse.id}
                 onClick={() => setWarehouseId(b.warehouseId)}
                 className={cn(
-                  'flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-semibold',
+                  'tap relative flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-semibold',
                   b.warehouseId === card.data.warehouse.id ? 'bg-ink text-paper' : 'border border-line-strong bg-card text-ink-2 hover:border-ink-3',
                 )}
               >
@@ -499,7 +499,7 @@ function MaterialDetail({ id, warehouseId: initialWarehouse, onClose, closable }
               <Link
                 key={t}
                 to={`/inventory/new/${t}?m=${m.id}`}
-                className="flex h-8 items-center gap-1.5 rounded-md border border-line-strong bg-card px-2.5 text-[12.5px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
+                className="tap relative flex h-8 items-center gap-1.5 rounded-md border border-line-strong bg-card px-2.5 text-[12.5px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
               >
                 {INV_DOC_META[t].title}
               </Link>
@@ -545,7 +545,10 @@ function MaterialDetail({ id, warehouseId: initialWarehouse, onClose, closable }
             action={
               can('inventory.operate') &&
               central && (
-                <Link to={`/inventory/new/opening?m=${m.id}`} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-pine px-3.5 text-[13px] font-bold text-paper hover:bg-pine-hover">
+                <Link
+                  to={`/inventory/new/opening?m=${m.id}`}
+                  className="tap relative inline-flex h-9 items-center gap-1.5 rounded-md bg-pine px-3.5 text-[13px] font-bold text-paper hover:bg-pine-hover"
+                >
                   建立期初 <ArrowRight className="size-4" />
                 </Link>
               )

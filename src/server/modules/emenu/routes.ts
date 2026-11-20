@@ -34,7 +34,8 @@ export function registerEmenuRoutes(app: FastifyInstance, deps: Deps) {
   // ── 平板 ──
   // 维护电子菜单的人预览时也读这一份
   // 设计师在工作台点「预览 → 在这台电脑上打开」也读这一份（8.1.1，只读；按手牌找客人、下单照旧只给平板）
-  app.get('/api/emenu/menu', { preHandler: guardAny('emenu.view', 'emenu.manage', 'studio.edit') }, async () => readSnapshot(sql, (tx) => emenuMenu(tx, deps)));
+  // 8.1.17（BW3）：打开平板点餐的账号按自己的出品口下单权限标「请找服务员点」（后台预览、工作台不限）
+  app.get('/api/emenu/menu', { preHandler: guardAny('emenu.view', 'emenu.manage', 'studio.edit') }, async (req) => readSnapshot(sql, (tx) => emenuMenu(tx, deps, undefined, req.actor)));
   app.get('/api/emenu/guest', { preHandler: tablet }, async (req) => emenuGuest(sql, req.query ?? {}));
   app.get('/api/emenu/table', { preHandler: tablet }, async (req) => checkEmenuTable(sql, req.query ?? {}));
   app.post('/api/emenu/orders', { preHandler: tablet }, async (req) => placeEmenuOrder(deps, req.body, req.actor, req.ip));

@@ -50,7 +50,11 @@ export function StudioSection() {
                   {s.openComments > 0 && <span className="ml-2 text-clay">{s.openComments} 条批注没解决</span>}
                 </p>
               </div>
-              <Link to={`/studio/${s.surface}`} className="inline-flex h-10 items-center gap-2 rounded-md bg-pine px-4 text-sm text-paper hover:bg-pine-hover" data-testid={`studio-open-${s.surface}`}>
+              <Link
+                to={`/studio/${s.surface}`}
+                className="tap relative inline-flex h-10 items-center gap-2 rounded-md bg-pine px-4 text-sm text-paper hover:bg-pine-hover"
+                data-testid={`studio-open-${s.surface}`}
+              >
                 <PenTool className="size-4" /> 打开工作台
               </Link>
             </Card>

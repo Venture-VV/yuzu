@@ -20,6 +20,8 @@ import { ZoneChip } from './parts';
 import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
 import { PendingPanel, useFrontdeskOp } from './pending';
 import { useDiningMenu } from '../dining/queries';
+import { useOrderOutlets } from '../dining/OrderExtras';
+import { outletBlockedText } from '@shared/dining-v8115';
 import { useFrontdeskTechnicians } from './queries';
 import { TechnicianPicker } from './TechnicianPicker';
 
@@ -49,6 +51,9 @@ export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean
   const backfill = useBackfill();
   const dining = useDiningMenu(open && session.dining);
   const remainingOf = useMemo(() => new Map(backfill.state.active ? [] : (dining.data?.dishes ?? []).map((d) => [d.id, d.remaining])), [dining.data, backfill.state.active]);
+  // 进厨房的菜按出品口的下单权限（8.1.17 BW-3）：不能下单的出品口的菜标「不能在水吧下单」、不能点；服务端照样逐行核对
+  const orderOutlets = useOrderOutlets();
+  const outletOf = useMemo(() => new Map((dining.data?.dishes ?? []).map((d) => [d.id, d.outlet])), [dining.data]);
   const techRules = techs.data?.rules;
   const techOn = !!techRules?.enabled;
   const [picking, setPicking] = useState<{ item: ServiceItem; tier: PriceTier } | null>(null);
@@ -147,13 +152,8 @@ export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean
   const unavailableFor = (i: ServiceItem) =>
     i.gender && i.gender !== visit.zone
       ? `仅限${ZONE_LABELS[i.gender].title}`
-      : remainingOf.get(i.id) === 0
-        ? '已沽清'
-        : i.technicianRequired && techs.isPending
-          ? '正在加载技师…'
-          : i.technicianRequired && !techs.data
-            ? '技师名单没有加载出来'
-            : null;
+      : (outletBlockedText(outletOf.get(i.id), orderOutlets) ??
+        (remainingOf.get(i.id) === 0 ? '已沽清' : i.technicianRequired && techs.isPending ? '正在加载技师…' : i.technicianRequired && !techs.data ? '技师名单没有加载出来' : null));
   const missingTech = techOn && !!techRules?.requireTechnician && lines.some((l) => l.item.technicianRequired && !l.technicianId);
   const staleTech = lines.some((l) => l.technicianId && !techById.has(l.technicianId));
   const customParsed = custom.map((c) => ({ name: c.name.trim(), amount: parseYuan(c.amount) }));
@@ -239,7 +239,10 @@ export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean
                     key={c}
                     type="button"
                     onClick={() => setCategory(c)}
-                    className={cn('h-8 shrink-0 rounded-full px-3.5 text-[13px] font-semibold transition-colors', category === c ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
+                    className={cn(
+                      'tap relative h-8 shrink-0 rounded-full px-3.5 text-[13px] font-semibold transition-colors',
+                      category === c ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3',
+                    )}
                   >
                     {c}
                   </button>
@@ -318,7 +321,7 @@ export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean
                     type="button"
                     aria-label="移除"
                     onClick={() => setCustom((list) => list.filter((_, j) => j !== i))}
-                    className="flex size-10 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay"
+                    className="tap relative flex size-10 items-center justify-center rounded-md text-ink-3 hover:bg-clay-soft hover:text-clay"
                   >
                     <Trash2 className="size-4" />
                   </button>
@@ -344,15 +347,15 @@ export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean
                   <span className="min-w-0 flex-1">
                     <CartLineName line={l} className="block text-[13px]" />
                     {l.techLabel && (
-                      <span className={cn('flex items-center gap-1 text-[11.5px] font-semibold', l.technicianId && techById.has(l.technicianId) ? 'text-pine' : 'text-clay')}>
+                      <span className={cn('flex items-center gap-1 text-[12px] font-semibold', l.technicianId && techById.has(l.technicianId) ? 'text-pine' : 'text-clay')}>
                         <HandHeart className="size-3" />
                         {l.techLabel}
                       </span>
                     )}
-                    {techOn && l.item.technicianRequired && !l.technicianId && <span className="block text-[11.5px] font-semibold text-ink-3">未指定技师</span>}
+                    {techOn && l.item.technicianRequired && !l.technicianId && <span className="block text-[12px] font-semibold text-ink-3">未指定技师</span>}
                   </span>
                   <span className="flex items-center rounded-md border border-line bg-card">
-                    <button type="button" aria-label={`减少 ${l.name}`} onClick={() => add(l.key, -1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
+                    <button type="button" aria-label={`减少 ${l.name}`} onClick={() => add(l.key, -1)} className="tap relative flex size-7 items-center justify-center text-ink-2 hover:text-ink">
                       <Minus className="size-3.5" />
                     </button>
                     <QtyInput
@@ -365,7 +368,7 @@ export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean
                       className="h-7 w-8 text-[13px]"
                       testId={`add-items-qty-${l.item.id}`}
                     />
-                    <button type="button" aria-label={`增加 ${l.name}`} onClick={() => add(l.key, 1)} className="flex size-7 items-center justify-center text-ink-2 hover:text-ink">
+                    <button type="button" aria-label={`增加 ${l.name}`} onClick={() => add(l.key, 1)} className="tap relative flex size-7 items-center justify-center text-ink-2 hover:text-ink">
                       <Plus className="size-3.5" />
                     </button>
                   </span>

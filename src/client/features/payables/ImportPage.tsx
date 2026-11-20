@@ -9,6 +9,7 @@ import { loadTableFile, type LoadedTable } from '../../lib/import-file';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, downloadCsvRows, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
@@ -134,7 +135,7 @@ export function ImportPage() {
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to="/payables" className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回货款">
+            <Link to="/payables" className="tap relative -ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回货款">
               <ArrowLeft className="size-[18px]" />
             </Link>
             批量导入
@@ -229,30 +230,15 @@ export function ImportPage() {
                 </ul>
               )}
               {preview.sample.length > 0 && (
-                <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card">
-                  <table className="w-full min-w-[640px] text-left text-[13px]">
-                    <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                      <tr>
-                        {sampleColumns.map((c) => (
-                          <th key={c} className="px-3 py-2">
-                            {c}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-line/70">
-                      {preview.sample.map((r, i) => (
-                        <tr key={i}>
-                          {sampleColumns.map((c) => (
-                            <td key={c} className="px-3 py-1.5">
-                              {r[c]}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {preview.rowCount > preview.sample.length && <p className="px-3 py-2 text-[12px] text-ink-3">只显示前 {preview.sample.length} 行。</p>}
+                <div>
+                  <DataTable
+                    onPage
+                    tableClassName="min-w-[640px]"
+                    rows={preview.sample}
+                    rowKey={(_r, i) => i}
+                    columns={sampleColumns.map((c) => ({ key: c, header: c, cell: (r: Record<string, string>) => r[c] }))}
+                  />
+                  {preview.rowCount > preview.sample.length && <p className="mt-1.5 px-3 text-[12px] text-ink-3">只显示前 {preview.sample.length} 行。</p>}
                 </div>
               )}
             </section>

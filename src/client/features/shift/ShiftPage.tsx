@@ -284,7 +284,7 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
     <div className="mt-4 grid gap-4 md:grid-cols-2" data-testid="shift-summary">
       <div className="rounded-lg border border-line p-4">
         <p className="text-[13px] font-bold text-ink-2">
-          前台结账 {summary.checkouts.count} 张 · <Money cents={summary.checkouts.total} className="font-bold" />
+          前台结账 {summary.checkouts.count} 张 · <Money cents={summary.checkouts.total} size="key" />
         </p>
         <ul className="mt-2 space-y-1 text-[13px]">
           {summary.checkoutByMethod.length === 0 && <li className="text-ink-4">无</li>}
@@ -301,7 +301,7 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
       </div>
       <div className="rounded-lg border border-line p-4">
         <p className="text-[13px] font-bold text-ink-2">
-          会员充值 {summary.recharges.count} 笔 · 实收 <Money cents={summary.recharges.paid} className="font-bold" />
+          会员充值 {summary.recharges.count} 笔 · 实收 <Money cents={summary.recharges.paid} size="key" />
         </p>
         <ul className="mt-2 space-y-1 text-[13px]">
           {summary.recharges.byMethod.length === 0 && <li className="text-ink-4">无</li>}
@@ -417,7 +417,7 @@ function ShiftRow({ s }: { s: ShiftRecord }) {
             {diff! > 0 ? '长款' : '短款'} ¥{(Math.abs(diff!) / 100).toFixed(2)}
           </Badge>
         )}
-        <Money cents={s.summary.checkouts.total + s.summary.recharges.paid} className="font-bold" />
+        <Money cents={s.summary.checkouts.total + s.summary.recharges.paid} size="key" />
       </button>
       {open && (
         <div className="border-t border-line bg-paper/50 px-4 pb-4">

@@ -4,6 +4,7 @@ import { FileUp, Lock, Nfc, Plus, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router';
 import { MAX_VIP_LEVEL, TAG_KIND_LABELS, TAG_ZONES, ZONE_LABELS, ZONES, type FrontdeskRules, type HandTag, type TagKind, type Zone } from '@shared/frontdesk';
 import { CARD_UID_PATTERN, normalizeCardUid, type FrontdeskRiskRules } from '@shared/frontdesk-risk';
+import { MAX_OVERTIME_HOURLY_CENTS } from '@shared/frontdesk-v8117';
 import { parseHandTagCsv, type HandTagCsvResult, type HandTagImportReport } from '@shared/hand-tag-import';
 import { formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
@@ -12,7 +13,7 @@ import { useCan, useReasons } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, ConfirmCheck, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, ConfirmCheck, Field, Input, MoneyInput, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
 import { groupTags, tagKindText, VipChip, ZoneChip, ZONE_STYLE } from '../frontdesk/parts';
 import { BlacklistPane } from '../frontdesk/blacklist';
 import { ReaderStatusLine, useCardReader, type CardMessage } from '../frontdesk/TagCardInput';
@@ -398,6 +399,8 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
   const [minutes, setMinutes] = useState('');
   const [fee, setFee] = useState('');
   const [grace, setGrace] = useState('0');
+  /** 超时加收：每超 1 小时多少（元，8.1.17 BW-1）；0 = 不算价 */
+  const [hourly, setHourly] = useState('0');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -405,13 +408,23 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
     setMinutes(String(rules.selfVoidMinutes));
     setFee(yuan(rules.lostTagFeeCents));
     setGrace(String(rules.overtimeGraceMinutes ?? 0));
+    setHourly(yuan(rules.overtimeSurchargeHourlyCents ?? 0));
   }, [rules]);
 
   const n = Number(minutes);
   const g = Number(grace);
   const feeCents = parseYuan(fee);
+  const hourlyCents = hourly.trim() === '' ? 0 : parseYuan(hourly);
   const problem =
-    !Number.isInteger(n) || n < 0 || n > 120 ? '更正时限应为 0–120 分钟' : !Number.isInteger(g) || g < 0 || g > 120 ? '跳档宽限应为 0–120 分钟' : feeCents === null ? '丢牌赔偿金额不正确' : null;
+    !Number.isInteger(n) || n < 0 || n > 120
+      ? '更正时限应为 0–120 分钟'
+      : !Number.isInteger(g) || g < 0 || g > 120
+        ? '跳档宽限应为 0–120 分钟'
+        : feeCents === null
+          ? '丢牌赔偿金额不正确'
+          : hourlyCents === null || hourlyCents < 0 || hourlyCents > MAX_OVERTIME_HOURLY_CENTS
+            ? `超时加收每小时填 0 到 ${formatYuan(MAX_OVERTIME_HOURLY_CENTS)}`
+            : null;
 
   const save = async () => {
     setBusy(true);
@@ -421,6 +434,7 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
         selfVoidMinutes: n,
         lostTagFeeCents: feeCents,
         overtimeGraceMinutes: g,
+        overtimeSurchargeHourlyCents: hourlyCents,
       });
       onSaved();
     } catch (e) {
@@ -449,6 +463,16 @@ function RulesCard({ rules, onSaved }: { rules: FrontdeskRules | undefined; onSa
           hint="每个 12 小时分界点之后多少分钟内不跳档；0 表示超过即跳档"
         >
           <Input value={grace} onChange={(e) => setGrace(e.target.value)} inputMode="numeric" className="num" aria-label="门票跳档宽限" data-testid="rules-grace" />
+        </Field>
+        <Field
+          label={
+            <span className="flex items-center gap-1.5">
+              超时加收：每超 1 小时（元） <PendingBadge title="8.1.17 BW1：默认 0（不算价）；超过 12 小时以后不足 1 小时按 1 小时算，待确认" />
+            </span>
+          }
+          hint="在店超过 12 小时以后，客人卡上点「加收」时按超了几个小时（不足 1 小时按 1 小时）× 这个价先填好金额，照旧要人确认、照旧的权限与授权，不自动收钱；填 0 不算价（照旧手填）"
+        >
+          <MoneyInput value={hourly} onChange={(e) => setHourly(e.target.value)} aria-label="超时加收每小时" data-testid="rules-overtime-hourly" />
         </Field>
       </div>
 

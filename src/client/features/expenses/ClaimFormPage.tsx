@@ -346,7 +346,7 @@ export function ClaimFormPage() {
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to="/erp/expenses" className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回费用报销">
+            <Link to="/erp/expenses" className="tap relative -ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回费用报销">
               <ArrowLeft className="size-[18px]" />
             </Link>
             <span className="flex size-8 items-center justify-center rounded-full bg-lake-soft text-lake">

@@ -60,7 +60,7 @@ export function SalesInvoicesPage() {
                 role="tab"
                 aria-selected={view === v.key}
                 onClick={() => setParams(v.key === 'requested' ? {} : { view: v.key }, { replace: true })}
-                className={cn('h-9 rounded-full px-3.5 text-[13px] font-semibold', view === v.key ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
+                className={cn('tap relative h-9 rounded-full px-3.5 text-[13px] font-semibold', view === v.key ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
                 data-testid={`sales-invoice-view-${v.key}`}
               >
                 {v.label}

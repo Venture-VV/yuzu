@@ -105,7 +105,7 @@ export function EmenuAdminSection() {
           href="/emenu"
           target="_blank"
           rel="noreferrer"
-          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-semibold text-ink hover:border-ink-4"
+          className="tap relative inline-flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-semibold text-ink hover:border-ink-4"
           data-testid="emenu-admin-open"
         >
           <ExternalLink className="size-4" />
@@ -812,7 +812,7 @@ function CategoryDialog({ target, data, onClose, onSaved }: { target: EmenuCateg
                   aria-pressed={on}
                   onClick={() => setPeriods(on ? periods.filter((k) => k !== p.key) : sortPeriods([...periods, p.key]))}
                   className={cn(
-                    'h-8 rounded-full border px-3 text-[12.5px] font-semibold tabular-nums',
+                    'tap relative h-8 rounded-full border px-3 text-[12.5px] font-semibold tabular-nums',
                     on ? 'border-pine bg-pine-tint text-pine' : 'border-line bg-card text-ink-2 hover:border-line-strong',
                   )}
                   data-testid={`emenu-admin-category-period-${p.key}`}
@@ -1020,7 +1020,7 @@ function DishesTab({ data, apply }: { data: EmenuAdmin; apply: Apply }) {
               onClick={() => setEditing(d)}
               data-testid={`emenu-admin-dish-${d.name}`}
             >
-              <span className="flex h-[54px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-line bg-paper-2 text-[11px] text-ink-4">
+              <span className="flex h-[54px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-line bg-paper-2 text-[12px] text-ink-4">
                 {url ? <img src={url} alt="" loading="lazy" className="size-full object-cover" /> : '无图'}
               </span>
               <span className="min-w-0 flex-1">

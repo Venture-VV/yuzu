@@ -20,7 +20,7 @@ import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, Notice, Skeleton, Textarea } from '../../components/ui';
-import { CheckoutReceipt } from '../frontdesk/CheckoutDialog';
+import { CheckoutReceipt } from '../frontdesk/CheckoutReceipt';
 import { PaymentsSection, usePayRows } from '../frontdesk/payments';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { PrintButton } from '../print/PrintButton';
@@ -229,14 +229,14 @@ export function TableCheckoutDialog({
                   aria-pressed={on}
                   onClick={() => toggle(c.sessionId)}
                   className={cn(
-                    'flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold',
+                    'tap relative flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold',
                     on ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong',
                   )}
                   data-testid={`table-checkout-pick-${c.tableName}`}
                 >
                   {on ? <CircleCheck className="size-4" /> : <span className="size-4 rounded-full border-2 border-line-strong" />}
                   <span className="num">桌 {c.tableName}</span>
-                  <span className="text-[11.5px] font-semibold opacity-70">{c.guests} 人</span>
+                  <span className="text-[12px] font-semibold opacity-70">{c.guests} 人</span>
                 </button>
               );
             })}

@@ -84,7 +84,7 @@ export function DishRow({ dish, likes, liked, onLike }: { dish: Dish; likes: num
           aria-pressed={liked}
           aria-label={`${liked ? '取消点赞' : '点赞'}：${dish.name}`}
           className={cn(
-            'flex h-10 min-w-14 items-center justify-center gap-1 rounded-full px-3 text-[14px] font-extrabold transition-all active:scale-90',
+            'tap relative flex h-10 min-w-14 items-center justify-center gap-1 rounded-full px-3 text-[14px] font-extrabold transition-all active:scale-90',
             liked ? 'bg-energy text-white shadow-[0_2px_0_#7f3218]' : 'bg-cream text-ink-3 ring-1 ring-line-strong',
           )}
         >

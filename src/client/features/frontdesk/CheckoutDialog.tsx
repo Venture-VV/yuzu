@@ -1,22 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { invalidateRevenue, useBusinessToday } from '../../lib/revenue';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { Banknote, CircleCheck, Clock3, Gift, LogOut, ReceiptText, ShieldCheck, Ticket, Undo2 } from 'lucide-react';
-import {
-  CHECKOUT_METHOD_LABELS,
-  COUPON_PLATFORM_LABELS,
-  isFreeTicket,
-  PERK_KIND_LABELS,
-  perkOperatorsText,
-  perksTotal,
-  priceTicket,
-  ticketChangeNeedsGrant,
-  type CheckoutDetail,
-  type CheckoutPerk,
-  type CheckoutPreview,
-  type RefundShiftOptions,
-  type RefundSummary,
-} from '@shared/checkout';
+import { Banknote, CircleCheck, Clock3, LogOut, ShieldCheck, Ticket, Undo2 } from 'lucide-react';
+import { CHECKOUT_METHOD_LABELS, isFreeTicket, priceTicket, ticketChangeNeedsGrant, type CheckoutDetail, type CheckoutPreview, type RefundShiftOptions, type RefundSummary } from '@shared/checkout';
 import { minutesText } from '@shared/benefits';
 import type { CheckoutCouponOption } from '@shared/coupons';
 import { KITCHEN_STATUS_LABELS } from '@shared/dining';
@@ -26,7 +12,7 @@ import { describeHours, shiftDate } from '@shared/labels';
 import { formatYuan } from '@shared/money';
 import { api, ApiError, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
-import { cn, formatDateTime, formatTime } from '../../lib/utils';
+import { cn, formatTime } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { DateNav } from '../../components/DateNav';
@@ -45,6 +31,7 @@ import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './ba
 import { PaymentsSection, usePayRows } from './payments';
 import { allocateCountCards, type CheckoutCountCardOption, type CountCardAllocation } from '@shared/count-cards';
 import { pendingFor, PendingPanel, useFrontdeskOp, useFrontdeskPending } from './pending';
+import { CheckoutReceipt, isTableCheckout } from './CheckoutReceipt';
 import { RefundPanel, RefundsList } from './RefundPanel';
 import { stayText, useCheckout, useCheckoutDaySummary, useCheckoutPreview, useCheckouts, useRefreshFrontdesk, useTicketTypes } from './queries';
 import { InvoiceRequestButton } from '../sales-invoices/InvoiceRequest';
@@ -283,11 +270,11 @@ export function CheckoutDialog({
               '请先为没有票种的客人选择票种'
             ) : remaining > 0 ? (
               <>
-                还差 <Money cents={remaining} className="font-bold text-clay" />
+                还差 <Money cents={remaining} size="key" className="text-clay" />
               </>
             ) : remaining < 0 ? (
               <>
-                多收 <Money cents={-remaining} className="font-bold text-clay" />
+                多收 <Money cents={-remaining} size="key" className="text-clay" />
                 （现金找零不用登记，按应收记）
               </>
             ) : problems.some(Boolean) ? (
@@ -324,13 +311,13 @@ export function CheckoutDialog({
                   aria-pressed={on}
                   onClick={() => toggle(t.visit!.id)}
                   className={cn(
-                    'flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold',
+                    'tap relative flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold',
                     on ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong',
                   )}
                 >
                   {on ? <CircleCheck className="size-4" /> : <span className="size-4 rounded-full border-2 border-line-strong" />}
                   <span className="num">{t.code}</span>
-                  <span className="text-[11.5px] font-semibold opacity-70">{ZONE_LABELS[t.zone].short}</span>
+                  <span className="text-[12px] font-semibold opacity-70">{ZONE_LABELS[t.zone].short}</span>
                 </button>
               );
             })}
@@ -640,133 +627,6 @@ function ReviewTable({
   );
 }
 
-/** 结账单结的是餐饮桌台（S5 第二步）：反结账后恢复的是桌台，不是在店客人 */
-const isTableCheckout = (d: CheckoutDetail) => d.bills.some((b) => b.tableSessionId !== null);
-
-/** 结账单：所结手牌（桌台）、门票与收款明细 */
-/** 一笔优惠 / 赠送：类别、名称、减了多少，下面一行是说明与经办人（发放、授权、渠道） */
-export function PerkRow({ perk }: { perk: CheckoutPerk }) {
-  const sub = [perk.name ? perk.detail : '', perkOperatorsText(perk)].filter(Boolean).join(' · ');
-  return (
-    <div data-testid={`checkout-perk-${perk.kind}`}>
-      <p className="flex items-baseline gap-2">
-        <Badge tone={perk.kind === 'gift' ? 'yuzu' : perk.kind === 'discount' ? 'clay' : 'pine'}>{PERK_KIND_LABELS[perk.kind]}</Badge>
-        <span className="min-w-0 flex-1 truncate font-semibold">{perk.name || perk.detail}</span>
-        <span className="num shrink-0 font-bold">
-          −<Money cents={perk.amount} />
-        </span>
-      </p>
-      {sub && <p className="mt-0.5 text-[12px] break-all text-ink-3">{sub}</p>}
-    </div>
-  );
-}
-
-export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
-  const perkPayments = new Set(detail.perks.map((k) => k.paymentId));
-  const tenders = detail.payments.filter((pm) => !perkPayments.has(pm.id));
-  return (
-    <div className="space-y-3" data-testid="checkout-receipt">
-      <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-ink-3">
-        <ReceiptText className="size-4" />
-        <span className="num font-semibold text-ink-2">{detail.checkoutNo}</span>
-        <span>
-          {formatDateTime(detail.createdAt)} · {detail.operatorName}
-        </span>
-        {detail.status === 'voided' && <Badge tone="clay">已反结账</Badge>}
-        {detail.backfill && (
-          <span data-testid="checkout-backfill">
-            <Badge tone="lake">补录 · 纸质单 {detail.backfill.slipNo}</Badge>
-          </span>
-        )}
-      </div>
-      {detail.backfill && (
-        <p className="text-[12px] text-ink-3">
-          按纸质单上的实际时间结账：{detail.backfill.enteredByName}于 {formatDateTime(detail.backfill.enteredAt)} 补录。
-        </p>
-      )}
-      {detail.status === 'voided' && (
-        <Notice tone="warning" icon={<Undo2 className="size-4" />} title={`${detail.voidedByName ?? ''} 于 ${detail.voidedAt ? formatDateTime(detail.voidedAt) : ''} 反结账`}>
-          {detail.voidReason}。储值消费已按原单撤销，团购券登记已作废，{isTableCheckout(detail) ? '这几桌恢复为用餐中' : '客人恢复为在店未结'}。
-        </Notice>
-      )}
-      <div className="overflow-hidden rounded-lg border border-line">
-        <table className="w-full text-[13px]">
-          <thead className="bg-paper-2 text-[12px] text-ink-3">
-            <tr>
-              <th className="px-3 py-2 text-left font-semibold">手牌</th>
-              <th className="px-3 py-2 text-left font-semibold">门票</th>
-              <th className="px-3 py-2 text-right font-semibold">金额</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line/70">
-            {detail.bills.map((b) => (
-              <tr key={b.billId}>
-                <td className="px-3 py-2">
-                  <span className="num font-bold">{b.tableName !== null ? `桌 ${b.tableName}` : b.tagCode}</span>{' '}
-                  <span className="text-ink-3">
-                    {b.memberName ?? (b.guestLabel || '散客')}
-                    {b.tableName !== null && ` · ${b.guests} 人`}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-ink-2">
-                  {b.ticketName !== null && (
-                    <>
-                      {b.ticketName} · {b.ticketSegments === 1 ? '12 小时档' : `${b.ticketSegments} 段`} <Money cents={b.ticketAmount ?? 0} className="text-ink-3" />
-                    </>
-                  )}
-                  <span className="block text-[11.5px] text-ink-3">
-                    {b.tableName !== null ? '用餐' : '在店'} {Math.floor(b.stayMinutes / 60)} 时 {b.stayMinutes % 60} 分
-                    {b.ticketExtensionMinutes > 0 && ` · 会员浴票延迟 ${minutesText(b.ticketExtensionMinutes)}`}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <Money cents={b.amount} className="font-bold" />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {/* 优惠与赠送（8.1.15）：签赠、券、会员折扣、优惠 / 免单各一笔，写明经办人；下面只列真收的钱与预付抵扣 */}
-        {detail.perks.length > 0 && (
-          <div className="space-y-1.5 border-t border-line bg-yuzu-soft/40 px-3 py-2.5 text-[13px]" data-testid="checkout-perks">
-            <p className="flex items-center gap-1 text-[12px] font-bold text-ink-3">
-              <Gift className="size-3.5" /> 优惠与赠送
-            </p>
-            {detail.perks.map((k) => (
-              <PerkRow key={k.paymentId} perk={k} />
-            ))}
-            <p className="flex items-baseline justify-between border-t border-dashed border-line pt-1.5">
-              <span className="font-semibold">共优惠</span>
-              <Money cents={perksTotal(detail.perks)} className="font-bold text-yuzu-deep" />
-            </p>
-          </div>
-        )}
-        <div className="space-y-1 border-t border-line bg-paper/60 px-3 py-2.5 text-[13px]">
-          {tenders.length === 0 && <p className="text-ink-3">{detail.perks.length > 0 ? '优惠后应付为 0，未收款' : '应收为 0，未收款'}</p>}
-          {tenders.map((pm) => (
-            <p key={pm.id} className="flex flex-wrap items-baseline gap-2">
-              <span className="font-semibold">{CHECKOUT_METHOD_LABELS[pm.method]}</span>
-              <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">
-                {pm.method === 'wallet' && pm.consumption
-                  ? `${pm.memberName ?? ''} · ${pm.consumption.docNo} · 本金 ¥${(pm.consumption.principal / 100).toFixed(2)} / 赠金 ¥${(pm.consumption.bonus / 100).toFixed(2)}${pm.consumption.status === 'reversed' ? '（已撤销）' : ''}`
-                  : pm.method === 'coupon' && pm.coupon
-                    ? `${COUPON_PLATFORM_LABELS[pm.coupon.platform]} ${pm.coupon.code}${pm.coupon.dealName ? ` · ${pm.coupon.dealName}` : ''}${pm.coupon.status === 'voided' ? '（已作废）' : ''}`
-                    : pm.ref}
-              </span>
-              <Money cents={pm.amount} className="font-bold" />
-            </p>
-          ))}
-          <p className="flex items-baseline justify-between border-t border-dashed border-line pt-1.5">
-            <span className="font-bold">合计</span>
-            <Money cents={detail.totalAmount} className="text-[20px] font-bold text-pine" />
-          </p>
-        </div>
-      </div>
-      {detail.remainingMates.length > 0 && detail.status === 'completed' && <p className="text-[12.5px] text-ink-3">同行组里还有 {detail.remainingMates.join('、')} 在店，离店时另行结账。</p>}
-    </div>
-  );
-}
-
 /** 结账记录：查看结账单、反结账；可以切换营业日（过了营业日切换点仍能找到前一晚的单），之前的营业日需要历史营业日权限 */
 export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolean; onClose: () => void; focusId?: number | null }) {
   const can = useCan();
@@ -807,7 +667,7 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
           </span>
           <span className="font-semibold">
             营业额（与日结一致）
-            <Money cents={sum.net} className="font-bold text-ink" data-testid="checkout-records-net" />
+            <Money cents={sum.net} size="key" className="text-ink" data-testid="checkout-records-net" />
           </span>
           {sum.unshifted.count > 0 && (
             <span className="col-span-full text-clay" data-testid="checkout-records-unshifted">

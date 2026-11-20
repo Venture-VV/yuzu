@@ -83,7 +83,7 @@ export function RegisterPage({ onDone, onLogin }: { onDone: (me: CanteenMe) => v
         <div className="flex items-center justify-between bg-wood-deep px-5 py-2.5 text-white">
           <div>
             <h1 className="text-[20px] font-black tracking-wide">新同事登记</h1>
-            <span className="text-[11px] font-semibold tracking-[0.2em] text-wood-5" style={{ fontFamily: 'var(--font-en)' }}>
+            <span className="text-[12px] font-semibold tracking-[0.2em] text-wood-5" style={{ fontFamily: 'var(--font-en)' }}>
               NEW FRIEND
             </span>
           </div>

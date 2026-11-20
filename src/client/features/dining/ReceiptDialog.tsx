@@ -95,7 +95,7 @@ function ReceiptPaper({ r, onlyWaiting, onToggle, refreshing }: { r: DiningRecei
             {r.guests !== null && ` · ${r.guests} 人`} · {r.kind === 'table' ? '开台' : '到店'} {formatDateTime(r.openedAt)}
           </p>
           {r.closed && (
-            <p className="mt-1 inline-block rounded border border-ink-4/50 px-1.5 text-[11.5px] font-semibold text-ink-3" data-testid="dining-receipt-closed">
+            <p className="mt-1 inline-block rounded border border-ink-4/50 px-1.5 text-[12px] font-semibold text-ink-3" data-testid="dining-receipt-closed">
               {r.kind === 'table' ? '已结账 / 撤台' : '已离店'} · 只读
             </p>
           )}
@@ -155,7 +155,7 @@ function ReceiptPaper({ r, onlyWaiting, onToggle, refreshing }: { r: DiningRecei
                   <li key={l.billLineId} className="flex items-start gap-2.5" data-testid={`dining-receipt-line-${l.billLineId}`} data-state={l.state}>
                     <div className="min-w-0 flex-1">
                       <p className={cn('text-[14.5px] leading-snug font-bold', l.state === 'voided' && 'text-ink-4 line-through')}>{l.name}</p>
-                      <p className="mt-0.5 text-[11.5px] text-ink-4">
+                      <p className="mt-0.5 text-[12px] text-ink-4">
                         {slotLabel(l)}
                         {l.note && <span className="ml-1.5 font-semibold text-yuzu-deep">{l.note}</span>}
                       </p>
@@ -196,7 +196,7 @@ function ReceiptPaper({ r, onlyWaiting, onToggle, refreshing }: { r: DiningRecei
               {formatYuan(t.amount)}
             </span>
           </p>
-          <p className="mt-1 text-center text-[11px] text-ink-4">
+          <p className="mt-1 text-center text-[12px] text-ink-4">
             {r.trackServed ? '已出餐的菜要服务员点「上菜」后才算已上' : '出餐即算已上'} · {formatTime(r.serverTime)} 更新{refreshing ? ' · 刷新中…' : ''}
           </p>
         </footer>
