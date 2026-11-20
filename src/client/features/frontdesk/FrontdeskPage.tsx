@@ -2,7 +2,7 @@
 // 以及找客人、锁牌、补录纸质单。不参与结账：看账单、预结账、结账、结账记录都在收银台（CashierPage）。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
-import { FilePenLine, Hash, Keyboard, Lock, Search, ShieldCheck, UserPlus, X } from 'lucide-react';
+import { FilePenLine, Hash, Keyboard, Lock, Search, ShieldCheck, TriangleAlert, UserPlus, X } from 'lucide-react';
 import { matchTags, normalizeTagCode, TAG_ZONES, uniqueTagMatch, ZONE_LABELS, type BoardTag, type CheckinResult, type TagZone, type VisitDetail } from '@shared/frontdesk';
 import { useCan, useSession } from '../../lib/session';
 import { cn, isTypingTarget } from '../../lib/utils';
@@ -16,9 +16,10 @@ import { AddItemsDialog } from './AddItemsDialog';
 import { BackfillBar, useBackfill } from './backfill';
 import { BillPanel, type PanelAction } from './BillPanel';
 import { CheckinDialog, type CheckinPrefill } from './CheckinDialog';
+import { IncidentDialog, IncidentTodoDialog } from './IncidentDialogs';
 import { TicketDialog } from './CheckoutDialog';
 import { MemberEntitlements } from './desk';
-import { groupTags, Stat, TagCard, TagChip, VipChip, ZoneChip } from './parts';
+import { groupTags, Stat, StatusChip, TagCard, TagChip, VipChip, ZoneChip } from './parts';
 import { useBoard, useFrontdeskChecks, useRefreshFrontdesk, useServerNow, useVisit } from './queries';
 import { FindGuestDialog, TagLockDialog } from './ToolDialogs';
 import { JoinGroupDialog, SwapDialog } from './VisitDialogs';
@@ -49,6 +50,8 @@ export function FrontdeskPage() {
   const [status, setStatus] = useState<StatusFilter>('all');
   const [dialog, setDialog] = useState<null | { kind: 'checkin'; prefill: CheckinPrefill } | { kind: PanelAction }>(null);
   const [checksOpen, setChecksOpen] = useState(false);
+  /** 异常待办（8.1.15）：没处理完的上报、未结离店 */
+  const [todosOpen, setTodosOpen] = useState(false);
   /** 找在店客人、锁牌 / 解锁 */
   const [tool, setTool] = useState<null | { kind: 'find' } | { kind: 'lock'; code?: string }>(null);
   const backfill = useBackfill();
@@ -104,6 +107,7 @@ export function FrontdeskPage() {
     else if (resume === 'bill_post') setDialog({ kind: 'add' });
     else if (resume === 'tag_swap') setDialog({ kind: 'swap' });
     else if (resume === 'line_move') setDialog({ kind: 'move' });
+    else if (resume === 'visit_incident') setDialog({ kind: 'incident' });
     const next = new URLSearchParams(params);
     next.delete('resume');
     next.delete('c');
@@ -157,7 +161,8 @@ export function FrontdeskPage() {
     toast({
       tone: 'success',
       title: `${r.replayed ? '已发过牌' : '已发牌'} ${r.visits.map((v) => v.tagCode).join('、')}`,
-      body: r.groupNo ? `同行组 ${r.groupNo}` : undefined,
+      // 发牌前风控（8.1.15）：顺带标成「已到店」的预约
+      body: [r.groupNo ? `同行组 ${r.groupNo}` : '', r.arrivedBookings?.length ? `预约 ${r.arrivedBookings.map((b) => b.bookingNo).join('、')} 已标到店` : ''].filter(Boolean).join(' · ') || undefined,
     });
     if (r.visits[0]) select(r.visits[0].id);
   };
@@ -222,6 +227,15 @@ export function FrontdeskPage() {
         actions={
           can('frontdesk.read') ? (
             <>
+              {/* 异常待办（8.1.15）：有没处理完的写出几条 */}
+              <Button size="sm" variant="ghost" icon={<TriangleAlert className="size-4" />} onClick={() => setTodosOpen(true)} data-testid="open-incident-todos">
+                异常待办
+                {board.data && board.data.risk.openTodos > 0 && (
+                  <StatusChip tone="clay" className="ml-0.5" testId="incident-todo-count">
+                    {board.data.risk.openTodos} 条
+                  </StatusChip>
+                )}
+              </Button>
               <Button size="sm" variant="ghost" icon={<Search className="size-4" />} onClick={() => setTool({ kind: 'find' })} data-testid="open-find-guest">
                 找客人
               </Button>
@@ -466,11 +480,25 @@ export function FrontdeskPage() {
         )}
       </div>
 
-      {dialog?.kind === 'checkin' && <CheckinDialog open tags={tags} rules={board.data?.rules} prefill={dialog.prefill} onClose={() => setDialog(null)} onDone={afterCheckin} />}
-      {visit.data && dialog?.kind === 'add' && <AddItemsDialog open visit={visit.data} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `已挂到 ${v.tag.code}`)} />}
-      {visit.data && dialog?.kind === 'swap' && (
-        <SwapDialog open visit={visit.data} tags={tags} rules={board.data?.rules} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `已换牌，现为 ${v.tag.code}`)} />
+      {dialog?.kind === 'checkin' && (
+        <CheckinDialog open tags={tags} rules={board.data?.rules} riskEnabled={board.data?.risk.enabled ?? false} prefill={dialog.prefill} onClose={() => setDialog(null)} onDone={afterCheckin} />
       )}
+      {visit.data && dialog?.kind === 'add' && <AddItemsDialog open visit={visit.data} onClose={() => setDialog(null)} onDone={(v) => afterChange(v, `已挂到 ${v.tag.code}`)} />}
+      {visit.data && (dialog?.kind === 'swap' || dialog?.kind === 'lost') && (
+        <SwapDialog
+          open
+          visit={visit.data}
+          tags={tags}
+          rules={board.data?.rules}
+          lost={dialog.kind === 'lost'}
+          onClose={() => setDialog(null)}
+          onDone={(v) => afterChange(v, `已换牌，现为 ${v.tag.code}`)}
+        />
+      )}
+      {visit.data && dialog?.kind === 'incident' && (
+        <IncidentDialog open visit={visit.data} onClose={() => setDialog(null)} onDone={(v, message) => afterChange(v, message)} onLost={() => setDialog({ kind: 'lost' })} />
+      )}
+      <IncidentTodoDialog open={todosOpen} onClose={() => setTodosOpen(false)} onOpenVisit={select} />
       {visit.data && dialog?.kind === 'move' && (
         <MoveLinesDialog
           open

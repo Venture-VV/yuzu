@@ -72,21 +72,28 @@ test.describe('单笔上限与撤销时限', () => {
   test('撤销时限设为 2 小时：昨天的消费值班经理不能撤销，店主看到提示仍可办理', async ({ page }) => {
     await login(page, 'linlan');
     const me = (await (await page.request.get('/api/auth/me')).json()) as { today: string };
-    const rows = (await (await page.request.get(`/api/ledger?date=${shiftDate(me.today, -1)}&type=consume`)).json()) as {
-      docNo: string;
-      consumptionStatus: string;
-      checkoutNo: string | null;
-    }[];
-    // 前台结账的储值支付只能反结账、没有「撤销这张消费单」：按 --previous-day 灌的数据里，昨天也有这种单（测试会话复测 v0.7.3）
-    const target = rows.find((r) => r.consumptionStatus === 'completed' && !r.checkoutNo);
-    expect(target, '演示数据昨天应有未撤销的消费').toBeTruthy();
+    type Row = { docNo: string; consumptionStatus: string; checkoutNo: string | null; createdAt: string };
+    // 前台结账的储值支付只能反结账、没有「撤销这张消费单」：按 --previous-day 灌的数据里，昨天也有这种单（测试会话复测 v0.7.3）。
+    // 只挑 3 小时以前的单：营业日早上 6 点切换，CI 在 6 点前灌数据、6 点后才跑到这一条时，「昨天」的单可能是几十分钟前的，
+    // 还在 2 小时的撤销时限里（8.1.15 的 CI 碰上过）；昨天没有这样的单就往前再找一天（那时 --previous-day 的数据在前天）
+    let target: Row | undefined;
+    let daysBack = 0;
+    for (const back of [1, 2]) {
+      const rows = (await (await page.request.get(`/api/ledger?date=${shiftDate(me.today, -back)}&type=consume`)).json()) as Row[];
+      target = rows.find((r) => r.consumptionStatus === 'completed' && !r.checkoutNo && Date.now() - Date.parse(r.createdAt) > 3 * 3600_000);
+      if (target) {
+        daysBack = back;
+        break;
+      }
+    }
+    expect(target, '演示数据昨天（营业日刚切换时是前天）应有 3 小时以前、未撤销的消费').toBeTruthy();
     // 记下原来的撤销时限，结束后恢复（R1.2 起默认 48 小时，不是「不限」）
     const previous = ((await (await page.request.get('/api/settings')).json()) as { reversalWindowHours: number | null }).reversalWindowHours;
     expect((await page.request.put('/api/settings', { data: { reversalWindowHours: 2 } })).status()).toBe(200);
     try {
       const openReversal = async () => {
         await page.goto('/ledger');
-        await page.getByRole('button', { name: '前一天' }).click();
+        for (let i = 0; i < daysBack; i += 1) await page.getByRole('button', { name: '前一天' }).click();
         await page.getByText(target!.docNo).first().click();
         await page.getByRole('button', { name: '撤销这张消费单' }).click();
         return page.getByRole('dialog').filter({ hasText: '撤销消费（整单）' });

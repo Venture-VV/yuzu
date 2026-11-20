@@ -124,7 +124,7 @@ test.describe('S5 餐饮', () => {
       }
       if (changed) {
         await page.getByTestId('dining-items-save').click();
-        await expect(page.getByText('菜品的出品档口已保存')).toBeVisible();
+        await expect(page.getByText('菜品的出品档口与点单分类已保存')).toBeVisible();
       }
       // 8.1.7：点单分类写明（宫保鸡丁在餐厅，柠檬茶在水吧）
       admin = await getJson<DiningAdmin>(page, '/api/admin/dining');
@@ -220,6 +220,8 @@ test.describe('S5 餐饮', () => {
       await expect(pending.getByTestId(`dining-pending-${HOT.name}`)).toHaveCount(0);
       await pending.getByTestId(`dining-pending-${TEA.name}`).getByRole('button', { name: '退菜' }).click();
       await page.getByRole('dialog').locator('#reason-text').fill('E2E：客人不要了');
+      // 8.1.15（块 B2）：退菜时选责任岗位
+      await page.getByRole('dialog').getByTestId('dish-void-blame-water').click();
       await page.getByRole('dialog').getByRole('button', { name: '确认退菜' }).click();
       await expect(page.getByText(`${TEA.name} 已退`)).toBeVisible();
       await expect(pending.getByTestId(`dining-pending-${TEA.name}`)).toHaveCount(0);

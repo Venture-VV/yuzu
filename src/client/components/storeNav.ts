@@ -25,6 +25,8 @@ import {
   Wallet,
 } from 'lucide-react';
 import { ADMIN_ENTRY_PERMISSIONS } from '@shared/admin';
+import { DISH_PERMISSIONS } from '@shared/dishes';
+import { deskEntries } from '@shared/frontdesk';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../lib/session';
 
@@ -63,8 +65,10 @@ const STORE_NAV: StoreNavDomain[] = [
     items: [
       // 8.1.15（docs/DESKS_V8115.md）：原「前台」按业务环节拆成两个台——发卡台管入场（接待发牌、会员等级识别、换牌），
       // 收银台管离店结账（只读账单、预结账、结账、结账记录）。两个都按「查看在店手牌」显示，台里的操作照各自的权限
-      { to: '/frontdesk', label: '发卡台', icon: ConciergeBell, perm: 'frontdesk.read' },
-      { to: '/cashier', label: '收银台', icon: Banknote, perm: 'frontdesk.read' },
+      // 8.1.15 前台 1 细化（YB2）：入口再按各自的权限分——有「接待发牌、挂账、换牌」的看得到发卡台，有「结账收款」的看得到收银台；
+      // 两项都没有、只有查看的两个都看得到（进去只能看）。规则在 @shared/frontdesk 的 deskEntries
+      { to: '/frontdesk', label: '发卡台', icon: ConciergeBell, perm: 'frontdesk.read', when: (s) => deskEntries(s.permissions).issue },
+      { to: '/cashier', label: '收银台', icon: Banknote, perm: 'frontdesk.read', when: (s) => deskEntries(s.permissions).cashier },
       // 预约（v0.7.28 ③）：技师、派对房等、客房电话预订的预约看板；小程序的预约在这里确认
       { to: '/bookings', label: '预约', icon: CalendarClock, perm: 'booking.manage' },
     ],
@@ -76,6 +80,8 @@ const STORE_NAV: StoreNavDomain[] = [
     items: [
       // 8.0.8：看日结的（导出流水、经营总览）也能进来看「台账」
       { to: '/dining', label: '餐饮', icon: UtensilsCrossed, perm: ['dining.order', 'dining.kitchen', 'frontdesk.checkout', 'ledger.export', 'report.executive'], when: (s) => s.dining },
+      // 菜品管理（8.1.15，docs/DISHES_V8115.md，CP7）：平时是「餐饮」里的一个页签；只有菜品权限、进不了餐饮的岗位（少见）才显示这个入口
+      { to: '/dishes', label: '菜品', icon: UtensilsCrossed, perm: [...DISH_PERMISSIONS], when: (s) => s.dining && !canEnter('/dining', s.permissions) },
     ],
   },
   {
@@ -131,6 +137,12 @@ const STORE_NAV: StoreNavDomain[] = [
 
 const ALL_ITEMS = STORE_NAV.flatMap((d) => d.items.map((item) => ({ item, domain: d.key })));
 
+/** 这位账号的权限进不进得了主导航里的某个页面（只看权限，不看功能开没开） */
+function canEnter(to: string, permissions: readonly Permission[]): boolean {
+  const item = ALL_ITEMS.find(({ item: n }) => n.to === to)?.item;
+  return !!item && (Array.isArray(item.perm) ? item.perm : [item.perm]).some((p) => permissions.includes(p));
+}
+
 /** 一个入口管不管这个地址（会员工作台 / 只认它自己） */
 function covers(item: StoreNavItem, pathname: string): boolean {
   if (item.to === '/') return pathname === '/';
@@ -182,6 +194,7 @@ const LEGACY_ORDER = [
   '/lookup',
   '/guide',
   '/devices',
+  '/dishes',
   '/admin',
 ];
 const legacyRank = (to: string) => {

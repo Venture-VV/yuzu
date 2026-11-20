@@ -1,11 +1,13 @@
 // 8.1.7 点菜单（小票可视化，docs/DINING_V817.md 第 6 节，PENDING_DECISIONS.md CF8、CF9）：
 // 一桌（或一位手牌客人）点过的菜，像一张点餐小票：抬头门店名、桌号与分区、人数、开台时间；上菜进度；
 // 按每次下单分段，每道菜标已上 / 未上 / 制作中 / 已出餐 / 已退；底下合计（只算有效的）。开着时 10 秒刷新一次，可以只看未上的。
+// 8.1.15（块 B3）：每次下单写整单备注、送到哪间房。
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Clock3, Flame, RotateCcw, Soup } from 'lucide-react';
 import { RECEIPT_STATE_LABELS, slotLabel, type DiningReceipt, type DiningReceiptLine, type ReceiptLineState } from '@shared/dining';
+import { partsText } from '@shared/dishes';
 import { formatYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { useLivePoll } from '../../lib/livePoll';
@@ -141,6 +143,13 @@ function ReceiptPaper({ r, onlyWaiting, onToggle, refreshing }: { r: DiningRecei
                   {formatTime(o.postedAt)} · {o.postedByName}
                 </span>
               </p>
+              {(o.orderNote || o.deliverRoom) && (
+                <p className="mt-1 text-[12.5px] font-semibold text-lake" data-testid={`dining-receipt-order-note-${o.seq}`}>
+                  {o.deliverRoom && `送到房 ${o.deliverRoom}`}
+                  {o.deliverRoom && o.orderNote && ' · '}
+                  {o.orderNote && `整单：${o.orderNote}`}
+                </p>
+              )}
               <ul className="mt-1.5 space-y-2">
                 {o.shown.map((l) => (
                   <li key={l.billLineId} className="flex items-start gap-2.5" data-testid={`dining-receipt-line-${l.billLineId}`} data-state={l.state}>
@@ -150,6 +159,8 @@ function ReceiptPaper({ r, onlyWaiting, onToggle, refreshing }: { r: DiningRecei
                         {slotLabel(l)}
                         {l.note && <span className="ml-1.5 font-semibold text-yuzu-deep">{l.note}</span>}
                       </p>
+                      {/* 套餐（8.1.15 菜品管理）：下单当时含的几样 */}
+                      {l.parts.length > 0 && <p className="mt-0.5 text-[12px] text-ink-3">含 {partsText(l.parts)}</p>}
                     </div>
                     {/* 手持点单机（商米 V3，窄屏）上状态章在上、份数与金额在下，菜名留得宽；平板、收银机上一行排开 */}
                     <div className="flex shrink-0 flex-col items-end gap-1 min-[420px]:flex-row min-[420px]:items-start min-[420px]:gap-2.5">

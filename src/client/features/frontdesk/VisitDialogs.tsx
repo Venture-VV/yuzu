@@ -1,17 +1,35 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ArrowRight, CircleAlert, CircleCheck, ReceiptText, ShieldCheck } from 'lucide-react';
-import { BILL_SOURCE_LABELS, matchTags, normalizeTagCode, uniqueTagMatch, ZONE_LABELS, type BoardTag, type FrontdeskBoardRules, type VisitDetail } from '@shared/frontdesk';
+import {
+  matchTags,
+  normalizeTagCode,
+  PREVIEW_COLUMN_LABELS,
+  PREVIEW_COLUMNS,
+  previewBuckets,
+  uniqueTagMatch,
+  ZONE_LABELS,
+  type BoardTag,
+  type FrontdeskBoardRules,
+  type PreviewBill,
+  type PreviewColumn,
+  type VisitDetail,
+} from '@shared/frontdesk';
+import { rateText } from '@shared/benefits';
+import type { CheckoutPreview, MemberDiscountOption } from '@shared/checkout';
 import { grantCovers, type VipGrant } from '@shared/grants';
 import { formatYuan } from '@shared/money';
 import { api } from '../../lib/api';
 import { useReasons, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
+import { LoadFailed } from '../../components/LoadFailed';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, ConfirmCheck, Field, Input, Notice, Skeleton } from '../../components/ui';
 import { useCheckoutPreview, usePreview, useServerNow, stayText } from './queries';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
+import { cardProblem } from '@shared/frontdesk-risk';
+import { ReaderStatusLine, TagCardInput, type CardMessage } from './TagCardInput';
 import { GroupMark, VipChip, ZoneChip } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
 
@@ -25,6 +43,7 @@ export function SwapDialog({
   visit,
   tags,
   rules,
+  lost,
   onClose,
   onDone,
 }: {
@@ -32,6 +51,8 @@ export function SwapDialog({
   visit: VisitDetail;
   tags: BoardTag[];
   rules: FrontdeskBoardRules | undefined;
+  /** 手牌丢失（8.1.15，从「异常处置」进来）：原因、锁定原手牌、丢牌赔偿都预先选好，一步走完「锁旧牌、收赔付、换新牌」 */
+  lost?: boolean;
   onClose: () => void;
   onDone: (v: VisitDetail) => void;
 }) {
@@ -52,12 +73,15 @@ export function SwapDialog({
     staffName: session.staff.displayName,
     pick: (found) => ('visit' in found ? found.visit : null),
   });
+  /** 刷新牌带出牌号（8.1.15）：最近一次读卡的结果 */
+  const [cardNote, setCardNote] = useState<CardMessage | null>(null);
   useResetOnOpen(open, () => {
     setCode('');
-    setReason('');
-    setLockOld(false);
-    setChargeFee(false);
+    setReason(lost ? LOST_REASON : '');
+    setLockOld(!!lost);
+    setChargeFee(!!lost && fee > 0);
     setGrant(null);
+    setCardNote(null);
     op.clearError();
   });
   useEffect(() => {
@@ -121,8 +145,8 @@ export function SwapDialog({
     <Dialog
       open={open}
       onClose={op.busy ? () => {} : onClose}
-      title={`换牌 · ${visit.tag.code}`}
-      description="账单跟着客人走：换牌后原有消费明细全部保留在新手牌上"
+      title={`${lost ? '手牌丢失 · 换牌' : '换牌'} · ${visit.tag.code}`}
+      description={lost ? '锁旧牌、收赔付、换新牌一步走完：账单跟着客人走，原手牌锁定后不会再发出' : '账单跟着客人走：换牌后原有消费明细全部保留在新手牌上'}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -156,21 +180,30 @@ export function SwapDialog({
                   : undefined
               }
             >
-              <Input
+              {/* 新牌可以刷卡带出（8.1.15）：要同分区的空闲牌；读不出来的原因写在上面那一行 */}
+              <TagCardInput
                 id="swap-code"
-                data-autofocus
+                autoFocus
                 value={code}
                 disabled={locked}
-                onChange={(e) => edit(() => setCode(e.target.value.toUpperCase()))}
+                onChange={(v) => edit(() => setCode(v))}
                 onBlur={() => {
                   if (c && !target) {
                     const m = uniqueTagMatch(free, c);
                     if (m) setCode(m.code);
                   }
                 }}
+                isTagCode={(v) => matchTags(tags, v).length > 0}
+                listening={open && !locked}
+                showStatus={false}
+                showMessage={false}
+                onMessage={setCardNote}
+                check={(found) => cardProblem(found, visit.zone, (z) => ZONE_LABELS[z].title)}
+                okText={(found) => `已读到 ${found.tag.code}，核对后点「确认换牌」`}
                 invalid={!!problem}
                 placeholder={`${ZONE_LABELS[visit.zone].title}牌号`}
-                className="num text-[18px] font-bold"
+                ariaLabel="新手牌"
+                inputClassName="num text-[18px] font-bold"
               />
               {candidates.length > 1 && (
                 <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]" data-testid="swap-candidates">
@@ -190,6 +223,7 @@ export function SwapDialog({
             </Field>
           </div>
         </div>
+        <ReaderStatusLine message={cardNote} />
         <Field label="换牌原因">
           <div className="flex flex-wrap gap-1.5">
             {swapReasons.map((r) => (
@@ -358,7 +392,6 @@ export function PreviewDialog({
   // 门票（与结账共用计价）：按此刻的在店时长估算，结账时按结账时刻重新计算
   const priced = useCheckoutPreview(selected, open);
   const now = useServerNow(preview.data?.serverTime);
-  const pricedOf = (visitId: number) => priced.data?.visits.find((v) => v.visitId === visitId);
   const inStore = tags.filter((t) => t.visit);
   const toggle = (id: number) => setSelected((s) => (s.includes(id) ? (s.length > 1 ? s.filter((x) => x !== id) : s) : [...s, id]));
   // 可勾选：同组 + 当前 + 任意其他在店手牌（「任意指定多张未结手牌合并」）
@@ -370,21 +403,21 @@ export function PreviewDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      width="max-w-2xl"
+      width="max-w-3xl"
       title={
         <span className="flex items-center gap-2">
           <ReceiptText className="size-5 text-pine" /> 预结账
         </span>
       }
-      description="勾选要一起结的手牌，查看合并后的应收（含门票）"
+      description="勾选要一起结的手牌，分列查看门票、餐饮、客房、服务、优惠与押金"
       footer={
         <>
           <span className="mr-auto self-center text-[12.5px] text-ink-3">门票按此刻的在店时长估算，结账时按结账时刻重新计算</span>
-          <Button variant={onCheckout ? 'ghost' : 'primary'} onClick={onClose}>
+          <Button size="lg" variant={onCheckout ? 'ghost' : 'primary'} onClick={onClose}>
             关闭
           </Button>
           {onCheckout && (
-            <Button variant="primary" onClick={() => onCheckout(selected)} data-testid="preview-checkout">
+            <Button size="lg" variant="primary" onClick={() => onCheckout(selected)} data-testid="preview-checkout">
               去结账
             </Button>
           )}
@@ -409,7 +442,7 @@ export function PreviewDialog({
                 >
                   {on ? <CircleCheck className="size-4" /> : <span className="size-4 rounded-full border-2 border-line-strong" />}
                   <span className="num">{t.code}</span>
-                  <span className="text-[11.5px] font-semibold opacity-70">{ZONE_LABELS[t.zone].short}</span>
+                  <span className="text-[12px] font-semibold opacity-70">{ZONE_LABELS[t.zone].short}</span>
                 </button>
               );
             })}
@@ -423,79 +456,187 @@ export function PreviewDialog({
 
         {preview.isPending ? (
           <Skeleton className="h-40" />
-        ) : preview.error ? (
-          <Notice tone="error" title={preview.error.message} />
+        ) : preview.isError && !preview.data ? (
+          <LoadFailed title="预结账没取回来" onRetry={() => void preview.refetch()} retrying={preview.isFetching} testId="preview-failed">
+            {preview.error.message}
+          </LoadFailed>
         ) : (
-          preview.data && (
-            <div className="overflow-hidden rounded-lg border border-line bg-card">
-              <table className="w-full text-[13.5px]">
-                <thead className="bg-paper-2 text-[12px] text-ink-3">
-                  <tr>
-                    <th className="px-4 py-2 text-left font-semibold">手牌</th>
-                    <th className="px-2 py-2 text-left font-semibold">客人</th>
-                    <th className="px-2 py-2 text-right font-semibold">在店</th>
-                    <th className="px-4 py-2 text-right font-semibold">应收（含门票）</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line/70">
-                  {preview.data.visits.map((v) => (
-                    <tr key={v.visitId}>
-                      <td className="px-4 py-2.5">
-                        <span className="num font-bold">{v.tagCode}</span> <ZoneChip zone={v.zone} className="ml-1" />
-                      </td>
-                      <td className="max-w-[160px] truncate px-2 py-2.5 text-ink-2">{v.memberName ?? (v.guestLabel || '散客')}</td>
-                      <td className="num px-2 py-2.5 text-right text-ink-3">
-                        {formatTime(v.checkedInAt)} · {stayText(v.checkedInAt, now)}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        {(() => {
-                          const pv = pricedOf(v.visitId);
-                          if (!pv) return <Money cents={v.amountCents} className="font-bold" />;
-                          return (
-                            <>
-                              <Money cents={pv.amount} className="font-bold" />
-                              <span className="block text-[11.5px] text-ink-3">
-                                {pv.ticket ? (
-                                  <>
-                                    明细 <Money cents={pv.linesAmount} /> + 门票 <Money cents={pv.ticket.amount} />（{pv.ticket.tierLabel}）
-                                  </>
-                                ) : (
-                                  '还没有选票种，结账时补选'
-                                )}
-                              </span>
-                            </>
-                          );
-                        })()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="flex flex-wrap items-end justify-between gap-3 border-t border-line bg-paper/60 px-4 py-3">
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-ink-3">
-                  {preview.data.bySource.map((s) => (
-                    <span key={s.source}>
-                      {BILL_SOURCE_LABELS[s.source]} <Money cents={s.amountCents} className="font-semibold text-ink-2" />
-                    </span>
-                  ))}
-                </div>
-                <div className="text-right">
-                  <p className="text-[12px] text-ink-3">
-                    {preview.data.visits.length} 张手牌应收（含门票）
-                    {priced.data ? ` · 门票 ¥${(priced.data.visits.reduce((n, v) => n + (v.ticket?.amount ?? 0), 0) / 100).toFixed(2)}` : ''}
-                  </p>
-                  <span data-testid="preview-total">
-                    <Money cents={priced.data?.totalAmount ?? preview.data.totalCents} className="text-[26px] font-bold text-pine" />
-                  </span>
-                </div>
-              </div>
-            </div>
-          )
+          preview.data && <PreviewColumns bill={preview.data} priced={priced.data} pricing={priced.isPending} now={now} />
+        )}
+        {preview.data && priced.isError && !priced.data && (
+          <LoadFailed title="门票与优惠没算出来" onRetry={() => void priced.refetch()} retrying={priced.isFetching} testId="preview-pricing-failed">
+            上面先按已挂的明细列出来（不含门票）：{priced.error.message}
+          </LoadFailed>
         )}
         <Notice tone="info" icon={<CircleAlert className="size-4" />} title="这还不是结账单">
           预结账只汇总，不收款、不扣会员余额，手牌不会释放；门票每 12 小时跳一档（跳档宽限见前台规则），结账时按结账那一刻重新计算。
         </Notice>
       </div>
     </Dialog>
+  );
+}
+
+// ───────────────────────── 结账预览分列（8.1.15 前台 1 细化，docs/DESKS_V8115.md 第 7 节） ─────────────────────────
+
+/** 一格里写什么：金额（没有的写一条横线，还在算的写「…」）与一句小字 */
+interface PreviewCellData {
+  value: ReactNode;
+  note?: ReactNode;
+}
+
+/** 没有金额的格子：一条横线，字号与金额一样、颜色淡一档 */
+const NO_AMOUNT = <span className="text-ink-3">—</span>;
+
+/** 餐饮、客房、服务三列：金额与几项；一条明细都没有的写横线 */
+function linesCell(cents: number, lines: number, extra = ''): PreviewCellData {
+  if (cents === 0 && lines === 0) return { value: NO_AMOUNT };
+  return { value: <Money cents={cents} />, note: `${lines} 项${extra}` };
+}
+
+/** 优惠一列：会自动带上的会员折扣能省多少（绿色、带减号）；没有的写横线，还没算出来的写 waiting */
+function discountCell(discount: MemberDiscountOption | null, ready: boolean, waiting: ReactNode, note?: string): PreviewCellData {
+  if (!discount) return { value: ready ? NO_AMOUNT : waiting };
+  return {
+    value: (
+      <span className="text-pine">
+        −<Money cents={discount.amount} />
+      </span>
+    ),
+    note: note ?? `${discount.stateLabel} ${rateText(discount.rate)}`,
+  };
+}
+
+/** 六列排成一行：窄的地方两列、三列，对话框够宽时六列一排（按对话框自己的宽度，不按屏幕）。列名 12 像素、金额 16 像素 */
+function PreviewRow({ cells, testIdOf }: { cells: Record<PreviewColumn, PreviewCellData>; testIdOf: (column: PreviewColumn) => string }) {
+  return (
+    <div className="grid grid-cols-2 gap-1.5 @min-[26rem]:grid-cols-3 @min-[42rem]:grid-cols-6">
+      {PREVIEW_COLUMNS.map((c) => (
+        <div key={c} className="min-w-0 rounded-md bg-paper-2/70 px-2 py-1.5" data-testid={testIdOf(c)}>
+          <p className="text-[12px] font-semibold text-ink-3">{PREVIEW_COLUMN_LABELS[c]}</p>
+          <p className="num text-[16px] leading-snug font-bold whitespace-nowrap text-ink">{cells[c].value}</p>
+          {cells[c].note && <p className="text-[12px] leading-snug break-words text-ink-3">{cells[c].note}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 结账预览分列（《浴族系统需求汇总》前台 1 的细化；YB3、YB5–YB8）：每张手牌与合计都分成门票、餐饮、客房、服务、优惠、押金六列。
+ *   · 门票：此刻算出来的（还没选票种的写结账时选）；
+ *   · 餐饮、客房、服务：已挂的明细按来源归列——技师服务、洗浴项目、其他都算服务；一份套餐是一条餐饮；
+ *   · 优惠：会自动带上的会员折扣能省多少（一次结账一项，记在那位会员的手牌上）；券、签赠要收银员在结账时选，只写有几张可用；
+ *   · 押金：在住的客房还押着多少，退房时退，不在手牌结账里抵——只显示，不进应收。
+ * pricing：门票与优惠还在算（先列已挂的明细）
+ */
+function PreviewColumns({ bill, priced, pricing, now }: { bill: PreviewBill; priced: CheckoutPreview | undefined; pricing: boolean; now: number }) {
+  const discount = priced?.memberDiscounts?.[0] ?? null;
+  const coupons = priced?.storeCoupons?.filter((c) => c.usable) ?? [];
+  const gifts = coupons.filter((c) => c.gift).length;
+  const waiting = pricing ? '…' : NO_AMOUNT;
+  const otherText = (other: number) => (other > 0 ? `，含其他 ${formatYuan(other)}` : '');
+  const total = previewBuckets(bill.visits.flatMap((v) => v.bySource));
+  const ticketTotal = priced ? priced.visits.reduce((n, v) => n + (v.ticket?.amount ?? 0), 0) : null;
+  const noTicket = priced ? priced.visits.filter((v) => v.needsTicket).length : 0;
+  const due = priced?.totalAmount ?? bill.totalCents;
+  const rooms = [...new Set(bill.visits.flatMap((v) => v.deposit.rooms))];
+
+  const cellsOf = (v: PreviewBill['visits'][number]): Record<PreviewColumn, PreviewCellData> => {
+    const pv = priced?.visits.find((x) => x.visitId === v.visitId);
+    const b = previewBuckets(v.bySource);
+    return {
+      ticket: pv?.ticket
+        ? { value: <Money cents={pv.ticket.amount} />, note: `${pv.ticket.name} · ${pv.ticket.tierLabel}` }
+        : { value: pv ? NO_AMOUNT : waiting, note: pv?.needsTicket ? '结账时选票种' : undefined },
+      dining: linesCell(b.dining, b.lines.dining),
+      room: linesCell(b.room, b.lines.room),
+      service: linesCell(b.service, b.lines.service, otherText(b.other)),
+      discount: discountCell(discount && discount.tagCode === v.tagCode ? discount : null, !!priced, waiting),
+      deposit: v.deposit.rooms.length ? { value: <Money cents={v.deposit.amountCents} />, note: `客房 ${v.deposit.rooms.join('、')}，退房时退` } : { value: NO_AMOUNT },
+    };
+  };
+  const totalCells: Record<PreviewColumn, PreviewCellData> = {
+    ticket: { value: ticketTotal !== null ? <Money cents={ticketTotal} /> : waiting, note: noTicket > 0 ? `${noTicket} 张还没选票种` : undefined },
+    dining: linesCell(total.dining, total.lines.dining),
+    room: linesCell(total.room, total.lines.room),
+    service: linesCell(total.service, total.lines.service, otherText(total.other)),
+    discount: discountCell(discount, !!priced, waiting, '会员折扣，自动带上'),
+    deposit: rooms.length ? { value: <Money cents={bill.depositCents} />, note: '退房时退，不在这里抵' } : { value: NO_AMOUNT },
+  };
+
+  return (
+    <div className="@container space-y-2" data-testid="preview-columns">
+      <ul className="space-y-2">
+        {bill.visits.map((v) => {
+          const pv = priced?.visits.find((x) => x.visitId === v.visitId);
+          return (
+            <li key={v.visitId} className="rounded-lg border border-line bg-card p-3" data-testid={`preview-visit-${v.tagCode}`}>
+              <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="num text-[16px] font-bold">{v.tagCode}</span>
+                <ZoneChip zone={v.zone} />
+                <span className="max-w-[160px] min-w-0 truncate text-[13px] text-ink-2">{v.memberName ?? (v.guestLabel || '散客')}</span>
+                <span className="num text-[12px] text-ink-3">
+                  {formatTime(v.checkedInAt)} · {stayText(v.checkedInAt, now)}
+                </span>
+                <span className="ml-auto text-right">
+                  <Money cents={pv ? pv.amount : v.amountCents} className="text-[16px] font-bold" />
+                  <span className="block text-[12px] text-ink-3">
+                    {!pv ? (
+                      '已挂的明细，不含门票'
+                    ) : pv.ticket ? (
+                      <>
+                        明细 <Money cents={pv.linesAmount} /> + 门票 <Money cents={pv.ticket.amount} />（{pv.ticket.tierLabel}）
+                      </>
+                    ) : (
+                      '还没有选票种，结账时补选'
+                    )}
+                  </span>
+                </span>
+              </div>
+              <PreviewRow cells={cellsOf(v)} testIdOf={(c) => `preview-${v.tagCode}-${c}`} />
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="rounded-lg border border-line bg-paper/60 p-3" data-testid="preview-summary">
+        <p className="mb-1.5 text-[12px] font-bold text-ink-3">{bill.visits.length} 张手牌合计</p>
+        <PreviewRow cells={totalCells} testIdOf={(c) => `preview-col-${c}`} />
+        {priced && (
+          <p className="mt-2 text-[13px] leading-relaxed text-ink-2" data-testid="preview-perks">
+            {discount ? (
+              <>
+                优惠：{discount.memberName} 的「{discount.name}」（{discount.stateLabel} {rateText(discount.rate)}）结账时自动带上，省 <Money cents={discount.amount} className="font-semibold" />。
+              </>
+            ) : (
+              '优惠：没有能自动带上的会员折扣。'
+            )}
+            {coupons.length > 0 ? `另有 ${coupons.length} 张券可用${gifts > 0 ? `（其中签赠 ${gifts} 张）` : ''}，结账时由收银员选。` : '没有可用的券。'}
+          </p>
+        )}
+        {rooms.length > 0 && (
+          <p className="mt-1 text-[13px] leading-relaxed text-ink-2" data-testid="preview-deposit-note">
+            押金：客房 {rooms.join('、')} 还押着 <Money cents={bill.depositCents} className="font-semibold" />
+            ，退房时退，不在手牌结账里抵，下面的应收不含它。
+          </p>
+        )}
+        <div className="mt-3 flex flex-wrap items-end justify-end gap-x-5 gap-y-1 text-right">
+          {discount && (
+            <p className="text-[13px] text-ink-3" data-testid="preview-after-discount">
+              带上会员折扣后 <Money cents={Math.max(0, due - discount.amount)} className="text-[16px] font-bold text-ink" />
+            </p>
+          )}
+          <div>
+            <p className="text-[12px] text-ink-3">
+              {bill.visits.length} 张手牌应收（含门票）
+              {ticketTotal !== null ? ` · 门票 ${formatYuan(ticketTotal)}` : ''}
+            </p>
+            <span data-testid="preview-total">
+              <Money cents={due} className="text-[26px] font-bold text-pine" />
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

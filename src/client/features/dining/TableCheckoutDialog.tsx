@@ -2,6 +2,7 @@
 // 收款与手牌结账相同（同一套收款区）：可组合多种方式；储值只能用这几桌登记的会员；「优惠 / 免单」由值班经理及以上
 // 当场授权（这几桌、这个金额）；收款前先开班。应收合计、储值扣款构成以服务端为准，变化时拒绝并重新核对。
 // 反结账在「结账记录」里，与手牌结账相同（桌台须仍空闲）。
+// 8.1.15（块 B1）：并台的一组一起结——核对时服务端把一组都带上（选了附台带上主台），这里跟着勾上，附台写明并入哪桌。
 
 import { invalidateRevenue } from '../../lib/revenue';
 import { useEffect, useState } from 'react';
@@ -97,6 +98,12 @@ export function TableCheckoutDialog({
 
   const locked = op.locked;
   const p = preview.data;
+  // 并台（8.1.15）：服务端把一组都带上了，这里跟着勾上（取数中的旧数据不算）
+  useEffect(() => {
+    if (!p || locked || preview.isPlaceholderData) return;
+    const ids = p.sessions.map((s) => s.sessionId).sort((a, b) => a - b);
+    setSelected((cur) => (cur.length === ids.length && [...cur].sort((a, b) => a - b).every((x, i) => x === ids[i]) ? cur : ids));
+  }, [p, locked, preview.isPlaceholderData]);
   const total = p ? p.totalAmount : null;
   const sessionIds = p ? p.sessions.map((s) => s.sessionId) : selected;
   const pay = usePayRows({
@@ -309,6 +316,11 @@ function TableReview({ preview }: { preview: TableCheckoutPreview }) {
           <li key={s.sessionId} className="px-3 py-2.5">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <span className="num text-[15px] font-bold">桌 {s.tableName}</span>
+              {s.mergedInto !== null && (
+                <span className="text-[12.5px] font-semibold text-lake" data-testid={`table-checkout-merged-${s.tableName}`}>
+                  并入桌 {preview.sessions.find((x) => x.sessionId === s.mergedInto)?.tableName ?? ''}
+                </span>
+              )}
               <span className="text-[12.5px] text-ink-3">
                 {s.guests} 人 · {s.memberName ?? (s.guestLabel || '散客')} · {formatTime(s.openedAt)} 开台
               </span>

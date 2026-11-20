@@ -213,6 +213,8 @@ test.describe('8.0.8 前台整改', () => {
       const v1 = page.getByRole('dialog').filter({ hasText: `退菜 · ${JUICE.name}` });
       await expect(v1.getByTestId('dish-void-tier')).toContainText('小额');
       await v1.locator('#reason-text').fill('E2E 客人点错了');
+      // 8.1.15（块 B2）：退菜时选责任岗位
+      await v1.getByTestId('dish-void-blame-waiter').click();
       await v1.getByTestId('dish-void-confirm').click();
       await expect(page.getByText(`${JUICE.name} 已退`)).toBeVisible();
 
@@ -222,6 +224,7 @@ test.describe('8.0.8 前台整改', () => {
       await expect(v2.getByTestId('dish-void-tier')).toContainText('请值班经理及以上当场授权');
       await expect(v2.getByTestId('dish-void-confirm')).toHaveCount(0);
       await v2.locator('#reason-text').fill('E2E 等太久不要了');
+      await v2.getByTestId('dish-void-blame-kitchen').click();
       await v2.getByTestId('dish-void-authorize').click();
       const auth = page.getByRole('dialog').filter({ hasText: '当场授权 · 退菜（超过小额上限）' });
       await expect(auth).toContainText(SEAFOOD.name);
@@ -239,6 +242,7 @@ test.describe('8.0.8 前台整改', () => {
       const again = pending.getByTestId(`dining-pending-${JUICE.name}`);
       await again.getByRole('button', { name: '改', exact: true }).click();
       const v3 = page.getByRole('dialog').filter({ hasText: `改单 · ${JUICE.name}` });
+      await v3.getByTestId('dish-void-blame-guest').click();
       await page.route(
         '**/api/frontdesk/lines/*/void',
         async (route) => {
@@ -253,9 +257,10 @@ test.describe('8.0.8 前台整改', () => {
       await expect(page.getByText(`${JUICE.name} 已退，放回了购物车`)).toBeVisible();
       await expect(page.getByTestId('dining-cart')).toContainText(JUICE.name);
 
-      // ④ 退菜记录：两条，分别是「小额直接退」「当场授权（张经理）」
-      await page.getByTestId('dining-tab-voids').click();
-      const voids = page.getByTestId('dining-voids');
+      // ④ 退菜（8.1.15 起在台账里按「退菜」看）：两条，分别是「小额直接退」「当场授权（张经理）」
+      await page.getByTestId('dining-tab-ledger').click();
+      await page.getByTestId('dining-ledger-type').getByRole('radio', { name: '退菜' }).click();
+      const voids = page.getByTestId('dining-ledger');
       await expect(voids.locator('tr').filter({ hasText: JUICE.name }).first()).toContainText('小额直接退');
       await expect(voids.locator('tr').filter({ hasText: SEAFOOD.name }).first()).toContainText('当场授权（');
       await expect(voids.locator('tr').filter({ hasText: SEAFOOD.name }).first()).toContainText('E2E 等太久不要了');

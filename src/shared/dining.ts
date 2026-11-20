@@ -9,6 +9,8 @@
 //   · 下单多少分钟还没出餐标红提醒（默认 15 分钟）。
 
 import type { CheckoutMember } from './checkout';
+import type { LedgerKind, LedgerVoidRate, TableStateInfo, VoidBlame } from './dining-v8115';
+import type { DishAddonOption, DishPart } from './dishes';
 
 export interface DiningRules {
   /** 餐饮功能：关闭时前台挂账与升级前完全一样，主导航没有「餐饮」（默认关闭） */
@@ -27,6 +29,8 @@ export interface DiningRules {
    * 超过的照旧（本人 15 分钟内、经理），或值班经理及以上当场授权。0 为不分级
    */
   voidFreeCents: number;
+  /** 结账以后桌台先「待清台」，点「清台」才回到可用（8.1.15 块 B1，默认开）；关了结账后直接可用，与原来一样 */
+  clearAfterCheckout: boolean;
 }
 
 export const DEFAULT_DINING_RULES: DiningRules = {
@@ -36,6 +40,7 @@ export const DEFAULT_DINING_RULES: DiningRules = {
   warnMinutes: 15,
   tablesEnabled: true,
   voidFreeCents: 5000,
+  clearAfterCheckout: true,
 };
 
 /** 小额退菜上限最多 ¥1,000 */
@@ -178,6 +183,8 @@ export interface KitchenItem {
   note: string;
   /** 小程序扫了桌上的码点的菜送到哪张桌（v0.7.28；空为送到客人手里） */
   deliverTo: string;
+  /** 套餐下单当时含哪几样（8.1.15 菜品管理，每份套餐的份数）；不是套餐为空 */
+  parts: DishPart[];
   status: KitchenStatus;
   stationId: number;
   stationName: string;
@@ -189,6 +196,9 @@ export interface KitchenItem {
   postedByName: string;
   /** 客人已结账离店 / 这桌已结账（还没上的菜请与前台确认后处理） */
   visitClosed: boolean;
+  /** 整单备注、送达房号（8.1.15 块 B3；没有的为空） */
+  orderNote: string;
+  deliverRoom: string;
 }
 
 export interface KitchenBoard {
@@ -217,6 +227,13 @@ export interface MenuDish {
   /** 点单分类（8.1.7）：在哪一处、哪个小分类（后台没设的按默认归） */
   outlet: DiningOutlet;
   group: string;
+  /**
+   * 菜品管理（8.1.15，docs/DISHES_V8115.md）：可选的做法（不加钱，选了写进出品备注）、能点的加料（另起一行、备注写「配 某菜」）、
+   * 套餐含哪几样（下单一行，出品单上列出来）。点单页的菜单才带，都没有的菜不带；厨房屏的沽清列表不带
+   */
+  methods?: string[];
+  addons?: DishAddonOption[];
+  combo?: DishPart[];
 }
 
 export interface DiningMenu {
@@ -239,6 +256,8 @@ export interface DiningGuest {
   roomNo: string | null;
   /** 是按手牌还是按房号找到的（按房号找到的默认送到客房） */
   via?: 'tag' | 'room';
+  /** 送到哪间房（8.1.15 块 B3）：按房号找到的是那间房，手牌号、房号都填的是填的房号；没有为空 */
+  deliverRoom?: string;
 }
 
 /** 点过、还没上的菜（出品单）：点单页、桌台详情上可以催单、上菜、退菜 */
@@ -322,12 +341,14 @@ export interface TableSessionBrief {
   lineCount: number;
   /** 还没上的菜（份） */
   pendingDishes: number;
+  /** 并台（8.1.15 块 B1）：这桌并入了哪一次开台（主台）；不是附台为 null */
+  mergedInto: number | null;
 }
 
 export interface TablesBoard {
   serverTime: string;
   businessDate: string;
-  tables: (DiningTable & { session: TableSessionBrief | null })[];
+  tables: (DiningTable & TableStateInfo & { session: TableSessionBrief | null })[];
 }
 
 export interface TableSessionDetail {
@@ -351,6 +372,9 @@ export interface TableSessionDetail {
   /** 这桌点过、还没上的菜 */
   pending: PendingDish[];
   moves: { fromTable: string; toTable: string; reason: string; operatorName: string; at: string }[];
+  /** 并台（8.1.15 块 B1）：这桌并入了哪桌（附台）；并着哪几桌（主台），结账时一起结 */
+  mergedInto: { sessionId: number; tableName: string } | null;
+  merged: { sessionId: number; tableName: string; amount: number }[];
 }
 
 /** 桌台结账前核对（只读） */
@@ -367,6 +391,8 @@ export interface TableCheckoutPreview {
     openedAt: string;
     lines: { id: number; name: string; quantity: number; amount: number }[];
     amount: number;
+    /** 附台并入的那一次开台（8.1.15 块 B1）；结账时主台与附台一起结 */
+    mergedInto: number | null;
   }[];
   totalAmount: number;
   /** 这几桌登记的会员（可用储值支付），附余额 */
@@ -414,6 +440,10 @@ export interface DiningLedgerRow {
   voidReason: string | null;
   kitchenStatus: KitchenStatus | null;
   postedByName: string;
+  /** 8.1.15 块 B2：类型（正常 / 退菜 / 赠送 / 折扣）；退菜的审批方式与审批人、责任岗位（审计里记的，升级前退的没有） */
+  kind: LedgerKind;
+  approvalText: string | null;
+  blame: VoidBlame | null;
 }
 
 export interface DiningLedger {
@@ -424,6 +454,8 @@ export interface DiningLedger {
   rows: DiningLedgerRow[];
   /** 合计：份数、金额只算有效的；已退的另列 */
   totals: { lines: number; quantity: number; amount: number; voidedLines: number; voidedAmount: number };
+  /** 退菜率（8.1.15 块 B2）：按日期、分类筛完、类型筛之前的那一批算 */
+  voidRate: LedgerVoidRate;
 }
 
 /** 退菜记录的一行（8.0.8，B02） */
@@ -478,6 +510,8 @@ export interface DiningReceiptLine {
   unitPrice: number;
   amount: number;
   note: string;
+  /** 套餐下单当时含哪几样（8.1.15；不是套餐、没进厨房的为空） */
+  parts: DishPart[];
   kitchenStatus: KitchenStatus | null;
   state: ReceiptLineState;
 }
@@ -490,6 +524,9 @@ export interface DiningReceiptOrder {
   postedAt: string;
   postedByName: string;
   lines: DiningReceiptLine[];
+  /** 整单备注、送达房号（8.1.15 块 B3；没有的为空） */
+  orderNote: string;
+  deliverRoom: string;
 }
 
 export interface DiningReceipt {

@@ -23,7 +23,8 @@ import { BillPanel, type PanelAction } from './BillPanel';
 import { CheckoutDialog, CheckoutRecordsDialog } from './CheckoutDialog';
 import { BillPerks, gradeShort } from './desk';
 import { ChecksDialog } from './FrontdeskPage';
-import { GroupMark, LONG_STAY_MINUTES, Stat, VipChip, ZoneChip } from './parts';
+import { overstayOf } from '@shared/frontdesk-risk';
+import { GroupMark, Stat, VipChip, VisitStatusChips, ZoneChip } from './parts';
 import { stayMinutes, stayText, useBoard, useCheckoutPreview, useRefreshFrontdesk, useServerNow, useVisit } from './queries';
 import { FindGuestDialog } from './ToolDialogs';
 import { PreviewDialog } from './VisitDialogs';
@@ -140,7 +141,7 @@ export function CashierPage() {
       const v = t.visit!;
       if (filter === 'spent') return v.amountCents > 0;
       if (filter === 'group') return v.groupId !== null;
-      if (filter === 'long') return stayMinutes(v.checkedInAt, now) >= LONG_STAY_MINUTES;
+      if (filter === 'long') return overstayOf(stayMinutes(v.checkedInAt, now)) !== null;
       return true;
     });
     // 按牌号时沿用手牌板的顺序（分区、柜型、号段）
@@ -298,7 +299,7 @@ export function CashierPage() {
                     { value: 'all', label: `全部 ${inStore.length}` },
                     { value: 'spent', label: '有消费' },
                     { value: 'group', label: '同行' },
-                    { value: 'long', label: '超 6 小时' },
+                    { value: 'long', label: '超 12 小时' },
                   ]}
                 />
                 <label className="ml-auto flex items-center gap-1.5 text-[12.5px] text-ink-3">
@@ -393,7 +394,6 @@ export function CashierPage() {
 /** 待结账清单的一行：牌号、客人与档阶、同行、手上的券 / 签赠、在店多久、已挂多少 */
 function QueueRow({ tag, now, selected, primary, onClick }: { tag: BoardTag; now: number; selected: boolean; primary: boolean; onClick: () => void }) {
   const v = tag.visit!;
-  const long = stayMinutes(v.checkedInAt, now) >= LONG_STAY_MINUTES;
   return (
     <li>
       <button
@@ -429,7 +429,9 @@ function QueueRow({ tag, now, selected, primary, onClick }: { tag: BoardTag; now
             {v.groupNo && <GroupMark groupNo={v.groupNo} count={v.groupOpenCount} />}
           </span>
           <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-3">
-            <span className={cn('num font-semibold', long && 'rounded-sm bg-yuzu-soft px-1 text-yuzu-deep')}>在店 {stayText(v.checkedInAt, now)}</span>
+            <span className="num font-semibold">在店 {stayText(v.checkedInAt, now)}</span>
+            {/* 超时在店（8.1.15：超 12 / 24 / 72 小时黄 / 橙 / 红）、临时外出、异常待办：颜色都配文字与图标 */}
+            <VisitStatusChips visit={v} now={now} testId={`queue-${tag.code}`} />
             {/* 手上有能用的签赠 / 券：提醒收银别漏了 */}
             {v.gifts > 0 && (
               <span className="flex items-center gap-0.5 rounded-sm bg-yuzu-soft px-1 font-bold text-yuzu-deep" data-testid={`queue-${tag.code}-gift`}>

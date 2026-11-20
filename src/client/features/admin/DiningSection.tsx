@@ -181,8 +181,21 @@ function RulesCard() {
           />,
         )}
         {row(
+          '结账后先待清台',
+          '开启时（默认）桌台结完账先是「待清台」，服务员收拾好点「清台」才回到可用，之前不能开台、不能换过去；关闭后结账就空出来（与原来一样）。',
+          <Segmented
+            ariaLabel="结账后先待清台"
+            value={draft.clearAfterCheckout ? 'on' : 'off'}
+            onChange={(v) => editable && set({ clearAfterCheckout: v === 'on' })}
+            options={[
+              { value: 'on', label: '先待清台', disabled: !editable },
+              { value: 'off', label: '直接可用', disabled: !editable },
+            ]}
+          />,
+        )}
+        {row(
           '小额退菜上限',
-          '单条不超过这个金额的菜，服务员写原因就能直接退；超过的本人点的、规定时间内或经理照旧直接退，其余请值班经理及以上当场授权。填 0 不分级。退菜记录在「餐饮 → 退菜记录」。',
+          '单条不超过这个金额的菜，服务员写原因就能直接退；超过的本人点的、规定时间内或经理照旧直接退，其余请值班经理及以上当场授权。填 0 不分级。退菜在「餐饮 → 台账」里按「退菜」看。',
           <span className="w-32 shrink-0">
             <MoneyInput
               value={freeText ?? (draft.voidFreeCents / 100).toString()}
@@ -211,6 +224,7 @@ function RulesCard() {
           (draft.trackServed !== DEFAULT_DINING_RULES.trackServed ||
             draft.warnMinutes !== DEFAULT_DINING_RULES.warnMinutes ||
             draft.tablesEnabled !== DEFAULT_DINING_RULES.tablesEnabled ||
+            draft.clearAfterCheckout !== DEFAULT_DINING_RULES.clearAfterCheckout ||
             draft.voidFreeCents !== DEFAULT_DINING_RULES.voidFreeCents) && (
             <Button
               size="sm"

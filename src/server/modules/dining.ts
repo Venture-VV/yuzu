@@ -28,6 +28,7 @@ import {
 } from '@shared/dining';
 import { defaultTier, type TierPrice } from '@shared/catalog';
 import { can } from '@shared/permissions';
+import type { FrontdeskOpLookup } from '@shared/frontdesk';
 import type { Db, Tx } from '../db';
 import { guard, guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -41,6 +42,8 @@ import { saveRuleSetting } from '../lib/rule-settings';
 import { recordRecipeUsage, reverseRecipeUsage } from './stock-usage';
 import { settingRow } from '../lib/store-settings';
 import { currentStoreId } from '../lib/store-context';
+import { DeliverRoomField, findGuestByRoom, findGuestByTag, prepareDiningOrder } from './dining-order-v8115';
+import { comboPartsOf, withDishOptions } from './dish-options';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
   const row = await settingRow<Partial<DiningRules>>(db, 'dining_rules');
@@ -104,22 +107,41 @@ export interface KitchenLine {
 /**
  * 一次下单建一张出品单（同一个出品单号）：手牌客人的（visitId）或桌台的（tableSessionId）；补录纸质单的菜早已上过，直接记为已上菜。
  * deliverTo：小程序扫了桌上的码点的菜送到哪张桌（v0.7.28，桌台名称；空为送到客人手里）
+ * orderNote、deliverRoom（8.1.15 块 B3）：整单备注写进这一单每道菜的出品单；送到房间的记房号，「送到哪」没有别的时写「房 W301」
  */
 export async function createKitchenItems(
   tx: Tx,
-  args: { visitId: number | null; tableSessionId?: number | null; deliverTo?: string; lines: KitchenLine[]; date: string; at: Date; actor: Actor; backfill: boolean },
+  args: {
+    visitId: number | null;
+    tableSessionId?: number | null;
+    deliverTo?: string;
+    lines: KitchenLine[];
+    date: string;
+    at: Date;
+    actor: Actor;
+    backfill: boolean;
+    orderNote?: string;
+    deliverRoom?: string;
+  },
 ): Promise<string | null> {
   if (args.lines.length === 0) return null;
   const orderNo = await nextDocNo(tx, 'kitchen_order', 'CD', args.date);
   const done = args.backfill ? args.at : null;
+  const deliverTo = args.deliverTo || (args.deliverRoom ? `房 ${args.deliverRoom}` : '');
   const made: number[] = [];
+  // 套餐（8.1.15 菜品管理）：下单当时含哪几样记在出品单上（只读、不加锁；以后改了套餐，已经下的单还是当时的）
+  const combos = await comboPartsOf(
+    tx,
+    args.lines.map((l) => l.itemId),
+  );
   for (const l of args.lines) {
     const [row] = await tx<{ id: number }[]>`
       INSERT INTO kitchen_items (order_no, bill_line_id, visit_id, table_session_id, item_id, station_id, quantity, note, status, business_date,
-                                 limit_taken, created_by, created_at, done_by, done_at, served_by, served_at, deliver_to)
+                                 limit_taken, created_by, created_at, done_by, done_at, served_by, served_at, deliver_to, parts, order_note, deliver_room)
       VALUES (${orderNo}, ${l.billLineId}, ${args.visitId}, ${args.tableSessionId ?? null}, ${l.itemId}, ${l.stationId}, ${l.quantity}, ${l.note},
               ${args.backfill ? 'served' : 'queued'}, ${args.date}, ${l.limitTaken}, ${args.actor.id}, ${args.at},
-              ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done}, ${args.deliverTo ?? ''})
+              ${done ? args.actor.id : null}, ${done}, ${done ? args.actor.id : null}, ${done}, ${deliverTo},
+              ${tx.json((combos.get(l.itemId) ?? []) as never)}, ${args.orderNote ?? ''}, ${args.deliverRoom ?? ''})
       RETURNING id`;
     made.push(Number(row!.id));
   }
@@ -195,8 +217,8 @@ async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
 const ITEM_COLUMNS = (db: Db) => db`
   k.id, k.order_no, k.visit_id, h.code AS tag_code, v.zone, k.table_session_id, dt.name AS table_name,
   coalesce(m.name, nullif(v.guest_label, ''), tm.name, nullif(ts.guest_label, ''), '散客') AS guest, k.item_id, i.name,
-  k.quantity, k.note, k.deliver_to, k.status, k.station_id, s.name AS station_name, k.rush_count, k.created_at, k.started_at, k.done_at, k.served_at,
-  p.display_name AS posted_by_name, coalesce(v.status, ts.status) <> 'open' AS visit_closed`;
+  k.quantity, k.note, k.deliver_to, k.parts, k.status, k.station_id, s.name AS station_name, k.rush_count, k.created_at, k.started_at, k.done_at, k.served_at,
+  p.display_name AS posted_by_name, coalesce(v.status, ts.status) <> 'open' AS visit_closed, k.order_note, k.deliver_room`;
 const ITEM_FROM = (db: Db) => db`
   kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN kitchen_stations s ON s.id = k.station_id
   LEFT JOIN visits v ON v.id = k.visit_id LEFT JOIN hand_tags h ON h.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
@@ -228,7 +250,8 @@ export async function kitchenBoard(db: Db, deps: Deps): Promise<KitchenBoard> {
 export async function diningMenu(db: Db, deps: Deps): Promise<DiningMenu> {
   const today = await businessDate(db as Tx, deps, new Date());
   const { selfVoidMinutes } = await loadFrontdeskRules(db);
-  return { rules: await loadDiningRules(db), businessDate: today, dishes: await kitchenDishes(db, today), selfVoidMinutes };
+  // 点单页的菜单带上做法、加料、套餐内容（8.1.15 菜品管理；厨房屏 5 秒取一次的沽清列表不带）
+  return { rules: await loadDiningRules(db), businessDate: today, dishes: await withDishOptions(db, await kitchenDishes(db, today)), selfVoidMinutes };
 }
 
 /** 点单页按手牌找在店客人：只给点单需要的信息（不含会员手机号、余额与账单） */
@@ -243,6 +266,25 @@ export async function diningGuest(db: Db, tagCode: string): Promise<DiningGuest>
     WHERE s.status = 'open' AND vv.status = 'open' AND upper(r.room_no) = upper(${tagCode})`;
   if (stay) return { ...(await diningGuestOf(db, stay.visitId)), via: 'room' };
   throw notFound(`手牌 ${tagCode} 现在没有在店客人（也没有这个房号的在住客人），请核对`);
+}
+
+/**
+ * 点单页找客人（8.1.15 块 B3）：手牌号、房号至少一样。都填时按手牌找、房号是送到哪；只填房号的按 findGuestByRoom 找这间房现在的客人；
+ * 只填手牌号的照旧（手牌找不到时当房号找在住的客人）
+ */
+async function diningGuestFor(db: Db, q: { tag?: string; room?: string }): Promise<DiningGuest> {
+  if (q.tag && q.room) {
+    const visitId = await findGuestByTag(db, q.tag);
+    if (!visitId) throw notFound(`手牌 ${q.tag} 现在没有在店客人，请核对`);
+    return { ...(await diningGuestOf(db, visitId)), via: 'tag', deliverRoom: q.room };
+  }
+  if (q.room) {
+    const hit = await findGuestByRoom(db, q.room);
+    if (!hit) throw notFound(`房号 ${q.room} 现在没有登记的客人，请核对房号，或填手牌号`);
+    return { ...(await diningGuestOf(db, hit.visitId)), via: 'room', deliverRoom: q.room };
+  }
+  const g = await diningGuest(db, q.tag!);
+  return g.via === 'room' ? { ...g, deliverRoom: q.tag!.toUpperCase() } : g;
 }
 
 /** 这位客人在住的客房（没住店是 null） */
@@ -409,6 +451,8 @@ const RulesInput = z.object({
     .int('金额必须是整数（分）')
     .min(0, '不能小于 0')
     .max(MAX_VOID_FREE_CENTS, `最多 ¥${MAX_VOID_FREE_CENTS / 100}`),
+  // 8.1.15（块 B1）：结账以后桌台先待清台
+  clearAfterCheckout: z.boolean(),
 });
 const StationInput = z.object({
   name: z.string().trim().min(1, '请填写档口名称').max(MAX_STATION_NAME, `档口名称最多 ${MAX_STATION_NAME} 字`),
@@ -560,15 +604,21 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
     diningMenu(sql, deps),
   );
 
+  // 8.1.15（块 B3）：手牌号（tag）、房号（room）至少带一样；只带 tag 的照旧
   app.get('/api/dining/guest', { preHandler: guard('dining.order') }, async (req) => {
-    const { tag } = parse(z.object({ tag: z.string().trim().min(1, '请输入手牌号或房号').max(16) }), req.query ?? {});
-    return diningGuest(sql, tag);
+    const q = parse(
+      z.object({ tag: z.string().trim().max(16).optional(), room: DeliverRoomField }).refine((v) => !!v.tag || !!v.room, '请输入手牌号或房号'),
+      req.query ?? {},
+    );
+    return diningGuestFor(sql, { ...(q.tag ? { tag: q.tag } : {}), ...(q.room ? { room: q.room } : {}) });
   });
 
-  // 下单就是挂账：与钟房派钟一样还要「前台挂账」权限（断网后的「结果待确认」按前台的操作编号查回、作废）
-  app.post('/api/dining/orders', { preHandler: guard('dining.order', 'frontdesk.operate') }, async (req) => {
+  // 下单就是挂账（断网后的「结果待确认」按前台的操作编号查回、作废）。8.1.15（块 B3）起按出品口逐行核对「在某个出品口下单」，
+  // 不再另要「前台挂账」（康美部只有水吧、果吧的下单权限）；只填房号找到的客人在挂账的事务里再核对一次这间房还是他
+  app.post('/api/dining/orders', { preHandler: guard('dining.order') }, async (req) => {
     const body = parse(z.object({ visitId: z.number('请先选客人').int().positive('请先选客人'), toRoom: z.boolean().optional() }).passthrough(), req.body);
     const { postCharges } = await import('./frontdesk/bills');
+    const order = await prepareDiningOrder(sql, req.actor, req.body);
     // 客房点餐（8.0.20）：送到客房的，出品单上写房号。住哪间在挂账的事务里、核对完操作编号之后才查（见 PostOptions.toRoom）
     const visitId = body.visitId;
     const toRoom = body.toRoom
@@ -577,11 +627,32 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
           if (!roomNo) throw unprocessable('ROOM_NOT_STAYING', '这位客人现在没有在住的客房，不能送到客房');
           return `客房 ${roomNo}`;
         }
-      : undefined;
+      : order.toRoom;
     const { toRoom: _toRoom, ...rest } = req.body as Record<string, unknown>;
     // 点单页只能点进厨房的菜（其他项目、手动金额请到前台登记）
     await postCharges(deps, visitId, { ...rest, customLines: [] } as never, ctxOf(req), { dining: { onlyKitchen: true }, ...(toRoom ? { toRoom } : {}) });
     return diningGuestOf(sql, body.visitId);
+  });
+
+  // 点单页下单「结果待确认」的查回与确认作废（8.1.15，Codex 审查 f6327a4）：下单只要「餐饮点单」+ 出品口权限（康美部没有前台权限），
+  // 查回、作废也照这个来——有「餐饮点单」，或有前台原来那一项（查回要「查看在店手牌」、作废要「接待发牌、挂账、换牌」，同一台设备上
+  // 前台的同事也能处理）。只认点单用的业务类型（挂账 bill_post）；查回只说生效没生效、记在哪次来访上，不给整张账单；
+  // 编号属于别的前台业务的，这里只答「没查到」、不作废（作废登记绑定业务类型，只拦同类型的原请求，见 lib/fences.ts）
+  const DiningOpKey = z.object({ key: z.uuid('操作编号格式不正确') });
+  const diningOpResult = (r: FrontdeskOpLookup): FrontdeskOpLookup => {
+    if (!r.found) return r;
+    if (r.type !== 'bill_post') return { found: false, abandoned: false };
+    return { found: true, type: 'dining_order', visitId: r.visit.id };
+  };
+  app.get('/api/dining/ops/:key', { preHandler: guardAny('dining.order', 'frontdesk.read') }, async (req) => {
+    const { key } = parse(DiningOpKey, req.params);
+    const { lookupFrontdeskOp } = await import('./frontdesk/visits');
+    return diningOpResult((await lookupFrontdeskOp(sql, key, deps.config.timezone, 'bill_post')) as FrontdeskOpLookup);
+  });
+  app.post('/api/dining/ops/:key/abandon', { preHandler: guardAny('dining.order', 'frontdesk.operate') }, async (req) => {
+    const { key } = parse(DiningOpKey, req.params);
+    const { abandonFrontdeskOp } = await import('./frontdesk/visits');
+    return diningOpResult((await abandonFrontdeskOp(deps, key, 'bill_post', ctxOf(req))) as FrontdeskOpLookup);
   });
 
   app.post('/api/dining/items/:id/rush', { preHandler: guard('dining.order') }, async (req) => {

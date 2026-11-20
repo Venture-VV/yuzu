@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FileUp, Lock, Plus, ShieldCheck } from 'lucide-react';
+import { FileUp, Lock, Nfc, Plus, ShieldCheck } from 'lucide-react';
 import { Link } from 'react-router';
 import { MAX_VIP_LEVEL, TAG_KIND_LABELS, TAG_ZONES, ZONE_LABELS, ZONES, type FrontdeskRules, type HandTag, type TagKind, type Zone } from '@shared/frontdesk';
+import { CARD_UID_PATTERN, normalizeCardUid, type FrontdeskRiskRules } from '@shared/frontdesk-risk';
 import { parseHandTagCsv, type HandTagCsvResult, type HandTagImportReport } from '@shared/hand-tag-import';
 import { formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
@@ -13,14 +14,19 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, ConfirmCheck, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
 import { groupTags, tagKindText, VipChip, ZoneChip, ZONE_STYLE } from '../frontdesk/parts';
+import { BlacklistPane } from '../frontdesk/blacklist';
+import { ReaderStatusLine, useCardReader, type CardMessage } from '../frontdesk/TagCardInput';
 import { SubPane } from '../../components/SubNav';
 import { AdminPage } from './AdminShell';
 
-type AdminTag = HandTag & { inUse: boolean; lockedByName: string | null; lockedAt: string | null };
+type AdminTag = HandTag & { inUse: boolean; lockedByName: string | null; lockedAt: string | null; cardUid: string | null };
 
 const LEVELS = Array.from({ length: MAX_VIP_LEVEL }, (_, i) => i + 1);
 
-/** 手牌池：按清单导入、按号段建牌、锁定 / 解锁、改分区与柜型、停用；前台规则（更正时限、丢牌赔偿、VIP 等级） */
+/**
+ * 手牌池：按清单导入、按号段建牌、锁定 / 解锁、改分区与柜型、停用；前台规则（更正时限、丢牌赔偿、VIP 等级）。
+ * 8.1.15（docs/FRONTDESK_RISK_V8115.md）：手牌绑 / 解绑芯片号（点一张牌）、发牌前风控的开关（前台规则页签）、黑名单页签
+ */
 export function TagsTab() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -34,11 +40,16 @@ export function TagsTab() {
 
   // 二级页签（8.0.17）：规则 → 清单 → 导入与工具。前台规则只有能改经营规则的岗位（店主）能改；
   // 值班经理在这里只维护手牌池，看不到「前台规则」这个页签
-  const tabs = [...(can('settings.manage') ? [{ key: 'rules', label: '前台规则' }] : []), { key: 'pool', label: '手牌池' }, { key: 'create', label: '建牌与导入' }];
+  const tabs = [
+    ...(can('settings.manage') ? [{ key: 'rules', label: '前台规则' }] : []),
+    { key: 'pool', label: '手牌池' },
+    ...(can('frontdesk.blacklist') ? [{ key: 'blacklist', label: '黑名单' }] : []),
+    { key: 'create', label: '建牌与导入' },
+  ];
   return (
-    <AdminPage section="tags" description="前台规则、手牌池（分区、VIP 柜、锁定与停用）、按号段建牌与柜号清单导入。" tabs={tabs}>
+    <AdminPage section="tags" description="前台规则、手牌池（分区、VIP 柜、芯片号、锁定与停用）、黑名单、按号段建牌与柜号清单导入。" tabs={tabs}>
       {can('settings.manage') && (
-        <SubPane tab="rules">
+        <SubPane tab="rules" className="space-y-5">
           <RulesCard
             rules={rules.data}
             onSaved={() => {
@@ -46,6 +57,12 @@ export function TagsTab() {
               toast({ tone: 'success', title: '前台规则已保存' });
             }}
           />
+          <RiskSwitchCard />
+        </SubPane>
+      )}
+      {can('frontdesk.blacklist') && (
+        <SubPane tab="blacklist">
+          <BlacklistPane />
         </SubPane>
       )}
       <SubPane tab="create" className="space-y-5">
@@ -56,7 +73,10 @@ export function TagsTab() {
       <SubPane tab="pool">
         <Card className="p-5">
           <SectionTitle>手牌池</SectionTitle>
-          <p className="mt-1 text-[12.5px] text-ink-3">点一张手牌可锁定 / 解锁、改分区与柜型或停用。在店手牌不能改分区、柜型、停用或锁定，请先在前台给客人换牌。</p>
+          <p className="mt-1 text-[12.5px] text-ink-3">
+            点一张手牌可锁定 / 解锁、改分区与柜型、停用，或绑定 / 解绑芯片号（绑了的牌带 <Nfc className="inline size-3.5 align-[-2px]" />{' '}
+            标，发牌时刷卡就能带出牌号）。在店手牌不能改分区、柜型、停用或锁定，请先在前台给客人换牌。
+          </p>
           {tags.isPending ? (
             <Skeleton className="mt-3 h-40" />
           ) : tags.data?.length === 0 ? (
@@ -69,7 +89,7 @@ export function TagsTab() {
                 <div key={z} className="mt-5" data-testid={`admin-zone-${z}`}>
                   <p className="mb-2 flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink-3">
                     <ZoneChip zone={z} size="md" /> 共 {list.length} 张 · 在店 {list.filter((t) => t.inUse).length} · 锁定 {list.filter((t) => t.locked).length} · 停用{' '}
-                    {list.filter((t) => !t.active).length}
+                    {list.filter((t) => !t.active).length} · 已绑芯片 {list.filter((t) => t.cardUid).length}
                     {z === 'child' && <span className="text-clay">儿童区已取消，请把这些牌改为男宾或女宾，或停用</span>}
                   </p>
                   {groupTags(list).map((g) => (
@@ -84,8 +104,9 @@ export function TagsTab() {
                             key={t.id}
                             type="button"
                             onClick={() => setEditing(t)}
-                            title={t.locked ? `锁定：${t.lockReason}` : t.inUse ? '在店' : t.active ? '空闲' : '已停用'}
+                            title={`${t.locked ? `锁定：${t.lockReason}` : t.inUse ? '在店' : t.active ? '空闲' : '已停用'}${t.cardUid ? ` · 芯片号 ${t.cardUid}` : ' · 没绑芯片号'}`}
                             data-testid={`admin-tag-${t.code}`}
+                            data-card={t.cardUid ?? ''}
                             className={cn(
                               'num flex h-8 items-center gap-1 rounded-md border px-2.5 text-[13px] font-bold',
                               !t.active
@@ -99,6 +120,7 @@ export function TagsTab() {
                           >
                             {t.locked && <Lock className="size-3" />}
                             {t.code}
+                            {t.cardUid && <Nfc className="size-3 opacity-70" aria-label="已绑芯片号" />}
                           </button>
                         ))}
                       </div>
@@ -547,6 +569,7 @@ function TagDialog({ tag, onClose, onDone }: { tag: AdminTag; onClose: () => voi
             ]}
           />
         </Field>
+        <TagCardField tag={tag} onDone={onDone} />
         <div className="rounded-lg border border-line bg-paper/60 p-4">
           {tag.locked ? (
             <>
@@ -589,5 +612,144 @@ function TagDialog({ tag, onClose, onDone }: { tag: AdminTag; onClose: () => voi
         {error && <Notice tone="error" title={error} />}
       </div>
     </Dialog>
+  );
+}
+
+// ───────────────────────── 芯片号、发牌前风控（8.1.15） ─────────────────────────
+
+/** 一张手牌的芯片号：点「绑定」后刷一下（本机读卡器 / 键盘式读卡器），或手输；绑着的可以解绑 */
+function TagCardField({ tag, onDone }: { tag: AdminTag; onDone: (message: string) => void }) {
+  const [binding, setBinding] = useState(false);
+  const [uid, setUid] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<CardMessage | null>(null);
+  const normalized = normalizeCardUid(uid);
+  const ok = CARD_UID_PATTERN.test(normalized);
+  const save = async (cardUid: string | null) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      await api.put(`/api/frontdesk/tags/${tag.id}/card`, { cardUid });
+      onDone(cardUid ? `${tag.code} 已绑定芯片号 ${cardUid}` : `${tag.code} 已解绑芯片号`);
+    } catch (e) {
+      setNote({ tone: 'error', text: errorMessage(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  // 绑定时刷一下：读到的卡号填进来，核对后点「确认绑定」
+  useCardReader(binding, {
+    onCard: (card) => {
+      setUid(normalizeCardUid(card));
+      setNote({ tone: 'ok', text: '已读到卡号，核对后点「确认绑定」' });
+    },
+    onReadError: (text) => setNote({ tone: 'error', text }),
+  });
+  return (
+    <div className="rounded-lg border border-line bg-paper/60 p-4" data-testid="tag-card-field">
+      <div className="flex flex-wrap items-center gap-2">
+        <Nfc className="size-4 text-ink-3" />
+        <p className="text-[13px] font-semibold text-ink-2">芯片号</p>
+        {tag.cardUid ? (
+          <span className="num rounded-md bg-card px-2 py-0.5 text-[16px] font-bold" data-testid="tag-card-uid">
+            {tag.cardUid}
+          </span>
+        ) : (
+          <span className="text-[13px] text-ink-3" data-testid="tag-card-none">
+            还没绑；绑了以后发牌时刷这张牌就能带出牌号
+          </span>
+        )}
+        <span className="flex-1" />
+        {!binding && (
+          <Button size="lg" variant="secondary" disabled={busy} onClick={() => setBinding(true)} data-testid="tag-card-bind">
+            {tag.cardUid ? '换一张卡' : '绑定'}
+          </Button>
+        )}
+        {!binding && tag.cardUid && (
+          <Button size="lg" variant="ghost" loading={busy} onClick={() => void save(null)} data-testid="tag-card-unbind">
+            解绑
+          </Button>
+        )}
+      </div>
+      {binding && (
+        <div className="mt-3 space-y-2">
+          <ReaderStatusLine message={note} />
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              fullWidth={false}
+              autoFocus
+              value={uid}
+              onChange={(e) => setUid(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && ok && !busy) {
+                  e.preventDefault();
+                  void save(normalized);
+                }
+              }}
+              placeholder="把手牌放到读卡器上，或手输芯片号"
+              autoComplete="off"
+              className="num h-11 min-w-0 flex-1 basis-56"
+              aria-label="芯片号"
+              invalid={!!uid && !ok}
+              data-testid="tag-card-input"
+            />
+            <Button size="lg" variant="primary" disabled={!ok} loading={busy} onClick={() => void save(normalized)} data-testid="tag-card-save">
+              确认绑定
+            </Button>
+            <Button size="lg" variant="ghost" disabled={busy} onClick={() => setBinding(false)}>
+              取消
+            </Button>
+          </div>
+          {uid && !ok && <p className="text-[12.5px] font-medium text-clay">芯片号应为 4–32 位数字或字母（刷卡带出来的原样填）</p>}
+        </div>
+      )}
+      {!binding && note && <p className="mt-2 text-[12.5px] font-semibold text-clay">{note.text}</p>}
+    </div>
+  );
+}
+
+/** 发牌前风控的开关（功能开关，默认开）：黑名单、未结离店授权、重复到店提示、预约带出与核销 */
+function RiskSwitchCard() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const rules = useQuery({ queryKey: ['frontdesk', 'risk-rules'], queryFn: () => api.get<FrontdeskRiskRules>('/api/frontdesk/risk-rules') });
+  const [busy, setBusy] = useState(false);
+  const set = async (enabled: boolean) => {
+    setBusy(true);
+    try {
+      qc.setQueryData(['frontdesk', 'risk-rules'], await api.put<FrontdeskRiskRules>('/api/frontdesk/risk-rules', { enabled }));
+      void qc.invalidateQueries({ queryKey: ['frontdesk'] });
+      toast({ tone: 'success', title: enabled ? '发牌前风控已开启' : '发牌前风控已关闭', body: enabled ? undefined : '发牌与以前一样：不查黑名单、不拦未结离店、不带预约。' });
+    } catch (e) {
+      toast({ tone: 'error', title: '没有保存', body: errorMessage(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card className="p-5" data-testid="risk-switch">
+      <SectionTitle aside={<PendingBadge title="发牌前风控的做法是默认值，待确认（docs/PENDING_DECISIONS.md「块 A：前台」FK1 起）" />}>发牌前风控</SectionTitle>
+      <p className="mt-1 text-[12.5px] text-ink-3">
+        开着时，接待发牌选了会员会核对四样：在黑名单里的不能发；名下有没处理完的「未结离店」的要值班经理及以上当场授权；今天来过的提示第几次到店；今天待到店的预约带出来，发牌成功后自动标「已到店」（派对房除外）。关掉以后发牌与以前一样。
+      </p>
+      {rules.isPending ? (
+        <Skeleton className="mt-3 h-10 w-48" />
+      ) : rules.isError && !rules.data ? (
+        <Notice tone="error" className="mt-3" title={`开关没取回来：${errorMessage(rules.error)}`} />
+      ) : (
+        <Segmented
+          className="mt-3"
+          value={rules.data!.enabled ? 'on' : 'off'}
+          onChange={(v) => {
+            if (!busy && (v === 'on') !== rules.data!.enabled) void set(v === 'on');
+          }}
+          ariaLabel="发牌前风控"
+          options={[
+            { value: 'on', label: '开启' },
+            { value: 'off', label: '关闭' },
+          ]}
+        />
+      )}
+    </Card>
   );
 }

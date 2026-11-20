@@ -5,11 +5,13 @@
 //     记着抵到哪几行；合计与收款对得上；反结账以后原单照样读得出（券和优惠 / 免单照旧二选一，分两张单验）；
 //   · 打印数据的明细行带权益标记；小票上有「优惠与赠送」一栏、「共优惠」「优惠后应付」，「收款」只列真收的钱。
 // 两个台是页面上的划分（FS3–FS5）：接口、权限、账务都没改，原来的用例照旧管着；页面上的边界在 e2e/desks.spec.ts。
+// 前台 1 细化（第 7 节，YB3、YB5–YB7）：预结账带每位客人在住客房的押金（只读、不进应收），已挂的明细按来源归列；
+// 归列的规则、两个台的入口按权限显示在不要数据库的 tests/desks-columns.test.ts。
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { perkOperatorsText, perksTotal, perkTitle, type CheckoutDetail, type CheckoutPreview } from '../src/shared/checkout';
-import type { FrontdeskBoard } from '../src/shared/frontdesk';
+import { previewBuckets, type FrontdeskBoard, type PreviewBill } from '../src/shared/frontdesk';
 import type { GiftIssueResult, GiftType } from '../src/shared/gifts';
 import type { CheckoutPrint } from '../src/shared/print';
 import { decodePrintedText } from '../src/server/devices/escpos';
@@ -273,6 +275,91 @@ describe('结账单的「优惠与赠送」与经办人', () => {
   });
 
   it('前台自检全部通过（只读的新字段没有动账）', async () => {
+    for (const c of (await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { ok: boolean; label: string; detail: string }[]) {
+      expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
+    }
+  });
+});
+
+describe('前台 1 细化：结账预览分列（YB3、YB5–YB7）', () => {
+  const previewBill = async (ids: number[]) => {
+    const r = await api<PreviewBill>(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/preview?ids=${ids.join(',')}`);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    return r.body;
+  };
+
+  it('已挂的明细按来源归列，带条数；没住客房的押金是 0、没有房号', async () => {
+    const a = await enter(null, [rubId, footId]);
+    const b = await enter(null, [rubId]);
+    const pre = await previewBill([a.id, b.id]);
+    const va = pre.visits.find((v) => v.visitId === a.id)!;
+    // 前台加的项目（没挂技师、不是出品口的菜）来源是「门票与洗浴项目」，归「服务」一列
+    expect(va.bySource).toEqual([{ source: 'bath', amountCents: 19600, lineCount: 2 }]);
+    expect(previewBuckets(va.bySource)).toEqual({ dining: 0, room: 0, service: 19600, other: 0, lines: { dining: 0, room: 0, service: 2 } });
+    expect(previewBuckets(pre.visits.flatMap((v) => v.bySource))).toEqual({ dining: 0, room: 0, service: 26400, other: 0, lines: { dining: 0, room: 0, service: 3 } });
+    expect(pre.visits.map((v) => v.deposit)).toEqual([
+      { amountCents: 0, rooms: [] },
+      { amountCents: 0, rooms: [] },
+    ]);
+    expect(pre.depositCents).toBe(0);
+    expect(pre.totalCents).toBe(26400);
+  });
+
+  it('押金：在住客房还押着多少（收 − 退）、哪间房，只显示、不进应收；房费归客房一列；退房以后不再列', async () => {
+    // 老用例的基线里客房关着：打开，建一个房型、一间房
+    const rules = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/rooms/rules', { enabled: true, checkoutMinute: 720, lateFullMinute: 1080, hourlyGraceMinutes: 15, defaultDeposit: 0 });
+    expect(rules.status, JSON.stringify(rules.body)).toBe(200);
+    const types = await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/types', { name: '分列标间', kind: 'daily', price: 28800 });
+    expect(types.status, JSON.stringify(types.body)).toBe(200);
+    const typeId = types.body.types.find((t: { name: string }) => t.name === '分列标间').id as number;
+    const rooms = await api(ctx.app, ctx.owner, 'POST', '/api/admin/rooms/rooms', { roomNo: '8301', floor: '3', roomTypeId: typeId });
+    expect(rooms.status, JSON.stringify(rooms.body)).toBe(200);
+    const roomId = rooms.body.rooms.find((x: { roomNo: string }) => x.roomNo === '8301').id as number;
+
+    const g = await enter(null, [rubId]); // 住客：先挂了一个搓澡
+    const mate = await enter(null, []); // 一起结的同伴：没住客房
+    // 入住收现金押金 200，再收微信 100，退现金 50 → 还押着 250
+    const stay = await api(ctx.app, ctx.clerk, 'POST', '/api/rooms/checkin', {
+      clientKey: randomUUID(),
+      guests: 1,
+      roomId,
+      expectedRate: 28800,
+      tagCode: g.code,
+      deposit: { method: 'cash', amount: 20000 },
+    });
+    expect(stay.status, JSON.stringify(stay.body)).toBe(200);
+    const stayId = stay.body.id as number;
+    const more = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${stayId}/deposits`, { clientKey: randomUUID(), method: 'wechat', amount: 10000, ref: '尾号 8888' });
+    expect(more.status, JSON.stringify(more.body)).toBe(200);
+    const back = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${stayId}/refunds`, { clientKey: randomUUID(), method: 'cash', amount: 5000, reason: '客人要回一部分' });
+    expect(back.status, JSON.stringify(back.body)).toBe(200);
+
+    const pre = await previewBill([g.id, mate.id]);
+    const mine = pre.visits.find((v) => v.visitId === g.id)!;
+    expect(mine.deposit).toEqual({ amountCents: 25000, rooms: ['8301'] });
+    expect(pre.visits.find((v) => v.visitId === mate.id)!.deposit).toEqual({ amountCents: 0, rooms: [] });
+    expect(pre.depositCents).toBe(25000);
+    // 第一晚的房费归「客房」，搓澡归「服务」；押金不在已挂的合计里，算门票的那一份预览的应收也不含它
+    expect(previewBuckets(mine.bySource)).toEqual({ dining: 0, room: 28800, service: 6800, other: 0, lines: { dining: 0, room: 1, service: 1 } });
+    expect(mine.amountCents).toBe(28800 + 6800);
+    expect(pre.totalCents).toBe(28800 + 6800);
+    const priced = await preview(g.id);
+    expect(priced.visits[0]!.linesAmount).toBe(28800 + 6800);
+    expect(priced.totalAmount).toBe(priced.visits[0]!.amount);
+
+    // 退房（押金原路退回）以后这位客人不再有押着的押金
+    const due = (await api(ctx.app, ctx.clerk, 'GET', `/api/rooms/stays/${stayId}/checkout-preview`)).body as { dueAmount: number; depositBalance: number; depositByMethod: unknown[] };
+    expect(due.depositBalance).toBe(25000);
+    const close = await api(ctx.app, ctx.clerk, 'POST', `/api/rooms/stays/${stayId}/close`, { clientKey: randomUUID(), expectedDue: due.dueAmount, expectedDeposits: due.depositByMethod });
+    expect(close.status, JSON.stringify(close.body)).toBe(200);
+    const after = await previewBill([g.id]);
+    expect(after.visits[0]!.deposit).toEqual({ amountCents: 0, rooms: [] });
+    expect(after.depositCents).toBe(0);
+    // 房费还在手牌账单上，随手牌结账
+    expect(previewBuckets(after.visits[0]!.bySource).room).toBe(28800);
+  });
+
+  it('预结账只读：没有动账，前台自检（含客房的押金与房费）全部通过', async () => {
     for (const c of (await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks')).body as { ok: boolean; label: string; detail: string }[]) {
       expect(c.ok, `${c.label}：${c.detail}`).toBe(true);
     }
