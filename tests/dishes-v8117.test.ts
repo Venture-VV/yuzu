@@ -633,7 +633,16 @@ describe('BW10 菜品排序、批量上下架、删除', () => {
     const on = await api(ctx.app, waterLead, 'POST', '/api/dining/dishes/active-bulk', { clientKey: randomUUID(), ids: [melon!.id, orange!.id, (await dishOf('柠檬茶')).id], active: true });
     expect(on.body).toEqual({ changed: 2, replayed: false });
     const audits = await ctx.sql<{ summary: string }[]>`SELECT detail->>'summary' AS summary FROM audit_logs WHERE action = 'dishes_active_bulk' ORDER BY id`;
-    expect(audits.map((a) => a.summary)).toEqual([`批量下架 2 道：${[melon!, orange!].sort((a, b) => a.id - b.id).map((d) => d.name).join('、')}`, `批量上架 2 道：${[melon!, orange!].sort((a, b) => a.id - b.id).map((d) => d.name).join('、')}`]);
+    expect(audits.map((a) => a.summary)).toEqual([
+      `批量下架 2 道：${[melon!, orange!]
+        .sort((a, b) => a.id - b.id)
+        .map((d) => d.name)
+        .join('、')}`,
+      `批量上架 2 道：${[melon!, orange!]
+        .sort((a, b) => a.id - b.id)
+        .map((d) => d.name)
+        .join('、')}`,
+    ]);
   });
 
   it('删除：下架并从菜品表默认隐藏（显示已删除时看得到）、以前的订单不受影响；恢复回到菜品表（还是下架的）；重新上架就不再算删除', async () => {
@@ -650,7 +659,14 @@ describe('BW10 菜品排序、批量上下架、删除', () => {
     // 以前的订单照旧：账单明细、出品单都在
     expect((await billLines(v.id)).map((l) => `${l.name}|${l.status}|${l.amount}`)).toEqual(['橙汁|active|1800']);
     // 排序时不算删除了的
-    expect((await sort('water:手作饮料', (await slotIds('water:手作饮料')).map((d) => d.id))).status).toBe(200);
+    expect(
+      (
+        await sort(
+          'water:手作饮料',
+          (await slotIds('water:手作饮料')).map((d) => d.id),
+        )
+      ).status,
+    ).toBe(200);
     // 恢复：回到菜品表，还是下架的
     const back = await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${orange.id}/restore`, { clientKey: randomUUID() });
     expect(back.body.dish).toMatchObject({ deleted: false, active: false });

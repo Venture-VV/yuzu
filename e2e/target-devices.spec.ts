@@ -7,7 +7,7 @@
 // 里面没有进厨房的菜）；为了看到餐饮页面临时打开餐饮与桌台点单，结束时恢复原样。
 // 依赖四套演示数据（仅独立演示库）；账号店主 linlan。新做的、改过的页面加到下面 PAGES 里。
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import type { DiningMenu, DiningReceipt, KitchenBoard, MenuDish, PendingDish, TableSessionDetail, TablesBoard } from '../src/shared/dining';
+import type { DiningMenu, DiningReceipt, KitchenBoard, KitchenItem, KitchenPartItem, MenuDish, PendingDish, TableSessionDetail, TablesBoard } from '../src/shared/dining';
 import type { BillLine } from '../src/shared/frontdesk';
 import type { DishPriceChange, DishesBoard } from '../src/shared/dishes';
 import { expectFits } from './fits';
@@ -381,6 +381,61 @@ const DISH_BOARD: DishesBoard = {
     updatedAt: NOW,
   })),
 };
+/** 套餐里可换的那一样；厨房屏上合成的套餐那一张与它在水吧的子项单（8.1.17） */
+const TEA_PART = '招牌手打香水柠檬茶（大杯）';
+const COMBO_TICKET: KitchenItem = {
+  id: 995_901,
+  orderNo: 'K-SYN-8117',
+  visitId: null,
+  tagCode: 'A8060',
+  zone: 'male',
+  tableSessionId: null,
+  tableName: null,
+  guest: '合成客人',
+  itemId: COMBO_DISH.id,
+  name: COMBO_DISH.name,
+  quantity: 1,
+  note: `${TEA_PART}换杨枝甘露 +¥6`,
+  deliverTo: '',
+  parts: [
+    { name: '宫保鸡丁', quantity: 1 },
+    { name: '杨枝甘露', quantity: 2, from: TEA_PART },
+  ],
+  status: 'queued',
+  stationId: 996_000,
+  stationName: '热菜',
+  rushCount: 0,
+  createdAt: NOW,
+  startedAt: null,
+  doneAt: null,
+  servedAt: null,
+  postedByName: '林岚',
+  visitClosed: false,
+  orderNote: '',
+  deliverRoom: '',
+  partTickets: [{ id: 995_902, name: '杨枝甘露', quantity: 2, stationId: 996_002, stationName: '水吧', status: 'cooking' }],
+};
+const COMBO_PART: KitchenPartItem = {
+  id: 995_902,
+  kitchenItemId: COMBO_TICKET.id,
+  orderNo: 'K-SYN-8117',
+  comboName: COMBO_DISH.name,
+  name: '杨枝甘露',
+  swappedFrom: TEA_PART,
+  quantity: 2,
+  stationId: 996_002,
+  stationName: '水吧',
+  status: 'cooking',
+  tagCode: 'A8060',
+  tableName: null,
+  guest: '合成客人',
+  note: `${TEA_PART}换杨枝甘露 +¥6`,
+  orderNote: '',
+  createdAt: NOW,
+  startedAt: NOW,
+  doneAt: null,
+  visitClosed: false,
+};
 const PRICE_CHANGES: DishPriceChange[] = [
   { id: 3, itemId: SPICY.id, itemName: SPICY.name, tier: 'standard', oldPrice: 5_800, newPrice: 6_800, reason: '食材涨价', source: 'dishes', staffName: '林岚', createdAt: ago(60) },
   { id: 2, itemId: COMBO_DISH.id, itemName: COMBO_DISH.name, tier: 'premium', oldPrice: null, newPrice: 10_800, reason: '新加一档整只的', source: 'import', staffName: '林岚', createdAt: ago(600) },
@@ -400,7 +455,9 @@ async function mockTables(ctx: BrowserContext) {
   await ctx.route('**/api/kitchen', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     const res = await route.fetch();
-    await route.fulfill({ response: res, json: { ...((await res.json()) as KitchenBoard), dishes: MENU_DISHES } });
+    const real = (await res.json()) as KitchenBoard;
+    // 8.1.17：再加一张合成的套餐（带别的档口的进度）与它在水吧的子项单
+    await route.fulfill({ response: res, json: { ...real, dishes: MENU_DISHES, items: [COMBO_TICKET, ...real.items], parts: [COMBO_PART, ...(real.parts ?? [])] } });
   });
   await ctx.route('**/api/dining/tables', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: BOARD }) : route.fallback()));
   await ctx.route(`**/api/dining/tables/sessions/${SID}`, (route) => route.fulfill({ json: DETAIL }));
@@ -701,6 +758,9 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
   'dining-kitchen': async (page) => {
     await page.goto('/dining/kitchen');
     await expect(page.getByTestId('kitchen')).toBeVisible();
+    // 8.1.17：套餐在水吧做的一样单独一张子项单；套餐那一张写着它做到哪了
+    await expect(page.getByTestId(`kds-part-${COMBO_PART.id}`)).toContainText(`套餐「${COMBO_DISH.name}」里的`);
+    await expect(page.getByTestId(`kds-part-tickets-${COMBO_TICKET.id}`)).toContainText('杨枝甘露×2');
     await expectFits(page);
   },
   'dining-limits': async (page) => {
@@ -761,6 +821,22 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await expectFits(page);
     await expectOnScreen(page, ['dish-import-preview', 'dish-import-apply']);
     await page.keyboard.press('Escape');
+    // 8.1.17：套餐的一样标「可换」、能换成的菜与差价；排序弹窗；勾了几道出来的批量上下架
+    await page.getByTestId(`dish-edit-${COMBO_DISH.name}`).click();
+    await expect(page.getByTestId(`dish-combo-swaps-${TEA_PART}`)).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, [`dish-combo-swappable-${TEA_PART}`, `dish-combo-swap-diff-${TEA_PART}-杨枝甘露`]);
+    await page.keyboard.press('Escape');
+    await page.getByTestId('dishes-sort').click();
+    await expect(page.getByTestId('dish-sort')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['dish-sort-slot', 'dish-sort-save']);
+    await page.keyboard.press('Escape');
+    await page.getByTestId(`dish-select-${SPICY.name}`).check();
+    await expect(page.getByTestId('dishes-bulk')).toContainText('已选 1 道');
+    await expectFits(page);
+    await expectOnScreen(page, ['dishes-bulk-on', 'dishes-bulk-off', 'dishes-bulk-clear']);
+    await page.getByTestId('dishes-bulk-clear').click();
   },
   // 8.1.15 点单时选做法、加料：菜单上写着「可选做法、加料」「含 …」；点开弹窗，选一种做法、加一种料，「加入已点」在屏幕里
   'dining-dish-options': async (page) => {
@@ -775,6 +851,14 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await page.getByTestId('dish-options-addon-add-宫保鸡丁').click();
     await expectFits(page);
     await expectOnScreen(page, ['dish-options-add', 'dish-options-note', 'dish-options-qty', 'dish-options-method-免香菜', 'dish-options-addon-qty-宫保鸡丁']);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('dish-options')).toHaveCount(0);
+    // 8.1.17：套餐里可换的一样（柠檬茶换杨枝甘露，每份补 ¥6）
+    await page.getByTestId(`dining-dish-${COMBO_DISH.name}`).click();
+    await expect(page.getByTestId('dish-options')).toBeVisible();
+    await page.getByTestId(`dish-options-swap-${TEA_PART}-杨枝甘露`).click();
+    await expectFits(page);
+    await expectOnScreen(page, ['dish-options-add', `dish-options-swap-${TEA_PART}-杨枝甘露`, 'dish-options-qty']);
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('dish-options')).toHaveCount(0);
   },

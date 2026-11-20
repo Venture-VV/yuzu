@@ -29,7 +29,18 @@ import {
   Trash2,
 } from 'lucide-react';
 import { DINING_OUTLET_KEYS, DINING_OUTLET_LABELS, type DiningOutlet } from '@shared/dining';
-import { DISH_OUTLET_PERMISSIONS, DISH_PRICE_PERMISSION, DISH_STATUS_LABELS, filterDishes, pricesText, remainingText, type DishRow, type DishSaveResult, type DishStatusFilter } from '@shared/dishes';
+import {
+  DISH_OUTLET_PERMISSIONS,
+  DISH_PRICE_PERMISSION,
+  DISH_STATUS_LABELS,
+  filterDishes,
+  plusYuan,
+  pricesText,
+  remainingText,
+  type DishRow,
+  type DishSaveResult,
+  type DishStatusFilter,
+} from '@shared/dishes';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn, downloadUrl, uuid } from '../../lib/utils';
@@ -483,7 +494,12 @@ function DishLine({
         </p>
         {d.combo.length > 0 && (
           <p className="mt-0.5 text-[12.5px] text-ink-2" data-testid={`dish-combo-${d.name}`}>
-            含 {d.combo.map((c) => `${c.name}×${c.quantity}`).join('、')}
+            含{' '}
+            {d.combo
+              .map(
+                (c) => `${c.name}×${c.quantity}${c.swappable && c.swaps.length ? `（可换 ${c.swaps.map((w) => `${w.name}${w.priceDiff > 0 ? ` ${plusYuan(w.priceDiff)}` : ''}`).join('、')}）` : ''}`,
+              )
+              .join('、')}
             {missing.length > 0 && <span className="ml-1 font-semibold text-clay">（{missing.join('、')}已下架）</span>}
           </p>
         )}
