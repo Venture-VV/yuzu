@@ -36,7 +36,8 @@ const lineOf = async (visitId: number, name: string) =>
   ((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${visitId}`)).body.lines as { id: number; name: string; status: string }[]).find((l) => l.name === name && l.status === 'active')!;
 const voidLine = (lineId: number, cookie: string, extra: Record<string, unknown> = {}) =>
   api(ctx.app, cookie, 'POST', `/api/frontdesk/lines/${lineId}/void`, { reason: '客人不要了', blame: 'guest', ...extra });
-const setClerkPermissions = (drop: string[]) => api(ctx.app, ctx.owner, 'PUT', '/api/admin/permissions', { roles: { clerk: permissionsOf({ role: 'clerk' }).filter((p) => !drop.includes(p)) } });
+const setClerkPermissions = (drop: string[]) =>
+  api(ctx.app, ctx.owner, 'PUT', '/api/admin/permissions', { roles: { clerk: permissionsOf({ position: null, role: 'clerk' }).filter((p) => !drop.includes(p)) } });
 const auditOf = async (lineId: number) =>
   (await ctx.sql<{ detail: Record<string, unknown> }[]>`SELECT detail FROM audit_logs WHERE action IN ('frontdesk_void', 'table_void') AND detail ->> 'lineId' = ${String(lineId)}`)[0]?.detail;
 
@@ -71,9 +72,9 @@ afterAll(async () => ctx.close());
 describe('BW-4 退菜按出品口', () => {
   it('默认：原来能退菜的岗位三项都有，康美部有水吧、果吧（没有餐厅、没有「前台挂账」）', async () => {
     for (const role of ['owner', 'store_manager', 'duty_manager', 'clerk'] as const) {
-      expect(permissionsOf({ role })).toEqual(expect.arrayContaining(['frontdesk.operate', 'dining.voidRestaurant', 'dining.voidWater', 'dining.voidFruit']));
+      expect(permissionsOf({ position: null, role })).toEqual(expect.arrayContaining(['frontdesk.operate', 'dining.voidRestaurant', 'dining.voidWater', 'dining.voidFruit']));
     }
-    expect(permissionsOf({ role: 'backoffice' }).filter((p) => p.startsWith('dining.void'))).toEqual([]);
+    expect(permissionsOf({ position: null, role: 'backoffice' }).filter((p) => p.startsWith('dining.void'))).toEqual([]);
     const me = (await api(ctx.app, km, 'GET', '/api/auth/me')).body as { permissions: string[] };
     expect(me.permissions).toEqual(expect.arrayContaining(['dining.voidWater', 'dining.voidFruit']));
     expect(me.permissions).not.toContain('dining.voidRestaurant');

@@ -26,7 +26,7 @@ import {
   type CustomFieldSheet,
 } from '@shared/custom-fields';
 import { can, type Permission } from '@shared/permissions';
-import { guard, sessionOnly } from '../auth/guard';
+import { guard, sessionReady } from '../auth/guard';
 import { isUniqueViolation, readSnapshot, type Db } from '../db';
 import { writeAudit } from '../lib/audit';
 import { ctxOf, type Deps, type OpContext } from '../lib/context';
@@ -354,7 +354,7 @@ export async function searchByField(db: Db, entity: CustomFieldEntity, raw: unkn
 export function registerCustomFieldRoutes(app: FastifyInstance, deps: Deps) {
   const { sql } = deps;
   // 定义：后台维护（修改经营规则）看全部；各页只取自己那一类启用的
-  app.get('/api/custom-fields/defs', { preHandler: sessionOnly }, async (req) => {
+  app.get('/api/custom-fields/defs', { preHandler: sessionReady }, async (req) => {
     const { entity } = parse(z.object({ entity: EntityField.optional() }), req.query ?? {});
     if (!entity) {
       if (!can(req.actor, 'settings.manage')) throw forbidden();
@@ -395,7 +395,7 @@ export function registerCustomFieldRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   // 列表上显示的几列
-  app.get('/api/custom-fields/:entity/values', { preHandler: sessionOnly }, async (req) => {
+  app.get('/api/custom-fields/:entity/values', { preHandler: sessionReady }, async (req) => {
     const { entity } = parse(EntityParam, req.params);
     assertRead(req, entity);
     const { ids } = parse(
@@ -412,12 +412,12 @@ export function registerCustomFieldRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   // 一个对象的「其他信息」
-  app.get('/api/custom-fields/:entity/:id', { preHandler: sessionOnly }, async (req) => {
+  app.get('/api/custom-fields/:entity/:id', { preHandler: sessionReady }, async (req) => {
     const { entity, id } = parse(EntityIdParam, req.params);
     assertRead(req, entity);
     return readSnapshot(sql, (tx) => getSheet(tx, entity, id));
   });
-  app.put('/api/custom-fields/:entity/:id', { preHandler: sessionOnly }, async (req) => {
+  app.put('/api/custom-fields/:entity/:id', { preHandler: sessionReady }, async (req) => {
     const { entity, id } = parse(EntityIdParam, req.params);
     if (req.actor.mustChangePassword) throw forbidden('首次登录请先修改密码');
     if (!can(req.actor, WRITE_PERMS[entity])) throw forbidden();

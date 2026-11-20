@@ -1,5 +1,6 @@
 import type { FastifyRequest } from 'fastify';
 import type { Duty, Permission, Role } from '@shared/permissions';
+import type { PositionKey } from '@shared/positions';
 import type { AppConfig } from '../config';
 import type { Sql } from '../db';
 
@@ -16,6 +17,10 @@ export interface Actor {
   /** 库存与采购职责，可叠加 */
   duties: Duty[];
   mustChangePassword: boolean;
+  /** 新岗位（8.1.18，GW1）；没有的是老账号或专用账号 */
+  position?: PositionKey | null;
+  /** 老账号这一版以后第一次登录要先选新岗位（GW7） */
+  needsPosition?: boolean;
   /** 按后台岗位权限算好的权限（登录会话都带）；系统操作、合成数据没有时按默认规则 */
   permissions?: Permission[];
   /** 当前门店（8.0.22，登录会话都带；系统操作、合成数据没有时是本店） */

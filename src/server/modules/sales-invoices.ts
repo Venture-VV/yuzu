@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { PAYMENT_METHODS } from '@shared/labels';
 import { can, type Permission } from '@shared/permissions';
 import { INVOICE_SOURCE_LABELS, INVOICE_SOURCE_TYPES, TAX_NO_PATTERN, type InvoiceSourceInfo, type InvoiceSourceType, type SalesInvoice, type SalesInvoiceList } from '@shared/sales-invoices';
-import { guard, sessionOnly } from '../auth/guard';
+import { guard, sessionReady } from '../auth/guard';
 import { isUniqueViolation, readSnapshot, type Db, type Tx } from '../db';
 import { eInvoiceAdapter } from '../integrations/einvoice';
 import { modeOf } from '../integrations/config';
@@ -490,12 +490,12 @@ export function registerSalesInvoiceRoutes(app: FastifyInstance, deps: Deps) {
   const ISSUE = guard('invoice.issue');
   const providerMode = () => modeOf(deps.config.integrations, 'einvoice');
   // 申请：前台、充值、回款的岗位（不在 ERP 前缀下，ERP 关着时前台照样能申请——申请要等开票模块开着才有人处理，页面上提示）
-  app.get('/api/invoice-requests/source', { preHandler: sessionOnly }, async (req) => {
+  app.get('/api/invoice-requests/source', { preHandler: sessionReady }, async (req) => {
     const q = parse(SourceQuery, req.query ?? {});
     assertSourcePerm(req, q.type);
     return readSnapshot(sql, (tx) => sourceInfo(tx, q.type, q.id));
   });
-  app.post('/api/invoice-requests', { preHandler: sessionOnly }, async (req, reply) => {
+  app.post('/api/invoice-requests', { preHandler: sessionReady }, async (req, reply) => {
     const type = (req.body as { sourceType?: string } | null)?.sourceType;
     if (!(INVOICE_SOURCE_TYPES as readonly string[]).includes(type ?? '')) throw badRequest('来源不对');
     assertSourcePerm(req, type as InvoiceSourceType);

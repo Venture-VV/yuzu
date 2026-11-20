@@ -104,12 +104,14 @@ interface PinStaff {
   displayName: string;
   role: Role;
   duties: Duty[] | null;
+  position: unknown;
+  permissionAdjust: unknown;
   active: boolean;
 }
 
 async function findByPin(db: Db, pin: string): Promise<PinStaff | null> {
   const [row] = await db<(PinStaff & { pinHash: string })[]>`
-    SELECT s.id, s.username, s.display_name, s.role, s.duties, s.active, p.pin_hash
+    SELECT s.id, s.username, s.display_name, s.role, s.duties, s.position, s.permission_adjust, s.active, p.pin_hash
     FROM staff_order_pins p JOIN staff s ON s.id = p.staff_id WHERE p.slot = ${pin.slice(0, 3)} AND NOT s.system`;
   if (!row) {
     dummyHash ??= hashPassword('yuzu-order-pin-dummy');

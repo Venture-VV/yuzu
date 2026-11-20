@@ -504,7 +504,7 @@ describe('终端替桥上报', () => {
     let reported: { status: number; body: unknown } | null = null;
     let took = 0;
     await ctx.sql.begin(async (tx) => {
-      // 先占住要改的那位员工一行：改员工的事务锁了店主行以后停在这里
+      // 先占住要改的那位员工一行：改员工的事务锁了店主行以后停在这里（8.1.18 起停在锁这一行的 SELECT，原来停在 UPDATE）
       await tx`SELECT id FROM staff WHERE id = ${target!.id} FOR UPDATE`;
       put = api(ctx.app, ctx.owner, 'PUT', `/api/staff/${target!.id}`, { displayName: '客户经理', role: 'account_manager', duties: [], active: true });
       await expect
@@ -512,7 +512,7 @@ describe('终端替桥上报', () => {
           async () =>
             Number(
               (
-                await ctx.sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%UPDATE staff SET display_name%' AND query NOT ILIKE '%pg_stat_activity%'`
+                await ctx.sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND (query ILIKE '%UPDATE staff SET display_name%' OR query ILIKE '%display_name%FROM staff WHERE id%') AND query NOT ILIKE '%pg_stat_activity%'`
               )[0]!.n,
             ),
           { timeout: 5_000 },

@@ -34,6 +34,11 @@
 // 默认店主、店总；厨房主管、水吧主管要维护自己那一处的，在后台「岗位权限」里加。
 // 8.1.17 退菜按出品口（docs/FRONTDESK_V8117.md 第 2 节，BW4 待确认）：新增「退菜：餐厅 / 水吧 / 果吧」三项——原来能退菜（有「前台挂账」）的岗位三项都有，
 // 康美部默认有水吧、果吧两项（康美部自己退菜）；餐饮的菜按这道菜所在的出品口核对，别的明细照旧要「前台挂账」。
+// 8.1.18 组织架构与岗位（docs/POSITIONS_V8118.md，GW1–GW9）：新建账号改成「部门 → 岗位（负责人 / 员工）」，
+// 权限按岗位模板（src/shared/positions.ts）算；员工档案里有岗位（position）的按岗位，没有的（还没重新选岗的老账号、
+// 点餐平板 / 他店查询 / 设计师这几种专用账号）照旧按下面的旧岗位规则。新增「管理本部门员工账号」（staff.dept）。
+
+import { applyAdjust, positionDefaults, type PermissionAdjust, type PositionKey, type PositionOverrides } from './positions';
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store', 'tablet', 'designer'] as const;
 export type Role = (typeof ROLES)[number];
@@ -269,6 +274,8 @@ export const PERMISSIONS = {
   /** 授权结账的「优惠 / 免单」、降低票种与免票（R1.2，店主 2026-10-29 签认） */
   'auth.discount': { roles: ['owner', 'store_manager', 'duty_manager'] },
   'staff.manage': { roles: ['owner'] },
+  /** 管理本部门员工账号（8.1.18，GW6）：负责人新建、编辑、停用本部门的「员工」岗位账号，重置密码；不能改岗位权限 */
+  'staff.dept': { roles: ['owner'] },
   'catalog.manage': { roles: ['owner', 'store_manager'] },
   /** 技师名册：新建、编辑、停用技师（v0.7.0，待确认：默认店主与店总） */
   'technician.manage': { roles: ['owner', 'store_manager'] },
@@ -417,10 +424,43 @@ export function roleHas(role: Role, permission: Permission, overrides?: RoleOver
 }
 
 /** 岗位权限（按后台调整）与职责权限（固定）的并集 */
-export function permissionsOf(subject: PermissionSubject, overrides?: RoleOverrides | null, opts: { financeExclusion?: boolean } = {}): Permission[] {
-  return ALL_PERMISSIONS.filter(
-    (p) => !excludedByDuty(subject, p, opts.financeExclusion ?? true) && (roleHas(subject.role, p, overrides) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d))),
+/** 旧岗位的调整与新岗位的调整（会话、授权人、审批人算权限都用它） */
+export interface PermissionOverrides {
+  roles: RoleOverrides;
+  positions: PositionOverrides;
+}
+
+/** 算权限要的员工资料：岗位（position）必须给出（没有就是 null），免得漏了新岗位按旧岗位算 */
+export interface PermissionsOfSubject {
+  role: Role;
+  duties?: readonly Duty[];
+  position: PositionKey | null;
+  /** 员工档案里的个人微调（8.1.18，GW8） */
+  adjust?: PermissionAdjust | null;
+}
+
+/** 只给旧岗位的调整（RoleOverrides）时当作没有新岗位的调整 */
+function normalizeOverrides(overrides: PermissionOverrides | RoleOverrides | null | undefined): PermissionOverrides | null {
+  if (!overrides) return null;
+  return 'positions' in overrides && 'roles' in overrides ? (overrides as PermissionOverrides) : { roles: overrides as RoleOverrides, positions: {} };
+}
+
+export function permissionsOf(subject: PermissionsOfSubject, rawOverrides?: PermissionOverrides | RoleOverrides | null, opts: { financeExclusion?: boolean } = {}): Permission[] {
+  const finance = opts.financeExclusion ?? true;
+  const overrides = normalizeOverrides(rawOverrides);
+  if (subject.position === 'president' || (!subject.position && subject.role === 'owner')) return [...ALL_PERMISSIONS];
+  if (subject.position) {
+    // 新岗位：岗位模板 → 后台按岗位的增减 → 个人微调；店主专属的权限（LOCKED_PERMISSIONS）只有总裁有
+    const base = applyAdjust(positionDefaults(subject.position, ALL_PERMISSIONS), overrides?.positions[subject.position], LOCKED_PERMISSIONS);
+    const mine = applyAdjust(base, subject.adjust, LOCKED_PERMISSIONS);
+    return ALL_PERMISSIONS.filter((p) => mine.has(p) && !LOCKED_PERMISSIONS.includes(p) && !excludedByDuty(subject, p, finance));
+  }
+  const legacy = ALL_PERMISSIONS.filter(
+    (p) => !excludedByDuty(subject, p, finance) && (roleHas(subject.role, p, overrides?.roles) || !!(PERMISSIONS[p] as Rule).duties?.some((d) => subject.duties?.includes(d))),
   );
+  if (!subject.adjust) return legacy;
+  const mine = applyAdjust(legacy, subject.adjust, LOCKED_PERMISSIONS);
+  return ALL_PERMISSIONS.filter((p) => mine.has(p) && !excludedByDuty(subject, p, finance));
 }
 
 export function can(subject: PermissionSubject, permission: Permission): boolean {
@@ -546,6 +586,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'auth.vipOverride': '当场授权散客或低等级会员使用 VIP 柜',
   'auth.discount': '当场授权优惠 / 免单、降低票种与免票',
   'staff.manage': '管理员工账号',
+  'staff.dept': '管理本部门员工账号（新建、编辑、停用本部门的员工岗位）',
   'catalog.manage': '管理充值套餐与消费项目',
   'technician.manage': '维护技师名册',
   'technician.dispatch': '钟房派钟、上下钟、加钟、退钟、上牌',
@@ -712,7 +753,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   { title: '员工工作台', items: ['canteen.manage', 'patrol.read', 'patrol.manage'] },
   { title: '当场授权', items: ['auth.overLimit', 'auth.vipOverride', 'auth.discount', 'auth.memberRefund', 'auth.memberPhone'] },
   { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission', 'marketing.cost'] },
-  { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'emenu.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
+  { title: '管理后台', items: ['staff.manage', 'staff.dept', 'catalog.manage', 'emenu.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
   { title: 'UI 工作台', items: ['studio.edit', 'studio.publish'] },
   { title: '前台风控', items: ['frontdesk.blacklist', 'auth.checkinRisk'] },
   { title: '餐饮：按出品口下单', items: ['dining.orderRestaurant', 'dining.orderWater', 'dining.orderFruit'] },

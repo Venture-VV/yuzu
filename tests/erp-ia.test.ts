@@ -55,7 +55,7 @@ describe('挪到后台的三个模块', () => {
     expect(staff.items).toEqual(['stores', 'staff', 'permissions', 'canteen', 'patrol']);
     expect(ADMIN_SECTION_MODULES).toEqual({ canteen: 'canteen', patrol: 'patrol' });
     // 8.1.1：设计师只有「工作台：编辑 / 发布」，也要进得了后台的「工作台」
-    expect(ADMIN_STANDALONE_SECTIONS).toEqual(['dashboard', 'canteen', 'patrol', 'studio']);
+    expect(ADMIN_STANDALONE_SECTIONS).toEqual(['dashboard', 'canteen', 'patrol', 'studio', 'staff']);
     for (const p of ['canteen.manage', 'patrol.read', 'patrol.manage', 'erp.revenue'] as Permission[]) expect(ADMIN_ENTRY_PERMISSIONS, p).toContain(p);
     // 权限没变：还是原来那几项
     expect(ADMIN_SECTIONS.canteen.perms).toEqual(ERP_MODULES.canteen.perms);

@@ -45,7 +45,8 @@ const ledger = async (q = '') => {
   expect(r.status, JSON.stringify(r.body)).toBe(200);
   return r.body as DiningLedger;
 };
-const setClerkPermissions = (drop: string[]) => api(ctx.app, ctx.owner, 'PUT', '/api/admin/permissions', { roles: { clerk: permissionsOf({ role: 'clerk' }).filter((p) => !drop.includes(p)) } });
+const setClerkPermissions = (drop: string[]) =>
+  api(ctx.app, ctx.owner, 'PUT', '/api/admin/permissions', { roles: { clerk: permissionsOf({ position: null, role: 'clerk' }).filter((p) => !drop.includes(p)) } });
 
 beforeAll(async () => {
   ctx = await setup();

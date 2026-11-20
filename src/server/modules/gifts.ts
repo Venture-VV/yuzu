@@ -36,7 +36,7 @@ import {
 } from '@shared/gifts';
 import { formatAmount } from '@shared/money';
 import { can, permissionsOf, type Duty, type Role } from '@shared/permissions';
-import { loadRoleOverrides } from '../auth/role-permissions';
+import { loadRoleOverrides, staffSubject } from '../auth/role-permissions';
 import { guard, guardAny } from '../auth/guard';
 import { isUniqueViolation, readSnapshot, type Db } from '../db';
 import { writeAudit } from '../lib/audit';
@@ -164,19 +164,19 @@ export async function updateGiftType(deps: Deps, id: number, raw: unknown, ctx: 
 
 /** 能被选作授权人的：在职、有「签赠授权」（按岗位权限，含后台改过的） */
 export async function giftAuthorizers(db: Db): Promise<GiftAuthorizer[]> {
-  const rows = await db<{ id: number; name: string; role: Role; duties: Duty[] | null }[]>`
-    SELECT id, display_name AS name, role, duties FROM staff WHERE active AND NOT system ORDER BY display_name, id`;
+  const rows = await db<{ id: number; name: string; role: Role; duties: Duty[] | null; position: unknown; permissionAdjust: unknown }[]>`
+    SELECT id, display_name AS name, role, duties, position, permission_adjust FROM staff WHERE active AND NOT system ORDER BY display_name, id`;
   const overrides = await loadRoleOverrides(db);
-  return rows.filter((r) => permissionsOf({ role: r.role, duties: r.duties ?? [] }, overrides).includes('gift.authorize')).map((r) => ({ id: Number(r.id), name: r.name }));
+  return rows.filter((r) => permissionsOf(staffSubject(r), overrides).includes('gift.authorize')).map((r) => ({ id: Number(r.id), name: r.name }));
 }
 
 /** 核对授权人（只读、不加锁）：在职、有「签赠授权」；返回名字 */
 async function assertAuthorizer(db: Db, staffId: number): Promise<string> {
-  const [s] = await db<{ name: string; role: Role; duties: Duty[] | null; active: boolean; system: boolean }[]>`
-    SELECT display_name AS name, role, duties, active, system FROM staff WHERE id = ${staffId}`;
+  const [s] = await db<{ name: string; role: Role; duties: Duty[] | null; position: unknown; permissionAdjust: unknown; active: boolean; system: boolean }[]>`
+    SELECT display_name AS name, role, duties, position, permission_adjust, active, system FROM staff WHERE id = ${staffId}`;
   if (!s || !s.active || s.system) throw unprocessable('AUTHORIZER_INVALID', '选的授权人不存在或已停用，请重新选择');
   const overrides = await loadRoleOverrides(db);
-  if (!permissionsOf({ role: s.role, duties: s.duties ?? [] }, overrides).includes('gift.authorize')) {
+  if (!permissionsOf(staffSubject(s), overrides).includes('gift.authorize')) {
     throw unprocessable('AUTHORIZER_INVALID', `「${s.name}」没有「签赠授权」的权限，不能做授权人；请重新选择（后台「岗位权限」里可以加）`);
   }
   return s.name;

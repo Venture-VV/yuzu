@@ -14,6 +14,7 @@ export type AuditAction =
   | 'staff_created'
   | 'staff_updated'
   | 'staff_password_reset'
+  | 'position_chosen'
   | 'member_created'
   | 'member_updated'
   | 'recharge_created'
