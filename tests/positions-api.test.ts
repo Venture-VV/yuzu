@@ -95,6 +95,17 @@ describe('负责人管本部门员工（GW6）', () => {
     expect((await api(ctx.app, lead.cookie, 'POST', `/api/staff/${here.id}/reset-password`)).status).toBe(200);
   });
 
+  it('负责人只能给员工配自己的领料小仓（Codex 安全审查 4e118c1）', async () => {
+    const [a] = await ctx.sql<{ id: number }[]>`INSERT INTO departments (name) VALUES ('出品小仓') RETURNING id`;
+    const [b] = await ctx.sql<{ id: number }[]>`INSERT INTO departments (name) VALUES ('别家小仓') RETURNING id`;
+    const lead = await hire('k_lead', { position: 'kitchen.lead', departmentId: a!.id });
+    expect((await api(ctx.app, lead.cookie, 'POST', '/api/staff', { username: 'k_bad', displayName: 'x', position: 'kitchen.staff', departmentId: b!.id })).status).toBe(403);
+    const ok = await api(ctx.app, lead.cookie, 'POST', '/api/staff', { username: 'k_ok', displayName: 'x', position: 'kitchen.staff', departmentId: a!.id });
+    expect(ok.status).toBe(201);
+    expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${ok.body.id}`, { displayName: 'x', active: true, departmentId: b!.id })).status).toBe(403);
+    expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${ok.body.id}`, { displayName: 'y', active: true, departmentId: null })).status).toBe(200);
+  });
+
   it('财务部负责人没有账号与权限配置（表上 ✘）', async () => {
     const fin = await hire('fin_lead', { position: 'finance.lead' });
     expect((await api(ctx.app, fin.cookie, 'GET', '/api/staff')).status).toBe(403);

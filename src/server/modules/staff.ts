@@ -78,7 +78,7 @@ export async function listStaff(db: Db): Promise<StaffRecord[]> {
  * 能管哪些员工账号（8.1.18，GW6）：有「管理员工账号」的（总裁）管全部；有「管理本部门员工账号」的负责人只管本部门的「员工」岗位，
  * 能建、改姓名与领料小仓、停用、重置密码，不能改岗位权限、不能给个人微调。
  */
-type StaffScope = { all: true } | { all: false; position: PositionKey; stores: number[] };
+type StaffScope = { all: true } | { all: false; position: PositionKey; stores: number[]; departmentId: number | null };
 /**
  * 多门店（Codex 安全审查 49a64d0）：负责人只管挂的门店都在自己能进的门店里的员工——
  * 不然登录店 A 的负责人能重置只挂店 B 的同部门员工的密码，再拿这个账号进店 B。没挂门店的员工按本店算。
@@ -88,11 +88,19 @@ async function staffScope(db: Db, actor: Actor): Promise<StaffScope> {
   if (can(actor, 'staff.dept') && actor.position && actor.position !== 'president' && actor.position !== 'gmo') {
     const dept = positionOf(actor.position).department;
     const stores = (await allowedStores(db, actor)).map((x) => Number(x.id));
-    return { all: false, position: `${dept}.staff` as PositionKey, stores };
+    // 领料小仓（Codex 安全审查 4e118c1）：负责人只能给员工配自己档案里的那个小仓（或不配），别的部门的小仓只有总裁能配
+    const [me] = await db<{ departmentId: number | null }[]>`SELECT department_id FROM staff WHERE id = ${actor.id}`;
+    return { all: false, position: `${dept}.staff` as PositionKey, stores, departmentId: me?.departmentId == null ? null : Number(me.departmentId) };
   }
   throw forbidden('只能管理本部门员工的账号；您还没有部门岗位，请联系总裁');
 }
 const inScope = (scope: StaffScope, position: PositionKey | null | undefined) => scope.all || position === scope.position;
+
+/** 负责人给员工配的领料小仓：只能是自己的那个或不配 */
+function assertDeptStock(scope: StaffScope, departmentId: number | null | undefined) {
+  if (scope.all || departmentId === undefined || departmentId === null) return;
+  if (departmentId !== scope.departmentId) throw forbidden('负责人只能给员工配本部门的领料小仓；别的部门的小仓请总裁配');
+}
 
 /** 负责人范围内的员工（本部门员工岗位、挂的门店都在负责人能进的门店里）的条件；s 是 staff 表 */
 function scopeCond(db: Db, scope: StaffScope) {
@@ -187,6 +195,7 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
     const scope = await staffScope(sql, req.actor);
     const resolved = resolveRole(input);
     if (!scope.all && (resolved.position !== scope.position || input.permissionAdjust)) throw forbidden('负责人只能给本部门建「员工」岗位的账号，不能单独调权限');
+    assertDeptStock(scope, input.departmentId);
     // 组织里的岗位（GW1）：后台页面只给「部门 → 岗位」与专用账号；旧岗位只留给脚本与测试
     if (!resolved.position) assertDutiesCompatible(resolved.role, resolved.duties);
     const permissionAdjust = cleanAdjust(input.permissionAdjust);
@@ -214,6 +223,7 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
     const scope = await staffScope(sql, req.actor);
     const permissionAdjust = cleanAdjust(input.permissionAdjust);
     if (!scope.all && permissionAdjust) throw forbidden('只有总裁能单独调某个人的权限');
+    assertDeptStock(scope, input.departmentId);
     await sql.begin(async (tx) => {
       // 锁住全部店主行，保证并发修改时仍至少保留一位在职店主。
       // FOR NO KEY UPDATE（8.0.19，原来是 FOR UPDATE）：改员工的事务之间照旧互相串行，但不再挡住引用店主的写入——
