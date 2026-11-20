@@ -3,20 +3,21 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router';
 import { HandHeart, Plus } from 'lucide-react';
-import { PRICE_TIER_LABELS, PRICE_TIERS, type PriceTier } from '@shared/catalog';
-import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES, gradeLabel, MAX_TECH_NAME, TECH_NO_PATTERN, type CallType, type TechnicianAdmin, type TechnicianRules } from '@shared/technicians';
+import { PRICE_TIERS } from '@shared/catalog';
+import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES, gradeLabel, type CallType, type TechnicianAdmin, type TechnicianRules } from '@shared/technicians';
 import { api, errorMessage } from '../../lib/api';
 import { ClockroomRulesCard, CommissionCard } from './ClockroomCards';
 import { qk, useCatalog } from '../../lib/queries';
 import { useCan } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
-import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
-import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Skeleton } from '../../components/ui';
+import { Badge, Button, Card, Notice, PendingBadge, SectionTitle, Segmented, Skeleton } from '../../components/ui';
 import { AdminPage } from './AdminShell';
 import { SubPane } from '../../components/SubNav';
+import { TechnicianDialog } from '../technicians/TechnicianDialog';
 
 const adminKey = ['admin', 'technicians'] as const;
 const useTechnicianAdmin = () => useQuery({ queryKey: adminKey, queryFn: () => api.get<TechnicianAdmin>('/api/admin/technicians') });
@@ -196,6 +197,14 @@ function RosterCard() {
         技师名册
       </SectionTitle>
       <p className="mt-1 text-[12.5px] text-ink-3">工号保存后不变，纸质单与历史明细都按工号对得上；离职的停用（不删除，历史明细照常显示）。等级对应价目表的「标准 / 专业 / 优选」三档价格。</p>
+      <p className="mt-1 text-[12.5px] text-ink-3" data-testid="technician-roster-store-link">
+        {/* 8.1.15：组别、班次与排班、休假在门店的「技师管理」里（当班会用到的不放后台）；名册两边都能改，是同一份 */}
+        技师的组别、班次与排班、休假在门店的
+        <Link to="/technicians" className="font-semibold text-pine underline-offset-2 hover:underline">
+          「技师管理」
+        </Link>
+        里；名册在那里也能改（同一份）。
+      </p>
       <p className="mt-2 flex flex-wrap gap-1.5 text-[12.5px]">
         <Badge tone="pine">在职 {all.length - inactive} 人</Badge>
         {byGrade.map((x) => (
@@ -218,7 +227,11 @@ function RosterCard() {
           {shown.map((t) => (
             <li key={t.id} className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5', !t.active && 'bg-paper-2/50 opacity-70')} data-testid={`technician-${t.techNo}`}>
               <span className="num w-12 text-[18px] font-bold">{t.techNo}</span>
-              <span className="min-w-[96px] text-[14.5px] font-bold">{t.name}</span>
+              <span className="min-w-[96px] text-[14.5px] font-bold">
+                {t.name}
+                {t.nickname && <span className="ml-1 text-[12.5px] font-semibold text-ink-3">「{t.nickname}」</span>}
+              </span>
+              {t.kind && <Badge tone="lake">{t.kind}</Badge>}
               <Badge tone={t.gender === 'female' ? 'clay' : 'lake'}>{t.gender === 'female' ? '女' : '男'}</Badge>
               <Badge tone={t.grade === 'premium' ? 'yuzu' : t.grade === 'professional' ? 'pine' : 'neutral'}>{gradeLabel(t.grade)}</Badge>
               <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-3">
@@ -236,158 +249,8 @@ function RosterCard() {
           ))}
         </ul>
       )}
-      <TechnicianDialog target={editing} categories={admin.data.categories} onClose={() => setEditing(null)} />
+      <TechnicianDialog target={editing} categories={admin.data.categories} kinds={admin.data.kinds} onClose={() => setEditing(null)} />
     </Card>
-  );
-}
-
-function TechnicianDialog({ target, categories, onClose }: { target: Tech | 'new' | null; categories: string[]; onClose: () => void }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const isNew = target === 'new';
-  const existing = target && target !== 'new' ? target : null;
-  const [techNo, setTechNo] = useState('');
-  const [name, setName] = useState('');
-  const [gender, setGender] = useState<'male' | 'female'>('female');
-  const [grade, setGrade] = useState<PriceTier>('standard');
-  const [skills, setSkills] = useState<string[]>([]);
-  const [note, setNote] = useState('');
-  const [active, setActive] = useState(true);
-  const [sortOrder, setSortOrder] = useState('0');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [last, setLast] = useState<typeof target>(null);
-  if (target !== last) {
-    setLast(target);
-    setTechNo(existing?.techNo ?? '');
-    setName(existing?.name ?? '');
-    setGender(existing?.gender ?? 'female');
-    setGrade(existing?.grade ?? 'standard');
-    setSkills(existing?.skills ?? []);
-    setNote(existing?.note ?? '');
-    setActive(existing?.active ?? true);
-    setSortOrder(String(existing?.sortOrder ?? 0));
-    setError(null);
-  }
-  // 名册里的分类可能已不在价目表里（项目改了分类），照样列出，方便去掉
-  const options = [...new Set([...categories, ...skills])];
-  const problem =
-    isNew && !TECH_NO_PATTERN.test(techNo.trim()) ? '工号为 1–6 位数字或字母，例如 08、A12' : !name.trim() ? '请填写技师名字' : !/^\d{1,4}$/.test(sortOrder) ? '排序请填 0–9999 的整数' : null;
-
-  const save = async () => {
-    setSaving(true);
-    setError(null);
-    const body = { name: name.trim(), gender, grade, skills, note: note.trim(), active, sortOrder: Number(sortOrder) };
-    try {
-      const next = isNew
-        ? await api.post<TechnicianAdmin>('/api/admin/technicians', { ...body, techNo: techNo.trim() })
-        : await api.put<TechnicianAdmin>(`/api/admin/technicians/${existing!.id}`, body);
-      qc.setQueryData(adminKey, next);
-      await qc.invalidateQueries({ queryKey: ['frontdesk', 'technicians'] });
-      toast({ tone: 'success', title: isNew ? `已添加技师 ${techNo.trim()} 号 ${name.trim()}` : '已保存' });
-      onClose();
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog
-      open={!!target}
-      onClose={onClose}
-      title={isNew ? '新建技师' : `编辑技师 · ${existing?.techNo} 号`}
-      description={isNew ? '工号保存后不能改；离职的技师停用即可，不删除。' : `${existing?.lineCount ?? 0} 项明细记在这位技师名下，改名字后历史明细也显示新名字。`}
-      footer={
-        <>
-          {problem && <span className="mr-auto self-center text-[13px] text-clay">{problem}</span>}
-          <Button variant="secondary" onClick={onClose}>
-            取消
-          </Button>
-          <Button variant="primary" loading={saving} disabled={!!problem} onClick={save} data-testid="technician-save">
-            保存
-          </Button>
-        </>
-      }
-    >
-      <div className="grid grid-cols-1 gap-4">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[120px_minmax(0,1fr)]">
-          <Field label="工号" htmlFor="t-no">
-            {isNew ? (
-              <Input id="t-no" value={techNo} maxLength={6} onChange={(e) => setTechNo(e.target.value)} className="num" placeholder="08" data-autofocus data-testid="technician-no" />
-            ) : (
-              <p className="num flex h-11 items-center text-[18px] font-bold">{existing?.techNo}</p>
-            )}
-          </Field>
-          <Field label="名字" htmlFor="t-name" hint="艺名或姓名，前台与小票上显示">
-            <Input id="t-name" value={name} maxLength={MAX_TECH_NAME} onChange={(e) => setName(e.target.value)} data-testid="technician-name" />
-          </Field>
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="性别">
-            <Segmented
-              ariaLabel="技师性别"
-              value={gender}
-              onChange={setGender}
-              className="w-full"
-              options={[
-                { value: 'female', label: '女' },
-                { value: 'male', label: '男' },
-              ]}
-            />
-          </Field>
-          <Field label="等级" hint="价格跟技师等级时按这一档取价">
-            <Segmented ariaLabel="技师等级" value={grade} onChange={setGrade} className="w-full" options={PRICE_TIERS.map((g) => ({ value: g, label: PRICE_TIER_LABELS[g] }))} />
-          </Field>
-        </div>
-        <Field label="可做的项目分类" hint={skills.length ? `只能挂这 ${skills.length} 类的项目` : '不勾选 = 全部需要技师的项目都能做'}>
-          <div className="flex flex-wrap gap-1.5">
-            {options.length === 0 && <span className="text-[12.5px] text-ink-3">价目表里还没有项目分类</span>}
-            {options.map((c) => {
-              const on = skills.includes(c);
-              return (
-                <button
-                  key={c}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => setSkills(on ? skills.filter((x) => x !== c) : [...skills, c])}
-                  className={cn(
-                    'h-8 rounded-full border px-3 text-[13px] font-semibold transition-colors',
-                    on ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-2 hover:border-ink-4',
-                  )}
-                >
-                  {c}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_120px]">
-          <Field label="备注" htmlFor="t-note">
-            <Input id="t-note" value={note} maxLength={100} onChange={(e) => setNote(e.target.value)} placeholder="例如：擅长足疗，周二休" />
-          </Field>
-          <Field label="排序" htmlFor="t-sort" hint="小的在前">
-            <Input id="t-sort" value={sortOrder} inputMode="numeric" maxLength={4} onChange={(e) => setSortOrder(e.target.value)} className="num" />
-          </Field>
-        </div>
-        {!isNew && (
-          <Field label="状态">
-            <Segmented
-              ariaLabel="技师状态"
-              value={active ? 'on' : 'off'}
-              onChange={(v) => setActive(v === 'on')}
-              className="w-full"
-              options={[
-                { value: 'on', label: '在职' },
-                { value: 'off', label: '停用（前台不能再选）' },
-              ]}
-            />
-          </Field>
-        )}
-        {error && <Notice tone="error" title={error} />}
-      </div>
-    </Dialog>
   );
 }
 

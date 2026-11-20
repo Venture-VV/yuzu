@@ -106,6 +106,7 @@ import { registerAiRoutes } from './modules/ai';
 import { registerSettlementRoutes } from './modules/settlement';
 import { registerStaffRoutes } from './modules/staff';
 import { registerTechnicianRoutes } from './modules/technicians';
+import { registerTechnicianAdminRoutes } from './modules/technician-admin';
 import { registerClockroomRoutes } from './modules/clockroom';
 import { registerDiningRoutes } from './modules/dining';
 import { registerTableRoutes } from './modules/tables';
@@ -411,6 +412,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerDishImportRoutes(app, deps);
   // 房态中心（8.1.15，docs/ROOM_CENTER_V8115.md）：按房型看全店房间的五种状态，服务房间的登记、换房、续钟、并房、退房
   registerRoomCenterRoutes(app, deps);
+  // 技师管理（8.1.15，docs/TECHNICIANS_V8115.md）：组别、班次与排班、休假；名册与钟房的接口在各自原来的模块里
+  registerTechnicianAdminRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');

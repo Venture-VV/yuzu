@@ -315,7 +315,13 @@ export type AuditAction =
   | 'room_center_checkout'
   | 'room_center_merge'
   | 'room_center_state'
-  | 'room_category';
+  | 'room_category'
+  // 8.1.15 技师管理（docs/TECHNICIANS_V8115.md）：组别、班次、排班与临时调班、休假单（detail.action：申请、批准、驳回、撤回、销假）、主播报终端的接管与放下
+  | 'technician_group'
+  | 'technician_shift'
+  | 'technician_schedule'
+  | 'technician_leave'
+  | 'clock_announcer';
 
 export interface AuditEntry {
   staffId: number | null;

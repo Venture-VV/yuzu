@@ -6,7 +6,9 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { ISO_DATE } from '@shared/business-date';
 import { PRICE_TIERS, type PriceTier } from '@shared/catalog';
+import { DEFAULT_TECH_KINDS, MAX_TECH_KIND } from '@shared/technician-admin';
 import {
   CALL_TYPES,
   DEFAULT_TECHNICIAN_RULES,
@@ -38,8 +40,15 @@ export async function loadTechnicianRules(db: Db): Promise<TechnicianRules> {
   return { ...DEFAULT_TECHNICIAN_RULES, ...row?.value };
 }
 
+/** 技师类型的清单（8.1.15）：技师管理的名册页签里维护，没设过用默认的 */
+export async function loadTechnicianKinds(db: Db): Promise<string[]> {
+  const row = await settingRow<string[]>(db, 'technician_kinds');
+  return Array.isArray(row?.value) ? row.value : [...DEFAULT_TECH_KINDS];
+}
+
 const TECH_COLUMNS = (db: Db) => db`
-  t.id, t.tech_no, t.name, t.gender, t.grade, t.skills, t.active, t.sort_order, t.note, t.is_synthetic, t.suspended_at, t.suspended_reason`;
+  t.id, t.tech_no, t.name, t.gender, t.grade, t.skills, t.active, t.sort_order, t.note, t.is_synthetic, t.suspended_at, t.suspended_reason,
+  t.nickname, t.kind, t.hired_on, t.left_on, t.group_id`;
 
 /** 按工号排序：数字工号按数值（2 号在 10 号前面），其余按字母 */
 const ORDER = (db: Db) => db`t.active DESC, t.sort_order, (t.tech_no ~ '^[0-9]+$') DESC, length(t.tech_no), t.tech_no COLLATE "C", t.id`;
@@ -89,6 +98,7 @@ export async function technicianAdmin(db: Db): Promise<TechnicianAdmin> {
     clockroomUpdatedBy: crMeta?.updatedBy ?? null,
     technicians: technicians.map((t) => ({ ...t, createdAt: new Date(t.createdAt).toISOString(), updatedAt: new Date(t.updatedAt).toISOString() })),
     categories: categories.map((c) => c.category),
+    kinds: await loadTechnicianKinds(db),
   };
 }
 
@@ -106,7 +116,18 @@ const TechnicianInput = z.object({
   note: z.string().trim().max(100, '备注最多 100 字').default(''),
   active: z.boolean().default(true),
   sortOrder: z.number().int().min(0).max(9999).default(0),
+  // 8.1.15：花名、类型、入职日期。不带的（后台原来的名册卡片）新建时为空、修改时不动
+  nickname: z.string().trim().max(MAX_TECH_NAME, `花名最多 ${MAX_TECH_NAME} 个字`).optional(),
+  kind: z.string().trim().max(MAX_TECH_KIND, `类型最多 ${MAX_TECH_KIND} 个字`).optional(),
+  hiredOn: z.string().regex(ISO_DATE, '入职日期格式应为 YYYY-MM-DD').nullable().optional(),
 });
+
+/** 类型要在清单里（没设类型可以；清单里已经去掉、这位技师原来就是这一类的照旧留着） */
+async function assertKind(db: Db, kind: string | undefined, before = '') {
+  if (!kind || kind === before) return;
+  const kinds = await loadTechnicianKinds(db);
+  if (!kinds.includes(kind)) throw badRequest(`技师类型「${kind}」不在清单里（${kinds.join('、')}），请先在「技师管理 → 名册」里加上`);
+}
 
 const NewTechnicianInput = TechnicianInput.extend({
   techNo: z.string().trim().regex(TECH_NO_PATTERN, '工号为 1–6 位数字或字母，例如 08、A12'),
@@ -213,11 +234,13 @@ export function registerTechnicianRoutes(app: FastifyInstance, deps: Deps) {
 
   app.post('/api/admin/technicians', { preHandler: guard('technician.manage') }, async (req) => {
     const t = parse(NewTechnicianInput, req.body);
+    await assertKind(sql, t.kind);
     try {
       await sql.begin(async (tx) => {
         const [row] = await tx<{ id: number }[]>`
-          INSERT INTO technicians (tech_no, name, gender, grade, skills, active, sort_order, note, created_by)
-          VALUES (${t.techNo}, ${t.name}, ${t.gender}, ${t.grade}, ${t.skills}::text[], ${t.active}, ${t.sortOrder}, ${t.note}, ${req.actor.id})
+          INSERT INTO technicians (tech_no, name, gender, grade, skills, active, sort_order, note, created_by, nickname, kind, hired_on)
+          VALUES (${t.techNo}, ${t.name}, ${t.gender}, ${t.grade}, ${t.skills}::text[], ${t.active}, ${t.sortOrder}, ${t.note}, ${req.actor.id},
+                  ${t.nickname ?? ''}, ${t.kind ?? ''}, ${t.hiredOn ?? null})
           RETURNING id`;
         await writeAudit(tx, {
           staffId: req.actor.id,
@@ -241,9 +264,14 @@ export function registerTechnicianRoutes(app: FastifyInstance, deps: Deps) {
     await sql.begin(async (tx) => {
       const [before] = await tx<Technician[]>`SELECT ${TECH_COLUMNS(tx)} FROM technicians t WHERE t.id = ${id} AND t.store_id = ${currentStoreId()} FOR UPDATE`;
       if (!before) throw notFound('技师不存在');
+      await assertKind(tx, t.kind, before.kind);
+      // 8.1.15：停用（离职）记下离职日期（没记过的记当前营业日），重新启用清掉；花名、类型、入职日期没带的不动
+      const leftOn = t.active ? null : (before.leftOn ?? (await businessDate(tx, deps, new Date())));
+      const extra = { nickname: t.nickname ?? before.nickname, kind: t.kind ?? before.kind, hiredOn: t.hiredOn === undefined ? before.hiredOn : t.hiredOn };
       await tx`
         UPDATE technicians SET name = ${t.name}, gender = ${t.gender}, grade = ${t.grade}, skills = ${t.skills}::text[], active = ${t.active},
-               sort_order = ${t.sortOrder}, note = ${t.note}, updated_at = now()
+               sort_order = ${t.sortOrder}, note = ${t.note}, nickname = ${extra.nickname}, kind = ${extra.kind}, hired_on = ${extra.hiredOn},
+               left_on = ${leftOn}, updated_at = now()
         WHERE id = ${id}`;
       await writeAudit(tx, {
         staffId: req.actor.id,
@@ -252,8 +280,19 @@ export function registerTechnicianRoutes(app: FastifyInstance, deps: Deps) {
         targetId: id,
         detail: {
           name: t.name,
-          before: { name: before.name, gender: before.gender, grade: before.grade, skills: before.skills, active: before.active, sortOrder: before.sortOrder, note: before.note },
-          after: t,
+          before: {
+            name: before.name,
+            gender: before.gender,
+            grade: before.grade,
+            skills: before.skills,
+            active: before.active,
+            sortOrder: before.sortOrder,
+            note: before.note,
+            nickname: before.nickname,
+            kind: before.kind,
+            hiredOn: before.hiredOn,
+          },
+          after: { ...t, ...extra },
           summary: `修改技师 ${describeTechnician({ ...t, techNo: before.techNo })}`,
         },
         ip: req.ip,

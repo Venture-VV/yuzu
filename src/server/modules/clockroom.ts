@@ -36,7 +36,9 @@ import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
 import { idParam, parse, positiveCents } from '../lib/validate';
 import { assertCanFix, assertOpen, businessDate, hashRequest, loadFrontdeskRules, lockVisits, nextDocNo, runIdempotent, saveKey, setTxTimeouts } from './frontdesk/common';
 import { loadPricedItems } from './pricing';
-import { loadTechnicianRules, loadTechnicians } from './technicians';
+import { loadTechnicianKinds, loadTechnicianRules, loadTechnicians } from './technicians';
+import { announcerClaim, recentCalls, recordCall, setAnnouncer, spokenRoom } from './clock-calls';
+import { approvedLeavesOn, groupNames, scheduleOn, type ApprovedLeave } from './technician-day';
 import { assertTechnicianNotBooked } from './booking-guard';
 import { locateSession, locateSessionEnd, locateSignIn, locateSignOut } from './locations';
 import { ctxOf } from '../lib/context';
@@ -57,10 +59,12 @@ interface Status {
   state: TechState;
   queueKey: Date | null;
   rejectStreak: number;
+  /** 今天在已批准的休假里（8.1.15）：state 一定是 leave */
+  approvedLeave?: ApprovedLeave;
 }
 
-/** 今天的上牌状态；换了营业日没有重新上牌的按「未上牌」 */
-async function statusMap(db: Db, today: string): Promise<Map<number, Status>> {
+/** 当天记下的上牌状态（不看休假单）；换了营业日没有重新上牌的按「未上牌」 */
+async function recordedStatusMap(db: Db, today: string): Promise<Map<number, Status>> {
   const rows = await db<{ technicianId: number; businessDate: string; state: TechState; queueKey: string; rejectStreak: number }[]>`
     SELECT technician_id, business_date::text AS business_date, state, queue_key, reject_streak FROM technician_status`;
   return new Map(
@@ -69,6 +73,18 @@ async function statusMap(db: Db, today: string): Promise<Map<number, Status>> {
       r.businessDate === today ? { state: r.state, queueKey: new Date(r.queueKey), rejectStreak: r.rejectStreak } : { state: 'off' as const, queueKey: null, rejectStreak: 0 },
     ]),
   );
+}
+
+/**
+ * 今天的上牌状态。已批准的休假含今天的（8.1.15，技师管理的休假单），不管当天记的是什么都按休假：
+ * 不进排位、不能派钟、「全部上牌」跳过；排位、派钟、看板都走这里，所以休假从今天开始的不用谁去点
+ */
+async function statusMap(db: Db, today: string): Promise<Map<number, Status>> {
+  const map = await recordedStatusMap(db, today);
+  for (const leave of await approvedLeavesOn(db, today)) {
+    map.set(leave.technicianId, { ...(map.get(leave.technicianId) ?? offStatus), state: 'leave', approvedLeave: leave });
+  }
+  return map;
 }
 
 const offStatus: Status = { state: 'off', queueKey: null, rejectStreak: 0 };
@@ -277,6 +293,8 @@ export async function attachSessions(
     // 停牌、休假（8.0.8，B01）：前台挂账选技师、钟房派钟都不能选
     if (t.suspendedAt) throw unprocessable('TECHNICIAN_SUSPENDED', `${t.techNo} 号 ${t.name}停牌中（${t.suspendedReason ?? ''}），复牌后才能派钟`);
     if (status.state === 'leave') throw unprocessable('TECHNICIAN_ON_LEAVE', `${t.techNo} 号 ${t.name}今天休假，请换一位技师`);
+    // 叫号时念的排位号（8.1.15）：派钟之前在轮钟队列里排第几
+    const calledPosition = status.state === 'on' ? queueOrder(statuses).indexOf(t.id) + 1 : null;
     let start = false;
     if (options.dispatch) {
       if (status.state === 'off') throw unprocessable('TECHNICIAN_OFF', `${t.techNo} 号 ${t.name}今天还没上牌，请先上牌`);
@@ -390,6 +408,8 @@ export async function attachSessions(
       at,
     });
     if (start) await logEvent(tx, { technicianId: t.id, sessionId: row!.id, kind: 'start', staffId: actor.id, businessDate: today, at });
+    // 排位播报（8.1.15）：派了钟就叫一次号，主播报终端取看板时念
+    await recordCall(tx, { technician: t, sessionId: row!.id, kind: 'dispatch', position: calledPosition || null, room: spokenRoom(space), businessDate: today, staffId: actor.id, at });
     busyIds.add(t.id);
     ids.push(row!.id);
   }
@@ -974,6 +994,11 @@ export async function changeState(deps: Deps, technicianId: number, raw: unknown
     if (t.suspendedAt && action !== 'resume' && action !== 'sign_out') {
       throw unprocessable('TECHNICIAN_SUSPENDED', `${label}停牌中（${t.suspendedReason ?? ''}），请先复牌`);
     }
+    // 8.1.15：休假单批了的，在钟房不能上牌、也不能在这里取消休假——先到技师管理里销假（停牌、复牌照旧）
+    if (s.approvedLeave && action !== 'leave' && action !== 'suspend' && action !== 'resume') {
+      const { fromDate, toDate } = s.approvedLeave;
+      throw unprocessable('TECHNICIAN_LEAVE_APPROVED', `${label}在已批准的休假里（${fromDate === toDate ? fromDate : `${fromDate} 至 ${toDate}`}），要上牌请先到「技师管理 → 休假」销假`);
+    }
     let next: Status | null;
     let detail: Record<string, unknown> = reason ? { reason } : {};
     switch (action) {
@@ -1039,7 +1064,7 @@ export async function changeState(deps: Deps, technicianId: number, raw: unknown
   return clockroomBoard(deps.sql, deps);
 }
 
-/** 全部上牌：在职、今天还没上牌的技师按名册顺序上牌（已在岗、休息、休假、停牌的不动） */
+/** 全部上牌：在职、今天还没上牌的技师按名册顺序上牌（已在岗、休息、休假、停牌的不动；8.1.15 起今天排休的也不动） */
 export async function signInAll(deps: Deps, ctx: OpContext) {
   await deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
@@ -1047,16 +1072,84 @@ export async function signInAll(deps: Deps, ctx: OpContext) {
     await lockQueue(tx);
     const today = await businessDate(tx, deps, at);
     const statuses = await statusMap(tx, today);
+    // 8.1.15：排班表上今天排休的跳过（要上可以单独点上牌）
+    const schedule = await scheduleOn(tx, today);
     let i = 0;
     const signed: number[] = [];
     for (const t of (await loadTechnicians(tx)).values()) {
-      if (!t.active || t.suspendedAt || (statuses.get(t.id)?.state ?? 'off') !== 'off') continue;
+      if (!t.active || t.suspendedAt || (statuses.get(t.id)?.state ?? 'off') !== 'off' || schedule.get(t.id)?.rest) continue;
       const key = new Date(at.getTime() + i++);
       await writeStatus(tx, t.id, today, { state: 'on', queueKey: key, rejectStreak: 0 }, ctx.actor.id, at);
       await logEvent(tx, { technicianId: t.id, kind: 'sign_in', detail: { all: true }, staffId: ctx.actor.id, businessDate: today, at });
       signed.push(t.id);
     }
     await locateSignIn(tx, signed, { at, staffId: ctx.actor.id });
+  });
+  return clockroomBoard(deps.sql, deps);
+}
+
+// ───────────────────────── 休假单与今天的排位、手动叫号（8.1.15） ─────────────────────────
+
+/**
+ * 休假单批准、销假时同步今天的上牌状态（技师管理调用；调用前已拿技师队列锁、锁好技师一行与休假单）。
+ * on：批准的休假含今天——在钟上、有派了没上的钟的拒绝（先下钟或转钟），当天记着在岗、休息的改成休假，在店的算离店；
+ * off：销假——当天记着休假的回到未上牌，之后照常上牌。都记进钟房日志。
+ */
+export async function syncLeaveToday(tx: Tx, deps: Deps, t: { id: number; label: string }, mode: 'on' | 'off', leaveId: number, ctx: OpContext, at: Date) {
+  const today = await businessDate(tx, deps, at);
+  const s = (await recordedStatusMap(tx, today)).get(t.id) ?? offStatus;
+  if (mode === 'off') {
+    if (s.state === 'leave') await writeStatus(tx, t.id, today, { ...s, state: 'off' }, ctx.actor.id, at);
+    await logEvent(tx, { technicianId: t.id, kind: 'sign_out', detail: { from: 'leave', reason: `休假单 ${leaveId} 销假` }, staffId: ctx.actor.id, businessDate: today, at });
+    return;
+  }
+  const [busy] = await tx<{ sessionNo: string; status: string }[]>`
+    SELECT s.session_no, s.status FROM technician_sessions s JOIN visits v ON v.id = s.visit_id
+    WHERE s.technician_id = ${t.id} AND s.status IN ('waiting', 'serving') AND v.status = 'open' LIMIT 1`;
+  if (busy) {
+    throw conflict('TECHNICIAN_BUSY', `${t.label}${busy.status === 'serving' ? '正在钟上' : '还有派了没上的钟'}（${busy.sessionNo}），先下钟或转钟再批准今天开始的休假`);
+  }
+  if (s.state === 'on' || s.state === 'rest') {
+    await writeStatus(tx, t.id, today, { ...s, state: 'leave', queueKey: s.queueKey ?? at }, ctx.actor.id, at);
+    await locateSignOut(tx, t.id, { at, staffId: ctx.actor.id });
+  }
+  await logEvent(tx, { technicianId: t.id, kind: 'leave', detail: { reason: `休假单 ${leaveId} 批准` }, staffId: ctx.actor.id, businessDate: today, at });
+}
+
+const CallInput = z.object({
+  technicianId: z.number().int().positive(),
+  /** 叫的是哪一张钟单（念它的房间）；不带的念这位技师手上先派的那一张，没有就只念排位 */
+  sessionId: z.number().int().positive().nullish(),
+});
+
+/** 手动叫号（8.1.15）：再叫一次这位技师。只记一条叫号（只追加），不动排位与钟单；主播报终端取看板时念 */
+async function callTechnician(deps: Deps, raw: unknown, ctx: OpContext) {
+  const { technicianId, sessionId } = parse(CallInput, raw);
+  await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    const at = ctx.at ?? new Date();
+    const t = (await loadTechnicians(tx, [technicianId])).get(technicianId);
+    if (!t || !t.active) throw notFound('技师不存在或已停用');
+    const today = await businessDate(tx, deps, at);
+    const statuses = await statusMap(tx, today);
+    const s = statuses.get(t.id) ?? offStatus;
+    const why = t.suspendedAt ? '停牌中' : s.state === 'leave' ? '今天休假' : s.state === 'off' ? '今天还没上牌' : null;
+    if (why) throw unprocessable('TECHNICIAN_NOT_ON', `${t.techNo} 号 ${t.name}${why}，不能叫号`);
+    const [session] = await tx<{ id: number; code: string | null; displayName: string | null }[]>`
+      SELECT s.id, sp.code, sp.display_name FROM technician_sessions s JOIN visits v ON v.id = s.visit_id LEFT JOIN spaces sp ON sp.id = s.space_id
+      WHERE s.technician_id = ${t.id} AND s.status IN ('waiting', 'serving') AND v.status = 'open' ${sessionId ? tx`AND s.id = ${sessionId}` : tx``}
+      ORDER BY (s.status = 'waiting') DESC, s.id LIMIT 1`;
+    if (sessionId && !session) throw conflict('SESSION_CLOSED', '这张钟单已经结束，或者不是这位技师的，请刷新');
+    await recordCall(tx, {
+      technician: t,
+      sessionId: session?.id ?? null,
+      kind: 'manual',
+      position: s.state === 'on' ? queueOrder(statuses).indexOf(t.id) + 1 || null : null,
+      room: spokenRoom(session?.code ? { code: session.code, displayName: session.displayName } : null),
+      businessDate: today,
+      staffId: ctx.actor.id,
+      at,
+    });
   });
   return clockroomBoard(deps.sql, deps);
 }
@@ -1096,6 +1189,11 @@ export async function clockroomBoard(db: Db, deps: Deps): Promise<ClockroomBoard
     WHERE l.source = 'therapist' AND l.status = 'active' AND l.technician_id IS NULL AND l.item_id IS NOT NULL AND v.status = 'open'
       AND v.store_id = ${currentStoreId()}
     ORDER BY l.posted_at, l.id`;
+  // 8.1.15：组别、今天的排班、休假单，筛选用的类型与项目分类，叫号与主播报终端
+  const groups = await groupNames(db);
+  const schedule = await scheduleOn(db, today);
+  const categories = await db<{ category: string }[]>`
+    SELECT coalesce(nullif(category, ''), '其他') AS category FROM service_items WHERE technician_required AND active GROUP BY 1 ORDER BY min(sort_order), min(id)`;
   const board: BoardTechnician[] = [...techs.values()]
     .filter((t) => t.active || sessions.some((s) => s.technicianId === t.id))
     .map((t) => {
@@ -1103,6 +1201,8 @@ export async function clockroomBoard(db: Db, deps: Deps): Promise<ClockroomBoard
       const mine = sessions.filter((s) => s.technicianId === t.id);
       const serving = mine.find((s) => s.status === 'serving');
       const first = serving ?? mine[0];
+      const day = schedule.get(t.id);
+      const leave = st.approvedLeave;
       return {
         ...t,
         state: st.state,
@@ -1111,6 +1211,10 @@ export async function clockroomBoard(db: Db, deps: Deps): Promise<ClockroomBoard
         waiting: mine.filter((s) => s.status === 'waiting').length,
         todayClocks: todayOf(t.id),
         rejectStreak: st.rejectStreak,
+        groupName: t.groupId === null ? null : (groups.get(t.groupId) ?? null),
+        shiftToday: day?.shift ?? null,
+        restToday: day?.rest ?? false,
+        approvedLeave: leave ? { id: leave.id, fromDate: leave.fromDate, toDate: leave.toDate, leaveType: leave.leaveType } : null,
       };
     });
   return {
@@ -1133,6 +1237,10 @@ export async function clockroomBoard(db: Db, deps: Deps): Promise<ClockroomBoard
       designated: clocks.filter((c) => c.callType === 'designated').reduce((n, c) => n + c.clocks, 0),
       rotation: clocks.filter((c) => c.callType === 'rotation').reduce((n, c) => n + c.clocks, 0),
     },
+    kinds: await loadTechnicianKinds(db),
+    categories: categories.map((c) => c.category),
+    calls: await recentCalls(db, at),
+    announcer: await announcerClaim(db),
   };
 }
 
@@ -1286,4 +1394,11 @@ export function registerClockroomRoutes(app: FastifyInstance, deps: Deps) {
 
   app.post('/api/clockroom/technicians/:id/state', { preHandler: guard('technician.dispatch') }, async (req) => changeState(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.post('/api/clockroom/sign-in-all', { preHandler: guard('technician.dispatch') }, async (req) => signInAll(deps, ctxOf(req)));
+
+  // 8.1.15 排位播报：手动叫号、登记主播报终端（接管、放下、报到）
+  app.post('/api/clockroom/calls', { preHandler: guard('technician.dispatch') }, async (req) => callTechnician(deps, req.body, ctxOf(req)));
+  app.post('/api/clockroom/announcer', { preHandler: guard('technician.dispatch') }, async (req) => {
+    await setAnnouncer(deps, req.body, ctxOf(req));
+    return clockroomBoard(sql, deps);
+  });
 }

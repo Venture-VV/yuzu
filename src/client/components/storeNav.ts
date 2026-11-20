@@ -23,6 +23,7 @@ import {
   HandHeart,
   BriefcaseBusiness,
   Wallet,
+  IdCard,
 } from 'lucide-react';
 import { ADMIN_ENTRY_PERMISSIONS } from '@shared/admin';
 import { DISH_PERMISSIONS } from '@shared/dishes';
@@ -94,7 +95,11 @@ const STORE_NAV: StoreNavDomain[] = [
     key: 'technicians',
     label: '技师',
     icon: Hourglass,
-    items: [{ to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians }],
+    items: [
+      { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
+      // 技师管理（8.1.15 块 E，草稿）：技师名册、组别、班次与排班、休假；钟房的岗位能看、能替技师申请休假
+      { to: '/technicians', label: '技师管理', icon: IdCard, perm: ['technician.manage', 'technician.dispatch'], when: (s) => s.technicians },
+    ],
   },
   {
     key: 'members',

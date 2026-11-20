@@ -1,9 +1,11 @@
 // 钟房（v0.7.1）：左边轮钟队列（在岗技师按排位，第一位空闲的是「下一位」）、休息与未上牌；
 // 右边上钟中的钟（倒计时、快到钟、超时）与待上钟（已派、技师还没到）。派钟、加钟都是挂账，走前台同一套「结果待确认」。
+// 8.1.15（docs/TECHNICIANS_V8115.md）：顶上是排位播报条（Announcer.tsx）与搜索、筛选（ClockFilters.tsx）；有条件生效或按状态排时
+// 下面列技师卡片，没有时是原来的看板。技师的花名、类型、组别、今天的班与休假单来自技师管理。
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import type { BookingDetail } from '@shared/bookings';
 import {
   ArrowDownToLine,
@@ -17,6 +19,7 @@ import {
   ListOrdered,
   LogIn,
   LogOut,
+  Megaphone,
   Play,
   Plus,
   RotateCcw,
@@ -26,17 +29,24 @@ import {
   UsersRound,
 } from 'lucide-react';
 import {
+  EMPTY_TECH_QUERY,
   EVENT_KIND_LABELS,
+  filterBoardTechnicians,
+  sortBoardTechnicians,
   TECH_FILTER_LABELS,
   TECH_FILTERS,
   techFilterOf,
+  techQueryActive,
   type BoardSession,
   type BoardTechnician,
   type ClockEvent,
   type ClockroomBoard,
   type PendingLine,
   type TechFilter,
+  type TechQuery,
+  type TechSort,
 } from '@shared/clockroom';
+import { LEAVE_TYPE_LABELS, leaveRangeText, shiftTimeText } from '@shared/technician-admin';
 import { CALL_TYPE_LABELS, gradeLabel } from '@shared/technicians';
 import { spaceLabel } from '@shared/spaces';
 import { api, errorMessage } from '../../lib/api';
@@ -48,6 +58,8 @@ import { PageHeader } from '../../components/AppShell';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Skeleton } from '../../components/ui';
+import { AnnouncerBar } from './Announcer';
+import { ClockFilters } from './ClockFilters';
 import { DispatchDialog, ExtendDialog, TransferDialog, type DispatchPrefill } from './DispatchDialog';
 import { RoomDialog } from './RoomPicker';
 import { TECH_STATE_DONE, TechStateDialog, type TechStateAction } from './TechStateDialog';
@@ -96,7 +108,9 @@ export function ClockroomPage() {
   const [showLog, setShowLog] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   // 8.0.8：按状态筛选（B01）、待派钟补派（A01）、转钟（B05）、停牌（B01）、预约到店带入（A04）
-  const [filter, setFilter] = useState<TechFilter>('all');
+  // 8.1.15：搜索、按类型与项目筛选、按状态排（状态筛选并进同一组条件）
+  const [query, setQuery] = useState<TechQuery>(EMPTY_TECH_QUERY);
+  const [sort, setSort] = useState<TechSort>('queue');
   const [assigning, setAssigning] = useState<PendingLine | null>(null);
   const [transferring, setTransferring] = useState<BoardSession | null>(null);
   // 休假、停牌、复牌走「结果待确认」（合并前 Codex 审查 e2cb70d）：在对话框里做，结果不明时留在对话框里处理
@@ -190,6 +204,9 @@ export function ClockroomPage() {
   const openSuspend = (t: BoardTechnician) => {
     if (!blockedByPending(t)) setTechState({ t, action: 'suspend' });
   };
+  /** 手动叫号（8.1.15）：记一条叫号，主播报终端念；s 是叫哪一张钟单（念它的房间） */
+  const call = (t: { id: number; techNo: string }, s?: BoardSession) =>
+    run(`call-${t.id}`, () => api.post<ClockroomBoard>('/api/clockroom/calls', { technicianId: t.id, ...(s ? { sessionId: s.id } : {}) }), `已叫 ${t.techNo} 号`);
 
   const d = board.data;
   const queue = useMemo(() => (d?.technicians ?? []).filter((t) => t.state === 'on').sort((a, b) => a.position! - b.position!), [d]);
@@ -207,6 +224,9 @@ export function ClockroomPage() {
     }
     return c;
   }, [d]);
+  // 有条件生效或按状态排：列技师卡片；都没有：原来的看板
+  const listMode = techQueryActive(query) || sort !== 'queue';
+  const listed = useMemo(() => sortBoardTechnicians(filterBoardTechnicians(d?.technicians ?? [], query), sort), [d, query, sort]);
   const nextFree = queue.find((t) => !t.busy);
   const serving = (d?.sessions ?? []).filter((s) => s.status === 'serving');
   const waiting = (d?.sessions ?? []).filter((s) => s.status === 'waiting');
@@ -247,23 +267,14 @@ export function ClockroomPage() {
           </div>
         ) : (
           <>
-            <div className="mx-auto flex max-w-[1280px] flex-wrap gap-1.5 px-5 pt-5 md:px-7" role="group" aria-label="按状态筛选技师" data-testid="clock-filter">
-              {TECH_FILTERS.map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setFilter(f)}
-                  aria-pressed={filter === f}
-                  className={cn('h-8 rounded-full border px-3 text-[13px] font-semibold', filter === f ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2 hover:border-ink-4')}
-                  data-testid={`clock-filter-${f}`}
-                >
-                  {TECH_FILTER_LABELS[f]} <span className="num">{counts[f]}</span>
-                </button>
-              ))}
+            <div className="mx-auto max-w-[1280px] px-5 pt-5 md:px-7">
+              <AnnouncerBar board={d} onBoard={(b) => qc.setQueryData(clockKey, b)} />
             </div>
-            {filter !== 'all' ? (
+            <ClockFilters board={d} query={query} onQuery={setQuery} sort={sort} onSort={setSort} counts={counts} shown={listed.length} />
+            {listMode ? (
               <FilteredTechs
-                filter={filter}
+                filter={query.status}
+                list={listed}
                 board={d}
                 now={now}
                 busy={busy}
@@ -274,9 +285,10 @@ export function ClockroomPage() {
                 onStart={(s) => run(`start-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/start`), `${s.techNo} 号上钟`)}
                 onFinish={(s) => run(`finish-${s.id}`, () => api.post(`/api/clockroom/sessions/${s.id}/finish`), `${s.techNo} 号下钟`)}
                 onTransfer={(s) => setTransferring(s)}
+                onCall={(t, s) => void call(t, s)}
               />
             ) : (
-              <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-5 px-5 py-5 md:px-7 lg:grid-cols-[340px_minmax(0,1fr)]" data-testid="clockroom">
+              <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-5 px-5 py-5 md:px-7 lg:grid-cols-[360px_minmax(0,1fr)]" data-testid="clockroom">
                 <div className="space-y-4">
                   <Card className="p-4" data-testid="clock-queue">
                     <SectionTitle aside={<span className="text-[12px] text-ink-3">在岗 {queue.length} 人</span>}>
@@ -299,6 +311,7 @@ export function ClockroomPage() {
                             onRest={() => state(t, 'rest', `${t.techNo} 号休息`)}
                             onOff={() => state(t, 'sign_out', `${t.techNo} 号下牌`)}
                             onToEnd={() => !blockedByPending(t) && setToEnd(t)}
+                            onCall={() => void call(t)}
                           />
                         ))}
                       </ol>
@@ -327,12 +340,19 @@ export function ClockroomPage() {
                       <SectionTitle>休假 {onLeave.length} 人</SectionTitle>
                       <ul className="mt-2 space-y-1.5">
                         {onLeave.map((t) => (
-                          <li key={t.id} className="flex items-center gap-2 text-[13px]" data-testid={`clock-leave-${t.techNo}`}>
+                          <li key={t.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]" data-testid={`clock-leave-${t.techNo}`}>
                             <span className="num w-9 font-bold">{t.techNo}</span>
-                            <span className="min-w-0 flex-1 truncate font-semibold">{t.name}</span>
-                            <Button size="sm" variant="ghost" loading={busy === `sign_out-${t.id}`} onClick={() => state(t, 'sign_out', `${t.techNo} 号已取消休假`)}>
-                              取消休假
-                            </Button>
+                            <span className="min-w-0 flex-1 truncate font-semibold">{techName(t)}</span>
+                            {t.approvedLeave ? (
+                              // 休假单批的（8.1.15）：钟房不能取消，到技师管理里销假
+                              <Link to="/technicians/leaves" className="font-semibold text-pine underline-offset-2 hover:underline" data-testid={`clock-leave-approved-${t.techNo}`}>
+                                休假单至 {t.approvedLeave.toDate.slice(5)} · 去销假
+                              </Link>
+                            ) : (
+                              <Button size="sm" variant="ghost" loading={busy === `sign_out-${t.id}`} onClick={() => state(t, 'sign_out', `${t.techNo} 号已取消休假`)}>
+                                取消休假
+                              </Button>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -394,7 +414,8 @@ export function ClockroomPage() {
                             className="flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[13px] font-semibold text-ink-2 hover:border-pine hover:text-pine disabled:opacity-50"
                             data-testid={`clock-sign-in-${t.techNo}`}
                           >
-                            <span className="num font-bold">{t.techNo}</span> {t.name}
+                            <span className="num font-bold">{t.techNo}</span> {techName(t)}
+                            {t.restToday && <span className="font-normal text-ink-3">排休</span>}
                           </button>
                         ))}
                       </div>
@@ -483,7 +504,17 @@ export function ClockroomPage() {
                                 {formatTime(s.createdAt)} 派{queued ? ' · 在等上一钟' : ''}
                               </span>
                               <RoomChip s={s} onClick={() => setRooming(s)} />
-                              <div className="flex gap-1.5">
+                              <div className="flex flex-wrap gap-1.5">
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  icon={<Megaphone className="size-3.5" />}
+                                  loading={busy === `call-${s.technicianId}`}
+                                  onClick={() => void call({ id: s.technicianId, techNo: s.techNo }, s)}
+                                  data-testid={`clock-call-${s.sessionNo}`}
+                                >
+                                  叫号
+                                </Button>
                                 <Button
                                   size="sm"
                                   variant="primary"
@@ -626,6 +657,12 @@ export function ClockroomPage() {
   );
 }
 
+/** 名字后面带花名（8.1.15）：「张小明「小雅」」 */
+const techName = (t: { name: string; nickname: string }) => (t.nickname ? `${t.name}「${t.nickname}」` : t.name);
+
+/** 技师卡片上的一行说明：类型、组别、今天的班（8.1.15，技师管理里维护） */
+const techExtras = (t: BoardTechnician) => [t.kind, t.groupName, t.shiftToday ? `${t.shiftToday.name} ${shiftTimeText(t.shiftToday)}` : t.restToday ? '今天排休' : ''].filter(Boolean);
+
 function QueueRow({
   t,
   next,
@@ -635,6 +672,7 @@ function QueueRow({
   onRest,
   onOff,
   onToEnd,
+  onCall,
 }: {
   t: BoardTechnician;
   next: boolean;
@@ -644,6 +682,7 @@ function QueueRow({
   onRest: () => void;
   onOff: () => void;
   onToEnd: () => void;
+  onCall: () => void;
 }) {
   const s = t.busy ? sessions.find((x) => x.id === t.busy!.sessionId) : undefined;
   const left = s?.plannedEnd ? new Date(s.plannedEnd).getTime() - now : null;
@@ -655,7 +694,7 @@ function QueueRow({
       <span className={cn('num flex size-6 items-center justify-center rounded-full text-[12px] font-bold', next ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-3')}>{t.position}</span>
       <span className="num text-[15px] font-bold">{t.techNo}</span>
       <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">
-        {t.name}
+        {techName(t)}
         <span className={cn('ml-1 text-[11.5px]', t.gender === 'female' ? 'text-clay' : 'text-lake')}>{t.gender === 'female' ? '女' : '男'}</span>
       </span>
       {next && <Badge tone="pine">下一位</Badge>}
@@ -666,26 +705,38 @@ function QueueRow({
       ) : (
         <span className="text-[11.5px] text-ink-4">今日 {t.todayClocks} 钟</span>
       )}
-      <span className="flex w-full items-center justify-end gap-1 pl-8 text-[11.5px] whitespace-nowrap">
-        <span className="mr-auto min-w-0 truncate text-ink-4">
-          {gradeLabel(t.grade)}
+      {/* 说明放不下时操作换到下一行（8.1.15：说明里多了类型、组别、今天的班） */}
+      <span className="flex w-full flex-wrap items-center justify-end gap-x-1 gap-y-0.5 pl-8 text-[11.5px] whitespace-nowrap">
+        <span className="mr-auto max-w-full truncate text-ink-4">
+          {[gradeLabel(t.grade), ...techExtras(t)].join(' · ')}
           {t.rejectStreak ? ` · 已连续被退 ${t.rejectStreak} 次` : ''}
         </span>
-        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onToEnd} disabled={busy !== null}>
-          <ArrowDownToLine className="size-3" /> 排尾
-        </button>
-        <button
-          type="button"
-          className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink"
-          onClick={onRest}
-          disabled={busy !== null}
-          data-testid={`clock-rest-btn-${t.techNo}`}
-        >
-          <Coffee className="size-3" /> 休息
-        </button>
-        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onOff} disabled={busy !== null}>
-          <LogOut className="size-3" /> 下牌
-        </button>
+        <span className="flex items-center gap-1">
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[12px] font-semibold text-pine hover:bg-pine-tint"
+            onClick={onCall}
+            disabled={busy !== null}
+            data-testid={`clock-call-tech-${t.techNo}`}
+          >
+            <Megaphone className="size-3" /> 叫号
+          </button>
+          <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onToEnd} disabled={busy !== null}>
+            <ArrowDownToLine className="size-3" /> 排尾
+          </button>
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink"
+            onClick={onRest}
+            disabled={busy !== null}
+            data-testid={`clock-rest-btn-${t.techNo}`}
+          >
+            <Coffee className="size-3" /> 休息
+          </button>
+          <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onOff} disabled={busy !== null}>
+            <LogOut className="size-3" /> 下牌
+          </button>
+        </span>
       </span>
     </li>
   );
@@ -765,9 +816,23 @@ function ServingCard({
 
 type StateAction = 'sign_in' | 'rest' | 'back' | 'sign_out' | 'leave' | 'resume';
 
-/** 按状态筛选（8.0.8，B01）：只列这一类技师，卡片上带这个状态下能做的操作 */
+const STATUS_TONE: Record<Exclude<TechFilter, 'all'>, 'pine' | 'yuzu' | 'lake' | 'clay' | 'neutral'> = {
+  idle: 'pine',
+  serving: 'yuzu',
+  waiting: 'lake',
+  rest: 'neutral',
+  leave: 'neutral',
+  suspended: 'clay',
+  off: 'neutral',
+};
+
+/**
+ * 技师卡片（8.0.8 按状态筛选，B01；8.1.15 起搜索、按类型与项目筛选、按状态排也列在这里）：
+ * 每张卡片按这位技师自己现在的状态带能做的操作。filter 是现在选的状态（全部时各人各的状态）。
+ */
 function FilteredTechs({
   filter,
+  list,
   board,
   now,
   busy,
@@ -778,8 +843,10 @@ function FilteredTechs({
   onStart,
   onFinish,
   onTransfer,
+  onCall,
 }: {
-  filter: Exclude<TechFilter, 'all'>;
+  filter: TechFilter;
+  list: BoardTechnician[];
   board: ClockroomBoard;
   now: number;
   busy: string | null;
@@ -790,17 +857,18 @@ function FilteredTechs({
   onStart: (s: BoardSession) => void;
   onFinish: (s: BoardSession) => void;
   onTransfer: (s: BoardSession) => void;
+  onCall: (t: BoardTechnician, s?: BoardSession) => void;
 }) {
-  const list = board.technicians
-    .filter((t) => t.active && techFilterOf(t) === filter)
-    .sort((a, b) => (a.position ?? 999) - (b.position ?? 999) || Number(a.techNo) - Number(b.techNo) || a.techNo.localeCompare(b.techNo));
   return (
     <div className="mx-auto max-w-[1280px] px-5 py-5 md:px-7" data-testid={`clock-filtered-${filter}`}>
       {list.length === 0 ? (
-        <Card className="px-4 py-8 text-center text-[13px] text-ink-3">没有「{TECH_FILTER_LABELS[filter]}」的技师</Card>
+        <Card className="px-4 py-8 text-center text-[13px] text-ink-3" data-testid="clock-filtered-empty">
+          {filter === 'all' ? '没有符合条件的技师，换个条件或点「清空」' : `没有符合条件的「${TECH_FILTER_LABELS[filter]}」技师`}
+        </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {list.map((t) => {
+            const status = techFilterOf(t);
             const s = t.busy ? board.sessions.find((x) => x.id === t.busy!.sessionId) : undefined;
             const left = s?.plannedEnd ? new Date(s.plannedEnd).getTime() - now : null;
             const act = (action: StateAction, ok: string, label: string, icon: React.ReactNode, variant: 'primary' | 'secondary' | 'ghost' = 'ghost') => (
@@ -816,27 +884,50 @@ function FilteredTechs({
                 {label}
               </Button>
             );
+            const callButton = (
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<Megaphone className="size-3.5" />}
+                loading={busy === `call-${t.id}`}
+                disabled={busy !== null}
+                onClick={() => onCall(t, s)}
+                data-testid={`clock-tech-call-${t.techNo}`}
+              >
+                叫号
+              </Button>
+            );
             return (
-              <Card key={t.id} className="flex flex-col p-4" data-testid={`clock-tech-${t.techNo}`}>
+              <Card key={t.id} className="flex flex-col p-4" data-testid={`clock-tech-${t.techNo}`} data-status={status}>
                 <div className="flex items-baseline gap-2">
                   <span className="num text-[20px] font-bold">{t.techNo}</span>
-                  <span className="min-w-0 flex-1 truncate text-[15px] font-bold">{t.name}</span>
-                  <Badge tone={filter === 'idle' ? 'pine' : filter === 'serving' ? 'yuzu' : filter === 'suspended' ? 'clay' : 'neutral'}>{TECH_FILTER_LABELS[filter]}</Badge>
+                  <span className="min-w-0 flex-1 truncate text-[15px] font-bold">{techName(t)}</span>
+                  <Badge tone={STATUS_TONE[status]}>{TECH_FILTER_LABELS[status]}</Badge>
                 </div>
                 <p className="mt-1 text-[12px] text-ink-3">
-                  {gradeLabel(t.grade)} · {t.gender === 'female' ? '女' : '男'} · 今日 {t.todayClocks} 钟{t.position ? ` · 排第 ${t.position} 位` : ''}
+                  {[gradeLabel(t.grade), t.gender === 'female' ? '女' : '男', ...techExtras(t)].join(' · ')} · 今日 {t.todayClocks} 钟{t.position ? ` · 排第 ${t.position} 位` : ''}
                   {t.rejectStreak ? ` · 已连续被退 ${t.rejectStreak} 次` : ''}
                 </p>
+                {t.skills.length > 0 && <p className="mt-0.5 truncate text-[12px] text-ink-3">可做：{t.skills.join('、')}</p>}
                 {s && (
                   <p className="mt-1.5 truncate text-[13px] text-ink-2">
                     <span className="num font-bold">{s.tagCode}</span> {s.guest} · {s.itemName} × {s.clocks}
                     {s.status === 'serving' && left !== null ? ` · ${left < 0 ? `超时 ${mmss(left)}` : `剩 ${mmss(left)}`}` : ''}
                   </p>
                 )}
-                {filter === 'suspended' && <p className="mt-1.5 text-[12.5px] text-clay">停牌：{t.suspendedReason}</p>}
+                {status === 'suspended' && <p className="mt-1.5 text-[12.5px] text-clay">停牌：{t.suspendedReason}</p>}
+                {status === 'leave' && t.approvedLeave && (
+                  <p className="mt-1.5 text-[12.5px] text-ink-2" data-testid={`clock-tech-leave-${t.techNo}`}>
+                    休假单：{leaveRangeText(t.approvedLeave)}（{LEAVE_TYPE_LABELS[t.approvedLeave.leaveType]}）。要上牌先
+                    <Link to="/technicians/leaves" className="font-semibold text-pine underline-offset-2 hover:underline">
+                      到技师管理销假
+                    </Link>
+                  </p>
+                )}
                 <div className="mt-3 flex flex-wrap gap-1.5">
-                  {filter === 'idle' && (
+                  {status === 'idle' && (
                     <>
+                      {callButton}
                       {act('rest', `${t.techNo} 号休息`, '休息', <Coffee className="size-3.5" />)}
                       <Button size="sm" variant="ghost" icon={<ArrowDownToLine className="size-3.5" />} disabled={busy !== null} onClick={() => onToEnd(t)}>
                         排尾
@@ -845,7 +936,7 @@ function FilteredTechs({
                       {act('leave', `${t.techNo} 号今天休假`, '休假', <CalendarOff className="size-3.5" />)}
                     </>
                   )}
-                  {filter === 'serving' && s && (
+                  {status === 'serving' && s && (
                     <>
                       <Button size="sm" variant="primary" icon={<Square className="size-3.5" />} loading={busy === `finish-${s.id}`} onClick={() => onFinish(s)}>
                         下钟
@@ -853,39 +944,41 @@ function FilteredTechs({
                       <Button size="sm" variant="secondary" icon={<ArrowRightLeft className="size-3.5" />} disabled={!canPost} onClick={() => onTransfer(s)}>
                         转钟
                       </Button>
+                      {callButton}
                     </>
                   )}
-                  {filter === 'waiting' && s && (
+                  {status === 'waiting' && s && (
                     <>
                       <Button size="sm" variant="primary" icon={<Play className="size-3.5" />} loading={busy === `start-${s.id}`} onClick={() => onStart(s)}>
                         上钟
                       </Button>
+                      {callButton}
                       <Button size="sm" variant="secondary" icon={<ArrowRightLeft className="size-3.5" />} disabled={!canPost} onClick={() => onTransfer(s)}>
                         转钟
                       </Button>
                     </>
                   )}
-                  {filter === 'rest' && (
+                  {status === 'rest' && (
                     <>
                       {act('back', `${t.techNo} 号回牌`, '回牌', <LogIn className="size-3.5" />, 'secondary')}
                       {act('sign_out', `${t.techNo} 号下牌`, '下牌', <LogOut className="size-3.5" />)}
                       {act('leave', `${t.techNo} 号今天休假`, '休假', <CalendarOff className="size-3.5" />)}
                     </>
                   )}
-                  {filter === 'leave' && (
+                  {status === 'leave' && !t.approvedLeave && (
                     <>
                       {act('sign_in', `${t.techNo} 号上牌`, '上牌', <LogIn className="size-3.5" />, 'secondary')}
                       {act('sign_out', `${t.techNo} 号已取消休假`, '取消休假', <Undo2 className="size-3.5" />)}
                     </>
                   )}
-                  {filter === 'off' && (
+                  {status === 'off' && (
                     <>
                       {act('sign_in', `${t.techNo} 号上牌`, '上牌', <LogIn className="size-3.5" />, 'secondary')}
                       {act('leave', `${t.techNo} 号今天休假`, '休假', <CalendarOff className="size-3.5" />)}
                     </>
                   )}
-                  {filter === 'suspended' && act('resume', `${t.techNo} 号已复牌`, '复牌', <RotateCcw className="size-3.5" />, 'secondary')}
-                  {(filter === 'idle' || filter === 'rest' || filter === 'off' || filter === 'leave') && (
+                  {status === 'suspended' && act('resume', `${t.techNo} 号已复牌`, '复牌', <RotateCcw className="size-3.5" />, 'secondary')}
+                  {(status === 'idle' || status === 'rest' || status === 'off' || status === 'leave') && (
                     <Button size="sm" variant="ghost" icon={<BadgeX className="size-3.5" />} disabled={busy !== null} onClick={() => onSuspend(t)} data-testid={`clock-tech-suspend-${t.techNo}`}>
                       停牌
                     </Button>

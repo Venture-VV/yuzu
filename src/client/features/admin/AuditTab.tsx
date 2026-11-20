@@ -101,6 +101,12 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   room_center_merge: { label: '房态中心 · 并房 / 拆并', tone: 'yuzu' },
   room_center_state: { label: '房态中心 · 改房态', tone: 'ember' },
   room_category: { label: '房态中心 · 房型', tone: 'pine' },
+  // 8.1.15 技师管理
+  technician_group: { label: '技师组别', tone: 'neutral' },
+  technician_shift: { label: '技师班次', tone: 'neutral' },
+  technician_schedule: { label: '技师排班', tone: 'neutral' },
+  technician_leave: { label: '技师休假', tone: 'ember' },
+  clock_announcer: { label: '叫号播报终端', tone: 'neutral' },
 };
 
 function describe(detail: Record<string, unknown>): string {
