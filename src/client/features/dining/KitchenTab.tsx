@@ -204,7 +204,10 @@ export function KitchenTab() {
                   setPref(s.id);
                   writeStation(s.id);
                 }}
-                className={cn('h-9 shrink-0 rounded-full px-4 text-[13.5px] font-semibold whitespace-nowrap', station === s.id ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink')}
+                className={cn(
+                  'tap relative h-9 shrink-0 rounded-full px-4 text-[13.5px] font-semibold whitespace-nowrap',
+                  station === s.id ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-2 hover:text-ink',
+                )}
                 data-testid={`kds-station-${s.name}`}
               >
                 {s.name}

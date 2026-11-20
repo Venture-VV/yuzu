@@ -398,7 +398,7 @@ export function DishEditor({
                   aria-label={`去掉做法的组 ${g.name}`}
                   title={`去掉这一组（组里的做法改成不分组）`}
                   onClick={() => set({ groups: f.groups.filter((x) => x.name !== g.name), methods: f.methods.map((m) => (m.group === g.name ? { ...m, group: '' } : m)) })}
-                  className="flex size-9 items-center justify-center rounded-full hover:bg-lake/10"
+                  className="tap relative flex size-9 items-center justify-center rounded-full hover:bg-lake/10"
                 >
                   <X className="size-3.5" />
                 </button>
@@ -472,7 +472,7 @@ export function DishEditor({
           </form>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {QUICK_METHODS.filter((m) => !f.methods.some((x) => x.name === m)).map((m) => (
-              <button key={m} type="button" className="h-9 rounded-full bg-paper-2 px-3 text-[12.5px] font-semibold text-ink-3 hover:text-ink" onClick={() => addMethod(m)}>
+              <button key={m} type="button" className="tap relative h-9 rounded-full bg-paper-2 px-3 text-[12.5px] font-semibold text-ink-3 hover:text-ink" onClick={() => addMethod(m)}>
                 + {m}
               </button>
             ))}

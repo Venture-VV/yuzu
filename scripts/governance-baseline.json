@@ -67,7 +67,7 @@
     "polling": 64,
     "raw-dialog": 11,
     "raw-table": 36,
-    "small-text": 40,
+    "small-text": 24,
     "status-500": 2
   },
   "duplicationMaxPercent": 1,

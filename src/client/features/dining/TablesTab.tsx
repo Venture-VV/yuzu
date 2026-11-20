@@ -368,7 +368,7 @@ function TableTile({ t, now, onClick, tables, alertMinutes }: { t: Tile; now: nu
           <span className="mt-0.5 w-full truncate text-[12.5px] font-semibold text-ink-2">{guestOf(s)}</span>
           <span className="mt-auto flex w-full flex-wrap items-center gap-x-2 gap-y-1 pt-1.5">
             <Money cents={s.amount} className="text-[14px] font-bold" />
-            <span className="num text-[11.5px] text-ink-3">{stayText(s.openedAt, now)}</span>
+            <span className="num text-[12px] text-ink-3">{stayText(s.openedAt, now)}</span>
             {s.pendingDishes > 0 && <Badge tone="yuzu">待上 {s.pendingDishes}</Badge>}
             {!t.active && <Badge tone="clay">已停用</Badge>}
           </span>
@@ -744,7 +744,7 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
                     <span className={cn('min-w-0 flex-1 basis-40 text-[13.5px] font-semibold', isVoided && 'line-through')}>
                       {l.name} × {l.quantity}
                       {l.kitchen?.note && <span className="ml-1 text-[12px] font-bold text-yuzu-deep">{l.kitchen.note}</span>}
-                      <span className="block text-[11.5px] font-normal text-ink-4">
+                      <span className="block text-[12px] font-normal text-ink-4">
                         {formatTime(l.postedAt)} {l.postedByName}
                         {isVoided && ` · ${l.voidedByName ?? ''}退：${l.voidReason ?? ''}`}
                       </span>
@@ -976,10 +976,13 @@ function MoveDialog({ detail, free, onClose, onMoved }: { detail: TableSessionDe
               role="radio"
               aria-checked={to === t.id}
               onClick={() => setTo(t.id)}
-              className={cn('h-10 rounded-full border px-3.5 text-[14px] font-bold', to === t.id ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong')}
+              className={cn(
+                'tap relative h-10 rounded-full border px-3.5 text-[14px] font-bold',
+                to === t.id ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong',
+              )}
               data-testid={`table-move-to-${t.name}`}
             >
-              <span className="num">{t.name}</span> <span className="text-[11.5px] font-semibold opacity-70">{t.seats} 座</span>
+              <span className="num">{t.name}</span> <span className="text-[12px] font-semibold opacity-70">{t.seats} 座</span>
             </button>
           ))}
         </div>

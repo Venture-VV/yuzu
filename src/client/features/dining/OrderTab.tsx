@@ -549,7 +549,7 @@ export function OrderTab() {
                 <button
                   type="button"
                   onClick={() => pickOutlet(null)}
-                  className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] font-semibold text-ink-3 hover:bg-paper-2 hover:text-ink"
+                  className="tap relative inline-flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] font-semibold text-ink-3 hover:bg-paper-2 hover:text-ink"
                   data-testid="dining-outlet-back"
                 >
                   <RotateCcw className="size-3.5" /> 重新选
@@ -617,7 +617,7 @@ export function OrderTab() {
           {/* 这一单记到谁账上：手牌号（桌号）、客人、份数放在最上面，下单前一眼看得到（需求 5） */}
           {target && cart.length > 0 && (
             <div className="mb-3 rounded-lg border border-pine/25 bg-pine-tint px-3 py-2" data-testid="dining-target">
-              <p className="text-[11.5px] font-semibold text-ink-3">这一单记到</p>
+              <p className="text-[12px] font-semibold text-ink-3">这一单记到</p>
               <p className="flex flex-wrap items-baseline gap-x-2">
                 <span className="num text-[22px] leading-tight font-bold text-pine">{target.label}</span>
                 <span className="text-[14.5px] font-bold">{target.who}</span>
@@ -655,7 +655,7 @@ export function OrderTab() {
                     <span className="ml-auto flex items-center gap-2">
                       <button
                         type="button"
-                        className="flex size-8 items-center justify-center rounded-full bg-paper-2 hover:bg-paper-3"
+                        className="tap relative flex size-8 items-center justify-center rounded-full bg-paper-2 hover:bg-paper-3"
                         onClick={() => update(l.key, { quantity: l.quantity - 1 })}
                         aria-label="少一份"
                         disabled={op.locked}
@@ -673,7 +673,7 @@ export function OrderTab() {
                       />
                       <button
                         type="button"
-                        className="flex size-8 items-center justify-center rounded-full bg-paper-2 hover:bg-paper-3"
+                        className="tap relative flex size-8 items-center justify-center rounded-full bg-paper-2 hover:bg-paper-3"
                         onClick={() =>
                           update(l.key, {
                             quantity: Math.min(99, l.quantity + 1),
@@ -717,7 +717,7 @@ export function OrderTab() {
                       <button
                         key={w}
                         type="button"
-                        className="h-6 rounded-full bg-paper-2 px-2 text-[11.5px] font-semibold text-ink-3 hover:text-ink"
+                        className="tap relative h-6 rounded-full bg-paper-2 px-2 text-[12px] font-semibold text-ink-3 hover:text-ink"
                         onClick={() => addNote(l, w)}
                         disabled={op.locked}
                       >
@@ -754,7 +754,7 @@ export function OrderTab() {
               {target ? `下单 · ${target.label}` : '下单'}
             </Button>
           </div>
-          <p className="mt-2 text-[11.5px] leading-relaxed text-ink-4">下单就是记到客人或这桌的账上（不是收款），结账时一起结。点错了在下面「还没上的菜」里退菜。</p>
+          <p className="mt-2 text-[12px] leading-relaxed text-ink-4">下单就是记到客人或这桌的账上（不是收款），结账时一起结。点错了在下面「还没上的菜」里退菜。</p>
         </Card>
 
         {target && (
@@ -793,7 +793,7 @@ export function OrderTab() {
                     <Badge tone={STATUS_TONE[p.status]}>{KITCHEN_STATUS_LABELS[p.status]}</Badge>
                     {p.rushCount > 0 && <Badge tone="clay">催 {p.rushCount}</Badge>}
                     <span className="flex w-full items-center justify-end gap-1">
-                      <span className="mr-auto text-[11.5px] text-ink-4">{formatTime(p.createdAt)} 下单</span>
+                      <span className="mr-auto text-[12px] text-ink-4">{formatTime(p.createdAt)} 下单</span>
                       {p.status === 'done' ? (
                         <Button
                           size="sm"
@@ -967,7 +967,7 @@ function DishGrid({ list, countOf, add, locked }: { list: MenuDish[]; countOf: (
             )}
             <span className="mt-auto flex w-full items-center gap-1.5 pt-1">
               <Money cents={d.price} className="text-[13.5px] font-bold text-ink-2" />
-              <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink-4">{d.stationName}</span>
+              <span className="min-w-0 flex-1 truncate text-[12px] text-ink-4">{d.stationName}</span>
               {out ? <Badge tone="clay">已沽清</Badge> : d.remaining !== null && <Badge tone="yuzu">剩 {d.remaining}</Badge>}
             </span>
             {n > 0 && <span className="num absolute top-2 right-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-pine px-1.5 text-[12.5px] font-bold text-paper">{n}</span>}
@@ -1019,13 +1019,13 @@ function TablePicker({
                 onClick={() => onPick(x.sessionId)}
                 title={`${x.guests} 人 · ${x.guest}`}
                 className={cn(
-                  'flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold disabled:opacity-40',
+                  'tap relative flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold disabled:opacity-40',
                   on ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong',
                 )}
                 data-testid={`dining-table-${x.name}`}
               >
                 <span className="num">桌 {x.name}</span>
-                <span className="flex items-center gap-0.5 text-[11.5px] font-semibold opacity-70">
+                <span className="flex items-center gap-0.5 text-[12px] font-semibold opacity-70">
                   <Users className="size-3" />
                   {x.guests}
                 </span>
