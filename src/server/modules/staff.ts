@@ -24,6 +24,7 @@ const username = z
 
 /** 专用账号：后台把老账号改成专用账号时也不用再选岗（Codex 审查 4e118c1） */
 const isSpecialRole = (role: Role) => role === 'tablet' || role === 'other_store' || role === 'designer';
+const EMPTY_ADJUST = { add: [] as Permission[], remove: [] as Permission[] };
 
 // 专用账号（8.1.18，GW3）：点餐平板、他店查询、设计师不是组织里的岗位，照旧按旧岗位建。
 // 组织里的账号一律「部门 → 岗位」（position）；旧岗位（role + duties）只留给脚本与测试用（后台页面不再提供）。
@@ -205,7 +206,7 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
     const password = input.password || generateTempPassword();
     const weak = checkPasswordStrength(password);
     if (weak) throw badRequest(weak, { field: 'password' });
-    const id = await createStaff(sql, { ...input, ...resolved, permissionAdjust, password, mustChangePassword: true });
+    const id = await createStaff(sql, { ...input, ...resolved, permissionAdjust: isSpecialRole(resolved.role) ? EMPTY_ADJUST : permissionAdjust, password, mustChangePassword: true });
     // 新员工挂在建他的那家门店（8.0.22，docs/MULTISTORE_V8022.md 第 1 节；员工档案里可以再改成几家）
     await sql`INSERT INTO staff_stores (staff_id, store_id) VALUES (${id}, ${currentStoreId()}) ON CONFLICT DO NOTHING`;
     await writeAudit(sql, {
@@ -258,7 +259,8 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
         UPDATE staff SET display_name = ${input.displayName}, role = ${resolved.role}, duties = ${uniqueDuties(resolved.duties)},
                department_id = ${input.departmentId === undefined ? tx`department_id` : input.departmentId},
                position = ${resolved.position},
-               permission_adjust = ${permissionAdjust ? tx.json(permissionAdjust as never) : tx`permission_adjust`},
+               -- 改成专用账号（点餐平板、他店查询、设计师）清掉个人微调：专用账号的编辑框不显示微调，留着就是看不见的加权（Codex 审查 072a6e3）
+               permission_adjust = ${isSpecialRole(resolved.role) ? tx.json(EMPTY_ADJUST as never) : permissionAdjust ? tx.json(permissionAdjust as never) : tx`permission_adjust`},
                -- 后台给了岗位就不用自己再选（GW7）；改过岗位的不再标「自选岗位」
                needs_position = ${resolved.position || isSpecialRole(resolved.role) ? false : tx`needs_position`},
                position_chosen_at = ${positionChanged ? null : tx`position_chosen_at`},

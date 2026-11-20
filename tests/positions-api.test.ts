@@ -214,6 +214,25 @@ describe('老账号第一次登录选新岗位（GW7）', () => {
     expect((await ctx.sql<{ needsPosition: boolean }[]>`SELECT needs_position FROM staff WHERE id = ${id}`)[0]!.needsPosition).toBe(false);
   });
 
+  it('改成专用账号时清掉原来的个人微调（Codex 审查 072a6e3）', async () => {
+    const { id } = await hire('adj_to_os', { position: 'front.staff', permissionAdjust: { add: ['expense.approve'], remove: [] } });
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/staff/${id}`, { displayName: '他店', role: 'other_store', duties: [], active: true })).status).toBe(200);
+    const [row] = await ctx.sql<{ permissionAdjust: { add: string[]; remove: string[] } }[]>`SELECT permission_adjust FROM staff WHERE id = ${id}`;
+    expect(row!.permissionAdjust.add).toEqual([]);
+    const cookie = await login(ctx.app, 'adj_to_os');
+    expect((await me(cookie)).permissions).not.toContain('expense.approve');
+    // 新建专用账号带了微调也不存
+    const r = await api(ctx.app, ctx.owner, 'POST', '/api/staff', {
+      username: 'pad_adj',
+      displayName: 'x',
+      role: 'tablet',
+      password: PASSWORD,
+      permissionAdjust: { add: ['expense.approve'], remove: [] },
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect((await ctx.sql<{ permissionAdjust: { add: string[] } }[]>`SELECT permission_adjust FROM staff WHERE username = 'pad_adj'`)[0]!.permissionAdjust.add).toEqual([]);
+  });
+
   it('原来是值班经理的可以选负责人，不能选总经办', async () => {
     await createStaff(ctx.sql, { username: 'old_duty', displayName: '老值班经理', role: 'duty_manager', password: PASSWORD, mustChangePassword: false });
     await ctx.sql`UPDATE staff SET needs_position = true WHERE username = 'old_duty'`;
