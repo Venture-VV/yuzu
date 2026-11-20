@@ -26,6 +26,8 @@ const TABLE = String.raw`(?:ONLY\s+)?(?:"?[a-z_][a-z0-9_]*"?\.)?"?`;
 /** UPDATE 目标表与 SET 之间可以有别名（UPDATE ledger_entries l SET …、UPDATE x AS y SET …） */
 const ALIAS = String.raw`"?(?:\s+(?:AS\s+)?(?!SET\b)[a-z_][a-z0-9_]*)?\s+SET\b`;
 const updateOf = (table) => new RegExp(String.raw`\bUPDATE\s+${TABLE}${table}${ALIAS}`, 'i');
+const insertOf = (table) => new RegExp(String.raw`\bINSERT\s+INTO\s+${TABLE}${table}"?(?![a-z0-9_])`, 'i');
+const mergeOf = (table) => new RegExp(String.raw`\bMERGE\s+INTO\s+${TABLE}${table}"?(?![a-z0-9_])`, 'i');
 const deleteOf = (table) => new RegExp(String.raw`\bDELETE\s+FROM\s+${TABLE}${table}"?(?![a-z0-9_])`, 'i');
 
 export const RULES = [
@@ -38,7 +40,8 @@ export const RULES = [
   {
     id: 'ledger-write',
     title: '改动账本或资金表的已有行（只许追加）',
-    test: (st) => LEDGER_TABLES.some((t) => updateOf(t).test(st) || deleteOf(t).test(st)),
+    // UPDATE / DELETE；INSERT … ON CONFLICT … DO UPDATE（UPSERT 会改已有行）；MERGE INTO（Codex 审查 692dc3c）。只追加的 INSERT 与 DO NOTHING 不算
+    test: (st) => LEDGER_TABLES.some((t) => updateOf(t).test(st) || deleteOf(t).test(st) || (insertOf(t).test(st) && /\bON\s+CONFLICT\b[\s\S]*\bDO\s+UPDATE\b/i.test(st)) || mergeOf(t).test(st)),
   },
   { id: 'type-change', title: '改列的类型（旧数据要能转、旧版本代码回滚时还认得）', test: (st) => /\bALTER\s+COLUMN\s+[a-z_"]+\s+(SET\s+DATA\s+)?TYPE\b/i.test(st) },
   { id: 'rename', title: '改表名或列名（回滚到上一版时旧代码找不到）', test: (st) => /\bRENAME\s+(COLUMN\s+|TO\s+)/i.test(st) },

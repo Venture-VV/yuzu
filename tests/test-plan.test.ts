@@ -281,6 +281,11 @@ describe('迁移的数据风险', () => {
     expect(rules('DELETE FROM public.ledger_entries WHERE id = 1;')).toEqual(['ledger-write']);
     expect(rules('UPDATE public."recharges" AS r SET note = 1 WHERE r.id = 1;')).toEqual(['ledger-write']);
     expect(rules('UPDATE ledger_entries_archive SET a = 1 WHERE id = 1;')).toEqual([]);
+    // UPSERT 与 MERGE 会改已有行（Codex 审查 692dc3c）；只追加的 INSERT、DO NOTHING 不算
+    expect(rules('INSERT INTO ledger_entries SELECT * FROM ledger_entries WHERE true ON CONFLICT (id) DO UPDATE SET principal_after = 0;')).toEqual(['ledger-write']);
+    expect(rules('MERGE INTO public.recharges r USING x ON r.id = x.id WHEN MATCHED THEN UPDATE SET amount = 0;')).toEqual(['ledger-write']);
+    expect(rules('INSERT INTO ledger_entries (id) VALUES (1) ON CONFLICT (id) DO NOTHING;')).toEqual([]);
+    expect(rules('INSERT INTO ledger_entries (id) VALUES (1);')).toEqual([]);
     expect(rules('UPDATE dishes d SET price = 0;')).toEqual(['unbounded-write']);
     expect(rules('ALTER TABLE x ALTER COLUMN y TYPE bigint;')).toEqual(['type-change']);
     expect(rules('ALTER TABLE x RENAME COLUMN a TO b;')).toEqual(['rename']);
