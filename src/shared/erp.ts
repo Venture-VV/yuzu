@@ -471,6 +471,9 @@ export const ERP_OP_TYPES = [
   'gift_issue',
   // 8.1.10 核库转领用：库管核库完成（开领料单）、部门答复替代提议
   'request_stock',
+  // 8.1.15 会员建档（匿名卡没有手机号去重、实体卡同时收押金）、退卡退押金（动的是钱）
+  'member_create',
+  'member_card_return',
 ] as const;
 export type ErpOpType = (typeof ERP_OP_TYPES)[number];
 export const ERP_OP_LABELS: Record<ErpOpType, string> = {
@@ -541,6 +544,8 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   gift_type: '新建签赠券类型',
   gift_issue: '签赠发放',
   request_stock: '需求单核库 / 答复替代',
+  member_create: '新建会员',
+  member_card_return: '退卡退押金',
 };
 export interface ErpOpLookup {
   /** 已经登记成功：refId 是那张单据（退回 / 补付另给所在的打款） */

@@ -174,7 +174,8 @@ export async function previewOpeningImport(deps: Deps, raw: OpeningPreviewInputD
 async function reportOfImport(db: Db, importId: number, replayed: boolean): Promise<OpeningImportReport> {
   const [imp] = await db<{ importNo: string }[]>`SELECT import_no FROM opening_imports WHERE id = ${importId}`;
   if (!imp) throw notFound('期初导入记录不存在');
-  const rows = await db<{ line: number; name: string; phone: string; memberNo: string; principal: number; bonus: number; legacyRecharged: number; memberCreated: boolean }[]>`
+  // 期初的会员都是按手机号建档、对上的（手机号登记以后不能清空）；列本身可以为空（匿名卡，8.1.15），这里按空着带出来
+  const rows = await db<{ line: number; name: string; phone: string | null; memberNo: string; principal: number; bonus: number; legacyRecharged: number; memberCreated: boolean }[]>`
     SELECT b.line_no AS line, m.name, m.phone, m.member_no, b.principal, b.bonus, b.legacy_recharged, b.member_created
     FROM opening_balances b JOIN members m ON m.id = b.member_id
     WHERE b.import_id = ${importId} ORDER BY b.line_no`;
@@ -194,7 +195,7 @@ async function reportOfImport(db: Db, importId: number, replayed: boolean): Prom
     samples: rows.slice(0, 30).map((r) => ({
       line: r.line,
       name: r.name,
-      phone: r.phone,
+      phone: r.phone ?? '',
       principal: r.principal,
       bonus: r.bonus,
       action: r.memberCreated ? 'create' : 'match',

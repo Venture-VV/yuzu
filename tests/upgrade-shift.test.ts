@@ -97,6 +97,8 @@ beforeAll(async () => {
   await sql`ALTER TABLE members ADD COLUMN grade smallint NOT NULL DEFAULT 0, ADD COLUMN tier smallint, ADD COLUMN cycle_start date, ADD COLUMN cycle_end date, ADD COLUMN grace_until date, ADD COLUMN grade_version integer NOT NULL DEFAULT 0`;
   // 现版本按「这位会员与并进来的会员」算滚动累计充值，充值减去退回的本金（v0.7.26，047 才有）：写入期间临时加列、建空表，迁移前删掉
   await sql`ALTER TABLE members ADD COLUMN merged_into_id bigint`;
+  // 现版本读会员资料带卡类型、推荐人、偏好项目（8.1.15，192 才有）：写入期间临时加列，迁移前删掉
+  await sql`ALTER TABLE members ADD COLUMN card_type text NOT NULL DEFAULT 'ecard', ADD COLUMN referrer_member_id bigint, ADD COLUMN preferred_items text[] NOT NULL DEFAULT '{}'`;
   await sql`ALTER TABLE ledger_entries ADD COLUMN member_refund_id bigint, ADD COLUMN member_merge_id bigint`;
   await sql`CREATE TABLE member_refund_lines (id bigint, recharge_id bigint, amount bigint)`;
   // 读充值单时带渠道（前台 / 小程序，047 才有）
@@ -151,6 +153,7 @@ beforeAll(async () => {
   await sql`DROP TABLE benefits`;
   await sql`DROP TABLE member_refund_lines`;
   await sql`ALTER TABLE members DROP COLUMN merged_into_id`;
+  await sql`ALTER TABLE members DROP COLUMN card_type, DROP COLUMN referrer_member_id, DROP COLUMN preferred_items`;
   await sql`ALTER TABLE ledger_entries DROP COLUMN member_refund_id, DROP COLUMN member_merge_id`;
   await sql`ALTER TABLE recharges DROP COLUMN channel`;
   await sql`ALTER TABLE checkout_bills DROP COLUMN ticket_extension_minutes, DROP COLUMN ticket_extension_benefit_id`;

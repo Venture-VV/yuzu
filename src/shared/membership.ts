@@ -337,7 +337,8 @@ export function maskName(name: string): string {
   return `${chars[0]}${'*'.repeat(chars.length - 2)}${chars[chars.length - 1]}`;
 }
 
-export const maskPhone = (phone: string): string => (phone.length === 11 ? `${phone.slice(0, 3)}****${phone.slice(7)}` : '****');
+/** 没留手机号的（匿名卡，8.1.15）写「未留手机号」 */
+export const maskPhone = (phone: string | null): string => (phone === null ? '未留手机号' : phone.length === 11 ? `${phone.slice(0, 3)}****${phone.slice(7)}` : '****');
 
 // ───────────────────────── 接口的数据 ─────────────────────────
 
@@ -460,7 +461,8 @@ export interface RetentionRow {
   memberId: number;
   memberNo: string;
   name: string;
-  phone: string;
+  /** 没留手机号的（匿名卡，8.1.15）为 null */
+  phone: string | null;
   grade: Grade;
   tier: Tier | null;
   cycleStart: string;

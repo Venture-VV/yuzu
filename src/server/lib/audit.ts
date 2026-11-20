@@ -321,7 +321,10 @@ export type AuditAction =
   | 'technician_shift'
   | 'technician_schedule'
   | 'technician_leave'
-  | 'clock_announcer';
+  | 'clock_announcer'
+  // 8.1.15 会员卡押金（收、退，detail.kind 写是哪一样）、退卡
+  | 'member_card_deposit'
+  | 'member_card_returned';
 
 export interface AuditEntry {
   staffId: number | null;

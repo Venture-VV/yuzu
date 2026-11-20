@@ -1,6 +1,7 @@
 // v0.7.28 ⑦ 浏览器验收：会员实体卡。会员页「会员卡」发卡（读卡器按模拟键盘把卡号打进输入框、回车）→ 查找框刷卡找到这位会员 →
 // 挂失 → 再刷这张卡：提醒已挂失、卡主是谁 → 补卡发新卡。依赖演示数据（仅独立演示库）；账号：店主 linlan，密码 yuzu2026。可重复执行。
 import { expect, test, type Page } from '@playwright/test';
+import { ensureShift } from './shift';
 
 const PASSWORD = 'yuzu2026';
 const run = Date.now().toString(36).toUpperCase().slice(-6);
@@ -16,6 +17,8 @@ async function login(page: Page, username: string) {
 test('发卡 → 刷卡找会员 → 挂失后刷卡提醒 → 补卡', async ({ page }, info) => {
   test.skip(info.project.name !== '门店电脑', '写数据的只在门店电脑尺寸执行一次');
   await login(page, 'linlan');
+  // 8.1.15 起发卡按后台设的金额收押金（默认 20 元，现金）：收款要先开班
+  await ensureShift(page);
   const phone = `199${String(Date.now()).slice(-8)}`;
   const created = await page.request.post('/api/members', { data: { name: `E2E 持卡 ${run}`, phone } });
   expect(created.ok(), await created.text()).toBe(true);
@@ -32,6 +35,10 @@ test('发卡 → 刷卡找会员 → 挂失后刷卡提醒 → 补卡', async ({
   await page.getByTestId('member-card-no').press('Enter');
   await expect(page.getByText('已发卡')).toBeVisible();
   await expect(box.getByTestId(`member-card-${first}`)).toHaveAttribute('data-status', 'active');
+  // 押金押着（负债，不在储值余额里）；挂失不退、补卡沿用
+  const rules = (await (await page.request.get('/api/auth/me')).json()) as { rules: { memberForm: { cardDeposit: number } } };
+  const deposit = rules.rules.memberForm.cardDeposit;
+  if (deposit > 0) await expect(box.getByTestId('member-card-deposit-held')).toContainText((deposit / 100).toFixed(2));
 
   // ② 查找框刷卡：找到这位会员
   const search = page.getByRole('searchbox', { name: '搜索会员' }).or(page.getByLabel('搜索会员'));

@@ -93,10 +93,15 @@ export function shiftDate(isoDate: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function maskPhone(phone: string): string {
+/** 没留手机号的会员（匿名卡，8.1.15）在页面、小票、导出里写的字 */
+export const NO_PHONE_LABEL = '未留手机号';
+
+export function maskPhone(phone: string | null | undefined): string {
+  if (!phone) return NO_PHONE_LABEL;
   return phone.length === 11 ? `${phone.slice(0, 3)} **** ${phone.slice(7)}` : phone;
 }
 
-export function formatPhone(phone: string): string {
+export function formatPhone(phone: string | null | undefined): string {
+  if (!phone) return NO_PHONE_LABEL;
   return phone.length === 11 ? `${phone.slice(0, 3)} ${phone.slice(3, 7)} ${phone.slice(7)}` : phone;
 }

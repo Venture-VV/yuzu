@@ -11,6 +11,7 @@ import { SHIFT_MODE_LABELS } from '@shared/checkout';
 import { DEFAULT_FRONTDESK_RULES, type FrontdeskRules } from '@shared/frontdesk';
 import { APPROVAL_RULE_LABELS, type ApprovalRules } from '@shared/inventory';
 import { DEDUCTION_RULE_LABELS, describeHours, ROLE_LABELS } from '@shared/labels';
+import { MEMBER_FORM_FIELD_LABELS, MEMBER_FORM_FIELDS } from '@shared/member-form';
 import { DEFAULT_MEMBERSHIP_RULES, type MembershipRules } from '@shared/membership';
 import { CALL_TYPE_LABELS, DEFAULT_TECHNICIAN_RULES } from '@shared/technicians';
 import { AFTER_DESIGNATED_LABELS, AFTER_ROTATION_LABELS, DEFAULT_CLOCKROOM_RULES, DEFAULT_COMMISSION_RULES, describeCommissionBase } from '@shared/clockroom';
@@ -317,6 +318,40 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
     current: s.memberChannels,
     dflt: d.memberChannels,
     metaKey: sk('memberChannels'),
+  });
+  // 建档表单与实体卡押金（8.1.15，docs/MEMBERS_V8115.md；按门店）
+  const formFields = (r: typeof s.memberForm) => {
+    const hidden = MEMBER_FORM_FIELDS.filter((f) => !r.fields[f].show).map((f) => MEMBER_FORM_FIELD_LABELS[f]);
+    const required = MEMBER_FORM_FIELDS.filter((f) => r.fields[f].required).map((f) => MEMBER_FORM_FIELD_LABELS[f]);
+    return `${hidden.length ? `不显示：${hidden.join('、')}` : '选填项都显示'}；${required.length ? `必填：${required.join('、')}` : '都不必填'}`;
+  };
+  add({
+    key: 'member_form_fields',
+    group: 'members',
+    label: '建档表单的选填项',
+    value: formFields(s.memberForm),
+    defaultValue: formFields(d.memberForm),
+    pending: true,
+    section: 'membership',
+    tab: 'channels',
+    hint: '姓名、手机号（匿名卡除外）、卡类型、会员等级固定必填',
+    current: s.memberForm.fields,
+    dflt: d.memberForm.fields,
+    metaKey: sk('memberForm'),
+  });
+  add({
+    key: 'member_card_deposit',
+    group: 'members',
+    label: '实体卡押金',
+    value: s.memberForm.cardDeposit ? formatYuan(s.memberForm.cardDeposit) : '不收押金',
+    defaultValue: formatYuan(d.memberForm.cardDeposit),
+    pending: true,
+    section: 'membership',
+    tab: 'channels',
+    hint: '押金是负债：不进储值、不算营业额；退卡时全额退',
+    current: s.memberForm.cardDeposit,
+    dflt: d.memberForm.cardDeposit,
+    metaKey: sk('memberForm'),
   });
   // 会员自定义字段 8.0.4 起改成会员标签（数据，不是规则；在「会员与渠道 → 会员标签」维护），不在规则总表里
   // ── 会员体系 v2（v0.7.23，后台「会员体系 → 会员规则」）──
@@ -1359,6 +1394,7 @@ const SETTING_LABELS: Record<string, string> = {
   cashDrawers: '钱箱',
   hidePendingMarks: '「待确认」标记',
   memberChannels: '渠道来源',
+  memberForm: '建档表单与实体卡押金',
 };
 
 function describeChange(action: string, detail: Record<string, unknown>): string {

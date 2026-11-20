@@ -58,8 +58,8 @@ export interface GiftMemberOption {
   id: number;
   memberNo: string;
   name: string;
-  /** 没有「查找与查看会员」权限的账号看到的是打码的 */
-  phone: string;
+  /** 没有「查找与查看会员」权限的账号看到的是打码的；没留手机号的（匿名卡，8.1.15）为 null */
+  phone: string | null;
   grade: number;
   /** 停用、合并过的不能发 */
   usable: boolean;

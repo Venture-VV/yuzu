@@ -20,6 +20,7 @@ import { benefitChecks } from '../modules/benefits';
 import { trialChecks } from '../modules/member-trials';
 import { memberRefundChecks } from '../modules/member-refunds';
 import { memberMergeChecks } from '../modules/member-admin';
+import { cardDepositChecks } from '../modules/member-card-deposits';
 import { computeSettlement } from '../modules/settlement';
 import { loadSettings } from '../modules/settings';
 import { customerChecks } from '../modules/customer/checks';
@@ -59,6 +60,8 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
   const refunds = await readSnapshot(sql, memberRefundChecks);
   // 会员合并（v0.7.26）
   const merges = await readSnapshot(sql, memberMergeChecks);
+  // 会员卡押金（8.1.15）：押着的余额不为负、退卡与台账一致、押金不进储值
+  const cardDeposits = await readSnapshot(sql, cardDepositChecks);
   // 合同与法务审查（v0.7.31）
   const contracts = await readSnapshot(sql, contractChecks);
   // 付款流（v0.7.32）
@@ -83,6 +86,7 @@ export async function consistencyChecks(sql: Sql, timezone: string): Promise<Che
     ...trials,
     ...refunds,
     ...merges,
+    ...cardDeposits,
     ...contracts,
     ...payments,
     ...receivables,

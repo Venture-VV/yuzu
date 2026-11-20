@@ -296,6 +296,11 @@ export function buildShiftSlip(r: ShiftRecord, meta: SlipMeta): Buffer {
     for (const m of sum.deposits.received) s.pair(`收 ${payLabel(m.method)} · ${m.count} 笔`, yuan(m.amount));
     for (const m of sum.deposits.refunded) s.pair(`退 ${payLabel(m.method)} · ${m.count} 笔`, yuan(m.amount));
   }
+  if (sum.cardDeposits) {
+    s.strong('会员卡押金（不算营业额）');
+    for (const m of sum.cardDeposits.received) s.pair(`收 ${payLabel(m.method)} · ${m.count} 笔`, yuan(m.amount));
+    for (const m of sum.cardDeposits.refunded) s.pair(`退 ${payLabel(m.method)} · ${m.count} 笔`, yuan(m.amount));
+  }
   if (sum.countCards) {
     s.strong('次卡（收款，不算营业额）');
     for (const m of sum.countCards.sales.byMethod) s.pair(`卖 ${payLabel(m.method)} · ${m.count} 笔`, yuan(m.amount));
@@ -313,6 +318,7 @@ export function buildShiftSlip(r: ShiftRecord, meta: SlipMeta): Buffer {
   if (sum.cash.refundSlip) s.pair('− 退款单退现金', yuan(sum.cash.refundSlip));
   if (sum.cash.memberRefund) s.pair('− 储值退回的现金', yuan(sum.cash.memberRefund));
   if (sum.cash.countCard) s.pair(sum.cash.countCard > 0 ? '+ 次卡现金（卖 − 退）' : '− 次卡现金（退 − 卖）', yuan(Math.abs(sum.cash.countCard)));
+  if (sum.cash.cardDeposit) s.pair(sum.cash.cardDeposit > 0 ? '+ 会员卡押金现金（收 − 退）' : '− 会员卡押金现金（退 − 收）', yuan(Math.abs(sum.cash.cardDeposit)));
   s.pair('= 应有现金', yuan(r.expectedCash ?? sum.cash.expected), { strong: true });
   if (closed && r.countedCash !== null) {
     const diff = r.countedCash - (r.expectedCash ?? sum.cash.expected);
@@ -412,6 +418,13 @@ export function buildSettlementSlip(st: SettlementSummary, meta: SlipMeta): Buff
     for (const m of st.deposits.received) s.pair(`收 ${payLabel(m.method)} · ${m.count} 笔`, yuan(m.amount));
     for (const m of st.deposits.refunded) s.pair(`退 ${payLabel(m.method)} · ${m.count} 笔`, yuan(-m.amount));
     s.pair('当天结束时在住押金', yuan(st.deposits.held), { strong: true });
+  }
+  const cd = st.cardDeposits;
+  if (cd && (cd.received.length > 0 || cd.refunded.length > 0 || cd.held !== 0)) {
+    s.rule().strong('会员卡押金（负债，不算营业额）');
+    for (const m of cd.received) s.pair(`收 ${payLabel(m.method)} · ${m.count} 笔`, yuan(m.amount));
+    for (const m of cd.refunded) s.pair(`退 ${payLabel(m.method)} · ${m.count} 笔`, yuan(-m.amount));
+    s.pair('当天结束时押着的押金', yuan(cd.held), { strong: true });
   }
   const cc = st.countCards;
   if (cc && (cc.sales.count || cc.refunds.count || cc.uses.count)) {

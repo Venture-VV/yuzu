@@ -42,11 +42,13 @@ test.describe('对话框打开后马上输入', () => {
   test('新建会员、前台接待：点开后马上输入的姓名、牌号都还在', async ({ page }) => {
     await login(page, 'xiaozhou');
 
-    // 会员工作台「新建会员」：姓名
+    // 会员工作台「新建会员」：姓名。8.1.15 起先选卡类型再填表——点开以后选电子卡，表单一出来马上输入
     await page.goto('/');
     await expect(page.getByRole('button', { name: '新建会员' }).first()).toBeVisible();
     for (let i = 0; i < 5; i++) {
-      const r = await typeRightAfterOpen(page, 'text=新建会员', '#m-name', '快速输入');
+      await page.getByRole('button', { name: '新建会员' }).first().click();
+      await expect(page.getByTestId('card-type-ecard')).toBeVisible();
+      const r = await typeRightAfterOpen(page, '[data-testid="card-type-ecard"]', '#m-name', '快速输入');
       expect(r, `新建会员第 ${i + 1} 次`).toEqual({ value: '快速输入' });
       await page.keyboard.press('Escape');
       await expect(page.getByRole('dialog')).toHaveCount(0);

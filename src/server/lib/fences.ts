@@ -147,6 +147,9 @@ export const FENCED_OPS = [
   'request_stock',
   // 8.1.15 发牌后的异常处置（迁移 187）：提醒、加收、上报、外出、返回、未结离店；编号记在 idempotency_keys（ref_id 是那次来访），也记在 visit_incidents.op_key
   'visit_incident',
+  // 8.1.15 会员建档（迁移 192；编号记在 members.client_key）、退卡退押金（编号记在 member_card_returns.client_key）
+  'member_create',
+  'member_card_return',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
@@ -199,6 +202,7 @@ export async function fenceKey(tx: Tx, key: string, opType: FencedOp, staffId: n
   if (opType === 'platform_verify' && (await tx`SELECT 1 FROM platform_verifications WHERE client_key = ${key}`).length) return { existingOpType: opType };
   if (opType === 'ota_import' && (await tx`SELECT 1 FROM ota_imports WHERE client_key = ${key}`).length) return { existingOpType: opType };
   if (opType === 'studio_publish' && (await tx`SELECT 1 FROM studio_versions WHERE client_key = ${key}`).length) return { existingOpType: opType };
+  if (isMemberFormOp(opType) && (await memberFormOpRef(tx, key, opType)) !== null) return { existingOpType: opType };
   const rows = await tx`
     INSERT INTO op_fences (key, op_type, staff_id) VALUES (${key}, ${opType}, ${staffId})
     ON CONFLICT (key, op_type) DO NOTHING RETURNING key`;
@@ -377,5 +381,18 @@ export async function erpP2OpRef(db: Db, key: string, op: ErpP2Op): Promise<numb
                   : op === 'ota_import'
                     ? await db<{ id: number }[]>`SELECT id FROM ota_imports WHERE client_key = ${key}`
                     : await db<{ id: number }[]>`SELECT id FROM asset_cards WHERE client_key = ${key} ORDER BY id LIMIT 1`;
+  return row ? Number(row.id) : null;
+}
+
+const MEMBER_FORM_OPS = ['member_create', 'member_card_return'] as const;
+type MemberFormOp = (typeof MEMBER_FORM_OPS)[number];
+export const isMemberFormOp = (op: string): op is MemberFormOp => (MEMBER_FORM_OPS as readonly string[]).includes(op);
+
+/** 8.1.15 会员建档、退卡退押金的操作编号记在会员一行、退卡记录上：查到时返回那位会员的编号 */
+export async function memberFormOpRef(db: Db, key: string, op: MemberFormOp): Promise<number | null> {
+  const [row] =
+    op === 'member_create'
+      ? await db<{ id: number }[]>`SELECT id FROM members WHERE client_key = ${key}`
+      : await db<{ id: number }[]>`SELECT member_id AS id FROM member_card_returns WHERE client_key = ${key}`;
   return row ? Number(row.id) : null;
 }
