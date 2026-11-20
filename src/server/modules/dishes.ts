@@ -7,6 +7,10 @@
 // 权限：看 = 有任一项菜品权限；维护按出品口分三项（这道菜现在所在的出品口、要挪去的出品口都要有）；定价、改价再要「定价与改价」。
 // 都在锁住这道菜以后按库里的出品口核对，页面上看到的不算数。
 //
+// 结果待确认（8.1.16，Codex 审查 d12390f 的 P1）：编辑、上下架、改价都带页面打开时看到的版本（rev），在锁里核对，对不上整笔拒绝——
+// 延迟到达的旧请求不会再把菜改回去（上架以后别人又下架了，晚到的那笔上架被拒绝）；导入的预览摘要里带上要改的那几道菜的版本。
+// 页面在结果不明时把原编号与原请求存在本机，只能按编号查回、按原内容重提或确认作废（作废记在 dish_ops：原请求之后再到也整笔不做）。
+//
 // 加锁（docs/LOCKING.md 第 1 节）：操作编号的咨询锁 →「菜品维护」咨询锁（菜品管理的写入全部串行）→ 这道菜与它引用的加料、套餐子项
 // （service_items，id 升序，FOR NO KEY UPDATE；与后台价目、后台「出品档口与菜品」同一批行、同一个顺序）→ 做法 / 加料 / 套餐子表 → 改价记录 → 操作记录。
 // 导入锁全部价目项目（id 升序，与价目表导入相同）。不碰来访、账单、出品单的锁；点单读价目与做法都不加锁。
@@ -17,6 +21,8 @@ import { defaultTier, PRICE_TIERS, sortTiers, tierPrice, type TierPrice } from '
 import { DINING_OUTLET_LABELS, diningSlotOf, parseSlotKey, slotLabel, type DiningOutlet, type DiningSlot } from '@shared/dining';
 import {
   DISH_EXPORT_EXTRA_COLUMNS,
+  DISH_OP_LABELS,
+  DISH_OP_TYPES,
   DISH_OUTLET_PERMISSIONS,
   DISH_PERMISSIONS,
   DISH_PRICE_PERMISSION,
@@ -39,6 +45,8 @@ import {
   type DishAddonRef,
   type DishComboRef,
   type DishFilter,
+  type DishOpLookup,
+  type DishOpType,
   type DishPriceChange,
   type DishPriceSource,
   type DishRow,
@@ -59,7 +67,7 @@ import { idParam, parse, positiveCents } from '../lib/validate';
 import { buildXlsx } from '../lib/xlsx';
 import { recordPriceChanges } from './dish-prices';
 import { emenuImage, saveEmenuImage } from './emenu/core';
-import { businessDate } from './frontdesk/common';
+import { abandonedError, businessDate } from './frontdesk/common';
 import { pricesColumn } from './pricing';
 
 /** 菜品的图片地址（图存在电子菜单的图片表里；这个地址给有菜品权限的人看） */
@@ -269,20 +277,29 @@ const CreateInput = DishFields.extend({
   prices: PricesInput.refine((p) => p.length > 0, '请至少填写一档价格'),
   active: z.boolean().default(true),
 });
-const UpdateInput = DishFields.extend({
-  clientKey,
-  /** 打开编辑时看到的版本：别人先改过就拒绝 */
-  rev: z.string('缺少版本，请刷新后重试').regex(/^[0-9]{1,20}$/, '版本不对，请刷新后重试'),
-});
-const ActiveInput = z.object({ clientKey, active: z.boolean('请指明上架还是下架') });
+/**
+ * 页面打开时看到的版本（这一行最后一次修改的时刻）：编辑、上下架、改价都带，在锁里核对，别人先改过就拒绝。
+ * 只比状态（上架 / 下架、改前的价）挡不住「改过去又改回来」：晚到的旧请求看到的还是原样，会把菜又改一遍（Codex 审查 d12390f 的 P1）
+ */
+const revInput = z.string('缺少版本，请刷新后重试').regex(/^[0-9]{1,20}$/, '版本不对，请刷新后重试');
+const UpdateInput = DishFields.extend({ clientKey, rev: revInput });
+const ActiveInput = z.object({ clientKey, active: z.boolean('请指明上架还是下架'), rev: revInput });
 const reasonInput = z.string('请填写改价原因').trim().min(2, '请填写改价原因（至少 2 个字）').max(MAX_PRICE_REASON, `原因最多 ${MAX_PRICE_REASON} 个字`);
 const PriceInput = z.object({
   clientKey,
   prices: PricesInput.refine((p) => p.length > 0, '请至少留一档价格'),
   /** 改价时页面上看到的各档价格：与现在的不一样（别人刚改过）就拒绝 */
   expected: PricesInput,
+  rev: revInput,
   reason: reasonInput,
 });
+
+/** 页面看到的版本与锁住以后的不一样：别人（或晚到的另一笔）先改过这道菜 */
+const changedSince = (cur: ItemState, what: string) =>
+  conflict('DISH_CHANGED', `「${cur.name}」刚刚被改过（现在${cur.active ? '上架' : '下架'}、${pricesText(cur.prices)}），没有${what}；请刷新后再操作`, {
+    active: cur.active,
+    prices: cur.prices,
+  });
 
 // ───────────────────────── 写：事务里的几步（单道保存与导入共用） ─────────────────────────
 
@@ -455,11 +472,15 @@ export async function updateDishTx(tx: Tx, ctx: OpContext, id: number, f: DishFi
   return changes;
 }
 
-/** 上架 / 下架（事务里）：要这道菜所在出品口的维护权限；本来就是这个状态返回 false、不动这一行 */
-export async function setDishActiveTx(tx: Tx, ctx: OpContext, id: number, active: boolean): Promise<{ name: string; changed: boolean }> {
+/**
+ * 上架 / 下架（事务里）：要这道菜所在出品口的维护权限；带了页面看到的版本（rev）的，与锁住以后的不一样整笔拒绝。
+ * 本来就是这个状态返回 false、不动这一行
+ */
+export async function setDishActiveTx(tx: Tx, ctx: OpContext, id: number, active: boolean, opts: { rev?: string } = {}): Promise<{ name: string; changed: boolean }> {
   const cur = (await lockItems(tx, [id])).get(id);
   if (!cur || !isDishState(cur)) throw notDish();
   assertOutlet(ctx.actor, slotOfState(cur).outlet, `把「${cur.name}」${active ? '上架' : '下架'}`);
+  if (opts.rev !== undefined && opts.rev !== cur.rev) throw changedSince(cur, active ? '上架' : '下架');
   if (cur.active === active) return { name: cur.name, changed: false };
   await tx`UPDATE service_items SET active = ${active}, updated_at = clock_timestamp() WHERE id = ${id}`;
   return { name: cur.name, changed: true };
@@ -474,7 +495,7 @@ export async function changeDishPriceTx(
   ctx: OpContext,
   id: number,
   prices: TierPrice[],
-  opts: { reason: string; source: DishPriceSource; expected?: TierPrice[] },
+  opts: { reason: string; source: DishPriceSource; expected?: TierPrice[]; rev?: string },
 ): Promise<{ name: string; diff: ReturnType<typeof priceDiff> }> {
   const cur = (await lockItems(tx, [id])).get(id);
   if (!cur || !isDishState(cur)) throw notDish();
@@ -484,6 +505,8 @@ export async function changeDishPriceTx(
   if (opts.expected && priceDiff(opts.expected, cur.prices).length > 0) {
     throw conflict('DISH_PRICE_STALE', `「${cur.name}」的价格刚刚被别人改过（现在是 ${pricesText(cur.prices)}），请刷新后再改`, { prices: cur.prices });
   }
+  // 价格看着一样也可能是「改过去又改回来」：再核对版本，晚到的旧改价不会把价又改一遍
+  if (opts.rev !== undefined && opts.rev !== cur.rev) throw changedSince(cur, '改价');
   const diff = priceDiff(cur.prices, prices);
   if (diff.length === 0) return { name: cur.name, diff };
   for (const d of diff) {
@@ -502,11 +525,20 @@ export async function changeDishPriceTx(
 
 // ───────────────────────── 操作编号 ─────────────────────────
 
-type DishOpType = 'create' | 'update' | 'active' | 'price' | 'import';
+/** dish_ops 里一个编号的记录：result.abandoned 为真的是「确认作废」登记的（没办，原请求之后再到也不办） */
+interface DishOpRow {
+  opType: DishOpType;
+  requestHash: string;
+  itemId: number | null;
+  result: Record<string, unknown>;
+  createdAt: string;
+}
+const isAbandonedRow = (row: DishOpRow) => row.result?.abandoned === true;
+const readDishOp = async (db: Db, key: string) => (await db<DishOpRow[]>`SELECT op_type, request_hash, item_id, result, created_at FROM dish_ops WHERE client_key = ${key}`)[0];
 
 /**
- * 带操作编号的一笔菜品维护：同一个编号排队（操作编号的咨询锁），已经办过的——内容一样返回第一次的结果，内容不同拒绝；
- * 没办过的取「菜品维护」锁、办理、记下编号。菜品维护不是收款，没有「确认作废」：结果不明时原样再提一次就行
+ * 带操作编号的一笔菜品维护：同一个编号排队（操作编号的咨询锁，与「确认作废」同一把），已经办过的——内容一样返回第一次的结果，
+ * 内容不同拒绝；已经确认作废的整笔不做（OP_ABANDONED）；没办过的取「菜品维护」锁、办理、记下编号
  */
 export async function runDishOp<R extends Record<string, unknown>>(
   deps: Deps,
@@ -516,9 +548,9 @@ export async function runDishOp<R extends Record<string, unknown>>(
   return deps.sql.begin(async (tx) => {
     await setTxTimeouts(tx);
     await lockOpKey(tx, opts.key);
-    const [seen] = await tx<{ opType: string; requestHash: string; itemId: number | null; result: R }[]>`
-      SELECT op_type, request_hash, item_id, result FROM dish_ops WHERE client_key = ${opts.key}`;
+    const seen = (await readDishOp(tx, opts.key)) as (DishOpRow & { result: R }) | undefined;
     if (seen) {
+      if (isAbandonedRow(seen)) throw abandonedError();
       if (seen.opType !== opts.opType || seen.requestHash !== opts.requestHash) {
         throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一次不同的操作，请刷新页面后重新发起');
       }
@@ -576,9 +608,9 @@ async function updateDish(deps: Deps, id: number, raw: unknown, ctx: OpContext):
 }
 
 async function setDishActive(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<DishSaveResult> {
-  const { clientKey: key, active } = parse(ActiveInput, raw);
-  const run = await runDishOp(deps, { key, opType: 'active', requestHash: hashRequest({ id, active }), staffId: ctx.actor.id }, async (tx) => {
-    const r = await setDishActiveTx(tx, ctx, id, active);
+  const { clientKey: key, active, rev } = parse(ActiveInput, raw);
+  const run = await runDishOp(deps, { key, opType: 'active', requestHash: hashRequest({ id, active, rev }), staffId: ctx.actor.id }, async (tx) => {
+    const r = await setDishActiveTx(tx, ctx, id, active, { rev });
     if (r.changed) {
       await writeAudit(tx, {
         staffId: ctx.actor.id,
@@ -597,7 +629,7 @@ async function setDishActive(deps: Deps, id: number, raw: unknown, ctx: OpContex
 async function changeDishPrice(deps: Deps, id: number, raw: unknown, ctx: OpContext): Promise<DishSaveResult> {
   const { clientKey: key, ...input } = parse(PriceInput, raw);
   const run = await runDishOp(deps, { key, opType: 'price', requestHash: hashRequest({ id, ...input }), staffId: ctx.actor.id }, async (tx) => {
-    const r = await changeDishPriceTx(tx, ctx, id, input.prices, { reason: input.reason, source: 'dishes', expected: input.expected });
+    const r = await changeDishPriceTx(tx, ctx, id, input.prices, { reason: input.reason, source: 'dishes', expected: input.expected, rev: input.rev });
     if (r.diff.length === 0) throw unprocessable('DISH_PRICE_SAME', '价格没有变，不用改');
     await writeAudit(tx, {
       staffId: ctx.actor.id,
@@ -610,6 +642,60 @@ async function changeDishPrice(deps: Deps, id: number, raw: unknown, ctx: OpCont
     return { itemId: id, result: {} };
   });
   return { dish: await getDish(deps.sql, deps, run.itemId!), replayed: run.replayed };
+}
+
+// ───────────────────────── 结果待确认：按编号查回、确认作废 ─────────────────────────
+
+const OpTypeInput = z.enum(DISH_OP_TYPES, '操作类型不对，请刷新后重试');
+const OpKeyParam = z.object({ key: z.uuid('操作编号不对') });
+const AbandonInput = z.object({ type: OpTypeInput, itemId: z.number().int().positive().nullish() });
+
+/** 编号已有的记录 → 查回的结果（声明的类型与记下的不一样：这个编号是别的操作的，原请求不会按声明的那种生效） */
+async function lookupOf(db: Db, deps: Deps, row: DishOpRow | undefined, type: DishOpType): Promise<DishOpLookup> {
+  if (!row) return { found: false, abandoned: false };
+  if (row.opType !== type) throw conflict('IDEMPOTENCY_CONFLICT', '这个操作编号属于另一种菜品操作，请刷新后核对');
+  if (isAbandonedRow(row)) return { found: false, abandoned: true };
+  const dish = row.itemId === null ? null : await getDish(db, deps, row.itemId).catch(() => null);
+  return { found: true, type: row.opType, itemId: row.itemId, dish, result: row.result, at: new Date(row.createdAt).toISOString() };
+}
+
+/** 按编号只读查回：查不到只说明此刻还没有已提交的结果（原请求可能还在路上或在等锁），不能据此断定没有生效 */
+const lookupDishOp = async (deps: Deps, key: string, type: DishOpType) => lookupOf(deps.sql, deps, await readDishOp(deps.sql, key), type);
+
+/**
+ * 确认作废一个结果不明的编号：按声明的类型检查权限（改价要「定价与改价」，其余要任一处的维护权限；带了菜的再要这道菜所在出品口的），
+ * 与原请求写编号取同一把咨询锁——
+ *   · 编号已经办过：返回查回的结果，不作废；
+ *   · 还没办：在 dish_ops 记一条作废（result.abandoned），原请求之后即使到达也整笔不做（runDishOp 抛 OP_ABANDONED）；
+ *   · 原请求恰好正在办：等它提交（最多 5 秒）再答，等不到这一次失败、仍是待确认。
+ */
+async function abandonDishOp(deps: Deps, key: string, raw: unknown, ctx: OpContext): Promise<DishOpLookup> {
+  const { type, itemId } = parse(AbandonInput, raw);
+  // 改价、新增（新增要定价）本身要「定价与改价」：作废它们也要
+  if ((type === 'price' || type === 'create') && !can(ctx.actor, DISH_PRICE_PERMISSION)) throw forbidden(`作废${DISH_OP_LABELS[type]}要有「菜品管理：定价与改价」的权限`);
+  const row = await deps.sql.begin(async (tx) => {
+    await setTxTimeouts(tx);
+    await lockOpKey(tx, key);
+    const seen = await readDishOp(tx, key);
+    if (seen) return seen;
+    const dish = itemId ? (await readItems(tx, [itemId])).get(itemId) : undefined;
+    if (dish && isDishState(dish)) assertOutlet(ctx.actor, slotOfState(dish).outlet, `作废「${dish.name}」的${DISH_OP_LABELS[type]}`);
+    const ref = dish && isDishState(dish) ? dish.id : null;
+    await tx`
+      INSERT INTO dish_ops (client_key, op_type, request_hash, item_id, result, staff_id)
+      VALUES (${key}, ${type}, ${hashRequest({ abandoned: key })}, ${ref}, ${tx.json({ abandoned: true })}, ${ctx.actor.id})`;
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'dish_op_abandoned',
+      targetType: 'operation',
+      targetId: key,
+      detail: { key, type, itemId: ref, summary: `作废结果待确认的${DISH_OP_LABELS[type]}${dish ? `（「${dish.name}」）` : ''}：原请求之后再到也不生效` },
+      ip: ctx.ip,
+    });
+    return undefined;
+  });
+  if (!row) return { found: false, abandoned: true };
+  return lookupOf(deps.sql, deps, row, type);
 }
 
 // ───────────────────────── 改价记录、导出 ─────────────────────────
@@ -688,6 +774,13 @@ export function registerDishRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/dining/dishes/:id/active', { preHandler: manage }, async (req) => setDishActive(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.post('/api/dining/dishes/:id/price', { preHandler: guard(DISH_PRICE_PERMISSION) }, async (req) => changeDishPrice(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.get('/api/dining/dishes/price-changes', { preHandler: view }, async (req) => dishPriceChanges(sql, req.query));
+  // 结果待确认（8.1.16）：按编号查回（看得到菜品的都能查）、确认作废（按声明的类型核对权限）
+  app.get('/api/dining/dishes/ops/:key', { preHandler: view }, async (req) => {
+    const { key } = parse(OpKeyParam, req.params);
+    const { type } = parse(z.object({ type: OpTypeInput }), req.query ?? {});
+    return lookupDishOp(deps, key, type);
+  });
+  app.post('/api/dining/dishes/ops/:key/abandon', { preHandler: manage }, async (req) => abandonDishOp(deps, parse(OpKeyParam, req.params).key, req.body, ctxOf(req)));
 
   app.get('/api/dining/dishes/export.xlsx', { preHandler: view }, async (req, reply) => {
     const file = await dishesXlsx(sql, deps);

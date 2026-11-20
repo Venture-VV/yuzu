@@ -97,7 +97,7 @@ async function prepare(page: Page) {
 async function ensureFizz(page: Page) {
   const old = (await getJson<DishesBoard>(page, '/api/dining/dishes')).dishes.find((d) => d.name === FIZZ);
   if (old) {
-    if (!old.active) await send(page, 'post', `/api/dining/dishes/${old.id}/active`, { clientKey: randomUUID(), active: true });
+    if (!old.active) await send(page, 'post', `/api/dining/dishes/${old.id}/active`, { clientKey: randomUUID(), active: true, rev: old.rev });
     return;
   }
   const admin = await getJson<DiningAdmin>(page, '/api/admin/dining');

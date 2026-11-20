@@ -259,7 +259,7 @@ test.describe('8.1.15 菜品管理', () => {
         await page.request.post(`/api/frontdesk/visits/${visitId}/cancel`, { data: { reason: 'E2E：菜品管理收尾' } });
       }
       for (const d of (await dishes(page)).filter((x: DishRow) => x.name.endsWith(RUN) && x.active)) {
-        await page.request.post(`/api/dining/dishes/${d.id}/active`, { data: { clientKey: randomUUID(), active: false } });
+        await page.request.post(`/api/dining/dishes/${d.id}/active`, { data: { clientKey: randomUUID(), active: false, rev: d.rev } });
       }
       const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: before.enabled, trackServed: before.trackServed } });
       expect(res.ok(), await res.text()).toBe(true);
@@ -310,7 +310,7 @@ test.describe('8.1.15 菜品管理', () => {
       await expect(page.getByText(`「${BAR_DISH}」已下架`)).toBeVisible();
       await expect(page.getByTestId(`dish-state-${BAR_DISH}`)).toContainText('下架');
       // 页面上按钮是灰的不算数：直接调接口改餐厅的菜也被拒绝
-      const denied = await page.request.post(`/api/dining/dishes/${hot.id}/active`, { data: { clientKey: randomUUID(), active: false } });
+      const denied = await page.request.post(`/api/dining/dishes/${hot.id}/active`, { data: { clientKey: randomUUID(), active: false, rev: hot.rev } });
       expect(denied.status()).toBe(403);
       expect(((await denied.json()) as { error: { message: string } }).error.message).toContain('没有餐厅的菜品维护权限');
       await expectFits(page);
@@ -334,8 +334,94 @@ test.describe('8.1.15 菜品管理', () => {
       await relogin(page, 'linlan');
       expect((await page.request.put('/api/admin/permissions', { data: { roles: restore } })).ok()).toBe(true);
       for (const d of (await dishes(page)).filter((x: DishRow) => x.name.endsWith(RUN) && x.active)) {
-        await page.request.post(`/api/dining/dishes/${d.id}/active`, { data: { clientKey: randomUUID(), active: false } });
+        await page.request.post(`/api/dining/dishes/${d.id}/active`, { data: { clientKey: randomUUID(), active: false, rev: d.rev } });
       }
+      const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: before.enabled, trackServed: before.trackServed } });
+      expect(res.ok(), await res.text()).toBe(true);
+    }
+  });
+
+  // 8.1.16（Codex 审查 d12390f 的 P1）：上下架没收到结果进「结果待确认」——记在本机、列在菜品表上方，这道菜先不能再上下架；
+  // 只能查回、按原内容重新提交（同一编号）或确认作废；作废以后原请求晚到也不生效
+  test('上下架没收到结果：结果待确认、这道菜先不能再上下架；刷新还在；确认作废以后晚到的原请求被拒绝；回复丢了的自动查回已经生效', async ({ page }) => {
+    const DISH = `待确认面 ${RUN}`;
+    await login(page, 'linlan');
+    const before = (await getJson<DiningAdmin>(page, '/api/admin/dining')).rules;
+    try {
+      await send(page, 'put', '/api/admin/dining/rules', { enabled: true });
+      let admin = await getJson<DiningAdmin>(page, '/api/admin/dining');
+      if (!admin.stations.some((s) => s.name === HOT && s.active)) {
+        const old = admin.stations.find((s) => s.name === HOT);
+        admin = await send<DiningAdmin>(
+          page,
+          old ? 'put' : 'post',
+          old ? `/api/admin/dining/stations/${old.id}` : '/api/admin/dining/stations',
+          old ? { name: HOT, sortOrder: old.sortOrder, active: true } : { name: HOT },
+        );
+      }
+      const made = await send<DishSaveResult>(page, 'post', '/api/dining/dishes', {
+        clientKey: randomUUID(),
+        name: DISH,
+        category: 'E2E 菜品',
+        slot: 'restaurant:餐饮',
+        stationId: admin.stations.find((s) => s.name === HOT)!.id,
+        prices: { standard: 1800 },
+        active: false,
+      });
+      await page.goto('/dining/dishes');
+      await page.getByTestId('dishes-search').fill(DISH);
+      await expect(row(page, DISH)).toHaveAttribute('data-active', 'false');
+
+      // ① 上架的请求发出去就断了（没到服务端）：结果待确认，按钮写「待确认」、点不了
+      let sent: unknown = null;
+      await page.route(`**/api/dining/dishes/${made.dish.id}/active`, async (route) => {
+        sent = route.request().postDataJSON();
+        await route.fulfill({ status: 502, body: '' });
+      });
+      await page.getByTestId(`dish-toggle-${DISH}`).click();
+      await expect(page.getByText(`「${DISH}」上架的结果待确认`)).toBeVisible();
+      const notice = page.getByTestId(`dish-pending-active-${made.dish.id}`);
+      await expect(notice).toContainText(`「${DISH}」上架`);
+      await expect(page.getByTestId(`dish-toggle-${DISH}`)).toBeDisabled();
+      await expect(page.getByTestId(`dish-toggle-${DISH}`)).toHaveText('待确认');
+      // 自动查回过一次：查不到（原请求没到服务端），不能断定没生效
+      await expect(notice.getByTestId('dish-pending-message')).toContainText('还没查到已生效的结果');
+      await page.unroute(`**/api/dining/dishes/${made.dish.id}/active`);
+
+      // ② 刷新：原编号与原请求还在本机，照样不能另起一笔
+      await page.reload();
+      await page.getByTestId('dishes-search').fill(DISH);
+      await expect(notice).toBeVisible();
+      await expect(page.getByTestId(`dish-toggle-${DISH}`)).toBeDisabled();
+
+      // ③ 确认作废：服务端登记作废，这一条消失、可以重新上架；原请求这时才到也不生效
+      await notice.getByTestId('dish-pending-abandon').click();
+      await expect(page.getByText(`「${DISH}」上架：已作废，没有生效`)).toBeVisible();
+      await expect(notice).toHaveCount(0);
+      await expect(page.getByTestId(`dish-toggle-${DISH}`)).toHaveText('上架');
+      const late = await page.request.post(`/api/dining/dishes/${made.dish.id}/active`, { data: sent });
+      expect(late.status()).toBe(409);
+      expect(((await late.json()) as { error: { code: string } }).error.code).toBe('OP_ABANDONED');
+      expect((await dishOf(page, DISH)).active).toBe(false);
+
+      // ④ 再上架：这次请求到了服务端、回复丢了——自动查回发现已经生效，这一条消失，表上是上架
+      let dropped = false;
+      await page.route(`**/api/dining/dishes/${made.dish.id}/active`, async (route) => {
+        if (dropped) return route.continue();
+        dropped = true;
+        await route.fetch();
+        await route.fulfill({ status: 502, body: '' });
+      });
+      await page.getByTestId(`dish-toggle-${DISH}`).click();
+      await expect(page.getByText(`「${DISH}」上架：已经生效`)).toBeVisible();
+      await expect(page.getByTestId(`dish-pending-active-${made.dish.id}`)).toHaveCount(0);
+      await expect(page.getByTestId(`dish-state-${DISH}`)).toContainText('上架');
+      expect((await dishOf(page, DISH)).active).toBe(true);
+      await page.unroute(`**/api/dining/dishes/${made.dish.id}/active`);
+      await expectFits(page);
+    } finally {
+      const d = (await dishes(page)).find((x) => x.name === DISH);
+      if (d?.active) await page.request.post(`/api/dining/dishes/${d.id}/active`, { data: { clientKey: randomUUID(), active: false, rev: d.rev } });
       const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: before.enabled, trackServed: before.trackServed } });
       expect(res.ok(), await res.text()).toBe(true);
     }

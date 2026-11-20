@@ -277,6 +277,28 @@ describe('导入：先预览再生效', () => {
     expect((await apply(csv, p2.planHash)).status).toBe(200);
   });
 
+  it('预览以后菜被改过又改回原样（8.1.16，Codex 审查 d12390f 的 P1）：摘要带着版本，晚到的生效照样被拒绝，不把别人刚定下的又改一遍', async () => {
+    const tea = (await dishOf('柠檬茶'))!;
+    const csv = csvOf([line({ 名称: '柠檬茶', 状态: tea.active ? '下架' : '上架' })]);
+    const p = await preview(csv);
+    expect(p.changes).toEqual([{ row: 2, name: '柠檬茶', action: 'update', fields: [tea.active ? '上架 → 下架' : '下架 → 上架'] }]);
+    // 别人照这份表的意思先改了，又明确改回原样：状态与预览时一样，只有版本变了
+    const flip = async (active: boolean) => {
+      const now = (await dishOf('柠檬茶'))!;
+      const r = await api(ctx.app, ctx.owner, 'POST', `/api/dining/dishes/${now.id}/active`, { clientKey: randomUUID(), active, rev: now.rev });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+    };
+    await flip(!tea.active);
+    await flip(tea.active);
+    expect((await preview(csv)).changes).toEqual(p.changes);
+    const before = await counts();
+    const late = await apply(csv, p.planHash);
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('IMPORT_CHANGED');
+    expect((await dishOf('柠檬茶'))!.active).toBe(tea.active);
+    expect(await counts()).toEqual(before);
+  });
+
   it('空着不改、写「无」清掉；有编号的按编号找、可以改名；多出来的列、列的先后都不要紧', async () => {
     const kungpao = (await dishOf('宫保鸡丁'))!;
     const noodle = (await dishOf('牛肉面'))!;

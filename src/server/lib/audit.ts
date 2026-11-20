@@ -324,7 +324,9 @@ export type AuditAction =
   | 'clock_announcer'
   // 8.1.15 会员卡押金（收、退，detail.kind 写是哪一样）、退卡
   | 'member_card_deposit'
-  | 'member_card_returned';
+  | 'member_card_returned'
+  // 8.1.16 菜品维护的「结果待确认」：确认作废一个操作编号（Codex 审查 d12390f 的 P1，docs/DISHES_V8115.md 第 9 节）
+  | 'dish_op_abandoned';
 
 export interface AuditEntry {
   staffId: number | null;

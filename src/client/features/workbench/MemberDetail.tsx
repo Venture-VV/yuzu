@@ -199,9 +199,11 @@ export function MemberDetail({
         )}
       </div>
 
-      {/* 会员详情所在的栏宽随工作台布局变化，按卡片容器宽度决定是否并排 */}
+      {/* 会员详情所在的栏宽随工作台布局变化，按卡片容器宽度决定是否并排。
+          一栏时也写明 grid-cols-1（minmax(0, 1fr)）：不然档阶阶梯（min-w 560、自己左右滑）把这一栏撑宽，
+          1280 × 720 上会员详情整栏横着滚（8.1.16 四种尺寸核对时发现） */}
       <div className="@container">
-        <div className="grid gap-4 @3xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @3xl:grid-cols-2">
           <GradeCard member={member} />
           <BonusLotsCard member={member} />
         </div>

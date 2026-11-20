@@ -434,7 +434,8 @@ export function ClockroomPage() {
                         {pending.map((p) => (
                           <div key={p.lineId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3" data-testid={`clock-pending-${p.lineId}`}>
                             <span className="num text-[15px] font-bold">{p.tagCode}</span>
-                            <span className="min-w-0 flex-1 truncate text-[13px] text-ink-2">
+                            {/* 手持机上放不下就换行（不截断：金额在最后，截掉就看不到了） */}
+                            <span className="min-w-0 flex-1 basis-48 text-[13px] break-words text-ink-2">
                               {p.guest} · <span className="font-semibold text-ink">{p.itemName}</span> × {p.quantity} · <Money cents={p.amount} />
                             </span>
                             <span className="text-[12px] text-ink-3">

@@ -1,7 +1,8 @@
 // 菜品管理：新增 / 编辑一道菜（8.1.15，docs/DISHES_V8115.md 第 7 节）。
 // 名称、分类、出品口与小类、档口、图片；规格与价格（新增时定价，沿用价目里的档；以后改价走「改价」，要写原因）；
 // 做法（不加钱，点单时选了写进出品备注）、加料（另外的菜，点单时另起一行、备注「配 某菜」）、套餐内容（含哪几样、每样几份）。
-// 保存带操作编号与打开时的版本：别人先改过会被拒绝，结果不明时原样再点一次不会重复。
+// 保存带操作编号与打开时的版本：别人先改过会被拒绝；没收到结果的进「结果待确认」（8.1.16，dishPendingStore.ts）——
+// 弹窗里列着那一笔，查回、按原内容重新提交（同一个编号）或确认作废之前不能再保存。
 
 import { useMemo, useState, type ReactNode } from 'react';
 import { CircleOff, ImagePlus, Plus, Trash2, X } from 'lucide-react';
@@ -22,14 +23,16 @@ import {
 } from '@shared/dishes';
 import { formatYuan, parseYuan } from '@shared/money';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { cn } from '../../lib/utils';
+import { cn, uuid } from '../../lib/utils';
 import { imagePayload } from '../../components/Images';
 import { Dialog } from '../../components/Overlay';
 import { QtyInput } from '../../components/QtyInput';
 import { Button, Field, Input, MoneyInput, Notice, Select } from '../../components/ui';
 import { StatusChip } from './DishChips';
-import { UNCERTAIN_HINT, useOpKey } from './dishQueries';
+import { DishPendingNotice } from './DishPendingNotice';
+import { pendingOf, sendDishOp, useDishPending } from './dishPendingStore';
 
 /** 常用的做法，点一下加进去 */
 const QUICK_METHODS = ['不辣', '微辣', '中辣', '特辣', '免葱', '免蒜', '免香菜', '去冰', '少冰', '热', '少糖', '无糖'];
@@ -100,7 +103,9 @@ export function DishEditor({
   const [busy, setBusy] = useState<'save' | 'image' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [qtyHint, setQtyHint] = useState<string | null>(null);
-  const op = useOpKey();
+  const session = useSession();
+  // 这道菜（新增：任何一笔新增）上一笔保存的结果待确认：处理好之前不能再保存
+  const waiting = pendingOf(useDishPending(), dish ? 'update' : 'create', dish?.id ?? null);
   useResetOnOpen(
     target !== null,
     () => {
@@ -168,17 +173,25 @@ export function DishEditor({
       if (Object.keys(prices).length === 0) return setError('请至少填写一档价格');
       extra = { prices, active: f.active };
     }
-    const payload = { ...body, ...extra };
+    if (waiting) return;
+    const key = uuid();
     setBusy('save');
     setError(null);
     try {
-      const clientKey = op.keyFor(JSON.stringify(payload));
-      const r = dish ? await api.put<DishSaveResult>(`/api/dining/dishes/${dish.id}`, { clientKey, ...payload }) : await api.post<DishSaveResult>('/api/dining/dishes', { clientKey, ...payload });
-      op.settle();
+      const r = await sendDishOp<DishSaveResult>({
+        key,
+        type: dish ? 'update' : 'create',
+        itemId: dish?.id ?? null,
+        method: dish ? 'put' : 'post',
+        url: dish ? `/api/dining/dishes/${dish.id}` : '/api/dining/dishes',
+        body: { clientKey: key, ...body, ...extra },
+        summary: dish ? `编辑「${dish.name}」` : `新增「${name}」`,
+        staffName: session.staff.displayName,
+      });
       onSaved(r.dish, !dish);
     } catch (e) {
-      op.settle(e);
-      setError(e instanceof UncertainError ? UNCERTAIN_HINT : errorMessage(e));
+      // 没收到结果：记录留在本机，弹窗里出现「结果待确认」那一条（查回、按原内容重新提交、确认作废）
+      if (!(e instanceof UncertainError)) setError(errorMessage(e));
       if (e instanceof ApiError) onRejected();
     } finally {
       setBusy(null);
@@ -198,13 +211,14 @@ export function DishEditor({
           <Button variant="ghost" className="min-h-11" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" className="min-h-11 min-w-[112px]" loading={busy === 'save'} disabled={busy === 'image'} onClick={() => void save()} data-testid="dish-save">
+          <Button variant="primary" className="min-h-11 min-w-[112px]" loading={busy === 'save'} disabled={busy === 'image' || !!waiting} onClick={() => void save()} data-testid="dish-save">
             {dish ? '保存' : '新增'}
           </Button>
         </>
       }
     >
       <div className="space-y-5" data-testid="dish-editor">
+        {waiting && <DishPendingNotice op={waiting} onApplied={(saved) => (saved ? onSaved(saved, !dish) : onRejected())} onAbandoned={onRejected} />}
         <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="菜名" htmlFor="dish-name" className="sm:col-span-2">
             <Input id="dish-name" value={f.name} onChange={(e) => set({ name: e.target.value })} maxLength={MAX_DISH_NAME} placeholder="例如 牛肉面" data-autofocus data-testid="dish-name" />
