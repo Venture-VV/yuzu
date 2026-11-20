@@ -14,7 +14,7 @@ import { sendErpOp } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
-import { EmptyState } from '../../components/EmptyState';
+import { DataTable } from '../../components/DataTable';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Dialog } from '../../components/Overlay';
 import { ReasonDialog } from '../../components/ReasonDialog';
@@ -108,44 +108,43 @@ export function LinenPage() {
                     </Button>
                   )}
                 </div>
-                {d.items.length === 0 ? (
-                  <EmptyState art="leaf" title="还没有布草品类" description={manage ? '先加品类（浴巾、浴衣、床单……）与每件洗涤费，再开「新增」单把现有的数量记进来。' : undefined} className="py-8" />
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[520px] text-[13.5px]" data-testid="linen-items">
-                      <thead>
-                        <tr className="text-left text-[12px] text-ink-3">
-                          <th className="py-1.5 font-semibold">品类</th>
-                          <th className="text-right font-semibold">总数</th>
-                          <th className="text-right font-semibold">在店</th>
-                          <th className="text-right font-semibold">在洗</th>
-                          <th className="text-right font-semibold">每件洗涤费</th>
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {d.items.map((it) => (
-                          <tr key={it.id} className={cn('border-t border-line/70', !it.active && 'text-ink-3')} data-testid={`linen-item-${it.id}`}>
-                            <td className="py-1.5 font-semibold">
-                              {it.name} {!it.active && <Badge>已停用</Badge>}
-                            </td>
-                            <td className="num text-right">{it.totalQty}</td>
-                            <td className="num text-right font-bold">{it.inHouseQty}</td>
-                            <td className="num text-right">{it.atLaundryQty}</td>
-                            <td className="num text-right">{formatYuan(it.washPriceCents)}</td>
-                            <td className="text-right">
-                              {manage && (
-                                <Button size="sm" variant="ghost" onClick={() => setEditing(it)}>
-                                  改
-                                </Button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                <DataTable
+                  variant="plain"
+                  testId="linen-items"
+                  tableClassName="min-w-[520px]"
+                  rows={d.items}
+                  rowKey={(it) => it.id}
+                  rowClassName={(it) => (!it.active ? 'text-ink-3' : undefined)}
+                  rowTestId={(it) => `linen-item-${it.id}`}
+                  empty={manage ? '还没有布草品类：先加品类（浴巾、浴衣、床单……）与每件洗涤费，再开「新增」单把现有的数量记进来。' : '还没有布草品类'}
+                  columns={[
+                    {
+                      key: 'name',
+                      header: '品类',
+                      cellClassName: 'font-semibold',
+                      cell: (it) => (
+                        <>
+                          {it.name} {!it.active && <Badge>已停用</Badge>}
+                        </>
+                      ),
+                    },
+                    { key: 'total', header: '总数', numeric: true, cell: (it) => it.totalQty },
+                    { key: 'inHouse', header: '在店', numeric: true, cellClassName: 'font-bold', cell: (it) => it.inHouseQty },
+                    { key: 'atLaundry', header: '在洗', numeric: true, cell: (it) => it.atLaundryQty },
+                    { key: 'price', header: '每件洗涤费', numeric: true, cell: (it) => formatYuan(it.washPriceCents) },
+                    {
+                      key: 'actions',
+                      header: '',
+                      align: 'right',
+                      cell: (it) =>
+                        manage && (
+                          <Button size="sm" variant="ghost" onClick={() => setEditing(it)}>
+                            改
+                          </Button>
+                        ),
+                    },
+                  ]}
+                />
               </Card>
 
               {d.outstanding.length > 0 && (
@@ -172,42 +171,31 @@ export function LinenPage() {
                     </Button>
                   </a>
                 </div>
-                {!statement.data ? (
-                  <Skeleton className="h-16" />
-                ) : statement.data.rows.length === 0 ? (
-                  <p className="text-[13px] text-ink-3">这个月没有收回单。</p>
-                ) : (
-                  <table className="w-full text-[13.5px]" data-testid="linen-statement">
-                    <thead>
-                      <tr className="text-left text-[12px] text-ink-3">
-                        <th className="py-1.5 font-semibold">洗涤厂</th>
-                        <th className="text-right font-semibold">收回单</th>
-                        <th className="text-right font-semibold">完好</th>
-                        <th className="text-right font-semibold">破损</th>
-                        <th className="text-right font-semibold">丢失</th>
-                        <th className="text-right font-semibold">洗涤费</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {statement.data.rows.map((r) => (
-                        <tr key={r.supplierId} className="border-t border-line/70">
-                          <td className="py-1.5">{r.supplierName}</td>
-                          <td className="num text-right">{r.docs}</td>
-                          <td className="num text-right">{r.washedQty}</td>
-                          <td className="num text-right">{r.damagedQty}</td>
-                          <td className="num text-right">{r.lostQty}</td>
-                          <td className="num text-right font-bold">{formatYuan(r.amountCents)}</td>
-                        </tr>
-                      ))}
-                      <tr className="border-t border-line font-bold">
-                        <td className="py-1.5" colSpan={5}>
+                <DataTable
+                  variant="plain"
+                  testId="linen-statement"
+                  rows={statement.data?.rows}
+                  rowKey={(r) => r.supplierId}
+                  empty="这个月没有收回单"
+                  columns={[
+                    { key: 'supplier', header: '洗涤厂', cell: (r) => r.supplierName },
+                    { key: 'docs', header: '收回单', numeric: true, cell: (r) => r.docs },
+                    { key: 'washed', header: '完好', numeric: true, cell: (r) => r.washedQty },
+                    { key: 'damaged', header: '破损', numeric: true, cell: (r) => r.damagedQty },
+                    { key: 'lost', header: '丢失', numeric: true, cell: (r) => r.lostQty },
+                    { key: 'amount', header: '洗涤费', numeric: true, cellClassName: 'font-bold', cell: (r) => formatYuan(r.amountCents) },
+                  ]}
+                  footer={
+                    statement.data && (
+                      <tr>
+                        <td className="py-2 pr-3" colSpan={5}>
                           合计
                         </td>
-                        <td className="num text-right">{formatYuan(statement.data.totalCents)}</td>
+                        <td className="num py-2 text-right">{formatYuan(statement.data.totalCents)}</td>
                       </tr>
-                    </tbody>
-                  </table>
-                )}
+                    )
+                  }
+                />
               </Card>
 
               <Card className="p-4">

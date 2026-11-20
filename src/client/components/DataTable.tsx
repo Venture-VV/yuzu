@@ -23,6 +23,8 @@ export interface DataColumn<T> {
   cellClassName?: string | ((row: T) => string | undefined);
   /** 单元格的 data-testid（按行） */
   cellTestId?: (row: T) => string | undefined;
+  /** 表头这一格的 data-testid */
+  headerTestId?: string;
   /** 单元格的 data-label：窄屏把一行排成卡片时，样式表用 attr(data-label) 在格子前面写上列名 */
   dataLabel?: string;
 }
@@ -55,6 +57,7 @@ export function DataTable<T>({
   footer,
   caption,
   hideHeader,
+  stickyHeader,
   testId,
   className,
   tableClassName = 'min-w-max',
@@ -88,6 +91,8 @@ export function DataTable<T>({
   caption?: string;
   /** 不显示表头（像一张清单、一看就懂的小表）：列名只念给读屏 */
   hideHeader?: boolean;
+  /** 表头停在框顶：框有最大高度、上下滚动时（className 给 max-h-… overflow-y-auto） */
+  stickyHeader?: boolean;
   testId?: string;
   /** 外面那一层（边框、底色、阴影、外边距） */
   className?: string;
@@ -124,10 +129,15 @@ export function DataTable<T>({
     <div className={cn('max-w-full overflow-x-auto', boxed && 'rounded-lg border border-line', boxed && onPage && 'bg-card shadow-card', className)} data-testid={testId}>
       <table className={cn('w-full text-[13px]', tableClassName)}>
         {caption && <caption className="sr-only">{caption}</caption>}
-        <thead className={cn('text-[12px] text-ink-3', boxed && 'bg-paper-2/70', hideHeader && 'sr-only')}>
+        <thead className={cn('text-[12px] text-ink-3', stickyHeader ? cn('sticky top-0 z-10', boxed ? 'bg-paper-2' : 'bg-card') : boxed && 'bg-paper-2/70', hideHeader && 'sr-only')}>
           <tr>
             {columns.map((c) => (
-              <th key={c.key} scope="col" className={cn('font-bold whitespace-nowrap', boxed ? 'px-3 py-2' : 'py-1.5 pr-3 last:pr-0', alignOf(c), c.className, c.headerClassName)}>
+              <th
+                key={c.key}
+                scope="col"
+                className={cn('font-bold whitespace-nowrap', boxed ? 'px-3 py-2' : 'py-1.5 pr-3 last:pr-0', alignOf(c), c.className, c.headerClassName)}
+                data-testid={c.headerTestId}
+              >
                 {c.header}
               </th>
             ))}

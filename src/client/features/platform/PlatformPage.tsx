@@ -15,6 +15,7 @@ import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable } from '../../components/DataTable';
 import { DateNav } from '../../components/DateNav';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Dialog } from '../../components/Overlay';
@@ -284,43 +285,55 @@ function SettleTab({ today }: { today: string }) {
           <Notice tone="warning" className="mt-3">
             开始日期不能晚于结束日期
           </Notice>
-        ) : !rec.data ? (
-          <Skeleton className="mt-3 h-24" />
-        ) : rec.data.rows.length === 0 ? (
-          <p className="mt-3 text-[13px] text-ink-3">这段时间没有平台核销与打款。</p>
         ) : (
-          <div className="mt-3 overflow-x-auto rounded-lg border border-line">
-            <table className="w-full min-w-max text-[13px]">
-              <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                <tr>
-                  <th className="px-3 py-2 text-left">平台</th>
-                  <th className="px-3 py-2 text-right">补登记（应结）</th>
-                  <th className="px-3 py-2 text-right">结账团购券</th>
-                  <th className="px-3 py-2 text-right">应结合计</th>
-                  <th className="px-3 py-2 text-right">到账</th>
-                  <th className="px-3 py-2 text-right">差额（到账 − 应结）</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {rec.data.rows.map((r) => (
-                  <tr key={r.platform} data-testid={`platform-row-${r.platform}`}>
-                    <td className="px-3 py-2">{COUPON_PLATFORM_LABELS[r.platform]}</td>
-                    <td className="num px-3 py-2 text-right">
-                      {r.redemptions.count} 张 · {formatYuan(r.redemptions.settle)}
-                    </td>
-                    <td className="num px-3 py-2 text-right">
-                      {r.checkoutCoupons.count} 张 · {formatYuan(r.checkoutCoupons.amount)}
-                    </td>
-                    <td className="num px-3 py-2 text-right font-semibold">{formatYuan(r.expected)}</td>
-                    <td className="num px-3 py-2 text-right">
-                      {r.settlements.count} 笔 · {formatYuan(r.settlements.amount)}
-                    </td>
-                    <td className={cn('num px-3 py-2 text-right font-bold', r.diff < 0 ? 'text-clay' : r.diff > 0 ? 'text-yuzu-deep' : 'text-pine')}>{formatYuan(r.diff)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            className="mt-3"
+            rows={rec.data?.rows}
+            rowKey={(r) => r.platform}
+            rowTestId={(r) => `platform-row-${r.platform}`}
+            empty="这段时间没有平台核销与打款"
+            columns={[
+              { key: 'platform', header: '平台', cell: (r) => COUPON_PLATFORM_LABELS[r.platform] },
+              {
+                key: 'redemptions',
+                header: '补登记（应结）',
+                numeric: true,
+                cell: (r) => (
+                  <>
+                    {r.redemptions.count} 张 · {formatYuan(r.redemptions.settle)}
+                  </>
+                ),
+              },
+              {
+                key: 'checkoutCoupons',
+                header: '结账团购券',
+                numeric: true,
+                cell: (r) => (
+                  <>
+                    {r.checkoutCoupons.count} 张 · {formatYuan(r.checkoutCoupons.amount)}
+                  </>
+                ),
+              },
+              { key: 'expected', header: '应结合计', numeric: true, cellClassName: 'font-semibold', cell: (r) => formatYuan(r.expected) },
+              {
+                key: 'settlements',
+                header: '到账',
+                numeric: true,
+                cell: (r) => (
+                  <>
+                    {r.settlements.count} 笔 · {formatYuan(r.settlements.amount)}
+                  </>
+                ),
+              },
+              {
+                key: 'diff',
+                header: '差额（到账 − 应结）',
+                numeric: true,
+                cellClassName: (r) => cn('font-bold', r.diff < 0 ? 'text-clay' : r.diff > 0 ? 'text-yuzu-deep' : 'text-pine'),
+                cell: (r) => formatYuan(r.diff),
+              },
+            ]}
+          />
         )}
         <p className="mt-2 text-[12px] text-ink-3">打款按它所属的结算期间算：期间整段在这段时间里的才算进来。差额是负数时是平台还没打，或者扣了佣金、退款。</p>
       </Card>

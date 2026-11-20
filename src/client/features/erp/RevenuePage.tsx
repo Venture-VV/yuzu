@@ -9,6 +9,7 @@ import type { ErpRevenue } from '@shared/erp';
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { formatDateTime } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { Money } from '../../components/Money';
 import { Badge, Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { HBars, Kpi, PeriodPicker, presetRange, yuan, type Period } from '../dashboard/charts';
@@ -72,45 +73,34 @@ export function RevenuePage() {
                 <div className="px-4 pt-4">
                   <SectionTitle>每天</SectionTitle>
                 </div>
-                <div className="mt-2 overflow-x-auto">
-                  <table className="w-full min-w-[560px] text-[13px]" data-testid="erp-revenue-days">
-                    <thead className="bg-paper-2/70 text-[12px] text-ink-3">
-                      <tr>
-                        <th className="px-4 py-2 text-left font-semibold">营业日</th>
-                        <th className="px-3 py-2 text-right font-semibold">净营业额</th>
-                        <th className="px-3 py-2 text-right font-semibold">结账客人</th>
-                        <th className="px-3 py-2 text-right font-semibold">充值实收</th>
-                        <th className="px-4 py-2 text-left font-semibold">日结</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-line/70">
-                      {[...d.trend].reverse().map((t) => {
+                <DataTable
+                  variant="plain"
+                  testId="erp-revenue-days"
+                  className="mt-2 px-4 pb-2"
+                  tableClassName="min-w-[560px]"
+                  rows={[...d.trend].reverse()}
+                  rowKey={(t) => t.date}
+                  columns={[
+                    { key: 'date', header: '营业日', cellClassName: 'num font-semibold', cell: (t) => t.date },
+                    { key: 'net', header: '净营业额', numeric: true, cell: (t) => <Money cents={t.net} className="font-bold" /> },
+                    { key: 'guests', header: '结账客人', numeric: true, cell: (t) => t.guests },
+                    { key: 'recharge', header: '充值实收', numeric: true, cell: (t) => <Money cents={t.rechargePaid} /> },
+                    {
+                      key: 'settlement',
+                      header: '日结',
+                      cell: (t) => {
                         const s = closed.get(t.date);
-                        return (
-                          <tr key={t.date}>
-                            <td className="num px-4 py-2 font-semibold">{t.date}</td>
-                            <td className="px-3 py-2 text-right">
-                              <Money cents={t.net} className="font-bold" />
-                            </td>
-                            <td className="num px-3 py-2 text-right">{t.guests}</td>
-                            <td className="px-3 py-2 text-right">
-                              <Money cents={t.rechargePaid} />
-                            </td>
-                            <td className="px-4 py-2">
-                              {s ? (
-                                <span className="text-[12px] text-ink-3">
-                                  <Badge tone="pine">已日结</Badge> {s.closedByName} · {formatDateTime(s.closedAt)}
-                                </span>
-                              ) : (
-                                <Badge tone="neutral">未日结</Badge>
-                              )}
-                            </td>
-                          </tr>
+                        return s ? (
+                          <span className="text-[12px] text-ink-3">
+                            <Badge tone="pine">已日结</Badge> {s.closedByName} · {formatDateTime(s.closedAt)}
+                          </span>
+                        ) : (
+                          <Badge tone="neutral">未日结</Badge>
                         );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                      },
+                    },
+                  ]}
+                />
               </Card>
 
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">

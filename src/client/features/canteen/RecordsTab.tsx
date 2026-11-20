@@ -7,6 +7,7 @@ import { MEAL_LABELS, MEALS, type CanteenCheckinList, type CanteenCheckinRow, ty
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { downloadUrl, formatDateTime } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { ReasonDialog } from '../../components/ReasonDialog';
 import { EmptyState } from '../../components/EmptyState';
 import { Badge, Button, Card, Field, Input, Notice, Select, Skeleton } from '../../components/ui';
@@ -75,47 +76,54 @@ export function RecordsTab() {
               这里只列最近的 {list.data.rows.length} 条；全部的请点「导出表格」（导出不截断），或把日期范围缩小一点。
             </Notice>
           )}
-          <table className="w-full min-w-[820px] text-[13px]">
-            <thead className="border-b border-line text-left text-[12px] text-ink-3">
-              <tr>
-                <th className="px-4 py-2 font-semibold">日子 · 餐次</th>
-                <th className="px-3 py-2 font-semibold">员工</th>
-                <th className="px-3 py-2 font-semibold">部门</th>
-                <th className="px-3 py-2 font-semibold">方式</th>
-                <th className="px-3 py-2 font-semibold">扫到的时间</th>
-                <th className="px-3 py-2 font-semibold">登记人</th>
-                <th className="px-4 py-2 text-right font-semibold">状态</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {list.data.rows.map((r) => (
-                <tr key={r.id} className={r.voidedAt ? 'text-ink-3' : ''}>
-                  <td className="px-4 py-2">
+          <DataTable
+            variant="plain"
+            className="px-4"
+            tableClassName="min-w-[820px]"
+            rows={list.data.rows}
+            rowKey={(r) => r.id}
+            rowClassName={(r) => (r.voidedAt ? 'text-ink-3' : undefined)}
+            columns={[
+              {
+                key: 'meal',
+                header: '日子 · 餐次',
+                cell: (r) => (
+                  <>
                     {r.date.slice(5)} {MEAL_LABELS[r.meal]}
-                  </td>
-                  <td className="px-3 py-2">
+                  </>
+                ),
+              },
+              {
+                key: 'employee',
+                header: '员工',
+                cell: (r) => (
+                  <>
                     <span className="mr-1.5">{r.avatar}</span>
                     <span className={r.voidedAt ? 'line-through' : 'font-semibold'}>{r.name}</span> <span className="num text-[12px] text-ink-3">{r.empNo}</span>
-                  </td>
-                  <td className="px-3 py-2">{r.department || '—'}</td>
-                  <td className="px-3 py-2">{r.method === 'scan' ? '扫码' : <Badge tone="yuzu">手动{r.note ? `：${r.note}` : ''}</Badge>}</td>
-                  <td className="num px-3 py-2">{formatDateTime(r.scannedAt)}</td>
-                  <td className="px-3 py-2">{r.recorderName}</td>
-                  <td className="px-4 py-2 text-right">
-                    {r.voidedAt ? (
-                      <span className="text-[12px]" title={`${r.voidedByName ?? ''} ${formatDateTime(r.voidedAt)}`}>
-                        已撤销：{r.voidReason}
-                      </span>
-                    ) : (
-                      <Button size="sm" variant="ghost" onClick={() => setVoiding(r)}>
-                        撤销
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </>
+                ),
+              },
+              { key: 'department', header: '部门', cell: (r) => r.department || '—' },
+              { key: 'method', header: '方式', cell: (r) => (r.method === 'scan' ? '扫码' : <Badge tone="yuzu">手动{r.note ? `：${r.note}` : ''}</Badge>) },
+              { key: 'scannedAt', header: '扫到的时间', cellClassName: 'num', cell: (r) => formatDateTime(r.scannedAt) },
+              { key: 'recorder', header: '登记人', cell: (r) => r.recorderName },
+              {
+                key: 'status',
+                header: '状态',
+                align: 'right',
+                cell: (r) =>
+                  r.voidedAt ? (
+                    <span className="text-[12px]" title={`${r.voidedByName ?? ''} ${formatDateTime(r.voidedAt)}`}>
+                      已撤销：{r.voidReason}
+                    </span>
+                  ) : (
+                    <Button size="sm" variant="ghost" onClick={() => setVoiding(r)}>
+                      撤销
+                    </Button>
+                  ),
+              },
+            ]}
+          />
         </Card>
       )}
       <ReasonDialog

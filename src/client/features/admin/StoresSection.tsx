@@ -10,6 +10,7 @@ import { api, errorMessage } from '../../lib/api';
 import { formatYuan } from '@shared/money';
 import { useCan, useSession } from '../../lib/session';
 import { useToast } from '../../components/Toast';
+import { DataTable } from '../../components/DataTable';
 import { LoadFailed } from '../../components/LoadFailed';
 import { Dialog } from '../../components/Overlay';
 import { Badge, Button, Card, Field, Input, Select, Skeleton } from '../../components/ui';
@@ -45,44 +46,44 @@ export function StoresSection() {
                 新建门店
               </Button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-[14px]">
-                <thead className="text-left text-[12.5px] text-ink-3">
-                  <tr>
-                    <th className="py-2 pr-3 font-medium">代码</th>
-                    <th className="py-2 pr-3 font-medium">名称</th>
-                    <th className="py-2 pr-3 font-medium">公司主体</th>
-                    <th className="py-2 pr-3 font-medium">地址 · 电话</th>
-                    <th className="py-2 pr-3 text-right font-medium">挂着的员工</th>
-                    <th className="py-2 font-medium" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.data.stores.map((s) => (
-                    <tr key={s.id} className="border-t border-line" data-testid={`store-row-${s.code}`}>
-                      <td className="num py-2.5 pr-3 font-semibold">{s.code}</td>
-                      <td className="py-2.5 pr-3">
-                        {s.name}
-                        {s.id === 1 && <span className="ml-1.5 text-[12px] text-ink-3">（本店）</span>}
-                        {!s.active && (
-                          <Badge tone="neutral" className="ml-1.5">
-                            已停用
-                          </Badge>
-                        )}
-                      </td>
-                      <td className="py-2.5 pr-3">{s.entityName}</td>
-                      <td className="py-2.5 pr-3 text-ink-2">{[s.address, s.phone].filter(Boolean).join(' · ') || '—'}</td>
-                      <td className="num py-2.5 pr-3 text-right">{s.staffCount}</td>
-                      <td className="py-2.5 text-right">
-                        <Button size="sm" variant="ghost" onClick={() => setStore({ mode: 'edit', store: s })} data-testid={`store-edit-${s.code}`}>
-                          修改
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              variant="plain"
+              tableClassName="min-w-[640px]"
+              rows={data.data.stores}
+              rowKey={(s) => s.id}
+              rowTestId={(s) => `store-row-${s.code}`}
+              columns={[
+                { key: 'code', header: '代码', cellClassName: 'num font-semibold', cell: (s) => s.code },
+                {
+                  key: 'name',
+                  header: '名称',
+                  cell: (s) => (
+                    <>
+                      {s.name}
+                      {s.id === 1 && <span className="ml-1.5 text-[12px] text-ink-3">（本店）</span>}
+                      {!s.active && (
+                        <Badge tone="neutral" className="ml-1.5">
+                          已停用
+                        </Badge>
+                      )}
+                    </>
+                  ),
+                },
+                { key: 'entity', header: '公司主体', cell: (s) => s.entityName },
+                { key: 'contact', header: '地址 · 电话', cellClassName: 'text-ink-2', cell: (s) => [s.address, s.phone].filter(Boolean).join(' · ') || '—' },
+                { key: 'staff', header: '挂着的员工', numeric: true, cell: (s) => s.staffCount },
+                {
+                  key: 'actions',
+                  header: '',
+                  align: 'right',
+                  cell: (s) => (
+                    <Button size="sm" variant="ghost" onClick={() => setStore({ mode: 'edit', store: s })} data-testid={`store-edit-${s.code}`}>
+                      修改
+                    </Button>
+                  ),
+                },
+              ]}
+            />
           </Card>
 
           <Card className="p-5" data-testid="entities-card">
@@ -93,41 +94,42 @@ export function StoresSection() {
               </Button>
             </div>
             <p className="mb-3 text-[13px] text-ink-3">合同、进项发票、付款、开票申请、银行账户按主体分；打印、导出里的「我方」抬头与税号取这里。</p>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-[14px]">
-                <thead className="text-left text-[12.5px] text-ink-3">
-                  <tr>
-                    <th className="py-2 pr-3 font-medium">名称（发票抬头）</th>
-                    <th className="py-2 pr-3 font-medium">税号</th>
-                    <th className="py-2 pr-3 font-medium">开户行 · 账号</th>
-                    <th className="py-2 pr-3 text-right font-medium">门店</th>
-                    <th className="py-2 font-medium" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.data.entities.map((e) => (
-                    <tr key={e.id} className="border-t border-line" data-testid={`entity-row-${e.id}`}>
-                      <td className="py-2.5 pr-3">
-                        {e.name}
-                        {!e.active && (
-                          <Badge tone="neutral" className="ml-1.5">
-                            已停用
-                          </Badge>
-                        )}
-                      </td>
-                      <td className="num py-2.5 pr-3">{e.taxNo || '—'}</td>
-                      <td className="py-2.5 pr-3 text-ink-2">{[e.bankName, e.bankAccount].filter(Boolean).join(' · ') || '—'}</td>
-                      <td className="num py-2.5 pr-3 text-right">{e.storeCount}</td>
-                      <td className="py-2.5 text-right">
-                        <Button size="sm" variant="ghost" onClick={() => setEntity({ mode: 'edit', entity: e })} data-testid={`entity-edit-${e.id}`}>
-                          修改
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              variant="plain"
+              tableClassName="min-w-[640px]"
+              rows={data.data.entities}
+              rowKey={(e) => e.id}
+              rowTestId={(e) => `entity-row-${e.id}`}
+              columns={[
+                {
+                  key: 'name',
+                  header: '名称（发票抬头）',
+                  cell: (e) => (
+                    <>
+                      {e.name}
+                      {!e.active && (
+                        <Badge tone="neutral" className="ml-1.5">
+                          已停用
+                        </Badge>
+                      )}
+                    </>
+                  ),
+                },
+                { key: 'taxNo', header: '税号', cellClassName: 'num', cell: (e) => e.taxNo || '—' },
+                { key: 'bank', header: '开户行 · 账号', cellClassName: 'text-ink-2', cell: (e) => [e.bankName, e.bankAccount].filter(Boolean).join(' · ') || '—' },
+                { key: 'stores', header: '门店', numeric: true, cell: (e) => e.storeCount },
+                {
+                  key: 'actions',
+                  header: '',
+                  align: 'right',
+                  cell: (e) => (
+                    <Button size="sm" variant="ghost" onClick={() => setEntity({ mode: 'edit', entity: e })} data-testid={`entity-edit-${e.id}`}>
+                      修改
+                    </Button>
+                  ),
+                },
+              ]}
+            />
           </Card>
 
           {can('report.executive') && data.data.stores.filter((s) => s.active).length > 1 && <SettlementCard />}
@@ -340,28 +342,19 @@ function SettlementCard() {
         </p>
       ) : (
         <div className="grid gap-4">
-          <table className="w-full text-[14px]">
-            <thead className="text-left text-[12.5px] text-ink-3">
-              <tr>
-                <th className="py-2 pr-3 font-medium">开卡店</th>
-                <th className="py-2 pr-3 font-medium">消费店</th>
-                <th className="py-2 pr-3 text-right font-medium">笔数</th>
-                <th className="py-2 pr-3 text-right font-medium">本金</th>
-                <th className="py-2 text-right font-medium">赠金</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.data.pairs.map((p) => (
-                <tr key={`${p.homeStoreId}-${p.spendStoreId}`} className="border-t border-line" data-testid={`settle-pair-${p.homeStoreId}-${p.spendStoreId}`}>
-                  <td className="py-2 pr-3">{name(p.homeStoreId)}</td>
-                  <td className="py-2 pr-3">{name(p.spendStoreId)}</td>
-                  <td className="num py-2 pr-3 text-right">{p.count}</td>
-                  <td className="num py-2 pr-3 text-right">{formatYuan(p.principal)}</td>
-                  <td className="num py-2 text-right text-ink-2">{formatYuan(p.bonus)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            variant="plain"
+            rows={report.data.pairs}
+            rowKey={(p) => `${p.homeStoreId}-${p.spendStoreId}`}
+            rowTestId={(p) => `settle-pair-${p.homeStoreId}-${p.spendStoreId}`}
+            columns={[
+              { key: 'home', header: '开卡店', cell: (p) => name(p.homeStoreId) },
+              { key: 'spend', header: '消费店', cell: (p) => name(p.spendStoreId) },
+              { key: 'count', header: '笔数', numeric: true, cell: (p) => p.count },
+              { key: 'principal', header: '本金', numeric: true, cell: (p) => formatYuan(p.principal) },
+              { key: 'bonus', header: '赠金', numeric: true, cellClassName: 'text-ink-2', cell: (p) => formatYuan(p.bonus) },
+            ]}
+          />
           <div className="rounded-md bg-paper-2 px-4 py-3 text-[14px]" data-testid="store-settlement-net">
             <p className="mb-1 font-semibold">两两轧差（本金）</p>
             {report.data.net.map((n) => (

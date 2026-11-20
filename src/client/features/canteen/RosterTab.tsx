@@ -9,8 +9,8 @@ import { api, errorMessage, UncertainError } from '../../lib/api';
 import { relativeTime, uuid } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Dialog } from '../../components/Overlay';
-import { EmptyState } from '../../components/EmptyState';
-import { Badge, Button, Card, Field, Input, Notice, Segmented, Select, Skeleton, Textarea } from '../../components/ui';
+import { DataTable } from '../../components/DataTable';
+import { Badge, Button, Field, Input, Notice, Segmented, Select, Textarea } from '../../components/ui';
 import { useToast } from '../../components/Toast';
 import { PrintButton } from '../print/PrintButton';
 import { useOverview } from './CanteenPage';
@@ -79,87 +79,77 @@ export function RosterTab() {
         )}
       </div>
 
-      {list.isLoading ? (
-        <Skeleton className="h-48" />
-      ) : rows.length === 0 ? (
-        <Card>
-          <EmptyState
-            art="leaf"
-            title={list.data?.length ? '没有符合条件的员工' : '名单还是空的'}
-            description="在「设置」里打开自己登记，大家扫注册二维码自己登记；没手机的同事在这里单个加，或者把「工号 姓名 部门」一行一位粘贴进来。"
-          />
-        </Card>
-      ) : (
-        <Card className="overflow-x-auto p-0">
-          <table className="w-full min-w-[760px] text-[13.5px]">
-            <thead className="border-b border-line text-left text-[12px] text-ink-3">
-              <tr>
-                <th className="px-4 py-2.5 font-semibold">员工</th>
-                <th className="px-3 py-2.5 font-semibold">部门</th>
-                <th className="px-3 py-2.5 font-semibold">角色</th>
-                <th className="px-3 py-2.5 font-semibold">柚子饭堂</th>
-                <th className="px-3 py-2.5 font-semibold">最近用过</th>
-                <th className="px-4 py-2.5 text-right font-semibold">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {rows.map((e) => (
-                <tr key={e.id} className={e.active ? '' : 'text-ink-3'} data-testid={`canteen-row-${e.empNo}`}>
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-[22px]">{e.avatar}</span>
-                      <div>
-                        <p className="flex items-center gap-1.5 font-semibold">
-                          {e.name}
-                          {e.source === 'self' && <Badge tone="lake">自己登记</Badge>}
-                        </p>
-                        <p className="num text-[12px] text-ink-3">
-                          {e.empNo}
-                          {e.username && e.username !== e.name && ` · 用户名 ${e.username}`}
-                          {e.phone && ` · ${displayPhone(e.phone)}`}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">{e.department || <span className="text-ink-4">—</span>}</td>
-                  <td className="px-3 py-2.5">
-                    <Badge tone={ROLE_TONE[e.role]}>{CANTEEN_ROLE_LABELS[e.role]}</Badge>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {!e.active ? (
-                      <Badge tone="neutral">已停用</Badge>
-                    ) : e.activated ? (
-                      <Badge tone="pine">已开通</Badge>
-                    ) : e.activationPending ? (
-                      <Badge tone="yuzu">待开通 · {e.activationExpiresAt ? `${e.activationExpiresAt.slice(5, 10)} 前` : ''}</Badge>
-                    ) : (
-                      <Badge tone="clay">开通码过期</Badge>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-ink-3">{e.lastSeenAt ? relativeTime(e.lastSeenAt) : '—'}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex justify-end gap-1">
-                      {e.active && e.activationPending && (
-                        <PrintButton path={`/print/canteen-cards/${e.id}`} paper="a4" size="sm" testId={`canteen-print-${e.empNo}`}>
-                          开通卡片
-                        </PrintButton>
-                      )}
-                      {e.active && (
-                        <Button size="sm" variant="ghost" icon={<KeyRound className="size-3.5" />} onClick={() => setReissue(e)}>
-                          重新开通
-                        </Button>
-                      )}
-                      <Button size="sm" variant="ghost" icon={<Pencil className="size-3.5" />} onClick={() => setEditing(e)} data-testid={`canteen-edit-${e.empNo}`}>
-                        修改
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
+      <DataTable
+        onPage
+        tableClassName="min-w-[760px]"
+        rows={list.isLoading ? undefined : rows}
+        rowKey={(e) => e.id}
+        rowClassName={(e) => (e.active ? undefined : 'text-ink-3')}
+        rowTestId={(e) => `canteen-row-${e.empNo}`}
+        empty={list.data?.length ? '没有符合条件的员工' : '名单还是空的'}
+        emptyDescription="在「设置」里打开自己登记，大家扫注册二维码自己登记；没手机的同事在这里单个加，或者把「工号 姓名 部门」一行一位粘贴进来。"
+        columns={[
+          {
+            key: 'employee',
+            header: '员工',
+            cell: (e) => (
+              <div className="flex items-center gap-2.5">
+                <span className="text-[22px]">{e.avatar}</span>
+                <div>
+                  <p className="flex items-center gap-1.5 font-semibold">
+                    {e.name}
+                    {e.source === 'self' && <Badge tone="lake">自己登记</Badge>}
+                  </p>
+                  <p className="num text-[12px] text-ink-3">
+                    {e.empNo}
+                    {e.username && e.username !== e.name && ` · 用户名 ${e.username}`}
+                    {e.phone && ` · ${displayPhone(e.phone)}`}
+                  </p>
+                </div>
+              </div>
+            ),
+          },
+          { key: 'department', header: '部门', cell: (e) => e.department || <span className="text-ink-4">—</span> },
+          { key: 'role', header: '角色', cell: (e) => <Badge tone={ROLE_TONE[e.role]}>{CANTEEN_ROLE_LABELS[e.role]}</Badge> },
+          {
+            key: 'activation',
+            header: '柚子饭堂',
+            cell: (e) =>
+              !e.active ? (
+                <Badge tone="neutral">已停用</Badge>
+              ) : e.activated ? (
+                <Badge tone="pine">已开通</Badge>
+              ) : e.activationPending ? (
+                <Badge tone="yuzu">待开通 · {e.activationExpiresAt ? `${e.activationExpiresAt.slice(5, 10)} 前` : ''}</Badge>
+              ) : (
+                <Badge tone="clay">开通码过期</Badge>
+              ),
+          },
+          { key: 'lastSeen', header: '最近用过', cellClassName: 'text-ink-3', cell: (e) => (e.lastSeenAt ? relativeTime(e.lastSeenAt) : '—') },
+          {
+            key: 'actions',
+            header: '操作',
+            align: 'right',
+            cell: (e) => (
+              <div className="flex justify-end gap-1">
+                {e.active && e.activationPending && (
+                  <PrintButton path={`/print/canteen-cards/${e.id}`} paper="a4" size="sm" testId={`canteen-print-${e.empNo}`}>
+                    开通卡片
+                  </PrintButton>
+                )}
+                {e.active && (
+                  <Button size="sm" variant="ghost" icon={<KeyRound className="size-3.5" />} onClick={() => setReissue(e)}>
+                    重新开通
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" icon={<Pencil className="size-3.5" />} onClick={() => setEditing(e)} data-testid={`canteen-edit-${e.empNo}`}>
+                  修改
+                </Button>
+              </div>
+            ),
+          },
+        ]}
+      />
 
       <EmployeeDialog
         open={editing !== null}
@@ -375,29 +365,32 @@ function BatchDialog({ open, onClose, onDone }: { open: boolean; onClose: () => 
         </Notice>
       )}
       {rows && (
-        <div className="mt-3 max-h-64 overflow-y-auto rounded-md border border-line">
-          <table className="w-full text-[13px]">
-            <tbody className="divide-y divide-line">
-              {rows.map((r) => (
-                <tr key={r.line} className={r.status === 'error' ? 'bg-clay-soft/40' : ''}>
-                  <td className="num w-10 px-3 py-1.5 text-ink-3">{r.line}</td>
-                  <td className="num px-2 py-1.5 font-semibold">{r.empNo}</td>
-                  <td className="px-2 py-1.5">{r.name}</td>
-                  <td className="px-2 py-1.5 text-ink-3">{r.department}</td>
-                  <td className="px-3 py-1.5 text-right">
-                    {r.status === 'new' ? (
-                      <Badge tone="pine">新加</Badge>
-                    ) : r.status === 'same' ? (
-                      <Badge tone="neutral">已有，跳过</Badge>
-                    ) : (
-                      <span className="text-[12.5px] font-semibold text-clay">{r.message}</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          hideHeader
+          className="mt-3 max-h-64 overflow-y-auto"
+          rows={rows}
+          rowKey={(r) => r.line}
+          rowClassName={(r) => (r.status === 'error' ? 'bg-clay-soft/40' : undefined)}
+          columns={[
+            { key: 'line', header: '行', className: 'w-10', cellClassName: 'num text-ink-3', cell: (r) => r.line },
+            { key: 'empNo', header: '工号', cellClassName: 'num font-semibold', cell: (r) => r.empNo },
+            { key: 'name', header: '姓名', cell: (r) => r.name },
+            { key: 'department', header: '部门', cellClassName: 'text-ink-3', cell: (r) => r.department },
+            {
+              key: 'status',
+              header: '结果',
+              align: 'right',
+              cell: (r) =>
+                r.status === 'new' ? (
+                  <Badge tone="pine">新加</Badge>
+                ) : r.status === 'same' ? (
+                  <Badge tone="neutral">已有，跳过</Badge>
+                ) : (
+                  <span className="text-[12.5px] font-semibold text-clay">{r.message}</span>
+                ),
+            },
+          ]}
+        />
       )}
     </Dialog>
   );
