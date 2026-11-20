@@ -23,6 +23,8 @@ export interface DataColumn<T> {
   cellClassName?: string | ((row: T) => string | undefined);
   /** 单元格的 data-testid（按行） */
   cellTestId?: (row: T) => string | undefined;
+  /** 单元格的 data-label：窄屏把一行排成卡片时，样式表用 attr(data-label) 在格子前面写上列名 */
+  dataLabel?: string;
 }
 
 const ALIGN = { left: 'text-left', center: 'text-center', right: 'text-right' } as const;
@@ -150,6 +152,7 @@ export function DataTable<T>({
                     typeof c.cellClassName === 'function' ? c.cellClassName(row) : c.cellClassName,
                   )}
                   data-testid={c.cellTestId?.(row)}
+                  data-label={c.dataLabel}
                 >
                   {c.cell(row, i)}
                 </td>

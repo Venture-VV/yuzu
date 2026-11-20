@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
 import type { CustomerSettlementPage } from '@shared/customer';
+import { DataTable } from '../../components/DataTable';
 import { Card, Notice, SectionTitle } from '../../components/ui';
 import { CHECKOUT_METHOD_LABELS } from '@shared/checkout';
 import { customerUrl, useCustomerRead } from './api';
 import { ListFilters } from './Lists';
 import type { ListProps } from './Lists';
-import { Amount, Empty, localTime, PageControls, ReadStatus } from './ui';
+import { Amount, localTime, PageControls, ReadStatus } from './ui';
 export const paymentLabel = (method: string) => (CHECKOUT_METHOD_LABELS as Record<string, string>)[method] || method;
 export function SettlementList(props: ListProps) {
   const f = props.filters;
@@ -62,55 +63,63 @@ export function SettlementList(props: ListProps) {
           <Card className="customer-section">
             <SectionTitle>消费原单 · 结账与独立扣卡</SectionTitle>
             <p className="customer-caption">整单结账与其会员钱包扣费只计一次；会员工作台独立扣卡单另列，不伪造手牌、人数或前台结账单。</p>
-            {!d.rows.length ? (
-              <Empty />
-            ) : (
-              <div className="customer-table-scroll">
-                <table className="customer-table">
-                  <thead>
-                    <tr>
-                      <th>消费原单 / 来源</th>
-                      <th>所付手牌 / 客人</th>
-                      <th>原单 / 退款</th>
-                      <th>净消费</th>
-                      <th>支付方式 / 经办</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.rows.map((row) => (
-                      <tr key={`${row.sourceKind}:${row.id}`}>
-                        <td>
-                          <button type="button" className="customer-text-button" onClick={() => props.onRecord(row.sourceKind === 'consumption' ? 'consumption' : 'settlement', row.id)}>
-                            {row.docNo}
-                          </button>
-                          <small>
-                            {row.sourceKind === 'consumption' ? '会员工作台扣卡' : '前台结账整单'} · {row.status === 'completed' ? '已完成' : '已撤销'}
-                          </small>
-                          <small>{localTime(row.occurredAt, d.timezone)}</small>
-                        </td>
-                        <td>
-                          {row.tagCodes.length ? row.tagCodes.join('、') : '无手牌关联'}
-                          <small>{row.guestNames.join('、') || '客人称呼未登记'}</small>
-                        </td>
-                        <td>
-                          <Amount value={row.amountCents} />
-                          <small>
-                            退款/冲回 <Amount value={row.refundedCents} />
-                          </small>
-                        </td>
-                        <td>
-                          <Amount value={row.netCents} />
-                        </td>
-                        <td>
-                          {row.methods.map(paymentLabel).join('、')}
-                          <small>经办：{row.operator.name}</small>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <DataTable
+              tableClassName="customer-table"
+              rows={d.rows}
+              rowKey={(row) => `${row.sourceKind}:${row.id}`}
+              empty="当前条件下暂无记录"
+              columns={[
+                {
+                  key: 'doc',
+                  header: '消费原单 / 来源',
+                  cell: (row) => (
+                    <>
+                      <button type="button" className="customer-text-button" onClick={() => props.onRecord(row.sourceKind === 'consumption' ? 'consumption' : 'settlement', row.id)}>
+                        {row.docNo}
+                      </button>
+                      <small>
+                        {row.sourceKind === 'consumption' ? '会员工作台扣卡' : '前台结账整单'} · {row.status === 'completed' ? '已完成' : '已撤销'}
+                      </small>
+                      <small>{localTime(row.occurredAt, d.timezone)}</small>
+                    </>
+                  ),
+                },
+                {
+                  key: 'tags',
+                  header: '所付手牌 / 客人',
+                  cell: (row) => (
+                    <>
+                      {row.tagCodes.length ? row.tagCodes.join('、') : '无手牌关联'}
+                      <small>{row.guestNames.join('、') || '客人称呼未登记'}</small>
+                    </>
+                  ),
+                },
+                {
+                  key: 'amount',
+                  header: '原单 / 退款',
+                  numeric: true,
+                  cell: (row) => (
+                    <>
+                      <Amount value={row.amountCents} />
+                      <small>
+                        退款/冲回 <Amount value={row.refundedCents} />
+                      </small>
+                    </>
+                  ),
+                },
+                { key: 'net', header: '净消费', numeric: true, cell: (row) => <Amount value={row.netCents} /> },
+                {
+                  key: 'methods',
+                  header: '支付方式 / 经办',
+                  cell: (row) => (
+                    <>
+                      {row.methods.map(paymentLabel).join('、')}
+                      <small>经办：{row.operator.name}</small>
+                    </>
+                  ),
+                },
+              ]}
+            />
             <PageControls {...d} total={d.filteredTotal} onOffset={(offset) => props.onFilters({ ...f, offset })} />
           </Card>
         </>
