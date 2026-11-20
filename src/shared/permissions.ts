@@ -351,10 +351,11 @@ export const PERMISSIONS = {
    * 有这一项的人自己加收不用另请授权，「未结离店」的待办也由有这一项的人写处理结果
    */
   'auth.checkinRisk': { roles: ['owner', 'store_manager', 'duty_manager'] },
-  // 8.1.15 块 B（docs/DINING_V8115.md 第 4 节）：按出品口下单，点单页只显示有权限的出品口，服务端逐行核对；默认与「餐饮点单」同一批岗位，康美部没有餐厅
-  'dining.orderRestaurant': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
-  'dining.orderWater': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'], duties: ['kangmei'] },
-  'dining.orderFruit': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'], duties: ['kangmei'] },
+  // 8.1.15 块 B（docs/DINING_V8115.md 第 4 节）：按出品口下单，点单页只显示有权限的出品口，服务端逐行核对；默认与「餐饮点单」同一批岗位，康美部没有餐厅。
+  // 8.1.17（BW3，docs/DISHES_V8117.md 第 5 节）：平板电子菜单也按出品口核对，「点餐平板」默认三处都有；店里去掉哪一处，平板上那一处的菜就点不了
+  'dining.orderRestaurant': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'tablet'] },
+  'dining.orderWater': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'tablet'], duties: ['kangmei'] },
+  'dining.orderFruit': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'tablet'], duties: ['kangmei'] },
   /**
    * 菜品管理（8.1.15，docs/DISHES_V8115.md，CP6、CP7 待确认：店主、店总）：维护权限按出品口分三项——新增、编辑、上下架、做法、加料、套餐、图片；
    * 没有某个出品口权限的看得到、改不了。有任一项（或改价）就看得到餐饮里的「菜品管理」
