@@ -25,6 +25,7 @@ import { sweepPaying, sweepRefunds } from './modules/pay-terminal';
 import { runVoucherReconcile, sweepVerifying } from './modules/platform-verify';
 import { runAiSummaries } from './modules/ai';
 import { sweepOvertimeReminders } from './modules/frontdesk/overtime';
+import { sweepTableRestores } from './modules/tables-v8117';
 
 export interface JobLog {
   info: (msg: string) => void;
@@ -76,6 +77,13 @@ export async function runMinuteJobs(deps: { sql: Sql; config: AppConfig }, log: 
     if (n > 0) log.info(`超时提醒：记了 ${n} 条`);
   } catch (error) {
     log.error('超时提醒没记完，下一分钟重试', error);
+  }
+  // 桌台到点自动恢复（8.1.17 BW-2）：餐饮规则开了「到点自动恢复」的店，维修过了预计恢复时间的桌自动恢复（经办人「系统」）
+  try {
+    const n = await sweepTableRestores({ sql, config }, now);
+    if (n > 0) log.info(`桌台到点自动恢复：${n} 桌`);
+  } catch (error) {
+    log.error('桌台到点自动恢复失败，下一分钟重试', error);
   }
   // 预约（v0.7.28）：小程序预约开始前还没确认的自动取消、过了时间没到店的记爽约、客房过了保留时间释放
   try {

@@ -57,3 +57,45 @@ export function overtimeReminderLevel(stayMinutes: number): number | null {
 
 /** 超时提醒的备注（经办记录、异常待办里那一句） */
 export const overtimeReminderNote = (hours: number) => `在店超过 ${hours} 小时，请去看看客人、提醒结账或续时（系统记）`;
+
+// ───────────── BW-2 桌台提醒 ─────────────
+
+/** 「待清台多久算久了」最多填多少分钟 */
+export const MAX_DIRTY_ALERT_MINUTES = 240;
+
+/** 一张桌（没在用餐的）要不要提醒：维修过了预计恢复时间（overdue）、待清台太久（dirty_long），带过了几分钟；不用提醒为 null */
+export type TableReminder = { kind: 'overdue' | 'dirty_long'; minutes: number };
+
+export function tableReminderOf(
+  t: { state: 'available' | 'dirty' | 'maintenance'; maintenanceUntil: string | null; stateSince: string | null },
+  now: number,
+  dirtyAlertMinutes: number,
+): TableReminder | null {
+  if (t.state === 'maintenance' && t.maintenanceUntil) {
+    const over = now - new Date(t.maintenanceUntil).getTime();
+    return over >= 0 ? { kind: 'overdue', minutes: Math.floor(over / 60_000) } : null;
+  }
+  // 待清台从结账那一刻（state_since）算；升级前就待清台、没有时刻的不提醒
+  if (t.state === 'dirty' && t.stateSince) {
+    const minutes = Math.floor((now - new Date(t.stateSince).getTime()) / 60_000);
+    return minutes >= dirtyAlertMinutes ? { kind: 'dirty_long', minutes } : null;
+  }
+  return null;
+}
+
+/** 餐饮的待办数（桌台这一块）：没在用餐的桌里要提醒的几桌，分两样 */
+export function tableTodos(
+  tables: readonly { session: unknown; state: 'available' | 'dirty' | 'maintenance'; maintenanceUntil: string | null; stateSince: string | null }[],
+  now: number,
+  dirtyAlertMinutes: number,
+): { overdue: number; dirtyLong: number; total: number } {
+  let overdue = 0;
+  let dirtyLong = 0;
+  for (const t of tables) {
+    if (t.session) continue;
+    const r = tableReminderOf(t, now, dirtyAlertMinutes);
+    if (r?.kind === 'overdue') overdue += 1;
+    else if (r?.kind === 'dirty_long') dirtyLong += 1;
+  }
+  return { overdue, dirtyLong, total: overdue + dirtyLong };
+}

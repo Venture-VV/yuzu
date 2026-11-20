@@ -53,12 +53,23 @@
 - **待办**：超时提醒与上报、未结离店一样进「异常待办」，能指派、写处理结果（有「接待发牌、挂账、换牌」的人都能写，只写一次）；另外两种情况自动不再算待办——**客人离店以后**、**这次来访有了更高一级的超时提醒以后**（24 小时那条把 12 小时那条盖过）。手牌板上每张牌的待办数、发卡台顶上的条数、「异常待办」清单是同一个口径（`openTodoWhere`，页面上是 `isOpenTodo`）。客人卡的异常记录里，不再算待办的写「不再跟进」。
 - 页面上不能自己登记「超时提醒」（登记接口只认原来的六种）。
 
+## 5. BW-2 桌台提醒：维修到点、待清台太久
+
+- **维修过了预计恢复时间**：维修中的桌，格子上原来的「维修中 · 原因 · 预计几点」下面多一行「已过预计恢复时间」（陶土色、闹钟图标、16 像素），格子的边框加粗；算进餐饮的待办数。
+- **待清台太久**：结账以后待清台（从结账那一刻 `state_since` 算）超过 N 分钟（餐饮规则「待清台多久算久了」，默认 15，1–240）还没清台，格子上多一行「已待清台 23 分钟」（深橙色、闹钟图标），边框加粗；算进待办数。升级前就待清台、没有时刻的不提醒。
+- **餐饮的待办数**：「桌台」页签上一个小标「待办 N」（N = 上面两种的桌数，没有时不显示），桌台页顶上写「待办 N 桌 · 已过预计恢复时间 X · 待清台超过 15 分钟 Y」。都按看板上现成的状态与时刻、服务器的钟算（`tableReminderOf` / `tableTodos`，`src/shared/frontdesk-v8117.ts`），不另存、不另加接口。
+- **到点自动恢复**（餐饮规则「维修到点自动恢复」，`dining_rules.autoRestore`，默认关；按店）：开着时每分钟的任务（`src/server/jobs.ts` → `sweepTableRestores`，`src/server/modules/tables-v8117.ts`）把过了预计恢复时间的桌恢复——走手动「恢复」的同一个函数 `restoreTable`，同样的锁、同样记一条桌台记录（`table_events` 的 restore）与审计 `table_restore`，经办人是系统账号「系统」，桌台历史里写「系统」。
+  - 操作编号按「桌台 + 这一次维修的开始时刻」算出来（`autoRestoreKey`）：几个进程同时跑，后到的按编号原样返回第一次的那条，只恢复一次；
+  - 锁住桌台以后再核对预计恢复时间确实到了（`restoreTable` 的 `dueAt`，`MAINTENANCE_NOT_DUE`）：挑候选到锁住之间有人恢复后又重新报修的，新的那次维修还没到点不动；
+  - 关着时什么都不做，格子上标着、等人去点「恢复」。
+- 后台「餐饮 → 餐饮规则」多这两项（只有店主能改）。
+
 ## 进度
 
 - [x] BW-12「流水」的订单详情（部件、接口、用例 `tests/frontdesk-v8117.test.ts`，`e2e/orders.spec.ts` 按新部件改了取法）
 - [x] BW-4 退菜按出品口（迁移 199 的岗位权限一段；用例 `tests/dining-voids-v8117.test.ts`，`tests/dining-808.test.ts`、`tests/orders.test.ts`、`tests/upgrade-dining-v8115.test.ts` 按新规矩改了预期）
 - [x] BW-3 发卡台加项目按出品口（用例在 `tests/dining-voids-v8117.test.ts`）
 - [x] BW-1 超时加收与提醒（迁移 199 的异常种类一段；用例在 `tests/frontdesk-v8117.test.ts`；`tests/frontdesk-vip.test.ts`、`src/server/demo/frontdesk-expected.json` 的前台规则多一项）
-- [ ] BW-2 桌台提醒
+- [x] BW-2 桌台提醒（用例 `tests/tables-reminders-v8117.test.ts`）
 - [ ] BW-11 本店价改价留痕（迁移 198）
 - [ ] 浏览器用例 `e2e/frontdesk-v8117.spec.ts`、三台设备
