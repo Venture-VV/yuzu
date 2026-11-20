@@ -47,6 +47,12 @@ let lastContact: number | null = null;
 let probing: Promise<boolean> | null = null;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let rqSetOnline: ((online: boolean) => void) | null = null;
+/**
+ * 断网信号的序号：请求发不出去、网卡断了、检查问不到，各加一。页面请求发出去时记下当时的序号，
+ * 回来时序号已经变了，说明它是信号以前发出去的：在「检查中 / 断了」的时候不拿它当连上了的证据——
+ * 断网时还在路上的回应可能这时才送到，当成连上会把计数清零、取消重试，要等 60 秒的心跳才发现断了。
+ */
+let signalSeq = 0;
 let started = false;
 
 function set(patch: Partial<ConnectionSnapshot>) {
@@ -100,6 +106,7 @@ function markReachable(reply?: PingReply, rttMs?: number) {
 }
 
 function markUnreachable() {
+  signalSeq += 1;
   failures += 1;
   if (failures >= 2 && snap.state !== 'offline') {
     set({ state: 'offline', downSince: lastContact ?? Date.now(), attempts: 0 });
@@ -141,12 +148,19 @@ export function probe(opts: { fresh?: boolean } = {}): Promise<boolean> {
   return probing;
 }
 
-/** 请求收到了服务器的回应（任何状态码，只要是服务器回的） */
-export function noteResponse(): void {
+/** 页面请求发出去时记下的断网信号序号（交给 noteResponse） */
+export const requestSeq = (): number => signalSeq;
+
+/**
+ * 请求收到了服务器的回应（任何状态码，只要是服务器回的）。sentSeq：发出去时的 requestSeq()；
+ * 发出去以后又有过断网信号的，在「检查中 / 断了」时不算连上（见 signalSeq），等下一次检查。
+ */
+export function noteResponse(sentSeq?: number): void {
   if (snap.state === 'online') {
     lastContact = Date.now();
     return;
   }
+  if (sentSeq !== undefined && sentSeq !== signalSeq) return;
   markReachable();
 }
 
@@ -155,6 +169,7 @@ export const lastContactAt = (): number | null => lastContact;
 
 /** 请求发不出去、超时、网关说连不上后面：马上问一次服务器 */
 export function noteNetworkFailure(): void {
+  signalSeq += 1;
   if (snap.state === 'online') set({ state: 'checking' });
   void probe({ fresh: true });
 }
@@ -211,6 +226,7 @@ export function startConnectionWatch(): void {
   });
   window.addEventListener('online', () => void probe({ fresh: true }));
   window.addEventListener('offline', () => {
+    signalSeq += 1;
     if (snap.state === 'online') set({ state: 'checking' });
     void probe({ fresh: true });
   });

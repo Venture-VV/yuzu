@@ -1,7 +1,7 @@
 import type { ApiErrorBody } from '@shared/types';
 import { NOT_APPLIED_CODES } from '@shared/resilience';
 import { noteProblem } from './clientLog';
-import { ensureReachable, noteNetworkFailure, noteResponse } from './connection';
+import { ensureReachable, noteNetworkFailure, noteResponse, requestSeq } from './connection';
 import { noteServerTime } from './serverClock';
 
 export class ApiError extends Error {
@@ -112,6 +112,8 @@ async function requestOnce<T>(method: 'GET' | 'POST' | 'PUT', url: string, body:
   if (!(await ensureReachable())) throw new OfflineError();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 15_000);
+  // 发出去时的断网信号序号：回来时又有过断网信号的，回应不算连上的证据（connection.ts 的 signalSeq）
+  const sentSeq = requestSeq();
   let res: Response;
   try {
     res = await fetch(url, {
@@ -129,7 +131,7 @@ async function requestOnce<T>(method: 'GET' | 'POST' | 'PUT', url: string, body:
     clearTimeout(timer);
   }
   if (res.ok) {
-    noteResponse();
+    noteResponse(sentSeq);
     // 带服务器时间的响应：在收到的这一刻记下时差（前台、餐饮按服务器时间判断时限）
     const receivedAt = Date.now();
     const data = (await res.json()) as T;
@@ -148,7 +150,7 @@ async function requestOnce<T>(method: 'GET' | 'POST' | 'PUT', url: string, body:
   const retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined;
   // yuzu 自己的过载保护（8.1.3）：请求一进来就拒了，确定没处理
   if (res.status === 503 && payload?.error?.code === 'OVERLOADED') {
-    noteResponse();
+    noteResponse(sentSeq);
     throw new ApiError(503, 'OVERLOADED', payload.error.message, undefined, retryAfterMs);
   }
   // 网关、断网的 502 / 503 / 504 算网络问题；读请求遇到 yuzu 自己回的 503（带错误码，例如门店没配会员码）按错误显示原因（v0.7.25）
@@ -156,7 +158,7 @@ async function requestOnce<T>(method: 'GET' | 'POST' | 'PUT', url: string, body:
     noteNetworkFailure();
     throw new UncertainError('network');
   }
-  noteResponse();
+  noteResponse(sentSeq);
   // 写请求遇到服务器出错（500 等）：事务可能已经提交（例如登记后读结果失败），不能当作被拒绝。
   // 带操作编号的页面按「结果待确认」处理：保留原编号与原请求，查回、按原内容重新提交或确认作废
   if (method !== 'GET' && res.status >= 500) throw new UncertainError('server');
