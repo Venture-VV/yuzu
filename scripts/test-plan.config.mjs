@@ -138,6 +138,7 @@ export const DATA_WRITE_PATTERNS = [
 export const DATA_WRITE_TESTS = ['tests/concurrency.test.ts', 'tests/acceptance.test.ts', 'tests/op-fences-constraint.test.ts', 'tests/recon.test.ts'];
 
 /**
+ * docs/TESTING.md 第 4 节「改了什么先跑哪些」那张对照表的每一行都在这里（Codex 审查 a88acd1：表里的行要一条不落地搬过来）。
  * 模块名对不上用例文件名的，在这里补（按改到的路径 → 额外要跑的集成测试与浏览器用例）。
  * 按文件名能对上的（例如 src/server/modules/dishes.ts → tests/dishes*.test.ts、e2e/dishes*.spec.ts）不用写。
  */
@@ -162,6 +163,45 @@ export const AREAS = [
     paths: ['src/client/features/auth/**'],
     tests: ['tests/login-throttle.test.ts', 'tests/auth-settlement.test.ts'],
     e2e: ['e2e/flows.spec.ts', 'e2e/resilience.spec.ts', 'e2e/review-v060.spec.ts'],
+  },
+  {
+    name: '会员建档与会员卡押金',
+    paths: ['src/server/modules/member-card*', 'src/shared/member-cards.ts', 'src/shared/member-form.ts'],
+    tests: ['tests/member-card*.test.ts', 'tests/recon.test.ts', 'tests/upgrade-shift.test.ts'],
+    e2e: ['e2e/member-card*.spec.ts', 'e2e/dialog-input.spec.ts', 'e2e/admin-v060.spec.ts', 'e2e/target-devices.spec.ts'],
+  },
+  {
+    name: '退储值原路退回',
+    paths: ['src/server/modules/member-refunds.ts', 'src/shared/member-refunds.ts'],
+    tests: ['tests/member-refunds*.test.ts', 'tests/mp-refund.test.ts'],
+    e2e: ['e2e/member-*.spec.ts'],
+  },
+  {
+    name: '预约与登记消费',
+    paths: ['src/server/modules/booking*', 'src/server/modules/usages*', 'src/client/features/bookings/**', 'src/shared/bookings.ts', 'src/shared/usages.ts'],
+    tests: ['tests/bookings.test.ts', 'tests/usages.test.ts', 'tests/usage-charges.test.ts'],
+    e2e: ['e2e/requests-1114.spec.ts', 'e2e/bookings.spec.ts', 'e2e/dining.spec.ts', 'e2e/emenu.spec.ts'],
+  },
+  {
+    name: '技师与钟房',
+    paths: [
+      'src/server/modules/technician*',
+      'src/server/modules/clock*',
+      'src/server/modules/commission.ts',
+      'src/client/features/technicians/**',
+      'src/client/features/clockroom/**',
+      'src/shared/technician*.ts',
+      'src/shared/clockroom.ts',
+      'src/shared/pinyin-initials.ts',
+    ],
+    tests: ['tests/technician*.test.ts', 'tests/clockroom*.test.ts', 'tests/catalog-tiers.test.ts', 'tests/review-v071.test.ts', 'tests/pinyin-initials.test.ts'],
+    e2e: ['e2e/technician*.spec.ts', 'e2e/clockroom.spec.ts', 'e2e/target-devices.spec.ts'],
+  },
+  {
+    name: '客户部',
+    paths: ['src/server/modules/customer/**', 'src/client/features/customer/**', 'src/shared/customer*.ts'],
+    tests: ['tests/customer-*.test.ts'],
+    e2e: ['e2e/customer.spec.ts'],
   },
   {
     name: '前台与收银',

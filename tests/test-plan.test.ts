@@ -198,6 +198,12 @@ describe('挑用例', () => {
     expect(plan(['src/server/modules/dishes.ts']).jobs.canteen).toBe(false);
   });
 
+  it('文件名对不上的用例靠对照表补上：改预约页要跑 requests-1114（Codex 审查 a88acd1）', () => {
+    const extra = { specs: [...base.specs, 'e2e/requests-1114.spec.ts'], e2eUnits: [...base.e2eUnits, { project: '门店电脑', file: 'e2e/requests-1114.spec.ts' }] };
+    const r = plan(['src/client/features/bookings/BookingsPage.tsx'], extra);
+    expect(r.e2e.units.map((u) => u.file)).toContain('e2e/requests-1114.spec.ts');
+  });
+
   it('改了用例文件本身：跑它', () => {
     const r = plan(['tests/frontdesk.test.ts', 'e2e/viewports.spec.ts']);
     expect(r.integration.files).toContain('tests/frontdesk.test.ts');
