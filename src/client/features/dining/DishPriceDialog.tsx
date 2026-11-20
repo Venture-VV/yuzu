@@ -1,21 +1,24 @@
 // 菜品管理：改价与改价记录（8.1.15，docs/DISHES_V8115.md 第 4 节）。
 // 改价是单独一项权限，要写原因；每一档的变化记一条（改前、改后、谁、几点、原因、从哪里改的），只追加。
 // 以前的订单照下单时的价：明细上留着当时的单价，改价不碰它。
+// 8.1.16：带着打开时看到的价与版本（晚到的旧改价被拒绝）；没收到结果的进「结果待确认」，处理好之前这道菜不能再改价。
 
 import { useState } from 'react';
 import { PRICE_TIER_LABELS, PRICE_TIERS, type PriceTier, type TierPrice } from '@shared/catalog';
 import { DISH_PRICE_SOURCE_LABELS, MAX_PRICE_REASON, priceChangeText, priceDiff, type DishPriceChange, type DishRow, type DishSaveResult } from '@shared/dishes';
 import { centsToInput, parseYuan } from '@shared/money';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
-import { useReasons } from '../../lib/session';
+import { ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { useReasons, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { formatDateTime } from '../../lib/utils';
+import { formatDateTime, uuid } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { LoadFailed } from '../../components/LoadFailed';
 import { Dialog } from '../../components/Overlay';
 import { ReasonChips } from '../../components/ReasonChips';
 import { Badge, Button, Field, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
-import { UNCERTAIN_HINT, useDishPriceChanges, useOpKey } from './dishQueries';
+import { DishPendingNotice } from './DishPendingNotice';
+import { pendingOf, sendDishOp, useDishPending } from './dishPendingStore';
+import { useDishPriceChanges } from './dishQueries';
 
 /** 各档现在的价填进输入框（元）；没有的档空着 */
 const toInputs = (prices: readonly TierPrice[]) =>
@@ -43,7 +46,8 @@ export function DishPriceDialog({
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const op = useOpKey();
+  const session = useSession();
+  const pending = useDishPending();
   useResetOnOpen(
     dish !== null,
     () => {
@@ -56,6 +60,7 @@ export function DishPriceDialog({
   );
   const history = useDishPriceChanges(dish?.id ?? null, dish !== null);
   if (!dish) return null;
+  const waiting = pendingOf(pending, 'price', dish.id);
 
   // 填的各档：空着是不卖这一档；写得不对的先不算
   const parsed = PRICE_TIERS.map((tier) => {
@@ -76,18 +81,26 @@ export function DishPriceDialog({
           : null;
 
   const save = async () => {
-    if (problem) return;
+    if (problem || waiting) return;
     const asObject = (list: readonly TierPrice[]) => Object.fromEntries(PRICE_TIERS.map((tier) => [tier, list.find((p) => p.tier === tier)?.price ?? null]));
-    const payload = { prices: asObject(next), expected: asObject(dish.prices), reason: reason.trim() };
+    const key = uuid();
     setBusy(true);
     setError(null);
     try {
-      const r = await api.post<DishSaveResult>(`/api/dining/dishes/${dish.id}/price`, { clientKey: op.keyFor(JSON.stringify(payload)), ...payload });
-      op.settle();
+      const r = await sendDishOp<DishSaveResult>({
+        key,
+        type: 'price',
+        itemId: dish.id,
+        method: 'post',
+        url: `/api/dining/dishes/${dish.id}/price`,
+        body: { clientKey: key, prices: asObject(next), expected: asObject(dish.prices), rev: dish.rev, reason: reason.trim() },
+        summary: `「${dish.name}」改价（${diff.map(priceChangeText).join('；')}）`.slice(0, 120),
+        staffName: session.staff.displayName,
+      });
       onSaved(r.dish);
     } catch (e) {
-      op.settle(e);
-      setError(e instanceof UncertainError ? UNCERTAIN_HINT : errorMessage(e));
+      // 没收到结果：记录留在本机，弹窗上方出现「结果待确认」那一条
+      if (!(e instanceof UncertainError)) setError(errorMessage(e));
       if (e instanceof ApiError) onRejected();
     } finally {
       setBusy(false);
@@ -106,13 +119,14 @@ export function DishPriceDialog({
           <Button variant="ghost" className="min-h-11" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" className="min-h-11 min-w-[112px]" disabled={!!problem} loading={busy} onClick={() => void save()} data-testid="dish-price-save">
+          <Button variant="primary" className="min-h-11 min-w-[112px]" disabled={!!problem || !!waiting} loading={busy} onClick={() => void save()} data-testid="dish-price-save">
             确认改价
           </Button>
         </>
       }
     >
       <div className="space-y-4" data-testid="dish-price-dialog">
+        {waiting && <DishPendingNotice op={waiting} onApplied={(saved) => (saved ? onSaved(saved) : onRejected())} onAbandoned={onRejected} />}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {PRICE_TIERS.map((tier, i) => (
             <Field key={tier} label={`${PRICE_TIER_LABELS[tier]}价`} htmlFor={`price-${tier}`} hint={dish.prices.some((p) => p.tier === tier) ? undefined : '现在没有这一档'}>

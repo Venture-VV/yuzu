@@ -212,6 +212,19 @@ export interface DishSaveResult {
   replayed: boolean;
 }
 
+// ───────────────────────── 操作编号与「结果待确认」（Codex 审查 d12390f 的 P1） ─────────────────────────
+
+/** 菜品维护的五种写入，各带一个操作编号（记在 dish_ops） */
+export const DISH_OP_TYPES = ['create', 'update', 'active', 'price', 'import'] as const;
+export type DishOpType = (typeof DISH_OP_TYPES)[number];
+export const DISH_OP_LABELS: Record<DishOpType, string> = { create: '新增菜品', update: '编辑菜品', active: '上架 / 下架', price: '改价', import: '导入菜品' };
+
+/**
+ * 按编号查回（只读）：found = 这个编号已经办过（dish 是这道菜现在的样子，导入为空、result 里是新建 / 修改几道）；
+ * 没办过时 abandoned 说明是不是已经确认作废——都不是只说明「此刻还没有结果」，原请求可能还在路上，不能断定没生效
+ */
+export type DishOpLookup = { found: true; type: DishOpType; itemId: number | null; dish: DishRow | null; result: Record<string, unknown>; at: string } | { found: false; abandoned: boolean };
+
 // ───────────────────────── 导入、导出（Excel / CSV） ─────────────────────────
 
 /** 导入认的列（按表头的名字找，先后、多出来的列都不要紧）；导出多三列只读的：今日沽清、图片、电子菜单 */

@@ -1,20 +1,23 @@
 // 菜品管理：导入（8.1.15，docs/DISHES_V8115.md 第 6 节）。Excel（.xlsx）或 CSV，先预览再生效：
 // 预览列出新建、修改、没变的各几道与每一道改什么，逐行写问题；有一行有问题整份不写。
-// 生效带回预览的摘要（预览以后菜被别人改过就拒绝，请重新预览）与操作编号（结果不明时原样再点一次不会重复）；有改价要写原因。
+// 生效带回预览的摘要（预览以后菜被别人改过就拒绝，请重新预览）与操作编号；有改价要写原因。
+// 8.1.16：生效没收到结果的进「结果待确认」（dishPendingStore.ts）：查回、按原内容重新提交或确认作废之前不能再导入。
 
 import { useRef, useState } from 'react';
 import { CircleAlert, CircleCheck, Download, FileSearch, FileUp, Tag } from 'lucide-react';
 import { DISH_SHEET_COLUMNS, DISH_SHEET_HINT, MAX_PRICE_REASON, type DishImportPreview, type DishImportResult } from '@shared/dishes';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { loadTableFile, type LoadedTable } from '../../lib/import-file';
-import { useReasons } from '../../lib/session';
+import { useReasons, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { downloadCsvRows } from '../../lib/utils';
+import { downloadCsvRows, uuid } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { ReasonChips } from '../../components/ReasonChips';
 import { Badge, Button, Field, Input, Notice } from '../../components/ui';
 import { StatusChip } from './DishChips';
-import { UNCERTAIN_HINT, useOpKey } from './dishQueries';
+import { DishPendingNotice } from './DishPendingNotice';
+import { pendingOf, sendDishOp, useDishPending } from './dishPendingStore';
+import { useRefreshDishes } from './dishQueries';
 
 const SAMPLE = [
   ['', '示例牛肉面（请替换）', '餐饮', '餐厅', '餐饮', '热菜', '38', '', '58', '上架', '微辣、中辣、免葱', '', ''],
@@ -30,7 +33,10 @@ export function DishImportDialog({ open, onClose, onDone }: { open: boolean; onC
   const [error, setError] = useState<string | null>(null);
   // 每换一次文件就加一：晚回来的读取、预览对不上现在选的文件，丢掉
   const selection = useRef(0);
-  const op = useOpKey();
+  const session = useSession();
+  const refreshDishes = useRefreshDishes();
+  // 上一次生效的结果待确认：处理好之前不能再导入
+  const waiting = pendingOf(useDishPending(), 'import');
   const reset = () => {
     selection.current += 1;
     setFile(null);
@@ -74,20 +80,38 @@ export function DishImportDialog({ open, onClose, onDone }: { open: boolean; onC
 
   const needReason = (preview?.priceChangeCount ?? 0) > 0;
   const nothing = !!preview && preview.createCount + preview.updateCount === 0;
-  const blocked = !preview ? '先预览' : preview.issues.length > 0 ? '有问题的行要先改好' : nothing ? '没有要改的' : needReason && reason.trim().length < 2 ? '有改价，请写原因' : null;
+  const blocked = waiting
+    ? '上一次导入的结果待确认'
+    : !preview
+      ? '先预览'
+      : preview.issues.length > 0
+        ? '有问题的行要先改好'
+        : nothing
+          ? '没有要改的'
+          : needReason && reason.trim().length < 2
+            ? '有改价，请写原因'
+            : null;
 
   const apply = async () => {
     if (!file || !preview || blocked) return;
-    const payload = { ...body(), planHash: preview.planHash, reason: reason.trim() };
+    const key = uuid();
     setBusy('apply');
     setError(null);
     try {
-      const r = await api.post<DishImportResult>('/api/dining/dishes/import', { clientKey: op.keyFor(JSON.stringify(payload)), ...payload }, { timeoutMs: 60_000 });
-      op.settle();
+      const r = await sendDishOp<DishImportResult>({
+        key,
+        type: 'import',
+        itemId: null,
+        method: 'post',
+        url: '/api/dining/dishes/import',
+        body: { clientKey: key, ...body(), planHash: preview.planHash, reason: reason.trim() },
+        summary: `导入「${file.fileName}」（新建 ${preview.createCount} 道、修改 ${preview.updateCount} 道）`,
+        staffName: session.staff.displayName,
+      });
       onDone(r);
     } catch (e) {
-      op.settle(e);
-      setError(e instanceof UncertainError ? UNCERTAIN_HINT : errorMessage(e));
+      // 没收到结果：记录留在本机，上方出现「结果待确认」那一条
+      if (!(e instanceof UncertainError)) setError(errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -124,6 +148,16 @@ export function DishImportDialog({ open, onClose, onDone }: { open: boolean; onC
       }
     >
       <div className="space-y-3" data-testid="dish-import">
+        {waiting && (
+          <DishPendingNotice
+            op={waiting}
+            onApplied={() => {
+              refreshDishes();
+              onClose();
+            }}
+            onAbandoned={() => setPreview(null)}
+          />
+        )}
         <p className="text-[12.5px] leading-relaxed text-ink-3">
           列：{DISH_SHEET_COLUMNS.join('、')}。{DISH_SHEET_HINT}
         </p>
