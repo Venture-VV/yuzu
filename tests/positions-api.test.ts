@@ -78,6 +78,23 @@ describe('负责人管本部门员工（GW6）', () => {
     expect((await api(ctx.app, lead.cookie, 'PUT', '/api/admin/position-permissions', { positions: { 'front.staff': [] } })).status).toBe(403);
   });
 
+  it('多门店：负责人只管挂的门店都在自己能进的门店里的员工（Codex 安全审查 49a64d0）', async () => {
+    const entity = await api(ctx.app, ctx.owner, 'POST', '/api/admin/entities', { name: '二店公司', taxNo: '91440300MA5POS0001' });
+    const store = await api(ctx.app, ctx.owner, 'POST', '/api/admin/stores', { code: 'p2', name: '二店', entityId: entity.body.id });
+    expect(store.status, JSON.stringify(store.body)).toBe(201);
+    const second = store.body.id as number;
+    const lead = await hire('m_lead', { position: 'male.lead' });
+    const here = await hire('m_here', { position: 'male.staff' });
+    const there = await hire('m_there', { position: 'male.staff' });
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/staff/${there.id}/stores`, { storeIds: [second] })).status).toBe(200);
+    const list = (await api(ctx.app, lead.cookie, 'GET', '/api/staff')).body as { id: number }[];
+    expect(list.some((x) => Number(x.id) === here.id)).toBe(true);
+    expect(list.some((x) => Number(x.id) === there.id)).toBe(false);
+    expect((await api(ctx.app, lead.cookie, 'POST', `/api/staff/${there.id}/reset-password`)).status).toBe(403);
+    expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${there.id}`, { displayName: '改名', active: false })).status).toBe(403);
+    expect((await api(ctx.app, lead.cookie, 'POST', `/api/staff/${here.id}/reset-password`)).status).toBe(200);
+  });
+
   it('财务部负责人没有账号与权限配置（表上 ✘）', async () => {
     const fin = await hire('fin_lead', { position: 'finance.lead' });
     expect((await api(ctx.app, fin.cookie, 'GET', '/api/staff')).status).toBe(403);
