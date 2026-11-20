@@ -587,7 +587,7 @@ describe('派对房、已预订、客房', () => {
     const today = (await board()).businessDate;
     await ctx.sql`
       INSERT INTO bookings (booking_no, kind, source, status, guest_name, guests, space_id, starts_at, ends_at, business_date, created_by, client_key, request_hash, confirmed_by, confirmed_at)
-      VALUES ('YY-SYN-1', 'space', 'phone', 'confirmed', '电话客人', 8, ${spaceId.P202}, now() + interval '1 hour', now() + interval '3 hours', ${today}, ${ctx.clerkId},
+      VALUES ('YY-SYN-1', 'space', 'phone', 'confirmed', '电话客人', 8, ${spaceId.P202!}, now() + interval '1 hour', now() + interval '3 hours', ${today}, ${ctx.clerkId},
               ${randomUUID()}, ${'a'.repeat(64)}, ${ctx.clerkId}, now())`;
     const booked = await room('P202');
     expect(booked.status).toBe('booked');
