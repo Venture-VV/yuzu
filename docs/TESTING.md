@@ -142,7 +142,7 @@ E2E_MP_PORT=<小程序端口> E2E_MP_GATEWAY_KEY=<网关密钥> E2E_BASE_URL=htt
 3. **一般代码**：
    - 顺着「谁引了我」往上找三层（用例 → 模块 → 模块 → 改到的文件），不经过登记处与入口（`HUBS`：`app.ts`、`App.tsx`、`tests/helpers.ts`、演示数据等，它们引了几乎所有模块）；用例引到其中任何一个就跑。
    - 改到的文件和直接引它的文件给出模块名（目录名、文件名、去掉 `-v8117` 这类后缀、连字符的第一段），文件名对得上的集成测试与浏览器用例都跑；对不上名字的在 `AREAS` 里补（第 4 节那张对照表已经搬进去了）。
-   - 另加**每次都跑的核心回归**：`acceptance`、`concurrency`、`checkout`、`op-fences-constraint`、`wallet-abandon`、`migrations-list`，浏览器的完整收银流程 `flows`（门店电脑）。
+   - 另加**每次都跑的核心回归**：`acceptance`、`concurrency`、`checkout`、`op-fences-constraint`、`wallet-abandon`、`migrations-list`，浏览器的完整收银流程 `flows`（门店电脑）；改了页面（`src/client/`）再加三台目标设备的布局 `target-devices` 与五个尺寸的视口冒烟 `viewports`（跨页面的用例，按文件名对不上）。
 4. **数据写入**：改动的行里有 `INSERT`、`UPDATE … SET`、`DELETE`、`ON CONFLICT`、`FOR UPDATE / SHARE`、开事务这类写法的服务端文件，风险记「数据写入」，计划里单列，另跑数据一致性的几组（`concurrency`、`acceptance`、`op-fences-constraint`、`recon`）。浏览器验收的每一组跑完都照旧再跑 `cli check`（会员、营业口径、库存、前台全部 ✓）。
 5. **拿不准就扩大**：改了服务端代码却一条集成测试都没对上 → 集成测试全量；改了页面却一条浏览器用例都没对上 → 浏览器验收全量；改到的模块太多（超过 25 个）或挑出来的超过六成 → 那一样全量。
 6. 秒级一档（不要数据库的用例）每次都全跑，在「静态检查」job 里，8 秒。

@@ -236,7 +236,8 @@ export function makePlan(input) {
   // 改了页面却一条浏览器用例都没对上：拿不准，浏览器验收全量
   // 员工食堂的页面另有一套浏览器验收（员工食堂 job），不算在这里
   const clientChanged = code.some((f) => f.file.startsWith('src/client/') && !matchAny(f.file, CANTEEN));
-  const matchedSpecs = [...e2eFiles].filter((s) => !ALWAYS.e2e.includes(s));
+  if (clientChanged) for (const f of ALWAYS.e2eClient) if (specs.includes(f)) e2eFiles.add(f);
+  const matchedSpecs = [...e2eFiles].filter((s) => !ALWAYS.e2e.includes(s) && !ALWAYS.e2eClient.includes(s));
   if (clientChanged && !matchedSpecs.length) {
     reasons.push('改了页面，按模块名找不到对应的浏览器用例：浏览器验收全量');
     e2eAll = true;

@@ -173,7 +173,7 @@ describe('挑用例', () => {
     const r = plan(['src/server/modules/dishes.ts']);
     expect(r.full).toBe(false);
     expect(r.integration.files).toEqual(['tests/acceptance.test.ts', 'tests/dishes.test.ts']);
-    expect(r.e2e.units.map((u) => u.file).sort()).toEqual(['e2e/dishes.spec.ts', 'e2e/flows.spec.ts']);
+    expect(r.e2e.units.map((u) => u.file).sort()).toEqual(['e2e/dishes.spec.ts', 'e2e/flows.spec.ts']); // 只改服务端：不加页面布局冒烟
     expect(r.jobs.upgrade).toBe(false);
   });
 
@@ -202,6 +202,19 @@ describe('挑用例', () => {
     const extra = { specs: [...base.specs, 'e2e/requests-1114.spec.ts'], e2eUnits: [...base.e2eUnits, { project: '门店电脑', file: 'e2e/requests-1114.spec.ts' }] };
     const r = plan(['src/client/features/bookings/BookingsPage.tsx'], extra);
     expect(r.e2e.units.map((u) => u.file)).toContain('e2e/requests-1114.spec.ts');
+  });
+
+  it('改建档表单要跑建档渠道与目标设备的浏览器用例（Codex 审查 a28c2c9）', () => {
+    const more = ['e2e/admin-v060.spec.ts', 'e2e/target-devices.spec.ts'];
+    const extra = { specs: [...base.specs, ...more], e2eUnits: [...base.e2eUnits, ...more.map((file) => ({ project: '门店电脑', file }))] };
+    const files = plan(['src/client/features/workbench/MemberFormDialog.tsx'], extra).e2e.units.map((u) => u.file);
+    expect(files).toEqual(expect.arrayContaining(more));
+  });
+
+  it('改了页面：另加目标设备与视口冒烟（各尺寸都跑）', () => {
+    const units = plan(['src/client/features/dining/DishesPage.tsx']).e2e.units;
+    expect(units.filter((u) => u.file === 'e2e/viewports.spec.ts')).toHaveLength(2);
+    expect(units.map((u) => u.file)).toContain('e2e/dishes.spec.ts');
   });
 
   it('改了用例文件本身：跑它', () => {

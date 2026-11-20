@@ -651,7 +651,8 @@ jobs:
   result:
     name: CI 结论（${{ needs.plan.outputs.mode == 'full' && '全量' || '按改动挑选' }}）
     needs: [plan, static, integration, test, e2e, e2e-summary, demo, upgrade, canteen, miniprogram]
-    if: always()
+    # 新提交推上来、旧的这次被取消时不跑（否则旧提交上会多一个看着像失败的结论）；其余情况都跑
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

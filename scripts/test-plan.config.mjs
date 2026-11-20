@@ -119,6 +119,8 @@ export const ALWAYS = {
   ],
   // 完整收银流程（门店电脑）：前台开牌 → 消费 → 结账 → 交班
   e2e: ['e2e/flows.spec.ts'],
+  // 改了页面（src/client/）另加：三台目标设备上各页面的布局、五个尺寸的视口冒烟（跨页面的，按文件名对不上）
+  e2eClient: ['e2e/target-devices.spec.ts', 'e2e/viewports.spec.ts'],
 };
 
 /**
@@ -166,7 +168,18 @@ export const AREAS = [
   },
   {
     name: '会员建档与会员卡押金',
-    paths: ['src/server/modules/member-card*', 'src/shared/member-cards.ts', 'src/shared/member-form.ts'],
+    paths: [
+      'src/server/modules/member-card*',
+      'src/shared/member-cards.ts',
+      'src/shared/member-form.ts',
+      // 建档表单、会员卡与卡类型的页面（Codex 审查 a28c2c9）
+      'src/client/features/workbench/MemberFormDialog.tsx',
+      'src/client/features/workbench/MemberList.tsx',
+      'src/client/features/workbench/MemberDetail.tsx',
+      'src/client/features/admin/MemberFormCard.tsx',
+      'src/client/features/membership/MemberCardsCard.tsx',
+      'src/client/features/membership/MemberProfileExtras.tsx',
+    ],
     tests: ['tests/member-card*.test.ts', 'tests/recon.test.ts', 'tests/upgrade-shift.test.ts'],
     e2e: ['e2e/member-card*.spec.ts', 'e2e/dialog-input.spec.ts', 'e2e/admin-v060.spec.ts', 'e2e/target-devices.spec.ts'],
   },
