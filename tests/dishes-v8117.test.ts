@@ -617,20 +617,30 @@ describe('BW10 菜品排序、批量上下架、删除', () => {
     expect((await slotIds('water:手作饮料')).map((d) => d.name)).toEqual(['西瓜汁', '橙汁', '柠檬茶']);
   });
 
+  /** 批量上下架：带着每一道现在的版本（与页面一样） */
+  const bulk = async (names: string[], active: boolean, key: string = randomUUID(), cookie = waterLead) => {
+    const rows = await Promise.all(names.map((n) => dishOf(n)));
+    return api(ctx.app, cookie, 'POST', '/api/dining/dishes/active-bulk', { clientKey: key, ids: rows.map((d) => d.id), revs: rows.map((d) => d.rev), active });
+  };
+
   it('批量上下架：一次几道，本来就是这个状态的不动；有一道没有权限整批拒绝；同一个编号重提不重复', async () => {
     const [melon, orange] = await slotIds('water:手作饮料');
     const key = randomUUID();
-    const off = await api(ctx.app, waterLead, 'POST', '/api/dining/dishes/active-bulk', { clientKey: key, ids: [melon!.id, orange!.id], active: false });
+    const body = { clientKey: key, ids: [melon!.id, orange!.id], revs: [melon!.rev, orange!.rev], active: false };
+    const off = await api(ctx.app, waterLead, 'POST', '/api/dining/dishes/active-bulk', body);
     expect(off.status, JSON.stringify(off.body)).toBe(200);
     expect(off.body).toEqual({ changed: 2, replayed: false });
-    expect((await api(ctx.app, waterLead, 'POST', '/api/dining/dishes/active-bulk', { clientKey: key, ids: [orange!.id, melon!.id], active: false })).body).toEqual({ changed: 2, replayed: true });
+    // 同一个编号、同一份请求（几道菜的先后不同也算同一份）：返回第一次的结果
+    const again = { ...body, ids: [orange!.id, melon!.id], revs: [orange!.rev, melon!.rev] };
+    expect((await api(ctx.app, waterLead, 'POST', '/api/dining/dishes/active-bulk', again)).body).toEqual({ changed: 2, replayed: true });
     expect((await menu()).dishes.map((d) => d.name)).not.toContain('橙汁');
-    const fish = await dishOf('水煮鱼');
-    const denied = await api(ctx.app, waterLead, 'POST', '/api/dining/dishes/active-bulk', { clientKey: randomUUID(), ids: [melon!.id, fish.id], active: true });
+    const denied = await bulk(['西瓜汁', '水煮鱼'], true);
     expect(denied.status).toBe(403);
     expect(denied.body.error.message).toContain('「水煮鱼」');
     expect((await dishOf('西瓜汁')).active).toBe(false);
-    const on = await api(ctx.app, waterLead, 'POST', '/api/dining/dishes/active-bulk', { clientKey: randomUUID(), ids: [melon!.id, orange!.id, (await dishOf('柠檬茶')).id], active: true });
+    // 版本与菜品对不上：拒绝
+    expect((await api(ctx.app, waterLead, 'POST', '/api/dining/dishes/active-bulk', { clientKey: randomUUID(), ids: [melon!.id], revs: [], active: true })).status).toBe(400);
+    const on = await bulk(['西瓜汁', '橙汁', '柠檬茶'], true);
     expect(on.body).toEqual({ changed: 2, replayed: false });
     const audits = await ctx.sql<{ summary: string }[]>`SELECT detail->>'summary' AS summary FROM audit_logs WHERE action = 'dishes_active_bulk' ORDER BY id`;
     expect(audits.map((a) => a.summary)).toEqual([
@@ -649,7 +659,7 @@ describe('BW10 菜品排序、批量上下架、删除', () => {
     const orange = await dishOf('橙汁');
     const v = await enter();
     expect((await orderTag(v.id, [{ itemId: orange.id, quantity: 1 }], 1800)).status).toBe(200);
-    const del = await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${orange.id}/delete`, { clientKey: randomUUID() });
+    const del = await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${orange.id}/delete`, { clientKey: randomUUID(), rev: orange.rev });
     expect(del.status, JSON.stringify(del.body)).toBe(200);
     expect(del.body.dish).toMatchObject({ deleted: true, active: false });
     // 菜品表：默认不列（带筛选条件的接口也一样），勾「显示已删除」才列；点单页没有；导出不导
@@ -668,17 +678,50 @@ describe('BW10 菜品排序、批量上下架、删除', () => {
       ).status,
     ).toBe(200);
     // 恢复：回到菜品表，还是下架的
-    const back = await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${orange.id}/restore`, { clientKey: randomUUID() });
+    const back = await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${orange.id}/restore`, { clientKey: randomUUID(), rev: (await dishOf('橙汁')).rev });
     expect(back.body.dish).toMatchObject({ deleted: false, active: false });
     // 再删一次，然后从后台价目重新上架：不再算删除
-    expect((await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${orange.id}/delete`, { clientKey: randomUUID() })).status).toBe(200);
-    expect((await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${orange.id}/active`, { clientKey: randomUUID(), active: true })).status).toBe(200);
+    expect((await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${orange.id}/delete`, { clientKey: randomUUID(), rev: back.body.dish.rev })).status).toBe(200);
+    const relisted = await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${orange.id}/active`, { clientKey: randomUUID(), active: true, rev: (await dishOf('橙汁')).rev });
+    expect(relisted.status, JSON.stringify(relisted.body)).toBe(200);
     expect(await dishOf('橙汁')).toMatchObject({ deleted: false, active: true });
     const audits = await ctx.sql<{ action: string }[]>`SELECT action FROM audit_logs WHERE action IN ('dish_deleted', 'dish_restored') ORDER BY id`;
     expect(audits.map((a) => a.action)).toEqual(['dish_deleted', 'dish_restored', 'dish_deleted']);
     // 删除了的一定是下架的（约束）
     await expect(ctx.sql`UPDATE service_items SET dish_deleted_at = now(), dish_deleted_by = ${ctx.ownerId} WHERE id = ${orange.id}`).rejects.toThrow();
     // 没有那一处的维护权限：拒绝
-    expect((await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${(await dishOf('水煮鱼')).id}/delete`, { clientKey: randomUUID() })).status).toBe(403);
+    const fish = await dishOf('水煮鱼');
+    expect((await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${fish.id}/delete`, { clientKey: randomUUID(), rev: fish.rev })).status).toBe(403);
+  });
+
+  it('结果待确认（与 8.1.16 的菜品维护同一套）：批量上下架、删除、恢复带页面看到的版本，晚到的旧请求被拒绝；排序等能按编号查回、确认作废', async () => {
+    const lookup = (key: string, type: string) => api(ctx.app, ctx.owner, 'GET', `/api/dining/dishes/ops/${key}?type=${type}`);
+    const abandon = (key: string, body: Record<string, unknown>) => api(ctx.app, ctx.owner, 'POST', `/api/dining/dishes/ops/${key}/abandon`, body);
+    // 页面看到西瓜汁上架时发出批量下架（A），没收到结果；之后别人下架又上架了一次：A 晚到，版本对不上，整批不做
+    const seen = await dishOf('西瓜汁');
+    const lateKey = randomUUID();
+    const late = { clientKey: lateKey, ids: [seen.id], revs: [seen.rev], active: false };
+    expect((await bulk(['西瓜汁'], false)).status).toBe(200);
+    expect((await bulk(['西瓜汁'], true)).status).toBe(200);
+    const stale = await api(ctx.app, waterLead, 'POST', '/api/dining/dishes/active-bulk', late);
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('DISH_CHANGED');
+    expect((await dishOf('西瓜汁')).active).toBe(true);
+    // 删除、恢复同样：拿旧版本删不掉
+    expect((await api(ctx.app, waterLead, 'POST', `/api/dining/dishes/${seen.id}/delete`, { clientKey: randomUUID(), rev: seen.rev })).body.error.code).toBe('DISH_CHANGED');
+    // 查回：办过的找得到；没办过的查不到（不能断定没生效）
+    const done = randomUUID();
+    expect((await bulk(['西瓜汁'], false, done)).status).toBe(200);
+    expect((await lookup(done, 'bulk_active')).body).toMatchObject({ found: true, type: 'bulk_active', itemId: null, result: { changed: 1 } });
+    // 确认作废一笔还没到的排序：之后原请求再到整笔不做
+    const lost = randomUUID();
+    expect((await abandon(lost, { type: 'sort', itemId: null })).body).toEqual({ found: false, abandoned: true });
+    const order = (await slotIds('water:手作饮料')).map((d) => d.id).reverse();
+    const after = await sort('water:手作饮料', order, ctx.owner, lost);
+    expect(after.status).toBe(409);
+    expect(after.body.error.code).toBe('OP_ABANDONED');
+    expect((await lookup(lost, 'sort')).body).toEqual({ found: false, abandoned: true });
+    const audits = await ctx.sql<{ summary: string }[]>`SELECT detail->>'summary' AS summary FROM audit_logs WHERE action = 'dish_op_abandoned' ORDER BY id`;
+    expect(audits.at(-1)?.summary).toBe('作废结果待确认的菜品排序：原请求之后再到也不生效');
   });
 });

@@ -89,7 +89,11 @@ const STORE_NAV: StoreNavDomain[] = [
     key: 'rooms',
     label: '房态',
     icon: BedDouble,
-    items: [{ to: '/rooms', label: '客房', icon: BedDouble, perm: ['room.operate', 'room.housekeep', 'frontdesk.checkout'], when: (s) => s.rooms }],
+    items: [
+      // 房态中心（8.1.16，docs/ROOM_CENTER_V8115.md）：按房型看全部房间的状态，原来的「客房」页（房态看板、平面图、派对房）并进来（/rooms 跳过去）。
+      // 不看客房功能开没开：技师服务的房间、派对房、大厅都在这里；能看房态中心的岗位（客房、钟房、收银）都有入口
+      { to: '/room-center', label: '房态中心', icon: BedDouble, perm: ['room.operate', 'room.housekeep', 'technician.dispatch', 'frontdesk.checkout'] },
+    ],
   },
   {
     key: 'technicians',
@@ -97,7 +101,7 @@ const STORE_NAV: StoreNavDomain[] = [
     icon: Hourglass,
     items: [
       { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
-      // 技师管理（8.1.15 块 E，草稿）：技师名册、组别、班次与排班、休假；钟房的岗位能看、能替技师申请休假
+      // 技师管理（8.1.16 块 E，docs/TECHNICIANS_V8115.md）：技师名册、组别、班次与排班、休假；钟房的岗位能看、能替技师申请休假
       { to: '/technicians', label: '技师管理', icon: IdCard, perm: ['technician.manage', 'technician.dispatch'], when: (s) => s.technicians },
     ],
   },
@@ -180,7 +184,7 @@ export function useStoreNav(): StoreNavDomain[] {
 }
 
 /**
- * 看得到的入口排成一列，按 8.1.15 分组以前的老顺序（发卡台、收银台、钟房、餐饮、客房、预约、会员……）。
+ * 看得到的入口排成一列，按 8.1.15 分组以前的老顺序（发卡台、收银台、钟房、餐饮、客房〔8.1.16 起是房态中心〕、预约、会员……）。
  * ERP 顶栏的「返回门店」回到其中第一个能用的页面：分组以后各岗位回到哪一页照旧不变。
  */
 const LEGACY_ORDER = [
@@ -188,7 +192,7 @@ const LEGACY_ORDER = [
   '/cashier',
   '/clockroom',
   '/dining',
-  '/rooms',
+  '/room-center',
   '/bookings',
   '/',
   '/customer',

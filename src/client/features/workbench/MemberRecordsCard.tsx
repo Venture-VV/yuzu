@@ -88,14 +88,15 @@ export function MemberRecordsCard({ member, onReverse }: { member: MemberDetail;
 
 function Bar({ label, total, principal, bonus, max, tone, testid }: { label: string; total: number; principal: number; bonus: number; max: number; tone: 'lake' | 'yuzu'; testid: string }) {
   const w = (n: number) => `${Math.max(0, Math.min(100, (n / max) * 100))}%`;
+  // 窄屏（手持机）上金额那一段换到下一行，宽的照旧一行（8.1.16 四种尺寸核对时发现 360 宽上会员详情横着滚）
   return (
-    <div className="flex items-center gap-3 py-1" data-testid={testid}>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1" data-testid={testid}>
       <span className="w-8 shrink-0 text-[12.5px] font-semibold text-ink-2">{label}</span>
       <div className="flex h-3.5 min-w-0 flex-1 overflow-hidden rounded-full bg-card ring-1 ring-line" aria-hidden>
         <div className={cn('h-full', tone === 'lake' ? 'bg-lake' : 'bg-yuzu-deep')} style={{ width: w(Math.max(0, principal)) }} />
         <div className={cn('h-full', tone === 'lake' ? 'bg-lake/40' : 'bg-yuzu')} style={{ width: w(Math.max(0, bonus)) }} />
       </div>
-      <span className="w-[210px] shrink-0 text-right text-[12.5px] text-ink-2">
+      <span className="w-full shrink-0 text-right text-[12.5px] text-ink-2 sm:w-[210px]">
         <Money cents={total} className="font-bold text-ink" />
         <span className="text-ink-3">
           {' '}

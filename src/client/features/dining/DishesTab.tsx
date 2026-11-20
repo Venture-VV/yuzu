@@ -5,6 +5,8 @@
 // 宽屏（平板、收银机）是一张表，窄屏（手持点单机）一道菜一张卡片，都不用横向滚动。
 // 8.1.17（BW10，docs/DISHES_V8117.md 第 6 节）：排序（DishSortDialog，点单页按这个排）；勾几道批量上架 / 下架；
 // 「删除」在编辑弹窗里（下架并从这张表默认隐藏，勾「显示已删除」看得到、能恢复，以前的订单不受影响）。
+// 8.1.16（Codex 审查 d12390f 的 P1）：上下架、改价、新增 / 编辑、导入没收到结果的进「结果待确认」（dishPendingStore.ts）：
+// 记在本机、列在菜品表上方，这道菜上同类的操作先不能再做，只能查回、按原内容重新提交或确认作废。
 
 import { useMemo, useState } from 'react';
 import {
@@ -41,8 +43,8 @@ import {
   type DishSaveResult,
   type DishStatusFilter,
 } from '@shared/dishes';
-import { api, errorMessage } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { errorMessage, UncertainError } from '../../lib/api';
+import { useCan, useSession } from '../../lib/session';
 import { cn, downloadUrl, uuid } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { LoadFailed } from '../../components/LoadFailed';
@@ -53,7 +55,9 @@ import { Badge, Button, Card, Input, Notice, Segmented, Skeleton } from '../../c
 import { StatusChip } from './DishChips';
 import { DishEditor } from './DishEditor';
 import { DishImportDialog } from './DishImportDialog';
+import { DishPendingNotice } from './DishPendingNotice';
 import { DishPriceDialog, PriceHistoryDialog } from './DishPriceDialog';
+import { sendDishOp, stateBlockerOf, useDishPending } from './dishPendingStore';
 import { useDishes, useRefreshDishes } from './dishQueries';
 import { DishSortDialog } from './DishSortDialog';
 import { OutletFilter, SlotBadge } from './slots';
@@ -65,6 +69,7 @@ const ROW_BUTTON = 'min-h-11';
 
 export function DishesTab() {
   const can = useCan();
+  const session = useSession();
   const toast = useToast();
   const refresh = useRefreshDishes();
   const board = useDishes();
@@ -83,6 +88,7 @@ export function DishesTab() {
   const [bulkBusy, setBulkBusy] = useState<'on' | 'off' | null>(null);
   const [sorting, setSorting] = useState(false);
   const [deleting, setDeleting] = useState<DishRow | null>(null);
+  const pending = useDishPending();
 
   const mine = DINING_OUTLET_KEYS.filter((o) => can(DISH_OUTLET_PERMISSIONS[o]));
   const canPrice = can(DISH_PRICE_PERMISSION);
@@ -104,18 +110,43 @@ export function DishesTab() {
       return next;
     });
 
+  /**
+   * 批量上下架：带着每一道在页面上看到的版本（有一道被别人先改过、或晚到的旧请求，整批被拒绝）；没收到结果的进「结果待确认」，
+   * 这几道菜在有结论之前不能再上下架、删除、恢复（docs/DISHES_V8117.md 第 6 节）
+   */
   const bulk = async (active: boolean) => {
+    const verb = active ? '上架' : '下架';
+    const blocked = picked.filter((d) => stateBlockerOf(pending, d.id));
+    if (blocked.length) {
+      toast({ tone: 'error', title: `批量${verb}先等一等`, body: `${blocked.map((d) => `「${d.name}」`).join('')}上一笔上下架、删除或恢复结果待确认：先在菜品表上方处理。` });
+      return;
+    }
+    const key = uuid();
     setBulkBusy(active ? 'on' : 'off');
     try {
-      const r = await api.post<{ changed: number }>('/api/dining/dishes/active-bulk', { clientKey: uuid(), ids: picked.map((d) => d.id), active });
+      const r = await sendDishOp<{ changed: number }>({
+        key,
+        type: 'bulk_active',
+        itemId: null,
+        itemIds: picked.map((d) => d.id),
+        method: 'post',
+        url: '/api/dining/dishes/active-bulk',
+        body: { clientKey: key, ids: picked.map((d) => d.id), revs: picked.map((d) => d.rev), active },
+        summary: `批量${verb} ${picked.length} 道：${picked.map((d) => d.name).join('、')}`.slice(0, 120),
+        staffName: session.staff.displayName,
+      });
       toast({
         tone: 'success',
-        title: `已批量${active ? '上架' : '下架'} ${r.changed} 道`,
-        body: r.changed < picked.length ? `另外 ${picked.length - r.changed} 道本来就是${active ? '上架' : '下架'}的。` : undefined,
+        title: `已批量${verb} ${r.changed} 道`,
+        body: r.changed < picked.length ? `另外 ${picked.length - r.changed} 道本来就是${verb}的。` : undefined,
       });
       setSelected(new Set());
     } catch (e) {
-      toast({ tone: 'error', title: `批量${active ? '上架' : '下架'}没成功`, body: errorMessage(e) });
+      toast(
+        e instanceof UncertainError
+          ? { tone: 'info', title: `批量${verb}的结果待确认`, body: '已记在本机：在菜品表上方查回、按原内容重新提交或确认作废；有结论之前这几道菜不能再上下架。' }
+          : { tone: 'error', title: `批量${verb}没成功`, body: errorMessage(e) },
+      );
     } finally {
       setBulkBusy(null);
       refresh();
@@ -123,38 +154,71 @@ export function DishesTab() {
   };
 
   /** 删除（8.1.17）：下架并从菜品表隐藏；以前的订单、账单、报表照旧，勾「显示已删除」能恢复 */
-  const remove = async (d: DishRow) => {
+  /** 删除、恢复（8.1.17）共用：带页面看到的版本；没收到结果的进「结果待确认」，有结论之前这道菜不能再上下架、删除、恢复 */
+  const sendDeleted = async (d: DishRow, deleted: boolean) => {
+    if (stateBlockerOf(pending, d.id)) {
+      toast({ tone: 'error', title: `「${d.name}」先等一等`, body: '上一笔上下架、删除或恢复结果待确认：先在菜品表上方处理。' });
+      return;
+    }
+    const verb = deleted ? '删除' : '恢复';
+    const key = uuid();
     setBusy(d.id);
     try {
-      await api.post<DishSaveResult>(`/api/dining/dishes/${d.id}/delete`, { clientKey: uuid() });
-      setDeleting(null);
-      setEditing(null);
-      toast({ tone: 'success', title: `「${d.name}」已删除`, body: '已经下架，菜品表上默认不再列出；勾「显示已删除」能找回来、恢复。' });
+      await sendDishOp<DishSaveResult>({
+        key,
+        type: deleted ? 'delete' : 'restore',
+        itemId: d.id,
+        method: 'post',
+        url: `/api/dining/dishes/${d.id}/${deleted ? 'delete' : 'restore'}`,
+        body: { clientKey: key, rev: d.rev },
+        summary: `「${d.name}」${verb}`,
+        staffName: session.staff.displayName,
+      });
+      if (deleted) {
+        setDeleting(null);
+        setEditing(null);
+      }
+      toast(
+        deleted
+          ? { tone: 'success', title: `「${d.name}」已删除`, body: '已经下架，菜品表上默认不再列出；勾「显示已删除」能找回来、恢复。' }
+          : { tone: 'success', title: `「${d.name}」已恢复`, body: '回到了菜品表，还是下架的；要卖请点「上架」。' },
+      );
     } catch (e) {
-      toast({ tone: 'error', title: `「${d.name}」没删成`, body: errorMessage(e) });
+      if (e instanceof UncertainError) {
+        setDeleting(null);
+        setEditing(null);
+      }
+      toast(
+        e instanceof UncertainError
+          ? { tone: 'info', title: `「${d.name}」${verb}的结果待确认`, body: '已记在本机：在菜品表上方查回、按原内容重新提交或确认作废；有结论之前这道菜不能再上下架、删除、恢复。' }
+          : { tone: 'error', title: `「${d.name}」没${verb}成`, body: errorMessage(e) },
+      );
     } finally {
       setBusy(null);
       refresh();
     }
   };
+  /** 删除（8.1.17）：下架并从菜品表隐藏；以前的订单、账单、报表照旧，勾「显示已删除」能恢复 */
+  const remove = (d: DishRow) => sendDeleted(d, true);
+  const restore = (d: DishRow) => sendDeleted(d, false);
 
-  const restore = async (d: DishRow) => {
-    setBusy(d.id);
-    try {
-      await api.post<DishSaveResult>(`/api/dining/dishes/${d.id}/restore`, { clientKey: uuid() });
-      toast({ tone: 'success', title: `「${d.name}」已恢复`, body: '回到了菜品表，还是下架的；要卖请点「上架」。' });
-    } catch (e) {
-      toast({ tone: 'error', title: `「${d.name}」没恢复成`, body: errorMessage(e) });
-    } finally {
-      setBusy(null);
-      refresh();
-    }
-  };
-
+  /** 上下架：带着页面看到的版本（别人先改过、或晚到的旧请求都被拒绝）；没收到结果的进「结果待确认」，这道菜先不能再上下架 */
   const toggle = async (d: DishRow) => {
+    if (stateBlockerOf(pending, d.id)) return;
+    const verb = d.active ? '下架' : '上架';
+    const key = uuid();
     setBusy(d.id);
     try {
-      const r = await api.post<DishSaveResult>(`/api/dining/dishes/${d.id}/active`, { clientKey: uuid(), active: !d.active });
+      const r = await sendDishOp<DishSaveResult>({
+        key,
+        type: 'active',
+        itemId: d.id,
+        method: 'post',
+        url: `/api/dining/dishes/${d.id}/active`,
+        body: { clientKey: key, active: !d.active, rev: d.rev },
+        summary: `「${d.name}」${verb}`,
+        staffName: session.staff.displayName,
+      });
       const used = r.dish.usedBy.length ? `它还是${r.dish.usedBy.join('、')}：加料不再列出来，套餐照卖。` : '';
       toast(
         r.dish.active
@@ -162,12 +226,24 @@ export function DishesTab() {
           : { tone: 'success', title: `「${d.name}」已下架`, body: `点单页马上不显示，电子菜单上标「已下架」、不能点。${used}` },
       );
     } catch (e) {
-      toast({ tone: 'error', title: `「${d.name}」${d.active ? '下架' : '上架'}没成功`, body: errorMessage(e) });
+      toast(
+        e instanceof UncertainError
+          ? { tone: 'info', title: `「${d.name}」${verb}的结果待确认`, body: '已记在本机：在菜品表上方查回、按原内容重新提交或确认作废；有结论之前这道菜不能再上下架。' }
+          : { tone: 'error', title: `「${d.name}」${verb}没成功`, body: errorMessage(e) },
+      );
     } finally {
       setBusy(null);
       refresh();
     }
   };
+  // 弹窗开着的那一笔在弹窗里处理，菜品表上方不重复列（也免得两处同时自动查回）
+  const inDialog = (op: (typeof pending)[number]) =>
+    (op.type === 'price' && pricing?.id === op.itemId) ||
+    (op.type === 'update' && editing !== null && editing !== 'new' && editing.id === op.itemId) ||
+    (op.type === 'create' && editing === 'new') ||
+    (op.type === 'import' && importOpen) ||
+    (op.type === 'sort' && sorting);
+  const listed = pending.filter((op) => !inDialog(op));
 
   if (board.isPending) {
     return (
@@ -275,6 +351,14 @@ export function DishesTab() {
         </p>
       </Card>
 
+      {listed.length > 0 && (
+        <section className="space-y-2" aria-label="结果待确认的菜品操作" data-testid="dish-pending-list">
+          {listed.map((op) => (
+            <DishPendingNotice key={op.key} op={op} onApplied={refresh} onAbandoned={refresh} />
+          ))}
+        </section>
+      )}
+
       {all.length === 0 ? (
         <Card>
           <EmptyState
@@ -318,6 +402,7 @@ export function DishesTab() {
                 busy={busy === d.id}
                 selected={selected.has(d.id)}
                 onSelect={(on) => toggleSelect(d.id, on)}
+                waiting={!!stateBlockerOf(pending, d.id)}
                 onEdit={() => setEditing(d)}
                 onPrice={() => setPricing(d)}
                 onToggle={() => void toggle(d)}
@@ -438,6 +523,7 @@ function DishLine({
   busy,
   selected,
   onSelect,
+  waiting,
   onEdit,
   onPrice,
   onToggle,
@@ -449,6 +535,8 @@ function DishLine({
   busy: boolean;
   selected: boolean;
   onSelect: (on: boolean) => void;
+  /** 上一笔上下架结果待确认：处理好之前不能再上下架 */
+  waiting: boolean;
   onEdit: () => void;
   onPrice: () => void;
   onToggle: () => void;
@@ -551,8 +639,8 @@ function DishLine({
             className={ROW_BUTTON}
             variant="secondary"
             icon={<RotateCcw className="size-4" />}
-            disabled={!editable}
-            title={why ?? '恢复到菜品表（还是下架的）'}
+            disabled={!editable || waiting}
+            title={waiting ? '这道菜上一笔上下架、删除或恢复结果待确认：先在菜品表上方处理' : (why ?? '恢复到菜品表（还是下架的）')}
             loading={busy}
             onClick={onRestore}
             data-testid={`dish-restore-${d.name}`}
@@ -560,7 +648,7 @@ function DishLine({
             恢复
           </Button>
         ) : (
-          <DishActions d={d} editable={editable} priceable={priceable} busy={busy} why={why} onEdit={onEdit} onPrice={onPrice} onToggle={onToggle} />
+          <DishActions d={d} editable={editable} priceable={priceable} busy={busy} waiting={waiting} why={why} onEdit={onEdit} onPrice={onPrice} onToggle={onToggle} />
         )}
       </div>
     </li>
@@ -573,6 +661,7 @@ function DishActions({
   editable,
   priceable,
   busy,
+  waiting,
   why,
   onEdit,
   onPrice,
@@ -582,6 +671,8 @@ function DishActions({
   editable: boolean;
   priceable: boolean;
   busy: boolean;
+  /** 这道菜上一笔上下架（含批量）、删除或恢复结果待确认：处理好之前不能再上下架 */
+  waiting: boolean;
   why: string | undefined;
   onEdit: () => void;
   onPrice: () => void;
@@ -618,15 +709,15 @@ function DishActions({
       <Button
         size="sm"
         className={cn(ROW_BUTTON, 'min-w-[76px]')}
-        variant={d.active ? 'secondary' : 'primary'}
-        icon={d.active ? <ArrowDownToLine className="size-4" /> : <ArrowUpFromLine className="size-4" />}
-        disabled={!editable}
-        title={why}
+        variant={waiting ? 'ghost' : d.active ? 'secondary' : 'primary'}
+        icon={waiting ? <Hourglass className="size-4" /> : d.active ? <ArrowDownToLine className="size-4" /> : <ArrowUpFromLine className="size-4" />}
+        disabled={!editable || waiting}
+        title={waiting ? '上一笔上下架、删除或恢复结果待确认：先在菜品表上方处理' : why}
         loading={busy}
         onClick={onToggle}
         data-testid={`dish-toggle-${d.name}`}
       >
-        {d.active ? '下架' : '上架'}
+        {waiting ? '待确认' : d.active ? '下架' : '上架'}
       </Button>
     </>
   );

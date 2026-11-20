@@ -1,19 +1,22 @@
 // 菜品排序（8.1.17 BW10，docs/DISHES_V8117.md 第 6 节）：选一个点单小类（餐厅 · 餐饮、水吧 · 手作饮料……），把这一类的菜排好先后，
 // 点单页的菜单、菜品表都按这个排。拖住左边的把手上下拖；手指不方便拖、用键盘的，点每一行的「上移」「下移」，或在把手上按上下键。
 // 这一类里没删除的菜都在（含下架的）；保存时服务端核对还是这一批（别人刚新增、挪走、删除了就请刷新再排）。
-// 带操作编号：结果不明时原样再点一次保存，不会重复记。
+// 带操作编号；没收到结果的进「结果待确认」（与菜品维护的其他操作同一套，dishPendingStore.ts）：弹窗里列着那一笔，
+// 查回、按原内容重新提交或确认作废之前，这一小类不能再排（晚到的旧排序不会盖掉后来排好的）。
 
 import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { ArrowDown, ArrowUp, GripVertical } from 'lucide-react';
 import { ALL_DINING_SLOTS, slotKey, slotLabel, type DiningOutlet } from '@shared/dining';
 import type { DishRow } from '@shared/dishes';
-import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { ApiError, errorMessage, UncertainError } from '../../lib/api';
+import { useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
-import { cn } from '../../lib/utils';
+import { cn, uuid } from '../../lib/utils';
 import { Dialog } from '../../components/Overlay';
 import { Button, Field, Notice, Select } from '../../components/ui';
 import { StatusChip } from './DishChips';
-import { UNCERTAIN_HINT, useOpKey } from './dishQueries';
+import { DishPendingNotice } from './DishPendingNotice';
+import { sendDishOp, sortPendingOf, useDishPending } from './dishPendingStore';
 
 /** 一个小类里的菜现在的先后：排过的按排的，没排过的跟在后面、照菜品表的顺序 */
 export function slotDishes(dishes: readonly DishRow[], key: string): DishRow[] {
@@ -48,7 +51,8 @@ export function DishSortDialog({
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState<number | null>(null);
   const list = useRef<HTMLOListElement>(null);
-  const op = useOpKey();
+  const session = useSession();
+  const pending = useDishPending();
   const pick = (key: string) => {
     setSlot(key);
     setOrder(slotDishes(dishes, key).map((d) => d.id));
@@ -57,6 +61,8 @@ export function DishSortDialog({
   useResetOnOpen(open, () => pick(firstWithDishes ? slotKey(firstWithDishes) : ''));
   const byId = useMemo(() => new Map(dishes.map((d) => [d.id, d])), [dishes]);
   const current = slots.find((s) => slotKey(s) === slot);
+  /** 这一小类上一笔排序结果待确认：处理好之前不能再排 */
+  const waiting = sortPendingOf(pending, slot);
   const changed =
     order.join(',') !==
     slotDishes(dishes, slot)
@@ -98,17 +104,26 @@ export function DishSortDialog({
   };
 
   const save = async () => {
-    if (!current) return;
+    if (!current || waiting) return;
+    const key = uuid();
     setBusy(true);
     setError(null);
     try {
-      const payload = { slot, ids: order };
-      await api.post('/api/dining/dishes/sort', { clientKey: op.keyFor(JSON.stringify(payload)), ...payload });
-      op.settle();
+      await sendDishOp({
+        key,
+        type: 'sort',
+        itemId: null,
+        scope: slot,
+        method: 'post',
+        url: '/api/dining/dishes/sort',
+        body: { clientKey: key, slot, ids: order },
+        summary: `「${slotLabel(current)}」排序`,
+        staffName: session.staff.displayName,
+      });
       onSaved(slotLabel(current));
     } catch (e) {
-      op.settle(e);
-      setError(e instanceof UncertainError ? UNCERTAIN_HINT : errorMessage(e));
+      // 没收到结果：记录留在本机，弹窗上方出现「结果待确认」那一条
+      if (!(e instanceof UncertainError)) setError(errorMessage(e));
       if (e instanceof ApiError) onRejected();
     } finally {
       setBusy(false);
@@ -127,13 +142,21 @@ export function DishSortDialog({
           <Button variant="ghost" className="min-h-11" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" className="min-h-11 min-w-[112px]" loading={busy} disabled={!current || order.length < 2 || !changed} onClick={() => void save()} data-testid="dish-sort-save">
+          <Button
+            variant="primary"
+            className="min-h-11 min-w-[112px]"
+            loading={busy}
+            disabled={!current || order.length < 2 || !changed || !!waiting}
+            onClick={() => void save()}
+            data-testid="dish-sort-save"
+          >
             保存先后
           </Button>
         </>
       }
     >
       <div className="space-y-3" data-testid="dish-sort">
+        {waiting && <DishPendingNotice op={waiting} onApplied={() => onSaved(waiting.summary.replace(/^「|」排序$/g, ''))} onAbandoned={onRejected} />}
         <Field label="点单小类" htmlFor="dish-sort-slot" hint="同一个小类里的菜一起排；挪到别的小类的菜排在那一类的最后">
           <Select id="dish-sort-slot" className="min-h-11" value={slot} onChange={(e) => pick(e.target.value)} data-testid="dish-sort-slot">
             {slots.map((s) => (

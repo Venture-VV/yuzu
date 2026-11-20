@@ -1,13 +1,17 @@
 // 8.1.15 · 房态中心（《浴族系统需求汇总》房态中心 1–4，docs/ROOM_CENTER_V8115.md）：
 // 房型与各状态的数量（没归类的进「其他」）、五种状态的口径与先后、卡片式登记（挂账 + 派钟 + 占房一步做完，缺一样都不生效）、
 // 续钟、换房（钟单与计时不变）、退房 → 待清 → 清洁完成、客人结账离店自动腾房、维修（原因 + 预计完成时间，钟房与使用单也拦）、
-// 并房、派对房从房态中心开单、客房沿用房态看板、房间历史、权限、操作编号重提、给餐饮的 currentGuestOfSpace。全部是合成数据。
+// 并房、派对房从房态中心开单、客房沿用房态看板、房间历史、权限、操作编号重提、给餐饮的 currentGuestOfSpace 与「只填房号」找客人；
+// 8.1.16：换房、退房、并房、维修、改房态带操作编号（迁移 193）——原样重提只做一次、查回、确认作废以后原请求再到被拒、没有原业务权限的不能作废。
+// 全部是合成数据。
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { categoryProblem, roomKindOf, roomStatusOf, type RoomCard, type RoomCategoriesAdmin, type RoomCenterBoard, type RoomCheckoutPreview, type RoomHistory } from '../src/shared/room-center';
 import type { SpaceLedger } from '../src/shared/spaces';
-import { currentGuestOfSpace } from '../src/server/modules/room-center';
+import type { FrontdeskOpLookup } from '../src/shared/frontdesk';
+import { findGuestByRoom } from '../src/server/modules/dining-order-v8115';
+import { currentGuestOfSpace } from '../src/server/modules/room-state';
 import { createStaff } from '../src/server/modules/staff';
 import { api, createMember, login, PASSWORD, setup, type TestContext } from './helpers';
 
@@ -69,8 +73,11 @@ const register = (code: string, body: Record<string, unknown>, clientKey = rando
     expectedTotal: 19800,
     ...body,
   });
+/** 房间动作：带上看到的房态版本号与一个新的操作编号（8.1.16 起这八样都要操作编号） */
 const act = async (code: string, action: string, body: Record<string, unknown> = {}, cookie = ctx.clerk) =>
-  api(ctx.app, cookie, 'POST', on(code, action), { expectedVersion: (await room(code)).version, ...body });
+  api(ctx.app, cookie, 'POST', on(code, action), { clientKey: randomUUID(), expectedVersion: (await room(code)).version, ...body });
+const lookup = async (key: string, type: 'space_state' | 'space_dispatch', cookie = ctx.clerk) => api(ctx.app, cookie, 'GET', `/api/room-center/ops/${key}?type=${type}`);
+const abandon = (key: string, type: string, cookie = ctx.clerk) => api(ctx.app, cookie, 'POST', `/api/room-center/ops/${key}/abandon`, { type });
 const finish = (sessionId: number) => api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${sessionId}/finish`);
 const preview = async (code: string) => (await api(ctx.app, ctx.clerk, 'GET', on(code, 'checkout-preview'))).body as RoomCheckoutPreview;
 /** 退房（先下钟、看预览、确认客人带手牌在店）→ 清洁完成：把房间与技师都腾出来 */
@@ -348,7 +355,8 @@ describe('续钟、换房', () => {
     const before = await room('S301');
     const s = before.guests[0]!.sessions[0]!;
     const lines = await counts();
-    expect((await api(ctx.app, ctx.clerk, 'POST', on('S301', 'move'), { toSpaceId: spaceId.S305, expectedVersion: before.version + 9 })).body.error.code).toBe('ROOM_STATE_MOVED');
+    expect((await act('S301', 'move', { toSpaceId: spaceId.S305, expectedVersion: before.version + 9 })).body.error.code).toBe('ROOM_STATE_MOVED');
+    expect((await act('S301', 'move', { toSpaceId: spaceId.S305, clientKey: 'abc' })).status).toBe(400);
     expect((await act('S301', 'move', { toSpaceId: spaceId.S301 })).body.error.code).toBe('MOVE_SAME');
     expect((await act('S301', 'move', { toSpaceId: spaceId.S302 })).body.error.code).toBe('ROOM_IN_USE');
     expect((await act('S301', 'move', { toSpaceId: spaceId.P201 })).body.error.code).toBe('MOVE_NOT_SERVICE');
@@ -397,8 +405,8 @@ describe('退房 → 待清 → 清洁完成', () => {
     const dirty = (out.body as RoomCenterBoard).rooms.find((x) => x.code === 'S305')!;
     expect(dirty).toMatchObject({ status: 'dirty', guests: [], guestText: null, version: version + 1 });
     expect(dirty.dirtySince).toBeTruthy();
-    // 迟到的重发（带着旧版本号）不会再做一遍
-    expect((await api(ctx.app, ctx.clerk, 'POST', on('S305', 'checkout'), { expectedVersion: version, seenUnpaid: 39600, inHouse: true })).body.error.code).toBe('ROOM_STATE_MOVED');
+    // 另起一笔（新的操作编号）带着旧版本号：对不上，不会再做一遍
+    expect((await act('S305', 'checkout', { expectedVersion: version, seenUnpaid: 39600, inHouse: true })).body.error.code).toBe('ROOM_STATE_MOVED');
     // 客人还在店、账还在手牌上（没有因为退房动一分钱）
     expect((await bill(g.visitId)).bill.amountCents).toBe(39600);
     const [reg] = await ctx.sql<{ status: string; closeKind: string; unpaidCents: number }[]>`SELECT status, close_kind, unpaid_cents FROM room_registrations WHERE id = ${g.registrationId}`;
@@ -633,7 +641,7 @@ describe('派对房、已预订、客房', () => {
     expect(stay.status, JSON.stringify(stay.body)).toBe(200);
     expect(await room('G301')).toMatchObject({ status: 'in_use', guestText: '王先生', amount: 30000 });
     // 房态中心的改房态、登记不管客房
-    expect((await api(ctx.app, ctx.clerk, 'POST', on('G301', 'cleaned'), { expectedVersion: 0 })).body.error.code).toBe('ROOM_IS_HOTEL');
+    expect((await api(ctx.app, ctx.clerk, 'POST', on('G301', 'cleaned'), { clientKey: randomUUID(), expectedVersion: 0 })).body.error.code).toBe('ROOM_IS_HOTEL');
     // 客房的预约按房型订、不占具体哪一间：只在页签上提示
     const today = b.businessDate;
     await ctx.sql`
@@ -641,6 +649,94 @@ describe('派对房、已预订、客房', () => {
       VALUES ('YY-SYN-2', 'room', 'phone', 'confirmed', '订房客人', 2, ${typeId}, now() + interval '1 hour', now() + interval '2 hours', now() + interval '5 hours', ${today}, ${ctx.clerkId},
               ${randomUUID()}, ${'b'.repeat(64)}, ${ctx.clerkId}, now())`;
     expect((await category('客房')).hint).toContain('1 张客房预约');
+  });
+});
+
+describe('房间动作的操作编号（8.1.16，迁移 193）：结果待确认', () => {
+  const events = async (code: string) => {
+    const [n] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM space_room_events WHERE space_id = ${spaceId[code]!}`;
+    return n!.n;
+  };
+
+  it('同一个编号原样重提只做一次（同时到的两次也一样），换了内容拒绝；按编号查回是那一条房间事件', async () => {
+    const before = await room('H201');
+    expect(before.status).toBe('free');
+    const key = randomUUID();
+    const body = { clientKey: key, expectedVersion: before.version, note: '合成：客人洒了水' };
+    const n = await events('H201');
+    // 页面超时以后原样重提：两次几乎同时到，后到的那次撞上版本号以后按编号查回第一次的结果
+    const [a, b] = await Promise.all([api(ctx.app, ctx.clerk, 'POST', on('H201', 'dirty'), body), api(ctx.app, ctx.clerk, 'POST', on('H201', 'dirty'), body)]);
+    expect([a.status, b.status], JSON.stringify([a.body, b.body])).toEqual([200, 200]);
+    expect(await events('H201')).toBe(n + 1);
+    expect((await api(ctx.app, ctx.clerk, 'POST', on('H201', 'dirty'), body)).status).toBe(200);
+    expect(await events('H201')).toBe(n + 1);
+    expect((await room('H201')).version).toBe(before.version + 1);
+    expect((await api(ctx.app, ctx.clerk, 'POST', on('H201', 'dirty'), { ...body, note: '换了内容' })).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    const found = (await lookup(key, 'space_state')).body as FrontdeskOpLookup;
+    expect(found).toMatchObject({ found: true, type: 'space_state', action: { spaceId: spaceId.H201, kind: 'dirty', replayed: true } });
+    // 前台的查回也认得；查成另一类的（换房一类）按查不到
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${key}?type=space_state`)).body).toMatchObject({ found: true, type: 'space_state' });
+    expect((await lookup(key, 'space_dispatch')).body).toEqual({ found: false, abandoned: false });
+    // 生效了的确认作废不了：返回查回的结果，不登记作废
+    expect((await abandon(key, 'space_state')).body).toMatchObject({ found: true, type: 'space_state' });
+    const [fence] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM op_fences WHERE key = ${key}`;
+    expect(fence!.n).toBe(0);
+    expect((await act('H201', 'cleaned')).status).toBe(200);
+  });
+
+  it('确认作废以后原请求再到：整笔拒绝（OP_ABANDONED），房间、钟单、登记单都不动；查回说已作废', async () => {
+    const g = await enter();
+    expect((await register('S306', { tagCode: g.tagCode, technicianId: tech['06'], start: 'later' })).status).toBe(200);
+    const card = await room('S306');
+    const key = randomUUID();
+    // 原请求（换房到 S305）还在路上，页面已经确认作废
+    expect((await lookup(key, 'space_dispatch')).body).toEqual({ found: false, abandoned: false });
+    expect((await abandon(key, 'space_dispatch')).body).toEqual({ found: false, abandoned: true });
+    expect((await abandon(key, 'space_dispatch')).body).toEqual({ found: false, abandoned: true });
+    const n = await counts();
+    const late = await api(ctx.app, ctx.clerk, 'POST', on('S306', 'move'), { clientKey: key, toSpaceId: spaceId.S305, expectedVersion: card.version });
+    expect(late.status, JSON.stringify(late.body)).toBe(409);
+    expect(late.body.error.code).toBe('OP_ABANDONED');
+    expect(await counts()).toEqual(n);
+    const after = await room('S306');
+    expect(after).toMatchObject({ status: 'in_use', version: card.version });
+    expect(after.guests[0]!.sessions[0]!.id).toBe(card.guests[0]!.sessions[0]!.id);
+    expect((await room('S305')).guests).toEqual([]);
+    expect((await lookup(key, 'space_dispatch')).body).toEqual({ found: false, abandoned: true });
+    // 只拦同一类：同一个编号当改房态那一类作废不了换房（这里换房已经作废了，另拿一个编号看）
+    const other = randomUUID();
+    expect((await abandon(other, 'space_state')).body).toEqual({ found: false, abandoned: true });
+    const moved = await api(ctx.app, ctx.clerk, 'POST', on('S306', 'move'), { clientKey: other, toSpaceId: spaceId.S305, expectedVersion: card.version });
+    expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+    expect((await room('S305')).guests.map((x) => x.tagCode)).toEqual([g.tagCode]);
+    // 没上过钟就换走的房间不算用过：S306 照旧空闲
+    expect((await room('S306')).status).toBe('free');
+    // 收掉：还没上钟的钟取消派钟（明细一起作废），退房、清洁完成
+    const s = (await room('S305')).guests[0]!.sessions[0]!;
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/clockroom/sessions/${s.id}/void`, { reason: '合成：收掉' })).status).toBe(200);
+    const p = await preview('S305');
+    expect((await act('S305', 'checkout', { seenUnpaid: p.unpaidTotal, inHouse: true })).status).toBe(200);
+    expect((await act('S305', 'cleaned')).status).toBe(200);
+  });
+
+  it('查回、作废按原业务的权限：后勤（只有打扫）能处理改房态那一笔、不能处理换房一类；前台的查回它用不了；看不了房态的岗位都不行', async () => {
+    const key = randomUUID();
+    expect((await act('H201', 'dirty', { clientKey: key }, logistics)).status).toBe(200);
+    expect((await lookup(key, 'space_state', logistics)).body).toMatchObject({ found: true, type: 'space_state' });
+    expect((await api(ctx.app, logistics, 'GET', `/api/frontdesk/ops/${key}?type=space_state`)).status).toBe(403);
+    expect((await lookup(randomUUID(), 'space_dispatch', logistics)).status).toBe(403);
+    expect((await abandon(randomUUID(), 'space_dispatch', logistics)).status).toBe(403);
+    expect((await abandon(randomUUID(), 'space_state', logistics)).body).toEqual({ found: false, abandoned: true });
+    expect((await lookup(key, 'space_state', manager)).status).toBe(403);
+    expect((await abandon(randomUUID(), 'space_state', manager)).status).toBe(403);
+    expect((await abandon(randomUUID(), 'bill_post')).status).toBe(400);
+    // 别的业务的编号（这里是登记时挂账的编号）从这里查不到内容
+    const g = await enter();
+    const billKey = randomUUID();
+    expect((await register('S303', { tagCode: g.tagCode, technicianId: tech['04'], start: 'later', join: true }, billKey)).status).toBe(200);
+    expect((await lookup(billKey, 'space_state')).body).toEqual({ found: false, abandoned: false });
+    expect((await abandon(billKey, 'space_state')).body).toEqual({ found: false, abandoned: false });
+    expect((await act('H201', 'cleaned', {}, logistics)).status).toBe(200);
   });
 });
 
@@ -678,7 +774,7 @@ describe('权限、看得到什么、给别的模块的入口', () => {
     expect((await api(ctx.app, ctx.clerk, 'GET', '/api/room-center/seller?no=x9')).body.error.code).toBe('SELLER_NOT_FOUND');
   });
 
-  it('currentGuestOfSpace（餐饮「只填房号」点单用）：登记了的取先登记的那位；钟房直接派进来的取那张钟的客人；空房为空', async () => {
+  it('currentGuestOfSpace（餐饮「只填房号」点单用）：登记了的取先登记的那位；钟房直接派进来的取那张钟的客人；派对房取使用人；空房为空', async () => {
     const first = (await room('S302')).guests[0]!;
     expect(await currentGuestOfSpace(ctx.sql, spaceId.S302!)).toEqual({ visitId: first.visitId, tagNo: first.tagCode, memberId: null });
     expect(await currentGuestOfSpace(ctx.sql, spaceId.S306!)).toBeNull();
@@ -700,6 +796,27 @@ describe('权限、看得到什么、给别的模块的入口', () => {
     expect(await currentGuestOfSpace(ctx.sql, spaceId.S306!)).toEqual({ visitId: g.visitId, tagNo: g.tagCode, memberId: null });
     // 事务里也能调
     await ctx.sql.begin(async (tx) => expect(await currentGuestOfSpace(tx, spaceId.S306!)).toMatchObject({ tagNo: g.tagCode }));
+    // 派对房：开着的使用单的使用人（P201 上面开着一张）
+    const party = (await room('P201')).usage!;
+    expect(await currentGuestOfSpace(ctx.sql, spaceId.P201!)).toEqual({ visitId: party.visitId, tagNo: party.tagCode, memberId: null });
+  });
+
+  it('餐饮「只填房号」找客人（findGuestByRoom）：在住的客房在前；再按空间编码找房态中心里这间房的客人；空房、大厅、没有的房号为空', async () => {
+    const first = (await room('S302')).guests[0]!;
+    expect(await findGuestByRoom(ctx.sql, ' s302 ')).toEqual({ visitId: first.visitId, tagCode: first.tagCode });
+    const party = (await room('P201')).usage!;
+    expect(await findGuestByRoom(ctx.sql, 'p201')).toEqual({ visitId: party.visitId, tagCode: party.tagCode });
+    // 客房按入住单找（G301 是挂了空间的客房，在住的是上面入住的那位）
+    const hotel = (await room('G301')).hotel!.stay!;
+    expect(await findGuestByRoom(ctx.sql, 'G301')).toEqual({ visitId: hotel.visitId, tagCode: hotel.tagCode });
+    expect(await findGuestByRoom(ctx.sql, 'H201')).toBeNull();
+    expect(await findGuestByRoom(ctx.sql, 'S301')).toBeNull();
+    expect(await findGuestByRoom(ctx.sql, 'X999')).toBeNull();
+    // 点单页按房号找客人：带出这位客人、送到哪
+    const r = await api(ctx.app, ctx.clerk, 'GET', '/api/dining/guest?room=s302');
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ visitId: first.visitId, tagCode: first.tagCode, via: 'room', deliverRoom: 'S302' });
+    expect((await api(ctx.app, ctx.clerk, 'GET', '/api/dining/guest?room=S301')).status).toBe(404);
   });
 
   it('两间房一起数：各房型的数量加起来等于总数，五种状态都数得到', async () => {

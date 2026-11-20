@@ -1,6 +1,7 @@
 // 房间详情（技师服务的房间、派对房一类、大厅类）：现在的状态与里面的客人，能做的动作，房间历史。
 // 动作按状态给：空闲 → 登记 / 开单、标待清、维修；在用 → 上钟、下钟、续钟、同房加人、换房、并房 / 拆并、退房（派对房是结束计费、撤单）；
 // 待清 → 清洁完成；维修 → 恢复、改维修信息。没有权限的按钮是灰的（写明要哪项权限）。客房不在这里：点客房卡片打开的是客房原来的对话框。
+// 房间动作带操作编号（8.1.16）：这间房上有一笔「结果待确认」时顶上写明、能查回 / 原样重提 / 确认作废，同一类的动作先锁住。
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -17,7 +18,8 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Notice, SectionTitle, Skeleton } from '../../components/ui';
-import { roomUrl, useRefreshRoomCenter, useRoomAction, useRoomHistory } from './queries';
+import { useRefreshRoomCenter, useRoomAction, useRoomHistory } from './queries';
+import { RoomActionStatus } from './RoomActions';
 import { StatusChip } from './status';
 
 export type RoomDialogAction =
@@ -41,7 +43,23 @@ const EVENT_TONE: Partial<Record<RoomEventKind, 'pine' | 'lake' | 'yuzu' | 'clay
 };
 
 /** 一张钟单：技师、项目、计时与金额；上钟、下钟、续钟 */
-function SessionRow({ s, now, canDispatch, canPost, busy, onClock, onExtend }: { s: RoomSessionView; now: number; canDispatch: boolean; canPost: boolean; busy: boolean; onClock: (action: 'start' | 'finish') => void; onExtend: () => void }) {
+function SessionRow({
+  s,
+  now,
+  canDispatch,
+  canPost,
+  busy,
+  onClock,
+  onExtend,
+}: {
+  s: RoomSessionView;
+  now: number;
+  canDispatch: boolean;
+  canPost: boolean;
+  busy: boolean;
+  onClock: (action: 'start' | 'finish') => void;
+  onExtend: () => void;
+}) {
   const left = s.plannedEnd ? Math.ceil((new Date(s.plannedEnd).getTime() - now) / 60_000) : null;
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5" data-testid={`rc-session-${s.sessionNo}`}>
@@ -116,7 +134,8 @@ export function RoomDialog({ room, now, onClose, onAction }: { room: RoomCard; n
   const toast = useToast();
   const navigate = useNavigate();
   const refresh = useRefreshRoomCenter();
-  const act = useRoomAction();
+  const stateAct = useRoomAction(room, 'space_state');
+  const dispatchAct = useRoomAction(room, 'space_dispatch');
   const [clockBusy, setClockBusy] = useState(false);
   const [clockError, setClockError] = useState<string | null>(null);
   const canDispatch = can('technician.dispatch');
@@ -140,9 +159,16 @@ export function RoomDialog({ room, now, onClose, onAction }: { room: RoomCard; n
       refresh();
     }
   };
-  const simple = async (action: 'cleaned' | 'unmerge', done: string) => {
-    if (await act.run(roomUrl(room.spaceId!, action), { expectedVersion: room.version })) toast({ tone: 'success', title: `${room.code} ${done}` });
+  /** 清洁完成（改房态那一类）、拆并（调度那一类）：不用另填什么，点了就提交 */
+  const cleaned = async () => {
+    if (await stateAct.run('cleaned', { expectedVersion: room.version }, `清洁完成 ${room.code}`)) toast({ tone: 'success', title: `${room.code} 清洁完成，可以用了` });
   };
+  const unmerge = async () => {
+    if (await dispatchAct.run('unmerge', { expectedVersion: room.version }, `拆并 ${room.code}（${room.merged.map((m) => m.code).join(' + ')}）`))
+      toast({ tone: 'success', title: `${room.code} 已拆并` });
+  };
+  const stateOff = !canHousekeep || stateAct.locked;
+  const dispatchOff = !canDispatch || dispatchAct.locked;
   const usageMinutes = room.usage ? Math.max(0, Math.floor((now - new Date(room.usage.openedAt).getTime()) / 60_000)) : 0;
 
   return (
@@ -158,6 +184,8 @@ export function RoomDialog({ room, now, onClose, onAction }: { room: RoomCard; n
       description={`${room.businessType}${room.floor ? ` · ${room.floor}` : ''}${room.capacity ? ` · ${room.capacity} 人` : ''} · ${ROOM_SOURCE_LABELS[room.kind]}：${ROOM_SOURCE_HINTS[room.kind]}`}
     >
       <div className="space-y-5" data-testid="rc-room-dialog" data-status={room.status}>
+        <RoomActionStatus action={stateAct} room={room} />
+        <RoomActionStatus action={dispatchAct} room={room} />
         {room.merged.length > 1 && (
           <Notice
             tone="info"
@@ -165,7 +193,7 @@ export function RoomDialog({ room, now, onClose, onAction }: { room: RoomCard; n
             title={`并房：${room.merged.map((m) => m.code).join(' + ')}（主房 ${room.merged[0]!.code}）`}
             data-testid="rc-merged"
             action={
-              <Button size="sm" variant="secondary" icon={<Unlink className="size-3.5" />} disabled={!canDispatch || act.busy} onClick={() => void simple('unmerge', '已拆并')} data-testid="rc-unmerge">
+              <Button size="sm" variant="secondary" icon={<Unlink className="size-3.5" />} disabled={dispatchOff} loading={dispatchAct.busy} onClick={() => void unmerge()} data-testid="rc-unmerge">
                 拆并
               </Button>
             }
@@ -216,7 +244,16 @@ export function RoomDialog({ room, now, onClose, onAction }: { room: RoomCard; n
             </p>
             <ul className="mt-1 divide-y divide-line/70">
               {g.sessions.map((s) => (
-                <SessionRow key={s.id} s={s} now={now} canDispatch={canDispatch} canPost={canPost} busy={clockBusy} onClock={(a) => void clock(s, a)} onExtend={() => onAction({ kind: 'extend', session: s })} />
+                <SessionRow
+                  key={s.id}
+                  s={s}
+                  now={now}
+                  canDispatch={canDispatch}
+                  canPost={canPost}
+                  busy={clockBusy}
+                  onClock={(a) => void clock(s, a)}
+                  onExtend={() => onAction({ kind: 'extend', session: s })}
+                />
               ))}
             </ul>
             {g.sessions.length === 0 && <p className="mt-1 text-[13px] text-ink-3">这位客人在这间房里没有钟了（钟被取消或转走）：可以退房。</p>}
@@ -253,11 +290,17 @@ export function RoomDialog({ room, now, onClose, onAction }: { room: RoomCard; n
           </section>
         )}
         {clockError && <Notice tone="error" title={clockError} />}
-        {act.error && <Notice tone="error" title={act.error} data-testid="rc-action-error" />}
 
         <div className="flex flex-wrap gap-2" data-testid="rc-actions">
           {room.kind === 'service' && (room.status === 'free' || room.status === 'booked') && (
-            <Button variant="primary" icon={<DoorOpen className="size-4" />} className="h-11" disabled={!canPost} onClick={() => onAction({ kind: 'register', join: false })} data-testid="rc-act-register">
+            <Button
+              variant="primary"
+              icon={<DoorOpen className="size-4" />}
+              className="h-11"
+              disabled={!canPost}
+              onClick={() => onAction({ kind: 'register', join: false })}
+              data-testid="rc-act-register"
+            >
               登记
             </Button>
           )}
@@ -268,7 +311,14 @@ export function RoomDialog({ room, now, onClose, onAction }: { room: RoomCard; n
           )}
           {room.usage && (
             <>
-              <Button variant="primary" icon={<Square className="size-4" />} className="h-11" disabled={!canUsage} onClick={() => onAction({ kind: 'usage_close', mode: 'end' })} data-testid="rc-act-usage-end">
+              <Button
+                variant="primary"
+                icon={<Square className="size-4" />}
+                className="h-11"
+                disabled={!canUsage}
+                onClick={() => onAction({ kind: 'usage_close', mode: 'end' })}
+                data-testid="rc-act-usage-end"
+              >
                 {room.usagePriced ? '结束计费' : '结束使用'}
               </Button>
               <Button variant="ghost" className="h-11" disabled={!canUsage} onClick={() => onAction({ kind: 'usage_close', mode: 'cancel' })} data-testid="rc-act-usage-cancel">
@@ -279,52 +329,76 @@ export function RoomDialog({ room, now, onClose, onAction }: { room: RoomCard; n
           {room.kind === 'service' && room.status === 'in_use' && (
             <>
               {registered && (
-                <Button variant="primary" icon={<DoorOpen className="size-4" />} className="h-11" disabled={!canDispatch} onClick={() => onAction({ kind: 'checkout' })} data-testid="rc-act-checkout">
+                <Button variant="primary" icon={<DoorOpen className="size-4" />} className="h-11" disabled={dispatchOff} onClick={() => onAction({ kind: 'checkout' })} data-testid="rc-act-checkout">
                   退房
                 </Button>
               )}
-              <Button variant="secondary" icon={<Shuffle className="size-4" />} className="h-11" disabled={!canDispatch} onClick={() => onAction({ kind: 'move' })} data-testid="rc-act-move">
+              <Button variant="secondary" icon={<Shuffle className="size-4" />} className="h-11" disabled={dispatchOff} onClick={() => onAction({ kind: 'move' })} data-testid="rc-act-move">
                 换房
               </Button>
-              <Button variant="secondary" icon={<UserPlus className="size-4" />} className="h-11" disabled={!canPost} onClick={() => onAction({ kind: 'register', join: true })} data-testid="rc-act-join">
+              <Button
+                variant="secondary"
+                icon={<UserPlus className="size-4" />}
+                className="h-11"
+                disabled={!canPost}
+                onClick={() => onAction({ kind: 'register', join: true })}
+                data-testid="rc-act-join"
+              >
                 同房加人
               </Button>
             </>
           )}
           {(room.kind === 'service' || room.kind === 'party') && room.status === 'in_use' && room.merged.length <= 1 && (
-            <Button variant="secondary" icon={<Link2 className="size-4" />} className="h-11" disabled={!canDispatch} onClick={() => onAction({ kind: 'merge' })} data-testid="rc-act-merge">
+            <Button variant="secondary" icon={<Link2 className="size-4" />} className="h-11" disabled={dispatchOff} onClick={() => onAction({ kind: 'merge' })} data-testid="rc-act-merge">
               并房
             </Button>
           )}
           {room.status === 'dirty' && (
-            <Button variant="primary" icon={<CircleCheck className="size-4" />} className="h-11" disabled={!canHousekeep} loading={act.busy} onClick={() => void simple('cleaned', '清洁完成，可以用了')} data-testid="rc-act-cleaned">
+            <Button
+              variant="primary"
+              icon={<CircleCheck className="size-4" />}
+              className="h-11"
+              disabled={stateOff}
+              loading={stateAct.busy}
+              onClick={() => void cleaned()}
+              data-testid="rc-act-cleaned"
+            >
               清洁完成
             </Button>
           )}
           {(room.status === 'free' || room.status === 'booked') && (
-            <Button variant="secondary" icon={<Sparkles className="size-4" />} className="h-11" disabled={!canHousekeep} onClick={() => onAction({ kind: 'dirty' })} data-testid="rc-act-dirty">
+            <Button variant="secondary" icon={<Sparkles className="size-4" />} className="h-11" disabled={stateOff} onClick={() => onAction({ kind: 'dirty' })} data-testid="rc-act-dirty">
               标为待清
             </Button>
           )}
           {room.status === 'maintenance' ? (
             <>
-              <Button variant="primary" icon={<CircleCheck className="size-4" />} className="h-11" disabled={!canHousekeep} onClick={() => onAction({ kind: 'restore' })} data-testid="rc-act-restore">
+              <Button variant="primary" icon={<CircleCheck className="size-4" />} className="h-11" disabled={stateOff} onClick={() => onAction({ kind: 'restore' })} data-testid="rc-act-restore">
                 恢复
               </Button>
-              <Button variant="secondary" icon={<Timer className="size-4" />} className="h-11" disabled={!canHousekeep} onClick={() => onAction({ kind: 'maintenance' })} data-testid="rc-act-maintenance-edit">
+              <Button
+                variant="secondary"
+                icon={<Timer className="size-4" />}
+                className="h-11"
+                disabled={stateOff}
+                onClick={() => onAction({ kind: 'maintenance' })}
+                data-testid="rc-act-maintenance-edit"
+              >
                 改维修信息
               </Button>
             </>
           ) : (
             room.status !== 'in_use' && (
-              <Button variant="secondary" icon={<Wrench className="size-4" />} className="h-11" disabled={!canHousekeep} onClick={() => onAction({ kind: 'maintenance' })} data-testid="rc-act-maintenance">
+              <Button variant="secondary" icon={<Wrench className="size-4" />} className="h-11" disabled={stateOff} onClick={() => onAction({ kind: 'maintenance' })} data-testid="rc-act-maintenance">
                 维修
               </Button>
             )
           )}
         </div>
         {(!canDispatch || !canHousekeep) && (
-          <p className="text-[12.5px] text-ink-3">灰的按钮是当前岗位没有权限：登记、换房、退房、并房要「钟房派钟」，标待清、清洁完成、维修、恢复要「客房打扫、维修」，派对房开单要「客房入住、退房」。</p>
+          <p className="text-[12.5px] text-ink-3">
+            灰的按钮是当前岗位没有权限：登记、换房、退房、并房要「钟房派钟」，标待清、清洁完成、维修、恢复要「客房打扫、维修」，派对房开单要「客房入住、退房」。
+          </p>
         )}
 
         <section>

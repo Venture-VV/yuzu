@@ -348,6 +348,8 @@ export type FrontdeskOpLookup =
   | { found: true; type: 'technician_state'; technicianId: number }
   /** 桌台动作（8.1.15）：清台、维修、恢复、并台、拆台——编号记下的那一条桌台记录 */
   | { found: true; type: 'table_state' | 'table_merge'; action: import('./dining-v8115').TableActionResult }
+  /** 房态中心的房间动作（8.1.16）：维修、恢复、标待清、清洁完成、换房、退房、并房、拆并——编号记下的那一条房间事件 */
+  | { found: true; type: 'space_state' | 'space_dispatch'; action: import('./room-center').RoomActionResult }
   /**
    * 点单页下单（挂账）从餐饮这边查回、作废（8.1.15，`/api/dining/ops`）：只说生效了、记在哪次来访上，不给整张账单——
    * 康美部只有点单权限，看不到前台的账（Codex 审查 f6327a4）

@@ -18,6 +18,8 @@ let tagNo = 0;
 const station: Record<string, number> = {};
 const dish: Record<string, number> = {};
 const mat: Record<string, number> = {};
+/** 这道菜现在的版本（上下架要带页面看到的版本，8.1.16） */
+const revOf = async (id: number): Promise<string> => ((await api(ctx.app, ctx.owner, 'GET', '/api/dining/dishes')).body as DishesBoard).dishes.find((d) => d.id === id)!.rev;
 const q = (n: number) => Math.round(n * 1000);
 
 const board = async () => (await api(ctx.app, ctx.owner, 'GET', '/api/dining/dishes')).body as DishesBoard;
@@ -345,12 +347,12 @@ describe('BW7 点单：换菜与差价、子项出品单', () => {
     const notCombo = await orderTag(v.id, [{ itemId: dish['牛肉面']!, quantity: 1, swaps: [{ from: dish['可乐']!, to: dish['橙汁']! }] }], 3800);
     expect(notCombo.body.error.code).toBe('DISH_SWAP_INVALID');
     // 换成的下架了
-    expect((await api(ctx.app, ctx.owner, 'POST', `/api/dining/dishes/${dish['橙汁']}/active`, { clientKey: randomUUID(), active: false })).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/dining/dishes/${dish['橙汁']}/active`, { clientKey: randomUUID(), active: false, rev: await revOf(dish['橙汁']!) })).status).toBe(200);
     const off = await orderTag(v.id, [{ itemId: set, quantity: 1, swaps: [{ from: dish['可乐']!, to: dish['橙汁']! }] }], LUNCH + 300);
     expect(off.status).toBe(422);
     expect(off.body.error.message).toBe('「橙汁」现在点不了（下架或档口停用），「午餐套餐」请换别的');
     expect((await menu()).dishes.find((d) => d.name === '午餐套餐')!.combo![1]!.swaps!.map((w) => `${w.name}:${w.available}`)).toEqual(['橙汁:false', '雪碧:true']);
-    expect((await api(ctx.app, ctx.owner, 'POST', `/api/dining/dishes/${dish['橙汁']}/active`, { clientKey: randomUUID(), active: true })).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'POST', `/api/dining/dishes/${dish['橙汁']}/active`, { clientKey: randomUUID(), active: true, rev: await revOf(dish['橙汁']!) })).status).toBe(200);
     // 同价的换：不加钱，备注写「可乐换雪碧」
     const same = await orderTag(v.id, [{ itemId: set, quantity: 1, swaps: [{ from: dish['可乐']!, to: dish['雪碧']! }] }], LUNCH);
     expect(same.status, JSON.stringify(same.body)).toBe(200);

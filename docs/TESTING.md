@@ -6,12 +6,12 @@
 
 测的是 PR #33 一次完整通过的 CI：head `92d2ab1`，[运行记录 41391566365](https://github.com/Venture-VV/yuzu/actions/runs/41391566365)。
 
-| job | 用时 | 其中 |
-| --- | --- | --- |
-| 类型检查 · 集成测试 · 构建 | 7 分 00 秒 | `npm test` 5 分 50 秒，类型检查 35 秒，`npm ci` 7 秒，构建 6 秒，起数据库 13 秒 |
-| 从上一发布版本的演示库升级 | 57 秒 | 构建上一版本 12 秒，灌演示数据 7 秒 |
-| 浏览器验收（合成演示库） | 16 分 13 秒，**要等上面那个 job 结束才开始** | Playwright 15 分 12 秒，装浏览器 20 秒，灌演示数据 7 秒，构建 6 秒 |
-| **整次 CI** | **23 分 36 秒** | 测试 job 7 分 + 浏览器 job 16 分，串行 |
+| job                        | 用时                                         | 其中                                                                            |
+| -------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
+| 类型检查 · 集成测试 · 构建 | 7 分 00 秒                                   | `npm test` 5 分 50 秒，类型检查 35 秒，`npm ci` 7 秒，构建 6 秒，起数据库 13 秒 |
+| 从上一发布版本的演示库升级 | 57 秒                                        | 构建上一版本 12 秒，灌演示数据 7 秒                                             |
+| 浏览器验收（合成演示库）   | 16 分 13 秒，**要等上面那个 job 结束才开始** | Playwright 15 分 12 秒，装浏览器 20 秒，灌演示数据 7 秒，构建 6 秒              |
+| **整次 CI**                | **23 分 36 秒**                              | 测试 job 7 分 + 浏览器 job 16 分，串行                                          |
 
 - 浏览器验收共 385 项：跑 211 项，按尺寸跳过 174 项。会改数据的流程只在门店电脑尺寸跑，平板与手机上按设计跳过。
 - 按日志时间推算各尺寸用时：门店电脑约 10 分钟，平板横屏约 1.5 分钟，平板竖屏约 2 分钟，小屏电脑约 0.8 分钟，手机约 0.7 分钟。
@@ -42,11 +42,11 @@
 
 **三档（工程治理三期）**——写代码途中别动不动跑全量，按档来：
 
-| 档 | 命令 | 跑什么 | 要多久 | 什么时候跑 |
-| --- | --- | --- | --- | --- |
-| 秒级 | `npm run lint`、`npm run test:unit` | oxlint；不要数据库的用例（36 个文件、300 多条：共用的计算与规则、页面的请求层、各个检查脚本） | 1 秒、8 秒 | 写代码途中随时 |
-| 快测 | `npm run test:quick` | 秒级那一档 + 和这次改动沾边的集成测试（按改到的模块名在用例文件名里找） | 几十秒到两三分钟 | 写完一块 |
-| 门禁 | `npm run typecheck && npm run check:code && … && npm test && npm run build`（`AGENTS.md` 的「门禁」一行） | 全部静态检查、全量集成测试、构建 | 五分钟左右 | 交 PR 前；CI 每次都跑，另加浏览器验收 |
+| 档   | 命令                                                                                                      | 跑什么                                                                                        | 要多久           | 什么时候跑                            |
+| ---- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------- |
+| 秒级 | `npm run lint`、`npm run test:unit`                                                                       | oxlint；不要数据库的用例（36 个文件、300 多条：共用的计算与规则、页面的请求层、各个检查脚本） | 1 秒、8 秒       | 写代码途中随时                        |
+| 快测 | `npm run test:quick`                                                                                      | 秒级那一档 + 和这次改动沾边的集成测试（按改到的模块名在用例文件名里找）                       | 几十秒到两三分钟 | 写完一块                              |
+| 门禁 | `npm run typecheck && npm run check:code && … && npm test && npm run build`（`AGENTS.md` 的「门禁」一行） | 全部静态检查、全量集成测试、构建                                                              | 五分钟左右       | 交 PR 前；CI 每次都跑，另加浏览器验收 |
 
 - 哪些用例不要数据库是 `scripts/test-tiers.mjs` 顺着导入关系认出来的（引到数据库连接或用例的公共准备 `tests/helpers.ts` 就算要），不用改文件名、不用维护清单；`npm run test:unit -- --list` 看是哪些。新写纯计算、纯规则的用例时不要引 `tests/helpers.ts`，它就自动进秒级这一档。
 - 快测是按文件名找的、会漏（例如改钱包会影响前台的用例），**不能代替全量**；`npm run test:quick -- --list` 先看会跑哪些，不够的照下面的对照表补。
@@ -66,26 +66,27 @@ E2E_BASE_URL=http://127.0.0.1:<端口> npx playwright test e2e/locations.spec.ts
 npm run typecheck && npm test && npm run build                  # 交 PR 前
 ```
 
-| 改了什么 | 先跑的集成测试（`tests/`） | 先跑的浏览器用例（`e2e/`） |
-| --- | --- | --- |
-| 会员与储值（钱包、扣款规则、赠金、上限、期初） | `wallet-*`、`deduction`、`bonus-expiry`、`concurrency`、`acceptance`、`opening-*`、`member-fields` | `flows`、`review-fixes`、`wallet-limits`、`member-fields`、`storage-failure` |
-| 前台与收银（接待、挂账、结账、反结账、交班、补录、转单、打印） | `frontdesk*`、`checkout`、`cashier`、`r1-funds`、`backfill`、`refund-drawer`、`shift-boundary`、`settlement-snapshot`、`auth-settlement`、`recon`、`print` | `frontdesk*`、`cashier`、`r1-funds`、`backfill`、`line-move`、`print`、`regression/` |
-| 发卡台与收银台、前台风控（芯片号、黑名单、异常处置、结账预览分列；8.1.15） | `desks`、`desks-columns`（不要数据库）、`frontdesk-risk`、`upgrade-frontdesk-risk`、`upgrade-shift`、`op-fences-constraint` | `desks`、`frontdesk-risk`、`frontdesk`、`cashier`、`admin-ia` |
-| 技师与钟房 | `technicians`、`clockroom`、`catalog-tiers`、`review-v071` | `technicians`、`clockroom` |
-| 餐饮与桌台（8.1.15 起含桌台动作、台账并退菜、按出品口下单、菜品管理；出品单与平板下单经过同一处） | `dining*`、`dishes*`、`upgrade-dining-v8115`、`upgrade-dishes` | `dining*`、`dishes`、`emenu` |
-| 客房 | `rooms*` | `rooms` |
-| 客户部（经营总览、手牌跟进、成交归属、月目标、低余额、同步指纹；只读前台与会员数据） | `customer-*` | `customer` |
-| 登记消费的项目与数量、预约页的日期与新建弹窗（店主 2026-11-14 的七条需求；点单换人在 `dining`，平板下单后回起始页在 `emenu`） | `bookings` | `requests-1114`、`bookings`、`dining`、`emenu` |
-| 加了带操作编号的业务类型、动了「确认作废」的类型约束（任何迁移） | `op-fences-constraint`（代码里登记的类型约束都认）、`wallet-abandon` | — |
-| 空间台账、底图、房态图、实时位置 | `spaces`、`floorplan*`、`floormap`、`locations`、`upgrade-floormap` | `spaces`、`floorplans`、`floormap`、`locations` |
-| ERP（库存、采购、应付、报销、需求单、两级库存、台账、旧账；采购途径、转报销、部门备用金台账、补货建议、询价比价） | `inventory*`、`purchasing`、`supplier-settlement`、`stock-cycles`、`warehouses`、`expenses`、`requests`、`purchase-ledger`、`erp`、`erp-purchasing`、`replenish-mode`（补货方式，迁移 161）、`legacy` | `inventory`、`warehouses`、`supplier-settlement`、`stock-cycles`、`expenses`、`requests`、`purchase-ledger`、`erp`、`erp-purchasing`、`legacy` |
-| 后台、岗位权限、看板 | `admin-v060`、`roles`、`instance` | `admin-v060`、`review-v060`、`viewports`、`pending-marks` |
-| 演示数据 | `*-seed`、`demo-time`、`demo-prepare`（新增） | `demo-showcase`（新增） |
-| 退储值的「门店系统原路退回」（要小程序端口与模拟微信支付） | `member-refunds-online`、`mp-refund` | `member-refund-online`（设了 `E2E_MP_PORT`、`E2E_MP_GATEWAY_KEY` 才收，见下） |
-| 请求层、连接状态、页面不白屏、服务端防护（`lib/api`、`lib/connection`、`lib/livePoll`、`lib/lazyPage`、错误边界、`lib/protect`；8.1.3） | `client-api`、`protection`、`check-code` | `resilience`、`flows`、`frontdesk-recovery`、`storage-failure`、`concierge`、`customer` |
-| 迁移 | `upgrade*`；加了迁移一定跑全量 `npm test` | — |
-| 备份与运维脚本 | `backup`、`static-compression`、`import-encoding`；`shellcheck` | — |
-| 文档、检查脚本、版本号的读法（工程治理一期，`docs/GOVERNANCE.md`） | `check-docs`、`check-governance`、`check-code`、`version-source`、`instance`（这几个除 `instance` 外不要数据库） | — |
+| 改了什么                                                                                                                                | 先跑的集成测试（`tests/`）                                                                                                                                                                            | 先跑的浏览器用例（`e2e/`）                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 会员与储值（钱包、扣款规则、赠金、上限、期初）                                                                                          | `wallet-*`、`deduction`、`bonus-expiry`、`concurrency`、`acceptance`、`opening-*`、`member-fields`                                                                                                    | `flows`、`review-fixes`、`wallet-limits`、`member-fields`、`storage-failure`                                                                   |
+| 会员建档与会员卡押金（8.1.16：卡类型、押金进交班与日结、匿名卡、建档表单）                                                              | `member-card-types`、`member-cards`、`recon`、`upgrade-shift`、`op-fences-constraint`                                                                                                                 | `member-card-types`、`member-cards`、`dialog-input`、`admin-v060`、`target-devices`                                                            |
+| 前台与收银（接待、挂账、结账、反结账、交班、补录、转单、打印）                                                                          | `frontdesk*`、`checkout`、`cashier`、`r1-funds`、`backfill`、`refund-drawer`、`shift-boundary`、`settlement-snapshot`、`auth-settlement`、`recon`、`print`                                            | `frontdesk*`、`cashier`、`r1-funds`、`backfill`、`line-move`、`print`、`regression/`                                                           |
+| 发卡台与收银台、前台风控（芯片号、黑名单、异常处置、结账预览分列；8.1.15）                                                              | `desks`、`desks-columns`（不要数据库）、`frontdesk-risk`、`upgrade-frontdesk-risk`、`upgrade-shift`、`op-fences-constraint`                                                                           | `desks`、`frontdesk-risk`、`frontdesk`、`cashier`、`admin-ia`                                                                                  |
+| 技师与钟房                                                                                                                              | `technicians`、`clockroom`、`catalog-tiers`、`review-v071`、`technician-admin`、`pinyin-initials`（不要数据库）                                                                                       | `technicians`、`clockroom`、`technician-admin`、`target-devices`                                                                               |
+| 餐饮与桌台（8.1.15 起含桌台动作、台账并退菜、按出品口下单、菜品管理；出品单与平板下单经过同一处；菜品维护的结果待确认在 `dishes`）      | `dining*`、`dishes*`、`upgrade-dining-v8115`、`upgrade-dishes`                                                                                                                                        | `dining*`、`dishes`、`emenu`                                                                                                                   |
+| 客房与房态中心（8.1.16：房型、房态、登记与房间动作、结果待确认、客房页并进来）                                                          | `rooms*`、`room-center`、`upgrade-room-center`、`op-fences-constraint`、`tag-scan`（不要数据库）、`store-nav`（不要数据库）、`dining-v8115-orders`                                                    | `rooms`、`room-center`、`frontdesk-808`、`floormap`、`locations`、`target-devices`、`viewports`                                                |
+| 客户部（经营总览、手牌跟进、成交归属、月目标、低余额、同步指纹；只读前台与会员数据）                                                    | `customer-*`                                                                                                                                                                                          | `customer`                                                                                                                                     |
+| 登记消费的项目与数量、预约页的日期与新建弹窗（店主 2026-11-14 的七条需求；点单换人在 `dining`，平板下单后回起始页在 `emenu`）           | `bookings`                                                                                                                                                                                            | `requests-1114`、`bookings`、`dining`、`emenu`                                                                                                 |
+| 加了带操作编号的业务类型、动了「确认作废」的类型约束（任何迁移）                                                                        | `op-fences-constraint`（代码里登记的类型约束都认）、`wallet-abandon`                                                                                                                                  | —                                                                                                                                              |
+| 空间台账、底图、房态图、实时位置                                                                                                        | `spaces`、`floorplan*`、`floormap`、`locations`、`upgrade-floormap`                                                                                                                                   | `spaces`、`floorplans`、`floormap`、`locations`                                                                                                |
+| ERP（库存、采购、应付、报销、需求单、两级库存、台账、旧账；采购途径、转报销、部门备用金台账、补货建议、询价比价）                       | `inventory*`、`purchasing`、`supplier-settlement`、`stock-cycles`、`warehouses`、`expenses`、`requests`、`purchase-ledger`、`erp`、`erp-purchasing`、`replenish-mode`（补货方式，迁移 161）、`legacy` | `inventory`、`warehouses`、`supplier-settlement`、`stock-cycles`、`expenses`、`requests`、`purchase-ledger`、`erp`、`erp-purchasing`、`legacy` |
+| 后台、岗位权限、看板                                                                                                                    | `admin-v060`、`roles`、`instance`                                                                                                                                                                     | `admin-v060`、`review-v060`、`viewports`、`pending-marks`                                                                                      |
+| 演示数据                                                                                                                                | `*-seed`、`demo-time`、`demo-prepare`（新增）                                                                                                                                                         | `demo-showcase`（新增）                                                                                                                        |
+| 退储值的「门店系统原路退回」（要小程序端口与模拟微信支付）                                                                              | `member-refunds-online`、`mp-refund`                                                                                                                                                                  | `member-refund-online`（设了 `E2E_MP_PORT`、`E2E_MP_GATEWAY_KEY` 才收，见下）                                                                  |
+| 请求层、连接状态、页面不白屏、服务端防护（`lib/api`、`lib/connection`、`lib/livePoll`、`lib/lazyPage`、错误边界、`lib/protect`；8.1.3） | `client-api`、`protection`、`check-code`                                                                                                                                                              | `resilience`、`flows`、`frontdesk-recovery`、`storage-failure`、`concierge`、`customer`                                                        |
+| 迁移                                                                                                                                    | `upgrade*`；加了迁移一定跑全量 `npm test`                                                                                                                                                             | —                                                                                                                                              |
+| 备份与运维脚本                                                                                                                          | `backup`、`static-compression`、`import-encoding`；`shellcheck`                                                                                                                                       | —                                                                                                                                              |
+| 文档、检查脚本、版本号的读法（工程治理一期，`docs/GOVERNANCE.md`）                                                                      | `check-docs`、`check-governance`、`check-code`、`version-source`、`instance`（这几个除 `instance` 外不要数据库）                                                                                      | —                                                                                                                                              |
 
 退储值「门店系统原路退回」的浏览器用例（`e2e/member-refund-online.spec.ts`，v0.7.29）要应用开着小程序端口与模拟微信支付：应用用 `MP_PORT`、`MP_GATEWAY_KEY`（至少 32 个字符）、`MP_PAY_MOCK=true` 启动（只在 development、test，实例标识不是 prod / shadow / test），Playwright 设同一个端口与密钥的 `E2E_MP_PORT`、`E2E_MP_GATEWAY_KEY` 才收这个文件；平时的浏览器验收不收、用例总数不变。它会临时打开小程序与线上充值、开着原路退回，结束时（含失败）照原样改回。CI 里还没有跑它的步骤（CI 的测试步骤归测试会话与 Codex）。
 
@@ -97,15 +98,15 @@ E2E_MP_PORT=<小程序端口> E2E_MP_GATEWAY_KEY=<网关密钥> E2E_BASE_URL=htt
 
 优化前：PR #33 `92d2ab1`（[运行记录 41391566365](https://github.com/Venture-VV/yuzu/actions/runs/41391566365)）；优化后：PR #34 `c7f5a5d`（[运行记录 41406793109](https://github.com/Venture-VV/yuzu/actions/runs/41406793109)，只改了 CI 与测试，还没有演示数据 job）。
 
-| job | 优化前 | 优化后 |
-| --- | --- | --- |
-| 类型检查 · 集成测试 · 构建 | 7 分 00 秒（`npm test` 5 分 50 秒） | 4 分 03 秒（`npm test` 2 分 53 秒） |
-| 浏览器验收 | 16 分 13 秒，等上面结束才开始 | 三组同时：6 分 09 秒 / 6 分 20 秒 / 6 分 33 秒（Playwright 4 分 58 秒 / 5 分 12 秒 / 5 分 21 秒） |
-| 浏览器验收汇总 | — | 约 20 秒（三组结束后） |
-| 从上一发布版本的演示库升级 | 57 秒 | 57 秒 |
-| **整次 CI** | **23 分 36 秒** | **6 分 56 秒** |
-| 运行机分钟数（各 job 用时相加） | 24 分 10 秒 | 24 分 21 秒 |
-| 计费分钟（GitHub 用量接口） | 0 | 0 |
+| job                             | 优化前                              | 优化后                                                                                            |
+| ------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 类型检查 · 集成测试 · 构建      | 7 分 00 秒（`npm test` 5 分 50 秒） | 4 分 03 秒（`npm test` 2 分 53 秒）                                                               |
+| 浏览器验收                      | 16 分 13 秒，等上面结束才开始       | 三组同时：6 分 09 秒 / 6 分 20 秒 / 6 分 33 秒（Playwright 4 分 58 秒 / 5 分 12 秒 / 5 分 21 秒） |
+| 浏览器验收汇总                  | —                                   | 约 20 秒（三组结束后）                                                                            |
+| 从上一发布版本的演示库升级      | 57 秒                               | 57 秒                                                                                             |
+| **整次 CI**                     | **23 分 36 秒**                     | **6 分 56 秒**                                                                                    |
+| 运行机分钟数（各 job 用时相加） | 24 分 10 秒                         | 24 分 21 秒                                                                                       |
+| 计费分钟（GitHub 用量接口）     | 0                                   | 0                                                                                                 |
 
 - 运行机分钟数基本没变：测试 job 快了 3 分钟，抵掉了浏览器验收多出来的两份安装、构建、灌数据。演示数据 job 另加的用时见 PR #34。
 - 浏览器验收：三组合计跑过 385 项（通过 211、按尺寸跳过 174、失败 0、重试后才通过 0），与不拆分时 `--list` 的 385 项一致——与拆分前 PR #33 的 211 + 174 相同。

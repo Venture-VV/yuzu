@@ -64,10 +64,10 @@
   "conventions": {
     "inline-dvh": 1,
     "navigator.onLine": 1,
-    "polling": 64,
+    "polling": 63,
     "raw-dialog": 5,
     "raw-table": 36,
-    "small-text": 24,
+    "small-text": 21,
     "status-500": 2
   },
   "duplicationMaxPercent": 1,

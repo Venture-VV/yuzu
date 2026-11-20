@@ -1,5 +1,6 @@
 // 房态中心的房间动作（《浴族系统需求汇总》房态中心第 4 条）：续钟、换房、退房、并房、维修 / 恢复、标待清。
-// 续钟要挂账，与前台同一套「结果待确认」；其余几样带着页面看到的房态版本号提交（见 queries.ts 的 useRoomAction）。
+// 续钟要挂账，与前台同一套「结果待确认」；换房、退房、并房、维修、恢复、标待清 8.1.16 起也带操作编号（queries.ts 的 useRoomAction）：
+// 结果不确定时这间房上同一类的动作锁住，对话框里查回、按原内容重新提交或确认作废。
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -14,13 +15,32 @@ import { cn, formatDateTime } from '../../lib/utils';
 import { LoadFailed } from '../../components/LoadFailed';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
+import { useToast } from '../../components/Toast';
 import { Button, ConfirmCheck, Field, Input, Notice, Segmented, Skeleton } from '../../components/ui';
-import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
+import { FRONTDESK_OP_LABELS, PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { roomUrl, useCheckoutPreview, useRefreshRoomCenter, useRoomAction } from './queries';
 import { ClockStepper, foundPosted } from './RegisterDialog';
 import { STATUS_META } from './status';
 
 const nameOf = (room: Pick<RoomCard, 'code' | 'name'>) => spaceLabel(room.code, room.name);
+
+/** 房间动作的提交状态：被拒绝的写原因；结果待确认时显示查回 / 按原内容重新提交 / 确认作废（处理完：生效了的提示只生效一次） */
+export function RoomActionStatus({ action, room, onResolved }: { action: ReturnType<typeof useRoomAction>; room: Pick<RoomCard, 'code'>; onResolved?: () => void }) {
+  const toast = useToast();
+  return (
+    <>
+      <PendingPanel
+        op={action.op}
+        onResolved={() => {
+          action.resolved();
+          toast({ tone: 'success', title: `房 ${room.code} 的${FRONTDESK_OP_LABELS[action.type]}已生效`, body: '只生效了一次，不用重新操作。' });
+          onResolved?.();
+        }}
+      />
+      {action.op.state.phase === 'error' && <Notice tone="error" title={action.op.state.message} data-testid="rc-action-error" />}
+    </>
+  );
+}
 
 /** 续钟：原技师继续，按这张钟单的项目与档次加收，计划时长跟着加 */
 export function ExtendRoomDialog({ room, session: s, onClose, onDone }: { room: RoomCard; session: RoomSessionView; onClose: () => void; onDone: (board: RoomCenterBoard | null) => void }) {
@@ -74,7 +94,21 @@ export function ExtendRoomDialog({ room, session: s, onClose, onDone }: { room: 
 }
 
 /** 一排可选的房间（换房、并房都是从里面挑一间） */
-function RoomPicker({ rooms, value, onChange, empty, testId }: { rooms: RoomCard[]; value: number | null; onChange: (spaceId: number) => void; empty: string; testId: string }) {
+function RoomPicker({
+  rooms,
+  value,
+  onChange,
+  empty,
+  disabled,
+  testId,
+}: {
+  rooms: RoomCard[];
+  value: number | null;
+  onChange: (spaceId: number) => void;
+  empty: string;
+  disabled?: boolean;
+  testId: string;
+}) {
   if (rooms.length === 0) return <p className="rounded-lg border border-dashed border-line-strong px-3 py-4 text-center text-[13px] text-ink-3">{empty}</p>;
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" data-testid={testId}>
@@ -87,8 +121,9 @@ function RoomPicker({ rooms, value, onChange, empty, testId }: { rooms: RoomCard
             type="button"
             role="radio"
             aria-checked={on}
+            disabled={disabled}
             onClick={() => onChange(r.spaceId!)}
-            className={cn('flex min-h-11 flex-col rounded-lg border px-3 py-2 text-left', on ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-line-strong')}
+            className={cn('flex min-h-11 flex-col rounded-lg border px-3 py-2 text-left disabled:opacity-60', on ? 'border-pine bg-pine-tint' : 'border-line bg-card hover:border-line-strong')}
             data-testid={`${testId}-${r.code}`}
           >
             <span className="num text-[16px] font-bold">{r.code}</span>
@@ -106,15 +141,24 @@ function RoomPicker({ rooms, value, onChange, empty, testId }: { rooms: RoomCard
 }
 
 /** 换房：换到另一间空闲的技师服务房间；单与计时不动 */
-export function MoveRoomDialog({ room, rooms, onClose, onDone }: { room: RoomCard; rooms: RoomCard[]; onClose: () => void; onDone: (to: RoomCard | null) => void }) {
-  const act = useRoomAction();
+export function MoveRoomDialog({ room, rooms, onClose, onDone }: { room: RoomCard; rooms: RoomCard[]; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const act = useRoomAction(room, 'space_dispatch');
   const [to, setTo] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const targets = rooms.filter((r) => r.kind === 'service' && r.spaceId !== room.spaceId && (r.status === 'free' || r.status === 'booked'));
+  const target = targets.find((r) => r.spaceId === to) ?? null;
   const submit = async () => {
-    if (to === null) return;
-    const board = await act.run(roomUrl(room.spaceId!, 'move'), { toSpaceId: to, expectedVersion: room.version, note: note.trim() });
-    if (board) onDone(board.rooms.find((r) => r.spaceId === to) ?? null);
+    if (!target) return;
+    const ok = await act.run(
+      'move',
+      { toSpaceId: target.spaceId, expectedVersion: room.version, note: note.trim() },
+      `换房 ${room.code} → ${target.code}${note.trim() ? `（${note.trim()}）` : ''}`,
+      target.spaceId!,
+    );
+    if (!ok) return;
+    toast({ tone: 'success', title: `已换到 ${target.code}`, body: `${room.code} 的客人整间换过去，单与计时不变` });
+    onDone();
   };
   return (
     <Dialog
@@ -122,26 +166,26 @@ export function MoveRoomDialog({ room, rooms, onClose, onDone }: { room: RoomCar
       onClose={act.busy ? () => {} : onClose}
       width="max-w-2xl"
       title={`换房 · ${nameOf(room)}`}
-      description="这间房里的客人整间换到另一间空房。单与计时不变：钟单还是那一张，金额、开始时间都不动，只记从哪间换到哪间。原来的房间转待清。"
+      description="这间房里的客人整间换到另一间空房。单与计时不变：钟单还是那一张，金额、开始时间都不动，只记从哪间换到哪间。原来的房间有人上过钟就转待清。"
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={act.busy}>
             取消
           </Button>
-          <Button variant="primary" size="lg" disabled={to === null} loading={act.busy} onClick={() => void submit()} data-testid="rc-move-submit">
+          <Button variant="primary" size="lg" disabled={!target || act.locked} loading={act.busy} onClick={() => void submit()} data-testid="rc-move-submit">
             确认换房
           </Button>
         </>
       }
     >
       <div className="space-y-4" data-testid="rc-move">
+        <RoomActionStatus action={act} room={room} onResolved={onDone} />
         <Field label="换到哪一间（空闲的技师服务房间）">
-          <RoomPicker rooms={targets} value={to} onChange={setTo} empty="现在没有空闲的技师服务房间（待清的先点清洁完成）" testId="rc-move-to" />
+          <RoomPicker rooms={targets} value={to} onChange={setTo} disabled={act.locked} empty="现在没有空闲的技师服务房间（待清的先点清洁完成）" testId="rc-move-to" />
         </Field>
         <Field label="说明" htmlFor="rc-move-note" hint="选填，例如 空调不凉、客人要安静的">
-          <Input id="rc-move-note" value={note} maxLength={MAX_ROOM_NOTE} onChange={(e) => setNote(e.target.value)} data-testid="rc-move-note" />
+          <Input id="rc-move-note" value={note} maxLength={MAX_ROOM_NOTE} disabled={act.locked} onChange={(e) => setNote(e.target.value)} data-testid="rc-move-note" />
         </Field>
-        {act.error && <Notice tone="error" title={act.error} data-testid="rc-move-error" />}
       </div>
     </Dialog>
   );
@@ -149,11 +193,16 @@ export function MoveRoomDialog({ room, rooms, onClose, onDone }: { room: RoomCar
 
 /** 并房：和另一间在用的房间记成一起的（只连显示与历史，不动钱） */
 export function MergeRoomDialog({ room, rooms, onClose, onDone }: { room: RoomCard; rooms: RoomCard[]; onClose: () => void; onDone: () => void }) {
-  const act = useRoomAction();
+  const toast = useToast();
+  const act = useRoomAction(room, 'space_dispatch');
   const [to, setTo] = useState<number | null>(null);
   const targets = rooms.filter((r) => (r.kind === 'service' || r.kind === 'party') && r.spaceId !== room.spaceId && r.status === 'in_use');
+  const target = targets.find((r) => r.spaceId === to) ?? null;
   const submit = async () => {
-    if (to !== null && (await act.run(roomUrl(room.spaceId!, 'merge'), { withSpaceId: to, expectedVersion: room.version }))) onDone();
+    if (!target) return;
+    if (!(await act.run('merge', { withSpaceId: target.spaceId, expectedVersion: room.version }, `并房 ${room.code} 并入 ${target.code}`, target.spaceId!))) return;
+    toast({ tone: 'success', title: `${room.code} 已并入 ${target.code}` });
+    onDone();
   };
   return (
     <Dialog
@@ -167,17 +216,17 @@ export function MergeRoomDialog({ room, rooms, onClose, onDone }: { room: RoomCa
           <Button variant="ghost" onClick={onClose} disabled={act.busy}>
             取消
           </Button>
-          <Button variant="primary" size="lg" disabled={to === null} loading={act.busy} onClick={() => void submit()} data-testid="rc-merge-submit">
+          <Button variant="primary" size="lg" disabled={!target || act.locked} loading={act.busy} onClick={() => void submit()} data-testid="rc-merge-submit">
             确认并房
           </Button>
         </>
       }
     >
       <div className="space-y-4" data-testid="rc-merge">
+        <RoomActionStatus action={act} room={room} onResolved={onDone} />
         <Field label="并到哪一间（在用的房间）">
-          <RoomPicker rooms={targets} value={to} onChange={setTo} empty="现在没有别的在用的房间" testId="rc-merge-to" />
+          <RoomPicker rooms={targets} value={to} onChange={setTo} disabled={act.locked} empty="现在没有别的在用的房间" testId="rc-merge-to" />
         </Field>
-        {act.error && <Notice tone="error" title={act.error} />}
       </div>
     </Dialog>
   );
@@ -189,9 +238,10 @@ export function MergeRoomDialog({ room, rooms, onClose, onDone }: { room: RoomCa
  */
 export function CheckoutRoomDialog({ room, onClose, onDone }: { room: RoomCard; onClose: () => void; onDone: () => void }) {
   const can = useCan();
+  const toast = useToast();
   const navigate = useNavigate();
   const refresh = useRefreshRoomCenter();
-  const act = useRoomAction();
+  const act = useRoomAction(room, 'space_dispatch');
   const preview = useCheckoutPreview(room.spaceId!, room.version);
   const [inHouse, setInHouse] = useState(false);
   const [finishing, setFinishing] = useState<number | null>(null);
@@ -217,7 +267,17 @@ export function CheckoutRoomDialog({ room, onClose, onDone }: { room: RoomCard; 
   };
   const submit = async () => {
     if (!p || !ok) return;
-    if (await act.run(roomUrl(room.spaceId!, 'checkout'), { expectedVersion: room.version, seenUnpaid: p.unpaidTotal, inHouse })) onDone();
+    const tags = p.guests.map((g) => g.tagCode).join('、');
+    if (
+      !(await act.run(
+        'checkout',
+        { expectedVersion: room.version, seenUnpaid: p.unpaidTotal, inHouse },
+        `退房 ${room.code}（手牌 ${tags}${unpaid > 0 ? `，账单未结 ${formatYuan(unpaid)}，客人带手牌在店` : ''}）`,
+      ))
+    )
+      return;
+    toast({ tone: 'success', title: `${room.code} 已退房，转待清`, body: unpaid > 0 ? `手牌 ${tags} 还有 ${formatYuan(unpaid)} 没结，离店时在收银台结` : undefined });
+    onDone();
   };
   return (
     <Dialog
@@ -231,12 +291,13 @@ export function CheckoutRoomDialog({ room, onClose, onDone }: { room: RoomCard; 
           <Button variant="ghost" onClick={onClose} disabled={act.busy}>
             取消
           </Button>
-          <Button variant="primary" size="lg" disabled={!ok} loading={act.busy} onClick={() => void submit()} data-testid="rc-checkout-submit">
+          <Button variant="primary" size="lg" disabled={!ok || act.locked} loading={act.busy} onClick={() => void submit()} data-testid="rc-checkout-submit">
             确认退房
           </Button>
         </>
       }
     >
+      <RoomActionStatus action={act} room={room} onResolved={onDone} />
       {preview.isError && !p ? (
         <LoadFailed title="结账预览没取回来" onRetry={() => void preview.refetch()} retrying={preview.isFetching} />
       ) : !p ? (
@@ -297,7 +358,14 @@ export function CheckoutRoomDialog({ room, onClose, onDone }: { room: RoomCard; 
                 </Notice>
               ))}
               <p className="mt-2">
-                <Button size="sm" variant="ghost" icon={<Banknote className="size-4" />} disabled={!can('frontdesk.read')} onClick={() => navigate(`/cashier?v=${g.visitId}`)} data-testid={`rc-checkout-cashier-${g.tagCode}`}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<Banknote className="size-4" />}
+                  disabled={!can('frontdesk.read')}
+                  onClick={() => navigate(`/cashier?v=${g.visitId}`)}
+                  data-testid={`rc-checkout-cashier-${g.tagCode}`}
+                >
                   去收银台给这张手牌结账
                 </Button>
               </p>
@@ -313,7 +381,6 @@ export function CheckoutRoomDialog({ room, onClose, onDone }: { room: RoomCard; 
           ) : (
             <Notice tone="success" title="手牌账单上没有未结的金额" />
           )}
-          {act.error && <Notice tone="error" title={act.error} data-testid="rc-checkout-error" />}
         </div>
       )}
     </Dialog>
@@ -325,7 +392,8 @@ type EtaUnit = keyof typeof ETA_UNITS;
 
 /** 维修：原因 + 预计完成时间（填「多久以后修好」，页面算出几月几日几点）；已经在维修的是改这两样 */
 export function MaintenanceDialog({ room, onClose, onDone }: { room: RoomCard; onClose: () => void; onDone: () => void }) {
-  const act = useRoomAction();
+  const toast = useToast();
+  const act = useRoomAction(room, 'space_state');
   const editing = room.maintenance !== null;
   const [reason, setReason] = useState(room.maintenance?.reason ?? '');
   const [amount, setAmount] = useState('2');
@@ -336,7 +404,10 @@ export function MaintenanceDialog({ room, onClose, onDone }: { room: RoomCard; o
   const ok = reason.trim().length >= 2 && expectedAt !== null;
   const submit = async () => {
     if (!ok || !expectedAt) return;
-    if (await act.run(roomUrl(room.spaceId!, 'maintenance'), { reason: reason.trim(), expectedAt: expectedAt.toISOString(), expectedVersion: room.version })) onDone();
+    const summary = `${editing ? '改维修信息' : '维修'} ${room.code}：${reason.trim()}，预计 ${formatDateTime(expectedAt.toISOString())} 完成`;
+    if (!(await act.run('maintenance', { reason: reason.trim(), expectedAt: expectedAt.toISOString(), expectedVersion: room.version }, summary))) return;
+    toast({ tone: 'success', title: `${room.code} ${editing ? '的维修信息已改' : '已设为维修'}` });
+    onDone();
   };
   return (
     <Dialog
@@ -349,15 +420,24 @@ export function MaintenanceDialog({ room, onClose, onDone }: { room: RoomCard; o
           <Button variant="ghost" onClick={onClose} disabled={act.busy}>
             取消
           </Button>
-          <Button variant="danger" size="lg" disabled={!ok} loading={act.busy} onClick={() => void submit()} data-testid="rc-maintenance-submit">
+          <Button variant="danger" size="lg" disabled={!ok || act.locked} loading={act.busy} onClick={() => void submit()} data-testid="rc-maintenance-submit">
             {editing ? '保存' : '设为维修'}
           </Button>
         </>
       }
     >
       <div className="space-y-4" data-testid="rc-maintenance">
+        <RoomActionStatus action={act} room={room} onResolved={onDone} />
         <Field label="原因" htmlFor="rc-mt-reason" hint="至少 2 个字，例如 空调漏水、灯坏了">
-          <Input id="rc-mt-reason" value={reason} maxLength={MAX_MAINTENANCE_REASON} onChange={(e) => setReason(e.target.value)} data-autofocus data-testid="rc-maintenance-reason" />
+          <Input
+            id="rc-mt-reason"
+            value={reason}
+            maxLength={MAX_MAINTENANCE_REASON}
+            disabled={act.locked}
+            onChange={(e) => setReason(e.target.value)}
+            data-autofocus
+            data-testid="rc-maintenance-reason"
+          />
         </Field>
         <Field
           label="预计多久以后修好"
@@ -366,7 +446,16 @@ export function MaintenanceDialog({ room, onClose, onDone }: { room: RoomCard; o
           hint={expectedAt ? `预计完成时间：${formatDateTime(expectedAt.toISOString())}` : undefined}
         >
           <div className="flex flex-wrap items-center gap-2">
-            <Input id="rc-mt-eta" fullWidth={false} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} className="num w-24 text-[16px] font-bold" data-testid="rc-maintenance-eta" />
+            <Input
+              id="rc-mt-eta"
+              fullWidth={false}
+              inputMode="numeric"
+              value={amount}
+              disabled={act.locked}
+              onChange={(e) => setAmount(e.target.value)}
+              className="num w-24 text-[16px] font-bold"
+              data-testid="rc-maintenance-eta"
+            />
             <Segmented<EtaUnit> ariaLabel="单位" value={unit} onChange={setUnit} options={(['hour', 'day'] as const).map((u) => ({ value: u, label: ETA_UNITS[u].label }))} />
           </div>
         </Field>
@@ -375,7 +464,6 @@ export function MaintenanceDialog({ room, onClose, onDone }: { room: RoomCard; o
             现在记的预计完成时间：{formatDateTime(room.maintenance!.expectedAt)}（{room.maintenance!.byName} {formatDateTime(room.maintenance!.at)} 设的）
           </p>
         )}
-        {act.error && <Notice tone="error" title={act.error} data-testid="rc-maintenance-error" />}
       </div>
     </Dialog>
   );
@@ -383,11 +471,15 @@ export function MaintenanceDialog({ room, onClose, onDone }: { room: RoomCard; o
 
 /** 标为待清、恢复：带一句说明（选填）的确认 */
 export function NoteActionDialog({ room, action, onClose, onDone }: { room: RoomCard; action: 'dirty' | 'restore'; onClose: () => void; onDone: () => void }) {
-  const act = useRoomAction();
+  const toast = useToast();
+  const act = useRoomAction(room, 'space_state');
   const [note, setNote] = useState('');
   const dirty = action === 'dirty';
   const submit = async () => {
-    if (await act.run(roomUrl(room.spaceId!, action), { expectedVersion: room.version, note: note.trim() })) onDone();
+    const summary = `${dirty ? '标为待清' : '恢复'} ${room.code}${note.trim() ? `（${note.trim()}）` : ''}`;
+    if (!(await act.run(action, { expectedVersion: room.version, note: note.trim() }, summary))) return;
+    toast({ tone: 'success', title: dirty ? `${room.code} 已标为待清` : `${room.code} 已恢复使用` });
+    onDone();
   };
   return (
     <Dialog
@@ -400,17 +492,17 @@ export function NoteActionDialog({ room, action, onClose, onDone }: { room: Room
           <Button variant="ghost" onClick={onClose} disabled={act.busy}>
             取消
           </Button>
-          <Button variant="primary" size="lg" loading={act.busy} onClick={() => void submit()} data-testid={`rc-${action}-submit`}>
+          <Button variant="primary" size="lg" disabled={act.locked} loading={act.busy} onClick={() => void submit()} data-testid={`rc-${action}-submit`}>
             {dirty ? '标为待清' : '恢复使用'}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
+        <RoomActionStatus action={act} room={room} onResolved={onDone} />
         <Field label="说明" htmlFor="rc-note-action" hint={dirty ? '选填，例如 客人打翻了茶' : '选填，例如 配件换好了'}>
-          <Input id="rc-note-action" value={note} maxLength={MAX_ROOM_NOTE} onChange={(e) => setNote(e.target.value)} data-autofocus data-testid={`rc-${action}-note`} />
+          <Input id="rc-note-action" value={note} maxLength={MAX_ROOM_NOTE} disabled={act.locked} onChange={(e) => setNote(e.target.value)} data-autofocus data-testid={`rc-${action}-note`} />
         </Field>
-        {act.error && <Notice tone="error" title={act.error} />}
       </div>
     </Dialog>
   );

@@ -2,7 +2,7 @@
 //   · 技师管理（门店页面）：名册（花名、类型、入职时间）、组别（分组与组长）、班次（班次、排班表、临时调班）、休假（申请、审批）；
 //   · 钟房的搜索与筛选（姓名、工号、花名、拼音首字母；类型、可做项目；按状态排）；
 //   · 排位播报：叫号记录、主播报终端。
-// 没写细的默认做法都标「待确认」（docs/TECHNICIANS_V8115.md 第 6 节）。
+// 没写细的默认做法都标「待确认」（docs/TECHNICIANS_V8115.md 第 10 节，JS1–JS18）。
 
 import { matchesQuery } from './pinyin-initials';
 import type { Technician } from './technicians';

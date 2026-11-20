@@ -118,6 +118,7 @@ describe('8.1.14 → 8.1.15：迁移 189（菜品管理）', () => {
       clientKey: randomUUID(),
       prices: { standard: 5200, premium: 6800 },
       expected: { standard: 4800, premium: 6800 },
+      rev: d.rev,
       reason: '升级后调价',
     });
     expect(priced.status, JSON.stringify(priced.body)).toBe(200);

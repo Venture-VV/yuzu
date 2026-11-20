@@ -1,4 +1,4 @@
-// 房态图（飞书需求 RQ-004 第三段，v0.7.16，见 docs/ROOMMAP.md）：「客房」页的「平面图」视图。
+// 房态图（飞书需求 RQ-004 第三段，v0.7.16，见 docs/ROOMMAP.md）：「客房」页的「平面图」视图（8.1.16 起在房态中心，「视图 → 平面图」）。
 // 在用的底图按楼层画，空间台账里的每个空间按业态与状态着色（颜色与图例一一对应，口径见 @shared/floormap）：
 // 客房与房态看板同一个口径，点开可开房、查房、续住、换房、收押金、退房、改房态（都用「客房」页原来的对话框）；
 // 技师房看钟单（派钟时选的房间），点开看这间房里的钟；派对房等「开单即占用」（v0.7.19）点开可开单、结束使用、撤单；其他业态只显示业态。
@@ -68,7 +68,18 @@ export interface UsageResume {
   usageId: number | null;
 }
 
-export function FloorMapView({ board, onAction, resume = null, onResumed }: { board: RoomBoard; onAction: (a: MapAction) => void; resume?: UsageResume | null; onResumed?: () => void }) {
+/** board：客房的房态看板（只用它的房间；客房功能没开时给一个空的） */
+export function FloorMapView({
+  board,
+  onAction,
+  resume = null,
+  onResumed,
+}: {
+  board: Pick<RoomBoard, 'rooms'>;
+  onAction: (a: MapAction) => void;
+  resume?: UsageResume | null;
+  onResumed?: () => void;
+}) {
   const fm = useFloorMap();
   const plan = useActiveFloorplan(fm.data ? fm.data.floorplanBatchId : undefined, fm.data?.floorplanRev ?? 0);
   const [floorCode, setFloorCode] = useState<string | null>(null);

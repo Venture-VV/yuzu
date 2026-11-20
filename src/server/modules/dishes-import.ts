@@ -4,6 +4,7 @@
 // 预览就是把整份照生效的做法在事务里跑一遍、最后回滚——核对的规矩与单道保存完全是同一套（同一批函数、同一批约束与权限），
 // 不会出现「预览说能导、生效时被拒绝」；每一行在一个保存点里做，有问题的记下原因、只回滚这一行，接着看下一行。
 // 生效时带回预览的摘要（planHash）：预览以后菜品被别人改过、文件换过，算出来的不一样就拒绝，请重新预览。
+// 摘要里带着要改的那几道菜的版本（8.1.16）：改过去又改回来也算改过，晚到的生效请求不会把别人刚定下的又改一遍。
 //
 // 加锁（docs/LOCKING.md 第 1 节）：操作编号的咨询锁 →「菜品维护」咨询锁 → 全部价目项目（id 升序，FOR NO KEY UPDATE，与价目表导入同一个顺序）。
 
@@ -89,6 +90,8 @@ interface RowPlan {
   comboParts?: { name: string; quantity: number }[];
   /** 这一行新建 / 修改以后是哪道菜 */
   itemId?: number;
+  /** 加料、套餐内容按菜名找到的那几道（预览摘要里带上它们的版本） */
+  refIds?: number[];
   fields: string[];
   created: boolean;
   priceChanged: boolean;
@@ -385,6 +388,7 @@ async function runImport(tx: Tx, ctx: OpContext, sheet: Sheet, reason: string): 
     const base = fieldsNow.get(id)!;
     const addons = p.addonNames?.map((n) => resolve(n, '加料'));
     const combo = p.comboParts?.map((c) => ({ itemId: resolve(c.name, '套餐内容'), quantity: c.quantity }));
+    p.refIds = [...(addons ?? []), ...(combo ?? []).map((c) => c.itemId)].filter((x): x is number => x !== null);
     if (p.problems.length) continue;
     const next: DishFieldsData = {
       ...base,
@@ -416,6 +420,12 @@ async function runImport(tx: Tx, ctx: OpContext, sheet: Sheet, reason: string): 
     .map((p) => ({ row: p.row, name: p.name, action: p.created ? ('create' as const) : ('update' as const), fields: p.fields }));
   const createCount = changes.filter((c) => c.action === 'create').length;
   const updateCount = changes.length - createCount;
+  // 摘要带上要改的那几道菜（与它们按菜名找到的加料、套餐内容）开始时的版本（8.1.16，Codex 审查 d12390f 的 P1）：
+  // 预览以后它们被改过——哪怕又改回了原样——摘要就不一样，晚到的生效请求被拒绝（IMPORT_CHANGED），不会把别人刚定下的又改一遍
+  const revs = [...new Set(plans.filter((p) => p.problems.length === 0 && p.fields.length > 0).flatMap((p) => [...(p.target ? [p.target.id] : []), ...(p.refIds ?? [])]))]
+    .filter((id) => items.has(id))
+    .sort((a, b) => a - b)
+    .map((id) => `${id}:${items.get(id)!.rev}`);
   return {
     rowCount: plans.length,
     createCount,
@@ -424,7 +434,7 @@ async function runImport(tx: Tx, ctx: OpContext, sheet: Sheet, reason: string): 
     priceChangeCount: plans.filter((p) => p.problems.length === 0 && p.priceChanged).length,
     issues,
     changes,
-    planHash: hashRequest({ changes, rowCount: plans.length }),
+    planHash: hashRequest({ changes, rowCount: plans.length, revs }),
   };
 }
 

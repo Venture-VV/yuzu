@@ -283,7 +283,7 @@ test.describe('8.1.17 菜品补完', () => {
         await page.request.post(`/api/frontdesk/visits/${visitId}/cancel`, { data: { reason: 'E2E：菜品补完收尾' } });
       }
       for (const d of (await dishes(page)).filter((x: DishRow) => x.name.endsWith(RUN) && !x.deleted)) {
-        await page.request.post(`/api/dining/dishes/${d.id}/delete`, { data: { clientKey: randomUUID() } });
+        await page.request.post(`/api/dining/dishes/${d.id}/delete`, { data: { clientKey: randomUUID(), rev: d.rev } });
       }
       const res = await page.request.put('/api/admin/dining/rules', { data: { enabled: before.enabled, trackServed: before.trackServed } });
       expect(res.ok(), await res.text()).toBe(true);

@@ -1078,6 +1078,11 @@ export async function lookupFrontdeskOp(db: Db, key: string, timezone: string, e
     const { tableActionOf } = await import('../tables-v8115');
     return { found: true as const, type: row.opType as 'table_state' | 'table_merge', action: await tableActionOf(db, row.refId) };
   }
+  // 房态中心的房间动作（8.1.16）：查回编号记下的那一条房间事件
+  if (row.opType === 'space_state' || row.opType === 'space_dispatch') {
+    const { roomActionOf } = await import('../room-center-ops');
+    return { found: true as const, type: row.opType as 'space_state' | 'space_dispatch', action: await roomActionOf(db, row.refId) };
+  }
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
   return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId, timezone) };
 }

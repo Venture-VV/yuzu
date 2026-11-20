@@ -5,7 +5,7 @@ import { ArrowRight, Hourglass } from 'lucide-react';
 import { formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { FRONTDESK_OP_LABELS, isBookingOp, isRoomOp, isTableOp, isTechOp, isUsageOp, reconcilePending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
+import { FRONTDESK_OP_LABELS, isBookingOp, isRoomOp, isSpaceOp, isTableOp, isTechOp, isUsageOp, reconcilePending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
 import { onReconnect } from '../../lib/connection';
 
 /**
@@ -38,6 +38,7 @@ export function FrontdeskPendingBanner() {
           void qc.invalidateQueries({ queryKey: ['frontdesk'] });
           if (isTableOp(op.type)) void qc.invalidateQueries({ queryKey: ['dining'] });
           if (isRoomOp(op.type) || isUsageOp(op.type)) void qc.invalidateQueries({ queryKey: ['rooms'] });
+          if (isRoomOp(op.type) || isUsageOp(op.type) || isSpaceOp(op.type)) void qc.invalidateQueries({ queryKey: ['room-center'] });
           if (isTechOp(op.type)) void qc.invalidateQueries({ queryKey: ['clockroom'] });
           if (out.kind === 'found') {
             toast({ tone: 'success', title: `已查回：${op.tagCodes.join('、')} 的${FRONTDESK_OP_LABELS[op.type]}已生效`, body: '只生效了一次，无需重新操作。' });
@@ -79,19 +80,18 @@ export function FrontdeskPendingBanner() {
       navigate(`/dining/tables?${params}`);
       return;
     }
-    // 客房的操作到客房页处理：入住回到那间房的入住对话框，其余回到那张入住单
+    // 客房的操作到房态中心处理（8.1.16 客房页并进了房态中心）：入住回到那间房的入住对话框，其余回到那张入住单
     if (isRoomOp(op.type)) {
       if (op.roomId) params.set('r', String(op.roomId));
       if (op.stayIds?.[0]) params.set('s', String(op.stayIds[0]));
-      navigate(`/rooms?${params}`);
+      navigate(`/room-center?${params}`);
       return;
     }
-    // 派对房等的使用单（v0.7.19）到客房页的平面图处理：开单回到那间房的开单对话框，结束、撤单回到那张使用单
-    if (isUsageOp(op.type)) {
-      params.set('view', 'map');
+    // 派对房等的使用单（v0.7.19）、房态中心的房间动作（8.1.16）到房态中心处理：开单、房间动作回到那间房，结束、撤单回到那张使用单
+    if (isUsageOp(op.type) || isSpaceOp(op.type)) {
       if (op.spaceId) params.set('sp', String(op.spaceId));
       if (op.usageIds?.[0]) params.set('u', String(op.usageIds[0]));
-      navigate(`/rooms?${params}`);
+      navigate(`/room-center?${params}`);
       return;
     }
     // 预约（v0.7.28）到「预约」页处理：改动回到那张预约单
@@ -113,7 +113,7 @@ export function FrontdeskPendingBanner() {
     navigate(`${op.type === 'checkout' || op.type === 'checkout_refund' ? '/cashier' : '/frontdesk'}?${params}`);
   };
   const anyTable = ops.some((op) => isTableOp(op.type));
-  const anyRoom = ops.some((op) => isRoomOp(op.type) || isUsageOp(op.type));
+  const anyRoom = ops.some((op) => isRoomOp(op.type) || isUsageOp(op.type) || isSpaceOp(op.type));
   const anyTech = ops.some((op) => isTechOp(op.type));
   const objects = ['手牌', ...(anyTable ? ['桌台'] : []), ...(anyRoom ? ['房间'] : []), ...(anyTech ? ['技师'] : [])];
 

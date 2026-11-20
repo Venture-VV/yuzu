@@ -38,9 +38,12 @@ test('演示场景：前台、客房与平面图、钟房、厨房、旧账都�
     for (const code of Object.values(tagOf)) await expect(page.getByTestId(`tag-${code}`)).toHaveAttribute('data-state', 'in_use');
   });
 
-  await test.step('客房：房态看板', async () => {
+  await test.step('客房：房态中心的「客房」页签（8.1.16 起原来的「客房」页并进房态中心，/rooms 跳过去）', async () => {
     await page.goto('/rooms');
-    for (const [room, state] of Object.entries(expected.rooms)) await expect(page.getByTestId(`room-tile-${room}`)).toHaveAttribute('data-state', state);
+    await expect(page).toHaveURL(/\/room-center\?tab=hotel/);
+    // 客房原来的房态（在住 / 待打扫 / 维修）在房态中心是在用 / 待清 / 维修
+    const STATUS: Record<string, string> = { vacant: 'free', occupied: 'in_use', dirty: 'dirty', maintenance: 'maintenance' };
+    for (const [room, state] of Object.entries(expected.rooms)) await expect(page.getByTestId(`rc-room-${room}`)).toHaveAttribute('data-status', STATUS[state]!);
   });
 
   await test.step('平面图：房态颜色、房间人数、在场名单', async () => {

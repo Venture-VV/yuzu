@@ -195,7 +195,7 @@ export function AnnouncerBar({ board, onBoard }: { board: ClockroomBoard; onBoar
             {!speech.supported && '换一台能朗读的终端（门店电脑的浏览器）来播报。'}
           </p>
           {last && (
-            <p className="mt-1 truncate text-[13px] text-ink-2" data-testid="announcer-last">
+            <p className="mt-1 text-[13px] break-words text-ink-2" data-testid="announcer-last">
               <span className="text-ink-3">最近叫号 {formatTime(last.at)}：</span>
               <span className="font-semibold text-ink">{last.text}</span>
             </p>

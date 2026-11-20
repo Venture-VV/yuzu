@@ -44,9 +44,10 @@ import { AdminPage } from './AdminShell';
 import { SpaceImportCard } from './SpaceImportCard';
 import { FloorplanCard } from './FloorplanCard';
 import { LocationsCard, useInvalidateLocations } from './LocationsCard';
+import { RoomCategoriesCard } from './RoomCategoriesCard';
 import { useActiveSubTab, useGoSubTab } from '../../components/SubNav';
 
-type Tab = 'spaces' | 'zones' | 'import' | 'plans' | 'locations';
+type Tab = 'spaces' | 'zones' | 'room-categories' | 'import' | 'plans' | 'locations';
 type VerifyFilter = '' | SpaceVerifyStatus | 'unverified';
 interface Filters {
   floorId: number;
@@ -66,6 +67,8 @@ const SPACE_BASE = '/admin/spaces';
 const SPACE_TABS = [
   { key: 'spaces', label: '空间' },
   { key: 'zones', label: '楼层与区域' },
+  // 房态中心按房型分页签（8.1.16，docs/ROOM_CENTER_V8115.md 第 7.4 节）
+  { key: 'room-categories', label: '房态中心房型' },
   { key: 'plans', label: '底图' },
   { key: 'locations', label: '实时位置' },
   { key: 'import', label: '导入' },
@@ -77,7 +80,7 @@ export function SpacesSection() {
       section="spaces"
       wide
       tabs={SPACE_TABS}
-      description="楼层、区域与空间（编码图的编码，建好后不能改）、别名与核对状态；空间清单、区域清单的导入与导出；编码图转换成每层底图与房间轮廓；实时位置的开关、刷卡点与项目所在区域。客房房间在「客房」里挂接空间。"
+      description="楼层、区域与空间（编码图的编码，建好后不能改）、别名与核对状态；空间清单、区域清单的导入与导出；编码图转换成每层底图与房间轮廓；实时位置的开关、刷卡点与项目所在区域；房态中心按哪几个房型分页签。客房房间在「客房」里挂接空间。"
     >
       <SpacesBody />
     </AdminPage>
@@ -111,7 +114,9 @@ function SpacesBody() {
           }}
         />
       )}
-      {tab === 'locations' ? (
+      {tab === 'room-categories' ? (
+        <RoomCategoriesCard />
+      ) : tab === 'locations' ? (
         <LocationsCard />
       ) : tab === 'plans' ? (
         <FloorplanCard />

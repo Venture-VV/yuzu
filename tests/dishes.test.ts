@@ -50,10 +50,12 @@ const fieldsOf = (d: DishRow) => ({
 const create = (body: Record<string, unknown>, cookie = ctx.owner, key: string = randomUUID()) => api(ctx.app, cookie, 'POST', '/api/dining/dishes', { clientKey: key, ...body });
 const update = (d: DishRow, patch: Record<string, unknown>, cookie = ctx.owner, key: string = randomUUID()) =>
   api(ctx.app, cookie, 'PUT', `/api/dining/dishes/${d.id}`, { clientKey: key, rev: d.rev, ...fieldsOf(d), ...patch });
-const setActive = (id: number, active: boolean, cookie = ctx.owner, key: string = randomUUID()) => api(ctx.app, cookie, 'POST', `/api/dining/dishes/${id}/active`, { clientKey: key, active });
+/** 上下架带页面看到的版本（8.1.16）：不给的取这道菜现在的（相当于刚打开页面） */
+const setActive = async (id: number, active: boolean, cookie = ctx.owner, key: string = randomUUID(), rev?: string) =>
+  api(ctx.app, cookie, 'POST', `/api/dining/dishes/${id}/active`, { clientKey: key, active, rev: rev ?? (await board()).dishes.find((d) => d.id === id)!.rev });
 const pricesOf = (d: DishRow) => Object.fromEntries(d.prices.map((p) => [p.tier, p.price]));
 const reprice = (d: DishRow, prices: Record<string, number | null>, reason: string, cookie = ctx.owner, key: string = randomUUID()) =>
-  api(ctx.app, cookie, 'POST', `/api/dining/dishes/${d.id}/price`, { clientKey: key, prices, expected: pricesOf(d), reason });
+  api(ctx.app, cookie, 'POST', `/api/dining/dishes/${d.id}/price`, { clientKey: key, prices, expected: pricesOf(d), rev: d.rev, reason });
 const history = async (itemId?: number) => (await api(ctx.app, ctx.owner, 'GET', `/api/dining/dishes/price-changes${itemId ? `?itemId=${itemId}` : ''}`)).body as DishPriceChange[];
 const menu = async () => (await api(ctx.app, ctx.clerk, 'GET', '/api/dining/menu')).body as DiningMenu;
 const menuDish = async (name: string) => (await menu()).dishes.find((d) => d.name === name);
@@ -392,7 +394,7 @@ describe('上下架', () => {
     const v = await enter();
     expect((await orderTag(v.id, [{ itemId: d.id, quantity: 1 }], 2200)).status).toBe(200);
     const key = randomUUID();
-    const off = await setActive(d.id, false, ctx.owner, key);
+    const off = await setActive(d.id, false, ctx.owner, key, d.rev);
     expect(off.status, JSON.stringify(off.body)).toBe(200);
     expect(off.body.dish.active).toBe(false);
     expect(await menuDish('葱油拌面')).toBeUndefined();
@@ -402,7 +404,7 @@ describe('上下架', () => {
     expect((await board(ctx.owner, '?status=off')).dishes.map((x) => x.name)).toEqual(['葱油拌面']);
     // 已经点了的不受影响（账上、出品单都在）
     expect((await kitchen()).filter((k) => k.name === '葱油拌面' && k.status === 'queued').length).toBe(1);
-    const again = await setActive(d.id, false, ctx.owner, key);
+    const again = await setActive(d.id, false, ctx.owner, key, d.rev);
     expect(again.body.replayed).toBe(true);
     // 本来就是下架：不再记一条
     expect((await setActive(d.id, false)).status).toBe(200);
@@ -489,6 +491,7 @@ describe('改价', () => {
       clientKey: randomUUID(),
       prices: { standard: 5600 },
       expected: { standard: 4800 },
+      rev: d.rev,
       reason: '按旧价看的',
     });
     expect(stale.status).toBe(409);
@@ -728,6 +731,109 @@ describe('点单带做法、加料、套餐', () => {
     expect(r.body.amount).toBe(8900);
     const mine = (await kitchen()).filter((k) => k.tableSessionId === open.body.id);
     expect(mine.map((k) => `${k.name}|${k.note}|${JSON.stringify(k.parts)}`)).toEqual(['牛肉面（标准）|中辣|[]', '加蛋|配 牛肉面|[]', '牛肉面套餐||[{"name":"加蛋","quantity":3}]']);
+  });
+});
+
+// 8.1.16（Codex 审查 d12390f 的 P1）：上下架、改价、编辑都带页面看到的版本，延迟到达的旧请求被拒绝；
+// 页面结果不明时只能按编号查回、按原内容重提（同一编号）或确认作废（作废以后原请求再到也不生效）
+describe('结果待确认：延迟到达的旧请求、查回与作废', () => {
+  const lookup = (key: string, type: string, cookie = ctx.owner) => api(ctx.app, cookie, 'GET', `/api/dining/dishes/ops/${key}?type=${type}`);
+  const abandon = (key: string, body: Record<string, unknown>, cookie = ctx.owner) => api(ctx.app, cookie, 'POST', `/api/dining/dishes/ops/${key}/abandon`, body);
+  const activeAudits = async (name: string) => (await audits('dish_active_set')).filter((a) => a.summary.includes(`「${name}」`)).map((a) => a.summary);
+
+  it('上架那一笔晚到：员工已经重新上架成功、又明确下架了，晚到的上架被拒绝（DISH_CHANGED），菜还是下架；同一编号重提返回第一次的结果', async () => {
+    const made = await create({ ...base('延迟上架面', '热菜', 'restaurant:餐饮', 1800), active: false });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    const seen = made.body.dish as DishRow;
+    expect(seen.active).toBe(false);
+    // 第一次上架（A）发出去没收到结果，被网络耽搁了；员工换一个编号重新上架（B）成功，随后明确下架（C）
+    const keyA = randomUUID();
+    const keyB = randomUUID();
+    const b = await setActive(seen.id, true, ctx.owner, keyB, seen.rev);
+    expect(b.status, JSON.stringify(b.body)).toBe(200);
+    const c = await setActive(seen.id, false, ctx.owner, randomUUID(), (b.body.dish as DishRow).rev);
+    expect(c.status, JSON.stringify(c.body)).toBe(200);
+    // A 这时才到：看到的版本已经不是现在的，整笔拒绝，不把菜又上架
+    const late = await setActive(seen.id, true, ctx.owner, keyA, seen.rev);
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('DISH_CHANGED');
+    expect(late.body.error.message).toContain('现在下架');
+    expect((await dishOf('延迟上架面')).active).toBe(false);
+    expect(await menuDish('延迟上架面')).toBeUndefined();
+    expect(await activeAudits('延迟上架面')).toEqual(['菜品「延迟上架面」上架', '菜品「延迟上架面」下架']);
+    // A 没有留下编号：查回查不到、也没作废
+    expect((await lookup(keyA, 'active')).body).toEqual({ found: false, abandoned: false });
+    // B 原样重提（同一编号、同样内容）：返回第一次的结果，不再改一遍
+    const replay = await setActive(seen.id, true, ctx.owner, keyB, seen.rev);
+    expect(replay.status).toBe(200);
+    expect(replay.body).toMatchObject({ replayed: true, dish: { active: false } });
+    expect(await activeAudits('延迟上架面')).toHaveLength(2);
+    // 同一编号换了内容：拒绝
+    expect((await setActive(seen.id, false, ctx.owner, keyB, seen.rev)).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    // 编辑同理：带着旧版本的保存被拒绝
+    const edit = await update(seen, { methods: ['加辣'] });
+    expect(edit.status).toBe(409);
+    expect(edit.body.error.code).toBe('DISH_CHANGED');
+  });
+
+  it('改价那一笔晚到：价改过去又改回来，晚到的旧改价看到的价一样，但版本不一样，被拒绝；改价记录不多一条', async () => {
+    const made = await create(base('延迟改价面', '热菜', 'restaurant:餐饮', 1800));
+    const seen = made.body.dish as DishRow;
+    const keyA = randomUUID();
+    const b = await reprice(seen, { standard: 2000 }, '涨价');
+    expect(b.status, JSON.stringify(b.body)).toBe(200);
+    const c = await reprice(b.body.dish as DishRow, { standard: 1800 }, '改回原价');
+    expect(c.status, JSON.stringify(c.body)).toBe(200);
+    const before = (await history(seen.id)).length;
+    const late = await reprice(seen, { standard: 2000 }, '涨价', ctx.owner, keyA);
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('DISH_CHANGED');
+    expect((await dishOf('延迟改价面')).price).toBe(1800);
+    expect(await history(seen.id)).toHaveLength(before);
+  });
+
+  it('查回：办过的返回这道菜现在的样子；作废：没办过的登记作废，原请求之后再到整笔不做（OP_ABANDONED）；办过的不作废、返回查回的结果', async () => {
+    const made = await create({ ...base('作废测试面', '热菜', 'restaurant:餐饮', 1800), active: false });
+    const seen = made.body.dish as DishRow;
+    // 办过的编号：查回 found，带这道菜现在的样子
+    const done = randomUUID();
+    expect((await setActive(seen.id, true, ctx.owner, done, seen.rev)).status).toBe(200);
+    const found = await lookup(done, 'active');
+    expect(found.status, JSON.stringify(found.body)).toBe(200);
+    expect(found.body).toMatchObject({ found: true, type: 'active', itemId: seen.id, dish: { name: '作废测试面', active: true } });
+    // 声明的类型对不上：这个编号是别的操作的
+    expect((await lookup(done, 'price')).body.error.code).toBe('IDEMPOTENCY_CONFLICT');
+    // 办过的不作废：返回查回的结果
+    const late = await abandon(done, { type: 'active', itemId: seen.id });
+    expect(late.status, JSON.stringify(late.body)).toBe(200);
+    expect(late.body).toMatchObject({ found: true, dish: { active: true } });
+
+    // 结果不明的一笔下架（编号 lost）：确认作废以后，原请求再到也不生效
+    const now = await dishOf('作废测试面');
+    const lost = randomUUID();
+    const fenced = await abandon(lost, { type: 'active', itemId: seen.id });
+    expect(fenced.status, JSON.stringify(fenced.body)).toBe(200);
+    expect(fenced.body).toEqual({ found: false, abandoned: true });
+    expect((await lookup(lost, 'active')).body).toEqual({ found: false, abandoned: true });
+    // 重复作废：照样是已作废
+    expect((await abandon(lost, { type: 'active', itemId: seen.id })).body).toEqual({ found: false, abandoned: true });
+    const arrived = await setActive(seen.id, false, ctx.owner, lost, now.rev);
+    expect(arrived.status).toBe(409);
+    expect(arrived.body.error.code).toBe('OP_ABANDONED');
+    expect((await dishOf('作废测试面')).active).toBe(true);
+    expect((await audits('dish_op_abandoned')).map((a) => a.summary)).toEqual(['作废结果待确认的上架 / 下架（「作废测试面」）：原请求之后再到也不生效']);
+
+    // 改价、新增的作废要「定价与改价」；没有这道菜所在出品口的维护权限的不能作废它的上下架；没有菜品权限的查回、作废都进不来
+    expect((await abandon(randomUUID(), { type: 'price', itemId: seen.id }, water)).status).toBe(403);
+    expect((await abandon(randomUUID(), { type: 'create' }, water)).status).toBe(403);
+    const other = await abandon(randomUUID(), { type: 'active', itemId: seen.id }, water);
+    expect(other.status).toBe(403);
+    expect(other.body.error.message).toContain('没有餐厅的菜品维护权限');
+    expect((await lookup(lost, 'active', ctx.clerk)).status).toBe(403);
+    expect((await abandon(randomUUID(), { type: 'active' }, ctx.clerk)).status).toBe(403);
+    // 厨师长（餐厅 + 改价）能作废这道菜的改价；导入不带菜也能作废
+    expect((await abandon(randomUUID(), { type: 'price', itemId: seen.id }, chef)).body).toEqual({ found: false, abandoned: true });
+    expect((await abandon(randomUUID(), { type: 'import' }, water)).body).toEqual({ found: false, abandoned: true });
   });
 });
 

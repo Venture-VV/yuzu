@@ -331,7 +331,9 @@ export type AuditAction =
   | 'dishes_sorted'
   | 'dishes_active_bulk'
   | 'dish_deleted'
-  | 'dish_restored';
+  | 'dish_restored'
+  // 8.1.16 菜品维护的「结果待确认」：确认作废一个操作编号（Codex 审查 d12390f 的 P1，docs/DISHES_V8115.md 第 9 节）
+  | 'dish_op_abandoned';
 
 export interface AuditEntry {
   staffId: number | null;

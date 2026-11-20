@@ -117,7 +117,7 @@ beforeAll(async () => {
   // 写入期间临时加列、建空表，迁移前删掉
   await sql`ALTER TABLE visits ADD COLUMN risk_approved_by bigint, ADD COLUMN risk_approved_at timestamptz, ADD COLUMN risk_reason text`;
   await sql`CREATE TABLE bookings (id bigint, booking_no text, status text, arrival_visit_id bigint, arrived_at timestamptz)`;
-  // 现版本结账时一起结束客人开着的房间登记单（190 才有）：写入期间临时建最小的表，迁移前删掉
+  // 现版本结账时一起结束这几位客人在房态中心的登记单（190 才有）：写入期间临时建空表，迁移前删掉
   await sql`CREATE TABLE room_registrations (id bigint, space_id bigint, visit_id bigint, status text)`;
   const deps = { sql, config };
   const as = (id: number, username: string): Actor => ({ id, username, displayName: username, role: username === 'owner' ? 'owner' : 'clerk', duties: [], mustChangePassword: false });
@@ -146,6 +146,7 @@ beforeAll(async () => {
   await sql`DROP TABLE rooms`;
   await sql`DROP FUNCTION yuzu_snapshot_checkout_items(bigint, boolean)`;
   await sql`DROP TABLE space_usages`;
+  await sql`DROP TABLE room_registrations`;
   await sql`DROP TABLE coupon_rules`;
   await sql`DROP TABLE refunds`;
   await sql`DROP TABLE refund_payments`;
@@ -163,7 +164,6 @@ beforeAll(async () => {
   for (const t of ['hand_tags', 'visits', 'shifts', 'checkouts']) await sql.unsafe(`ALTER TABLE ${t} DROP COLUMN store_id`);
   await sql`ALTER TABLE visits DROP COLUMN risk_approved_by, DROP COLUMN risk_approved_at, DROP COLUMN risk_reason`;
   await sql`DROP TABLE bookings`;
-  await sql`DROP TABLE room_registrations`;
 
   expect(await migrate(sql)).toEqual(migrationsFrom('016_shift_boundary.sql'));
   // 升级后的收款这里按小额核对班次；会员体系 v2 的首充 / 续充最低（默认 5,000 元）设成不限

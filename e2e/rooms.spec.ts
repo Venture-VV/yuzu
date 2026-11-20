@@ -1,5 +1,6 @@
 // S7 客房浏览器验收（v0.7.4；店主 2026-10-31 定：住客都是洗浴客人，门票必选，房价不含门票）：
-//   后台「客房」建房型、房间、开启 → 前台接待一位客人 → 主导航「客房」→ 填手牌入住（收押金）→ 入住单收押金、按原方式退一部分
+//   后台「客房」建房型、房间、开启 → 前台接待一位客人 → 主导航「房态中心」的「客房」页签（8.1.16 起原来的「客房」页并进房态中心，
+//   卡片的状态是房态中心的五种：空闲 / 在用 / 待清 / 维修）→ 填手牌入住（收押金）→ 入住单收押金、按原方式退一部分
 //   → 换房（原房间待打扫）→ 前台结账：客人还住着客房，结账对话框里直接退房（押金原路退回），房费挂到手牌账单上和门票一起结
 //   → 改房态（打扫、维修）→ 夜审对话框 → 看板「客房」；
 //   入住响应丢失：刷新后顶部仍提醒待确认，「去处理」回到那间房的入住对话框，查回已生效、只入住一次；
@@ -63,6 +64,14 @@ async function send<T = unknown>(page: Page, method: 'post' | 'put', url: string
 }
 
 const tileOf = async (page: Page, roomNo: string) => (await getJson<RoomBoard>(page, '/api/rooms')).rooms.find((r) => r.roomNo === roomNo)!;
+/** 房态中心里的客房卡片（8.1.16）：data-status 是 free / in_use / dirty / maintenance；点卡片是 rc-open- */
+const card = (page: Page, roomNo: string) => page.getByTestId(`rc-room-${roomNo}`);
+const openCard = (page: Page, roomNo: string) => page.getByTestId(`rc-open-${roomNo}`).click();
+/** 房态中心的「客房」页签（原来的「客房」页） */
+async function hotelTab(page: Page) {
+  await page.getByRole('tablist', { name: '房型' }).getByRole('tab', { name: /^客房/ }).click();
+  await expect(page.getByTestId('rc-hotel-tools')).toBeVisible();
+}
 
 /** 收掉洗浴客人的来访（店主）：作废有效明细后撤销；已离店的不动 */
 async function clearVisit(page: Page, visitId: number, reason: string) {
@@ -159,14 +168,15 @@ test.describe('S7 客房', () => {
       const g = await checkinGuest(page, 'E2E 住客');
       visit = g.visitId;
 
-      // ① 主导航「客房」：按楼层的房态看板
-      await clickNav(page, '客房');
-      await expect(page).toHaveURL(/\/rooms/);
-      const tile1 = page.getByTestId(`room-tile-${R1}`);
-      await expect(tile1).toHaveAttribute('data-state', 'vacant');
+      // ① 主导航「房态中心」→「客房」页签（8.1.16 起原来的「客房」页并进来）
+      await clickNav(page, '房态中心');
+      await expect(page).toHaveURL(/\/room-center/);
+      await hotelTab(page);
+      const tile1 = card(page, R1);
+      await expect(tile1).toHaveAttribute('data-status', 'free');
 
       // ② 入住 E2E-01：填在店客人的手牌（小写也行），2 人；押金默认不收，这里勾上收现金 ¥200；入住挂第一晚到手牌账单上
-      await tile1.click();
+      await openCard(page, R1);
       const checkin = page.getByRole('dialog').filter({ hasText: `入住 · ${R1}` });
       await expect(checkin).toContainText('¥288 / 晚');
       await expect(checkin.getByTestId('room-checkin-submit')).toBeDisabled();
@@ -182,7 +192,7 @@ test.describe('S7 客房', () => {
       await expect(detail).toContainText(`手牌 ${g.tag}`);
       await expect(detail.getByTestId('stay-charges')).toContainText('一晚');
       await expect(detail.getByTestId('stay-deposit-balance')).toContainText('200.00');
-      await expect(tile1).toHaveAttribute('data-state', 'occupied');
+      await expect(tile1).toHaveAttribute('data-status', 'in_use');
       const stayId = (await tileOf(page, R1)).stay!.id;
 
       // ③ 收押金（微信 ¥100）、退押金（微信 ¥50，写原因）：押金按原收款方式原路退
@@ -212,8 +222,8 @@ test.describe('S7 客房', () => {
       await expect(page.getByText(`已换到 ${R2}`)).toBeVisible();
       await expect(detail).toContainText('换房记录');
       await page.keyboard.press('Escape');
-      await expect(tile1).toHaveAttribute('data-state', 'dirty');
-      await expect(page.getByTestId(`room-tile-${R2}`)).toHaveAttribute('data-state', 'occupied');
+      await expect(tile1).toHaveAttribute('data-status', 'dirty');
+      await expect(card(page, R2)).toHaveAttribute('data-status', 'in_use');
 
       // ⑤ 前台结账：客人还住着客房，不能确认结清；在结账对话框里直接退房（押金 ¥250 原路退回），房费随门票一起结
       await page.goto(`/frontdesk?v=${g.visitId}`);
@@ -255,10 +265,11 @@ test.describe('S7 客房', () => {
       expect(full.totalAmount).toBe(full.bills[0]!.amount);
       expect(full.totalAmount - (full.bills[0]!.ticketAmount ?? 0)).toBe(DAILY.price);
 
-      // ⑥ 改房态：E2E-01 打扫好（空闲）；E2E-03 设为维修（写原因）
+      // ⑥ 改房态：E2E-01 打扫好（空闲）；E2E-03 设为维修（写原因）。原来的地址 /rooms 跳到房态中心的「客房」页签
       await page.goto('/rooms');
-      await expect(page.getByTestId(`room-tile-${R2}`)).toHaveAttribute('data-state', 'dirty');
-      await page.getByTestId(`room-tile-${R1}`).click();
+      await expect(page).toHaveURL(/\/room-center\?tab=hotel/);
+      await expect(card(page, R2)).toHaveAttribute('data-status', 'dirty');
+      await openCard(page, R1);
       const hk = page.getByRole('dialog').filter({ hasText: `改房态 · ${R1}` });
       await hk.getByRole('radio', { name: '已打扫（空闲）' }).click();
       await hk.getByTestId('room-maintenance-note').fill('E2E 已检查');
@@ -267,8 +278,8 @@ test.describe('S7 客房', () => {
       await expect(hk.getByTestId('room-housekeeping-review')).toContainText(`${R1}：待打扫 → 已打扫（空闲）`);
       await hk.getByTestId('room-housekeeping-confirm').click();
       await expect(page.getByText(`${R1} 已改为已打扫`)).toBeVisible();
-      await expect(tile1).toHaveAttribute('data-state', 'vacant');
-      await page.getByTestId(`room-tile-${R3}`).click();
+      await expect(tile1).toHaveAttribute('data-status', 'free');
+      await openCard(page, R3);
       // 空闲的房点开是入住；改房态在入住对话框左下角
       await page
         .getByRole('dialog')
@@ -281,8 +292,8 @@ test.describe('S7 客房', () => {
       await hk3.getByTestId('room-maintenance-note').fill('E2E 空调不制冷');
       await hk3.getByTestId('room-housekeeping-save').click();
       await hk3.getByTestId('room-housekeeping-confirm').click();
-      await expect(page.getByTestId(`room-tile-${R3}`)).toHaveAttribute('data-state', 'maintenance');
-      await expect(page.getByTestId(`room-tile-${R3}`)).toContainText('E2E 空调不制冷');
+      await expect(card(page, R3)).toHaveAttribute('data-status', 'maintenance');
+      await expect(card(page, R3)).toContainText('E2E 空调不制冷');
 
       // ⑦ 夜审：过了加收一晚的时刻才能做
       await page.getByTestId('rooms-audit').click();
@@ -331,7 +342,7 @@ test.describe('S7 客房', () => {
       );
       await page.route('**/api/frontdesk/ops/*', (route) => route.abort('connectionreset'));
       await page.goto('/rooms');
-      await page.getByTestId(`room-tile-${R1}`).click();
+      await openCard(page, R1);
       const dialog = page.getByRole('dialog').filter({ hasText: `入住 · ${R1}` });
       await dialog.getByTestId('room-checkin-tag').fill(g.tag);
       await dialog.getByTestId('room-checkin-label').fill('E2E 断网');
@@ -344,7 +355,7 @@ test.describe('S7 客房', () => {
       await expect(banner).toContainText(`房 ${R1}`);
       await expect(banner).toContainText('客房入住');
       await banner.getByRole('button', { name: '去处理' }).click();
-      await expect(page).toHaveURL(/\/rooms/);
+      await expect(page).toHaveURL(/\/room-center/);
       const again = page.getByRole('dialog').filter({ hasText: `入住 · ${R1}` });
       await expect(again.getByTestId('pending-op')).toContainText(`房 ${R1}`);
       // 网络恢复：查回已生效，只入住一次
@@ -376,7 +387,7 @@ test.describe('S7 客房', () => {
       const g = await checkinGuest(page, 'E2E 改价');
       visit = g.visitId;
       await page.goto('/rooms');
-      await page.getByTestId(`room-tile-${R1}`).click();
+      await openCard(page, R1);
       const dialog = page.getByRole('dialog').filter({ hasText: `入住 · ${R1}` });
       await expect(dialog).toContainText('¥288 / 晚');
       await dialog.getByTestId('room-checkin-tag').fill(g.tag);

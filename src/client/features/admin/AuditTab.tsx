@@ -112,6 +112,8 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_card_lost: { label: '挂失会员卡', tone: 'ember' },
   member_card_deposit: { label: '会员卡押金', tone: 'pine' },
   member_card_returned: { label: '退卡', tone: 'clay' },
+  // 8.1.16 菜品维护结果待确认时确认作废
+  dish_op_abandoned: { label: '作废菜品操作', tone: 'clay' },
   // 8.1.17 第二家店改本店价（BW-11）
   store_price_changed: { label: '改本店价', tone: 'ember' },
   dishes_sorted: { label: '菜品排序', tone: 'neutral' },

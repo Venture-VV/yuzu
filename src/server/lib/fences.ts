@@ -154,6 +154,10 @@ export const FENCED_OPS = [
   // 编号记在 idempotency_keys（ref_id 是记下的第一条 table_events）。结果待确认时照前台的规矩查回、确认作废（Codex 审查 9ef9424）
   'table_state',
   'table_merge',
+  // 8.1.16 房态中心的房间动作（迁移 193 在约束里加了这两个类型）：维修、恢复、标待清、清洁完成（space_state），换房、退房、并房、拆并（space_dispatch）；
+  // 编号记在 idempotency_keys（ref_id 是记下的第一条 space_room_events）。登记、续钟照旧是挂账（bill_post），派对房开单照旧是 usage_open
+  'space_state',
+  'space_dispatch',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 
