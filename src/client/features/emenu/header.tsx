@@ -24,9 +24,10 @@ const ROW_MID = 55.45;
 // 原来按字数估（英文一个字 8.2、中文 14），长的英文名估少了会被裁掉一截。现在用页面上的字体在画布上量；
 // 字体下载完（document.fonts 的 loadingdone）重新量一次。量不了（没有画布）时照旧按字数估。
 
-// 分类的英文是衬线展示体（8.1.14，品牌部，PC1；样式表的 --em-en-display）：量宽用同一串字体
-const EN_FONTS = "'Playfair Display', 'Tangqi Brand En', 'Average Sans', 'Zhuque Fangsong', 'FangSong', serif";
-const ZH_FONTS = "'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif";
+// 分类的英文是衬线展示体（8.1.14，品牌部，PC1；样式表的 --em-en-display）：量宽用同一串字体。
+// 8.1.19（PD1）起授权的品牌英文字体排在最前，没放授权文件时量出来的就是 Playfair Display
+const EN_FONTS = "'Tangqi Brand En', 'Playfair Display', 'Average Sans', 'Zhuque Fangsong', 'FangSong', serif";
+const ZH_FONTS = "'Tangqi Brand Latin', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif";
 /** 分类名最多缩到设计稿的几成：再长的末尾显示「…」（一般是后台的英文名太长，后台填英文名的地方有提示） */
 export const CAT_MIN_SCALE = 0.8;
 

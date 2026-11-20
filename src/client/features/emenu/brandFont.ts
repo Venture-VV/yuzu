@@ -6,6 +6,13 @@
 import { useEffect, useState } from 'react';
 
 export const BRAND_EN_FAMILY = 'Tangqi Brand En';
+/**
+ * 同一个授权文件的第二个名字，只管拉丁字母（8.1.19，店主「所有的英文字体都要替换为数据包提供的示例字体」，PD5）：
+ * 排在中文字体串里朱雀仿宋的前面，中文里夹的字母、数字（手牌号、菜名里的英文）也是品牌字体；
+ * 中文标点（“ ” — …）不在这个范围里，照旧由朱雀仿宋出，中文的排版不变
+ */
+export const BRAND_LATIN_FAMILY = 'Tangqi Brand Latin';
+const LATIN_RANGE = 'U+0020-007E, U+00A0-00FF, U+0100-024F';
 const SOURCE = "url(/api/emenu/fonts/en.woff2) format('woff2')";
 const RETRY_MS = 10 * 60_000;
 
@@ -21,8 +28,10 @@ export function loadBrandFont(): Promise<boolean> {
   pending = (async () => {
     try {
       const face = new FontFace(BRAND_EN_FAMILY, SOURCE, { display: 'swap' });
-      await face.load();
+      const latin = new FontFace(BRAND_LATIN_FAMILY, SOURCE, { display: 'swap', unicodeRange: LATIN_RANGE });
+      await Promise.all([face.load(), latin.load()]);
       document.fonts.add(face);
+      document.fonts.add(latin);
       loaded = true;
     } catch {
       failedAt = Date.now();

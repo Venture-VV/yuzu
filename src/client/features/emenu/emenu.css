@@ -11,7 +11,9 @@
  *     .em-en 补的字距自动去掉；各处全大写小标题另补的字距换上以后照设计稿再核对一遍。
  *   · 衬线展示体（8.1.14，品牌部《工作台需求汇总 1.2》第 1 条，PENDING_DECISIONS.md PC1）：顶栏分类的英文、菜品的英文名用
  *     Playfair Display（SIL OFL 开源，随应用打包，只带拉丁字母 400 这一个文件）——衬脚明显、收笔尖、竖粗横细。用 .em-en-display；
- *     别处的英文（介绍、价格、按钮、弹窗、封面大标题）照旧是上面那一款。服务器上放没放授权的 en.woff2 都不影响这两处。
+ *     别处的英文（介绍、价格、按钮、弹窗、封面大标题）照旧是上面那一款。
+ *     8.1.19 起（《工作台需求汇总 1.3》）：这两处优先用授权的品牌英文字体 ABC Arizona Flare（Tangqi Brand En）；服务器上没放
+ *     授权的 en.woff2 时才是 Playfair Display。
  *
  * 行框（Em Box Zh / Em Box En）：两个只有 612 字节的小字体，里面没有任何常用字的字形（只映射了私用区的一个码位），只规定
  * 一行字的上沿、下沿——中文 0.707 / 0.293、英文 0.745 / 0.255（都是 1em 的比例，加起来正好 1），与设计稿 PDF 里两种字体的
@@ -60,14 +62,19 @@
    * 版面里多存一个主题色，退回 8.1.7 时那边的工作台不认、版面读不了（PENDING_DECISIONS.md PB2）
    */
   --em-dot: #bf1d25;
-  --em-zh: 'Em Box Zh', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif;
+  /* 8.1.19（PD5）：中文里夹的字母、数字也用授权的品牌英文字体（Tangqi Brand Latin 只含拉丁字母，见 brandFont.ts）；没放授权文件时跳过它 */
+  --em-zh: 'Em Box Zh', 'Tangqi Brand Latin', 'Zhuque Fangsong', 'FangSong', 'STFangsong', 'Songti SC', 'Noto Serif CJK SC', serif;
   --em-en: 'Em Box En', 'Tangqi Brand En', 'Average Sans', 'Optima', 'Zhuque Fangsong', 'FangSong', 'STFangsong', sans-serif;
   /*
    * 衬线展示体（8.1.14，品牌部，PC1）：顶栏分类的英文、菜品的英文名。行框照旧用 Em Box En（文字框的位置与原来一样）；
    * Playfair Display 里没有的字（英文名里夹的中文）落到后面几款。写在样式表里，不进工作台主题的字体（与 --em-dot 一样：
    * 版面里多存一项，退回上一版时那边的工作台不认）
    */
-  --em-en-display: 'Em Box En', 'Playfair Display', 'Tangqi Brand En', 'Average Sans', 'Zhuque Fangsong', 'FangSong', 'STFangsong', serif;
+  /*
+   * 8.1.19（品牌部《工作台需求汇总 1.3》，PENDING_DECISIONS.md PD1）：这两处换成品牌部数据包里的示例字体 ABC Arizona Flare——
+   * 就是门店授权的品牌英文字体（服务器 brand-fonts/en.woff2，Tangqi Brand En），排在最前；门店没放授权文件时照旧是 Playfair Display
+   */
+  --em-en-display: 'Em Box En', 'Tangqi Brand En', 'Playfair Display', 'Average Sans', 'Zhuque Fangsong', 'FangSong', 'STFangsong', serif;
   /*
    * 动效（8.0.13，docs/EMENU.md 第 11.3 节）：整体舒缓。要调快慢改这几个数：
    *   --em-in 进入（弹窗、抽屉、菜品详情）；--em-out 退出；--em-page 翻页与分类切换；--em-micro 按下、选中这类小反馈。
