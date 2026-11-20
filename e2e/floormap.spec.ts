@@ -273,7 +273,7 @@ test.describe('v0.7.16 房态图', () => {
       await expect(serving.getByTestId(/^clock-room-/)).toHaveText('T301 · 样例 SPA 1人间');
 
       // ② 客房 → 平面图：默认编码最多的 L3；状态色与图例一致
-      await clickNav(page, '客房');
+      await clickNav(page, '房态中心');
       await page.getByRole('radiogroup', { name: '视图' }).getByRole('radio', { name: '平面图' }).click();
       await expect(page).toHaveURL(/view=map/);
       const map = page.getByTestId('floormap');

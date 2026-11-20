@@ -2,13 +2,14 @@
 //   · 房型（后台可配）与看板：按房型分页签，每个页签的总数与空闲 / 在用 / 待清 / 维修 / 已预订各几间，房间卡片（房号、状态、客人、技师、已用时长、金额）；
 //   · 房间历史：房态中心自己的事件，加上这间房里的钟单、使用单；
 //   · 登记表单要问的两样：手牌上的客人（会员与档阶）、出单员的工号；
-//   · 给别的模块的只读入口：currentGuestOfSpace（这间服务房间里现在登记的是哪位客人——餐饮「只填房号」点单用）。
+//   · 「结果待确认」：房间动作（space_state / space_dispatch）按编号查回、确认作废（按原业务的权限；只管打扫的后勤没有前台权限也能处理）。
+// 给别的模块的只读入口 currentGuestOfSpace（这间房里现在是哪位客人——餐饮「只填房号」点单用）在 room-state.ts。
 // 状态怎么算在 room-center-core.ts，写操作在 room-center-ops.ts；客房的卡片直接用客房的房态看板（rooms.ts），不另算一遍。
 // 谁能看：看得到客房、钟房、派对房其中一样的岗位。没有前台、钟房、客房操作权限的（只管打扫的后勤）只看得到手牌号，不显示客人姓名。
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { normalizeTagCode, TAG_CODE_PATTERN, ZONE_LABELS } from '@shared/frontdesk';
+import { normalizeTagCode, TAG_CODE_PATTERN, ZONE_LABELS, type FrontdeskOpLookup } from '@shared/frontdesk';
 import { formatYuan } from '@shared/money';
 import { can } from '@shared/permissions';
 import {
@@ -47,11 +48,11 @@ import { isUniqueViolation, type Db, type Tx } from '../db';
 import { guard, guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import { ctxOf, type Actor, type Deps, type OpContext } from '../lib/context';
-import { conflict, notFound, unprocessable } from '../lib/errors';
+import { conflict, forbidden, notFound, unprocessable } from '../lib/errors';
 import { currentStoreId, DEFAULT_STORE_ID } from '../lib/store-context';
 import { idParam, parse } from '../lib/validate';
 import { monthDayTime } from './bookings';
-import { businessDate, setTxTimeouts } from './frontdesk/common';
+import { businessDate, FRONTDESK_OP_PERMISSIONS, setTxTimeouts } from './frontdesk/common';
 import { memberGradeBadges } from './membership';
 import { guestName, loadRoomFacts, roomLabel, statusOfFacts, type GuestFact, type SessionFact } from './room-center-core';
 import {
@@ -561,28 +562,6 @@ export async function lookupGuest(deps: Deps, raw: unknown): Promise<RoomGuestLo
   };
 }
 
-// ───────────────────────── 给别的模块：这间房里现在是哪位客人 ─────────────────────────
-
-/**
- * 这间服务房间里现在登记的客人（餐饮「只填房号」点单按它找到手牌）：有登记单的取先登记的那一位；
- * 没有登记单、钟房直接派进来的，取还没结束的钟里最早的那一张的客人；都没有（空房、待清、维修）为 null。
- * 只读、不加锁；传事务或连接都行。别家店的空间按没有算。
- */
-export async function currentGuestOfSpace(db: Db, spaceId: number): Promise<{ visitId: number; tagNo: string; memberId: number | null } | null> {
-  const [row] = await db<{ visitId: number; tagNo: string; memberId: number | null }[]>`
-    SELECT g.visit_id, h.code AS tag_no, v.member_id
-    FROM (
-      SELECT r.visit_id, 0 AS rank, r.id AS seq FROM room_registrations r
-      WHERE r.space_id = ${spaceId} AND r.status = 'open' AND r.store_id = ${currentStoreId()}
-      UNION ALL
-      SELECT s.visit_id, 1 AS rank, s.id AS seq FROM technician_sessions s
-      WHERE s.space_id = ${spaceId} AND s.status IN ('waiting', 'serving') AND s.store_id = ${currentStoreId()}
-    ) g JOIN visits v ON v.id = g.visit_id JOIN hand_tags h ON h.id = v.tag_id
-    WHERE v.status = 'open'
-    ORDER BY g.rank, g.seq LIMIT 1`;
-  return row ? { visitId: Number(row.visitId), tagNo: row.tagNo, memberId: row.memberId === null ? null : Number(row.memberId) } : null;
-}
-
 /** 房间里一个都不该看到别家店的：路由上的房间编号先核对是本店的空间 */
 async function assertSpace(db: Db, spaceId: number) {
   const [sp] = await db<{ id: number }[]>`SELECT id FROM spaces WHERE id = ${spaceId} AND store_id = ${currentStoreId()}`;
@@ -655,6 +634,29 @@ export function registerRoomCenterRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/room-center/rooms/:id/cleaned', { preHandler: housekeep }, async (req) => {
     await markCleaned(deps, await space(req), req.body, ctxOf(req));
     return board(req);
+  });
+
+  // 「结果待确认」（8.1.16）：房间动作按编号只读查回（GET）、确认作废（POST abandon；之后原请求即使到达也整笔不做）。
+  // 只认房态中心的两类，按原业务的权限（改房态要「客房打扫、维修」，换房、退房、并房要「钟房派钟」）——只管打扫的后勤没有前台权限，
+  // 走前台的 /api/frontdesk/ops 查不了自己改房态的那一笔，所以在这里另开一个。查到的是别的业务的编号按查不到回（不给别的业务的内容）
+  const SpaceOpQuery = z.object({ type: z.enum(['space_state', 'space_dispatch'], '缺少原操作的业务类型') });
+  const OpKey = z.object({ key: z.uuid('操作编号格式不正确') });
+  const spaceOp = (req: { actor: Actor; params: unknown }, raw: unknown) => {
+    const { key } = parse(OpKey, req.params);
+    const { type } = parse(SpaceOpQuery, raw ?? {});
+    if (!FRONTDESK_OP_PERMISSIONS[type].every((p) => can(req.actor, p))) throw forbidden('处理这笔要有原业务的权限，请由有权限的员工处理');
+    return { key, type };
+  };
+  const onlySpace = (type: 'space_state' | 'space_dispatch', r: FrontdeskOpLookup): FrontdeskOpLookup => (r.found && r.type !== type ? { found: false, abandoned: false } : r);
+  app.get('/api/room-center/ops/:key', { preHandler: read }, async (req) => {
+    const { key, type } = spaceOp(req, req.query);
+    const { lookupFrontdeskOp } = await import('./frontdesk/visits');
+    return onlySpace(type, (await lookupFrontdeskOp(sql, key, deps.config.timezone, type)) as FrontdeskOpLookup);
+  });
+  app.post('/api/room-center/ops/:key/abandon', { preHandler: read }, async (req) => {
+    const { key, type } = spaceOp(req, req.body);
+    const { abandonFrontdeskOp } = await import('./frontdesk/visits');
+    return onlySpace(type, (await abandonFrontdeskOp(deps, key, type, ctxOf(req))) as FrontdeskOpLookup);
   });
 
   // 后台：房型（与空间台账同一组岗位）

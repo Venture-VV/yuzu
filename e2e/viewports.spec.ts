@@ -228,7 +228,7 @@ test.describe('视口冒烟', () => {
     }
   });
 
-  test('客房：房态看板、后台「客房」与看板「客房」，技师、餐饮、客房都开启后主导航 10 个入口都看得到（S7）', async ({ page, isMobile }) => {
+  test('客房：房态中心（8.1.16 起原来的「客房」页并进来）、后台「客房」与看板「客房」，技师、餐饮、客房都开启后主导航 10 个入口都看得到（S7）', async ({ page, isMobile }) => {
     await login(page, 'linlan');
     // 只临时打开三个功能开关看页面（不入住、不写业务数据），结束时恢复原样
     const tech = (await (await page.request.get('/api/admin/technicians')).json()) as { rules: { enabled: boolean } };
@@ -239,11 +239,11 @@ test.describe('视口冒烟', () => {
     if (!rooms.rules.enabled) expect((await page.request.put('/api/admin/rooms/rules', { data: { ...rooms.rules, enabled: true } })).ok()).toBe(true);
     try {
       await page.goto('/rooms');
-      await expect(page.getByTestId('rooms-board')).toBeVisible();
+      await expect(page.getByTestId('room-center')).toBeVisible();
       await expectFits(page);
       if (!isMobile) {
         const nav = page.getByRole('navigation', { name: '主导航' });
-        await expectNavFits(page, ['发卡台', '收银台', '钟房', '餐饮', '客房', '会员', '流水', '日结', '交班', '后台']);
+        await expectNavFits(page, ['发卡台', '收银台', '钟房', '餐饮', '房态中心', '会员', '流水', '日结', '交班', '后台']);
         await expectNavRoomForTwoLineTag(nav);
       }
       await page.goto('/admin/rooms');

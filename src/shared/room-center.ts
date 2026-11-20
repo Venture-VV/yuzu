@@ -260,6 +260,18 @@ export const ROOM_EVENT_LABELS: Record<RoomEventKind, string> = {
   restore: '恢复',
 };
 
+/**
+ * 房间动作（换房、退房、并房、拆并、维修、恢复、标待清、清洁完成）带的操作编号记下的那一条房间事件（8.1.16）：
+ * 「结果待确认」时按编号查回的就是它（页面查回以后重新取看板）
+ */
+export interface RoomActionResult {
+  eventId: number;
+  spaceId: number;
+  kind: RoomEventKind;
+  at: string;
+  replayed: boolean;
+}
+
 /** 房间历史的一行：房态中心自己的事件，加上这间房里的钟单（派钟、上钟、下钟）与使用单（开单、结束），按时间倒排 */
 export interface RoomHistoryRow {
   /** 事件是 e<编号>，钟单、使用单推出来的各有前缀（只用来当列表的 key） */

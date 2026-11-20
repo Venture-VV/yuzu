@@ -31,9 +31,8 @@ import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { QtyInput } from '../../components/QtyInput';
 import { Button, Field, Input, Notice, Segmented, Skeleton } from '../../components/ui';
-import { clockKey } from '../clockroom/ClockroomPage';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
-import { roomUrl } from './queries';
+import { clockroomKey, roomUrl } from './queries';
 import { TagField } from './TagField';
 
 /** 钟数的加减（1–9）：加减按钮 44 像素，中间可以直接输 */
@@ -82,7 +81,7 @@ export function RegisterDialog({
 }) {
   const session = useSession();
   const catalog = useCatalog();
-  const clock = useQuery({ queryKey: clockKey, queryFn: () => api.get<ClockroomBoard>('/api/clockroom') });
+  const clock = useQuery({ queryKey: clockroomKey, queryFn: () => api.get<ClockroomBoard>('/api/clockroom') });
   const [tag, setTag] = useState('');
   const [guest, setGuest] = useState<RoomGuestLookup | null>(null);
   const [itemId, setItemId] = useState<number | null>(null);
@@ -243,7 +242,10 @@ export function RegisterDialog({
             >
               <Input id="rc-seller" value={sellerNo} maxLength={MAX_SELLER_NO} onChange={(e) => setSellerNo(e.target.value)} disabled={op.locked} autoComplete="off" data-testid="rc-register-seller" />
             </Field>
-            <Field label="开始时间" hint={start === 'at' && startedAt ? `按 ${formatTime(startedAt.toISOString())} 开始计时` : start === 'later' ? '先占房、挂账、派钟；技师到了在房间详情里点「上钟」' : undefined}>
+            <Field
+              label="开始时间"
+              hint={start === 'at' && startedAt ? `按 ${formatTime(startedAt.toISOString())} 开始计时` : start === 'later' ? '先占房、挂账、派钟；技师到了在房间详情里点「上钟」' : undefined}
+            >
               <Segmented<RoomStartMode>
                 size="sm"
                 ariaLabel="开始时间"
@@ -260,7 +262,10 @@ export function RegisterDialog({
                       type="button"
                       onClick={() => setMinutesAgo(m)}
                       aria-pressed={minutesAgo === m}
-                      className={cn('h-9 rounded-full border px-3 text-[13px] font-semibold', minutesAgo === m ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-2 hover:border-ink-4')}
+                      className={cn(
+                        'h-9 rounded-full border px-3 text-[13px] font-semibold',
+                        minutesAgo === m ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-2 hover:border-ink-4',
+                      )}
                     >
                       {m} 分钟前
                     </button>
@@ -290,7 +295,10 @@ export function RegisterDialog({
                         setTechnicianId(null);
                       }}
                       aria-pressed={itemId === i.id}
-                      className={cn('h-11 rounded-full border px-3.5 text-[13.5px] font-semibold', itemId === i.id ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-2 hover:border-ink-4')}
+                      className={cn(
+                        'h-11 rounded-full border px-3.5 text-[13.5px] font-semibold',
+                        itemId === i.id ? 'border-pine bg-pine-tint text-pine' : 'border-line-strong text-ink-2 hover:border-ink-4',
+                      )}
                       data-testid={`rc-register-item-${i.name}`}
                     >
                       {i.name}
@@ -360,7 +368,16 @@ export function RegisterDialog({
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-[14px] font-bold">{t.name}</span>
                             <span className={cn('block truncate text-[12px]', why ? 'text-clay' : t.busy ? 'text-ember-deep' : 'text-ink-3')}>
-                              {why ?? (t.busy ? (t.busy.status === 'serving' ? '在钟上，登记后等钟' : '已有待上的钟') : mode === 'rotation' ? `轮钟第 ${t.position} 位` : t.state === 'rest' ? '休息中' : `今日 ${t.todayClocks} 钟`)}
+                              {why ??
+                                (t.busy
+                                  ? t.busy.status === 'serving'
+                                    ? '在钟上，登记后等钟'
+                                    : '已有待上的钟'
+                                  : mode === 'rotation'
+                                    ? `轮钟第 ${t.position} 位`
+                                    : t.state === 'rest'
+                                      ? '休息中'
+                                      : `今日 ${t.todayClocks} 钟`)}
                               {!why && ` · ${gradeLabel(t.grade)}`}
                             </span>
                           </span>

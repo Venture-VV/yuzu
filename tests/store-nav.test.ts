@@ -38,7 +38,7 @@ describe('主导航的业务域', () => {
       收银台: '前台',
       预约: '前台',
       餐饮: '餐饮',
-      客房: '房态',
+      房态中心: '房态',
       钟房: '技师',
       会员: '会员',
       客户部: '会员',
@@ -54,7 +54,14 @@ describe('主导航的业务域', () => {
 
   it('功能没开、没有权限的入口不显示，空了的组整组不显示', () => {
     const off = visibleStoreNav(canOf(OWNER), session({ technicians: false, dining: false, rooms: false, permissions: OWNER }));
-    expect(off.map((d) => d.label)).toEqual(['前台', '会员', '财务', '设置']);
+    // 房态中心（8.1.16）不看客房功能开没开：技师服务的房间、派对房、大厅都在里面
+    expect(off.map((d) => d.label)).toEqual(['前台', '房态', '会员', '财务', '设置']);
+    expect(off.find((d) => d.label === '房态')!.items.map((i) => i.label)).toEqual(['房态中心']);
+    // 只管打扫的后勤：房态这一组只有房态中心（原来的「客房」页并进来了）
+    const housekeep: Permission[] = ['room.housekeep'];
+    expect(visibleStoreNav(canOf(housekeep), session({ permissions: housekeep })).flatMap((d) => d.items.map((i) => i.label))).toEqual(['房态中心']);
+    expect(storeDomainOf('/room-center')).toBe('rooms');
+    expect(storePageOf('/room-center')?.label).toBe('房态中心');
     // 只有管家职责的后勤：会员这一组只剩「管家」，加上所有岗位都能看的导览
     const concierge: Permission[] = ['concierge.read', 'guide.view'];
     const nav = visibleStoreNav(canOf(concierge), session({ permissions: concierge }));

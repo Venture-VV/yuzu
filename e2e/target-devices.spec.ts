@@ -10,6 +10,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import type { DiningMenu, DiningReceipt, KitchenBoard, MenuDish, PendingDish, TableSessionDetail, TablesBoard } from '../src/shared/dining';
 import type { BillLine } from '../src/shared/frontdesk';
 import type { DishPriceChange, DishesBoard } from '../src/shared/dishes';
+import type { RoomCard, RoomCenterBoard, RoomGuestView, RoomHistory } from '../src/shared/room-center';
 import { expectFits } from './fits';
 
 const PASSWORD = 'yuzu2026';
@@ -47,7 +48,9 @@ type PageKey =
   | 'urgent-contract'
   // 8.1.15 菜品管理：菜品表与新增 / 编辑、改价、导入三个弹窗；点单时选做法与加料的弹窗（合成的菜品）
   | 'dining-dishes'
-  | 'dining-dish-options';
+  | 'dining-dish-options'
+  // 8.1.16 房态中心：总览、按房型的页签与各状态的数量、卡片（五种状态都有、客人名有长有短）、房间详情、登记对话框（合成的看板）
+  | 'room-center';
 
 const DEVICES: Device[] = [
   {
@@ -72,12 +75,26 @@ const DEVICES: Device[] = [
       'urgent-contract',
       'dining-dishes',
       'dining-dish-options',
+      'room-center',
     ],
   },
   {
     name: '商米 D3 Pro（系统缩放 1.5 倍）',
     viewport: { width: 1280, height: 720 },
-    pages: ['frontdesk', 'cashier', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger', 'pool', 'gift-ledger-concierge', 'requests-stock', 'dining-dishes', 'dining-dish-options'],
+    pages: [
+      'frontdesk',
+      'cashier',
+      'dining-order',
+      'dining-receipt',
+      'dining-tables',
+      'dining-ledger',
+      'pool',
+      'gift-ledger-concierge',
+      'requests-stock',
+      'dining-dishes',
+      'dining-dish-options',
+      'room-center',
+    ],
   },
   {
     name: '商米 V3',
@@ -97,6 +114,7 @@ const DEVICES: Device[] = [
       'urgent-contract',
       'dining-dishes',
       'dining-dish-options',
+      'room-center',
     ],
   },
   {
@@ -116,6 +134,7 @@ const DEVICES: Device[] = [
       'urgent-contract',
       'dining-dishes',
       'dining-dish-options',
+      'room-center',
     ],
   },
 ];
@@ -534,7 +553,159 @@ async function expectReceiptNamesReadable(page: Page) {
   for (const w of widths) expect(w.width, `「${w.text}」的宽度`).toBeGreaterThanOrEqual(Math.min(5, w.text.length) * w.size - 1);
 }
 
+// ───────────── 合成数据：房态中心（8.1.16）——SPA 房五种状态各一间（在用那间两位客人、名字长）、派对房一间在用、大厅一间空闲 ─────────────
+
+const RC_CAT = { spa: 'c990001', party: 'c990002', hall: 'c990003' } as const;
+const rcGuest = (visitId: number, tagCode: string, guest: string, techNo: string, techName: string): RoomGuestView => ({
+  registrationId: visitId,
+  visitId,
+  tagCode,
+  guest,
+  memberGradeLabel: 'L3 观澜',
+  sellerNo: 'xiaozhou',
+  sellerName: '小周',
+  note: '客人要靠窗、水温高一点',
+  since: ago(35),
+  sessions: [
+    {
+      id: visitId,
+      sessionNo: `JZ-${visitId}`,
+      visitId,
+      technicianId: visitId,
+      techNo,
+      techName,
+      itemId: 1,
+      itemName: '足底按摩（经典 90 分钟）',
+      callType: 'designated',
+      clocks: 2,
+      minutes: 180,
+      status: 'serving',
+      startedAt: ago(35),
+      plannedEnd: new Date(Date.now() + 145 * 60_000).toISOString(),
+      endedAt: null,
+      amount: 39600,
+      unitPrice: 19800,
+    },
+  ],
+  amount: 39600,
+  billAmount: 52800,
+});
+const rcRoom = (spaceId: number, code: string, categoryKey: string, kind: RoomCard['kind'], status: RoomCard['status'], extra: Partial<RoomCard> = {}): RoomCard => ({
+  key: `s${spaceId}`,
+  categoryKey,
+  kind,
+  spaceId,
+  code,
+  name: `合成${code}`,
+  floor: 'L3',
+  businessType: kind === 'service' ? 'SPA' : kind === 'party' ? '派对房' : '休息大厅',
+  capacity: 2,
+  status,
+  version: 1,
+  guests: [],
+  usage: null,
+  usagePriced: kind === 'party',
+  hotel: null,
+  maintenance: null,
+  dirtySince: null,
+  dirtyNote: '',
+  booking: null,
+  merged: [],
+  guestText: null,
+  techText: null,
+  since: null,
+  amount: null,
+  phase: null,
+  plannedEnd: null,
+  ...extra,
+});
+const RC_GUESTS = [rcGuest(990_801, 'A023', '欧阳慕容雪晴（长名字的会员）', '18', '技师小林'), rcGuest(990_802, 'B105', '王先生', '23', '技师阿秀')];
+const RC_ROOMS: RoomCard[] = [
+  rcRoom(990_701, 'S9901', RC_CAT.spa, 'service', 'free'),
+  rcRoom(990_702, 'S9902', RC_CAT.spa, 'service', 'in_use', {
+    guests: RC_GUESTS,
+    guestText: RC_GUESTS.map((g) => g.guest).join('、'),
+    techText: '18 号 技师小林、23 号 技师阿秀',
+    since: ago(35),
+    amount: 79200,
+    phase: 'serving',
+    plannedEnd: new Date(Date.now() + 145 * 60_000).toISOString(),
+  }),
+  rcRoom(990_703, 'S9903', RC_CAT.spa, 'service', 'dirty', { dirtySince: ago(12), dirtyNote: '换房换到 S9902' }),
+  rcRoom(990_704, 'S9904', RC_CAT.spa, 'service', 'maintenance', {
+    maintenance: { reason: '空调漏水，等配件到了再修', expectedAt: new Date(Date.now() + 26 * 3_600_000).toISOString(), at: ago(60), byName: '后勤小周' },
+  }),
+  rcRoom(990_705, 'S9905', RC_CAT.spa, 'service', 'booked', {
+    booking: {
+      id: 990_901,
+      bookingNo: 'YY-990901',
+      guest: '电话客人',
+      guests: 2,
+      startsAt: new Date(Date.now() + 3_600_000).toISOString(),
+      endsAt: new Date(Date.now() + 3 * 3_600_000).toISOString(),
+    },
+  }),
+  rcRoom(990_706, 'P9901', RC_CAT.party, 'party', 'in_use', { guestText: '手牌 A066 · 8 人', since: ago(80) }),
+  rcRoom(990_707, 'H9901', RC_CAT.hall, 'hall', 'free', { capacity: 40 }),
+];
+const rcCounts = (list: RoomCard[]) => ({
+  total: list.length,
+  free: list.filter((r) => r.status === 'free').length,
+  inUse: list.filter((r) => r.status === 'in_use').length,
+  dirty: list.filter((r) => r.status === 'dirty').length,
+  maintenance: list.filter((r) => r.status === 'maintenance').length,
+  booked: list.filter((r) => r.status === 'booked').length,
+});
+const RC_BOARD: RoomCenterBoard = {
+  serverTime: NOW,
+  businessDate: NOW.slice(0, 10),
+  categories: [
+    { key: RC_CAT.spa, id: 990_001, name: 'SPA 房', source: 'service', counts: rcCounts(RC_ROOMS.filter((r) => r.categoryKey === RC_CAT.spa)), hint: null },
+    { key: RC_CAT.party, id: 990_002, name: '派对房', source: 'party', counts: rcCounts(RC_ROOMS.filter((r) => r.categoryKey === RC_CAT.party)), hint: null },
+    { key: RC_CAT.hall, id: 990_003, name: '休息大厅', source: 'hall', counts: rcCounts(RC_ROOMS.filter((r) => r.categoryKey === RC_CAT.hall)), hint: null },
+  ],
+  total: rcCounts(RC_ROOMS),
+  rooms: RC_ROOMS,
+};
+const RC_HISTORY: RoomHistory = {
+  spaceId: 990_702,
+  code: 'S9902',
+  name: '合成S9902',
+  rows: [
+    { key: 'e1', at: ago(10), label: '换房（换入）', text: '从 S9903 换来 · 手牌 A023 · 单与计时不变 · 空调不凉', staffName: '小周', kind: 'move_in' },
+    { key: 'e2', at: ago(35), label: '登记', text: '手牌 A023 · 足底按摩（经典 90 分钟） × 2 · 18 号 技师小林（点钟） · 出单员 xiaozhou 小周 · ¥396.00', staffName: '小周', kind: 'register' },
+  ],
+};
+
 const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
+  // 8.1.16 房态中心（合成的看板）：总览、SPA 房页签（五种状态的卡片、各状态的数量）、在用房间的详情（两位客人、动作、历史）、空闲房间的登记对话框
+  'room-center': async (page) => {
+    await page.route('**/api/room-center', (route) => route.fulfill({ json: RC_BOARD }));
+    await page.route('**/api/room-center/rooms/*/history', (route) => route.fulfill({ json: RC_HISTORY }));
+    try {
+      await page.goto('/room-center');
+      await expect(page.getByTestId('rc-summary')).toBeVisible();
+      await expectFits(page);
+      await page.getByTestId(`rc-tab-${RC_CAT.spa}`).click();
+      await expect(page.getByTestId('rc-room-S9905')).toHaveAttribute('data-status', 'booked');
+      await expectFits(page);
+      await expectOnScreen(page, ['rc-count-total', 'rc-count-maintenance', 'rc-open-S9901', 'rc-detail-S9901']);
+      await page.getByTestId('rc-detail-S9902').click();
+      await expect(page.getByTestId('rc-history')).toBeVisible();
+      await expectFits(page);
+      await expectOnScreen(page, ['rc-act-checkout', 'rc-act-move', 'rc-act-join']);
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('rc-room-dialog')).toHaveCount(0);
+      await page.getByTestId('rc-open-S9901').click();
+      await expect(page.getByTestId('rc-register').or(page.getByText('技师没取回来'))).toBeVisible();
+      await expectFits(page);
+      await expectOnScreen(page, ['rc-register-submit']);
+      await page.keyboard.press('Escape');
+    } finally {
+      await page.unroute('**/api/room-center');
+      await page.unroute('**/api/room-center/rooms/*/history');
+    }
+  },
   // 8.1.10 核库：待核库页签；合成的需求单详情与核库对话框（三种行都有，选替代的一行）；等部门确认替代的那张
   'requests-stock': async (page) => {
     await page.goto('/erp/requests?view=stock');

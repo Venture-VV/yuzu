@@ -29,7 +29,7 @@ import { Button, ConfirmCheck, Field, Input, Notice, Skeleton } from '../../comp
 import { useCheckoutPreview, usePreview, useServerNow, stayText } from './queries';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { cardProblem } from '@shared/frontdesk-risk';
-import { ReaderStatusLine, TagCardInput, type CardMessage } from './TagCardInput';
+import { ReaderStatusLine, TagCardInput, type CardMessage, type TagCardInputProps } from './TagCardInput';
 import { GroupMark, VipChip, ZoneChip } from './parts';
 import { PendingPanel, useFrontdeskOp } from './pending';
 
@@ -638,5 +638,21 @@ function PreviewColumns({ bill, priced, pricing, now }: { bill: PreviewBill; pri
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * 在店客人的牌号框（8.1.16 房态中心登记用，docs/ROOM_CENTER_V8115.md 第 7.2 节）：就是 TagCardInput（读卡器刷到的先按芯片号查绑定、随时能手输），
+ * 刷到的牌要是在店的（有来访）——空闲、停用、锁定的写明原因。
+ * 放在这里（已经引了 TagCardInput 的模块）给房态中心用，不让房态中心直接引 TagCardInput：多一个模块直接引它，打包时前台的共用代码
+ * （手牌状态章、前台的取数等）会被挤进首屏主包，主包超过 check:bundle 的上限（8.1.16 实测 881 KB → 903 KB）。
+ */
+export function InStoreTagInput(props: Omit<TagCardInputProps, 'check' | 'okText'>) {
+  return (
+    <TagCardInput
+      {...props}
+      check={(found) => (found.state === 'in_use' ? null : `手牌 ${found.tag.code} 现在没有在店的客人（要先在发卡台接待、领手牌）`)}
+      okText={(found) => `已读到 ${found.tag.code}，带出这位客人`}
+    />
   );
 }
