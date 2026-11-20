@@ -24,6 +24,7 @@ import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, isTypingTarget, relativeTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useToast } from '../../components/Toast';
@@ -244,28 +245,24 @@ function CatalogCard({ overview }: { overview: DeviceOverview }) {
   return (
     <Card className="p-4" data-testid="devices-catalog">
       <h2 className="mb-2 text-[15px] font-bold">采购清单对数</h2>
-      <table className="w-full text-[13px]">
-        <thead className="text-left text-ink-3">
-          <tr>
-            <th className="py-1 font-semibold">类别 · 型号</th>
-            <th className="py-1 text-right font-semibold">采购</th>
-            <th className="py-1 text-right font-semibold">已登记</th>
-            <th className="py-1 text-right font-semibold">在线</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((l) => (
-            <tr key={l.key} className="border-t border-line" data-testid={`devices-catalog-${l.key}`}>
-              <td className="py-1.5">
-                {l.category} · {l.brand} {l.model}
-              </td>
-              <td className="py-1.5 text-right tabular-nums">{l.purchased}</td>
-              <td className={cn('py-1.5 text-right tabular-nums', l.registered !== l.purchased && 'font-semibold text-clay')}>{l.registered}</td>
-              <td className="py-1.5 text-right tabular-nums">{l.online}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        variant="plain"
+        rows={lines}
+        rowKey={(l) => l.key}
+        rowTestId={(l) => `devices-catalog-${l.key}`}
+        columns={[
+          { key: 'model', header: '类别 · 型号', cell: (l) => `${l.category} · ${l.brand} ${l.model}`, className: 'w-full' },
+          { key: 'purchased', header: '采购', numeric: true, cell: (l) => l.purchased },
+          {
+            key: 'registered',
+            header: '已登记',
+            numeric: true,
+            // 与采购数不符：颜色加文字（8.1.17 YS-4）
+            cell: (l) => (l.registered !== l.purchased ? <span className="font-semibold text-clay">{l.registered}（不符）</span> : l.registered),
+          },
+          { key: 'online', header: '在线', numeric: true, cell: (l) => l.online },
+        ]}
+      />
     </Card>
   );
 }

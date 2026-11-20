@@ -65,6 +65,9 @@
     "inline-dvh": 1,
     "navigator.onLine": 1,
     "polling": 64,
+    "raw-dialog": 11,
+    "raw-table": 105,
+    "small-text": 116,
     "status-500": 2
   },
   "duplicationMaxPercent": 1,

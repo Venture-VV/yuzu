@@ -31,6 +31,7 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, downloadUrl, formatDateTime, formatTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { DateNav } from '../../components/DateNav';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
@@ -301,37 +302,32 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
         {/* 余额核对（手机上表格放不下时在框内横向滑动） */}
         <Card className="p-5">
           <SectionTitle>余额核对</SectionTitle>
-          <div className="mt-3 overflow-x-auto rounded-lg border border-line">
-            <table className="w-full min-w-max text-[13px]">
-              <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                <tr>
-                  <th className="px-3 py-2 text-left">会员储值</th>
-                  <th className="px-3 py-2 text-right">期初</th>
-                  <th className="px-3 py-2 text-right">本日变动</th>
-                  <th className="px-3 py-2 text-right">期末</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {(['principal', 'bonus'] as const).map((k) => (
-                  <tr key={k}>
-                    <td className="px-3 py-2.5 font-semibold">
-                      <span className={cn('mr-2 inline-block size-2 rounded-full', k === 'principal' ? 'bg-pine' : 'bg-yuzu')} />
-                      {k === 'principal' ? '本金' : '赠金'}
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <Money cents={s.balances.opening[k]} className="text-ink-2" />
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <Money cents={s.net[k]} signed className={cn('font-semibold', s.net[k] < 0 ? 'text-clay' : s.net[k] > 0 ? 'text-moss' : 'text-ink-4')} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <Money cents={s.balances.closing[k]} className="font-bold" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            className="mt-3"
+            rows={['principal', 'bonus'] as const}
+            rowKey={(k) => k}
+            columns={[
+              {
+                key: 'kind',
+                header: '会员储值',
+                cellClassName: 'font-semibold',
+                cell: (k) => (
+                  <>
+                    <span className={cn('mr-2 inline-block size-2 rounded-full', k === 'principal' ? 'bg-pine' : 'bg-yuzu')} />
+                    {k === 'principal' ? '本金' : '赠金'}
+                  </>
+                ),
+              },
+              { key: 'opening', header: '期初', numeric: true, cell: (k) => <Money cents={s.balances.opening[k]} className="text-ink-2" /> },
+              {
+                key: 'net',
+                header: '本日变动',
+                numeric: true,
+                cell: (k) => <Money cents={s.net[k]} signed className={cn('font-semibold', s.net[k] < 0 ? 'text-clay' : s.net[k] > 0 ? 'text-moss' : 'text-ink-4')} />,
+              },
+              { key: 'closing', header: '期末', numeric: true, cell: (k) => <Money cents={s.balances.closing[k]} className="font-bold" /> },
+            ]}
+          />
           <ul className="mt-4 space-y-2.5">
             {s.checks.map((c) => (
               <li key={c.key} className="flex gap-2.5">
@@ -363,36 +359,39 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
           {/* 按员工 */}
           <Card className="p-5">
             <SectionTitle>按员工</SectionTitle>
-            {s.byStaff.length === 0 ? (
-              <p className="mt-3 text-[13px] text-ink-4">无业务</p>
-            ) : (
-              <table className="mt-2 w-full text-[13px]">
-                <thead className="text-[12px] text-ink-3">
-                  <tr>
-                    <th className="py-1.5 text-left font-semibold">员工</th>
-                    <th className="py-1.5 text-right font-semibold">充值实收</th>
-                    <th className="py-1.5 text-right font-semibold">消费</th>
-                    <th className="py-1.5 text-right font-semibold">撤销</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line/70">
-                  {s.byStaff.map((st) => (
-                    <tr key={st.staffId}>
-                      <td className="py-2 font-semibold">{st.name}</td>
-                      <td className="py-2 text-right">
-                        <Money cents={st.rechargePaid} className="text-lake" />
-                        <span className="ml-1 text-[12px] text-ink-3">/{st.rechargeCount}</span>
-                      </td>
-                      <td className="py-2 text-right">
-                        <Money cents={st.consumeTotal} />
-                        <span className="ml-1 text-[12px] text-ink-3">/{st.consumeCount}</span>
-                      </td>
-                      <td className="num py-2 text-right">{st.reversalCount}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            <DataTable
+              variant="plain"
+              className="mt-2"
+              empty="无业务"
+              rows={s.byStaff}
+              rowKey={(st) => st.staffId}
+              columns={[
+                { key: 'name', header: '员工', cellClassName: 'font-semibold', cell: (st) => st.name },
+                {
+                  key: 'recharge',
+                  header: '充值实收',
+                  numeric: true,
+                  cell: (st) => (
+                    <>
+                      <Money cents={st.rechargePaid} className="text-lake" />
+                      <span className="ml-1 text-[12px] text-ink-3">/{st.rechargeCount}</span>
+                    </>
+                  ),
+                },
+                {
+                  key: 'consume',
+                  header: '消费',
+                  numeric: true,
+                  cell: (st) => (
+                    <>
+                      <Money cents={st.consumeTotal} />
+                      <span className="ml-1 text-[12px] text-ink-3">/{st.consumeCount}</span>
+                    </>
+                  ),
+                },
+                { key: 'reversals', header: '撤销', numeric: true, cell: (st) => st.reversalCount },
+              ]}
+            />
           </Card>
         </div>
       </div>
@@ -733,34 +732,18 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
           <p className="mt-1.5 text-[12.5px] text-ink-3">按收款方式核对抽屉现金与各收款账户（已减去当天的退款单）；会员储值、团购券、优惠 / 免单、券抵扣不计入</p>
         </div>
         <div className="px-5 py-4">
-          <table className="w-full text-[13px]">
-            <thead className="text-[12px] text-ink-3">
-              <tr>
-                <th className="pb-1.5 text-left font-semibold">方式</th>
-                <th className="pb-1.5 text-right font-semibold">充值</th>
-                <th className="pb-1.5 text-right font-semibold">结账</th>
-                <th className="pb-1.5 text-right font-semibold">退款</th>
-                <th className="pb-1.5 text-right font-semibold">合计</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/70">
-              {cashMethods.map((r) => (
-                <tr key={r.method}>
-                  <td className="py-1.5 font-semibold text-ink-2">{PAYMENT_METHOD_LABELS[r.method]}</td>
-                  <td className="py-1.5 text-right">
-                    <Money cents={r.recharge} className="text-ink-3" />
-                  </td>
-                  <td className="py-1.5 text-right">
-                    <Money cents={r.checkout} className="text-ink-3" />
-                  </td>
-                  <td className="py-1.5 text-right">{r.refund ? <Money cents={-r.refund} signed className="text-ember" /> : <span className="text-ink-4">—</span>}</td>
-                  <td className="py-1.5 text-right">
-                    <Money cents={r.total} className="font-bold" />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            variant="plain"
+            rows={cashMethods}
+            rowKey={(r) => r.method}
+            columns={[
+              { key: 'method', header: '方式', cellClassName: 'font-semibold text-ink-2', cell: (r) => PAYMENT_METHOD_LABELS[r.method] },
+              { key: 'recharge', header: '充值', numeric: true, cell: (r) => <Money cents={r.recharge} className="text-ink-3" /> },
+              { key: 'checkout', header: '结账', numeric: true, cell: (r) => <Money cents={r.checkout} className="text-ink-3" /> },
+              { key: 'refund', header: '退款', numeric: true, cell: (r) => (r.refund ? <Money cents={-r.refund} signed className="text-ember" /> : <span className="text-ink-4">—</span>) },
+              { key: 'total', header: '合计', numeric: true, cell: (r) => <Money cents={r.total} className="font-bold" /> },
+            ]}
+          />
         </div>
       </Card>
     </div>

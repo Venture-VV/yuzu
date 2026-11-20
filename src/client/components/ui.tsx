@@ -41,7 +41,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type}
       disabled={disabled || loading}
       className={cn(
-        'relative inline-flex shrink-0 select-none items-center justify-center font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow,transform] duration-150 ease-out active:scale-[0.975] disabled:active:scale-100',
+        // tap：点按热区补到 44 × 44（8.1.17 YS-3，样子不变；styles.css）
+        'tap relative inline-flex shrink-0 select-none items-center justify-center font-semibold whitespace-nowrap transition-[background-color,border-color,color,box-shadow,transform] duration-150 ease-out active:scale-[0.975] disabled:active:scale-100',
         VARIANTS[variant],
         SIZES[size],
         className,
@@ -52,7 +53,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {children}
       {kbd && !loading && (
         <kbd
-          className={cn('ml-0.5 rounded-[5px] px-1.5 py-px text-[11px] font-semibold leading-4', variant === 'primary' || variant === 'danger' ? 'bg-white/14 text-paper/80' : 'bg-ink/6 text-ink-3')}
+          className={cn('ml-0.5 rounded-[5px] px-1.5 py-px text-[12px] font-semibold leading-4', variant === 'primary' || variant === 'danger' ? 'bg-white/14 text-paper/80' : 'bg-ink/6 text-ink-3')}
         >
           {kbd}
         </kbd>
@@ -68,7 +69,7 @@ export function IconButton({ label, className, children, ...rest }: ButtonHTMLAt
       aria-label={label}
       title={label}
       className={cn(
-        'inline-flex size-9 items-center justify-center rounded-md text-ink-2 transition-[background-color,color,transform] duration-150 hover:bg-paper-2 hover:text-ink active:scale-[0.92] disabled:text-ink-4 disabled:active:scale-100',
+        'tap relative inline-flex size-9 items-center justify-center rounded-md text-ink-2 transition-[background-color,color,transform] duration-150 hover:bg-paper-2 hover:text-ink active:scale-[0.92] disabled:text-ink-4 disabled:active:scale-100',
         className,
       )}
       {...rest}
@@ -199,7 +200,7 @@ export function Segmented<T extends string>({
             disabled={o.disabled}
             onClick={() => onChange(o.value)}
             className={cn(
-              'relative flex-1 rounded-[9px] font-semibold whitespace-nowrap transition-colors duration-150 disabled:opacity-40',
+              'tap relative flex-1 rounded-[9px] font-semibold whitespace-nowrap transition-colors duration-150 disabled:opacity-40',
               size === 'sm' ? 'h-7 px-2.5 text-[12.5px]' : 'h-9 px-3.5 text-[13.5px]',
               active ? cn('text-ink', !thumb.style && 'bg-card shadow-[0_1px_2px_rgb(28_35_31/0.1)]') : 'text-ink-3 hover:text-ink',
             )}
@@ -270,7 +271,7 @@ export function PendingBadge({ className, title }: { className?: string; title?:
     <span
       title={title ?? '经营规则尚待店主确认，当前为模拟规则'}
       className={cn(
-        'inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-dashed border-yuzu-deep/50 bg-yuzu-tint px-2 text-[11.5px] leading-none font-semibold text-yuzu-deep',
+        'inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-dashed border-yuzu-deep/50 bg-yuzu-tint px-2 text-[12px] leading-none font-semibold text-yuzu-deep',
         className,
       )}
     >
@@ -284,7 +285,7 @@ export function Kbd({ children, className }: { children: ReactNode; className?: 
   return (
     <kbd
       className={cn(
-        'inline-flex h-5 min-w-5 items-center justify-center rounded-[5px] border border-line-strong bg-card px-1 text-[11px] font-semibold text-ink-3 shadow-[0_1px_0_var(--color-line-strong)]',
+        'inline-flex h-5 min-w-5 items-center justify-center rounded-[5px] border border-line-strong bg-card px-1 text-[12px] font-semibold text-ink-3 shadow-[0_1px_0_var(--color-line-strong)]',
         className,
       )}
     >
@@ -359,7 +360,7 @@ export function Notice({
 export function InfoItem({ label, children, wide, full }: { label: string; children: ReactNode; wide?: boolean; full?: boolean }) {
   return (
     <div className={cn('min-w-0', wide && 'col-span-2', full && 'col-span-full')}>
-      <dt className="text-[11.5px] font-semibold text-ink-3">{label}</dt>
+      <dt className="text-[12px] font-semibold text-ink-3">{label}</dt>
       <dd className="truncate font-semibold text-ink">{children}</dd>
     </div>
   );

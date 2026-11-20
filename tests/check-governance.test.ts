@@ -131,6 +131,26 @@ describe('约定检查（docs/CONVENTIONS.md 里能查的几条）', () => {
     expect(conventionCounts('src/client/features/clockroom/ClockroomPage.tsx', timers)).toEqual({});
   });
 
+  it('小于 12 像素的字、手写的表格与弹窗各自记数；打印纸样、电子菜单版面、公共部件自己的实现不算（8.1.17 YS-1、YS-5）', () => {
+    const page = [
+      'export const A = () => <p className="text-[11px] text-[11.5px] text-[9px] text-[12px] text-[12.5px] text-[13px]">x</p>;',
+      'export const B = () => <table><tbody /></table>;',
+      'export const C = () => <div role="dialog" aria-modal>x</div>;',
+      '// <table> 与 text-[10px] 写在注释里不算',
+    ].join('\n');
+    expect(conventionCounts('src/client/features/x/Page.tsx', page)).toEqual({ 'small-text': 3, 'raw-table': 1, 'raw-dialog': 1 });
+    expect(conventionCounts('src/canteen-app/pages/Me.tsx', page)).toEqual({ 'small-text': 3, 'raw-table': 1, 'raw-dialog': 1 });
+    // 整个目录除外（以 / 结尾）与单个文件除外
+    expect(conventionCounts('src/client/features/print/CheckoutPrintPage.tsx', page)).toEqual({ 'raw-dialog': 1 });
+    expect(conventionCounts('src/client/features/emenu/EmenuPage.tsx', page)).toEqual({ 'raw-table': 1 });
+    expect(conventionCounts('src/client/features/studio/Canvas.tsx', page)).toEqual({ 'raw-table': 1, 'raw-dialog': 1 });
+    expect(conventionCounts('src/client/features/studio/panels.tsx', page)).toEqual({ 'small-text': 3, 'raw-table': 1, 'raw-dialog': 1 });
+    expect(conventionCounts('src/client/components/DataTable.tsx', '<table className="w-full" />')).toEqual({});
+    expect(conventionCounts('src/client/components/Overlay.tsx', '<div role="dialog" />')).toEqual({});
+    // 服务端不是页面
+    expect(conventionCounts('src/server/modules/x.ts', page)).toEqual({});
+  });
+
   it('行内样式里的 dvh 记数；类名里带方括号的写法（打包时会补 vh）不算', () => {
     const code = "export const X = () => <div className=\"h-dvh max-h-[88dvh]\" style={{ height: '100dvh', minHeight: 'calc(100dvh - 2rem)' }} />;";
     expect(scanPageCode('x.tsx', code).inlineDvh).toBe(2);

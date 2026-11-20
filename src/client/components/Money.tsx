@@ -2,13 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { formatAmount } from '@shared/money';
 import { cn } from '../lib/utils';
 
-/** 金额展示：¥ 符号缩小、分位弱化，便于一眼读出整数部分 */
+/**
+ * 金额展示：¥ 符号缩小、分位弱化，便于一眼读出整数部分。
+ * 8.1.17（《浴族系统需求汇总》系统整体，docs/YUZU_REQ_V8117.md YS-1、YS-2）：缩小的 ¥ 与分位也不小于 12 像素；
+ * 关键金额（应收、实收、合计、找零、会员余额、交班与日结的合计）写 size="key"，不小于 16 像素（要更大照旧写在 className 里）
+ */
 export function Money({
   cents,
   className,
   signed,
   muted,
   symbolClassName,
+  size,
 }: {
   cents: number;
   className?: string;
@@ -16,16 +21,18 @@ export function Money({
   signed?: boolean;
   muted?: boolean;
   symbolClassName?: string;
+  /** 关键金额：不小于 16 像素、加粗；页面上用 [data-money="key"] 核对 */
+  size?: 'key';
 }) {
   const text = formatAmount(cents);
   const [int, dec] = text.split('.');
   const sign = signed ? (cents > 0 ? '+' : cents < 0 ? '−' : '') : cents < 0 ? '−' : '';
   return (
-    <span className={cn('num inline-flex items-baseline whitespace-nowrap', muted && 'text-ink-3', className)}>
+    <span className={cn('num inline-flex items-baseline whitespace-nowrap', size === 'key' && 'text-[16px] font-bold', muted && 'text-ink-3', className)} data-money={size}>
       {sign && <span className="mr-[0.08em]">{sign}</span>}
-      <span className={cn('mr-[0.12em] text-[0.72em] font-semibold opacity-70', symbolClassName)}>¥</span>
+      <span className={cn('mr-[0.12em] text-[length:max(12px,0.72em)] font-semibold opacity-70', symbolClassName)}>¥</span>
       <span>{int}</span>
-      <span className="text-[0.78em] opacity-70">.{dec}</span>
+      <span className="text-[length:max(12px,0.78em)] opacity-70">.{dec}</span>
     </span>
   );
 }

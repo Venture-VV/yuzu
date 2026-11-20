@@ -91,7 +91,44 @@ export const CONVENTION_RULES = [
     allow: [],
     hint: '新的定时取数用 lib/livePoll 的 useLivePoll（后台不取、断网不取、回到页面与网络恢复时马上取），不用 refetchInterval；纯界面的计时器（倒计时、轮播）不在此列',
   },
+  // 8.1.17（《浴族系统需求汇总》系统整体，docs/YUZU_REQ_V8117.md YS-1、YS-5）：小于 12 像素的字、手写的表格与弹窗只降不升。
+  // allow 里以 / 结尾的是整个目录：打印的纸样（80mm 小票、标签、巡场码、开通卡按毫米排）、平板电子菜单的版面（按设计稿等比缩放）、
+  // 工作台画布上的量距标注、图表的坐标刻度不算小字；公共部件自己的实现不算手写
+  {
+    key: 'small-text',
+    pattern: /\btext-\[(?:\d|1[01])(?:\.\d+)?px\]/g,
+    scope: ['src/client/', 'src/canteen-app/'],
+    allow: [
+      'src/client/features/print/',
+      'src/client/features/emenu/',
+      'src/client/features/canteen/CardsPrintPage.tsx',
+      'src/client/features/canteen/PosterPrintPage.tsx',
+      'src/client/features/assets/AssetLabelsPrintPage.tsx',
+      'src/client/features/patrol/CodesPrintPage.tsx',
+      'src/client/features/studio/Canvas.tsx',
+      'src/client/features/studio/TemplateCanvas.tsx',
+      'src/client/features/dashboard/charts.tsx',
+    ],
+    hint: '屏幕上给人读的字不小于 12 像素（text-[12px] 起）；打印的纸样、平板电子菜单的版面、画布上的量距、图表刻度除外（docs/YUZU_REQ_V8117.md YS-1）',
+  },
+  {
+    key: 'raw-table',
+    pattern: /<table\b/g,
+    scope: ['src/client/', 'src/canteen-app/'],
+    allow: ['src/client/components/DataTable.tsx', 'src/client/features/print/'],
+    hint: '表格用公共的 DataTable（src/client/components/DataTable.tsx：表头、对齐、金额等宽、空态、加载失败、窄屏横向滚动都在里面），不再手写 <table>',
+  },
+  {
+    key: 'raw-dialog',
+    pattern: /role=(?:"dialog"|'dialog'|\{'dialog'\})/g,
+    scope: ['src/client/', 'src/canteen-app/'],
+    allow: ['src/client/components/Overlay.tsx', 'src/client/features/emenu/'],
+    hint: '弹窗用公共的 Dialog / Sheet（src/client/components/Overlay.tsx：遮罩、Esc、焦点、手机上全屏都在里面），不再自己画',
+  },
 ];
+
+/** allow 里的一项管不管这个文件：以 / 结尾的是整个目录 */
+const allowed = (allow, file) => allow.some((a) => (a.endsWith('/') ? file.startsWith(a) : a === file));
 
 /** 去掉注释（约定检查只看代码；注释里提到这些写法不算） */
 export function stripComments(code) {
@@ -103,7 +140,7 @@ export function conventionCounts(file, code) {
   const counts = {};
   const text = stripComments(code);
   for (const rule of CONVENTION_RULES) {
-    if (!rule.scope.some((dir) => file.startsWith(dir)) || rule.allow.includes(file)) continue;
+    if (!rule.scope.some((dir) => file.startsWith(dir)) || allowed(rule.allow, file)) continue;
     const n = (text.match(rule.pattern) ?? []).length;
     if (n) counts[rule.key] = n;
   }

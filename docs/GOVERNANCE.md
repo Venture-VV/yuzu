@@ -160,6 +160,7 @@ yuzu 的代码本身不乱（重复率 0.78%，没用到的文件 0 个），问
 | 重复代码 | jscpd：70 个词、8 行起算 | 上限 1%（现在 0.78%） | 抽成公共函数或部件 |
 | 约定（三期起） | `docs/CONVENTIONS.md` 里能查的四条：看 `navigator.onLine`、手写 `status < 500`、用 `refetchInterval` 定时取数、行内样式写 dvh | 1、2、64、1 处 | 照提示换成公共小工具的写法 |
 | 用例里的 `.only`（三期起） | `tests/`、`e2e/`、`e2e-canteen/` | 0（硬规则） | 去掉 |
+| 小字、手写表格与弹窗（8.1.17 起，`docs/YUZU_REQ_V8117.md` YS-1、YS-5） | 页面代码里 `text-[Npx]` 小于 12 的处数（打印的纸样、平板电子菜单的版面、工作台画布上的量距、图表刻度除外）；手写的 `<table>`、自己画的 `role="dialog"`（公共部件自己的实现、打印页、电子菜单版面除外） | 116、105、11 处（只降不升，逐页换成公共部件以后收紧） | 字号用 `text-[12px]` 起；表格用 `components/DataTable`；弹窗用 `components/Overlay` 的 `Dialog` / `Sheet` |
 
 - 数字变少不用管；清掉一批以后跑 `npm run check:gov -- --update` 把基线收紧（只会调低）。
 - 确实要放宽的（例如设计工具里新加一组默认颜色）：`npm run check:gov -- --update --allow-increase`，并在 PR 说明里写原因。不要手改基线文件来过检查。
