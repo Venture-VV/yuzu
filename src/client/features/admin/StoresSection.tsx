@@ -39,7 +39,7 @@ export function StoresSection() {
         <LoadFailed title="门店与主体取不回来，请检查网络" onRetry={() => void data.refetch()} retrying={data.isFetching} testId="stores-error" />
       ) : (
         <div className="grid gap-5">
-          <Card className="p-5" data-testid="stores-card">
+          <Card className="min-w-0 p-5" data-testid="stores-card">
             <div className="mb-3 flex items-center gap-3">
               <h2 className="flex-1 text-[16px] font-bold">门店</h2>
               <Button variant="secondary" onClick={() => setStore({ mode: 'new' })} data-testid="store-new">
@@ -86,7 +86,7 @@ export function StoresSection() {
             />
           </Card>
 
-          <Card className="p-5" data-testid="entities-card">
+          <Card className="min-w-0 p-5" data-testid="entities-card">
             <div className="mb-3 flex items-center gap-3">
               <h2 className="flex-1 text-[16px] font-bold">公司主体</h2>
               <Button variant="secondary" onClick={() => setEntity({ mode: 'new' })} data-testid="entity-new">
@@ -321,7 +321,7 @@ function SettlementCard() {
   });
   const name = (id: number) => report.data?.stores.find((s) => Number(s.id) === id)?.name ?? `门店 ${id}`;
   return (
-    <Card className="p-5" data-testid="store-settlement">
+    <Card className="min-w-0 p-5" data-testid="store-settlement">
       <div className="mb-1 flex flex-wrap items-end gap-3">
         <h2 className="flex-1 text-[16px] font-bold">门店之间的储值结算</h2>
         <Field label="从">

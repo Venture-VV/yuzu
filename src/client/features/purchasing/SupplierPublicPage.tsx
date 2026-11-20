@@ -227,8 +227,10 @@ function PendingReplyNotice({ pending, busy, onResend }: { pending: PendingReply
 function LinesTable({ view, cell, head }: { view: SupplierPublicView; head: string; cell: (lineId: number) => ReactNode }) {
   const s = view.snapshot;
   return (
+    // 供应商多在手机上填：物料名换行、不按内容撑开横向滑（原来就是这样）
     <DataTable
       onPage
+      tableClassName="min-w-0"
       rows={s.lines}
       rowKey={(l) => l.lineId}
       columns={[

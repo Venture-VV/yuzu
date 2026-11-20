@@ -66,7 +66,7 @@ export function TermsView({ content }: { content: Omit<ContractContent, 'lines'>
   const warrantyPct = warrantyPercentBp(content);
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-      <div>
+      <div className="min-w-0">
         <h4 className="mb-1.5 text-[12.5px] font-bold text-ink-2">付款节点</h4>
         <DataTable
           variant="plain"

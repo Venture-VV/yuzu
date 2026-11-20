@@ -149,7 +149,7 @@ export function MarketingCostTab() {
                   </dd>
                 </dl>
               </Card>
-              <Card className="space-y-2 p-5" data-testid="marketing-cost-discount-card">
+              <Card className="min-w-0 space-y-2 p-5" data-testid="marketing-cost-discount-card">
                 <SectionTitle>会员折扣</SectionTitle>
                 <DataTable
                   variant="plain"
