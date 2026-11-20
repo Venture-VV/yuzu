@@ -20,6 +20,8 @@ import { ZoneChip } from './parts';
 import { BackfillNotice, backfillBody, backfillSummary, useBackfill } from './backfill';
 import { PendingPanel, useFrontdeskOp } from './pending';
 import { useDiningMenu } from '../dining/queries';
+import { useOrderOutlets } from '../dining/OrderExtras';
+import { outletBlockedText } from '@shared/dining-v8115';
 import { useFrontdeskTechnicians } from './queries';
 import { TechnicianPicker } from './TechnicianPicker';
 
@@ -49,6 +51,9 @@ export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean
   const backfill = useBackfill();
   const dining = useDiningMenu(open && session.dining);
   const remainingOf = useMemo(() => new Map(backfill.state.active ? [] : (dining.data?.dishes ?? []).map((d) => [d.id, d.remaining])), [dining.data, backfill.state.active]);
+  // 进厨房的菜按出品口的下单权限（8.1.17 BW-3）：不能下单的出品口的菜标「不能在水吧下单」、不能点；服务端照样逐行核对
+  const orderOutlets = useOrderOutlets();
+  const outletOf = useMemo(() => new Map((dining.data?.dishes ?? []).map((d) => [d.id, d.outlet])), [dining.data]);
   const techRules = techs.data?.rules;
   const techOn = !!techRules?.enabled;
   const [picking, setPicking] = useState<{ item: ServiceItem; tier: PriceTier } | null>(null);
@@ -147,13 +152,8 @@ export function AddItemsDialog({ open, visit, onClose, onDone }: { open: boolean
   const unavailableFor = (i: ServiceItem) =>
     i.gender && i.gender !== visit.zone
       ? `仅限${ZONE_LABELS[i.gender].title}`
-      : remainingOf.get(i.id) === 0
-        ? '已沽清'
-        : i.technicianRequired && techs.isPending
-          ? '正在加载技师…'
-          : i.technicianRequired && !techs.data
-            ? '技师名单没有加载出来'
-            : null;
+      : (outletBlockedText(outletOf.get(i.id), orderOutlets) ??
+        (remainingOf.get(i.id) === 0 ? '已沽清' : i.technicianRequired && techs.isPending ? '正在加载技师…' : i.technicianRequired && !techs.data ? '技师名单没有加载出来' : null));
   const missingTech = techOn && !!techRules?.requireTechnician && lines.some((l) => l.item.technicianRequired && !l.technicianId);
   const staleTech = lines.some((l) => l.technicianId && !techById.has(l.technicianId));
   const customParsed = custom.map((c) => ({ name: c.name.trim(), amount: parseYuan(c.amount) }));

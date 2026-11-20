@@ -167,3 +167,35 @@ describe('BW-4 退菜按出品口', () => {
     expect((r.body as { ok: boolean; name: string }[]).filter((c) => !c.ok)).toEqual([]);
   });
 });
+
+describe('BW-3 发卡台「加项目」按出品口核对', () => {
+  it('去掉店员的「在水吧下单」：加项目里有水吧的菜整单拒绝（写明哪一道）；餐厅的菜、不进厨房的项目照常挂；原样重提照原样返回第一次的结果', async () => {
+    const v = await enter();
+    const key = randomUUID();
+    expect((await charge(v, ['柠檬茶'], ctx.clerk, key)).status).toBe(200);
+    expect((await setClerkPermissions(['dining.orderWater'])).status).toBe(200);
+    const clerk = await login(ctx.app, 'clerk');
+    try {
+      const denied = await charge(v, ['宫保鸡丁', '柠檬茶', '搓澡'], clerk);
+      expect(denied.status).toBe(403);
+      expect(denied.body.error).toMatchObject({ code: 'OUTLET_FORBIDDEN', details: { items: ['柠檬茶'] } });
+      expect(denied.body.error.message).toContain('水吧');
+      expect((await charge(v, ['宫保鸡丁', '搓澡'], clerk)).status).toBe(200);
+      expect((await charge(v, ['搓澡'], clerk)).status).toBe(200);
+      // 同一个编号原样重提：照原样返回第一次的结果，不再按此刻的权限核对，也不多挂
+      const again = await charge(v, ['柠檬茶'], clerk, key);
+      expect(again.status, JSON.stringify(again.body)).toBe(200);
+      const teas = ((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/visits/${v}`)).body.lines as { name: string; status: string }[]).filter((l) => l.name === '柠檬茶');
+      expect(teas).toHaveLength(1);
+      // 康美部没有「前台挂账」，发卡台的加项目本来就进不来
+      expect((await charge(v, ['柠檬茶'], km)).status).toBe(403);
+    } finally {
+      expect((await setClerkPermissions([])).status).toBe(200);
+    }
+  });
+
+  it('前台自检照旧全部通过', async () => {
+    const r = await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/checks');
+    expect((r.body as { ok: boolean }[]).filter((c) => !c.ok)).toEqual([]);
+  });
+});

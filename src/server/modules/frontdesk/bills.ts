@@ -19,7 +19,7 @@ import { loadTechnicianRules, loadTechnicians } from '../technicians';
 import { attachSessions, lockQueue, syncSessionAfterVoid, type SessionPostOptions } from '../clockroom';
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, takeDishLimits } from '../dining';
 import { authorizeLineVoid } from '../dining-808';
-import { DeliverRoomField, OrderNoteField, VoidBlameField } from '../dining-order-v8115';
+import { assertOrderOutlets, DeliverRoomField, OrderNoteField, VoidBlameField } from '../dining-order-v8115';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill, type Backfill } from './backfill';
 import { getVisit } from './visits';
 import { locateCharges, locateSession } from '../locations';
@@ -85,6 +85,11 @@ export interface PostOptions {
    * 按原样重提照样认得出是同一笔、返回第一次的结果，不会被说成另一笔或「没有在住的客房」（合并前 Codex 审查 b850838）。
    */
   toRoom?: (tx: Tx) => Promise<string>;
+  /**
+   * 发卡台「加项目」（8.1.17 BW-3，docs/FRONTDESK_V8117.md 第 3 节）：进厨房的菜按出品口的下单权限逐行核对（与点单页同一个函数 assertOrderOutlets），
+   * 不进厨房的项目不受影响。点单页在事务外已经核对过；钟房、渠道入口、平板点餐不带
+   */
+  outlets?: boolean;
 }
 
 export type PostInputParsed = z.output<typeof PostInput>;
@@ -185,6 +190,8 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
     tx,
     input.lines.map((l) => l.itemId),
   );
+  // 发卡台「加项目」（8.1.17 BW-3）：这一单进厨房的菜按出品口的下单权限核对，有一道不行整单拒绝（403 OUTLET_FORBIDDEN）；只读、不加锁
+  if (options.outlets) await assertOrderOutlets(tx, ctx.actor, [...stations.keys()]);
   type Line = {
     itemId: number | null;
     name: string;

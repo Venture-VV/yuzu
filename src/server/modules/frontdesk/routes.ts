@@ -119,7 +119,8 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   // ── 挂账与更正 ──
   app.post('/api/frontdesk/visits/:id/charges', { preHandler: guard('frontdesk.operate') }, async (req) => {
     const { id } = parse(idParam, req.params);
-    return postCharges(deps, id, req.body as PostInputData, ctxOf(req));
+    // 8.1.17（BW-3）：发卡台「加项目」里进厨房的菜按出品口的下单权限核对（与点单页同一个函数）
+    return postCharges(deps, id, req.body as PostInputData, ctxOf(req), { outlets: true });
   });
 
   // 8.1.17（BW-4）：康美部能退水吧、果吧的菜——有任一项「退菜：某出品口」的也进得来，逐行按出品口核对（dining-v8117.ts）
