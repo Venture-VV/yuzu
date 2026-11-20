@@ -60,10 +60,18 @@ export const DOCS_ONLY = ['docs/**', 'brand/**', '*.md', 'CHANGELOG*', '.env.exa
 /** 小程序线自己的包：只跑「小程序」那个 job（它每次都跑），主线的用例不受影响 */
 export const MP_PACKAGE = ['miniprogram/**'];
 
-/** 员工食堂另有一套浏览器验收（e2e-canteen/）：改到这些才跑那个 job（全量时照跑） */
+/** 员工端（员工食堂、安保巡场、设计台）另有一套浏览器验收（e2e-canteen/ 的 canteen、patrol、studio）：改到这些才跑那个 job（全量时照跑） */
 export const CANTEEN = [
   'src/server/modules/canteen/**',
   'src/client/features/canteen/**',
+  'src/server/modules/patrol/**',
+  'src/client/features/patrol/**',
+  'src/shared/patrol.ts',
+  'src/server/modules/studio/**',
+  'src/client/features/studio/**',
+  'src/client/studio-render/**',
+  'src/shared/studio/**',
+  'src/shared/qr-svg.ts',
   'src/canteen-app/**',
   'src/shared/canteen*.ts',
   'e2e-canteen/**',

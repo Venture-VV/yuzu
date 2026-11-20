@@ -192,6 +192,12 @@ describe('挑用例', () => {
     expect(client.e2e.all).toBe(true);
   });
 
+  it('员工端（员工食堂、巡场、设计台）有自己的浏览器验收：改到就跑那个 job（Codex 审查 001ebb4）', () => {
+    for (const f of ['src/server/modules/patrol/routes.ts', 'src/shared/patrol.ts', 'src/server/modules/canteen/portal.ts', 'src/client/features/studio/StudioPage.tsx'])
+      expect(plan([f]).jobs.canteen, f).toBe(true);
+    expect(plan(['src/server/modules/dishes.ts']).jobs.canteen).toBe(false);
+  });
+
   it('改了用例文件本身：跑它', () => {
     const r = plan(['tests/frontdesk.test.ts', 'e2e/viewports.spec.ts']);
     expect(r.integration.files).toContain('tests/frontdesk.test.ts');
@@ -251,6 +257,12 @@ describe('迁移的数据风险', () => {
     expect(rules('UPDATE dishes SET price = 0;')).toEqual(['unbounded-write']);
     expect(rules('UPDATE dishes SET price = 0 WHERE id = 1;')).toEqual([]);
     expect(rules('UPDATE ledger_entries SET amount = 0 WHERE id = 1;')).toEqual(['ledger-write']);
+    // 带别名、schema、引号的也认（Codex 审查 001ebb4）；名字只是前缀相同的别的表不算
+    expect(rules('UPDATE ledger_entries l SET amount_cents = 0 WHERE l.id = 1;')).toEqual(['ledger-write']);
+    expect(rules('DELETE FROM public.ledger_entries WHERE id = 1;')).toEqual(['ledger-write']);
+    expect(rules('UPDATE public."recharges" AS r SET note = 1 WHERE r.id = 1;')).toEqual(['ledger-write']);
+    expect(rules('UPDATE ledger_entries_archive SET a = 1 WHERE id = 1;')).toEqual([]);
+    expect(rules('UPDATE dishes d SET price = 0;')).toEqual(['unbounded-write']);
     expect(rules('ALTER TABLE x ALTER COLUMN y TYPE bigint;')).toEqual(['type-change']);
     expect(rules('ALTER TABLE x RENAME COLUMN a TO b;')).toEqual(['rename']);
     expect(rules('ALTER TABLE x ALTER COLUMN y SET NOT NULL;')).toEqual(['not-null']);

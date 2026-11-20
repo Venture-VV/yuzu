@@ -163,6 +163,9 @@ jobs:
           echo "测试计划：${{ needs.plan.result }}；静态检查：${{ needs.static.result }}；集成测试分组：${{ needs.integration.result }}"
           [ "${{ needs.plan.result }}" = success ] || { echo "::error::测试计划没算出来"; exit 1; }
           [ "${{ needs.static.result }}" = success ] || { echo "::error::静态检查、秒级用例或构建没通过"; exit 1; }
+          if [ "${{ needs.plan.outputs.integration_count }}" != 0 ] && [ "${{ needs.integration.result }}" != success ]; then
+            echo "::error::集成测试有分组没成功（${{ needs.integration.result }}）"; exit 1
+          fi
       - name: 取回测试计划
         uses: actions/download-artifact@v7
         with:
@@ -283,8 +286,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: 测试计划算出来了
-        run: '[ "${{ needs.plan.result }}" = success ] || { echo "::error::测试计划没算出来"; exit 1; }'
+      - name: 测试计划算出来了，计划里的各组都成功（分组的结果文件齐全，但组里浏览器验收之后的 cli check 没过也算失败）
+        run: |
+          [ "${{ needs.plan.result }}" = success ] || { echo "::error::测试计划没算出来"; exit 1; }
+          if [ "${{ needs.plan.outputs.e2e_count }}" != 0 ] && [ "${{ needs.e2e.result }}" != success ]; then
+            echo "::error::浏览器验收有分组没成功（${{ needs.e2e.result }}）"; exit 1
+          fi
       - run: npm ci
         if: needs.plan.outputs.e2e_count != '0'
       - name: 取回测试计划
@@ -643,7 +650,7 @@ jobs:
   # 整次 CI 的结论：写明是全量还是按改动挑选；该跑的 job 都要通过，按计划不跑的可以跳过
   result:
     name: CI 结论（${{ needs.plan.outputs.mode == 'full' && '全量' || '按改动挑选' }}）
-    needs: [plan, static, test, e2e-summary, demo, upgrade, canteen, miniprogram]
+    needs: [plan, static, integration, test, e2e, e2e-summary, demo, upgrade, canteen, miniprogram]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -655,7 +662,14 @@ jobs:
           node -e '
             const needs = JSON.parse(process.env.RESULTS);
             const plan = needs.plan.outputs ?? {};
-            const optional = { demo: plan.demo === "true", upgrade: plan.upgrade === "true", canteen: plan.canteen === "true" };
+            // 按计划可以不跑的：分组数为 0 的两个矩阵、计划写了不跑的三个 job；其余（含矩阵里每一组，例如浏览器验收后的 cli check）都要成功
+            const optional = {
+              integration: plan.integration_count !== "0",
+              e2e: plan.e2e_count !== "0",
+              demo: plan.demo === "true",
+              upgrade: plan.upgrade === "true",
+              canteen: plan.canteen === "true",
+            };
             const bad = [];
             for (const [job, n] of Object.entries(needs)) {
               const planned = job in optional ? optional[job] : true;

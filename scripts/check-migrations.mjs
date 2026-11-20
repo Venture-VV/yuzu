@@ -21,17 +21,24 @@ const DIR = 'src/server/migrations';
 /** 账本与资金表：只追加，不改不删（AGENTS.md「已生效的单据、流水、明细只追加」） */
 export const LEDGER_TABLES = ['ledger_entries', 'recharges', 'consumptions', 'consumption_lines', 'reversals', 'checkout_payments', 'refund_payments', 'payments', 'audit_logs', 'daily_settlements'];
 
+/** 表名：可带 ONLY、schema 前缀（public.）与双引号 */
+const TABLE = String.raw`(?:ONLY\s+)?(?:"?[a-z_][a-z0-9_]*"?\.)?"?`;
+/** UPDATE 目标表与 SET 之间可以有别名（UPDATE ledger_entries l SET …、UPDATE x AS y SET …） */
+const ALIAS = String.raw`"?(?:\s+(?:AS\s+)?(?!SET\b)[a-z_][a-z0-9_]*)?\s+SET\b`;
+const updateOf = (table) => new RegExp(String.raw`\bUPDATE\s+${TABLE}${table}${ALIAS}`, 'i');
+const deleteOf = (table) => new RegExp(String.raw`\bDELETE\s+FROM\s+${TABLE}${table}"?(?![a-z0-9_])`, 'i');
+
 export const RULES = [
   { id: 'drop', title: '删表、删列或清空表（数据会丢）', test: (st) => /\bDROP\s+(TABLE|COLUMN)\b|\bTRUNCATE\b/i.test(st) },
   {
     id: 'unbounded-write',
     title: '整表改写：UPDATE / DELETE 没有 WHERE',
-    test: (st) => (/^\s*(UPDATE\s+[a-z_."]+\s+SET\b)/im.test(st) || /^\s*DELETE\s+FROM\b/im.test(st)) && !/\bWHERE\b/i.test(st),
+    test: (st) => (updateOf('[a-z_][a-z0-9_]*').test(st) || /\bDELETE\s+FROM\b/i.test(st)) && !/\bWHERE\b/i.test(st),
   },
   {
     id: 'ledger-write',
     title: '改动账本或资金表的已有行（只许追加）',
-    test: (st) => LEDGER_TABLES.some((t) => new RegExp(`\\b(UPDATE\\s+${t}\\s+SET|DELETE\\s+FROM\\s+${t})\\b`, 'i').test(st)),
+    test: (st) => LEDGER_TABLES.some((t) => updateOf(t).test(st) || deleteOf(t).test(st)),
   },
   { id: 'type-change', title: '改列的类型（旧数据要能转、旧版本代码回滚时还认得）', test: (st) => /\bALTER\s+COLUMN\s+[a-z_"]+\s+(SET\s+DATA\s+)?TYPE\b/i.test(st) },
   { id: 'rename', title: '改表名或列名（回滚到上一版时旧代码找不到）', test: (st) => /\bRENAME\s+(COLUMN\s+|TO\s+)/i.test(st) },
