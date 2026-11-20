@@ -143,6 +143,14 @@ describe('权限模板（表 3 逐列）', () => {
     }
   });
 
+  it('能登记布草、申用备用金的岗位都看得到对应的页面（页面与列表接口要「看」那一项，Codex 审查 036b336）', () => {
+    for (const pos of POSITIONS) {
+      const perms = positionDefaults(pos.key, ALL_PERMISSIONS);
+      if (perms.includes('linen.manage')) expect(perms, pos.title).toContain('linen.read');
+      if (perms.includes('pool.manage')) expect(perms, pos.title).toContain('pool.read');
+    }
+  });
+
   it('退菜按出品口（8.1.17）跟着下单：能在哪个出品口下单就能退哪个出品口的菜；康美部没有餐厅', () => {
     for (const pos of POSITIONS.filter((p) => p.key !== 'president')) {
       const perms = positionDefaults(pos.key, ALL_PERMISSIONS);
