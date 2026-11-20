@@ -272,3 +272,45 @@ describe('并发', () => {
     }
   });
 });
+
+describe('桌台动作的结果待确认（Codex 审查 9ef9424）', () => {
+  it('按编号查回、确认作废：作废以后原请求再到不生效；已经生效的作废不了、查回那一条；并台一样；作废要有原业务的权限', async () => {
+    for (const name of ['D1', 'D2', 'D3']) {
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/admin/dining/tables', { name, area: '散桌', seats: 4 });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      table[name] = r.body.tables.find((t: { name: string }) => t.name === name).id;
+    }
+    // 设维修的请求结果不明：查回查不到；确认作废以后原请求再到被拒，桌台不变
+    const lost = randomUUID();
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${lost}?type=table_state`)).body).toEqual({ found: false, abandoned: false });
+    expect((await api(ctx.app, cook, 'POST', `/api/frontdesk/ops/${lost}/abandon`, { type: 'table_state' })).status).toBe(403);
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${lost}/abandon`, { type: 'table_state' })).body).toEqual({ found: false, abandoned: true });
+    const late = await act('D1', 'maintenance', { reason: '桌腿松了', expectedBackAt: inHours(2) }, ctx.clerk, lost);
+    expect([late.status, late.body.error.code]).toEqual([409, 'OP_ABANDONED']);
+    expect((await tile('D1')).state).toBe('available');
+    // 已经生效的：查回编号记下的那一条，作废不了
+    const key = randomUUID();
+    expect((await act('D1', 'maintenance', { reason: '桌腿松了', expectedBackAt: inHours(2) }, ctx.clerk, key)).status).toBe(200);
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${key}?type=table_state`)).body).toMatchObject({
+      found: true,
+      type: 'table_state',
+      action: { tableId: table['D1'], kind: 'maintenance', replayed: true },
+    });
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${key}/abandon`, { type: 'table_state' })).body).toMatchObject({ found: true, type: 'table_state' });
+    expect((await act('D1', 'restore')).status).toBe(200);
+
+    // 并台：作废以后原请求再到不生效；生效的查回
+    const main = await opened('D2');
+    const sub = await opened('D3');
+    const lostMerge = randomUUID();
+    expect((await api(ctx.app, ctx.clerk, 'POST', `/api/frontdesk/ops/${lostMerge}/abandon`, { type: 'table_merge' })).body).toEqual({ found: false, abandoned: true });
+    expect((await merge(main, [sub], lostMerge)).body.error.code).toBe('OP_ABANDONED');
+    expect((await tile('D3')).session).toMatchObject({ mergedInto: null });
+    const mergeKey = randomUUID();
+    expect((await merge(main, [sub], mergeKey)).status).toBe(200);
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/ops/${mergeKey}?type=table_merge`)).body).toMatchObject({ found: true, type: 'table_merge' });
+    expect((await split(sub)).status).toBe(200);
+    expect((await pay([main], 0)).status).toBe(200);
+    expect((await pay([sub], 0)).status).toBe(200);
+  });
+});

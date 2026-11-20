@@ -310,6 +310,8 @@ test.describe('S5 餐饮', () => {
         { times: 1 },
       );
       await page.route('**/api/frontdesk/ops/*', (route) => route.abort('connectionreset'));
+      // 8.1.15 起点单页下单的查回、作废走餐饮的地址（康美部没有前台权限，Codex 审查 f6327a4）：一样先连不上
+      await page.route('**/api/dining/ops/*', (route) => route.abort('connectionreset'));
       await page.goto('/dining/order');
       await page.getByTestId('dining-tag').fill(tag);
       await page.getByTestId('dining-find').click();
@@ -333,6 +335,7 @@ test.describe('S5 餐饮', () => {
       await expect(page.getByText(`已挂到 ${tag}`)).toBeVisible();
       await expect(banner).toHaveCount(0);
       await page.unroute('**/api/frontdesk/ops/*');
+      await page.unroute('**/api/dining/ops/*');
       const lines = (await getJson<{ lines: Line[] }>(page, `/api/frontdesk/visits/${visitId}`)).lines;
       expect(lines.map((l) => [l.name, l.source, l.status, l.kitchen?.status])).toEqual([[HOT.name, 'dining', 'active', 'queued']]);
       await expect(page.getByTestId('bill-panel')).toContainText(HOT.name);

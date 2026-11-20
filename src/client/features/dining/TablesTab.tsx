@@ -33,7 +33,7 @@ import { stayText } from '../frontdesk/queries';
 import { TableCheckoutDialog } from './TableCheckoutDialog';
 import { ReceiptDialog } from './ReceiptDialog';
 import { tablesKey, useDiningMenu, useServerNow, useTableSession, useTablesBoard } from './queries';
-import { MergeDialog, TableHistoryDialog, TableStateDialog, TableStateLine, useTableAction } from './TableActions';
+import { MergeDialog, TableActionStatus, TableHistoryDialog, TableStateDialog, TableStateLine, useTableAction } from './TableActions';
 
 type Tile = TablesBoard['tables'][number];
 
@@ -103,6 +103,12 @@ export function TablesTab() {
       if (tile) setOpening(tile);
     } else if (resume === 'table_checkout' && s) {
       setCheckoutFor(s);
+    } else if (resume === 'table_state' && t) {
+      // 8.1.15 桌台动作：清台、维修、恢复回到那张桌的状态框；并台、拆台回到那一桌的详情（两处都有查回、原样重提、确认作废）
+      const tile = board.data.tables.find((x) => x.id === t);
+      if (tile) setStateFor(tile);
+    } else if (resume === 'table_merge' && s) {
+      setSessionId(s);
     }
     const next = new URLSearchParams(params);
     for (const k of ['resume', 't', 's']) next.delete(k);
@@ -553,8 +559,8 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
   /** 并台、桌台历史（8.1.15） */
   const [merging, setMerging] = useState(false);
   const [history, setHistory] = useState(false);
-  const splitAction = useTableAction();
   const d = detail.data;
+  const splitAction = useTableAction({ type: 'table_merge', sessionId: id, tableName: d?.tableName ?? '' });
   const canOrder = can('dining.order') && can('frontdesk.operate');
 
   const refresh = () => {
@@ -645,7 +651,7 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
             ）；附台要单独结先在附台「拆台」。
           </Notice>
         )}
-        {splitAction.uncertain && <Notice tone="warning" title={splitAction.uncertain} />}
+        <TableActionStatus action={splitAction} onResolved={refresh} />
         <ReceiptDialog target={receipt ? { session: d.id } : null} onClose={() => setReceipt(false)} />
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" icon={<ClipboardList className="size-3.5" />} onClick={() => setReceipt(true)} data-testid="table-receipt">
@@ -682,7 +688,8 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
                   variant="secondary"
                   icon={<Unlink className="size-3.5" />}
                   loading={splitAction.busy}
-                  onClick={() => void splitAction.run(`/api/dining/tables/sessions/${d.id}/split`, {}, `桌 ${d.tableName} 已拆台，各结各的`)}
+                  disabled={splitAction.locked}
+                  onClick={() => void splitAction.run(`/api/dining/tables/sessions/${d.id}/split`, {}, `桌 ${d.tableName} 已拆台，各结各的`, '拆台')}
                   data-testid="table-split"
                 >
                   拆台

@@ -26,7 +26,8 @@ import { guard, guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import { ctxOf, type Deps, type OpContext } from '../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
-import { lockOpKey } from '../lib/fences';
+import { assertNotFenced } from '../lib/fences';
+import { abandonedError } from './frontdesk/common';
 import { hashRequest } from '../lib/idempotency';
 import { currentStoreId } from '../lib/store-context';
 import { setTxTimeouts } from '../lib/tx';
@@ -145,7 +146,8 @@ async function runTableOp(deps: Deps, ctx: OpContext, opts: { key: string; opTyp
   try {
     return await deps.sql.begin(async (tx) => {
       await setTxTimeouts(tx);
-      await lockOpKey(tx, opts.key);
+      // 先取编号的咨询锁并核对没被确认作废（与登记作废串行）：作废过的编号原请求再到也整笔不做（Codex 审查 9ef9424）
+      await assertNotFenced(tx, opts.key, opts.opType, abandonedError);
       const seen = await replayOf(tx, opts.key, opts.opType, opts.requestHash);
       if (seen !== null) return { eventId: seen, replayed: true };
       const eventId = await body(tx, at);
@@ -160,6 +162,9 @@ async function runTableOp(deps: Deps, ctx: OpContext, opts: { key: string; opTyp
     throw error;
   }
 }
+
+/** 「结果待确认」按编号查回（frontdesk/visits.ts 的 lookupFrontdeskOp）：编号记下的那一条桌台记录 */
+export const tableActionOf = (db: Db, eventId: number) => actionResult(db, { eventId, replayed: true });
 
 async function actionResult(db: Db, run: { eventId: number; replayed: boolean }): Promise<TableActionResult> {
   const [e] = await db<{ id: number; tableId: number; kind: TableEventKind; createdAt: string }[]>`SELECT id, table_id, kind, created_at FROM table_events WHERE id = ${run.eventId}`;

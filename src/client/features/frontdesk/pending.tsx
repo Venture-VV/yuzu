@@ -40,7 +40,11 @@ export type FrontdeskOpType =
   | 'booking_create'
   | 'booking_change'
   | 'technician_state'
-  | 'visit_incident';
+  | 'visit_incident'
+  /** 桌台动作（8.1.15）：清台、维修、恢复（对象是桌台） */
+  | 'table_state'
+  /** 桌台动作（8.1.15）：并台（对象是主台的开台）、拆台（对象是附台的开台） */
+  | 'table_merge';
 
 export interface FrontdeskPendingOp {
   key: string;
@@ -101,10 +105,12 @@ export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = {
   booking_change: '改预约',
   technician_state: '停牌 / 复牌 / 休假',
   visit_incident: '异常处置',
+  table_state: '清台 / 维修 / 恢复',
+  table_merge: '并台 / 拆台',
 };
 
 /** 餐饮桌台的操作：对象是桌台或开台，不是手牌 */
-export const isTableOp = (type: FrontdeskOpType) => type === 'table_open' || type === 'table_post' || type === 'table_checkout';
+export const isTableOp = (type: FrontdeskOpType) => type === 'table_open' || type === 'table_post' || type === 'table_checkout' || type === 'table_state' || type === 'table_merge';
 /** 客房的操作（S7）：对象是房间或入住单，在客房页处理 */
 export const isRoomOp = (type: FrontdeskOpType) => type.startsWith('room_');
 /** 派对房等的使用单（v0.7.19）：对象是空间或使用单，在客房页的平面图上处理 */
@@ -271,8 +277,8 @@ export function pendingFor(
     if (type === 'checkout_refund') return table.checkoutId != null && !!p.checkoutIds?.includes(table.checkoutId);
     if (type === 'usage_open') return table.spaceId != null && p.spaceId === table.spaceId;
     if (isUsageOp(type)) return table.usageId != null && !!p.usageIds?.includes(table.usageId);
-    if (type === 'table_open') return table.tableId != null && p.tableId === table.tableId;
-    if (type === 'table_post' || type === 'table_checkout') return table.sessionId != null && !!p.sessionIds?.includes(table.sessionId);
+    if (type === 'table_open' || type === 'table_state') return table.tableId != null && p.tableId === table.tableId;
+    if (type === 'table_post' || type === 'table_checkout' || type === 'table_merge') return table.sessionId != null && !!p.sessionIds?.includes(table.sessionId);
     if (type === 'room_checkin') return table.roomId != null && p.roomId === table.roomId;
     if (isRoomOp(type)) return table.stayId != null && !!p.stayIds?.includes(table.stayId);
     return p.visitId === visitId || (visitId !== null && !!p.visitIds?.includes(visitId));
