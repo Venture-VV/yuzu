@@ -168,7 +168,7 @@ export async function createKitchenItems(
       const [part] = await tx<{ id: number }[]>`
         INSERT INTO kitchen_item_parts (kitchen_item_id, item_id, name, swapped_from, per_combo, quantity, station_id, split, limit_taken, status,
                                         business_date, created_at, done_by, done_at)
-        VALUES (${row!.id}, ${p.itemId}, ${p.name}, ${p.swappedFrom}, ${p.perCombo}, ${l.quantity * p.perCombo}, ${stationId}, ${stationId !== l.stationId},
+        VALUES (${row!.id}, ${p.itemId}, ${p.name.slice(0, 48)}, ${p.swappedFrom?.slice(0, 48) ?? null}, ${p.perCombo}, ${l.quantity * p.perCombo}, ${stationId}, ${stationId !== l.stationId},
                 ${p.limitTaken}, ${done ? 'done' : 'queued'}, ${args.date}, ${args.at}, ${done ? args.actor.id : null}, ${done})
         RETURNING id`;
       madeParts.push(Number(part!.id));
