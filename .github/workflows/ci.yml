@@ -1,14 +1,14 @@
-# 自动测试：类型检查、后端集成测试（会员回归 + 库存 / 采购 / 应付 + 前台手牌核心校验 + 备份与恢复核验）、构建、
-# 从上一发布版本的演示库升级后自检、演示数据（demo-prepare）准备 / 重复执行 / 核对 / 环境保护 / 先备份再重建，
-# 以及真实浏览器验收（含完整收银流程与五种视口）。
-# 只使用合成数据与一次性的 CI 数据库，不连接任何门店环境。
+# 自动测试（店主 2026-11-20 改成「按改动与风险挑选」，见 docs/TESTING.md 第 6 节）。只使用合成数据与一次性的 CI 数据库，不连接任何门店环境。
 #
-# 运行机：GitHub 托管（ubuntu-latest）。2026-11-03 曾改到门店 Mac mini 的自托管运行机，店主 2026-11-05 嫌太慢改回；
-# 浏览器缓存的键带运行机架构、先查预装的 Chromium 这两处在托管运行机上照常可用，保留。
+# 先由「测试计划」job 看这次改了什么（scripts/test-plan.mjs）：
+#   · main 上的推送（每次合并）：全量——集成测试、浏览器验收、演示数据、从上一发布版本升级都跑；版本标签只打在全量通过的提交上。
+#   · PR：按风险。改到资金、账本、加锁、权限、迁移、演示数据、测试与 CI 本身就全量；其余只跑受影响的用例 + 每次都跑的核心回归；
+#     只改文档不跑运行时用例。要全量：PR 加 ci:full 标签，或提交信息里写 [ci full]。
+# 静态检查（代码规范、类型、文档、治理基线、排版、迁移数据风险、秒级用例、构建、打包体积）每次都跑。
+# 集成测试与浏览器验收按上次的用时均匀分到几个并行 job（scripts/ci/timings.json），汇总 job 核对计划里的一项不少、没有失败。
+# 「CI 结论」job 写明这次是全量还是按改动挑选；任何一个该跑的 job 没过，整次 CI 失败。
 #
-# 提速（v0.7.18，RQ-008，见 docs/TESTING.md）：各 job 同时开始，浏览器验收不再等测试 job；浏览器验收按文件名拆成三组
-# 并行（门店电脑 a–l、门店电脑 m–z、其余四个尺寸），每组用自己的临时库与应用；「浏览器验收汇总」核对三组都跑完、
-# 合计跑过的用例 = 不拆分时的总数、没有失败。集成测试按文件并行，每个进程用自己的测试库。任何一个 job 失败整次 CI 失败。
+# 运行机：GitHub 托管。2026-11-03 曾改到门店 Mac mini 的自托管运行机，店主 2026-11-05 嫌太慢改回。
 name: CI
 
 on:
@@ -21,11 +21,94 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: 类型检查 · 集成测试 · 构建
+  plan:
+    name: 测试计划（按改动与风险挑选）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      risk: ${{ steps.plan.outputs.risk }}
+      integration: ${{ steps.plan.outputs.integration }}
+      integration_count: ${{ steps.plan.outputs.integration_count }}
+      e2e: ${{ steps.plan.outputs.e2e }}
+      e2e_count: ${{ steps.plan.outputs.e2e_count }}
+      upgrade: ${{ steps.plan.outputs.upgrade }}
+      demo: ${{ steps.plan.outputs.demo }}
+      canteen: ${{ steps.plan.outputs.canteen }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # 要比对这次改动、读提交信息
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 算测试计划（改了什么、风险多高、跑哪些、怎么分组）
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # PR 上 HEAD 是合并提交、main 上是刚合并的提交：第一父提交就是合并前的目标分支，两者之差就是这次的改动
+          if [ "$EVENT" != "pull_request" ]; then export TEST_PLAN_FULL="main 上的推送：每次合并后全量（版本标签只打在全量通过的提交上）"; fi
+          if [ "$FULL_LABEL" = "true" ]; then export TEST_PLAN_FULL="PR 带 ci:full 标签：全量"; fi
+          if git log -1 --format=%B "$HEAD_SHA" | grep -qiF '[ci full]'; then export TEST_PLAN_FULL="提交信息写了 [ci full]：全量"; fi
+          node scripts/test-plan.mjs --ci --base HEAD^1 --head HEAD
+      - name: 交出测试计划（给两个汇总 job 核对）
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-plan
+          path: test-plan.json
+          retention-days: 7
+
+  static:
+    name: 静态检查 · 秒级用例 · 构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # 迁移数据风险检查要比对目标分支
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 运维脚本静态检查（shellcheck）
+        env:
+          LC_ALL: C.UTF-8
+        run: shellcheck -x -S warning -s bash scripts/*.sh scripts/lib/common.sh
+      - name: 代码规范（oxlint；小程序线的目录不查）
+        run: npm run lint
+      - name: 类型检查与代码整洁（类型错误、没用到的导入与变量、事务里没等结果的查询、类型导入写法）
+        run: npm run check:code
+      - name: 文档检查（AGENTS.md 的体积预算、死链、文档索引、开发约定小节）
+        run: npm run check:docs
+      - name: 治理基线（分层、页面里的颜色与字号、大文件、没人引用的导出、重复率，只许持平或下降）
+        run: npm run check:gov
+      - name: 排版检查（Prettier；没过就本地跑 npm run format）
+        run: npm run format:check
+      - name: 迁移的数据风险（新迁移里删数据、改账本、改类型、重建作废约束要写明「风险已知」；已有迁移不许改）
+        run: node scripts/check-migrations.mjs --base HEAD^1
+      - name: 秒级用例（不要数据库的，每次全跑）
+        run: npm run test:unit
+      - run: npm run build
+      - name: 打包体积（首屏主包不超过上限）
+        run: npm run check:bundle
+
+  integration:
+    name: 集成测试（${{ matrix.name }}）
+    needs: plan
+    if: needs.plan.outputs.integration_count != '0'
     # 要 PostgreSQL 16 的 pg_dump / pg_restore（备份测试）：ubuntu-latest 换成 26.04 以后不带 16 版、apt 里也没有，固定用 24.04（自带 16）
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.integration) }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -52,44 +135,63 @@ jobs:
             sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
           fi
           echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
-      - name: 运维脚本静态检查（shellcheck）
-        env:
-          LC_ALL: C.UTF-8
-        run: shellcheck -x -S warning -s bash scripts/*.sh scripts/lib/common.sh
-      - name: 代码规范（oxlint：会出错的写法——缺 key、多余的非空断言、没用到的表达式等；小程序线的目录不查；工程治理二期）
-        run: npm run lint
-      # 类型检查不再单独跑一遍（工程治理三期）：check:code 就是带着「没用到的」两个开关跑同一次类型检查，类型错也在这里报，省 50 秒
-      - name: 类型检查与代码整洁（类型错误、没用到的导入与变量、事务里没等结果的查询、类型导入写法；8.1.3）
-        run: npm run check:code
-      - name: 文档检查（AGENTS.md 的体积预算、死链、引用了不存在的文档、文档索引、开发约定小节；工程治理一期，docs/GOVERNANCE.md）
-        run: npm run check:docs
-      - name: 治理基线（分层、页面里的颜色与字号、大文件、没人引用的导出、重复率，只许持平或下降；工程治理一期）
-        run: npm run check:gov
-      - name: 排版检查（Prettier；没过就本地跑 npm run format；8.1.3）
-        run: npm run format:check
-      - run: npm test
-      - run: npm run build
-      - name: 打包体积（首屏主包不超过上限，重的库与不常用的页面按需加载；工程治理二期）
-        run: npm run check:bundle
+      - name: 集成测试（这一组，约 ${{ matrix.seconds }} 秒的单进程用时）
+        run: npx vitest run ${{ matrix.files }} --reporter=default --reporter=json --outputFile.json=vitest-results/${{ matrix.id }}.json
+      - name: 交回这一组的结果（给汇总核对）
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: vitest-results-${{ matrix.id }}
+          path: vitest-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # 名字沿用原来的「类型检查 · 集成测试 · 构建」（分支保护按名字认检查）：现在是汇总——静态检查通过、计划里的集成测试一项不少、没有失败
+  test:
+    name: 类型检查 · 集成测试 · 构建
+    needs: [plan, static, integration]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: 测试计划与静态检查都通过
+        run: |
+          echo "测试计划：${{ needs.plan.result }}；静态检查：${{ needs.static.result }}；集成测试分组：${{ needs.integration.result }}"
+          [ "${{ needs.plan.result }}" = success ] || { echo "::error::测试计划没算出来"; exit 1; }
+          [ "${{ needs.static.result }}" = success ] || { echo "::error::静态检查、秒级用例或构建没通过"; exit 1; }
+      - name: 取回测试计划
+        uses: actions/download-artifact@v7
+        with:
+          name: test-plan
+      - name: 取回各组的结果
+        if: needs.plan.outputs.integration_count != '0'
+        uses: actions/download-artifact@v7
+        with:
+          pattern: vitest-results-*
+          path: vitest-results
+          merge-multiple: true
+      - name: 核对
+        run: |
+          if [ "${{ needs.plan.outputs.integration_count }}" = 0 ]; then
+            node -e 'const p=require("./test-plan.json"); if (p.integration.files.length) { console.error("::error::计划里有集成测试却没有分组"); process.exit(1) } console.log("这次的改动不用跑集成测试（" + p.reasons.join("；") + "）")'
+          else
+            node scripts/ci/vitest-summary.mjs test-plan.json vitest-results
+          fi
 
   e2e:
     name: 浏览器验收（${{ matrix.name }}）
+    needs: plan
+    if: needs.plan.outputs.e2e_count != '0'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # 按文件名首字母分组：新加的用例文件一定落在某一组里，不会漏跑（汇总 job 再核对总数）
-          - group: store-a
-            name: 门店电脑 · a–l
-            args: "--project=门店电脑 'e2e/[a-l]'"
-          - group: store-b
-            name: 门店电脑 · m–z
-            args: "--project=门店电脑 'e2e/[m-z]'"
-          - group: others
-            name: 平板、小屏电脑、手机
-            args: --project=平板横屏 --project=平板竖屏 --project=小屏电脑 --project=手机
+        include: ${{ fromJSON(needs.plan.outputs.e2e) }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -143,9 +245,9 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - run: npx playwright install --with-deps chromium
-      - name: 浏览器验收（这一组）
+      - name: 浏览器验收（这一组，约 ${{ matrix.seconds }} 秒）
         env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: e2e-results/${{ matrix.group }}.json
+          PLAYWRIGHT_JSON_OUTPUT_FILE: e2e-results/${{ matrix.id }}.json
         run: npx playwright test ${{ matrix.args }} --reporter=list,json
       - name: 浏览器验收改过数据之后再自检（会员、营业口径、库存、前台全部 ✓）
         run: node dist/server/cli.js check
@@ -153,7 +255,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: e2e-results-${{ matrix.group }}
+          name: e2e-results-${{ matrix.id }}
           path: e2e-results
           if-no-files-found: ignore
           retention-days: 7
@@ -161,17 +263,18 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: e2e-failure-${{ matrix.group }}
+          name: e2e-failure-${{ matrix.id }}
           path: |
             test-results
             app.log
           retention-days: 7
 
+  # 名字沿用原来的（分支保护按名字认检查）；现在核对的是测试计划里的各组
   e2e-summary:
     name: 浏览器验收汇总（三组都跑完、用例一项不少、没有失败）
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: e2e
+    needs: [plan, e2e]
     # 有分组失败也要核对、写明哪一组；整次 CI 被取消（新的提交推上来）时不跑
     if: ${{ !cancelled() }}
     steps:
@@ -180,8 +283,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: 测试计划算出来了
+        run: '[ "${{ needs.plan.result }}" = success ] || { echo "::error::测试计划没算出来"; exit 1; }'
       - run: npm ci
-      - name: 取回三组的结果
+        if: needs.plan.outputs.e2e_count != '0'
+      - name: 取回测试计划
+        uses: actions/download-artifact@v7
+        with:
+          name: test-plan
+      - name: 取回各组的结果
+        if: needs.plan.outputs.e2e_count != '0'
         uses: actions/download-artifact@v7
         with:
           pattern: e2e-results-*
@@ -189,12 +300,16 @@ jobs:
           merge-multiple: true
       - name: 核对
         run: |
-          total=$(npx playwright test --list | tail -n 1 | sed -E 's/^Total: ([0-9]+) tests?.*/\1/')
-          echo "不拆分时的用例总数：$total"
-          node scripts/ci/e2e-summary.mjs e2e-results 3 "$total"
+          if [ "${{ needs.plan.outputs.e2e_count }}" = 0 ]; then
+            node -e 'const p=require("./test-plan.json"); if (p.e2e.units.length) { console.error("::error::计划里有浏览器用例却没有分组"); process.exit(1) } console.log("这次的改动不用跑浏览器验收（" + p.reasons.join("；") + "）")'
+          else
+            node scripts/ci/e2e-summary.mjs test-plan.json e2e-results
+          fi
 
   demo:
     name: 演示数据：准备、重复执行与核对
+    needs: plan
+    if: needs.plan.outputs.demo == 'true'
     # 同上：demo-reset 先备份，要 16 版的 pg_dump
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -339,6 +454,8 @@ jobs:
 
   upgrade:
     name: 从上一发布版本的演示库升级
+    needs: plan
+    if: needs.plan.outputs.upgrade == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -450,6 +567,8 @@ jobs:
   # 与平时的浏览器验收分开（playwright.canteen.config.ts、e2e-canteen/），不算进「浏览器验收汇总」的用例总数。
   canteen:
     name: 员工食堂：手机端浏览器验收
+    needs: plan
+    if: needs.plan.outputs.canteen == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -520,3 +639,30 @@ jobs:
             test-results
             app.log
           retention-days: 7
+
+  # 整次 CI 的结论：写明是全量还是按改动挑选；该跑的 job 都要通过，按计划不跑的可以跳过
+  result:
+    name: CI 结论（${{ needs.plan.outputs.mode == 'full' && '全量' || '按改动挑选' }}）
+    needs: [plan, static, test, e2e-summary, demo, upgrade, canteen, miniprogram]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 核对各 job 的结果
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node -e '
+            const needs = JSON.parse(process.env.RESULTS);
+            const plan = needs.plan.outputs ?? {};
+            const optional = { demo: plan.demo === "true", upgrade: plan.upgrade === "true", canteen: plan.canteen === "true" };
+            const bad = [];
+            for (const [job, n] of Object.entries(needs)) {
+              const planned = job in optional ? optional[job] : true;
+              const ok = n.result === "success" || (!planned && n.result === "skipped");
+              console.log(`${ok ? "✓" : "✗"} ${job}: ${n.result}${planned ? "" : "（按计划不跑）"}`);
+              if (!ok) bad.push(job);
+            }
+            console.log(`方式：${plan.mode === "full" ? "全量" : "按改动挑选"}；风险：${plan.risk ?? "（没算出来）"}`);
+            if (bad.length) { console.error(`::error::这些 job 没通过：${bad.join("、")}`); process.exit(1); }
+          '

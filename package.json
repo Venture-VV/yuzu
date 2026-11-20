@@ -31,6 +31,8 @@
     "test": "vitest run",
     "test:unit": "node scripts/test-tiers.mjs unit",
     "test:quick": "node scripts/test-tiers.mjs quick",
+    "test:plan": "node scripts/test-plan.mjs",
+    "check:migrations": "node scripts/check-migrations.mjs",
     "test:watch": "vitest",
     "e2e": "playwright test"
   },

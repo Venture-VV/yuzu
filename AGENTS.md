@@ -40,13 +40,13 @@
 
 ## 快测、门禁与高风险目录（oil-dev）
 
-- 快测：`npx vitest run tests/{target}.test.ts`（不要数据库的一档 `npm run test:unit`，8 秒；按改动自动挑 `npm run test:quick`）
+- 快测：`npx vitest run tests/{target}.test.ts`（不要数据库的一档 `npm run test:unit`，8 秒；按改动与风险自动挑 `npm run test:quick`，看挑了哪些、为什么 `npm run test:plan`）
 - 重测：`E2E_BASE_URL=http://127.0.0.1:<端口> npx playwright test e2e/{target}.spec.ts --project=门店电脑`
 - 门禁：`npm run lint && npm run typecheck && npm run check:code && npm run check:docs && npm run check:gov && npm run format:check && npm test && npm run build && npm run check:bundle`
 - 高风险：`src/server/migrations/`、`src/server/modules/wallet*.ts`、`src/server/modules/frontdesk/**`、`src/server/modules/shifts.ts`、`src/server/modules/settlement.ts`、`src/server/auth/**`、`src/server/lib/idempotency.ts`、`src/server/lib/fences.ts`、`src/shared/permissions.ts`、`src/shared/money.ts`、`src/shared/deduction.ts`、`scripts/*.sh`、`.github/workflows/**`
 - 禁改：`miniprogram/`、`src/gateway/`、`src/server/modules/mp/`、`src/client/features/mp/`、`src/shared/mp.ts`、`src/client/public/concierge/ocr/`
 
-写代码途中只跑秒级的（`npm run lint`、`npm run test:unit`）；写完一块跑快测；全量与浏览器验收留到交 PR 前与 CI（三档见 `docs/TESTING.md` 第 4 节）。高风险目录的改动要独立审查（Codex）；禁改的是小程序线的目录（主线不改）与按清单核对摘要的第三方文件；已发布的迁移文件不改（见下「开发约定」）。
+写代码途中只跑秒级的（`npm run lint`、`npm run test:unit`）；写完一块跑快测；交 PR 前照 `npm run test:plan` 列的跑（改到高风险的文件就是上面整条门禁）。CI 在 PR 上按改动与风险挑、main 每次合并全量，测试 AI 验收用 `node scripts/test-plan.mjs --base <上一版本标签> --head <SHA>` 定必测范围（店主 2026-11-20，`docs/TESTING.md` 第 6 节）。高风险目录的改动要独立审查（Codex）；禁改的是小程序线的目录（主线不改）与按清单核对摘要的第三方文件；已发布的迁移文件不改（见下「开发约定」）。
 
 ## 常用命令
 
@@ -54,7 +54,9 @@
 npm run lint && npm run typecheck && npm run check:code && npm run format:check   # 写完先过这四样（lint 一秒内）；排版没过跑 npm run format
 npm run check:docs && npm run check:gov                           # 文档检查与治理基线（CI 跑；docs/GOVERNANCE.md）
 npm run test:unit                                                 # 秒级：不要数据库的用例（8 秒）；写代码途中随时跑
-npm run test:quick                                                # 快测：秒级 + 和这次改动沾边的集成测试（TEST_DATABASE_URL 指向独立测试库；也可以 npx vitest run tests/<相关的>.test.ts）
+npm run test:plan                                                 # 测试计划：这次改了什么、风险多高、该跑哪些（与 CI 同一份；--base <标签> --head <SHA> 给验收用）
+npm run test:quick                                                # 快测：秒级 + 测试计划挑出的集成测试（TEST_DATABASE_URL 指向独立测试库）
+npm run check:migrations                                          # 新迁移的数据风险（删数据、改账本、改类型等要写「-- 风险已知：」）
 npm test && npm run build                                         # 交 PR 前：全量集成测试（按文件并行，要建库权限；TEST_WORKERS=1 单库串行）与构建
 node dist/server/cli.js demo-prepare                              # 一条命令准备独立演示库，最后自带 check 与 demo-check
 node dist/server/cli.js check                                     # 会员（含营业口径）、库存、前台自检，全部 ✓ 才算一致
@@ -77,7 +79,7 @@ E2E_BASE_URL=http://127.0.0.1:<端口> npx playwright test e2e/<相关的>.spec.
 
 ## 提交、PR 与评论
 
-- Claude 只在指定的 `claude/*` 分支开发并推送，Gemini 只在 `gemini/*` 分支（店主 2026-11-15）；PR 由店主决定是否合并，AI 不打标签。**主线的 PR 由 Claude 主线开发会话自己合并（店主 2026-11-18）**：PR 最后一个提交（完整 SHA）上 CI 的检查全部通过，Codex 的代码审查在这个提交上跑完、没有发现问题（报了问题的，修好以后在新的提交上重新审查；新提交没有自动审查时留言 `@codex review` 请它审），最近一次安全审查也没有报问题（报了的等店主定，不越过它合并），就用合并提交（merge commit）合进 `main`；分支落后 `main` 的先把 `main` 合进来，再等 CI 与审查。小程序线的 PR 仍由店主合并，Gemini 不合并。
+- Claude 只在指定的 `claude/*` 分支开发并推送，Gemini 只在 `gemini/*` 分支（店主 2026-11-15）；PR 由店主决定是否合并，AI 不打标签。**主线的 PR 由 Claude 主线开发会话自己合并（店主 2026-11-18）**：PR 最后一个提交（完整 SHA）上 CI 的检查全部通过，Codex 的代码审查在这个提交上跑完、没有发现问题（报了问题的，修好以后在新的提交上重新审查；新提交没有自动审查时留言 `@codex review` 请它审），最近一次安全审查也没有报问题（报了的等店主定，不越过它合并），就用合并提交（merge commit）合进 `main`；分支落后 `main` 的先把 `main` 合进来，再等 CI 与审查。PR 上的 CI 按改动与风险挑（最后一个 job「CI 结论」写明全量还是挑选），main 上每次合并全量；main 的全量没过时先修 main，别的 PR 先不合并（`docs/TESTING.md` 第 6.3 节）。小程序线的 PR 仍由店主合并，Gemini 不合并。
 - **开发会话的 PR 合并后，开发会话马上从最新 `main` 重开分支、推送第一个提交（通常是排期或设计文档）并建草稿 PR**（店主 2026-10-31），方便测试会话、Codex 等往里提交报告和评论；做完、CI 全绿后改成待审（Codex 在改成待审时开始审查），主线在 CI 与 Codex 审查都没有问题后由开发会话合并（店主 2026-11-18；此前交店主合并），小程序线交店主合并。
 - 业务代码只由开发会话改（店主 2026-11-03 起分两条线：主线管 yuzu 本体，会员、钱包、券、结账、前台的核心只由主线改；小程序线只写 `miniprogram/`、`src/gateway/`、`src/server/modules/mp/`、`src/client/features/mp/`、`src/shared/mp.ts`，登记处只加挂接的几行，不改 yuzu 的版本号；见 ROADMAP 第 7 节与 `docs/MINIPROGRAM.md` 第 8 节。8.1.0 起小程序线的 PR 由 CI「线范围」检查兜底：改了范围外的文件检查不通过，规则见 `docs/RELEASE_V810.md` 第 3 节）；测试会话只改 `tests/`、`e2e/`、`miniprogram/tests/`、`miniprogram/e2e/`、CI 的测试步骤、演示数据（`src/server/seed*.ts`、`src/server/demo/`）与测试文档，评论开头写「测试会话」。
 - **四个 AI 按线协作（店主 2026-11-03）**：主线 = Claude 主线开发会话 + Codex「yuzu测试开发助手」（总协调与主线验收）；小程序线 = Gemini（店主 2026-11-15 起接手，原来是 Claude 小程序开发会话；交接见 `docs/HANDOFF_MP_GEMINI.md`）+ Codex「小程序助手」（小程序专项测试）。为了报告与评论不发错地方：
