@@ -249,14 +249,19 @@ export interface LockedRiskBooking {
 
 /**
  * 发牌带出预约：在锁手牌之前先锁这几位会员今天待到店的预约（技师、客房；id 升序）。
- * 锁住以后只留下还在「待确认 / 已确认」的——等锁期间被取消、记了爽约、别的终端点了到店的不动。
+ * 锁的那一句带上全部候选条件（本店、这几位会员、这个营业日、待确认 / 已确认、不是派对房）：读已提交级别下，
+ * 等锁的行在锁到以后按最新的一版重新核对条件，等锁期间被取消、记了爽约、别的终端点了到店、改到别的营业日的都不会被锁住、不动
+ * （只核对状态不够：改期只改营业日、状态照旧，Codex 审查 f6327a4）。
  */
 export async function lockArrivableBookings(tx: Tx, memberIds: number[], date: string): Promise<LockedRiskBooking[]> {
   const candidates = (await openBookings(tx, memberIds, date)).filter((b) => b.autoArrive).map((b) => b.id);
   if (candidates.length === 0) return [];
-  const rows = await tx<{ id: number; bookingNo: string; memberId: number; status: string }[]>`
-    SELECT id, booking_no, member_id, status FROM bookings WHERE id IN ${tx(candidates)} ORDER BY id FOR UPDATE`;
-  return rows.filter((r) => r.status === 'pending' || r.status === 'confirmed').map((r) => ({ id: Number(r.id), bookingNo: r.bookingNo, memberId: Number(r.memberId) }));
+  const rows = await tx<{ id: number; bookingNo: string; memberId: number }[]>`
+    SELECT id, booking_no, member_id FROM bookings
+    WHERE id IN ${tx(candidates)} AND member_id IN ${tx(memberIds)} AND business_date = ${date} AND store_id = ${currentStoreId()}
+      AND status IN ('pending', 'confirmed') AND kind <> 'space'
+    ORDER BY id FOR UPDATE`;
+  return rows.map((r) => ({ id: Number(r.id), bookingNo: r.bookingNo, memberId: Number(r.memberId) }));
 }
 
 /** 发牌成功后把锁住的预约标「已到店」、挂上这位会员刚发的手牌（与「预约」页点到店写的一样；审计里写明是发牌带出的） */

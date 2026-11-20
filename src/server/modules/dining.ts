@@ -28,6 +28,7 @@ import {
 } from '@shared/dining';
 import { defaultTier, type TierPrice } from '@shared/catalog';
 import { can } from '@shared/permissions';
+import type { FrontdeskOpLookup } from '@shared/frontdesk';
 import type { Db, Tx } from '../db';
 import { guard, guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
@@ -631,6 +632,27 @@ export function registerDiningRoutes(app: FastifyInstance, deps: Deps) {
     // 点单页只能点进厨房的菜（其他项目、手动金额请到前台登记）
     await postCharges(deps, visitId, { ...rest, customLines: [] } as never, ctxOf(req), { dining: { onlyKitchen: true }, ...(toRoom ? { toRoom } : {}) });
     return diningGuestOf(sql, body.visitId);
+  });
+
+  // 点单页下单「结果待确认」的查回与确认作废（8.1.15，Codex 审查 f6327a4）：下单只要「餐饮点单」+ 出品口权限（康美部没有前台权限），
+  // 查回、作废也照这个来——有「餐饮点单」，或有前台原来那一项（查回要「查看在店手牌」、作废要「接待发牌、挂账、换牌」，同一台设备上
+  // 前台的同事也能处理）。只认点单用的业务类型（挂账 bill_post）；查回只说生效没生效、记在哪次来访上，不给整张账单；
+  // 编号属于别的前台业务的，这里只答「没查到」、不作废（作废登记绑定业务类型，只拦同类型的原请求，见 lib/fences.ts）
+  const DiningOpKey = z.object({ key: z.uuid('操作编号格式不正确') });
+  const diningOpResult = (r: FrontdeskOpLookup): FrontdeskOpLookup => {
+    if (!r.found) return r;
+    if (r.type !== 'bill_post') return { found: false, abandoned: false };
+    return { found: true, type: 'dining_order', visitId: r.visit.id };
+  };
+  app.get('/api/dining/ops/:key', { preHandler: guardAny('dining.order', 'frontdesk.read') }, async (req) => {
+    const { key } = parse(DiningOpKey, req.params);
+    const { lookupFrontdeskOp } = await import('./frontdesk/visits');
+    return diningOpResult((await lookupFrontdeskOp(sql, key, deps.config.timezone, 'bill_post')) as FrontdeskOpLookup);
+  });
+  app.post('/api/dining/ops/:key/abandon', { preHandler: guardAny('dining.order', 'frontdesk.operate') }, async (req) => {
+    const { key } = parse(DiningOpKey, req.params);
+    const { abandonFrontdeskOp } = await import('./frontdesk/visits');
+    return diningOpResult((await abandonFrontdeskOp(deps, key, 'bill_post', ctxOf(req))) as FrontdeskOpLookup);
   });
 
   app.post('/api/dining/items/:id/rush', { preHandler: guard('dining.order') }, async (req) => {

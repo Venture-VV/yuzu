@@ -336,7 +336,12 @@ export type FrontdeskOpLookup =
   | { found: true; type: 'checkout_refund'; refund: import('./checkout').RefundDetail }
   | { found: true; type: 'booking_create' | 'booking_change'; booking: import('./bookings').BookingDetail }
   /** 技师停牌、复牌、休假（8.0.8）：查回那位技师；页面按最新的钟房看板显示 */
-  | { found: true; type: 'technician_state'; technicianId: number };
+  | { found: true; type: 'technician_state'; technicianId: number }
+  /**
+   * 点单页下单（挂账）从餐饮这边查回、作废（8.1.15，`/api/dining/ops`）：只说生效了、记在哪次来访上，不给整张账单——
+   * 康美部只有点单权限，看不到前台的账（Codex 审查 f6327a4）
+   */
+  | { found: true; type: 'dining_order'; visitId: number };
 
 export interface CheckinResult {
   replayed: boolean;

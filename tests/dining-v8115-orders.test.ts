@@ -126,6 +126,56 @@ describe('按出品口下单（B3）', () => {
   });
 });
 
+describe('点单的结果待确认（康美部没有前台权限，Codex 审查 f6327a4）', () => {
+  it('按餐饮的地址查回、确认作废自己点的单；前台的地址照旧要前台权限；别的前台业务的编号这里查不到、不作废', async () => {
+    const me = (await api(ctx.app, km, 'GET', '/api/auth/me')).body as { permissions: string[] };
+    expect(me.permissions).not.toContain('frontdesk.read');
+    expect(me.permissions).not.toContain('frontdesk.operate');
+    const g = await enter();
+    // 下单其实成功了、页面没收到响应：按原编号查回。只说生效了、记在哪次来访上，不给整张账单
+    const key = randomUUID();
+    expect((await order(g.visitId, ['柠檬茶'], {}, km, key)).status).toBe(200);
+    expect((await api(ctx.app, km, 'GET', `/api/frontdesk/ops/${key}?type=bill_post`)).status).toBe(403);
+    const found = await api(ctx.app, km, 'GET', `/api/dining/ops/${key}`);
+    expect([found.status, found.body]).toEqual([200, { found: true, type: 'dining_order', visitId: g.visitId }]);
+    // 已经生效的作废不了：照样答生效了
+    expect((await api(ctx.app, km, 'POST', `/api/dining/ops/${key}/abandon`, {})).body).toEqual({ found: true, type: 'dining_order', visitId: g.visitId });
+
+    // 原请求没到（或还在路上）：确认作废以后它再到也不会生效；留一条作废的审计
+    const lost = randomUUID();
+    expect((await api(ctx.app, km, 'GET', `/api/dining/ops/${lost}`)).body).toEqual({ found: false, abandoned: false });
+    expect((await api(ctx.app, km, 'POST', `/api/frontdesk/ops/${lost}/abandon`, { type: 'bill_post' })).status).toBe(403);
+    expect((await api(ctx.app, km, 'POST', `/api/dining/ops/${lost}/abandon`, {})).body).toEqual({ found: false, abandoned: true });
+    const late = await order(g.visitId, ['果盘'], {}, km, lost);
+    expect(late.body.error?.code).toBe('OP_ABANDONED');
+    expect((await api(ctx.app, km, 'GET', `/api/dining/ops/${lost}`)).body).toEqual({ found: false, abandoned: true });
+    const [abandons] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'frontdesk_abandon' AND detail->>'key' = ${lost}`;
+    expect(abandons!.n).toBe(1);
+    const [count] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM bill_lines l JOIN visits v ON v.bill_id = l.bill_id WHERE v.id = ${g.visitId}`;
+    expect(count!.n).toBe(1);
+
+    // 编号属于别的前台业务（发牌）：这里只答没查到、不说是什么，也不作废
+    tagNo += 1;
+    const checkinKey = randomUUID();
+    const other = await api(ctx.app, ctx.clerk, 'POST', '/api/frontdesk/checkins', {
+      clientKey: checkinKey,
+      guests: [{ tagCode: `G${String(tagNo).padStart(3, '0')}`, zone: 'male', memberId: null }],
+    });
+    expect(other.status, JSON.stringify(other.body)).toBe(201);
+    expect((await api(ctx.app, km, 'GET', `/api/dining/ops/${checkinKey}`)).body).toEqual({ found: false, abandoned: false });
+    expect((await api(ctx.app, km, 'POST', `/api/dining/ops/${checkinKey}/abandon`, {})).body).toEqual({ found: false, abandoned: false });
+    const [fences] = await ctx.sql<{ n: number }[]>`SELECT count(*)::int AS n FROM op_fences WHERE key = ${checkinKey}`;
+    expect(fences!.n).toBe(0);
+
+    // 同一台设备上前台的同事（有前台权限）也能从这里处理；两样都没有的不行
+    expect((await api(ctx.app, ctx.clerk, 'GET', `/api/dining/ops/${key}`)).body).toEqual({ found: true, type: 'dining_order', visitId: g.visitId });
+    const bm = (await api(ctx.app, butler, 'GET', '/api/auth/me')).body as { permissions: string[] };
+    expect(bm.permissions.filter((p) => ['dining.order', 'frontdesk.read', 'frontdesk.operate'].includes(p))).toEqual([]);
+    expect((await api(ctx.app, butler, 'GET', `/api/dining/ops/${key}`)).status).toBe(403);
+    expect((await api(ctx.app, butler, 'POST', `/api/dining/ops/${randomUUID()}/abandon`, {})).status).toBe(403);
+  });
+});
+
 describe('房号找客人与送达（B3）', () => {
   it('只填房号：找到在住的客人、出品单写送到哪；找不到拒绝；都填时记在手牌上、房号写在送达位置；换了房按原房号下单拒绝', async () => {
     const g = await enter();

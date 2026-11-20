@@ -374,6 +374,62 @@ describe('发牌前风控 · 未结离店、重复到店、预约', () => {
     expect((await risk(m.id)).bookings.map((b) => b.id)).toEqual([spaceBooking]);
   });
 
+  it('预约改期与发牌同时来：发牌等改期提交以后按最新的营业日核对，改到明天的不标到店、不挂这张牌（Codex 审查 f6327a4）', async () => {
+    const me = (await api(ctx.app, ctx.owner, 'GET', '/api/auth/me')).body as { today: string };
+    const tomorrow = new Date(Date.parse(`${me.today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    const it = await api(ctx.app, ctx.owner, 'POST', '/api/items', { name: '改期足疗', category: '足疗', price: 16800, durationMinutes: 60 });
+    const itemId = it.body.items.find((i: { name: string }) => i.name === '改期足疗').id as number;
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/technicians/items', { items: [{ id: itemId, required: true }] })).status).toBe(200);
+    expect((await api(ctx.app, ctx.owner, 'POST', '/api/admin/technicians', { techNo: 'F8', name: '改期技师', gender: 'female', grade: 'standard' })).status).toBe(200);
+    const m = await createMember(ctx, '改期乙');
+    const slots = (await api(ctx.app, ctx.clerk, 'GET', `/api/bookings/slots?kind=technician&date=${tomorrow}&itemId=${itemId}`)).body as { startsAt: string; free: number }[];
+    const made = await api(ctx.app, ctx.clerk, 'POST', '/api/bookings', {
+      clientKey: randomUUID(),
+      memberId: m.id,
+      kind: 'technician',
+      itemId,
+      technicianId: null,
+      startsAt: slots.find((s) => s.free > 0)!.startsAt,
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(200);
+    const bookingId = made.body.id as number;
+    // 约的是明天的时段，先挪到今天这个营业日：发牌读到的是「今天待到店」
+    await ctx.sql`UPDATE bookings SET business_date = ${me.today} WHERE id = ${bookingId}`;
+    expect((await risk(m.id)).bookings.map((b) => b.id)).toEqual([bookingId]);
+    const [row] = await ctx.sql<{ status: string }[]>`SELECT status FROM bookings WHERE id = ${bookingId}`;
+    const before = row!.status;
+    expect(['pending', 'confirmed']).toContain(before);
+
+    // 改期的事务先拿着这张预约的行锁（只改营业日、状态照旧，与预约页改期一样），发牌读到的还是今天的、卡在锁预约上
+    let updated!: () => void;
+    let release!: () => void;
+    const didUpdate = new Promise<void>((r) => (updated = r));
+    const gate = new Promise<void>((r) => (release = r));
+    const reschedule = ctx.sql.begin(async (t1) => {
+      await t1`UPDATE bookings SET business_date = ${tomorrow}, version = version + 1 WHERE id = ${bookingId}`;
+      updated();
+      await gate;
+    });
+    await didUpdate;
+    const code = nextTag();
+    const pending = checkinRaw(ctx.clerk, { guests: [{ tagCode: code, zone: 'male', memberId: m.id }] });
+    for (let i = 0; ; i++) {
+      const rows = await ctx.sql`SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE ${'%FROM bookings%FOR UPDATE%'}`;
+      if (rows.length > 0) break;
+      if (i > 100) throw new Error('发牌没有卡在锁预约上');
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    release();
+    await reschedule;
+    const done = await pending;
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect((done.body as CheckinResult).arrivedBookings).toEqual([]);
+    const [b] = await ctx.sql<{ status: string; businessDate: string; arrivalVisitId: number | null }[]>`
+      SELECT status, business_date::text AS business_date, arrival_visit_id FROM bookings WHERE id = ${bookingId}`;
+    // 预约原样不动：状态还是原来的（没有标到店），营业日是改到的明天，没有挂上这张牌
+    expect(b).toEqual({ status: before, businessDate: tomorrow, arrivalVisitId: null });
+  });
+
   it('同一编号并发两次：只发一次牌；两位客人同时发同一张牌：一位成功、一位被告知已在店', async () => {
     const m = await createMember(ctx, '并发甲');
     const code = nextTag();

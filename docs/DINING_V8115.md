@@ -83,6 +83,7 @@
 | `POST /api/frontdesk/lines/:id/void`、`/api/dining/tables/lines/:id/void` | 原有 | 多可选的 `blame` |
 | `GET /api/dining/guest` | 原有 | `tag`、`room` 至少一样；多 `deliverRoom` |
 | `POST /api/dining/orders` | 餐饮点单（+ 出品口） | 多 `deliverRoom`、`roomOnly`、`orderNote` |
+| `GET /api/dining/ops/:key`、`POST /api/dining/ops/:key/abandon` | 餐饮点单，或前台原来那一项（查回：查看在店手牌；作废：接待发牌、挂账、换牌） | 点单页下单「结果待确认」的查回、确认作废（Codex 审查 f6327a4）：只认挂账 `bill_post`；查回只答 `{ found: true, type: 'dining_order', visitId }`，不给整张账单；编号属于别的前台业务的答没查到、不作废 |
 | `POST /api/dining/tables/sessions/:id/orders` | 原有（+ 出品口） | 多 `orderNote` |
 | `PUT /api/admin/dining/rules` | 原有 | 多 `clearAfterCheckout` |
 
@@ -98,6 +99,8 @@
 - 开台、换台在原来锁住的桌台行里核对待清台、维修中；撤台在锁住开台以后核对没在并台；反结账照旧（桌台 → 开台），不改桌台状态；
 - 都是「桌台 → 开台」，没有反过来的路径；`table_events` 的外键只指向调用方已经锁住的桌台、开台；
 - 台账、桌台历史只读；点单页按出品口核对、按房号找客人不加锁，只填房号的在挂账的事务里锁住来访以后再只读地核对一次。
+
+点单页下单是挂账（业务类型 `bill_post`），「结果待确认」时页面按原编号走 `/api/dining/ops` 查回、确认作废（`src/client/features/frontdesk/pending.tsx` 的 `opsPath`）：康美部只有「餐饮点单」与出品口的下单权限，走前台的 `/api/frontdesk/ops` 会因为没有前台权限被拒，响应丢了就没法自己结束待确认（Codex 审查 f6327a4）。前台加项目、桌台点单照旧走前台的地址。
 
 桌台动作不涉及钱：结果不确定时在当前页面再点一次同样的按钮（沿用原编号，服务端只记一次）；不存本机、没有「确认作废」——状态核对挡住了重复（已经清过台的再清提示不用清台）。下单、退菜照旧走前台那一套「结果待确认」。
 

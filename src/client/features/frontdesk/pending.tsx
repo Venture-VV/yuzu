@@ -294,6 +294,14 @@ export type ReconcileOutcome =
   /** 还是不确定（查不到、又不该自动重提，或网络又断了）：记录留着 */
   | { kind: 'pending' };
 
+/**
+ * 查回、作废走哪个地址（8.1.15，Codex 审查 f6327a4）：点单页的下单（挂账，发到 `/api/dining/orders`）走餐饮的
+ * `/api/dining/ops`——只要「餐饮点单」（康美部没有前台权限），有前台权限的同事在同一台设备上也能处理；其余照旧走前台的
+ */
+export function opsPath(op: { key: string; type: FrontdeskPendingOp['type']; url: string }): string {
+  return op.type === 'bill_post' && op.url === '/api/dining/orders' ? `/api/dining/ops/${op.key}` : `/api/frontdesk/ops/${op.key}`;
+}
+
 const reconciling = new Set<string>();
 
 /**
@@ -309,7 +317,7 @@ export async function reconcilePending(op: FrontdeskPendingOp, resend = false): 
   try {
     let found: FrontdeskOpLookup;
     try {
-      found = await api.get<FrontdeskOpLookup>(`/api/frontdesk/ops/${op.key}?type=${op.type}`);
+      found = await api.get<FrontdeskOpLookup>(`${opsPath(op)}?type=${op.type}`);
     } catch {
       return { kind: 'pending' };
     }
@@ -416,7 +424,7 @@ export function useFrontdeskOp<T>(opts: {
             // 重提被明确拒绝，不代表之前那次结果不明的请求不会随后生效：先在服务端作废编号，再下结论
             let fenced: FrontdeskOpLookup | null = null;
             try {
-              fenced = await api.post<FrontdeskOpLookup>(`/api/frontdesk/ops/${op.key}/abandon`, { type: op.type });
+              fenced = await api.post<FrontdeskOpLookup>(`${opsPath(op)}/abandon`, { type: op.type });
             } catch {
               /* 作废没有完成，下面按待确认处理 */
             }
@@ -505,7 +513,7 @@ export function useFrontdeskOp<T>(opts: {
     if (!pending) return null;
     setState({ phase: 'busy' });
     try {
-      return settle(pending.key, await api.get<FrontdeskOpLookup>(`/api/frontdesk/ops/${pending.key}?type=${pending.type}`));
+      return settle(pending.key, await api.get<FrontdeskOpLookup>(`${opsPath(pending)}?type=${pending.type}`));
     } catch (error) {
       setState({ phase: 'uncertain', message: `仍然无法确认：${errorMessage(error)}` });
       return null;
@@ -517,7 +525,7 @@ export function useFrontdeskOp<T>(opts: {
     if (!pending) return null;
     setState({ phase: 'busy' });
     try {
-      return settle(pending.key, await api.post<FrontdeskOpLookup>(`/api/frontdesk/ops/${pending.key}/abandon`, { type: pending.type }));
+      return settle(pending.key, await api.post<FrontdeskOpLookup>(`${opsPath(pending)}/abandon`, { type: pending.type }));
     } catch (error) {
       setState({ phase: 'uncertain', message: `作废未完成，原操作仍待确认：${errorMessage(error)}` });
       return null;
