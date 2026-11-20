@@ -15,6 +15,7 @@ import { api, errorMessage } from '../../lib/api';
 import { useErpRecorded } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { LoadFailed } from '../../components/LoadFailed';
@@ -228,32 +229,21 @@ function ByAuthorizer({ l }: { l: Ledger }) {
   return (
     <Card className="min-w-0 p-4" data-testid="gift-by-authorizer">
       <p className="mb-2 text-[14.5px] font-bold">按授权人</p>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[420px] text-[13px]">
-          <thead>
-            <tr className="text-left text-[12px] text-ink-3">
-              <th className="py-1.5 font-semibold">授权人</th>
-              <th className="text-right font-semibold">发出</th>
-              <th className="text-right font-semibold">已使用</th>
-              <th className="text-right font-semibold">未使用</th>
-              <th className="text-right font-semibold">已作废</th>
-              <th className="text-right font-semibold">已过期</th>
-            </tr>
-          </thead>
-          <tbody>
-            {l.byAuthorizer.map((a) => (
-              <tr key={a.authorizer.id} className="border-t border-line/70" data-testid={`gift-authorizer-${a.authorizer.id}`}>
-                <td className="py-1.5 font-semibold">{a.authorizer.name}</td>
-                <td className="num text-right">{a.issued}</td>
-                <td className="num text-right text-pine">{a.used}</td>
-                <td className="num text-right">{a.available}</td>
-                <td className="num text-right text-ink-3">{a.voided}</td>
-                <td className="num text-right text-ember">{a.expired}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        variant="plain"
+        tableClassName="min-w-[420px]"
+        rows={l.byAuthorizer}
+        rowKey={(a) => a.authorizer.id}
+        rowTestId={(a) => `gift-authorizer-${a.authorizer.id}`}
+        columns={[
+          { key: 'authorizer', header: '授权人', cellClassName: 'font-semibold', cell: (a) => a.authorizer.name },
+          { key: 'issued', header: '发出', numeric: true, cell: (a) => a.issued },
+          { key: 'used', header: '已使用', numeric: true, cellClassName: 'text-pine', cell: (a) => a.used },
+          { key: 'available', header: '未使用', numeric: true, cell: (a) => a.available },
+          { key: 'voided', header: '已作废', numeric: true, cellClassName: 'text-ink-3', cell: (a) => a.voided },
+          { key: 'expired', header: '已过期', numeric: true, cellClassName: 'text-ember', cell: (a) => a.expired },
+        ]}
+      />
     </Card>
   );
 }
@@ -305,31 +295,28 @@ function ByPerson({ l }: { l: Ledger }) {
       <p className="mb-2 text-[14.5px] font-bold">
         按个人<span className="ml-2 text-[12px] font-normal text-ink-3">会员名下累计（用了的从多到少，前 50 位）</span>
       </p>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[400px] text-[13px]">
-          <thead>
-            <tr className="text-left text-[12px] text-ink-3">
-              <th className="py-1.5 font-semibold">会员</th>
-              <th className="text-right font-semibold">发了</th>
-              <th className="text-right font-semibold">用了</th>
-              <th className="text-right font-semibold">抵扣</th>
-            </tr>
-          </thead>
-          <tbody>
-            {l.byPerson.map((p) => (
-              <tr key={p.member.id} className="border-t border-line/70" data-testid={`gift-person-${p.member.id}`}>
-                <td className="py-1.5">
-                  <span className="font-semibold">{p.member.name}</span>
-                  <span className="num ml-2 text-[12px] text-ink-3">{p.member.phone}</span>
-                </td>
-                <td className="num text-right">{p.issued}</td>
-                <td className="num text-right text-pine">{p.used}</td>
-                <td className="num text-right">{formatYuan(p.usedCents)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        variant="plain"
+        tableClassName="min-w-[400px]"
+        rows={l.byPerson}
+        rowKey={(p) => p.member.id}
+        rowTestId={(p) => `gift-person-${p.member.id}`}
+        columns={[
+          {
+            key: 'member',
+            header: '会员',
+            cell: (p) => (
+              <>
+                <span className="font-semibold">{p.member.name}</span>
+                <span className="num ml-2 text-[12px] text-ink-3">{p.member.phone}</span>
+              </>
+            ),
+          },
+          { key: 'issued', header: '发了', numeric: true, cell: (p) => p.issued },
+          { key: 'used', header: '用了', numeric: true, cellClassName: 'text-pine', cell: (p) => p.used },
+          { key: 'usedCents', header: '抵扣', numeric: true, cell: (p) => formatYuan(p.usedCents) },
+        ]}
+      />
     </Card>
   );
 }
@@ -375,53 +362,74 @@ function Detail({ l, canVoid, onVoid }: { l: Ledger; canVoid: boolean; onVoid: (
         {l.truncated && <Badge tone="ember">只显示最近 1000 张，统计与导出是全部</Badge>}
       </div>
       {/* 宽屏：表格 */}
-      <div className="hidden overflow-x-auto lg:block">
-        <table className="w-full min-w-[960px] text-[13px]" data-testid="gift-table">
-          <thead>
-            <tr className="text-left text-[12px] text-ink-3">
-              <th className="py-1.5 font-semibold">券码 · 券种</th>
-              <th className="font-semibold">会员</th>
-              <th className="font-semibold">授权人 · 渠道</th>
-              <th className="font-semibold">事由 · 经办</th>
-              <th className="font-semibold">发放</th>
-              <th className="font-semibold">状态 · 核销记录</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {l.rows.map((r) => (
-              <tr key={r.couponId} className={cn('border-t border-line/70 align-top', r.status === 'voided' && 'text-ink-3')} data-testid={`gift-row-${r.couponId}`}>
-                <td className="py-2">
-                  <p className="num font-semibold">{formatStoreCouponCode(r.code)}</p>
-                  <p className="text-[12.5px]">
-                    {r.type.name} <span className="text-ink-3">· {r.segment}</span>
-                  </p>
-                </td>
-                <td className="py-2">
-                  <p className="font-semibold">{r.member?.name ?? '—'}</p>
-                  <p className="num text-[12px] text-ink-3">{r.member?.phone ?? ''}</p>
-                </td>
-                <td className="py-2">
-                  <p className="font-semibold">{r.authorizer.name}</p>
-                  <p className="text-[12px] text-ink-3">{r.channel}</p>
-                </td>
-                <td className="max-w-[220px] py-2">
-                  <p className="line-clamp-2">{r.reason}</p>
-                  <p className="text-[12px] text-ink-3">{r.issuedByName ?? ''}</p>
-                </td>
-                <td className="py-2 whitespace-nowrap">
-                  <p className="num">{formatDateTime(r.issuedAt)}</p>
-                  <p className="num text-[12px] text-ink-3">{r.issueNo}</p>
-                </td>
-                <td className="py-2">
-                  <StatusCell r={r} />
-                </td>
-                <td className="py-2 text-right">{voidButton(r)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        variant="plain"
+        testId="gift-table"
+        className="hidden lg:block"
+        tableClassName="min-w-[960px]"
+        rows={l.rows}
+        rowKey={(r) => r.couponId}
+        rowClassName={(r) => cn('align-top', r.status === 'voided' && 'text-ink-3')}
+        rowTestId={(r) => `gift-row-${r.couponId}`}
+        columns={[
+          {
+            key: 'code',
+            header: '券码 · 券种',
+            cell: (r) => (
+              <>
+                <p className="num font-semibold">{formatStoreCouponCode(r.code)}</p>
+                <p className="text-[12.5px]">
+                  {r.type.name} <span className="text-ink-3">· {r.segment}</span>
+                </p>
+              </>
+            ),
+          },
+          {
+            key: 'member',
+            header: '会员',
+            cell: (r) => (
+              <>
+                <p className="font-semibold">{r.member?.name ?? '—'}</p>
+                <p className="num text-[12px] text-ink-3">{r.member?.phone ?? ''}</p>
+              </>
+            ),
+          },
+          {
+            key: 'authorizer',
+            header: '授权人 · 渠道',
+            cell: (r) => (
+              <>
+                <p className="font-semibold">{r.authorizer.name}</p>
+                <p className="text-[12px] text-ink-3">{r.channel}</p>
+              </>
+            ),
+          },
+          {
+            key: 'reason',
+            header: '事由 · 经办',
+            cellClassName: 'max-w-[220px]',
+            cell: (r) => (
+              <>
+                <p className="line-clamp-2">{r.reason}</p>
+                <p className="text-[12px] text-ink-3">{r.issuedByName ?? ''}</p>
+              </>
+            ),
+          },
+          {
+            key: 'issued',
+            header: '发放',
+            cellClassName: 'whitespace-nowrap',
+            cell: (r) => (
+              <>
+                <p className="num">{formatDateTime(r.issuedAt)}</p>
+                <p className="num text-[12px] text-ink-3">{r.issueNo}</p>
+              </>
+            ),
+          },
+          { key: 'status', header: '状态 · 核销记录', cell: (r) => <StatusCell r={r} /> },
+          { key: 'actions', header: '', align: 'right', cell: (r) => voidButton(r) },
+        ]}
+      />
       {/* 窄屏（商米 V3、平板竖屏）：卡片 */}
       <ul className="space-y-2 lg:hidden" data-testid="gift-cards">
         {l.rows.map((r) => (

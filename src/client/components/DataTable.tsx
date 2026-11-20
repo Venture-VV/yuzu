@@ -23,6 +23,10 @@ export interface DataColumn<T> {
   cellClassName?: string | ((row: T) => string | undefined);
   /** 单元格的 data-testid（按行） */
   cellTestId?: (row: T) => string | undefined;
+  /** 表头这一格的 data-testid */
+  headerTestId?: string;
+  /** 单元格的 data-label：窄屏把一行排成卡片时，样式表用 attr(data-label) 在格子前面写上列名 */
+  dataLabel?: string;
 }
 
 const ALIGN = { left: 'text-left', center: 'text-center', right: 'text-right' } as const;
@@ -38,6 +42,7 @@ export function DataTable<T>({
   rows,
   rowKey,
   variant = 'boxed',
+  onPage,
   onRowClick,
   rowLabel,
   rowClassName,
@@ -51,6 +56,8 @@ export function DataTable<T>({
   failedTitle = '没有取回来，请重试',
   footer,
   caption,
+  hideHeader,
+  stickyHeader,
   testId,
   className,
   tableClassName = 'min-w-max',
@@ -61,6 +68,8 @@ export function DataTable<T>({
   rowKey: (row: T, index: number) => string | number;
   /** boxed：独立的一张表（带边框、表头有底色）；plain：卡片里的小表 */
   variant?: 'boxed' | 'plain';
+  /** boxed 的表直接放在页面底色上（外面没有卡片）时给 true：表格那一层用卡片底色、带浅阴影，空态放进虚线框 */
+  onPage?: boolean;
   /** 整行可点：鼠标、触摸、键盘回车都行；行里自己的按钮照旧只管自己 */
   onRowClick?: (row: T) => void;
   /** 可点的行念给读屏的那一句（不给就念这一行的文字） */
@@ -80,6 +89,10 @@ export function DataTable<T>({
   footer?: ReactNode;
   /** 表格的名字（读屏用，不显示） */
   caption?: string;
+  /** 不显示表头（像一张清单、一看就懂的小表）：列名只念给读屏 */
+  hideHeader?: boolean;
+  /** 表头停在框顶：框有最大高度、上下滚动时（className 给 max-h-… overflow-y-auto） */
+  stickyHeader?: boolean;
   testId?: string;
   /** 外面那一层（边框、底色、阴影、外边距） */
   className?: string;
@@ -102,18 +115,29 @@ export function DataTable<T>({
         {empty}
       </p>
     ) : (
-      <EmptyState title={empty} description={emptyDescription} art="calm" className={className} testId={testId ? `${testId}-empty` : undefined} />
+      <EmptyState
+        title={empty}
+        description={emptyDescription}
+        art="calm"
+        className={cn(onPage && 'rounded-lg border border-dashed border-line-strong', className)}
+        testId={testId ? `${testId}-empty` : undefined}
+      />
     );
   const boxed = variant === 'boxed';
   const alignOf = (c: DataColumn<T>) => ALIGN[c.align ?? (c.numeric ? 'right' : 'left')];
   return (
-    <div className={cn('max-w-full overflow-x-auto', boxed && 'rounded-lg border border-line', className)} data-testid={testId}>
+    <div className={cn('max-w-full overflow-x-auto', boxed && 'rounded-lg border border-line', boxed && onPage && 'bg-card shadow-card', className)} data-testid={testId}>
       <table className={cn('w-full text-[13px]', tableClassName)}>
         {caption && <caption className="sr-only">{caption}</caption>}
-        <thead className={cn('text-[12px] text-ink-3', boxed && 'bg-paper-2/70')}>
+        <thead className={cn('text-[12px] text-ink-3', stickyHeader ? cn('sticky top-0 z-10', boxed ? 'bg-paper-2' : 'bg-card') : boxed && 'bg-paper-2/70', hideHeader && 'sr-only')}>
           <tr>
             {columns.map((c) => (
-              <th key={c.key} scope="col" className={cn('font-bold whitespace-nowrap', boxed ? 'px-3 py-2' : 'py-1.5 pr-3 last:pr-0', alignOf(c), c.className, c.headerClassName)}>
+              <th
+                key={c.key}
+                scope="col"
+                className={cn('font-bold whitespace-nowrap', boxed ? 'px-3 py-2' : 'py-1.5 pr-3 last:pr-0', alignOf(c), c.className, c.headerClassName)}
+                data-testid={c.headerTestId}
+              >
                 {c.header}
               </th>
             ))}
@@ -150,6 +174,7 @@ export function DataTable<T>({
                     typeof c.cellClassName === 'function' ? c.cellClassName(row) : c.cellClassName,
                   )}
                   data-testid={c.cellTestId?.(row)}
+                  data-label={c.dataLabel}
                 >
                   {c.cell(row, i)}
                 </td>

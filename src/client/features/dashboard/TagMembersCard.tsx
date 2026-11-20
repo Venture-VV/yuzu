@@ -7,6 +7,7 @@ import { Download, Tags } from 'lucide-react';
 import { groupTags, type TagMatchMode, type TagMemberReport } from '@shared/member-tags';
 import { api } from '../../lib/api';
 import { cn, downloadUrl, relativeTime } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { Money } from '../../components/Money';
 import { Button, Card, Notice, SectionTitle, Segmented, Skeleton } from '../../components/ui';
 import { useMemberTags } from '../membership/TagPicker';
@@ -86,33 +87,29 @@ export function TagMembersCard() {
           </div>
           {report.error && <Notice tone="error" title={report.error.message} />}
           {report.data && report.data.rows.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-[13px]">
-                <thead className="text-left text-[12px] text-ink-3">
-                  <tr>
-                    <th className="py-1.5 pr-3">会员</th>
-                    <th className="py-1.5 pr-3">档阶</th>
-                    <th className="py-1.5 pr-3 text-right">余额</th>
-                    <th className="py-1.5 pr-3">最近</th>
-                    <th className="py-1.5">标签</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line/70">
-                  {report.data.rows.map((r) => (
-                    <tr key={r.id}>
-                      <td className="py-1.5 pr-3 font-semibold text-ink">
+            <div>
+              <DataTable
+                variant="plain"
+                tableClassName="min-w-[640px]"
+                rows={report.data.rows}
+                rowKey={(r) => r.id}
+                columns={[
+                  {
+                    key: 'member',
+                    header: '会员',
+                    cellClassName: 'font-semibold text-ink',
+                    cell: (r) => (
+                      <>
                         {r.name} <span className="num font-normal text-ink-3">{r.memberNo}</span>
-                      </td>
-                      <td className="py-1.5 pr-3 whitespace-nowrap text-ink-2">{r.gradeLabel}</td>
-                      <td className="py-1.5 pr-3 text-right">
-                        <Money cents={r.principalBalance + r.bonusBalance} />
-                      </td>
-                      <td className="py-1.5 pr-3 whitespace-nowrap text-ink-3">{relativeTime(r.lastActivityAt)}</td>
-                      <td className="py-1.5 text-[12px] text-ink-3">{r.tags.join('、')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </>
+                    ),
+                  },
+                  { key: 'grade', header: '档阶', cellClassName: 'whitespace-nowrap text-ink-2', cell: (r) => r.gradeLabel },
+                  { key: 'balance', header: '余额', numeric: true, cell: (r) => <Money cents={r.principalBalance + r.bonusBalance} /> },
+                  { key: 'last', header: '最近', cellClassName: 'whitespace-nowrap text-ink-3', cell: (r) => relativeTime(r.lastActivityAt) },
+                  { key: 'tags', header: '标签', cellClassName: 'text-[12px] text-ink-3', cell: (r) => r.tags.join('、') },
+                ]}
+              />
               {report.data.count > report.data.rows.length && <p className="mt-2 text-[12px] text-ink-3">页面只列最近活动的 {report.data.rows.length} 位，导出不受这个限制。</p>}
             </div>
           )}

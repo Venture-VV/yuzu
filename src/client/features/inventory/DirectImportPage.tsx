@@ -15,6 +15,7 @@ import { loadTableFile, type LoadedTable } from '../../lib/import-file';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable } from '../../components/DataTable';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useToast } from '../../components/Toast';
 import { Button, Notice } from '../../components/ui';
@@ -204,46 +205,55 @@ export function DirectImportPage() {
                   ))}
                 </Notice>
               )}
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] text-[13px]">
-                  <thead>
-                    <tr className="border-b border-line text-left text-[12px] font-semibold whitespace-nowrap text-ink-3">
-                      <th className="py-2 pr-2">行</th>
-                      <th className="pr-2">入库日期</th>
-                      <th className="pr-2">供应商</th>
-                      <th className="pr-2">物品</th>
-                      <th className="pr-2 text-right">送达 / 合格</th>
-                      <th className="pr-2 text-right">单价</th>
-                      <th className="pr-2 text-right">金额</th>
-                      <th className="pr-2">分组</th>
-                      <th className="w-[34%]">问题</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.rows.map((r) => (
-                      <tr key={r.row} className={cn('border-b border-line/60 align-top', r.issues.length > 0 && 'bg-clay-soft/40')} data-testid={`direct-import-row-${r.row}`}>
-                        <td className="num py-2 pr-2 text-ink-3">{r.row}</td>
-                        <td className="num pr-2 whitespace-nowrap">{r.docDate ?? '—'}</td>
-                        <td className="pr-2 whitespace-nowrap">{r.supplier?.name ?? '—'}</td>
-                        <td className="pr-2">
-                          {r.material ? r.material.name : '—'}
-                          {r.material && <span className="num ml-1 text-[12px] text-ink-3">{r.material.code}</span>}
-                        </td>
-                        <td className="num pr-2 text-right whitespace-nowrap">
-                          {r.deliveredMilli !== null ? formatQty(r.deliveredMilli) : '—'} / {r.acceptedMilli !== null ? formatQty(r.acceptedMilli) : '—'} {r.material?.inventoryUnit ?? ''}
-                        </td>
-                        <td className="num pr-2 text-right whitespace-nowrap">
-                          {r.priceCents !== null ? `¥${formatAmount(r.priceCents)}` : '—'}
-                          {r.material && <span className="text-[12px] text-ink-3">/{r.material.purchaseUnit}</span>}
-                        </td>
-                        <td className="num pr-2 text-right whitespace-nowrap">{r.amountCents !== null ? `¥${formatAmount(r.amountCents)}` : '—'}</td>
-                        <td className="pr-2 whitespace-nowrap">{r.group || '—'}</td>
-                        <td className="text-[12.5px] font-semibold text-clay">{r.issues.join('；')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                variant="plain"
+                tableClassName="min-w-[980px]"
+                rows={preview.rows}
+                rowKey={(r) => r.row}
+                rowClassName={(r) => cn('align-top', r.issues.length > 0 && 'bg-clay-soft/40')}
+                rowTestId={(r) => `direct-import-row-${r.row}`}
+                columns={[
+                  { key: 'row', header: '行', cellClassName: 'num text-ink-3', cell: (r) => r.row },
+                  { key: 'docDate', header: '入库日期', cellClassName: 'num whitespace-nowrap', cell: (r) => r.docDate ?? '—' },
+                  { key: 'supplier', header: '供应商', cellClassName: 'whitespace-nowrap', cell: (r) => r.supplier?.name ?? '—' },
+                  {
+                    key: 'material',
+                    header: '物品',
+                    cell: (r) => (
+                      <>
+                        {r.material ? r.material.name : '—'}
+                        {r.material && <span className="num ml-1 text-[12px] text-ink-3">{r.material.code}</span>}
+                      </>
+                    ),
+                  },
+                  {
+                    key: 'qty',
+                    header: '送达 / 合格',
+                    numeric: true,
+                    cellClassName: 'whitespace-nowrap',
+                    cell: (r) => (
+                      <>
+                        {r.deliveredMilli !== null ? formatQty(r.deliveredMilli) : '—'} / {r.acceptedMilli !== null ? formatQty(r.acceptedMilli) : '—'} {r.material?.inventoryUnit ?? ''}
+                      </>
+                    ),
+                  },
+                  {
+                    key: 'price',
+                    header: '单价',
+                    numeric: true,
+                    cellClassName: 'whitespace-nowrap',
+                    cell: (r) => (
+                      <>
+                        {r.priceCents !== null ? `¥${formatAmount(r.priceCents)}` : '—'}
+                        {r.material && <span className="text-[12px] text-ink-3">/{r.material.purchaseUnit}</span>}
+                      </>
+                    ),
+                  },
+                  { key: 'amount', header: '金额', numeric: true, cellClassName: 'whitespace-nowrap', cell: (r) => (r.amountCents !== null ? `¥${formatAmount(r.amountCents)}` : '—') },
+                  { key: 'group', header: '分组', cellClassName: 'whitespace-nowrap', cell: (r) => r.group || '—' },
+                  { key: 'issues', header: '问题', headerClassName: 'w-[34%]', cellClassName: 'text-[12.5px] font-semibold text-clay', cell: (r) => r.issues.join('；') },
+                ]}
+              />
             </section>
           )}
 

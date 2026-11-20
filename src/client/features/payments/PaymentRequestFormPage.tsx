@@ -13,6 +13,7 @@ import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, uuid } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
@@ -304,50 +305,42 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
             </Select>
           </Field>
           {supplierId && items.isPending && <Skeleton className="h-24" />}
-          {supplierId &&
-            items.data &&
-            (rows.length === 0 ? (
-              <p className="text-[13px] text-ink-3">这家供应商没有没结清的货款。</p>
-            ) : (
-              <table className="w-full text-[13px]" data-testid="request-items">
-                <thead>
-                  <tr className="border-b border-line text-left text-[12px] text-ink-3">
-                    <th className="py-1.5 pr-2 font-semibold">单号</th>
-                    <th className="py-1.5 pr-2 font-semibold">日期</th>
-                    <th className="py-1.5 pr-2 text-right font-semibold">没结清</th>
-                    <th className="py-1.5 pr-2 text-right font-semibold">别的申请占着</th>
-                    <th className="w-36 py-1.5 font-semibold">申请</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line/70">
-                  {rows.map((r) => (
-                    <tr key={r.key} className={cn(r.blocked && 'text-ink-3')}>
-                      <td className="py-1.5 pr-2">
-                        <span className="num font-semibold">{r.i.docNo}</span>
-                        <span className="block text-[12px] text-ink-3">{r.blocked ?? r.i.summary}</span>
-                      </td>
-                      <td className="num py-1.5 pr-2">{r.i.date}</td>
-                      <td className="py-1.5 pr-2 text-right">
-                        <Money cents={r.i.openCents} />
-                      </td>
-                      <td className="py-1.5 pr-2 text-right">{r.i.requestedCents ? <Money cents={r.i.requestedCents} /> : <span className="text-ink-4">·</span>}</td>
-                      <td className="py-1.5">
-                        {r.blocked ? (
-                          <span className="text-[12px]">—</span>
-                        ) : (
-                          <MoneyInput
-                            aria-label={`申请 ${r.i.docNo}`}
-                            value={r.text}
-                            onChange={(e) => setTargets((t) => ({ ...t, [r.key]: e.target.value }))}
-                            data-testid={`request-item-${r.i.docNo}`}
-                          />
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ))}
+          {supplierId && items.data && (
+            <DataTable
+              variant="plain"
+              testId="request-items"
+              rows={rows}
+              rowKey={(r) => r.key}
+              rowClassName={(r) => (r.blocked ? 'text-ink-3' : undefined)}
+              empty="这家供应商没有没结清的货款"
+              columns={[
+                {
+                  key: 'doc',
+                  header: '单号',
+                  cell: (r) => (
+                    <>
+                      <span className="num font-semibold">{r.i.docNo}</span>
+                      <span className="block text-[12px] text-ink-3">{r.blocked ?? r.i.summary}</span>
+                    </>
+                  ),
+                },
+                { key: 'date', header: '日期', cellClassName: 'num', cell: (r) => r.i.date },
+                { key: 'open', header: '没结清', numeric: true, cell: (r) => <Money cents={r.i.openCents} /> },
+                { key: 'requested', header: '别的申请占着', numeric: true, cell: (r) => (r.i.requestedCents ? <Money cents={r.i.requestedCents} /> : <span className="text-ink-4">·</span>) },
+                {
+                  key: 'apply',
+                  header: '申请',
+                  headerClassName: 'w-36',
+                  cell: (r) =>
+                    r.blocked ? (
+                      <span className="text-[12px]">—</span>
+                    ) : (
+                      <MoneyInput aria-label={`申请 ${r.i.docNo}`} value={r.text} onChange={(e) => setTargets((t) => ({ ...t, [r.key]: e.target.value }))} data-testid={`request-item-${r.i.docNo}`} />
+                    ),
+                },
+              ]}
+            />
+          )}
           {chosen.length > 0 && (
             <p className="text-[13px]">
               合计 <Money cents={targetsTotal} className="font-bold" />

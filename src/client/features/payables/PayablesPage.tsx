@@ -7,6 +7,7 @@ import { errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn, downloadUrl } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
@@ -119,6 +120,9 @@ export function PayablesPage() {
   );
 }
 
+/** 没有这一项的格子：一个淡淡的点 */
+const DOT = <span className="text-ink-4">·</span>;
+
 function Tile({ label, cents, tone = 'ink', sign }: { label: string; cents: number; tone?: 'ink' | 'pine' | 'lake' | 'clay'; sign?: string }) {
   const color = { ink: 'text-ink', pine: 'text-pine', lake: 'text-lake', clay: 'text-clay' }[tone];
   return (
@@ -157,73 +161,78 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
           待确认的付款不计入已付款，但会占用对应货款的未结清金额，防止重复核销。
         </Notice>
       )}
-      {active.length === 0 ? (
-        <EmptyState art="calm" title="还没有供应商货款" description="收货生效后，货款会按供应商自动汇总在这里。" className="rounded-lg border border-dashed border-line-strong" />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card">
-          <table className="w-full min-w-[1110px] text-left text-[13px]">
-            <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-              <tr>
-                <th className="px-4 py-2.5">供应商</th>
-                <th className="px-2 py-2.5 text-right">期初未付</th>
-                <th className="px-2 py-2.5 text-right">+ 收货货款</th>
-                <th className="px-2 py-2.5 text-right">− 退货扣款</th>
-                <th className="px-2 py-2.5 text-right">− 已付款</th>
-                <th className="px-2 py-2.5 text-right">+ 供应商退款</th>
-                <th className="bg-paper-3/50 px-2 py-2.5 text-right text-ink-2">= 余额</th>
-                <th className="px-2 py-2.5 text-right">可抵扣</th>
-                <th className="px-2 py-2.5 text-right">质保金（未到期）</th>
-                <th className="px-2 py-2.5 text-right">待确认付款</th>
-                <th className="w-[170px] px-4 py-2.5" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/70">
-              {active.map((s) => (
-                <tr key={s.supplierId} className="hover:bg-pine-tint/40">
-                  <td className="px-4 py-2.5">
-                    <p className="font-bold">{s.name}</p>
-                    <p className="num text-[12px] text-ink-3">
-                      {s.code}
-                      {s.openItemCount > 0 && ` · ${s.openItemCount} 笔未结清`}
-                    </p>
-                  </td>
-                  <td className="num px-2 py-2.5 text-right">{s.openingCents ? <Money cents={s.openingCents} /> : <span className="text-ink-4">·</span>}</td>
-                  <td className="num px-2 py-2.5 text-right">
-                    <Money cents={s.receivedCents} className="text-pine" />
-                  </td>
-                  <td className="num px-2 py-2.5 text-right">{s.returnCreditCents ? <Money cents={s.returnCreditCents} className="text-clay" /> : <span className="text-ink-4">·</span>}</td>
-                  <td className="num px-2 py-2.5 text-right">{s.paidCents ? <Money cents={s.paidCents} className="text-lake" /> : <span className="text-ink-4">·</span>}</td>
-                  <td className="num px-2 py-2.5 text-right">{s.refundedCents ? <Money cents={s.refundedCents} /> : <span className="text-ink-4">·</span>}</td>
-                  <td className="bg-paper-2/50 px-2 py-2.5 text-right">
-                    <Money cents={s.balanceCents} className={cn('text-[15px] font-bold', s.balanceCents < 0 && 'text-clay')} />
-                    {s.balanceCents < 0 && <span className="block text-[12px] font-semibold text-clay">供应商欠我们（预付 / 退货余额）</span>}
-                  </td>
-                  <td className="num px-2 py-2.5 text-right">{s.creditCents ? <Money cents={s.creditCents} className="text-ember" /> : <span className="text-ink-4">·</span>}</td>
-                  <td className="num px-2 py-2.5 text-right" data-testid={`warranty-held-${s.code}`}>
-                    {s.warrantyHeldCents ? <Money cents={s.warrantyHeldCents} /> : <span className="text-ink-4">·</span>}
-                  </td>
-                  <td className="num px-2 py-2.5 text-right text-yuzu-deep">{s.pendingPaymentCents ? <Money cents={s.pendingPaymentCents} /> : <span className="text-ink-4">·</span>}</td>
-                  <td className="px-4 py-2.5 text-right">
-                    <span className="flex justify-end gap-1.5">
-                      <Button size="sm" variant="ghost" onClick={() => onStatement(s.supplierId)}>
-                        对账单
-                      </Button>
-                      {can('payable.manage') && s.balanceCents > 0 && (
-                        <Link
-                          to={`/payables/pay?supplier=${s.supplierId}`}
-                          className="tap relative flex h-8 items-center rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold whitespace-nowrap hover:border-ink-3"
-                        >
-                          付款
-                        </Link>
-                      )}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        onPage
+        tableClassName="min-w-[1110px]"
+        rows={active}
+        rowKey={(s) => s.supplierId}
+        rowClassName={() => 'hover:bg-pine-tint/40'}
+        empty="还没有供应商货款"
+        emptyDescription="收货生效后，货款会按供应商自动汇总在这里。"
+        columns={[
+          {
+            key: 'supplier',
+            header: '供应商',
+            cell: (s) => (
+              <>
+                <p className="font-bold">{s.name}</p>
+                <p className="num text-[12px] text-ink-3">
+                  {s.code}
+                  {s.openItemCount > 0 && ` · ${s.openItemCount} 笔未结清`}
+                </p>
+              </>
+            ),
+          },
+          { key: 'opening', header: '期初未付', numeric: true, cell: (s) => (s.openingCents ? <Money cents={s.openingCents} /> : DOT) },
+          { key: 'received', header: '+ 收货货款', numeric: true, cell: (s) => <Money cents={s.receivedCents} className="text-pine" /> },
+          { key: 'returnCredit', header: '− 退货扣款', numeric: true, cell: (s) => (s.returnCreditCents ? <Money cents={s.returnCreditCents} className="text-clay" /> : DOT) },
+          { key: 'paid', header: '− 已付款', numeric: true, cell: (s) => (s.paidCents ? <Money cents={s.paidCents} className="text-lake" /> : DOT) },
+          { key: 'refunded', header: '+ 供应商退款', numeric: true, cell: (s) => (s.refundedCents ? <Money cents={s.refundedCents} /> : DOT) },
+          {
+            key: 'balance',
+            header: '= 余额',
+            numeric: true,
+            headerClassName: 'bg-paper-3/50 text-ink-2',
+            cellClassName: 'bg-paper-2/50',
+            cell: (s) => (
+              <>
+                <Money cents={s.balanceCents} className={cn('text-[15px] font-bold', s.balanceCents < 0 && 'text-clay')} />
+                {s.balanceCents < 0 && <span className="block text-[12px] font-semibold text-clay">供应商欠我们（预付 / 退货余额）</span>}
+              </>
+            ),
+          },
+          { key: 'credit', header: '可抵扣', numeric: true, cell: (s) => (s.creditCents ? <Money cents={s.creditCents} className="text-ember" /> : DOT) },
+          {
+            key: 'warranty',
+            header: '质保金（未到期）',
+            numeric: true,
+            cellTestId: (s) => `warranty-held-${s.code}`,
+            cell: (s) => (s.warrantyHeldCents ? <Money cents={s.warrantyHeldCents} /> : DOT),
+          },
+          { key: 'pending', header: '待确认付款', numeric: true, cellClassName: 'text-yuzu-deep', cell: (s) => (s.pendingPaymentCents ? <Money cents={s.pendingPaymentCents} /> : DOT) },
+          {
+            key: 'actions',
+            header: '',
+            align: 'right',
+            headerClassName: 'w-[170px]',
+            cell: (s) => (
+              <span className="flex justify-end gap-1.5">
+                <Button size="sm" variant="ghost" onClick={() => onStatement(s.supplierId)}>
+                  对账单
+                </Button>
+                {can('payable.manage') && s.balanceCents > 0 && (
+                  <Link
+                    to={`/payables/pay?supplier=${s.supplierId}`}
+                    className="tap relative flex h-8 items-center rounded-sm border border-line-strong bg-card px-3 text-[13px] font-semibold whitespace-nowrap hover:border-ink-3"
+                  >
+                    付款
+                  </Link>
+                )}
+              </span>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -334,108 +343,91 @@ function StatementBody({ st, onPayment, onOpening }: { st: Statement; onPayment:
 
       <section>
         <h3 className="mb-2 text-[13px] font-bold text-ink-2">本期明细</h3>
-        {st.rows.length === 0 ? (
-          <EmptyState art="calm" title="本期没有货款变动" className="rounded-lg border border-dashed border-line-strong py-6" />
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card">
-            <table className="w-full min-w-[760px] text-left text-[13px]">
-              <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                <tr>
-                  <th className="w-[118px] px-4 py-2">日期</th>
-                  <th className="w-[100px] px-2 py-2">类型</th>
-                  <th className="w-[170px] px-2 py-2">单号</th>
-                  <th className="px-2 py-2">说明</th>
-                  <th className="w-[120px] px-2 py-2 text-right">金额</th>
-                  <th className="w-[120px] px-4 py-2 text-right">余额</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line/70">
-                {st.rows.map((r) => (
-                  <tr key={r.id}>
-                    <td className="num px-4 py-2 whitespace-nowrap text-ink-2">{r.date}</td>
-                    <td className="px-2 py-2">
-                      <span className="font-semibold">{KIND_LABEL[r.kind]}</span>
-                      {r.isVoid && (
-                        <Badge tone="clay" className="ml-1">
-                          冲销
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="num px-2 py-2">
-                      {r.docKind === 'inv_doc' ? (
-                        <Link to={`/inventory/docs?doc=${r.docId}`} className="font-semibold text-pine hover:underline">
-                          {r.docNo}
-                        </Link>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => (r.docKind === 'payment' ? onPayment(r.docId) : r.docKind === 'supplier_refund' ? setRefundId(r.docId) : onOpening(r.docId))}
-                          className="font-semibold text-pine hover:underline"
-                        >
-                          {r.docNo}
-                        </button>
-                      )}
-                    </td>
-                    <td className="truncate px-2 py-2 text-ink-3">{r.note}</td>
-                    <td className="px-2 py-2 text-right">
-                      <Money cents={r.amountDeltaCents} signed className={cn('font-semibold', r.amountDeltaCents > 0 ? 'text-ink' : 'text-lake')} />
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <Money cents={r.balanceCents} className="font-bold" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable
+          onPage
+          tableClassName="min-w-[760px]"
+          rows={st.rows}
+          rowKey={(r) => r.id}
+          empty="本期没有货款变动"
+          columns={[
+            { key: 'date', header: '日期', headerClassName: 'w-[118px]', cellClassName: 'num whitespace-nowrap text-ink-2', cell: (r) => r.date },
+            {
+              key: 'kind',
+              header: '类型',
+              headerClassName: 'w-[100px]',
+              cell: (r) => (
+                <>
+                  <span className="font-semibold">{KIND_LABEL[r.kind]}</span>
+                  {r.isVoid && (
+                    <Badge tone="clay" className="ml-1">
+                      冲销
+                    </Badge>
+                  )}
+                </>
+              ),
+            },
+            {
+              key: 'doc',
+              header: '单号',
+              headerClassName: 'w-[170px]',
+              cellClassName: 'num',
+              cell: (r) =>
+                r.docKind === 'inv_doc' ? (
+                  <Link to={`/inventory/docs?doc=${r.docId}`} className="font-semibold text-pine hover:underline">
+                    {r.docNo}
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => (r.docKind === 'payment' ? onPayment(r.docId) : r.docKind === 'supplier_refund' ? setRefundId(r.docId) : onOpening(r.docId))}
+                    className="font-semibold text-pine hover:underline"
+                  >
+                    {r.docNo}
+                  </button>
+                ),
+            },
+            { key: 'note', header: '说明', cellClassName: 'truncate text-ink-3', cell: (r) => r.note },
+            {
+              key: 'amount',
+              header: '金额',
+              numeric: true,
+              headerClassName: 'w-[120px]',
+              cell: (r) => <Money cents={r.amountDeltaCents} signed className={cn('font-semibold', r.amountDeltaCents > 0 ? 'text-ink' : 'text-lake')} />,
+            },
+            { key: 'balance', header: '余额', numeric: true, headerClassName: 'w-[120px]', cell: (r) => <Money cents={r.balanceCents} className="font-bold" /> },
+          ]}
+        />
       </section>
 
       <section>
         <h3 className="mb-2 text-[13px] font-bold text-ink-2">未结清货款</h3>
-        {st.openItems.filter((i) => i.amountCents - i.creditCents - i.offsetCents - i.paidCents !== 0).length === 0 ? (
-          <p className="text-[13px] text-ink-3">全部货款已结清。</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card">
-            <table className="w-full min-w-[720px] text-left text-[13px]">
-              <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                <tr>
-                  <th className="px-4 py-2">货款</th>
-                  <th className="px-2 py-2 text-right">金额</th>
-                  <th className="px-2 py-2 text-right">退货抵扣</th>
-                  <th className="px-2 py-2 text-right">核销</th>
-                  <th className="px-2 py-2 text-right">已付</th>
-                  <th className="px-2 py-2 text-right">待确认付款</th>
-                  <th className="px-4 py-2 text-right">未结清</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line/70">
-                {st.openItems
-                  .filter((i) => i.amountCents - i.creditCents - i.offsetCents - i.paidCents !== 0)
-                  .map((i) => (
-                    <tr key={`${i.kind}${i.id}`}>
-                      <td className="px-4 py-2">
-                        <span className="num font-semibold">{i.docNo}</span>
-                        <span className="ml-2 text-ink-3">
-                          {i.kind === 'opening' ? '期初未付' : i.purchaseOrderNo ? `采购单 ${i.purchaseOrderNo}` : '直接收货'} · {i.date}
-                        </span>
-                      </td>
-                      <td className="px-2 py-2 text-right">
-                        <Money cents={i.amountCents} />
-                      </td>
-                      <td className="px-2 py-2 text-right">{i.creditCents ? <Money cents={i.creditCents} className="text-clay" /> : <span className="text-ink-4">·</span>}</td>
-                      <td className="px-2 py-2 text-right">{i.offsetCents ? <Money cents={i.offsetCents} className="text-ember" /> : <span className="text-ink-4">·</span>}</td>
-                      <td className="px-2 py-2 text-right">{i.paidCents ? <Money cents={i.paidCents} className="text-lake" /> : <span className="text-ink-4">·</span>}</td>
-                      <td className="px-2 py-2 text-right">{i.pendingCents ? <Money cents={i.pendingCents} className="text-yuzu-deep" /> : <span className="text-ink-4">·</span>}</td>
-                      <td className="px-4 py-2 text-right">
-                        <Money cents={i.amountCents - i.creditCents - i.offsetCents - i.paidCents} className="font-bold" />
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable
+          onPage
+          tableClassName="min-w-[720px]"
+          rows={st.openItems.filter((i) => i.amountCents - i.creditCents - i.offsetCents - i.paidCents !== 0)}
+          rowKey={(i) => `${i.kind}${i.id}`}
+          empty="全部货款已结清"
+          columns={[
+            {
+              key: 'doc',
+              header: '货款',
+              cell: (i) => (
+                <>
+                  <span className="num font-semibold">{i.docNo}</span>
+                  <span className="ml-2 text-ink-3">
+                    {i.kind === 'opening' ? '期初未付' : i.purchaseOrderNo ? `采购单 ${i.purchaseOrderNo}` : '直接收货'} · {i.date}
+                  </span>
+                </>
+              ),
+            },
+            { key: 'amount', header: '金额', numeric: true, cell: (i) => <Money cents={i.amountCents} /> },
+            { key: 'credit', header: '退货抵扣', numeric: true, cell: (i) => (i.creditCents ? <Money cents={i.creditCents} className="text-clay" /> : DOT) },
+            { key: 'offset', header: '核销', numeric: true, cell: (i) => (i.offsetCents ? <Money cents={i.offsetCents} className="text-ember" /> : DOT) },
+            { key: 'paid', header: '已付', numeric: true, cell: (i) => (i.paidCents ? <Money cents={i.paidCents} className="text-lake" /> : DOT) },
+            { key: 'pending', header: '待确认付款', numeric: true, cell: (i) => (i.pendingCents ? <Money cents={i.pendingCents} className="text-yuzu-deep" /> : DOT) },
+            { key: 'open', header: '未结清', numeric: true, cell: (i) => <Money cents={i.amountCents - i.creditCents - i.offsetCents - i.paidCents} className="font-bold" /> },
+          ]}
+        />
       </section>
       <RefundSheet id={refundId} onClose={() => setRefundId(null)} />
     </>

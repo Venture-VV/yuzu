@@ -11,6 +11,7 @@ import { centsToInput, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { downloadUrl } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, MoneyInput, Notice, SectionTitle, Segmented, Skeleton } from '../../components/ui';
@@ -106,35 +107,28 @@ export function MarketingCostTab() {
                 onChange={setGroup}
                 options={USAGE_GROUPS.map((g) => ({ value: g, label: <span data-testid={`marketing-cost-group-${g}`}>{USAGE_GROUP_LABELS[g]}</span> }))}
               />
-              {d.coupons.groups[group].length === 0 ? (
-                <p className="py-6 text-center text-[13px] text-ink-3">{group === 'benefit' && d.coupons.used > 0 ? '这段时间用的券都不是会员权益发的' : '这段时间没有用券'}</p>
-              ) : (
-                <div className="overflow-x-auto rounded-lg border border-line">
-                  <table className="w-full min-w-[480px] text-[13px]" data-testid="marketing-cost-coupon-table">
-                    <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                      <tr>
-                        <th className="px-3 py-2 text-left">{USAGE_GROUP_LABELS[group].slice(1)}</th>
-                        <th className="px-3 py-2 text-right">用了（张）</th>
-                        <th className="px-3 py-2 text-right">成本（抵扣）</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-line/70">
-                      {d.coupons.groups[group].map((r) => (
-                        <tr key={r.key} data-testid={`marketing-cost-row-${r.key.replace(':', '-')}`}>
-                          <td className="px-3 py-2">
-                            <span className="font-semibold text-ink">{r.label}</span>
-                            {r.note && <span className="ml-1.5 text-[12px] text-ink-3">{r.note}</span>}
-                          </td>
-                          <td className="num px-3 py-2 text-right">{r.used}</td>
-                          <td className="px-3 py-2 text-right">
-                            <Money cents={r.amount} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <DataTable
+                testId="marketing-cost-coupon-table"
+                tableClassName="min-w-[480px]"
+                rows={d.coupons.groups[group]}
+                rowKey={(r) => r.key}
+                rowTestId={(r) => `marketing-cost-row-${r.key.replace(':', '-')}`}
+                empty={group === 'benefit' && d.coupons.used > 0 ? '这段时间用的券都不是会员权益发的' : '这段时间没有用券'}
+                columns={[
+                  {
+                    key: 'label',
+                    header: USAGE_GROUP_LABELS[group].slice(1),
+                    cell: (r) => (
+                      <>
+                        <span className="font-semibold text-ink">{r.label}</span>
+                        {r.note && <span className="ml-1.5 text-[12px] text-ink-3">{r.note}</span>}
+                      </>
+                    ),
+                  },
+                  { key: 'used', header: '用了（张）', numeric: true, cell: (r) => r.used },
+                  { key: 'amount', header: '成本（抵扣）', numeric: true, cell: (r) => <Money cents={r.amount} /> },
+                ]}
+              />
             </Card>
 
             <div className="grid gap-5 lg:grid-cols-2">
@@ -155,34 +149,28 @@ export function MarketingCostTab() {
                   </dd>
                 </dl>
               </Card>
-              <Card className="space-y-2 p-5" data-testid="marketing-cost-discount-card">
+              <Card className="min-w-0 space-y-2 p-5" data-testid="marketing-cost-discount-card">
                 <SectionTitle>会员折扣</SectionTitle>
-                {d.discounts.rows.length === 0 ? (
-                  <p className="py-4 text-center text-[13px] text-ink-3">这段时间没有会员折扣</p>
-                ) : (
-                  <table className="w-full text-[13px]">
-                    <thead className="text-[12px] font-bold text-ink-3">
-                      <tr>
-                        <th className="py-1.5 text-left">权益</th>
-                        <th className="py-1.5 text-right">结账单</th>
-                        <th className="py-1.5 text-right">折扣</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-line/70">
-                      {d.discounts.rows.map((r) => (
-                        <tr key={r.benefitId} data-testid={`marketing-cost-discount-${r.code}`}>
-                          <td className="py-1.5">
-                            <span className="font-semibold text-ink">{r.name}</span> <span className="text-[12px] text-ink-3">{r.code}</span>
-                          </td>
-                          <td className="num py-1.5 text-right">{r.checkouts}</td>
-                          <td className="py-1.5 text-right">
-                            <Money cents={r.amount} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
+                <DataTable
+                  variant="plain"
+                  rows={d.discounts.rows}
+                  rowKey={(r) => r.benefitId}
+                  rowTestId={(r) => `marketing-cost-discount-${r.code}`}
+                  empty="这段时间没有会员折扣"
+                  columns={[
+                    {
+                      key: 'benefit',
+                      header: '权益',
+                      cell: (r) => (
+                        <>
+                          <span className="font-semibold text-ink">{r.name}</span> <span className="text-[12px] text-ink-3">{r.code}</span>
+                        </>
+                      ),
+                    },
+                    { key: 'checkouts', header: '结账单', numeric: true, cell: (r) => r.checkouts },
+                    { key: 'amount', header: '折扣', numeric: true, cell: (r) => <Money cents={r.amount} /> },
+                  ]}
+                />
               </Card>
             </div>
 
@@ -226,73 +214,74 @@ function ServiceCostCard({ report }: { report: MarketingCost }) {
   return (
     <Card className="space-y-3 p-5" data-testid="marketing-cost-service-card">
       <SectionTitle aside={<span className="text-[12px] text-ink-3">没填单价的只列次数，不算钱</span>}>服务类权益</SectionTitle>
-      {params.error ? (
-        <Notice tone="error" title={errorMessage(params.error)} />
-      ) : !params.data ? (
-        <Skeleton className="h-24" />
-      ) : params.data.length === 0 ? (
-        <p className="py-4 text-center text-[13px] text-ink-3">没有服务类权益（在「会员权益」里导入清单）</p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full min-w-[640px] text-[13px]">
-            <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-              <tr>
-                <th className="px-3 py-2 text-left">权益</th>
-                <th className="px-3 py-2 text-right">登记次数</th>
-                <th className="px-3 py-2 text-right">会员人数</th>
-                <th className="px-3 py-2 text-right">测算单价（每次）</th>
-                <th className="px-3 py-2 text-right">测算成本</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/70">
-              {params.data.map((p) => {
-                const used = usesOf.get(p.benefitId);
-                const open = editing?.id === p.benefitId;
-                return (
-                  <tr key={p.benefitId} data-testid={`marketing-cost-service-${p.code}`}>
-                    <td className="px-3 py-2">
-                      <span className="font-semibold text-ink">{p.name}</span> <span className="text-[12px] text-ink-3">{p.code}</span>
-                      {p.status !== 'published' && <span className="ml-1.5 text-[12px] text-ink-3">（{p.status === 'draft' ? '草稿' : '暂缓'}）</span>}
-                    </td>
-                    <td className="num px-3 py-2 text-right">{used?.uses ?? 0}</td>
-                    <td className="num px-3 py-2 text-right">{used?.members ?? 0}</td>
-                    <td className="px-3 py-2 text-right">
-                      {open ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <MoneyInput
-                            value={editing.text}
-                            onChange={(e) => setEditing({ id: p.benefitId, text: e.target.value })}
-                            placeholder="不测算"
-                            className="h-8 w-28"
-                            aria-label={`${p.name}的测算单价`}
-                            data-testid={`marketing-cost-param-input-${p.code}`}
-                          />
-                          <Button size="sm" variant="primary" loading={busy} onClick={() => void save(p)} data-testid={`marketing-cost-param-save-${p.code}`}>
-                            保存
-                          </Button>
-                          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>
-                            取消
-                          </Button>
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="font-semibold text-pine hover:underline"
-                          onClick={() => setEditing({ id: p.benefitId, text: p.unitCost === null ? '' : centsToInput(p.unitCost) })}
-                          data-testid={`marketing-cost-param-edit-${p.code}`}
-                        >
-                          {p.unitCost === null ? '填单价' : <Money cents={p.unitCost} />}
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right">{used?.amount != null ? <Money cents={used.amount} /> : <span className="text-ink-3">—</span>}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        tableClassName="min-w-[640px]"
+        rows={params.data}
+        failed={!!params.error}
+        failedTitle={params.error ? errorMessage(params.error) : undefined}
+        onRetry={() => void params.refetch()}
+        retrying={params.isFetching}
+        rowKey={(p) => p.benefitId}
+        rowTestId={(p) => `marketing-cost-service-${p.code}`}
+        empty="没有服务类权益"
+        emptyDescription="在「会员权益」里导入清单。"
+        columns={[
+          {
+            key: 'benefit',
+            header: '权益',
+            cell: (p) => (
+              <>
+                <span className="font-semibold text-ink">{p.name}</span> <span className="text-[12px] text-ink-3">{p.code}</span>
+                {p.status !== 'published' && <span className="ml-1.5 text-[12px] text-ink-3">（{p.status === 'draft' ? '草稿' : '暂缓'}）</span>}
+              </>
+            ),
+          },
+          { key: 'uses', header: '登记次数', numeric: true, cell: (p) => usesOf.get(p.benefitId)?.uses ?? 0 },
+          { key: 'members', header: '会员人数', numeric: true, cell: (p) => usesOf.get(p.benefitId)?.members ?? 0 },
+          {
+            key: 'unitCost',
+            header: '测算单价（每次）',
+            numeric: true,
+            cell: (p) =>
+              editing?.id === p.benefitId ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <MoneyInput
+                    value={editing.text}
+                    onChange={(e) => setEditing({ id: p.benefitId, text: e.target.value })}
+                    placeholder="不测算"
+                    className="h-8 w-28"
+                    aria-label={`${p.name}的测算单价`}
+                    data-testid={`marketing-cost-param-input-${p.code}`}
+                  />
+                  <Button size="sm" variant="primary" loading={busy} onClick={() => void save(p)} data-testid={`marketing-cost-param-save-${p.code}`}>
+                    保存
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>
+                    取消
+                  </Button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="font-semibold text-pine hover:underline"
+                  onClick={() => setEditing({ id: p.benefitId, text: p.unitCost === null ? '' : centsToInput(p.unitCost) })}
+                  data-testid={`marketing-cost-param-edit-${p.code}`}
+                >
+                  {p.unitCost === null ? '填单价' : <Money cents={p.unitCost} />}
+                </button>
+              ),
+          },
+          {
+            key: 'amount',
+            header: '测算成本',
+            numeric: true,
+            cell: (p) => {
+              const used = usesOf.get(p.benefitId);
+              return used?.amount != null ? <Money cents={used.amount} /> : <span className="text-ink-3">—</span>;
+            },
+          },
+        ]}
+      />
     </Card>
   );
 }
@@ -339,50 +328,61 @@ function GiftOutsCard({ report }: { report: MarketingCost }) {
         买一赠一的赠品出库
       </SectionTitle>
       {report.giftOuts.items.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full min-w-[760px] text-[13px]">
-            <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-              <tr>
-                <th className="px-3 py-2 text-left">营业日</th>
-                <th className="px-3 py-2 text-left">结账单 / 券码</th>
-                <th className="px-3 py-2 text-left">赠品</th>
-                <th className="px-3 py-2 text-left">状态</th>
-                <th className="px-3 py-2 text-right" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/70">
-              {report.giftOuts.items.map((g) => (
-                <tr key={g.id} data-testid={`marketing-cost-gift-${g.id}`}>
-                  <td className="num px-3 py-2">{g.businessDate}</td>
-                  <td className="px-3 py-2">
-                    <span className="font-semibold text-ink">{g.checkoutNo}</span>
-                    <span className="block text-[12px] text-ink-3">
-                      {g.templateName} · {g.couponCode}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    {g.materialName} {qtyText(g.qtyMilli, g.unit)}
-                    <span className="block text-[12px] text-ink-3">
-                      {g.warehouseName}
-                      {g.invDocNo ? ` · ${g.invDocNo}` : ''}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <Badge tone={GIFT_TONES[g.status]}>{GIFT_OUT_STATUS_LABELS[g.status]}</Badge>
-                    {g.lastError && GIFT_OUT_NEEDS_ACTION.includes(g.status) && <span className="mt-0.5 block text-[12px] text-ember">{g.lastError}</span>}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {GIFT_OUT_NEEDS_ACTION.includes(g.status) && (
-                      <Button size="sm" variant="secondary" loading={busy === g.id} disabled={busy !== null} onClick={() => void retry(g.id)} data-testid={`marketing-cost-gift-retry-${g.id}`}>
-                        重试
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          tableClassName="min-w-[760px]"
+          rows={report.giftOuts.items}
+          rowKey={(g) => g.id}
+          rowTestId={(g) => `marketing-cost-gift-${g.id}`}
+          columns={[
+            { key: 'date', header: '营业日', cellClassName: 'num', cell: (g) => g.businessDate },
+            {
+              key: 'checkout',
+              header: '结账单 / 券码',
+              cell: (g) => (
+                <>
+                  <span className="font-semibold text-ink">{g.checkoutNo}</span>
+                  <span className="block text-[12px] text-ink-3">
+                    {g.templateName} · {g.couponCode}
+                  </span>
+                </>
+              ),
+            },
+            {
+              key: 'gift',
+              header: '赠品',
+              cell: (g) => (
+                <>
+                  {g.materialName} {qtyText(g.qtyMilli, g.unit)}
+                  <span className="block text-[12px] text-ink-3">
+                    {g.warehouseName}
+                    {g.invDocNo ? ` · ${g.invDocNo}` : ''}
+                  </span>
+                </>
+              ),
+            },
+            {
+              key: 'status',
+              header: '状态',
+              cell: (g) => (
+                <>
+                  <Badge tone={GIFT_TONES[g.status]}>{GIFT_OUT_STATUS_LABELS[g.status]}</Badge>
+                  {g.lastError && GIFT_OUT_NEEDS_ACTION.includes(g.status) && <span className="mt-0.5 block text-[12px] text-ember">{g.lastError}</span>}
+                </>
+              ),
+            },
+            {
+              key: 'actions',
+              header: '',
+              align: 'right',
+              cell: (g) =>
+                GIFT_OUT_NEEDS_ACTION.includes(g.status) && (
+                  <Button size="sm" variant="secondary" loading={busy === g.id} disabled={busy !== null} onClick={() => void retry(g.id)} data-testid={`marketing-cost-gift-retry-${g.id}`}>
+                    重试
+                  </Button>
+                ),
+            },
+          ]}
+        />
       )}
     </Card>
   );

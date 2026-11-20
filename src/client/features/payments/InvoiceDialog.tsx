@@ -11,6 +11,7 @@ import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { uuid } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
@@ -306,48 +307,41 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
       {supplierId && (
         <div className="mt-4">
           <h4 className="mb-1.5 text-[12.5px] font-bold text-ink-2">分到采购单</h4>
-          {(pos.data ?? []).length === 0 ? (
-            <p className="text-[13px] text-ink-3">这家供应商还没有已下单的采购单。</p>
-          ) : (
-            <table className="w-full text-[13px]" data-testid="invoice-pos">
-              <thead>
-                <tr className="border-b border-line text-left text-[12px] text-ink-3">
-                  <th className="py-1.5 pr-2 font-semibold">采购单</th>
-                  <th className="py-1.5 pr-2 text-right font-semibold">采购单金额</th>
-                  <th className="py-1.5 pr-2 text-right font-semibold">已收货</th>
-                  <th className="py-1.5 pr-2 text-right font-semibold">已开票</th>
-                  <th className="w-36 py-1.5 font-semibold">这张发票分</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line/70">
-                {(pos.data ?? []).map((p) => (
-                  <tr key={p.poId}>
-                    <td className="py-1.5 pr-2">
-                      <span className="num font-semibold">{p.poNo}</span> <ThreeWayBadge status={p.status} />
-                      {p.contractNo && <span className="block text-[12px] text-ink-3">合同 {p.contractNo}</span>}
-                    </td>
-                    <td className="py-1.5 pr-2 text-right">
-                      <Money cents={p.poTotalCents} />
-                    </td>
-                    <td className="py-1.5 pr-2 text-right">
-                      <Money cents={p.receivedCents} />
-                    </td>
-                    <td className="py-1.5 pr-2 text-right">
-                      <Money cents={p.invoicedCents} />
-                    </td>
-                    <td className="py-1.5">
-                      <MoneyInput
-                        aria-label={`分到 ${p.poNo}`}
-                        value={split[p.poId] ?? ''}
-                        onChange={(e) => setSplit((s) => ({ ...s, [p.poId]: e.target.value }))}
-                        data-testid={`invoice-split-${p.poNo}`}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <DataTable
+            variant="plain"
+            testId="invoice-pos"
+            rows={pos.data ?? []}
+            rowKey={(p) => p.poId}
+            empty="这家供应商还没有已下单的采购单"
+            columns={[
+              {
+                key: 'po',
+                header: '采购单',
+                cell: (p) => (
+                  <>
+                    <span className="num font-semibold">{p.poNo}</span> <ThreeWayBadge status={p.status} />
+                    {p.contractNo && <span className="block text-[12px] text-ink-3">合同 {p.contractNo}</span>}
+                  </>
+                ),
+              },
+              { key: 'total', header: '采购单金额', numeric: true, cell: (p) => <Money cents={p.poTotalCents} /> },
+              { key: 'received', header: '已收货', numeric: true, cell: (p) => <Money cents={p.receivedCents} /> },
+              { key: 'invoiced', header: '已开票', numeric: true, cell: (p) => <Money cents={p.invoicedCents} /> },
+              {
+                key: 'split',
+                header: '这张发票分',
+                headerClassName: 'w-36',
+                cell: (p) => (
+                  <MoneyInput
+                    aria-label={`分到 ${p.poNo}`}
+                    value={split[p.poId] ?? ''}
+                    onChange={(e) => setSplit((s) => ({ ...s, [p.poId]: e.target.value }))}
+                    data-testid={`invoice-split-${p.poNo}`}
+                  />
+                ),
+              },
+            ]}
+          />
         </div>
       )}
       {kindDef && rateBp !== null && !kindDef.taxRatesBp.includes(rateBp) && (

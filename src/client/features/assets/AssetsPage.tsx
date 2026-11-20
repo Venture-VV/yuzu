@@ -24,7 +24,7 @@ import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useReasons, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
-import { EmptyState } from '../../components/EmptyState';
+import { DataTable } from '../../components/DataTable';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
@@ -94,58 +94,50 @@ export function AssetsPage() {
                 ))}
               </Select>
             </div>
-            {cards.error ? (
-              <Notice tone="error" title={errorMessage(cards.error)} />
-            ) : cards.isPending ? (
-              <Skeleton className="h-48" />
-            ) : cards.data.length === 0 ? (
-              <EmptyState
-                art="leaf"
-                title="还没有资产卡片"
-                description={manage ? '点「建卡」：手工建（期初）或从收货单的某一行转过来。' : undefined}
-                className="rounded-lg border border-dashed border-line-strong"
-              />
-            ) : (
-              <div className="overflow-x-auto rounded-lg border border-line bg-card">
-                <table className="w-full min-w-[760px] text-[13px]" data-testid="asset-table">
-                  <thead className="bg-paper-2 text-left text-[12px] text-ink-3">
-                    <tr>
-                      <th className="w-8 px-3 py-2" />
-                      <th className="px-3 py-2 font-semibold">编号</th>
-                      <th className="px-3 py-2 font-semibold">名称</th>
-                      <th className="px-3 py-2 font-semibold">部门 · 位置 · 保管人</th>
-                      <th className="px-3 py-2 text-right font-semibold">原值</th>
-                      <th className="px-3 py-2 font-semibold">状态</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cards.data.map((c) => (
-                      <tr key={c.id} className={cn('border-t border-line', c.status === 'scrapped' && 'opacity-55')}>
-                        <td className="px-3 py-1.5">
-                          <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={picked.has(c.id)} onChange={() => toggle(c.id)} aria-label={`选 ${c.assetNo}`} />
-                        </td>
-                        <td className="px-3 py-1.5">
-                          <button type="button" className="num font-semibold text-lake hover:underline" onClick={() => setOpenId(c.id)}>
-                            {c.assetNo}
-                          </button>
-                        </td>
-                        <td className="px-3 py-1.5">
-                          {c.name}
-                          <span className="ml-1.5 text-[12px] text-ink-3">{ASSET_CATEGORY_LABELS[c.category]}</span>
-                        </td>
-                        <td className="px-3 py-1.5 text-ink-2">{[c.departmentName, c.location, c.keeper].filter(Boolean).join(' · ') || '—'}</td>
-                        <td className="px-3 py-1.5 text-right">
-                          <Money cents={c.originalCents} />
-                        </td>
-                        <td className="px-3 py-1.5">
-                          <Badge tone={STATUS_TONES[c.status]}>{ASSET_STATUS_LABELS[c.status]}</Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <DataTable
+              onPage
+              testId="asset-table"
+              tableClassName="min-w-[760px]"
+              rows={cards.data}
+              failed={!!cards.error}
+              failedTitle={cards.error ? errorMessage(cards.error) : undefined}
+              onRetry={() => void cards.refetch()}
+              retrying={cards.isFetching}
+              rowKey={(c) => c.id}
+              rowClassName={(c) => (c.status === 'scrapped' ? 'opacity-55' : undefined)}
+              empty="还没有资产卡片"
+              emptyDescription={manage ? '点「建卡」：手工建（期初）或从收货单的某一行转过来。' : undefined}
+              columns={[
+                {
+                  key: 'pick',
+                  header: '',
+                  headerClassName: 'w-8',
+                  cell: (c) => <input type="checkbox" className="size-4 accent-[var(--color-pine)]" checked={picked.has(c.id)} onChange={() => toggle(c.id)} aria-label={`选 ${c.assetNo}`} />,
+                },
+                {
+                  key: 'assetNo',
+                  header: '编号',
+                  cell: (c) => (
+                    <button type="button" className="num font-semibold text-lake hover:underline" onClick={() => setOpenId(c.id)}>
+                      {c.assetNo}
+                    </button>
+                  ),
+                },
+                {
+                  key: 'name',
+                  header: '名称',
+                  cell: (c) => (
+                    <>
+                      {c.name}
+                      <span className="ml-1.5 text-[12px] text-ink-3">{ASSET_CATEGORY_LABELS[c.category]}</span>
+                    </>
+                  ),
+                },
+                { key: 'place', header: '部门 · 位置 · 保管人', cellClassName: 'text-ink-2', cell: (c) => [c.departmentName, c.location, c.keeper].filter(Boolean).join(' · ') || '—' },
+                { key: 'original', header: '原值', numeric: true, cell: (c) => <Money cents={c.originalCents} /> },
+                { key: 'status', header: '状态', cell: (c) => <Badge tone={STATUS_TONES[c.status]}>{ASSET_STATUS_LABELS[c.status]}</Badge> },
+              ]}
+            />
           </>
         ) : (
           <StocktakeView manage={manage} />

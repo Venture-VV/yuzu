@@ -13,6 +13,7 @@ import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
@@ -90,74 +91,80 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
           另有不带付款申请、核销到这份合同收货单上的付款 ¥{formatAmount(p.legacyPaidCents)}（v0.7.32 以前登记的，或「付款规则」关掉「挂合同的货款要先提申请」以后直接登记的；不算在各段里）。
         </p>
       )}
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-[13px]" data-testid="payment-plan-stages">
-          <thead>
-            <tr className="border-b border-line text-left text-[12px] text-ink-3">
-              <th className="py-1.5 pr-2 font-semibold">节点</th>
-              <th className="py-1.5 pr-2 text-right font-semibold">计划</th>
-              <th className="py-1.5 pr-2 text-right font-semibold">现在可付</th>
-              <th className="py-1.5 pr-2 text-right font-semibold" title="审批中、退回待改、批了没付完的">
-                在途申请
-              </th>
-              <th className="py-1.5 pr-2 text-right font-semibold">已付</th>
-              <th className="py-1.5 pr-2 font-semibold">说明</th>
-              <th className="py-1.5 font-semibold" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line/70">
-            {p.stages.map((s) => (
-              <tr key={s.stage} className={cn(s.plannedCents === 0 && 'text-ink-3')} data-testid={`plan-stage-${s.stage}`}>
-                <td className="py-2 pr-2 align-top font-semibold">
-                  {PAYMENT_STAGE_LABELS[s.stage]} {formatPercentBp(s.percentBp)}
-                  {s.condition && <span className="block text-[12px] font-normal text-ink-3">{s.condition}</span>}
-                </td>
-                <td className="py-2 pr-2 text-right align-top">
-                  <Money cents={s.plannedCents} />
-                </td>
-                <td className="py-2 pr-2 text-right align-top">
-                  <Money cents={s.payableCents} className={cn(s.payableCents > 0 && 'font-semibold text-pine')} />
-                </td>
-                <td className="py-2 pr-2 text-right align-top">{s.requestedCents ? <Money cents={s.requestedCents} /> : <span className="text-ink-4">·</span>}</td>
-                <td className="py-2 pr-2 text-right align-top">{s.paidCents ? <Money cents={s.paidCents} /> : <span className="text-ink-4">·</span>}</td>
-                <td className="py-2 pr-2 align-top text-[12.5px]">
-                  <span className={cn(s.overpaidCents > 0 ? 'text-clay' : 'text-ink-2')}>{s.reason}</span>
-                  {s.requests.length > 0 && (
-                    <span className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
-                      {s.requests.map((r) => (
-                        <Link key={r.id} to={`/erp/payments/requests/${r.id}`} className="num inline-flex items-center gap-1 text-lake hover:underline">
-                          {r.requestNo} ¥{formatAmount(r.amountCents)}
-                          <RequestStatusBadge status={r.status} />
-                        </Link>
-                      ))}
-                    </span>
-                  )}
-                </td>
-                <td className="py-2 text-right align-top">
-                  {s.done && s.plannedCents > 0 ? (
-                    <Badge tone="pine">{s.paidCents >= s.plannedCents ? '付清' : '已结束'}</Badge>
-                  ) : (
-                    canRequest &&
-                    p.canRequest &&
-                    s.remainingCents > 0 && (
-                      <Button
-                        size="sm"
-                        variant={s.availableCents > 0 ? 'primary' : 'secondary'}
-                        icon={<FilePlus2 className="size-4" />}
-                        onClick={() => navigate(`/erp/payments/requests/new?contract=${c.id}&stage=${s.stage}`)}
-                        data-testid={`plan-request-${s.stage}`}
-                      >
-                        {s.availableCents > 0 ? '申请付款' : '提前申请'}
-                      </Button>
-                    )
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
+      <DataTable
+        variant="plain"
+        testId="payment-plan-stages"
+        tableClassName="min-w-[720px]"
+        rows={p.stages}
+        rowKey={(s) => s.stage}
+        rowClassName={(s) => cn('align-top', s.plannedCents === 0 && 'text-ink-3')}
+        rowTestId={(s) => `plan-stage-${s.stage}`}
+        columns={[
+          {
+            key: 'stage',
+            header: '节点',
+            cellClassName: 'font-semibold',
+            cell: (s) => (
+              <>
+                {PAYMENT_STAGE_LABELS[s.stage]} {formatPercentBp(s.percentBp)}
+                {s.condition && <span className="block text-[12px] font-normal text-ink-3">{s.condition}</span>}
+              </>
+            ),
+          },
+          { key: 'planned', header: '计划', numeric: true, cell: (s) => <Money cents={s.plannedCents} /> },
+          { key: 'payable', header: '现在可付', numeric: true, cell: (s) => <Money cents={s.payableCents} className={cn(s.payableCents > 0 && 'font-semibold text-pine')} /> },
+          {
+            key: 'requested',
+            header: <span title="审批中、退回待改、批了没付完的">在途申请</span>,
+            numeric: true,
+            cell: (s) => (s.requestedCents ? <Money cents={s.requestedCents} /> : <span className="text-ink-4">·</span>),
+          },
+          { key: 'paid', header: '已付', numeric: true, cell: (s) => (s.paidCents ? <Money cents={s.paidCents} /> : <span className="text-ink-4">·</span>) },
+          {
+            key: 'reason',
+            header: '说明',
+            cellClassName: 'text-[12.5px]',
+            cell: (s) => (
+              <>
+                <span className={cn(s.overpaidCents > 0 ? 'text-clay' : 'text-ink-2')}>{s.reason}</span>
+                {s.requests.length > 0 && (
+                  <span className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+                    {s.requests.map((r) => (
+                      <Link key={r.id} to={`/erp/payments/requests/${r.id}`} className="num inline-flex items-center gap-1 text-lake hover:underline">
+                        {r.requestNo} ¥{formatAmount(r.amountCents)}
+                        <RequestStatusBadge status={r.status} />
+                      </Link>
+                    ))}
+                  </span>
+                )}
+              </>
+            ),
+          },
+          {
+            key: 'actions',
+            header: '',
+            align: 'right',
+            cell: (s) =>
+              s.done && s.plannedCents > 0 ? (
+                <Badge tone="pine">{s.paidCents >= s.plannedCents ? '付清' : '已结束'}</Badge>
+              ) : (
+                canRequest &&
+                p.canRequest &&
+                s.remainingCents > 0 && (
+                  <Button
+                    size="sm"
+                    variant={s.availableCents > 0 ? 'primary' : 'secondary'}
+                    icon={<FilePlus2 className="size-4" />}
+                    onClick={() => navigate(`/erp/payments/requests/new?contract=${c.id}&stage=${s.stage}`)}
+                    data-testid={`plan-request-${s.stage}`}
+                  >
+                    {s.availableCents > 0 ? '申请付款' : '提前申请'}
+                  </Button>
+                )
+              ),
+          },
+        ]}
+      />
       <div className="grid gap-4 lg:grid-cols-2">
         <div>
           <div className="mb-1.5 flex items-center gap-2">

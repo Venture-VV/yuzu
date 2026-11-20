@@ -14,6 +14,7 @@ import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Card, Input, Notice, Select, Skeleton } from '../../components/ui';
@@ -97,51 +98,55 @@ export function ComparePage() {
                       耗用：领用 {formatQty(u?.issuedMilli ?? 0)} · 直接耗用 {formatQty(u?.directUsedMilli ?? 0)} {m.inventoryUnit}
                     </span>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[880px] text-[13px]">
-                      <thead>
-                        <tr className="text-left text-[12px] font-semibold text-ink-3">
-                          <th className="px-4 py-2">供应商</th>
-                          <th className="px-2 text-right">次数</th>
-                          <th className="px-2 text-right">收货（{m.inventoryUnit}）</th>
-                          <th className="px-2 text-right">最近单价</th>
-                          <th className="px-2 text-right">平均（元/{m.purchaseUnit}）</th>
-                          <th className="px-2 text-right">最低 ~ 最高</th>
-                          <th className="px-2 text-right">比上一时段</th>
-                          <th className="px-2 text-right">退货率</th>
-                          <th className="px-4 text-right">质量问题</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((r, i) => (
-                          <tr key={r.supplierId} className={cn('border-t border-line/60', i === 0 && rows.length > 1 && 'bg-pine-tint/30')} data-testid={`compare-row-${r.materialId}-${r.supplierId}`}>
-                            <td className="px-4 py-2 font-semibold">{r.supplierName}</td>
-                            <td className="num px-2 text-right">{r.receipts}</td>
-                            <td className="num px-2 text-right">{formatQty(r.receivedMilli)}</td>
-                            <td className="px-2 text-right">
-                              {r.lastPriceCents !== null ? <Money cents={r.lastPriceCents} /> : '—'}
-                              {r.lastDate && <span className="block text-[12px] text-ink-3">{r.lastDate}</span>}
-                            </td>
-                            <td className="px-2 text-right font-bold">{r.avgPriceCents !== null ? <Money cents={r.avgPriceCents} /> : '—'}</td>
-                            <td className="px-2 text-right text-ink-2">
-                              {r.minPriceCents !== null && r.maxPriceCents !== null ? (
-                                <>
-                                  <Money cents={r.minPriceCents} /> ~ <Money cents={r.maxPriceCents} />
-                                </>
-                              ) : (
-                                '—'
-                              )}
-                            </td>
-                            <td className="px-2 text-right">
-                              <Change pct={r.changePercent} />
-                            </td>
-                            <td className="num px-2 text-right">{r.returnRatePct === null ? '—' : `${r.returnRatePct}%`}</td>
-                            <td className="num px-4 text-right">{quality.get(r.supplierId) ?? 0}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <DataTable
+                    variant="plain"
+                    className="px-4"
+                    tableClassName="min-w-[880px]"
+                    rows={rows}
+                    rowKey={(r) => r.supplierId}
+                    rowClassName={(r) => (r === rows[0] && rows.length > 1 ? 'bg-pine-tint/30' : undefined)}
+                    rowTestId={(r) => `compare-row-${r.materialId}-${r.supplierId}`}
+                    columns={[
+                      { key: 'supplier', header: '供应商', cellClassName: 'font-semibold', cell: (r) => r.supplierName },
+                      { key: 'receipts', header: '次数', numeric: true, cell: (r) => r.receipts },
+                      { key: 'received', header: `收货（${m.inventoryUnit}）`, numeric: true, cell: (r) => formatQty(r.receivedMilli) },
+                      {
+                        key: 'last',
+                        header: '最近单价',
+                        numeric: true,
+                        cell: (r) => (
+                          <>
+                            {r.lastPriceCents !== null ? <Money cents={r.lastPriceCents} /> : '—'}
+                            {r.lastDate && <span className="block text-[12px] text-ink-3">{r.lastDate}</span>}
+                          </>
+                        ),
+                      },
+                      {
+                        key: 'avg',
+                        header: `平均（元/${m.purchaseUnit}）`,
+                        numeric: true,
+                        cellClassName: 'font-bold',
+                        cell: (r) => (r.avgPriceCents !== null ? <Money cents={r.avgPriceCents} /> : '—'),
+                      },
+                      {
+                        key: 'range',
+                        header: '最低 ~ 最高',
+                        numeric: true,
+                        cellClassName: 'text-ink-2',
+                        cell: (r) =>
+                          r.minPriceCents !== null && r.maxPriceCents !== null ? (
+                            <>
+                              <Money cents={r.minPriceCents} /> ~ <Money cents={r.maxPriceCents} />
+                            </>
+                          ) : (
+                            '—'
+                          ),
+                      },
+                      { key: 'change', header: '比上一时段', numeric: true, cell: (r) => <Change pct={r.changePercent} /> },
+                      { key: 'returnRate', header: '退货率', numeric: true, cell: (r) => (r.returnRatePct === null ? '—' : `${r.returnRatePct}%`) },
+                      { key: 'quality', header: '质量问题', numeric: true, cell: (r) => quality.get(r.supplierId) ?? 0 },
+                    ]}
+                  />
                 </Card>
               );
             })}
