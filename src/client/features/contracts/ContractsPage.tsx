@@ -126,7 +126,7 @@ export function ContractsPage() {
                 role="radio"
                 aria-checked={filter === f.value}
                 onClick={() => setParams(f.value === 'all' ? {} : { filter: f.value }, { replace: true })}
-                className={cn('h-8 rounded-full px-3 text-[13px] font-semibold', filter === f.value ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
+                className={cn('tap relative h-8 rounded-full px-3 text-[13px] font-semibold', filter === f.value ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-paper-3')}
                 data-testid={`contract-filter-${f.value}`}
               >
                 {f.label}

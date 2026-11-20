@@ -80,7 +80,11 @@ export function UrgentPage() {
         subtitle="没有采购单、临时给部门买的东西：采购登记 → 按金额分级审批 → 仓库到部门验收 → 补采购单（提交即确认）"
         actions={
           can('purchase.manage') ? (
-            <Link to="/purchasing/urgent/new" className="flex h-9 items-center gap-1.5 rounded-md bg-pine px-3.5 text-[13.5px] font-bold text-paper hover:bg-pine-hover" data-testid="urgent-new">
+            <Link
+              to="/purchasing/urgent/new"
+              className="tap relative flex h-9 items-center gap-1.5 rounded-md bg-pine px-3.5 text-[13.5px] font-bold text-paper hover:bg-pine-hover"
+              data-testid="urgent-new"
+            >
               <Plus className="size-4" />
               登记急采
             </Link>

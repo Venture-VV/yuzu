@@ -24,6 +24,7 @@ import {
   type KitchenStation,
   type TablesAdmin,
 } from '@shared/dining';
+import { MAX_DIRTY_ALERT_MINUTES } from '@shared/frontdesk-v8117';
 import { formatYuan, parseYuan } from '@shared/money';
 import { api, errorMessage } from '../../lib/api';
 import { qk } from '../../lib/queries';
@@ -81,6 +82,8 @@ function RulesCard() {
   const dirty = JSON.stringify(draft) !== JSON.stringify(admin.data.rules);
   const set = (patch: Partial<DiningRules>) => setDraft({ ...draft, ...patch });
   const minutesOk = Number.isInteger(draft.warnMinutes) && draft.warnMinutes >= 1 && draft.warnMinutes <= 180;
+  // 8.1.17（BW-2）：待清台多久算久了
+  const dirtyOk = Number.isInteger(draft.dirtyAlertMinutes) && draft.dirtyAlertMinutes >= 1 && draft.dirtyAlertMinutes <= MAX_DIRTY_ALERT_MINUTES;
   const freeCents = freeText === null ? draft.voidFreeCents : freeText.trim() === '' ? null : parseYuan(freeText);
   const freeOk = freeCents !== null && freeCents >= 0 && freeCents <= MAX_VOID_FREE_CENTS;
   const mapped = admin.data.items.filter((i) => i.stationId !== null && !i.technicianRequired).length;
@@ -194,6 +197,40 @@ function RulesCard() {
           />,
         )}
         {row(
+          '维修到点自动恢复',
+          '开启时，维修中的桌过了预计恢复时间，系统每分钟替人点「恢复」（桌台记录的经办人写「系统」）；关闭时（默认）格子上标「已过预计恢复时间」、进待办数，等人去点「恢复」。',
+          <Segmented
+            ariaLabel="维修到点自动恢复"
+            value={draft.autoRestore ? 'on' : 'off'}
+            onChange={(v) => editable && set({ autoRestore: v === 'on' })}
+            options={[
+              { value: 'off', label: '等人恢复', disabled: !editable },
+              { value: 'on', label: '自动恢复', disabled: !editable },
+            ]}
+          />,
+          true,
+        )}
+        {row(
+          '待清台多久算久了',
+          '结账以后待清台超过这么多分钟还没清台，格子上标出来、进待办数。',
+          <span className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={MAX_DIRTY_ALERT_MINUTES}
+              value={Number.isNaN(draft.dirtyAlertMinutes) ? '' : draft.dirtyAlertMinutes}
+              disabled={!editable}
+              onChange={(e) => set({ dirtyAlertMinutes: e.target.value === '' ? NaN : Number(e.target.value) })}
+              className="num h-11 w-20"
+              aria-label="待清台多久算久了（分钟）"
+              data-testid="dining-dirty-alert-minutes"
+            />
+            <span className="text-[13px] text-ink-3">分钟</span>
+          </span>,
+          true,
+        )}
+        {row(
           '小额退菜上限',
           '单条不超过这个金额的菜，服务员写原因就能直接退；超过的本人点的、规定时间内或经理照旧直接退，其余请值班经理及以上当场授权。填 0 不分级。退菜在「餐饮 → 台账」里按「退菜」看。',
           <span className="w-32 shrink-0">
@@ -214,6 +251,7 @@ function RulesCard() {
         )}
       </div>
       {!minutesOk && <Notice tone="error" title="分钟数要在 1 到 180 之间" className="mt-3" />}
+      {!dirtyOk && <Notice tone="error" title={`待清台的分钟数要在 1 到 ${MAX_DIRTY_ALERT_MINUTES} 之间`} className="mt-3" />}
       {!freeOk && <Notice tone="error" title={`小额退菜上限填 0 到 ${formatYuan(MAX_VOID_FREE_CENTS)} 之间的金额`} className="mt-3" />}
       {error && <Notice tone="error" title={error} className="mt-3" />}
       <div className="mt-3 flex flex-wrap items-center justify-end gap-3">
@@ -225,6 +263,8 @@ function RulesCard() {
             draft.warnMinutes !== DEFAULT_DINING_RULES.warnMinutes ||
             draft.tablesEnabled !== DEFAULT_DINING_RULES.tablesEnabled ||
             draft.clearAfterCheckout !== DEFAULT_DINING_RULES.clearAfterCheckout ||
+            draft.autoRestore !== DEFAULT_DINING_RULES.autoRestore ||
+            draft.dirtyAlertMinutes !== DEFAULT_DINING_RULES.dirtyAlertMinutes ||
             draft.voidFreeCents !== DEFAULT_DINING_RULES.voidFreeCents) && (
             <Button
               size="sm"
@@ -238,7 +278,7 @@ function RulesCard() {
             </Button>
           )}
         {editable && (
-          <Button variant="primary" loading={busy} disabled={!dirty || !minutesOk || !freeOk} onClick={save} data-testid="dining-rules-save">
+          <Button variant="primary" loading={busy} disabled={!dirty || !minutesOk || !freeOk || !dirtyOk} onClick={save} data-testid="dining-rules-save">
             保存餐饮规则
           </Button>
         )}

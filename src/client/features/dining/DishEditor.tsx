@@ -1,6 +1,8 @@
 // 菜品管理：新增 / 编辑一道菜（8.1.15，docs/DISHES_V8115.md 第 7 节）。
 // 名称、分类、出品口与小类、档口、图片；规格与价格（新增时定价，沿用价目里的档；以后改价走「改价」，要写原因）；
-// 做法（不加钱，点单时选了写进出品备注）、加料（另外的菜，点单时另起一行、备注「配 某菜」）、套餐内容（含哪几样、每样几份）。
+// 做法（点单时选了写进出品备注；8.1.17 起可以分组、设必选、加价，docs/DISHES_V8117.md 第 2 节）、
+// 加料（另外的菜，点单时另起一行、备注「配 某菜」）、套餐内容（含哪几样、每样几份；8.1.17 起每一样可以标「可换」，
+// 列出能换成哪几样与每份补的差价，docs/DISHES_V8117.md 第 7 节）。
 // 保存带操作编号与打开时的版本：别人先改过会被拒绝；没收到结果的进「结果待确认」（8.1.16，dishPendingStore.ts）——
 // 弹窗里列着那一笔，查回、按原内容重新提交（同一个编号）或确认作废之前不能再保存。
 
@@ -10,18 +12,25 @@ import { PRICE_TIER_LABELS, PRICE_TIERS, type PriceTier } from '@shared/catalog'
 import { ALL_DINING_SLOTS, slotKey, slotLabel, type DiningOutlet } from '@shared/dining';
 import {
   MAX_COMBO_ITEMS,
+  MAX_COMBO_SWAP_DIFF,
+  MAX_COMBO_SWAPS,
   MAX_DISH_ADDONS,
   MAX_DISH_CATEGORY,
+  MAX_DISH_METHOD_GROUP_LENGTH,
+  MAX_DISH_METHOD_GROUPS,
   MAX_DISH_METHOD_LENGTH,
+  MAX_DISH_METHOD_PRICE,
   MAX_DISH_METHODS,
   MAX_DISH_NAME,
+  plusYuan,
   pricesText,
   type DishBody,
+  type DishMethodOption,
   type DishRow,
   type DishSaveResult,
   type DishesBoard,
 } from '@shared/dishes';
-import { formatYuan, parseYuan } from '@shared/money';
+import { centsToInput, formatYuan, parseYuan } from '@shared/money';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
@@ -47,9 +56,12 @@ interface Draft {
   imageUrl: string | null;
   prices: Record<PriceTier, string>;
   active: boolean;
-  methods: string[];
+  /** 做法（8.1.17：所在的组、加价——加价是输入框里的元） */
+  methods: { name: string; group: string; price: string }[];
+  groups: { name: string; required: boolean }[];
   addons: number[];
-  combo: { itemId: number; quantity: number }[];
+  /** 套餐内容（8.1.17：可换的、能换成哪几样，差价是输入框里的元） */
+  combo: { itemId: number; quantity: number; swappable: boolean; swaps: { itemId: number; diff: string }[] }[];
 }
 
 const emptyDraft = (outlets: DiningOutlet[]): Draft => ({
@@ -62,6 +74,7 @@ const emptyDraft = (outlets: DiningOutlet[]): Draft => ({
   prices: { standard: '', professional: '', premium: '' },
   active: true,
   methods: [],
+  groups: [],
   addons: [],
   combo: [],
 });
@@ -75,9 +88,15 @@ const draftOf = (d: DishRow): Draft => ({
   imageUrl: d.imageUrl,
   prices: { standard: '', professional: '', premium: '' },
   active: d.active,
-  methods: d.methods,
+  methods: d.methodOptions.map((m) => ({ name: m.name, group: m.group, price: m.price ? centsToInput(m.price) : '' })),
+  groups: d.methodGroups.map((g) => ({ ...g })),
   addons: d.addons.map((a) => a.itemId),
-  combo: d.combo.map((c) => ({ itemId: c.itemId, quantity: c.quantity })),
+  combo: d.combo.map((c) => ({
+    itemId: c.itemId,
+    quantity: c.quantity,
+    swappable: c.swappable,
+    swaps: c.swaps.map((w) => ({ itemId: w.itemId, diff: w.priceDiff ? centsToInput(w.priceDiff) : '' })),
+  })),
 });
 
 export function DishEditor({
@@ -87,6 +106,7 @@ export function DishEditor({
   onClose,
   onSaved,
   onRejected,
+  onDelete,
 }: {
   target: DishRow | 'new' | null;
   board: DishesBoard;
@@ -96,10 +116,13 @@ export function DishEditor({
   onSaved: (dish: DishRow, created: boolean) => void;
   /** 服务端明确拒绝了（别人先改过、重名……）：外面把菜品表刷新一下，关掉重新打开看到的就是最新的 */
   onRejected: () => void;
+  /** 删除这道菜（8.1.17 BW10：下架并从菜品表隐藏）：外面问一句再删 */
+  onDelete?: (dish: DishRow) => void;
 }) {
   const dish = target && target !== 'new' ? target : null;
   const [f, setF] = useState<Draft>(() => emptyDraft(outlets));
   const [method, setMethod] = useState('');
+  const [groupName, setGroupName] = useState('');
   const [busy, setBusy] = useState<'save' | 'image' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [qtyHint, setQtyHint] = useState<string | null>(null);
@@ -111,6 +134,7 @@ export function DishEditor({
     () => {
       setF(dish ? draftOf(dish) : emptyDraft(outlets));
       setMethod('');
+      setGroupName('');
       setBusy(null);
       setError(null);
       setQtyHint(null);
@@ -133,12 +157,24 @@ export function DishEditor({
     const m = raw.trim();
     if (!m) return;
     if (m.length > MAX_DISH_METHOD_LENGTH) return setError(`一种做法最多 ${MAX_DISH_METHOD_LENGTH} 个字`);
-    if (/[，,、;；/\s]/.test(m)) return setError('一种做法写一个，不要带逗号、顿号、斜杠或空格');
-    if (f.methods.includes(m)) return setMethod('');
+    if (/[，,、;；/\s+＋:：]/.test(m)) return setError('一种做法写一个，不要带逗号、顿号、斜杠、冒号、加号或空格');
+    if (f.methods.some((x) => x.name === m)) return setMethod('');
     if (f.methods.length >= MAX_DISH_METHODS) return setError(`一道菜最多 ${MAX_DISH_METHODS} 种做法`);
-    set({ methods: [...f.methods, m] });
+    set({ methods: [...f.methods, { name: m, group: '', price: '' }] });
     setMethod('');
   };
+  /** 做法分组（8.1.17）：同一组点单时只能选一个；必选的组不选不能下单 */
+  const addGroup = (raw: string) => {
+    const g = raw.trim();
+    if (!g) return;
+    if (g.length > MAX_DISH_METHOD_GROUP_LENGTH) return setError(`组名最多 ${MAX_DISH_METHOD_GROUP_LENGTH} 个字`);
+    if (/[，,、;；/\s+＋:：（）()]/.test(g)) return setError('组名里不要带标点、括号或空格');
+    if (f.groups.some((x) => x.name === g)) return setGroupName('');
+    if (f.groups.length >= MAX_DISH_METHOD_GROUPS) return setError(`做法最多分 ${MAX_DISH_METHOD_GROUPS} 组`);
+    set({ groups: [...f.groups, { name: g, required: false }] });
+    setGroupName('');
+  };
+  const setMethodAt = (name: string, patch: Partial<Draft['methods'][number]>) => set({ methods: f.methods.map((m) => (m.name === name ? { ...m, ...patch } : m)) });
 
   const upload = async (file: File | undefined) => {
     if (!file) return;
@@ -158,7 +194,38 @@ export function DishEditor({
     const name = f.name.trim();
     if (!name) return setError('请填写菜名');
     if (f.stationId === null) return setError('请选择出品档口');
-    const body: DishBody = { name, category: f.category.trim(), slot: f.slot, stationId: f.stationId, imageId: f.imageId, methods: f.methods, addons: f.addons, combo: f.combo };
+    const methods: DishMethodOption[] = [];
+    for (const m of f.methods) {
+      const price = m.price.trim() ? parseYuan(m.price) : 0;
+      if (price === null || price > MAX_DISH_METHOD_PRICE) return setError(`做法「${m.name}」的加价「${m.price}」不对（最多 ${formatYuan(MAX_DISH_METHOD_PRICE)}）`);
+      methods.push({ name: m.name, group: f.groups.some((g) => g.name === m.group) ? m.group : '', price });
+    }
+    const empty = f.groups.find((g) => !methods.some((m) => m.group === g.name));
+    if (empty) return setError(`做法的组「${empty.name}」里还没有做法：给它选几种做法，或者把这一组去掉`);
+    // 套餐（8.1.17）：可换的至少能换成一样；差价是每份套餐补的钱
+    const combo: DishBody['combo'] = [];
+    for (const c of f.combo) {
+      const partName = byId.get(c.itemId)?.name ?? '这一样';
+      if (c.swappable && c.swaps.length === 0) return setError(`套餐里的「${partName}」标了可换：请加上能换成的菜，或者取消「可换」`);
+      const swaps: { itemId: number; priceDiff: number }[] = [];
+      for (const w of c.swappable ? c.swaps : []) {
+        const diff = w.diff.trim() ? parseYuan(w.diff) : 0;
+        if (diff === null || diff > MAX_COMBO_SWAP_DIFF) return setError(`「${partName}」换成「${byId.get(w.itemId)?.name ?? ''}」的差价「${w.diff}」不对（最多 ${formatYuan(MAX_COMBO_SWAP_DIFF)}）`);
+        swaps.push({ itemId: w.itemId, priceDiff: diff });
+      }
+      combo.push({ itemId: c.itemId, quantity: c.quantity, swappable: c.swappable, swaps });
+    }
+    const body: DishBody = {
+      name,
+      category: f.category.trim(),
+      slot: f.slot,
+      stationId: f.stationId,
+      imageId: f.imageId,
+      methods,
+      methodGroups: f.groups,
+      addons: f.addons,
+      combo,
+    };
     let extra: Record<string, unknown>;
     if (dish) extra = { rev: dish.rev };
     else {
@@ -208,6 +275,11 @@ export function DishEditor({
       width="max-w-2xl"
       footer={
         <>
+          {dish && onDelete && (
+            <Button variant="danger" className="mr-auto min-h-11" icon={<Trash2 className="size-4" />} disabled={busy !== null} onClick={() => onDelete(dish)} data-testid="dish-delete">
+              删除
+            </Button>
+          )}
           <Button variant="ghost" className="min-h-11" onClick={onClose}>
             取消
           </Button>
@@ -315,15 +387,91 @@ export function DishEditor({
           )}
         </Section>
 
-        <Section title={`做法 ${f.methods.length ? f.methods.length : ''}`} hint="不加钱。点单时选了写进出品单的口味备注，例如「微辣，免葱」。">
-          <div className="flex flex-wrap gap-1.5" data-testid="dish-methods">
-            {f.methods.length === 0 && <span className="text-[13px] text-ink-3">还没有做法</span>}
-            {f.methods.map((m) => (
-              <Chip key={m} onRemove={() => set({ methods: f.methods.filter((x) => x !== m) })} label={`去掉做法 ${m}`}>
-                {m}
-              </Chip>
+        <Section
+          title={`做法 ${f.methods.length ? f.methods.length : ''}`}
+          hint="点单时选了写进出品单的口味备注，例如「微辣，免葱」。可以分组（同一组只能选一个，组可以设必选），可以加价（按份加在这道菜的单价上，账单上写「特辣 +¥2」）。"
+        >
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="dish-method-groups">
+            <span className="text-[13px] font-semibold text-ink-2">分组：</span>
+            {f.groups.length === 0 && <span className="text-[13px] text-ink-3">不分组（都可以多选）</span>}
+            {f.groups.map((g) => (
+              <span key={g.name} className="inline-flex h-11 items-center gap-1 rounded-full bg-lake-soft pr-1 pl-3 text-[13.5px] font-semibold text-lake" data-testid={`dish-group-${g.name}`}>
+                {g.name}
+                <label className="ml-1 inline-flex h-9 items-center gap-1 rounded-full px-1.5 text-[13px] font-semibold">
+                  <input
+                    type="checkbox"
+                    className="size-4"
+                    checked={g.required}
+                    onChange={(e) => set({ groups: f.groups.map((x) => (x.name === g.name ? { ...x, required: e.target.checked } : x)) })}
+                    data-testid={`dish-group-required-${g.name}`}
+                  />
+                  必选
+                </label>
+                <button
+                  type="button"
+                  aria-label={`去掉做法的组 ${g.name}`}
+                  title={`去掉这一组（组里的做法改成不分组）`}
+                  onClick={() => set({ groups: f.groups.filter((x) => x.name !== g.name), methods: f.methods.map((m) => (m.group === g.name ? { ...m, group: '' } : m)) })}
+                  className="tap relative flex size-9 items-center justify-center rounded-full hover:bg-lake/10"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </span>
             ))}
           </div>
+          <form
+            className="mt-2 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              addGroup(groupName);
+            }}
+          >
+            <Input
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              maxLength={MAX_DISH_METHOD_GROUP_LENGTH}
+              placeholder="加一组，例如 辣度、冰量"
+              aria-label="做法的组名"
+              data-testid="dish-group-input"
+            />
+            <Button type="submit" className="min-h-11 shrink-0" icon={<Plus className="size-4" />} disabled={!groupName.trim()} data-testid="dish-group-add">
+              加一组
+            </Button>
+          </form>
+          <ul className="mt-3 space-y-1.5" data-testid="dish-methods">
+            {f.methods.length === 0 && <li className="text-[13px] text-ink-3">还没有做法</li>}
+            {f.methods.map((m) => (
+              <li key={m.name} className="flex flex-wrap items-center gap-2 rounded-md border border-line px-3 py-1.5" data-testid={`dish-method-${m.name}`}>
+                <span className="min-w-0 flex-1 basis-20 truncate text-[15px] font-semibold">{m.name}</span>
+                <Select
+                  className="min-h-11 w-32"
+                  fullWidth={false}
+                  value={m.group}
+                  onChange={(e) => setMethodAt(m.name, { group: e.target.value })}
+                  aria-label={`${m.name} 在哪一组`}
+                  data-testid={`dish-method-group-${m.name}`}
+                >
+                  <option value="">不分组</option>
+                  {f.groups.map((g) => (
+                    <option key={g.name} value={g.name}>
+                      {g.name}
+                    </option>
+                  ))}
+                </Select>
+                <span className="w-28">
+                  <MoneyInput
+                    value={m.price}
+                    onChange={(e) => setMethodAt(m.name, { price: e.target.value })}
+                    placeholder="不加钱"
+                    aria-label={`${m.name} 加价（元）`}
+                    data-testid={`dish-method-price-${m.name}`}
+                  />
+                </span>
+                {parseYuan(m.price) ? <span className="num text-[13px] font-semibold text-ember-deep">{plusYuan(parseYuan(m.price)!)}</span> : null}
+                <RemoveButton label={`去掉做法 ${m.name}`} onClick={() => set({ methods: f.methods.filter((x) => x.name !== m.name) })} />
+              </li>
+            ))}
+          </ul>
           <form
             className="mt-2 flex gap-2"
             onSubmit={(e) => {
@@ -337,8 +485,8 @@ export function DishEditor({
             </Button>
           </form>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {QUICK_METHODS.filter((m) => !f.methods.includes(m)).map((m) => (
-              <button key={m} type="button" className="h-9 rounded-full bg-paper-2 px-3 text-[12.5px] font-semibold text-ink-3 hover:text-ink" onClick={() => addMethod(m)}>
+            {QUICK_METHODS.filter((m) => !f.methods.some((x) => x.name === m)).map((m) => (
+              <button key={m} type="button" className="tap relative h-9 rounded-full bg-paper-2 px-3 text-[12.5px] font-semibold text-ink-3 hover:text-ink" onClick={() => addMethod(m)}>
                 + {m}
               </button>
             ))}
@@ -368,7 +516,10 @@ export function DishEditor({
           )}
         </Section>
 
-        <Section title={`套餐内容 ${f.combo.length ? f.combo.length : ''}`} hint="填了就是套餐：下单一行、按这道菜自己的价，出品单上列出含的几样。">
+        <Section
+          title={`套餐内容 ${f.combo.length ? f.combo.length : ''}`}
+          hint="填了就是套餐：下单一行、按这道菜自己的价，出品单上列出含的几样；每一样在自己的档口出、扣自己的沽清与用料。标了「可换」的点单时可以换成列出的菜（补差价的加在这一行上）。"
+        >
           {comboBlocked ? (
             <p className="text-[13px] text-ink-3" data-testid="dish-combo-blocked">
               {comboBlocked}
@@ -378,24 +529,71 @@ export function DishEditor({
               <ul className="space-y-1.5" data-testid="dish-combo">
                 {f.combo.map((c) => {
                   const it = byId.get(c.itemId);
+                  const name = it?.name ?? '这一样';
+                  const patch = (p: Partial<Draft['combo'][number]>) => set({ combo: f.combo.map((x) => (x.itemId === c.itemId ? { ...x, ...p } : x)) });
                   return (
-                    <li key={c.itemId} className="flex min-h-11 items-center gap-2 rounded-md border border-line px-3">
-                      <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">{it?.name ?? '已经不是菜品'}</span>
-                      {it && !it.active && (
-                        <StatusChip tone="neutral" icon={<CircleOff />}>
-                          已下架
-                        </StatusChip>
+                    <li key={c.itemId} className="rounded-md border border-line px-3 py-1" data-testid={`dish-combo-part-${name}`}>
+                      <div className="flex min-h-11 flex-wrap items-center gap-2">
+                        <span className="min-w-0 flex-1 basis-24 truncate text-[15px] font-semibold">{it?.name ?? '已经不是菜品'}</span>
+                        {it && !it.active && (
+                          <StatusChip tone="neutral" icon={<CircleOff />}>
+                            已下架
+                          </StatusChip>
+                        )}
+                        <span className="text-[13px] text-ink-3">×</span>
+                        <QtyInput
+                          value={c.quantity}
+                          onChange={(n) => patch({ quantity: n })}
+                          onHint={setQtyHint}
+                          label={`${name} 每份套餐含几份`}
+                          className="h-9 w-11 rounded-md border border-line-strong text-[15px]"
+                          testId={`dish-combo-qty-${it?.name ?? c.itemId}`}
+                        />
+                        {/* 8.1.17（BW7）：点单时能不能换成别的 */}
+                        <label className="inline-flex h-11 items-center gap-1.5 px-1 text-[13.5px] font-semibold text-ink-2">
+                          <input type="checkbox" className="size-4" checked={c.swappable} onChange={(e) => patch({ swappable: e.target.checked })} data-testid={`dish-combo-swappable-${name}`} />
+                          可换
+                        </label>
+                        <RemoveButton label={`去掉 ${it?.name ?? ''}`} onClick={() => set({ combo: f.combo.filter((x) => x.itemId !== c.itemId) })} />
+                      </div>
+                      {c.swappable && (
+                        <div className="mb-1.5 ml-2 border-l-2 border-line pl-3" data-testid={`dish-combo-swaps-${name}`}>
+                          <p className="text-[12.5px] text-ink-3">点单时可以换成（每份套餐补的差价，空着 = 同价）：</p>
+                          <ul className="mt-1 space-y-1">
+                            {c.swaps.map((w) => {
+                              const to = byId.get(w.itemId);
+                              return (
+                                <li key={w.itemId} className="flex min-h-11 flex-wrap items-center gap-2" data-testid={`dish-combo-swap-${name}-${to?.name ?? w.itemId}`}>
+                                  <span className="min-w-0 flex-1 basis-20 truncate text-[14.5px] font-semibold">{to?.name ?? '已经不是菜品'}</span>
+                                  {to && !to.active && (
+                                    <StatusChip tone="neutral" icon={<CircleOff />}>
+                                      已下架
+                                    </StatusChip>
+                                  )}
+                                  <span className="w-28">
+                                    <MoneyInput
+                                      value={w.diff}
+                                      onChange={(e) => patch({ swaps: c.swaps.map((x) => (x.itemId === w.itemId ? { ...x, diff: e.target.value } : x)) })}
+                                      placeholder="同价"
+                                      aria-label={`${name} 换成 ${to?.name ?? ''} 补差价（元）`}
+                                      data-testid={`dish-combo-swap-diff-${name}-${to?.name ?? w.itemId}`}
+                                    />
+                                  </span>
+                                  <RemoveButton label={`不能换成 ${to?.name ?? ''}`} onClick={() => patch({ swaps: c.swaps.filter((x) => x.itemId !== w.itemId) })} />
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          {c.swaps.length < MAX_COMBO_SWAPS && (
+                            <DishPicker
+                              candidates={candidates.filter((d) => d.id !== c.itemId && !c.swaps.some((w) => w.itemId === d.id))}
+                              placeholder={`搜菜名，${name}可以换成什么`}
+                              testId={`dish-combo-swap-${name}`}
+                              onPick={(d) => patch({ swaps: [...c.swaps, { itemId: d.id, diff: '' }] })}
+                            />
+                          )}
+                        </div>
                       )}
-                      <span className="text-[13px] text-ink-3">×</span>
-                      <QtyInput
-                        value={c.quantity}
-                        onChange={(n) => set({ combo: f.combo.map((x) => (x.itemId === c.itemId ? { ...x, quantity: n } : x)) })}
-                        onHint={setQtyHint}
-                        label={`${it?.name ?? '这一样'} 每份套餐含几份`}
-                        className="h-9 w-11 rounded-md border border-line-strong text-[15px]"
-                        testId={`dish-combo-qty-${it?.name ?? c.itemId}`}
-                      />
-                      <RemoveButton label={`去掉 ${it?.name ?? ''}`} onClick={() => set({ combo: f.combo.filter((x) => x.itemId !== c.itemId) })} />
                     </li>
                   );
                 })}
@@ -410,7 +608,7 @@ export function DishEditor({
                   candidates={candidates.filter((d) => !f.combo.some((c) => c.itemId === d.id))}
                   placeholder="搜菜名，加进套餐"
                   testId="dish-combo"
-                  onPick={(d) => set({ combo: [...f.combo, { itemId: d.id, quantity: 1 }] })}
+                  onPick={(d) => set({ combo: [...f.combo, { itemId: d.id, quantity: 1, swappable: false, swaps: [] }] })}
                 />
               )}
             </>
@@ -430,17 +628,6 @@ function Section({ title, hint, children }: { title: string; hint: string; child
       <p className="mt-0.5 mb-2.5 text-[12.5px] leading-relaxed text-ink-3">{hint}</p>
       {children}
     </section>
-  );
-}
-
-function Chip({ children, onRemove, label }: { children: ReactNode; onRemove: () => void; label: string }) {
-  return (
-    <span className="inline-flex h-9 items-center gap-0.5 rounded-full bg-pine-tint pr-1 pl-3 text-[13.5px] font-semibold text-pine">
-      {children}
-      <button type="button" aria-label={label} title={label} onClick={onRemove} className="flex size-7 items-center justify-center rounded-full hover:bg-pine/10">
-        <X className="size-3.5" />
-      </button>
-    </span>
   );
 }
 

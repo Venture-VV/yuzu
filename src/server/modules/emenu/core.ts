@@ -10,7 +10,9 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { defaultTier, type TierPrice } from '@shared/catalog';
-import { MAX_BILL_LINE_QUANTITY, MAX_TABLE_NAME } from '@shared/dining';
+import { DINING_OUTLET_KEYS, diningSlotOf, MAX_BILL_LINE_QUANTITY, MAX_TABLE_NAME, type DiningOutlet } from '@shared/dining';
+import { OUTLET_ORDER_PERMISSIONS } from '@shared/dining-v8115';
+import { can } from '@shared/permissions';
 import {
   composeEmenuNote,
   DEFAULT_EMENU_RULES,
@@ -41,6 +43,8 @@ import {
   type EmenuOrderResult,
   type EmenuPageView,
   type EmenuRules,
+  type EmenuComboSwapPart,
+  type EmenuSpecOptions,
   type EmenuSpecState,
   type EmenuWindow,
 } from '@shared/emenu';
@@ -54,6 +58,9 @@ import { isFenced } from '../../lib/fences';
 import { hashRequest } from '../../lib/idempotency';
 import { parse, positiveCents } from '../../lib/validate';
 import { loadDiningRules } from '../dining';
+import { assertOrderOutlets } from '../dining-order-v8115';
+import { DishLineFields } from '../dish-lines';
+import { comboRemainingOf, dishOptionsOf } from '../dish-options';
 import { postChargesTx } from '../frontdesk/bills';
 import { assertOpen, businessDate, lockVisits, runIdempotent } from '../frontdesk/common';
 import { abandonFrontdeskOp } from '../frontdesk/visits';
@@ -147,7 +154,23 @@ interface SpecRow {
   inKitchen: boolean;
   prices: TierPrice[];
   remaining: number | null;
+  /** 出品口（8.1.17：这台平板的岗位能不能在这一处下单） */
+  category: string;
+  diningOutlet: string | null;
+  diningGroup: string;
+  stationName: string | null;
 }
+
+/** 一个价目项目在哪个出品口（后台没设的按默认归，与点单页同一个口径） */
+const outletOf = (r: Pick<SpecRow, 'category' | 'diningOutlet' | 'diningGroup' | 'stationName'>): DiningOutlet =>
+  diningSlotOf({ outlet: r.diningOutlet, group: r.diningGroup, category: r.category, stationName: r.stationName }).outlet;
+
+/**
+ * 这台平板能在哪几处下单（8.1.17 BW3）：打开平板点餐的账号（「点餐平板」岗位，或在平板上登录的员工）按自己的三项下单权限；
+ * 后台预览、工作台看菜单的不限（null）
+ */
+export const tabletOutlets = (actor: Actor | null | undefined): DiningOutlet[] | null =>
+  actor && can(actor, 'emenu.view') ? DINING_OUTLET_KEYS.filter((o) => can(actor, OUTLET_ORDER_PERMISSIONS[o])) : null;
 
 const defaultPrice = (prices: TierPrice[]) => {
   const tier = defaultTier(prices);
@@ -156,9 +179,11 @@ const defaultPrice = (prices: TierPrice[]) => {
 
 /**
  * 这几道菜在平板上的样子：图文、每个规格的价格（默认价格档）与现在能不能点。
- * 已下架：菜品图文停用、价目项目停用、不挂在启用的出品档口上、改成了需要技师，或餐饮功能关着；已售罄：今天的沽清为 0。
+ * 已下架：菜品图文停用、价目项目停用、不挂在启用的出品档口上、改成了需要技师，或餐饮功能关着；已售罄：今天的沽清为 0；
+ * 请找服务员点（8.1.17）：allowed 给了的，这道菜的出品口不在里面（这台平板的岗位不能在那一处下单）。
+ * 8.1.17（BW9）：有做法、加料的规格带上做法（分组、加价、必选）与加料（各自的价、能不能点）
  */
-export async function dishViews(db: Db, dishIds: number[], today: string, diningOn: boolean): Promise<Map<number, EmenuDishView>> {
+export async function dishViews(db: Db, dishIds: number[], today: string, diningOn: boolean, allowed: readonly DiningOutlet[] | null = null): Promise<Map<number, EmenuDishView>> {
   const ids = [...new Set(dishIds)];
   if (ids.length === 0) return new Map();
   const dishes = await db<DishRow[]>`
@@ -166,9 +191,22 @@ export async function dishViews(db: Db, dishIds: number[], today: string, dining
     FROM emenu_dishes WHERE id IN ${db(ids)}`;
   const specs = await db<SpecRow[]>`
     SELECT sp.dish_id, sp.item_id, sp.label, sp.label_en, i.active AS item_active, i.technician_required, (st.id IS NOT NULL) AS in_kitchen, ${pricesColumn(db)} AS prices,
-           (SELECT dl.remaining FROM dish_limits dl WHERE dl.item_id = i.id AND dl.business_date = ${today}) AS remaining
+           (SELECT dl.remaining FROM dish_limits dl WHERE dl.item_id = i.id AND dl.business_date = ${today}) AS remaining,
+           i.category, i.dining_outlet, i.dining_group, st.name AS station_name
     FROM emenu_dish_specs sp JOIN service_items i ON i.id = sp.item_id LEFT JOIN kitchen_stations st ON st.id = i.station_id AND st.active
     WHERE sp.dish_id IN ${db(ids)} ORDER BY sp.dish_id, sp.sort_no, sp.item_id`;
+  const options = await specOptions(
+    db,
+    specs.map((s) => Number(s.itemId)),
+    today,
+    allowed,
+  );
+  // 套餐（8.1.17 BW7）：今天还能卖几份按子项里最少的（与点单页的菜单同一个算法）
+  const comboLeft = await comboRemainingOf(
+    db,
+    [...options].filter(([, o]) => o.comboIds).map(([id]) => id),
+    today,
+  );
   const out = new Map<number, EmenuDishView>();
   for (const d of dishes) {
     out.set(Number(d.id), {
@@ -189,9 +227,71 @@ export async function dishViews(db: Db, dishIds: number[], today: string, dining
         .filter((s) => Number(s.dishId) === Number(d.id))
         .map((s) => {
           const off = !diningOn || !d.active || !s.itemActive || s.technicianRequired || !s.inKitchen;
-          const state: EmenuSpecState = off ? 'off' : s.remaining === 0 ? 'sold_out' : 'ok';
-          return { itemId: Number(s.itemId), label: s.label, labelEn: s.labelEn, price: defaultPrice(s.prices), state, remaining: s.remaining };
+          const left = comboLeft.get(Number(s.itemId)) ?? null;
+          const remaining = left === null ? s.remaining : s.remaining === null ? left : Math.min(s.remaining, left);
+          const state: EmenuSpecState = off ? 'off' : allowed && !allowed.includes(outletOf(s)) ? 'unavailable' : remaining === 0 ? 'sold_out' : 'ok';
+          const o = options.get(Number(s.itemId))?.view;
+          return { itemId: Number(s.itemId), label: s.label, labelEn: s.labelEn, price: defaultPrice(s.prices), state, remaining, ...(o ? { options: o } : {}) };
         }),
+    });
+  }
+  return out;
+}
+
+/**
+ * 规格的做法与加料（8.1.17 BW9）：做法照菜品管理里设的（分组、加价、必选）；加料只列现在能点的（在售、挂在启用的档口上），
+ * 带上各自的价（默认档）、今天的沽清与这台平板能不能点（出品口）。没有做法、加料的规格不在返回里
+ */
+async function specOptions(db: Db, itemIds: number[], today: string, allowed: readonly DiningOutlet[] | null): Promise<Map<number, { view: EmenuSpecOptions | null; comboIds: boolean }>> {
+  const sets = await dishOptionsOf(db, itemIds);
+  const addonIds = [...new Set([...sets.values()].flatMap((o) => o.addons.map((a) => a.id)))];
+  // 套餐可换的子项（8.1.17 BW7）：原来的与能换成的今天的沽清（不够一份套餐的算售罄）
+  const swapIds = [...new Set([...sets.values()].flatMap((o) => o.combo.filter((p) => p.swaps?.length).flatMap((p) => [p.itemId, ...p.swaps!.map((w) => w.itemId)])))];
+  const limits = new Map(
+    swapIds.length
+      ? (await db<{ itemId: number; remaining: number }[]>`SELECT item_id, remaining FROM dish_limits WHERE item_id IN ${db(swapIds)} AND business_date = ${today}`).map((r) => [
+          Number(r.itemId),
+          r.remaining,
+        ])
+      : [],
+  );
+  const short = (itemId: number, perCombo: number) => (limits.get(itemId) ?? Infinity) < perCombo;
+  const addonRows = addonIds.length
+    ? await db<{ id: number; remaining: number | null; category: string; diningOutlet: string | null; diningGroup: string; stationName: string | null }[]>`
+        SELECT i.id, (SELECT dl.remaining FROM dish_limits dl WHERE dl.item_id = i.id AND dl.business_date = ${today}) AS remaining,
+               i.category, i.dining_outlet, i.dining_group, s.name AS station_name
+        FROM service_items i LEFT JOIN kitchen_stations s ON s.id = i.station_id WHERE i.id IN ${db(addonIds)}`
+    : [];
+  const out = new Map<number, { view: EmenuSpecOptions | null; comboIds: boolean }>();
+  for (const [itemId, o] of sets) {
+    const swaps = o.combo
+      .filter((p) => p.swaps?.length)
+      .map(
+        (p): EmenuComboSwapPart => ({
+          itemId: p.itemId,
+          name: p.name,
+          quantity: p.quantity,
+          state: short(p.itemId, p.quantity) ? 'sold_out' : 'ok',
+          choices: p.swaps!.map((w) => ({ itemId: w.itemId, name: w.name, priceDiff: w.priceDiff, state: !w.available ? 'off' : short(w.itemId, p.quantity) ? 'sold_out' : 'ok' })),
+        }),
+      );
+    const comboIds = o.combo.length > 0;
+    if (o.methods.length === 0 && o.addons.length === 0 && swaps.length === 0) {
+      if (comboIds) out.set(itemId, { view: null, comboIds });
+      continue;
+    }
+    out.set(itemId, {
+      comboIds,
+      view: {
+        methods: o.methods,
+        groups: o.groups,
+        addons: o.addons.map((a) => {
+          const r = addonRows.find((x) => Number(x.id) === a.id);
+          const state: EmenuSpecState = r && allowed && !allowed.includes(outletOf(r)) ? 'unavailable' : r?.remaining === 0 ? 'sold_out' : 'ok';
+          return { itemId: a.id, name: a.name, price: a.price, state, remaining: r?.remaining ?? null };
+        }),
+        ...(swaps.length ? { swaps } : {}),
+      },
     });
   }
   return out;
@@ -211,7 +311,7 @@ export type EmenuMenuView = EmenuPeriodKey | 'all';
  * 平板上的菜单：设置、现在显示的分类与各页、每道菜的状态、桌台。每 15 秒取一次，价格、沽清、上下架、版面都跟得上；
  * 时段交界（8.1.5）与分类另外限定时间的起止由 nextChangeAt 告诉平板，到点马上再取。
  */
-export async function emenuMenu(db: Db, deps: Deps, view?: EmenuMenuView): Promise<EmenuMenu> {
+export async function emenuMenu(db: Db, deps: Deps, view?: EmenuMenuView, actor?: Actor): Promise<EmenuMenu> {
   const now = new Date();
   const today = await businessDate(db, deps, now);
   const rules = await loadEmenuRules(db);
@@ -231,6 +331,7 @@ export async function emenuMenu(db: Db, deps: Deps, view?: EmenuMenuView): Promi
     slots.map((s) => Number(s.dishId)),
     today,
     diningOn,
+    tabletOutlets(actor),
   );
 
   // 现在是哪一段：工作台按某一段看时是那一段，看全部时没有
@@ -362,6 +463,8 @@ const OrderInput = z.object({
       z.object({
         itemId: z.number('菜品编号不对').int().positive('菜品编号不对'),
         quantity: z.number('份数不对').int('份数不对').min(1, '份数至少为 1').max(MAX_BILL_LINE_QUANTITY, `一道菜一单最多 ${MAX_BILL_LINE_QUANTITY} 份`),
+        /** 8.1.17（BW9）：选的做法、加料挂在哪一行主菜上；都不带的与以前的请求一样 */
+        ...DishLineFields,
       }),
       '请先点菜',
     )
@@ -441,7 +544,15 @@ export async function placeEmenuOrder(deps: Deps, raw: unknown, device: Actor, s
   const rules = await loadEmenuRules(deps.sql);
   if (!rules.enabled || !(await loadDiningRules(deps.sql)).enabled) throw disabledError();
   const itemIds = input.lines.map((l) => l.itemId);
-  if (new Set(itemIds).size !== itemIds.length) throw badRequest('同一道菜同一个规格请合成一行');
+  // 同一道菜、同一个规格、同样的做法、配在同一道菜上的合成一行（8.1.17 起做法不同的、加料配的主菜不同的另起一行）
+  const lineKeys = input.lines.map(
+    (l) =>
+      `${l.itemId}|${[...(l.methods ?? [])].sort().join(',')}|${l.addonOf ?? ''}|${(l.swaps ?? [])
+        .map((w) => `${w.from}>${w.to}`)
+        .sort()
+        .join(',')}`,
+  );
+  if (new Set(lineKeys).size !== lineKeys.length) throw badRequest('同一道菜同一个规格请合成一行');
   if (input.avoid.some((a) => !rules.avoidOptions.includes(a)) || (input.serve !== null && !rules.serveOptions.includes(input.serve))) {
     throw unprocessable('REMARK_OPTION_INVALID', '备注的选项刚刚改过，请重新选一下备注');
   }
@@ -466,14 +577,34 @@ export async function placeEmenuOrder(deps: Deps, raw: unknown, device: Actor, s
       throw conflict('TAG_CHANGED', `这位客人现在用的是手牌 ${tag!.code}，不是 ${tagCode}，请回到起始页重新输入手牌`);
     }
     const tableName = await resolveTable(tx, input.tableName);
-    await assertOnMenuNow(tx, itemIds, minuteOfDay(at, deps.config.timezone), rules.periods);
+    // 加料（8.1.17）不一定排在电子菜单上：按主菜配的加料核对（postChargesTx 里），这里只核对菜单上点的那几道
+    await assertOnMenuNow(
+      tx,
+      input.lines.filter((l) => l.addonOf === undefined).map((l) => l.itemId),
+      minuteOfDay(at, deps.config.timezone),
+      rules.periods,
+    );
+    // 8.1.17（BW3）：按出品口核对下单权限，与点单页同一个函数——这台平板的岗位（「点餐平板」默认三处都有）；
+    // 开着「点单密码」时输密码确认的服务员是经办人，也要能在那一处下单（与他在点单页下单一样）
+    await assertTabletOutlets(tx, device, itemIds, 'tablet');
+    if (waiter.id !== device.id) await assertTabletOutlets(tx, waiter, itemIds, 'waiter');
     const posted = await postChargesTx(
       tx,
       deps,
       input.visitId,
       {
         clientKey: key,
-        lines: input.lines.map((l) => ({ itemId: l.itemId, quantity: l.quantity, note: note || undefined, tier: undefined, technicianId: undefined, callType: undefined })),
+        lines: input.lines.map((l) => ({
+          itemId: l.itemId,
+          quantity: l.quantity,
+          note: note || undefined,
+          tier: undefined,
+          technicianId: undefined,
+          callType: undefined,
+          methods: l.methods,
+          addonOf: l.addonOf,
+          swaps: l.swaps,
+        })),
         customLines: [],
         expectedTotal: input.expectedTotal,
         backfill: undefined,
@@ -511,6 +642,24 @@ export async function placeEmenuOrder(deps: Deps, raw: unknown, device: Actor, s
   // 编号是点单页（不是平板）用过的：内容摘要对不上时 runIdempotent 已经拒绝；走到这里一定有点餐单
   if (!order) throw conflict('IDEMPOTENCY_CONFLICT', '该操作编号已用于另一笔不同的业务，请重新下单');
   return { ...order, replayed };
+}
+
+/** 平板下单按出品口核对（assertOrderOutlets，与点单页同一个函数），拒绝时说清楚是这台平板还是输密码的服务员 */
+async function assertTabletOutlets(tx: Tx, actor: Actor, itemIds: number[], who: 'tablet' | 'waiter') {
+  try {
+    await assertOrderOutlets(tx, actor, itemIds);
+  } catch (e) {
+    if (!(e instanceof AppError) || e.code !== 'OUTLET_FORBIDDEN') throw e;
+    const items = (e.details?.items as string[] | undefined) ?? [];
+    throw new AppError(
+      403,
+      'OUTLET_FORBIDDEN',
+      who === 'tablet'
+        ? `这台平板不能点${items.map((n) => `「${n}」`).join('')}（这一处没给「点餐平板」开下单权限），请从未下单里去掉，或请服务员在点单页点`
+        : `${actor.displayName}不能在这一处下单（${items.map((n) => `「${n}」`).join('')}），请换一位有权限的同事输密码`,
+      e.details,
+    );
+  }
 }
 
 /**

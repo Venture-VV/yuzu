@@ -132,7 +132,7 @@ export function PermissionsSection() {
                         {columns.map((c, i) => (
                           <th key={c.key} className={cn('w-[78px] px-1.5 py-2 text-center leading-tight', i === ROLES.length && 'border-l border-line')}>
                             {c.label}
-                            {c.role && q.data.staffCount[c.role] ? <span className="block text-[11px] font-semibold text-ink-4">{q.data.staffCount[c.role]} 人</span> : null}
+                            {c.role && q.data.staffCount[c.role] ? <span className="block text-[12px] font-semibold text-ink-4">{q.data.staffCount[c.role]} 人</span> : null}
                           </th>
                         ))}
                       </tr>
@@ -184,7 +184,7 @@ export function PermissionsSection() {
                                     onClick={() => toggle(role, p)}
                                     data-testid={`perm-${role}-${p}`}
                                     className={cn(
-                                      'relative mx-auto flex size-8 items-center justify-center rounded-md transition-colors',
+                                      'tap relative mx-auto flex size-8 items-center justify-center rounded-md transition-colors',
                                       editable && !locked ? 'hover:bg-paper-2' : 'cursor-default',
                                       has && 'bg-pine-tint',
                                     )}

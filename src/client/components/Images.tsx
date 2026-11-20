@@ -164,7 +164,7 @@ export function ImagePicker({
             type="button"
             disabled={disabled || busy}
             onClick={() => input.current?.click()}
-            className="flex size-14 flex-col items-center justify-center gap-0.5 rounded-md border border-dashed border-line-strong text-[11px] text-ink-3 hover:bg-paper-2 disabled:opacity-50"
+            className="flex size-14 flex-col items-center justify-center gap-0.5 rounded-md border border-dashed border-line-strong text-[12px] text-ink-3 hover:bg-paper-2 disabled:opacity-50"
             data-testid={testId}
           >
             <ImagePlus className="size-4" />

@@ -125,7 +125,7 @@ export function AdminShell() {
         data-testid={compact ? `admin-tab-${k}` : `admin-nav-${k}`}
         className={({ isActive }) =>
           cn(
-            'relative flex shrink-0 items-center gap-2.5 font-semibold whitespace-nowrap transition-colors duration-100',
+            'tap relative flex shrink-0 items-center gap-2.5 font-semibold whitespace-nowrap transition-colors duration-100',
             compact ? 'h-10 rounded-full px-3.5 text-[13.5px]' : 'h-10 rounded-lg px-3 text-[14px]',
             // 当前项的底块：量得到位置时由导航里那一块滑过来画（8.0.16），量不到时自己画
             isActive ? cn('nav-on text-paper', !pill.style && 'bg-pine') : 'text-ink-2 hover:bg-paper-2 hover:text-ink',
@@ -148,15 +148,15 @@ export function AdminShell() {
           </p>
           {/* 实例标识与「版本 + SHA」常显（窄屏也显示） */}
           <p className="mt-0.5 flex min-w-0 items-center gap-1.5" data-testid="admin-instance" title={versionText(session.version, session.commit)}>
-            <InstanceBadge instance={session.instance} className="h-5 px-2 text-[11px]" />
-            <span className="num truncate text-[11px] text-paper/60">{versionText(session.version, session.commit)}</span>
+            <InstanceBadge instance={session.instance} className="h-5 px-2 text-[12px]" />
+            <span className="num truncate text-[12px] text-paper/60">{versionText(session.version, session.commit)}</span>
           </p>
         </div>
         <span className="hidden text-[12.5px] text-paper/75 md:inline">
           {session.staff.displayName} · {ROLE_LABELS[session.staff.role]}
         </span>
         <ThemeToggleButton className="size-9" />
-        <NavLink to="/" className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18" data-testid="admin-exit">
+        <NavLink to="/" className="tap relative flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18" data-testid="admin-exit">
           <ArrowLeft className="size-4" />
           返回前台
         </NavLink>
@@ -175,7 +175,7 @@ export function AdminShell() {
           )}
           {groups.map((g) => (
             <div key={g.title} className="flex flex-col gap-0.5">
-              <p className="px-3 pb-1 text-[11.5px] font-bold tracking-wide text-ink-4">{g.title}</p>
+              <p className="px-3 pb-1 text-[12px] font-bold tracking-wide text-ink-4">{g.title}</p>
               {g.items.map((k) => link(k, false))}
             </div>
           ))}

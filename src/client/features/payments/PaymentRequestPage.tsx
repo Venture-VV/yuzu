@@ -13,6 +13,7 @@ import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
@@ -216,37 +217,29 @@ function Detail({ r }: { r: PaymentRequestDetail }) {
       {r.targets.length > 0 && (
         <Card className="p-5">
           <h2 className="mb-2 text-[14px] font-bold">申请付的货款</h2>
-          <table className="w-full text-[13px]" data-testid="request-targets">
-            <thead>
-              <tr className="border-b border-line text-left text-[12px] text-ink-3">
-                <th className="py-1.5 pr-2 font-semibold">单号</th>
-                <th className="py-1.5 pr-2 font-semibold">日期</th>
-                <th className="py-1.5 pr-2 text-right font-semibold">申请</th>
-                <th className="py-1.5 pr-2 text-right font-semibold">已付</th>
-                <th className="py-1.5 text-right font-semibold">现在没结清</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/70">
-              {r.targets.map((t) => (
-                <tr key={`${t.kind}:${t.targetId}`}>
-                  <td className="num py-1.5 pr-2 font-semibold">
+          <DataTable
+            variant="plain"
+            testId="request-targets"
+            rows={r.targets}
+            rowKey={(t) => `${t.kind}:${t.targetId}`}
+            columns={[
+              {
+                key: 'doc',
+                header: '单号',
+                cellClassName: 'num font-semibold',
+                cell: (t) => (
+                  <>
                     {t.docNo}
                     {t.purchaseOrderNo && <span className="block font-sans text-[12px] font-normal text-ink-3">采购单 {t.purchaseOrderNo}</span>}
-                  </td>
-                  <td className="num py-1.5 pr-2">{t.date}</td>
-                  <td className="py-1.5 pr-2 text-right">
-                    <Money cents={t.amountCents} />
-                  </td>
-                  <td className="py-1.5 pr-2 text-right">
-                    <Money cents={t.paidCents} />
-                  </td>
-                  <td className="py-1.5 text-right">
-                    <Money cents={t.openCents} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </>
+                ),
+              },
+              { key: 'date', header: '日期', cellClassName: 'num', cell: (t) => t.date },
+              { key: 'amount', header: '申请', numeric: true, cell: (t) => <Money cents={t.amountCents} /> },
+              { key: 'paid', header: '已付', numeric: true, cell: (t) => <Money cents={t.paidCents} /> },
+              { key: 'open', header: '现在没结清', numeric: true, cell: (t) => <Money cents={t.openCents} /> },
+            ]}
+          />
         </Card>
       )}
 

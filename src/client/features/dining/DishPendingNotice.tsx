@@ -57,7 +57,9 @@ export function DishPendingNotice({
     return onReconnect(() => void runRef.current('check'));
   }, [op.key]);
 
-  const target = op.itemId === null ? '这一类' : '这道菜';
+  const target = op.type === 'bulk_active' ? '这几道菜' : op.type === 'sort' ? '这一小类' : op.itemId === null ? '这一类' : '这道菜';
+  // 改上架状态的几种（8.1.17）互相挡：有结论之前上下架、删除、恢复都不能做
+  const blocked = ['active', 'bulk_active', 'delete', 'restore'].includes(op.type) ? '上下架、删除或恢复' : DISH_OP_LABELS[op.type];
   return (
     <Notice
       tone="warning"
@@ -80,7 +82,7 @@ export function DishPendingNotice({
       }
     >
       <span className="block">
-        {formatDateTime(op.createdAt)} {op.staffName} 提交的，没收到结果（超时、断网或服务器出错，可能已经生效）。有结论之前{target}不能再{DISH_OP_LABELS[op.type]}。
+        {formatDateTime(op.createdAt)} {op.staffName} 提交的，没收到结果（超时、断网或服务器出错，可能已经生效）。有结论之前{target}不能再{blocked}。
       </span>
       {message && (
         <span className="mt-1 block font-semibold text-ink" data-testid="dish-pending-message">

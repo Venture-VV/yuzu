@@ -182,7 +182,7 @@ export function ScanPage({ me, offsetMs, online }: { me: CanteenMe; offsetMs: nu
               aria-label={voice.on ? '关掉柚子播报' : '打开柚子播报'}
               data-testid="scan-voice-toggle"
               className={cn(
-                'flex h-9 items-center gap-1 rounded-full px-2.5 text-[13px] font-extrabold ring-1 active:scale-95',
+                'tap relative flex h-9 items-center gap-1 rounded-full px-2.5 text-[13px] font-extrabold ring-1 active:scale-95',
                 voice.on ? 'bg-yuzu-soft text-wood-deep ring-yuzu-deep/30' : 'bg-card text-ink-3 ring-line',
               )}
             >

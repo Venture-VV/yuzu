@@ -902,10 +902,11 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
                   type="button"
                   disabled={removing === f.id}
                   onClick={() => void remove(f.id)}
-                  className="absolute -top-1.5 -right-1.5 flex size-6 items-center justify-center rounded-full bg-ink text-paper shadow disabled:opacity-50"
+                  className="tap absolute -top-1.5 -right-1.5 flex h-6 items-center gap-0.5 rounded-full bg-ink px-2 text-[12px] font-semibold text-paper shadow disabled:opacity-50"
                   aria-label={`删除第 ${i + 1} 页`}
                 >
                   <Trash2 className="size-3.5" />
+                  删除
                 </button>
               )}
             </li>

@@ -19,6 +19,7 @@ import { LedgerTab } from './LedgerTab';
 import { OrderTab } from './OrderTab';
 import { useDiningMenu } from './queries';
 import { TablesTab } from './TablesTab';
+import { TablesTodoBadge } from './TableReminders';
 
 const TABS = [
   { key: 'order', label: '点单', perms: ['dining.order'], subtitle: '找到手牌客人或用餐中的桌，点的菜记在客人或这桌的账上（结账时一起结），同时送到厨房' },
@@ -72,6 +73,8 @@ export function DiningPage() {
               data-testid={`dining-tab-${t.key}`}
             >
               {t.label}
+              {/* 8.1.17（BW-2）：餐饮的待办数——维修过了预计恢复时间、待清台太久的桌 */}
+              {t.key === 'tables' && <TablesTodoBadge enabled />}
               {t.key === current.key && <span className="absolute inset-x-2 bottom-0 h-[3px] rounded-t-full bg-pine" />}
             </NavLink>
           ))}

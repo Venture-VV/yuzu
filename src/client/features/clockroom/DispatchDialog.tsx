@@ -402,14 +402,14 @@ export function DispatchDialog({
                       data-testid={`dispatch-tech-${t.techNo}`}
                     >
                       <span className="flex items-baseline gap-1.5">
-                        {callType === 'rotation' && <span className="num text-[11.5px] font-bold text-ink-3">第 {t.position} 位</span>}
+                        {callType === 'rotation' && <span className="num text-[12px] font-bold text-ink-3">第 {t.position} 位</span>}
                         <span className="num text-[16px] font-bold">{t.techNo}</span>
                         <span className="min-w-0 truncate font-bold">{t.name}</span>
                       </span>
                       <span className="text-[12px] text-ink-3">
                         {gradeLabel(t.grade)} {price !== null && !cant && <Money cents={price} className="font-bold text-ink-2" />}
                       </span>
-                      <span className={cn('text-[11.5px] font-semibold', cant ? 'text-clay' : t.busy ? 'text-yuzu-deep' : 'text-ink-4')}>
+                      <span className={cn('text-[12px] font-semibold', cant ? 'text-clay' : t.busy ? 'text-yuzu-deep' : 'text-ink-4')}>
                         {cant ?? (t.busy ? (t.busy.status === 'serving' ? '在钟上，派了要等钟' : '已有待上钟') : t.state === 'rest' ? '休息中' : `今日 ${t.todayClocks} 钟`)}
                       </span>
                     </button>
@@ -628,11 +628,11 @@ export function TransferDialog({ session: s, board, onClose, onDone }: { session
                   data-testid={`transfer-tech-${t.techNo}`}
                 >
                   <span className="flex items-baseline gap-1.5">
-                    {callType === 'rotation' && <span className="num text-[11.5px] font-bold text-ink-3">第 {t.position} 位</span>}
+                    {callType === 'rotation' && <span className="num text-[12px] font-bold text-ink-3">第 {t.position} 位</span>}
                     <span className="num text-[16px] font-bold">{t.techNo}</span>
                     <span className="min-w-0 truncate font-bold">{t.name}</span>
                   </span>
-                  <span className="text-[11.5px] text-ink-3">
+                  <span className="text-[12px] text-ink-3">
                     {gradeLabel(t.grade)} · {t.busy ? (t.busy.status === 'serving' ? '在钟上，要等钟' : '已有待上钟') : t.state === 'rest' ? '休息中' : `今日 ${t.todayClocks} 钟`}
                   </span>
                 </button>

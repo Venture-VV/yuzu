@@ -43,7 +43,7 @@ export function FlowPage() {
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to="/purchasing" className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回采购">
+            <Link to="/purchasing" className="tap relative -ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回采购">
               <ArrowLeft className="size-[18px]" />
             </Link>
             流程进度
@@ -51,7 +51,7 @@ export function FlowPage() {
         }
         subtitle="进行中的采购从提需求到付款走到哪了；每个环节的状态是从单据算出来的，点环节去那张单"
         actions={
-          <Link to="/purchasing/rules" className="flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3">
+          <Link to="/purchasing/rules" className="tap relative flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3.5 text-[13.5px] font-bold text-ink-2 hover:border-ink-3">
             <Settings2 className="size-4" />
             采购规则
           </Link>
@@ -87,7 +87,7 @@ export function FlowPage() {
                 aria-pressed={on}
                 onClick={() => setParams(c.value ? { stage: c.value } : {}, { replace: true })}
                 className={cn(
-                  'flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-semibold transition-colors duration-150',
+                  'tap relative flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-semibold transition-colors duration-150',
                   on ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2 hover:border-ink-3',
                   c.value === 'alert' && !on && n > 0 && 'border-clay/50 text-clay',
                 )}

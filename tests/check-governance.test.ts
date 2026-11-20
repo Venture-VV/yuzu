@@ -131,6 +131,42 @@ describe('约定检查（docs/CONVENTIONS.md 里能查的几条）', () => {
     expect(conventionCounts('src/client/features/clockroom/ClockroomPage.tsx', timers)).toEqual({});
   });
 
+  it('小于 12 像素的字、手写的表格与弹窗各自记数；打印纸样、电子菜单版面、公共部件自己的实现不算（8.1.17 YS-1、YS-5）', () => {
+    const page = [
+      'export const A = () => <p className="text-[11px] text-[11.5px] text-[9px] text-[12px] text-[12.5px] text-[13px]">x</p>;',
+      'export const B = () => <table><tbody /></table>;',
+      'export const C = () => <div role="dialog" aria-modal>x</div>;',
+      '// <table> 与 text-[10px] 写在注释里不算',
+    ].join('\n');
+    expect(conventionCounts('src/client/features/x/Page.tsx', page)).toEqual({ 'small-text': 3, 'raw-table': 1, 'raw-dialog': 1 });
+    expect(conventionCounts('src/canteen-app/pages/Me.tsx', page)).toEqual({ 'small-text': 3, 'raw-table': 1, 'raw-dialog': 1 });
+    // 整个目录除外（以 / 结尾）与单个文件除外
+    expect(conventionCounts('src/client/features/print/CheckoutPrintPage.tsx', page)).toEqual({ 'raw-dialog': 1 });
+    expect(conventionCounts('src/client/features/emenu/EmenuPage.tsx', page)).toEqual({ 'raw-table': 1 });
+    expect(conventionCounts('src/client/features/studio/Canvas.tsx', page)).toEqual({ 'raw-table': 1, 'raw-dialog': 1 });
+    expect(conventionCounts('src/client/features/studio/panels.tsx', page)).toEqual({ 'small-text': 3, 'raw-table': 1, 'raw-dialog': 1 });
+    expect(conventionCounts('src/client/components/DataTable.tsx', '<table className="w-full" />')).toEqual({});
+    expect(conventionCounts('src/client/components/Overlay.tsx', '<div role="dialog" />')).toEqual({});
+    // 找开着的弹窗用的选择器不是弹窗
+    expect(conventionCounts('src/client/features/x/Keys.tsx', 'if (document.querySelector(\'[role="dialog"]\')) return;')).toEqual({});
+    // 小于 1em 的相对字号也算；用 max(12px, …) 兜底的不算
+    expect(conventionCounts('src/client/features/x/Unit.tsx', '<span className="text-[0.78em]">瓶</span><span className="text-[length:max(12px,0.72em)]">¥</span>')).toEqual({ 'small-text': 1 });
+    // 服务端不是页面
+    expect(conventionCounts('src/server/modules/x.ts', page)).toEqual({});
+  });
+
+  it('样式表里小于 12 像素的字：font-size 与 font 简写里的第一个像素值；注释里的、rem / em 写法不算', () => {
+    const { cssSmallFonts } = gov as { cssSmallFonts: (css: string) => number };
+    const css = [
+      '.a { font-size: 11px; }',
+      '.b { font: 600 10px/1.4 var(--font-sans); }',
+      '.c { font: 12px/1.9 var(--font-sans); font-size: 12.5px; }',
+      '/* .d { font-size: 8px; } */',
+      '.e { font-size: 0.7rem; line-height: 10px; }',
+    ].join('\n');
+    expect(cssSmallFonts(css)).toBe(2);
+  });
+
   it('行内样式里的 dvh 记数；类名里带方括号的写法（打包时会补 vh）不算', () => {
     const code = "export const X = () => <div className=\"h-dvh max-h-[88dvh]\" style={{ height: '100dvh', minHeight: 'calc(100dvh - 2rem)' }} />;";
     expect(scanPageCode('x.tsx', code).inlineDvh).toBe(2);

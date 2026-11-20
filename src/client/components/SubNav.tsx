@@ -73,7 +73,8 @@ export function SubNav({ tabs, base, active, label, className }: { tabs: readonl
             to={t.to ?? (i === 0 ? base : `${base}/${t.key}`)}
             aria-current={on ? 'page' : undefined}
             className={cn(
-              'relative flex h-10 shrink-0 items-center gap-1.5 px-3.5 text-[14px] font-semibold whitespace-nowrap transition-colors duration-150',
+              // 高 44（8.1.17 YS-3）：页签条能横着滑，滑动的框会把看不见的外扩裁掉，所以直接做到 44 高
+              'relative flex h-11 shrink-0 items-center gap-1.5 px-3.5 text-[14px] font-semibold whitespace-nowrap transition-colors duration-150',
               on ? 'text-pine' : 'text-ink-3 hover:text-ink',
               // 量不到位置时（容器还没显示）当前页签自己画底下那条线
               on && !line.style && 'shadow-[inset_0_-2px_0_var(--color-pine)]',
@@ -82,7 +83,7 @@ export function SubNav({ tabs, base, active, label, className }: { tabs: readonl
           >
             {t.label}
             {!!t.badge && (
-              <span key={t.badge} className="num flex h-[18px] min-w-[18px] animate-tick items-center justify-center rounded-full bg-yuzu px-1 text-[11px] font-bold text-ink">
+              <span key={t.badge} className="num flex h-[18px] min-w-[18px] animate-tick items-center justify-center rounded-full bg-yuzu px-1 text-[12px] font-bold text-ink">
                 {t.badge > 99 ? '99+' : t.badge}
               </span>
             )}

@@ -14,6 +14,7 @@ import type { ConsumptionRecord } from '@shared/supply';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { cn, formatDateTime, relativeTime } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Sheet } from '../../components/Overlay';
@@ -529,58 +530,62 @@ function ConsumptionView({ deptId, meta, onOpen }: { deptId: number; meta: DeptS
         </Select>
         <a
           href={`/api/erp/dept-stock/${deptId}/consumption/export?${qs}`}
-          className="ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
+          className="tap relative ml-auto flex h-9 items-center gap-1.5 rounded-md border border-line-strong bg-card px-3 text-[13px] font-bold text-ink-2 hover:border-ink-3"
         >
           <Download className="size-4" />
           导出
         </a>
       </div>
-      {rows.error ? (
-        <Notice tone="error" title={errorMessage(rows.error)} />
-      ) : rows.isPending ? (
-        <Skeleton className="h-40" />
-      ) : rows.data.length === 0 ? (
-        <p className="text-[13px] text-ink-3">这段时间没有耗用。</p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-line bg-card">
-          <table className="w-full min-w-[720px] text-[13px]">
-            <thead className="bg-paper-2 text-left text-[12px] text-ink-3">
-              <tr>
-                <th className="px-3 py-2 font-semibold">日期</th>
-                <th className="px-3 py-2 font-semibold">单号</th>
-                <th className="px-3 py-2 font-semibold">用途</th>
-                <th className="px-3 py-2 font-semibold">经办人</th>
-                <th className="px-3 py-2 font-semibold">物料</th>
-                <th className="px-3 py-2 text-right font-semibold">数量</th>
-                <th className="px-3 py-2 font-semibold">说明</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.data.map((r, i) => (
-                <tr key={`${r.docId}-${i}`} className={cn('border-t border-line', r.status === 'voided' && 'opacity-55')}>
-                  <td className="num px-3 py-1.5">{r.docDate}</td>
-                  <td className="px-3 py-1.5">
-                    <button type="button" className="num font-semibold text-lake hover:underline" onClick={() => onOpen(r.docId)}>
-                      {r.docNo}
-                    </button>
-                    {r.status === 'voided' && <Badge className="ml-1.5">已冲销</Badge>}
-                  </td>
-                  <td className="px-3 py-1.5">{r.purpose ?? <span className="text-ink-3">（v8.0.7 以前没记）</span>}</td>
-                  <td className="px-3 py-1.5">{r.handlerName ?? '—'}</td>
-                  <td className="px-3 py-1.5">
-                    <span className="num mr-1 text-[12px] text-ink-3">{r.materialCode}</span>
-                    {r.materialName}
-                  </td>
-                  <td className="num px-3 py-1.5 text-right">
-                    {formatQty(r.quantityMilli)} {r.inventoryUnit}
-                  </td>
-                  <td className="px-3 py-1.5 text-ink-2">{r.note}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        onPage
+        tableClassName="min-w-[720px]"
+        rows={rows.data}
+        failed={!!rows.error}
+        failedTitle={rows.error ? errorMessage(rows.error) : undefined}
+        onRetry={() => void rows.refetch()}
+        retrying={rows.isFetching}
+        rowKey={(r, i) => `${r.docId}-${i}`}
+        rowClassName={(r) => (r.status === 'voided' ? 'opacity-55' : undefined)}
+        empty="这段时间没有耗用"
+        columns={[
+          { key: 'date', header: '日期', cellClassName: 'num', cell: (r) => r.docDate },
+          {
+            key: 'doc',
+            header: '单号',
+            cell: (r) => (
+              <>
+                <button type="button" className="num font-semibold text-lake hover:underline" onClick={() => onOpen(r.docId)}>
+                  {r.docNo}
+                </button>
+                {r.status === 'voided' && <Badge className="ml-1.5">已冲销</Badge>}
+              </>
+            ),
+          },
+          { key: 'purpose', header: '用途', cell: (r) => r.purpose ?? <span className="text-ink-3">（v8.0.7 以前没记）</span> },
+          { key: 'handler', header: '经办人', cell: (r) => r.handlerName ?? '—' },
+          {
+            key: 'material',
+            header: '物料',
+            cell: (r) => (
+              <>
+                <span className="num mr-1 text-[12px] text-ink-3">{r.materialCode}</span>
+                {r.materialName}
+              </>
+            ),
+          },
+          {
+            key: 'quantity',
+            header: '数量',
+            numeric: true,
+            cell: (r) => (
+              <>
+                {formatQty(r.quantityMilli)} {r.inventoryUnit}
+              </>
+            ),
+          },
+          { key: 'note', header: '说明', cellClassName: 'text-ink-2', cell: (r) => r.note },
+        ]}
+      />
     </section>
   );
 }

@@ -10,6 +10,7 @@ import { applyCopy, collectCopy, copyFromCsv, copyToCsv, type StudioCommentView,
 import { api, errorMessage } from '../../lib/api';
 import { readImportFile } from '../../lib/import-file';
 import { cn, downloadBlob, uuid } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { Dialog } from '../../components/Overlay';
 import { LoadFailed } from '../../components/LoadFailed';
 import { useToast } from '../../components/Toast';
@@ -72,45 +73,39 @@ export function CopyDialog({ doc, onChange, onClose }: { doc: StudioDoc; onChang
             data-testid="studio-copy-file"
           />
         </div>
-        {shown.length === 0 ? (
-          <p className="py-6 text-center text-[13px] leading-relaxed text-ink-3">
-            {rows.length ? '英文都填好了' : '这份版面里还没有自己加的字：在左栏「插入」里加文字、按钮，字就列在这里。内置功能块里的字（菜名、版权行……）在后台对应的设置里改。'}
-          </p>
-        ) : (
-          <div className="max-h-[56vh] overflow-y-auto rounded-md border border-line">
-            <table className="w-full text-[12.5px]">
-              <thead className="sticky top-0 bg-paper-2 text-left text-ink-3">
-                <tr>
-                  <th className="w-28 px-2 py-1.5 font-normal">屏</th>
-                  <th className="w-36 px-2 py-1.5 font-normal">名字</th>
-                  <th className="px-2 py-1.5 font-normal">中文</th>
-                  <th className="px-2 py-1.5 font-normal">英文</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((r) => (
-                  <tr key={r.key} className="border-t border-line align-top" data-testid={`studio-copy-row-${r.nodeId}`}>
-                    <td className="px-2 py-1.5 text-ink-3">{r.screenLabel}</td>
-                    <td className="truncate px-2 py-1.5">{r.label}</td>
-                    <td className="px-1 py-1">
-                      <Textarea rows={1} className="min-h-8 text-[12.5px]" value={r.zh} onChange={(e) => set(r.key, 'zh', e.target.value)} />
-                    </td>
-                    <td className="px-1 py-1">
-                      <Textarea
-                        rows={1}
-                        className={cn('min-h-8 text-[12.5px]', r.zh.trim() && !r.en.trim() && 'border-yuzu')}
-                        value={r.en}
-                        placeholder="没填时显示中文"
-                        onChange={(e) => set(r.key, 'en', e.target.value)}
-                        data-testid={`studio-copy-en-${r.nodeId}`}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable
+          stickyHeader
+          className="max-h-[56vh] overflow-y-auto"
+          rows={shown}
+          rowKey={(r) => r.key}
+          rowClassName={() => 'align-top'}
+          rowTestId={(r) => `studio-copy-row-${r.nodeId}`}
+          empty={rows.length ? '英文都填好了' : '这份版面里还没有自己加的字'}
+          emptyDescription={rows.length ? undefined : '在左栏「插入」里加文字、按钮，字就列在这里。内置功能块里的字（菜名、版权行……）在后台对应的设置里改。'}
+          columns={[
+            { key: 'screen', header: '屏', headerClassName: 'w-28', cellClassName: 'text-ink-3', cell: (r) => r.screenLabel },
+            { key: 'label', header: '名字', headerClassName: 'w-36', cellClassName: 'truncate', cell: (r) => r.label },
+            {
+              key: 'zh',
+              header: '中文',
+              cell: (r) => <Textarea rows={1} className="min-h-8 text-[12.5px]" value={r.zh} onChange={(e) => set(r.key, 'zh', e.target.value)} />,
+            },
+            {
+              key: 'en',
+              header: '英文',
+              cell: (r) => (
+                <Textarea
+                  rows={1}
+                  className={cn('min-h-8 text-[12.5px]', r.zh.trim() && !r.en.trim() && 'border-yuzu')}
+                  value={r.en}
+                  placeholder="没填时显示中文"
+                  onChange={(e) => set(r.key, 'en', e.target.value)}
+                  data-testid={`studio-copy-en-${r.nodeId}`}
+                />
+              ),
+            },
+          ]}
+        />
       </div>
     </Dialog>
   );
@@ -375,7 +370,7 @@ export function CommentsPanel({
       data-testid={`studio-comment-${c.id}`}
     >
       <div className="flex items-center gap-1.5 text-[12px]">
-        {index !== null && <span className="flex size-5 items-center justify-center rounded-full bg-clay text-[10.5px] font-bold text-white">{index}</span>}
+        {index !== null && <span className="flex size-5 items-center justify-center rounded-full bg-clay text-[12px] font-bold text-white">{index}</span>}
         <span className="font-bold">{c.createdBy}</span>
         <When at={c.createdAt} />
         <div className="flex-1" />

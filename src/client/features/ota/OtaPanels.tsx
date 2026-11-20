@@ -21,6 +21,7 @@ import {
 } from '@shared/ota';
 import { api, errorMessage, UncertainError } from '../../lib/api';
 import { sendErpOp } from '../../lib/erpPending';
+import { DataTable } from '../../components/DataTable';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { LoadFailed } from '../../components/LoadFailed';
 import { useCan, useSession } from '../../lib/session';
@@ -302,31 +303,22 @@ export function OtaOrdersPanel() {
           <Skeleton className="h-24" />
         )
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line bg-card">
-          <table className="w-full text-[13px]" data-testid="ota-recon">
-            <thead className="bg-paper-2 text-left text-ink-3">
-              <tr>
-                <th className="px-3 py-2">渠道</th>
-                <th className="px-3 py-2 text-right">订单数</th>
-                <th className="px-3 py-2 text-right">间夜</th>
-                <th className="px-3 py-2 text-right">订单金额</th>
-                <th className="px-3 py-2 text-right">佣金</th>
-                <th className="px-3 py-2 text-right">应收净额</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/70">
-              {recon.data.map((r) => (
-                <tr key={r.channelId}>
-                  <td className="px-3 py-2">{r.channelName}</td>
-                  <td className="num px-3 py-2 text-right">{r.orders}</td>
-                  <td className="num px-3 py-2 text-right">{r.roomNights}</td>
-                  <td className="num px-3 py-2 text-right">{formatYuan(r.amountCents)}</td>
-                  <td className="num px-3 py-2 text-right">{formatYuan(r.commissionCents)}</td>
-                  <td className="num px-3 py-2 text-right font-semibold">{formatYuan(r.netCents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        // 没有订单的月份也留着 ota-recon 这一块（空态在里面），取不回来时上面是 ota-recon-error
+        <div data-testid="ota-recon">
+          <DataTable
+            onPage
+            rows={recon.data}
+            rowKey={(r) => r.channelId}
+            empty="这个月没有渠道订单"
+            columns={[
+              { key: 'channel', header: '渠道', cell: (r) => r.channelName },
+              { key: 'orders', header: '订单数', numeric: true, cell: (r) => r.orders },
+              { key: 'nights', header: '间夜', numeric: true, cell: (r) => r.roomNights },
+              { key: 'amount', header: '订单金额', numeric: true, cell: (r) => formatYuan(r.amountCents) },
+              { key: 'commission', header: '佣金', numeric: true, cell: (r) => formatYuan(r.commissionCents) },
+              { key: 'net', header: '应收净额', numeric: true, cellClassName: 'font-semibold', cell: (r) => formatYuan(r.netCents) },
+            ]}
+          />
         </div>
       )}
     </div>

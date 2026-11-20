@@ -207,6 +207,7 @@ const SHOWCASE_FIELDS: [keyof ShowcaseState, string][] = [
   ['usages', '派对房使用单'],
   ['guide', '对客导览的区域分类与图标'],
   ['coupons', '券模板、会员的券与无记名券'],
+  ['menu', '菜品补完：两档与必选做法的面、可换的套餐'],
 ];
 
 const MEMBERSHIP_FIELDS: [keyof MembershipDemoState, string][] = [

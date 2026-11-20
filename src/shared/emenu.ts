@@ -5,6 +5,7 @@
 // 没定的规则按默认（PENDING_DECISIONS.md「8.0.10」DC1–DC18，待确认），能调的在后台「电子菜单 → 设置」里改。
 
 import { parseCsvRecords, unclosedQuoteMessage } from './csv-read';
+import type { DishMethodGroup, DishMethodOption, DishSwapChoice } from './dishes';
 import { normalizeTagCode, tagDigits } from './frontdesk';
 
 // ───────────────────────── 设置 ─────────────────────────
@@ -419,8 +420,30 @@ export function describeCategoryHours(category: { periods: readonly string[]; wi
 
 // ───────────────────────── 平板上看到的菜单 ─────────────────────────
 
-/** 一个规格现在能不能点 */
-export type EmenuSpecState = 'ok' | 'sold_out' | 'off';
+/**
+ * 一个规格现在能不能点。unavailable（8.1.17 BW3）：这台平板的岗位不能在这道菜的出品口下单（后台「岗位权限」里给「点餐平板」去掉了），
+ * 平板上写「请找服务员点」，门店系统也拒绝
+ */
+export type EmenuSpecState = 'ok' | 'sold_out' | 'off' | 'unavailable';
+
+/** 一个规格（价目项目）的做法与加料（8.1.17 BW9，docs/DISHES_V8117.md 第 5 节）：有做法或加料的才带 */
+export interface EmenuSpecOptions {
+  methods: DishMethodOption[];
+  groups: DishMethodGroup[];
+  /** 加料：另外的菜，加进未下单时另起一行、挂在这道菜上（不一定排在电子菜单上） */
+  addons: { itemId: number; name: string; price: number; state: EmenuSpecState; remaining: number | null }[];
+  /** 套餐里可换的几样（8.1.17 BW7）；没有可换的套餐不带 */
+  swaps?: EmenuComboSwapPart[];
+}
+
+/** 套餐里可换的一样（8.1.17 BW7）：原来是哪一样（今天还够不够）、每份套餐几份、能换成哪几样（每份补的差价、能不能点） */
+export interface EmenuComboSwapPart {
+  itemId: number;
+  name: string;
+  quantity: number;
+  state: 'ok' | 'sold_out';
+  choices: { itemId: number; name: string; priceDiff: number; state: 'ok' | 'sold_out' | 'off' }[];
+}
 
 export interface EmenuSpecView {
   /** 价目表里的项目（下单用它） */
@@ -434,6 +457,8 @@ export interface EmenuSpecView {
   state: EmenuSpecState;
   /** 今天还剩几份（厨房沽清）；null 为不限量 */
   remaining: number | null;
+  /** 做法与加料（8.1.17）：有的才带 */
+  options?: EmenuSpecOptions;
 }
 
 export interface EmenuDishView {
@@ -510,18 +535,22 @@ export interface EmenuMenu {
   studio?: { id: number; version: number; inherited: boolean } | null;
 }
 
-/** 一道菜整体的状态：有一个规格能点就算能点；都不能点时，全是下架算下架，否则算售罄 */
+/**
+ * 一道菜整体的状态：有一个规格能点就算能点；都不能点时，全是下架算下架，没有售罄的、有这台平板点不了的（8.1.17）算点不了，否则算售罄
+ */
 export function dishState(dish: Pick<EmenuDishView, 'specs'>): EmenuSpecState {
   if (dish.specs.some((s) => s.state === 'ok')) return 'ok';
-  return dish.specs.every((s) => s.state === 'off') ? 'off' : 'sold_out';
+  if (dish.specs.every((s) => s.state === 'off')) return 'off';
+  return dish.specs.some((s) => s.state === 'sold_out') ? 'sold_out' : 'unavailable';
 }
 
-export type EmenuBlock = 'closed' | 'off' | 'sold_out';
+export type EmenuBlock = 'closed' | 'off' | 'sold_out' | 'unavailable';
 
-/** 这道菜在这个分类里为什么不能点（能点返回 null）：分类不在时段 → 下架 → 售罄 */
+/** 这道菜在这个分类里为什么不能点（能点返回 null）：分类不在时段 → 下架 → 这台平板点不了 → 售罄 */
 export function dishBlock(dish: Pick<EmenuDishView, 'specs'>, categoryOpen: boolean): EmenuBlock | null {
   const state = dishState(dish);
   if (state === 'off') return 'off';
+  if (state === 'unavailable') return 'unavailable';
   if (!categoryOpen) return 'closed';
   return state === 'sold_out' ? 'sold_out' : null;
 }
@@ -530,6 +559,7 @@ export const EMENU_BLOCK_LABELS: Record<EmenuBlock, { zh: string; en: string }> 
   off: { zh: '已下架', en: 'Discontinued' },
   closed: { zh: '当前时段不可售', en: 'Not Available Now' },
   sold_out: { zh: '已售罄', en: 'Sold Out' },
+  unavailable: { zh: '请找服务员点', en: 'Please Ask Staff' },
 };
 
 // ───────────────────────── 手牌、桌号的输入 ─────────────────────────
@@ -585,6 +615,11 @@ export interface EmenuGuest {
 export interface EmenuOrderLineInput {
   itemId: number;
   quantity: number;
+  /** 8.1.17（BW9）：选的做法（名字）；加料挂在哪一行主菜上（同一单里主菜的下标，主菜在前）。都不带的与以前一样 */
+  methods?: string[];
+  addonOf?: number;
+  /** 8.1.17（BW7）：套餐换菜（套餐里的哪一样换成哪一样） */
+  swaps?: DishSwapChoice[];
 }
 
 /** 下单的内容（不含点单密码）：结果待确认时本机保存的就是这一份，重提时原样再发 */

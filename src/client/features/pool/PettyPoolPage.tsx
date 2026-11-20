@@ -16,6 +16,7 @@ import { sendErpOp } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { LoadFailed } from '../../components/LoadFailed';
@@ -207,46 +208,65 @@ export function PettyPoolPage() {
                 ) : (
                   <>
                     {/* 宽屏：表格 */}
-                    <div className="mt-3 hidden overflow-x-auto lg:block">
-                      <table className="w-full min-w-[880px] text-[13.5px]" data-testid="pool-table">
-                        <thead>
-                          <tr className="text-left text-[12px] text-ink-3">
-                            <th className="py-1.5 font-semibold">单号 / 日期</th>
-                            <th className="font-semibold">申请人</th>
-                            <th className="font-semibold">用途 · 采购内容</th>
-                            <th className="text-right font-semibold">申用金额</th>
-                            <th className="pl-4 font-semibold">进度（补单 · 报销单）</th>
-                            <th />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {b.uses.map((u) => (
-                            <tr key={u.id} className={cn('border-t border-line/70 align-top', u.state === 'voided' && 'text-ink-3')} data-testid={`pool-use-${u.id}`}>
-                              <td className="py-2 whitespace-nowrap">
-                                <button type="button" className="num font-semibold text-pine hover:underline" onClick={() => setOpened(u.id)}>
-                                  {u.docNo}
-                                </button>
-                                <p className="num text-[12px] text-ink-3">{u.useDate}</p>
-                              </td>
-                              <td className="py-2 pr-2 whitespace-nowrap">{u.applicant.name}</td>
-                              <td className="max-w-[280px] py-2">
-                                <p className="font-semibold">{u.purpose}</p>
-                                <p className="line-clamp-2 text-[12.5px] text-ink-2">{u.content}</p>
-                              </td>
-                              <td className={cn('num py-2 text-right font-bold', u.state === 'voided' && 'line-through')}>{formatYuan(u.amountCents)}</td>
-                              <td className="py-2 pl-4">
-                                <StateBadge u={u} />
-                                <div className="mt-1 space-y-0.5 leading-snug">
-                                  <BackfillCell u={u} />
-                                  <ClaimCell u={u} />
-                                </div>
-                              </td>
-                              <td className="py-2 text-right">{actions(u)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <DataTable
+                      variant="plain"
+                      testId="pool-table"
+                      className="mt-3 hidden lg:block"
+                      tableClassName="min-w-[880px]"
+                      rows={b.uses}
+                      rowKey={(u) => u.id}
+                      rowClassName={(u) => cn('align-top', u.state === 'voided' && 'text-ink-3')}
+                      rowTestId={(u) => `pool-use-${u.id}`}
+                      columns={[
+                        {
+                          key: 'doc',
+                          header: '单号 / 日期',
+                          cellClassName: 'whitespace-nowrap',
+                          cell: (u) => (
+                            <>
+                              <button type="button" className="num font-semibold text-pine hover:underline" onClick={() => setOpened(u.id)}>
+                                {u.docNo}
+                              </button>
+                              <p className="num text-[12px] text-ink-3">{u.useDate}</p>
+                            </>
+                          ),
+                        },
+                        { key: 'applicant', header: '申请人', cellClassName: 'whitespace-nowrap', cell: (u) => u.applicant.name },
+                        {
+                          key: 'purpose',
+                          header: '用途 · 采购内容',
+                          cellClassName: 'max-w-[280px]',
+                          cell: (u) => (
+                            <>
+                              <p className="font-semibold">{u.purpose}</p>
+                              <p className="line-clamp-2 text-[12.5px] text-ink-2">{u.content}</p>
+                            </>
+                          ),
+                        },
+                        {
+                          key: 'amount',
+                          header: '申用金额',
+                          numeric: true,
+                          cellClassName: (u) => cn('font-bold', u.state === 'voided' && 'line-through'),
+                          cell: (u) => formatYuan(u.amountCents),
+                        },
+                        {
+                          key: 'progress',
+                          header: '进度（补单 · 报销单）',
+                          className: 'pl-4',
+                          cell: (u) => (
+                            <>
+                              <StateBadge u={u} />
+                              <div className="mt-1 space-y-0.5 leading-snug">
+                                <BackfillCell u={u} />
+                                <ClaimCell u={u} />
+                              </div>
+                            </>
+                          ),
+                        },
+                        { key: 'actions', header: '', align: 'right', cell: (u) => actions(u) },
+                      ]}
+                    />
                     {/* 窄屏（商米 V3、平板竖屏）：卡片 */}
                     <ul className="mt-3 space-y-2.5 lg:hidden" data-testid="pool-cards">
                       {b.uses.map((u) => (
@@ -438,7 +458,7 @@ function Filters({ filters, setFilter, applicants }: { filters: Record<string, s
             aria-checked={filters.state === o.value}
             onClick={() => setFilter('state', o.value)}
             className={cn(
-              'h-8 shrink-0 rounded-full border px-3 text-[12.5px] font-semibold whitespace-nowrap transition-colors',
+              'tap relative h-8 shrink-0 rounded-full border px-3 text-[12.5px] font-semibold whitespace-nowrap transition-colors',
               filters.state === o.value ? 'border-pine bg-pine text-white' : 'border-line bg-card text-ink-2 hover:border-pine/40',
             )}
             data-testid={`pool-filter-${o.value || 'all'}`}

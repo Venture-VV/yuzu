@@ -42,6 +42,7 @@
 - [`DINING_V8115.md`](DINING_V8115.md)：8.1.15 餐饮：桌台动作、台账合并退菜、出品口下单权限与房号备注（《浴族系统需求汇总》块 B）
 - [`DINING_V817.md`](DINING_V817.md)：8.1.7 餐饮分区与点菜单（店主 2026-11-18）
 - [`DISHES_V8115.md`](DISHES_V8115.md)：8.1.15 菜品管理（《浴族系统需求汇总》餐饮第 4 条）
+- [`DISHES_V8117.md`](DISHES_V8117.md)：8.1.17 菜品补完：做法分组与加价、选规格、退主菜带加料、平板选做法、排序与删除、套餐出品与换菜
 - [`EMENU.md`](EMENU.md)：点餐系统 · 平板电子菜单（8.0.10）
 - [`ERP.md`](ERP.md)：ERP 独立工作区（含 SCM）
 - [`ERP_PURCHASING.md`](ERP_PURCHASING.md)：ERP 采购五项（v0.7.29）· 设计稿
@@ -57,6 +58,7 @@
 - [`FLOW_V8017.md`](FLOW_V8017.md)：ERP 流程图 · 采购从提需求到付款（8.0.17）
 - [`FRONTDESK_RISK_V8115.md`](FRONTDESK_RISK_V8115.md)：8.1.15 追加 · 前台：NFC 发牌、发牌前风控、发牌后异常处置（块 A）
 - [`FRONTDESK_V808.md`](FRONTDESK_V808.md)：8.0.8 前台整改（钟房、收银、派对房、预约、餐饮、客房）
+- [`FRONTDESK_V8117.md`](FRONTDESK_V8117.md)：8.1.17 · 前台、桌台、退菜、本店价、流水（BW-1、BW-2、BW-3 发卡台、BW-4、BW-11、BW-12）
 - [`GIFTS_V819.md`](GIFTS_V819.md)：8.1.9 · 全局签赠（签赠券、授权人、签赠台账）
 - [`HARDWARE.md`](HARDWARE.md)：硬件连接（飞书需求 RQ-001，v0.7.21，迁移 `038`）
 - [`INTEGRATIONS_V8021.md`](INTEGRATIONS_V8021.md)：8.0.21 设计 · 对外接口（支付直连、平台验券、OTA、开票与银企直连的适配器）
@@ -88,6 +90,7 @@
 - [`WAREHOUSES.md`](WAREHOUSES.md)：两级库存：总仓 + 部门小仓（v0.7.11，RQ-002 第一步）
 - [`WORKBENCH_V811.md`](WORKBENCH_V811.md)：UI 工作台（8.1.1–8.1.2）：设计师在系统里直接改版面
 - [`YUZU_REQ_V8115.md`](YUZU_REQ_V8115.md)：8.1.15 追加 ·《浴族系统需求汇总》：对照现状与做法
+- [`YUZU_REQ_V8117.md`](YUZU_REQ_V8117.md)：8.1.17 ·《浴族系统需求汇总》整体样式与没做完的部分
 
 ## 部署、发版与环境
 
@@ -199,6 +202,7 @@
 - [`HANDOFF_V8114.md`](HANDOFF_V8114.md)：v8.1.14 交接说明 · 品牌部的三条（电子菜单）
 - [`HANDOFF_V8115.md`](HANDOFF_V8115.md)：v8.1.15 交接说明 · 发卡台与收银台、前台风控、餐饮桌台与菜品管理、深浅主题、退出键
 - [`HANDOFF_V8116.md`](HANDOFF_V8116.md)：v8.1.16 交接说明 · 房态中心、技师、会员与主导航分组
+- [`HANDOFF_V8117.md`](HANDOFF_V8117.md)：8.1.17 交接说明 ·《浴族系统需求汇总》整体样式与没做完的部分
 - [`HANDOFF_V812.md`](HANDOFF_V812.md)：v8.1.2 交接说明 · UI 工作台第二步（卡片模板、组件与变体、员工食堂、给小程序线的格式、定时发布与批注）
 - [`HANDOFF_V813.md`](HANDOFF_V813.md)：v8.1.3 交接说明 · 代码整洁与网络波动防护
 - [`HANDOFF_V814.md`](HANDOFF_V814.md)：v8.1.4 交接说明 · 老浏览器上侧栏划不动、工作台开在哪一档

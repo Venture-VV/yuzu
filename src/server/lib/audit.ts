@@ -326,6 +326,13 @@ export type AuditAction =
   // 8.1.15 会员卡押金（收、退，detail.kind 写是哪一样）、退卡
   | 'member_card_deposit'
   | 'member_card_returned'
+  // 8.1.17 第二家店改本店价（docs/FRONTDESK_V8117.md 第 6 节，BW-11）：改前改后、那时的全公司价、原因；菜品的另记进改价记录
+  | 'store_price_changed'
+  // 8.1.17 菜品（docs/DISHES_V8117.md 第 6 节）：排序、批量上下架、删除（下架并隐藏）、恢复
+  | 'dishes_sorted'
+  | 'dishes_active_bulk'
+  | 'dish_deleted'
+  | 'dish_restored'
   // 8.1.16 菜品维护的「结果待确认」：确认作废一个操作编号（Codex 审查 d12390f 的 P1，docs/DISHES_V8115.md 第 9 节）
   | 'dish_op_abandoned';
 

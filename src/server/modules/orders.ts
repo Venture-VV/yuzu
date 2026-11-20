@@ -214,8 +214,20 @@ function resolveLines(lines: readonly LineRecord[], items: readonly OrderItemSna
 
 export async function checkoutOrderDetail(db: Db, id: number): Promise<CheckoutOrderDetail> {
   const doc = await checkoutForPrint(db, id);
-  const { lines, source } = resolveLines(await loadLines(db, [id]), await loadItems(db, [id]));
+  const raw = await loadLines(db, [id]);
+  const { lines, source } = resolveLines(raw, await loadItems(db, [id]));
   const plain: OrderLine[] = lines.map(({ guest: _g, ...l }) => l);
+  // 8.1.17（BW-12）：「流水」的订单详情用结账单的同一个部件，逐行写在每张手牌下面——打印那一份的每一行（带「赠」「券」「折」）
+  // 按明细编号对上这里算的所属部门与摊到的优惠（按时刻取的明细与快照对得上时才有；摊优惠保持行的先后，第 i 行就是 raw 的第 i 行）
+  if (source === 'lines') {
+    const byId = new Map(raw.map((r, i) => [Number(r.lineId), plain[i]!]));
+    for (const b of doc.bills) {
+      b.lines = b.lines.map((l) => {
+        const o = byId.get(l.id);
+        return o ? { ...l, category: o.category, discount: o.discount } : l;
+      });
+    }
+  }
   return { doc, lines: plain, source, amount: plain.reduce((s, l) => s + l.amount, 0), discount: plain.reduce((s, l) => s + l.discount, 0) };
 }
 

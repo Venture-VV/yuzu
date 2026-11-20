@@ -82,7 +82,7 @@ export function BonusLotsCard({ member }: { member: MemberDetail }) {
                   过期作废 <Money cents={l.expired} />
                 </Badge>
               )}
-              <span className="num w-full text-[11.5px] text-ink-4 sm:w-auto">{formatDate(l.createdAt)} 赠送</span>
+              <span className="num w-full text-[12px] text-ink-4 sm:w-auto">{formatDate(l.createdAt)} 赠送</span>
             </li>
           ))}
         </ul>

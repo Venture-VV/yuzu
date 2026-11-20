@@ -15,6 +15,7 @@ import { loadTableFile, type LoadedTable } from '../../lib/import-file';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable } from '../../components/DataTable';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { useToast } from '../../components/Toast';
 import { Button, ConfirmCheck, Notice } from '../../components/ui';
@@ -123,7 +124,7 @@ export function RequestSheetImportPage() {
         dateMode="calendar"
         title={
           <span className="flex items-center gap-2.5">
-            <Link to="/erp/requests/new" className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回提需求">
+            <Link to="/erp/requests/new" className="tap relative -ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink" aria-label="返回提需求">
               <ArrowLeft className="size-[18px]" />
             </Link>
             导入表格
@@ -213,48 +214,54 @@ export function RequestSheetImportPage() {
                   )}
                 </div>
               )}
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] text-[13px]">
-                  <thead>
-                    <tr className="border-b border-line text-left text-[12px] font-semibold whitespace-nowrap text-ink-3">
-                      <th className="py-2 pr-2">行</th>
-                      <th className="pr-2">部门</th>
-                      <th className="pr-2">物品</th>
-                      <th className="pr-2">用途</th>
-                      <th className="pr-2 text-right">数量</th>
-                      <th className="pr-2">优先级</th>
-                      <th className="pr-2">期望到货</th>
-                      <th className="pr-2 text-right">参考单价</th>
-                      <th className="w-[36%]">问题</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.rows.map((r) => (
-                      <tr key={r.row} className={cn('border-b border-line/60 align-top', r.issues.length > 0 && 'bg-clay-soft/40')} data-testid={`request-sheet-row-${r.row}`}>
-                        <td className="num py-2 pr-2 text-ink-3">{r.row}</td>
-                        <td className="pr-2 whitespace-nowrap">{r.department?.name ?? (r.departmentText || '—')}</td>
-                        <td className="pr-2">
-                          {r.material ? r.material.name : r.name || '—'}
-                          {r.material && <span className="num ml-1 text-[12px] text-ink-3">{r.material.code}</span>}
-                        </td>
-                        <td className="pr-2 whitespace-nowrap">{r.purpose || '—'}</td>
-                        <td className="num pr-2 text-right whitespace-nowrap">
-                          {r.qtyMilli !== null ? formatQty(r.qtyMilli) : '—'} {r.unit}
-                        </td>
-                        <td className="pr-2 whitespace-nowrap">
-                          <span className="inline-flex items-center gap-1">
-                            <PriorityDot priority={r.priority} />
-                            {PRIORITY_LABELS[r.priority]}
-                          </span>
-                        </td>
-                        <td className="num pr-2 whitespace-nowrap">{r.needBy ?? '—'}</td>
-                        <td className="num pr-2 text-right whitespace-nowrap">{r.refPriceCents !== null ? `¥${formatAmount(r.refPriceCents)}` : '—'}</td>
-                        <td className="text-[12.5px] font-semibold text-clay">{r.issues.join('；')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                variant="plain"
+                tableClassName="min-w-[980px]"
+                rows={preview.rows}
+                rowKey={(r) => r.row}
+                rowClassName={(r) => cn('align-top', r.issues.length > 0 && 'bg-clay-soft/40')}
+                rowTestId={(r) => `request-sheet-row-${r.row}`}
+                columns={[
+                  { key: 'row', header: '行', cellClassName: 'num text-ink-3', cell: (r) => r.row },
+                  { key: 'department', header: '部门', cellClassName: 'whitespace-nowrap', cell: (r) => r.department?.name ?? (r.departmentText || '—') },
+                  {
+                    key: 'item',
+                    header: '物品',
+                    cell: (r) => (
+                      <>
+                        {r.material ? r.material.name : r.name || '—'}
+                        {r.material && <span className="num ml-1 text-[12px] text-ink-3">{r.material.code}</span>}
+                      </>
+                    ),
+                  },
+                  { key: 'purpose', header: '用途', cellClassName: 'whitespace-nowrap', cell: (r) => r.purpose || '—' },
+                  {
+                    key: 'qty',
+                    header: '数量',
+                    numeric: true,
+                    cellClassName: 'whitespace-nowrap',
+                    cell: (r) => (
+                      <>
+                        {r.qtyMilli !== null ? formatQty(r.qtyMilli) : '—'} {r.unit}
+                      </>
+                    ),
+                  },
+                  {
+                    key: 'priority',
+                    header: '优先级',
+                    cellClassName: 'whitespace-nowrap',
+                    cell: (r) => (
+                      <span className="inline-flex items-center gap-1">
+                        <PriorityDot priority={r.priority} />
+                        {PRIORITY_LABELS[r.priority]}
+                      </span>
+                    ),
+                  },
+                  { key: 'needBy', header: '期望到货', cellClassName: 'num whitespace-nowrap', cell: (r) => r.needBy ?? '—' },
+                  { key: 'refPrice', header: '参考单价', numeric: true, cellClassName: 'whitespace-nowrap', cell: (r) => (r.refPriceCents !== null ? `¥${formatAmount(r.refPriceCents)}` : '—') },
+                  { key: 'issues', header: '问题', headerClassName: 'w-[36%]', cellClassName: 'text-[12.5px] font-semibold text-clay', cell: (r) => r.issues.join('；') },
+                ]}
+              />
             </section>
           )}
 

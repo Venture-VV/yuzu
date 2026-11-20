@@ -913,7 +913,7 @@ function DocForm({
           <span className="flex items-center gap-2.5">
             <Link
               to={scope.home}
-              className="-ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink"
+              className="tap relative -ml-1 flex size-8 items-center justify-center rounded-md text-ink-3 hover:bg-paper-2 hover:text-ink"
               aria-label={central || direct ? '返回库存' : urgent ? '返回急采' : '返回本部门小仓'}
             >
               <ArrowLeft className="size-[18px]" />
@@ -1053,7 +1053,7 @@ function DocForm({
                         disabled={locked}
                         onClick={() => patch({ departmentId: d.id })}
                         className={cn(
-                          'h-10 rounded-md border px-3.5 text-[14px] font-semibold transition-colors',
+                          'tap relative h-10 rounded-md border px-3.5 text-[14px] font-semibold transition-colors',
                           form.departmentId === d.id ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2 hover:border-ink-3',
                         )}
                       >
@@ -1759,7 +1759,7 @@ function UsualChips({
           disabled={disabled}
           onClick={() => onAdd(u.m!, u.lastQtyMilli)}
           title={`上次领料 ${formatQty(u.lastQtyMilli)} ${u.m!.inventoryUnit}，点击按上次数量加入`}
-          className="flex h-7 items-center gap-1 rounded-full border border-line-strong bg-card px-2.5 text-[12.5px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
+          className="tap relative flex h-7 items-center gap-1 rounded-full border border-line-strong bg-card px-2.5 text-[12.5px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
         >
           <ListPlus className="size-3.5" />
           {u.m!.name}
@@ -1777,7 +1777,7 @@ function CountFillMenu({ materials, taken, onAdd }: { materials: Material[]; tak
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="text-[12px] font-semibold text-ink-3">带出物料</span>
-      <button type="button" onClick={() => onAdd(tracked)} className="h-7 rounded-full bg-pine px-3 text-[12.5px] font-bold text-paper hover:bg-pine-hover">
+      <button type="button" onClick={() => onAdd(tracked)} className="tap relative h-7 rounded-full bg-pine px-3 text-[12.5px] font-bold text-paper hover:bg-pine-hover">
         全部 {tracked.length}
       </button>
       {categories.map((c) => (
@@ -1785,7 +1785,7 @@ function CountFillMenu({ materials, taken, onAdd }: { materials: Material[]; tak
           key={c}
           type="button"
           onClick={() => onAdd(tracked.filter((m) => (m.category || '未分类') === c))}
-          className="h-7 rounded-full border border-line-strong bg-card px-2.5 text-[12.5px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
+          className="tap relative h-7 rounded-full border border-line-strong bg-card px-2.5 text-[12.5px] font-semibold text-ink-2 hover:border-pine hover:text-pine"
         >
           {c}
         </button>

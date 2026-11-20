@@ -138,13 +138,13 @@ function TodayTab({ go }: { go: (t: Tab) => void }) {
               const total = MEALS.reduce((n, m) => n + d.counts[m], 0);
               return (
                 <div key={d.date} className="flex min-w-0 flex-1 flex-col items-center gap-1" title={`${d.date}：${meals.map((m) => `${MEAL_LABELS[m]} ${d.counts[m]}`).join('，')}`}>
-                  <span className="num text-[10.5px] text-ink-3">{total || ''}</span>
+                  <span className="num text-[12px] text-ink-3">{total || ''}</span>
                   <div className="flex w-full flex-col-reverse overflow-hidden rounded-t-md" style={{ height: `${(total / maxDay) * 120}px` }}>
                     {meals.map((m) => (
                       <div key={m} className={MEAL_BAR[m]} style={{ height: `${total ? (d.counts[m] / total) * 100 : 0}%` }} />
                     ))}
                   </div>
-                  <span className="num text-[10.5px] text-ink-3">{Number(d.date.slice(8))}</span>
+                  <span className="num text-[12px] text-ink-3">{Number(d.date.slice(8))}</span>
                 </div>
               );
             })}

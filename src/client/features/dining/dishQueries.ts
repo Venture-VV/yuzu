@@ -4,20 +4,24 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DishPriceChange, DishesBoard } from '@shared/dishes';
+import type { PriceChangeStoreFilter } from '@shared/frontdesk-v8117';
 import { api } from '../../lib/api';
 import { menuKey } from './queries';
 
 export const dishesKey = ['dining', 'dishes'] as const;
-const priceChangesKey = (itemId: number | null) => ['dining', 'dishes', 'price-changes', itemId] as const;
+const priceChangesKey = (itemId: number | null, store: PriceChangeStoreFilter = 'all') => ['dining', 'dishes', 'price-changes', itemId, store] as const;
 
 /** 全部菜品（搜索与筛选在页面上做，用的是与服务端同一个 filterDishes） */
 export const useDishes = () => useQuery({ queryKey: dishesKey, queryFn: () => api.get<DishesBoard>('/api/dining/dishes') });
 
-/** 改价记录：给了菜品只看这一道，不给是全部（新的在前） */
-export const useDishPriceChanges = (itemId: number | null, enabled = true) =>
+/** 改价记录：给了菜品只看这一道，不给是全部（新的在前）；store 按门店筛（8.1.17 BW-11：hq 全公司的价目、数字是那家店的本店价） */
+export const useDishPriceChanges = (itemId: number | null, enabled = true, store: PriceChangeStoreFilter = 'all') =>
   useQuery({
-    queryKey: priceChangesKey(itemId),
-    queryFn: () => api.get<DishPriceChange[]>(`/api/dining/dishes/price-changes${itemId ? `?itemId=${itemId}` : ''}`),
+    queryKey: priceChangesKey(itemId, store),
+    queryFn: () => {
+      const q = new URLSearchParams({ ...(itemId ? { itemId: String(itemId) } : {}), ...(store !== 'all' ? { store: String(store) } : {}) }).toString();
+      return api.get<DishPriceChange[]>(`/api/dining/dishes/price-changes${q ? `?${q}` : ''}`);
+    },
     enabled,
   });
 

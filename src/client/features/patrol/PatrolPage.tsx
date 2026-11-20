@@ -30,6 +30,7 @@ import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { cn, downloadUrl, formatDateTime, formatTime, uuid } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
+import { DataTable, type DataColumn } from '../../components/DataTable';
 import { Dialog } from '../../components/Overlay';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { ReasonDialog } from '../../components/ReasonDialog';
@@ -168,54 +169,56 @@ function DayTab() {
               <p className="mt-0.5 truncate text-[12px] text-ink-3">{d.people.map((p) => `${p.name} ${p.count} 次`).join('、')}</p>
             </Card>
           </div>
-          <Card className="p-0">
-            {d.points.length === 0 ? (
-              <p className="px-4 py-8 text-center text-[13px] text-ink-3">还没有场所：在「场所与二维码」里新增</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full border-collapse text-[12.5px]" data-testid="patrol-day-grid">
-                  <thead>
-                    <tr className="border-b border-line bg-paper-2/60 text-left">
-                      <th className="sticky left-0 z-10 min-w-40 bg-paper-2 px-3 py-2 font-semibold">场所</th>
-                      {d.rounds.map((r) => (
-                        <th
-                          key={r.no}
-                          className={cn('min-w-28 px-3 py-2 font-semibold whitespace-nowrap', r.state === 'current' && 'bg-ember-soft', r.state === 'future' && 'text-ink-4')}
-                          data-testid={`patrol-day-round-${r.no}`}
-                        >
-                          第 {r.no} 轮<span className="block text-[12px] font-normal text-ink-3">{roundSpan(r)}</span>
-                          <span className={cn('block text-[12px] font-normal', r.state === 'past' && r.done < r.expected ? 'text-clay' : 'text-ink-3')}>
-                            {r.state === 'future' ? '还没到' : `巡了 ${r.done} / ${r.expected}`}
-                          </span>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.points.map((p) => (
-                      <tr key={p.id} className="border-b border-line/70 align-top" data-testid={`patrol-day-point-${p.name}`}>
-                        <td className="sticky left-0 z-10 bg-card px-3 py-2">
-                          <span className="font-semibold">{p.name}</span>
-                          {!p.active && (
-                            <Badge tone="neutral" className="ml-2">
-                              已停用
-                            </Badge>
-                          )}
-                          {p.area && <span className="block text-[12px] text-ink-3">{p.area}</span>}
-                          <span className="block text-[12px] text-ink-3">今天 {p.count} 次</span>
-                        </td>
-                        {d.rounds.map((r, i) => (
-                          <td key={r.no} className={cn('px-3 py-2', r.state === 'current' && 'bg-ember-soft/40')}>
-                            <RoundCell scans={p.byRound[i] ?? null} state={r.state} />
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
+          <DataTable
+            onPage
+            testId="patrol-day-grid"
+            tableClassName="min-w-full"
+            rows={d.points}
+            rowKey={(p) => p.id}
+            rowClassName={() => 'align-top'}
+            rowTestId={(p) => `patrol-day-point-${p.name}`}
+            empty="还没有场所"
+            emptyDescription="在「场所与二维码」里新增"
+            columns={[
+              {
+                key: 'point',
+                header: '场所',
+                className: 'sticky left-0 z-10 min-w-40',
+                headerClassName: 'bg-paper-2',
+                cellClassName: 'bg-card',
+                cell: (p) => (
+                  <>
+                    <span className="font-semibold">{p.name}</span>
+                    {!p.active && (
+                      <Badge tone="neutral" className="ml-2">
+                        已停用
+                      </Badge>
+                    )}
+                    {p.area && <span className="block text-[12px] text-ink-3">{p.area}</span>}
+                    <span className="block text-[12px] text-ink-3">今天 {p.count} 次</span>
+                  </>
+                ),
+              },
+              ...d.rounds.map(
+                (r, i): DataColumn<PatrolDay['points'][number]> => ({
+                  key: `round-${r.no}`,
+                  header: (
+                    <>
+                      第 {r.no} 轮<span className="block text-[12px] font-normal text-ink-3">{roundSpan(r)}</span>
+                      <span className={cn('block text-[12px] font-normal', r.state === 'past' && r.done < r.expected ? 'text-clay' : 'text-ink-3')}>
+                        {r.state === 'future' ? '还没到' : `巡了 ${r.done} / ${r.expected}`}
+                      </span>
+                    </>
+                  ),
+                  className: 'min-w-28',
+                  headerClassName: cn(r.state === 'current' && 'bg-ember-soft', r.state === 'future' && 'text-ink-4'),
+                  cellClassName: r.state === 'current' ? 'bg-ember-soft/40' : undefined,
+                  headerTestId: `patrol-day-round-${r.no}`,
+                  cell: (p) => <RoundCell scans={p.byRound[i] ?? null} state={r.state} />,
+                }),
+              ),
+            ]}
+          />
           <p className="text-[12px] text-ink-3">「漏巡」是已经结束的那一轮没人打卡；「待巡」是正在巡的这一轮还没打；「·」是那一轮还没建这个场所（或已停用）、不用巡。</p>
         </>
       )}
@@ -321,56 +324,57 @@ function RecordsTab({ manage }: { manage: boolean }) {
       <p className="text-[13px] text-ink-3" data-testid="patrol-records-total">
         共 {total} 次{rows.length > total ? `，另有作废 ${rows.length - total} 次` : ''}
       </p>
-      <Card className="overflow-x-auto p-0">
-        <table className="w-full min-w-[780px] text-[13px]">
-          <thead className="bg-paper-2 text-left text-[12px] text-ink-3">
-            <tr>
-              <th className="px-3 py-2 font-semibold">营业日</th>
-              <th className="px-3 py-2 font-semibold">轮次</th>
-              <th className="px-3 py-2 font-semibold">时间</th>
-              <th className="px-3 py-2 font-semibold">场所</th>
-              <th className="px-3 py-2 font-semibold">巡场的人</th>
-              <th className="px-3 py-2 font-semibold">怎么扫的</th>
-              <th className="px-3 py-2 font-semibold">状态</th>
-              {manage && <th className="px-3 py-2" />}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line/70">
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={manage ? 8 : 7} className="px-3 py-8 text-center text-ink-3">
-                  {records.isPending ? '正在取…' : '这段时间没有巡场记录'}
-                </td>
-              </tr>
-            )}
-            {rows.map((r) => (
-              <tr key={r.id} className={cn(r.voidedAt && 'text-ink-4 line-through')} data-testid={`patrol-record-${r.id}`}>
-                <td className="num px-3 py-2">{r.businessDate}</td>
-                <td className="num px-3 py-2 whitespace-nowrap">{r.roundNo ? `第 ${r.roundNo} 轮` : '—'}</td>
-                <td className="num px-3 py-2">
-                  {formatTime(r.scannedAt)}
-                  {r.late && <span className="ml-1 text-[12px] text-clay no-underline">离线补登</span>}
-                </td>
-                <td className="px-3 py-2">{r.pointName}</td>
-                <td className="px-3 py-2">
-                  {r.name} <span className="text-ink-3">{r.empNo}</span>
-                </td>
-                <td className="px-3 py-2">{PATROL_VIA_LABELS[r.via]}</td>
-                <td className="px-3 py-2">{r.voidedAt ? `已作废：${r.voidReason}（${r.voidedByName ?? ''}）` : '有效'}</td>
-                {manage && (
-                  <td className="px-3 py-2 text-right">
-                    {!r.voidedAt && (
+      <DataTable
+        onPage
+        tableClassName="min-w-[780px]"
+        rows={records.isPending ? undefined : rows}
+        rowKey={(r) => r.id}
+        rowClassName={(r) => (r.voidedAt ? 'text-ink-4 line-through' : undefined)}
+        rowTestId={(r) => `patrol-record-${r.id}`}
+        empty="这段时间没有巡场记录"
+        columns={[
+          { key: 'date', header: '营业日', cellClassName: 'num', cell: (r) => r.businessDate },
+          { key: 'round', header: '轮次', cellClassName: 'num whitespace-nowrap', cell: (r) => (r.roundNo ? `第 ${r.roundNo} 轮` : '—') },
+          {
+            key: 'time',
+            header: '时间',
+            cellClassName: 'num',
+            cell: (r) => (
+              <>
+                {formatTime(r.scannedAt)}
+                {r.late && <span className="ml-1 text-[12px] text-clay no-underline">离线补登</span>}
+              </>
+            ),
+          },
+          { key: 'point', header: '场所', cell: (r) => r.pointName },
+          {
+            key: 'person',
+            header: '巡场的人',
+            cell: (r) => (
+              <>
+                {r.name} <span className="text-ink-3">{r.empNo}</span>
+              </>
+            ),
+          },
+          { key: 'via', header: '怎么扫的', cell: (r) => PATROL_VIA_LABELS[r.via] },
+          { key: 'state', header: '状态', cell: (r) => (r.voidedAt ? `已作废：${r.voidReason}（${r.voidedByName ?? ''}）` : '有效') },
+          ...(manage
+            ? [
+                {
+                  key: 'actions',
+                  header: '',
+                  align: 'right' as const,
+                  cell: (r: PatrolRecords['rows'][number]) =>
+                    !r.voidedAt && (
                       <Button size="sm" variant="ghost" onClick={() => setVoiding(r.id)} data-testid={`patrol-void-${r.id}`}>
                         作废
                       </Button>
-                    )}
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+                    ),
+                },
+              ]
+            : []),
+        ]}
+      />
       <ReasonDialog
         open={voiding !== null}
         title="作废这条巡场记录"

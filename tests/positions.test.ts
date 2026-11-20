@@ -143,6 +143,19 @@ describe('权限模板（表 3 逐列）', () => {
     }
   });
 
+  it('退菜按出品口（8.1.17）跟着下单：能在哪个出品口下单就能退哪个出品口的菜；康美部没有餐厅', () => {
+    for (const pos of POSITIONS.filter((p) => p.key !== 'president')) {
+      const perms = positionDefaults(pos.key, ALL_PERMISSIONS);
+      for (const [order, voids] of [
+        ['dining.orderRestaurant', 'dining.voidRestaurant'],
+        ['dining.orderWater', 'dining.voidWater'],
+        ['dining.orderFruit', 'dining.voidFruit'],
+      ] as [Permission, Permission][])
+        expect(perms.includes(voids), `${pos.title} ${voids}`).toBe(perms.includes(order));
+    }
+    expect(positionDefaults('kangmei.staff', ALL_PERMISSIONS)).not.toContain('dining.voidRestaurant');
+  });
+
   it('总经办成员：跨部门，除账号与基础数据外都开', () => {
     const perms = positionDefaults('gmo', ALL_PERMISSIONS);
     expect(perms).toContain('report.executive');

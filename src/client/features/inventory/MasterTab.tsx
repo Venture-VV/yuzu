@@ -20,6 +20,7 @@ import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { pdfMaxBytes } from '@shared/tunables';
 import { cn, formatDateTime } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { CustomFieldInline, CustomFieldsCard, useCustomListValues } from '../custom-fields/CustomFieldsCard';
 import { Dialog } from '../../components/Overlay';
@@ -93,65 +94,80 @@ function Materials({ editable }: { editable: boolean }) {
           </Button>
         )}
       </div>
-      {materials.isPending ? (
-        <Skeleton className="h-64" />
-      ) : materials.error ? (
-        <Notice tone="error" title={errorMessage(materials.error)} />
-      ) : list.length === 0 ? (
-        <EmptyState art="leaf" title="还没有物料档案" description="先建立首批试点物料：明确名称、规格、库存单位与采购包装换算。" className="rounded-lg border border-dashed border-line-strong" />
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-line bg-card shadow-card">
-          <table className="w-full min-w-[860px] text-left text-[13px]">
-            <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-              <tr>
-                <th className="w-[64px] px-4 py-2.5">编码</th>
-                <th className="px-2 py-2.5">名称与规格</th>
-                <th className="w-[80px] px-2 py-2.5">分类</th>
-                <th className="w-[150px] px-2 py-2.5">包装换算</th>
-                <th className="w-[110px] px-2 py-2.5 text-right">参考价</th>
-                <th className="w-[100px] px-2 py-2.5 text-right">提醒线</th>
-                <th className="w-[110px] px-4 py-2.5">状态</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/70">
-              {list.map((m) => (
-                <tr key={m.id} onClick={editable ? () => setEditing(m) : undefined} className={cn(editable && 'cursor-pointer hover:bg-pine-tint/50', !m.active && 'opacity-55')}>
-                  <td className="num px-4 py-2.5 font-semibold text-ink-3">{m.code}</td>
-                  <td className="px-2 py-2.5">
-                    <p className="font-bold">{m.name}</p>
-                    <p className="text-[12px] text-ink-3">{m.specification || '—'}</p>
-                    <CustomFieldInline data={custom.data} id={m.id} />
-                  </td>
-                  <td className="px-2 py-2.5 text-ink-2">{m.category || '—'}</td>
-                  <td className="num px-2 py-2.5 text-ink-2">{conversionText(m.purchaseUnit, m.purchaseFactorMilli, m.inventoryUnit)}</td>
-                  <td className="num px-2 py-2.5 text-right">{m.refPriceCents !== null ? `¥${formatAmount(m.refPriceCents)}/${m.purchaseUnit}` : <span className="text-ink-4">—</span>}</td>
-                  <td className="num px-2 py-2.5 text-right">
-                    {m.replenishMode === 'on_demand' ? (
-                      <span className="text-ink-3">不提醒</span>
-                    ) : m.coverDays !== null ? (
-                      `可用不足 ${m.coverDays} 天`
-                    ) : m.lowStockMilli !== null ? (
-                      `${formatQty(m.lowStockMilli)} ${m.inventoryUnit}`
-                    ) : (
-                      <span className="text-ink-4">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <span className="flex flex-wrap gap-1">
-                      {!m.tracked ? <Badge tone="lake">候选</Badge> : m.active ? <Badge tone="pine">受管</Badge> : <Badge>已停用</Badge>}
-                      {m.replenishMode === 'on_demand' && <Badge tone="lake">按需采购</Badge>}
-                      {m.replenishMode === 'stock' && <Badge tone="lake">常备</Badge>}
-                      {m.counterUse && <Badge tone="lake">台面日耗品</Badge>}
-                      {m.weighed && <Badge tone="lake">称重</Badge>}
-                      {m.isSynthetic && <Badge tone="ember">合成</Badge>}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        onPage
+        tableClassName="min-w-[860px]"
+        rows={materials.data && list}
+        failed={!!materials.error}
+        failedTitle={materials.error ? errorMessage(materials.error) : undefined}
+        onRetry={() => void materials.refetch()}
+        retrying={materials.isFetching}
+        rowKey={(m) => m.id}
+        onRowClick={editable ? (m) => setEditing(m) : undefined}
+        rowClassName={(m) => (!m.active ? 'opacity-55' : undefined)}
+        empty="还没有物料档案"
+        emptyDescription="先建立首批试点物料：明确名称、规格、库存单位与采购包装换算。"
+        columns={[
+          { key: 'code', header: '编码', headerClassName: 'w-[64px]', cellClassName: 'num font-semibold text-ink-3', cell: (m) => m.code },
+          {
+            key: 'name',
+            header: '名称与规格',
+            cell: (m) => (
+              <>
+                <p className="font-bold">{m.name}</p>
+                <p className="text-[12px] text-ink-3">{m.specification || '—'}</p>
+                <CustomFieldInline data={custom.data} id={m.id} />
+              </>
+            ),
+          },
+          { key: 'category', header: '分类', headerClassName: 'w-[80px]', cellClassName: 'text-ink-2', cell: (m) => m.category || '—' },
+          {
+            key: 'conversion',
+            header: '包装换算',
+            headerClassName: 'w-[150px]',
+            cellClassName: 'num text-ink-2',
+            cell: (m) => conversionText(m.purchaseUnit, m.purchaseFactorMilli, m.inventoryUnit),
+          },
+          {
+            key: 'refPrice',
+            header: '参考价',
+            numeric: true,
+            headerClassName: 'w-[110px]',
+            cell: (m) => (m.refPriceCents !== null ? `¥${formatAmount(m.refPriceCents)}/${m.purchaseUnit}` : <span className="text-ink-4">—</span>),
+          },
+          {
+            key: 'low',
+            header: '提醒线',
+            numeric: true,
+            headerClassName: 'w-[100px]',
+            cell: (m) =>
+              m.replenishMode === 'on_demand' ? (
+                <span className="text-ink-3">不提醒</span>
+              ) : m.coverDays !== null ? (
+                `可用不足 ${m.coverDays} 天`
+              ) : m.lowStockMilli !== null ? (
+                `${formatQty(m.lowStockMilli)} ${m.inventoryUnit}`
+              ) : (
+                <span className="text-ink-4">—</span>
+              ),
+          },
+          {
+            key: 'status',
+            header: '状态',
+            headerClassName: 'w-[110px]',
+            cell: (m) => (
+              <span className="flex flex-wrap gap-1">
+                {!m.tracked ? <Badge tone="lake">候选</Badge> : m.active ? <Badge tone="pine">受管</Badge> : <Badge>已停用</Badge>}
+                {m.replenishMode === 'on_demand' && <Badge tone="lake">按需采购</Badge>}
+                {m.replenishMode === 'stock' && <Badge tone="lake">常备</Badge>}
+                {m.counterUse && <Badge tone="lake">台面日耗品</Badge>}
+                {m.weighed && <Badge tone="lake">称重</Badge>}
+                {m.isSynthetic && <Badge tone="ember">合成</Badge>}
+              </span>
+            ),
+          },
+        ]}
+      />
       <MaterialDialog editing={editing} onClose={() => setEditing(null)} />
     </>
   );

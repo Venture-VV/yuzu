@@ -127,7 +127,9 @@ export function DraftBox({ open, onClose, currentKey }: { open: boolean; onClose
                             <Button size="sm" variant="primary" icon={<FilePen className="size-4" />} onClick={() => resume(d)} data-testid={`draft-resume-${d.key}`}>
                               继续填写
                             </Button>
-                            <Button size="sm" variant="ghost" icon={<Trash2 className="size-4" />} onClick={() => setRemoving(d)} aria-label="删除草稿" data-testid={`draft-delete-${d.key}`} />
+                            <Button size="sm" variant="ghost" icon={<Trash2 className="size-4" />} onClick={() => setRemoving(d)} aria-label="删除草稿" data-testid={`draft-delete-${d.key}`}>
+                              删除
+                            </Button>
                           </>
                         )}
                       </div>

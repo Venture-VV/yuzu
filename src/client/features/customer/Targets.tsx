@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { CustomerTargets } from '@shared/customer';
+import type { CustomerTargetRow, CustomerTargets } from '@shared/customer';
+import { DataTable } from '../../components/DataTable';
 import { Badge, Button, Card, SectionTitle } from '../../components/ui';
 import { customerUrl, useCustomerRead } from './api';
 import { Amount, Empty, localTime, Metric, monthName, ReadStatus } from './ui';
@@ -87,74 +88,79 @@ export function Targets({ day, revision, onRefresh, onForm, onRecord }: { day: s
             <p className="customer-caption">
               — 表示尚未配置；0目标不计算完成率。个人目标合计 {wan(d.assignedTargetCents)} 万元，部门未分配 {wan(d.allocationDifferenceCents)} 万元。分组按本月目标配置保存。
             </p>
-            {!d.rows.length ? (
-              <Empty>暂无客户经理，请先配置真实员工岗位。</Empty>
-            ) : (
-              <div className="customer-table-scroll">
-                <table className="customer-table customer-ranking-table">
-                  <thead>
-                    <tr>
-                      <th>名次</th>
-                      <th>姓名</th>
-                      <th>组别</th>
-                      <th>目标（万）</th>
-                      <th>累计（万）</th>
-                      <th>金额资格</th>
-                      <th>完成率</th>
-                      {d.capabilities.manage && <th>维护</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.rows.map((row) => (
-                      <tr key={row.manager.id}>
-                        <td>
-                          <span className={`customer-rank ${row.rank <= 3 ? 'customer-rank-leading' : ''}`}>{row.rank}</span>
-                        </td>
-                        <td>
-                          <button type="button" className="customer-text-button" onClick={() => open('month', 'staff', row.manager.name, undefined, row.manager.id)}>
-                            {row.manager.name}
-                          </button>
-                          {!row.manager.active && <small>已停用</small>}
-                        </td>
-                        <td>{row.groupName || '待分组'}</td>
-                        <td>{wan(row.targetCents)}</td>
-                        <td>
-                          <button type="button" className="customer-text-button" onClick={() => open('month', 'staff', row.manager.name, undefined, row.manager.id)}>
-                            {wan(row.verifiedCreditCents)}
-                          </button>
-                        </td>
-                        <td>
-                          <Badge tone={row.amountGrade === 'S' || row.amountGrade === 'A' ? 'pine' : 'neutral'}>{gradeLabel(row.amountGrade)}</Badge>
-                          <small>综合评分待履职</small>
-                        </td>
-                        <td>{progress(row.progress)}</td>
-                        {d.capabilities.manage && (
-                          <td>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() =>
-                                onForm({
-                                  kind: 'target',
-                                  month: d.month,
-                                  staffId: row.manager.id,
-                                  label: row.manager.name,
-                                  amountCents: row.targetCents,
-                                  version: row.version,
-                                  groupName: row.groupName,
-                                })
-                              }
-                            >
-                              目标 / 分组
-                            </Button>
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <DataTable
+              className="customer-ranking-table"
+              tableClassName="customer-table"
+              rows={d.rows}
+              rowKey={(row) => row.manager.id}
+              empty="暂无客户经理"
+              emptyDescription="请先配置真实员工岗位。"
+              columns={[
+                { key: 'rank', header: '名次', cell: (row) => <span className={`customer-rank ${row.rank <= 3 ? 'customer-rank-leading' : ''}`}>{row.rank}</span> },
+                {
+                  key: 'name',
+                  header: '姓名',
+                  cell: (row) => (
+                    <>
+                      <button type="button" className="customer-text-button" onClick={() => open('month', 'staff', row.manager.name, undefined, row.manager.id)}>
+                        {row.manager.name}
+                      </button>
+                      {!row.manager.active && <small>已停用</small>}
+                    </>
+                  ),
+                },
+                { key: 'group', header: '组别', cell: (row) => row.groupName || '待分组' },
+                { key: 'target', header: '目标（万）', numeric: true, cell: (row) => wan(row.targetCents) },
+                {
+                  key: 'verified',
+                  header: '累计（万）',
+                  numeric: true,
+                  cell: (row) => (
+                    <button type="button" className="customer-text-button" onClick={() => open('month', 'staff', row.manager.name, undefined, row.manager.id)}>
+                      {wan(row.verifiedCreditCents)}
+                    </button>
+                  ),
+                },
+                {
+                  key: 'grade',
+                  header: '金额资格',
+                  cell: (row) => (
+                    <>
+                      <Badge tone={row.amountGrade === 'S' || row.amountGrade === 'A' ? 'pine' : 'neutral'}>{gradeLabel(row.amountGrade)}</Badge>
+                      <small>综合评分待履职</small>
+                    </>
+                  ),
+                },
+                { key: 'progress', header: '完成率', numeric: true, cell: (row) => progress(row.progress) },
+                ...(d.capabilities.manage
+                  ? [
+                      {
+                        key: 'manage',
+                        header: '维护',
+                        cell: (row: CustomerTargetRow) => (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              onForm({
+                                kind: 'target',
+                                month: d.month,
+                                staffId: row.manager.id,
+                                label: row.manager.name,
+                                amountCents: row.targetCents,
+                                version: row.version,
+                                groupName: row.groupName,
+                              })
+                            }
+                          >
+                            目标 / 分组
+                          </Button>
+                        ),
+                      },
+                    ]
+                  : []),
+              ]}
+            />
             <details className="customer-rating-rules">
               <summary>金额资格与考评规则说明</summary>
               <p>{d.ratings.source}</p>

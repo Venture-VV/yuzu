@@ -75,7 +75,7 @@ export function Qty({ milli, unit, signed, className, unitClassName }: { milli: 
         {sign}
         {formatQty(Math.abs(milli))}
       </span>
-      <span className={cn('text-[0.78em] font-semibold opacity-60', unitClassName)}>{unit}</span>
+      <span className={cn('text-[length:max(12px,0.78em)] font-semibold opacity-60', unitClassName)}>{unit}</span>
     </span>
   );
 }

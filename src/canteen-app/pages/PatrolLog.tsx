@@ -235,7 +235,7 @@ export function PatrolLogPage({ me, go }: { me: CanteenMe; go: (route: string) =
                   </li>
                 ))}
               </ul>
-              <p className="pb-1 text-[11px] text-ink-3">圆点从左到右是第 1 轮起：绿 = 巡了，红 = 漏巡，黄 = 正在巡还没打，灰 = 还没到</p>
+              <p className="pb-1 text-[12px] text-ink-3">圆点从左到右是第 1 轮起：绿 = 巡了，红 = 漏巡，黄 = 正在巡还没打，灰 = 还没到</p>
             </Card>
           )}
         </>

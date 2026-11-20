@@ -18,7 +18,7 @@ export function ZoneChip({ zone, size = 'sm', className }: { zone: TagZone; size
     <span
       className={cn(
         'inline-flex shrink-0 items-center justify-center rounded-full font-bold leading-none',
-        size === 'sm' ? 'h-[18px] px-1.5 text-[11px]' : 'h-6 px-2.5 text-[12.5px]',
+        size === 'sm' ? 'h-[18px] px-1.5 text-[12px]' : 'h-6 px-2.5 text-[12.5px]',
         ZONE_STYLE[zone].chip,
         className,
       )}
@@ -35,7 +35,7 @@ export function VipChip({ level, size = 'sm', className }: { level: number; size
       title={`VIP 第 ${level} 级柜`}
       className={cn(
         'inline-flex shrink-0 items-center gap-0.5 rounded-full bg-ink font-bold leading-none text-yuzu',
-        size === 'sm' ? 'h-[18px] px-1.5 text-[11px]' : 'h-6 px-2.5 text-[12.5px]',
+        size === 'sm' ? 'h-[18px] px-1.5 text-[12px]' : 'h-6 px-2.5 text-[12.5px]',
         className,
       )}
     >
@@ -72,7 +72,7 @@ export function GroupMark({ groupNo, count, className }: { groupNo: string; coun
   return (
     <span
       title={`同行组 ${groupNo}${count ? `，${count} 人在店` : ''}`}
-      className={cn('inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-full bg-pine px-1.5 text-[11px] leading-none font-bold text-paper', className)}
+      className={cn('inline-flex h-[18px] shrink-0 items-center gap-0.5 rounded-full bg-pine px-1.5 text-[12px] leading-none font-bold text-paper', className)}
     >
       <Link2 className="size-3" strokeWidth={2.6} />联{groupShort(groupNo)}
       {count ? <span className="font-semibold opacity-75">·{count}</span> : null}
@@ -216,7 +216,7 @@ export function TagCard({
                 <span className="min-w-0 truncate font-semibold">{v.memberName}</span>
                 {/* 会员等级识别（8.1.15）：档阶的短写，全称在客人卡上 */}
                 {v.memberGradeLabel && (
-                  <span className="shrink-0 rounded-sm bg-yuzu-soft px-1 text-[10.5px] leading-[15px] font-bold text-yuzu-deep" title={v.memberGradeLabel} data-testid={`tag-${tag.code}-grade`}>
+                  <span className="shrink-0 rounded-sm bg-yuzu-soft px-1 text-[12px] leading-[15px] font-bold text-yuzu-deep" title={v.memberGradeLabel} data-testid={`tag-${tag.code}-grade`}>
                     {v.memberGradeLabel.split(/[\s·]/)[0]}
                   </span>
                 )}
@@ -229,16 +229,17 @@ export function TagCard({
           </span>
           <span className="mt-auto flex items-end justify-between gap-1 pr-2.5 pb-2 pl-3.5">
             <span className="num text-[12px] font-semibold whitespace-nowrap text-ink-3">{stayText(v.checkedInAt, now)}</span>
-            {v.amountCents > 0 ? <CardMoney cents={v.amountCents} /> : <span className="text-[11.5px] text-ink-4">未挂账</span>}
+            {v.amountCents > 0 ? <CardMoney cents={v.amountCents} /> : <span className="text-[12px] text-ink-4">未挂账</span>}
           </span>
           {/* 超时在店、临时外出、异常待办（8.1.15）：卡片底下各一条带字、带图标的色带（卡片窄，放不下并排的标记） */}
           <VisitStatusChips visit={v} now={now} chipClass="w-full justify-center rounded-none" testId={`tag-${tag.code}`} />
         </>
       ) : (
-        <span className="mt-auto flex items-center gap-1 px-3 pb-2 text-[12px] font-semibold">
+        // 卡片上的当前状态不小于 16 像素（8.1.17 YS-2）
+        <span className="mt-auto flex items-center gap-1 px-3 pb-2 text-[16px] font-semibold">
           {tag.locked ? (
             <>
-              <Lock className="size-3 text-clay" />
+              <Lock className="size-4 shrink-0 text-clay" />
               <span className="truncate text-clay">锁定 · {tag.lockReason}</span>
             </>
           ) : (
@@ -268,7 +269,7 @@ export function TagChip({ tag, matched, primaryMatch, onClick }: { tag: BoardTag
       aria-label={`手牌 ${tag.code}，${ZONE_LABELS[tag.zone].title}${tag.kind === 'vip' ? `，VIP ${tag.vipLevel} 级` : ''}，${state}${tag.locked ? `（${tag.lockReason}）` : ''}`}
       title={tag.locked ? `锁定：${tag.lockReason}` : '空闲，点此发牌'}
       className={cn(
-        'num flex h-[34px] min-w-[74px] items-center justify-center gap-1 rounded-[10px] border px-2 text-[14px] font-bold transition-[box-shadow,border-color,background-color] duration-150 active:scale-[0.98]',
+        'tap relative num flex h-[34px] min-w-[74px] items-center justify-center gap-1 rounded-[10px] border px-2 text-[14px] font-bold transition-[box-shadow,border-color,background-color] duration-150 active:scale-[0.98]',
         tag.locked
           ? 'border-clay/30 bg-[repeating-linear-gradient(135deg,var(--color-paper-2)_0_6px,var(--color-paper-3)_6px_7px)] text-clay'
           : 'border-dashed border-line-strong bg-paper/60 text-ink-2 hover:border-pine hover:bg-card hover:text-pine',
@@ -287,7 +288,7 @@ function CardMoney({ cents }: { cents: number }) {
   if (cents % 100 !== 0) return <Money cents={cents} className="text-[14px] font-bold text-ink" />;
   return (
     <span className="num inline-flex items-baseline text-[14px] font-bold whitespace-nowrap text-ink">
-      <span className="mr-[0.12em] text-[0.72em] font-semibold opacity-70">¥</span>
+      <span className="mr-[0.12em] text-[length:max(12px,0.72em)] font-semibold opacity-70">¥</span>
       {(cents / 100).toLocaleString('en-US')}
     </span>
   );

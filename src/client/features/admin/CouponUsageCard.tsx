@@ -12,6 +12,7 @@ import { groupTags } from '@shared/member-tags';
 import { api, errorMessage } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import { downloadUrl } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { Money } from '../../components/Money';
 import { Button, Card, Input, Notice, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
 import { useCouponMeta } from '../coupons/queries';
@@ -197,74 +198,57 @@ export function CouponUsageCard() {
               {group === 'benefit' && d.totals.issued > 0 ? '这段时间没有会员权益发的券' : '这段时间没有发券'}
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-line">
-              <table className="w-full min-w-[760px] text-[13px]" data-testid="coupon-usage-table">
-                <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                  <tr>
-                    <th className="px-3 py-2 text-left">{USAGE_GROUP_LABELS[group].slice(1)}</th>
-                    <th className="px-3 py-2 text-right">发放</th>
-                    <th className="px-3 py-2 text-right">领取</th>
-                    <th className="px-3 py-2 text-right">领取率</th>
-                    <th className="px-3 py-2 text-right">核销</th>
-                    <th className="px-3 py-2 text-right">核销率</th>
-                    <th className="px-3 py-2 text-right">核销金额</th>
-                    <th className="px-3 py-2 text-right">过期</th>
-                    <th className="px-3 py-2 text-right">作废</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line/70">
-                  {rows.map((r) => (
-                    <tr key={r.key} data-testid={`coupon-usage-row-${r.key.replace(':', '-')}`}>
-                      <td className="px-3 py-2">
-                        <span className="font-semibold text-ink">{r.label}</span>
-                        {r.note && <span className="ml-1.5 text-[12px] text-ink-3">{r.note}</span>}
-                      </td>
-                      <td className="num px-3 py-2 text-right">{r.issued}</td>
-                      <td className="num px-3 py-2 text-right">{r.claimed}</td>
-                      <td className="px-3 py-2 text-right">
-                        <RateMeter part={r.claimed} whole={r.issued} />
-                      </td>
-                      <td className="num px-3 py-2 text-right">{r.used}</td>
-                      <td className="px-3 py-2 text-right">
-                        <RateMeter part={r.used} whole={r.issued} />
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <Money cents={r.usedAmount} />
-                      </td>
-                      <td className="num px-3 py-2 text-right">{r.expired}</td>
-                      <td className="num px-3 py-2 text-right">{r.voided}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              testId="coupon-usage-table"
+              tableClassName="min-w-[760px]"
+              rows={rows}
+              rowKey={(r) => r.key}
+              rowTestId={(r) => `coupon-usage-row-${r.key.replace(':', '-')}`}
+              columns={[
+                {
+                  key: 'label',
+                  header: USAGE_GROUP_LABELS[group].slice(1),
+                  cell: (r) => (
+                    <>
+                      <span className="font-semibold text-ink">{r.label}</span>
+                      {r.note && <span className="ml-1.5 text-[12px] text-ink-3">{r.note}</span>}
+                    </>
+                  ),
+                },
+                { key: 'issued', header: '发放', numeric: true, cell: (r) => r.issued },
+                { key: 'claimed', header: '领取', numeric: true, cell: (r) => r.claimed },
+                { key: 'claimRate', header: '领取率', numeric: true, cell: (r) => <RateMeter part={r.claimed} whole={r.issued} /> },
+                { key: 'used', header: '核销', numeric: true, cell: (r) => r.used },
+                { key: 'useRate', header: '核销率', numeric: true, cell: (r) => <RateMeter part={r.used} whole={r.issued} /> },
+                { key: 'usedAmount', header: '核销金额', numeric: true, cell: (r) => <Money cents={r.usedAmount} /> },
+                { key: 'expired', header: '过期', numeric: true, cell: (r) => r.expired },
+                { key: 'voided', header: '作废', numeric: true, cell: (r) => r.voided },
+              ]}
+            />
           )}
           {d.services.length > 0 && (
             <div data-testid="coupon-usage-services">
               <p className="mb-1.5 text-[13px] font-bold text-ink">服务类权益（这段时间登记使用，作废的不算）</p>
-              <div className="overflow-x-auto rounded-lg border border-line">
-                <table className="w-full min-w-[420px] text-[13px]">
-                  <thead className="bg-paper-2/70 text-[12px] font-bold text-ink-3">
-                    <tr>
-                      <th className="px-3 py-2 text-left">权益</th>
-                      <th className="px-3 py-2 text-right">登记次数</th>
-                      <th className="px-3 py-2 text-right">会员人数</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line/70">
-                    {d.services.map((s) => (
-                      <tr key={s.benefitId} data-testid={`coupon-usage-service-${s.code}`}>
-                        <td className="px-3 py-2">
-                          <span className="font-semibold text-ink">{s.name}</span>
-                          <span className="ml-1.5 text-[12px] text-ink-3">{s.code}</span>
-                        </td>
-                        <td className="num px-3 py-2 text-right">{s.uses}</td>
-                        <td className="num px-3 py-2 text-right">{s.members}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                tableClassName="min-w-[420px]"
+                rows={d.services}
+                rowKey={(s) => s.benefitId}
+                rowTestId={(s) => `coupon-usage-service-${s.code}`}
+                columns={[
+                  {
+                    key: 'benefit',
+                    header: '权益',
+                    cell: (s) => (
+                      <>
+                        <span className="font-semibold text-ink">{s.name}</span>
+                        <span className="ml-1.5 text-[12px] text-ink-3">{s.code}</span>
+                      </>
+                    ),
+                  },
+                  { key: 'uses', header: '登记次数', numeric: true, cell: (s) => s.uses },
+                  { key: 'members', header: '会员人数', numeric: true, cell: (s) => s.members },
+                ]}
+              />
             </div>
           )}
         </>

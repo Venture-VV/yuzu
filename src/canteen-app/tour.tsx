@@ -239,7 +239,7 @@ export function Tour({ steps, route, go, onClose }: { steps: TourStep[]; route: 
                   aria-pressed={liked}
                   aria-label="点赞：番茄炒蛋（示例）"
                   className={cn(
-                    'flex h-10 min-w-16 items-center justify-center gap-1 rounded-full px-3 text-[14px] font-extrabold transition-all active:scale-90',
+                    'tap relative flex h-10 min-w-16 items-center justify-center gap-1 rounded-full px-3 text-[14px] font-extrabold transition-all active:scale-90',
                     liked ? 'bg-energy text-white' : 'bg-card text-ink-3 ring-1 ring-line-strong',
                   )}
                 >

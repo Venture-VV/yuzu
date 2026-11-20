@@ -218,7 +218,7 @@ export function ErpShell() {
         data-testid={compact ? `erp-tab-${it.key}` : `erp-nav-${it.key}`}
         className={({ isActive }) =>
           cn(
-            'relative flex shrink-0 items-center gap-2.5 font-semibold whitespace-nowrap transition-colors duration-100',
+            'tap relative flex shrink-0 items-center gap-2.5 font-semibold whitespace-nowrap transition-colors duration-100',
             compact ? 'h-10 rounded-full px-3.5 text-[13.5px]' : 'h-10 rounded-lg px-3 text-[14px]',
             // 模块下的其他页面（如费用模块的备用金、采购台账、账目自检）也高亮所属模块。
             // 当前项的底块：量得到位置时由导航里那一块滑过来画（8.0.16），量不到时自己画
@@ -262,12 +262,16 @@ export function ErpShell() {
         </span>
         <ThemeToggleButton className="size-9" />
         {access.storeHome ? (
-          <NavLink to={access.storeHome} className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18" data-testid="erp-exit">
+          <NavLink
+            to={access.storeHome}
+            className="tap relative flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18"
+            data-testid="erp-exit"
+          >
             <ArrowLeft className="size-4" />
             返回门店
           </NavLink>
         ) : (
-          <NavLink to="/password" className="flex h-9 items-center rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18">
+          <NavLink to="/password" className="tap relative flex h-9 items-center rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18">
             修改密码
           </NavLink>
         )}

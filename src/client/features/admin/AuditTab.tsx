@@ -115,6 +115,12 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_card_returned: { label: '退卡', tone: 'clay' },
   // 8.1.16 菜品维护结果待确认时确认作废
   dish_op_abandoned: { label: '作废菜品操作', tone: 'clay' },
+  // 8.1.17 第二家店改本店价（BW-11）
+  store_price_changed: { label: '改本店价', tone: 'ember' },
+  dishes_sorted: { label: '菜品排序', tone: 'neutral' },
+  dishes_active_bulk: { label: '菜品批量上下架', tone: 'neutral' },
+  dish_deleted: { label: '删除菜品', tone: 'clay' },
+  dish_restored: { label: '恢复菜品', tone: 'neutral' },
 };
 
 function describe(detail: Record<string, unknown>): string {
@@ -175,7 +181,7 @@ export function AuditTab() {
                   <Badge tone={meta.tone}>{meta.label}</Badge>
                   <span className="font-semibold">{a.staffName ?? '系统'}</span>
                   <span className="min-w-0 flex-1 truncate text-ink-2">{describe(a.detail)}</span>
-                  {a.ip && <span className="num text-[11.5px] text-ink-4">{a.ip}</span>}
+                  {a.ip && <span className="num text-[12px] text-ink-4">{a.ip}</span>}
                 </li>
               );
             })}

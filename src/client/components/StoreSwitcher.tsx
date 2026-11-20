@@ -54,7 +54,7 @@ export function StoreSwitcher() {
         aria-expanded={open}
         title={`当前门店：${session.store.name}（点一下换店）`}
         data-testid="store-switcher"
-        className="flex w-full flex-col items-center gap-0.5 rounded-md bg-white/10 px-1 py-1.5 text-[11px] leading-tight font-bold text-paper transition hover:bg-white/18"
+        className="flex w-full flex-col items-center gap-0.5 rounded-md bg-white/10 px-1 py-1.5 text-[12px] leading-tight font-bold text-paper transition hover:bg-white/18"
       >
         <Store className="size-4" />
         <span className="num w-full truncate" data-testid="store-current">
@@ -72,7 +72,10 @@ export function StoreSwitcher() {
               disabled={busy !== null}
               onClick={() => void pick(s.id)}
               data-testid={`store-pick-${s.code}`}
-              className={cn('flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium hover:bg-paper-2', s.id === session.store.id ? 'text-ink' : 'text-ink-2')}
+              className={cn(
+                'tap relative flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium hover:bg-paper-2',
+                s.id === session.store.id ? 'text-ink' : 'text-ink-2',
+              )}
             >
               <span className="num w-10 shrink-0 text-[12.5px] text-ink-3">{s.code}</span>
               <span className="min-w-0 flex-1 truncate">{s.name}</span>

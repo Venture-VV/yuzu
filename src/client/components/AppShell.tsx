@@ -98,7 +98,7 @@ function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
         data-testid="user-menu"
-        className="flex size-11 items-center justify-center rounded-full bg-yuzu text-[15px] font-bold text-ink ring-2 ring-white/15 transition hover:ring-white/35 short:size-9 short:text-[14px]"
+        className="tap relative flex size-11 items-center justify-center rounded-full bg-yuzu text-[15px] font-bold text-ink ring-2 ring-white/15 transition hover:ring-white/35 short:size-9 short:text-[14px]"
         title={`${session.staff.displayName} · ${roleText(session.staff)}`}
       >
         {session.staff.displayName.slice(0, 1)}
@@ -204,7 +204,7 @@ function MenuItem({ icon, children, onClick, testId }: { icon: ReactNode; childr
       role="menuitem"
       onClick={onClick}
       data-testid={testId}
-      className="flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium text-ink-2 hover:bg-paper-2 hover:text-ink"
+      className="tap relative flex h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-[14px] font-medium text-ink-2 hover:bg-paper-2 hover:text-ink"
     >
       {icon}
       {children}
@@ -236,11 +236,11 @@ export function PageHeader({ title, subtitle, actions, dateMode = 'business' }: 
         className="flex items-center gap-2 rounded-full border border-line bg-card py-1 pr-3.5 pl-1 shadow-card"
         title={`营业时间 ${describeBusinessHours(hours)}；营业日每天 ${String(session.rules.businessDayStartHour).padStart(2, '0')}:00 切换`}
       >
-        <span className="rounded-full bg-pine px-2.5 py-1 text-[11.5px] font-bold text-paper">{dateMode === 'business' ? '营业日' : '今天'}</span>
+        <span className="rounded-full bg-pine px-2.5 py-1 text-[12px] font-bold text-paper">{dateMode === 'business' ? '营业日' : '今天'}</span>
         <span className="num text-[13.5px] font-bold text-ink">{d.md}</span>
         <span className="text-[12.5px] text-ink-3">{d.weekday}</span>
         {closed && (
-          <span className="rounded-full bg-clay-soft px-2 py-0.5 text-[11.5px] font-bold text-clay" data-testid="outside-hours">
+          <span className="rounded-full bg-clay-soft px-2 py-0.5 text-[12px] font-bold text-clay" data-testid="outside-hours">
             非营业时间
           </span>
         )}

@@ -7,6 +7,7 @@ import { CHECKOUT_METHOD_LABELS } from '@shared/checkout';
 import type { ExecutiveReport } from '@shared/reports';
 import { api } from '../../lib/api';
 import { useSession } from '../../lib/session';
+import { DataTable } from '../../components/DataTable';
 import { Money } from '../../components/Money';
 import { Card, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { DepartmentItemsCard } from './DepartmentItems';
@@ -156,34 +157,20 @@ export function OverviewTab() {
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
               <Card className="p-5">
                 <SectionTitle>热门项目（按金额）</SectionTitle>
-                {d.topItems.length === 0 ? (
-                  <p className="mt-3 text-[13px] text-ink-4">这段时间没有项目消费</p>
-                ) : (
-                  <div className="mt-3 overflow-x-auto">
-                    <table className="w-full min-w-[360px] text-[13px]">
-                      <thead className="text-[12px] text-ink-3">
-                        <tr>
-                          <th className="py-1.5 text-left font-semibold">项目</th>
-                          <th className="py-1.5 text-left font-semibold">分类</th>
-                          <th className="py-1.5 text-right font-semibold">数量</th>
-                          <th className="py-1.5 text-right font-semibold">金额</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-line/70">
-                        {d.topItems.map((t) => (
-                          <tr key={`${t.category}-${t.name}`}>
-                            <td className="py-1.5 font-semibold text-ink">{t.name}</td>
-                            <td className="py-1.5 text-ink-3">{t.category}</td>
-                            <td className="num py-1.5 text-right">{t.quantity}</td>
-                            <td className="py-1.5 text-right">
-                              <Money cents={t.amount} className="font-bold" />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                <DataTable
+                  variant="plain"
+                  className="mt-3"
+                  tableClassName="min-w-[360px]"
+                  rows={d.topItems}
+                  rowKey={(t) => `${t.category}-${t.name}`}
+                  empty="这段时间没有项目消费"
+                  columns={[
+                    { key: 'name', header: '项目', cellClassName: 'font-semibold text-ink', cell: (t) => t.name },
+                    { key: 'category', header: '分类', cellClassName: 'text-ink-3', cell: (t) => t.category },
+                    { key: 'quantity', header: '数量', numeric: true, cell: (t) => t.quantity },
+                    { key: 'amount', header: '金额', numeric: true, cell: (t) => <Money cents={t.amount} className="font-bold" /> },
+                  ]}
+                />
               </Card>
               <Card className="p-5">
                 <SectionTitle>门票</SectionTitle>

@@ -13,6 +13,7 @@ import { serverNowMs } from '../../lib/serverClock';
 import { useCan, useSession } from '../../lib/session';
 import { formatDateTime, uuid } from '../../lib/utils';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
+import { DataTable } from '../../components/DataTable';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, PendingBadge, SectionTitle, Segmented, Select, Skeleton } from '../../components/ui';
@@ -151,54 +152,54 @@ function ReadersCard({ data, ledger }: { data: LocationAdmin; ledger: SpaceLedge
       <p className="text-[12.5px] text-ink-3">
         需求文档有 16 个 RC300（接待 2、收银 4、助浴 2、水吧 2、娱乐 2、餐厅 1、休息 1、按摩 2），各自装在哪、编号多少由现场补。读卡器的设备接入在 RQ-001；之前用「模拟刷卡」试。
       </p>
-      {data.readers.length === 0 ? (
-        <p className="rounded-md border border-dashed border-line-strong px-4 py-5 text-center text-[13px] text-ink-3">还没有登记刷卡点。</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[620px] text-[13px]">
-            <thead>
-              <tr className="border-b border-line text-left text-[12px] text-ink-3">
-                <th className="py-2 pr-3 font-semibold">编号</th>
-                <th className="py-2 pr-3 font-semibold">名称</th>
-                <th className="py-2 pr-3 font-semibold">装在哪</th>
-                <th className="py-2 pr-3 font-semibold">最近刷卡</th>
-                <th className="py-2 font-semibold" />
-              </tr>
-            </thead>
-            <tbody>
-              {data.readers.map((r) => (
-                <tr key={r.id} className="border-b border-line/70 last:border-0" data-testid={`reader-${r.code}`}>
-                  <td className="num py-2 pr-3 font-bold">{r.code}</td>
-                  <td className="py-2 pr-3">
-                    {r.name} {!r.active && <Badge>停用</Badge>}
-                  </td>
-                  <td className="py-2 pr-3">
-                    {placeText(r.place)} {r.placeInactive && <Badge tone="ember">地方已停用</Badge>}
-                  </td>
-                  <td className="py-2 pr-3 text-ink-3">{r.lastAt ? formatDateTime(r.lastAt) : '还没刷过'}</td>
-                  <td className="py-2 text-right whitespace-nowrap">
-                    <Button size="sm" variant="ghost" onClick={() => setEditing(r)} data-testid="reader-edit">
-                      修改
-                    </Button>
-                    {canReport && r.active && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={!data.rules.enabled}
-                        title={data.rules.enabled ? undefined : '先打开实时位置'}
-                        onClick={() => setSwiping(r)}
-                        data-testid="reader-swipe"
-                      >
-                        模拟刷卡
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        variant="plain"
+        tableClassName="min-w-[620px]"
+        rows={data.readers}
+        rowKey={(r) => r.id}
+        rowTestId={(r) => `reader-${r.code}`}
+        empty="还没有登记刷卡点"
+        columns={[
+          { key: 'code', header: '编号', cellClassName: 'num font-bold', cell: (r) => r.code },
+          {
+            key: 'name',
+            header: '名称',
+            cell: (r) => (
+              <>
+                {r.name} {!r.active && <Badge>停用</Badge>}
+              </>
+            ),
+          },
+          {
+            key: 'place',
+            header: '装在哪',
+            cell: (r) => (
+              <>
+                {placeText(r.place)} {r.placeInactive && <Badge tone="ember">地方已停用</Badge>}
+              </>
+            ),
+          },
+          { key: 'last', header: '最近刷卡', cellClassName: 'text-ink-3', cell: (r) => (r.lastAt ? formatDateTime(r.lastAt) : '还没刷过') },
+          {
+            key: 'actions',
+            header: '',
+            align: 'right',
+            cellClassName: 'whitespace-nowrap',
+            cell: (r) => (
+              <>
+                <Button size="sm" variant="ghost" onClick={() => setEditing(r)} data-testid="reader-edit">
+                  修改
+                </Button>
+                {canReport && r.active && (
+                  <Button size="sm" variant="ghost" disabled={!data.rules.enabled} title={data.rules.enabled ? undefined : '先打开实时位置'} onClick={() => setSwiping(r)} data-testid="reader-swipe">
+                    模拟刷卡
+                  </Button>
+                )}
+              </>
+            ),
+          },
+        ]}
+      />
       <ReaderDialog reader={editing} zones={data.zones} ledger={ledger} onClose={() => setEditing(null)} />
       <SwipeDialog reader={swiping} onClose={() => setSwiping(null)} />
     </Card>

@@ -398,11 +398,11 @@ export function ConsumeFlow({ member, onClose, onSwitchToRecharge }: { member: M
             <div key={l.key} className="flex items-center gap-3 border-b border-line px-3.5 py-2 last:border-0">
               <CartLineName line={l} className="text-[13.5px]" />
               <div className="flex items-center rounded-md border border-line">
-                <button type="button" aria-label={`减少 ${l.name}`} onClick={() => add(l.key, -1)} className="flex size-9 items-center justify-center text-ink-2 hover:bg-paper-2">
+                <button type="button" aria-label={`减少 ${l.name}`} onClick={() => add(l.key, -1)} className="tap relative flex size-9 items-center justify-center text-ink-2 hover:bg-paper-2">
                   <Minus className="size-3.5" />
                 </button>
                 <QtyInput value={l.qty} onChange={(n) => setQty(l.key, n)} onHint={setQtyHint} label={`${l.name} 的数量`} className="h-9 w-10 text-[14px]" testId={`consume-qty-${l.item.id}`} />
-                <button type="button" aria-label={`增加 ${l.name}`} onClick={() => add(l.key, 1)} className="flex size-9 items-center justify-center text-ink-2 hover:bg-paper-2">
+                <button type="button" aria-label={`增加 ${l.name}`} onClick={() => add(l.key, 1)} className="tap relative flex size-9 items-center justify-center text-ink-2 hover:bg-paper-2">
                   <Plus className="size-3.5" />
                 </button>
               </div>

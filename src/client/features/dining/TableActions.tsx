@@ -79,14 +79,14 @@ export function TableActionStatus({ action, onResolved }: { action: ReturnType<t
 export function TableStateLine({ t, mainName, subCount }: { t: TableStateInfo & { name: string }; mainName?: string | null; subCount?: number }) {
   if (mainName) {
     return (
-      <span className="flex items-center gap-1 text-[13px] font-bold text-lake" data-testid={`table-merged-${t.name}`}>
+      <span className="flex items-center gap-1 text-[16px] font-bold text-lake" data-testid={`table-merged-${t.name}`}>
         <Link2 className="size-3.5" /> 并入桌 {mainName}
       </span>
     );
   }
   if (subCount) {
     return (
-      <span className="flex items-center gap-1 text-[13px] font-bold text-lake" data-testid={`table-merged-${t.name}`}>
+      <span className="flex items-center gap-1 text-[16px] font-bold text-lake" data-testid={`table-merged-${t.name}`}>
         <Link2 className="size-3.5" /> 并着 {subCount} 桌
       </span>
     );

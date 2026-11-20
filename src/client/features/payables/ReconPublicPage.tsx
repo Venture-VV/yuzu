@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { RECON_REPLY_LABELS, type ReconPublicView, type ReconReply } from '@shared/cycles';
 import { formatAmount } from '@shared/money';
+import { DataTable } from '../../components/DataTable';
 import { Button, Field, Input, Notice, Skeleton, Textarea } from '../../components/ui';
 
 const yuan = (cents: number) => `¥${formatAmount(cents)}`;
@@ -83,38 +84,20 @@ export function ReconPublicPage() {
                 ))}
               </dl>
             )}
-            <div className="overflow-x-auto rounded-lg border border-line bg-card">
-              <table className="w-full min-w-[520px] text-[13px]">
-                <thead className="bg-paper-2 text-left text-[12px] text-ink-3">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold">日期</th>
-                    <th className="px-3 py-2 font-semibold">单号</th>
-                    <th className="px-3 py-2 font-semibold">类型</th>
-                    <th className="px-3 py-2 text-right font-semibold">金额</th>
-                    <th className="px-3 py-2 font-semibold">摘要</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {s.rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-3 text-ink-3">
-                        这一期没有往来
-                      </td>
-                    </tr>
-                  ) : (
-                    s.rows.map((r, i) => (
-                      <tr key={i} className="border-t border-line">
-                        <td className="num px-3 py-1.5">{r.date}</td>
-                        <td className="num px-3 py-1.5">{r.docNo}</td>
-                        <td className="px-3 py-1.5">{r.kind}</td>
-                        <td className="num px-3 py-1.5 text-right">{yuan(r.amountCents)}</td>
-                        <td className="px-3 py-1.5 text-ink-2">{r.note}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              onPage
+              tableClassName="min-w-[520px]"
+              rows={s.rows}
+              rowKey={(_r, i) => i}
+              empty="这一期没有往来"
+              columns={[
+                { key: 'date', header: '日期', cellClassName: 'num', cell: (r) => r.date },
+                { key: 'doc', header: '单号', cellClassName: 'num', cell: (r) => r.docNo },
+                { key: 'kind', header: '类型', cell: (r) => r.kind },
+                { key: 'amount', header: '金额', numeric: true, cell: (r) => yuan(r.amountCents) },
+                { key: 'note', header: '摘要', cellClassName: 'text-ink-2', cell: (r) => r.note },
+              ]}
+            />
             {view.reply ? (
               <Notice tone={view.reply === 'confirmed' ? 'success' : 'warning'} title={`已回复：${RECON_REPLY_LABELS[view.reply]}`} data-testid="recon-public-replied">
                 {view.replyName} · {view.repliedAt?.slice(0, 16).replace('T', ' ')}

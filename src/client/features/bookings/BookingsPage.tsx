@@ -548,7 +548,7 @@ function CreateBookingDialog({
                   key={d}
                   type="button"
                   onClick={() => setDay(d)}
-                  className={cn('h-9 rounded-md border px-3 text-[13px] font-semibold', day === d ? 'border-pine bg-pine text-white' : 'border-line bg-card text-ink-2 hover:border-pine')}
+                  className={cn('tap relative h-9 rounded-md border px-3 text-[13px] font-semibold', day === d ? 'border-pine bg-pine text-white' : 'border-line bg-card text-ink-2 hover:border-pine')}
                   data-testid={`booking-day-${n}`}
                 >
                   {['今天', '明天', '后天'][n]}
