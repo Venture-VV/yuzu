@@ -678,7 +678,7 @@ function AliasPanel({ space }: { space: Space }) {
             <li key={a.id} className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-[13px]">
               <Badge tone={a.kind === 'brand' ? 'lake' : 'neutral'}>{SPACE_ALIAS_LABELS[a.kind]}</Badge>
               <span className="min-w-0 flex-1 truncate font-semibold">{a.alias}</span>
-              <span className="text-[11.5px] text-ink-4">
+              <span className="text-[12px] text-ink-4">
                 {a.createdByName ?? '系统'} · {formatDateTime(a.createdAt)}
               </span>
               <Button

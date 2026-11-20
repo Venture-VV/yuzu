@@ -122,7 +122,7 @@ body {
 /* 英文小标题：大写、加字距（汤崎 VI） */
 .eyebrow {
   font-family: var(--font-en);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.18em;
   text-transform: uppercase;

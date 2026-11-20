@@ -36,7 +36,7 @@ export function CartLineName({ line, className }: { line: CartLine; className?: 
   return (
     <span className={cn('min-w-0 flex-1 leading-snug', className)} title={line.name}>
       <span className="line-clamp-2 font-semibold">{line.item.name}</span>
-      {line.item.prices.length > 1 && <span className="block text-[11.5px] font-semibold text-ink-3">{PRICE_TIER_LABELS[line.tier]}档</span>}
+      {line.item.prices.length > 1 && <span className="block text-[12px] font-semibold text-ink-3">{PRICE_TIER_LABELS[line.tier]}档</span>}
     </span>
   );
 }
@@ -90,7 +90,7 @@ export function ItemCard({
         </span>
       </span>
       {(item.durationMinutes || tags.length > 0 || item.gender || unavailable || hint) && (
-        <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11.5px] font-semibold text-ink-3">
+        <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-semibold text-ink-3">
           {item.durationMinutes ? (
             <span className="num inline-flex items-center gap-0.5">
               <Clock3 className="size-3" />
@@ -154,9 +154,9 @@ export function ItemCard({
                 q ? 'border-current font-bold' : 'border-line bg-paper/60 hover:border-line-strong hover:bg-card',
               )}
             >
-              <span className="text-[11.5px] font-semibold text-ink-3">{PRICE_TIER_LABELS[p.tier]}</span>
+              <span className="text-[12px] font-semibold text-ink-3">{PRICE_TIER_LABELS[p.tier]}</span>
               <TierMoney cents={p.price} />
-              {q > 0 && <span className={cn('num absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-bold', t.badge)}>{q}</span>}
+              {q > 0 && <span className={cn('num absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[12px] font-bold', t.badge)}>{q}</span>}
             </button>
           );
         })}

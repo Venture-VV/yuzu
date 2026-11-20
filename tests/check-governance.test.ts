@@ -151,6 +151,18 @@ describe('约定检查（docs/CONVENTIONS.md 里能查的几条）', () => {
     expect(conventionCounts('src/server/modules/x.ts', page)).toEqual({});
   });
 
+  it('样式表里小于 12 像素的字：font-size 与 font 简写里的第一个像素值；注释里的、rem / em 写法不算', () => {
+    const { cssSmallFonts } = gov as { cssSmallFonts: (css: string) => number };
+    const css = [
+      '.a { font-size: 11px; }',
+      '.b { font: 600 10px/1.4 var(--font-sans); }',
+      '.c { font: 12px/1.9 var(--font-sans); font-size: 12.5px; }',
+      '/* .d { font-size: 8px; } */',
+      '.e { font-size: 0.7rem; line-height: 10px; }',
+    ].join('\n');
+    expect(cssSmallFonts(css)).toBe(2);
+  });
+
   it('行内样式里的 dvh 记数；类名里带方括号的写法（打包时会补 vh）不算', () => {
     const code = "export const X = () => <div className=\"h-dvh max-h-[88dvh]\" style={{ height: '100dvh', minHeight: 'calc(100dvh - 2rem)' }} />;";
     expect(scanPageCode('x.tsx', code).inlineDvh).toBe(2);

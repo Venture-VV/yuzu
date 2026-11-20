@@ -172,7 +172,7 @@ export function AuditTab() {
                   <Badge tone={meta.tone}>{meta.label}</Badge>
                   <span className="font-semibold">{a.staffName ?? '系统'}</span>
                   <span className="min-w-0 flex-1 truncate text-ink-2">{describe(a.detail)}</span>
-                  {a.ip && <span className="num text-[11.5px] text-ink-4">{a.ip}</span>}
+                  {a.ip && <span className="num text-[12px] text-ink-4">{a.ip}</span>}
                 </li>
               );
             })}

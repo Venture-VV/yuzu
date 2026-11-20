@@ -102,7 +102,7 @@ export function TemplatesPanel({
           data-testid="studio-layout-header"
         >
           <span className="min-w-0 flex-1 truncate">顶栏（字标、分类、右上角四样）</span>
-          {changedSlots(doc, EMENU_HEADER_LAYOUT) > 0 && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[10.5px] text-yuzu-deep">改过 {changedSlots(doc, EMENU_HEADER_LAYOUT)} 块</span>}
+          {changedSlots(doc, EMENU_HEADER_LAYOUT) > 0 && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[12px] text-yuzu-deep">改过 {changedSlots(doc, EMENU_HEADER_LAYOUT)} 块</span>}
         </button>
       </div>
       <div>
@@ -123,7 +123,7 @@ export function TemplatesPanel({
                 data-testid={`studio-layout-${l}`}
               >
                 <span className="min-w-0 flex-1 truncate">{EMENU_LAYOUT_INFO[l].label}</span>
-                {n > 0 && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[10.5px] text-yuzu-deep">改过 {n} 块</span>}
+                {n > 0 && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[12px] text-yuzu-deep">改过 {n} 块</span>}
                 <span className={cn('shrink-0 text-[12px]', used ? 'text-ink-3' : 'text-ink-3/50')} title="菜单里用这种版式的页数">
                   {used} 页
                 </span>
@@ -166,9 +166,9 @@ export function TemplatesPanel({
                 }}
                 data-testid={`studio-slot-item-${def.key}`}
               >
-                <span className="w-9 shrink-0 text-[10.5px] text-ink-3">{KIND_LABELS[def.kind]}</span>
+                <span className="w-9 shrink-0 text-[12px] text-ink-3">{KIND_LABELS[def.kind]}</span>
                 <span className={cn('min-w-0 flex-1 truncate', o?.hidden && 'line-through opacity-60')}>{def.label}</span>
-                {o?.hidden && <span className="shrink-0 text-[10.5px] text-ink-3">藏起来了</span>}
+                {o?.hidden && <span className="shrink-0 text-[12px] text-ink-3">藏起来了</span>}
                 {o && !o.hidden && <span className="size-1.5 shrink-0 rounded-full bg-yuzu" title="改过" />}
               </button>
             );

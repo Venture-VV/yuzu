@@ -72,7 +72,7 @@ export function RuleCatalog() {
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 md:max-w-[300px] md:justify-end">
                       {r.isDefault ? <Badge>默认</Badge> : <Badge tone="pine">已调整</Badge>}
                       {r.updatedBy && (
-                        <span className="text-[11.5px] text-ink-3">
+                        <span className="text-[12px] text-ink-3">
                           {r.updatedBy} · {formatDateTime(r.updatedAt!)}
                         </span>
                       )}

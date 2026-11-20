@@ -78,7 +78,7 @@ export function CatalogTab() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[14px] font-semibold">{i.name}</span>
                       {(i.durationMinutes || tags.length > 0 || i.gender || i.technicianRequired) && (
-                        <span className="block truncate text-[11.5px] text-ink-3">
+                        <span className="block truncate text-[12px] text-ink-3">
                           {[i.durationMinutes ? `${i.durationMinutes} 分钟` : '', i.gender ? `仅${i.gender === 'female' ? '女宾' : '男宾'}` : '', i.technicianRequired ? '需要技师' : '', ...tags]
                             .filter(Boolean)
                             .join(' · ')}

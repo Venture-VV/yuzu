@@ -54,7 +54,7 @@ export function StoreSwitcher() {
         aria-expanded={open}
         title={`当前门店：${session.store.name}（点一下换店）`}
         data-testid="store-switcher"
-        className="flex w-full flex-col items-center gap-0.5 rounded-md bg-white/10 px-1 py-1.5 text-[11px] leading-tight font-bold text-paper transition hover:bg-white/18"
+        className="flex w-full flex-col items-center gap-0.5 rounded-md bg-white/10 px-1 py-1.5 text-[12px] leading-tight font-bold text-paper transition hover:bg-white/18"
       >
         <Store className="size-4" />
         <span className="num w-full truncate" data-testid="store-current">

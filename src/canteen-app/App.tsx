@@ -380,7 +380,7 @@ function TabBar({ route, role, hasWork, go }: { route: Route; role: CanteenMe['e
                     {it.icon(active ? 'var(--color-yuzu)' : 'none')}
                   </span>
                 )}
-                <span className={cn('text-[11px] font-extrabold whitespace-nowrap', active ? 'text-ink' : 'text-ink-3')}>{it.label}</span>
+                <span className={cn('text-[12px] font-extrabold whitespace-nowrap', active ? 'text-ink' : 'text-ink-3')}>{it.label}</span>
               </button>
             </li>
           );

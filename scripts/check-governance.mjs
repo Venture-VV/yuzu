@@ -130,6 +130,17 @@ export const CONVENTION_RULES = [
 /** allow 里的一项管不管这个文件：以 / 结尾的是整个目录 */
 const allowed = (allow, file) => allow.some((a) => (a.endsWith('/') ? file.startsWith(a) : a === file));
 
+/** 样式表里小于 12 像素的字（font-size，或 font 简写里的第一个像素值）：记进 small-text（8.1.17 YS-1）；注释里的不算 */
+export function cssSmallFonts(css) {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  let n = 0;
+  for (const m of text.matchAll(/(?:^|[;{\s])font(?:-size)?\s*:\s*([^;}]*)/g)) {
+    const px = m[1].match(/(\d+(?:\.\d+)?)px/);
+    if (px && Number(px[1]) < 12) n += 1;
+  }
+  return n;
+}
+
 /** 去掉注释（约定检查只看代码；注释里提到这些写法不算） */
 export function stripComments(code) {
   return code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
@@ -249,11 +260,11 @@ export function loosened(oldBase, newBase) {
   return out;
 }
 
-function sourceFiles(dir, out = []) {
+function sourceFiles(dir, out = [], pattern = /\.(ts|tsx)$/) {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
-    if (statSync(path).isDirectory()) sourceFiles(path, out);
-    else if (/\.(ts|tsx)$/.test(name)) out.push(path);
+    if (statSync(path).isDirectory()) sourceFiles(path, out, pattern);
+    else if (pattern.test(name)) out.push(path);
   }
   return out;
 }
@@ -282,6 +293,14 @@ function scanSources() {
     }
   }
   const fontSizes = Object.keys(sizeCounts).sort((a, b) => Number(a) - Number(b));
+  // 页面的样式表里小于 12 像素的字也记进 small-text
+  for (const root of PAGE_ROOTS) {
+    for (const abs of sourceFiles(join(ROOT, root), [], /\.css$/)) {
+      const file = relative(ROOT, abs).split('\\').join('/');
+      if (isMpLine(file)) continue;
+      bump('small-text', cssSmallFonts(readFileSync(abs, 'utf8')));
+    }
+  }
   // 用例里的 .only
   const focused = [];
   for (const dir of ['tests', 'e2e', 'e2e-canteen']) {

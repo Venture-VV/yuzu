@@ -372,7 +372,9 @@ function AdvanceSheet({ id, onClose }: { id: number | null; onClose: () => void 
                           icon={<Undo2 className="size-3.5" />}
                           onClick={() => setVoidTarget({ kind: 'settlement', id: s.id, docNo: s.docNo })}
                           aria-label={`冲销 ${s.docNo}`}
-                        />
+                        >
+                          冲销
+                        </Button>
                       )}
                     </li>
                   ))}

@@ -157,12 +157,12 @@ export function ColorField({
       </div>
       <div className="flex flex-wrap gap-1">
         {allowAuto && (
-          <button type="button" className={cn('h-5 rounded border px-1 text-[10.5px]', value === 'auto' ? 'border-pine text-pine' : 'border-line text-ink-3')} onClick={() => onChange('auto')}>
+          <button type="button" className={cn('h-5 rounded border px-1 text-[12px]', value === 'auto' ? 'border-pine text-pine' : 'border-line text-ink-3')} onClick={() => onChange('auto')}>
             自动
           </button>
         )}
         {allowNone && (
-          <button type="button" className={cn('h-5 rounded border px-1 text-[10.5px]', value === null ? 'border-pine text-pine' : 'border-line text-ink-3')} onClick={() => onChange(null)}>
+          <button type="button" className={cn('h-5 rounded border px-1 text-[12px]', value === null ? 'border-pine text-pine' : 'border-line text-ink-3')} onClick={() => onChange(null)}>
             无
           </button>
         )}
@@ -221,7 +221,7 @@ export function LayersPanel({
           onClick={(e) => onSelect(e.shiftKey ? (on ? selection.filter((x) => x !== n.id) : [...selection, n.id]) : [n.id])}
           data-testid={`studio-layer-${n.id}`}
         >
-          <span className="w-4 shrink-0 text-center text-[10px] text-ink-3">
+          <span className="w-4 shrink-0 text-center text-[12px] text-ink-3">
             {
               {
                 text: 'T',
@@ -237,7 +237,7 @@ export function LayersPanel({
             }
           </span>
           <span className={cn('min-w-0 flex-1 truncate', n.hidden && 'text-ink-4 line-through')}>{nodeLabel(n, surface, doc)}</span>
-          {required && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[10px] text-yuzu-deep">必需</span>}
+          {required && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[12px] text-yuzu-deep">必需</span>}
           <button
             type="button"
             title={n.hidden ? '显示' : required ? '必需的块不能隐藏' : '隐藏'}
@@ -440,8 +440,8 @@ export function InsertPanel({
               >
                 <div className="flex items-center gap-1.5 text-[12.5px] font-medium text-ink">
                   {b.label}
-                  {b.required && <span className="rounded bg-yuzu-soft px-1 text-[10px] text-yuzu-deep">必需</span>}
-                  {b.single && has(b) && <span className="text-[10.5px] text-ink-3">已在这一屏</span>}
+                  {b.required && <span className="rounded bg-yuzu-soft px-1 text-[12px] text-yuzu-deep">必需</span>}
+                  {b.single && has(b) && <span className="text-[12px] text-ink-3">已在这一屏</span>}
                 </div>
                 <div className="mt-0.5 text-[12px] leading-snug text-ink-3">{b.hint}</div>
               </button>

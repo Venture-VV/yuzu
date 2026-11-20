@@ -521,15 +521,15 @@ function CloseDialog({ open, onClose, s }: { open: boolean; onClose: () => void;
         <div className="grid grid-cols-3 gap-2.5 rounded-lg bg-paper-2/70 p-3 text-[12.5px]">
           <div>
             <p className="text-ink-3">充值实收</p>
-            <Money cents={s.recharge.paid} className="text-[15px] font-bold text-lake" />
+            <Money cents={s.recharge.paid} size="key" className="text-lake" />
           </div>
           <div>
             <p className="text-ink-3">储值消费</p>
-            <Money cents={s.consume.total} className="text-[15px] font-bold" />
+            <Money cents={s.consume.total} size="key" />
           </div>
           <div>
             <p className="text-ink-3">撤销恢复</p>
-            <Money cents={s.reversal.principal + s.reversal.bonus} className="text-[15px] font-bold text-clay" />
+            <Money cents={s.reversal.principal + s.reversal.bonus} size="key" className="text-clay" />
           </div>
         </div>
         <Field label="日结备注" htmlFor="close-note" hint="选填，如现金盘点结果">

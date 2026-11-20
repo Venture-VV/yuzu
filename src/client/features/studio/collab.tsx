@@ -375,7 +375,7 @@ export function CommentsPanel({
       data-testid={`studio-comment-${c.id}`}
     >
       <div className="flex items-center gap-1.5 text-[12px]">
-        {index !== null && <span className="flex size-5 items-center justify-center rounded-full bg-clay text-[10.5px] font-bold text-white">{index}</span>}
+        {index !== null && <span className="flex size-5 items-center justify-center rounded-full bg-clay text-[12px] font-bold text-white">{index}</span>}
         <span className="font-bold">{c.createdBy}</span>
         <When at={c.createdAt} />
         <div className="flex-1" />

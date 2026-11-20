@@ -30,7 +30,7 @@ export function InstanceTag({ instance, version, commit }: { instance: InstanceK
   const [main, sub] = labelOf(instance).split('·');
   return (
     <div data-testid="instance-tag" title={`${labelOf(instance)} · ${versionText(version, commit)}`} className="mb-3 flex w-[64px] flex-col items-center gap-1 text-center short:mb-2 short:gap-0.5">
-      <span className={cn('w-full rounded-md px-1 py-1 text-[11px] leading-tight font-bold', toneOf(instance))}>
+      <span className={cn('w-full rounded-md px-1 py-1 text-[12px] leading-tight font-bold', toneOf(instance))}>
         {main}
         {sub && (
           <>
@@ -39,8 +39,8 @@ export function InstanceTag({ instance, version, commit }: { instance: InstanceK
           </>
         )}
       </span>
-      <span className="num w-full text-[10px] leading-tight break-all text-paper/60">v{version}</span>
-      {commit && <span className="num text-[10px] leading-tight text-paper/60">{commit.slice(0, 7)}</span>}
+      <span className="num w-full text-[12px] leading-tight break-all text-paper/60">v{version}</span>
+      {commit && <span className="num text-[12px] leading-tight text-paper/60">{commit.slice(0, 7)}</span>}
     </div>
   );
 }

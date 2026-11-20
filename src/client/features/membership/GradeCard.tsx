@@ -137,16 +137,16 @@ function Ladder({ rules, info }: { rules: MembershipRules; info: MemberGradeInfo
               <p className={cn('text-[12px] font-bold', current ? 'text-pine' : 'text-ink-2')}>
                 L{i} {g.name}
               </p>
-              <p className="num text-[11px] text-ink-3">{i === 0 ? '免费注册' : `${formatYuan(g.thresholdCents).replace('.00', '')}`}</p>
-              <p className="text-[11px] text-ink-3">{g.bonusBp ? `赠 ${pctOf(g.bonusBp)}` : '不赠'}</p>
+              <p className="num text-[12px] text-ink-3">{i === 0 ? '免费注册' : `${formatYuan(g.thresholdCents).replace('.00', '')}`}</p>
+              <p className="text-[12px] text-ink-3">{g.bonusBp ? `赠 ${pctOf(g.bonusBp)}` : '不赠'}</p>
               <div className="mt-1 flex justify-center gap-0.5">
                 {i === 0 ? (
-                  <span className={cn('rounded px-1.5 text-[11px] font-semibold', current ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-3')}>注册</span>
+                  <span className={cn('rounded px-1.5 text-[12px] font-semibold', current ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-3')}>注册</span>
                 ) : (
                   TIER_LABELS.map((t, k) => (
                     <span
                       key={t}
-                      className={cn('rounded px-1 text-[11px] font-semibold', current && s.tier === k ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-3')}
+                      className={cn('rounded px-1 text-[12px] font-semibold', current && s.tier === k ? 'bg-pine text-paper' : 'bg-paper-2 text-ink-3')}
                       data-current={current && s.tier === k ? 'true' : undefined}
                     >
                       {t}
@@ -198,7 +198,7 @@ function SpendProgress({ info }: { info: MemberGradeInfo }) {
         <div className={cn('h-full rounded-full', pct >= 100 ? 'bg-pine' : 'bg-yuzu')} style={{ width: `${pct}%` }} />
         <span className="absolute inset-y-0 w-0.5 bg-ink-4/60" style={{ left: `${enjoyAt}%` }} aria-hidden />
       </div>
-      <div className="mt-0.5 flex justify-between text-[11px] text-ink-3">
+      <div className="mt-0.5 flex justify-between text-[12px] text-ink-3">
         <span>初</span>
         <span style={{ marginLeft: `${enjoyAt - 10}%` }}>
           享 <Money cents={t.enjoy} />

@@ -148,8 +148,8 @@ export function AdminShell() {
           </p>
           {/* 实例标识与「版本 + SHA」常显（窄屏也显示） */}
           <p className="mt-0.5 flex min-w-0 items-center gap-1.5" data-testid="admin-instance" title={versionText(session.version, session.commit)}>
-            <InstanceBadge instance={session.instance} className="h-5 px-2 text-[11px]" />
-            <span className="num truncate text-[11px] text-paper/60">{versionText(session.version, session.commit)}</span>
+            <InstanceBadge instance={session.instance} className="h-5 px-2 text-[12px]" />
+            <span className="num truncate text-[12px] text-paper/60">{versionText(session.version, session.commit)}</span>
           </p>
         </div>
         <span className="hidden text-[12.5px] text-paper/75 md:inline">
@@ -175,7 +175,7 @@ export function AdminShell() {
           )}
           {groups.map((g) => (
             <div key={g.title} className="flex flex-col gap-0.5">
-              <p className="px-3 pb-1 text-[11.5px] font-bold tracking-wide text-ink-4">{g.title}</p>
+              <p className="px-3 pb-1 text-[12px] font-bold tracking-wide text-ink-4">{g.title}</p>
               {g.items.map((k) => link(k, false))}
             </div>
           ))}

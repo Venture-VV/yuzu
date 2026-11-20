@@ -82,7 +82,7 @@ export function SubNav({ tabs, base, active, label, className }: { tabs: readonl
           >
             {t.label}
             {!!t.badge && (
-              <span key={t.badge} className="num flex h-[18px] min-w-[18px] animate-tick items-center justify-center rounded-full bg-yuzu px-1 text-[11px] font-bold text-ink">
+              <span key={t.badge} className="num flex h-[18px] min-w-[18px] animate-tick items-center justify-center rounded-full bg-yuzu px-1 text-[12px] font-bold text-ink">
                 {t.badge > 99 ? '99+' : t.badge}
               </span>
             )}

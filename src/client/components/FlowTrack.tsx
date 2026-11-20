@@ -65,7 +65,7 @@ export function FlowDot({ state, alert, children, size = 'md' }: { state: FlowSt
 /** 红底的一条：已等待 7 天 · 超期 2 天 */
 export function FlowAlert({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span className={cn('inline-flex max-w-full items-center gap-1 rounded-md bg-clay-soft px-1.5 py-0.5 text-[11.5px] leading-snug font-semibold text-clay', className)}>
+    <span className={cn('inline-flex max-w-full items-center gap-1 rounded-md bg-clay-soft px-1.5 py-0.5 text-[12px] leading-snug font-semibold text-clay', className)}>
       <Hourglass className="size-3 shrink-0" />
       <span className="min-w-0">{children}</span>
     </span>
@@ -126,7 +126,7 @@ export function FlowTrack({ nodes, density = 'full', label, className }: { nodes
                 <span
                   className={cn(
                     'mt-1 font-bold',
-                    compact ? 'text-[11.5px] leading-tight' : 'text-[13px]',
+                    compact ? 'text-[12px] leading-tight' : 'text-[13px]',
                     n.state === 'pending' ? 'text-ink-3' : 'text-ink',
                     compact && selected?.key === n.key && 'text-pine underline decoration-2 underline-offset-4',
                   )}

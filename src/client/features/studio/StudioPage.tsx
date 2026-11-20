@@ -797,7 +797,7 @@ export function StudioPage() {
         })}
         <ToolButton title="批注：在画布上留言，设计师和店主来回说" onClick={() => setRight('comments')} active={right === 'comments'} testId="studio-open-comments">
           <MessageSquare className="size-4" /> <Wide>批注</Wide>
-          {openComments > 0 && <span className="rounded-full bg-clay px-1.5 text-[10.5px] font-bold leading-4 text-white">{openComments}</span>}
+          {openComments > 0 && <span className="rounded-full bg-clay px-1.5 text-[12px] font-bold leading-4 text-white">{openComments}</span>}
         </ToolButton>
         <ToolButton title="检查" onClick={() => setRight('checks')} active={right === 'checks'} testId="studio-open-checks">
           {red ? <TriangleAlert className="size-4 text-clay" /> : <CheckCircle2 className="size-4 text-pine" />}
@@ -990,7 +990,7 @@ export function StudioPage() {
               属性
             </button>
             <button type="button" className={cn('h-9 border-b-2', right === 'checks' ? 'border-pine font-medium text-pine' : 'border-transparent text-ink-3')} onClick={() => setRight('checks')}>
-              检查{red ? <span className="ml-1 rounded-full bg-clay px-1.5 text-[10px] text-white">{red}</span> : null}
+              检查{red ? <span className="ml-1 rounded-full bg-clay px-1.5 text-[12px] text-white">{red}</span> : null}
             </button>
             <button
               type="button"
@@ -998,7 +998,7 @@ export function StudioPage() {
               onClick={() => setRight('comments')}
               data-testid="studio-tab-comments"
             >
-              批注{openComments ? <span className="ml-1 rounded-full bg-clay px-1.5 text-[10px] text-white">{openComments}</span> : null}
+              批注{openComments ? <span className="ml-1 rounded-full bg-clay px-1.5 text-[12px] text-white">{openComments}</span> : null}
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">

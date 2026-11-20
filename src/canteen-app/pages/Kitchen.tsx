@@ -233,7 +233,7 @@ export function KitchenPage({ me, offsetMs }: { me: CanteenMe; offsetMs: number 
             className={cn('flex min-w-[60px] shrink-0 flex-col items-center rounded-2xl px-3 py-2', d === date ? 'bg-ink text-cream' : 'bg-card text-ink-2 ring-1 ring-line')}
           >
             <span className="text-[13px] font-extrabold">{dayLabel(d, today)}</span>
-            <span className="num text-[11px]">{monthDay(d)}</span>
+            <span className="num text-[12px]">{monthDay(d)}</span>
           </button>
         ))}
       </div>
