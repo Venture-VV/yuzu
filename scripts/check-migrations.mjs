@@ -115,11 +115,19 @@ export function findRisks(sql) {
   return findings;
 }
 
-/** git 记下的迁移目录改动：[{ status, file }]（A 新加、M 改了、D 删了、R 改名） */
+/**
+ * 迁移目录相对 base 的改动：[{ status, file }]（A 新加、M 改了、D 删了、R 改名）。
+ * 比的是分叉点与工作区：已提交、暂存、没暂存的都算（Codex 审查 9ef7126：本地改了已有迁移还没提交也要拦住），另加没跟踪的新文件。
+ * 拿不到（没有这个提交）返回 null。
+ */
 function migrationChanges(base) {
+  const run = (args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
+  let untracked = '';
   try {
-    out = execFileSync('git', ['diff', '--name-status', `${base}...HEAD`, '--', DIR], { cwd: ROOT, encoding: 'utf8' });
+    const forkPoint = run(['merge-base', base, 'HEAD']).trim();
+    out = run(['diff', '--name-status', '-M', forkPoint, '--', DIR]);
+    untracked = run(['ls-files', '--others', '--exclude-standard', '--', DIR]);
   } catch {
     return null;
   }
@@ -130,14 +138,8 @@ function migrationChanges(base) {
       const [status, ...files] = line.split('\t');
       return { status: status[0], file: files.at(-1), from: files[0] };
     });
-  // 还没提交的新迁移也算
-  try {
-    const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '--', DIR], { cwd: ROOT, encoding: 'utf8' });
-    for (const f of untracked.split('\n').filter(Boolean)) changes.push({ status: 'A', file: f, from: f });
-  } catch {
-    // 不是 git 仓库：只看已提交的
-  }
-  return changes.filter((c) => c.file.endsWith('.sql'));
+  for (const f of untracked.split('\n').filter(Boolean)) changes.push({ status: 'A', file: f, from: f });
+  return changes.filter((c) => c.file.endsWith('.sql') || c.from.endsWith('.sql'));
 }
 
 function main() {

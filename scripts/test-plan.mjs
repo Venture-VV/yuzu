@@ -316,11 +316,15 @@ export function playwrightArgs(projects, files) {
 
 // ───────────────────────── 读仓库 ─────────────────────────
 
+/** git 命令；失败就抛错（拿不到改动就不能断定「没改」：比对失败时整份计划作废，不输出空计划。Codex 审查 9ef7126） */
 function git(args) {
   try {
-    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  } catch {
-    return '';
+    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    const detail = String(e.stderr ?? e.message ?? '')
+      .trim()
+      .split('\n')[0];
+    throw new Error(`比对失败：git ${args.join(' ')}（${detail}）。先 git fetch 拿到这个提交或标签（CI 里要 fetch-depth: 0），再算测试计划`);
   }
 }
 
@@ -334,23 +338,25 @@ function listFiles(dir, pattern) {
 
 /** 改到的文件与每个文件的改动内容：给了 head 用两个提交之间的；没给就是相对 base 的已提交 + 没提交 + 没跟踪的 */
 function readChanges(base, head) {
+  // 两头都先核对存在，不存在直接报错（不当成没改动）
+  git(['rev-parse', '--verify', '--quiet', `${base}^{commit}`]);
   if (head) {
+    git(['rev-parse', '--verify', '--quiet', `${head}^{commit}`]);
     const changed = git(['diff', '--name-only', `${base}...${head}`])
       .split('\n')
       .filter(Boolean);
     const diffs = Object.fromEntries(changed.map((f) => [f, git(['diff', '-U0', `${base}...${head}`, '--', f])]));
     return { changed, diffs };
   }
-  const committed = git(['diff', '--name-only', `${base}...HEAD`])
-    .split('\n')
-    .filter(Boolean);
-  const working = git(['diff', '--name-only', 'HEAD']).split('\n').filter(Boolean);
+  // 本机：相对分叉点的已提交 + 暂存 + 没暂存 + 没跟踪的
+  const forkPoint = git(['merge-base', base, 'HEAD']).trim();
+  const tracked = git(['diff', '--name-only', forkPoint]).split('\n').filter(Boolean);
   const untracked = git(['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean);
-  const changed = [...new Set([...committed, ...working, ...untracked])].sort();
+  const changed = [...new Set([...tracked, ...untracked])].sort();
   const diffs = {};
   for (const f of changed) {
     if (untracked.includes(f)) diffs[f] = (readFileSafe(f) ?? '').replace(/^/gm, '+');
-    else diffs[f] = git(['diff', '-U0', base, '--', f]);
+    else diffs[f] = git(['diff', '-U0', forkPoint, '--', f]);
   }
   return { changed, diffs };
 }
@@ -452,7 +458,13 @@ function parseArgs(argv) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const forceFull = process.env.TEST_PLAN_FULL || '';
-  const repo = collectRepo(args);
+  let repo;
+  try {
+    repo = collectRepo(args);
+  } catch (e) {
+    console.error(`✗ ${e.message}`);
+    process.exit(2);
+  }
   const plan = makePlan({ ...repo, forceFull });
   const shards = shardPlan(plan, loadTimings());
   if (args.json) return console.log(JSON.stringify({ ...plan, shards }, null, 2));
