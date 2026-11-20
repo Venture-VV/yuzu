@@ -60,6 +60,15 @@ describe('主导航的业务域', () => {
     // 只管打扫的后勤：房态这一组只有房态中心（原来的「客房」页并进来了）
     const housekeep: Permission[] = ['room.housekeep'];
     expect(visibleStoreNav(canOf(housekeep), session({ permissions: housekeep })).flatMap((d) => d.items.map((i) => i.label))).toEqual(['房态中心']);
+    // 后勤（库存、采购、财务也是后勤，都有「客房打扫、维修」）：客房功能没开时没有房态中心，只用 ERP 的人不多出门店入口（CI e2e/inventory.spec.ts）
+    expect(visibleStoreNav(canOf(housekeep), session({ rooms: false, permissions: housekeep }))).toEqual([]);
+    const kitchen: Permission[] = ['room.housekeep', 'dining.kitchen'];
+    expect(visibleStoreNav(canOf(kitchen), session({ rooms: false, dining: false, permissions: kitchen }))).toEqual([]);
+    // 钟房、收银的岗位客房功能没开也有
+    for (const perm of ['technician.dispatch', 'frontdesk.checkout', 'room.operate'] as Permission[]) {
+      const perms: Permission[] = ['room.housekeep', perm];
+      expect(visibleStoreNav(canOf(perms), session({ rooms: false, permissions: perms })).flatMap((d) => d.items.map((i) => i.label))).toContain('房态中心');
+    }
     expect(storeDomainOf('/room-center')).toBe('rooms');
     expect(storePageOf('/room-center')?.label).toBe('房态中心');
     // 只有管家职责的后勤：会员这一组只剩「管家」，加上所有岗位都能看的导览
