@@ -68,6 +68,9 @@ async function fitsOnTargets(page: Page, testInfo: { project: { name: string } }
   try {
     for (const size of TARGET_SIZES) {
       await page.setViewportSize(size);
+      // 换了尺寸以后，主导航按宽度在展开 / 收起之间切换要等页面重画一两帧（CI 上量得太早会量到切换中的导航）
+      await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+      await page.waitForTimeout(250);
       await visible();
       await expectFits(page);
     }
@@ -110,6 +113,17 @@ async function cleanup(req: APIRequestContext, visitId: number) {
 }
 const newItem = async (req: APIRequestContext, name: string, category: string, price: number) =>
   (await send<{ items: { id: number; name: string }[] }>(req, 'post', '/api/items', { name, category, price })).items.find((i) => i.name === name)!.id;
+/**
+ * 要餐饮（与桌台）开着的用例：先记下原样再打开，结束时恢复。CI 的库里餐饮默认关着，前面的用例（frontdesk-808）结束时也会关掉（CI 3415b67）
+ */
+async function diningOn(req: APIRequestContext, tables: boolean): Promise<() => Promise<void>> {
+  const before = (await getJson<{ rules: { enabled: boolean; tablesEnabled: boolean } }>(req, '/api/admin/dining')).rules;
+  const changed = !before.enabled || (tables && !before.tablesEnabled);
+  if (changed) await send(req, 'put', '/api/admin/dining/rules', { enabled: true, ...(tables ? { tablesEnabled: true } : {}) });
+  return async () => {
+    if (changed) await send(req, 'put', '/api/admin/dining/rules', { enabled: before.enabled, tablesEnabled: before.tablesEnabled });
+  };
+}
 
 test.describe('8.1.17 前台、桌台、退菜、流水', () => {
   test('「流水」的订单详情与结账单同一写法：优惠与赠送写经办人、券抵到的行标「券」；放得下', async ({ page }, testInfo) => {
@@ -163,7 +177,16 @@ test.describe('8.1.17 前台、桌台、退菜、流水', () => {
   });
 });
 
+/** 第二家店的用例换过当前门店：结束后（无论过没过）换回总店 */
+let switchedStore = false;
+
 test.describe('8.1.17 前台、桌台、退菜（会登记单据）', () => {
+  test.afterEach(async ({ page }) => {
+    if (!switchedStore) return;
+    switchedStore = false;
+    const res = await page.request.post('/api/auth/store', { data: { storeId: 1 } });
+    expect(res.ok(), await res.text()).toBe(true);
+  });
   test.beforeEach(({}, testInfo) => {
     test.skip(testInfo.project.name !== '门店电脑', '会登记单据、改规则，只在门店电脑尺寸执行一次');
   });
@@ -219,6 +242,7 @@ test.describe('8.1.17 前台、桌台、退菜（会登记单据）', () => {
   test('按出品口：去掉店员「在水吧下单」「退菜：水吧的菜」，加项目里水吧的菜不能点，点单页水吧的菜没有退菜；改回去照常', async ({ page, browser, baseURL }) => {
     test.setTimeout(180_000);
     const owner = await apiAs(browser, baseURL, 'linlan');
+    const restoreDining = await diningOn(owner, false);
     const s = suffix();
     const st = await send<{ stations: { id: number; name: string }[] }>(owner, 'post', '/api/admin/dining/stations', { name: `E2E8117水吧${s}` });
     const stationId = st.stations.find((x) => x.name === `E2E8117水吧${s}`)!.id;
@@ -266,11 +290,13 @@ test.describe('8.1.17 前台、桌台、退菜（会登记单据）', () => {
     await page.getByTestId('dining-find').click();
     await expect(page.getByTestId(`dining-pending-${water}`).getByRole('button', { name: '退菜' })).toBeVisible();
     await cleanup(owner, visitId);
+    await restoreDining();
   });
 
   test('桌台提醒：维修过了预计恢复时间，格子上写「已过预计恢复时间」，「桌台」页签与页顶写待办；后台规则两项与前台规则的超时加收', async ({ page, browser, baseURL }, testInfo) => {
     test.setTimeout(240_000);
     const owner = await apiAs(browser, baseURL, 'linlan');
+    const restoreDining = await diningOn(owner, true);
     // 桌号最多 12 个字
     const name = `E8117-${Math.random().toString(36).slice(2, 6)}`;
     const created = await send<{ tables: { id: number; name: string }[] }>(owner, 'post', '/api/admin/dining/tables', { name, area: '散桌', seats: 2 });
@@ -303,13 +329,19 @@ test.describe('8.1.17 前台、桌台、退菜（会登记单据）', () => {
       await expectFits(page);
     } finally {
       await owner.post(`/api/dining/tables/${tableId}/restore`, { data: { clientKey: randomUUID() } });
+      await restoreDining();
     }
   });
 
   test('第二家店改本店价要写原因，菜品管理的改价记录能按门店筛', async ({ page }) => {
     test.setTimeout(120_000);
+    // 换回总店放在用例结束后的钩子里（自己有超时）：用例本身超时时 finally 来不及跑完，店主就一直停在第二家店，
+    // 后面的用例都看不到总店的手牌和空间台账（CI 3415b67）
+    switchedStore = true;
     await login(page, 'linlan');
     const req = page.request;
+    // 菜品管理在「餐饮」里：餐饮关着时进不去（CI 的库里默认关着）
+    const restoreDining = await diningOn(req, false);
     const code = `Q${String(Date.now()).slice(-6)}`;
     const storeName = `验收南店${code.slice(-3)}`;
     const store = await send<{ id: number }>(req, 'post', '/api/admin/stores', { code, name: storeName, entityId: 1 });
@@ -347,6 +379,8 @@ test.describe('8.1.17 前台、桌台、退菜（会登记单据）', () => {
       await expectFits(page);
     } finally {
       await req.post('/api/auth/store', { data: { storeId: 1 } });
+      switchedStore = false;
+      await restoreDining();
       const list = await getJson<{ stores: { id: number; code: string; name: string; entityId: number; address: string; phone: string; sortOrder: number; version: number }[] }>(
         req,
         '/api/admin/stores',
