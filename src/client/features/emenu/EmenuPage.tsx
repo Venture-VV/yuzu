@@ -3,7 +3,7 @@
 // 起始页 → 输入手牌、桌号、人数 → 翻菜单、加菜 → 订单抽屉（未下单 / 已下单）、备注 → 服务员输点单密码确认 → 下单成功。
 // 下单与门店系统所有写操作一样带操作编号：提交前把编号与原请求（不含密码）存在这台平板上，断网、超时、服务器出错时进入
 // 「结果待确认」——查回、原样重新提交（再输密码）或确认作废（再输密码）之后才能下新的一单。
-// 菜单每 15 秒向门店系统取一次：价格、估清、上下架、供应时段、后台改的版面都跟得上。
+// 菜单每 15 秒向门店系统取一次：价格、沽清、上下架、供应时段、后台改的版面都跟得上。
 // 8.0.13（docs/EMENU.md 第 11 节）：「中 | EN」一键切换（i18n.tsx）、键盘弹起时页面不缩放（stage.tsx）、
 // 跟手翻页（strip.tsx）与进入 / 退出的动效（motion.tsx、emenu.css）。
 
@@ -28,7 +28,8 @@ import {
   type EmenuSpecView,
 } from '@shared/emenu';
 import { api, ApiError, errorMessage, isRejected, notSentAsRejection, UncertainError } from '../../lib/api';
-import { useCan } from '../../lib/session';
+import { homeIsEmenu } from '../../lib/landing';
+import { useCan, useSession } from '../../lib/session';
 import { uuid } from '../../lib/utils';
 import { Header } from './header';
 import {
@@ -51,6 +52,7 @@ import {
   type Messages,
 } from './i18n';
 import { LogoStacked } from './logo';
+import { ExitKey, LeaveSheet, type LeaveAction } from './exit';
 import { Backdrop, BiText, Frame, InfoModal, ModalButton, ModalNote, SmallDialog, SuccessModal, Toast, type InfoField } from './modals';
 import { DishDetail, OrderDrawer, RemarkDrawer, SearchOverlay, type CartRow, type SearchHit } from './overlays';
 import { flyToOrder, overlayNav } from './motion';
@@ -121,12 +123,13 @@ type Overlay =
   | { kind: 'success' }
   | { kind: 'pending' }
   | { kind: 'end' }
-  | { kind: 'exit' }
+  | { kind: 'leave' }
   | null;
 
 export function EmenuPage() {
   const qc = useQueryClient();
   const can = useCan();
+  const { staff } = useSession();
   const menuQ = useQuery({ queryKey: MENU_KEY, queryFn: () => api.get<EmenuMenu>('/api/emenu/menu'), refetchInterval: 15_000, staleTime: 5_000 });
   const menu = menuQ.data ?? null;
 
@@ -613,6 +616,40 @@ export function EmenuPage() {
   }, [categories, flashId]);
   const pageCtx = (f: FlatPage): PageCtx => pageCtxs.get(f.category.id)!;
 
+  /**
+   * 真的离开电子菜单（8.1.15，TC3、TC7）：记在平板上的这一次点餐先清掉（下一个人进来从起始页开始），再整页跳走——
+   * 返回工作台去门店系统的首页；退出登录回登录页；退出预览回工作台的编辑页（没有工作台权限的回正常的菜单）
+   */
+  const leave = (action: LeaveAction) => {
+    saveState(null);
+    if (action === 'signout') return void api.post('/api/auth/logout').finally(() => window.location.assign('/login'));
+    window.location.assign(action === 'preview' ? (can('studio.edit') ? '/studio/emenu' : '/emenu') : '/');
+  };
+  /**
+   * 返回 / 退出那一层（8.1.15，TC1–TC10）：左下角的键 + 点开的退出界面。弹窗、抽屉、大图开着或正在输入信息时键不显示。
+   * 菜单取不回来、平板点餐没开的那两种画面也有——原来卡在那里只能长按版权行，而那两屏没有版权行
+   */
+  const leaveLayer = (where: 'menu' | 'start', tone: string) => (
+    <>
+      {!overlay && phase !== 'input' && <ExitKey kind={layout.preview ? 'preview' : where === 'menu' ? 'back' : 'exit'} tone={tone} onClick={() => setOverlay({ kind: 'leave' })} />}
+      {overlay?.kind === 'leave' && (
+        <LeaveSheet
+          phase={where}
+          tagCode={session?.tagCode ?? null}
+          cartCount={count}
+          pending={!!pending}
+          staffName={staff.displayName}
+          hasHome={!homeIsEmenu(can)}
+          preview={!!layout.preview}
+          requirePin={menu?.rules.requirePin ?? false}
+          onClose={() => setOverlay(null)}
+          onEnd={reset}
+          onLeave={leave}
+        />
+      )}
+    </>
+  );
+
   if (!menu) {
     return (
       <Stage testId="emenu">
@@ -639,6 +676,7 @@ export function EmenuPage() {
             </>
           )}
         </div>
+        {leaveLayer('start', 'var(--em-ink)')}
       </Stage>
     );
   }
@@ -663,6 +701,7 @@ export function EmenuPage() {
             )}
           </div>
         </div>
+        {leaveLayer('start', 'var(--em-ink)')}
       </Stage>
     );
   }
@@ -804,7 +843,7 @@ export function EmenuPage() {
                 setPhase('menu');
                 lastTouch.current = Date.now();
               }}
-              onExit={() => setOverlay({ kind: 'exit' })}
+              onExit={() => setOverlay({ kind: 'leave' })}
               onLang={langOn ? toggleLang : undefined}
             />
           )}
@@ -893,7 +932,7 @@ export function EmenuPage() {
                 };
                 const result = await send({ key: body.clientKey, body, quantity: count, createdAt: new Date().toISOString() }, pin, false);
                 if (result.outcome === 'uncertain') setOverlay({ kind: 'pending' });
-                // 价格、估清、时段刚变过的：马上取一次最新的菜单
+                // 价格、沽清、时段刚变过的：马上取一次最新的菜单
                 if (result.outcome === 'rejected') void qc.invalidateQueries({ queryKey: MENU_KEY });
               }}
             />
@@ -966,40 +1005,7 @@ export function EmenuPage() {
               </span>
             </SmallDialog>
           )}
-          {overlay?.kind === 'exit' && (
-            <SmallDialog
-              title="退出登录"
-              subtitle="STAFF ONLY"
-              onClose={() => setOverlay(null)}
-              testId="emenu-exit"
-              extra={shown === 'en' ? STAFF_EXTRA.dialog : 0}
-              actions={
-                <>
-                  <ModalButton x={28} y={196} w={140} onClick={() => setOverlay(null)} testId="emenu-exit-cancel">
-                    {m.cancel}
-                  </ModalButton>
-                  <ModalButton
-                    x={192}
-                    y={196}
-                    w={140}
-                    primary
-                    onClick={() => {
-                      void api.post('/api/auth/logout').finally(() => window.location.assign('/login'));
-                    }}
-                    testId="emenu-exit-ok"
-                  >
-                    {m.signOut}
-                  </ModalButton>
-                </>
-              }
-            >
-              {m.exitBody[0]}
-              <br />
-              {m.exitBody[1]}
-              {/* 给员工看的：切到英文时下面再写一遍中文（QZ6） */}
-              {shown === 'en' && <BiText text={`\n${ZH_M.exitBody.join('')}`} />}
-            </SmallDialog>
-          )}
+          {leaveLayer(inMenu ? 'menu' : 'start', inMenu ? 'var(--em-mute)' : menu.rules.coverUrl ? 'var(--em-bg)' : 'var(--em-ink)')}
           <StudioPreviewBand preview={layout.preview} error={layout.previewError} />
           <Toast text={toast} />
         </EmenuTemplatesProvider>

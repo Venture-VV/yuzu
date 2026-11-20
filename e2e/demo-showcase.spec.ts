@@ -1,6 +1,6 @@
 // v0.7.18 演示数据场景块的浏览器核对（飞书需求 RQ-007，docs/DEMO_DATA.md 第 3 节）：在 demo-prepare 准备好的演示库上，
 // 用店主账号只读打开关键页面，看得到场景块的业务——前台在店客人、房态看板、平面图的房态与人员、钟房服务中与待上钟、
-// 厨房待出品与估清、旧账对照；v0.7.19 起还有派对房 X201 使用中、对客导览（区域色块与图标）；v0.7.24 起还有会员体系块
+// 厨房待出品与沽清、旧账对照；v0.7.19 起还有派对房 X201 使用中、对客导览（区域色块与图标）；v0.7.24 起还有会员体系块
 // （到期提醒、补充期名单与今天的降档，本月可享的项目券，后台会员权益）。只读，不改数据（跑完 check、demo-check 照样通过）。
 // 只在准备好的演示库上跑：playwright.config.ts 默认不收这个文件，要设 E2E_DEMO_SHOWCASE=1（CI「演示数据」job 这样跑），只在门店电脑尺寸跑。
 // 账号：店主 linlan，密码 yuzu2026。全部是合成数据。
@@ -88,11 +88,11 @@ test('演示场景：前台、客房与平面图、钟房、厨房、旧账都�
     await expect(page.getByTestId(`clock-waiting-${waiting!.sessionNo}`)).toBeVisible();
   });
 
-  await test.step('厨房：果汁待出、演示果汁估清', async () => {
+  await test.step('厨房：果汁待出、演示果汁沽清', async () => {
     await page.goto('/dining/kitchen');
     await expect(page.getByTestId('kds-col-queued')).toContainText('演示果汁');
     await page.goto('/dining/limits');
-    await expect(page.getByTestId('limit-演示果汁')).toContainText('估清');
+    await expect(page.getByTestId('limit-演示果汁')).toContainText('沽清');
   });
 
   await test.step('旧账对照：四份合成样例', async () => {

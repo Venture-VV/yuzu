@@ -180,10 +180,10 @@ export function NetworkPage() {
               ) : null}
             </li>
             <li>
-              前台（手牌、结账、客房、预约等）：{frontdeskOps.length} 笔
+              发卡台与收银台（手牌、结账、客房、预约等）：{frontdeskOps.length} 笔
               {frontdeskOps.length ? (
                 <Link to="/frontdesk" className="ml-2 text-pine underline">
-                  去前台处理
+                  去处理
                 </Link>
               ) : null}
             </li>

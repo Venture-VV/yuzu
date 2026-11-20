@@ -232,6 +232,18 @@ describe('包房房费折扣（QY-011）', () => {
     firstCheckout = c.id;
     const md = c.payments.find((x) => x.method === 'member_discount')!;
     expect([md.amount, md.memberName, md.ref]).toEqual([off(base, 75), '观澜会员', expect.stringContaining('7.5 折')]);
+    // 8.1.15：结账单的「优惠与赠送」里有这一笔，写明哪一项权益、几折、抵到哪几行；按档阶自动打的，不写经办人
+    const perks = (await api(ctx.app, ctx.clerk, 'GET', `/api/frontdesk/checkouts/${c.id}`)).body.perks as {
+      kind: string;
+      name: string;
+      amount: number;
+      detail: string;
+      operators: unknown[];
+      lineIds: number[];
+    }[];
+    expect(perks).toEqual([expect.objectContaining({ kind: 'member_discount', amount: off(base, 75), detail: '7.5 折，按会员档阶自动打', operators: [] })]);
+    expect(perks[0]!.name).not.toBe('');
+    expect(perks[0]!.lineIds.length).toBeGreaterThan(0);
     // 部门快照：会员折扣只分摊到客房，门票不分
     const items = await ctx.sql<{ category: string; discount: number }[]>`
       SELECT category, sum(discount)::int AS discount FROM checkout_items WHERE checkout_id = ${c.id} GROUP BY 1 ORDER BY 1`;

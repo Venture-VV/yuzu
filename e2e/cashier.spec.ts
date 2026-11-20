@@ -120,7 +120,7 @@ test.describe('完整收银', () => {
     expect(shift.openingCash).toBe(50000);
 
     // ② F2 接待：会员 + 同行女宾（自动建同行组）
-    await nav(page, '前台').click();
+    await nav(page, '发卡台').click();
     await expect(page.getByTestId('tag-board')).toBeVisible();
     const tags = await boardTags(page);
     const member = await pickMember(page, tags);
@@ -161,6 +161,7 @@ test.describe('完整收银', () => {
     await expect(panel.getByTestId('bill-total')).toContainText('58.00');
 
     // ④ 结账：同行两张牌一起结；门票不含餐 12 小时档 499 × 2 + 搓背 58 = 1,056；储值 300 + 美团券 499 + 现金 257
+    await panel.getByTestId('go-cashier').click();
     await panel.getByTestId('action-checkout').click();
     const review = page.getByTestId('checkout-review');
     await expect(review.getByTestId(`checkout-ticket-${memberTag}`)).toContainText('不含餐');
@@ -217,7 +218,7 @@ test.describe('完整收银', () => {
       await login(manager, 'zhangjl');
       await ensureShift(manager);
       const managerBefore = (await currentShift(manager))!;
-      await nav(manager, '前台').click();
+      await nav(manager, '收银台').click();
       await manager.getByTestId('open-checkouts').click();
       const records = manager.getByRole('dialog', { name: '结账记录' });
       await records.getByText(first.checkoutNo).click();
@@ -241,10 +242,10 @@ test.describe('完整收银', () => {
       await expect(slip.getByTestId('print-payment-coupon')).toContainText('（已作废）');
       await slip.close();
 
-      // ⑦ 前台改收现金重新结账：同样 1,056（门票仍是 12 小时档、搓背还在），客人给 1,100 找零 44
+      // ⑦ 收银台改收现金重新结账（8.1.15）：反结账以后这张牌回到待结账清单；同样 1,056（门票仍是 12 小时档、搓背还在），客人给 1,100 找零 44
       await page.reload();
-      await expect(page.getByTestId('tag-board')).toBeVisible();
-      await page.getByTestId(`tag-${memberTag}`).click();
+      await expect(page.getByTestId('cashier-queue')).toBeVisible();
+      await page.getByTestId(`queue-${memberTag}`).click();
       await expect(panel.getByTestId('bill-tag')).toHaveText(memberTag);
       await panel.getByTestId('action-checkout').click();
       await expect(page.getByTestId('checkout-review').getByTestId(`checkout-ticket-${friendTag}`)).toBeVisible();

@@ -432,7 +432,7 @@ export interface EmenuSpecView {
   /** 默认价格档的单价（分） */
   price: number;
   state: EmenuSpecState;
-  /** 今天还剩几份（厨房估清）；null 为不限量 */
+  /** 今天还剩几份（厨房沽清）；null 为不限量 */
   remaining: number | null;
 }
 

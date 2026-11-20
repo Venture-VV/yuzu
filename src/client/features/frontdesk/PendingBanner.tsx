@@ -2,12 +2,10 @@ import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, Hourglass } from 'lucide-react';
-import type { FrontdeskOpLookup } from '@shared/frontdesk';
-import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/utils';
 import { Money } from '../../components/Money';
 import { useToast } from '../../components/Toast';
-import { FRONTDESK_OP_LABELS, isBookingOp, isRoomOp, isTableOp, isTechOp, isUsageOp, removeFrontdeskPending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
+import { FRONTDESK_OP_LABELS, isBookingOp, isRoomOp, isTableOp, isTechOp, isUsageOp, reconcilePending, useFrontdeskPendingForBanner, type FrontdeskPendingOp } from './pending';
 import { onReconnect } from '../../lib/connection';
 
 /**
@@ -22,24 +20,31 @@ export function FrontdeskPendingBanner() {
   const checked = useRef(new Set<string>());
 
   useEffect(() => {
-    const run = () => {
+    // resend：网络刚恢复时才给——发牌没生效的按原编号重提一次；平时（进页面、每分钟）只查回
+    const run = (resend = false) => {
       for (const op of ops) {
         if (checked.current.has(op.key)) continue;
         checked.current.add(op.key);
-        api
-          .get<FrontdeskOpLookup>(`/api/frontdesk/ops/${op.key}?type=${op.type}`)
-          .then((found) => {
-            if (!found.found && !found.abandoned) return;
-            removeFrontdeskPending(op.key);
-            void qc.invalidateQueries({ queryKey: ['frontdesk'] });
-            if (isTableOp(op.type)) void qc.invalidateQueries({ queryKey: ['dining'] });
-            if (isRoomOp(op.type) || isUsageOp(op.type)) void qc.invalidateQueries({ queryKey: ['rooms'] });
-            if (isTechOp(op.type)) void qc.invalidateQueries({ queryKey: ['clockroom'] });
-            if (found.found) {
-              toast({ tone: 'success', title: `已查回：${op.tagCodes.join('、')} 的${FRONTDESK_OP_LABELS[op.type]}已生效`, body: '只生效了一次，无需重新操作。' });
-            }
-          })
-          .catch(() => checked.current.delete(op.key));
+        // 按原编号核对（8.1.15）：已生效、已作废的移除；发牌没生效的按原编号重提一次；重提被拒绝的留着等人处理
+        void reconcilePending(op, resend).then((out) => {
+          if (out.kind === 'pending') {
+            checked.current.delete(op.key);
+            return;
+          }
+          if (out.kind === 'rejected') {
+            toast({ tone: 'error', title: `${op.tagCodes.join('、')} 的${FRONTDESK_OP_LABELS[op.type]}自动重提被拒绝`, body: `${out.message}。这一笔留在「结果待确认」里，请点「去处理」。` });
+            return;
+          }
+          void qc.invalidateQueries({ queryKey: ['frontdesk'] });
+          if (isTableOp(op.type)) void qc.invalidateQueries({ queryKey: ['dining'] });
+          if (isRoomOp(op.type) || isUsageOp(op.type)) void qc.invalidateQueries({ queryKey: ['rooms'] });
+          if (isTechOp(op.type)) void qc.invalidateQueries({ queryKey: ['clockroom'] });
+          if (out.kind === 'found') {
+            toast({ tone: 'success', title: `已查回：${op.tagCodes.join('、')} 的${FRONTDESK_OP_LABELS[op.type]}已生效`, body: '只生效了一次，无需重新操作。' });
+          } else if (out.kind === 'resent') {
+            toast({ tone: 'success', title: `网络恢复，已按原编号补上：${op.tagCodes.join('、')} 的${FRONTDESK_OP_LABELS[op.type]}`, body: '同一个编号只生效一次，不会重复。' });
+          }
+        });
       }
     };
     run();
@@ -50,7 +55,7 @@ export function FrontdeskPendingBanner() {
     // 网络恢复（8.1.3）：马上按原编号再查一遍，不等下一分钟
     const off = onReconnect(() => {
       checked.current.clear();
-      run();
+      run(true);
     });
     return () => {
       clearInterval(timer);
@@ -104,7 +109,8 @@ export function FrontdeskPendingBanner() {
     // 退款单（v0.7.20）回到前台「结账记录」里的原结账单
     if (op.type === 'checkout_refund' && op.checkoutIds?.[0]) params.set('c', String(op.checkoutIds[0]));
     if (op.visitId) params.set('v', String(op.visitId));
-    navigate(`/frontdesk?${params}`);
+    // 8.1.15：结账、退款单在收银台处理，发牌、挂账、换牌、转明细在发卡台
+    navigate(`${op.type === 'checkout' || op.type === 'checkout_refund' ? '/cashier' : '/frontdesk'}?${params}`);
   };
   const anyTable = ops.some((op) => isTableOp(op.type));
   const anyRoom = ops.some((op) => isRoomOp(op.type) || isUsageOp(op.type));
@@ -126,6 +132,7 @@ export function FrontdeskPendingBanner() {
             <span className="hidden text-[12px] text-ink-3 sm:inline">
               {formatDateTime(op.createdAt)} · {op.staffName}
             </span>
+            {op.autoRejected && <span className="text-[12px] font-semibold text-clay">自动重提被拒绝</span>}
             <button type="button" onClick={() => open(op)} className="flex h-7 items-center gap-1 rounded-full bg-pine px-3 text-[12.5px] font-bold text-paper hover:bg-pine-hover">
               去处理 <ArrowRight className="size-3.5" />
             </button>

@@ -224,9 +224,9 @@ test.describe('8.1.6 平板电子菜单与工作台的二次整改', () => {
       const path = new URL(request.url()).pathname;
       if (path === '/api/emenu/orders') {
         posts += 1;
-        // 第一次：服务器出错（结果不明 → 结果待确认）；重新提交：估清（明确拒绝 → 先作废编号再说没有下成）
+        // 第一次：服务器出错（结果不明 → 结果待确认）；重新提交：沽清（明确拒绝 → 先作废编号再说没有下成）
         if (posts === 1) return route.fulfill({ status: 500, json: { error: { code: 'INTERNAL', message: '服务器内部错误' } } });
-        return route.fulfill({ status: 409, json: { error: { code: 'DISH_SOLD_OUT', message: '「和牛牛肉汉堡」今天已估清（卖完了），请换一道菜' } } });
+        return route.fulfill({ status: 409, json: { error: { code: 'DISH_SOLD_OUT', message: '「和牛牛肉汉堡」今天已沽清（卖完了），请换一道菜' } } });
       }
       if (path.endsWith('/abandon')) return route.fulfill({ json: { found: false, abandoned: true } });
       return route.abort();
@@ -251,11 +251,11 @@ test.describe('8.1.6 平板电子菜单与工作台的二次整改', () => {
       await expect(pending.getByTestId('emenu-hint')).toContainText('No placed order found yet');
       await expect(pending.getByTestId('emenu-hint').getByTestId('emenu-zh-line')).toContainText('暂时没有查到已经下单');
 
-      // 重新提交被拒（估清）：先作废编号，再说没有下成——英文按拒绝码，下面是门店系统原来的中文
+      // 重新提交被拒（沽清）：先作废编号，再说没有下成——英文按拒绝码，下面是门店系统原来的中文
       await pending.getByTestId('emenu-pending-retry').click();
       const notice = page.getByTestId('emenu-notice');
       await expect(notice).toContainText('This order was not placed: A dish has just sold out');
-      await expect(notice.getByTestId('emenu-zh-line')).toContainText('「和牛牛肉汉堡」今天已估清');
+      await expect(notice.getByTestId('emenu-zh-line')).toContainText('「和牛牛肉汉堡」今天已沽清');
       await expect(notice.getByTestId('emenu-notice-ok')).toHaveText('OK');
       // 弹窗没有超出屏幕、提示没有压到按钮
       const box = (await notice.boundingBox())!;

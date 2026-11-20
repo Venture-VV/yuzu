@@ -249,7 +249,7 @@ test('只有管家职责的后勤账号：登录直接进管家部；手机上�
     // 管家在门店主导航里只看得到自己能用的页面：有「管家」，没有「后台」「会员」「流水」
     const nav = p.getByRole('navigation', { name: '主导航' });
     await expect(nav.getByRole('link', { name: '管家' })).toBeVisible();
-    for (const hidden of ['后台', '会员', '流水', '前台']) await expect(nav.getByRole('link', { name: hidden, exact: true })).toHaveCount(0);
+    for (const hidden of ['后台', '会员', '流水', '发卡台', '收银台']) await expect(nav.getByRole('link', { name: hidden, exact: true })).toHaveCount(0);
     // 后台进不去：回到管家部
     await p.goto('/admin');
     await expect(p).toHaveURL(/\/concierge$/);

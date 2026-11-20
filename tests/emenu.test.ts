@@ -339,7 +339,7 @@ describe('后台「电子菜单」', () => {
 });
 
 describe('平板上的菜单', () => {
-  it('按排序列出分类与各页；规格的价格读价目表；估清、下架、停用都跟着变', async () => {
+  it('按排序列出分类与各页；规格的价格读价目表；沽清、下架、停用都跟着变', async () => {
     const m = await menu();
     expect(m.enabled).toBe(true);
     expect(m.categories.map((c) => c.name)).toEqual(['西式午餐', '中式午餐', '茶']);
@@ -363,7 +363,7 @@ describe('平板上的菜单', () => {
         .flatMap((p) => p.dishes)
         .flatMap((d) => d?.specs ?? [])
         .find((s) => s.itemId === itemId)!;
-    // 估清
+    // 沽清
     expect((await api(ctx.app, ctx.owner, 'PUT', `/api/kitchen/limits/${item['砂锅焗溪鳗（小份）']}`, { remaining: 0 })).status).toBe(200);
     expect(await specOf(item['砂锅焗溪鳗（小份）']!)).toMatchObject({ state: 'sold_out', remaining: 0 });
     expect((await specOf(item['砂锅焗溪鳗（大份）']!)).state).toBe('ok');
@@ -596,6 +596,20 @@ describe('点单密码', () => {
     expect(JSON.stringify(logs)).not.toContain(clerkPin);
   });
 
+  it('离开菜单前的员工确认（8.1.15，TC5）：点单密码对了回这位同事的名字；不对拒绝、记进同一份限次；没有平板点餐权限的账号用不了', async () => {
+    const ok = await api(ctx.app, pad, 'POST', '/api/emenu/staff-check', { pin: clerkPin });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body).toEqual({ ok: true, displayName: expect.any(String) });
+    const bad = await api(ctx.app, pad, 'POST', '/api/emenu/staff-check', { pin: wrongPin(clerkPin) });
+    expect(bad.status).toBe(403);
+    expect(bad.body.error.code).toBe('PIN_INVALID');
+    expect((await api(ctx.app, pad, 'POST', '/api/emenu/staff-check', {})).status).toBe(400);
+    // 后厨没有「打开平板点餐」：这个接口也不让用
+    expect((await api(ctx.app, cook, 'POST', '/api/emenu/staff-check', { pin: clerkPin })).status).toBe(403);
+    // 对的一次把这台平板的失败次数清掉（下面那条用例从 0 次数起）
+    expect((await api(ctx.app, pad, 'POST', '/api/emenu/staff-check', { pin: clerkPin })).status).toBe(200);
+  });
+
   it('输错 5 次这台平板锁 5 分钟，别的平板不受影响；没有点单权限的密码被拒（不算输错）；收回、停用以后不能用', async () => {
     const line = [{ itemId: item['华夫牛角']!, quantity: 1 }];
     const bad = wrongPin(clerkPin);
@@ -766,11 +780,11 @@ describe('下单', () => {
     expect(g.orderedTotal).toBe(20600);
   });
 
-  it('各种拒绝：价格变了、估清、不在电子菜单、不在时段、桌号、手牌换了人、备注选项、格式', async () => {
+  it('各种拒绝：价格变了、沽清、不在电子菜单、不在时段、桌号、手牌换了人、备注选项、格式', async () => {
     const waffle = [{ itemId: item['华夫牛角']!, quantity: 1 }];
     const code = async (p: Promise<{ status: number; body: { error?: { code: string } } }>) => (await p).body.error?.code;
     expect(await code(order(waffle, 3900))).toBe('PRICE_CHANGED');
-    // 估清
+    // 沽清
     await api(ctx.app, ctx.owner, 'PUT', `/api/kitchen/limits/${item['华夫牛角']}`, { remaining: 1 });
     expect(await code(order([{ itemId: item['华夫牛角']!, quantity: 2 }], 7600))).toBe('DISH_SOLD_OUT');
     await api(ctx.app, ctx.owner, 'PUT', `/api/kitchen/limits/${item['华夫牛角']}`, { remaining: null });

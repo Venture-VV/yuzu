@@ -4,14 +4,17 @@
 //     输自己的账号密码，授权绑定这一条与金额，5 分钟内有效、只能用一次；
 //   · 改单：退掉这道（同样分级）后把它放回购物车，改数量或换菜再下单。
 // 服务端照同样的规则核对（判断不一致时以服务端为准：提示要授权就转到授权）。
+// 8.1.15（块 B2）：退菜时选责任岗位（服务员 / 厨房 / 水吧 / 果吧 / 客人原因 / 其他），记在审计里，台账的退菜行写出来。
 
 import { useState } from 'react';
 import { formatYuan } from '@shared/money';
 import { isSmallDishVoid } from '@shared/dining';
+import { VOID_BLAME_LABELS, VOID_BLAMES, type VoidBlame } from '@shared/dining-v8115';
 import type { LineVoidGrantRequest } from '@shared/grants';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
+import { cn } from '../../lib/utils';
 import { AuthorizeDialog } from '../../components/AuthorizeDialog';
 import { Dialog } from '../../components/Overlay';
 import { Button, Field, Input, Notice } from '../../components/ui';
@@ -48,12 +51,14 @@ export function DishVoidDialog({
   const can = useCan();
   const menu = useDiningMenu();
   const [reason, setReason] = useState('');
+  const [blame, setBlame] = useState<VoidBlame | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forceGrant, setForceGrant] = useState(false);
   const [authorizing, setAuthorizing] = useState(false);
   useResetOnOpen(!!dish, () => {
     setReason(mode === 'modify' ? '改单' : '');
+    setBlame(null);
     setError(null);
     setForceGrant(false);
     setAuthorizing(false);
@@ -76,13 +81,13 @@ export function DishVoidDialog({
         : mine
           ? `你点的、${selfMinutes} 分钟内：直接退`
           : `超过${limit > 0 ? `小额上限 ${formatYuan(limit)}` : '上限'}：请值班经理及以上当场授权`;
-  const ok = reason.trim().length >= 2;
+  const ok = reason.trim().length >= 2 && blame !== null;
 
   const send = async (grantId?: string) => {
     setBusy(true);
     setError(null);
     try {
-      const result = await api.post<unknown>(url, { reason: reason.trim(), ...(grantId ? { grantId } : {}) });
+      const result = await api.post<unknown>(url, { reason: reason.trim(), ...(blame ? { blame } : {}), ...(grantId ? { grantId } : {}) });
       onDone(dish, result);
     } catch (e) {
       if (e instanceof ApiError && e.code === 'VOID_NEEDS_GRANT') {
@@ -111,7 +116,7 @@ export function DishVoidDialog({
         description={
           mode === 'modify'
             ? '先退掉这道（作废这条挂账，留痕），再把它放回购物车，改数量或换菜后重新下单。'
-            : `${dish.served ? '这道菜已经出餐了。' : ''}退菜就是作废这条挂账（留痕，不收这道菜的钱），厨房屏上显示「已退」；估清的菜按原份数加回。`
+            : `${dish.served ? '这道菜已经出餐了。' : ''}退菜就是作废这条挂账（留痕，不收这道菜的钱），厨房屏上显示「已退」；沽清的菜按原份数加回。`
         }
         footer={
           <>
@@ -139,7 +144,7 @@ export function DishVoidDialog({
         <p className="mb-3 text-[12.5px] text-ink-3" data-testid="dish-void-tier">
           {forceGrant ? '请值班经理及以上当场授权' : tierText}
         </p>
-        <Field label="原因" htmlFor="reason-text" hint="至少 2 个字，记在明细与退菜记录里">
+        <Field label="原因" htmlFor="reason-text" hint="至少 2 个字，记在明细与台账的退菜里">
           <Input
             id="reason-text"
             value={reason}
@@ -149,6 +154,26 @@ export function DishVoidDialog({
             data-autofocus
             data-testid="dish-void-reason"
           />
+        </Field>
+        <Field label="责任岗位" hint="是谁的原因：记在台账的退菜里，月底按岗位看">
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="责任岗位" data-testid="dish-void-blame">
+            {VOID_BLAMES.map((b) => (
+              <button
+                key={b}
+                type="button"
+                role="radio"
+                aria-checked={blame === b}
+                onClick={() => setBlame(b)}
+                className={cn(
+                  'h-11 rounded-full border px-3.5 text-[13.5px] font-semibold',
+                  blame === b ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong',
+                )}
+                data-testid={`dish-void-blame-${b}`}
+              >
+                {VOID_BLAME_LABELS[b]}
+              </button>
+            ))}
+          </div>
         </Field>
         {error && <Notice tone="error" title={error} className="mt-3" />}
       </Dialog>

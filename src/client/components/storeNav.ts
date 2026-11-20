@@ -2,6 +2,7 @@
 // 库存、采购、货款、待办在 ERP 工作区（v0.7.3，用户菜单「进入 ERP」），不在这里。
 
 import {
+  Banknote,
   BedDouble,
   CalendarCheck2,
   CalendarClock,
@@ -19,8 +20,10 @@ import {
   BriefcaseBusiness,
 } from 'lucide-react';
 import { ADMIN_ENTRY_PERMISSIONS } from '@shared/admin';
+import { deskEntries } from '@shared/frontdesk';
 import type { Permission } from '@shared/permissions';
 import { useCan, useSession } from '../lib/session';
+import { DISH_PERMISSIONS } from '@shared/dishes';
 
 export interface StoreNavItem {
   to: string;
@@ -41,7 +44,12 @@ export interface StoreNavItem {
 // 前台与会员储值、管理后台是独立的业务组，导航中用分隔线区分
 const STORE_NAV: StoreNavItem[][] = [
   [
-    { to: '/frontdesk', label: '前台', icon: ConciergeBell, perm: 'frontdesk.read' },
+    // 8.1.15（docs/DESKS_V8115.md）：原「前台」按业务环节拆成两个台——发卡台管入场（接待发牌、会员等级识别、换牌），
+    // 收银台管离店结账（只读账单、预结账、结账、结账记录）。两个都按「查看在店手牌」显示，台里的操作照各自的权限
+    // 8.1.15 前台 1 细化（YB2）：入口再按各自的权限分——有「接待发牌、挂账、换牌」的看得到发卡台，有「结账收款」的看得到收银台；
+    // 两项都没有、只有查看的两个都看得到（进去只能看）。规则在 @shared/frontdesk 的 deskEntries
+    { to: '/frontdesk', label: '发卡台', icon: ConciergeBell, perm: 'frontdesk.read', when: (s) => deskEntries(s.permissions).issue },
+    { to: '/cashier', label: '收银台', icon: Banknote, perm: 'frontdesk.read', when: (s) => deskEntries(s.permissions).cashier },
     { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
     // 8.0.8：看日结的（导出流水、经营总览）也能进来看「台账」「退菜记录」
     { to: '/dining', label: '餐饮', icon: UtensilsCrossed, perm: ['dining.order', 'dining.kitchen', 'frontdesk.checkout', 'ledger.export', 'report.executive'], when: (s) => s.dining },
@@ -64,6 +72,8 @@ const STORE_NAV: StoreNavItem[][] = [
     { to: '/guide', label: '导览', icon: MapPinned, perm: 'guide.view', guestFacing: true },
     // 设备（v0.7.21，RQ-001）：一屏看全部设备、本机终端
     { to: '/devices', label: '设备', icon: Printer, perm: 'device.view' },
+    // 菜品管理（8.1.15，docs/DISHES_V8115.md，CP7）：平时是「餐饮」里的一个页签；只有菜品权限、进不了餐饮的岗位（少见）才显示这个入口
+    { to: '/dishes', label: '菜品', icon: UtensilsCrossed, perm: [...DISH_PERMISSIONS], when: (s) => s.dining && !canEnter('/dining', s.permissions) },
   ],
   // 管理后台是单独的一套页面（规则、价目、手牌池、员工与权限、数据看板）；只有看板权限的岗位进去只看得到数据看板
   [{ to: '/admin', label: '后台', icon: Settings2, perm: [...ADMIN_ENTRY_PERMISSIONS] }],
@@ -82,4 +92,10 @@ export function useStoreNav(): StoreNavItem[][] {
   const can = useCan();
   const session = useSession();
   return STORE_NAV.map((group) => group.filter((n) => (Array.isArray(n.perm) ? n.perm : [n.perm]).some((p) => can(p)) && (!n.when || n.when(session)))).filter((group) => group.length > 0);
+}
+
+/** 这位账号的权限进不进得了主导航里的某个页面（只看权限，不看功能开没开） */
+function canEnter(to: string, permissions: readonly Permission[]): boolean {
+  const item = STORE_NAV.flat().find((n) => n.to === to);
+  return !!item && (Array.isArray(item.perm) ? item.perm : [item.perm]).some((p) => permissions.includes(p));
 }

@@ -99,7 +99,7 @@ test.describe('收银完善（v0.7.20）', () => {
       const before = await shiftCash();
 
       // 结账记录 → 打开这张单 → 部分退款
-      await page.goto('/frontdesk');
+      await page.goto('/cashier');
       await page.getByTestId('open-checkouts').click();
       const dialog = page.getByRole('dialog', { name: '结账记录' });
       await dialog.getByTestId('checkout-records').getByRole('button').filter({ hasText: paid.checkoutNo }).click();
@@ -214,6 +214,7 @@ test.describe('收银完善（v0.7.20）', () => {
       await page.goto(`/frontdesk?v=${visitId}`);
       const bill = page.getByTestId('bill-panel');
       await expect(bill.getByTestId('bill-tag')).toHaveText(tag);
+      await bill.getByTestId('go-cashier').click();
       await bill.getByTestId('action-checkout').click();
       await expect(page.getByTestId('checkout-total')).toBeVisible();
       await page.getByTestId('pay-add-store_coupon').click();

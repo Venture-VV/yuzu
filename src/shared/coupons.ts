@@ -335,6 +335,6 @@ export interface CheckoutCouponOption {
   usable: boolean;
   amount: number;
   reason: string | null;
-  /** 签赠券（8.1.9）：板块，发放时的授权人、渠道、事由；普通券为 null */
-  gift: { segment: string; authorizerName: string; channel: string; reason: string } | null;
+  /** 签赠券（8.1.9）：板块，发放时的授权人、渠道、事由；8.1.15 起还有发放人（收银台账单上写全经办人）；普通券为 null */
+  gift: { segment: string; authorizerName: string; channel: string; reason: string; issuerName: string } | null;
 }

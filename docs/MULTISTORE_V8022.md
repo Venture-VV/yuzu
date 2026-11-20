@@ -50,7 +50,7 @@
 | 设备 | `devices`（「门店 + 编号」唯一）、`device_jobs` | 设备页、打印机清单、终端只看当前门店的；打小票只打当前门店的打印机 |
 | 客房与预约 | `room_types`、`rooms`（「门店 + 房号」唯一）、`room_stays`、`bookings` | 房态、入住、预约只看当前门店 |
 | 技师与钟房 | `technicians`（「门店 + 工号」唯一）、`technician_sessions` | 技师牌、轮牌、派钟只在当前门店的技师里排；轮牌锁按门店分 |
-| 餐饮与桌台 | `dining_tables`（「门店 + 名称」唯一）、`table_sessions`、`kitchen_items`、`emenu_orders` | 点单、桌台、出品屏只看当前门店的出品单；出品档口（`kitchen_stations`）是全公司一套的分类（实现时定，MD21），估清（`dish_limits`）这一版全公司一份（MD13） |
+| 餐饮与桌台 | `dining_tables`（「门店 + 名称」唯一）、`table_sessions`、`kitchen_items`、`emenu_orders` | 点单、桌台、出品屏只看当前门店的出品单；出品档口（`kitchen_stations`）是全公司一套的分类（实现时定，MD21），沽清（`dish_limits`）这一版全公司一份（MD13） |
 | 空间与底图 | `floors`、`zones`、`spaces`（「门店 + 代码」唯一）、`space_usages`、`floorplan_batches`（每家店一份在用的底图）、`location_readers`、`current_locations`、`guide_markers` | 空间台账、底图、房态图、实时位置、对客导览都按店 |
 | 审计 | `audit_logs` | 记一列门店；审计页可以按店筛 |
 
@@ -97,7 +97,7 @@
 | 编号 | 事项 | 默认 |
 | --- | --- | --- |
 | MD12 | 时区 | 全系统一个（`APP_TIMEZONE`）；门店档案里只记不分，跨时区开店时再拆 |
-| MD13 | 估清（菜卖完） | 全公司一份；两家店各自估清时再拆 |
+| MD13 | 沽清（菜卖完） | 全公司一份；两家店各自沽清时再拆 |
 | MD14 | 单号要不要带门店 | 不带：计数器全公司一个，第二家店接着往下排，不会撞号 |
 | MD15 | 成本 | 移动加权平均全公司一个（同一物料各店一个成本） |
 | MD16 | 部门小仓 | 部门全公司一套；部门小仓按「部门 + 门店」各一个，用到才建 |

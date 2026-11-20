@@ -219,6 +219,7 @@ test.describe('S7 客房', () => {
       const panel = page.getByTestId('bill-panel');
       await expect(panel.getByTestId('bill-tag')).toHaveText(g.tag);
       await expect(panel).toContainText(`房费 ${R1}`);
+      await panel.getByTestId('go-cashier').click();
       await panel.getByTestId('action-checkout').click();
       const rooms = page.getByTestId('checkout-rooms');
       await expect(rooms).toContainText(R2);

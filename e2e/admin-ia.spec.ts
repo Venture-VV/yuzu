@@ -83,7 +83,7 @@ test.describe('8.0.17 后台的信息架构', () => {
     };
     // 8.0.18：「库存与采购」归了 ERP（ERP 设置 → 库存与审批开关），e2e/erp-ia.spec.ts 核对旧地址的跳转
     await tabs('/admin/rules', ['基本与收款', '交班方式', '可调的数值']);
-    await tabs('/admin/tags', ['前台规则', '手牌池', '建牌与导入']);
+    await tabs('/admin/tags', ['前台规则', '手牌池', '黑名单', '建牌与导入']);
     await tabs('/admin/dining', ['餐饮规则', '档口与出品', '桌台']);
     await tabs('/admin/rooms', ['客房规则', '房型与房价', '房间', '渠道']);
     await tabs('/admin/catalog', ['消费项目', '门票', '充值套餐', '导入价目表']);

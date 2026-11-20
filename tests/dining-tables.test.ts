@@ -130,7 +130,7 @@ describe('开台、点单、转台、退菜、撤台', () => {
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/sessions/${won.id}/cancel`, { reason: '测试并发' })).status).toBe(200);
   });
 
-  it('点单到桌台：记在这桌的账单（餐饮），出品单显示桌号；只能点进厨房的菜；估清同样扣减；同一编号只下一次', async () => {
+  it('点单到桌台：记在这桌的账单（餐饮），出品单显示桌号；只能点进厨房的菜；沽清同样扣减；同一编号只下一次', async () => {
     const s = (await board()).tables.find((t) => t.name === 'A1')!.session!;
     const key = randomUUID();
     const r = await order(
@@ -195,7 +195,7 @@ describe('开台、点单、转台、退菜、撤台', () => {
     expect((await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/sessions/${other.id}/cancel`, { reason: '开错桌' })).body.status).toBe('cancelled');
   });
 
-  it('退菜：作废明细、出品单已退、估清加回；有没结的菜不能撤台，退完可以撤', async () => {
+  it('退菜：作废明细、出品单已退、沽清加回；有没结的菜不能撤台，退完可以撤', async () => {
     const s = (await open(table['包1']!, { guests: 6 })).body;
     expect((await limit(item['宫保鸡丁']!, 5)).status).toBe(200);
     const r = await order(s.id, [{ itemId: item['宫保鸡丁']!, quantity: 2 }], 9600);

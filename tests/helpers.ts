@@ -33,14 +33,18 @@ export async function legacySwitchesOff(sql: Sql): Promise<void> {
   const off = { enabled: false };
   await sql`INSERT INTO settings (key, value) VALUES
     ('technician_rules', ${sql.json(off)}), ('room_rules', ${sql.json(off)}), ('emenu_rules', ${sql.json(off)}), ('location_rules', ${sql.json(off)}),
-    ('dining_rules', ${sql.json({ enabled: false, tablesEnabled: false })}),
+    -- 8.1.15 块 B1：结账以后先待清台（默认开）；之前的用例按结账后桌台直接可用编写，这里关上，新行为由 tests/dining-v8115*.test.ts 打开了验证
+    ('dining_rules', ${sql.json({ enabled: false, tablesEnabled: false, clearAfterCheckout: false })}),
     ('erp_modules', ${sql.json({ canteen: false, patrol: false })}),
     ('wecom_weekly_push', 'false'::jsonb),
     -- 自动补货（8.0.20 新加的）到点会自己建采购单草稿，结果随钟点变；别的用例里关着，它自己的用例里打开
     ('auto_replenish', ${sql.json({ enabled: false })}),
     -- 提需核库（8.1.10，CK12）：开着时选了物料、总仓有货的需求单先进「待核库」、核完才能审核；之前的用例按提交即待审核编写，
     -- 这里关上，核库的行为由 tests/stock-check.test.ts 打开了验证
-    ('purchase_rules', ${sql.json({ stockCheckEnabled: false })})
+    ('purchase_rules', ${sql.json({ stockCheckEnabled: false })}),
+    -- 发牌前风控（8.1.15，docs/FRONTDESK_RISK_V8115.md）：开着时发牌会把会员当天待到店的预约顺带标成「已到店」，
+    -- 之前的预约用例是发牌以后再点到店；这里关上，风控的行为由 tests/frontdesk-risk.test.ts 打开了验证
+    ('frontdesk_risk_rules', ${sql.json(off)})
     ON CONFLICT (key) DO NOTHING`;
 }
 
@@ -340,6 +344,9 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '184_gifts.sql',
   '185_stock_check.sql',
   '186_urgent_contract.sql',
+  '187_frontdesk_risk.sql',
+  '188_dining_tables_v8115.sql',
+  '189_dishes.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

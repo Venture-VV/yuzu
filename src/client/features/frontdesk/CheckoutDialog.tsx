@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { invalidateRevenue, useBusinessToday } from '../../lib/revenue';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { Banknote, CircleCheck, Clock3, LogOut, ReceiptText, ShieldCheck, Ticket, Undo2 } from 'lucide-react';
+import { Banknote, CircleCheck, Clock3, Gift, LogOut, ReceiptText, ShieldCheck, Ticket, Undo2 } from 'lucide-react';
 import {
   CHECKOUT_METHOD_LABELS,
   COUPON_PLATFORM_LABELS,
   isFreeTicket,
+  PERK_KIND_LABELS,
+  perkOperatorsText,
+  perksTotal,
   priceTicket,
   ticketChangeNeedsGrant,
   type CheckoutDetail,
+  type CheckoutPerk,
   type CheckoutPreview,
   type RefundShiftOptions,
   type RefundSummary,
@@ -640,7 +644,26 @@ function ReviewTable({
 const isTableCheckout = (d: CheckoutDetail) => d.bills.some((b) => b.tableSessionId !== null);
 
 /** 结账单：所结手牌（桌台）、门票与收款明细 */
+/** 一笔优惠 / 赠送：类别、名称、减了多少，下面一行是说明与经办人（发放、授权、渠道） */
+export function PerkRow({ perk }: { perk: CheckoutPerk }) {
+  const sub = [perk.name ? perk.detail : '', perkOperatorsText(perk)].filter(Boolean).join(' · ');
+  return (
+    <div data-testid={`checkout-perk-${perk.kind}`}>
+      <p className="flex items-baseline gap-2">
+        <Badge tone={perk.kind === 'gift' ? 'yuzu' : perk.kind === 'discount' ? 'clay' : 'pine'}>{PERK_KIND_LABELS[perk.kind]}</Badge>
+        <span className="min-w-0 flex-1 truncate font-semibold">{perk.name || perk.detail}</span>
+        <span className="num shrink-0 font-bold">
+          −<Money cents={perk.amount} />
+        </span>
+      </p>
+      {sub && <p className="mt-0.5 text-[12px] break-all text-ink-3">{sub}</p>}
+    </div>
+  );
+}
+
 export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
+  const perkPayments = new Set(detail.perks.map((k) => k.paymentId));
+  const tenders = detail.payments.filter((pm) => !perkPayments.has(pm.id));
   return (
     <div className="space-y-3" data-testid="checkout-receipt">
       <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-ink-3">
@@ -703,9 +726,24 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
             ))}
           </tbody>
         </table>
+        {/* 优惠与赠送（8.1.15）：签赠、券、会员折扣、优惠 / 免单各一笔，写明经办人；下面只列真收的钱与预付抵扣 */}
+        {detail.perks.length > 0 && (
+          <div className="space-y-1.5 border-t border-line bg-yuzu-soft/40 px-3 py-2.5 text-[13px]" data-testid="checkout-perks">
+            <p className="flex items-center gap-1 text-[12px] font-bold text-ink-3">
+              <Gift className="size-3.5" /> 优惠与赠送
+            </p>
+            {detail.perks.map((k) => (
+              <PerkRow key={k.paymentId} perk={k} />
+            ))}
+            <p className="flex items-baseline justify-between border-t border-dashed border-line pt-1.5">
+              <span className="font-semibold">共优惠</span>
+              <Money cents={perksTotal(detail.perks)} className="font-bold text-yuzu-deep" />
+            </p>
+          </div>
+        )}
         <div className="space-y-1 border-t border-line bg-paper/60 px-3 py-2.5 text-[13px]">
-          {detail.payments.length === 0 && <p className="text-ink-3">应收为 0，未收款</p>}
-          {detail.payments.map((pm) => (
+          {tenders.length === 0 && <p className="text-ink-3">{detail.perks.length > 0 ? '优惠后应付为 0，未收款' : '应收为 0，未收款'}</p>}
+          {tenders.map((pm) => (
             <p key={pm.id} className="flex flex-wrap items-baseline gap-2">
               <span className="font-semibold">{CHECKOUT_METHOD_LABELS[pm.method]}</span>
               <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">
@@ -713,9 +751,7 @@ export function CheckoutReceipt({ detail }: { detail: CheckoutDetail }) {
                   ? `${pm.memberName ?? ''} · ${pm.consumption.docNo} · 本金 ¥${(pm.consumption.principal / 100).toFixed(2)} / 赠金 ¥${(pm.consumption.bonus / 100).toFixed(2)}${pm.consumption.status === 'reversed' ? '（已撤销）' : ''}`
                   : pm.method === 'coupon' && pm.coupon
                     ? `${COUPON_PLATFORM_LABELS[pm.coupon.platform]} ${pm.coupon.code}${pm.coupon.dealName ? ` · ${pm.coupon.dealName}` : ''}${pm.coupon.status === 'voided' ? '（已作废）' : ''}`
-                    : pm.method === 'discount'
-                      ? `${pm.ref} · ${pm.approvedByName ?? ''}授权`
-                      : pm.ref}
+                    : pm.ref}
               </span>
               <Money cents={pm.amount} className="font-bold" />
             </p>

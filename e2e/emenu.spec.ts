@@ -3,7 +3,7 @@
 //    后台排菜单（分类、版面、菜品图文、设置）→ 员工账号里给服务员生成点单密码、本人在「修改密码」页重新生成
 //    →「点餐平板」账号首次登录改密码后直接进点餐页，别的页面与接口进不去 → 输手牌、桌号、人数 → 翻页、加菜、
 //    多规格进详情选、搜索 → 未下单里加减、备注 → 旧的点单密码被拒、新的下单成功 → 已下单；
-//    前台账单与厨房屏有这一单（经办人是服务员、带桌号与整单备注）；估清后平板标「已售罄」；点手牌结束点餐。
+//    前台账单与厨房屏有这一单（经办人是服务员、带桌号与整单备注）；沽清后平板标「已售罄」；点手牌结束点餐。
 // ② 各尺寸（门店电脑、平板横屏、平板竖屏）：合成菜单代替接口、只读——整页按 1024×768 等比缩放、不出滚动条，
 //    1024×768 时几处文字正好在设计稿量的位置上。
 // ③ 8.0.13（docs/EMENU.md 第 11 节，合成菜单、只读）：「中 | EN」切换（录了英文的显示英文、没录的显示中文、切回来位置不变、
@@ -88,7 +88,7 @@ async function prepareByApi(page: Page) {
   const stationId = dining.stations.find((s) => s.name === STATION)!.id;
   await send(page, 'put', '/api/admin/dining/items', { items: ITEMS.map((it) => ({ id: itemId(it.name), stationId })) });
   await send(page, 'put', '/api/admin/dining/rules', { enabled: true, trackServed: true, warnMinutes: 15 });
-  // 上一轮留下的估清先取消
+  // 上一轮留下的沽清先取消
   for (const it of ITEMS) await send(page, 'put', `/api/kitchen/limits/${itemId(it.name)}`, { remaining: null });
 
   let admin = await getJson<EmenuAdmin>(page, '/api/admin/emenu');
@@ -257,7 +257,7 @@ const clearEmenuStorage = (page: Page) =>
   );
 
 test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
-  test('后台排菜单、发点单密码 → 平板账号登录 → 点餐、备注、服务员确认下单 → 账单与厨房屏 → 估清 → 结束点餐', async ({ page, browser, baseURL }, info) => {
+  test('后台排菜单、发点单密码 → 平板账号登录 → 点餐、备注、服务员确认下单 → 账单与厨房屏 → 沽清 → 结束点餐', async ({ page, browser, baseURL }, info) => {
     test.skip(info.project.name !== '门店电脑', '会写数据的流程只在门店电脑这一组执行一次（平板那一段另开 1024×768 的窗口）');
     test.setTimeout(300_000);
     await loginStaff(page, 'linlan');
@@ -546,7 +546,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
       await expect(page.getByTestId('bill-panel')).toContainText(ITEMS[1].name);
       await expect(page.getByTestId('bill-panel')).toContainText(ITEMS[2].name);
 
-      // ⑩ 估清：厨房把柠檬茶设成估清，平板刷新后标「已售罄」、加号点不了；这一次点餐（手牌、桌号）刷新后还在
+      // ⑩ 沽清：厨房把柠檬茶设成沽清，平板刷新后标「已售罄」、加号点不了；这一次点餐（手牌、桌号）刷新后还在
       await send(page, 'put', `/api/kitchen/limits/${teaItem}`, { remaining: 0 });
       await pad.reload();
       await expect(pad.getByTestId('emenu-tag')).toContainText(tag);
@@ -712,7 +712,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
         const body = req.postDataJSON() as { clientKey: string; expectedTotal: number };
         seen.posts.push(body.clientKey);
         if (mode === 'drop') return route.abort('connectionreset');
-        if (mode === 'reject') return route.fulfill({ status: 422, json: { error: { code: 'DISH_SOLD_OUT', message: '「广式猪脚姜浸花胶」今天已经估清了' } } });
+        if (mode === 'reject') return route.fulfill({ status: 422, json: { error: { code: 'DISH_SOLD_OUT', message: '「广式猪脚姜浸花胶」今天已经沽清了' } } });
         // 门店系统要 1.5 秒才答复（排锁、网慢）
         await new Promise((r) => setTimeout(r, 1500));
         return route.fulfill({ json: { orderNo: 'D0001', tableName: 'A01', guests: 2, total: body.expectedTotal, quantity: 1, waiterName: '测试服务员', replayed: false, guest } });
@@ -784,7 +784,7 @@ test.describe('8.0.10 点餐系统 · 平板电子菜单', () => {
     await pendingModal.getByTestId('emenu-pending-retry').click();
     const notice = page.getByTestId('emenu-notice');
     await expect(notice).toContainText('这一单没有下成');
-    await expect(notice).toContainText('今天已经估清了');
+    await expect(notice).toContainText('今天已经沽清了');
     expect(seen.posts).toEqual([seen.posts[0], firstKey, firstKey]);
     expect(seen.abandons).toBe(1);
     expect(await page.evaluate(() => localStorage.getItem('yuzu.emenu.pending.v1'))).toBeNull();

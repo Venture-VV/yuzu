@@ -62,6 +62,7 @@ test.describe('R1.2 收银', () => {
     }
     const code = await newGuest(page);
     await openBill(page, code);
+    await page.getByTestId('bill-panel').getByTestId('go-cashier').click();
     await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
     await expect(page.getByTestId('checkout-review')).toBeVisible();
 
@@ -94,7 +95,9 @@ test.describe('R1.2 收银', () => {
     await page.getByTestId('checkout-submit').click();
     const receipt = page.getByTestId('checkout-receipt');
     await expect(receipt).toContainText('优惠 / 免单');
-    await expect(receipt).toContainText('抹零 · 张经理授权');
+    // 8.1.15：优惠 / 免单写在「优惠与赠送」一栏，带原因与授权人
+    await expect(receipt.getByTestId('checkout-perk-discount')).toContainText('抹零');
+    await expect(receipt.getByTestId('checkout-perk-discount')).toContainText('授权 张经理');
     await page.getByTestId('checkout-finish').click();
 
     // 交班表：优惠单列，不计入应有现金

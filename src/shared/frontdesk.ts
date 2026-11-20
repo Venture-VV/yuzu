@@ -5,6 +5,7 @@
 import type { BackfillMark } from './backfill';
 import type { PriceTier } from './catalog';
 import type { CheckoutDetail } from './checkout';
+import type { VisitIncident } from './frontdesk-risk';
 import type { MemberGradeBadge } from './membership';
 import type { LineTechnician } from './technicians';
 
@@ -181,6 +182,17 @@ export interface BoardVisit {
   groupOpenCount: number;
   amountCents: number;
   lineCount: number;
+  /**
+   * 会员等级识别（8.1.15，docs/DESKS_V8115.md 第 3 节）：会员的档阶（「L3 观澜」；体验身份另见客人卡），散客、没定档的为 null；
+   * 手上此刻能用的券几张、其中签赠几张——发卡台的手牌板与收银台的待结账清单都按它标出来
+   */
+  memberGradeLabel: string | null;
+  coupons: number;
+  gifts: number;
+  /** 临时外出（8.1.15，docs/FRONTDESK_RISK_V8115.md）：从几点起；牌照旧占着，不能发给别人。没外出为 null */
+  awaySince: string | null;
+  /** 这次来访上没处理完的异常待办（上报、未结离店）几条 */
+  openTodos: number;
 }
 
 export interface FrontdeskBoard {
@@ -194,6 +206,8 @@ export interface FrontdeskBoard {
     groups: number;
   };
   rules: FrontdeskBoardRules;
+  /** 发牌前风控开没开（8.1.15；关着时发牌与以前一样）、全店没处理完的异常待办几条（发卡台顶上的「异常待办」） */
+  risk: { enabled: boolean; openTodos: number };
   /** 服务器当前时间，页面据此计算在店时长，避免终端时钟不准 */
   serverTime: string;
 }
@@ -254,7 +268,7 @@ export interface GroupMate {
 
 export interface VisitHistoryEvent {
   at: string;
-  kind: 'checkin' | 'swap' | 'join' | 'leave' | 'post' | 'void' | 'close' | 'ticket' | 'reopen';
+  kind: 'checkin' | 'swap' | 'join' | 'leave' | 'post' | 'void' | 'close' | 'ticket' | 'reopen' | 'incident';
   text: string;
   operatorName: string;
 }
@@ -279,6 +293,12 @@ export interface VisitDetail {
   vipOverrideByName: string | null;
   /** 按实际时间补录的接待（R1.9）：纸质单号、实际时间与补录人；平时为 null */
   backfill: BackfillMark | null;
+  /** 临时外出（8.1.15）：从几点起；没外出为 null */
+  awaySince: string | null;
+  /** 发牌时这位会员名下有没处理完的「未结离店」、经当场授权才发的：授权人、时间、原因；平时为 null */
+  riskApproval: { byName: string; at: string; reason: string } | null;
+  /** 这次来访上登记的异常（提醒、加收、上报、外出、返回、未结离店），按时间先后 */
+  incidents: VisitIncident[];
   /** 票种与按当前时刻计算的门票（Batch 3 之前开的牌没有票种，结账时补选） */
   ticket: {
     typeId: number;
@@ -308,7 +328,7 @@ export interface VisitDetail {
 export type FrontdeskOpLookup =
   | { found: false; abandoned: boolean }
   | { found: true; type: 'checkin'; checkin: CheckinResult }
-  | { found: true; type: 'bill_post' | 'tag_swap' | 'line_move'; visit: VisitDetail }
+  | { found: true; type: 'bill_post' | 'tag_swap' | 'line_move' | 'visit_incident'; visit: VisitDetail }
   | { found: true; type: 'checkout' | 'table_checkout'; checkout: CheckoutDetail }
   | { found: true; type: 'table_open' | 'table_post'; session: import('./dining').TableSessionDetail }
   | { found: true; type: 'room_checkin' | 'room_extend' | 'room_deposit' | 'room_refund' | 'room_close'; stay: import('./rooms').StayDetail }
@@ -316,12 +336,21 @@ export type FrontdeskOpLookup =
   | { found: true; type: 'checkout_refund'; refund: import('./checkout').RefundDetail }
   | { found: true; type: 'booking_create' | 'booking_change'; booking: import('./bookings').BookingDetail }
   /** 技师停牌、复牌、休假（8.0.8）：查回那位技师；页面按最新的钟房看板显示 */
-  | { found: true; type: 'technician_state'; technicianId: number };
+  | { found: true; type: 'technician_state'; technicianId: number }
+  /** 桌台动作（8.1.15）：清台、维修、恢复、并台、拆台——编号记下的那一条桌台记录 */
+  | { found: true; type: 'table_state' | 'table_merge'; action: import('./dining-v8115').TableActionResult }
+  /**
+   * 点单页下单（挂账）从餐饮这边查回、作废（8.1.15，`/api/dining/ops`）：只说生效了、记在哪次来访上，不给整张账单——
+   * 康美部只有点单权限，看不到前台的账（Codex 审查 f6327a4）
+   */
+  | { found: true; type: 'dining_order'; visitId: number };
 
 export interface CheckinResult {
   replayed: boolean;
   visits: { id: number; visitNo: string; tagCode: string; zone: TagZone }[];
   groupNo: string | null;
+  /** 这次发牌顺带标成「已到店」的预约（8.1.15 发牌前风控；没有为空） */
+  arrivedBookings: { bookingNo: string; tagCode: string }[];
 }
 
 /** 预结账（S2 只汇总已挂明细，不收款） */
@@ -336,10 +365,56 @@ export interface PreviewBill {
     checkedInAt: string;
     amountCents: number;
     bySource: { source: BillSource; amountCents: number; lineCount: number }[];
+    /** 押金（8.1.15 前台 1 细化，YB3）：这位客人在住的客房还押着多少（收 − 退）、哪几间房；退房时退，不在手牌结账里抵 */
+    deposit: { amountCents: number; rooms: string[] };
   }[];
   totalCents: number;
   bySource: { source: BillSource; amountCents: number }[];
+  /** 这几位客人在住客房的押金合计 */
+  depositCents: number;
   serverTime: string;
+}
+
+/**
+ * 结账预览分列（8.1.15 前台 1 细化，《浴族系统需求汇总》前台 1；YB3、YB5）：门票、餐饮、客房、服务、优惠、押金。
+ * 已挂的明细按来源归列：餐饮、客房各一列，其余（技师服务、洗浴等项目、其他）都算「服务」；
+ * 门票是此刻算出来的、优惠是会自动带上的会员折扣、押金是在住客房押着的，这三列不在明细里。
+ */
+export const PREVIEW_COLUMNS = ['ticket', 'dining', 'room', 'service', 'discount', 'deposit'] as const;
+export type PreviewColumn = (typeof PREVIEW_COLUMNS)[number];
+export const PREVIEW_COLUMN_LABELS: Record<PreviewColumn, string> = { ticket: '门票', dining: '餐饮', room: '客房', service: '服务', discount: '优惠', deposit: '押金' };
+
+/** 已挂明细按来源归到哪一列：三列的金额（分）与各有几条明细（几位客人的可以一起传进来，同一来源的加在一起） */
+export function previewBuckets(bySource: readonly { source: BillSource; amountCents: number; lineCount?: number }[]): {
+  dining: number;
+  room: number;
+  service: number;
+  /** 「服务」里归不进技师服务、洗浴项目的「其他」（丢牌赔偿等）有多少，页面上小字写出来 */
+  other: number;
+  /** 各列有几条明细：一份套餐是一条餐饮（套餐里含哪几样只在出品单上拆开），加料是单独的一条 */
+  lines: { dining: number; room: number; service: number };
+} {
+  const sum = (sources: readonly BillSource[], pick: (s: { amountCents: number; lineCount?: number }) => number) => bySource.filter((s) => sources.includes(s.source)).reduce((n, s) => n + pick(s), 0);
+  const cents = (...sources: BillSource[]) => sum(sources, (s) => s.amountCents);
+  const count = (...sources: BillSource[]) => sum(sources, (s) => s.lineCount ?? 0);
+  return {
+    dining: cents('dining'),
+    room: cents('room'),
+    service: cents('therapist', 'bath', 'other'),
+    other: cents('other'),
+    lines: { dining: count('dining'), room: count('room'), service: count('therapist', 'bath', 'other') },
+  };
+}
+
+/**
+ * 两个台的入口谁看得到（8.1.15 前台 1 细化，YB2）：有「接待发牌、挂账、换牌」的看得到发卡台，有「结账收款」的看得到收银台，
+ * 两项都有的两个都看得到；两项都没有、只有查看的两个都能进去看（不能操作）。连查看都没有的都看不到。
+ */
+export function deskEntries(permissions: readonly string[]): { issue: boolean; cashier: boolean } {
+  const read = permissions.includes('frontdesk.read');
+  const operate = permissions.includes('frontdesk.operate');
+  const checkout = permissions.includes('frontdesk.checkout');
+  return { issue: read && (operate || !checkout), cashier: read && (checkout || !operate) };
 }
 
 export interface FrontdeskCheck {

@@ -2,9 +2,10 @@
 
 /* 矮屏（窗口高度 940 以下，例如 1280×720、浏览器里的 1440×900）：主导航收紧间距，店主的 11 个入口不用滚动就能看到（测试服 E2E 报告 BUG-1） */
 @custom-variant short (@media (max-height: 940px));
-/* 更矮（760 以下，例如 1280×720）：开了技师与餐饮后店主有 13 个入口，再收紧一档。演示库、测试服的实例标识是两行，
-   比开发环境多一行，也要放得下（Codex 复测 PR #18 P2） */
-@custom-variant tiny (@media (max-height: 760px));
+/* 更矮（780 以下，例如 1280×720、平板横屏 1024×768）：开了技师与餐饮后店主有 13 个入口，再收紧一档。演示库、测试服的实例标识是两行，
+   比开发环境多一行，也要放得下（Codex 复测 PR #18 P2）。8.1.15 起「前台」分成发卡台与收银台、多一个入口，
+   768 高的平板横屏也用这一档（原来 760 以下才用，技师、餐饮、客房都开时最后一个入口会压到实例标识） */
+@custom-variant tiny (@media (max-height: 780px));
 
 /*
  * 浴族设计语言 · 城市度假 × 山野自然 × 年轻当代
@@ -21,32 +22,43 @@
 
   --color-ink: #1c231f;
   --color-ink-2: #4a524c;
-  --color-ink-3: #808780;
-  --color-ink-4: #b2b6ae;
+  /* 8.1.15：文字对比度不低于 4.5 : 1（docs/DESIGN.md「深浅两套主题」）。ink-3 在最深的纸色 paper-3 上也够；
+     ink-4 只给占位字、停用的控件与装饰线（对比度 3 : 1），不拿来写要读的字 */
+  --color-ink-3: #616761;
+  --color-ink-4: #898c86;
 
   --color-pine: #24493a;
   --color-pine-hover: #1a3a2d;
   --color-pine-soft: #dfe9e2;
   --color-pine-tint: #eef4ef;
 
-  --color-moss: #6a7c44;
+  --color-moss: #5f703d;
   --color-moss-soft: #e9eddb;
 
   --color-yuzu: #f2c230;
   --color-yuzu-hover: #e8b51c;
-  --color-yuzu-deep: #a87508;
+  --color-yuzu-deep: #906507;
   --color-yuzu-soft: #fcf0c8;
   --color-yuzu-tint: #fdf7e3;
 
   --color-ember: #dc7432;
+  /* 橙色写字用深一档的（ember 本身留给色块、圆点、进度条） */
+  --color-ember-deep: #9e5424;
   --color-ember-soft: #fae4d4;
 
-  --color-clay: #b0503a;
+  --color-clay: #a54b37;
   --color-clay-hover: #973f2b;
   --color-clay-soft: #f6e0d8;
 
   --color-lake: #2c6066;
   --color-lake-soft: #dcebea;
+
+  /* 主导航那一条：深浅两套主题里都是深底浅字，不跟着纸色、墨色翻转 */
+  --color-rail: #1d3f31;
+  --color-rail-erp: #22344a;
+  --color-rail-ink: #f6f3ec;
+  /* 柚黄、橙色这类亮色块上的字：两套主题里都用深色 */
+  --color-on-bright: #1c231f;
 
   --font-sans:
     'Plus Jakarta Sans Variable', 'PingFang SC', 'HarmonyOS Sans SC', 'MiSans', 'Microsoft YaHei UI',
@@ -143,6 +155,76 @@
     0%, 100% { opacity: 0; }
     50% { opacity: 1; }
   }
+}
+
+/*
+ * 深色主题（8.1.15，docs/DESIGN.md「深浅两套主题」）：只换变量，页面照旧用 bg-paper、text-ink 这些色名。
+ * <html data-theme="dark"> 时生效（src/client/lib/theme.ts：用户菜单里选，记在这台设备的浏览器里；默认浅色）。
+ * 对客的页面（平板电子菜单、导览、打印的小票）不跟着换。纸色变深、墨色变浅；主色变亮，色块上的字用纸色（深）。
+ * 平面图、导览图的画布是白底配深色线条，深色主题里照旧是白的。
+ * 每一对「字 / 底」的对比度由 tests/theme-contrast.test.ts 核对，改颜色先跑它。
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-paper: #131714;
+  --color-paper-2: #191e1a;
+  --color-paper-3: #212722;
+  --color-card: #1c211d;
+  --color-line: #2c332d;
+  --color-line-strong: #3d463f;
+
+  --color-ink: #eceee8;
+  --color-ink-2: #bcc1b9;
+  --color-ink-3: #939a91;
+  --color-ink-4: #687069;
+
+  --color-pine: #7cc4a0;
+  --color-pine-hover: #93d2b1;
+  --color-pine-soft: #1f3329;
+  --color-pine-tint: #18261f;
+
+  --color-moss: #a9bd78;
+  --color-moss-soft: #2a3120;
+
+  --color-yuzu: #f2c230;
+  --color-yuzu-hover: #f6cf58;
+  --color-yuzu-deep: #e3b445;
+  --color-yuzu-soft: #3a3013;
+  --color-yuzu-tint: #2a2410;
+
+  --color-ember: #f08a4b;
+  --color-ember-deep: #f39a62;
+  --color-ember-soft: #3d2618;
+
+  --color-clay: #e88f79;
+  --color-clay-hover: #f0a593;
+  --color-clay-soft: #40221b;
+
+  --color-lake: #72c1c8;
+  --color-lake-soft: #1b3235;
+
+  --color-rail: #0e1410;
+  --color-rail-erp: #0f1722;
+  --color-rail-ink: #eceee8;
+
+  --shadow-card: 0 1px 0 rgb(0 0 0 / 0.2), 0 1px 3px rgb(0 0 0 / 0.3);
+  --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.25), 0 10px 24px -14px rgb(0 0 0 / 0.6);
+  --shadow-pop: 0 2px 6px rgb(0 0 0 / 0.3), 0 24px 48px -20px rgb(0 0 0 / 0.7);
+}
+
+/*
+ * 深底的条（门店主导航、后台与 ERP 的顶栏，标了 data-surface="rail"）：两套主题里都是深底浅字。
+ * 里面照旧写 text-paper，这里把「纸色」指回浅色；条里弹出来的菜单（卡片底）再指回页面的纸色。
+ */
+:root {
+  --paper-root: var(--color-paper);
+}
+[data-surface='rail'] {
+  --color-paper: var(--color-rail-ink);
+}
+[data-surface='rail'] :where([role='menu'], [role='dialog'], [role='listbox']) {
+  --color-paper: var(--paper-root);
 }
 
 @layer base {

@@ -1,12 +1,14 @@
-// 厨房出品屏（KDS）与估清。
+// 厨房出品屏（KDS）与沽清。
 // 出品屏：待做 → 制作中 → 已出餐（待上菜）三列，按下单先后；下单超过规定分钟还没出餐标红，催过的标出次数。
 // 每个操作都带上页面看到的状态，连点两下或别人刚改过时服务端拒绝（DISH_CHANGED），不会多走一步。
-// 只有点单权限的服务员只能「上菜」与撤回上菜；开始做、出餐、估清要厨房的岗位。
+// 只有点单权限的服务员只能「上菜」与撤回上菜；开始做、出餐、沽清要厨房的岗位。
+// 8.1.15（块 B3）：出品单上写整单备注、送到哪间房。
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { BellRing, ChefHat, CircleCheckBig, Flame, Undo2 } from 'lucide-react';
 import { ALL_DINING_SLOTS, KITCHEN_STATUS_LABELS, kitchenElapsed, slotLabel, type DiningOutlet, type KitchenBoard, type KitchenItem, type MenuDish } from '@shared/dining';
+import { partsText } from '@shared/dishes';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
@@ -235,7 +237,25 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
         <span className="min-w-0 flex-1 text-[17px] leading-snug font-bold">{k.name}</span>
         <span className="num text-[20px] font-bold">×{k.quantity}</span>
       </div>
-      {k.note && <p className="mt-1 rounded-md bg-yuzu-tint px-2 py-1 text-[13.5px] font-bold text-yuzu-deep">{k.note}</p>}
+      {/* 套餐（8.1.15 菜品管理）：下单当时含的几样，每份套餐的份数 */}
+      {k.parts.length > 0 && (
+        <p className="mt-1 rounded-md bg-lake-soft px-2 py-1 text-[13.5px] font-bold text-lake" data-testid={`kds-parts-${k.id}`}>
+          {k.quantity > 1 ? '每份含 ' : '含 '}
+          {partsText(k.parts)}
+        </p>
+      )}
+      {/* 这一行的备注：做法、手写的口味、加料的「配 某菜」（最多 40 字） */}
+      {k.note && (
+        <p className="mt-1 rounded-md bg-yuzu-tint px-2 py-1 text-[13.5px] font-bold text-yuzu-deep" data-testid={`kds-note-${k.id}`}>
+          {k.note}
+        </p>
+      )}
+      {/* 整单备注（8.1.15 块 B，最多 60 字）：这一单每道菜都带，另起一条、换一种底色，与套餐含的几样、这一行的备注分得开 */}
+      {k.orderNote && (
+        <p className="mt-1 rounded-md border border-dashed border-line-strong bg-paper-2 px-2 py-1 text-[13.5px] font-semibold text-ink-2" data-testid={`kds-order-note-${k.id}`}>
+          整单：{k.orderNote}
+        </p>
+      )}
       <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12.5px] text-ink-3">
         {/* 手牌客人按男宾 / 女宾着色；桌台的菜显示桌号 */}
         <span className={cn('num text-[14px] font-bold', k.tableName !== null ? 'text-pine' : k.zone === 'female' ? 'text-clay' : 'text-lake')}>{whereOf(k)}</span>
@@ -243,7 +263,11 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
         {showStation && <span>· {k.stationName}</span>}
         <span className="num text-ink-4">· {k.orderNo}</span>
         {/* 小程序扫了桌上的码点的菜（v0.7.28）：送到这张桌 */}
-        {k.deliverTo && <span className="font-bold text-pine">· 送 {k.deliverTo} 桌</span>}
+        {k.deliverRoom ? (
+          <span className="font-bold text-pine">· 送到房 {k.deliverRoom}</span>
+        ) : (
+          k.deliverTo && <span className="font-bold text-pine">· 送 {k.deliverTo.startsWith('客房') ? k.deliverTo : `${k.deliverTo} 桌`}</span>
+        )}
         {k.postedByName === '小程序' && <span className="text-ink-4">· 小程序点单</span>}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -262,7 +286,7 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
   );
 }
 
-/** 估清：今天某道菜还剩几份（0 为估清）；不限量就是没有限制 */
+/** 沽清：今天某道菜还剩几份（0 为沽清）；不限量就是没有限制 */
 export function LimitsTab() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -281,7 +305,7 @@ export function LimitsTab() {
       qc.setQueryData(kitchenKey, await api.put<KitchenBoard>(`/api/kitchen/limits/${dish.id}`, { remaining }));
       void qc.invalidateQueries({ queryKey: menuKey });
       setEditing(null);
-      toast({ tone: 'success', title: remaining === null ? `「${dish.name}」不限量` : remaining === 0 ? `「${dish.name}」已估清` : `「${dish.name}」今天限量 ${remaining} 份` });
+      toast({ tone: 'success', title: remaining === null ? `「${dish.name}」不限量` : remaining === 0 ? `「${dish.name}」已沽清` : `「${dish.name}」今天限量 ${remaining} 份` });
     } catch (e) {
       toast({ tone: 'error', title: errorMessage(e) });
     } finally {
@@ -301,7 +325,7 @@ export function LimitsTab() {
   return (
     <div className="mx-auto max-w-[1080px] space-y-4 px-5 py-5 md:px-7" data-testid="limits">
       <p className="text-[13px] text-ink-3">
-        营业日 {d.businessDate}：已估清 {soldOut} 道，限量 {limited} 道。估清只管今天，换了营业日自动恢复不限量。
+        营业日 {d.businessDate}：已沽清 {soldOut} 道，限量 {limited} 道。沽清 = 这道菜今天卖完、不再接单；只管今天，换了营业日自动恢复不限量。
       </p>
       {d.dishes.length > 0 && <OutletFilter value={outlet} onChange={setOutlet} counts={counts} testPrefix="limits" />}
       {d.dishes.length === 0 ? (
@@ -326,7 +350,7 @@ export function LimitsTab() {
                       <span className="ml-2 text-[12px] font-normal text-ink-4">{dish.stationName}</span>
                     </span>
                     <Money cents={dish.price} className="text-[13px] text-ink-3" />
-                    {dish.remaining === null ? <Badge>不限量</Badge> : dish.remaining === 0 ? <Badge tone="clay">已估清</Badge> : <Badge tone="yuzu">剩 {dish.remaining} 份</Badge>}
+                    {dish.remaining === null ? <Badge>不限量</Badge> : dish.remaining === 0 ? <Badge tone="clay">已沽清</Badge> : <Badge tone="yuzu">剩 {dish.remaining} 份</Badge>}
                     {edit ? (
                       <span className="flex items-center gap-1.5">
                         <Input
@@ -362,7 +386,7 @@ export function LimitsTab() {
                         </Button>
                         {dish.remaining !== 0 && (
                           <Button size="sm" variant="danger" loading={busy === dish.id} disabled={busy !== null} onClick={() => void save(dish, 0)} data-testid={`limit-soldout-${dish.name}`}>
-                            估清
+                            沽清
                           </Button>
                         )}
                         {dish.remaining !== null && (

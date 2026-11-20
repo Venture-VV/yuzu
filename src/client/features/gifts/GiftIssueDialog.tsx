@@ -18,7 +18,18 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Field, Input, Notice, Select, Skeleton, Textarea } from '../../components/ui';
 import { useGiftAuthorizers, useGiftRules, useGiftTypes } from './queries';
 
-export function GiftIssueDialog({ defaultChannel, onClose, onDone }: { defaultChannel?: string; onClose: () => void; onDone: () => Promise<unknown> | void }) {
+export function GiftIssueDialog({
+  defaultChannel,
+  presetMember,
+  onClose,
+  onDone,
+}: {
+  defaultChannel?: string;
+  /** 已经知道发给谁（8.1.15：收银台对着这位客人的账单发）：不用再找，也不能换成别人 */
+  presetMember?: GiftMemberOption;
+  onClose: () => void;
+  onDone: () => Promise<unknown> | void;
+}) {
   const session = useSession();
   const toast = useToast();
   const rules = useGiftRules();
@@ -28,7 +39,7 @@ export function GiftIssueDialog({ defaultChannel, onClose, onDone }: { defaultCh
   const [clientKey] = useState(uuid);
   const [term, setTerm] = useState('');
   const [debounced, setDebounced] = useState('');
-  const [member, setMember] = useState<GiftMemberOption | null>(null);
+  const [member, setMember] = useState<GiftMemberOption | null>(presetMember ?? null);
   const [templateId, setTemplateId] = useState<number | ''>('');
   const [quantity, setQuantity] = useState(1);
   const [qtyHint, setQtyHint] = useState<string | null>(null);
@@ -141,9 +152,11 @@ export function GiftIssueDialog({ defaultChannel, onClose, onDone }: { defaultCh
                   <span className="num text-ink-3">{member.phone}</span>
                   <Badge tone="lake">L{member.grade}</Badge>
                   <span className="flex-1" />
-                  <Button size="sm" variant="ghost" icon={<X className="size-3.5" />} disabled={locked} onClick={() => setMember(null)}>
-                    换一位
-                  </Button>
+                  {!presetMember && (
+                    <Button size="sm" variant="ghost" icon={<X className="size-3.5" />} disabled={locked} onClick={() => setMember(null)}>
+                      换一位
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <>

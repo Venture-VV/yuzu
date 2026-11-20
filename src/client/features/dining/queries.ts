@@ -11,10 +11,10 @@ export const tablesKey = ['dining', 'tables'] as const;
 export const tableSessionKey = (id: number | null) => ['dining', 'tables', 'session', id] as const;
 const tableCheckoutKey = (ids: number[]) => ['dining', 'tables', 'checkout-preview', ids.join(',')] as const;
 
-/** 菜单与余量（估清）：10 秒刷新一次（8.0.8，B03 / F12），别的终端点了菜，余量很快跟上；前台「加项目」打开时才取 */
+/** 菜单与余量（沽清）：10 秒刷新一次（8.0.8，B03 / F12），别的终端点了菜，余量很快跟上；前台「加项目」打开时才取 */
 export const useDiningMenu = (enabled = true) => useQuery({ queryKey: menuKey, queryFn: () => api.get<DiningMenu>('/api/dining/menu'), refetchInterval: 10_000, enabled });
 
-/** 厨房屏 5 秒刷新一次；估清页不用那么勤 */
+/** 厨房屏 5 秒刷新一次；沽清页不用那么勤 */
 export const useKitchenBoard = (refetchInterval: number) => useQuery({ queryKey: kitchenKey, queryFn: () => api.get<KitchenBoard>('/api/kitchen'), refetchInterval });
 
 /** 桌台看板：多台终端同时开台、点单，10 秒刷新一次 */

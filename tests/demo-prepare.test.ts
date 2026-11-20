@@ -88,7 +88,7 @@ describe('演示数据准备', () => {
     const ownerId = await createStaff(ctx.sql, { username: 'linlan', displayName: '林岚', role: 'owner', password: DEMO_PASSWORD, mustChangePassword: false });
     await ctx.sql`
       INSERT INTO technicians (tech_no, name, gender, grade, note, created_by) VALUES ('D04', '演示技师·许', 'male', 'premium', '演示场景', ${ownerId})`;
-    // 预先放一道已估清的「演示果汁」：场景块照常用它（按名称认已有的菜），桌台点单时被估清拦下、中途出错
+    // 预先放一道已沽清的「演示果汁」：场景块照常用它（按名称认已有的菜），桌台点单时被沽清拦下、中途出错
     const [item] = await ctx.sql<{ id: number }[]>`
       INSERT INTO service_items (name, category, price) VALUES ('演示果汁', '餐饮', 2200) RETURNING id`;
     const today = businessDateOf(new Date(), ctx.config.timezone, (await loadSettings(ctx.sql)).businessDayStartHour);

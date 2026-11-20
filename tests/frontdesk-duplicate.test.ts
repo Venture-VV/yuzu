@@ -1,6 +1,6 @@
 // 同一操作编号的两次提交并发（网络重试时同时提交两次）：后到的那次返回第一次的结果，
 // 不再提示「被其他终端发出 / 开台」「刚刚已换过牌」「已结账」等（店主 2026-10-30 的观察；见 frontdesk/common.ts runIdempotent）。
-// 用可控的锁等待制造确定的交错顺序：第一次拿到手牌 / 桌台 / 来访 / 开台的锁之后，卡在单号计数行（或来访行、估清行）上；
+// 用可控的锁等待制造确定的交错顺序：第一次拿到手牌 / 桌台 / 来访 / 开台的锁之后，卡在单号计数行（或来访行、沽清行）上；
 // 第二次（同一编号、同一内容）开头查编号时第一次还没提交，接着排在第一次的锁后面。放行后第一次提交，第二次拿到锁。
 
 import { randomUUID } from 'node:crypto';
@@ -158,11 +158,11 @@ describe('同一编号同时提交两次：后到的那次返回第一次的结�
     expect(sessions!.n).toBe(1);
   });
 
-  it('桌台点单（最后一份）：只下一次单，后到的那次不提示已估清；桌台结账只结一次', async () => {
+  it('桌台点单（最后一份）：只下一次单，后到的那次不提示已沽清；桌台结账只结一次', async () => {
     const s = (await api(ctx.app, ctx.clerk, 'POST', '/api/dining/tables/open', { clientKey: randomUUID(), tableId: table.B2, guests: 2 })).body as { id: number };
     expect((await api(ctx.app, ctx.clerk, 'PUT', `/api/kitchen/limits/${dish}`, { remaining: 1 })).status).toBe(200);
     const orderBody = { clientKey: randomUUID(), lines: [{ itemId: dish, quantity: 1 }], expectedTotal: 4800 };
-    // 第一次锁上开台、账单之后卡在估清行上；第二次排在开台锁后面
+    // 第一次锁上开台、账单之后卡在沽清行上；第二次排在开台锁后面
     const releaseLimit = await hold((tx) => tx`SELECT item_id FROM dish_limits WHERE item_id = ${dish} AND business_date = ${today} FOR UPDATE`);
     const [a, b] = await race(releaseLimit, () => api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/sessions/${s.id}/orders`, orderBody));
     expect(a.status, JSON.stringify(a.body)).toBe(200);

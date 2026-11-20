@@ -1,7 +1,7 @@
 // 给小程序第三期的入口（v0.7.28 ①，docs/SCHEDULE_FINISH.md 第 2 节、docs/MP_PHASE3.md 第 2、3 节）：
 //   · 3b createTrialInviteFromMp：与前台「邀请体验」同一套规则；经办人系统账号「小程序」；好友还不是会员的当场建档、渠道「老带新」；
 //     同一个 claimKey 再调用返回第一次那条，内容不同拒绝；拒绝时什么都不留（存档点），调用方事务还能接着用；
-//   · 3c orderFoodFromMp：挂在会员在店手牌的账单上、进厨房出品单（扣估清），桌码写进出品单；只能点进厨房的菜；
+//   · 3c orderFoodFromMp：挂在会员在店手牌的账单上、进厨房出品单（扣沽清），桌码写进出品单；只能点进厨房的菜；
 //     一单份数、金额有上限（一道菜一行最多 99 份，8.0.8）；同一个 claimKey 只下一次（两个事务同时下也只一单）；没有在店手牌、桌号不对、价格变了都拒绝；
 //   · 只读：桌台、「我的账单」。
 
@@ -232,7 +232,7 @@ describe('3c 扫码点餐 orderFoodFromMp', () => {
     expect(n!.n).toBe(1);
   });
 
-  it('只能点进厨房的菜；份数、金额有上限；估清不够、桌号不对、价格变了都拒绝，账单不变', async () => {
+  it('只能点进厨房的菜；份数、金额有上限；沽清不够、桌号不对、价格变了都拒绝，账单不变', async () => {
     const bill = async () => (await mpOpenBill(ctx.sql, guest.id))!.total;
     const before = await bill();
     const reject = async (input: Omit<MpFoodInput, 'memberId'>) => (await errorOf(order({ memberId: guest.id, ...input }))).code;
@@ -247,7 +247,7 @@ describe('3c 扫码点餐 orderFoodFromMp', () => {
     expect(await reject({ items: [{ itemId: item['宫保鸡丁']!, quantity: 2 }], claimKey: 'f-x6' })).toBe('DISH_SOLD_OUT');
     expect(await bill()).toBe(before);
     expect((await ctx.sql`SELECT 1 FROM entry_claims WHERE claim_key LIKE 'mp_food:f-x%'`).length).toBe(0);
-    // 估清剩 1 份：点 1 份可以，扣成 0
+    // 沽清剩 1 份：点 1 份可以，扣成 0
     const ok = await order({ memberId: guest.id, items: [{ itemId: item['宫保鸡丁']!, quantity: 1 }], claimKey: 'f-x7' });
     expect(ok.total).toBe(4800);
     const menu = (await api(ctx.app, ctx.clerk, 'GET', '/api/dining/menu')).body.dishes as { id: number; remaining: number | null }[];

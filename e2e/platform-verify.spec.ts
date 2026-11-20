@@ -2,7 +2,7 @@
 // 应用要带 INTEGRATIONS_MOCK=true 启动（只许开发、测试实例）；没带时整组跳过。模拟的美团券面值 ¥99。
 // 依赖演示数据（仅独立演示库），账号：店主 linlan，密码 yuzu2026。
 //   · 接待一位客人 → 结账加一笔团购券，选美团、填券码、点「验券」→ 看到项目与面值 → 确认核销 → 这一行锁定 → 余下现金结清；
-//   · 验过没结账的一张（接口造）→ 前台顶上提示 → 撤销核销 → 提示消失；
+//   · 验过没结账的一张（接口造）→ 收银台顶上提示 → 撤销核销 → 提示消失；
 //   · 平台核销补录页「验券对账」：手动对今天的账，看到对账记录；
 //   · 验券请求断在路上（结果待确认）：刷新页面、重新打开验券还在（本机存着原编号），确认作废以后才能重新验。
 import { randomUUID } from 'node:crypto';
@@ -39,6 +39,7 @@ test.describe('8.0.21 平台验券', () => {
     expect(checkin.status(), await checkin.text()).toBe(201);
     await page.reload();
     await page.getByTestId(`tag-${tag}`).click();
+    await page.getByTestId('bill-panel').getByTestId('go-cashier').click();
     await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
     await page.getByTestId('pay-add-coupon').click();
     await page.getByLabel('团购平台').selectOption('meituan');
@@ -87,8 +88,10 @@ test.describe('8.0.21 平台验券', () => {
     const checkin = await page.request.post('/api/frontdesk/checkins', { data: { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: tag.startsWith('B') ? 'female' : 'male' }] } });
     expect(checkin.status(), await checkin.text()).toBe(201);
     const code = `E2EV${stamp}3003`;
+    // 8.1.15：结账在收银台，从待结账清单点这张手牌
     const openVerify = async () => {
-      await page.getByTestId(`tag-${tag}`).click();
+      await page.goto('/cashier');
+      await page.getByTestId(`queue-${tag}`).click();
       await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
       await page.getByTestId('pay-add-coupon').click();
       await page.getByLabel('团购平台').selectOption('meituan');
@@ -123,7 +126,7 @@ test.describe('8.0.21 平台验券', () => {
     expect((await page.request.post(`/api/platform/verifications/${mine!.id}/cancel`, { data: { reason: '浏览器用例收尾' } })).ok()).toBe(true);
   });
 
-  test('「验过没结账的券」取不回来：前台顶上写明查不到、可以重试', async ({ page }) => {
+  test('「验过没结账的券」取不回来：收银台顶上写明查不到、可以重试', async ({ page }) => {
     test.setTimeout(90_000);
     await login(page);
     const status = (await (await page.request.get('/api/platform/verify/status')).json()) as { mode: string };
@@ -131,7 +134,7 @@ test.describe('8.0.21 平台验券', () => {
     await page.route('**/api/platform/verifications/open', (route) =>
       route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: '服务暂时不可用' } }) }),
     );
-    await page.goto('/frontdesk');
+    await page.goto('/cashier');
     const failed = page.getByTestId('unused-vouchers-error');
     await expect(failed).toBeVisible({ timeout: 20_000 });
     await expect(failed).toContainText('验过没结账的团购券查不到');
@@ -174,6 +177,7 @@ test.describe('8.0.21 平台验券', () => {
     );
     await page.reload();
     await page.getByTestId(`tag-${tag}`).click();
+    await page.getByTestId('bill-panel').getByTestId('go-cashier').click();
     await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
     await page.getByTestId('pay-add-coupon').click();
     await page.getByLabel('团购平台').selectOption('meituan');

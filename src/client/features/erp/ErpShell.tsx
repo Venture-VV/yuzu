@@ -42,6 +42,7 @@ import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import { api } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
 import { cn } from '../../lib/utils';
+import { ThemeToggleButton } from '../../components/ThemeSwitch';
 import { LogoMark } from '../../components/Brand';
 import { InstanceBadge } from '../../components/InstanceTag';
 import { Notice } from '../../components/ui';
@@ -244,7 +245,7 @@ export function ErpShell() {
 
   return (
     <div className="flex h-dvh min-h-0 flex-col bg-paper" data-testid="erp-shell">
-      <header className="flex h-14 shrink-0 items-center gap-3 bg-[#22344a] px-4 text-paper md:px-5">
+      <header data-surface="rail" className="flex h-14 shrink-0 items-center gap-3 bg-rail-erp px-4 text-paper md:px-5">
         <LogoMark className="size-8 rounded-[10px] ring-1 ring-white/10" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] leading-tight font-bold">
@@ -259,6 +260,7 @@ export function ErpShell() {
         <span className="hidden text-[12.5px] text-paper/75 md:inline">
           {session.staff.displayName} · {[ROLE_LABELS[session.staff.role], ...session.staff.duties.map((d) => DUTY_LABELS[d].title)].join(' · ')}
         </span>
+        <ThemeToggleButton className="size-9" />
         {access.storeHome ? (
           <NavLink to={access.storeHome} className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-3.5 text-[13px] font-semibold text-paper hover:bg-white/18" data-testid="erp-exit">
             <ArrowLeft className="size-4" />

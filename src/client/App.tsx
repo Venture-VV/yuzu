@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import { ApiError, onAuthError, queryRetryDelay, shouldRetryQuery } from './lib/api';
 import { qk, useSessionQuery } from './lib/queries';
 import { SessionProvider } from './lib/session';
+import { useApplyTheme } from './lib/theme';
 import { setDisplayTimeZone } from './lib/utils';
 import { AppShell } from './components/AppShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -17,13 +18,16 @@ import { NetworkPage } from './features/network/NetworkPage';
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
+import { DeskLayout } from './features/frontdesk/desk';
 import { ADMIN_SECTIONS } from '@shared/admin';
 import { adminRoutes } from './features/admin/AdminPage';
+import { homeIsEmenu } from './lib/landing';
 import { useCan, useOptionalSession } from './lib/session';
 import { useErpAccess } from './features/erp/access';
 import { lazyPage } from './lib/lazyPage';
 
 // 会员工作台与前台随首屏加载；其余页面第一次打开时再下载（v0.7.22：收银台首屏更轻）
+const CashierPage = lazyPage(() => import('./features/frontdesk/CashierPage').then((m) => m.CashierPage));
 const ClockroomPage = lazyPage(() => import('./features/clockroom/ClockroomPage').then((m) => m.ClockroomPage));
 const DiningPage = lazyPage(() => import('./features/dining/DiningPage').then((m) => m.DiningPage));
 const RoomsPage = lazyPage(() => import('./features/rooms/RoomsPage').then((m) => m.RoomsPage));
@@ -110,6 +114,8 @@ const DirectImportPage = lazyPage(() => import('./features/inventory/DirectImpor
 const PayablesPage = lazyPage(() => import('./features/payables/PayablesPage').then((m) => m.PayablesPage));
 const PaymentFormPage = lazyPage(() => import('./features/payables/PaymentFormPage').then((m) => m.PaymentFormPage));
 const ImportPage = lazyPage(() => import('./features/payables/ImportPage').then((m) => m.ImportPage));
+// 菜品管理的单独入口（8.1.15）：只有菜品权限、进不了餐饮的岗位用；别的人在餐饮的「菜品管理」页签里
+const DishesPage = lazyPage(() => import('./features/dining/DishesPage').then((m) => m.DishesPage));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -211,7 +217,7 @@ function Home() {
   // 设计师（8.1.1）：只进工作台
   if (can('studio.edit') && !can('frontdesk.read')) return <Navigate to="/admin/studio" replace />;
   // 「点餐平板」账号（8.0.10）：只能打开点餐页，登录后直接进去
-  if (can('emenu.view') && !can('frontdesk.read')) return <Navigate to="/emenu" replace />;
+  if (homeIsEmenu(can)) return <Navigate to="/emenu" replace />;
   // 他店查询（v0.7.23）：另一家店的同事只能查会员档阶
   if (can('member.lookup')) return <Navigate to="/lookup" replace />;
   if (erp.landing) return <Navigate to={erp.landing} replace />;
@@ -362,7 +368,14 @@ const router = createBrowserRouter([
     element: <AuthGate />,
     children: [
       { index: true, element: <Home /> },
-      { path: 'frontdesk', element: <FrontdeskPage /> },
+      // 8.1.15：原「前台」拆成发卡台（/frontdesk，地址沿用）与收银台（/cashier）；两个台共用一个补录纸质单的状态
+      {
+        element: <DeskLayout />,
+        children: [
+          { path: 'frontdesk', element: <FrontdeskPage /> },
+          { path: 'cashier', element: <CashierPage /> },
+        ],
+      },
       { path: 'clockroom', element: <ClockroomPage /> },
       { path: 'dining/:tab?', element: <DiningPage /> },
       { path: 'rooms', element: <RoomsPage /> },
@@ -385,6 +398,7 @@ const router = createBrowserRouter([
       { path: 'dashboard/:tab?', element: <DashboardMoved /> },
       { path: 'lookup', element: <LookupPage /> },
       { path: 'password', element: <ChangePasswordPage /> },
+      { path: 'dishes', element: <DishesPage /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
@@ -397,6 +411,12 @@ const useRouterPath = () =>
     () => router.state.location.pathname,
   );
 
+/** 深浅主题落到 <html> 上（8.1.15）：对客与出纸的页面一律浅色 */
+function ThemeHost() {
+  useApplyTheme(useRouterPath());
+  return null;
+}
+
 function NetworkBannerHost() {
   const path = useRouterPath();
   return <NetworkBanner path={path} openNetwork={() => void router.navigate('/network')} />;
@@ -408,6 +428,7 @@ export function App() {
       <ToastProvider>
         <RouterProvider router={router} />
         <NetworkBannerHost />
+        <ThemeHost />
       </ToastProvider>
     </QueryClientProvider>
   );

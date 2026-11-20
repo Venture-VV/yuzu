@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router';
-import { CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS, ticketTierLabel } from '@shared/checkout';
+import { CHECKOUT_METHOD_LABELS, COUPON_PLATFORM_LABELS, PERK_MARKS, perkOperatorsText, perksTotal, perkTitle, ticketTierLabel } from '@shared/checkout';
 import { minutesText } from '@shared/benefits';
 import type { CheckoutPrint } from '@shared/print';
 import { api, errorMessage } from '../../lib/api';
@@ -30,6 +30,10 @@ export function CheckoutPrintPage() {
 function CheckoutSlip({ d }: { d: CheckoutPrint }) {
   const session = useSession();
   const tz = session.timezone;
+  // 优惠与赠送（8.1.15）单独一栏、写明经办人；「收款」只列真收的钱与预付抵扣
+  const perkPayments = new Set(d.perks.map((k) => k.paymentId));
+  const tenders = d.payments.filter((p) => !perkPayments.has(p.id));
+  const saved = perksTotal(d.perks);
   return (
     <div data-testid="print-checkout">
       <SlipHeader title="结账单" />
@@ -67,7 +71,19 @@ function CheckoutSlip({ d }: { d: CheckoutPrint }) {
           <div className="mt-1 space-y-0.5">
             {b.lines.map((l, j) => (
               <div key={j}>
-                <Row left={l.name} right={yuan(l.amount)} />
+                <Row
+                  left={
+                    <>
+                      {l.name}
+                      {l.perks.length > 0 && (
+                        <span className="ml-1 font-bold" data-testid="print-line-perk">
+                          [{l.perks.map((k) => PERK_MARKS[k]).join('')}]
+                        </span>
+                      )}
+                    </>
+                  }
+                  right={yuan(l.amount)}
+                />
                 {l.technician && <p className="pl-3 text-[11px]">技师 {l.technician}</p>}
                 {l.quantity > 1 && (
                   <p className="pl-3 text-[11px]">
@@ -84,10 +100,26 @@ function CheckoutSlip({ d }: { d: CheckoutPrint }) {
       ))}
       <Rule double />
       <Row left="应收合计" right={yuan(d.totalAmount)} big />
+      {d.perks.length > 0 && (
+        <div data-testid="print-perks">
+          <p className="mt-1.5 font-bold">优惠与赠送</p>
+          <div className="space-y-1">
+            {d.perks.map((k) => (
+              <div key={k.paymentId} data-testid={`print-perk-${k.kind}`}>
+                <Row left={perkTitle(k)} right={`-${yuan(k.amount)}`} />
+                {perkOperatorsText(k) && <p className="pl-3 text-[11px] break-all">{perkOperatorsText(k)}</p>}
+                {k.detail && <p className="pl-3 text-[11px] break-all">{k.detail}</p>}
+              </div>
+            ))}
+          </div>
+          <Row left="共优惠" right={yuan(saved)} strong />
+          <Row left="优惠后应付" right={yuan(d.totalAmount - saved)} strong />
+        </div>
+      )}
       <p className="mt-1.5 font-bold">收款</p>
-      {d.payments.length === 0 && <p>应收为 0，未收款</p>}
+      {tenders.length === 0 && <p>{d.perks.length > 0 ? '优惠后应付为 0，未收款' : '应收为 0，未收款'}</p>}
       <div className="space-y-1">
-        {d.payments.map((p) => (
+        {tenders.map((p) => (
           <div key={p.id} data-testid={`print-payment-${p.method}`}>
             <Row left={`${CHECKOUT_METHOD_LABELS[p.method] ?? p.method}${p.method === 'wallet' && p.memberName ? ` · ${p.memberName}` : ''}`} right={yuan(p.amount)} />
             {p.method === 'wallet' && p.consumption && (

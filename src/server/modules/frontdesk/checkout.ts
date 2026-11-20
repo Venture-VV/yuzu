@@ -28,10 +28,13 @@ import {
   priceTicket,
   ticketTierLabel,
   type CheckoutDetail,
+  type CheckoutPerk,
   type CheckoutPreview,
   type CheckoutSummary,
   type CouponPlatform,
 } from '@shared/checkout';
+import { rateText } from '@shared/benefits';
+import { COUPON_ISSUE_KIND_LABELS, type CouponIssueKind } from '@shared/coupons';
 import { describeHours, PAYMENT_METHODS } from '@shared/labels';
 import { formatYuan } from '@shared/money';
 import { can } from '@shared/permissions';
@@ -923,13 +926,89 @@ export async function getCheckout(db: Db, id: number): Promise<CheckoutDetail> {
     FROM checkout_payments p LEFT JOIN members m ON m.id = coalesce(p.member_id, p.discount_member_id) LEFT JOIN consumptions k ON k.id = p.consumption_id
     LEFT JOIN group_buy_coupons g ON g.id = p.coupon_id LEFT JOIN staff ap ON ap.id = p.approved_by
     WHERE p.checkout_id = ${id} ORDER BY p.id`;
+  // 用了券、会员折扣、优惠 / 免单的单才有「优惠与赠送」；别的单（多数）不用再查一次
+  const perks = payments.some((p) => PERK_PAYMENT_METHODS.includes(p.method)) ? await checkoutPerks(db, id) : [];
   const mates = await db<{ code: string }[]>`
     SELECT DISTINCT t.code FROM visits v JOIN hand_tags t ON t.id = v.tag_id
     WHERE v.status = 'open' AND v.group_id IN (
       SELECT v2.group_id FROM checkout_bills cb JOIN visits v2 ON v2.id = cb.visit_id WHERE cb.checkout_id = ${id} AND v2.group_id IS NOT NULL)
       AND v.id NOT IN (SELECT visit_id FROM checkout_bills WHERE checkout_id = ${id} AND visit_id IS NOT NULL)
     ORDER BY t.code`;
-  return { ...c, backfill: normalizeMark(c.backfill), bills, payments, remainingMates: mates.map((m) => m.code), refunds: await listRefundsOf(db, id) };
+  return { ...c, backfill: normalizeMark(c.backfill), bills, payments, perks, remainingMates: mates.map((m) => m.code), refunds: await listRefundsOf(db, id) };
+}
+
+/**
+ * 结账单的「优惠与赠送」（8.1.15）：只读。券抵扣、会员折扣、优惠 / 免单三种收款明细各一条，带上经办人——
+ * 签赠券写发放人、授权人、渠道与事由（发券记录里记着，8.1.9），手动发的券写发券人，按规则自动发的不写人；
+ * 优惠 / 免单写当场授权的人（原因在收款备注里）；会员折扣是按档阶自动打的，写几折。
+ * 以前结的单一样读得出：这些都是结账时就记下的。
+ */
+const PERK_PAYMENT_METHODS: readonly string[] = ['store_coupon', 'member_discount', 'discount'];
+
+async function checkoutPerks(db: Db, id: number): Promise<CheckoutPerk[]> {
+  const rows = await db<
+    {
+      paymentId: number;
+      method: 'store_coupon' | 'member_discount' | 'discount';
+      amount: number;
+      ref: string;
+      lineIds: number[] | null;
+      discountRate: number | null;
+      templateName: string | null;
+      gift: boolean | null;
+      issueKind: CouponIssueKind | null;
+      issueReason: string | null;
+      giftChannel: string | null;
+      issuedByName: string | null;
+      authorizedByName: string | null;
+      benefitName: string | null;
+      approvedByName: string | null;
+    }[]
+  >`
+    SELECT p.id AS payment_id, p.method, p.amount, p.ref, p.coupon_lines AS line_ids, p.discount_rate,
+           t.name AS template_name, t.gift, ci.kind AS issue_kind, ci.reason AS issue_reason, ci.gift_channel,
+           isu.display_name AS issued_by_name, au.display_name AS authorized_by_name,
+           b.name AS benefit_name, ap.display_name AS approved_by_name
+    FROM checkout_payments p
+    LEFT JOIN coupons k ON k.id = p.store_coupon_id
+    LEFT JOIN coupon_templates t ON t.id = k.template_id
+    LEFT JOIN coupon_issues ci ON ci.id = k.issue_id
+    LEFT JOIN staff isu ON isu.id = ci.issued_by
+    LEFT JOIN staff au ON au.id = ci.authorized_by
+    LEFT JOIN benefits b ON b.id = p.benefit_id
+    LEFT JOIN staff ap ON ap.id = p.approved_by
+    WHERE p.checkout_id = ${id} AND p.method IN ${db(PERK_PAYMENT_METHODS)}
+    ORDER BY p.id`;
+  return rows.map((r): CheckoutPerk => {
+    const base = { paymentId: Number(r.paymentId), amount: Number(r.amount), lineIds: (r.lineIds ?? []).map(Number) };
+    if (r.method === 'discount') {
+      return { ...base, kind: 'discount', name: '', detail: r.ref, channel: '', operators: r.approvedByName ? [{ role: '授权', name: r.approvedByName }] : [] };
+    }
+    if (r.method === 'member_discount') {
+      return { ...base, kind: 'member_discount', name: r.benefitName ?? '', detail: r.discountRate === null ? '' : `${rateText(r.discountRate)}，按会员档阶自动打`, channel: '', operators: [] };
+    }
+    const name = r.templateName ?? r.ref;
+    if (r.gift) {
+      return {
+        ...base,
+        kind: 'gift',
+        name,
+        detail: r.issueReason ?? '',
+        channel: r.giftChannel ?? '',
+        operators: [...(r.issuedByName ? [{ role: '发放', name: r.issuedByName }] : []), ...(r.authorizedByName ? [{ role: '授权', name: r.authorizedByName }] : [])],
+      };
+    }
+    // 普通券：手动发的写发券人与事由；无记名券、按规则 / 会员权益 / 小程序领取 / 批量发的只写来源
+    const manual = r.issueKind === 'manual';
+    return {
+      ...base,
+      kind: 'coupon',
+      name,
+      detail: manual ? (r.issueReason ?? '') : r.issueKind ? COUPON_ISSUE_KIND_LABELS[r.issueKind] : '',
+      channel: '',
+      operators: manual && r.issuedByName ? [{ role: '发券', name: r.issuedByName }] : [],
+    };
+  });
 }
 
 export async function listCheckouts(db: Db, date: string): Promise<CheckoutSummary[]> {

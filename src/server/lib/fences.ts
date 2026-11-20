@@ -145,6 +145,12 @@ export const FENCED_OPS = [
   'gift_issue',
   // 8.1.10 核库转领用（迁移 185；编号记在 idempotency_keys，ref_id 是那张需求单）
   'request_stock',
+  // 8.1.15 发牌后的异常处置（迁移 187）：提醒、加收、上报、外出、返回、未结离店；编号记在 idempotency_keys（ref_id 是那次来访），也记在 visit_incidents.op_key
+  'visit_incident',
+  // 8.1.15 桌台动作（迁移 188 已在约束里加了这两个类型）：清台、维修、恢复（table_state），并台、拆台（table_merge）；
+  // 编号记在 idempotency_keys（ref_id 是记下的第一条 table_events）。结果待确认时照前台的规矩查回、确认作废（Codex 审查 9ef9424）
+  'table_state',
+  'table_merge',
 ] as const;
 export type FencedOp = (typeof FENCED_OPS)[number];
 

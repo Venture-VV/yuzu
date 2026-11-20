@@ -19,6 +19,7 @@ import { loadTechnicianRules, loadTechnicians } from '../technicians';
 import { attachSessions, lockQueue, syncSessionAfterVoid, type SessionPostOptions } from '../clockroom';
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, takeDishLimits } from '../dining';
 import { authorizeLineVoid } from '../dining-808';
+import { DeliverRoomField, OrderNoteField, VoidBlameField } from '../dining-order-v8115';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill, type Backfill } from './backfill';
 import { getVisit } from './visits';
 import { locateCharges, locateSession } from '../locations';
@@ -66,6 +67,9 @@ export const PostInput = z
     expectedTotal: positiveCents('本次合计'),
     /** 按实际时间补录纸质单（R1.9）：纸质单号与实际时间；平时不带 */
     backfill: BackfillInput,
+    /** 8.1.15（块 B3）：整单备注、送达房号，写进这一单每道菜的出品单；不带时与升级前的请求完全相同（幂等摘要不变） */
+    orderNote: OrderNoteField,
+    deliverRoom: DeliverRoomField,
   })
   .refine((v) => v.lines.length + v.customLines.length > 0, '请至少选择一个项目');
 export type PostInputData = z.input<typeof PostInput>;
@@ -97,6 +101,11 @@ export interface PostTxMeta {
   channel?: { expectedTotal: number | null; maxQuantity: number; maxTotal: number; deliverTo: string; memberId: number };
   /** 平板点餐（8.0.10）：出品单写送到哪张桌（服务员输点单密码确认的，不走渠道入口的限制） */
   deliverTo?: string;
+  /**
+   * 这个编号记成哪种业务（8.1.15）：平时是挂账 bill_post；发牌后的「超时加收」也走这里挂一条手动金额的明细，
+   * 编号记成 visit_incident（查回、作废都按那一类），不带时与以前完全一样
+   */
+  opType?: 'bill_post' | 'visit_incident';
 }
 
 export interface PostedLine {
@@ -143,7 +152,7 @@ export async function postCharges(deps: Deps, visitId: number, raw: PostInputDat
 /**
  * 挂账（调用方的事务里；前台、点单页、钟房经 postCharges 的幂等外壳调用，小程序扫码点餐经 mp-entries.ts 调用，
  * 平板点餐经 emenu/core.ts 调用（8.0.10：经办人是输点单密码的服务员））。
- * 锁：来访 → 账单 →（技师队列 → 钟单 → 技师状态）→ 估清 → 出品单
+ * 锁：来访 → 账单 →（技师队列 → 钟单 → 技师状态）→ 沽清 → 出品单
  */
 export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: PostInputParsed, meta: PostTxMeta, ctx: OpContext, options: PostOptions = {}): Promise<PostResult> {
   const { key, requestHash, backfill, channel } = meta;
@@ -278,7 +287,7 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
   } else if (options.session?.extendId !== undefined || options.session?.dispatch) {
     throw unprocessable('TECHNICIAN_REQUIRED', '派钟、加钟要选技师');
   }
-  // 估清（技师队列之后、建出品单之前）：今天还剩的份数不够整笔拒绝；补录纸质单的菜早已上过，不扣估清
+  // 沽清（技师队列之后、建出品单之前）：今天还剩的份数不够整笔拒绝；补录纸质单的菜早已上过，不扣沽清
   const dishLines = lines.filter((l) => l.stationId !== null);
   const limited =
     dishLines.length > 0 && !backfill
@@ -307,6 +316,8 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
     at,
     actor: ctx.actor,
     backfill: !!backfill,
+    orderNote: input.orderNote,
+    deliverRoom: input.deliverRoom,
   });
   await tx`
     UPDATE bills SET amount_cents = amount_cents + ${total}, line_count = line_count + ${lines.length} WHERE id = ${bill!.id}`;
@@ -320,7 +331,7 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
   // 派钟马上上钟（或加钟）的钟单：技师与客人在钟单记的房间（记在消费之后，房间比项目的区域更准）
   for (const id of new Set(sessionIds.values())) await locateSession(tx, id, 'session_start', { at, staffId: ctx.actor.id, backfill: !!backfill });
   if (backfill) await recordBackfill(tx, backfill, { kind: 'charges', opKey: key, visitId: visit.id, businessDate: date, actor: ctx.actor });
-  await saveKey(tx, key, 'bill_post', requestHash, visit.id, ctx.actor.id);
+  await saveKey(tx, key, meta.opType ?? 'bill_post', requestHash, visit.id, ctx.actor.id);
   await writeAudit(tx, {
     staffId: ctx.actor.id,
     action: 'frontdesk_post',
@@ -342,6 +353,8 @@ export const VoidInput = z.object({
   reason: z.string().trim().min(2, '请填写作废原因（至少 2 个字）').max(200, '原因最多 200 字'),
   /** 退超过小额上限的菜时值班经理及以上的当场授权（8.0.8，B02） */
   grantId: z.uuid('授权编号不正确').optional(),
+  /** 退菜的责任岗位（8.1.15 块 B2：点单页退菜时选，记在审计里，不改明细表） */
+  blame: VoidBlameField,
 });
 
 export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: OpContext) {
@@ -375,14 +388,14 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
       await lockQueue(tx);
       await syncSessionAfterVoid(tx, deps, line!.sessionId, input.reason, ctx.actor, at);
     }
-    // 餐饮明细（退菜）：出品单改为已退，扣过估清的按原份数加回
+    // 餐饮明细（退菜）：出品单改为已退，扣过沽清的按原份数加回
     await cancelKitchenItem(tx, line!.id, `退菜：${input.reason}`, ctx.actor, at);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
       action: 'frontdesk_void',
       targetType: 'visit',
       targetId: visit.id,
-      detail: { visitNo: visit.visitNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, ...approval },
+      detail: { visitNo: visit.visitNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, blame: input.blame, ...approval },
       ip: ctx.ip,
       businessDate: await businessDate(tx, deps, at),
     });

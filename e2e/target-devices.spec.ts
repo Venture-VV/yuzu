@@ -9,6 +9,7 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { DiningMenu, DiningReceipt, KitchenBoard, MenuDish, PendingDish, TableSessionDetail, TablesBoard } from '../src/shared/dining';
 import type { BillLine } from '../src/shared/frontdesk';
+import type { DishPriceChange, DishesBoard } from '../src/shared/dishes';
 import { expectFits } from './fits';
 
 const PASSWORD = 'yuzu2026';
@@ -23,6 +24,8 @@ interface Device {
 
 type PageKey =
   | 'frontdesk'
+  // 8.1.15：前台拆成发卡台（frontdesk）与收银台
+  | 'cashier'
   | 'shift'
   | 'workbench'
   | 'dining-order'
@@ -41,7 +44,10 @@ type PageKey =
   | 'gift-ledger-customer'
   // 8.1.10：需求单的待核库、核库对话框、替代确认（合成的需求单），急采的待补合同
   | 'requests-stock'
-  | 'urgent-contract';
+  | 'urgent-contract'
+  // 8.1.15 菜品管理：菜品表与新增 / 编辑、改价、导入三个弹窗；点单时选做法与加料的弹窗（合成的菜品）
+  | 'dining-dishes'
+  | 'dining-dish-options';
 
 const DEVICES: Device[] = [
   {
@@ -49,6 +55,7 @@ const DEVICES: Device[] = [
     viewport: { width: 1920, height: 1080 },
     pages: [
       'frontdesk',
+      'cashier',
       'shift',
       'workbench',
       'dining-order',
@@ -63,23 +70,53 @@ const DEVICES: Device[] = [
       'gift-ledger-customer',
       'requests-stock',
       'urgent-contract',
+      'dining-dishes',
+      'dining-dish-options',
     ],
   },
   {
     name: '商米 D3 Pro（系统缩放 1.5 倍）',
     viewport: { width: 1280, height: 720 },
-    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger', 'pool', 'gift-ledger-concierge', 'requests-stock'],
+    pages: ['frontdesk', 'cashier', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger', 'pool', 'gift-ledger-concierge', 'requests-stock', 'dining-dishes', 'dining-dish-options'],
   },
   {
     name: '商米 V3',
     viewport: { width: 360, height: 800 },
     mobile: true,
-    pages: ['dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'dining-limits', 'gift-ledger-concierge', 'gift-ledger-customer', 'requests-stock', 'urgent-contract'],
+    pages: [
+      'frontdesk',
+      'cashier',
+      'dining-order',
+      'dining-receipt',
+      'dining-tables',
+      'dining-kitchen',
+      'dining-limits',
+      'gift-ledger-concierge',
+      'gift-ledger-customer',
+      'requests-stock',
+      'urgent-contract',
+      'dining-dishes',
+      'dining-dish-options',
+    ],
   },
   {
     name: '小米平板 6S Pro 12.4',
     viewport: { width: 1355, height: 903 },
-    pages: ['frontdesk', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-kitchen', 'direct-receipt', 'admin-gifts', 'gift-ledger-concierge', 'requests-stock', 'urgent-contract'],
+    pages: [
+      'frontdesk',
+      'cashier',
+      'dining-order',
+      'dining-receipt',
+      'dining-tables',
+      'dining-kitchen',
+      'direct-receipt',
+      'admin-gifts',
+      'gift-ledger-concierge',
+      'requests-stock',
+      'urgent-contract',
+      'dining-dishes',
+      'dining-dish-options',
+    ],
   },
 ];
 
@@ -88,7 +125,9 @@ const DEVICES: Device[] = [
 const SID = 990_001;
 const NOW = new Date().toISOString();
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
-const free = (id: number, name: string, area: string, seats: number) => ({ id, name, area, seats, sortOrder: id, active: true, session: null });
+// 8.1.15 块 B1：桌台多了状态（可用 / 待清台 / 维修中）
+const STATE = { state: 'available', maintenanceReason: null, maintenanceUntil: null, stateSince: null } as const;
+const free = (id: number, name: string, area: string, seats: number) => ({ id, name, area, seats, sortOrder: id, active: true, ...STATE, session: null });
 const BOARD: TablesBoard = {
   serverTime: NOW,
   businessDate: NOW.slice(0, 10),
@@ -102,6 +141,7 @@ const BOARD: TablesBoard = {
       seats: 10,
       sortOrder: 990_103,
       active: true,
+      ...STATE,
       session: {
         id: SID,
         sessionNo: 'T99000001',
@@ -115,11 +155,13 @@ const BOARD: TablesBoard = {
         amount: 30_200,
         lineCount: 6,
         pendingDishes: 4,
+        mergedInto: null,
       },
     },
     free(990_104, '听松阁', '景观包厢', 8),
-    free(990_105, 'W1', '休闲水吧区', 2),
-    free(990_106, 'F1', '休息果吧区', 4),
+    // 8.1.15：一张待清台、一张维修中（格子上颜色加文字加图标，维修写原因与预计时间）
+    { ...free(990_105, 'W1', '休闲水吧区', 2), state: 'dirty', stateSince: ago(6) },
+    { ...free(990_106, 'F1', '休息果吧区', 4), state: 'maintenance', maintenanceReason: '桌腿松了，等师傅来修', maintenanceUntil: ago(-120), stateSince: ago(30) },
   ],
 };
 
@@ -191,6 +233,8 @@ const DETAIL: TableSessionDetail = {
   lines: LINES,
   pending: PENDING,
   moves: [],
+  mergedInto: null,
+  merged: [],
 };
 
 const RECEIPT: DiningReceipt = (() => {
@@ -201,6 +245,8 @@ const RECEIPT: DiningReceipt = (() => {
     orderNo: `K${seq}`,
     postedAt: ago(48 - seq * 10),
     postedByName: '前台小周',
+    orderNote: seq === 1 ? '先上凉菜，孩子的不要辣' : '',
+    deliverRoom: '',
     lines: DISHES.flatMap((d, i) =>
       d.order === seq
         ? [
@@ -213,6 +259,7 @@ const RECEIPT: DiningReceipt = (() => {
               unitPrice: d.price,
               amount: d.price * d.qty,
               note: d.kitchen?.note ?? '',
+              parts: [],
               kitchenStatus: d.kitchen?.status ?? null,
               state: state(d.kitchen),
             } as DiningReceipt['orders'][number]['lines'][number],
@@ -245,7 +292,7 @@ const RECEIPT: DiningReceipt = (() => {
   };
 })();
 
-/** 菜单里的菜：三处、每个小分类都有，菜名有长有短，一道估清、一道限量（规则、营业日照接口返回的） */
+/** 菜单里的菜：三处、每个小分类都有，菜名有长有短，一道沽清、一道限量（规则、营业日照接口返回的） */
 const MENU_DISHES: MenuDish[] = (
   [
     ['宫保鸡丁', 4_800, '热菜', 'restaurant', '餐饮', null],
@@ -272,8 +319,63 @@ const MENU_DISHES: MenuDish[] = (
   group,
 }));
 
+// 8.1.15 菜品管理：「小炒黄牛肉」有六种做法、两种加料，「招牌秘制酱香手撕鸡（半只）」是套餐（点单时的选项弹窗、菜单上的提示）
+const SPICY = MENU_DISHES[1]!;
+const COMBO_DISH = MENU_DISHES[2]!;
+SPICY.methods = ['微辣', '中辣', '特辣', '免葱', '免蒜', '免香菜'];
+SPICY.addons = [MENU_DISHES[0]!, MENU_DISHES[5]!].map((d) => ({ id: d.id, name: d.name, price: d.price }));
+COMBO_DISH.combo = [
+  { name: '宫保鸡丁', quantity: 1 },
+  { name: '招牌手打香水柠檬茶（大杯）', quantity: 2 },
+];
+
+/** 合成的菜品表：三处都有，菜名有长有短；有下架的、沽清的、两档规格的、档口停用的、按默认归的、被别的菜用着的 */
+const DISH_BOARD: DishesBoard = {
+  businessDate: NOW.slice(0, 10),
+  stations: ['热菜', '吧台', '水吧', '果吧'].map((name, i) => ({ id: 996_000 + i, name, active: i !== 1 })),
+  categories: ['餐饮', '酒水', '饮品'],
+  dishes: MENU_DISHES.map((d, i) => ({
+    id: d.id,
+    name: d.name,
+    category: i % 4 === 3 ? '酒水' : '餐饮',
+    outlet: d.outlet,
+    group: d.group,
+    slotAssigned: i % 3 !== 0,
+    stationId: d.stationId,
+    stationName: d.stationName,
+    stationActive: d.stationName !== '吧台',
+    prices:
+      i === 2
+        ? [
+            { tier: 'standard', price: d.price },
+            { tier: 'premium', price: d.price + 2_000 },
+          ]
+        : [{ tier: 'standard', price: d.price }],
+    price: d.price,
+    active: i !== 6,
+    remaining: d.remaining,
+    imageId: null,
+    imageUrl: null,
+    emenuDish: null,
+    methods: d.methods ?? [],
+    addons: (d.addons ?? []).map((a) => ({ itemId: a.id, name: a.name, price: a.price, available: true })),
+    combo: (d.combo ?? []).map((c, k) => ({ itemId: MENU_DISHES[k === 0 ? 0 : 5]!.id, name: c.name, quantity: c.quantity, available: k === 0 })),
+    usedBy: i === 0 ? ['「小炒黄牛肉」的加料', '套餐「招牌秘制酱香手撕鸡（半只）」'] : [],
+    rev: String(1_700_000_000_000_000 + i),
+    updatedAt: NOW,
+  })),
+};
+const PRICE_CHANGES: DishPriceChange[] = [
+  { id: 3, itemId: SPICY.id, itemName: SPICY.name, tier: 'standard', oldPrice: 5_800, newPrice: 6_800, reason: '食材涨价', source: 'dishes', staffName: '林岚', createdAt: ago(60) },
+  { id: 2, itemId: COMBO_DISH.id, itemName: COMBO_DISH.name, tier: 'premium', oldPrice: null, newPrice: 10_800, reason: '新加一档整只的', source: 'import', staffName: '林岚', createdAt: ago(600) },
+  { id: 1, itemId: SPICY.id, itemName: SPICY.name, tier: 'standard', oldPrice: null, newPrice: 5_800, reason: '新建菜品', source: 'dishes', staffName: null, createdAt: ago(6000) },
+];
+
 /** 菜单、厨房看板里的菜，桌台看板、这一桌的详情、点菜单换成合成数据（只读，不碰库里的菜与桌台） */
 async function mockTables(ctx: BrowserContext) {
+  // 菜品管理（8.1.15）：菜品表与改价记录用合成的
+  await ctx.route('**/api/dining/dishes', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: DISH_BOARD }) : route.fallback()));
+  await ctx.route('**/api/dining/dishes/price-changes*', (route) => route.fulfill({ json: PRICE_CHANGES }));
   // 菜单与厨房看板：取真的（规则、营业日、档口、出品单照旧），只把菜换成合成的
   await ctx.route('**/api/dining/menu', async (route) => {
     const res = await route.fetch();
@@ -494,10 +596,26 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await expectFits(page);
     await expectOnScreen(page, ['gift-issue', 'gift-from', 'gift-to']);
   },
+  // 发卡台（8.1.15，原「前台」）：手牌板；点一张在店的手牌，客人卡上的加项目、换牌、去收银台都在屏幕里
   frontdesk: async (page) => {
     await page.goto('/frontdesk');
     await expect(page.getByTestId('tag-board')).toBeVisible();
     await expectFits(page);
+    await page.locator('[data-testid^="tag-"][data-state="in_use"]').first().click();
+    await expect(page.getByTestId('bill-panel')).toHaveAttribute('data-desk', 'issue');
+    await expectFits(page);
+    await expectOnScreen(page, ['action-add', 'action-swap', 'go-cashier']);
+  },
+  // 收银台（8.1.15）：查找框、排序、待结账清单；点第一张手牌，账单上的预结账、结账在屏幕里
+  cashier: async (page) => {
+    await page.goto('/cashier');
+    await expect(page.getByTestId('cashier-queue')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['tag-search', 'queue-sort']);
+    await page.getByTestId('cashier-queue').locator('button[data-testid^="queue-"]').first().click();
+    await expect(page.getByTestId('bill-panel')).toHaveAttribute('data-desk', 'cashier');
+    await expectFits(page);
+    await expectOnScreen(page, ['action-preview', 'action-checkout']);
   },
   shift: async (page) => {
     await page.goto('/shift');
@@ -543,6 +661,14 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await page.goto('/dining/tables');
     await expect(page.getByTestId('table-zones')).toBeVisible();
     await expectFits(page);
+    // 8.1.15：维修中的桌——格子上写维修中，点开看得到「恢复」「历史」
+    await expect(page.getByTestId('table-tile-F1')).toContainText('维修中');
+    await page.getByTestId('table-tile-F1').click();
+    await expect(page.getByTestId('table-state')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['table-restore', 'table-history-open']);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('table-state')).toHaveCount(0);
     await page.getByTestId('table-zone-景观包厢').click();
     await expect(page.getByTestId('table-zone-detail')).toContainText('景观包厢');
     await expectFits(page);
@@ -576,10 +702,12 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await expect(page.getByTestId('dining-ledger-group-all')).toBeVisible();
     await expectFits(page);
   },
+  // 8.1.15：退菜记录并进台账，旧地址跳到台账的「退菜」
   'dining-voids': async (page) => {
     await page.goto('/dining/voids');
-    await expect(page.getByTestId('dining-voids-outlet-all')).toBeVisible();
-    await page.getByTestId('dining-voids-outlet-fruit').click();
+    await expect(page.getByTestId('dining-ledger-outlet-all')).toBeVisible();
+    await expect(page.getByTestId('dining-ledger-type')).toBeVisible();
+    await page.getByTestId('dining-ledger-outlet-fruit').click();
     await expectFits(page);
   },
   'admin-dining': async (page) => {
@@ -589,6 +717,50 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await page.goto('/admin/dining/tables');
     await expect(page.getByTestId('dining-tables')).toBeVisible();
     await expectFits(page);
+  },
+  // 8.1.15 菜品管理：菜品表（宽屏一张表、窄屏一道一张卡片），新增 / 编辑、改价（带改价记录）、导入三个弹窗
+  'dining-dishes': async (page) => {
+    await page.goto('/dining/dishes');
+    await expect(page.getByTestId('dishes-list')).toBeVisible();
+    await expect(page.getByTestId(`dish-row-${COMBO_DISH.name}`)).toContainText('套餐');
+    await expectFits(page);
+    await expectOnScreen(page, ['dishes-search', 'dishes-new', 'dishes-import', 'dishes-export', 'dishes-history', `dish-edit-${SPICY.name}`, `dish-price-${SPICY.name}`, `dish-toggle-${SPICY.name}`]);
+    await expectOnScreen(page, [`dish-state-${COMBO_DISH.name}`, `dish-limit-${COMBO_DISH.name}`, `dish-price-text-${COMBO_DISH.name}`, `dish-toggle-${COMBO_DISH.name}`]);
+    await page.getByTestId(`dish-edit-${SPICY.name}`).click();
+    await expect(page.getByTestId('dish-editor')).toBeVisible();
+    await expect(page.getByTestId('dish-methods')).toContainText('免香菜');
+    await expectFits(page);
+    await expectOnScreen(page, ['dish-save', 'dish-name', 'dish-slot', 'dish-station', 'dish-method-add', 'dish-addon-search']);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('dish-editor')).toHaveCount(0);
+    await page.getByTestId(`dish-price-${SPICY.name}`).click();
+    await expect(page.getByTestId('dish-price-dialog')).toBeVisible();
+    await expect(page.getByTestId('dish-price-history')).toContainText('食材涨价');
+    await expectFits(page);
+    await expectOnScreen(page, ['dish-price-save', 'dish-price-new-standard', 'dish-price-new-premium', 'dish-price-reason']);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('dish-price-dialog')).toHaveCount(0);
+    await page.getByTestId('dishes-import').click();
+    await expect(page.getByTestId('dish-import')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['dish-import-preview', 'dish-import-apply']);
+    await page.keyboard.press('Escape');
+  },
+  // 8.1.15 点单时选做法、加料：菜单上写着「可选做法、加料」「含 …」；点开弹窗，选一种做法、加一种料，「加入已点」在屏幕里
+  'dining-dish-options': async (page) => {
+    await page.goto('/dining/order');
+    await page.getByTestId('dining-outlet-restaurant').click();
+    await expect(page.getByTestId(`dining-dish-${SPICY.name}`)).toContainText('可选做法、加料');
+    await expect(page.getByTestId(`dining-dish-${COMBO_DISH.name}`)).toContainText('含 宫保鸡丁×1');
+    await expectFits(page);
+    await page.getByTestId(`dining-dish-${SPICY.name}`).click();
+    await expect(page.getByTestId('dish-options')).toBeVisible();
+    await page.getByTestId('dish-options-method-微辣').click();
+    await page.getByTestId('dish-options-addon-add-宫保鸡丁').click();
+    await expectFits(page);
+    await expectOnScreen(page, ['dish-options-add', 'dish-options-note', 'dish-options-qty', 'dish-options-method-免香菜', 'dish-options-addon-qty-宫保鸡丁']);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('dish-options')).toHaveCount(0);
   },
 };
 

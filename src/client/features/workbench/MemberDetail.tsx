@@ -17,6 +17,7 @@ import { BenefitsCard } from '../membership/BenefitsCard';
 import { TrialsCard } from '../membership/TrialsCard';
 import { CountCardsCard } from '../membership/CountCardsCard';
 import { MemberCardsCard } from '../membership/MemberCardsCard';
+import { MemberBlacklistCard } from '../frontdesk/blacklist';
 import { MemberHistoryCard } from '../membership/MemberHistoryCard';
 import { MemberTagChips } from '../membership/TagPicker';
 import { AccountCard } from '../membership/AccountCard';
@@ -223,6 +224,9 @@ export function MemberDetail({
 
       {/* 微信小程序的绑定（8.0.19）：看绑没绑，有权限的在这里解绑；换会员时整块重来 */}
       <MemberWechatCard key={`wechat-${member.id}`} member={member} />
+
+      {/* 黑名单（8.1.15 发牌前风控）：在不在、为什么；值班经理及以上在这里加入 / 解除；换会员时整块重来 */}
+      <MemberBlacklistCard key={`blacklist-${member.id}`} member={member} />
 
       {/* 账户内券（v0.7.20）：换会员时整块重来（筛选、发券的操作编号都不带到下一位会员） */}
       {can('member.read') && <MemberCouponsCard key={member.id} member={member} />}

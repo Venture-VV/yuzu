@@ -264,6 +264,7 @@ test.describe('会员体系收尾', () => {
       expect(d).toMatchObject({ code: 'QY-041', rate: 80, target: 'companion_ticket', companions: [tagB] });
 
       await page.goto(`/frontdesk?v=${visitIds[0]}`);
+      await page.getByTestId('bill-panel').getByTestId('go-cashier').click();
       await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
       await expect(page.getByTestId('checkout-total')).toBeVisible();
       const row = page.getByTestId('member-discount');

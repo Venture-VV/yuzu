@@ -26,6 +26,8 @@ export const STORE_SCOPED_SETTING_KEYS = [
   'location_rules',
   'guide_rules',
   'stock_usage_rules',
+  // 发牌前风控的开关（8.1.15，docs/FRONTDESK_RISK_V8115.md）
+  'frontdesk_risk_rules',
 ] as const;
 
 export const STORE_CODE_PATTERN = /^[A-Z0-9]{2,8}$/;

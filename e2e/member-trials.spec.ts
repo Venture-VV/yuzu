@@ -178,6 +178,7 @@ test.describe('会员体系 v2 第三期', () => {
       expect(d.amount).toBeGreaterThan(0);
 
       await page.goto(`/frontdesk?v=${visitId}`);
+      await page.getByTestId('bill-panel').getByTestId('go-cashier').click();
       await page.getByTestId('bill-panel').getByTestId('action-checkout').click();
       await expect(page.getByTestId('checkout-total')).toBeVisible();
       const row = page.getByTestId('member-discount');

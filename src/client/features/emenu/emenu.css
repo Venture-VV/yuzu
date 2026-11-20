@@ -520,6 +520,46 @@
   animation: em-fade 0.45s ease-out both;
 }
 
+/* ───────────── 返回 / 退出（8.1.15，TC1、TC10） ───────────── */
+/* 左下角的键：进来时淡入；手指按下去底色轻轻亮一下 */
+.emenu .em-leave-key {
+  animation: em-fade 0.45s ease-out both;
+  -webkit-tap-highlight-color: transparent;
+}
+.emenu .em-leave-key:active {
+  background: rgb(166 148 122 / 0.16) !important;
+}
+/* 退出界面：从左下角那个键的方向长出来 */
+@keyframes em-leave-in {
+  from {
+    opacity: 0;
+    transform: translate(-150px, 170px) scale(0.55);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.emenu .em-leave-in {
+  animation: em-leave-in 0.34s var(--em-ease) both;
+}
+/* 没人碰自己收起的倒计时：底边的细线从满到空（时长由组件给） */
+@keyframes em-leave-idle {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+.emenu .em-leave-idle {
+  animation: em-leave-idle linear both;
+  opacity: 0.55;
+}
+
 /* 动效关掉：系统「减少动态效果」或后台设成「简洁」时舞台带 data-motion="off"（stage.tsx） */
 .emenu[data-motion='off'] *,
 .emenu[data-motion='off'] *::before,

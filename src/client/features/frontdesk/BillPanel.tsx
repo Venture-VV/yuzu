@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router';
 import {
   ArrowLeftRight,
+  ArrowRight,
   ChevronDown,
   CircleSlash,
   Clock3,
@@ -8,6 +10,7 @@ import {
   FilePenLine,
   HandHeart,
   Link2,
+  Lock,
   LogOut,
   Plus,
   ReceiptText,
@@ -20,6 +23,7 @@ import {
   Ticket,
   UtensilsCrossed,
   Shuffle,
+  TriangleAlert,
 } from 'lucide-react';
 import { BILL_SOURCE_LABELS, BILL_SOURCES, VISIT_STATUS_LABELS, ZONE_LABELS, type BillLine, type FrontdeskBoardRules, type VisitDetail } from '@shared/frontdesk';
 import { minutesText } from '@shared/benefits';
@@ -36,27 +40,44 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, PendingBadge, Skeleton, Textarea } from '../../components/ui';
 import { DishVoidDialog } from '../dining/DishVoid';
-import { GroupMark, LONG_STAY_MINUTES, VipChip, ZONE_STYLE } from './parts';
+import { TODO_KINDS } from '@shared/frontdesk-risk';
+import { GroupMark, VipChip, VisitStatusChips, ZONE_STYLE } from './parts';
 import { FRONTDESK_OP_LABELS, useFrontdeskPending } from './pending';
-import { stayMinutes, stayText, useServerNow } from './queries';
+import { stayText, useServerNow } from './queries';
 
-export type PanelAction = 'add' | 'swap' | 'join' | 'companion' | 'preview' | 'checkout' | 'ticket' | 'records' | 'move';
+/** incident：异常处置（8.1.15）；lost：手牌丢失（换牌对话框预先选好丢失） */
+export type PanelAction = 'add' | 'swap' | 'join' | 'companion' | 'preview' | 'checkout' | 'ticket' | 'records' | 'move' | 'incident' | 'lost';
 
-/** 右侧「小票」：当前手牌的共同账单，按消费来源分组；挂账、换牌、同行、预结账都从这里发起 */
+/**
+ * 两个台（8.1.15，docs/DESKS_V8115.md）：
+ *   · issue 发卡台的「客人卡」——身份、票种、同行、已挂的项目，挂账、换牌、同行都从这里发起；没有预结账与结账；
+ *   · cashier 收银台的「账单」——只读，不能加项目、不能作废、不能换牌；预结账与结账在这里。
+ */
+export type Desk = 'issue' | 'cashier';
+
+/** 右侧一栏：当前手牌的客人与共同账单，按消费来源分组；哪些能做看在哪个台 */
 export function BillPanel({
+  desk,
   visit,
   loading,
   error,
   rules,
+  identityExtra,
+  extra,
   onAction,
   onSelectVisit,
   onChanged,
   onClose,
 }: {
+  desk: Desk;
   visit: VisitDetail | undefined;
   loading: boolean;
   error: unknown;
   rules: FrontdeskBoardRules | undefined;
+  /** 客人一栏下面再放的内容：发卡台的会员基础权益 */
+  identityExtra?: ReactNode;
+  /** 明细下面再放的内容：收银台的「权益与优惠」 */
+  extra?: ReactNode;
   onAction: (a: PanelAction) => void;
   onSelectVisit: (id: number) => void;
   onChanged: (v: VisitDetail) => void;
@@ -72,6 +93,7 @@ export function BillPanel({
   const can = useCan();
   const session = useSession();
   const toast = useToast();
+  const navigate = useNavigate();
   const pendingOps = useFrontdeskPending();
   const voidReasons = useReasons('voidReasons');
   const cancelReasons = useReasons('cancelReasons');
@@ -87,12 +109,15 @@ export function BillPanel({
   }
   if (error && !visit) return <Notice tone="error" title={errorMessage(error)} className="m-5" />;
   if (!visit) return null;
-  const pendingHere = pendingOps.filter((p) => p.visitId === visit.id);
+  const issue = desk === 'issue';
+  // 结果待确认的操作各回各的台：结账在收银台处理，挂账、换牌、转明细在发卡台
+  const pendingHere = pendingOps.filter((p) => p.visitId === visit.id && (p.type === 'checkout') === !issue);
 
   const open = visit.status === 'open';
   const active = visit.lines.filter((l) => l.status === 'active');
   const voided = visit.lines.filter((l) => l.status === 'voided');
-  const long = open && stayMinutes(visit.checkedInAt, now) >= LONG_STAY_MINUTES;
+  // 异常（8.1.15）：这次来访记过几条、其中没处理完的待办几条
+  const openTodos = visit.incidents.filter((i) => TODO_KINDS.includes(i.kind) && !i.resolved).length;
   const selfMinutes = rules?.selfVoidMinutes ?? 10;
   const canFix = (ownerId: number, at: string) => can('frontdesk.correct') || (ownerId === session.staff.id && (now - new Date(at).getTime()) / 60_000 <= selfMinutes);
 
@@ -106,7 +131,7 @@ export function BillPanel({
   };
 
   return (
-    <section aria-label={`手牌 ${visit.tag.code} 账单`} data-testid="bill-panel" className="flex h-full min-h-0 flex-col">
+    <section aria-label={`手牌 ${visit.tag.code} ${issue ? '客人卡' : '账单'}`} data-testid="bill-panel" data-desk={desk} className="flex h-full min-h-0 flex-col">
       {/* 抬头 */}
       <header className="shrink-0 border-b border-line px-5 pt-4 pb-3.5">
         <div className="flex items-start gap-3">
@@ -130,15 +155,21 @@ export function BillPanel({
                 入场 {formatTime(visit.checkedInAt)}
               </span>
               {open && (
-                <span className={cn('font-semibold', long ? 'rounded-sm bg-yuzu-soft px-1 text-yuzu-deep' : 'text-ink-2')} data-testid="bill-stay">
+                <span className="font-semibold text-ink-2" data-testid="bill-stay">
                   在店 {stayText(visit.checkedInAt, now)}
-                  {long && ' · 超 6 小时'}
                 </span>
               )}
             </p>
+            {/* 超时在店（超 12 / 24 / 72 小时）、临时外出、异常待办（8.1.15）：颜色都配文字与图标 */}
+            {open && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 empty:hidden" data-testid="bill-status">
+                <VisitStatusChips visit={{ checkedInAt: visit.checkedInAt, awaySince: visit.awaySince, openTodos }} now={now} testId="bill" />
+                {visit.awaySince && <span className="num text-[12px] text-ink-3">{formatTime(visit.awaySince)} 起外出</span>}
+              </div>
+            )}
           </div>
           {onClose && (
-            <IconButton label="关闭账单" onClick={onClose} className="-mt-1 -mr-2">
+            <IconButton label={issue ? '关闭客人卡' : '关闭账单'} onClick={onClose} className="-mt-1 -mr-2">
               <X className="size-[18px]" />
             </IconButton>
           )}
@@ -173,10 +204,29 @@ export function BillPanel({
             <p className="min-w-0 flex-1 truncate text-[13.5px] text-ink-2">散客{visit.guestLabel ? ` · ${visit.guestLabel}` : ''}</p>
           )}
         </div>
+        {identityExtra}
         {visit.vipOverrideByName && (
           <p className="mt-1.5 flex items-center gap-1 px-1 text-[12px] font-semibold text-yuzu-deep" data-testid="bill-vip-override">
             <ShieldCheck className="size-3.5" /> VIP 柜由{visit.vipOverrideByName}当场授权
           </p>
+        )}
+        {visit.riskApproval && (
+          <p className="mt-1.5 flex items-start gap-1 px-1 text-[12px] font-semibold text-yuzu-deep" data-testid="bill-risk-approval">
+            <ShieldCheck className="mt-px size-3.5 shrink-0" /> 上次未结离店，发牌由{visit.riskApproval.byName}当场授权（{formatTime(visit.riskApproval.at)}）：{visit.riskApproval.reason}
+          </p>
+        )}
+        {/* 异常处置（8.1.15）：发卡台能登记；收银台只看有几条 */}
+        {((issue && open && can('frontdesk.operate')) || visit.incidents.length > 0) && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-[13px]" data-testid="bill-incidents">
+            <span className="font-semibold text-ink-3">
+              {visit.incidents.length === 0 ? '没有异常记录' : `异常记录 ${visit.incidents.length} 条${openTodos > 0 ? `，其中 ${openTodos} 条待办没处理完` : ''}`}
+            </span>
+            {issue && open && can('frontdesk.operate') && (
+              <Button size="lg" variant="secondary" className="ml-auto" icon={<TriangleAlert className="size-4" />} onClick={() => onAction('incident')} data-testid="action-incident">
+                异常处置
+              </Button>
+            )}
+          </div>
         )}
         {visit.backfill && (
           <p className="mt-1.5 flex items-center gap-1 px-1 text-[12px] font-semibold text-lake" data-testid="bill-backfill">
@@ -230,7 +280,7 @@ export function BillPanel({
               <Button
                 size="sm"
                 variant="primary"
-                onClick={() => onAction(p.type === 'bill_post' ? 'add' : p.type === 'checkout' ? 'checkout' : p.type === 'line_move' ? 'move' : 'swap')}
+                onClick={() => onAction(p.type === 'bill_post' ? 'add' : p.type === 'checkout' ? 'checkout' : p.type === 'line_move' ? 'move' : p.type === 'visit_incident' ? 'incident' : 'swap')}
                 data-testid="bill-pending-resolve"
               >
                 去处理
@@ -243,15 +293,17 @@ export function BillPanel({
         <div className="relative rounded-[14px] border border-line bg-card px-4 pt-3 pb-4 shadow-card" data-testid="receipt">
           <div className="flex items-center justify-between border-b border-dashed border-line-strong pb-2 text-[12px] text-ink-3">
             <span className="flex items-center gap-1 font-semibold">
-              <ReceiptText className="size-3.5" /> 账单 {visit.bill.billNo}
+              <ReceiptText className="size-3.5" /> {issue ? '已挂的项目' : `账单 ${visit.bill.billNo}`}
             </span>
-            <span>{active.length} 项有效</span>
+            <span>
+              {active.length} 项有效{!issue && ' · 只读'}
+            </span>
           </div>
           {active.length === 0 ? (
             <div className="py-8 text-center">
               <p className="text-[14px] font-bold text-ink-2">还没有挂账</p>
               <p className="mt-1 text-[12.5px] text-ink-3">门票结账时按在店时长计算；项目、饮品等可随时挂到这张手牌</p>
-              {open && can('frontdesk.operate') && (
+              {issue && open && can('frontdesk.operate') && (
                 <Button className="mt-3" variant="secondary" icon={<Plus className="size-4" />} onClick={() => onAction('add')}>
                   加项目
                 </Button>
@@ -271,7 +323,7 @@ export function BillPanel({
                       <LineRow
                         key={l.id}
                         line={l}
-                        canVoid={open && can('frontdesk.operate')}
+                        canVoid={issue && open && can('frontdesk.operate')}
                         allowed={l.source === 'dining' || canFix(l.postedById, l.postedAt)}
                         selfMinutes={selfMinutes}
                         onVoid={() => (l.source === 'dining' ? setDishVoiding(l) : setVoiding(l))}
@@ -312,11 +364,10 @@ export function BillPanel({
             {visit.ticket ? (
               <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[13px]">
                 <Ticket className="size-3.5 self-center text-pine" />
-                <span className="font-semibold">
-                  门票 · {visit.ticket.name}（{visit.ticket.tierLabel}）
-                </span>
-                <Money cents={visit.ticket.amount} className="font-bold" />
-                {open &&
+                <span className="font-semibold">{issue ? `票种 · ${visit.ticket.name}` : `门票 · ${visit.ticket.name}（${visit.ticket.tierLabel}）`}</span>
+                {!issue && <Money cents={visit.ticket.amount} className="font-bold" />}
+                {!issue &&
+                  open &&
                   (visit.ticket.endAt ? (
                     // 反结账后重结：门票按第一次结账的时刻计算，不再跳档
                     <span className="text-[12px] text-ink-3">按第一次结账 {formatTime(visit.ticket.endAt)} 计算</span>
@@ -331,7 +382,7 @@ export function BillPanel({
                   </span>
                 )}
                 <span className="flex-1" />
-                {open && can('frontdesk.operate') && (
+                {issue && open && can('frontdesk.operate') && (
                   <button type="button" onClick={() => onAction('ticket')} className="text-[12.5px] font-semibold text-pine hover:underline" data-testid="bill-ticket-change">
                     改票种
                   </button>
@@ -339,8 +390,8 @@ export function BillPanel({
               </p>
             ) : open ? (
               <p className="flex flex-wrap items-center gap-2 text-[13px] text-clay">
-                <Ticket className="size-3.5" /> 还没有选票种（结账前需要选择）
-                {can('frontdesk.operate') && (
+                <Ticket className="size-3.5" /> {issue ? '还没有选票种（结账前需要选择）' : '还没有选票种（结账时选）'}
+                {issue && can('frontdesk.operate') && (
                   <button type="button" onClick={() => onAction('ticket')} className="font-semibold text-pine hover:underline" data-testid="bill-ticket-change">
                     选择票种
                   </button>
@@ -353,6 +404,7 @@ export function BillPanel({
             </p>
           </div>
         </div>
+        {extra}
 
         <button type="button" onClick={() => setShowHistory((v) => !v)} className="mt-3 flex items-center gap-1 px-1 text-[12px] font-semibold text-ink-3 hover:text-ink">
           <ChevronDown className={cn('size-3.5 transition-transform', showHistory && 'rotate-180')} />
@@ -375,19 +427,26 @@ export function BillPanel({
       <footer className="@container shrink-0 border-t border-line bg-card px-5 pt-3 pb-4 shadow-[0_-8px_24px_-18px_rgb(28_35_31/0.3)]">
         <div className="flex flex-col gap-2.5 @min-[22rem]:flex-row @min-[22rem]:flex-wrap @min-[22rem]:items-end @min-[22rem]:gap-x-2">
           <div className="@min-[22rem]:grow">
-            <p className="w-0 min-w-full text-[12px] font-semibold text-ink-3">{open ? '本牌未结（已挂明细）' : '账单金额'}</p>
+            <p className="w-0 min-w-full text-[12px] font-semibold text-ink-3">{issue ? '已挂合计（不含门票）' : open ? '本牌未结（已挂明细）' : '账单金额'}</p>
             <span data-testid="bill-total">
-              <Money cents={visit.bill.amountCents} className="text-[30px] leading-tight font-bold text-ink" />
+              <Money cents={visit.bill.amountCents} className={cn('leading-tight font-bold text-ink', issue ? 'text-[22px]' : 'text-[30px]')} />
             </span>
-            {open && visit.ticket && (
+            {!issue && open && visit.ticket && (
               <p className="w-0 min-w-full text-[12px] text-ink-3" data-testid="bill-due">
                 含门票此刻应收 <Money cents={visit.bill.amountCents + visit.ticket.amount} className="font-bold text-pine" />
               </p>
             )}
           </div>
-          {open ? (
+          {issue ? (
+            // 发卡台不结账：有结账权限的人从这里带着这张手牌去收银台；已经结过的去收银台看结账单
+            (open ? can('frontdesk.checkout') : !!visit.checkout) && (
+              <Button variant="secondary" className="@min-[22rem]:ml-auto" icon={<ArrowRight className="size-4" />} onClick={() => navigate(`/cashier?v=${visit.id}`)} data-testid="go-cashier">
+                {open ? '去收银台结账' : '去收银台看结账单'}
+              </Button>
+            )
+          ) : open ? (
             <div className="flex gap-2 @min-[22rem]:ml-auto">
-              <Button variant="secondary" className="flex-1 @min-[22rem]:flex-none" icon={<ReceiptText className="size-4" />} onClick={() => onAction('preview')} kbd="F8">
+              <Button variant="secondary" className="flex-1 @min-[22rem]:flex-none" icon={<ReceiptText className="size-4" />} onClick={() => onAction('preview')} kbd="F8" data-testid="action-preview">
                 预结账
               </Button>
               {can('frontdesk.checkout') && (
@@ -404,7 +463,19 @@ export function BillPanel({
             )
           )}
         </div>
-        {open && can('frontdesk.operate') && (
+        {!issue && open && (
+          // 收银台不改单（8.1.15）：明细有误回发卡台，由有权限的人作废、转明细，照旧留原因
+          <p className="mt-2.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-ink-3" data-testid="cashier-readonly-hint">
+            <Lock className="size-3.5 shrink-0" />
+            收银台只看不改：加项目、作废、换牌请到发卡台。
+            {can('frontdesk.operate') && (
+              <button type="button" onClick={() => navigate(`/frontdesk?v=${visit.id}`)} className="font-semibold text-pine hover:underline" data-testid="go-issue">
+                去发卡台处理 →
+              </button>
+            )}
+          </p>
+        )}
+        {issue && open && can('frontdesk.operate') && (
           <div className="mt-3 flex gap-2">
             <Button variant="primary" size="lg" className="flex-1" icon={<Plus className="size-[18px]" />} onClick={() => onAction('add')} kbd="F4" data-testid="action-add">
               加项目

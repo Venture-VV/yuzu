@@ -125,6 +125,7 @@ test.describe('8.1.9 签赠', () => {
       await page.goto(`/frontdesk?v=${visitId}`);
       const bill = page.getByTestId('bill-panel');
       await expect(bill.getByTestId('bill-tag')).toHaveText(tag);
+      await bill.getByTestId('go-cashier').click();
       await bill.getByTestId('action-checkout').click();
       await expect(page.getByTestId('checkout-total')).toBeVisible();
       await page.getByTestId('pay-add-store_coupon').click();

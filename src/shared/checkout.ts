@@ -342,6 +342,44 @@ export interface CheckoutPayment {
   approvedByName: string | null;
 }
 
+/**
+ * 优惠与赠送（8.1.15，docs/DESKS_V8115.md 第 4 节）：结账单上每一笔减掉钱的权益——是什么、减了多少、谁经办的、
+ * 用在哪几条明细上。签赠是标了签赠的券（8.1.9），与普通券分开写；次卡、会员储值、团购券是预付或平台结算，不算优惠。
+ */
+export const PERK_KINDS = ['gift', 'coupon', 'member_discount', 'discount'] as const;
+export type PerkKind = (typeof PERK_KINDS)[number];
+export const PERK_KIND_LABELS: Record<PerkKind, string> = { gift: '签赠', coupon: '券抵扣', member_discount: '会员折扣', discount: '优惠 / 免单' };
+/** 小票、账单明细行上的短标记：这一行被哪一类权益抵到了（整单的优惠 / 免单不标在行上） */
+export const PERK_MARKS: Record<PerkKind, string> = { gift: '赠', coupon: '券', member_discount: '折', discount: '惠' };
+
+export interface CheckoutPerk {
+  /** 对应的那一笔收款明细（券抵扣、会员折扣、优惠 / 免单） */
+  paymentId: number;
+  kind: PerkKind;
+  /** 券名、会员权益名；优惠 / 免单没有名称，为空 */
+  name: string;
+  amount: number;
+  /** 说明：签赠与手动发券的事由、会员折扣打几折、优惠 / 免单的原因 */
+  detail: string;
+  /** 签赠的发放渠道（管家部、客户部……）；别的为空 */
+  channel: string;
+  /** 经办人留痕，按小票上写的顺序：发放、授权；按规则自动发的券、按档阶自动打的会员折扣没有（经办是收银） */
+  operators: { role: string; name: string }[];
+  /** 用在哪几条明细上（券、会员折扣记了适用的明细）；整单的优惠 / 免单为空 */
+  lineIds: number[];
+}
+
+/** 一条优惠在小票、账单上的一行字：「签赠 · 足疗体验券」「券抵扣 · 满 100 减 20」「会员折扣 · 结账折扣」「优惠 / 免单」 */
+export function perkTitle(p: Pick<CheckoutPerk, 'kind' | 'name'>): string {
+  return p.name ? `${PERK_KIND_LABELS[p.kind]} · ${p.name}` : PERK_KIND_LABELS[p.kind];
+}
+/** 经办人的一行字：「管家部 · 发放 张三 · 授权 李四」；没有经办人时为空 */
+export function perkOperatorsText(p: Pick<CheckoutPerk, 'channel' | 'operators'>): string {
+  return [p.channel, ...p.operators.map((o) => `${o.role} ${o.name}`)].filter(Boolean).join(' · ');
+}
+/** 这张结账单一共优惠了多少（签赠、券、会员折扣、优惠 / 免单相加） */
+export const perksTotal = (perks: readonly Pick<CheckoutPerk, 'amount'>[]) => perks.reduce((s, p) => s + p.amount, 0);
+
 export interface CheckoutDetail {
   id: number;
   checkoutNo: string;
@@ -380,6 +418,8 @@ export interface CheckoutDetail {
     ticketExtensionMinutes: number;
   }[];
   payments: CheckoutPayment[];
+  /** 优惠与赠送（8.1.15）：签赠、券、会员折扣、优惠 / 免单，各带经办人；没有为空 */
+  perks: CheckoutPerk[];
   /** 本次结账后同行组里仍在店的手牌 */
   remainingMates: string[];
   /** 这张结账单的退款单（v0.7.20，含已作废的） */

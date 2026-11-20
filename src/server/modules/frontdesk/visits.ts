@@ -20,13 +20,14 @@ import { businessDateOf } from '@shared/business-date';
 import { backfillText, type BackfillMark } from '@shared/backfill';
 import { isFreeTicket } from '@shared/checkout';
 import { formatYuan } from '@shared/money';
+import { INCIDENT_KIND_LABELS } from '@shared/frontdesk-risk';
 import { technicianText } from '@shared/technicians';
-import { consumeTicketGrant } from '../../auth/grants';
-import type { Db } from '../../db';
+import { consumeCheckinRiskGrant, consumeTicketGrant } from '../../auth/grants';
+import type { Db, Tx } from '../../db';
 import { writeAudit } from '../../lib/audit';
 import type { Deps, OpContext } from '../../lib/context';
 import { fenceKey, isFenced } from '../../lib/fences';
-import { badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
+import { AppError, badRequest, conflict, notFound, unprocessable } from '../../lib/errors';
 import { parse } from '../../lib/validate';
 import {
   assertCanFix,
@@ -60,6 +61,8 @@ import { lineTechnicianSql } from '../technicians';
 import { loadVipLockerRules } from '../vip-lockers';
 import { assertVipAllowed, consumeVipShortfalls, memberLockerGrades, vipShortfalls } from './vip';
 import { currentStoreId } from '../../lib/store-context';
+import { incidentText, openTodoCount, visitIncidentEvents, visitIncidents } from './incident-read';
+import { arriveBookingsTx, blacklistedError, blacklistHits, loadRiskRules, lockArrivableBookings, unsettledDebts, visitsToday, type LockedRiskBooking } from './risk';
 
 const clientKey = z.uuid('缺少有效的操作编号，请刷新页面后重试');
 const tagCode = z.string('请输入牌号').transform(normalizeTagCode).pipe(z.string().regex(TAG_CODE_PATTERN, '牌号格式不正确（例如 A023、1088）'));
@@ -84,6 +87,11 @@ export const CheckinInput = z.object({
   vipGrantId: z.uuid('授权编号格式不正确').nullable().default(null),
   /** 当场授权编号：有客人选免票（例如 1 米以下儿童）时，由值班经理及以上签发，同一次接待只授权一次（R1.2） */
   ticketGrantId: z.uuid('授权编号格式不正确').nullable().default(null),
+  /**
+   * 当场授权编号（8.1.15 发牌前风控）：有会员名下还有没处理完的「未结离店」时，由值班经理及以上签发（用途 checkin_risk）；
+   * 不带时不进入请求摘要（升级前留下的待确认请求重提时仍能对上）
+   */
+  riskGrantId: z.uuid('授权编号格式不正确').nullable().default(null),
   /** 按实际时间补录纸质单（R1.9）：纸质单号与实际时间；平时不带 */
   backfill: BackfillInput,
 });
@@ -101,10 +109,18 @@ async function loadCheckin(db: Db, key: string, replayed: boolean): Promise<Chec
     SELECT v.id, v.visit_no, t.code AS tag_code, v.zone, g.group_no
     FROM visits v JOIN hand_tags t ON t.id = v.tag_id LEFT JOIN visit_groups g ON g.id = v.group_id
     WHERE v.checkin_key = ${key} ORDER BY v.id`;
+  // 这次发牌顺带标成「已到店」的预约（8.1.15）：到店时刻就是发牌时刻、挂的是这次发的牌；之后在「预约」页点到店的时刻更晚，不算
+  const arrived = rows.length
+    ? await db<{ bookingNo: string; tagCode: string }[]>`
+        SELECT b.booking_no, t.code AS tag_code
+        FROM bookings b JOIN visits v ON v.id = b.arrival_visit_id JOIN hand_tags t ON t.id = v.tag_id
+        WHERE v.checkin_key = ${key} AND b.status = 'arrived' AND b.arrived_at = v.checked_in_at ORDER BY b.id`
+    : [];
   return {
     replayed,
     visits: rows.map(({ groupNo: _g, ...r }) => r),
     groupNo: rows.find((r) => r.groupNo)?.groupNo ?? null,
+    arrivedBookings: [...arrived],
   };
 }
 
@@ -116,11 +132,18 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
   if (new Set(memberIds).size !== memberIds.length) throw badRequest('同一位会员只能持一张手牌');
 
   const { clientKey: key, ...payload } = input;
-  const requestHash = hashRequest(hashedPayload(payload, ['vipGrantId', 'ticketGrantId']));
+  const requestHash = hashRequest(hashedPayload(payload, ['vipGrantId', 'ticketGrantId', 'riskGrantId']));
   // 补录纸质单：按纸质单上的实际时间办理（门票从实际时间起计，营业日按实际时间归属）
   const backfill = resolveBackfill(input.backfill, ctx.actor);
-  const run = await runIdempotent(deps, { key, opType: 'checkin', requestHash }, async (tx) => {
+  const body = async (tx: Tx) => {
     const at = backfill?.at ?? ctx.at ?? new Date();
+    // 发牌前风控（8.1.15，docs/FRONTDESK_RISK_V8115.md 第 3 节）：开着、不是补录纸质单、有会员时才核对——
+    // 页面预先看到的不算数，这里在同一个事务里再核对一遍。补录的客人早已按纸质单进过店，不再拦
+    const riskOn = !backfill && memberIds.length > 0 && (await loadRiskRules(tx)).enabled;
+    // ⓪ 预约（id 升序）：这几位会员今天待到店的预约先锁住，发牌成功后标「已到店」。预约的确认、到店、取消都先锁预约一行，
+    //    所以排在手牌之前，方向一致
+    const riskDate = riskOn ? await businessDate(tx, deps, at) : null;
+    const bookings: LockedRiskBooking[] = riskDate ? await lockArrivableBookings(tx, memberIds, riskDate) : [];
     // ① 手牌（id 升序）
     const tags = await lockTagsByCode(tx, codes);
     for (const g of input.guests) assertTagIssuable(tags.get(g.tagCode)!, g.zone);
@@ -157,6 +180,11 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
         names.set(Number(m.id), m.name);
         statusSeen.set(Number(m.id), m.status);
       }
+      // 黑名单：命中的会员拒绝（下面 ④ 锁住会员一行以后再核对一次，与登记黑名单串行）
+      if (riskOn) {
+        const [hit] = await blacklistHits(tx, memberIds);
+        if (hit) throw blacklistedError(hit);
+      }
       const inStore = await tx<{ name: string; code: string }[]>`
         SELECT m.name, t.code FROM visits v JOIN members m ON m.id = v.member_id JOIN hand_tags t ON t.id = v.tag_id
         WHERE v.status = 'open' AND v.member_id IN ${tx(memberIds)}`;
@@ -181,6 +209,32 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       return t && isFreeTicket(t) ? [{ tagCode: g.tagCode, ticketTypeId: t.id, name: t.name, free: true }] : [];
     });
     if (freeGuests.length && !input.ticketGrantId) throw ticketAuthRequired(freeGuests);
+
+    // 未结离店：名下有没处理完的待办的会员，要值班经理及以上当场授权才发（没带授权的先在这里拒绝，不做无用功）
+    const owing = riskOn ? await unsettledDebts(tx, memberIds) : [];
+    const owingIds = [...new Set(owing.map((d) => d.memberId))].sort((a, b) => a - b);
+    if (owingIds.length && !input.riskGrantId) {
+      const first = owing[0]!;
+      throw unprocessable(
+        'CHECKIN_RISK_AUTH_REQUIRED',
+        `会员「${names.get(first.memberId) ?? ''}」${first.viaName ? `（合并前的「${first.viaName}」）` : ''}上次（手牌 ${first.tagCode}，${first.visitNo}）未结离店，应收 ${formatYuan(first.amountCents)} 还没处理完。要发牌请值班经理、店总或店主当场授权`,
+        {
+          members: owingIds.map((id) => ({
+            memberId: id,
+            memberName: names.get(id) ?? '',
+            debts: owing.filter((d) => d.memberId === id).map(({ incidentId, visitNo, tagCode, amountCents }) => ({ incidentId, visitNo, tagCode, amountCents })),
+          })),
+        },
+      );
+    }
+    // 当日重复到店：只记下来（审计里留痕、页面提示），不拦
+    const repeats: { memberId: number; nth: number }[] = [];
+    if (riskOn) {
+      for (const id of memberIds) {
+        const today = await visitsToday(tx, id, riskDate!);
+        if (today.count > 0) repeats.push({ memberId: id, nth: today.count + 1 });
+      }
+    }
 
     // ② 同行组 → ③ 来访
     let groupId: number | null = null;
@@ -228,6 +282,11 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
           throw conflict('MEMBER_CHANGED', `会员「${name}」刚刚被${m.status === 'frozen' ? '停用' : '启用'}，请重新核对后再接待`);
         }
       }
+      // 黑名单在会员一行锁住以后再核对一次：登记黑名单先对会员一行加排他锁，这里要么看得到它，要么它排在这次发牌之后
+      if (riskOn) {
+        const [hit] = await blacklistHits(tx, memberIds);
+        if (hit) throw blacklistedError(hit);
+      }
     }
 
     // 授权凭据最后加锁并核销（业务回滚时一起回滚）
@@ -240,9 +299,13 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
           usedRef: `checkin:${key}`,
         })
       : null;
+    // 未结离店的放行授权：必须覆盖这几位会员；授权人、时间、原因记在这几位的来访上
+    const riskApproval = owingIds.length ? await consumeCheckinRiskGrant(tx, { grantId: input.riskGrantId!, actor: ctx.actor, memberIds: owingIds, usedRef: `checkin:${key}` }) : null;
 
     let firstId = 0;
     const created: number[] = [];
+    /** 会员 → 这次发给他的来访与牌号（预约到店挂这张牌） */
+    const visitOf = new Map<number, { visitId: number; tagCode: string }>();
     for (const [i, g] of input.guests.entries()) {
       const tag = tags.get(g.tagCode)!;
       const ticket = tickets[i]!;
@@ -250,15 +313,20 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
       const [bill] = await tx<{ id: number }[]>`
         INSERT INTO bills (bill_no, kind, business_date, opened_at) VALUES (${billNo}, 'visit', ${date}, ${at}) RETURNING id`;
       const visitNo = await nextDocNo(tx, 'visit', 'LF', date);
+      // 这位是不是凭当场授权放行的（名下有没处理完的未结离店）
+      const owed = !!riskApproval && g.memberId !== null && owingIds.includes(g.memberId);
       const [visit] = await tx<{ id: number }[]>`
         INSERT INTO visits (visit_no, bill_id, tag_id, zone, member_id, guest_label, group_id, business_date,
-                            checked_in_at, checked_in_by, checkin_key, vip_override_by, ticket_type_id, ticket_price_12h, ticket_price_24h)
+                            checked_in_at, checked_in_by, checkin_key, vip_override_by, ticket_type_id, ticket_price_12h, ticket_price_24h,
+                            risk_approved_by, risk_approved_at, risk_reason)
         VALUES (${visitNo}, ${bill!.id}, ${tag.id}, ${g.zone}, ${g.memberId}, ${g.guestLabel}, ${groupId}, ${date},
                 ${at}, ${ctx.actor.id}, ${key}, ${override && overrideCodes.has(tag.code) ? override.approverId : null},
-                ${ticket?.id ?? null}, ${ticket?.price12h ?? null}, ${ticket?.price24h ?? null})
+                ${ticket?.id ?? null}, ${ticket?.price12h ?? null}, ${ticket?.price24h ?? null},
+                ${owed ? riskApproval!.approverId : null}, ${owed ? at : null}, ${owed ? riskApproval!.reason : null})
         RETURNING id`;
       if (!firstId) firstId = visit!.id;
       created.push(visit!.id);
+      if (g.memberId !== null) visitOf.set(g.memberId, { visitId: visit!.id, tagCode: tag.code });
       // 免票：记一条改票种记录，留下授权人与原因
       if (ticket && ticketApproval && isFreeTicket(ticket)) {
         await tx`
@@ -275,6 +343,8 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
     }
     // 实时位置（v0.7.17）：发手牌后客人在接待区（后台没选接待区、补录的不记）
     await locateCheckin(tx, created, { at, staffId: ctx.actor.id, backfill: !!backfill });
+    // 预约带出并核销：开头锁住的预约标「已到店」、挂上这位会员刚发的牌（同一个事务，发牌不成这里也不生效）
+    await arriveBookingsTx(tx, bookings, visitOf, { at, staffId: ctx.actor.id, ip: ctx.ip, businessDate: date });
     await saveKey(tx, key, 'checkin', requestHash, firstId, ctx.actor.id);
     await writeAudit(tx, {
       staffId: ctx.actor.id,
@@ -298,13 +368,51 @@ export async function checkin(deps: Deps, raw: CheckinInputData, ctx: OpContext)
               },
             }
           : {}),
+        // 发牌前风控命中留痕：未结离店的放行授权、今天第几次到店、带出并标到店的预约
+        ...(riskApproval || repeats.length || bookings.length
+          ? {
+              risk: {
+                ...(riskApproval
+                  ? {
+                      unsettled: {
+                        members: owingIds,
+                        incidents: owing.map((d) => d.incidentId),
+                        approverId: riskApproval.approverId,
+                        approverName: riskApproval.approverName,
+                        reason: riskApproval.reason,
+                        grantId: input.riskGrantId,
+                      },
+                    }
+                  : {}),
+                ...(repeats.length ? { repeats } : {}),
+                ...(bookings.length ? { bookings: bookings.filter((b) => visitOf.has(b.memberId)).map((b) => b.bookingNo) } : {}),
+              },
+            }
+          : {}),
         ...backfillDetail(backfill),
       },
       ip: ctx.ip,
       businessDate: date,
     });
     return firstId;
-  });
+  };
+  let run: { refId: number; replayed: boolean };
+  try {
+    run = await runIdempotent(deps, { key, opType: 'checkin', requestHash }, body);
+  } catch (error) {
+    // 黑名单拦下的发牌整笔回滚了，留痕另记一条（事务外；记不上不影响拒绝本身）
+    if (error instanceof AppError && error.code === 'GUEST_BLACKLISTED') {
+      await writeAudit(deps.sql, {
+        staffId: ctx.actor.id,
+        action: 'checkin_blocked',
+        targetType: 'member',
+        targetId: Number(error.details?.memberId ?? 0) || undefined,
+        detail: { ...error.details, tags: codes, key },
+        ip: ctx.ip,
+      }).catch(() => {});
+    }
+    throw error;
+  }
   return loadCheckin(deps.sql, key, run.replayed);
 }
 
@@ -545,6 +653,32 @@ export async function cancelVisit(deps: Deps, visitId: number, raw: unknown, ctx
 
 // ───────────────────────── 读取 ─────────────────────────
 
+/**
+ * 手牌板上会员的档阶与手上能用的券（8.1.15，只读）：在店会员一次查完，发卡台认身份、收银台提醒有券 / 有签赠没用。
+ * 档阶与 VIP 柜核对用同一个来源（memberGradeBadges）；券只数此刻能用的（没用过、没作废、在有效期里）。
+ */
+export async function withMemberMarks(db: Db, board: FrontdeskBoard, date: string): Promise<FrontdeskBoard> {
+  const memberIds = [...new Set(board.tags.flatMap((t) => (t.visit?.memberId ? [t.visit.memberId] : [])))];
+  if (memberIds.length === 0) return board;
+  const grades = await memberLockerGrades(db, memberIds, date);
+  const counts = await db<{ memberId: number; coupons: number; gifts: number }[]>`
+    SELECT c.member_id, count(*)::int AS coupons, (count(*) FILTER (WHERE t.gift))::int AS gifts
+    FROM coupons c JOIN coupon_templates t ON t.id = c.template_id
+    WHERE c.member_id IN ${db(memberIds)} AND c.status = 'available' AND c.valid_from <= ${date} AND c.valid_to >= ${date}
+    GROUP BY c.member_id`;
+  const byMember = new Map(counts.map((r) => [Number(r.memberId), r]));
+  return {
+    ...board,
+    tags: board.tags.map((t) => {
+      const v = t.visit;
+      if (!v?.memberId) return t;
+      const g = grades.get(v.memberId);
+      const c = byMember.get(v.memberId);
+      return { ...t, visit: { ...v, memberGradeLabel: g && g.grade > 0 ? g.label : null, coupons: c?.coupons ?? 0, gifts: c?.gifts ?? 0 } };
+    }),
+  };
+}
+
 export async function getBoard(db: Db): Promise<FrontdeskBoard> {
   const rows = await db<
     (Omit<FrontdeskBoard['tags'][number], 'visit'> & {
@@ -561,6 +695,8 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
       groupOpenCount: number;
       amountCents: number | null;
       lineCount: number | null;
+      awaySince: string | null;
+      openTodos: number | null;
     })[]
   >`
     SELECT t.id, t.code, t.zone, t.kind, t.vip_level, t.locked, t.lock_reason, t.active, t.is_synthetic,
@@ -568,7 +704,11 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
            v.guest_label,
            v.group_id, g.group_no,
            CASE WHEN v.group_id IS NULL THEN 0 ELSE count(v.id) OVER (PARTITION BY v.group_id) END AS group_open_count,
-           b.amount_cents, b.line_count
+           b.amount_cents, b.line_count, v.away_since,
+           -- 这次来访上没处理完的异常待办（上报、未结离店）几条（8.1.15）
+           (SELECT count(*)::int FROM visit_incidents i
+            WHERE i.visit_id = v.id AND i.kind IN ('report', 'unsettled')
+              AND NOT EXISTS (SELECT 1 FROM visit_incident_events e WHERE e.incident_id = i.id AND e.action = 'resolve')) AS open_todos
     FROM hand_tags t
     LEFT JOIN visits v ON v.tag_id = t.id AND v.status = 'open'
     LEFT JOIN members m ON m.id = v.member_id
@@ -602,6 +742,12 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
           groupOpenCount: r.groupOpenCount,
           amountCents: r.amountCents ?? 0,
           lineCount: r.lineCount ?? 0,
+          // 档阶与手上的券由 withMemberMarks 按当天补上（8.1.15）；这里先给空的
+          memberGradeLabel: null,
+          coupons: 0,
+          gifts: 0,
+          awaySince: r.awaySince,
+          openTodos: r.openTodos ?? 0,
         }
       : null,
   }));
@@ -620,6 +766,7 @@ export async function getBoard(db: Db): Promise<FrontdeskBoard> {
       groups: new Set(inStore.map((t) => t.visit!.groupId).filter(Boolean)).size,
     },
     rules: { ...(await loadFrontdeskRules(db)), vipOverrideEnabled: (await loadVipLockerRules(db)).overrideEnabled },
+    risk: { enabled: (await loadRiskRules(db)).enabled, openTodos: await openTodoCount(db) },
     serverTime: now!.now,
   };
 }
@@ -658,6 +805,10 @@ export async function getVisit(db: Db, id: number, timezone: string): Promise<Vi
       tagSynthetic: boolean;
       vipOverrideByName: string | null;
       backfill: BackfillMark | null;
+      awaySince: string | null;
+      riskApprovedByName: string | null;
+      riskApprovedAt: string | null;
+      riskReason: string | null;
     }[]
   >`
     SELECT v.id, v.visit_no, v.status, v.zone, v.guest_label, v.business_date, v.checked_in_at, ${backfillMarkSql(db, 'v.checkin_key')} AS backfill,
@@ -666,9 +817,11 @@ export async function getVisit(db: Db, id: number, timezone: string): Promise<Vi
            b.id AS bill_id, b.bill_no, b.status AS bill_status, b.amount_cents, b.line_count,
            t.id AS tag_id, t.code AS tag_code, t.zone AS tag_zone, t.kind AS tag_kind, t.vip_level AS tag_vip_level,
            t.locked AS tag_locked, t.lock_reason AS tag_lock_reason, t.active AS tag_active, t.is_synthetic AS tag_synthetic,
-           os.display_name AS vip_override_by_name
+           os.display_name AS vip_override_by_name,
+           v.away_since, rk.display_name AS risk_approved_by_name, v.risk_approved_at, v.risk_reason
     FROM visits v JOIN bills b ON b.id = v.bill_id JOIN hand_tags t ON t.id = v.tag_id
     JOIN staff s ON s.id = v.checked_in_by LEFT JOIN staff cs ON cs.id = v.closed_by LEFT JOIN staff os ON os.id = v.vip_override_by
+    LEFT JOIN staff rk ON rk.id = v.risk_approved_by
     WHERE v.id = ${id} AND v.store_id = ${currentStoreId()}`;
   if (!v) throw notFound('来访记录不存在');
 
@@ -711,7 +864,9 @@ export async function getVisit(db: Db, id: number, timezone: string): Promise<Vi
     {
       at: v.checkedInAt,
       kind: 'checkin',
-      text: `开牌 · ${ZONE_LABELS[v.zone].title}${v.vipOverrideByName ? `（VIP 柜由${v.vipOverrideByName}当场授权）` : ''}${backfill ? `（${backfillText(backfill)}）` : ''}`,
+      text: `开牌 · ${ZONE_LABELS[v.zone].title}${v.vipOverrideByName ? `（VIP 柜由${v.vipOverrideByName}当场授权）` : ''}${
+        v.riskApprovedByName ? `（上次未结离店，由${v.riskApprovedByName}当场授权放行：${v.riskReason}）` : ''
+      }${backfill ? `（${backfillText(backfill)}）` : ''}`,
       operatorName: v.checkedInByName,
     },
   ];
@@ -780,6 +935,17 @@ export async function getVisit(db: Db, id: number, timezone: string): Promise<Vi
   if (v.closedAt && v.status === 'cancelled') {
     history.push({ at: v.closedAt, kind: 'close', text: `撤销来访（${v.closeReason}）`, operatorName: v.closedByName ?? '' });
   }
+  // 异常处置（8.1.15）：提醒、加收、上报、外出、返回、未结离店，与待办的指派、处理结果
+  const incidents = await visitIncidents(db, id);
+  for (const i of incidents) history.push({ at: i.createdAt, kind: 'incident', text: incidentText(i), operatorName: i.createdByName });
+  for (const e of await visitIncidentEvents(db, id)) {
+    history.push({
+      at: e.createdAt,
+      kind: 'incident',
+      text: e.action === 'assign' ? `异常 · ${INCIDENT_KIND_LABELS[e.kind]}指给${e.assigneeName ?? ''}` : `异常 · ${INCIDENT_KIND_LABELS[e.kind]}处理结果：${e.note}`,
+      operatorName: e.operatorName,
+    });
+  }
   history.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
@@ -812,6 +978,9 @@ export async function getVisit(db: Db, id: number, timezone: string): Promise<Vi
     memberGrade,
     vipOverrideByName: v.vipOverrideByName,
     backfill,
+    awaySince: v.awaySince,
+    riskApproval: v.riskApprovedByName && v.riskApprovedAt ? { byName: v.riskApprovedByName, at: v.riskApprovedAt, reason: v.riskReason ?? '' } : null,
+    incidents,
     ticket: await visitTicket(db, v.id, v.closedAt ? new Date(v.closedAt) : new Date(now!.now), today),
     checkout: lastCheckout ? { id: lastCheckout.id, checkoutNo: lastCheckout.checkoutNo, status: lastCheckout.status } : null,
     bill: { id: v.billId, billNo: v.billNo, status: v.billStatus, amountCents: v.amountCents, lineCount: v.lineCount },
@@ -842,14 +1011,26 @@ export async function previewBills(db: Db, visitIds: number[]): Promise<PreviewB
     GROUP BY bill_id, source ORDER BY bill_id, source`;
   const totalBySource = new Map<BillSource, number>();
   for (const s of sums) totalBySource.set(s.source, (totalBySource.get(s.source) ?? 0) + s.amountCents);
+  // 押金（8.1.15 前台 1 细化，YB3）：这几位客人在住的客房还押着多少（收 − 退）；只读，退房时退，不在手牌结账里抵
+  const deposits = await db<{ visitId: number; roomNo: string; balance: number }[]>`
+    SELECT s.visit_id, r.room_no,
+           coalesce((SELECT sum(CASE WHEN d.kind = 'receive' THEN d.amount ELSE -d.amount END) FROM room_deposits d WHERE d.stay_id = s.id), 0)::int AS balance
+    FROM room_stays s JOIN rooms r ON r.id = s.room_id
+    WHERE s.visit_id IN ${db(ids)} AND s.status = 'open' ORDER BY s.id`;
+  const depositOf = (visitId: number) => {
+    const mine = deposits.filter((d) => Number(d.visitId) === visitId);
+    return { amountCents: mine.reduce((sum, d) => sum + d.balance, 0), rooms: mine.map((d) => d.roomNo) };
+  };
   const [now] = await db<{ now: string }[]>`SELECT now() AS now`;
   return {
     visits: visits.map(({ status: _s, billId, ...v }) => ({
       ...v,
       bySource: sums.filter((s) => s.billId === billId).map(({ billId: _b, ...s }) => s),
+      deposit: depositOf(v.visitId),
     })),
     totalCents: visits.reduce((s, v) => s + v.amountCents, 0),
     bySource: [...totalBySource].map(([source, amountCents]) => ({ source, amountCents })),
+    depositCents: deposits.reduce((sum, d) => sum + d.balance, 0),
     serverTime: now!.now,
   };
 }
@@ -869,6 +1050,8 @@ export async function lookupFrontdeskOp(db: Db, key: string, timezone: string, e
   if (row.opType === 'bill_post') return { found: true as const, type: 'bill_post' as const, visit: await getVisit(db, row.refId, timezone) };
   // 转单（v0.7.6）：查回原客人（明细转出的那位）
   if (row.opType === 'line_move') return { found: true as const, type: 'line_move' as const, visit: await getVisit(db, row.refId, timezone) };
+  // 发牌后的异常处置（8.1.15）：编号记在那次来访上
+  if (row.opType === 'visit_incident') return { found: true as const, type: 'visit_incident' as const, visit: await getVisit(db, row.refId, timezone) };
   if (row.opType === 'checkout') return { found: true as const, type: 'checkout' as const, checkout: await getCheckout(db, row.refId) };
   // 餐饮第二步：开台、桌台点单查回这一桌；桌台结账查回结账单
   if (row.opType === 'table_open' || row.opType === 'table_post') {
@@ -892,6 +1075,11 @@ export async function lookupFrontdeskOp(db: Db, key: string, timezone: string, e
   }
   // 技师停牌、复牌、休假（8.0.8）：编号记在那位技师上
   if (row.opType === 'technician_state') return { found: true as const, type: 'technician_state' as const, technicianId: Number(row.refId) };
+  // 桌台动作（8.1.15）：清台、维修、恢复、并台、拆台——查回编号记下的那一条桌台记录
+  if (row.opType === 'table_state' || row.opType === 'table_merge') {
+    const { tableActionOf } = await import('../tables-v8115');
+    return { found: true as const, type: row.opType as 'table_state' | 'table_merge', action: await tableActionOf(db, row.refId) };
+  }
   const [c] = await db<{ visitId: number }[]>`SELECT visit_id FROM visit_tag_changes WHERE id = ${row.refId}`;
   return { found: true as const, type: 'tag_swap' as const, visit: await getVisit(db, c!.visitId, timezone) };
 }

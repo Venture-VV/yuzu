@@ -2,6 +2,8 @@
 // 以及切到英文时每样内容取哪一份（录了英文的用英文，没录的显示中文，单位、规格、常见忌口有内置的英文）。不开浏览器、不连数据库。
 
 import { describe, expect, it } from 'vitest';
+import { homeIsEmenu } from '../src/client/lib/landing';
+import { permissionsOf, type Permission } from '../src/shared/permissions';
 import {
   categoryOpenAt,
   DEFAULT_EMENU_PERIODS,
@@ -221,7 +223,7 @@ describe('中 / EN：每样内容取哪一份', () => {
     expect(en.endCart(3)).toContain('3 items');
     expect(guestErrorEn('TAG_NOT_IN_STORE')).toMatch(/tag/i);
     expect(guestErrorEn('TABLE_NOT_FOUND')).toMatch(/table/i);
-    // 8.1.6（QZ6）：服务员那一步的原因（密码不对、估清、价格变了）也有英文；新加的拒绝码没有英文时返回 null
+    // 8.1.6（QZ6）：服务员那一步的原因（密码不对、沽清、价格变了）也有英文；新加的拒绝码没有英文时返回 null
     expect(errorEn('PIN_INVALID')).toMatch(/PIN/);
     expect(errorEn('DISH_SOLD_OUT')).toMatch(/sold out/);
     expect(errorEn('PRICE_CHANGED')).toMatch(/price/i);
@@ -233,7 +235,25 @@ describe('中 / EN：每样内容取哪一份', () => {
     expect(bothText(note, 'en')).toBe('Wrong order PIN (the earlier order is still unconfirmed)\n点单密码不对（原来那一单仍待确认）');
     expect(zh.pendingAmount(2, '88.00')).toBe('2 份 ¥88.00');
     expect(en.pendingAmount(1, '28.00')).toBe('1 item · ¥28.00');
-    expect(en.exitBody.join(' ')).not.toMatch(/[一-鿿]/);
+    // 返回 / 退出（8.1.15）：英文那一份里没有中文；份数的单复数
+    for (const text of [en.leaveKeyExit, en.leaveKeyBack, en.leaveHome, en.signOutFull, en.leaveStaffNote, en.leaveStaffNoteDevice, en.leaveHoldHint, en.leavePinHint, en.leaveWho('Lin')])
+      expect(text).not.toMatch(/[一-鿿]/);
+    expect(en.leaveWarnCart(1)).toBe('1 item not ordered yet — cleared when you leave');
+    expect(en.leaveEndNote('A8060', 2)).toContain('2 items');
+    expect(zh.leaveEndNote('A8060', 0)).toBe('手牌 A8060：已经下单的不受影响');
+  });
+});
+
+describe('离开电子菜单以后去哪（8.1.15，TC3）', () => {
+  const canOf = (role: Parameters<typeof permissionsOf>[0]['role']) => {
+    const set = new Set(permissionsOf({ role, duties: [] }));
+    return (p: Permission) => set.has(p);
+  };
+  it('「点餐平板」设备账号登录后只能进菜单：没有主系统可回，只有退出登录', () => {
+    expect(homeIsEmenu(canOf('tablet'))).toBe(true);
+  });
+  it('店主、店长、值班经理、店员、设计师有自己的首页：有「返回工作台」', () => {
+    for (const role of ['owner', 'store_manager', 'duty_manager', 'clerk', 'designer'] as const) expect(homeIsEmenu(canOf(role)), role).toBe(false);
   });
 });
 

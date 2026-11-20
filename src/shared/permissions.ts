@@ -27,11 +27,16 @@
 // 新增「打开平板点餐」「维护电子菜单」。平板上确认下单的服务员照旧要「餐饮点单」+「前台挂账」（凭点单密码认人）。
 // 8.1.1 UI 工作台（docs/WORKBENCH_V811.md 第 6 节）：新岗位「设计师」（只进工作台），新增「工作台：编辑」「工作台：发布」；
 // 店主 2026-11-15 定设计师可以发布（GZ3）：两项默认给店主与设计师，别的岗位要的在后台「岗位权限」里加。
+// 8.1.15《浴族系统需求汇总》块 A（docs/FRONTDESK_RISK_V8115.md，FK1 待确认）：新增「维护黑名单」与「前台风控的当场授权」，默认值班经理及以上。
+// 8.1.15《浴族系统需求汇总》块 B（docs/DINING_V8115.md，ZT 待确认）：新增「在餐厅 / 水吧 / 果吧下单」三项（原来有「餐饮点单」的岗位三项都有）、
+// 新职责「康美部」（默认有「餐饮点单」与水吧、果吧两项，没有餐厅；不和别的职责分组互斥）。
+// 8.1.15 菜品管理（docs/DISHES_V8115.md，CP6、CP7 待确认）：新增「菜品管理：维护餐厅 / 水吧 / 果吧的菜品」三项与「定价与改价」一项，
+// 默认店主、店总；厨房主管、水吧主管要维护自己那一处的，在后台「岗位权限」里加。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store', 'tablet', 'designer'] as const;
 export type Role = (typeof ROLES)[number];
 
-export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request', 'legal', 'concierge', 'concierge_manager'] as const;
+export const DUTIES = ['stock', 'purchase', 'payable', 'approve', 'cost', 'request', 'legal', 'concierge', 'concierge_manager', 'kangmei'] as const;
 export type Duty = (typeof DUTIES)[number];
 
 /**
@@ -268,8 +273,8 @@ export const PERMISSIONS = {
   /** 钟房：上牌、派钟、上钟、下钟、加钟、退钟（v0.7.1，待确认：前台岗位都能做；派钟、加钟、退钟还要能挂账） */
   'technician.dispatch': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
   /** 餐饮点单：按手牌给在店客人点菜（挂账）、催单、上菜（S5 第一步，待确认：前台岗位都能做；下单还要能挂账） */
-  'dining.order': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
-  /** 厨房出品屏：开始做、出餐、估清（S5 第一步，待确认：前台岗位与后勤人员；厨房可以用后勤账号） */
+  'dining.order': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'], duties: ['kangmei'] },
+  /** 厨房出品屏：开始做、出餐、沽清（S5 第一步，待确认：前台岗位与后勤人员；厨房可以用后勤账号） */
   'dining.kitchen': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk', 'backoffice'] },
   /**
    * 打开平板点餐（8.0.10，DC16 待确认：能点单的前台岗位与「点餐平板」）：看电子菜单、按手牌找在店客人、看这张手牌点过的菜；
@@ -338,6 +343,27 @@ export const PERMISSIONS = {
   'report.commission': { roles: ['owner', 'store_manager'] },
   /** 营销成本测算（8.0.4，HY14）：券、赠金、会员折扣、服务类权益的实核成本；有财务职责的账号一律没有（见 FINANCE_EXCLUDED） */
   'marketing.cost': { roles: ['owner', 'store_manager'] },
+  // ── 前台风控（8.1.15《浴族系统需求汇总》块 A，docs/FRONTDESK_RISK_V8115.md，FK1 待确认：值班经理及以上）──
+  /** 黑名单：把会员或手机号加入黑名单、解除，看黑名单清单 */
+  'frontdesk.blacklist': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  /**
+   * 前台风控的当场授权：名下有没处理完的「未结离店」的会员发牌、超时加收；
+   * 有这一项的人自己加收不用另请授权，「未结离店」的待办也由有这一项的人写处理结果
+   */
+  'auth.checkinRisk': { roles: ['owner', 'store_manager', 'duty_manager'] },
+  // 8.1.15 块 B（docs/DINING_V8115.md 第 4 节）：按出品口下单，点单页只显示有权限的出品口，服务端逐行核对；默认与「餐饮点单」同一批岗位，康美部没有餐厅
+  'dining.orderRestaurant': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  'dining.orderWater': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'], duties: ['kangmei'] },
+  'dining.orderFruit': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'], duties: ['kangmei'] },
+  /**
+   * 菜品管理（8.1.15，docs/DISHES_V8115.md，CP6、CP7 待确认：店主、店总）：维护权限按出品口分三项——新增、编辑、上下架、做法、加料、套餐、图片；
+   * 没有某个出品口权限的看得到、改不了。有任一项（或改价）就看得到餐饮里的「菜品管理」
+   */
+  'dish.restaurant': { roles: ['owner', 'store_manager'] },
+  'dish.water': { roles: ['owner', 'store_manager'] },
+  'dish.fruit': { roles: ['owner', 'store_manager'] },
+  /** 菜品定价与改价（8.1.15）：单独一项，新建时定价、以后改价都要它，并且要有这道菜所在出品口的维护权限；每次改价写改价记录 */
+  'dish.price': { roles: ['owner', 'store_manager'] },
 } as const satisfies Record<string, Rule>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -517,7 +543,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'technician.manage': '维护技师名册',
   'technician.dispatch': '钟房派钟、上下钟、加钟、退钟、上牌',
   'dining.order': '餐饮点单、催单、上菜',
-  'dining.kitchen': '厨房出品屏：开始做、出餐、估清',
+  'dining.kitchen': '厨房出品屏：开始做、出餐、沽清',
   'emenu.view': '打开平板点餐（电子菜单；下单要服务员输点单密码）',
   'emenu.manage': '维护电子菜单（分类、版面、菜品图文、设置）',
   'room.operate': '客房入住、续住、换房、退房、押金、夜审',
@@ -547,6 +573,15 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'marketing.cost': '营销成本测算（券、赠金、会员折扣的实核成本；有财务职责的账号不生效）',
   'studio.edit': 'UI 工作台：改版面草稿、传素材、预览',
   'studio.publish': 'UI 工作台：发布、回滚版面（平板马上换成新样子）',
+  'frontdesk.blacklist': '维护黑名单（加入、解除、看清单）',
+  'auth.checkinRisk': '当场授权未结离店的会员发牌、超时加收；处理未结离店的待办',
+  'dining.orderRestaurant': '点单：在餐厅下单',
+  'dining.orderWater': '点单：在水吧下单',
+  'dining.orderFruit': '点单：在果吧下单',
+  'dish.restaurant': '菜品管理：维护餐厅的菜品（新增、编辑、上下架、做法、加料、套餐）',
+  'dish.water': '菜品管理：维护水吧的菜品（新增、编辑、上下架、做法、加料、套餐）',
+  'dish.fruit': '菜品管理：维护果吧的菜品（新增、编辑、上下架、做法、加料、套餐）',
+  'dish.price': '菜品管理：定价与改价（还要有那个出品口的维护权限；每次改价留记录）',
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
@@ -669,4 +704,7 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   { title: '数据看板', items: ['report.executive', 'report.members', 'report.technicians', 'report.commission', 'marketing.cost'] },
   { title: '管理后台', items: ['staff.manage', 'catalog.manage', 'emenu.manage', 'technician.manage', 'settings.manage', 'audit.read'] },
   { title: 'UI 工作台', items: ['studio.edit', 'studio.publish'] },
+  { title: '前台风控', items: ['frontdesk.blacklist', 'auth.checkinRisk'] },
+  { title: '餐饮：按出品口下单', items: ['dining.orderRestaurant', 'dining.orderWater', 'dining.orderFruit'] },
+  { title: '菜品管理', items: ['dish.restaurant', 'dish.water', 'dish.fruit', 'dish.price'] },
 ];
