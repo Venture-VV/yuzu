@@ -89,19 +89,19 @@ test.describe('订单查询', () => {
     await rowOf(page, wallet.docNo).click();
     const drawer = page.getByTestId('order-drawer');
     await expect(page.getByTestId('order-drawer-no')).toHaveText(wallet.docNo);
-    // 每张手牌一段，行数与打印的结账单一样
-    await expect(drawer.getByTestId('order-bill')).toHaveCount(print.bills.length);
-    await expect(drawer.getByTestId('order-line')).toHaveCount(print.bills.reduce((n, b) => n + b.lines.length, 0));
+    // 8.1.17（BW-12）：与结账单同一个部件——每张手牌一行、下面是它的明细，行数与打印的结账单一样
+    await expect(drawer.getByTestId('checkout-receipt')).toBeVisible();
+    await expect(drawer.getByTestId('checkout-bill')).toHaveCount(print.bills.length);
+    for (const b of print.bills) await expect(drawer.getByTestId('checkout-bill').filter({ hasText: b.tagCode })).toHaveCount(1);
+    await expect(drawer.getByTestId('receipt-line')).toHaveCount(print.bills.reduce((n, b) => n + b.lines.length, 0));
     for (const b of print.bills) {
-      const section = drawer.getByTestId('order-bill').filter({ hasText: b.tagCode });
-      for (const l of b.lines) await expect(section.getByTestId('order-line').filter({ hasText: l.name }).first()).toBeVisible();
+      for (const l of b.lines) await expect(drawer.getByTestId('receipt-line').filter({ hasText: l.name }).first()).toBeVisible();
     }
-    await expect(drawer.getByTestId('order-lines').first()).toContainText('所属部门');
-    await expect(drawer.getByTestId('order-lines').first()).toContainText('优惠');
-    await expect(drawer.getByTestId('order-line').filter({ hasText: '门票 · 全日自助餐' })).toContainText('门票');
+    // 所属部门写在每一行下面（门票归「门票」）
+    await expect(drawer.getByTestId('receipt-line').filter({ hasText: '门票 · 全日自助餐' })).toContainText('门票 ·');
     const total = `${(print.totalAmount / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-    await expect(drawer.getByTestId('order-totals')).toContainText(total);
-    const payments = drawer.getByTestId('order-payments');
+    await expect(drawer.getByTestId('checkout-receipt-total')).toContainText(total);
+    const payments = drawer.getByTestId('checkout-tenders');
     await expect(payments).toContainText('会员储值');
     await expect(payments).toContainText('扣前 本金 ¥2,000.00 / 赠金 ¥300.00');
     await expect(payments).toContainText('团购券');
@@ -122,8 +122,8 @@ test.describe('订单查询', () => {
     await expect(drawer).toContainText('收款方式记错');
     // 反结账时作废的门票照样在（结账那一刻的明细）
     const voidedPrint = (await (await page.request.get(`/api/print/checkouts/${voided.id}`)).json()) as { bills: { lines: unknown[] }[] };
-    await expect(drawer.getByTestId('order-line')).toHaveCount(voidedPrint.bills.reduce((n, b) => n + b.lines.length, 0));
-    await expect(drawer.getByTestId('order-line').filter({ hasText: '门票 · 不含餐' })).toHaveCount(1);
+    await expect(drawer.getByTestId('receipt-line')).toHaveCount(voidedPrint.bills.reduce((n, b) => n + b.lines.length, 0));
+    await expect(drawer.getByTestId('receipt-line').filter({ hasText: '门票 · 不含餐' })).toHaveCount(1);
   });
 
   test('导出明细 CSV：导出的是页面上列出来的这几张，一行一个消费项目；店员没有导出、只查当天', async ({ page }) => {
