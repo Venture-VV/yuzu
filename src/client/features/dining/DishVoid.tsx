@@ -5,6 +5,7 @@
 //   · 改单：退掉这道（同样分级）后把它放回购物车，改数量或换菜再下单。
 // 服务端照同样的规则核对（判断不一致时以服务端为准：提示要授权就转到授权）。
 // 8.1.15（块 B2）：退菜时选责任岗位（服务员 / 厨房 / 水吧 / 果吧 / 客人原因 / 其他），记在审计里，台账的退菜行写出来。
+// 8.1.17（BW8，docs/DISHES_V8117.md 第 4 节）：这道菜还有没退的加料时问「它的加料一起退吗」（默认勾上），一起退的照主菜的原因与授权。
 
 import { useState } from 'react';
 import { formatYuan } from '@shared/money';
@@ -29,6 +30,8 @@ export interface VoidableDish {
   postedAt: string;
   /** 已经出餐了的提示 */
   served?: boolean;
+  /** 挂在这道菜上、还没退的加料（8.1.17）：有的话问要不要一起退 */
+  addons?: { name: string; quantity: number; amount: number }[];
 }
 
 export function DishVoidDialog({
@@ -56,12 +59,15 @@ export function DishVoidDialog({
   const [error, setError] = useState<string | null>(null);
   const [forceGrant, setForceGrant] = useState(false);
   const [authorizing, setAuthorizing] = useState(false);
+  /** 加料一起退（默认勾上） */
+  const [withAddons, setWithAddons] = useState(true);
   useResetOnOpen(!!dish, () => {
     setReason(mode === 'modify' ? '改单' : '');
     setBlame(null);
     setError(null);
     setForceGrant(false);
     setAuthorizing(false);
+    setWithAddons(true);
   });
   if (!dish) return null;
 
@@ -82,12 +88,16 @@ export function DishVoidDialog({
           ? `你点的、${selfMinutes} 分钟内：直接退`
           : `超过${limit > 0 ? `小额上限 ${formatYuan(limit)}` : '上限'}：请值班经理及以上当场授权`;
   const ok = reason.trim().length >= 2 && blame !== null;
+  const addons = dish.addons ?? [];
+  const addonsAmount = addons.reduce((n, a) => n + a.amount, 0);
+  const addonsText = addons.map((a) => `${a.name} × ${a.quantity}`).join('、');
+  const together = addons.length > 0 && withAddons;
 
   const send = async (grantId?: string) => {
     setBusy(true);
     setError(null);
     try {
-      const result = await api.post<unknown>(url, { reason: reason.trim(), ...(blame ? { blame } : {}), ...(grantId ? { grantId } : {}) });
+      const result = await api.post<unknown>(url, { reason: reason.trim(), ...(blame ? { blame } : {}), ...(grantId ? { grantId } : {}), ...(together ? { withAddons: true } : {}) });
       onDone(dish, result);
     } catch (e) {
       if (e instanceof ApiError && e.code === 'VOID_NEEDS_GRANT') {
@@ -141,6 +151,20 @@ export function DishVoidDialog({
           </span>
           <span className="font-bold">{formatYuan(dish.amount)}</span>
         </div>
+        {addons.length > 0 && (
+          <label
+            className={cn('mb-3 flex min-h-11 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5', withAddons ? 'border-clay/40 bg-clay-soft/40' : 'border-line bg-card')}
+            data-testid="dish-void-addons"
+          >
+            <input type="checkbox" className="mt-0.5 size-5 shrink-0" checked={withAddons} onChange={(e) => setWithAddons(e.target.checked)} data-testid="dish-void-addons-check" />
+            <span className="min-w-0 flex-1 text-[13.5px]">
+              <b>它的加料一起退吗？</b>
+              <span className="block text-ink-2">
+                {addonsText}，共 <b className="num">{formatYuan(addonsAmount)}</b>；照这道菜的原因{withAddons ? '一起退' : '，不勾就只退这道菜'}
+              </span>
+            </span>
+          </label>
+        )}
         <p className="mb-3 text-[12.5px] text-ink-3" data-testid="dish-void-tier">
           {forceGrant ? '请值班经理及以上当场授权' : tierText}
         </p>
@@ -180,7 +204,7 @@ export function DishVoidDialog({
       <AuthorizeDialog
         open={authorizing}
         request={request}
-        lines={[`${dish.name} × ${dish.quantity}`, `金额 ${formatYuan(dish.amount)}`, `原因：${reason.trim()}`]}
+        lines={[`${dish.name} × ${dish.quantity}`, `金额 ${formatYuan(dish.amount)}`, ...(together ? [`连同加料一起退：${addonsText}（${formatYuan(addonsAmount)}）`] : []), `原因：${reason.trim()}`]}
         onClose={() => setAuthorizing(false)}
         onGranted={(g) => {
           setAuthorizing(false);

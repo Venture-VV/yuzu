@@ -32,25 +32,7 @@ import { homeIsEmenu } from '../../lib/landing';
 import { useCan, useSession } from '../../lib/session';
 import { uuid } from '../../lib/utils';
 import { Header } from './header';
-import {
-  blockLabel,
-  both,
-  bothText,
-  dishNames,
-  dishTagline,
-  errorEn,
-  LangProvider,
-  messages,
-  namePair,
-  optionLabel,
-  specLabel,
-  uncertainEn,
-  useLang,
-  useM,
-  type Both,
-  type Lang,
-  type Messages,
-} from './i18n';
+import { blockLabel, both, bothText, dishNames, errorEn, LangProvider, messages, namePair, optionLabel, specLabel, uncertainEn, useLang, useM, type Both, type Lang, type Messages } from './i18n';
 import { LogoStacked } from './logo';
 import { ExitKey, LeaveSheet, type LeaveAction } from './exit';
 import { Backdrop, BiText, Frame, InfoModal, ModalButton, ModalNote, SmallDialog, SuccessModal, Toast, type InfoField } from './modals';
@@ -63,7 +45,23 @@ import { MenuStrip, type StripHandle } from './strip';
 import { LangBlock, LogoBlock, LogoRowBlock, StartCoverBlock, StartFooterBlock, StartPendingBlock, StudioPreviewBand, StudioVersionMark, studioAssetUrl, useEmenuLayout } from './studio';
 import { colorValue, EMENU_SURFACE, type StudioDoc } from '@shared/studio';
 import { StudioNodes, type StudioRenderCtx } from '../../studio-render/StudioNodes';
-import { EMPTY_REMARK, lastTable, loadState, rememberTable, removePending, savePending, saveState, usePendingOrder, type CartLine, type PendingOrder, type Remark, type TableSession } from './store';
+import {
+  cartKey,
+  EMPTY_REMARK,
+  lastTable,
+  loadState,
+  rememberTable,
+  removePending,
+  savePending,
+  saveState,
+  usePendingOrder,
+  type CartLine,
+  type PendingOrder,
+  type Remark,
+  type TableSession,
+} from './store';
+import { OptionsDrawer, type PickedOptions } from './options';
+import { cartRows, optionLineKeys, withOptionLines, type CartHit } from './cart';
 
 /** 一页菜单页：内容（这一页的菜、这个分类的上下文）没变就不重画（8.1.6，QZ4）；语言、版面这些从上下文来，变了照样重画 */
 const MemoPage = memo(PageCanvas);
@@ -93,13 +91,6 @@ function reasonOf(error: unknown): Both {
   return { zh: errorMessage(error), en: EN_M.serverTrouble };
 }
 
-/** 「未下单」一行要知道的：哪道菜、哪个规格、现在能不能点（收起来的分类里的菜只给菜名与规格） */
-interface CartHit {
-  dish: Pick<EmenuDishView, 'name' | 'nameEn' | 'tagline' | 'taglineEn'>;
-  spec: Pick<EmenuSpecView, 'label' | 'labelEn' | 'price' | 'state' | 'remaining'>;
-  open: boolean;
-}
-
 const MENU_KEY = ['emenu', 'menu'] as const;
 const guestKey = (visitId: number | null) => ['emenu', 'guest', visitId] as const;
 /** 页面被系统刷新以后，这么久之内的那一次点餐接着用（之后再按设置的「多久没人动」核对） */
@@ -115,6 +106,8 @@ interface FlatPage {
 
 type Overlay =
   | { kind: 'detail'; dishId: number; categoryId: number; origin?: { x: number; y: number } | null }
+  /** 选做法、加料（8.1.17 BW9）：哪道菜的哪个规格、所在的分类现在能不能点 */
+  | { kind: 'options'; dishId: number; itemId: number; open: boolean }
   | { kind: 'search' }
   | { kind: 'drawer'; tab: 'cart' | 'ordered' }
   | { kind: 'remark' }
@@ -342,27 +335,8 @@ export function EmenuPage() {
     return map;
   }, [menu]);
 
-  const rows = useMemo<CartRow[]>(
-    () =>
-      cart.map((l) => {
-        const hit = specIndex.get(l.itemId) ?? laterIndex.get(l.itemId);
-        if (!hit) return { ...l, names: { main: m.goneDish, sub: '', mainEn: shown === 'en' }, tagline: { text: '', en: false }, label: '', price: 0, problem: m.goneProblem };
-        const { dish, spec, open } = hit;
-        const why = (block: 'off' | 'closed' | 'sold_out') => m.blockedProblem(blockLabel(block, shown).main);
-        const problem =
-          spec.state === 'off'
-            ? why('off')
-            : !open
-              ? why('closed')
-              : spec.state === 'sold_out'
-                ? why('sold_out')
-                : spec.remaining !== null && l.quantity > spec.remaining
-                  ? m.leftProblem(spec.remaining)
-                  : null;
-        return { ...l, names: dishNames(dish, shown), tagline: dishTagline(dish, shown), label: specLabel(spec, shown), price: spec.price, problem };
-      }),
-    [cart, specIndex, laterIndex, shown, m],
-  );
+  const hitOf = useCallback((itemId: number) => specIndex.get(itemId) ?? laterIndex.get(itemId), [specIndex, laterIndex]);
+  const rows = useMemo<CartRow[]>(() => cartRows(cart, hitOf, shown, m), [cart, hitOf, shown, m]);
   const total = rows.reduce((s, r) => s + r.price * r.quantity, 0);
   const count = cart.reduce((s, l) => s + l.quantity, 0);
   const cartProblem = rows.length === 0 ? m.cartEmpty : rows.find((r) => r.problem) ? m.cartHasBlocked : null;
@@ -382,27 +356,57 @@ export function EmenuPage() {
       if (pending) return say(m.pendingFirst);
       const block = dishBlock(dish, open);
       if (block) return say(m.dishBlocked(name, blockLabel(block, shown).main));
+      if (spec.state === 'unavailable') return say(m.dishBlocked(name, blockLabel('unavailable', shown).main));
       if (spec.state !== 'ok') return say(m.specBlocked(name, spec.state === 'sold_out'));
-      const cur = cart.find((l) => l.itemId === spec.itemId);
+      // 有做法、加料的（8.1.17 BW9）：先在右边的抽屉里选，选好了再加
+      if (spec.options) return setOverlay({ kind: 'options', dishId: dish.id, itemId: spec.itemId, open });
+      const cur = cart.find((l) => cartKey(l) === String(spec.itemId));
       const want = (cur?.quantity ?? 0) + 1;
       if (want > 99) return say(m.maxPerDish);
       if (spec.remaining !== null && want > spec.remaining) return say(m.onlyLeft(name, spec.remaining));
       if (!cur && cart.length >= EMENU_MAX_LINES) return say(m.maxLines);
       setCart((c) =>
-        c.some((l) => l.itemId === spec.itemId) ? c.map((l) => (l.itemId === spec.itemId ? { ...l, quantity: l.quantity + 1 } : l)) : [...c, { itemId: spec.itemId, dishId: dish.id, quantity: 1 }],
+        c.some((l) => cartKey(l) === String(spec.itemId))
+          ? c.map((l) => (cartKey(l) === String(spec.itemId) ? { ...l, quantity: l.quantity + 1 } : l))
+          : [...c, { itemId: spec.itemId, dishId: dish.id, quantity: 1 }],
       );
       setBump((n) => n + 1);
       // 一个小圆点从加号飞向右上角的订单图标
       if (from) flyToOrder(from);
       say(m.added(name, specLabel(spec, shown)));
     },
-    [cart, pending, say, shown, m],
+    [cart, pending, say, shown, m, setOverlay],
   );
 
-  const setQuantity = (itemId: number, quantity: number) => {
-    const hit = specIndex.get(itemId);
-    const max = Math.min(99, hit?.spec.remaining ?? 99);
-    setCart((c) => c.flatMap((l) => (l.itemId !== itemId ? [l] : quantity <= 0 ? [] : [{ ...l, quantity: quantity > l.quantity ? Math.max(l.quantity, Math.min(quantity, max)) : quantity }])));
+  /**
+   * 选好做法、加料以后加进未下单（8.1.17 BW9）：同一道菜同一个规格同样的做法合成一行，做法不同的另起一行；
+   * 加料各一行、挂在这一行主菜上（下单时带 addonOf，出品单上写「配 某菜」）
+   */
+  const addOptions = (dish: EmenuDishView, spec: EmenuSpecView, picked: PickedOptions) => {
+    const name = dishNames(dish, shown).main;
+    const keys = optionLineKeys(spec.itemId, picked);
+    const mainKey = keys[0]!;
+    const fresh = keys.filter((k) => !cart.some((l) => cartKey(l) === k)).length;
+    if (cart.length + fresh > EMENU_MAX_LINES) return say(m.maxLines);
+    const cur = cart.find((l) => cartKey(l) === mainKey);
+    if ((cur?.quantity ?? 0) + 1 > 99) return say(m.maxPerDish);
+    if (spec.remaining !== null && cart.filter((l) => l.itemId === spec.itemId).reduce((n, l) => n + l.quantity, 0) + 1 > spec.remaining) return say(m.onlyLeft(name, spec.remaining));
+    setCart((c) => withOptionLines(c, dish.id, spec.itemId, picked));
+    setBump((n) => n + 1);
+    setOverlay(null);
+    say(m.added(name, specLabel(spec, shown)));
+  };
+
+  const setQuantity = (key: string, quantity: number) => {
+    const line = cart.find((l) => cartKey(l) === key);
+    const main = line?.addonOf ? cart.find((l) => cartKey(l) === line.addonOf) : undefined;
+    const left = line?.addonOf ? hitOf(main?.itemId ?? 0)?.spec.options?.addons.find((a) => a.itemId === line.itemId)?.remaining : specIndex.get(line?.itemId ?? 0)?.spec.remaining;
+    const max = Math.min(99, left ?? 99);
+    setCart((c) => {
+      const next = c.flatMap((l) => (cartKey(l) !== key ? [l] : quantity <= 0 ? [] : [{ ...l, quantity: quantity > l.quantity ? Math.max(l.quantity, Math.min(quantity, max)) : quantity }]));
+      // 主菜拿掉了：配它的加料一起拿掉
+      return next.filter((l) => !l.addonOf || next.some((x) => cartKey(x) === l.addonOf));
+    });
   };
 
   // ───────────── 已下单 ─────────────
@@ -889,6 +893,14 @@ export function EmenuPage() {
               onClose={() => setOverlay(null)}
             />
           )}
+          {inMenu &&
+            overlay?.kind === 'options' &&
+            (() => {
+              const dish = categories.flatMap((c) => c.pages.flatMap((p) => p.dishes)).find((d) => d?.id === overlay.dishId);
+              const spec = dish?.specs.find((x) => x.itemId === overlay.itemId);
+              if (!dish || !spec?.options) return null;
+              return <OptionsDrawer dish={dish} spec={spec} tableName={session.tableName} onClose={() => setOverlay(null)} onAdd={(picked) => addOptions(dish, spec, picked)} />;
+            })()}
           {inMenu && overlay?.kind === 'remark' && (
             <RemarkDrawer
               remark={remark}
@@ -924,7 +936,14 @@ export function EmenuPage() {
                   tagCode: next.tagCode,
                   tableName: next.tableName,
                   guests: next.guests,
-                  lines: cart.map((l) => ({ itemId: l.itemId, quantity: l.quantity })),
+                  // 8.1.17：做法、加料挂在哪一行主菜上（主菜在前，下标）；都没有的与以前一样
+                  lines: cart.map((l) => ({
+                    itemId: l.itemId,
+                    quantity: l.quantity,
+                    ...(l.methods?.length ? { methods: l.methods } : {}),
+                    ...(l.addonOf ? { addonOf: cart.findIndex((x) => cartKey(x) === l.addonOf) } : {}),
+                    ...(l.swaps?.length ? { swaps: l.swaps } : {}),
+                  })),
                   avoid: remark.avoid,
                   serve: remark.serve,
                   customNote: remark.custom.trim(),

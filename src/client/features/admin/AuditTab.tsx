@@ -114,6 +114,10 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_card_returned: { label: '退卡', tone: 'clay' },
   // 8.1.17 第二家店改本店价（BW-11）
   store_price_changed: { label: '改本店价', tone: 'ember' },
+  dishes_sorted: { label: '菜品排序', tone: 'neutral' },
+  dishes_active_bulk: { label: '菜品批量上下架', tone: 'neutral' },
+  dish_deleted: { label: '删除菜品', tone: 'clay' },
+  dish_restored: { label: '恢复菜品', tone: 'neutral' },
 };
 
 function describe(detail: Record<string, unknown>): string {

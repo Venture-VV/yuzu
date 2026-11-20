@@ -11,8 +11,8 @@ import { displaySpec, wrapParen, yuan } from './pages';
 import { BIG, Bleed, box, Hairline, HEADER_H, useBig, useBleed, useStage, ZoomAt } from './stage';
 import type { CartLine, Remark } from './store';
 
-const MUTE = 'var(--em-mute)';
-const LINE = '0.5px solid var(--em-mute)';
+export const MUTE = 'var(--em-mute)';
+export const LINE = '0.5px solid var(--em-mute)';
 
 // ───────────────────────── 菜品详情 ─────────────────────────
 
@@ -214,7 +214,9 @@ export function DishDetail({
                     </button>
                   );
                 })}
-                {spec && spec.state !== 'ok' && !block && <span style={{ fontSize: 11, lineHeight: '16px', color: MUTE }}>{spec.state === 'sold_out' ? m.specSoldOut : m.specOff}</span>}
+                {spec && spec.state !== 'ok' && !block && (
+                  <span style={{ fontSize: 11, lineHeight: '16px', color: MUTE }}>{spec.state === 'sold_out' ? m.specSoldOut : spec.state === 'unavailable' ? m.specUnavailable : m.specOff}</span>
+                )}
               </div>
             )}
           </div>
@@ -363,14 +365,14 @@ export function SearchOverlay({ hits, onPick, onClose }: { hits: (q: string) => 
 // ───────────────────────── 抽屉 ─────────────────────────
 
 /** 右侧抽屉的壳（设计稿：从 598.3 起到右边，里面的内容从 640.7 到 984，左边的页面压暗）。DX 是内容左边离抽屉左边多远 */
-const DX = 42.4;
+export const DX = 42.4;
 /**
  * 放大的一档（8.0.15）：抽屉整块放大 BIG.drawer 倍——宽从 425.7 变成 532（左边到 491.9），里面仍照设计稿的像素写，
  * 只是能用的高从 768 变成 614.4：贴着底的几样（按钮、备注、合计）与能滑的那一块都往上收这么多。
  */
 const DRAWER_DROP = 768 - 768 / BIG.drawer;
-const useDrawerDrop = () => (useBig() ? DRAWER_DROP : 0);
-function Drawer({
+export const useDrawerDrop = () => (useBig() ? DRAWER_DROP : 0);
+export function Drawer({
   kind,
   swap,
   title,
@@ -380,7 +382,7 @@ function Drawer({
   children,
   testId,
 }: {
-  kind: 'drawer' | 'remark';
+  kind: 'drawer' | 'remark' | 'options';
   /** 抽屉里换内容（未下单 ⇄ 备注）：抽屉不重新滑进来、背景不重新淡入，内容淡入 */
   swap?: boolean;
   title: string;
@@ -440,7 +442,7 @@ function Drawer({
   );
 }
 
-function DrawerButton({ onClick, disabled, children, testId, shift = 0 }: { onClick: () => void; disabled?: boolean; children: ReactNode; testId: string; shift?: number }) {
+export function DrawerButton({ onClick, disabled, children, testId, shift = 0 }: { onClick: () => void; disabled?: boolean; children: ReactNode; testId: string; shift?: number }) {
   const drop = useDrawerDrop();
   return (
     <button
@@ -467,7 +469,7 @@ function DrawerButton({ onClick, disabled, children, testId, shift = 0 }: { onCl
   );
 }
 
-function Pill({
+export function Pill({
   x,
   y,
   on,
@@ -515,6 +517,10 @@ function Pill({
 }
 
 export interface CartRow extends CartLine {
+  /** 这一行的标识（store.ts 的 cartKey：老的一行就是项目编号） */
+  key: string;
+  /** 选的做法（「特辣 +¥2，免葱」）、加料配的哪道菜（「配 水煮鱼」）（8.1.17）：写在菜名下面那一行 */
+  detail?: string;
   /** 菜名两行（按现在的语言排好主次） */
   names: NamePair;
   /** 名称后的小字 */
@@ -562,7 +568,7 @@ export function OrderDrawer({
   problem: string | null;
   /** 下单要服务员输点单密码（后台开着「点单密码」）：按钮上写「请呼叫服务员」 */
   callStaff: boolean;
-  onQuantity: (itemId: number, quantity: number) => void;
+  onQuantity: (key: string, quantity: number) => void;
   onRemark: () => void;
   onSubmit: () => void;
   onClose: () => void;
@@ -609,7 +615,7 @@ export function OrderDrawer({
               </div>
             ) : (
               rows.map((r) => (
-                <div key={r.itemId} className="em-rise" style={{ position: 'relative', height: 45.4, opacity: r.problem ? 0.55 : 1 }} data-testid={`emenu-cart-${r.itemId}`}>
+                <div key={r.key} className="em-rise" style={{ position: 'relative', height: 45.4, opacity: r.problem ? 0.55 : 1 }} data-testid={`emenu-cart-${r.key}`}>
                   <div
                     className={`em-clip${r.names.mainEn ? ' em-en' : ''}`}
                     style={{ ...box(0.5, r.names.mainEn ? 16.9 : 15.9, large ? 252 : 270), fontSize: r.names.mainEn ? 13 : 14, lineHeight: '14px' }}
@@ -622,6 +628,11 @@ export function OrderDrawer({
                     <div className={`em-clip${en ? ' em-en' : ''}`} style={{ ...box(0.5, 30.6, 270), fontSize: 8, lineHeight: '8px', color: 'var(--em-error)' }}>
                       {r.problem}
                     </div>
+                  ) : r.detail ? (
+                    // 8.1.17：选的做法、加料配的哪道菜
+                    <div className="em-clip" style={{ ...box(0.5, 30.2, 270), fontSize: 9, lineHeight: '9px', color: 'var(--em-tan)' }} data-testid={`emenu-cart-detail-${r.key}`}>
+                      {r.detail}
+                    </div>
                   ) : r.names.mainEn ? (
                     <div className="em-clip" style={{ ...box(0.5, 31.2, 270), fontSize: 9, lineHeight: '9px', color: MUTE }}>
                       {r.names.sub}
@@ -632,7 +643,7 @@ export function OrderDrawer({
                     </div>
                   )}
                   {/* 减号 283.6、加号 330.7（离内容左边），份数在两个圆点中间；圆点比菜名高 1.3 */}
-                  {step(() => onQuantity(r.itemId, r.quantity - 1), <MinusDot size={dot} />, large ? 264 : 283.6, m.less(r.names.main), `emenu-minus-${r.itemId}`, locked)}
+                  {step(() => onQuantity(r.key, r.quantity - 1), <MinusDot size={dot} />, large ? 264 : 283.6, m.less(r.names.main), `emenu-minus-${r.key}`, locked)}
                   <span
                     key={r.quantity}
                     className="em-en em-bump"
@@ -641,18 +652,11 @@ export function OrderDrawer({
                         ? { ...box(282, 14.4, 43.3), textAlign: 'center', fontSize: 14, lineHeight: '14px', letterSpacing: 0 }
                         : { ...box(296.2, 16.2, 34.5), textAlign: 'center', fontSize: 12, lineHeight: '12px', letterSpacing: 0 }
                     }
-                    data-testid={`emenu-qty-${r.itemId}`}
+                    data-testid={`emenu-qty-${r.key}`}
                   >
                     {r.quantity}
                   </span>
-                  {step(
-                    () => onQuantity(r.itemId, r.quantity + 1),
-                    <PlusDot size={dot} />,
-                    large ? 325.3 : 330.7,
-                    m.more(r.names.main),
-                    `emenu-plus-${r.itemId}`,
-                    locked || !!r.problem || r.quantity >= 99,
-                  )}
+                  {step(() => onQuantity(r.key, r.quantity + 1), <PlusDot size={dot} />, large ? 325.3 : 330.7, m.more(r.names.main), `emenu-plus-${r.key}`, locked || !!r.problem || r.quantity >= 99)}
                 </div>
               ))
             )}

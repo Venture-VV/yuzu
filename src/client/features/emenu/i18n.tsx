@@ -175,6 +175,24 @@ const ZH = {
   tryAgain: '再试一次',
   menuNotSet: '请店主在「后台 → 电子菜单」里排好分类与版面',
   emenuOff: '平板点餐没有开启',
+  // 8.1.17（BW9）：选做法、加料（docs/DISHES_V8117.md 第 5 节）；这台平板点不了的出品口（BW3）
+  optionsTitle: '做法',
+  optionsRequired: '必选',
+  optionsPickOne: '选一种',
+  optionsAny: '可多选',
+  optionsMore: '其他做法',
+  optionsAddons: '加料',
+  optionsMissing: (group: string) => `请先选「${group}」`,
+  optionsAdd: '加入未下单',
+  optionsLess: (name: string) => `${name} 少一份`,
+  optionsMoreOne: (name: string) => `${name} 多一份`,
+  addonOfLine: (name: string) => `配 ${name}`,
+  specUnavailable: '这个规格请找服务员点',
+  // 8.1.17（BW7）：套餐里可换的一样
+  optionsSwap: (name: string) => `套餐里的${name}`,
+  optionsSwapNote: '可换 · 选一种',
+  optionsAsIs: '不换',
+  optionsSwapGone: (name: string) => `${name}今天没有了，请换一种`,
 };
 
 const EN: typeof ZH = {
@@ -308,6 +326,22 @@ const EN: typeof ZH = {
   tryAgain: 'Try again',
   menuNotSet: 'The menu is not ready yet — please ask our staff',
   emenuOff: 'Tablet ordering is off',
+  optionsTitle: 'Options',
+  optionsRequired: 'Required',
+  optionsPickOne: 'Choose one',
+  optionsAny: 'Any',
+  optionsMore: 'More',
+  optionsAddons: 'Add-ons',
+  optionsMissing: (group) => `Please choose: ${group}`,
+  optionsAdd: 'Add to Order',
+  optionsLess: (name) => `One less ${name}`,
+  optionsMoreOne: (name) => `One more ${name}`,
+  addonOfLine: (name) => `With ${name}`,
+  specUnavailable: 'Please ask staff for this size',
+  optionsSwap: (name) => `${name} in the set`,
+  optionsSwapNote: 'Swap · Choose one',
+  optionsAsIs: 'Keep',
+  optionsSwapGone: (name) => `${name} is sold out today — please choose a swap`,
 };
 
 export type Messages = typeof ZH;
@@ -333,6 +367,14 @@ const ERRORS_EN: Record<string, string> = {
   DISH_NOT_ON_MENU: 'A dish is no longer on the menu — please remove it',
   DISH_CHANGED: 'A dish has just changed — please check and order again',
   DISH_NOT_KITCHEN: 'A dish cannot be ordered here — please ask our staff',
+  // 8.1.17：做法、加料、出品口
+  DISH_METHOD_REQUIRED: 'A dish needs an option chosen — please choose it',
+  DISH_METHOD_GROUP: 'Only one option can be chosen in a group — please choose again',
+  DISH_METHOD_INVALID: 'A dish option has just changed — please choose again',
+  DISH_ADDON_INVALID: 'An add-on has just changed — please choose again',
+  DISH_NOTE_TOO_LONG: 'The options and note are too long — please choose fewer',
+  DISH_SWAP_INVALID: 'A swap in a set has just changed — please choose again',
+  OUTLET_FORBIDDEN: 'A dish cannot be ordered on this tablet — please ask our staff',
   PRICE_CHANGED: 'Prices have just changed — please check the total and confirm again',
   VISIT_CLOSED: 'This tag has already checked out',
   VISIT_CHANGED: 'This tag has just been given to another guest — please order again',

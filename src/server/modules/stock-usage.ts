@@ -67,7 +67,7 @@ export async function usageCoversItem(db: Db, itemId: number, billIds: number[])
   const lines = await db<{ kitchenId: number | null; status: string | null; recorded: boolean }[]>`
     SELECT k.id AS kitchen_id, k.status,
            (k.id IS NOT NULL AND EXISTS (SELECT 1 FROM stock_usage_events e
-                                         WHERE e.kitchen_item_id = k.id AND e.kind = 'recipe' AND e.sign = 1 AND e.reversed_at IS NULL)) AS recorded
+                                         WHERE e.kitchen_item_id = k.id AND e.kitchen_part_id IS NULL AND e.kind = 'recipe' AND e.sign = 1 AND e.reversed_at IS NULL)) AS recorded
     FROM bill_lines l LEFT JOIN kitchen_items k ON k.bill_line_id = l.id
     WHERE l.bill_id IN ${db(billIds)} AND l.status = 'active' AND l.item_id = ${itemId}`;
   if (lines.length === 0) return now;
@@ -287,9 +287,40 @@ export async function recordRecipeUsage(tx: Tx, kitchenItemIds: number[]): Promi
   return rows.length;
 }
 
-/** 撤回出品（出品单一行调用方已锁） */
+/**
+ * 套餐的子项（8.1.17 BW7，kitchen_item_parts）出品完成时：按子项自己的用料记「该扣多少」（kitchen_part_id 分开记，不与套餐自己的、
+ * 别的子项撞在一条上）。在别的档口出的子项单（split）在那张子项单出餐时记；跟着套餐出的在套餐那一张出餐时记；补录的建单时就记
+ */
+export async function recordPartUsage(tx: Tx, partIds: number[]): Promise<number> {
+  if (partIds.length === 0) return 0;
+  const rules = await loadStockUsageRules(tx);
+  if (!rules.enabled) return 0;
+  const rows = await tx`
+    INSERT INTO stock_usage_events (kind, sign, kitchen_item_id, kitchen_part_id, bill_line_id, item_id, item_name, quantity, recipe_id, material_id, warehouse_id, qty_milli, business_date)
+    SELECT 'recipe', 1, src.kitchen_item_id, src.id, k.bill_line_id, src.item_id, src.name, src.quantity, r.id, rl.material_id, COALESCE((SELECT w.id FROM warehouses w WHERE w.id = r.warehouse_id AND w.store_id = ${currentStoreId()}), ${rules.recipeWarehouseId}), ${usageSql(tx)}, src.business_date
+    FROM kitchen_item_parts src
+    JOIN kitchen_items k ON k.id = src.kitchen_item_id
+    JOIN item_recipes r ON r.item_id = src.item_id AND r.status = 'active'
+    JOIN item_recipe_lines rl ON rl.recipe_id = r.id
+    JOIN materials m ON m.id = rl.material_id
+    WHERE src.id IN ${tx(partIds)}
+    ON CONFLICT DO NOTHING
+    RETURNING id`;
+  return rows.length;
+}
+
+/** 撤回出品（出品单一行调用方已锁）：套餐自己的与跟着它出的子项（8.1.17）一起冲回；在别的档口出的子项单各自撤回 */
 export async function reverseRecipeUsage(tx: Tx, kitchenItemId: number): Promise<number> {
-  return reverse(tx, tx`kitchen_item_id = ${kitchenItemId} AND kind = 'recipe'`);
+  return reverse(
+    tx,
+    tx`kitchen_item_id = ${kitchenItemId} AND kind = 'recipe'
+       AND (kitchen_part_id IS NULL OR kitchen_part_id IN (SELECT p.id FROM kitchen_item_parts p WHERE p.kitchen_item_id = ${kitchenItemId} AND NOT p.split))`,
+  );
+}
+
+/** 撤回一张子项单的出餐（子项单一行调用方已锁，8.1.17） */
+export async function reversePartUsage(tx: Tx, partId: number): Promise<number> {
+  return reverse(tx, tx`kitchen_part_id = ${partId} AND kind = 'recipe'`);
 }
 
 async function reverse(tx: Tx, where: ReturnType<Tx>): Promise<number> {
@@ -297,8 +328,8 @@ async function reverse(tx: Tx, where: ReturnType<Tx>): Promise<number> {
     WITH orig AS (
       UPDATE stock_usage_events SET reversed_at = now() WHERE ${where} AND sign = 1 AND reversed_at IS NULL RETURNING *
     )
-    INSERT INTO stock_usage_events (kind, sign, checkout_id, kitchen_item_id, bill_line_id, reverses_id, item_id, item_name, quantity, recipe_id, material_id, warehouse_id, qty_milli, business_date)
-    SELECT kind, -1, checkout_id, kitchen_item_id, bill_line_id, id, item_id, item_name, quantity, recipe_id, material_id, warehouse_id, qty_milli, business_date FROM orig
+    INSERT INTO stock_usage_events (kind, sign, checkout_id, kitchen_item_id, kitchen_part_id, bill_line_id, reverses_id, item_id, item_name, quantity, recipe_id, material_id, warehouse_id, qty_milli, business_date)
+    SELECT kind, -1, checkout_id, kitchen_item_id, kitchen_part_id, bill_line_id, id, item_id, item_name, quantity, recipe_id, material_id, warehouse_id, qty_milli, business_date FROM orig
     RETURNING id`;
   return rows.length;
 }

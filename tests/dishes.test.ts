@@ -349,8 +349,8 @@ describe('加料与套餐的规矩', () => {
     expect(combo.status, JSON.stringify(combo.body)).toBe(201);
     const set = combo.body.dish as DishRow;
     expect(set.combo).toEqual([
-      { itemId: noodle.id, name: '牛肉面', quantity: 1, available: true },
-      { itemId: tea.id, name: '柠檬茶', quantity: 2, available: true },
+      { itemId: noodle.id, name: '牛肉面', quantity: 1, available: true, swappable: false, swaps: [] },
+      { itemId: tea.id, name: '柠檬茶', quantity: 2, available: true, swappable: false, swaps: [] },
     ]);
     expect((await dishOf('柠檬茶')).usedBy).toEqual(['套餐「牛肉面套餐」']);
     // 套餐里不能再放套餐
@@ -636,9 +636,10 @@ describe('点单带做法、加料、套餐', () => {
         { name: '加蛋', price: 300 },
       ],
     });
+    // 8.1.17（BW7）：带上每一样的价目项目（换菜、子项沽清用）
     expect(set.combo).toEqual([
-      { name: '柠檬茶', quantity: 1 },
-      { name: '牛肉面', quantity: 1 },
+      { itemId: expect.any(Number), name: '柠檬茶', quantity: 1 },
+      { itemId: expect.any(Number), name: '牛肉面', quantity: 1 },
     ]);
     // 没有做法、加料、套餐的菜不带这三项（与以前的菜单一样）
     expect(m.dishes.find((d) => d.name === '宫保鸡丁')).not.toHaveProperty('methods');
@@ -655,8 +656,9 @@ describe('点单带做法、加料、套餐', () => {
     const r = await orderTag(v.id, lines, total, key);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const mine = (await kitchen()).filter((k) => k.visitId === v.id);
+    // 8.1.17（BW5）：出品单写下单时账单那一行的名字，多档的菜带档名
     expect(mine.map((k) => `${k.name}×${k.quantity}|${k.note}|${JSON.stringify(k.parts)}`)).toEqual([
-      '牛肉面×1|微辣，免葱，面硬一点|[]',
+      '牛肉面（标准）×1|微辣，免葱，面硬一点|[]',
       '加牛肉×1|配 牛肉面|[]',
       '加蛋×2|配 牛肉面|[]',
       '牛肉面套餐×2||[{"name":"柠檬茶","quantity":1},{"name":"牛肉面","quantity":1}]',
@@ -725,7 +727,7 @@ describe('点单带做法、加料、套餐', () => {
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.amount).toBe(8900);
     const mine = (await kitchen()).filter((k) => k.tableSessionId === open.body.id);
-    expect(mine.map((k) => `${k.name}|${k.note}|${JSON.stringify(k.parts)}`)).toEqual(['牛肉面|中辣|[]', '加蛋|配 牛肉面|[]', '牛肉面套餐||[{"name":"加蛋","quantity":3}]']);
+    expect(mine.map((k) => `${k.name}|${k.note}|${JSON.stringify(k.parts)}`)).toEqual(['牛肉面（标准）|中辣|[]', '加蛋|配 牛肉面|[]', '牛肉面套餐||[{"name":"加蛋","quantity":3}]']);
   });
 });
 

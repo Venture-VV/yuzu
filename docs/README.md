@@ -42,6 +42,7 @@
 - [`DINING_V8115.md`](DINING_V8115.md)：8.1.15 餐饮：桌台动作、台账合并退菜、出品口下单权限与房号备注（《浴族系统需求汇总》块 B）
 - [`DINING_V817.md`](DINING_V817.md)：8.1.7 餐饮分区与点菜单（店主 2026-11-18）
 - [`DISHES_V8115.md`](DISHES_V8115.md)：8.1.15 菜品管理（《浴族系统需求汇总》餐饮第 4 条）
+- [`DISHES_V8117.md`](DISHES_V8117.md)：8.1.17 菜品补完：做法分组与加价、选规格、退主菜带加料、平板选做法、排序与删除、套餐出品与换菜
 - [`EMENU.md`](EMENU.md)：点餐系统 · 平板电子菜单（8.0.10）
 - [`ERP.md`](ERP.md)：ERP 独立工作区（含 SCM）
 - [`ERP_PURCHASING.md`](ERP_PURCHASING.md)：ERP 采购五项（v0.7.29）· 设计稿

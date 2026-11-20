@@ -245,6 +245,8 @@ export interface BillLine {
   kitchen: { status: 'queued' | 'cooking' | 'done' | 'served' | 'cancelled'; note: string; orderNo: string } | null;
   /** 钟房派的钟、加的钟（v0.7.1）所属的钟单；其他明细为 null（v0.7.6 起返回，转单时用来判断能不能转） */
   sessionId: number | null;
+  /** 加料挂在哪一行主菜上（8.1.17 BW8，退主菜时问要不要一起退）；不是加料、老的明细为 null */
+  addonOf?: number | null;
 }
 
 export interface VisitMember {

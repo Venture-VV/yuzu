@@ -326,7 +326,12 @@ export type AuditAction =
   | 'member_card_deposit'
   | 'member_card_returned'
   // 8.1.17 第二家店改本店价（docs/FRONTDESK_V8117.md 第 6 节，BW-11）：改前改后、那时的全公司价、原因；菜品的另记进改价记录
-  | 'store_price_changed';
+  | 'store_price_changed'
+  // 8.1.17 菜品（docs/DISHES_V8117.md 第 6 节）：排序、批量上下架、删除（下架并隐藏）、恢复
+  | 'dishes_sorted'
+  | 'dishes_active_bulk'
+  | 'dish_deleted'
+  | 'dish_restored';
 
 export interface AuditEntry {
   staffId: number | null;
