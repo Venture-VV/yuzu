@@ -16,6 +16,7 @@ import { centsToInput, formatAmount, parseYuan } from '@shared/money';
 import { formatQty, parseQty } from '@shared/quantity';
 import { SUPPLIER_LINK_LABELS, type SupplierPublicView } from '@shared/supplier-portal';
 import { formatDateTime, uuid } from '../../lib/utils';
+import { DataTable } from '../../components/DataTable';
 import { Button, Field, Input, Notice, Skeleton, Textarea } from '../../components/ui';
 
 const yuan = (cents: number) => `¥${formatAmount(cents)}`;
@@ -226,33 +227,38 @@ function PendingReplyNotice({ pending, busy, onResend }: { pending: PendingReply
 function LinesTable({ view, cell, head }: { view: SupplierPublicView; head: string; cell: (lineId: number) => ReactNode }) {
   const s = view.snapshot;
   return (
-    <div className="overflow-x-auto rounded-lg border border-line bg-card">
-      <table className="w-full text-[13px]">
-        <thead className="bg-paper-2 text-left text-ink-3">
-          <tr>
-            <th className="px-3 py-2">物料</th>
-            <th className="px-3 py-2 text-right">数量</th>
-            {s.lines.some((l) => l.priceCents !== null) && <th className="px-3 py-2 text-right">单价</th>}
-            <th className="px-3 py-2">{head}</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-line/70">
-          {s.lines.map((l) => (
-            <tr key={l.lineId}>
-              <td className="px-3 py-2">
-                <span className="font-semibold">{l.materialName}</span>
-                {l.spec && <span className="block text-[12px] text-ink-3">{l.spec}</span>}
-              </td>
-              <td className="num px-3 py-2 text-right whitespace-nowrap">
-                {formatQty(l.purchaseQtyMilli)} {l.purchaseUnit}
-              </td>
-              {l.priceCents !== null && <td className="num px-3 py-2 text-right">{yuan(l.priceCents)}</td>}
-              <td className="px-3 py-2">{cell(l.lineId)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      onPage
+      rows={s.lines}
+      rowKey={(l) => l.lineId}
+      columns={[
+        {
+          key: 'material',
+          header: '物料',
+          cell: (l) => (
+            <>
+              <span className="font-semibold">{l.materialName}</span>
+              {l.spec && <span className="block text-[12px] text-ink-3">{l.spec}</span>}
+            </>
+          ),
+        },
+        {
+          key: 'qty',
+          header: '数量',
+          numeric: true,
+          cellClassName: 'whitespace-nowrap',
+          cell: (l) => (
+            <>
+              {formatQty(l.purchaseQtyMilli)} {l.purchaseUnit}
+            </>
+          ),
+        },
+        ...(s.lines.some((l) => l.priceCents !== null)
+          ? [{ key: 'price', header: '单价', numeric: true, cell: (l: SupplierPublicView['snapshot']['lines'][number]) => (l.priceCents !== null ? yuan(l.priceCents) : '—') }]
+          : []),
+        { key: 'cell', header: head, cell: (l) => cell(l.lineId) },
+      ]}
+    />
   );
 }
 

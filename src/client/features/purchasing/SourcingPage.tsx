@@ -16,6 +16,7 @@ import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
+import { DataTable, type DataColumn } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
@@ -592,47 +593,54 @@ function Detail({ ev }: { ev: SourcingEvent }) {
 function Compare({ ev, quotes }: { ev: SourcingEvent; quotes: SourcingQuote[] }) {
   const lowestLanded = quotes.length ? Math.min(...quotes.map((q) => q.landedCents)) : null;
   return (
-    <Card className="overflow-x-auto" data-testid="sourcing-compare">
-      <table className="w-full min-w-[640px] border-collapse text-[12.5px]">
-        <thead>
-          <tr className="border-b border-line text-left text-[12px] text-ink-3">
-            <th className="px-3 py-2 font-semibold">物料 · 数量</th>
-            <th className="px-3 py-2 text-right font-semibold">最近成交价</th>
-            {quotes.map((q) => (
-              <th key={q.id} className={cn('px-3 py-2 text-right font-semibold', q.id === ev.awardedQuoteId && 'bg-pine-tint')}>
-                <span className="block text-[13px] font-bold text-ink">{q.supplier.name}</span>
-                {q.viaLink && <span className="block text-[12px] font-semibold text-lake">供应商链接</span>}
-                <span className="font-normal">第 {q.rank} 名</span>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {ev.lines.map((l) => (
-            <tr key={l.id} className="border-b border-line/70">
-              <td className="px-3 py-2">
-                <span className="flex items-center gap-1">
-                  <span className="min-w-0">
-                    <span className="block font-semibold">{l.materialName}</span>
-                    <span className="text-ink-3">
-                      {formatQty(l.purchaseQtyMilli)} {l.purchaseUnit}
-                      {l.spec && ` · ${l.spec}`}
-                    </span>
-                    {l.requests.length > 0 && (
-                      <span className="block text-[12px] text-ink-3" data-testid={`sourcing-line-requests-${l.lineNo}`}>
-                        来自需求单 {[...new Set(l.requests.map((r) => `${r.requestNo} ${r.departmentName}`))].join('、')}
-                      </span>
-                    )}
+    <div data-testid="sourcing-compare">
+      <DataTable
+        onPage
+        tableClassName="min-w-[640px]"
+        rows={ev.lines}
+        rowKey={(l) => l.id}
+        columns={[
+          {
+            key: 'material',
+            header: '物料 · 数量',
+            cell: (l) => (
+              <span className="flex items-center gap-1">
+                <span className="min-w-0">
+                  <span className="block font-semibold">{l.materialName}</span>
+                  <span className="text-ink-3">
+                    {formatQty(l.purchaseQtyMilli)} {l.purchaseUnit}
+                    {l.spec && ` · ${l.spec}`}
                   </span>
-                  <PriceHistoryButton materialId={l.materialId} name={l.materialName} />
+                  {l.requests.length > 0 && (
+                    <span className="block text-[12px] text-ink-3" data-testid={`sourcing-line-requests-${l.lineNo}`}>
+                      来自需求单 {[...new Set(l.requests.map((r) => `${r.requestNo} ${r.departmentName}`))].join('、')}
+                    </span>
+                  )}
                 </span>
-              </td>
-              <td className="px-3 py-2 text-right text-ink-2">{l.baseline ? `¥${formatAmount(l.baseline.priceCents)}` : '—'}</td>
-              {quotes.map((q) => {
+                <PriceHistoryButton materialId={l.materialId} name={l.materialName} />
+              </span>
+            ),
+          },
+          { key: 'baseline', header: '最近成交价', numeric: true, cellClassName: 'text-ink-2', cell: (l) => (l.baseline ? `¥${formatAmount(l.baseline.priceCents)}` : '—') },
+          ...quotes.map(
+            (q): DataColumn<SourcingEvent['lines'][number]> => ({
+              key: `quote-${q.id}`,
+              header: (
+                <>
+                  <span className="block text-[13px] font-bold text-ink">{q.supplier.name}</span>
+                  {q.viaLink && <span className="block text-[12px] font-semibold text-lake">供应商链接</span>}
+                  <span className="font-normal">第 {q.rank} 名</span>
+                </>
+              ),
+              numeric: true,
+              headerClassName: q.id === ev.awardedQuoteId ? 'bg-pine-tint' : undefined,
+              cellClassName: q.id === ev.awardedQuoteId ? 'bg-pine-tint/60' : undefined,
+              cellTestId: (l) => `cell-${l.id}-${q.id}`,
+              cell: (l) => {
                 const p = q.prices.find((x) => x.lineId === l.id)!;
                 const best = ev.lowest[l.id] === q.id;
                 return (
-                  <td key={q.id} className={cn('px-3 py-2 text-right', q.id === ev.awardedQuoteId && 'bg-pine-tint/60')} data-testid={`cell-${l.id}-${q.id}`}>
+                  <>
                     <span className={cn('font-semibold', best && 'text-pine')}>¥{formatAmount(p.priceCents)}</span>
                     {p.changePercent !== null && (
                       <span className={cn('block text-[12px]', p.changePercent > 0 ? 'text-clay' : p.changePercent < 0 ? 'text-pine' : 'text-ink-3')}>
@@ -640,36 +648,41 @@ function Compare({ ev, quotes }: { ev: SourcingEvent; quotes: SourcingQuote[] })
                         {p.changePercent.toFixed(2)}%
                       </span>
                     )}
-                  </td>
+                  </>
                 );
-              })}
+              },
+            }),
+          ),
+        ]}
+        footer={
+          <>
+            <Row label="货款合计" quotes={quotes} ev={ev} render={(q) => `¥${formatAmount(q.goodsCents)}`} />
+            <Row label="运费" quotes={quotes} ev={ev} render={(q) => (q.freightCents ? `¥${formatAmount(q.freightCents)}` : '含')} />
+            <tr className="border-b border-line bg-paper-2/60 font-bold">
+              <td className="px-3 py-2">综合到价</td>
+              <td />
+              {quotes.map((q) => (
+                <td key={q.id} className={cn('num px-3 py-2 text-right', q.landedCents === lowestLanded && 'text-pine')} data-testid={`landed-${q.id}`}>
+                  ¥{formatAmount(q.landedCents)}
+                </td>
+              ))}
             </tr>
-          ))}
-          <Row label="货款合计" quotes={quotes} ev={ev} render={(q) => `¥${formatAmount(q.goodsCents)}`} />
-          <Row label="运费" quotes={quotes} ev={ev} render={(q) => (q.freightCents ? `¥${formatAmount(q.freightCents)}` : '含')} />
-          <tr className="border-b border-line bg-paper-2/60 font-bold">
-            <td className="px-3 py-2">综合到价</td>
-            <td />
-            {quotes.map((q) => (
-              <td key={q.id} className={cn('px-3 py-2 text-right', q.landedCents === lowestLanded && 'text-pine')} data-testid={`landed-${q.id}`}>
-                ¥{formatAmount(q.landedCents)}
-              </td>
-            ))}
-          </tr>
-          <Row label="付款条件" quotes={quotes} ev={ev} render={(q) => `${q.payTerms}${q.creditDays ? `（${q.creditDays} 天）` : ''}`} />
-          <Row label="交货" quotes={quotes} ev={ev} render={(q) => (q.deliveryDays === null ? '—' : `${q.deliveryDays} 天`)} />
-          <Row label="有效期至" quotes={quotes} ev={ev} render={(q) => q.validUntil ?? '—'} />
-          <Row label="备注" quotes={quotes} ev={ev} render={(q) => q.note || '—'} />
-        </tbody>
-      </table>
+            <Row label="付款条件" quotes={quotes} ev={ev} render={(q) => `${q.payTerms}${q.creditDays ? `（${q.creditDays} 天）` : ''}`} />
+            <Row label="交货" quotes={quotes} ev={ev} render={(q) => (q.deliveryDays === null ? '—' : `${q.deliveryDays} 天`)} />
+            <Row label="有效期至" quotes={quotes} ev={ev} render={(q) => q.validUntil ?? '—'} />
+            <Row label="备注" quotes={quotes} ev={ev} render={(q) => q.note || '—'} last />
+          </>
+        }
+      />
       {quotes.length === 0 && <p className="px-4 py-6 text-center text-[13px] text-ink-3">还没有有效报价：点「登记报价」录入各家的单价、运费与付款条件</p>}
-    </Card>
+    </div>
   );
 }
 
-function Row({ label, quotes, ev, render }: { label: string; quotes: SourcingQuote[]; ev: SourcingEvent; render: (q: SourcingQuote) => string }) {
+/** 比价表表尾的一行（合计、运费、付款条件……）：表尾默认加粗，这几行用常规字重 */
+function Row({ label, quotes, ev, render, last }: { label: string; quotes: SourcingQuote[]; ev: SourcingEvent; render: (q: SourcingQuote) => string; last?: boolean }) {
   return (
-    <tr className="border-b border-line/70">
+    <tr className={cn('font-normal', !last && 'border-b border-line/70')}>
       <td className="px-3 py-2 text-ink-2">{label}</td>
       <td />
       {quotes.map((q) => (

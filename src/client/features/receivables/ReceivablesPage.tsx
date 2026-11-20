@@ -15,6 +15,7 @@ import { sendErpOp, useErpPending } from '../../lib/erpPending';
 import { useCan, useSession } from '../../lib/session';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { cn, formatDateTime, uuid } from '../../lib/utils';
+import { DataTable, type DataColumn } from '../../components/DataTable';
 import { EmptyState } from '../../components/EmptyState';
 import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Money } from '../../components/Money';
@@ -329,43 +330,31 @@ function AccountSheet({ id, manage, onClose }: { id: number | null; manage: bool
           </p>
           <section>
             <h3 className="mb-1.5 text-[13px] font-bold text-ink-2">挂账</h3>
-            {d.charges.length === 0 ? (
-              <p className="text-[12.5px] text-ink-3">还没有挂账。</p>
-            ) : (
-              <div className="overflow-x-auto rounded-md border border-line">
-                <table className="w-full min-w-[560px] text-[12.5px]">
-                  <thead className="bg-paper-2 text-left text-ink-3">
-                    <tr>
-                      <th className="px-2.5 py-1.5 font-semibold">营业日</th>
-                      <th className="px-2.5 py-1.5 font-semibold">结账单</th>
-                      <th className="px-2.5 py-1.5 font-semibold">签单人</th>
-                      <th className="px-2.5 py-1.5 text-right font-semibold">挂账</th>
-                      <th className="px-2.5 py-1.5 text-right font-semibold">已回款</th>
-                      <th className="px-2.5 py-1.5 text-right font-semibold">挂了</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.charges.map((c) => (
-                      <tr key={c.id} className={cn('border-t border-line', c.status === 'voided' && 'opacity-50')}>
-                        <td className="num px-2.5 py-1">{c.businessDate}</td>
-                        <td className="num px-2.5 py-1">
-                          {c.checkoutNo}
-                          {c.status === 'voided' && <Badge className="ml-1">已反结账</Badge>}
-                        </td>
-                        <td className="px-2.5 py-1">{c.signer}</td>
-                        <td className="px-2.5 py-1 text-right">
-                          <Money cents={c.amountCents} />
-                        </td>
-                        <td className="px-2.5 py-1 text-right">
-                          <Money cents={c.collectedCents} />
-                        </td>
-                        <td className="num px-2.5 py-1 text-right">{c.status === 'open' && c.collectedCents < c.amountCents ? `${c.ageDays} 天` : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <DataTable
+              tableClassName="min-w-[560px]"
+              rows={d.charges}
+              rowKey={(c) => c.id}
+              rowClassName={(c) => (c.status === 'voided' ? 'opacity-50' : undefined)}
+              empty="还没有挂账"
+              columns={[
+                { key: 'date', header: '营业日', cellClassName: 'num', cell: (c) => c.businessDate },
+                {
+                  key: 'checkout',
+                  header: '结账单',
+                  cellClassName: 'num',
+                  cell: (c) => (
+                    <>
+                      {c.checkoutNo}
+                      {c.status === 'voided' && <Badge className="ml-1">已反结账</Badge>}
+                    </>
+                  ),
+                },
+                { key: 'signer', header: '签单人', cell: (c) => c.signer },
+                { key: 'amount', header: '挂账', numeric: true, cell: (c) => <Money cents={c.amountCents} /> },
+                { key: 'collected', header: '已回款', numeric: true, cell: (c) => <Money cents={c.collectedCents} /> },
+                { key: 'age', header: '挂了', numeric: true, cell: (c) => (c.status === 'open' && c.collectedCents < c.amountCents ? `${c.ageDays} 天` : '—') },
+              ]}
+            />
           </section>
           <section>
             <h3 className="mb-1.5 text-[13px] font-bold text-ink-2">回款</h3>
@@ -439,49 +428,48 @@ function AgingView() {
             导出
           </a>
         </div>
-        {aging.error ? (
-          <Notice tone="error" title={errorMessage(aging.error)} />
-        ) : aging.isPending ? (
-          <Skeleton className="h-32" />
-        ) : aging.data.rows.length === 0 ? (
-          <p className="text-[13px] text-ink-3">没有没回的应收。</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-line bg-card">
-            <table className="w-full min-w-[720px] text-[13px]" data-testid="ar-aging">
-              <thead className="bg-paper-2 text-left text-[12px] text-ink-3">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">单位 / 平台</th>
-                  {AGING_BUCKETS.map((b) => (
-                    <th key={b.key} className="px-3 py-2 text-right font-semibold">
-                      {b.label}
-                    </th>
-                  ))}
-                  <th className="px-3 py-2 text-right font-semibold">合计</th>
-                  <th className="px-3 py-2 text-right font-semibold">逾期</th>
-                </tr>
-              </thead>
-              <tbody>
-                {aging.data.rows.map((r) => (
-                  <tr key={r.id} className={cn('border-t border-line', r.overdueCents > 0 && 'bg-clay/5')}>
-                    <td className="px-3 py-1.5 font-semibold">
-                      {r.kind === 'platform' && <Landmark className="mr-1 inline size-3.5 text-ink-3" />}
-                      {r.name}
-                    </td>
-                    {AGING_BUCKETS.map((b) => (
-                      <td key={b.key} className="px-3 py-1.5 text-right">
-                        {r.buckets[b.key] ? <Money cents={r.buckets[b.key]} /> : <span className="text-ink-4">—</span>}
-                      </td>
-                    ))}
-                    <td className="px-3 py-1.5 text-right font-bold">
-                      <Money cents={r.totalCents} />
-                    </td>
-                    <td className={cn('px-3 py-1.5 text-right', r.overdueCents > 0 && 'font-bold text-clay')}>{r.overdueCents ? <Money cents={r.overdueCents} /> : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <DataTable
+          onPage
+          testId="ar-aging"
+          tableClassName="min-w-[720px]"
+          rows={aging.data?.rows}
+          failed={!!aging.error}
+          failedTitle={aging.error ? errorMessage(aging.error) : undefined}
+          onRetry={() => void aging.refetch()}
+          retrying={aging.isFetching}
+          rowKey={(r) => r.id}
+          rowClassName={(r) => (r.overdueCents > 0 ? 'bg-clay/5' : undefined)}
+          empty="没有没回的应收"
+          columns={[
+            {
+              key: 'name',
+              header: '单位 / 平台',
+              cellClassName: 'font-semibold',
+              cell: (r) => (
+                <>
+                  {r.kind === 'platform' && <Landmark className="mr-1 inline size-3.5 text-ink-3" />}
+                  {r.name}
+                </>
+              ),
+            },
+            ...AGING_BUCKETS.map(
+              (b): DataColumn<ArAging['rows'][number]> => ({
+                key: b.key,
+                header: b.label,
+                numeric: true,
+                cell: (r) => (r.buckets[b.key] ? <Money cents={r.buckets[b.key]} /> : <span className="text-ink-4">—</span>),
+              }),
+            ),
+            { key: 'total', header: '合计', numeric: true, cellClassName: 'font-bold', cell: (r) => <Money cents={r.totalCents} /> },
+            {
+              key: 'overdue',
+              header: '逾期',
+              numeric: true,
+              cellClassName: (r) => (r.overdueCents > 0 ? 'font-bold text-clay' : undefined),
+              cell: (r) => (r.overdueCents ? <Money cents={r.overdueCents} /> : '—'),
+            },
+          ]}
+        />
       </section>
       <section className="space-y-2">
         <h2 className="text-[15px] font-bold">平台团购回款</h2>
