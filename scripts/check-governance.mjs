@@ -121,7 +121,8 @@ export const CONVENTION_RULES = [
   },
   {
     key: 'raw-dialog',
-    pattern: /role=(?:"dialog"|'dialog'|\{'dialog'\})/g,
+    // 只数 JSX 的属性；选择器里的 [role="dialog"]（找页面上开着的弹窗）不算
+    pattern: /(?<!\[)\brole=(?:"dialog"|'dialog'|\{'dialog'\})/g,
     scope: ['src/client/', 'src/canteen-app/'],
     allow: ['src/client/components/Overlay.tsx', 'src/client/features/emenu/'],
     hint: '弹窗用公共的 Dialog / Sheet（src/client/components/Overlay.tsx：遮罩、Esc、焦点、手机上全屏都在里面），不再自己画',
