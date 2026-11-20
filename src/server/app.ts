@@ -137,6 +137,7 @@ import { registerPatrolAdminRoutes } from './modules/patrol/routes';
 import { registerTablesV8115Routes } from './modules/tables-v8115';
 import { registerDishRoutes } from './modules/dishes';
 import { registerDishImportRoutes } from './modules/dishes-import';
+import { registerRoomCenterRoutes } from './modules/room-center';
 
 function originHost(origin: string): string | null {
   try {
@@ -408,6 +409,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   // 菜品管理（8.1.15，docs/DISHES_V8115.md）：菜品表、新增 / 编辑、上下架、改价与改价记录、Excel 导出与导入
   registerDishRoutes(app, deps);
   registerDishImportRoutes(app, deps);
+  // 房态中心（8.1.15，docs/ROOM_CENTER_V8115.md）：按房型看全店房间的五种状态，服务房间的登记、换房、续钟、并房、退房
+  registerRoomCenterRoutes(app, deps);
 
   // 前端静态资源（构建产物），全部从本机提供，外网中断不影响使用。
   const staticDir = resolve(process.env.STATIC_DIR ?? 'dist/client');

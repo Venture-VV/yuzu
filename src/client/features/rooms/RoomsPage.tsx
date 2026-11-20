@@ -396,8 +396,8 @@ function AuditStrip({ board, onRun }: { board: RoomBoard; onRun?: () => void }) 
   );
 }
 
-/** 入住：填在店客人的手牌（住客要先在前台接待、买门票），房费挂在手牌账单上，离店时随手牌结账；押金按规则默认收或不收 */
-function CheckinDialog({
+/** 入住：填在店客人的手牌（住客要先在前台接待、买门票），房费挂在手牌账单上，离店时随手牌结账；押金按规则默认收或不收。房态中心（8.1.15）的客房卡片也打开它 */
+export function CheckinDialog({
   room,
   board,
   booking = null,

@@ -307,7 +307,15 @@ export type AuditAction =
   | 'dish_saved'
   | 'dish_active_set'
   | 'dish_price_changed'
-  | 'dishes_imported';
+  | 'dishes_imported'
+  // 8.1.15 房态中心：服务房间的登记、续钟、换房、退房、并房 / 拆并，改房态（待清、清洁完成、维修、恢复），后台的房型
+  | 'room_center_register'
+  | 'room_center_extend'
+  | 'room_center_move'
+  | 'room_center_checkout'
+  | 'room_center_merge'
+  | 'room_center_state'
+  | 'room_category';
 
 export interface AuditEntry {
   staffId: number | null;

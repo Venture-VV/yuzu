@@ -48,6 +48,7 @@ import { ctxOf } from '../lib/context';
 import { saveRuleSetting } from '../lib/rule-settings';
 import { settingRow } from '../lib/store-settings';
 import { currentStoreId } from '../lib/store-context';
+import { assertSpaceNotInMaintenance, closeRegistrationsOfVisits } from './room-state';
 
 // ───────────────────────── 规则 ─────────────────────────
 
@@ -261,6 +262,8 @@ export async function openUsageTx(tx: Tx, deps: Deps, input: { spaceId: number; 
     );
   }
   if (!space.active || !space.sellable) throw conflict('SPACE_INACTIVE', `${space.code} 在空间台账里停用或不可售，不能开单，请换一间`);
+  // 房态中心（8.1.15）：维修中的房间不能开单（设维修时也锁这一行，两边排队）
+  await assertSpaceNotInMaintenance(tx, space.id, space.code);
   const [busy] = await tx<{ usageNo: string; tagCode: string }[]>`
     SELECT u.usage_no, h.code AS tag_code FROM space_usages u JOIN visits v ON v.id = u.visit_id JOIN hand_tags h ON h.id = v.tag_id
     WHERE u.space_id = ${space.id} AND u.status = 'open'`;
@@ -458,11 +461,14 @@ export async function cancelUsage(deps: Deps, id: number, raw: unknown, ctx: OpC
 }
 
 /**
- * 使用人结账、撤销来访时一起结束他开着的使用单（在调用方已有的锁之后，按 id 升序锁）。
+ * 使用人结账、撤销来访时一起结束他开着的使用单（在调用方已有的锁之后，按 id 升序锁）；
+ * 8.1.15 起在这之前先结束他在服务房间里的登记单（room-state.ts；结账、撤销来访都只从这里走，不用各加一处）。
  * 位置不在这里处理：调用方接着清掉这几位客人的位置（离店）。返回结束的使用单号。
  */
 export async function closeUsagesOfVisits(tx: Tx, visitIds: number[], kind: 'checkout' | 'visit_cancel', c: { at: Date; staffId: number }): Promise<string[]> {
   if (visitIds.length === 0) return [];
+  // 房态中心（8.1.15）：这几位客人在服务房间里的登记单一起结束（房间转待清）——同一个时机，登记单排在使用单之前锁
+  await closeRegistrationsOfVisits(tx, visitIds, kind, c);
   // 先只锁使用单（id 升序）；没有开着的就不再读房间（大多数结账没有使用单）
   const open = await tx<{ id: number; usageNo: string; spaceId: number }[]>`
     SELECT id, usage_no, space_id FROM space_usages WHERE visit_id IN ${tx(visitIds)} AND status = 'open' ORDER BY id FOR UPDATE`;
