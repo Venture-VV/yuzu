@@ -106,6 +106,7 @@
 - `tests/tables-reminders-v8117.test.ts`：餐饮规则两项（默认、范围、只有店主）；维修过期的提醒与待办数、没开自动恢复不动、开了以后到点恢复（经办人「系统」、桌台历史与审计）、没到点不动、同时跑每桌只恢复一次、恢复后重新报修没到点的拒绝；待清台太久（分钟数跟着规则、升级前没有时刻的不提醒、清台后不提醒）。
 - `tests/store-prices-v8117.test.ts`：要原因、记录的各项、文字、审计；一样的价不多记、别人刚改过拒绝；同时改记录接得上；回到全公司的价；按门店筛；不是菜品只记审计；本店里不能改；只追加。
 - `tests/upgrade-frontdesk-v8117.test.ts`：从 198 之前的库升上来（见第 7 节）。
+- 浏览器用例 `e2e/frontdesk-v8117.spec.ts`（门店电脑一组 5 条；「流水」那一条平板横屏组也跑）：「流水」的订单详情（优惠与赠送、经办人、行上的「券」、所属部门、收银）；超时加收先填好、不点确认不挂，「超时提醒」进「异常待办」、经办人「系统」；按出品口（临时去掉店员水吧的下单、退菜权限：加项目里不能点、点单页没有退菜、服务端拒绝，改回去照常）；桌台维修过了预计恢复时间（格子、页顶、页签的待办）与后台的规则；第二家店改本店价写原因、改价记录按门店筛。三台目标设备的四个尺寸（1920×1080、1280×720、360×800、1355×903）上量过「流水」的订单详情、超时加收的弹窗、桌台页，不横向滚动（「手机」那一组只跑指定的几个文件，所以在门店电脑组里换尺寸量）。
 - 改了预期的老用例：`tests/dining-808.test.ts`（去掉「前台挂账」以后小额退菜按「退菜：餐厅」拦）、`tests/orders.test.ts`（「流水」的那一份多两项）、`tests/upgrade-dining-v8115.test.ts`（迁移 199 再补退菜权限）、`tests/upgrade-dishes.test.ts`（198 排在 189 之后跑）、`tests/stores-modules.test.ts`（改本店价带原因）、`tests/frontdesk-vip.test.ts` 与 `src/server/demo/frontdesk-expected.json`（前台规则多一项）、`e2e/orders.spec.ts`（「流水」的订单详情按新部件取）。
 
 ## 10. 默认做法（待确认）
@@ -132,15 +133,5 @@
 - 平板电子菜单按出品口核对、菜品的几样（BW-5–BW-10）：另一份。
 - 超时加收不自动挂、不按小时自动收钱（只把金额先填好）；超时提醒不发到手机、不响铃（在「异常待办」里）。
 - 桌台提醒不发到手机；自动恢复只看预计恢复时间，不看维修的人有没有修好。
-- 本店价的批量改、按门店导入价目表；本店价不分「菜品管理」里改（仍在后台「价目 → 本店价」）。
+- 本店价的批量改、按门店导入价目表；本店价仍在后台「价目 → 本店价」里一档一档改，「菜品管理」里不能改本店价。
 - 「流水」里退款单的详情照旧（退了哪几项、退款方式），没有换成结账单部件。
-
-## 进度
-
-- [x] BW-12「流水」的订单详情（部件、接口、用例 `tests/frontdesk-v8117.test.ts`，`e2e/orders.spec.ts` 按新部件改了取法）
-- [x] BW-4 退菜按出品口（迁移 199 的岗位权限一段；用例 `tests/dining-voids-v8117.test.ts`，`tests/dining-808.test.ts`、`tests/orders.test.ts`、`tests/upgrade-dining-v8115.test.ts` 按新规矩改了预期）
-- [x] BW-3 发卡台加项目按出品口（用例在 `tests/dining-voids-v8117.test.ts`）
-- [x] BW-1 超时加收与提醒（迁移 199 的异常种类一段；用例在 `tests/frontdesk-v8117.test.ts`；`tests/frontdesk-vip.test.ts`、`src/server/demo/frontdesk-expected.json` 的前台规则多一项）
-- [x] BW-2 桌台提醒（用例 `tests/tables-reminders-v8117.test.ts`）
-- [x] BW-11 本店价改价留痕（迁移 198；用例 `tests/store-prices-v8117.test.ts`、升级用例 `tests/upgrade-frontdesk-v8117.test.ts`）
-- [ ] 浏览器用例 `e2e/frontdesk-v8117.spec.ts`、三台设备

@@ -305,4 +305,59 @@ test.describe('8.1.17 前台、桌台、退菜（会登记单据）', () => {
       await owner.post(`/api/dining/tables/${tableId}/restore`, { data: { clientKey: randomUUID() } });
     }
   });
+
+  test('第二家店改本店价要写原因，菜品管理的改价记录能按门店筛', async ({ page }) => {
+    test.setTimeout(120_000);
+    await login(page, 'linlan');
+    const req = page.request;
+    const code = `Q${String(Date.now()).slice(-6)}`;
+    const storeName = `验收南店${code.slice(-3)}`;
+    const store = await send<{ id: number }>(req, 'post', '/api/admin/stores', { code, name: storeName, entityId: 1 });
+    const s = suffix();
+    const st = await send<{ stations: { id: number; name: string }[] }>(req, 'post', '/api/admin/dining/stations', { name: `E2E8117面${s}` });
+    const dish = `E2E8117汤面${s}`;
+    const dishId = await newItem(req, dish, 'E2E8117面食', 3800);
+    await send(req, 'put', '/api/admin/dining/items', { items: [{ id: dishId, stationId: st.stations.find((x) => x.name === `E2E8117面${s}`)!.id }] });
+    try {
+      expect((await req.post('/api/auth/store', { data: { storeId: store.id } })).ok()).toBe(true);
+      await page.goto('/admin/catalog/store');
+      const row = page.getByTestId(`store-price-${dishId}-standard`);
+      await row.getByRole('textbox').fill('35');
+      await page.getByTestId(`store-price-save-${dishId}-standard`).click();
+      // 弹出写原因：写着改前 → 改后
+      const dialog = page.getByRole('dialog').filter({ hasText: '改本店价' });
+      await expect(dialog).toContainText('同全公司（¥38.00） → ¥35.00');
+      await expect(page.getByTestId('store-price-confirm')).toBeDisabled();
+      await page.getByTestId('store-price-reason').fill('南店开业促销');
+      await page.getByTestId('store-price-confirm').click();
+      await expect(dialog).toHaveCount(0);
+      await expect(page.getByText(`「${dish}」本店价已保存`)).toBeVisible();
+      await expectFits(page);
+      // 改价记录：按门店筛
+      await page.goto('/dining/dishes');
+      await page.getByTestId('dishes-history').click();
+      await page.getByTestId('price-history-store').selectOption(String(store.id));
+      const history = page.getByTestId('dish-price-history');
+      const rec = history.locator('li').filter({ hasText: dish });
+      await expect(rec).toContainText('标准 同全公司（¥38.00） → ¥35.00');
+      await expect(rec).toContainText(`本店价 · ${storeName}`);
+      await expect(rec).toContainText('南店开业促销');
+      await page.getByTestId('price-history-store').selectOption('hq');
+      await expect(history.locator('li').filter({ hasText: '南店开业促销' })).toHaveCount(0);
+      await expectFits(page);
+    } finally {
+      await req.post('/api/auth/store', { data: { storeId: 1 } });
+      const list = await getJson<{ stores: { id: number; code: string; name: string; entityId: number; address: string; phone: string; sortOrder: number; version: number }[] }>(
+        req,
+        '/api/admin/stores',
+      );
+      const x = list.stores.find((r) => r.code === code);
+      if (x) {
+        const off = await req.put(`/api/admin/stores/${x.id}`, {
+          data: { code: x.code, name: x.name, entityId: x.entityId, address: x.address, phone: x.phone, sortOrder: x.sortOrder, active: false, version: x.version },
+        });
+        expect(off.ok(), await off.text()).toBe(true);
+      }
+    }
+  });
 });
