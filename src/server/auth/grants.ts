@@ -221,8 +221,8 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
       scope = { kind: s.kind, memberId: s.memberId, amount: s.amount };
     }
     checkLock(input.username, req.ip);
-    const [approver] = await sql<{ id: number; displayName: string; role: Role; duties: Duty[] | null; active: boolean; passwordHash: string }[]>`
-      SELECT id, display_name, role, duties, active, password_hash FROM staff WHERE username = ${input.username}`;
+    const [approver] = await sql<{ id: number; displayName: string; role: Role; duties: Duty[] | null; position: unknown; permissionAdjust: unknown; active: boolean; passwordHash: string }[]>`
+      SELECT id, display_name, role, duties, position, permission_adjust, active, password_hash FROM staff WHERE username = ${input.username}`;
     const ok = approver ? await verifyPassword(input.password, approver.passwordHash) : false;
     if (!approver || !ok || !approver.active) {
       recordFailure(input.username, req.ip);
@@ -276,6 +276,8 @@ interface LockedGrant {
   approverName: string;
   role: Role;
   duties: Duty[] | null;
+  position: unknown;
+  permissionAdjust: unknown;
   active: boolean;
 }
 
@@ -287,7 +289,7 @@ const selfDiscountError = () => new AppError(403, 'AUTH_SELF_NOT_ALLOWED', '优�
 async function lockGrant(tx: Tx, grantId: string, purpose: GrantPurpose, actor: Actor): Promise<LockedGrant> {
   const [g] = await tx<LockedGrant[]>`
     SELECT g.purpose, g.requested_by, g.approved_by, g.scope, g.used_at, g.expires_at <= now() AS expired,
-           s.display_name AS approver_name, s.role, s.duties, s.active
+           s.display_name AS approver_name, s.role, s.duties, s.position, s.permission_adjust, s.active
     FROM auth_grants g JOIN staff s ON s.id = g.approved_by
     WHERE g.id = ${grantId} FOR UPDATE OF g`;
   if (!g || g.purpose !== purpose) throw unprocessable('GRANT_INVALID', '找不到这次授权，请重新授权');

@@ -11,7 +11,7 @@ import { createSql, type Sql } from '../src/server/db';
 import { migrate } from '../src/server/migrate';
 import { todayIn } from '../src/server/modules/inventory/common';
 import { inventoryChecks } from '../src/server/modules/inventory/reports';
-import { api, login, PASSWORD, TEST_DB, migrationsFrom } from './helpers';
+import { api, login, PASSWORD, TEST_DB, migrationsFrom, skipPositionPrompt } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
@@ -87,6 +87,8 @@ describe('迁移 030 · 迁移前已生效的退货', () => {
     const r4 = await docAt('supplier_return', credit, 300, 'credit', b, 'submitted');
 
     expect(await migrate(sql)).toEqual(migrationsFrom('030_supplier_settlement.sql'));
+
+    await skipPositionPrompt(sql);
     const applied = new Map(
       (await sql<{ id: number; returnAppliedCents: number | null }[]>`SELECT id, return_applied_cents FROM inv_docs WHERE doc_type = 'supplier_return'`).map((r) => [r.id, r.returnAppliedCents]),
     );

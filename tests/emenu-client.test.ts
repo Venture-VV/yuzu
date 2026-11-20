@@ -246,7 +246,7 @@ describe('中 / EN：每样内容取哪一份', () => {
 
 describe('离开电子菜单以后去哪（8.1.15，TC3）', () => {
   const canOf = (role: Parameters<typeof permissionsOf>[0]['role']) => {
-    const set = new Set(permissionsOf({ role, duties: [] }));
+    const set = new Set(permissionsOf({ position: null, role, duties: [] }));
     return (p: Permission) => set.has(p);
   };
   it('「点餐平板」设备账号登录后只能进菜单：没有主系统可回，只有退出登录', () => {

@@ -1,0 +1,145 @@
+// 8.1.18 组织架构与岗位（docs/POSITIONS_V8118.md GW1–GW9）：按岗位建账号、负责人管本部门员工、超级管理员按岗位开关权限、
+// 老账号第一次登录自己选新岗位（选完不再提示，不能选比原来高的级别）。
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ALL_PERMISSIONS } from '../src/shared/permissions';
+import { positionDefaults } from '../src/shared/positions';
+import { createStaff } from '../src/server/modules/staff';
+import { api, login, PASSWORD, setup, type TestContext } from './helpers';
+
+let ctx: TestContext;
+
+beforeAll(async () => {
+  ctx = await setup();
+});
+afterAll(async () => ctx.close());
+
+const me = async (cookie: string) => (await api(ctx.app, cookie, 'GET', '/api/auth/me')).body as { staff: { position: string | null; needsPosition: boolean; role: string }; permissions: string[] };
+
+/** 店主建账号，登录时把临时密码换掉（库里直接清掉首次改密的标记） */
+async function hire(username: string, body: Record<string, unknown>) {
+  const r = await api(ctx.app, ctx.owner, 'POST', '/api/staff', { username, displayName: username, ...body, password: PASSWORD });
+  expect(r.status, JSON.stringify(r.body)).toBe(201);
+  await ctx.sql`UPDATE staff SET must_change_password = false WHERE username = ${username}`;
+  return { id: r.body.id as number, cookie: await login(ctx.app, username) };
+}
+
+describe('按岗位建账号（GW1、GW2）', () => {
+  it('前厅部员工：旧岗位自动是前台店员，权限按岗位模板', async () => {
+    const { cookie } = await hire('fd_staff', { position: 'front.staff' });
+    const info = await me(cookie);
+    expect(info.staff.position).toBe('front.staff');
+    expect(info.staff.role).toBe('clerk');
+    expect(info.permissions.sort()).toEqual(positionDefaults('front.staff', ALL_PERMISSIONS).sort());
+  });
+
+  it('总裁 = 店主（全部权限）；外联部员工同时有库存与采购（不受分岗不兼任限制）', async () => {
+    const boss = await hire('pres2', { position: 'president' });
+    expect((await me(boss.cookie)).staff.role).toBe('owner');
+    expect((await me(boss.cookie)).permissions).toContain('staff.manage');
+    const out = await hire('out_staff', { position: 'outreach.staff' });
+    const p = (await me(out.cookie)).permissions;
+    expect(p).toContain('inventory.operate');
+    expect(p).toContain('purchase.manage');
+    expect(p).not.toContain('inventory.approve');
+  });
+
+  it('个人微调只有总裁能给；店主专属的权限给不了', async () => {
+    const r = await api(ctx.app, ctx.owner, 'POST', '/api/staff', { username: 'bad_adj', displayName: 'x', position: 'front.staff', permissionAdjust: { add: ['staff.manage'], remove: [] } });
+    expect(r.status).toBe(400);
+    const { cookie } = await hire('fd_adj', { position: 'front.staff', permissionAdjust: { add: ['ledger.readHistory'], remove: ['recharge.create'] } });
+    const p = (await me(cookie)).permissions;
+    expect(p).toContain('ledger.readHistory');
+    expect(p).not.toContain('recharge.create');
+  });
+});
+
+describe('负责人管本部门员工（GW6）', () => {
+  it('前厅部负责人只看得到、只建得了前厅部员工；不能建负责人、别的部门，不能个人微调', async () => {
+    const lead = await hire('fd_lead', { position: 'front.lead' });
+    const list = (await api(ctx.app, lead.cookie, 'GET', '/api/staff')).body as { username: string; position: string | null }[];
+    expect(list.length).toBeGreaterThan(0);
+    expect(list.every((s) => s.position === 'front.staff')).toBe(true);
+    expect((await api(ctx.app, lead.cookie, 'POST', '/api/staff', { username: 'fd_new', displayName: '新员工', position: 'front.staff' })).status).toBe(201);
+    expect((await api(ctx.app, lead.cookie, 'POST', '/api/staff', { username: 'fd_new2', displayName: 'x', position: 'front.lead' })).status).toBe(403);
+    expect((await api(ctx.app, lead.cookie, 'POST', '/api/staff', { username: 'fd_new3', displayName: 'x', position: 'male.staff' })).status).toBe(403);
+    expect((await api(ctx.app, lead.cookie, 'POST', '/api/staff', { username: 'fd_new4', displayName: 'x', role: 'clerk' })).status).toBe(403);
+    const target = list.find((s) => s.username === 'fd_staff')!;
+    const id = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = ${target.username}`)[0]!.id;
+    expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${id}`, { displayName: '改名', active: true, permissionAdjust: { add: ['ledger.export'], remove: [] } })).status).toBe(403);
+    expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${id}`, { displayName: '改名', active: true })).status).toBe(200);
+    expect((await api(ctx.app, lead.cookie, 'POST', `/api/staff/${id}/reset-password`)).status).toBe(200);
+    // 店主的账号碰不到
+    expect((await api(ctx.app, lead.cookie, 'PUT', `/api/staff/${ctx.ownerId}`, { displayName: '改名', active: false })).status).toBe(403);
+    // 不能改岗位权限
+    expect((await api(ctx.app, lead.cookie, 'PUT', '/api/admin/position-permissions', { positions: { 'front.staff': [] } })).status).toBe(403);
+  });
+
+  it('财务部负责人没有账号与权限配置（表上 ✘）', async () => {
+    const fin = await hire('fin_lead', { position: 'finance.lead' });
+    expect((await api(ctx.app, fin.cookie, 'GET', '/api/staff')).status).toBe(403);
+  });
+});
+
+describe('超级管理员按岗位开关权限（GW8）', () => {
+  it('去掉前厅部员工的「确认充值入账」→ 立即生效；恢复建议值后回来', async () => {
+    const { cookie } = await hire('fd_toggle', { position: 'front.staff' });
+    const before = (await me(cookie)).permissions;
+    expect(before).toContain('recharge.create');
+    const r = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/position-permissions', { positions: { 'front.staff': before.filter((p) => p !== 'recharge.create') } });
+    expect(r.status).toBe(200);
+    expect(r.body.positions.overrides['front.staff']).toEqual({ add: [], remove: ['recharge.create'] });
+    expect((await me(cookie)).permissions).not.toContain('recharge.create');
+    // 总裁专属的给不了
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/position-permissions', { positions: { 'front.staff': [...before, 'settings.manage'] } })).status).toBe(400);
+    await api(ctx.app, ctx.owner, 'PUT', '/api/admin/position-permissions', { positions: { 'front.staff': positionDefaults('front.staff', ALL_PERMISSIONS) } });
+    expect((await me(cookie)).permissions).toContain('recharge.create');
+    const m = (await api(ctx.app, ctx.owner, 'GET', '/api/admin/permissions')).body;
+    expect(m.positions.overrides).toEqual({});
+  });
+});
+
+describe('老账号第一次登录选新岗位（GW7）', () => {
+  it('没选之前除了会话接口都拒绝；只能选同级或更低的岗位；选完不再提示；后台标「自选岗位」', async () => {
+    await createStaff(ctx.sql, { username: 'old_clerk', displayName: '老店员', role: 'clerk', password: PASSWORD, mustChangePassword: false });
+    await ctx.sql`UPDATE staff SET needs_position = true WHERE username = 'old_clerk'`;
+    const cookie = await login(ctx.app, 'old_clerk');
+    expect((await me(cookie)).staff.needsPosition).toBe(true);
+    const blocked = await api(ctx.app, cookie, 'GET', '/api/members?q=1');
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe('POSITION_REQUIRED');
+    const options = (await api(ctx.app, cookie, 'GET', '/api/auth/position-options')).body.options as { key: string; level: string }[];
+    expect(options.every((o) => o.level === 'admin')).toBe(true);
+    expect((await api(ctx.app, cookie, 'POST', '/api/auth/position', { position: 'front.lead' })).status).toBe(400);
+    expect((await api(ctx.app, cookie, 'POST', '/api/auth/position', { position: 'president' })).status).toBe(400);
+    const ok = await api(ctx.app, cookie, 'POST', '/api/auth/position', { position: 'male.staff' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.staff).toMatchObject({ position: 'male.staff', needsPosition: false });
+    expect(ok.body.permissions.sort()).toEqual(positionDefaults('male.staff', ALL_PERMISSIONS).sort());
+    // 选完不再提示，也不能自己再改
+    expect((await me(cookie)).staff.needsPosition).toBe(false);
+    expect((await api(ctx.app, cookie, 'POST', '/api/auth/position', { position: 'front.staff' })).status).toBe(422);
+    // 男宾部员工没有查会员，有看在店手牌
+    expect((await api(ctx.app, cookie, 'GET', '/api/members?q=1')).status).toBe(403);
+    expect((await api(ctx.app, cookie, 'GET', '/api/frontdesk/board')).status).toBe(200);
+    const row = ((await api(ctx.app, ctx.owner, 'GET', '/api/staff')).body as { username: string; positionChosenAt: string | null; position: string }[]).find((s) => s.username === 'old_clerk')!;
+    expect(row.position).toBe('male.staff');
+    expect(row.positionChosenAt).not.toBeNull();
+    const [audit] = await ctx.sql<{ detail: { position: string } }[]>`SELECT detail FROM audit_logs WHERE action = 'position_chosen' ORDER BY id DESC LIMIT 1`;
+    expect(audit!.detail.position).toBe('male.staff');
+    // 总裁在后台改了岗位：不再标「自选岗位」
+    const id = (await ctx.sql<{ id: number }[]>`SELECT id FROM staff WHERE username = 'old_clerk'`)[0]!.id;
+    await api(ctx.app, ctx.owner, 'PUT', `/api/staff/${id}`, { displayName: '老店员', position: 'front.staff', active: true });
+    const after = ((await api(ctx.app, ctx.owner, 'GET', '/api/staff')).body as { username: string; positionChosenAt: string | null }[]).find((s) => s.username === 'old_clerk')!;
+    expect(after.positionChosenAt).toBeNull();
+  });
+
+  it('原来是值班经理的可以选负责人，不能选总经办', async () => {
+    await createStaff(ctx.sql, { username: 'old_duty', displayName: '老值班经理', role: 'duty_manager', password: PASSWORD, mustChangePassword: false });
+    await ctx.sql`UPDATE staff SET needs_position = true WHERE username = 'old_duty'`;
+    const cookie = await login(ctx.app, 'old_duty');
+    expect((await api(ctx.app, cookie, 'POST', '/api/auth/position', { position: 'gmo' })).status).toBe(400);
+    expect((await api(ctx.app, cookie, 'POST', '/api/auth/position', { position: 'front.lead' })).status).toBe(200);
+    expect((await me(cookie)).permissions).toContain('staff.dept');
+  });
+});

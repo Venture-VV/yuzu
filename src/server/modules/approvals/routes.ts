@@ -28,7 +28,7 @@ import { TUNABLE_LIMITS } from '@shared/tunables';
 import { can, permissionsOf, type Duty, type Role } from '@shared/permissions';
 import { isUniqueViolation, type Db } from '../../db';
 import { guard, guardAny } from '../../auth/guard';
-import { loadRoleOverrides } from '../../auth/role-permissions';
+import { loadRoleOverrides, staffSubject } from '../../auth/role-permissions';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
 import { daysBetween, todayIn } from '../../lib/dates';
@@ -290,14 +290,14 @@ async function createDelegation(deps: Deps, raw: unknown, actor: Actor, ip?: str
       await assertNotFenced(tx, clientKey, 'approval_delegation', erpOpAbandoned);
       const existing = await find(tx);
       if (existing) return { id: existing, replayed: true };
-      const people = await tx<{ id: number; displayName: string; role: Role; duties: Duty[] | null; active: boolean }[]>`
-        SELECT id, display_name, role, duties, active FROM staff WHERE id IN ${tx([d.staffId, d.delegateId])}`;
+      const people = await tx<{ id: number; displayName: string; role: Role; duties: Duty[] | null; position: unknown; permissionAdjust: unknown; active: boolean }[]>`
+        SELECT id, display_name, role, duties, position, permission_adjust, active FROM staff WHERE id IN ${tx([d.staffId, d.delegateId])}`;
       const staff = people.find((p) => Number(p.id) === d.staffId);
       const delegate = people.find((p) => Number(p.id) === d.delegateId);
       if (!staff?.active) throw unprocessable('STAFF_INVALID', '被代理的人不存在或已停用');
       if (!delegate?.active) throw unprocessable('DELEGATE_INVALID', '代理人不存在或已停用');
       const overrides = await loadRoleOverrides(tx);
-      const subject = { id: d.delegateId, role: delegate.role, duties: delegate.duties ?? [], permissions: permissionsOf({ role: delegate.role, duties: delegate.duties ?? [] }, overrides) };
+      const subject = { id: d.delegateId, role: delegate.role, duties: delegate.duties ?? [], permissions: permissionsOf(staffSubject(delegate), overrides) };
       if (!hasApprovalAccess(subject)) {
         throw unprocessable('DELEGATE_INVALID', `「${delegate.displayName}」没有审批中心的权限（岗位权限里的「审批中心：审批」），不能做代理人`);
       }
@@ -332,12 +332,12 @@ async function revokeDelegation(deps: Deps, delegationId: number, actor: Actor, 
 
 /** 规则编辑器、代理人选择用：在用、能用审批中心的员工，以及他们在哪些岗位组里 */
 async function approverOptions(db: Db): Promise<ApproverOption[]> {
-  const rows = await db<{ id: number; displayName: string; role: Role; duties: Duty[] | null }[]>`
-    SELECT id, display_name, role, duties FROM staff WHERE active ORDER BY id`;
+  const rows = await db<{ id: number; displayName: string; role: Role; duties: Duty[] | null; position: unknown; permissionAdjust: unknown }[]>`
+    SELECT id, display_name, role, duties, position, permission_adjust FROM staff WHERE active ORDER BY id`;
   const overrides = await loadRoleOverrides(db);
   return rows
     .map((r) => {
-      const who = { id: Number(r.id), role: r.role, duties: r.duties ?? [], permissions: permissionsOf({ role: r.role, duties: r.duties ?? [] }, overrides) };
+      const who = { id: Number(r.id), role: r.role, duties: r.duties ?? [], permissions: permissionsOf(staffSubject(r), overrides) };
       return {
         who,
         option: {

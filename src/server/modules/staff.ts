@@ -1,15 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { DUTIES, ROLES, dutyConflict, type Duty, type Role } from '@shared/permissions';
+import { ALL_PERMISSIONS, DUTIES, LOCKED_PERMISSIONS, ROLES, can, dutyConflict, type Duty, type Permission, type Role } from '@shared/permissions';
+import { POSITION_KEYS, positionOf, type PositionKey } from '@shared/positions';
 import type { StaffRecord } from '@shared/types';
 import { isForeignKeyViolation, isUniqueViolation, type Db } from '../db';
-import { guard } from '../auth/guard';
+import { guardAny } from '../auth/guard';
+import { positionFrom, sanitizeAdjust } from '../auth/role-permissions';
 import { checkPasswordStrength, generateTempPassword, hashPassword } from '../auth/password';
 import { destroyStaffSessions } from '../auth/session';
 import { writeAudit } from '../lib/audit';
 import { currentStoreId } from '../lib/store-context';
 import type { Deps } from '../lib/context';
-import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
+import { badRequest, conflict, forbidden, notFound, unprocessable } from '../lib/errors';
+import type { Actor } from '../lib/context';
 import { idParam, parse } from '../lib/validate';
 
 const username = z
@@ -18,12 +21,23 @@ const username = z
   .toLowerCase()
   .regex(/^[a-z0-9_.-]{2,32}$/, '账号需为 2–32 位小写字母、数字或 _ . -');
 
+// 专用账号（8.1.18，GW3）：点餐平板、他店查询、设计师不是组织里的岗位，照旧按旧岗位建。
+// 组织里的账号一律「部门 → 岗位」（position）；旧岗位（role + duties）只留给脚本与测试用（后台页面不再提供）。
+const permissionList = z.array(z.enum(ALL_PERMISSIONS as [Permission, ...Permission[]], '有不认识的权限，请刷新页面后重试')).max(ALL_PERMISSIONS.length);
+const AdjustInput = z.object({ add: permissionList.default([]), remove: permissionList.default([]) });
+const positionInput = z.enum(POSITION_KEYS as [PositionKey, ...PositionKey[]], '请选择岗位');
+
 const CreateInput = z.object({
   username,
   displayName: z.string().trim().min(1, '请填写姓名').max(32, '姓名最多 32 个字'),
-  role: z.enum(ROLES, '请选择岗位'),
-  /** 库存与采购职责，可叠加；店主自动拥有全部 */
+  /** 新岗位（8.1.18）：先选部门、再选负责人 / 员工，系统按岗位套用管理员级别与权限模板 */
+  position: positionInput.optional(),
+  /** 专用账号（或脚本、测试按旧岗位建）；有 position 时不看 */
+  role: z.enum(ROLES, '请选择岗位').optional(),
+  /** 库存与采购职责（旧岗位）；有 position 时按岗位自动填 */
   duties: z.array(z.enum(DUTIES)).max(DUTIES.length).default([]),
+  /** 个人微调（只有超级管理员能给，GW8） */
+  permissionAdjust: AdjustInput.optional(),
   /** 所属部门（v0.7.8：部门申购只能给自己的部门提需求单） */
   departmentId: z.number().int().positive().nullable().default(null),
   /** 不填则自动生成临时密码；员工首次登录必须修改 */
@@ -32,16 +46,20 @@ const CreateInput = z.object({
 
 const UpdateInput = z.object({
   displayName: z.string().trim().min(1, '请填写姓名').max(32, '姓名最多 32 个字'),
-  role: z.enum(ROLES, '请选择岗位'),
+  position: positionInput.nullable().optional(),
+  role: z.enum(ROLES, '请选择岗位').optional(),
   duties: z.array(z.enum(DUTIES)).max(DUTIES.length).default([]),
+  /** 不传保持原样 */
+  permissionAdjust: AdjustInput.optional(),
   /** 不传保持原样，传 null 清空 */
   departmentId: z.number().int().positive().nullable().optional(),
   active: z.boolean(),
 });
 
 export async function listStaff(db: Db): Promise<StaffRecord[]> {
-  return db<StaffRecord[]>`
+  const rows = await db<(StaffRecord & { permissionAdjust: unknown })[]>`
     SELECT s.id, s.username, s.display_name, s.role, s.duties, s.department_id, d.name AS department_name, s.active, s.must_change_password,
+           s.position, s.permission_adjust, s.needs_position, s.position_chosen_at,
            s.last_login_at, s.created_at,
            -- 点单密码（8.0.10）：只给有没有、哪天生成的，不含密码
            (SELECT p.set_at FROM staff_order_pins p WHERE p.staff_id = s.id) AS order_pin_set_at
@@ -49,6 +67,40 @@ export async function listStaff(db: Db): Promise<StaffRecord[]> {
     -- 系统账号（小程序线上收款的经办人，v0.7.26）不出现在员工名单里
     WHERE NOT s.system
     ORDER BY s.active DESC, (s.role = 'owner') DESC, s.id`;
+  return rows.map((r) => ({ ...r, position: positionFrom(r.position), permissionAdjust: sanitizeAdjust(r.permissionAdjust) ?? { add: [], remove: [] } }));
+}
+
+/**
+ * 能管哪些员工账号（8.1.18，GW6）：有「管理员工账号」的（总裁）管全部；有「管理本部门员工账号」的负责人只管本部门的「员工」岗位，
+ * 能建、改姓名与领料小仓、停用、重置密码，不能改岗位权限、不能给个人微调。
+ */
+type StaffScope = { all: true } | { all: false; position: PositionKey };
+function staffScope(actor: Actor): StaffScope {
+  if (can(actor, 'staff.manage')) return { all: true };
+  if (can(actor, 'staff.dept') && actor.position && actor.position !== 'president' && actor.position !== 'gmo') {
+    const dept = positionOf(actor.position).department;
+    return { all: false, position: `${dept}.staff` as PositionKey };
+  }
+  throw forbidden('只能管理本部门员工的账号；您还没有部门岗位，请联系总裁');
+}
+const inScope = (scope: StaffScope, position: PositionKey | null | undefined) => scope.all || position === scope.position;
+
+/** 按岗位定旧岗位与职责（只给按旧岗位判断的几处用）；没有岗位的专用账号与旧岗位照原样 */
+function resolveRole(input: { position?: PositionKey | null; role?: Role; duties?: Duty[] }): { position: PositionKey | null; role: Role; duties: Duty[] } {
+  if (input.position) {
+    const def = positionOf(input.position);
+    return { position: input.position, role: def.legacyRole, duties: [...def.duties] };
+  }
+  if (!input.role) throw badRequest('请选择部门与岗位', { field: 'position' });
+  return { position: null, role: input.role, duties: input.duties ?? [] };
+}
+
+/** 个人微调：只留认识的权限；总裁专属的不能加 */
+function cleanAdjust(adjust: { add: Permission[]; remove: Permission[] } | undefined) {
+  if (!adjust) return undefined;
+  const locked = adjust.add.find((p) => LOCKED_PERMISSIONS.includes(p));
+  if (locked) throw badRequest('「管理员工账号」「修改经营规则设置」「导入旧系统会员余额」只属于总裁，不能单独给', { field: 'permissionAdjust' });
+  return { add: [...new Set(adjust.add)].sort(), remove: [...new Set(adjust.remove)].sort() };
 }
 
 const uniqueDuties = (duties: Duty[] = []) => [...new Set(duties)].sort();
@@ -70,13 +122,25 @@ function assertDutiesCompatible(role: Role, duties: readonly Duty[]) {
 /** 创建员工账号（CLI 与接口共用）。 */
 export async function createStaff(
   db: Db,
-  input: { username: string; displayName: string; role: Role; duties?: Duty[]; departmentId?: number | null; password: string; mustChangePassword: boolean },
+  input: {
+    username: string;
+    displayName: string;
+    role: Role;
+    duties?: Duty[];
+    departmentId?: number | null;
+    password: string;
+    mustChangePassword: boolean;
+    /** 新岗位（8.1.18）；给了就按岗位定 role 与 duties */
+    position?: PositionKey | null;
+    permissionAdjust?: { add: Permission[]; remove: Permission[] };
+  },
 ): Promise<number> {
+  const r = input.position ? resolveRole({ position: input.position }) : { position: null, role: input.role, duties: input.duties ?? [] };
   try {
     const [row] = await db<{ id: number }[]>`
-      INSERT INTO staff (username, display_name, role, duties, department_id, password_hash, must_change_password)
-      VALUES (${input.username}, ${input.displayName}, ${input.role}, ${uniqueDuties(input.duties)}, ${input.departmentId ?? null},
-              ${await hashPassword(input.password)}, ${input.mustChangePassword})
+      INSERT INTO staff (username, display_name, role, duties, department_id, password_hash, must_change_password, position, permission_adjust)
+      VALUES (${input.username}, ${input.displayName}, ${r.role}, ${uniqueDuties(r.duties)}, ${input.departmentId ?? null},
+              ${await hashPassword(input.password)}, ${input.mustChangePassword}, ${r.position}, ${db.json((input.permissionAdjust ?? {}) as never)})
       RETURNING id`;
     return row!.id;
   } catch (error) {
@@ -87,15 +151,24 @@ export async function createStaff(
 }
 
 export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
-  app.get('/api/staff', { preHandler: guard('staff.manage') }, async () => listStaff(sql));
+  app.get('/api/staff', { preHandler: guardAny('staff.manage', 'staff.dept') }, async (req) => {
+    const scope = staffScope(req.actor);
+    const list = await listStaff(sql);
+    return scope.all ? list : list.filter((s) => s.position === scope.position);
+  });
 
-  app.post('/api/staff', { preHandler: guard('staff.manage') }, async (req, reply) => {
+  app.post('/api/staff', { preHandler: guardAny('staff.manage', 'staff.dept') }, async (req, reply) => {
     const input = parse(CreateInput, req.body);
-    assertDutiesCompatible(input.role, input.duties);
+    const scope = staffScope(req.actor);
+    const resolved = resolveRole(input);
+    if (!scope.all && (resolved.position !== scope.position || input.permissionAdjust)) throw forbidden('负责人只能给本部门建「员工」岗位的账号，不能单独调权限');
+    // 组织里的岗位（GW1）：后台页面只给「部门 → 岗位」与专用账号；旧岗位只留给脚本与测试
+    if (!resolved.position) assertDutiesCompatible(resolved.role, resolved.duties);
+    const permissionAdjust = cleanAdjust(input.permissionAdjust);
     const password = input.password || generateTempPassword();
     const weak = checkPasswordStrength(password);
     if (weak) throw badRequest(weak, { field: 'password' });
-    const id = await createStaff(sql, { ...input, password, mustChangePassword: true });
+    const id = await createStaff(sql, { ...input, ...resolved, permissionAdjust, password, mustChangePassword: true });
     // 新员工挂在建他的那家门店（8.0.22，docs/MULTISTORE_V8022.md 第 1 节；员工档案里可以再改成几家）
     await sql`INSERT INTO staff_stores (staff_id, store_id) VALUES (${id}, ${currentStoreId()}) ON CONFLICT DO NOTHING`;
     await writeAudit(sql, {
@@ -103,36 +176,54 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
       action: 'staff_created',
       targetType: 'staff',
       targetId: id,
-      detail: { username: input.username, role: input.role, duties: input.duties },
+      detail: { username: input.username, position: resolved.position, role: resolved.role, duties: resolved.duties, permissionAdjust },
       ip: req.ip,
     });
     reply.code(201);
     return { id, temporaryPassword: password };
   });
 
-  app.put('/api/staff/:id', { preHandler: guard('staff.manage') }, async (req) => {
+  app.put('/api/staff/:id', { preHandler: guardAny('staff.manage', 'staff.dept') }, async (req) => {
     const { id } = parse(idParam, req.params);
     const input = parse(UpdateInput, req.body);
-    // 停用的员工不用先改职责（停用后没有任何权限）
-    if (input.active) assertDutiesCompatible(input.role, input.duties);
+    const scope = staffScope(req.actor);
+    const permissionAdjust = cleanAdjust(input.permissionAdjust);
+    if (!scope.all && permissionAdjust) throw forbidden('只有总裁能单独调某个人的权限');
     await sql.begin(async (tx) => {
       // 锁住全部店主行，保证并发修改时仍至少保留一位在职店主。
       // FOR NO KEY UPDATE（8.0.19，原来是 FOR UPDATE）：改员工的事务之间照旧互相串行，但不再挡住引用店主的写入——
       // 审计、设备事件等记经办人的外键检查要对店主行加 KEY SHARE，FOR UPDATE 会让全店所有店主经手的写入等这个事务提交
       await tx`SELECT id FROM staff WHERE role = 'owner' FOR NO KEY UPDATE`;
-      const [before] = await tx<{ role: string; duties: string[]; active: boolean; displayName: string; system: boolean }[]>`
-        SELECT role, duties, active, display_name, system FROM staff WHERE id = ${id}`;
+      const [before] = await tx<{ role: Role; duties: Duty[]; active: boolean; displayName: string; system: boolean; position: string | null; permissionAdjust: unknown }[]>`
+        SELECT role, duties, active, display_name, system, position, permission_adjust FROM staff WHERE id = ${id}`;
       if (!before || before.system) throw notFound('员工不存在');
-      if (id === req.actor.id && (!input.active || input.role !== 'owner')) {
-        throw unprocessable('SELF_LOCKOUT', '不能停用自己或取消自己的店主岗位');
+      const beforePosition = positionFrom(before.position);
+      // 不传岗位与旧岗位：岗位不变（负责人改本部门员工的姓名、停用时）
+      const resolved =
+        input.position === undefined && input.role === undefined
+          ? { position: beforePosition, role: before.role, duties: before.duties ?? [] }
+          : resolveRole({ position: input.position, role: input.role, duties: input.duties });
+      if (!scope.all && (!inScope(scope, beforePosition) || !inScope(scope, resolved.position))) {
+        throw forbidden('负责人只能管理本部门「员工」岗位的账号');
       }
+      // 停用的员工不用先改职责（停用后没有任何权限）
+      if (input.active && !resolved.position) assertDutiesCompatible(resolved.role, resolved.duties);
+      if (id === req.actor.id && (!input.active || resolved.role !== 'owner')) {
+        throw unprocessable('SELF_LOCKOUT', '不能停用自己或取消自己的总裁（店主）岗位');
+      }
+      const positionChanged = resolved.position !== beforePosition;
       if (input.departmentId) {
         const [dept] = await tx<{ id: number }[]>`SELECT id FROM departments WHERE id = ${input.departmentId}`;
         if (!dept) throw unprocessable('DEPARTMENT_INVALID', '所属部门不存在');
       }
       await tx`
-        UPDATE staff SET display_name = ${input.displayName}, role = ${input.role}, duties = ${uniqueDuties(input.duties)},
+        UPDATE staff SET display_name = ${input.displayName}, role = ${resolved.role}, duties = ${uniqueDuties(resolved.duties)},
                department_id = ${input.departmentId === undefined ? tx`department_id` : input.departmentId},
+               position = ${resolved.position},
+               permission_adjust = ${permissionAdjust ? tx.json(permissionAdjust as never) : tx`permission_adjust`},
+               -- 后台给了岗位就不用自己再选（GW7）；改过岗位的不再标「自选岗位」
+               needs_position = ${resolved.position ? false : tx`needs_position`},
+               position_chosen_at = ${positionChanged ? null : tx`position_chosen_at`},
                active = ${input.active}, updated_at = now()
         WHERE id = ${id}`;
       const [owners] = await tx<{ count: number }[]>`SELECT count(*) AS count FROM staff WHERE role = 'owner' AND active`;
@@ -143,15 +234,21 @@ export function registerStaffRoutes(app: FastifyInstance, { sql }: Deps) {
         action: 'staff_updated',
         targetType: 'staff',
         targetId: id,
-        detail: { before, after: input },
+        detail: { before, after: { ...input, ...resolved, permissionAdjust } },
         ip: req.ip,
       });
     });
     return listStaff(sql);
   });
 
-  app.post('/api/staff/:id/reset-password', { preHandler: guard('staff.manage') }, async (req) => {
+  app.post('/api/staff/:id/reset-password', { preHandler: guardAny('staff.manage', 'staff.dept') }, async (req) => {
     const { id } = parse(idParam, req.params);
+    const scope = staffScope(req.actor);
+    if (!scope.all) {
+      const [row] = await sql<{ position: string | null }[]>`SELECT position FROM staff WHERE id = ${id} AND NOT system`;
+      if (!row) throw notFound('员工不存在');
+      if (!inScope(scope, positionFrom(row.position))) throw forbidden('负责人只能管理本部门「员工」岗位的账号');
+    }
     const password = generateTempPassword();
     const hash = await hashPassword(password);
     await sql.begin(async (tx) => {

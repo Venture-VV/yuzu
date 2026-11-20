@@ -16,6 +16,7 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   staff_created: { label: '添加员工', tone: 'pine' },
   staff_updated: { label: '修改员工', tone: 'pine' },
   staff_password_reset: { label: '重置密码', tone: 'ember' },
+  position_chosen: { label: '自选新岗位', tone: 'pine' },
   member_created: { label: '新建会员', tone: 'lake' },
   member_updated: { label: '修改会员', tone: 'lake' },
   recharge_created: { label: '充值', tone: 'lake' },

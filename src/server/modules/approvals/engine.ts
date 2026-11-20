@@ -21,7 +21,7 @@ import {
 import { DEFAULT_PAYMENT_RULES } from '@shared/payments';
 import { can, permissionsOf, type Duty, type Role } from '@shared/permissions';
 import { lineAmountCents } from '@shared/quantity';
-import { loadRoleOverrides } from '../../auth/role-permissions';
+import { loadRoleOverrides, staffSubject } from '../../auth/role-permissions';
 import type { Db, Fragment, Tx } from '../../db';
 import type { Actor } from '../../lib/context';
 import { todayIn } from '../../lib/dates';
@@ -330,15 +330,15 @@ export async function submitForApproval(
 
 /** 今天在代理期内、没收回、委托人在用的代理（delegate = 这个人）：委托人的岗位、职责与按后台调整算好的权限 */
 export async function delegatorsOf(db: Db, delegateId: number, today: string): Promise<ApproverSubject[]> {
-  const rows = await db<{ id: number; role: Role; duties: Duty[] | null }[]>`
-    SELECT DISTINCT s.id, s.role, s.duties FROM approval_delegations g JOIN staff s ON s.id = g.staff_id
+  const rows = await db<{ id: number; role: Role; duties: Duty[] | null; position: unknown; permissionAdjust: unknown }[]>`
+    SELECT DISTINCT s.id, s.role, s.duties, s.position, s.permission_adjust FROM approval_delegations g JOIN staff s ON s.id = g.staff_id
     WHERE g.delegate_id = ${delegateId} AND g.revoked_at IS NULL AND ${today}::date BETWEEN g.starts_on AND g.ends_on AND s.active
     ORDER BY s.id`;
   if (rows.length === 0) return [];
   const overrides = await loadRoleOverrides(db);
   return rows.map((r) => {
     const duties = r.duties ?? [];
-    return { id: Number(r.id), role: r.role, duties, permissions: permissionsOf({ role: r.role, duties }, overrides) };
+    return { id: Number(r.id), role: r.role, duties, permissions: permissionsOf(staffSubject(r), overrides) };
   });
 }
 

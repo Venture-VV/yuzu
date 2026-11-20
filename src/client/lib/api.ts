@@ -163,7 +163,7 @@ async function requestOnce<T>(method: 'GET' | 'POST' | 'PUT', url: string, body:
   // 带操作编号的页面按「结果待确认」处理：保留原编号与原请求，查回、按原内容重新提交或确认作废
   if (method !== 'GET' && res.status >= 500) throw new UncertainError('server');
   const error = new ApiError(res.status, payload?.error.code ?? 'HTTP_ERROR', payload?.error.message ?? `请求失败（${res.status}）`, payload?.error.details, retryAfterMs);
-  if (res.status === 401 || error.code === 'PASSWORD_CHANGE_REQUIRED') {
+  if (res.status === 401 || error.code === 'PASSWORD_CHANGE_REQUIRED' || error.code === 'POSITION_REQUIRED') {
     if (!url.startsWith('/api/auth/login')) authListeners.forEach((fn) => fn(error));
   }
   throw error;

@@ -5,6 +5,7 @@
 import type { ErpModuleKey } from './erp';
 import type { InstanceKind } from './instance';
 import type { EditableRole, Permission, Role, RoleOverrides } from './permissions';
+import type { PositionKey, PositionOverrides } from './positions';
 
 /** 后台分区：路径、名称、所需权限（有其一即可） */
 export const ADMIN_SECTIONS = {
@@ -70,7 +71,8 @@ export const ADMIN_SECTIONS = {
   mp: { path: '/admin/mp', label: '微信小程序', perms: ['mp.content', 'mp.unbind', 'mp.recharge', 'mp.coupon', 'mp.reminder', 'mp.invite', 'mp.food', 'mp.booking'] },
   // 门店与主体（8.0.22，docs/MULTISTORE_V8022.md）：门店档案、公司主体、门店之间的储值结算
   stores: { path: '/admin/stores', label: '门店与主体', perms: ['settings.manage'] },
-  staff: { path: '/admin/staff', label: '员工账号', perms: ['staff.manage'] },
+  // 8.1.18（GW6）：部门负责人有「管理本部门员工账号」，不进后台首页也看得到这个分区，只看得到本部门的员工
+  staff: { path: '/admin/staff', label: '员工账号', perms: ['staff.manage', 'staff.dept'] },
   permissions: { path: '/admin/permissions', label: '岗位权限', perms: ['settings.manage', 'audit.read'] },
   // 8.0.18（IA1，店主 2026-11-13）：员工食堂、安保巡场从 ERP 挪到后台「人员与行政」。页面、权限、接口都没变；
   // 开没开仍然按 ERP 的模块开关（ADMIN_SECTION_MODULES），员工手机端的入口不变
@@ -102,7 +104,7 @@ export const ADMIN_PERMISSIONS: readonly Permission[] = ADMIN_SECTIONS.home.perm
  * 不进后台首页也看得到的分区：数据看板（店主 2026-11-10），员工食堂、安保巡场（8.0.18，食堂负责人、安保主管原来只进 ERP）。
  * 只有这些分区的权限的岗位能进后台，但只看得到自己的这几个分区
  */
-export const ADMIN_STANDALONE_SECTIONS: readonly AdminSection[] = ['dashboard', 'canteen', 'patrol', 'studio'];
+export const ADMIN_STANDALONE_SECTIONS: readonly AdminSection[] = ['dashboard', 'canteen', 'patrol', 'studio', 'staff'];
 /** 跟着 ERP 模块开关走的分区：模块关着时只有能改模块开关的人还看得到（页面上提示去开启） */
 export const ADMIN_SECTION_MODULES: Partial<Record<AdminSection, ErpModuleKey>> = { canteen: 'canteen', patrol: 'patrol' };
 /** 能进后台的权限（有其一即可）：后台首页的权限，加上不进首页也看得到的那几个分区的权限 */
@@ -171,7 +173,22 @@ export interface AdminOverview {
 }
 
 /** 岗位权限：默认规则、店主的调整与生效结果 */
+/** 后台能改权限的新岗位（总裁固定全部） */
+export type EditablePosition = Exclude<PositionKey, 'president'>;
+
 export interface RolePermissionMatrix {
+  /** 新岗位（8.1.18，docs/POSITIONS_V8118.md）：模板、调整后生效的、在职人数 */
+  positions: {
+    overrides: PositionOverrides;
+    defaults: Record<EditablePosition, Permission[]>;
+    effective: Record<EditablePosition, Permission[]>;
+    staffCount: Partial<Record<EditablePosition, number>>;
+    updatedAt: string | null;
+    updatedBy: string | null;
+    /** 还没自己选新岗位的在职老账号 */
+    needsPosition: number;
+  };
+  /** 旧岗位（还没重新选岗的老账号、专用账号照旧按它） */
   overrides: RoleOverrides;
   /** 各岗位（不含职责）生效的权限 */
   effective: Record<Role, Permission[]>;

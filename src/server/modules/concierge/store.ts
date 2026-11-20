@@ -1,7 +1,7 @@
 import type { Db } from '../../db';
 import { permissionsOf, can, type Duty, type Role } from '@shared/permissions';
 import type { Actor } from '../../lib/context';
-import { loadRoleOverrides } from '../../auth/role-permissions';
+import { loadRoleOverrides, staffSubject } from '../../auth/role-permissions';
 import type { WorkspaceData, TeamUser, CatalogItem, Receipt } from '@shared/concierge/types';
 import { WorkspaceError, uuid } from './validation';
 import { nativeMemberSummaries, nativeResourceOptions } from './native-links';
@@ -42,11 +42,13 @@ export async function listTeam(db: Db): Promise<TeamUser[]> {
       displayName: string;
       role: Role;
       duties: Duty[];
+      position: unknown;
+      permissionAdjust: unknown;
       active: boolean;
     }[]
-  >`SELECT id,username,display_name,role,duties,active FROM staff WHERE NOT system ORDER BY id`;
+  >`SELECT id,username,display_name,role,duties,position,permission_adjust,active FROM staff WHERE NOT system ORDER BY id`;
   return rows.flatMap((s) => {
-    const perms = permissionsOf(s, overrides);
+    const perms = permissionsOf(staffSubject(s), overrides);
     return perms.includes('concierge.read')
       ? [
           {
