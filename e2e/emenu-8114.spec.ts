@@ -1,6 +1,7 @@
 // 8.1.14 品牌部《工作台需求汇总 1.2》的三条（docs/EMENU.md 第 17 节，docs/HANDOFF_V8114.md，PENDING_DECISIONS.md PC1–PC4）的浏览器验收。
 // 只在「门店电脑」这一组跑，平板那一段另开小米平板 6S Pro 12.4 大小的窗口（1355 × 903）；菜单、找客人、桌号用合成的（只读）。
-//   ① 顶栏分类的英文、菜品的英文名是衬线展示体（Playfair Display，随应用打包）；别处的英文（介绍、价格、手牌）照旧；
+//   ① 顶栏分类的英文、菜品的英文名是衬线展示体（8.1.19 起排在最前的是门店授权的品牌英文字体 ABC Arizona Flare，测试环境没放
+//      授权文件，画出来的是后面的 Playfair Display，随应用打包）；别处的英文（介绍、价格、手牌）照旧；
 //      中文、英文两种语言都看，字体真的下载到、画出来的宽与这款字体量出来的一样（不是落到后面的字体上）；
 //   ② 加号与菜名的间距：「大图 + 文字」「文字陈列」2 个加号，其余九种版式 3.5 个（放大一档、原样两种大小都看）；
 //   ③ 封面标题右下角是手绘的不规则圆环（矢量图）：颜色 #bf1d25，大小、中文的位置与原来一样；切到英文跟着在标题右下角、
@@ -254,7 +255,7 @@ test.describe('8.1.14 品牌部：英文衬线展示体、加号间距 2 / 3.5�
 
       // ① 衬线展示体真的用上了：这个类画出来的宽 = Playfair Display 量出来的宽，与顶替字体 Average Sans 的不一样
       const probe = await probeDisplayFont(page);
-      expect(probe.family).toMatch(/^"Em Box En", "Playfair Display"/);
+      expect(probe.family).toMatch(/^"Em Box En", "Tangqi Brand En", "Playfair Display"/);
       expect(probe.loaded).toContain('loaded');
       expect(probe.spacing).toBe('normal');
       expect(probe.numeric).toContain('lining-nums');
@@ -267,7 +268,7 @@ test.describe('8.1.14 品牌部：英文衬线展示体、加号间距 2 / 3.5�
       const zhHead = await headerLines(page);
       expect(zhHead.filter((l) => l.display).map((l) => l.text)).toEqual(['CHINESE LUNCH', 'BEVERAGE', 'WESTERN LUNCH', 'CHINESE BREAKFAST']);
       for (const l of zhHead) {
-        if (l.display) expect(l.font, l.text).toMatch(/^"Em Box En", "Playfair Display"/);
+        if (l.display) expect(l.font, l.text).toMatch(/^"Em Box En", "Tangqi Brand En", "Playfair Display"/);
         else expect(l.font, l.text).not.toContain('Playfair');
       }
       // 别处的英文照旧：手牌号、价格不是衬线展示体
@@ -293,7 +294,7 @@ test.describe('8.1.14 品牌部：英文衬线展示体、加号间距 2 / 3.5�
           // ① 中文时每道菜下面那一行英文名是衬线展示体
           expect(d.display, `第 ${i + 1} 页（${layout}）「${d.name}」的英文名`).toHaveLength(1);
           expect(d.display[0]!.text).toMatch(/^[A-Za-z ]+$/);
-          expect(d.display[0]!.font).toMatch(/^"Em Box En", "Playfair Display"/);
+          expect(d.display[0]!.font).toMatch(/^"Em Box En", "Tangqi Brand En", "Playfair Display"/);
         }
         // ③ 封面标题右下角的圆环
         if (layout === 'cover') {
@@ -329,13 +330,13 @@ test.describe('8.1.14 品牌部：英文衬线展示体、加号间距 2 / 3.5�
       await expect(page.getByTestId('emenu-dots')).toHaveAttribute('data-page', '0');
       const enHead = await headerLines(page);
       expect(enHead.filter((l) => l.display).map((l) => l.text)).toEqual(['CHINESE LUNCH', 'BEVERAGE', 'WESTERN LUNCH', 'CHINESE BREAKFAST']);
-      for (const l of enHead.filter((l) => l.display)) expect(l.font).toMatch(/^"Em Box En", "Playfair Display"/);
+      for (const l of enHead.filter((l) => l.display)) expect(l.font).toMatch(/^"Em Box En", "Tangqi Brand En", "Playfair Display"/);
       const en = await pageFacts(page, 0);
       expect(en.title!.text).toBe('CHINESE LUNCH');
       // 封面的大标题不在这次改的范围里：照旧是原来的英文字体
       expect(en.title!.family).not.toContain('Playfair');
       expect(en.dishes[0]!.display.map((d) => d.text)).toEqual(['Beef Noodles']);
-      expect(en.dishes[0]!.display[0]!.font).toMatch(/^"Em Box En", "Playfair Display"/);
+      expect(en.dishes[0]!.display[0]!.font).toMatch(/^"Em Box En", "Tangqi Brand En", "Playfair Display"/);
       // ③ 圆环跟着在英文标题的右下角：在最后一个字母的外面（不压字），下沿不低过这一行，不出左半边
       const dot = en.dot!;
       expect(dot.fill).toBe(DOT);

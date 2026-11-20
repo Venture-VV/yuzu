@@ -437,7 +437,9 @@ export function namePair(zh: string, en: string, lang: Lang): NamePair {
 }
 
 /**
- * 菜品的英文名用衬线展示体（8.1.14，品牌部《工作台需求汇总 1.2》第 1 条，PENDING_DECISIONS.md PC1；样式表的 .em-en-display）：
+ * 菜品的英文名用衬线展示体（8.1.14，品牌部《工作台需求汇总 1.2》第 1 条，PENDING_DECISIONS.md PC1；样式表的 .em-en-display；
+ * 8.1.19 起是授权的品牌英文字体 ABC Arizona Flare，没放授权文件时是 Playfair Display，PD1）。
+ * 英文是手录的还是用翻译工具翻好经「英文对照表」导入的都一样走这里：
  * 只包住名字那几个字——名字后面的小字、份数、规格照旧用原来的字体
  */
 export function EnName({ children }: { children: string }) {
