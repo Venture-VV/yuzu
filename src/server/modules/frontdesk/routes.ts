@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { COUPON_PLATFORMS } from '@shared/checkout';
 import { ISO_DATE } from '@shared/business-date';
 import { can } from '@shared/permissions';
-import { guard } from '../../auth/guard';
+import { guard, guardAny } from '../../auth/guard';
+import { VOID_PERMISSIONS } from '@shared/frontdesk-v8117';
 import { readSnapshot } from '../../db';
 import { checkoutDaySummary } from '../settlement';
 import type { Deps } from '../../lib/context';
@@ -121,7 +122,8 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
     return postCharges(deps, id, req.body as PostInputData, ctxOf(req));
   });
 
-  app.post('/api/frontdesk/lines/:id/void', { preHandler: guard('frontdesk.operate') }, async (req) => {
+  // 8.1.17（BW-4）：康美部能退水吧、果吧的菜——有任一项「退菜：某出品口」的也进得来，逐行按出品口核对（dining-v8117.ts）
+  app.post('/api/frontdesk/lines/:id/void', { preHandler: guardAny('frontdesk.operate', ...VOID_PERMISSIONS) }, async (req) => {
     const { id } = parse(idParam, req.params);
     return voidLine(deps, id, req.body, ctxOf(req));
   });

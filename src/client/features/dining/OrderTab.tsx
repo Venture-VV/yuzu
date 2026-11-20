@@ -41,6 +41,7 @@ import { ReceiptDialog, type ReceiptTarget } from './ReceiptDialog';
 import { GroupChips, OutletEntry, OutletFilter } from './slots';
 import { guestParams, OrderNoteInput, orderExtras, outletProblem, useOrderOutlets } from './OrderExtras';
 import { MAX_DELIVER_ROOM, outletBlockedText } from '@shared/dining-v8115';
+import { voidBlockedText, voidOutletsOf } from '@shared/frontdesk-v8117';
 import { EmptyState } from '../../components/EmptyState';
 
 interface CartLine {
@@ -65,8 +66,11 @@ const doneOnFound = () => true as const;
 
 export function OrderTab() {
   const session = useSession();
-  /** 退菜、改单与下单同一套权限：挂到账上要「前台挂账」（桌台上的还要「点单」，这一页本来就要）（8.0.8，B02，Codex 审查 f14210c） */
-  const canVoid = useCan()('frontdesk.operate');
+  /**
+   * 退菜、改单按这道菜所在的出品口（8.1.17 BW-4）：有那一处的「退菜」权限才显示（康美部能退水吧、果吧的菜）；
+   * 不知道在哪一处的（已下架的菜）照样显示，服务端逐行核对。桌台上的还要「点单」+「前台挂账」，退菜接口照旧拦
+   */
+  const voidOutlets = voidOutletsOf(useCan());
   const qc = useQueryClient();
   const toast = useToast();
   const menu = useDiningMenu();
@@ -161,6 +165,7 @@ export function OrderTab() {
 
   const dishes = useMemo(() => menu.data?.dishes ?? [], [menu.data]);
   const byId = useMemo(() => new Map(dishes.map((d) => [d.id, d])), [dishes]);
+  const canVoid = (p: PendingDish) => !voidBlockedText(byId.get(p.itemId)?.outlet, voidOutlets);
   // 这一处的菜，再按小分类筛（8.1.7）
   const inOutlet = useMemo(() => (outlet ? dishes.filter((d) => d.outlet === outlet) : []), [dishes, outlet]);
   const shown = groups.length ? inOutlet.filter((d) => groups.includes(d.group)) : inOutlet;
@@ -700,9 +705,9 @@ export function OrderTab() {
             >
               还没上的菜 {target.pending.length ? target.pending.length : ''}
             </SectionTitle>
-            {!canVoid && target.pending.length > 0 && (
-              <p className="mt-1 text-[11.5px] text-ink-4" data-testid="dining-void-no-permission">
-                退菜、改单要有「前台挂账」权限，请找前台同事。
+            {target.pending.some((p) => !canVoid(p)) && (
+              <p className="mt-1 text-[12px] text-ink-3" data-testid="dining-void-no-permission">
+                {voidOutlets.length === 0 ? '你的岗位不能退菜' : `你的岗位只能退${voidOutlets.map((o) => DINING_OUTLET_LABELS[o]).join('、')}的菜`}，别的退菜、改单请找有权限的同事。
               </p>
             )}
             {target.pending.length === 0 ? (
@@ -750,7 +755,7 @@ export function OrderTab() {
                           催单
                         </Button>
                       )}
-                      {canVoid && (
+                      {canVoid(p) && (
                         <>
                           <Button size="sm" variant="ghost" icon={<PencilLine className="size-3.5" />} onClick={() => setVoiding({ dish: p, mode: 'modify' })} data-testid={`dining-modify-${p.id}`}>
                             改

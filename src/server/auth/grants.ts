@@ -47,6 +47,7 @@ import { parse, positiveCents } from '../lib/validate';
 import { loadVipLockerRules } from '../modules/vip-lockers';
 import { loadSettings } from '../modules/settings';
 import { loadDiningRules } from '../modules/dining';
+import { assertLineVoidPermission, canEnterLineVoid } from '../modules/dining-v8117';
 import { loadRiskRules, unsettledDebts } from '../modules/frontdesk/risk';
 import { currentStoreId } from '../lib/store-context';
 import { guard } from './guard';
@@ -173,15 +174,17 @@ export function registerGrantRoutes(app: FastifyInstance, deps: Deps) {
       scope = parse(MemberRefundScopeInput, rawScope);
     } else if (input.purpose === 'line_void') {
       // 退大额的菜（8.0.8，B02）：授权绑定那一条明细、此刻的金额与原因；自己能更正的、小额的不用授权。
-      // 申请与退菜同一套权限（前台挂账）；只用于餐饮明细，别的明细照原来的更正流程（Codex 审查 d034bc6）
-      if (!can(req.actor, 'frontdesk.operate')) throw forbidden();
-      if (can(req.actor, 'frontdesk.correct')) throw conflict('GRANT_NOT_NEEDED', '你的岗位可以直接退，不需要授权');
+      // 申请与退菜同一套权限；只用于餐饮明细，别的明细照原来的更正流程（Codex 审查 d034bc6）。
+      // 8.1.17（BW-4）：退菜按出品口——要这道菜所在出品口的「退菜」权限（原来是「前台挂账」；康美部能申请退水吧、果吧的菜）
+      if (!canEnterLineVoid(req.actor)) throw forbidden();
       const v = parse(LineVoidScopeInput, rawScope);
       const [line] = await sql<{ name: string; amount: number; status: string; source: string }[]>`SELECT name, amount, status, source FROM bill_lines WHERE id = ${v.lineId}`;
       if (!line) throw notFound('这道菜不存在');
       if (line.source !== 'dining') {
         throw conflict('GRANT_NOT_DINING', `「${line.name}」不是餐饮的菜，当场授权只用于退菜；请按原来的更正流程：本人 15 分钟内，或经理用自己的账号作废`);
       }
+      await assertLineVoidPermission(sql, req.actor, { id: v.lineId, source: line.source, name: line.name });
+      if (can(req.actor, 'frontdesk.correct')) throw conflict('GRANT_NOT_NEEDED', '你的岗位可以直接退，不需要授权');
       if (line.status !== 'active') throw conflict('ALREADY_VOIDED', `「${line.name}」已经退了`);
       const dining = await loadDiningRules(sql);
       if (line.source === 'dining' && dining.voidFreeCents > 0 && Number(line.amount) <= dining.voidFreeCents) {

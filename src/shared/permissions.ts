@@ -32,6 +32,8 @@
 // 新职责「康美部」（默认有「餐饮点单」与水吧、果吧两项，没有餐厅；不和别的职责分组互斥）。
 // 8.1.15 菜品管理（docs/DISHES_V8115.md，CP6、CP7 待确认）：新增「菜品管理：维护餐厅 / 水吧 / 果吧的菜品」三项与「定价与改价」一项，
 // 默认店主、店总；厨房主管、水吧主管要维护自己那一处的，在后台「岗位权限」里加。
+// 8.1.17 退菜按出品口（docs/FRONTDESK_V8117.md 第 2 节，BW4 待确认）：新增「退菜：餐厅 / 水吧 / 果吧」三项——原来能退菜（有「前台挂账」）的岗位三项都有，
+// 康美部默认有水吧、果吧两项（康美部自己退菜）；餐饮的菜按这道菜所在的出品口核对，别的明细照旧要「前台挂账」。
 
 export const ROLES = ['owner', 'store_manager', 'duty_manager', 'account_manager', 'clerk', 'backoffice', 'other_store', 'tablet', 'designer'] as const;
 export type Role = (typeof ROLES)[number];
@@ -364,6 +366,10 @@ export const PERMISSIONS = {
   'dish.fruit': { roles: ['owner', 'store_manager'] },
   /** 菜品定价与改价（8.1.15）：单独一项，新建时定价、以后改价都要它，并且要有这道菜所在出品口的维护权限；每次改价写改价记录 */
   'dish.price': { roles: ['owner', 'store_manager'] },
+  // 8.1.17 退菜按出品口（BW-4）：餐饮的菜退菜时按这道菜所在的出品口核对；默认与「前台挂账」同一批岗位，康美部有水吧、果吧
+  'dining.voidRestaurant': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'] },
+  'dining.voidWater': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'], duties: ['kangmei'] },
+  'dining.voidFruit': { roles: ['owner', 'store_manager', 'duty_manager', 'clerk'], duties: ['kangmei'] },
 } as const satisfies Record<string, Rule>;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -582,6 +588,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'dish.water': '菜品管理：维护水吧的菜品（新增、编辑、上下架、做法、加料、套餐）',
   'dish.fruit': '菜品管理：维护果吧的菜品（新增、编辑、上下架、做法、加料、套餐）',
   'dish.price': '菜品管理：定价与改价（还要有那个出品口的维护权限；每次改价留记录）',
+  'dining.voidRestaurant': '退菜：餐厅的菜',
+  'dining.voidWater': '退菜：水吧的菜',
+  'dining.voidFruit': '退菜：果吧的菜',
 };
 
 export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
@@ -707,4 +716,5 @@ export const PERMISSION_GROUPS: { title: string; items: Permission[] }[] = [
   { title: '前台风控', items: ['frontdesk.blacklist', 'auth.checkinRisk'] },
   { title: '餐饮：按出品口下单', items: ['dining.orderRestaurant', 'dining.orderWater', 'dining.orderFruit'] },
   { title: '菜品管理', items: ['dish.restaurant', 'dish.water', 'dish.fruit', 'dish.price'] },
+  { title: '餐饮：按出品口退菜', items: ['dining.voidRestaurant', 'dining.voidWater', 'dining.voidFruit'] },
 ];

@@ -369,9 +369,13 @@ describe('逐行明细', () => {
     }
     const [one, , two] = posted;
     expect(Math.abs(two!.discount - one!.discount * 2)).toBeLessThanOrEqual(1);
-    // 打印的结账单：同样的行、同样的顺序
+    // 打印的结账单：同样的行、同样的顺序（8.1.17 BW-12：「流水」的那一份每一行另带所属部门与摊到的优惠，与上面逐行的一致；打印的不带）
     const print = (await api<CheckoutPrint>(ctx.app, ctx.clerk, 'GET', `/api/print/checkouts/${zhang.id}`)).body;
-    expect(d.doc).toEqual(print);
+    const { bills: docBills, ...docRest } = d.doc;
+    const { bills: printBills, ...printRest } = print;
+    expect(docRest).toEqual(printRest);
+    expect(docBills.map((b) => ({ ...b, lines: b.lines.map(({ category: _c, discount: _d, ...l }) => l) }))).toEqual(printBills);
+    expect(docBills.flatMap((b) => b.lines.map((l) => [l.category, l.discount]))).toEqual(d.lines.map((l) => [l.category, l.discount]));
     expect(d.lines.map((l) => [l.name, l.unitPrice, l.quantity, l.amount, l.technician])).toEqual(
       print.bills.flatMap((b) => b.lines.map((l) => [l.name, l.unitPrice, l.quantity, l.amount, l.technician])),
     );

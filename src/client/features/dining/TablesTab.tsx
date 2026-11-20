@@ -8,6 +8,7 @@
 // 桌台详情里能并台、拆台、看历史，附台写明并入哪桌、在主台结账（TableActions.tsx）。
 
 import { DishVoidDialog } from './DishVoid';
+import { voidBlockedText, voidOutletsOf } from '@shared/frontdesk-v8117';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -562,6 +563,10 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
   const d = detail.data;
   const splitAction = useTableAction({ type: 'table_merge', sessionId: id, tableName: d?.tableName ?? '' });
   const canOrder = can('dining.order') && can('frontdesk.operate');
+  /** 退菜按这道菜所在的出品口（8.1.17 BW-4）：没有那一处「退菜」权限的不显示退菜（菜单里没有的菜照样显示，服务端核对） */
+  const voidOutlets = voidOutletsOf(can);
+  const menuDishes = useDiningMenu().data?.dishes;
+  const canVoidLine = (itemId: number | null) => !voidBlockedText(menuDishes?.find((m) => m.id === itemId)?.outlet, voidOutlets);
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['dining'] });
@@ -757,7 +762,7 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
                             催单
                           </Button>
                         ) : null}
-                        {canOrder && (
+                        {canOrder && canVoidLine(l.itemId) && (
                           <Button
                             size="sm"
                             variant="ghost"
