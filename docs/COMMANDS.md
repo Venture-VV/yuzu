@@ -121,6 +121,7 @@ E2E_BASE_URL=… npx playwright test e2e/emenu-818.spec.ts --project=门店电�
 E2E_BASE_URL=… npx playwright test e2e/emenu-8114.spec.ts --project=门店电脑   # 8.1.14 品牌部《工作台需求汇总 1.2》的三条（docs/HANDOFF_V8114.md）：小米平板大小上 11 种版式逐页核对顶栏分类与菜品的英文是衬线展示体（Playfair Display）、加号离菜名 2 / 3.5 个加号宽（放大一档、原样两种大小）、封面标题右下角的手绘圆环（中文位置不变、英文不压字）；合成菜单，只读
 E2E_BASE_URL=… npx playwright test e2e/dining-817.spec.ts --project=门店电脑   # 8.1.7 餐饮分区与点菜单（docs/HANDOFF_V817.md）：后台选点单分类与分区 → 桌台分区详情 → 先选餐厅 / 水吧 / 果吧再点 → 点菜单五种状态 → 沽清、台账、退菜记录按果吧筛；手牌客人的点菜单（菜品、档口、桌台以 E2E 817 开头，留着下次沿用；结束时退菜撤台、关闭餐饮）
 E2E_BASE_URL=… npx playwright test e2e/target-devices.spec.ts --project=门店电脑   # 三台目标设备（docs/DEVICES.md）：另开 1920×1080、1280×720、360×800、1355×903 的窗口核对主要页面不横向滚动、按钮在屏幕里（菜单里的菜、桌台与点菜单用合成数据，只读；临时打开餐饮，结束时恢复）
+E2E_BASE_URL=… npx playwright test e2e/ys-v8117.spec.ts --project=门店电脑   # 8.1.17 整体样式（docs/YUZU_REQ_V8117.md YS-1–YS-5）：在 1920×1080、1280×720、360×800、1355×903 四个尺寸上核对统一过的页面——没有小于 12 像素的字、关键金额不小于 16 像素、触屏上的热区补到 44 × 44（用鼠标不外扩）、不横向滚动；只读，统一过的页面加进 PAGES
 E2E_BASE_URL=… E2E_CANTEEN_URL=… npx playwright test -c playwright.canteen.config.ts   # 员工食堂的手机端流程（应用要开着员工端口、带 CANTEEN_PUSH_LOCAL_ENDPOINTS=true，库里有 seed-demo 的店主）；8.1.2 起含 studio.spec：工作台发布的员工食堂版面在员工手机上看得到、用完发回默认版面
 E2E_BASE_URL=… npx playwright test e2e/concierge.spec.ts --project=门店电脑   # 管家部（8.0.12）：建档与余额、管家账号落地、拍一张合成小票在浏览器本机识别（要在构建产物上跑，开发模式测不出识别资源缺不缺）
 E2E_BASE_URL=… npx playwright test e2e/customer.spec.ts --project=门店电脑   # 客户部（PR #107 整合）：总览与小时下钻、手牌筛选、低余额、目标与原单明细、页签地址、权限受限时的提示；只读前台与会员数据，不做收款
