@@ -87,6 +87,7 @@
 - [`WAREHOUSES.md`](WAREHOUSES.md)：两级库存：总仓 + 部门小仓（v0.7.11，RQ-002 第一步）
 - [`WORKBENCH_V811.md`](WORKBENCH_V811.md)：UI 工作台（8.1.1–8.1.2）：设计师在系统里直接改版面
 - [`YUZU_REQ_V8115.md`](YUZU_REQ_V8115.md)：8.1.15 追加 ·《浴族系统需求汇总》：对照现状与做法
+- [`YUZU_REQ_V8117.md`](YUZU_REQ_V8117.md)：8.1.17 ·《浴族系统需求汇总》整体样式与没做完的部分
 
 ## 部署、发版与环境
 
