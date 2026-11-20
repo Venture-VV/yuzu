@@ -4,7 +4,8 @@
 // 读卡走设备模块的读卡通道（docs/HARDWARE.md 第 3 节）：
 //   · 本机终端的设备服务（桥）报上来的读卡（串口读卡器、商米终端的 NFC）；
 //   · USB 读卡器当键盘用的：很短时间内连续输入、以回车结束的一串认作一次刷卡——光标在牌号框里时由牌号框自己收
-//     （框里原来的内容不动，这一串按芯片号查）；光标不在任何输入框里时在窗口上收。
+//     （框里原来的内容不动，这一串按芯片号查）；光标不在任何输入框里时在窗口上收。两处都先按芯片号查绑定，没绑定的才当牌号
+//     （@shared/frontdesk-risk 的 resolveScan，Codex 审查 d12390f 的 P2：芯片号也可能「像」某张牌）。
 // 浏览器的 Web NFC 要 HTTPS，门店内网是 http，用不了。
 //
 // 一屏上有几个牌号框时（接待发牌一位客人一行）：只让当前那一个收读卡（listening），读卡器状态那一行由页面自己放一条 ReaderStatusLine。
@@ -13,7 +14,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import { CircleAlert, CircleCheck, Nfc } from 'lucide-react';
 import { createWedgeRecognizer, WEDGE_MAX_GAP_MS } from '@shared/devices';
 import { normalizeTagCode, TAG_CODE_PATTERN } from '@shared/frontdesk';
-import { CARD_UID_PATTERN, normalizeCardUid, type TagByCard, type TagCardFound } from '@shared/frontdesk-risk';
+import { CARD_UID_PATTERN, normalizeCardUid, resolveScan, type TagByCard, type TagCardFound } from '@shared/frontdesk-risk';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
 import { cn, isTypingTarget } from '../../lib/utils';
@@ -45,8 +46,9 @@ function useReaderStatus(): { ok: boolean; label: string; hint: string } {
 /**
  * 收读卡（低一层的钩子；一般直接用 TagCardInput）：桥报上来的新读卡、桥报的读卡失败、光标不在输入框里时键盘式读卡器打进来的卡号。
  * 只认打开之后的新事件；回调用最新的（不用放进依赖）。后台给手牌绑芯片号要的是卡号本身，直接用它。
+ * onCard 的第二个参数是从哪来的：bridge 桥报的（一定是芯片号）、keyboard 键盘式读卡器 / 扫码枪打进来的（也可能是印着牌号的码）。
  */
-export function useCardReader(active: boolean, handlers: { onCard: (uid: string) => void; onReadError: (message: string) => void }) {
+export function useCardReader(active: boolean, handlers: { onCard: (uid: string, via: 'bridge' | 'keyboard') => void; onReadError: (message: string) => void }) {
   useTerminalBridge(active);
   const events = useTerminalState().events;
   const latest = useRef(handlers);
@@ -57,7 +59,7 @@ export function useCardReader(active: boolean, handlers: { onCard: (uid: string)
     if (!e || e.id === seen.current) return;
     seen.current = e.id;
     if (!active || e.source !== 'bridge') return;
-    if (e.type === 'card') latest.current.onCard(e.value);
+    if (e.type === 'card') latest.current.onCard(e.value, 'bridge');
     else if (e.type === 'error') latest.current.onReadError(`没读到卡（${e.value}），请再刷一次，或手输牌号`);
   }, [events, active]);
   useEffect(() => {
@@ -70,7 +72,7 @@ export function useCardReader(active: boolean, handlers: { onCard: (uid: string)
         // 这一次回车是读卡器打的，不是人按的「确认」
         e.preventDefault();
         e.stopPropagation();
-        latest.current.onCard(code);
+        latest.current.onCard(code, 'keyboard');
       }
     };
     // 抢在页面自己的回车处理之前
@@ -185,29 +187,32 @@ export function TagCardInput({
   const burst = useRef({ wedge: createWedgeRecognizer(), prefix: '', last: -Infinity });
   const isTag = isTagCode ?? ((code: string) => TAG_CODE_PATTERN.test(code));
 
-  /** 一张卡：按芯片号查牌、判断能不能用、填进来。typed 为这串内容是打进输入框的（可能是手敲错的牌号） */
-  const read = async (raw: string, typed: boolean) => {
-    const uid = normalizeCardUid(raw);
-    if (!CARD_UID_PATTERN.test(uid)) return say({ tone: 'error', text: '没读到卡（卡号不完整），请再刷一次，或手输牌号' });
-    let found: TagByCard;
-    try {
-      found = await lookupCard(uid);
-    } catch (e) {
-      return say({ tone: 'error', text: `查不到这张卡（${errorMessage(e)}），请手输牌号` });
+  /**
+   * 一张卡：先按芯片号查绑定，查到了判断能不能用、填进来（resolveScan）。typed 为这串内容是打进输入框的（可能是手敲错的牌号）；
+   * scanned 为读卡器、扫码枪打进来的（不是桥报的）：没绑定的、本身是牌号的当牌号用
+   */
+  const read = async (raw: string, typed: boolean, scanned: boolean) => {
+    const r = await resolveScan(raw, { lookup: lookupCard, isTagCode: isTag, tagFallback: scanned });
+    if (r.kind === 'tag') {
+      say(null);
+      return onChange(r.code);
     }
-    if (!found.found) {
+    if (r.kind === 'unreadable') return say({ tone: 'error', text: '没读到卡（卡号不完整），请再刷一次，或手输牌号' });
+    if (r.kind === 'failed') return say({ tone: 'error', text: `查不到这张卡（${errorMessage(r.error)}），请手输牌号` });
+    if (r.kind === 'unbound') {
       return say({
         tone: 'error',
-        text: typed ? `「${uid}」不是牌号，按芯片号查也没有绑定的手牌；请核对牌号，或到后台「手牌池」绑定这张卡` : '这张卡没绑手牌：请在后台「手牌与前台 → 手牌池」绑定，这一次先手输牌号',
+        text: typed ? `「${r.uid}」不是牌号，按芯片号查也没有绑定的手牌；请核对牌号，或到后台「手牌池」绑定这张卡` : '这张卡没绑手牌：请在后台「手牌与前台 → 手牌池」绑定，这一次先手输牌号',
       });
     }
+    const found = r.found;
     const problem = check?.(found) ?? null;
     if (problem) return say(typeof problem === 'string' ? { tone: 'error', text: `${problem}；可以换一张牌再刷，或手输牌号` } : problem);
     onChange(found.tag.code);
     onCard?.(found);
     say({ tone: 'ok', text: okText ? okText(found) : `已读到 ${found.tag.code}，核对后再确认` });
   };
-  useCardReader(listening && !disabled, { onCard: (uid) => void read(uid, false), onReadError: (text) => say({ tone: 'error', text }) });
+  useCardReader(listening && !disabled, { onCard: (uid, via) => void read(uid, false, via === 'keyboard'), onReadError: (text) => say({ tone: 'error', text }) });
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     const b = burst.current;
@@ -216,20 +221,18 @@ export function TagCardInput({
     const scanned = b.wedge.feed(e.key, e.timeStamp);
     if (e.key !== 'Enter') return;
     if (scanned) {
-      // 键盘式读卡器（或扫码枪）打进来的一串：这一次回车不是人按的确认
+      // 键盘式读卡器（或扫码枪）打进来的一串：这一次回车不是人按的确认。框里先恢复成原来的内容，
+      // 再先按芯片号查绑定——芯片号也可能「像」某张牌（Codex 审查 d12390f 的 P2），没绑定的、本身是牌号的（扫了印着牌号的码）才当牌号用
       e.preventDefault();
-      const code = normalizeTagCode(scanned);
-      // 打进来的就是一个牌号（例如扫了印着牌号的码）：当牌号用
-      if (isTag(code)) return onChange(code);
       onChange(b.prefix);
-      void read(scanned, true);
+      void read(scanned, true, true);
       return;
     }
     const code = normalizeTagCode(value);
     // 手敲（或粘贴）进来的不是牌号：按芯片号查一次
     if (code && !isTag(code) && CARD_UID_PATTERN.test(normalizeCardUid(value))) {
       e.preventDefault();
-      void read(value, true);
+      void read(value, true, false);
       return;
     }
     onEnter?.(e);

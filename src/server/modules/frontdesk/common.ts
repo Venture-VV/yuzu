@@ -64,6 +64,10 @@ export const FRONTDESK_OPS = [
   // 桌台动作（8.1.15，docs/DINING_V8115.md 第 6 节）：清台、维修、恢复（对象是桌台），并台、拆台（对象是开台）；在「桌台」页处理
   'table_state',
   'table_merge',
+  // 房态中心的房间动作（8.1.16，docs/ROOM_CENTER_V8115.md 第 5 节）：维修、恢复、标待清、清洁完成（space_state），换房、退房、并房、拆并（space_dispatch）；
+  // 对象是房间（空间），在「房态中心」处理
+  'space_state',
+  'space_dispatch',
 ] as const;
 export type FrontdeskOp = (typeof FRONTDESK_OPS)[number];
 
@@ -96,6 +100,9 @@ export const FRONTDESK_OP_PERMISSIONS: Record<FrontdeskOp, readonly Permission[]
   visit_incident: ['frontdesk.operate'],
   table_state: ['dining.order', 'frontdesk.operate'],
   table_merge: ['dining.order', 'frontdesk.operate'],
+  // 与房态中心各自的接口一致：改房态要「客房打扫、维修」，换房、退房、并房要「钟房派钟」
+  space_state: ['room.housekeep'],
+  space_dispatch: ['technician.dispatch'],
 };
 
 export const abandonedError = () => conflict('OP_ABANDONED', '这笔操作已在「结果待确认」时由员工作废，不会再生效；如仍需要，请重新填写一笔');

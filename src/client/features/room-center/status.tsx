@@ -42,7 +42,13 @@ export function CountChips({ counts, filter, onFilter, testId }: { counts: RoomC
   return (
     <div className="flex flex-wrap gap-2" role="group" aria-label="各状态的房间数" data-testid={testId}>
       {onFilter ? (
-        <button type="button" onClick={() => onFilter(null)} aria-pressed={!filter} className={cn(base, 'text-ink-2', !filter ? 'border-ink-3 bg-card' : 'border-line bg-paper hover:border-line-strong')} data-testid="rc-count-total">
+        <button
+          type="button"
+          onClick={() => onFilter(null)}
+          aria-pressed={!filter}
+          className={cn(base, 'text-ink-2', !filter ? 'border-ink-3 bg-card' : 'border-line bg-paper hover:border-line-strong')}
+          data-testid="rc-count-total"
+        >
           {total}
         </button>
       ) : (

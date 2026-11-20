@@ -271,8 +271,11 @@ export async function bumpRoomVersion(tx: Tx, spaceIds: number[], staffId: numbe
   await tx`UPDATE space_room_states SET version = version + 1, updated_at = ${at}, updated_by = ${staffId} WHERE space_id IN ${tx([...new Set(spaceIds)])}`;
 }
 
-export async function logRoomEvent(tx: Tx, e: { spaceId: number; kind: RoomEventKind; registrationId?: number | null; detail?: Record<string, unknown>; staffId: number; at: Date }) {
-  await tx`
+/** 记一条房间事件，返回它的编号（带操作编号的房间动作把第一条记进 idempotency_keys，查回时按它找） */
+export async function logRoomEvent(tx: Tx, e: { spaceId: number; kind: RoomEventKind; registrationId?: number | null; detail?: Record<string, unknown>; staffId: number; at: Date }): Promise<number> {
+  const [row] = await tx<{ id: number }[]>`
     INSERT INTO space_room_events (space_id, kind, registration_id, detail, staff_id, created_at)
-    VALUES (${e.spaceId}, ${e.kind}, ${e.registrationId ?? null}, ${tx.json((e.detail ?? {}) as never)}, ${e.staffId}, ${e.at})`;
+    VALUES (${e.spaceId}, ${e.kind}, ${e.registrationId ?? null}, ${tx.json((e.detail ?? {}) as never)}, ${e.staffId}, ${e.at})
+    RETURNING id`;
+  return Number(row!.id);
 }
