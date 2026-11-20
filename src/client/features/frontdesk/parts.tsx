@@ -235,10 +235,11 @@ export function TagCard({
           <VisitStatusChips visit={v} now={now} chipClass="w-full justify-center rounded-none" testId={`tag-${tag.code}`} />
         </>
       ) : (
-        <span className="mt-auto flex items-center gap-1 px-3 pb-2 text-[12px] font-semibold">
+        // 卡片上的当前状态不小于 16 像素（8.1.17 YS-2）
+        <span className="mt-auto flex items-center gap-1 px-3 pb-2 text-[16px] font-semibold">
           {tag.locked ? (
             <>
-              <Lock className="size-3 text-clay" />
+              <Lock className="size-4 shrink-0 text-clay" />
               <span className="truncate text-clay">锁定 · {tag.lockReason}</span>
             </>
           ) : (
