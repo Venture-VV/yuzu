@@ -43,6 +43,7 @@ import {
   type EmenuOrderResult,
   type EmenuPageView,
   type EmenuRules,
+  type EmenuComboSwapPart,
   type EmenuSpecOptions,
   type EmenuSpecState,
   type EmenuWindow,
@@ -59,7 +60,7 @@ import { parse, positiveCents } from '../../lib/validate';
 import { loadDiningRules } from '../dining';
 import { assertOrderOutlets } from '../dining-order-v8115';
 import { DishLineFields } from '../dish-lines';
-import { dishOptionsOf } from '../dish-options';
+import { comboRemainingOf, dishOptionsOf } from '../dish-options';
 import { postChargesTx } from '../frontdesk/bills';
 import { assertOpen, businessDate, lockVisits, runIdempotent } from '../frontdesk/common';
 import { abandonFrontdeskOp } from '../frontdesk/visits';
@@ -200,6 +201,12 @@ export async function dishViews(db: Db, dishIds: number[], today: string, dining
     today,
     allowed,
   );
+  // 套餐（8.1.17 BW7）：今天还能卖几份按子项里最少的（与点单页的菜单同一个算法）
+  const comboLeft = await comboRemainingOf(
+    db,
+    [...options].filter(([, o]) => o.comboIds).map(([id]) => id),
+    today,
+  );
   const out = new Map<number, EmenuDishView>();
   for (const d of dishes) {
     out.set(Number(d.id), {
@@ -220,9 +227,11 @@ export async function dishViews(db: Db, dishIds: number[], today: string, dining
         .filter((s) => Number(s.dishId) === Number(d.id))
         .map((s) => {
           const off = !diningOn || !d.active || !s.itemActive || s.technicianRequired || !s.inKitchen;
-          const state: EmenuSpecState = off ? 'off' : allowed && !allowed.includes(outletOf(s)) ? 'unavailable' : s.remaining === 0 ? 'sold_out' : 'ok';
-          const o = options.get(Number(s.itemId));
-          return { itemId: Number(s.itemId), label: s.label, labelEn: s.labelEn, price: defaultPrice(s.prices), state, remaining: s.remaining, ...(o ? { options: o } : {}) };
+          const left = comboLeft.get(Number(s.itemId)) ?? null;
+          const remaining = left === null ? s.remaining : s.remaining === null ? left : Math.min(s.remaining, left);
+          const state: EmenuSpecState = off ? 'off' : allowed && !allowed.includes(outletOf(s)) ? 'unavailable' : remaining === 0 ? 'sold_out' : 'ok';
+          const o = options.get(Number(s.itemId))?.view;
+          return { itemId: Number(s.itemId), label: s.label, labelEn: s.labelEn, price: defaultPrice(s.prices), state, remaining, ...(o ? { options: o } : {}) };
         }),
     });
   }
@@ -233,26 +242,56 @@ export async function dishViews(db: Db, dishIds: number[], today: string, dining
  * 规格的做法与加料（8.1.17 BW9）：做法照菜品管理里设的（分组、加价、必选）；加料只列现在能点的（在售、挂在启用的档口上），
  * 带上各自的价（默认档）、今天的沽清与这台平板能不能点（出品口）。没有做法、加料的规格不在返回里
  */
-async function specOptions(db: Db, itemIds: number[], today: string, allowed: readonly DiningOutlet[] | null): Promise<Map<number, EmenuSpecOptions>> {
+async function specOptions(db: Db, itemIds: number[], today: string, allowed: readonly DiningOutlet[] | null): Promise<Map<number, { view: EmenuSpecOptions | null; comboIds: boolean }>> {
   const sets = await dishOptionsOf(db, itemIds);
   const addonIds = [...new Set([...sets.values()].flatMap((o) => o.addons.map((a) => a.id)))];
+  // 套餐可换的子项（8.1.17 BW7）：原来的与能换成的今天的沽清（不够一份套餐的算售罄）
+  const swapIds = [...new Set([...sets.values()].flatMap((o) => o.combo.filter((p) => p.swaps?.length).flatMap((p) => [p.itemId, ...p.swaps!.map((w) => w.itemId)])))];
+  const limits = new Map(
+    swapIds.length
+      ? (await db<{ itemId: number; remaining: number }[]>`SELECT item_id, remaining FROM dish_limits WHERE item_id IN ${db(swapIds)} AND business_date = ${today}`).map((r) => [
+          Number(r.itemId),
+          r.remaining,
+        ])
+      : [],
+  );
+  const short = (itemId: number, perCombo: number) => (limits.get(itemId) ?? Infinity) < perCombo;
   const addonRows = addonIds.length
     ? await db<{ id: number; remaining: number | null; category: string; diningOutlet: string | null; diningGroup: string; stationName: string | null }[]>`
         SELECT i.id, (SELECT dl.remaining FROM dish_limits dl WHERE dl.item_id = i.id AND dl.business_date = ${today}) AS remaining,
                i.category, i.dining_outlet, i.dining_group, s.name AS station_name
         FROM service_items i LEFT JOIN kitchen_stations s ON s.id = i.station_id WHERE i.id IN ${db(addonIds)}`
     : [];
-  const out = new Map<number, EmenuSpecOptions>();
+  const out = new Map<number, { view: EmenuSpecOptions | null; comboIds: boolean }>();
   for (const [itemId, o] of sets) {
-    if (o.methods.length === 0 && o.addons.length === 0) continue;
+    const swaps = o.combo
+      .filter((p) => p.swaps?.length)
+      .map(
+        (p): EmenuComboSwapPart => ({
+          itemId: p.itemId,
+          name: p.name,
+          quantity: p.quantity,
+          state: short(p.itemId, p.quantity) ? 'sold_out' : 'ok',
+          choices: p.swaps!.map((w) => ({ itemId: w.itemId, name: w.name, priceDiff: w.priceDiff, state: !w.available ? 'off' : short(w.itemId, p.quantity) ? 'sold_out' : 'ok' })),
+        }),
+      );
+    const comboIds = o.combo.length > 0;
+    if (o.methods.length === 0 && o.addons.length === 0 && swaps.length === 0) {
+      if (comboIds) out.set(itemId, { view: null, comboIds });
+      continue;
+    }
     out.set(itemId, {
-      methods: o.methods,
-      groups: o.groups,
-      addons: o.addons.map((a) => {
-        const r = addonRows.find((x) => Number(x.id) === a.id);
-        const state: EmenuSpecState = r && allowed && !allowed.includes(outletOf(r)) ? 'unavailable' : r?.remaining === 0 ? 'sold_out' : 'ok';
-        return { itemId: a.id, name: a.name, price: a.price, state, remaining: r?.remaining ?? null };
-      }),
+      comboIds,
+      view: {
+        methods: o.methods,
+        groups: o.groups,
+        addons: o.addons.map((a) => {
+          const r = addonRows.find((x) => Number(x.id) === a.id);
+          const state: EmenuSpecState = r && allowed && !allowed.includes(outletOf(r)) ? 'unavailable' : r?.remaining === 0 ? 'sold_out' : 'ok';
+          return { itemId: a.id, name: a.name, price: a.price, state, remaining: r?.remaining ?? null };
+        }),
+        ...(swaps.length ? { swaps } : {}),
+      },
     });
   }
   return out;
@@ -506,7 +545,13 @@ export async function placeEmenuOrder(deps: Deps, raw: unknown, device: Actor, s
   if (!rules.enabled || !(await loadDiningRules(deps.sql)).enabled) throw disabledError();
   const itemIds = input.lines.map((l) => l.itemId);
   // 同一道菜、同一个规格、同样的做法、配在同一道菜上的合成一行（8.1.17 起做法不同的、加料配的主菜不同的另起一行）
-  const lineKeys = input.lines.map((l) => `${l.itemId}|${[...(l.methods ?? [])].sort().join(',')}|${l.addonOf ?? ''}`);
+  const lineKeys = input.lines.map(
+    (l) =>
+      `${l.itemId}|${[...(l.methods ?? [])].sort().join(',')}|${l.addonOf ?? ''}|${(l.swaps ?? [])
+        .map((w) => `${w.from}>${w.to}`)
+        .sort()
+        .join(',')}`,
+  );
   if (new Set(lineKeys).size !== lineKeys.length) throw badRequest('同一道菜同一个规格请合成一行');
   if (input.avoid.some((a) => !rules.avoidOptions.includes(a)) || (input.serve !== null && !rules.serveOptions.includes(input.serve))) {
     throw unprocessable('REMARK_OPTION_INVALID', '备注的选项刚刚改过，请重新选一下备注');
@@ -558,6 +603,7 @@ export async function placeEmenuOrder(deps: Deps, raw: unknown, device: Actor, s
           callType: undefined,
           methods: l.methods,
           addonOf: l.addonOf,
+          swaps: l.swaps,
         })),
         customLines: [],
         expectedTotal: input.expectedTotal,

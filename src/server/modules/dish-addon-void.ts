@@ -3,7 +3,7 @@
 //
 // 只在手牌（前台作废明细）与桌台的退菜里各加两句（锁加料行、退加料行），退菜原来的核对一行不改：
 //   · 锁：主菜那一行锁住以后，按 id 升序锁它没退的加料行（同一张账单；来访 / 开台、账单调用方已锁），
-//     之后每一行照旧：明细 → 出品单 → 沽清（cancelKitchenItem）；
+//     再把这几行的出品单（id 升序）→ 子项单 → 扣过的沽清（项目 id 升序）一起锁上，之后每一行照旧退（cancelKitchenItem）；
 //   · 授权：每一行加料照退菜原来的核对（authorizeLineVoid：小额直接退、经理、本人规定分钟内……出品口的退菜权限也在它里面）；
 //     这一行要当场授权的，照主菜的授权——主菜用了当场授权（授权弹窗里写着连同加料）就算同一次授权；主菜不用授权（小额、本人、经理）
 //     而这一行加料要的，整笔拒绝（ADDON_NEEDS_GRANT）：小额的主菜申请不到授权，请先只退主菜（不勾「加料一起退」），再单独退这份加料；
@@ -15,7 +15,7 @@ import { writeAudit, type AuditAction } from '../lib/audit';
 import type { Actor } from '../lib/context';
 import { formatYuan } from '@shared/money';
 import { AppError } from '../lib/errors';
-import { cancelKitchenItem } from './dining';
+import { cancelKitchenItem, lockKitchenForVoid } from './dining';
 import { authorizeLineVoid, type VoidApproval } from './dining-808';
 
 /**
@@ -40,11 +40,16 @@ export interface AddonLine {
   postedAt: string;
 }
 
-/** 主菜那一行锁住以后：按 id 升序锁挂在它上面、还没退的加料行 */
+/**
+ * 主菜那一行锁住以后：按 id 升序锁挂在它上面、还没退的加料行；有加料的，再把主菜与这几行的出品单、子项单、扣过的沽清
+ * 按固定的顺序一起锁上（lockKitchenForVoid：沽清按项目 id 升序，与下单一样），之后一行一行退不再另外等锁
+ */
 export async function lockAddonLines(tx: Tx, mainLineId: number): Promise<AddonLine[]> {
-  return tx<AddonLine[]>`
+  const addons = await tx<AddonLine[]>`
     SELECT id, name, source, quantity, amount, status, posted_by, posted_at FROM bill_lines
     WHERE addon_of = ${mainLineId} AND status = 'active' ORDER BY id FOR UPDATE`;
+  if (addons.length) await lockKitchenForVoid(tx, [mainLineId, ...addons.map((a) => a.id)]);
+  return addons;
 }
 
 /**

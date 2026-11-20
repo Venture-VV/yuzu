@@ -46,7 +46,7 @@ import { recordSaleUsage } from './stock-usage';
 import { currentStoreId } from '../lib/store-context';
 import { assertMergeGroupsComplete, assertNotMerged, assertSessionsStayed, assertTableUsable, lockTablesOfSessions, markTablesDirty, mergeInfoOf, withMergeGroups } from './tables-v8115';
 import { assertOrderOutlets, OrderNoteField, VoidBlameField } from './dining-order-v8115';
-import { DishLineFields, planDishLines } from './dish-lines';
+import { DishLineFields, kitchenPartsOf, limitLinesOf, planDishLines } from './dish-lines';
 import { lockAddonLines, pendingAddonsColumn, voidAddonLines, WithAddonsField } from './dish-addon-void';
 import type { TableState } from '@shared/dining-v8115';
 
@@ -444,19 +444,15 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
     const plans = await planDishLines(tx, input.lines, { strict: true, isDish: () => true, nameOf: (id) => items.get(id)?.name ?? '这道菜' });
     const lines = priced.map((l, i) => {
       const unitPrice = l.unitPrice + plans[i]!.extra;
-      return { ...l, unitPrice, amount: unitPrice * l.quantity, note: plans[i]!.note, addonOf: plans[i]!.addonOf };
+      return { ...l, itemId: l.itemId!, unitPrice, amount: unitPrice * l.quantity, note: plans[i]!.note, addonOf: plans[i]!.addonOf, parts: plans[i]!.parts };
     });
     const total = lines.reduce((sum, l) => sum + l.amount, 0);
     if (total !== input.expectedTotal) {
       throw conflict('PRICE_CHANGED', '菜价刚刚有调整，本次合计与确认时不同，请核对后重新确认', { total });
     }
     const date = await businessDate(tx, deps, at);
-    // 沽清（明细之前）：今天还剩的份数不够整笔拒绝
-    const limited = await takeDishLimits(
-      tx,
-      lines.map((l) => ({ itemId: l.itemId!, name: l.name, quantity: l.quantity })),
-      date,
-    );
+    // 沽清（明细之前）：今天还剩的份数不够整笔拒绝；套餐的子项各扣各的（8.1.17 BW7）
+    const limited = await takeDishLimits(tx, limitLinesOf(lines), date);
     const kitchen: KitchenLine[] = [];
     for (const l of lines) {
       const [row] = await tx<{ id: number }[]>`
@@ -464,7 +460,15 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
         VALUES (${s.billId}, 'dining', ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${date},
                 ${ctx.actor.id}, ${at}, ${l.addonOf === null ? null : kitchen[l.addonOf]!.billLineId})
         RETURNING id`;
-      kitchen.push({ billLineId: row!.id, itemId: l.itemId!, stationId: l.stationId, quantity: l.quantity, note: l.note, limitTaken: limited.has(l.itemId!) });
+      kitchen.push({
+        billLineId: row!.id,
+        itemId: l.itemId,
+        stationId: l.stationId,
+        quantity: l.quantity,
+        note: l.note,
+        limitTaken: limited.has(l.itemId),
+        ...kitchenPartsOf(l.parts, limited),
+      });
     }
     await createKitchenItems(tx, { visitId: null, tableSessionId: s.id, lines: kitchen, date, at, actor: ctx.actor, backfill: false, orderNote: input.orderNote });
     await tx`UPDATE bills SET amount_cents = amount_cents + ${total}, line_count = line_count + ${lines.length} WHERE id = ${s.billId}`;

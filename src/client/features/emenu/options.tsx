@@ -2,12 +2,14 @@
 // 右边滑出这一块抽屉（与「备注」同一个样子）——
 //   · 做法：分了组的同一组只能选一个（再点别的就换过去），必选的组不选不能加；不分组的可以多选；加价的写「+¥2」；
 //   · 加料：另外的菜，各算各的钱；加进未下单时另起一行、挂在这道菜上（出品单上写「配 这道菜」）；
-//   · 规格照电子菜单原来的做法：在菜品详情里选（每个规格是价目里的一个项目，各有各的价）。
+//   · 规格照电子菜单原来的做法：在菜品详情里选（每个规格是价目里的一个项目，各有各的价）；
+//   · 套餐里可换的一样（8.1.17 BW7）：默认不换，可以换成后台设好的几样之一（补差价的写「+¥3」）；原来那一样今天没有了的，
+//     先选好换成哪一样才能加。
 // 核对与点单页、门店系统同一个函数（@shared/dishes 的 methodChoiceProblem）；价格以门店系统为准。
 
 import { useState, type CSSProperties, type ReactNode } from 'react';
-import { methodChoiceProblem, methodsExtra, pickedMethods, plusYuan, type DishMethodOption } from '@shared/dishes';
-import type { EmenuDishView, EmenuSpecView } from '@shared/emenu';
+import { methodChoiceProblem, methodsExtra, pickedMethods, plusYuan, swapText, type DishMethodOption, type DishSwapChoice } from '@shared/dishes';
+import type { EmenuComboSwapPart, EmenuDishView, EmenuSpecView } from '@shared/emenu';
 import { dishNames, specLabel, useLang, useM } from './i18n';
 import { MinusDot, PlusDot } from './icons';
 import { DrawerButton, Drawer, DX, LINE, MUTE, useDrawerDrop } from './overlays';
@@ -18,7 +20,12 @@ import { box, Hairline } from './stage';
 export interface PickedOptions {
   methods: string[];
   addons: { itemId: number; quantity: number }[];
+  /** 套餐换菜（8.1.17 BW7）：只列换了的 */
+  swaps: DishSwapChoice[];
 }
+
+/** 套餐每一样可换的开始时选哪个：原来那一样今天还有就不换，没有了选第一样能点的（都没有的不选，加不了） */
+const firstChoice = (p: EmenuComboSwapPart) => (p.state === 'ok' ? p.itemId : (p.choices.find((c) => c.state === 'ok')?.itemId ?? 0));
 
 const pillStyle = (on: boolean, disabled: boolean): CSSProperties => ({
   position: 'relative',
@@ -58,11 +65,25 @@ export function OptionsDrawer({
   const options = spec.options!;
   const [methods, setMethods] = useState<string[]>([]);
   const [addons, setAddons] = useState<Record<number, number>>({});
+  const swapParts = options.swaps ?? [];
+  const [swapped, setSwapped] = useState<Record<number, number>>(() => Object.fromEntries(swapParts.map((p) => [p.itemId, firstChoice(p)])));
   const name = dishNames(dish, lang).main;
   const label = specLabel(spec, lang);
-  const problem = methodChoiceProblem(name, options.methods, options.groups, methods, { requireAll: true });
+  const missing = swapParts.find((p) => !swapped[p.itemId]);
+  const methodProblem = methodChoiceProblem(name, options.methods, options.groups, methods, { requireAll: true });
+  const problem = methodProblem
+    ? methodProblem.code === 'DISH_METHOD_REQUIRED'
+      ? m.optionsMissing(methodProblem.group ?? '')
+      : methodProblem.message
+    : missing
+      ? m.optionsSwapGone(missing.name)
+      : null;
   const picked = options.addons.filter((a) => (addons[a.itemId] ?? 0) > 0 && a.state === 'ok');
-  const total = spec.price + methodsExtra(options.methods, methods) + picked.reduce((s, a) => s + a.price * addons[a.itemId]!, 0);
+  const swaps = swapParts.flatMap((p) => {
+    const to = p.choices.find((c) => c.itemId === swapped[p.itemId]);
+    return to ? [{ from: p.itemId, to: to.itemId, text: swapText(p.name, to.name, to.priceDiff), diff: to.priceDiff }] : [];
+  });
+  const total = spec.price + methodsExtra(options.methods, methods) + picked.reduce((s, a) => s + a.price * addons[a.itemId]!, 0) + swaps.reduce((s, w) => s + w.diff, 0);
   const loose = options.methods.filter((o) => !o.group || !options.groups.some((g) => g.name === o.group));
   const toggle = (o: DishMethodOption) =>
     setMethods((cur) => {
@@ -97,6 +118,32 @@ export function OptionsDrawer({
       </button>
     );
   };
+  const swapPill = (p: EmenuComboSwapPart, itemId: number, text: string, diff: number, usable: boolean) => {
+    const on = swapped[p.itemId] === itemId;
+    return (
+      <button
+        key={itemId}
+        type="button"
+        role="radio"
+        aria-checked={on}
+        disabled={!usable}
+        onClick={() => setSwapped((cur) => ({ ...cur, [p.itemId]: itemId }))}
+        className="em-tap-soft"
+        style={pillStyle(on, !usable)}
+        data-testid={`emenu-swap-option-${p.name}-${text}`}
+      >
+        {!on && <Hairline />}
+        <span style={{ position: 'absolute', left: 0, right: 0, top: 8.85, textAlign: 'center' }}>
+          {text}
+          {diff > 0 && (
+            <span className="em-en" style={{ fontSize: 11, marginLeft: 3 }}>
+              {plusYuan(diff)}
+            </span>
+          )}
+        </span>
+      </button>
+    );
+  };
   const heading = (text: ReactNode, note: ReactNode) => (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, margin: '14px 0 8px', fontSize: 14, lineHeight: '16px' }}>
       <span>{text}</span>
@@ -118,6 +165,12 @@ export function OptionsDrawer({
         </span>
       </div>
       <ScrollArea style={{ ...box(DX, 136, 343.3, 530 - drop) }} testId="emenu-options-list">
+        {swapParts.map((p) => (
+          <div key={p.itemId} role="radiogroup" aria-label={m.optionsSwap(p.name)} data-testid={`emenu-swap-${p.name}`}>
+            {heading(`${m.optionsSwap(p.name)}${p.quantity > 1 ? ` ×${p.quantity}` : ''}`, m.optionsSwapNote)}
+            {row([swapPill(p, p.itemId, p.name, 0, p.state === 'ok'), ...p.choices.map((c) => swapPill(p, c.itemId, c.name, c.priceDiff, c.state === 'ok'))])}
+          </div>
+        ))}
         {options.groups
           .filter((g) => options.methods.some((o) => o.group === g.name))
           .map((g) => (
@@ -204,16 +257,17 @@ export function OptionsDrawer({
         style={{ ...box(DX, 680 - drop, 343.3), textAlign: 'center', fontSize: 12, lineHeight: '14px', color: problem ? 'var(--em-error)' : MUTE }}
         data-testid="emenu-options-note"
       >
-        {problem
-          ? problem.code === 'DISH_METHOD_REQUIRED'
-            ? m.optionsMissing(problem.group ?? '')
-            : problem.message
-          : pickedMethods(options.methods, methods)
-              .map((o) => o.name)
-              .join(' · ')}
+        {problem ?? [...pickedMethods(options.methods, methods).map((o) => o.name), ...swaps.map((w) => w.text)].join(' · ')}
       </div>
       <DrawerButton
-        onClick={() => !problem && onAdd({ methods: pickedMethods(options.methods, methods).map((o) => o.name), addons: picked.map((a) => ({ itemId: a.itemId, quantity: addons[a.itemId]! })) })}
+        onClick={() =>
+          !problem &&
+          onAdd({
+            methods: pickedMethods(options.methods, methods).map((o) => o.name),
+            addons: picked.map((a) => ({ itemId: a.itemId, quantity: addons[a.itemId]! })),
+            swaps: swaps.map((w) => ({ from: w.from, to: w.to })),
+          })
+        }
         disabled={!!problem}
         testId="emenu-options-add"
       >

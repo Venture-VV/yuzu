@@ -188,6 +188,11 @@ const ZH = {
   optionsMoreOne: (name: string) => `${name} 多一份`,
   addonOfLine: (name: string) => `配 ${name}`,
   specUnavailable: '这个规格请找服务员点',
+  // 8.1.17（BW7）：套餐里可换的一样
+  optionsSwap: (name: string) => `套餐里的${name}`,
+  optionsSwapNote: '可换 · 选一种',
+  optionsAsIs: '不换',
+  optionsSwapGone: (name: string) => `${name}今天没有了，请换一种`,
 };
 
 const EN: typeof ZH = {
@@ -333,6 +338,10 @@ const EN: typeof ZH = {
   optionsMoreOne: (name) => `One more ${name}`,
   addonOfLine: (name) => `With ${name}`,
   specUnavailable: 'Please ask staff for this size',
+  optionsSwap: (name) => `${name} in the set`,
+  optionsSwapNote: 'Swap · Choose one',
+  optionsAsIs: 'Keep',
+  optionsSwapGone: (name) => `${name} is sold out today — please choose a swap`,
 };
 
 export type Messages = typeof ZH;
@@ -364,6 +373,7 @@ const ERRORS_EN: Record<string, string> = {
   DISH_METHOD_INVALID: 'A dish option has just changed — please choose again',
   DISH_ADDON_INVALID: 'An add-on has just changed — please choose again',
   DISH_NOTE_TOO_LONG: 'The options and note are too long — please choose fewer',
+  DISH_SWAP_INVALID: 'A swap in a set has just changed — please choose again',
   OUTLET_FORBIDDEN: 'A dish cannot be ordered on this tablet — please ask our staff',
   PRICE_CHANGED: 'Prices have just changed — please check the total and confirm again',
   VISIT_CLOSED: 'This tag has already checked out',

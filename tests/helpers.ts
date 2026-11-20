@@ -354,6 +354,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '191_technician_admin.sql',
   '192_member_cards_v8115.sql',
   '196_dishes_v8117.sql',
+  '197_combo_parts_v8117.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

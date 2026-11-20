@@ -5,7 +5,7 @@
 // 没定的规则按默认（PENDING_DECISIONS.md「8.0.10」DC1–DC18，待确认），能调的在后台「电子菜单 → 设置」里改。
 
 import { parseCsvRecords, unclosedQuoteMessage } from './csv-read';
-import type { DishMethodGroup, DishMethodOption } from './dishes';
+import type { DishMethodGroup, DishMethodOption, DishSwapChoice } from './dishes';
 import { normalizeTagCode, tagDigits } from './frontdesk';
 
 // ───────────────────────── 设置 ─────────────────────────
@@ -432,6 +432,17 @@ export interface EmenuSpecOptions {
   groups: DishMethodGroup[];
   /** 加料：另外的菜，加进未下单时另起一行、挂在这道菜上（不一定排在电子菜单上） */
   addons: { itemId: number; name: string; price: number; state: EmenuSpecState; remaining: number | null }[];
+  /** 套餐里可换的几样（8.1.17 BW7）；没有可换的套餐不带 */
+  swaps?: EmenuComboSwapPart[];
+}
+
+/** 套餐里可换的一样（8.1.17 BW7）：原来是哪一样（今天还够不够）、每份套餐几份、能换成哪几样（每份补的差价、能不能点） */
+export interface EmenuComboSwapPart {
+  itemId: number;
+  name: string;
+  quantity: number;
+  state: 'ok' | 'sold_out';
+  choices: { itemId: number; name: string; priceDiff: number; state: 'ok' | 'sold_out' | 'off' }[];
 }
 
 export interface EmenuSpecView {
@@ -607,6 +618,8 @@ export interface EmenuOrderLineInput {
   /** 8.1.17（BW9）：选的做法（名字）；加料挂在哪一行主菜上（同一单里主菜的下标，主菜在前）。都不带的与以前一样 */
   methods?: string[];
   addonOf?: number;
+  /** 8.1.17（BW7）：套餐换菜（套餐里的哪一样换成哪一样） */
+  swaps?: DishSwapChoice[];
 }
 
 /** 下单的内容（不含点单密码）：结果待确认时本机保存的就是这一份，重提时原样再发 */

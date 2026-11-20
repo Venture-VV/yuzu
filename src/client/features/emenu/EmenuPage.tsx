@@ -32,24 +32,7 @@ import { homeIsEmenu } from '../../lib/landing';
 import { useCan, useSession } from '../../lib/session';
 import { uuid } from '../../lib/utils';
 import { Header } from './header';
-import {
-  blockLabel,
-  both,
-  bothText,
-  dishNames,
-  errorEn,
-  LangProvider,
-  messages,
-  namePair,
-  optionLabel,
-  specLabel,
-  uncertainEn,
-  useLang,
-  useM,
-  type Both,
-  type Lang,
-  type Messages,
-} from './i18n';
+import { blockLabel, both, bothText, dishNames, errorEn, LangProvider, messages, namePair, optionLabel, specLabel, uncertainEn, useLang, useM, type Both, type Lang, type Messages } from './i18n';
 import { LogoStacked } from './logo';
 import { ExitKey, LeaveSheet, type LeaveAction } from './exit';
 import { Backdrop, BiText, Frame, InfoModal, ModalButton, ModalNote, SmallDialog, SuccessModal, Toast, type InfoField } from './modals';
@@ -959,6 +942,7 @@ export function EmenuPage() {
                     quantity: l.quantity,
                     ...(l.methods?.length ? { methods: l.methods } : {}),
                     ...(l.addonOf ? { addonOf: cart.findIndex((x) => cartKey(x) === l.addonOf) } : {}),
+                    ...(l.swaps?.length ? { swaps: l.swaps } : {}),
                   })),
                   avoid: remark.avoid,
                   serve: remark.serve,

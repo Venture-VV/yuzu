@@ -1,7 +1,8 @@
 // 菜品管理：新增 / 编辑一道菜（8.1.15，docs/DISHES_V8115.md 第 7 节）。
 // 名称、分类、出品口与小类、档口、图片；规格与价格（新增时定价，沿用价目里的档；以后改价走「改价」，要写原因）；
 // 做法（点单时选了写进出品备注；8.1.17 起可以分组、设必选、加价，docs/DISHES_V8117.md 第 2 节）、
-// 加料（另外的菜，点单时另起一行、备注「配 某菜」）、套餐内容（含哪几样、每样几份）。
+// 加料（另外的菜，点单时另起一行、备注「配 某菜」）、套餐内容（含哪几样、每样几份；8.1.17 起每一样可以标「可换」，
+// 列出能换成哪几样与每份补的差价，docs/DISHES_V8117.md 第 7 节）。
 // 保存带操作编号与打开时的版本：别人先改过会被拒绝，结果不明时原样再点一次不会重复。
 
 import { useMemo, useState, type ReactNode } from 'react';
@@ -10,6 +11,8 @@ import { PRICE_TIER_LABELS, PRICE_TIERS, type PriceTier } from '@shared/catalog'
 import { ALL_DINING_SLOTS, slotKey, slotLabel, type DiningOutlet } from '@shared/dining';
 import {
   MAX_COMBO_ITEMS,
+  MAX_COMBO_SWAP_DIFF,
+  MAX_COMBO_SWAPS,
   MAX_DISH_ADDONS,
   MAX_DISH_CATEGORY,
   MAX_DISH_METHOD_GROUP_LENGTH,
@@ -54,7 +57,8 @@ interface Draft {
   methods: { name: string; group: string; price: string }[];
   groups: { name: string; required: boolean }[];
   addons: number[];
-  combo: { itemId: number; quantity: number }[];
+  /** 套餐内容（8.1.17：可换的、能换成哪几样，差价是输入框里的元） */
+  combo: { itemId: number; quantity: number; swappable: boolean; swaps: { itemId: number; diff: string }[] }[];
 }
 
 const emptyDraft = (outlets: DiningOutlet[]): Draft => ({
@@ -84,7 +88,12 @@ const draftOf = (d: DishRow): Draft => ({
   methods: d.methodOptions.map((m) => ({ name: m.name, group: m.group, price: m.price ? centsToInput(m.price) : '' })),
   groups: d.methodGroups.map((g) => ({ ...g })),
   addons: d.addons.map((a) => a.itemId),
-  combo: d.combo.map((c) => ({ itemId: c.itemId, quantity: c.quantity })),
+  combo: d.combo.map((c) => ({
+    itemId: c.itemId,
+    quantity: c.quantity,
+    swappable: c.swappable,
+    swaps: c.swaps.map((w) => ({ itemId: w.itemId, diff: w.priceDiff ? centsToInput(w.priceDiff) : '' })),
+  })),
 });
 
 export function DishEditor({
@@ -188,6 +197,19 @@ export function DishEditor({
     }
     const empty = f.groups.find((g) => !methods.some((m) => m.group === g.name));
     if (empty) return setError(`做法的组「${empty.name}」里还没有做法：给它选几种做法，或者把这一组去掉`);
+    // 套餐（8.1.17）：可换的至少能换成一样；差价是每份套餐补的钱
+    const combo: DishBody['combo'] = [];
+    for (const c of f.combo) {
+      const partName = byId.get(c.itemId)?.name ?? '这一样';
+      if (c.swappable && c.swaps.length === 0) return setError(`套餐里的「${partName}」标了可换：请加上能换成的菜，或者取消「可换」`);
+      const swaps: { itemId: number; priceDiff: number }[] = [];
+      for (const w of c.swappable ? c.swaps : []) {
+        const diff = w.diff.trim() ? parseYuan(w.diff) : 0;
+        if (diff === null || diff > MAX_COMBO_SWAP_DIFF) return setError(`「${partName}」换成「${byId.get(w.itemId)?.name ?? ''}」的差价「${w.diff}」不对（最多 ${formatYuan(MAX_COMBO_SWAP_DIFF)}）`);
+        swaps.push({ itemId: w.itemId, priceDiff: diff });
+      }
+      combo.push({ itemId: c.itemId, quantity: c.quantity, swappable: c.swappable, swaps });
+    }
     const body: DishBody = {
       name,
       category: f.category.trim(),
@@ -197,7 +219,7 @@ export function DishEditor({
       methods,
       methodGroups: f.groups,
       addons: f.addons,
-      combo: f.combo,
+      combo,
     };
     let extra: Record<string, unknown>;
     if (dish) extra = { rev: dish.rev };
@@ -480,7 +502,10 @@ export function DishEditor({
           )}
         </Section>
 
-        <Section title={`套餐内容 ${f.combo.length ? f.combo.length : ''}`} hint="填了就是套餐：下单一行、按这道菜自己的价，出品单上列出含的几样。">
+        <Section
+          title={`套餐内容 ${f.combo.length ? f.combo.length : ''}`}
+          hint="填了就是套餐：下单一行、按这道菜自己的价，出品单上列出含的几样；每一样在自己的档口出、扣自己的沽清与用料。标了「可换」的点单时可以换成列出的菜（补差价的加在这一行上）。"
+        >
           {comboBlocked ? (
             <p className="text-[13px] text-ink-3" data-testid="dish-combo-blocked">
               {comboBlocked}
@@ -490,24 +515,71 @@ export function DishEditor({
               <ul className="space-y-1.5" data-testid="dish-combo">
                 {f.combo.map((c) => {
                   const it = byId.get(c.itemId);
+                  const name = it?.name ?? '这一样';
+                  const patch = (p: Partial<Draft['combo'][number]>) => set({ combo: f.combo.map((x) => (x.itemId === c.itemId ? { ...x, ...p } : x)) });
                   return (
-                    <li key={c.itemId} className="flex min-h-11 items-center gap-2 rounded-md border border-line px-3">
-                      <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">{it?.name ?? '已经不是菜品'}</span>
-                      {it && !it.active && (
-                        <StatusChip tone="neutral" icon={<CircleOff />}>
-                          已下架
-                        </StatusChip>
+                    <li key={c.itemId} className="rounded-md border border-line px-3 py-1" data-testid={`dish-combo-part-${name}`}>
+                      <div className="flex min-h-11 flex-wrap items-center gap-2">
+                        <span className="min-w-0 flex-1 basis-24 truncate text-[15px] font-semibold">{it?.name ?? '已经不是菜品'}</span>
+                        {it && !it.active && (
+                          <StatusChip tone="neutral" icon={<CircleOff />}>
+                            已下架
+                          </StatusChip>
+                        )}
+                        <span className="text-[13px] text-ink-3">×</span>
+                        <QtyInput
+                          value={c.quantity}
+                          onChange={(n) => patch({ quantity: n })}
+                          onHint={setQtyHint}
+                          label={`${name} 每份套餐含几份`}
+                          className="h-9 w-11 rounded-md border border-line-strong text-[15px]"
+                          testId={`dish-combo-qty-${it?.name ?? c.itemId}`}
+                        />
+                        {/* 8.1.17（BW7）：点单时能不能换成别的 */}
+                        <label className="inline-flex h-11 items-center gap-1.5 px-1 text-[13.5px] font-semibold text-ink-2">
+                          <input type="checkbox" className="size-4" checked={c.swappable} onChange={(e) => patch({ swappable: e.target.checked })} data-testid={`dish-combo-swappable-${name}`} />
+                          可换
+                        </label>
+                        <RemoveButton label={`去掉 ${it?.name ?? ''}`} onClick={() => set({ combo: f.combo.filter((x) => x.itemId !== c.itemId) })} />
+                      </div>
+                      {c.swappable && (
+                        <div className="mb-1.5 ml-2 border-l-2 border-line pl-3" data-testid={`dish-combo-swaps-${name}`}>
+                          <p className="text-[12.5px] text-ink-3">点单时可以换成（每份套餐补的差价，空着 = 同价）：</p>
+                          <ul className="mt-1 space-y-1">
+                            {c.swaps.map((w) => {
+                              const to = byId.get(w.itemId);
+                              return (
+                                <li key={w.itemId} className="flex min-h-11 flex-wrap items-center gap-2" data-testid={`dish-combo-swap-${name}-${to?.name ?? w.itemId}`}>
+                                  <span className="min-w-0 flex-1 basis-20 truncate text-[14.5px] font-semibold">{to?.name ?? '已经不是菜品'}</span>
+                                  {to && !to.active && (
+                                    <StatusChip tone="neutral" icon={<CircleOff />}>
+                                      已下架
+                                    </StatusChip>
+                                  )}
+                                  <span className="w-28">
+                                    <MoneyInput
+                                      value={w.diff}
+                                      onChange={(e) => patch({ swaps: c.swaps.map((x) => (x.itemId === w.itemId ? { ...x, diff: e.target.value } : x)) })}
+                                      placeholder="同价"
+                                      aria-label={`${name} 换成 ${to?.name ?? ''} 补差价（元）`}
+                                      data-testid={`dish-combo-swap-diff-${name}-${to?.name ?? w.itemId}`}
+                                    />
+                                  </span>
+                                  <RemoveButton label={`不能换成 ${to?.name ?? ''}`} onClick={() => patch({ swaps: c.swaps.filter((x) => x.itemId !== w.itemId) })} />
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          {c.swaps.length < MAX_COMBO_SWAPS && (
+                            <DishPicker
+                              candidates={candidates.filter((d) => d.id !== c.itemId && !c.swaps.some((w) => w.itemId === d.id))}
+                              placeholder={`搜菜名，${name}可以换成什么`}
+                              testId={`dish-combo-swap-${name}`}
+                              onPick={(d) => patch({ swaps: [...c.swaps, { itemId: d.id, diff: '' }] })}
+                            />
+                          )}
+                        </div>
                       )}
-                      <span className="text-[13px] text-ink-3">×</span>
-                      <QtyInput
-                        value={c.quantity}
-                        onChange={(n) => set({ combo: f.combo.map((x) => (x.itemId === c.itemId ? { ...x, quantity: n } : x)) })}
-                        onHint={setQtyHint}
-                        label={`${it?.name ?? '这一样'} 每份套餐含几份`}
-                        className="h-9 w-11 rounded-md border border-line-strong text-[15px]"
-                        testId={`dish-combo-qty-${it?.name ?? c.itemId}`}
-                      />
-                      <RemoveButton label={`去掉 ${it?.name ?? ''}`} onClick={() => set({ combo: f.combo.filter((x) => x.itemId !== c.itemId) })} />
                     </li>
                   );
                 })}
@@ -522,7 +594,7 @@ export function DishEditor({
                   candidates={candidates.filter((d) => !f.combo.some((c) => c.itemId === d.id))}
                   placeholder="搜菜名，加进套餐"
                   testId="dish-combo"
-                  onPick={(d) => set({ combo: [...f.combo, { itemId: d.id, quantity: 1 }] })}
+                  onPick={(d) => set({ combo: [...f.combo, { itemId: d.id, quantity: 1, swappable: false, swaps: [] }] })}
                 />
               )}
             </>

@@ -3,11 +3,12 @@
 // 每个操作都带上页面看到的状态，连点两下或别人刚改过时服务端拒绝（DISH_CHANGED），不会多走一步。
 // 只有点单权限的服务员只能「上菜」与撤回上菜；开始做、出餐、沽清要厨房的岗位。
 // 8.1.15（块 B3）：出品单上写整单备注、送到哪间房。
+// 8.1.17（BW7）：套餐里在别的档口做的一样单独出一张子项单（KitchenParts.tsx），与普通的菜同一列、按下单先后。
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { BellRing, ChefHat, CircleCheckBig, Flame, Undo2 } from 'lucide-react';
-import { ALL_DINING_SLOTS, KITCHEN_STATUS_LABELS, kitchenElapsed, slotLabel, type DiningOutlet, type KitchenBoard, type KitchenItem, type MenuDish } from '@shared/dining';
+import { ALL_DINING_SLOTS, KITCHEN_STATUS_LABELS, kitchenElapsed, slotLabel, type DiningOutlet, type KitchenBoard, type KitchenItem, type KitchenPartItem, type MenuDish } from '@shared/dining';
 import { partsText } from '@shared/dishes';
 import { api, errorMessage } from '../../lib/api';
 import { useCan } from '../../lib/session';
@@ -17,6 +18,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Input, Notice, SectionTitle, Skeleton } from '../../components/ui';
 import { kitchenKey, tablesKey, menuKey, useKitchenBoard, useServerNow } from './queries';
 import { OutletFilter } from './slots';
+import { kitchenCards, PartTicket, PartTicketsLine } from './KitchenParts';
 
 type Action = 'start' | 'done' | 'serve' | 'undo';
 
@@ -61,6 +63,9 @@ export function KitchenTab() {
   const cooking = items.filter((k) => k.status === 'cooking');
   const done = items.filter((k) => k.status === 'done');
   const recent = items.filter((k) => k.status === 'served' || k.status === 'cancelled');
+  // 子项单（8.1.17）：在这个档口做的
+  const parts = (d.parts ?? []).filter((p) => station === 'all' || p.stationId === station);
+  const partsIn = (status: KitchenPartItem['status']) => parts.filter((p) => p.status === status);
 
   const act = async (k: KitchenItem, action: Action) => {
     setBusy(`${action}-${k.id}`);
@@ -75,6 +80,30 @@ export function KitchenTab() {
       setBusy(null);
     }
   };
+  const partAct = async (p: KitchenPartItem, action: 'start' | 'done' | 'undo') => {
+    setBusy(`part-${action}-${p.id}`);
+    try {
+      qc.setQueryData(kitchenKey, await api.post<KitchenBoard>(`/api/kitchen/parts/${p.id}/${action}`, { from: p.status }));
+    } catch (e) {
+      toast({ tone: 'error', title: errorMessage(e) });
+      void qc.invalidateQueries({ queryKey: kitchenKey });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const partBtn = (p: KitchenPartItem, action: 'start' | 'done' | 'undo', label: string, variant: 'primary' | 'secondary' | 'ghost', icon?: React.ReactNode) => (
+    <Button
+      size="sm"
+      variant={variant}
+      icon={icon}
+      disabled={busy !== null && busy !== `part-${action}-${p.id}`}
+      loading={busy === `part-${action}-${p.id}`}
+      onClick={() => void partAct(p, action)}
+      data-testid={`kds-part-${action}-${p.id}`}
+    >
+      {label}
+    </Button>
+  );
   const btn = (k: KitchenItem, action: Action, label: string, variant: 'primary' | 'secondary' | 'ghost', icon?: React.ReactNode) => (
     <Button
       size="sm"
@@ -89,12 +118,28 @@ export function KitchenTab() {
     </Button>
   );
 
-  const columns: { key: string; title: string; icon: React.ReactNode; list: KitchenItem[]; actions: (k: KitchenItem) => React.ReactNode }[] = [
+  const columns: {
+    key: string;
+    title: string;
+    icon: React.ReactNode;
+    list: KitchenItem[];
+    parts: KitchenPartItem[];
+    actions: (k: KitchenItem) => React.ReactNode;
+    partActions: (p: KitchenPartItem) => React.ReactNode;
+  }[] = [
     {
       key: 'queued',
       title: '待做',
       icon: <ChefHat className="size-4 text-ink-3" />,
       list: queued,
+      parts: partsIn('queued'),
+      partActions: (p) =>
+        kitchen && (
+          <>
+            {partBtn(p, 'start', '开始做', 'primary', <Flame className="size-3.5" />)}
+            {partBtn(p, 'done', '出餐', 'secondary')}
+          </>
+        ),
       actions: (k) =>
         kitchen && (
           <>
@@ -108,6 +153,14 @@ export function KitchenTab() {
       title: '制作中',
       icon: <Flame className="size-4 text-yuzu-deep" />,
       list: cooking,
+      parts: partsIn('cooking'),
+      partActions: (p) =>
+        kitchen && (
+          <>
+            {partBtn(p, 'done', '出餐', 'primary', <CircleCheckBig className="size-3.5" />)}
+            {partBtn(p, 'undo', '撤回', 'ghost', <Undo2 className="size-3.5" />)}
+          </>
+        ),
       actions: (k) =>
         kitchen && (
           <>
@@ -118,12 +171,15 @@ export function KitchenTab() {
     },
   ];
   // 规则改成「出餐即算上菜」之前已出餐的菜仍在这一列，上完为止
-  if (d.rules.trackServed || done.length > 0) {
+  if (d.rules.trackServed || done.length > 0 || partsIn('done').length > 0) {
     columns.push({
       key: 'done',
       title: '待上菜',
       icon: <CircleCheckBig className="size-4 text-pine" />,
       list: done,
+      // 子项单出了餐：等套餐那一张上菜（上菜在套餐那一张上点）
+      parts: partsIn('done'),
+      partActions: (p) => kitchen && partBtn(p, 'undo', '撤回', 'ghost', <Undo2 className="size-3.5" />),
       actions: (k) => (
         <>
           {btn(k, 'serve', '上菜', 'primary')}
@@ -170,17 +226,23 @@ export function KitchenTab() {
         {columns.map((c) => (
           <section key={c.key} className="min-w-0 rounded-lg bg-paper-2/60 p-3" data-testid={`kds-col-${c.key}`}>
             <h2 className="mb-2 flex items-center gap-1.5 text-[14px] font-bold text-ink-2">
-              {c.icon} {c.title} <span className="num text-ink-3">{c.list.length}</span>
+              {c.icon} {c.title} <span className="num text-ink-3">{c.list.length + c.parts.length}</span>
             </h2>
-            {c.list.length === 0 ? (
+            {c.list.length + c.parts.length === 0 ? (
               <p className="rounded-lg border border-dashed border-line-strong px-3 py-6 text-center text-[13px] text-ink-4">没有</p>
             ) : (
               <div className="space-y-2.5">
-                {c.list.map((k) => (
-                  <Ticket key={k.id} k={k} now={now} warnMinutes={d.rules.warnMinutes} showStation={station === 'all' && stations.length > 1}>
-                    {c.actions(k)}
-                  </Ticket>
-                ))}
+                {kitchenCards(c.list, c.parts).map((card) =>
+                  card.kind === 'item' ? (
+                    <Ticket key={`k${card.k.id}`} k={card.k} now={now} warnMinutes={d.rules.warnMinutes} showStation={station === 'all' && stations.length > 1}>
+                      {c.actions(card.k)}
+                    </Ticket>
+                  ) : (
+                    <PartTicket key={`p${card.p.id}`} p={card.p} now={now} warnMinutes={d.rules.warnMinutes} showStation={station === 'all' && stations.length > 1}>
+                      {c.partActions(card.p)}
+                    </PartTicket>
+                  ),
+                )}
               </div>
             )}
           </section>
@@ -244,6 +306,8 @@ function Ticket({ k, now, warnMinutes, showStation, children }: { k: KitchenItem
           {partsText(k.parts)}
         </p>
       )}
+      {/* 8.1.17（BW7）：在别的档口做的几样各做到哪了 */}
+      <PartTicketsLine k={k} />
       {/* 这一行的备注：做法、手写的口味、加料的「配 某菜」（最多 40 字） */}
       {k.note && (
         <p className="mt-1 rounded-md bg-yuzu-tint px-2 py-1 text-[13.5px] font-bold text-yuzu-deep" data-testid={`kds-note-${k.id}`}>

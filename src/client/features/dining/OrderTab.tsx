@@ -23,7 +23,7 @@ import {
   type TableSessionDetail,
 } from '@shared/dining';
 import { PRICE_TIER_LABELS, type PriceTier } from '@shared/catalog';
-import { composeLineNote, methodChoiceProblem, methodsExtra, partsText, pickedMethods } from '@shared/dishes';
+import { comboChoice, composeLineNote, methodChoiceProblem, methodsExtra, partsText, pickedMethods, type DishSwapChoice } from '@shared/dishes';
 import { ZONE_LABELS } from '@shared/frontdesk';
 import { api, errorMessage } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -36,7 +36,7 @@ import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Segmented, Skeleton, Spinner } from '../../components/ui';
 import { PendingPanel, useFrontdeskOp, useFrontdeskPending } from '../frontdesk/pending';
 import { guestKey, menuKey, useDiningMenu, useTableSession, useTablesBoard } from './queries';
-import { DishOptionsDialog, methodOptionsOf, needsOptions, tierPriceOf, type PickedLine } from './DishOptionsDialog';
+import { DishOptionsDialog, methodOptionsOf, needsOptions, swappableOf, tierPriceOf, type PickedLine } from './DishOptionsDialog';
 import { DishVoidDialog } from './DishVoid';
 import { ReceiptDialog, type ReceiptTarget } from './ReceiptDialog';
 import { GroupChips, OutletEntry, OutletFilter } from './slots';
@@ -54,13 +54,25 @@ interface CartLine {
   tier?: PriceTier;
   methods?: string[];
   addonOf?: string;
+  /** 套餐换菜（8.1.17 BW7） */
+  swaps?: DishSwapChoice[];
 }
 
-/** 一行的单价：选的档的价 + 做法加价（与服务端同样算；对不上服务端会拒绝，按新价重新确认） */
-const unitOf = (l: CartLine, dish: MenuDish | null) => (dish ? tierPriceOf(dish, l.tier) + methodsExtra(methodOptionsOf(dish), l.methods ?? []) : 0);
-/** 同一道菜、同一档、同样的做法、没写备注、不是加料：能合成一行 */
-const sameChoice = (l: CartLine, p: { dishId: number; tier?: PriceTier; methods?: string[] }) =>
-  l.dishId === p.dishId && l.tier === p.tier && [...(l.methods ?? [])].sort().join('|') === [...(p.methods ?? [])].sort().join('|') && !l.note.trim() && !l.addonOf;
+/** 一行的单价：选的档的价 + 做法加价 + 换菜差价（与服务端同样算；对不上服务端会拒绝，按新价重新确认） */
+const unitOf = (l: CartLine, dish: MenuDish | null) => (dish ? tierPriceOf(dish, l.tier) + methodsExtra(methodOptionsOf(dish), l.methods ?? []) + comboChoice(dish.combo ?? [], l.swaps).extra : 0);
+const swapKey = (swaps: readonly DishSwapChoice[] | undefined) =>
+  (swaps ?? [])
+    .map((w) => `${w.from}>${w.to}`)
+    .sort()
+    .join('|');
+/** 同一道菜、同一档、同样的做法与换菜、没写备注、不是加料：能合成一行 */
+const sameChoice = (l: CartLine, p: { dishId: number; tier?: PriceTier; methods?: string[]; swaps?: DishSwapChoice[] }) =>
+  l.dishId === p.dishId &&
+  l.tier === p.tier &&
+  [...(l.methods ?? [])].sort().join('|') === [...(p.methods ?? [])].sort().join('|') &&
+  swapKey(l.swaps) === swapKey(p.swaps) &&
+  !l.note.trim() &&
+  !l.addonOf;
 
 /** 常用口味备注，点一下加进备注 */
 const QUICK_NOTES = ['少辣', '不辣', '不要香菜', '不要葱', '少冰', '去冰', '热的'];
@@ -314,6 +326,7 @@ export function OrderTab() {
       note: composeLineNote({
         addonOf: l.addonOf ? (byId.get(cart.find((m) => m.key === l.addonOf)?.dishId ?? 0)?.name ?? null) : null,
         methods: pickedMethods(methodOptionsOf(l.dish!), l.methods ?? []),
+        swaps: comboChoice(l.dish!.combo ?? [], l.swaps).texts,
         note: l.note,
       }),
     }));
@@ -324,6 +337,7 @@ export function OrderTab() {
       ...(l.tier ? { tier: l.tier } : {}),
       ...(l.methods?.length ? { methods: l.methods } : {}),
       ...(l.addonOf ? { addonOf: cart.findIndex((m) => m.key === l.addonOf) } : {}),
+      ...(l.swaps?.length ? { swaps: l.swaps } : {}),
       ...(l.note.trim() ? { note: l.note.trim() } : {}),
     }));
     const summary = `点单 ${named.map((n) => `${n.name}×${n.quantity}${n.note ? `（${n.note}）` : ''}`).join('、')}`.slice(0, 120);
@@ -669,18 +683,19 @@ export function OrderTab() {
                     </span>
                   </div>
                   {/* 8.1.17：选的做法（带加价的写「+¥2」）、加料配的哪道菜——出品单上就是这样写 */}
-                  {l.dish && (l.methods?.length || l.addonOf) && (
+                  {l.dish && (l.methods?.length || l.addonOf || l.swaps?.length) && (
                     <p className="mt-0.5 text-[12.5px] font-semibold text-yuzu-deep" data-testid={`dining-line-options-${i}`}>
                       {composeLineNote({
                         addonOf: l.addonOf ? (byId.get(cart.find((m) => m.key === l.addonOf)?.dishId ?? 0)?.name ?? null) : null,
                         methods: pickedMethods(methodOptionsOf(l.dish), l.methods ?? []),
+                        swaps: comboChoice(l.dish.combo ?? [], l.swaps).texts,
                       })}
                     </p>
                   )}
-                  {/* 套餐（8.1.15）：含的几样写出来，出品单上也会列 */}
+                  {/* 套餐（8.1.15）：含的几样写出来，出品单上也会列（8.1.17 换过的写原来是哪一样） */}
                   {l.dish?.combo && (
                     <p className="mt-0.5 text-[12px] text-ink-3" data-testid={`dining-line-combo-${i}`}>
-                      套餐含 {partsText(l.dish.combo)}
+                      套餐含 {partsText(comboChoice(l.dish.combo, l.swaps).parts)}
                     </p>
                   )}
                   <Input
@@ -942,7 +957,9 @@ function DishGrid({ list, countOf, add, locked }: { list: MenuDish[]; countOf: (
             <span className="pr-8 text-[14.5px] leading-snug font-bold">{d.name}</span>
             {/* 菜品管理（8.1.15）：套餐写出含哪几样；有做法、加料的点了先选 */}
             {d.combo && <span className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-ink-3">含 {partsText(d.combo)}</span>}
-            {(d.methods || d.addons) && <span className="mt-0.5 text-[12px] font-semibold text-pine">可选{[d.methods && '做法', d.addons && '加料'].filter(Boolean).join('、')}</span>}
+            {(d.methods || d.addons || swappableOf(d).length > 0) && (
+              <span className="mt-0.5 text-[12px] font-semibold text-pine">可选{[d.methods && '做法', d.addons && '加料', swappableOf(d).length > 0 && '换菜'].filter(Boolean).join('、')}</span>
+            )}
             <span className="mt-auto flex w-full items-center gap-1.5 pt-1">
               <Money cents={d.price} className="text-[13.5px] font-bold text-ink-2" />
               <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink-4">{d.stationName}</span>

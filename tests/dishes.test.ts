@@ -349,8 +349,8 @@ describe('加料与套餐的规矩', () => {
     expect(combo.status, JSON.stringify(combo.body)).toBe(201);
     const set = combo.body.dish as DishRow;
     expect(set.combo).toEqual([
-      { itemId: noodle.id, name: '牛肉面', quantity: 1, available: true },
-      { itemId: tea.id, name: '柠檬茶', quantity: 2, available: true },
+      { itemId: noodle.id, name: '牛肉面', quantity: 1, available: true, swappable: false, swaps: [] },
+      { itemId: tea.id, name: '柠檬茶', quantity: 2, available: true, swappable: false, swaps: [] },
     ]);
     expect((await dishOf('柠檬茶')).usedBy).toEqual(['套餐「牛肉面套餐」']);
     // 套餐里不能再放套餐
@@ -636,9 +636,10 @@ describe('点单带做法、加料、套餐', () => {
         { name: '加蛋', price: 300 },
       ],
     });
+    // 8.1.17（BW7）：带上每一样的价目项目（换菜、子项沽清用）
     expect(set.combo).toEqual([
-      { name: '柠檬茶', quantity: 1 },
-      { name: '牛肉面', quantity: 1 },
+      { itemId: expect.any(Number), name: '柠檬茶', quantity: 1 },
+      { itemId: expect.any(Number), name: '牛肉面', quantity: 1 },
     ]);
     // 没有做法、加料、套餐的菜不带这三项（与以前的菜单一样）
     expect(m.dishes.find((d) => d.name === '宫保鸡丁')).not.toHaveProperty('methods');

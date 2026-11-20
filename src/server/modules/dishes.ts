@@ -26,6 +26,8 @@ import {
   isDishStatusFilter,
   MAX_COMBO_ITEM_QUANTITY,
   MAX_COMBO_ITEMS,
+  MAX_COMBO_SWAP_DIFF,
+  MAX_COMBO_SWAPS,
   MAX_DISH_BATCH,
   MAX_DISH_ADDONS,
   MAX_DISH_CATEGORY,
@@ -38,6 +40,7 @@ import {
   MAX_PRICE_REASON,
   methodsCellText,
   partsText,
+  plusYuan,
   priceChangeText,
   priceDiff,
   pricesText,
@@ -127,10 +130,17 @@ async function loadDishRows(db: Db, today: string, onlyIds?: number[]): Promise<
     FROM dish_addons a JOIN service_items i ON i.id = a.addon_item_id JOIN service_items o ON o.id = a.item_id
     LEFT JOIN kitchen_stations s ON s.id = i.station_id
     WHERE a.item_id IN ${db(ids)} OR a.addon_item_id IN ${db(ids)} ORDER BY a.item_id, a.sort_no, a.addon_item_id`;
-  const combos = await db<{ comboItemId: number; itemId: number; name: string; ownerName: string; quantity: number; available: boolean }[]>`
-    SELECT c.combo_item_id, c.item_id, i.name, o.name AS owner_name, c.quantity, i.active AS available
+  const combos = await db<{ comboItemId: number; itemId: number; name: string; ownerName: string; quantity: number; available: boolean; swappable: boolean }[]>`
+    SELECT c.combo_item_id, c.item_id, i.name, o.name AS owner_name, c.quantity, i.active AS available, c.swappable
     FROM dish_combo_items c JOIN service_items i ON i.id = c.item_id JOIN service_items o ON o.id = c.combo_item_id
     WHERE c.combo_item_id IN ${db(ids)} OR c.item_id IN ${db(ids)} ORDER BY c.combo_item_id, c.sort_no, c.item_id`;
+  // 套餐里可以换成的（8.1.17 BW7）：自己的（按套餐找）与被谁当换成的（按换成的菜找）
+  const swaps = await db<{ comboItemId: number; itemId: number; toItemId: number; name: string; ownerName: string; priceDiff: number; available: boolean }[]>`
+    SELECT w.combo_item_id, w.item_id, w.to_item_id, i.name, o.name AS owner_name, w.price_diff,
+           (i.active AND NOT i.technician_required AND coalesce(s.active, false)) AS available
+    FROM dish_combo_swaps w JOIN service_items i ON i.id = w.to_item_id JOIN service_items o ON o.id = w.combo_item_id
+    LEFT JOIN kitchen_stations s ON s.id = i.station_id
+    WHERE w.combo_item_id IN ${db(ids)} OR w.to_item_id IN ${db(ids)} ORDER BY w.combo_item_id, w.item_id, w.sort_no, w.to_item_id`;
   return rows.map((r) => {
     const { assigned, ...slot } = diningSlotOf({ outlet: r.diningOutlet, group: r.diningGroup, category: r.category, stationName: r.stationName });
     const prices = sortTiers(r.prices);
@@ -156,8 +166,23 @@ async function loadDishRows(db: Db, today: string, onlyIds?: number[]): Promise<
       methodOptions: methods.filter((m) => m.itemId === r.id).map((m) => ({ name: m.name, group: m.groupName ?? '', price: m.price })),
       methodGroups: groups.filter((g) => g.itemId === r.id).map((g) => ({ name: g.name, required: g.required })),
       addons: addons.filter((a) => a.itemId === r.id).map((a): DishAddonRef => ({ itemId: a.addonItemId, name: a.name, price: defaultPrice(sortTiers(a.prices)), available: a.available })),
-      combo: combos.filter((c) => c.comboItemId === r.id).map((c): DishComboRef => ({ itemId: c.itemId, name: c.name, quantity: c.quantity, available: c.available })),
-      usedBy: [...addons.filter((a) => a.addonItemId === r.id).map((a) => `「${a.ownerName}」的加料`), ...combos.filter((c) => c.itemId === r.id).map((c) => `套餐「${c.ownerName}」`)],
+      combo: combos
+        .filter((c) => c.comboItemId === r.id)
+        .map(
+          (c): DishComboRef => ({
+            itemId: c.itemId,
+            name: c.name,
+            quantity: c.quantity,
+            available: c.available,
+            swappable: c.swappable,
+            swaps: swaps.filter((w) => w.comboItemId === r.id && w.itemId === c.itemId).map((w) => ({ itemId: w.toItemId, name: w.name, priceDiff: w.priceDiff, available: w.available })),
+          }),
+        ),
+      usedBy: [
+        ...addons.filter((a) => a.addonItemId === r.id).map((a) => `「${a.ownerName}」的加料`),
+        ...combos.filter((c) => c.itemId === r.id).map((c) => `套餐「${c.ownerName}」`),
+        ...[...new Set(swaps.filter((w) => w.toItemId === r.id).map((w) => w.ownerName))].map((owner) => `套餐「${owner}」里可换成的菜`),
+      ],
       sort: r.dishSort,
       deleted: r.deletedAt !== null,
       rev: r.rev,
@@ -308,6 +333,22 @@ const DishFields = z.object({
       z.object({
         itemId: z.number().int().positive(),
         quantity: z.number('份数必须是整数').int('份数必须是整数').min(1, '份数至少 1').max(MAX_COMBO_ITEM_QUANTITY, `份数最多 ${MAX_COMBO_ITEM_QUANTITY}`),
+        /** 8.1.17（BW7）：这一样点单时能不能换、能换成哪几样（每份套餐补的差价，分）；都不带的（8.1.15 的页面、导入）保留原来的 */
+        swappable: z.boolean().optional(),
+        swaps: z
+          .array(
+            z.object({
+              itemId: z.number().int().positive(),
+              priceDiff: z
+                .number('差价必须是整数（分）')
+                .int('差价必须是整数（分）')
+                .min(0, '差价不能为负')
+                .max(MAX_COMBO_SWAP_DIFF, `差价最多 ¥${MAX_COMBO_SWAP_DIFF / 100}`),
+            }),
+          )
+          .max(MAX_COMBO_SWAPS, `一样最多能换成 ${MAX_COMBO_SWAPS} 样`)
+          .refine((list) => unique(list.map((w) => w.itemId)), '能换成的菜重复了')
+          .optional(),
       }),
     )
     .max(MAX_COMBO_ITEMS, `一个套餐最多含 ${MAX_COMBO_ITEMS} 样`)
@@ -360,24 +401,40 @@ async function checkFields(tx: Tx, cur: ItemState | null, f: DishFieldsData, ref
     const [dup] = await tx<{ id: number }[]>`SELECT id FROM service_items WHERE lower(btrim(name)) = lower(${f.name}) AND id IS DISTINCT FROM ${id} LIMIT 1`;
     if (dup) throw conflict('DISH_NAME_TAKEN', `价目里已经有「${f.name}」了（菜品或别的项目），请换一个名字`);
   }
-  const refIds = [...f.addons, ...f.combo.map((c) => c.itemId)];
-  if (id !== null && refIds.includes(id)) throw unprocessable('DISH_SELF_REF', '加料、套餐内容里不能选这道菜自己');
+  // 8.1.17（BW7）：可换成的菜与套餐子项一样要是菜品、不是套餐、不是这道菜自己；可换的至少能换成一样、不换成它自己
+  const swapIds = swapTargetsOf(f);
+  for (const c of f.combo) {
+    if (c.swaps?.some((w) => w.itemId === c.itemId)) throw unprocessable('DISH_SWAP_SAME', `套餐里的「${refs.get(c.itemId)?.name ?? '这一样'}」不用换成它自己`);
+  }
+  const refIds = [...f.addons, ...f.combo.map((c) => c.itemId), ...swapIds];
+  if (id !== null && refIds.includes(id)) throw unprocessable('DISH_SELF_REF', '加料、套餐内容、可换成的菜里不能选这道菜自己');
   for (const refId of refIds) {
     const r = refs.get(refId);
     if (!r) throw notFound('选的加料或套餐内容里有菜已经不存在，请刷新后重试');
-    if (!isDishState(r)) throw unprocessable('DISH_REF_NOT_DISH', `「${r.name}」不是菜品（没挂出品档口，或需要技师），不能当加料或放进套餐`);
+    if (!isDishState(r)) throw unprocessable('DISH_REF_NOT_DISH', `「${r.name}」不是菜品（没挂出品档口，或需要技师），不能当加料、放进套餐或当可换成的菜`);
   }
   if (refIds.length) {
     const nested = await tx<{ id: number; name: string }[]>`
       SELECT DISTINCT i.id, i.name FROM dish_combo_items c JOIN service_items i ON i.id = c.combo_item_id WHERE c.combo_item_id IN ${tx(refIds)} ORDER BY i.id LIMIT 1`;
     if (nested[0]) {
-      throw unprocessable('DISH_COMBO_NESTED', f.addons.includes(nested[0].id) ? `「${nested[0].name}」是套餐，不能当加料` : `「${nested[0].name}」本身是套餐，套餐里不能再放套餐`);
+      const n = nested[0];
+      throw unprocessable(
+        'DISH_COMBO_NESTED',
+        f.addons.includes(n.id)
+          ? `「${n.name}」是套餐，不能当加料`
+          : f.combo.some((c) => c.itemId === n.id)
+            ? `「${n.name}」本身是套餐，套餐里不能再放套餐`
+            : `「${n.name}」本身是套餐，不能当套餐里可换成的菜`,
+      );
     }
   }
   if (f.combo.length && id !== null) {
     const [inCombo] = await tx<{ name: string }[]>`
       SELECT i.name FROM dish_combo_items c JOIN service_items i ON i.id = c.combo_item_id WHERE c.item_id = ${id} ORDER BY i.id LIMIT 1`;
     if (inCombo) throw unprocessable('DISH_COMBO_NESTED', `这道菜已经在套餐「${inCombo.name}」里，不能再做成套餐`);
+    const [asSwap] = await tx<{ name: string }[]>`
+      SELECT i.name FROM dish_combo_swaps w JOIN service_items i ON i.id = w.combo_item_id WHERE w.to_item_id = ${id} ORDER BY i.id LIMIT 1`;
+    if (asSwap) throw unprocessable('DISH_COMBO_NESTED', `这道菜是套餐「${asSwap.name}」里可换成的菜，不能做成套餐`);
     const [asAddon] = await tx<{ name: string }[]>`
       SELECT i.name FROM dish_addons a JOIN service_items i ON i.id = a.item_id WHERE a.addon_item_id = ${id} ORDER BY i.id LIMIT 1`;
     if (asAddon) throw unprocessable('DISH_COMBO_NESTED', `这道菜是「${asAddon.name}」的加料，不能做成套餐`);
@@ -438,12 +495,65 @@ async function writeAddons(tx: Tx, id: number, addons: number[], fresh = false) 
   }
 }
 
-async function writeCombo(tx: Tx, id: number, combo: { itemId: number; quantity: number }[], fresh = false) {
+/** 套餐的一样要写成的样子（8.1.17 BW7：带能不能换、能换成哪几样） */
+interface ComboWrite {
+  itemId: number;
+  quantity: number;
+  swappable: boolean;
+  swaps: { itemId: number; priceDiff: number }[];
+}
+
+/** 套餐现在的一样（带菜名，审计用） */
+interface ComboKid extends ComboWrite {
+  name: string;
+  swaps: { itemId: number; name: string; priceDiff: number }[];
+}
+
+/** 交上来的可换成的菜（要锁、要核对的；没带的保留原来的，不再核对） */
+const swapTargetsOf = (f: Pick<DishFieldsData, 'combo'>) => f.combo.flatMap((c) => (c.swappable === false ? [] : (c.swaps ?? []).map((w) => w.itemId)));
+
+/**
+ * 交上来的套餐内容换成要写的（8.1.17）：swappable、swaps 都没带的（8.1.15 的页面、导入）同一样保留原来的可换设置，新加的不可换；
+ * 只带了 swaps 的按有没有换成的菜算可不可换；标了不可换的不留换成的菜
+ */
+function resolveCombo(combo: DishFieldsData['combo'], current: readonly ComboKid[], refs: Map<number, ItemState>): ComboWrite[] {
+  return combo.map((c) => {
+    const was = current.find((k) => k.itemId === c.itemId);
+    const swappable = c.swappable ?? (c.swaps ? c.swaps.length > 0 : (was?.swappable ?? false));
+    const swaps = swappable ? (c.swaps ?? (was?.swaps ?? []).map((w) => ({ itemId: w.itemId, priceDiff: w.priceDiff }))) : [];
+    if (swappable && swaps.length === 0) {
+      throw unprocessable('DISH_SWAP_EMPTY', `套餐里的「${refs.get(c.itemId)?.name ?? '这一样'}」标了可换，请至少选一样能换成的菜`);
+    }
+    return { itemId: c.itemId, quantity: c.quantity, swappable, swaps };
+  });
+}
+
+/** 比较套餐内容有没有变：份数、先后、可不可换、换成的菜与差价变了都算 */
+const comboKey = (c: ComboWrite) => `${c.itemId}×${c.quantity}${c.swappable ? `[${c.swaps.map((w) => `${w.itemId}+${w.priceDiff}`).join(',')}]` : ''}`;
+
+/** 审计里的套餐内容：「宫保鸡丁×1、可乐×1（可换：橙汁 +¥3、雪碧）」 */
+const comboText = (parts: readonly { name: string; quantity: number; swappable: boolean; swaps: readonly { name: string; priceDiff: number }[] }[]) =>
+  parts.length
+    ? parts.map((p) => `${partsText([p])}${p.swappable ? `（可换：${p.swaps.map((w) => `${w.name}${w.priceDiff > 0 ? ` ${plusYuan(w.priceDiff)}` : ''}`).join('、')}）` : ''}`).join('、')
+    : '（没有）';
+
+async function writeCombo(tx: Tx, id: number, combo: ComboWrite[], fresh = false) {
+  // 删套餐子项时，可换成的跟着删（197 的外键）
   if (!fresh) await tx`DELETE FROM dish_combo_items WHERE combo_item_id = ${id}`;
   if (combo.length) {
     await tx`
-      INSERT INTO dish_combo_items (combo_item_id, item_id, quantity, sort_no)
-      SELECT ${id}, c, q, (ord - 1)::int FROM unnest(${combo.map((c) => c.itemId)}::bigint[], ${combo.map((c) => c.quantity)}::int[]) WITH ORDINALITY AS t(c, q, ord)`;
+      INSERT INTO dish_combo_items (combo_item_id, item_id, quantity, sort_no, swappable)
+      SELECT ${id}, c, q, (ord - 1)::int, w::boolean
+      FROM unnest(${combo.map((c) => c.itemId)}::bigint[], ${combo.map((c) => c.quantity)}::int[], ${combo.map((c) => String(c.swappable))}::text[])
+        WITH ORDINALITY AS t(c, q, w, ord)`;
+  }
+  const swaps = combo.flatMap((c) => c.swaps.map((w) => ({ from: c.itemId, ...w })));
+  if (swaps.length) {
+    await tx`
+      INSERT INTO dish_combo_swaps (combo_item_id, item_id, to_item_id, price_diff, sort_no)
+      SELECT ${id}, f, t, d, (ord - 1)::int
+      FROM unnest(${swaps.map((w) => w.from)}::bigint[], ${swaps.map((w) => w.itemId)}::bigint[], ${swaps.map((w) => w.priceDiff)}::bigint[])
+        WITH ORDINALITY AS x(f, t, d, ord)`;
   }
 }
 
@@ -453,8 +563,12 @@ async function childrenOf(db: Db, id: number) {
   const groups = await db<DishMethodGroup[]>`SELECT name, required FROM dish_method_groups WHERE item_id = ${id} ORDER BY sort_no, name`;
   const addons = await db<{ id: number; name: string }[]>`
     SELECT i.id, i.name FROM dish_addons a JOIN service_items i ON i.id = a.addon_item_id WHERE a.item_id = ${id} ORDER BY a.sort_no, i.id`;
-  const combo = await db<{ itemId: number; name: string; quantity: number }[]>`
-    SELECT i.id AS item_id, i.name, c.quantity FROM dish_combo_items c JOIN service_items i ON i.id = c.item_id WHERE c.combo_item_id = ${id} ORDER BY c.sort_no, i.id`;
+  const parts = await db<{ itemId: number; name: string; quantity: number; swappable: boolean }[]>`
+    SELECT i.id AS item_id, i.name, c.quantity, c.swappable FROM dish_combo_items c JOIN service_items i ON i.id = c.item_id WHERE c.combo_item_id = ${id} ORDER BY c.sort_no, i.id`;
+  const swaps = await db<{ itemId: number; toItemId: number; name: string; priceDiff: number }[]>`
+    SELECT w.item_id, w.to_item_id, i.name, w.price_diff FROM dish_combo_swaps w JOIN service_items i ON i.id = w.to_item_id
+    WHERE w.combo_item_id = ${id} ORDER BY w.item_id, w.sort_no, w.to_item_id`;
+  const combo = parts.map((c): ComboKid => ({ ...c, swaps: swaps.filter((w) => w.itemId === c.itemId).map((w) => ({ itemId: w.toItemId, name: w.name, priceDiff: w.priceDiff })) }));
   return { methods: { options: methods.map((m) => ({ name: m.name, group: m.groupName ?? '', price: m.price })), groups } satisfies MethodSet, addons, combo };
 }
 
@@ -468,7 +582,7 @@ export async function createDishTx(tx: Tx, ctx: OpContext, f: DishFieldsData & {
   const slot = parseSlotKey(f.slot)!;
   assertOutlet(ctx.actor, slot.outlet, '在这里新建菜品');
   if (!can(ctx.actor, DISH_PRICE_PERMISSION)) throw forbidden('新建菜品要定价，需要「菜品管理：定价与改价」的权限');
-  const refs = await lockItems(tx, [...f.addons, ...f.combo.map((c) => c.itemId)]);
+  const refs = await lockItems(tx, [...f.addons, ...f.combo.map((c) => c.itemId), ...swapTargetsOf(f)]);
   await checkFields(tx, null, f, refs);
   const methods = normalizeMethods(f, null);
   const [row] = await tx<{ id: number }[]>`
@@ -483,7 +597,7 @@ export async function createDishTx(tx: Tx, ctx: OpContext, f: DishFieldsData & {
   // 新建的菜：做法、加料、套餐内容直接写（没有旧的要先删）
   await writeMethods(tx, id, methods, true);
   await writeAddons(tx, id, f.addons, true);
-  await writeCombo(tx, id, f.combo, true);
+  await writeCombo(tx, id, resolveCombo(f.combo, [], refs), true);
   await recordPriceChanges(tx, { itemId: id, itemName: f.name, before: [], after: f.prices, reason: opts.reason, source: opts.source, staffId: ctx.actor.id });
   return id;
 }
@@ -493,7 +607,7 @@ export async function createDishTx(tx: Tx, ctx: OpContext, f: DishFieldsData & {
  * 要这道菜现在所在出品口的维护权限，挪到另一个出品口还要那一个的。返回改了什么（什么都没改返回空，不动这一行）
  */
 export async function updateDishTx(tx: Tx, ctx: OpContext, id: number, f: DishFieldsData, opts: { rev?: string } = {}): Promise<FieldChange[]> {
-  const locked = await lockItems(tx, [id, ...f.addons, ...f.combo.map((c) => c.itemId)]);
+  const locked = await lockItems(tx, [id, ...f.addons, ...f.combo.map((c) => c.itemId), ...swapTargetsOf(f)]);
   const cur = locked.get(id);
   if (!cur || !isDishState(cur)) throw notDish();
   if (opts.rev !== undefined && opts.rev !== cur.rev) throw conflict('DISH_CHANGED', `「${cur.name}」刚刚被别人改过，请刷新后再改`);
@@ -529,15 +643,15 @@ export async function updateDishTx(tx: Tx, ctx: OpContext, id: number, f: DishFi
   if (addonsChanged) {
     changes.push({ label: '加料', before: listText(kids.addons.map((a) => a.name)), after: listText(f.addons.map((a) => locked.get(a)!.name)) });
   }
-  const comboChanged = !sameList(
-    kids.combo.map((c) => `${c.itemId}×${c.quantity}`),
-    f.combo.map((c) => `${c.itemId}×${c.quantity}`),
-  );
+  // 套餐内容（8.1.17 带可换成的菜与差价）
+  const combo = resolveCombo(f.combo, kids.combo, locked);
+  const comboChanged = !sameList(kids.combo.map(comboKey), combo.map(comboKey));
   if (comboChanged) {
+    const nameOf = (itemId: number) => locked.get(itemId)?.name ?? kids.combo.flatMap((k) => k.swaps).find((w) => w.itemId === itemId)?.name ?? '';
     changes.push({
       label: '套餐内容',
-      before: kids.combo.length ? partsText(kids.combo) : '（没有）',
-      after: f.combo.length ? partsText(f.combo.map((c) => ({ name: locked.get(c.itemId)!.name, quantity: c.quantity }))) : '（没有）',
+      before: comboText(kids.combo),
+      after: comboText(combo.map((c) => ({ ...c, name: nameOf(c.itemId), swaps: c.swaps.map((w) => ({ ...w, name: nameOf(w.itemId) })) }))),
     });
   }
   if (changes.length === 0) return [];
@@ -549,7 +663,7 @@ export async function updateDishTx(tx: Tx, ctx: OpContext, id: number, f: DishFi
     WHERE id = ${id}`;
   if (methodsChanged) await writeMethods(tx, id, methods);
   if (addonsChanged) await writeAddons(tx, id, f.addons);
-  if (comboChanged) await writeCombo(tx, id, f.combo);
+  if (comboChanged) await writeCombo(tx, id, combo);
   return changes;
 }
 
@@ -713,11 +827,7 @@ async function changeDishPrice(deps: Deps, id: number, raw: unknown, ctx: OpCont
 
 // ───────────────────────── 8.1.17：排序、批量上下架、删除与恢复（BW10，docs/DISHES_V8117.md 第 6 节） ─────────────────────────
 
-const idList = z
-  .array(z.number().int().positive(), '请选菜品')
-  .min(1, '请选菜品')
-  .max(MAX_DISH_BATCH, `一次最多 ${MAX_DISH_BATCH} 道`)
-  .refine(unique, '同一道菜选了两次');
+const idList = z.array(z.number().int().positive(), '请选菜品').min(1, '请选菜品').max(MAX_DISH_BATCH, `一次最多 ${MAX_DISH_BATCH} 道`).refine(unique, '同一道菜选了两次');
 const SortInput = z.object({
   clientKey,
   slot: z
@@ -850,24 +960,26 @@ const yuan = (cents: number | null) => (cents === null ? null : cents / 100);
 async function dishesXlsx(db: Db, deps: Deps): Promise<{ buffer: Buffer; fileName: string; count: number }> {
   const board = await dishesBoard(db, deps);
   // 删除了的（8.1.17）不导出：菜品表上默认也不列
-  const rows = board.dishes.filter((d) => !d.deleted).map((d) => [
-    d.id,
-    d.name,
-    d.category,
-    DINING_OUTLET_LABELS[d.outlet],
-    d.group,
-    d.stationName,
-    yuan(tierPrice(d.prices, 'standard')),
-    yuan(tierPrice(d.prices, 'professional')),
-    yuan(tierPrice(d.prices, 'premium')),
-    d.active ? '上架' : '下架',
-    methodsCellText(d.methodOptions, d.methodGroups),
-    d.addons.map((a) => a.name).join('、'),
-    partsText(d.combo),
-    remainingText(d.remaining),
-    d.imageUrl ? '有' : '',
-    d.emenuDish ?? '',
-  ]);
+  const rows = board.dishes
+    .filter((d) => !d.deleted)
+    .map((d) => [
+      d.id,
+      d.name,
+      d.category,
+      DINING_OUTLET_LABELS[d.outlet],
+      d.group,
+      d.stationName,
+      yuan(tierPrice(d.prices, 'standard')),
+      yuan(tierPrice(d.prices, 'professional')),
+      yuan(tierPrice(d.prices, 'premium')),
+      d.active ? '上架' : '下架',
+      methodsCellText(d.methodOptions, d.methodGroups),
+      d.addons.map((a) => a.name).join('、'),
+      partsText(d.combo),
+      remainingText(d.remaining),
+      d.imageUrl ? '有' : '',
+      d.emenuDish ?? '',
+    ]);
   const widths: Record<string, number> = { 编号: 8, 名称: 22, 分类: 12, 出品口: 8, 小类: 10, 档口: 12, 状态: 8, 做法: 26, 加料: 26, 套餐内容: 34, 今日沽清: 10, 图片: 6, 电子菜单: 18 };
   const buffer = buildXlsx({
     name: '菜品',

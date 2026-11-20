@@ -6,6 +6,7 @@
 //   · 这台平板上一次下单用的桌号（平板一般固定在一张桌上，下次预先填好）。
 
 import { useSyncExternalStore } from 'react';
+import type { DishSwapChoice } from '@shared/dishes';
 import type { EmenuOrderBody } from '@shared/emenu';
 
 export interface CartLine {
@@ -19,6 +20,8 @@ export interface CartLine {
   key?: string;
   methods?: string[];
   addonOf?: string;
+  /** 套餐换菜（8.1.17 BW7）：套餐里的哪一样换成哪一样 */
+  swaps?: DishSwapChoice[];
 }
 
 /** 「未下单」一行的标识：老的一行（没选做法、加料）就是项目编号 */

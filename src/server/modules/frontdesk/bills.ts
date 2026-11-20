@@ -20,7 +20,7 @@ import { attachSessions, lockQueue, syncSessionAfterVoid, type SessionPostOption
 import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, takeDishLimits } from '../dining';
 import { authorizeLineVoid } from '../dining-808';
 import { DeliverRoomField, OrderNoteField, VoidBlameField } from '../dining-order-v8115';
-import { DishLineFields, planDishLines } from '../dish-lines';
+import { DishLineFields, kitchenPartsOf, limitLinesOf, planDishLines, type ComboPartPlan } from '../dish-lines';
 import { lockAddonLines, voidAddonLines, WithAddonsField } from '../dish-addon-void';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill, type Backfill } from './backfill';
 import { getVisit } from './visits';
@@ -204,6 +204,8 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
     note: string;
     /** 加料（8.1.17）：同一次挂账里主菜那一行的下标 */
     addonOf: number | null;
+    /** 套餐（8.1.17 BW7）：这一份含的几样（拆子项单、扣子项的沽清） */
+    parts: ComboPartPlan[] | null;
   };
   const lines: Line[] = [];
   for (const l of input.lines) {
@@ -245,6 +247,7 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
       stationId,
       note: l.note ?? '',
       addonOf: null,
+      parts: null,
     });
   }
   for (const l of input.customLines) {
@@ -262,6 +265,7 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
       stationId: null,
       note: '',
       addonOf: null,
+      parts: null,
     });
   }
   // 8.1.17（docs/DISHES_V8117.md）：做法（分组、加价、必选）与加料（挂在主菜那一行上），点单页、桌台、平板与这里同一个核对；
@@ -277,6 +281,7 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
     line.amount = line.unitPrice * line.quantity;
     line.note = p.note;
     line.addonOf = p.addonOf;
+    line.parts = p.parts;
   });
   const total = lines.reduce((s, l) => s + l.amount, 0);
   const expectedTotal = channel ? channel.expectedTotal : input.expectedTotal;
@@ -309,16 +314,10 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
   } else if (options.session?.extendId !== undefined || options.session?.dispatch) {
     throw unprocessable('TECHNICIAN_REQUIRED', '派钟、加钟要选技师');
   }
-  // 沽清（技师队列之后、建出品单之前）：今天还剩的份数不够整笔拒绝；补录纸质单的菜早已上过，不扣沽清
+  // 沽清（技师队列之后、建出品单之前）：今天还剩的份数不够整笔拒绝；补录纸质单的菜早已上过，不扣沽清。
+  // 套餐的子项各扣各的（8.1.17 BW7，与单点的同一道菜合起来按项目 id 升序锁）
   const dishLines = lines.filter((l) => l.stationId !== null);
-  const limited =
-    dishLines.length > 0 && !backfill
-      ? await takeDishLimits(
-          tx,
-          dishLines.map((l) => ({ itemId: l.itemId!, name: l.name, quantity: l.quantity })),
-          date,
-        )
-      : new Set<number>();
+  const limited = dishLines.length > 0 && !backfill ? await takeDishLimits(tx, limitLinesOf(dishLines.map((l) => ({ ...l, itemId: l.itemId! }))), date) : new Set<number>();
   const lineIds = new Map<Line, number>();
   for (const l of lines) {
     const [row] = await tx<{ id: number }[]>`
@@ -334,7 +333,15 @@ export async function postChargesTx(tx: Tx, deps: Deps, visitId: number, input: 
     visitId: visit.id,
     tableSessionId: null,
     deliverTo: channel?.deliverTo ?? deliverTo ?? '',
-    lines: dishLines.map((l) => ({ billLineId: lineIds.get(l)!, itemId: l.itemId!, stationId: l.stationId!, quantity: l.quantity, note: l.note, limitTaken: limited.has(l.itemId!) })),
+    lines: dishLines.map((l) => ({
+      billLineId: lineIds.get(l)!,
+      itemId: l.itemId!,
+      stationId: l.stationId!,
+      quantity: l.quantity,
+      note: l.note,
+      limitTaken: limited.has(l.itemId!),
+      ...kitchenPartsOf(l.parts, limited),
+    })),
     date,
     at,
     actor: ctx.actor,

@@ -38,10 +38,56 @@ export const DISH_PERMISSIONS: readonly Permission[] = [...Object.values(DISH_OU
 
 // ───────────────────────── 点单：做法、加料、套餐 ─────────────────────────
 
-/** 出品单上的套餐内容：下单当时含哪几样（每份套餐的份数） */
+/** 出品单上的套餐内容：下单当时含哪几样（每份套餐的份数）；换过的（8.1.17）记原来是哪一样 */
 export interface DishPart {
   name: string;
   quantity: number;
+  from?: string;
+}
+
+/** 套餐可以换成的一样（8.1.17 BW7）：每份套餐补多少差价（0 为同价）；available 为现在能不能点（在售、档口启用） */
+export interface ComboSwapOption {
+  itemId: number;
+  name: string;
+  priceDiff: number;
+  available: boolean;
+}
+
+/** 点单页、平板菜单里套餐的一样（8.1.17）：可换的带上能换成的几样 */
+export interface ComboPartOption extends DishPart {
+  itemId: number;
+  swaps?: ComboSwapOption[];
+}
+
+/** 点单时选的换菜：套餐里的哪一样（价目项目）换成哪一样 */
+export interface DishSwapChoice {
+  from: number;
+  to: number;
+}
+
+/** 一个套餐最多几样可换；一样最多能换成几样；差价最多 ¥999 */
+export const MAX_COMBO_SWAPS = 8;
+export const MAX_COMBO_SWAP_DIFF = 99_900;
+
+/** 换菜写在出品单、账单上的样子：「可乐换橙汁 +¥3」「可乐换雪碧」 */
+export const swapText = (fromName: string, toName: string, priceDiff: number): string => `${fromName}换${toName}${priceDiff > 0 ? ` ${plusYuan(priceDiff)}` : ''}`;
+
+/**
+ * 点单页选的换菜在这份套餐里是什么样（8.1.17 BW7，与服务端 dish-lines.ts 同样算）：每份补的差价、出品单上的写法、
+ * 这一份含的几样（换过的记原来是哪一样）。菜单上已经没有的换法不算（下单时服务端会拒绝）
+ */
+export function comboChoice(combo: readonly ComboPartOption[], chosen: readonly DishSwapChoice[] = []): { extra: number; texts: string[]; parts: DishPart[] } {
+  let extra = 0;
+  const texts: string[] = [];
+  const parts = combo.map((p): DishPart => {
+    const pick = chosen.find((s) => s.from === p.itemId);
+    const to = pick && p.swaps?.find((w) => w.itemId === pick.to);
+    if (!to) return { name: p.name, quantity: p.quantity };
+    extra += to.priceDiff;
+    texts.push(swapText(p.name, to.name, to.priceDiff));
+    return { name: to.name, quantity: p.quantity, from: p.name };
+  });
+  return { extra, texts, parts };
 }
 
 /** 点单页一道菜的加料：另外的一道菜（在售、能点的才列出来），价格是它自己的默认价 */
@@ -51,8 +97,8 @@ export interface DishAddonOption {
   price: number;
 }
 
-/** 写在出品单上的样子：「柠檬茶×1、薯条×2」 */
-export const partsText = (parts: readonly DishPart[]): string => parts.map((p) => `${p.name}×${p.quantity}`).join('、');
+/** 写在出品单上的样子：「柠檬茶×1、薯条×2」；换过的写「橙汁×1（原 可乐）」 */
+export const partsText = (parts: readonly DishPart[]): string => parts.map((p) => `${p.name}×${p.quantity}${p.from ? `（原 ${p.from}）` : ''}`).join('、');
 
 /** 加料那一行的备注：「配 牛肉面」（出品备注最多 40 个字，菜名最多 32 个字，放得下） */
 export const addonNote = (dishName: string): string => `配 ${dishName}`.slice(0, MAX_DISH_NOTE);
@@ -196,6 +242,9 @@ export interface DishComboRef {
   quantity: number;
   /** 这一样现在在不在售（不在售的套餐照卖，菜品表上提醒，CP4） */
   available: boolean;
+  /** 8.1.17（BW7）：能不能换、能换成哪几样（差价） */
+  swappable: boolean;
+  swaps: ComboSwapOption[];
 }
 
 export interface DishRow {
@@ -339,7 +388,8 @@ export interface DishBody {
   methods: (string | DishMethodOption)[];
   methodGroups?: DishMethodGroup[];
   addons: number[];
-  combo: { itemId: number; quantity: number }[];
+  /** 套餐内容；swappable、swaps 不带的（8.1.15 的页面、导入）保留原来的可换设置（8.1.17） */
+  combo: { itemId: number; quantity: number; swappable?: boolean; swaps?: { itemId: number; priceDiff: number }[] }[];
 }
 
 export interface DishSaveResult {

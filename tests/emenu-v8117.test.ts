@@ -3,7 +3,9 @@
 //   · 下单带做法、加料挂在主菜上：与点单页同一个核对（必选、同一组、加价按份进单价、加料要是主菜配的）；加料不用排在电子菜单上；
 //     出品单写「特辣 +¥2，不加香菜」「配 水煮鱼，不加香菜」；同一道菜做法不同的另起一行；
 //   · 出品口：「点餐平板」岗位默认三处都能下单；店里去掉一处，菜单上那一处的菜写「请找服务员点」、下单被拒绝；
-//     开着「点单密码」时输密码的服务员也要能在那一处下单。
+//     开着「点单密码」时输密码的服务员也要能在那一处下单；
+//   · 套餐换菜（BW7）：菜单的规格带可换的几样（差价、今天还有没有）、套餐还能卖几份按子项里最少的；下单带换菜，差价进单价、
+//     出品单写「可乐换橙汁 +¥3」；换法不同的另起一行。
 // 全部是合成数据。
 
 import { randomUUID } from 'node:crypto';
@@ -26,7 +28,7 @@ const specOf = async (itemId: number): Promise<EmenuSpecView> => {
   for (const c of (await menu()).categories) for (const p of c.pages) for (const d of p.dishes) for (const s of d?.specs ?? []) if (s.itemId === itemId) return s;
   throw new Error(`菜单上没有 ${itemId}`);
 };
-type Line = { itemId: number; quantity: number; methods?: string[]; addonOf?: number };
+type Line = { itemId: number; quantity: number; methods?: string[]; addonOf?: number; swaps?: { from: number; to: number }[] };
 const order = (lines: Line[], expectedTotal: number, o: { avoid?: string[]; pin?: string; key?: string } = {}) =>
   api(ctx.app, pad, 'POST', '/api/emenu/orders', {
     clientKey: o.key ?? randomUUID(),
@@ -194,5 +196,91 @@ describe('BW3 平板下单按出品口核对', () => {
     await overrides({});
     expect((await order([{ itemId: item['水煮鱼']!, quantity: 1, methods: ['微辣'] }], 3800, { pin })).status).toBe(200);
     expect((await rules({ requirePin: false })).status).toBe(200);
+  });
+});
+
+describe('BW7 平板上换菜', () => {
+  beforeAll(async () => {
+    const dish = async (body: Record<string, unknown>) => {
+      const r = await api(ctx.app, ctx.owner, 'POST', '/api/dining/dishes', { clientKey: randomUUID(), category: '餐饮', ...body });
+      expect(r.status, JSON.stringify(r.body)).toBe(201);
+      item[r.body.dish.name] = r.body.dish.id;
+    };
+    await dish({ name: '米饭', slot: 'restaurant:餐饮', stationId: station['厨房'], prices: { standard: 200 } });
+    await dish({ name: '可乐', category: '饮品', slot: 'water:手作饮料', stationId: station['水吧'], prices: { standard: 800 } });
+    await dish({ name: '橙汁', category: '饮品', slot: 'water:手作饮料', stationId: station['水吧'], prices: { standard: 1200 } });
+    await dish({
+      name: '快餐套餐',
+      slot: 'restaurant:餐饮',
+      stationId: station['厨房'],
+      prices: { standard: 4800 },
+      combo: [
+        { itemId: item['米饭'], quantity: 1 },
+        { itemId: item['可乐'], quantity: 1, swappable: true, swaps: [{ itemId: item['橙汁'], priceDiff: 300 }] },
+      ],
+    });
+    const r = await api<EmenuAdmin>(ctx.app, ctx.owner, 'POST', '/api/admin/emenu/dishes', { name: '快餐套餐', specs: [{ itemId: item['快餐套餐'] }] });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const set = r.body.dishes.find((d) => d.name === '快餐套餐')!.id;
+    const a = await admin();
+    const cat = a.categories.find((x) => x.name === '午餐')!;
+    const p = await api(ctx.app, ctx.owner, 'PUT', `/api/admin/emenu/categories/${cat.id}/pages`, {
+      version: cat.version,
+      pages: [...cat.pages.map((x) => ({ layout: x.layout, dishIds: x.dishIds })), { layout: 'single_wide', dishIds: [set] }],
+    });
+    expect(p.status, JSON.stringify(p.body)).toBe(200);
+  });
+
+  it('菜单的规格带可换的几样（差价、今天还有没有）；套餐还能卖几份按子项里最少的', async () => {
+    const set = await specOf(item['快餐套餐']!);
+    expect(set.options).toEqual({
+      methods: [],
+      groups: [],
+      addons: [],
+      swaps: [{ itemId: item['可乐'], name: '可乐', quantity: 1, state: 'ok', choices: [{ itemId: item['橙汁'], name: '橙汁', priceDiff: 300, state: 'ok' }] }],
+    });
+    expect(set.remaining).toBeNull();
+    const limit = (id: number, remaining: number | null) => api(ctx.app, ctx.owner, 'PUT', `/api/kitchen/limits/${id}`, { remaining });
+    expect((await limit(item['米饭']!, 2)).status).toBe(200);
+    expect((await specOf(item['快餐套餐']!)).remaining).toBe(2);
+    expect((await limit(item['米饭']!, 0)).status).toBe(200);
+    expect((await specOf(item['快餐套餐']!)).state).toBe('sold_out');
+    expect((await limit(item['米饭']!, null)).status).toBe(200);
+    // 可乐卖完了：可以换橙汁，套餐照卖；可乐那一项标售罄
+    expect((await limit(item['可乐']!, 0)).status).toBe(200);
+    const noCola = await specOf(item['快餐套餐']!);
+    expect(noCola.state).toBe('ok');
+    expect(noCola.options!.swaps![0]!.state).toBe('sold_out');
+    const plain = await order([{ itemId: item['快餐套餐']!, quantity: 1 }], 4800);
+    expect(plain.status).toBe(409);
+    expect(plain.body.error.code).toBe('DISH_SOLD_OUT');
+    expect((await limit(item['可乐']!, null)).status).toBe(200);
+  });
+
+  it('下单带换菜：差价进单价、出品单写换了什么；换法不同的另起一行，一样的要合成一行', async () => {
+    const before = (await linesOf()).length;
+    const swap = [{ from: item['可乐']!, to: item['橙汁']! }];
+    const dup = await order(
+      [
+        { itemId: item['快餐套餐']!, quantity: 1, swaps: swap },
+        { itemId: item['快餐套餐']!, quantity: 1, swaps: swap },
+      ],
+      10200,
+    );
+    expect(dup.status).toBe(400);
+    const r = await order(
+      [
+        { itemId: item['快餐套餐']!, quantity: 1, swaps: swap },
+        { itemId: item['快餐套餐']!, quantity: 2 },
+      ],
+      5100 + 4800 * 2,
+    );
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect((await linesOf()).slice(before).map((l) => `${l.name}|${l.unitPrice}|${l.quantity}|${l.note}`)).toEqual(['快餐套餐|5100|1|可乐换橙汁 +¥3', '快餐套餐|4800|2|']);
+    // 子项单：可乐 / 橙汁在水吧单独出
+    const parts = await ctx.sql<{ name: string; split: boolean; quantity: number }[]>`
+      SELECT p.name, p.split, p.quantity FROM kitchen_item_parts p JOIN kitchen_items k ON k.id = p.kitchen_item_id JOIN bill_lines l ON l.id = k.bill_line_id
+      JOIN visits v ON v.bill_id = l.bill_id WHERE v.id = ${visitId} ORDER BY p.id`;
+    expect(parts.map((p) => `${p.name}|${p.split}|${p.quantity}`)).toEqual(['米饭|false|1', '橙汁|true|1', '米饭|false|2', '可乐|true|2']);
   });
 });

@@ -327,9 +327,18 @@ SPICY.methods = ['微辣', '中辣', '特辣', '免葱', '免蒜', '免香菜'];
 SPICY.methodOptions = SPICY.methods.map((name, i) => ({ name, group: i < 3 ? '辣度' : '', price: name === '特辣' ? 200 : 0 }));
 SPICY.methodGroups = [{ name: '辣度', required: true }];
 SPICY.addons = [MENU_DISHES[0]!, MENU_DISHES[5]!].map((d) => ({ id: d.id, name: d.name, price: d.price }));
+// 8.1.17（BW7）：柠檬茶可以换成柚子气泡水（同价）或杨枝甘露（每份补 ¥6）
 COMBO_DISH.combo = [
-  { name: '宫保鸡丁', quantity: 1 },
-  { name: '招牌手打香水柠檬茶（大杯）', quantity: 2 },
+  { name: '宫保鸡丁', quantity: 1, itemId: MENU_DISHES[0]!.id },
+  {
+    name: '招牌手打香水柠檬茶（大杯）',
+    quantity: 2,
+    itemId: MENU_DISHES[5]!.id,
+    swaps: [
+      { itemId: MENU_DISHES[6]!.id, name: MENU_DISHES[6]!.name, priceDiff: 0, available: true },
+      { itemId: MENU_DISHES[7]!.id, name: MENU_DISHES[7]!.name, priceDiff: 600, available: true },
+    ],
+  },
 ];
 
 /** 合成的菜品表：三处都有，菜名有长有短；有下架的、沽清的、两档规格的、档口停用的、按默认归的、被别的菜用着的 */
@@ -364,7 +373,7 @@ const DISH_BOARD: DishesBoard = {
     methodOptions: d.methodOptions ?? [],
     methodGroups: d.methodGroups ?? [],
     addons: (d.addons ?? []).map((a) => ({ itemId: a.id, name: a.name, price: a.price, available: true })),
-    combo: (d.combo ?? []).map((c, k) => ({ itemId: MENU_DISHES[k === 0 ? 0 : 5]!.id, name: c.name, quantity: c.quantity, available: k === 0 })),
+    combo: (d.combo ?? []).map((c, k) => ({ itemId: c.itemId, name: c.name, quantity: c.quantity, available: k === 0, swappable: !!c.swaps, swaps: c.swaps ?? [] })),
     usedBy: i === 0 ? ['「小炒黄牛肉」的加料', '套餐「招牌秘制酱香手撕鸡（半只）」'] : [],
     sort: null,
     deleted: false,
