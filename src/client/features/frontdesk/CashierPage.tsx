@@ -185,7 +185,7 @@ export function CashierPage() {
               </Stat>
               <Stat label="同行">{stats.groups} 组</Stat>
               <span className="flex items-center gap-1.5">
-                未结合计 <Money cents={stats.unsettledCents} className="font-bold text-ink" />
+                未结合计 <Money cents={stats.unsettledCents} size="key" className="text-ink" />
               </span>
             </span>
           ) : (
@@ -418,7 +418,7 @@ function QueueRow({ tag, now, selected, primary, onClick }: { tag: BoardTag; now
                 <UserRound className="size-3.5 shrink-0 text-pine" />
                 <span className="min-w-0 truncate font-bold">{v.memberName}</span>
                 {v.memberGradeLabel && (
-                  <span className="shrink-0 rounded-sm bg-yuzu-soft px-1 text-[11px] font-bold text-yuzu-deep" title={v.memberGradeLabel}>
+                  <span className="shrink-0 rounded-sm bg-yuzu-soft px-1 text-[12px] font-bold text-yuzu-deep" title={v.memberGradeLabel}>
                     {gradeShort(v.memberGradeLabel)}
                   </span>
                 )}
@@ -447,7 +447,7 @@ function QueueRow({ tag, now, selected, primary, onClick }: { tag: BoardTag; now
         </span>
         <span className="shrink-0 text-right">
           {v.amountCents > 0 ? <Money cents={v.amountCents} className="text-[16px] font-bold text-ink" /> : <span className="text-[12px] text-ink-4">未挂账</span>}
-          <span className="block text-[11.5px] text-ink-3">{v.lineCount > 0 ? `${v.lineCount} 项` : '只有门票'}</span>
+          <span className="block text-[12px] text-ink-3">{v.lineCount > 0 ? `${v.lineCount} 项` : '只有门票'}</span>
         </span>
       </button>
     </li>

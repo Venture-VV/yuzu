@@ -143,7 +143,7 @@ export function MoveLinesDialog({
         </Field>
         <div className="flex items-end gap-3">
           <div className="rounded-lg border border-line bg-paper px-4 py-2 text-center">
-            <p className="text-[11.5px] text-ink-3">从</p>
+            <p className="text-[12px] text-ink-3">从</p>
             <p className="num text-[20px] font-bold">{visit.tag.code}</p>
           </div>
           <ArrowRight className="mb-3 size-5 text-ink-3" />
@@ -173,7 +173,7 @@ export function MoveLinesDialog({
                 type="button"
                 disabled={locked}
                 onClick={() => edit(() => setReason(r))}
-                className={cn('h-8 rounded-full border px-3 text-[13px] font-semibold', reason === r ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2 hover:bg-paper-2')}
+                className={cn('tap relative h-8 rounded-full border px-3 text-[13px] font-semibold', reason === r ? 'border-pine bg-pine-tint text-pine' : 'border-line text-ink-2 hover:bg-paper-2')}
               >
                 {r}
               </button>

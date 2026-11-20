@@ -133,7 +133,7 @@ export function FrontdeskPendingBanner() {
               {formatDateTime(op.createdAt)} · {op.staffName}
             </span>
             {op.autoRejected && <span className="text-[12px] font-semibold text-clay">自动重提被拒绝</span>}
-            <button type="button" onClick={() => open(op)} className="flex h-7 items-center gap-1 rounded-full bg-pine px-3 text-[12.5px] font-bold text-paper hover:bg-pine-hover">
+            <button type="button" onClick={() => open(op)} className="tap relative flex h-7 items-center gap-1 rounded-full bg-pine px-3 text-[12.5px] font-bold text-paper hover:bg-pine-hover">
               去处理 <ArrowRight className="size-3.5" />
             </button>
           </span>

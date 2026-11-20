@@ -185,7 +185,7 @@ export function TagLockDialog({ open, tags, initialCode, onClose, onDone }: { op
                   type="button"
                   onClick={() => setReason(r)}
                   className={cn(
-                    'h-8 rounded-full border px-3 text-[13px] font-semibold',
+                    'tap relative h-8 rounded-full border px-3 text-[13px] font-semibold',
                     reason === r ? 'border-clay bg-clay-soft text-clay' : 'border-line bg-card text-ink-2 hover:border-line-strong',
                   )}
                 >

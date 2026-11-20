@@ -270,11 +270,11 @@ export function CheckoutDialog({
               '请先为没有票种的客人选择票种'
             ) : remaining > 0 ? (
               <>
-                还差 <Money cents={remaining} className="font-bold text-clay" />
+                还差 <Money cents={remaining} size="key" className="text-clay" />
               </>
             ) : remaining < 0 ? (
               <>
-                多收 <Money cents={-remaining} className="font-bold text-clay" />
+                多收 <Money cents={-remaining} size="key" className="text-clay" />
                 （现金找零不用登记，按应收记）
               </>
             ) : problems.some(Boolean) ? (
@@ -311,13 +311,13 @@ export function CheckoutDialog({
                   aria-pressed={on}
                   onClick={() => toggle(t.visit!.id)}
                   className={cn(
-                    'flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold',
+                    'tap relative flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold',
                     on ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong',
                   )}
                 >
                   {on ? <CircleCheck className="size-4" /> : <span className="size-4 rounded-full border-2 border-line-strong" />}
                   <span className="num">{t.code}</span>
-                  <span className="text-[11.5px] font-semibold opacity-70">{ZONE_LABELS[t.zone].short}</span>
+                  <span className="text-[12px] font-semibold opacity-70">{ZONE_LABELS[t.zone].short}</span>
                 </button>
               );
             })}
@@ -667,7 +667,7 @@ export function CheckoutRecordsDialog({ open, onClose, focusId }: { open: boolea
           </span>
           <span className="font-semibold">
             营业额（与日结一致）
-            <Money cents={sum.net} className="font-bold text-ink" data-testid="checkout-records-net" />
+            <Money cents={sum.net} size="key" className="text-ink" data-testid="checkout-records-net" />
           </span>
           {sum.unshifted.count > 0 && (
             <span className="col-span-full text-clay" data-testid="checkout-records-unshifted">

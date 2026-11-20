@@ -136,8 +136,8 @@ export function BillPanel({
       <header className="shrink-0 border-b border-line px-5 pt-4 pb-3.5">
         <div className="flex items-start gap-3">
           <div className={cn('flex size-[58px] shrink-0 flex-col items-center justify-center rounded-[16px]', ZONE_STYLE[visit.zone].soft)}>
-            <span className={cn('text-[11px] font-bold', ZONE_STYLE[visit.zone].text)}>{ZONE_LABELS[visit.zone].title}</span>
-            <span className="num text-[11px] font-semibold text-ink-3">手牌</span>
+            <span className={cn('text-[12px] font-bold', ZONE_STYLE[visit.zone].text)}>{ZONE_LABELS[visit.zone].title}</span>
+            <span className="num text-[12px] font-semibold text-ink-3">手牌</span>
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -241,7 +241,7 @@ export function BillPanel({
                 <Link2 className="size-3.5" /> 同行 {visit.group.groupNo}
               </span>
               <span className="text-ink-3">
-                同行未结 <Money cents={visit.group.openAmountCents} className="font-bold text-ink" />
+                同行未结 <Money cents={visit.group.openAmountCents} size="key" className="text-ink" />
               </span>
             </div>
             <div className="scroll-thin mt-1.5 flex gap-1.5 overflow-x-auto pb-0.5">
@@ -259,8 +259,8 @@ export function BillPanel({
                   title={m.status !== 'open' ? VISIT_STATUS_LABELS[m.status] : undefined}
                 >
                   <span className="num">{m.tagCode}</span>
-                  <span className="text-[11px] opacity-70">{ZONE_LABELS[m.zone].short}</span>
-                  {m.status === 'open' ? <Money cents={m.amountCents} className="font-semibold text-ink-3" /> : <span className="text-[11px]">{VISIT_STATUS_LABELS[m.status]}</span>}
+                  <span className="text-[12px] opacity-70">{ZONE_LABELS[m.zone].short}</span>
+                  {m.status === 'open' ? <Money cents={m.amountCents} className="font-semibold text-ink-3" /> : <span className="text-[12px]">{VISIT_STATUS_LABELS[m.status]}</span>}
                 </button>
               ))}
             </div>
@@ -351,7 +351,7 @@ export function BillPanel({
                         </span>
                         <Money cents={l.amount} className="line-through" />
                       </div>
-                      <p className="text-[11.5px]">
+                      <p className="text-[12px]">
                         {l.voidReason} · {l.voidedByName} {l.voidedAt && formatTime(l.voidedAt)}
                       </p>
                     </li>
@@ -398,7 +398,7 @@ export function BillPanel({
                 )}
               </p>
             ) : null}
-            <p className="mt-1 flex items-center gap-1.5 text-[11.5px] text-ink-3">
+            <p className="mt-1 flex items-center gap-1.5 text-[12px] text-ink-3">
               <PendingBadge title="门票按每 12 小时跳一档计算（店主 #31）；跳档宽限默认 0 分钟、1 米以下儿童免票为默认做法，待确认" />
               门票离店结账时按在店时长计算（每 12 小时跳一档），不预先挂账
             </p>
@@ -433,7 +433,7 @@ export function BillPanel({
             </span>
             {!issue && open && visit.ticket && (
               <p className="w-0 min-w-full text-[12px] text-ink-3" data-testid="bill-due">
-                含门票此刻应收 <Money cents={visit.bill.amountCents + visit.ticket.amount} className="font-bold text-pine" />
+                含门票此刻应收 <Money cents={visit.bill.amountCents + visit.ticket.amount} size="key" className="text-pine" />
               </p>
             )}
           </div>
@@ -591,7 +591,7 @@ function LineRow({ line, canVoid, allowed, selfMinutes, onVoid }: { line: BillLi
             {line.kitchen.note && <span className="min-w-0 truncate text-ink-3">· {line.kitchen.note}</span>}
           </p>
         )}
-        <p className="num text-[11.5px] text-ink-4">
+        <p className="num text-[12px] text-ink-4">
           {line.backfill ? formatDateTime(line.postedAt) : formatTime(line.postedAt)} · {line.postedByName}
           {line.backfill && <span className="ml-1 font-semibold text-lake">· 补录 纸质单 {line.backfill.slipNo}</span>}
         </p>
@@ -604,9 +604,11 @@ function LineRow({ line, canVoid, allowed, selfMinutes, onVoid }: { line: BillLi
           disabled={!allowed}
           aria-label={`作废 ${line.name}`}
           title={line.source === 'dining' ? '退菜：小额直接退，超过的请值班经理及以上当场授权' : allowed ? '作废这项明细' : `超过 ${selfMinutes} 分钟或不是你登记的，请店主处理`}
-          className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-md text-ink-4 transition-colors hover:bg-clay-soft hover:text-clay disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-4"
+          // 8.1.17 YS-4：危险操作写上字（原来只有图标）
+          className="tap relative -mr-1 flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] font-semibold text-ink-3 transition-colors hover:bg-clay-soft hover:text-clay disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-ink-3"
         >
-          <CircleSlash className="size-4" />
+          <CircleSlash className="size-3.5" />
+          {line.source === 'dining' ? '退菜' : '作废'}
         </button>
       )}
     </li>
@@ -728,7 +730,7 @@ function QuickReasonDialog({
                 type="button"
                 onClick={() => setReason(r)}
                 className={cn(
-                  'h-9 rounded-full border px-3.5 text-[13px] font-semibold',
+                  'tap relative h-9 rounded-full border px-3.5 text-[13px] font-semibold',
                   reason === r ? 'border-clay bg-clay-soft text-clay' : 'border-line bg-card text-ink-2 hover:border-line-strong',
                 )}
               >

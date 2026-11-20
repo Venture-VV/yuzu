@@ -162,7 +162,7 @@ export function SwapDialog({
       <div className="space-y-4">
         <div className="flex items-center gap-3">
           <div className="rounded-lg border border-line bg-paper px-4 py-2.5 text-center">
-            <p className="text-[11.5px] text-ink-3">原手牌</p>
+            <p className="text-[12px] text-ink-3">原手牌</p>
             <p className="num text-[22px] font-bold">{visit.tag.code}</p>
           </div>
           <ArrowRight className="size-5 text-ink-3" />
@@ -213,7 +213,7 @@ export function SwapDialog({
                       key={t.id}
                       type="button"
                       onClick={() => edit(() => setCode(t.code))}
-                      className="num h-8 rounded-full border border-line bg-card px-3 font-bold text-ink-2 hover:border-pine hover:text-pine"
+                      className="tap relative num h-8 rounded-full border border-line bg-card px-3 font-bold text-ink-2 hover:border-pine hover:text-pine"
                     >
                       {t.code}
                     </button>
@@ -238,7 +238,7 @@ export function SwapDialog({
                   })
                 }
                 className={cn(
-                  'h-9 rounded-full border px-3.5 text-[13px] font-semibold',
+                  'tap relative h-9 rounded-full border px-3.5 text-[13px] font-semibold',
                   reason === r ? 'border-pine bg-pine-tint text-pine' : 'border-line bg-card text-ink-2 hover:border-line-strong',
                 )}
               >
@@ -436,7 +436,7 @@ export function PreviewDialog({
                   aria-pressed={on}
                   onClick={() => toggle(t.visit!.id)}
                   className={cn(
-                    'flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold',
+                    'tap relative flex h-10 items-center gap-1.5 rounded-full border px-3 text-[14px] font-bold',
                     on ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong',
                   )}
                 >
