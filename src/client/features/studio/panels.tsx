@@ -351,8 +351,8 @@ export function InsertPanel({
             </button>
           ))}
         </div>
-        {full && <p className="mt-1 text-[11.5px] text-clay">这一屏的图层到上限了，删掉一些再加</p>}
-        <p className="mt-1.5 text-[11.5px] leading-snug text-ink-3">先选中一个框再点，就插在这个框里；框可以「竖排 / 横排」自动排好里面的东西。</p>
+        {full && <p className="mt-1 text-[12px] text-clay">这一屏的图层到上限了，删掉一些再加</p>}
+        <p className="mt-1.5 text-[12px] leading-snug text-ink-3">先选中一个框再点，就插在这个框里；框可以「竖排 / 横排」自动排好里面的东西。</p>
       </div>
       {surface.fields.length > 0 && (
         <div>
@@ -369,7 +369,7 @@ export function InsertPanel({
               >
                 <Database className="size-3.5 shrink-0 text-ink-3" />
                 <span className="min-w-0 flex-1 truncate">{f.label}</span>
-                <span className="max-w-24 truncate text-[11px] text-ink-3">{f.sample.zh}</span>
+                <span className="max-w-24 truncate text-[12px] text-ink-3">{f.sample.zh}</span>
               </button>
             ))}
           </div>
@@ -379,7 +379,7 @@ export function InsertPanel({
         <div data-testid="studio-components">
           <PanelTitle>组件（自己存的，改一处各处跟着变）</PanelTitle>
           {Object.keys(doc.components ?? {}).length === 0 ? (
-            <p className="text-[11.5px] leading-snug text-ink-3">还没有。选中画布上的一块（框连着里面的也行），在右边点「存成组件」（⌘/Ctrl+Alt+K）。</p>
+            <p className="text-[12px] leading-snug text-ink-3">还没有。选中画布上的一块（框连着里面的也行），在右边点「存成组件」（⌘/Ctrl+Alt+K）。</p>
           ) : (
             <div className="space-y-1">
               {Object.entries(doc.components ?? {}).map(([cid, c]) => {
@@ -388,9 +388,9 @@ export function InsertPanel({
                 const self = componentIdOf(screen) === cid;
                 return (
                   <div key={cid} className="flex items-center gap-1.5 rounded-md border border-line bg-card px-2 py-1.5 text-[12.5px]" data-testid={`studio-component-${cid}`}>
-                    <span className="text-[11px] text-ink-3">◆</span>
+                    <span className="text-[12px] text-ink-3">◆</span>
                     <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                    <span className="shrink-0 text-[11px] text-ink-3">{uses} 处</span>
+                    <span className="shrink-0 text-[12px] text-ink-3">{uses} 处</span>
                     <button
                       type="button"
                       disabled={full || self}
@@ -443,7 +443,7 @@ export function InsertPanel({
                   {b.required && <span className="rounded bg-yuzu-soft px-1 text-[10px] text-yuzu-deep">必需</span>}
                   {b.single && has(b) && <span className="text-[10.5px] text-ink-3">已在这一屏</span>}
                 </div>
-                <div className="mt-0.5 text-[11px] leading-snug text-ink-3">{b.hint}</div>
+                <div className="mt-0.5 text-[12px] leading-snug text-ink-3">{b.hint}</div>
               </button>
             );
           })}
@@ -545,7 +545,7 @@ export function ThemePanel({ doc, surface, onChange }: { doc: StudioDoc; surface
       <div>
         <PanelTitle
           aside={
-            <button type="button" className="text-[11.5px] text-pine hover:underline" onClick={() => onChange((d) => ({ ...d, theme: defaultStudioDoc(surface.key).theme }))}>
+            <button type="button" className="text-[12px] text-pine hover:underline" onClick={() => onChange((d) => ({ ...d, theme: defaultStudioDoc(surface.key).theme }))}>
               恢复默认
             </button>
           }
@@ -564,14 +564,14 @@ export function ThemePanel({ doc, surface, onChange }: { doc: StudioDoc; surface
                   </span>
                   <span className="min-w-0 flex-1 truncate text-ink-2">{c.label}</span>
                   <Lock className="size-3.5 shrink-0 text-ink-3" aria-label="不能改" />
-                  <span className="font-mono text-[11px] text-ink-3">{v}</span>
+                  <span className="font-mono text-[12px] text-ink-3">{v}</span>
                 </div>
               );
             return (
               <label key={c.key} className="flex items-center gap-2 text-[12.5px]" data-testid={`studio-theme-${c.key}`}>
                 <input type="color" className="h-7 w-8 shrink-0 cursor-pointer rounded border border-line bg-card p-0.5" value={v.slice(0, 7)} onChange={(e) => setColor(c.key, e.target.value)} />
                 <span className="min-w-0 flex-1 truncate text-ink-2">{c.label}</span>
-                <span className="font-mono text-[11px] text-ink-3">{v}</span>
+                <span className="font-mono text-[12px] text-ink-3">{v}</span>
               </label>
             );
           })}
@@ -596,7 +596,7 @@ export function ThemePanel({ doc, surface, onChange }: { doc: StudioDoc; surface
               </select>
             </Row>
           ))}
-          <p className="text-[11.5px] leading-snug text-ink-3">只列有授权、平板上有的字体（品牌字体随应用打包；系统字体是平板自带的）。</p>
+          <p className="text-[12px] leading-snug text-ink-3">只列有授权、平板上有的字体（品牌字体随应用打包；系统字体是平板自带的）。</p>
         </div>
       </div>
     </div>
@@ -621,7 +621,7 @@ function BlockPropField({ def, value, onChange, surface, doc }: { def: StudioPro
             value={Number(value ?? def.default)}
             onChange={(e) => onChange(Number(e.target.value))}
           />
-          <span className="w-10 shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">{Number(value ?? def.default)}</span>
+          <span className="w-10 shrink-0 text-right text-[12px] tabular-nums text-ink-3">{Number(value ?? def.default)}</span>
         </div>
       );
     case 'boolean':
@@ -684,7 +684,7 @@ function LayoutEditor({ value, onChange, allowFree = true, testId }: { value: St
           </div>
           <div className="grid grid-cols-4 gap-1">
             {(['上', '右', '下', '左'] as const).map((label, i) => (
-              <label key={label} className="flex flex-col gap-0.5 text-[11px] text-ink-3">
+              <label key={label} className="flex flex-col gap-0.5 text-[12px] text-ink-3">
                 内边距 {label}
                 <NumberInput
                   value={v.padding[i]!}
@@ -926,7 +926,7 @@ export function PropsPanel({
                 testId="studio-screen-height"
               />
             </Row>
-            <p className="text-[11.5px] leading-snug text-ink-3">手机往下滚：自动排列时内容多了会往下长，屏高是最少这么高。</p>
+            <p className="text-[12px] leading-snug text-ink-3">手机往下滚：自动排列时内容多了会往下长，屏高是最少这么高。</p>
             <PanelTitle>整屏的排列</PanelTitle>
             <LayoutEditor
               value={s.layout}
@@ -943,7 +943,7 @@ export function PropsPanel({
             />
           </>
         )}
-        <p className="text-[11.5px] leading-snug text-ink-3">
+        <p className="text-[12px] leading-snug text-ink-3">
           点画布上的一块选中它；按住 Shift 点可以多选。方向键挪 1 像素（Shift 10 像素；在自动排列里是往前、往后排），Delete 删除，⌘/Ctrl+Z 撤销，⌘/Ctrl+D 复制一份。
         </p>
       </div>
@@ -978,14 +978,14 @@ export function PropsPanel({
       <div>
         <PanelTitle
           aside={
-            <span className="text-[11px] text-ink-3">
+            <span className="text-[12px] text-ink-3">
               {block ? '功能块' : { text: '文字', rect: '矩形', ellipse: '椭圆', frame: '框', image: '图片', button: '按钮', field: '数据字段', instance: '组件' }[n.type as 'text']}
             </span>
           }
         >
           {nodeLabel(n, surface, doc)}
         </PanelTitle>
-        {block && <p className="mb-2 text-[11.5px] leading-snug text-ink-3">{block.hint}</p>}
+        {block && <p className="mb-2 text-[12px] leading-snug text-ink-3">{block.hint}</p>}
         {n.type === 'instance' && components && (
           <div className="mb-2 space-y-1.5 rounded-md border border-line bg-paper-2/60 px-2.5 py-2 text-[12px] text-ink-2" data-testid="studio-instance">
             <div>
@@ -1023,10 +1023,10 @@ export function PropsPanel({
       {f.flow ? (
         <div className="space-y-1.5">
           <PanelTitle>大小（在自动排列里）</PanelTitle>
-          <p className="text-[11px] leading-snug text-ink-3">位置按先后排：方向键或右边「前后」换位置。</p>
+          <p className="text-[12px] leading-snug text-ink-3">位置按先后排：方向键或右边「前后」换位置。</p>
           {/* 大小由里面的内容定的功能块（员工食堂的各段、饭卡码）：不能改宽高规则 */}
           {block?.resize === 'none' ? (
-            <p className="text-[11.5px] leading-snug text-ink-3">这一块的大小跟着里面的内容走，不能改。</p>
+            <p className="text-[12px] leading-snug text-ink-3">这一块的大小跟着里面的内容走，不能改。</p>
           ) : (
             <SizingRows node={n} onChange={(patch) => set(patch, 'sizing')} />
           )}
@@ -1040,7 +1040,7 @@ export function PropsPanel({
               value={n.opacity}
               onChange={(e) => set({ opacity: Number(e.target.value) }, 'opacity')}
             />
-            <span className="w-9 shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">{Math.round(n.opacity * 100)}%</span>
+            <span className="w-9 shrink-0 text-right text-[12px] tabular-nums text-ink-3">{Math.round(n.opacity * 100)}%</span>
           </Row>
         </div>
       ) : (
@@ -1060,7 +1060,7 @@ export function PropsPanel({
               <NumberInput value={n.h} min={4} onChange={(v) => rules.resize !== 'none' && set(rules.resize === 'scale' ? { h: v, w: round1(v * ratio) } : { h: v }, 'h')} testId="studio-prop-h" />
             </Row>
           </div>
-          {(!rules.move || rules.resize === 'none') && <p className="text-[11px] text-ink-3">{n.locked ? '锁住了：在图层里解锁再改' : '这一块的位置与大小不能改（8.1.1）'}</p>}
+          {(!rules.move || rules.resize === 'none') && <p className="text-[12px] text-ink-3">{n.locked ? '锁住了：在图层里解锁再改' : '这一块的位置与大小不能改（8.1.1）'}</p>}
           {n.type !== 'block' && (
             <Row label="旋转">
               <NumberInput value={n.rotate} min={-360} max={360} onChange={(v) => set({ rotate: v }, 'rotate')} />
@@ -1076,7 +1076,7 @@ export function PropsPanel({
               value={n.opacity}
               onChange={(e) => set({ opacity: Number(e.target.value) }, 'opacity')}
             />
-            <span className="w-9 shrink-0 text-right text-[11.5px] tabular-nums text-ink-3">{Math.round(n.opacity * 100)}%</span>
+            <span className="w-9 shrink-0 text-right text-[12px] tabular-nums text-ink-3">{Math.round(n.opacity * 100)}%</span>
           </Row>
         </div>
       )}
@@ -1254,7 +1254,7 @@ export function PropsPanel({
             </select>
           </Row>
           {surface.squareImages ? (
-            <p className="text-[11.5px] leading-snug text-ink-3" data-testid="studio-image-square">
+            <p className="text-[12px] leading-snug text-ink-3" data-testid="studio-image-square">
               图片一律直角（品牌规定）。
             </p>
           ) : (

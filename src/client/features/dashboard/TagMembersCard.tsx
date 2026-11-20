@@ -49,7 +49,7 @@ export function TagMembersCard() {
                   data-testid={`tag-filter-${t.id}`}
                 >
                   {t.name}
-                  <span className="num text-[11px] opacity-70">{t.memberCount}</span>
+                  <span className="num text-[12px] opacity-70">{t.memberCount}</span>
                 </button>
               ))}
             </div>

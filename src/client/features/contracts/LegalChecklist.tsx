@@ -68,7 +68,7 @@ export function LegalChecklistEditor({ value, onChange, disabled }: { value: Che
               <div className="flex flex-wrap items-center gap-2">
                 <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-semibold">{item.label}</p>
-                  <p className="text-[11.5px] text-ink-3">{item.hint}</p>
+                  <p className="text-[12px] text-ink-3">{item.hint}</p>
                 </div>
                 <div className="flex gap-1" role="radiogroup" aria-label={`${item.label}结论`}>
                   {REVIEW_VERDICTS.map((v) => (

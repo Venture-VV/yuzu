@@ -269,8 +269,8 @@ function MealReminderEditor({ value: r, window, today, onChange }: { value: Meal
             </SectionTitle>
             <div className="mt-2 rounded-[22px] bg-gradient-to-b from-[#3b4a5c] to-[#26313d] p-3" data-testid={`reminder-preview-${r.meal}`}>
               <div className="rounded-2xl bg-white/90 p-3 shadow-sm backdrop-blur">
-                <div className="flex items-center gap-2 text-[11.5px] text-ink-3">
-                  <span className="flex size-5 items-center justify-center rounded-[5px] bg-[#EBDECA] text-[11px]" aria-hidden>
+                <div className="flex items-center gap-2 text-[12px] text-ink-3">
+                  <span className="flex size-5 items-center justify-center rounded-[5px] bg-[#EBDECA] text-[12px]" aria-hidden>
                     🍊
                   </span>
                   <span className="font-semibold tracking-wide">柚子饭堂</span>
@@ -279,7 +279,7 @@ function MealReminderEditor({ value: r, window, today, onChange }: { value: Meal
                 <p className="mt-1.5 text-[14px] font-bold text-ink">{r.title.trim() || '（还没写标题）'}</p>
                 <p className="mt-0.5 text-[13px] leading-snug text-ink-2">{shown ? fillReminderLine(shown, SAMPLE_NAME, SAMPLE_MENU) : '（还没写柚子说的话）'}</p>
               </div>
-              <p className="mt-2 text-center text-[11.5px] text-white/70">点开打开：{REMINDER_OPEN_LABELS[r.open]}</p>
+              <p className="mt-2 text-center text-[12px] text-white/70">点开打开：{REMINDER_OPEN_LABELS[r.open]}</p>
             </div>
           </div>
         </div>

@@ -380,11 +380,11 @@ function Summary({ s, dayLabel }: { s: SettlementSummary; dayLabel: string }) {
                       <td className="py-2 font-semibold">{st.name}</td>
                       <td className="py-2 text-right">
                         <Money cents={st.rechargePaid} className="text-lake" />
-                        <span className="ml-1 text-[11.5px] text-ink-3">/{st.rechargeCount}</span>
+                        <span className="ml-1 text-[12px] text-ink-3">/{st.rechargeCount}</span>
                       </td>
                       <td className="py-2 text-right">
                         <Money cents={st.consumeTotal} />
-                        <span className="ml-1 text-[11.5px] text-ink-3">/{st.consumeCount}</span>
+                        <span className="ml-1 text-[12px] text-ink-3">/{st.consumeCount}</span>
                       </td>
                       <td className="num py-2 text-right">{st.reversalCount}</td>
                     </tr>
@@ -706,9 +706,9 @@ function BusinessCard({ s }: { s: SettlementSummary }) {
                 <span className="ml-1 text-[12px]">
                   · {m.count} 笔{m.voidCount ? `，反结账 ${m.voidCount}` : ''}
                 </span>
-                {m.method === 'wallet' && <span className="ml-1 text-[11.5px] text-ink-4">（会员余额抵扣，同时计入储值消费）</span>}
-                {m.method === 'coupon' && <span className="ml-1 text-[11.5px] text-ink-4">（平台团购核销）</span>}
-                {(m.method === 'discount' || m.method === 'store_coupon' || m.method === 'member_discount') && <span className="ml-1 text-[11.5px] text-ink-4">（不是收款）</span>}
+                {m.method === 'wallet' && <span className="ml-1 text-[12px] text-ink-4">（会员余额抵扣，同时计入储值消费）</span>}
+                {m.method === 'coupon' && <span className="ml-1 text-[12px] text-ink-4">（平台团购核销）</span>}
+                {(m.method === 'discount' || m.method === 'store_coupon' || m.method === 'member_discount') && <span className="ml-1 text-[12px] text-ink-4">（不是收款）</span>}
               </span>
               <Money cents={m.amount} className="font-bold" />
             </div>

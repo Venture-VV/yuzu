@@ -473,7 +473,7 @@ function OrderedTab({ highlight }: { highlight: string | null }) {
                   <img src={`/api/erp/legacy/images/${o.imageId}`} alt={o.product} loading="lazy" className="size-14 rounded-md border border-line object-cover" />
                 </a>
               ) : (
-                <span className="flex size-14 shrink-0 items-center justify-center rounded-md border border-dashed border-clay/50 text-[11px] text-clay">没有图</span>
+                <span className="flex size-14 shrink-0 items-center justify-center rounded-md border border-dashed border-clay/50 text-[12px] text-clay">没有图</span>
               )
             }
             title={

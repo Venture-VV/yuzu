@@ -324,7 +324,7 @@ function Form({ existing }: { existing: PaymentRequestDetail | null }) {
                     <tr key={r.key} className={cn(r.blocked && 'text-ink-3')}>
                       <td className="py-1.5 pr-2">
                         <span className="num font-semibold">{r.i.docNo}</span>
-                        <span className="block text-[11.5px] text-ink-3">{r.blocked ?? r.i.summary}</span>
+                        <span className="block text-[12px] text-ink-3">{r.blocked ?? r.i.summary}</span>
                       </td>
                       <td className="num py-1.5 pr-2">{r.i.date}</td>
                       <td className="py-1.5 pr-2 text-right">

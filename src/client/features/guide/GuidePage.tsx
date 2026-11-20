@@ -165,7 +165,7 @@ export function GuideLegend({ zones, markers, big = false }: { zones: GuideZone[
           <span className={cn('inline-block rounded-sm ring-1 ring-black/10', big ? 'size-5' : 'size-3.5')} style={{ background: z.color }} />
           <span className="font-semibold">{z.name}</span>
           {z.nameEn && <span className="text-ink-3">{z.nameEn}</span>}
-          <span className={cn('text-ink-4', big ? 'text-[14px]' : 'text-[11.5px]')}>
+          <span className={cn('text-ink-4', big ? 'text-[14px]' : 'text-[12px]')}>
             {GUIDE_KIND_LABELS[z.kind]} {GUIDE_KIND_EN[z.kind]}
           </span>
         </span>

@@ -232,7 +232,7 @@ export function ErpShell() {
           <span
             // 待办的数字变了：小幅回弹一下（8.0.16）
             key={it.badge}
-            className={cn('num flex h-5 min-w-5 animate-tick items-center justify-center rounded-full px-1.5 text-[11px] font-bold', it.alert ? 'bg-clay text-paper' : 'bg-yuzu text-ink')}
+            className={cn('num flex h-5 min-w-5 animate-tick items-center justify-center rounded-full px-1.5 text-[12px] font-bold', it.alert ? 'bg-clay text-paper' : 'bg-yuzu text-ink')}
             aria-hidden
             data-testid={`erp-badge-${it.key}`}
           >
@@ -253,8 +253,8 @@ export function ErpShell() {
           </p>
           {/* 实例标识与「版本 + SHA」常显（窄屏也显示） */}
           <p className="mt-0.5 flex min-w-0 items-center gap-1.5" data-testid="erp-instance" title={versionText(session.version, session.commit)}>
-            <InstanceBadge instance={session.instance} className="h-5 px-2 text-[11px]" />
-            <span className="num truncate text-[11px] text-paper/60">{versionText(session.version, session.commit)}</span>
+            <InstanceBadge instance={session.instance} className="h-5 px-2 text-[12px]" />
+            <span className="num truncate text-[12px] text-paper/60">{versionText(session.version, session.commit)}</span>
           </p>
         </div>
         <span className="hidden text-[12.5px] text-paper/75 md:inline">
@@ -286,7 +286,7 @@ export function ErpShell() {
           )}
           {groups.map((g) => (
             <div key={g.title} className="flex flex-col gap-0.5">
-              <p className="px-3 pb-1 text-[11.5px] font-bold tracking-wide text-ink-4">{g.title}</p>
+              <p className="px-3 pb-1 text-[12px] font-bold tracking-wide text-ink-4">{g.title}</p>
               {g.items.map((it) => link(it, false))}
             </div>
           ))}

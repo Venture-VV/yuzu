@@ -324,7 +324,7 @@ export function InvoiceDialog({ open, onClose, onDone, supplierId: presetSupplie
                   <tr key={p.poId}>
                     <td className="py-1.5 pr-2">
                       <span className="num font-semibold">{p.poNo}</span> <ThreeWayBadge status={p.status} />
-                      {p.contractNo && <span className="block text-[11.5px] text-ink-3">合同 {p.contractNo}</span>}
+                      {p.contractNo && <span className="block text-[12px] text-ink-3">合同 {p.contractNo}</span>}
                     </td>
                     <td className="py-1.5 pr-2 text-right">
                       <Money cents={p.poTotalCents} />

@@ -103,7 +103,7 @@ export function PhonePreviewPage() {
         <button type="button" className="h-8 rounded-md border border-line px-2 text-[12px]" onClick={() => setLang((l) => (l === 'zh' ? 'en' : 'zh'))}>
           {lang === 'zh' ? '中' : 'EN'}
         </button>
-        <span className="text-[11.5px] text-ink-3">草稿的样子，不是真的小程序；按钮点了只写出会去哪</span>
+        <span className="text-[12px] text-ink-3">草稿的样子，不是真的小程序；按钮点了只写出会去哪</span>
       </div>
       {tapped && (
         <div className="mx-auto mt-2 w-fit rounded-md bg-ink px-3 py-1.5 text-[12.5px] text-paper" data-testid="studio-phone-tapped">

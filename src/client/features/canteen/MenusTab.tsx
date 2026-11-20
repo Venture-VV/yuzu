@@ -73,7 +73,7 @@ export function MenusTab() {
                           <div className="space-y-1">
                             <div className="flex items-center gap-1.5">
                               {menu.published ? <Badge tone="pine">已发布</Badge> : <Badge tone="neutral">草稿</Badge>}
-                              <span className="truncate text-[11.5px] text-ink-3" title={formatDateTime(menu.updatedAt)}>
+                              <span className="truncate text-[12px] text-ink-3" title={formatDateTime(menu.updatedAt)}>
                                 {menu.updatedByName}
                               </span>
                             </div>
@@ -82,7 +82,7 @@ export function MenusTab() {
                                 <li key={dish.id} className="flex items-center gap-1">
                                   <span>{dish.emoji}</span>
                                   <span className="truncate">{dish.name}</span>
-                                  {(menu.likes[dish.id] ?? 0) > 0 && <span className="ml-auto shrink-0 text-[11.5px] text-clay">❤️{menu.likes[dish.id]}</span>}
+                                  {(menu.likes[dish.id] ?? 0) > 0 && <span className="ml-auto shrink-0 text-[12px] text-clay">❤️{menu.likes[dish.id]}</span>}
                                 </li>
                               ))}
                             </ul>

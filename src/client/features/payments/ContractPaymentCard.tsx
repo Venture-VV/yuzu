@@ -110,7 +110,7 @@ export function ContractPaymentCard({ c }: { c: ContractDetail }) {
               <tr key={s.stage} className={cn(s.plannedCents === 0 && 'text-ink-3')} data-testid={`plan-stage-${s.stage}`}>
                 <td className="py-2 pr-2 align-top font-semibold">
                   {PAYMENT_STAGE_LABELS[s.stage]} {formatPercentBp(s.percentBp)}
-                  {s.condition && <span className="block text-[11.5px] font-normal text-ink-3">{s.condition}</span>}
+                  {s.condition && <span className="block text-[12px] font-normal text-ink-3">{s.condition}</span>}
                 </td>
                 <td className="py-2 pr-2 text-right align-top">
                   <Money cents={s.plannedCents} />

@@ -131,7 +131,7 @@ export function DocsTab() {
                   </span>
                   <span className="min-w-0">
                     <span className="num block truncate text-[13.5px] font-bold">{d.docNo}</span>
-                    <span className="num block text-[11.5px] text-ink-3">
+                    <span className="num block text-[12px] text-ink-3">
                       {d.docDate} · {d.createdByName}
                     </span>
                   </span>
@@ -163,7 +163,7 @@ export function DocsTab() {
                   <span className="row-start-1 justify-self-end lg:row-auto">
                     <StatusChip status={d.status} />
                   </span>
-                  <span className="hidden text-right text-[11.5px] text-ink-3 lg:block">{formatDateTime(d.createdAt)}</span>
+                  <span className="hidden text-right text-[12px] text-ink-3 lg:block">{formatDateTime(d.createdAt)}</span>
                 </button>
               </li>
             ))}

@@ -156,7 +156,7 @@ function MemberList({ title, hint, rows, value, testId }: { title: string; hint?
                   <span className="block truncate font-semibold text-ink">
                     {m.name} <span className="num font-normal text-ink-3">尾号 {m.phoneTail}</span>
                   </span>
-                  <span className="block truncate text-[11.5px] text-ink-3">
+                  <span className="block truncate text-[12px] text-ink-3">
                     {m.levelName} · 最近 {relativeTime(m.lastActivityAt)}
                   </span>
                 </span>
