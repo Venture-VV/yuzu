@@ -19,7 +19,7 @@ import { Money } from '../../components/Money';
 import { Badge, Skeleton } from '../../components/ui';
 import { GiftIssueDialog } from '../gifts/GiftIssueDialog';
 import { BackfillProvider } from './backfill';
-import { PerkRow } from './CheckoutDialog';
+import { PerkRow } from './CheckoutReceipt';
 import { fk, useCheckout } from './queries';
 
 /** 两个台共用一个补录状态（FS14）：在发卡台填了纸质单号与时间，切到收银台结账时还在 */

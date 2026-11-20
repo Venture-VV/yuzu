@@ -7,14 +7,16 @@ import { PRICE_TIER_LABELS, PRICE_TIERS, type PriceTier, type TierPrice } from '
 import { DISH_PRICE_SOURCE_LABELS, MAX_PRICE_REASON, priceChangeText, priceDiff, type DishPriceChange, type DishRow, type DishSaveResult } from '@shared/dishes';
 import { centsToInput, parseYuan } from '@shared/money';
 import { api, ApiError, errorMessage, UncertainError } from '../../lib/api';
-import { useReasons } from '../../lib/session';
+import { useReasons, useSession } from '../../lib/session';
+import { DEFAULT_STORE_ID } from '@shared/stores';
+import { storePriceChangeText, type PriceChangeStoreFilter } from '@shared/frontdesk-v8117';
 import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { formatDateTime } from '../../lib/utils';
 import { EmptyState } from '../../components/EmptyState';
 import { LoadFailed } from '../../components/LoadFailed';
 import { Dialog } from '../../components/Overlay';
 import { ReasonChips } from '../../components/ReasonChips';
-import { Badge, Button, Field, Input, MoneyInput, Notice, Skeleton } from '../../components/ui';
+import { Badge, Button, Field, Input, MoneyInput, Notice, Select, Skeleton } from '../../components/ui';
 import { UNCERTAIN_HINT, useDishPriceChanges, useOpKey } from './dishQueries';
 
 /** 各档现在的价填进输入框（元）；没有的档空着 */
@@ -148,11 +150,35 @@ export function DishPriceDialog({
   );
 }
 
-/** 全部菜品的改价记录（新的在前，最近 200 条） */
+/** 全部菜品的改价记录（新的在前，最近 200 条）；有第二家店时能按门店筛（8.1.17 BW-11：全公司的价目、某家店的本店价） */
 export function PriceHistoryDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const history = useDishPriceChanges(null, open);
+  const session = useSession();
+  const [store, setStore] = useState<PriceChangeStoreFilter>('all');
+  const history = useDishPriceChanges(null, open, store);
+  const others = session.stores.filter((s) => s.id !== DEFAULT_STORE_ID);
   return (
     <Dialog open={open} onClose={onClose} title="改价记录" description="每一次定价、改价都在这里：改前、改后、谁、几点、原因。只追加，不能改。最近 200 条，新的在前。" width="max-w-2xl">
+      {others.length > 0 && (
+        <label className="mb-3 flex flex-wrap items-center gap-2 text-[13px] text-ink-2">
+          门店
+          <Select
+            value={String(store)}
+            onChange={(e) => setStore(e.target.value === 'all' || e.target.value === 'hq' ? e.target.value : Number(e.target.value))}
+            fullWidth={false}
+            className="w-56"
+            aria-label="改价记录按门店筛"
+            data-testid="price-history-store"
+          >
+            <option value="all">全部</option>
+            <option value="hq">全公司的价目</option>
+            {others.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}的本店价
+              </option>
+            ))}
+          </Select>
+        </label>
+      )}
       <PriceChangeList query={history} emptyText="还没有定价、改价的记录" withName />
     </Dialog>
   );
@@ -169,8 +195,11 @@ function PriceChangeList({ query, emptyText, withName }: { query: ReturnType<typ
         <li key={c.id} className="py-2 text-[13px]">
           <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             {withName && <span className="text-[15px] font-bold">{c.itemName}</span>}
-            <span className="num text-[16px] font-semibold">{priceChangeText(c)}</span>
-            <Badge>{DISH_PRICE_SOURCE_LABELS[c.source]}</Badge>
+            <span className="num text-[16px] font-semibold">{c.storeId ? storePriceChangeText({ ...c, basePrice: c.basePrice ?? null }) : priceChangeText(c)}</span>
+            <Badge tone={c.storeId ? 'lake' : 'neutral'}>
+              {DISH_PRICE_SOURCE_LABELS[c.source]}
+              {c.storeName ? ` · ${c.storeName}` : ''}
+            </Badge>
           </p>
           <p className="mt-0.5 text-[12.5px] text-ink-3">
             {formatDateTime(c.createdAt)} · {c.staffName ?? '命令行'} · {c.reason}

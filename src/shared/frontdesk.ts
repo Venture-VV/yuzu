@@ -63,6 +63,11 @@ export interface FrontdeskRules {
   // VIP 柜的当场授权开关 8.0.4 起归「会员权益 → VIP 柜」（vip_locker_rules，见 @shared/membership 的 VipLockerRules）
   /** 门票跳档宽限分钟数（店主 ❓6，2026-10-29 签认 15 分钟：12 小时分界点之后 15 分钟内不跳档） */
   overtimeGraceMinutes: number;
+  /**
+   * 超时加收：在店超过 12 小时以后每超 1 小时加收多少（分，8.1.17 BW-1）；0 = 不算价（默认）。
+   * 只用来在客人卡上点「加收」时把金额先填好，照旧要人确认、照旧的权限与授权，不自动收钱
+   */
+  overtimeSurchargeHourlyCents: number;
 }
 
 /**
@@ -77,6 +82,7 @@ export const DEFAULT_FRONTDESK_RULES: FrontdeskRules = {
   selfVoidMinutes: 15,
   lostTagFeeCents: 20000,
   overtimeGraceMinutes: 15,
+  overtimeSurchargeHourlyCents: 0,
 };
 
 /** 牌号：0–2 位大写字母前缀 + 1–5 位数字 */

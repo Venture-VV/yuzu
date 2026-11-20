@@ -152,12 +152,12 @@ interface LockedIncident {
   resolved: boolean;
 }
 
-/** 锁住一条待办（本店的上报、未结离店），带上现在的责任人与有没有处理结果 */
+/** 锁住一条待办（本店的上报、未结离店、超时提醒），带上现在的责任人与有没有处理结果 */
 async function lockTodo(tx: Tx, id: number): Promise<LockedIncident> {
   const [row] = await tx<{ id: number; visitId: number; kind: VisitIncident['kind'] }[]>`
     SELECT id, visit_id, kind FROM visit_incidents WHERE id = ${id} AND store_id = ${currentStoreId()} FOR UPDATE`;
   if (!row) throw notFound('这条异常不存在，请刷新');
-  if (row.kind !== 'report' && row.kind !== 'unsettled') throw unprocessable('NOT_TODO', '只有上报、未结离店要指派和写处理结果');
+  if (row.kind !== 'report' && row.kind !== 'unsettled' && row.kind !== 'overtime') throw unprocessable('NOT_TODO', '只有上报、未结离店、超时提醒要指派和写处理结果');
   const [more] = await tx<{ visitNo: string; assigneeId: number | null; resolved: boolean }[]>`
     SELECT v.visit_no,
            coalesce((SELECT e.assignee_id FROM visit_incident_events e WHERE e.incident_id = i.id AND e.action = 'assign' ORDER BY e.id DESC LIMIT 1), i.assignee_id) AS assignee_id,

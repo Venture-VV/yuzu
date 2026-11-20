@@ -112,6 +112,8 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_card_lost: { label: '挂失会员卡', tone: 'ember' },
   member_card_deposit: { label: '会员卡押金', tone: 'pine' },
   member_card_returned: { label: '退卡', tone: 'clay' },
+  // 8.1.17 第二家店改本店价（BW-11）
+  store_price_changed: { label: '改本店价', tone: 'ember' },
 };
 
 function describe(detail: Record<string, unknown>): string {

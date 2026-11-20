@@ -14,6 +14,9 @@ export interface CheckoutPrintLine {
   amount: number;
   /** 技师与点钟 / 轮钟，例如「08 号 小李 · 点钟」（v0.7.0）；没有技师时为 null */
   technician: string | null;
+  /** 「流水」的订单详情才带（8.1.17 BW-12）：所属部门（与看板、对账包同一个归法）、摊到这一行的优惠（分） */
+  category?: string;
+  discount?: number;
 }
 
 export interface WalletBalance {

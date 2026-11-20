@@ -37,6 +37,7 @@ import { consumeLineVoidGrant } from '../auth/grants';
 import { assertCanFix, loadFrontdeskRules } from './frontdesk/common';
 import { loadDiningRules } from './dining';
 import { loadSettings } from './settings';
+import { assertLineVoidPermission } from './dining-v8117';
 import { currentStoreId } from '../lib/store-context';
 
 export type VoidApproval = { approval: 'small' | 'self' | 'manager' | 'grant'; approverName?: string; approverId?: number };
@@ -51,10 +52,12 @@ export async function authorizeLineVoid(
   opts: { line: { id: number; source: string; amount: number; name: string; postedBy: number; postedAt: string }; actor: Actor; at: Date; grantId?: string; what: string },
 ): Promise<VoidApproval> {
   const { line, actor } = opts;
+  // 8.1.17（BW-4）：退菜按出品口——餐饮的菜要这道菜所在出品口的「退菜」权限（康美部有水吧、果吧），别的明细照旧要「前台挂账」。
+  // 逐行核对（退主菜带加料时每一行都过这一步），之后原因、时限、授权的规矩照旧
+  await assertLineVoidPermission(tx, actor, line);
   const dining = await loadDiningRules(tx);
-  // 小额直接退与下单同一套权限：要「前台挂账」（手牌、桌台的退菜接口本来就要；桌台上的还要「点单」，由接口拦），
-  // 只有「点单」、没有「前台挂账」的岗位本来就不能下单，也不能退（Codex 审查 f14210c）
-  if (isSmallDishVoid(dining, { source: line.source, amount: Number(line.amount) }) && can(actor, 'frontdesk.operate')) {
+  // 小额直接退：能退这个出品口的菜的就能直接退（上一步已核对；原来是「前台挂账」，Codex 审查 f14210c）
+  if (isSmallDishVoid(dining, { source: line.source, amount: Number(line.amount) })) {
     return { approval: 'small' };
   }
   if (can(actor, 'frontdesk.correct')) return { approval: 'manager' };

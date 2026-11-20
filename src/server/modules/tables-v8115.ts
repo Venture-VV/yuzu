@@ -199,10 +199,11 @@ interface LockedTable {
   name: string;
   active: boolean;
   state: TableState;
+  maintenanceUntil: Date | null;
 }
 
 async function lockTable(tx: Tx, tableId: number): Promise<LockedTable> {
-  const [t] = await tx<LockedTable[]>`SELECT id, name, active, state FROM dining_tables WHERE id = ${tableId} AND store_id = ${currentStoreId()} FOR UPDATE`;
+  const [t] = await tx<LockedTable[]>`SELECT id, name, active, state, maintenance_until FROM dining_tables WHERE id = ${tableId} AND store_id = ${currentStoreId()} FOR UPDATE`;
   if (!t) throw notFound('桌台不存在，请刷新后重试');
   return t;
 }
@@ -265,12 +266,18 @@ export async function maintainTable(deps: Deps, tableId: number, raw: unknown, c
   return actionResult(deps.sql, run);
 }
 
-/** 恢复：维修中 → 可用 */
-export async function restoreTable(deps: Deps, tableId: number, raw: unknown, ctx: OpContext): Promise<TableActionResult> {
+/**
+ * 恢复：维修中 → 可用。到点自动恢复（8.1.17 BW-2，tables-v8117.ts）走的也是这里（同样的锁与记录，经办人是系统账号「系统」），
+ * 另带 dueAt：锁住以后核对预计恢复时间确实到了（挑候选到锁住之间有人恢复后又重新报修、改了预计时间的不动，MAINTENANCE_NOT_DUE）
+ */
+export async function restoreTable(deps: Deps, tableId: number, raw: unknown, ctx: OpContext, opts: { dueAt?: Date } = {}): Promise<TableActionResult> {
   const { clientKey: key } = parse(KeyInput, raw);
   const run = await runTableOp(deps, ctx, { key, opType: 'table_state', requestHash: hashRequest({ action: 'restore', tableId }) }, async (tx, at) => {
     const t = await lockTable(tx, tableId);
     if (t.state !== 'maintenance') throw conflict('TABLE_NOT_MAINTENANCE', `桌台「${t.name}」没有在维修，不用恢复`);
+    if (opts.dueAt && (!t.maintenanceUntil || new Date(t.maintenanceUntil).getTime() > opts.dueAt.getTime())) {
+      throw conflict('MAINTENANCE_NOT_DUE', `桌台「${t.name}」还没到预计恢复时间`);
+    }
     await tx`UPDATE dining_tables SET state = 'available', maintenance_reason = NULL, maintenance_until = NULL, state_since = ${at}, updated_at = now() WHERE id = ${t.id}`;
     const date = await businessDate(tx, deps, at);
     const eventId = await insertEvent(tx, { tableId: t.id, kind: 'restore' }, { key, actorId: ctx.actor.id, date, at });

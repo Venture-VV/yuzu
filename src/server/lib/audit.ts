@@ -324,7 +324,9 @@ export type AuditAction =
   | 'clock_announcer'
   // 8.1.15 会员卡押金（收、退，detail.kind 写是哪一样）、退卡
   | 'member_card_deposit'
-  | 'member_card_returned';
+  | 'member_card_returned'
+  // 8.1.17 第二家店改本店价（docs/FRONTDESK_V8117.md 第 6 节，BW-11）：改前改后、那时的全公司价、原因；菜品的另记进改价记录
+  | 'store_price_changed';
 
 export interface AuditEntry {
   staffId: number | null;

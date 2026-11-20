@@ -353,6 +353,8 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '190_room_center.sql',
   '191_technician_admin.sql',
   '192_member_cards_v8115.sql',
+  '198_store_price_changes.sql',
+  '199_dining_voids_v8117.sql',
 ];
 
 /** 从 first（含）起到最后一个迁移：升级用例从某个版本的库升级时应该应用的迁移 */

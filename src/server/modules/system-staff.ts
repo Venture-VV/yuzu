@@ -106,3 +106,40 @@ export async function systemStockActor(db: Db): Promise<Actor> {
     mustChangePassword: false,
   };
 }
+
+// ───────────────────────── 系统账号「系统」（8.1.17） ───────────────────────
+
+export const SYSTEM_AUTO_USERNAME = 'system.auto';
+const SYSTEM_AUTO_NAME = '系统';
+
+/**
+ * 系统账号「系统」的编号：每分钟的任务自己记的事——超时提醒（异常待办）、桌台到点自动恢复——的经办人，页面上写「系统」
+ * （docs/FRONTDESK_V8117.md）。没有就建，不能登录、员工名单里不显示
+ */
+export async function systemAutoStaffId(db: Db): Promise<number> {
+  const [row] = await db<{ id: number; system: boolean }[]>`SELECT id, system FROM staff WHERE username = ${SYSTEM_AUTO_USERNAME}`;
+  if (row?.system) return row.id;
+  if (!row) {
+    const [made] = await db<{ id: number }[]>`
+      INSERT INTO staff (username, display_name, role, password_hash, active, must_change_password, system)
+      VALUES (${SYSTEM_AUTO_USERNAME}, ${SYSTEM_AUTO_NAME}, 'clerk', 'system:no-login', false, false, true)
+      ON CONFLICT (username) DO NOTHING RETURNING id`;
+    if (made) return made.id;
+    const [again] = await db<{ id: number; system: boolean }[]>`SELECT id, system FROM staff WHERE username = ${SYSTEM_AUTO_USERNAME}`;
+    if (again?.system) return again.id;
+  }
+  throw new AppError(500, 'SYSTEM_ACCOUNT_TAKEN', `员工账号 ${SYSTEM_AUTO_USERNAME} 被占用了，超时提醒、桌台自动恢复要用这个系统账号；请店主改掉那位员工的账号名`);
+}
+
+/** 系统账号「系统」当经办人：没有岗位权限（走的写入路径自己不按权限判断，接口的权限由调用方——每分钟的任务——不经过） */
+export async function systemAutoActor(db: Db): Promise<Actor> {
+  return {
+    id: await systemAutoStaffId(db),
+    username: SYSTEM_AUTO_USERNAME,
+    displayName: SYSTEM_AUTO_NAME,
+    role: 'clerk',
+    duties: [],
+    mustChangePassword: false,
+    permissions: [],
+  };
+}

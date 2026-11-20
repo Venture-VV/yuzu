@@ -26,6 +26,7 @@ import {
   type KitchenStatus,
   type MenuDish,
 } from '@shared/dining';
+import { MAX_DIRTY_ALERT_MINUTES } from '@shared/frontdesk-v8117';
 import { defaultTier, type TierPrice } from '@shared/catalog';
 import { can } from '@shared/permissions';
 import type { FrontdeskOpLookup } from '@shared/frontdesk';
@@ -453,6 +454,9 @@ const RulesInput = z.object({
     .max(MAX_VOID_FREE_CENTS, `最多 ¥${MAX_VOID_FREE_CENTS / 100}`),
   // 8.1.15（块 B1）：结账以后桌台先待清台
   clearAfterCheckout: z.boolean(),
+  // 8.1.17（BW-2）：维修到点自动恢复、待清台多久算久了
+  autoRestore: z.boolean(),
+  dirtyAlertMinutes: z.number('分钟数必须是整数').int('分钟数必须是整数').min(1, '至少 1 分钟').max(MAX_DIRTY_ALERT_MINUTES, `最多 ${MAX_DIRTY_ALERT_MINUTES} 分钟`),
 });
 const StationInput = z.object({
   name: z.string().trim().min(1, '请填写档口名称').max(MAX_STATION_NAME, `档口名称最多 ${MAX_STATION_NAME} 字`),

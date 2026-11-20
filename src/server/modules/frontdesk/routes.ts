@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { COUPON_PLATFORMS } from '@shared/checkout';
 import { ISO_DATE } from '@shared/business-date';
 import { can } from '@shared/permissions';
-import { guard } from '../../auth/guard';
+import { guard, guardAny } from '../../auth/guard';
+import { MAX_OVERTIME_HOURLY_CENTS, VOID_PERMISSIONS } from '@shared/frontdesk-v8117';
 import { readSnapshot } from '../../db';
 import { checkoutDaySummary } from '../settlement';
 import type { Deps } from '../../lib/context';
@@ -48,6 +49,12 @@ const RulesInput = z.object({
   selfVoidMinutes: z.number().int().min(0, '分钟数不能为负').max(120, '最多 120 分钟'),
   lostTagFeeCents: z.number().int().min(0, '赔偿金额不能为负').max(10_000_00, '赔偿金额最多 10,000 元'),
   overtimeGraceMinutes: z.number().int().min(0, '宽限分钟数不能为负').max(120, '宽限最多 120 分钟'),
+  // 8.1.17（BW-1）：超时加收每超 1 小时多少（分），0 = 不算价；只用来把「加收」的金额先填好
+  overtimeSurchargeHourlyCents: z
+    .number('金额必须是整数（分）')
+    .int('金额必须是整数（分）')
+    .min(0, '金额不能为负')
+    .max(MAX_OVERTIME_HOURLY_CENTS, `每小时最多 ¥${MAX_OVERTIME_HOURLY_CENTS / 100}`),
 });
 
 export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
@@ -118,10 +125,12 @@ export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
   // ── 挂账与更正 ──
   app.post('/api/frontdesk/visits/:id/charges', { preHandler: guard('frontdesk.operate') }, async (req) => {
     const { id } = parse(idParam, req.params);
-    return postCharges(deps, id, req.body as PostInputData, ctxOf(req));
+    // 8.1.17（BW-3）：发卡台「加项目」里进厨房的菜按出品口的下单权限核对（与点单页同一个函数）
+    return postCharges(deps, id, req.body as PostInputData, ctxOf(req), { outlets: true });
   });
 
-  app.post('/api/frontdesk/lines/:id/void', { preHandler: guard('frontdesk.operate') }, async (req) => {
+  // 8.1.17（BW-4）：康美部能退水吧、果吧的菜——有任一项「退菜：某出品口」的也进得来，逐行按出品口核对（dining-v8117.ts）
+  app.post('/api/frontdesk/lines/:id/void', { preHandler: guardAny('frontdesk.operate', ...VOID_PERMISSIONS) }, async (req) => {
     const { id } = parse(idParam, req.params);
     return voidLine(deps, id, req.body, ctxOf(req));
   });

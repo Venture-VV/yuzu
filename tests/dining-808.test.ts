@@ -160,7 +160,7 @@ describe('退菜按金额分级（B02）', () => {
 describe('小额退菜与下单同一套权限（B02，Codex 审查 f14210c）', () => {
   // 8.1.15（块 B3，docs/DINING_V8115.md 第 4 节）起点单按出品口核对「在某个出品口下单」，不再另要「前台挂账」（康美部只有水吧、果吧）；
   // 退菜（含小额直接退）照旧要「前台挂账」
-  it('只有「点单」、没有「前台挂账」的岗位：看得到点单页；有这个出品口的下单权限能下单，没有的被拒；小额退菜照旧被拒；权限恢复后照常小额直接退', async () => {
+  it('只有「点单」、没有「前台挂账」的岗位：看得到点单页；有这个出品口的下单权限能下单，没有的被拒；没有这个出品口的退菜权限，小额退菜也被拒；权限恢复后照常小额直接退', async () => {
     const v = await enter();
     expect((await order(v, [{ itemId: item['鲜榨橙汁']!, quantity: 1 }], 2800, ctx.owner)).status).toBe(200);
     const juice = await lineOf(v, '鲜榨橙汁');
@@ -172,10 +172,13 @@ describe('小额退菜与下单同一套权限（B02，Codex 审查 f14210c）',
       expect((await api(ctx.app, ctx.clerk, 'GET', '/api/dining/menu')).status).toBe(200);
       const ordered = await order(v, [{ itemId: item['鲜榨橙汁']!, quantity: 1 }], 2800);
       expect(ordered.status, JSON.stringify(ordered.body)).toBe(200);
-      // 鲜榨橙汁（价目分类「饮品」、不在水吧做）按默认归在餐厅：去掉「在餐厅下单」就点不了
-      await without(['frontdesk.operate', 'dining.orderRestaurant']);
+      // 鲜榨橙汁（价目分类「饮品」、不在水吧做）按默认归在餐厅：去掉「在餐厅下单」就点不了；
+      // 8.1.17（BW-4）起退菜按出品口的「退菜」权限（不再看「前台挂账」）：去掉「退菜：餐厅」才退不了
+      await without(['frontdesk.operate', 'dining.orderRestaurant', 'dining.voidRestaurant']);
       expect((await order(v, [{ itemId: item['鲜榨橙汁']!, quantity: 1 }], 2800)).status).toBe(403);
-      expect((await voidLine(juice.id, { reason: '客人点错了' })).status).toBe(403);
+      const denied = await voidLine(juice.id, { reason: '客人点错了' });
+      expect(denied.status).toBe(403);
+      expect(denied.body.error.code).toBe('OUTLET_VOID_FORBIDDEN');
       expect((await lineOf(v, '鲜榨橙汁'))?.id).toBe(juice.id);
     } finally {
       await ctx.sql`DELETE FROM settings WHERE key = 'role_permissions'`;

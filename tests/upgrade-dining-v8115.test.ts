@@ -103,7 +103,11 @@ describe('迁移 188：桌台动作、出品口下单权限与康美部', () => 
     // 岗位权限：加了「餐饮点单」的补上三个出品口；没加的、去掉了的不动
     const perms = async () => (await sql<{ value: Record<string, { add: string[]; remove: string[] }> }[]>`SELECT value FROM settings WHERE key = 'role_permissions'`)[0]!.value;
     const v = await perms();
-    expect(v.backoffice).toEqual({ add: ['dining.order', 'frontdesk.operate', 'dining.orderRestaurant', 'dining.orderWater', 'dining.orderFruit'], remove: [] });
+    // （之后的迁移 199，8.1.17 BW-4：加了「前台挂账」的再补上三个出品口的退菜权限）
+    expect(v.backoffice).toEqual({
+      add: ['dining.order', 'frontdesk.operate', 'dining.orderRestaurant', 'dining.orderWater', 'dining.orderFruit', 'dining.voidRestaurant', 'dining.voidWater', 'dining.voidFruit'],
+      remove: [],
+    });
     expect(v.account_manager).toEqual({ add: ['dining.kitchen'], remove: [] });
     expect(v.clerk).toEqual({ add: [], remove: ['dining.order'] });
     // 职责名单、岗位权限两段再跑一次：什么都不变（职责照旧认、权限不重复加）

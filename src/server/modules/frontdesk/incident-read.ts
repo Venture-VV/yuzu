@@ -14,7 +14,19 @@ type IncidentRow = Omit<VisitIncident, 'resolved'> & { resolvedNote: string | nu
 
 const INCIDENT_COLUMNS = (db: Db) => db`
   i.id, i.visit_id, i.kind, i.note, i.amount_cents, ap.display_name AS approved_by_name, cs.display_name AS created_by_name, i.created_at,
-  a.assignee_id, asg.display_name AS assignee_name, r.note AS resolved_note, rs.display_name AS resolved_by_name, r.created_at AS resolved_at`;
+  a.assignee_id, asg.display_name AS assignee_name, r.note AS resolved_note, rs.display_name AS resolved_by_name, r.created_at AS resolved_at,
+  i.overtime_hours`;
+
+/**
+ * 「没处理完的待办」（i 是异常，v 是它的来访；8.1.17 起手牌板、发卡台顶上的条数与「异常待办」清单都用这一句）：
+ * 上报、未结离店、超时提醒，没写处理结果的；超时提醒另外要客人还在店、这次来访没有更高一级的超时提醒（被盖过的不再算）。
+ * 页面上同一个口径是 @shared/frontdesk-risk 的 isOpenTodo
+ */
+export const openTodoWhere = (db: Db) => db`
+  i.kind IN ('report', 'unsettled', 'overtime')
+  AND NOT EXISTS (SELECT 1 FROM visit_incident_events e WHERE e.incident_id = i.id AND e.action = 'resolve')
+  AND (i.kind <> 'overtime' OR (v.status = 'open' AND NOT EXISTS (
+    SELECT 1 FROM visit_incidents h WHERE h.visit_id = i.visit_id AND h.kind = 'overtime' AND h.overtime_hours > i.overtime_hours)))`;
 /** 现在的责任人 = 最后一次指派的那位，没指派过的是登记时指的 */
 const INCIDENT_FROM = (db: Db) => db`
   visit_incidents i JOIN staff cs ON cs.id = i.created_by LEFT JOIN staff ap ON ap.id = i.approved_by
@@ -32,6 +44,7 @@ const toIncident = <T extends IncidentRow>({ resolvedNote, resolvedByName, resol
   amountCents: r.amountCents === null ? null : Number(r.amountCents),
   assigneeId: r.assigneeId === null ? null : Number(r.assigneeId),
   resolved: resolvedAt ? { note: resolvedNote ?? '', byName: resolvedByName ?? '', at: resolvedAt } : null,
+  overtimeHours: r.overtimeHours === null ? null : Number(r.overtimeHours),
 });
 
 /** 一次来访上登记的异常，按时间先后 */
@@ -63,20 +76,19 @@ export function incidentText(i: Pick<VisitIncident, 'kind' | 'note' | 'amountCen
 /** 没处理完的待办条数：本店全部，或某几次来访各几条 */
 export async function openTodoCount(db: Db): Promise<number> {
   const [row] = await db<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM visit_incidents i
-    WHERE i.store_id = ${currentStoreId()} AND i.kind IN ('report', 'unsettled')
-      AND NOT EXISTS (SELECT 1 FROM visit_incident_events e WHERE e.incident_id = i.id AND e.action = 'resolve')`;
+    SELECT count(*)::int AS n FROM visit_incidents i JOIN visits v ON v.id = i.visit_id
+    WHERE i.store_id = ${currentStoreId()} AND ${openTodoWhere(db)}`;
   return row!.n;
 }
 
-/** 「异常待办」：本店没处理完的上报、未结离店（先登记的在前），与能指派给谁 */
+/** 「异常待办」：本店没处理完的上报、未结离店、超时提醒（先登记的在前），与能指派给谁 */
 export async function listTodos(db: Db): Promise<IncidentTodoList> {
   const rows = await db<(IncidentRow & Omit<IncidentTodo, keyof VisitIncident>)[]>`
     SELECT ${INCIDENT_COLUMNS(db)}, v.visit_no, v.status AS visit_status, t.code AS tag_code, v.zone, m.name AS member_name, v.guest_label,
            b.amount_cents AS bill_amount_cents, v.checked_in_at
     FROM ${INCIDENT_FROM(db)}
     JOIN visits v ON v.id = i.visit_id JOIN hand_tags t ON t.id = v.tag_id JOIN bills b ON b.id = v.bill_id LEFT JOIN members m ON m.id = i.member_id
-    WHERE i.store_id = ${currentStoreId()} AND i.kind IN ('report', 'unsettled') AND r.id IS NULL
+    WHERE i.store_id = ${currentStoreId()} AND ${openTodoWhere(db)}
     ORDER BY i.id LIMIT 200`;
   const staff = await db<{ id: number; name: string; role: keyof typeof ROLE_LABELS }[]>`
     SELECT id, display_name AS name, role FROM staff WHERE active AND role IN ${db(ASSIGNEE_ROLES as unknown as string[])} ORDER BY display_name, id`;

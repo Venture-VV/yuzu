@@ -124,7 +124,8 @@ export function overstayOf(minutes: number): { level: 1 | 2 | 3; label: string; 
   return t ? { level: t.level, label: t.label, hours: t.hours } : null;
 }
 
-export const INCIDENT_KINDS = ['remind', 'surcharge', 'report', 'away', 'return', 'unsettled'] as const;
+/** overtime 超时提醒（8.1.17 BW-1）：到 12 / 24 / 72 小时由每分钟的任务记一条（经办人「系统」），不能在页面上登记 */
+export const INCIDENT_KINDS = ['remind', 'surcharge', 'report', 'away', 'return', 'unsettled', 'overtime'] as const;
 export type IncidentKind = (typeof INCIDENT_KINDS)[number];
 export const INCIDENT_KIND_LABELS: Record<IncidentKind, string> = {
   remind: '已提醒',
@@ -133,9 +134,13 @@ export const INCIDENT_KIND_LABELS: Record<IncidentKind, string> = {
   away: '临时外出',
   return: '返回',
   unsettled: '未结离店',
+  overtime: '超时提醒',
 };
-/** 要有人跟进、写处理结果的两种（进「异常待办」） */
-export const TODO_KINDS: readonly IncidentKind[] = ['report', 'unsettled'];
+/**
+ * 要有人跟进、写处理结果的（进「异常待办」）：上报、未结离店，与超时提醒（8.1.17）——超时提醒在客人离店以后、
+ * 有了更高一级的提醒以后不再算待办（openTodoOf）
+ */
+export const TODO_KINDS: readonly IncidentKind[] = ['report', 'unsettled', 'overtime'];
 
 /** 加收挂到账单上的明细名称 */
 export const SURCHARGE_LINE_NAME = '超时加收';
@@ -156,6 +161,18 @@ export interface VisitIncident {
   assigneeId: number | null;
   assigneeName: string | null;
   resolved: { note: string; byName: string; at: string } | null;
+  /** 超时提醒是哪一级（12 / 24 / 72 小时，8.1.17）；别的种类为 null */
+  overtimeHours: number | null;
+}
+
+/**
+ * 这一条异常现在还算不算待办（8.1.17）：上报、未结离店写了处理结果就不算；超时提醒另外在客人离店以后、
+ * 这次来访有了更高一级的超时提醒以后也不算（服务端「异常待办」、手牌板的待办数是同一个口径，见 incident-read.ts 的 OPEN_TODO）
+ */
+export function isOpenTodo(i: Pick<VisitIncident, 'kind' | 'resolved' | 'overtimeHours'>, all: readonly Pick<VisitIncident, 'kind' | 'overtimeHours'>[], visitOpen: boolean): boolean {
+  if (!TODO_KINDS.includes(i.kind) || i.resolved) return false;
+  if (i.kind !== 'overtime') return true;
+  return visitOpen && !all.some((x) => x.kind === 'overtime' && (x.overtimeHours ?? 0) > (i.overtimeHours ?? 0));
 }
 
 /** 「异常待办」的一行：没处理完的上报、未结离店 */

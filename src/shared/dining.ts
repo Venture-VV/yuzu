@@ -31,6 +31,10 @@ export interface DiningRules {
   voidFreeCents: number;
   /** 结账以后桌台先「待清台」，点「清台」才回到可用（8.1.15 块 B1，默认开）；关了结账后直接可用，与原来一样 */
   clearAfterCheckout: boolean;
+  /** 维修到了预计恢复时间自动恢复（8.1.17 BW-2，默认关）：开了每分钟的任务替人点「恢复」，桌台记录的经办人写「系统」 */
+  autoRestore: boolean;
+  /** 待清台超过多少分钟算久了（8.1.17 BW-2，默认 15）：格子上标出、进餐饮的待办数 */
+  dirtyAlertMinutes: number;
 }
 
 export const DEFAULT_DINING_RULES: DiningRules = {
@@ -41,6 +45,8 @@ export const DEFAULT_DINING_RULES: DiningRules = {
   tablesEnabled: true,
   voidFreeCents: 5000,
   clearAfterCheckout: true,
+  autoRestore: false,
+  dirtyAlertMinutes: 15,
 };
 
 /** 小额退菜上限最多 ¥1,000 */

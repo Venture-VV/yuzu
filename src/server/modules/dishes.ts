@@ -617,15 +617,21 @@ async function changeDishPrice(deps: Deps, id: number, raw: unknown, ctx: OpCont
 const HistoryQuery = z.object({
   itemId: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
+  /** 按门店筛（8.1.17 BW-11）：hq 只看全公司的价目，数字只看那家店的本店价；不带是全部 */
+  store: z.union([z.literal('hq'), z.coerce.number().int().positive()]).optional(),
 });
 
-/** 改价记录：新的在前；给了菜品只看这一道 */
+/** 改价记录：新的在前；给了菜品只看这一道；本店价的（8.1.17）带门店与那时的全公司价，能按门店筛 */
 async function dishPriceChanges(db: Db, raw: unknown): Promise<DishPriceChange[]> {
   const q = parse(HistoryQuery, raw ?? {});
+  const where = [...(q.itemId ? [db`c.item_id = ${q.itemId}`] : []), ...(q.store === 'hq' ? [db`c.store_id IS NULL`] : q.store !== undefined ? [db`c.store_id = ${q.store}`] : [])];
   return db<DishPriceChange[]>`
-    SELECT c.id, c.item_id, c.item_name, c.tier, c.old_price, c.new_price, c.reason, c.source, s.display_name AS staff_name, c.created_at
-    FROM dish_price_changes c LEFT JOIN staff s ON s.id = c.staff_id
-    ${q.itemId ? db`WHERE c.item_id = ${q.itemId}` : db``} ORDER BY c.id DESC LIMIT ${q.limit}`;
+    SELECT c.id, c.item_id, c.item_name, c.tier, c.old_price, c.new_price, c.reason, c.source, s.display_name AS staff_name, c.created_at,
+           c.store_id, st.name AS store_name, c.base_price
+    FROM dish_price_changes c LEFT JOIN staff s ON s.id = c.staff_id LEFT JOIN stores st ON st.id = c.store_id
+    ${where.length ? db`WHERE ${where.reduce((a, b) => db`${a} AND ${b}`)}` : db``} ORDER BY c.id DESC LIMIT ${q.limit}`.then((rows) =>
+    rows.map((r) => ({ ...r, storeId: r.storeId === null ? null : Number(r.storeId), basePrice: r.basePrice === null ? null : Number(r.basePrice) })),
+  );
 }
 
 const yuan = (cents: number | null) => (cents === null ? null : cents / 100);

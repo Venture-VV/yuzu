@@ -20,7 +20,7 @@ import { useResetOnOpen } from '../../lib/useResetOnOpen';
 import { Money } from '../../components/Money';
 import { Dialog } from '../../components/Overlay';
 import { Button, Notice, Skeleton, Textarea } from '../../components/ui';
-import { CheckoutReceipt } from '../frontdesk/CheckoutDialog';
+import { CheckoutReceipt } from '../frontdesk/CheckoutReceipt';
 import { PaymentsSection, usePayRows } from '../frontdesk/payments';
 import { PendingPanel, useFrontdeskOp } from '../frontdesk/pending';
 import { PrintButton } from '../print/PrintButton';

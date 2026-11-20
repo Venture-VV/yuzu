@@ -40,7 +40,7 @@ import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, IconButton, Notice, PendingBadge, Skeleton, Textarea } from '../../components/ui';
 import { DishVoidDialog } from '../dining/DishVoid';
-import { TODO_KINDS } from '@shared/frontdesk-risk';
+import { isOpenTodo } from '@shared/frontdesk-risk';
 import { GroupMark, VipChip, VisitStatusChips, ZONE_STYLE } from './parts';
 import { FRONTDESK_OP_LABELS, useFrontdeskPending } from './pending';
 import { stayText, useServerNow } from './queries';
@@ -117,7 +117,7 @@ export function BillPanel({
   const active = visit.lines.filter((l) => l.status === 'active');
   const voided = visit.lines.filter((l) => l.status === 'voided');
   // 异常（8.1.15）：这次来访记过几条、其中没处理完的待办几条
-  const openTodos = visit.incidents.filter((i) => TODO_KINDS.includes(i.kind) && !i.resolved).length;
+  const openTodos = visit.incidents.filter((i) => isOpenTodo(i, visit.incidents, open)).length;
   const selfMinutes = rules?.selfVoidMinutes ?? 10;
   const canFix = (ownerId: number, at: string) => can('frontdesk.correct') || (ownerId === session.staff.id && (now - new Date(at).getTime()) / 60_000 <= selfMinutes);
 
