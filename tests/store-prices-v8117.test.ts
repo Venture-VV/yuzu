@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { DishPriceChange } from '../src/shared/dishes';
+import type { DishPriceChange, DishesBoard } from '../src/shared/dishes';
 import { storePriceChangeText } from '../src/shared/frontdesk-v8117';
 import { api, login, setup, type TestContext } from './helpers';
 
@@ -92,10 +92,13 @@ describe('BW-11 本店价改价留痕', () => {
     const last = (await changes(`?store=${ft}`)).find((x) => x.itemId === dishId)!;
     expect(last).toMatchObject({ oldPrice: cur, newPrice: null, basePrice: 3800 });
     // 全公司改价（菜品管理）也有一条：按门店筛
+    // 改价带页面看到的版本（8.1.16）
+    const board = await api<DishesBoard>(ctx.app, ctx.owner, 'GET', '/api/dining/dishes');
     const hqChange = await api(ctx.app, ctx.owner, 'POST', `/api/dining/dishes/${dishId}/price`, {
       clientKey: randomUUID(),
       prices: { standard: 4000 },
       expected: { standard: 3800 },
+      rev: board.body.dishes.find((d) => d.id === dishId)!.rev,
       reason: '食材涨价',
     });
     expect(hqChange.status, JSON.stringify(hqChange.body)).toBe(200);

@@ -38,9 +38,10 @@
 
 ## 3. 已执行的验证
 
-- 门禁：lint、typecheck、check:code、check:docs、test:unit、build 通过；check:gov 与 format:check 只报 8.1.16 分支里还在做的房态中心（`src/shared/room-center.ts` 四个没人引用的导出、`src/client/features/room-center/` 七个文件的排版），8.1.17 的计数都已写进基线。
-- 集成：两个功能包的新用例与相关旧用例合在一起 20 个文件 201 项通过（`dishes-v8117`、`dish-combos-v8117`、`emenu-v8117`、`frontdesk-v8117`、`dining-voids-v8117`、`tables-reminders-v8117`、`store-prices-v8117`、`upgrade-frontdesk-v8117`、`upgrade-dishes`、`dishes`、`dining*`、`emenu`、`frontdesk`、`op-fences-constraint`、`migrations-list`、`roles`、`stock-usage`）；全量 `npm test`（`a98bd9e`，本地 PG16、单库串行）263 个文件 2448 项通过、3 项跳过，只有 `upgrade-shift` 没过——它在 015 时期的库上用现版本的结账造数据，结账要结束房间登记单（迁移 190 才有那张表，8.1.16 的房态）；照这份用例的做法临时建表（`da2cb6e`），单跑通过。
-- 浏览器（门店电脑）：样式改到的页面 35 个用例文件 121 项通过；`ys-v8117` 四个尺寸通过；前台几个用例在 CI 同样的库与顺序（frontdesk-808 → frontdesk-v8117 → frontdesk → guide → locations）上 21 项通过；表格包换过的页面 20 多个用例文件通过（详见 PR 评论）。
+- 门禁：lint、typecheck、check:code、check:docs、check:gov（小字 0、手写表格 36、手写弹窗 5）、format:check、test:unit（401 项）、build、check:bundle 通过。
+- 集成：合进 8.1.16 以后全量 `npm test`（本地 PG16、单库串行）265 个文件 2465 项，只有 `store-prices-v8117` 一项没过——全公司改价要带页面看到的版本（8.1.16），用例没带；补上以后单跑 5 项通过。之前的一次（合进以前）里 `upgrade-shift` 要跟上房态的结账，已改（`da2cb6e`，8.1.16 里同样改了）。
+- 菜品的「结果待确认」：`dishes-v8117` 加一条（晚到的旧批量下架被拒绝、旧版本删不掉、查回、作废排序后原请求 `OP_ABANDONED`）；菜品相关 7 个文件 65 项通过。
+- 浏览器（演示库，门店电脑）：`ys-v8117` 四个尺寸（页面单子加上前台、收银、餐饮、菜品、房态中心、钟房、技师）通过；dishes、dishes-v8117、clockroom、room-center、technician-admin、technicians 11 项通过，平板横屏 2 项通过（其余在平板上本来就跳过）。合并以前：样式改到的页面 35 个用例文件 121 项、前台几个用例在 CI 同样的库与顺序上 21 项、表格包换过的页面 20 多个用例文件通过。全部浏览器用例看 CI（三组）。
 
 ## 4. 验收要点
 
