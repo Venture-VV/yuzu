@@ -19,3 +19,7 @@ recon/
 brand-fonts/
 # 开发 AI 的并行工作区（git worktree，每个都是一份完整的检出）：不进 Git，检查脚本（check:docs 按 git 认得的文件扫）也不该扫到
 .claude/worktrees/
+# CI 的测试计划与分组结果（scripts/test-plan.mjs --ci）
+test-plan.json
+vitest-results/
+e2e-results/
