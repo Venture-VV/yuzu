@@ -234,7 +234,7 @@ export function DirectImportPage() {
                         </td>
                         <td className="num pr-2 text-right whitespace-nowrap">
                           {r.priceCents !== null ? `¥${formatAmount(r.priceCents)}` : '—'}
-                          {r.material && <span className="text-[11.5px] text-ink-3">/{r.material.purchaseUnit}</span>}
+                          {r.material && <span className="text-[12px] text-ink-3">/{r.material.purchaseUnit}</span>}
                         </td>
                         <td className="num pr-2 text-right whitespace-nowrap">{r.amountCents !== null ? `¥${formatAmount(r.amountCents)}` : '—'}</td>
                         <td className="pr-2 whitespace-nowrap">{r.group || '—'}</td>

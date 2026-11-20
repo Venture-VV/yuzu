@@ -164,6 +164,12 @@ function refOfResponse(type: ErpOpType, data: unknown): ErpOpRef | null {
     // 员工食堂第二期：柚子信箱的回信返回那一条（id）
     case 'canteen_reply':
       return typeof d.id === 'number' ? { refId: d.id } : null;
+    // 会员建档（8.1.15）：返回那位会员
+    case 'member_create':
+      return typeof d.id === 'number' ? { refId: d.id } : null;
+    // 退卡退押金（8.1.15）：返回那位会员
+    case 'member_card_return':
+      return typeof d.memberId === 'number' ? { refId: d.memberId } : null;
   }
 }
 

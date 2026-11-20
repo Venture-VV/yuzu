@@ -124,7 +124,7 @@ export const MaterialPicker = forwardRef<
                 ) : (
                   <span className="shrink-0 text-right">
                     <Qty milli={m.stockMilli} unit={m.inventoryUnit} className={cn('text-[13px] font-bold', m.isLow && 'text-clay')} />
-                    {m.isLow && <span className="block text-[11px] font-semibold text-clay">低于提醒</span>}
+                    {m.isLow && <span className="block text-[12px] font-semibold text-clay">低于提醒</span>}
                   </span>
                 )}
                 {!reason && i === cursor && <Plus className="size-4 shrink-0 text-pine" />}
@@ -248,7 +248,7 @@ export function QtyInput({
           <span className="flex shrink-0 items-center border-l border-line bg-paper-2/70 px-2.5 text-[12.5px] font-bold text-ink-2">{material.inventoryUnit}</span>
         )}
       </div>
-      <p className={cn('mt-1 h-4 truncate text-right text-[11.5px]', r.error ? 'font-semibold text-clay' : 'text-ink-3')}>
+      <p className={cn('mt-1 h-4 truncate text-right text-[12px]', r.error ? 'font-semibold text-clay' : 'text-ink-3')}>
         {r.error
           ? r.error
           : r.milli !== null && value.unit === 'pack' && pack

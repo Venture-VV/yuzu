@@ -2,6 +2,7 @@
 // 账号：店主 linlan / 前台 xiaozhou / 值班经理 zhangjl，密码 yuzu2026。手牌池为店主 2026-10-27 的真实柜号清单（747 个）。
 // 会改数据的业务流程只在门店电脑尺寸跑（每次自动挑空闲手牌，可重复执行）；三种尺寸都检查双栏布局与金额不截断。
 import { expect, test, type APIRequestContext, type Browser, type Page } from '@playwright/test';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -18,8 +19,6 @@ async function pressF2(page: Page) {
   await expect(page.getByTestId('tag-board')).toBeVisible();
   await page.keyboard.press('F2');
 }
-
-const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });
 
 interface BoardTag {
   id: number;
@@ -61,7 +60,7 @@ test.describe('前台流程', () => {
 
   test('接待同行、男女牌防呆、挂账、作废、换牌、预结账，全程不扣会员余额', async ({ page }) => {
     await login(page, 'xiaozhou');
-    await nav(page, '发卡台').click();
+    await clickNav(page, '发卡台');
     await expect(page.getByRole('heading', { name: '发卡台 · 在店手牌' })).toBeVisible();
     const balanceBefore = await memberBalance(page, '韩松');
     const [maleTag, maleTag2] = await freeTags(page, 'male');

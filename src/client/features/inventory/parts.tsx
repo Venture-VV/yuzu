@@ -84,7 +84,7 @@ export function Qty({ milli, unit, signed, className, unitClassName }: { milli: 
 export function PackHint({ milli, factorMilli, purchaseUnit, inventoryUnit, className }: { milli: number; factorMilli: number; purchaseUnit: string; inventoryUnit: string; className?: string }) {
   const text = packText(Math.abs(milli), factorMilli, purchaseUnit, inventoryUnit);
   if (!text) return null;
-  return <span className={cn('num text-[11.5px] text-ink-3', className)}>= {text}</span>;
+  return <span className={cn('num text-[12px] text-ink-3', className)}>= {text}</span>;
 }
 
 /** 「模拟规则」：未经店主确认的经营规则统一标注 */
@@ -93,7 +93,7 @@ export function SimRule({ children = '模拟规则', className }: { children?: R
     <span
       title="经营规则尚待店主确认，当前为模拟规则"
       className={cn(
-        'inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-dashed border-yuzu-deep/50 bg-yuzu-tint px-2 text-[11px] leading-none font-semibold text-yuzu-deep',
+        'inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-dashed border-yuzu-deep/50 bg-yuzu-tint px-2 text-[12px] leading-none font-semibold text-yuzu-deep',
         className,
       )}
     >

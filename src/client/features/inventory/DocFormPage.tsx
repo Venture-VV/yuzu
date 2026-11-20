@@ -1489,7 +1489,7 @@ function LineRow({
                 ) : (
                   <span className="inline-flex flex-col items-end">
                     <Qty milli={row.diff} unit={m.inventoryUnit} signed className={cn('text-[15px] font-bold', row.diff < 0 ? 'text-clay' : 'text-lake')} />
-                    <span className="text-[11px] font-semibold text-yuzu-deep">{COUNT_REASON_LABELS.pending}</span>
+                    <span className="text-[12px] font-semibold text-yuzu-deep">{COUNT_REASON_LABELS.pending}</span>
                   </span>
                 )}
               </span>
@@ -1637,7 +1637,7 @@ function ReceiptCells({
           aria-label={`单价（元/${row.poLine?.purchaseUnit ?? m.purchaseUnit}）`}
           className="h-10 text-right"
         />
-        <p className="mt-1 hidden text-right text-[11.5px] text-ink-3 @5xl:block">{row.poLine ? '采购单价' : `元 / ${m.purchaseUnit}`}</p>
+        <p className="mt-1 hidden text-right text-[12px] text-ink-3 @5xl:block">{row.poLine ? '采购单价' : `元 / ${m.purchaseUnit}`}</p>
       </div>
       <div className="min-w-0 @5xl:text-right">
         {caption('金额')}

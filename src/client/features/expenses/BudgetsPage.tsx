@@ -218,7 +218,7 @@ function BudgetCellView({
       ) : (
         <div className="text-[13px]">
           {cell.budgetCents === null ? <span className="text-ink-3">不控制</span> : <Money cents={cell.budgetCents} className="font-bold" />}
-          {cell.fromMonth && cell.fromMonth !== month && <span className="ml-1 text-[11.5px] text-ink-4">（{cell.fromMonth} 起）</span>}
+          {cell.fromMonth && cell.fromMonth !== month && <span className="ml-1 text-[12px] text-ink-4">（{cell.fromMonth} 起）</span>}
         </div>
       )}
       {cell.budgetCents !== null && (

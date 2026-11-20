@@ -225,7 +225,7 @@ function BookingRow({ b, focused, onAction }: { b: BookingDetail; focused: boole
         </Link>
       )}
       {b.status === 'arrived' && !b.service && b.kind === 'room' && (
-        <Link to={`/rooms?booking=${b.id}`} className="text-[13px] font-semibold text-pine hover:underline" data-testid={`booking-go-checkin-${b.bookingNo}`}>
+        <Link to={`/room-center?booking=${b.id}`} className="text-[13px] font-semibold text-pine hover:underline" data-testid={`booking-go-checkin-${b.bookingNo}`}>
           去开房 →
         </Link>
       )}
@@ -737,7 +737,7 @@ function BookingActionDialog({ board, booking: b, action, onClose }: { board: Bo
     // 8.0.8（A04）：到店后一步到位——技师预约直接打开派钟、客房预约到客房页挑这个房型的空房（带着手牌、项目、技师、房型）
     if (action === 'arrive' && r.status === 'arrived' && !r.service) {
       if (r.kind === 'technician') navigate(`/clockroom?booking=${r.id}`);
-      if (r.kind === 'room') navigate(`/rooms?booking=${r.id}`);
+      if (r.kind === 'room') navigate(`/room-center?booking=${r.id}`);
     }
   };
   const submit = async () => {

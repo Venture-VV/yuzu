@@ -40,7 +40,7 @@ beforeAll(async () => {
 afterAll(async () => ctx.close());
 
 describe('每日对账包', () => {
-  it('十四个文件（v0.7.28 加了次卡、平台核销补录）；自检全部一致，部门参考表合计 = 应收，再单列优惠 / 免单、券抵扣、退款与净营业额', () => {
+  it('十五个文件（v0.7.28 加了次卡、平台核销补录，8.1.15 加了会员卡押金）；自检全部一致，部门参考表合计 = 应收，再单列优惠 / 免单、券抵扣、退款与净营业额', () => {
     expect(recon.files.map((f) => f.name)).toEqual([
       '00-说明.txt',
       '01-日结汇总.csv',
@@ -56,6 +56,7 @@ describe('每日对账包', () => {
       '11-储值退回.csv',
       '12-次卡.csv',
       '13-平台核销补录.csv',
+      '14-会员卡押金.csv',
     ]);
     expect(recon.ok).toBe(true);
     const dept = rowsOf(file('03-部门参考表.csv'));

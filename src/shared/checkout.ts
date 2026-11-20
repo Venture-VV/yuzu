@@ -527,11 +527,33 @@ export interface ShiftSummary {
     refunds: { count: number; total: number; byMethod: { method: PaymentMethod; count: number; amount: number }[] };
   };
   /**
+   * 会员卡押金（8.1.15，docs/MEMBERS_V8115.md）：本班次收、退的实体卡押金，按方式；押金是负债、不算营业额、不进会员储值，
+   * 现金押金计入应有现金。本班次没有会员卡押金往来、升级之前交班的快照都没有这一项（没有现金押金时 cash.cardDeposit 同样没有）
+   */
+  cardDeposits?: {
+    received: { method: PaymentMethod; count: number; amount: number }[];
+    refunded: { method: PaymentMethod; count: number; amount: number }[];
+  };
+  /**
    * 按钱箱交班（v0.7.28）的班次：各人经办的结账与充值（一个钱箱几个人收款，交班时看各收了多少）；按人交班的班次没有这一项
    */
   byOperator?: ShiftOperatorTotals[];
-  /** 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 押金现金（收 − 退）− 退款单退现金 − 储值退回的现金 + 次卡现金（卖 − 退） */
-  cash: { opening: number; checkout: number; recharge: number; refund?: number; deposit?: number; refundSlip?: number; memberRefund?: number; countCard?: number; expected: number };
+  /**
+   * 应有现金 = 备用金 + 结账现金 + 充值现金 − 反结账退现金 + 押金现金（收 − 退）− 退款单退现金 − 储值退回的现金 + 次卡现金（卖 − 退）
+   * + 会员卡押金现金（收 − 退）
+   */
+  cash: {
+    opening: number;
+    checkout: number;
+    recharge: number;
+    refund?: number;
+    deposit?: number;
+    refundSlip?: number;
+    memberRefund?: number;
+    countCard?: number;
+    cardDeposit?: number;
+    expected: number;
+  };
 }
 
 export interface ShiftOperatorTotals {

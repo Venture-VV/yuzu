@@ -156,7 +156,7 @@ function StockList({ deptId }: { deptId: number }) {
             </span>
             <span className="text-right">
               <Qty milli={r.stockMilli} unit={r.inventoryUnit} className={cn('text-[17px] font-bold', r.isLow && 'text-clay')} />
-              <span className="block text-[11.5px] text-ink-3">
+              <span className="block text-[12px] text-ink-3">
                 {r.daysOfCover !== null ? `可用 ${r.daysOfCover} 天${r.coverDays !== null ? ` · 提醒 ${r.coverDays} 天` : ''}` : relativeTime(r.lastMoveAt)}
               </span>
             </span>

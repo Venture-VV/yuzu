@@ -44,7 +44,11 @@ export type FrontdeskOpType =
   /** 桌台动作（8.1.15）：清台、维修、恢复（对象是桌台） */
   | 'table_state'
   /** 桌台动作（8.1.15）：并台（对象是主台的开台）、拆台（对象是附台的开台） */
-  | 'table_merge';
+  | 'table_merge'
+  /** 房态中心（8.1.16）：维修、恢复、标待清、清洁完成（对象是房间） */
+  | 'space_state'
+  /** 房态中心（8.1.16）：换房、退房、并房、拆并（对象是房间；换房、并房连着另一间） */
+  | 'space_dispatch';
 
 export interface FrontdeskPendingOp {
   key: string;
@@ -63,8 +67,10 @@ export interface FrontdeskPendingOp {
   roomId?: number;
   /** 客房续住、押金、退房：那张入住单 */
   stayIds?: number[];
-  /** 派对房等开单（v0.7.19）：那间房（空间；同一间房上不能另起一笔开单） */
+  /** 派对房等开单（v0.7.19）：那间房（空间；同一间房上不能另起一笔开单）；房态中心的房间动作（8.1.16）：动的那一间 */
   spaceId?: number;
+  /** 房态中心的换房、并房（8.1.16）：连着的另一间也算（两间房上都不能另起一笔） */
+  spaceIds?: number[];
   /** 使用单结束、撤单：那张使用单 */
   usageIds?: number[];
   /** 退款单（v0.7.20）：原结账单（同一张结账单上不能另起一笔退款） */
@@ -107,6 +113,8 @@ export const FRONTDESK_OP_LABELS: Record<FrontdeskOpType, string> = {
   visit_incident: '异常处置',
   table_state: '清台 / 维修 / 恢复',
   table_merge: '并台 / 拆台',
+  space_state: '改房态',
+  space_dispatch: '换房 / 退房 / 并房',
 };
 
 /** 餐饮桌台的操作：对象是桌台或开台，不是手牌 */
@@ -119,6 +127,8 @@ export const isUsageOp = (type: FrontdeskOpType) => type.startsWith('usage_');
 export const isBookingOp = (type: FrontdeskOpType) => type.startsWith('booking_');
 /** 技师停牌、复牌、休假（8.0.8）：对象是技师，在钟房处理 */
 export const isTechOp = (type: FrontdeskOpType) => type === 'technician_state';
+/** 房态中心的房间动作（8.1.16）：对象是房间（空间），在「房态中心」处理 */
+export const isSpaceOp = (type: FrontdeskOpType) => type === 'space_state' || type === 'space_dispatch';
 
 const STORAGE_KEY = 'yuzu.frontdeskPending.v1';
 const listeners = new Set<() => void>();
@@ -276,6 +286,7 @@ export function pendingFor(
     if (type === 'booking_change') return table.bookingId != null && !!p.bookingIds?.includes(table.bookingId);
     if (type === 'checkout_refund') return table.checkoutId != null && !!p.checkoutIds?.includes(table.checkoutId);
     if (type === 'usage_open') return table.spaceId != null && p.spaceId === table.spaceId;
+    if (isSpaceOp(type)) return table.spaceId != null && (p.spaceId === table.spaceId || !!p.spaceIds?.includes(table.spaceId));
     if (isUsageOp(type)) return table.usageId != null && !!p.usageIds?.includes(table.usageId);
     if (type === 'table_open' || type === 'table_state') return table.tableId != null && p.tableId === table.tableId;
     if (type === 'table_post' || type === 'table_checkout' || type === 'table_merge') return table.sessionId != null && !!p.sessionIds?.includes(table.sessionId);
@@ -305,7 +316,10 @@ export type ReconcileOutcome =
  * `/api/dining/ops`——只要「餐饮点单」（康美部没有前台权限），有前台权限的同事在同一台设备上也能处理；其余照旧走前台的
  */
 export function opsPath(op: { key: string; type: FrontdeskPendingOp['type']; url: string }): string {
-  return op.type === 'bill_post' && op.url === '/api/dining/orders' ? `/api/dining/ops/${op.key}` : `/api/frontdesk/ops/${op.key}`;
+  if (op.type === 'bill_post' && op.url === '/api/dining/orders') return `/api/dining/ops/${op.key}`;
+  // 房态中心的房间动作（8.1.16）走房态中心的：按原业务的权限，只管打扫的后勤（没有前台权限）也能处理改房态的那一笔
+  if (isSpaceOp(op.type)) return `/api/room-center/ops/${op.key}`;
+  return `/api/frontdesk/ops/${op.key}`;
 }
 
 const reconciling = new Set<string>();
@@ -471,6 +485,7 @@ export function useFrontdeskOp<T>(opts: {
         visitIds?: number[];
         sessionIds?: number[];
         stayIds?: number[];
+        spaceIds?: number[];
       },
     ) => {
       if (pending) return null;
@@ -633,7 +648,7 @@ export function PendingPanel<T>({ op, onResolved }: { op: ReturnType<typeof useF
           ? `${op.state.message}。`
           : op.state.phase === 'not_found'
             ? '暂未查到已生效的结果，原请求可能仍在处理。可按原内容重新提交（沿用原编号，不会重复），或确认作废后重新填写（作废后原请求即使到达也不会生效）。'
-            : `处理前不能对这${isTableOp(p.type) ? '桌' : isRoomOp(p.type) || isUsageOp(p.type) ? '间房' : '张手牌'}另起一笔，避免重复。`}
+            : `处理前不能对这${isTableOp(p.type) ? '桌' : isRoomOp(p.type) || isUsageOp(p.type) || isSpaceOp(p.type) ? '间房' : '张手牌'}另起一笔，避免重复。`}
       </span>
     </Notice>
   );

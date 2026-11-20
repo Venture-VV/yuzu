@@ -361,7 +361,7 @@ function MaterialRow({ m, selected, onSelect }: { m: Material; selected: boolean
         </span>
         <span className="text-right">
           <Qty milli={m.stockMilli} unit={m.inventoryUnit} className={cn('text-[17px] font-bold', m.isLow && 'text-clay')} />
-          <span className="block text-[11.5px] text-ink-3">
+          <span className="block text-[12px] text-ink-3">
             {m.deptStockMilli > 0 ? (
               <>
                 部门小仓 <Qty milli={m.deptStockMilli} unit={m.inventoryUnit} />
@@ -400,7 +400,7 @@ function DeptRow({ r, selected, onSelect }: { r: WarehouseStockRow; selected: bo
         </span>
         <span className="text-right">
           <Qty milli={r.stockMilli} unit={r.inventoryUnit} className={cn('text-[17px] font-bold', r.isLow && 'text-clay')} />
-          <span className="block text-[11.5px] text-ink-3">
+          <span className="block text-[12px] text-ink-3">
             {r.daysOfCover !== null ? `可用 ${r.daysOfCover} 天${r.coverDays !== null ? ` · 提醒 ${r.coverDays} 天` : ''}` : relativeTime(r.lastMoveAt)}
           </span>
         </span>
@@ -571,14 +571,14 @@ function MaterialDetail({ id, warehouseId: initialWarehouse, onClose, closable }
                         <span className="text-[13.5px] font-bold">{MOVE_TYPE_LABELS[mv.moveType]}</span>
                         {mv.partyName && <span className="truncate text-[12.5px] text-ink-2">{mv.partyName}</span>}
                       </span>
-                      <span className="num block truncate text-[11.5px] text-ink-3">
+                      <span className="num block truncate text-[12px] text-ink-3">
                         {mv.docNo} · {mv.docDate === session.calendarToday ? '今天' : mv.docDate.slice(5)} · {mv.operatorName}
                         {mv.note && ` · ${mv.note}`}
                       </span>
                     </span>
                     <span className="shrink-0 text-right">
                       <Qty milli={mv.qtyDeltaMilli} unit={m.inventoryUnit} signed className={cn('text-[14px] font-bold', inbound ? 'text-pine' : 'text-ink')} />
-                      <span className="num block text-[11.5px] text-ink-3" title={formatDateTime(mv.createdAt)}>
+                      <span className="num block text-[12px] text-ink-3" title={formatDateTime(mv.createdAt)}>
                         结存 {formatQty(mv.qtyAfterMilli)}
                       </span>
                     </span>

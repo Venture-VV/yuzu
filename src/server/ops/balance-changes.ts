@@ -8,7 +8,8 @@ import { toCsv } from '../lib/csv';
 export interface BalanceChangeRow {
   memberNo: string;
   name: string;
-  phone: string;
+  /** 没留手机号的（匿名卡，8.1.15）为 null，导出里留空 */
+  phone: string | null;
   legacyNo: string | null;
   principalBefore: number;
   bonusBefore: number;
@@ -64,7 +65,7 @@ export function balanceChangesCsv(rows: BalanceChangeRow[], stampOf: (iso: strin
     ...rows.map((r) => [
       r.memberNo,
       r.name,
-      r.phone,
+      r.phone ?? '',
       r.legacyNo ?? '',
       yuan(r.principalBefore),
       yuan(r.bonusBefore),

@@ -378,7 +378,7 @@ function Stat({ label, value, hint, tone, testId }: { label: string; value: stri
     <div className="min-w-0 rounded-lg bg-paper-2/60 px-3 py-2.5" data-testid={testId}>
       <p className="text-[12px] font-semibold text-ink-3">{label}</p>
       <p className={cn('num truncate text-[20px] font-bold md:text-[22px]', tone ? color[tone] : 'text-ink')}>{value}</p>
-      <p className="truncate text-[11.5px] text-ink-3">{hint}</p>
+      <p className="truncate text-[12px] text-ink-3">{hint}</p>
     </div>
   );
 }

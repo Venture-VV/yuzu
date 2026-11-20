@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Navigate, NavLink, useLocation, useNavigate } from 'react-router';
+import { Navigate, useLocation, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Building2, KeyRound, LogOut, MonitorSmartphone, Wifi } from 'lucide-react';
 import { useTerminalState } from '../features/devices/terminal';
 import { describeBusinessHours, isOpenAt, minuteOfDay } from '@shared/business-date';
 import { describeDate, DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
 import { api } from '../lib/api';
-import { useExitGhost, usePageEnter, useSlidingIndicator } from '../lib/motion';
+import { useExitGhost, usePageEnter } from '../lib/motion';
 import { useCan, useSession } from '../lib/session';
 import { cn } from '../lib/utils';
-import { LogoMark } from './Brand';
 import { InstanceTag } from './InstanceTag';
 import { StoreSwitcher } from './StoreSwitcher';
 import { ThemeMenuRow } from './ThemeSwitch';
-import { storePageOf, useStoreNav } from './storeNav';
+import { storePageOf } from './storeNav';
+import { StoreRail } from './StoreRail';
 import { PendingOpsBanner } from './PendingOpsBanner';
 import { useLocalPendingCount } from './LocalPendingNotice';
 import { useConnection } from '../lib/connection';
@@ -25,12 +25,11 @@ import { Badge } from './ui';
 export function AppShell({ children }: { children: ReactNode }) {
   const can = useCan();
   const session = useSession();
-  // ERP（库存、采购、货款、待办）在单独的工作区，主导航里没有（v0.7.3）；待办的数字在 ERP 导航上
-  const nav = useStoreNav();
+  // ERP（库存、采购、货款、待办）在单独的工作区，主导航里没有（v0.7.3）；待办的数字在 ERP 导航上。
+  // 主导航按业务域分组（8.1.15），在 StoreRail 里
   const { pathname } = useLocation();
-  // 动效（8.0.16）：换页面时内容区淡入；主导航里当前项的底块滑过去
+  // 动效（8.0.16）：换页面时内容区淡入
   const content = usePageEnter<HTMLDivElement>(pathname);
-  const pill = useSlidingIndicator<HTMLDivElement>('.nav-on', `${pathname}|${nav.flat().length}`, 220);
   // 没有权限的门店页面（流水、日结、交班、前台……）回到首页：只用 ERP 的人回到 ERP，客户经理回到会员工作台。
   // 功能没开启（钟房、餐饮）不算没有权限，页面自己提示
   const page = storePageOf(pathname);
@@ -39,56 +38,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex h-dvh min-h-0 bg-paper">
       {/* 设备（v0.7.21）：选了「这台终端」的设备常连本机的设备服务、替它上报（不在设备页也照常） */}
       <TerminalBridgeRunner />
-      <nav aria-label="主导航" data-surface="rail" className="flex w-[76px] shrink-0 flex-col items-center gap-1 bg-rail pt-4 pb-4 text-paper short:gap-0.5 short:pt-2.5 short:pb-2.5 md:w-[84px]">
-        <NavLink to="/" aria-label="浴族 yuzu 首页" className="mb-5 rounded-[14px] ring-1 ring-white/10 short:mb-2">
-          <LogoMark className="size-10 short:size-8" />
-        </NavLink>
-        <div ref={pill.ref} className="scroll-thin relative flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto short:gap-0.5">
-          {pill.style && (
-            <span
-              key={pill.jump}
-              aria-hidden
-              className={cn('mo-indicator rounded-[14px] bg-white/12 short:rounded-[12px]', pill.jump > 0 && 'mo-indicator-jump')}
-              data-settled={pill.settled}
-              style={pill.style}
-            >
-              <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />
-            </span>
-          )}
-          {nav.map((group, gi) => (
-            <div key={group[0]!.to} className="flex flex-col items-center gap-1 short:gap-0.5">
-              {gi > 0 && <span className="my-1.5 h-px w-8 bg-white/12 short:my-1" aria-hidden />}
-              {group.map(({ to, label, icon: Icon, end }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  end={end}
-                  aria-label={label}
-                  className={({ isActive }) =>
-                    cn(
-                      'group relative flex w-[64px] flex-col items-center gap-0.5 rounded-[14px] py-2 text-[12px] font-semibold transition-colors short:gap-0 short:rounded-[12px] short:py-[3px] short:text-[11px] short:leading-[15px] tiny:py-[2px] tiny:leading-[14px]',
-                      // 当前项的底块与左边的黄条：量得到位置时由上面那一块滑过来画，量不到时自己画
-                      isActive ? cn('nav-on text-paper', !pill.style && 'bg-white/12') : 'text-paper/60 hover:bg-white/6 hover:text-paper',
-                    )
-                  }
-                >
-                  {({ isActive }) => (
-                    <>
-                      {isActive && !pill.style && <span className="absolute top-1/2 -left-[10px] h-6 w-1 -translate-y-1/2 rounded-r-full bg-yuzu" />}
-                      <Icon className="size-[21px] short:size-[18px] tiny:size-4" strokeWidth={isActive ? 2.2 : 1.8} />
-                      <span>{label}</span>
-                    </>
-                  )}
-                </NavLink>
-              ))}
-            </div>
-          ))}
-        </div>
-        {/* 能进不止一家店的人：当前门店、点一下换店（8.0.22）；只有一家店时不显示 */}
-        <StoreSwitcher />
-        <InstanceTag instance={session.instance} version={session.version} commit={session.commit} />
-        <UserMenu />
-      </nav>
+      <StoreRail
+        footer={
+          <>
+            {/* 能进不止一家店的人：当前门店、点一下换店（8.0.22）；只有一家店时不显示 */}
+            <StoreSwitcher />
+            <InstanceTag instance={session.instance} version={session.version} commit={session.commit} />
+            <UserMenu />
+          </>
+        }
+      />
       <div ref={content} className="flex min-w-0 flex-1 flex-col">
         <PendingOpsBanner />
         {can('frontdesk.operate') && <FrontdeskPendingBanner />}

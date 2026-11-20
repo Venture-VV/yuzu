@@ -1,14 +1,10 @@
-// 菜品管理（8.1.15，docs/DISHES_V8115.md）的取数与保存。
-//
-// 保存都带操作编号：同一个编号、同样的内容重提，服务端返回第一次的结果，不会多建一道、多记一条改价。
-// 菜品维护不是收款，不进门店的「结果待确认」（不存本机、没有确认作废）：结果不明（超时、断网、服务器出错）时弹窗留着、
-// 内容没动的话再点一次用的还是原来的编号（useOpKey）；也可以关掉刷新，看表里是不是已经改了。
+// 菜品管理（8.1.15，docs/DISHES_V8115.md）的取数。
+// 保存都带操作编号：同一个编号、同样的内容重提，服务端返回第一次的结果，不会多建一道、多记一条改价；
+// 没收到结果的进「结果待确认」（8.1.16，dishPendingStore.ts）。
 
-import { useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DishPriceChange, DishesBoard } from '@shared/dishes';
-import { api, UncertainError } from '../../lib/api';
-import { uuid } from '../../lib/utils';
+import { api } from '../../lib/api';
 import { menuKey } from './queries';
 
 export const dishesKey = ['dining', 'dishes'] as const;
@@ -33,24 +29,3 @@ export function useRefreshDishes() {
     void qc.invalidateQueries({ queryKey: menuKey });
   };
 }
-
-/**
- * 这一次保存用的操作编号：内容（signature）没变就一直是同一个——结果不明以后原样再点一次，服务端认得出是同一笔；
- * 内容改了、或者上一次已经有了明确的结果（成功、被拒绝），下一次换新的。
- */
-export function useOpKey() {
-  const held = useRef<{ signature: string; key: string } | null>(null);
-  return {
-    keyFor(signature: string): string {
-      if (held.current?.signature !== signature) held.current = { signature, key: uuid() };
-      return held.current.key;
-    },
-    /** 有了明确的结果：这个编号用完了 */
-    settle(error?: unknown) {
-      if (!(error instanceof UncertainError)) held.current = null;
-    },
-  };
-}
-
-/** 结果不明时给员工看的话 */
-export const UNCERTAIN_HINT = '没收到结果（网络不稳或超时）。可以原样再点一次保存（不会重复）；或者关掉刷新，看表里是不是已经改了。';

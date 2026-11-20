@@ -341,7 +341,7 @@ export function StudioCanvas({
           })()}
         {single && singleBox && (
           <div
-            className="pointer-events-none absolute rounded bg-[#2f7cf6] px-1.5 py-0.5 text-[11px] leading-none text-white tabular-nums"
+            className="pointer-events-none absolute rounded bg-[#2f7cf6] px-1.5 py-0.5 text-[12px] leading-none text-white tabular-nums"
             style={{ left: singleBox.x * scale, top: (singleBox.y + singleBox.h) * scale + 6 }}
           >
             {Math.round(singleBox.w)} × {Math.round(singleBox.h)}

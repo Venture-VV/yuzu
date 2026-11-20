@@ -26,12 +26,15 @@ type UsageSpace = Pick<FloorMapSpace, 'id' | 'code' | 'displayName' | 'businessT
 export function OpenUsageDialog({
   space,
   priced = true,
+  url = '/api/usages',
   onClose,
   onDone,
 }: {
   space: UsageSpace;
   /** 这个业态设了计费；没设的（8.0.8，F7）开单时提醒结束不收房费 */
   priced?: boolean;
+  /** 提交到哪个接口：房态中心（8.1.15）从自己的入口开单——同一张使用单、同一种操作编号，多核对待清与维修；别处照旧 */
+  url?: string;
   onClose: () => void;
   onDone: (u: UsageDetail) => void;
 }) {
@@ -60,7 +63,7 @@ export function OpenUsageDialog({
   const submit = async () => {
     if (!ok) return;
     const u = await op.submit((key) => ({
-      url: '/api/usages',
+      url,
       body: { clientKey: key, spaceId: space.id, tagCode, guests, note: note.trim() },
       tagCodes: [`房 ${space.code}`],
       summary: `开单 ${guests} 人（手牌 ${tagCode}）`,
@@ -239,8 +242,7 @@ export function CloseUsageDialog({ usage, space, mode, onClose, onDone }: { usag
   );
 }
 
-/** 结账前「结束使用并挂房费」（v0.7.28）：按编号取使用单，再用同一个结束对话框 */
-/** 由使用单直接结束 / 撤单（8.0.8 派对房看板，不经过平面图） */
+/** 由使用单直接结束 / 撤单（8.0.8 派对房看板起；8.1.16 起是房态中心的派对房卡片，不经过平面图） */
 export function CloseUsageFor({ usage: d, mode, onClose, onDone }: { usage: UsageDetail; mode: 'end' | 'cancel'; onClose: () => void; onDone: (u: UsageDetail) => void }) {
   const usage: FloorMapUsage = {
     id: d.id,
@@ -258,29 +260,16 @@ export function CloseUsageFor({ usage: d, mode, onClose, onDone }: { usage: Usag
   return <CloseUsageDialog usage={usage} space={space} mode={mode} onClose={onClose} onDone={onDone} />;
 }
 
-export function EndUsageById({ usageId, onClose, onDone }: { usageId: number; onClose: () => void; onDone: (u: UsageDetail) => void }) {
+/** 按编号取使用单，再用同一个结束 / 撤单对话框：结账前「结束使用并挂房费」（v0.7.28）、房态中心从「结果待确认」回到那张使用单（8.1.16） */
+export function EndUsageById({ usageId, mode = 'end', onClose, onDone }: { usageId: number; mode?: 'end' | 'cancel'; onClose: () => void; onDone: (u: UsageDetail) => void }) {
   const q = useQuery({ queryKey: ['usages', 'one', usageId], queryFn: () => api.get<UsageDetail>(`/api/usages/${usageId}`) });
   if (q.isError) {
     return (
-      <Dialog open onClose={onClose} title="结束使用">
+      <Dialog open onClose={onClose} title={mode === 'end' ? '结束使用' : '撤单'}>
         <Notice tone="error">{errorMessage(q.error)}</Notice>
       </Dialog>
     );
   }
   if (!q.data) return null;
-  const d = q.data;
-  const usage: FloorMapUsage = {
-    id: d.id,
-    usageNo: d.usageNo,
-    spaceId: d.spaceId,
-    visitId: d.visitId,
-    tagCode: d.tagCode,
-    guests: d.guests,
-    note: d.note,
-    openedAt: d.openedAt,
-    openedByName: d.openedByName,
-    pricing: d.pricing ?? null,
-  };
-  const space = { id: d.spaceId, code: d.spaceCode, displayName: d.spaceName, businessType: d.businessType, capacity: null };
-  return <CloseUsageDialog usage={usage} space={space} mode="end" onClose={onClose} onDone={onDone} />;
+  return <CloseUsageFor usage={q.data} mode={mode} onClose={onClose} onDone={onDone} />;
 }

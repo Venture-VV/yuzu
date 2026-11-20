@@ -69,11 +69,12 @@ npm run typecheck && npm test && npm run build                  # 交 PR 前
 | 改了什么 | 先跑的集成测试（`tests/`） | 先跑的浏览器用例（`e2e/`） |
 | --- | --- | --- |
 | 会员与储值（钱包、扣款规则、赠金、上限、期初） | `wallet-*`、`deduction`、`bonus-expiry`、`concurrency`、`acceptance`、`opening-*`、`member-fields` | `flows`、`review-fixes`、`wallet-limits`、`member-fields`、`storage-failure` |
+| 会员建档与会员卡押金（8.1.16：卡类型、押金进交班与日结、匿名卡、建档表单） | `member-card-types`、`member-cards`、`recon`、`upgrade-shift`、`op-fences-constraint` | `member-card-types`、`member-cards`、`dialog-input`、`admin-v060`、`target-devices` |
 | 前台与收银（接待、挂账、结账、反结账、交班、补录、转单、打印） | `frontdesk*`、`checkout`、`cashier`、`r1-funds`、`backfill`、`refund-drawer`、`shift-boundary`、`settlement-snapshot`、`auth-settlement`、`recon`、`print` | `frontdesk*`、`cashier`、`r1-funds`、`backfill`、`line-move`、`print`、`regression/` |
 | 发卡台与收银台、前台风控（芯片号、黑名单、异常处置、结账预览分列；8.1.15） | `desks`、`desks-columns`（不要数据库）、`frontdesk-risk`、`upgrade-frontdesk-risk`、`upgrade-shift`、`op-fences-constraint` | `desks`、`frontdesk-risk`、`frontdesk`、`cashier`、`admin-ia` |
-| 技师与钟房 | `technicians`、`clockroom`、`catalog-tiers`、`review-v071` | `technicians`、`clockroom` |
-| 餐饮与桌台（8.1.15 起含桌台动作、台账并退菜、按出品口下单、菜品管理；出品单与平板下单经过同一处） | `dining*`、`dishes*`、`upgrade-dining-v8115`、`upgrade-dishes` | `dining*`、`dishes`、`emenu` |
-| 客房 | `rooms*` | `rooms` |
+| 技师与钟房 | `technicians`、`clockroom`、`catalog-tiers`、`review-v071`、`technician-admin`、`pinyin-initials`（不要数据库） | `technicians`、`clockroom`、`technician-admin`、`target-devices` |
+| 餐饮与桌台（8.1.15 起含桌台动作、台账并退菜、按出品口下单、菜品管理；出品单与平板下单经过同一处；菜品维护的结果待确认在 `dishes`） | `dining*`、`dishes*`、`upgrade-dining-v8115`、`upgrade-dishes` | `dining*`、`dishes`、`emenu` |
+| 客房与房态中心（8.1.16：房型、房态、登记与房间动作、结果待确认、客房页并进来） | `rooms*`、`room-center`、`upgrade-room-center`、`op-fences-constraint`、`tag-scan`（不要数据库）、`store-nav`（不要数据库）、`dining-v8115-orders` | `rooms`、`room-center`、`frontdesk-808`、`floormap`、`locations`、`target-devices`、`viewports` |
 | 客户部（经营总览、手牌跟进、成交归属、月目标、低余额、同步指纹；只读前台与会员数据） | `customer-*` | `customer` |
 | 登记消费的项目与数量、预约页的日期与新建弹窗（店主 2026-11-14 的七条需求；点单换人在 `dining`，平板下单后回起始页在 `emenu`） | `bookings` | `requests-1114`、`bookings`、`dining`、`emenu` |
 | 加了带操作编号的业务类型、动了「确认作废」的类型约束（任何迁移） | `op-fences-constraint`（代码里登记的类型约束都认）、`wallet-abandon` | — |

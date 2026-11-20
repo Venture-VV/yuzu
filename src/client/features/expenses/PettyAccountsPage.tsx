@@ -109,7 +109,7 @@ function Board({ rows, onOpen, onEdit }: { rows: PettyAccountRow[]; onOpen: (id:
               <span className="text-[12.5px] lg:text-right">
                 <span className="text-ink-3 lg:hidden">余额 </span>
                 <Money cents={r.balanceCents} className={cn('font-bold', r.balanceCents < 0 && 'text-ember')} />
-                {r.owedCents > 0 && <span className="block text-[11.5px] text-ember">待补付 ¥{formatAmount(r.owedCents)}</span>}
+                {r.owedCents > 0 && <span className="block text-[12px] text-ember">待补付 ¥{formatAmount(r.owedCents)}</span>}
               </span>
               <span className="text-[12.5px] lg:text-right">
                 <span className="text-ink-3 lg:hidden">待确认 </span>

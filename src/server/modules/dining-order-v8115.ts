@@ -1,19 +1,21 @@
 // 8.1.15《浴族系统需求汇总》块 B3 · 按出品口下单、房号、整单备注（docs/DINING_V8115.md 第 4 节）：
 //   · 下单权限按出品口分三项（在餐厅 / 水吧 / 果吧下单），服务端逐行核对（按菜现在的点单分类，后台没设的按默认归）；
-//   · 点单时手牌号、房号至少填一项：只填房号的按 findGuestByRoom 找这间房现在的客人（这一版认在住的客房；房态中心合进来以后
-//     在那个函数里接上服务房间登记的客人），下单时在挂账的事务里（锁住来访以后）再核对一次这间房还是这位客人；都填时账记在手牌上、房号写在送达位置；
+//   · 点单时手牌号、房号至少填一项：只填房号的按 findGuestByRoom 找这间房现在的客人（在住的客房在前，再找房态中心里这间房的客人，8.1.16），
+//     下单时在挂账的事务里（锁住来访以后）再核对一次这间房还是这位客人；都填时账记在手牌上、房号写在送达位置；
 //   · 整单备注写进这一单每道菜的出品单（厨房出品屏、点菜单）；退菜时选的责任岗位记在审计里。
 // 都不另加锁：权限与菜的分类只读；挂账照旧（来访 → 账单 → 沽清 → 出品单）。
 
 import { z } from 'zod';
 import { DINING_OUTLET_LABELS, diningSlotOf, type DiningOutlet } from '@shared/dining';
 import { MAX_DELIVER_ROOM, MAX_ORDER_NOTE, OUTLET_ORDER_PERMISSIONS, VOID_BLAMES } from '@shared/dining-v8115';
+import { ROOM_BUSINESS_TYPE } from '@shared/spaces';
 import { can } from '@shared/permissions';
 import type { Db, Tx } from '../db';
 import type { Actor } from '../lib/context';
 import { AppError, badRequest, conflict } from '../lib/errors';
 import { currentStoreId } from '../lib/store-context';
 import { parse } from '../lib/validate';
+import { currentGuestOfSpace } from './room-state';
 
 /** 整单备注（选填）：空的当没带，请求摘要与升级前一样 */
 export const OrderNoteField = z
@@ -38,7 +40,10 @@ export const VoidBlameField = z.enum(VOID_BLAMES, '责任岗位不正确').optio
 
 /**
  * 只填房号时找客人：这间房现在的客人——这次来访（visitId）与他的手牌号（tagCode）；找不到为 null。只读、不加锁。
- * 这一版认在住的客房（客房的入住单在住、来访在店）。房态中心（块 D）合进来以后在这里接上「这间服务房现在登记的客人」：
+ * 先后（8.1.16，docs/ROOM_CENTER_V8115.md FT 默认做法）：
+ *   ① 在住的客房（房号是客房的房号；客房的入住单在住、来访在店）——与以前一样；
+ *   ② 房态中心里这间房现在的客人（房号是空间台账的编码，本店在用的空间，「客房」业态的不算——客房按 ① 找）：
+ *      登记了的取先登记的那位，钟房直接派进来的取最早那张钟的客人，派对房等取开着的使用单的使用人（room-state.ts 的 currentGuestOfSpace）。
  * 签名与返回值不变，调用方（点单页找客人、下单时在挂账的事务里再核对一次）只认 visitId 与 tagCode。
  */
 export async function findGuestByRoom(tx: Db, room: string): Promise<{ visitId: number; tagCode: string } | null> {
@@ -47,7 +52,11 @@ export async function findGuestByRoom(tx: Db, room: string): Promise<{ visitId: 
     FROM room_stays s JOIN rooms r ON r.id = s.room_id JOIN visits v ON v.id = s.visit_id JOIN hand_tags h ON h.id = v.tag_id
     WHERE s.status = 'open' AND v.status = 'open' AND r.store_id = ${currentStoreId()} AND upper(btrim(r.room_no)) = upper(btrim(${room}))
     ORDER BY s.id LIMIT 1`;
-  return stay ? { visitId: stay.visitId, tagCode: stay.tagCode } : null;
+  if (stay) return { visitId: Number(stay.visitId), tagCode: stay.tagCode };
+  const [space] = await tx<{ id: number }[]>`
+    SELECT id FROM spaces WHERE store_id = ${currentStoreId()} AND active AND business_type <> ${ROOM_BUSINESS_TYPE} AND upper(btrim(code)) = upper(btrim(${room}))`;
+  const guest = space ? await currentGuestOfSpace(tx, Number(space.id)) : null;
+  return guest ? { visitId: guest.visitId, tagCode: guest.tagNo } : null;
 }
 
 /** 按手牌号找在店客人（只认手牌，不当房号找）；找不到为 null */

@@ -15,6 +15,7 @@ import type { LocationAdmin, LocationPerson, LocationsCurrent, LocationTrackData
 import type { RoomBoard } from '../src/shared/rooms';
 import type { SpaceLedger } from '../src/shared/spaces';
 import { floorplanSampleDxf } from '../src/server/demo/floorplan-sample';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 const READER = { code: 'E2E-R2', name: 'E2E 足浴门口' };
@@ -184,7 +185,7 @@ test.describe('v0.7.17 第一级实时位置', () => {
       await send(page, 'post', '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', guestLabel: 'E2E 实时位置客人' }] });
       visit = (await getJson<{ tags: BoardTag[] }>(page, '/api/frontdesk/board')).tags.find((t) => t.code === tag)!.visit!.id;
 
-      await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '客房' }).click();
+      await clickNav(page, '房态中心');
       await page.getByRole('radiogroup', { name: '视图' }).getByRole('radio', { name: '平面图' }).click();
       await expect(page.getByTestId('floormap-show-people')).toBeChecked();
       const zoneBadge = page.getByTestId(`map-zone-${zone.spa}`);

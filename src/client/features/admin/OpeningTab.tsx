@@ -544,7 +544,7 @@ function ImportDetailDialog({ id, onClose }: { id: number; onClose: () => void }
     const all = detail.data?.rows ?? [];
     const t = q.trim();
     if (!t) return all;
-    return all.filter((r) => r.memberName.includes(t) || r.memberPhone.includes(t) || r.legacyNo.includes(t) || r.memberNo.includes(t));
+    return all.filter((r) => r.memberName.includes(t) || (r.memberPhone ?? '').includes(t) || r.legacyNo.includes(t) || r.memberNo.includes(t));
   }, [detail.data, q]);
   const d = detail.data;
   const voidableAll = !!d && d.rows.some((r) => r.status === 'active') && d.rows.every((r) => r.status !== 'active' || !r.laterActivity);

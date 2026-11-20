@@ -64,7 +64,7 @@ export function FlowFrame({
             </p>
           </div>
           <div className="text-right">
-            <p className={cn('text-[11px] font-semibold', tone === 'pine' ? 'text-paper/60' : 'text-ink/55')}>可用余额</p>
+            <p className={cn('text-[12px] font-semibold', tone === 'pine' ? 'text-paper/60' : 'text-ink/55')}>可用余额</p>
             <Money cents={member.principalBalance + member.bonusBalance} className="text-[15px] font-bold" />
           </div>
         </div>

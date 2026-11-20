@@ -20,7 +20,8 @@ export interface MemberStatusEvent {
 export interface MemberPhoneChange {
   id: number;
   memberId: number;
-  oldPhone: string;
+  /** 原来的手机号；匿名卡补登手机号时原来没有（8.1.15），为 null */
+  oldPhone: string | null;
   newPhone: string;
   reason: string;
   staffName: string;
@@ -34,7 +35,8 @@ export interface MergeParty {
   id: number;
   memberNo: string;
   name: string;
-  phone: string;
+  /** 没留手机号的（匿名卡，8.1.15）为 null */
+  phone: string | null;
 }
 
 /** 合并单 */

@@ -55,12 +55,12 @@ export function ReceivingChip({ state, className }: { state: ReceivingState; cla
 /** 与最近同口径成交价比较；没有可比历史时明确写「暂无可比成交价」 */
 export function CompareChip({ compare, unit, className }: { compare: PriceCompare | null | undefined; unit: string; className?: string }) {
   if (!compare?.baseline || compare.changePercent === null) {
-    return <span className={cn('text-[11.5px] text-ink-3', className)}>暂无可比成交价</span>;
+    return <span className={cn('text-[12px] text-ink-3', className)}>暂无可比成交价</span>;
   }
   const p = compare.changePercent;
   const b = compare.baseline;
   return (
-    <span className={cn('inline-flex items-center gap-1 text-[11.5px] whitespace-nowrap', className)} title={`比较对象：${b.docNo}（${b.docDate} · ${b.supplierName}）同规格、同单位、同价格口径`}>
+    <span className={cn('inline-flex items-center gap-1 text-[12px] whitespace-nowrap', className)} title={`比较对象：${b.docNo}（${b.docDate} · ${b.supplierName}）同规格、同单位、同价格口径`}>
       {p > 0 ? (
         <span className="inline-flex items-center gap-0.5 rounded-full bg-clay-soft px-1.5 font-bold text-clay">
           <TrendingUp className="size-3" />+{p.toFixed(2)}%

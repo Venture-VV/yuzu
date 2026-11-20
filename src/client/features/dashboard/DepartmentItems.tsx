@@ -95,7 +95,7 @@ export function DepartmentItemsCard({ report }: { report: ExecutiveReport }) {
                         >
                           {open ? <ChevronDown className="size-4 shrink-0 text-ink-3" aria-hidden /> : <ChevronRight className="size-4 shrink-0 text-ink-3" aria-hidden />}
                           <span className="truncate">{g.category}</span>
-                          <span className="shrink-0 text-[11.5px] font-semibold text-ink-3">
+                          <span className="shrink-0 text-[12px] font-semibold text-ink-3">
                             {g.items.length} 个项目{g.share !== null && ` · 占全部 ${sharePercent(g.share)}`}
                           </span>
                         </button>

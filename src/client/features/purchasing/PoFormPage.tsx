@@ -832,11 +832,11 @@ function PoLineRow({
           />
           <span className="flex shrink-0 items-center border-l border-line bg-paper-2/70 px-2.5 text-[12.5px] font-bold text-ink-2">{l.purchaseUnit}</span>
         </div>
-        <p className="num mt-1 text-right text-[11.5px] text-ink-3">{row.base !== null ? `= ${formatQty(row.base)} ${l.inventoryUnit}` : ''}</p>
+        <p className="num mt-1 text-right text-[12px] text-ink-3">{row.base !== null ? `= ${formatQty(row.base)} ${l.inventoryUnit}` : ''}</p>
       </div>
       <div>
         <MoneyInput value={l.price} disabled={locked || priceLocked} onChange={(e) => onPatch({ price: e.target.value })} aria-label={`单价（元/${l.purchaseUnit}）`} className="h-10 text-right" />
-        <p className="mt-1 text-right text-[11.5px] text-ink-3">{priceLocked ? '已有收货，单价锁定' : `元 / ${l.purchaseUnit}`}</p>
+        <p className="mt-1 text-right text-[12px] text-ink-3">{priceLocked ? '已有收货，单价锁定' : `元 / ${l.purchaseUnit}`}</p>
       </div>
       <div className="text-right @4xl:pt-2">{row.amount !== null ? <Money cents={row.amount} className="text-[15px] font-bold" /> : <span className="text-ink-4">—</span>}</div>
       <div className="flex items-start gap-1 @4xl:pt-1">

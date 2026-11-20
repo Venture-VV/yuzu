@@ -1,7 +1,7 @@
 // 前台：NFC 发牌、发牌前风控、发牌后异常处置（8.1.15《浴族系统需求汇总》块 A，docs/FRONTDESK_RISK_V8115.md）。
 // 前后端共用的类型、常量与中文名称。金额为分。
 
-import type { HandTag, TagZone } from './frontdesk';
+import { normalizeTagCode, type HandTag, type TagZone } from './frontdesk';
 
 // ───────────── 手牌芯片号 ─────────────
 
@@ -33,6 +33,41 @@ export type TagByCard =
 
 /** 按芯片号查到了的那一种（刷卡带出牌号的部件把它交给调用方判断能不能用） */
 export type TagCardFound = Extract<TagByCard, { found: true }>;
+
+/** 读卡器（或扫码枪）一口气打进来的一串、桥报上来的一张卡，认成了什么（resolveScan） */
+export type ScanResolution =
+  /** 按芯片号查到了绑着的手牌 */
+  | { kind: 'card'; found: TagCardFound }
+  /** 没有绑定（或不像芯片号），这一串本身是牌号：当牌号用（扫了印着牌号的码） */
+  | { kind: 'tag'; code: string }
+  /** 按芯片号查不到绑定的手牌，也不能当牌号 */
+  | { kind: 'unbound'; uid: string }
+  /** 不像芯片号（卡号不完整），也不能当牌号 */
+  | { kind: 'unreadable' }
+  /** 按芯片号查的时候出错了（连不上服务器等）：不知道绑没绑，不当牌号猜 */
+  | { kind: 'failed'; error: unknown };
+
+/**
+ * 读卡器连续打进来的一串怎么认（Codex 审查 d12390f 的 P2）：**先按芯片号查绑定**，查到了就是绑着的那张牌；没有绑定，这一串本身是牌号的
+ * （tagFallback 打开时：键盘式读卡器、扫码枪打进来的，可能扫的是印着牌号的码）才当牌号用。
+ * 以前是先看像不像牌号——芯片号也可能「像」某张牌（「00000001」按数字比较配得上 A001），刷 A002 的卡反而选中了 A001。
+ * 桥报上来的一定是芯片号，不当牌号（tagFallback 关着）。查的时候出错了不当牌号猜。输入框里、输入框外刷都走这一条。
+ * isTagCode 是页面认不认这一串是牌号（发卡台按手牌池模糊匹配，默认按牌号的格式）。
+ */
+export async function resolveScan(raw: string, opts: { lookup: (uid: string) => Promise<TagByCard>; isTagCode: (code: string) => boolean; tagFallback: boolean }): Promise<ScanResolution> {
+  const uid = normalizeCardUid(raw);
+  const code = normalizeTagCode(raw);
+  const asTag = opts.tagFallback && code !== '' && opts.isTagCode(code);
+  if (!CARD_UID_PATTERN.test(uid)) return asTag ? { kind: 'tag', code } : { kind: 'unreadable' };
+  let found: TagByCard;
+  try {
+    found = await opts.lookup(uid);
+  } catch (error) {
+    return { kind: 'failed', error };
+  }
+  if (found.found) return { kind: 'card', found };
+  return asTag ? { kind: 'tag', code } : { kind: 'unbound', uid };
+}
 
 /** 刷到的这张牌为什么不能发；能发返回 null。zone 为这位客人选的分区（没选过的不核对分区） */
 export function cardProblem(found: TagCardFound, zone: TagZone | null, zoneTitle: (z: TagZone) => string): string | null {

@@ -2,6 +2,7 @@
 // 打印页直接打开（不带 ?auto=1，不调出打印）核对内容；切到打印样式后工具栏隐藏、纸宽 72mm 不溢出；入口按钮在新窗口打开打印页。
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -179,7 +180,7 @@ test.describe('打印', () => {
     const { list } = found!;
     const wallet = demoCheckout(list, 'A8066', 'completed');
 
-    await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '收银台', exact: true }).click();
+    await clickNav(page, '收银台');
     await page.getByTestId('open-checkouts').click();
     const records = page.getByRole('dialog', { name: '结账记录' });
     await records.getByText(wallet.checkoutNo).click();
@@ -188,7 +189,7 @@ test.describe('打印', () => {
     await popup.close().catch(() => {});
 
     await page.keyboard.press('Escape');
-    await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '交班', exact: true }).click();
+    await clickNav(page, '交班');
     // 交班页只列本营业日的班次与仍未交班的班次：陈茵的演示班次落在前一个营业日时，用列表里的第一个班次。
     // 营业日切换后不久灌的数据，这个营业日可能还没有班次（列表为空）：没有可打印的交班表，只核对上面结账记录的入口（测试会话复测 v0.7.3）
     const shiftList = page.getByTestId('shift-list');

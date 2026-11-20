@@ -361,6 +361,28 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     WHERE mv.business_date = ${date} ORDER BY mv.id`;
   // 平台核销补录（v0.7.28）：当天（按核销营业日）的补登记，含作废的
   const platformRedemptions = await listRedemptions(tx, date, date);
+  // 会员卡押金（8.1.15）：当天收、退的每一笔（押金是负债，不算营业额；现金进出钱箱）
+  const cardDeposits = await tx<
+    {
+      at: string;
+      docNo: string;
+      kind: 'receive' | 'refund';
+      member: string;
+      memberNo: string;
+      cardNo: string | null;
+      method: keyof typeof PAYMENT_METHOD_LABELS;
+      amount: number;
+      ref: string;
+      reason: string | null;
+      staff: string;
+      shiftNo: string | null;
+    }[]
+  >`
+    SELECT d.created_at AS at, d.doc_no, d.kind, m.name AS member, m.member_no, c.card_no, d.method, d.amount, d.ref, d.reason,
+           st.display_name AS staff, sh.shift_no
+    FROM member_card_deposits d JOIN members m ON m.id = d.member_id JOIN staff st ON st.id = d.operator_id
+    LEFT JOIN member_cards c ON c.id = d.card_id LEFT JOIN shifts sh ON sh.id = d.shift_id
+    WHERE d.business_date = ${date} AND ${storeIn(tx, 'd.store_id')} ORDER BY d.id`;
   return {
     summary,
     checkouts,
@@ -379,6 +401,7 @@ async function readDay(tx: Tx, date: string, today: string, from: Date, to: Date
     memberRefunds,
     countCardMoves,
     platformRedemptions,
+    cardDeposits,
   };
 }
 
@@ -638,7 +661,8 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
         yuan(r.summary.recharges.bonus),
         yuan(r.summary.walletConsumes.total),
         yuan(cashRefund(r)),
-        yuan(r.summary.cash.deposit ?? 0),
+        // 押金现金：客房押金与会员卡押金（8.1.15）都是押金，合在这一列
+        yuan((r.summary.cash.deposit ?? 0) + (r.summary.cash.cardDeposit ?? 0)),
         yuan(r.summary.cash.refundSlip ?? 0),
         yuan(r.expectedCash ?? r.summary.cash.expected),
         r.countedCash === null ? '' : yuan(r.countedCash),
@@ -910,6 +934,32 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     ]),
   });
 
+  // 14 会员卡押金（8.1.15）：当天收、退的每一笔与按方式的汇总；押金是负债，不算营业额、不进会员储值，现金进出钱箱
+  files.push({
+    name: '14-会员卡押金.csv',
+    content: toCsv([
+      ['时间', '单号', '收 / 退', '会员', '会员号', '卡号', '方式', '金额（元）', '班次', '经办人', '备注 / 原因'],
+      ...day.cardDeposits.map((d) => [
+        stampOf(d.at),
+        d.docNo,
+        d.kind === 'receive' ? '收押金' : '退押金',
+        d.member,
+        d.memberNo,
+        d.cardNo ?? '',
+        PAYMENT_METHOD_LABELS[d.method],
+        (d.kind === 'refund' ? '-' : '') + yuan(d.amount),
+        d.shiftNo ?? '',
+        d.staff,
+        [d.ref, d.reason].filter(Boolean).join('；'),
+      ]),
+      [],
+      ['押金汇总', '', '', '', '', '', '方式', '金额（元）'],
+      ...s.cardDeposits.received.map((m) => ['收押金', '', '', '', '', '', PAYMENT_METHOD_LABELS[m.method], yuan(m.amount)]),
+      ...s.cardDeposits.refunded.map((m) => ['退押金', '', '', '', '', '', PAYMENT_METHOD_LABELS[m.method], '-' + yuan(m.amount)]),
+      ['当天结束时押着的押金', '', '', '', '', '', '', yuan(s.cardDeposits.held)],
+    ]),
+  });
+
   // 00 说明
   const failed = checks.filter((c: CheckLine) => !c.ok);
   const deptOk = deptTotal === biz.receivable && deptDiscount === biz.discount + biz.coupon + biz.memberDiscount && deptRefund === biz.refund;
@@ -926,6 +976,7 @@ export async function buildDailyRecon(sql: Sql, config: AppConfig, date: string,
     `交班：${day.shifts.length} 个班次，已交班 ${day.shifts.filter((r) => r.status === 'closed').length} 个`,
     `技师：${tr.totals.clocks} 个钟（点钟 ${tr.totals.designated}、轮钟 ${tr.totals.rotation}），${formatYuan(tr.totals.amount)}${tr.unassigned.clocks ? `；未指定技师 ${tr.unassigned.clocks} 个钟` : ''}`,
     `客房押金：收 ${formatYuan(s.deposits.received.reduce((t, m) => t + m.amount, 0))}、退 ${formatYuan(s.deposits.refunded.reduce((t, m) => t + m.amount, 0))}；当天结束时在住押金 ${formatYuan(s.deposits.held)}`,
+    `会员卡押金：收 ${formatYuan(s.cardDeposits.received.reduce((t, m) => t + m.amount, 0))}、退 ${formatYuan(s.cardDeposits.refunded.reduce((t, m) => t + m.amount, 0))}；当天结束时押着 ${formatYuan(s.cardDeposits.held)}`,
     `派对房等使用单：当天开 ${day.usages.filter((u) => u.businessDate === date).length} 张，撤单 ${day.usages.filter((u) => u.status === 'cancelled').length} 张，仍在使用 ${day.usages.filter((u) => u.status === 'open').length} 张`,
     `次卡：售卡 ${s.countCards.sales.count} 张 ${formatYuan(s.countCards.sales.amount)}；退卡 ${s.countCards.refunds.count} 张 ${formatYuan(s.countCards.refunds.amount)}；结账使用净 ${s.countCards.uses.count} 次 ${formatYuan(s.countCards.uses.amount)}；过期作废 ${s.countCards.expired.uses} 次；当天结束时还剩 ${s.countCards.outstanding.uses} 次`,
     `平台核销补录（不结账）：${s.platformRedemptions.count} 张，面值 ${formatYuan(s.platformRedemptions.face)}，平台应结 ${formatYuan(s.platformRedemptions.settle)}${s.platformRedemptions.voidCount ? `；作废 ${s.platformRedemptions.voidCount} 笔` : ''}`,

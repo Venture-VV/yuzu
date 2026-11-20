@@ -67,6 +67,7 @@
 - [`MEMBERSHIP_FINISH.md`](MEMBERSHIP_FINISH.md)：会员体系收尾（v0.7.26）
 - [`MEMBERSHIP_P3.md`](MEMBERSHIP_P3.md)：会员体系 v2 第三期：会员折扣、邀请体验与赠送会籍（v0.7.25）
 - [`MEMBERSHIP_V804.md`](MEMBERSHIP_V804.md)：会员体系整改（8.0.4 设计稿）
+- [`MEMBERS_V8115.md`](MEMBERS_V8115.md)：8.1.16 会员中心：建档先选卡类型、表单字段补全
 - [`MULTISTORE_V8022.md`](MULTISTORE_V8022.md)：8.0.22 设计 · 多门店、多店多仓、多公司主体（MD-A、MD-B、MD-C）
 - [`ORDERS_V8015.md`](ORDERS_V8015.md)：订单查询与部门项目明细（8.0.15）
 - [`PATROL_V809.md`](PATROL_V809.md)：安保巡场与员工工作台（8.0.9）
@@ -76,10 +77,12 @@
 - [`RESILIENCE_V813.md`](RESILIENCE_V813.md)：8.1.3 · 代码整洁与网络波动防护
 - [`ROOMMAP.md`](ROOMMAP.md)：房态图（RQ-004 第三段，v0.7.16）与第一级实时位置（v0.7.17）
 - [`ROOMS.md`](ROOMS.md)：S7 客房（v0.7.4）
+- [`ROOM_CENTER_V8115.md`](ROOM_CENTER_V8115.md)：8.1.15 / 8.1.16 · 房态中心（《浴族系统需求汇总》房态中心 1–4）
 - [`SPACES.md`](SPACES.md)：空间台账（RQ-004 第一段，v0.7.14）
 - [`STOCK_CYCLES.md`](STOCK_CYCLES.md)：台面日耗品、称重与盘点 / 对账提醒（v0.7.13，Batch 4 收尾）
 - [`STUDIO_MP.md`](STUDIO_MP.md)：工作台 · 小程序的版面格式（8.1.2，给小程序线）
 - [`SUPPLIER_SETTLEMENT.md`](SUPPLIER_SETTLEMENT.md)：供应商结算与库存采购收尾（v0.7.12，RQ-002 第二步）
+- [`TECHNICIANS_V8115.md`](TECHNICIANS_V8115.md)：8.1.16 技师：钟房搜索与筛选、排位播报、技师管理
 - [`TEST_AUDIT.md`](TEST_AUDIT.md)：用例体检（2026-11-18，工程治理三期）
 - [`WAREHOUSES.md`](WAREHOUSES.md)：两级库存：总仓 + 部门小仓（v0.7.11，RQ-002 第一步）
 - [`WORKBENCH_V811.md`](WORKBENCH_V811.md)：UI 工作台（8.1.1–8.1.2）：设计师在系统里直接改版面
@@ -194,6 +197,7 @@
 - [`HANDOFF_V8110.md`](HANDOFF_V8110.md)：v8.1.13 交接说明 · 核库转领用、急采后补合同
 - [`HANDOFF_V8114.md`](HANDOFF_V8114.md)：v8.1.14 交接说明 · 品牌部的三条（电子菜单）
 - [`HANDOFF_V8115.md`](HANDOFF_V8115.md)：v8.1.15 交接说明 · 发卡台与收银台、前台风控、餐饮桌台与菜品管理、深浅主题、退出键
+- [`HANDOFF_V8116.md`](HANDOFF_V8116.md)：v8.1.16 交接说明 · 房态中心、技师、会员与主导航分组
 - [`HANDOFF_V812.md`](HANDOFF_V812.md)：v8.1.2 交接说明 · UI 工作台第二步（卡片模板、组件与变体、员工食堂、给小程序线的格式、定时发布与批注）
 - [`HANDOFF_V813.md`](HANDOFF_V813.md)：v8.1.3 交接说明 · 代码整洁与网络波动防护
 - [`HANDOFF_V814.md`](HANDOFF_V814.md)：v8.1.4 交接说明 · 老浏览器上侧栏划不动、工作台开在哪一档

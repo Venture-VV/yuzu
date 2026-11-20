@@ -199,7 +199,7 @@ export function OrdersPanel() {
                         <td className="px-2 py-3 text-right">
                           <Money cents={r.kind === 'refund' ? -r.amount : r.amount} className={cn('font-bold', off ? 'struck text-ink-4' : r.kind === 'refund' ? 'text-ember' : 'text-ink')} />
                           {r.kind === 'checkout' && r.refundedAmount > 0 && (
-                            <p className="text-[11.5px] text-ink-3">
+                            <p className="text-[12px] text-ink-3">
                               已退 <Money cents={r.refundedAmount} />
                             </p>
                           )}

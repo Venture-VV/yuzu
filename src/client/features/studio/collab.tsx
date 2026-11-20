@@ -222,7 +222,7 @@ export function PresenceChip({ others }: { others: StudioPresence[] }) {
   if (!others.length) return null;
   return (
     <span
-      className="mr-2 max-w-28 shrink truncate whitespace-nowrap rounded-full bg-yuzu-soft px-2 py-0.5 text-[11.5px] text-yuzu-deep min-[1400px]:max-w-48"
+      className="mr-2 max-w-28 shrink truncate whitespace-nowrap rounded-full bg-yuzu-soft px-2 py-0.5 text-[12px] text-yuzu-deep min-[1400px]:max-w-48"
       title={`${others.map((o) => o.name).join('、')} 也开着这个界面的编辑器：两个人同时改，后存的会提示刷新`}
       data-testid="studio-presence"
     >
@@ -281,7 +281,7 @@ export function CommentPins({
           key={c.id}
           type="button"
           className={cn(
-            'absolute z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full rounded-bl-none border-2 border-white text-[11px] font-bold text-white shadow',
+            'absolute z-10 flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full rounded-bl-none border-2 border-white text-[12px] font-bold text-white shadow',
             active === c.id ? 'bg-[#2f7cf6]' : 'bg-clay',
           )}
           style={{ left: c.x * scale, top: c.y * scale }}
@@ -303,7 +303,7 @@ export function CommentPins({
 }
 
 function When({ at }: { at: string }) {
-  return <span className="text-[11px] text-ink-3">{new Date(at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>;
+  return <span className="text-[12px] text-ink-3">{new Date(at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>;
 }
 
 export function CommentsPanel({
@@ -379,7 +379,7 @@ export function CommentsPanel({
         <span className="font-bold">{c.createdBy}</span>
         <When at={c.createdAt} />
         <div className="flex-1" />
-        <button type="button" className="text-[11.5px] text-pine hover:underline" onClick={() => void resolve(c.id, !c.resolvedAt)} data-testid={`studio-comment-resolve-${c.id}`}>
+        <button type="button" className="text-[12px] text-pine hover:underline" onClick={() => void resolve(c.id, !c.resolvedAt)} data-testid={`studio-comment-resolve-${c.id}`}>
           {c.resolvedAt ? '重新打开' : '解决了'}
         </button>
       </div>
@@ -393,7 +393,7 @@ export function CommentsPanel({
           </div>
         ))}
       {c.resolvedAt ? (
-        <p className="mt-1 text-[11px] text-ink-3">{c.resolvedBy} 标了解决</p>
+        <p className="mt-1 text-[12px] text-ink-3">{c.resolvedBy} 标了解决</p>
       ) : (
         <div className="mt-1.5 flex gap-1.5">
           <input
@@ -429,13 +429,13 @@ export function CommentsPanel({
         <Button size="sm" variant={adding ? 'primary' : 'secondary'} onClick={() => onAdding(!adding)} data-testid="studio-comment-add">
           {adding ? '点画布上要说的地方' : '加一条批注'}
         </Button>
-        <label className="ml-auto flex items-center gap-1 text-[11.5px] text-ink-3">
+        <label className="ml-auto flex items-center gap-1 text-[12px] text-ink-3">
           <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} /> 显示已解决的
         </label>
       </div>
       {draft && (
         <div className="space-y-1.5 rounded-md border border-[#2f7cf6] px-2.5 py-2" data-testid="studio-comment-draft">
-          <div className="text-[11.5px] text-ink-3">
+          <div className="text-[12px] text-ink-3">
             在「{screenLabel(screen)}」这个位置{draft.nodeId ? '（挂在点到的那一块上）' : ''}
           </div>
           <Textarea rows={3} autoFocus maxLength={1000} value={text} onChange={(e) => setText(e.target.value)} placeholder="想说什么：哪里要改、为什么" data-testid="studio-comment-text" />
@@ -481,7 +481,7 @@ export function CommentsPanel({
           {here.map((c) => thread(c, roots.filter((x) => x.screen === screen && !x.resolvedAt).indexOf(c) + 1 || null))}
           {elsewhere.length > 0 && (
             <div className="space-y-2 pt-1">
-              <div className="text-[11.5px] font-bold text-ink-3">别的屏</div>
+              <div className="text-[12px] font-bold text-ink-3">别的屏</div>
               {elsewhere.map((c) => (
                 <button
                   key={c.id}

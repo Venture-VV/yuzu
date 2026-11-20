@@ -4,12 +4,19 @@
 //   小米平板 6S Pro 12.4（网页 1355 × 903 横屏）。
 // 在门店电脑这一组里另开这几个窗口，逐页核对：不横向滚动、没有东西超出屏幕右边（有意左右滑的区域除外）、要点的按钮在屏幕里、
 // 菜名不被挤成一列。只读：菜单里的菜、桌台页、桌台详情与点菜单用合成数据代替接口（CI 的浏览器验收各组用的是只灌了五套演示数据的新库，
-// 里面没有进厨房的菜）；为了看到餐饮页面临时打开餐饮与桌台点单，结束时恢复原样。
+// 里面没有进厨房的菜）；为了看到餐饮页面临时打开餐饮与桌台点单，结束时恢复原样。8.1.16 起钟房、技师管理同样用合成的技师（临时打开技师功能），
+// 会员详情取真的演示会员、把卡类型与会员卡换成合成的。
 // 依赖四套演示数据（仅独立演示库）；账号店主 linlan。新做的、改过的页面加到下面 PAGES 里。
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import type { DiningMenu, DiningReceipt, KitchenBoard, MenuDish, PendingDish, TableSessionDetail, TablesBoard } from '../src/shared/dining';
 import type { BillLine } from '../src/shared/frontdesk';
 import type { DishPriceChange, DishesBoard } from '../src/shared/dishes';
+import type { RoomCard, RoomCenterBoard, RoomGuestView, RoomHistory } from '../src/shared/room-center';
+import { DEFAULT_CLOCKROOM_RULES, type BoardTechnician, type ClockroomBoard } from '../src/shared/clockroom';
+import type { MemberCard } from '../src/shared/member-cards';
+import type { MemberCardDeposits } from '../src/shared/member-form';
+import type { RosterTechnician, ScheduleView, TechLeave, TechnicianAdminView } from '../src/shared/technician-admin';
+import { DEFAULT_TECHNICIAN_RULES } from '../src/shared/technicians';
 import { expectFits } from './fits';
 
 const PASSWORD = 'yuzu2026';
@@ -47,7 +54,15 @@ type PageKey =
   | 'urgent-contract'
   // 8.1.15 菜品管理：菜品表与新增 / 编辑、改价、导入三个弹窗；点单时选做法与加料的弹窗（合成的菜品）
   | 'dining-dishes'
-  | 'dining-dish-options';
+  | 'dining-dish-options'
+  // 8.1.16 房态中心：总览、按房型的页签与各状态的数量、卡片（五种状态都有、客人名有长有短）、房间详情、登记对话框（合成的看板）
+  | 'room-center'
+  // 8.1.16 技师（块 E）：钟房（播报条、搜索与筛选、按状态排的技师卡片）、技师管理四个页签与它们的弹窗（合成的技师）
+  | 'clockroom'
+  | 'technician-admin'
+  // 8.1.16 会员（块 F）：新建会员两步（先选卡类型）、会员详情（卡类型、推荐人、偏好项目、会员卡与押金、退卡弹窗）
+  | 'member-create'
+  | 'member-detail';
 
 const DEVICES: Device[] = [
   {
@@ -72,12 +87,34 @@ const DEVICES: Device[] = [
       'urgent-contract',
       'dining-dishes',
       'dining-dish-options',
+      'room-center',
+      'clockroom',
+      'technician-admin',
+      'member-create',
+      'member-detail',
     ],
   },
   {
     name: '商米 D3 Pro（系统缩放 1.5 倍）',
     viewport: { width: 1280, height: 720 },
-    pages: ['frontdesk', 'cashier', 'dining-order', 'dining-receipt', 'dining-tables', 'dining-ledger', 'pool', 'gift-ledger-concierge', 'requests-stock', 'dining-dishes', 'dining-dish-options'],
+    pages: [
+      'frontdesk',
+      'cashier',
+      'dining-order',
+      'dining-receipt',
+      'dining-tables',
+      'dining-ledger',
+      'pool',
+      'gift-ledger-concierge',
+      'requests-stock',
+      'dining-dishes',
+      'dining-dish-options',
+      'room-center',
+      'clockroom',
+      'technician-admin',
+      'member-create',
+      'member-detail',
+    ],
   },
   {
     name: '商米 V3',
@@ -97,6 +134,11 @@ const DEVICES: Device[] = [
       'urgent-contract',
       'dining-dishes',
       'dining-dish-options',
+      'room-center',
+      'clockroom',
+      'technician-admin',
+      'member-create',
+      'member-detail',
     ],
   },
   {
@@ -116,6 +158,11 @@ const DEVICES: Device[] = [
       'urgent-contract',
       'dining-dishes',
       'dining-dish-options',
+      'room-center',
+      'clockroom',
+      'technician-admin',
+      'member-create',
+      'member-detail',
     ],
   },
 ];
@@ -391,6 +438,268 @@ async function mockTables(ctx: BrowserContext) {
   await ctx.route('**/api/dining/receipt?*', (route) => route.fulfill({ json: RECEIPT }));
 }
 
+// ───────────── 合成的钟房与技师管理（8.1.16 块 E）：八位技师各种状态（名字、花名、组别有长有短），在钟上与待上钟的各一张钟单，
+// 叫号记录与主播报终端（就是这台：音量、静音、重播、试音、放下几个按钮都在，最宽的样子）；四个页签的名册、组别、班次与排班、休假单 ─────────────
+
+const TODAY = NOW.slice(0, 10);
+const plusDays = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const ANNOUNCER_CLIENT = 'e2e-device-announcer';
+const tech = (id: number, techNo: string, name: string, extra: Partial<BoardTechnician> = {}): BoardTechnician => ({
+  id,
+  techNo,
+  name,
+  gender: 'female',
+  grade: 'standard',
+  skills: [],
+  active: true,
+  sortOrder: id,
+  note: '',
+  isSynthetic: false,
+  suspendedAt: null,
+  suspendedReason: null,
+  nickname: '',
+  kind: '足浴',
+  hiredOn: '2025-03-01',
+  leftOn: null,
+  groupId: null,
+  state: 'off',
+  position: null,
+  busy: null,
+  waiting: 0,
+  todayClocks: 0,
+  rejectStreak: 0,
+  groupName: null,
+  shiftToday: null,
+  restToday: false,
+  approvedLeave: null,
+  ...extra,
+});
+const EARLY = { id: 990_401, name: '早班（含午休）', startMinute: 600, endMinute: 1080 };
+const LATE = { id: 990_402, name: '晚班', startMinute: 1080, endMinute: 120 };
+const TECH_GROUP = '足浴一组（白班）';
+const BOARD_TECHS: BoardTechnician[] = [
+  tech(990_201, '08', '欧阳晓晓', {
+    nickname: '晓晓',
+    kind: 'SPA',
+    skills: ['足疗', 'SPA 精油', '采耳'],
+    state: 'on',
+    position: 1,
+    busy: { sessionId: 990_301, status: 'serving' },
+    todayClocks: 3,
+    groupId: 990_451,
+    groupName: TECH_GROUP,
+    shiftToday: EARLY,
+  }),
+  tech(990_202, '12', '司马长青', { kind: '按摩', gender: 'male', grade: 'premium', state: 'on', position: 2, busy: { sessionId: 990_302, status: 'waiting' }, rejectStreak: 2, shiftToday: LATE }),
+  tech(990_203, '15', '林', { state: 'on', position: 3, todayClocks: 1, groupId: 990_451, groupName: TECH_GROUP }),
+  tech(990_204, '21', '张小明', { nickname: '小雅', state: 'rest', todayClocks: 2 }),
+  tech(990_205, '23', '上官婉儿', { kind: 'SPA', state: 'leave', approvedLeave: { id: 990_551, fromDate: TODAY, toDate: plusDays(TODAY, 2), leaveType: 'personal' } }),
+  tech(990_206, '30', '慕容复', { gender: 'male', suspendedAt: ago(90), suspendedReason: '客诉待处理，等店长复核' }),
+  tech(990_207, '31', '王强', { nickname: '阿强', gender: 'male', restToday: true }),
+  tech(990_208, 'A12', '诸葛青', { kind: '采耳', skills: ['采耳'] }),
+];
+type ClockSession = ClockroomBoard['sessions'][number];
+const clockSession = (id: number, techIndex: number, over: Partial<ClockSession>): ClockSession => ({
+  id,
+  sessionNo: `ZS${TODAY.replaceAll('-', '')}-${String(id % 1000).padStart(4, '0')}`,
+  technicianId: BOARD_TECHS[techIndex]!.id,
+  techNo: BOARD_TECHS[techIndex]!.techNo,
+  techName: BOARD_TECHS[techIndex]!.name,
+  visitId: 990_501,
+  tagCode: 'F018',
+  zone: 'female',
+  guest: '王女士（会员 L3 · 同行三位）',
+  itemId: 990_601,
+  itemName: '泰式精油推拿（全身 · 加热石）',
+  callType: 'designated',
+  clocks: 2,
+  minutes: 120,
+  status: 'waiting',
+  createdAt: ago(40),
+  startedAt: null,
+  plannedEnd: null,
+  space: null,
+  spaceVersion: 0,
+  ...over,
+});
+const CLOCK_BOARD: ClockroomBoard = {
+  serverTime: NOW,
+  businessDate: TODAY,
+  rules: DEFAULT_CLOCKROOM_RULES,
+  techRules: { ...DEFAULT_TECHNICIAN_RULES, enabled: true },
+  technicians: BOARD_TECHS,
+  sessions: [
+    clockSession(990_301, 0, {
+      status: 'serving',
+      startedAt: ago(35),
+      plannedEnd: new Date(Date.now() + 85 * 60_000).toISOString(),
+      space: { id: 990_701, code: 'A201', displayName: '观澜 SPA 双人房' },
+      spaceVersion: 1,
+    }),
+    clockSession(990_302, 1, { callType: 'rotation', clocks: 1, minutes: 60, tagCode: 'M106', zone: 'male', guest: '散客' }),
+  ],
+  pending: [
+    {
+      lineId: 990_801,
+      visitId: 990_502,
+      tagCode: 'F021',
+      zone: 'female',
+      guest: '李女士',
+      itemId: 990_602,
+      itemName: '中式足疗（60 分钟）',
+      tier: null,
+      quantity: 1,
+      amount: 19_800,
+      postedAt: ago(5),
+      postedByName: '小周',
+    },
+  ],
+  today: { clocks: 12, designated: 5, rotation: 7 },
+  kinds: ['足浴', '按摩', 'SPA', '采耳', '其他'],
+  categories: ['足疗', 'SPA 精油', '采耳', '头疗'],
+  calls: [{ id: 990_901, at: ago(3), kind: 'dispatch', technicianId: 990_201, sessionId: 990_301, text: '请 1 号排位，08 号 晓晓，到 A201 观澜 SPA 双人房', staffName: '小周' }],
+  announcer: { clientId: ANNOUNCER_CLIENT, label: '前台收银机（主播报）', claimedByName: '林岚', claimedAt: ago(60), seenAt: NOW },
+};
+const ROSTER: RosterTechnician[] = BOARD_TECHS.map(({ state: _s, position: _p, busy: _b, waiting: _w, todayClocks: _t, rejectStreak: _r, approvedLeave, ...t }) => ({
+  ...t,
+  leaveToday: approvedLeave,
+}));
+const TECH_VIEW: TechnicianAdminView = {
+  businessDate: TODAY,
+  canManage: true,
+  kinds: CLOCK_BOARD.kinds,
+  categories: CLOCK_BOARD.categories,
+  technicians: ROSTER,
+  groups: [
+    { id: 990_451, name: TECH_GROUP, leaderId: 990_201, sortOrder: 0, active: true, note: '白班主力，带新人', memberIds: [990_201, 990_203] },
+    { id: 990_452, name: '按摩组', leaderId: null, sortOrder: 1, active: true, note: '', memberIds: [] },
+  ],
+  shifts: [
+    { ...EARLY, sortOrder: 0, active: true },
+    { ...LATE, sortOrder: 1, active: true },
+  ],
+  pendingLeaves: 1,
+};
+const LEAVE_PENDING = 990_552;
+const techLeave = (id: number, techIndex: number, over: Partial<TechLeave>): TechLeave => ({
+  id,
+  technicianId: BOARD_TECHS[techIndex]!.id,
+  techNo: BOARD_TECHS[techIndex]!.techNo,
+  techName: BOARD_TECHS[techIndex]!.name,
+  nickname: BOARD_TECHS[techIndex]!.nickname,
+  fromDate: TODAY,
+  toDate: TODAY,
+  days: 1,
+  leaveType: 'personal',
+  reason: '家里有事',
+  status: 'pending',
+  appliedByName: '小周',
+  appliedAt: ago(120),
+  decidedByName: null,
+  decidedAt: null,
+  decisionNote: '',
+  cancelledByName: null,
+  cancelledAt: null,
+  cancelReason: '',
+  ...over,
+});
+const LEAVES: TechLeave[] = [
+  techLeave(LEAVE_PENDING, 3, { fromDate: plusDays(TODAY, 3), toDate: plusDays(TODAY, 9), days: 7, leaveType: 'annual', reason: '回老家参加表姐的婚礼，顺便陪父母住几天' }),
+  techLeave(990_551, 4, { toDate: plusDays(TODAY, 2), days: 3, status: 'approved', decidedByName: '林岚', decidedAt: ago(100), decisionNote: '同意，记得交接熟客' }),
+  techLeave(990_550, 6, { status: 'rejected', leaveType: 'sick', reason: '感冒', decidedByName: '林岚', decidedAt: ago(500), decisionNote: '那天人手不够，改到下周' }),
+];
+/** 排班表：从地址里的 from 起 7 天，早班、晚班、排休都有；改动记录两条（对调一条、排班一条） */
+function scheduleOf(from: string): ScheduleView {
+  const days = Array.from({ length: 7 }, (_, i) => plusDays(from, i));
+  return {
+    from,
+    days: 7,
+    today: TODAY,
+    cells: days.flatMap((date, i) => [
+      { technicianId: 990_201, date, shiftId: i % 3 === 2 ? null : EARLY.id, rest: i % 3 === 2 },
+      { technicianId: 990_202, date, shiftId: LATE.id, rest: false },
+      { technicianId: 990_203, date, shiftId: i % 2 ? EARLY.id : null, rest: false },
+    ]),
+    leaves: [{ technicianId: 990_205, fromDate: TODAY, toDate: plusDays(TODAY, 2), status: 'approved' }],
+    changes: [
+      {
+        id: 2,
+        at: ago(30),
+        kind: 'swap',
+        technicianId: 990_202,
+        techNo: '12',
+        techName: '司马长青',
+        date: days[1]!,
+        from: '晚班',
+        to: '早班（含午休）',
+        swapWith: '08 号 欧阳晓晓',
+        reason: '两人换班照顾家里',
+        staffName: '林岚',
+      },
+      {
+        id: 1,
+        at: ago(300),
+        kind: 'plan',
+        technicianId: 990_201,
+        techNo: '08',
+        techName: '欧阳晓晓',
+        date: days[0]!,
+        from: '没排',
+        to: '早班（含午休）',
+        swapWith: null,
+        reason: '',
+        staffName: '林岚',
+      },
+    ],
+  };
+}
+
+/** 钟房看板（主播报终端的报到、登记也回合成的，免得回来的真看板把它盖掉）与技师管理的几样换成合成数据（只读） */
+async function mockTechnicians(ctx: BrowserContext) {
+  await ctx.route('**/api/clockroom', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: CLOCK_BOARD }) : route.fallback()));
+  await ctx.route('**/api/clockroom/announcer', (route) => route.fulfill({ json: CLOCK_BOARD }));
+  await ctx.route('**/api/technician-admin', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: TECH_VIEW }) : route.fallback()));
+  await ctx.route('**/api/technician-admin/schedule?*', (route) => route.fulfill({ json: scheduleOf(new URL(route.request().url()).searchParams.get('from') ?? TODAY) }));
+  await ctx.route('**/api/technician-admin/leaves*', (route) => (route.request().method() === 'GET' ? route.fulfill({ json: LEAVES }) : route.fallback()));
+}
+
+// ───────────── 会员详情（8.1.16 块 F）：取真的演示会员，把卡类型、推荐人、偏好项目、会员卡与押金换成最长的样子（只读） ─────────────
+
+const DETAIL_CARDS = (memberId: number): MemberCard[] => [
+  { id: 990_951, cardNo: 'YZC0088123456', memberId, status: 'active', issuedAt: ago(200), issuedByName: '小周', replacesId: 990_950, note: '', endedAt: null, endedByName: null, endReason: null },
+  {
+    id: 990_950,
+    cardNo: 'YZC0088000001',
+    memberId,
+    status: 'lost',
+    issuedAt: ago(900),
+    issuedByName: '林岚',
+    replacesId: null,
+    note: '',
+    endedAt: ago(300),
+    endedByName: '林岚',
+    endReason: '客人说卡丢在停车场了',
+  },
+];
+const DETAIL_DEPOSITS: MemberCardDeposits = {
+  held: 2_000,
+  rows: [
+    {
+      id: 990_961,
+      docNo: `KY${TODAY.replaceAll('-', '')}-0001`,
+      kind: 'receive',
+      method: 'cash',
+      amount: 2_000,
+      ref: '',
+      reason: null,
+      cardNo: 'YZC0088000001',
+      operatorName: '小周',
+      businessDate: TODAY,
+      createdAt: ago(900),
+    },
+  ],
+};
+
 // ───────────── 合成的需求单（8.1.10）：一张待核库（领用、能换算与换算不了的行、手填新品），一张等部门确认替代 ─────────────
 
 const STOCK_ID = 990_810;
@@ -503,6 +812,7 @@ async function openDevice(browser: Browser, baseURL: string, d: Device) {
   const ctx = await browser.newContext({ baseURL, viewport: d.viewport, hasTouch: true, isMobile: !!d.mobile, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
   await mockTables(ctx);
   await mockRequests(ctx);
+  await mockTechnicians(ctx);
   const page = await ctx.newPage();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/login');
@@ -534,7 +844,159 @@ async function expectReceiptNamesReadable(page: Page) {
   for (const w of widths) expect(w.width, `「${w.text}」的宽度`).toBeGreaterThanOrEqual(Math.min(5, w.text.length) * w.size - 1);
 }
 
+// ───────────── 合成数据：房态中心（8.1.16）——SPA 房五种状态各一间（在用那间两位客人、名字长）、派对房一间在用、大厅一间空闲 ─────────────
+
+const RC_CAT = { spa: 'c990001', party: 'c990002', hall: 'c990003' } as const;
+const rcGuest = (visitId: number, tagCode: string, guest: string, techNo: string, techName: string): RoomGuestView => ({
+  registrationId: visitId,
+  visitId,
+  tagCode,
+  guest,
+  memberGradeLabel: 'L3 观澜',
+  sellerNo: 'xiaozhou',
+  sellerName: '小周',
+  note: '客人要靠窗、水温高一点',
+  since: ago(35),
+  sessions: [
+    {
+      id: visitId,
+      sessionNo: `JZ-${visitId}`,
+      visitId,
+      technicianId: visitId,
+      techNo,
+      techName,
+      itemId: 1,
+      itemName: '足底按摩（经典 90 分钟）',
+      callType: 'designated',
+      clocks: 2,
+      minutes: 180,
+      status: 'serving',
+      startedAt: ago(35),
+      plannedEnd: new Date(Date.now() + 145 * 60_000).toISOString(),
+      endedAt: null,
+      amount: 39600,
+      unitPrice: 19800,
+    },
+  ],
+  amount: 39600,
+  billAmount: 52800,
+});
+const rcRoom = (spaceId: number, code: string, categoryKey: string, kind: RoomCard['kind'], status: RoomCard['status'], extra: Partial<RoomCard> = {}): RoomCard => ({
+  key: `s${spaceId}`,
+  categoryKey,
+  kind,
+  spaceId,
+  code,
+  name: `合成${code}`,
+  floor: 'L3',
+  businessType: kind === 'service' ? 'SPA' : kind === 'party' ? '派对房' : '休息大厅',
+  capacity: 2,
+  status,
+  version: 1,
+  guests: [],
+  usage: null,
+  usagePriced: kind === 'party',
+  hotel: null,
+  maintenance: null,
+  dirtySince: null,
+  dirtyNote: '',
+  booking: null,
+  merged: [],
+  guestText: null,
+  techText: null,
+  since: null,
+  amount: null,
+  phase: null,
+  plannedEnd: null,
+  ...extra,
+});
+const RC_GUESTS = [rcGuest(990_801, 'A023', '欧阳慕容雪晴（长名字的会员）', '18', '技师小林'), rcGuest(990_802, 'B105', '王先生', '23', '技师阿秀')];
+const RC_ROOMS: RoomCard[] = [
+  rcRoom(990_701, 'S9901', RC_CAT.spa, 'service', 'free'),
+  rcRoom(990_702, 'S9902', RC_CAT.spa, 'service', 'in_use', {
+    guests: RC_GUESTS,
+    guestText: RC_GUESTS.map((g) => g.guest).join('、'),
+    techText: '18 号 技师小林、23 号 技师阿秀',
+    since: ago(35),
+    amount: 79200,
+    phase: 'serving',
+    plannedEnd: new Date(Date.now() + 145 * 60_000).toISOString(),
+  }),
+  rcRoom(990_703, 'S9903', RC_CAT.spa, 'service', 'dirty', { dirtySince: ago(12), dirtyNote: '换房换到 S9902' }),
+  rcRoom(990_704, 'S9904', RC_CAT.spa, 'service', 'maintenance', {
+    maintenance: { reason: '空调漏水，等配件到了再修', expectedAt: new Date(Date.now() + 26 * 3_600_000).toISOString(), at: ago(60), byName: '后勤小周' },
+  }),
+  rcRoom(990_705, 'S9905', RC_CAT.spa, 'service', 'booked', {
+    booking: {
+      id: 990_901,
+      bookingNo: 'YY-990901',
+      guest: '电话客人',
+      guests: 2,
+      startsAt: new Date(Date.now() + 3_600_000).toISOString(),
+      endsAt: new Date(Date.now() + 3 * 3_600_000).toISOString(),
+    },
+  }),
+  rcRoom(990_706, 'P9901', RC_CAT.party, 'party', 'in_use', { guestText: '手牌 A066 · 8 人', since: ago(80) }),
+  rcRoom(990_707, 'H9901', RC_CAT.hall, 'hall', 'free', { capacity: 40 }),
+];
+const rcCounts = (list: RoomCard[]) => ({
+  total: list.length,
+  free: list.filter((r) => r.status === 'free').length,
+  inUse: list.filter((r) => r.status === 'in_use').length,
+  dirty: list.filter((r) => r.status === 'dirty').length,
+  maintenance: list.filter((r) => r.status === 'maintenance').length,
+  booked: list.filter((r) => r.status === 'booked').length,
+});
+const RC_BOARD: RoomCenterBoard = {
+  serverTime: NOW,
+  businessDate: NOW.slice(0, 10),
+  categories: [
+    { key: RC_CAT.spa, id: 990_001, name: 'SPA 房', source: 'service', counts: rcCounts(RC_ROOMS.filter((r) => r.categoryKey === RC_CAT.spa)), hint: null },
+    { key: RC_CAT.party, id: 990_002, name: '派对房', source: 'party', counts: rcCounts(RC_ROOMS.filter((r) => r.categoryKey === RC_CAT.party)), hint: null },
+    { key: RC_CAT.hall, id: 990_003, name: '休息大厅', source: 'hall', counts: rcCounts(RC_ROOMS.filter((r) => r.categoryKey === RC_CAT.hall)), hint: null },
+  ],
+  total: rcCounts(RC_ROOMS),
+  rooms: RC_ROOMS,
+};
+const RC_HISTORY: RoomHistory = {
+  spaceId: 990_702,
+  code: 'S9902',
+  name: '合成S9902',
+  rows: [
+    { key: 'e1', at: ago(10), label: '换房（换入）', text: '从 S9903 换来 · 手牌 A023 · 单与计时不变 · 空调不凉', staffName: '小周', kind: 'move_in' },
+    { key: 'e2', at: ago(35), label: '登记', text: '手牌 A023 · 足底按摩（经典 90 分钟） × 2 · 18 号 技师小林（点钟） · 出单员 xiaozhou 小周 · ¥396.00', staffName: '小周', kind: 'register' },
+  ],
+};
+
 const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
+  // 8.1.16 房态中心（合成的看板）：总览、SPA 房页签（五种状态的卡片、各状态的数量）、在用房间的详情（两位客人、动作、历史）、空闲房间的登记对话框
+  'room-center': async (page) => {
+    await page.route('**/api/room-center', (route) => route.fulfill({ json: RC_BOARD }));
+    await page.route('**/api/room-center/rooms/*/history', (route) => route.fulfill({ json: RC_HISTORY }));
+    try {
+      await page.goto('/room-center');
+      await expect(page.getByTestId('rc-summary')).toBeVisible();
+      await expectFits(page);
+      await page.getByTestId(`rc-tab-${RC_CAT.spa}`).click();
+      await expect(page.getByTestId('rc-room-S9905')).toHaveAttribute('data-status', 'booked');
+      await expectFits(page);
+      await expectOnScreen(page, ['rc-count-total', 'rc-count-maintenance', 'rc-open-S9901', 'rc-detail-S9901']);
+      await page.getByTestId('rc-detail-S9902').click();
+      await expect(page.getByTestId('rc-history')).toBeVisible();
+      await expectFits(page);
+      await expectOnScreen(page, ['rc-act-checkout', 'rc-act-move', 'rc-act-join']);
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('rc-room-dialog')).toHaveCount(0);
+      await page.getByTestId('rc-open-S9901').click();
+      await expect(page.getByTestId('rc-register').or(page.getByText('技师没取回来'))).toBeVisible();
+      await expectFits(page);
+      await expectOnScreen(page, ['rc-register-submit']);
+      await page.keyboard.press('Escape');
+    } finally {
+      await page.unroute('**/api/room-center');
+      await page.unroute('**/api/room-center/rooms/*/history');
+    }
+  },
   // 8.1.10 核库：待核库页签；合成的需求单详情与核库对话框（三种行都有，选替代的一行）；等部门确认替代的那张
   'requests-stock': async (page) => {
     await page.goto('/erp/requests?view=stock');
@@ -762,6 +1224,117 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('dish-options')).toHaveCount(0);
   },
+  // 8.1.16 钟房：这台是主播报终端（播报条上按钮最多）；轮钟排队、在钟上与待上钟的钟单；展开类型、项目两排筛选；按状态排的技师卡片
+  clockroom: async (page) => {
+    await page.evaluate((id) => localStorage.setItem('yuzu.clock.announcer.client', id), ANNOUNCER_CLIENT);
+    await page.goto('/clockroom');
+    await expect(page.getByTestId('announcer-bar')).toHaveAttribute('data-announcer', 'on');
+    await expect(page.getByTestId('clock-queue')).toContainText('欧阳晓晓');
+    await expectFits(page);
+    await expectOnScreen(page, [
+      'clock-dispatch',
+      'clock-search',
+      'clock-more-filters',
+      'announcer-volume',
+      'announcer-mute',
+      'announcer-replay',
+      'announcer-test',
+      'announcer-release',
+      'clock-call-tech-15',
+    ]);
+    await page.getByTestId('clock-more-filters').click();
+    await page.getByTestId('clock-kind-足浴').click();
+    await page.getByTestId('clock-category-采耳').click();
+    await expect(page.getByTestId('clock-active-filters')).toContainText('项目：采耳');
+    await expectFits(page);
+    await expectOnScreen(page, ['clock-filters-clear', 'clock-kind-SPA', 'clock-category-头疗']);
+    await page.getByTestId('clock-filters-clear').click();
+    await page.getByTestId('clock-sort-status').click();
+    await expect(page.getByTestId('clock-tech-30')).toHaveAttribute('data-status', 'suspended');
+    await expectFits(page);
+    await expectOnScreen(page, ['clock-tech-call-15', 'clock-tech-rest-15', 'clock-tech-suspend-15', 'clock-tech-back-21']);
+  },
+  // 8.1.16 技师管理：名册（与编辑技师的弹窗）、组别、班次与排班表（排班表在自己的框里左右滑；临时调班的弹窗）、休假（申请的弹窗）
+  'technician-admin': async (page) => {
+    await page.goto('/technicians/roster');
+    await expect(page.getByTestId('tech-roster-08')).toContainText('晓晓');
+    await expectFits(page);
+    await expectOnScreen(page, ['tech-roster-search', 'tech-roster-new', 'tech-kinds-edit', 'tech-roster-edit-08', 'tech-roster-edit-A12']);
+    await page.getByTestId('tech-roster-edit-08').click();
+    await expect(page.getByTestId('technician-name')).toHaveValue('欧阳晓晓');
+    await expectFits(page);
+    await expectOnScreen(page, ['technician-save', 'technician-kind', 'technician-nickname', 'technician-hired']);
+    await page.keyboard.press('Escape');
+    await page.getByTestId('tech-tab-groups').click();
+    await expect(page.getByTestId(`tech-group-${TECH_GROUP}`)).toContainText('组长');
+    await expectFits(page);
+    await expectOnScreen(page, ['tech-group-new', `tech-group-edit-${TECH_GROUP}`]);
+    await page.getByTestId('tech-tab-shifts').click();
+    await expect(page.getByTestId('tech-schedule-grid')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['tech-shift-new', 'tech-schedule-adjust', 'tech-schedule-next', 'tech-schedule-copy']);
+    await page.getByTestId('tech-schedule-adjust').click();
+    await expect(page.getByTestId('tech-cell-reason')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['tech-cell-save', 'tech-cell-tech', 'tech-cell-date', 'tech-cell-reason']);
+    await page.keyboard.press('Escape');
+    await page.getByTestId('tech-tab-leaves').click();
+    await expect(page.getByTestId(`tech-leave-${LEAVE_PENDING}`)).toContainText('表姐的婚礼');
+    await expectFits(page);
+    await expectOnScreen(page, ['tech-leave-new', `tech-leave-approve-${LEAVE_PENDING}`, `tech-leave-reject-${LEAVE_PENDING}`]);
+    await page.getByTestId('tech-leave-new').click();
+    await expect(page.getByTestId('tech-leave-reason')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['tech-leave-save', 'tech-leave-tech', 'tech-leave-from', 'tech-leave-to']);
+    await page.keyboard.press('Escape');
+  },
+  // 8.1.16 新建会员：第 1 步三种卡、第 2 步（实体卡：卡号、押金）不横向滚动，「建档」「上一步」在屏幕里（不提交）
+  'member-create': async (page) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: '新建会员' }).first().click();
+    const dialog = page.getByRole('dialog').filter({ hasText: '新建会员' });
+    await expect(dialog.getByTestId('member-card-type-step')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['card-type-ecard', 'card-type-physical', 'card-type-anonymous']);
+    await dialog.getByTestId('card-type-physical').click();
+    await expect(dialog.getByTestId('member-card-type-pinned')).toContainText('实体卡');
+    await expectFits(page);
+    await expectOnScreen(page, ['member-form-submit', 'member-form-back', 'member-card-no', 'member-card-type-change']);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  },
+  // 8.1.16 会员详情：卡类型、推荐人、偏好项目一行；会员卡（在用、挂失）、押着的押金与押金记录；退卡的弹窗（不提交）
+  'member-detail': async (page) => {
+    const [m] = (await (await page.request.get('/api/members?limit=1')).json()) as { id: number }[];
+    await page.route(`**/api/members/${m!.id}`, async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      const res = await route.fetch();
+      const real = (await res.json()) as Record<string, unknown>;
+      await route.fulfill({
+        response: res,
+        json: {
+          ...real,
+          cardType: 'physical',
+          referrer: { id: 1, memberNo: 'YZ01001', name: '林小满（老会员介绍来的）' },
+          preferredItems: ['足疗', '汗蒸', '泰式精油推拿', '采耳', 'SPA 精油'],
+          cardDepositHeld: 2_000,
+        },
+      });
+    });
+    await page.route(`**/api/members/${m!.id}/cards`, (route) => (route.request().method() === 'GET' ? route.fulfill({ json: DETAIL_CARDS(m!.id) }) : route.fallback()));
+    await page.route(`**/api/members/${m!.id}/card-deposits`, (route) => route.fulfill({ json: DETAIL_DEPOSITS }));
+    await page.goto(`/?m=${m!.id}`);
+    await expect(page.getByTestId('member-profile-extras')).toContainText('实体卡');
+    await expect(page.getByTestId('member-preferred-items')).toContainText('泰式精油推拿');
+    await expect(page.getByTestId('member-card-deposit-held')).toContainText('20.00');
+    await expectFits(page);
+    await expectOnScreen(page, ['member-referrer', 'member-card-YZC0088123456', 'member-card-replace-open', 'member-card-lost-YZC0088123456', 'member-card-return-open']);
+    await page.getByTestId('member-card-return-open').click();
+    await expect(page.getByTestId('member-card-return-reason')).toBeVisible();
+    await expectFits(page);
+    await expectOnScreen(page, ['member-card-return-submit', 'member-card-return-reason']);
+    await page.keyboard.press('Escape');
+  },
 };
 
 test.describe('三台目标设备（docs/DEVICES.md）', () => {
@@ -778,6 +1351,10 @@ test.describe('三台目标设备（docs/DEVICES.md）', () => {
     const before = ((await (await page.request.get('/api/admin/dining')).json()) as { rules: { enabled: boolean; tablesEnabled: boolean } }).rules;
     const put = async (data: Record<string, boolean>) => expect((await page.request.put('/api/admin/dining/rules', { data })).ok()).toBe(true);
     if (!before.enabled || !before.tablesEnabled) await put({ enabled: true, tablesEnabled: true });
+    // 8.1.16：钟房、技师管理要开着技师功能（看板与名册用合成的），结束时恢复
+    const techBefore = ((await (await page.request.get('/api/admin/technicians')).json()) as { rules: { enabled: boolean } }).rules.enabled;
+    const putTech = async (enabled: boolean) => expect((await page.request.put('/api/admin/technicians/rules', { data: { enabled } })).ok()).toBe(true);
+    if (!techBefore) await putTech(true);
     try {
       for (const d of DEVICES) {
         const { ctx, page: p } = await openDevice(browser, baseURL!, d);
@@ -789,6 +1366,7 @@ test.describe('三台目标设备（docs/DEVICES.md）', () => {
       }
     } finally {
       if (!before.enabled || !before.tablesEnabled) await put({ enabled: before.enabled, tablesEnabled: before.tablesEnabled });
+      if (!techBefore) await putTech(false);
     }
   });
 });

@@ -401,7 +401,7 @@ function Bars({ days }: { days: DashboardData['days'] }) {
     <div className="mt-4 flex h-44 items-end gap-2" role="img" aria-label="近几个营业日营业额">
       {days.map((d) => (
         <div key={d.date} className="flex min-w-0 flex-1 flex-col items-center gap-1">
-          <span className="num text-[11px] text-ink-3">{d.net ? `¥${Math.round(d.net / 100)}` : ''}</span>
+          <span className="num text-[12px] text-ink-3">{d.net ? `¥${Math.round(d.net / 100)}` : ''}</span>
           <div className="flex w-full flex-1 items-end">
             <div
               className="w-full rounded-t-md bg-pine/80"
@@ -409,7 +409,7 @@ function Bars({ days }: { days: DashboardData['days'] }) {
               title={`${d.date} 营业额 ¥${(d.net / 100).toFixed(2)}，结账 ${d.checkouts} 张`}
             />
           </div>
-          <span className="num text-[11px] text-ink-3">{d.date.slice(5)}</span>
+          <span className="num text-[12px] text-ink-3">{d.date.slice(5)}</span>
         </div>
       ))}
     </div>

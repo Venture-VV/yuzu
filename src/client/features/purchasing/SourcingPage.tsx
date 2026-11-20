@@ -601,7 +601,7 @@ function Compare({ ev, quotes }: { ev: SourcingEvent; quotes: SourcingQuote[] })
             {quotes.map((q) => (
               <th key={q.id} className={cn('px-3 py-2 text-right font-semibold', q.id === ev.awardedQuoteId && 'bg-pine-tint')}>
                 <span className="block text-[13px] font-bold text-ink">{q.supplier.name}</span>
-                {q.viaLink && <span className="block text-[11.5px] font-semibold text-lake">供应商链接</span>}
+                {q.viaLink && <span className="block text-[12px] font-semibold text-lake">供应商链接</span>}
                 <span className="font-normal">第 {q.rank} 名</span>
               </th>
             ))}
@@ -635,7 +635,7 @@ function Compare({ ev, quotes }: { ev: SourcingEvent; quotes: SourcingQuote[] })
                   <td key={q.id} className={cn('px-3 py-2 text-right', q.id === ev.awardedQuoteId && 'bg-pine-tint/60')} data-testid={`cell-${l.id}-${q.id}`}>
                     <span className={cn('font-semibold', best && 'text-pine')}>¥{formatAmount(p.priceCents)}</span>
                     {p.changePercent !== null && (
-                      <span className={cn('block text-[11px]', p.changePercent > 0 ? 'text-clay' : p.changePercent < 0 ? 'text-pine' : 'text-ink-3')}>
+                      <span className={cn('block text-[12px]', p.changePercent > 0 ? 'text-clay' : p.changePercent < 0 ? 'text-pine' : 'text-ink-3')}>
                         {p.changePercent > 0 ? '+' : ''}
                         {p.changePercent.toFixed(2)}%
                       </span>

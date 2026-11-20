@@ -880,7 +880,7 @@ function FilesCard({ c, manage, onChanged }: { c: ContractDetail; manage: boolea
                   href={f.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex size-20 flex-col items-center justify-center gap-1 overflow-hidden rounded-md border border-line bg-paper-2 px-1 text-center text-[11px] font-semibold text-lake hover:border-line-strong"
+                  className="flex size-20 flex-col items-center justify-center gap-1 overflow-hidden rounded-md border border-line bg-paper-2 px-1 text-center text-[12px] font-semibold text-lake hover:border-line-strong"
                   aria-label={`打开 PDF ${f.name}`}
                   data-testid="contract-file-pdf"
                 >

@@ -18,6 +18,7 @@ import { TrialsCard } from '../membership/TrialsCard';
 import { CountCardsCard } from '../membership/CountCardsCard';
 import { MemberCardsCard } from '../membership/MemberCardsCard';
 import { MemberBlacklistCard } from '../frontdesk/blacklist';
+import { MemberProfileExtras } from '../membership/MemberProfileExtras';
 import { MemberHistoryCard } from '../membership/MemberHistoryCard';
 import { MemberTagChips } from '../membership/TagPicker';
 import { AccountCard } from '../membership/AccountCard';
@@ -78,6 +79,8 @@ export function MemberDetail({
               {member.createdByName ? `（${member.createdByName}）` : ''}
               {channel && ` · 渠道 ${channel}`}
             </p>
+            {/* 卡类型、推荐人、偏好项目（8.1.15） */}
+            <MemberProfileExtras member={member} />
           </div>
           {can('member.write') && member.mergedIntoId === null && (
             <Button size="sm" variant="secondary" icon={<PencilLine className="size-3.5" />} onClick={onEdit}>
@@ -196,9 +199,11 @@ export function MemberDetail({
         )}
       </div>
 
-      {/* 会员详情所在的栏宽随工作台布局变化，按卡片容器宽度决定是否并排 */}
+      {/* 会员详情所在的栏宽随工作台布局变化，按卡片容器宽度决定是否并排。
+          一栏时也写明 grid-cols-1（minmax(0, 1fr)）：不然档阶阶梯（min-w 560、自己左右滑）把这一栏撑宽，
+          1280 × 720 上会员详情整栏横着滚（8.1.16 四种尺寸核对时发现） */}
       <div className="@container">
-        <div className="grid gap-4 @3xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @3xl:grid-cols-2">
           <GradeCard member={member} />
           <BonusLotsCard member={member} />
         </div>
@@ -216,7 +221,7 @@ export function MemberDetail({
       {/* 次卡（v0.7.28）：换会员时整块重来（售卡、退卡的操作编号不带到下一位会员） */}
       <CountCardsCard key={`count-cards-${member.id}`} member={member} />
 
-      {/* 会员实体卡（v0.7.28）：发卡、挂失、补卡；换会员时整块重来 */}
+      {/* 会员实体卡（v0.7.28）：发卡、挂失、补卡；8.1.15 起还有押金与退卡；换会员时整块重来 */}
       <MemberCardsCard key={`member-cards-${member.id}`} member={member} />
 
       {/* 其他信息（8.0.21 自定义字段）：后台建了字段才显示；单独保存，不动会员档案 */}

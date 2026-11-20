@@ -252,7 +252,7 @@ export async function processCampaign(deps: Pick<Deps, 'sql' | 'config'>, id: nu
       const ids = pending.map((p) => Number(p.memberId));
       const members = new Map(
         (
-          await tx<{ id: number; phone: string; status: string; grade: number; mergedIntoId: number | null }[]>`
+          await tx<{ id: number; phone: string | null; status: string; grade: number; mergedIntoId: number | null }[]>`
           SELECT id, phone, status, grade, merged_into_id FROM members WHERE id IN ${tx(ids)}`
         ).map((m) => [Number(m.id), m]),
       );
@@ -310,7 +310,8 @@ export async function processCampaign(deps: Pick<Deps, 'sql' | 'config'>, id: nu
               ON CONFLICT (dedupe_key) DO NOTHING`;
           }
         }
-        if (c.notifySms && /^1\d{10}$/.test(m.phone)) {
+        // 没留手机号的（匿名卡，8.1.15）不发短信，券与会员端提醒照发
+        if (c.notifySms && m.phone !== null && /^1\d{10}$/.test(m.phone)) {
           await tx`
             INSERT INTO sms_outbox (member_id, phone, purpose, params, content, campaign_id, dedupe_key)
             VALUES (${memberId}, ${m.phone}, 'coupon_issued', ${tx.json({ count: String(c.quantity), coupon: template!.name, validTo: range!.to })},

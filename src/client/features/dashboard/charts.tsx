@@ -108,7 +108,7 @@ export function Columns({
     <div className={cn('mt-4 flex items-end gap-[2px]', height)} role="img" aria-label={label}>
       {items.map((i, idx) => (
         <div key={i.key} className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1" title={i.title}>
-          {showValues && !dense && <span className="num truncate text-[11px] text-ink-3">{i.value ? format(i.value) : ''}</span>}
+          {showValues && !dense && <span className="num truncate text-[12px] text-ink-3">{i.value ? format(i.value) : ''}</span>}
           <div className="flex w-full flex-1 items-end">
             <div
               className="w-full rounded-t-[4px] bg-pine/75 transition-colors group-hover:bg-pine"
@@ -135,13 +135,13 @@ export function HBars({ rows, format, empty, testId }: { rows: { key: string; la
             <span className="min-w-0 truncate text-ink-2">{r.label}</span>
             <span className="num shrink-0 font-bold text-ink">
               {format(r.value)}
-              {total > 0 && r.value > 0 && <span className="ml-1.5 text-[11.5px] font-semibold text-ink-3">{Math.round((r.value / total) * 100)}%</span>}
+              {total > 0 && r.value > 0 && <span className="ml-1.5 text-[12px] font-semibold text-ink-3">{Math.round((r.value / total) * 100)}%</span>}
             </span>
           </div>
           <div className="mt-1 h-2 rounded-full bg-paper-2">
             <div className="h-full rounded-full bg-pine/70" style={{ width: `${Math.max(0, (r.value / max) * 100)}%` }} />
           </div>
-          {r.note && <p className="mt-0.5 text-[11.5px] text-ink-3">{r.note}</p>}
+          {r.note && <p className="mt-0.5 text-[12px] text-ink-3">{r.note}</p>}
         </li>
       ))}
     </ul>

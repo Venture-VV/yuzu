@@ -2,6 +2,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { relaxRechargeMinimum } from './membership';
 import { ensureShift } from './shift';
+import { clickNav } from './nav';
 
 relaxRechargeMinimum();
 
@@ -15,8 +16,6 @@ async function login(page: Page, username: string) {
   await expect(page.getByRole('heading', { name: '会员工作台' })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
   await ensureShift(page); // 收款前必须先开班（R1.2）
 }
-
-const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });
 
 /** 点「确认入账」，返回这笔的赠金（会员体系 v2：按充值后所在档的比例自动算） */
 async function confirmRecharge(page: Page): Promise<number> {
@@ -120,7 +119,7 @@ test('店主：整单撤销后按原构成恢复余额，日结核对一致', as
   await dialog.getByRole('button', { name: '完成' }).click();
   await expect.poll(() => availableCents(page)).toBe(before + restore);
 
-  await nav(page, '日结').click();
+  await clickNav(page, '日结');
   await expect(page.getByText(/余额与流水核对一致/)).toBeVisible();
   await expect(page.getByText('异常与提醒')).toBeVisible();
 });
@@ -134,7 +133,7 @@ test('店主：前台结账的储值消费不能在会员这里单独撤销，�
   await expect(main.getByText('需反结账更正')).toBeVisible();
   await expect(main.getByRole('button', { name: '撤销' })).toHaveCount(0);
   // 流水的单据详情：不提供「撤销这张消费单」，写明对哪张结账单反结账
-  await nav(page, '流水').click();
+  await clickNav(page, '流水');
   await expect(page.getByRole('heading', { name: '流水' })).toBeVisible();
   // 只看沈先生的：当天可能还有其他用例（如完整收银）结账后又反结账、储值已撤销的单。
   // 结账演示可能落在前一个营业日（营业日切换后不久灌的数据，或按 AGENTS.md 加 --previous-day）：按它实际所在的营业日打开流水（测试会话复测 v0.7.3）
@@ -190,7 +189,7 @@ test('请求超时：显示结果待确认，可查回原单且不重复记账',
 
 test('权限：店员进后台只看得到数据看板（2026-11-10 起看板在后台），不能查看历史营业日', async ({ page }) => {
   await login(page, 'xiaozhou');
-  await nav(page, '后台').click();
+  await clickNav(page, '后台');
   await expect(page).toHaveURL(/\/admin\/dashboard$/);
   await expect(page.getByTestId('admin-nav-dashboard')).toHaveCount(1);
   await expect(page.getByTestId('admin-nav-settings')).toHaveCount(0);
@@ -215,9 +214,9 @@ test('外网中断：所有资源来自本机，核心页面照常使用', async
   );
   await login(page, 'linlan');
   await openMember(page, '林小满');
-  await nav(page, '流水').click();
+  await clickNav(page, '流水');
   await expect(page.getByRole('heading', { name: '流水' })).toBeVisible();
-  await nav(page, '日结').click();
+  await clickNav(page, '日结');
   await expect(page.getByText('余额核对')).toBeVisible();
   expect(external).toEqual([]);
 });

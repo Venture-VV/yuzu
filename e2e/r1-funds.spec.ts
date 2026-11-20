@@ -4,6 +4,7 @@
 //   · 改成免票、接待时直接选免票：要值班经理当场授权并填原因（同一次接待授权一次）。
 // 账号：收银员 chenyin（演示里已交班）、值班经理 zhangjl，密码 yuzu2026。会改数据，只在门店电脑尺寸执行；每次自动挑空闲手牌，可重复执行。
 import { expect, test, type Page } from '@playwright/test';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -101,7 +102,7 @@ test.describe('R1.2 收银', () => {
     await page.getByTestId('checkout-finish').click();
 
     // 交班表：优惠单列，不计入应有现金
-    await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '交班', exact: true }).click();
+    await clickNav(page, '交班');
     await expect(page.getByTestId('shift-summary')).toContainText('优惠 / 免单');
     await expect(page.getByTestId('shift-cash-formula')).toContainText('备用金');
   });

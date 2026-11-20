@@ -29,8 +29,9 @@ import { lazyPage } from './lib/lazyPage';
 // 会员工作台与前台随首屏加载；其余页面第一次打开时再下载（v0.7.22：收银台首屏更轻）
 const CashierPage = lazyPage(() => import('./features/frontdesk/CashierPage').then((m) => m.CashierPage));
 const ClockroomPage = lazyPage(() => import('./features/clockroom/ClockroomPage').then((m) => m.ClockroomPage));
+const TechnicianAdminPage = lazyPage(() => import('./features/technicians/TechnicianAdminPage').then((m) => m.TechnicianAdminPage));
 const DiningPage = lazyPage(() => import('./features/dining/DiningPage').then((m) => m.DiningPage));
-const RoomsPage = lazyPage(() => import('./features/rooms/RoomsPage').then((m) => m.RoomsPage));
+const RoomCenterPage = lazyPage(() => import('./features/room-center/RoomCenterPage').then((m) => m.RoomCenterPage));
 const BookingsPage = lazyPage(() => import('./features/bookings/BookingsPage').then((m) => m.BookingsPage));
 const ParkingLogPage = lazyPage(() => import('./features/membership/ParkingLogCard').then((m) => m.ParkingLogPage));
 const CouponIssuePage = lazyPage(() => import('./features/coupons/CouponIssuePage').then((m) => m.CouponIssuePage));
@@ -225,11 +226,26 @@ function Home() {
   // 原来排在最前面：以后给别的岗位勾上管家部的查看权限，平板、库管、采购登录都会被带到管家部（整改）
   if (can('concierge.read')) return <Navigate to="/concierge" replace />;
   if (dining && (can('dining.kitchen') || can('dining.order'))) return <Navigate to="/dining" replace />;
-  if (session?.rooms && (can('room.operate') || can('room.housekeep'))) return <Navigate to="/rooms" replace />;
+  if (session?.rooms && (can('room.operate') || can('room.housekeep'))) return <Navigate to="/room-center" replace />;
   if (erp.canEnter) return <Navigate to="/erp" replace />;
   // 只有「看对客导览」的账号（门店大屏）：直接进大屏模式
   if (can('guide.view')) return <Navigate to="/guide/screen" replace />;
   return <Navigate to="/password" replace />;
+}
+
+/**
+ * 原来的「客房」页（/rooms）8.1.16 起并进了房态中心（docs/ROOM_CENTER_V8115.md 第 7 节）：带上查询参数跳过去——
+ * 房态看板 → 「客房」页签，派对房看板 → 派对房的页签，平面图 → 「视图 → 平面图」；预约到店（booking）、结果待确认（resume）照旧
+ */
+function RoomsMoved() {
+  const { search } = useLocation();
+  const next = new URLSearchParams(search);
+  const view = next.get('view');
+  next.delete('view');
+  if (view === 'map') next.set('view', 'map');
+  else if (!next.has('resume') && !next.has('booking')) next.set('tab', view === 'party' ? 'party' : 'hotel');
+  const q = next.toString();
+  return <Navigate to={`/room-center${q ? `?${q}` : ''}`} replace />;
 }
 
 /** 门店的旧地址 /dashboard、/dashboard/<页签>：看板 2026-11-10 起在后台「数据看板」，带上页签与查询参数跳过去 */
@@ -378,7 +394,8 @@ const router = createBrowserRouter([
       },
       { path: 'clockroom', element: <ClockroomPage /> },
       { path: 'dining/:tab?', element: <DiningPage /> },
-      { path: 'rooms', element: <RoomsPage /> },
+      { path: 'room-center', element: <RoomCenterPage /> },
+      { path: 'rooms', element: <RoomsMoved /> },
       { path: 'bookings', element: <BookingsPage /> },
       // 发券（8.0.19，IA4）：批量发券、无记名券从后台「券」挪到门店，会员工作台右上角进
       { path: 'coupon-issue/:tab?', element: <CouponIssuePage /> },
@@ -397,6 +414,8 @@ const router = createBrowserRouter([
       // 看板 2026-11-10 起在后台（「数据看板」）：门店的旧地址跳过去，页签与查询参数照带
       { path: 'dashboard/:tab?', element: <DashboardMoved /> },
       { path: 'lookup', element: <LookupPage /> },
+      // 技师管理（8.1.15）：技师名册、组别、班次、休假四个页签
+      { path: 'technicians/:tab?', element: <TechnicianAdminPage /> },
       { path: 'password', element: <ChangePasswordPage /> },
       { path: 'dishes', element: <DishesPage /> },
       { path: '*', element: <Navigate to="/" replace /> },

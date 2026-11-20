@@ -190,7 +190,7 @@ export function SummaryTab() {
                     <td className="px-4 py-2.5">
                       <Link to={`/inventory?m=${r.materialId}`} className="block min-w-0 hover:text-pine">
                         <span className="block truncate font-bold">{r.name}</span>
-                        <span className="num block truncate text-[11.5px] text-ink-3">
+                        <span className="num block truncate text-[12px] text-ink-3">
                           {r.code} · {r.inventoryUnit}
                           {r.specification && ` · ${r.specification}`}
                         </span>

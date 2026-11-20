@@ -15,7 +15,8 @@ export interface CustomerMemberRef {
   id: number;
   memberNo: string;
   name: string;
-  phone: string;
+  /** 没留手机号的（匿名卡，8.1.15）为 null */
+  phone: string | null;
   status: string;
 }
 export interface CustomerVisitMember extends CustomerMemberRef {

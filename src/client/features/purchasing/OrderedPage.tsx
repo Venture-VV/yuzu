@@ -121,7 +121,7 @@ export function OrderedPage() {
                     {l.images.length > 0 ? (
                       <ImageThumbs images={l.images.slice(0, 1)} size={52} />
                     ) : (
-                      <span className="flex size-[52px] items-center justify-center rounded-md border border-dashed border-line text-[11px] text-ink-4">无图</span>
+                      <span className="flex size-[52px] items-center justify-center rounded-md border border-dashed border-line text-[12px] text-ink-4">无图</span>
                     )}
                   </span>
                   <span className="min-w-0 space-y-0.5">
