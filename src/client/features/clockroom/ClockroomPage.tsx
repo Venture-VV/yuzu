@@ -288,7 +288,7 @@ export function ClockroomPage() {
                 onCall={(t, s) => void call(t, s)}
               />
             ) : (
-              <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-5 px-5 py-5 md:px-7 lg:grid-cols-[340px_minmax(0,1fr)]" data-testid="clockroom">
+              <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-5 px-5 py-5 md:px-7 lg:grid-cols-[360px_minmax(0,1fr)]" data-testid="clockroom">
                 <div className="space-y-4">
                   <Card className="p-4" data-testid="clock-queue">
                     <SectionTitle aside={<span className="text-[12px] text-ink-3">在岗 {queue.length} 人</span>}>
@@ -705,35 +705,38 @@ function QueueRow({
       ) : (
         <span className="text-[11.5px] text-ink-4">今日 {t.todayClocks} 钟</span>
       )}
-      <span className="flex w-full items-center justify-end gap-1 pl-8 text-[11.5px] whitespace-nowrap">
-        <span className="mr-auto min-w-0 truncate text-ink-4">
+      {/* 说明放不下时操作换到下一行（8.1.15：说明里多了类型、组别、今天的班） */}
+      <span className="flex w-full flex-wrap items-center justify-end gap-x-1 gap-y-0.5 pl-8 text-[11.5px] whitespace-nowrap">
+        <span className="mr-auto max-w-full truncate text-ink-4">
           {[gradeLabel(t.grade), ...techExtras(t)].join(' · ')}
           {t.rejectStreak ? ` · 已连续被退 ${t.rejectStreak} 次` : ''}
         </span>
-        <button
-          type="button"
-          className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[12px] font-semibold text-pine hover:bg-pine-tint"
-          onClick={onCall}
-          disabled={busy !== null}
-          data-testid={`clock-call-tech-${t.techNo}`}
-        >
-          <Megaphone className="size-3" /> 叫号
-        </button>
-        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onToEnd} disabled={busy !== null}>
-          <ArrowDownToLine className="size-3" /> 排尾
-        </button>
-        <button
-          type="button"
-          className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink"
-          onClick={onRest}
-          disabled={busy !== null}
-          data-testid={`clock-rest-btn-${t.techNo}`}
-        >
-          <Coffee className="size-3" /> 休息
-        </button>
-        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onOff} disabled={busy !== null}>
-          <LogOut className="size-3" /> 下牌
-        </button>
+        <span className="flex items-center gap-1">
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[12px] font-semibold text-pine hover:bg-pine-tint"
+            onClick={onCall}
+            disabled={busy !== null}
+            data-testid={`clock-call-tech-${t.techNo}`}
+          >
+            <Megaphone className="size-3" /> 叫号
+          </button>
+          <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onToEnd} disabled={busy !== null}>
+            <ArrowDownToLine className="size-3" /> 排尾
+          </button>
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink"
+            onClick={onRest}
+            disabled={busy !== null}
+            data-testid={`clock-rest-btn-${t.techNo}`}
+          >
+            <Coffee className="size-3" /> 休息
+          </button>
+          <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onOff} disabled={busy !== null}>
+            <LogOut className="size-3" /> 下牌
+          </button>
+        </span>
       </span>
     </li>
   );

@@ -4,9 +4,10 @@
 //   · 现在生效的条件列在下面一行，各自能单独去掉，也能一键清空；
 //   · 排序：按排位（默认，与轮钟队列一致），或按状态（空闲、上钟、已派待上、休息、休假、停牌、未上牌）。
 // 条件都只在这台终端的页面上（不存、不影响别人）；有任何条件或按状态排时，下面列的是技师卡片，全去掉回到钟房看板。
+// 类型、项目两排平时收着（点「筛选」展开，选了的时候一直开着），不占看板的地方。
 
-import { useMemo, type ReactNode } from 'react';
-import { ArrowDownUp, Search, X } from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { ArrowDownUp, Search, SlidersHorizontal, X } from 'lucide-react';
 import {
   EMPTY_TECH_QUERY,
   TECH_FILTER_LABELS,
@@ -87,6 +88,9 @@ export function ClockFilters({
   }, [board]);
   const text = query.text.trim();
   const active = techQueryActive(query);
+  const picked = query.kinds.length + query.categories.length;
+  const [opened, setOpened] = useState(false);
+  const more = opened || picked > 0;
 
   return (
     <div className="mx-auto max-w-[1280px] space-y-2.5 px-5 pt-4 md:px-7" data-testid="clock-filters">
@@ -114,6 +118,17 @@ export function ClockFilters({
             </button>
           )}
         </div>
+        <Button
+          variant={more ? 'quiet' : 'secondary'}
+          className="h-11"
+          icon={<SlidersHorizontal className="size-4" />}
+          onClick={() => setOpened(!more)}
+          disabled={picked > 0}
+          aria-expanded={more}
+          data-testid="clock-more-filters"
+        >
+          类型 / 项目{picked > 0 ? ` ${picked}` : ''}
+        </Button>
         <div className="flex items-center gap-1.5">
           <ArrowDownUp className="size-4 text-ink-3" aria-hidden />
           <Segmented ariaLabel="技师的排序" value={sort} onChange={onSort} options={TECH_SORTS.map((s) => ({ value: s, label: <span data-testid={`clock-sort-${s}`}>{TECH_SORT_LABELS[s]}</span> }))} />
@@ -128,7 +143,7 @@ export function ClockFilters({
           ))}
         </div>
       </FilterRow>
-      {kinds.length > 0 && (
+      {more && kinds.length > 0 && (
         <FilterRow label="类型">
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="按技师类型筛选" data-testid="clock-kinds">
             {kinds.map((k) => (
@@ -139,7 +154,7 @@ export function ClockFilters({
           </div>
         </FilterRow>
       )}
-      {categories.length > 0 && (
+      {more && categories.length > 0 && (
         <FilterRow label="项目">
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="按可做的项目筛选" data-testid="clock-categories">
             {categories.map((c) => (

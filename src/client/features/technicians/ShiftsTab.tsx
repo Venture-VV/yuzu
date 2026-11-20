@@ -201,7 +201,8 @@ function ScheduleCard({ view }: { view: TechnicianAdminView }) {
   const toast = useToast();
   const refresh = useTechAdminRefresh();
   const [offset, setOffset] = useState(0);
-  const [picking, setPicking] = useState<{ t: RosterTechnician; date: string } | null>(null);
+  // 点格子：改那一格；点「临时调班」：在对话框里选技师与日期（一定要写原因）
+  const [picking, setPicking] = useState<{ technicianId: number; date: string; adjust: boolean } | null>(null);
   const [copying, setCopying] = useState(false);
   const from = shiftDate(mondayOf(view.businessDate), offset * DAYS);
   const schedule = useSchedule(from, DAYS);
@@ -244,7 +245,18 @@ function ScheduleCard({ view }: { view: TechnicianAdminView }) {
     <Card className="p-5" data-testid="tech-schedule">
       <SectionTitle
         aside={
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            {view.canManage && technicians.length > 0 && dates.some((d) => d >= today) && (
+              <Button
+                variant="secondary"
+                className="h-11"
+                icon={<Shuffle className="size-4" />}
+                onClick={() => setPicking({ technicianId: technicians[0]!.id, date: dates.find((d) => d >= today)!, adjust: true })}
+                data-testid="tech-schedule-adjust"
+              >
+                临时调班
+              </Button>
+            )}
             <Button size="sm" variant="ghost" icon={<ChevronLeft className="size-4" />} onClick={() => setOffset(offset - 1)} aria-label="上一周" data-testid="tech-schedule-prev">
               上一周
             </Button>
@@ -281,7 +293,7 @@ function ScheduleCard({ view }: { view: TechnicianAdminView }) {
           <table className="w-full min-w-[640px] border-separate border-spacing-0 text-[13px]" data-testid="tech-schedule-grid">
             <thead>
               <tr>
-                <th className="sticky left-0 z-10 w-28 border-b border-line bg-paper-2 px-2 py-2 text-left text-[12.5px] font-semibold text-ink-3">技师</th>
+                <th className="sticky left-0 z-10 w-28 border-b border-line bg-paper-2 px-2 py-2 text-left text-[12.5px] font-semibold text-ink-3 md:w-44">技师</th>
                 {dates.map((d) => {
                   const day = describeDate(d);
                   return (
@@ -299,7 +311,7 @@ function ScheduleCard({ view }: { view: TechnicianAdminView }) {
             <tbody>
               {technicians.map((t) => (
                 <tr key={t.id}>
-                  <th className="sticky left-0 z-10 w-28 border-b border-line bg-card px-2 py-1.5 text-left font-semibold">
+                  <th className="sticky left-0 z-10 w-28 border-b border-line bg-card px-2 py-1.5 text-left font-semibold md:w-44">
                     <span className="num">{t.techNo}</span> <span className="break-words">{t.nickname || t.name}</span>
                     {t.groupName && <span className="block text-[12px] font-normal text-ink-3">{t.groupName}</span>}
                   </th>
@@ -313,7 +325,7 @@ function ScheduleCard({ view }: { view: TechnicianAdminView }) {
                         <button
                           type="button"
                           disabled={!view.canManage || past}
-                          onClick={() => setPicking({ t, date: d })}
+                          onClick={() => setPicking({ technicianId: t.id, date: d, adjust: false })}
                           className={cn(
                             'flex min-h-11 w-full flex-col items-center justify-center rounded-md px-1 py-1 text-center leading-tight',
                             shift ? 'bg-pine-tint font-semibold text-pine' : cell.rest ? 'bg-paper-2 font-semibold text-ink-2' : 'text-ink-4',
@@ -364,15 +376,14 @@ function ScheduleCard({ view }: { view: TechnicianAdminView }) {
       )}
       {picking && data && (
         <CellDialog
-          key={cellKey(picking.t.id, picking.date)}
-          technician={picking.t}
-          date={picking.date}
+          key={`${cellKey(picking.technicianId, picking.date)}|${picking.adjust}`}
+          initial={picking}
           today={today}
           from={from}
-          current={cells.get(cellKey(picking.t.id, picking.date)) ?? EMPTY}
+          dates={dates.filter((d) => d >= today)}
           cells={cells}
           shifts={view.shifts}
-          others={technicians.filter((t) => t.id !== picking.t.id)}
+          technicians={technicians}
           onClose={() => setPicking(null)}
           onSaved={(next) => {
             apply(next);
@@ -386,40 +397,59 @@ function ScheduleCard({ view }: { view: TechnicianAdminView }) {
 
 const describeCell = (cell: CellValue, shifts: Map<number, TechShift>) => (cell.shiftId !== null ? (shifts.get(cell.shiftId)?.name ?? '班次') : cell.rest ? '排休' : '没排');
 
-/** 改一格：选班次 / 排休 / 不排，或与另一位技师对调这一天。写了原因的记成临时调班；今天已经排了的、对调的必须写 */
+const choiceOf = (cell: CellValue) => (cell.shiftId !== null ? `s${cell.shiftId}` : cell.rest ? 'rest' : 'none');
+
+/**
+ * 改一格：选班次 / 排休 / 不排，或与另一位技师对调这一天。写了原因的记成临时调班；今天已经排了的、对调的必须写。
+ * 从「临时调班」按钮打开的（initial.adjust）在这里选技师与日期，一定要写原因。
+ */
 function CellDialog({
-  technician,
-  date,
+  initial,
   today,
   from,
-  current,
+  dates,
   cells,
   shifts,
-  others,
+  technicians,
   onClose,
   onSaved,
 }: {
-  technician: RosterTechnician;
-  date: string;
+  initial: { technicianId: number; date: string; adjust: boolean };
   today: string;
   from: string;
-  current: CellValue;
+  /** 这一周里还能改的日子（不早于今天） */
+  dates: string[];
   cells: Map<string, ScheduleCell>;
   shifts: TechShift[];
-  others: RosterTechnician[];
+  /** 在职的技师 */
+  technicians: RosterTechnician[];
   onClose: () => void;
   onSaved: (next: ScheduleView) => void;
 }) {
   const toast = useToast();
+  const [technicianId, setTechnicianId] = useState(initial.technicianId);
+  const [date, setDate] = useState(initial.date);
+  const cellOf = (id: number, d: string): CellValue => cells.get(cellKey(id, d)) ?? EMPTY;
+  const current = cellOf(technicianId, date);
+  const technician = technicians.find((t) => t.id === technicianId)!;
+  const others = technicians.filter((t) => t.id !== technicianId);
   const [mode, setMode] = useState<'set' | 'swap'>('set');
-  const [choice, setChoice] = useState<string>(current.shiftId !== null ? `s${current.shiftId}` : current.rest ? 'rest' : 'none');
+  const [choice, setChoice] = useState<string>(choiceOf(current));
   const [swapWith, setSwapWith] = useState('');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 换了技师或日期：选中的班回到那一格现在的样子 */
+  const pick = (id: number, d: string) => {
+    setTechnicianId(id);
+    setDate(d);
+    setChoice(choiceOf(cellOf(id, d)));
+    setSwapWith('');
+    setError(null);
+  };
   const shiftMap = new Map(shifts.map((s) => [s.id, s]));
   const hasValue = current.shiftId !== null || current.rest;
-  const mustReason = mode === 'swap' || (date === today && hasValue);
+  const mustReason = initial.adjust || mode === 'swap' || (date === today && hasValue);
   const trimmed = reason.trim();
   const next: CellValue = choice === 'rest' ? { shiftId: null, rest: true } : choice === 'none' ? EMPTY : { shiftId: Number(choice.slice(1)), rest: false };
   const unchanged = mode === 'set' && next.shiftId === current.shiftId && next.rest === current.rest;
@@ -470,6 +500,29 @@ function CellDialog({
       }
     >
       <div className="grid grid-cols-1 gap-4">
+        {initial.adjust && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="技师" htmlFor="tc-tech">
+              <Select id="tc-tech" className="h-11" value={technicianId} onChange={(e) => pick(Number(e.target.value), date)} data-testid="tech-cell-tech">
+                {technicians.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.techNo} 号 {t.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="哪一天" htmlFor="tc-date">
+              <Select id="tc-date" className="h-11" value={date} onChange={(e) => pick(technicianId, e.target.value)} data-testid="tech-cell-date">
+                {dates.map((d) => (
+                  <option key={d} value={d}>
+                    {describeDate(d).md} {describeDate(d).weekday}
+                    {d === today ? '（今天）' : ''}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        )}
         <Segmented
           ariaLabel="怎么改"
           value={mode}

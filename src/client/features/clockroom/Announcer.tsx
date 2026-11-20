@@ -159,7 +159,7 @@ export function AnnouncerBar({ board, onBoard }: { board: ClockroomBoard; onBoar
 
   return (
     <Card
-      className={cn('flex flex-wrap items-center gap-x-4 gap-y-3 p-4', muted && 'border-clay bg-clay-soft')}
+      className={cn('flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3', muted && 'border-clay bg-clay-soft')}
       data-testid="announcer-bar"
       data-announcer={mine ? (muted ? 'muted' : 'on') : claim ? 'other' : 'none'}
     >
@@ -184,9 +184,7 @@ export function AnnouncerBar({ board, onBoard }: { board: ClockroomBoard; onBoar
           </p>
           <p className="mt-0.5 text-[12.5px] text-ink-2">
             {muted && (missed > 0 ? `静音期间有 ${missed} 次叫号没有念。` : '取消静音以后，新的叫号照常念。')}
-            {!muted &&
-              mine &&
-              (speech.blocked ? '浏览器还没让出声：点一下「试音」。' : !speech.hasVoice ? '没找到中文的朗读声音，可能念不出来：点「试音」听一下。' : '几台终端同时开着钟房，只有本机念。')}
+            {!muted && mine && (speech.blocked ? '浏览器还没让出声：点一下「试音」。' : !speech.hasVoice ? '没找到中文的朗读声音，可能念不出来：点「试音」听一下。' : '')}
             {!mine && claim && (
               <span data-testid="announcer-other">
                 {claim.label || '另一台终端'}（{claim.claimedByName} {formatTime(claim.claimedAt)} 起）在念，本机不出声。
