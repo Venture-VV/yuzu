@@ -5,8 +5,7 @@ import { APP_ONLY_ENV, clearAppOnlyEnv } from './app-only-env';
 // @ts-expect-error 脚本是 .mjs，没有类型声明
 import * as tiers from '../scripts/test-tiers.mjs';
 
-const { keywordsOf, matchesKeyword, needsDatabase, resolveImport, runtimeImports } = tiers as {
-  keywordsOf: (changedFile: string) => string[];
+const { matchesKeyword, needsDatabase, resolveImport, runtimeImports } = tiers as {
   matchesKeyword: (testFile: string, keyword: string) => boolean;
   needsDatabase: (testFile: string, read: (path: string) => string | null, exists: (path: string) => boolean) => boolean;
   resolveImport: (fromFile: string, specifier: string, exists: (path: string) => boolean) => string | null;
@@ -58,17 +57,7 @@ describe('不要数据库的用例', () => {
   });
 });
 
-describe('快测：按改到的模块找沾边的用例', () => {
-  it('改到的文件 → 模块名', () => {
-    expect(keywordsOf('src/server/modules/coupons.ts')).toEqual(['coupons']);
-    expect(keywordsOf('src/server/modules/inventory/docs.ts')).toEqual(['inventory']);
-    expect(keywordsOf('src/client/features/frontdesk/CheckoutDialog.tsx')).toEqual(['frontdesk']);
-    expect(keywordsOf('src/shared/membership.ts')).toEqual(['membership']);
-    expect(keywordsOf('src/server/lib/idempotency.ts')).toEqual(['idempotency']);
-    expect(keywordsOf('tests/wallet-limits.test.ts')).toEqual(['wallet-limits']);
-    expect(keywordsOf('docs/TESTING.md')).toEqual([]);
-  });
-
+describe('按模块名找沾边的用例（测试计划用，tests/test-plan.test.ts 测整套挑法）', () => {
   it('模块名或它的单数出现在用例文件名里就算沾边；太短的词不算', () => {
     expect(matchesKeyword('tests/coupon-campaigns.test.ts', 'coupons')).toBe(true);
     expect(matchesKeyword('tests/wallet-limits.test.ts', 'wallet')).toBe(true);

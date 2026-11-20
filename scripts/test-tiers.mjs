@@ -1,10 +1,11 @@
 // 测试分三档（工程治理三期，docs/TESTING.md 第 4 节）：
 //   npm run test:unit    秒级：不要数据库的用例（看导入关系自动认，不用改文件名）。写代码途中随时跑。
-//   npm run test:quick   快测：秒级那一档 + 和这次改动沾边的集成测试（按改到的模块名找用例文件）。写完一块跑一次。
+//   npm run test:quick   快测：秒级那一档 + 测试计划挑出的集成测试（scripts/test-plan.mjs：按导入关系、模块名与风险挑，
+//                        和 CI 的 PR 一样；改到高风险的文件就是全量）。写完一块跑一次。
 //   npm test             门禁：全量，交 PR 前与 CI 跑。
-// 加 --list 只列出会跑哪些文件、不跑。快测按文件名猜、会漏（例如改钱包会影响前台的用例），不能代替全量。
+// 加 --list 只列出会跑哪些文件、不跑。
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -69,24 +70,6 @@ export function needsDatabase(testFile, read, exists) {
   return false;
 }
 
-/** 改到的文件 → 关键词（模块名）：用来按文件名找沾边的用例 */
-export function keywordsOf(changedFile) {
-  const patterns = [
-    /^src\/server\/modules\/([^/.]+)/,
-    /^src\/server\/(?:lib|ops|auth|integrations|devices|floorplan)\/([^/.]+)/,
-    /^src\/shared\/([^/.]+)/,
-    /^src\/client\/features\/([^/.]+)/,
-    /^src\/client\/lib\/([^/.]+)/,
-    /^scripts\/([^/.]+)/,
-    /^tests\/([^/.]+)\.test\.ts$/,
-  ];
-  for (const p of patterns) {
-    const m = p.exec(changedFile);
-    if (m) return [m[1].toLowerCase()];
-  }
-  return [];
-}
-
 /** 用例文件名和关键词沾不沾边：整个词或它的单数形式出现在文件名里（wallet 对上 wallet-limits，coupons 对上 mp-claim-coupon） */
 export function matchesKeyword(testFile, keyword) {
   const name = posix
@@ -95,18 +78,6 @@ export function matchesKeyword(testFile, keyword) {
     .toLowerCase();
   const stems = new Set([keyword, keyword.replace(/s$/, ''), keyword.replace(/ies$/, 'y')]);
   return [...stems].some((s) => s.length >= 3 && name.includes(s));
-}
-
-function changedFiles() {
-  const run = (args) => {
-    try {
-      return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
-    } catch {
-      return [];
-    }
-  };
-  // 相对 main 改过的 + 还没提交的
-  return [...new Set([...run(['diff', '--name-only', 'origin/main...HEAD']), ...run(['diff', '--name-only', 'HEAD']), ...run(['ls-files', '--others', '--exclude-standard'])])];
 }
 
 function main() {
@@ -141,21 +112,22 @@ function main() {
     process.exit(spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '-c', 'vitest.unit.config.ts', ...unit], { cwd: ROOT, stdio: 'inherit' }).status ?? 1);
   }
 
-  const changed = changedFiles();
-  const keywords = [...new Set(changed.flatMap(keywordsOf))];
-  const related = tests.filter((t) => !unit.includes(t) && (changed.includes(t) || keywords.some((k) => matchesKeyword(t, k))));
-  console.log(`快测：改到 ${changed.length} 个文件，模块 ${keywords.length ? keywords.join('、') : '（没认出模块）'}`);
-  console.log(`  秒级 ${unit.length} 个文件 + 沾边的集成测试 ${related.length} 个${related.length ? `：${related.map((t) => posix.basename(t, '.test.ts')).join('、')}` : ''}`);
-  console.log('  按文件名找的、会漏（改了什么先跑哪些的对照表在 docs/TESTING.md 第 4 节）；交 PR 前跑全量 npm test');
-  if (listOnly) return;
-  const unitRun = spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '-c', 'vitest.unit.config.ts', ...unit], { cwd: ROOT, stdio: 'inherit' });
-  if (unitRun.status !== 0) process.exit(unitRun.status ?? 1);
-  if (!related.length) return;
-  if (!process.env.TEST_DATABASE_URL) {
-    console.error('✗ 沾边的集成测试要数据库：TEST_DATABASE_URL 指向独立测试库（会清空该库）');
-    process.exit(1);
-  }
-  process.exit(spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', ...related], { cwd: ROOT, stdio: 'inherit' }).status ?? 1);
+  // 快测 = 测试计划（与 CI 的 PR 同一套挑法），只是在本机跑
+  import('./test-plan.mjs').then(({ collectRepo, makePlan, describePlan }) => {
+    const plan = makePlan(collectRepo({ base: 'origin/main', head: null }));
+    console.log(describePlan(plan));
+    const related = plan.integration.files;
+    if (listOnly) return;
+    const unitRun = spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '-c', 'vitest.unit.config.ts', ...unit], { cwd: ROOT, stdio: 'inherit' });
+    if (unitRun.status !== 0) process.exit(unitRun.status ?? 1);
+    if (!related.length) return;
+    if (!process.env.TEST_DATABASE_URL) {
+      console.error('✗ 挑出的集成测试要数据库：TEST_DATABASE_URL 指向独立测试库（会清空该库）');
+      process.exit(1);
+    }
+    const args = plan.integration.all ? [] : related;
+    process.exit(spawnSync(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', ...args], { cwd: ROOT, stdio: 'inherit' }).status ?? 1);
+  });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

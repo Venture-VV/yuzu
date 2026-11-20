@@ -32,6 +32,7 @@
 cd miniprogram && npm ci && npm run check        # 小程序：类型检查 + 单元测试（不要数据库）
 npm ci && npm run typecheck && npm run build      # 服务端、网关、后台页面
 TEST_DATABASE_URL=postgres://<用户>:<密码>@127.0.0.1:5432/<独立测试库> npx vitest run tests/mp-*.test.ts tests/gateway*.test.ts
+npm run test:plan                                 # 这次改动该跑哪些（与 CI 同一份测试计划；改到主线的高风险文件就是全量，docs/TESTING.md 第 6 节）
 ```
 
 - `TEST_DATABASE_URL` 只能指向自己新建的独立测试库（用例会清空它），本地可以用 `compose.dev.yaml` 起一个 PostgreSQL 16。

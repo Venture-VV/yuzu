@@ -14,9 +14,11 @@ npm run check:docs                         # 工程治理一期（docs/GOVERNANC
 npm run check:gov                          # 工程治理一期（CI 跑，约 5 秒）：治理基线 scripts/governance-baseline.json，只许持平或下降——分层、页面里的十六进制颜色与手写字号、超过 1,500 行的文件、没人引用的导出（knip）、重复率（jscpd）；清掉一批后 -- --update 收紧
 npm run format                             # 8.1.3 排版（Prettier 固定版本，.prettierrc.json）；提交前跑一次，CI 跑 npm run format:check；小程序线的目录、迁移、静态资源不排（.prettierignore）
 npm run test:unit                          # 工程治理三期：秒级一档，只跑不要数据库的用例（按导入关系自动认，-- --list 看是哪些）；不用起数据库
-npm run test:quick                         # 工程治理三期：快测，秒级一档 + 和这次改动沾边的集成测试（按改到的模块名找，会漏，不能代替全量；-- --list 先看会跑哪些）
+npm run test:plan                          # 2026-11-20：测试计划，这次改了什么、风险多高、该跑哪些、本机照着跑的命令（与 CI 同一份；--base <标签> --head <SHA> 给验收用；docs/TESTING.md 第 6 节）
+npm run test:quick                         # 快测：秒级一档 + 测试计划挑出的集成测试（高风险就是全量；-- --list 先看会跑哪些）
+npm run check:migrations                   # 2026-11-20：新迁移的数据风险（删数据、改账本、改类型、改名、加 NOT NULL、重建作废约束要写「-- 风险已知：」；已有迁移不许改）
 npm test                                   # TEST_DATABASE_URL 指向独立测试库；按文件并行，另建 <库名>_w1…、<库名>_tpl（要建库权限；TEST_WORKERS=1 回到单库串行）
-E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟（CI 拆三组并行，见 docs/TESTING.md）
+E2E_BASE_URL=http://127.0.0.1:<端口> npm run e2e   # 1440×900 / 1024×768 / 820×1180，另有 1280×720 与手机只跑视口冒烟（CI 按用时均匀分组并行，见 docs/TESTING.md 第 6 节）
 ```
 
 ## 2. 数据库与演示数据
