@@ -10,8 +10,27 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 
 const PASSWORD = 'yuzu2026';
 
-/** 已经统一过的页面（房态、技师、会员、前台、餐饮几块的页面等 8.1.16 与 8.1.17 的两个包合进来以后再加） */
-const PAGES = ['/settlement', '/shift', '/devices', '/bookings', '/customer', '/guide', '/admin', '/admin/rules', '/admin/catalog', '/inventory', '/payables'];
+/** 已经统一过的页面（8.1.16 合并以后加上房态中心、钟房、技师，与 8.1.17 的前台、收银、餐饮、菜品） */
+const PAGES = [
+  '/settlement',
+  '/shift',
+  '/devices',
+  '/bookings',
+  '/customer',
+  '/guide',
+  '/admin',
+  '/admin/rules',
+  '/admin/catalog',
+  '/inventory',
+  '/payables',
+  '/frontdesk',
+  '/cashier',
+  '/dining',
+  '/dishes',
+  '/room-center',
+  '/clockroom',
+  '/technicians',
+];
 
 const DEVICES = [
   { name: '商米 D3 Pro', viewport: { width: 1920, height: 1080 } },

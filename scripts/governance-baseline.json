@@ -22,7 +22,6 @@
     "10",
     "10.5",
     "11",
-    "11.5",
     "12",
     "12.5",
     "13",
@@ -67,7 +66,7 @@
     "polling": 63,
     "raw-dialog": 5,
     "raw-table": 36,
-    "small-text": 21,
+    "small-text": 0,
     "status-500": 2
   },
   "duplicationMaxPercent": 1,

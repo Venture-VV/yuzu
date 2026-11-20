@@ -33,7 +33,7 @@ function Chip({ on, onClick, children, testId }: { on: boolean; onClick: () => v
       type="button"
       onClick={onClick}
       aria-pressed={on}
-      className={cn('h-9 rounded-full border px-3 text-[13px] font-semibold', on ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2 hover:border-ink-4')}
+      className={cn('tap relative h-9 rounded-full border px-3 text-[13px] font-semibold', on ? 'border-pine bg-pine text-paper' : 'border-line-strong bg-card text-ink-2 hover:border-ink-4')}
       data-testid={testId}
     >
       {children}
@@ -47,7 +47,7 @@ function ActiveChip({ label, onRemove, testId }: { label: string; onRemove: () =
     <button
       type="button"
       onClick={onRemove}
-      className="inline-flex h-9 items-center gap-1 rounded-full border border-pine/40 bg-pine-tint pr-2 pl-3 text-[13px] font-semibold text-pine hover:border-pine"
+      className="tap relative inline-flex h-9 items-center gap-1 rounded-full border border-pine/40 bg-pine-tint pr-2 pl-3 text-[13px] font-semibold text-pine hover:border-pine"
       aria-label={`去掉条件：${label}`}
       data-testid={testId}
     >

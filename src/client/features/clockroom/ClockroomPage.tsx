@@ -27,6 +27,7 @@ import {
   Square,
   Undo2,
   UsersRound,
+  AlarmClock,
 } from 'lucide-react';
 import {
   EMPTY_TECH_QUERY,
@@ -316,7 +317,7 @@ export function ClockroomPage() {
                         ))}
                       </ol>
                     )}
-                    <p className="mt-3 text-[11.5px] leading-relaxed text-ink-4">轮钟按排位派给第一位空闲的技师；派了轮钟的排到队尾，点钟不动牌（规则在「后台 → 技师」）。</p>
+                    <p className="mt-3 text-[12px] leading-relaxed text-ink-4">轮钟按排位派给第一位空闲的技师；派了轮钟的排到队尾，点钟不动牌（规则在「后台 → 技师」）。</p>
                   </Card>
                   {resting.length > 0 && (
                     <Card className="p-4">
@@ -696,18 +697,18 @@ function QueueRow({
       <span className="num text-[15px] font-bold">{t.techNo}</span>
       <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">
         {techName(t)}
-        <span className={cn('ml-1 text-[11.5px]', t.gender === 'female' ? 'text-clay' : 'text-lake')}>{t.gender === 'female' ? '女' : '男'}</span>
+        <span className={cn('ml-1 text-[12px]', t.gender === 'female' ? 'text-clay' : 'text-lake')}>{t.gender === 'female' ? '女' : '男'}</span>
       </span>
       {next && <Badge tone="pine">下一位</Badge>}
       {s ? (
-        <span className={cn('text-[11.5px] font-semibold', s.status === 'serving' ? (left !== null && left < 0 ? 'text-clay' : 'text-yuzu-deep') : 'text-lake')}>
+        <span className={cn('text-[12px] font-semibold', s.status === 'serving' ? (left !== null && left < 0 ? 'text-clay' : 'text-yuzu-deep') : 'text-lake')}>
           {s.status === 'serving' ? (left === null ? '上钟中' : left < 0 ? `超时 ${mmss(left)}` : `剩 ${mmss(left)}`) : '待上钟'}
         </span>
       ) : (
-        <span className="text-[11.5px] text-ink-4">今日 {t.todayClocks} 钟</span>
+        <span className="text-[12px] text-ink-4">今日 {t.todayClocks} 钟</span>
       )}
       {/* 说明放不下时操作换到下一行（8.1.15：说明里多了类型、组别、今天的班） */}
-      <span className="flex w-full flex-wrap items-center justify-end gap-x-1 gap-y-0.5 pl-8 text-[11.5px] whitespace-nowrap">
+      <span className="flex w-full flex-wrap items-center justify-end gap-x-1 gap-y-0.5 pl-8 text-[12px] whitespace-nowrap">
         <span className="mr-auto max-w-full truncate text-ink-4">
           {[gradeLabel(t.grade), ...techExtras(t)].join(' · ')}
           {t.rejectStreak ? ` · 已连续被退 ${t.rejectStreak} 次` : ''}
@@ -715,26 +716,36 @@ function QueueRow({
         <span className="flex items-center gap-1">
           <button
             type="button"
-            className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[12px] font-semibold text-pine hover:bg-pine-tint"
+            className="tap relative inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[12px] font-semibold text-pine hover:bg-pine-tint"
             onClick={onCall}
             disabled={busy !== null}
             data-testid={`clock-call-tech-${t.techNo}`}
           >
             <Megaphone className="size-3" /> 叫号
           </button>
-          <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onToEnd} disabled={busy !== null}>
+          <button
+            type="button"
+            className="tap relative inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink"
+            onClick={onToEnd}
+            disabled={busy !== null}
+          >
             <ArrowDownToLine className="size-3" /> 排尾
           </button>
           <button
             type="button"
-            className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink"
+            className="tap relative inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink"
             onClick={onRest}
             disabled={busy !== null}
             data-testid={`clock-rest-btn-${t.techNo}`}
           >
             <Coffee className="size-3" /> 休息
           </button>
-          <button type="button" className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink" onClick={onOff} disabled={busy !== null}>
+          <button
+            type="button"
+            className="tap relative inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-ink-3 hover:bg-paper-2 hover:text-ink"
+            onClick={onOff}
+            disabled={busy !== null}
+          >
             <LogOut className="size-3" /> 下牌
           </button>
         </span>
@@ -796,7 +807,11 @@ function ServingCard({
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-paper-2">
         <div className={cn('h-full rounded-full', over ? 'bg-clay' : soon ? 'bg-yuzu-deep' : 'bg-pine')} style={{ width: `${progress * 100}%` }} />
       </div>
-      <p className="mt-1 text-[11.5px] font-semibold text-ink-3">{over ? '已超时，请提醒下钟或加钟' : soon ? '快到钟了' : ' '}</p>
+      {/* 钟的状态（YS-2）：16 像素加图标，超时红、快到钟黄 */}
+      <p className={cn('mt-1 flex min-h-6 items-center gap-1 text-[16px] font-bold', over ? 'text-clay' : 'text-yuzu-deep')} data-testid={`clock-state-${s.sessionNo}`}>
+        {(over || soon) && <AlarmClock className="size-4 shrink-0" aria-hidden />}
+        {over ? '已超时，请提醒下钟或加钟' : soon ? '快到钟了' : ''}
+      </p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         <Button size="sm" variant="primary" icon={<Square className="size-3.5" />} loading={busy === `finish-${s.id}`} onClick={onFinish} data-testid={`clock-finish-${s.sessionNo}`}>
           下钟

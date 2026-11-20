@@ -197,7 +197,7 @@ export function StayDialog({
                   <li key={c.id} className={cn('flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2', voided && 'opacity-60')}>
                     <span className={cn('min-w-0 flex-1 basis-40 text-[13.5px] font-semibold', voided && 'line-through')}>
                       {chargeText(c)}
-                      <span className="block text-[11.5px] font-normal text-ink-4">
+                      <span className="block text-[12px] font-normal text-ink-4">
                         {SOURCE_LABELS[c.source]} · {formatDateTime(c.createdAt)} {c.createdByName}
                         {voided && ' · 已作废（不再补挂）'}
                       </span>
@@ -544,7 +544,7 @@ function MoveDialog({ stay, free, onClose, onDone }: { stay: StayDetail; free: R
               className={cn('h-10 rounded-full border px-3.5 text-[14px] font-bold', to === r.id ? 'border-pine bg-pine text-paper' : 'border-line bg-card text-ink-2 hover:border-line-strong')}
               data-testid={`stay-move-to-${r.roomNo}`}
             >
-              <span className="num">{r.roomNo}</span> <span className="text-[11.5px] font-semibold opacity-70">{r.typeName}</span>
+              <span className="num">{r.roomNo}</span> <span className="text-[12px] font-semibold opacity-70">{r.typeName}</span>
             </button>
           ))}
         </div>
