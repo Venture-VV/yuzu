@@ -16,11 +16,12 @@ import { createSql, type Sql } from '../src/server/db';
 import { migrate } from '../src/server/migrate';
 import type { DiningMenu, KitchenBoard } from '../src/shared/dining';
 import type { DishesBoard } from '../src/shared/dishes';
-import { api, login, PASSWORD, TEST_DB } from './helpers';
+import { api, login, migrationsFrom, PASSWORD, TEST_DB } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
-const NEW = ['189_dishes.sql'];
+// 189 与之后的迁移（8.1.17 的 196 改 189 建的表，要在它之后跑）
+const NEW = migrationsFrom('189_dishes.sql');
 let sql: Sql;
 let app: FastifyInstance | undefined;
 
@@ -80,7 +81,10 @@ describe('8.1.14 → 8.1.15：迁移 189（菜品管理）', () => {
     // 老的价目、明细一行不动
     expect(await sql`SELECT id, name, category, price, active, station_id, dining_outlet, dining_group, updated_at FROM service_items ORDER BY id`).toEqual(itemsBefore);
     expect(await sql`SELECT item_id, tier, price FROM service_item_prices ORDER BY item_id, tier`).toEqual(pricesBefore);
-    expect(await sql`SELECT * FROM bill_lines WHERE id = ${line!.id}`).toEqual(lineBefore);
+    // 8.1.17 的迁移 196 给明细加了 addon_of（加料挂在哪一行主菜上，老的为空）：其余各列一样
+    const [{ addonOf, ...lineAfter }] = (await sql`SELECT * FROM bill_lines WHERE id = ${line!.id}`) as unknown as [Record<string, unknown>];
+    expect(addonOf).toBeNull();
+    expect([lineAfter]).toEqual(lineBefore);
     expect((await sql<{ dishImageId: number | null }[]>`SELECT dish_image_id FROM service_items`).every((r) => r.dishImageId === null)).toBe(true);
     // 出品单：多一项套餐内容，老的是空的；口味备注、状态照旧
     expect(await sql`SELECT note, status, parts FROM kitchen_items WHERE id = ${kitchen!.id}`).toEqual([{ note: '少辣', status: 'queued', parts: [] }]);
@@ -104,7 +108,8 @@ describe('8.1.14 → 8.1.15：迁移 189（菜品管理）', () => {
     expect(menu.dishes.every((d) => !('methods' in d) && !('addons' in d) && !('combo' in d))).toBe(true);
     // 厨房屏照常：老的出品单在，能开始做
     const kds = (await api(app, cookie, 'GET', '/api/kitchen')).body as KitchenBoard;
-    expect(kds.items.map((k) => `${k.name}×${k.quantity}|${k.note}|${JSON.stringify(k.parts)}|${k.status}`)).toEqual(['宫保鸡丁×2|少辣|[]|queued']);
+    // 8.1.17（BW5）：出品单写账单那一行的名字，多档的菜带档名
+    expect(kds.items.map((k) => `${k.name}×${k.quantity}|${k.note}|${JSON.stringify(k.parts)}|${k.status}`)).toEqual(['宫保鸡丁（标准）×2|少辣|[]|queued']);
     expect((await api(app, cookie, 'POST', `/api/kitchen/items/${kitchen!.id}/start`, { from: 'queued' })).status).toBe(200);
 
     // 改价：记改价记录；老订单的明细还是当时的价

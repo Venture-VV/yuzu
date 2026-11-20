@@ -323,6 +323,9 @@ const MENU_DISHES: MenuDish[] = (
 const SPICY = MENU_DISHES[1]!;
 const COMBO_DISH = MENU_DISHES[2]!;
 SPICY.methods = ['微辣', '中辣', '特辣', '免葱', '免蒜', '免香菜'];
+// 8.1.17：辣度是必选的一组、特辣加 ¥2（docs/DISHES_V8117.md）
+SPICY.methodOptions = SPICY.methods.map((name, i) => ({ name, group: i < 3 ? '辣度' : '', price: name === '特辣' ? 200 : 0 }));
+SPICY.methodGroups = [{ name: '辣度', required: true }];
 SPICY.addons = [MENU_DISHES[0]!, MENU_DISHES[5]!].map((d) => ({ id: d.id, name: d.name, price: d.price }));
 COMBO_DISH.combo = [
   { name: '宫保鸡丁', quantity: 1 },
@@ -358,6 +361,8 @@ const DISH_BOARD: DishesBoard = {
     imageUrl: null,
     emenuDish: null,
     methods: d.methods ?? [],
+    methodOptions: d.methodOptions ?? [],
+    methodGroups: d.methodGroups ?? [],
     addons: (d.addons ?? []).map((a) => ({ itemId: a.id, name: a.name, price: a.price, available: true })),
     combo: (d.combo ?? []).map((c, k) => ({ itemId: MENU_DISHES[k === 0 ? 0 : 5]!.id, name: c.name, quantity: c.quantity, available: k === 0 })),
     usedBy: i === 0 ? ['「小炒黄牛肉」的加料', '套餐「招牌秘制酱香手撕鸡（半只）」'] : [],

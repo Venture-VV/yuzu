@@ -655,8 +655,9 @@ describe('点单带做法、加料、套餐', () => {
     const r = await orderTag(v.id, lines, total, key);
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const mine = (await kitchen()).filter((k) => k.visitId === v.id);
+    // 8.1.17（BW5）：出品单写下单时账单那一行的名字，多档的菜带档名
     expect(mine.map((k) => `${k.name}×${k.quantity}|${k.note}|${JSON.stringify(k.parts)}`)).toEqual([
-      '牛肉面×1|微辣，免葱，面硬一点|[]',
+      '牛肉面（标准）×1|微辣，免葱，面硬一点|[]',
       '加牛肉×1|配 牛肉面|[]',
       '加蛋×2|配 牛肉面|[]',
       '牛肉面套餐×2||[{"name":"柠檬茶","quantity":1},{"name":"牛肉面","quantity":1}]',
@@ -725,7 +726,7 @@ describe('点单带做法、加料、套餐', () => {
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.amount).toBe(8900);
     const mine = (await kitchen()).filter((k) => k.tableSessionId === open.body.id);
-    expect(mine.map((k) => `${k.name}|${k.note}|${JSON.stringify(k.parts)}`)).toEqual(['牛肉面|中辣|[]', '加蛋|配 牛肉面|[]', '牛肉面套餐||[{"name":"加蛋","quantity":3}]']);
+    expect(mine.map((k) => `${k.name}|${k.note}|${JSON.stringify(k.parts)}`)).toEqual(['牛肉面（标准）|中辣|[]', '加蛋|配 牛肉面|[]', '牛肉面套餐||[{"name":"加蛋","quantity":3}]']);
   });
 });
 

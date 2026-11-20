@@ -8,6 +8,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { PRICE_TIERS } from '@shared/catalog';
 import type { CheckoutDetail } from '@shared/checkout';
 import {
   MAX_BILL_LINE_QUANTITY,
@@ -45,6 +46,7 @@ import { recordSaleUsage } from './stock-usage';
 import { currentStoreId } from '../lib/store-context';
 import { assertMergeGroupsComplete, assertNotMerged, assertSessionsStayed, assertTableUsable, lockTablesOfSessions, markTablesDirty, mergeInfoOf, withMergeGroups } from './tables-v8115';
 import { assertOrderOutlets, OrderNoteField, VoidBlameField } from './dining-order-v8115';
+import { DishLineFields, planDishLines } from './dish-lines';
 import type { TableState } from '@shared/dining-v8115';
 
 // ───────────────────────── 后台：桌台 ─────────────────────────
@@ -387,6 +389,9 @@ export const TablePostInput = z.object({
           .max(MAX_DISH_NOTE, `口味备注最多 ${MAX_DISH_NOTE} 字`)
           .nullish()
           .transform((v) => v || undefined),
+        /** 8.1.17（docs/DISHES_V8117.md）：规格（档）、做法、加料挂在哪一行主菜上；都不带时与升级前的请求完全相同（幂等摘要不变） */
+        tier: z.enum(PRICE_TIERS, '规格不正确').optional(),
+        ...DishLineFields,
       }),
     )
     .min(1, '请至少点一道菜')
@@ -424,12 +429,19 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
       tx,
       input.lines.map((l) => l.itemId),
     );
-    const lines = input.lines.map((l) => {
+    const priced = input.lines.map((l) => {
       const item = items.get(l.itemId);
-      const priced = priceLine(item, undefined, l.quantity, '有菜已停用，请刷新后重新点');
+      // 8.1.17（BW5）：按选的档计价（不带按默认档，与以前一样）
+      const line = priceLine(item, l.tier, l.quantity, '有菜已停用，请刷新后重新点');
       const stationId = stations.get(l.itemId) ?? null;
       if (stationId === null) throw unprocessable('DISH_NOT_KITCHEN', `「${item!.name}」不是点单的菜，桌台只能点进厨房的菜`);
-      return { ...priced, stationId, note: l.note ?? '' };
+      return { ...line, stationId };
+    });
+    // 8.1.17：做法（分组、加价、必选）与加料，与手牌点单同一个核对（dish-lines.ts）；加价按份加进单价
+    const plans = await planDishLines(tx, input.lines, { strict: true, isDish: () => true, nameOf: (id) => items.get(id)?.name ?? '这道菜' });
+    const lines = priced.map((l, i) => {
+      const unitPrice = l.unitPrice + plans[i]!.extra;
+      return { ...l, unitPrice, amount: unitPrice * l.quantity, note: plans[i]!.note, addonOf: plans[i]!.addonOf };
     });
     const total = lines.reduce((sum, l) => sum + l.amount, 0);
     if (total !== input.expectedTotal) {
@@ -445,9 +457,9 @@ export async function postTableCharges(deps: Deps, id: number, raw: unknown, ctx
     const kitchen: KitchenLine[] = [];
     for (const l of lines) {
       const [row] = await tx<{ id: number }[]>`
-        INSERT INTO bill_lines (bill_id, source, item_id, tier, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at)
+        INSERT INTO bill_lines (bill_id, source, item_id, tier, name, unit_price, quantity, amount, post_key, business_date, posted_by, posted_at, addon_of)
         VALUES (${s.billId}, 'dining', ${l.itemId}, ${l.tier}, ${l.name}, ${l.unitPrice}, ${l.quantity}, ${l.amount}, ${key}, ${date},
-                ${ctx.actor.id}, ${at})
+                ${ctx.actor.id}, ${at}, ${l.addonOf === null ? null : kitchen[l.addonOf]!.billLineId})
         RETURNING id`;
       kitchen.push({ billLineId: row!.id, itemId: l.itemId!, stationId: l.stationId, quantity: l.quantity, note: l.note, limitTaken: limited.has(l.itemId!) });
     }

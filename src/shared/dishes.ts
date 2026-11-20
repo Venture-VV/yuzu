@@ -14,8 +14,8 @@ import type { Permission } from './permissions';
 
 // ───────────────────────── 上限 ─────────────────────────
 
-/** 一道菜最多 12 种做法，每种最多 8 个字（CP2） */
-export const MAX_DISH_METHODS = 12;
+/** 一道菜最多 24 种做法（8.1.15 是 12 种，8.1.17 做法能分组以后放宽），每种最多 8 个字（CP2） */
+export const MAX_DISH_METHODS = 24;
 export const MAX_DISH_METHOD_LENGTH = 8;
 /** 一道菜最多 12 种加料；一个套餐最多含 12 样 */
 export const MAX_DISH_ADDONS = 12;
@@ -63,6 +63,123 @@ export const composeDishNote = (methods: readonly string[], note: string): strin
 /** 拼出来放不放得进出品备注（最多 40 个字）；放不进的不让加进已点 */
 export const dishNoteFits = (methods: readonly string[], note: string): boolean => composeDishNote(methods, note).length <= MAX_DISH_NOTE;
 
+// ───────────────────────── 8.1.17：做法分组、加价、必选（BW6，docs/DISHES_V8117.md 第 2 节） ─────────────────────────
+
+/** 一道菜最多分 6 组，组名最多 6 个字；一种做法最多加价 ¥999 */
+export const MAX_DISH_METHOD_GROUPS = 6;
+export const MAX_DISH_METHOD_GROUP_LENGTH = 6;
+export const MAX_DISH_METHOD_PRICE = 99_900;
+/** 出品单的口味备注最多 200 字（迁移 196：做法带加价、换菜、平板的整单备注拼在一起；点单页手写的部分照旧 40 字） */
+export const MAX_KITCHEN_NOTE = 200;
+
+/** 做法的一组：同一组里只能选一个；必选的组不选一个不能下单 */
+export interface DishMethodGroup {
+  name: string;
+  required: boolean;
+}
+
+/** 一种做法：所在的组（'' 为不分组，可以多选）与加价（分，按份加在这一行的单价上；0 为不加钱） */
+export interface DishMethodOption {
+  name: string;
+  group: string;
+  price: number;
+}
+
+/** 「+¥2」「+¥2.50」 */
+export const plusYuan = (cents: number): string => `+¥${cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2)}`;
+
+/** 做法写在出品单、账单上的样子：「微辣」「微辣 +¥2」 */
+export const methodText = (m: Pick<DishMethodOption, 'name' | 'price'>): string => (m.price > 0 ? `${m.name} ${plusYuan(m.price)}` : m.name);
+
+/** 选了的做法按这道菜维护时的顺序排好（出品单上的顺序不跟着点的先后变）；不认识的名字不在里面 */
+export const pickedMethods = (options: readonly DishMethodOption[], chosen: readonly string[]): DishMethodOption[] => options.filter((o) => chosen.includes(o.name));
+
+/** 选了的做法按份加多少钱 */
+export const methodsExtra = (options: readonly DishMethodOption[], chosen: readonly string[]): number => pickedMethods(options, chosen).reduce((s, m) => s + m.price, 0);
+
+export type MethodChoiceProblem = { code: 'DISH_METHOD_INVALID' | 'DISH_METHOD_GROUP' | 'DISH_METHOD_REQUIRED'; message: string; group?: string };
+
+/**
+ * 核对点一道菜时选的做法（点单页、桌台、平板与服务端用同一个）：不认识的做法、重复的、同一组选了两个、必选的组没选。
+ * requireAll 为假时不查必选（前台「加项目」、小程序扫码点餐还选不了做法）；没问题返回 null
+ */
+export function methodChoiceProblem(
+  dishName: string,
+  options: readonly DishMethodOption[],
+  groups: readonly DishMethodGroup[],
+  chosen: readonly string[],
+  opts: { requireAll: boolean },
+): MethodChoiceProblem | null {
+  if (new Set(chosen).size !== chosen.length) return { code: 'DISH_METHOD_INVALID', message: `「${dishName}」的做法重复了，请重新选` };
+  const unknown = chosen.find((c) => !options.some((o) => o.name === c));
+  if (unknown !== undefined) return { code: 'DISH_METHOD_INVALID', message: `「${dishName}」现在没有「${unknown}」这种做法了，请刷新后重新选` };
+  for (const g of groups) {
+    const picked = options.filter((o) => o.group === g.name && chosen.includes(o.name));
+    if (picked.length > 1) return { code: 'DISH_METHOD_GROUP', message: `「${dishName}」的「${g.name}」只能选一个（选了 ${picked.map((p) => p.name).join('、')}）`, group: g.name };
+    if (opts.requireAll && g.required && picked.length === 0 && options.some((o) => o.group === g.name)) {
+      return { code: 'DISH_METHOD_REQUIRED', message: `「${dishName}」要先选「${g.name}」`, group: g.name };
+    }
+  }
+  return null;
+}
+
+/**
+ * 点单一行写在出品单（账单上也看得到）上的备注：加料写「配 主菜」，做法（带加价的写「微辣 +¥2」），换菜（「换 橙汁 +¥3」），
+ * 最后是手写的；用「，」隔开
+ */
+export function composeLineNote(parts: { addonOf?: string | null; methods?: readonly Pick<DishMethodOption, 'name' | 'price'>[]; swaps?: readonly string[]; note?: string }): string {
+  return [parts.addonOf ? `配 ${parts.addonOf}` : '', ...(parts.methods ?? []).map(methodText), ...(parts.swaps ?? []), (parts.note ?? '').trim()].filter(Boolean).join('，');
+}
+
+/**
+ * Excel 里「做法」一格的写法（8.1.17）：分组的写「辣度（必选）：微辣、中辣+2」，不分组的直接列「免葱、加芝士+5」，几段用「；」隔开；
+ * 加价写在做法后面「+元」。只写名字的（8.1.15 的导出）照样认：都算不分组、不加钱
+ */
+export function methodsCellText(options: readonly DishMethodOption[], groups: readonly DishMethodGroup[]): string {
+  const item = (m: DishMethodOption) => (m.price > 0 ? `${m.name}+${m.price % 100 === 0 ? String(m.price / 100) : (m.price / 100).toFixed(2)}` : m.name);
+  const segments = groups
+    .map((g) => ({ g, list: options.filter((o) => o.group === g.name) }))
+    .filter((x) => x.list.length > 0)
+    .map(({ g, list }) => `${g.name}${g.required ? '（必选）' : ''}：${list.map(item).join('、')}`);
+  const loose = options.filter((o) => !o.group || !groups.some((g) => g.name === o.group));
+  if (loose.length) segments.push(loose.map(item).join('、'));
+  return segments.join('；');
+}
+
+/** 读「做法」一格（methodsCellText 的反过来）；写错的给出原因 */
+export function parseMethodsCell(text: string): { options: DishMethodOption[]; groups: DishMethodGroup[] } | { error: string } {
+  const options: DishMethodOption[] = [];
+  const groups: DishMethodGroup[] = [];
+  for (const segment of text.split(/[；;\n]+/)) {
+    const s = segment.trim();
+    if (!s) continue;
+    const colon = s.search(/[：:]/);
+    let group = '';
+    let body = s;
+    if (colon >= 0) {
+      const head = s.slice(0, colon).trim();
+      body = s.slice(colon + 1);
+      const required = /[（(［[]必选[）)］\]]$/.test(head);
+      group = head.replace(/[（(［[]必选[）)］\]]$/, '').trim();
+      if (!group) return { error: `「${s}」：冒号前面要写组名` };
+      if (groups.some((g) => g.name === group)) return { error: `做法的组「${group}」写了两次` };
+      groups.push({ name: group, required });
+    }
+    for (const raw of body.split(/[、，,/]+/)) {
+      const t = raw.trim();
+      if (!t) continue;
+      const m = /^(.*?)\s*[+＋]\s*[¥￥]?\s*([0-9]+(?:\.[0-9]{1,2})?)$/.exec(t);
+      const name = (m ? m[1]! : t).trim();
+      const price = m ? Math.round(Number(m[2]) * 100) : 0;
+      if (!name) return { error: `「${t}」：加价前面要写做法的名字` };
+      if (options.some((o) => o.name === name)) return { error: `做法「${name}」写了两次` };
+      options.push({ name, group, price });
+    }
+    if (group && !options.some((o) => o.group === group)) return { error: `做法的组「${group}」里还没有做法` };
+  }
+  return { options, groups };
+}
+
 // ───────────────────────── 菜品表 ─────────────────────────
 
 export interface DishAddonRef {
@@ -105,7 +222,10 @@ export interface DishRow {
   imageUrl: string | null;
   /** 放进了电子菜单的哪道菜（展示名）；没放为 null */
   emenuDish: string | null;
+  /** 做法的名字（按维护时的顺序）；分组与加价在 methodOptions、methodGroups（8.1.17） */
   methods: string[];
+  methodOptions: DishMethodOption[];
+  methodGroups: DishMethodGroup[];
   addons: DishAddonRef[];
   combo: DishComboRef[];
   /** 被哪些菜当加料、在哪些套餐里（下架、改名时提醒） */
@@ -201,7 +321,12 @@ export interface DishBody {
   slot: string;
   stationId: number;
   imageId: number | null;
-  methods: string[];
+  /**
+   * 做法：只写名字的（8.1.15 的写法）是不分组、不加钱——编辑已有的菜时同名的做法保留原来的分组与加价；
+   * 带分组、加价的写成 DishMethodOption，这时 methodGroups 一起交（8.1.17）
+   */
+  methods: (string | DishMethodOption)[];
+  methodGroups?: DishMethodGroup[];
   addons: number[];
   combo: { itemId: number; quantity: number }[];
 }

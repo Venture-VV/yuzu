@@ -26,7 +26,7 @@ import {
   type KitchenStatus,
   type MenuDish,
 } from '@shared/dining';
-import { defaultTier, type TierPrice } from '@shared/catalog';
+import { defaultTier, sortTiers, type TierPrice } from '@shared/catalog';
 import { can } from '@shared/permissions';
 import type { FrontdeskOpLookup } from '@shared/frontdesk';
 import type { Db, Tx } from '../db';
@@ -209,18 +209,20 @@ async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
     WHERE i.active AND NOT i.technician_required ORDER BY s.sort_order, s.id, i.sort_order, i.id`;
   return rows.map(({ prices, diningOutlet, diningGroup, ...r }) => {
     const slot = diningSlotOf({ outlet: diningOutlet, group: diningGroup, category: r.category, stationName: r.stationName });
-    return { ...r, price: defaultPrice(prices), outlet: slot.outlet, group: slot.group };
+    // 8.1.17（BW5）：多档的菜带上各档的价，点单时弹出来选；只有一档的不带
+    return { ...r, price: defaultPrice(prices), outlet: slot.outlet, group: slot.group, ...(prices.length > 1 ? { prices: sortTiers(prices) } : {}) };
   });
 }
 
 // 手牌客人的菜显示牌号；桌台的菜（第二步）显示桌号
 const ITEM_COLUMNS = (db: Db) => db`
   k.id, k.order_no, k.visit_id, h.code AS tag_code, v.zone, k.table_session_id, dt.name AS table_name,
-  coalesce(m.name, nullif(v.guest_label, ''), tm.name, nullif(ts.guest_label, ''), '散客') AS guest, k.item_id, i.name,
+  coalesce(m.name, nullif(v.guest_label, ''), tm.name, nullif(ts.guest_label, ''), '散客') AS guest, k.item_id, bl.name,
   k.quantity, k.note, k.deliver_to, k.parts, k.status, k.station_id, s.name AS station_name, k.rush_count, k.created_at, k.started_at, k.done_at, k.served_at,
   p.display_name AS posted_by_name, coalesce(v.status, ts.status) <> 'open' AS visit_closed, k.order_note, k.deliver_room`;
 const ITEM_FROM = (db: Db) => db`
   kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN kitchen_stations s ON s.id = k.station_id
+  JOIN bill_lines bl ON bl.id = k.bill_line_id
   LEFT JOIN visits v ON v.id = k.visit_id LEFT JOIN hand_tags h ON h.id = v.tag_id LEFT JOIN members m ON m.id = v.member_id
   LEFT JOIN table_sessions ts ON ts.id = k.table_session_id LEFT JOIN dining_tables dt ON dt.id = ts.table_id
   LEFT JOIN members tm ON tm.id = ts.member_id
@@ -305,8 +307,8 @@ export async function diningGuestOf(db: Db, visitId: number): Promise<DiningGues
     WHERE v.id = ${visitId} AND v.store_id = ${currentStoreId()}`;
   if (!v) throw notFound('来访不存在');
   const pending = await db<DiningGuest['pending']>`
-    SELECT k.id, k.bill_line_id, k.item_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at
-    FROM kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN bill_lines l ON l.id = k.bill_line_id
+    SELECT k.id, k.bill_line_id, k.item_id, l.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at
+    FROM kitchen_items k JOIN bill_lines l ON l.id = k.bill_line_id
     WHERE k.visit_id = ${v.visitId} AND k.status IN ('queued', 'cooking', 'done') ORDER BY k.id`;
   return { visitId: v.visitId, tagCode: v.tagCode, zone: v.zone, guest: guestName(v.memberName, v.guestLabel), pending, roomNo: await openRoomOf(db, v.visitId) };
 }

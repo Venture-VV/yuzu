@@ -27,10 +27,14 @@ import {
   MAX_COMBO_ITEMS,
   MAX_DISH_ADDONS,
   MAX_DISH_CATEGORY,
+  MAX_DISH_METHOD_GROUP_LENGTH,
+  MAX_DISH_METHOD_GROUPS,
   MAX_DISH_METHOD_LENGTH,
+  MAX_DISH_METHOD_PRICE,
   MAX_DISH_METHODS,
   MAX_DISH_NAME,
   MAX_PRICE_REASON,
+  methodsCellText,
   partsText,
   priceChangeText,
   priceDiff,
@@ -39,6 +43,8 @@ import {
   type DishAddonRef,
   type DishComboRef,
   type DishFilter,
+  type DishMethodGroup,
+  type DishMethodOption,
   type DishPriceChange,
   type DishPriceSource,
   type DishRow,
@@ -105,7 +111,11 @@ async function loadDishRows(db: Db, today: string, onlyIds?: number[]): Promise<
     ORDER BY i.active DESC, s.sort_order, s.id, i.sort_order, i.id`;
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
-  const methods = await db<{ itemId: number; name: string }[]>`SELECT item_id, name FROM dish_methods WHERE item_id IN ${db(ids)} ORDER BY item_id, sort_no, name`;
+  const methods = await db<{ itemId: number; name: string; groupName: string | null; price: number }[]>`
+    SELECT item_id, name, group_name, price FROM dish_methods WHERE item_id IN ${db(ids)} ORDER BY item_id, sort_no, name`;
+  // 做法的分组（8.1.17）
+  const groups = await db<{ itemId: number; name: string; required: boolean }[]>`
+    SELECT item_id, name, required FROM dish_method_groups WHERE item_id IN ${db(ids)} ORDER BY item_id, sort_no, name`;
   // 加料、套餐：自己的（按这道菜找）与被谁用（按加料、子项找）一次取回来
   const addons = await db<{ itemId: number; addonItemId: number; name: string; ownerName: string; prices: TierPrice[]; available: boolean }[]>`
     SELECT a.item_id, a.addon_item_id, i.name, o.name AS owner_name, ${pricesColumn(db, { base: true })} AS prices,
@@ -139,6 +149,8 @@ async function loadDishRows(db: Db, today: string, onlyIds?: number[]): Promise<
       imageUrl: dishImageUrl(imageId),
       emenuDish: r.emenuName,
       methods: methods.filter((m) => m.itemId === r.id).map((m) => m.name),
+      methodOptions: methods.filter((m) => m.itemId === r.id).map((m) => ({ name: m.name, group: m.groupName ?? '', price: m.price })),
+      methodGroups: groups.filter((g) => g.itemId === r.id).map((g) => ({ name: g.name, required: g.required })),
       addons: addons.filter((a) => a.itemId === r.id).map((a): DishAddonRef => ({ itemId: a.addonItemId, name: a.name, price: defaultPrice(sortTiers(a.prices)), available: a.available })),
       combo: combos.filter((c) => c.comboItemId === r.id).map((c): DishComboRef => ({ itemId: c.itemId, name: c.name, quantity: c.quantity, available: c.available })),
       usedBy: [...addons.filter((a) => a.addonItemId === r.id).map((a) => `「${a.ownerName}」的加料`), ...combos.filter((c) => c.itemId === r.id).map((c) => `套餐「${c.ownerName}」`)],
@@ -229,6 +241,39 @@ const PricesInput = z.object({ standard: tierInput, professional: tierInput, pre
   }),
 );
 
+/** 做法、组名里不能带的字：分隔做法的标点、Excel 一格里表示分组（冒号）与加价（加号）的写法、空格 */
+const METHOD_FORBIDDEN = /[，,、;；/\s+＋:：]/;
+const methodName = z
+  .string()
+  .trim()
+  .min(1, '做法不能是空的')
+  .max(MAX_DISH_METHOD_LENGTH, `一种做法最多 ${MAX_DISH_METHOD_LENGTH} 个字`)
+  .refine((m) => !METHOD_FORBIDDEN.test(m), '做法里不要带逗号、顿号、斜杠、冒号、加号或空格（一种做法写一个）');
+/** 一种做法：只写名字（8.1.15 的写法），或带上所在的组与加价（8.1.17） */
+const MethodInput = z.union([
+  methodName,
+  z.object({
+    name: methodName,
+    group: z.string().trim().max(MAX_DISH_METHOD_GROUP_LENGTH, `组名最多 ${MAX_DISH_METHOD_GROUP_LENGTH} 个字`).default(''),
+    price: z
+      .number('加价必须是数字')
+      .int('加价必须精确到分')
+      .min(0, '加价不能是负数')
+      .max(MAX_DISH_METHOD_PRICE, `一种做法最多加价 ¥${MAX_DISH_METHOD_PRICE / 100}`)
+      .default(0),
+  }),
+]);
+const methodNameOf = (m: z.output<typeof MethodInput>) => (typeof m === 'string' ? m : m.name);
+const GroupInput = z.object({
+  name: z
+    .string('请填写做法的组名')
+    .trim()
+    .min(1, '请填写做法的组名')
+    .max(MAX_DISH_METHOD_GROUP_LENGTH, `组名最多 ${MAX_DISH_METHOD_GROUP_LENGTH} 个字`)
+    .refine((g) => !METHOD_FORBIDDEN.test(g) && !/[（）()]/.test(g), '组名里不要带标点、括号或空格'),
+  required: z.boolean().default(false),
+});
+
 const DishFields = z.object({
   name: z.string('请填写菜名').trim().min(1, '请填写菜名').max(MAX_DISH_NAME, `菜名最多 ${MAX_DISH_NAME} 个字`),
   category: z.string().trim().max(MAX_DISH_CATEGORY, `分类最多 ${MAX_DISH_CATEGORY} 个字`).default(''),
@@ -239,17 +284,16 @@ const DishFields = z.object({
   stationId: z.number('请选择出品档口').int().positive('请选择出品档口'),
   imageId: z.number().int().positive().nullable().default(null),
   methods: z
-    .array(
-      z
-        .string()
-        .trim()
-        .min(1, '做法不能是空的')
-        .max(MAX_DISH_METHOD_LENGTH, `一种做法最多 ${MAX_DISH_METHOD_LENGTH} 个字`)
-        .refine((m) => !/[，,、;；/\s]/.test(m), '做法里不要带逗号、顿号、斜杠或空格（一种做法写一个）'),
-    )
+    .array(MethodInput)
     .max(MAX_DISH_METHODS, `一道菜最多 ${MAX_DISH_METHODS} 种做法`)
-    .refine(unique, '做法重复了')
+    .refine((list) => unique(list.map(methodNameOf)), '做法重复了')
     .default([]),
+  /** 做法的分组（8.1.17）：不带时，只写名字的做法保留原来的分组与加价（旧页面、旧导入） */
+  methodGroups: z
+    .array(GroupInput)
+    .max(MAX_DISH_METHOD_GROUPS, `做法最多分 ${MAX_DISH_METHOD_GROUPS} 组`)
+    .refine((list) => unique(list.map((g) => g.name)), '做法的组重复了')
+    .optional(),
   addons: z.array(z.number().int().positive()).max(MAX_DISH_ADDONS, `一道菜最多 ${MAX_DISH_ADDONS} 种加料`).refine(unique, '加料重复了').default([]),
   combo: z
     .array(
@@ -333,10 +377,49 @@ async function checkFields(tx: Tx, cur: ItemState | null, f: DishFieldsData, ref
   return station;
 }
 
-async function writeMethods(tx: Tx, id: number, methods: string[], fresh = false) {
-  if (!fresh) await tx`DELETE FROM dish_methods WHERE item_id = ${id}`;
-  if (methods.length) {
-    await tx`INSERT INTO dish_methods (item_id, name, sort_no) SELECT ${id}, m, (ord - 1)::int FROM unnest(${methods}::text[]) WITH ORDINALITY AS t(m, ord)`;
+interface MethodSet {
+  options: DishMethodOption[];
+  groups: DishMethodGroup[];
+}
+
+/**
+ * 交上来的做法换成「做法 + 分组」（8.1.17）：只写名字、没带分组的（8.1.15 的页面与导入）——同名的做法保留原来的分组与加价、
+ * 新的不分组不加钱，原来的组里还有做法的照留；带了分组的照交的来。做法的组要写在分组里，每一组至少一种做法
+ */
+function normalizeMethods(f: Pick<DishFieldsData, 'methods' | 'methodGroups'>, current: MethodSet | null): MethodSet {
+  const legacy = f.methodGroups === undefined && f.methods.every((m) => typeof m === 'string');
+  if (legacy) {
+    const options = f.methods.map((m) => {
+      const name = methodNameOf(m);
+      return current?.options.find((o) => o.name === name) ?? { name, group: '', price: 0 };
+    });
+    return { options, groups: (current?.groups ?? []).filter((g) => options.some((o) => o.group === g.name)) };
+  }
+  const options = f.methods.map((m) => (typeof m === 'string' ? { name: m, group: '', price: 0 } : { name: m.name, group: m.group, price: m.price }));
+  const groups = f.methodGroups ?? [];
+  const stray = options.find((o) => o.group && !groups.some((g) => g.name === o.group));
+  if (stray) throw unprocessable('DISH_METHOD_GROUP_UNKNOWN', `做法「${stray.name}」所在的组「${stray.group}」没有写在分组里，请刷新后重试`);
+  const empty = groups.find((g) => !options.some((o) => o.group === g.name));
+  if (empty) throw unprocessable('DISH_METHOD_GROUP_EMPTY', `做法的组「${empty.name}」里还没有做法：加一种，或者把这一组去掉`);
+  return { options, groups };
+}
+
+async function writeMethods(tx: Tx, id: number, set: MethodSet, fresh = false) {
+  if (!fresh) {
+    await tx`DELETE FROM dish_methods WHERE item_id = ${id}`;
+    await tx`DELETE FROM dish_method_groups WHERE item_id = ${id}`;
+  }
+  if (set.groups.length) {
+    await tx`
+      INSERT INTO dish_method_groups (item_id, name, required, sort_no)
+      SELECT ${id}, g, r::boolean, (ord - 1)::int
+      FROM unnest(${set.groups.map((g) => g.name)}::text[], ${set.groups.map((g) => (g.required ? 'true' : 'false'))}::text[]) WITH ORDINALITY AS t(g, r, ord)`;
+  }
+  if (set.options.length) {
+    await tx`
+      INSERT INTO dish_methods (item_id, name, group_name, price, sort_no)
+      SELECT ${id}, m, nullif(g, ''), p, (ord - 1)::int
+      FROM unnest(${set.options.map((o) => o.name)}::text[], ${set.options.map((o) => o.group)}::text[], ${set.options.map((o) => o.price)}::bigint[]) WITH ORDINALITY AS t(m, g, p, ord)`;
   }
 }
 
@@ -358,12 +441,13 @@ async function writeCombo(tx: Tx, id: number, combo: { itemId: number; quantity:
 
 /** 这道菜现在的做法、加料、套餐内容（比较有没有变、写审计用） */
 async function childrenOf(db: Db, id: number) {
-  const methods = await db<{ name: string }[]>`SELECT name FROM dish_methods WHERE item_id = ${id} ORDER BY sort_no, name`;
+  const methods = await db<{ name: string; groupName: string | null; price: number }[]>`SELECT name, group_name, price FROM dish_methods WHERE item_id = ${id} ORDER BY sort_no, name`;
+  const groups = await db<DishMethodGroup[]>`SELECT name, required FROM dish_method_groups WHERE item_id = ${id} ORDER BY sort_no, name`;
   const addons = await db<{ id: number; name: string }[]>`
     SELECT i.id, i.name FROM dish_addons a JOIN service_items i ON i.id = a.addon_item_id WHERE a.item_id = ${id} ORDER BY a.sort_no, i.id`;
   const combo = await db<{ itemId: number; name: string; quantity: number }[]>`
     SELECT i.id AS item_id, i.name, c.quantity FROM dish_combo_items c JOIN service_items i ON i.id = c.item_id WHERE c.combo_item_id = ${id} ORDER BY c.sort_no, i.id`;
-  return { methods: methods.map((m) => m.name), addons, combo };
+  return { methods: { options: methods.map((m) => ({ name: m.name, group: m.groupName ?? '', price: m.price })), groups } satisfies MethodSet, addons, combo };
 }
 
 const sameList = <T>(a: readonly T[], b: readonly T[]) => a.length === b.length && a.every((x, i) => x === b[i]);
@@ -378,6 +462,7 @@ export async function createDishTx(tx: Tx, ctx: OpContext, f: DishFieldsData & {
   if (!can(ctx.actor, DISH_PRICE_PERMISSION)) throw forbidden('新建菜品要定价，需要「菜品管理：定价与改价」的权限');
   const refs = await lockItems(tx, [...f.addons, ...f.combo.map((c) => c.itemId)]);
   await checkFields(tx, null, f, refs);
+  const methods = normalizeMethods(f, null);
   const [row] = await tx<{ id: number }[]>`
     INSERT INTO service_items (name, category, price, technician_required, station_id, dining_outlet, dining_group, dish_image_id, active, sort_order)
     VALUES (${f.name}, ${f.category}, ${defaultPrice(f.prices)}, false, ${f.stationId}, ${slot.outlet}, ${slot.group}, ${f.imageId}, ${f.active},
@@ -388,7 +473,7 @@ export async function createDishTx(tx: Tx, ctx: OpContext, f: DishFieldsData & {
     INSERT INTO service_item_prices (item_id, tier, price)
     SELECT ${id}, unnest(${f.prices.map((p) => p.tier)}::text[]), unnest(${f.prices.map((p) => p.price)}::bigint[])`;
   // 新建的菜：做法、加料、套餐内容直接写（没有旧的要先删）
-  await writeMethods(tx, id, f.methods, true);
+  await writeMethods(tx, id, methods, true);
   await writeAddons(tx, id, f.addons, true);
   await writeCombo(tx, id, f.combo, true);
   await recordPriceChanges(tx, { itemId: id, itemName: f.name, before: [], after: f.prices, reason: opts.reason, source: opts.source, staffId: ctx.actor.id });
@@ -423,8 +508,12 @@ export async function updateDishTx(tx: Tx, ctx: OpContext, id: number, f: DishFi
   const writeSlot = kept.outlet !== to.outlet || kept.group !== to.group;
   if (cur.stationId !== f.stationId) changes.push({ label: '档口', before: cur.stationName ?? '', after: station.name });
   if (cur.dishImageId !== f.imageId) changes.push({ label: '图片', before: cur.dishImageId ? '有' : '没有', after: f.imageId ? (cur.dishImageId ? '换了一张' : '有') : '没有' });
-  const methodsChanged = !sameList(kids.methods, f.methods);
-  if (methodsChanged) changes.push({ label: '做法', before: listText(kids.methods), after: listText(f.methods) });
+  // 做法（8.1.17 带分组、加价、必选）：按 Excel 一格的写法比较，分组、加价、必选、先后变了都算改
+  const methods = normalizeMethods(f, kids.methods);
+  const methodsBefore = methodsCellText(kids.methods.options, kids.methods.groups);
+  const methodsAfter = methodsCellText(methods.options, methods.groups);
+  const methodsChanged = methodsBefore !== methodsAfter;
+  if (methodsChanged) changes.push({ label: '做法', before: methodsBefore || '（没有）', after: methodsAfter || '（没有）' });
   const addonsChanged = !sameList(
     kids.addons.map((a) => a.id),
     f.addons,
@@ -449,7 +538,7 @@ export async function updateDishTx(tx: Tx, ctx: OpContext, id: number, f: DishFi
     UPDATE service_items SET name = ${f.name}, category = ${f.category}, station_id = ${f.stationId}, dish_image_id = ${f.imageId},
            ${writeSlot ? tx`dining_outlet = ${to.outlet}, dining_group = ${to.group},` : tx``} updated_at = clock_timestamp()
     WHERE id = ${id}`;
-  if (methodsChanged) await writeMethods(tx, id, f.methods);
+  if (methodsChanged) await writeMethods(tx, id, methods);
   if (addonsChanged) await writeAddons(tx, id, f.addons);
   if (comboChanged) await writeCombo(tx, id, f.combo);
   return changes;
@@ -644,7 +733,7 @@ async function dishesXlsx(db: Db, deps: Deps): Promise<{ buffer: Buffer; fileNam
     yuan(tierPrice(d.prices, 'professional')),
     yuan(tierPrice(d.prices, 'premium')),
     d.active ? '上架' : '下架',
-    d.methods.join('、'),
+    methodsCellText(d.methodOptions, d.methodGroups),
     d.addons.map((a) => a.name).join('、'),
     partsText(d.combo),
     remainingText(d.remaining),

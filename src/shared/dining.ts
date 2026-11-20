@@ -10,7 +10,8 @@
 
 import type { CheckoutMember } from './checkout';
 import type { LedgerKind, LedgerVoidRate, TableStateInfo, VoidBlame } from './dining-v8115';
-import type { DishAddonOption, DishPart } from './dishes';
+import type { TierPrice } from './catalog';
+import type { DishAddonOption, DishMethodGroup, DishMethodOption, DishPart } from './dishes';
 
 export interface DiningRules {
   /** 餐饮功能：关闭时前台挂账与升级前完全一样，主导航没有「餐饮」（默认关闭） */
@@ -234,6 +235,13 @@ export interface MenuDish {
   methods?: string[];
   addons?: DishAddonOption[];
   combo?: DishPart[];
+  /**
+   * 8.1.17（docs/DISHES_V8117.md）：做法的分组与加价（有做法的菜带，名字与 methods 一样、同样的顺序）、做法的组（分了组的才带）；
+   * 多档的菜各档的价（BW5：只有一档的不带，点单页不弹选档）
+   */
+  methodOptions?: DishMethodOption[];
+  methodGroups?: DishMethodGroup[];
+  prices?: TierPrice[];
 }
 
 export interface DiningMenu {
