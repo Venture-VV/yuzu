@@ -35,9 +35,11 @@ import {
   isApprovalOp,
   isDeviceOp,
   isFenced,
+  isMemberFormOp,
   isMemberOp,
   isPaymentFlowOp,
   isPlatformOp,
+  memberFormOpRef,
   memberOpRef,
   paymentFlowOpRef,
   trialOpRef,
@@ -136,6 +138,9 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   gift_issue: ['gift.issue'],
   // 与答复替代的接口一致：只有「审核需求单」的部门主管也答复得了替代，结果待确认时自己能确认作废（Codex 审查 d9b58a2）
   request_stock: ['request.stock', 'request.create', 'request.review'],
+  // 8.1.15 会员建档、退卡退押金：与各自的提交接口一致
+  member_create: ['member.write'],
+  member_card_return: ['member.card'],
 };
 /** 查回要的权限 */
 const READ: Record<ErpOpType, Permission[]> = {
@@ -206,6 +211,8 @@ const READ: Record<ErpOpType, Permission[]> = {
   gift_type: ['gift.manage'],
   gift_issue: ['gift.issue', 'gift.read'],
   request_stock: ['request.stock', 'request.create', 'request.review'],
+  member_create: ['member.write', 'member.read'],
+  member_card_return: ['member.card', 'member.read'],
 };
 
 export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise<ErpOpLookup> {
@@ -292,6 +299,11 @@ export async function lookupErpOp(db: Db, key: string, type: ErpOpType): Promise
   // 付款流（v0.7.32）：refId 是那张付款申请、那笔合同付款、那条验收 / 质量问题登记、那张发票
   if (isPaymentFlowOp(type)) {
     const refId = await paymentFlowOpRef(db, key, type);
+    if (refId !== null) return { found: true, abandoned: false, refId };
+  }
+  // 8.1.15 会员建档、退卡退押金：refId 是那位会员
+  if (isMemberFormOp(type)) {
+    const refId = await memberFormOpRef(db, key, type);
     if (refId !== null) return { found: true, abandoned: false, refId };
   }
   return { found: false, abandoned: await isFenced(db, key, [type]) };

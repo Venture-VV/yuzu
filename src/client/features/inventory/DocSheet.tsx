@@ -327,7 +327,7 @@ function DocBody({ doc, onClose }: { doc: InvDoc; onClose: () => void }) {
                     {doc.docType !== 'count' && (
                       <span className="block">
                         {l.enteredUnit && l.enteredUnit !== l.inventoryUnit && l.enteredQtyMilli !== null ? (
-                          <span className="num text-[11.5px] text-ink-3">
+                          <span className="num text-[12px] text-ink-3">
                             录入 {formatQty(l.enteredQtyMilli)} {l.enteredUnit}
                           </span>
                         ) : (

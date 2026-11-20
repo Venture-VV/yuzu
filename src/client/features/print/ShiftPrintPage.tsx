@@ -74,16 +74,25 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
       ))}
       <Row left="充值实收" right={yuan(sum.recharges.paid)} strong />
       <Row left="赠送赠金（不是收款）" right={yuan(sum.recharges.bonus)} />
-      {sum.deposits && (
-        <div data-testid="print-shift-deposits">
-          <p className="mt-1.5 font-bold">客房押金（不算营业额）</p>
-          {sum.deposits.received.map((m) => (
-            <Row key={`r-${m.method}`} left={`收 ${PAYMENT_METHOD_LABELS[m.method] ?? m.method} · ${m.count} 笔`} right={yuan(m.amount)} />
-          ))}
-          {sum.deposits.refunded.map((m) => (
-            <Row key={`f-${m.method}`} left={`退 ${PAYMENT_METHOD_LABELS[m.method] ?? m.method} · ${m.count} 笔`} right={yuan(m.amount)} />
-          ))}
-        </div>
+      {/* 押金：客房押金与会员卡押金（8.1.15）各一段 */}
+      {(
+        [
+          ['print-shift-deposits', '客房押金（不算营业额）', sum.deposits],
+          ['print-shift-card-deposits', '会员卡押金（不算营业额）', sum.cardDeposits],
+        ] as const
+      ).map(
+        ([testId, title, d]) =>
+          d && (
+            <div key={testId} data-testid={testId}>
+              <p className="mt-1.5 font-bold">{title}</p>
+              {d.received.map((m) => (
+                <Row key={`r-${m.method}`} left={`收 ${PAYMENT_METHOD_LABELS[m.method] ?? m.method} · ${m.count} 笔`} right={yuan(m.amount)} />
+              ))}
+              {d.refunded.map((m) => (
+                <Row key={`f-${m.method}`} left={`退 ${PAYMENT_METHOD_LABELS[m.method] ?? m.method} · ${m.count} 笔`} right={yuan(m.amount)} />
+              ))}
+            </div>
+          ),
       )}
       {sum.countCards && (
         <div data-testid="print-shift-count-cards">
@@ -117,6 +126,7 @@ function ShiftSlip({ s }: { s: ShiftRecord }) {
       {!!sum.cash.refundSlip && <Row left="− 退款单退现金" right={yuan(sum.cash.refundSlip)} />}
       {!!sum.cash.memberRefund && <Row left="− 储值退回的现金" right={yuan(sum.cash.memberRefund)} />}
       {!!sum.cash.countCard && <Row left={sum.cash.countCard > 0 ? '+ 次卡现金（卖 − 退）' : '− 次卡现金（退 − 卖）'} right={yuan(Math.abs(sum.cash.countCard))} />}
+      {!!sum.cash.cardDeposit && <Row left={sum.cash.cardDeposit > 0 ? '+ 会员卡押金现金（收 − 退）' : '− 会员卡押金现金（退 − 收）'} right={yuan(Math.abs(sum.cash.cardDeposit))} />}
       <Row left="= 应有现金" right={yuan(s.expectedCash ?? sum.cash.expected)} strong />
       {closed && s.countedCash !== null && (
         <>

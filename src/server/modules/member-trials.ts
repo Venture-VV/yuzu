@@ -354,7 +354,7 @@ export async function createTrialTx(tx: Tx, deps: Deps, args: TrialCreateArgs, c
   if (existingId === inviterId) throw unprocessable('TRIAL_SELF', '不能邀请自己：请输入受邀人的手机号');
   // 两位会员按 id 升序锁（与充值、消费、登记使用同一把锁）
   const ids = existingId === null ? [inviterId] : [inviterId, existingId].sort((a, b) => a - b);
-  const locked = await tx<{ id: number; status: string; phone: string; name: string }[]>`
+  const locked = await tx<{ id: number; status: string; phone: string | null; name: string }[]>`
     SELECT id, status, phone, name FROM members WHERE id IN ${tx(ids)} ORDER BY id FOR UPDATE`;
   const inviter = locked.find((m) => Number(m.id) === inviterId);
   if (!inviter) throw notFound('会员不存在');

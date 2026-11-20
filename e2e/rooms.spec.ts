@@ -11,6 +11,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { CheckoutDetail } from '../src/shared/checkout';
 import type { RoomBoard, RoomsAdmin, StayDetail } from '../src/shared/rooms';
 import { ensureShift } from './shift';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 const DAILY = { name: 'E2E 标准间', kind: 'daily', price: 28800, blockMinutes: null } as const;
@@ -159,7 +160,7 @@ test.describe('S7 客房', () => {
       visit = g.visitId;
 
       // ① 主导航「客房」：按楼层的房态看板
-      await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '客房' }).click();
+      await clickNav(page, '客房');
       await expect(page).toHaveURL(/\/rooms/);
       const tile1 = page.getByTestId(`room-tile-${R1}`);
       await expect(tile1).toHaveAttribute('data-state', 'vacant');

@@ -107,9 +107,9 @@ export function PaymentsPage() {
             >
               {t.label}
               {t.value === 'requests' && !!todo.data?.awaitingPayment && can('payable.manage') && (
-                <span className="num ml-1.5 rounded-full bg-yuzu px-1.5 text-[11px] text-ink">{todo.data.awaitingPayment}</span>
+                <span className="num ml-1.5 rounded-full bg-yuzu px-1.5 text-[12px] text-ink">{todo.data.awaitingPayment}</span>
               )}
-              {t.value === 'warranty' && !!todo.data?.warrantyDue && <span className="num ml-1.5 rounded-full bg-ember px-1.5 text-[11px] text-paper">{todo.data.warrantyDue}</span>}
+              {t.value === 'warranty' && !!todo.data?.warrantyDue && <span className="num ml-1.5 rounded-full bg-ember px-1.5 text-[12px] text-paper">{todo.data.warrantyDue}</span>}
             </button>
           ))}
         </div>
@@ -176,7 +176,7 @@ function RequestsTab() {
                   </span>
                   <span className="text-right md:self-center">
                     <Money cents={r.amountCents} className="text-[14px] font-bold" />
-                    {r.paidCents > 0 && r.paidCents < r.amountCents && <span className="block text-[11.5px] text-ink-3">已付 ¥{formatAmount(r.paidCents)}</span>}
+                    {r.paidCents > 0 && r.paidCents < r.amountCents && <span className="block text-[12px] text-ink-3">已付 ¥{formatAmount(r.paidCents)}</span>}
                   </span>
                   <span className="flex flex-wrap items-center justify-end gap-1.5 md:self-center">
                     {r.early && <Badge tone="ember">提前付款</Badge>}
@@ -458,7 +458,7 @@ function WarrantyTab() {
                   <WarrantyBadge status={w.rowStatus} />
                   <span className="text-right">
                     <Money cents={w.plannedCents} className="font-bold" />
-                    {w.paidCents > 0 && <span className="block text-[11.5px] text-ink-3">已付 ¥{formatAmount(w.paidCents)}</span>}
+                    {w.paidCents > 0 && <span className="block text-[12px] text-ink-3">已付 ¥{formatAmount(w.paidCents)}</span>}
                   </span>
                 </span>
               </li>

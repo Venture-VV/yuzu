@@ -91,7 +91,7 @@ function RoundCell({ scans, state }: { scans: PatrolScan[] | null; state: Patrol
         {scans.map((x) => (
           <span key={x.id} className="block whitespace-nowrap text-pine">
             ✓ {formatTime(x.at)} {x.name}
-            {x.late && <span className="ml-1 text-[11px] text-clay">补登</span>}
+            {x.late && <span className="ml-1 text-[12px] text-clay">补登</span>}
           </span>
         ))}
       </span>
@@ -183,8 +183,8 @@ function DayTab() {
                           className={cn('min-w-28 px-3 py-2 font-semibold whitespace-nowrap', r.state === 'current' && 'bg-ember-soft', r.state === 'future' && 'text-ink-4')}
                           data-testid={`patrol-day-round-${r.no}`}
                         >
-                          第 {r.no} 轮<span className="block text-[11.5px] font-normal text-ink-3">{roundSpan(r)}</span>
-                          <span className={cn('block text-[11.5px] font-normal', r.state === 'past' && r.done < r.expected ? 'text-clay' : 'text-ink-3')}>
+                          第 {r.no} 轮<span className="block text-[12px] font-normal text-ink-3">{roundSpan(r)}</span>
+                          <span className={cn('block text-[12px] font-normal', r.state === 'past' && r.done < r.expected ? 'text-clay' : 'text-ink-3')}>
                             {r.state === 'future' ? '还没到' : `巡了 ${r.done} / ${r.expected}`}
                           </span>
                         </th>
@@ -201,8 +201,8 @@ function DayTab() {
                               已停用
                             </Badge>
                           )}
-                          {p.area && <span className="block text-[11.5px] text-ink-3">{p.area}</span>}
-                          <span className="block text-[11.5px] text-ink-3">今天 {p.count} 次</span>
+                          {p.area && <span className="block text-[12px] text-ink-3">{p.area}</span>}
+                          <span className="block text-[12px] text-ink-3">今天 {p.count} 次</span>
                         </td>
                         {d.rounds.map((r, i) => (
                           <td key={r.no} className={cn('px-3 py-2', r.state === 'current' && 'bg-ember-soft/40')}>
@@ -349,7 +349,7 @@ function RecordsTab({ manage }: { manage: boolean }) {
                 <td className="num px-3 py-2 whitespace-nowrap">{r.roundNo ? `第 ${r.roundNo} 轮` : '—'}</td>
                 <td className="num px-3 py-2">
                   {formatTime(r.scannedAt)}
-                  {r.late && <span className="ml-1 text-[11.5px] text-clay no-underline">离线补登</span>}
+                  {r.late && <span className="ml-1 text-[12px] text-clay no-underline">离线补登</span>}
                 </td>
                 <td className="px-3 py-2">{r.pointName}</td>
                 <td className="px-3 py-2">

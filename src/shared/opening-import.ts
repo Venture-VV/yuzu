@@ -271,7 +271,8 @@ export interface OpeningBalanceRow {
   memberId: number;
   memberNo: string;
   memberName: string;
-  memberPhone: string;
+  /** 期初的会员都有手机号；列本身可以为空（匿名卡，8.1.15） */
+  memberPhone: string | null;
   legacyNo: string;
   principal: number;
   bonus: number;

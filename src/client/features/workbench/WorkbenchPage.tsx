@@ -9,6 +9,7 @@ import { useCan, useSession } from '../../lib/session';
 import { cn, isTypingTarget } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
 import { EmptyState } from '../../components/EmptyState';
+import { ErpPendingPanel } from '../../components/ErpPendingPanel';
 import { Sheet } from '../../components/Overlay';
 import { Notice } from '../../components/ui';
 import { ConsumeFlow } from '../flows/ConsumeFlow';
@@ -31,6 +32,7 @@ function useMedia(query: string) {
 }
 
 type Flow = 'recharge' | 'consume' | null;
+const MEMBER_CREATE_OPS = ['member_create'] as const;
 
 export function WorkbenchPage() {
   const session = useSession();
@@ -160,8 +162,21 @@ export function WorkbenchPage() {
         )}
       >
         {showList && (
-          <aside className="min-h-0 border-r border-line bg-paper-2/45">
-            <MemberList ref={searchRef} selectedId={selectedId} onSelect={(m: MemberSummary) => select(m.id)} onCreate={(prefill) => setForm({ mode: 'create', prefill })} />
+          <aside className="flex min-h-0 flex-col border-r border-line bg-paper-2/45">
+            {/* 建档没收到结果的（8.1.15）：查回、按原内容重新提交或确认作废；查回了就打开那位会员 */}
+            {can('member.write') && (
+              <ErpPendingPanel
+                types={MEMBER_CREATE_OPS}
+                className="space-y-2 px-3 pt-3"
+                onFound={(_op, ref) => {
+                  void qc.invalidateQueries({ queryKey: ['members'] });
+                  select(ref.refId);
+                }}
+              />
+            )}
+            <div className="min-h-0 flex-1">
+              <MemberList ref={searchRef} selectedId={selectedId} onSelect={(m: MemberSummary) => select(m.id)} onCreate={(prefill) => setForm({ mode: 'create', prefill })} />
+            </div>
           </aside>
         )}
 

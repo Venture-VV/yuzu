@@ -133,16 +133,26 @@ function SettlementSheet({ s }: { s: SettlementSummary }) {
           <p className="mt-1 text-[11px]">按收款方式核对抽屉现金与各收款账户（已减去当天的退款单）；会员储值、团购券、优惠 / 免单、券抵扣不计入。</p>
         </Section>
 
-        {s.deposits && (s.deposits.received.length > 0 || s.deposits.refunded.length > 0 || s.deposits.held !== 0) && (
-          <Section title="客房押金 · 负债，不算营业额" testId="print-settlement-deposits">
-            {s.deposits.received.map((m) => (
-              <Row key={`r-${m.method}`} left={`收 ${PAYMENT_METHOD_LABELS[m.method]} · ${m.count} 笔`} right={yuan(m.amount)} />
-            ))}
-            {s.deposits.refunded.map((m) => (
-              <Row key={`f-${m.method}`} left={`退 ${PAYMENT_METHOD_LABELS[m.method]} · ${m.count} 笔`} right={yuan(-m.amount)} />
-            ))}
-            <Row left="当天结束时在住押金" right={yuan(s.deposits.held)} strong />
-          </Section>
+        {/* 押金：客房押金与会员卡押金（8.1.15）各一段 */}
+        {(
+          [
+            ['print-settlement-deposits', '客房押金 · 负债，不算营业额', '当天结束时在住押金', s.deposits],
+            ['print-settlement-card-deposits', '会员卡押金 · 负债，不算营业额', '当天结束时押着的押金', s.cardDeposits],
+          ] as const
+        ).map(
+          ([testId, title, heldLabel, d]) =>
+            d &&
+            (d.received.length > 0 || d.refunded.length > 0 || d.held !== 0) && (
+              <Section key={testId} title={title} testId={testId}>
+                {d.received.map((m) => (
+                  <Row key={`r-${m.method}`} left={`收 ${PAYMENT_METHOD_LABELS[m.method]} · ${m.count} 笔`} right={yuan(m.amount)} />
+                ))}
+                {d.refunded.map((m) => (
+                  <Row key={`f-${m.method}`} left={`退 ${PAYMENT_METHOD_LABELS[m.method]} · ${m.count} 笔`} right={yuan(-m.amount)} />
+                ))}
+                <Row left={heldLabel} right={yuan(d.held)} strong />
+              </Section>
+            ),
         )}
 
         <Section title="会员储值">

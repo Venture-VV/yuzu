@@ -154,7 +154,7 @@ function MoreMenu({ items }: { items: { key: string; label: string; hint: string
               <span className="mt-0.5 text-ink-3">{it.icon}</span>
               <span>
                 <span className="block text-[13px] text-ink">{it.label}</span>
-                <span className="block text-[11.5px] leading-snug text-ink-3">{it.hint}</span>
+                <span className="block text-[12px] leading-snug text-ink-3">{it.hint}</span>
               </span>
             </button>
           ))}
@@ -786,7 +786,7 @@ export function StudioPage() {
             <button
               key={v.id}
               type="button"
-              className="mr-2 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-pine-tint px-2 py-0.5 text-[11.5px] text-pine"
+              className="mr-2 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-pine-tint px-2 py-0.5 text-[12px] text-pine"
               title={`第 ${v.version} 版定在 ${at} 生效（点开「版本」可以撤销）`}
               onClick={() => setDialog('versions')}
               data-testid="studio-scheduled"
@@ -1250,7 +1250,7 @@ function PublishDialog({
               />
             )}
           </div>
-          {when === 'later' && <p className="text-[11.5px] text-ink-3">到点才换（最早 2 分钟以后、最晚 60 天以内）；没到点之前在「版本」里能撤。到点前又发了一版也照样到点换成这一版。</p>}
+          {when === 'later' && <p className="text-[12px] text-ink-3">到点才换（最早 2 分钟以后、最晚 60 天以内）；没到点之前在「版本」里能撤。到点前又发了一版也照样到点换成这一版。</p>}
         </div>
         <p className="text-[12px] leading-relaxed text-ink-3">发布以后{SHOWN_ON[surface].when}；改坏了在「版本」里一键回到上一版。发布记在操作审计里。</p>
         <div className="flex justify-end gap-2">
@@ -1343,24 +1343,24 @@ function VersionsDialog({
             <div key={v.id} className={cn('rounded-md border border-line px-3 py-2', v.cancelledAt && 'opacity-60')} data-testid={`studio-version-${v.version}`}>
               <div className="flex items-center gap-2 text-[13px]">
                 <span className="font-bold">第 {v.version} 版</span>
-                {v.current && <span className="rounded bg-pine-tint px-1.5 text-[11px] text-pine">现在用的</span>}
+                {v.current && <span className="rounded bg-pine-tint px-1.5 text-[12px] text-pine">现在用的</span>}
                 {v.effectiveAt && !v.cancelledAt && new Date(v.effectiveAt).getTime() > Date.now() && (
-                  <span className="rounded bg-yuzu-soft px-1.5 text-[11px] text-yuzu-deep" data-testid={`studio-version-pending-${v.version}`}>
+                  <span className="rounded bg-yuzu-soft px-1.5 text-[12px] text-yuzu-deep" data-testid={`studio-version-pending-${v.version}`}>
                     定在 {new Date(v.effectiveAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 生效
                   </span>
                 )}
                 {v.cancelledAt && (
-                  <span className="rounded bg-paper-2 px-1.5 text-[11px] text-ink-3">
+                  <span className="rounded bg-paper-2 px-1.5 text-[12px] text-ink-3">
                     {v.cancelledBy} 撤销了（{new Date(v.cancelledAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}）
                   </span>
                 )}
-                {v.kind === 'rollback' && <span className="rounded bg-paper-2 px-1.5 text-[11px] text-ink-3">回到第 {v.rollbackOf} 版</span>}
-                <span className="ml-auto text-[11.5px] text-ink-3">
+                {v.kind === 'rollback' && <span className="rounded bg-paper-2 px-1.5 text-[12px] text-ink-3">回到第 {v.rollbackOf} 版</span>}
+                <span className="ml-auto text-[12px] text-ink-3">
                   {v.publishedBy} · {new Date(v.publishedAt).toLocaleString('zh-CN')}
                 </span>
               </div>
               <div className="mt-0.5 text-[12.5px] text-ink-2">{v.note}</div>
-              <div className="mt-0.5 text-[11.5px] text-ink-3">改了：{v.screensChanged.map((s) => screenLabel(surface, s)).join('、') || '—'}</div>
+              <div className="mt-0.5 text-[12px] text-ink-3">改了：{v.screensChanged.map((s) => screenLabel(surface, s)).join('、') || '—'}</div>
               <div className="mt-1.5 flex gap-2">
                 {!v.current && canPublish && (
                   <Button size="sm" variant="secondary" loading={busy === v.version} onClick={() => void rollback(v)} data-testid={`studio-rollback-${v.version}`}>
@@ -1432,20 +1432,20 @@ function PreviewDialog({ surface, doc, onClose }: { surface: StudioSurface; doc:
               {surface === 'canteen' ? (
                 <>
                   <p>
-                    在这台电脑上看示意：扫左边的码或打开 <span className="break-all font-mono text-[11.5px]">{url}</span>（各段画的是示意）。
+                    在这台电脑上看示意：扫左边的码或打开 <span className="break-all font-mono text-[12px]">{url}</span>（各段画的是示意）。
                   </p>
                   <p data-testid="studio-preview-canteen">
                     在员工手机上看真实的样子：用员工账号登录柚子饭堂，在它的地址后面加 <span className="font-mono text-[12px] font-bold text-ink">?studio={code.code}</span>
-                    （比如 <span className="font-mono text-[11.5px]">http://柚子饭堂的地址/?studio={code.code}</span>），首页、饭卡码页就是这份草稿的样子；不存进手机，关掉再开回到发布的那一版。
+                    （比如 <span className="font-mono text-[12px]">http://柚子饭堂的地址/?studio={code.code}</span>），首页、饭卡码页就是这份草稿的样子；不存进手机，关掉再开回到发布的那一版。
                   </p>
                 </>
               ) : phone ? (
                 <p>
-                  在手机上看：手机浏览器登录着工作台的账号，扫左边的码，或打开 <span className="break-all font-mono text-[11.5px]">{url}</span>。小程序里的样子以小程序线照这份版面画的为准。
+                  在手机上看：手机浏览器登录着工作台的账号，扫左边的码，或打开 <span className="break-all font-mono text-[12px]">{url}</span>。小程序里的样子以小程序线照这份版面画的为准。
                 </p>
               ) : (
                 <p>
-                  在真平板上看：平板登录着「点餐平板」账号，扫左边的码，或打开 <span className="break-all font-mono text-[11.5px]">{url}</span>
+                  在真平板上看：平板登录着「点餐平板」账号，扫左边的码，或打开 <span className="break-all font-mono text-[12px]">{url}</span>
                 </p>
               )}
               <div className="flex gap-2">
@@ -1459,7 +1459,7 @@ function PreviewDialog({ surface, doc, onClose }: { surface: StudioSurface; doc:
             </div>
           </div>
         )}
-        <p className="text-[11.5px] text-ink-3">预览用的是生成那一刻的草稿；之后又改了，点「照现在的改动重新生成」。</p>
+        <p className="text-[12px] text-ink-3">预览用的是生成那一刻的草稿；之后又改了，点「照现在的改动重新生成」。</p>
       </div>
     </Dialog>
   );

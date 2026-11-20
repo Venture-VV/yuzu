@@ -20,9 +20,11 @@ import { resolveReadableDate } from './ledger';
 import { loadFrontdeskRules } from './frontdesk/common';
 import { loadSettings } from './settings';
 import { countCardDayTotals } from './count-cards';
+import { cardDepositDayTotals } from './member-card-deposits';
 import { EMPTY_COUNT_CARD_TOTALS } from '@shared/count-cards';
 import { platformDayTotals } from './platform-redemptions';
 import { EMPTY_PLATFORM_DAY_TOTALS } from '@shared/platform';
+import { EMPTY_CARD_DEPOSIT_TOTALS } from '@shared/member-form';
 
 type Pair = { principal: number; bonus: number };
 
@@ -99,6 +101,7 @@ async function computeTotals(db: Db, date: string): Promise<SettlementTotals> {
     deposits: await depositTotals(db, date),
     countCards: await countCardDayTotals(db, date),
     platformRedemptions: await platformDayTotals(db, date),
+    cardDeposits: await cardDepositDayTotals(db, date),
   };
 }
 
@@ -222,6 +225,8 @@ const withNewSections = (t: SettlementTotals): SettlementTotals => ({
   countCards: t.countCards ?? EMPTY_COUNT_CARD_TOTALS,
   // 平台核销补录（v0.7.28）之前确认的快照没有这一项
   platformRedemptions: t.platformRedemptions ?? EMPTY_PLATFORM_DAY_TOTALS,
+  // 会员卡押金（8.1.15）之前确认的快照没有这一项
+  cardDeposits: t.cardDeposits ?? EMPTY_CARD_DEPOSIT_TOTALS,
 });
 /**
  * 比较「日结后有变动」：快照按 withNewSections 补齐后与此刻的口径比。
@@ -756,6 +761,11 @@ export function settlementCsv(s: SettlementSummary): string {
     ...s.deposits.received.map((m) => [`收押金 · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, y(m.amount), m.method === 'cash' ? '现金计入钱箱' : '']),
     ...s.deposits.refunded.map((m) => [`退押金 · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, '-' + y(m.amount), m.method === 'cash' ? '现金从钱箱退' : '原路退回']),
     ['当天结束时在住押金余额', '', y(s.deposits.held), ''],
+    [],
+    ['会员卡押金（负债，不算营业额、不进储值）', '笔数', '金额（元）', '说明'],
+    ...s.cardDeposits.received.map((m) => [`收押金 · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, y(m.amount), m.method === 'cash' ? '现金计入钱箱' : '']),
+    ...s.cardDeposits.refunded.map((m) => [`退押金 · ${PAYMENT_METHOD_LABELS[m.method]}`, m.count, '-' + y(m.amount), m.method === 'cash' ? '现金从钱箱退' : '商户后台原路退回']),
+    ['当天结束时押着的会员卡押金', '', y(s.cardDeposits.held), ''],
     [],
     ['次卡（v0.7.28）', '笔数 / 次数', '金额（元）', '说明'],
     ['售卡收款', s.countCards.sales.count, y(s.countCards.sales.amount), '预收，不是营业额；用的时候按项目价算营业额'],

@@ -242,6 +242,12 @@ function CashFormula({ cash }: { cash: ShiftSummary['cash'] }) {
           {cash.countCard > 0 ? '+' : '−'} 次卡现金（卖 − 退） <Money cents={Math.abs(cash.countCard)} />
         </>
       ) : null}
+      {cash.cardDeposit ? (
+        <>
+          {' '}
+          {cash.cardDeposit > 0 ? '+' : '−'} 会员卡押金现金（收 − 退） <Money cents={Math.abs(cash.cardDeposit)} />
+        </>
+      ) : null}
     </p>
   );
 }
@@ -315,6 +321,7 @@ function SummaryView({ summary }: { summary: ShiftSummary }) {
       </div>
       {summary.byOperator && summary.byOperator.length > 0 && <OperatorsView operators={summary.byOperator} />}
       {summary.deposits && <DepositsView deposits={summary.deposits} />}
+      {summary.cardDeposits && <DepositsView deposits={summary.cardDeposits} card />}
       {summary.refundSlips && <RefundSlipsView slips={summary.refundSlips} />}
       {summary.countCards && <CountCardsView cards={summary.countCards} />}
       {summary.voids.length > 0 &&
@@ -372,15 +379,18 @@ function CountCardsView({ cards }: { cards: NonNullable<ShiftSummary['countCards
   );
 }
 
-/** 客房押金（S7）：本班次收、退的押金，按收款方式；押金是负债、不算营业额，现金押金计入应有现金 */
-function DepositsView({ deposits }: { deposits: NonNullable<ShiftSummary['deposits']> }) {
+/**
+ * 押金：本班次收、退的押金，按收款方式；押金是负债、不算营业额，现金押金计入应有现金。
+ * 客房押金（S7）与会员卡押金（8.1.15，card）各一块
+ */
+function DepositsView({ deposits, card }: { deposits: NonNullable<ShiftSummary['deposits']>; card?: boolean }) {
   const line = (list: typeof deposits.received) => (list.length ? list.map((m) => `${PAYMENT_METHOD_LABELS[m.method]} ${m.count} 笔 ¥${(m.amount / 100).toFixed(2)}`).join('、') : '无');
   return (
-    <div className="rounded-lg border border-line p-4 md:col-span-2" data-testid="shift-deposits">
-      <p className="text-[13px] font-bold text-ink-2">客房押金（不算营业额）</p>
+    <div className="rounded-lg border border-line p-4 md:col-span-2" data-testid={card ? 'shift-card-deposits' : 'shift-deposits'}>
+      <p className="text-[13px] font-bold text-ink-2">{card ? '会员卡押金（不算营业额、不进储值）' : '客房押金（不算营业额）'}</p>
       <p className="mt-1.5 text-[13px] text-ink-2">收：{line(deposits.received)}</p>
       <p className="mt-0.5 text-[13px] text-ink-2">退：{line(deposits.refunded)}</p>
-      <p className="mt-1.5 text-[12px] text-ink-3">现金押金计入应有现金（收的加、退的减）；扫码、银行卡收的押金退房时在商户后台原路退。</p>
+      <p className="mt-1.5 text-[12px] text-ink-3">现金押金计入应有现金（收的加、退的减）；扫码、银行卡收的押金{card ? '退卡' : '退房'}时在商户后台原路退。</p>
     </div>
   );
 }

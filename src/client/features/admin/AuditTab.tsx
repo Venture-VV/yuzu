@@ -93,6 +93,25 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   dish_active_set: { label: '菜品上下架', tone: 'neutral' },
   dish_price_changed: { label: '菜品改价', tone: 'ember' },
   dishes_imported: { label: '导入菜品', tone: 'ember' },
+  // 8.1.15 房态中心
+  room_center_register: { label: '房态中心 · 登记', tone: 'lake' },
+  room_center_extend: { label: '房态中心 · 续钟', tone: 'lake' },
+  room_center_move: { label: '房态中心 · 换房', tone: 'yuzu' },
+  room_center_checkout: { label: '房态中心 · 退房', tone: 'pine' },
+  room_center_merge: { label: '房态中心 · 并房 / 拆并', tone: 'yuzu' },
+  room_center_state: { label: '房态中心 · 改房态', tone: 'ember' },
+  room_category: { label: '房态中心 · 房型', tone: 'pine' },
+  // 8.1.15 技师管理
+  technician_group: { label: '技师组别', tone: 'neutral' },
+  technician_shift: { label: '技师班次', tone: 'neutral' },
+  technician_schedule: { label: '技师排班', tone: 'neutral' },
+  technician_leave: { label: '技师休假', tone: 'ember' },
+  clock_announcer: { label: '叫号播报终端', tone: 'neutral' },
+  // 会员实体卡（v0.7.28）与押金、退卡（8.1.15）
+  member_card_issued: { label: '发卡 / 补卡', tone: 'lake' },
+  member_card_lost: { label: '挂失会员卡', tone: 'ember' },
+  member_card_deposit: { label: '会员卡押金', tone: 'pine' },
+  member_card_returned: { label: '退卡', tone: 'clay' },
 };
 
 function describe(detail: Record<string, unknown>): string {

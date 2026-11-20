@@ -71,7 +71,7 @@ export function PriceHistoryDialog({ materialId, onClose }: { materialId: number
                 <span className="num text-right font-semibold">
                   ¥{formatAmount(p.priceCents)}
                   <span className="font-normal text-ink-3">/{p.purchaseUnit}</span>
-                  {p.qtyMilli !== null && <span className="block text-[11px] font-normal text-ink-4">{formatQty(p.qtyMilli)}</span>}
+                  {p.qtyMilli !== null && <span className="block text-[12px] font-normal text-ink-4">{formatQty(p.qtyMilli)}</span>}
                 </span>
               </li>
             ))}

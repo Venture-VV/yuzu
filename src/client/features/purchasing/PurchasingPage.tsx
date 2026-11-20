@@ -144,9 +144,9 @@ export function PurchasingPage() {
                   <span className="min-w-0">
                     <span className="num block truncate text-[13.5px] font-bold">
                       {p.docNo}
-                      {p.revision > 1 && <span className="ml-1 text-[11.5px] font-semibold text-ink-3">v{p.revision}</span>}
+                      {p.revision > 1 && <span className="ml-1 text-[12px] font-semibold text-ink-3">v{p.revision}</span>}
                     </span>
-                    <span className="num block text-[11.5px] text-ink-3">
+                    <span className="num block text-[12px] text-ink-3">
                       {p.orderDate}
                       {p.expectedDate && ` · 预计 ${p.expectedDate.slice(5)}`}
                     </span>
@@ -154,7 +154,7 @@ export function PurchasingPage() {
                   <span className="col-span-2 min-w-0 lg:col-span-1">
                     <span className="flex items-center gap-1.5">
                       <span className="truncate text-[13.5px] font-semibold">{p.supplierName}</span>
-                      {p.channel && <span className="shrink-0 truncate text-[11.5px] font-semibold text-ink-3">{p.channel.label}</span>}
+                      {p.channel && <span className="shrink-0 truncate text-[12px] font-semibold text-ink-3">{p.channel.label}</span>}
                       {p.backfill && <Badge tone="ember">补单</Badge>}
                     </span>
                     <span className="block truncate text-[12.5px] text-ink-3">
@@ -164,11 +164,11 @@ export function PurchasingPage() {
                   </span>
                   <span className="hidden text-right lg:block">
                     <Money cents={p.totalCents} className="text-[14px] font-bold" />
-                    <span className="block text-[11px] text-ink-3">下单</span>
+                    <span className="block text-[12px] text-ink-3">下单</span>
                   </span>
                   <span className="hidden text-right lg:block">
                     <Money cents={p.receivedCents} className="text-[14px] font-semibold text-pine" />
-                    <span className="block text-[11px] text-ink-3">已收货</span>
+                    <span className="block text-[12px] text-ink-3">已收货</span>
                   </span>
                   <span className="hidden lg:block">{(p.status === 'approved' || p.status === 'closed') && <ReceivingChip state={p.receiving} />}</span>
                   <span className="row-start-1 justify-self-end lg:row-auto">

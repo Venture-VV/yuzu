@@ -220,7 +220,7 @@ function LinesTable({ lines, withTechnician }: { lines: OrderLine[]; withTechnic
           <li key={i} className="flex items-start gap-3 px-3 py-2">
             <div className="min-w-0 flex-1">
               <p className="font-semibold break-words">{l.name}</p>
-              <p className="text-[11.5px] text-ink-3">
+              <p className="text-[12px] text-ink-3">
                 {l.category} · {l.unitPrice == null ? `${l.quantity} 份` : `${l.quantity} × ${formatYuan(l.unitPrice)}`}
                 {withTechnician && l.technician && ` · ${l.technician}`}
               </p>
@@ -228,7 +228,7 @@ function LinesTable({ lines, withTechnician }: { lines: OrderLine[]; withTechnic
             <div className="shrink-0 text-right">
               <Money cents={l.amount} className="font-bold" />
               {l.discount > 0 && (
-                <p className="text-[11.5px] text-ember">
+                <p className="text-[12px] text-ember">
                   优惠 <Money cents={-l.discount} />
                 </p>
               )}
@@ -252,7 +252,7 @@ function LinesTable({ lines, withTechnician }: { lines: OrderLine[]; withTechnic
             <tr key={i} data-testid="order-line">
               <td className="px-3 py-2">
                 <p className="font-semibold break-words">{l.name}</p>
-                {withTechnician && l.technician && <p className="text-[11.5px] text-ink-3">{l.technician}</p>}
+                {withTechnician && l.technician && <p className="text-[12px] text-ink-3">{l.technician}</p>}
               </td>
               <td className="px-2 py-2 break-words text-ink-2">{l.category}</td>
               <td className="num px-2 py-2 text-right">{l.quantity}</td>

@@ -27,6 +27,7 @@ import { nextDocNo, setTxTimeouts } from '../lib/tx';
 import { cents, idParam, parse } from '../lib/validate';
 import { expireDueLots, moveLotsForMerge } from './bonus';
 import { erpOpAbandoned } from './erp-ops';
+import { heldCardDeposit } from './member-card-deposits';
 import { applyMergeGrade, loadMembershipRules, previewMergeGrade } from './membership';
 import { loadSettings } from './settings';
 import { applyBalance, type LockedMember } from './wallet-core';
@@ -170,6 +171,9 @@ async function mergeProblems(db: Db, source: MergeMemberRow, target: MergeMember
   const [spent] = await db<{ n: number }[]>`
     SELECT count(*)::int AS n FROM consumptions WHERE member_id = ${source.id} AND status = 'completed' AND business_date = ${today}`;
   if (spent!.n > 0) out.push(`「${source.name}」今天有储值消费（可能还要撤销或反结账），明天再合并`);
+  // 会员卡押金（8.1.15）：押金记在人名下，不跟着余额转；先退卡退押金再合并
+  const held = await heldCardDeposit(db, source.id);
+  if (held > 0) out.push(`「${source.name}」还押着实体卡押金 ${formatYuan(held)}：先退卡、退押金再合并`);
   return out;
 }
 

@@ -4,6 +4,7 @@
 // 反结账退的现金算在哪个班次随版本不同（v0.3 从原收款人的班次去掉；R1.2 起原单留在原班次、退款扣反结账人的班次），
 // 这里核对与口径无关的部分：两人交班表的应有现金变动合计 = 实际净收现金。
 import { expect, test, type Page } from '@playwright/test';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -14,8 +15,6 @@ async function login(page: Page, username: string) {
   await page.getByRole('button', { name: '登录' }).click();
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible({ timeout: 30_000 }); // 刚启动的服务第一次登录可能较慢
 }
-
-const nav = (page: Page, name: string) => page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });
 
 async function getJson<T>(page: Page, url: string): Promise<T> {
   const res = await page.request.get(url);
@@ -111,7 +110,7 @@ test.describe('完整收银', () => {
     // ① 前台开班，备用金 500 元
     await login(page, 'xiaozhou');
     await closeLeftoverShift(page);
-    await nav(page, '交班').click();
+    await clickNav(page, '交班');
     await expect(page.getByTestId('shift-start')).toBeVisible();
     await page.getByTestId('shift-opening-cash').fill('500');
     await page.getByTestId('shift-start-submit').click();
@@ -120,7 +119,7 @@ test.describe('完整收银', () => {
     expect(shift.openingCash).toBe(50000);
 
     // ② F2 接待：会员 + 同行女宾（自动建同行组）
-    await nav(page, '发卡台').click();
+    await clickNav(page, '发卡台');
     await expect(page.getByTestId('tag-board')).toBeVisible();
     const tags = await boardTags(page);
     const member = await pickMember(page, tags);
@@ -218,7 +217,7 @@ test.describe('完整收银', () => {
       await login(manager, 'zhangjl');
       await ensureShift(manager);
       const managerBefore = (await currentShift(manager))!;
-      await nav(manager, '收银台').click();
+      await clickNav(manager, '收银台');
       await manager.getByTestId('open-checkouts').click();
       const records = manager.getByRole('dialog', { name: '结账记录' });
       await records.getByText(first.checkoutNo).click();
@@ -264,7 +263,7 @@ test.describe('完整收银', () => {
       expect(await balance(page, member.id)).toEqual(before);
 
       // ⑧ 交班：实点现金与应有一致
-      await nav(page, '交班').click();
+      await clickNav(page, '交班');
       await expect(page.getByTestId('shift-open')).toContainText(shift.shiftNo);
       const open = (await currentShift(page))!;
       await page.getByTestId('shift-counted-cash').fill((open.summary.cash.expected / 100).toFixed(2));

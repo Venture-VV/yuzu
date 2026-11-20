@@ -54,7 +54,7 @@ export function Facts({ children, className }: { children: ReactNode; className?
 export function Fact({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
   return (
     <div className={cn('min-w-0', wide && 'col-span-2')}>
-      <dt className="text-[11.5px] font-semibold text-ink-3">{label}</dt>
+      <dt className="text-[12px] font-semibold text-ink-3">{label}</dt>
       <dd className="font-semibold break-words text-ink">{children}</dd>
     </div>
   );
@@ -127,7 +127,7 @@ export function LinesView({ lines, ordered }: { lines: ContractLineView[]; order
             <tr key={l.lineNo}>
               <td className="py-1.5 pr-2 font-semibold">
                 {l.itemName}
-                {l.materialId === null && <span className="ml-1 text-[11.5px] font-normal text-ink-3">（不在物料档案）</span>}
+                {l.materialId === null && <span className="ml-1 text-[12px] font-normal text-ink-3">（不在物料档案）</span>}
               </td>
               <td className="py-1.5 pr-2 text-ink-2">{l.spec || '—'}</td>
               <td className="num py-1.5 pr-2 text-right">
@@ -159,7 +159,7 @@ export function ReviewsView({ reviews }: { reviews: ReviewView[] }) {
           <ul className="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
             {r.items.map((it) => (
               <li key={it.key} className="flex min-w-0 items-baseline gap-1.5">
-                <Badge tone={VERDICT_TONE[it.verdict]} className="h-[20px] px-1.5 text-[11px]">
+                <Badge tone={VERDICT_TONE[it.verdict]} className="h-[20px] px-1.5 text-[12px]">
                   {REVIEW_VERDICT_LABELS[it.verdict]}
                 </Badge>
                 <span className="shrink-0 font-semibold">{LEGAL_CHECKLIST.find((x) => x.key === it.key)?.label ?? it.key}</span>

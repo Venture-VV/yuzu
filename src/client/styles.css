@@ -223,7 +223,7 @@
 [data-surface='rail'] {
   --color-paper: var(--color-rail-ink);
 }
-[data-surface='rail'] :where([role='menu'], [role='dialog'], [role='listbox']) {
+[data-surface='rail'] :where([role='menu'], [role='dialog'], [role='listbox'], [data-surface='panel']) {
   --color-paper: var(--paper-root);
 }
 

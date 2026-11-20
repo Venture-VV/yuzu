@@ -9,6 +9,7 @@ import type { DeductionRule, WalletBalance } from './deduction';
 import type { InstanceKind } from './instance';
 import type { EntryType, PaymentMethod } from './labels';
 import type { MemberTagBrief } from './member-tags';
+import type { CardDepositDayTotals, MemberCardType, MemberFormRules } from './member-form';
 import type { BonusLotRow, MemberChannel } from './members';
 import type { MemberGradeFields, MemberGradeInfo } from './membership';
 import type { Duty, Permission, Role } from './permissions';
@@ -62,6 +63,8 @@ export interface StoreRules extends Tunables {
   memberChannels: MemberChannel[];
   /** 数据字典（8.0.21，CW11）：作废、撤销、退款、报损……的快捷原因，后台「数据字典与字段」维护；原因照旧存文字，也可以手填 */
   dictionaries: Dictionaries;
+  /** 建档表单的字段显隐、必填与实体卡押金（8.1.15，后台「会员体系 → 渠道与标签」，按门店） */
+  memberForm: MemberFormRules;
 }
 
 export interface SessionInfo {
@@ -103,7 +106,10 @@ export interface MemberSummary extends MemberGradeFields {
   id: number;
   memberNo: string;
   name: string;
-  phone: string;
+  /** 手机号；只有匿名卡可以没有（8.1.15） */
+  phone: string | null;
+  /** 卡类型（8.1.15）：电子卡、实体卡、匿名卡 */
+  cardType: MemberCardType;
   gender: 'female' | 'male' | null;
   birthday: string | null;
   note: string;
@@ -117,10 +123,18 @@ export interface MemberSummary extends MemberGradeFields {
   channel: string | null;
   /** 已合并到的会员（v0.7.26）：这份档案停用、余额已转过去；没合并为 null */
   mergedIntoId: number | null;
+  /** 推荐人（8.1.15）：另一位会员；没登记为 null */
+  referrerMemberId: number | null;
+  /** 偏好项目（8.1.15）：一组短文字，如「足疗」「汗蒸」 */
+  preferredItems: string[];
 }
 
 export interface MemberDetail extends MemberSummary {
   createdByName: string | null;
+  /** 推荐人（8.1.15）：会员号与姓名 */
+  referrer: { id: number; memberNo: string; name: string } | null;
+  /** 押着的实体卡押金（8.1.15，收 − 退）；押金是负债，不在储值余额里 */
+  cardDepositHeld: number;
   /** 会员体系 v2 的等级卡：档阶、周期消费与保级、下一档、状态变化记录（v0.7.23） */
   gradeInfo: MemberGradeInfo;
   /** 全部赠金批次（可用、已用完、已过期），最近的在前（v0.6.0） */
@@ -286,7 +300,8 @@ export interface LedgerRow {
   memberId: number;
   memberNo: string;
   memberName: string;
-  memberPhone: string;
+  /** 没留手机号的（匿名卡，8.1.15）为 null */
+  memberPhone: string | null;
   principalDelta: number;
   bonusDelta: number;
   principalAfter: number;
@@ -409,6 +424,11 @@ export interface SettlementTotals {
    * 升级之前确认的日结快照没有这一项，按 0 补齐
    */
   platformRedemptions: import('./platform').PlatformDayTotals;
+  /**
+   * 会员卡押金（8.1.15）：押金是负债，不算营业额、不进会员储值。received / refunded 是当天收、退的（按方式，现金进出钱箱）；
+   * held 是当天结束时押着的余额。升级之前确认的日结快照没有这一项，按 0 补齐
+   */
+  cardDeposits: CardDepositDayTotals;
 }
 
 export interface SettlementDeposits {

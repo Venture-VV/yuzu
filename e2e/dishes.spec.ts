@@ -8,6 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
+import { navItem } from './nav';
 import type { DiningAdmin, DiningMenu, KitchenBoard } from '../src/shared/dining';
 import type { DishRow, DishSaveResult, DishesBoard } from '../src/shared/dishes';
 import { expectFits } from './fits';
@@ -322,7 +323,7 @@ test.describe('8.1.15 菜品管理', () => {
       await relogin(page, 'lixiao');
       await page.goto('/dishes');
       await expect(page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '菜品' })).toBeVisible();
-      await expect(page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '餐饮' })).toHaveCount(0);
+      await expect(navItem(page, '餐饮')).toHaveCount(0);
       await expect(page.getByRole('heading', { name: '菜品管理' })).toBeVisible();
       await expect(page.getByTestId('dishes-summary')).toContainText('你能维护果吧的菜；餐厅、水吧的看得到、改不了');
       await page.getByTestId('dishes-search').fill(RUN);

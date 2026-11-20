@@ -137,7 +137,7 @@ function Detail({ r }: { r: PaymentRequestDetail }) {
           {r.supplierBalanceCents !== null && (
             <Fact label="供应商往来余额">
               <Money cents={r.supplierBalanceCents} />
-              {!!r.supplierCreditCents && <span className="block text-[11.5px] text-ink-3">其中可抵扣 ¥{formatAmount(r.supplierCreditCents)}</span>}
+              {!!r.supplierCreditCents && <span className="block text-[12px] text-ink-3">其中可抵扣 ¥{formatAmount(r.supplierCreditCents)}</span>}
             </Fact>
           )}
           <Fact label="发起">
@@ -231,7 +231,7 @@ function Detail({ r }: { r: PaymentRequestDetail }) {
                 <tr key={`${t.kind}:${t.targetId}`}>
                   <td className="num py-1.5 pr-2 font-semibold">
                     {t.docNo}
-                    {t.purchaseOrderNo && <span className="block font-sans text-[11.5px] font-normal text-ink-3">采购单 {t.purchaseOrderNo}</span>}
+                    {t.purchaseOrderNo && <span className="block font-sans text-[12px] font-normal text-ink-3">采购单 {t.purchaseOrderNo}</span>}
                   </td>
                   <td className="num py-1.5 pr-2">{t.date}</td>
                   <td className="py-1.5 pr-2 text-right">

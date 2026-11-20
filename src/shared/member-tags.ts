@@ -51,7 +51,8 @@ export interface TagMemberRow {
   id: number;
   memberNo: string;
   name: string;
-  phone: string;
+  /** 没留手机号的（匿名卡，8.1.15）为 null */
+  phone: string | null;
   gradeLabel: string;
   status: 'active' | 'frozen';
   principalBalance: number;

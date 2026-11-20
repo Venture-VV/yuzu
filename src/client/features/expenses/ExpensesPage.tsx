@@ -163,7 +163,7 @@ export function ExpensesPage() {
                     </span>
                     <span className="hidden text-[12.5px] text-ink-2 md:block">
                       {PAY_SOURCE_LABELS[c.paySource]}
-                      {c.advance && <span className="num block text-[11.5px] text-ink-3">{c.advance.docNo}</span>}
+                      {c.advance && <span className="num block text-[12px] text-ink-3">{c.advance.docNo}</span>}
                     </span>
                     <span className="flex flex-wrap items-center gap-1 justify-self-start md:justify-self-auto">
                       <Badge tone={STATUS_TONE[c.status]}>{CLAIM_STATUS_LABELS[c.status]}</Badge>

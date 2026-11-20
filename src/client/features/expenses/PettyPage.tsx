@@ -209,7 +209,7 @@ function DailyRows({ row, onOpen }: { row: NonNullable<ReturnType<typeof usePett
           </td>
           <td className="px-3 py-2 text-right">
             <Money cents={a.spentCents} />
-            {a.pendingCents > 0 && <span className="block text-[11px] text-yuzu-deep">待确认 ¥{formatAmount(a.pendingCents)}</span>}
+            {a.pendingCents > 0 && <span className="block text-[12px] text-yuzu-deep">待确认 ¥{formatAmount(a.pendingCents)}</span>}
           </td>
           <td className="px-3 py-2 text-right">
             <Money cents={a.dueCents} />
@@ -222,7 +222,7 @@ function DailyRows({ row, onOpen }: { row: NonNullable<ReturnType<typeof usePett
           </td>
           <td className="px-3 py-2">
             <Badge tone={STATE_TONE[a.state]}>{STATE_LABELS[a.state]}</Badge>
-            {a.state === 'overdue' && <span className="block text-[11px] text-clay">{a.ageDays} 天</span>}
+            {a.state === 'overdue' && <span className="block text-[12px] text-clay">{a.ageDays} 天</span>}
           </td>
         </tr>
       ))}
@@ -322,13 +322,13 @@ function AdvanceSheet({ id, onClose }: { id: number | null; onClose: () => void 
                 ['未退回', a.outstandingCents],
               ].map(([label, cents]) => (
                 <div key={label as string} className="rounded-lg border border-line bg-card px-2 py-2">
-                  <p className="text-[11.5px] text-ink-3">{label}</p>
+                  <p className="text-[12px] text-ink-3">{label}</p>
                   <Money cents={cents as number} className="font-bold" />
                 </div>
               ))}
               <div className="flex flex-col items-center justify-center rounded-lg border border-line bg-card px-2 py-2">
                 <Badge tone={STATE_TONE[a.state]}>{STATE_LABELS[a.state]}</Badge>
-                <p className="mt-0.5 text-[11px] text-ink-3">{a.ageDays} 天</p>
+                <p className="mt-0.5 text-[12px] text-ink-3">{a.ageDays} 天</p>
               </div>
             </div>
             {a.pendingCents > 0 && <Notice tone="warning" title={`还有待确认的报销 ¥${formatAmount(a.pendingCents)}，确认后才算进支出`} />}

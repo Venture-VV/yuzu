@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import type { CheckoutPreview } from '../src/shared/checkout';
 import type { PreviewBill } from '../src/shared/frontdesk';
+import { clickNav, navItem } from './nav';
 
 const PASSWORD = 'yuzu2026';
 
@@ -218,18 +219,21 @@ test.describe('8.1.15 发卡台与收银台', () => {
       const coupon = issued.coupons[0]!;
       const me = (await getJson<{ staff: { displayName: string } }>(page, '/api/auth/me')).staff;
 
-      // ① 主导航：发卡台、收银台两个入口，没有「前台」
-      const nav = page.getByRole('navigation', { name: '主导航' });
-      await expect(nav.getByRole('link', { name: '发卡台', exact: true })).toBeVisible();
-      await expect(nav.getByRole('link', { name: '收银台', exact: true })).toBeVisible();
-      await expect(nav.getByRole('link', { name: '前台', exact: true })).toHaveCount(0);
+      // ① 主导航：「前台」这一组下面是发卡台、收银台两个入口（8.1.15 起按业务域分组，「前台」是组名不是页面）
+      await expect(navItem(page, '发卡台')).toHaveCount(1);
+      await expect(navItem(page, '收银台')).toHaveCount(1);
+      await expect(navItem(page, '前台')).toHaveCount(0);
+      await expect(page.getByTestId('nav-domain-frontdesk')).toContainText('前台');
 
       // ② 发卡台：接待这位会员（接口），手牌卡片上有档阶
       const [tag, tag2] = await freeTags(page);
       const checkin = await postJson<{ visits: { id: number }[] }>(page, '/api/frontdesk/checkins', { clientKey: randomUUID(), guests: [{ tagCode: tag, zone: 'male', memberId }] });
       visitId = checkin.visits[0]!.id;
-      expect((await boardTags(page)).find((t) => t.code === tag)!.visit).toMatchObject({ memberGradeLabel: 'L4 望岳 · 初', coupons: 1, gifts: 1 });
-      await nav.getByRole('link', { name: '发卡台', exact: true }).click();
+      const onBoard = (await boardTags(page)).find((t) => t.code === tag)!.visit!;
+      // 签赠正好一张；券至少一张——演示库（demo-prepare）开着按档自动发的会员权益券，L4 会员建档当场还会多几张
+      expect(onBoard).toMatchObject({ memberGradeLabel: 'L4 望岳 · 初', gifts: 1 });
+      expect(onBoard.coupons).toBeGreaterThanOrEqual(1);
+      await clickNav(page, '发卡台');
       await expect(page.getByRole('heading', { name: '发卡台 · 在店手牌' })).toBeVisible();
       await expect(page.getByTestId(`tag-${tag}-grade`)).toHaveText('L4');
       await page.getByTestId(`tag-${tag}`).click();
@@ -240,7 +244,8 @@ test.describe('8.1.15 发卡台与收银台', () => {
       await expect(panel).toContainText('L4 望岳');
       const rights = panel.getByTestId('member-entitlements');
       await expect(rights).toContainText('VIP 柜 2 级及以下');
-      await expect(rights).toContainText('券 1 张（签赠 1）');
+      // 演示库（demo-prepare）开着按档自动发的会员权益券，券数不一定是 1；签赠正好一张
+      await expect(rights).toContainText(/券 \d+ 张（签赠 1）/);
       // 发卡台不结账：没有预结账、结账、结账记录；F9 不开结账
       await expect(panel.getByTestId('action-checkout')).toHaveCount(0);
       await expect(panel.getByTestId('action-preview')).toHaveCount(0);
@@ -461,7 +466,8 @@ test.describe('8.1.15 发卡台与收银台', () => {
     // 前台店员小周在另一个浏览器里；每改一次岗位权限重新登录一次
     const ctx = await browser.newContext({ baseURL, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
     const staff = await ctx.newPage();
-    const link = (name: string) => staff.getByRole('navigation', { name: '主导航' }).getByRole('link', { name, exact: true });
+    // 8.1.15 起主导航按业务域分组：入口在不在用 navItem 查（所在的组折着也算）
+    const link = (name: string) => navItem(staff, name);
     const sees = async (issue: boolean, cashier: boolean) => {
       await staff.request.post('/api/auth/logout');
       await login(staff, 'xiaozhou');
@@ -498,9 +504,8 @@ test.describe('8.1.15 发卡台与收银台', () => {
     try {
       const p = await again.newPage();
       await login(p, 'xiaozhou');
-      const nav = p.getByRole('navigation', { name: '主导航' });
-      await expect(nav.getByRole('link', { name: '发卡台', exact: true })).toHaveCount(1);
-      await expect(nav.getByRole('link', { name: '收银台', exact: true })).toHaveCount(1);
+      await expect(navItem(p, '发卡台')).toHaveCount(1);
+      await expect(navItem(p, '收银台')).toHaveCount(1);
     } finally {
       await again.close();
     }

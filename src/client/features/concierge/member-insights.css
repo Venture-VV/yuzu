@@ -57,11 +57,11 @@
 .concierge-workspace .growth-line { fill: none; stroke: var(--color-moss); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
 .concierge-workspace .growth-dot { fill: var(--color-card); stroke: var(--color-moss); stroke-width: 2; }
 .concierge-workspace .growth-dot.selected { fill: var(--color-moss); }
-.concierge-workspace .growth-chart svg text { font-size: 11px; fill: var(--color-ink-3); }
+.concierge-workspace .growth-chart svg text { font-size: 12px; fill: var(--color-ink-3); }
 .concierge-workspace .growth-chart svg .growth-count { font-size: 13px; fill: var(--color-moss); }
 .concierge-workspace .growth-months { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); padding: 0 10px 6px; }
 .concierge-workspace .growth-months button { display: grid; gap: 5px; padding: 9px 2px; min-height: 54px; border-radius: 8px; border: 1px solid transparent; color: var(--color-ink); font-size: 13px; }
-.concierge-workspace .growth-months button small { font-size: 11px; color: var(--color-ink-3); }
+.concierge-workspace .growth-months button small { font-size: 12px; color: var(--color-ink-3); }
 .concierge-workspace .growth-months button:hover:not(:disabled),.concierge-workspace .growth-months button:focus-visible { border-color: var(--color-moss); }
 .concierge-workspace .growth-months button.selected { background: var(--color-moss-soft); border-color: var(--color-moss); color: var(--color-moss); }
 .concierge-workspace .growth-months button:disabled { opacity: .4; }
@@ -79,7 +79,7 @@
  .concierge-workspace .member-overview-card { padding: 16px 12px; }
  .concierge-workspace .member-overview-card > span { font-size: 12px; }
  .concierge-workspace .member-overview-card > strong { font-size: 27px; margin: 12px 0; }
- .concierge-workspace .member-overview-card p { font-size: 11px; }
+ .concierge-workspace .member-overview-card p { font-size: 12px; }
  .concierge-workspace .dormancy-card { padding: 16px 12px; }
  .concierge-workspace .dormancy-card > span { font-size: 13px; line-height: 1.6; }
  .concierge-workspace .member-grade-card { padding: 18px 14px; }

@@ -238,7 +238,7 @@ export function TodoPage() {
                     </li>
                   )}
                 </ul>
-                <p className="mt-2 text-[11.5px] text-ink-3">每月盘点、月结供应商次月初对账、按批次的每批货到后对账（规则在后台「规则总表 → 库存与采购」）。</p>
+                <p className="mt-2 text-[12px] text-ink-3">每月盘点、月结供应商次月初对账、按批次的每批货到后对账（规则在后台「规则总表 → 库存与采购」）。</p>
               </Card>
             )}
             <Card title="低库存提醒" count={low.length} icon={<TriangleAlert className="size-4 text-clay" />}>
@@ -256,7 +256,7 @@ export function TodoPage() {
                   ))}
                 </ul>
               )}
-              <p className="mt-2 text-[11.5px] text-ink-3">提醒线为人工设定的模拟值，不是行业推荐用量。</p>
+              <p className="mt-2 text-[12px] text-ink-3">提醒线为人工设定的模拟值，不是行业推荐用量。</p>
             </Card>
             <Card title="缺少采购依据的收货" count={missingPo.length} icon={<Inbox className="size-4 text-ember" />}>
               {missingPo.length === 0 ? (
@@ -276,7 +276,7 @@ export function TodoPage() {
                   ))}
                 </ul>
               )}
-              <p className="mt-2 text-[11.5px] text-ink-3">
+              <p className="mt-2 text-[12px] text-ink-3">
                 直接收货已计入库存与货款；补采购单时只关联原收货，不会重复入库。
                 <Badge tone="yuzu" className="ml-1">
                   先收货后补单待确认
@@ -295,7 +295,7 @@ export function TodoPage() {
                     </li>
                   ))}
                 </ul>
-                <p className="mt-2 text-[11.5px] text-ink-3">已付货款后又退货形成，需与供应商确认退款或抵扣；系统不假定现金已退回。</p>
+                <p className="mt-2 text-[12px] text-ink-3">已付货款后又退货形成，需与供应商确认退款或抵扣；系统不假定现金已退回。</p>
               </Card>
             )}
           </aside>
@@ -351,7 +351,7 @@ function TodoRow({
         <span className="min-w-0 flex-1">
           <span className="block text-[14px] font-bold">{title}</span>
           <span className="block truncate text-[12.5px] text-ink-2">{line}</span>
-          <span className="block truncate text-[11.5px] text-ink-3">{meta}</span>
+          <span className="block truncate text-[12px] text-ink-3">{meta}</span>
         </span>
         {amount}
         <ArrowRight className="size-4 shrink-0 text-ink-3" />

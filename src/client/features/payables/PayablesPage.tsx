@@ -182,7 +182,7 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
                 <tr key={s.supplierId} className="hover:bg-pine-tint/40">
                   <td className="px-4 py-2.5">
                     <p className="font-bold">{s.name}</p>
-                    <p className="num text-[11.5px] text-ink-3">
+                    <p className="num text-[12px] text-ink-3">
                       {s.code}
                       {s.openItemCount > 0 && ` · ${s.openItemCount} 笔未结清`}
                     </p>
@@ -196,7 +196,7 @@ function SuppliersView({ onStatement }: { onStatement: (id: number) => void }) {
                   <td className="num px-2 py-2.5 text-right">{s.refundedCents ? <Money cents={s.refundedCents} /> : <span className="text-ink-4">·</span>}</td>
                   <td className="bg-paper-2/50 px-2 py-2.5 text-right">
                     <Money cents={s.balanceCents} className={cn('text-[15px] font-bold', s.balanceCents < 0 && 'text-clay')} />
-                    {s.balanceCents < 0 && <span className="block text-[11px] font-semibold text-clay">供应商欠我们（预付 / 退货余额）</span>}
+                    {s.balanceCents < 0 && <span className="block text-[12px] font-semibold text-clay">供应商欠我们（预付 / 退货余额）</span>}
                   </td>
                   <td className="num px-2 py-2.5 text-right">{s.creditCents ? <Money cents={s.creditCents} className="text-ember" /> : <span className="text-ink-4">·</span>}</td>
                   <td className="num px-2 py-2.5 text-right" data-testid={`warranty-held-${s.code}`}>
@@ -446,7 +446,7 @@ function Formula({ label, cents, tone = 'ink', strong }: { label: string; cents:
   const color = { ink: 'text-ink', pine: 'text-pine', lake: 'text-lake', clay: 'text-clay' }[tone];
   return (
     <div className={cn('min-w-[110px] flex-1 rounded-md px-3 py-1.5', strong ? 'bg-pine text-paper' : 'bg-paper-2/60')}>
-      <p className={cn('text-[11.5px] font-semibold', strong ? 'text-paper/70' : 'text-ink-3')}>{label}</p>
+      <p className={cn('text-[12px] font-semibold', strong ? 'text-paper/70' : 'text-ink-3')}>{label}</p>
       <Money cents={cents} className={cn('text-[16px] font-bold', !strong && color)} />
     </div>
   );

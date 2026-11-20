@@ -242,7 +242,7 @@ function PoBody({ po, onClose }: { po: PurchaseOrder; onClose: () => void }) {
                     </div>
                     <div className="shrink-0 text-right">
                       <Qty milli={l.purchaseQtyMilli} unit={l.purchaseUnit} className="text-[16px] font-bold" />
-                      <p className="num text-[11.5px] text-ink-3">
+                      <p className="num text-[12px] text-ink-3">
                         = {formatQty(l.baseQtyMilli)} {l.inventoryUnit}
                       </p>
                     </div>
@@ -457,9 +457,9 @@ function MoneyTile({ label, cents, hint, tone = 'ink' }: { label: string; cents:
   const color = { ink: 'text-ink', pine: 'text-pine', lake: 'text-lake', clay: 'text-clay' }[tone];
   return (
     <div className="rounded-lg border border-line bg-card px-3 py-2.5">
-      <p className="text-[11.5px] font-semibold text-ink-3">{label}</p>
+      <p className="text-[12px] font-semibold text-ink-3">{label}</p>
       <Money cents={cents} className={cn('text-[17px] font-bold', color)} />
-      <p className="truncate text-[11px] text-ink-3">{hint}</p>
+      <p className="truncate text-[12px] text-ink-3">{hint}</p>
     </div>
   );
 }

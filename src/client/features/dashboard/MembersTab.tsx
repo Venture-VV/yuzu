@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { Banknote, Hourglass, Moon, UserPlus, UsersRound, Wallet } from 'lucide-react';
+import { NO_PHONE_LABEL } from '@shared/labels';
 import type { MemberBrief, MembersReport } from '@shared/reports';
 import { api } from '../../lib/api';
 import { useCan, useSession } from '../../lib/session';
@@ -154,9 +155,9 @@ function MemberList({ title, hint, rows, value, testId }: { title: string; hint?
                 <span className="num w-5 text-[12px] text-ink-4">{i + 1}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-semibold text-ink">
-                    {m.name} <span className="num font-normal text-ink-3">尾号 {m.phoneTail}</span>
+                    {m.name} <span className="num font-normal text-ink-3">{m.phoneTail ? `尾号 ${m.phoneTail}` : NO_PHONE_LABEL}</span>
                   </span>
-                  <span className="block truncate text-[11.5px] text-ink-3">
+                  <span className="block truncate text-[12px] text-ink-3">
                     {m.levelName} · 最近 {relativeTime(m.lastActivityAt)}
                   </span>
                 </span>

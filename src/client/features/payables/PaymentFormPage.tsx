@@ -238,7 +238,7 @@ export function PaymentFormPage() {
                       <span className="hidden text-right text-[12.5px] md:block">
                         <span className="block text-ink-3">未结清</span>
                         <Money cents={i.openCents} className="font-bold" />
-                        {i.pendingCents > 0 && <span className="block text-[11px] text-yuzu-deep">另有待确认 ¥{formatAmount(i.pendingCents)}</span>}
+                        {i.pendingCents > 0 && <span className="block text-[12px] text-yuzu-deep">另有待确认 ¥{formatAmount(i.pendingCents)}</span>}
                       </span>
                       <span>
                         <MoneyInput
@@ -249,7 +249,7 @@ export function PaymentFormPage() {
                           invalid={!!err}
                           className="h-10 text-right"
                         />
-                        {err && <span className="mt-1 block text-right text-[11.5px] font-semibold text-clay">{err}</span>}
+                        {err && <span className="mt-1 block text-right text-[12px] font-semibold text-clay">{err}</span>}
                       </span>
                     </li>
                   );

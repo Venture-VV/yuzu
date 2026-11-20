@@ -366,7 +366,7 @@ export function RechargeFlow({ member, onClose, onSwitchToConsume }: { member: M
                   <span className="inline-flex items-center gap-1 rounded-full bg-yuzu-soft px-2 py-0.5 text-[12px] font-bold text-yuzu-deep">
                     <Gift className="size-3" />送 <Money cents={outcomeOf(p.payAmount)!.bonusCents} />
                   </span>
-                  {p.bonusValidDays && <span className="text-[11.5px] font-semibold text-ink-3">{p.bonusValidDays} 天有效</span>}
+                  {p.bonusValidDays && <span className="text-[12px] font-semibold text-ink-3">{p.bonusValidDays} 天有效</span>}
                 </span>
               ) : (
                 <span className="mt-1 text-[12px] text-ink-3">{g ? '这一档不赠送' : '　'}</span>

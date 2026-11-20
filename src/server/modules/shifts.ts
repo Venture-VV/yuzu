@@ -190,6 +190,8 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       memberRefundList: NonNullable<ShiftSummary['memberRefunds']>['list'];
       countCardSales: { method: PaymentMethod; count: number; amount: number }[];
       countCardRefunds: { method: PaymentMethod; count: number; amount: number }[];
+      cardDepositReceived: NonNullable<ShiftSummary['cardDeposits']>['received'];
+      cardDepositRefunded: NonNullable<ShiftSummary['cardDeposits']>['refunded'];
       byOperator: NonNullable<ShiftSummary['byOperator']>;
     })[]
   >`
@@ -250,6 +252,10 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
     ), ccr AS (
       -- 次卡（v0.7.28）：本班次退的卡（不能作废）
       SELECT method, count(*)::int AS count, sum(amount)::bigint AS amount FROM count_card_refunds WHERE shift_id = ${s.id} GROUP BY method
+    ), cdp AS (
+      -- 会员卡押金（8.1.15）：收、退都记在经办人当班的班次；押金是负债，不算营业额、不进储值
+      SELECT kind, method, count(*)::int AS count, sum(amount)::int AS amount FROM member_card_deposits
+      WHERE shift_id = ${s.id} GROUP BY kind, method
     ), ops AS (
       -- 按钱箱交班：各人经办的结账与充值
       SELECT x.operator_id, sum(x.cn)::int AS checkout_count, sum(x.ct)::bigint AS checkout_total, sum(x.rn)::int AS recharge_count, sum(x.rp)::bigint AS recharge_paid
@@ -299,6 +305,10 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
               ORDER BY mr.created_at, mr.id), '[]'::json) FROM mr) AS member_refund_list,
       (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json) FROM ccs) AS count_card_sales,
       (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json) FROM ccr) AS count_card_refunds,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json)
+       FROM cdp WHERE kind = 'receive') AS card_deposit_received,
+      (SELECT coalesce(json_agg(json_build_object('method', method, 'count', count, 'amount', amount) ORDER BY method), '[]'::json)
+       FROM cdp WHERE kind = 'refund') AS card_deposit_refunded,
       (SELECT coalesce(json_agg(json_build_object('staffId', ops.operator_id, 'staffName', st.display_name,
                                                   'checkouts', json_build_object('count', ops.checkout_count, 'total', ops.checkout_total),
                                                   'recharges', json_build_object('count', ops.recharge_count, 'paid', ops.recharge_paid))
@@ -323,6 +333,11 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
   // 次卡（v0.7.28）：卖卡收的现金计入、退卡退的现金扣减；本班次没有次卡往来时不列这一项
   const hasCountCards = countCardSales.length > 0 || countCardRefunds.length > 0;
   const cashCountCard = Number(countCardSales.find((m) => m.method === 'cash')?.amount ?? 0) - Number(countCardRefunds.find((m) => m.method === 'cash')?.amount ?? 0);
+  // 会员卡押金（8.1.15）的现金：收的计入、退的扣减（押金是负债，交班时钱箱里有这笔钱）；本班次没有会员卡押金往来时不列这一项
+  const { cardDepositReceived, cardDepositRefunded } = row!;
+  const hasCardDeposits = cardDepositReceived.length > 0 || cardDepositRefunded.length > 0;
+  const hasCashCardDeposit = [...cardDepositReceived, ...cardDepositRefunded].some((m) => m.method === 'cash');
+  const cashCardDeposit = (cardDepositReceived.find((m) => m.method === 'cash')?.amount ?? 0) - (cardDepositRefunded.find((m) => m.method === 'cash')?.amount ?? 0);
   const cardRows = (rows: { method: PaymentMethod; count: number; amount: number }[]) => rows.map((m) => ({ ...m, amount: Number(m.amount) }));
   const cardSum = (rows: { count: number; amount: number }[]) => ({ count: rows.reduce((t, m) => t + m.count, 0), total: rows.reduce((t, m) => t + Number(m.amount), 0) });
   return {
@@ -379,6 +394,7 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
           },
         }
       : {}),
+    ...(hasCardDeposits ? { cardDeposits: { received: cardDepositReceived, refunded: cardDepositRefunded } } : {}),
     ...(named
       ? {
           byOperator: row!.byOperator.map((o) => ({
@@ -397,7 +413,8 @@ async function shiftSummary(db: Db, s: ShiftScope, to: Date | string): Promise<S
       ...(hasSlips ? { refundSlip: cashSlip } : {}),
       ...(hasMemberRefunds ? { memberRefund: cashMemberRefund } : {}),
       ...(hasCountCards ? { countCard: cashCountCard } : {}),
-      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund + cashDeposit - cashSlip - cashMemberRefund + cashCountCard,
+      ...(hasCashCardDeposit ? { cardDeposit: cashCardDeposit } : {}),
+      expected: s.openingCash + cashCheckout + cashRecharge - cashRefund + cashDeposit - cashSlip - cashMemberRefund + cashCountCard + cashCardDeposit,
     },
   };
 }

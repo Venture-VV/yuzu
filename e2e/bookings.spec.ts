@@ -3,6 +3,7 @@
 // 依赖四套演示数据（仅独立演示库）；账号：店主 linlan、前台 xiaozhou，密码 yuzu2026。
 // 与 clockroom.spec 共用「E2E 技师足疗」项目与 E8 号技师（没有就建，做法与它一样），可重复执行。
 import { expect, test, type Page } from '@playwright/test';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 const ITEM = 'E2E 技师足疗';
@@ -65,7 +66,7 @@ test.describe('v0.7.28 预约', () => {
     await relogin(page, 'xiaozhou');
     const me = await getJson<{ today: string }>(page, '/api/auth/me');
     const tomorrow = new Date(Date.parse(`${me.today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
-    await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '预约' }).click();
+    await clickNav(page, '预约');
     await expect(page.getByTestId('bookings')).toBeVisible();
     await page.goto(`/bookings?d=${tomorrow}`);
     await expect(page.getByTestId('bookings-technician')).toBeVisible();

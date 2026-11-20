@@ -189,7 +189,7 @@ function BalanceLedger() {
                         </td>
                         <td className="px-2 py-3">
                           <p className="truncate font-semibold">{r.memberName}</p>
-                          <p className="num text-[11.5px] text-ink-3">{maskPhone(r.memberPhone)}</p>
+                          <p className="num text-[12px] text-ink-3">{maskPhone(r.memberPhone)}</p>
                         </td>
                         <td className="px-2 py-3">
                           <div className="flex items-center gap-1.5">
@@ -197,7 +197,7 @@ function BalanceLedger() {
                             {reversed && <Badge tone="clay">已撤销</Badge>}
                             {crossDay && <Badge tone="ember">跨日</Badge>}
                           </div>
-                          {r.entryType === 'recharge' && r.paymentMethod && <p className="text-[11.5px] text-ink-3">{PAYMENT_METHOD_LABELS[r.paymentMethod]}</p>}
+                          {r.entryType === 'recharge' && r.paymentMethod && <p className="text-[12px] text-ink-3">{PAYMENT_METHOD_LABELS[r.paymentMethod]}</p>}
                         </td>
                         <td className="px-2 py-3 text-right">{r.paidAmount != null ? <Money cents={r.paidAmount} className="font-bold text-lake" /> : <span className="text-ink-4">—</span>}</td>
                         <td className="px-2 py-3 text-right">

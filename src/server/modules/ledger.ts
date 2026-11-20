@@ -100,27 +100,26 @@ export async function resolveReadableDate(deps: Deps, req: FastifyRequest, date:
 export function ledgerCsv(rows: LedgerRow[], timeZone: string): string {
   const header = ['营业日', '时间', '单号', '类型', '会员号', '会员', '手机号', '实收金额', '收款方式', '本金变动', '赠金变动', '本金余额', '赠金余额', '操作人', '关联单号', '内容/原因', '状态'];
   const time = (iso: string) => new Date(iso).toLocaleString('zh-CN', { timeZone, hour12: false });
-  const body = [...rows]
-    .reverse()
-    .map((r) => [
-      r.businessDate,
-      time(r.createdAt),
-      r.docNo,
-      ENTRY_TYPE_LABELS[r.entryType],
-      r.memberNo,
-      r.memberName,
-      r.memberPhone,
-      r.paidAmount == null ? '' : formatAmount(r.paidAmount),
-      r.paymentMethod ? PAYMENT_METHOD_LABELS[r.paymentMethod] : '',
-      (r.principalDelta < 0 ? '-' : '') + formatAmount(r.principalDelta),
-      (r.bonusDelta < 0 ? '-' : '') + formatAmount(r.bonusDelta),
-      formatAmount(r.principalAfter),
-      formatAmount(r.bonusAfter),
-      r.operatorName,
-      r.relatedDocNo ?? '',
-      r.summary,
-      r.entryType === 'consume' ? (r.consumptionStatus === 'reversed' ? '已撤销' : '已完成') : '已完成',
-    ]);
+  const body = [...rows].reverse().map((r) => [
+    r.businessDate,
+    time(r.createdAt),
+    r.docNo,
+    ENTRY_TYPE_LABELS[r.entryType],
+    r.memberNo,
+    r.memberName,
+    // 没留手机号的（匿名卡，8.1.15）导出里留空
+    r.memberPhone ?? '',
+    r.paidAmount == null ? '' : formatAmount(r.paidAmount),
+    r.paymentMethod ? PAYMENT_METHOD_LABELS[r.paymentMethod] : '',
+    (r.principalDelta < 0 ? '-' : '') + formatAmount(r.principalDelta),
+    (r.bonusDelta < 0 ? '-' : '') + formatAmount(r.bonusDelta),
+    formatAmount(r.principalAfter),
+    formatAmount(r.bonusAfter),
+    r.operatorName,
+    r.relatedDocNo ?? '',
+    r.summary,
+    r.entryType === 'consume' ? (r.consumptionStatus === 'reversed' ? '已撤销' : '已完成') : '已完成',
+  ]);
   return toCsv([header, ...body]);
 }
 

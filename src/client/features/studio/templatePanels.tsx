@@ -124,7 +124,7 @@ export function TemplatesPanel({
               >
                 <span className="min-w-0 flex-1 truncate">{EMENU_LAYOUT_INFO[l].label}</span>
                 {n > 0 && <span className="shrink-0 rounded bg-yuzu-soft px-1 text-[10.5px] text-yuzu-deep">改过 {n} 块</span>}
-                <span className={cn('shrink-0 text-[11px]', used ? 'text-ink-3' : 'text-ink-3/50')} title="菜单里用这种版式的页数">
+                <span className={cn('shrink-0 text-[12px]', used ? 'text-ink-3' : 'text-ink-3/50')} title="菜单里用这种版式的页数">
                   {used} 页
                 </span>
               </button>
@@ -138,7 +138,7 @@ export function TemplatesPanel({
             changed > 0 && (
               <button
                 type="button"
-                className="flex items-center gap-1 text-[11.5px] text-ink-3 hover:text-clay"
+                className="flex items-center gap-1 text-[12px] text-ink-3 hover:text-clay"
                 onClick={() => {
                   if (window.confirm(`「${layoutLabel(layout)}」里改过的 ${changed} 块都恢复成设计稿的样子？（可以撤销）`)) onChange((d) => resetLayoutTemplate(d, layout));
                 }}
@@ -151,7 +151,7 @@ export function TemplatesPanel({
         >
           {layout === EMENU_HEADER_LAYOUT ? '顶栏里的各块' : '这种版式里的各块'}
         </PanelTitle>
-        <p className="mb-1.5 text-[11.5px] text-ink-3">{layoutHint(layout)}</p>
+        <p className="mb-1.5 text-[12px] text-ink-3">{layoutHint(layout)}</p>
         <div className="space-y-0.5">
           {EMENU_ALL_TEMPLATES[layout]!.slots.map((def) => {
             const o = overrides[def.key];
@@ -177,7 +177,7 @@ export function TemplatesPanel({
       </div>
       <div>
         <PanelTitle>菜的几种样子（变体）</PanelTitle>
-        <p className="mb-1.5 text-[11.5px] text-ink-3">卖完了、不在供应时段、下架了的菜在菜单页上怎么显示（所有版式通用）。选一种，画布上这一页的菜都变成这个样子。</p>
+        <p className="mb-1.5 text-[12px] text-ink-3">卖完了、不在供应时段、下架了的菜在菜单页上怎么显示（所有版式通用）。选一种，画布上这一页的菜都变成这个样子。</p>
         <div className="space-y-0.5">
           {DISH_STATES.map((k) => (
             <button
@@ -213,7 +213,7 @@ export function DishStatePanel({ doc, state, onChange }: { doc: StudioDoc; state
     <div className="space-y-4" data-testid="studio-state-panel">
       <div>
         <PanelTitle>{DISH_STATE_LABELS[state]}</PanelTitle>
-        <p className="text-[11.5px] leading-relaxed text-ink-3">
+        <p className="text-[12px] leading-relaxed text-ink-3">
           {state === 'sold_out' ? '厨房沽清、今天卖完了的菜。' : state === 'closed' ? '分类不在供应时段时，这一页的菜都是这个样子。' : '后台下架了、还排在页上的菜。'}
           所有版式通用；客人点不了，点了会说明原因。
         </p>
@@ -268,7 +268,7 @@ export function DishStatePanel({ doc, state, onChange }: { doc: StudioDoc; state
           />
           <span className="w-10 text-right text-[12px] tabular-nums text-ink-3">{pct(st.textOpacity)}</span>
         </Row>
-        <p className="text-[11px] leading-relaxed text-ink-3">文字陈列、没配图的菜：菜名价格那一块变浅，价格旁写原因。</p>
+        <p className="text-[12px] leading-relaxed text-ink-3">文字陈列、没配图的菜：菜名价格那一块变浅，价格旁写原因。</p>
       </div>
       <Button size="sm" variant="secondary" disabled={!changed} onClick={() => onChange((d) => setDishState(d, state, { ...DISH_STATE_DEFAULT }))} data-testid="studio-state-reset">
         <RotateCcw className="size-3.5" /> 恢复设计稿的样子
@@ -309,7 +309,7 @@ function HeaderGapsPanel({ boxes, big, onChange }: { boxes: ReadonlyMap<string, 
   return (
     <div className="space-y-1.5" data-testid="studio-head-gaps">
       <PanelTitle>间距（「{big ? '放大' : '原样'}」一档）</PanelTitle>
-      <p className="text-[11.5px] leading-relaxed text-ink-3">从左到右每两块之间、两头到屏幕边各多远（设计稿像素）。改哪一个只动那一条：分类那一块跟着收放，别的间距不变。</p>
+      <p className="text-[12px] leading-relaxed text-ink-3">从左到右每两块之间、两头到屏幕边各多远（设计稿像素）。改哪一个只动那一条：分类那一块跟着收放，别的间距不变。</p>
       {gaps.map((g) => (
         <label key={g.index} className="flex items-center gap-2 text-[12.5px]">
           <span className="min-w-0 flex-1 truncate text-ink-3">{label(g)}</span>
@@ -319,7 +319,7 @@ function HeaderGapsPanel({ boxes, big, onChange }: { boxes: ReadonlyMap<string, 
         </label>
       ))}
       {error && (
-        <p className="text-[11.5px] text-clay" data-testid="studio-head-gap-error">
+        <p className="text-[12px] text-clay" data-testid="studio-head-gap-error">
           {error}
         </p>
       )}
@@ -390,7 +390,7 @@ export function SlotPanel({
     <div className="space-y-4" data-testid="studio-slot-panel">
       <div>
         <PanelTitle>{def.label}</PanelTitle>
-        <p className="text-[11.5px] leading-relaxed text-ink-3">
+        <p className="text-[12px] leading-relaxed text-ink-3">
           {layoutLabel(layout)} · {kindHint[def.kind]}
         </p>
       </div>
@@ -399,7 +399,7 @@ export function SlotPanel({
         <button type="button" className="ml-2 text-pine underline" onClick={onToggleBig} data-testid="studio-slot-mode">
           改{big ? '原样' : '放大'}一档
         </button>
-        <div className="mt-0.5 text-[11px] text-ink-3">{big ? '放大一档没改的项跟着原样一档。' : '原样一档改了，放大一档没单独改过的项也跟着。'}</div>
+        <div className="mt-0.5 text-[12px] text-ink-3">{big ? '放大一档没改的项跟着原样一档。' : '原样一档改了，放大一档没单独改过的项也跟着。'}</div>
       </div>
       <div className="space-y-2">
         <PanelTitle>位置与大小</PanelTitle>
@@ -428,7 +428,7 @@ export function SlotPanel({
                 }}
                 testId="studio-slot-scale"
               />
-              <span className="shrink-0 text-[11px] text-ink-3">%</span>
+              <span className="shrink-0 text-[12px] text-ink-3">%</span>
             </Row>
           ) : (
             <>
@@ -445,7 +445,7 @@ export function SlotPanel({
             </>
           )}
         </div>
-        {p.bottom !== undefined && <p className="text-[11px] leading-relaxed text-ink-3">这一块在放大一档里下沿贴线、往上长（介绍长了往上多出来，不压到下面的图）；挪的是下沿。</p>}
+        {p.bottom !== undefined && <p className="text-[12px] leading-relaxed text-ink-3">这一块在放大一档里下沿贴线、往上长（介绍长了往上多出来，不压到下面的图）；挪的是下沿。</p>}
       </div>
       {!isHead && (slotHideable(def) || def.kind === 'photo') && (
         <div className="space-y-2">
@@ -458,7 +458,7 @@ export function SlotPanel({
           )}
           {/* 8.1.8（品牌部，PENDING_DECISIONS.md PB3）：照片一律直角、大小不变，不再给改圆角 */}
           {def.kind === 'photo' && (
-            <p className="text-[11.5px] leading-snug text-ink-3" data-testid="studio-slot-square">
+            <p className="text-[12px] leading-snug text-ink-3" data-testid="studio-slot-square">
               照片一律直角（品牌规定）：四个角都是直角，大小照上面的宽、高。
             </p>
           )}

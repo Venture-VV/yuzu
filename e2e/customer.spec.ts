@@ -2,6 +2,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { CustomerOverview, CustomerBindingQueue, CustomerLowBalancePage, CustomerMemberDetail, CustomerTargets, CustomerVisitDetail, CustomerVisitPage } from '../src/shared/customer';
 import type { SessionInfo } from '../src/shared/types';
+import { navItem } from './nav';
 async function login(page: Page) {
   await page.goto('/login');
   await page.locator('#username').fill('linlan');
@@ -306,7 +307,7 @@ test('无客户部权限时客户端隐藏入口且不读取客户部数据', as
   await page.goto('/customer');
   await expect(page).not.toHaveURL(/\/customer/);
   await expect(page.getByTestId('customer-workbench')).toHaveCount(0);
-  await expect(page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('link', { name: '客户部', exact: true })).toHaveCount(0);
+  await expect(navItem(page, '客户部')).toHaveCount(0);
   expect(customerRequests).toBe(0);
 });
 test('390px客户部六模块与横向表格局部滚动不会撑宽页面', async ({ page }, info) => {

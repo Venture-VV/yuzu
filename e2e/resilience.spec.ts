@@ -4,6 +4,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { relaxRechargeMinimum } from './membership';
 import { ensureShift } from './shift';
+import { clickNav } from './nav';
 
 relaxRechargeMinimum();
 test.beforeEach(({}, info) => {
@@ -196,7 +197,7 @@ test('页面出错：只换掉这一块（导航还能用）、报给服务器�
   expect(body).toMatchObject({ kind: 'render', path: '/clockroom' });
   expect(body.message).toContain('故意让这一页出错');
   // 导航还在，换一页就恢复
-  await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '会员', exact: true }).click();
+  await clickNav(page, '会员');
   await expect(page.getByRole('heading', { name: '会员工作台' })).toBeVisible();
   await expect(page.getByTestId('page-error')).toHaveCount(0);
   await page.goto('/network');

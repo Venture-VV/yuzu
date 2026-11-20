@@ -117,7 +117,7 @@ function PendingPanel({ onResolved }: { onResolved: () => void }) {
             <div key={op.requestId} className="my-2 flex flex-wrap items-center gap-2" data-testid="concierge-pending-item">
               <span className="min-w-0 flex-1 basis-56 text-[14px]">
                 <b>{describePending(op)}</b>
-                <code className="block truncate text-[11px] opacity-70">操作编号 {op.requestId}</code>
+                <code className="block truncate text-[12px] opacity-70">操作编号 {op.requestId}</code>
               </span>
               <Button size="sm" disabled={busy} onClick={() => void act(op, 'check')}>
                 查回结果

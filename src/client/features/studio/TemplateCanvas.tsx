@@ -371,7 +371,7 @@ export function TemplateCanvas({
             return (
               <div
                 key={`label-${s.def.key}`}
-                className={cn('pointer-events-none absolute whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] leading-none', on ? 'bg-[#2f7cf6] text-white' : 'bg-white/90 text-[#2f7cf6] shadow-sm')}
+                className={cn('pointer-events-none absolute whitespace-nowrap rounded px-1.5 py-0.5 text-[12px] leading-none', on ? 'bg-[#2f7cf6] text-white' : 'bg-white/90 text-[#2f7cf6] shadow-sm')}
                 style={{ left: b.x * scale, top: Math.max(0, b.y * scale - 18) }}
               >
                 {s.def.label}
@@ -392,7 +392,7 @@ export function TemplateCanvas({
           ))}
         {sel && selBox && !dragging && (
           <div
-            className="pointer-events-none absolute rounded bg-[#2f7cf6] px-1.5 py-0.5 text-[11px] leading-none text-white tabular-nums"
+            className="pointer-events-none absolute rounded bg-[#2f7cf6] px-1.5 py-0.5 text-[12px] leading-none text-white tabular-nums"
             style={{ left: selBox.x * scale, top: (selBox.y + selBox.h) * scale + 6 }}
           >
             {Math.round(selBox.w)} × {Math.round(selBox.h)}

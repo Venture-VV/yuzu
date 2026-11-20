@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { DEFAULT_CLOCKROOM_RULES, DEFAULT_COMMISSION_RULES, type ClockroomBoard, type CommissionSettings } from '../src/shared/clockroom';
+import { clickNav } from './nav';
 
 const PASSWORD = 'yuzu2026';
 const ITEM = 'E2E 技师足疗';
@@ -101,7 +102,7 @@ test.describe('v0.7.1 钟房', () => {
 
       // ③ 钟房：派点钟给 E8（专业技师按专业档 238），技师到了立即上钟
       await page.goto('/');
-      await page.getByRole('navigation', { name: '主导航' }).getByRole('link', { name: '钟房' }).click();
+      await clickNav(page, '钟房');
       await expect(page.getByTestId('clock-queue')).toContainText('E8');
       await page.getByTestId('clock-dispatch').click();
       const dispatch = page.getByRole('dialog', { name: '派钟' });

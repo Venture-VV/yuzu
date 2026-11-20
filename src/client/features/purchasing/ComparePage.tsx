@@ -120,7 +120,7 @@ export function ComparePage() {
                             <td className="num px-2 text-right">{formatQty(r.receivedMilli)}</td>
                             <td className="px-2 text-right">
                               {r.lastPriceCents !== null ? <Money cents={r.lastPriceCents} /> : '—'}
-                              {r.lastDate && <span className="block text-[11.5px] text-ink-3">{r.lastDate}</span>}
+                              {r.lastDate && <span className="block text-[12px] text-ink-3">{r.lastDate}</span>}
                             </td>
                             <td className="px-2 text-right font-bold">{r.avgPriceCents !== null ? <Money cents={r.avgPriceCents} /> : '—'}</td>
                             <td className="px-2 text-right text-ink-2">
