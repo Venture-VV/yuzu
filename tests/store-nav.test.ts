@@ -12,6 +12,7 @@ function session(over: Partial<{ technicians: boolean; dining: boolean; rooms: b
 
 const OWNER: Permission[] = [
   'frontdesk.read',
+  'frontdesk.operate',
   'frontdesk.checkout',
   'booking.manage',
   'dining.order',
@@ -81,5 +82,19 @@ describe('主导航的业务域', () => {
     expect(storePageOf('/')).toBeNull();
     expect(storePageOf('/shift')?.label).toBe('交班');
     expect(storePageOf('/admin/studio')?.label).toBe('后台');
+  });
+
+  it('两个台的入口按各自的权限（YB2）；只有菜品权限、进不了餐饮的看到「菜品」（CP7），都在对的组里', () => {
+    const cashierOnly: Permission[] = ['frontdesk.read', 'frontdesk.checkout'];
+    // 只有结账的：看得到收银台，没有发卡台（结账权限另外还带出餐饮、客房的看账单）
+    const cashierItems = visibleStoreNav(canOf(cashierOnly), session({ permissions: cashierOnly })).flatMap((d) => d.items.map((i) => i.label));
+    expect(cashierItems).toContain('收银台');
+    expect(cashierItems).not.toContain('发卡台');
+    const readOnly: Permission[] = ['frontdesk.read'];
+    expect(visibleStoreNav(canOf(readOnly), session({ permissions: readOnly })).flatMap((d) => d.items.map((i) => i.label))).toEqual(['发卡台', '收银台']);
+    const dishesOnly: Permission[] = ['dish.water'];
+    const nav = visibleStoreNav(canOf(dishesOnly), session({ permissions: dishesOnly }));
+    expect(nav.map((d) => [d.label, d.items.map((i) => i.label)])).toEqual([['餐饮', ['菜品']]]);
+    expect(storeDomainOf('/dishes')).toBe('dining');
   });
 });
