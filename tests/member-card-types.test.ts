@@ -218,6 +218,10 @@ describe('实体卡建档：同一笔里发卡、收押金', () => {
     const lost = physical({ name: '捡到卡的', card: { cardNo, deposit: cash } });
     expect((await create(lost)).body.error.code).toBe('CARD_LOST');
     expect(await countMembers(lost.phone as string)).toBe(0);
+    // 卡主（建档时就是实体卡的）挂失以后补卡：押金沿用，不另收；人照旧是实体卡
+    expect((await issue(holder.body.id, { cardNo: nextCard(), replace: true })).status).toBe(200);
+    expect((await cardsOf(holder.body.id)).map((c) => c.status).sort()).toEqual(['active', 'lost']);
+    expect(await detail(holder.body.id)).toMatchObject({ cardType: 'physical', cardDepositHeld: DEPOSIT });
   });
 
   it('匿名卡可以配一张实体卡（同样收押金）；刷卡找得到这份档案', async () => {

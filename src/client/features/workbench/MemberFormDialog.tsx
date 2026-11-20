@@ -306,7 +306,8 @@ export function MemberFormDialog({
   const onTypeStep = creating && step === 'type';
   const TypeIcon = CARD_TYPE_ICONS[type];
   const gradeNames = membership.data?.grades;
-  const depositBlocked = deposit > 0 && !shiftReady.ready;
+  // 要先开班的门店：确定还没开班时才拦（开班提示在押金上面）；还没取回来时不拦，服务端照样核对
+  const depositBlocked = deposit > 0 && !shiftReady.loading && !shiftReady.ready;
   const label = (text: string, required: boolean): ReactNode => (
     <>
       {text}
@@ -346,7 +347,7 @@ export function MemberFormDialog({
     >
       {onTypeStep ? (
         <div className="grid gap-3" role="radiogroup" aria-label="卡类型" data-testid="member-card-type-step">
-          {MEMBER_CARD_TYPES.map((t, i) => {
+          {MEMBER_CARD_TYPES.map((t) => {
             const Icon = CARD_TYPE_ICONS[t];
             // 实体卡要发卡的权限
             const blocked = t === 'physical' && !can('member.card');
@@ -357,7 +358,9 @@ export function MemberFormDialog({
                 role="radio"
                 aria-checked={cardType === t}
                 disabled={blocked}
-                data-autofocus={i === 0 || undefined}
+                // 打开时、从第 2 步回来时，焦点落在选着的那一种上
+                autoFocus={cardType === t}
+                data-autofocus={cardType === t || undefined}
                 onClick={() => pickType(t)}
                 className={cn(
                   'flex min-h-[72px] w-full items-center gap-4 rounded-lg border px-4 py-3 text-left transition-colors disabled:opacity-50',

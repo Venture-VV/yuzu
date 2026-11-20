@@ -1,6 +1,7 @@
 // 8.1.15 浏览器验收：新建会员先选卡类型、表单字段补全、实体卡押金（docs/MEMBERS_V8115.md）。
 //   ① 两步：先选卡类型，再填表；选的类型固定在表单顶上，「上一步」回去改、填过的还在；匿名卡不留手机号也能建，详情写「未留手机号」；
-//   ② 实体卡：填卡号、收押金（要先开班）建档 → 详情是实体卡、押着押金、储值余额不变、班次里有这笔押金 → 退卡全额退、记回电子卡；
+//   ② 实体卡：填卡号、收押金（要先开班）建档 → 详情是实体卡、押着押金、储值余额不变、班次里有这笔押金 →
+//     挂失（押金照旧押着）→ 补卡（押金沿用）→ 退卡全额退、记回电子卡；
 //   ③ 电子卡：推荐人（找一位已有的会员）、偏好项目，建档后详情里看得到；
 //   ④ 后台「建档表单」把生日设成不显示 → 建档表单里没有生日；结束时（含失败）照原样改回；
 //   ⑤ 三台目标设备的尺寸上对话框不横向滚动、「建档」按钮点得到。
@@ -88,7 +89,7 @@ test.describe('新建会员先选卡类型', () => {
     expect(m).toMatchObject({ phone: null, cardType: 'anonymous' });
   });
 
-  test('实体卡：填卡号、收押金建档；押金押着、储值余额不变、班次里有这笔；退卡全额退', async ({ page }) => {
+  test('实体卡：填卡号、收押金建档；押金押着、储值余额不变、班次里有这笔；挂失、补卡押金照旧；退卡全额退', async ({ page }) => {
     await login(page, 'linlan');
     // 收押金是收款：要先开班
     await ensureShift(page);
@@ -125,6 +126,25 @@ test.describe('新建会员先选卡类型', () => {
     const shiftAfter = await getJson<{ shift: { summary: { cash: { expected: number; cardDeposit?: number } } } }>(page, '/api/shifts/current');
     expect(shiftAfter.shift.summary.cash.expected - shiftBefore.shift.summary.cash.expected).toBe(deposit);
 
+    // 挂失：这张卡从此不能用，押金照旧押着
+    await box.getByTestId(`member-card-lost-${cardNo}`).click();
+    await expect(page.getByRole('dialog')).toContainText('照旧押着');
+    await page.getByTestId('member-card-lost-reason').fill('E2E：客人说卡丢了');
+    await page.getByTestId('member-card-lost-submit').click();
+    await expect(box.getByTestId(`member-card-${cardNo}`)).toHaveAttribute('data-status', 'lost');
+    await expect(box.getByTestId('member-card-deposit-held')).toContainText(yuan);
+    // 补卡：押金沿用原来的，不另收
+    const second = `P${run}02`;
+    await box.getByTestId('member-card-issue-open').click();
+    const again = page.getByRole('dialog').filter({ hasText: '补卡' });
+    await expect(again).toContainText('押金沿用原来的');
+    await expect(again.getByTestId('card-deposit-fields')).toHaveCount(0);
+    await again.getByTestId('member-card-no').fill(second);
+    await again.getByTestId('member-card-issue-submit').click();
+    await expect(page.getByText('已补卡')).toBeVisible();
+    await expect(box.getByTestId(`member-card-${second}`)).toHaveAttribute('data-status', 'active');
+    await expect(box.getByTestId('member-card-deposit-held')).toContainText(yuan);
+
     // 退卡：写原因，押金全额退（现金）；卡记「已退卡」，人记回电子卡
     await box.getByTestId('member-card-return-open').click();
     const back = page.getByRole('dialog').filter({ hasText: '退卡' });
@@ -132,7 +152,7 @@ test.describe('新建会员先选卡类型', () => {
     await back.getByTestId('member-card-return-reason').fill('E2E：客人不再用卡了');
     await back.getByTestId('member-card-return-submit').click();
     await expect(page.getByText('已退卡').first()).toBeVisible();
-    await expect(box.getByTestId(`member-card-${cardNo}`)).toHaveAttribute('data-status', 'returned');
+    await expect(box.getByTestId(`member-card-${second}`)).toHaveAttribute('data-status', 'returned');
     await expect(box.getByTestId('member-card-deposit-held')).toHaveCount(0);
     await expect(page.getByTestId('member-profile-extras')).toContainText('电子卡');
     const after = await getJson<{ cardType: string; cardDepositHeld: number }>(page, `/api/members/${id}`);

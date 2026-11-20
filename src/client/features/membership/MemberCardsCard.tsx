@@ -218,8 +218,10 @@ function IssueDialog({
   // 押金（8.1.15）：名下没有押金、又不是换下在用的卡，按后台设的金额收；服务端按自己算的核对
   const deposit = held > 0 || replacingActive ? 0 : (session.rules.memberForm?.cardDeposit ?? 0);
   const payProblem = deposit > 0 ? depositPayProblem(pay, 'receive') : null;
+  // 要先开班的门店：确定还没开班时才拦（开班提示在下面）；开没开班还没取回来时不拦，服务端照样核对——刷卡回车不会白按
   const shiftReady = useShiftReady(deposit > 0);
-  const ok = MEMBER_CARD_RE.test(normalized) && (!replacingActive || reason.trim().length >= 2) && !payProblem && (deposit === 0 || shiftReady.ready);
+  const noShift = deposit > 0 && !shiftReady.loading && !shiftReady.ready;
+  const ok = MEMBER_CARD_RE.test(normalized) && (!replacingActive || reason.trim().length >= 2) && !payProblem && !noShift;
   const submit = async () => {
     if (!ok || busy) return;
     setBusy(true);
@@ -320,7 +322,8 @@ function ReturnDialog({ member, current, held, onClose, onDone }: { member: Memb
   const [error, setError] = useState<string | null>(null);
   const payProblem = held > 0 ? depositPayProblem(pay, 'refund') : null;
   const shiftReady = useShiftReady(held > 0);
-  const ok = reason.trim().length >= 2 && !payProblem && (held === 0 || shiftReady.ready);
+  const noShift = held > 0 && !shiftReady.loading && !shiftReady.ready;
+  const ok = reason.trim().length >= 2 && !payProblem && !noShift;
   const what = current ? (held > 0 ? '退卡、退押金' : '退卡') : '退押金';
   const submit = async () => {
     if (!ok || busy) return;
