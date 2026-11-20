@@ -284,6 +284,9 @@ export interface PendingDish {
   amount: number;
   postedBy: number;
   postedAt: string;
+  /** 8.1.17（BW8）：这道是加料时挂在哪一行主菜上；挂在这道菜上、还没退的加料（不管上没上），退菜时问要不要一起退 */
+  addonOf?: number | null;
+  addons?: { billLineId: number; name: string; quantity: number; amount: number }[];
 }
 
 export interface DiningAdmin {

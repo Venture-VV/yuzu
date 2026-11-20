@@ -887,6 +887,8 @@ export function OrderTab() {
                 postedBy: voiding.dish.postedBy,
                 postedAt: voiding.dish.postedAt,
                 served: voiding.dish.status === 'done',
+                // 8.1.17（BW8）：挂在这道菜上、还没退的加料，问要不要一起退
+                addons: voiding.dish.addons ?? [],
               }
             : null
         }

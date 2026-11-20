@@ -21,6 +21,7 @@ import { cancelKitchenItem, createKitchenItems, kitchenStationsOf, takeDishLimit
 import { authorizeLineVoid } from '../dining-808';
 import { DeliverRoomField, OrderNoteField, VoidBlameField } from '../dining-order-v8115';
 import { DishLineFields, planDishLines } from '../dish-lines';
+import { lockAddonLines, voidAddonLines, WithAddonsField } from '../dish-addon-void';
 import { assertAfterVisits, backfillDetail, BackfillInput, recordBackfill, resolveBackfill, type Backfill } from './backfill';
 import { getVisit } from './visits';
 import { locateCharges, locateSession } from '../locations';
@@ -377,6 +378,8 @@ export const VoidInput = z.object({
   grantId: z.uuid('授权编号不正确').optional(),
   /** 退菜的责任岗位（8.1.15 块 B2：点单页退菜时选，记在审计里，不改明细表） */
   blame: VoidBlameField,
+  /** 退主菜时连同它的加料一起退（8.1.17 BW8） */
+  withAddons: WithAddonsField,
 });
 
 export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: OpContext) {
@@ -399,6 +402,8 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
     if (line!.status === 'voided') {
       throw conflict('ALREADY_VOIDED', `这项明细已由${line!.voidedByName ?? '其他人'}作废，不会重复冲减`);
     }
+    // 8.1.17（BW8）：退主菜带加料——主菜那一行之后按 id 升序锁它没退的加料行
+    const addons = input.withAddons ? await lockAddonLines(tx, line!.id) : [];
     // 8.0.8（B02）：餐饮的菜小额直接退；超过的经理、当场授权或本人 15 分钟内（其他明细照旧）
     const approval = await authorizeLineVoid(tx, { line: line!, actor: ctx.actor, at, grantId: input.grantId, what: '这项明细' });
     await tx`
@@ -420,6 +425,17 @@ export async function voidLine(deps: Deps, lineId: number, raw: unknown, ctx: Op
       detail: { visitNo: visit.visitNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, blame: input.blame, ...approval },
       ip: ctx.ip,
       businessDate: await businessDate(tx, deps, at),
+    });
+    await voidAddonLines(tx, addons, {
+      billId: visit.billId,
+      main: line!,
+      mainApproval: approval,
+      reason: input.reason,
+      actor: ctx.actor,
+      at,
+      businessDate: await businessDate(tx, deps, at),
+      ip: ctx.ip,
+      audit: { action: 'frontdesk_void', targetType: 'visit', targetId: visit.id, detail: { visitNo: visit.visitNo, blame: input.blame } },
     });
   });
   return getVisit(deps.sql, peek.visitId, deps.config.timezone);

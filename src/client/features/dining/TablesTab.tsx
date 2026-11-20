@@ -806,6 +806,8 @@ function SessionDialog({ id, board, onClose, onCheckout }: { id: number; board: 
                 postedBy: voiding.postedBy,
                 postedAt: voiding.postedAt,
                 served: voiding.status === 'done' || voiding.status === 'served',
+                // 8.1.17（BW8）：挂在这道菜上、还没退的加料，问要不要一起退
+                addons: d.lines.filter((x) => x.addonOf === voiding.lineId && x.status === 'active'),
               }
             : null
         }

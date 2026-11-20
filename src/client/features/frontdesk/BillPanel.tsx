@@ -530,6 +530,8 @@ export function BillPanel({
             postedBy: dishVoiding.postedById,
             postedAt: dishVoiding.postedAt,
             served: dishVoiding.kitchen?.status === 'served' || dishVoiding.kitchen?.status === 'done',
+            // 8.1.17（BW8）：挂在这道菜上、还没退的加料，问要不要一起退
+            addons: visit.lines.filter((x) => x.addonOf === dishVoiding.id && x.status === 'active'),
           }
         }
         url={dishVoiding ? `/api/frontdesk/lines/${dishVoiding.id}/void` : ''}

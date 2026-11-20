@@ -47,6 +47,7 @@ import { currentStoreId } from '../lib/store-context';
 import { assertMergeGroupsComplete, assertNotMerged, assertSessionsStayed, assertTableUsable, lockTablesOfSessions, markTablesDirty, mergeInfoOf, withMergeGroups } from './tables-v8115';
 import { assertOrderOutlets, OrderNoteField, VoidBlameField } from './dining-order-v8115';
 import { DishLineFields, planDishLines } from './dish-lines';
+import { lockAddonLines, pendingAddonsColumn, voidAddonLines, WithAddonsField } from './dish-addon-void';
 import type { TableState } from '@shared/dining-v8115';
 
 // ───────────────────────── 后台：桌台 ─────────────────────────
@@ -147,13 +148,15 @@ export async function getTableSession(db: Db, id: number): Promise<TableSessionD
   const lines = await db<BillLine[]>`
     SELECT l.id, l.source, l.item_id, l.tier, l.name, l.unit_price, l.quantity, l.amount, l.status, l.post_key, l.business_date,
            l.posted_by AS posted_by_id, p.display_name AS posted_by_name, l.posted_at, l.void_reason, vs.display_name AS voided_by_name,
-           l.voided_at, NULL AS backfill, NULL AS technician, l.session_id,
+           l.voided_at, NULL AS backfill, NULL AS technician, l.session_id, l.addon_of,
            (SELECT json_build_object('status', k.status, 'note', k.note, 'orderNo', k.order_no) FROM kitchen_items k WHERE k.bill_line_id = l.id) AS kitchen
     FROM bill_lines l JOIN staff p ON p.id = l.posted_by LEFT JOIN staff vs ON vs.id = l.voided_by
     WHERE l.bill_id = ${s.billId} ORDER BY l.id`;
+  // 8.1.17：写账单那一行的名字（多档的带档名）；带上它的加料（退菜时问要不要一起退）
   const pending = await db<PendingDish[]>`
-    SELECT k.id, k.bill_line_id, k.item_id, i.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at
-    FROM kitchen_items k JOIN service_items i ON i.id = k.item_id JOIN bill_lines l ON l.id = k.bill_line_id
+    SELECT k.id, k.bill_line_id, k.item_id, l.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at,
+           l.addon_of, ${pendingAddonsColumn(db)}
+    FROM kitchen_items k JOIN bill_lines l ON l.id = k.bill_line_id
     WHERE k.table_session_id = ${id} AND k.status IN ('queued', 'cooking', 'done') ORDER BY k.id`;
   const moves = await db<TableSessionDetail['moves']>`
     SELECT ft.name AS from_table, tt.name AS to_table, mv.reason, st.display_name AS operator_name, mv.created_at AS at
@@ -486,6 +489,8 @@ const VoidInput = z.object({
   grantId: z.uuid('授权编号不正确').optional(),
   /** 退菜的责任岗位（8.1.15 块 B2：退菜时选，记在审计里，不改明细表） */
   blame: VoidBlameField,
+  /** 退主菜时连同它的加料一起退（8.1.17 BW8） */
+  withAddons: WithAddonsField,
 });
 
 /** 退菜：作废桌台账单的一条明细（规则与前台作废相同）；出品单改为已退，扣过沽清的按原份数加回 */
@@ -504,6 +509,8 @@ export async function voidTableLine(deps: Deps, lineId: number, raw: unknown, ct
       SELECT l.id, l.name, l.source, l.quantity, l.amount, l.status, l.posted_by, l.posted_at, vs.display_name AS voided_by_name
       FROM bill_lines l LEFT JOIN staff vs ON vs.id = l.voided_by WHERE l.id = ${lineId} FOR UPDATE OF l`;
     if (line!.status === 'voided') throw conflict('ALREADY_VOIDED', `这项明细已由${line!.voidedByName ?? '其他人'}作废，不会重复冲减`);
+    // 8.1.17（BW8）：退主菜带加料——主菜那一行之后按 id 升序锁它没退的加料行
+    const addons = input.withAddons ? await lockAddonLines(tx, line!.id) : [];
     // 8.0.8（B02）：小额直接退、经理、当场授权、本人 15 分钟内
     const approval = await authorizeLineVoid(tx, { line: line!, actor: ctx.actor, at, grantId: input.grantId, what: '这项明细' });
     await tx`
@@ -518,6 +525,17 @@ export async function voidTableLine(deps: Deps, lineId: number, raw: unknown, ct
       detail: { sessionNo: s.sessionNo, lineId: line!.id, name: line!.name, quantity: line!.quantity, amount: line!.amount, reason: input.reason, blame: input.blame, ...approval },
       ip: ctx.ip,
       businessDate: await businessDate(tx, deps, at),
+    });
+    await voidAddonLines(tx, addons, {
+      billId: s.billId,
+      main: line!,
+      mainApproval: approval,
+      reason: input.reason,
+      actor: ctx.actor,
+      at,
+      businessDate: await businessDate(tx, deps, at),
+      ip: ctx.ip,
+      audit: { action: 'table_void', targetType: 'table_session', targetId: s.id, detail: { sessionNo: s.sessionNo, blame: input.blame } },
     });
   });
   return getTableSession(deps.sql, peek.sessionId);

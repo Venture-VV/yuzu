@@ -44,6 +44,7 @@ import { settingRow } from '../lib/store-settings';
 import { currentStoreId } from '../lib/store-context';
 import { DeliverRoomField, findGuestByRoom, findGuestByTag, prepareDiningOrder } from './dining-order-v8115';
 import { comboPartsOf, withDishOptions } from './dish-options';
+import { pendingAddonsColumn } from './dish-addon-void';
 
 export async function loadDiningRules(db: Db): Promise<DiningRules> {
   const row = await settingRow<Partial<DiningRules>>(db, 'dining_rules');
@@ -307,7 +308,8 @@ export async function diningGuestOf(db: Db, visitId: number): Promise<DiningGues
     WHERE v.id = ${visitId} AND v.store_id = ${currentStoreId()}`;
   if (!v) throw notFound('来访不存在');
   const pending = await db<DiningGuest['pending']>`
-    SELECT k.id, k.bill_line_id, k.item_id, l.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at
+    SELECT k.id, k.bill_line_id, k.item_id, l.name, k.quantity, k.note, k.status, k.rush_count, k.created_at, l.amount, l.posted_by, l.posted_at,
+           l.addon_of, ${pendingAddonsColumn(db)}
     FROM kitchen_items k JOIN bill_lines l ON l.id = k.bill_line_id
     WHERE k.visit_id = ${v.visitId} AND k.status IN ('queued', 'cooking', 'done') ORDER BY k.id`;
   return { visitId: v.visitId, tagCode: v.tagCode, zone: v.zone, guest: guestName(v.memberName, v.guestLabel), pending, roomNo: await openRoomOf(db, v.visitId) };

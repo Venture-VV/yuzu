@@ -9,7 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { slotKey, type DiningLedger, type DiningMenu, type DiningReceipt, type KitchenItem } from '../src/shared/dining';
 import { methodsCellText, parseMethodsCell, type DishRow, type DishesBoard } from '../src/shared/dishes';
-import { api, setup, type TestContext } from './helpers';
+import { createStaff } from '../src/server/modules/staff';
+import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
 let today: string;
@@ -335,5 +336,234 @@ describe('BW5 点单选规格（档）', () => {
     const plain = await orderTag(v.id, [{ itemId: fish.id, quantity: 1, methods: ['中辣'] }], 3800);
     expect(plain.status, JSON.stringify(plain.body)).toBe(200);
     expect((await billLines(v.id)).map((l) => `${l.name}|${l.unitPrice}`)).toEqual(['水煮鱼（优选）|5800', '水煮鱼（标准）|3800']);
+  });
+});
+
+describe('BW8 加料挂在主菜上、退主菜带加料', () => {
+  let noodle: DishRow;
+  let egg: DishRow;
+  let beef: DishRow;
+  let duty: string;
+  beforeAll(async () => {
+    await createStaff(ctx.sql, { username: 'duty8117', displayName: '值班经理', role: 'duty_manager', password: PASSWORD, mustChangePassword: false });
+    duty = await login(ctx.app, 'duty8117');
+    expect((await create({ name: '加蛋', category: '餐饮', slot: 'restaurant:餐饮', stationId: station['热菜'], prices: { standard: 300 } })).status).toBe(201);
+    expect((await create({ name: '加牛肉', category: '餐饮', slot: 'restaurant:餐饮', stationId: station['热菜'], prices: { standard: 6000 } })).status).toBe(201);
+    egg = await dishOf('加蛋');
+    beef = await dishOf('加牛肉');
+    const r = await create({ name: '牛肉面', category: '餐饮', slot: 'restaurant:餐饮', stationId: station['热菜'], prices: { standard: 6800 }, addons: [egg.id, beef.id] });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    noodle = await dishOf('牛肉面');
+    // 加蛋今天限量 10 份（退的时候按原份数加回）
+    expect((await api(ctx.app, ctx.owner, 'PUT', `/api/kitchen/limits/${egg.id}`, { remaining: 10 })).status).toBe(200);
+  });
+  const remainingOf = async (id: number) => (await menu()).dishes.find((d) => d.id === id)!.remaining;
+  const voidFront = (lineId: number, body: Record<string, unknown>, cookie = ctx.clerk) => api(ctx.app, cookie, 'POST', `/api/frontdesk/lines/${lineId}/void`, body);
+
+  it('下单时加料挂在主菜那一行上（addonOf 是同一次下单里主菜的下标），出品单写「配 主菜」；不是主菜配的加料、写在主菜前面、配在加料上的都拒绝', async () => {
+    const v = await enter();
+    const wrongOrder = await orderTag(
+      v.id,
+      [
+        { itemId: egg.id, quantity: 1, addonOf: 1 },
+        { itemId: noodle.id, quantity: 1 },
+      ],
+      7100,
+    );
+    expect(wrongOrder.status).toBe(400);
+    const notAddon = await orderTag(
+      v.id,
+      [
+        { itemId: noodle.id, quantity: 1 },
+        { itemId: (await dishOf('柠檬茶')).id, quantity: 1, addonOf: 0 },
+      ],
+      8300,
+    );
+    expect(notAddon.status).toBe(422);
+    expect(notAddon.body.error.code).toBe('DISH_ADDON_INVALID');
+    const nested = await orderTag(
+      v.id,
+      [
+        { itemId: noodle.id, quantity: 1 },
+        { itemId: egg.id, quantity: 1, addonOf: 0 },
+        { itemId: beef.id, quantity: 1, addonOf: 1 },
+      ],
+      13100,
+    );
+    expect(nested.status).toBe(422);
+    expect(nested.body.error.code).toBe('DISH_ADDON_INVALID');
+    const r = await orderTag(
+      v.id,
+      [
+        { itemId: noodle.id, quantity: 1, note: '面硬一点' },
+        { itemId: egg.id, quantity: 2, addonOf: 0 },
+      ],
+      6800 + 600,
+    );
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const [main, add] = await billLines(v.id);
+    expect(add).toMatchObject({ name: '加蛋', addonOf: main!.id, amount: 600 });
+    expect((await kitchen()).filter((k) => k.visitId === v.id).map((k) => `${k.name}|${k.note}`)).toEqual(['牛肉面|面硬一点', '加蛋|配 牛肉面']);
+    // 前台账单的明细带 addonOf；点单页「还没上的菜」主菜带它的加料
+    const visit = (await api(ctx.app, ctx.owner, 'GET', `/api/frontdesk/visits/${v.id}`)).body;
+    expect(visit.lines.map((l: { addonOf: number | null }) => l.addonOf)).toEqual([null, main!.id]);
+    const guest = (await api(ctx.app, ctx.clerk, 'GET', `/api/dining/guest?tag=${v.code}`)).body;
+    expect(guest.pending[0]).toMatchObject({ name: '牛肉面', addonOf: null, addons: [{ billLineId: add!.id, name: '加蛋', quantity: 2, amount: 600 }] });
+    expect(guest.pending[1]).toMatchObject({ addonOf: main!.id, addons: [] });
+  });
+
+  it('退主菜勾上「加料一起退」：同一个事务里一起退，照主菜的原因；出品单改已退、沽清加回、账单冲减，各记一条审计；不勾的只退主菜', async () => {
+    const v = await enter();
+    const before = await remainingOf(egg.id);
+    expect(
+      (
+        await orderTag(
+          v.id,
+          [
+            { itemId: noodle.id, quantity: 1 },
+            { itemId: egg.id, quantity: 2, addonOf: 0 },
+          ],
+          7400,
+        )
+      ).status,
+    ).toBe(200);
+    expect(await remainingOf(egg.id)).toBe(before! - 2);
+    const [main, add] = await billLines(v.id);
+    // 主菜 ¥68 超过小额上限：店员退要经理授权；值班经理自己退直接退
+    const r = await voidFront(main!.id, { reason: '客人不要了', blame: 'guest', withAddons: true }, duty);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect((await billLines(v.id)).map((l) => `${l.name}|${l.status}`)).toEqual(['牛肉面|voided', '加蛋|voided']);
+    expect(await billAmount(v.id)).toBe(0);
+    expect((await kitchen()).filter((k) => k.visitId === v.id).map((k) => k.status)).toEqual(['cancelled', 'cancelled']);
+    expect(await remainingOf(egg.id)).toBe(before);
+    const reasons = await ctx.sql<{ voidReason: string }[]>`SELECT void_reason FROM bill_lines WHERE id IN ${ctx.sql([main!.id, add!.id])} ORDER BY id`;
+    expect(reasons.map((x) => x.voidReason)).toEqual(['客人不要了', '客人不要了']);
+    const audits = await ctx.sql<
+      { detail: Record<string, unknown> }[]
+    >`SELECT detail FROM audit_logs WHERE action = 'frontdesk_void' AND (detail->>'lineId')::bigint IN ${ctx.sql([main!.id, add!.id])} ORDER BY id`;
+    // 每一行照退菜原来的核对：主菜 ¥68 是经理退的，¥6 的加料本来就是小额直接退
+    expect(audits.map((a) => [a.detail.lineId, a.detail.addonOf ?? null, a.detail.approval, a.detail.blame])).toEqual([
+      [main!.id, null, 'manager', 'guest'],
+      [add!.id, main!.id, 'small', 'guest'],
+    ]);
+    // 台账：加料那一行也写着怎么批的
+    const ledger = (await api(ctx.app, ctx.owner, 'GET', `/api/dining/ledger?from=${today}&to=${today}&type=voided`)).body as DiningLedger;
+    expect(ledger.rows.filter((x) => x.tagCode === v.code).map((x) => `${x.name}|${x.approvalText}|${x.blame}`)).toEqual(['牛肉面|经理|guest', '加蛋|小额直接退|guest']);
+
+    // 不勾：只退主菜，加料照旧
+    const v2 = await enter();
+    expect(
+      (
+        await orderTag(
+          v2.id,
+          [
+            { itemId: noodle.id, quantity: 1 },
+            { itemId: egg.id, quantity: 1, addonOf: 0 },
+          ],
+          7100,
+        )
+      ).status,
+    ).toBe(200);
+    const [main2] = await billLines(v2.id);
+    expect((await voidFront(main2!.id, { reason: '客人不要了' }, duty)).status).toBe(200);
+    expect((await billLines(v2.id)).map((l) => `${l.name}|${l.status}`)).toEqual(['牛肉面|voided', '加蛋|active']);
+  });
+
+  it('授权：主菜用当场授权退的，加料照这一次授权；主菜不用授权、加料要的整笔拒绝（先只退主菜、再单独退加料）', async () => {
+    // 店主下的单：店员退大额的菜不是「本人 15 分钟内」，要授权
+    const byOwner = (visitId: number, lines: OrderLine[], expectedTotal: number) => api(ctx.app, ctx.owner, 'POST', '/api/dining/orders', { clientKey: randomUUID(), visitId, lines, expectedTotal });
+    const v = await enter();
+    expect(
+      (
+        await byOwner(
+          v.id,
+          [
+            { itemId: noodle.id, quantity: 1 },
+            { itemId: beef.id, quantity: 1, addonOf: 0 },
+            { itemId: egg.id, quantity: 1, addonOf: 0 },
+          ],
+          6800 + 6000 + 300,
+        )
+      ).status,
+    ).toBe(200);
+    const [main, big, small] = await billLines(v.id);
+    const denied = await voidFront(main!.id, { reason: '上错了', withAddons: true });
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe('VOID_NEEDS_GRANT');
+    const g = await api(ctx.app, ctx.clerk, 'POST', '/api/auth/authorize', { username: 'duty8117', password: PASSWORD, purpose: 'line_void', scope: { lineId: main!.id, reason: '上错了' } });
+    expect(g.status, JSON.stringify(g.body)).toBe(200);
+    const r = await voidFront(main!.id, { reason: '上错了', withAddons: true, grantId: g.body.grantId });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect((await billLines(v.id)).map((l) => l.status)).toEqual(['voided', 'voided', 'voided']);
+    const audits = await ctx.sql<{ detail: Record<string, unknown> }[]>`
+      SELECT detail FROM audit_logs WHERE action = 'frontdesk_void' AND (detail->>'lineId')::bigint IN ${ctx.sql([main!.id, big!.id, small!.id])} ORDER BY (detail->>'lineId')::bigint`;
+    // 大额的加料照主菜的授权；小额的加料本来就能直接退
+    expect(audits.map((a) => `${a.detail.approval}|${a.detail.approverName ?? ''}`)).toEqual(['grant|值班经理', 'grant|值班经理', 'small|']);
+
+    // 主菜小额（¥18 的鸡蛋面）、加料大额（¥60 的加牛肉）：小额的主菜申请不到授权，整笔拒绝，请先只退主菜、再单独退加料
+    expect((await create({ name: '鸡蛋面', category: '餐饮', slot: 'restaurant:餐饮', stationId: station['热菜'], prices: { standard: 1800 }, addons: [beef.id] })).status).toBe(201);
+    const cheap = await dishOf('鸡蛋面');
+    const v3 = await enter();
+    expect(
+      (
+        await byOwner(
+          v3.id,
+          [
+            { itemId: cheap.id, quantity: 1 },
+            { itemId: beef.id, quantity: 1, addonOf: 0 },
+          ],
+          7800,
+        )
+      ).status,
+    ).toBe(200);
+    const [main3] = await billLines(v3.id);
+    const blocked = await voidFront(main3!.id, { reason: '上错了', withAddons: true });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe('ADDON_NEEDS_GRANT');
+    expect((await billLines(v3.id)).map((l) => l.status)).toEqual(['active', 'active']);
+    expect((await voidFront(main3!.id, { reason: '上错了' })).status).toBe(200);
+    // 本人下的、15 分钟内：主菜与加料都是「本人」，一起退
+    const v2 = await enter();
+    expect(
+      (
+        await orderTag(
+          v2.id,
+          [
+            { itemId: cheap.id, quantity: 1 },
+            { itemId: beef.id, quantity: 1, addonOf: 0 },
+          ],
+          7800,
+        )
+      ).status,
+    ).toBe(200);
+    const [main2, beef2] = await billLines(v2.id);
+    expect(beef2!.addonOf).toBe(main2!.id);
+    expect((await voidFront(main2!.id, { reason: '上错了', withAddons: true })).status).toBe(200);
+    expect((await billLines(v2.id)).map((l) => l.status)).toEqual(['voided', 'voided']);
+  });
+
+  it('桌台退菜同一套：勾上一起退、照主菜的原因与授权', async () => {
+    const t = await api(ctx.app, ctx.owner, 'POST', '/api/admin/dining/tables', { name: 'B2', seats: 4 });
+    const tableId = t.body.tables.find((x: { name: string }) => x.name === 'B2').id;
+    const open = await api(ctx.app, ctx.clerk, 'POST', '/api/dining/tables/open', { clientKey: randomUUID(), tableId, guests: 2 });
+    expect(open.status, JSON.stringify(open.body)).toBe(200);
+    const r = await api(ctx.app, ctx.clerk, 'POST', `/api/dining/tables/sessions/${open.body.id}/orders`, {
+      clientKey: randomUUID(),
+      lines: [
+        { itemId: noodle.id, quantity: 1 },
+        { itemId: egg.id, quantity: 1, addonOf: 0 },
+      ],
+      expectedTotal: 7100,
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const [main, add] = r.body.lines as { id: number; addonOf: number | null }[];
+    expect(add!.addonOf).toBe(main!.id);
+    expect(r.body.pending[0].addons.map((a: { name: string }) => a.name)).toEqual(['加蛋']);
+    const v = await api(ctx.app, duty, 'POST', `/api/dining/tables/lines/${main!.id}/void`, { reason: '客人不要了', blame: 'kitchen', withAddons: true });
+    expect(v.status, JSON.stringify(v.body)).toBe(200);
+    expect(v.body.lines.map((l: { status: string }) => l.status)).toEqual(['voided', 'voided']);
+    expect(v.body.amount).toBe(0);
+    const audits = await ctx.sql<{ detail: Record<string, unknown> }[]>`SELECT detail FROM audit_logs WHERE action = 'table_void' ORDER BY id`;
+    expect(audits.map((a) => `${a.detail.name}|${a.detail.addonOf ?? ''}|${a.detail.blame}`)).toEqual(['牛肉面||kitchen', `加蛋|${main!.id}|kitchen`]);
   });
 });
