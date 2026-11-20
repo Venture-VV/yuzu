@@ -131,7 +131,8 @@ async function loadItemOptions(db: Db): Promise<EmenuItemOption[]> {
     SELECT i.id, i.name, i.category, s.name AS station_name, ${pricesColumn(db)} AS prices,
            (SELECT sp.dish_id FROM emenu_dish_specs sp WHERE sp.item_id = i.id) AS dish_id
     FROM service_items i JOIN kitchen_stations s ON s.id = i.station_id AND s.active
-    WHERE i.active AND NOT i.technician_required ORDER BY s.sort_order, s.id, i.sort_order, i.id`;
+    WHERE i.active AND NOT i.technician_required ORDER BY i.dish_sort NULLS LAST, s.sort_order, s.id, i.sort_order, i.id`;
+  // 8.1.17（BW10）：照菜品表里排的先后（从价目表生成初稿也是这个顺序）
   return rows.map(({ prices, ...r }) => ({ ...r, id: Number(r.id), dishId: r.dishId === null ? null : Number(r.dishId), price: defaultPrice(prices) }));
 }
 

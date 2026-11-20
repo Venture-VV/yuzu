@@ -324,7 +324,12 @@ export type AuditAction =
   | 'clock_announcer'
   // 8.1.15 会员卡押金（收、退，detail.kind 写是哪一样）、退卡
   | 'member_card_deposit'
-  | 'member_card_returned';
+  | 'member_card_returned'
+  // 8.1.17 菜品（docs/DISHES_V8117.md 第 6 节）：排序、批量上下架、删除（下架并隐藏）、恢复
+  | 'dishes_sorted'
+  | 'dishes_active_bulk'
+  | 'dish_deleted'
+  | 'dish_restored';
 
 export interface AuditEntry {
   staffId: number | null;

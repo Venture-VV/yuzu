@@ -366,6 +366,8 @@ const DISH_BOARD: DishesBoard = {
     addons: (d.addons ?? []).map((a) => ({ itemId: a.id, name: a.name, price: a.price, available: true })),
     combo: (d.combo ?? []).map((c, k) => ({ itemId: MENU_DISHES[k === 0 ? 0 : 5]!.id, name: c.name, quantity: c.quantity, available: k === 0 })),
     usedBy: i === 0 ? ['「小炒黄牛肉」的加料', '套餐「招牌秘制酱香手撕鸡（半只）」'] : [],
+    sort: null,
+    deleted: false,
     rev: String(1_700_000_000_000_000 + i),
     updatedAt: NOW,
   })),

@@ -14,10 +14,11 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { defaultTier, PRICE_TIERS, sortTiers, tierPrice, type TierPrice } from '@shared/catalog';
-import { DINING_OUTLET_LABELS, diningSlotOf, parseSlotKey, slotLabel, type DiningOutlet, type DiningSlot } from '@shared/dining';
+import { DINING_OUTLET_LABELS, diningSlotOf, parseSlotKey, slotLabel, slotOrder, type DiningOutlet, type DiningSlot } from '@shared/dining';
 import {
   DISH_EXPORT_EXTRA_COLUMNS,
   DISH_OUTLET_PERMISSIONS,
+  DISH_SORT_SLOT_SPAN,
   DISH_PERMISSIONS,
   DISH_PRICE_PERMISSION,
   DISH_SHEET_COLUMNS,
@@ -25,6 +26,7 @@ import {
   isDishStatusFilter,
   MAX_COMBO_ITEM_QUANTITY,
   MAX_COMBO_ITEMS,
+  MAX_DISH_BATCH,
   MAX_DISH_ADDONS,
   MAX_DISH_CATEGORY,
   MAX_DISH_METHOD_GROUP_LENGTH,
@@ -93,6 +95,8 @@ interface DishBase {
   remaining: number | null;
   emenuName: string | null;
   emenuImageId: number | null;
+  dishSort: number | null;
+  deletedAt: string | null;
   rev: string;
   updatedAt: string;
 }
@@ -104,11 +108,11 @@ async function loadDishRows(db: Db, today: string, onlyIds?: number[]): Promise<
     SELECT i.id, i.name, i.category, i.active, i.station_id, s.name AS station_name, s.active AS station_active, i.dining_outlet, i.dining_group,
            i.dish_image_id, ${pricesColumn(db, { base: true })} AS prices,
            (SELECT d.remaining FROM dish_limits d WHERE d.item_id = i.id AND d.business_date = ${today}) AS remaining,
-           ed.name AS emenu_name, ed.image_id AS emenu_image_id, ${REV(db)} AS rev, i.updated_at
+           ed.name AS emenu_name, ed.image_id AS emenu_image_id, ${REV(db)} AS rev, i.updated_at, i.dish_sort, i.dish_deleted_at AS deleted_at
     FROM service_items i JOIN kitchen_stations s ON s.id = i.station_id
     LEFT JOIN emenu_dish_specs sp ON sp.item_id = i.id LEFT JOIN emenu_dishes ed ON ed.id = sp.dish_id
     WHERE NOT i.technician_required ${onlyIds ? db`AND i.id IN ${db(onlyIds)}` : db``}
-    ORDER BY i.active DESC, s.sort_order, s.id, i.sort_order, i.id`;
+    ORDER BY i.active DESC, i.dish_sort NULLS LAST, s.sort_order, s.id, i.sort_order, i.id`;
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
   const methods = await db<{ itemId: number; name: string; groupName: string | null; price: number }[]>`
@@ -154,6 +158,8 @@ async function loadDishRows(db: Db, today: string, onlyIds?: number[]): Promise<
       addons: addons.filter((a) => a.itemId === r.id).map((a): DishAddonRef => ({ itemId: a.addonItemId, name: a.name, price: defaultPrice(sortTiers(a.prices)), available: a.available })),
       combo: combos.filter((c) => c.comboItemId === r.id).map((c): DishComboRef => ({ itemId: c.itemId, name: c.name, quantity: c.quantity, available: c.available })),
       usedBy: [...addons.filter((a) => a.addonItemId === r.id).map((a) => `「${a.ownerName}」的加料`), ...combos.filter((c) => c.itemId === r.id).map((c) => `套餐「${c.ownerName}」`)],
+      sort: r.dishSort,
+      deleted: r.deletedAt !== null,
       rev: r.rev,
       updatedAt: new Date(r.updatedAt).toISOString(),
     };
@@ -191,6 +197,8 @@ export interface ItemState {
   diningGroup: string;
   dishImageId: number | null;
   prices: TierPrice[];
+  /** 删除了（8.1.17：下架并从菜品表隐藏） */
+  deleted: boolean;
   rev: string;
 }
 
@@ -216,7 +224,7 @@ export async function readItems(db: Db, ids: number[]): Promise<Map<number, Item
   if (ids.length === 0) return new Map();
   const rows = await db<ItemState[]>`
     SELECT i.id, i.name, i.category, i.active, i.station_id, s.name AS station_name, i.technician_required, i.dining_outlet, i.dining_group,
-           i.dish_image_id, ${pricesColumn(db, { base: true })} AS prices, ${REV(db)} AS rev
+           i.dish_image_id, ${pricesColumn(db, { base: true })} AS prices, ${REV(db)} AS rev, i.dish_deleted_at IS NOT NULL AS deleted
     FROM service_items i LEFT JOIN kitchen_stations s ON s.id = i.station_id WHERE i.id IN ${db(ids)}`;
   return new Map(rows.map((r) => [r.id, { ...r, prices: sortTiers(r.prices) }]));
 }
@@ -536,7 +544,8 @@ export async function updateDishTx(tx: Tx, ctx: OpContext, id: number, f: DishFi
 
   await tx`
     UPDATE service_items SET name = ${f.name}, category = ${f.category}, station_id = ${f.stationId}, dish_image_id = ${f.imageId},
-           ${writeSlot ? tx`dining_outlet = ${to.outlet}, dining_group = ${to.group},` : tx``} updated_at = clock_timestamp()
+           ${writeSlot ? tx`dining_outlet = ${to.outlet}, dining_group = ${to.group},` : tx``}
+           ${/* 挪到别的小类：原来排的先后不再算（排在新小类的最后，8.1.17） */ slotChanged ? tx`dish_sort = NULL,` : tx``} updated_at = clock_timestamp()
     WHERE id = ${id}`;
   if (methodsChanged) await writeMethods(tx, id, methods);
   if (addonsChanged) await writeAddons(tx, id, f.addons);
@@ -591,7 +600,8 @@ export async function changeDishPriceTx(
 
 // ───────────────────────── 操作编号 ─────────────────────────
 
-type DishOpType = 'create' | 'update' | 'active' | 'price' | 'import';
+/** 8.1.17（迁移 196）多四种：批量上下架、删除、恢复、排序 */
+type DishOpType = 'create' | 'update' | 'active' | 'price' | 'import' | 'bulk_active' | 'delete' | 'restore' | 'sort';
 
 /**
  * 带操作编号的一笔菜品维护：同一个编号排队（操作编号的咨询锁），已经办过的——内容一样返回第一次的结果，内容不同拒绝；
@@ -701,6 +711,123 @@ async function changeDishPrice(deps: Deps, id: number, raw: unknown, ctx: OpCont
   return { dish: await getDish(deps.sql, deps, run.itemId!), replayed: run.replayed };
 }
 
+// ───────────────────────── 8.1.17：排序、批量上下架、删除与恢复（BW10，docs/DISHES_V8117.md 第 6 节） ─────────────────────────
+
+const idList = z
+  .array(z.number().int().positive(), '请选菜品')
+  .min(1, '请选菜品')
+  .max(MAX_DISH_BATCH, `一次最多 ${MAX_DISH_BATCH} 道`)
+  .refine(unique, '同一道菜选了两次');
+const SortInput = z.object({
+  clientKey,
+  slot: z
+    .string('请选点单小类')
+    .max(40)
+    .refine((v) => parseSlotKey(v) !== null, '点单小类不对，请刷新后重试'),
+  /** 这一小类里（没删除的）全部的菜，按排好的先后 */
+  ids: idList,
+});
+const BulkActiveInput = z.object({ clientKey, ids: idList, active: z.boolean('请指明上架还是下架') });
+const KeyInput = z.object({ clientKey });
+
+/**
+ * 给一个点单小类里的菜排先后（点单页、菜品表按这个排）：页面交这一小类里全部没删除的菜（含下架的）；
+ * 刚好有人新增、挪走、删除了这一类的菜，对不上就拒绝（DISH_SORT_STALE）。先后存成「小类的位置 × 1000 + 第几个」
+ */
+async function sortDishes(deps: Deps, raw: unknown, ctx: OpContext): Promise<{ count: number; replayed: boolean }> {
+  const { clientKey: key, slot, ids } = parse(SortInput, raw);
+  const target = parseSlotKey(slot)!;
+  const run = await runDishOp(deps, { key, opType: 'sort', requestHash: hashRequest({ slot, ids }), staffId: ctx.actor.id }, async (tx) => {
+    assertOutlet(ctx.actor, target.outlet, `给「${slotLabel(target)}」排序`);
+    const locked = await lockItems(tx, ids);
+    const all = await tx<{ id: number; category: string; diningOutlet: string | null; diningGroup: string; stationName: string }[]>`
+      SELECT i.id, i.category, i.dining_outlet, i.dining_group, s.name AS station_name
+      FROM service_items i JOIN kitchen_stations s ON s.id = i.station_id WHERE NOT i.technician_required AND i.dish_deleted_at IS NULL`;
+    const inSlot = all
+      .filter((r) => {
+        const at = diningSlotOf({ outlet: r.diningOutlet, group: r.diningGroup, category: r.category, stationName: r.stationName });
+        return at.outlet === target.outlet && at.group === target.group;
+      })
+      .map((r) => r.id);
+    if (inSlot.length !== ids.length || inSlot.some((id) => !ids.includes(id))) {
+      throw conflict('DISH_SORT_STALE', `「${slotLabel(target)}」的菜刚刚有变动（别人新增、挪走或删除了），请刷新后再排`);
+    }
+    const base = slotOrder(target) * DISH_SORT_SLOT_SPAN;
+    await tx`
+      UPDATE service_items i SET dish_sort = t.n
+      FROM unnest(${ids}::bigint[], ${ids.map((_id, i) => base + i + 1)}::int[]) AS t(id, n) WHERE i.id = t.id`;
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: 'dishes_sorted',
+      targetType: 'dishes',
+      detail: { slot: slotLabel(target), count: ids.length, summary: `「${slotLabel(target)}」排序：${ids.map((id) => locked.get(id)!.name).join('、')}`.slice(0, 500) },
+      ip: ctx.ip,
+    });
+    return { itemId: null, result: { count: ids.length } };
+  });
+  return { count: Number(run.result.count), replayed: run.replayed };
+}
+
+/** 批量上架 / 下架：每一道照它的出品口核对维护权限（有一道不行整批拒绝）；本来就是这个状态的不动 */
+async function setDishesActive(deps: Deps, raw: unknown, ctx: OpContext): Promise<{ changed: number; replayed: boolean }> {
+  const { clientKey: key, ids, active } = parse(BulkActiveInput, raw);
+  const sorted = [...ids].sort((a, b) => a - b);
+  const run = await runDishOp(deps, { key, opType: 'bulk_active', requestHash: hashRequest({ ids: sorted, active }), staffId: ctx.actor.id }, async (tx) => {
+    const locked = await lockItems(tx, ids);
+    const denied: string[] = [];
+    for (const id of sorted) {
+      const cur = locked.get(id);
+      if (!cur || !isDishState(cur)) throw notDish();
+      if (!can(ctx.actor, DISH_OUTLET_PERMISSIONS[slotOfState(cur).outlet])) denied.push(`「${cur.name}」`);
+    }
+    if (denied.length) throw forbidden(`没有这几道菜所在出品口的维护权限，不能批量${active ? '上架' : '下架'}：${denied.join('')}`);
+    const changed = sorted.filter((id) => locked.get(id)!.active !== active);
+    if (changed.length) {
+      // 删除了的重新上架就不再算删除（迁移 196 的触发器清掉标记）
+      await tx`UPDATE service_items SET active = ${active}, updated_at = clock_timestamp() WHERE id IN ${tx(changed)}`;
+      await writeAudit(tx, {
+        staffId: ctx.actor.id,
+        action: 'dishes_active_bulk',
+        targetType: 'dishes',
+        detail: { active, count: changed.length, summary: `批量${active ? '上架' : '下架'} ${changed.length} 道：${changed.map((id) => locked.get(id)!.name).join('、')}`.slice(0, 500) },
+        ip: ctx.ip,
+      });
+    }
+    return { itemId: null, result: { changed: changed.length } };
+  });
+  return { changed: Number(run.result.changed), replayed: run.replayed };
+}
+
+/**
+ * 删除 = 下架并从菜品表默认隐藏（价目项目不删：以前的订单、账单、报表照旧）；恢复 = 回到菜品表（还是下架的，要卖再点上架）。
+ * 要这道菜所在出品口的维护权限；本来就是这个样子的不动
+ */
+async function setDishDeleted(deps: Deps, id: number, raw: unknown, ctx: OpContext, deleted: boolean): Promise<DishSaveResult> {
+  const { clientKey: key } = parse(KeyInput, raw);
+  const run = await runDishOp(deps, { key, opType: deleted ? 'delete' : 'restore', requestHash: hashRequest({ id }), staffId: ctx.actor.id }, async (tx) => {
+    const cur = (await lockItems(tx, [id])).get(id);
+    if (!cur || !isDishState(cur)) throw notDish();
+    assertOutlet(ctx.actor, slotOfState(cur).outlet, `${deleted ? '删除' : '恢复'}「${cur.name}」`);
+    if (cur.deleted === deleted) return { itemId: id, result: {} };
+    if (deleted) {
+      await tx`
+        UPDATE service_items SET active = false, dish_deleted_at = clock_timestamp(), dish_deleted_by = ${ctx.actor.id}, updated_at = clock_timestamp() WHERE id = ${id}`;
+    } else {
+      await tx`UPDATE service_items SET dish_deleted_at = NULL, dish_deleted_by = NULL, updated_at = clock_timestamp() WHERE id = ${id}`;
+    }
+    await writeAudit(tx, {
+      staffId: ctx.actor.id,
+      action: deleted ? 'dish_deleted' : 'dish_restored',
+      targetType: 'item',
+      targetId: id,
+      detail: { name: cur.name, summary: deleted ? `删除菜品「${cur.name}」（下架并从菜品表隐藏${cur.active ? '' : '；删除前已经下架'}）` : `恢复菜品「${cur.name}」（回到菜品表，仍是下架）` },
+      ip: ctx.ip,
+    });
+    return { itemId: id, result: {} };
+  });
+  return { dish: await getDish(deps.sql, deps, run.itemId!), replayed: run.replayed };
+}
+
 // ───────────────────────── 改价记录、导出 ─────────────────────────
 
 const HistoryQuery = z.object({
@@ -722,7 +849,8 @@ const yuan = (cents: number | null) => (cents === null ? null : cents / 100);
 /** 导出全部菜品（Excel）：列与导入认的一样，改完可以原样导回来；后面三列只读 */
 async function dishesXlsx(db: Db, deps: Deps): Promise<{ buffer: Buffer; fileName: string; count: number }> {
   const board = await dishesBoard(db, deps);
-  const rows = board.dishes.map((d) => [
+  // 删除了的（8.1.17）不导出：菜品表上默认也不列
+  const rows = board.dishes.filter((d) => !d.deleted).map((d) => [
     d.id,
     d.name,
     d.category,
@@ -755,6 +883,8 @@ const BoardQuery = z.object({
   q: z.string().max(40).default(''),
   outlet: z.enum(['restaurant', 'water', 'fruit'], '出品口不对').optional(),
   status: z.string().refine(isDishStatusFilter, '状态不对').default('all'),
+  /** 8.1.17：带筛选条件时也列出删除了的 */
+  deleted: z.enum(['0', '1']).optional(),
 });
 
 export function registerDishRoutes(app: FastifyInstance, deps: Deps) {
@@ -765,8 +895,8 @@ export function registerDishRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/api/dining/dishes', { preHandler: view }, async (req) => {
     const q = parse(BoardQuery, req.query ?? {});
-    const filtered = q.q.trim() !== '' || q.outlet !== undefined || q.status !== 'all';
-    return dishesBoard(sql, deps, filtered ? { q: q.q, outlet: q.outlet ?? null, status: q.status as DishFilter['status'] } : undefined);
+    const filtered = q.q.trim() !== '' || q.outlet !== undefined || q.status !== 'all' || q.deleted !== undefined;
+    return dishesBoard(sql, deps, filtered ? { q: q.q, outlet: q.outlet ?? null, status: q.status as DishFilter['status'], showDeleted: q.deleted === '1' } : undefined);
   });
   app.post('/api/dining/dishes', { preHandler: manage }, async (req, reply) => {
     const r = await createDish(deps, req.body, ctxOf(req));
@@ -776,6 +906,11 @@ export function registerDishRoutes(app: FastifyInstance, deps: Deps) {
   app.put('/api/dining/dishes/:id', { preHandler: manage }, async (req) => updateDish(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.post('/api/dining/dishes/:id/active', { preHandler: manage }, async (req) => setDishActive(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.post('/api/dining/dishes/:id/price', { preHandler: guard(DISH_PRICE_PERMISSION) }, async (req) => changeDishPrice(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
+  // 8.1.17（BW10）：排序、批量上下架、删除（下架并隐藏）与恢复
+  app.post('/api/dining/dishes/sort', { preHandler: manage }, async (req) => sortDishes(deps, req.body, ctxOf(req)));
+  app.post('/api/dining/dishes/active-bulk', { preHandler: manage }, async (req) => setDishesActive(deps, req.body, ctxOf(req)));
+  app.post('/api/dining/dishes/:id/delete', { preHandler: manage }, async (req) => setDishDeleted(deps, parse(idParam, req.params).id, req.body, ctxOf(req), true));
+  app.post('/api/dining/dishes/:id/restore', { preHandler: manage }, async (req) => setDishDeleted(deps, parse(idParam, req.params).id, req.body, ctxOf(req), false));
   app.get('/api/dining/dishes/price-changes', { preHandler: view }, async (req) => dishPriceChanges(sql, req.query));
 
   app.get('/api/dining/dishes/export.xlsx', { preHandler: view }, async (req, reply) => {

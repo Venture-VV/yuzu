@@ -94,6 +94,7 @@ export function DishEditor({
   onClose,
   onSaved,
   onRejected,
+  onDelete,
 }: {
   target: DishRow | 'new' | null;
   board: DishesBoard;
@@ -103,6 +104,8 @@ export function DishEditor({
   onSaved: (dish: DishRow, created: boolean) => void;
   /** 服务端明确拒绝了（别人先改过、重名……）：外面把菜品表刷新一下，关掉重新打开看到的就是最新的 */
   onRejected: () => void;
+  /** 删除这道菜（8.1.17 BW10：下架并从菜品表隐藏）：外面问一句再删 */
+  onDelete?: (dish: DishRow) => void;
 }) {
   const dish = target && target !== 'new' ? target : null;
   const [f, setF] = useState<Draft>(() => emptyDraft(outlets));
@@ -237,6 +240,11 @@ export function DishEditor({
       width="max-w-2xl"
       footer={
         <>
+          {dish && onDelete && (
+            <Button variant="danger" className="mr-auto min-h-11" icon={<Trash2 className="size-4" />} disabled={busy !== null} onClick={() => onDelete(dish)} data-testid="dish-delete">
+              删除
+            </Button>
+          )}
           <Button variant="ghost" className="min-h-11" onClick={onClose}>
             取消
           </Button>

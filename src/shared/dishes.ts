@@ -230,6 +230,9 @@ export interface DishRow {
   combo: DishComboRef[];
   /** 被哪些菜当加料、在哪些套餐里（下架、改名时提醒） */
   usedBy: string[];
+  /** 8.1.17（BW10）：同一个点单小类里的先后（null 为没排过）；删除了（下架并从菜品表默认隐藏，能恢复） */
+  sort: number | null;
+  deleted: boolean;
   /** 版本：保存时带回来，别人先改过会被拒绝 */
   rev: string;
   updatedAt: string;
@@ -253,14 +256,17 @@ export interface DishFilter {
   q: string;
   outlet: DiningOutlet | null;
   status: DishStatusFilter;
+  /** 8.1.17（BW10）：删除了的也列出来（勾「显示已删除」）；不带是不列 */
+  showDeleted?: boolean;
 }
 
-type Filterable = Pick<DishRow, 'name' | 'category' | 'outlet' | 'group' | 'stationName' | 'active' | 'remaining' | 'methods'>;
+type Filterable = Pick<DishRow, 'name' | 'category' | 'outlet' | 'group' | 'stationName' | 'active' | 'remaining' | 'methods'> & { deleted?: boolean };
 
 /** 菜品表的搜索与筛选（页面与导出、接口用同一个） */
 export function filterDishes<T extends Filterable>(rows: readonly T[], f: DishFilter): T[] {
   const q = f.q.trim().toLowerCase();
   return rows.filter((d) => {
+    if (d.deleted && !f.showDeleted) return false;
     if (f.outlet && d.outlet !== f.outlet) return false;
     if (f.status === 'on' && !d.active) return false;
     if (f.status === 'off' && d.active) return false;
@@ -269,6 +275,11 @@ export function filterDishes<T extends Filterable>(rows: readonly T[], f: DishFi
     return [d.name, d.category, d.stationName, d.group, DINING_OUTLET_LABELS[d.outlet], ...d.methods].some((s) => s.toLowerCase().includes(q));
   });
 }
+
+/** 同一个点单小类里的先后存成「小类的位置 × 1000 + 第几个」（8.1.17 BW10）：整张表、点单页按它排时同一个小类挨在一起 */
+export const DISH_SORT_SLOT_SPAN = 1000;
+/** 一次最多给多少道菜排序、批量上下架 */
+export const MAX_DISH_BATCH = 500;
 
 /** 沽清一格的字 */
 export const remainingText = (remaining: number | null): string => (remaining === null ? '不限量' : remaining === 0 ? '已沽清' : `剩 ${remaining} 份`);

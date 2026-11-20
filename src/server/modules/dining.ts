@@ -207,7 +207,8 @@ async function kitchenDishes(db: Db, today: string): Promise<MenuDish[]> {
            (SELECT d.remaining FROM dish_limits d WHERE d.item_id = i.id AND d.business_date = ${today}) AS remaining,
            i.dining_outlet, i.dining_group
     FROM service_items i JOIN kitchen_stations s ON s.id = i.station_id AND s.active
-    WHERE i.active AND NOT i.technician_required ORDER BY s.sort_order, s.id, i.sort_order, i.id`;
+    WHERE i.active AND NOT i.technician_required ORDER BY i.dish_sort NULLS LAST, s.sort_order, s.id, i.sort_order, i.id`;
+  // 8.1.17（BW10）：菜品表里排过的按排的先后（同一个小类挨在一起），没排过的在后面、照原来的顺序
   return rows.map(({ prices, diningOutlet, diningGroup, ...r }) => {
     const slot = diningSlotOf({ outlet: diningOutlet, group: diningGroup, category: r.category, stationName: r.stationName });
     // 8.1.17（BW5）：多档的菜带上各档的价，点单时弹出来选；只有一档的不带

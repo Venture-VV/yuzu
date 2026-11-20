@@ -112,6 +112,10 @@ const ACTION_LABELS: Record<string, { label: string; tone: 'neutral' | 'pine' | 
   member_card_lost: { label: '挂失会员卡', tone: 'ember' },
   member_card_deposit: { label: '会员卡押金', tone: 'pine' },
   member_card_returned: { label: '退卡', tone: 'clay' },
+  dishes_sorted: { label: '菜品排序', tone: 'neutral' },
+  dishes_active_bulk: { label: '菜品批量上下架', tone: 'neutral' },
+  dish_deleted: { label: '删除菜品', tone: 'clay' },
+  dish_restored: { label: '恢复菜品', tone: 'neutral' },
 };
 
 function describe(detail: Record<string, unknown>): string {
