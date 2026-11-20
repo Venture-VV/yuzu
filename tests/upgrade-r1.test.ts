@@ -16,7 +16,7 @@ import { createSql, type Sql } from '../src/server/db';
 import { migrate } from '../src/server/migrate';
 import { loadFrontdeskRules } from '../src/server/modules/frontdesk/common';
 import { loadSettings } from '../src/server/modules/settings';
-import { api, login, PASSWORD, TEST_DB, migrationsFrom } from './helpers';
+import { api, login, PASSWORD, TEST_DB, migrationsFrom, skipPositionPrompt } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
@@ -44,6 +44,7 @@ async function upgradeWith(settings: Record<string, unknown>) {
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   }
   expect(await migrate(sql)).toEqual(migrationsFrom('017_r1_funds.sql'));
+  await skipPositionPrompt(sql);
 }
 
 beforeAll(() => {
@@ -115,6 +116,8 @@ describe('迁移 017 · 反结账退款的交班口径只用于升级之后开�
     await sql`INSERT INTO checkout_payments (checkout_id, method, amount) VALUES (${c1!.id}, 'cash', 55700)`;
 
     expect(await migrate(sql)).toEqual(migrationsFrom('017_r1_funds.sql'));
+
+    await skipPositionPrompt(sql);
     const legacy = await sql<{ shiftNo: string; legacyRefund: boolean }[]>`SELECT shift_no, legacy_refund FROM shifts ORDER BY id`;
     expect(legacy).toEqual([
       { shiftNo: 'BC-UP-A', legacyRefund: true },

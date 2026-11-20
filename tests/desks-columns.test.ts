@@ -58,7 +58,7 @@ describe('两个台的入口按权限显示（YB2）', () => {
     expect(deskEntries([OPERATE, CHECKOUT])).toEqual({ issue: false, cashier: false });
   });
 
-  const entriesOf = (role: Role, overrides?: RoleOverrides) => deskEntries(permissionsOf({ role, duties: [] }, overrides));
+  const entriesOf = (role: Role, overrides?: RoleOverrides) => deskEntries(permissionsOf({ position: null, role, duties: [] }, overrides));
 
   it('默认的岗位权限：店主、店总、值班经理、前台店员两个台都看得到，别的岗位都看不到', () => {
     const both = ROLES.filter((r) => entriesOf(r).issue && entriesOf(r).cashier);
@@ -67,7 +67,7 @@ describe('两个台的入口按权限显示（YB2）', () => {
   });
 
   it('后台「岗位权限」去掉其中一项，就把这个岗位分到一个台；两项都去掉只留查看的，两个台都能进去看', () => {
-    const base = permissionsOf({ role: 'clerk', duties: [] });
+    const base = permissionsOf({ position: null, role: 'clerk', duties: [] });
     const without = (...drop: Permission[]) => overridesFrom({ clerk: base.filter((p) => !drop.includes(p)) } satisfies Partial<Record<EditableRole, Permission[]>>);
     expect(entriesOf('clerk', without(CHECKOUT))).toEqual({ issue: true, cashier: false });
     expect(entriesOf('clerk', without(OPERATE))).toEqual({ issue: false, cashier: true });

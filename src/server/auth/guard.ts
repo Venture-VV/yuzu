@@ -12,19 +12,27 @@ declare module 'fastify' {
 }
 
 /**
- * 路由权限守卫：未登录 → 401；首次登录未改密码 → 只放行改密码；无权限 → 403。
+ * 路由权限守卫：未登录 → 401；首次登录未改密码 → 只放行改密码；老账号还没选新岗位（8.1.18，GW7）→ 只放行选岗位；无权限 → 403。
  * 不传权限时只要求登录。
  */
 export function guard(...permissions: Permission[]): preHandlerAsyncHookHandler {
   return async (req: FastifyRequest, _reply: FastifyReply) => {
     if (!req.hasSession) throw unauthorized();
-    if (req.actor.mustChangePassword) {
-      throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '首次登录请先修改密码');
-    }
+    blockUntilReady(req.actor);
     for (const p of permissions) {
       if (!can(req.actor, p)) throw forbidden();
     }
   };
+}
+
+/** 改密码、选新岗位之前，除了会话本身的几个接口都不放行 */
+function blockUntilReady(actor: Actor) {
+  if (actor.mustChangePassword) {
+    throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '首次登录请先修改密码');
+  }
+  if (actor.needsPosition) {
+    throw new AppError(403, 'POSITION_REQUIRED', '系统岗位已更新，请先选择您现在的岗位');
+  }
 }
 
 /** 只要求已登录（允许尚未修改初始密码的员工访问）。 */
@@ -32,13 +40,20 @@ export const sessionOnly: preHandlerAsyncHookHandler = async (req) => {
   if (!req.hasSession) throw unauthorized();
 };
 
+/**
+ * 只要求已登录、不看权限的业务接口（开票申请、自定义字段、会员规则）：老账号没选新岗位之前照样拦下（8.1.18，GW7）。
+ * 首次改密照旧由各接口自己看（原来就允许读的不变）；会话本身的接口（/api/auth/*、营业日）用 sessionOnly。
+ */
+export const sessionReady: preHandlerAsyncHookHandler = async (req) => {
+  if (!req.hasSession) throw unauthorized();
+  if (req.actor.needsPosition) throw new AppError(403, 'POSITION_REQUIRED', '系统岗位已更新，请先选择您现在的岗位');
+};
+
 /** 有其中任一权限即可（后台各分区、看板各页按岗位开放） */
 export function guardAny(...permissions: Permission[]): preHandlerAsyncHookHandler {
   return async (req: FastifyRequest, _reply: FastifyReply) => {
     if (!req.hasSession) throw unauthorized();
-    if (req.actor.mustChangePassword) {
-      throw new AppError(403, 'PASSWORD_CHANGE_REQUIRED', '首次登录请先修改密码');
-    }
+    blockUntilReady(req.actor);
     if (!permissions.some((p) => can(req.actor, p))) throw forbidden();
   };
 }

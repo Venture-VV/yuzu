@@ -41,7 +41,7 @@ import { PAY_MODE_LABELS, THREE_WAY_STATUS_LABELS } from '@shared/payments';
 import { can, permissionsOf, type Duty, type Role } from '@shared/permissions';
 import { PAY_METHOD_LABELS, type PayMethod } from '@shared/purchasing';
 import { formatQty, lineAmountCents } from '@shared/quantity';
-import { loadRoleOverrides } from '../../auth/role-permissions';
+import { loadRoleOverrides, staffSubject } from '../../auth/role-permissions';
 import type { Db } from '../../db';
 import type { BudgetCheckItem } from '@shared/budgets';
 import { budgetSummary } from '../budgets';
@@ -111,11 +111,12 @@ async function loadRequests(db: Db, where: { pending?: boolean; ids?: number[]; 
 
 /** 在用的员工（判断某一级有没有人能审） */
 async function activeSubjects(db: Db): Promise<ApproverSubject[]> {
-  const rows = await db<{ id: number; role: Role; duties: Duty[] | null }[]>`SELECT id, role, duties FROM staff WHERE active`;
+  const rows = await db<{ id: number; role: Role; duties: Duty[] | null; position: unknown; permissionAdjust: unknown }[]>`
+    SELECT id, role, duties, position, permission_adjust FROM staff WHERE active`;
   const overrides = await loadRoleOverrides(db);
   return rows.map((r) => {
     const duties = r.duties ?? [];
-    return { id: Number(r.id), role: r.role, duties, permissions: permissionsOf({ role: r.role, duties }, overrides) };
+    return { id: Number(r.id), role: r.role, duties, permissions: permissionsOf(staffSubject(r), overrides) };
   });
 }
 

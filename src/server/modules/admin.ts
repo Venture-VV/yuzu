@@ -4,7 +4,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ADMIN_PERMISSIONS, type AdminOverview, type RolePermissionMatrix, type RuleEntry, type RuleGroup } from '@shared/admin';
+import { ADMIN_PERMISSIONS, type AdminOverview, type EditablePosition, type RolePermissionMatrix, type RuleEntry, type RuleGroup } from '@shared/admin';
 import { PRINT_MODE_LABELS, type PrintMode } from '@shared/tunables';
 import { describeBusinessHours } from '@shared/business-date';
 import { SHIFT_MODE_LABELS } from '@shared/checkout';
@@ -24,20 +24,7 @@ import { DEFAULT_PAYMENT_RULES, payDaysLabel } from '@shared/payments';
 import { DEFAULT_EXPENSE_RULES } from '@shared/expenses';
 import { DEFAULT_CANTEEN_SETTINGS, mealWindowText } from '@shared/canteen';
 import { PATROL_ROUND_DEFAULT_MINUTES } from '@shared/patrol';
-import {
-  ALL_PERMISSIONS,
-  can,
-  EDITABLE_ROLES,
-  LOCKED_PERMISSIONS,
-  overridesFrom,
-  PERMISSION_LABELS,
-  roleDefault,
-  roleHas,
-  ROLES,
-  type Permission,
-  type Role,
-  type RoleOverrides,
-} from '@shared/permissions';
+import { ALL_PERMISSIONS, can, EDITABLE_ROLES, LOCKED_PERMISSIONS, overridesFrom, PERMISSION_LABELS, roleDefault, roleHas, ROLES, type Permission, type Role } from '@shared/permissions';
 import type { Db } from '../db';
 import { loadPaymentRules, PAYMENT_RULES_KEY } from './payments/rules';
 import { loadExpenseRules } from './expenses';
@@ -45,6 +32,7 @@ import { loadCanteenSettings } from './canteen/settings';
 import { loadPatrolSettings } from './patrol/core';
 import { guard, guardAny } from '../auth/guard';
 import { loadRoleOverrides } from '../auth/role-permissions';
+import { applyAdjust, POSITION_KEYS, positionDefaults, positionLabel, type PositionOverrides } from '@shared/positions';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
@@ -84,7 +72,7 @@ const approvals = (r: ApprovalRules) => {
   const on = (Object.keys(APPROVAL_RULE_LABELS) as (keyof ApprovalRules)[]).filter((k) => r[k]).map((k) => APPROVAL_RULE_LABELS[k]);
   return on.length ? `${on.join('、')}（盘点调整固定需要）` : '只有盘点调整需要';
 };
-const overrideCount = (o: RoleOverrides) => Object.values(o).reduce((n, x) => n + (x?.add.length ?? 0) + (x?.remove.length ?? 0), 0);
+const overrideCount = (o: Partial<Record<string, { add: unknown[]; remove: unknown[] }>>) => Object.values(o).reduce((n, x) => n + (x?.add.length ?? 0) + (x?.remove.length ?? 0), 0);
 
 interface Meta {
   updatedAt: string | null;
@@ -1313,12 +1301,13 @@ export async function ruleCatalog(db: Db): Promise<RuleEntry[]> {
   tun('expiry_remind_days', 'inventory', '批次临期提醒', (v: number) => `到期前 ${v} 天`, 'V18');
   tun('wecom_weekly_push', 'erp', '每周一推企业微信', (v: boolean) => (v ? '推送（机器人地址在服务器 .env）' : '不推'), 'V19、V20；每周一 9:00');
   // ── 岗位与权限 ──
-  const changed = overrideCount(overrides);
+  const changed = overrideCount(overrides.roles) + overrideCount(overrides.positions);
   add({
     key: 'role_permissions',
     group: 'staff',
     label: '岗位权限',
     value: changed ? `在默认基础上调整了 ${changed} 处` : '按默认',
+    // 8.1.18：新岗位按「分部门岗位职权配置」的建议值（docs/POSITIONS_V8118.md），超级管理员可以逐项开关
     defaultValue: '按默认',
     pending: true,
     section: 'permissions',
@@ -1547,9 +1536,22 @@ export async function permissionMatrix(db: Db): Promise<RolePermissionMatrix> {
     SELECT s.updated_at, st.display_name AS updated_by FROM settings s LEFT JOIN staff st ON st.id = s.updated_by WHERE s.key = 'role_permissions'`;
   const staff = await db<{ role: Role; n: number }[]>`SELECT role, count(*)::int AS n FROM staff WHERE active GROUP BY role`;
   const per = (f: (r: Role, p: Permission) => boolean) => Object.fromEntries(ROLES.map((r) => [r, ALL_PERMISSIONS.filter((p) => f(r, p))])) as Record<Role, Permission[]>;
+  const posStaff = await db<{ position: string; n: number }[]>`SELECT position, count(*)::int AS n FROM staff WHERE active AND position IS NOT NULL GROUP BY position`;
+  const [posMeta] = await db<{ updatedAt: string; updatedBy: string | null }[]>`
+    SELECT s.updated_at, st.display_name AS updated_by FROM settings s LEFT JOIN staff st ON st.id = s.updated_by WHERE s.key = 'position_permissions'`;
+  const positionKeys = POSITION_KEYS.filter((k): k is EditablePosition => k !== 'president');
   return {
-    overrides,
-    effective: per((r, p) => roleHas(r, p, overrides)),
+    positions: {
+      overrides: overrides.positions,
+      defaults: Object.fromEntries(positionKeys.map((k) => [k, positionDefaults(k, ALL_PERMISSIONS)])) as Record<EditablePosition, Permission[]>,
+      effective: Object.fromEntries(positionKeys.map((k) => [k, positionPermissions(k, overrides.positions)])) as Record<EditablePosition, Permission[]>,
+      staffCount: Object.fromEntries(posStaff.map((x) => [x.position, x.n])),
+      updatedAt: posMeta ? new Date(posMeta.updatedAt).toISOString() : null,
+      updatedBy: posMeta?.updatedBy ?? null,
+      needsPosition: Number((await db<{ n: number }[]>`SELECT count(*)::int AS n FROM staff WHERE active AND needs_position`)[0]?.n ?? 0),
+    },
+    overrides: overrides.roles,
+    effective: per((r, p) => roleHas(r, p, overrides.roles)),
     defaults: per((r, p) => (r === 'owner' ? true : !LOCKED_PERMISSIONS.includes(p) && roleDefault(r, p))),
     updatedAt: meta ? new Date(meta.updatedAt).toISOString() : null,
     updatedBy: meta?.updatedBy ?? null,
@@ -1559,6 +1561,19 @@ export async function permissionMatrix(db: Db): Promise<RolePermissionMatrix> {
 
 const PermissionInput = z.object({
   roles: z.partialRecord(z.enum(EDITABLE_ROLES), z.array(z.enum(ALL_PERMISSIONS as [Permission, ...Permission[]], '有不认识的权限，请刷新页面后重试')).max(ALL_PERMISSIONS.length)),
+});
+
+/** 这个岗位按后台调整以后的权限（不含个人微调） */
+function positionPermissions(key: EditablePosition, overrides: PositionOverrides): Permission[] {
+  const set = applyAdjust(positionDefaults(key, ALL_PERMISSIONS), overrides[key], LOCKED_PERMISSIONS);
+  return ALL_PERMISSIONS.filter((p) => set.has(p) && !LOCKED_PERMISSIONS.includes(p));
+}
+
+const PositionPermissionInput = z.object({
+  positions: z.partialRecord(
+    z.enum(POSITION_KEYS.filter((k) => k !== 'president') as [EditablePosition, ...EditablePosition[]]),
+    z.array(z.enum(ALL_PERMISSIONS as [Permission, ...Permission[]], '有不认识的权限，请刷新页面后重试')).max(ALL_PERMISSIONS.length),
+  ),
 });
 
 export function registerAdminRoutes(app: FastifyInstance, deps: Deps) {
@@ -1579,7 +1594,10 @@ export function registerAdminRoutes(app: FastifyInstance, deps: Deps) {
     await sql.begin(async (tx) => {
       await lockSettings(tx);
       const before = await loadRoleOverrides(tx);
-      const target = Object.fromEntries(EDITABLE_ROLES.map((r) => [r, roles[r] ?? ALL_PERMISSIONS.filter((p) => roleHas(r, p, before))])) as Record<(typeof EDITABLE_ROLES)[number], Permission[]>;
+      const target = Object.fromEntries(EDITABLE_ROLES.map((r) => [r, roles[r] ?? ALL_PERMISSIONS.filter((p) => roleHas(r, p, before.roles))])) as Record<
+        (typeof EDITABLE_ROLES)[number],
+        Permission[]
+      >;
       const after = overridesFrom(target);
       await tx`
         INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('role_permissions', ${tx.json(after as never)}, now(), ${req.actor.id})
@@ -1588,7 +1606,40 @@ export function registerAdminRoutes(app: FastifyInstance, deps: Deps) {
         staffId: req.actor.id,
         action: 'settings_updated',
         targetType: 'settings',
-        detail: { key: 'role_permissions', before, after },
+        detail: { key: 'role_permissions', before: before.roles, after },
+        ip: req.ip,
+      });
+    });
+    return permissionMatrix(sql);
+  });
+
+  // 新岗位的权限开关（8.1.18，GW8）：只提交要改的岗位，存为相对岗位模板的增减；只有超级管理员（总裁）改，店主专属的权限不能授出
+  app.put('/api/admin/position-permissions', { preHandler: guard('settings.manage') }, async (req) => {
+    const { positions } = parse(PositionPermissionInput, req.body);
+    for (const [key, list] of Object.entries(positions)) {
+      const locked = list?.find((p) => LOCKED_PERMISSIONS.includes(p));
+      if (locked) throw badRequest(`「${PERMISSION_LABELS[locked]}」只属于总裁，不能授给${positionLabel(key as EditablePosition)}`);
+    }
+    await sql.begin(async (tx) => {
+      await lockSettings(tx);
+      const before = (await loadRoleOverrides(tx)).positions;
+      const after: PositionOverrides = {};
+      for (const key of POSITION_KEYS) {
+        if (key === 'president') continue;
+        const want = positions[key] ?? positionPermissions(key, before);
+        const dflt = positionDefaults(key, ALL_PERMISSIONS);
+        const add = ALL_PERMISSIONS.filter((p) => want.includes(p) && !dflt.includes(p));
+        const remove = ALL_PERMISSIONS.filter((p) => !want.includes(p) && dflt.includes(p));
+        if (add.length || remove.length) after[key] = { add, remove };
+      }
+      await tx`
+        INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('position_permissions', ${tx.json(after as never)}, now(), ${req.actor.id})
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`;
+      await writeAudit(tx, {
+        staffId: req.actor.id,
+        action: 'settings_updated',
+        targetType: 'settings',
+        detail: { key: 'position_permissions', before, after },
         ip: req.ip,
       });
     });

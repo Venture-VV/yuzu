@@ -689,12 +689,12 @@ describe('P2-08 使用率与 P2-10、11 营销成本', () => {
     expect((await api(ctx.app, finance, 'GET', `/api/marketing-cost?from=${today}&to=${today}`)).status).toBe(403);
     expect((await api(ctx.app, finance, 'GET', '/api/marketing-cost/params')).status).toBe(403);
     expect((await api(ctx.app, ctx.clerk, 'GET', `/api/marketing-cost?from=${today}&to=${today}`)).status).toBe(403);
-    expect(permissionsOf({ role: 'store_manager', duties: ['cost'] })).not.toContain('marketing.cost');
-    expect(permissionsOf({ role: 'store_manager', duties: [] })).toContain('marketing.cost');
-    expect(permissionsOf({ role: 'owner', duties: ['payable'] })).toContain('marketing.cost');
+    expect(permissionsOf({ position: null, role: 'store_manager', duties: ['cost'] })).not.toContain('marketing.cost');
+    expect(permissionsOf({ position: null, role: 'store_manager', duties: [] })).toContain('marketing.cost');
+    expect(permissionsOf({ position: null, role: 'owner', duties: ['payable'] })).toContain('marketing.cost');
     // 后台把「营销成本测算」加给后勤岗位：没有财务职责的有，有财务职责的仍然没有
-    expect(permissionsOf({ role: 'backoffice', duties: ['payable'] }, { backoffice: { add: ['marketing.cost'], remove: [] } })).not.toContain('marketing.cost');
-    expect(permissionsOf({ role: 'backoffice', duties: ['stock'] }, { backoffice: { add: ['marketing.cost'], remove: [] } })).toContain('marketing.cost');
+    expect(permissionsOf({ position: null, role: 'backoffice', duties: ['payable'] }, { backoffice: { add: ['marketing.cost'], remove: [] } })).not.toContain('marketing.cost');
+    expect(permissionsOf({ position: null, role: 'backoffice', duties: ['stock'] }, { backoffice: { add: ['marketing.cost'], remove: [] } })).toContain('marketing.cost');
     // 日结里没有「营销成本」：测算不写任何账
     const st = (await api(ctx.app, ctx.owner, 'GET', `/api/settlements/${today}`)).body;
     expect(JSON.stringify(st)).not.toContain('营销成本');

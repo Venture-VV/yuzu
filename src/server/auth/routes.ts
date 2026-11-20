@@ -2,11 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { businessDateOf } from '@shared/business-date';
 import { permissionsOf, type Duty, type Role } from '@shared/permissions';
-import { loadRoleOverrides } from './role-permissions';
+import { ADMIN_LEVEL_LABELS, positionOf, selfSelectablePositions } from '@shared/positions';
+import { loadRoleOverrides, positionFrom, sanitizeAdjust } from './role-permissions';
 import type { SessionInfo } from '@shared/types';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
-import { badRequest, unauthorized } from '../lib/errors';
+import { badRequest, unauthorized, unprocessable } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { loadSettings } from '../modules/settings';
 import { loadTechnicianRules } from '../modules/technicians';
@@ -49,8 +50,17 @@ async function sessionInfoInStore({ sql, config }: Deps, actor: Actor): Promise<
   >`SELECT (EXISTS (SELECT 1 FROM members WHERE is_synthetic) OR EXISTS (SELECT 1 FROM materials WHERE is_synthetic) OR EXISTS (SELECT 1 FROM hand_tags WHERE is_synthetic)) AS exists`;
   const { storeName, ...rules } = settings;
   return {
-    staff: { id: actor.id, username: actor.username, displayName: actor.displayName, role: actor.role, duties: actor.duties, mustChangePassword: actor.mustChangePassword },
-    permissions: actor.permissions ?? permissionsOf(actor, await loadRoleOverrides(sql), { financeExclusion: settings.financeHidesMarketingCost }),
+    staff: {
+      id: actor.id,
+      username: actor.username,
+      displayName: actor.displayName,
+      role: actor.role,
+      duties: actor.duties,
+      mustChangePassword: actor.mustChangePassword,
+      position: actor.position ?? null,
+      needsPosition: actor.needsPosition === true,
+    },
+    permissions: actor.permissions ?? (await permissionsOfStaff(sql, actor, settings.financeHidesMarketingCost)),
     storeName,
     store: current ?? { id: storeId, code: '', name: storeName },
     stores,
@@ -71,6 +81,16 @@ async function sessionInfoInStore({ sql, config }: Deps, actor: Actor): Promise<
     miniProgram: (await loadMpRules(sql)).enabled,
   };
 }
+
+/** 登录、选岗以后会话里还没算好权限时：按员工档案（岗位、个人微调）与后台调整算 */
+async function permissionsOfStaff(sql: Deps['sql'], actor: Actor, financeExclusion: boolean) {
+  const [row] = await sql<{ permissionAdjust: unknown }[]>`SELECT permission_adjust FROM staff WHERE id = ${actor.id}`;
+  return permissionsOf({ role: actor.role, duties: actor.duties, position: actor.position ?? null, adjust: sanitizeAdjust(row?.permissionAdjust) }, await loadRoleOverrides(sql), {
+    financeExclusion,
+  });
+}
+
+const ChoosePositionInput = z.object({ position: z.string().min(1, '请选择岗位') });
 
 export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
   const { sql, config } = deps;
@@ -104,7 +124,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
     const { username, password } = parse(LoginInput, req.body);
     checkLock(username, req.ip);
     const rows = await sql<(Actor & { passwordHash: string; active: boolean })[]>`
-      SELECT id, username, display_name, role, duties, must_change_password, password_hash, active
+      SELECT id, username, display_name, role, duties, must_change_password, password_hash, active, position, needs_position
       FROM staff WHERE username = ${username}`;
     const staff = rows[0];
     const ok = staff ? await verifyPassword(password, staff.passwordHash) : false;
@@ -134,6 +154,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
       role: staff.role as Role,
       duties: (staff.duties ?? []) as Duty[],
       mustChangePassword: staff.mustChangePassword,
+      position: positionFrom(staff.position),
+      needsPosition: staff.needsPosition === true,
     };
     // 登录进最近用过的门店（会话里没记门店时取能进的第一家，与会话解析同一个顺序，8.0.22）
     actor.storeId = (await allowedStores(sql, actor))[0]?.id ?? DEFAULT_STORE_ID;
@@ -163,6 +185,49 @@ export function registerAuthRoutes(app: FastifyInstance, deps: Deps) {
     const settings = await loadSettings(deps.sql);
     const now = new Date();
     return { today: businessDateOf(now, deps.config.timezone, settings.businessDayStartHour), calendarToday: businessDateOf(now, deps.config.timezone, 0) };
+  });
+
+  // 老账号第一次登录选新岗位（8.1.18，GW7）：能选的部门与岗位按原来的岗位与职责限定（selfSelectablePositions，店主定方案 B），选完不再提示；
+  // 后台员工名单标「自选岗位」，超级管理员核对、可以再改
+  app.get('/api/auth/position-options', { preHandler: sessionOnly }, async (req) => {
+    const options = selfSelectablePositions(req.actor.role, req.actor.duties).map((p) => ({
+      key: p.key,
+      department: p.department,
+      title: p.title,
+      level: p.level,
+      levelLabel: ADMIN_LEVEL_LABELS[p.level],
+    }));
+    return { needsPosition: req.actor.needsPosition === true, options };
+  });
+
+  app.post('/api/auth/position', { preHandler: sessionOnly }, async (req) => {
+    if (req.actor.mustChangePassword) throw unprocessable('PASSWORD_CHANGE_REQUIRED', '请先修改密码');
+    const { position: raw } = parse(ChoosePositionInput, req.body);
+    const position = positionFrom(raw);
+    const allowed = selfSelectablePositions(req.actor.role, req.actor.duties);
+    if (!position || !allowed.some((p) => p.key === position)) throw badRequest('不能选这个岗位，请联系总裁在后台调整', { field: 'position' });
+    const def = positionOf(position);
+    const updated = await sql.begin(async (tx) => {
+      // 只认还要选的账号（两个页面同时提交时第二次不再改）
+      const [before] = await tx<{ role: string; duties: string[]; needsPosition: boolean }[]>`
+        SELECT role, duties, needs_position FROM staff WHERE id = ${req.actor.id} FOR NO KEY UPDATE`;
+      if (!before?.needsPosition) return false;
+      await tx`
+        UPDATE staff SET position = ${position}, role = ${def.legacyRole}, duties = ${[...def.duties].sort()},
+               needs_position = false, position_chosen_at = now(), updated_at = now()
+        WHERE id = ${req.actor.id}`;
+      await writeAudit(tx, {
+        staffId: req.actor.id,
+        action: 'position_chosen',
+        targetType: 'staff',
+        targetId: req.actor.id,
+        detail: { before: { role: before.role, duties: before.duties }, position },
+        ip: req.ip,
+      });
+      return true;
+    });
+    if (!updated) throw unprocessable('POSITION_ALREADY_SET', '已经选过岗位了，要改请联系总裁');
+    return buildSessionInfo(deps, { ...req.actor, role: def.legacyRole, duties: [...def.duties], position, needsPosition: false, permissions: undefined });
   });
 
   app.post('/api/auth/change-password', { preHandler: sessionOnly }, async (req) => {

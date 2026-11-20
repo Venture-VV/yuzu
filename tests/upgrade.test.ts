@@ -12,7 +12,7 @@ import { createSql, type Sql } from '../src/server/db';
 import type { Actor } from '../src/server/lib/context';
 import { migrate } from '../src/server/migrate';
 import { consume, recharge } from '../src/server/modules/wallet';
-import { api, login, PASSWORD, TEST_DB, migrationsFrom } from './helpers';
+import { api, login, PASSWORD, TEST_DB, migrationsFrom, skipPositionPrompt } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 let sql: Sql;
@@ -125,6 +125,7 @@ beforeAll(async () => {
 
   // 升级：增量执行 002 之后的全部迁移
   const applied = await migrate(sql);
+  await skipPositionPrompt(sql);
   expect(applied).toEqual(migrationsFrom('002_inventory.sql'));
   app = await buildApp(sql, config);
 }, 60_000);

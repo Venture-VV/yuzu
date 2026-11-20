@@ -85,6 +85,8 @@ test.describe('v0.6.0 管理后台', () => {
     await login(page, 'linlan');
     try {
       await page.goto('/admin/permissions');
+      // 8.1.18：旧岗位的表在第二个页签（第一个是新岗位）
+      await page.getByRole('radio', { name: '旧岗位与专用账号' }).click();
       const cell = page.getByTestId('perm-duty_manager-ledger.readHistory');
       await expect(cell).toHaveAttribute('aria-checked', 'true');
       await cell.click();

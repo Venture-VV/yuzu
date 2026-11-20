@@ -13,6 +13,7 @@ import type { CardDepositDayTotals, MemberCardType, MemberFormRules } from './me
 import type { BonusLotRow, MemberChannel } from './members';
 import type { MemberGradeFields, MemberGradeInfo } from './membership';
 import type { Duty, Permission, Role } from './permissions';
+import type { PositionKey } from './positions';
 import type { Tunables } from './tunables';
 
 export type AppEnv = 'development' | 'trial' | 'production' | 'test';
@@ -28,6 +29,10 @@ export interface StaffBrief {
   role: Role;
   duties: Duty[];
   mustChangePassword: boolean;
+  /** 新岗位（8.1.18，docs/POSITIONS_V8118.md）；没有的是还没重新选岗的老账号或专用账号 */
+  position: PositionKey | null;
+  /** 老账号这一版以后第一次登录要先选新岗位（GW7） */
+  needsPosition: boolean;
 }
 
 /** 经营规则（会话里带到各页面）；8.0.7 起加上「可调的数值」（Tunables，@shared/tunables） */
@@ -504,9 +509,17 @@ export interface StaffRecord {
   displayName: string;
   role: Role;
   duties: Duty[];
-  /** 所属部门（v0.7.8） */
+  /** 所属部门（v0.7.8；8.1.18 起叫「领料小仓」，部门申购、本部门小仓用） */
   departmentId: number | null;
   departmentName: string | null;
+  /** 新岗位（8.1.18）：部门在岗位里（positionOf(position).department） */
+  position: PositionKey | null;
+  /** 个人微调（相对岗位模板的增减，GW8） */
+  permissionAdjust: { add: Permission[]; remove: Permission[] };
+  /** 老账号还没自己选新岗位 */
+  needsPosition: boolean;
+  /** 自己选岗的时间（超级管理员核对后在档案里改过的为 null） */
+  positionChosenAt: string | null;
   active: boolean;
   mustChangePassword: boolean;
   lastLoginAt: string | null;

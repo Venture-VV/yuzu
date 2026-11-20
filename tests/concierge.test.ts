@@ -99,8 +99,8 @@ describe('8.0.12 管家部原生集成', () => {
     expect((await api(ctx.app, ctx.clerk, 'GET', endpoint)).status).toBe(403);
     expect((await api(ctx.app, butler, 'GET', '/api/members?q=合成')).status).toBe(403);
     expect((await api(ctx.app, butler, 'GET', '/api/concierge/native-members?q=合成')).status).toBe(200);
-    expect(permissionsOf({ role: 'backoffice', duties: ['concierge'] })).not.toContain('consume.create');
-    expect(permissionsOf({ role: 'backoffice', duties: ['concierge_manager'] })).not.toContain('staff.manage');
+    expect(permissionsOf({ position: null, role: 'backoffice', duties: ['concierge'] })).not.toContain('consume.create');
+    expect(permissionsOf({ position: null, role: 'backoffice', duties: ['concierge_manager'] })).not.toContain('staff.manage');
   });
   it('升级空名单，不自动纳入原生会员；从000001编码且收银卡号独立', async () => {
     await createMember(ctx, '原生旧会员', '19900001001');

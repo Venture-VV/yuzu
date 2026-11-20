@@ -354,6 +354,7 @@ export const ALL_MIGRATIONS: readonly string[] = [
   '191_technician_admin.sql',
   '192_member_cards_v8115.sql',
   '193_room_center_ops.sql',
+  '194_positions.sql',
   '196_dishes_v8117.sql',
   '197_combo_parts_v8117.sql',
   '198_store_price_changes.sql',
@@ -365,4 +366,12 @@ export function migrationsFrom(first: string): string[] {
   const i = ALL_MIGRATIONS.indexOf(first);
   if (i < 0) throw new Error(`迁移清单里没有 ${first}`);
   return ALL_MIGRATIONS.slice(i);
+}
+
+/**
+ * 8.1.18（迁移 194，docs/POSITIONS_V8118.md GW7）起，升级前就有的员工账号第一次登录要先自己选新岗位，没选之前接口都回 POSITION_REQUIRED。
+ * 验别的迁移的升级用例不管选岗，升级完把这一步当作已经选过（照旧按旧岗位的权限）；选岗本身由 tests/upgrade-positions.test.ts 验。
+ */
+export async function skipPositionPrompt(sql: Sql) {
+  await sql`UPDATE staff SET needs_position = false`;
 }

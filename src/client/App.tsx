@@ -16,6 +16,7 @@ import { LoginPage } from './features/auth/LoginPage';
 // 网络与同步随首屏加载：断网时还要打得开（按需加载的页面那时可能下载不下来）
 import { NetworkPage } from './features/network/NetworkPage';
 import { ChangePasswordPage } from './features/auth/ChangePasswordPage';
+import { ChoosePositionPage } from './features/auth/ChoosePositionPage';
 import { WorkbenchPage } from './features/workbench/WorkbenchPage';
 import { FrontdeskPage } from './features/frontdesk/FrontdeskPage';
 import { DeskLayout } from './features/frontdesk/desk';
@@ -183,6 +184,14 @@ function AuthGate({ shell = 'app' }: { shell?: 'app' | 'admin' | 'erp' | 'bare' 
     return (
       <SessionProvider value={session.data}>
         <ChangePasswordPage forced />
+      </SessionProvider>
+    );
+  }
+  // 老账号这一版以后第一次登录先选新岗位（8.1.18，GW7）
+  if (session.data.staff.needsPosition) {
+    return (
+      <SessionProvider value={session.data}>
+        <ChoosePositionPage />
       </SessionProvider>
     );
   }

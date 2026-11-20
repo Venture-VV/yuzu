@@ -83,7 +83,7 @@ export const adminRoutes: RouteObject[] = [
   {
     path: 'staff',
     element: (
-      <AdminPage section="staff" description="员工账号、岗位与库存职责、重置密码；岗位能做什么见「岗位权限」。">
+      <AdminPage section="staff" description="员工账号（先选部门、再选岗位）、重置密码；岗位能做什么见「岗位权限」。">
         <StaffTab />
       </AdminPage>
     ),

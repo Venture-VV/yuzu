@@ -14,7 +14,7 @@ import { hashPassword } from '../src/server/auth/password';
 import { loadConfig } from '../src/server/config';
 import { createSql, type Sql } from '../src/server/db';
 import { migrate } from '../src/server/migrate';
-import { api, login, PASSWORD, TEST_DB } from './helpers';
+import { api, login, PASSWORD, TEST_DB, skipPositionPrompt } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const config = loadConfig({ databaseUrl: TEST_DB, env: 'test', logLevel: 'silent' });
@@ -60,6 +60,7 @@ describe('库里有旧儿童区数据时升级', () => {
       RETURNING id`;
     childVisitId = visit!.id;
     expect(await migrate(sql)).toEqual(await migrationsAfter007());
+    await skipPositionPrompt(sql);
     app = await buildApp(sql, config);
   }, 60_000);
 
@@ -142,6 +143,7 @@ describe('没有旧儿童区数据时升级', () => {
     await sql`UPDATE settings SET value = '3000000' WHERE key = 'max_consume_cents'`;
     await sql`INSERT INTO hand_tags (code, zone) VALUES ('A001', 'male'), ('B001', 'female')`;
     expect(await migrate(sql)).toEqual(await migrationsAfter007());
+    await skipPositionPrompt(sql);
   }, 60_000);
 
   afterAll(async () => {

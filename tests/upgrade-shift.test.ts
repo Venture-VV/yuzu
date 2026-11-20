@@ -16,7 +16,7 @@ import { migrate } from '../src/server/migrate';
 import { checkout } from '../src/server/modules/frontdesk/checkout';
 import { checkin } from '../src/server/modules/frontdesk/visits';
 import { recharge } from '../src/server/modules/wallet';
-import { api, login, PASSWORD, TEST_DB, migrationsFrom } from './helpers';
+import { api, login, PASSWORD, TEST_DB, migrationsFrom, skipPositionPrompt } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const config = loadConfig({ databaseUrl: TEST_DB, env: 'test', logLevel: 'silent' });
@@ -166,6 +166,8 @@ beforeAll(async () => {
   await sql`DROP TABLE bookings`;
 
   expect(await migrate(sql)).toEqual(migrationsFrom('016_shift_boundary.sql'));
+
+  await skipPositionPrompt(sql);
   // 升级后的收款这里按小额核对班次；会员体系 v2 的首充 / 续充最低（默认 5,000 元）设成不限
   await sql`INSERT INTO settings (key, value) VALUES ('membership_rules', '{"firstRechargeMinCents": 0, "topUpMinCents": 0}'::jsonb)`;
   app = await buildApp(sql, config);

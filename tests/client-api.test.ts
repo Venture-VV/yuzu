@@ -191,4 +191,32 @@ describe('连不上服务器时不发（WL4）', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(conn.connectionSnapshot().state).toBe('offline');
   });
+
+  it('断网以前发出去的页面请求，断网以后才回来：不当成连上了，照样判定断了（e2e/resilience.spec.ts 断网提示偶发等不到）', async () => {
+    vi.useFakeTimers();
+    const conn = await import('../src/client/lib/connection');
+    let down = false;
+    const held: { release?: () => void } = {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url === '/api/slow' && !held.release) return new Promise<Response>((resolve) => (held.release = () => resolve(json(200, { ok: 1 }))));
+        if (down) return Promise.reject(new TypeError('Failed to fetch'));
+        return Promise.resolve(json(200, PING));
+      }),
+    );
+    const slow = mod.request('GET', '/api/slow'); // 断网以前发出去的页面请求
+    down = true; // 这时网断了
+    conn.noteNetworkFailure(); // 别的请求发不出去
+    await vi.advanceTimersByTimeAsync(100); // 第一次检查问不到：还在「检查中」
+    expect(conn.connectionSnapshot().state).toBe('checking');
+    held.release!(); // 那个页面请求这时才回来
+    await expect(slow).resolves.toEqual({ ok: 1 });
+    await vi.advanceTimersByTimeAsync(5_000); // 第二次检查也问不到
+    expect(conn.connectionSnapshot().state).toBe('offline');
+    // 断了以后才发出去的请求回来了，才算连上
+    down = false;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(conn.connectionSnapshot().state).toBe('online');
+  });
 });

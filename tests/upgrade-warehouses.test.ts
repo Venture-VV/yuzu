@@ -12,7 +12,7 @@ import { createSql, type Sql } from '../src/server/db';
 import { migrate } from '../src/server/migrate';
 import { todayIn } from '../src/server/modules/inventory/common';
 import { inventoryChecks } from '../src/server/modules/inventory/reports';
-import { api, login, PASSWORD, TEST_DB, migrationsFrom } from './helpers';
+import { api, login, PASSWORD, TEST_DB, migrationsFrom, skipPositionPrompt } from './helpers';
 import { resetPublicSchema } from './test-db';
 
 const MIGRATIONS = new URL('../src/server/migrations/', import.meta.url);
@@ -81,6 +81,8 @@ describe('迁移 029 · 原有库存与还没生效的领料、退回', () => {
     await lineOf(pendingIssue, 1_000);
 
     expect(await migrate(sql)).toEqual(migrationsFrom('029_warehouses.sql'));
+
+    await skipPositionPrompt(sql);
     const docs = await sql<{ id: number; warehouseId: number | null }[]>`SELECT id, warehouse_id FROM inv_docs ORDER BY id`;
     const whOf = (id: number) => docs.find((d) => d.id === id)!.warehouseId;
     const [bathWh] = await sql<{ id: number }[]>`SELECT id FROM warehouses WHERE department_id = ${dept!.id}`;
