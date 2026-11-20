@@ -103,7 +103,7 @@ describe('会员档级与 VIP 柜（会员体系 v2，v0.7.23）', () => {
 
   it('前台规则只剩手牌的几项：旧页面带来的等级门槛、VIP 柜授权开关（8.0.4 起归会员权益）不再保存；只改提交的字段；店员不能改规则', async () => {
     const before = (await api(ctx.app, ctx.owner, 'GET', '/api/frontdesk/rules')).body;
-    expect(before).toEqual({ selfVoidMinutes: 15, lostTagFeeCents: 20000, overtimeGraceMinutes: 15 });
+    expect(before).toEqual({ selfVoidMinutes: 15, lostTagFeeCents: 20000, overtimeGraceMinutes: 15, overtimeSurchargeHourlyCents: 0 });
     expect(await setRules({ vipLevelThresholds: [0, 5_000_000, 5_000_000] })).toEqual(before);
     expect(await setRules({ vipOverrideEnabled: true })).toEqual(before);
     expect((await api(ctx.app, ctx.owner, 'GET', '/api/vip-lockers')).body.rules.overrideEnabled).toBe(false);

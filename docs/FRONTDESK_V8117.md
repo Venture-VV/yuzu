@@ -36,12 +36,29 @@
   - 点单页（事务外已经核对）、钟房派钟与加钟、小程序扫码点餐不带这一项；平板电子菜单按平板账号的岗位核对是另一份（BW-3 的另一半）。
 - **页面**：「加项目」里，这个岗位不能下单的出品口的菜标「不能在水吧下单」、不能点（按点单页菜单里那道菜的出品口；服务端照样核对）。
 
+## 4. BW-1 超时加收按小时先填好、到点自动提醒
+
+### 4.1 超时加收
+
+- 后台「手牌与前台 → 前台规则」多一项「超时加收：每超 1 小时（元）」（`frontdesk_rules.overtimeSurchargeHourlyCents`，分；默认 0 = 不算价；0–¥1,000；按店，第二家店存自己的）。只有能改经营规则的人（店主）改。
+- 客人卡「异常处置 → 加收」：这位客人在店超过 12 小时、又设了每小时的价时，金额先填好 = 超过 12 小时以后的小时数 × 每小时的价，**不足 1 小时按 1 小时算**（超 1 分钟算 1 小时；`overtimeSurchargeOf`，`src/shared/frontdesk-v8117.ts`），一笔最多 ¥10,000（与手填的上限一样，超了按上限填并写明）；原因先填「超时 N 小时」。下面一行写明怎么算的。
+- 金额、原因都能改；照旧要点「确认加收」才挂，照旧的权限与授权（值班经理及以上直接加，别人凭当场授权），**不自动收钱**。服务端没有改：加收照旧是一条手动金额的明细。没超过 12 小时、没设价的照旧手填。
+
+### 4.2 超时提醒
+
+- 每分钟的任务（`src/server/jobs.ts` → `sweepOvertimeReminders`，`src/server/modules/frontdesk/overtime.ts`）：各家店在店的客人到了 12 / 24 / 72 小时（就是手牌板上超时在店的三级 `OVERSTAY_TIERS`），在「异常待办」里记一条「超时提醒」（`visit_incidents.kind = 'overtime'`，`overtime_hours` 记是哪一级），经办人是系统账号「系统」（`system.auto`，第一次用到时建，不能登录、员工名单里不显示）。
+  - **每一级只记一次**：部分唯一索引 `visit_incidents_overtime_uq`（来访 + 级别）兜底，插入 `ON CONFLICT DO NOTHING`；几个进程同时跑、同一分钟跑两次都只记一次。
+  - 停机后才跑到、一下子跨了几级的，只记到了的最高一级（低的算被它盖过，不补记）。
+  - 操作编号按「来访 + 级别」算出来（`overtimeOpKey`），查得到是哪一笔；审计记 `visit_incident`（`detail.kind = 'overtime'`、`auto: true`），经办人「系统」。
+- **待办**：超时提醒与上报、未结离店一样进「异常待办」，能指派、写处理结果（有「接待发牌、挂账、换牌」的人都能写，只写一次）；另外两种情况自动不再算待办——**客人离店以后**、**这次来访有了更高一级的超时提醒以后**（24 小时那条把 12 小时那条盖过）。手牌板上每张牌的待办数、发卡台顶上的条数、「异常待办」清单是同一个口径（`openTodoWhere`，页面上是 `isOpenTodo`）。客人卡的异常记录里，不再算待办的写「不再跟进」。
+- 页面上不能自己登记「超时提醒」（登记接口只认原来的六种）。
+
 ## 进度
 
 - [x] BW-12「流水」的订单详情（部件、接口、用例 `tests/frontdesk-v8117.test.ts`，`e2e/orders.spec.ts` 按新部件改了取法）
 - [x] BW-4 退菜按出品口（迁移 199 的岗位权限一段；用例 `tests/dining-voids-v8117.test.ts`，`tests/dining-808.test.ts`、`tests/orders.test.ts`、`tests/upgrade-dining-v8115.test.ts` 按新规矩改了预期）
 - [x] BW-3 发卡台加项目按出品口（用例在 `tests/dining-voids-v8117.test.ts`）
-- [ ] BW-1 超时加收与提醒（迁移 199）
+- [x] BW-1 超时加收与提醒（迁移 199 的异常种类一段；用例在 `tests/frontdesk-v8117.test.ts`；`tests/frontdesk-vip.test.ts`、`src/server/demo/frontdesk-expected.json` 的前台规则多一项）
 - [ ] BW-2 桌台提醒
 - [ ] BW-11 本店价改价留痕（迁移 198）
 - [ ] 浏览器用例 `e2e/frontdesk-v8117.spec.ts`、三台设备

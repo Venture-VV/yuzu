@@ -6,6 +6,7 @@
 // 金额为分。
 
 import { DINING_OUTLET_KEYS, DINING_OUTLET_LABELS, type DiningOutlet } from './dining';
+import { MAX_SURCHARGE_CENTS, OVERSTAY_TIERS } from './frontdesk-risk';
 import type { Permission } from './permissions';
 
 // ───────────── BW-4 退菜按出品口 ─────────────
@@ -25,3 +26,34 @@ export const voidOutletsOf = (can: (p: Permission) => boolean): DiningOutlet[] =
 export function voidBlockedText(outlet: DiningOutlet | null | undefined, allowed: readonly DiningOutlet[]): string | null {
   return outlet && !allowed.includes(outlet) ? `不能退${DINING_OUTLET_LABELS[outlet]}的菜` : null;
 }
+
+// ───────────── BW-1 超时加收与提醒 ─────────────
+
+/** 超时从几小时算起：12 小时（超时在店的第一级） */
+export const OVERTIME_FROM_HOURS = 12;
+/** 「每超 1 小时加收」最多填多少（分）：¥1,000 */
+export const MAX_OVERTIME_HOURLY_CENTS = 100_000;
+
+/**
+ * 点「加收」时先填好的金额（BW1）：在店超过 12 小时以后，不足 1 小时按 1 小时算（超 1 分钟算 1 小时）× 每小时的价；
+ * 一笔最多 ¥10,000（与手填的上限一样）。没设价、还没超过 12 小时的返回 null（照旧手填）
+ */
+export function overtimeSurchargeOf(stayMinutes: number, hourlyCents: number): { hours: number; amount: number; capped: boolean } | null {
+  const over = stayMinutes - OVERTIME_FROM_HOURS * 60;
+  if (hourlyCents <= 0 || over <= 0) return null;
+  const hours = Math.ceil(over / 60);
+  const raw = hours * hourlyCents;
+  return { hours, amount: Math.min(raw, MAX_SURCHARGE_CENTS), capped: raw > MAX_SURCHARGE_CENTS };
+}
+
+/** 超时提醒的三级（12 / 24 / 72 小时，与手牌板的超时分级同一份），从低到高 */
+export const OVERTIME_REMINDER_HOURS: readonly number[] = [...OVERSTAY_TIERS].map((t) => t.hours).sort((a, b) => a - b);
+
+/** 在店这么多分钟，到了哪一级提醒（没到 12 小时为 null）：只记最高的那一级，低的几级算被它盖过 */
+export function overtimeReminderLevel(stayMinutes: number): number | null {
+  const reached = OVERTIME_REMINDER_HOURS.filter((h) => stayMinutes >= h * 60);
+  return reached.length ? reached[reached.length - 1]! : null;
+}
+
+/** 超时提醒的备注（经办记录、异常待办里那一句） */
+export const overtimeReminderNote = (hours: number) => `在店超过 ${hours} 小时，请去看看客人、提醒结账或续时（系统记）`;

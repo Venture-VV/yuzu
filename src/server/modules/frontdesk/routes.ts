@@ -4,7 +4,7 @@ import { COUPON_PLATFORMS } from '@shared/checkout';
 import { ISO_DATE } from '@shared/business-date';
 import { can } from '@shared/permissions';
 import { guard, guardAny } from '../../auth/guard';
-import { VOID_PERMISSIONS } from '@shared/frontdesk-v8117';
+import { MAX_OVERTIME_HOURLY_CENTS, VOID_PERMISSIONS } from '@shared/frontdesk-v8117';
 import { readSnapshot } from '../../db';
 import { checkoutDaySummary } from '../settlement';
 import type { Deps } from '../../lib/context';
@@ -49,6 +49,12 @@ const RulesInput = z.object({
   selfVoidMinutes: z.number().int().min(0, '分钟数不能为负').max(120, '最多 120 分钟'),
   lostTagFeeCents: z.number().int().min(0, '赔偿金额不能为负').max(10_000_00, '赔偿金额最多 10,000 元'),
   overtimeGraceMinutes: z.number().int().min(0, '宽限分钟数不能为负').max(120, '宽限最多 120 分钟'),
+  // 8.1.17（BW-1）：超时加收每超 1 小时多少（分），0 = 不算价；只用来把「加收」的金额先填好
+  overtimeSurchargeHourlyCents: z
+    .number('金额必须是整数（分）')
+    .int('金额必须是整数（分）')
+    .min(0, '金额不能为负')
+    .max(MAX_OVERTIME_HOURLY_CENTS, `每小时最多 ¥${MAX_OVERTIME_HOURLY_CENTS / 100}`),
 });
 
 export function registerFrontdeskRoutes(app: FastifyInstance, deps: Deps) {
