@@ -3,7 +3,10 @@
 // - 展开：带分组标题的侧栏（宽 200）。当前页面所在的组默认打开，别的组点标题打开 / 折起；
 // - 收起：一列业务域的图标（宽 76 / 84）。当前所在的组把二级入口直接列在下面（点组名能折起），别的组点一下在右边弹出二级入口；
 // - 1440 宽起默认展开，窄一些的默认收起（1280×720 的收银机、平板横屏照旧是一列图标，不用滚动就看得到全部业务域）；
-//   左下角的按钮在两种之间换，记在这台设备的浏览器里。手机（768 以下）总是收着；
+//   左下角的按钮在两种之间换，记在这台设备的浏览器里；
+// - 8.2.0 P02（回测 2-1）：导航固定在左边、撑满一屏，菜单长了在导航里面滚（内容区另滚，见 AppShell）。
+//   窄屏（1024 以下）平时是一列图标，点「展开导航」是盖在内容上的抽屉，带遮罩，点遮罩、按 Esc、换页面都收回；
+//   收起时鼠标停在业务域上就弹出二级入口（触屏照旧点一下弹出）；
 // - 每个二级入口都是主导航里的一个链接（名字就是页面名），带 data-nav-item；所在的组折着时链接在页面上但看不见，
 //   用例用 e2e/nav.ts 的 navLink 先打开组再点。
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
@@ -25,7 +28,10 @@ interface NavPrefs {
 
 const PREFS_KEY = 'yuzu.storeNav.v1';
 const WIDE = '(min-width: 1440px)';
-const CAN_EXPAND = '(min-width: 768px)';
+/** 1024 起展开是挤开内容的侧栏；窄一些展开是盖在内容上的抽屉 */
+const DOCKED = '(min-width: 1024px)';
+/** 能悬停的指针（鼠标、触控板）：收起时停在业务域上就弹出二级入口 */
+const HOVER = '(hover: hover) and (pointer: fine)';
 
 function loadPrefs(): NavPrefs {
   try {
@@ -77,13 +83,25 @@ export function StoreRail({ footer }: { footer: ReactNode }) {
   const current = storeDomainOf(pathname);
   const [prefs, savePrefs] = useNavPrefs();
   const wide = useMedia(WIDE);
-  const canExpand = useMedia(CAN_EXPAND);
-  const expanded = canExpand && (prefs.mode ?? (wide ? 'expanded' : 'collapsed')) === 'expanded';
+  const docked = useMedia(DOCKED);
+  const hover = useMedia(HOVER);
+  // 窄屏的抽屉：换了页面就收回（记着打开时的地址）
+  const [drawerAt, setDrawerAt] = useState<string | null>(null);
+  const drawer = !docked && drawerAt === pathname;
+  const expanded = docked ? (prefs.mode ?? (wide ? 'expanded' : 'collapsed')) === 'expanded' : drawer;
+  useEffect(() => {
+    if (!drawer) return;
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setDrawerAt(null);
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [drawer]);
   const isOpen = (key: StoreNavDomainKey) => prefs.open?.[key] ?? key === current;
   const toggleOpen = (key: StoreNavDomainKey) => savePrefs({ ...prefs, open: { ...prefs.open, [key]: !isOpen(key) } });
 
   // 收起时弹出的那一组：换了页面、换了展开 / 收起就不算开着
-  const [flyout, setFlyout] = useState<{ key: StoreNavDomainKey; path: string; style: CSSProperties } | null>(null);
+  const [flyout, setFlyout] = useState<{ key: StoreNavDomainKey; path: string; style: CSSProperties; hover?: boolean } | null>(null);
+  const hoverTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
   const openFlyout = flyout && flyout.path === pathname && !expanded ? flyout : null;
   const railRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -111,21 +129,42 @@ export function StoreRail({ footer }: { footer: ReactNode }) {
     isOpen,
     onToggle: (d, button) => {
       if (expanded || d.key === current) return toggleOpen(d.key);
+      window.clearTimeout(hoverTimer.current);
+      // 鼠标停上去已经弹出来的：点一下是留住它，不是关掉
+      if (openFlyout?.key === d.key && openFlyout.hover) return setFlyout({ ...openFlyout, hover: false });
       setFlyout(openFlyout?.key === d.key ? null : { key: d.key, path: pathname, style: flyoutPosition(button, d.items.length) });
     },
+    onHover: hover
+      ? (d, button) => {
+          window.clearTimeout(hoverTimer.current);
+          if (expanded || d.key === current) return;
+          if (!button) {
+            // 移出了这一组（含弹出层）：稍等一下再收，让鼠标走过按钮与弹出层之间的空隙
+            hoverTimer.current = window.setTimeout(() => setFlyout((f) => (f?.key === d.key && f.hover ? null : f)), 220);
+            return;
+          }
+          if (openFlyout?.key === d.key) return;
+          if (openFlyout && !openFlyout.hover) return;
+          hoverTimer.current = window.setTimeout(() => setFlyout({ key: d.key, path: pathname, style: flyoutPosition(button, d.items.length), hover: true }), 120);
+        }
+      : undefined,
+    // 进了这一组（按钮或弹出来的二级入口）就不收：鼠标从按钮走到弹出层要经过一道空隙（Codex 审查 f1e5186 的 P2）
+    onKeep: hover ? () => window.clearTimeout(hoverTimer.current) : undefined,
     flyout: openFlyout,
   };
 
-  return (
+  const nav = (
     <nav
       ref={railRef}
       aria-label="主导航"
       data-surface="rail"
       data-mode={expanded ? 'expanded' : 'collapsed'}
+      data-drawer={drawer ? 'open' : undefined}
       data-testid="store-rail"
       className={cn(
-        'flex shrink-0 flex-col bg-rail pt-4 pb-4 text-paper short:pt-2.5 short:pb-2.5',
+        'flex h-full min-h-0 shrink-0 flex-col bg-rail pt-4 pb-4 text-paper short:pt-2.5 short:pb-2.5',
         expanded ? 'w-[200px] items-stretch gap-1' : 'w-[76px] items-center gap-1 short:gap-0.5 md:w-[84px]',
+        drawer && 'fixed inset-y-0 left-0 z-40 w-[240px] shadow-pop',
       )}
     >
       <NavLink to="/" aria-label="浴族 yuzu 首页" className={cn('mb-4 flex items-center gap-2.5 short:mb-2', expanded ? 'mx-3 rounded-[14px]' : 'rounded-[14px] ring-1 ring-white/10')}>
@@ -157,24 +196,31 @@ export function StoreRail({ footer }: { footer: ReactNode }) {
           <Domain key={d.key} domain={d} ctx={ctx} />
         ))}
       </div>
-      {canExpand && (
-        <button
-          type="button"
-          onClick={() => savePrefs({ ...prefs, mode: expanded ? 'collapsed' : 'expanded' })}
-          aria-label={expanded ? '收起导航' : '展开导航'}
-          title={expanded ? '收起成一列图标' : '展开成带分组的侧栏'}
-          data-testid="nav-mode-toggle"
-          className={cn(
-            'flex shrink-0 items-center rounded-[12px] text-paper/60 transition-colors hover:bg-white/6 hover:text-paper',
-            expanded ? 'mx-2 h-11 gap-2.5 px-3 text-[13px] font-semibold' : 'size-11 justify-center',
-          )}
-        >
-          {expanded ? <PanelLeftClose className="size-[18px]" /> : <PanelLeftOpen className="size-[18px]" />}
-          {expanded && '收起导航'}
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => (docked ? savePrefs({ ...prefs, mode: expanded ? 'collapsed' : 'expanded' }) : setDrawerAt(drawer ? null : pathname))}
+        aria-label={expanded ? '收起导航' : '展开导航'}
+        title={expanded ? '收起成一列图标' : '展开成带分组的侧栏'}
+        data-testid="nav-mode-toggle"
+        className={cn(
+          'flex shrink-0 items-center rounded-[12px] text-paper/60 transition-colors hover:bg-white/6 hover:text-paper',
+          expanded ? 'mx-2 h-11 gap-2.5 px-3 text-[13px] font-semibold' : 'size-11 justify-center',
+        )}
+      >
+        {expanded ? <PanelLeftClose className="size-[18px]" /> : <PanelLeftOpen className="size-[18px]" />}
+        {expanded && '收起导航'}
+      </button>
       <div className="flex flex-col items-center">{footer}</div>
     </nav>
+  );
+  if (!drawer) return nav;
+  // 抽屉开着：原地留一列图标宽的空位（内容不跳），抽屉盖在内容上，遮罩点一下收回
+  return (
+    <>
+      <div aria-hidden className="w-[76px] shrink-0 bg-rail md:w-[84px]" />
+      <div aria-hidden className="fixed inset-0 z-30 bg-ink/35 animate-fade" onClick={() => setDrawerAt(null)} data-testid="nav-drawer-scrim" />
+      {nav}
+    </>
   );
 }
 
@@ -185,6 +231,10 @@ interface DomainCtx {
   pillDrawn: boolean;
   isOpen: (key: StoreNavDomainKey) => boolean;
   onToggle: (domain: StoreNavDomain, button: HTMLButtonElement) => void;
+  /** 鼠标停上去（button）/ 移开（null）；触屏没有 */
+  onHover?: (domain: StoreNavDomain, button: HTMLButtonElement | null) => void;
+  /** 鼠标回到这一组里：取消正要收起的弹出层 */
+  onKeep?: () => void;
   flyout: { key: StoreNavDomainKey; style: CSSProperties } | null;
 }
 
@@ -216,6 +266,8 @@ function Domain({ domain, ctx }: { domain: StoreNavDomain; ctx: DomainCtx }) {
       data-testid={`nav-domain-${domain.key}`}
       // 收起时当前所在的组：组名和下面的入口放在一块浅底上，一眼看得出是一组
       className={cn(ctx.expanded ? 'flex flex-col' : 'flex flex-col items-center gap-0.5', !ctx.expanded && here && open && 'rounded-[16px] bg-white/6 pb-0.5')}
+      onMouseLeave={ctx.onHover && !inline ? () => ctx.onHover!(domain, null) : undefined}
+      onMouseEnter={ctx.onKeep && !inline ? ctx.onKeep : undefined}
     >
       <button
         type="button"
@@ -225,6 +277,7 @@ function Domain({ domain, ctx }: { domain: StoreNavDomain; ctx: DomainCtx }) {
         aria-haspopup={inline ? undefined : 'true'}
         title={`${domain.label}：${domain.items.map((i) => i.label).join('、')}`}
         onClick={(e) => ctx.onToggle(domain, e.currentTarget)}
+        onMouseEnter={ctx.onHover && !inline ? (e) => ctx.onHover!(domain, e.currentTarget) : undefined}
         className={cn(
           'group relative transition-colors',
           ctx.expanded
