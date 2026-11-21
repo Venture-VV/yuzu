@@ -1,6 +1,6 @@
 // 钟房（v0.7.1）：左边轮钟队列（在岗技师按排位，第一位空闲的是「下一位」）、休息与未上牌；
 // 右边上钟中的钟（倒计时、快到钟、超时）与待上钟（已派、技师还没到）。派钟、加钟都是挂账，走前台同一套「结果待确认」。
-// 8.1.15（docs/TECHNICIANS_V8115.md）：顶上是排位播报条（Announcer.tsx）与搜索、筛选（ClockFilters.tsx）；有条件生效或按状态排时
+// 8.1.15（docs/TECHNICIANS_V8115.md）：顶上是搜索、筛选（ClockFilters.tsx；排位播报 8.2.0 起是单独的页面 AnnouncerPage.tsx）；有条件生效或按状态排时
 // 下面列技师卡片，没有时是原来的看板。技师的花名、类型、组别、今天的班与休假单来自技师管理。
 
 import { useEffect, useMemo, useState } from 'react';
@@ -59,7 +59,6 @@ import { PageHeader } from '../../components/AppShell';
 import { Dialog } from '../../components/Overlay';
 import { useToast } from '../../components/Toast';
 import { Badge, Button, Card, Field, Input, Notice, SectionTitle, Skeleton } from '../../components/ui';
-import { AnnouncerBar } from './Announcer';
 import { ClockFilters } from './ClockFilters';
 import { DispatchDialog, ExtendDialog, TransferDialog, type DispatchPrefill } from './DispatchDialog';
 import { RoomDialog } from './RoomPicker';
@@ -268,9 +267,7 @@ export function ClockroomPage() {
           </div>
         ) : (
           <>
-            <div className="mx-auto max-w-[1280px] px-5 pt-5 md:px-7">
-              <AnnouncerBar board={d} onBoard={(b) => qc.setQueryData(clockKey, b)} />
-            </div>
+            <AnnouncerMoved />
             <ClockFilters board={d} query={query} onQuery={setQuery} sort={sort} onSort={setSort} counts={counts} shown={listed.length} />
             {listMode ? (
               <FilteredTechs
@@ -1110,5 +1107,45 @@ function ClockLog({ open, onClose }: { open: boolean; onClose: () => void }) {
         </ul>
       )}
     </Dialog>
+  );
+}
+
+const MOVED_KEY = 'yuzu.clock.announcerMoved';
+
+/**
+ * 排位播报从钟房移走了（8.2.0 P03）：钟房顶上一条提示，点「去排位播报」过去；点「知道了」以后这台设备不再提示。
+ * 叫号照旧能在钟房点（记一条叫号），念要在开着「排位播报」页的那台终端上
+ */
+function AnnouncerMoved() {
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem(MOVED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  if (hidden) return null;
+  const dismiss = () => {
+    setHidden(true);
+    try {
+      localStorage.setItem(MOVED_KEY, '1');
+    } catch {
+      // 存不了：这一次照样收起
+    }
+  };
+  return (
+    <div className="mx-auto max-w-[1280px] px-5 pt-5 md:px-7">
+      <Notice tone="info" title="排位播报移到了「技师 → 排位播报」" data-testid="clock-announcer-moved">
+        自动叫号、重播、音量与静音、播报记录都在那一页；要出声的终端开着那一页。钟房里点「叫号」照旧记一条叫号。
+        <span className="mt-1 flex gap-3">
+          <Link to="/announcer" className="font-bold text-lake hover:underline" data-testid="clock-go-announcer">
+            去排位播报
+          </Link>
+          <button type="button" className="font-semibold text-ink-3 hover:text-ink" onClick={dismiss}>
+            知道了
+          </button>
+        </span>
+      </Notice>
+    </div>
   );
 }

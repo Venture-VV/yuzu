@@ -30,6 +30,7 @@ import { lazyPage } from './lib/lazyPage';
 // 会员工作台与前台随首屏加载；其余页面第一次打开时再下载（v0.7.22：收银台首屏更轻）
 const CashierPage = lazyPage(() => import('./features/frontdesk/CashierPage').then((m) => m.CashierPage));
 const ClockroomPage = lazyPage(() => import('./features/clockroom/ClockroomPage').then((m) => m.ClockroomPage));
+const AnnouncerPage = lazyPage(() => import('./features/clockroom/AnnouncerPage').then((m) => m.AnnouncerPage));
 const TechnicianAdminPage = lazyPage(() => import('./features/technicians/TechnicianAdminPage').then((m) => m.TechnicianAdminPage));
 const DiningPage = lazyPage(() => import('./features/dining/DiningPage').then((m) => m.DiningPage));
 const RoomCenterPage = lazyPage(() => import('./features/room-center/RoomCenterPage').then((m) => m.RoomCenterPage));
@@ -402,6 +403,9 @@ const router = createBrowserRouter([
         ],
       },
       { path: 'clockroom', element: <ClockroomPage /> },
+      // 排位播报（8.2.0 P03）：独立页面；老地址跳过来并提示位置换了
+      { path: 'announcer', element: <AnnouncerPage /> },
+      { path: 'clockroom/announcer', element: <Navigate to="/announcer?moved=1" replace /> },
       { path: 'dining/:tab?', element: <DiningPage /> },
       { path: 'room-center', element: <RoomCenterPage /> },
       { path: 'rooms', element: <RoomsMoved /> },

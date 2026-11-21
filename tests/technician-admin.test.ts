@@ -453,6 +453,31 @@ describe('排位播报：叫号记录与主播报终端', () => {
     expect((await api(ctx.app, backoffice, 'POST', '/api/clockroom/calls', { technicianId: idle.id })).status).toBe(403);
   });
 
+  it('排位播报单独授权（8.2.0 P03）：只有「排位播报」的账号看得到排位、能叫号、能登记播报终端，钟房的操作做不了', async () => {
+    const made = await api(ctx.app, ctx.owner, 'POST', '/api/staff', {
+      username: 'paiwei',
+      displayName: '排位员',
+      position: 'finance.staff',
+      permissionAdjust: { add: ['technician.announce'], remove: [] },
+      password: PASSWORD,
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    await ctx.sql`UPDATE staff SET must_change_password = false WHERE username = 'paiwei'`;
+    const caller = await login(ctx.app, 'paiwei');
+    const me = (await api(ctx.app, caller, 'GET', '/api/auth/me')).body as { permissions: string[] };
+    expect(me.permissions).toContain('technician.announce');
+    expect(me.permissions).not.toContain('technician.dispatch');
+    const b = (await api(ctx.app, caller, 'GET', '/api/clockroom')).body as ClockroomBoard;
+    const idle = b.technicians.find((t) => t.position !== null && !t.busy)!;
+    const r = await api(ctx.app, caller, 'POST', '/api/clockroom/calls', { technicianId: idle.id });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect((r.body as ClockroomBoard).calls.at(-1)).toMatchObject({ kind: 'manual', technicianId: idle.id, staffName: '排位员' });
+    // 钟房的操作（上下牌）没有权限
+    expect((await api(ctx.app, caller, 'POST', `/api/clockroom/technicians/${idle.id}/state`, { action: 'rest' })).status).toBe(403);
+    // 两样都没有的看不到排位
+    expect((await api(ctx.app, backoffice, 'GET', '/api/clockroom')).status).toBe(403);
+  });
+
   it('主播报终端：登记、另一台接管、只有它自己能放下、报到只认登记的那一台；接管与放下记审计', async () => {
     const a = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
     const z = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';

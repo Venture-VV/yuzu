@@ -1,10 +1,11 @@
 // 后台「岗位权限」：店主按岗位勾选权限（存为相对默认规则的增减，改完立即生效）。
 // 店主一栏固定拥有全部权限；管理员工账号、修改经营规则、导入期初只属于店主；库存职责的权限固定，不在这里调整。
-// 8.1.18：上面一个页签是新岗位（部门 → 负责人 / 员工，PositionPermissions），下面这张表只管旧岗位——
+// 8.1.18：上面一个页签是按部门设立的岗位（部门 → 负责人 / 员工，PositionPermissions；8.2.0 P03 起叫「设立岗位」，回测 5-3），下面这张表只管旧岗位——
 // 还没重新选岗的老账号与点餐平板、他店查询、设计师这几种专用账号照旧按它。
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
 import { Check, Lock, Minus, RotateCcw } from 'lucide-react';
 import type { RolePermissionInput, RolePermissionMatrix } from '@shared/admin';
 import { DUTY_LABELS, ROLE_LABELS } from '@shared/labels';
@@ -29,7 +30,10 @@ export function PermissionsSection() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<'positions' | 'roles'>('positions');
+  // 页签记在地址里（?tab=setup / roles）；8.2.0 以前的 ?tab=positions 照旧打开「设立岗位」
+  const [params, setParams] = useSearchParams();
+  const view: 'setup' | 'roles' = params.get('tab') === 'roles' ? 'roles' : 'setup';
+  const setView = (v: 'setup' | 'roles') => setParams(v === 'setup' ? {} : { tab: v }, { replace: true });
   useEffect(() => {
     if (q.data) setDraft(Object.fromEntries(EDITABLE_ROLES.map((r) => [r, q.data.effective[r]])) as Draft);
   }, [q.data]);
@@ -76,8 +80,8 @@ export function PermissionsSection() {
       section="permissions"
       wide
       description={
-        view === 'positions'
-          ? '新岗位按部门分：总裁（超级管理员）、总经办成员与各部门负责人（高级管理员）、各部门员工（管理员）；服务端逐项校验，改完立即生效。'
+        view === 'setup'
+          ? '设立岗位：按部门设立岗位——总裁（超级管理员）、总经办成员与各部门负责人（高级管理员）、各部门员工（管理员）；服务端逐项校验，改完立即生效。'
           : '旧岗位：一个账号 = 一个岗位 + 若干库存职责，权限取并集；还没重新选岗的老账号与专用账号照旧按这张表。'
       }
       actions={
@@ -109,11 +113,11 @@ export function PermissionsSection() {
             value={view}
             onChange={setView}
             options={[
-              { value: 'positions', label: '新岗位（按部门）' },
+              { value: 'setup', label: '设立岗位' },
               { value: 'roles', label: '旧岗位与专用账号' },
             ]}
           />
-          {view === 'positions' ? (
+          {view === 'setup' ? (
             <PositionPermissions data={q.data} editable={editable} />
           ) : (
             <>
