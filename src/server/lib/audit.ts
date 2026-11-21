@@ -283,6 +283,8 @@ export type AuditAction =
   | 'pool_use'
   // 8.1.9 库管入库台账导入
   | 'receipt_import'
+  // 8.1.20 出入库台账导入
+  | 'ledger_import'
   // 8.1.9 签赠：新建、修改签赠券类型（知识库），签赠发放；作废签赠券记 coupon_voided（与券一样）
   | 'gift_type'
   | 'gift_issue'

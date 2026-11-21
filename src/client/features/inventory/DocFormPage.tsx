@@ -197,6 +197,7 @@ function deptMaterial(m: DeptStockMeta['materials'][number], row: WarehouseStock
     anyMoves: !!row,
     lastMoveAt: row?.lastMoveAt ?? null,
     note: '',
+    location: '',
     isSynthetic: false,
     // 部门小仓不分批（V17）
     expiryTracked: false,

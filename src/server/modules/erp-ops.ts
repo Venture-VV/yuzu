@@ -134,6 +134,7 @@ const WRITE: Record<ErpOpType, Permission[]> = {
   studio_publish: ['studio.publish'],
   pool_use: ['pool.manage'],
   receipt_import: ['inventory.operate'],
+  ledger_import: ['inventory.operate'],
   gift_type: ['gift.manage'],
   gift_issue: ['gift.issue'],
   // 与答复替代的接口一致：只有「审核需求单」的部门主管也答复得了替代，结果待确认时自己能确认作废（Codex 审查 d9b58a2）
@@ -208,6 +209,7 @@ const READ: Record<ErpOpType, Permission[]> = {
   studio_publish: ['studio.edit'],
   pool_use: ['pool.read'],
   receipt_import: ['inventory.read'],
+  ledger_import: ['inventory.read'],
   gift_type: ['gift.manage'],
   gift_issue: ['gift.issue', 'gift.read'],
   request_stock: ['request.stock', 'request.create', 'request.review'],

@@ -140,6 +140,8 @@ export const FENCED_OPS = [
   'pool_use',
   // 8.1.9 库管入库台账导入（迁移 183；编号记在 idempotency_keys，ref_id 是那次导入，也记在 receipt_imports.client_key）
   'receipt_import',
+  // 8.1.20 出入库台账导入（迁移 200；编号记在 idempotency_keys，ref_id 是那次导入，也记在 ledger_imports.client_key）
+  'ledger_import',
   // 8.1.9 签赠（迁移 184）：新建签赠券类型（编号记在 coupon_templates.client_key）、签赠发放（编号记在 coupon_issues.client_key）
   'gift_type',
   'gift_issue',

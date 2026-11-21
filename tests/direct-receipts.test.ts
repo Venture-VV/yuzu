@@ -4,7 +4,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { todayIn } from '../src/server/modules/inventory/common';
-import { readSheet } from '../src/server/lib/sheet-read';
 import { seedInventoryDemo } from '../src/server/seed-inventory';
 import { api, login, setup, type TestContext } from './helpers';
 
@@ -128,12 +127,10 @@ describe('库管入库', () => {
 });
 
 describe('库管入库台账：模板与一键导入', () => {
-  it('模板是三个工作表的 Excel，读得回表头', async () => {
+  it('8.1.20 起旧模板停用：下载返回 410，指向新的出入库台账模板（LD9）', async () => {
     const res = await ctx.app.inject({ method: 'GET', url: '/api/inventory/direct-receipts/template', headers: { cookie: keeper } });
-    expect(res.statusCode).toBe(200);
-    expect(res.headers['content-type']).toContain('spreadsheetml');
-    const sheet = readSheet({ xlsxBase64: res.rawPayload.toString('base64') }, { findHeader: (c) => c.includes('入库日期') });
-    expect(sheet.header.slice(0, 6)).toEqual(['序号', '入库日期', '供应商', '物品名称', '物料编号', '送达数量']);
+    expect(res.statusCode).toBe(410);
+    expect(res.json().error.code).toBe('TEMPLATE_RETIRED');
     expect((await api(ctx.app, buyer, 'GET', '/api/inventory/direct-receipts/template')).status).toBe(403);
   });
 

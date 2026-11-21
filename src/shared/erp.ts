@@ -466,6 +466,8 @@ export const ERP_OP_TYPES = [
   'pool_use',
   // 8.1.9 库管入库台账导入（一次进很多库存，断网后也要能查回、重提或作废）
   'receipt_import',
+  // 8.1.20 出入库台账导入（入库、领料一次进很多单）
+  'ledger_import',
   // 8.1.9 签赠：新建签赠券类型、签赠发放
   'gift_type',
   'gift_issue',
@@ -541,6 +543,7 @@ export const ERP_OP_LABELS: Record<ErpOpType, string> = {
   studio_publish: '工作台发布 / 回滚',
   pool_use: '零采备用金申用',
   receipt_import: '库管入库台账导入',
+  ledger_import: '出入库台账导入',
   gift_type: '新建签赠券类型',
   gift_issue: '签赠发放',
   request_stock: '需求单核库 / 答复替代',

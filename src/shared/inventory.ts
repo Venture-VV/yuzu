@@ -375,6 +375,8 @@ export interface Material {
   /** 效期管理（8.0.7 3.3）：收货要填到期日；保质期天数（可空） */
   expiryTracked: boolean;
   shelfLifeDays: number | null;
+  /** 库位（8.1.20，迁移 200），如 J-1；出入库台账导入会写、导出会带出 */
+  location: string;
   /** 补货方式（迁移 161）：按需采购的不提补货、不做低库存提醒 */
   replenishMode: ReplenishMode;
   /** 补货方式的版本号（每改一次加一）：只改补货方式时带上，对不上拒绝 */
