@@ -112,7 +112,8 @@ E2E_BASE_URL=… npx playwright test e2e/motion.spec.ts --project=门店电脑  
 E2E_BASE_URL=… npx playwright test e2e/positions.spec.ts --project=门店电脑   # 组织架构与岗位（8.1.18，docs/POSITIONS_V8118.md）：添加员工先选部门再选岗位、新账号按岗位的权限、岗位权限按八列显示
 E2E_BASE_URL=… npx playwright test e2e/emenu.spec.ts   # 点餐系统 · 平板电子菜单（8.0.10，docs/EMENU.md）：整套流程只在门店电脑这一组跑（平板那一段另开 1024×768 的窗口）；地址 /emenu，用「点餐平板」岗位的账号登录；8.0.13 起含中英切换、键盘适配与动效的只读用例；8.0.15 起含「放大、不要点单密码」的只读用例（整套流程与设计稿位置核对走的是「要密码、设计稿原样」）
 E2E_BASE_URL=… npx playwright test e2e/emenu-v816.spec.ts --project=门店电脑   # 8.1.6 二次整改（docs/HANDOFF_V816.md）：小米平板 6S Pro 12.4 大小（1355 × 903）上底色、压暗层、大图铺到屏幕边与右上角四样、服务员那一步的英文、装饰压不到大图上、工作台改顶栏（会写工作台的草稿、用完放回默认，不发布）
-E2E_BASE_URL=… npx playwright test e2e/erp-819.spec.ts --project=门店电脑   # 8.1.9 ERP 供应链（docs/HANDOFF_V819.md）：店主填零采备用金总额 → 采购申用、提交报销（未补单）→ 按申用登记报销、确认后面板回补；库管入库手填一张；下载台账模板、导入一份合成的台账（会登记单据，每次用新的说明与金额）
+E2E_BASE_URL=… npx playwright test e2e/erp-819.spec.ts --project=门店电脑   # 8.1.9 ERP 供应链（docs/HANDOFF_V819.md）：店主填零采备用金总额 → 采购申用、提交报销（未补单）→ 按申用登记报销、确认后面板回补；库管入库手填一张（会登记单据，每次用新的说明与金额）
+E2E_BASE_URL=… npx playwright test e2e/erp-8120.spec.ts --project=门店电脑  # 8.1.20 出入库台账（docs/HANDOFF_V8120.md）：库管入库页右上角三个入口；下载模板、导入一份合成的台账生成库管入库与部门领料、导出台账（会登记单据）
 E2E_BASE_URL=… npx playwright test e2e/gifts.spec.ts --project=门店电脑   # 8.1.9 签赠（docs/GIFTS_V819.md）：后台建签赠券类型 → 管家部发放（授权人张经理）→ 前台结账选这张签赠券 → 客户部签赠台账里是已使用、按授权人有张经理（要 seed-demo、seed-frontdesk-demo；会登记单据，每次用新的名称）
 E2E_BASE_URL=… npx playwright test e2e/erp-8110.spec.ts --project=门店电脑   # 8.1.13 ERP 采购（原排 8.1.10，docs/HANDOFF_V8110.md）：采购规则的四项新设置、急采「待补合同」；核库转领用——店主提需求单（两样新建、有期初的物料）→ 待核库里核库（第 1 行只领一部分、第 2 行提议替代）→ 同意替代 → 通过 → 待转采购单只买剩下的（会登记单据，物料编号带时间）
 E2E_BASE_URL=… npx playwright test e2e/desks.spec.ts --project=门店电脑   # 8.1.15 发卡台与收银台（docs/DESKS_V8115.md）：导航里两个台；发卡台认会员档阶、加项目、换牌，没有结账；收银台只读、「权益与优惠」写着签赠的发放人与授权人；用签赠结账，结账单与小票的「优惠与赠送」写明经办人；预结账分列（合成的返回）与四种屏幕、两个台的入口按权限显示（临时改前台店员的岗位权限，用完改回；8.1.15 前台 1 细化）

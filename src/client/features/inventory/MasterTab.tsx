@@ -69,7 +69,7 @@ function Materials({ editable }: { editable: boolean }) {
   const materials = useMaterials(true);
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<Material | 'new' | null>(null);
-  const list = (materials.data ?? []).filter((m) => !q.trim() || `${m.code} ${m.name} ${m.specification} ${m.category}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const list = (materials.data ?? []).filter((m) => !q.trim() || `${m.code} ${m.name} ${m.specification} ${m.category} ${m.location}`.toLowerCase().includes(q.trim().toLowerCase()));
   const custom = useCustomListValues(
     'material',
     list.map((m) => m.id),
@@ -115,7 +115,10 @@ function Materials({ editable }: { editable: boolean }) {
             cell: (m) => (
               <>
                 <p className="font-bold">{m.name}</p>
-                <p className="text-[12px] text-ink-3">{m.specification || '—'}</p>
+                <p className="text-[12px] text-ink-3">
+                  {m.specification || '—'}
+                  {m.location && <span className="ml-2">库位 {m.location}</span>}
+                </p>
                 <CustomFieldInline data={custom.data} id={m.id} />
               </>
             ),
@@ -223,6 +226,7 @@ export function MaterialDialog({
       name: form.name.trim(),
       category: form.category.trim(),
       specification: form.specification.trim(),
+      location: form.location.trim(),
       inventoryUnit: form.inventoryUnit.trim(),
       decimals,
       purchaseUnit: form.purchaseUnit.trim(),
@@ -283,11 +287,14 @@ export function MaterialDialog({
         <Field label="名称" htmlFor="m-name" className="sm:col-span-4">
           <Input id="m-name" value={form.name} maxLength={40} onChange={(e) => set({ name: e.target.value })} />
         </Field>
-        <Field label="规格" htmlFor="m-spec" className="sm:col-span-4" hint="如 500ml × 24 瓶 / 均码独立包装">
+        <Field label="规格" htmlFor="m-spec" className="sm:col-span-6" hint="如 500ml × 24 瓶 / 均码独立包装">
           <Input id="m-spec" value={form.specification} maxLength={80} onChange={(e) => set({ specification: e.target.value })} />
         </Field>
-        <Field label="分类" htmlFor="m-cat" className="sm:col-span-2">
+        <Field label="分类" htmlFor="m-cat" className="sm:col-span-3">
           <Input id="m-cat" value={form.category} maxLength={16} onChange={(e) => set({ category: e.target.value })} placeholder="如 客用品" />
+        </Field>
+        <Field label="库位" htmlFor="m-loc" className="sm:col-span-3" hint="放在仓库哪个架位，出入库台账导入时也会写">
+          <Input id="m-loc" value={form.location} maxLength={20} onChange={(e) => set({ location: e.target.value })} placeholder="如 J-2" data-testid="material-location" />
         </Field>
 
         <div className="rounded-lg border border-line bg-paper-2/50 p-4 sm:col-span-6">
@@ -452,6 +459,7 @@ function toForm(m: Material | null) {
     name: m?.name ?? '',
     category: m?.category ?? '',
     specification: m?.specification ?? '',
+    location: m?.location ?? '',
     inventoryUnit: m?.inventoryUnit ?? '',
     decimals: String(m?.decimals ?? 0),
     purchaseUnit: m?.purchaseUnit ?? '',
