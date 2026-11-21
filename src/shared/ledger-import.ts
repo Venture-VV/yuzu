@@ -11,6 +11,9 @@ export const LEDGER_OUT_SLOTS = 3;
 /** 一份最多几行物料；一张单最多几行（与单据上限一样） */
 export const LEDGER_MAX_ROWS = 500;
 export const LEDGER_LINES_PER_DOC = 100;
+/** 入库、出库各最多几组（一个月每天一组还有富余）；一份最多生成几张单（Codex 安全审查 1ddc70a：不封顶时一份小文件能塞几万组、一个事务里生成几万张单） */
+export const LEDGER_MAX_GROUPS = 62;
+export const LEDGER_MAX_DOCS = 200;
 /** 导出的文件标题里带这几个字：导出的台账只用来对账，原样再导入会重复记账，导入时认出来拒绝 */
 export const LEDGER_EXPORT_MARK = '系统导出';
 

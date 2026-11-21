@@ -206,6 +206,15 @@ describe('出入库台账', () => {
     await ctx.sql`UPDATE materials SET ref_price_cents = NULL WHERE id = ${bare.id}`;
   });
 
+  it('组数封顶：入库超过 62 组整份拒绝（IMPORT_TOO_MANY）', async () => {
+    const n = 63;
+    const top = ['序号', '物料名称', ...Array.from({ length: n }, () => ['入库', '']).flat()];
+    const sub = ['', '', ...Array.from({ length: n }, () => ['日期', '数量']).flat()];
+    const csv = csvOf([['台账'], top, sub, ['1', mat.name, today, '1']]);
+    const r = await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import/preview', { fileName: '太多.csv', csv });
+    expect(r.body.error.code).toBe('IMPORT_TOO_MANY');
+  });
+
   it('作废了编号的导入不再写', async () => {
     const lost = randomUUID();
     expect((await api(ctx.app, keeper, 'POST', `/api/erp/ops/${lost}/abandon`, { type: 'ledger_import' })).body).toMatchObject({ abandoned: true });

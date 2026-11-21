@@ -18,6 +18,8 @@ import {
   LEDGER_EXPORT_MARK,
   LEDGER_IN_SLOTS,
   LEDGER_LINES_PER_DOC,
+  LEDGER_MAX_DOCS,
+  LEDGER_MAX_GROUPS,
   LEDGER_MAX_ROWS,
   LEDGER_OUT_SLOTS,
   LEDGER_TAIL_COLUMNS,
@@ -249,6 +251,9 @@ async function plan(db: Db, f: z.infer<typeof PreviewInput>, timezone: string): 
     throw unprocessable('IMPORT_EXPORTED', '这是系统导出的台账（只用来对账），里面的出入库已经记过账，再导入会重复记账。请用「下载模板」填新发生的出入库');
   }
   if (!sheet.cols.has('物料名称')) throw unprocessable('IMPORT_COLUMNS', '表头少了「物料名称」');
+  if (sheet.ins.length > LEDGER_MAX_GROUPS || sheet.outs.length > LEDGER_MAX_GROUPS) {
+    throw unprocessable('IMPORT_TOO_MANY', `入库、出库各最多 ${LEDGER_MAX_GROUPS} 组（这份入库 ${sheet.ins.length} 组、出库 ${sheet.outs.length} 组），请按月分成几份导入`);
+  }
   if (sheet.ins.length === 0 && sheet.outs.length === 0) {
     throw unprocessable('IMPORT_COLUMNS', '表头里没有「入库」「出库」分组（第二行要有「日期」「数量」），请用「下载模板」的出入库台账');
   }
@@ -451,6 +456,9 @@ async function plan(db: Db, f: z.infer<typeof PreviewInput>, timezone: string): 
   }
   const issueCount = out.filter((r) => r.issues.length).length;
   const docs = issueCount ? [] : docsOf(out, factorsOf(mats)).map((d) => d.summary);
+  if (docs.length > LEDGER_MAX_DOCS) {
+    throw unprocessable('IMPORT_TOO_MANY', `这份台账要生成 ${docs.length} 张单，一份最多 ${LEDGER_MAX_DOCS} 张；请按日期分成几份导入`);
+  }
   const [prev] = await db<{ id: number; createdAt: string; createdByName: string; receiptCount: number; issueCount: number }[]>`
     SELECT i.id, i.created_at, s.display_name AS created_by_name, i.receipt_count, i.issue_count FROM ledger_imports i JOIN staff s ON s.id = i.created_by
     WHERE i.file_sha256 = ${sheet.sha256}`;
