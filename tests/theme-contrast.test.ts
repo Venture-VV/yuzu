@@ -48,6 +48,11 @@ const TEXT_PAIRS: [string, string[]][] = [
   ['ember-deep', ['paper', 'card', 'ember-soft']],
   ['clay', ['paper', 'card', 'clay-soft']],
   ['lake', ['paper', 'card', 'lake-soft']],
+  // 房态四色（8.2.0 P01）：状态字写在卡片底色与白卡片上
+  ['room-free-ink', ['card', 'room-free-soft']],
+  ['room-in-use-ink', ['card', 'room-in-use-soft']],
+  ['room-dirty-ink', ['card', 'room-dirty-soft']],
+  ['room-maintenance-ink', ['card', 'room-maintenance-soft']],
   // 色块上的字：主按钮、危险按钮、深色标签
   ['paper', ['pine', 'pine-hover', 'clay', 'clay-hover', 'lake', 'ink']],
   // 亮色块（柚黄、橙）上的字

@@ -1,16 +1,23 @@
-// 房态中心五种状态的样子：颜色（都走样式表里的色名，深浅两套主题跟着变）+ 文字 + 图标，卡片、数量、总览的小方块共用这一张表。
-// 空闲 绿、在用 蓝、待清 黄、维修 红、已预订 灰（《浴族系统需求汇总》房态中心第 2 条）。
+// 房态中心五种状态的样子：颜色 + 文字 + 图标，卡片、数量、总览的小方块共用这一张表。
+// 8.2.0 P01（回测 3-2）：空闲 绿、在用 蓝、待清 黄、维修 红 四色固定，走样式表里只给房态用的 --color-room-*（值见 @shared/room-colors）；
+// 卡片底色、左侧色条、状态点三处同源；已预订用中性灰，不占这四色。
 
 import { CalendarClock, CircleCheck, Sparkles, Timer, Wrench } from 'lucide-react';
 import { ROOM_COUNT_KEY, ROOM_STATUS_LABELS, ROOM_STATUSES, type RoomCounts, type RoomStatus } from '@shared/room-center';
 import { cn } from '../../lib/utils';
 
-export const STATUS_META: Record<RoomStatus, { icon: typeof Timer; card: string; text: string; dot: string }> = {
-  free: { icon: CircleCheck, card: 'border-pine/35 bg-pine-tint', text: 'text-pine', dot: 'bg-pine' },
-  in_use: { icon: Timer, card: 'border-lake/40 bg-lake-soft/60', text: 'text-lake', dot: 'bg-lake' },
-  dirty: { icon: Sparkles, card: 'border-yuzu-deep/45 bg-yuzu-tint', text: 'text-yuzu-deep', dot: 'bg-yuzu' },
-  maintenance: { icon: Wrench, card: 'border-clay/40 bg-clay-soft/50', text: 'text-clay', dot: 'bg-clay' },
-  booked: { icon: CalendarClock, card: 'border-line-strong bg-paper-2', text: 'text-ink-2', dot: 'bg-ink-3' },
+export const STATUS_META: Record<RoomStatus, { icon: typeof Timer; card: string; bar: string; text: string; dot: string }> = {
+  free: { icon: CircleCheck, card: 'border-room-free/40 bg-room-free-soft', bar: 'border-l-room-free', text: 'text-room-free-ink', dot: 'bg-room-free' },
+  in_use: { icon: Timer, card: 'border-room-in-use/40 bg-room-in-use-soft', bar: 'border-l-room-in-use', text: 'text-room-in-use-ink', dot: 'bg-room-in-use' },
+  dirty: { icon: Sparkles, card: 'border-room-dirty/50 bg-room-dirty-soft', bar: 'border-l-room-dirty', text: 'text-room-dirty-ink', dot: 'bg-room-dirty' },
+  maintenance: {
+    icon: Wrench,
+    card: 'border-room-maintenance/40 bg-room-maintenance-soft',
+    bar: 'border-l-room-maintenance',
+    text: 'text-room-maintenance-ink',
+    dot: 'bg-room-maintenance',
+  },
+  booked: { icon: CalendarClock, card: 'border-line-strong bg-paper-2', bar: 'border-l-ink-4', text: 'text-ink-2', dot: 'bg-ink-3' },
 };
 
 /** 状态章：图标 + 文字（16 像素），底色用卡片色、边线与字用状态色——放在哪种底色的卡片上都看得清 */
@@ -22,6 +29,7 @@ export function StatusChip({ status, className }: { status: RoomStatus; classNam
       className={cn('inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-current/30 bg-card px-2.5 text-[16px] leading-none font-bold whitespace-nowrap', m.text, className)}
       data-testid="rc-status"
     >
+      <span className={cn('size-2 shrink-0 rounded-full', m.dot)} aria-hidden data-testid="rc-status-dot" />
       <Icon className="size-4" aria-hidden />
       {ROOM_STATUS_LABELS[status]}
     </span>

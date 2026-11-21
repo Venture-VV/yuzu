@@ -53,6 +53,20 @@
   --color-lake: #2c6066;
   --color-lake-soft: #dcebea;
 
+  /* 房态四色（8.2.0 P01）：空闲 绿、在用 蓝、待清 黄、维修 红；只给房态用，值与 src/shared/room-colors.ts 一致 */
+  --color-room-free: #2e9d58;
+  --color-room-free-soft: #e2f4e8;
+  --color-room-free-ink: #1a6b3a;
+  --color-room-in-use: #2563d0;
+  --color-room-in-use-soft: #e1eafb;
+  --color-room-in-use-ink: #1d4ea6;
+  --color-room-dirty: #e3b000;
+  --color-room-dirty-soft: #fcf1c6;
+  --color-room-dirty-ink: #735400;
+  --color-room-maintenance: #d43c3c;
+  --color-room-maintenance-soft: #fbe2e2;
+  --color-room-maintenance-ink: #a32727;
+
   /* 主导航那一条：深浅两套主题里都是深底浅字，不跟着纸色、墨色翻转 */
   --color-rail: #1d3f31;
   --color-rail-erp: #22344a;
@@ -203,6 +217,19 @@
 
   --color-lake: #72c1c8;
   --color-lake-soft: #1b3235;
+
+  --color-room-free: #3fbf74;
+  --color-room-free-soft: #142c1d;
+  --color-room-free-ink: #7fdca3;
+  --color-room-in-use: #4b8ef0;
+  --color-room-in-use-soft: #15233d;
+  --color-room-in-use-ink: #9cc2ff;
+  --color-room-dirty: #f0c020;
+  --color-room-dirty-soft: #33290a;
+  --color-room-dirty-ink: #f3d36b;
+  --color-room-maintenance: #ef5b5b;
+  --color-room-maintenance-soft: #381616;
+  --color-room-maintenance-ink: #ff9d9d;
 
   --color-rail: #0e1410;
   --color-rail-erp: #0f1722;

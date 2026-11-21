@@ -677,7 +677,7 @@ const RoomsLayer = memo(function RoomsLayer({
                 points={e.polygon.map((pt) => pt.join(',')).join(' ')}
                 fill={c.fill}
                 fillOpacity={0.78}
-                stroke={isSel ? '#a87508' : c.stroke}
+                stroke={isSel ? '#1c231f' : c.stroke}
                 strokeWidth={sw(isSel ? 3.5 : 1.5)}
                 strokeDasharray={dashed ? dash(6, 4) : undefined}
                 vectorEffect="non-scaling-stroke"
@@ -688,7 +688,7 @@ const RoomsLayer = memo(function RoomsLayer({
                 cy={e.labelAt[1]}
                 r={font * 1.1}
                 fill={c.fill}
-                stroke={isSel ? '#a87508' : c.stroke}
+                stroke={isSel ? '#1c231f' : c.stroke}
                 strokeWidth={sw(isSel ? 3.5 : 1.5)}
                 strokeDasharray={dashed ? dash(4, 3) : undefined}
                 vectorEffect="non-scaling-stroke"

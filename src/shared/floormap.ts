@@ -4,8 +4,10 @@
 //   · 开单即占用的业态（派对房、宠物轰趴房、娱乐室，v0.7.19 D39，后台可改）：看使用单：空闲 / 使用中；
 //   · 其他业态没有业务单据，只显示业态；
 //   · 停用、不可售的空间灰色（还有人住、还有钟单的照样按占用显示）。
-// 颜色与图例共用这一张表，图上与图例一一对应。
+// 颜色与图例共用这一张表，图上与图例一一对应。8.2.0 P01：空闲、在用（在住、使用中、待上钟、服务中）、待打扫、维修
+// 用房态四色（@shared/room-colors，与房态中心的卡片同源）；其余几样（未挂接、其他业态、停用、台账里没有）不用这四色。
 
+import { ROOM_COLORS } from './room-colors';
 import type { RoomBoardRoom } from './rooms';
 import { isTechnicianBusinessType, ROOM_BUSINESS_TYPE } from './spaces';
 
@@ -26,13 +28,13 @@ export interface FloorMapLegendItem {
 }
 
 export const FLOOR_MAP_LEGEND: Record<FloorMapState, FloorMapLegendItem> = {
-  vacant: { label: '空闲', fill: '#cfe3d4', stroke: '#24493a', hint: '客房已打扫可入住；技师房没有钟单；派对房等没有开着的使用单' },
-  occupied: { label: '在住', fill: '#f2c230', stroke: '#a87508', hint: '客房有在住的入住单' },
-  in_use: { label: '使用中', fill: '#eab4cf', stroke: '#9c3a6c', hint: '派对房、宠物轰趴房、娱乐室有开着的使用单（开单即占用）' },
-  waiting: { label: '待上钟', fill: '#f6c7a6', stroke: '#dc7432', hint: '技师房派了钟、技师还没上钟' },
-  serving: { label: '服务中', fill: '#8fbcc0', stroke: '#2c6066', hint: '技师房有技师在钟上' },
-  dirty: { label: '待打扫', fill: '#e9a99a', stroke: '#b0503a', hint: '客房退房后还没打扫' },
-  maintenance: { label: '维修', fill: '#a3a8a0', stroke: '#4a524c', hint: '客房在维修，不能入住' },
+  vacant: { label: '空闲', fill: ROOM_COLORS.free.map, stroke: ROOM_COLORS.free.ink, hint: '客房已打扫可入住；技师房没有钟单；派对房等没有开着的使用单' },
+  occupied: { label: '在住', fill: ROOM_COLORS.in_use.map, stroke: ROOM_COLORS.in_use.ink, hint: '客房有在住的入住单' },
+  in_use: { label: '使用中', fill: ROOM_COLORS.in_use.map, stroke: ROOM_COLORS.in_use.ink, hint: '派对房、宠物轰趴房、娱乐室有开着的使用单（开单即占用）' },
+  waiting: { label: '待上钟', fill: ROOM_COLORS.in_use.soft, stroke: ROOM_COLORS.in_use.solid, hint: '技师房派了钟、技师还没上钟' },
+  serving: { label: '服务中', fill: ROOM_COLORS.in_use.map, stroke: ROOM_COLORS.in_use.ink, hint: '技师房有技师在钟上' },
+  dirty: { label: '待打扫', fill: ROOM_COLORS.dirty.map, stroke: ROOM_COLORS.dirty.ink, hint: '客房退房后还没打扫' },
+  maintenance: { label: '维修', fill: ROOM_COLORS.maintenance.map, stroke: ROOM_COLORS.maintenance.ink, hint: '客房在维修，不能入住' },
   unlinked: { label: '未挂接', fill: '#ffffff', stroke: '#808780', hint: '「客房」空间还没挂客房房间，在「后台 → 客房 → 房间」里挂接' },
   other: { label: '其他业态', fill: '#e4dcef', stroke: '#7a6a99', hint: '没有业务单据的业态，只显示业态' },
   off: { label: '停用 / 不可售', fill: '#d9d9d5', stroke: '#9a9e97', hint: '空间台账里停用或不可售，或挂的客房房间停用' },

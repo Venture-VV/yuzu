@@ -4,6 +4,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ROOM_COLORS } from '../src/shared/room-colors';
 import { FLOOR_MAP_LEGEND, FLOOR_MAP_STATES, spaceMatches, spaceStatus, type FloorMapData, type FloorMapSession, type FloorMapSpace } from '../src/shared/floormap';
 import type { RoomBoardRoom } from '../src/shared/rooms';
 import type { SpaceLedger } from '../src/shared/spaces';
@@ -175,11 +176,18 @@ describe('状态口径（共用的纯函数）', () => {
     expect(spaceStatus(sp({ active: false }), undefined, [session('serving')]).state).toBe('serving');
   });
 
-  it('其他业态只显示业态；颜色表每个状态都有、互不相同；搜索编码、显示名、别名不分大小写', () => {
+  it('其他业态只显示业态；颜色表每个状态都有；在用的几样（在住、使用中、服务中）同一个在用色，其余互不相同；搜索编码、显示名、别名不分大小写', () => {
     expect(spaceStatus(sp({ businessType: '派对房' }), undefined, []).state).toBe('other');
     expect(spaceStatus(sp({ businessType: '自定业态' }), undefined, []).kind).toBe('other');
     expect(Object.keys(FLOOR_MAP_LEGEND).sort()).toEqual([...FLOOR_MAP_STATES].sort());
-    expect(new Set(FLOOR_MAP_STATES.map((k) => FLOOR_MAP_LEGEND[k].fill)).size).toBe(FLOOR_MAP_STATES.length);
+    // 8.2.0 P01：在住、使用中、服务中都是房态中心的「在用」，同一个在用色（房态四色，@shared/room-colors）
+    const inUse = ['occupied', 'in_use', 'serving'] as const;
+    expect(new Set(inUse.map((k) => FLOOR_MAP_LEGEND[k].fill))).toEqual(new Set([ROOM_COLORS.in_use.map]));
+    const rest = FLOOR_MAP_STATES.filter((k) => !(inUse as readonly string[]).includes(k));
+    expect(new Set([...rest.map((k) => FLOOR_MAP_LEGEND[k].fill), ROOM_COLORS.in_use.map]).size).toBe(rest.length + 1);
+    expect(FLOOR_MAP_LEGEND.vacant.fill).toBe(ROOM_COLORS.free.map);
+    expect(FLOOR_MAP_LEGEND.dirty.fill).toBe(ROOM_COLORS.dirty.map);
+    expect(FLOOR_MAP_LEGEND.maintenance.fill).toBe(ROOM_COLORS.maintenance.map);
     expect(new Set(FLOOR_MAP_STATES.map((k) => FLOOR_MAP_LEGEND[k].label)).size).toBe(FLOOR_MAP_STATES.length);
     expect(spaceMatches(sp(), 's30')).toBe(true);
     expect(spaceMatches(sp(), '合成spa')).toBe(true);
