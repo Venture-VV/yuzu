@@ -148,6 +148,8 @@ export function StoreRail({ footer }: { footer: ReactNode }) {
           hoverTimer.current = window.setTimeout(() => setFlyout({ key: d.key, path: pathname, style: flyoutPosition(button, d.items.length), hover: true }), 120);
         }
       : undefined,
+    // 进了这一组（按钮或弹出来的二级入口）就不收：鼠标从按钮走到弹出层要经过一道空隙（Codex 审查 f1e5186 的 P2）
+    onKeep: hover ? () => window.clearTimeout(hoverTimer.current) : undefined,
     flyout: openFlyout,
   };
 
@@ -160,7 +162,7 @@ export function StoreRail({ footer }: { footer: ReactNode }) {
       data-drawer={drawer ? 'open' : undefined}
       data-testid="store-rail"
       className={cn(
-        'flex h-full min-h-0 shrink-0 flex-col overflow-hidden bg-rail pt-4 pb-4 text-paper short:pt-2.5 short:pb-2.5',
+        'flex h-full min-h-0 shrink-0 flex-col bg-rail pt-4 pb-4 text-paper short:pt-2.5 short:pb-2.5',
         expanded ? 'w-[200px] items-stretch gap-1' : 'w-[76px] items-center gap-1 short:gap-0.5 md:w-[84px]',
         drawer && 'fixed inset-y-0 left-0 z-40 w-[240px] shadow-pop',
       )}
@@ -231,6 +233,8 @@ interface DomainCtx {
   onToggle: (domain: StoreNavDomain, button: HTMLButtonElement) => void;
   /** 鼠标停上去（button）/ 移开（null）；触屏没有 */
   onHover?: (domain: StoreNavDomain, button: HTMLButtonElement | null) => void;
+  /** 鼠标回到这一组里：取消正要收起的弹出层 */
+  onKeep?: () => void;
   flyout: { key: StoreNavDomainKey; style: CSSProperties } | null;
 }
 
@@ -263,6 +267,7 @@ function Domain({ domain, ctx }: { domain: StoreNavDomain; ctx: DomainCtx }) {
       // 收起时当前所在的组：组名和下面的入口放在一块浅底上，一眼看得出是一组
       className={cn(ctx.expanded ? 'flex flex-col' : 'flex flex-col items-center gap-0.5', !ctx.expanded && here && open && 'rounded-[16px] bg-white/6 pb-0.5')}
       onMouseLeave={ctx.onHover && !inline ? () => ctx.onHover!(domain, null) : undefined}
+      onMouseEnter={ctx.onKeep && !inline ? ctx.onKeep : undefined}
     >
       <button
         type="button"

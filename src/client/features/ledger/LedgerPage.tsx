@@ -106,6 +106,8 @@ function BalanceLedger() {
         <DateNav value={historyAllowed ? date : session.today} today={session.today} locked={!historyAllowed} onChange={(d) => update({ date: d === session.today ? null : d })} />
         <Segmented<TypeFilter>
           size="sm"
+          // 手机上六个类型放不下时在自己这一条里左右滑（8.2.0 P02 起内容区自己滚，滚动条占几个像素）
+          className="max-w-full overflow-x-auto"
           value={type}
           onChange={(v) => update({ type: v === 'all' ? null : v })}
           ariaLabel="类型"
