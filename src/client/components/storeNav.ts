@@ -24,6 +24,7 @@ import {
   BriefcaseBusiness,
   Wallet,
   IdCard,
+  Megaphone,
 } from 'lucide-react';
 import { ADMIN_ENTRY_PERMISSIONS } from '@shared/admin';
 import { DISH_PERMISSIONS } from '@shared/dishes';
@@ -112,6 +113,8 @@ const STORE_NAV: StoreNavDomain[] = [
     icon: Hourglass,
     items: [
       { to: '/clockroom', label: '钟房', icon: Hourglass, perm: 'technician.dispatch', when: (s) => s.technicians },
+      // 排位播报（8.2.0 P03，回测 4-1）：从钟房里移出来，与钟房同级；权限单独授，排位员可以只有这一项
+      { to: '/announcer', label: '排位播报', icon: Megaphone, perm: ['technician.announce', 'technician.dispatch'], when: (s) => s.technicians },
       // 技师管理（8.1.16 块 E，docs/TECHNICIANS_V8115.md）：技师名册、组别、班次与排班、休假；钟房的岗位能看、能替技师申请休假
       { to: '/technicians', label: '技师管理', icon: IdCard, perm: ['technician.manage', 'technician.dispatch'], when: (s) => s.technicians },
     ],
@@ -202,6 +205,7 @@ const LEGACY_ORDER = [
   '/frontdesk',
   '/cashier',
   '/clockroom',
+  '/announcer',
   '/dining',
   '/room-center',
   '/bookings',

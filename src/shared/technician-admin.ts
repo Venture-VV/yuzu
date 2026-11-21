@@ -175,6 +175,7 @@ export interface TechnicianAdminView {
 
 export const CALL_KINDS = ['dispatch', 'manual'] as const;
 export type CallKind = (typeof CALL_KINDS)[number];
+export const CALL_KIND_LABELS: Record<CallKind, string> = { dispatch: '自动叫号', manual: '手动叫号' };
 
 /** 一次叫号：text 是当时念的那一句 */
 export interface ClockCall {

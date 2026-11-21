@@ -29,7 +29,7 @@ import { ISO_DATE } from '@shared/business-date';
 import type { ClockSpace } from '@shared/floormap';
 import { isTechnicianBusinessType, spaceLabel, TECHNICIAN_BUSINESS_TYPES } from '@shared/spaces';
 import { isUniqueViolation, type Db, type Tx } from '../db';
-import { guard } from '../auth/guard';
+import { guard, guardAny } from '../auth/guard';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps, OpContext } from '../lib/context';
 import { badRequest, conflict, notFound, unprocessable } from '../lib/errors';
@@ -1348,7 +1348,8 @@ export function registerClockroomRoutes(app: FastifyInstance, deps: Deps) {
   // 派钟、加钟要挂账：与前台挂账同一个入口（价格、技师、幂等的核对都在那里）
   const post = async () => (await import('./frontdesk/bills')).postCharges;
 
-  app.get('/api/clockroom', { preHandler: guard('technician.dispatch') }, async () => clockroomBoard(sql, deps));
+  // 看板：钟房与排位播报（8.2.0 P03）共用同一份排位数据，只有排位播报的岗位也能看
+  app.get('/api/clockroom', { preHandler: guardAny('technician.dispatch', 'technician.announce') }, async () => clockroomBoard(sql, deps));
 
   app.get('/api/clockroom/events', { preHandler: guard('technician.dispatch') }, async (req) => {
     const { date } = parse(z.object({ date: z.string().regex(ISO_DATE, '日期格式应为 YYYY-MM-DD').optional() }), req.query ?? {});
@@ -1395,9 +1396,10 @@ export function registerClockroomRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/api/clockroom/technicians/:id/state', { preHandler: guard('technician.dispatch') }, async (req) => changeState(deps, parse(idParam, req.params).id, req.body, ctxOf(req)));
   app.post('/api/clockroom/sign-in-all', { preHandler: guard('technician.dispatch') }, async (req) => signInAll(deps, ctxOf(req)));
 
-  // 8.1.15 排位播报：手动叫号、登记主播报终端（接管、放下、报到）
-  app.post('/api/clockroom/calls', { preHandler: guard('technician.dispatch') }, async (req) => callTechnician(deps, req.body, ctxOf(req)));
-  app.post('/api/clockroom/announcer', { preHandler: guard('technician.dispatch') }, async (req) => {
+  // 8.1.15 排位播报：手动叫号、登记主播报终端（接管、放下、报到）；8.2.0 P03 起是单独的页面与权限，钟房的岗位照旧能叫号
+  const announce = guardAny('technician.dispatch', 'technician.announce');
+  app.post('/api/clockroom/calls', { preHandler: announce }, async (req) => callTechnician(deps, req.body, ctxOf(req)));
+  app.post('/api/clockroom/announcer', { preHandler: announce }, async (req) => {
     await setAnnouncer(deps, req.body, ctxOf(req));
     return clockroomBoard(sql, deps);
   });

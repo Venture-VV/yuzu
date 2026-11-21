@@ -1324,24 +1324,15 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('dish-options')).toHaveCount(0);
   },
-  // 8.1.16 钟房：这台是主播报终端（播报条上按钮最多）；轮钟排队、在钟上与待上钟的钟单；展开类型、项目两排筛选；按状态排的技师卡片
+  // 8.1.16 钟房：轮钟排队、在钟上与待上钟的钟单；展开类型、项目两排筛选；按状态排的技师卡片。
+  // 8.2.0 P03：排位播报移到了单独的页面（这台是主播报终端，播报条上按钮最多），最后看那一页
   clockroom: async (page) => {
     await page.evaluate((id) => localStorage.setItem('yuzu.clock.announcer.client', id), ANNOUNCER_CLIENT);
     await page.goto('/clockroom');
-    await expect(page.getByTestId('announcer-bar')).toHaveAttribute('data-announcer', 'on');
+    await expect(page.getByTestId('announcer-bar')).toHaveCount(0);
     await expect(page.getByTestId('clock-queue')).toContainText('欧阳晓晓');
     await expectFits(page);
-    await expectOnScreen(page, [
-      'clock-dispatch',
-      'clock-search',
-      'clock-more-filters',
-      'announcer-volume',
-      'announcer-mute',
-      'announcer-replay',
-      'announcer-test',
-      'announcer-release',
-      'clock-call-tech-15',
-    ]);
+    await expectOnScreen(page, ['clock-dispatch', 'clock-search', 'clock-more-filters', 'clock-call-tech-15']);
     await page.getByTestId('clock-more-filters').click();
     await page.getByTestId('clock-kind-足浴').click();
     await page.getByTestId('clock-category-采耳').click();
@@ -1353,6 +1344,10 @@ const PAGES: Record<PageKey, (page: Page) => Promise<void>> = {
     await expect(page.getByTestId('clock-tech-30')).toHaveAttribute('data-status', 'suspended');
     await expectFits(page);
     await expectOnScreen(page, ['clock-tech-call-15', 'clock-tech-rest-15', 'clock-tech-suspend-15', 'clock-tech-back-21']);
+    await page.goto('/announcer');
+    await expect(page.getByTestId('announcer-bar')).toHaveAttribute('data-announcer', 'on');
+    await expectFits(page);
+    await expectOnScreen(page, ['announcer-volume', 'announcer-mute', 'announcer-replay', 'announcer-test', 'announcer-release']);
   },
   // 8.1.16 技师管理：名册（与编辑技师的弹窗）、组别、班次与排班表（排班表在自己的框里左右滑；临时调班的弹窗）、休假（申请的弹窗）
   'technician-admin': async (page) => {
