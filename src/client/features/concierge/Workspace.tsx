@@ -57,7 +57,6 @@ import type { ReceiptDraft } from './ReceiptExperience';
 import { connectionSnapshot, onReconnect } from '../../lib/connection';
 import { Dialog, Field, Empty, Status, amount, csv, date, dayKey, download, iso, initial, localTime, time, uid } from './WorkspaceParts';
 import { pretty, timelineFor } from './workspaceTimeline';
-import { CaptureReceipt } from './CaptureReceipt';
 
 type View = 'dashboard' | 'members' | 'appointments' | 'followup' | 'balances' | 'segments' | 'receipts' | 'receiptArchive' | 'tasks' | 'gifts' | 'manager';
 // 哪一页写进地址（8.0.18 整合，与后台的二级页签同一个规矩）：/concierge 是今日工作台，其余是 /concierge/<页>。
@@ -101,7 +100,7 @@ const NAV = [
   { id: 'gifts', label: '签赠台账', icon: Signature },
 ] as const;
 const TITLES: Record<View, [string, string]> = {
-  dashboard: ['今日工作台', '把接待、拍单与后续安排，接续在同一份会员档案中。'],
+  dashboard: ['今日工作台', '把接待、预约与后续安排，接续在同一份会员档案中。'],
   members: ['会员档案', '查看全体系统会员，接续同一份管家服务档案。'],
   appointments: ['预约与接待', '管家协调预约；正式房间、技师占用请以前台预约为准。'],
   receipts: ['管家好评中心', '记录被客人认可的服务，让每一份好评都有依据。'],
@@ -141,7 +140,6 @@ export default function Workspace({ initialData }: { initialData: WorkspaceData 
   const [lastSync, setLastSync] = useState(initialData.sync?.serverTime || '');
   const [syncError, setSyncError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [capture, setCapture] = useState<{ memberId: string } | null>(null);
   const [receiptDetailId, setReceiptDetailIdState] = useState<string | null>(null);
   const [balanceDetailId, setBalanceDetailId] = useState<string | null>(null);
   const [receiptEditor, setReceiptEditor] = useState<{
@@ -1036,7 +1034,7 @@ export default function Workspace({ initialData }: { initialData: WorkspaceData 
         </table>
       </div>
     ) : (
-      <Empty icon={Camera} title="还没有消费凭证" text="拍摄真实小票，识别后核对关键字段。消费记录不会自动扣减余额。" action="拍摄消费单" onAction={() => setCapture({ memberId: '' })} />
+      <Empty icon={Camera} title="还没有消费凭证" text="消费数据由前台收银实时同步，管家端不再拍照补录（8.1.21）；这里只查看以前拍过的小票。" />
     );
   }
   return (
@@ -1110,12 +1108,7 @@ export default function Workspace({ initialData }: { initialData: WorkspaceData 
                 <p>{TITLES[view][1]}</p>
               </div>
               <div className="heading-actions">
-                {view === 'receiptArchive' ? (
-                  <button className="btn btn-primary" onClick={() => setCapture({ memberId: '' })}>
-                    <Camera size={17} />
-                    拍摄消费单
-                  </button>
-                ) : view === 'receipts' || view === 'gifts' ? null : view === 'tasks' ? (
+                {view === 'receiptArchive' || view === 'receipts' || view === 'gifts' ? null : view === 'tasks' ? (
                   <button className="btn btn-primary" onClick={() => openModal({ kind: 'task' })}>
                     <Plus size={17} />
                     新增待办
@@ -1155,12 +1148,6 @@ export default function Workspace({ initialData }: { initialData: WorkspaceData 
                       sub: '确认需求，核实安排',
                       icon: CalendarDays,
                       fn: () => openModal({ kind: 'appointment' }),
-                    },
-                    {
-                      title: '拍消费单',
-                      sub: '拍照识别，核对保存',
-                      icon: Camera,
-                      fn: () => setCapture({ memberId: '' }),
                     },
                     {
                       title: '处理待办',
@@ -1918,10 +1905,6 @@ export default function Workspace({ initialData }: { initialData: WorkspaceData 
                   <CalendarDays size={16} />
                   录预约
                 </button>
-                <button onClick={() => setCapture({ memberId: member.id })}>
-                  <Camera size={16} />
-                  拍消费单
-                </button>
                 <button onClick={() => openModal({ kind: 'visit', member })}>
                   <HeartHandshake size={16} />
                   开始接待
@@ -2471,18 +2454,6 @@ export default function Workspace({ initialData }: { initialData: WorkspaceData 
               </div>
             </form>
           </Dialog>
-        )}
-        {capture && (
-          <CaptureReceipt
-            catalog={data.catalog || []}
-            members={data.members}
-            memberId={capture.memberId}
-            onClose={() => setCapture(null)}
-            onDone={(draft) => {
-              setCapture(null);
-              setReceiptEditor({ draft, key: uid() });
-            }}
-          />
         )}
         {receiptEditor && (
           <ReceiptEditor

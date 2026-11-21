@@ -100,8 +100,9 @@ test('前台会员建立服务档案，原生资料实时同步，历史核对�
 
 // ── 8.0.15（docs/ORDERS_V8015.md 第 1 节）──
 // 门店内网用 http://IP 打开时没有 crypto.randomUUID（只在 HTTPS / localhost 下有）；8.0.12 的管家部直接用了它，点「新增会员」没反应。
-// 这里把这个接口拿掉来模拟内网 HTTP：点按钮 1 秒内出录入窗，提交后名单与「在册会员」数马上更新，代录预约、拍消费单同样打得开。
-test('内网 HTTP（没有 crypto.randomUUID）：新增会员 1 秒内弹窗、提交后名单与在册数更新；代录预约、拍消费单打得开；没有相关报错', async ({ page }, testInfo) => {
+// 这里把这个接口拿掉来模拟内网 HTTP：点按钮 1 秒内出录入窗，提交后名单与「在册会员」数马上更新，代录预约同样打得开。
+// 8.1.21 起管家端没有「拍消费单」（消费由前台收银同步），工作台与档案里都看不到这个入口。
+test('内网 HTTP（没有 crypto.randomUUID）：新增会员 1 秒内弹窗、提交后名单与在册数更新；代录预约打得开；没有拍消费单；没有相关报错', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== '门店电脑', '变更流程只在门店电脑组执行');
   const problems: string[] = [];
   page.on('pageerror', (e) => problems.push(String(e)));
@@ -146,7 +147,8 @@ test('内网 HTTP（没有 crypto.randomUUID）：新增会员 1 秒内弹窗、
   await expect(member).toContainText(/会员档案 · \d{6}/);
   await member.getByText('基本档案', { exact: true }).click();
   await expect(member).toContainText('喜欢靠窗的位置');
-  // 从档案里代录预约、拍消费单：都能直接关联到这位会员
+  // 从档案里代录预约：直接关联到这位会员；档案里没有「拍消费单」（8.1.21）
+  await expect(member.getByRole('button', { name: /拍消费单/ })).toHaveCount(0);
   await member.getByRole('button', { name: '录预约', exact: true }).click();
   dialog = page.getByRole('dialog', { name: '登记新预约' });
   await expect(dialog).toBeVisible({ timeout: 1000 });
@@ -156,7 +158,7 @@ test('内网 HTTP（没有 crypto.randomUUID）：新增会员 1 秒内弹窗、
   await page.locator('.drawer-scrim').click({ position: { x: 10, y: 10 } });
   await expect(member).not.toBeVisible();
 
-  // 工作台上的三个入口：新增会员、代录预约、拍消费单
+  // 工作台上的入口：建立服务档案、代录预约、处理待办；没有「拍消费单」（8.1.21）
   await page
     .getByRole('navigation', { name: '管家业务模块' })
     .getByRole('button', { name: /工作台/ })
@@ -169,46 +171,13 @@ test('内网 HTTP（没有 crypto.randomUUID）：新增会员 1 秒内弹窗、
   dialog = page.getByRole('dialog', { name: '登记新预约' });
   await expect(dialog).toBeVisible({ timeout: 1000 });
   await dialog.getByRole('button', { name: '关闭' }).click();
-  await page
-    .locator('.quick-actions')
-    .getByRole('button', { name: /拍消费单/ })
-    .click();
-  const capture = page.getByRole('dialog').last();
-  await expect(capture).toBeVisible({ timeout: 1000 });
-  await expect(capture).toContainText(/拍|凭证|小票/);
+  await expect(page.locator('.quick-actions').getByRole('button')).toHaveText([/建立服务档案/, /代录预约/, /处理待办/]);
+  await expect(page.getByRole('button', { name: /拍消费单|拍摄消费单/ })).toHaveCount(0);
   expect(problems).toEqual([]);
 });
 
 // ── 主线整改（docs/HANDOFF_V8012.md）──
-// 合成小票：用页面画一张（不是真实小票），当作拍到的照片
-async function syntheticReceipt(page: Page, number: string): Promise<Buffer> {
-  const draw = await page
-    .context()
-    .browser()!
-    .newPage({ viewport: { width: 720, height: 1100 }, deviceScaleFactor: 2 });
-  try {
-    await draw.setContent(`<body style="margin:0;background:#fff;font-family:'WenQuanYi Zen Hei','Noto Sans CJK SC',sans-serif;color:#000">
-      <div style="padding:36px 44px;font-size:30px;line-height:1.7">
-        <div style="text-align:center;font-size:38px;font-weight:bold">合成测试门店</div>
-        <div style="text-align:center">结算单</div>
-        <div>单号：${number}</div><div>时间：2026-11-12 10:24:32</div>
-        <hr style="border:0;border-top:2px dashed #000">
-        <div style="display:flex;justify-content:space-between"><span>项目</span><span>数量</span><span>金额</span></div>
-        <div style="display:flex;justify-content:space-between"><span>精油按摩</span><span>1</span><span>298.00</span></div>
-        <div style="display:flex;justify-content:space-between"><span>柠檬红茶</span><span>2</span><span>36.00</span></div>
-        <div style="display:flex;justify-content:space-between"><span>水果拼盘</span><span>1</span><span>58.00</span></div>
-        <hr style="border:0;border-top:2px dashed #000">
-        <div style="display:flex;justify-content:space-between"><span>合计</span><span>392.00</span></div>
-        <div style="display:flex;justify-content:space-between"><span>实付</span><span>392.00</span></div>
-        <div>支付方式：微信支付 392.00</div>
-      </div></body>`);
-    return await draw.screenshot();
-  } finally {
-    await draw.close();
-  }
-}
-
-test('只有管家职责的后勤账号：登录直接进管家部；手机上拍一张合成小票，在浏览器本机识别出单号与金额', async ({ page, browser }, testInfo) => {
+test('只有管家职责的后勤账号：登录直接进管家部；手机上的工作台、会员档案、消费凭证历史都没有「拍消费单」（8.1.21）', async ({ page, browser }, testInfo) => {
   test.skip(testInfo.project.name !== '门店电脑', '会写数据的流程只在门店电脑组执行（手机那一段另开手机尺寸的窗口）');
   test.setTimeout(240_000);
   await login(page);
@@ -227,12 +196,6 @@ test('只有管家职责的后勤账号：登录直接进管家部；手机上�
   });
   try {
     const p = await phone.newPage();
-    // 识别用到的脚本、语言模型、名称模型都从本站取，一个都不能缺（原来的构建把两份语言模型删了，打包后的系统识别不了）
-    const ocr: { url: string; status: number; type: string }[] = [];
-    p.on('response', (r) => {
-      const u = new URL(r.url());
-      if (u.pathname.startsWith('/concierge/ocr/')) ocr.push({ url: u.pathname, status: r.status(), type: r.headers()['content-type'] ?? '' });
-    });
     await p.goto('/login');
     await p.fill('#username', `e2egj${stamp}`);
     await p.fill('#password', staff.temporaryPassword);
@@ -255,46 +218,25 @@ test('只有管家职责的后勤账号：登录直接进管家部；手机上�
     // 后台进不去：回到管家部
     await p.goto('/admin');
     await expect(p).toHaveURL(/\/concierge$/);
-    // 建一位管家会员（接口），再拍单
-    const number = `E2E${stamp}`;
-    const native = await page.request.post('/api/members', { data: { name: `E2E拍单-${stamp}`, phone: '198' + stamp } });
+    // 建一位管家会员（接口），再看工作台、档案、消费凭证历史：都没有「拍消费单」
+    const native = await page.request.post('/api/members', { data: { name: `E2E无拍单-${stamp}`, phone: '198' + stamp } });
     expect(native.status(), await native.text()).toBe(201);
     const nativeId = (await native.json()).id;
     const member = await p.request.post('/api/concierge/workspace', {
       data: {
         action: 'createMember',
         requestId: randomUUID(),
-        payload: { nativeMemberId: nativeId, name: `E2E拍单-${stamp}`, phone: '', cardNo: `E2E-OCR-${stamp}`, ownerId: '', cardTier: '', preferences: '', source: '', joinedAt: '' },
+        payload: { nativeMemberId: nativeId, name: `E2E无拍单-${stamp}`, phone: '', cardNo: `E2E-NOCAP-${stamp}`, ownerId: '', cardTier: '', preferences: '', source: '', joinedAt: '' },
       },
     });
     expect(member.status(), await member.text()).toBe(200);
     await p.reload();
-    await p
-      .getByRole('button', { name: /拍消费单/ })
-      .first()
-      .click();
-    await p
-      .locator('input[type=file]')
-      .last()
-      .setInputFiles({ name: 'receipt.png', mimeType: 'image/png', buffer: await syntheticReceipt(p, number) });
-    await p.getByRole('button', { name: '保存图片并识别' }).click();
-    // 识别在浏览器里跑：出来的是「识别草稿」，单号、实付金额认得出（数字与字母最稳，中文名称不作断言）
-    await expect(p.getByText(/识别草稿/).first()).toBeVisible({ timeout: 180_000 });
-    const values = () => p.evaluate(() => [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.concierge-workspace input, .concierge-workspace textarea')].map((e) => e.value));
-    await expect.poll(async () => (await values()).some((v) => v.includes(number)), { timeout: 30_000 }).toBe(true);
-    expect((await values()).filter((v) => v === '392.00').length).toBeGreaterThan(0);
-    // 资源：都取到了、没有被页面顶替；两份语言模型在
-    expect(ocr.filter((r) => r.status !== 200)).toEqual([]);
-    expect(ocr.filter((r) => r.type.startsWith('text/html'))).toEqual([]);
-    for (const need of ['/concierge/ocr/worker.min.js', '/concierge/ocr/lang/chi_sim.traineddata.gz', '/concierge/ocr/lang/eng.traineddata.gz'])
-      expect(
-        ocr.map((r) => r.url),
-        need,
-      ).toContain(need);
-    // 原图已经存下：这张草稿在门店系统里（没确认，不动任何钱）
-    const list = (await (await p.request.get(`/api/concierge/receipts?q=${number}`)).json()) as { receipts: { number: string; status: string }[] };
-    expect(list.receipts.map((r) => r.number)).toContain(number);
-    expect(list.receipts.every((r) => r.status !== '已确认')).toBe(true);
+    await expect(p.getByRole('heading', { level: 1, name: /^今日工作台/ })).toBeVisible();
+    await expect(p.locator('.quick-actions').getByRole('button')).toHaveCount(3);
+    await expect(p.getByRole('button', { name: /拍消费单|拍摄消费单/ })).toHaveCount(0);
+    await p.goto('/concierge/receipts');
+    await expect(p.getByRole('heading', { level: 1, name: /消费凭证历史/ })).toBeVisible();
+    await expect(p.getByRole('button', { name: /拍消费单|拍摄消费单/ })).toHaveCount(0);
   } finally {
     await phone.close();
     await page.request.put(`/api/staff/${staff.id}`, { data: { displayName: 'E2E 管家', role: 'backoffice', duties: ['concierge'], active: false } });
