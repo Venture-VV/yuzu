@@ -11,6 +11,7 @@ import { Megaphone } from 'lucide-react';
 import type { BoardTechnician, ClockroomBoard } from '@shared/clockroom';
 import { CALL_KIND_LABELS } from '@shared/technician-admin';
 import { api, errorMessage } from '../../lib/api';
+import { useLivePoll } from '../../lib/livePoll';
 import { useCan, useSession } from '../../lib/session';
 import { cn, formatTime } from '../../lib/utils';
 import { PageHeader } from '../../components/AppShell';
@@ -31,7 +32,16 @@ export function AnnouncerPage() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const moved = params.get('moved') === '1';
-  const q = useQuery({ queryKey: clockKey, queryFn: () => api.get<ClockroomBoard>('/api/clockroom'), refetchInterval: ANNOUNCER_REFRESH_MS });
+  const q = useQuery({ queryKey: clockKey, queryFn: () => api.get<ClockroomBoard>('/api/clockroom') });
+  // 比钟房刷得勤一点；页面在后台、断网时不取，回来马上取（lib/livePoll）
+  useLivePoll(
+    async (isLive) => {
+      const next = await api.get<ClockroomBoard>('/api/clockroom');
+      if (isLive()) qc.setQueryData(clockKey, next);
+    },
+    [qc],
+    { intervalMs: ANNOUNCER_REFRESH_MS },
+  );
   const [busy, setBusy] = useState<number | null>(null);
   const d = q.data;
   // 排在队列里的技师（在岗、按轮钟顺序）；派了钟还没上的排最前，方便叫
