@@ -43,13 +43,30 @@ export function sanitizePositionOverrides(value: unknown): PositionOverrides {
   return out;
 }
 
-export function overridesOf(roleValue: unknown, positionValue: unknown): PermissionOverrides {
-  return { roles: sanitizeOverrides(roleValue), positions: sanitizePositionOverrides(positionValue) };
+export function overridesOf(roleValue: unknown, positionValue: unknown, suggested?: PermissionOverrides['suggested']): PermissionOverrides {
+  return { roles: sanitizeOverrides(roleValue), positions: sanitizePositionOverrides(positionValue), ...(suggested ? { suggested } : {}) };
+}
+
+/** 库里一行 position_suggestions 的权限（不认识的扔掉：旧版本留下的、手工改的） */
+export const knownPermissions = known;
+
+/**
+ * 「分部门岗位职权配置」里各岗位的建议权限（8.2.0 P04）：岗位在库里有（position_catalog）就按库里的，一项都没有也是空的；
+ * 库里没有这个岗位的（不该有）不给，按代码里的模板
+ */
+export async function loadSuggestions(db: Db): Promise<NonNullable<PermissionOverrides['suggested']>> {
+  const rows = await db<{ key: string; permissions: string[] | null }[]>`
+    SELECT c.key, array_agg(s.permission) FILTER (WHERE s.permission IS NOT NULL) AS permissions
+    FROM position_catalog c LEFT JOIN position_suggestions s ON s.position_key = c.key
+    WHERE NOT c.all_permissions GROUP BY c.key`;
+  const out: NonNullable<PermissionOverrides['suggested']> = {};
+  for (const r of rows) if (isPositionKey(r.key)) out[r.key] = known(r.permissions ?? []);
+  return out;
 }
 
 export async function loadRoleOverrides(db: Db): Promise<PermissionOverrides> {
   const rows = await db<{ key: string; value: unknown }[]>`SELECT key, value FROM settings WHERE key IN ('role_permissions', 'position_permissions')`;
-  return overridesOf(rows.find((r) => r.key === 'role_permissions')?.value, rows.find((r) => r.key === 'position_permissions')?.value);
+  return overridesOf(rows.find((r) => r.key === 'role_permissions')?.value, rows.find((r) => r.key === 'position_permissions')?.value, await loadSuggestions(db));
 }
 
 /** 员工档案里的岗位（库里的值不认识时当作没有） */

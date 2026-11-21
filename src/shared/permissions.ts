@@ -433,6 +433,11 @@ export function roleHas(role: Role, permission: Permission, overrides?: RoleOver
 export interface PermissionOverrides {
   roles: RoleOverrides;
   positions: PositionOverrides;
+  /**
+   * 岗位的建议权限（8.2.0 P04：存在库里的「分部门岗位职权配置」，position_suggestions）。给了这个岗位的就按它，
+   * 没给（库里还没有这张表、或没有这个岗位）按代码里的岗位模板 positionDefaults（与库里的初始数据一致）
+   */
+  suggested?: Partial<Record<PositionKey, readonly Permission[]>>;
 }
 
 /** 算权限要的员工资料：岗位（position）必须给出（没有就是 null），免得漏了新岗位按旧岗位算 */
@@ -450,13 +455,20 @@ function normalizeOverrides(overrides: PermissionOverrides | RoleOverrides | nul
   return 'positions' in overrides && 'roles' in overrides ? (overrides as PermissionOverrides) : { roles: overrides as RoleOverrides, positions: {} };
 }
 
+/** 岗位的建议权限：库里的（P04）优先，没有按代码里的模板 */
+export function suggestedOf(position: PositionKey, overrides?: Pick<PermissionOverrides, 'suggested'> | null): Permission[] {
+  if (position === 'president') return [...ALL_PERMISSIONS];
+  const fromDb = overrides?.suggested?.[position];
+  return fromDb ? ALL_PERMISSIONS.filter((p) => fromDb.includes(p)) : positionDefaults(position, ALL_PERMISSIONS);
+}
+
 export function permissionsOf(subject: PermissionsOfSubject, rawOverrides?: PermissionOverrides | RoleOverrides | null, opts: { financeExclusion?: boolean } = {}): Permission[] {
   const finance = opts.financeExclusion ?? true;
   const overrides = normalizeOverrides(rawOverrides);
   if (subject.position === 'president' || (!subject.position && subject.role === 'owner')) return [...ALL_PERMISSIONS];
   if (subject.position) {
     // 新岗位：岗位模板 → 后台按岗位的增减 → 个人微调；店主专属的权限（LOCKED_PERMISSIONS）只有总裁有
-    const base = applyAdjust(positionDefaults(subject.position, ALL_PERMISSIONS), overrides?.positions[subject.position], LOCKED_PERMISSIONS);
+    const base = applyAdjust(suggestedOf(subject.position, overrides), overrides?.positions[subject.position], LOCKED_PERMISSIONS);
     const mine = applyAdjust(base, subject.adjust, LOCKED_PERMISSIONS);
     return ALL_PERMISSIONS.filter((p) => mine.has(p) && !LOCKED_PERMISSIONS.includes(p) && !excludedByDuty(subject, p, finance));
   }

@@ -24,7 +24,21 @@ import { DEFAULT_PAYMENT_RULES, payDaysLabel } from '@shared/payments';
 import { DEFAULT_EXPENSE_RULES } from '@shared/expenses';
 import { DEFAULT_CANTEEN_SETTINGS, mealWindowText } from '@shared/canteen';
 import { PATROL_ROUND_DEFAULT_MINUTES } from '@shared/patrol';
-import { ALL_PERMISSIONS, can, EDITABLE_ROLES, LOCKED_PERMISSIONS, overridesFrom, PERMISSION_LABELS, roleDefault, roleHas, ROLES, type Permission, type Role } from '@shared/permissions';
+import {
+  ALL_PERMISSIONS,
+  can,
+  EDITABLE_ROLES,
+  LOCKED_PERMISSIONS,
+  overridesFrom,
+  PERMISSION_LABELS,
+  roleDefault,
+  roleHas,
+  ROLES,
+  suggestedOf,
+  type Permission,
+  type PermissionOverrides,
+  type Role,
+} from '@shared/permissions';
 import type { Db } from '../db';
 import { loadPaymentRules, PAYMENT_RULES_KEY } from './payments/rules';
 import { loadExpenseRules } from './expenses';
@@ -32,7 +46,7 @@ import { loadCanteenSettings } from './canteen/settings';
 import { loadPatrolSettings } from './patrol/core';
 import { guard, guardAny } from '../auth/guard';
 import { loadRoleOverrides } from '../auth/role-permissions';
-import { applyAdjust, POSITION_KEYS, positionDefaults, positionLabel, type PositionOverrides } from '@shared/positions';
+import { applyAdjust, POSITION_KEYS, positionLabel, type PositionOverrides } from '@shared/positions';
 import { writeAudit } from '../lib/audit';
 import type { Actor, Deps } from '../lib/context';
 import { badRequest } from '../lib/errors';
@@ -1543,8 +1557,9 @@ export async function permissionMatrix(db: Db): Promise<RolePermissionMatrix> {
   return {
     positions: {
       overrides: overrides.positions,
-      defaults: Object.fromEntries(positionKeys.map((k) => [k, positionDefaults(k, ALL_PERMISSIONS)])) as Record<EditablePosition, Permission[]>,
-      effective: Object.fromEntries(positionKeys.map((k) => [k, positionPermissions(k, overrides.positions)])) as Record<EditablePosition, Permission[]>,
+      // 建议权限（8.2.0 P04 起在库里，「分部门岗位职权配置」维护）
+      defaults: Object.fromEntries(positionKeys.map((k) => [k, suggestedOf(k, overrides)])) as Record<EditablePosition, Permission[]>,
+      effective: Object.fromEntries(positionKeys.map((k) => [k, positionPermissions(k, overrides)])) as Record<EditablePosition, Permission[]>,
       staffCount: Object.fromEntries(posStaff.map((x) => [x.position, x.n])),
       updatedAt: posMeta ? new Date(posMeta.updatedAt).toISOString() : null,
       updatedBy: posMeta?.updatedBy ?? null,
@@ -1563,9 +1578,9 @@ const PermissionInput = z.object({
   roles: z.partialRecord(z.enum(EDITABLE_ROLES), z.array(z.enum(ALL_PERMISSIONS as [Permission, ...Permission[]], '有不认识的权限，请刷新页面后重试')).max(ALL_PERMISSIONS.length)),
 });
 
-/** 这个岗位按后台调整以后的权限（不含个人微调） */
-function positionPermissions(key: EditablePosition, overrides: PositionOverrides): Permission[] {
-  const set = applyAdjust(positionDefaults(key, ALL_PERMISSIONS), overrides[key], LOCKED_PERMISSIONS);
+/** 这个岗位按后台调整以后的权限（不含个人微调）：建议权限（库里的）± 「设立岗位」的增减 */
+function positionPermissions(key: EditablePosition, overrides: Pick<PermissionOverrides, 'positions' | 'suggested'>): Permission[] {
+  const set = applyAdjust(suggestedOf(key, overrides), overrides.positions[key], LOCKED_PERMISSIONS);
   return ALL_PERMISSIONS.filter((p) => set.has(p) && !LOCKED_PERMISSIONS.includes(p));
 }
 
@@ -1622,12 +1637,13 @@ export function registerAdminRoutes(app: FastifyInstance, deps: Deps) {
     }
     await sql.begin(async (tx) => {
       await lockSettings(tx);
-      const before = (await loadRoleOverrides(tx)).positions;
+      const loaded = await loadRoleOverrides(tx);
+      const before = loaded.positions;
       const after: PositionOverrides = {};
       for (const key of POSITION_KEYS) {
         if (key === 'president') continue;
-        const want = positions[key] ?? positionPermissions(key, before);
-        const dflt = positionDefaults(key, ALL_PERMISSIONS);
+        const want = positions[key] ?? positionPermissions(key, loaded);
+        const dflt = suggestedOf(key, loaded);
         const add = ALL_PERMISSIONS.filter((p) => want.includes(p) && !dflt.includes(p));
         const remove = ALL_PERMISSIONS.filter((p) => !want.includes(p) && dflt.includes(p));
         if (add.length || remove.length) after[key] = { add, remove };
