@@ -51,7 +51,7 @@ test.describe('8.2.0 排位播报独立菜单；设立岗位', () => {
     await page.goto('/admin/permissions?tab=positions');
     await expect(page.getByRole('radio', { name: '设立岗位' })).toBeChecked();
     await expect(page.getByText('新岗位（按部门）')).toHaveCount(0);
-    await page.getByRole('radio', { name: '旧岗位与专用账号' }).click();
-    await expect(page).toHaveURL(/tab=roles/);
+    await page.getByRole('radio', { name: '分部门岗位职权配置' }).click();
+    await expect(page).toHaveURL(/tab=catalog/);
   });
 });

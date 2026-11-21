@@ -17,6 +17,7 @@ import { cn, formatDateTime } from '../../lib/utils';
 import { useToast } from '../../components/Toast';
 import { Button, Card, Notice, PendingBadge, Segmented, Skeleton } from '../../components/ui';
 import { AdminPage } from './AdminShell';
+import { PositionCatalog } from './PositionCatalog';
 import { PositionPermissions } from './PositionPermissions';
 
 type Draft = Record<EditableRole, Permission[]>;
@@ -30,10 +31,12 @@ export function PermissionsSection() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 页签记在地址里（?tab=setup / roles）；8.2.0 以前的 ?tab=positions 照旧打开「设立岗位」
+  // 页签记在地址里（?tab=setup / catalog）；8.2.0 以前的 ?tab=positions 照旧打开「设立岗位」。
+  // 8.2.0 P05：第二个页签换成「分部门岗位职权配置」；旧岗位那张表（专用账号照旧按它）从那一页点进去（?tab=roles）
   const [params, setParams] = useSearchParams();
-  const view: 'setup' | 'roles' = params.get('tab') === 'roles' ? 'roles' : 'setup';
-  const setView = (v: 'setup' | 'roles') => setParams(v === 'setup' ? {} : { tab: v }, { replace: true });
+  const tab = params.get('tab');
+  const view: 'setup' | 'catalog' | 'roles' = tab === 'roles' ? 'roles' : tab === 'catalog' ? 'catalog' : 'setup';
+  const setView = (v: 'setup' | 'catalog' | 'roles') => setParams(v === 'setup' ? {} : { tab: v }, { replace: true });
   useEffect(() => {
     if (q.data) setDraft(Object.fromEntries(EDITABLE_ROLES.map((r) => [r, q.data.effective[r]])) as Draft);
   }, [q.data]);
@@ -82,7 +85,9 @@ export function PermissionsSection() {
       description={
         view === 'setup'
           ? '设立岗位：按部门设立岗位——总裁（超级管理员）、总经办成员与各部门负责人（高级管理员）、各部门员工（管理员）；服务端逐项校验，改完立即生效。'
-          : '旧岗位：一个账号 = 一个岗位 + 若干库存职责，权限取并集；还没重新选岗的老账号与专用账号照旧按这张表。'
+          : view === 'catalog'
+            ? '分部门岗位职权配置：部门 → 岗位 → 建议权限。每个岗位的建议权限在这里维护，保存立即生效；可以导出 Excel 与原始表格逐条核对。'
+            : '旧岗位与专用账号：点餐平板、他店查询、设计师这几种专用账号与还没重新选岗位的老账号照旧按这张表（一个账号 = 一个岗位 + 若干库存职责，权限取并集）。'
       }
       actions={
         view === 'roles' && editable && q.data && draft ? (
@@ -110,17 +115,33 @@ export function PermissionsSection() {
       ) : (
         <div className="space-y-4">
           <Segmented
-            value={view}
+            value={view === 'roles' ? 'catalog' : view}
             onChange={setView}
             options={[
               { value: 'setup', label: '设立岗位' },
-              { value: 'roles', label: '旧岗位与专用账号' },
+              { value: 'catalog', label: '分部门岗位职权配置' },
             ]}
           />
           {view === 'setup' ? (
             <PositionPermissions data={q.data} editable={editable} />
+          ) : view === 'catalog' ? (
+            <>
+              <PositionCatalog editable={editable} />
+              <Card className="flex flex-wrap items-center gap-3 p-4" data-testid="legacy-roles-entry">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-bold">旧岗位与专用账号</p>
+                  <p className="text-[12.5px] text-ink-3">点餐平板、他店查询、设计师这几种专用账号，与还没重新选岗位的老账号，照旧按旧岗位那张表；账号与历史都保留。</p>
+                </div>
+                <Button variant="secondary" onClick={() => setView('roles')} data-testid="legacy-roles-open">
+                  打开旧岗位表
+                </Button>
+              </Card>
+            </>
           ) : (
             <>
+              <button type="button" className="text-[13px] font-semibold text-lake hover:underline" onClick={() => setView('catalog')} data-testid="legacy-roles-back">
+                ← 回到分部门岗位职权配置
+              </button>
               <Notice tone="info" title={editable ? '点格子勾选或取消；带锁的只属于店主' : '只有店主可以调整岗位权限'}>
                 {q.data.updatedBy ? `${q.data.updatedBy} 于 ${formatDateTime(q.data.updatedAt!)} 调整过；` : '目前全部按默认规则；'}
                 黄点表示与默认规则不同（与默认相比 {fromDefault} 处）。库存与采购的职责可叠加，在「员工账号」里给人勾选。
