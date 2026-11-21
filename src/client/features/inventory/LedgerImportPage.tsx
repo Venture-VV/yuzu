@@ -107,7 +107,7 @@ export function LedgerImportPage() {
         key: clientKey,
         type: 'ledger_import',
         url: '/api/inventory/ledger/import',
-        body: { ...body(), clientKey },
+        body: { ...body(), clientKey, previewDigest: preview.digest },
         summary: `出入库台账导入 · ${file.fileName} · ${preview.rows.length} 行`,
         staffName: session.staff.displayName,
       });
@@ -124,7 +124,7 @@ export function LedgerImportPage() {
         toast({ tone: 'info', title: '导入结果待确认', body: '已记在本机：请在页面上方查回、按原内容重新提交或作废，不要改了文件再导入。' });
         reset();
       } else if (e instanceof ErpPendingStoreError) setError(`${e.message} 文件较大时也可以拆成几份分批导入。`);
-      else if (e instanceof ApiError && e.code === 'IMPORT_REPEAT') {
+      else if (e instanceof ApiError && (e.code === 'IMPORT_REPEAT' || e.code === 'IMPORT_STALE')) {
         setError(e.message);
         void runPreview();
       } else setError(e instanceof ApiError ? e.message : errorMessage(e));

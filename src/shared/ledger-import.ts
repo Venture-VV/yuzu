@@ -70,6 +70,8 @@ export interface LedgerImportDoc {
 export interface LedgerImportPreview {
   fileName: string;
   sha256: string;
+  /** 这次预览的摘要：导入时带上，服务端在锁里重新核对、不一样就整份不导 */
+  digest: string;
   title: string;
   rows: LedgerImportRow[];
   docs: LedgerImportDoc[];

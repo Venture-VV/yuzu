@@ -115,7 +115,7 @@ describe('出入库台账', () => {
     expect(issues[3]).toContain('没认出部门');
     expect(p.body.issueCount).toBe(3);
     expect(p.body.docs).toEqual([]);
-    const refused = await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '台账.csv', csv, clientKey: randomUUID() });
+    const refused = await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '台账.csv', csv, clientKey: randomUUID(), previewDigest: p.body.digest });
     expect(refused.body.error.code).toBe('IMPORT_INVALID');
     expect(await stock(mat.id)).toBe(before);
   });
@@ -153,7 +153,7 @@ describe('出入库台账', () => {
       expect.objectContaining({ kind: 'issue', party: dept.name, receiver: '李四', lines: 1 }),
     ]);
     const key = randomUUID();
-    const done = await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '十一月台账.csv', csv, clientKey: key });
+    const done = await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '十一月台账.csv', csv, clientKey: key, previewDigest: prev.body.digest });
     expect(done.status, JSON.stringify(done.body)).toBe(201);
     expect(done.body.import).toMatchObject({ rowCount: 2, receiptCount: 1, issueCount: 2, amountCents: 4050 });
     expect(await stock(mat.id)).toBe(s1 + q(15) - q(6));
@@ -166,21 +166,51 @@ describe('出入库台账', () => {
     }
     expect((await ctx.sql<{ location: string }[]>`SELECT location FROM materials WHERE id = ${mat.id}`)[0]!.location).toBe('J-2');
     // 原样重提：返回原来那次；换个编号再导：拒绝
-    expect((await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '十一月台账.csv', csv, clientKey: key })).body).toMatchObject({
+    expect((await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '十一月台账.csv', csv, clientKey: key, previewDigest: prev.body.digest })).body).toMatchObject({
       replayed: true,
       import: { id: done.body.import.id },
     });
-    expect((await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '另存.csv', csv, clientKey: randomUUID() })).body.error.code).toBe('IMPORT_REPEAT');
+    expect((await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '另存.csv', csv, clientKey: randomUUID(), previewDigest: prev.body.digest })).body.error.code).toBe(
+      'IMPORT_REPEAT',
+    );
     expect(await stock(mat.id)).toBe(s1 + q(9));
     expect((await api(ctx.app, keeper, 'GET', `/api/erp/ops/${key}?type=ledger_import`)).body).toMatchObject({ found: true, refId: done.body.import.id });
     expect((await api(ctx.app, keeper, 'GET', `/api/inventory/ledger/imports/${done.body.import.id}`)).body.docs).toHaveLength(3);
+  });
+
+  it('同一种物料：第一行只有核对、后面两行入库单价不一样，也拦下来', async () => {
+    const csv = ledger('台账', [
+      row({ seq: '1', name: mat.name, open: '1' }),
+      row({ seq: '2', supplier: sup.name, name: mat.name, in1: [today, '1'], price: '2' }),
+      row({ seq: '3', supplier: sup.name, name: mat.name, in1: [today, '1'], price: '3' }),
+    ]);
+    const p = await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import/preview', { fileName: '单价.csv', csv });
+    expect(p.body.rows[1].issues).toEqual([]);
+    expect(p.body.rows[2].issues.join('|')).toContain('在第 5 行也有入库，两行的单价不一样');
+  });
+
+  it('预览以后参考价改了：导入整份拒绝（IMPORT_STALE），重新预览后能导', async () => {
+    await ctx.sql`UPDATE materials SET ref_price_cents = 100 WHERE id = ${bare.id}`;
+    const before = await stock(bare.id);
+    const csv = ledger('台账', [row({ supplier: sup.name, name: bare.name, in1: [today, '1'], note: `stale ${Date.now()}` })]);
+    const p = await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import/preview', { fileName: '改价.csv', csv });
+    expect(p.body.rows[0]).toMatchObject({ priceCents: 100, priceFromRef: true });
+    await ctx.sql`UPDATE materials SET ref_price_cents = 900 WHERE id = ${bare.id}`;
+    const stale = await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '改价.csv', csv, clientKey: randomUUID(), previewDigest: p.body.digest });
+    expect(stale.body.error.code).toBe('IMPORT_STALE');
+    expect(await stock(bare.id)).toBe(before);
+    const p2 = await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import/preview', { fileName: '改价.csv', csv });
+    const ok = await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '改价.csv', csv, clientKey: randomUUID(), previewDigest: p2.body.digest });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body.import.amountCents).toBe(900);
+    await ctx.sql`UPDATE materials SET ref_price_cents = NULL WHERE id = ${bare.id}`;
   });
 
   it('作废了编号的导入不再写', async () => {
     const lost = randomUUID();
     expect((await api(ctx.app, keeper, 'POST', `/api/erp/ops/${lost}/abandon`, { type: 'ledger_import' })).body).toMatchObject({ abandoned: true });
     const csv = ledger('台账', [row({ supplier: sup.name, name: mat.name, in1: [today, '1'], price: '2' })]);
-    expect((await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '作废.csv', csv, clientKey: lost })).body.error.code).toBe('OP_ABANDONED');
+    expect((await api(ctx.app, keeper, 'POST', '/api/inventory/ledger/import', { fileName: '作废.csv', csv, clientKey: lost, previewDigest: '0'.repeat(64) })).body.error.code).toBe('OP_ABANDONED');
   });
 
   it('导出台账：这个月总仓的出入库，同一个版式；标题带「系统导出」，原样再导入被拒绝', async () => {

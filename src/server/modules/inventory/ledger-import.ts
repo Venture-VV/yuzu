@@ -30,7 +30,7 @@ import {
 } from '@shared/ledger-import';
 import { parseYuan } from '@shared/money';
 import { lineAmountCents } from '@shared/quantity';
-import type { Db } from '../../db';
+import { readSnapshot, type Db } from '../../db';
 import { guard } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
@@ -56,7 +56,11 @@ const FileFields = z.object({
 });
 const oneFile = (f: { csv?: string; xlsxBase64?: string }) => !!f.csv !== !!f.xlsxBase64;
 const PreviewInput = FileFields.refine(oneFile, { message: '请选择一个 Excel 或 CSV 文件', path: ['csv'] });
-const ApplyInput = FileFields.extend({ clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试') }).refine(oneFile, {
+const ApplyInput = FileFields.extend({
+  clientKey: z.uuid('缺少有效的操作编号，请刷新页面后重试'),
+  /** 用户看过的那次预览的摘要：导入时在锁里重新核对一遍，与它不一样（预览以后档案、参考价、结存变过）整份不导 */
+  previewDigest: z.string().regex(/^[0-9a-f]{64}$/, '请先预览，核对后再导入'),
+}).refine(oneFile, {
   message: '请选择一个 Excel 或 CSV 文件',
   path: ['csv'],
 });
@@ -416,17 +420,19 @@ async function plan(db: Db, f: z.infer<typeof PreviewInput>, timezone: string): 
   });
   // 同一种物料写了两行：合单时会算到一起，提醒一下
   const seen = new Map<number, LedgerImportRow>();
+  // 每种物料第一行有入库的（不一定是这种物料的第一行）：后面有入库的行都与它比单价
+  const firstIn = new Map<number, LedgerImportRow>();
   for (const r of out) {
     if (!r.material) continue;
     const first = seen.get(r.material.id);
-    if (!first) {
-      seen.set(r.material.id, r);
-      continue;
-    }
-    r.warnings.push(`「${r.material.name}」在第 ${first.row} 行也有，两行的出入库都会记`);
+    if (!first) seen.set(r.material.id, r);
+    else r.warnings.push(`「${r.material.name}」在第 ${first.row} 行也有，两行的出入库都会记`);
+    if (!r.ins.length) continue;
+    const fi = firstIn.get(r.material.id);
+    if (!fi) firstIn.set(r.material.id, r);
     // 合单时同一张库管入库里同一种物料只有一行：两行都有入库、单价又不一样的，分不清按哪个价
-    if (r.ins.length && first.ins.length && r.priceCents !== first.priceCents) {
-      r.issues.push(`单价：「${r.material.name}」在第 ${first.row} 行也有入库，两行的单价不一样；请合成一行，或写同一个单价`);
+    else if (r.priceCents !== fi.priceCents) {
+      r.issues.push(`单价：「${r.material.name}」在第 ${fi.row} 行也有入库，两行的单价不一样；请合成一行，或写同一个单价`);
     }
   }
   // 按日期走一遍总仓结存：出库不能比当时的库存多（同一天先入库后出库）
@@ -444,6 +450,7 @@ async function plan(db: Db, f: z.infer<typeof PreviewInput>, timezone: string): 
     }
   }
   const issueCount = out.filter((r) => r.issues.length).length;
+  const docs = issueCount ? [] : docsOf(out, factorsOf(mats)).map((d) => d.summary);
   const [prev] = await db<{ id: number; createdAt: string; createdByName: string; receiptCount: number; issueCount: number }[]>`
     SELECT i.id, i.created_at, s.display_name AS created_by_name, i.receipt_count, i.issue_count FROM ledger_imports i JOIN staff s ON s.id = i.created_by
     WHERE i.file_sha256 = ${sheet.sha256}`;
@@ -452,10 +459,14 @@ async function plan(db: Db, f: z.infer<typeof PreviewInput>, timezone: string): 
     sha256: sheet.sha256,
     title: sheet.title,
     rows: out,
-    docs: issueCount ? [] : docsOf(out, factorsOf(mats)).map((d) => d.summary),
+    digest: createHash('sha256')
+      .update(JSON.stringify({ rows: out, docs }))
+      .digest('hex'),
+    docs,
     issueCount,
     warningCount: out.filter((r) => r.warnings.length).length,
-    amountCents: out.reduce((t, r) => t + r.amountCents, 0),
+    // 按合成以后的单据汇总（每张单每一行各自取整，与生成的收货单、应付一致）
+    amountCents: docs.reduce((t, d) => t + d.amountCents, 0),
     previous: prev ? { id: Number(prev.id), createdAt: prev.createdAt, createdByName: prev.createdByName, receiptCount: Number(prev.receiptCount), issueCount: Number(prev.issueCount) } : null,
   };
 }
@@ -618,9 +629,10 @@ export async function applyLedgerImport(deps: Deps, raw: unknown, actor: Actor, 
     const materialIds = [...new Set(p.rows.map((x) => x.material!.id))].sort((a, b) => a - b);
     await tx`SELECT id FROM materials WHERE id IN ${tx(materialIds)} ORDER BY id FOR UPDATE`;
     // 锁住物料以后再算一遍：上面那一遍读物料时还没上锁，期间有人改了档案、结存或参考价，就整份不导
+    // 与用户看过的那次预览比（预览摘要随请求带来）：预览以后改过参考价、档案、结存的，整份不导
     const again = await plan(tx, f, deps.config.timezone);
-    if (JSON.stringify(again.rows) !== JSON.stringify(p.rows)) {
-      throw conflict('IMPORT_STALE', '导入的这一刻有物料的档案或结存刚变过，这份台账没有导入；请重新预览、核对后再导入');
+    if (again.digest !== f.previewDigest || again.digest !== p.digest) {
+      throw conflict('IMPORT_STALE', '预览以后有物料的档案、参考价或结存变过，这份台账没有导入；请重新预览、核对后再导入');
     }
     // 库位写进物料档案（已经锁着）
     for (const row of p.rows) {
@@ -876,7 +888,7 @@ export async function ledgerExport(db: Db, month: string): Promise<{ buf: Buffer
     FROM stock_moves s JOIN inv_docs d ON d.id = s.doc_id
     LEFT JOIN departments p ON p.id = d.department_id LEFT JOIN suppliers sp ON sp.id = d.supplier_id
     WHERE s.warehouse_id = ${wh} AND s.doc_date >= ${start} AND s.doc_date < ${next}
-    GROUP BY s.material_id, s.move_type, s.doc_date, d.doc_type, p.name, d.handler, sp.name
+    GROUP BY s.material_id, s.move_type, s.doc_date, d.doc_type, p.name, d.handler, sp.name, s.qty_delta_milli > 0
     ORDER BY s.doc_date, s.material_id`;
   const byMat = new Map<number, (typeof moves)[number][]>();
   for (const mv of moves) byMat.set(Number(mv.materialId), [...(byMat.get(Number(mv.materialId)) ?? []), mv]);
@@ -937,7 +949,8 @@ export function registerLedgerImportRoutes(app: FastifyInstance, deps: Deps) {
   });
   app.get('/api/inventory/ledger/export', { preHandler: guard('inventory.read') }, async (req, reply) => {
     const { month } = parse(ExportQuery, req.query);
-    const { buf, fileName } = await ledgerExport(deps.sql, month);
+    // 期初期末与明细在同一个只读快照里取，营业中导出也对得上
+    const { buf, fileName } = await readSnapshot(deps.sql, (tx) => ledgerExport(tx, month));
     attachment(reply, fileName, XLSX);
     return reply.send(buf);
   });
