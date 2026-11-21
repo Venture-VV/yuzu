@@ -28,15 +28,20 @@ export function PositionCatalog({ editable }: { editable: boolean }) {
   const q = useQuery({ queryKey: ['admin', 'position-catalog'], queryFn: () => api.get<PositionCatalogView>('/api/admin/position-catalog') });
   const [search, setSearch] = useState('');
   const [key, setKey] = useState<EditablePosition | null>(null);
-  const [draft, setDraft] = useState<Permission[] | null>(null);
+  // 草稿连同岗位、开始改时看到的版本一起记（Codex 审查 e770cb9）：保存带开始改时的版本，别人先改过就拒绝；
+  // 冲突以后不给旧草稿换上新版本号，要「放弃我的修改」按最新的重新改，免得把别人刚去掉的又加回去
+  const [draft, setDraft] = useState<{ key: EditablePosition; perms: Permission[]; version: string } | null>(null);
   const [asking, setAsking] = useState<EditablePosition | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const all = useMemo(() => q.data?.departments.flatMap((d) => d.positions) ?? [], [q.data]);
   const current: PositionCatalogPosition | null = all.find((p) => p.key === key) ?? all[0] ?? null;
-  const value = draft ?? current?.suggested ?? [];
-  const dirty = !!current && !!draft && !sameSet(draft, current.suggested);
+  const mine = current && draft?.key === current.key ? draft : null;
+  const value = mine?.perms ?? current?.suggested ?? [];
+  const dirty = !!current && !!mine && !sameSet(mine.perms, current.suggested);
+  /** 开始改以后别人保存过：这份草稿不能再保存 */
+  const stale = !!current && !!mine && mine.version !== current.version;
   const shown = useMemo(() => {
     const t = search.trim();
     if (!q.data) return [];
@@ -52,18 +57,19 @@ export function PositionCatalog({ editable }: { editable: boolean }) {
     );
 
   const pick = (k: EditablePosition) => {
-    if (k === current.key) return;
+    if (k === current.key || saving) return;
     if (dirty) return setAsking(k);
     setKey(k);
     setDraft(null);
     setError(null);
   };
   const save = async () => {
-    if (!draft) return;
+    if (!mine || stale) return;
     setSaving(true);
     setError(null);
     try {
-      const next = await api.put<PositionCatalogView>(`/api/admin/position-catalog/${current.key}`, { permissions: draft, version: current.version });
+      // 保存期间勾选、换岗位都锁着，回来时草稿还是发出去的那一份
+      const next = await api.put<PositionCatalogView>(`/api/admin/position-catalog/${current.key}`, { permissions: mine.perms, version: mine.version });
       qc.setQueryData(['admin', 'position-catalog'], next);
       setDraft(null);
       await qc.invalidateQueries({ queryKey: ['admin', 'permissions'] });
@@ -139,17 +145,39 @@ export function PositionCatalog({ editable }: { editable: boolean }) {
             {editable && (
               <div className="flex flex-wrap items-center gap-2">
                 {dirty && <span className="text-[12.5px] text-ink-3">未保存</span>}
-                <Button variant="ghost" icon={<RotateCcw className="size-4" />} disabled={!dirty} onClick={() => setDraft(null)} data-testid="catalog-discard">
+                <Button variant="ghost" icon={<RotateCcw className="size-4" />} disabled={!dirty || saving} onClick={() => setDraft(null)} data-testid="catalog-discard">
                   撤销修改
                 </Button>
-                <Button variant="primary" loading={saving} disabled={!dirty} onClick={() => void save()} data-testid="catalog-save">
+                <Button variant="primary" loading={saving} disabled={!dirty || stale} onClick={() => void save()} data-testid="catalog-save">
                   保存建议权限
                 </Button>
               </div>
             )}
           </Card>
-          {error && <Notice tone="error" title={error} />}
-          <PermissionPicker value={value} onChange={setDraft} baseline={current.suggested} baselineLabel="保存的" editable={editable} testId="catalog-perms" />
+          {stale ? (
+            <Notice
+              tone="warning"
+              title="别人刚刚改过这个岗位的建议权限"
+              data-testid="catalog-stale"
+              action={
+                <Button size="sm" variant="secondary" onClick={() => setDraft(null)} data-testid="catalog-stale-reload">
+                  放弃我的修改，按最新的重新改
+                </Button>
+              }
+            >
+              你的修改是在旧的那一份上做的，直接保存会把别人的改动盖掉，所以不能保存。下面标黄的是你的草稿与最新的不同之处，记下来以后按最新的重新改。
+            </Notice>
+          ) : (
+            error && <Notice tone="error" title={error} />
+          )}
+          <PermissionPicker
+            value={value}
+            onChange={(perms) => setDraft({ key: current.key, perms, version: mine?.version ?? current.version })}
+            baseline={current.suggested}
+            baselineLabel="保存的"
+            editable={editable && !saving}
+            testId="catalog-perms"
+          />
         </div>
       </div>
       <Card className="p-0" data-testid="catalog-log">

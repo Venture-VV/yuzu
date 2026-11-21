@@ -53,4 +53,32 @@ test.describe('8.2.0 分部门岗位职权配置', () => {
     await page.getByTestId('legacy-roles-back').click();
     await expect(page.getByTestId('position-catalog')).toBeVisible();
   });
+
+  test('别人先保存过：保存被拒、不给旧草稿换新版本，要放弃修改按最新的重新改（Codex 审查 e770cb9）', async ({ page }) => {
+    await login(page);
+    await page.goto('/admin/permissions?tab=catalog');
+    await page.getByTestId('catalog-list').getByTestId('catalog-pos-kangmei.staff').click();
+    const mine = page.getByTestId('catalog-perms-ledger.readHistory');
+    await mine.click();
+    // 另一个浏览器先把这个岗位的「查看会员」改掉
+    type Pos = { key: string; suggested: string[]; version: string };
+    const view = async () =>
+      ((await (await page.request.get('/api/admin/position-catalog')).json()) as { departments: { positions: Pos[] }[] }).departments
+        .flatMap((d) => d.positions)
+        .find((p) => p.key === 'kangmei.staff')!;
+    const before = await view();
+    const other = before.suggested.includes('member.read') ? before.suggested.filter((p) => p !== 'member.read') : [...before.suggested, 'member.read'];
+    expect((await page.request.put('/api/admin/position-catalog/kangmei.staff', { data: { permissions: other, version: before.version } })).status()).toBe(200);
+    await page.getByTestId('catalog-save').click();
+    await expect(page.getByTestId('catalog-stale')).toBeVisible();
+    await expect(page.getByTestId('catalog-save')).toBeDisabled();
+    // 服务端还是别人改的那一份
+    expect((await view()).suggested.includes('member.read')).toBe(other.includes('member.read'));
+    await page.getByTestId('catalog-stale-reload').click();
+    await expect(page.getByTestId('catalog-stale')).toHaveCount(0);
+    await expect(page.getByTestId('catalog-perms-off')).toHaveText('0');
+    // 改回去
+    const now = await view();
+    expect((await page.request.put('/api/admin/position-catalog/kangmei.staff', { data: { permissions: before.suggested, version: now.version } })).status()).toBe(200);
+  });
 });
