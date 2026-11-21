@@ -3,7 +3,7 @@ import { permissionsOf, type Duty, type Role } from '@shared/permissions';
 import type { Db } from '../db';
 import type { Actor } from '../lib/context';
 import { DEFAULT_STORE_ID } from '../lib/store-context';
-import { overridesOf, positionFrom, sanitizeAdjust } from './role-permissions';
+import { knownPermissions, overridesOf, positionFrom, sanitizeAdjust } from './role-permissions';
 
 export const SESSION_COOKIE = 'yuzu_sid';
 
@@ -29,6 +29,8 @@ export async function resolveSession(db: Db, token: string, ttlHours: number): P
       stale: boolean;
       overrides: unknown;
       positionOverrides: unknown;
+      suggested: string[] | null;
+      inCatalog: boolean;
       permissionAdjust: unknown;
       financeHides: unknown;
       sessionStoreId: number | null;
@@ -40,6 +42,8 @@ export async function resolveSession(db: Db, token: string, ttlHours: number): P
            s.last_seen_at < now() - interval '1 minute' AS stale,
            (SELECT value FROM settings WHERE key = 'role_permissions') AS overrides,
            (SELECT value FROM settings WHERE key = 'position_permissions') AS position_overrides,
+           (SELECT array_agg(ps.permission) FROM position_suggestions ps WHERE ps.position_key = st.position) AS suggested,
+           EXISTS (SELECT 1 FROM position_catalog pc WHERE pc.key = st.position AND NOT pc.all_permissions) AS in_catalog,
            (SELECT value FROM settings WHERE key = 'finance_hides_marketing_cost') AS finance_hides,
            s.store_id AS session_store_id,
            ${storeIdsOf(db)} AS store_ids
@@ -66,9 +70,13 @@ export async function resolveSession(db: Db, token: string, ttlHours: number): P
     needsPosition: row.needsPosition === true,
     // 按店主在后台调整后的岗位权限（每次请求重新计算，改完立即生效）
     // 「有财务职责的账号看不到营销成本」（HY14）没设过的按默认（是）
-    permissions: permissionsOf({ role, duties, position, adjust: sanitizeAdjust(row.permissionAdjust) }, overridesOf(row.overrides, row.positionOverrides), {
-      financeExclusion: row.financeHides !== false,
-    }),
+    permissions: permissionsOf(
+      { role, duties, position, adjust: sanitizeAdjust(row.permissionAdjust) },
+      overridesOf(row.overrides, row.positionOverrides, position && row.inCatalog ? { [position]: knownPermissions(row.suggested ?? []) } : undefined),
+      {
+        financeExclusion: row.financeHides !== false,
+      },
+    ),
     storeId: effectiveStore(row.sessionStoreId, (row.storeIds ?? []).map(Number)),
   };
 }
