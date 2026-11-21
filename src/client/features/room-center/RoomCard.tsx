@@ -128,7 +128,12 @@ export function RoomCard({
 }) {
   return (
     <div
-      className={cn('relative flex min-h-[148px] rounded-xl border transition-colors', STATUS_META[room.status].card, highlight && 'ring-2 ring-pine ring-offset-1')}
+      className={cn(
+        'relative flex min-h-[148px] rounded-xl border border-l-[6px] transition-colors',
+        STATUS_META[room.status].card,
+        STATUS_META[room.status].bar,
+        highlight && 'ring-2 ring-pine ring-offset-1',
+      )}
       data-testid={`rc-room-${room.code}`}
       data-status={room.status}
       data-highlight={highlight ? 'booking' : undefined}
