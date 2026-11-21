@@ -35,7 +35,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const page = storePageOf(pathname);
   if (page && !(Array.isArray(page.perm) ? page.perm : [page.perm]).some((p) => can(p))) return <Navigate to="/" replace />;
   return (
-    <div className="flex h-dvh min-h-0 bg-paper">
+    // 8.2.0 P02（回测 2-1）：整屏不滚，左侧主导航固定、撑满一屏（菜单长了在导航里面滚）；右边内容区自己滚，
+    // 页头（PageHeader）贴在内容区顶上。页面自己有滚动区的照旧在里面滚，不会出现两条滚动条
+    <div className="flex h-dvh min-h-0 overflow-hidden bg-paper">
       {/* 设备（v0.7.21）：选了「这台终端」的设备常连本机的设备服务、替它上报（不在设备页也照常） */}
       <TerminalBridgeRunner />
       <StoreRail
@@ -48,7 +50,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </>
         }
       />
-      <div ref={content} className="flex min-w-0 flex-1 flex-col">
+      <div ref={content} className="scroll-thin flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto" data-testid="app-content">
         <PendingOpsBanner />
         {can('frontdesk.operate') && <FrontdeskPendingBanner />}
         {children}
@@ -220,7 +222,7 @@ export function PageHeader({ title, subtitle, actions, dateMode = 'business' }: 
   const now = useMinuteClock(!!hours);
   const closed = !!hours && !isOpenAt(minuteOfDay(new Date(now), session.timezone), hours);
   return (
-    <header className="flex min-h-[64px] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-paper/90 px-5 py-3 backdrop-blur md:px-7">
+    <header className="sticky top-0 z-20 flex min-h-[64px] shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-paper/90 px-5 py-3 backdrop-blur md:px-7">
       {/* 标题至少留 10rem：窄屏（商米 V3）上右边的按钮放不下时换到下一行，不把标题挤成一个字（8.1.9） */}
       <div className="min-w-0 flex-1 basis-40">
         <h1 className="truncate text-[19px] font-bold tracking-tight text-ink">{title}</h1>
