@@ -14,6 +14,7 @@ import { decodedPath, isApiRequest, routePath } from './lib/paths';
 import type { Deps } from './lib/context';
 import { DEFAULT_STORE_ID, runInStore } from './lib/store-context';
 import { registerAdminRoutes } from './modules/admin';
+import { registerPositionCatalogRoutes } from './modules/position-catalog';
 import type { PingReply } from '@shared/resilience';
 import { registerAuditRoutes } from './modules/audit';
 import { registerClientErrorRoutes } from './modules/client-errors';
@@ -311,6 +312,8 @@ export async function buildApp(sql: Sql, config: AppConfig): Promise<FastifyInst
   registerAiRoutes(app, deps);
   registerAuditRoutes(app, deps);
   registerAdminRoutes(app, deps);
+  // 分部门岗位职权配置（8.2.0 P05）
+  registerPositionCatalogRoutes(app, deps);
   registerMasterRoutes(app, deps);
   registerDocRoutes(app, deps);
   // 8.1.9 库管入库的台账模板与一键导入（docs/ERP_V819.md 第 3.2 节）

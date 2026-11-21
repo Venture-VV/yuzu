@@ -201,3 +201,44 @@ export interface RolePermissionMatrix {
 }
 
 export type RolePermissionInput = Partial<Record<EditableRole, Permission[]>>;
+
+/**
+ * 分部门岗位职权配置（8.2.0 P05，回测 5-2，docs/YUZU_REQ_V820.md 第 6 节）：部门 → 岗位 → 建议权限。
+ * 建议权限存在库里（P04 的 position_suggestions），这一页维护；「设立岗位」里按岗位的增减、个人微调都在它上面算
+ */
+export interface PositionCatalogPosition {
+  key: EditablePosition;
+  department: string;
+  departmentName: string;
+  title: string;
+  level: 'senior' | 'admin';
+  /** 建议权限（按权限表的顺序） */
+  suggested: Permission[];
+  /** 在职人数 */
+  staff: number;
+  /** 「设立岗位」里有没有在建议上增减过 */
+  adjusted: boolean;
+  /** 这一行的版本（最后一次改的时刻）：保存时原样带回，别人先改过就拒绝 */
+  version: string;
+  updatedBy: string | null;
+}
+
+export interface PositionCatalogLog {
+  id: number;
+  at: string;
+  staffName: string | null;
+  action: 'init' | 'suggestions' | 'restore' | 'legacy_migrate';
+  positionKey: string | null;
+  positionTitle: string | null;
+  /** 改建议权限：加了、去了哪几项；初始化、旧账号迁移：数量 */
+  added: Permission[];
+  removed: Permission[];
+  note: string;
+}
+
+export interface PositionCatalogView {
+  departments: { key: string; name: string; positions: PositionCatalogPosition[] }[];
+  log: PositionCatalogLog[];
+  /** 还在用旧岗位（还没选岗位）的在职账号、专用账号 */
+  legacy: { waiting: number; special: number };
+}

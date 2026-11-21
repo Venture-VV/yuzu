@@ -5,6 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ALL_PERMISSIONS } from '../src/shared/permissions';
 import { ORG_DEPARTMENTS, POSITIONS, positionDefaults } from '../src/shared/positions';
+import { readXlsx } from '../src/server/lib/xlsx-read';
 import { api, login, PASSWORD, setup, type TestContext } from './helpers';
 
 let ctx: TestContext;
@@ -65,5 +66,69 @@ describe('岗位职权数据（P04）', () => {
     // 恢复
     await ctx.sql`INSERT INTO position_suggestions (position_key, permission) SELECT 'front.staff', unnest(${positionDefaults('front.staff', ALL_PERMISSIONS)}::text[])`;
     expect((await me(front)).permissions).toContain('recharge.create');
+  });
+});
+
+describe('分部门岗位职权配置（P05）', () => {
+  type View = {
+    departments: { key: string; name: string; positions: { key: string; title: string; suggested: string[]; version: string; staff: number; adjusted: boolean }[] }[];
+    log: { action: string; positionKey: string | null; added: string[]; removed: string[]; staffName: string | null }[];
+    legacy: { waiting: number; special: number };
+  };
+  const view = async (cookie = ctx.owner) => (await api(ctx.app, cookie, 'GET', '/api/admin/position-catalog')).body as View;
+  const pos = (v: View, key: string) => v.departments.flatMap((d) => d.positions).find((p) => p.key === key)!;
+
+  it('按部门列出岗位（不含总裁）：岗位名、建议权限项数、在职人数；同一个岗位名在不同部门是两行', async () => {
+    const v = await view();
+    expect(v.departments.map((d) => d.key)).toEqual(ORG_DEPARTMENTS.map((d) => d.key).filter((k) => k !== 'company'));
+    const all = v.departments.flatMap((d) => d.positions);
+    expect(all).toHaveLength(POSITIONS.length - 1);
+    expect(pos(v, 'male.staff').title).toBe('男宾部员工');
+    expect(pos(v, 'female.staff').title).toBe('女宾部员工');
+    expect(pos(v, 'front.staff').suggested.sort()).toEqual([...positionDefaults('front.staff', ALL_PERMISSIONS)].sort());
+    expect(v.log.map((l) => l.action)).toEqual(['legacy_migrate', 'init']);
+  });
+
+  it('改一个岗位的建议权限：整批换、记日志与审计；版本对不上拒绝；总裁专属的不能建议；只有总裁能改', async () => {
+    const before = pos(await view(), 'kangmei.staff');
+    const want = [...before.suggested.filter((p) => p !== 'dining.orderFruit'), 'ledger.readHistory'];
+    const r = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/position-catalog/kangmei.staff', { permissions: want, version: before.version });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const after = pos(r.body as View, 'kangmei.staff');
+    expect(after.suggested).toContain('ledger.readHistory');
+    expect(after.suggested).not.toContain('dining.orderFruit');
+    expect(after.version).not.toBe(before.version);
+    expect((r.body as View).log[0]).toMatchObject({ action: 'suggestions', positionKey: 'kangmei.staff', added: ['ledger.readHistory'], removed: ['dining.orderFruit'] });
+    // 康美部员工以外的岗位不受影响
+    expect(pos(r.body as View, 'kangmei.lead').suggested).toEqual(pos(await view(), 'kangmei.lead').suggested);
+    // 旧版本再提交：拒绝
+    const stale = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/position-catalog/kangmei.staff', { permissions: before.suggested, version: before.version });
+    expect(stale.body.error.code).toBe('POSITION_STALE');
+    // 总裁专属
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/position-catalog/kangmei.staff', { permissions: ['staff.manage'], version: after.version })).status).toBe(400);
+    // 没有「修改经营规则」的改不了
+    expect((await api(ctx.app, ctx.clerk, 'PUT', '/api/admin/position-catalog/kangmei.staff', { permissions: [], version: after.version })).status).toBe(403);
+    // 总裁没有这一行
+    expect((await api(ctx.app, ctx.owner, 'PUT', '/api/admin/position-catalog/president', { permissions: [], version: 'x' })).status).toBe(404);
+    const audit = await ctx.sql<{ detail: { position: string } }[]>`SELECT detail FROM audit_logs WHERE target_type = 'position_suggestions' ORDER BY id DESC LIMIT 1`;
+    expect(audit[0]!.detail.position).toBe('kangmei.staff');
+    // 改回去
+    const back = await api(ctx.app, ctx.owner, 'PUT', '/api/admin/position-catalog/kangmei.staff', { permissions: before.suggested, version: after.version });
+    expect(pos(back.body as View, 'kangmei.staff').suggested.sort()).toEqual([...before.suggested].sort());
+  });
+
+  it('导出 Excel：职权表（权限 × 岗位打 ✔）、岗位汇总、变更记录', async () => {
+    const res = await ctx.app.inject({ method: 'GET', url: '/api/admin/position-catalog/export', headers: { cookie: ctx.owner } });
+    expect(res.statusCode).toBe(200);
+    expect(decodeURIComponent(res.headers['content-disposition'] as string)).toContain('分部门岗位职权配置-');
+    const book = readXlsx(res.rawPayload);
+    expect(book.sheets.map((s) => s.name)).toEqual(['职权表', '岗位汇总', '变更记录']);
+    const m = book.sheets[0]!;
+    const line = (r: number) => [...(m.rows.get(r)?.values() ?? [])].map((c) => c.value ?? '');
+    expect(line(1).slice(0, 3)).toEqual(['分组', '权限', '权限编号']);
+    const recharge = [...m.rows.keys()].map(line).find((l) => l[2] === 'recharge.create')!;
+    const col = line(2).findIndex((v, i) => i > 2 && line(1)[i] === '前厅部' && v === '员工');
+    expect(col).toBeGreaterThan(2);
+    expect(recharge[col]).toBe('✔');
   });
 });
