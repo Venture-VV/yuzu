@@ -1438,15 +1438,21 @@ async function afterApproval(tx: Tx, doc: DocRow & { docNo: string; amountCents:
 }
 
 /** 新建单据的那一行（草稿）：新建单据与库管入库台账导入（8.1.9）共用 */
-async function insertDocRow(tx: Tx, body: z.infer<typeof DocBody>, prepared: Prepared, o: { docNo: string; clientKey: string; staffId: number; importId: number | null }) {
+async function insertDocRow(
+  tx: Tx,
+  body: z.infer<typeof DocBody>,
+  prepared: Prepared,
+  o: { docNo: string; clientKey: string; staffId: number; importId: number | null; ledgerImportId?: number | null },
+) {
   const [row] = await tx<{ id: number }[]>`
     INSERT INTO inv_docs (doc_no, doc_type, status, doc_date, supplier_id, purchase_order_id, department_id, handler,
                           source_doc_id, note, amount_cents, no_po, price_basis, warehouse_id, urgent, urgent_cap_cents,
-                          co_acceptor_id, use_purpose, use_handler_id, client_key, created_by, direct, import_id)
+                          co_acceptor_id, use_purpose, use_handler_id, client_key, created_by, direct, import_id, ledger_import_id)
     VALUES (${o.docNo}, ${body.docType}, 'draft', ${body.docDate}, ${prepared.supplierId}, ${prepared.purchaseOrderId},
             ${prepared.departmentId}, ${prepared.handler}, ${prepared.sourceDocId}, ${body.note}, ${prepared.amountCents},
             ${prepared.noPo}, ${prepared.priceBasis}, ${prepared.warehouseId}, ${prepared.urgent}, ${prepared.urgentCapCents},
-            ${prepared.coAcceptorId}, ${prepared.usePurpose}, ${prepared.useHandlerId}, ${o.clientKey}, ${o.staffId}, ${prepared.direct}, ${o.importId})
+            ${prepared.coAcceptorId}, ${prepared.usePurpose}, ${prepared.useHandlerId}, ${o.clientKey}, ${o.staffId}, ${prepared.direct}, ${o.importId},
+            ${o.ledgerImportId ?? null})
     RETURNING id`;
   return Number(row!.id);
 }
@@ -1470,6 +1476,29 @@ export async function createImportedReceipt(tx: Tx, deps: Deps, raw: DocBodyInpu
   await submitLocked(tx, await lockDoc(tx, newId), actor, false, deps.config.timezone);
   const [d] = await tx<{ status: string }[]>`SELECT status FROM inv_docs WHERE id = ${newId}`;
   if (d?.status !== 'confirmed') throw conflict('IMPORT_NOT_CONFIRMED', `${o.docNo} 没能直接入库（按审批规则要确认），台账导入整份没写`);
+  return { id: newId, docNo: o.docNo, amountCents: prepared.amountCents };
+}
+
+/** 部门领料的单号（出入库台账导入先按日期把单号取好，再锁物料） */
+export const nextIssueNo = (tx: Tx, docDate: string) => nextDocNo(tx, 'inv_issue', INV_DOC_META.issue.prefix, docDate);
+
+/**
+ * 出入库台账导入（8.1.20，docs/ERP_V8120.md 第 3 节）：在调用方的事务里建一张库管入库或部门领料并马上生效。
+ * 调用方已经取了操作编号与文件的锁、按日期取好单号、按 id 升序锁住这次要动的全部物料（之后每张单再锁同一批物料不会等；
+ * 部门领料再锁部门小仓的结存行与部门行，与平时登记领料同一顺序）。要审批的（按审批规则）整份不写。
+ */
+export async function createLedgerDoc(tx: Tx, deps: Deps, raw: DocBodyInput, actor: Actor, o: { docNo: string; ledgerImportId: number; note: string }) {
+  const body = parse(DocBody, raw);
+  if (!((body.docType === 'receipt' && body.direct) || body.docType === 'issue')) throw badRequest('出入库台账导入只生成库管入库与部门领料');
+  const wh = await warehouseOfBody(tx, body);
+  await assertCanOperate(tx, actor, body.docType, wh);
+  const prepared = await prepare(tx, deps, body, null, wh, actor);
+  const newId = await insertDocRow(tx, body, prepared, { docNo: o.docNo, clientKey: randomUUID(), staffId: actor.id, importId: null, ledgerImportId: o.ledgerImportId });
+  await insertLines(tx, newId, prepared.lines);
+  await logApproval(tx, 'inv_doc', newId, 'create', actor.id, o.note);
+  await submitLocked(tx, await lockDoc(tx, newId), actor, false, deps.config.timezone);
+  const [d] = await tx<{ status: string }[]>`SELECT status FROM inv_docs WHERE id = ${newId}`;
+  if (d?.status !== 'confirmed') throw conflict('IMPORT_NOT_CONFIRMED', `${o.docNo} 没能直接生效（按审批规则要负责人确认），出入库台账整份没导入`);
   return { id: newId, docNo: o.docNo, amountCents: prepared.amountCents };
 }
 

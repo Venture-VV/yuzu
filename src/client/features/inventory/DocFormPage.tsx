@@ -35,6 +35,7 @@ import { usePo, usePos } from '../purchasing/queries';
 import { useDeptDoc, useDeptMeta, useDeptStock, useInvalidateDept } from '../dept-stock/queries';
 import { useCoAcceptors, useDepartments, useInvDoc, useInvDocs, useInvSettings, useInvalidateInventory, useMaterials, useSuppliers, useUsual } from './queries';
 import { DeliveryNoticesHint } from '../purchasing/SupplierLinks';
+import { LedgerActions } from './LedgerActions';
 
 // ───────────────────────── 表单状态 ─────────────────────────
 
@@ -197,6 +198,7 @@ function deptMaterial(m: DeptStockMeta['materials'][number], row: WarehouseStock
     anyMoves: !!row,
     lastMoveAt: row?.lastMoveAt ?? null,
     note: '',
+    location: '',
     isSynthetic: false,
     // 部门小仓不分批（V17）
     expiryTracked: false,
@@ -926,6 +928,7 @@ function DocForm({
           </span>
         }
         subtitle={urgent ? URGENT_INTRO : direct ? DIRECT_INTRO : (scope.dept && DEPT_INTRO[type]) || INTRO[type]}
+        actions={direct && !editing ? <LedgerActions /> : undefined}
       />
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">

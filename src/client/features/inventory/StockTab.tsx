@@ -176,7 +176,7 @@ export function StockTab() {
                     data-testid="inv-direct-import"
                   >
                     <FileUp className="size-4" />
-                    导入入库台账
+                    出入库台账
                   </Link>
                 </>
               )}

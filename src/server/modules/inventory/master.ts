@@ -18,7 +18,7 @@ import { lockSettings } from '../../lib/rule-settings';
 const MATERIAL_COLUMNS = (db: Db) => db`
   m.id, m.code, m.name, m.category, m.specification, m.inventory_unit, m.decimals, m.purchase_unit,
   m.purchase_factor_milli, m.ref_price_cents, m.default_supplier_id, s.name AS default_supplier_name,
-  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.expiry_tracked, m.shelf_life_days, m.replenish_mode, m.replenish_rev, m.tracked, m.active, m.stock_milli,
+  m.low_stock_milli, m.cover_days, m.counter_use, m.weighed, m.expiry_tracked, m.shelf_life_days, m.replenish_mode, m.replenish_rev, m.tracked, m.active, m.stock_milli, m.location,
   (SELECT coalesce(sum(ws.stock_milli), 0) FROM warehouse_stock ws WHERE ws.material_id = m.id) AS dept_stock_milli,
   (m.low_stock_milli IS NOT NULL AND m.tracked AND m.replenish_mode <> 'on_demand' AND m.stock_milli < m.low_stock_milli) AS is_low,
   (m.last_move_id IS NOT NULL) AS has_moves,
@@ -112,6 +112,8 @@ export const MaterialInput = z
     tracked: z.boolean().default(true),
     active: z.boolean().default(true),
     note: text(200, '备注').default(''),
+    /** 库位（8.1.20，迁移 200）：新建不填为空，修改不填保持原样（出入库台账导入也会写） */
+    location: text(20, '库位').optional(),
   })
   .refine((m) => fitsDecimals(m.purchaseFactorMilli, m.decimals), {
     message: '换算数量的小数位超过了库存单位允许的精度',
@@ -218,10 +220,10 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
       const [row] = await db<{ id: number }[]>`
         INSERT INTO materials (code, name, category, specification, inventory_unit, decimals, purchase_unit, purchase_factor_milli,
                                ref_price_cents, default_supplier_id, low_stock_milli, cover_days, counter_use, weighed, expiry_tracked, shelf_life_days,
-                               replenish_mode, tracked, active, note, is_synthetic)
+                               replenish_mode, tracked, active, note, is_synthetic, location)
         VALUES (${m.code}, ${m.name}, ${m.category}, ${m.specification}, ${m.inventoryUnit}, ${m.decimals}, ${m.purchaseUnit},
                 ${m.purchaseFactorMilli}, ${m.refPriceCents}, ${m.defaultSupplierId}, ${m.lowStockMilli}, ${m.coverDays}, ${m.counterUse}, ${m.weighed},
-                ${m.expiryTracked}, ${m.shelfLifeDays}, ${m.replenishMode ?? 'auto'}, ${m.tracked}, ${m.active}, ${m.note}, ${extra.isSynthetic ?? false})
+                ${m.expiryTracked}, ${m.shelfLifeDays}, ${m.replenishMode ?? 'auto'}, ${m.tracked}, ${m.active}, ${m.note}, ${extra.isSynthetic ?? false}, ${m.location ?? ''})
         RETURNING id`;
       return row!.id;
     }
@@ -264,7 +266,7 @@ export async function saveMaterial(db: Sql, id: number | null, raw: MaterialInpu
                replenish_mode = coalesce(${m.replenishMode ?? null}, replenish_mode),
                -- 补货方式变了就把它的版本号加一（迁移 161）：补货建议页上没等到回音的旧请求晚到时会被拒绝
                replenish_rev = replenish_rev + ${m.replenishMode !== undefined && before && m.replenishMode !== before.replenishMode ? 1 : 0},
-               active = ${m.active}, note = ${m.note}, updated_at = now()
+               active = ${m.active}, note = ${m.note}, location = coalesce(${m.location ?? null}, location), updated_at = now()
         WHERE id = ${id}`;
       return id;
     });

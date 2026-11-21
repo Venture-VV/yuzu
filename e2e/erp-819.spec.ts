@@ -2,7 +2,7 @@
 //   ① 零采备用金：店主在 ERP 设置里填总额 → 采购经办申用、提交报销（未补单）→ 店主在「费用报销」按这笔申用登记报销（钱从零采备用金来）
 //      → 报销单确认后面板上这笔是「已报销」、剩余可用加回；
 //   ② 库管入库：物资经办在库存页点「库管入库」，不选采购单，直接选物料、填单价，确认入库，单据上标「库管入库」；
-//   ③ 导入入库台账：下载模板，导入一份合成的台账（备注里带时间，每次文件内容不同），预览没有问题，一键生成库管入库。
+//   （8.1.9 的③「导入入库台账」8.1.20 起换成出入库台账，用例在 e2e/erp-8120.spec.ts。）
 // 依赖演示数据（seed-demo 与 seed-inventory-demo：店主 linlan、采购 zhouyi、物资 lixiao，密码 yuzu2026）。会登记单据，只在门店电脑尺寸执行；
 // 每次用新的说明与金额，不改演示数据里已有的档案。
 import { expect, test, type Page } from '@playwright/test';
@@ -126,37 +126,5 @@ test.describe('8.1.9 ERP 供应链', () => {
     const doc = (await (await page.request.get(`/api/inventory/docs/${docId}`)).json()) as { status: string; direct: boolean; noPo: boolean };
     expect(doc).toMatchObject({ status: 'confirmed', direct: true, noPo: true });
     await expect(page.getByText('库管入库').first()).toBeVisible();
-  });
-
-  test('导入入库台账：下载模板、导入一份合成的台账、生成库管入库', async ({ page }) => {
-    await login(page, 'lixiao');
-    const suppliers = (await (await page.request.get('/api/inventory/suppliers')).json()) as { name: string; active: boolean }[];
-    const mats = (await (await page.request.get('/api/inventory/materials')).json()) as { name: string; code: string; active: boolean; tracked: boolean; expiryTracked?: boolean }[];
-    const supplier = suppliers.find((s) => s.active)!;
-    const mat = mats.find((m) => m.active && m.tracked && !m.expiryTracked && m.name === '抽纸') ?? mats.find((m) => m.active && m.tracked && !m.expiryTracked)!;
-    await page.goto('/inventory/direct/import');
-    await expect(page.getByTestId('direct-import')).toBeVisible();
-    const download = page.waitForEvent('download');
-    await page.getByTestId('direct-import-template').click();
-    await download;
-    const tpl = await page.request.get('/api/inventory/direct-receipts/template');
-    expect(tpl.headers()['content-type']).toContain('spreadsheetml');
-    expect(decodeURIComponent(tpl.headers()['content-disposition'] ?? '')).toContain('库管入库台账模板.xlsx');
-
-    const today = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-    const stamp = `E2E ${Date.now()}`;
-    const csv = [
-      '序号,入库日期,供应商,物品名称,物料编号,送达数量,合格实收,单位,单价,金额,拒收原因,收货人,单据分组,备注',
-      `1,${today},${supplier.name},${mat.name},${mat.code},2,,,8,,,李晓,,${stamp}`,
-      `2,${today},${supplier.name},${mat.name},${mat.code},1,,,8,,,李晓,晚班,${stamp}`,
-    ].join('\n');
-    await page.getByTestId('direct-import-file').setInputFiles({ name: '入库台账.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
-    await page.getByTestId('direct-import-preview').click();
-    const result = page.getByTestId('direct-import-preview-result');
-    await expect(result).toContainText('2 行都能导入，生成 2 张库管入库');
-    await page.getByTestId('direct-import-apply').click();
-    const done = page.getByTestId('direct-import-done');
-    await expect(done).toContainText('已导入 2 行，生成 2 张库管入库');
-    await expect(done.getByRole('button')).toHaveCount(2);
   });
 });

@@ -25,7 +25,6 @@ import type { Db } from '../../db';
 import { guard } from '../../auth/guard';
 import { writeAudit } from '../../lib/audit';
 import type { Actor, Deps } from '../../lib/context';
-import { attachment } from '../../lib/csv';
 import { todayIn } from '../../lib/dates';
 import { conflict, unprocessable } from '../../lib/errors';
 import { assertNotFenced, lockOpKey } from '../../lib/fences';
@@ -33,7 +32,6 @@ import { hashRequest } from '../../lib/idempotency';
 import { readSheet } from '../../lib/sheet-read';
 import { setTxTimeouts } from '../../lib/tx';
 import { parse } from '../../lib/validate';
-import { buildWorkbook, colName, type WbSheet, type WbValidation } from '../../lib/xlsx';
 import { erpOpAbandoned } from '../erp-ops';
 import { isoDate } from '../request-import';
 import { loadInventorySettings } from './common';
@@ -394,112 +392,13 @@ export async function applyReceiptImport(deps: Deps, raw: unknown, actor: Actor,
   return receiptImportResult(deps.sql, r.id, r.replayed);
 }
 
-// ───────────────────────── 模板 ─────────────────────────
-
-const COLUMN_SPEC: Record<(typeof RECEIPT_IMPORT_COLUMNS)[number], { width: number; how: string; example: string }> = {
-  序号: { width: 7, how: '随便填，方便自己对照；记进这一行的备注', example: '1' },
-  入库日期: { width: 13, how: '写成 2026-11-18 或 2026/11/18；不能晚于今天', example: '2026-11-18' },
-  供应商: { width: 20, how: '从下拉里选供应商档案里的名称（也可以写供应商编号）；网购写对应的网购平台供应商', example: '城东批发' },
-  物品名称: { width: 22, how: '从下拉里选物料档案里的物品；不在档案里的先去库存「物料」建档', example: '抽纸' },
-  物料编号: { width: 11, how: '选填。档案里有同名的几个物料时写编号（见「选项」表）', example: 'A001' },
-  送达数量: { width: 10, how: '大于 0，最多 3 位小数；单位见「单位」一列', example: '10' },
-  合格实收: { width: 10, how: '选填，空着 = 全部合格；比送达少要写拒收原因', example: '10' },
-  单位: { width: 8, how: '选填，空着按库存单位；写采购单位（如「箱」）时按包装换算', example: '箱' },
-  单价: { width: 10, how: '元，每采购单位（与收货页面上的单价一样），最多 2 位小数', example: '35.5' },
-  金额: { width: 11, how: '选填，用来核对：与合格实收 × 单价差 1 分以上的会标出来', example: '355' },
-  拒收原因: { width: 16, how: '合格实收比送达少时必填，最多 100 个字', example: '破损 1 箱' },
-  批号: { width: 12, how: '选填，最多 40 个字', example: 'B20261101' },
-  生产日期: { width: 13, how: '选填；管效期的物料可以只写生产日期（按保质期算到期日）', example: '2026-11-01' },
-  到期日: { width: 13, how: '管效期的物料必填（或写生产日期）', example: '2027-11-01' },
-  收货人: { width: 10, how: '选填，最多 32 个字', example: '李晓' },
-  单据分组: { width: 12, how: '选填。同一天同一家供应商想拆成几张单时写不同的分组；空着同一天同一家合成一张', example: '早班' },
-  备注: { width: 20, how: '选填，最多 100 个字', example: '' },
-};
-
-export async function receiptImportTemplate(db: Db): Promise<Buffer> {
-  const suppliers = await db<{ code: string; name: string; settlement: string }[]>`SELECT code, name, settlement FROM suppliers WHERE active ORDER BY name`;
-  const mats = await db<{ code: string; name: string; specification: string; inventoryUnit: string; purchaseUnit: string; category: string }[]>`
-    SELECT code, name, specification, inventory_unit, purchase_unit, category FROM materials WHERE active AND tracked ORDER BY category, code`;
-  const required = new Set<string>(RECEIPT_IMPORT_REQUIRED);
-  const last = RECEIPT_IMPORT_MAX_ROWS + 1;
-  const range = (name: string) => {
-    const c = colName(RECEIPT_IMPORT_COLUMNS.indexOf(name as (typeof RECEIPT_IMPORT_COLUMNS)[number]));
-    return `${c}2:${c}${last}`;
-  };
-  const validations: WbValidation[] = RECEIPT_IMPORT_COLUMNS.map((name) => {
-    const v: WbValidation = { sqref: range(name), promptTitle: `${name}（${required.has(name) ? '必填' : '选填'}）`, prompt: COLUMN_SPEC[name].how };
-    if (name === '供应商' && suppliers.length) Object.assign(v, { list: { name: 'opt_supplier' }, error: '请从下拉里选供应商档案里的供应商' });
-    if (name === '物品名称' && mats.length) Object.assign(v, { list: { name: 'opt_material' }, error: '只能选物料档案里的物品；新物品先去库存「物料」建档' });
-    return v;
-  });
-  const main: WbSheet = {
-    name: '入库台账',
-    active: true,
-    widths: RECEIPT_IMPORT_COLUMNS.map((c) => COLUMN_SPEC[c].width),
-    freezeRows: 1,
-    rows: [{ height: 24, cells: RECEIPT_IMPORT_COLUMNS.map((c) => ({ v: c, style: required.has(c) ? 'required' : 'optional' })) }],
-    validations,
-  };
-  const guide: WbSheet = {
-    name: '填写说明',
-    widths: [12, 8, 64, 16],
-    freezeRows: 0,
-    rows: [
-      { height: 26, cells: [{ v: '库管入库台账 · 填写说明', style: 'title' }] },
-      { cells: [{ v: '在「入库台账」里一行写一样东西；橙色表头必填、灰色选填；表头的名字不要改（顺序可以换，多出来的列不管）。', style: 'note' }] },
-      { height: 22, cells: ['列', '必填', '怎么填', '例子'].map((v) => ({ v, style: 'optional' as const })) },
-      ...RECEIPT_IMPORT_COLUMNS.map((c) => ({
-        cells: [
-          { v: c, style: 'body' as const },
-          { v: required.has(c) ? '必填' : '选填', style: 'body' as const },
-          { v: COLUMN_SPEC[c].how, style: 'body' as const },
-          { v: COLUMN_SPEC[c].example, style: 'body' as const },
-        ],
-      })),
-      { cells: [] },
-      { cells: [{ v: `导入：在库存页「库管入库」旁点「导入台账」，选这份文件 →「预览」逐行核对 → 没有问题再「导入」。一份最多 ${RECEIPT_IMPORT_MAX_ROWS} 行。`, style: 'note' }] },
-      { cells: [{ v: `按「入库日期 + 供应商 + 单据分组」合成库管入库单，一张最多 ${RECEIPT_IMPORT_LINES_PER_DOC} 行；导入即确认入库（与手填的「确认入库」一样）。`, style: 'note' }] },
-      { cells: [{ v: '有问题的行在预览里整行标红、写明哪一列为什么；有一行有问题整份都不导入，改好再选一次文件。', style: 'note' }] },
-      { cells: [{ v: '同一份文件只能导入一次（重复入库会多出库存）；导错了在库存单据里逐张冲销。', style: 'note' }] },
-    ],
-    merges: ['A1:D1', 'A2:D2', ...[0, 1, 2, 3].map((i) => `A${RECEIPT_IMPORT_COLUMNS.length + 5 + i}:D${RECEIPT_IMPORT_COLUMNS.length + 5 + i}`)],
-  };
-  const optRows = Math.max(suppliers.length, mats.length, 1);
-  const options: WbSheet = {
-    name: '选项',
-    widths: [20, 12, 8, 24, 12, 22, 10, 10, 14],
-    freezeRows: 1,
-    rows: [
-      { cells: ['供应商', '供应商编号', '结算', '物品名称', '物料编号', '规格', '库存单位', '采购单位', '分类'].map((v) => ({ v, style: 'optional' as const })) },
-      ...Array.from({ length: optRows }, (_, i) => ({
-        cells: [
-          suppliers[i]?.name ?? null,
-          suppliers[i]?.code ?? null,
-          suppliers[i] ? (suppliers[i]!.settlement === 'cash' ? '现付' : '挂账') : null,
-          mats[i]?.name ?? null,
-          mats[i]?.code ?? null,
-          mats[i]?.specification ?? null,
-          mats[i]?.inventoryUnit ?? null,
-          mats[i]?.purchaseUnit ?? null,
-          mats[i]?.category ?? null,
-        ],
-      })),
-    ],
-  };
-  const names = [
-    ...(suppliers.length ? [{ name: 'opt_supplier', sheet: '选项', range: `$A$2:$A$${suppliers.length + 1}` }] : []),
-    ...(mats.length ? [{ name: 'opt_material', sheet: '选项', range: `$D$2:$D$${mats.length + 1}` }] : []),
-  ];
-  return buildWorkbook([main, guide, options], names);
-}
-
 export function registerReceiptImportRoutes(app: FastifyInstance, deps: Deps) {
   const bodyLimit = 4_000_000;
   const operate = guard('inventory.operate');
+  // 8.1.20 起旧的「入库台账」模板停用（店主《库存页面导入台账调整》：旧模板同步停用，PENDING_DECISIONS LD9），换成出入库台账
+  // （ledger-import.ts）。导入接口还留着：只给这一版以前「结果待确认」的旧导入查回、原样重提或确认作废，页面上没有入口了
   app.get('/api/inventory/direct-receipts/template', { preHandler: operate }, async (_req, reply) => {
-    const buf = await receiptImportTemplate(deps.sql);
-    attachment(reply, '库管入库台账模板.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    return reply.send(buf);
+    return reply.code(410).send({ error: { code: 'TEMPLATE_RETIRED', message: '入库台账模板已停用，请在「库管入库」页右上角下载新的出入库台账模板' } });
   });
   app.post('/api/inventory/direct-receipts/import/preview', { preHandler: operate, bodyLimit }, async (req) => previewReceiptImport(deps, req.body));
   app.post('/api/inventory/direct-receipts/import', { preHandler: operate, bodyLimit }, async (req, reply) => {
